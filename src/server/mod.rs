@@ -1,3 +1,5 @@
+// pgwire server handler: bridges network protocol to parser + executor.
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,10 +9,11 @@ use pgwire::api::results::Response;
 use pgwire::api::{ClientInfo, PgWireHandlerFactory};
 use pgwire::error::PgWireResult;
 
-use crate::executor;
-use crate::parser;
+use crate::{executor, parser, Database};
 
-pub struct PepperHandler;
+pub struct PepperHandler {
+    db: Arc<Database>,
+}
 
 #[async_trait]
 impl SimpleQueryHandler for PepperHandler {
@@ -22,7 +25,7 @@ impl SimpleQueryHandler for PepperHandler {
         let statements = parser::parse(query)?;
         let mut responses = Vec::new();
         for stmt in statements {
-            responses.push(executor::execute(stmt)?);
+            responses.push(executor::execute(stmt, &self.db)?);
         }
         Ok(responses)
     }
@@ -33,9 +36,9 @@ pub struct PepperServerFactory {
 }
 
 impl PepperServerFactory {
-    pub fn new() -> Self {
+    pub fn new(db: Arc<Database>) -> Self {
         Self {
-            handler: Arc::new(PepperHandler),
+            handler: Arc::new(PepperHandler { db }),
         }
     }
 }

@@ -3,10 +3,13 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 
 use pepper_db::server::PepperServerFactory;
+use pepper_db::Database;
 
 #[tokio::main]
 async fn main() {
-    let factory = Arc::new(PepperServerFactory::new());
+    let data_dir = std::path::Path::new("pepper_data");
+    let db = Arc::new(Database::new(data_dir));
+    let factory = Arc::new(PepperServerFactory::new(db));
 
     let listener = TcpListener::bind("127.0.0.1:5432").await.unwrap();
     println!("PepperDB listening on 127.0.0.1:5432");
