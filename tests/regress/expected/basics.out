@@ -1,0 +1,32 @@
+-- Basic SQL functionality
+SELECT 1;
+ ?column?
+---------
+        1
+(1 row)
+SELECT 1, 2, 3;
+ ?column? | ?column? | ?column?
+----------+-----------+----------
+        1 |        2 |        3
+(1 row)
+SELECT 'hello';
+ ?column?
+---------
+ hello   
+(1 row)
+CREATE TABLE t (a int, b int);
+CREATE TABLE
+INSERT INTO t VALUES (1, 1001);
+INSERT 0 1
+INSERT INTO t VALUES (2, 1002), (3, 1003);
+INSERT 0 2
+SELECT * FROM t;
+ a | b   
+---+------
+ 1 | 1001
+ 2 | 1002
+ 3 | 1003
+(3 rows)
+-- Error cases
+CREATE TABLE t (a int);
+ERROR:  relation "t" already exists
