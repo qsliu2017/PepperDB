@@ -1,16 +1,14 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
-PepperDB is a proof-of-concept PostgreSQL implementation in Rust. The goal is to explore what PostgreSQL would look like rewritten in Rust, leveraging Rust's memory safety and concurrency model.
+PepperDB is a proof-of-concept PostgreSQL implementation in Rust, exploring what PostgreSQL would look like with Rust's memory safety and concurrency model.
 
 **Design principles:**
 - Match PostgreSQL behavior in: SQL grammar, storage file format, network protocol, module separation
 - Use existing Rust libraries where practical (parser, network protocol) for rapid prototyping
-- Not a 1:1 source file mapping with PostgreSQL, but same logical module boundaries
-- PoC scope — not all PostgreSQL features will be covered
+- Same logical module boundaries as PostgreSQL, but not a 1:1 source file mapping
+- PoC scope -- not all PostgreSQL features will be covered
 
 ## Build Commands
 
@@ -24,21 +22,29 @@ cargo fmt            # Format code
 
 ## Architecture
 
-The project is structured as a Rust library crate (`pepper_db`).
+Rust library crate (`pepper_db`). `src/lib.rs` as crate root, submodules in directories with `mod.rs`.
 
 **Current modules:**
-- `buffer_pool` — Buffer pool management, starting with the LRU-K page replacement policy (`LRUKReplacer`)
+- `buffer_pool` -- LRU-K page replacement policy (`LRUKReplacer`)
 
 **Planned modules** (following PostgreSQL's architecture):
-- Parser (SQL parsing — will use a library)
-- Catalog (system catalog / metadata)
-- Executor (query execution)
-- Storage (heap files, page layout — PostgreSQL-compatible format)
-- WAL (write-ahead logging)
-- Network (PostgreSQL wire protocol — will use a library)
+- Parser, Catalog, Executor, Storage, WAL, Network
 
 ## Conventions
 
+### Code style
+- ASCII only in all source files, SQL tests, and expected output -- no emojis, no Unicode dashes/quotes (use `-`, `--`, `'`, `"`)
+- Write clean, minimal code; fewer lines is better
+- Prioritize simplicity for effective and maintainable software
 - Rust 2021 edition
-- Standard Rust project layout: `src/lib.rs` as crate root, submodules in directories with `mod.rs`
 - Tests are inline (`#[cfg(test)] mod test`) within the source files they test
+
+### Documentation
+- Do NOT write docs everywhere -- avoid docs rot
+- Preferred locations: regression tests, source file header comments, `.claude/skills/`, `README.md`, `CLAUDE.md`
+- Header comments explain purpose and usage of each source file; maintain after each edit
+- Only include comments essential to understanding functionality or conveying non-obvious information
+
+### Workflow
+- When modifying multiple files, run file modifications in parallel whenever possible
+- When installing any dependency (Cargo crate, apt-get package, etc.), also update `.devcontainer/` so the dev container stays in sync
