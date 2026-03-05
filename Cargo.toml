@@ -3,4 +3,13 @@ name = "pepper_db"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "pepper_db"
+path = "src/main.rs"
+
 [dependencies]
+pgwire = "0.25"
+sqlparser = { version = "0.53", features = ["visitor"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
+async-trait = "0.1"
+futures = "0.3"
