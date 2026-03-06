@@ -1,5 +1,5 @@
-// DiskManager -- raw 8KB page I/O per table file.
-// Each table is stored as one file named {base_path}/{oid}.
+//! DiskManager -- raw 8KB page I/O per table file.
+//! Each table is stored as one file named {base_path}/{oid}.
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};

@@ -1,4 +1,4 @@
-// Query executor: routes SELECT to DataFusion, handles DDL/DML directly.
+//! Query executor: routes SELECT to DataFusion, handles DDL/DML directly.
 
 use std::any::Any;
 use std::sync::{Arc, Mutex};
@@ -26,73 +26,73 @@ use crate::storage::heap;
 use crate::types::{Datum, TypeId};
 use crate::Database;
 
-/// Main entry point: takes raw SQL, classifies, and routes.
-pub async fn execute_sql(sql: &str, db: &Database) -> PgWireResult<Response<'static>> {
-    let dialect = PostgreSqlDialect {};
-    let stmts = Parser::parse_sql(&dialect, sql).map_err(|e| {
-        PgWireError::UserError(Box::new(pgwire::error::ErrorInfo::new(
-            "ERROR".to_owned(),
-            "42601".to_owned(),
-            e.to_string(),
-        )))
-    })?;
+impl Database {
+    /// Main entry point: takes raw SQL, classifies, and routes.
+    pub async fn execute_sql(&self, sql: &str) -> PgWireResult<Response<'static>> {
+        let dialect = PostgreSqlDialect {};
+        let stmts = Parser::parse_sql(&dialect, sql).map_err(|e| {
+            PgWireError::UserError(Box::new(pgwire::error::ErrorInfo::new(
+                "ERROR".to_owned(),
+                "42601".to_owned(),
+                e.to_string(),
+            )))
+        })?;
 
-    let stmt = stmts
-        .into_iter()
-        .next()
-        .ok_or_else(|| user_error("42601", "empty query"))?;
+        let stmt = stmts
+            .into_iter()
+            .next()
+            .ok_or_else(|| user_error("42601", "empty query"))?;
 
-    match &stmt {
-        ast::Statement::Query(_) => execute_select_df(sql, db).await,
-        _ => {
-            let our_stmt = parser::convert_statement(stmt)?;
-            execute(our_stmt, db)
+        match &stmt {
+            ast::Statement::Query(_) => self.execute_select_df(sql).await,
+            _ => {
+                let our_stmt = parser::convert_statement(stmt)?;
+                self.execute(our_stmt)
+            }
         }
     }
-}
 
-fn execute(stmt: Statement, db: &Database) -> PgWireResult<Response<'static>> {
-    match stmt {
-        Statement::CreateTable(ct) => execute_create_table(db, ct),
-        Statement::Insert(ins) => execute_insert(db, ins),
-        Statement::Update(upd) => execute_update(db, upd),
-        Statement::Delete(del) => execute_delete(db, del),
-        Statement::DropTable(dt) => execute_drop_table(db, dt),
+    fn execute(&self, stmt: Statement) -> PgWireResult<Response<'static>> {
+        match stmt {
+            Statement::CreateTable(ct) => self.execute_create_table(ct),
+            Statement::Insert(ins) => self.execute_insert(ins),
+            Statement::Update(upd) => self.execute_update(upd),
+            Statement::Delete(del) => self.execute_delete(del),
+            Statement::DropTable(dt) => self.execute_drop_table(dt),
+        }
     }
-}
 
-// -- DataFusion SELECT -----------------------------------------------------
+    // -- DataFusion SELECT -------------------------------------------------
 
-async fn execute_select_df(sql: &str, db: &Database) -> PgWireResult<Response<'static>> {
-    // Register all catalog tables with DataFusion
-    register_all_tables(db)?;
+    async fn execute_select_df(&self, sql: &str) -> PgWireResult<Response<'static>> {
+        self.register_all_tables()?;
 
-    let df = db
-        .session
-        .sql(sql)
-        .await
-        .map_err(|e| df_to_pg(&e, sql))?;
-    let batches = df.collect().await.map_err(|e| df_to_pg(&e, sql))?;
+        let df = self
+            .session
+            .sql(sql)
+            .await
+            .map_err(|e| df_to_pg(&e, sql))?;
+        let batches = df.collect().await.map_err(|e| df_to_pg(&e, sql))?;
 
-    batches_to_response(batches)
-}
-
-fn register_all_tables(db: &Database) -> PgWireResult<()> {
-    let catalog = db.catalog.lock().unwrap();
-    for table in catalog.all_tables() {
-        let provider = HeapTableProvider {
-            arrow_schema: columns_to_arrow_schema(&table.columns),
-            oid: table.oid,
-            columns: table.columns.clone(),
-            disk: db.disk.clone(),
-        };
-        // Deregister first (ignore error if not exists), then register fresh
-        let _ = db.session.deregister_table(&table.name);
-        db.session
-            .register_table(&table.name, Arc::new(provider))
-            .map_err(|e| df_to_pg(&e, ""))?;
+        batches_to_response(batches)
     }
-    Ok(())
+
+    fn register_all_tables(&self) -> PgWireResult<()> {
+        let catalog = self.catalog.lock().unwrap();
+        for table in catalog.all_tables() {
+            let provider = HeapTableProvider {
+                arrow_schema: columns_to_arrow_schema(&table.columns),
+                oid: table.oid,
+                columns: table.columns.clone(),
+                disk: self.disk.clone(),
+            };
+            let _ = self.session.deregister_table(&table.name);
+            self.session
+                .register_table(&table.name, Arc::new(provider))
+                .map_err(|e| df_to_pg(&e, ""))?;
+        }
+        Ok(())
+    }
 }
 
 // -- HeapTableProvider -----------------------------------------------------
@@ -305,16 +305,17 @@ fn batches_to_response(batches: Vec<RecordBatch>) -> PgWireResult<Response<'stat
         .collect();
     let schema = Arc::new(fields);
 
-    let mut rows = Vec::new();
-    for batch in &batches {
-        for row_idx in 0..batch.num_rows() {
+    let rows: Vec<_> = batches
+        .iter()
+        .flat_map(|batch| (0..batch.num_rows()).map(move |row_idx| (batch, row_idx)))
+        .map(|(batch, row_idx)| {
             let mut encoder = DataRowEncoder::new(schema.clone());
             for col_idx in 0..batch.num_columns() {
                 encode_arrow_value(&mut encoder, batch.column(col_idx), row_idx)?;
             }
-            rows.push(encoder.finish());
-        }
-    }
+            encoder.finish()
+        })
+        .collect();
 
     Ok(Response::Query(QueryResponse::new(
         schema,
@@ -376,220 +377,222 @@ fn encode_arrow_value(
     }
 }
 
-// -- CREATE TABLE ---------------------------------------------------------
+impl Database {
+    // -- CREATE TABLE -----------------------------------------------------
 
-fn execute_create_table(
-    db: &Database,
-    ct: crate::parser::CreateTableStmt,
-) -> PgWireResult<Response<'static>> {
-    let columns: Vec<Column> = ct
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(i, c)| Column {
-            name: c.name.clone(),
-            type_id: c.type_id,
-            col_num: i as u16,
-        })
-        .collect();
+    fn execute_create_table(
+        &self,
+        ct: crate::parser::CreateTableStmt,
+    ) -> PgWireResult<Response<'static>> {
+        let columns: Vec<Column> = ct
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(i, c)| Column {
+                name: c.name.clone(),
+                type_id: c.type_id,
+                col_num: i as u16,
+            })
+            .collect();
 
-    {
-        let mut catalog = db.catalog.lock().unwrap();
-        match catalog.create_table(&ct.table_name, columns) {
-            Ok(oid) => {
-                let disk = db.disk.lock().unwrap();
-                disk.create_heap_file(oid);
-            }
-            Err(e) => {
-                if ct.if_not_exists {
-                    return Ok(Response::Execution(Tag::new("CREATE TABLE")));
+        {
+            let mut catalog = self.catalog.lock().unwrap();
+            match catalog.create_table(&ct.table_name, columns) {
+                Ok(oid) => {
+                    let disk = self.disk.lock().unwrap();
+                    disk.create_heap_file(oid);
                 }
+                Err(e) => {
+                    if ct.if_not_exists {
+                        return Ok(Response::Execution(Tag::new("CREATE TABLE")));
+                    }
+                    return Err(PgWireError::UserError(Box::new(
+                        pgwire::error::ErrorInfo::new("ERROR".to_owned(), "42P07".to_owned(), e),
+                    )));
+                }
+            }
+        }
+
+        Ok(Response::Execution(Tag::new("CREATE TABLE")))
+    }
+
+    // -- INSERT -----------------------------------------------------------
+
+    fn execute_insert(
+        &self,
+        ins: crate::parser::InsertStmt,
+    ) -> PgWireResult<Response<'static>> {
+        let (oid, columns) = {
+            let catalog = self.catalog.lock().unwrap();
+            let table = catalog.get_table(&ins.table_name).ok_or_else(|| {
+                user_error(
+                    "42P01",
+                    &format!("relation \"{}\" does not exist", ins.table_name),
+                )
+            })?;
+            (table.oid, table.columns.clone())
+        };
+
+        let mut count = 0u64;
+        let disk = self.disk.lock().unwrap();
+
+        for row_exprs in &ins.values {
+            if row_exprs.len() != columns.len() {
                 return Err(PgWireError::UserError(Box::new(
-                    pgwire::error::ErrorInfo::new("ERROR".to_owned(), "42P07".to_owned(), e),
+                    pgwire::error::ErrorInfo::new(
+                        "ERROR".to_owned(),
+                        "42601".to_owned(),
+                        format!(
+                            "INSERT has {} expressions but table has {} columns",
+                            row_exprs.len(),
+                            columns.len()
+                        ),
+                    ),
                 )));
             }
-        }
-    }
 
-    Ok(Response::Execution(Tag::new("CREATE TABLE")))
-}
+            let datums: Vec<Datum> = row_exprs
+                .iter()
+                .zip(columns.iter())
+                .map(|(expr, col)| expr_to_datum(expr, col.type_id))
+                .collect::<PgWireResult<Vec<_>>>()?;
 
-// -- INSERT ---------------------------------------------------------------
-
-fn execute_insert(
-    db: &Database,
-    ins: crate::parser::InsertStmt,
-) -> PgWireResult<Response<'static>> {
-    let (oid, columns) = {
-        let catalog = db.catalog.lock().unwrap();
-        let table = catalog.get_table(&ins.table_name).ok_or_else(|| {
-            user_error(
-                "42P01",
-                &format!("relation \"{}\" does not exist", ins.table_name),
-            )
-        })?;
-        (table.oid, table.columns.clone())
-    };
-
-    let mut count = 0u64;
-    let disk = db.disk.lock().unwrap();
-
-    for row_exprs in &ins.values {
-        if row_exprs.len() != columns.len() {
-            return Err(PgWireError::UserError(Box::new(
-                pgwire::error::ErrorInfo::new(
-                    "ERROR".to_owned(),
-                    "42601".to_owned(),
-                    format!(
-                        "INSERT has {} expressions but table has {} columns",
-                        row_exprs.len(),
-                        columns.len()
-                    ),
-                ),
-            )));
+            let tuple_data = heap::serialize_tuple(&datums);
+            insert_tuple_to_heap(&disk, oid, &tuple_data)?;
+            count += 1;
         }
 
-        let datums: Vec<Datum> = row_exprs
-            .iter()
-            .zip(columns.iter())
-            .map(|(expr, col)| expr_to_datum(expr, col.type_id))
-            .collect::<PgWireResult<Vec<_>>>()?;
-
-        let tuple_data = heap::serialize_tuple(&datums);
-        insert_tuple_to_heap(&disk, oid, &tuple_data)?;
-        count += 1;
+        Ok(Response::Execution(Tag::new(&format!("INSERT 0 {}", count))))
     }
 
-    Ok(Response::Execution(Tag::new(&format!("INSERT 0 {}", count))))
-}
+    // -- UPDATE -----------------------------------------------------------
 
-// -- UPDATE ---------------------------------------------------------------
+    fn execute_update(
+        &self,
+        upd: crate::parser::UpdateStmt,
+    ) -> PgWireResult<Response<'static>> {
+        let (oid, columns) = {
+            let catalog = self.catalog.lock().unwrap();
+            let table = catalog.get_table(&upd.table_name).ok_or_else(|| {
+                user_error(
+                    "42P01",
+                    &format!("relation \"{}\" does not exist", upd.table_name),
+                )
+            })?;
+            (table.oid, table.columns.clone())
+        };
 
-fn execute_update(
-    db: &Database,
-    upd: crate::parser::UpdateStmt,
-) -> PgWireResult<Response<'static>> {
-    let (oid, columns) = {
-        let catalog = db.catalog.lock().unwrap();
-        let table = catalog.get_table(&upd.table_name).ok_or_else(|| {
-            user_error(
-                "42P01",
-                &format!("relation \"{}\" does not exist", upd.table_name),
-            )
-        })?;
-        (table.oid, table.columns.clone())
-    };
+        let disk = self.disk.lock().unwrap();
+        let num_pages = disk.num_pages(oid);
+        let mut page = [0u8; PAGE_SIZE];
+        let mut count = 0u64;
+        let mut new_tuples: Vec<Vec<Datum>> = Vec::new();
 
-    let disk = db.disk.lock().unwrap();
-    let num_pages = disk.num_pages(oid);
-    let mut page = [0u8; PAGE_SIZE];
-    let mut count = 0u64;
-    let mut new_tuples: Vec<Vec<Datum>> = Vec::new();
-
-    for page_id in 0..num_pages {
-        disk.read_page(oid, page_id, &mut page);
-        let n = heap::num_items(&page);
-        for item_idx in 0..n {
-            if let Some(data) = heap::get_tuple(&page, item_idx) {
-                let datums = heap::deserialize_tuple(data, &columns);
-                let matches = match &upd.where_clause {
-                    Some(wh) => matches!(eval_expr(wh, &datums, &columns), Datum::Bool(true)),
-                    None => true,
-                };
-                if matches {
-                    let mut new_row = datums.clone();
-                    for (col_name, expr) in &upd.assignments {
-                        if let Some(idx) = columns.iter().position(|c| c.name == *col_name) {
-                            new_row[idx] = eval_expr(expr, &datums, &columns);
+        for page_id in 0..num_pages {
+            disk.read_page(oid, page_id, &mut page);
+            let n = heap::num_items(&page);
+            for item_idx in 0..n {
+                if let Some(data) = heap::get_tuple(&page, item_idx) {
+                    let datums = heap::deserialize_tuple(data, &columns);
+                    let matches = match &upd.where_clause {
+                        Some(wh) => matches!(eval_expr(wh, &datums, &columns), Datum::Bool(true)),
+                        None => true,
+                    };
+                    if matches {
+                        let mut new_row = datums.clone();
+                        for (col_name, expr) in &upd.assignments {
+                            if let Some(idx) = columns.iter().position(|c| c.name == *col_name) {
+                                new_row[idx] = eval_expr(expr, &datums, &columns);
+                            }
                         }
+                        new_tuples.push(new_row);
+                        heap::mark_tuple_dead(&mut page, item_idx);
+                        count += 1;
                     }
-                    new_tuples.push(new_row);
-                    heap::mark_tuple_dead(&mut page, item_idx);
-                    count += 1;
                 }
             }
+            disk.write_page(oid, page_id, &page);
         }
-        disk.write_page(oid, page_id, &page);
+
+        for new_row in &new_tuples {
+            let tuple_data = heap::serialize_tuple(new_row);
+            insert_tuple_to_heap(&disk, oid, &tuple_data)?;
+        }
+
+        Ok(Response::Execution(Tag::new(&format!("UPDATE {}", count))))
     }
 
-    for new_row in &new_tuples {
-        let tuple_data = heap::serialize_tuple(new_row);
-        insert_tuple_to_heap(&disk, oid, &tuple_data)?;
-    }
+    // -- DELETE -----------------------------------------------------------
 
-    Ok(Response::Execution(Tag::new(&format!("UPDATE {}", count))))
-}
+    fn execute_delete(
+        &self,
+        del: crate::parser::DeleteStmt,
+    ) -> PgWireResult<Response<'static>> {
+        let (oid, columns) = {
+            let catalog = self.catalog.lock().unwrap();
+            let table = catalog.get_table(&del.table_name).ok_or_else(|| {
+                user_error(
+                    "42P01",
+                    &format!("relation \"{}\" does not exist", del.table_name),
+                )
+            })?;
+            (table.oid, table.columns.clone())
+        };
 
-// -- DELETE ---------------------------------------------------------------
+        let disk = self.disk.lock().unwrap();
+        let num_pages = disk.num_pages(oid);
+        let mut page = [0u8; PAGE_SIZE];
+        let mut count = 0u64;
 
-fn execute_delete(
-    db: &Database,
-    del: crate::parser::DeleteStmt,
-) -> PgWireResult<Response<'static>> {
-    let (oid, columns) = {
-        let catalog = db.catalog.lock().unwrap();
-        let table = catalog.get_table(&del.table_name).ok_or_else(|| {
-            user_error(
-                "42P01",
-                &format!("relation \"{}\" does not exist", del.table_name),
-            )
-        })?;
-        (table.oid, table.columns.clone())
-    };
-
-    let disk = db.disk.lock().unwrap();
-    let num_pages = disk.num_pages(oid);
-    let mut page = [0u8; PAGE_SIZE];
-    let mut count = 0u64;
-
-    for page_id in 0..num_pages {
-        disk.read_page(oid, page_id, &mut page);
-        let n = heap::num_items(&page);
-        for item_idx in 0..n {
-            if let Some(data) = heap::get_tuple(&page, item_idx) {
-                let datums = heap::deserialize_tuple(data, &columns);
-                let matches = match &del.where_clause {
-                    Some(wh) => matches!(eval_expr(wh, &datums, &columns), Datum::Bool(true)),
-                    None => true,
-                };
-                if matches {
-                    heap::mark_tuple_dead(&mut page, item_idx);
-                    count += 1;
+        for page_id in 0..num_pages {
+            disk.read_page(oid, page_id, &mut page);
+            let n = heap::num_items(&page);
+            for item_idx in 0..n {
+                if let Some(data) = heap::get_tuple(&page, item_idx) {
+                    let datums = heap::deserialize_tuple(data, &columns);
+                    let matches = match &del.where_clause {
+                        Some(wh) => matches!(eval_expr(wh, &datums, &columns), Datum::Bool(true)),
+                        None => true,
+                    };
+                    if matches {
+                        heap::mark_tuple_dead(&mut page, item_idx);
+                        count += 1;
+                    }
                 }
             }
+            disk.write_page(oid, page_id, &page);
         }
-        disk.write_page(oid, page_id, &page);
+
+        Ok(Response::Execution(Tag::new(&format!("DELETE {}", count))))
     }
 
-    Ok(Response::Execution(Tag::new(&format!("DELETE {}", count))))
-}
+    // -- DROP TABLE -------------------------------------------------------
 
-// -- DROP TABLE -----------------------------------------------------------
-
-fn execute_drop_table(
-    db: &Database,
-    dt: crate::parser::DropTableStmt,
-) -> PgWireResult<Response<'static>> {
-    let oid = {
-        let mut catalog = db.catalog.lock().unwrap();
-        match catalog.drop_table(&dt.table_name) {
-            Ok(oid) => oid,
-            Err(e) => {
-                if dt.if_exists {
-                    return Ok(Response::Execution(Tag::new("DROP TABLE")));
+    fn execute_drop_table(
+        &self,
+        dt: crate::parser::DropTableStmt,
+    ) -> PgWireResult<Response<'static>> {
+        let oid = {
+            let mut catalog = self.catalog.lock().unwrap();
+            match catalog.drop_table(&dt.table_name) {
+                Ok(oid) => oid,
+                Err(e) => {
+                    if dt.if_exists {
+                        return Ok(Response::Execution(Tag::new("DROP TABLE")));
+                    }
+                    return Err(user_error("42P01", &e));
                 }
-                return Err(user_error("42P01", &e));
             }
+        };
+
+        let _ = self.session.deregister_table(&dt.table_name);
+        {
+            let disk = self.disk.lock().unwrap();
+            disk.delete_heap_file(oid);
         }
-    };
 
-    let _ = db.session.deregister_table(&dt.table_name);
-    {
-        let disk = db.disk.lock().unwrap();
-        disk.delete_heap_file(oid);
+        Ok(Response::Execution(Tag::new("DROP TABLE")))
     }
-
-    Ok(Response::Execution(Tag::new("DROP TABLE")))
 }
 
 // -- Expression evaluation (for UPDATE/DELETE WHERE) -----------------------
@@ -601,14 +604,11 @@ fn eval_expr(expr: &Expr, row: &[Datum], columns: &[Column]) -> Datum {
         Expr::StringLiteral(s) => Datum::Text(s.clone()),
         Expr::Bool(b) => Datum::Bool(*b),
         Expr::Null => Datum::Null,
-        Expr::ColumnRef(name) => {
-            for (i, col) in columns.iter().enumerate() {
-                if col.name == *name {
-                    return row[i].clone();
-                }
-            }
-            Datum::Null
-        }
+        Expr::ColumnRef(name) => columns
+            .iter()
+            .position(|col| col.name == *name)
+            .map(|i| row[i].clone())
+            .unwrap_or(Datum::Null),
         Expr::BinaryOp { left, op, right } => {
             let l = eval_expr(left, row, columns);
             let r = eval_expr(right, row, columns);
@@ -914,7 +914,7 @@ mod test {
     #[tokio::test]
     async fn execute_select_integer() {
         let db = Database::new(std::path::Path::new("/tmp/pepper_test_unused"));
-        let resp = execute_sql("SELECT 1;", &db).await.unwrap();
+        let resp = db.execute_sql("SELECT 1;").await.unwrap();
         assert!(matches!(resp, Response::Query(_)));
     }
 }

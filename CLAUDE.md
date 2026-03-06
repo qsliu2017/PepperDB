@@ -49,6 +49,9 @@ Rust library crate (`pepper_db`). `src/lib.rs` as crate root, submodules in dire
 - Prioritize simplicity for effective and maintainable software
 - Rust 2021 edition
 - Tests are inline (`#[cfg(test)] mod test`) within the source files they test
+- Prefer methods over free functions when a struct is the natural receiver
+- Prefer iterator chains (`.map()`, `.filter()`, `.collect()`) over `let mut vec` + `for` loop + push
+- Use `//!` for module-level doc comments (file headers)
 
 ### Documentation
 - Do NOT write docs everywhere -- avoid docs rot

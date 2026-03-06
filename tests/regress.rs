@@ -12,7 +12,7 @@ use pgwire::api::Type;
 use pgwire::error::PgWireError;
 use pgwire::messages::response::CommandComplete;
 
-use pepper_db::{executor, Database};
+use pepper_db::Database;
 
 // -- Statement splitting ------------------------------------------------
 
@@ -52,9 +52,7 @@ fn format_table(schema: &[FieldInfo], rows: &[Vec<String>]) -> String {
     let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
     for row in rows {
         for (i, val) in row.iter().enumerate() {
-            if val.len() > widths[i] {
-                widths[i] = val.len();
-            }
+            widths[i] = widths[i].max(val.len());
         }
     }
 
@@ -155,7 +153,7 @@ async fn run_sql(sql: &str, db: &Database) -> String {
         out.push_str(&stmt_sql);
         out.push('\n');
 
-        match executor::execute_sql(&stmt_sql, db).await {
+        match db.execute_sql(&stmt_sql).await {
             Ok(resp) => out.push_str(&format_response(resp)),
             Err(PgWireError::UserError(info)) => {
                 out.push_str(&format_error(&info.message));

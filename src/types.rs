@@ -1,4 +1,4 @@
-// Shared type definitions: OID, TypeId, Datum.
+//! Shared type definitions: OID, TypeId, Datum.
 
 pub type OID = u32;
 

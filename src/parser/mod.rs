@@ -1,5 +1,5 @@
-// SQL parser: converts sqlparser-rs AST to PepperDB AST for DDL/DML.
-// SELECT queries bypass this module and go directly to DataFusion.
+//! SQL parser: converts sqlparser-rs AST to PepperDB AST for DDL/DML.
+//! SELECT queries bypass this module and go directly to DataFusion.
 
 use pgwire::error::{PgWireError, PgWireResult};
 use sqlparser::ast;

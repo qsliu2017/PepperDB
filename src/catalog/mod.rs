@@ -1,5 +1,5 @@
-// In-memory catalog (simplified pg_class + pg_attribute).
-// Stores table metadata. Lost on restart -- acceptable for PoC.
+//! In-memory catalog (simplified pg_class + pg_attribute).
+//! Stores table metadata. Lost on restart -- acceptable for PoC.
 
 use std::collections::HashMap;
 

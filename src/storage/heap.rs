@@ -1,9 +1,9 @@
-// Heap page layout following PostgreSQL's page structure:
-//   [PageHeader 24B] [ItemId array ->] [... free space ...] [<- Tuples]
-//
-// Tuples have a minimal 8-byte header (t_xmin, t_xmax) followed by a null
-// bitmap (ceil(ncols/8) bytes) and column data. Variable-length columns
-// (Text) use a 4B length prefix.
+//! Heap page layout following PostgreSQL's page structure:
+//!   [PageHeader 24B] [ItemId array ->] [... free space ...] [<- Tuples]
+//!
+//! Tuples have a minimal 8-byte header (t_xmin, t_xmax) followed by a null
+//! bitmap (ceil(ncols/8) bytes) and column data. Variable-length columns
+//! (Text) use a 4B length prefix.
 
 use crate::catalog::Column;
 use crate::storage::disk::PAGE_SIZE;
