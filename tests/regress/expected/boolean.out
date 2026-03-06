@@ -1,0 +1,34 @@
+-- Boolean type
+CREATE TABLE booltest (a boolean, b boolean);
+CREATE TABLE
+INSERT INTO booltest VALUES (true, false);
+INSERT 0 1
+INSERT INTO booltest VALUES (false, true);
+INSERT 0 1
+INSERT INTO booltest VALUES (true, true);
+INSERT 0 1
+SELECT * FROM booltest;
+ a | b
+---+---
+ t | f
+ f | t
+ t | t
+(3 rows)
+-- WHERE with boolean column
+SELECT * FROM booltest WHERE a;
+ a | b
+---+---
+ t | f
+ t | t
+(2 rows)
+SELECT * FROM booltest WHERE NOT b;
+ a | b
+---+---
+ t | f
+(1 row)
+-- Boolean literals in SELECT
+SELECT true, false;
+ ?column? | ?column?
+----------+----------
+ t        | f       
+(1 row)

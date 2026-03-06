@@ -1,8 +1,9 @@
 // Heap page layout following PostgreSQL's page structure:
 //   [PageHeader 24B] [ItemId array ->] [... free space ...] [<- Tuples]
 //
-// Tuples have a minimal 8-byte header (t_xmin, t_xmax) followed by column
-// data (big-endian Int4 values concatenated).
+// Tuples have a minimal 8-byte header (t_xmin, t_xmax) followed by a null
+// bitmap (ceil(ncols/8) bytes) and column data. Variable-length columns
+// (Text) use a 4B length prefix.
 
 use crate::catalog::Column;
 use crate::storage::disk::PAGE_SIZE;
@@ -89,14 +90,33 @@ pub fn num_items(buf: &[u8; PAGE_SIZE]) -> u16 {
     ((pd_lower - HEADER_SIZE) / ITEM_ID_SIZE) as u16
 }
 
+/// Serialize datums into tuple data bytes: [null_bitmap] [column values...].
+/// Null columns are omitted from the data area; the bitmap tracks which are present.
 pub fn serialize_tuple(values: &[Datum]) -> Vec<u8> {
-    let mut data = Vec::new();
+    let ncols = values.len();
+    let bitmap_len = ncols.div_ceil(8);
+    let mut data = vec![0u8; bitmap_len];
+
+    // Set bits for non-null columns
+    for (i, v) in values.iter().enumerate() {
+        if !matches!(v, Datum::Null) {
+            data[i / 8] |= 1 << (i % 8);
+        }
+    }
+
     for v in values {
         match v {
+            Datum::Null => {}
+            Datum::Bool(b) => data.push(if *b { 1 } else { 0 }),
+            Datum::Int2(i) => data.extend_from_slice(&i.to_be_bytes()),
             Datum::Int4(i) => data.extend_from_slice(&i.to_be_bytes()),
-            Datum::Null => data.extend_from_slice(&0i32.to_be_bytes()),
-            Datum::Bool(_) | Datum::Text(_) => {
-                unimplemented!("Bool/Text heap storage not yet supported")
+            Datum::Int8(i) => data.extend_from_slice(&i.to_be_bytes()),
+            Datum::Float4(f) => data.extend_from_slice(&f.to_be_bytes()),
+            Datum::Float8(f) => data.extend_from_slice(&f.to_be_bytes()),
+            Datum::Text(s) => {
+                let bytes = s.as_bytes();
+                data.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+                data.extend_from_slice(bytes);
             }
         }
     }
@@ -104,10 +124,27 @@ pub fn serialize_tuple(values: &[Datum]) -> Vec<u8> {
 }
 
 pub fn deserialize_tuple(data: &[u8], columns: &[Column]) -> Vec<Datum> {
-    let mut result = Vec::with_capacity(columns.len());
-    let mut offset = 0;
-    for col in columns {
+    let ncols = columns.len();
+    let bitmap_len = ncols.div_ceil(8);
+    let mut result = Vec::with_capacity(ncols);
+    let mut offset = bitmap_len;
+
+    for (i, col) in columns.iter().enumerate() {
+        let is_null = (data[i / 8] & (1 << (i % 8))) == 0;
+        if is_null {
+            result.push(Datum::Null);
+            continue;
+        }
         match col.type_id {
+            TypeId::Bool => {
+                result.push(Datum::Bool(data[offset] != 0));
+                offset += 1;
+            }
+            TypeId::Int2 => {
+                let val = i16::from_be_bytes([data[offset], data[offset + 1]]);
+                result.push(Datum::Int2(val));
+                offset += 2;
+            }
             TypeId::Int4 => {
                 let val = i32::from_be_bytes([
                     data[offset],
@@ -117,6 +154,36 @@ pub fn deserialize_tuple(data: &[u8], columns: &[Column]) -> Vec<Datum> {
                 ]);
                 result.push(Datum::Int4(val));
                 offset += 4;
+            }
+            TypeId::Int8 => {
+                let val = i64::from_be_bytes(
+                    data[offset..offset + 8].try_into().unwrap(),
+                );
+                result.push(Datum::Int8(val));
+                offset += 8;
+            }
+            TypeId::Float4 => {
+                let val = f32::from_be_bytes(
+                    data[offset..offset + 4].try_into().unwrap(),
+                );
+                result.push(Datum::Float4(val));
+                offset += 4;
+            }
+            TypeId::Float8 => {
+                let val = f64::from_be_bytes(
+                    data[offset..offset + 8].try_into().unwrap(),
+                );
+                result.push(Datum::Float8(val));
+                offset += 8;
+            }
+            TypeId::Text => {
+                let len = u32::from_be_bytes(
+                    data[offset..offset + 4].try_into().unwrap(),
+                ) as usize;
+                offset += 4;
+                let s = String::from_utf8_lossy(&data[offset..offset + len]).into_owned();
+                result.push(Datum::Text(s));
+                offset += len;
             }
         }
     }
@@ -158,9 +225,9 @@ mod test {
             count += 1;
         }
         assert_eq!(num_items(&page), count);
-        // Each tuple = 8 (header) + 4 (data) = 12 bytes, plus 4 byte ItemId = 16 per tuple
-        // Available = 8192 - 24 = 8168; 8168 / 16 = 510
-        assert_eq!(count, 510);
+        // Each tuple = 8 (header) + 1 (bitmap) + 4 (data) = 13 bytes, plus 4 byte ItemId = 17
+        // Available = 8192 - 24 = 8168; 8168 / 17 = 480
+        assert_eq!(count, 480);
     }
 
     #[test]
@@ -171,6 +238,52 @@ mod test {
             Column { name: "x".into(), type_id: TypeId::Int4, col_num: 0 },
             Column { name: "y".into(), type_id: TypeId::Int4, col_num: 1 },
             Column { name: "z".into(), type_id: TypeId::Int4, col_num: 2 },
+        ];
+        let out = deserialize_tuple(&data, &cols);
+        assert_eq!(out, values);
+    }
+
+    #[test]
+    fn null_bitmap_round_trip() {
+        let values = vec![Datum::Int4(1), Datum::Null, Datum::Int4(3)];
+        let data = serialize_tuple(&values);
+        let cols = vec![
+            Column { name: "a".into(), type_id: TypeId::Int4, col_num: 0 },
+            Column { name: "b".into(), type_id: TypeId::Int4, col_num: 1 },
+            Column { name: "c".into(), type_id: TypeId::Int4, col_num: 2 },
+        ];
+        let out = deserialize_tuple(&data, &cols);
+        assert_eq!(out, values);
+    }
+
+    #[test]
+    fn text_round_trip() {
+        let values = vec![Datum::Text("hello".into()), Datum::Int4(42)];
+        let data = serialize_tuple(&values);
+        let cols = vec![
+            Column { name: "s".into(), type_id: TypeId::Text, col_num: 0 },
+            Column { name: "n".into(), type_id: TypeId::Int4, col_num: 1 },
+        ];
+        let out = deserialize_tuple(&data, &cols);
+        assert_eq!(out, values);
+    }
+
+    #[test]
+    fn mixed_types_round_trip() {
+        let values = vec![
+            Datum::Bool(true),
+            Datum::Int2(42),
+            Datum::Int8(1_000_000_000_000),
+            Datum::Float4(3.14),
+            Datum::Float8(2.718281828),
+        ];
+        let data = serialize_tuple(&values);
+        let cols = vec![
+            Column { name: "a".into(), type_id: TypeId::Bool, col_num: 0 },
+            Column { name: "b".into(), type_id: TypeId::Int2, col_num: 1 },
+            Column { name: "c".into(), type_id: TypeId::Int8, col_num: 2 },
+            Column { name: "d".into(), type_id: TypeId::Float4, col_num: 3 },
+            Column { name: "e".into(), type_id: TypeId::Float8, col_num: 4 },
         ];
         let out = deserialize_tuple(&data, &cols);
         assert_eq!(out, values);

@@ -55,8 +55,10 @@ pub struct InsertStmt {
 #[derive(Debug, Clone)]
 pub enum Expr {
     Integer(i64),
+    Float(f64),
     StringLiteral(String),
     Bool(bool),
+    Null,
     ColumnRef(String),
     BinaryOp {
         left: Box<Expr>,
@@ -67,6 +69,8 @@ pub enum Expr {
         op: UnaryOp,
         expr: Box<Expr>,
     },
+    IsNull(Box<Expr>),
+    IsNotNull(Box<Expr>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -119,12 +123,7 @@ fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
         .columns
         .into_iter()
         .map(|col| {
-            let type_id = match &col.data_type {
-                ast::DataType::Int(_)
-                | ast::DataType::Int4(_)
-                | ast::DataType::Integer(_) => TypeId::Int4,
-                other => return Err(unsupported(&format!("Unsupported type: {}", other))),
-            };
+            let type_id = convert_data_type(&col.data_type)?;
             Ok(ColumnDef {
                 name: col.name.value,
                 type_id,
@@ -135,6 +134,25 @@ fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
         table_name,
         columns: columns?,
     }))
+}
+
+fn convert_data_type(dt: &ast::DataType) -> PgWireResult<TypeId> {
+    match dt {
+        ast::DataType::Boolean => Ok(TypeId::Bool),
+        ast::DataType::SmallInt(_) | ast::DataType::Int2(_) => Ok(TypeId::Int2),
+        ast::DataType::Int(_) | ast::DataType::Int4(_) | ast::DataType::Integer(_) => {
+            Ok(TypeId::Int4)
+        }
+        ast::DataType::BigInt(_) | ast::DataType::Int8(_) => Ok(TypeId::Int8),
+        ast::DataType::Real | ast::DataType::Float4 => Ok(TypeId::Float4),
+        ast::DataType::DoublePrecision | ast::DataType::Float8 => Ok(TypeId::Float8),
+        ast::DataType::Text
+        | ast::DataType::Varchar(_)
+        | ast::DataType::CharVarying(_)
+        | ast::DataType::Char(_)
+        | ast::DataType::Character(_) => Ok(TypeId::Text),
+        other => Err(unsupported(&format!("Unsupported type: {}", other))),
+    }
 }
 
 fn convert_insert(ins: ast::Insert) -> PgWireResult<Statement> {
@@ -210,8 +228,12 @@ fn convert_expr(expr: ast::Expr) -> PgWireResult<Expr> {
         ast::Expr::UnaryOp { op, expr } => match op {
             ast::UnaryOperator::Minus => match *expr {
                 ast::Expr::Value(ast::Value::Number(n, _)) => {
-                    let i: i64 = n.parse().map_err(|_| unsupported("Invalid number"))?;
-                    Ok(Expr::Integer(-i))
+                    if let Ok(i) = n.parse::<i64>() {
+                        Ok(Expr::Integer(-i))
+                    } else {
+                        let f: f64 = n.parse().map_err(|_| unsupported("Invalid number"))?;
+                        Ok(Expr::Float(-f))
+                    }
                 }
                 other => Ok(Expr::UnaryOp {
                     op: UnaryOp::Minus,
@@ -233,6 +255,8 @@ fn convert_expr(expr: ast::Expr) -> PgWireResult<Expr> {
             })
         }
         ast::Expr::Nested(inner) => convert_expr(*inner),
+        ast::Expr::IsNull(inner) => Ok(Expr::IsNull(Box::new(convert_expr(*inner)?))),
+        ast::Expr::IsNotNull(inner) => Ok(Expr::IsNotNull(Box::new(convert_expr(*inner)?))),
         _ => Err(unsupported("Unsupported expression")),
     }
 }
@@ -258,11 +282,16 @@ fn convert_binop(op: ast::BinaryOperator) -> PgWireResult<BinOp> {
 fn convert_value(value: ast::Value) -> PgWireResult<Expr> {
     match value {
         ast::Value::Number(n, _) => {
-            let i: i64 = n.parse().map_err(|_| unsupported("Invalid number"))?;
-            Ok(Expr::Integer(i))
+            if let Ok(i) = n.parse::<i64>() {
+                Ok(Expr::Integer(i))
+            } else {
+                let f: f64 = n.parse().map_err(|_| unsupported("Invalid number"))?;
+                Ok(Expr::Float(f))
+            }
         }
         ast::Value::SingleQuotedString(s) => Ok(Expr::StringLiteral(s)),
         ast::Value::Boolean(b) => Ok(Expr::Bool(b)),
+        ast::Value::Null => Ok(Expr::Null),
         _ => Err(unsupported("Unsupported value type")),
     }
 }
@@ -288,6 +317,29 @@ mod test {
                 assert_eq!(s.targets.len(), 1);
                 assert!(matches!(&s.targets[0], ResTarget::Expr(Expr::Integer(1))));
                 assert!(s.from.is_none());
+            }
+            _ => panic!("Expected Select"),
+        }
+    }
+
+    #[test]
+    fn parse_select_float() {
+        let stmts = parse("SELECT 3.14;").unwrap();
+        match &stmts[0] {
+            Statement::Select(s) => match &s.targets[0] {
+                ResTarget::Expr(Expr::Float(f)) => assert!((*f - 3.14).abs() < 1e-10),
+                other => panic!("Expected Float, got {:?}", other),
+            },
+            _ => panic!("Expected Select"),
+        }
+    }
+
+    #[test]
+    fn parse_select_null() {
+        let stmts = parse("SELECT NULL;").unwrap();
+        match &stmts[0] {
+            Statement::Select(s) => {
+                assert!(matches!(&s.targets[0], ResTarget::Expr(Expr::Null)));
             }
             _ => panic!("Expected Select"),
         }
@@ -320,6 +372,26 @@ mod test {
                 assert_eq!(ct.columns[0].name, "id");
                 assert_eq!(ct.columns[0].type_id, TypeId::Int4);
                 assert_eq!(ct.columns[1].name, "val");
+            }
+            _ => panic!("Expected CreateTable"),
+        }
+    }
+
+    #[test]
+    fn parse_create_table_types() {
+        let stmts = parse(
+            "CREATE TABLE t (a boolean, b smallint, c bigint, d real, e double precision, f text, g varchar);",
+        )
+        .unwrap();
+        match &stmts[0] {
+            Statement::CreateTable(ct) => {
+                assert_eq!(ct.columns[0].type_id, TypeId::Bool);
+                assert_eq!(ct.columns[1].type_id, TypeId::Int2);
+                assert_eq!(ct.columns[2].type_id, TypeId::Int8);
+                assert_eq!(ct.columns[3].type_id, TypeId::Float4);
+                assert_eq!(ct.columns[4].type_id, TypeId::Float8);
+                assert_eq!(ct.columns[5].type_id, TypeId::Text);
+                assert_eq!(ct.columns[6].type_id, TypeId::Text);
             }
             _ => panic!("Expected CreateTable"),
         }
@@ -388,6 +460,17 @@ mod test {
             Statement::Select(s) => {
                 assert_eq!(s.order_by.len(), 1);
                 assert!(!s.order_by[0].asc);
+            }
+            _ => panic!("Expected Select"),
+        }
+    }
+
+    #[test]
+    fn parse_is_null() {
+        let stmts = parse("SELECT * FROM t WHERE a IS NULL;").unwrap();
+        match &stmts[0] {
+            Statement::Select(s) => {
+                assert!(matches!(s.where_clause, Some(Expr::IsNull(_))));
             }
             _ => panic!("Expected Select"),
         }

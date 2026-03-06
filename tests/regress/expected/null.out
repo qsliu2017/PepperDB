@@ -1,0 +1,41 @@
+-- NULL handling
+CREATE TABLE nulltest (a int, b int);
+CREATE TABLE
+INSERT INTO nulltest VALUES (1, 10);
+INSERT 0 1
+INSERT INTO nulltest VALUES (2, NULL);
+INSERT 0 1
+INSERT INTO nulltest VALUES (NULL, 30);
+INSERT 0 1
+SELECT * FROM nulltest;
+ a | b 
+---+----
+ 1 | 10
+ 2 |   
+   | 30
+(3 rows)
+-- IS NULL / IS NOT NULL
+SELECT * FROM nulltest WHERE b IS NULL;
+ a | b
+---+---
+ 2 |  
+(1 row)
+SELECT * FROM nulltest WHERE a IS NOT NULL;
+ a | b 
+---+----
+ 1 | 10
+ 2 |   
+(2 rows)
+-- NULL propagation in arithmetic
+SELECT a + b FROM nulltest;
+ ?column?
+---------
+       11
+         
+         
+(3 rows)
+-- NULL comparison (NULL = NULL is NULL, not true)
+SELECT * FROM nulltest WHERE a = NULL;
+ a | b
+---+---
+(0 rows)

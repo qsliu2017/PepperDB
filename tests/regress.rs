@@ -81,9 +81,16 @@ fn format_table(schema: &[FieldInfo], rows: &[Vec<String>]) -> String {
     out.push('\n');
 
     // Data rows
-    let int4_cols: Vec<bool> = schema
+    let right_align: Vec<bool> = schema
         .iter()
-        .map(|f| *f.datatype() == Type::INT4)
+        .map(|f| {
+            let t = f.datatype();
+            *t == Type::INT2
+                || *t == Type::INT4
+                || *t == Type::INT8
+                || *t == Type::FLOAT4
+                || *t == Type::FLOAT8
+        })
         .collect();
     for row in rows {
         for (i, val) in row.iter().enumerate() {
@@ -92,7 +99,7 @@ fn format_table(schema: &[FieldInfo], rows: &[Vec<String>]) -> String {
             } else {
                 out.push(' ');
             }
-            if int4_cols[i] {
+            if right_align[i] {
                 out.push_str(&format!("{:>width$}", val, width = widths[i]));
             } else {
                 out.push_str(&format!("{:<width$}", val, width = widths[i]));
@@ -228,4 +235,4 @@ macro_rules! regress_test {
     };
 }
 
-regress_test!(basics, select, orderby);
+regress_test!(basics, select, orderby, boolean, int2, int8, float, text, null);

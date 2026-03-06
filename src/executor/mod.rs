@@ -152,28 +152,62 @@ fn expr_name(expr: &Expr) -> String {
 fn infer_type(expr: &Expr, columns: &[Column]) -> PgWireResult<Type> {
     match expr {
         Expr::Integer(_) => Ok(Type::INT4),
+        Expr::Float(_) => Ok(Type::FLOAT8),
         Expr::StringLiteral(_) => Ok(Type::TEXT),
         Expr::Bool(_) => Ok(Type::BOOL),
+        Expr::Null => Ok(Type::TEXT),
         Expr::ColumnRef(name) => {
             let col = columns.iter().find(|c| c.name == *name).ok_or_else(|| {
                 user_error("42703", &format!("column \"{}\" does not exist", name))
             })?;
             Ok(type_id_to_pg(col.type_id))
         }
-        Expr::BinaryOp { op, left, .. } => match op {
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => infer_type(left, columns),
+        Expr::BinaryOp { op, left, right } => match op {
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+                let lt = infer_type(left, columns)?;
+                let rt = infer_type(right, columns)?;
+                Ok(promote_pg_type(&lt, &rt))
+            }
             _ => Ok(Type::BOOL),
         },
         Expr::UnaryOp { op, expr } => match op {
             UnaryOp::Minus => infer_type(expr, columns),
             UnaryOp::Not => Ok(Type::BOOL),
         },
+        Expr::IsNull(_) | Expr::IsNotNull(_) => Ok(Type::BOOL),
     }
+}
+
+fn promote_pg_type(a: &Type, b: &Type) -> Type {
+    let rank = |t: &Type| -> u8 {
+        if *t == Type::INT2 {
+            1
+        } else if *t == Type::INT4 {
+            2
+        } else if *t == Type::INT8 {
+            3
+        } else if *t == Type::FLOAT4 {
+            4
+        } else if *t == Type::FLOAT8 {
+            5
+        } else {
+            2
+        }
+    };
+    let ra = rank(a);
+    let rb = rank(b);
+    if ra >= rb { a.clone() } else { b.clone() }
 }
 
 fn type_id_to_pg(type_id: TypeId) -> Type {
     match type_id {
+        TypeId::Bool => Type::BOOL,
+        TypeId::Int2 => Type::INT2,
         TypeId::Int4 => Type::INT4,
+        TypeId::Int8 => Type::INT8,
+        TypeId::Float4 => Type::FLOAT4,
+        TypeId::Float8 => Type::FLOAT8,
+        TypeId::Text => Type::TEXT,
     }
 }
 
@@ -182,8 +216,10 @@ fn type_id_to_pg(type_id: TypeId) -> Type {
 fn eval_expr(expr: &Expr, row: &[Datum], columns: &[Column]) -> Datum {
     match expr {
         Expr::Integer(i) => Datum::Int4(*i as i32),
+        Expr::Float(f) => Datum::Float8(*f),
         Expr::StringLiteral(s) => Datum::Text(s.clone()),
         Expr::Bool(b) => Datum::Bool(*b),
+        Expr::Null => Datum::Null,
         Expr::ColumnRef(name) => {
             for (i, col) in columns.iter().enumerate() {
                 if col.name == *name {
@@ -199,32 +235,140 @@ fn eval_expr(expr: &Expr, row: &[Datum], columns: &[Column]) -> Datum {
         }
         Expr::UnaryOp { op, expr } => {
             let v = eval_expr(expr, row, columns);
-            match op {
-                UnaryOp::Minus => match v {
-                    Datum::Int4(i) => Datum::Int4(-i),
-                    _ => Datum::Null,
-                },
-                UnaryOp::Not => match v {
-                    Datum::Bool(b) => Datum::Bool(!b),
-                    _ => Datum::Null,
-                },
-            }
+            eval_unary(*op, &v)
+        }
+        Expr::IsNull(inner) => {
+            let v = eval_expr(inner, row, columns);
+            Datum::Bool(v == Datum::Null)
+        }
+        Expr::IsNotNull(inner) => {
+            let v = eval_expr(inner, row, columns);
+            Datum::Bool(v != Datum::Null)
         }
     }
 }
 
+fn eval_unary(op: UnaryOp, v: &Datum) -> Datum {
+    match op {
+        UnaryOp::Minus => match v {
+            Datum::Int2(i) => Datum::Int2(-i),
+            Datum::Int4(i) => Datum::Int4(-i),
+            Datum::Int8(i) => Datum::Int8(-i),
+            Datum::Float4(f) => Datum::Float4(-f),
+            Datum::Float8(f) => Datum::Float8(-f),
+            _ => Datum::Null,
+        },
+        UnaryOp::Not => match v {
+            Datum::Bool(b) => Datum::Bool(!b),
+            _ => Datum::Null,
+        },
+    }
+}
+
+/// Promote two datums to a common numeric type for arithmetic/comparison.
+fn promote(a: &Datum, b: &Datum) -> (Datum, Datum) {
+    match (a, b) {
+        // Same types -- no promotion needed
+        (Datum::Int4(_), Datum::Int4(_))
+        | (Datum::Int2(_), Datum::Int2(_))
+        | (Datum::Int8(_), Datum::Int8(_))
+        | (Datum::Float4(_), Datum::Float4(_))
+        | (Datum::Float8(_), Datum::Float8(_)) => (a.clone(), b.clone()),
+
+        // Promote to wider integer
+        (Datum::Int2(l), Datum::Int4(_)) => (Datum::Int4(*l as i32), b.clone()),
+        (Datum::Int4(_), Datum::Int2(r)) => (a.clone(), Datum::Int4(*r as i32)),
+        (Datum::Int2(l), Datum::Int8(_)) => (Datum::Int8(*l as i64), b.clone()),
+        (Datum::Int8(_), Datum::Int2(r)) => (a.clone(), Datum::Int8(*r as i64)),
+        (Datum::Int4(l), Datum::Int8(_)) => (Datum::Int8(*l as i64), b.clone()),
+        (Datum::Int8(_), Datum::Int4(r)) => (a.clone(), Datum::Int8(*r as i64)),
+
+        // Int + Float -> Float8
+        (Datum::Float4(l), Datum::Float8(_)) => (Datum::Float8(*l as f64), b.clone()),
+        (Datum::Float8(_), Datum::Float4(r)) => (a.clone(), Datum::Float8(*r as f64)),
+
+        (Datum::Int2(l), Datum::Float4(_)) | (Datum::Int2(l), Datum::Float8(_)) => {
+            (Datum::Float8(*l as f64), to_f64(b))
+        }
+        (Datum::Float4(_), Datum::Int2(r)) | (Datum::Float8(_), Datum::Int2(r)) => {
+            (to_f64(a), Datum::Float8(*r as f64))
+        }
+        (Datum::Int4(l), Datum::Float4(_)) | (Datum::Int4(l), Datum::Float8(_)) => {
+            (Datum::Float8(*l as f64), to_f64(b))
+        }
+        (Datum::Float4(_), Datum::Int4(r)) | (Datum::Float8(_), Datum::Int4(r)) => {
+            (to_f64(a), Datum::Float8(*r as f64))
+        }
+        (Datum::Int8(l), Datum::Float4(_)) | (Datum::Int8(l), Datum::Float8(_)) => {
+            (Datum::Float8(*l as f64), to_f64(b))
+        }
+        (Datum::Float4(_), Datum::Int8(r)) | (Datum::Float8(_), Datum::Int8(r)) => {
+            (to_f64(a), Datum::Float8(*r as f64))
+        }
+
+        _ => (a.clone(), b.clone()),
+    }
+}
+
+fn to_f64(d: &Datum) -> Datum {
+    match d {
+        Datum::Int2(i) => Datum::Float8(*i as f64),
+        Datum::Int4(i) => Datum::Float8(*i as f64),
+        Datum::Int8(i) => Datum::Float8(*i as f64),
+        Datum::Float4(f) => Datum::Float8(*f as f64),
+        Datum::Float8(_) => d.clone(),
+        _ => Datum::Null,
+    }
+}
+
 fn eval_binop(op: BinOp, left: &Datum, right: &Datum) -> Datum {
-    match (left, right) {
-        (Datum::Int4(l), Datum::Int4(r)) => match op {
-            BinOp::Add => Datum::Int4(l.wrapping_add(*r)),
-            BinOp::Sub => Datum::Int4(l.wrapping_sub(*r)),
-            BinOp::Mul => Datum::Int4(l.wrapping_mul(*r)),
-            BinOp::Div => {
-                if *r == 0 {
-                    return Datum::Null;
-                }
-                Datum::Int4(l / r)
+    // NULL propagation: any op with NULL yields NULL (except AND/OR short-circuit)
+    match op {
+        BinOp::And => {
+            // false AND NULL = false
+            if matches!(left, Datum::Bool(false)) || matches!(right, Datum::Bool(false)) {
+                return Datum::Bool(false);
             }
+            if *left == Datum::Null || *right == Datum::Null {
+                return Datum::Null;
+            }
+            if let (Datum::Bool(l), Datum::Bool(r)) = (left, right) {
+                return Datum::Bool(*l && *r);
+            }
+            return Datum::Null;
+        }
+        BinOp::Or => {
+            // true OR NULL = true
+            if matches!(left, Datum::Bool(true)) || matches!(right, Datum::Bool(true)) {
+                return Datum::Bool(true);
+            }
+            if *left == Datum::Null || *right == Datum::Null {
+                return Datum::Null;
+            }
+            if let (Datum::Bool(l), Datum::Bool(r)) = (left, right) {
+                return Datum::Bool(*l || *r);
+            }
+            return Datum::Null;
+        }
+        _ => {}
+    }
+
+    if *left == Datum::Null || *right == Datum::Null {
+        return Datum::Null;
+    }
+
+    // Bool equality
+    if let (Datum::Bool(l), Datum::Bool(r)) = (left, right) {
+        return match op {
+            BinOp::Eq => Datum::Bool(l == r),
+            BinOp::NotEq => Datum::Bool(l != r),
+            _ => Datum::Null,
+        };
+    }
+
+    // Text operations
+    if let (Datum::Text(l), Datum::Text(r)) = (left, right) {
+        return match op {
             BinOp::Eq => Datum::Bool(l == r),
             BinOp::NotEq => Datum::Bool(l != r),
             BinOp::Lt => Datum::Bool(l < r),
@@ -232,21 +376,94 @@ fn eval_binop(op: BinOp, left: &Datum, right: &Datum) -> Datum {
             BinOp::LtEq => Datum::Bool(l <= r),
             BinOp::GtEq => Datum::Bool(l >= r),
             _ => Datum::Null,
-        },
-        (Datum::Bool(l), Datum::Bool(r)) => match op {
-            BinOp::And => Datum::Bool(*l && *r),
-            BinOp::Or => Datum::Bool(*l || *r),
-            BinOp::Eq => Datum::Bool(l == r),
-            BinOp::NotEq => Datum::Bool(l != r),
-            _ => Datum::Null,
-        },
+        };
+    }
+
+    // Numeric: promote then operate
+    let (l, r) = promote(left, right);
+
+    match (&l, &r) {
+        (Datum::Int2(l), Datum::Int2(r)) => eval_int_op(op, *l as i64, *r as i64, 2),
+        (Datum::Int4(l), Datum::Int4(r)) => eval_int_op(op, *l as i64, *r as i64, 4),
+        (Datum::Int8(l), Datum::Int8(r)) => eval_int_op(op, *l, *r, 8),
+        (Datum::Float4(l), Datum::Float4(r)) => eval_float_op(op, *l as f64, *r as f64, 4),
+        (Datum::Float8(l), Datum::Float8(r)) => eval_float_op(op, *l, *r, 8),
+        _ => Datum::Null,
+    }
+}
+
+fn eval_int_op(op: BinOp, l: i64, r: i64, size: u8) -> Datum {
+    let wrap = |v: i64| -> Datum {
+        match size {
+            2 => Datum::Int2(v as i16),
+            4 => Datum::Int4(v as i32),
+            _ => Datum::Int8(v),
+        }
+    };
+    match op {
+        BinOp::Add => wrap(l.wrapping_add(r)),
+        BinOp::Sub => wrap(l.wrapping_sub(r)),
+        BinOp::Mul => wrap(l.wrapping_mul(r)),
+        BinOp::Div => {
+            if r == 0 {
+                return Datum::Null;
+            }
+            wrap(l / r)
+        }
+        BinOp::Eq => Datum::Bool(l == r),
+        BinOp::NotEq => Datum::Bool(l != r),
+        BinOp::Lt => Datum::Bool(l < r),
+        BinOp::Gt => Datum::Bool(l > r),
+        BinOp::LtEq => Datum::Bool(l <= r),
+        BinOp::GtEq => Datum::Bool(l >= r),
+        _ => Datum::Null,
+    }
+}
+
+fn eval_float_op(op: BinOp, l: f64, r: f64, size: u8) -> Datum {
+    let wrap = |v: f64| -> Datum {
+        match size {
+            4 => Datum::Float4(v as f32),
+            _ => Datum::Float8(v),
+        }
+    };
+    match op {
+        BinOp::Add => wrap(l + r),
+        BinOp::Sub => wrap(l - r),
+        BinOp::Mul => wrap(l * r),
+        BinOp::Div => {
+            if r == 0.0 {
+                return Datum::Null;
+            }
+            wrap(l / r)
+        }
+        BinOp::Eq => Datum::Bool(l == r),
+        BinOp::NotEq => Datum::Bool(l != r),
+        BinOp::Lt => Datum::Bool(l < r),
+        BinOp::Gt => Datum::Bool(l > r),
+        BinOp::LtEq => Datum::Bool(l <= r),
+        BinOp::GtEq => Datum::Bool(l >= r),
         _ => Datum::Null,
     }
 }
 
 fn compare_datums(a: &Datum, b: &Datum) -> Ordering {
-    match (a, b) {
+    if *a == Datum::Null && *b == Datum::Null {
+        return Ordering::Equal;
+    }
+    if *a == Datum::Null {
+        return Ordering::Greater; // NULLs sort last (ASC)
+    }
+    if *b == Datum::Null {
+        return Ordering::Less;
+    }
+    let (pa, pb) = promote(a, b);
+    match (&pa, &pb) {
+        (Datum::Int2(a), Datum::Int2(b)) => a.cmp(b),
         (Datum::Int4(a), Datum::Int4(b)) => a.cmp(b),
+        (Datum::Int8(a), Datum::Int8(b)) => a.cmp(b),
+        (Datum::Float4(a), Datum::Float4(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+        (Datum::Float8(a), Datum::Float8(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
         (Datum::Bool(a), Datum::Bool(b)) => a.cmp(b),
         (Datum::Text(a), Datum::Text(b)) => a.cmp(b),
         _ => Ordering::Equal,
@@ -255,8 +472,12 @@ fn compare_datums(a: &Datum, b: &Datum) -> Ordering {
 
 fn encode_datum(encoder: &mut DataRowEncoder, datum: &Datum) -> PgWireResult<()> {
     match datum {
-        Datum::Int4(i) => encoder.encode_field(i),
         Datum::Bool(b) => encoder.encode_field(b),
+        Datum::Int2(i) => encoder.encode_field(i),
+        Datum::Int4(i) => encoder.encode_field(i),
+        Datum::Int8(i) => encoder.encode_field(i),
+        Datum::Float4(f) => encoder.encode_field(f),
+        Datum::Float8(f) => encoder.encode_field(f),
         Datum::Text(s) => encoder.encode_field(s),
         Datum::Null => encoder.encode_field(&None::<i32>),
     }
@@ -391,8 +612,29 @@ fn execute_insert(
 }
 
 fn expr_to_datum(expr: &Expr, type_id: TypeId) -> PgWireResult<Datum> {
-    match (expr, type_id) {
-        (Expr::Integer(i), TypeId::Int4) => Ok(Datum::Int4(*i as i32)),
+    match expr {
+        Expr::Null => Ok(Datum::Null),
+        Expr::Bool(b) => match type_id {
+            TypeId::Bool => Ok(Datum::Bool(*b)),
+            _ => Err(user_error("42804", "Type mismatch in expression")),
+        },
+        Expr::Integer(i) => match type_id {
+            TypeId::Int2 => Ok(Datum::Int2(*i as i16)),
+            TypeId::Int4 => Ok(Datum::Int4(*i as i32)),
+            TypeId::Int8 => Ok(Datum::Int8(*i)),
+            TypeId::Float4 => Ok(Datum::Float4(*i as f32)),
+            TypeId::Float8 => Ok(Datum::Float8(*i as f64)),
+            _ => Err(user_error("42804", "Type mismatch in expression")),
+        },
+        Expr::Float(f) => match type_id {
+            TypeId::Float4 => Ok(Datum::Float4(*f as f32)),
+            TypeId::Float8 => Ok(Datum::Float8(*f)),
+            _ => Err(user_error("42804", "Type mismatch in expression")),
+        },
+        Expr::StringLiteral(s) => match type_id {
+            TypeId::Text => Ok(Datum::Text(s.clone())),
+            _ => Err(user_error("42804", "Type mismatch in expression")),
+        },
         _ => Err(user_error("42804", "Type mismatch in expression")),
     }
 }

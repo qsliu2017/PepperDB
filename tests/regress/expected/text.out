@@ -1,0 +1,35 @@
+-- Text and varchar types
+CREATE TABLE texttest (a text, b varchar);
+CREATE TABLE
+INSERT INTO texttest VALUES ('hello', 'world');
+INSERT 0 1
+INSERT INTO texttest VALUES ('foo', 'bar');
+INSERT 0 1
+INSERT INTO texttest VALUES ('abc', 'xyz');
+INSERT 0 1
+SELECT * FROM texttest;
+ a     | b    
+-------+-------
+ hello | world
+ foo   | bar  
+ abc   | xyz  
+(3 rows)
+SELECT * FROM texttest WHERE a = 'foo';
+ a   | b  
+-----+-----
+ foo | bar
+(1 row)
+SELECT * FROM texttest ORDER BY a;
+ a     | b    
+-------+-------
+ abc   | xyz  
+ foo   | bar  
+ hello | world
+(3 rows)
+SELECT b FROM texttest ORDER BY b DESC;
+ b    
+------
+ xyz  
+ world
+ bar  
+(3 rows)
