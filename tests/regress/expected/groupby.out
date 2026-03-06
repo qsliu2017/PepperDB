@@ -1,0 +1,102 @@
+-- GROUP BY and aggregate functions
+CREATE TABLE sales (dept text, item text, amount int, qty int);
+CREATE TABLE
+INSERT INTO sales VALUES ('electronics', 'phone', 500, 10);
+INSERT 0 1
+INSERT INTO sales VALUES ('electronics', 'laptop', 1200, 5);
+INSERT 0 1
+INSERT INTO sales VALUES ('electronics', 'phone', 500, 8);
+INSERT 0 1
+INSERT INTO sales VALUES ('clothing', 'shirt', 30, 100);
+INSERT 0 1
+INSERT INTO sales VALUES ('clothing', 'pants', 50, 60);
+INSERT 0 1
+INSERT INTO sales VALUES ('clothing', 'shirt', 30, 80);
+INSERT 0 1
+INSERT INTO sales VALUES ('food', 'apple', 2, 500);
+INSERT 0 1
+INSERT INTO sales VALUES ('food', 'bread', 5, 200);
+INSERT 0 1
+-- COUNT
+SELECT COUNT(*) FROM sales;
+ ?column?
+---------
+        8
+(1 row)
+SELECT dept, COUNT(*) FROM sales GROUP BY dept ORDER BY dept;
+ dept        | ?column?
+-------------+----------
+ clothing    |        3
+ electronics |        3
+ food        |        2
+(3 rows)
+-- SUM
+SELECT dept, SUM(qty) FROM sales GROUP BY dept ORDER BY dept;
+ dept        | ?column?
+-------------+----------
+ clothing    |      240
+ electronics |       23
+ food        |      700
+(3 rows)
+-- AVG
+SELECT dept, AVG(amount) FROM sales GROUP BY dept ORDER BY dept;
+ dept        | ?column?          
+-------------+--------------------
+ clothing    | 36.666666666666664
+ electronics |  733.3333333333334
+ food        |                3.5
+(3 rows)
+-- MIN / MAX
+SELECT dept, MIN(amount), MAX(amount) FROM sales GROUP BY dept ORDER BY dept;
+ dept        | ?column? | ?column?
+-------------+-----------+----------
+ clothing    |       30 |       50
+ electronics |      500 |     1200
+ food        |        2 |        5
+(3 rows)
+-- Multiple aggregates
+SELECT dept, COUNT(*), SUM(qty), MIN(amount), MAX(amount) FROM sales GROUP BY dept ORDER BY dept;
+ dept        | ?column? | ?column? | ?column? | ?column?
+-------------+-----------+-----------+-----------+----------
+ clothing    |        3 |      240 |       30 |       50
+ electronics |        3 |       23 |      500 |     1200
+ food        |        2 |      700 |        2 |        5
+(3 rows)
+-- GROUP BY multiple columns
+SELECT dept, item, SUM(qty) FROM sales GROUP BY dept, item ORDER BY dept, item;
+ dept        | item   | ?column?
+-------------+---------+----------
+ clothing    | pants  |       60
+ clothing    | shirt  |      180
+ electronics | laptop |        5
+ electronics | phone  |       18
+ food        | apple  |      500
+ food        | bread  |      200
+(6 rows)
+-- HAVING
+SELECT dept, SUM(qty) FROM sales GROUP BY dept HAVING SUM(qty) > 100 ORDER BY dept;
+ dept     | ?column?
+----------+----------
+ clothing |      240
+ food     |      700
+(2 rows)
+-- Aggregate without GROUP BY (whole table)
+SELECT SUM(qty), AVG(amount), MIN(qty), MAX(qty) FROM sales;
+ ?column? | ?column? | ?column? | ?column?
+----------+-----------+-----------+----------
+      963 |  289.625 |        5 |      500
+(1 row)
+-- COUNT with column (excludes NULLs)
+CREATE TABLE cn2 (a int, b int);
+CREATE TABLE
+INSERT INTO cn2 VALUES (1, 10);
+INSERT 0 1
+INSERT INTO cn2 VALUES (2, NULL);
+INSERT 0 1
+INSERT INTO cn2 VALUES (3, 30);
+INSERT 0 1
+SELECT COUNT(*), COUNT(b) FROM cn2;
+ ?column? | ?column?
+----------+----------
+        3 |        2
+(1 row)
