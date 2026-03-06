@@ -166,11 +166,12 @@ fn infer_type(expr: &Expr, columns: &[Column]) -> PgWireResult<Type> {
             Ok(type_id_to_pg(col.type_id))
         }
         Expr::BinaryOp { op, left, right } => match op {
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
                 let lt = infer_type(left, columns)?;
                 let rt = infer_type(right, columns)?;
                 Ok(promote_pg_type(&lt, &rt))
             }
+            BinOp::Concat => Ok(Type::TEXT),
             _ => Ok(Type::BOOL),
         },
         Expr::UnaryOp { op, expr } => match op {
@@ -178,6 +179,24 @@ fn infer_type(expr: &Expr, columns: &[Column]) -> PgWireResult<Type> {
             UnaryOp::Not => Ok(Type::BOOL),
         },
         Expr::IsNull(_) | Expr::IsNotNull(_) => Ok(Type::BOOL),
+        Expr::Case { results, else_result, .. } => {
+            if let Some(first) = results.first() {
+                infer_type(first, columns)
+            } else if let Some(e) = else_result {
+                infer_type(e, columns)
+            } else {
+                Ok(Type::TEXT)
+            }
+        }
+        Expr::Cast { type_id, .. } => Ok(type_id_to_pg(*type_id)),
+        Expr::Coalesce(args) => {
+            if let Some(first) = args.first() {
+                infer_type(first, columns)
+            } else {
+                Ok(Type::TEXT)
+            }
+        }
+        Expr::NullIf(a, _) => infer_type(a, columns),
     }
 }
 
@@ -248,6 +267,98 @@ fn eval_expr(expr: &Expr, row: &[Datum], columns: &[Column]) -> Datum {
             let v = eval_expr(inner, row, columns);
             Datum::Bool(v != Datum::Null)
         }
+        Expr::Case {
+            operand,
+            conditions,
+            results,
+            else_result,
+        } => {
+            if let Some(op) = operand {
+                let op_val = eval_expr(op, row, columns);
+                for (cond, res) in conditions.iter().zip(results.iter()) {
+                    let cond_val = eval_expr(cond, row, columns);
+                    if op_val == cond_val {
+                        return eval_expr(res, row, columns);
+                    }
+                }
+            } else {
+                for (cond, res) in conditions.iter().zip(results.iter()) {
+                    if matches!(eval_expr(cond, row, columns), Datum::Bool(true)) {
+                        return eval_expr(res, row, columns);
+                    }
+                }
+            }
+            match else_result {
+                Some(e) => eval_expr(e, row, columns),
+                None => Datum::Null,
+            }
+        }
+        Expr::Cast { expr, type_id } => {
+            let v = eval_expr(expr, row, columns);
+            cast_datum(&v, *type_id)
+        }
+        Expr::Coalesce(args) => {
+            for arg in args {
+                let v = eval_expr(arg, row, columns);
+                if v != Datum::Null {
+                    return v;
+                }
+            }
+            Datum::Null
+        }
+        Expr::NullIf(a, b) => {
+            let va = eval_expr(a, row, columns);
+            let vb = eval_expr(b, row, columns);
+            if va == vb { Datum::Null } else { va }
+        }
+    }
+}
+
+fn cast_datum(d: &Datum, target: TypeId) -> Datum {
+    match d {
+        Datum::Null => Datum::Null,
+        Datum::Int2(i) => cast_int(*i as i64, target),
+        Datum::Int4(i) => cast_int(*i as i64, target),
+        Datum::Int8(i) => cast_int(*i, target),
+        Datum::Float4(f) => cast_float(*f as f64, target),
+        Datum::Float8(f) => cast_float(*f, target),
+        Datum::Bool(b) => match target {
+            TypeId::Bool => Datum::Bool(*b),
+            TypeId::Int4 => Datum::Int4(if *b { 1 } else { 0 }),
+            TypeId::Text => Datum::Text(b.to_string()),
+            _ => Datum::Null,
+        },
+        Datum::Text(s) => match target {
+            TypeId::Text => Datum::Text(s.clone()),
+            TypeId::Int4 => s.parse::<i32>().map(Datum::Int4).unwrap_or(Datum::Null),
+            TypeId::Int8 => s.parse::<i64>().map(Datum::Int8).unwrap_or(Datum::Null),
+            TypeId::Float8 => s.parse::<f64>().map(Datum::Float8).unwrap_or(Datum::Null),
+            _ => Datum::Null,
+        },
+    }
+}
+
+fn cast_int(i: i64, target: TypeId) -> Datum {
+    match target {
+        TypeId::Int2 => Datum::Int2(i as i16),
+        TypeId::Int4 => Datum::Int4(i as i32),
+        TypeId::Int8 => Datum::Int8(i),
+        TypeId::Float4 => Datum::Float4(i as f32),
+        TypeId::Float8 => Datum::Float8(i as f64),
+        TypeId::Text => Datum::Text(i.to_string()),
+        TypeId::Bool => Datum::Bool(i != 0),
+    }
+}
+
+fn cast_float(f: f64, target: TypeId) -> Datum {
+    match target {
+        TypeId::Int2 => Datum::Int2(f as i16),
+        TypeId::Int4 => Datum::Int4(f as i32),
+        TypeId::Int8 => Datum::Int8(f as i64),
+        TypeId::Float4 => Datum::Float4(f as f32),
+        TypeId::Float8 => Datum::Float8(f),
+        TypeId::Text => Datum::Text(f.to_string()),
+        TypeId::Bool => Datum::Bool(f != 0.0),
     }
 }
 
@@ -324,6 +435,19 @@ fn to_f64(d: &Datum) -> Datum {
     }
 }
 
+fn datum_to_string(d: &Datum) -> String {
+    match d {
+        Datum::Bool(b) => b.to_string(),
+        Datum::Int2(i) => i.to_string(),
+        Datum::Int4(i) => i.to_string(),
+        Datum::Int8(i) => i.to_string(),
+        Datum::Float4(f) => f.to_string(),
+        Datum::Float8(f) => f.to_string(),
+        Datum::Text(s) => s.clone(),
+        Datum::Null => String::new(),
+    }
+}
+
 fn eval_binop(op: BinOp, left: &Datum, right: &Datum) -> Datum {
     // NULL propagation: any op with NULL yields NULL (except AND/OR short-circuit)
     match op {
@@ -367,6 +491,13 @@ fn eval_binop(op: BinOp, left: &Datum, right: &Datum) -> Datum {
             BinOp::NotEq => Datum::Bool(l != r),
             _ => Datum::Null,
         };
+    }
+
+    // Concat: convert both sides to text
+    if op == BinOp::Concat {
+        let ls = datum_to_string(left);
+        let rs = datum_to_string(right);
+        return Datum::Text(format!("{}{}", ls, rs));
     }
 
     // Text operations
@@ -413,6 +544,12 @@ fn eval_int_op(op: BinOp, l: i64, r: i64, size: u8) -> Datum {
             }
             wrap(l / r)
         }
+        BinOp::Mod => {
+            if r == 0 {
+                return Datum::Null;
+            }
+            wrap(l % r)
+        }
         BinOp::Eq => Datum::Bool(l == r),
         BinOp::NotEq => Datum::Bool(l != r),
         BinOp::Lt => Datum::Bool(l < r),
@@ -439,6 +576,12 @@ fn eval_float_op(op: BinOp, l: f64, r: f64, size: u8) -> Datum {
                 return Datum::Null;
             }
             wrap(l / r)
+        }
+        BinOp::Mod => {
+            if r == 0.0 {
+                return Datum::Null;
+            }
+            wrap(l % r)
         }
         BinOp::Eq => Datum::Bool(l == r),
         BinOp::NotEq => Datum::Bool(l != r),

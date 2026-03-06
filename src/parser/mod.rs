@@ -94,14 +94,27 @@ pub enum Expr {
     },
     IsNull(Box<Expr>),
     IsNotNull(Box<Expr>),
+    Case {
+        operand: Option<Box<Expr>>,
+        conditions: Vec<Expr>,
+        results: Vec<Expr>,
+        else_result: Option<Box<Expr>>,
+    },
+    Cast {
+        expr: Box<Expr>,
+        type_id: TypeId,
+    },
+    Coalesce(Vec<Expr>),
+    NullIf(Box<Expr>, Box<Expr>),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
     Add,
     Sub,
     Mul,
     Div,
+    Mod,
     Eq,
     NotEq,
     Lt,
@@ -110,6 +123,7 @@ pub enum BinOp {
     GtEq,
     And,
     Or,
+    Concat,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -348,7 +362,73 @@ fn convert_expr(expr: ast::Expr) -> PgWireResult<Expr> {
         ast::Expr::Nested(inner) => convert_expr(*inner),
         ast::Expr::IsNull(inner) => Ok(Expr::IsNull(Box::new(convert_expr(*inner)?))),
         ast::Expr::IsNotNull(inner) => Ok(Expr::IsNotNull(Box::new(convert_expr(*inner)?))),
+        ast::Expr::Case {
+            operand,
+            conditions,
+            results,
+            else_result,
+        } => {
+            let operand = operand.map(|e| convert_expr(*e)).transpose()?.map(Box::new);
+            let conds = conditions
+                .into_iter()
+                .map(convert_expr)
+                .collect::<PgWireResult<Vec<_>>>()?;
+            let res = results
+                .into_iter()
+                .map(convert_expr)
+                .collect::<PgWireResult<Vec<_>>>()?;
+            let else_r = else_result
+                .map(|e| convert_expr(*e))
+                .transpose()?
+                .map(Box::new);
+            Ok(Expr::Case {
+                operand,
+                conditions: conds,
+                results: res,
+                else_result: else_r,
+            })
+        }
+        ast::Expr::Cast {
+            expr, data_type, ..
+        } => {
+            let type_id = convert_data_type(&data_type)?;
+            Ok(Expr::Cast {
+                expr: Box::new(convert_expr(*expr)?),
+                type_id,
+            })
+        }
+        ast::Expr::Function(func) => convert_function(func),
         _ => Err(unsupported("Unsupported expression")),
+    }
+}
+
+fn convert_function(func: ast::Function) -> PgWireResult<Expr> {
+    let name = func.name.to_string().to_uppercase();
+    let args = match func.args {
+        ast::FunctionArguments::List(list) => list
+            .args
+            .into_iter()
+            .map(|a| match a {
+                ast::FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(e)) => convert_expr(e),
+                _ => Err(unsupported("Unsupported function argument")),
+            })
+            .collect::<PgWireResult<Vec<_>>>()?,
+        _ => vec![],
+    };
+
+    match name.as_str() {
+        "COALESCE" => Ok(Expr::Coalesce(args)),
+        "NULLIF" => {
+            if args.len() != 2 {
+                return Err(unsupported("NULLIF requires exactly 2 arguments"));
+            }
+            let mut it = args.into_iter();
+            Ok(Expr::NullIf(
+                Box::new(it.next().unwrap()),
+                Box::new(it.next().unwrap()),
+            ))
+        }
+        _ => Err(unsupported(&format!("Unsupported function: {}", name))),
     }
 }
 
@@ -358,6 +438,7 @@ fn convert_binop(op: ast::BinaryOperator) -> PgWireResult<BinOp> {
         ast::BinaryOperator::Minus => Ok(BinOp::Sub),
         ast::BinaryOperator::Multiply => Ok(BinOp::Mul),
         ast::BinaryOperator::Divide => Ok(BinOp::Div),
+        ast::BinaryOperator::Modulo => Ok(BinOp::Mod),
         ast::BinaryOperator::Eq => Ok(BinOp::Eq),
         ast::BinaryOperator::NotEq => Ok(BinOp::NotEq),
         ast::BinaryOperator::Lt => Ok(BinOp::Lt),
@@ -366,6 +447,7 @@ fn convert_binop(op: ast::BinaryOperator) -> PgWireResult<BinOp> {
         ast::BinaryOperator::GtEq => Ok(BinOp::GtEq),
         ast::BinaryOperator::And => Ok(BinOp::And),
         ast::BinaryOperator::Or => Ok(BinOp::Or),
+        ast::BinaryOperator::StringConcat => Ok(BinOp::Concat),
         _ => Err(unsupported("Unsupported binary operator")),
     }
 }

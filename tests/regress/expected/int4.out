@@ -1,0 +1,73 @@
+-- Comprehensive int4 arithmetic, comparison, modulo, unary minus
+CREATE TABLE i4 (a int, b int);
+CREATE TABLE
+INSERT INTO i4 VALUES (10, 3);
+INSERT 0 1
+INSERT INTO i4 VALUES (-7, 2);
+INSERT 0 1
+INSERT INTO i4 VALUES (0, 5);
+INSERT 0 1
+-- Arithmetic
+SELECT a + b FROM i4 ORDER BY a;
+ ?column?
+---------
+       -5
+        5
+       13
+(3 rows)
+SELECT a - b FROM i4 ORDER BY a;
+ ?column?
+---------
+       -9
+       -5
+        7
+(3 rows)
+SELECT a * b FROM i4 ORDER BY a;
+ ?column?
+---------
+      -14
+        0
+       30
+(3 rows)
+SELECT a / b FROM i4 ORDER BY a;
+ ?column?
+---------
+       -3
+        0
+        3
+(3 rows)
+SELECT a % b FROM i4 ORDER BY a;
+ ?column?
+---------
+       -1
+        0
+        1
+(3 rows)
+-- Unary minus
+SELECT -a FROM i4 ORDER BY a;
+ ?column?
+---------
+        7
+        0
+      -10
+(3 rows)
+-- Comparison
+SELECT * FROM i4 WHERE a > 0 ORDER BY a;
+ a  | b
+----+---
+ 10 | 3
+(1 row)
+SELECT * FROM i4 WHERE a <= 0 ORDER BY a;
+ a  | b
+----+---
+ -7 | 2
+  0 | 5
+(2 rows)
+-- Expression in SELECT
+SELECT a, b, a + b, a * b, a % b FROM i4 ORDER BY a;
+ a  | b | ?column? | ?column? | ?column?
+----+----+-----------+-----------+----------
+ -7 | 2 |       -5 |      -14 |       -1
+  0 | 5 |        5 |        0 |        0
+ 10 | 3 |       13 |       30 |        1
+(3 rows)
