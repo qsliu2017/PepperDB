@@ -16,13 +16,22 @@ pub enum Statement {
 
 #[derive(Debug)]
 pub struct SelectStmt {
-    pub target: SelectTarget,
+    pub targets: Vec<ResTarget>,
+    pub from: Option<String>,
+    pub where_clause: Option<Expr>,
+    pub order_by: Vec<OrderByExpr>,
 }
 
 #[derive(Debug)]
-pub enum SelectTarget {
-    Expressions(Vec<Expr>),
-    FromTable { table_name: String },
+pub enum ResTarget {
+    Wildcard,
+    Expr(Expr),
+}
+
+#[derive(Debug)]
+pub struct OrderByExpr {
+    pub expr: Expr,
+    pub asc: bool,
 }
 
 #[derive(Debug)]
@@ -43,10 +52,43 @@ pub struct InsertStmt {
     pub values: Vec<Vec<Expr>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     Integer(i64),
     StringLiteral(String),
+    Bool(bool),
+    ColumnRef(String),
+    BinaryOp {
+        left: Box<Expr>,
+        op: BinOp,
+        right: Box<Expr>,
+    },
+    UnaryOp {
+        op: UnaryOp,
+        expr: Box<Expr>,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+    NotEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UnaryOp {
+    Minus,
+    Not,
 }
 
 pub fn parse(sql: &str) -> PgWireResult<Vec<Statement>> {
@@ -114,29 +156,47 @@ fn convert_insert(ins: ast::Insert) -> PgWireResult<Statement> {
 }
 
 fn convert_query(query: ast::Query) -> PgWireResult<Statement> {
+    let order_by = if let Some(ob) = query.order_by {
+        ob.exprs
+            .into_iter()
+            .map(|e| {
+                Ok(OrderByExpr {
+                    expr: convert_expr(e.expr)?,
+                    asc: e.asc.unwrap_or(true),
+                })
+            })
+            .collect::<PgWireResult<Vec<_>>>()?
+    } else {
+        vec![]
+    };
+
     match *query.body {
         ast::SetExpr::Select(select) => {
-            // Check for SELECT * FROM table
-            let has_wildcard = select.projection.len() == 1
-                && matches!(select.projection[0], ast::SelectItem::Wildcard(_));
-            if has_wildcard && !select.from.is_empty() {
-                let table_name = select.from[0].relation.to_string();
-                return Ok(Statement::Select(SelectStmt {
-                    target: SelectTarget::FromTable { table_name },
-                }));
-            }
-
-            // Existing literal expression path
-            let exprs: PgWireResult<Vec<Expr>> = select
+            let targets = select
                 .projection
                 .into_iter()
                 .map(|item| match item {
-                    ast::SelectItem::UnnamedExpr(expr) => convert_expr(expr),
+                    ast::SelectItem::Wildcard(_) => Ok(ResTarget::Wildcard),
+                    ast::SelectItem::UnnamedExpr(expr) => {
+                        Ok(ResTarget::Expr(convert_expr(expr)?))
+                    }
                     _ => Err(unsupported("Unsupported select item")),
                 })
-                .collect();
+                .collect::<PgWireResult<Vec<_>>>()?;
+
+            let from = if !select.from.is_empty() {
+                Some(select.from[0].relation.to_string())
+            } else {
+                None
+            };
+
+            let where_clause = select.selection.map(convert_expr).transpose()?;
+
             Ok(Statement::Select(SelectStmt {
-                target: SelectTarget::Expressions(exprs?),
+                targets,
+                from,
+                where_clause,
+                order_by,
             }))
         }
         _ => Err(unsupported("Unsupported query type")),
@@ -146,17 +206,52 @@ fn convert_query(query: ast::Query) -> PgWireResult<Statement> {
 fn convert_expr(expr: ast::Expr) -> PgWireResult<Expr> {
     match expr {
         ast::Expr::Value(v) => convert_value(v),
-        ast::Expr::UnaryOp {
-            op: ast::UnaryOperator::Minus,
-            expr,
-        } => match *expr {
-            ast::Expr::Value(ast::Value::Number(n, _)) => {
-                let i: i64 = n.parse().map_err(|_| unsupported("Invalid number"))?;
-                Ok(Expr::Integer(-i))
-            }
-            _ => Err(unsupported("Unsupported unary expression")),
+        ast::Expr::Identifier(ident) => Ok(Expr::ColumnRef(ident.value)),
+        ast::Expr::UnaryOp { op, expr } => match op {
+            ast::UnaryOperator::Minus => match *expr {
+                ast::Expr::Value(ast::Value::Number(n, _)) => {
+                    let i: i64 = n.parse().map_err(|_| unsupported("Invalid number"))?;
+                    Ok(Expr::Integer(-i))
+                }
+                other => Ok(Expr::UnaryOp {
+                    op: UnaryOp::Minus,
+                    expr: Box::new(convert_expr(other)?),
+                }),
+            },
+            ast::UnaryOperator::Not => Ok(Expr::UnaryOp {
+                op: UnaryOp::Not,
+                expr: Box::new(convert_expr(*expr)?),
+            }),
+            _ => Err(unsupported("Unsupported unary operator")),
         },
+        ast::Expr::BinaryOp { left, op, right } => {
+            let bin_op = convert_binop(op)?;
+            Ok(Expr::BinaryOp {
+                left: Box::new(convert_expr(*left)?),
+                op: bin_op,
+                right: Box::new(convert_expr(*right)?),
+            })
+        }
+        ast::Expr::Nested(inner) => convert_expr(*inner),
         _ => Err(unsupported("Unsupported expression")),
+    }
+}
+
+fn convert_binop(op: ast::BinaryOperator) -> PgWireResult<BinOp> {
+    match op {
+        ast::BinaryOperator::Plus => Ok(BinOp::Add),
+        ast::BinaryOperator::Minus => Ok(BinOp::Sub),
+        ast::BinaryOperator::Multiply => Ok(BinOp::Mul),
+        ast::BinaryOperator::Divide => Ok(BinOp::Div),
+        ast::BinaryOperator::Eq => Ok(BinOp::Eq),
+        ast::BinaryOperator::NotEq => Ok(BinOp::NotEq),
+        ast::BinaryOperator::Lt => Ok(BinOp::Lt),
+        ast::BinaryOperator::Gt => Ok(BinOp::Gt),
+        ast::BinaryOperator::LtEq => Ok(BinOp::LtEq),
+        ast::BinaryOperator::GtEq => Ok(BinOp::GtEq),
+        ast::BinaryOperator::And => Ok(BinOp::And),
+        ast::BinaryOperator::Or => Ok(BinOp::Or),
+        _ => Err(unsupported("Unsupported binary operator")),
     }
 }
 
@@ -167,6 +262,7 @@ fn convert_value(value: ast::Value) -> PgWireResult<Expr> {
             Ok(Expr::Integer(i))
         }
         ast::Value::SingleQuotedString(s) => Ok(Expr::StringLiteral(s)),
+        ast::Value::Boolean(b) => Ok(Expr::Bool(b)),
         _ => Err(unsupported("Unsupported value type")),
     }
 }
@@ -188,13 +284,11 @@ mod test {
         let stmts = parse("SELECT 1;").unwrap();
         assert_eq!(stmts.len(), 1);
         match &stmts[0] {
-            Statement::Select(s) => match &s.target {
-                SelectTarget::Expressions(exprs) => {
-                    assert_eq!(exprs.len(), 1);
-                    assert!(matches!(exprs[0], Expr::Integer(1)));
-                }
-                _ => panic!("Expected Expressions"),
-            },
+            Statement::Select(s) => {
+                assert_eq!(s.targets.len(), 1);
+                assert!(matches!(&s.targets[0], ResTarget::Expr(Expr::Integer(1))));
+                assert!(s.from.is_none());
+            }
             _ => panic!("Expected Select"),
         }
     }
@@ -204,16 +298,13 @@ mod test {
         let stmts = parse("SELECT 'hello';").unwrap();
         assert_eq!(stmts.len(), 1);
         match &stmts[0] {
-            Statement::Select(s) => match &s.target {
-                SelectTarget::Expressions(exprs) => {
-                    assert_eq!(exprs.len(), 1);
-                    match &exprs[0] {
-                        Expr::StringLiteral(s) => assert_eq!(s, "hello"),
-                        _ => panic!("Expected StringLiteral"),
-                    }
+            Statement::Select(s) => {
+                assert_eq!(s.targets.len(), 1);
+                match &s.targets[0] {
+                    ResTarget::Expr(Expr::StringLiteral(s)) => assert_eq!(s, "hello"),
+                    _ => panic!("Expected StringLiteral"),
                 }
-                _ => panic!("Expected Expressions"),
-            },
+            }
             _ => panic!("Expected Select"),
         }
     }
@@ -253,10 +344,51 @@ mod test {
         let stmts = parse("SELECT * FROM t;").unwrap();
         assert_eq!(stmts.len(), 1);
         match &stmts[0] {
-            Statement::Select(s) => match &s.target {
-                SelectTarget::FromTable { table_name } => assert_eq!(table_name, "t"),
-                _ => panic!("Expected FromTable"),
-            },
+            Statement::Select(s) => {
+                assert_eq!(s.targets.len(), 1);
+                assert!(matches!(&s.targets[0], ResTarget::Wildcard));
+                assert_eq!(s.from.as_deref(), Some("t"));
+            }
+            _ => panic!("Expected Select"),
+        }
+    }
+
+    #[test]
+    fn parse_select_columns() {
+        let stmts = parse("SELECT a, b FROM t;").unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Statement::Select(s) => {
+                assert_eq!(s.targets.len(), 2);
+                assert!(
+                    matches!(&s.targets[0], ResTarget::Expr(Expr::ColumnRef(n)) if n == "a")
+                );
+                assert!(
+                    matches!(&s.targets[1], ResTarget::Expr(Expr::ColumnRef(n)) if n == "b")
+                );
+                assert_eq!(s.from.as_deref(), Some("t"));
+            }
+            _ => panic!("Expected Select"),
+        }
+    }
+
+    #[test]
+    fn parse_where_clause() {
+        let stmts = parse("SELECT * FROM t WHERE a > 5;").unwrap();
+        match &stmts[0] {
+            Statement::Select(s) => assert!(s.where_clause.is_some()),
+            _ => panic!("Expected Select"),
+        }
+    }
+
+    #[test]
+    fn parse_order_by() {
+        let stmts = parse("SELECT * FROM t ORDER BY a DESC;").unwrap();
+        match &stmts[0] {
+            Statement::Select(s) => {
+                assert_eq!(s.order_by.len(), 1);
+                assert!(!s.order_by[0].asc);
+            }
             _ => panic!("Expected Select"),
         }
     }

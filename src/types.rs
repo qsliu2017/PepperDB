@@ -18,5 +18,7 @@ impl TypeId {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Datum {
     Int4(i32),
+    Bool(bool),
+    Text(String),
     Null,
 }

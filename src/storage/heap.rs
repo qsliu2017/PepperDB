@@ -95,6 +95,9 @@ pub fn serialize_tuple(values: &[Datum]) -> Vec<u8> {
         match v {
             Datum::Int4(i) => data.extend_from_slice(&i.to_be_bytes()),
             Datum::Null => data.extend_from_slice(&0i32.to_be_bytes()),
+            Datum::Bool(_) | Datum::Text(_) => {
+                unimplemented!("Bool/Text heap storage not yet supported")
+            }
         }
     }
     data

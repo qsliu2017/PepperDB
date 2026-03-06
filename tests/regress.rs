@@ -228,4 +228,4 @@ macro_rules! regress_test {
     };
 }
 
-regress_test!(basics);
+regress_test!(basics, select, orderby);
