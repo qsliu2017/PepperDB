@@ -28,9 +28,16 @@ cargo test
 
 ## Status
 
-Early stage. Currently implemented:
+Actively developing. Currently implemented:
 
-- **Buffer Pool** — LRU-K replacement policy
+- **Query Engine** -- Apache DataFusion handles SELECT parsing, planning, optimization, and execution (GROUP BY, JOINs, subqueries, set operations, window functions, etc.)
+- **DDL/DML** -- CREATE TABLE, INSERT, UPDATE, DELETE, DROP TABLE with our own parser and executor
+- **Storage** -- PostgreSQL-style heap pages (8KB), null bitmap, dead tuple marking (UPDATE = mark-dead + insert-new)
+- **Catalog** -- in-memory table metadata
+- **Types** -- bool, int2, int4, int8, float4, float8, text
+- **Network** -- PostgreSQL wire protocol via pgwire (connect with `psql`)
+- **Buffer Pool** -- LRU-K replacement policy
+- **Regression Tests** -- 22 PostgreSQL-style regression tests covering: basics, select, orderby, boolean, int2, int4, int8, float, text, null, update, delete, drop_table, case expressions, general expressions, strings, limit, distinct, aliases, group by, joins, subqueries
 
 ## License
 

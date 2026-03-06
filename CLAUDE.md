@@ -26,9 +26,20 @@ Rust library crate (`pepper_db`). `src/lib.rs` as crate root, submodules in dire
 
 **Current modules:**
 - `buffer_pool` -- LRU-K page replacement policy (`LRUKReplacer`)
+- `storage` -- heap page layout (8KB pages, null bitmap, dead tuple marking) and disk manager
+- `catalog` -- in-memory table/column metadata (simplified pg_class + pg_attribute)
+- `parser` -- converts sqlparser-rs AST to PepperDB AST for DDL/DML statements
+- `executor` -- routes SELECT to DataFusion, handles DDL/DML directly; includes `HeapTableProvider` bridging heap storage to DataFusion's `TableProvider`
+- `server` -- pgwire protocol handler
+- `types` -- core type definitions (Bool, Int2, Int4, Int8, Float4, Float8, Text)
 
-**Planned modules** (following PostgreSQL's architecture):
-- Parser, Catalog, Executor, Storage, WAL, Network
+**Key dependencies:**
+- Apache DataFusion (v44) -- query engine for all SELECT execution
+- sqlparser-rs (v0.53) -- SQL parsing for DDL/DML (also used internally by DataFusion)
+- pgwire (v0.25) -- PostgreSQL wire protocol
+
+**Planned modules:**
+- WAL, Buffer Pool integration with storage
 
 ## Conventions
 
