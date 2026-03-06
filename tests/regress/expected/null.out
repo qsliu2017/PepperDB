@@ -28,14 +28,14 @@ SELECT * FROM nulltest WHERE a IS NOT NULL;
 (2 rows)
 -- NULL propagation in arithmetic
 SELECT a + b FROM nulltest;
- ?column?
----------
-       11
-         
-         
+ nulltest.a + nulltest.b
+------------------------
+                      11
+                        
+                        
 (3 rows)
 -- NULL comparison (NULL = NULL is NULL, not true)
 SELECT * FROM nulltest WHERE a = NULL;
- a | b
----+---
+
+
 (0 rows)

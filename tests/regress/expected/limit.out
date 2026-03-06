@@ -36,8 +36,8 @@ SELECT * FROM lim ORDER BY a LIMIT 2 OFFSET 1;
 (2 rows)
 -- LIMIT 0
 SELECT * FROM lim ORDER BY a LIMIT 0;
- a | b
----+---
+
+
 (0 rows)
 -- LIMIT greater than row count
 SELECT * FROM lim ORDER BY a LIMIT 100;
@@ -51,8 +51,8 @@ SELECT * FROM lim ORDER BY a LIMIT 100;
 (5 rows)
 -- OFFSET greater than row count
 SELECT * FROM lim ORDER BY a OFFSET 100;
- a | b
----+---
+
+
 (0 rows)
 -- OFFSET with no LIMIT
 SELECT * FROM lim ORDER BY a OFFSET 4;

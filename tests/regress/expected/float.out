@@ -15,9 +15,9 @@ SELECT * FROM floattest;
     0 | 100.001
 (3 rows)
 SELECT a + b FROM floattest WHERE a > 0.0;
- ?column?         
-------------------
- 4.640000000000001
+ floattest.a + floattest.b
+--------------------------
+         4.640000000000001
 (1 row)
 SELECT * FROM floattest ORDER BY b;
  a    | b      

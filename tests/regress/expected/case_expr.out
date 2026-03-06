@@ -35,7 +35,7 @@ SELECT a, CASE WHEN a = 1 THEN 'yes' END FROM cv ORDER BY a;
 SELECT COALESCE(NULL, NULL, 3);
  ?column?
 ---------
- 3       
+        3
 (1 row)
 SELECT COALESCE(1, 2, 3);
  ?column?

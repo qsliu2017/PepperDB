@@ -59,6 +59,10 @@ impl Catalog {
         self.tables.get(name)
     }
 
+    pub fn all_tables(&self) -> Vec<&Table> {
+        self.tables.values().collect()
+    }
+
     pub fn drop_table(&mut self, name: &str) -> Result<OID, String> {
         match self.tables.remove(name) {
             Some(table) => Ok(table.oid),

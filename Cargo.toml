@@ -13,6 +13,7 @@ sqlparser = { version = "0.53", features = ["visitor"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
 async-trait = "0.1"
 futures = "0.3"
+datafusion = "44"
 
 [dev-dependencies]
 diff = "0.1.13"

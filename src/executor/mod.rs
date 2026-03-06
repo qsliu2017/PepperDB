@@ -1,23 +1,58 @@
-// Query executor: runs parsed statements against the Database.
+// Query executor: routes SELECT to DataFusion, handles DDL/DML directly.
 
-use std::cmp::Ordering;
-use std::sync::Arc;
+use std::any::Any;
+use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
+use datafusion::arrow::array::*;
+use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::catalog::TableProvider;
+use datafusion::datasource::MemTable;
+use datafusion::logical_expr::TableType;
+use datafusion::physical_plan::ExecutionPlan;
 use futures::stream;
 use pgwire::api::results::{DataRowEncoder, FieldFormat, FieldInfo, QueryResponse, Response, Tag};
 use pgwire::api::Type;
 use pgwire::error::{PgWireError, PgWireResult};
+use sqlparser::ast;
+use sqlparser::dialect::PostgreSqlDialect;
+use sqlparser::parser::Parser;
 
 use crate::catalog::Column;
-use crate::parser::{BinOp, Expr, ResTarget, Statement, UnaryOp};
-use crate::storage::disk::PAGE_SIZE;
+use crate::parser::{self, BinOp, Expr, Statement, UnaryOp};
+use crate::storage::disk::{DiskManager, PAGE_SIZE};
 use crate::storage::heap;
 use crate::types::{Datum, TypeId};
 use crate::Database;
 
-pub fn execute(stmt: Statement, db: &Database) -> PgWireResult<Response<'static>> {
+/// Main entry point: takes raw SQL, classifies, and routes.
+pub async fn execute_sql(sql: &str, db: &Database) -> PgWireResult<Response<'static>> {
+    let dialect = PostgreSqlDialect {};
+    let stmts = Parser::parse_sql(&dialect, sql).map_err(|e| {
+        PgWireError::UserError(Box::new(pgwire::error::ErrorInfo::new(
+            "ERROR".to_owned(),
+            "42601".to_owned(),
+            e.to_string(),
+        )))
+    })?;
+
+    let stmt = stmts
+        .into_iter()
+        .next()
+        .ok_or_else(|| user_error("42601", "empty query"))?;
+
+    match &stmt {
+        ast::Statement::Query(_) => execute_select_df(sql, db).await,
+        _ => {
+            let our_stmt = parser::convert_statement(stmt)?;
+            execute(our_stmt, db)
+        }
+    }
+}
+
+fn execute(stmt: Statement, db: &Database) -> PgWireResult<Response<'static>> {
     match stmt {
-        Statement::Select(s) => execute_select(db, s),
         Statement::CreateTable(ct) => execute_create_table(db, ct),
         Statement::Insert(ins) => execute_insert(db, ins),
         Statement::Update(upd) => execute_update(db, upd),
@@ -26,127 +61,259 @@ pub fn execute(stmt: Statement, db: &Database) -> PgWireResult<Response<'static>
     }
 }
 
-// -- SELECT ----------------------------------------------------------------
+// -- DataFusion SELECT -----------------------------------------------------
 
-struct ResolvedTarget {
-    name: String,
-    expr: Expr,
-    pg_type: Type,
+async fn execute_select_df(sql: &str, db: &Database) -> PgWireResult<Response<'static>> {
+    // Register all catalog tables with DataFusion
+    register_all_tables(db)?;
+
+    let df = db
+        .session
+        .sql(sql)
+        .await
+        .map_err(|e| df_to_pg(&e, sql))?;
+    let batches = df.collect().await.map_err(|e| df_to_pg(&e, sql))?;
+
+    batches_to_response(batches)
 }
 
-fn execute_select(
-    db: &Database,
-    sel: crate::parser::SelectStmt,
-) -> PgWireResult<Response<'static>> {
-    let table_info = if let Some(ref table_name) = sel.from {
-        let catalog = db.catalog.lock().unwrap();
-        let table = catalog.get_table(table_name).ok_or_else(|| {
-            user_error(
-                "42P01",
-                &format!("relation \"{}\" does not exist", table_name),
-            )
-        })?;
-        Some((table.oid, table.columns.clone()))
-    } else {
-        None
-    };
+fn register_all_tables(db: &Database) -> PgWireResult<()> {
+    let catalog = db.catalog.lock().unwrap();
+    for table in catalog.all_tables() {
+        let provider = HeapTableProvider {
+            arrow_schema: columns_to_arrow_schema(&table.columns),
+            oid: table.oid,
+            columns: table.columns.clone(),
+            disk: db.disk.clone(),
+        };
+        // Deregister first (ignore error if not exists), then register fresh
+        let _ = db.session.deregister_table(&table.name);
+        db.session
+            .register_table(&table.name, Arc::new(provider))
+            .map_err(|e| df_to_pg(&e, ""))?;
+    }
+    Ok(())
+}
 
-    let columns: &[Column] = match table_info {
-        Some((_, ref cols)) => cols,
-        None => &[],
-    };
+// -- HeapTableProvider -----------------------------------------------------
 
-    let resolved = resolve_targets(&sel.targets, columns)?;
+struct HeapTableProvider {
+    arrow_schema: SchemaRef,
+    oid: u32,
+    columns: Vec<Column>,
+    disk: Arc<Mutex<DiskManager>>,
+}
 
-    // Scan rows (or single virtual row if no FROM)
-    let mut tuples = if let Some((oid, _)) = table_info {
-        scan_table(db, oid, columns)?
-    } else {
-        vec![vec![]]
-    };
+impl std::fmt::Debug for HeapTableProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HeapTableProvider")
+            .field("oid", &self.oid)
+            .finish()
+    }
+}
 
-    // WHERE
-    if let Some(ref wh) = sel.where_clause {
-        tuples.retain(|row| matches!(eval_expr(wh, row, columns), Datum::Bool(true)));
+#[async_trait]
+impl TableProvider for HeapTableProvider {
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
-    // ORDER BY
-    if !sel.order_by.is_empty() {
-        tuples.sort_by(|a, b| {
-            for ob in &sel.order_by {
-                let va = eval_expr(&ob.expr, a, columns);
-                let vb = eval_expr(&ob.expr, b, columns);
-                let c = compare_datums(&va, &vb);
-                let c = if ob.asc { c } else { c.reverse() };
-                if c != Ordering::Equal {
-                    return c;
+    fn schema(&self) -> SchemaRef {
+        self.arrow_schema.clone()
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::Base
+    }
+
+    async fn scan(
+        &self,
+        state: &dyn datafusion::catalog::Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[datafusion::prelude::Expr],
+        limit: Option<usize>,
+    ) -> datafusion::error::Result<Arc<dyn ExecutionPlan>> {
+        let batch = self.scan_heap()?;
+        let mem = MemTable::try_new(self.arrow_schema.clone(), vec![vec![batch]])?;
+        mem.scan(state, projection, filters, limit).await
+    }
+}
+
+impl HeapTableProvider {
+    fn scan_heap(&self) -> datafusion::error::Result<RecordBatch> {
+        let disk = self.disk.lock().unwrap();
+        let num_pages = disk.num_pages(self.oid);
+        let mut tuples = Vec::new();
+        let mut page = [0u8; PAGE_SIZE];
+
+        for page_id in 0..num_pages {
+            disk.read_page(self.oid, page_id, &mut page);
+            let n = heap::num_items(&page);
+            for item_idx in 0..n {
+                if let Some(data) = heap::get_tuple(&page, item_idx) {
+                    tuples.push(heap::deserialize_tuple(data, &self.columns));
                 }
             }
-            Ordering::Equal
-        });
-    }
+        }
 
-    // DISTINCT
-    if sel.distinct {
-        let mut seen = Vec::new();
-        tuples.retain(|row| {
-            let key: Vec<Datum> = resolved.iter().map(|rt| eval_expr(&rt.expr, row, columns)).collect();
-            if seen.contains(&key) {
-                false
-            } else {
-                seen.push(key);
-                true
-            }
-        });
+        tuples_to_record_batch(&tuples, &self.columns, &self.arrow_schema)
     }
+}
 
-    // OFFSET
-    if let Some(ref off) = sel.offset {
-        let n = match eval_expr(off, &[], &[]) {
-            Datum::Int4(n) => n as usize,
-            Datum::Int8(n) => n as usize,
-            _ => 0,
-        };
-        if n < tuples.len() {
-            tuples = tuples.split_off(n);
-        } else {
-            tuples.clear();
+// -- Arrow conversion helpers ----------------------------------------------
+
+fn columns_to_arrow_schema(columns: &[Column]) -> SchemaRef {
+    let fields: Vec<Field> = columns
+        .iter()
+        .map(|c| Field::new(&c.name, type_id_to_arrow(c.type_id), true))
+        .collect();
+    Arc::new(Schema::new(fields))
+}
+
+fn type_id_to_arrow(tid: TypeId) -> DataType {
+    match tid {
+        TypeId::Bool => DataType::Boolean,
+        TypeId::Int2 => DataType::Int16,
+        TypeId::Int4 => DataType::Int32,
+        TypeId::Int8 => DataType::Int64,
+        TypeId::Float4 => DataType::Float32,
+        TypeId::Float8 => DataType::Float64,
+        TypeId::Text => DataType::Utf8,
+    }
+}
+
+fn tuples_to_record_batch(
+    tuples: &[Vec<Datum>],
+    columns: &[Column],
+    schema: &SchemaRef,
+) -> datafusion::error::Result<RecordBatch> {
+    let arrays: Vec<ArrayRef> = columns
+        .iter()
+        .enumerate()
+        .map(|(col_idx, col)| build_array(tuples, col_idx, col.type_id))
+        .collect();
+    RecordBatch::try_new(schema.clone(), arrays).map_err(|e| {
+        datafusion::error::DataFusionError::ArrowError(e, None)
+    })
+}
+
+fn build_array(tuples: &[Vec<Datum>], col_idx: usize, tid: TypeId) -> ArrayRef {
+    match tid {
+        TypeId::Bool => {
+            let vals: Vec<Option<bool>> = tuples
+                .iter()
+                .map(|r| match &r[col_idx] {
+                    Datum::Bool(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            Arc::new(BooleanArray::from(vals))
+        }
+        TypeId::Int2 => {
+            let vals: Vec<Option<i16>> = tuples
+                .iter()
+                .map(|r| match &r[col_idx] {
+                    Datum::Int2(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            Arc::new(Int16Array::from(vals))
+        }
+        TypeId::Int4 => {
+            let vals: Vec<Option<i32>> = tuples
+                .iter()
+                .map(|r| match &r[col_idx] {
+                    Datum::Int4(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            Arc::new(Int32Array::from(vals))
+        }
+        TypeId::Int8 => {
+            let vals: Vec<Option<i64>> = tuples
+                .iter()
+                .map(|r| match &r[col_idx] {
+                    Datum::Int8(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            Arc::new(Int64Array::from(vals))
+        }
+        TypeId::Float4 => {
+            let vals: Vec<Option<f32>> = tuples
+                .iter()
+                .map(|r| match &r[col_idx] {
+                    Datum::Float4(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            Arc::new(Float32Array::from(vals))
+        }
+        TypeId::Float8 => {
+            let vals: Vec<Option<f64>> = tuples
+                .iter()
+                .map(|r| match &r[col_idx] {
+                    Datum::Float8(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            Arc::new(Float64Array::from(vals))
+        }
+        TypeId::Text => {
+            let vals: Vec<Option<&str>> = tuples
+                .iter()
+                .map(|r| match &r[col_idx] {
+                    Datum::Text(v) => Some(v.as_str()),
+                    _ => None,
+                })
+                .collect();
+            Arc::new(StringArray::from(vals))
         }
     }
+}
 
-    // LIMIT
-    if let Some(ref lim) = sel.limit {
-        let n = match eval_expr(lim, &[], &[]) {
-            Datum::Int4(n) => n as usize,
-            Datum::Int8(n) => n as usize,
-            _ => tuples.len(),
-        };
-        tuples.truncate(n);
-    }
+// -- RecordBatch to pgwire Response ----------------------------------------
 
-    // Build schema
-    let fields: Vec<FieldInfo> = resolved
+fn batches_to_response(batches: Vec<RecordBatch>) -> PgWireResult<Response<'static>> {
+    let arrow_schema = if let Some(first) = batches.first() {
+        first.schema()
+    } else {
+        let schema = Arc::new(vec![]);
+        return Ok(Response::Query(QueryResponse::new(
+            schema,
+            stream::iter(vec![]),
+        )));
+    };
+    let fields: Vec<FieldInfo> = arrow_schema
+        .fields()
         .iter()
-        .map(|rt| {
+        .map(|f| {
+            // DataFusion names literal columns like "Int64(1)". PostgreSQL uses "?column?".
+            let name = if f.name().contains('(') && f.name().contains(')') {
+                "?column?".to_owned()
+            } else {
+                f.name().clone()
+            };
             FieldInfo::new(
-                rt.name.clone(),
+                name,
                 None,
                 None,
-                rt.pg_type.clone(),
+                arrow_to_pg_type(f.data_type()),
                 FieldFormat::Text,
             )
         })
         .collect();
     let schema = Arc::new(fields);
 
-    // Encode rows
     let mut rows = Vec::new();
-    for tuple in &tuples {
-        let mut encoder = DataRowEncoder::new(schema.clone());
-        for rt in &resolved {
-            encode_datum(&mut encoder, &eval_expr(&rt.expr, tuple, columns))?;
+    for batch in &batches {
+        for row_idx in 0..batch.num_rows() {
+            let mut encoder = DataRowEncoder::new(schema.clone());
+            for col_idx in 0..batch.num_columns() {
+                encode_arrow_value(&mut encoder, batch.column(col_idx), row_idx)?;
+            }
+            rows.push(encoder.finish());
         }
-        rows.push(encoder.finish());
     }
 
     Ok(Response::Query(QueryResponse::new(
@@ -155,534 +322,58 @@ fn execute_select(
     )))
 }
 
-fn resolve_targets(
-    targets: &[ResTarget],
-    columns: &[Column],
-) -> PgWireResult<Vec<ResolvedTarget>> {
-    let mut resolved = Vec::new();
-    for target in targets {
-        match target {
-            ResTarget::Wildcard => {
-                for col in columns {
-                    resolved.push(ResolvedTarget {
-                        name: col.name.clone(),
-                        expr: Expr::ColumnRef(col.name.clone()),
-                        pg_type: type_id_to_pg(col.type_id),
-                    });
-                }
-            }
-            ResTarget::Expr(expr, alias) => {
-                resolved.push(ResolvedTarget {
-                    name: alias.clone().unwrap_or_else(|| expr_name(expr)),
-                    expr: expr.clone(),
-                    pg_type: infer_type(expr, columns)?,
-                });
-            }
-        }
-    }
-    Ok(resolved)
-}
-
-fn expr_name(expr: &Expr) -> String {
-    match expr {
-        Expr::ColumnRef(name) => name.clone(),
-        _ => "?column?".to_owned(),
+fn arrow_to_pg_type(dt: &DataType) -> Type {
+    match dt {
+        DataType::Boolean => Type::BOOL,
+        DataType::Int16 => Type::INT2,
+        DataType::Int32 => Type::INT4,
+        DataType::Int64 => Type::INT8,
+        DataType::Float32 => Type::FLOAT4,
+        DataType::Float64 => Type::FLOAT8,
+        DataType::Utf8 | DataType::LargeUtf8 => Type::TEXT,
+        _ => Type::TEXT,
     }
 }
 
-fn infer_type(expr: &Expr, columns: &[Column]) -> PgWireResult<Type> {
-    match expr {
-        Expr::Integer(_) => Ok(Type::INT4),
-        Expr::Float(_) => Ok(Type::FLOAT8),
-        Expr::StringLiteral(_) => Ok(Type::TEXT),
-        Expr::Bool(_) => Ok(Type::BOOL),
-        Expr::Null => Ok(Type::TEXT),
-        Expr::ColumnRef(name) => {
-            let col = columns.iter().find(|c| c.name == *name).ok_or_else(|| {
-                user_error("42703", &format!("column \"{}\" does not exist", name))
-            })?;
-            Ok(type_id_to_pg(col.type_id))
-        }
-        Expr::BinaryOp { op, left, right } => match op {
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
-                let lt = infer_type(left, columns)?;
-                let rt = infer_type(right, columns)?;
-                Ok(promote_pg_type(&lt, &rt))
-            }
-            BinOp::Concat => Ok(Type::TEXT),
-            _ => Ok(Type::BOOL),
-        },
-        Expr::UnaryOp { op, expr } => match op {
-            UnaryOp::Minus => infer_type(expr, columns),
-            UnaryOp::Not => Ok(Type::BOOL),
-        },
-        Expr::IsNull(_) | Expr::IsNotNull(_) => Ok(Type::BOOL),
-        Expr::Case { results, else_result, .. } => {
-            if let Some(first) = results.first() {
-                infer_type(first, columns)
-            } else if let Some(e) = else_result {
-                infer_type(e, columns)
-            } else {
-                Ok(Type::TEXT)
-            }
-        }
-        Expr::Cast { type_id, .. } => Ok(type_id_to_pg(*type_id)),
-        Expr::Coalesce(args) => {
-            if let Some(first) = args.first() {
-                infer_type(first, columns)
-            } else {
-                Ok(Type::TEXT)
-            }
-        }
-        Expr::NullIf(a, _) => infer_type(a, columns),
+fn encode_arrow_value(
+    encoder: &mut DataRowEncoder,
+    array: &ArrayRef,
+    row: usize,
+) -> PgWireResult<()> {
+    if array.is_null(row) {
+        return encoder.encode_field(&None::<i32>);
     }
-}
-
-fn promote_pg_type(a: &Type, b: &Type) -> Type {
-    let rank = |t: &Type| -> u8 {
-        if *t == Type::INT2 {
-            1
-        } else if *t == Type::INT4 {
-            2
-        } else if *t == Type::INT8 {
-            3
-        } else if *t == Type::FLOAT4 {
-            4
-        } else if *t == Type::FLOAT8 {
-            5
-        } else {
-            2
+    match array.data_type() {
+        DataType::Boolean => {
+            let a = array.as_any().downcast_ref::<BooleanArray>().unwrap();
+            encoder.encode_field(&a.value(row))
         }
-    };
-    let ra = rank(a);
-    let rb = rank(b);
-    if ra >= rb { a.clone() } else { b.clone() }
-}
-
-fn type_id_to_pg(type_id: TypeId) -> Type {
-    match type_id {
-        TypeId::Bool => Type::BOOL,
-        TypeId::Int2 => Type::INT2,
-        TypeId::Int4 => Type::INT4,
-        TypeId::Int8 => Type::INT8,
-        TypeId::Float4 => Type::FLOAT4,
-        TypeId::Float8 => Type::FLOAT8,
-        TypeId::Text => Type::TEXT,
+        DataType::Int16 => {
+            let a = array.as_any().downcast_ref::<Int16Array>().unwrap();
+            encoder.encode_field(&a.value(row))
+        }
+        DataType::Int32 => {
+            let a = array.as_any().downcast_ref::<Int32Array>().unwrap();
+            encoder.encode_field(&a.value(row))
+        }
+        DataType::Int64 => {
+            let a = array.as_any().downcast_ref::<Int64Array>().unwrap();
+            encoder.encode_field(&a.value(row))
+        }
+        DataType::Float32 => {
+            let a = array.as_any().downcast_ref::<Float32Array>().unwrap();
+            encoder.encode_field(&a.value(row))
+        }
+        DataType::Float64 => {
+            let a = array.as_any().downcast_ref::<Float64Array>().unwrap();
+            encoder.encode_field(&a.value(row))
+        }
+        DataType::Utf8 => {
+            let a = array.as_any().downcast_ref::<StringArray>().unwrap();
+            encoder.encode_field(&a.value(row))
+        }
+        _ => encoder.encode_field(&None::<i32>),
     }
-}
-
-// -- Expression evaluation ------------------------------------------------
-
-fn eval_expr(expr: &Expr, row: &[Datum], columns: &[Column]) -> Datum {
-    match expr {
-        Expr::Integer(i) => Datum::Int4(*i as i32),
-        Expr::Float(f) => Datum::Float8(*f),
-        Expr::StringLiteral(s) => Datum::Text(s.clone()),
-        Expr::Bool(b) => Datum::Bool(*b),
-        Expr::Null => Datum::Null,
-        Expr::ColumnRef(name) => {
-            for (i, col) in columns.iter().enumerate() {
-                if col.name == *name {
-                    return row[i].clone();
-                }
-            }
-            Datum::Null
-        }
-        Expr::BinaryOp { left, op, right } => {
-            let l = eval_expr(left, row, columns);
-            let r = eval_expr(right, row, columns);
-            eval_binop(*op, &l, &r)
-        }
-        Expr::UnaryOp { op, expr } => {
-            let v = eval_expr(expr, row, columns);
-            eval_unary(*op, &v)
-        }
-        Expr::IsNull(inner) => {
-            let v = eval_expr(inner, row, columns);
-            Datum::Bool(v == Datum::Null)
-        }
-        Expr::IsNotNull(inner) => {
-            let v = eval_expr(inner, row, columns);
-            Datum::Bool(v != Datum::Null)
-        }
-        Expr::Case {
-            operand,
-            conditions,
-            results,
-            else_result,
-        } => {
-            if let Some(op) = operand {
-                let op_val = eval_expr(op, row, columns);
-                for (cond, res) in conditions.iter().zip(results.iter()) {
-                    let cond_val = eval_expr(cond, row, columns);
-                    if op_val == cond_val {
-                        return eval_expr(res, row, columns);
-                    }
-                }
-            } else {
-                for (cond, res) in conditions.iter().zip(results.iter()) {
-                    if matches!(eval_expr(cond, row, columns), Datum::Bool(true)) {
-                        return eval_expr(res, row, columns);
-                    }
-                }
-            }
-            match else_result {
-                Some(e) => eval_expr(e, row, columns),
-                None => Datum::Null,
-            }
-        }
-        Expr::Cast { expr, type_id } => {
-            let v = eval_expr(expr, row, columns);
-            cast_datum(&v, *type_id)
-        }
-        Expr::Coalesce(args) => {
-            for arg in args {
-                let v = eval_expr(arg, row, columns);
-                if v != Datum::Null {
-                    return v;
-                }
-            }
-            Datum::Null
-        }
-        Expr::NullIf(a, b) => {
-            let va = eval_expr(a, row, columns);
-            let vb = eval_expr(b, row, columns);
-            if va == vb { Datum::Null } else { va }
-        }
-    }
-}
-
-fn cast_datum(d: &Datum, target: TypeId) -> Datum {
-    match d {
-        Datum::Null => Datum::Null,
-        Datum::Int2(i) => cast_int(*i as i64, target),
-        Datum::Int4(i) => cast_int(*i as i64, target),
-        Datum::Int8(i) => cast_int(*i, target),
-        Datum::Float4(f) => cast_float(*f as f64, target),
-        Datum::Float8(f) => cast_float(*f, target),
-        Datum::Bool(b) => match target {
-            TypeId::Bool => Datum::Bool(*b),
-            TypeId::Int4 => Datum::Int4(if *b { 1 } else { 0 }),
-            TypeId::Text => Datum::Text(b.to_string()),
-            _ => Datum::Null,
-        },
-        Datum::Text(s) => match target {
-            TypeId::Text => Datum::Text(s.clone()),
-            TypeId::Int4 => s.parse::<i32>().map(Datum::Int4).unwrap_or(Datum::Null),
-            TypeId::Int8 => s.parse::<i64>().map(Datum::Int8).unwrap_or(Datum::Null),
-            TypeId::Float8 => s.parse::<f64>().map(Datum::Float8).unwrap_or(Datum::Null),
-            _ => Datum::Null,
-        },
-    }
-}
-
-fn cast_int(i: i64, target: TypeId) -> Datum {
-    match target {
-        TypeId::Int2 => Datum::Int2(i as i16),
-        TypeId::Int4 => Datum::Int4(i as i32),
-        TypeId::Int8 => Datum::Int8(i),
-        TypeId::Float4 => Datum::Float4(i as f32),
-        TypeId::Float8 => Datum::Float8(i as f64),
-        TypeId::Text => Datum::Text(i.to_string()),
-        TypeId::Bool => Datum::Bool(i != 0),
-    }
-}
-
-fn cast_float(f: f64, target: TypeId) -> Datum {
-    match target {
-        TypeId::Int2 => Datum::Int2(f as i16),
-        TypeId::Int4 => Datum::Int4(f as i32),
-        TypeId::Int8 => Datum::Int8(f as i64),
-        TypeId::Float4 => Datum::Float4(f as f32),
-        TypeId::Float8 => Datum::Float8(f),
-        TypeId::Text => Datum::Text(f.to_string()),
-        TypeId::Bool => Datum::Bool(f != 0.0),
-    }
-}
-
-fn eval_unary(op: UnaryOp, v: &Datum) -> Datum {
-    match op {
-        UnaryOp::Minus => match v {
-            Datum::Int2(i) => Datum::Int2(-i),
-            Datum::Int4(i) => Datum::Int4(-i),
-            Datum::Int8(i) => Datum::Int8(-i),
-            Datum::Float4(f) => Datum::Float4(-f),
-            Datum::Float8(f) => Datum::Float8(-f),
-            _ => Datum::Null,
-        },
-        UnaryOp::Not => match v {
-            Datum::Bool(b) => Datum::Bool(!b),
-            _ => Datum::Null,
-        },
-    }
-}
-
-/// Promote two datums to a common numeric type for arithmetic/comparison.
-fn promote(a: &Datum, b: &Datum) -> (Datum, Datum) {
-    match (a, b) {
-        // Same types -- no promotion needed
-        (Datum::Int4(_), Datum::Int4(_))
-        | (Datum::Int2(_), Datum::Int2(_))
-        | (Datum::Int8(_), Datum::Int8(_))
-        | (Datum::Float4(_), Datum::Float4(_))
-        | (Datum::Float8(_), Datum::Float8(_)) => (a.clone(), b.clone()),
-
-        // Promote to wider integer
-        (Datum::Int2(l), Datum::Int4(_)) => (Datum::Int4(*l as i32), b.clone()),
-        (Datum::Int4(_), Datum::Int2(r)) => (a.clone(), Datum::Int4(*r as i32)),
-        (Datum::Int2(l), Datum::Int8(_)) => (Datum::Int8(*l as i64), b.clone()),
-        (Datum::Int8(_), Datum::Int2(r)) => (a.clone(), Datum::Int8(*r as i64)),
-        (Datum::Int4(l), Datum::Int8(_)) => (Datum::Int8(*l as i64), b.clone()),
-        (Datum::Int8(_), Datum::Int4(r)) => (a.clone(), Datum::Int8(*r as i64)),
-
-        // Int + Float -> Float8
-        (Datum::Float4(l), Datum::Float8(_)) => (Datum::Float8(*l as f64), b.clone()),
-        (Datum::Float8(_), Datum::Float4(r)) => (a.clone(), Datum::Float8(*r as f64)),
-
-        (Datum::Int2(l), Datum::Float4(_)) | (Datum::Int2(l), Datum::Float8(_)) => {
-            (Datum::Float8(*l as f64), to_f64(b))
-        }
-        (Datum::Float4(_), Datum::Int2(r)) | (Datum::Float8(_), Datum::Int2(r)) => {
-            (to_f64(a), Datum::Float8(*r as f64))
-        }
-        (Datum::Int4(l), Datum::Float4(_)) | (Datum::Int4(l), Datum::Float8(_)) => {
-            (Datum::Float8(*l as f64), to_f64(b))
-        }
-        (Datum::Float4(_), Datum::Int4(r)) | (Datum::Float8(_), Datum::Int4(r)) => {
-            (to_f64(a), Datum::Float8(*r as f64))
-        }
-        (Datum::Int8(l), Datum::Float4(_)) | (Datum::Int8(l), Datum::Float8(_)) => {
-            (Datum::Float8(*l as f64), to_f64(b))
-        }
-        (Datum::Float4(_), Datum::Int8(r)) | (Datum::Float8(_), Datum::Int8(r)) => {
-            (to_f64(a), Datum::Float8(*r as f64))
-        }
-
-        _ => (a.clone(), b.clone()),
-    }
-}
-
-fn to_f64(d: &Datum) -> Datum {
-    match d {
-        Datum::Int2(i) => Datum::Float8(*i as f64),
-        Datum::Int4(i) => Datum::Float8(*i as f64),
-        Datum::Int8(i) => Datum::Float8(*i as f64),
-        Datum::Float4(f) => Datum::Float8(*f as f64),
-        Datum::Float8(_) => d.clone(),
-        _ => Datum::Null,
-    }
-}
-
-fn datum_to_string(d: &Datum) -> String {
-    match d {
-        Datum::Bool(b) => b.to_string(),
-        Datum::Int2(i) => i.to_string(),
-        Datum::Int4(i) => i.to_string(),
-        Datum::Int8(i) => i.to_string(),
-        Datum::Float4(f) => f.to_string(),
-        Datum::Float8(f) => f.to_string(),
-        Datum::Text(s) => s.clone(),
-        Datum::Null => String::new(),
-    }
-}
-
-fn eval_binop(op: BinOp, left: &Datum, right: &Datum) -> Datum {
-    // NULL propagation: any op with NULL yields NULL (except AND/OR short-circuit)
-    match op {
-        BinOp::And => {
-            // false AND NULL = false
-            if matches!(left, Datum::Bool(false)) || matches!(right, Datum::Bool(false)) {
-                return Datum::Bool(false);
-            }
-            if *left == Datum::Null || *right == Datum::Null {
-                return Datum::Null;
-            }
-            if let (Datum::Bool(l), Datum::Bool(r)) = (left, right) {
-                return Datum::Bool(*l && *r);
-            }
-            return Datum::Null;
-        }
-        BinOp::Or => {
-            // true OR NULL = true
-            if matches!(left, Datum::Bool(true)) || matches!(right, Datum::Bool(true)) {
-                return Datum::Bool(true);
-            }
-            if *left == Datum::Null || *right == Datum::Null {
-                return Datum::Null;
-            }
-            if let (Datum::Bool(l), Datum::Bool(r)) = (left, right) {
-                return Datum::Bool(*l || *r);
-            }
-            return Datum::Null;
-        }
-        _ => {}
-    }
-
-    if *left == Datum::Null || *right == Datum::Null {
-        return Datum::Null;
-    }
-
-    // Bool equality
-    if let (Datum::Bool(l), Datum::Bool(r)) = (left, right) {
-        return match op {
-            BinOp::Eq => Datum::Bool(l == r),
-            BinOp::NotEq => Datum::Bool(l != r),
-            _ => Datum::Null,
-        };
-    }
-
-    // Concat: convert both sides to text
-    if op == BinOp::Concat {
-        let ls = datum_to_string(left);
-        let rs = datum_to_string(right);
-        return Datum::Text(format!("{}{}", ls, rs));
-    }
-
-    // Text operations
-    if let (Datum::Text(l), Datum::Text(r)) = (left, right) {
-        return match op {
-            BinOp::Eq => Datum::Bool(l == r),
-            BinOp::NotEq => Datum::Bool(l != r),
-            BinOp::Lt => Datum::Bool(l < r),
-            BinOp::Gt => Datum::Bool(l > r),
-            BinOp::LtEq => Datum::Bool(l <= r),
-            BinOp::GtEq => Datum::Bool(l >= r),
-            _ => Datum::Null,
-        };
-    }
-
-    // Numeric: promote then operate
-    let (l, r) = promote(left, right);
-
-    match (&l, &r) {
-        (Datum::Int2(l), Datum::Int2(r)) => eval_int_op(op, *l as i64, *r as i64, 2),
-        (Datum::Int4(l), Datum::Int4(r)) => eval_int_op(op, *l as i64, *r as i64, 4),
-        (Datum::Int8(l), Datum::Int8(r)) => eval_int_op(op, *l, *r, 8),
-        (Datum::Float4(l), Datum::Float4(r)) => eval_float_op(op, *l as f64, *r as f64, 4),
-        (Datum::Float8(l), Datum::Float8(r)) => eval_float_op(op, *l, *r, 8),
-        _ => Datum::Null,
-    }
-}
-
-fn eval_int_op(op: BinOp, l: i64, r: i64, size: u8) -> Datum {
-    let wrap = |v: i64| -> Datum {
-        match size {
-            2 => Datum::Int2(v as i16),
-            4 => Datum::Int4(v as i32),
-            _ => Datum::Int8(v),
-        }
-    };
-    match op {
-        BinOp::Add => wrap(l.wrapping_add(r)),
-        BinOp::Sub => wrap(l.wrapping_sub(r)),
-        BinOp::Mul => wrap(l.wrapping_mul(r)),
-        BinOp::Div => {
-            if r == 0 {
-                return Datum::Null;
-            }
-            wrap(l / r)
-        }
-        BinOp::Mod => {
-            if r == 0 {
-                return Datum::Null;
-            }
-            wrap(l % r)
-        }
-        BinOp::Eq => Datum::Bool(l == r),
-        BinOp::NotEq => Datum::Bool(l != r),
-        BinOp::Lt => Datum::Bool(l < r),
-        BinOp::Gt => Datum::Bool(l > r),
-        BinOp::LtEq => Datum::Bool(l <= r),
-        BinOp::GtEq => Datum::Bool(l >= r),
-        _ => Datum::Null,
-    }
-}
-
-fn eval_float_op(op: BinOp, l: f64, r: f64, size: u8) -> Datum {
-    let wrap = |v: f64| -> Datum {
-        match size {
-            4 => Datum::Float4(v as f32),
-            _ => Datum::Float8(v),
-        }
-    };
-    match op {
-        BinOp::Add => wrap(l + r),
-        BinOp::Sub => wrap(l - r),
-        BinOp::Mul => wrap(l * r),
-        BinOp::Div => {
-            if r == 0.0 {
-                return Datum::Null;
-            }
-            wrap(l / r)
-        }
-        BinOp::Mod => {
-            if r == 0.0 {
-                return Datum::Null;
-            }
-            wrap(l % r)
-        }
-        BinOp::Eq => Datum::Bool(l == r),
-        BinOp::NotEq => Datum::Bool(l != r),
-        BinOp::Lt => Datum::Bool(l < r),
-        BinOp::Gt => Datum::Bool(l > r),
-        BinOp::LtEq => Datum::Bool(l <= r),
-        BinOp::GtEq => Datum::Bool(l >= r),
-        _ => Datum::Null,
-    }
-}
-
-fn compare_datums(a: &Datum, b: &Datum) -> Ordering {
-    if *a == Datum::Null && *b == Datum::Null {
-        return Ordering::Equal;
-    }
-    if *a == Datum::Null {
-        return Ordering::Greater; // NULLs sort last (ASC)
-    }
-    if *b == Datum::Null {
-        return Ordering::Less;
-    }
-    let (pa, pb) = promote(a, b);
-    match (&pa, &pb) {
-        (Datum::Int2(a), Datum::Int2(b)) => a.cmp(b),
-        (Datum::Int4(a), Datum::Int4(b)) => a.cmp(b),
-        (Datum::Int8(a), Datum::Int8(b)) => a.cmp(b),
-        (Datum::Float4(a), Datum::Float4(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-        (Datum::Float8(a), Datum::Float8(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-        (Datum::Bool(a), Datum::Bool(b)) => a.cmp(b),
-        (Datum::Text(a), Datum::Text(b)) => a.cmp(b),
-        _ => Ordering::Equal,
-    }
-}
-
-fn encode_datum(encoder: &mut DataRowEncoder, datum: &Datum) -> PgWireResult<()> {
-    match datum {
-        Datum::Bool(b) => encoder.encode_field(b),
-        Datum::Int2(i) => encoder.encode_field(i),
-        Datum::Int4(i) => encoder.encode_field(i),
-        Datum::Int8(i) => encoder.encode_field(i),
-        Datum::Float4(f) => encoder.encode_field(f),
-        Datum::Float8(f) => encoder.encode_field(f),
-        Datum::Text(s) => encoder.encode_field(s),
-        Datum::Null => encoder.encode_field(&None::<i32>),
-    }
-}
-
-fn scan_table(db: &Database, oid: u32, columns: &[Column]) -> PgWireResult<Vec<Vec<Datum>>> {
-    let disk = db.disk.lock().unwrap();
-    let num_pages = disk.num_pages(oid);
-    let mut tuples = Vec::new();
-    let mut page = [0u8; PAGE_SIZE];
-
-    for page_id in 0..num_pages {
-        disk.read_page(oid, page_id, &mut page);
-        let n = heap::num_items(&page);
-        for item_idx in 0..n {
-            if let Some(data) = heap::get_tuple(&page, item_idx) {
-                tuples.push(heap::deserialize_tuple(data, columns));
-            }
-        }
-    }
-    Ok(tuples)
 }
 
 // -- CREATE TABLE ---------------------------------------------------------
@@ -702,10 +393,13 @@ fn execute_create_table(
         })
         .collect();
 
-    let oid = {
+    {
         let mut catalog = db.catalog.lock().unwrap();
         match catalog.create_table(&ct.table_name, columns) {
-            Ok(oid) => oid,
+            Ok(oid) => {
+                let disk = db.disk.lock().unwrap();
+                disk.create_heap_file(oid);
+            }
             Err(e) => {
                 if ct.if_not_exists {
                     return Ok(Response::Execution(Tag::new("CREATE TABLE")));
@@ -715,11 +409,6 @@ fn execute_create_table(
                 )));
             }
         }
-    };
-
-    {
-        let disk = db.disk.lock().unwrap();
-        disk.create_heap_file(oid);
     }
 
     Ok(Response::Execution(Tag::new("CREATE TABLE")))
@@ -734,11 +423,10 @@ fn execute_insert(
     let (oid, columns) = {
         let catalog = db.catalog.lock().unwrap();
         let table = catalog.get_table(&ins.table_name).ok_or_else(|| {
-            PgWireError::UserError(Box::new(pgwire::error::ErrorInfo::new(
-                "ERROR".to_owned(),
-                "42P01".to_owned(),
-                format!("relation \"{}\" does not exist", ins.table_name),
-            )))
+            user_error(
+                "42P01",
+                &format!("relation \"{}\" does not exist", ins.table_name),
+            )
         })?;
         (table.oid, table.columns.clone())
     };
@@ -768,31 +456,7 @@ fn execute_insert(
             .collect::<PgWireResult<Vec<_>>>()?;
 
         let tuple_data = heap::serialize_tuple(&datums);
-
-        let num_pages = disk.num_pages(oid);
-        let mut page = [0u8; PAGE_SIZE];
-
-        if num_pages == 0 {
-            heap::init_page(&mut page);
-            if heap::insert_tuple(&mut page, &tuple_data).is_err() {
-                return Err(user_error("42000", "Tuple too large for page"));
-            }
-            disk.write_page(oid, 0, &page);
-        } else {
-            let last_page_id = num_pages - 1;
-            disk.read_page(oid, last_page_id, &mut page);
-            if heap::insert_tuple(&mut page, &tuple_data).is_ok() {
-                disk.write_page(oid, last_page_id, &page);
-            } else {
-                // Last page full, allocate new page
-                let new_page_id = num_pages;
-                heap::init_page(&mut page);
-                if heap::insert_tuple(&mut page, &tuple_data).is_err() {
-                    return Err(user_error("42000", "Tuple too large for page"));
-                }
-                disk.write_page(oid, new_page_id, &page);
-            }
-        }
+        insert_tuple_to_heap(&disk, oid, &tuple_data)?;
         count += 1;
     }
 
@@ -820,8 +484,6 @@ fn execute_update(
     let num_pages = disk.num_pages(oid);
     let mut page = [0u8; PAGE_SIZE];
     let mut count = 0u64;
-
-    // Collect tuples to update (mark dead + collect new values)
     let mut new_tuples: Vec<Vec<Datum>> = Vec::new();
 
     for page_id in 0..num_pages {
@@ -835,7 +497,6 @@ fn execute_update(
                     None => true,
                 };
                 if matches {
-                    // Build updated row
                     let mut new_row = datums.clone();
                     for (col_name, expr) in &upd.assignments {
                         if let Some(idx) = columns.iter().position(|c| c.name == *col_name) {
@@ -843,7 +504,6 @@ fn execute_update(
                         }
                     }
                     new_tuples.push(new_row);
-                    // Mark old tuple dead
                     heap::mark_tuple_dead(&mut page, item_idx);
                     count += 1;
                 }
@@ -852,7 +512,6 @@ fn execute_update(
         disk.write_page(oid, page_id, &page);
     }
 
-    // Insert new tuples
     for new_row in &new_tuples {
         let tuple_data = heap::serialize_tuple(new_row);
         insert_tuple_to_heap(&disk, oid, &tuple_data)?;
@@ -924,6 +583,7 @@ fn execute_drop_table(
         }
     };
 
+    let _ = db.session.deregister_table(&dt.table_name);
     {
         let disk = db.disk.lock().unwrap();
         disk.delete_heap_file(oid);
@@ -932,9 +592,231 @@ fn execute_drop_table(
     Ok(Response::Execution(Tag::new("DROP TABLE")))
 }
 
-/// Insert a tuple into the heap file, allocating a new page if needed.
+// -- Expression evaluation (for UPDATE/DELETE WHERE) -----------------------
+
+fn eval_expr(expr: &Expr, row: &[Datum], columns: &[Column]) -> Datum {
+    match expr {
+        Expr::Integer(i) => Datum::Int4(*i as i32),
+        Expr::Float(f) => Datum::Float8(*f),
+        Expr::StringLiteral(s) => Datum::Text(s.clone()),
+        Expr::Bool(b) => Datum::Bool(*b),
+        Expr::Null => Datum::Null,
+        Expr::ColumnRef(name) => {
+            for (i, col) in columns.iter().enumerate() {
+                if col.name == *name {
+                    return row[i].clone();
+                }
+            }
+            Datum::Null
+        }
+        Expr::BinaryOp { left, op, right } => {
+            let l = eval_expr(left, row, columns);
+            let r = eval_expr(right, row, columns);
+            eval_binop(*op, &l, &r)
+        }
+        Expr::UnaryOp { op, expr } => {
+            let v = eval_expr(expr, row, columns);
+            eval_unary(*op, &v)
+        }
+        Expr::IsNull(inner) => {
+            let v = eval_expr(inner, row, columns);
+            Datum::Bool(v == Datum::Null)
+        }
+        Expr::IsNotNull(inner) => {
+            let v = eval_expr(inner, row, columns);
+            Datum::Bool(v != Datum::Null)
+        }
+    }
+}
+
+fn eval_unary(op: UnaryOp, v: &Datum) -> Datum {
+    match op {
+        UnaryOp::Minus => match v {
+            Datum::Int2(i) => Datum::Int2(-i),
+            Datum::Int4(i) => Datum::Int4(-i),
+            Datum::Int8(i) => Datum::Int8(-i),
+            Datum::Float4(f) => Datum::Float4(-f),
+            Datum::Float8(f) => Datum::Float8(-f),
+            _ => Datum::Null,
+        },
+        UnaryOp::Not => match v {
+            Datum::Bool(b) => Datum::Bool(!b),
+            _ => Datum::Null,
+        },
+    }
+}
+
+fn promote(a: &Datum, b: &Datum) -> (Datum, Datum) {
+    match (a, b) {
+        (Datum::Int4(_), Datum::Int4(_))
+        | (Datum::Int2(_), Datum::Int2(_))
+        | (Datum::Int8(_), Datum::Int8(_))
+        | (Datum::Float4(_), Datum::Float4(_))
+        | (Datum::Float8(_), Datum::Float8(_)) => (a.clone(), b.clone()),
+        (Datum::Int2(l), Datum::Int4(_)) => (Datum::Int4(*l as i32), b.clone()),
+        (Datum::Int4(_), Datum::Int2(r)) => (a.clone(), Datum::Int4(*r as i32)),
+        (Datum::Int2(l), Datum::Int8(_)) => (Datum::Int8(*l as i64), b.clone()),
+        (Datum::Int8(_), Datum::Int2(r)) => (a.clone(), Datum::Int8(*r as i64)),
+        (Datum::Int4(l), Datum::Int8(_)) => (Datum::Int8(*l as i64), b.clone()),
+        (Datum::Int8(_), Datum::Int4(r)) => (a.clone(), Datum::Int8(*r as i64)),
+        (Datum::Float4(l), Datum::Float8(_)) => (Datum::Float8(*l as f64), b.clone()),
+        (Datum::Float8(_), Datum::Float4(r)) => (a.clone(), Datum::Float8(*r as f64)),
+        (Datum::Int2(l), Datum::Float4(_)) | (Datum::Int2(l), Datum::Float8(_)) => {
+            (Datum::Float8(*l as f64), to_f64(b))
+        }
+        (Datum::Float4(_), Datum::Int2(r)) | (Datum::Float8(_), Datum::Int2(r)) => {
+            (to_f64(a), Datum::Float8(*r as f64))
+        }
+        (Datum::Int4(l), Datum::Float4(_)) | (Datum::Int4(l), Datum::Float8(_)) => {
+            (Datum::Float8(*l as f64), to_f64(b))
+        }
+        (Datum::Float4(_), Datum::Int4(r)) | (Datum::Float8(_), Datum::Int4(r)) => {
+            (to_f64(a), Datum::Float8(*r as f64))
+        }
+        (Datum::Int8(l), Datum::Float4(_)) | (Datum::Int8(l), Datum::Float8(_)) => {
+            (Datum::Float8(*l as f64), to_f64(b))
+        }
+        (Datum::Float4(_), Datum::Int8(r)) | (Datum::Float8(_), Datum::Int8(r)) => {
+            (to_f64(a), Datum::Float8(*r as f64))
+        }
+        _ => (a.clone(), b.clone()),
+    }
+}
+
+fn to_f64(d: &Datum) -> Datum {
+    match d {
+        Datum::Int2(i) => Datum::Float8(*i as f64),
+        Datum::Int4(i) => Datum::Float8(*i as f64),
+        Datum::Int8(i) => Datum::Float8(*i as f64),
+        Datum::Float4(f) => Datum::Float8(*f as f64),
+        Datum::Float8(_) => d.clone(),
+        _ => Datum::Null,
+    }
+}
+
+fn eval_binop(op: BinOp, left: &Datum, right: &Datum) -> Datum {
+    match op {
+        BinOp::And => {
+            if matches!(left, Datum::Bool(false)) || matches!(right, Datum::Bool(false)) {
+                return Datum::Bool(false);
+            }
+            if *left == Datum::Null || *right == Datum::Null {
+                return Datum::Null;
+            }
+            if let (Datum::Bool(l), Datum::Bool(r)) = (left, right) {
+                return Datum::Bool(*l && *r);
+            }
+            return Datum::Null;
+        }
+        BinOp::Or => {
+            if matches!(left, Datum::Bool(true)) || matches!(right, Datum::Bool(true)) {
+                return Datum::Bool(true);
+            }
+            if *left == Datum::Null || *right == Datum::Null {
+                return Datum::Null;
+            }
+            if let (Datum::Bool(l), Datum::Bool(r)) = (left, right) {
+                return Datum::Bool(*l || *r);
+            }
+            return Datum::Null;
+        }
+        _ => {}
+    }
+
+    if *left == Datum::Null || *right == Datum::Null {
+        return Datum::Null;
+    }
+
+    if let (Datum::Bool(l), Datum::Bool(r)) = (left, right) {
+        return match op {
+            BinOp::Eq => Datum::Bool(l == r),
+            BinOp::NotEq => Datum::Bool(l != r),
+            _ => Datum::Null,
+        };
+    }
+
+    if let (Datum::Text(l), Datum::Text(r)) = (left, right) {
+        return match op {
+            BinOp::Eq => Datum::Bool(l == r),
+            BinOp::NotEq => Datum::Bool(l != r),
+            BinOp::Lt => Datum::Bool(l < r),
+            BinOp::Gt => Datum::Bool(l > r),
+            BinOp::LtEq => Datum::Bool(l <= r),
+            BinOp::GtEq => Datum::Bool(l >= r),
+            _ => Datum::Null,
+        };
+    }
+
+    let (l, r) = promote(left, right);
+    match (&l, &r) {
+        (Datum::Int2(l), Datum::Int2(r)) => eval_int_op(op, *l as i64, *r as i64, 2),
+        (Datum::Int4(l), Datum::Int4(r)) => eval_int_op(op, *l as i64, *r as i64, 4),
+        (Datum::Int8(l), Datum::Int8(r)) => eval_int_op(op, *l, *r, 8),
+        (Datum::Float4(l), Datum::Float4(r)) => eval_float_op(op, *l as f64, *r as f64, 4),
+        (Datum::Float8(l), Datum::Float8(r)) => eval_float_op(op, *l, *r, 8),
+        _ => Datum::Null,
+    }
+}
+
+fn eval_int_op(op: BinOp, l: i64, r: i64, size: u8) -> Datum {
+    let wrap = |v: i64| -> Datum {
+        match size {
+            2 => Datum::Int2(v as i16),
+            4 => Datum::Int4(v as i32),
+            _ => Datum::Int8(v),
+        }
+    };
+    match op {
+        BinOp::Add => wrap(l.wrapping_add(r)),
+        BinOp::Sub => wrap(l.wrapping_sub(r)),
+        BinOp::Mul => wrap(l.wrapping_mul(r)),
+        BinOp::Div => {
+            if r == 0 { Datum::Null } else { wrap(l / r) }
+        }
+        BinOp::Mod => {
+            if r == 0 { Datum::Null } else { wrap(l % r) }
+        }
+        BinOp::Eq => Datum::Bool(l == r),
+        BinOp::NotEq => Datum::Bool(l != r),
+        BinOp::Lt => Datum::Bool(l < r),
+        BinOp::Gt => Datum::Bool(l > r),
+        BinOp::LtEq => Datum::Bool(l <= r),
+        BinOp::GtEq => Datum::Bool(l >= r),
+        _ => Datum::Null,
+    }
+}
+
+fn eval_float_op(op: BinOp, l: f64, r: f64, size: u8) -> Datum {
+    let wrap = |v: f64| -> Datum {
+        match size {
+            4 => Datum::Float4(v as f32),
+            _ => Datum::Float8(v),
+        }
+    };
+    match op {
+        BinOp::Add => wrap(l + r),
+        BinOp::Sub => wrap(l - r),
+        BinOp::Mul => wrap(l * r),
+        BinOp::Div => {
+            if r == 0.0 { Datum::Null } else { wrap(l / r) }
+        }
+        BinOp::Mod => {
+            if r == 0.0 { Datum::Null } else { wrap(l % r) }
+        }
+        BinOp::Eq => Datum::Bool(l == r),
+        BinOp::NotEq => Datum::Bool(l != r),
+        BinOp::Lt => Datum::Bool(l < r),
+        BinOp::Gt => Datum::Bool(l > r),
+        BinOp::LtEq => Datum::Bool(l <= r),
+        BinOp::GtEq => Datum::Bool(l >= r),
+        _ => Datum::Null,
+    }
+}
+
+// -- Helpers ---------------------------------------------------------------
+
 fn insert_tuple_to_heap(
-    disk: &crate::storage::disk::DiskManager,
+    disk: &DiskManager,
     oid: u32,
     tuple_data: &[u8],
 ) -> PgWireResult<()> {
@@ -1000,16 +882,39 @@ fn user_error(code: &str, msg: &str) -> PgWireError {
     )))
 }
 
+fn df_to_pg(e: &datafusion::error::DataFusionError, sql: &str) -> PgWireError {
+    let msg = e.to_string();
+
+    // Translate DataFusion errors to PostgreSQL-style messages
+    if msg.contains("not found") {
+        // Extract table name from SQL for a cleaner error
+        let table = sql
+            .split_whitespace()
+            .skip_while(|w| !w.eq_ignore_ascii_case("FROM"))
+            .nth(1)
+            .unwrap_or("unknown");
+        let table = table.trim_end_matches(';');
+        return user_error(
+            "42P01",
+            &format!("relation \"{}\" does not exist", table),
+        );
+    }
+
+    PgWireError::UserError(Box::new(pgwire::error::ErrorInfo::new(
+        "ERROR".to_owned(),
+        "XX000".to_owned(),
+        msg,
+    )))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::parser;
 
-    #[test]
-    fn execute_select_integer() {
-        let stmts = parser::parse("SELECT 1;").unwrap();
+    #[tokio::test]
+    async fn execute_select_integer() {
         let db = Database::new(std::path::Path::new("/tmp/pepper_test_unused"));
-        let resp = execute(stmts.into_iter().next().unwrap(), &db).unwrap();
+        let resp = execute_sql("SELECT 1;", &db).await.unwrap();
         assert!(matches!(resp, Response::Query(_)));
     }
 }

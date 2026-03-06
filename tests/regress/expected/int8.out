@@ -14,9 +14,9 @@ SELECT * FROM int8test;
  0 |             0
 (2 rows)
 SELECT a + b FROM int8test WHERE a = 1;
- ?column?     
---------------
- 1000000000001
+ int8test.a + int8test.b
+------------------------
+           1000000000001
 (1 row)
 SELECT * FROM int8test ORDER BY b DESC;
  a | b            

@@ -12,7 +12,7 @@ use pgwire::api::Type;
 use pgwire::error::PgWireError;
 use pgwire::messages::response::CommandComplete;
 
-use pepper_db::{executor, parser, Database};
+use pepper_db::{executor, Database};
 
 // -- Statement splitting ------------------------------------------------
 
@@ -148,36 +148,20 @@ fn format_response(resp: Response) -> String {
 
 // -- SQL runner ---------------------------------------------------------
 
-fn run_sql(sql: &str, db: &Database) -> String {
+async fn run_sql(sql: &str, db: &Database) -> String {
     let mut out = String::new();
     for stmt_sql in split_statements(sql) {
         // Echo the SQL (like psql -e)
         out.push_str(&stmt_sql);
         out.push('\n');
 
-        // Parse
-        let stmts = match parser::parse(&stmt_sql) {
-            Ok(s) => s,
+        match executor::execute_sql(&stmt_sql, db).await {
+            Ok(resp) => out.push_str(&format_response(resp)),
             Err(PgWireError::UserError(info)) => {
                 out.push_str(&format_error(&info.message));
-                continue;
             }
             Err(e) => {
                 out.push_str(&format_error(&e.to_string()));
-                continue;
-            }
-        };
-
-        // Execute
-        for stmt in stmts {
-            match executor::execute(stmt, db) {
-                Ok(resp) => out.push_str(&format_response(resp)),
-                Err(PgWireError::UserError(info)) => {
-                    out.push_str(&format_error(&info.message));
-                }
-                Err(e) => {
-                    out.push_str(&format_error(&e.to_string()));
-                }
             }
         }
     }
@@ -186,7 +170,7 @@ fn run_sql(sql: &str, db: &Database) -> String {
 
 // -- Test runner --------------------------------------------------------
 
-fn run_regress_test(name: &str) {
+async fn run_regress_test(name: &str) {
     let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/regress");
     let sql_path = base.join("sql").join(format!("{}.sql", name));
     let out_path = base.join("expected").join(format!("{}.out", name));
@@ -196,7 +180,7 @@ fn run_regress_test(name: &str) {
 
     let tmp = tempfile::tempdir().expect("failed to create tempdir");
     let db = Database::new(tmp.path());
-    let actual = run_sql(&sql, &db);
+    let actual = run_sql(&sql, &db).await;
 
     if std::env::var("UPDATE_EXPECT").as_deref() == Ok("1") {
         std::fs::write(&out_path, &actual)
@@ -231,7 +215,7 @@ fn run_regress_test(name: &str) {
 
 macro_rules! regress_test {
     ($($name:ident),* $(,)?) => {
-        $( #[test] fn $name() { run_regress_test(stringify!($name)); } )*
+        $( #[tokio::test] async fn $name() { run_regress_test(stringify!($name)).await; } )*
     };
 }
 

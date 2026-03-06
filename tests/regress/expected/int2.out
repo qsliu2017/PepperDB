@@ -15,9 +15,9 @@ SELECT * FROM int2test;
       0 |     0
 (3 rows)
 SELECT a + b FROM int2test WHERE a = 1;
- ?column?
----------
-      101
+ int2test.a + int2test.b
+------------------------
+                     101
 (1 row)
 SELECT * FROM int2test ORDER BY a;
  a      | b    

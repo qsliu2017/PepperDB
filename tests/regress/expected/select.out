@@ -48,11 +48,11 @@ SELECT * FROM t1 WHERE a >= 2 AND b <= 25;
 (1 row)
 -- Expressions in target list
 SELECT a, b, a + b FROM t1;
- a | b  | ?column?
----+-----+----------
- 1 | 10 |       11
- 2 | 20 |       22
- 3 | 30 |       33
+ a | b  | t1.a + t1.b
+---+-----+-------------
+ 1 | 10 |          11
+ 2 | 20 |          22
+ 3 | 30 |          33
 (3 rows)
 SELECT a * 2 FROM t1;
  ?column?
