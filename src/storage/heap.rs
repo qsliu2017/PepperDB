@@ -81,8 +81,27 @@ pub fn get_tuple(buf: &[u8; PAGE_SIZE], item_index: u16) -> Option<&[u8]> {
     if offset == 0 && length == 0 {
         return None;
     }
+    // Skip dead tuples (t_xmax != 0)
+    let t_xmax = u32::from_le_bytes([
+        buf[offset + 4],
+        buf[offset + 5],
+        buf[offset + 6],
+        buf[offset + 7],
+    ]);
+    if t_xmax != 0 {
+        return None;
+    }
     // Skip tuple header, return just the data portion
     Some(&buf[offset + TUPLE_HEADER_SIZE..offset + length])
+}
+
+/// Mark a tuple as dead by setting t_xmax to 1.
+pub fn mark_tuple_dead(buf: &mut [u8; PAGE_SIZE], item_index: u16) {
+    let item_id_off = HEADER_SIZE + (item_index as usize) * ITEM_ID_SIZE;
+    let offset = read_u16(buf, item_id_off) as usize;
+    // Set t_xmax (bytes 4..8 of tuple header) to 1
+    let xmax_bytes = 1u32.to_le_bytes();
+    buf[offset + 4..offset + 8].copy_from_slice(&xmax_bytes);
 }
 
 pub fn num_items(buf: &[u8; PAGE_SIZE]) -> u16 {

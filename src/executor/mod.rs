@@ -20,6 +20,9 @@ pub fn execute(stmt: Statement, db: &Database) -> PgWireResult<Response<'static>
         Statement::Select(s) => execute_select(db, s),
         Statement::CreateTable(ct) => execute_create_table(db, ct),
         Statement::Insert(ins) => execute_insert(db, ins),
+        Statement::Update(upd) => execute_update(db, upd),
+        Statement::Delete(del) => execute_delete(db, del),
+        Statement::DropTable(dt) => execute_drop_table(db, dt),
     }
 }
 
@@ -520,13 +523,17 @@ fn execute_create_table(
 
     let oid = {
         let mut catalog = db.catalog.lock().unwrap();
-        catalog.create_table(&ct.table_name, columns).map_err(|e| {
-            PgWireError::UserError(Box::new(pgwire::error::ErrorInfo::new(
-                "ERROR".to_owned(),
-                "42P07".to_owned(),
-                e,
-            )))
-        })?
+        match catalog.create_table(&ct.table_name, columns) {
+            Ok(oid) => oid,
+            Err(e) => {
+                if ct.if_not_exists {
+                    return Ok(Response::Execution(Tag::new("CREATE TABLE")));
+                }
+                return Err(PgWireError::UserError(Box::new(
+                    pgwire::error::ErrorInfo::new("ERROR".to_owned(), "42P07".to_owned(), e),
+                )));
+            }
+        }
     };
 
     {
@@ -609,6 +616,171 @@ fn execute_insert(
     }
 
     Ok(Response::Execution(Tag::new(&format!("INSERT 0 {}", count))))
+}
+
+// -- UPDATE ---------------------------------------------------------------
+
+fn execute_update(
+    db: &Database,
+    upd: crate::parser::UpdateStmt,
+) -> PgWireResult<Response<'static>> {
+    let (oid, columns) = {
+        let catalog = db.catalog.lock().unwrap();
+        let table = catalog.get_table(&upd.table_name).ok_or_else(|| {
+            user_error(
+                "42P01",
+                &format!("relation \"{}\" does not exist", upd.table_name),
+            )
+        })?;
+        (table.oid, table.columns.clone())
+    };
+
+    let disk = db.disk.lock().unwrap();
+    let num_pages = disk.num_pages(oid);
+    let mut page = [0u8; PAGE_SIZE];
+    let mut count = 0u64;
+
+    // Collect tuples to update (mark dead + collect new values)
+    let mut new_tuples: Vec<Vec<Datum>> = Vec::new();
+
+    for page_id in 0..num_pages {
+        disk.read_page(oid, page_id, &mut page);
+        let n = heap::num_items(&page);
+        for item_idx in 0..n {
+            if let Some(data) = heap::get_tuple(&page, item_idx) {
+                let datums = heap::deserialize_tuple(data, &columns);
+                let matches = match &upd.where_clause {
+                    Some(wh) => matches!(eval_expr(wh, &datums, &columns), Datum::Bool(true)),
+                    None => true,
+                };
+                if matches {
+                    // Build updated row
+                    let mut new_row = datums.clone();
+                    for (col_name, expr) in &upd.assignments {
+                        if let Some(idx) = columns.iter().position(|c| c.name == *col_name) {
+                            new_row[idx] = eval_expr(expr, &datums, &columns);
+                        }
+                    }
+                    new_tuples.push(new_row);
+                    // Mark old tuple dead
+                    heap::mark_tuple_dead(&mut page, item_idx);
+                    count += 1;
+                }
+            }
+        }
+        disk.write_page(oid, page_id, &page);
+    }
+
+    // Insert new tuples
+    for new_row in &new_tuples {
+        let tuple_data = heap::serialize_tuple(new_row);
+        insert_tuple_to_heap(&disk, oid, &tuple_data)?;
+    }
+
+    Ok(Response::Execution(Tag::new(&format!("UPDATE {}", count))))
+}
+
+// -- DELETE ---------------------------------------------------------------
+
+fn execute_delete(
+    db: &Database,
+    del: crate::parser::DeleteStmt,
+) -> PgWireResult<Response<'static>> {
+    let (oid, columns) = {
+        let catalog = db.catalog.lock().unwrap();
+        let table = catalog.get_table(&del.table_name).ok_or_else(|| {
+            user_error(
+                "42P01",
+                &format!("relation \"{}\" does not exist", del.table_name),
+            )
+        })?;
+        (table.oid, table.columns.clone())
+    };
+
+    let disk = db.disk.lock().unwrap();
+    let num_pages = disk.num_pages(oid);
+    let mut page = [0u8; PAGE_SIZE];
+    let mut count = 0u64;
+
+    for page_id in 0..num_pages {
+        disk.read_page(oid, page_id, &mut page);
+        let n = heap::num_items(&page);
+        for item_idx in 0..n {
+            if let Some(data) = heap::get_tuple(&page, item_idx) {
+                let datums = heap::deserialize_tuple(data, &columns);
+                let matches = match &del.where_clause {
+                    Some(wh) => matches!(eval_expr(wh, &datums, &columns), Datum::Bool(true)),
+                    None => true,
+                };
+                if matches {
+                    heap::mark_tuple_dead(&mut page, item_idx);
+                    count += 1;
+                }
+            }
+        }
+        disk.write_page(oid, page_id, &page);
+    }
+
+    Ok(Response::Execution(Tag::new(&format!("DELETE {}", count))))
+}
+
+// -- DROP TABLE -----------------------------------------------------------
+
+fn execute_drop_table(
+    db: &Database,
+    dt: crate::parser::DropTableStmt,
+) -> PgWireResult<Response<'static>> {
+    let oid = {
+        let mut catalog = db.catalog.lock().unwrap();
+        match catalog.drop_table(&dt.table_name) {
+            Ok(oid) => oid,
+            Err(e) => {
+                if dt.if_exists {
+                    return Ok(Response::Execution(Tag::new("DROP TABLE")));
+                }
+                return Err(user_error("42P01", &e));
+            }
+        }
+    };
+
+    {
+        let disk = db.disk.lock().unwrap();
+        disk.delete_heap_file(oid);
+    }
+
+    Ok(Response::Execution(Tag::new("DROP TABLE")))
+}
+
+/// Insert a tuple into the heap file, allocating a new page if needed.
+fn insert_tuple_to_heap(
+    disk: &crate::storage::disk::DiskManager,
+    oid: u32,
+    tuple_data: &[u8],
+) -> PgWireResult<()> {
+    let num_pages = disk.num_pages(oid);
+    let mut page = [0u8; PAGE_SIZE];
+
+    if num_pages == 0 {
+        heap::init_page(&mut page);
+        if heap::insert_tuple(&mut page, tuple_data).is_err() {
+            return Err(user_error("42000", "Tuple too large for page"));
+        }
+        disk.write_page(oid, 0, &page);
+    } else {
+        let last_page_id = num_pages - 1;
+        disk.read_page(oid, last_page_id, &mut page);
+        if heap::insert_tuple(&mut page, tuple_data).is_ok() {
+            disk.write_page(oid, last_page_id, &page);
+        } else {
+            let new_page_id = num_pages;
+            heap::init_page(&mut page);
+            if heap::insert_tuple(&mut page, tuple_data).is_err() {
+                return Err(user_error("42000", "Tuple too large for page"));
+            }
+            disk.write_page(oid, new_page_id, &page);
+        }
+    }
+    Ok(())
 }
 
 fn expr_to_datum(expr: &Expr, type_id: TypeId) -> PgWireResult<Datum> {

@@ -58,6 +58,13 @@ impl Catalog {
     pub fn get_table(&self, name: &str) -> Option<&Table> {
         self.tables.get(name)
     }
+
+    pub fn drop_table(&mut self, name: &str) -> Result<OID, String> {
+        match self.tables.remove(name) {
+            Some(table) => Ok(table.oid),
+            None => Err(format!("table \"{}\" does not exist", name)),
+        }
+    }
 }
 
 #[cfg(test)]

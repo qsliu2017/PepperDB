@@ -1,0 +1,14 @@
+-- DROP TABLE and IF EXISTS / IF NOT EXISTS
+CREATE TABLE drp (a int);
+SELECT * FROM drp;
+DROP TABLE drp;
+-- Verify table is gone
+SELECT * FROM drp;
+-- DROP TABLE IF EXISTS (no error on missing)
+DROP TABLE IF EXISTS drp;
+-- CREATE TABLE IF NOT EXISTS
+CREATE TABLE drp2 (a int);
+CREATE TABLE IF NOT EXISTS drp2 (a int);
+INSERT INTO drp2 VALUES (1);
+SELECT * FROM drp2;
+DROP TABLE drp2;

@@ -48,6 +48,10 @@ impl DiskManager {
         f.write_all(buf).expect("write failed");
     }
 
+    pub fn delete_heap_file(&self, oid: OID) {
+        let _ = fs::remove_file(self.file_path(oid));
+    }
+
     pub fn num_pages(&self, oid: OID) -> u32 {
         let path = self.file_path(oid);
         match fs::metadata(&path) {

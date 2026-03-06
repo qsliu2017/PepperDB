@@ -12,6 +12,9 @@ pub enum Statement {
     Select(SelectStmt),
     CreateTable(CreateTableStmt),
     Insert(InsertStmt),
+    Update(UpdateStmt),
+    Delete(DeleteStmt),
+    DropTable(DropTableStmt),
 }
 
 #[derive(Debug)]
@@ -38,6 +41,26 @@ pub struct OrderByExpr {
 pub struct CreateTableStmt {
     pub table_name: String,
     pub columns: Vec<ColumnDef>,
+    pub if_not_exists: bool,
+}
+
+#[derive(Debug)]
+pub struct UpdateStmt {
+    pub table_name: String,
+    pub assignments: Vec<(String, Expr)>,
+    pub where_clause: Option<Expr>,
+}
+
+#[derive(Debug)]
+pub struct DeleteStmt {
+    pub table_name: String,
+    pub where_clause: Option<Expr>,
+}
+
+#[derive(Debug)]
+pub struct DropTableStmt {
+    pub table_name: String,
+    pub if_exists: bool,
 }
 
 #[derive(Debug)]
@@ -113,12 +136,36 @@ fn convert_statement(stmt: ast::Statement) -> PgWireResult<Statement> {
         ast::Statement::Query(query) => convert_query(*query),
         ast::Statement::CreateTable(ct) => convert_create_table(ct),
         ast::Statement::Insert(ins) => convert_insert(ins),
+        ast::Statement::Update {
+            table,
+            assignments,
+            selection,
+            ..
+        } => convert_update(table, assignments, selection),
+        ast::Statement::Delete(del) => convert_delete(del),
+        ast::Statement::Drop {
+            object_type: ast::ObjectType::Table,
+            if_exists,
+            names,
+            ..
+        } => {
+            let table_name = names
+                .into_iter()
+                .next()
+                .ok_or_else(|| unsupported("DROP TABLE requires a name"))?
+                .to_string();
+            Ok(Statement::DropTable(DropTableStmt {
+                table_name,
+                if_exists,
+            }))
+        }
         _ => Err(unsupported("Unsupported statement")),
     }
 }
 
 fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
     let table_name = ct.name.to_string();
+    let if_not_exists = ct.if_not_exists;
     let columns: PgWireResult<Vec<ColumnDef>> = ct
         .columns
         .into_iter()
@@ -133,6 +180,50 @@ fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
     Ok(Statement::CreateTable(CreateTableStmt {
         table_name,
         columns: columns?,
+        if_not_exists,
+    }))
+}
+
+fn convert_update(
+    table: ast::TableWithJoins,
+    assignments: Vec<ast::Assignment>,
+    selection: Option<ast::Expr>,
+) -> PgWireResult<Statement> {
+    let table_name = table.relation.to_string();
+    let assigns = assignments
+        .into_iter()
+        .map(|a| {
+            let col_name = match a.target {
+                ast::AssignmentTarget::ColumnName(name) => name.to_string(),
+                _ => return Err(unsupported("Unsupported assignment target")),
+            };
+            let expr = convert_expr(a.value)?;
+            Ok((col_name, expr))
+        })
+        .collect::<PgWireResult<Vec<_>>>()?;
+    let where_clause = selection.map(convert_expr).transpose()?;
+    Ok(Statement::Update(UpdateStmt {
+        table_name,
+        assignments: assigns,
+        where_clause,
+    }))
+}
+
+fn convert_delete(del: ast::Delete) -> PgWireResult<Statement> {
+    let table_name = match del.from {
+        ast::FromTable::WithFromKeyword(tables) | ast::FromTable::WithoutKeyword(tables) => {
+            tables
+                .into_iter()
+                .next()
+                .ok_or_else(|| unsupported("DELETE requires FROM"))?
+                .relation
+                .to_string()
+        }
+    };
+    let where_clause = del.selection.map(convert_expr).transpose()?;
+    Ok(Statement::Delete(DeleteStmt {
+        table_name,
+        where_clause,
     }))
 }
 

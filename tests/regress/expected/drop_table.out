@@ -1,0 +1,29 @@
+-- DROP TABLE and IF EXISTS / IF NOT EXISTS
+CREATE TABLE drp (a int);
+CREATE TABLE
+SELECT * FROM drp;
+ a
+--
+(0 rows)
+DROP TABLE drp;
+DROP TABLE
+-- Verify table is gone
+SELECT * FROM drp;
+ERROR:  relation "drp" does not exist
+-- DROP TABLE IF EXISTS (no error on missing)
+DROP TABLE IF EXISTS drp;
+DROP TABLE
+-- CREATE TABLE IF NOT EXISTS
+CREATE TABLE drp2 (a int);
+CREATE TABLE
+CREATE TABLE IF NOT EXISTS drp2 (a int);
+CREATE TABLE
+INSERT INTO drp2 VALUES (1);
+INSERT 0 1
+SELECT * FROM drp2;
+ a
+--
+ 1
+(1 row)
+DROP TABLE drp2;
+DROP TABLE

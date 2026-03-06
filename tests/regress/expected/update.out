@@ -1,0 +1,59 @@
+-- UPDATE statement
+CREATE TABLE upd (a int, b int);
+CREATE TABLE
+INSERT INTO upd VALUES (1, 10);
+INSERT 0 1
+INSERT INTO upd VALUES (2, 20);
+INSERT 0 1
+INSERT INTO upd VALUES (3, 30);
+INSERT 0 1
+-- SET single column with WHERE
+UPDATE upd SET b = 99 WHERE a = 2;
+UPDATE 1
+SELECT * FROM upd ORDER BY a;
+ a | b 
+---+----
+ 1 | 10
+ 2 | 99
+ 3 | 30
+(3 rows)
+-- SET with expression
+UPDATE upd SET b = b + 100 WHERE a = 1;
+UPDATE 1
+SELECT * FROM upd ORDER BY a;
+ a | b  
+---+-----
+ 1 | 110
+ 2 |  99
+ 3 |  30
+(3 rows)
+-- SET multiple columns
+UPDATE upd SET a = 10, b = 200 WHERE a = 3;
+UPDATE 1
+SELECT * FROM upd ORDER BY a;
+ a  | b  
+----+-----
+  1 | 110
+  2 |  99
+ 10 | 200
+(3 rows)
+-- No-match update
+UPDATE upd SET b = 0 WHERE a = 999;
+UPDATE 0
+SELECT * FROM upd ORDER BY a;
+ a  | b  
+----+-----
+  1 | 110
+  2 |  99
+ 10 | 200
+(3 rows)
+-- Update all rows
+UPDATE upd SET b = 0;
+UPDATE 3
+SELECT * FROM upd ORDER BY a;
+ a  | b
+----+---
+  1 | 0
+  2 | 0
+ 10 | 0
+(3 rows)

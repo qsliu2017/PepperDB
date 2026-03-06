@@ -1,0 +1,36 @@
+-- DELETE statement
+CREATE TABLE del (a int, b int);
+CREATE TABLE
+INSERT INTO del VALUES (1, 10);
+INSERT 0 1
+INSERT INTO del VALUES (2, 20);
+INSERT 0 1
+INSERT INTO del VALUES (3, 30);
+INSERT 0 1
+INSERT INTO del VALUES (4, 40);
+INSERT 0 1
+-- DELETE with WHERE
+DELETE FROM del WHERE a = 2;
+DELETE 1
+SELECT * FROM del ORDER BY a;
+ a | b 
+---+----
+ 1 | 10
+ 3 | 30
+ 4 | 40
+(3 rows)
+-- DELETE multiple rows
+DELETE FROM del WHERE b > 25;
+DELETE 2
+SELECT * FROM del ORDER BY a;
+ a | b 
+---+----
+ 1 | 10
+(1 row)
+-- DELETE all
+DELETE FROM del;
+DELETE 1
+SELECT * FROM del;
+ a | b
+---+---
+(0 rows)
