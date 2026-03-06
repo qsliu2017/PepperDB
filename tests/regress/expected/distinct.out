@@ -1,0 +1,35 @@
+-- SELECT DISTINCT
+CREATE TABLE d (a int, b int);
+CREATE TABLE
+INSERT INTO d VALUES (1, 10);
+INSERT 0 1
+INSERT INTO d VALUES (2, 20);
+INSERT 0 1
+INSERT INTO d VALUES (1, 10);
+INSERT 0 1
+INSERT INTO d VALUES (3, 30);
+INSERT 0 1
+INSERT INTO d VALUES (2, 20);
+INSERT 0 1
+-- DISTINCT on all columns
+SELECT DISTINCT * FROM d ORDER BY a, b;
+ a | b 
+---+----
+ 1 | 10
+ 2 | 20
+ 3 | 30
+(3 rows)
+-- DISTINCT on single column expression
+SELECT DISTINCT a FROM d ORDER BY a;
+ a
+--
+ 1
+ 2
+ 3
+(3 rows)
+-- DISTINCT with no duplicates
+SELECT DISTINCT * FROM d WHERE a = 3;
+ a | b 
+---+----
+ 3 | 30
+(1 row)

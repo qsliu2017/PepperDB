@@ -23,12 +23,15 @@ pub struct SelectStmt {
     pub from: Option<String>,
     pub where_clause: Option<Expr>,
     pub order_by: Vec<OrderByExpr>,
+    pub limit: Option<Expr>,
+    pub offset: Option<Expr>,
+    pub distinct: bool,
 }
 
 #[derive(Debug)]
 pub enum ResTarget {
     Wildcard,
-    Expr(Expr),
+    Expr(Expr, Option<String>), // (expression, optional alias)
 }
 
 #[derive(Debug)]
@@ -293,15 +296,26 @@ fn convert_query(query: ast::Query) -> PgWireResult<Statement> {
         vec![]
     };
 
+    let limit = query.limit.map(convert_expr).transpose()?;
+    let offset = query
+        .offset
+        .map(|o| convert_expr(o.value))
+        .transpose()?;
+
     match *query.body {
         ast::SetExpr::Select(select) => {
+            let distinct = matches!(select.distinct, Some(ast::Distinct::Distinct));
+
             let targets = select
                 .projection
                 .into_iter()
                 .map(|item| match item {
                     ast::SelectItem::Wildcard(_) => Ok(ResTarget::Wildcard),
                     ast::SelectItem::UnnamedExpr(expr) => {
-                        Ok(ResTarget::Expr(convert_expr(expr)?))
+                        Ok(ResTarget::Expr(convert_expr(expr)?, None))
+                    }
+                    ast::SelectItem::ExprWithAlias { expr, alias } => {
+                        Ok(ResTarget::Expr(convert_expr(expr)?, Some(alias.value)))
                     }
                     _ => Err(unsupported("Unsupported select item")),
                 })
@@ -320,6 +334,9 @@ fn convert_query(query: ast::Query) -> PgWireResult<Statement> {
                 from,
                 where_clause,
                 order_by,
+                limit,
+                offset,
+                distinct,
             }))
         }
         _ => Err(unsupported("Unsupported query type")),
@@ -488,7 +505,7 @@ mod test {
         match &stmts[0] {
             Statement::Select(s) => {
                 assert_eq!(s.targets.len(), 1);
-                assert!(matches!(&s.targets[0], ResTarget::Expr(Expr::Integer(1))));
+                assert!(matches!(&s.targets[0], ResTarget::Expr(Expr::Integer(1), None)));
                 assert!(s.from.is_none());
             }
             _ => panic!("Expected Select"),
@@ -500,7 +517,7 @@ mod test {
         let stmts = parse("SELECT 3.14;").unwrap();
         match &stmts[0] {
             Statement::Select(s) => match &s.targets[0] {
-                ResTarget::Expr(Expr::Float(f)) => assert!((*f - 3.14).abs() < 1e-10),
+                ResTarget::Expr(Expr::Float(f), _) => assert!((*f - 3.14).abs() < 1e-10),
                 other => panic!("Expected Float, got {:?}", other),
             },
             _ => panic!("Expected Select"),
@@ -512,7 +529,7 @@ mod test {
         let stmts = parse("SELECT NULL;").unwrap();
         match &stmts[0] {
             Statement::Select(s) => {
-                assert!(matches!(&s.targets[0], ResTarget::Expr(Expr::Null)));
+                assert!(matches!(&s.targets[0], ResTarget::Expr(Expr::Null, None)));
             }
             _ => panic!("Expected Select"),
         }
@@ -526,7 +543,7 @@ mod test {
             Statement::Select(s) => {
                 assert_eq!(s.targets.len(), 1);
                 match &s.targets[0] {
-                    ResTarget::Expr(Expr::StringLiteral(s)) => assert_eq!(s, "hello"),
+                    ResTarget::Expr(Expr::StringLiteral(s), _) => assert_eq!(s, "hello"),
                     _ => panic!("Expected StringLiteral"),
                 }
             }
@@ -606,10 +623,10 @@ mod test {
             Statement::Select(s) => {
                 assert_eq!(s.targets.len(), 2);
                 assert!(
-                    matches!(&s.targets[0], ResTarget::Expr(Expr::ColumnRef(n)) if n == "a")
+                    matches!(&s.targets[0], ResTarget::Expr(Expr::ColumnRef(n), None) if n == "a")
                 );
                 assert!(
-                    matches!(&s.targets[1], ResTarget::Expr(Expr::ColumnRef(n)) if n == "b")
+                    matches!(&s.targets[1], ResTarget::Expr(Expr::ColumnRef(n), None) if n == "b")
                 );
                 assert_eq!(s.from.as_deref(), Some("t"));
             }

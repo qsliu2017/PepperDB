@@ -1,0 +1,16 @@
+-- SELECT DISTINCT
+CREATE TABLE d (a int, b int);
+INSERT INTO d VALUES (1, 10);
+INSERT INTO d VALUES (2, 20);
+INSERT INTO d VALUES (1, 10);
+INSERT INTO d VALUES (3, 30);
+INSERT INTO d VALUES (2, 20);
+
+-- DISTINCT on all columns
+SELECT DISTINCT * FROM d ORDER BY a, b;
+
+-- DISTINCT on single column expression
+SELECT DISTINCT a FROM d ORDER BY a;
+
+-- DISTINCT with no duplicates
+SELECT DISTINCT * FROM d WHERE a = 3;

@@ -1,0 +1,62 @@
+-- LIMIT and OFFSET
+CREATE TABLE lim (a int, b int);
+CREATE TABLE
+INSERT INTO lim VALUES (1, 10);
+INSERT 0 1
+INSERT INTO lim VALUES (2, 20);
+INSERT 0 1
+INSERT INTO lim VALUES (3, 30);
+INSERT 0 1
+INSERT INTO lim VALUES (4, 40);
+INSERT 0 1
+INSERT INTO lim VALUES (5, 50);
+INSERT 0 1
+-- Basic LIMIT
+SELECT * FROM lim ORDER BY a LIMIT 3;
+ a | b 
+---+----
+ 1 | 10
+ 2 | 20
+ 3 | 30
+(3 rows)
+-- OFFSET
+SELECT * FROM lim ORDER BY a OFFSET 2;
+ a | b 
+---+----
+ 3 | 30
+ 4 | 40
+ 5 | 50
+(3 rows)
+-- LIMIT + OFFSET
+SELECT * FROM lim ORDER BY a LIMIT 2 OFFSET 1;
+ a | b 
+---+----
+ 2 | 20
+ 3 | 30
+(2 rows)
+-- LIMIT 0
+SELECT * FROM lim ORDER BY a LIMIT 0;
+ a | b
+---+---
+(0 rows)
+-- LIMIT greater than row count
+SELECT * FROM lim ORDER BY a LIMIT 100;
+ a | b 
+---+----
+ 1 | 10
+ 2 | 20
+ 3 | 30
+ 4 | 40
+ 5 | 50
+(5 rows)
+-- OFFSET greater than row count
+SELECT * FROM lim ORDER BY a OFFSET 100;
+ a | b
+---+---
+(0 rows)
+-- OFFSET with no LIMIT
+SELECT * FROM lim ORDER BY a OFFSET 4;
+ a | b 
+---+----
+ 5 | 50
+(1 row)

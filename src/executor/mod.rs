@@ -86,6 +86,44 @@ fn execute_select(
         });
     }
 
+    // DISTINCT
+    if sel.distinct {
+        let mut seen = Vec::new();
+        tuples.retain(|row| {
+            let key: Vec<Datum> = resolved.iter().map(|rt| eval_expr(&rt.expr, row, columns)).collect();
+            if seen.contains(&key) {
+                false
+            } else {
+                seen.push(key);
+                true
+            }
+        });
+    }
+
+    // OFFSET
+    if let Some(ref off) = sel.offset {
+        let n = match eval_expr(off, &[], &[]) {
+            Datum::Int4(n) => n as usize,
+            Datum::Int8(n) => n as usize,
+            _ => 0,
+        };
+        if n < tuples.len() {
+            tuples = tuples.split_off(n);
+        } else {
+            tuples.clear();
+        }
+    }
+
+    // LIMIT
+    if let Some(ref lim) = sel.limit {
+        let n = match eval_expr(lim, &[], &[]) {
+            Datum::Int4(n) => n as usize,
+            Datum::Int8(n) => n as usize,
+            _ => tuples.len(),
+        };
+        tuples.truncate(n);
+    }
+
     // Build schema
     let fields: Vec<FieldInfo> = resolved
         .iter()
@@ -133,9 +171,9 @@ fn resolve_targets(
                     });
                 }
             }
-            ResTarget::Expr(expr) => {
+            ResTarget::Expr(expr, alias) => {
                 resolved.push(ResolvedTarget {
-                    name: expr_name(expr),
+                    name: alias.clone().unwrap_or_else(|| expr_name(expr)),
                     expr: expr.clone(),
                     pg_type: infer_type(expr, columns)?,
                 });

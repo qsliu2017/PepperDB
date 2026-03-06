@@ -235,4 +235,4 @@ macro_rules! regress_test {
     };
 }
 
-regress_test!(basics, select, orderby, boolean, int2, int8, float, text, null, update, delete, drop_table, int4, case_expr, expressions, strings);
+regress_test!(basics, select, orderby, boolean, int2, int8, float, text, null, update, delete, drop_table, int4, case_expr, expressions, strings, limit, distinct, alias);
