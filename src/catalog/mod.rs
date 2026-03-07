@@ -1,5 +1,8 @@
 //! In-memory catalog (simplified pg_class + pg_attribute).
-//! Stores table metadata. Lost on restart -- acceptable for PoC.
+//! Persisted to global/ heap tables via bootstrap module; loaded on restart.
+
+pub mod bootstrap;
+pub mod filenode_map;
 
 use std::collections::HashMap;
 
@@ -19,8 +22,18 @@ pub struct Table {
     pub columns: Vec<Column>,
 }
 
+#[derive(Debug, Clone)]
+pub struct Index {
+    pub oid: OID,
+    pub name: String,
+    pub table_oid: OID,
+    pub column_name: String,
+    pub key_type: TypeId,
+}
+
 pub struct Catalog {
     tables: HashMap<String, Table>,
+    indexes: Vec<Index>,
     next_oid: OID,
 }
 
@@ -34,8 +47,21 @@ impl Catalog {
     pub fn new() -> Self {
         Self {
             tables: HashMap::new(),
+            indexes: Vec::new(),
             next_oid: 16384,
         }
+    }
+
+    pub fn with_next_oid(next_oid: OID) -> Self {
+        Self {
+            tables: HashMap::new(),
+            indexes: Vec::new(),
+            next_oid,
+        }
+    }
+
+    pub fn next_oid(&self) -> OID {
+        self.next_oid
     }
 
     pub fn create_table(&mut self, name: &str, columns: Vec<Column>) -> Result<OID, String> {
@@ -55,6 +81,11 @@ impl Catalog {
         Ok(oid)
     }
 
+    /// Insert a pre-built Table (used by catalog loader on restart).
+    pub fn insert_table(&mut self, table: Table) {
+        self.tables.insert(table.name.clone(), table);
+    }
+
     pub fn get_table(&self, name: &str) -> Option<&Table> {
         self.tables.get(name)
     }
@@ -65,9 +96,45 @@ impl Catalog {
 
     pub fn drop_table(&mut self, name: &str) -> Result<OID, String> {
         match self.tables.remove(name) {
-            Some(table) => Ok(table.oid),
+            Some(table) => {
+                self.indexes.retain(|idx| idx.table_oid != table.oid);
+                Ok(table.oid)
+            }
             None => Err(format!("table \"{}\" does not exist", name)),
         }
+    }
+
+    pub fn create_index(
+        &mut self,
+        name: &str,
+        table_oid: OID,
+        column_name: &str,
+        key_type: TypeId,
+    ) -> Result<OID, String> {
+        if self.indexes.iter().any(|i| i.name == name) {
+            return Err(format!("relation \"{}\" already exists", name));
+        }
+        let oid = self.next_oid;
+        self.next_oid += 1;
+        self.indexes.push(Index {
+            oid,
+            name: name.to_owned(),
+            table_oid,
+            column_name: column_name.to_owned(),
+            key_type,
+        });
+        Ok(oid)
+    }
+
+    pub fn insert_index(&mut self, index: Index) {
+        self.indexes.push(index);
+    }
+
+    pub fn get_indexes_for_table(&self, table_oid: OID) -> Vec<&Index> {
+        self.indexes
+            .iter()
+            .filter(|i| i.table_oid == table_oid)
+            .collect()
     }
 }
 
@@ -79,8 +146,16 @@ mod test {
     fn create_and_get_table() {
         let mut cat = Catalog::new();
         let cols = vec![
-            Column { name: "a".into(), type_id: TypeId::Int4, col_num: 0 },
-            Column { name: "b".into(), type_id: TypeId::Int4, col_num: 1 },
+            Column {
+                name: "a".into(),
+                type_id: TypeId::Int4,
+                col_num: 0,
+            },
+            Column {
+                name: "b".into(),
+                type_id: TypeId::Int4,
+                col_num: 1,
+            },
         ];
         let oid = cat.create_table("t", cols).unwrap();
         assert_eq!(oid, 16384);
@@ -93,7 +168,11 @@ mod test {
     #[test]
     fn duplicate_table() {
         let mut cat = Catalog::new();
-        let cols = vec![Column { name: "a".into(), type_id: TypeId::Int4, col_num: 0 }];
+        let cols = vec![Column {
+            name: "a".into(),
+            type_id: TypeId::Int4,
+            col_num: 0,
+        }];
         cat.create_table("t", cols.clone()).unwrap();
         assert!(cat.create_table("t", cols).is_err());
     }

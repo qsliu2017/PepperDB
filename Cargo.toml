@@ -14,6 +14,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
 async-trait = "0.1"
 futures = "0.3"
 datafusion = "44"
+crc32c = "0.6.8"
 
 [dev-dependencies]
 diff = "0.1.13"

@@ -19,16 +19,38 @@ use sqlparser::ast;
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 
+use crate::catalog::bootstrap;
 use crate::catalog::Column;
 use crate::parser::{self, BinOp, Expr, Statement, UnaryOp};
 use crate::storage::disk::{DiskManager, PAGE_SIZE};
-use crate::storage::heap;
+use crate::storage::{fsm, heap, vm};
+use crate::txn::TxnManager;
 use crate::types::{Datum, TypeId};
+use crate::wal::record::{self as wal_record, WalRecord};
 use crate::Database;
 
 impl Database {
     /// Main entry point: takes raw SQL, classifies, and routes.
     pub async fn execute_sql(&self, sql: &str) -> PgWireResult<Response<'static>> {
+        // Handle VACUUM manually (not in sqlparser-rs AST).
+        // Strip SQL comments before checking.
+        let stripped: String = sql
+            .lines()
+            .map(|l| l.split("--").next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let trimmed = stripped.trim().trim_end_matches(';').trim();
+        let upper = trimmed.to_ascii_uppercase();
+        if upper == "VACUUM" || upper.starts_with("VACUUM ") {
+            let table = trimmed[6..].trim(); // skip "VACUUM"
+            let table_name = if table.is_empty() {
+                None
+            } else {
+                Some(table.to_string())
+            };
+            return self.execute(Statement::Vacuum(parser::VacuumStmt { table_name }));
+        }
+
         let dialect = PostgreSqlDialect {};
         let stmts = Parser::parse_sql(&dialect, sql).map_err(|e| {
             PgWireError::UserError(Box::new(pgwire::error::ErrorInfo::new(
@@ -55,10 +77,12 @@ impl Database {
     fn execute(&self, stmt: Statement) -> PgWireResult<Response<'static>> {
         match stmt {
             Statement::CreateTable(ct) => self.execute_create_table(ct),
+            Statement::CreateIndex(ci) => self.execute_create_index(ci),
             Statement::Insert(ins) => self.execute_insert(ins),
             Statement::Update(upd) => self.execute_update(upd),
             Statement::Delete(del) => self.execute_delete(del),
             Statement::DropTable(dt) => self.execute_drop_table(dt),
+            Statement::Vacuum(v) => self.execute_vacuum(v),
         }
     }
 
@@ -67,11 +91,7 @@ impl Database {
     async fn execute_select_df(&self, sql: &str) -> PgWireResult<Response<'static>> {
         self.register_all_tables()?;
 
-        let df = self
-            .session
-            .sql(sql)
-            .await
-            .map_err(|e| df_to_pg(&e, sql))?;
+        let df = self.session.sql(sql).await.map_err(|e| df_to_pg(&e, sql))?;
         let batches = df.collect().await.map_err(|e| df_to_pg(&e, sql))?;
 
         batches_to_response(batches)
@@ -85,6 +105,7 @@ impl Database {
                 oid: table.oid,
                 columns: table.columns.clone(),
                 disk: self.disk.clone(),
+                txn: self.txn.clone(),
             };
             let _ = self.session.deregister_table(&table.name);
             self.session
@@ -102,6 +123,7 @@ struct HeapTableProvider {
     oid: u32,
     columns: Vec<Column>,
     disk: Arc<Mutex<DiskManager>>,
+    txn: Arc<Mutex<TxnManager>>,
 }
 
 impl std::fmt::Debug for HeapTableProvider {
@@ -142,6 +164,8 @@ impl TableProvider for HeapTableProvider {
 impl HeapTableProvider {
     fn scan_heap(&self) -> datafusion::error::Result<RecordBatch> {
         let disk = self.disk.lock().unwrap();
+        let mut txn = self.txn.lock().unwrap();
+        let snapshot = txn.take_snapshot();
         let num_pages = disk.num_pages(self.oid);
         let mut tuples = Vec::new();
         let mut page = [0u8; PAGE_SIZE];
@@ -150,8 +174,10 @@ impl HeapTableProvider {
             disk.read_page(self.oid, page_id, &mut page);
             let n = heap::num_items(&page);
             for item_idx in 0..n {
-                if let Some(data) = heap::get_tuple(&page, item_idx) {
-                    tuples.push(heap::deserialize_tuple(data, &self.columns));
+                if let Some(datums) =
+                    heap::read_tuple_mvcc(&page, item_idx, &self.columns, &snapshot, txn.clog())
+                {
+                    tuples.push(datums);
                 }
             }
         }
@@ -192,9 +218,8 @@ fn tuples_to_record_batch(
         .enumerate()
         .map(|(col_idx, col)| build_array(tuples, col_idx, col.type_id))
         .collect();
-    RecordBatch::try_new(schema.clone(), arrays).map_err(|e| {
-        datafusion::error::DataFusionError::ArrowError(e, None)
-    })
+    RecordBatch::try_new(schema.clone(), arrays)
+        .map_err(|e| datafusion::error::DataFusionError::ArrowError(e, None))
 }
 
 fn build_array(tuples: &[Vec<Datum>], col_idx: usize, tid: TypeId) -> ArrayRef {
@@ -397,10 +422,18 @@ impl Database {
 
         {
             let mut catalog = self.catalog.lock().unwrap();
-            match catalog.create_table(&ct.table_name, columns) {
+            match catalog.create_table(&ct.table_name, columns.clone()) {
                 Ok(oid) => {
                     let disk = self.disk.lock().unwrap();
                     disk.create_heap_file(oid);
+                    bootstrap::insert_pg_class_row(
+                        &disk,
+                        oid,
+                        &ct.table_name,
+                        columns.len() as i16,
+                    );
+                    bootstrap::insert_pg_attribute_rows(&disk, oid, &columns);
+                    let _ = bootstrap::update_next_oid(&disk, catalog.next_oid());
                 }
                 Err(e) => {
                     if ct.if_not_exists {
@@ -418,10 +451,7 @@ impl Database {
 
     // -- INSERT -----------------------------------------------------------
 
-    fn execute_insert(
-        &self,
-        ins: crate::parser::InsertStmt,
-    ) -> PgWireResult<Response<'static>> {
+    fn execute_insert(&self, ins: crate::parser::InsertStmt) -> PgWireResult<Response<'static>> {
         let (oid, columns) = {
             let catalog = self.catalog.lock().unwrap();
             let table = catalog.get_table(&ins.table_name).ok_or_else(|| {
@@ -435,6 +465,9 @@ impl Database {
 
         let mut count = 0u64;
         let disk = self.disk.lock().unwrap();
+        let mut wal = self.wal.lock().unwrap();
+        let mut txn = self.txn.lock().unwrap();
+        let xid = txn.assign_xid();
 
         for row_exprs in &ins.values {
             if row_exprs.len() != columns.len() {
@@ -457,20 +490,45 @@ impl Database {
                 .map(|(expr, col)| expr_to_datum(expr, col.type_id))
                 .collect::<PgWireResult<Vec<_>>>()?;
 
-            let tuple_data = heap::serialize_tuple(&datums);
-            insert_tuple_to_heap(&disk, oid, &tuple_data)?;
+            let tuple = heap::build_tuple_with_xid(&datums, &columns, xid, false);
+            let (pg_id, item_idx) = insert_tuple_to_heap(&disk, &mut wal, oid, &tuple, xid)?;
+
+            // Maintain indexes
+            let catalog = self.catalog.lock().unwrap();
+            let indexes: Vec<_> = catalog
+                .get_indexes_for_table(oid)
+                .into_iter()
+                .cloned()
+                .collect();
+            drop(catalog);
+            for idx in &indexes {
+                let col_pos = columns.iter().position(|c| c.name == idx.column_name);
+                if let Some(pos) = col_pos {
+                    let key = &datums[pos];
+                    if *key != Datum::Null {
+                        let tid = crate::storage::btree::ItemPointer {
+                            block_id: pg_id,
+                            offset_num: item_idx,
+                        };
+                        crate::storage::btree::bt_insert(&disk, idx.oid, key, tid, idx.key_type);
+                    }
+                }
+            }
+
             count += 1;
         }
 
-        Ok(Response::Execution(Tag::new(&format!("INSERT 0 {}", count))))
+        txn.commit(xid);
+
+        Ok(Response::Execution(Tag::new(&format!(
+            "INSERT 0 {}",
+            count
+        ))))
     }
 
     // -- UPDATE -----------------------------------------------------------
 
-    fn execute_update(
-        &self,
-        upd: crate::parser::UpdateStmt,
-    ) -> PgWireResult<Response<'static>> {
+    fn execute_update(&self, upd: crate::parser::UpdateStmt) -> PgWireResult<Response<'static>> {
         let (oid, columns) = {
             let catalog = self.catalog.lock().unwrap();
             let table = catalog.get_table(&upd.table_name).ok_or_else(|| {
@@ -483,6 +541,9 @@ impl Database {
         };
 
         let disk = self.disk.lock().unwrap();
+        let mut wal = self.wal.lock().unwrap();
+        let mut txn = self.txn.lock().unwrap();
+        let xid = txn.assign_xid();
         let num_pages = disk.num_pages(oid);
         let mut page = [0u8; PAGE_SIZE];
         let mut count = 0u64;
@@ -491,9 +552,9 @@ impl Database {
         for page_id in 0..num_pages {
             disk.read_page(oid, page_id, &mut page);
             let n = heap::num_items(&page);
+            let mut page_modified = false;
             for item_idx in 0..n {
-                if let Some(data) = heap::get_tuple(&page, item_idx) {
-                    let datums = heap::deserialize_tuple(data, &columns);
+                if let Some(datums) = heap::read_tuple(&page, item_idx, &columns) {
                     let matches = match &upd.where_clause {
                         Some(wh) => matches!(eval_expr(wh, &datums, &columns), Datum::Bool(true)),
                         None => true,
@@ -506,28 +567,61 @@ impl Database {
                             }
                         }
                         new_tuples.push(new_row);
-                        heap::mark_tuple_dead(&mut page, item_idx);
+                        heap::mark_tuple_dead_with_xid(&mut page, item_idx, xid);
+                        let wal_data = wal_record::build_heap_delete_data(oid, page_id, item_idx);
+                        let rec = WalRecord {
+                            xl_xid: xid,
+                            xl_info: wal_record::XLOG_HEAP_DELETE,
+                            xl_rmid: wal_record::RM_HEAP_ID,
+                            data: wal_data,
+                        };
+                        let lsn = wal.append(&rec);
+                        heap::set_page_lsn(&mut page, lsn);
+                        page_modified = true;
                         count += 1;
                     }
                 }
             }
-            disk.write_page(oid, page_id, &page);
+            if page_modified {
+                wal.flush();
+                disk.write_page(oid, page_id, &page);
+            }
         }
 
+        let indexes: Vec<_> = {
+            let catalog = self.catalog.lock().unwrap();
+            catalog
+                .get_indexes_for_table(oid)
+                .into_iter()
+                .cloned()
+                .collect()
+        };
         for new_row in &new_tuples {
-            let tuple_data = heap::serialize_tuple(new_row);
-            insert_tuple_to_heap(&disk, oid, &tuple_data)?;
+            let tuple = heap::build_tuple_with_xid(new_row, &columns, xid, false);
+            let (pg_id, item_idx) = insert_tuple_to_heap(&disk, &mut wal, oid, &tuple, xid)?;
+            for idx in &indexes {
+                let col_pos = columns.iter().position(|c| c.name == idx.column_name);
+                if let Some(pos) = col_pos {
+                    let key = &new_row[pos];
+                    if *key != Datum::Null {
+                        let tid = crate::storage::btree::ItemPointer {
+                            block_id: pg_id,
+                            offset_num: item_idx,
+                        };
+                        crate::storage::btree::bt_insert(&disk, idx.oid, key, tid, idx.key_type);
+                    }
+                }
+            }
         }
+
+        txn.commit(xid);
 
         Ok(Response::Execution(Tag::new(&format!("UPDATE {}", count))))
     }
 
     // -- DELETE -----------------------------------------------------------
 
-    fn execute_delete(
-        &self,
-        del: crate::parser::DeleteStmt,
-    ) -> PgWireResult<Response<'static>> {
+    fn execute_delete(&self, del: crate::parser::DeleteStmt) -> PgWireResult<Response<'static>> {
         let (oid, columns) = {
             let catalog = self.catalog.lock().unwrap();
             let table = catalog.get_table(&del.table_name).ok_or_else(|| {
@@ -540,6 +634,9 @@ impl Database {
         };
 
         let disk = self.disk.lock().unwrap();
+        let mut wal = self.wal.lock().unwrap();
+        let mut txn = self.txn.lock().unwrap();
+        let xid = txn.assign_xid();
         let num_pages = disk.num_pages(oid);
         let mut page = [0u8; PAGE_SIZE];
         let mut count = 0u64;
@@ -547,21 +644,36 @@ impl Database {
         for page_id in 0..num_pages {
             disk.read_page(oid, page_id, &mut page);
             let n = heap::num_items(&page);
+            let mut page_modified = false;
             for item_idx in 0..n {
-                if let Some(data) = heap::get_tuple(&page, item_idx) {
-                    let datums = heap::deserialize_tuple(data, &columns);
+                if let Some(datums) = heap::read_tuple(&page, item_idx, &columns) {
                     let matches = match &del.where_clause {
                         Some(wh) => matches!(eval_expr(wh, &datums, &columns), Datum::Bool(true)),
                         None => true,
                     };
                     if matches {
-                        heap::mark_tuple_dead(&mut page, item_idx);
+                        heap::mark_tuple_dead_with_xid(&mut page, item_idx, xid);
+                        let wal_data = wal_record::build_heap_delete_data(oid, page_id, item_idx);
+                        let rec = WalRecord {
+                            xl_xid: xid,
+                            xl_info: wal_record::XLOG_HEAP_DELETE,
+                            xl_rmid: wal_record::RM_HEAP_ID,
+                            data: wal_data,
+                        };
+                        let lsn = wal.append(&rec);
+                        heap::set_page_lsn(&mut page, lsn);
+                        page_modified = true;
                         count += 1;
                     }
                 }
             }
-            disk.write_page(oid, page_id, &page);
+            if page_modified {
+                wal.flush();
+                disk.write_page(oid, page_id, &page);
+            }
         }
+
+        txn.commit(xid);
 
         Ok(Response::Execution(Tag::new(&format!("DELETE {}", count))))
     }
@@ -572,6 +684,20 @@ impl Database {
         &self,
         dt: crate::parser::DropTableStmt,
     ) -> PgWireResult<Response<'static>> {
+        // Collect index OIDs before dropping from catalog
+        let index_oids: Vec<u32> = {
+            let catalog = self.catalog.lock().unwrap();
+            if let Some(table) = catalog.get_table(&dt.table_name) {
+                catalog
+                    .get_indexes_for_table(table.oid)
+                    .iter()
+                    .map(|i| i.oid)
+                    .collect()
+            } else {
+                vec![]
+            }
+        };
+
         let oid = {
             let mut catalog = self.catalog.lock().unwrap();
             match catalog.drop_table(&dt.table_name) {
@@ -589,9 +715,152 @@ impl Database {
         {
             let disk = self.disk.lock().unwrap();
             disk.delete_heap_file(oid);
+            for idx_oid in &index_oids {
+                disk.delete_heap_file(*idx_oid);
+                bootstrap::drop_pg_catalog_rows(&disk, *idx_oid);
+            }
+            bootstrap::drop_pg_catalog_rows(&disk, oid);
         }
 
         Ok(Response::Execution(Tag::new("DROP TABLE")))
+    }
+
+    // -- CREATE INDEX ---------------------------------------------------------
+
+    fn execute_create_index(
+        &self,
+        ci: crate::parser::CreateIndexStmt,
+    ) -> PgWireResult<Response<'static>> {
+        let (table_oid, columns) = {
+            let catalog = self.catalog.lock().unwrap();
+            let table = catalog.get_table(&ci.table_name).ok_or_else(|| {
+                user_error(
+                    "42P01",
+                    &format!("relation \"{}\" does not exist", ci.table_name),
+                )
+            })?;
+            (table.oid, table.columns.clone())
+        };
+
+        let col = columns
+            .iter()
+            .find(|c| c.name == ci.column_name)
+            .ok_or_else(|| {
+                user_error(
+                    "42703",
+                    &format!("column \"{}\" does not exist", ci.column_name),
+                )
+            })?;
+        let key_type = col.type_id;
+        let col_idx = col.col_num as usize;
+
+        let index_oid = {
+            let mut catalog = self.catalog.lock().unwrap();
+            match catalog.create_index(&ci.index_name, table_oid, &ci.column_name, key_type) {
+                Ok(oid) => oid,
+                Err(e) => return Err(user_error("42P07", &e)),
+            }
+        };
+
+        {
+            let disk = self.disk.lock().unwrap();
+            crate::storage::btree::create_index(&disk, index_oid);
+
+            // Populate index from existing heap data
+            let num_pages = disk.num_pages(table_oid);
+            let mut page = [0u8; PAGE_SIZE];
+            for page_id in 0..num_pages {
+                disk.read_page(table_oid, page_id, &mut page);
+                let n = heap::num_items(&page);
+                for item_idx in 0..n {
+                    if let Some(datums) = heap::read_tuple(&page, item_idx, &columns) {
+                        let key = &datums[col_idx];
+                        if *key == Datum::Null {
+                            continue;
+                        }
+                        let tid = crate::storage::btree::ItemPointer {
+                            block_id: page_id,
+                            offset_num: item_idx,
+                        };
+                        crate::storage::btree::bt_insert(&disk, index_oid, key, tid, key_type);
+                    }
+                }
+            }
+
+            // Persist index metadata
+            crate::catalog::bootstrap::insert_pg_class_row(&disk, index_oid, &ci.index_name, 0);
+            let _ = crate::catalog::bootstrap::update_next_oid(&disk, {
+                let catalog = self.catalog.lock().unwrap();
+                catalog.next_oid()
+            });
+        }
+
+        Ok(Response::Execution(Tag::new("CREATE INDEX")))
+    }
+
+    // -- VACUUM ---------------------------------------------------------------
+
+    fn execute_vacuum(&self, v: crate::parser::VacuumStmt) -> PgWireResult<Response<'static>> {
+        let tables: Vec<(u32, String)> = {
+            let catalog = self.catalog.lock().unwrap();
+            match &v.table_name {
+                Some(name) => {
+                    let table = catalog.get_table(name).ok_or_else(|| {
+                        user_error("42P01", &format!("relation \"{}\" does not exist", name))
+                    })?;
+                    vec![(table.oid, table.name.clone())]
+                }
+                None => catalog
+                    .all_tables()
+                    .iter()
+                    .map(|t| (t.oid, t.name.clone()))
+                    .collect(),
+            }
+        };
+
+        let disk = self.disk.lock().unwrap();
+        let mut txn = self.txn.lock().unwrap();
+
+        for (oid, _) in &tables {
+            let num_pages = disk.num_pages(*oid);
+            let mut page = [0u8; PAGE_SIZE];
+            let mut all_frozen = true;
+            for page_id in 0..num_pages {
+                disk.read_page(*oid, page_id, &mut page);
+                let compacted = heap::compact_page(&mut page, txn.clog());
+                let frozen = heap::freeze_tuples(&mut page, txn.clog());
+                if compacted > 0 || frozen > 0 {
+                    disk.write_page(*oid, page_id, &page);
+                }
+                // Update FSM with current free space
+                fsm::update(&disk, *oid, page_id, fsm::page_free_space(&page));
+                // Check if all tuples on page are frozen
+                let n = heap::num_items(&page);
+                let page_all_frozen = n > 0
+                    && (0..n).all(|i| {
+                        let item_id_off = 28 + (i as usize) * 4;
+                        let item_id = u32::from_le_bytes(
+                            page[item_id_off..item_id_off + 4].try_into().unwrap(),
+                        );
+                        let offset = (item_id & 0x7FFF) as usize;
+                        let flags = ((item_id >> 15) & 0x3) as u8;
+                        if flags != 1 || offset == 0 {
+                            return true; // dead/unused -- skip
+                        }
+                        let xmin = u32::from_le_bytes(page[offset..offset + 4].try_into().unwrap());
+                        xmin == 2 // FROZEN_XID
+                    });
+                if page_all_frozen {
+                    vm::set_frozen(&disk, *oid, page_id);
+                }
+                if !page_all_frozen {
+                    all_frozen = false;
+                }
+            }
+            let _ = all_frozen; // suppress unused warning
+        }
+
+        Ok(Response::Execution(Tag::new("VACUUM")))
     }
 }
 
@@ -771,10 +1040,18 @@ fn eval_int_op(op: BinOp, l: i64, r: i64, size: u8) -> Datum {
         BinOp::Sub => wrap(l.wrapping_sub(r)),
         BinOp::Mul => wrap(l.wrapping_mul(r)),
         BinOp::Div => {
-            if r == 0 { Datum::Null } else { wrap(l / r) }
+            if r == 0 {
+                Datum::Null
+            } else {
+                wrap(l / r)
+            }
         }
         BinOp::Mod => {
-            if r == 0 { Datum::Null } else { wrap(l % r) }
+            if r == 0 {
+                Datum::Null
+            } else {
+                wrap(l % r)
+            }
         }
         BinOp::Eq => Datum::Bool(l == r),
         BinOp::NotEq => Datum::Bool(l != r),
@@ -798,10 +1075,18 @@ fn eval_float_op(op: BinOp, l: f64, r: f64, size: u8) -> Datum {
         BinOp::Sub => wrap(l - r),
         BinOp::Mul => wrap(l * r),
         BinOp::Div => {
-            if r == 0.0 { Datum::Null } else { wrap(l / r) }
+            if r == 0.0 {
+                Datum::Null
+            } else {
+                wrap(l / r)
+            }
         }
         BinOp::Mod => {
-            if r == 0.0 { Datum::Null } else { wrap(l % r) }
+            if r == 0.0 {
+                Datum::Null
+            } else {
+                wrap(l % r)
+            }
         }
         BinOp::Eq => Datum::Bool(l == r),
         BinOp::NotEq => Datum::Bool(l != r),
@@ -817,33 +1102,70 @@ fn eval_float_op(op: BinOp, l: f64, r: f64, size: u8) -> Datum {
 
 fn insert_tuple_to_heap(
     disk: &DiskManager,
+    wal: &mut crate::wal::writer::WalWriter,
     oid: u32,
-    tuple_data: &[u8],
-) -> PgWireResult<()> {
+    tuple: &[u8],
+    xid: u32,
+) -> PgWireResult<(u32, u16)> {
     let num_pages = disk.num_pages(oid);
     let mut page = [0u8; PAGE_SIZE];
 
-    if num_pages == 0 {
-        heap::init_page(&mut page);
-        if heap::insert_tuple(&mut page, tuple_data).is_err() {
-            return Err(user_error("42000", "Tuple too large for page"));
-        }
-        disk.write_page(oid, 0, &page);
-    } else {
-        let last_page_id = num_pages - 1;
-        disk.read_page(oid, last_page_id, &mut page);
-        if heap::insert_tuple(&mut page, tuple_data).is_ok() {
-            disk.write_page(oid, last_page_id, &page);
+    // Try FSM first to find a page with enough space
+    let (page_id, item_idx) = if let Some(target) = fsm::search(disk, oid, tuple.len() + 4) {
+        disk.read_page(oid, target, &mut page);
+        if let Ok(idx) = heap::insert_tuple(&mut page, tuple, target) {
+            (target, idx)
         } else {
-            let new_page_id = num_pages;
-            heap::init_page(&mut page);
-            if heap::insert_tuple(&mut page, tuple_data).is_err() {
-                return Err(user_error("42000", "Tuple too large for page"));
-            }
-            disk.write_page(oid, new_page_id, &page);
+            // FSM was stale; fall through to append
+            insert_new_or_last(disk, oid, tuple, num_pages, &mut page)?
         }
+    } else if num_pages == 0 {
+        heap::init_page(&mut page);
+        let idx = heap::insert_tuple(&mut page, tuple, 0)
+            .map_err(|()| user_error("42000", "Tuple too large for page"))?;
+        (0u32, idx)
+    } else {
+        insert_new_or_last(disk, oid, tuple, num_pages, &mut page)?
+    };
+
+    let wal_data = wal_record::build_heap_insert_data(oid, page_id, item_idx, tuple);
+    let rec = WalRecord {
+        xl_xid: xid,
+        xl_info: wal_record::XLOG_HEAP_INSERT,
+        xl_rmid: wal_record::RM_HEAP_ID,
+        data: wal_data,
+    };
+    let lsn = wal.append(&rec);
+    wal.flush();
+    heap::set_page_lsn(&mut page, lsn);
+    disk.write_page(oid, page_id, &page);
+
+    // Update FSM with remaining free space
+    fsm::update(disk, oid, page_id, fsm::page_free_space(&page));
+    // Clear VM frozen bit since we just modified this page
+    vm::clear_frozen(disk, oid, page_id);
+
+    Ok((page_id, item_idx))
+}
+
+fn insert_new_or_last(
+    disk: &DiskManager,
+    oid: u32,
+    tuple: &[u8],
+    num_pages: u32,
+    page: &mut [u8; PAGE_SIZE],
+) -> PgWireResult<(u32, u16)> {
+    let last = num_pages - 1;
+    disk.read_page(oid, last, page);
+    if let Ok(idx) = heap::insert_tuple(page, tuple, last) {
+        Ok((last, idx))
+    } else {
+        let new_id = num_pages;
+        heap::init_page(page);
+        let idx = heap::insert_tuple(page, tuple, new_id)
+            .map_err(|()| user_error("42000", "Tuple too large for page"))?;
+        Ok((new_id, idx))
     }
-    Ok(())
 }
 
 fn expr_to_datum(expr: &Expr, type_id: TypeId) -> PgWireResult<Datum> {
@@ -894,10 +1216,7 @@ fn df_to_pg(e: &datafusion::error::DataFusionError, sql: &str) -> PgWireError {
             .nth(1)
             .unwrap_or("unknown");
         let table = table.trim_end_matches(';');
-        return user_error(
-            "42P01",
-            &format!("relation \"{}\" does not exist", table),
-        );
+        return user_error("42P01", &format!("relation \"{}\" does not exist", table));
     }
 
     PgWireError::UserError(Box::new(pgwire::error::ErrorInfo::new(
@@ -913,7 +1232,8 @@ mod test {
 
     #[tokio::test]
     async fn execute_select_integer() {
-        let db = Database::new(std::path::Path::new("/tmp/pepper_test_unused"));
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::new(tmp.path());
         let resp = db.execute_sql("SELECT 1;").await.unwrap();
         assert!(matches!(resp, Response::Query(_)));
     }

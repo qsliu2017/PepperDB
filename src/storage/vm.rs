@@ -1,0 +1,79 @@
+//! Visibility Map: 1 bit per heap page. Bit set = all tuples on page are frozen.
+//! One VM byte covers 8 heap pages. The VM file is a flat byte array.
+
+use crate::storage::disk::DiskManager;
+use crate::types::OID;
+
+/// Check if a heap page is marked all-frozen in the VM.
+pub fn is_frozen(disk: &DiskManager, relfilenode: OID, page_id: u32) -> bool {
+    let path = disk.fork_file_path(relfilenode, "_vm");
+    let data = match std::fs::read(&path) {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+    let byte_idx = page_id as usize / 8;
+    let bit_idx = page_id as usize % 8;
+    if byte_idx < data.len() {
+        (data[byte_idx] & (1 << bit_idx)) != 0
+    } else {
+        false
+    }
+}
+
+/// Mark a heap page as all-frozen in the VM.
+pub fn set_frozen(disk: &DiskManager, relfilenode: OID, page_id: u32) {
+    let path = disk.fork_file_path(relfilenode, "_vm");
+    let mut data = std::fs::read(&path).unwrap_or_default();
+    let byte_idx = page_id as usize / 8;
+    let bit_idx = page_id as usize % 8;
+    if data.len() <= byte_idx {
+        data.resize(byte_idx + 1, 0);
+    }
+    data[byte_idx] |= 1 << bit_idx;
+    std::fs::write(&path, &data).expect("failed to write VM");
+}
+
+/// Clear the frozen bit for a heap page (e.g., after an INSERT/UPDATE).
+pub fn clear_frozen(disk: &DiskManager, relfilenode: OID, page_id: u32) {
+    let path = disk.fork_file_path(relfilenode, "_vm");
+    let mut data = match std::fs::read(&path) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let byte_idx = page_id as usize / 8;
+    let bit_idx = page_id as usize % 8;
+    if byte_idx < data.len() {
+        data[byte_idx] &= !(1 << bit_idx);
+        std::fs::write(&path, &data).expect("failed to write VM");
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn vm_set_and_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let dm = DiskManager::new(dir.path(), 5);
+        dm.create_heap_file(100);
+
+        // Create VM file
+        let vm_path = dm.fork_file_path(100, "_vm");
+        std::fs::write(&vm_path, &[]).unwrap();
+
+        assert!(!is_frozen(&dm, 100, 0));
+        assert!(!is_frozen(&dm, 100, 7));
+
+        set_frozen(&dm, 100, 0);
+        assert!(is_frozen(&dm, 100, 0));
+        assert!(!is_frozen(&dm, 100, 1));
+
+        set_frozen(&dm, 100, 7);
+        assert!(is_frozen(&dm, 100, 7));
+
+        clear_frozen(&dm, 100, 0);
+        assert!(!is_frozen(&dm, 100, 0));
+        assert!(is_frozen(&dm, 100, 7));
+    }
+}

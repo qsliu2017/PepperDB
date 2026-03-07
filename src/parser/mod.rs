@@ -9,10 +9,24 @@ use crate::types::TypeId;
 #[derive(Debug)]
 pub enum Statement {
     CreateTable(CreateTableStmt),
+    CreateIndex(CreateIndexStmt),
     Insert(InsertStmt),
     Update(UpdateStmt),
     Delete(DeleteStmt),
     DropTable(DropTableStmt),
+    Vacuum(VacuumStmt),
+}
+
+#[derive(Debug)]
+pub struct CreateIndexStmt {
+    pub index_name: String,
+    pub table_name: String,
+    pub column_name: String,
+}
+
+#[derive(Debug)]
+pub struct VacuumStmt {
+    pub table_name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -103,6 +117,7 @@ pub enum UnaryOp {
 pub fn convert_statement(stmt: ast::Statement) -> PgWireResult<Statement> {
     match stmt {
         ast::Statement::CreateTable(ct) => convert_create_table(ct),
+        ast::Statement::CreateIndex(ci) => convert_create_index(ci),
         ast::Statement::Insert(ins) => convert_insert(ins),
         ast::Statement::Update {
             table,
@@ -129,6 +144,26 @@ pub fn convert_statement(stmt: ast::Statement) -> PgWireResult<Statement> {
         }
         _ => Err(unsupported("Unsupported statement")),
     }
+}
+
+fn convert_create_index(ci: ast::CreateIndex) -> PgWireResult<Statement> {
+    let index_name = ci
+        .name
+        .ok_or_else(|| unsupported("CREATE INDEX requires an index name"))?
+        .to_string();
+    let table_name = ci.table_name.to_string();
+    let column_name = ci
+        .columns
+        .into_iter()
+        .next()
+        .ok_or_else(|| unsupported("CREATE INDEX requires at least one column"))?
+        .expr
+        .to_string();
+    Ok(Statement::CreateIndex(CreateIndexStmt {
+        index_name,
+        table_name,
+        column_name,
+    }))
 }
 
 fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
@@ -179,14 +214,12 @@ fn convert_update(
 
 fn convert_delete(del: ast::Delete) -> PgWireResult<Statement> {
     let table_name = match del.from {
-        ast::FromTable::WithFromKeyword(tables) | ast::FromTable::WithoutKeyword(tables) => {
-            tables
-                .into_iter()
-                .next()
-                .ok_or_else(|| unsupported("DELETE requires FROM"))?
-                .relation
-                .to_string()
-        }
+        ast::FromTable::WithFromKeyword(tables) | ast::FromTable::WithoutKeyword(tables) => tables
+            .into_iter()
+            .next()
+            .ok_or_else(|| unsupported("DELETE requires FROM"))?
+            .relation
+            .to_string(),
     };
     let where_clause = del.selection.map(convert_expr).transpose()?;
     Ok(Statement::Delete(DeleteStmt {
@@ -216,7 +249,9 @@ fn convert_data_type(dt: &ast::DataType) -> PgWireResult<TypeId> {
 
 fn convert_insert(ins: ast::Insert) -> PgWireResult<Statement> {
     let table_name = ins.table_name.to_string();
-    let source = ins.source.ok_or_else(|| unsupported("INSERT without VALUES"))?;
+    let source = ins
+        .source
+        .ok_or_else(|| unsupported("INSERT without VALUES"))?;
     match *source.body {
         ast::SetExpr::Values(ast::Values { rows, .. }) => {
             let values: PgWireResult<Vec<Vec<Expr>>> = rows
