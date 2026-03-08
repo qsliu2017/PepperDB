@@ -38,6 +38,9 @@ Rust library crate (`pepper_db`). `src/lib.rs` as crate root, submodules in dire
 - sqlparser-rs (v0.53) -- SQL parsing for DDL/DML (also used internally by DataFusion)
 - pgwire (v0.25) -- PostgreSQL wire protocol
 
+**Reference implementation:**
+- `postgres/` -- PostgreSQL 18 source (git submodule, `REL_18_STABLE` branch). Use as the authoritative reference for behavior, storage format, and protocol details. Read the C source when implementing or debugging PepperDB features.
+
 **Planned modules:**
 - WAL, Buffer Pool integration with storage
 
