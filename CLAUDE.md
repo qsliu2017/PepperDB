@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-PepperDB is a proof-of-concept PostgreSQL implementation in Rust, exploring what PostgreSQL would look like with Rust's memory safety and concurrency model.
+PepperDB is a PostgreSQL implementation in Rust, targeting production readiness. It leverages Rust's memory safety and concurrency model to build a correct, durable, and performant database.
 
 **Design principles:**
 - Match PostgreSQL behavior in: SQL grammar, storage file format, network protocol, module separation
-- Use existing Rust libraries where practical (parser, network protocol) for rapid prototyping
+- Use existing Rust libraries where practical (parser, network protocol)
 - Same logical module boundaries as PostgreSQL, but not a 1:1 source file mapping
-- PoC scope -- not all PostgreSQL features will be covered
+- Production-ready: correctness, durability, and performance for real workloads
 
 ## Build Commands
 
