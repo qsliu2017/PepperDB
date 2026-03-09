@@ -19,7 +19,12 @@ pub struct Column {
 
 impl Column {
     pub fn new(name: &str, type_id: TypeId, col_num: u16) -> Self {
-        Self { name: name.into(), type_id, col_num, typmod: -1 }
+        Self {
+            name: name.into(),
+            type_id,
+            col_num,
+            typmod: -1,
+        }
     }
 }
 
@@ -157,12 +162,14 @@ mod test {
             Column {
                 name: "a".into(),
                 type_id: TypeId::Int4,
-                col_num: 0, typmod: -1,
+                col_num: 0,
+                typmod: -1,
             },
             Column {
                 name: "b".into(),
                 type_id: TypeId::Int4,
-                col_num: 1, typmod: -1,
+                col_num: 1,
+                typmod: -1,
             },
         ];
         let oid = cat.create_table("t", cols).unwrap();
@@ -179,7 +186,8 @@ mod test {
         let cols = vec![Column {
             name: "a".into(),
             type_id: TypeId::Int4,
-            col_num: 0, typmod: -1,
+            col_num: 0,
+            typmod: -1,
         }];
         cat.create_table("t", cols.clone()).unwrap();
         assert!(cat.create_table("t", cols).is_err());

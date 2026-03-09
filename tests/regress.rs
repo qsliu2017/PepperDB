@@ -89,7 +89,10 @@ fn format_table(schema: &[FieldInfo], rows: &[Vec<String>]) -> String {
     out.push('\n');
 
     // Data rows
-    let right_align: Vec<bool> = schema.iter().map(|f| is_numeric_type(f.datatype())).collect();
+    let right_align: Vec<bool> = schema
+        .iter()
+        .map(|f| is_numeric_type(f.datatype()))
+        .collect();
     let last = widths.len().saturating_sub(1);
     for row in rows {
         for (i, val) in row.iter().enumerate() {
@@ -243,7 +246,9 @@ async fn run_sql(sql: &str, db: &Database) -> String {
         comment_depth += block_comment_delta(line);
 
         // Inside or entering a standalone block comment (no active statement)
-        if stmt_lines.is_empty() && (prev_depth > 0 || (prev_depth == 0 && comment_depth != 0 && !line.contains(';'))) {
+        if stmt_lines.is_empty()
+            && (prev_depth > 0 || (prev_depth == 0 && comment_depth != 0 && !line.contains(';')))
+        {
             // Echo block comment lines (psql echoes them)
             out.push_str(line);
             out.push('\n');
@@ -334,10 +339,7 @@ async fn run_regress_test(name: &str) {
                 diff::Result::Both(b, _) => diff.push_str(&format!(" {}\n", b)),
             }
         }
-        panic!(
-            "regression test '{}' output mismatch\n\n{}",
-            name, diff
-        );
+        panic!("regression test '{}' output mismatch\n\n{}", name, diff);
     }
 }
 

@@ -122,7 +122,8 @@ mod test {
         let cols = vec![Column {
             name: "a".into(),
             type_id: TypeId::Int4,
-            col_num: 0, typmod: -1,
+            col_num: 0,
+            typmod: -1,
         }];
 
         // Insert with xid=3, commit it
@@ -156,7 +157,8 @@ mod test {
         let cols = vec![Column {
             name: "a".into(),
             type_id: TypeId::Int4,
-            col_num: 0, typmod: -1,
+            col_num: 0,
+            typmod: -1,
         }];
 
         // Insert with xid=3, commit it after snapshot

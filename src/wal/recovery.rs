@@ -260,7 +260,8 @@ mod test {
         let cols = vec![Column {
             name: "a".into(),
             type_id: TypeId::Int4,
-            col_num: 0, typmod: -1,
+            col_num: 0,
+            typmod: -1,
         }];
         let tuple = heap::build_tuple(&[crate::types::Datum::Int4(42)], &cols);
 
@@ -302,7 +303,8 @@ mod test {
         let cols = vec![Column {
             name: "a".into(),
             type_id: TypeId::Int4,
-            col_num: 0, typmod: -1,
+            col_num: 0,
+            typmod: -1,
         }];
         let tuple = heap::build_tuple(&[crate::types::Datum::Int4(99)], &cols);
         let wal_data = record::build_heap_insert_data(16384, 0, 0, &tuple);
