@@ -23,22 +23,22 @@ pub fn pg_class_columns() -> Vec<Column> {
         Column {
             name: "oid".into(),
             type_id: TypeId::Int4,
-            col_num: 0,
+            col_num: 0, typmod: -1,
         },
         Column {
             name: "relname".into(),
             type_id: TypeId::Text,
-            col_num: 1,
+            col_num: 1, typmod: -1,
         },
         Column {
             name: "relfilenode".into(),
             type_id: TypeId::Int4,
-            col_num: 2,
+            col_num: 2, typmod: -1,
         },
         Column {
             name: "relnatts".into(),
             type_id: TypeId::Int2,
-            col_num: 3,
+            col_num: 3, typmod: -1,
         },
     ]
 }
@@ -49,22 +49,22 @@ pub fn pg_attribute_columns() -> Vec<Column> {
         Column {
             name: "attrelid".into(),
             type_id: TypeId::Int4,
-            col_num: 0,
+            col_num: 0, typmod: -1,
         },
         Column {
             name: "attname".into(),
             type_id: TypeId::Text,
-            col_num: 1,
+            col_num: 1, typmod: -1,
         },
         Column {
             name: "atttypid".into(),
             type_id: TypeId::Int4,
-            col_num: 2,
+            col_num: 2, typmod: -1,
         },
         Column {
             name: "attnum".into(),
             type_id: TypeId::Int2,
-            col_num: 3,
+            col_num: 3, typmod: -1,
         },
     ]
 }
@@ -191,7 +191,7 @@ pub fn load_catalog(disk: &DiskManager) -> io::Result<Catalog> {
                     .map(|(name, typid, attnum)| Column {
                         name: name.clone(),
                         type_id: TypeId::from_pg_oid(*typid).unwrap_or(TypeId::Text),
-                        col_num: (*attnum - 1) as u16,
+                        col_num: (*attnum - 1) as u16, typmod: -1,
                     })
                     .collect()
             })
@@ -389,12 +389,12 @@ mod test {
             Column {
                 name: "a".into(),
                 type_id: TypeId::Int4,
-                col_num: 0,
+                col_num: 0, typmod: -1,
             },
             Column {
                 name: "b".into(),
                 type_id: TypeId::Text,
-                col_num: 1,
+                col_num: 1, typmod: -1,
             },
         ];
         let oid: OID = 16384;
@@ -423,7 +423,7 @@ mod test {
         let cols = vec![Column {
             name: "x".into(),
             type_id: TypeId::Int4,
-            col_num: 0,
+            col_num: 0, typmod: -1,
         }];
         let oid: OID = 16384;
         disk.create_heap_file(oid);

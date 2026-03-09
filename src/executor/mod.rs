@@ -92,9 +92,10 @@ impl Database {
         self.register_all_tables()?;
 
         let df = self.session.sql(sql).await.map_err(|e| df_to_pg(&e, sql))?;
+        let arrow_schema = df.schema().inner().clone();
         let batches = df.collect().await.map_err(|e| df_to_pg(&e, sql))?;
 
-        batches_to_response(batches)
+        batches_to_response(batches, &arrow_schema)
     }
 
     fn register_all_tables(&self) -> PgWireResult<()> {
@@ -299,23 +300,25 @@ fn build_array(tuples: &[Vec<Datum>], col_idx: usize, tid: TypeId) -> ArrayRef {
 
 // -- RecordBatch to pgwire Response ----------------------------------------
 
-fn batches_to_response(batches: Vec<RecordBatch>) -> PgWireResult<Response<'static>> {
-    let arrow_schema = if let Some(first) = batches.first() {
-        first.schema()
-    } else {
-        let schema = Arc::new(vec![]);
-        return Ok(Response::Query(QueryResponse::new(
-            schema,
-            stream::iter(vec![]),
-        )));
-    };
+fn batches_to_response(
+    batches: Vec<RecordBatch>,
+    arrow_schema: &Schema,
+) -> PgWireResult<Response<'static>> {
     let fields: Vec<FieldInfo> = arrow_schema
         .fields()
         .iter()
         .map(|f| {
-            // DataFusion names literal columns like "Int64(1)". PostgreSQL uses "?column?".
-            let name = if f.name().contains('(') && f.name().contains(')') {
-                "?column?".to_owned()
+            // DataFusion names columns by expression text. PostgreSQL rules:
+            // - function calls like "lower(c)" -> "lower"
+            // - DataFusion internal names like "Int64(1)" -> "?column?"
+            let name = if let Some(func) = f.name().split('(').next() {
+                if !f.name().contains('(') {
+                    f.name().clone()
+                } else if func.starts_with(|c: char| c.is_ascii_uppercase()) {
+                    "?column?".to_owned()
+                } else {
+                    func.to_owned()
+                }
             } else {
                 f.name().clone()
             };
@@ -417,6 +420,7 @@ impl Database {
                 name: c.name.clone(),
                 type_id: c.type_id,
                 col_num: i as u16,
+                typmod: c.typmod,
             })
             .collect();
 
@@ -487,7 +491,7 @@ impl Database {
             let datums: Vec<Datum> = row_exprs
                 .iter()
                 .zip(columns.iter())
-                .map(|(expr, col)| expr_to_datum(expr, col.type_id))
+                .map(|(expr, col)| expr_to_datum(expr, col))
                 .collect::<PgWireResult<Vec<_>>>()?;
 
             let tuple = heap::build_tuple_with_xid(&datums, &columns, xid, false);
@@ -1168,14 +1172,14 @@ fn insert_new_or_last(
     }
 }
 
-fn expr_to_datum(expr: &Expr, type_id: TypeId) -> PgWireResult<Datum> {
+fn expr_to_datum(expr: &Expr, col: &Column) -> PgWireResult<Datum> {
     match expr {
         Expr::Null => Ok(Datum::Null),
-        Expr::Bool(b) => match type_id {
+        Expr::Bool(b) => match col.type_id {
             TypeId::Bool => Ok(Datum::Bool(*b)),
             _ => Err(user_error("42804", "Type mismatch in expression")),
         },
-        Expr::Integer(i) => match type_id {
+        Expr::Integer(i) => match col.type_id {
             TypeId::Int2 => Ok(Datum::Int2(*i as i16)),
             TypeId::Int4 => Ok(Datum::Int4(*i as i32)),
             TypeId::Int8 => Ok(Datum::Int8(*i)),
@@ -1183,13 +1187,21 @@ fn expr_to_datum(expr: &Expr, type_id: TypeId) -> PgWireResult<Datum> {
             TypeId::Float8 => Ok(Datum::Float8(*i as f64)),
             _ => Err(user_error("42804", "Type mismatch in expression")),
         },
-        Expr::Float(f) => match type_id {
+        Expr::Float(f) => match col.type_id {
             TypeId::Float4 => Ok(Datum::Float4(*f as f32)),
             TypeId::Float8 => Ok(Datum::Float8(*f)),
             _ => Err(user_error("42804", "Type mismatch in expression")),
         },
-        Expr::StringLiteral(s) => match type_id {
-            TypeId::Text => Ok(Datum::Text(s.clone())),
+        Expr::StringLiteral(s) => match col.type_id {
+            TypeId::Text => {
+                // char(n): pad with spaces to typmod length
+                let val = if col.typmod > 0 {
+                    format!("{:<width$}", s, width = col.typmod as usize)
+                } else {
+                    s.clone()
+                };
+                Ok(Datum::Text(val))
+            }
             _ => Err(user_error("42804", "Type mismatch in expression")),
         },
         _ => Err(user_error("42804", "Type mismatch in expression")),

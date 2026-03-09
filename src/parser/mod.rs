@@ -59,6 +59,7 @@ pub struct DropTableStmt {
 pub struct ColumnDef {
     pub name: String,
     pub type_id: TypeId,
+    pub typmod: i32,
 }
 
 #[derive(Debug)]
@@ -173,10 +174,11 @@ fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
         .columns
         .into_iter()
         .map(|col| {
-            let type_id = convert_data_type(&col.data_type)?;
+            let (type_id, typmod) = convert_data_type(&col.data_type)?;
             Ok(ColumnDef {
                 name: col.name.value,
                 type_id,
+                typmod,
             })
         })
         .collect();
@@ -228,21 +230,27 @@ fn convert_delete(del: ast::Delete) -> PgWireResult<Statement> {
     }))
 }
 
-fn convert_data_type(dt: &ast::DataType) -> PgWireResult<TypeId> {
+/// Returns (TypeId, typmod). typmod is the char length for char(n), -1 otherwise.
+fn convert_data_type(dt: &ast::DataType) -> PgWireResult<(TypeId, i32)> {
     match dt {
-        ast::DataType::Boolean => Ok(TypeId::Bool),
-        ast::DataType::SmallInt(_) | ast::DataType::Int2(_) => Ok(TypeId::Int2),
+        ast::DataType::Boolean => Ok((TypeId::Bool, -1)),
+        ast::DataType::SmallInt(_) | ast::DataType::Int2(_) => Ok((TypeId::Int2, -1)),
         ast::DataType::Int(_) | ast::DataType::Int4(_) | ast::DataType::Integer(_) => {
-            Ok(TypeId::Int4)
+            Ok((TypeId::Int4, -1))
         }
-        ast::DataType::BigInt(_) | ast::DataType::Int8(_) => Ok(TypeId::Int8),
-        ast::DataType::Real | ast::DataType::Float4 => Ok(TypeId::Float4),
-        ast::DataType::DoublePrecision | ast::DataType::Float8 => Ok(TypeId::Float8),
-        ast::DataType::Text
-        | ast::DataType::Varchar(_)
-        | ast::DataType::CharVarying(_)
-        | ast::DataType::Char(_)
-        | ast::DataType::Character(_) => Ok(TypeId::Text),
+        ast::DataType::BigInt(_) | ast::DataType::Int8(_) => Ok((TypeId::Int8, -1)),
+        ast::DataType::Real | ast::DataType::Float4 => Ok((TypeId::Float4, -1)),
+        ast::DataType::DoublePrecision | ast::DataType::Float8 => Ok((TypeId::Float8, -1)),
+        ast::DataType::Text | ast::DataType::Varchar(_) | ast::DataType::CharVarying(_) => {
+            Ok((TypeId::Text, -1))
+        }
+        ast::DataType::Char(len) | ast::DataType::Character(len) => {
+            let n = match len {
+                Some(ast::CharacterLength::IntegerLength { length, .. }) => *length as i32,
+                _ => 1,
+            };
+            Ok((TypeId::Text, n))
+        }
         other => Err(unsupported(&format!("Unsupported type: {}", other))),
     }
 }

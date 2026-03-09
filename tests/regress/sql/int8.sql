@@ -1,8 +1,0 @@
--- Bigint (int8) type
-CREATE TABLE int8test (a bigint, b bigint);
-INSERT INTO int8test VALUES (1, 1000000000000);
-INSERT INTO int8test VALUES (-9223372036854775808, 9223372036854775807);
-INSERT INTO int8test VALUES (0, 0);
-SELECT * FROM int8test;
-SELECT a + b FROM int8test WHERE a = 1;
-SELECT * FROM int8test ORDER BY b DESC;

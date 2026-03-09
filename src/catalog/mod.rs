@@ -13,6 +13,14 @@ pub struct Column {
     pub name: String,
     pub type_id: TypeId,
     pub col_num: u16,
+    /// PostgreSQL atttypmod. -1 = no modifier. For char(n): n (the max length).
+    pub typmod: i32,
+}
+
+impl Column {
+    pub fn new(name: &str, type_id: TypeId, col_num: u16) -> Self {
+        Self { name: name.into(), type_id, col_num, typmod: -1 }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -149,12 +157,12 @@ mod test {
             Column {
                 name: "a".into(),
                 type_id: TypeId::Int4,
-                col_num: 0,
+                col_num: 0, typmod: -1,
             },
             Column {
                 name: "b".into(),
                 type_id: TypeId::Int4,
-                col_num: 1,
+                col_num: 1, typmod: -1,
             },
         ];
         let oid = cat.create_table("t", cols).unwrap();
@@ -171,7 +179,7 @@ mod test {
         let cols = vec![Column {
             name: "a".into(),
             type_id: TypeId::Int4,
-            col_num: 0,
+            col_num: 0, typmod: -1,
         }];
         cat.create_table("t", cols.clone()).unwrap();
         assert!(cat.create_table("t", cols).is_err());

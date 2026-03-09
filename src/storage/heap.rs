@@ -709,7 +709,7 @@ mod test {
         Column {
             name: name.into(),
             type_id: tid,
-            col_num: num,
+            col_num: num, typmod: -1,
         }
     }
 
