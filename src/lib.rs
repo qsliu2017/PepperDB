@@ -17,6 +17,8 @@ use storage::pg_control::{self, ControlFileData, DBState};
 use txn::TxnManager;
 use wal::writer::WalWriter;
 
+mod udfs;
+
 /// Default database OID, matching PostgreSQL's `postgres` database.
 const DEFAULT_DB_OID: u32 = 5;
 
@@ -78,10 +80,13 @@ impl Database {
         let wal_writer = WalWriter::new(&wal_dir, wal_start);
         let txn_mgr = TxnManager::new(&clog_dir, txn::FIRST_NORMAL_XID);
 
+        let session = SessionContext::new();
+        udfs::register_all(&session);
+
         Self {
             catalog: Mutex::new(catalog),
             disk: Arc::new(Mutex::new(disk)),
-            session: SessionContext::new(),
+            session,
             wal: Mutex::new(wal_writer),
             txn: Arc::new(Mutex::new(txn_mgr)),
             control: Mutex::new(control),

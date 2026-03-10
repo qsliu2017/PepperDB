@@ -16,14 +16,14 @@ use pepper_db::Database;
 
 // -- DataRow value extraction -------------------------------------------
 
-fn extract_row_values(data: &[u8], schema: &[FieldInfo]) -> Vec<String> {
+fn extract_row_values(data: &[u8], schema: &[FieldInfo], null_display: &str) -> Vec<String> {
     let mut values = Vec::with_capacity(schema.len());
     let mut pos = 0;
     for fi in schema {
         let len = i32::from_be_bytes(data[pos..pos + 4].try_into().unwrap());
         pos += 4;
         if len < 0 {
-            values.push(String::new());
+            values.push(null_display.to_string());
         } else {
             let end = pos + len as usize;
             let mut val = String::from_utf8_lossy(&data[pos..end]).into_owned();
@@ -190,7 +190,7 @@ fn format_error_with_position(msg: &str, pos: Option<usize>, sql: &str) -> Strin
     out
 }
 
-fn format_response(resp: Response) -> String {
+fn format_response(resp: Response, null_display: &str) -> String {
     match resp {
         Response::Execution(_) => String::new(),
         Response::Query(qr) => {
@@ -198,12 +198,29 @@ fn format_response(resp: Response) -> String {
             let mut data_rows = qr.data_rows();
             let mut rows = Vec::new();
             while let Some(Ok(dr)) = futures::executor::block_on(data_rows.next()) {
-                rows.push(extract_row_values(&dr.data, &schema));
+                rows.push(extract_row_values(&dr.data, &schema, null_display));
             }
             format_table(&schema, &rows)
         }
         Response::Error(info) => format_error(&info.message),
         _ => String::new(),
+    }
+}
+
+// -- psql meta-command parsing ------------------------------------------
+
+/// Parse `\pset null 'value'` and return the null display string.
+fn parse_pset_null(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let rest = trimmed.strip_prefix("\\pset")?;
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix("null")?;
+    let rest = rest.trim_start();
+    // Value may be quoted with single quotes
+    if let Some(inner) = rest.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+        Some(inner.to_string())
+    } else {
+        Some(rest.to_string())
     }
 }
 
@@ -291,10 +308,22 @@ async fn run_sql(sql: &str, db: &Database) -> String {
     let mut out = String::new();
     let mut stmt_lines: Vec<&str> = Vec::new();
     let mut comment_depth: i32 = 0;
+    let mut null_display = String::new();
 
     for line in sql.lines() {
         // Skip blank lines (psql -a does not echo them)
         if line.trim().is_empty() {
+            continue;
+        }
+
+        // Handle psql meta-commands (lines starting with \)
+        if stmt_lines.is_empty() && line.trim_start().starts_with('\\') {
+            if let Some(val) = parse_pset_null(line) {
+                null_display = val;
+            }
+            // psql -a echoes \pset commands
+            out.push_str(line);
+            out.push('\n');
             continue;
         }
 
@@ -341,7 +370,7 @@ async fn run_sql(sql: &str, db: &Database) -> String {
             // Strip block comments before sending to DataFusion
             let clean_sql = strip_block_comments(&stmt_sql);
             match db.execute_sql(&clean_sql).await {
-                Ok(resp) => out.push_str(&format_response(resp)),
+                Ok(resp) => out.push_str(&format_response(resp, &null_display)),
                 Err(PgWireError::UserError(info)) => {
                     let pos = info.position.as_ref().and_then(|p| p.parse::<usize>().ok());
                     out.push_str(&format_error_with_position(&info.message, pos, &clean_sql));
@@ -426,7 +455,7 @@ regress_test!(
     // arrays,
     // bit,
     // bitmapops,
-    // boolean,
+    boolean,
     // brin,
     // brin_bloom,
     // brin_multi,

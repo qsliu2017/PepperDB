@@ -67,12 +67,21 @@ impl Database {
             .ok_or_else(|| user_error("42601", "empty query"))?;
 
         match stmt {
-            ast::Statement::Query(_) => self.execute_select_df(sql).await,
+            ast::Statement::Query(_) => {
+                // Intercept pg_input_error_info() table function
+                if let Some(resp) = self.try_pg_input_error_info(sql) {
+                    return resp;
+                }
+                self.execute_select_df(sql).await
+            }
             ast::Statement::CreateTable(ref ct) if ct.query.is_some() => {
                 self.execute_create_table_as(sql, stmt).await
             }
             _ => {
-                let our_stmt = parser::convert_statement(stmt)?;
+                let our_stmt = parser::convert_statement(stmt).map_err(|e| {
+                    // Add cursor position for "invalid input syntax" errors from typed string parsing
+                    add_input_syntax_position(e, sql)
+                })?;
                 self.execute(our_stmt)
             }
         }
@@ -90,12 +99,75 @@ impl Database {
         }
     }
 
+    // -- pg_input_error_info table function ----------------------------------
+
+    /// Handle `SELECT * FROM pg_input_error_info(value, type)` as a special case.
+    fn try_pg_input_error_info(&self, sql: &str) -> Option<PgWireResult<Response<'static>>> {
+        let lower = sql.to_ascii_lowercase();
+        if !lower.contains("pg_input_error_info") {
+            return None;
+        }
+        // Extract arguments: pg_input_error_info('value', 'type')
+        let start = lower.find("pg_input_error_info(")?;
+        let args_start = start + "pg_input_error_info(".len();
+        let args_end = sql[args_start..].find(')')? + args_start;
+        let args_str = &sql[args_start..args_end];
+        let parts: Vec<&str> = args_str.split(',').collect();
+        if parts.len() != 2 {
+            return None;
+        }
+        let value = parts[0].trim().trim_matches('\'');
+        let type_name = parts[1].trim().trim_matches('\'');
+
+        let (message, sql_error_code) = if !crate::udfs::validate_input_public(value, type_name) {
+            let msg = match type_name {
+                "bool" | "boolean" => {
+                    format!("invalid input syntax for type boolean: \"{}\"", value)
+                }
+                _ => format!("invalid input syntax for type {}: \"{}\"", type_name, value),
+            };
+            (msg, "22P02".to_string())
+        } else {
+            (String::new(), String::new())
+        };
+
+        let schema = Arc::new(vec![
+            FieldInfo::new("message".into(), None, None, Type::TEXT, FieldFormat::Text),
+            FieldInfo::new("detail".into(), None, None, Type::TEXT, FieldFormat::Text),
+            FieldInfo::new("hint".into(), None, None, Type::TEXT, FieldFormat::Text),
+            FieldInfo::new(
+                "sql_error_code".into(),
+                None,
+                None,
+                Type::TEXT,
+                FieldFormat::Text,
+            ),
+        ]);
+        let schema2 = schema.clone();
+        let row = {
+            let mut encoder = DataRowEncoder::new(schema2);
+            encoder.encode_field(&message).ok()?;
+            encoder.encode_field(&"").ok()?; // detail
+            encoder.encode_field(&"").ok()?; // hint
+            encoder.encode_field(&sql_error_code).ok()?;
+            encoder.finish().ok()?
+        };
+        Some(Ok(Response::Query(QueryResponse::new(
+            schema,
+            stream::iter(vec![Ok(row)]),
+        ))))
+    }
+
     // -- DataFusion SELECT -------------------------------------------------
 
     async fn execute_select_df(&self, sql: &str) -> PgWireResult<Response<'static>> {
         // Rewrite constant HAVING clauses (DataFusion doesn't support them).
         let rewritten_having = rewrite_constant_having(sql);
         let sql = rewritten_having.as_deref().unwrap_or(sql);
+
+        // Add aliases for bare CAST expressions so column names match PG.
+        let rewritten_cast = rewrite_cast_aliases(sql);
+        let sql = rewritten_cast.as_deref().unwrap_or(sql);
 
         // Rewrite ORDER BY expressions matching GROUP BY keys.
         let rewritten_ob = rewrite_order_by_group_by(sql);
@@ -170,7 +242,7 @@ impl Database {
         let ast::Statement::CreateTable(ct) = stmt else {
             unreachable!()
         };
-        let table_name = ct.name.to_string();
+        let table_name = ct.name.to_string().to_ascii_lowercase();
         let select_sql = ct.query.unwrap().to_string();
 
         // Apply ORDER BY / GROUP BY rewrite if needed
@@ -506,19 +578,9 @@ fn batches_to_response(
             // - function calls like "lower(c)" -> "lower"
             // - DataFusion internal names like "Int64(1)" -> "?column?"
             // - expressions with embedded type constructors like "t.a / Int64(2)" -> "?column?"
-            let name = if !f.name().contains('(') {
-                f.name().clone()
-            } else if has_type_constructor(f.name()) {
-                "?column?".to_owned()
-            } else if let Some(func) = f.name().split('(').next() {
-                if func.starts_with(|c: char| c.is_ascii_uppercase()) {
-                    "?column?".to_owned()
-                } else {
-                    func.to_owned()
-                }
-            } else {
-                f.name().clone()
-            };
+            // - boolean expressions like "t.a AND t.b" -> "?column?"
+            // - CAST(... AS Type) -> lowercase type name (e.g. "bool")
+            let name = df_column_to_pg_name(f.name());
             FieldInfo::new(
                 name,
                 None,
@@ -560,13 +622,51 @@ fn batches_to_response_trimmed(
     batches_to_response(batches, &trimmed_schema)
 }
 
-/// Check if a DataFusion column name contains a type constructor (e.g. "Int64(2)").
-fn has_type_constructor(name: &str) -> bool {
-    const CTORS: &[&str] = &[
-        "Int8(", "Int16(", "Int32(", "Int64(", "UInt8(", "UInt16(", "UInt32(", "UInt64(",
-        "Float32(", "Float64(", "Utf8(", "Boolean(",
-    ];
-    CTORS.iter().any(|c| name.contains(c))
+/// Map a DataFusion column name to PostgreSQL display name.
+fn df_column_to_pg_name(name: &str) -> String {
+    // Boolean/logical expressions -> ?column?
+    if name.contains(" AND ") || name.contains(" OR ") {
+        return "?column?".to_owned();
+    }
+    // CAST(... AS Type) -> lowercase type name
+    if let Some(cast_type) = extract_cast_type(name) {
+        return cast_type;
+    }
+    if !name.contains('(') {
+        return name.to_owned();
+    }
+    // Function calls: name starts with a simple lowercase identifier before "("
+    // (even if arguments contain type constructors like Utf8("..."))
+    if let Some(func) = name.split('(').next() {
+        if func.starts_with(|c: char| c.is_ascii_lowercase())
+            && func.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return func.to_owned();
+        }
+    }
+    // Type constructors, expressions, or uppercase names -> ?column?
+    "?column?".to_owned()
+}
+
+/// Extract the target type name from a CAST expression column name.
+/// "CAST(Int64(0) AS Boolean)" -> Some("bool")
+fn extract_cast_type(name: &str) -> Option<String> {
+    let rest = name.strip_prefix("CAST(")?;
+    let as_idx = rest.rfind(" AS ")?;
+    let type_part = rest[as_idx + 4..].trim_end_matches(')').trim();
+    Some(
+        match type_part {
+            "Boolean" => "bool",
+            "Int16" => "int2",
+            "Int32" => "int4",
+            "Int64" => "int8",
+            "Float32" => "float4",
+            "Float64" => "float8",
+            "Utf8" | "LargeUtf8" => "text",
+            _ => return None,
+        }
+        .to_owned(),
+    )
 }
 
 fn arrow_to_pg_type(dt: &DataType) -> Type {
@@ -1443,6 +1543,62 @@ fn user_error_with_position(code: &str, msg: &str, pos: Option<usize>) -> PgWire
     PgWireError::UserError(Box::new(info))
 }
 
+/// Add cursor position to "invalid input syntax" errors from parser.
+fn add_input_syntax_position(err: PgWireError, sql: &str) -> PgWireError {
+    if let PgWireError::UserError(ref info) = err {
+        if info.message.starts_with("invalid input syntax for type") {
+            // Extract the value from the error: ...type boolean: "XXX"
+            if let Some(start) = info.message.rfind('"') {
+                let val_start = info.message[..start].rfind('"');
+                if let Some(vs) = val_start {
+                    let val = &info.message[vs + 1..start];
+                    // Find the string literal position in SQL
+                    if let Some(pos) = sql.find(&format!("'{}'", val)).map(|p| p + 1) {
+                        let mut new_info = pgwire::error::ErrorInfo::new(
+                            info.severity.clone(),
+                            info.code.clone(),
+                            info.message.clone(),
+                        );
+                        new_info.position = Some(pos.to_string());
+                        return PgWireError::UserError(Box::new(new_info));
+                    }
+                }
+            }
+        }
+    }
+    err
+}
+
+/// Extract the original string literal from SQL that was cast to boolean.
+/// For `'  tru e '::text::boolean`, returns `"  tru e "`.
+fn extract_cast_source_literal(sql: &str, trimmed_val: &str) -> Option<String> {
+    // Find a string literal in the SQL that contains the trimmed value
+    let mut i = 0;
+    let bytes = sql.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'\'' {
+            let start = i + 1;
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\'' {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                        i += 2;
+                        continue;
+                    }
+                    let literal = &sql[start..i];
+                    if literal.trim() == trimmed_val && literal != trimmed_val {
+                        return Some(literal.to_string());
+                    }
+                    break;
+                }
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 /// Find 1-indexed byte position of a bare column name in the SQL.
 fn find_column_position(sql: &str, qualified_col: &str, in_having: bool) -> Option<usize> {
     let bare = qualified_col.rsplit('.').next()?;
@@ -1530,6 +1686,39 @@ fn df_to_pg(e: &datafusion::error::DataFusionError, sql: &str) -> PgWireError {
     let msg = e.to_string();
 
     // Translate DataFusion errors to PostgreSQL-style messages
+
+    // Boolean cast errors: "Arrow error: Cast error: Cannot cast value 'X' to value of Boolean type"
+    if msg.contains("Cannot cast value") && msg.contains("Boolean") {
+        if let Some(val) = msg
+            .split("Cannot cast value '")
+            .nth(1)
+            .and_then(|s| s.split("' to value").next())
+        {
+            // Check if this is a `bool 'value'` typed-string syntax (has position)
+            // or a `::boolean` cast (no position)
+            let is_typed_string = sql
+                .to_ascii_lowercase()
+                .contains(&format!("bool '{}'", val.to_ascii_lowercase()));
+            if is_typed_string {
+                let pg_msg = format!("invalid input syntax for type boolean: \"{}\"", val);
+                // Find position of the string literal after "bool"
+                let lower = sql.to_ascii_lowercase();
+                let pos = lower
+                    .find(&format!("bool '{}'", val.to_ascii_lowercase()))
+                    .map(|p| p + 5 + 1); // skip "bool " and 1-index
+                return user_error_with_position("22P02", &pg_msg, pos);
+            } else {
+                // ::boolean cast - use original (untrimmed) value, no position
+                let original_val = extract_cast_source_literal(sql, val).unwrap_or(val.to_string());
+                let pg_msg = format!(
+                    "invalid input syntax for type boolean: \"{}\"",
+                    original_val
+                );
+                return user_error("22P02", &pg_msg);
+            }
+        }
+    }
+
     if msg.contains("not found") {
         // Extract table name from SQL for a cleaner error
         let table = sql
@@ -1778,6 +1967,54 @@ fn rewrite_duplicate_projections(sql: &str) -> Option<(String, HashMap<usize, us
 }
 
 // -- ORDER BY / GROUP BY rewrite -------------------------------------------
+
+/// Rewrite bare CAST expressions to include an alias matching PG column naming.
+/// e.g. `SELECT 0::boolean` -> `SELECT 0::boolean AS bool`
+fn rewrite_cast_aliases(sql: &str) -> Option<String> {
+    let stmts = Parser::parse_sql(&PostgreSqlDialect {}, sql).ok()?;
+    let mut stmt = stmts.into_iter().next()?;
+    let ast::Statement::Query(ref mut query) = stmt else {
+        return None;
+    };
+    let ast::SetExpr::Select(ref mut select) = *query.body else {
+        return None;
+    };
+    let mut changed = false;
+    for item in &mut select.projection {
+        if let ast::SelectItem::UnnamedExpr(ast::Expr::Cast { data_type, .. }) = item {
+            let alias = pg_type_alias(data_type);
+            if let Some(alias) = alias {
+                let orig = std::mem::replace(item, ast::SelectItem::Wildcard(Default::default()));
+                if let ast::SelectItem::UnnamedExpr(expr) = orig {
+                    *item = ast::SelectItem::ExprWithAlias {
+                        expr,
+                        alias: ast::Ident::new(alias),
+                    };
+                    changed = true;
+                }
+            }
+        }
+    }
+    if changed {
+        Some(stmt.to_string())
+    } else {
+        None
+    }
+}
+
+/// Map a sqlparser DataType to PG's canonical column alias.
+fn pg_type_alias(dt: &ast::DataType) -> Option<&'static str> {
+    match dt {
+        ast::DataType::Bool | ast::DataType::Boolean => Some("bool"),
+        ast::DataType::SmallInt(_) | ast::DataType::Int2(_) => Some("int2"),
+        ast::DataType::Int(_) | ast::DataType::Int4(_) | ast::DataType::Integer(_) => Some("int4"),
+        ast::DataType::BigInt(_) | ast::DataType::Int8(_) => Some("int8"),
+        ast::DataType::Real | ast::DataType::Float4 => Some("float4"),
+        ast::DataType::DoublePrecision | ast::DataType::Float8 => Some("float8"),
+        ast::DataType::Text => Some("text"),
+        _ => None,
+    }
+}
 
 /// Rewrite ORDER BY expressions that match GROUP BY keys but use raw columns
 /// that DataFusion can't resolve after grouping. Adds GROUP BY key to SELECT

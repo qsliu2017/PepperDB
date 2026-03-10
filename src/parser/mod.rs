@@ -113,6 +113,21 @@ pub enum UnaryOp {
     Not,
 }
 
+/// Normalize an ObjectName by lowercasing unquoted identifiers (PG behavior).
+fn normalize_name(name: &ast::ObjectName) -> String {
+    name.0
+        .iter()
+        .map(|ident| {
+            if ident.quote_style.is_some() {
+                ident.value.clone()
+            } else {
+                ident.value.to_ascii_lowercase()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 /// Convert a sqlparser statement to our AST. Called by the executor for
 /// non-SELECT statements. SELECT goes to DataFusion directly.
 pub fn convert_statement(stmt: ast::Statement) -> PgWireResult<Statement> {
@@ -134,10 +149,9 @@ pub fn convert_statement(stmt: ast::Statement) -> PgWireResult<Statement> {
             ..
         } => {
             let table_name = names
-                .into_iter()
-                .next()
-                .ok_or_else(|| unsupported("DROP TABLE requires a name"))?
-                .to_string();
+                .first()
+                .ok_or_else(|| unsupported("DROP TABLE requires a name"))
+                .map(normalize_name)?;
             Ok(Statement::DropTable(DropTableStmt {
                 table_name,
                 if_exists,
@@ -152,7 +166,7 @@ fn convert_create_index(ci: ast::CreateIndex) -> PgWireResult<Statement> {
         .name
         .ok_or_else(|| unsupported("CREATE INDEX requires an index name"))?
         .to_string();
-    let table_name = ci.table_name.to_string();
+    let table_name = normalize_name(&ci.table_name);
     let column_name = ci
         .columns
         .into_iter()
@@ -168,15 +182,20 @@ fn convert_create_index(ci: ast::CreateIndex) -> PgWireResult<Statement> {
 }
 
 fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
-    let table_name = ct.name.to_string();
+    let table_name = normalize_name(&ct.name);
     let if_not_exists = ct.if_not_exists;
     let columns: PgWireResult<Vec<ColumnDef>> = ct
         .columns
         .into_iter()
         .map(|col| {
             let (type_id, typmod) = convert_data_type(&col.data_type)?;
+            let name = if col.name.quote_style.is_some() {
+                col.name.value
+            } else {
+                col.name.value.to_ascii_lowercase()
+            };
             Ok(ColumnDef {
-                name: col.name.value,
+                name,
                 type_id,
                 typmod,
             })
@@ -194,7 +213,7 @@ fn convert_update(
     assignments: Vec<ast::Assignment>,
     selection: Option<ast::Expr>,
 ) -> PgWireResult<Statement> {
-    let table_name = table.relation.to_string();
+    let table_name = table.relation.to_string().to_ascii_lowercase();
     let assigns = assignments
         .into_iter()
         .map(|a| {
@@ -221,7 +240,8 @@ fn convert_delete(del: ast::Delete) -> PgWireResult<Statement> {
             .next()
             .ok_or_else(|| unsupported("DELETE requires FROM"))?
             .relation
-            .to_string(),
+            .to_string()
+            .to_ascii_lowercase(),
     };
     let where_clause = del.selection.map(convert_expr).transpose()?;
     Ok(Statement::Delete(DeleteStmt {
@@ -233,7 +253,7 @@ fn convert_delete(del: ast::Delete) -> PgWireResult<Statement> {
 /// Returns (TypeId, typmod). typmod is the char length for char(n), -1 otherwise.
 fn convert_data_type(dt: &ast::DataType) -> PgWireResult<(TypeId, i32)> {
     match dt {
-        ast::DataType::Boolean => Ok((TypeId::Bool, -1)),
+        ast::DataType::Bool | ast::DataType::Boolean => Ok((TypeId::Bool, -1)),
         ast::DataType::SmallInt(_) | ast::DataType::Int2(_) => Ok((TypeId::Int2, -1)),
         ast::DataType::Int(_) | ast::DataType::Int4(_) | ast::DataType::Integer(_) => {
             Ok((TypeId::Int4, -1))
@@ -256,7 +276,7 @@ fn convert_data_type(dt: &ast::DataType) -> PgWireResult<(TypeId, i32)> {
 }
 
 fn convert_insert(ins: ast::Insert) -> PgWireResult<Statement> {
-    let table_name = ins.table_name.to_string();
+    let table_name = normalize_name(&ins.table_name);
     let source = ins
         .source
         .ok_or_else(|| unsupported("INSERT without VALUES"))?;
@@ -311,6 +331,8 @@ fn convert_expr(expr: ast::Expr) -> PgWireResult<Expr> {
         ast::Expr::Nested(inner) => convert_expr(*inner),
         ast::Expr::IsNull(inner) => Ok(Expr::IsNull(Box::new(convert_expr(*inner)?))),
         ast::Expr::IsNotNull(inner) => Ok(Expr::IsNotNull(Box::new(convert_expr(*inner)?))),
+        // Type 'literal' syntax (e.g. bool 't', int4 '42')
+        ast::Expr::TypedString { data_type, value } => convert_typed_string(&data_type, &value),
         _ => Err(unsupported("Unsupported expression")),
     }
 }
@@ -348,6 +370,60 @@ fn convert_value(value: ast::Value) -> PgWireResult<Expr> {
         ast::Value::Boolean(b) => Ok(Expr::Bool(b)),
         ast::Value::Null => Ok(Expr::Null),
         _ => Err(unsupported("Unsupported value type")),
+    }
+}
+
+/// Handle `type 'literal'` syntax (e.g. `bool 't'`, `int4 '42'`).
+fn convert_typed_string(data_type: &ast::DataType, value: &str) -> PgWireResult<Expr> {
+    match data_type {
+        ast::DataType::Bool | ast::DataType::Boolean => {
+            let trimmed = value.trim();
+            match trimmed.to_ascii_lowercase().as_str() {
+                "t" | "true" | "y" | "yes" | "on" | "1" => Ok(Expr::Bool(true)),
+                "f" | "false" | "n" | "no" | "off" | "of" | "0" => Ok(Expr::Bool(false)),
+                _ => Err(PgWireError::UserError(Box::new(
+                    pgwire::error::ErrorInfo::new(
+                        "ERROR".to_owned(),
+                        "22P02".to_owned(),
+                        format!("invalid input syntax for type boolean: \"{}\"", value),
+                    ),
+                ))),
+            }
+        }
+        ast::DataType::SmallInt(_) | ast::DataType::Int2(_) => {
+            let i: i64 = value
+                .parse()
+                .map_err(|_| unsupported("invalid int2 value"))?;
+            Ok(Expr::Integer(i))
+        }
+        ast::DataType::Int(_) | ast::DataType::Int4(_) | ast::DataType::Integer(_) => {
+            let i: i64 = value
+                .parse()
+                .map_err(|_| unsupported("invalid int4 value"))?;
+            Ok(Expr::Integer(i))
+        }
+        ast::DataType::BigInt(_) | ast::DataType::Int8(_) => {
+            let i: i64 = value
+                .parse()
+                .map_err(|_| unsupported("invalid int8 value"))?;
+            Ok(Expr::Integer(i))
+        }
+        ast::DataType::Real
+        | ast::DataType::Float4
+        | ast::DataType::DoublePrecision
+        | ast::DataType::Float8 => {
+            let f: f64 = value
+                .parse()
+                .map_err(|_| unsupported("invalid float value"))?;
+            Ok(Expr::Float(f))
+        }
+        ast::DataType::Text | ast::DataType::Varchar(_) | ast::DataType::Char(_) => {
+            Ok(Expr::StringLiteral(value.to_string()))
+        }
+        _ => Err(unsupported(&format!(
+            "Unsupported typed string: {} '{}'",
+            data_type, value
+        ))),
     }
 }
 
