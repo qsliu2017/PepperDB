@@ -150,16 +150,42 @@ fn find_line_col(sql: &str, pos: usize) -> (usize, &str, usize) {
 fn format_error_with_position(msg: &str, pos: Option<usize>, sql: &str) -> String {
     let mut out = format!("ERROR:  {}\n", msg);
     if let Some(pos) = pos {
-        let (line_num, line_text, col) = find_line_col(sql, pos);
+        let (line_num, raw_line, col) = find_line_col(sql, pos);
+        let line_text = raw_line.replace('\t', " ");
         let prefix = format!("LINE {}: ", line_num);
-        out.push_str(&prefix);
-        out.push_str(line_text);
-        out.push('\n');
-        let spaces = prefix.len() + col - 1;
-        for _ in 0..spaces {
-            out.push(' ');
+
+        const DISPLAY_SIZE: usize = 60;
+        const MIN_RIGHT_CXT: usize = 10;
+        let curs0 = col - 1; // 0-indexed cursor in line
+
+        if line_text.len() <= DISPLAY_SIZE {
+            out.push_str(&prefix);
+            out.push_str(&line_text);
+            out.push('\n');
+            let spaces = prefix.len() + curs0;
+            out.extend(std::iter::repeat(' ').take(spaces));
+            out.push_str("^\n");
+        } else {
+            let max_start = line_text.len() - DISPLAY_SIZE;
+            let want_start = curs0.saturating_sub(DISPLAY_SIZE - MIN_RIGHT_CXT);
+            let start = want_start.min(max_start);
+            let end = (start + DISPLAY_SIZE).min(line_text.len());
+
+            out.push_str(&prefix);
+            if start > 0 {
+                out.push_str("...");
+            }
+            out.push_str(&line_text[start..end]);
+            if end < line_text.len() {
+                out.push_str("...");
+            }
+            out.push('\n');
+
+            let display_col = curs0 - start + if start > 0 { 3 } else { 0 };
+            let spaces = prefix.len() + display_col;
+            out.extend(std::iter::repeat(' ').take(spaces));
+            out.push_str("^\n");
         }
-        out.push_str("^\n");
     }
     out
 }
@@ -562,7 +588,7 @@ regress_test!(
     // select_distinct,
     // select_distinct_on,
     select_having,
-    // select_implicit,
+    select_implicit,
     // select_into,
     // select_parallel,
     // select_views,

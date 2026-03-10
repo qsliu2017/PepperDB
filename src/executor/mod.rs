@@ -1,6 +1,7 @@
 //! Query executor: routes SELECT to DataFusion, handles DDL/DML directly.
 
 use std::any::Any;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -65,8 +66,11 @@ impl Database {
             .next()
             .ok_or_else(|| user_error("42601", "empty query"))?;
 
-        match &stmt {
+        match stmt {
             ast::Statement::Query(_) => self.execute_select_df(sql).await,
+            ast::Statement::CreateTable(ref ct) if ct.query.is_some() => {
+                self.execute_create_table_as(sql, stmt).await
+            }
             _ => {
                 let our_stmt = parser::convert_statement(stmt)?;
                 self.execute(our_stmt)
@@ -90,16 +94,145 @@ impl Database {
 
     async fn execute_select_df(&self, sql: &str) -> PgWireResult<Response<'static>> {
         // Rewrite constant HAVING clauses (DataFusion doesn't support them).
-        let rewritten = rewrite_constant_having(sql);
-        let sql = rewritten.as_deref().unwrap_or(sql);
+        let rewritten_having = rewrite_constant_having(sql);
+        let sql = rewritten_having.as_deref().unwrap_or(sql);
+
+        // Rewrite ORDER BY expressions matching GROUP BY keys.
+        let rewritten_ob = rewrite_order_by_group_by(sql);
+        let (exec_sql, strip_cols) = match &rewritten_ob {
+            Some((rw, orig_len)) => (rw.as_str(), Some(*orig_len)),
+            None => (sql, None),
+        };
 
         self.register_all_tables()?;
 
-        let df = self.session.sql(sql).await.map_err(|e| df_to_pg(&e, sql))?;
+        let result = self.session.sql(exec_sql).await;
+        match result {
+            Ok(df) => {
+                let arrow_schema = df.schema().inner().clone();
+                let batches = df.collect().await.map_err(|e| df_to_pg(&e, sql))?;
+                if let Some(orig_len) = strip_cols {
+                    return batches_to_response_trimmed(batches, &arrow_schema, orig_len);
+                }
+                batches_to_response(batches, &arrow_schema)
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("Projections require unique expression names") {
+                    return self.execute_select_df_dedup(sql).await;
+                }
+                Err(df_to_pg(&e, sql))
+            }
+        }
+    }
+
+    /// Execute a SELECT with duplicate projections by aliasing duplicates.
+    async fn execute_select_df_dedup(&self, sql: &str) -> PgWireResult<Response<'static>> {
+        let (rewritten, dup_map) = rewrite_duplicate_projections(sql).ok_or_else(|| {
+            user_error("XX000", "internal: failed to rewrite duplicate projections")
+        })?;
+        let df = self
+            .session
+            .sql(&rewritten)
+            .await
+            .map_err(|e| df_to_pg(&e, sql))?;
         let arrow_schema = df.schema().inner().clone();
         let batches = df.collect().await.map_err(|e| df_to_pg(&e, sql))?;
 
-        batches_to_response(batches, &arrow_schema)
+        // Fix column names: replace aliases with their first occurrence's name
+        let fields: Vec<Arc<Field>> = arrow_schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                if let Some(&first_idx) = dup_map.get(&i) {
+                    Arc::new(Field::new(
+                        arrow_schema.field(first_idx).name(),
+                        f.data_type().clone(),
+                        f.is_nullable(),
+                    ))
+                } else {
+                    f.clone()
+                }
+            })
+            .collect();
+        let fixed_schema = Schema::new(fields);
+        batches_to_response(batches, &fixed_schema)
+    }
+
+    // -- CREATE TABLE AS SELECT (CTAS) ----------------------------------------
+
+    async fn execute_create_table_as(
+        &self,
+        sql: &str,
+        stmt: ast::Statement,
+    ) -> PgWireResult<Response<'static>> {
+        let ast::Statement::CreateTable(ct) = stmt else {
+            unreachable!()
+        };
+        let table_name = ct.name.to_string();
+        let select_sql = ct.query.unwrap().to_string();
+
+        // Apply ORDER BY / GROUP BY rewrite if needed
+        let rewritten_ob = rewrite_order_by_group_by(&select_sql);
+        let (exec_sql, orig_col_count) = match &rewritten_ob {
+            Some((rw, orig_len)) => (rw.as_str(), Some(*orig_len)),
+            None => (select_sql.as_str(), None),
+        };
+
+        // Execute the SELECT via DataFusion
+        self.register_all_tables()?;
+        let df = self
+            .session
+            .sql(exec_sql)
+            .await
+            .map_err(|e| df_to_pg(&e, sql))?;
+        let arrow_schema = df.schema().inner().clone();
+        let batches = df.collect().await.map_err(|e| df_to_pg(&e, sql))?;
+
+        // Derive columns from Arrow schema (only original columns, not rewrite extras)
+        let col_count = orig_col_count.unwrap_or(arrow_schema.fields().len());
+        let columns: Vec<Column> = arrow_schema
+            .fields()
+            .iter()
+            .take(col_count)
+            .enumerate()
+            .map(|(i, f)| {
+                let type_id = arrow_to_type_id(f.data_type());
+                Column {
+                    name: f.name().clone(),
+                    type_id,
+                    col_num: i as u16,
+                    typmod: -1,
+                }
+            })
+            .collect();
+
+        let oid = self.create_table_catalog(&table_name, &columns)?;
+
+        let mut count = 0u64;
+        let disk = self.disk.lock().unwrap();
+        let mut wal = self.wal.lock().unwrap();
+        let mut txn = self.txn.lock().unwrap();
+        let xid = txn.assign_xid();
+
+        for batch in &batches {
+            for row_idx in 0..batch.num_rows() {
+                let datums: Vec<Datum> = columns
+                    .iter()
+                    .enumerate()
+                    .map(|(col_idx, col)| {
+                        arrow_value_to_datum(batch.column(col_idx), row_idx, col.type_id)
+                    })
+                    .collect();
+                let tuple = heap::build_tuple_with_xid(&datums, &columns, xid, false);
+                insert_tuple_to_heap(&disk, &mut wal, oid, &tuple, xid)?;
+                count += 1;
+            }
+        }
+        txn.commit(xid);
+
+        Ok(Response::Execution(Tag::new(&format!("SELECT {}", count))))
     }
 
     fn register_all_tables(&self) -> PgWireResult<()> {
@@ -199,6 +332,55 @@ fn columns_to_arrow_schema(columns: &[Column]) -> SchemaRef {
         .map(|c| Field::new(&c.name, type_id_to_arrow(c.type_id), true))
         .collect();
     Arc::new(Schema::new(fields))
+}
+
+fn arrow_to_type_id(dt: &DataType) -> TypeId {
+    match dt {
+        DataType::Boolean => TypeId::Bool,
+        DataType::Int16 => TypeId::Int2,
+        DataType::Int32 => TypeId::Int4,
+        DataType::Int64 => TypeId::Int8,
+        DataType::Float32 => TypeId::Float4,
+        DataType::Float64 => TypeId::Float8,
+        DataType::Utf8 | DataType::LargeUtf8 => TypeId::Text,
+        _ => TypeId::Text,
+    }
+}
+
+fn arrow_value_to_datum(array: &ArrayRef, row: usize, type_id: TypeId) -> Datum {
+    if array.is_null(row) {
+        return Datum::Null;
+    }
+    match type_id {
+        TypeId::Bool => {
+            let a = array.as_any().downcast_ref::<BooleanArray>().unwrap();
+            Datum::Bool(a.value(row))
+        }
+        TypeId::Int2 => {
+            let a = array.as_any().downcast_ref::<Int16Array>().unwrap();
+            Datum::Int2(a.value(row))
+        }
+        TypeId::Int4 => {
+            let a = array.as_any().downcast_ref::<Int32Array>().unwrap();
+            Datum::Int4(a.value(row))
+        }
+        TypeId::Int8 => {
+            let a = array.as_any().downcast_ref::<Int64Array>().unwrap();
+            Datum::Int8(a.value(row))
+        }
+        TypeId::Float4 => {
+            let a = array.as_any().downcast_ref::<Float32Array>().unwrap();
+            Datum::Float4(a.value(row))
+        }
+        TypeId::Float8 => {
+            let a = array.as_any().downcast_ref::<Float64Array>().unwrap();
+            Datum::Float8(a.value(row))
+        }
+        TypeId::Text => {
+            let a = array.as_any().downcast_ref::<StringArray>().unwrap();
+            Datum::Text(a.value(row).to_string())
+        }
+    }
 }
 
 fn type_id_to_arrow(tid: TypeId) -> DataType {
@@ -323,10 +505,13 @@ fn batches_to_response(
             // DataFusion names columns by expression text. PostgreSQL rules:
             // - function calls like "lower(c)" -> "lower"
             // - DataFusion internal names like "Int64(1)" -> "?column?"
-            let name = if let Some(func) = f.name().split('(').next() {
-                if !f.name().contains('(') {
-                    f.name().clone()
-                } else if func.starts_with(|c: char| c.is_ascii_uppercase()) {
+            // - expressions with embedded type constructors like "t.a / Int64(2)" -> "?column?"
+            let name = if !f.name().contains('(') {
+                f.name().clone()
+            } else if has_type_constructor(f.name()) {
+                "?column?".to_owned()
+            } else if let Some(func) = f.name().split('(').next() {
+                if func.starts_with(|c: char| c.is_ascii_uppercase()) {
                     "?column?".to_owned()
                 } else {
                     func.to_owned()
@@ -361,6 +546,27 @@ fn batches_to_response(
         schema,
         stream::iter(rows),
     )))
+}
+
+/// Like batches_to_response but only includes the first `n` columns (strips extras).
+/// Safe because batches_to_response iterates by schema length, not batch width.
+fn batches_to_response_trimmed(
+    batches: Vec<RecordBatch>,
+    arrow_schema: &Schema,
+    n: usize,
+) -> PgWireResult<Response<'static>> {
+    let trimmed_fields: Vec<Arc<Field>> = arrow_schema.fields().iter().take(n).cloned().collect();
+    let trimmed_schema = Schema::new(trimmed_fields);
+    batches_to_response(batches, &trimmed_schema)
+}
+
+/// Check if a DataFusion column name contains a type constructor (e.g. "Int64(2)").
+fn has_type_constructor(name: &str) -> bool {
+    const CTORS: &[&str] = &[
+        "Int8(", "Int16(", "Int32(", "Int64(", "UInt8(", "UInt16(", "UInt32(", "UInt64(",
+        "Float32(", "Float64(", "Utf8(", "Boolean(",
+    ];
+    CTORS.iter().any(|c| name.contains(c))
 }
 
 fn arrow_to_pg_type(dt: &DataType) -> Type {
@@ -425,6 +631,20 @@ fn encode_arrow_value(
 impl Database {
     // -- CREATE TABLE -----------------------------------------------------
 
+    /// Create table in catalog + disk, returning the assigned OID.
+    fn create_table_catalog(&self, table_name: &str, columns: &[Column]) -> PgWireResult<u32> {
+        let mut catalog = self.catalog.lock().unwrap();
+        let oid = catalog
+            .create_table(table_name, columns.to_vec())
+            .map_err(|e| user_error("42P07", &e))?;
+        let disk = self.disk.lock().unwrap();
+        disk.create_heap_file(oid);
+        bootstrap::insert_pg_class_row(&disk, oid, table_name, columns.len() as i16);
+        bootstrap::insert_pg_attribute_rows(&disk, oid, columns);
+        let _ = bootstrap::update_next_oid(&disk, catalog.next_oid());
+        Ok(oid)
+    }
+
     fn execute_create_table(
         &self,
         ct: crate::parser::CreateTableStmt,
@@ -441,33 +661,14 @@ impl Database {
             })
             .collect();
 
-        {
-            let mut catalog = self.catalog.lock().unwrap();
-            match catalog.create_table(&ct.table_name, columns.clone()) {
-                Ok(oid) => {
-                    let disk = self.disk.lock().unwrap();
-                    disk.create_heap_file(oid);
-                    bootstrap::insert_pg_class_row(
-                        &disk,
-                        oid,
-                        &ct.table_name,
-                        columns.len() as i16,
-                    );
-                    bootstrap::insert_pg_attribute_rows(&disk, oid, &columns);
-                    let _ = bootstrap::update_next_oid(&disk, catalog.next_oid());
-                }
-                Err(e) => {
-                    if ct.if_not_exists {
-                        return Ok(Response::Execution(Tag::new("CREATE TABLE")));
-                    }
-                    return Err(PgWireError::UserError(Box::new(
-                        pgwire::error::ErrorInfo::new("ERROR".to_owned(), "42P07".to_owned(), e),
-                    )));
-                }
+        match self.create_table_catalog(&ct.table_name, &columns) {
+            Ok(_) => Ok(Response::Execution(Tag::new("CREATE TABLE"))),
+            Err(e) if ct.if_not_exists => {
+                let _ = e;
+                Ok(Response::Execution(Tag::new("CREATE TABLE")))
             }
+            Err(e) => Err(e),
         }
-
-        Ok(Response::Execution(Tag::new("CREATE TABLE")))
     }
 
     // -- INSERT -----------------------------------------------------------
@@ -1256,9 +1457,22 @@ fn find_column_position(sql: &str, qualified_col: &str, in_having: bool) -> Opti
     } else {
         sql.len()
     };
-    let search_area = &sql[search_start..search_end];
+    if let Some(pos) = find_bare_in_range(sql, bare, search_start, search_end) {
+        return Some(pos);
+    }
+    // Fallback: search ORDER BY region (for GROUP BY violations in ORDER BY)
+    if !in_having {
+        if let Some(order_start) = upper.find("ORDER BY").map(|i| i + 8) {
+            return find_bare_in_range(sql, bare, order_start, sql.len());
+        }
+    }
+    None
+}
+
+fn find_bare_in_range(sql: &str, bare: &str, start: usize, end: usize) -> Option<usize> {
+    let search_area = &sql[start..end];
     for (i, _) in search_area.match_indices(bare) {
-        let abs_pos = search_start + i;
+        let abs_pos = start + i;
         let before = if abs_pos > 0 {
             sql.as_bytes()[abs_pos - 1]
         } else {
@@ -1279,6 +1493,37 @@ fn find_column_position(sql: &str, qualified_col: &str, in_having: bool) -> Opti
         }
     }
     None
+}
+
+/// Find 1-indexed position of a bare word after a keyword like "GROUP BY".
+fn find_bare_word_position(sql: &str, word: &str, after_keyword: &str) -> Option<usize> {
+    let upper = sql.to_ascii_uppercase();
+    let start = upper.find(&after_keyword.to_ascii_uppercase())? + after_keyword.len();
+    find_bare_in_range(sql, word, start, sql.len())
+}
+
+/// Find 1-indexed position of the LAST bare occurrence of a word in SQL.
+/// Excludes qualified references like `x.b` (preceded by `.`).
+fn find_last_bare_position(sql: &str, word: &str) -> Option<usize> {
+    let mut last = None;
+    for (i, _) in sql.match_indices(word) {
+        let before = if i > 0 { sql.as_bytes()[i - 1] } else { b' ' };
+        let after_pos = i + word.len();
+        let after = if after_pos < sql.len() {
+            sql.as_bytes()[after_pos]
+        } else {
+            b' '
+        };
+        if !before.is_ascii_alphanumeric()
+            && before != b'_'
+            && before != b'.'
+            && !after.is_ascii_alphanumeric()
+            && after != b'_'
+        {
+            last = Some(i + 1);
+        }
+    }
+    last
 }
 
 fn df_to_pg(e: &datafusion::error::DataFusionError, sql: &str) -> PgWireError {
@@ -1325,6 +1570,45 @@ fn df_to_pg(e: &datafusion::error::DataFusionError, sql: &str) -> PgWireError {
             );
             let pos = find_column_position(sql, col, true);
             return user_error_with_position("42803", &pg_msg, pos);
+        }
+    }
+
+    // GROUP BY position out of range
+    if msg.contains("Cannot find column with position") {
+        if let Some(n_str) = msg
+            .split("position ")
+            .nth(1)
+            .and_then(|s| s.split(' ').next())
+        {
+            let pg_msg = format!("GROUP BY position {} is not in select list", n_str);
+            let pos = find_bare_word_position(sql, n_str, "GROUP BY");
+            return user_error_with_position("42P10", &pg_msg, pos);
+        }
+    }
+
+    // Ambiguous column reference
+    if msg.contains("Ambiguous reference to unqualified field") {
+        if let Some(col) = msg.split("field ").nth(1).map(|s| s.trim()) {
+            let pg_msg = format!("column reference \"{}\" is ambiguous", col);
+            let pos = find_last_bare_position(sql, col);
+            return user_error_with_position("42702", &pg_msg, pos);
+        }
+    }
+
+    // GROUP BY violation: "No field named X" after grouping (ORDER BY column not in GROUP BY)
+    if msg.contains("No field named") && msg.contains("Valid fields are") {
+        if let Some(rest) = msg.split("No field named ").nth(1) {
+            if let Some(col) = rest.split('.').nth(1).and_then(|s| s.split('.').next()) {
+                let col = col.trim();
+                // Extract table.col for the PG-style message
+                let qualified = rest.split('.').take(2).collect::<Vec<_>>().join(".");
+                let pg_msg = format!(
+                    "column \"{}\" must appear in the GROUP BY clause or be used in an aggregate function",
+                    qualified
+                );
+                let pos = find_column_position(sql, col, false);
+                return user_error_with_position("42803", &pg_msg, pos);
+            }
         }
     }
 
@@ -1435,6 +1719,123 @@ fn rewrite_constant_having(sql: &str) -> Option<String> {
     }
 
     Some(query.to_string())
+}
+
+// -- Duplicate projection rewrite -------------------------------------------
+
+/// Rewrite SELECT with duplicate expressions to use unique aliases.
+/// Returns (rewritten_sql, map of col_index -> first_occurrence_index).
+fn rewrite_duplicate_projections(sql: &str) -> Option<(String, HashMap<usize, usize>)> {
+    let stmts = Parser::parse_sql(&PostgreSqlDialect {}, sql).ok()?;
+    let mut stmt = stmts.into_iter().next()?;
+    let ast::Statement::Query(ref mut query) = stmt else {
+        return None;
+    };
+    let ast::SetExpr::Select(ref mut select) = *query.body else {
+        return None;
+    };
+
+    let expr_strings: Vec<String> = select
+        .projection
+        .iter()
+        .map(|item| match item {
+            ast::SelectItem::UnnamedExpr(e) | ast::SelectItem::ExprWithAlias { expr: e, .. } => {
+                e.to_string()
+            }
+            _ => item.to_string(),
+        })
+        .collect();
+
+    let mut first_occ: HashMap<String, usize> = HashMap::new();
+    let mut dup_map: HashMap<usize, usize> = HashMap::new();
+    let mut has_dups = false;
+
+    for (i, key) in expr_strings.iter().enumerate() {
+        if let Some(&first) = first_occ.get(key) {
+            dup_map.insert(i, first);
+            has_dups = true;
+        } else {
+            first_occ.insert(key.clone(), i);
+        }
+    }
+    if !has_dups {
+        return None;
+    }
+
+    // Alias duplicate occurrences (second+)
+    for &i in dup_map.keys() {
+        let alias = format!("__pepper_dup_{}", i);
+        let item = &mut select.projection[i];
+        if let ast::SelectItem::UnnamedExpr(expr) = item {
+            *item = ast::SelectItem::ExprWithAlias {
+                expr: expr.clone(),
+                alias: ast::Ident::new(alias),
+            };
+        }
+    }
+
+    Some((stmt.to_string(), dup_map))
+}
+
+// -- ORDER BY / GROUP BY rewrite -------------------------------------------
+
+/// Rewrite ORDER BY expressions that match GROUP BY keys but use raw columns
+/// that DataFusion can't resolve after grouping. Adds GROUP BY key to SELECT
+/// with an alias and rewrites ORDER BY to reference the alias.
+/// Returns (rewritten_sql, original_select_count).
+fn rewrite_order_by_group_by(sql: &str) -> Option<(String, usize)> {
+    let stmts = Parser::parse_sql(&PostgreSqlDialect {}, sql).ok()?;
+    let mut stmt = stmts.into_iter().next()?;
+    let ast::Statement::Query(ref mut query) = stmt else {
+        return None;
+    };
+    let order_by = query.order_by.as_mut()?;
+    let ast::SetExpr::Select(ref mut select) = *query.body else {
+        return None;
+    };
+
+    let group_by_exprs: Vec<ast::Expr> = match &select.group_by {
+        ast::GroupByExpr::Expressions(exprs, _) => exprs.clone(),
+        _ => return None,
+    };
+    if group_by_exprs.is_empty() {
+        return None;
+    }
+
+    let orig_select_len = select.projection.len();
+    let mut aliases: Vec<(ast::Expr, String)> = Vec::new();
+    let mut modified = false;
+
+    for item in order_by.exprs.iter_mut() {
+        // Skip positional references (e.g. ORDER BY 1)
+        if matches!(&item.expr, ast::Expr::Value(ast::Value::Number(..))) {
+            continue;
+        }
+        for gb in &group_by_exprs {
+            if matches!(gb, ast::Expr::Value(ast::Value::Number(..))) {
+                continue;
+            }
+            if item.expr == *gb {
+                let alias = format!("__pepper_ob_{}", aliases.len());
+                aliases.push((gb.clone(), alias.clone()));
+                item.expr = ast::Expr::Identifier(ast::Ident::new(&alias));
+                modified = true;
+                break;
+            }
+        }
+    }
+    if !modified {
+        return None;
+    }
+
+    for (expr, alias) in aliases {
+        select.projection.push(ast::SelectItem::ExprWithAlias {
+            expr,
+            alias: ast::Ident::new(alias),
+        });
+    }
+
+    Some((stmt.to_string(), orig_select_len))
 }
 
 #[cfg(test)]
