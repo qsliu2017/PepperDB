@@ -374,6 +374,9 @@ async fn run_sql(sql: &str, db: &Database) -> String {
                 Err(PgWireError::UserError(info)) => {
                     let pos = info.position.as_ref().and_then(|p| p.parse::<usize>().ok());
                     out.push_str(&format_error_with_position(&info.message, pos, &clean_sql));
+                    if let Some(hint) = &info.hint {
+                        out.push_str(&format!("HINT:  {}\n", hint));
+                    }
                 }
                 Err(e) => {
                     out.push_str(&format_error(&e.to_string()));
@@ -494,7 +497,7 @@ regress_test!(
     // database,
     // date,
     // dbsize,
-    // delete,
+    delete,
     // dependency,
     // domain,
     // drop_if_exists,

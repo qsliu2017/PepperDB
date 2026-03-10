@@ -46,6 +46,7 @@ pub struct UpdateStmt {
 #[derive(Debug)]
 pub struct DeleteStmt {
     pub table_name: String,
+    pub alias: Option<String>,
     pub where_clause: Option<Expr>,
 }
 
@@ -60,11 +61,14 @@ pub struct ColumnDef {
     pub name: String,
     pub type_id: TypeId,
     pub typmod: i32,
+    /// Column has SERIAL auto-increment behavior.
+    pub is_serial: bool,
 }
 
 #[derive(Debug)]
 pub struct InsertStmt {
     pub table_name: String,
+    pub columns: Option<Vec<String>>,
     pub values: Vec<Vec<Expr>>,
 }
 
@@ -88,6 +92,10 @@ pub enum Expr {
     },
     IsNull(Box<Expr>),
     IsNotNull(Box<Expr>),
+    FunctionCall {
+        name: String,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,7 +196,7 @@ fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
         .columns
         .into_iter()
         .map(|col| {
-            let (type_id, typmod) = convert_data_type(&col.data_type)?;
+            let (type_id, typmod, is_serial) = convert_data_type(&col.data_type)?;
             let name = if col.name.quote_style.is_some() {
                 col.name.value
             } else {
@@ -198,6 +206,7 @@ fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
                 name,
                 type_id,
                 typmod,
+                is_serial,
             })
         })
         .collect();
@@ -234,42 +243,54 @@ fn convert_update(
 }
 
 fn convert_delete(del: ast::Delete) -> PgWireResult<Statement> {
-    let table_name = match del.from {
-        ast::FromTable::WithFromKeyword(tables) | ast::FromTable::WithoutKeyword(tables) => tables
-            .into_iter()
-            .next()
-            .ok_or_else(|| unsupported("DELETE requires FROM"))?
-            .relation
-            .to_string()
-            .to_ascii_lowercase(),
+    let (table_name, alias) = match del.from {
+        ast::FromTable::WithFromKeyword(tables) | ast::FromTable::WithoutKeyword(tables) => {
+            let twj = tables
+                .into_iter()
+                .next()
+                .ok_or_else(|| unsupported("DELETE requires FROM"))?;
+            match twj.relation {
+                ast::TableFactor::Table { name, alias, .. } => {
+                    let tname = normalize_name(&name);
+                    let aname = alias.map(|a| a.name.value.to_ascii_lowercase());
+                    (tname, aname)
+                }
+                other => (other.to_string().to_ascii_lowercase(), None),
+            }
+        }
     };
     let where_clause = del.selection.map(convert_expr).transpose()?;
     Ok(Statement::Delete(DeleteStmt {
         table_name,
+        alias,
         where_clause,
     }))
 }
 
-/// Returns (TypeId, typmod). typmod is the char length for char(n), -1 otherwise.
-fn convert_data_type(dt: &ast::DataType) -> PgWireResult<(TypeId, i32)> {
+/// Returns (TypeId, typmod, is_serial).
+fn convert_data_type(dt: &ast::DataType) -> PgWireResult<(TypeId, i32, bool)> {
     match dt {
-        ast::DataType::Bool | ast::DataType::Boolean => Ok((TypeId::Bool, -1)),
-        ast::DataType::SmallInt(_) | ast::DataType::Int2(_) => Ok((TypeId::Int2, -1)),
+        ast::DataType::Bool | ast::DataType::Boolean => Ok((TypeId::Bool, -1, false)),
+        ast::DataType::SmallInt(_) | ast::DataType::Int2(_) => Ok((TypeId::Int2, -1, false)),
         ast::DataType::Int(_) | ast::DataType::Int4(_) | ast::DataType::Integer(_) => {
-            Ok((TypeId::Int4, -1))
+            Ok((TypeId::Int4, -1, false))
         }
-        ast::DataType::BigInt(_) | ast::DataType::Int8(_) => Ok((TypeId::Int8, -1)),
-        ast::DataType::Real | ast::DataType::Float4 => Ok((TypeId::Float4, -1)),
-        ast::DataType::DoublePrecision | ast::DataType::Float8 => Ok((TypeId::Float8, -1)),
+        ast::DataType::BigInt(_) | ast::DataType::Int8(_) => Ok((TypeId::Int8, -1, false)),
+        ast::DataType::Real | ast::DataType::Float4 => Ok((TypeId::Float4, -1, false)),
+        ast::DataType::DoublePrecision | ast::DataType::Float8 => Ok((TypeId::Float8, -1, false)),
         ast::DataType::Text | ast::DataType::Varchar(_) | ast::DataType::CharVarying(_) => {
-            Ok((TypeId::Text, -1))
+            Ok((TypeId::Text, -1, false))
         }
         ast::DataType::Char(len) | ast::DataType::Character(len) => {
             let n = match len {
                 Some(ast::CharacterLength::IntegerLength { length, .. }) => *length as i32,
                 _ => 1,
             };
-            Ok((TypeId::Text, n))
+            Ok((TypeId::Text, n, false))
+        }
+        // SERIAL = auto-incrementing INT4
+        ast::DataType::Custom(name, _) if name.to_string().eq_ignore_ascii_case("serial") => {
+            Ok((TypeId::Int4, -1, true))
         }
         other => Err(unsupported(&format!("Unsupported type: {}", other))),
     }
@@ -277,6 +298,16 @@ fn convert_data_type(dt: &ast::DataType) -> PgWireResult<(TypeId, i32)> {
 
 fn convert_insert(ins: ast::Insert) -> PgWireResult<Statement> {
     let table_name = normalize_name(&ins.table_name);
+    let columns = if ins.columns.is_empty() {
+        None
+    } else {
+        Some(
+            ins.columns
+                .iter()
+                .map(|c| c.value.to_ascii_lowercase())
+                .collect(),
+        )
+    };
     let source = ins
         .source
         .ok_or_else(|| unsupported("INSERT without VALUES"))?;
@@ -288,6 +319,7 @@ fn convert_insert(ins: ast::Insert) -> PgWireResult<Statement> {
                 .collect();
             Ok(Statement::Insert(InsertStmt {
                 table_name,
+                columns,
                 values: values?,
             }))
         }
@@ -331,6 +363,29 @@ fn convert_expr(expr: ast::Expr) -> PgWireResult<Expr> {
         ast::Expr::Nested(inner) => convert_expr(*inner),
         ast::Expr::IsNull(inner) => Ok(Expr::IsNull(Box::new(convert_expr(*inner)?))),
         ast::Expr::IsNotNull(inner) => Ok(Expr::IsNotNull(Box::new(convert_expr(*inner)?))),
+        // table.column or alias.column
+        ast::Expr::CompoundIdentifier(parts) => {
+            let col = parts
+                .last()
+                .ok_or_else(|| unsupported("empty identifier"))?;
+            Ok(Expr::ColumnRef(col.value.to_ascii_lowercase()))
+        }
+        // Function calls (e.g. repeat('x', 10))
+        ast::Expr::Function(func) => {
+            let name = func.name.to_string().to_ascii_lowercase();
+            let args = match func.args {
+                ast::FunctionArguments::List(arg_list) => arg_list
+                    .args
+                    .into_iter()
+                    .map(|a| match a {
+                        ast::FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(e)) => convert_expr(e),
+                        _ => Err(unsupported("Unsupported function argument")),
+                    })
+                    .collect::<PgWireResult<Vec<_>>>()?,
+                _ => Vec::new(),
+            };
+            Ok(Expr::FunctionCall { name, args })
+        }
         // Type 'literal' syntax (e.g. bool 't', int4 '42')
         ast::Expr::TypedString { data_type, value } => convert_typed_string(&data_type, &value),
         _ => Err(unsupported("Unsupported expression")),

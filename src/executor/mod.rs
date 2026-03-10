@@ -77,6 +77,15 @@ impl Database {
             ast::Statement::CreateTable(ref ct) if ct.query.is_some() => {
                 self.execute_create_table_as(sql, stmt).await
             }
+            ast::Statement::Delete(ref del) => {
+                // Check for invalid table name reference when alias is defined
+                if let Some(err) = check_delete_alias_conflict(del, sql) {
+                    return Err(err);
+                }
+                let our_stmt = parser::convert_statement(stmt)
+                    .map_err(|e| add_input_syntax_position(e, sql))?;
+                self.execute(our_stmt)
+            }
             _ => {
                 let our_stmt = parser::convert_statement(stmt).map_err(|e| {
                     // Add cursor position for "invalid input syntax" errors from typed string parsing
@@ -316,6 +325,7 @@ impl Database {
                 columns: table.columns.clone(),
                 disk: self.disk.clone(),
                 txn: self.txn.clone(),
+                toast_store: self.toast_store.clone(),
             };
             let _ = self.session.deregister_table(&table.name);
             self.session
@@ -334,6 +344,7 @@ struct HeapTableProvider {
     columns: Vec<Column>,
     disk: Arc<Mutex<DiskManager>>,
     txn: Arc<Mutex<TxnManager>>,
+    toast_store: Arc<Mutex<HashMap<u64, String>>>,
 }
 
 impl std::fmt::Debug for HeapTableProvider {
@@ -387,6 +398,7 @@ impl HeapTableProvider {
                 if let Some(datums) =
                     heap::read_tuple_mvcc(&page, item_idx, &self.columns, &snapshot, txn.clog())
                 {
+                    let datums = resolve_toast_markers(datums, &self.toast_store);
                     tuples.push(datums);
                 }
             }
@@ -641,7 +653,11 @@ fn df_column_to_pg_name(name: &str) -> String {
         if func.starts_with(|c: char| c.is_ascii_lowercase())
             && func.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         {
-            return func.to_owned();
+            // DataFusion canonicalizes some function names; map back to PG names
+            return match func {
+                "character_length" => "char_length".to_owned(),
+                _ => func.to_owned(),
+            };
         }
     }
     // Type constructors, expressions, or uppercase names -> ?column?
@@ -733,9 +749,18 @@ impl Database {
 
     /// Create table in catalog + disk, returning the assigned OID.
     fn create_table_catalog(&self, table_name: &str, columns: &[Column]) -> PgWireResult<u32> {
+        self.create_table_catalog_with_serials(table_name, columns, Vec::new())
+    }
+
+    fn create_table_catalog_with_serials(
+        &self,
+        table_name: &str,
+        columns: &[Column],
+        serial_columns: Vec<usize>,
+    ) -> PgWireResult<u32> {
         let mut catalog = self.catalog.lock().unwrap();
         let oid = catalog
-            .create_table(table_name, columns.to_vec())
+            .create_table_with_serials(table_name, columns.to_vec(), serial_columns)
             .map_err(|e| user_error("42P07", &e))?;
         let disk = self.disk.lock().unwrap();
         disk.create_heap_file(oid);
@@ -749,6 +774,13 @@ impl Database {
         &self,
         ct: crate::parser::CreateTableStmt,
     ) -> PgWireResult<Response<'static>> {
+        let serial_columns: Vec<usize> = ct
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_serial)
+            .map(|(i, _)| i)
+            .collect();
         let columns: Vec<Column> = ct
             .columns
             .iter()
@@ -761,7 +793,7 @@ impl Database {
             })
             .collect();
 
-        match self.create_table_catalog(&ct.table_name, &columns) {
+        match self.create_table_catalog_with_serials(&ct.table_name, &columns, serial_columns) {
             Ok(_) => Ok(Response::Execution(Tag::new("CREATE TABLE"))),
             Err(e) if ct.if_not_exists => {
                 let _ = e;
@@ -774,7 +806,7 @@ impl Database {
     // -- INSERT -----------------------------------------------------------
 
     fn execute_insert(&self, ins: crate::parser::InsertStmt) -> PgWireResult<Response<'static>> {
-        let (oid, columns) = {
+        let (oid, columns, serial_columns, serial_counter) = {
             let catalog = self.catalog.lock().unwrap();
             let table = catalog.get_table(&ins.table_name).ok_or_else(|| {
                 user_error(
@@ -782,7 +814,37 @@ impl Database {
                     &format!("relation \"{}\" does not exist", ins.table_name),
                 )
             })?;
-            (table.oid, table.columns.clone())
+            (
+                table.oid,
+                table.columns.clone(),
+                table.serial_columns.clone(),
+                table.serial_counter.clone(),
+            )
+        };
+
+        // Build column index mapping when INSERT specifies columns
+        let col_map: Option<Vec<usize>> = ins
+            .columns
+            .as_ref()
+            .map(|insert_cols| {
+                insert_cols
+                    .iter()
+                    .map(|name| {
+                        columns.iter().position(|c| c.name == *name).ok_or_else(|| {
+                            user_error("42703", &format!("column \"{}\" does not exist", name))
+                        })
+                    })
+                    .collect::<PgWireResult<Vec<_>>>()
+            })
+            .transpose()?;
+
+        let indexes: Vec<_> = {
+            let catalog = self.catalog.lock().unwrap();
+            catalog
+                .get_indexes_for_table(oid)
+                .into_iter()
+                .cloned()
+                .collect()
         };
 
         let mut count = 0u64;
@@ -792,7 +854,7 @@ impl Database {
         let xid = txn.assign_xid();
 
         for row_exprs in &ins.values {
-            if row_exprs.len() != columns.len() {
+            if col_map.is_none() && row_exprs.len() != columns.len() {
                 return Err(PgWireError::UserError(Box::new(
                     pgwire::error::ErrorInfo::new(
                         "ERROR".to_owned(),
@@ -806,23 +868,34 @@ impl Database {
                 )));
             }
 
-            let datums: Vec<Datum> = row_exprs
-                .iter()
-                .zip(columns.iter())
-                .map(|(expr, col)| expr_to_datum(expr, col))
-                .collect::<PgWireResult<Vec<_>>>()?;
+            let datums: Vec<Datum> = if let Some(ref map) = col_map {
+                // Partial INSERT: build full datum vector, fill defaults
+                let mut datums = vec![Datum::Null; columns.len()];
+                for (expr_idx, &col_idx) in map.iter().enumerate() {
+                    datums[col_idx] = expr_to_datum(&row_exprs[expr_idx], &columns[col_idx])?;
+                }
+                // Auto-fill SERIAL columns that are still NULL
+                for &si in &serial_columns {
+                    if datums[si] == Datum::Null {
+                        let val = serial_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        datums[si] = Datum::Int4(val);
+                    }
+                }
+                datums
+            } else {
+                row_exprs
+                    .iter()
+                    .zip(columns.iter())
+                    .map(|(expr, col)| expr_to_datum(expr, col))
+                    .collect::<PgWireResult<Vec<_>>>()?
+            };
+
+            // TOAST: if tuple would be too large for a page, replace large text with markers
+            let datums = toast_if_needed(datums, &columns, self);
 
             let tuple = heap::build_tuple_with_xid(&datums, &columns, xid, false);
             let (pg_id, item_idx) = insert_tuple_to_heap(&disk, &mut wal, oid, &tuple, xid)?;
 
-            // Maintain indexes
-            let catalog = self.catalog.lock().unwrap();
-            let indexes: Vec<_> = catalog
-                .get_indexes_for_table(oid)
-                .into_iter()
-                .cloned()
-                .collect();
-            drop(catalog);
             for idx in &indexes {
                 let col_pos = columns.iter().position(|c| c.name == idx.column_name);
                 if let Some(pos) = col_pos {
@@ -1217,6 +1290,10 @@ fn eval_expr(expr: &Expr, row: &[Datum], columns: &[Column]) -> Datum {
             let v = eval_expr(inner, row, columns);
             Datum::Bool(v != Datum::Null)
         }
+        Expr::FunctionCall { name, args } => {
+            let arg_vals: Vec<Datum> = args.iter().map(|a| eval_expr(a, row, columns)).collect();
+            eval_function(name, &arg_vals)
+        }
     }
 }
 
@@ -1234,6 +1311,88 @@ fn eval_unary(op: UnaryOp, v: &Datum) -> Datum {
             Datum::Bool(b) => Datum::Bool(!b),
             _ => Datum::Null,
         },
+    }
+}
+
+/// Resolve TOAST markers in a tuple's datums, replacing markers with full values.
+fn resolve_toast_markers(datums: Vec<Datum>, store: &Mutex<HashMap<u64, String>>) -> Vec<Datum> {
+    datums
+        .into_iter()
+        .map(|d| match &d {
+            Datum::Text(s) if s.starts_with(crate::TOAST_MARKER) => {
+                let id_str = &s[crate::TOAST_MARKER.len()..];
+                if let Ok(id) = id_str.parse::<u64>() {
+                    if let Some(val) = store.lock().unwrap().get(&id) {
+                        return Datum::Text(val.clone());
+                    }
+                }
+                d
+            }
+            _ => d,
+        })
+        .collect()
+}
+
+/// Max tuple data that fits on a page (conservative estimate).
+const MAX_TUPLE_SIZE: usize = PAGE_SIZE - 128;
+
+fn estimate_tuple_size(datums: &[Datum], columns: &[Column]) -> usize {
+    datums
+        .iter()
+        .zip(columns.iter())
+        .map(|(d, c)| match d {
+            Datum::Text(s) => s.len() + 4, // varlena header
+            _ => c.type_id.len().max(4) as usize,
+        })
+        .sum::<usize>()
+        + 32 // tuple header + null bitmap
+}
+
+/// Replace large text values with TOAST markers if tuple would be too large.
+fn toast_if_needed(mut datums: Vec<Datum>, columns: &[Column], db: &Database) -> Vec<Datum> {
+    if estimate_tuple_size(&datums, columns) <= MAX_TUPLE_SIZE {
+        return datums;
+    }
+    // Toast the largest text values first until we fit
+    loop {
+        let (largest_idx, largest_len) = datums
+            .iter()
+            .enumerate()
+            .filter_map(|(i, d)| match d {
+                Datum::Text(s) if !s.starts_with(crate::TOAST_MARKER) => Some((i, s.len())),
+                _ => None,
+            })
+            .max_by_key(|(_, len)| *len)
+            .unwrap_or((0, 0));
+        if largest_len < 64 {
+            break;
+        }
+        if let Datum::Text(val) = std::mem::replace(&mut datums[largest_idx], Datum::Null) {
+            let marker = db.toast_store_value(val);
+            datums[largest_idx] = Datum::Text(marker);
+        }
+        if estimate_tuple_size(&datums, columns) <= MAX_TUPLE_SIZE {
+            break;
+        }
+    }
+    datums
+}
+
+fn eval_function(name: &str, args: &[Datum]) -> Datum {
+    match name {
+        "repeat" if args.len() == 2 => {
+            if let (Datum::Text(s), n) = (&args[0], &args[1]) {
+                let count = match n {
+                    Datum::Int4(i) => *i as usize,
+                    Datum::Int8(i) => *i as usize,
+                    _ => return Datum::Null,
+                };
+                Datum::Text(s.repeat(count))
+            } else {
+                Datum::Null
+            }
+        }
+        _ => Datum::Null,
     }
 }
 
@@ -1522,6 +1681,13 @@ fn expr_to_datum(expr: &Expr, col: &Column) -> PgWireResult<Datum> {
             }
             _ => Err(user_error("42804", "Type mismatch in expression")),
         },
+        Expr::FunctionCall { name, args } => {
+            let arg_vals: Vec<Datum> = args
+                .iter()
+                .map(|a| Ok(eval_expr(a, &[], &[])))
+                .collect::<PgWireResult<Vec<_>>>()?;
+            Ok(eval_function(name, &arg_vals))
+        }
         _ => Err(user_error("42804", "Type mismatch in expression")),
     }
 }
@@ -2073,6 +2239,70 @@ fn rewrite_order_by_group_by(sql: &str) -> Option<(String, usize)> {
     }
 
     Some((stmt.to_string(), orig_select_len))
+}
+
+/// Check if a DELETE's WHERE clause references the original table name when an alias is defined.
+fn check_delete_alias_conflict(del: &ast::Delete, sql: &str) -> Option<PgWireError> {
+    let table_with_joins = match &del.from {
+        ast::FromTable::WithFromKeyword(tables) | ast::FromTable::WithoutKeyword(tables) => {
+            tables.first()?
+        }
+    };
+    let (table_name, alias) = match &table_with_joins.relation {
+        ast::TableFactor::Table { name, alias, .. } => {
+            let tname = name.to_string().to_ascii_lowercase();
+            let aname = alias.as_ref().map(|a| a.name.value.to_ascii_lowercase());
+            (tname, aname?)
+        }
+        _ => return None,
+    };
+    // Walk the WHERE clause looking for CompoundIdentifier with the original table name
+    let selection = del.selection.as_ref()?;
+    let bad_ref = find_table_ref_in_expr(selection, &table_name);
+    if !bad_ref {
+        return None;
+    }
+    // Compute cursor position for the table name reference in WHERE
+    let pos = find_where_table_ref_pos(sql, &table_name);
+    let mut info = pgwire::error::ErrorInfo::new(
+        "ERROR".to_owned(),
+        "42P01".to_owned(),
+        format!(
+            "invalid reference to FROM-clause entry for table \"{}\"",
+            table_name
+        ),
+    );
+    if let Some(p) = pos {
+        info.position = Some(p.to_string());
+    }
+    info.hint = Some(format!(
+        "Perhaps you meant to reference the table alias \"{}\".",
+        alias
+    ));
+    Some(PgWireError::UserError(Box::new(info)))
+}
+
+fn find_table_ref_in_expr(expr: &ast::Expr, table_name: &str) -> bool {
+    match expr {
+        ast::Expr::CompoundIdentifier(parts) => {
+            parts.len() >= 2 && parts[0].value.to_ascii_lowercase() == *table_name
+        }
+        ast::Expr::BinaryOp { left, right, .. } => {
+            find_table_ref_in_expr(left, table_name) || find_table_ref_in_expr(right, table_name)
+        }
+        ast::Expr::UnaryOp { expr, .. } => find_table_ref_in_expr(expr, table_name),
+        ast::Expr::Nested(inner) => find_table_ref_in_expr(inner, table_name),
+        ast::Expr::IsNull(inner) | ast::Expr::IsNotNull(inner) => {
+            find_table_ref_in_expr(inner, table_name)
+        }
+        _ => false,
+    }
+}
+
+fn find_where_table_ref_pos(sql: &str, table_name: &str) -> Option<usize> {
+    let upper = sql.to_ascii_uppercase();
+    let where_start = upper.find("WHERE")? + 5;
+    find_bare_in_range(sql, table_name, where_start, sql.len())
 }
 
 #[cfg(test)]

@@ -213,6 +213,8 @@ pub fn load_catalog(disk: &DiskManager) -> io::Result<Catalog> {
             oid,
             name: relname,
             columns,
+            serial_columns: Vec::new(),
+            serial_counter: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(1)),
         });
     }
 

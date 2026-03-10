@@ -5,6 +5,8 @@ pub mod bootstrap;
 pub mod filenode_map;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
 
 use crate::types::{TypeId, OID};
 
@@ -33,6 +35,10 @@ pub struct Table {
     pub oid: OID,
     pub name: String,
     pub columns: Vec<Column>,
+    /// Column indices that have SERIAL auto-increment behavior.
+    pub serial_columns: Vec<usize>,
+    /// Next value for SERIAL auto-increment columns.
+    pub serial_counter: Arc<AtomicI32>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +84,15 @@ impl Catalog {
     }
 
     pub fn create_table(&mut self, name: &str, columns: Vec<Column>) -> Result<OID, String> {
+        self.create_table_with_serials(name, columns, Vec::new())
+    }
+
+    pub fn create_table_with_serials(
+        &mut self,
+        name: &str,
+        columns: Vec<Column>,
+        serial_columns: Vec<usize>,
+    ) -> Result<OID, String> {
         if self.tables.contains_key(name) {
             return Err(format!("relation \"{}\" already exists", name));
         }
@@ -89,13 +104,18 @@ impl Catalog {
                 oid,
                 name: name.to_owned(),
                 columns,
+                serial_columns,
+                serial_counter: Arc::new(AtomicI32::new(1)),
             },
         );
         Ok(oid)
     }
 
     /// Insert a pre-built Table (used by catalog loader on restart).
-    pub fn insert_table(&mut self, table: Table) {
+    pub fn insert_table(&mut self, mut table: Table) {
+        if table.serial_counter.load(Ordering::Relaxed) == 0 {
+            table.serial_counter = Arc::new(AtomicI32::new(1));
+        }
         self.tables.insert(table.name.clone(), table);
     }
 

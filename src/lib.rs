@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
 pub mod catalog;
@@ -22,6 +24,9 @@ mod udfs;
 /// Default database OID, matching PostgreSQL's `postgres` database.
 const DEFAULT_DB_OID: u32 = 5;
 
+/// TOAST marker prefix. Text values starting with this are toast pointers.
+pub const TOAST_MARKER: &str = "\x00TOAST:";
+
 pub struct Database {
     pub catalog: Mutex<Catalog>,
     pub disk: Arc<Mutex<DiskManager>>,
@@ -29,6 +34,9 @@ pub struct Database {
     pub wal: Mutex<WalWriter>,
     pub txn: Arc<Mutex<TxnManager>>,
     control: Mutex<ControlFileData>,
+    /// In-memory store for large text values (simple TOAST).
+    pub toast_store: Arc<Mutex<HashMap<u64, String>>>,
+    toast_next_id: Arc<AtomicU64>,
 }
 
 impl Database {
@@ -90,7 +98,19 @@ impl Database {
             wal: Mutex::new(wal_writer),
             txn: Arc::new(Mutex::new(txn_mgr)),
             control: Mutex::new(control),
+            toast_store: Arc::new(Mutex::new(HashMap::new())),
+            toast_next_id: Arc::new(AtomicU64::new(1)),
         }
+    }
+
+    /// Store a large text value in the TOAST store and return a marker string.
+    pub fn toast_store_value(&self, value: String) -> String {
+        let id = self
+            .toast_next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let marker = format!("{}{}", TOAST_MARKER, id);
+        self.toast_store.lock().unwrap().insert(id, value);
+        marker
     }
 
     /// Clean shutdown: flush WAL, write checkpoint, set state to DB_SHUTDOWNED.
