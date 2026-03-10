@@ -134,6 +134,36 @@ fn format_error(msg: &str) -> String {
     format!("ERROR:  {}\n", msg)
 }
 
+/// Find which line and column a 1-indexed cursor position falls on.
+fn find_line_col(sql: &str, pos: usize) -> (usize, &str, usize) {
+    let pos0 = pos.saturating_sub(1);
+    let mut offset = 0;
+    for (i, line) in sql.lines().enumerate() {
+        if pos0 < offset + line.len() {
+            return (i + 1, line, pos - offset);
+        }
+        offset += line.len() + 1; // +1 for \n
+    }
+    (1, sql.lines().next().unwrap_or(sql), pos)
+}
+
+fn format_error_with_position(msg: &str, pos: Option<usize>, sql: &str) -> String {
+    let mut out = format!("ERROR:  {}\n", msg);
+    if let Some(pos) = pos {
+        let (line_num, line_text, col) = find_line_col(sql, pos);
+        let prefix = format!("LINE {}: ", line_num);
+        out.push_str(&prefix);
+        out.push_str(line_text);
+        out.push('\n');
+        let spaces = prefix.len() + col - 1;
+        for _ in 0..spaces {
+            out.push(' ');
+        }
+        out.push_str("^\n");
+    }
+    out
+}
+
 fn format_response(resp: Response) -> String {
     match resp {
         Response::Execution(_) => String::new(),
@@ -287,7 +317,8 @@ async fn run_sql(sql: &str, db: &Database) -> String {
             match db.execute_sql(&clean_sql).await {
                 Ok(resp) => out.push_str(&format_response(resp)),
                 Err(PgWireError::UserError(info)) => {
-                    out.push_str(&format_error(&info.message));
+                    let pos = info.position.as_ref().and_then(|p| p.parse::<usize>().ok());
+                    out.push_str(&format_error_with_position(&info.message, pos, &clean_sql));
                 }
                 Err(e) => {
                     out.push_str(&format_error(&e.to_string()));
@@ -530,7 +561,7 @@ regress_test!(
     // select,
     // select_distinct,
     // select_distinct_on,
-    // select_having,
+    select_having,
     // select_implicit,
     // select_into,
     // select_parallel,

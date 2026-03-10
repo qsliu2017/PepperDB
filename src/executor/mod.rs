@@ -89,6 +89,10 @@ impl Database {
     // -- DataFusion SELECT -------------------------------------------------
 
     async fn execute_select_df(&self, sql: &str) -> PgWireResult<Response<'static>> {
+        // Rewrite constant HAVING clauses (DataFusion doesn't support them).
+        let rewritten = rewrite_constant_having(sql);
+        let sql = rewritten.as_deref().unwrap_or(sql);
+
         self.register_all_tables()?;
 
         let df = self.session.sql(sql).await.map_err(|e| df_to_pg(&e, sql))?;
@@ -304,6 +308,14 @@ fn batches_to_response(
     batches: Vec<RecordBatch>,
     arrow_schema: &Schema,
 ) -> PgWireResult<Response<'static>> {
+    // Track which columns are function/expression results (need trailing-space
+    // trimming for CHAR(N) semantics -- PG implicitly casts char->text for functions).
+    let is_func_col: Vec<bool> = arrow_schema
+        .fields()
+        .iter()
+        .map(|f| f.name().contains('(') && !f.name().starts_with(|c: char| c.is_ascii_uppercase()))
+        .collect();
+
     let fields: Vec<FieldInfo> = arrow_schema
         .fields()
         .iter()
@@ -338,8 +350,8 @@ fn batches_to_response(
         .flat_map(|batch| (0..batch.num_rows()).map(move |row_idx| (batch, row_idx)))
         .map(|(batch, row_idx)| {
             let mut encoder = DataRowEncoder::new(schema.clone());
-            for col_idx in 0..batch.num_columns() {
-                encode_arrow_value(&mut encoder, batch.column(col_idx), row_idx)?;
+            for (col_idx, &trim) in is_func_col.iter().enumerate() {
+                encode_arrow_value(&mut encoder, batch.column(col_idx), row_idx, trim)?;
             }
             encoder.finish()
         })
@@ -368,6 +380,7 @@ fn encode_arrow_value(
     encoder: &mut DataRowEncoder,
     array: &ArrayRef,
     row: usize,
+    trim_trailing_spaces: bool,
 ) -> PgWireResult<()> {
     if array.is_null(row) {
         return encoder.encode_field(&None::<i32>);
@@ -399,7 +412,11 @@ fn encode_arrow_value(
         }
         DataType::Utf8 => {
             let a = array.as_any().downcast_ref::<StringArray>().unwrap();
-            encoder.encode_field(&a.value(row))
+            if trim_trailing_spaces {
+                encoder.encode_field(&a.value(row).trim_end())
+            } else {
+                encoder.encode_field(&a.value(row))
+            }
         }
         _ => encoder.encode_field(&None::<i32>),
     }
@@ -1216,6 +1233,54 @@ fn user_error(code: &str, msg: &str) -> PgWireError {
     )))
 }
 
+fn user_error_with_position(code: &str, msg: &str, pos: Option<usize>) -> PgWireError {
+    let mut info =
+        pgwire::error::ErrorInfo::new("ERROR".to_owned(), code.to_owned(), msg.to_owned());
+    if let Some(p) = pos {
+        info.position = Some(p.to_string());
+    }
+    PgWireError::UserError(Box::new(info))
+}
+
+/// Find 1-indexed byte position of a bare column name in the SQL.
+fn find_column_position(sql: &str, qualified_col: &str, in_having: bool) -> Option<usize> {
+    let bare = qualified_col.rsplit('.').next()?;
+    let upper = sql.to_ascii_uppercase();
+    let search_start = if in_having {
+        upper.find("HAVING").map(|i| i + 6)?
+    } else {
+        upper.find("SELECT").map(|i| i + 6)?
+    };
+    let search_end = if !in_having {
+        upper.find("FROM").unwrap_or(sql.len())
+    } else {
+        sql.len()
+    };
+    let search_area = &sql[search_start..search_end];
+    for (i, _) in search_area.match_indices(bare) {
+        let abs_pos = search_start + i;
+        let before = if abs_pos > 0 {
+            sql.as_bytes()[abs_pos - 1]
+        } else {
+            b' '
+        };
+        let after_pos = abs_pos + bare.len();
+        let after = if after_pos < sql.len() {
+            sql.as_bytes()[after_pos]
+        } else {
+            b' '
+        };
+        if !before.is_ascii_alphanumeric()
+            && before != b'_'
+            && !after.is_ascii_alphanumeric()
+            && after != b'_'
+        {
+            return Some(abs_pos + 1); // 1-indexed
+        }
+    }
+    None
+}
+
 fn df_to_pg(e: &datafusion::error::DataFusionError, sql: &str) -> PgWireError {
     let msg = e.to_string();
 
@@ -1231,11 +1296,145 @@ fn df_to_pg(e: &datafusion::error::DataFusionError, sql: &str) -> PgWireError {
         return user_error("42P01", &format!("relation \"{}\" does not exist", table));
     }
 
+    // GROUP BY violation: projection references non-aggregate column
+    if let Some(rest) = msg.strip_prefix(
+        "Error during planning: Projection references non-aggregate values: Expression ",
+    ) {
+        if let Some(col) = rest.split(" could not").next() {
+            let pg_msg = format!(
+                "column \"{}\" must appear in the GROUP BY clause or be used in an aggregate function",
+                col
+            );
+            let pos = find_column_position(sql, col, false);
+            return user_error_with_position("42803", &pg_msg, pos);
+        }
+    }
+
+    // GROUP BY violation: HAVING references non-aggregate column
+    if let Some(rest) = msg.strip_prefix("Error during planning: HAVING clause references: ") {
+        if let Some(expr_str) = rest
+            .strip_suffix(" must appear in the GROUP BY clause or be used in an aggregate function")
+        {
+            let col = expr_str
+                .split(|c: char| !c.is_alphanumeric() && c != '.' && c != '_')
+                .next()
+                .unwrap_or(expr_str);
+            let pg_msg = format!(
+                "column \"{}\" must appear in the GROUP BY clause or be used in an aggregate function",
+                col
+            );
+            let pos = find_column_position(sql, col, true);
+            return user_error_with_position("42803", &pg_msg, pos);
+        }
+    }
+
     PgWireError::UserError(Box::new(pgwire::error::ErrorInfo::new(
         "ERROR".to_owned(),
         "XX000".to_owned(),
         msg,
     )))
+}
+
+// -- Constant HAVING rewrite ------------------------------------------------
+
+fn is_constant_expr(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::Value(_) => true,
+        ast::Expr::BinaryOp { left, right, .. } => {
+            is_constant_expr(left) && is_constant_expr(right)
+        }
+        ast::Expr::UnaryOp { expr, .. } => is_constant_expr(expr),
+        ast::Expr::Nested(inner) => is_constant_expr(inner),
+        _ => false,
+    }
+}
+
+fn eval_constant_i64(expr: &ast::Expr) -> Option<i64> {
+    match expr {
+        ast::Expr::Value(ast::Value::Number(s, _)) => s.parse().ok(),
+        ast::Expr::Nested(inner) => eval_constant_i64(inner),
+        _ => None,
+    }
+}
+
+fn eval_constant_bool(expr: &ast::Expr) -> Option<bool> {
+    match expr {
+        ast::Expr::Value(ast::Value::Boolean(b)) => Some(*b),
+        ast::Expr::BinaryOp { left, op, right } => {
+            let l = eval_constant_i64(left)?;
+            let r = eval_constant_i64(right)?;
+            Some(match op {
+                ast::BinaryOperator::Lt => l < r,
+                ast::BinaryOperator::Gt => l > r,
+                ast::BinaryOperator::Eq => l == r,
+                ast::BinaryOperator::LtEq => l <= r,
+                ast::BinaryOperator::GtEq => l >= r,
+                ast::BinaryOperator::NotEq => l != r,
+                _ => return None,
+            })
+        }
+        ast::Expr::Nested(inner) => eval_constant_bool(inner),
+        _ => None,
+    }
+}
+
+fn select_has_only_literals(select: &ast::Select) -> bool {
+    select.projection.iter().all(|item| match item {
+        ast::SelectItem::UnnamedExpr(expr) | ast::SelectItem::ExprWithAlias { expr, .. } => {
+            is_constant_expr(expr)
+        }
+        _ => false,
+    })
+}
+
+/// Rewrite queries with constant HAVING clauses that DataFusion rejects.
+/// Returns Some(rewritten_sql) if rewriting was needed, None otherwise.
+fn rewrite_constant_having(sql: &str) -> Option<String> {
+    let stmts = Parser::parse_sql(&PostgreSqlDialect {}, sql).ok()?;
+    let stmt = stmts.into_iter().next()?;
+    let ast::Statement::Query(mut query) = stmt else {
+        return None;
+    };
+
+    // Check for constant HAVING
+    let result = {
+        let ast::SetExpr::Select(ref select) = *query.body else {
+            return None;
+        };
+        let having = select.having.as_ref()?;
+        if !is_constant_expr(having) {
+            return None;
+        }
+        eval_constant_bool(having)?
+    };
+
+    let ast::SetExpr::Select(ref mut select) = *query.body else {
+        unreachable!()
+    };
+    select.having = None;
+
+    if result {
+        // Constant-true: return 1 row (implicit single group)
+        if select_has_only_literals(select) {
+            select.from.clear();
+            select.selection = None;
+        } else {
+            query.limit = Some(ast::Expr::Value(ast::Value::Number("1".to_string(), false)));
+        }
+    } else {
+        // Constant-false: return 0 rows
+        let false_expr = ast::Expr::Value(ast::Value::Boolean(false));
+        select.selection = Some(match select.selection.take() {
+            Some(existing) => ast::Expr::BinaryOp {
+                left: Box::new(existing),
+                op: ast::BinaryOperator::And,
+                right: Box::new(false_expr),
+            },
+            None => false_expr,
+        });
+    }
+
+    Some(query.to_string())
 }
 
 #[cfg(test)]
