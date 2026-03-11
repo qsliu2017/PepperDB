@@ -252,19 +252,15 @@ fn insert_global_tuple(disk: &DiskManager, relfilenode: OID, values: &[Datum], c
 /// Helper: scan all live tuples from a global heap file.
 fn scan_global_heap(disk: &DiskManager, relfilenode: OID, columns: &[Column]) -> Vec<Vec<Datum>> {
     let num_pages = disk.num_global_pages(relfilenode);
-    let mut tuples = Vec::new();
     let mut page = Page::new();
-
-    for page_id in 0..num_pages {
-        disk.read_global_page(relfilenode, page_id, &mut page);
-        let n = page.num_items();
-        for item_idx in 0..n {
-            if let Some(datums) = page.read_tuple(item_idx, columns) {
-                tuples.push(datums);
-            }
-        }
-    }
-    tuples
+    (0..num_pages)
+        .flat_map(|page_id| {
+            disk.read_global_page(relfilenode, page_id, &mut page);
+            (0..page.num_items())
+                .filter_map(|item_idx| page.read_tuple(item_idx, columns))
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 /// Insert a pg_class row for a user table into the global catalog heap.

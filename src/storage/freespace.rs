@@ -39,12 +39,9 @@ impl FreeSpaceMap for DiskManager {
         }
 
         let data = std::fs::read(&path).ok()?;
-        for (page_id, &cat) in data.iter().enumerate() {
-            if cat >= needed_cat {
-                return Some(page_id as u32);
-            }
-        }
-        None
+        data.iter()
+            .position(|&cat| cat >= needed_cat)
+            .map(|page_id| page_id as u32)
     }
 
     fn fsm_update(&self, relfilenode: OID, page_id: u32, free_bytes: usize) {

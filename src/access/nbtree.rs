@@ -179,15 +179,13 @@ impl BTreePage for Page {
         }
 
         // Otherwise: rebuild page with new tuple inserted at pos
-        let mut tuples: Vec<Vec<u8>> = Vec::with_capacity(n as usize + 1);
-        for i in 0..n {
-            let item_id_off = HEADER_SIZE + (i as usize) * ITEM_ID_SIZE;
-            let item_id = read_u32(&self.0, item_id_off);
-            let (offset, _, length) = unpack_item_id(item_id);
-            let off = offset as usize;
-            let len = length as usize;
-            tuples.push(self.0[off..off + len].to_vec());
-        }
+        let mut tuples: Vec<Vec<u8>> = (0..n)
+            .map(|i| {
+                let item_id = read_u32(&self.0, HEADER_SIZE + (i as usize) * ITEM_ID_SIZE);
+                let (offset, _, length) = unpack_item_id(item_id);
+                self.0[offset as usize..offset as usize + length as usize].to_vec()
+            })
+            .collect();
         tuples.insert(pos as usize, tuple.to_vec());
 
         self.rebuild_btree_page(&tuples)?;
@@ -422,17 +420,15 @@ fn split_and_insert(
 
     // Collect all tuples + new one, sorted
     let n = page.num_items();
-    let mut all_tuples: Vec<(Datum, Vec<u8>)> = Vec::with_capacity(n as usize + 1);
-    for i in 0..n {
-        let item_id_off = HEADER_SIZE + (i as usize) * ITEM_ID_SIZE;
-        let item_id = read_u32(&page.0, item_id_off);
-        let (offset, _, length) = unpack_item_id(item_id);
-        let off = offset as usize;
-        let len = length as usize;
-        let tup_data = page.0[off..off + len].to_vec();
-        let k = decode_key(&tup_data[INDEX_TUPLE_HDR..], key_type);
-        all_tuples.push((k, tup_data));
-    }
+    let mut all_tuples: Vec<(Datum, Vec<u8>)> = (0..n)
+        .map(|i| {
+            let item_id = read_u32(&page.0, HEADER_SIZE + (i as usize) * ITEM_ID_SIZE);
+            let (offset, _, length) = unpack_item_id(item_id);
+            let tup_data = page.0[offset as usize..offset as usize + length as usize].to_vec();
+            let k = decode_key(&tup_data[INDEX_TUPLE_HDR..], key_type);
+            (k, tup_data)
+        })
+        .collect();
     // Insert new tuple in sorted position
     let mut insert_pos = all_tuples.len();
     for (i, (k, _)) in all_tuples.iter().enumerate() {
