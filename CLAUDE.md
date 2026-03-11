@@ -75,6 +75,11 @@ Rust library crate (`pepper_db`). `src/lib.rs` as crate root, submodules in dire
 - Header comments explain purpose and usage of each source file; maintain after each edit
 - Only include comments essential to understanding functionality or conveying non-obvious information
 
+### Regression tests
+- **`tests/regress/`** -- full PostgreSQL regression tests (sql/ and expected/ symlinked to `postgres/src/test/regress/`). Passing means PepperDB output matches PostgreSQL 18 exactly. Test harness in `tests/regress.rs`.
+- **`tests/regress_simple/`** -- simplified subsets of PG regression tests containing only parts PepperDB can handle (basic DDL/DML, SELECT via DataFusion). Own sql/ and expected/ directories with curated .sql and .out files. Test harness in `tests/regress_simple.rs`.
+- **`tests/common/mod.rs`** -- shared harness code (psql output formatting, SQL runner, test comparison) used by both `regress.rs` and `regress_simple.rs`.
+
 ### Workflow
 - Before committing, always run `cargo fmt` and `cargo clippy -- -D warnings` to match CI checks
 - When modifying multiple files, run file modifications in parallel whenever possible

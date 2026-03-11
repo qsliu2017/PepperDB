@@ -20,11 +20,20 @@ output, implementing the minimum fixes, and verifying everything passes.
 - PepperDB mirrors PG 18's regression test layout via symlinks:
   `tests/regress/sql/` and `tests/regress/expected/` point into
   `postgres/src/test/regress/`.
-- The test harness is `tests/regress.rs`. Tests are declared in the
-  `regress_test!()` macro -- commented-out tests are candidates.
-- The harness runs each .sql file through `Database::execute_sql()`, formats
-  output to match psql's aligned display, and diffs against the .out file.
+- There are two test harnesses sharing code via `tests/common/mod.rs`:
+  - `tests/regress.rs` -- full PG regression tests. Tests declared in
+    `regress_test!()` macro; commented-out tests are candidates.
+  - `tests/regress_simple.rs` -- simplified subsets of PG tests containing
+    only parts PepperDB can handle. Uses `simple_test!()` macro. SQL and
+    expected output live in `tests/regress_simple/sql/` and
+    `tests/regress_simple/expected/`.
+- The shared harness (`tests/common/mod.rs`) runs each .sql file through
+  `Database::execute_sql()`, formats output to match psql's aligned display,
+  and diffs against the .out file.
 - DataFusion handles all SELECT execution; our code handles DDL/DML.
+- When a full PG test cannot pass due to too many unsupported features,
+  create a simplified version in `tests/regress_simple/` with only the
+  passable portions.
 
 ## Phase 1: Find the Best Candidate
 
@@ -77,6 +86,21 @@ Read the diff carefully. Common categories:
 | **DataFusion SQL limitation** | Add a rewrite in `execute_select_df()` (like `rewrite_constant_having`) |
 | **Missing SQL feature** | May need parser/executor changes -- evaluate if it's worth the effort |
 | **Output formatting** | `format_table()` / `format_error()` in `tests/regress.rs` |
+
+### Alternative: Create a simplified test
+
+If the full PG test has too many blockers (transactions, PL/pgSQL, unsupported
+types, etc.), create a simplified version instead:
+
+1. Copy passable sections of the PG .sql file to
+   `tests/regress_simple/sql/<name>.sql`.
+2. Avoid: INSERT...SELECT, EXPLAIN, BEGIN/ROLLBACK, SET/SHOW, PREPARE,
+   CREATE FUNCTION/VIEW/SCHEMA/DOMAIN/TYPE/OPERATOR, DO $$ blocks,
+   binary/hex/octal literals, `float` (use `double precision` instead).
+3. Run through PepperDB to generate actual output, verify it matches PG's
+   expected output for those queries, then save as
+   `tests/regress_simple/expected/<name>.out`.
+4. Add the test name to `simple_test!()` in `tests/regress_simple.rs`.
 
 ### Step 3: Fix from easiest to hardest
 
@@ -134,7 +158,11 @@ how many tests they affect:
 
 | File | Role |
 |------|------|
-| `tests/regress.rs` | Test harness: SQL runner, psql output formatting, error formatting |
+| `tests/common/mod.rs` | Shared harness: SQL runner, psql output formatting, error formatting |
+| `tests/regress.rs` | Full PG test runner (uses `regress_test!()` macro) |
+| `tests/regress_simple.rs` | Simplified PG test runner (uses `simple_test!()` macro) |
+| `tests/regress_simple/sql/*.sql` | Simplified test inputs (curated subsets) |
+| `tests/regress_simple/expected/*.out` | Simplified expected outputs |
 | `src/executor/mod.rs` | Query executor: DataFusion bridge, error translation, SQL rewriting |
 | `src/parser/mod.rs` | DDL/DML parser (sqlparser-rs AST to PepperDB AST) |
 | `postgres/src/test/regress/sql/*.sql` | PG test inputs (via symlink) |
