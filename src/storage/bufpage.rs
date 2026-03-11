@@ -6,6 +6,7 @@ pub const PAGE_SIZE: usize = 8192;
 
 // -- Page header (28 bytes) ---------------------------------------------------
 
+pub(crate) const PD_CHECKSUM: usize = 8; // u16 at byte 8
 pub(crate) const PD_LOWER: usize = 12; // u16 at byte 12
 pub(crate) const PD_UPPER: usize = 14; // u16 at byte 14
 pub(crate) const PD_SPECIAL: usize = 16; // u16 at byte 16
@@ -114,12 +115,32 @@ impl Page {
     }
 
     pub fn compute_checksum(&self, blkno: u32) -> u16 {
-        compute_checksum_inner(&self.0, blkno)
+        const FNV_PRIME: u32 = 0x01000193;
+        const FNV_OFFSET: u32 = 0x811C9DC5;
+        const N_SUMS: usize = 32;
+
+        let sums = self.0
+            .chunks_exact(4)
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .enumerate()
+            .fold([0u32; N_SUMS], |mut acc, (i, w)| {
+                acc[i % N_SUMS] = acc[i % N_SUMS].wrapping_add(w);
+                acc
+            });
+
+        let result = sums
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .fold(FNV_OFFSET, |r, b| (r ^ b as u32).wrapping_mul(FNV_PRIME))
+            ^ blkno;
+
+        let checksum = ((result >> 16) ^ (result & 0xFFFF)) as u16;
+        if checksum == 0 { 1 } else { checksum }
     }
 
     pub fn set_checksum(&mut self, blkno: u32) {
         write_u16(&mut self.0, PD_CHECKSUM, 0);
-        let cksum = compute_checksum_inner(&self.0, blkno);
+        let cksum = self.compute_checksum(blkno);
         write_u16(&mut self.0, PD_CHECKSUM, cksum);
     }
 
@@ -128,10 +149,9 @@ impl Page {
             return true;
         }
         let stored = read_u16(&self.0, PD_CHECKSUM);
-        let mut tmp = self.0;
-        write_u16(&mut tmp, PD_CHECKSUM, 0);
-        let computed = compute_checksum_inner(&tmp, blkno);
-        stored == computed
+        let mut tmp = self.clone();
+        write_u16(&mut tmp.0, PD_CHECKSUM, 0);
+        tmp.compute_checksum(blkno) == stored
     }
 
     /// Compute free space on a heap page from pd_upper - pd_lower - ITEM_ID_SIZE.
@@ -146,54 +166,3 @@ impl Page {
     }
 }
 
-// -- Page checksums (PostgreSQL checksum_impl.h) ------------------------------
-
-const PD_CHECKSUM: usize = 8; // u16 at byte 8
-
-/// FNV-1a shuffle constants from PostgreSQL's checksum_impl.h.
-const FNV_PRIME: u32 = 0x01000193;
-const FNV_OFFSET: u32 = 0x811C9DC5;
-
-/// Number of u32 words in a page.
-const N_SUMS: usize = 32;
-
-/// Compute PG-compatible page checksum (FNV-1a variant mixed with block number).
-fn compute_checksum_inner(page: &[u8; PAGE_SIZE], blkno: u32) -> u16 {
-    let mut sums = [0u32; N_SUMS];
-
-    // Process page as u32 words, XOR-folding into N_SUMS accumulators
-    let words = PAGE_SIZE / 4;
-    for i in 0..words {
-        let off = i * 4;
-        let word = u32::from_le_bytes([page[off], page[off + 1], page[off + 2], page[off + 3]]);
-        sums[i % N_SUMS] = sums[i % N_SUMS].wrapping_add(word);
-    }
-
-    // FNV-1a hash of the accumulators
-    let mut result = FNV_OFFSET;
-    for &s in &sums {
-        let b0 = (s & 0xFF) as u8;
-        let b1 = ((s >> 8) & 0xFF) as u8;
-        let b2 = ((s >> 16) & 0xFF) as u8;
-        let b3 = ((s >> 24) & 0xFF) as u8;
-        result ^= b0 as u32;
-        result = result.wrapping_mul(FNV_PRIME);
-        result ^= b1 as u32;
-        result = result.wrapping_mul(FNV_PRIME);
-        result ^= b2 as u32;
-        result = result.wrapping_mul(FNV_PRIME);
-        result ^= b3 as u32;
-        result = result.wrapping_mul(FNV_PRIME);
-    }
-
-    // Mix in the block number
-    result ^= blkno;
-
-    // Reduce to u16, avoiding zero (which means "no checksum")
-    let checksum = ((result >> 16) ^ (result & 0xFFFF)) as u16;
-    if checksum == 0 {
-        1
-    } else {
-        checksum
-    }
-}
