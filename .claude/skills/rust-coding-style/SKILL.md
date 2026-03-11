@@ -95,6 +95,22 @@ let lower = self.pd_lower();
 self.set_pd_lower(val);
 ```
 
-The macro generates a `const fn` getter and a setter (prefixed `set_`), so getters work in `const fn` contexts. Use `get_u16`/`get_u32`/`set_u16`/`set_u32` for dynamic offsets (e.g., tuple fields at `base + T_XMAX`).
+The macro generates a `const fn` getter and a setter (prefixed `set_`), so getters work in `const fn` contexts.
 
-When adding a new page-level field, add one `page_field!` line -- never a standalone offset constant.
+For fields accessed at a dynamic base offset (e.g., tuple headers within a page), use `tuple_field!`:
+
+```rust
+// Before -- constant + verbose call sites
+const T_XMAX: usize = 4;
+let xmax = self.get_u32(offset + T_XMAX);
+self.set_u32(offset + T_XMAX, xid);
+
+// After -- macro is the definition, methods take a base offset
+tuple_field!(t_xmax, u32, 4);
+let xmax = self.t_xmax(offset);
+self.set_t_xmax(offset, xid);
+```
+
+The macro also emits an associated constant (`Page::T_XMAX`) for use with raw `&[u8]`/`Vec<u8>` (e.g., `write_u32(&mut tuple, Page::T_XMIN, xid)` in tuple builders).
+
+When adding a new field, add one macro line -- never a standalone offset constant.

@@ -18,16 +18,61 @@ use crate::storage::bufpage::{
 };
 use crate::types::{Datum, TypeId};
 
-// -- Tuple header offsets (23 bytes) ------------------------------------------
+// -- Tuple header field accessors (name, type, relative byte offset) ----------
 
-const T_XMIN: usize = 0;
-const T_XMAX: usize = 4;
-const T_CTID_BLKID: usize = 12;
-const T_CTID_POSID: usize = 16;
-const T_INFOMASK2: usize = 18;
-const T_INFOMASK: usize = 20;
-const T_HOFF: usize = 22;
 const TUPLE_HEADER_SIZE: usize = 23;
+
+macro_rules! tuple_field {
+    ($name:ident, u8, $offset:expr) => {
+        paste::paste! {
+            #[allow(dead_code)]
+            const [<$name:upper>]: usize = $offset;
+            #[allow(dead_code)]
+            pub(crate) fn $name(&self, base: usize) -> u8 {
+                self.0[base + $offset]
+            }
+        }
+    };
+    ($name:ident, u16, $offset:expr) => {
+        paste::paste! {
+            #[allow(dead_code)]
+            const [<$name:upper>]: usize = $offset;
+            #[allow(dead_code)]
+            pub(crate) fn $name(&self, base: usize) -> u16 {
+                self.get_u16(base + $offset)
+            }
+            #[allow(dead_code)]
+            pub(crate) fn [<set_ $name>](&mut self, base: usize, val: u16) {
+                self.set_u16(base + $offset, val);
+            }
+        }
+    };
+    ($name:ident, u32, $offset:expr) => {
+        paste::paste! {
+            #[allow(dead_code)]
+            const [<$name:upper>]: usize = $offset;
+            #[allow(dead_code)]
+            pub(crate) fn $name(&self, base: usize) -> u32 {
+                self.get_u32(base + $offset)
+            }
+            #[allow(dead_code)]
+            pub(crate) fn [<set_ $name>](&mut self, base: usize, val: u32) {
+                self.set_u32(base + $offset, val);
+            }
+        }
+    };
+}
+
+impl Page {
+    //                   name            type  relative offset
+    tuple_field!(t_xmin, u32, 0);
+    tuple_field!(t_xmax, u32, 4);
+    tuple_field!(t_ctid_blkid, u32, 12);
+    tuple_field!(t_ctid_posid, u16, 16);
+    tuple_field!(t_infomask2, u16, 18);
+    tuple_field!(t_infomask, u16, 20);
+    tuple_field!(t_hoff, u8, 22);
+}
 
 // -- t_infomask flags ---------------------------------------------------------
 
@@ -78,9 +123,9 @@ impl HeapAccessMethod for Page {
         self.0[tuple_offset..tuple_offset + tuple_size].copy_from_slice(tuple);
 
         // Patch t_ctid with actual location
-        self.set_u32(tuple_offset + T_CTID_BLKID, block_id);
+        self.set_t_ctid_blkid(tuple_offset, block_id);
         let item_index = (pd_lower - HEADER_SIZE) / ITEM_ID_SIZE;
-        self.set_u16(tuple_offset + T_CTID_POSID, (item_index + 1) as u16);
+        self.set_t_ctid_posid(tuple_offset, (item_index + 1) as u16);
 
         // Write packed ItemId at pd_lower
         let item_id = pack_item_id(tuple_offset as u16, LP_NORMAL, tuple_size as u16);
@@ -112,13 +157,13 @@ impl HeapAccessMethod for Page {
         }
 
         // Check if tuple is dead (t_xmax != 0 and HEAP_XMAX_INVALID not set)
-        let t_xmax = self.get_u32(offset + T_XMAX);
-        let t_infomask = self.get_u16(offset + T_INFOMASK);
+        let t_xmax = self.t_xmax(offset);
+        let t_infomask = self.t_infomask(offset);
         if t_xmax != 0 && (t_infomask & HEAP_XMAX_INVALID) == 0 {
             return None;
         }
 
-        let t_hoff = self.0[offset + T_HOFF] as usize;
+        let t_hoff = self.t_hoff(offset) as usize;
         let has_null = (t_infomask & HEAP_HASNULL) != 0;
         let ncols = columns.len();
         let data = &self.0[offset + t_hoff..offset + length];
@@ -155,9 +200,9 @@ impl HeapAccessMethod for Page {
         let (offset, _, _) = unpack_item_id(item_id);
         let offset = offset as usize;
 
-        self.set_u32(offset + T_XMAX, xid);
-        let infomask = self.get_u16(offset + T_INFOMASK);
-        self.set_u16(offset + T_INFOMASK, infomask & !HEAP_XMAX_INVALID);
+        self.set_t_xmax(offset, xid);
+        let infomask = self.t_infomask(offset);
+        self.set_t_infomask(offset, infomask & !HEAP_XMAX_INVALID);
     }
 
     /// Check MVCC visibility of a tuple. Returns true if the tuple should be visible
@@ -175,9 +220,9 @@ impl HeapAccessMethod for Page {
         }
         let offset = offset as usize;
 
-        let t_xmin = self.get_u32(offset + T_XMIN);
-        let t_xmax = self.get_u32(offset + T_XMAX);
-        let t_infomask = self.get_u16(offset + T_INFOMASK);
+        let t_xmin = self.t_xmin(offset);
+        let t_xmax = self.t_xmax(offset);
+        let t_infomask = self.t_infomask(offset);
 
         // Check if inserting xact is visible
         let xmin_visible = if t_xmin == FROZEN_XID
@@ -245,8 +290,8 @@ impl HeapAccessMethod for Page {
             }
 
             let offset = offset as usize;
-            let t_xmax = self.get_u32(offset + T_XMAX);
-            let t_infomask = self.get_u16(offset + T_INFOMASK);
+            let t_xmax = self.t_xmax(offset);
+            let t_infomask = self.t_infomask(offset);
 
             // Dead: t_xmax set, HEAP_XMAX_INVALID clear, and xmax committed
             let is_dead = t_xmax != 0
@@ -286,9 +331,9 @@ impl HeapAccessMethod for Page {
             self.0[upper..upper + tup_len].copy_from_slice(tuple_data);
 
             // Patch t_ctid to new location
-            let block_id = read_u32(tuple_data, T_CTID_BLKID);
-            self.set_u32(upper + T_CTID_BLKID, block_id);
-            self.set_u16(upper + T_CTID_POSID, (slot + 1) as u16);
+            let block_id = read_u32(tuple_data, Page::T_CTID_BLKID);
+            self.set_t_ctid_blkid(upper, block_id);
+            self.set_t_ctid_posid(upper, (slot + 1) as u16);
 
             // Write ItemId
             let item_id = pack_item_id(upper as u16, LP_NORMAL, tup_len as u16);
@@ -321,8 +366,8 @@ impl HeapAccessMethod for Page {
             }
             let offset = offset as usize;
 
-            let t_xmin = self.get_u32(offset + T_XMIN);
-            let t_infomask = self.get_u16(offset + T_INFOMASK);
+            let t_xmin = self.t_xmin(offset);
+            let t_infomask = self.t_infomask(offset);
 
             // Skip already frozen tuples
             if t_xmin == FROZEN_XID || (t_infomask & HEAP_XMIN_FROZEN) != 0 {
@@ -335,9 +380,9 @@ impl HeapAccessMethod for Page {
                 || clog.get_status(t_xmin) == XidStatus::Committed;
 
             if is_committed {
-                self.set_u32(offset + T_XMIN, FROZEN_XID);
+                self.set_t_xmin(offset, FROZEN_XID);
                 let new_infomask = t_infomask | HEAP_XMIN_FROZEN | HEAP_XMIN_COMMITTED;
-                self.set_u16(offset + T_INFOMASK, new_infomask);
+                self.set_t_infomask(offset, new_infomask);
                 frozen_count += 1;
             }
         }
@@ -426,11 +471,11 @@ pub fn build_tuple_with_xid(
 
     let mut tuple = vec![0u8; t_hoff];
 
-    write_u32(&mut tuple, T_XMIN, xid);
+    write_u32(&mut tuple, Page::T_XMIN, xid);
     // t_xmax = 0, t_cid = 0, t_ctid = (0,0) -- already zeroed
 
     // t_infomask2: ncols in low 11 bits
-    write_u16(&mut tuple, T_INFOMASK2, ncols as u16);
+    write_u16(&mut tuple, Page::T_INFOMASK2, ncols as u16);
 
     // t_infomask
     let mut infomask: u16 = HEAP_XMAX_INVALID;
@@ -443,10 +488,10 @@ pub fn build_tuple_with_xid(
     if has_varwidth {
         infomask |= HEAP_HASVARWIDTH;
     }
-    write_u16(&mut tuple, T_INFOMASK, infomask);
+    write_u16(&mut tuple, Page::T_INFOMASK, infomask);
 
     // t_hoff
-    tuple[T_HOFF] = t_hoff as u8;
+    tuple[Page::T_HOFF] = t_hoff as u8;
 
     // Null bitmap (bit set = NOT null, matching PostgreSQL convention)
     if has_null {
@@ -532,8 +577,8 @@ fn read_tuple_data(page: &Page, item_index: u16, columns: &[Column]) -> Option<V
         return None;
     }
 
-    let t_hoff = page[offset + T_HOFF] as usize;
-    let t_infomask = page.get_u16(offset + T_INFOMASK);
+    let t_hoff = page.t_hoff(offset) as usize;
+    let t_infomask = page.t_infomask(offset);
     let has_null = (t_infomask & HEAP_HASNULL) != 0;
     let ncols = columns.len();
     let data = &page[offset + t_hoff..offset + length];
@@ -778,23 +823,23 @@ mod test {
         let base = off as usize;
 
         // t_xmin = 1
-        assert_eq!(page.get_u32(base + T_XMIN), 1);
+        assert_eq!(page.t_xmin(base), 1);
         // t_xmax = 0
-        assert_eq!(page.get_u32(base + T_XMAX), 0);
+        assert_eq!(page.t_xmax(base), 0);
         // t_cid = 0
         assert_eq!(page.get_u32(base + 8), 0);
         // t_ctid = (block=5, offset=1)
-        assert_eq!(page.get_u32(base + T_CTID_BLKID), 5);
-        assert_eq!(page.get_u16(base + T_CTID_POSID), 1);
+        assert_eq!(page.t_ctid_blkid(base), 5);
+        assert_eq!(page.t_ctid_posid(base), 1);
         // t_infomask2 = 2 (ncols)
-        assert_eq!(page.get_u16(base + T_INFOMASK2), 2);
+        assert_eq!(page.t_infomask2(base), 2);
         // t_infomask = HEAP_XMIN_COMMITTED | HEAP_XMAX_INVALID = 0x0900
         assert_eq!(
-            page.get_u16(base + T_INFOMASK),
+            page.t_infomask(base),
             HEAP_XMIN_COMMITTED | HEAP_XMAX_INVALID
         );
         // t_hoff = 24 (MAXALIGN(23))
-        assert_eq!(page[base + T_HOFF], 24);
+        assert_eq!(page.t_hoff(base), 24);
 
         // Data at offset 24: two little-endian Int4 values
         let data_off = base + 24;
@@ -826,11 +871,11 @@ mod test {
         let base = off as usize;
 
         // t_infomask should include HEAP_HASNULL
-        let infomask = page.get_u16(base + T_INFOMASK);
+        let infomask = page.t_infomask(base);
         assert_ne!(infomask & HEAP_HASNULL, 0);
 
         // t_hoff = MAXALIGN(23 + 1) = 24 (bitmap for 3 cols = 1 byte)
-        assert_eq!(page[base + T_HOFF], 24);
+        assert_eq!(page.t_hoff(base), 24);
 
         // Null bitmap at byte 23: bits 0,2 set (cols a,c non-null), bit 1 clear (col b null)
         // = 0b00000101 = 5
@@ -862,7 +907,7 @@ mod test {
         let base = off as usize;
 
         // HEAP_HASVARWIDTH should be set
-        let infomask = page.get_u16(base + T_INFOMASK);
+        let infomask = page.t_infomask(base);
         assert_ne!(infomask & HEAP_HASVARWIDTH, 0);
 
         // Short varlena: 1B header, total_len = 1 + 5 = 6, header = (6 << 1) | 0x01 = 13
@@ -953,8 +998,8 @@ mod test {
         let item_id = page.get_u32(HEADER_SIZE);
         let (off, _, _) = unpack_item_id(item_id);
         let base = off as usize;
-        assert_eq!(page.get_u32(base + T_XMAX), 1);
-        assert_eq!(page.get_u16(base + T_INFOMASK) & HEAP_XMAX_INVALID, 0);
+        assert_eq!(page.t_xmax(base), 1);
+        assert_eq!(page.t_infomask(base) & HEAP_XMAX_INVALID, 0);
     }
 
     // -- Page checksum tests --------------------------------------------------
@@ -1057,8 +1102,8 @@ mod test {
         // Verify xmin = FROZEN_XID (2)
         let item_id = page.get_u32(HEADER_SIZE);
         let (offset, _, _) = unpack_item_id(item_id);
-        assert_eq!(page.get_u32(offset as usize + T_XMIN), FROZEN_XID);
-        let infomask = page.get_u16(offset as usize + T_INFOMASK);
+        assert_eq!(page.t_xmin(offset as usize), FROZEN_XID);
+        let infomask = page.t_infomask(offset as usize);
         assert_ne!(infomask & HEAP_XMIN_FROZEN, 0);
 
         // Freezing again should be a no-op
