@@ -3,7 +3,7 @@
 //! Metapage (page 0) stores root pointer. Leaf pages form a linked list.
 
 use crate::storage::bufpage::{
-    num_items, pack_item_id, read_u16, read_u32, unpack_item_id, write_u16, write_u32, HEADER_SIZE,
+    pack_item_id, read_u16, read_u32, unpack_item_id, write_u16, write_u32, Page, HEADER_SIZE,
     ITEM_ID_SIZE, LP_NORMAL, PAGE_SIZE, PD_LOWER, PD_PAGESIZE_VERSION, PD_SPECIAL, PD_UPPER,
     PG_PAGE_SIZE_VERSION,
 };
@@ -41,7 +41,7 @@ const BT_META_VERSION: u32 = 4;
 
 const INDEX_TUPLE_HDR: usize = 8;
 
-// -- Page init ----------------------------------------------------------------
+// -- BTreePage trait ----------------------------------------------------------
 
 /// Heap tuple pointer stored in an index tuple.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,58 +50,198 @@ pub struct ItemPointer {
     pub offset_num: u16,
 }
 
-/// Initialize a B-tree meta page (page 0).
-pub fn init_meta_page(buf: &mut [u8; PAGE_SIZE]) {
-    buf.fill(0);
-    write_u16(buf, PD_LOWER, HEADER_SIZE as u16 + 16); // header + meta data
-    write_u16(buf, PD_UPPER, BT_SPECIAL as u16);
-    write_u16(buf, PD_SPECIAL, BT_SPECIAL as u16);
-    write_u16(buf, PD_PAGESIZE_VERSION, PG_PAGE_SIZE_VERSION);
-    write_u32(buf, BTM_MAGIC_OFF, BT_META_MAGIC);
-    write_u32(buf, BTM_VERSION_OFF, BT_META_VERSION);
-    write_u32(buf, BTM_ROOT_OFF, BT_NO_PAGE);
-    write_u32(buf, BTM_LEVEL_OFF, 0);
-    // Write opaque flags = BTP_META
-    write_u16(buf, BT_SPECIAL + BTPO_FLAGS, BTP_META);
+trait BTreePage {
+    fn init_meta(&mut self);
+    fn init_btree(&mut self, level: u32, flags: u16);
+    fn read_meta(&self) -> (u32, u32);
+    fn write_meta(&mut self, root: u32, level: u32);
+    fn read_opaque_flags(&self) -> u16;
+    fn read_opaque_level(&self) -> u32;
+    fn read_opaque_next(&self) -> u32;
+    fn read_index_tuple(&self, item_index: u16, key_type: TypeId) -> Option<(ItemPointer, Datum)>;
+    fn insert_index_tuple(&mut self, tuple: &[u8]) -> Result<u16, ()>;
+    fn insert_sorted(&mut self, tuple: &[u8], key: &Datum, key_type: TypeId) -> Result<u16, ()>;
+    fn rebuild_btree_page(&mut self, tuples: &[Vec<u8>]) -> Result<(), ()>;
+    fn find_child(&self, key: &Datum, key_type: TypeId) -> u32;
 }
 
-/// Initialize a B-tree data page (leaf or internal).
-fn init_btree_page(buf: &mut [u8; PAGE_SIZE], level: u32, flags: u16) {
-    buf.fill(0);
-    write_u16(buf, PD_LOWER, HEADER_SIZE as u16);
-    write_u16(buf, PD_UPPER, BT_SPECIAL as u16);
-    write_u16(buf, PD_SPECIAL, BT_SPECIAL as u16);
-    write_u16(buf, PD_PAGESIZE_VERSION, PG_PAGE_SIZE_VERSION);
-    // BTPageOpaqueData
-    write_u32(buf, BT_SPECIAL + BTPO_PREV, BT_NO_PAGE);
-    write_u32(buf, BT_SPECIAL + BTPO_NEXT, BT_NO_PAGE);
-    write_u32(buf, BT_SPECIAL + BTPO_LEVEL, level);
-    write_u16(buf, BT_SPECIAL + BTPO_FLAGS, flags);
-}
+impl BTreePage for Page {
+    fn init_meta(&mut self) {
+        self.0.fill(0);
+        write_u16(&mut self.0, PD_LOWER, HEADER_SIZE as u16 + 16);
+        write_u16(&mut self.0, PD_UPPER, BT_SPECIAL as u16);
+        write_u16(&mut self.0, PD_SPECIAL, BT_SPECIAL as u16);
+        write_u16(&mut self.0, PD_PAGESIZE_VERSION, PG_PAGE_SIZE_VERSION);
+        write_u32(&mut self.0, BTM_MAGIC_OFF, BT_META_MAGIC);
+        write_u32(&mut self.0, BTM_VERSION_OFF, BT_META_VERSION);
+        write_u32(&mut self.0, BTM_ROOT_OFF, BT_NO_PAGE);
+        write_u32(&mut self.0, BTM_LEVEL_OFF, 0);
+        write_u16(&mut self.0, BT_SPECIAL + BTPO_FLAGS, BTP_META);
+    }
 
-// -- Meta page access ---------------------------------------------------------
+    fn init_btree(&mut self, level: u32, flags: u16) {
+        self.0.fill(0);
+        write_u16(&mut self.0, PD_LOWER, HEADER_SIZE as u16);
+        write_u16(&mut self.0, PD_UPPER, BT_SPECIAL as u16);
+        write_u16(&mut self.0, PD_SPECIAL, BT_SPECIAL as u16);
+        write_u16(&mut self.0, PD_PAGESIZE_VERSION, PG_PAGE_SIZE_VERSION);
+        write_u32(&mut self.0, BT_SPECIAL + BTPO_PREV, BT_NO_PAGE);
+        write_u32(&mut self.0, BT_SPECIAL + BTPO_NEXT, BT_NO_PAGE);
+        write_u32(&mut self.0, BT_SPECIAL + BTPO_LEVEL, level);
+        write_u16(&mut self.0, BT_SPECIAL + BTPO_FLAGS, flags);
+    }
 
-fn read_meta(buf: &[u8; PAGE_SIZE]) -> (u32, u32) {
-    (read_u32(buf, BTM_ROOT_OFF), read_u32(buf, BTM_LEVEL_OFF))
-}
+    fn read_meta(&self) -> (u32, u32) {
+        (
+            read_u32(&self.0, BTM_ROOT_OFF),
+            read_u32(&self.0, BTM_LEVEL_OFF),
+        )
+    }
 
-fn write_meta(buf: &mut [u8; PAGE_SIZE], root: u32, level: u32) {
-    write_u32(buf, BTM_ROOT_OFF, root);
-    write_u32(buf, BTM_LEVEL_OFF, level);
-}
+    fn write_meta(&mut self, root: u32, level: u32) {
+        write_u32(&mut self.0, BTM_ROOT_OFF, root);
+        write_u32(&mut self.0, BTM_LEVEL_OFF, level);
+    }
 
-// -- Opaque data access -------------------------------------------------------
+    fn read_opaque_flags(&self) -> u16 {
+        read_u16(&self.0, BT_SPECIAL + BTPO_FLAGS)
+    }
 
-fn read_opaque_flags(buf: &[u8; PAGE_SIZE]) -> u16 {
-    read_u16(buf, BT_SPECIAL + BTPO_FLAGS)
-}
+    fn read_opaque_level(&self) -> u32 {
+        read_u32(&self.0, BT_SPECIAL + BTPO_LEVEL)
+    }
 
-fn read_opaque_level(buf: &[u8; PAGE_SIZE]) -> u32 {
-    read_u32(buf, BT_SPECIAL + BTPO_LEVEL)
-}
+    fn read_opaque_next(&self) -> u32 {
+        read_u32(&self.0, BT_SPECIAL + BTPO_NEXT)
+    }
 
-fn read_opaque_next(buf: &[u8; PAGE_SIZE]) -> u32 {
-    read_u32(buf, BT_SPECIAL + BTPO_NEXT)
+    fn read_index_tuple(&self, item_index: u16, key_type: TypeId) -> Option<(ItemPointer, Datum)> {
+        let item_id_off = HEADER_SIZE + (item_index as usize) * ITEM_ID_SIZE;
+        let pd_lower = read_u16(&self.0, PD_LOWER) as usize;
+        if item_id_off + ITEM_ID_SIZE > pd_lower {
+            return None;
+        }
+        let item_id = read_u32(&self.0, item_id_off);
+        let (offset, flags, length) = unpack_item_id(item_id);
+        if flags != LP_NORMAL || (offset == 0 && length == 0) {
+            return None;
+        }
+        let off = offset as usize;
+        let tid = ItemPointer {
+            block_id: read_u32(&self.0, off),
+            offset_num: read_u16(&self.0, off + 4),
+        };
+        let key_data = &self.0[off + INDEX_TUPLE_HDR..off + length as usize];
+        let key = decode_key(key_data, key_type);
+        Some((tid, key))
+    }
+
+    fn insert_index_tuple(&mut self, tuple: &[u8]) -> Result<u16, ()> {
+        let pd_lower = read_u16(&self.0, PD_LOWER) as usize;
+        let pd_upper = read_u16(&self.0, PD_UPPER) as usize;
+
+        let needed_lower = pd_lower + ITEM_ID_SIZE;
+        let needed_upper = pd_upper - tuple.len();
+        if needed_lower > needed_upper {
+            return Err(());
+        }
+
+        let tuple_offset = pd_upper - tuple.len();
+        self.0[tuple_offset..tuple_offset + tuple.len()].copy_from_slice(tuple);
+
+        let item_index = (pd_lower - HEADER_SIZE) / ITEM_ID_SIZE;
+        let item_id = pack_item_id(tuple_offset as u16, LP_NORMAL, tuple.len() as u16);
+        write_u32(&mut self.0, pd_lower, item_id);
+
+        write_u16(&mut self.0, PD_LOWER, needed_lower as u16);
+        write_u16(&mut self.0, PD_UPPER, tuple_offset as u16);
+
+        Ok(item_index as u16)
+    }
+
+    fn insert_sorted(&mut self, tuple: &[u8], key: &Datum, key_type: TypeId) -> Result<u16, ()> {
+        let n = self.num_items();
+
+        // Find insertion position
+        let mut pos = n;
+        for i in 0..n {
+            if let Some((_, existing_key)) = self.read_index_tuple(i, key_type) {
+                if datum_cmp(key, &existing_key) != Ordering::Greater {
+                    pos = i;
+                    break;
+                }
+            }
+        }
+
+        // If inserting at end, just append
+        if pos == n {
+            return self.insert_index_tuple(tuple);
+        }
+
+        // Otherwise: rebuild page with new tuple inserted at pos
+        let mut tuples: Vec<Vec<u8>> = Vec::with_capacity(n as usize + 1);
+        for i in 0..n {
+            let item_id_off = HEADER_SIZE + (i as usize) * ITEM_ID_SIZE;
+            let item_id = read_u32(&self.0, item_id_off);
+            let (offset, _, length) = unpack_item_id(item_id);
+            let off = offset as usize;
+            let len = length as usize;
+            tuples.push(self.0[off..off + len].to_vec());
+        }
+        tuples.insert(pos as usize, tuple.to_vec());
+
+        self.rebuild_btree_page(&tuples)?;
+        Ok(pos)
+    }
+
+    fn rebuild_btree_page(&mut self, tuples: &[Vec<u8>]) -> Result<(), ()> {
+        // Save opaque data
+        let mut opaque = [0u8; BT_OPAQUE_SIZE];
+        opaque.copy_from_slice(&self.0[BT_SPECIAL..BT_SPECIAL + BT_OPAQUE_SIZE]);
+
+        // Clear data area
+        let version = read_u16(&self.0, PD_PAGESIZE_VERSION);
+        self.0[HEADER_SIZE..BT_SPECIAL].fill(0);
+
+        let new_lower = HEADER_SIZE + tuples.len() * ITEM_ID_SIZE;
+        let mut upper = BT_SPECIAL;
+
+        for (slot, tup) in tuples.iter().enumerate() {
+            upper -= tup.len();
+            if new_lower > upper {
+                return Err(()); // doesn't fit
+            }
+            self.0[upper..upper + tup.len()].copy_from_slice(tup);
+            let item_id = pack_item_id(upper as u16, LP_NORMAL, tup.len() as u16);
+            write_u32(&mut self.0, HEADER_SIZE + slot * ITEM_ID_SIZE, item_id);
+        }
+
+        write_u16(&mut self.0, PD_LOWER, new_lower as u16);
+        write_u16(&mut self.0, PD_UPPER, upper as u16);
+        write_u16(&mut self.0, PD_SPECIAL, BT_SPECIAL as u16);
+        write_u16(&mut self.0, PD_PAGESIZE_VERSION, version);
+        self.0[BT_SPECIAL..BT_SPECIAL + BT_OPAQUE_SIZE].copy_from_slice(&opaque);
+        Ok(())
+    }
+
+    fn find_child(&self, key: &Datum, key_type: TypeId) -> u32 {
+        let n = self.num_items();
+        if n == 0 {
+            return BT_NO_PAGE;
+        }
+        let (first, _) = self.read_index_tuple(0, key_type).unwrap();
+        let mut child = first.block_id;
+        for i in 1..n {
+            if let Some((ptr, sep)) = self.read_index_tuple(i, key_type) {
+                if datum_cmp(key, &sep) != Ordering::Less {
+                    child = ptr.block_id;
+                } else {
+                    break;
+                }
+            }
+        }
+        child
+    }
 }
 
 // -- Index tuple encoding -----------------------------------------------------
@@ -118,56 +258,6 @@ fn build_index_tuple(tid: ItemPointer, key: &Datum, key_type: TypeId) -> Vec<u8>
     tup[6..8].copy_from_slice(&(total_len as u16).to_le_bytes());
     tup.extend_from_slice(&key_bytes);
     tup
-}
-
-/// Read an index tuple at item_index, returning (ItemPointer, key Datum).
-fn read_index_tuple(
-    buf: &[u8; PAGE_SIZE],
-    item_index: u16,
-    key_type: TypeId,
-) -> Option<(ItemPointer, Datum)> {
-    let item_id_off = HEADER_SIZE + (item_index as usize) * ITEM_ID_SIZE;
-    let pd_lower = read_u16(buf, PD_LOWER) as usize;
-    if item_id_off + ITEM_ID_SIZE > pd_lower {
-        return None;
-    }
-    let item_id = read_u32(buf, item_id_off);
-    let (offset, flags, length) = unpack_item_id(item_id);
-    if flags != LP_NORMAL || (offset == 0 && length == 0) {
-        return None;
-    }
-    let off = offset as usize;
-    let tid = ItemPointer {
-        block_id: read_u32(buf, off),
-        offset_num: read_u16(buf, off + 4),
-    };
-    let key_data = &buf[off + INDEX_TUPLE_HDR..off + length as usize];
-    let key = decode_key(key_data, key_type);
-    Some((tid, key))
-}
-
-/// Insert an index tuple into a btree page. Returns item index or Err if full.
-fn insert_index_tuple(buf: &mut [u8; PAGE_SIZE], tuple: &[u8]) -> Result<u16, ()> {
-    let pd_lower = read_u16(buf, PD_LOWER) as usize;
-    let pd_upper = read_u16(buf, PD_UPPER) as usize;
-
-    let needed_lower = pd_lower + ITEM_ID_SIZE;
-    let needed_upper = pd_upper - tuple.len();
-    if needed_lower > needed_upper {
-        return Err(());
-    }
-
-    let tuple_offset = pd_upper - tuple.len();
-    buf[tuple_offset..tuple_offset + tuple.len()].copy_from_slice(tuple);
-
-    let item_index = (pd_lower - HEADER_SIZE) / ITEM_ID_SIZE;
-    let item_id = pack_item_id(tuple_offset as u16, LP_NORMAL, tuple.len() as u16);
-    write_u32(buf, pd_lower, item_id);
-
-    write_u16(buf, PD_LOWER, needed_lower as u16);
-    write_u16(buf, PD_UPPER, tuple_offset as u16);
-
-    Ok(item_index as u16)
 }
 
 // -- Key encoding/decoding ----------------------------------------------------
@@ -219,80 +309,17 @@ pub fn datum_cmp(a: &Datum, b: &Datum) -> Ordering {
     }
 }
 
-// -- Sorted insert into a leaf page -------------------------------------------
-
-/// Insert a tuple into a leaf page in sorted key order. Returns Err if full.
-fn insert_sorted(
-    buf: &mut [u8; PAGE_SIZE],
-    tuple: &[u8],
-    key: &Datum,
-    key_type: TypeId,
-) -> Result<u16, ()> {
-    let n = num_items(buf);
-
-    // Find insertion position
-    let mut pos = n;
-    for i in 0..n {
-        if let Some((_, existing_key)) = read_index_tuple(buf, i, key_type) {
-            if datum_cmp(key, &existing_key) != Ordering::Greater {
-                pos = i;
-                break;
-            }
-        }
+/// Minimum datum for a type (used for leftmost internal page entries).
+fn min_datum(key_type: TypeId) -> Datum {
+    match key_type {
+        TypeId::Bool => Datum::Bool(false),
+        TypeId::Int2 => Datum::Int2(i16::MIN),
+        TypeId::Int4 => Datum::Int4(i32::MIN),
+        TypeId::Int8 => Datum::Int8(i64::MIN),
+        TypeId::Float4 => Datum::Float4(f32::NEG_INFINITY),
+        TypeId::Float8 => Datum::Float8(f64::NEG_INFINITY),
+        TypeId::Text => Datum::Text(String::new()),
     }
-
-    // If inserting at end, just append
-    if pos == n {
-        return insert_index_tuple(buf, tuple);
-    }
-
-    // Otherwise: rebuild page with new tuple inserted at pos
-    // Collect existing tuples
-    let mut tuples: Vec<Vec<u8>> = Vec::with_capacity(n as usize + 1);
-    for i in 0..n {
-        let item_id_off = HEADER_SIZE + (i as usize) * ITEM_ID_SIZE;
-        let item_id = read_u32(buf, item_id_off);
-        let (offset, _, length) = unpack_item_id(item_id);
-        let off = offset as usize;
-        let len = length as usize;
-        tuples.push(buf[off..off + len].to_vec());
-    }
-    tuples.insert(pos as usize, tuple.to_vec());
-
-    // Rebuild
-    rebuild_btree_page(buf, &tuples)?;
-    Ok(pos)
-}
-
-/// Rebuild a btree page from a list of tuples, preserving opaque data.
-fn rebuild_btree_page(buf: &mut [u8; PAGE_SIZE], tuples: &[Vec<u8>]) -> Result<(), ()> {
-    // Save opaque data
-    let mut opaque = [0u8; BT_OPAQUE_SIZE];
-    opaque.copy_from_slice(&buf[BT_SPECIAL..BT_SPECIAL + BT_OPAQUE_SIZE]);
-
-    // Clear data area
-    let version = read_u16(buf, PD_PAGESIZE_VERSION);
-    buf[HEADER_SIZE..BT_SPECIAL].fill(0);
-
-    let new_lower = HEADER_SIZE + tuples.len() * ITEM_ID_SIZE;
-    let mut upper = BT_SPECIAL;
-
-    for (slot, tup) in tuples.iter().enumerate() {
-        upper -= tup.len();
-        if new_lower > upper {
-            return Err(()); // doesn't fit
-        }
-        buf[upper..upper + tup.len()].copy_from_slice(tup);
-        let item_id = pack_item_id(upper as u16, LP_NORMAL, tup.len() as u16);
-        write_u32(buf, HEADER_SIZE + slot * ITEM_ID_SIZE, item_id);
-    }
-
-    write_u16(buf, PD_LOWER, new_lower as u16);
-    write_u16(buf, PD_UPPER, upper as u16);
-    write_u16(buf, PD_SPECIAL, BT_SPECIAL as u16);
-    write_u16(buf, PD_PAGESIZE_VERSION, version);
-    buf[BT_SPECIAL..BT_SPECIAL + BT_OPAQUE_SIZE].copy_from_slice(&opaque);
-    Ok(())
 }
 
 // -- High-level B-tree operations ---------------------------------------------
@@ -300,8 +327,8 @@ fn rebuild_btree_page(buf: &mut [u8; PAGE_SIZE], tuples: &[Vec<u8>]) -> Result<(
 /// Create a new B-tree index file with a meta page.
 pub fn create_index(disk: &DiskManager, relfilenode: OID) {
     disk.create_heap_file(relfilenode);
-    let mut meta = [0u8; PAGE_SIZE];
-    init_meta_page(&mut meta);
+    let mut meta = Page::new();
+    meta.init_meta();
     disk.write_page(relfilenode, 0, &meta);
 }
 
@@ -316,18 +343,19 @@ pub fn bt_insert(
     let tuple = build_index_tuple(heap_tid, key, key_type);
 
     // Read meta page
-    let mut meta = [0u8; PAGE_SIZE];
+    let mut meta = Page::new();
     disk.read_page(index_rfn, 0, &mut meta);
-    let (root_blk, tree_level) = read_meta(&meta);
+    let (root_blk, tree_level) = meta.read_meta();
 
     if root_blk == BT_NO_PAGE {
         // Empty tree: create root leaf
-        let mut page = [0u8; PAGE_SIZE];
-        init_btree_page(&mut page, 0, BTP_LEAF | BTP_ROOT);
-        insert_sorted(&mut page, &tuple, key, key_type).expect("first insert must fit");
+        let mut page = Page::new();
+        page.init_btree(0, BTP_LEAF | BTP_ROOT);
+        page.insert_sorted(&tuple, key, key_type)
+            .expect("first insert must fit");
         let root_id = 1u32;
         disk.write_page(index_rfn, root_id, &page);
-        write_meta(&mut meta, root_id, 0);
+        meta.write_meta(root_id, 0);
         disk.write_page(index_rfn, 0, &meta);
         return;
     }
@@ -335,24 +363,24 @@ pub fn bt_insert(
     // Find leaf page, tracking path for splits
     let mut path: Vec<u32> = Vec::new();
     let mut current = root_blk;
-    let mut page = [0u8; PAGE_SIZE];
+    let mut page = Page::new();
 
     loop {
         disk.read_page(index_rfn, current, &mut page);
-        let flags = read_opaque_flags(&page);
+        let flags = page.read_opaque_flags();
         if (flags & BTP_LEAF) != 0 {
             break;
         }
         // Internal page: find child to descend
         path.push(current);
-        let n = num_items(&page);
+        let n = page.num_items();
         if n == 0 {
             return; // corrupt
         }
-        let (first_ptr, _) = read_index_tuple(&page, 0, key_type).unwrap();
+        let (first_ptr, _) = page.read_index_tuple(0, key_type).unwrap();
         let mut child = first_ptr.block_id;
         for i in 1..n {
-            if let Some((ptr, sep_key)) = read_index_tuple(&page, i, key_type) {
+            if let Some((ptr, sep_key)) = page.read_index_tuple(i, key_type) {
                 if datum_cmp(key, &sep_key) != Ordering::Less {
                     child = ptr.block_id;
                 } else {
@@ -364,7 +392,7 @@ pub fn bt_insert(
     }
 
     // Try insert into leaf
-    if insert_sorted(&mut page, &tuple, key, key_type).is_ok() {
+    if page.insert_sorted(&tuple, key, key_type).is_ok() {
         disk.write_page(index_rfn, current, &page);
         return;
     }
@@ -381,27 +409,27 @@ fn split_and_insert(
     disk: &DiskManager,
     index_rfn: OID,
     page_id: u32,
-    page: &mut [u8; PAGE_SIZE],
+    page: &mut Page,
     tuple: &[u8],
     key: &Datum,
     key_type: TypeId,
     path: &[u32],
     _tree_level: u32,
 ) {
-    let level = read_opaque_level(page);
-    let flags = read_opaque_flags(page);
-    let old_next = read_opaque_next(page);
+    let level = page.read_opaque_level();
+    let flags = page.read_opaque_flags();
+    let old_next = page.read_opaque_next();
 
     // Collect all tuples + new one, sorted
-    let n = num_items(page);
+    let n = page.num_items();
     let mut all_tuples: Vec<(Datum, Vec<u8>)> = Vec::with_capacity(n as usize + 1);
     for i in 0..n {
         let item_id_off = HEADER_SIZE + (i as usize) * ITEM_ID_SIZE;
-        let item_id = read_u32(page, item_id_off);
+        let item_id = read_u32(&page.0, item_id_off);
         let (offset, _, length) = unpack_item_id(item_id);
         let off = offset as usize;
         let len = length as usize;
-        let tup_data = page[off..off + len].to_vec();
+        let tup_data = page.0[off..off + len].to_vec();
         let k = decode_key(&tup_data[INDEX_TUPLE_HDR..], key_type);
         all_tuples.push((k, tup_data));
     }
@@ -425,26 +453,29 @@ fn split_and_insert(
 
     // Rebuild left page (keep same page_id)
     let left_flags = flags & !BTP_ROOT; // remove root flag if splitting root
-    init_btree_page(page, level, left_flags);
-    rebuild_btree_page(page, &left_tuples).expect("left split must fit");
+    page.init_btree(level, left_flags);
+    page.rebuild_btree_page(&left_tuples)
+        .expect("left split must fit");
     // Set next to new page
-    write_u32(page, BT_SPECIAL + BTPO_NEXT, new_page_id);
+    write_u32(&mut page.0, BT_SPECIAL + BTPO_NEXT, new_page_id);
     disk.write_page(index_rfn, page_id, page);
 
     // Create right page
-    let mut right = [0u8; PAGE_SIZE];
+    let mut right = Page::new();
     let right_flags = if (flags & BTP_LEAF) != 0 { BTP_LEAF } else { 0 };
-    init_btree_page(&mut right, level, right_flags);
-    rebuild_btree_page(&mut right, &right_tuples).expect("right split must fit");
-    write_u32(&mut right, BT_SPECIAL + BTPO_PREV, page_id);
-    write_u32(&mut right, BT_SPECIAL + BTPO_NEXT, old_next);
+    right.init_btree(level, right_flags);
+    right
+        .rebuild_btree_page(&right_tuples)
+        .expect("right split must fit");
+    write_u32(&mut right.0, BT_SPECIAL + BTPO_PREV, page_id);
+    write_u32(&mut right.0, BT_SPECIAL + BTPO_NEXT, old_next);
     disk.write_page(index_rfn, new_page_id, &right);
 
     // Update old_next's prev pointer
     if old_next != BT_NO_PAGE {
-        let mut next_page = [0u8; PAGE_SIZE];
+        let mut next_page = Page::new();
         disk.read_page(index_rfn, old_next, &mut next_page);
-        write_u32(&mut next_page, BT_SPECIAL + BTPO_PREV, new_page_id);
+        write_u32(&mut next_page.0, BT_SPECIAL + BTPO_PREV, new_page_id);
         disk.write_page(index_rfn, old_next, &next_page);
     }
 
@@ -461,8 +492,8 @@ fn split_and_insert(
     if (flags & BTP_ROOT) != 0 {
         // We split the root -- create new root
         let new_root_id = disk.num_pages(index_rfn);
-        let mut new_root = [0u8; PAGE_SIZE];
-        init_btree_page(&mut new_root, level + 1, BTP_ROOT);
+        let mut new_root = Page::new();
+        new_root.init_btree(level + 1, BTP_ROOT);
 
         // First entry: pointer to left child (with "minus infinity" -- we use Int4 MIN as dummy)
         let left_ptr = build_index_tuple(
@@ -473,20 +504,27 @@ fn split_and_insert(
             &min_datum(key_type),
             key_type,
         );
-        insert_index_tuple(&mut new_root, &left_ptr).expect("root insert must fit");
-        insert_index_tuple(&mut new_root, &sep_tuple).expect("root insert must fit");
+        new_root
+            .insert_index_tuple(&left_ptr)
+            .expect("root insert must fit");
+        new_root
+            .insert_index_tuple(&sep_tuple)
+            .expect("root insert must fit");
         disk.write_page(index_rfn, new_root_id, &new_root);
 
         // Update meta
-        let mut meta = [0u8; PAGE_SIZE];
+        let mut meta = Page::new();
         disk.read_page(index_rfn, 0, &mut meta);
-        write_meta(&mut meta, new_root_id, level + 1);
+        meta.write_meta(new_root_id, level + 1);
         disk.write_page(index_rfn, 0, &meta);
     } else if let Some(&parent_id) = path.last() {
         // Insert separator into parent internal page
-        let mut parent = [0u8; PAGE_SIZE];
+        let mut parent = Page::new();
         disk.read_page(index_rfn, parent_id, &mut parent);
-        if insert_sorted(&mut parent, &sep_tuple, &separator, key_type).is_ok() {
+        if parent
+            .insert_sorted(&sep_tuple, &separator, key_type)
+            .is_ok()
+        {
             disk.write_page(index_rfn, parent_id, &parent);
         } else {
             // Parent needs split too -- recursive
@@ -506,19 +544,6 @@ fn split_and_insert(
     }
 }
 
-/// Minimum datum for a type (used for leftmost internal page entries).
-fn min_datum(key_type: TypeId) -> Datum {
-    match key_type {
-        TypeId::Bool => Datum::Bool(false),
-        TypeId::Int2 => Datum::Int2(i16::MIN),
-        TypeId::Int4 => Datum::Int4(i32::MIN),
-        TypeId::Int8 => Datum::Int8(i64::MIN),
-        TypeId::Float4 => Datum::Float4(f32::NEG_INFINITY),
-        TypeId::Float8 => Datum::Float8(f64::NEG_INFINITY),
-        TypeId::Text => Datum::Text(String::new()),
-    }
-}
-
 /// Search for all heap TIDs matching an exact key.
 pub fn bt_search(
     disk: &DiskManager,
@@ -526,31 +551,31 @@ pub fn bt_search(
     key: &Datum,
     key_type: TypeId,
 ) -> Vec<ItemPointer> {
-    let mut meta = [0u8; PAGE_SIZE];
+    let mut meta = Page::new();
     disk.read_page(index_rfn, 0, &mut meta);
-    let (root_blk, _) = read_meta(&meta);
+    let (root_blk, _) = meta.read_meta();
     if root_blk == BT_NO_PAGE {
         return vec![];
     }
 
     // Descend to leaf
     let mut current = root_blk;
-    let mut page = [0u8; PAGE_SIZE];
+    let mut page = Page::new();
     loop {
         disk.read_page(index_rfn, current, &mut page);
-        let flags = read_opaque_flags(&page);
+        let flags = page.read_opaque_flags();
         if (flags & BTP_LEAF) != 0 {
             break;
         }
-        current = find_child(&page, key, key_type);
+        current = page.find_child(key, key_type);
     }
 
     // Scan leaf (and follow next pages for duplicates)
     let mut results = Vec::new();
     loop {
-        let n = num_items(&page);
+        let n = page.num_items();
         for i in 0..n {
-            if let Some((tid, k)) = read_index_tuple(&page, i, key_type) {
+            if let Some((tid, k)) = page.read_index_tuple(i, key_type) {
                 match datum_cmp(&k, key) {
                     Ordering::Equal => results.push(tid),
                     Ordering::Greater => return results,
@@ -558,7 +583,7 @@ pub fn bt_search(
                 }
             }
         }
-        let next = read_opaque_next(&page);
+        let next = page.read_opaque_next();
         if next == BT_NO_PAGE {
             break;
         }
@@ -567,40 +592,20 @@ pub fn bt_search(
     results
 }
 
-/// Find child page to descend into from an internal page.
-fn find_child(page: &[u8; PAGE_SIZE], key: &Datum, key_type: TypeId) -> u32 {
-    let n = num_items(page);
-    if n == 0 {
-        return BT_NO_PAGE;
-    }
-    let (first, _) = read_index_tuple(page, 0, key_type).unwrap();
-    let mut child = first.block_id;
-    for i in 1..n {
-        if let Some((ptr, sep)) = read_index_tuple(page, i, key_type) {
-            if datum_cmp(key, &sep) != Ordering::Less {
-                child = ptr.block_id;
-            } else {
-                break;
-            }
-        }
-    }
-    child
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
     fn meta_page_round_trip() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_meta_page(&mut page);
-        let (root, level) = read_meta(&page);
+        let mut page = Page::new();
+        page.init_meta();
+        let (root, level) = page.read_meta();
         assert_eq!(root, BT_NO_PAGE);
         assert_eq!(level, 0);
 
-        write_meta(&mut page, 1, 2);
-        let (root, level) = read_meta(&page);
+        page.write_meta(1, 2);
+        let (root, level) = page.read_meta();
         assert_eq!(root, 1);
         assert_eq!(level, 2);
     }
@@ -615,11 +620,11 @@ mod test {
         let tuple = build_index_tuple(tid, &key, TypeId::Int4);
         assert_eq!(tuple.len(), INDEX_TUPLE_HDR + 4);
 
-        let mut page = [0u8; PAGE_SIZE];
-        init_btree_page(&mut page, 0, BTP_LEAF | BTP_ROOT);
-        insert_index_tuple(&mut page, &tuple).unwrap();
+        let mut page = Page::new();
+        page.init_btree(0, BTP_LEAF | BTP_ROOT);
+        page.insert_index_tuple(&tuple).unwrap();
 
-        let (read_tid, read_key) = read_index_tuple(&page, 0, TypeId::Int4).unwrap();
+        let (read_tid, read_key) = page.read_index_tuple(0, TypeId::Int4).unwrap();
         assert_eq!(read_tid, tid);
         assert_eq!(read_key, key);
     }
@@ -633,11 +638,11 @@ mod test {
         let key = Datum::Text("hello".into());
         let tuple = build_index_tuple(tid, &key, TypeId::Text);
 
-        let mut page = [0u8; PAGE_SIZE];
-        init_btree_page(&mut page, 0, BTP_LEAF | BTP_ROOT);
-        insert_index_tuple(&mut page, &tuple).unwrap();
+        let mut page = Page::new();
+        page.init_btree(0, BTP_LEAF | BTP_ROOT);
+        page.insert_index_tuple(&tuple).unwrap();
 
-        let (_, read_key) = read_index_tuple(&page, 0, TypeId::Text).unwrap();
+        let (_, read_key) = page.read_index_tuple(0, TypeId::Text).unwrap();
         assert_eq!(read_key, Datum::Text("hello".into()));
     }
 

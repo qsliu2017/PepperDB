@@ -13,8 +13,9 @@ use crate::access::transam::clog::{Clog, XidStatus};
 use crate::access::transam::{Snapshot, BOOTSTRAP_XID, FROZEN_XID};
 use crate::catalog::Column;
 use crate::storage::bufpage::{
-    maxalign, pack_item_id, read_u16, read_u32, unpack_item_id, write_u16, write_u32, HEADER_SIZE,
-    ITEM_ID_SIZE, LP_NORMAL, PAGE_SIZE, PD_LOWER, PD_UPPER,
+    maxalign, pack_item_id, read_u16, read_u32, unpack_item_id, write_u16, write_u32, Page,
+    HEADER_SIZE, ITEM_ID_SIZE, LP_NORMAL, PAGE_SIZE, PD_LOWER, PD_PAGESIZE_VERSION, PD_SPECIAL,
+    PD_UPPER,
 };
 use crate::types::{Datum, TypeId};
 
@@ -37,97 +38,331 @@ const HEAP_XMIN_COMMITTED: u16 = 0x0100;
 const HEAP_XMIN_FROZEN: u16 = 0x0200;
 const HEAP_XMAX_INVALID: u16 = 0x0800;
 
-// -- Tuple operations ---------------------------------------------------------
+// -- HeapAccessMethod trait ---------------------------------------------------
 
-/// Insert a pre-built tuple into the page. Patches t_ctid with (block_id, item_index+1).
-/// Returns the 0-based item index.
-#[allow(clippy::result_unit_err)]
-pub fn insert_tuple(buf: &mut [u8; PAGE_SIZE], tuple: &[u8], block_id: u32) -> Result<u16, ()> {
-    let pd_lower = read_u16(buf, PD_LOWER) as usize;
-    let pd_upper = read_u16(buf, PD_UPPER) as usize;
-
-    let tuple_size = tuple.len();
-    let needed_lower = pd_lower + ITEM_ID_SIZE;
-    let needed_upper = pd_upper - tuple_size;
-
-    if needed_lower > needed_upper {
-        return Err(());
-    }
-
-    // Write tuple at end of free space
-    let tuple_offset = pd_upper - tuple_size;
-    buf[tuple_offset..tuple_offset + tuple_size].copy_from_slice(tuple);
-
-    // Patch t_ctid with actual location
-    write_u32(buf, tuple_offset + T_CTID_BLKID, block_id);
-    let item_index = (pd_lower - HEADER_SIZE) / ITEM_ID_SIZE;
-    write_u16(buf, tuple_offset + T_CTID_POSID, (item_index + 1) as u16);
-
-    // Write packed ItemId at pd_lower
-    let item_id = pack_item_id(tuple_offset as u16, LP_NORMAL, tuple_size as u16);
-    write_u32(buf, pd_lower, item_id);
-
-    // Update pd_lower and pd_upper
-    write_u16(buf, PD_LOWER, needed_lower as u16);
-    write_u16(buf, PD_UPPER, tuple_offset as u16);
-
-    Ok(item_index as u16)
+pub trait HeapAccessMethod {
+    #[allow(clippy::result_unit_err)]
+    fn insert_tuple(&mut self, tuple: &[u8], block_id: u32) -> Result<u16, ()>;
+    fn read_tuple(&self, item_index: u16, columns: &[Column]) -> Option<Vec<Datum>>;
+    fn mark_tuple_dead(&mut self, item_index: u16);
+    fn mark_tuple_dead_with_xid(&mut self, item_index: u16, xid: u32);
+    fn tuple_visible(&self, item_index: u16, snapshot: &Snapshot, clog: &mut Clog) -> bool;
+    fn read_tuple_mvcc(
+        &self,
+        item_index: u16,
+        columns: &[Column],
+        snapshot: &Snapshot,
+        clog: &mut Clog,
+    ) -> Option<Vec<Datum>>;
+    fn compact_page(&mut self, clog: &mut Clog) -> u16;
+    fn freeze_tuples(&mut self, clog: &mut Clog) -> u16;
 }
 
-/// Read and deserialize a tuple at the given item index.
-pub fn read_tuple(
-    buf: &[u8; PAGE_SIZE],
-    item_index: u16,
-    columns: &[Column],
-) -> Option<Vec<Datum>> {
-    let item_id_off = HEADER_SIZE + (item_index as usize) * ITEM_ID_SIZE;
-    let pd_lower = read_u16(buf, PD_LOWER) as usize;
-    if item_id_off + ITEM_ID_SIZE > pd_lower {
-        return None;
+impl HeapAccessMethod for Page {
+    /// Insert a pre-built tuple into the page. Patches t_ctid with (block_id, item_index+1).
+    /// Returns the 0-based item index.
+    #[allow(clippy::result_unit_err)]
+    fn insert_tuple(&mut self, tuple: &[u8], block_id: u32) -> Result<u16, ()> {
+        let pd_lower = read_u16(&self.0, PD_LOWER) as usize;
+        let pd_upper = read_u16(&self.0, PD_UPPER) as usize;
+
+        let tuple_size = tuple.len();
+        let needed_lower = pd_lower + ITEM_ID_SIZE;
+        let needed_upper = pd_upper - tuple_size;
+
+        if needed_lower > needed_upper {
+            return Err(());
+        }
+
+        // Write tuple at end of free space
+        let tuple_offset = pd_upper - tuple_size;
+        self.0[tuple_offset..tuple_offset + tuple_size].copy_from_slice(tuple);
+
+        // Patch t_ctid with actual location
+        write_u32(&mut self.0, tuple_offset + T_CTID_BLKID, block_id);
+        let item_index = (pd_lower - HEADER_SIZE) / ITEM_ID_SIZE;
+        write_u16(
+            &mut self.0,
+            tuple_offset + T_CTID_POSID,
+            (item_index + 1) as u16,
+        );
+
+        // Write packed ItemId at pd_lower
+        let item_id = pack_item_id(tuple_offset as u16, LP_NORMAL, tuple_size as u16);
+        write_u32(&mut self.0, pd_lower, item_id);
+
+        // Update pd_lower and pd_upper
+        write_u16(&mut self.0, PD_LOWER, needed_lower as u16);
+        write_u16(&mut self.0, PD_UPPER, tuple_offset as u16);
+
+        Ok(item_index as u16)
     }
 
-    let item_id = read_u32(buf, item_id_off);
-    let (offset, flags, length) = unpack_item_id(item_id);
-    if flags != LP_NORMAL {
-        return None;
+    /// Read and deserialize a tuple at the given item index.
+    fn read_tuple(&self, item_index: u16, columns: &[Column]) -> Option<Vec<Datum>> {
+        let item_id_off = HEADER_SIZE + (item_index as usize) * ITEM_ID_SIZE;
+        let pd_lower = read_u16(&self.0, PD_LOWER) as usize;
+        if item_id_off + ITEM_ID_SIZE > pd_lower {
+            return None;
+        }
+
+        let item_id = read_u32(&self.0, item_id_off);
+        let (offset, flags, length) = unpack_item_id(item_id);
+        if flags != LP_NORMAL {
+            return None;
+        }
+        let offset = offset as usize;
+        let length = length as usize;
+        if offset == 0 && length == 0 {
+            return None;
+        }
+
+        // Check if tuple is dead (t_xmax != 0 and HEAP_XMAX_INVALID not set)
+        let t_xmax = read_u32(&self.0, offset + T_XMAX);
+        let t_infomask = read_u16(&self.0, offset + T_INFOMASK);
+        if t_xmax != 0 && (t_infomask & HEAP_XMAX_INVALID) == 0 {
+            return None;
+        }
+
+        let t_hoff = self.0[offset + T_HOFF] as usize;
+        let has_null = (t_infomask & HEAP_HASNULL) != 0;
+        let ncols = columns.len();
+        let data = &self.0[offset + t_hoff..offset + length];
+
+        let mut result = Vec::with_capacity(ncols);
+        let mut pos = 0usize;
+
+        for (i, col) in columns.iter().enumerate() {
+            if has_null {
+                let byte = self.0[offset + TUPLE_HEADER_SIZE + i / 8];
+                if (byte & (1 << (i % 8))) == 0 {
+                    result.push(Datum::Null);
+                    continue;
+                }
+            }
+
+            let (datum, advance) = read_column_datum(data, pos, col.type_id);
+            result.push(datum);
+            pos += advance;
+        }
+
+        Some(result)
     }
-    let offset = offset as usize;
-    let length = length as usize;
-    if offset == 0 && length == 0 {
-        return None;
+
+    /// Mark a tuple as dead by setting t_xmax=1 and clearing HEAP_XMAX_INVALID.
+    fn mark_tuple_dead(&mut self, item_index: u16) {
+        self.mark_tuple_dead_with_xid(item_index, 1);
     }
 
-    // Check if tuple is dead (t_xmax != 0 and HEAP_XMAX_INVALID not set)
-    let t_xmax = read_u32(buf, offset + T_XMAX);
-    let t_infomask = read_u16(buf, offset + T_INFOMASK);
-    if t_xmax != 0 && (t_infomask & HEAP_XMAX_INVALID) == 0 {
-        return None;
+    /// Mark a tuple as dead with a specific xid in t_xmax.
+    fn mark_tuple_dead_with_xid(&mut self, item_index: u16, xid: u32) {
+        let item_id_off = HEADER_SIZE + (item_index as usize) * ITEM_ID_SIZE;
+        let item_id = read_u32(&self.0, item_id_off);
+        let (offset, _, _) = unpack_item_id(item_id);
+        let offset = offset as usize;
+
+        write_u32(&mut self.0, offset + T_XMAX, xid);
+
+        let infomask = read_u16(&self.0, offset + T_INFOMASK);
+        write_u16(
+            &mut self.0,
+            offset + T_INFOMASK,
+            infomask & !HEAP_XMAX_INVALID,
+        );
     }
 
-    let t_hoff = buf[offset + T_HOFF] as usize;
-    let has_null = (t_infomask & HEAP_HASNULL) != 0;
-    let ncols = columns.len();
-    let data = &buf[offset + t_hoff..offset + length];
+    /// Check MVCC visibility of a tuple. Returns true if the tuple should be visible
+    /// to the given snapshot according to HeapTupleSatisfiesMVCC rules.
+    fn tuple_visible(&self, item_index: u16, snapshot: &Snapshot, clog: &mut Clog) -> bool {
+        let item_id_off = HEADER_SIZE + (item_index as usize) * ITEM_ID_SIZE;
+        let pd_lower = read_u16(&self.0, PD_LOWER) as usize;
+        if item_id_off + ITEM_ID_SIZE > pd_lower {
+            return false;
+        }
 
-    let mut result = Vec::with_capacity(ncols);
-    let mut pos = 0usize;
+        let item_id = read_u32(&self.0, item_id_off);
+        let (offset, flags, length) = unpack_item_id(item_id);
+        if flags != LP_NORMAL || (offset == 0 && length == 0) {
+            return false;
+        }
+        let offset = offset as usize;
 
-    for (i, col) in columns.iter().enumerate() {
-        if has_null {
-            let byte = buf[offset + TUPLE_HEADER_SIZE + i / 8];
-            if (byte & (1 << (i % 8))) == 0 {
-                result.push(Datum::Null);
+        let t_xmin = read_u32(&self.0, offset + T_XMIN);
+        let t_xmax = read_u32(&self.0, offset + T_XMAX);
+        let t_infomask = read_u16(&self.0, offset + T_INFOMASK);
+
+        // Check if inserting xact is visible
+        let xmin_visible = if t_xmin == FROZEN_XID
+            || t_xmin == BOOTSTRAP_XID
+            || (t_infomask & HEAP_XMIN_COMMITTED) != 0
+        {
+            true
+        } else {
+            let status = clog.get_status(t_xmin);
+            if status == XidStatus::Committed {
+                xid_visible_in_snapshot(t_xmin, snapshot)
+            } else {
+                false
+            }
+        };
+
+        if !xmin_visible {
+            return false;
+        }
+
+        // Check if deleting xact makes it invisible
+        if t_xmax == 0 || (t_infomask & HEAP_XMAX_INVALID) != 0 {
+            return true; // not deleted
+        }
+
+        // t_xmax is set and HEAP_XMAX_INVALID is clear -- check if delete is visible
+        let xmax_committed = clog.get_status(t_xmax) == XidStatus::Committed;
+        if !xmax_committed {
+            return true; // deleter hasn't committed
+        }
+
+        // Deleter committed -- tuple is invisible if delete is visible in snapshot
+        !xid_visible_in_snapshot(t_xmax, snapshot)
+    }
+
+    /// Read a tuple using MVCC visibility (snapshot + CLOG).
+    fn read_tuple_mvcc(
+        &self,
+        item_index: u16,
+        columns: &[Column],
+        snapshot: &Snapshot,
+        clog: &mut Clog,
+    ) -> Option<Vec<Datum>> {
+        if !self.tuple_visible(item_index, snapshot, clog) {
+            return None;
+        }
+        read_tuple_data(&self.0, item_index, columns)
+    }
+
+    /// Compact a page: remove dead tuples (t_xmax committed), defragment live tuples.
+    /// Returns the number of dead tuples reclaimed.
+    fn compact_page(&mut self, clog: &mut Clog) -> u16 {
+        let n = self.num_items();
+        let mut reclaimed = 0u16;
+
+        // Collect live tuples: (item_index, tuple_bytes)
+        let mut live: Vec<(u16, Vec<u8>)> = Vec::new();
+        for i in 0..n {
+            let item_id_off = HEADER_SIZE + (i as usize) * ITEM_ID_SIZE;
+            let item_id = read_u32(&self.0, item_id_off);
+            let (offset, flags, length) = unpack_item_id(item_id);
+            if flags != LP_NORMAL || (offset == 0 && length == 0) {
+                reclaimed += 1;
                 continue;
+            }
+
+            let offset = offset as usize;
+            let t_xmax = read_u32(&self.0, offset + T_XMAX);
+            let t_infomask = read_u16(&self.0, offset + T_INFOMASK);
+
+            // Dead: t_xmax set, HEAP_XMAX_INVALID clear, and xmax committed
+            let is_dead = t_xmax != 0
+                && (t_infomask & HEAP_XMAX_INVALID) == 0
+                && clog.get_status(t_xmax) == XidStatus::Committed;
+
+            if is_dead {
+                reclaimed += 1;
+            } else {
+                let length = length as usize;
+                live.push((i, self.0[offset..offset + length].to_vec()));
             }
         }
 
-        let (datum, advance) = read_column_datum(data, pos, col.type_id);
-        result.push(datum);
-        pos += advance;
+        if reclaimed == 0 {
+            return 0;
+        }
+
+        // Rebuild page: keep header, rewrite ItemIds and tuples
+        let lsn = self.0[0..8].to_vec();
+        let checksum_bytes = self.0[8..10].to_vec();
+        let flags_bytes = self.0[10..12].to_vec();
+        let version_bytes = self.0[18..20].to_vec();
+
+        // Clear ItemId area and tuple area
+        self.0[HEADER_SIZE..].fill(0);
+
+        // Reset pd_lower/pd_upper
+        let new_pd_lower = HEADER_SIZE + live.len() * ITEM_ID_SIZE;
+        let mut upper = PAGE_SIZE;
+
+        for (slot, (_, tuple_data)) in live.iter().enumerate() {
+            let tup_len = tuple_data.len();
+            upper -= tup_len;
+
+            // Write tuple data
+            self.0[upper..upper + tup_len].copy_from_slice(tuple_data);
+
+            // Patch t_ctid to new location
+            let block_id = read_u32(&tuple_data.to_vec(), T_CTID_BLKID);
+            write_u32(&mut self.0, upper + T_CTID_BLKID, block_id);
+            write_u16(&mut self.0, upper + T_CTID_POSID, (slot + 1) as u16);
+
+            // Write ItemId
+            let item_id = pack_item_id(upper as u16, LP_NORMAL, tup_len as u16);
+            write_u32(&mut self.0, HEADER_SIZE + slot * ITEM_ID_SIZE, item_id);
+        }
+
+        write_u16(&mut self.0, PD_LOWER, new_pd_lower as u16);
+        write_u16(&mut self.0, PD_UPPER, upper as u16);
+        write_u16(&mut self.0, PD_SPECIAL, PAGE_SIZE as u16);
+        write_u16(
+            &mut self.0,
+            PD_PAGESIZE_VERSION,
+            read_u16(&version_bytes, 0),
+        );
+        self.0[0..8].copy_from_slice(&lsn);
+        self.0[8..10].copy_from_slice(&checksum_bytes);
+        self.0[10..12].copy_from_slice(&flags_bytes);
+
+        reclaimed
     }
 
-    Some(result)
+    /// Freeze committed tuples: set t_xmin = FROZEN_XID (2) and HEAP_XMIN_FROZEN flag
+    /// for tuples whose xmin is committed. Returns count of frozen tuples.
+    fn freeze_tuples(&mut self, clog: &mut Clog) -> u16 {
+        let n = self.num_items();
+        let mut frozen_count = 0u16;
+
+        for i in 0..n {
+            let item_id_off = HEADER_SIZE + (i as usize) * ITEM_ID_SIZE;
+            let item_id = read_u32(&self.0, item_id_off);
+            let (offset, flags, _) = unpack_item_id(item_id);
+            if flags != LP_NORMAL || offset == 0 {
+                continue;
+            }
+            let offset = offset as usize;
+
+            let t_xmin = read_u32(&self.0, offset + T_XMIN);
+            let t_infomask = read_u16(&self.0, offset + T_INFOMASK);
+
+            // Skip already frozen tuples
+            if t_xmin == FROZEN_XID || (t_infomask & HEAP_XMIN_FROZEN) != 0 {
+                continue;
+            }
+
+            // Freeze if xmin is committed
+            let is_committed = t_xmin == BOOTSTRAP_XID
+                || (t_infomask & HEAP_XMIN_COMMITTED) != 0
+                || clog.get_status(t_xmin) == XidStatus::Committed;
+
+            if is_committed {
+                write_u32(&mut self.0, offset + T_XMIN, FROZEN_XID);
+                let new_infomask = t_infomask | HEAP_XMIN_FROZEN | HEAP_XMIN_COMMITTED;
+                write_u16(&mut self.0, offset + T_INFOMASK, new_infomask);
+                frozen_count += 1;
+            }
+        }
+
+        frozen_count
+    }
 }
+
+// -- Free functions (not page-scoped) -----------------------------------------
 
 /// Read a single column value from tuple data at the given position.
 /// Returns (datum, bytes_consumed_from_pos). Handles alignment internally.
@@ -283,83 +518,6 @@ pub fn build_tuple_with_xid(
     tuple
 }
 
-/// Mark a tuple as dead by setting t_xmax=1 and clearing HEAP_XMAX_INVALID.
-pub fn mark_tuple_dead(buf: &mut [u8; PAGE_SIZE], item_index: u16) {
-    mark_tuple_dead_with_xid(buf, item_index, 1);
-}
-
-/// Mark a tuple as dead with a specific xid in t_xmax.
-pub fn mark_tuple_dead_with_xid(buf: &mut [u8; PAGE_SIZE], item_index: u16, xid: u32) {
-    let item_id_off = HEADER_SIZE + (item_index as usize) * ITEM_ID_SIZE;
-    let item_id = read_u32(buf, item_id_off);
-    let (offset, _, _) = unpack_item_id(item_id);
-    let offset = offset as usize;
-
-    write_u32(buf, offset + T_XMAX, xid);
-
-    let infomask = read_u16(buf, offset + T_INFOMASK);
-    write_u16(buf, offset + T_INFOMASK, infomask & !HEAP_XMAX_INVALID);
-}
-
-/// Check MVCC visibility of a tuple. Returns true if the tuple should be visible
-/// to the given snapshot according to HeapTupleSatisfiesMVCC rules.
-pub fn tuple_visible(
-    buf: &[u8; PAGE_SIZE],
-    item_index: u16,
-    snapshot: &Snapshot,
-    clog: &mut Clog,
-) -> bool {
-    let item_id_off = HEADER_SIZE + (item_index as usize) * ITEM_ID_SIZE;
-    let pd_lower = read_u16(buf, PD_LOWER) as usize;
-    if item_id_off + ITEM_ID_SIZE > pd_lower {
-        return false;
-    }
-
-    let item_id = read_u32(buf, item_id_off);
-    let (offset, flags, length) = unpack_item_id(item_id);
-    if flags != LP_NORMAL || (offset == 0 && length == 0) {
-        return false;
-    }
-    let offset = offset as usize;
-
-    let t_xmin = read_u32(buf, offset + T_XMIN);
-    let t_xmax = read_u32(buf, offset + T_XMAX);
-    let t_infomask = read_u16(buf, offset + T_INFOMASK);
-
-    // Check if inserting xact is visible
-    let xmin_visible = if t_xmin == FROZEN_XID
-        || t_xmin == BOOTSTRAP_XID
-        || (t_infomask & HEAP_XMIN_COMMITTED) != 0
-    {
-        true
-    } else {
-        let status = clog.get_status(t_xmin);
-        if status == XidStatus::Committed {
-            xid_visible_in_snapshot(t_xmin, snapshot)
-        } else {
-            false
-        }
-    };
-
-    if !xmin_visible {
-        return false;
-    }
-
-    // Check if deleting xact makes it invisible
-    if t_xmax == 0 || (t_infomask & HEAP_XMAX_INVALID) != 0 {
-        return true; // not deleted
-    }
-
-    // t_xmax is set and HEAP_XMAX_INVALID is clear -- check if delete is visible
-    let xmax_committed = clog.get_status(t_xmax) == XidStatus::Committed;
-    if !xmax_committed {
-        return true; // deleter hasn't committed
-    }
-
-    // Deleter committed -- tuple is invisible if delete is visible in snapshot
-    !xid_visible_in_snapshot(t_xmax, snapshot)
-}
-
 /// Returns true if a committed XID is visible in the given snapshot.
 fn xid_visible_in_snapshot(xid: u32, snapshot: &Snapshot) -> bool {
     if xid < snapshot.xmin {
@@ -372,21 +530,7 @@ fn xid_visible_in_snapshot(xid: u32, snapshot: &Snapshot) -> bool {
     !snapshot.xip.contains(&xid)
 }
 
-/// Read a tuple using MVCC visibility (snapshot + CLOG).
-pub fn read_tuple_mvcc(
-    buf: &[u8; PAGE_SIZE],
-    item_index: u16,
-    columns: &[Column],
-    snapshot: &Snapshot,
-    clog: &mut Clog,
-) -> Option<Vec<Datum>> {
-    if !tuple_visible(buf, item_index, snapshot, clog) {
-        return None;
-    }
-    read_tuple_data(buf, item_index, columns)
-}
-
-/// Read tuple data without visibility checks (used internally).
+/// Read tuple data without visibility checks (used internally by read_tuple_mvcc).
 fn read_tuple_data(
     buf: &[u8; PAGE_SIZE],
     item_index: u16,
@@ -435,137 +579,12 @@ fn read_tuple_data(
     Some(result)
 }
 
-// -- VACUUM operations --------------------------------------------------------
-
-/// Compact a page: remove dead tuples (t_xmax committed), defragment live tuples.
-/// Returns the number of dead tuples reclaimed.
-pub fn compact_page(buf: &mut [u8; PAGE_SIZE], clog: &mut Clog) -> u16 {
-    let n = crate::storage::bufpage::num_items(buf);
-    let mut reclaimed = 0u16;
-
-    // Collect live tuples: (item_index, tuple_bytes)
-    let mut live: Vec<(u16, Vec<u8>)> = Vec::new();
-    for i in 0..n {
-        let item_id_off = HEADER_SIZE + (i as usize) * ITEM_ID_SIZE;
-        let item_id = read_u32(buf, item_id_off);
-        let (offset, flags, length) = unpack_item_id(item_id);
-        if flags != LP_NORMAL || (offset == 0 && length == 0) {
-            reclaimed += 1;
-            continue;
-        }
-
-        let offset = offset as usize;
-        let t_xmax = read_u32(buf, offset + T_XMAX);
-        let t_infomask = read_u16(buf, offset + T_INFOMASK);
-
-        // Dead: t_xmax set, HEAP_XMAX_INVALID clear, and xmax committed
-        let is_dead = t_xmax != 0
-            && (t_infomask & HEAP_XMAX_INVALID) == 0
-            && clog.get_status(t_xmax) == XidStatus::Committed;
-
-        if is_dead {
-            reclaimed += 1;
-        } else {
-            let length = length as usize;
-            live.push((i, buf[offset..offset + length].to_vec()));
-        }
-    }
-
-    if reclaimed == 0 {
-        return 0;
-    }
-
-    // Rebuild page: keep header, rewrite ItemIds and tuples
-    let lsn = buf[0..8].to_vec();
-    let checksum_bytes = buf[8..10].to_vec();
-    let flags_bytes = buf[10..12].to_vec();
-    let version_bytes = buf[18..20].to_vec();
-
-    // Clear ItemId area and tuple area
-    buf[HEADER_SIZE..].fill(0);
-
-    // Reset pd_lower/pd_upper
-    let new_pd_lower = HEADER_SIZE + live.len() * ITEM_ID_SIZE;
-    let mut upper = PAGE_SIZE;
-
-    for (slot, (_, tuple_data)) in live.iter().enumerate() {
-        let tup_len = tuple_data.len();
-        upper -= tup_len;
-
-        // Write tuple data
-        buf[upper..upper + tup_len].copy_from_slice(tuple_data);
-
-        // Patch t_ctid to new location
-        let block_id = read_u32(&tuple_data.to_vec(), T_CTID_BLKID);
-        write_u32(buf, upper + T_CTID_BLKID, block_id);
-        write_u16(buf, upper + T_CTID_POSID, (slot + 1) as u16);
-
-        // Write ItemId
-        let item_id = pack_item_id(upper as u16, LP_NORMAL, tup_len as u16);
-        write_u32(buf, HEADER_SIZE + slot * ITEM_ID_SIZE, item_id);
-    }
-
-    write_u16(buf, PD_LOWER, new_pd_lower as u16);
-    write_u16(buf, PD_UPPER, upper as u16);
-    write_u16(buf, crate::storage::bufpage::PD_SPECIAL, PAGE_SIZE as u16);
-    write_u16(
-        buf,
-        crate::storage::bufpage::PD_PAGESIZE_VERSION,
-        read_u16(&version_bytes, 0),
-    );
-    buf[0..8].copy_from_slice(&lsn);
-    buf[8..10].copy_from_slice(&checksum_bytes);
-    buf[10..12].copy_from_slice(&flags_bytes);
-
-    reclaimed
-}
-
-/// Freeze committed tuples: set t_xmin = FROZEN_XID (2) and HEAP_XMIN_FROZEN flag
-/// for tuples whose xmin is committed. Returns count of frozen tuples.
-pub fn freeze_tuples(buf: &mut [u8; PAGE_SIZE], clog: &mut Clog) -> u16 {
-    let n = crate::storage::bufpage::num_items(buf);
-    let mut frozen_count = 0u16;
-
-    for i in 0..n {
-        let item_id_off = HEADER_SIZE + (i as usize) * ITEM_ID_SIZE;
-        let item_id = read_u32(buf, item_id_off);
-        let (offset, flags, _) = unpack_item_id(item_id);
-        if flags != LP_NORMAL || offset == 0 {
-            continue;
-        }
-        let offset = offset as usize;
-
-        let t_xmin = read_u32(buf, offset + T_XMIN);
-        let t_infomask = read_u16(buf, offset + T_INFOMASK);
-
-        // Skip already frozen tuples
-        if t_xmin == FROZEN_XID || (t_infomask & HEAP_XMIN_FROZEN) != 0 {
-            continue;
-        }
-
-        // Freeze if xmin is committed
-        let is_committed = t_xmin == BOOTSTRAP_XID
-            || (t_infomask & HEAP_XMIN_COMMITTED) != 0
-            || clog.get_status(t_xmin) == XidStatus::Committed;
-
-        if is_committed {
-            write_u32(buf, offset + T_XMIN, FROZEN_XID);
-            let new_infomask = t_infomask | HEAP_XMIN_FROZEN | HEAP_XMIN_COMMITTED;
-            write_u16(buf, offset + T_INFOMASK, new_infomask);
-            frozen_count += 1;
-        }
-    }
-
-    frozen_count
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::storage::bufpage::{
-        init_page, num_items, pack_item_id, read_u16, read_u32, set_checksum, unpack_item_id,
-        verify_checksum, HEADER_SIZE, LP_NORMAL, PAGE_SIZE, PD_LOWER, PD_PAGESIZE_VERSION,
-        PD_SPECIAL, PD_UPPER,
+        pack_item_id, read_u16, read_u32, unpack_item_id, Page, HEADER_SIZE, LP_NORMAL, PAGE_SIZE,
+        PD_LOWER, PD_PAGESIZE_VERSION, PD_SPECIAL, PD_UPPER,
     };
 
     fn col(name: &str, tid: TypeId, num: u16) -> Column {
@@ -579,24 +598,24 @@ mod test {
 
     #[test]
     fn init_and_insert() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
-        assert_eq!(num_items(&page), 0);
+        let mut page = Page::new();
+        page.init();
+        assert_eq!(page.num_items(), 0);
 
         let cols = vec![col("a", TypeId::Int4, 0), col("b", TypeId::Int4, 1)];
         let tuple = build_tuple(&[Datum::Int4(42), Datum::Int4(100)], &cols);
-        let idx = insert_tuple(&mut page, &tuple, 0).unwrap();
+        let idx = page.insert_tuple(&tuple, 0).unwrap();
         assert_eq!(idx, 0);
-        assert_eq!(num_items(&page), 1);
+        assert_eq!(page.num_items(), 1);
 
-        let datums = read_tuple(&page, 0, &cols).unwrap();
+        let datums = page.read_tuple(0, &cols).unwrap();
         assert_eq!(datums, vec![Datum::Int4(42), Datum::Int4(100)]);
     }
 
     #[test]
     fn fill_page_to_capacity() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
 
         let cols = vec![col("a", TypeId::Int4, 0)];
         let tuple = build_tuple(&[Datum::Int4(1)], &cols);
@@ -604,10 +623,10 @@ mod test {
         assert_eq!(tuple.len(), 28);
 
         let mut count = 0u16;
-        while insert_tuple(&mut page, &tuple, 0).is_ok() {
+        while page.insert_tuple(&tuple, 0).is_ok() {
             count += 1;
         }
-        assert_eq!(num_items(&page), count);
+        assert_eq!(page.num_items(), count);
         // Each slot = 28 (tuple) + 4 (ItemId) = 32 bytes
         // Available = 8192 - 28 (header) = 8164; 8164 / 32 = 255
         assert_eq!(count, 255);
@@ -622,10 +641,10 @@ mod test {
             col("z", TypeId::Int4, 2),
         ];
         let tuple = build_tuple(&values, &cols);
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
-        let out = read_tuple(&page, 0, &cols).unwrap();
+        let mut page = Page::new();
+        page.init();
+        page.insert_tuple(&tuple, 0).unwrap();
+        let out = page.read_tuple(0, &cols).unwrap();
         assert_eq!(out, values);
     }
 
@@ -638,10 +657,10 @@ mod test {
             col("c", TypeId::Int4, 2),
         ];
         let tuple = build_tuple(&values, &cols);
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
-        let out = read_tuple(&page, 0, &cols).unwrap();
+        let mut page = Page::new();
+        page.init();
+        page.insert_tuple(&tuple, 0).unwrap();
+        let out = page.read_tuple(0, &cols).unwrap();
         assert_eq!(out, values);
     }
 
@@ -650,10 +669,10 @@ mod test {
         let values = vec![Datum::Text("hello".into()), Datum::Int4(42)];
         let cols = vec![col("s", TypeId::Text, 0), col("n", TypeId::Int4, 1)];
         let tuple = build_tuple(&values, &cols);
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
-        let out = read_tuple(&page, 0, &cols).unwrap();
+        let mut page = Page::new();
+        page.init();
+        page.insert_tuple(&tuple, 0).unwrap();
+        let out = page.read_tuple(0, &cols).unwrap();
         assert_eq!(out, values);
     }
 
@@ -674,47 +693,47 @@ mod test {
             col("e", TypeId::Float8, 4),
         ];
         let tuple = build_tuple(&values, &cols);
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
-        let out = read_tuple(&page, 0, &cols).unwrap();
+        let mut page = Page::new();
+        page.init();
+        page.insert_tuple(&tuple, 0).unwrap();
+        let out = page.read_tuple(0, &cols).unwrap();
         assert_eq!(out, values);
     }
 
     #[test]
     fn read_tuple_out_of_bounds() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
         let cols = vec![col("a", TypeId::Int4, 0)];
-        assert!(read_tuple(&page, 0, &cols).is_none());
-        assert!(read_tuple(&page, 100, &cols).is_none());
+        assert!(page.read_tuple(0, &cols).is_none());
+        assert!(page.read_tuple(100, &cols).is_none());
     }
 
     // -- Sprint 1 tests -------------------------------------------------------
 
     #[test]
     fn page_header_layout() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
 
         // pd_lsn (bytes 0-7) = 0
         assert_eq!(&page[0..8], &[0u8; 8]);
         // pd_checksum (bytes 8-9) = 0
-        assert_eq!(read_u16(&page, 8), 0);
+        assert_eq!(read_u16(&*page, 8), 0);
         // pd_flags (bytes 10-11) = 0
-        assert_eq!(read_u16(&page, 10), 0);
+        assert_eq!(read_u16(&*page, 10), 0);
         // pd_lower (bytes 12-13) = 28 (HEADER_SIZE)
-        assert_eq!(read_u16(&page, PD_LOWER), 28);
+        assert_eq!(read_u16(&*page, PD_LOWER), 28);
         // pd_upper (bytes 14-15) = 8192 (PAGE_SIZE)
-        assert_eq!(read_u16(&page, PD_UPPER), PAGE_SIZE as u16);
+        assert_eq!(read_u16(&*page, PD_UPPER), PAGE_SIZE as u16);
         // pd_special (bytes 16-17) = 8192
-        assert_eq!(read_u16(&page, PD_SPECIAL), PAGE_SIZE as u16);
+        assert_eq!(read_u16(&*page, PD_SPECIAL), PAGE_SIZE as u16);
         // pd_pagesize_version (bytes 18-19) = 0x2004
-        assert_eq!(read_u16(&page, PD_PAGESIZE_VERSION), 0x2004);
+        assert_eq!(read_u16(&*page, PD_PAGESIZE_VERSION), 0x2004);
         // pd_prune_xid (bytes 20-23) = 0
-        assert_eq!(read_u32(&page, 20), 0);
+        assert_eq!(read_u32(&*page, 20), 0);
         // Remaining header bytes (24-27) = 0
-        assert_eq!(read_u32(&page, 24), 0);
+        assert_eq!(read_u32(&*page, 24), 0);
     }
 
     #[test]
@@ -737,8 +756,8 @@ mod test {
 
     #[test]
     fn pg_compatible_page_header() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
 
         // Verify all 28 header bytes
         let mut expected = [0u8; 28];
@@ -751,16 +770,16 @@ mod test {
 
     #[test]
     fn pg_compatible_item_id() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
 
         let cols = vec![col("a", TypeId::Int4, 0), col("b", TypeId::Int4, 1)];
         let tuple = build_tuple(&[Datum::Int4(1), Datum::Int4(2)], &cols);
         let tuple_len = tuple.len(); // 24 (hdr) + 8 (two Int4) = 32
-        insert_tuple(&mut page, &tuple, 0).unwrap();
+        page.insert_tuple(&tuple, 0).unwrap();
 
         // ItemId at byte 28 (first slot after 28-byte header)
-        let item_id = read_u32(&page, HEADER_SIZE);
+        let item_id = read_u32(&*page, HEADER_SIZE);
         let (off, flags, len) = unpack_item_id(item_id);
         assert_eq!(off, (PAGE_SIZE - tuple_len) as u16); // 8192 - 32 = 8160
         assert_eq!(flags, LP_NORMAL);
@@ -769,31 +788,31 @@ mod test {
 
     #[test]
     fn pg_compatible_tuple_two_int4() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
 
         let cols = vec![col("a", TypeId::Int4, 0), col("b", TypeId::Int4, 1)];
         let tuple = build_tuple(&[Datum::Int4(42), Datum::Int4(100)], &cols);
-        insert_tuple(&mut page, &tuple, 5).unwrap();
+        page.insert_tuple(&tuple, 5).unwrap();
 
-        let item_id = read_u32(&page, HEADER_SIZE);
+        let item_id = read_u32(&*page, HEADER_SIZE);
         let (off, _, _) = unpack_item_id(item_id);
         let base = off as usize;
 
         // t_xmin = 1
-        assert_eq!(read_u32(&page, base + T_XMIN), 1);
+        assert_eq!(read_u32(&*page, base + T_XMIN), 1);
         // t_xmax = 0
-        assert_eq!(read_u32(&page, base + T_XMAX), 0);
+        assert_eq!(read_u32(&*page, base + T_XMAX), 0);
         // t_cid = 0
-        assert_eq!(read_u32(&page, base + 8), 0);
+        assert_eq!(read_u32(&*page, base + 8), 0);
         // t_ctid = (block=5, offset=1)
-        assert_eq!(read_u32(&page, base + T_CTID_BLKID), 5);
-        assert_eq!(read_u16(&page, base + T_CTID_POSID), 1);
+        assert_eq!(read_u32(&*page, base + T_CTID_BLKID), 5);
+        assert_eq!(read_u16(&*page, base + T_CTID_POSID), 1);
         // t_infomask2 = 2 (ncols)
-        assert_eq!(read_u16(&page, base + T_INFOMASK2), 2);
+        assert_eq!(read_u16(&*page, base + T_INFOMASK2), 2);
         // t_infomask = HEAP_XMIN_COMMITTED | HEAP_XMAX_INVALID = 0x0900
         assert_eq!(
-            read_u16(&page, base + T_INFOMASK),
+            read_u16(&*page, base + T_INFOMASK),
             HEAP_XMIN_COMMITTED | HEAP_XMAX_INVALID
         );
         // t_hoff = 24 (MAXALIGN(23))
@@ -813,8 +832,8 @@ mod test {
 
     #[test]
     fn pg_compatible_tuple_with_null() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
 
         let cols = vec![
             col("a", TypeId::Int4, 0),
@@ -822,14 +841,14 @@ mod test {
             col("c", TypeId::Int4, 2),
         ];
         let tuple = build_tuple(&[Datum::Int4(10), Datum::Null, Datum::Int4(30)], &cols);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
+        page.insert_tuple(&tuple, 0).unwrap();
 
-        let item_id = read_u32(&page, HEADER_SIZE);
+        let item_id = read_u32(&*page, HEADER_SIZE);
         let (off, _, _) = unpack_item_id(item_id);
         let base = off as usize;
 
         // t_infomask should include HEAP_HASNULL
-        let infomask = read_u16(&page, base + T_INFOMASK);
+        let infomask = read_u16(&*page, base + T_INFOMASK);
         assert_ne!(infomask & HEAP_HASNULL, 0);
 
         // t_hoff = MAXALIGN(23 + 1) = 24 (bitmap for 3 cols = 1 byte)
@@ -853,19 +872,19 @@ mod test {
 
     #[test]
     fn pg_compatible_varlena_text() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
 
         let cols = vec![col("t", TypeId::Text, 0)];
         let tuple = build_tuple(&[Datum::Text("hello".into())], &cols);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
+        page.insert_tuple(&tuple, 0).unwrap();
 
-        let item_id = read_u32(&page, HEADER_SIZE);
+        let item_id = read_u32(&*page, HEADER_SIZE);
         let (off, _, _) = unpack_item_id(item_id);
         let base = off as usize;
 
         // HEAP_HASVARWIDTH should be set
-        let infomask = read_u16(&page, base + T_INFOMASK);
+        let infomask = read_u16(&*page, base + T_INFOMASK);
         assert_ne!(infomask & HEAP_HASVARWIDTH, 0);
 
         // Short varlena: 1B header, total_len = 1 + 5 = 6, header = (6 << 1) | 0x01 = 13
@@ -876,15 +895,15 @@ mod test {
 
     #[test]
     fn pg_compatible_alignment_bool_int8() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
 
         // Bool (align=1, size=1) then Int8 (align=8, size=8)
         let cols = vec![col("b", TypeId::Bool, 0), col("n", TypeId::Int8, 1)];
         let tuple = build_tuple(&[Datum::Bool(true), Datum::Int8(42)], &cols);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
+        page.insert_tuple(&tuple, 0).unwrap();
 
-        let item_id = read_u32(&page, HEADER_SIZE);
+        let item_id = read_u32(&*page, HEADER_SIZE);
         let (off, _, _) = unpack_item_id(item_id);
         let base = off as usize;
         let data_off = base + 24; // t_hoff
@@ -902,8 +921,8 @@ mod test {
 
     #[test]
     fn pg_compatible_alignment_mixed() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
 
         // Int4 (align=4) -> Bool (align=1) -> Int4 (align=4)
         let cols = vec![
@@ -912,9 +931,9 @@ mod test {
             col("c", TypeId::Int4, 2),
         ];
         let tuple = build_tuple(&[Datum::Int4(1), Datum::Bool(true), Datum::Int4(2)], &cols);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
+        page.insert_tuple(&tuple, 0).unwrap();
 
-        let item_id = read_u32(&page, HEADER_SIZE);
+        let item_id = read_u32(&*page, HEADER_SIZE);
         let (off, _, _) = unpack_item_id(item_id);
         let base = off as usize;
         let data_off = base + 24;
@@ -937,70 +956,70 @@ mod test {
 
     #[test]
     fn mark_dead_clears_xmax_invalid() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
 
         let cols = vec![col("a", TypeId::Int4, 0)];
         let tuple = build_tuple(&[Datum::Int4(1)], &cols);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
+        page.insert_tuple(&tuple, 0).unwrap();
 
         // Before: tuple is live
-        assert!(read_tuple(&page, 0, &cols).is_some());
+        assert!(page.read_tuple(0, &cols).is_some());
 
-        mark_tuple_dead(&mut page, 0);
+        page.mark_tuple_dead(0);
 
         // After: tuple is dead
-        assert!(read_tuple(&page, 0, &cols).is_none());
+        assert!(page.read_tuple(0, &cols).is_none());
 
         // Verify t_xmax=1 and HEAP_XMAX_INVALID cleared
-        let item_id = read_u32(&page, HEADER_SIZE);
+        let item_id = read_u32(&*page, HEADER_SIZE);
         let (off, _, _) = unpack_item_id(item_id);
         let base = off as usize;
-        assert_eq!(read_u32(&page, base + T_XMAX), 1);
-        assert_eq!(read_u16(&page, base + T_INFOMASK) & HEAP_XMAX_INVALID, 0);
+        assert_eq!(read_u32(&*page, base + T_XMAX), 1);
+        assert_eq!(read_u16(&*page, base + T_INFOMASK) & HEAP_XMAX_INVALID, 0);
     }
 
     // -- Page checksum tests --------------------------------------------------
 
     #[test]
     fn checksum_round_trip() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
         let cols = vec![col("a", TypeId::Int4, 0)];
         let tuple = build_tuple(&[Datum::Int4(42)], &cols);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
+        page.insert_tuple(&tuple, 0).unwrap();
 
-        set_checksum(&mut page, 0);
-        assert!(verify_checksum(&page, 0));
+        page.set_checksum(0);
+        assert!(page.verify_checksum(0));
     }
 
     #[test]
     fn checksum_corruption() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
-        set_checksum(&mut page, 0);
-        assert!(verify_checksum(&page, 0));
+        let mut page = Page::new();
+        page.init();
+        page.set_checksum(0);
+        assert!(page.verify_checksum(0));
 
         // Flip a data byte
         page[100] ^= 0xFF;
-        assert!(!verify_checksum(&page, 0));
+        assert!(!page.verify_checksum(0));
     }
 
     #[test]
     fn checksum_zero_page() {
-        let page = [0u8; PAGE_SIZE];
-        assert!(verify_checksum(&page, 0));
-        assert!(verify_checksum(&page, 42));
+        let page = Page::new();
+        assert!(page.verify_checksum(0));
+        assert!(page.verify_checksum(42));
     }
 
     #[test]
     fn checksum_block_number_matters() {
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
-        set_checksum(&mut page, 0);
-        assert!(verify_checksum(&page, 0));
+        let mut page = Page::new();
+        page.init();
+        page.set_checksum(0);
+        assert!(page.verify_checksum(0));
         // Same page with different block number should fail
-        assert!(!verify_checksum(&page, 1));
+        assert!(!page.verify_checksum(1));
     }
 
     // -- VACUUM tests ---------------------------------------------------------
@@ -1016,29 +1035,29 @@ mod test {
         let (_dir, mut clog) = make_clog();
         clog.set_status(1, XidStatus::Committed); // bootstrap xid
 
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
         let cols = vec![col("a", TypeId::Int4, 0)];
 
         // Insert 10 tuples
         for i in 0..10 {
             let tuple = build_tuple(&[Datum::Int4(i)], &cols);
-            insert_tuple(&mut page, &tuple, 0).unwrap();
+            page.insert_tuple(&tuple, 0).unwrap();
         }
-        assert_eq!(num_items(&page), 10);
+        assert_eq!(page.num_items(), 10);
 
         // Mark 5 as dead (xid=1 which is committed)
         for i in 0..5 {
-            mark_tuple_dead(&mut page, i);
+            page.mark_tuple_dead(i);
         }
 
-        let reclaimed = compact_page(&mut page, &mut clog);
+        let reclaimed = page.compact_page(&mut clog);
         assert_eq!(reclaimed, 5);
-        assert_eq!(num_items(&page), 5);
+        assert_eq!(page.num_items(), 5);
 
         // Verify remaining tuples are readable
         for i in 0..5 {
-            let datums = read_tuple(&page, i, &cols).unwrap();
+            let datums = page.read_tuple(i, &cols).unwrap();
             assert_eq!(datums, vec![Datum::Int4((i + 5) as i32)]);
         }
     }
@@ -1048,24 +1067,24 @@ mod test {
         let (_dir, mut clog) = make_clog();
         clog.set_status(1, XidStatus::Committed);
 
-        let mut page = [0u8; PAGE_SIZE];
-        init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
         let cols = vec![col("a", TypeId::Int4, 0)];
         let tuple = build_tuple(&[Datum::Int4(42)], &cols);
-        insert_tuple(&mut page, &tuple, 0).unwrap();
+        page.insert_tuple(&tuple, 0).unwrap();
 
-        let frozen = freeze_tuples(&mut page, &mut clog);
+        let frozen = page.freeze_tuples(&mut clog);
         assert_eq!(frozen, 1);
 
         // Verify xmin = FROZEN_XID (2)
-        let item_id = read_u32(&page, HEADER_SIZE);
+        let item_id = read_u32(&*page, HEADER_SIZE);
         let (offset, _, _) = unpack_item_id(item_id);
-        assert_eq!(read_u32(&page, offset as usize + T_XMIN), FROZEN_XID);
-        let infomask = read_u16(&page, offset as usize + T_INFOMASK);
+        assert_eq!(read_u32(&*page, offset as usize + T_XMIN), FROZEN_XID);
+        let infomask = read_u16(&*page, offset as usize + T_INFOMASK);
         assert_ne!(infomask & HEAP_XMIN_FROZEN, 0);
 
         // Freezing again should be a no-op
-        let frozen2 = freeze_tuples(&mut page, &mut clog);
+        let frozen2 = page.freeze_tuples(&mut clog);
         assert_eq!(frozen2, 0);
     }
 }

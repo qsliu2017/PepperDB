@@ -118,8 +118,9 @@ mod test {
     #[test]
     fn snapshot_visibility_committed_before() {
         use crate::access::heap;
+        use crate::access::heap::HeapAccessMethod;
         use crate::catalog::Column;
-        use crate::storage::bufpage::PAGE_SIZE;
+        use crate::storage::bufpage::Page;
         use crate::types::{Datum, TypeId};
 
         let dir = tempfile::tempdir().unwrap();
@@ -135,23 +136,24 @@ mod test {
         // Insert with xid=3, commit it
         let xid = txn.assign_xid();
         let tuple = heap::build_tuple_with_xid(&[Datum::Int4(42)], &cols, xid, false);
-        let mut page = [0u8; PAGE_SIZE];
-        crate::storage::bufpage::init_page(&mut page);
-        heap::insert_tuple(&mut page, &tuple, 0).unwrap();
+        let mut page = Page::new();
+        page.init();
+        page.insert_tuple(&tuple, 0).unwrap();
         txn.commit(xid);
 
         // Snapshot taken after commit -- tuple should be visible
         let snap = txn.take_snapshot();
-        assert!(heap::tuple_visible(&page, 0, &snap, txn.clog()));
-        let datums = heap::read_tuple_mvcc(&page, 0, &cols, &snap, txn.clog()).unwrap();
+        assert!(page.tuple_visible(0, &snap, txn.clog()));
+        let datums = page.read_tuple_mvcc(0, &cols, &snap, txn.clog()).unwrap();
         assert_eq!(datums, vec![Datum::Int4(42)]);
     }
 
     #[test]
     fn snapshot_visibility_committed_after() {
         use crate::access::heap;
+        use crate::access::heap::HeapAccessMethod;
         use crate::catalog::Column;
-        use crate::storage::bufpage::PAGE_SIZE;
+        use crate::storage::bufpage::Page;
         use crate::types::{Datum, TypeId};
 
         let dir = tempfile::tempdir().unwrap();
@@ -170,12 +172,12 @@ mod test {
         // Insert with xid=3, commit it after snapshot
         let xid = txn.assign_xid();
         let tuple = heap::build_tuple_with_xid(&[Datum::Int4(42)], &cols, xid, false);
-        let mut page = [0u8; PAGE_SIZE];
-        crate::storage::bufpage::init_page(&mut page);
-        heap::insert_tuple(&mut page, &tuple, 0).unwrap();
+        let mut page = Page::new();
+        page.init();
+        page.insert_tuple(&tuple, 0).unwrap();
         txn.commit(xid);
 
         // Tuple committed after snapshot -- should NOT be visible
-        assert!(!heap::tuple_visible(&page, 0, &snap, txn.clog()));
+        assert!(!page.tuple_visible(0, &snap, txn.clog()));
     }
 }

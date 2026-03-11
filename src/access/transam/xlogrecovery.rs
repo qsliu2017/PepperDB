@@ -7,8 +7,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::access::heap;
-use crate::storage::bufpage::{self, PAGE_SIZE};
+use crate::access::heap::HeapAccessMethod;
+use crate::storage::bufpage::Page;
 use crate::storage::smgr::DiskManager;
 
 use super::xlog as writer;
@@ -164,7 +164,7 @@ fn apply_heap_record(disk: &DiskManager, lsn: u64, rec: &WalRecord) {
         return;
     };
 
-    let mut page = [0u8; PAGE_SIZE];
+    let mut page = Page::new();
     let num_pages = disk.num_pages(rfn);
 
     match rec.xl_info {
@@ -174,18 +174,18 @@ fn apply_heap_record(disk: &DiskManager, lsn: u64, rec: &WalRecord) {
             };
             if blkno < num_pages {
                 disk.read_page(rfn, blkno, &mut page);
-                if bufpage::get_page_lsn(&page) >= lsn {
+                if page.lsn() >= lsn {
                     return; // Already applied
                 }
-                if heap::insert_tuple(&mut page, tuple, blkno).is_ok() {
-                    bufpage::set_page_lsn(&mut page, lsn);
+                if page.insert_tuple(tuple, blkno).is_ok() {
+                    page.set_lsn(lsn);
                     disk.write_page(rfn, blkno, &page);
                 }
             } else {
                 // Need to create new page(s) up to blkno
-                bufpage::init_page(&mut page);
-                if heap::insert_tuple(&mut page, tuple, blkno).is_ok() {
-                    bufpage::set_page_lsn(&mut page, lsn);
+                page.init();
+                if page.insert_tuple(tuple, blkno).is_ok() {
+                    page.set_lsn(lsn);
                     disk.write_page(rfn, blkno, &page);
                 }
             }
@@ -195,11 +195,11 @@ fn apply_heap_record(disk: &DiskManager, lsn: u64, rec: &WalRecord) {
                 return;
             }
             disk.read_page(rfn, blkno, &mut page);
-            if bufpage::get_page_lsn(&page) >= lsn {
+            if page.lsn() >= lsn {
                 return; // Already applied
             }
-            heap::mark_tuple_dead(&mut page, item_off);
-            bufpage::set_page_lsn(&mut page, lsn);
+            page.mark_tuple_dead(item_off);
+            page.set_lsn(lsn);
             disk.write_page(rfn, blkno, &page);
         }
         _ => {}
@@ -209,6 +209,7 @@ fn apply_heap_record(disk: &DiskManager, lsn: u64, rec: &WalRecord) {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::access::heap;
     use crate::access::transam::xlog::WalWriter;
     use crate::access::transam::xlogrecord::{WalRecord, RM_HEAP_ID, XLOG_HEAP_INSERT};
 
@@ -266,9 +267,9 @@ mod test {
         }];
         let tuple = heap::build_tuple(&[crate::types::Datum::Int4(42)], &cols);
 
-        let mut page = [0u8; PAGE_SIZE];
-        bufpage::init_page(&mut page);
-        let item_idx = heap::insert_tuple(&mut page, &tuple, 0).unwrap();
+        let mut page = Page::new();
+        page.init();
+        let item_idx = page.insert_tuple(&tuple, 0).unwrap();
         let wal_data = record::build_heap_insert_data(16384, 0, item_idx, &tuple);
         let rec = WalRecord {
             xl_xid: 1,
@@ -284,9 +285,9 @@ mod test {
         let _end_lsn = recover(&disk, &wal_dir, lsn).unwrap();
 
         // Verify the tuple was recovered
-        let mut read_page = [0u8; PAGE_SIZE];
+        let mut read_page = Page::new();
         disk.read_page(16384, 0, &mut read_page);
-        let datums = heap::read_tuple(&read_page, 0, &cols).unwrap();
+        let datums = read_page.read_tuple(0, &cols).unwrap();
         assert_eq!(datums, vec![crate::types::Datum::Int4(42)]);
     }
 
@@ -323,10 +324,10 @@ mod test {
         recover(&disk, &wal_dir, lsn).unwrap();
 
         // Should still have exactly 1 tuple
-        let mut page = [0u8; PAGE_SIZE];
+        let mut page = Page::new();
         disk.read_page(16384, 0, &mut page);
-        assert_eq!(bufpage::num_items(&page), 1);
-        let datums = heap::read_tuple(&page, 0, &cols).unwrap();
+        assert_eq!(page.num_items(), 1);
+        let datums = page.read_tuple(0, &cols).unwrap();
         assert_eq!(datums, vec![crate::types::Datum::Int4(99)]);
     }
 }

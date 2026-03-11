@@ -66,6 +66,7 @@ Rust library crate (`pepper_db`). `src/lib.rs` as crate root, submodules in dire
 - Tests are inline (`#[cfg(test)] mod test`) within the source files they test
 - Prefer methods over free functions when a struct is the natural receiver
 - Prefer iterator chains (`.map()`, `.filter()`, `.collect()`) over `let mut vec` + `for` loop + push
+- Prefer `const fn` for pure computation functions (no I/O, no allocation, no mutable slice ops)
 - Use `//!` for module-level doc comments (file headers)
 
 ### Documentation

@@ -6,9 +6,10 @@
 //! reconstruct the in-memory Catalog.
 
 use crate::access::heap;
+use crate::access::heap::HeapAccessMethod;
 use crate::catalog::filenode_map;
 use crate::catalog::{Catalog, Column, Table};
-use crate::storage::bufpage::{self, PAGE_SIZE};
+use crate::storage::bufpage::Page;
 use crate::storage::smgr::DiskManager;
 use crate::types::{Datum, TypeId, OID};
 use std::collections::HashMap;
@@ -226,21 +227,23 @@ pub fn load_catalog(disk: &DiskManager) -> io::Result<Catalog> {
 fn insert_global_tuple(disk: &DiskManager, relfilenode: OID, values: &[Datum], columns: &[Column]) {
     let tuple = heap::build_tuple(values, columns);
     let num_pages = disk.num_global_pages(relfilenode);
-    let mut page = [0u8; PAGE_SIZE];
+    let mut page = Page::new();
 
     if num_pages == 0 {
-        bufpage::init_page(&mut page);
-        heap::insert_tuple(&mut page, &tuple, 0).expect("tuple too large for page");
+        page.init();
+        page.insert_tuple(&tuple, 0)
+            .expect("tuple too large for page");
         disk.write_global_page(relfilenode, 0, &page);
     } else {
         let last = num_pages - 1;
         disk.read_global_page(relfilenode, last, &mut page);
-        if heap::insert_tuple(&mut page, &tuple, last).is_ok() {
+        if page.insert_tuple(&tuple, last).is_ok() {
             disk.write_global_page(relfilenode, last, &page);
         } else {
             let new_id = num_pages;
-            bufpage::init_page(&mut page);
-            heap::insert_tuple(&mut page, &tuple, new_id).expect("tuple too large for page");
+            page.init();
+            page.insert_tuple(&tuple, new_id)
+                .expect("tuple too large for page");
             disk.write_global_page(relfilenode, new_id, &page);
         }
     }
@@ -250,13 +253,13 @@ fn insert_global_tuple(disk: &DiskManager, relfilenode: OID, values: &[Datum], c
 fn scan_global_heap(disk: &DiskManager, relfilenode: OID, columns: &[Column]) -> Vec<Vec<Datum>> {
     let num_pages = disk.num_global_pages(relfilenode);
     let mut tuples = Vec::new();
-    let mut page = [0u8; PAGE_SIZE];
+    let mut page = Page::new();
 
     for page_id in 0..num_pages {
         disk.read_global_page(relfilenode, page_id, &mut page);
-        let n = bufpage::num_items(&page);
+        let n = page.num_items();
         for item_idx in 0..n {
-            if let Some(datums) = heap::read_tuple(&page, item_idx, columns) {
+            if let Some(datums) = page.read_tuple(item_idx, columns) {
                 tuples.push(datums);
             }
         }
@@ -295,16 +298,16 @@ pub fn drop_pg_catalog_rows(disk: &DiskManager, table_oid: OID) {
     // Mark pg_class row dead
     let class_cols = pg_class_columns();
     let num_pages = disk.num_global_pages(PG_CLASS_OID);
-    let mut page = [0u8; PAGE_SIZE];
+    let mut page = Page::new();
     for page_id in 0..num_pages {
         disk.read_global_page(PG_CLASS_OID, page_id, &mut page);
-        let n = bufpage::num_items(&page);
+        let n = page.num_items();
         let mut modified = false;
         for item_idx in 0..n {
-            if let Some(datums) = heap::read_tuple(&page, item_idx, &class_cols) {
+            if let Some(datums) = page.read_tuple(item_idx, &class_cols) {
                 if let Datum::Int4(oid) = &datums[0] {
                     if *oid as OID == table_oid {
-                        heap::mark_tuple_dead(&mut page, item_idx);
+                        page.mark_tuple_dead(item_idx);
                         modified = true;
                     }
                 }
@@ -320,13 +323,13 @@ pub fn drop_pg_catalog_rows(disk: &DiskManager, table_oid: OID) {
     let num_pages = disk.num_global_pages(PG_ATTRIBUTE_OID);
     for page_id in 0..num_pages {
         disk.read_global_page(PG_ATTRIBUTE_OID, page_id, &mut page);
-        let n = bufpage::num_items(&page);
+        let n = page.num_items();
         let mut modified = false;
         for item_idx in 0..n {
-            if let Some(datums) = heap::read_tuple(&page, item_idx, &attr_cols) {
+            if let Some(datums) = page.read_tuple(item_idx, &attr_cols) {
                 if let Datum::Int4(attrelid) = &datums[0] {
                     if *attrelid as OID == table_oid {
-                        heap::mark_tuple_dead(&mut page, item_idx);
+                        page.mark_tuple_dead(item_idx);
                         modified = true;
                     }
                 }

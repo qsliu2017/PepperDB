@@ -15,7 +15,7 @@ pub enum TypeId {
 
 impl TypeId {
     /// PostgreSQL typalign: alignment boundary for this type's on-disk storage.
-    pub fn align(&self) -> usize {
+    pub const fn align(&self) -> usize {
         match self {
             TypeId::Bool => 1,
             TypeId::Int2 => 2,
@@ -26,7 +26,7 @@ impl TypeId {
 
     /// PostgreSQL typlen: fixed byte size, or -1 for variable-length (varlena).
     #[allow(clippy::len_without_is_empty)]
-    pub fn len(&self) -> i16 {
+    pub const fn len(&self) -> i16 {
         match self {
             TypeId::Bool => 1,
             TypeId::Int2 => 2,
@@ -39,7 +39,7 @@ impl TypeId {
     }
 
     /// PostgreSQL pg_type OID for this type.
-    pub fn pg_oid(&self) -> OID {
+    pub const fn pg_oid(&self) -> OID {
         match self {
             TypeId::Bool => 16,
             TypeId::Int2 => 21,
@@ -52,7 +52,7 @@ impl TypeId {
     }
 
     /// Reverse lookup from PostgreSQL pg_type OID.
-    pub fn from_pg_oid(oid: OID) -> Option<Self> {
+    pub const fn from_pg_oid(oid: OID) -> Option<Self> {
         match oid {
             16 => Some(TypeId::Bool),
             21 => Some(TypeId::Int2),

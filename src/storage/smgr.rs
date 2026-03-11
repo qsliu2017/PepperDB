@@ -7,7 +7,7 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use crate::storage::bufpage::{self, PAGE_SIZE};
+use crate::storage::bufpage::{Page, PAGE_SIZE};
 use crate::types::OID;
 
 pub struct DiskManager {
@@ -64,22 +64,22 @@ impl DiskManager {
             .expect("failed to create VM file");
     }
 
-    pub fn read_page(&self, relfilenode: OID, page_id: u32, buf: &mut [u8; PAGE_SIZE]) {
+    pub fn read_page(&self, relfilenode: OID, page_id: u32, buf: &mut Page) {
         let mut f = fs::File::open(self.file_path(relfilenode)).expect("failed to open heap file");
         f.seek(SeekFrom::Start(page_id as u64 * PAGE_SIZE as u64))
             .expect("seek failed");
-        f.read_exact(buf).expect("read failed");
+        f.read_exact(&mut buf.0).expect("read failed");
         assert!(
-            bufpage::verify_checksum(buf, page_id),
+            buf.verify_checksum(page_id),
             "page checksum mismatch: relfilenode={}, page_id={}",
             relfilenode,
             page_id
         );
     }
 
-    pub fn write_page(&self, relfilenode: OID, page_id: u32, buf: &[u8; PAGE_SIZE]) {
-        let mut page = *buf;
-        bufpage::set_checksum(&mut page, page_id);
+    pub fn write_page(&self, relfilenode: OID, page_id: u32, buf: &Page) {
+        let mut page = buf.clone();
+        page.set_checksum(page_id);
         let mut f = fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -88,7 +88,7 @@ impl DiskManager {
             .expect("failed to open heap file for write");
         f.seek(SeekFrom::Start(page_id as u64 * PAGE_SIZE as u64))
             .expect("seek failed");
-        f.write_all(&page).expect("write failed");
+        f.write_all(&page.0).expect("write failed");
     }
 
     pub fn delete_heap_file(&self, relfilenode: OID) {
@@ -111,23 +111,23 @@ impl DiskManager {
         fs::File::create(self.global_file_path(relfilenode)).expect("failed to create global file");
     }
 
-    pub fn read_global_page(&self, relfilenode: OID, page_id: u32, buf: &mut [u8; PAGE_SIZE]) {
+    pub fn read_global_page(&self, relfilenode: OID, page_id: u32, buf: &mut Page) {
         let mut f =
             fs::File::open(self.global_file_path(relfilenode)).expect("failed to open global file");
         f.seek(SeekFrom::Start(page_id as u64 * PAGE_SIZE as u64))
             .expect("seek failed");
-        f.read_exact(buf).expect("read failed");
+        f.read_exact(&mut buf.0).expect("read failed");
         assert!(
-            bufpage::verify_checksum(buf, page_id),
+            buf.verify_checksum(page_id),
             "global page checksum mismatch: relfilenode={}, page_id={}",
             relfilenode,
             page_id
         );
     }
 
-    pub fn write_global_page(&self, relfilenode: OID, page_id: u32, buf: &[u8; PAGE_SIZE]) {
-        let mut page = *buf;
-        bufpage::set_checksum(&mut page, page_id);
+    pub fn write_global_page(&self, relfilenode: OID, page_id: u32, buf: &Page) {
+        let mut page = buf.clone();
+        page.set_checksum(page_id);
         let mut f = fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -136,7 +136,7 @@ impl DiskManager {
             .expect("failed to open global file for write");
         f.seek(SeekFrom::Start(page_id as u64 * PAGE_SIZE as u64))
             .expect("seek failed");
-        f.write_all(&page).expect("write failed");
+        f.write_all(&page.0).expect("write failed");
     }
 
     pub fn num_global_pages(&self, relfilenode: OID) -> u32 {
@@ -174,12 +174,12 @@ mod test {
         let dm = DiskManager::new(dir.path(), 5);
         dm.create_heap_file(1);
 
-        let mut page = [0u8; PAGE_SIZE];
-        bufpage::init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
         page[28] = 0xAB; // write after header
         dm.write_page(1, 0, &page);
 
-        let mut read_buf = [0u8; PAGE_SIZE];
+        let mut read_buf = Page::new();
         dm.read_page(1, 0, &mut read_buf);
         assert_eq!(read_buf[28], 0xAB);
     }
@@ -191,8 +191,8 @@ mod test {
         dm.create_heap_file(2);
         assert_eq!(dm.num_pages(2), 0);
 
-        let mut page = [0u8; PAGE_SIZE];
-        bufpage::init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
         dm.write_page(2, 0, &page);
         assert_eq!(dm.num_pages(2), 1);
 
@@ -206,11 +206,11 @@ mod test {
         let dm = DiskManager::new(dir.path(), 5);
         dm.create_global_file(1259);
 
-        let mut page = [0u8; PAGE_SIZE];
-        bufpage::init_page(&mut page);
+        let mut page = Page::new();
+        page.init();
         dm.write_global_page(1259, 0, &page);
 
-        let mut read_buf = [0u8; PAGE_SIZE];
+        let mut read_buf = Page::new();
         dm.read_global_page(1259, 0, &mut read_buf);
         assert_eq!(dm.num_global_pages(1259), 1);
     }

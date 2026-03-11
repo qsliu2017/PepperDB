@@ -21,14 +21,15 @@ use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 
 use crate::access::heap;
-use crate::access::heap::visibilitymap as vm;
+use crate::access::heap::visibilitymap::VisibilityMap;
+use crate::access::heap::HeapAccessMethod;
 use crate::access::transam::xlogrecord::{self as wal_record, WalRecord};
 use crate::access::transam::TxnManager;
 use crate::catalog::bootstrap;
 use crate::catalog::Column;
 use crate::parser::{self, BinOp, Expr, Statement, UnaryOp};
-use crate::storage::bufpage::{self, PAGE_SIZE};
-use crate::storage::freespace as fsm;
+use crate::storage::bufpage::{Page, PAGE_SIZE};
+use crate::storage::freespace::FreeSpaceMap;
 use crate::storage::smgr::DiskManager;
 use crate::types::{Datum, TypeId};
 use crate::Database;
@@ -429,14 +430,14 @@ impl HeapTableProvider {
         let snapshot = txn.take_snapshot();
         let num_pages = disk.num_pages(self.oid);
         let mut tuples = Vec::new();
-        let mut page = [0u8; PAGE_SIZE];
+        let mut page = Page::new();
 
         for page_id in 0..num_pages {
             disk.read_page(self.oid, page_id, &mut page);
-            let n = bufpage::num_items(&page);
+            let n = page.num_items();
             for item_idx in 0..n {
                 if let Some(datums) =
-                    heap::read_tuple_mvcc(&page, item_idx, &self.columns, &snapshot, txn.clog())
+                    page.read_tuple_mvcc(item_idx, &self.columns, &snapshot, txn.clog())
                 {
                     let datums = resolve_toast_markers(datums, &self.toast_store);
                     tuples.push(datums);
@@ -987,16 +988,16 @@ impl Database {
         let mut txn = self.txn.lock().unwrap();
         let xid = txn.assign_xid();
         let num_pages = disk.num_pages(oid);
-        let mut page = [0u8; PAGE_SIZE];
+        let mut page = Page::new();
         let mut count = 0u64;
         let mut new_tuples: Vec<Vec<Datum>> = Vec::new();
 
         for page_id in 0..num_pages {
             disk.read_page(oid, page_id, &mut page);
-            let n = bufpage::num_items(&page);
+            let n = page.num_items();
             let mut page_modified = false;
             for item_idx in 0..n {
-                if let Some(datums) = heap::read_tuple(&page, item_idx, &columns) {
+                if let Some(datums) = page.read_tuple(item_idx, &columns) {
                     let matches = match &upd.where_clause {
                         Some(wh) => matches!(eval_expr(wh, &datums, &columns), Datum::Bool(true)),
                         None => true,
@@ -1009,7 +1010,7 @@ impl Database {
                             }
                         }
                         new_tuples.push(new_row);
-                        heap::mark_tuple_dead_with_xid(&mut page, item_idx, xid);
+                        page.mark_tuple_dead_with_xid(item_idx, xid);
                         let wal_data = wal_record::build_heap_delete_data(oid, page_id, item_idx);
                         let rec = WalRecord {
                             xl_xid: xid,
@@ -1018,7 +1019,7 @@ impl Database {
                             data: wal_data,
                         };
                         let lsn = wal.append(&rec);
-                        bufpage::set_page_lsn(&mut page, lsn);
+                        page.set_lsn(lsn);
                         page_modified = true;
                         count += 1;
                     }
@@ -1080,21 +1081,21 @@ impl Database {
         let mut txn = self.txn.lock().unwrap();
         let xid = txn.assign_xid();
         let num_pages = disk.num_pages(oid);
-        let mut page = [0u8; PAGE_SIZE];
+        let mut page = Page::new();
         let mut count = 0u64;
 
         for page_id in 0..num_pages {
             disk.read_page(oid, page_id, &mut page);
-            let n = bufpage::num_items(&page);
+            let n = page.num_items();
             let mut page_modified = false;
             for item_idx in 0..n {
-                if let Some(datums) = heap::read_tuple(&page, item_idx, &columns) {
+                if let Some(datums) = page.read_tuple(item_idx, &columns) {
                     let matches = match &del.where_clause {
                         Some(wh) => matches!(eval_expr(wh, &datums, &columns), Datum::Bool(true)),
                         None => true,
                     };
                     if matches {
-                        heap::mark_tuple_dead_with_xid(&mut page, item_idx, xid);
+                        page.mark_tuple_dead_with_xid(item_idx, xid);
                         let wal_data = wal_record::build_heap_delete_data(oid, page_id, item_idx);
                         let rec = WalRecord {
                             xl_xid: xid,
@@ -1103,7 +1104,7 @@ impl Database {
                             data: wal_data,
                         };
                         let lsn = wal.append(&rec);
-                        bufpage::set_page_lsn(&mut page, lsn);
+                        page.set_lsn(lsn);
                         page_modified = true;
                         count += 1;
                     }
@@ -1210,12 +1211,12 @@ impl Database {
 
             // Populate index from existing heap data
             let num_pages = disk.num_pages(table_oid);
-            let mut page = [0u8; PAGE_SIZE];
+            let mut page = Page::new();
             for page_id in 0..num_pages {
                 disk.read_page(table_oid, page_id, &mut page);
-                let n = bufpage::num_items(&page);
+                let n = page.num_items();
                 for item_idx in 0..n {
-                    if let Some(datums) = heap::read_tuple(&page, item_idx, &columns) {
+                    if let Some(datums) = page.read_tuple(item_idx, &columns) {
                         let key = &datums[col_idx];
                         if *key == Datum::Null {
                             continue;
@@ -1265,19 +1266,19 @@ impl Database {
 
         for (oid, _) in &tables {
             let num_pages = disk.num_pages(*oid);
-            let mut page = [0u8; PAGE_SIZE];
+            let mut page = Page::new();
             let mut all_frozen = true;
             for page_id in 0..num_pages {
                 disk.read_page(*oid, page_id, &mut page);
-                let compacted = heap::compact_page(&mut page, txn.clog());
-                let frozen = heap::freeze_tuples(&mut page, txn.clog());
+                let compacted = page.compact_page(txn.clog());
+                let frozen = page.freeze_tuples(txn.clog());
                 if compacted > 0 || frozen > 0 {
                     disk.write_page(*oid, page_id, &page);
                 }
                 // Update FSM with current free space
-                fsm::update(&disk, *oid, page_id, fsm::page_free_space(&page));
+                disk.fsm_update(*oid, page_id, page.free_space());
                 // Check if all tuples on page are frozen
-                let n = bufpage::num_items(&page);
+                let n = page.num_items();
                 let page_all_frozen = n > 0
                     && (0..n).all(|i| {
                         let item_id_off = 28 + (i as usize) * 4;
@@ -1293,7 +1294,7 @@ impl Database {
                         xmin == 2 // FROZEN_XID
                     });
                 if page_all_frozen {
-                    vm::set_frozen(&disk, *oid, page_id);
+                    disk.vm_set_frozen(*oid, page_id);
                 }
                 if !page_all_frozen {
                     all_frozen = false;
@@ -1636,20 +1637,21 @@ fn insert_tuple_to_heap(
     xid: u32,
 ) -> PgWireResult<(u32, u16)> {
     let num_pages = disk.num_pages(oid);
-    let mut page = [0u8; PAGE_SIZE];
+    let mut page = Page::new();
 
     // Try FSM first to find a page with enough space
-    let (page_id, item_idx) = if let Some(target) = fsm::search(disk, oid, tuple.len() + 4) {
+    let (page_id, item_idx) = if let Some(target) = disk.fsm_search(oid, tuple.len() + 4) {
         disk.read_page(oid, target, &mut page);
-        if let Ok(idx) = heap::insert_tuple(&mut page, tuple, target) {
+        if let Ok(idx) = page.insert_tuple(tuple, target) {
             (target, idx)
         } else {
             // FSM was stale; fall through to append
             insert_new_or_last(disk, oid, tuple, num_pages, &mut page)?
         }
     } else if num_pages == 0 {
-        bufpage::init_page(&mut page);
-        let idx = heap::insert_tuple(&mut page, tuple, 0)
+        page.init();
+        let idx = page
+            .insert_tuple(tuple, 0)
             .map_err(|()| user_error("42000", "Tuple too large for page"))?;
         (0u32, idx)
     } else {
@@ -1665,13 +1667,13 @@ fn insert_tuple_to_heap(
     };
     let lsn = wal.append(&rec);
     wal.flush();
-    bufpage::set_page_lsn(&mut page, lsn);
+    page.set_lsn(lsn);
     disk.write_page(oid, page_id, &page);
 
     // Update FSM with remaining free space
-    fsm::update(disk, oid, page_id, fsm::page_free_space(&page));
+    disk.fsm_update(oid, page_id, page.free_space());
     // Clear VM frozen bit since we just modified this page
-    vm::clear_frozen(disk, oid, page_id);
+    disk.vm_clear_frozen(oid, page_id);
 
     Ok((page_id, item_idx))
 }
@@ -1681,16 +1683,17 @@ fn insert_new_or_last(
     oid: u32,
     tuple: &[u8],
     num_pages: u32,
-    page: &mut [u8; PAGE_SIZE],
+    page: &mut Page,
 ) -> PgWireResult<(u32, u16)> {
     let last = num_pages - 1;
     disk.read_page(oid, last, page);
-    if let Ok(idx) = heap::insert_tuple(page, tuple, last) {
+    if let Ok(idx) = page.insert_tuple(tuple, last) {
         Ok((last, idx))
     } else {
         let new_id = num_pages;
-        bufpage::init_page(page);
-        let idx = heap::insert_tuple(page, tuple, new_id)
+        page.init();
+        let idx = page
+            .insert_tuple(tuple, new_id)
             .map_err(|()| user_error("42000", "Tuple too large for page"))?;
         Ok((new_id, idx))
     }
