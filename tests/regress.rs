@@ -412,6 +412,13 @@ async fn setup_test_tables(name: &str, db: &Database) {
             "INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd');",
             "INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd    ');",
         ],
+        "char" => &[
+            "CREATE TABLE CHAR_TBL(f1 char(4));",
+            "INSERT INTO CHAR_TBL (f1) VALUES ('a');",
+            "INSERT INTO CHAR_TBL (f1) VALUES ('ab');",
+            "INSERT INTO CHAR_TBL (f1) VALUES ('abcd');",
+            "INSERT INTO CHAR_TBL (f1) VALUES ('abcd    ');",
+        ],
         _ => &[],
     };
     for sql in setup_sql {
@@ -482,7 +489,7 @@ regress_test!(
     // brin_multi,
     // btree_index,
     // case,
-    // char,
+    char,
     // circle,
     // cluster,
     // collate,

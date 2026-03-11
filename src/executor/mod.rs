@@ -203,6 +203,10 @@ impl Database {
     // -- DataFusion SELECT -------------------------------------------------
 
     async fn execute_select_df(&self, sql: &str) -> PgWireResult<Response<'static>> {
+        // Rewrite PG's internal "char" type casts to pg_char_cast() UDF.
+        let rewritten_char = rewrite_pg_char_casts(sql);
+        let sql = rewritten_char.as_deref().unwrap_or(sql);
+
         // Rewrite constant HAVING clauses (DataFusion doesn't support them).
         let rewritten_having = rewrite_constant_having(sql);
         let sql = rewritten_having.as_deref().unwrap_or(sql);
@@ -2245,6 +2249,161 @@ fn pg_type_alias(dt: &ast::DataType) -> Option<&'static str> {
         ast::DataType::DoublePrecision | ast::DataType::Float8 => Some("float8"),
         ast::DataType::Text => Some("text"),
         _ => None,
+    }
+}
+
+/// Check if a data type is PG's internal `"char"` type (double-quoted).
+fn is_pg_char_type(dt: &ast::DataType) -> bool {
+    if let ast::DataType::Custom(name, params) = dt {
+        if params.is_empty() {
+            let idents = name.0.as_slice();
+            if idents.len() == 1 && idents[0].value == "char" && idents[0].quote_style == Some('"')
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Build a `pg_char_cast(expr)` function call AST node.
+fn make_pg_char_call(expr: ast::Expr) -> ast::Expr {
+    ast::Expr::Function(ast::Function {
+        name: ast::ObjectName(vec![ast::Ident::new("pg_char_cast")]),
+        args: ast::FunctionArguments::List(ast::FunctionArgumentList {
+            duplicate_treatment: None,
+            args: vec![ast::FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(expr))],
+            clauses: vec![],
+        }),
+        filter: None,
+        null_treatment: None,
+        over: None,
+        within_group: vec![],
+        parameters: ast::FunctionArguments::None,
+        uses_odbc_syntax: false,
+    })
+}
+
+/// Recursively replace `"char"` type casts with `pg_char_cast()` calls.
+fn rewrite_pg_char_expr(expr: &mut ast::Expr) {
+    match expr {
+        ast::Expr::Cast {
+            data_type,
+            expr: inner,
+            ..
+        } => {
+            // Recurse into the inner expression first
+            rewrite_pg_char_expr(inner);
+            if is_pg_char_type(data_type) {
+                let inner_owned =
+                    std::mem::replace(inner.as_mut(), ast::Expr::Value(ast::Value::Null));
+                *expr = make_pg_char_call(inner_owned);
+            }
+        }
+        ast::Expr::Nested(inner) => rewrite_pg_char_expr(inner),
+        ast::Expr::UnaryOp { expr: inner, .. } => rewrite_pg_char_expr(inner),
+        ast::Expr::BinaryOp { left, right, .. } => {
+            rewrite_pg_char_expr(left);
+            rewrite_pg_char_expr(right);
+        }
+        ast::Expr::Function(f) => {
+            if let ast::FunctionArguments::List(ref mut list) = f.args {
+                for arg in &mut list.args {
+                    if let ast::FunctionArg::Unnamed(ast::FunctionArgExpr::Expr(e))
+                    | ast::FunctionArg::Named {
+                        arg: ast::FunctionArgExpr::Expr(e),
+                        ..
+                    } = arg
+                    {
+                        rewrite_pg_char_expr(e);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Rewrite `"char"` type casts to `pg_char_cast()` UDF calls and add
+/// appropriate column aliases. Returns Some(rewritten_sql) if changes made.
+fn rewrite_pg_char_casts(sql: &str) -> Option<String> {
+    if !sql.contains("\"char\"") {
+        return None;
+    }
+    let stmts = Parser::parse_sql(&PostgreSqlDialect {}, sql).ok()?;
+    let mut stmt = stmts.into_iter().next()?;
+    let ast::Statement::Query(ref mut query) = stmt else {
+        return None;
+    };
+    let ast::SetExpr::Select(ref mut select) = *query.body else {
+        return None;
+    };
+    let mut changed = false;
+    for item in &mut select.projection {
+        match item {
+            ast::SelectItem::UnnamedExpr(ref mut expr) => {
+                // Determine alias from outermost type before rewriting
+                let alias = outermost_char_alias(expr);
+                rewrite_pg_char_expr(expr);
+                if let Some(alias) = alias {
+                    let owned =
+                        std::mem::replace(item, ast::SelectItem::Wildcard(Default::default()));
+                    if let ast::SelectItem::UnnamedExpr(e) = owned {
+                        *item = ast::SelectItem::ExprWithAlias {
+                            expr: e,
+                            alias: ast::Ident::new(alias),
+                        };
+                        changed = true;
+                    }
+                } else {
+                    changed = true; // still changed if inner rewrite happened
+                }
+            }
+            ast::SelectItem::ExprWithAlias { ref mut expr, .. } => {
+                rewrite_pg_char_expr(expr);
+                changed = true;
+            }
+            _ => {}
+        }
+    }
+    if changed {
+        Some(stmt.to_string())
+    } else {
+        None
+    }
+}
+
+/// Determine the column alias for expressions involving `"char"` casts.
+/// Returns "char" if outermost cast is to "char", "text" if outermost
+/// is to text (with inner "char"), etc.
+fn outermost_char_alias(expr: &ast::Expr) -> Option<&'static str> {
+    match expr {
+        ast::Expr::Cast {
+            data_type,
+            expr: inner,
+            ..
+        } => {
+            if is_pg_char_type(data_type) {
+                Some("char")
+            } else if contains_pg_char_cast(inner) {
+                pg_type_alias(data_type)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Check if an expression tree contains any `"char"` type cast.
+fn contains_pg_char_cast(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::Cast {
+            data_type,
+            expr: inner,
+            ..
+        } => is_pg_char_type(data_type) || contains_pg_char_cast(inner),
+        _ => false,
     }
 }
 

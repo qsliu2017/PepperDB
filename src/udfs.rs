@@ -14,6 +14,7 @@ pub fn register_all(ctx: &SessionContext) {
     ctx.register_udf(ScalarUDF::from(BoolEq::new()));
     ctx.register_udf(ScalarUDF::from(BoolNe::new()));
     ctx.register_udf(ScalarUDF::from(PgInputIsValid::new()));
+    ctx.register_udf(ScalarUDF::from(PgCharCast::new()));
 }
 
 // Helper: convert ColumnarValue args to arrays
@@ -229,5 +230,66 @@ fn validate_input(value: &str, type_name: &str) -> bool {
             max_len == 0 || value.trim_end_matches(' ').len() <= max_len
         }
         _ => true,
+    }
+}
+
+// -- pg_char_cast (PG's internal "char" type) --------------------------------
+
+/// Implement PG's "char" type input: interprets `\NNN` octal escapes,
+/// otherwise takes the first byte. Output: printable ASCII as-is, NUL as
+/// empty, other bytes as `\NNN`.
+fn pg_char_convert(input: &str) -> String {
+    let byte = if input.starts_with('\\') && input.len() >= 2 {
+        // Try to parse trailing digits as octal
+        let digits = &input[1..];
+        u8::from_str_radix(digits, 8).ok()
+    } else {
+        input.bytes().next()
+    };
+    match byte {
+        None | Some(0) => String::new(),
+        Some(b) if (32..=126).contains(&b) => String::from(b as char),
+        Some(b) => format!("\\{:03o}", b),
+    }
+}
+
+#[derive(Debug)]
+struct PgCharCast {
+    sig: Signature,
+}
+
+impl PgCharCast {
+    fn new() -> Self {
+        Self {
+            sig: Signature::new(
+                TypeSignature::Exact(vec![DataType::Utf8]),
+                Volatility::Immutable,
+            ),
+        }
+    }
+}
+
+impl ScalarUDFImpl for PgCharCast {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn name(&self) -> &str {
+        "pg_char_cast"
+    }
+    fn signature(&self) -> &Signature {
+        &self.sig
+    }
+    fn return_type(&self, _: &[DataType]) -> datafusion::error::Result<DataType> {
+        Ok(DataType::Utf8)
+    }
+    fn invoke_batch(
+        &self,
+        args: &[ColumnarValue],
+        num_rows: usize,
+    ) -> datafusion::error::Result<ColumnarValue> {
+        let arrays = args_to_arrays(args, num_rows)?;
+        let values = arrays[0].as_any().downcast_ref::<StringArray>().unwrap();
+        let result: StringArray = values.iter().map(|val| val.map(pg_char_convert)).collect();
+        Ok(ColumnarValue::Array(Arc::new(result)))
     }
 }
