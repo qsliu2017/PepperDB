@@ -17,4 +17,4 @@ macro_rules! simple_test {
     };
 }
 
-simple_test!(case, subselect,);
+simple_test!(case, select_distinct, subselect,);
