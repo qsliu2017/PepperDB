@@ -10,7 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use super::record;
+use super::xlogrecord as record;
 
 const SEGMENT_SIZE: usize = 16 * 1024 * 1024; // 16MB
 const WAL_PAGE_SIZE: usize = 8192;
@@ -139,7 +139,7 @@ pub fn segment_path(wal_dir: &Path, segment_no: u64) -> PathBuf {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::wal::record::{WalRecord, RM_HEAP_ID, XLOG_HEAP_INSERT};
+    use crate::access::transam::xlogrecord::{WalRecord, RM_HEAP_ID, XLOG_HEAP_INSERT};
 
     #[test]
     fn segment_file_naming() {

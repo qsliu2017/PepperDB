@@ -7,8 +7,9 @@
 
 use crate::catalog::filenode_map;
 use crate::catalog::{Catalog, Column, Table};
-use crate::storage::disk::{DiskManager, PAGE_SIZE};
-use crate::storage::heap;
+use crate::access::heap;
+use crate::storage::bufpage::{self, PAGE_SIZE};
+use crate::storage::smgr::DiskManager;
 use crate::types::{Datum, TypeId, OID};
 use std::collections::HashMap;
 use std::io;
@@ -228,7 +229,7 @@ fn insert_global_tuple(disk: &DiskManager, relfilenode: OID, values: &[Datum], c
     let mut page = [0u8; PAGE_SIZE];
 
     if num_pages == 0 {
-        heap::init_page(&mut page);
+        bufpage::init_page(&mut page);
         heap::insert_tuple(&mut page, &tuple, 0).expect("tuple too large for page");
         disk.write_global_page(relfilenode, 0, &page);
     } else {
@@ -238,7 +239,7 @@ fn insert_global_tuple(disk: &DiskManager, relfilenode: OID, values: &[Datum], c
             disk.write_global_page(relfilenode, last, &page);
         } else {
             let new_id = num_pages;
-            heap::init_page(&mut page);
+            bufpage::init_page(&mut page);
             heap::insert_tuple(&mut page, &tuple, new_id).expect("tuple too large for page");
             disk.write_global_page(relfilenode, new_id, &page);
         }
@@ -253,7 +254,7 @@ fn scan_global_heap(disk: &DiskManager, relfilenode: OID, columns: &[Column]) ->
 
     for page_id in 0..num_pages {
         disk.read_global_page(relfilenode, page_id, &mut page);
-        let n = heap::num_items(&page);
+        let n = bufpage::num_items(&page);
         for item_idx in 0..n {
             if let Some(datums) = heap::read_tuple(&page, item_idx, columns) {
                 tuples.push(datums);
@@ -297,7 +298,7 @@ pub fn drop_pg_catalog_rows(disk: &DiskManager, table_oid: OID) {
     let mut page = [0u8; PAGE_SIZE];
     for page_id in 0..num_pages {
         disk.read_global_page(PG_CLASS_OID, page_id, &mut page);
-        let n = heap::num_items(&page);
+        let n = bufpage::num_items(&page);
         let mut modified = false;
         for item_idx in 0..n {
             if let Some(datums) = heap::read_tuple(&page, item_idx, &class_cols) {
@@ -319,7 +320,7 @@ pub fn drop_pg_catalog_rows(disk: &DiskManager, table_oid: OID) {
     let num_pages = disk.num_global_pages(PG_ATTRIBUTE_OID);
     for page_id in 0..num_pages {
         disk.read_global_page(PG_ATTRIBUTE_OID, page_id, &mut page);
-        let n = heap::num_items(&page);
+        let n = bufpage::num_items(&page);
         let mut modified = false;
         for item_idx in 0..n {
             if let Some(datums) = heap::read_tuple(&page, item_idx, &attr_cols) {

@@ -7,11 +7,12 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::storage::disk::{DiskManager, PAGE_SIZE};
-use crate::storage::heap;
+use crate::access::heap;
+use crate::storage::bufpage::{self, PAGE_SIZE};
+use crate::storage::smgr::DiskManager;
 
-use super::record::{self, WalRecord};
-use super::writer;
+use super::xlogrecord::{self as record, WalRecord};
+use super::xlog as writer;
 
 const WAL_PAGE_SIZE: usize = 8192;
 const PAGE_HEADER_SIZE: usize = 16;
@@ -173,18 +174,18 @@ fn apply_heap_record(disk: &DiskManager, lsn: u64, rec: &WalRecord) {
             };
             if blkno < num_pages {
                 disk.read_page(rfn, blkno, &mut page);
-                if heap::get_page_lsn(&page) >= lsn {
+                if bufpage::get_page_lsn(&page) >= lsn {
                     return; // Already applied
                 }
                 if heap::insert_tuple(&mut page, tuple, blkno).is_ok() {
-                    heap::set_page_lsn(&mut page, lsn);
+                    bufpage::set_page_lsn(&mut page, lsn);
                     disk.write_page(rfn, blkno, &page);
                 }
             } else {
                 // Need to create new page(s) up to blkno
-                heap::init_page(&mut page);
+                bufpage::init_page(&mut page);
                 if heap::insert_tuple(&mut page, tuple, blkno).is_ok() {
-                    heap::set_page_lsn(&mut page, lsn);
+                    bufpage::set_page_lsn(&mut page, lsn);
                     disk.write_page(rfn, blkno, &page);
                 }
             }
@@ -194,11 +195,11 @@ fn apply_heap_record(disk: &DiskManager, lsn: u64, rec: &WalRecord) {
                 return;
             }
             disk.read_page(rfn, blkno, &mut page);
-            if heap::get_page_lsn(&page) >= lsn {
+            if bufpage::get_page_lsn(&page) >= lsn {
                 return; // Already applied
             }
             heap::mark_tuple_dead(&mut page, item_off);
-            heap::set_page_lsn(&mut page, lsn);
+            bufpage::set_page_lsn(&mut page, lsn);
             disk.write_page(rfn, blkno, &page);
         }
         _ => {}
@@ -208,8 +209,8 @@ fn apply_heap_record(disk: &DiskManager, lsn: u64, rec: &WalRecord) {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::wal::record::{WalRecord, RM_HEAP_ID, XLOG_HEAP_INSERT};
-    use crate::wal::writer::WalWriter;
+    use crate::access::transam::xlogrecord::{WalRecord, RM_HEAP_ID, XLOG_HEAP_INSERT};
+    use crate::access::transam::xlog::WalWriter;
 
     #[test]
     fn reader_reads_written_records() {
@@ -266,7 +267,7 @@ mod test {
         let tuple = heap::build_tuple(&[crate::types::Datum::Int4(42)], &cols);
 
         let mut page = [0u8; PAGE_SIZE];
-        heap::init_page(&mut page);
+        bufpage::init_page(&mut page);
         let item_idx = heap::insert_tuple(&mut page, &tuple, 0).unwrap();
         let wal_data = record::build_heap_insert_data(16384, 0, item_idx, &tuple);
         let rec = WalRecord {
@@ -324,7 +325,7 @@ mod test {
         // Should still have exactly 1 tuple
         let mut page = [0u8; PAGE_SIZE];
         disk.read_page(16384, 0, &mut page);
-        assert_eq!(heap::num_items(&page), 1);
+        assert_eq!(bufpage::num_items(&page), 1);
         let datums = heap::read_tuple(&page, 0, &cols).unwrap();
         assert_eq!(datums, vec![crate::types::Datum::Int4(99)]);
     }

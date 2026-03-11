@@ -1,7 +1,7 @@
 //! Visibility Map: 1 bit per heap page. Bit set = all tuples on page are frozen.
 //! One VM byte covers 8 heap pages. The VM file is a flat byte array.
 
-use crate::storage::disk::DiskManager;
+use crate::storage::smgr::DiskManager;
 use crate::types::OID;
 
 /// Check if a heap page is marked all-frozen in the VM.

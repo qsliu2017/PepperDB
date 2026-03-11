@@ -2,7 +2,13 @@
 //! and MVCC snapshot support.
 //! For the PoC, each SQL statement auto-commits (single-statement transactions).
 
-use crate::storage::clog::{Clog, XidStatus};
+pub mod clog;
+pub mod pg_control;
+pub mod xlog;
+pub mod xlogrecord;
+pub mod xlogrecovery;
+
+use crate::access::transam::clog::{Clog, XidStatus};
 use std::path::Path;
 
 /// First normal transaction ID (matches PostgreSQL's FirstNormalTransactionId).
@@ -112,8 +118,8 @@ mod test {
     #[test]
     fn snapshot_visibility_committed_before() {
         use crate::catalog::Column;
-        use crate::storage::disk::PAGE_SIZE;
-        use crate::storage::heap;
+        use crate::storage::bufpage::PAGE_SIZE;
+        use crate::access::heap;
         use crate::types::{Datum, TypeId};
 
         let dir = tempfile::tempdir().unwrap();
@@ -130,7 +136,7 @@ mod test {
         let xid = txn.assign_xid();
         let tuple = heap::build_tuple_with_xid(&[Datum::Int4(42)], &cols, xid, false);
         let mut page = [0u8; PAGE_SIZE];
-        heap::init_page(&mut page);
+        crate::storage::bufpage::init_page(&mut page);
         heap::insert_tuple(&mut page, &tuple, 0).unwrap();
         txn.commit(xid);
 
@@ -144,8 +150,8 @@ mod test {
     #[test]
     fn snapshot_visibility_committed_after() {
         use crate::catalog::Column;
-        use crate::storage::disk::PAGE_SIZE;
-        use crate::storage::heap;
+        use crate::storage::bufpage::PAGE_SIZE;
+        use crate::access::heap;
         use crate::types::{Datum, TypeId};
 
         let dir = tempfile::tempdir().unwrap();
@@ -165,7 +171,7 @@ mod test {
         let xid = txn.assign_xid();
         let tuple = heap::build_tuple_with_xid(&[Datum::Int4(42)], &cols, xid, false);
         let mut page = [0u8; PAGE_SIZE];
-        heap::init_page(&mut page);
+        crate::storage::bufpage::init_page(&mut page);
         heap::insert_tuple(&mut page, &tuple, 0).unwrap();
         txn.commit(xid);
 

@@ -2,22 +2,21 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
+pub mod access;
 pub mod catalog;
 pub mod executor;
 pub mod parser;
 pub mod server;
 pub mod storage;
-pub mod txn;
 pub mod types;
-pub mod wal;
 
+use access::transam::pg_control::{self, ControlFileData, DBState};
+use access::transam::xlog::WalWriter;
+use access::transam::TxnManager;
 use catalog::bootstrap;
 use catalog::Catalog;
 use datafusion::execution::context::SessionContext;
-use storage::disk::DiskManager;
-use storage::pg_control::{self, ControlFileData, DBState};
-use txn::TxnManager;
-use wal::writer::WalWriter;
+use storage::smgr::DiskManager;
 
 mod udfs;
 
@@ -63,8 +62,9 @@ impl Database {
 
             // Crash recovery: if not cleanly shut down, replay WAL
             if ctl.state != DBState::Shutdowned {
-                let end_lsn = wal::recovery::recover(&disk, &wal_dir, ctl.checkpoint_redo)
-                    .expect("WAL recovery failed");
+                let end_lsn =
+                    access::transam::xlogrecovery::recover(&disk, &wal_dir, ctl.checkpoint_redo)
+                        .expect("WAL recovery failed");
                 wal_start = end_lsn;
             } else {
                 wal_start = ctl.checkpoint_redo;
@@ -86,7 +86,7 @@ impl Database {
         };
 
         let wal_writer = WalWriter::new(&wal_dir, wal_start);
-        let txn_mgr = TxnManager::new(&clog_dir, txn::FIRST_NORMAL_XID);
+        let txn_mgr = TxnManager::new(&clog_dir, access::transam::FIRST_NORMAL_XID);
 
         let session = SessionContext::new();
         udfs::register_all(&session);

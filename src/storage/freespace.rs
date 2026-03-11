@@ -2,7 +2,8 @@
 //! Each FSM byte represents one heap page's free space in 32-byte units
 //! (0 = full, 255 = ~8KB free). One FSM page (8KB) tracks 8192 heap pages.
 
-use crate::storage::disk::{DiskManager, PAGE_SIZE};
+use crate::storage::bufpage::PAGE_SIZE;
+use crate::storage::smgr::DiskManager;
 use crate::types::OID;
 
 /// Granularity: each FSM byte represents free space in 32-byte steps.
@@ -84,7 +85,7 @@ pub fn page_free_space(page: &[u8; PAGE_SIZE]) -> usize {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::storage::heap;
+    use crate::storage::bufpage;
 
     #[test]
     fn fsm_search_and_update() {
@@ -111,7 +112,7 @@ mod test {
     #[test]
     fn page_free_space_calculation() {
         let mut page = [0u8; PAGE_SIZE];
-        heap::init_page(&mut page);
+        bufpage::init_page(&mut page);
         // Fresh page: upper=8192, lower=28, free = 8192-28-4 = 8160
         assert_eq!(page_free_space(&page), 8160);
     }

@@ -7,7 +7,7 @@ PepperDB is a PostgreSQL implementation in Rust, targeting production readiness.
 **Design principles:**
 - Match PostgreSQL behavior in: SQL grammar, storage file format, network protocol, module separation
 - Use existing Rust libraries where practical (parser, network protocol)
-- Same logical module boundaries as PostgreSQL, but not a 1:1 source file mapping
+- Match PostgreSQL's module and file organization (e.g., `access/heap/`, `storage/buffer/`, `catalog/`)
 - Production-ready: correctness, durability, and performance for real workloads
 
 ## Build Commands
@@ -25,8 +25,19 @@ cargo fmt            # Format code
 Rust library crate (`pepper_db`). `src/lib.rs` as crate root, submodules in directories with `mod.rs`.
 
 **Current modules:**
+- `access/heap` -- heap tuple operations (insert, read, build, MVCC visibility, VACUUM)
+- `access/heap/visibilitymap` -- visibility map (1 bit per heap page)
+- `access/nbtree` -- B-tree index access method
+- `access/transam` -- transaction manager, snapshots, XID constants
+- `access/transam/clog` -- commit log (2 bits per XID)
+- `access/transam/pg_control` -- control file (system state, checkpoint LSN)
+- `access/transam/xlog` -- WAL writer (16MB segments, page headers)
+- `access/transam/xlogrecord` -- WAL record serialization (CRC-32C)
+- `access/transam/xlogrecovery` -- WAL replay for crash recovery
+- `storage/bufpage` -- page-level ops (8KB pages, checksums, ItemId, LSN)
+- `storage/smgr` -- storage manager / disk I/O (read/write pages with checksums)
+- `storage/freespace` -- free space map (1 byte per heap page)
 - `buffer_pool` -- LRU-K page replacement policy (`LRUKReplacer`)
-- `storage` -- heap page layout (8KB pages, null bitmap, dead tuple marking) and disk manager
 - `catalog` -- in-memory table/column metadata (simplified pg_class + pg_attribute)
 - `parser` -- converts sqlparser-rs AST to PepperDB AST for DDL/DML statements
 - `executor` -- routes SELECT to DataFusion, handles DDL/DML directly; includes `HeapTableProvider` bridging heap storage to DataFusion's `TableProvider`

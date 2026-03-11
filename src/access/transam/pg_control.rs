@@ -43,7 +43,7 @@ pub struct ControlFileData {
 }
 
 /// Size of the control file on disk (one 8KB page).
-const CONTROL_FILE_SIZE: usize = super::disk::PAGE_SIZE;
+const CONTROL_FILE_SIZE: usize = crate::storage::bufpage::PAGE_SIZE;
 
 /// CRC covers bytes 0..CRC_OFFSET, CRC stored at last 4 bytes.
 const CRC_OFFSET: usize = CONTROL_FILE_SIZE - 4;

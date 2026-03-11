@@ -20,14 +20,17 @@ use sqlparser::ast;
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 
+use crate::access::heap;
+use crate::access::heap::visibilitymap as vm;
+use crate::access::transam::xlogrecord::{self as wal_record, WalRecord};
+use crate::access::transam::TxnManager;
 use crate::catalog::bootstrap;
 use crate::catalog::Column;
 use crate::parser::{self, BinOp, Expr, Statement, UnaryOp};
-use crate::storage::disk::{DiskManager, PAGE_SIZE};
-use crate::storage::{fsm, heap, vm};
-use crate::txn::TxnManager;
+use crate::storage::bufpage::{self, PAGE_SIZE};
+use crate::storage::freespace as fsm;
+use crate::storage::smgr::DiskManager;
 use crate::types::{Datum, TypeId};
-use crate::wal::record::{self as wal_record, WalRecord};
 use crate::Database;
 
 impl Database {
@@ -430,7 +433,7 @@ impl HeapTableProvider {
 
         for page_id in 0..num_pages {
             disk.read_page(self.oid, page_id, &mut page);
-            let n = heap::num_items(&page);
+            let n = bufpage::num_items(&page);
             for item_idx in 0..n {
                 if let Some(datums) =
                     heap::read_tuple_mvcc(&page, item_idx, &self.columns, &snapshot, txn.clog())
@@ -945,11 +948,11 @@ impl Database {
                 if let Some(pos) = col_pos {
                     let key = &datums[pos];
                     if *key != Datum::Null {
-                        let tid = crate::storage::btree::ItemPointer {
+                        let tid = crate::access::nbtree::ItemPointer {
                             block_id: pg_id,
                             offset_num: item_idx,
                         };
-                        crate::storage::btree::bt_insert(&disk, idx.oid, key, tid, idx.key_type);
+                        crate::access::nbtree::bt_insert(&disk, idx.oid, key, tid, idx.key_type);
                     }
                 }
             }
@@ -990,7 +993,7 @@ impl Database {
 
         for page_id in 0..num_pages {
             disk.read_page(oid, page_id, &mut page);
-            let n = heap::num_items(&page);
+            let n = bufpage::num_items(&page);
             let mut page_modified = false;
             for item_idx in 0..n {
                 if let Some(datums) = heap::read_tuple(&page, item_idx, &columns) {
@@ -1015,7 +1018,7 @@ impl Database {
                             data: wal_data,
                         };
                         let lsn = wal.append(&rec);
-                        heap::set_page_lsn(&mut page, lsn);
+                        bufpage::set_page_lsn(&mut page, lsn);
                         page_modified = true;
                         count += 1;
                     }
@@ -1043,11 +1046,11 @@ impl Database {
                 if let Some(pos) = col_pos {
                     let key = &new_row[pos];
                     if *key != Datum::Null {
-                        let tid = crate::storage::btree::ItemPointer {
+                        let tid = crate::access::nbtree::ItemPointer {
                             block_id: pg_id,
                             offset_num: item_idx,
                         };
-                        crate::storage::btree::bt_insert(&disk, idx.oid, key, tid, idx.key_type);
+                        crate::access::nbtree::bt_insert(&disk, idx.oid, key, tid, idx.key_type);
                     }
                 }
             }
@@ -1082,7 +1085,7 @@ impl Database {
 
         for page_id in 0..num_pages {
             disk.read_page(oid, page_id, &mut page);
-            let n = heap::num_items(&page);
+            let n = bufpage::num_items(&page);
             let mut page_modified = false;
             for item_idx in 0..n {
                 if let Some(datums) = heap::read_tuple(&page, item_idx, &columns) {
@@ -1100,7 +1103,7 @@ impl Database {
                             data: wal_data,
                         };
                         let lsn = wal.append(&rec);
-                        heap::set_page_lsn(&mut page, lsn);
+                        bufpage::set_page_lsn(&mut page, lsn);
                         page_modified = true;
                         count += 1;
                     }
@@ -1203,25 +1206,25 @@ impl Database {
 
         {
             let disk = self.disk.lock().unwrap();
-            crate::storage::btree::create_index(&disk, index_oid);
+            crate::access::nbtree::create_index(&disk, index_oid);
 
             // Populate index from existing heap data
             let num_pages = disk.num_pages(table_oid);
             let mut page = [0u8; PAGE_SIZE];
             for page_id in 0..num_pages {
                 disk.read_page(table_oid, page_id, &mut page);
-                let n = heap::num_items(&page);
+                let n = bufpage::num_items(&page);
                 for item_idx in 0..n {
                     if let Some(datums) = heap::read_tuple(&page, item_idx, &columns) {
                         let key = &datums[col_idx];
                         if *key == Datum::Null {
                             continue;
                         }
-                        let tid = crate::storage::btree::ItemPointer {
+                        let tid = crate::access::nbtree::ItemPointer {
                             block_id: page_id,
                             offset_num: item_idx,
                         };
-                        crate::storage::btree::bt_insert(&disk, index_oid, key, tid, key_type);
+                        crate::access::nbtree::bt_insert(&disk, index_oid, key, tid, key_type);
                     }
                 }
             }
@@ -1274,7 +1277,7 @@ impl Database {
                 // Update FSM with current free space
                 fsm::update(&disk, *oid, page_id, fsm::page_free_space(&page));
                 // Check if all tuples on page are frozen
-                let n = heap::num_items(&page);
+                let n = bufpage::num_items(&page);
                 let page_all_frozen = n > 0
                     && (0..n).all(|i| {
                         let item_id_off = 28 + (i as usize) * 4;
@@ -1627,7 +1630,7 @@ fn eval_float_op(op: BinOp, l: f64, r: f64, size: u8) -> Datum {
 
 fn insert_tuple_to_heap(
     disk: &DiskManager,
-    wal: &mut crate::wal::writer::WalWriter,
+    wal: &mut crate::access::transam::xlog::WalWriter,
     oid: u32,
     tuple: &[u8],
     xid: u32,
@@ -1645,7 +1648,7 @@ fn insert_tuple_to_heap(
             insert_new_or_last(disk, oid, tuple, num_pages, &mut page)?
         }
     } else if num_pages == 0 {
-        heap::init_page(&mut page);
+        bufpage::init_page(&mut page);
         let idx = heap::insert_tuple(&mut page, tuple, 0)
             .map_err(|()| user_error("42000", "Tuple too large for page"))?;
         (0u32, idx)
@@ -1662,7 +1665,7 @@ fn insert_tuple_to_heap(
     };
     let lsn = wal.append(&rec);
     wal.flush();
-    heap::set_page_lsn(&mut page, lsn);
+    bufpage::set_page_lsn(&mut page, lsn);
     disk.write_page(oid, page_id, &page);
 
     // Update FSM with remaining free space
@@ -1686,7 +1689,7 @@ fn insert_new_or_last(
         Ok((last, idx))
     } else {
         let new_id = num_pages;
-        heap::init_page(page);
+        bufpage::init_page(page);
         let idx = heap::insert_tuple(page, tuple, new_id)
             .map_err(|()| user_error("42000", "Tuple too large for page"))?;
         Ok((new_id, idx))

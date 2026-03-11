@@ -1,4 +1,4 @@
-//! DiskManager -- raw 8KB page I/O per table file.
+//! Storage manager -- raw 8KB page I/O per table file.
 //! Table files stored under `base/{db_oid}/{relfilenode}` (per-database)
 //! and `global/{relfilenode}` (shared catalogs), matching PostgreSQL layout.
 //! All pages get PG-compatible checksums (pd_checksum at bytes 8-9).
@@ -7,10 +7,8 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use crate::storage::heap;
+use crate::storage::bufpage::{self, PAGE_SIZE};
 use crate::types::OID;
-
-pub const PAGE_SIZE: usize = 8192;
 
 pub struct DiskManager {
     base_path: PathBuf,
@@ -72,7 +70,7 @@ impl DiskManager {
             .expect("seek failed");
         f.read_exact(buf).expect("read failed");
         assert!(
-            heap::verify_checksum(buf, page_id),
+            bufpage::verify_checksum(buf, page_id),
             "page checksum mismatch: relfilenode={}, page_id={}",
             relfilenode,
             page_id
@@ -81,7 +79,7 @@ impl DiskManager {
 
     pub fn write_page(&self, relfilenode: OID, page_id: u32, buf: &[u8; PAGE_SIZE]) {
         let mut page = *buf;
-        heap::set_checksum(&mut page, page_id);
+        bufpage::set_checksum(&mut page, page_id);
         let mut f = fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -120,7 +118,7 @@ impl DiskManager {
             .expect("seek failed");
         f.read_exact(buf).expect("read failed");
         assert!(
-            heap::verify_checksum(buf, page_id),
+            bufpage::verify_checksum(buf, page_id),
             "global page checksum mismatch: relfilenode={}, page_id={}",
             relfilenode,
             page_id
@@ -129,7 +127,7 @@ impl DiskManager {
 
     pub fn write_global_page(&self, relfilenode: OID, page_id: u32, buf: &[u8; PAGE_SIZE]) {
         let mut page = *buf;
-        heap::set_checksum(&mut page, page_id);
+        bufpage::set_checksum(&mut page, page_id);
         let mut f = fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -177,7 +175,7 @@ mod test {
         dm.create_heap_file(1);
 
         let mut page = [0u8; PAGE_SIZE];
-        heap::init_page(&mut page);
+        bufpage::init_page(&mut page);
         page[28] = 0xAB; // write after header
         dm.write_page(1, 0, &page);
 
@@ -194,7 +192,7 @@ mod test {
         assert_eq!(dm.num_pages(2), 0);
 
         let mut page = [0u8; PAGE_SIZE];
-        heap::init_page(&mut page);
+        bufpage::init_page(&mut page);
         dm.write_page(2, 0, &page);
         assert_eq!(dm.num_pages(2), 1);
 
@@ -209,7 +207,7 @@ mod test {
         dm.create_global_file(1259);
 
         let mut page = [0u8; PAGE_SIZE];
-        heap::init_page(&mut page);
+        bufpage::init_page(&mut page);
         dm.write_global_page(1259, 0, &page);
 
         let mut read_buf = [0u8; PAGE_SIZE];

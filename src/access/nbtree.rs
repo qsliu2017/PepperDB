@@ -2,19 +2,14 @@
 //! index tuples with 8B IndexTupleData header (t_tid 6B + t_info 2B) + key data.
 //! Metapage (page 0) stores root pointer. Leaf pages form a linked list.
 
-use crate::storage::disk::{DiskManager, PAGE_SIZE};
+use crate::storage::bufpage::{
+    num_items, pack_item_id, read_u16, read_u32, unpack_item_id, write_u16, write_u32,
+    HEADER_SIZE, ITEM_ID_SIZE, LP_NORMAL, PAGE_SIZE, PD_LOWER, PD_PAGESIZE_VERSION, PD_SPECIAL,
+    PD_UPPER, PG_PAGE_SIZE_VERSION,
+};
+use crate::storage::smgr::DiskManager;
 use crate::types::{Datum, TypeId, OID};
 use std::cmp::Ordering;
-
-// -- Page header (same offsets as heap) ---------------------------------------
-
-const HEADER_SIZE: usize = 28;
-const PD_LOWER: usize = 12;
-const PD_UPPER: usize = 14;
-const PD_SPECIAL: usize = 16;
-const PD_PAGESIZE_VERSION: usize = 18;
-const ITEM_ID_SIZE: usize = 4;
-const PG_PAGE_SIZE_VERSION: u16 = (PAGE_SIZE as u16 & 0xFF00) | 4;
 
 // -- BTPageOpaqueData (16 bytes at end of page) -------------------------------
 
@@ -46,32 +41,7 @@ const BT_META_VERSION: u32 = 4;
 
 const INDEX_TUPLE_HDR: usize = 8;
 
-// -- Helpers ------------------------------------------------------------------
-
-fn read_u16(buf: &[u8], off: usize) -> u16 {
-    u16::from_le_bytes([buf[off], buf[off + 1]])
-}
-fn write_u16(buf: &mut [u8], off: usize, val: u16) {
-    buf[off..off + 2].copy_from_slice(&val.to_le_bytes());
-}
-fn read_u32(buf: &[u8], off: usize) -> u32 {
-    u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]])
-}
-fn write_u32(buf: &mut [u8], off: usize, val: u32) {
-    buf[off..off + 4].copy_from_slice(&val.to_le_bytes());
-}
-
-fn pack_item_id(offset: u16, flags: u8, length: u16) -> u32 {
-    (offset as u32 & 0x7FFF) | ((flags as u32 & 0x3) << 15) | ((length as u32 & 0x7FFF) << 17)
-}
-fn unpack_item_id(id: u32) -> (u16, u8, u16) {
-    let offset = (id & 0x7FFF) as u16;
-    let flags = ((id >> 15) & 0x3) as u8;
-    let length = ((id >> 17) & 0x7FFF) as u16;
-    (offset, flags, length)
-}
-
-const LP_NORMAL: u8 = 1;
+// -- Page init ----------------------------------------------------------------
 
 /// Heap tuple pointer stored in an index tuple.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,8 +49,6 @@ pub struct ItemPointer {
     pub block_id: u32,
     pub offset_num: u16,
 }
-
-// -- Page init ----------------------------------------------------------------
 
 /// Initialize a B-tree meta page (page 0).
 pub fn init_meta_page(buf: &mut [u8; PAGE_SIZE]) {
@@ -176,12 +144,6 @@ fn read_index_tuple(
     let key_data = &buf[off + INDEX_TUPLE_HDR..off + length as usize];
     let key = decode_key(key_data, key_type);
     Some((tid, key))
-}
-
-/// Number of index tuples on a page.
-fn num_items(buf: &[u8; PAGE_SIZE]) -> u16 {
-    let pd_lower = read_u16(buf, PD_LOWER) as usize;
-    ((pd_lower - HEADER_SIZE) / ITEM_ID_SIZE) as u16
 }
 
 /// Insert an index tuple into a btree page. Returns item index or Err if full.
@@ -750,8 +712,6 @@ mod test {
         create_index(&dm, rfn);
 
         // Insert enough entries to trigger a page split
-        // Each index tuple for Int4 = 8 (header) + 4 (key) = 12 bytes + 4 (ItemId) = 16 per entry
-        // Available space = 8176 - 28 = 8148; 8148 / 16 = ~509 entries per leaf
         for i in 0..600 {
             let tid = ItemPointer {
                 block_id: i / 255,

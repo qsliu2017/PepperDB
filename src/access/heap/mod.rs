@@ -1,33 +1,22 @@
-//! Heap page layout matching PostgreSQL's on-disk format:
-//!   [PageHeader 28B] [ItemId array ->] [... free space ...] [<- Tuples]
+//! Heap tuple operations matching PostgreSQL's on-disk format.
 //!
 //! Tuples have a 23-byte header (t_xmin, t_xmax, t_cid, t_ctid, t_infomask2,
 //! t_infomask, t_hoff) followed by an optional null bitmap and MAXALIGN-padded
 //! column data. Variable-length columns (Text) use PostgreSQL varlena encoding.
 //! All integers and floats are stored little-endian (native x86/ARM).
+//!
+//! Page-level operations (init, checksums, ItemId packing) are in storage::bufpage.
 
+pub mod visibilitymap;
+
+use crate::access::transam::clog::{Clog, XidStatus};
+use crate::access::transam::{Snapshot, BOOTSTRAP_XID, FROZEN_XID};
 use crate::catalog::Column;
-use crate::storage::clog::{Clog, XidStatus};
-use crate::storage::disk::PAGE_SIZE;
-use crate::txn::{Snapshot, BOOTSTRAP_XID, FROZEN_XID};
+use crate::storage::bufpage::{
+    maxalign, pack_item_id, read_u16, read_u32, unpack_item_id, write_u16, write_u32, HEADER_SIZE,
+    ITEM_ID_SIZE, LP_NORMAL, PAGE_SIZE, PD_LOWER, PD_UPPER,
+};
 use crate::types::{Datum, TypeId};
-
-// -- Page header (28 bytes) ---------------------------------------------------
-
-const PD_LOWER: usize = 12; // u16 at byte 12
-const PD_UPPER: usize = 14; // u16 at byte 14
-const PD_SPECIAL: usize = 16; // u16 at byte 16
-const PD_PAGESIZE_VERSION: usize = 18; // u16 at byte 18
-const HEADER_SIZE: usize = 28;
-
-/// pd_pagesize_version: page size in high bits, version 4 in low byte
-const PG_PAGE_SIZE_VERSION: u16 = (PAGE_SIZE as u16 & 0xFF00) | 4;
-
-// -- ItemId bitfield ----------------------------------------------------------
-
-const ITEM_ID_SIZE: usize = 4;
-
-const LP_NORMAL: u8 = 1;
 
 // -- Tuple header offsets (23 bytes) ------------------------------------------
 
@@ -48,52 +37,7 @@ const HEAP_XMIN_COMMITTED: u16 = 0x0100;
 const HEAP_XMIN_FROZEN: u16 = 0x0200;
 const HEAP_XMAX_INVALID: u16 = 0x0800;
 
-// -- MAXALIGN (8 bytes, matching PostgreSQL on 64-bit) ------------------------
-
-fn maxalign(v: usize) -> usize {
-    (v + 7) & !7
-}
-
-// -- Read/write helpers -------------------------------------------------------
-
-fn read_u16(buf: &[u8], off: usize) -> u16 {
-    u16::from_le_bytes([buf[off], buf[off + 1]])
-}
-
-fn write_u16(buf: &mut [u8], off: usize, val: u16) {
-    buf[off..off + 2].copy_from_slice(&val.to_le_bytes());
-}
-
-fn read_u32(buf: &[u8], off: usize) -> u32 {
-    u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]])
-}
-
-fn write_u32(buf: &mut [u8], off: usize, val: u32) {
-    buf[off..off + 4].copy_from_slice(&val.to_le_bytes());
-}
-
-// -- ItemId packing -----------------------------------------------------------
-
-fn pack_item_id(offset: u16, flags: u8, length: u16) -> u32 {
-    (offset as u32 & 0x7FFF) | ((flags as u32 & 0x3) << 15) | ((length as u32 & 0x7FFF) << 17)
-}
-
-fn unpack_item_id(id: u32) -> (u16, u8, u16) {
-    let offset = (id & 0x7FFF) as u16;
-    let flags = ((id >> 15) & 0x3) as u8;
-    let length = ((id >> 17) & 0x7FFF) as u16;
-    (offset, flags, length)
-}
-
-// -- Page operations ----------------------------------------------------------
-
-pub fn init_page(buf: &mut [u8; PAGE_SIZE]) {
-    buf.fill(0);
-    write_u16(buf, PD_LOWER, HEADER_SIZE as u16);
-    write_u16(buf, PD_UPPER, PAGE_SIZE as u16);
-    write_u16(buf, PD_SPECIAL, PAGE_SIZE as u16);
-    write_u16(buf, PD_PAGESIZE_VERSION, PG_PAGE_SIZE_VERSION);
-}
+// -- Tuple operations ---------------------------------------------------------
 
 /// Insert a pre-built tuple into the page. Patches t_ctid with (block_id, item_index+1).
 /// Returns the 0-based item index.
@@ -491,17 +435,12 @@ fn read_tuple_data(
     Some(result)
 }
 
-pub fn num_items(buf: &[u8; PAGE_SIZE]) -> u16 {
-    let pd_lower = read_u16(buf, PD_LOWER) as usize;
-    ((pd_lower - HEADER_SIZE) / ITEM_ID_SIZE) as u16
-}
-
 // -- VACUUM operations --------------------------------------------------------
 
 /// Compact a page: remove dead tuples (t_xmax committed), defragment live tuples.
 /// Returns the number of dead tuples reclaimed.
 pub fn compact_page(buf: &mut [u8; PAGE_SIZE], clog: &mut Clog) -> u16 {
-    let n = num_items(buf);
+    let n = crate::storage::bufpage::num_items(buf);
     let mut reclaimed = 0u16;
 
     // Collect live tuples: (item_index, tuple_bytes)
@@ -568,8 +507,12 @@ pub fn compact_page(buf: &mut [u8; PAGE_SIZE], clog: &mut Clog) -> u16 {
 
     write_u16(buf, PD_LOWER, new_pd_lower as u16);
     write_u16(buf, PD_UPPER, upper as u16);
-    write_u16(buf, PD_SPECIAL, PAGE_SIZE as u16);
-    write_u16(buf, PD_PAGESIZE_VERSION, read_u16(&version_bytes, 0));
+    write_u16(buf, crate::storage::bufpage::PD_SPECIAL, PAGE_SIZE as u16);
+    write_u16(
+        buf,
+        crate::storage::bufpage::PD_PAGESIZE_VERSION,
+        read_u16(&version_bytes, 0),
+    );
     buf[0..8].copy_from_slice(&lsn);
     buf[8..10].copy_from_slice(&checksum_bytes);
     buf[10..12].copy_from_slice(&flags_bytes);
@@ -580,7 +523,7 @@ pub fn compact_page(buf: &mut [u8; PAGE_SIZE], clog: &mut Clog) -> u16 {
 /// Freeze committed tuples: set t_xmin = FROZEN_XID (2) and HEAP_XMIN_FROZEN flag
 /// for tuples whose xmin is committed. Returns count of frozen tuples.
 pub fn freeze_tuples(buf: &mut [u8; PAGE_SIZE], clog: &mut Clog) -> u16 {
-    let n = num_items(buf);
+    let n = crate::storage::bufpage::num_items(buf);
     let mut frozen_count = 0u16;
 
     for i in 0..n {
@@ -616,94 +559,14 @@ pub fn freeze_tuples(buf: &mut [u8; PAGE_SIZE], clog: &mut Clog) -> u16 {
     frozen_count
 }
 
-// -- Page LSN -----------------------------------------------------------------
-
-/// Write LSN to pd_lsn (bytes 0-7) of page header.
-pub fn set_page_lsn(buf: &mut [u8; PAGE_SIZE], lsn: u64) {
-    buf[0..8].copy_from_slice(&lsn.to_le_bytes());
-}
-
-/// Read LSN from pd_lsn (bytes 0-7) of page header.
-pub fn get_page_lsn(buf: &[u8; PAGE_SIZE]) -> u64 {
-    u64::from_le_bytes(buf[0..8].try_into().unwrap())
-}
-
-// -- Page checksums (PostgreSQL checksum_impl.h) ------------------------------
-
-const PD_CHECKSUM: usize = 8; // u16 at byte 8
-
-/// FNV-1a shuffle constants from PostgreSQL's checksum_impl.h.
-const FNV_PRIME: u32 = 0x01000193;
-const FNV_OFFSET: u32 = 0x811C9DC5;
-
-/// Number of u32 words in a page.
-const N_SUMS: usize = 32;
-
-/// Compute PG-compatible page checksum (FNV-1a variant mixed with block number).
-pub fn compute_checksum(page: &[u8; PAGE_SIZE], blkno: u32) -> u16 {
-    let mut sums = [0u32; N_SUMS];
-
-    // Process page as u32 words, XOR-folding into N_SUMS accumulators
-    let words = PAGE_SIZE / 4;
-    for i in 0..words {
-        let off = i * 4;
-        let word = u32::from_le_bytes([page[off], page[off + 1], page[off + 2], page[off + 3]]);
-        sums[i % N_SUMS] = sums[i % N_SUMS].wrapping_add(word);
-    }
-
-    // FNV-1a hash of the accumulators
-    let mut result = FNV_OFFSET;
-    for &s in &sums {
-        let b0 = (s & 0xFF) as u8;
-        let b1 = ((s >> 8) & 0xFF) as u8;
-        let b2 = ((s >> 16) & 0xFF) as u8;
-        let b3 = ((s >> 24) & 0xFF) as u8;
-        result ^= b0 as u32;
-        result = result.wrapping_mul(FNV_PRIME);
-        result ^= b1 as u32;
-        result = result.wrapping_mul(FNV_PRIME);
-        result ^= b2 as u32;
-        result = result.wrapping_mul(FNV_PRIME);
-        result ^= b3 as u32;
-        result = result.wrapping_mul(FNV_PRIME);
-    }
-
-    // Mix in the block number
-    result ^= blkno;
-
-    // Reduce to u16, avoiding zero (which means "no checksum")
-    let checksum = ((result >> 16) ^ (result & 0xFFFF)) as u16;
-    if checksum == 0 {
-        1
-    } else {
-        checksum
-    }
-}
-
-/// Write checksum into pd_checksum (bytes 8-9). Zeros the field first.
-pub fn set_checksum(page: &mut [u8; PAGE_SIZE], blkno: u32) {
-    // Zero the checksum field before computing
-    write_u16(page, PD_CHECKSUM, 0);
-    let cksum = compute_checksum(page, blkno);
-    write_u16(page, PD_CHECKSUM, cksum);
-}
-
-/// Verify page checksum. All-zero pages (uninitialized) always pass.
-pub fn verify_checksum(page: &[u8; PAGE_SIZE], blkno: u32) -> bool {
-    if page.iter().all(|&b| b == 0) {
-        return true;
-    }
-    let stored = read_u16(page, PD_CHECKSUM);
-    // Zero the field, recompute, compare
-    let mut tmp = *page;
-    write_u16(&mut tmp, PD_CHECKSUM, 0);
-    let computed = compute_checksum(&tmp, blkno);
-    stored == computed
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::storage::bufpage::{
+        init_page, num_items, pack_item_id, read_u16, read_u32, set_checksum, unpack_item_id,
+        verify_checksum, HEADER_SIZE, LP_NORMAL, PAGE_SIZE, PD_LOWER, PD_PAGESIZE_VERSION,
+        PD_SPECIAL, PD_UPPER,
+    };
 
     fn col(name: &str, tid: TypeId, num: u16) -> Column {
         Column {
