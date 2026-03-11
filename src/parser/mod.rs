@@ -34,6 +34,7 @@ pub struct CreateTableStmt {
     pub table_name: String,
     pub columns: Vec<ColumnDef>,
     pub if_not_exists: bool,
+    pub temporary: bool,
 }
 
 #[derive(Debug)]
@@ -192,6 +193,7 @@ fn convert_create_index(ci: ast::CreateIndex) -> PgWireResult<Statement> {
 fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
     let table_name = normalize_name(&ct.name);
     let if_not_exists = ct.if_not_exists;
+    let temporary = ct.temporary;
     let columns: PgWireResult<Vec<ColumnDef>> = ct
         .columns
         .into_iter()
@@ -214,6 +216,7 @@ fn convert_create_table(ct: ast::CreateTable) -> PgWireResult<Statement> {
         table_name,
         columns: columns?,
         if_not_exists,
+        temporary,
     }))
 }
 
@@ -278,8 +281,13 @@ fn convert_data_type(dt: &ast::DataType) -> PgWireResult<(TypeId, i32, bool)> {
         ast::DataType::BigInt(_) | ast::DataType::Int8(_) => Ok((TypeId::Int8, -1, false)),
         ast::DataType::Real | ast::DataType::Float4 => Ok((TypeId::Float4, -1, false)),
         ast::DataType::DoublePrecision | ast::DataType::Float8 => Ok((TypeId::Float8, -1, false)),
-        ast::DataType::Text | ast::DataType::Varchar(_) | ast::DataType::CharVarying(_) => {
-            Ok((TypeId::Text, -1, false))
+        ast::DataType::Text => Ok((TypeId::Text, -1, false)),
+        ast::DataType::Varchar(len) | ast::DataType::CharVarying(len) => {
+            let typmod = match len {
+                Some(ast::CharacterLength::IntegerLength { length, .. }) => -(*length as i32 + 1),
+                _ => -1,
+            };
+            Ok((TypeId::Text, typmod, false))
         }
         ast::DataType::Char(len) | ast::DataType::Character(len) => {
             let n = match len {

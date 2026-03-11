@@ -54,6 +54,8 @@ pub struct Catalog {
     tables: HashMap<String, Table>,
     indexes: Vec<Index>,
     next_oid: OID,
+    /// Tables hidden by TEMP table shadowing, keyed by table name.
+    hidden_tables: HashMap<String, Table>,
 }
 
 impl Default for Catalog {
@@ -68,6 +70,7 @@ impl Catalog {
             tables: HashMap::new(),
             indexes: Vec::new(),
             next_oid: 16384,
+            hidden_tables: HashMap::new(),
         }
     }
 
@@ -76,6 +79,7 @@ impl Catalog {
             tables: HashMap::new(),
             indexes: Vec::new(),
             next_oid,
+            hidden_tables: HashMap::new(),
         }
     }
 
@@ -127,10 +131,23 @@ impl Catalog {
         self.tables.values().collect()
     }
 
+    /// Shadow an existing table (for TEMP TABLE support). Returns the OID
+    /// of the existing table's heap file so the caller can preserve it.
+    pub fn shadow_table(&mut self, name: &str) -> Option<OID> {
+        let existing = self.tables.remove(name)?;
+        let oid = existing.oid;
+        self.hidden_tables.insert(name.to_owned(), existing);
+        Some(oid)
+    }
+
     pub fn drop_table(&mut self, name: &str) -> Result<OID, String> {
         match self.tables.remove(name) {
             Some(table) => {
                 self.indexes.retain(|idx| idx.table_oid != table.oid);
+                // Restore any shadowed table
+                if let Some(hidden) = self.hidden_tables.remove(name) {
+                    self.tables.insert(name.to_owned(), hidden);
+                }
                 Ok(table.oid)
             }
             None => Err(format!("table \"{}\" does not exist", name)),

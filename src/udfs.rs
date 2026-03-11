@@ -187,6 +187,13 @@ pub fn validate_input_public(value: &str, type_name: &str) -> bool {
     validate_input(value, type_name)
 }
 
+/// Extract the numeric length from a type name like "varchar(4)" or "char(8)".
+fn parse_type_length(type_name: &str) -> Option<usize> {
+    let start = type_name.find('(')?;
+    let end = type_name.find(')')?;
+    type_name[start + 1..end].trim().parse().ok()
+}
+
 /// Check if a string value is valid for a given PG type name.
 fn validate_input(value: &str, type_name: &str) -> bool {
     match type_name {
@@ -213,6 +220,14 @@ fn validate_input(value: &str, type_name: &str) -> bool {
         "int8" | "bigint" => value.trim().parse::<i64>().is_ok(),
         "float4" | "real" => value.trim().parse::<f32>().is_ok(),
         "float8" | "double precision" => value.trim().parse::<f64>().is_ok(),
+        t if t.starts_with("varchar(") || t.starts_with("character varying(") => {
+            let max_len = parse_type_length(t).unwrap_or(0);
+            max_len == 0 || value.trim_end_matches(' ').len() <= max_len
+        }
+        t if t.starts_with("char(") || t.starts_with("character(") => {
+            let max_len = parse_type_length(t).unwrap_or(0);
+            max_len == 0 || value.trim_end_matches(' ').len() <= max_len
+        }
         _ => true,
     }
 }

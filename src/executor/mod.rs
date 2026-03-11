@@ -117,9 +117,27 @@ impl Database {
             return None;
         }
         // Extract arguments: pg_input_error_info('value', 'type')
+        // Use paren-depth matching to handle types like varchar(4).
         let start = lower.find("pg_input_error_info(")?;
         let args_start = start + "pg_input_error_info(".len();
-        let args_end = sql[args_start..].find(')')? + args_start;
+        let args_end = {
+            let mut depth = 1i32;
+            let mut end = None;
+            for (i, ch) in sql[args_start..].char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = Some(args_start + i);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            end?
+        };
         let args_str = &sql[args_start..args_end];
         let parts: Vec<&str> = args_str.split(',').collect();
         if parts.len() != 2 {
@@ -129,13 +147,28 @@ impl Database {
         let type_name = parts[1].trim().trim_matches('\'');
 
         let (message, sql_error_code) = if !crate::udfs::validate_input_public(value, type_name) {
-            let msg = match type_name {
-                "bool" | "boolean" => {
-                    format!("invalid input syntax for type boolean: \"{}\"", value)
-                }
-                _ => format!("invalid input syntax for type {}: \"{}\"", type_name, value),
-            };
-            (msg, "22P02".to_string())
+            let tn_lower = type_name.to_ascii_lowercase();
+            if tn_lower.starts_with("varchar(") || tn_lower.starts_with("character varying(") {
+                let msg = format!(
+                    "value too long for type character varying({})",
+                    &type_name[type_name.find('(').unwrap() + 1..type_name.find(')').unwrap()]
+                );
+                (msg, "22001".to_string())
+            } else if tn_lower.starts_with("char(") || tn_lower.starts_with("character(") {
+                let msg = format!(
+                    "value too long for type character({})",
+                    &type_name[type_name.find('(').unwrap() + 1..type_name.find(')').unwrap()]
+                );
+                (msg, "22001".to_string())
+            } else {
+                let msg = match type_name {
+                    "bool" | "boolean" => {
+                        format!("invalid input syntax for type boolean: \"{}\"", value)
+                    }
+                    _ => format!("invalid input syntax for type {}: \"{}\"", type_name, value),
+                };
+                (msg, "22P02".to_string())
+            }
         } else {
             (String::new(), String::new())
         };
@@ -792,6 +825,13 @@ impl Database {
                 typmod: c.typmod,
             })
             .collect();
+
+        // TEMP tables shadow any existing table with the same name
+        if ct.temporary {
+            let mut catalog = self.catalog.lock().unwrap();
+            catalog.shadow_table(&ct.table_name);
+            drop(catalog);
+        }
 
         match self.create_table_catalog_with_serials(&ct.table_name, &columns, serial_columns) {
             Ok(_) => Ok(Response::Execution(Tag::new("CREATE TABLE"))),
@@ -1662,6 +1702,7 @@ fn expr_to_datum(expr: &Expr, col: &Column) -> PgWireResult<Datum> {
             TypeId::Int8 => Ok(Datum::Int8(*i)),
             TypeId::Float4 => Ok(Datum::Float4(*i as f32)),
             TypeId::Float8 => Ok(Datum::Float8(*i as f64)),
+            TypeId::Text => coerce_text_value(&i.to_string(), col.typmod),
             _ => Err(user_error("42804", "Type mismatch in expression")),
         },
         Expr::Float(f) => match col.type_id {
@@ -1670,15 +1711,7 @@ fn expr_to_datum(expr: &Expr, col: &Column) -> PgWireResult<Datum> {
             _ => Err(user_error("42804", "Type mismatch in expression")),
         },
         Expr::StringLiteral(s) => match col.type_id {
-            TypeId::Text => {
-                // char(n): pad with spaces to typmod length
-                let val = if col.typmod > 0 {
-                    format!("{:<width$}", s, width = col.typmod as usize)
-                } else {
-                    s.clone()
-                };
-                Ok(Datum::Text(val))
-            }
+            TypeId::Text => coerce_text_value(s, col.typmod),
             _ => Err(user_error("42804", "Type mismatch in expression")),
         },
         Expr::FunctionCall { name, args } => {
@@ -1689,6 +1722,39 @@ fn expr_to_datum(expr: &Expr, col: &Column) -> PgWireResult<Datum> {
             Ok(eval_function(name, &arg_vals))
         }
         _ => Err(user_error("42804", "Type mismatch in expression")),
+    }
+}
+
+/// Apply char(n)/varchar(n) length enforcement and padding.
+///
+/// typmod > 0  → char(n): trim trailing spaces, check length, pad to n
+/// typmod < -1 → varchar(n): trim trailing spaces, check length, store trimmed
+/// typmod = -1 → text: store as-is
+fn coerce_text_value(s: &str, typmod: i32) -> PgWireResult<Datum> {
+    if typmod > 0 {
+        // char(n)
+        let max_len = typmod as usize;
+        let trimmed = s.trim_end_matches(' ');
+        if trimmed.len() > max_len {
+            return Err(user_error(
+                "22001",
+                &format!("value too long for type character({})", max_len),
+            ));
+        }
+        Ok(Datum::Text(format!("{:<width$}", trimmed, width = max_len)))
+    } else if typmod < -1 {
+        // varchar(n)
+        let max_len = -(typmod + 1) as usize;
+        let trimmed = s.trim_end_matches(' ');
+        if trimmed.len() > max_len {
+            return Err(user_error(
+                "22001",
+                &format!("value too long for type character varying({})", max_len),
+            ));
+        }
+        Ok(Datum::Text(trimmed.to_string()))
+    } else {
+        Ok(Datum::Text(s.to_string()))
     }
 }
 

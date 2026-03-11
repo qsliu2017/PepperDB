@@ -402,6 +402,23 @@ async fn run_sql(sql: &str, db: &Database) -> String {
 
 // -- Test runner --------------------------------------------------------
 
+/// Pre-populate tables from test_setup.sql that specific PG tests depend on.
+async fn setup_test_tables(name: &str, db: &Database) {
+    let setup_sql: &[&str] = match name {
+        "varchar" => &[
+            "CREATE TABLE VARCHAR_TBL(f1 varchar(4));",
+            "INSERT INTO VARCHAR_TBL (f1) VALUES ('a');",
+            "INSERT INTO VARCHAR_TBL (f1) VALUES ('ab');",
+            "INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd');",
+            "INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd    ');",
+        ],
+        _ => &[],
+    };
+    for sql in setup_sql {
+        let _ = db.execute_sql(sql).await;
+    }
+}
+
 async fn run_regress_test(name: &str) {
     let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/regress");
     let sql_path = base.join("sql").join(format!("{}.sql", name));
@@ -412,6 +429,7 @@ async fn run_regress_test(name: &str) {
 
     let tmp = tempfile::tempdir().expect("failed to create tempdir");
     let db = Database::new(tmp.path());
+    setup_test_tables(name, &db).await;
     let actual = run_sql(&sql, &db).await;
 
     let expected = std::fs::read_to_string(&out_path)
@@ -665,7 +683,7 @@ regress_test!(
     // uuid,
     // vacuum,
     // vacuum_parallel,
-    // varchar,
+    varchar,
     // window,
     // with,
     // without_overlaps,
