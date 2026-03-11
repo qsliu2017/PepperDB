@@ -5,9 +5,9 @@
 //! catalog rows. On subsequent startups, `load_catalog` reads those heap tables to
 //! reconstruct the in-memory Catalog.
 
+use crate::access::heap;
 use crate::catalog::filenode_map;
 use crate::catalog::{Catalog, Column, Table};
-use crate::access::heap;
 use crate::storage::bufpage::{self, PAGE_SIZE};
 use crate::storage::smgr::DiskManager;
 use crate::types::{Datum, TypeId, OID};

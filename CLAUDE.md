@@ -13,11 +13,12 @@ PepperDB is a PostgreSQL implementation in Rust, targeting production readiness.
 ## Build Commands
 
 ```bash
-cargo build          # Build the project
-cargo test           # Run all tests
-cargo test <name>    # Run a specific test (e.g., cargo test lru_replacer_test)
-cargo clippy         # Lint
-cargo fmt            # Format code
+cargo build                    # Build the project
+cargo test                     # Run all tests
+cargo test <name>              # Run a specific test (e.g., cargo test lru_replacer_test)
+cargo fmt                      # Format code
+cargo fmt -- --check           # Check formatting (CI)
+cargo clippy -- -D warnings    # Lint, deny all warnings (CI)
 ```
 
 ## Architecture
@@ -74,5 +75,6 @@ Rust library crate (`pepper_db`). `src/lib.rs` as crate root, submodules in dire
 - Only include comments essential to understanding functionality or conveying non-obvious information
 
 ### Workflow
+- Before committing, always run `cargo fmt` and `cargo clippy -- -D warnings` to match CI checks
 - When modifying multiple files, run file modifications in parallel whenever possible
 - When installing any dependency (Cargo crate, apt-get package, etc.), also update `.devcontainer/` so the dev container stays in sync

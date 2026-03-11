@@ -117,9 +117,9 @@ mod test {
 
     #[test]
     fn snapshot_visibility_committed_before() {
+        use crate::access::heap;
         use crate::catalog::Column;
         use crate::storage::bufpage::PAGE_SIZE;
-        use crate::access::heap;
         use crate::types::{Datum, TypeId};
 
         let dir = tempfile::tempdir().unwrap();
@@ -149,9 +149,9 @@ mod test {
 
     #[test]
     fn snapshot_visibility_committed_after() {
+        use crate::access::heap;
         use crate::catalog::Column;
         use crate::storage::bufpage::PAGE_SIZE;
-        use crate::access::heap;
         use crate::types::{Datum, TypeId};
 
         let dir = tempfile::tempdir().unwrap();

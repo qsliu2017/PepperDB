@@ -11,8 +11,8 @@ use crate::access::heap;
 use crate::storage::bufpage::{self, PAGE_SIZE};
 use crate::storage::smgr::DiskManager;
 
-use super::xlogrecord::{self as record, WalRecord};
 use super::xlog as writer;
+use super::xlogrecord::{self as record, WalRecord};
 
 const WAL_PAGE_SIZE: usize = 8192;
 const PAGE_HEADER_SIZE: usize = 16;
@@ -209,8 +209,8 @@ fn apply_heap_record(disk: &DiskManager, lsn: u64, rec: &WalRecord) {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::access::transam::xlogrecord::{WalRecord, RM_HEAP_ID, XLOG_HEAP_INSERT};
     use crate::access::transam::xlog::WalWriter;
+    use crate::access::transam::xlogrecord::{WalRecord, RM_HEAP_ID, XLOG_HEAP_INSERT};
 
     #[test]
     fn reader_reads_written_records() {
