@@ -15,6 +15,7 @@ pub enum Statement {
     Delete(DeleteStmt),
     DropTable(DropTableStmt),
     Vacuum(VacuumStmt),
+    Truncate(TruncateStmt),
 }
 
 #[derive(Debug)]
@@ -27,6 +28,11 @@ pub struct CreateIndexStmt {
 #[derive(Debug)]
 pub struct VacuumStmt {
     pub table_name: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct TruncateStmt {
+    pub table_name: String,
 }
 
 #[derive(Debug)]
@@ -165,6 +171,13 @@ pub fn convert_statement(stmt: ast::Statement) -> PgWireResult<Statement> {
                 table_name,
                 if_exists,
             }))
+        }
+        ast::Statement::Truncate { table_names, .. } => {
+            let target = table_names
+                .first()
+                .ok_or_else(|| unsupported("TRUNCATE requires a table name"))?;
+            let table_name = normalize_name(&target.name);
+            Ok(Statement::Truncate(TruncateStmt { table_name }))
         }
         _ => Err(unsupported("Unsupported statement")),
     }

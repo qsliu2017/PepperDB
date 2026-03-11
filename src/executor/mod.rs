@@ -109,6 +109,7 @@ impl Database {
             Statement::Delete(del) => self.execute_delete(del),
             Statement::DropTable(dt) => self.execute_drop_table(dt),
             Statement::Vacuum(v) => self.execute_vacuum(v),
+            Statement::Truncate(t) => self.execute_truncate(t),
         }
     }
 
@@ -1166,6 +1167,36 @@ impl Database {
         }
 
         Ok(Response::Execution(Tag::new("DROP TABLE")))
+    }
+
+    // -- TRUNCATE TABLE -------------------------------------------------------
+
+    fn execute_truncate(&self, t: crate::parser::TruncateStmt) -> PgWireResult<Response<'static>> {
+        let (table_oid, index_oids) = {
+            let catalog = self.catalog.lock().unwrap();
+            let table = catalog.get_table(&t.table_name).ok_or_else(|| {
+                user_error(
+                    "42P01",
+                    &format!("relation \"{}\" does not exist", t.table_name),
+                )
+            })?;
+            let idx_oids: Vec<u32> = catalog
+                .get_indexes_for_table(table.oid)
+                .iter()
+                .map(|i| i.oid)
+                .collect();
+            (table.oid, idx_oids)
+        };
+
+        {
+            let disk = self.disk.lock().unwrap();
+            disk.truncate_heap_file(table_oid);
+            for idx_oid in &index_oids {
+                disk.truncate_heap_file(*idx_oid);
+            }
+        }
+
+        Ok(Response::Execution(Tag::new("TRUNCATE TABLE")))
     }
 
     // -- CREATE INDEX ---------------------------------------------------------

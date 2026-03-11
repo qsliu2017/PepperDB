@@ -1,0 +1,38 @@
+--
+-- TRUNCATE
+-- Test basic TRUNCATE TABLE functionality.
+--
+CREATE TABLE trunctest (a integer, b text);
+INSERT INTO trunctest VALUES (1, 'one');
+INSERT INTO trunctest VALUES (2, 'two');
+INSERT INTO trunctest VALUES (3, 'three');
+SELECT * FROM trunctest;
+ a |   b   
+---+-------
+ 1 | one
+ 2 | two
+ 3 | three
+(3 rows)
+
+TRUNCATE trunctest;
+SELECT * FROM trunctest;
+ a | b 
+---+---
+(0 rows)
+
+-- verify table is usable after truncate
+INSERT INTO trunctest VALUES (4, 'four');
+SELECT * FROM trunctest;
+ a |  b   
+---+------
+ 4 | four
+(1 row)
+
+-- TRUNCATE TABLE (explicit TABLE keyword)
+TRUNCATE TABLE trunctest;
+SELECT * FROM trunctest;
+ a | b 
+---+---
+(0 rows)
+
+DROP TABLE trunctest;

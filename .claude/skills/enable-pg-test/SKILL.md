@@ -57,7 +57,13 @@ the one requiring the least new code.
    - Types not yet implemented (OID, NAME, MONEY, UUID, INTERVAL, etc.)
    - Features not in DataFusion or our executor
 
-4. **Rank by effort** and recommend the best candidate to the user with a
+4. **Prefer storage-layer features** -- tests that exercise storage
+   operations (TRUNCATE, COPY, ALTER TABLE, REINDEX, CLUSTER) or fill
+   gaps in the existing storage stack are higher priority than tests that
+   only require new SQL/DataFusion rewrites. These features strengthen
+   the core engine and unblock many downstream tests.
+
+5. **Rank by effort** and recommend the best candidate to the user with a
    brief explanation of what works and what needs fixing.
 
 ## Phase 2: Implement Fixes

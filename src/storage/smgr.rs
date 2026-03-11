@@ -91,6 +91,21 @@ impl DiskManager {
         f.write_all(&page.0).expect("write failed");
     }
 
+    pub fn truncate_heap_file(&self, relfilenode: OID) {
+        let path = self.file_path(relfilenode);
+        if let Ok(f) = fs::OpenOptions::new().write(true).open(&path) {
+            f.set_len(0).expect("failed to truncate heap file");
+        }
+        let fsm = self.fork_file_path(relfilenode, "_fsm");
+        if let Ok(f) = fs::OpenOptions::new().write(true).open(&fsm) {
+            f.set_len(0).expect("failed to truncate FSM file");
+        }
+        let vm = self.fork_file_path(relfilenode, "_vm");
+        if let Ok(f) = fs::OpenOptions::new().write(true).open(&vm) {
+            f.set_len(0).expect("failed to truncate VM file");
+        }
+    }
+
     pub fn delete_heap_file(&self, relfilenode: OID) {
         let _ = fs::remove_file(self.file_path(relfilenode));
         let _ = fs::remove_file(self.fork_file_path(relfilenode, "_fsm"));
@@ -198,6 +213,22 @@ mod test {
 
         dm.write_page(2, 1, &page);
         assert_eq!(dm.num_pages(2), 2);
+    }
+
+    #[test]
+    fn truncate_heap_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let dm = DiskManager::new(dir.path(), 5);
+        dm.create_heap_file(3);
+
+        let mut page = Page::new();
+        page.init();
+        dm.write_page(3, 0, &page);
+        dm.write_page(3, 1, &page);
+        assert_eq!(dm.num_pages(3), 2);
+
+        dm.truncate_heap_file(3);
+        assert_eq!(dm.num_pages(3), 0);
     }
 
     #[test]
