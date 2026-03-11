@@ -78,3 +78,23 @@ let result = sums
 ```
 
 Don't force iterator style when it hurts clarity or requires allocation (e.g., collecting into a Vec just to iterate again). A `for` loop is fine when the iterator version would be contorted or significantly less efficient.
+
+## Use `page_field!` macro for fixed-offset struct fields
+
+When a newtype wraps a byte buffer and has fields at known offsets, define them with the `page_field!` macro instead of separate constants + free-function calls. Each macro invocation is the single source of truth for name, type, and byte offset.
+
+```rust
+// Before -- scattered constant + verbose call sites
+pub(crate) const PD_LOWER: usize = 12; // u16 at byte 12
+let lower = read_u16(&self.0, PD_LOWER);
+write_u16(&mut self.0, PD_LOWER, val);
+
+// After -- macro is the definition, methods are the API
+page_field!(pd_lower, u16, 12);
+let lower = self.pd_lower();
+self.set_pd_lower(val);
+```
+
+The macro generates a `const fn` getter and a setter (prefixed `set_`), so getters work in `const fn` contexts. Use `get_u16`/`get_u32`/`set_u16`/`set_u32` for dynamic offsets (e.g., tuple fields at `base + T_XMAX`).
+
+When adding a new page-level field, add one `page_field!` line -- never a standalone offset constant.

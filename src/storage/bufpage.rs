@@ -6,11 +6,6 @@ pub const PAGE_SIZE: usize = 8192;
 
 // -- Page header (28 bytes) ---------------------------------------------------
 
-pub(crate) const PD_CHECKSUM: usize = 8; // u16 at byte 8
-pub(crate) const PD_LOWER: usize = 12; // u16 at byte 12
-pub(crate) const PD_UPPER: usize = 14; // u16 at byte 14
-pub(crate) const PD_SPECIAL: usize = 16; // u16 at byte 16
-pub(crate) const PD_PAGESIZE_VERSION: usize = 18; // u16 at byte 18
 pub(crate) const HEADER_SIZE: usize = 28;
 
 /// pd_pagesize_version: page size in high bits, version 4 in low byte
@@ -86,6 +81,49 @@ impl Default for Page {
     }
 }
 
+// -- Page header field accessors (name, type, byte offset) --------------------
+
+macro_rules! page_field {
+    ($name:ident, u16, $offset:expr) => {
+        paste::paste! {
+            #[allow(dead_code)]
+            pub(crate) const fn $name(&self) -> u16 {
+                read_u16(&self.0, $offset)
+            }
+            #[allow(dead_code)]
+            pub(crate) fn [<set_ $name>](&mut self, val: u16) {
+                write_u16(&mut self.0, $offset, val);
+            }
+        }
+    };
+}
+
+impl Page {
+    //                  name                type  byte offset
+    page_field!(pd_checksum, u16, 8);
+    page_field!(pd_lower, u16, 12);
+    page_field!(pd_upper, u16, 14);
+    page_field!(pd_special, u16, 16);
+    page_field!(pd_pagesize_version, u16, 18);
+}
+
+// -- Generic get/set for dynamic offsets --------------------------------------
+
+impl Page {
+    pub(crate) fn get_u16(&self, off: usize) -> u16 {
+        read_u16(&self.0, off)
+    }
+    pub(crate) fn set_u16(&mut self, off: usize, val: u16) {
+        write_u16(&mut self.0, off, val);
+    }
+    pub(crate) fn get_u32(&self, off: usize) -> u32 {
+        read_u32(&self.0, off)
+    }
+    pub(crate) fn set_u32(&mut self, off: usize, val: u32) {
+        write_u32(&mut self.0, off, val);
+    }
+}
+
 impl Page {
     pub fn new() -> Self {
         Page([0u8; PAGE_SIZE])
@@ -93,15 +131,14 @@ impl Page {
 
     pub fn init(&mut self) {
         self.0.fill(0);
-        write_u16(&mut self.0, PD_LOWER, HEADER_SIZE as u16);
-        write_u16(&mut self.0, PD_UPPER, PAGE_SIZE as u16);
-        write_u16(&mut self.0, PD_SPECIAL, PAGE_SIZE as u16);
-        write_u16(&mut self.0, PD_PAGESIZE_VERSION, PG_PAGE_SIZE_VERSION);
+        self.set_pd_lower(HEADER_SIZE as u16);
+        self.set_pd_upper(PAGE_SIZE as u16);
+        self.set_pd_special(PAGE_SIZE as u16);
+        self.set_pd_pagesize_version(PG_PAGE_SIZE_VERSION);
     }
 
     pub const fn num_items(&self) -> u16 {
-        let pd_lower = u16::from_le_bytes([self.0[PD_LOWER], self.0[PD_LOWER + 1]]) as usize;
-        ((pd_lower - HEADER_SIZE) / ITEM_ID_SIZE) as u16
+        ((self.pd_lower() as usize - HEADER_SIZE) / ITEM_ID_SIZE) as u16
     }
 
     pub fn set_lsn(&mut self, lsn: u64) {
@@ -119,7 +156,8 @@ impl Page {
         const FNV_OFFSET: u32 = 0x811C9DC5;
         const N_SUMS: usize = 32;
 
-        let sums = self.0
+        let sums = self
+            .0
             .chunks_exact(4)
             .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
             .enumerate()
@@ -135,34 +173,37 @@ impl Page {
             ^ blkno;
 
         let checksum = ((result >> 16) ^ (result & 0xFFFF)) as u16;
-        if checksum == 0 { 1 } else { checksum }
+        if checksum == 0 {
+            1
+        } else {
+            checksum
+        }
     }
 
     pub fn set_checksum(&mut self, blkno: u32) {
-        write_u16(&mut self.0, PD_CHECKSUM, 0);
+        self.set_pd_checksum(0);
         let cksum = self.compute_checksum(blkno);
-        write_u16(&mut self.0, PD_CHECKSUM, cksum);
+        self.set_pd_checksum(cksum);
     }
 
     pub fn verify_checksum(&self, blkno: u32) -> bool {
         if self.0.iter().all(|&b| b == 0) {
             return true;
         }
-        let stored = read_u16(&self.0, PD_CHECKSUM);
+        let stored = self.pd_checksum();
         let mut tmp = self.clone();
-        write_u16(&mut tmp.0, PD_CHECKSUM, 0);
+        tmp.set_pd_checksum(0);
         tmp.compute_checksum(blkno) == stored
     }
 
     /// Compute free space on a heap page from pd_upper - pd_lower - ITEM_ID_SIZE.
     pub fn free_space(&self) -> usize {
-        let pd_lower = read_u16(&self.0, PD_LOWER) as usize;
-        let pd_upper = read_u16(&self.0, PD_UPPER) as usize;
-        if pd_upper > pd_lower + 4 {
-            pd_upper - pd_lower - 4
+        let lower = self.pd_lower() as usize;
+        let upper = self.pd_upper() as usize;
+        if upper > lower + 4 {
+            upper - lower - 4
         } else {
             0
         }
     }
 }
-

@@ -3,8 +3,7 @@
 //! Metapage (page 0) stores root pointer. Leaf pages form a linked list.
 
 use crate::storage::bufpage::{
-    pack_item_id, read_u16, read_u32, unpack_item_id, write_u16, write_u32, Page, HEADER_SIZE,
-    ITEM_ID_SIZE, LP_NORMAL, PAGE_SIZE, PD_LOWER, PD_PAGESIZE_VERSION, PD_SPECIAL, PD_UPPER,
+    pack_item_id, unpack_item_id, Page, HEADER_SIZE, ITEM_ID_SIZE, LP_NORMAL, PAGE_SIZE,
     PG_PAGE_SIZE_VERSION,
 };
 use crate::storage::smgr::DiskManager;
@@ -68,68 +67,64 @@ trait BTreePage {
 impl BTreePage for Page {
     fn init_meta(&mut self) {
         self.0.fill(0);
-        write_u16(&mut self.0, PD_LOWER, HEADER_SIZE as u16 + 16);
-        write_u16(&mut self.0, PD_UPPER, BT_SPECIAL as u16);
-        write_u16(&mut self.0, PD_SPECIAL, BT_SPECIAL as u16);
-        write_u16(&mut self.0, PD_PAGESIZE_VERSION, PG_PAGE_SIZE_VERSION);
-        write_u32(&mut self.0, BTM_MAGIC_OFF, BT_META_MAGIC);
-        write_u32(&mut self.0, BTM_VERSION_OFF, BT_META_VERSION);
-        write_u32(&mut self.0, BTM_ROOT_OFF, BT_NO_PAGE);
-        write_u32(&mut self.0, BTM_LEVEL_OFF, 0);
-        write_u16(&mut self.0, BT_SPECIAL + BTPO_FLAGS, BTP_META);
+        self.set_pd_lower(HEADER_SIZE as u16 + 16);
+        self.set_pd_upper(BT_SPECIAL as u16);
+        self.set_pd_special(BT_SPECIAL as u16);
+        self.set_pd_pagesize_version(PG_PAGE_SIZE_VERSION);
+        self.set_u32(BTM_MAGIC_OFF, BT_META_MAGIC);
+        self.set_u32(BTM_VERSION_OFF, BT_META_VERSION);
+        self.set_u32(BTM_ROOT_OFF, BT_NO_PAGE);
+        self.set_u32(BTM_LEVEL_OFF, 0);
+        self.set_u16(BT_SPECIAL + BTPO_FLAGS, BTP_META);
     }
 
     fn init_btree(&mut self, level: u32, flags: u16) {
         self.0.fill(0);
-        write_u16(&mut self.0, PD_LOWER, HEADER_SIZE as u16);
-        write_u16(&mut self.0, PD_UPPER, BT_SPECIAL as u16);
-        write_u16(&mut self.0, PD_SPECIAL, BT_SPECIAL as u16);
-        write_u16(&mut self.0, PD_PAGESIZE_VERSION, PG_PAGE_SIZE_VERSION);
-        write_u32(&mut self.0, BT_SPECIAL + BTPO_PREV, BT_NO_PAGE);
-        write_u32(&mut self.0, BT_SPECIAL + BTPO_NEXT, BT_NO_PAGE);
-        write_u32(&mut self.0, BT_SPECIAL + BTPO_LEVEL, level);
-        write_u16(&mut self.0, BT_SPECIAL + BTPO_FLAGS, flags);
+        self.set_pd_lower(HEADER_SIZE as u16);
+        self.set_pd_upper(BT_SPECIAL as u16);
+        self.set_pd_special(BT_SPECIAL as u16);
+        self.set_pd_pagesize_version(PG_PAGE_SIZE_VERSION);
+        self.set_u32(BT_SPECIAL + BTPO_PREV, BT_NO_PAGE);
+        self.set_u32(BT_SPECIAL + BTPO_NEXT, BT_NO_PAGE);
+        self.set_u32(BT_SPECIAL + BTPO_LEVEL, level);
+        self.set_u16(BT_SPECIAL + BTPO_FLAGS, flags);
     }
 
     fn read_meta(&self) -> (u32, u32) {
-        (
-            read_u32(&self.0, BTM_ROOT_OFF),
-            read_u32(&self.0, BTM_LEVEL_OFF),
-        )
+        (self.get_u32(BTM_ROOT_OFF), self.get_u32(BTM_LEVEL_OFF))
     }
 
     fn write_meta(&mut self, root: u32, level: u32) {
-        write_u32(&mut self.0, BTM_ROOT_OFF, root);
-        write_u32(&mut self.0, BTM_LEVEL_OFF, level);
+        self.set_u32(BTM_ROOT_OFF, root);
+        self.set_u32(BTM_LEVEL_OFF, level);
     }
 
     fn read_opaque_flags(&self) -> u16 {
-        read_u16(&self.0, BT_SPECIAL + BTPO_FLAGS)
+        self.get_u16(BT_SPECIAL + BTPO_FLAGS)
     }
 
     fn read_opaque_level(&self) -> u32 {
-        read_u32(&self.0, BT_SPECIAL + BTPO_LEVEL)
+        self.get_u32(BT_SPECIAL + BTPO_LEVEL)
     }
 
     fn read_opaque_next(&self) -> u32 {
-        read_u32(&self.0, BT_SPECIAL + BTPO_NEXT)
+        self.get_u32(BT_SPECIAL + BTPO_NEXT)
     }
 
     fn read_index_tuple(&self, item_index: u16, key_type: TypeId) -> Option<(ItemPointer, Datum)> {
         let item_id_off = HEADER_SIZE + (item_index as usize) * ITEM_ID_SIZE;
-        let pd_lower = read_u16(&self.0, PD_LOWER) as usize;
-        if item_id_off + ITEM_ID_SIZE > pd_lower {
+        if item_id_off + ITEM_ID_SIZE > self.pd_lower() as usize {
             return None;
         }
-        let item_id = read_u32(&self.0, item_id_off);
+        let item_id = self.get_u32(item_id_off);
         let (offset, flags, length) = unpack_item_id(item_id);
         if flags != LP_NORMAL || (offset == 0 && length == 0) {
             return None;
         }
         let off = offset as usize;
         let tid = ItemPointer {
-            block_id: read_u32(&self.0, off),
-            offset_num: read_u16(&self.0, off + 4),
+            block_id: self.get_u32(off),
+            offset_num: self.get_u16(off + 4),
         };
         let key_data = &self.0[off + INDEX_TUPLE_HDR..off + length as usize];
         let key = decode_key(key_data, key_type);
@@ -137,8 +132,8 @@ impl BTreePage for Page {
     }
 
     fn insert_index_tuple(&mut self, tuple: &[u8]) -> Result<u16, ()> {
-        let pd_lower = read_u16(&self.0, PD_LOWER) as usize;
-        let pd_upper = read_u16(&self.0, PD_UPPER) as usize;
+        let pd_lower = self.pd_lower() as usize;
+        let pd_upper = self.pd_upper() as usize;
 
         let needed_lower = pd_lower + ITEM_ID_SIZE;
         let needed_upper = pd_upper - tuple.len();
@@ -151,10 +146,10 @@ impl BTreePage for Page {
 
         let item_index = (pd_lower - HEADER_SIZE) / ITEM_ID_SIZE;
         let item_id = pack_item_id(tuple_offset as u16, LP_NORMAL, tuple.len() as u16);
-        write_u32(&mut self.0, pd_lower, item_id);
+        self.set_u32(pd_lower, item_id);
 
-        write_u16(&mut self.0, PD_LOWER, needed_lower as u16);
-        write_u16(&mut self.0, PD_UPPER, tuple_offset as u16);
+        self.set_pd_lower(needed_lower as u16);
+        self.set_pd_upper(tuple_offset as u16);
 
         Ok(item_index as u16)
     }
@@ -181,7 +176,7 @@ impl BTreePage for Page {
         // Otherwise: rebuild page with new tuple inserted at pos
         let mut tuples: Vec<Vec<u8>> = (0..n)
             .map(|i| {
-                let item_id = read_u32(&self.0, HEADER_SIZE + (i as usize) * ITEM_ID_SIZE);
+                let item_id = self.get_u32(HEADER_SIZE + (i as usize) * ITEM_ID_SIZE);
                 let (offset, _, length) = unpack_item_id(item_id);
                 self.0[offset as usize..offset as usize + length as usize].to_vec()
             })
@@ -198,7 +193,7 @@ impl BTreePage for Page {
         opaque.copy_from_slice(&self.0[BT_SPECIAL..BT_SPECIAL + BT_OPAQUE_SIZE]);
 
         // Clear data area
-        let version = read_u16(&self.0, PD_PAGESIZE_VERSION);
+        let version = self.pd_pagesize_version();
         self.0[HEADER_SIZE..BT_SPECIAL].fill(0);
 
         let new_lower = HEADER_SIZE + tuples.len() * ITEM_ID_SIZE;
@@ -211,13 +206,13 @@ impl BTreePage for Page {
             }
             self.0[upper..upper + tup.len()].copy_from_slice(tup);
             let item_id = pack_item_id(upper as u16, LP_NORMAL, tup.len() as u16);
-            write_u32(&mut self.0, HEADER_SIZE + slot * ITEM_ID_SIZE, item_id);
+            self.set_u32(HEADER_SIZE + slot * ITEM_ID_SIZE, item_id);
         }
 
-        write_u16(&mut self.0, PD_LOWER, new_lower as u16);
-        write_u16(&mut self.0, PD_UPPER, upper as u16);
-        write_u16(&mut self.0, PD_SPECIAL, BT_SPECIAL as u16);
-        write_u16(&mut self.0, PD_PAGESIZE_VERSION, version);
+        self.set_pd_lower(new_lower as u16);
+        self.set_pd_upper(upper as u16);
+        self.set_pd_special(BT_SPECIAL as u16);
+        self.set_pd_pagesize_version(version);
         self.0[BT_SPECIAL..BT_SPECIAL + BT_OPAQUE_SIZE].copy_from_slice(&opaque);
         Ok(())
     }
@@ -422,9 +417,9 @@ fn split_and_insert(
     let n = page.num_items();
     let mut all_tuples: Vec<(Datum, Vec<u8>)> = (0..n)
         .map(|i| {
-            let item_id = read_u32(&page.0, HEADER_SIZE + (i as usize) * ITEM_ID_SIZE);
+            let item_id = page.get_u32(HEADER_SIZE + (i as usize) * ITEM_ID_SIZE);
             let (offset, _, length) = unpack_item_id(item_id);
-            let tup_data = page.0[offset as usize..offset as usize + length as usize].to_vec();
+            let tup_data = page[offset as usize..offset as usize + length as usize].to_vec();
             let k = decode_key(&tup_data[INDEX_TUPLE_HDR..], key_type);
             (k, tup_data)
         })
@@ -453,7 +448,7 @@ fn split_and_insert(
     page.rebuild_btree_page(&left_tuples)
         .expect("left split must fit");
     // Set next to new page
-    write_u32(&mut page.0, BT_SPECIAL + BTPO_NEXT, new_page_id);
+    page.set_u32(BT_SPECIAL + BTPO_NEXT, new_page_id);
     disk.write_page(index_rfn, page_id, page);
 
     // Create right page
@@ -463,15 +458,15 @@ fn split_and_insert(
     right
         .rebuild_btree_page(&right_tuples)
         .expect("right split must fit");
-    write_u32(&mut right.0, BT_SPECIAL + BTPO_PREV, page_id);
-    write_u32(&mut right.0, BT_SPECIAL + BTPO_NEXT, old_next);
+    right.set_u32(BT_SPECIAL + BTPO_PREV, page_id);
+    right.set_u32(BT_SPECIAL + BTPO_NEXT, old_next);
     disk.write_page(index_rfn, new_page_id, &right);
 
     // Update old_next's prev pointer
     if old_next != BT_NO_PAGE {
         let mut next_page = Page::new();
         disk.read_page(index_rfn, old_next, &mut next_page);
-        write_u32(&mut next_page.0, BT_SPECIAL + BTPO_PREV, new_page_id);
+        next_page.set_u32(BT_SPECIAL + BTPO_PREV, new_page_id);
         disk.write_page(index_rfn, old_next, &next_page);
     }
 
