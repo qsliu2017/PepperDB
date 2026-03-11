@@ -1,0 +1,71 @@
+--
+-- UPDATE
+-- Test basic UPDATE functionality.
+--
+CREATE TABLE update_test (
+    a   INT,
+    b   INT,
+    c   TEXT
+);
+INSERT INTO update_test VALUES (5, 10, 'foo');
+INSERT INTO update_test VALUES (10, 15, 'bar');
+INSERT INTO update_test VALUES (20, 25, 'baz');
+SELECT * FROM update_test ORDER BY a;
+ a  | b  |  c  
+----+----+-----
+  5 | 10 | foo
+ 10 | 15 | bar
+ 20 | 25 | baz
+(3 rows)
+
+-- update all rows
+UPDATE update_test SET c = 'updated';
+SELECT * FROM update_test ORDER BY a;
+ a  | b  |    c    
+----+----+---------
+  5 | 10 | updated
+ 10 | 15 | updated
+ 20 | 25 | updated
+(3 rows)
+
+-- update with WHERE clause
+UPDATE update_test SET b = 100 WHERE a = 5;
+SELECT * FROM update_test ORDER BY a;
+ a  |  b  |    c    
+----+-----+---------
+  5 | 100 | updated
+ 10 |  15 | updated
+ 20 |  25 | updated
+(3 rows)
+
+-- update with expression
+UPDATE update_test SET a = a + 1;
+SELECT * FROM update_test ORDER BY a;
+ a  |  b  |    c    
+----+-----+---------
+  6 | 100 | updated
+ 11 |  15 | updated
+ 21 |  25 | updated
+(3 rows)
+
+-- update multiple columns
+UPDATE update_test SET a = 0, b = 0, c = 'reset' WHERE a = 11;
+SELECT * FROM update_test ORDER BY a;
+ a  |  b  |    c    
+----+-----+---------
+  0 |   0 | reset
+  6 | 100 | updated
+ 21 |  25 | updated
+(3 rows)
+
+-- update with no matching rows
+UPDATE update_test SET a = 999 WHERE a = 12345;
+SELECT * FROM update_test ORDER BY a;
+ a  |  b  |    c    
+----+-----+---------
+  0 |   0 | reset
+  6 | 100 | updated
+ 21 |  25 | updated
+(3 rows)
+
+DROP TABLE update_test;
