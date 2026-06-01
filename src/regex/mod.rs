@@ -1,0 +1,14 @@
+//! Regular-expression engine (postgres/src/backend/regex + src/include/regex).
+//!
+//! Henry Spencer's regex library as adapted for PostgreSQL. Translated
+//! incrementally; so far only the error-string mapping (regerror).
+
+pub mod regfree;
+pub mod regc_cvec;
+pub mod regcustom;
+pub mod regerror;
+pub mod regexport;
+pub mod regprefix;
+pub mod regerrs;
+pub mod regex;
+pub mod regguts;

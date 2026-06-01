@@ -1,0 +1,59 @@
+//! Snowball stemmer support (postgres/src/backend/snowball).
+//!
+//! The libstemmer runtime (`api`, `utilities`) plus the generated per-language
+//! stemmers. So far: the runtime.
+
+pub mod stem_UTF_8_serbian;
+pub mod stem_UTF_8_tamil;
+pub mod stem_UTF_8_yiddish;
+pub mod stem_UTF_8_turkish;
+pub mod stem_UTF_8_spanish;
+pub mod stem_UTF_8_russian;
+pub mod stem_UTF_8_romanian;
+pub mod stem_UTF_8_greek;
+pub mod stem_UTF_8_french;
+pub mod stem_UTF_8_estonian;
+pub mod stem_UTF_8_catalan;
+pub mod stem_UTF_8_porter;
+pub mod stem_UTF_8_lithuanian;
+pub mod stem_UTF_8_italian;
+pub mod stem_UTF_8_basque;
+pub mod stem_UTF_8_arabic;
+pub mod stem_KOI8_R_russian;
+pub mod stem_ISO_8859_1_french;
+pub mod stem_ISO_8859_1_catalan;
+pub mod stem_ISO_8859_1_basque;
+pub mod stem_ISO_8859_1_spanish;
+pub mod stem_ISO_8859_1_portuguese;
+pub mod stem_ISO_8859_1_porter;
+pub mod stem_ISO_8859_1_italian;
+pub mod stem_ISO_8859_2_hungarian;
+pub mod stem_ISO_8859_1_english;
+pub mod api;
+pub mod dict_snowball;
+pub mod header;
+pub mod utilities;
+
+// Generated per-language stemmers.
+pub mod stem_ISO_8859_1_danish;
+pub mod stem_ISO_8859_1_dutch;
+pub mod stem_ISO_8859_1_finnish;
+pub mod stem_ISO_8859_1_german;
+pub mod stem_ISO_8859_1_indonesian;
+pub mod stem_ISO_8859_1_irish;
+pub mod stem_ISO_8859_1_norwegian;
+pub mod stem_ISO_8859_1_swedish;
+pub mod stem_UTF_8_armenian;
+pub mod stem_UTF_8_danish;
+pub mod stem_UTF_8_dutch;
+pub mod stem_UTF_8_english;
+pub mod stem_UTF_8_finnish;
+pub mod stem_UTF_8_german;
+pub mod stem_UTF_8_hindi;
+pub mod stem_UTF_8_hungarian;
+pub mod stem_UTF_8_indonesian;
+pub mod stem_UTF_8_irish;
+pub mod stem_UTF_8_nepali;
+pub mod stem_UTF_8_norwegian;
+pub mod stem_UTF_8_portuguese;
+pub mod stem_UTF_8_swedish;

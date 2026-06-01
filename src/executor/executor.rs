@@ -1,0 +1,1311 @@
+//! executor/executor.h - support for the POSTGRES executor module.
+
+use std::ffi::{c_char, c_int, c_void};
+
+use crate::c::{int64, uint32, uint64, Index, Size};
+use crate::postgres::{Datum, DatumGetBool, DatumGetPointer, PointerGetDatum};
+use crate::postgres_ext::Oid;
+
+use crate::access::attnum::AttrNumber;
+use crate::access::htup_details::HeapTupleHeader;
+use crate::access::sdir::ScanDirection;
+
+use crate::nodes::bitmapset::Bitmapset;
+use crate::nodes::lockoptions::LockTupleMode;
+use crate::nodes::nodes::{CmdType, Node, NodeTag, OnConflictAction};
+use crate::nodes::params::ParamListInfo;
+use crate::nodes::parsenodes::{RTEPermissionInfo, RangeTblEntry, WCOKind};
+use crate::nodes::pg_list::{list_nth, List};
+use crate::nodes::plannodes::Plan;
+use crate::nodes::primnodes::{CurrentOfExpr, Expr};
+
+use crate::nodes::execnodes::{
+    AggState, AggStatePerPhaseData, EPQState, EState, ExecAuxRowMark, ExecProcNodeMtd, ExecRowMark,
+    ExprContext, ExprContextCallbackFunction, ExprDoneCond, ExprState, IndexInfo, JunkFilter,
+    ModifyTableState, PlanState, ProjectionInfo, ResultRelInfo, ScanState, SetExprState,
+    TupleHashEntry, TupleHashEntryData, TupleHashTable,
+};
+
+use crate::access::common::tupconvert::TupleConversionMap;
+use crate::access::common::tupdesc::TupleDesc;
+use crate::access::htup_details::MinimalTuple;
+use crate::executor::execdesc::QueryDesc;
+use crate::executor::tuptable::{
+    slot_getattr, ExecClearTuple, TupleTableSlot, TupleTableSlotOps, TTS_FLAG_EMPTY,
+};
+use crate::storage::itemptr::ItemPointer;
+use crate::tcop::dest::DestReceiver;
+use crate::utils::fmgr::FmgrInfo;
+use crate::utils::mmgr::memnodes::MemoryContext;
+use crate::utils::palloc::MemoryContextSwitchTo;
+use crate::utils::adt::varlena::cstring_to_text;
+
+use crate::utils::rel::Relation;
+
+// Tuplestorestate is an opaque forward-declared type used here only by pointer.
+use crate::nodes::execnodes::Tuplestorestate;
+
+// EEO_FLAG_IS_QUAL lives in execnodes (expression eval flags).
+use crate::nodes::execnodes::EEO_FLAG_IS_QUAL;
+
+// MemoryContextReset from mcxt (real impl).
+use crate::utils::mmgr::mcxt::MemoryContextReset;
+
+// pfree from mcxt.
+use crate::utils::mmgr::mcxt::pfree;
+
+/*
+ * The "eflags" argument to ExecutorStart and the various ExecInitNode routines
+ * is a bitwise OR of the following flag bits.
+ */
+pub const EXEC_FLAG_EXPLAIN_ONLY: c_int = 0x0001; /* EXPLAIN, no ANALYZE */
+pub const EXEC_FLAG_EXPLAIN_GENERIC: c_int = 0x0002; /* EXPLAIN (GENERIC_PLAN) */
+pub const EXEC_FLAG_REWIND: c_int = 0x0004; /* need efficient rescan */
+pub const EXEC_FLAG_BACKWARD: c_int = 0x0008; /* need backward scan */
+pub const EXEC_FLAG_MARK: c_int = 0x0010; /* need mark/restore */
+pub const EXEC_FLAG_SKIP_TRIGGERS: c_int = 0x0020; /* skip AfterTrigger setup */
+pub const EXEC_FLAG_WITH_NO_DATA: c_int = 0x0040; /* REFRESH ... WITH NO DATA */
+
+/* Hook for plugins to get control in ExecutorStart() */
+pub type ExecutorStart_hook_type =
+    Option<unsafe fn(queryDesc: *mut QueryDesc, eflags: c_int)>;
+pub static mut ExecutorStart_hook: ExecutorStart_hook_type = None;
+
+/* Hook for plugins to get control in ExecutorRun() */
+pub type ExecutorRun_hook_type =
+    Option<unsafe fn(queryDesc: *mut QueryDesc, direction: ScanDirection, count: uint64)>;
+pub static mut ExecutorRun_hook: ExecutorRun_hook_type = None;
+
+/* Hook for plugins to get control in ExecutorFinish() */
+pub type ExecutorFinish_hook_type = Option<unsafe fn(queryDesc: *mut QueryDesc)>;
+pub static mut ExecutorFinish_hook: ExecutorFinish_hook_type = None;
+
+/* Hook for plugins to get control in ExecutorEnd() */
+pub type ExecutorEnd_hook_type = Option<unsafe fn(queryDesc: *mut QueryDesc)>;
+pub static mut ExecutorEnd_hook: ExecutorEnd_hook_type = None;
+
+/* Hook for plugins to get control in ExecCheckPermissions() */
+pub type ExecutorCheckPerms_hook_type = Option<
+    unsafe fn(
+        rangeTable: *mut List,
+        rtePermInfos: *mut List,
+        ereport_on_violation: bool,
+    ) -> bool,
+>;
+pub static mut ExecutorCheckPerms_hook: ExecutorCheckPerms_hook_type = None;
+
+/*
+ * prototypes from functions in execAmi.c
+ */
+// struct Path; - avoid including pathnodes.h here.  Forward-declared, used by
+// pointer only in ExecSupportsMarkRestore below.
+#[repr(C)]
+pub struct Path {
+    _private: [u8; 0],
+}
+
+pub unsafe fn ExecReScan(_node: *mut PlanState) {
+    unimplemented!()
+}
+pub unsafe fn ExecMarkPos(_node: *mut PlanState) {
+    unimplemented!()
+}
+pub unsafe fn ExecRestrPos(_node: *mut PlanState) {
+    unimplemented!()
+}
+pub unsafe fn ExecSupportsMarkRestore(_pathnode: *mut Path) -> bool {
+    unimplemented!()
+}
+pub unsafe fn ExecSupportsBackwardScan(_node: *mut Plan) -> bool {
+    unimplemented!()
+}
+pub unsafe fn ExecMaterializesOutput(_plantype: NodeTag) -> bool {
+    unimplemented!()
+}
+
+/*
+ * prototypes from functions in execCurrent.c
+ */
+pub unsafe fn execCurrentOf(
+    _cexpr: *mut CurrentOfExpr,
+    _econtext: *mut ExprContext,
+    _table_oid: Oid,
+    _current_tid: ItemPointer,
+) -> bool {
+    unimplemented!()
+}
+
+/*
+ * prototypes from functions in execGrouping.c
+ */
+pub unsafe fn execTuplesMatchPrepare(
+    _desc: TupleDesc,
+    _numCols: c_int,
+    _keyColIdx: *const AttrNumber,
+    _eqOperators: *const Oid,
+    _collations: *const Oid,
+    _parent: *mut PlanState,
+) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn execTuplesHashPrepare(
+    _numCols: c_int,
+    _eqOperators: *const Oid,
+    _eqFuncOids: *mut *mut Oid,
+    _hashFunctions: *mut *mut FmgrInfo,
+) {
+    unimplemented!()
+}
+pub unsafe fn BuildTupleHashTable(
+    _parent: *mut PlanState,
+    _inputDesc: TupleDesc,
+    _inputOps: *const TupleTableSlotOps,
+    _numCols: c_int,
+    _keyColIdx: *mut AttrNumber,
+    _eqfuncoids: *const Oid,
+    _hashfunctions: *mut FmgrInfo,
+    _collations: *mut Oid,
+    _nbuckets: std::ffi::c_long,
+    _additionalsize: Size,
+    _metacxt: MemoryContext,
+    _tablecxt: MemoryContext,
+    _tempcxt: MemoryContext,
+    _use_variable_hash_iv: bool,
+) -> TupleHashTable {
+    unimplemented!()
+}
+pub unsafe fn LookupTupleHashEntry(
+    _hashtable: TupleHashTable,
+    _slot: *mut TupleTableSlot,
+    _isnew: *mut bool,
+    _hash: *mut uint32,
+) -> TupleHashEntry {
+    unimplemented!()
+}
+pub unsafe fn TupleHashTableHash(
+    _hashtable: TupleHashTable,
+    _slot: *mut TupleTableSlot,
+) -> uint32 {
+    unimplemented!()
+}
+pub unsafe fn LookupTupleHashEntryHash(
+    _hashtable: TupleHashTable,
+    _slot: *mut TupleTableSlot,
+    _isnew: *mut bool,
+    _hash: uint32,
+) -> TupleHashEntry {
+    unimplemented!()
+}
+pub unsafe fn FindTupleHashEntry(
+    _hashtable: TupleHashTable,
+    _slot: *mut TupleTableSlot,
+    _eqcomp: *mut ExprState,
+    _hashexpr: *mut ExprState,
+) -> TupleHashEntry {
+    unimplemented!()
+}
+pub unsafe fn ResetTupleHashTable(_hashtable: TupleHashTable) {
+    unimplemented!()
+}
+
+/*
+ * Return size of the hash bucket. Useful for estimating memory usage.
+ */
+#[inline]
+pub fn TupleHashEntrySize() -> usize {
+    std::mem::size_of::<TupleHashEntryData>()
+}
+
+/*
+ * Return tuple from hash entry.
+ */
+#[inline]
+pub unsafe fn TupleHashEntryGetTuple(entry: TupleHashEntry) -> MinimalTuple {
+    (*entry).firstTuple
+}
+
+/*
+ * Get a pointer into the additional space allocated for this entry. The memory
+ * will be maxaligned and zeroed.
+ */
+#[inline]
+pub unsafe fn TupleHashEntryGetAdditional(
+    hashtable: TupleHashTable,
+    entry: TupleHashEntry,
+) -> *mut c_void {
+    if (*hashtable).additionalsize > 0 {
+        ((*entry).firstTuple as *mut c_char).offset(-((*hashtable).additionalsize as isize))
+            as *mut c_void
+    } else {
+        std::ptr::null_mut()
+    }
+}
+
+/*
+ * prototypes from functions in execJunk.c
+ */
+pub unsafe fn ExecInitJunkFilter(
+    _targetList: *mut List,
+    _slot: *mut TupleTableSlot,
+) -> *mut JunkFilter {
+    unimplemented!()
+}
+pub unsafe fn ExecInitJunkFilterConversion(
+    _targetList: *mut List,
+    _cleanTupType: TupleDesc,
+    _slot: *mut TupleTableSlot,
+) -> *mut JunkFilter {
+    unimplemented!()
+}
+pub unsafe fn ExecFindJunkAttribute(
+    _junkfilter: *mut JunkFilter,
+    _attrName: *const c_char,
+) -> AttrNumber {
+    unimplemented!()
+}
+pub unsafe fn ExecFindJunkAttributeInTlist(
+    _targetlist: *mut List,
+    _attrName: *const c_char,
+) -> AttrNumber {
+    unimplemented!()
+}
+pub unsafe fn ExecFilterJunk(
+    _junkfilter: *mut JunkFilter,
+    _slot: *mut TupleTableSlot,
+) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+
+/*
+ * ExecGetJunkAttribute
+ *
+ * Given a junk filter's input tuple (slot) and a junk attribute's number
+ * previously found by ExecFindJunkAttribute, extract & return the value and
+ * isNull flag of the attribute.
+ */
+#[inline]
+pub unsafe fn ExecGetJunkAttribute(
+    slot: *mut TupleTableSlot,
+    attno: AttrNumber,
+    isNull: *mut bool,
+) -> Datum {
+    debug_assert!(attno > 0);
+    slot_getattr(slot, attno as c_int, isNull)
+}
+
+/*
+ * prototypes from functions in execMain.c
+ */
+pub unsafe fn ExecutorStart(_queryDesc: *mut QueryDesc, _eflags: c_int) {
+    unimplemented!()
+}
+pub unsafe fn standard_ExecutorStart(_queryDesc: *mut QueryDesc, _eflags: c_int) {
+    unimplemented!()
+}
+pub unsafe fn ExecutorRun(
+    _queryDesc: *mut QueryDesc,
+    _direction: ScanDirection,
+    _count: uint64,
+) {
+    unimplemented!()
+}
+pub unsafe fn standard_ExecutorRun(
+    _queryDesc: *mut QueryDesc,
+    _direction: ScanDirection,
+    _count: uint64,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecutorFinish(_queryDesc: *mut QueryDesc) {
+    unimplemented!()
+}
+pub unsafe fn standard_ExecutorFinish(_queryDesc: *mut QueryDesc) {
+    unimplemented!()
+}
+pub unsafe fn ExecutorEnd(_queryDesc: *mut QueryDesc) {
+    unimplemented!()
+}
+pub unsafe fn standard_ExecutorEnd(_queryDesc: *mut QueryDesc) {
+    unimplemented!()
+}
+pub unsafe fn ExecutorRewind(_queryDesc: *mut QueryDesc) {
+    unimplemented!()
+}
+pub unsafe fn ExecCheckPermissions(
+    _rangeTable: *mut List,
+    _rteperminfos: *mut List,
+    _ereport_on_violation: bool,
+) -> bool {
+    unimplemented!()
+}
+pub unsafe fn ExecCheckOneRelPerms(_perminfo: *mut RTEPermissionInfo) -> bool {
+    unimplemented!()
+}
+pub unsafe fn CheckValidResultRel(
+    _resultRelInfo: *mut ResultRelInfo,
+    _operation: CmdType,
+    _onConflictAction: OnConflictAction,
+    _mergeActions: *mut List,
+) {
+    unimplemented!()
+}
+pub unsafe fn InitResultRelInfo(
+    _resultRelInfo: *mut ResultRelInfo,
+    _resultRelationDesc: Relation,
+    _resultRelationIndex: Index,
+    _partition_root_rri: *mut ResultRelInfo,
+    _instrument_options: c_int,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecGetTriggerResultRel(
+    _estate: *mut EState,
+    _relid: Oid,
+    _rootRelInfo: *mut ResultRelInfo,
+) -> *mut ResultRelInfo {
+    unimplemented!()
+}
+pub unsafe fn ExecGetAncestorResultRels(
+    _estate: *mut EState,
+    _resultRelInfo: *mut ResultRelInfo,
+) -> *mut List {
+    unimplemented!()
+}
+pub unsafe fn ExecConstraints(
+    _resultRelInfo: *mut ResultRelInfo,
+    _slot: *mut TupleTableSlot,
+    _estate: *mut EState,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecRelGenVirtualNotNull(
+    _resultRelInfo: *mut ResultRelInfo,
+    _slot: *mut TupleTableSlot,
+    _estate: *mut EState,
+    _notnull_virtual_attrs: *mut List,
+) -> AttrNumber {
+    unimplemented!()
+}
+pub unsafe fn ExecPartitionCheck(
+    _resultRelInfo: *mut ResultRelInfo,
+    _slot: *mut TupleTableSlot,
+    _estate: *mut EState,
+    _emitError: bool,
+) -> bool {
+    unimplemented!()
+}
+pub unsafe fn ExecPartitionCheckEmitError(
+    _resultRelInfo: *mut ResultRelInfo,
+    _slot: *mut TupleTableSlot,
+    _estate: *mut EState,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecWithCheckOptions(
+    _kind: WCOKind,
+    _resultRelInfo: *mut ResultRelInfo,
+    _slot: *mut TupleTableSlot,
+    _estate: *mut EState,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecBuildSlotValueDescription(
+    _reloid: Oid,
+    _slot: *mut TupleTableSlot,
+    _tupdesc: TupleDesc,
+    _modifiedCols: *mut Bitmapset,
+    _maxfieldlen: c_int,
+) -> *mut c_char {
+    unimplemented!()
+}
+pub unsafe fn ExecUpdateLockMode(
+    _estate: *mut EState,
+    _relinfo: *mut ResultRelInfo,
+) -> LockTupleMode {
+    unimplemented!()
+}
+pub unsafe fn ExecFindRowMark(
+    _estate: *mut EState,
+    _rti: Index,
+    _missing_ok: bool,
+) -> *mut ExecRowMark {
+    unimplemented!()
+}
+pub unsafe fn ExecBuildAuxRowMark(
+    _erm: *mut ExecRowMark,
+    _targetlist: *mut List,
+) -> *mut ExecAuxRowMark {
+    unimplemented!()
+}
+pub unsafe fn EvalPlanQual(
+    _epqstate: *mut EPQState,
+    _relation: Relation,
+    _rti: Index,
+    _inputslot: *mut TupleTableSlot,
+) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+pub unsafe fn EvalPlanQualInit(
+    _epqstate: *mut EPQState,
+    _parentestate: *mut EState,
+    _subplan: *mut Plan,
+    _auxrowmarks: *mut List,
+    _epqParam: c_int,
+    _resultRelations: *mut List,
+) {
+    unimplemented!()
+}
+pub unsafe fn EvalPlanQualSetPlan(
+    _epqstate: *mut EPQState,
+    _subplan: *mut Plan,
+    _auxrowmarks: *mut List,
+) {
+    unimplemented!()
+}
+pub unsafe fn EvalPlanQualSlot(
+    _epqstate: *mut EPQState,
+    _relation: Relation,
+    _rti: Index,
+) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+
+/* #define EvalPlanQualSetSlot(epqstate, slot) ((epqstate)->origslot = (slot)) */
+#[inline]
+pub unsafe fn EvalPlanQualSetSlot(epqstate: *mut EPQState, slot: *mut TupleTableSlot) {
+    (*epqstate).origslot = slot;
+}
+
+pub unsafe fn EvalPlanQualFetchRowMark(
+    _epqstate: *mut EPQState,
+    _rti: Index,
+    _slot: *mut TupleTableSlot,
+) -> bool {
+    unimplemented!()
+}
+pub unsafe fn EvalPlanQualNext(_epqstate: *mut EPQState) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+pub unsafe fn EvalPlanQualBegin(_epqstate: *mut EPQState) {
+    unimplemented!()
+}
+pub unsafe fn EvalPlanQualEnd(_epqstate: *mut EPQState) {
+    unimplemented!()
+}
+
+/*
+ * functions in execProcnode.c
+ */
+pub unsafe fn ExecInitNode(
+    _node: *mut Plan,
+    _estate: *mut EState,
+    _eflags: c_int,
+) -> *mut PlanState {
+    unimplemented!()
+}
+pub unsafe fn ExecSetExecProcNode(_node: *mut PlanState, _function: ExecProcNodeMtd) {
+    unimplemented!()
+}
+pub unsafe fn MultiExecProcNode(_node: *mut PlanState) -> *mut Node {
+    unimplemented!()
+}
+pub unsafe fn ExecEndNode(_node: *mut PlanState) {
+    unimplemented!()
+}
+pub unsafe fn ExecShutdownNode(_node: *mut PlanState) {
+    unimplemented!()
+}
+pub unsafe fn ExecSetTupleBound(_tuples_needed: int64, _child_node: *mut PlanState) {
+    unimplemented!()
+}
+
+/* ----------------------------------------------------------------
+ *		ExecProcNode
+ *
+ *		Execute the given node to return a(nother) tuple.
+ * ----------------------------------------------------------------
+ */
+#[inline]
+pub unsafe fn ExecProcNode(node: *mut PlanState) -> *mut TupleTableSlot {
+    if !(*node).chgParam.is_null() {
+        /* something changed? */
+        ExecReScan(node); /* let ReScan handle this */
+    }
+
+    ((*node).ExecProcNode.expect("ExecProcNode method not set"))(node)
+}
+
+/*
+ * prototypes from functions in execExpr.c
+ */
+pub unsafe fn ExecInitExpr(_node: *mut Expr, _parent: *mut PlanState) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecInitExprWithParams(
+    _node: *mut Expr,
+    _ext_params: ParamListInfo,
+) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecInitQual(_qual: *mut List, _parent: *mut PlanState) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecInitCheck(_qual: *mut List, _parent: *mut PlanState) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecInitExprList(_nodes: *mut List, _parent: *mut PlanState) -> *mut List {
+    unimplemented!()
+}
+pub unsafe fn ExecBuildAggTrans(
+    _aggstate: *mut AggState,
+    _phase: *mut AggStatePerPhaseData,
+    _doSort: bool,
+    _doHash: bool,
+    _nullcheck: bool,
+) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecBuildHash32FromAttrs(
+    _desc: TupleDesc,
+    _ops: *const TupleTableSlotOps,
+    _hashfunctions: *mut FmgrInfo,
+    _collations: *mut Oid,
+    _numCols: c_int,
+    _keyColIdx: *mut AttrNumber,
+    _parent: *mut PlanState,
+    _init_value: uint32,
+) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecBuildHash32Expr(
+    _desc: TupleDesc,
+    _ops: *const TupleTableSlotOps,
+    _hashfunc_oids: *const Oid,
+    _collations: *const List,
+    _hash_exprs: *const List,
+    _opstrict: *const bool,
+    _parent: *mut PlanState,
+    _init_value: uint32,
+    _keep_nulls: bool,
+) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecBuildGroupingEqual(
+    _ldesc: TupleDesc,
+    _rdesc: TupleDesc,
+    _lops: *const TupleTableSlotOps,
+    _rops: *const TupleTableSlotOps,
+    _numCols: c_int,
+    _keyColIdx: *const AttrNumber,
+    _eqfunctions: *const Oid,
+    _collations: *const Oid,
+    _parent: *mut PlanState,
+) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecBuildParamSetEqual(
+    _desc: TupleDesc,
+    _lops: *const TupleTableSlotOps,
+    _rops: *const TupleTableSlotOps,
+    _eqfunctions: *const Oid,
+    _collations: *const Oid,
+    _param_exprs: *const List,
+    _parent: *mut PlanState,
+) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecBuildProjectionInfo(
+    _targetList: *mut List,
+    _econtext: *mut ExprContext,
+    _slot: *mut TupleTableSlot,
+    _parent: *mut PlanState,
+    _inputDesc: TupleDesc,
+) -> *mut ProjectionInfo {
+    unimplemented!()
+}
+pub unsafe fn ExecBuildUpdateProjection(
+    _targetList: *mut List,
+    _evalTargetList: bool,
+    _targetColnos: *mut List,
+    _relDesc: TupleDesc,
+    _econtext: *mut ExprContext,
+    _slot: *mut TupleTableSlot,
+    _parent: *mut PlanState,
+) -> *mut ProjectionInfo {
+    unimplemented!()
+}
+pub unsafe fn ExecPrepareExpr(_node: *mut Expr, _estate: *mut EState) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecPrepareQual(_qual: *mut List, _estate: *mut EState) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecPrepareCheck(_qual: *mut List, _estate: *mut EState) -> *mut ExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecPrepareExprList(_nodes: *mut List, _estate: *mut EState) -> *mut List {
+    unimplemented!()
+}
+
+/*
+ * ExecEvalExpr
+ *
+ * Evaluate expression identified by "state" in the execution context given by
+ * "econtext".
+ */
+#[inline]
+pub unsafe fn ExecEvalExpr(
+    state: *mut ExprState,
+    econtext: *mut ExprContext,
+    isNull: *mut bool,
+) -> Datum {
+    ((*state).evalfunc.expect("evalfunc not set"))(state, econtext, isNull)
+}
+
+/*
+ * ExecEvalExprNoReturn
+ *
+ * Like ExecEvalExpr(), but for cases where no return value is expected.
+ */
+#[inline]
+pub unsafe fn ExecEvalExprNoReturn(state: *mut ExprState, econtext: *mut ExprContext) {
+    let retDatum: Datum = ((*state).evalfunc.expect("evalfunc not set"))(
+        state,
+        econtext,
+        std::ptr::null_mut(),
+    );
+
+    debug_assert!(retDatum == 0 as Datum);
+    let _ = retDatum;
+}
+
+/*
+ * ExecEvalExprSwitchContext
+ *
+ * Same as ExecEvalExpr, but get into the right allocation context explicitly.
+ */
+#[inline]
+pub unsafe fn ExecEvalExprSwitchContext(
+    state: *mut ExprState,
+    econtext: *mut ExprContext,
+    isNull: *mut bool,
+) -> Datum {
+    // palloc's MemoryContextSwitchTo uses a distinct stub MemoryContextData from
+    // memnodes' (the ExprContext field type); cast the opaque pointers across.
+    // TODO(pg-port): drops out once task #8 unifies palloc/memnodes MemoryContext.
+    let oldContext = MemoryContextSwitchTo((*econtext).ecxt_per_tuple_memory as *mut _);
+    let retDatum: Datum = ((*state).evalfunc.expect("evalfunc not set"))(state, econtext, isNull);
+    MemoryContextSwitchTo(oldContext as *mut _);
+    retDatum
+}
+
+/*
+ * ExecEvalExprNoReturnSwitchContext
+ *
+ * Same as ExecEvalExprNoReturn, but get into the right allocation context.
+ */
+#[inline]
+pub unsafe fn ExecEvalExprNoReturnSwitchContext(
+    state: *mut ExprState,
+    econtext: *mut ExprContext,
+) {
+    // palloc's MemoryContextSwitchTo uses a distinct stub MemoryContextData from
+    // memnodes' (the ExprContext field type); cast the opaque pointers across.
+    // TODO(pg-port): drops out once task #8 unifies palloc/memnodes MemoryContext.
+    let oldContext = MemoryContextSwitchTo((*econtext).ecxt_per_tuple_memory as *mut _);
+    ExecEvalExprNoReturn(state, econtext);
+    MemoryContextSwitchTo(oldContext as *mut _);
+}
+
+/*
+ * ExecProject
+ *
+ * Projects a tuple based on projection info and stores it in the slot passed
+ * to ExecBuildProjectionInfo().
+ */
+#[inline]
+pub unsafe fn ExecProject(projInfo: *mut ProjectionInfo) -> *mut TupleTableSlot {
+    let econtext: *mut ExprContext = (*projInfo).pi_exprContext;
+    let state: *mut ExprState = &mut (*projInfo).pi_state;
+    let slot: *mut TupleTableSlot = (*state).resultslot;
+
+    /*
+     * Clear any former contents of the result slot.  This makes it safe for us
+     * to use the slot's Datum/isnull arrays as workspace.
+     */
+    ExecClearTuple(slot);
+
+    /* Run the expression */
+    ExecEvalExprNoReturnSwitchContext(state, econtext);
+
+    /*
+     * Successfully formed a result row.  Mark the result slot as containing a
+     * valid virtual tuple (inlined version of ExecStoreVirtualTuple()).
+     */
+    (*slot).tts_flags &= !TTS_FLAG_EMPTY;
+    (*slot).tts_nvalid = (*(*slot).tts_tupleDescriptor).natts as AttrNumber;
+
+    slot
+}
+
+/*
+ * ExecQual - evaluate a qual prepared with ExecInitQual (possibly via
+ * ExecPrepareQual).  Returns true if qual is satisfied, else false.
+ */
+#[inline]
+pub unsafe fn ExecQual(state: *mut ExprState, econtext: *mut ExprContext) -> bool {
+    /* short-circuit (here and in ExecInitQual) for empty restriction list */
+    if state.is_null() {
+        return true;
+    }
+
+    /* verify that expression was compiled using ExecInitQual */
+    debug_assert!((*state).flags & EEO_FLAG_IS_QUAL != 0);
+
+    let mut isnull: bool = false;
+    let ret: Datum = ExecEvalExprSwitchContext(state, econtext, &mut isnull);
+
+    /* EEOP_QUAL should never return NULL */
+    debug_assert!(!isnull);
+
+    DatumGetBool(ret)
+}
+
+/*
+ * ExecQualAndReset() - evaluate qual with ExecQual() and reset expression
+ * context.
+ */
+#[inline]
+pub unsafe fn ExecQualAndReset(state: *mut ExprState, econtext: *mut ExprContext) -> bool {
+    let ret: bool = ExecQual(state, econtext);
+
+    /* inline ResetExprContext, to avoid ordering issue in this file */
+    MemoryContextReset((*econtext).ecxt_per_tuple_memory as *mut _);
+    ret
+}
+
+pub unsafe fn ExecCheck(_state: *mut ExprState, _econtext: *mut ExprContext) -> bool {
+    unimplemented!()
+}
+
+/*
+ * prototypes from functions in execSRF.c
+ */
+pub unsafe fn ExecInitTableFunctionResult(
+    _expr: *mut Expr,
+    _econtext: *mut ExprContext,
+    _parent: *mut PlanState,
+) -> *mut SetExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecMakeTableFunctionResult(
+    _setexpr: *mut SetExprState,
+    _econtext: *mut ExprContext,
+    _argContext: MemoryContext,
+    _expectedDesc: TupleDesc,
+    _randomAccess: bool,
+) -> *mut Tuplestorestate {
+    unimplemented!()
+}
+pub unsafe fn ExecInitFunctionResultSet(
+    _expr: *mut Expr,
+    _econtext: *mut ExprContext,
+    _parent: *mut PlanState,
+) -> *mut SetExprState {
+    unimplemented!()
+}
+pub unsafe fn ExecMakeFunctionResultSet(
+    _fcache: *mut SetExprState,
+    _econtext: *mut ExprContext,
+    _argContext: MemoryContext,
+    _isNull: *mut bool,
+    _isDone: *mut ExprDoneCond,
+) -> Datum {
+    unimplemented!()
+}
+
+/*
+ * prototypes from functions in execScan.c
+ */
+pub type ExecScanAccessMtd =
+    Option<unsafe fn(node: *mut ScanState) -> *mut TupleTableSlot>;
+pub type ExecScanRecheckMtd =
+    Option<unsafe fn(node: *mut ScanState, slot: *mut TupleTableSlot) -> bool>;
+
+pub unsafe fn ExecScan(
+    _node: *mut ScanState,
+    _accessMtd: ExecScanAccessMtd,
+    _recheckMtd: ExecScanRecheckMtd,
+) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+pub unsafe fn ExecAssignScanProjectionInfo(_node: *mut ScanState) {
+    unimplemented!()
+}
+pub unsafe fn ExecAssignScanProjectionInfoWithVarno(_node: *mut ScanState, _varno: c_int) {
+    unimplemented!()
+}
+pub unsafe fn ExecScanReScan(_node: *mut ScanState) {
+    unimplemented!()
+}
+
+/*
+ * prototypes from functions in execTuples.c
+ */
+pub unsafe fn ExecInitResultTypeTL(_planstate: *mut PlanState) {
+    unimplemented!()
+}
+pub unsafe fn ExecInitResultSlot(
+    _planstate: *mut PlanState,
+    _tts_ops: *const TupleTableSlotOps,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecInitResultTupleSlotTL(
+    _planstate: *mut PlanState,
+    _tts_ops: *const TupleTableSlotOps,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecInitScanTupleSlot(
+    _estate: *mut EState,
+    _scanstate: *mut ScanState,
+    _tupledesc: TupleDesc,
+    _tts_ops: *const TupleTableSlotOps,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecInitExtraTupleSlot(
+    _estate: *mut EState,
+    _tupledesc: TupleDesc,
+    _tts_ops: *const TupleTableSlotOps,
+) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+pub unsafe fn ExecInitNullTupleSlot(
+    _estate: *mut EState,
+    _tupType: TupleDesc,
+    _tts_ops: *const TupleTableSlotOps,
+) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+pub unsafe fn ExecTypeFromTL(_targetList: *mut List) -> TupleDesc {
+    unimplemented!()
+}
+pub unsafe fn ExecCleanTypeFromTL(_targetList: *mut List) -> TupleDesc {
+    unimplemented!()
+}
+pub unsafe fn ExecTypeFromExprList(_exprList: *mut List) -> TupleDesc {
+    unimplemented!()
+}
+pub unsafe fn ExecTypeSetColNames(_typeInfo: TupleDesc, _namesList: *mut List) {
+    unimplemented!()
+}
+pub unsafe fn UpdateChangedParamSet(_node: *mut PlanState, _newchg: *mut Bitmapset) {
+    unimplemented!()
+}
+
+#[repr(C)]
+pub struct TupOutputState {
+    pub slot: *mut TupleTableSlot,
+    pub dest: *mut DestReceiver,
+}
+
+pub unsafe fn begin_tup_output_tupdesc(
+    _dest: *mut DestReceiver,
+    _tupdesc: TupleDesc,
+    _tts_ops: *const TupleTableSlotOps,
+) -> *mut TupOutputState {
+    unimplemented!()
+}
+pub unsafe fn do_tup_output(
+    _tstate: *mut TupOutputState,
+    _values: *const Datum,
+    _isnull: *const bool,
+) {
+    unimplemented!()
+}
+pub unsafe fn do_text_output_multiline(_tstate: *mut TupOutputState, _txt: *const c_char) {
+    unimplemented!()
+}
+pub unsafe fn end_tup_output(_tstate: *mut TupOutputState) {
+    unimplemented!()
+}
+
+/*
+ * Write a single line of text given as a C string.
+ *
+ * Should only be used with a single-TEXT-attribute tupdesc.
+ */
+#[inline]
+pub unsafe fn do_text_output_oneline(tstate: *mut TupOutputState, str_to_emit: *const c_char) {
+    let mut values_: [Datum; 1] = [0 as Datum; 1];
+    let mut isnull_: [bool; 1] = [false; 1];
+    values_[0] = PointerGetDatum(cstring_to_text(str_to_emit) as *const c_void);
+    isnull_[0] = false;
+    do_tup_output(tstate, values_.as_ptr(), isnull_.as_ptr());
+    pfree(DatumGetPointer(values_[0]) as *mut c_void);
+}
+
+/*
+ * prototypes from functions in execUtils.c
+ */
+pub unsafe fn CreateExecutorState() -> *mut EState {
+    unimplemented!()
+}
+pub unsafe fn FreeExecutorState(_estate: *mut EState) {
+    unimplemented!()
+}
+pub unsafe fn CreateExprContext(_estate: *mut EState) -> *mut ExprContext {
+    unimplemented!()
+}
+pub unsafe fn CreateWorkExprContext(_estate: *mut EState) -> *mut ExprContext {
+    unimplemented!()
+}
+pub unsafe fn CreateStandaloneExprContext() -> *mut ExprContext {
+    unimplemented!()
+}
+pub unsafe fn FreeExprContext(_econtext: *mut ExprContext, _isCommit: bool) {
+    unimplemented!()
+}
+pub unsafe fn ReScanExprContext(_econtext: *mut ExprContext) {
+    unimplemented!()
+}
+
+/* #define ResetExprContext(econtext)
+ *     MemoryContextReset((econtext)->ecxt_per_tuple_memory) */
+#[inline]
+pub unsafe fn ResetExprContext(econtext: *mut ExprContext) {
+    MemoryContextReset((*econtext).ecxt_per_tuple_memory as *mut _);
+}
+
+pub unsafe fn MakePerTupleExprContext(_estate: *mut EState) -> *mut ExprContext {
+    unimplemented!()
+}
+
+/* Get an EState's per-output-tuple exprcontext, making it if first use */
+#[inline]
+pub unsafe fn GetPerTupleExprContext(estate: *mut EState) -> *mut ExprContext {
+    if !(*estate).es_per_tuple_exprcontext.is_null() {
+        (*estate).es_per_tuple_exprcontext
+    } else {
+        MakePerTupleExprContext(estate)
+    }
+}
+
+#[inline]
+pub unsafe fn GetPerTupleMemoryContext(estate: *mut EState) -> MemoryContext {
+    (*GetPerTupleExprContext(estate)).ecxt_per_tuple_memory as *mut _
+}
+
+/* Reset an EState's per-output-tuple exprcontext, if one's been created */
+#[inline]
+pub unsafe fn ResetPerTupleExprContext(estate: *mut EState) {
+    if !(*estate).es_per_tuple_exprcontext.is_null() {
+        ResetExprContext((*estate).es_per_tuple_exprcontext);
+    }
+}
+
+pub unsafe fn ExecAssignExprContext(_estate: *mut EState, _planstate: *mut PlanState) {
+    unimplemented!()
+}
+pub unsafe fn ExecGetResultType(_planstate: *mut PlanState) -> TupleDesc {
+    unimplemented!()
+}
+pub unsafe fn ExecGetResultSlotOps(
+    _planstate: *mut PlanState,
+    _isfixed: *mut bool,
+) -> *const TupleTableSlotOps {
+    unimplemented!()
+}
+pub unsafe fn ExecGetCommonSlotOps(
+    _planstates: *mut *mut PlanState,
+    _nplans: c_int,
+) -> *const TupleTableSlotOps {
+    unimplemented!()
+}
+pub unsafe fn ExecGetCommonChildSlotOps(_ps: *mut PlanState) -> *const TupleTableSlotOps {
+    unimplemented!()
+}
+pub unsafe fn ExecAssignProjectionInfo(_planstate: *mut PlanState, _inputDesc: TupleDesc) {
+    unimplemented!()
+}
+pub unsafe fn ExecConditionalAssignProjectionInfo(
+    _planstate: *mut PlanState,
+    _inputDesc: TupleDesc,
+    _varno: c_int,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecAssignScanType(_scanstate: *mut ScanState, _tupDesc: TupleDesc) {
+    unimplemented!()
+}
+pub unsafe fn ExecCreateScanSlotFromOuterPlan(
+    _estate: *mut EState,
+    _scanstate: *mut ScanState,
+    _tts_ops: *const TupleTableSlotOps,
+) {
+    unimplemented!()
+}
+
+pub unsafe fn ExecRelationIsTargetRelation(_estate: *mut EState, _scanrelid: Index) -> bool {
+    unimplemented!()
+}
+
+pub unsafe fn ExecOpenScanRelation(
+    _estate: *mut EState,
+    _scanrelid: Index,
+    _eflags: c_int,
+) -> Relation {
+    unimplemented!()
+}
+
+pub unsafe fn ExecInitRangeTable(
+    _estate: *mut EState,
+    _rangeTable: *mut List,
+    _permInfos: *mut List,
+    _unpruned_relids: *mut Bitmapset,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecCloseRangeTableRelations(_estate: *mut EState) {
+    unimplemented!()
+}
+pub unsafe fn ExecCloseResultRelations(_estate: *mut EState) {
+    unimplemented!()
+}
+
+#[inline]
+pub unsafe fn exec_rt_fetch(rti: Index, estate: *mut EState) -> *mut RangeTblEntry {
+    list_nth((*estate).es_range_table, (rti as c_int) - 1) as *mut RangeTblEntry
+}
+
+pub unsafe fn ExecGetRangeTableRelation(
+    _estate: *mut EState,
+    _rti: Index,
+    _isResultRel: bool,
+) -> Relation {
+    unimplemented!()
+}
+pub unsafe fn ExecInitResultRelation(
+    _estate: *mut EState,
+    _resultRelInfo: *mut ResultRelInfo,
+    _rti: Index,
+) {
+    unimplemented!()
+}
+
+pub unsafe fn executor_errposition(_estate: *mut EState, _location: c_int) -> c_int {
+    unimplemented!()
+}
+
+pub unsafe fn RegisterExprContextCallback(
+    _econtext: *mut ExprContext,
+    _function: ExprContextCallbackFunction,
+    _arg: Datum,
+) {
+    unimplemented!()
+}
+pub unsafe fn UnregisterExprContextCallback(
+    _econtext: *mut ExprContext,
+    _function: ExprContextCallbackFunction,
+    _arg: Datum,
+) {
+    unimplemented!()
+}
+
+pub unsafe fn GetAttributeByName(
+    _tuple: HeapTupleHeader,
+    _attname: *const c_char,
+    _isNull: *mut bool,
+) -> Datum {
+    unimplemented!()
+}
+pub unsafe fn GetAttributeByNum(
+    _tuple: HeapTupleHeader,
+    _attrno: AttrNumber,
+    _isNull: *mut bool,
+) -> Datum {
+    unimplemented!()
+}
+
+pub unsafe fn ExecTargetListLength(_targetlist: *mut List) -> c_int {
+    unimplemented!()
+}
+pub unsafe fn ExecCleanTargetListLength(_targetlist: *mut List) -> c_int {
+    unimplemented!()
+}
+
+pub unsafe fn ExecGetTriggerOldSlot(
+    _estate: *mut EState,
+    _relInfo: *mut ResultRelInfo,
+) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+pub unsafe fn ExecGetTriggerNewSlot(
+    _estate: *mut EState,
+    _relInfo: *mut ResultRelInfo,
+) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+pub unsafe fn ExecGetReturningSlot(
+    _estate: *mut EState,
+    _relInfo: *mut ResultRelInfo,
+) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+pub unsafe fn ExecGetAllNullSlot(
+    _estate: *mut EState,
+    _relInfo: *mut ResultRelInfo,
+) -> *mut TupleTableSlot {
+    unimplemented!()
+}
+pub unsafe fn ExecGetChildToRootMap(
+    _resultRelInfo: *mut ResultRelInfo,
+) -> *mut TupleConversionMap {
+    unimplemented!()
+}
+pub unsafe fn ExecGetRootToChildMap(
+    _resultRelInfo: *mut ResultRelInfo,
+    _estate: *mut EState,
+) -> *mut TupleConversionMap {
+    unimplemented!()
+}
+
+pub unsafe fn ExecGetResultRelCheckAsUser(
+    _relInfo: *mut ResultRelInfo,
+    _estate: *mut EState,
+) -> Oid {
+    unimplemented!()
+}
+pub unsafe fn ExecGetInsertedCols(
+    _relinfo: *mut ResultRelInfo,
+    _estate: *mut EState,
+) -> *mut Bitmapset {
+    unimplemented!()
+}
+pub unsafe fn ExecGetUpdatedCols(
+    _relinfo: *mut ResultRelInfo,
+    _estate: *mut EState,
+) -> *mut Bitmapset {
+    unimplemented!()
+}
+pub unsafe fn ExecGetExtraUpdatedCols(
+    _relinfo: *mut ResultRelInfo,
+    _estate: *mut EState,
+) -> *mut Bitmapset {
+    unimplemented!()
+}
+pub unsafe fn ExecGetAllUpdatedCols(
+    _relinfo: *mut ResultRelInfo,
+    _estate: *mut EState,
+) -> *mut Bitmapset {
+    unimplemented!()
+}
+
+/*
+ * prototypes from functions in execIndexing.c
+ */
+pub unsafe fn ExecOpenIndices(_resultRelInfo: *mut ResultRelInfo, _speculative: bool) {
+    unimplemented!()
+}
+pub unsafe fn ExecCloseIndices(_resultRelInfo: *mut ResultRelInfo) {
+    unimplemented!()
+}
+pub unsafe fn ExecInsertIndexTuples(
+    _resultRelInfo: *mut ResultRelInfo,
+    _slot: *mut TupleTableSlot,
+    _estate: *mut EState,
+    _update: bool,
+    _noDupErr: bool,
+    _specConflict: *mut bool,
+    _arbiterIndexes: *mut List,
+    _onlySummarizing: bool,
+) -> *mut List {
+    unimplemented!()
+}
+pub unsafe fn ExecCheckIndexConstraints(
+    _resultRelInfo: *mut ResultRelInfo,
+    _slot: *mut TupleTableSlot,
+    _estate: *mut EState,
+    _conflictTid: ItemPointer,
+    _tupleid: ItemPointer,
+    _arbiterIndexes: *mut List,
+) -> bool {
+    unimplemented!()
+}
+pub unsafe fn check_exclusion_constraint(
+    _heap: Relation,
+    _index: Relation,
+    _indexInfo: *mut IndexInfo,
+    _tupleid: ItemPointer,
+    _values: *const Datum,
+    _isnull: *const bool,
+    _estate: *mut EState,
+    _newIndex: bool,
+) {
+    unimplemented!()
+}
+
+/*
+ * prototypes from functions in execReplication.c
+ */
+pub unsafe fn RelationFindReplTupleByIndex(
+    _rel: Relation,
+    _idxoid: Oid,
+    _lockmode: LockTupleMode,
+    _searchslot: *mut TupleTableSlot,
+    _outslot: *mut TupleTableSlot,
+) -> bool {
+    unimplemented!()
+}
+pub unsafe fn RelationFindReplTupleSeq(
+    _rel: Relation,
+    _lockmode: LockTupleMode,
+    _searchslot: *mut TupleTableSlot,
+    _outslot: *mut TupleTableSlot,
+) -> bool {
+    unimplemented!()
+}
+
+pub unsafe fn ExecSimpleRelationInsert(
+    _resultRelInfo: *mut ResultRelInfo,
+    _estate: *mut EState,
+    _slot: *mut TupleTableSlot,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecSimpleRelationUpdate(
+    _resultRelInfo: *mut ResultRelInfo,
+    _estate: *mut EState,
+    _epqstate: *mut EPQState,
+    _searchslot: *mut TupleTableSlot,
+    _slot: *mut TupleTableSlot,
+) {
+    unimplemented!()
+}
+pub unsafe fn ExecSimpleRelationDelete(
+    _resultRelInfo: *mut ResultRelInfo,
+    _estate: *mut EState,
+    _epqstate: *mut EPQState,
+    _searchslot: *mut TupleTableSlot,
+) {
+    unimplemented!()
+}
+pub unsafe fn CheckCmdReplicaIdentity(_rel: Relation, _cmd: CmdType) {
+    unimplemented!()
+}
+
+pub unsafe fn CheckSubscriptionRelkind(
+    _relkind: c_char,
+    _nspname: *const c_char,
+    _relname: *const c_char,
+) {
+    unimplemented!()
+}
+
+/*
+ * prototypes from functions in nodeModifyTable.c
+ * Real implementations live in executor::nodeModifyTable; re-export here.
+ */
+pub use crate::executor::nodeModifyTable::{ExecGetUpdateNewTuple, ExecLookupResultRelByOid};

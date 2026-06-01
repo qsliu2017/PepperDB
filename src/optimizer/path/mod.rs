@@ -1,0 +1,10 @@
+//! optimizer/path module
+pub mod costsize;
+pub mod equivclass;
+pub mod indxpath;
+pub mod allpaths;
+pub mod pathkeys;
+pub mod clausesel;
+pub mod joinrels;
+pub mod joinpath;
+pub mod tidpath;

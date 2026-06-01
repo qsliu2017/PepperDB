@@ -1,0 +1,20 @@
+[package]
+name = "pepperdb"
+version = "0.0.0"
+edition = "2021"
+description = "A 1:1 Rust translation of the PostgreSQL backend (src/ under postgres/)."
+license = "PostgreSQL"
+
+# PostgreSQL is a server; the crate root is a binary (src/main.rs). We deliberately
+# do NOT create src/lib.rs so that the `lib` PostgreSQL subsystem can live at
+# src/lib/mod.rs without colliding with an auto-detected library target.
+[[bin]]
+name = "postgres"
+path = "src/main.rs"
+
+[profile.dev]
+# PostgreSQL's Assert() maps to Rust debug_assert!, which is enabled here.
+panic = "unwind"
+
+[dependencies]
+libc = "0.2"
