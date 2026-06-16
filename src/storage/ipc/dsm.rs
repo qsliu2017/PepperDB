@@ -552,7 +552,11 @@ unsafe fn dsm_backend_startup() {
  * shared memory segment is re-attached, so that we can record the control
  * handle retrieved from it.
  */
-/* (EXEC_BACKEND-only dsm_set_control_handle omitted: non-EXEC_BACKEND build.) */
+#[cfg(EXEC_BACKEND)]
+pub unsafe fn dsm_set_control_handle(h: dsm_handle) {
+    Assert!(dsm_control_handle == 0 && h != 0);
+    dsm_control_handle = h;
+}
 
 /*
  * Reserve some space in the main shared memory segment for DSM segments.

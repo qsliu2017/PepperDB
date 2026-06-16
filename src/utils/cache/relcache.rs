@@ -805,8 +805,15 @@ unsafe fn GetTableAmRoutine(_handler: RegProcedure) -> TableAmRoutine {
 unsafe fn GetHeapamTableAmRoutine() -> TableAmRoutine {
     unimplemented!("TODO(pg-port): GetHeapamTableAmRoutine")
 }
-unsafe fn InitTableAmRoutine(_relation: Relation) {
-    unimplemented!("TODO(pg-port): InitTableAmRoutine (access/table/tableam.c not ported)")
+/*
+ * Fill in the TableAmRoutine for a relation
+ *
+ * relation's rd_amhandler must be valid already.
+ */
+unsafe fn InitTableAmRoutine(relation: Relation) {
+    (*relation).rd_tableam =
+        crate::access::table::tableamapi::GetTableAmRoutine((*relation).rd_amhandler)
+            as *const c_void;
 }
 // RelationGetIndexAttOptions stub removed -- real impl in Part 8 below.
 unsafe fn index_opclass_options(

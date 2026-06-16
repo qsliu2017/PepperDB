@@ -10,9 +10,25 @@
 //! Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
 //! Portions Copyright (c) 1994, Regents of the University of California
 
-use crate::c::{int16, int32};
-use crate::postgres_ext::Oid;
-use core::ffi::c_char;
+use crate::c::{int16, int32, OidIsValid};
+use crate::postgres_ext::{InvalidOid, Oid};
+use core::ffi::{c_char, c_int};
+
+use crate::nodes::pg_list::List;
+use crate::nodes::parsenodes::{ObjectType::OBJECT_FUNCTION, ACL_EXECUTE};
+use crate::catalog::pg_type_d::ANYOID;
+use crate::catalog::catalog_oids::ProcedureRelationId;
+use crate::catalog::aclchk::{aclcheck_error, object_aclcheck};
+use crate::utils::adt::acl::{AclResult, AclResult::ACLCHECK_OK};
+use crate::utils::elog::ERROR;
+use crate::parser::parse_func::{func_get_detail, func_signature_string, FuncDetailCode,
+                                FUNCDETAIL_NORMAL};
+use crate::parser::parse_coerce::{enforce_generic_type_consistency, IsBinaryCoercible};
+use crate::utils::cache::lsyscache::get_func_name;
+use crate::miscadmin::GetUserId;
+use crate::{ereport, errmsg};
+
+const NIL: *mut List = core::ptr::null_mut();
 
 /* regproc is a C typedef for Oid (a registered-procedure OID). */
 pub type regproc = Oid;
@@ -109,6 +125,127 @@ pub fn AGGKIND_IS_ORDERED_SET(kind: c_char) -> bool {
 pub const AGGMODIFY_READ_ONLY: c_char = b'r' as c_char;
 pub const AGGMODIFY_SHAREABLE: c_char = b's' as c_char;
 pub const AGGMODIFY_READ_WRITE: c_char = b'w' as c_char;
+
+unsafe fn cstr_to_str(s: *const c_char) -> std::borrow::Cow<'static, str> {
+    std::ffi::CStr::from_ptr(s).to_string_lossy()
+}
+
+/*
+ * lookup_agg_function
+ * common code for finding aggregate support functions
+ *
+ * fnName: possibly-schema-qualified function name
+ * nargs, input_types: expected function argument types
+ * variadicArgType: type of variadic argument if any, else InvalidOid
+ *
+ * Returns OID of function, and stores its return type into *rettype
+ *
+ * NB: must not scribble on input_types[], as we may re-use those
+ */
+unsafe fn lookup_agg_function(
+    fnName: *mut List,
+    nargs: c_int,
+    input_types: *mut Oid,
+    variadicArgType: Oid,
+    rettype: *mut Oid,
+) -> Oid {
+    let fnOid: Oid;
+    let mut retset: bool = false;
+    let mut nvargs: c_int = 0;
+    let mut vatype: Oid = InvalidOid;
+    let mut true_oid_array: *mut Oid = core::ptr::null_mut();
+    let fdresult: FuncDetailCode;
+    let aclresult: AclResult;
+    let mut fnOid_local: Oid = InvalidOid;
+    let i: c_int;
+
+    /*
+     * func_get_detail looks up the function in the catalogs, does
+     * disambiguation for polymorphic functions, handles inheritance, and
+     * returns the funcid and type and set or singleton status of the
+     * function's return value.  it also returns the true argument types to
+     * the function.
+     */
+    fdresult = func_get_detail(fnName, NIL, NIL,
+                               nargs, input_types, false, false, false,
+                               &mut fnOid_local, rettype, &mut retset,
+                               &mut nvargs, &mut vatype,
+                               &mut true_oid_array, core::ptr::null_mut());
+    fnOid = fnOid_local;
+
+    /* only valid case is a normal function not returning a set */
+    if fdresult != FUNCDETAIL_NORMAL || !OidIsValid(fnOid) {
+        ereport!(ERROR,
+            errmsg!("function {} does not exist",
+                    cstr_to_str(func_signature_string(fnName, nargs,
+                                                      NIL, input_types)))
+            /* C also: errcode(ERRCODE_UNDEFINED_FUNCTION) */
+        );
+    }
+    if retset {
+        ereport!(ERROR,
+            errmsg!("function {} returns a set",
+                    cstr_to_str(func_signature_string(fnName, nargs,
+                                                      NIL, input_types)))
+            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH) */
+        );
+    }
+
+    /*
+     * If the agg is declared to take VARIADIC ANY, the underlying functions
+     * had better be declared that way too, else they may receive too many
+     * parameters; but func_get_detail would have been happy with plain ANY.
+     * (Probably nothing very bad would happen, but it wouldn't work as the
+     * user expects.)  Other combinations should work without any special
+     * pushups, given that we told func_get_detail not to expand VARIADIC.
+     */
+    if variadicArgType == ANYOID && vatype != ANYOID {
+        ereport!(ERROR,
+            errmsg!("function {} must accept VARIADIC ANY to be used in this aggregate",
+                    cstr_to_str(func_signature_string(fnName, nargs,
+                                                      NIL, input_types)))
+            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH) */
+        );
+    }
+
+    /*
+     * If there are any polymorphic types involved, enforce consistency, and
+     * possibly refine the result type.  It's OK if the result is still
+     * polymorphic at this point, though.
+     */
+    *rettype = enforce_generic_type_consistency(input_types,
+                                                true_oid_array,
+                                                nargs,
+                                                *rettype,
+                                                true);
+
+    /*
+     * func_get_detail will find functions requiring run-time argument type
+     * coercion, but nodeAgg.c isn't prepared to deal with that
+     */
+    i = 0;
+    let mut i = i;
+    while i < nargs {
+        let idx = i as usize;
+        if !IsBinaryCoercible(*input_types.add(idx), *true_oid_array.add(idx)) {
+            ereport!(ERROR,
+                errmsg!("function {} requires run-time type coercion",
+                        cstr_to_str(func_signature_string(fnName, nargs,
+                                                          NIL, true_oid_array)))
+                /* C also: errcode(ERRCODE_DATATYPE_MISMATCH) */
+            );
+        }
+        i += 1;
+    }
+
+    /* Check aggregate creator has permission to call the function */
+    aclresult = object_aclcheck(ProcedureRelationId, fnOid, GetUserId(), ACL_EXECUTE);
+    if aclresult != ACLCHECK_OK {
+        aclcheck_error(aclresult, OBJECT_FUNCTION, get_func_name(fnOid));
+    }
+
+    fnOid
+}
 
 #[cfg(test)]
 mod tests {

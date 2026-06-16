@@ -2820,6 +2820,13 @@ unsafe fn view_has_instead_trigger_impl(
  * The returned string has not been translated; if it is shown as an error
  * message, the caller should apply _() to translate it.
  */
+unsafe fn view_col_is_auto_updatable(
+    rtr: *mut RangeTblRef,
+    tle: *mut TargetEntry,
+) -> *const c_char {
+    view_col_is_auto_updatable_impl(rtr, tle)
+}
+
 unsafe fn view_col_is_auto_updatable_impl(
     rtr: *mut RangeTblRef,
     tle: *mut TargetEntry,
@@ -3023,6 +3030,15 @@ unsafe fn view_query_is_auto_updatable_impl(
  *
  * The returned string has not been translated.
  */
+unsafe fn view_cols_are_auto_updatable(
+    viewquery: *mut Query,
+    required_cols: *mut Bitmapset,
+    updatable_cols: *mut *mut Bitmapset,
+    non_updatable_col: *mut *mut c_char,
+) -> *const c_char {
+    view_cols_are_auto_updatable_impl(viewquery, required_cols, updatable_cols, non_updatable_col)
+}
+
 unsafe fn view_cols_are_auto_updatable_impl(
     viewquery: *mut Query,
     required_cols: *mut Bitmapset,
@@ -3259,6 +3275,13 @@ pub unsafe fn relation_is_updatable(
  * This is used with simply-updatable views to map column-permissions sets for
  * the view columns onto the matching columns in the underlying base relation.
  */
+unsafe fn adjust_view_column_set(
+    cols: *mut Bitmapset,
+    targetlist: *mut List,
+) -> *mut Bitmapset {
+    adjust_view_column_set_impl(cols, targetlist)
+}
+
 unsafe fn adjust_view_column_set_impl(
     cols: *mut Bitmapset,
     targetlist: *mut List,

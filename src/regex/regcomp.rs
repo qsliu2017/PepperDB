@@ -2386,6 +2386,45 @@ unsafe extern "C" fn rstacktoodeep() -> c_int {
     stack_is_too_deep() as c_int
 }
 
+// #ifdef REG_DEBUG
+// The following dump routines are only compiled when REG_DEBUG is defined,
+// which this port never does.  They are translated as no-op bodies to match
+// the sibling REG_DEBUG dump functions in regc_nfa.rs.
+
+/*
+ * dump - dump an RE in human-readable form
+ */
+unsafe fn dump(re: *mut regex_t, f: *mut c_void) {
+    let _ = (re, f);
+    // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
+}
+
+/*
+ * dumpst - dump a subRE tree
+ */
+unsafe fn dumpst(t: *mut subre, f: *mut c_void, nfapresent: c_int) {
+    let _ = (t, f, nfapresent);
+    // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
+}
+
+/*
+ * stdump - recursive guts of dumpst
+ */
+unsafe fn stdump(t: *mut subre, f: *mut c_void, nfapresent: c_int) {
+    let _ = (t, f, nfapresent);
+    // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
+}
+
+/*
+ * stid - identify a subtree node for dumping
+ */
+unsafe fn stid(t: *mut subre, buf: *mut c_char, bufsize: usize) -> *const c_char {
+    let _ = (t, buf, bufsize);
+    // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
+    std::ptr::null()
+}
+// #endif /* REG_DEBUG */
+
 // ---------------------------------------------------------------------------
 // Cross-module dependencies.
 //

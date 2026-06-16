@@ -80,6 +80,10 @@ use crate::lib::ilist::{
 };
 use crate::{dlist_container, dlist_foreach, dlist_foreach_modify};
 use core::ffi::{c_char, c_int, c_void};
+// elog.rs: WARNING level + the crate-wide `elog!` macro (used only under the
+// `memory_context_checking` feature by GenerationCheck).
+#[cfg(feature = "memory_context_checking")]
+use crate::utils::elog::WARNING;
 // `Assert!` and `IsA!` are brought into scope crate-wide via #[macro_use].
 
 // generation.c uses raw malloc/free/realloc for its blocks.
@@ -1192,14 +1196,178 @@ pub unsafe fn GenerationStats(
 // find yourself in an infinite loop when trouble occurs, because this
 // routine will be entered again when elog cleanup tries to release memory!
 //
-// TODO(pg-port): translate GenerationCheck under a cfg gating
-// MEMORY_CONTEXT_CHECKING. It walks every block's chunk chain validating
-// nfree<=nchunks, block->context==gen, per-chunk block links, chunk sizes,
-// requested_size/sentinels (sentinel_ok), that at most one external chunk lives
-// on a dedicated block, and that total_allocated == context->mem_allocated.
-// Omitted here because the default build (no MEMORY_CONTEXT_CHECKING) never
-// compiles it, and it depends on the not-yet-modeled requested_size field and
-// set_sentinel/sentinel_ok helpers.
+// Gated under MEMORY_CONTEXT_CHECKING (modeled here as the `memory_context_checking`
+// cargo feature, matching the sibling *Check fns). It depends on the checking-only
+// `requested_size` field on MemoryChunk and on `sentinel_ok` (both compiled only when
+// the feature is on); a local cfg-gated `sentinel_ok` stub is provided below so the
+// body stays self-consistent.
+//
+// NOTE: report errors as WARNING, *not* ERROR or FATAL.  Otherwise you'll
+// find yourself in an infinite loop when trouble occurs, because this
+// routine will be entered again when elog cleanup tries to release memory!
+//
+/// `GenerationCheck`
+///		Walk through chunks and check consistency of memory.
+///
+/// # Safety
+/// `context` must be a live `GenerationContext` MemoryContext.
+#[cfg(feature = "memory_context_checking")]
+pub unsafe fn GenerationCheck(context: MemoryContext) {
+    let gen: *mut GenerationContext = context as *mut GenerationContext;
+    let name: *const c_char = (*context).name;
+    let mut total_allocated: Size = 0;
+
+    // walk all blocks in this context
+    dlist_foreach!(iter, &mut (*gen).blocks, {
+        let block: *mut GenerationBlock = dlist_container!(GenerationBlock, node, iter.cur);
+        let mut nfree: c_int;
+        let mut nchunks: c_int;
+        let mut ptr: *mut c_char;
+        let mut has_external_chunk: bool = false;
+
+        total_allocated += (*block).blksize;
+
+        // nfree > nchunks is surely wrong.  Equality is allowed as the block
+        // might completely empty if it's the freeblock.
+        if (*block).nfree > (*block).nchunks {
+            elog!(
+                WARNING,
+                "problem in Generation {}: number of free chunks {} in block {:p} exceeds {} allocated",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                (*block).nfree,
+                block,
+                (*block).nchunks
+            );
+        }
+
+        // check block belongs to the correct context
+        if (*block).context != gen {
+            elog!(
+                WARNING,
+                "problem in Generation {}: bogus context link in block {:p}",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                block
+            );
+        }
+
+        // Now walk through the chunks and count them.
+        nfree = 0;
+        nchunks = 0;
+        ptr = (block as *mut u8).add(Generation_BLOCKHDRSZ) as *mut c_char;
+
+        while ptr < (*block).freeptr {
+            let chunk: *mut MemoryChunk = ptr as *mut MemoryChunk;
+            let chunkblock: *mut GenerationBlock;
+            let chunksize: Size;
+
+            // Allow access to the chunk header.
+            // VALGRIND_MAKE_MEM_DEFINED(chunk, Generation_CHUNKHDRSZ);
+
+            if MemoryChunkIsExternal(chunk) {
+                chunkblock = ExternalChunkGetBlock(chunk);
+                chunksize = ((*block).endptr as usize)
+                    .wrapping_sub(MemoryChunkGetPointer(chunk) as usize)
+                    as Size;
+                has_external_chunk = true;
+            } else {
+                chunkblock = MemoryChunkGetBlock(chunk) as *mut GenerationBlock;
+                chunksize = MemoryChunkGetValue(chunk);
+            }
+
+            // move to the next chunk
+            ptr = (ptr as *mut u8).add(chunksize + Generation_CHUNKHDRSZ) as *mut c_char;
+
+            nchunks += 1;
+
+            // chunks have both block and context pointers, so check both
+            if chunkblock != block {
+                elog!(
+                    WARNING,
+                    "problem in Generation {}: bogus block link in block {:p}, chunk {:p}",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    block,
+                    chunk
+                );
+            }
+
+            // is chunk allocated?
+            if (*chunk).requested_size != InvalidAllocSize {
+                // now make sure the chunk size is correct
+                if chunksize < (*chunk).requested_size || chunksize != MAXALIGN(chunksize) {
+                    elog!(
+                        WARNING,
+                        "problem in Generation {}: bogus chunk size in block {:p}, chunk {:p}",
+                        std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                        block,
+                        chunk
+                    );
+                }
+
+                // check sentinel
+                Assert!((*chunk).requested_size < chunksize);
+                if !sentinel_ok(chunk as *const c_void, Generation_CHUNKHDRSZ + (*chunk).requested_size) {
+                    elog!(
+                        WARNING,
+                        "problem in Generation {}: detected write past chunk end in block {:p}, chunk {:p}",
+                        std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                        block,
+                        chunk
+                    );
+                }
+            } else {
+                nfree += 1;
+            }
+
+            // if chunk is allocated, disallow access to the chunk header
+            if (*chunk).requested_size != InvalidAllocSize {
+                // VALGRIND_MAKE_MEM_NOACCESS(chunk, Generation_CHUNKHDRSZ);
+            }
+        }
+
+        // Make sure we got the expected number of allocated and free chunks
+        // (as tracked in the block header).
+        if nchunks != (*block).nchunks {
+            elog!(
+                WARNING,
+                "problem in Generation {}: number of allocated chunks {} in block {:p} does not match header {}",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                nchunks,
+                block,
+                (*block).nchunks
+            );
+        }
+
+        if nfree != (*block).nfree {
+            elog!(
+                WARNING,
+                "problem in Generation {}: number of free chunks {} in block {:p} does not match header {}",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                nfree,
+                block,
+                (*block).nfree
+            );
+        }
+
+        if has_external_chunk && nchunks > 1 {
+            elog!(
+                WARNING,
+                "problem in Generation {}: external chunk on non-dedicated block {:p}",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                block
+            );
+        }
+    });
+
+    Assert!(total_allocated == (*context).mem_allocated);
+}
+
+// TODO(pg-port): `sentinel_ok` (mcxt.c, MEMORY_CONTEXT_CHECKING-only) is not yet
+// ported anywhere in src/; provide a local cfg-gated stub so GenerationCheck stays
+// self-consistent. Replace with an import once the real fn lands.
+#[cfg(feature = "memory_context_checking")]
+unsafe fn sentinel_ok(_base: *const c_void, _offset: Size) -> bool {
+    true
+}
 // #endif							/* MEMORY_CONTEXT_CHECKING */
 
 // =============================================================================

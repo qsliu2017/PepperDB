@@ -106,8 +106,8 @@ use crate::lib::ilist::{
 use core::ffi::{c_char, c_int, c_void};
 // #[macro_export] macros live at the crate root and must be imported by name.
 use crate::{
-    dclist_container, dclist_foreach_modify, dlist_container, dlist_foreach, dlist_foreach_modify,
-    dlist_head_element,
+    dclist_container, dclist_foreach, dclist_foreach_modify, dlist_container, dlist_foreach,
+    dlist_foreach_modify, dlist_head_element, elog,
 };
 
 // slab.c uses raw malloc/free for its blocks and context header.
@@ -167,8 +167,9 @@ pub struct SlabContext {
     //     bool	   *isChunkFree;	/* array to mark free chunks in a block during
     //                                  * SlabCheck */
     // #endif
-    // TODO(pg-port): add `isChunkFree: *mut bool` under a cfg when
-    // MEMORY_CONTEXT_CHECKING is modeled.
+    /// array to mark free chunks in a block during SlabCheck
+    #[cfg(feature = "memory_context_checking")]
+    isChunkFree: *mut bool,
     /// number of bits to shift the nfree count by to get the index into blocklist[]
     blocklist_shift: int32,
     /// empty blocks to use up first instead of mallocing new blocks
@@ -256,6 +257,20 @@ unsafe fn SlabBlockGetChunk(slab: *mut SlabContext, block: *mut SlabBlock, n: in
 // Provided here so the Assert!()s below can reference them; under USE_ASSERT
 // they would be live, but our Assert! is a debug-only check.
 // TODO(pg-port): gate on USE_ASSERT_CHECKING / MEMORY_CONTEXT_CHECKING.
+
+/// `SlabChunkIndex(slab, block, chunk)` - 0-based index of how many chunks into
+/// the block the given chunk is.
+///
+/// # Safety
+/// `slab`/`block`/`chunk` must all be live and belong together.
+#[cfg(feature = "memory_context_checking")]
+#[inline]
+unsafe fn SlabChunkIndex(slab: *mut SlabContext, block: *mut SlabBlock, chunk: *mut MemoryChunk) -> c_int {
+    // C pointer subtraction; mirror with usize wrapping_sub.
+    (((chunk as *mut c_char as usize)
+        .wrapping_sub(SlabBlockGetChunk(slab, block, 0) as *mut c_char as usize))
+        / ((*slab).fullChunkSize as usize)) as c_int
+}
 
 /// `SlabChunkMod(slab, block, chunk)` - non-zero iff `chunk` is not aligned to a
 /// fullChunkSize boundary from the 0th chunk.
@@ -1097,21 +1112,238 @@ pub unsafe fn SlabStats(
 }
 
 // #ifdef MEMORY_CONTEXT_CHECKING
-//
-// SlabCheck
-//		Walk through all blocks looking for inconsistencies.
-//
-// NOTE: report errors as WARNING, *not* ERROR or FATAL.  Otherwise you'll
-// find yourself in an infinite loop when trouble occurs, because this
-// routine will be entered again when elog cleanup tries to release memory!
-//
-// TODO(pg-port): translate SlabCheck under a cfg gating MEMORY_CONTEXT_CHECKING.
-// It walks the emptyblocks list and every blocklist verifying nfree matches the
-// blocklist index, the slab back-pointer, the freehead/unused chains, block
-// offsets, and sentinels (sentinel_ok), and that nblocks * blockSize ==
-// context->mem_allocated. It uses the isChunkFree[] scratch array (sized by
-// chunksPerBlock) and the SlabChunkIndex helper, neither of which is compiled in
-// the default (no MEMORY_CONTEXT_CHECKING) build, so it is omitted here.
+
+/// `sentinel_ok` (memdebug.h) - check the sentinel byte at `offset` past `base`
+/// is intact.  Only compiled in MEMORY_CONTEXT_CHECKING builds.
+///
+/// TODO(pg-port): import the real `sentinel_ok` from memdebug once that header is
+/// ported; stubbed locally as a genuinely-unported MEMORY_CONTEXT_CHECKING dep.
+#[cfg(feature = "memory_context_checking")]
+unsafe fn sentinel_ok(_base: *const c_void, _offset: Size) -> bool {
+    true
+}
+
+/// SlabCheck
+///		Walk through all blocks looking for inconsistencies.
+///
+/// NOTE: report errors as WARNING, *not* ERROR or FATAL.  Otherwise you'll
+/// find yourself in an infinite loop when trouble occurs, because this
+/// routine will be entered again when elog cleanup tries to release memory!
+///
+/// # Safety
+/// `context` must be a valid SlabContext.
+#[cfg(feature = "memory_context_checking")]
+pub unsafe fn SlabCheck(context: MemoryContext) {
+    let slab: *mut SlabContext = context as *mut SlabContext;
+    let i: c_int;
+    let mut nblocks: c_int = 0;
+    let name: *const c_char = (*slab).header.name;
+    let mut iter: dlist_iter = core::mem::zeroed();
+
+    Assert!(SlabIsValid(slab));
+    Assert!((*slab).chunksPerBlock > 0);
+
+    // Have a look at the empty blocks.  These should have all their chunks
+    // marked as free.  Ensure that's the case.
+    crate::dclist_foreach!(iter, &mut (*slab).emptyblocks, {
+        let block: *mut SlabBlock = dlist_container!(SlabBlock, node, iter.cur);
+
+        if (*block).nfree != (*slab).chunksPerBlock {
+            elog!(
+                crate::utils::elog::WARNING,
+                "problem in slab {}: empty block {:p} should have {} free chunks but has {} chunks free",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                block,
+                (*slab).chunksPerBlock,
+                (*block).nfree
+            );
+        }
+    });
+
+    // walk the non-empty block lists
+    let mut i_loop: c_int = 0;
+    let _ = i;
+    while i_loop < SLAB_BLOCKLIST_COUNT as c_int {
+        let i = i_loop;
+        let j: c_int;
+        let mut nfree: c_int;
+
+        // walk all blocks on this blocklist
+        crate::dlist_foreach!(iter, &mut (*slab).blocklist[i as usize], {
+            let block: *mut SlabBlock = dlist_container!(SlabBlock, node, iter.cur);
+            let mut cur_chunk: *mut MemoryChunk;
+
+            // Make sure the number of free chunks (in the block header)
+            // matches the position in the blocklist.
+            if SlabBlocklistIndex(slab, (*block).nfree) != i {
+                elog!(
+                    crate::utils::elog::WARNING,
+                    "problem in slab {}: block {:p} is on blocklist {} but should be on blocklist {}",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    block,
+                    i,
+                    SlabBlocklistIndex(slab, (*block).nfree)
+                );
+            }
+
+            // make sure the block is not empty
+            if (*block).nfree >= (*slab).chunksPerBlock {
+                elog!(
+                    crate::utils::elog::WARNING,
+                    "problem in slab {}: empty block {:p} incorrectly stored on blocklist element {}",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    block,
+                    i
+                );
+            }
+
+            // make sure the slab pointer correctly points to this context
+            if (*block).slab != slab {
+                elog!(
+                    crate::utils::elog::WARNING,
+                    "problem in slab {}: bogus slab link in block {:p}",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    block
+                );
+            }
+
+            // reset the array of free chunks for this block
+            std::ptr::write_bytes(
+                (*slab).isChunkFree,
+                0,
+                (*slab).chunksPerBlock as usize,
+            );
+            nfree = 0;
+
+            // walk through the block's free list chunks
+            cur_chunk = (*block).freehead;
+            while !cur_chunk.is_null() {
+                let chunkidx: c_int = SlabChunkIndex(slab, block, cur_chunk);
+
+                // Ensure the free list link points to something on the block
+                // at an address aligned according to the full chunk size.
+                if cur_chunk < SlabBlockGetChunk(slab, block, 0)
+                    || cur_chunk > SlabBlockGetChunk(slab, block, (*slab).chunksPerBlock - 1)
+                    || SlabChunkMod(slab, block, cur_chunk) != 0
+                {
+                    elog!(
+                        crate::utils::elog::WARNING,
+                        "problem in slab {}: bogus free list link {:p} in block {:p}",
+                        std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                        cur_chunk,
+                        block
+                    );
+                }
+
+                // count the chunk and mark it free on the free chunk array
+                nfree += 1;
+                *(*slab).isChunkFree.add(chunkidx as usize) = true;
+
+                // read pointer of the next free chunk
+                // VALGRIND_MAKE_MEM_DEFINED(MemoryChunkGetPointer(cur_chunk), sizeof(MemoryChunk *));
+                cur_chunk = *(SlabChunkGetPointer(cur_chunk) as *mut *mut MemoryChunk);
+            }
+
+            // check that the unused pointer matches what nunused claims
+            if SlabBlockGetChunk(slab, block, (*slab).chunksPerBlock - (*block).nunused)
+                != (*block).unused
+            {
+                elog!(
+                    crate::utils::elog::WARNING,
+                    "problem in slab {}: mismatch detected between nunused chunks and unused pointer in block {:p}",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    block
+                );
+            }
+
+            // count the remaining free chunks that have yet to make it onto
+            // the block's free list.
+            cur_chunk = (*block).unused;
+            let mut j_loop: c_int = 0;
+            let _ = j;
+            while j_loop < (*block).nunused {
+                let chunkidx: c_int = SlabChunkIndex(slab, block, cur_chunk);
+
+                // count the chunk as free and mark it as so in the array
+                nfree += 1;
+                if chunkidx < (*slab).chunksPerBlock {
+                    *(*slab).isChunkFree.add(chunkidx as usize) = true;
+                }
+
+                // move forward 1 chunk
+                cur_chunk = ((cur_chunk as *mut c_char).add((*slab).fullChunkSize as usize))
+                    as *mut MemoryChunk;
+                j_loop += 1;
+            }
+
+            let mut j_loop2: c_int = 0;
+            while j_loop2 < (*slab).chunksPerBlock {
+                if !(*(*slab).isChunkFree.add(j_loop2 as usize)) {
+                    let chunk: *mut MemoryChunk = SlabBlockGetChunk(slab, block, j_loop2);
+                    let chunkblock: *mut SlabBlock;
+
+                    // Allow access to the chunk header.
+                    // VALGRIND_MAKE_MEM_DEFINED(chunk, Slab_CHUNKHDRSZ);
+
+                    chunkblock = MemoryChunkGetBlock(chunk) as *mut SlabBlock;
+
+                    // Disallow access to the chunk header.
+                    // VALGRIND_MAKE_MEM_NOACCESS(chunk, Slab_CHUNKHDRSZ);
+
+                    // check the chunk's blockoffset correctly points back to
+                    // the block
+                    if chunkblock != block {
+                        elog!(
+                            crate::utils::elog::WARNING,
+                            "problem in slab {}: bogus block link in block {:p}, chunk {:p}",
+                            std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                            block,
+                            chunk
+                        );
+                    }
+
+                    // check the sentinel byte is intact
+                    Assert!((*slab).chunkSize < ((*slab).fullChunkSize - Slab_CHUNKHDRSZ as uint32));
+                    if !sentinel_ok(
+                        chunk as *const c_void,
+                        Slab_CHUNKHDRSZ + (*slab).chunkSize as Size,
+                    ) {
+                        elog!(
+                            crate::utils::elog::WARNING,
+                            "problem in slab {}: detected write past chunk end in block {:p}, chunk {:p}",
+                            std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                            block,
+                            chunk
+                        );
+                    }
+                }
+                j_loop2 += 1;
+            }
+
+            // Make sure we got the expected number of free chunks (as tracked
+            // in the block header).
+            if nfree != (*block).nfree {
+                elog!(
+                    crate::utils::elog::WARNING,
+                    "problem in slab {}: nfree in block {:p} is {} but {} chunk were found as free",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    block,
+                    (*block).nfree,
+                    nfree
+                );
+            }
+
+            nblocks += 1;
+        });
+        i_loop += 1;
+    }
+
+    // the stored empty blocks are tracked in mem_allocated too
+    nblocks += dclist_count(&(*slab).emptyblocks) as c_int;
+
+    Assert!((nblocks as Size) * (*slab).blockSize as Size == (*context).mem_allocated as Size);
+}
+
 // #endif							/* MEMORY_CONTEXT_CHECKING */
 
 // =============================================================================

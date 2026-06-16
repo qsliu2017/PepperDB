@@ -82,7 +82,27 @@ use crate::nodes::primnodes::{
 };
 use crate::nodes::equalfuncs::equal;
 use crate::postgres_ext::{Oid, InvalidOid};
-use crate::{Assert, IsA};
+use crate::{foreach, Assert, IsA};
+
+use crate::c::{uint32, Size};
+use crate::access::cmptype::CompareType;
+use crate::access::cmptype::{COMPARE_EQ, COMPARE_GE, COMPARE_GT, COMPARE_LE, COMPARE_LT, COMPARE_NE};
+use crate::catalog::pg_proc::PROVOLATILE_IMMUTABLE;
+use crate::executor::executor::{
+    CreateExecutorState, ExecEvalExprSwitchContext, ExecInitExpr, FreeExecutorState,
+    GetPerTupleExprContext,
+};
+use crate::nodes::makefuncs::make_opclause;
+use crate::nodes::nodeFuncs::fix_opfuncids;
+use crate::nodes::pg_list::{lfirst, linitial, list_free_deep};
+use crate::utils::cache::lsyscache::{
+    func_strict, get_commutator, get_negator, get_op_index_interpretation,
+    get_opfamily_member_for_cmptype, op_strict, op_volatile, OpIndexInterpretation,
+};
+use crate::utils::hash::dynahash::{
+    hash_create, hash_search, hash_seq_init, hash_seq_search, HASHCTL, HASH_BLOBS, HASH_ELEM,
+    HASH_ENTER, HASH_SEQ_STATUS, HTAB,
+};
 
 /*
  * Proof attempts involving large arrays in ScalarArrayOpExpr nodes are
@@ -143,24 +163,6 @@ unsafe fn is_notclause(clause: *const c_void) -> bool {
 unsafe fn get_notclausearg(notclause: *const c_void) -> *mut Expr {
     let b = notclause as *const BoolExpr;
     crate::nodes::pg_list::linitial((*b).args) as *mut Expr
-}
-
-/*
- * ---------------------------------------------------------------------------
- * lsyscache.h shims (STUB).  These require syscache/pg_proc/pg_operator, none
- * of which are ported yet.  The conservative answers keep every proof SOUND:
- *   op_strict/func_strict = false  -> clause_is_strict_for fails to prove
- *   get_commutator/get_negator = InvalidOid -> operator proofs bail out
- * TODO(pg-port): replace with crate::utils::lsyscache once it lands.
- * ---------------------------------------------------------------------------
- */
-#[inline]
-unsafe fn op_strict(_opno: Oid) -> bool {
-    false
-}
-#[inline]
-unsafe fn func_strict(_funcid: Oid) -> bool {
-    false
 }
 
 /*
@@ -1336,34 +1338,710 @@ unsafe fn clause_is_strict_for(mut clause: *mut Node, mut subexpr: *mut Node, al
 }
 
 /*
- * ---------------------------------------------------------------------------
- * operator_predicate_proof and its support routines (STUB).
+ * The "test type" of a btree proof operator, expressed as a CompareType.
+ * These names mirror the C #defines RCLT/RCLE/RCEQ/RCGE/RCGT/RCNE which alias
+ * the COMPARE_* CompareType values.
+ */
+const RCLT: CompareType = COMPARE_LT;
+const RCLE: CompareType = COMPARE_LE;
+const RCEQ: CompareType = COMPARE_EQ;
+const RCGE: CompareType = COMPARE_GE;
+const RCGT: CompareType = COMPARE_GT;
+const RCNE: CompareType = COMPARE_NE;
+
+/* We use "none" for 0/false to make the tables align nicely */
+const none: CompareType = 0;
+
+/*
+ * RC_implies_table[] and RC_refutes_table[] are used for cases where we have
+ * two identical subexpressions and we want to know whether one operator
+ * expression implies or refutes the other.  That is, if the "clause" is known
+ * true, we want to know whether the "predicate" must also be true or false.
  *
- * The full implementation needs:
- *   - lsyscache: get_commutator, get_negator, op_strict, op_volatile,
- *     get_op_index_interpretation, get_opfamily_member_for_cmptype
- *   - syscache/inval: the OprProofCache HTAB + AMOPOPID callback
- *   - the executor: CreateExecutorState/ExecInitExpr/ExecEvalExprSwitchContext
- *     for const-vs-const comparison via a built test operator
- *   - utils/array for the SAOP element deconstruction
+ *		RC_implies_table[clause_op-1][pred_op-1]
+ *			"clause" (x clause_op y) implies "predicate" (x pred_op y)
+ *		RC_refutes_table[clause_op-1][pred_op-1]
+ *			"clause" (x clause_op y) refutes "predicate" (x pred_op y)
+ */
+#[rustfmt::skip]
+static RC_implies_table: [[bool; 6]; 6] = [
+/*
+ *			The predicate operator:
+ *	 LT    LE	 EQ    GE	 GT    NE
+ */
+    [true, true, false, false, false, true],	/* LT */
+    [false, true, false, false, false, false],	/* LE */
+    [false, true, true, true, false, false],	/* EQ */
+    [false, false, false, true, false, false],	/* GE */
+    [false, false, false, true, true, true],	/* GT */
+    [false, false, false, false, false, true],	/* NE */
+];
+
+#[rustfmt::skip]
+static RC_refutes_table: [[bool; 6]; 6] = [
+/*
+ *			The predicate operator:
+ *	 LT    LE	 EQ    GE	 GT    NE
+ */
+    [false, false, true, true, true, false],	/* LT */
+    [false, false, false, false, true, false],	/* LE */
+    [true, false, false, false, true, true],	/* EQ */
+    [true, false, false, false, false, false],	/* GE */
+    [true, true, true, false, false, false],	/* GT */
+    [false, false, true, false, false, false],	/* NE */
+];
+
+#[rustfmt::skip]
+static RC_implic_table: [[CompareType; 6]; 6] = [
+/*
+ *			The predicate operator:
+ *	 LT    LE	 EQ    GE	 GT    NE
+ */
+    [RCGE, RCGE, none, none, none, RCGE],	/* LT */
+    [RCGT, RCGE, none, none, none, RCGT],	/* LE */
+    [RCGT, RCGE, RCEQ, RCLE, RCLT, RCNE],	/* EQ */
+    [none, none, none, RCLE, RCLT, RCLT],	/* GE */
+    [none, none, none, RCLE, RCLE, RCLE],	/* GT */
+    [none, none, none, none, none, RCEQ],	/* NE */
+];
+
+#[rustfmt::skip]
+static RC_refute_table: [[CompareType; 6]; 6] = [
+/*
+ *			The predicate operator:
+ *	 LT    LE	 EQ    GE	 GT    NE
+ */
+    [none, none, RCGE, RCGE, RCGE, none],	/* LT */
+    [none, none, RCGT, RCGT, RCGE, none],	/* LE */
+    [RCLE, RCLT, RCNE, RCGT, RCGE, RCEQ],	/* EQ */
+    [RCLE, RCLT, RCLT, none, none, none],	/* GE */
+    [RCLE, RCLE, RCLE, none, none, none],	/* GT */
+    [none, none, RCEQ, none, none, none],	/* NE */
+];
+
+/*
+ * operator_predicate_proof
+ *	  Does the predicate implication or refutation test for a "simple clause"
+ *	  predicate and a "simple clause" restriction, when both are operator
+ *	  clauses using related operators and identical input expressions.
  *
- * Until lsyscache lands we return false ("cannot prove").  This keeps the
- * engine SOUND (every proof it reports is valid) but INCOMPLETE (operator
- * facts such as "x < 5" => "x < 10" are not proven).  The RC_* implication
- * tables and the OprProofCache machinery are intentionally not reproduced
- * here; they belong with the lsyscache port.
- * TODO(pg-port): implement once utils/lsyscache + executor land.
- * ---------------------------------------------------------------------------
+ * When refute_it == false, we want to prove the predicate true;
+ * when refute_it == true, we want to prove the predicate false.
+ * (There is enough common code to justify handling these two cases
+ * in one routine.)  We return true if able to make the proof, false
+ * if not able to prove it.
  */
 unsafe fn operator_predicate_proof(
-    _predicate: *mut Expr,
-    _clause: *mut Node,
-    _refute_it: bool,
-    _weak: bool,
+    predicate: *mut Expr,
+    clause: *mut Node,
+    refute_it: bool,
+    weak: bool,
 ) -> bool {
-    /* STUB: conservative "cannot prove". See module-level notes. */
-    // TODO(pg-port): real proof needs lsyscache + executor + utils/array.
-    false
+    let pred_opexpr: *mut OpExpr;
+    let clause_opexpr: *mut OpExpr;
+    let pred_collation: Oid;
+    let clause_collation: Oid;
+    let mut pred_op: Oid;
+    let mut clause_op: Oid;
+    let test_op: Oid;
+    let pred_leftop: *mut Node;
+    let pred_rightop: *mut Node;
+    let clause_leftop: *mut Node;
+    let clause_rightop: *mut Node;
+    let pred_const: *mut Const;
+    let clause_const: *mut Const;
+    let test_expr: *mut Expr;
+    let test_exprstate: *mut crate::nodes::execnodes::ExprState;
+    let test_result: Datum;
+    let mut isNull: bool = false;
+    let estate: *mut crate::nodes::execnodes::EState;
+    let oldcontext: MemoryContext;
+
+    /*
+     * Both expressions must be binary opclauses, else we can't do anything.
+     *
+     * Note: in future we might extend this logic to other operator-based
+     * constructs such as DistinctExpr.  But the planner isn't very smart
+     * about DistinctExpr in general, and this probably isn't the first place
+     * to fix if you want to improve that.
+     */
+    if !is_opclause(predicate as *const c_void) {
+        return false;
+    }
+    pred_opexpr = predicate as *mut OpExpr;
+    if list_length((*pred_opexpr).args) != 2 {
+        return false;
+    }
+    if !is_opclause(clause as *const c_void) {
+        return false;
+    }
+    clause_opexpr = clause as *mut OpExpr;
+    if list_length((*clause_opexpr).args) != 2 {
+        return false;
+    }
+
+    /*
+     * If they're marked with different collations then we can't do anything.
+     * This is a cheap test so let's get it out of the way early.
+     */
+    pred_collation = (*pred_opexpr).inputcollid;
+    clause_collation = (*clause_opexpr).inputcollid;
+    if pred_collation != clause_collation {
+        return false;
+    }
+
+    /* Grab the operator OIDs now too.  We may commute these below. */
+    pred_op = (*pred_opexpr).opno;
+    clause_op = (*clause_opexpr).opno;
+
+    /*
+     * We have to match up at least one pair of input expressions.
+     */
+    pred_leftop = linitial((*pred_opexpr).args) as *mut Node;
+    pred_rightop = lsecond((*pred_opexpr).args) as *mut Node;
+    clause_leftop = linitial((*clause_opexpr).args) as *mut Node;
+    clause_rightop = lsecond((*clause_opexpr).args) as *mut Node;
+
+    if equal(pred_leftop as *const c_void, clause_leftop as *const c_void) {
+        if equal(pred_rightop as *const c_void, clause_rightop as *const c_void) {
+            /* We have x op1 y and x op2 y */
+            return operator_same_subexprs_proof(pred_op, clause_op, refute_it);
+        } else {
+            /* Fail unless rightops are both Consts */
+            if pred_rightop.is_null() || !IsA!(pred_rightop, T_Const) {
+                return false;
+            }
+            pred_const = pred_rightop as *mut Const;
+            if clause_rightop.is_null() || !IsA!(clause_rightop, T_Const) {
+                return false;
+            }
+            clause_const = clause_rightop as *mut Const;
+        }
+    } else if equal(pred_rightop as *const c_void, clause_rightop as *const c_void) {
+        /* Fail unless leftops are both Consts */
+        if pred_leftop.is_null() || !IsA!(pred_leftop, T_Const) {
+            return false;
+        }
+        pred_const = pred_leftop as *mut Const;
+        if clause_leftop.is_null() || !IsA!(clause_leftop, T_Const) {
+            return false;
+        }
+        clause_const = clause_leftop as *mut Const;
+        /* Commute both operators so we can assume Consts are on the right */
+        pred_op = get_commutator(pred_op);
+        if !OidIsValid(pred_op) {
+            return false;
+        }
+        clause_op = get_commutator(clause_op);
+        if !OidIsValid(clause_op) {
+            return false;
+        }
+    } else if equal(pred_leftop as *const c_void, clause_rightop as *const c_void) {
+        if equal(pred_rightop as *const c_void, clause_leftop as *const c_void) {
+            /* We have x op1 y and y op2 x */
+            /* Commute pred_op that we can treat this like a straight match */
+            pred_op = get_commutator(pred_op);
+            if !OidIsValid(pred_op) {
+                return false;
+            }
+            return operator_same_subexprs_proof(pred_op, clause_op, refute_it);
+        } else {
+            /* Fail unless pred_rightop/clause_leftop are both Consts */
+            if pred_rightop.is_null() || !IsA!(pred_rightop, T_Const) {
+                return false;
+            }
+            pred_const = pred_rightop as *mut Const;
+            if clause_leftop.is_null() || !IsA!(clause_leftop, T_Const) {
+                return false;
+            }
+            clause_const = clause_leftop as *mut Const;
+            /* Commute clause_op so we can assume Consts are on the right */
+            clause_op = get_commutator(clause_op);
+            if !OidIsValid(clause_op) {
+                return false;
+            }
+        }
+    } else if equal(pred_rightop as *const c_void, clause_leftop as *const c_void) {
+        /* Fail unless pred_leftop/clause_rightop are both Consts */
+        if pred_leftop.is_null() || !IsA!(pred_leftop, T_Const) {
+            return false;
+        }
+        pred_const = pred_leftop as *mut Const;
+        if clause_rightop.is_null() || !IsA!(clause_rightop, T_Const) {
+            return false;
+        }
+        clause_const = clause_rightop as *mut Const;
+        /* Commute pred_op so we can assume Consts are on the right */
+        pred_op = get_commutator(pred_op);
+        if !OidIsValid(pred_op) {
+            return false;
+        }
+    } else {
+        /* Failed to match up any of the subexpressions, so we lose */
+        return false;
+    }
+
+    /*
+     * We have two identical subexpressions, and two other subexpressions that
+     * are not identical but are both Consts; and we have commuted the
+     * operators if necessary so that the Consts are on the right.  We'll need
+     * to compare the Consts' values.  If either is NULL, we can't do that, so
+     * usually the proof fails ... but in some cases we can claim success.
+     */
+    if (*clause_const).constisnull {
+        /* If clause_op isn't strict, we can't prove anything */
+        if !op_strict(clause_op) {
+            return false;
+        }
+
+        /*
+         * At this point we know that the clause returns NULL.  For proof
+         * types that assume truth of the clause, this means the proof is
+         * vacuously true (a/k/a "false implies anything").  That's all proof
+         * types except weak implication.
+         */
+        if !(weak && !refute_it) {
+            return true;
+        }
+
+        /*
+         * For weak implication, it's still possible for the proof to succeed,
+         * if the predicate can also be proven NULL.  In that case we've got
+         * NULL => NULL which is valid for this proof type.
+         */
+        if (*pred_const).constisnull && op_strict(pred_op) {
+            return true;
+        }
+        /* Else the proof fails */
+        return false;
+    }
+    if (*pred_const).constisnull {
+        /*
+         * If the pred_op is strict, we know the predicate yields NULL, which
+         * means the proof succeeds for either weak implication or weak
+         * refutation.
+         */
+        if weak && op_strict(pred_op) {
+            return true;
+        }
+        /* Else the proof fails */
+        return false;
+    }
+
+    /*
+     * Lookup the constant-comparison operator using the system catalogs and
+     * the operator implication tables.
+     */
+    test_op = get_btree_test_op(pred_op, clause_op, refute_it);
+
+    if !OidIsValid(test_op) {
+        /* couldn't find a suitable comparison operator */
+        return false;
+    }
+
+    /*
+     * Evaluate the test.  For this we need an EState.
+     */
+    estate = CreateExecutorState();
+
+    /* We can use the estate's working context to avoid memory leaks. */
+    oldcontext = MemoryContextSwitchTo((*estate).es_query_cxt);
+
+    /* Build expression tree */
+    test_expr = make_opclause(
+        test_op,
+        BOOLOID,
+        false,
+        pred_const as *mut Expr,
+        clause_const as *mut Expr,
+        InvalidOid,
+        pred_collation,
+    );
+
+    /* Fill in opfuncids */
+    fix_opfuncids(test_expr as *mut Node);
+
+    /* Prepare it for execution */
+    test_exprstate = ExecInitExpr(test_expr, core::ptr::null_mut());
+
+    /* And execute it. */
+    test_result = ExecEvalExprSwitchContext(
+        test_exprstate,
+        GetPerTupleExprContext(estate),
+        &mut isNull,
+    );
+
+    /* Get back to outer memory context */
+    MemoryContextSwitchTo(oldcontext);
+
+    /* Release all the junk we just created */
+    FreeExecutorState(estate);
+
+    if isNull {
+        /* Treat a null result as non-proof ... but it's a tad fishy ... */
+        elog!(DEBUG2, "null predicate test result");
+        return false;
+    }
+    DatumGetBool(test_result)
+}
+
+/*
+ * operator_same_subexprs_proof
+ *	  Assuming that EXPR1 clause_op EXPR2 is true, try to prove or refute
+ *	  EXPR1 pred_op EXPR2.
+ *
+ * Return true if able to make the proof, false if not able to prove it.
+ */
+unsafe fn operator_same_subexprs_proof(pred_op: Oid, clause_op: Oid, refute_it: bool) -> bool {
+    /*
+     * A simple and general rule is that the predicate is proven if clause_op
+     * and pred_op are the same, or refuted if they are each other's negators.
+     * We need not check immutability since the pred_op is already known
+     * immutable.  (Actually, by this point we may have the commutator of a
+     * known-immutable pred_op, but that should certainly be immutable too.
+     * Likewise we don't worry whether the pred_op's negator is immutable.)
+     *
+     * Note: the "same" case won't get here if we actually had EXPR1 clause_op
+     * EXPR2 and EXPR1 pred_op EXPR2, because the overall-expression-equality
+     * test in predicate_implied_by_simple_clause would have caught it.  But
+     * we can see the same operator after having commuted the pred_op.
+     */
+    if refute_it {
+        if get_negator(pred_op) == clause_op {
+            return true;
+        }
+    } else if pred_op == clause_op {
+        return true;
+    }
+
+    /*
+     * Otherwise, see if we can determine the implication by finding the
+     * operators' relationship via some btree opfamily.
+     */
+    operator_same_subexprs_lookup(pred_op, clause_op, refute_it)
+}
+
+/*
+ * We use a lookaside table to cache the result of btree proof operator
+ * lookups, since the actual lookup is pretty expensive and doesn't change
+ * for any given pair of operators (at least as long as pg_amop doesn't
+ * change).  A single hash entry stores both implication and refutation
+ * results for a given pair of operators; but note we may have determined
+ * only one of those sets of results as yet.
+ */
+#[repr(C)]
+struct OprProofCacheKey {
+    pred_op: Oid,   /* predicate operator */
+    clause_op: Oid, /* clause operator */
+}
+
+#[repr(C)]
+struct OprProofCacheEntry {
+    /* the hash lookup key MUST BE FIRST */
+    key: OprProofCacheKey,
+
+    have_implic: bool,           /* do we know the implication result? */
+    have_refute: bool,           /* do we know the refutation result? */
+    same_subexprs_implies: bool, /* X clause_op Y implies X pred_op Y? */
+    same_subexprs_refutes: bool, /* X clause_op Y refutes X pred_op Y? */
+    implic_test_op: Oid,         /* OID of the test operator, or 0 if none */
+    refute_test_op: Oid,         /* OID of the test operator, or 0 if none */
+}
+
+static mut OprProofCacheHash: *mut HTAB = core::ptr::null_mut();
+
+/* syscache id for pg_amop-by-opid; see catalog/pg_amop syscache. */
+const AMOPOPID: c_int = 0;
+
+/*
+ * TODO(pg-port): import crate::utils::cache::inval::CacheRegisterSyscacheCallback
+ * once utils/cache/inval is wired into utils/cache/mod.rs.  The real function
+ * already exists; only the module declaration is missing.
+ */
+unsafe fn CacheRegisterSyscacheCallback(
+    _cacheid: c_int,
+    _func: unsafe fn(arg: Datum, cacheid: c_int, hashvalue: uint32),
+    _arg: Datum,
+) {
+}
+
+/*
+ * lookup_proof_cache
+ *	  Get, and fill in if necessary, the appropriate cache entry.
+ */
+unsafe fn lookup_proof_cache(
+    pred_op: Oid,
+    clause_op: Oid,
+    refute_it: bool,
+) -> *mut OprProofCacheEntry {
+    let mut key: OprProofCacheKey = OprProofCacheKey {
+        pred_op: InvalidOid,
+        clause_op: InvalidOid,
+    };
+    let cache_entry: *mut OprProofCacheEntry;
+    let mut cfound: bool = false;
+    let mut same_subexprs: bool = false;
+    let mut test_op: Oid = InvalidOid;
+    let mut found: bool = false;
+    let pred_op_infos: *mut List;
+    let clause_op_infos: *mut List;
+
+    /*
+     * Find or make a cache entry for this pair of operators.
+     */
+    if OprProofCacheHash.is_null() {
+        /* First time through: initialize the hash table */
+        let mut ctl: HASHCTL = core::mem::zeroed();
+
+        ctl.keysize = core::mem::size_of::<OprProofCacheKey>() as Size;
+        ctl.entrysize = core::mem::size_of::<OprProofCacheEntry>() as Size;
+        OprProofCacheHash = hash_create(
+            c"Btree proof lookup cache".as_ptr(),
+            256,
+            &ctl,
+            HASH_ELEM | HASH_BLOBS,
+        );
+
+        /* Arrange to flush cache on pg_amop changes */
+        CacheRegisterSyscacheCallback(AMOPOPID, InvalidateOprProofCacheCallBack, 0 as Datum);
+    }
+
+    key.pred_op = pred_op;
+    key.clause_op = clause_op;
+    cache_entry = hash_search(
+        OprProofCacheHash,
+        &key as *const OprProofCacheKey as *const c_void,
+        HASH_ENTER,
+        &mut cfound,
+    ) as *mut OprProofCacheEntry;
+    if !cfound {
+        /* new cache entry, set it invalid */
+        (*cache_entry).have_implic = false;
+        (*cache_entry).have_refute = false;
+    } else {
+        /* pre-existing cache entry, see if we know the answer yet */
+        if if refute_it {
+            (*cache_entry).have_refute
+        } else {
+            (*cache_entry).have_implic
+        } {
+            return cache_entry;
+        }
+    }
+
+    /*
+     * Try to find a btree opfamily containing the given operators.
+     *
+     * We must find a btree opfamily that contains both operators, else the
+     * implication can't be determined.  Also, the opfamily must contain a
+     * suitable test operator taking the operators' righthand datatypes.
+     *
+     * If there are multiple matching opfamilies, assume we can use any one to
+     * determine the logical relationship of the two operators and the correct
+     * corresponding test operator.  This should work for any logically
+     * consistent opfamilies.
+     *
+     * Note that we can determine the operators' relationship for
+     * same-subexprs cases even from an opfamily that lacks a usable test
+     * operator.  This can happen in cases with incomplete sets of cross-type
+     * comparison operators.
+     */
+    clause_op_infos = get_op_index_interpretation(clause_op) as *mut List;
+    pred_op_infos = if !clause_op_infos.is_null() {
+        get_op_index_interpretation(pred_op) as *mut List
+    } else {
+        /* no point in looking */
+        NIL
+    };
+
+    foreach!(lcp, pred_op_infos, {
+        let pred_op_info = lfirst(crate::current_cell!(lcp)) as *mut OpIndexInterpretation;
+        let opfamily_id = (*pred_op_info).opfamily_id;
+
+        foreach!(lcc, clause_op_infos, {
+            let clause_op_info = lfirst(crate::current_cell!(lcc)) as *mut OpIndexInterpretation;
+            let pred_cmptype: CompareType;
+            let clause_cmptype: CompareType;
+            let test_cmptype: CompareType;
+
+            /* Must find them in same opfamily */
+            if opfamily_id != (*clause_op_info).opfamily_id {
+                continue;
+            }
+            /* Lefttypes should match */
+            Assert!((*clause_op_info).oplefttype == (*pred_op_info).oplefttype);
+
+            pred_cmptype = (*pred_op_info).cmptype;
+            clause_cmptype = (*clause_op_info).cmptype;
+
+            /*
+             * Check to see if we can make a proof for same-subexpressions
+             * cases based on the operators' relationship in this opfamily.
+             */
+            if refute_it {
+                same_subexprs |=
+                    RC_refutes_table[(clause_cmptype - 1) as usize][(pred_cmptype - 1) as usize];
+            } else {
+                same_subexprs |=
+                    RC_implies_table[(clause_cmptype - 1) as usize][(pred_cmptype - 1) as usize];
+            }
+
+            /*
+             * Look up the "test" cmptype number in the implication table
+             */
+            if refute_it {
+                test_cmptype =
+                    RC_refute_table[(clause_cmptype - 1) as usize][(pred_cmptype - 1) as usize];
+            } else {
+                test_cmptype =
+                    RC_implic_table[(clause_cmptype - 1) as usize][(pred_cmptype - 1) as usize];
+            }
+
+            if test_cmptype == 0 {
+                /* Can't determine implication using this interpretation */
+                continue;
+            }
+
+            /*
+             * See if opfamily has an operator for the test cmptype and the
+             * datatypes.
+             */
+            if test_cmptype == RCNE {
+                test_op = get_opfamily_member_for_cmptype(
+                    opfamily_id,
+                    (*pred_op_info).oprighttype,
+                    (*clause_op_info).oprighttype,
+                    COMPARE_EQ,
+                );
+                if OidIsValid(test_op) {
+                    test_op = get_negator(test_op);
+                }
+            } else {
+                test_op = get_opfamily_member_for_cmptype(
+                    opfamily_id,
+                    (*pred_op_info).oprighttype,
+                    (*clause_op_info).oprighttype,
+                    test_cmptype,
+                );
+            }
+
+            if !OidIsValid(test_op) {
+                continue;
+            }
+
+            /*
+             * Last check: test_op must be immutable.
+             *
+             * Note that we require only the test_op to be immutable, not the
+             * original clause_op.  (pred_op is assumed to have been checked
+             * immutable by the caller.)  Essentially we are assuming that the
+             * opfamily is consistent even if it contains operators that are
+             * merely stable.
+             */
+            if op_volatile(test_op) == PROVOLATILE_IMMUTABLE {
+                found = true;
+                break;
+            }
+        });
+
+        if found {
+            break;
+        }
+    });
+
+    list_free_deep(pred_op_infos);
+    list_free_deep(clause_op_infos);
+
+    if !found {
+        /* couldn't find a suitable comparison operator */
+        test_op = InvalidOid;
+    }
+
+    /*
+     * If we think we were able to prove something about same-subexpressions
+     * cases, check to make sure the clause_op is immutable before believing
+     * it completely.  (Usually, the clause_op would be immutable if the
+     * pred_op is, but it's not entirely clear that this must be true in all
+     * cases, so let's check.)
+     */
+    if same_subexprs && op_volatile(clause_op) != PROVOLATILE_IMMUTABLE {
+        same_subexprs = false;
+    }
+
+    /* Cache the results, whether positive or negative */
+    if refute_it {
+        (*cache_entry).refute_test_op = test_op;
+        (*cache_entry).same_subexprs_refutes = same_subexprs;
+        (*cache_entry).have_refute = true;
+    } else {
+        (*cache_entry).implic_test_op = test_op;
+        (*cache_entry).same_subexprs_implies = same_subexprs;
+        (*cache_entry).have_implic = true;
+    }
+
+    cache_entry
+}
+
+/*
+ * operator_same_subexprs_lookup
+ *	  Convenience subroutine to look up the cached answer for
+ *	  same-subexpressions cases.
+ */
+unsafe fn operator_same_subexprs_lookup(pred_op: Oid, clause_op: Oid, refute_it: bool) -> bool {
+    let cache_entry: *mut OprProofCacheEntry;
+
+    cache_entry = lookup_proof_cache(pred_op, clause_op, refute_it);
+    if refute_it {
+        (*cache_entry).same_subexprs_refutes
+    } else {
+        (*cache_entry).same_subexprs_implies
+    }
+}
+
+/*
+ * get_btree_test_op
+ *	  Identify the comparison operator needed for a btree-operator
+ *	  proof or refutation involving comparison of constants.
+ *
+ * Given the truth of a clause "var clause_op const1", we are attempting to
+ * prove or refute a predicate "var pred_op const2".  The identities of the
+ * two operators are sufficient to determine the operator (if any) to compare
+ * const2 to const1 with.
+ *
+ * Returns the OID of the operator to use, or InvalidOid if no proof is
+ * possible.
+ */
+unsafe fn get_btree_test_op(pred_op: Oid, clause_op: Oid, refute_it: bool) -> Oid {
+    let cache_entry: *mut OprProofCacheEntry;
+
+    cache_entry = lookup_proof_cache(pred_op, clause_op, refute_it);
+    if refute_it {
+        (*cache_entry).refute_test_op
+    } else {
+        (*cache_entry).implic_test_op
+    }
+}
+
+/*
+ * Callback for pg_amop inval events
+ */
+unsafe fn InvalidateOprProofCacheCallBack(_arg: Datum, _cacheid: c_int, _hashvalue: uint32) {
+    let mut status: HASH_SEQ_STATUS = core::mem::zeroed();
+    let mut hentry: *mut OprProofCacheEntry;
+
+    Assert!(!OprProofCacheHash.is_null());
+
+    /* Currently we just reset all entries; hard to be smarter ... */
+    hash_seq_init(&mut status, OprProofCacheHash);
+
+    loop {
+        hentry = hash_seq_search(&mut status) as *mut OprProofCacheEntry;
+        if hentry.is_null() {
+            break;
+        }
+        (*hentry).have_implic = false;
+        (*hentry).have_refute = false;
+    }
 }
 
 /*

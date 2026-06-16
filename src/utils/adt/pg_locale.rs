@@ -193,6 +193,89 @@ const C_COLLATION_OID: Oid = 950;
 const LOCALE_NAME_BUFLEN: usize = 128;
 
 // ===========================================================================
+// Win32-only API used by strftime_l_win32(), search_locale_enum(),
+// get_iso_localename() and IsoLocaleName().  Compiled only on Windows; the
+// originals live inside #ifdef WIN32 blocks in pg_locale.c.
+#[cfg(windows)]
+const LOCALE_NAME_MAX_LENGTH: usize = 85;
+#[cfg(windows)]
+const CP_UTF8: u32 = 65001;
+#[cfg(windows)]
+const CP_ACP: u32 = 0;
+#[cfg(windows)]
+const FALSE: i32 = 0;
+#[cfg(windows)]
+const TRUE: i32 = 1;
+#[cfg(windows)]
+const LOCALE_SENGLISHLANGUAGENAME: u32 = 0x00001001;
+#[cfg(windows)]
+const LOCALE_SENGLISHCOUNTRYNAME: u32 = 0x00001002;
+#[cfg(windows)]
+const LOCALE_SNAME: u32 = 0x0000005C;
+#[cfg(windows)]
+const LOCALE_WINDOWS: u32 = 0x00000001;
+// L"_"
+#[cfg(windows)]
+static L_UNDERSCORE: [u16; 2] = [b'_' as u16, 0];
+
+#[cfg(windows)]
+extern "system" {
+    fn MultiByteToWideChar(
+        CodePage: u32,
+        dwFlags: u32,
+        lpMultiByteStr: *const c_char,
+        cbMultiByte: c_int,
+        lpWideCharStr: *mut u16,
+        cchWideChar: c_int,
+    ) -> c_int;
+    fn WideCharToMultiByte(
+        CodePage: u32,
+        dwFlags: u32,
+        lpWideCharStr: *const u16,
+        cchWideChar: c_int,
+        lpMultiByteStr: *mut c_char,
+        cbMultiByte: c_int,
+        lpDefaultChar: *const c_char,
+        lpUsedDefaultChar: *mut c_int,
+    ) -> c_int;
+    fn GetLastError() -> u32;
+    fn GetLocaleInfoEx(
+        lpLocaleName: *const u16,
+        LCType: u32,
+        lpLCData: *mut u16,
+        cchData: c_int,
+    ) -> c_int;
+    fn EnumSystemLocalesEx(
+        lpLocaleEnumProcEx: Option<unsafe extern "system" fn(*mut u16, u32, isize) -> i32>,
+        dwFlags: u32,
+        lParam: isize,
+        lpReserved: *mut c_void,
+    ) -> i32;
+}
+
+#[cfg(windows)]
+use crate::utils::adt::pg_locale_libc::wchar2char;
+#[cfg(windows)]
+use crate::mb::mbutils::pg_mbstrlen;
+
+#[cfg(windows)]
+extern "C" {
+    fn pg_strcasecmp(s1: *const c_char, s2: *const c_char) -> c_int; // port/pgstrcasecmp.c
+    fn _wcsftime_l(
+        s: *mut u16,
+        maxsize: usize,
+        format: *const u16,
+        timeptr: *const libc::tm,
+        locale: locale_t,
+    ) -> usize;
+    fn _wcsicmp(s1: *const u16, s2: *const u16) -> c_int;
+    fn wcsrchr(s: *const u16, c: u16) -> *mut u16;
+    fn wcscpy(dst: *mut u16, src: *const u16) -> *mut u16;
+    fn wcscat(dst: *mut u16, src: *const u16) -> *mut u16;
+    fn wcslen(s: *const u16) -> usize;
+}
+
+// ===========================================================================
 // Shared pg_locale types (utils/pg_locale.h).  Mirrors the canonical struct
 // used by the sibling provider modules.
 // ===========================================================================
@@ -955,6 +1038,280 @@ pub unsafe fn cache_locale_time() {
 
     CurrentLCTimeValid = true;
 }
+
+// #ifdef WIN32
+/*
+ * On Windows, strftime_l() is not available, so we provide a workaround using
+ * the wide-character API.  Installed via #define strftime_l(...) on WIN32.
+ *
+ * Convert to UTF-16, call _wcsftime_l, convert back to the database encoding.
+ * (See the C source comment block at strftime_l_win32 for full rationale.)
+ */
+#[cfg(windows)]
+unsafe fn strftime_l_win32(
+    dst: *mut c_char,
+    dstlen: usize,
+    format: *const c_char,
+    tm: *const libc::tm,
+    locale: locale_t,
+) -> usize {
+    let mut len: usize;
+    let mut wformat: [u16; 8] = [0; 8]; /* formats used below need 3 chars */
+    let mut wbuf: [u16; MAX_L10N_DATA] = [0; MAX_L10N_DATA];
+
+    /*
+     * Get a wchar_t version of the format string.  We only actually use
+     * plain-ASCII formats in this file, so we can say that they're UTF8.
+     */
+    len = MultiByteToWideChar(
+        CP_UTF8,
+        0,
+        format,
+        -1,
+        wformat.as_mut_ptr(),
+        wformat.len() as c_int,
+    ) as usize;
+    if len == 0 {
+        elog!(
+            ERROR,
+            "could not convert format string from UTF-8: error code {}",
+            GetLastError()
+        );
+    }
+
+    len = _wcsftime_l(
+        wbuf.as_mut_ptr(),
+        MAX_L10N_DATA,
+        wformat.as_ptr(),
+        tm,
+        locale,
+    );
+    if len == 0 {
+        /*
+         * wcsftime failed, possibly because the result would not fit in
+         * MAX_L10N_DATA.  Return 0 with the contents of dst unspecified.
+         */
+        return 0;
+    }
+
+    len = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        wbuf.as_ptr(),
+        len as c_int,
+        dst,
+        (dstlen - 1) as c_int,
+        core::ptr::null(),
+        core::ptr::null_mut(),
+    ) as usize;
+    if len == 0 {
+        elog!(
+            ERROR,
+            "could not convert string to UTF-8: error code {}",
+            GetLastError()
+        );
+    }
+
+    *dst.add(len) = b'\0' as c_char;
+
+    len
+}
+// #endif /* WIN32 */
+
+// #if defined(WIN32) && defined(LC_MESSAGES)
+/*
+ * Callback function for EnumSystemLocalesEx() in get_iso_localename().
+ *
+ * Matches a Windows locale name against the requested locale name, which has
+ * an input with the format: <Language>[_<Country>], e.g.
+ * English[_United States]
+ *
+ * The input is a three wchar_t array as an LPARAM. The first element is the
+ * locale_name we want to match, the second element is an allocated buffer
+ * where the Unix-style locale is copied if a match is found, and the third
+ * element is the search status, 1 if a match was found, 0 otherwise.
+ */
+#[cfg(windows)]
+unsafe extern "system" fn search_locale_enum(
+    pStr: *mut u16,
+    dwFlags: u32,
+    lparam: isize,
+) -> i32 {
+    let mut test_locale: [u16; LOCALE_NAME_MAX_LENGTH] = [0; LOCALE_NAME_MAX_LENGTH];
+    let argv: *mut *mut u16;
+
+    let _ = dwFlags;
+
+    argv = lparam as *mut *mut u16;
+    *(*argv.add(2)) = 0u16;
+
+    core::ptr::write_bytes(test_locale.as_mut_ptr(), 0, test_locale.len());
+
+    /* Get the name of the <Language> in English */
+    if GetLocaleInfoEx(
+        pStr,
+        LOCALE_SENGLISHLANGUAGENAME,
+        test_locale.as_mut_ptr(),
+        LOCALE_NAME_MAX_LENGTH as c_int,
+    ) != 0
+    {
+        /*
+         * If the enumerated locale does not have a hyphen ("en") OR the
+         * locale_name input does not have an underscore ("English"), we only
+         * need to compare the <Language> tags.
+         */
+        if wcsrchr(pStr, '-' as u16).is_null()
+            || wcsrchr(*argv.add(0), '_' as u16).is_null()
+        {
+            if _wcsicmp(*argv.add(0), test_locale.as_ptr()) == 0 {
+                wcscpy(*argv.add(1), pStr);
+                *(*argv.add(2)) = 1u16;
+                return FALSE;
+            }
+        }
+        /*
+         * We have to compare a full <Language>_<Country> tag, so we append
+         * the underscore and name of the country/region in English, e.g.
+         * "English_United States".
+         */
+        else {
+            let len: usize;
+
+            wcscat(test_locale.as_mut_ptr(), L_UNDERSCORE.as_ptr());
+            len = wcslen(test_locale.as_ptr());
+            if GetLocaleInfoEx(
+                pStr,
+                LOCALE_SENGLISHCOUNTRYNAME,
+                test_locale.as_mut_ptr().add(len),
+                (LOCALE_NAME_MAX_LENGTH - len) as c_int,
+            ) != 0
+            {
+                if _wcsicmp(*argv.add(0), test_locale.as_ptr()) == 0 {
+                    wcscpy(*argv.add(1), pStr);
+                    *(*argv.add(2)) = 1u16;
+                    return FALSE;
+                }
+            }
+        }
+    }
+
+    TRUE
+}
+
+/*
+ * This function converts a Windows locale name to an ISO formatted version
+ * for Visual Studio 2015 or greater.
+ *
+ * Returns NULL, if no valid conversion was found.
+ */
+#[cfg(windows)]
+unsafe fn get_iso_localename(winlocname: *const c_char) -> *mut c_char {
+    let mut wc_locale_name: [u16; LOCALE_NAME_MAX_LENGTH] = [0; LOCALE_NAME_MAX_LENGTH];
+    let mut buffer: [u16; LOCALE_NAME_MAX_LENGTH] = [0; LOCALE_NAME_MAX_LENGTH];
+    static mut iso_lc_messages: [c_char; LOCALE_NAME_MAX_LENGTH] = [0; LOCALE_NAME_MAX_LENGTH];
+    let period: *const c_char;
+    let len: c_int;
+    let mut ret_val: c_int;
+
+    /*
+     * Valid locales have the following syntax:
+     * <Language>[_<Country>[.<CodePage>]]
+     *
+     * GetLocaleInfoEx can only take locale name without code-page and for the
+     * purpose of this API the code-page doesn't matter.
+     */
+    period = libc::strchr(winlocname, '.' as c_int);
+    if !period.is_null() {
+        len = period.offset_from(winlocname) as c_int;
+    } else {
+        len = pg_mbstrlen(winlocname);
+    }
+
+    core::ptr::write_bytes(wc_locale_name.as_mut_ptr(), 0, wc_locale_name.len());
+    core::ptr::write_bytes(buffer.as_mut_ptr(), 0, buffer.len());
+    MultiByteToWideChar(
+        CP_ACP,
+        0,
+        winlocname,
+        len,
+        wc_locale_name.as_mut_ptr(),
+        LOCALE_NAME_MAX_LENGTH as c_int,
+    );
+
+    /*
+     * If the lc_messages is already a Unix-style string, we have a direct
+     * match with LOCALE_SNAME, e.g. en-US, en_US.
+     */
+    ret_val = GetLocaleInfoEx(
+        wc_locale_name.as_ptr(),
+        LOCALE_SNAME,
+        buffer.as_mut_ptr(),
+        LOCALE_NAME_MAX_LENGTH as c_int,
+    );
+    if ret_val == 0 {
+        /*
+         * Search for a locale in the system that matches language and country
+         * name.
+         */
+        let mut argv: [*mut u16; 3] = [core::ptr::null_mut(); 3];
+
+        argv[0] = wc_locale_name.as_mut_ptr();
+        argv[1] = buffer.as_mut_ptr();
+        argv[2] = &mut ret_val as *mut c_int as *mut u16;
+        EnumSystemLocalesEx(
+            Some(search_locale_enum),
+            LOCALE_WINDOWS,
+            argv.as_mut_ptr() as isize,
+            core::ptr::null_mut(),
+        );
+    }
+
+    if ret_val != 0 {
+        let rc: usize;
+        let hyphen: *mut c_char;
+
+        /* Locale names use only ASCII, any conversion locale suffices. */
+        rc = wchar2char(
+            iso_lc_messages.as_mut_ptr(),
+            buffer.as_ptr() as *const _,
+            core::mem::size_of_val(&iso_lc_messages),
+            core::ptr::null_mut(),
+        );
+        if rc == usize::MAX || rc == core::mem::size_of_val(&iso_lc_messages) {
+            return core::ptr::null_mut();
+        }
+
+        /*
+         * Since the message catalogs sit on a case-insensitive filesystem, we
+         * need not standardize letter case here.  So long as we do not ship
+         * message catalogs for which it would matter, we also need not
+         * translate the script/variant portion, e.g.  uz-Cyrl-UZ to
+         * uz_UZ@cyrillic.  Simply replace the hyphen with an underscore.
+         */
+        hyphen = libc::strchr(iso_lc_messages.as_ptr(), '-' as c_int) as *mut c_char;
+        if !hyphen.is_null() {
+            *hyphen = '_' as c_char;
+        }
+        return iso_lc_messages.as_mut_ptr();
+    }
+
+    core::ptr::null_mut()
+}
+
+#[cfg(windows)]
+unsafe fn IsoLocaleName(winlocname: *const c_char) -> *mut c_char {
+    static mut iso_lc_messages: [c_char; LOCALE_NAME_MAX_LENGTH] = [0; LOCALE_NAME_MAX_LENGTH];
+
+    if pg_strcasecmp(b"c\0".as_ptr() as *const c_char, winlocname) == 0
+        || pg_strcasecmp(b"posix\0".as_ptr() as *const c_char, winlocname) == 0
+    {
+        libc::strcpy(iso_lc_messages.as_mut_ptr(), b"C\0".as_ptr() as *const c_char);
+        return iso_lc_messages.as_mut_ptr();
+    } else {
+        return get_iso_localename(winlocname);
+    }
+}
+// #endif /* WIN32 && LC_MESSAGES */
 
 /*
  * Create a new pg_locale_t struct for the given collation oid.

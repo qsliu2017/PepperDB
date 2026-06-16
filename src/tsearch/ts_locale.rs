@@ -44,6 +44,29 @@
 use crate::prelude::*;
 
 use crate::mb::mbutils::{pg_mblen_cstr, pg_mblen_unbounded, pg_mblen_with_len};
+use crate::lib::stringinfo::{initStringInfo, StringInfoData};
+use crate::common::pg_get_line::{pg_get_line_buf, FILE};
+use crate::utils::mb::mbutils::pg_any_to_server;
+use crate::mb::pg_wchar::PG_UTF8;
+use crate::utils::error::elog_impl::{error_context_stack, ErrorContextCallback};
+
+/// errcontext() shim (elog.h).  Real expansion pushes a message onto the active
+/// error report; mirrors the placeholder used elsewhere in the port (params.rs).
+/// TODO(pg-port): route through the real elog errcontext machinery.
+macro_rules! errcontext {
+    ($fmt:expr $(, $arg:expr)* $(,)?) => {{ let _ = ($fmt $(, $arg)*); }};
+}
+
+// AllocateFile/FreeFile (storage/fd.h) have no canonical home yet; the port
+// keeps per-file stubs (see access/transam/timeline.rs).  Mirror that here.
+/// TODO(pg-port): real AllocateFile from storage/fd.c (VFD-tracked fopen).
+unsafe fn AllocateFile(_name: *const c_char, _mode: *const c_char) -> *mut FILE {
+    core::ptr::null_mut()
+}
+/// TODO(pg-port): real FreeFile from storage/fd.c.
+unsafe fn FreeFile(_file: *mut FILE) -> c_int {
+    0
+}
 
 // ----------------------------------------------------------------------------
 // libc ctype / wctype bindings (<ctype.h>, <wctype.h>).
@@ -232,50 +255,146 @@ pub unsafe fn lowerstr(str: *const c_char) -> *mut c_char {
 // ----------------------------------------------------------------------------
 // tsearch_readline_state and the file-reading helpers.
 //
-// STUB(pg-port): these depend on the unported fd/VFD layer (storage/fd.h:
-// AllocateFile/FreeFile), pg_get_line_buf (common/string.h), pg_any_to_server
-// (the encoding-conversion path), the StringInfoData buffer, and the
-// error_context_stack / ErrorContextCallback machinery.  None are available
-// yet, so the whole readline facility is stubbed.
+// Faithful 1:1 translation of ts_locale.c.  AllocateFile/FreeFile are local
+// stubs (storage/fd.h is unported); everything else routes through the real
+// ported helpers (pg_get_line_buf, pg_any_to_server, initStringInfo,
+// error_context_stack).
 // ----------------------------------------------------------------------------
 
-/// Working state for `tsearch_readline()`.
-///
-/// STUB: fields kept opaque until the fd/stringinfo/error-context layers land.
-/// TODO(pg-port): real layout is
-///   { FILE *fp; const char *filename; int lineno; StringInfoData buf;
-///     char *curline; ErrorContextCallback cb; }
+/// Working state for `tsearch_readline()` (merged from ts_locale.h).
 #[repr(C)]
 pub struct tsearch_readline_state {
-    pub fp: *mut c_void,        // FILE* (VFD-backed) -- TODO
+    pub fp: *mut FILE,
     pub filename: *const c_char,
     pub lineno: c_int,
-    // buf: StringInfoData       -- TODO(pg-port): crate::lib::stringinfo
+    pub buf: StringInfoData,
     pub curline: *mut c_char,
-    // cb: ErrorContextCallback  -- TODO(pg-port): error_context_stack
-    _opaque: [u8; 0],
+    pub cb: ErrorContextCallback,
 }
 
-/// STUB: set up to read `filename` with tsearch_readline().
-/// TODO(pg-port): needs AllocateFile (storage/fd.h), initStringInfo, and the
-/// error_context_stack push.
+/*
+ * Set up to read a file using tsearch_readline().  This facility is
+ * better than just reading the file directly because it provides error
+ * context pointing to the specific line where a problem is detected.
+ *
+ * Note that the caller supplies the ereport() for file open failure;
+ * this is so that a custom message can be provided.  The filename string
+ * passed to tsearch_readline_begin() must remain valid through
+ * tsearch_readline_end().
+ */
 pub unsafe fn tsearch_readline_begin(
-    _stp: *mut tsearch_readline_state,
-    _filename: *const c_char,
+    stp: *mut tsearch_readline_state,
+    filename: *const c_char,
 ) -> bool {
-    unimplemented!("tsearch_readline_begin: needs the fd/VFD layer (storage/fd.h) - not ported")
+    (*stp).fp = AllocateFile(filename, c"r".as_ptr());
+    if (*stp).fp.is_null() {
+        return false;
+    }
+    (*stp).filename = filename;
+    (*stp).lineno = 0;
+    initStringInfo(&raw mut (*stp).buf);
+    (*stp).curline = core::ptr::null_mut();
+    /* Setup error traceback support for ereport() */
+    (*stp).cb.callback = tsearch_readline_callback;
+    (*stp).cb.arg = stp as *mut c_void;
+    (*stp).cb.previous = error_context_stack;
+    error_context_stack = &raw mut (*stp).cb;
+    true
 }
 
-/// STUB: read the next line (UTF-8 -> DB encoding), palloc'd; NULL at EOF.
-/// TODO(pg-port): needs pg_get_line_buf + pg_any_to_server.
-pub unsafe fn tsearch_readline(_stp: *mut tsearch_readline_state) -> *mut c_char {
-    unimplemented!("tsearch_readline: needs pg_get_line_buf/pg_any_to_server - not ported")
+/*
+ * Read the next line from a tsearch data file (expected to be in UTF-8), and
+ * convert it to database encoding if needed. The returned string is palloc'd.
+ * NULL return means EOF.
+ */
+pub unsafe fn tsearch_readline(stp: *mut tsearch_readline_state) -> *mut c_char {
+    let recoded: *mut c_char;
+
+    /* Advance line number to use in error reports */
+    (*stp).lineno += 1;
+
+    /* Clear curline, it's no longer relevant */
+    if !(*stp).curline.is_null() {
+        if (*stp).curline != (*stp).buf.data {
+            pfree((*stp).curline as *mut c_void);
+        }
+        (*stp).curline = core::ptr::null_mut();
+    }
+
+    /* Collect next line, if there is one */
+    if !pg_get_line_buf((*stp).fp, &raw mut (*stp).buf) {
+        return core::ptr::null_mut();
+    }
+
+    /* Validate the input as UTF-8, then convert to DB encoding if needed */
+    recoded = pg_any_to_server((*stp).buf.data, (*stp).buf.len, PG_UTF8);
+
+    /* Save the correctly-encoded string for possible error reports */
+    (*stp).curline = recoded; /* might be equal to buf.data */
+
+    /*
+     * We always return a freshly pstrdup'd string.  This is clearly necessary
+     * if pg_any_to_server() returned buf.data, and we need a second copy even
+     * if encoding conversion did occur.  The caller is entitled to pfree the
+     * returned string at any time, which would leave curline pointing to
+     * recycled storage, causing problems if an error occurs after that point.
+     * (It's preferable to return the result of pstrdup instead of the output
+     * of pg_any_to_server, because the conversion result tends to be
+     * over-allocated.  Since callers might save the result string directly
+     * into a long-lived dictionary structure, we don't want it to be a larger
+     * palloc chunk than necessary.  We'll reclaim the conversion result on
+     * the next call.)
+     */
+    pstrdup(recoded)
 }
 
-/// STUB: tear down after tsearch_readline().
-/// TODO(pg-port): needs FreeFile and the error_context_stack pop.
-pub unsafe fn tsearch_readline_end(_stp: *mut tsearch_readline_state) {
-    unimplemented!("tsearch_readline_end: needs the fd/VFD layer (storage/fd.h) - not ported")
+/*
+ * Close down after reading a file with tsearch_readline()
+ */
+pub unsafe fn tsearch_readline_end(stp: *mut tsearch_readline_state) {
+    /* Suppress use of curline in any error reported below */
+    if !(*stp).curline.is_null() {
+        if (*stp).curline != (*stp).buf.data {
+            pfree((*stp).curline as *mut c_void);
+        }
+        (*stp).curline = core::ptr::null_mut();
+    }
+
+    /* Release other resources */
+    pfree((*stp).buf.data as *mut c_void);
+    FreeFile((*stp).fp);
+
+    /* Pop the error context stack */
+    error_context_stack = (*stp).cb.previous;
+}
+
+/*
+ * Error context callback for errors occurring while reading a tsearch
+ * configuration file.
+ */
+unsafe extern "C" fn tsearch_readline_callback(arg: *mut c_void) {
+    let stp = arg as *mut tsearch_readline_state;
+
+    /*
+     * We can't include the text of the config line for errors that occur
+     * during tsearch_readline() itself.  The major cause of such errors is
+     * encoding violations, and we daren't try to print error messages
+     * containing badly-encoded data.
+     */
+    if !(*stp).curline.is_null() {
+        errcontext!(
+            "line {} of configuration file \"{}\": \"{}\"",
+            (*stp).lineno,
+            std::ffi::CStr::from_ptr((*stp).filename).to_string_lossy(),
+            std::ffi::CStr::from_ptr((*stp).curline).to_string_lossy()
+        );
+    } else {
+        errcontext!(
+            "line {} of configuration file \"{}\"",
+            (*stp).lineno,
+            std::ffi::CStr::from_ptr((*stp).filename).to_string_lossy()
+        );
+    }
 }
 
 // ----------------------------------------------------------------------------

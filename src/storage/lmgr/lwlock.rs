@@ -231,6 +231,165 @@ unsafe fn TRACE_POSTGRESQL_LWLOCK_RELEASE_ENABLED() -> bool {
 unsafe fn TRACE_POSTGRESQL_LWLOCK_RELEASE(_name: *const c_char) {}
 
 // =============================================================================
+// #ifdef LWLOCK_STATS
+//
+// Debugging-only statistics gathering, compiled in only when the
+// "lwlock_stats" feature is enabled (matching the C LWLOCK_STATS macro).
+// =============================================================================
+
+#[cfg(feature = "lwlock_stats")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct lwlock_stats_key {
+    tranche: c_int,
+    instance: *mut c_void,
+}
+
+#[cfg(feature = "lwlock_stats")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct lwlock_stats {
+    key: lwlock_stats_key,
+    sh_acquire_count: c_int,
+    ex_acquire_count: c_int,
+    block_count: c_int,
+    dequeue_self_count: c_int,
+    spin_delay_count: c_int,
+}
+
+#[cfg(feature = "lwlock_stats")]
+static mut lwlock_stats_htab: *mut crate::utils::hash::dynahash::HTAB = std::ptr::null_mut();
+#[cfg(feature = "lwlock_stats")]
+static mut lwlock_stats_dummy: lwlock_stats = lwlock_stats {
+    key: lwlock_stats_key {
+        tranche: 0,
+        instance: std::ptr::null_mut(),
+    },
+    sh_acquire_count: 0,
+    ex_acquire_count: 0,
+    block_count: 0,
+    dequeue_self_count: 0,
+    spin_delay_count: 0,
+};
+
+#[cfg(feature = "lwlock_stats")]
+unsafe fn init_lwlock_stats() {
+    use crate::utils::hash::dynahash::{
+        hash_create, HASHCTL, HASH_BLOBS, HASH_CONTEXT, HASH_ELEM,
+    };
+    use crate::utils::mmgr::aset::AllocSetContextCreate;
+    use crate::utils::mmgr::mcxt::{MemoryContextAllowInCriticalSection, MemoryContextDelete};
+    use crate::storage::ipc::ipc::on_shmem_exit;
+
+    let mut ctl: HASHCTL = core::mem::zeroed();
+    static mut lwlock_stats_cxt: crate::utils::mmgr::memnodes::MemoryContext = std::ptr::null_mut();
+    static mut exit_registered: bool = false;
+
+    if !lwlock_stats_cxt.is_null() {
+        MemoryContextDelete(lwlock_stats_cxt);
+    }
+
+    /*
+     * The LWLock stats will be updated within a critical section, which
+     * requires allocating new hash entries. Allocations within a critical
+     * section are normally not allowed because running out of memory would
+     * lead to a PANIC, but LWLOCK_STATS is debugging code that's not normally
+     * turned on in production, so that's an acceptable risk. The hash entries
+     * are small, so the risk of running out of memory is minimal in practice.
+     */
+    lwlock_stats_cxt = AllocSetContextCreate(
+        TopMemoryContext,
+        c"LWLock stats".as_ptr(),
+        ALLOCSET_DEFAULT_SIZES,
+    );
+    MemoryContextAllowInCriticalSection(lwlock_stats_cxt, true);
+
+    ctl.keysize = core::mem::size_of::<lwlock_stats_key>() as Size;
+    ctl.entrysize = core::mem::size_of::<lwlock_stats>() as Size;
+    ctl.hcxt = lwlock_stats_cxt;
+    lwlock_stats_htab = hash_create(
+        c"lwlock stats".as_ptr(),
+        16384,
+        &ctl,
+        HASH_ELEM | HASH_BLOBS | HASH_CONTEXT,
+    );
+    if !exit_registered {
+        on_shmem_exit(print_lwlock_stats, 0);
+        exit_registered = true;
+    }
+}
+
+#[cfg(feature = "lwlock_stats")]
+unsafe extern "C" fn print_lwlock_stats(_code: c_int, _arg: Datum) {
+    use crate::utils::hash::dynahash::{hash_seq_init, hash_seq_search, HASH_SEQ_STATUS};
+
+    let mut scan: HASH_SEQ_STATUS = core::mem::zeroed();
+    let mut lwstats: *mut lwlock_stats;
+
+    hash_seq_init(&mut scan, lwlock_stats_htab);
+
+    /* Grab an LWLock to keep different backends from mixing reports */
+    LWLockAcquire(&raw mut *(*MainLWLockArray).lock as *mut LWLock, LW_EXCLUSIVE);
+
+    loop {
+        lwstats = hash_seq_search(&mut scan) as *mut lwlock_stats;
+        if lwstats.is_null() {
+            break;
+        }
+        eprintln!(
+            "PID {} lwlock {} {:p}: shacq {} exacq {} blk {} spindelay {} dequeue self {}",
+            MyProcPid,
+            CStr::from_ptr(GetLWTrancheName((*lwstats).key.tranche as u16)).to_string_lossy(),
+            (*lwstats).key.instance,
+            (*lwstats).sh_acquire_count,
+            (*lwstats).ex_acquire_count,
+            (*lwstats).block_count,
+            (*lwstats).spin_delay_count,
+            (*lwstats).dequeue_self_count
+        );
+    }
+
+    LWLockRelease(&raw mut *(*MainLWLockArray).lock as *mut LWLock);
+}
+
+#[cfg(feature = "lwlock_stats")]
+unsafe fn get_lwlock_stats_entry(lock: *mut LWLock) -> *mut lwlock_stats {
+    use crate::utils::hash::dynahash::{hash_search, HASH_ENTER};
+
+    let mut key: lwlock_stats_key;
+    let lwstats: *mut lwlock_stats;
+    let mut found: bool = false;
+
+    /*
+     * During shared memory initialization, the hash table doesn't exist yet.
+     * Stats of that phase aren't very interesting, so just collect operations
+     * on all locks in a single dummy entry.
+     */
+    if lwlock_stats_htab.is_null() {
+        return &raw mut lwlock_stats_dummy;
+    }
+
+    /* Fetch or create the entry. */
+    key = core::mem::zeroed();
+    key.tranche = (*lock).tranche as c_int;
+    key.instance = lock as *mut c_void;
+    lwstats = hash_search(
+        lwlock_stats_htab,
+        &key as *const lwlock_stats_key as *const c_void,
+        HASH_ENTER,
+        &mut found,
+    ) as *mut lwlock_stats;
+    if !found {
+        (*lwstats).sh_acquire_count = 0;
+        (*lwstats).ex_acquire_count = 0;
+        (*lwstats).block_count = 0;
+        (*lwstats).dequeue_self_count = 0;
+        (*lwstats).spin_delay_count = 0;
+    }
+    lwstats
+}
+
+// =============================================================================
 // Declarations from storage/lwlock.h
 // =============================================================================
 

@@ -1279,6 +1279,22 @@ pub unsafe fn ReleaseExternalFD() {
 // ReleaseLruFile, ReleaseLruFiles, AllocateVfd, FreeVfd, FileAccess
 // ---------------------------------------------------------------------------
 
+#[cfg(FDDEBUG)]
+unsafe fn _dump_lru() {
+    let mut mru: c_int = (*VfdCache).lruLessRecently;
+    let mut vfdP: *mut Vfd = VfdCache.add(mru as usize);
+    let mut buf = String::new();
+
+    buf.push_str(&format!("LRU: MOST {} ", mru));
+    while mru != 0 {
+        mru = (*vfdP).lruLessRecently;
+        vfdP = VfdCache.add(mru as usize);
+        buf.push_str(&format!("{} ", mru));
+    }
+    buf.push_str("LEAST");
+    elog!(LOG, "{}", buf);
+}
+
 unsafe fn Delete(file: File) {
     Assert!(file != 0);
 

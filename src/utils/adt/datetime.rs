@@ -66,6 +66,13 @@ use crate::utils::adt::date::{
 };
 use crate::utils::adt::numutils::{pg_ultostr, pg_ultostr_zeropad};
 use crate::utils::fmgr::FunctionCallInfo;
+use crate::access::common::heaptuple::heap_form_tuple;
+use crate::access::common::tupdesc::TupleDesc;
+use crate::access::htup_details::HeapTuple;
+use crate::nodes::execnodes::{ExprEndResult, ExprMultipleResult, ReturnSetInfo};
+use crate::nodes::nodeFuncs::{exprTypmod, relabel_to_typmod};
+use crate::nodes::pg_list::{linitial, list_length, lsecond};
+use crate::nodes::primnodes::{Const, FuncExpr};
 
 // ===========================================================================
 // Constants that are canonical to datetime.h / datatype/timestamp.h and not yet
@@ -472,6 +479,67 @@ const MAXIMUM_ALIGNOF: usize = 8;
 #[inline]
 fn MAXALIGN(len: usize) -> usize {
     (len + (MAXIMUM_ALIGNOF - 1)) & !(MAXIMUM_ALIGNOF - 1)
+}
+
+// funcapi.h: HeapTupleGetDatum(tuple) -- not yet homed (depends on the SRF
+// tuple machinery in utils/fmgr/funcapi.c).
+#[allow(non_snake_case)]
+unsafe fn HeapTupleGetDatum(_tuple: HeapTuple) -> Datum {
+    // TODO(pg-port): real symbol lives in crate::utils::fmgr::funcapi
+    unimplemented!("HeapTupleGetDatum: crate::utils::fmgr::funcapi")
+}
+
+// ---- funcapi.h SRF machinery (utils/fmgr/funcapi.c not yet wired) ----
+// The real defs live in crate::utils::fmgr::funcapi which is not mounted as a
+// module yet, so these are carried as local TODO(pg-port) stubs.
+pub const TYPEFUNC_COMPOSITE: c_int = 1;
+
+#[repr(C)]
+pub struct FuncCallContext {
+    pub call_cntr: u64,
+    pub max_calls: u64,
+    pub user_fctx: *mut c_void,
+    pub attinmeta: *mut c_void,
+    pub multi_call_memory_ctx: MemoryContext,
+    pub tuple_desc: TupleDesc,
+}
+
+unsafe fn init_MultiFuncCall(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    // TODO(pg-port): real symbol lives in crate::utils::fmgr::funcapi
+    unimplemented!("init_MultiFuncCall: crate::utils::fmgr::funcapi")
+}
+unsafe fn per_MultiFuncCall(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    // TODO(pg-port): real symbol lives in crate::utils::fmgr::funcapi
+    unimplemented!("per_MultiFuncCall: crate::utils::fmgr::funcapi")
+}
+unsafe fn end_MultiFuncCall(_fcinfo: FunctionCallInfo, _funcctx: *mut FuncCallContext) {
+    // TODO(pg-port): real symbol lives in crate::utils::fmgr::funcapi
+    unimplemented!("end_MultiFuncCall: crate::utils::fmgr::funcapi")
+}
+unsafe fn get_call_result_type(
+    _fcinfo: FunctionCallInfo,
+    _resultTypeId: *mut Oid,
+    _resultTupleDesc: *mut TupleDesc,
+) -> c_int {
+    // TODO(pg-port): real symbol lives in crate::utils::fmgr::funcapi
+    unimplemented!("get_call_result_type: crate::utils::fmgr::funcapi")
+}
+#[allow(non_snake_case)]
+unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: u32) {
+    // TODO(pg-port): real symbol lives in crate::utils::fmgr::funcapi
+    unimplemented!("InitMaterializedSRF: crate::utils::fmgr::funcapi")
+}
+
+// tuplestore.h: tuplestore_putvalues -- real symbol lives in
+// crate::utils::sort::tuplestore (not yet ported).
+unsafe fn tuplestore_putvalues(
+    _state: *mut crate::nodes::execnodes::Tuplestorestate,
+    _tdesc: TupleDesc,
+    _values: *const Datum,
+    _isnull: *const bool,
+) {
+    // TODO(pg-port): real symbol lives in crate::utils::sort::tuplestore
+    unimplemented!("tuplestore_putvalues: crate::utils::sort::tuplestore")
 }
 
 // ===========================================================================
@@ -5321,10 +5389,30 @@ pub unsafe fn CheckDateTokenTables() -> bool {
  * list_length/lsecond/linitial) lives in the nodes subsystem, not yet ported,
  * so this is carried as a stub.
  */
-pub unsafe fn TemporalSimplify(_max_precis: int32, _node: *mut Node) -> *mut Node {
-    // TODO(pg-port): real symbol depends on crate::nodes::nodeFuncs
-    // (castNode/IsA/exprTypmod/relabel_to_typmod) which are not yet ported.
-    unimplemented!("TemporalSimplify: crate::nodes::nodeFuncs / primnodes")
+pub unsafe fn TemporalSimplify(max_precis: int32, node: *mut Node) -> *mut Node {
+    let expr: *mut FuncExpr = crate::castNode!(FuncExpr, T_FuncExpr, node);
+    let mut ret: *mut Node = std::ptr::null_mut();
+    let typmod: *mut Node;
+
+    Assert!(list_length((*expr).args) >= 2);
+
+    typmod = lsecond((*expr).args) as *mut Node;
+
+    if crate::IsA!(typmod, T_Const) && !(*(typmod as *mut Const)).constisnull {
+        let source = linitial((*expr).args) as *mut Node;
+        let old_precis: int32 = exprTypmod(source as *const crate::nodes::nodes::Node);
+        let new_precis: int32 = DatumGetInt32((*(typmod as *mut Const)).constvalue);
+
+        if new_precis < 0
+            || new_precis == max_precis
+            || (old_precis >= 0 && new_precis >= old_precis)
+        {
+            ret = relabel_to_typmod(source as *mut crate::nodes::nodes::Node, new_precis)
+                as *mut Node;
+        }
+    }
+
+    ret
 }
 
 /*
@@ -5471,9 +5559,107 @@ unsafe fn FetchDynamicTimeZone(
  * heap_form_tuple, HeapTupleGetDatum) and itmin2interval are not yet ported,
  * so the body is carried as a stub.
  */
-pub unsafe fn pg_timezone_abbrevs_zone(_fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): real symbol depends on funcapi (SRF) + heap + crate::utils::adt::timestamp
-    unimplemented!("pg_timezone_abbrevs_zone: funcapi / access::heaptuple / timestamp")
+pub unsafe fn pg_timezone_abbrevs_zone(fcinfo: FunctionCallInfo) -> Datum {
+    let funcctx: *mut FuncCallContext;
+    let pindex: *mut c_int;
+    let result: Datum;
+    let tuple: HeapTuple;
+    let mut values: [Datum; 3] = [0; 3];
+    let nulls: [bool; 3] = [false; 3];
+    let now: TimestampTz = GetCurrentTransactionStartTimestamp();
+    let mut t: pg_time_t = timestamptz_to_time_t(now);
+    let mut abbrev: *const c_char;
+    let mut gmtoff: c_long = 0;
+    let mut isdst: c_int = 0;
+    let mut itm_in: pg_itm_in = std::mem::zeroed();
+    let mut resInterval: *mut Interval;
+
+    /* stuff done only on the first call of the function */
+    if (*(*fcinfo).flinfo).fn_extra.is_null() {
+        let mut tupdesc: TupleDesc = std::ptr::null_mut();
+        let oldcontext: MemoryContext;
+
+        /* create a function context for cross-call persistence */
+        let funcctx_init = init_MultiFuncCall(fcinfo);
+
+        /*
+         * switch to memory context appropriate for multiple function calls
+         */
+        oldcontext = MemoryContextSwitchTo((*funcctx_init).multi_call_memory_ctx);
+
+        /* allocate memory for user context */
+        let pindex_init = palloc(std::mem::size_of::<c_int>() as Size) as *mut c_int;
+        *pindex_init = 0;
+        (*funcctx_init).user_fctx = pindex_init as *mut c_void;
+
+        if get_call_result_type(fcinfo, std::ptr::null_mut(), &mut tupdesc) != TYPEFUNC_COMPOSITE {
+            elog!(ERROR, "return type must be a row type");
+        }
+        (*funcctx_init).tuple_desc = tupdesc;
+
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = per_MultiFuncCall(fcinfo);
+    pindex = (*funcctx).user_fctx as *mut c_int;
+
+    loop {
+        abbrev = pg_get_next_timezone_abbrev(pindex, session_timezone);
+        if abbrev.is_null() {
+            break;
+        }
+
+        /* Ignore abbreviations that aren't all-alphabetic */
+        if strspn(
+            abbrev,
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZ\0".as_ptr() as *const c_char,
+        ) != strlen(abbrev)
+        {
+            continue;
+        }
+
+        /* Determine the current meaning of the abbrev */
+        if !pg_interpret_timezone_abbrev(
+            abbrev,
+            &mut t,
+            &mut gmtoff,
+            &mut isdst,
+            session_timezone,
+        ) {
+            continue; /* hm, not actually used in this zone? */
+        }
+
+        values[0] = CStringGetTextDatum(abbrev);
+
+        /* Convert offset (in seconds) to an interval; can't overflow */
+        MemSet(
+            &mut itm_in as *mut pg_itm_in as *mut c_void,
+            0,
+            std::mem::size_of::<pg_itm_in>() as Size,
+        );
+        itm_in.tm_usec = gmtoff as int64 * USECS_PER_SEC;
+        resInterval = palloc(std::mem::size_of::<Interval>() as Size) as *mut Interval;
+        itmin2interval(&itm_in, resInterval);
+        values[1] = IntervalPGetDatum(resInterval);
+
+        values[2] = BoolGetDatum(isdst != 0);
+
+        tuple = heap_form_tuple((*funcctx).tuple_desc, values.as_ptr(), nulls.as_ptr());
+        result = HeapTupleGetDatum(tuple);
+
+        /* SRF_RETURN_NEXT(funcctx, result) */
+        (*funcctx).call_cntr += 1;
+        let rsi = (*fcinfo).resultinfo as *mut ReturnSetInfo;
+        (*rsi).isDone = ExprMultipleResult;
+        return result;
+    }
+
+    /* SRF_RETURN_DONE(funcctx) */
+    end_MultiFuncCall(fcinfo, funcctx);
+    let rsi = (*fcinfo).resultinfo as *mut ReturnSetInfo;
+    (*rsi).isDone = ExprEndResult;
+    0 as Datum
 }
 
 /*
@@ -5481,18 +5667,228 @@ pub unsafe fn pg_timezone_abbrevs_zone(_fcinfo: FunctionCallInfo) -> Datum {
  * defined by the timezone_abbreviations setting,
  * and returns a set of (abbrev, utc_offset, is_dst).
  */
-pub unsafe fn pg_timezone_abbrevs_abbrevs(_fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): real symbol depends on funcapi (SRF) + heap + crate::utils::adt::timestamp
-    unimplemented!("pg_timezone_abbrevs_abbrevs: funcapi / access::heaptuple / timestamp")
+pub unsafe fn pg_timezone_abbrevs_abbrevs(fcinfo: FunctionCallInfo) -> Datum {
+    let funcctx: *mut FuncCallContext;
+    let pindex: *mut c_int;
+    let result: Datum;
+    let tuple: HeapTuple;
+    let mut values: [Datum; 3] = [0; 3];
+    let nulls: [bool; 3] = [false; 3];
+    let tp: *const datetkn;
+    let mut buffer: [c_char; TOKMAXLEN + 1] = [0; TOKMAXLEN + 1];
+    let gmtoffset: c_int;
+    let is_dst: bool;
+    let mut p: *mut std::os::raw::c_uchar;
+    let mut itm_in: pg_itm_in = std::mem::zeroed();
+    let resInterval: *mut Interval;
+
+    /* stuff done only on the first call of the function */
+    if (*(*fcinfo).flinfo).fn_extra.is_null() {
+        let mut tupdesc: TupleDesc = std::ptr::null_mut();
+        let oldcontext: MemoryContext;
+
+        /* create a function context for cross-call persistence */
+        let funcctx_init = init_MultiFuncCall(fcinfo);
+
+        /*
+         * switch to memory context appropriate for multiple function calls
+         */
+        oldcontext = MemoryContextSwitchTo((*funcctx_init).multi_call_memory_ctx);
+
+        /* allocate memory for user context */
+        let pindex_init = palloc(std::mem::size_of::<c_int>() as Size) as *mut c_int;
+        *pindex_init = 0;
+        (*funcctx_init).user_fctx = pindex_init as *mut c_void;
+
+        if get_call_result_type(fcinfo, std::ptr::null_mut(), &mut tupdesc) != TYPEFUNC_COMPOSITE {
+            elog!(ERROR, "return type must be a row type");
+        }
+        (*funcctx_init).tuple_desc = tupdesc;
+
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = per_MultiFuncCall(fcinfo);
+    pindex = (*funcctx).user_fctx as *mut c_int;
+
+    if zoneabbrevtbl.is_null() || *pindex >= (*zoneabbrevtbl).numabbrevs {
+        /* SRF_RETURN_DONE(funcctx) */
+        end_MultiFuncCall(fcinfo, funcctx);
+        let rsi = (*fcinfo).resultinfo as *mut ReturnSetInfo;
+        (*rsi).isDone = ExprEndResult;
+        return 0 as Datum;
+    }
+
+    tp = (*zoneabbrevtbl).abbrevs.as_ptr().offset(*pindex as isize);
+
+    match (*tp).r#type as c_int {
+        x if x == TZ => {
+            gmtoffset = (*tp).value;
+            is_dst = false;
+        }
+        x if x == DTZ => {
+            gmtoffset = (*tp).value;
+            is_dst = true;
+        }
+        x if x == DYNTZ => {
+            /* Determine the current meaning of the abbrev */
+            let tzp: *mut pg_tz;
+            let mut extra: DateTimeErrorExtra = std::mem::zeroed();
+            let now: TimestampTz;
+            let mut isdst: c_int = 0;
+
+            tzp = FetchDynamicTimeZone(zoneabbrevtbl, tp, &mut extra);
+            if tzp.is_null() {
+                DateTimeParseError(
+                    DTERR_BAD_ZONE_ABBREV,
+                    &mut extra,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                    std::ptr::null_mut(),
+                );
+            }
+            now = GetCurrentTransactionStartTimestamp();
+            gmtoffset = -DetermineTimeZoneAbbrevOffsetTS(now, (*tp).token.as_ptr(), tzp, &mut isdst);
+            is_dst = isdst != 0;
+        }
+        _ => {
+            elog!(ERROR, "unrecognized timezone type {}", (*tp).r#type as c_int);
+            /* keep compiler quiet */
+            #[allow(unreachable_code)]
+            {
+                gmtoffset = 0;
+                is_dst = false;
+            }
+        }
+    }
+
+    /*
+     * Convert name to text, using upcasing conversion that is the inverse of
+     * what ParseDateTime() uses.
+     */
+    strlcpy(
+        buffer.as_mut_ptr(),
+        (*tp).token.as_ptr(),
+        std::mem::size_of_val(&buffer),
+    );
+    p = buffer.as_mut_ptr() as *mut std::os::raw::c_uchar;
+    while *p != 0 {
+        *p = pg_toupper(*p);
+        p = p.add(1);
+    }
+
+    values[0] = CStringGetTextDatum(buffer.as_ptr());
+
+    /* Convert offset (in seconds) to an interval; can't overflow */
+    MemSet(
+        &mut itm_in as *mut pg_itm_in as *mut c_void,
+        0,
+        std::mem::size_of::<pg_itm_in>() as Size,
+    );
+    itm_in.tm_usec = gmtoffset as int64 * USECS_PER_SEC;
+    resInterval = palloc(std::mem::size_of::<Interval>() as Size) as *mut Interval;
+    itmin2interval(&itm_in, resInterval);
+    values[1] = IntervalPGetDatum(resInterval);
+
+    values[2] = BoolGetDatum(is_dst);
+
+    *pindex += 1;
+
+    tuple = heap_form_tuple((*funcctx).tuple_desc, values.as_ptr(), nulls.as_ptr());
+    result = HeapTupleGetDatum(tuple);
+
+    /* SRF_RETURN_NEXT(funcctx, result) */
+    (*funcctx).call_cntr += 1;
+    let rsi = (*fcinfo).resultinfo as *mut ReturnSetInfo;
+    (*rsi).isDone = ExprMultipleResult;
+    result
 }
 
 /*
  * This set-returning function reads all the available full time zones
  * and returns a set of (name, abbrev, utc_offset, is_dst).
  */
-pub unsafe fn pg_timezone_names(_fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): real symbol depends on funcapi (Materialized SRF) +
-    // tuplestore + crate::utils::adt::timestamp (timestamp2tm/itmin2interval)
-    unimplemented!("pg_timezone_names: funcapi / tuplestore / timestamp")
+pub unsafe fn pg_timezone_names(fcinfo: FunctionCallInfo) -> Datum {
+    let rsinfo: *mut ReturnSetInfo = (*fcinfo).resultinfo as *mut ReturnSetInfo;
+    let tzenum: *mut pg_tzenum;
+    let mut tz: *mut pg_tz;
+    let mut values: [Datum; 4] = [0; 4];
+    let nulls: [bool; 4] = [false; 4];
+    let mut tzoff: c_int = 0;
+    let mut tm: pg_tm = std::mem::zeroed();
+    let mut fsec: fsec_t = 0;
+    let mut tzn: *const c_char = std::ptr::null();
+    let mut resInterval: *mut Interval;
+    let mut itm_in: pg_itm_in = std::mem::zeroed();
+
+    InitMaterializedSRF(fcinfo, 0);
+
+    /* initialize timezone scanning code */
+    tzenum = pg_tzenumerate_start();
+
+    /* search for another zone to display */
+    loop {
+        tz = pg_tzenumerate_next(tzenum);
+        if tz.is_null() {
+            break;
+        }
+
+        /* Convert now() to local time in this zone */
+        if timestamp2tm(
+            GetCurrentTransactionStartTimestamp(),
+            &mut tzoff,
+            &mut tm,
+            &mut fsec,
+            &mut tzn,
+            tz,
+        ) != 0
+        {
+            continue; /* ignore if conversion fails */
+        }
+
+        /*
+         * IANA's rather silly "Factory" time zone used to emit ridiculously
+         * long "abbreviations" such as "Local time zone must be set--see zic
+         * manual page" or "Local time zone must be set--use tzsetup".  While
+         * modern versions of tzdb emit the much saner "-00", it seems some
+         * benighted packagers are hacking the IANA data so that it continues
+         * to produce these strings.  To prevent producing a weirdly wide
+         * abbrev column, reject ridiculously long abbreviations.
+         */
+        if !tzn.is_null() && strlen(tzn) > 31 {
+            continue;
+        }
+
+        values[0] = CStringGetTextDatum(pg_get_timezone_name(tz));
+        values[1] = CStringGetTextDatum(if !tzn.is_null() {
+            tzn
+        } else {
+            b"\0".as_ptr() as *const c_char
+        });
+
+        /* Convert tzoff to an interval; can't overflow */
+        MemSet(
+            &mut itm_in as *mut pg_itm_in as *mut c_void,
+            0,
+            std::mem::size_of::<pg_itm_in>() as Size,
+        );
+        itm_in.tm_usec = -tzoff as int64 * USECS_PER_SEC;
+        resInterval = palloc(std::mem::size_of::<Interval>() as Size) as *mut Interval;
+        itmin2interval(&itm_in, resInterval);
+        values[2] = IntervalPGetDatum(resInterval);
+
+        values[3] = BoolGetDatum(tm.tm_isdst > 0);
+
+        tuplestore_putvalues(
+            (*rsinfo).setResult,
+            (*rsinfo).setDesc,
+            values.as_ptr(),
+            nulls.as_ptr(),
+        );
+    }
+
+    pg_tzenumerate_end(tzenum);
+    0 as Datum
 }
 

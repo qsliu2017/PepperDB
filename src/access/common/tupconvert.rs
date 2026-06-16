@@ -50,6 +50,8 @@ use crate::access::htup_details::HeapTuple;
 use crate::access::sysattr::FirstLowInvalidHeapAttributeNumber;
 use crate::nodes::bitmapset::{bms_add_member, bms_is_member, Bitmapset};
 use crate::nodes::execnodes::TupleTableSlot;
+use crate::executor::tuptable::{slot_getallattrs, ExecClearTuple};
+use crate::executor::execTuples::ExecStoreVirtualTuple;
 
 use core::mem::size_of;
 
@@ -236,62 +238,53 @@ pub unsafe fn execute_attr_map_tuple(
  * `in_slot`/`out_slot` must be live TupleTableSlots; `attrMap` a live AttrMap.
  */
 pub unsafe fn execute_attr_map_slot(
-    _attrMap: *mut AttrMap,
-    _in_slot: *mut TupleTableSlot,
-    _out_slot: *mut TupleTableSlot,
+    attrMap: *mut AttrMap,
+    in_slot: *mut TupleTableSlot,
+    out_slot: *mut TupleTableSlot,
 ) -> *mut TupleTableSlot {
-    // TODO(pg-port): needs executor/tuptable.h (slot_getallattrs,
-    // ExecClearTuple, ExecStoreVirtualTuple, TupleTableSlot field access).
-    //
-    // Original C body:
-    //
-    //   Datum      *invalues;
-    //   bool       *inisnull;
-    //   Datum      *outvalues;
-    //   bool       *outisnull;
-    //   int         outnatts;
-    //   int         i;
-    //
-    //   /* Sanity checks */
-    //   Assert(in_slot->tts_tupleDescriptor != NULL &&
-    //          out_slot->tts_tupleDescriptor != NULL);
-    //   Assert(in_slot->tts_values != NULL && out_slot->tts_values != NULL);
-    //
-    //   outnatts = out_slot->tts_tupleDescriptor->natts;
-    //
-    //   /* Extract all the values of the in slot. */
-    //   slot_getallattrs(in_slot);
-    //
-    //   /* Before doing the mapping, clear any old contents from the out slot */
-    //   ExecClearTuple(out_slot);
-    //
-    //   invalues = in_slot->tts_values;
-    //   inisnull = in_slot->tts_isnull;
-    //   outvalues = out_slot->tts_values;
-    //   outisnull = out_slot->tts_isnull;
-    //
-    //   /* Transpose into proper fields of the out slot. */
-    //   for (i = 0; i < outnatts; i++)
-    //   {
-    //       int         j = attrMap->attnums[i] - 1;
-    //
-    //       /* attrMap->attnums[i] == 0 means it's a NULL datum. */
-    //       if (j == -1)
-    //       {
-    //           outvalues[i] = (Datum) 0;
-    //           outisnull[i] = true;
-    //       }
-    //       else
-    //       {
-    //           outvalues[i] = invalues[j];
-    //           outisnull[i] = inisnull[j];
-    //       }
-    //   }
-    //
-    //   ExecStoreVirtualTuple(out_slot);
-    //
-    //   return out_slot;
-    unimplemented!("execute_attr_map_slot: needs executor/tuptable.h (TupleTableSlot)")
+    let invalues: *mut Datum;
+    let inisnull: *mut bool;
+    let outvalues: *mut Datum;
+    let outisnull: *mut bool;
+    let outnatts: c_int;
+
+    /* Sanity checks */
+    Assert!(
+        !(*in_slot).tts_tupleDescriptor.is_null()
+            && !(*out_slot).tts_tupleDescriptor.is_null()
+    );
+    Assert!(!(*in_slot).tts_values.is_null() && !(*out_slot).tts_values.is_null());
+
+    outnatts = (*(*out_slot).tts_tupleDescriptor).natts;
+
+    /* Extract all the values of the in slot. */
+    slot_getallattrs(in_slot);
+
+    /* Before doing the mapping, clear any old contents from the out slot */
+    ExecClearTuple(out_slot);
+
+    invalues = (*in_slot).tts_values;
+    inisnull = (*in_slot).tts_isnull;
+    outvalues = (*out_slot).tts_values;
+    outisnull = (*out_slot).tts_isnull;
+
+    /* Transpose into proper fields of the out slot. */
+    for i in 0..outnatts as usize {
+        let j: c_int = *(*attrMap).attnums.add(i) as c_int - 1;
+
+        /* attrMap->attnums[i] == 0 means it's a NULL datum. */
+        if j == -1 {
+            *outvalues.add(i) = 0 as Datum;
+            *outisnull.add(i) = true;
+        } else {
+            *outvalues.add(i) = *invalues.add(j as usize);
+            *outisnull.add(i) = *inisnull.add(j as usize);
+        }
+    }
+
+    ExecStoreVirtualTuple(out_slot);
+
+    out_slot
 }
 
 /*

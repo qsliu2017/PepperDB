@@ -1142,6 +1142,13 @@ pub static mut BufferInitGlobal_inProgress: bool = false;
 #[repr(C)]
 pub struct CkptTsStatus {
     pub tsId: Oid,
+    /// Checkpoint progress for this tablespace. To make progress comparable
+    /// between tablespaces the progress is, for each tablespace, measured as a
+    /// number between 0 and the total number of to-be-checkpointed pages. Each
+    /// page checkpointed in this tablespace increments this space's progress
+    /// by progress_slice.
+    pub progress: f64,
+    pub progress_slice: f64,
     /// the info below is about the strategy for writing the next batch of
     /// dirty buffers for the tablespace
     pub num_to_scan: c_int,
@@ -2090,6 +2097,94 @@ pub unsafe fn CheckReadBuffersOperation(
 // ----------------------------------------------------------------
 // WaitReadBuffers
 // ----------------------------------------------------------------
+#[inline]
+unsafe fn ReadBuffersCanStartIOOnce(buffer: Buffer, nowait: bool) -> bool {
+    if BufferIsLocal(buffer) {
+        crate::storage::buffer::localbuf::StartLocalBufferIO(
+            GetLocalBufferDescriptor((-buffer - 1) as u32),
+            true,
+            nowait,
+        )
+    } else {
+        StartBufferIO(GetBufferDescriptor((buffer - 1) as u32), true, nowait)
+    }
+}
+
+/*
+ * Helper for AsyncReadBuffers that tries to get the buffer ready for IO.
+ */
+#[inline]
+unsafe fn ReadBuffersCanStartIO(buffer: Buffer, nowait: bool) -> bool {
+    /*
+     * If this backend currently has staged IO, we need to submit the pending
+     * IO before waiting for the right to issue IO, to avoid the potential for
+     * deadlocks (and, more commonly, unnecessary delays for other backends).
+     */
+    if !nowait && pgaio_have_staged() {
+        if ReadBuffersCanStartIOOnce(buffer, true) {
+            return true;
+        }
+
+        /*
+         * Unfortunately StartBufferIO() returning false doesn't allow to
+         * distinguish between the buffer already being valid and IO already
+         * being in progress. Since IO already being in progress is quite
+         * rare, this approach seems fine.
+         */
+        pgaio_submit_staged();
+    }
+
+    ReadBuffersCanStartIOOnce(buffer, nowait)
+}
+
+/*
+ * Helper for WaitReadBuffers() that processes the results of a readv
+ * operation, raising an error if necessary.
+ */
+unsafe fn ProcessReadBuffersResult(operation: *mut ReadBuffersOperation) {
+    let aio_ret = core::ptr::addr_of_mut!((*operation).io_return);
+    let rs = (*aio_ret).result.status();
+    let mut newly_read_blocks: c_int = 0;
+
+    assert!(pgaio_wref_valid(core::ptr::addr_of_mut!((*operation).io_wref)));
+    assert!((*aio_ret).result.status() != PGAIO_RS_UNKNOWN as uint32);
+
+    /*
+     * SMGR reports the number of blocks successfully read as the result of
+     * the IO operation. Thus we can simply add that to ->nblocks_done.
+     */
+
+    if rs != PGAIO_RS_ERROR as uint32 {
+        newly_read_blocks = (*aio_ret).result.result;
+    }
+
+    if rs == PGAIO_RS_ERROR as uint32 || rs == PGAIO_RS_WARNING as uint32 {
+        pgaio_result_report(
+            (*aio_ret).result,
+            core::ptr::addr_of!((*aio_ret).target_data),
+            if rs == PGAIO_RS_ERROR as uint32 { crate::utils::elog::ERROR } else { crate::utils::elog::WARNING },
+        );
+    } else if (*aio_ret).result.status() == PGAIO_RS_PARTIAL as uint32 {
+        /*
+         * We'll retry, so we just emit a debug message to the server log (or
+         * not even that in prod scenarios).
+         */
+        pgaio_result_report(
+            (*aio_ret).result,
+            core::ptr::addr_of!((*aio_ret).target_data),
+            crate::utils::elog::DEBUG1,
+        );
+        elog!(DEBUG3, "partial read, will retry");
+    }
+
+    assert!(newly_read_blocks > 0);
+    assert!(newly_read_blocks <= MAX_IO_COMBINE_LIMIT as c_int);
+
+    (*operation).nblocks_done += newly_read_blocks as int16;
+
+    assert!((*operation).nblocks_done <= (*operation).nblocks);
+}
+
 pub unsafe fn WaitReadBuffers(operation: *mut ReadBuffersOperation) {
     /*
      * Wait for any async I/O to complete.
@@ -2965,7 +3060,7 @@ pub unsafe fn BufferSync(flags: c_int) {
      */
     let heap = binaryheap_allocate(
         if num_spaces > 0 { num_spaces } else { 1 },
-        Some(ckpt_ts_comparator),
+        Some(ts_ckpt_progress_comparator),
         null_mut(),
     );
 
@@ -3003,15 +3098,26 @@ pub unsafe fn BufferSync(flags: c_int) {
     binaryheap_free(heap);
 }
 
-unsafe fn ckpt_ts_comparator(
+/*
+ * Comparator for a Min-Heap over the per-tablespace checkpoint completion
+ * progress.
+ */
+unsafe fn ts_ckpt_progress_comparator(
     a: Datum,
     b: Datum,
     _arg: *mut c_void,
 ) -> c_int {
-    let a = &*(DatumGetPointer(a) as *const CkptTsStatus);
-    let b = &*(DatumGetPointer(b) as *const CkptTsStatus);
-    /* Higher num_to_scan first */
-    b.num_to_scan - a.num_to_scan
+    let sa = &*(DatumGetPointer(a) as *const CkptTsStatus);
+    let sb = &*(DatumGetPointer(b) as *const CkptTsStatus);
+
+    /* we want a min-heap, so return 1 for the a < b */
+    if sa.progress < sb.progress {
+        1
+    } else if sa.progress == sb.progress {
+        0
+    } else {
+        -1
+    }
 }
 
 #[inline]
@@ -4115,6 +4221,101 @@ unsafe fn shared_buffer_read_error_callback(arg: *mut c_void) {
 // Comparator functions used by inline sort
 // ----------------------------------------------------------------
 
+/*
+ * Error context callback for errors occurring during shared buffer writes.
+ */
+unsafe fn shared_buffer_write_error_callback(arg: *mut c_void) {
+    let bufHdr = arg as *mut BufferDesc;
+
+    /* Buffer is pinned, so we can read the tag without locking the spinlock */
+    if !bufHdr.is_null() {
+        let tag = (*bufHdr).tag;
+        let _rlocator = BufTagGetRelFileLocator(&tag);
+        let _forknum = BufTagGetForkNum(&tag);
+        let _blkno = tag.blockNum;
+        /* C also: errcontext("writing block %u of relation \"%s\"", ...) */
+        errcontext(relpathperm(_rlocator, _forknum).str_ptr());
+    }
+}
+
+/*
+ * Error context callback for errors occurring during local buffer writes.
+ */
+unsafe fn local_buffer_write_error_callback(arg: *mut c_void) {
+    let bufHdr = arg as *mut BufferDesc;
+
+    if !bufHdr.is_null() {
+        let tag = (*bufHdr).tag;
+        let _rlocator = BufTagGetRelFileLocator(&tag);
+        let _forknum = BufTagGetForkNum(&tag);
+        let _blkno = tag.blockNum;
+        /* C also: errcontext("writing block %u of relation \"%s\"", ...) */
+        errcontext(relpathbackend(_rlocator, MyProcNumber, _forknum).str_ptr());
+    }
+}
+
+/*
+ * RelFileLocator qsort/bsearch comparator; see RelFileLocatorEquals.
+ */
+unsafe fn rlocator_comparator(p1: *const c_void, p2: *const c_void) -> c_int {
+    let n1 = *(p1 as *const RelFileLocator);
+    let n2 = *(p2 as *const RelFileLocator);
+
+    if n1.relNumber < n2.relNumber {
+        return -1;
+    } else if n1.relNumber > n2.relNumber {
+        return 1;
+    }
+
+    if n1.dbOid < n2.dbOid {
+        return -1;
+    } else if n1.dbOid > n2.dbOid {
+        return 1;
+    }
+
+    if n1.spcOid < n2.spcOid {
+        -1
+    } else if n1.spcOid > n2.spcOid {
+        1
+    } else {
+        0
+    }
+}
+
+/*
+ * BufferTag comparator.
+ */
+#[inline]
+unsafe fn buffertag_comparator(ba: *const BufferTag, bb: *const BufferTag) -> c_int {
+    let rlocatora = BufTagGetRelFileLocator(ba);
+    let rlocatorb = BufTagGetRelFileLocator(bb);
+
+    let ret = rlocator_comparator(
+        &rlocatora as *const RelFileLocator as *const c_void,
+        &rlocatorb as *const RelFileLocator as *const c_void,
+    );
+
+    if ret != 0 {
+        return ret;
+    }
+
+    if BufTagGetForkNum(ba) < BufTagGetForkNum(bb) {
+        return -1;
+    }
+    if BufTagGetForkNum(ba) > BufTagGetForkNum(bb) {
+        return 1;
+    }
+
+    if (*ba).blockNum < (*bb).blockNum {
+        return -1;
+    }
+    if (*ba).blockNum > (*bb).blockNum {
+        return 1;
+    }
+
+    0
+}
+
 pub unsafe fn ckpt_buforder_comparator(
     pa: *const c_void,
     pb: *const c_void,
@@ -4307,37 +4508,198 @@ pub unsafe fn IssuePendingWritebacks(context: *mut WritebackContext) {
     (*context).nr_pending = 0;
 }
 
-// ----------------------------------------------------------------
-// EvictUnpinnedBuffer
-//
-// Try to evict an unpinned buffer.  Returns true on success.
-// ----------------------------------------------------------------
-pub unsafe fn EvictUnpinnedBuffer(buf: Buffer) -> bool {
-    assert!(!BufferIsLocal(buf));
-    let buf_hdr = GetBufferDescriptor((buf - 1) as u32);
-    InvalidateVictimBuffer(buf_hdr)
+/*
+ * Helper function to evict unpinned buffer whose buffer header lock is
+ * already acquired.
+ */
+unsafe fn EvictUnpinnedBufferInternal(desc: *mut BufferDesc, buffer_flushed: *mut bool) -> bool {
+    let buf_state: uint32;
+    let result: bool;
+
+    *buffer_flushed = false;
+
+    buf_state = pg_atomic_read_u32(&(*desc).state);
+    assert!(buf_state & BM_LOCKED != 0);
+
+    if (buf_state & BM_VALID) == 0 {
+        UnlockBufHdr(desc, buf_state);
+        return false;
+    }
+
+    /* Check that it's not pinned already. */
+    if BUF_STATE_GET_REFCOUNT(buf_state) > 0 {
+        UnlockBufHdr(desc, buf_state);
+        return false;
+    }
+
+    PinBuffer_Locked(desc); /* releases spinlock */
+
+    /* If it was dirty, try to clean it once. */
+    if buf_state & BM_DIRTY != 0 {
+        LWLockAcquire(BufferDescriptorGetContentLock(desc), LW_SHARED);
+        FlushBuffer(desc, null_mut(), IOOBJECT_RELATION, IOCONTEXT_NORMAL);
+        *buffer_flushed = true;
+        LWLockRelease(BufferDescriptorGetContentLock(desc));
+    }
+
+    /* This will return false if it becomes dirty or someone else pins it. */
+    result = InvalidateVictimBuffer(desc);
+
+    UnpinBuffer(BufferDescriptorGetBuffer(desc));
+
+    result
 }
 
-// ----------------------------------------------------------------
-// EvictUnpinnedBuffers
-//
-// Evict all unpinned clean buffers for the given relation.
-// ----------------------------------------------------------------
-pub unsafe fn EvictUnpinnedBuffers(rlocator: *const RelFileLocator) {
-    for buf_id in 0..NBuffers {
-        let bufHdr = GetBufferDescriptor(buf_id as u32);
-        let buf_state = pg_atomic_read_u32(&(*bufHdr).state);
-        if (buf_state & BM_TAG_VALID) == 0 {
+/*
+ * Try to evict the current block in a shared buffer.
+ *
+ * This function is intended for testing/development use only!
+ *
+ * To succeed, the buffer must not be pinned on entry, so if the caller had a
+ * particular block in mind, it might already have been replaced by some other
+ * block by the time this function runs.  It's also unpinned on return, so the
+ * buffer might be occupied again by the time control is returned, potentially
+ * even by the same block.  This inherent raciness without other interlocking
+ * makes the function unsuitable for non-testing usage.
+ *
+ * *buffer_flushed is set to true if the buffer was dirty and has been
+ * flushed, false otherwise.  However, *buffer_flushed=true does not
+ * necessarily mean that we flushed the buffer, it could have been flushed by
+ * someone else.
+ *
+ * Returns true if the buffer was valid and it has now been made invalid.
+ * Returns false if it wasn't valid, if it couldn't be evicted due to a pin,
+ * or if the buffer becomes dirty again while we're trying to write it out.
+ */
+pub unsafe fn EvictUnpinnedBuffer(buf: Buffer, buffer_flushed: *mut bool) -> bool {
+    let desc: *mut BufferDesc;
+
+    assert!(BufferIsValid(buf) && !BufferIsLocal(buf));
+
+    /* Make sure we can pin the buffer. */
+    ResourceOwnerEnlarge(CurrentResourceOwner);
+    ReservePrivateRefCountEntry();
+
+    desc = GetBufferDescriptor((buf - 1) as u32);
+    LockBufHdr(desc);
+
+    EvictUnpinnedBufferInternal(desc, buffer_flushed)
+}
+
+/*
+ * Try to evict all the shared buffers.
+ *
+ * This function is intended for testing/development use only! See
+ * EvictUnpinnedBuffer().
+ *
+ * The buffers_* parameters are mandatory and indicate the total count of
+ * buffers that:
+ * - buffers_evicted - were evicted
+ * - buffers_flushed - were flushed
+ * - buffers_skipped - could not be evicted
+ */
+pub unsafe fn EvictAllUnpinnedBuffers(
+    buffers_evicted: *mut int32,
+    buffers_flushed: *mut int32,
+    buffers_skipped: *mut int32,
+) {
+    *buffers_evicted = 0;
+    *buffers_skipped = 0;
+    *buffers_flushed = 0;
+
+    for buf in 1..=NBuffers {
+        let desc = GetBufferDescriptor((buf - 1) as u32);
+        let buf_state: uint32;
+        let mut buffer_flushed: bool = false;
+
+        CHECK_FOR_INTERRUPTS();
+
+        buf_state = pg_atomic_read_u32(&(*desc).state);
+        if (buf_state & BM_VALID) == 0 {
             continue;
         }
-        if (buf_state & BM_DIRTY) != 0 {
+
+        ResourceOwnerEnlarge(CurrentResourceOwner);
+        ReservePrivateRefCountEntry();
+
+        LockBufHdr(desc);
+
+        if EvictUnpinnedBufferInternal(desc, &mut buffer_flushed) {
+            *buffers_evicted += 1;
+        } else {
+            *buffers_skipped += 1;
+        }
+
+        if buffer_flushed {
+            *buffers_flushed += 1;
+        }
+    }
+}
+
+/*
+ * Try to evict all the shared buffers containing provided relation's pages.
+ *
+ * This function is intended for testing/development use only! See
+ * EvictUnpinnedBuffer().
+ *
+ * The caller must hold at least AccessShareLock on the relation to prevent
+ * the relation from being dropped.
+ *
+ * The buffers_* parameters are mandatory and indicate the total count of
+ * buffers that:
+ * - buffers_evicted - were evicted
+ * - buffers_flushed - were flushed
+ * - buffers_skipped - could not be evicted
+ */
+pub unsafe fn EvictRelUnpinnedBuffers(
+    rel: Relation,
+    buffers_evicted: *mut int32,
+    buffers_flushed: *mut int32,
+    buffers_skipped: *mut int32,
+) {
+    assert!(!RelationUsesLocalBuffers(rel));
+
+    *buffers_skipped = 0;
+    *buffers_evicted = 0;
+    *buffers_flushed = 0;
+
+    for buf in 1..=NBuffers {
+        let desc = GetBufferDescriptor((buf - 1) as u32);
+        let mut buf_state = pg_atomic_read_u32(&(*desc).state);
+        let mut buffer_flushed: bool = false;
+
+        CHECK_FOR_INTERRUPTS();
+
+        /* An unlocked precheck should be safe and saves some cycles. */
+        if (buf_state & BM_VALID) == 0
+            || !BufTagMatchesRelFileLocator(&(*desc).tag, &(*rel).rd_locator)
+        {
             continue;
         }
-        let tag = (*bufHdr).tag;
-        if !RelFileLocatorEquals(BufTagGetRelFileLocator(&tag), *rlocator) {
+
+        /* Make sure we can pin the buffer. */
+        ResourceOwnerEnlarge(CurrentResourceOwner);
+        ReservePrivateRefCountEntry();
+
+        buf_state = LockBufHdr(desc);
+
+        /* recheck, could have changed without the lock */
+        if (buf_state & BM_VALID) == 0
+            || !BufTagMatchesRelFileLocator(&(*desc).tag, &(*rel).rd_locator)
+        {
+            UnlockBufHdr(desc, buf_state);
             continue;
         }
-        InvalidateVictimBuffer(bufHdr);
+
+        if EvictUnpinnedBufferInternal(desc, &mut buffer_flushed) {
+            *buffers_evicted += 1;
+        } else {
+            *buffers_skipped += 1;
+        }
+
+        if buffer_flushed {
+            *buffers_flushed += 1;
+        }
     }
 }
 
@@ -4365,6 +4727,33 @@ pub unsafe fn ResOwnerReleaseBufferIO(res: Datum) {
     }
     let buf_hdr = GetBufferDescriptor((buffer - 1) as u32);
     AbortBufferIO();
+}
+
+unsafe fn ResOwnerPrintBufferIO(res: Datum) -> *mut c_char {
+    let buffer: Buffer = DatumGetInt32(res);
+
+    psprintf(&format!("lost track of buffer IO on buffer {}", buffer))
+}
+
+unsafe fn ResOwnerReleaseBufferPin(res: Datum) {
+    let buffer: Buffer = DatumGetInt32(res);
+
+    /* Like ReleaseBuffer, but don't call ResourceOwnerForgetBuffer */
+    if !BufferIsValid(buffer) {
+        elog!(ERROR, "bad buffer ID: {}", buffer);
+    }
+
+    if BufferIsLocal(buffer) {
+        crate::storage::buffer::localbuf::UnpinLocalBufferNoOwner(buffer);
+    } else {
+        /* C: UnpinBufferNoOwner(GetBufferDescriptor(buffer - 1)) */
+        UnpinBufferNoOwner(buffer);
+    }
+}
+
+unsafe fn ResOwnerPrintBufferPin(res: Datum) -> *mut c_char {
+    DebugPrintBufferRefcount(DatumGetInt32(res));
+    null_mut()
 }
 
 // ----------------------------------------------------------------

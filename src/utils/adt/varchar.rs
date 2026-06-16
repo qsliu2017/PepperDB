@@ -40,7 +40,7 @@ use crate::prelude::*;
 use crate::utils::fmgr::*;
 use crate::varatt::{SET_VARSIZE, VARDATA, VARDATA_ANY, VARSIZE_ANY_EXHDR};
 use crate::{
-    PG_GETARG_BOOL, PG_GETARG_CHAR, PG_GETARG_DATUM, PG_GETARG_INT32, PG_GETARG_NAME,
+    IsA, PG_GETARG_BOOL, PG_GETARG_CHAR, PG_GETARG_DATUM, PG_GETARG_INT32, PG_GETARG_NAME,
     PG_GETARG_POINTER, PG_GET_COLLATION, PG_RETURN_CSTRING, PG_RETURN_INT32, PG_RETURN_NAME,
     PG_RETURN_POINTER,
 };
@@ -50,8 +50,14 @@ use crate::catalog::pg_known_oids::C_COLLATION_OID;
 use crate::catalog::pg_type_d::BPCHAROID;
 use crate::common::hashfn::{hash_any, hash_any_extended};
 use crate::nodes::nodes::Node;
-use crate::postgres::{DatumGetPointer, PointerGetDatum};
+use crate::nodes::supportnodes::SupportRequestSimplify;
+use crate::nodes::primnodes::{Const, FuncExpr};
+use crate::nodes::pg_list::{linitial, list_length, lsecond};
+use crate::nodes::nodeFuncs::{exprTypmod, relabel_to_typmod};
+use crate::postgres::{DatumGetInt32, DatumGetPointer, PointerGetDatum};
 use crate::utils::adt::varlena::{cstring_to_text, cstring_to_text_with_len, TextDatumGetCString};
+use crate::utils::sort::sortsupport::SortSupport;
+use crate::libpq::pqformat::pq_getmsgtext;
 use crate::lib::stringinfo::StringInfo;
 use core::ffi::{c_char, c_int, c_void};
 
@@ -137,6 +143,70 @@ fn pg_database_encoding_max_length() -> c_int {
 unsafe fn ArrayGetIntegerTypmods(ta: *mut c_void, n: *mut c_int) -> *mut int32 {
     let _ = (ta, n);
     unimplemented!("ArrayGetIntegerTypmods: utils/array.h not yet translated")
+}
+
+// ----------------------------------------------------------------
+//   utils/varlena.h shims (collation-aware string comparison).
+//   TODO(pg-port): varstr_cmp / varstr_sortsupport live in utils/adt/varlena.c
+//   which is still mid-translation; replace these once it lands.
+// ----------------------------------------------------------------
+
+/// varstr_cmp: collation-aware comparison of two strings (utils/adt/varlena.c).
+///
+/// # Safety
+/// `arg1`/`arg2` are readable for `len1`/`len2` bytes.
+unsafe fn varstr_cmp(
+    arg1: *const c_char,
+    len1: c_int,
+    arg2: *const c_char,
+    len2: c_int,
+    collid: Oid,
+) -> c_int {
+    let _ = (arg1, len1, arg2, len2, collid);
+    unimplemented!("varstr_cmp: utils/adt/varlena.c not yet translated")
+}
+
+/// varstr_sortsupport: install generic string SortSupport (utils/adt/varlena.c).
+///
+/// # Safety
+/// `ssup` points to a SortSupport node.
+unsafe fn varstr_sortsupport(ssup: SortSupport, typid: Oid, collid: Oid) {
+    let _ = (ssup, typid, collid);
+    unimplemented!("varstr_sortsupport: utils/adt/varlena.c not yet translated")
+}
+
+// ----------------------------------------------------------------
+//   utils/pg_locale.h shims.
+//   TODO(pg-port): utils/adt/pg_locale.rs exists but is not yet wired into the
+//   module tree; replace these once it lands.  Only the `deterministic` flag is
+//   modelled here, which is all bpchar comparison/hashing reads.
+// ----------------------------------------------------------------
+
+#[repr(C)]
+pub struct pg_locale_struct {
+    pub deterministic: bool,
+}
+pub type pg_locale_t = *mut pg_locale_struct;
+
+/// pg_newlocale_from_collation (utils/pg_locale.h).  Not yet wired.
+unsafe fn pg_newlocale_from_collation(collid: Oid) -> pg_locale_t {
+    let _ = collid;
+    unimplemented!("pg_newlocale_from_collation: utils/adt/pg_locale.rs not yet wired")
+}
+
+/// pg_strnxfrm (utils/pg_locale.h).  Not yet wired.
+///
+/// # Safety
+/// `src` is readable for `srclen` bytes; `dest` is writable for `destsize` bytes.
+unsafe fn pg_strnxfrm(
+    dest: *mut c_char,
+    destsize: usize,
+    src: *const c_char,
+    srclen: isize,
+    locale: pg_locale_t,
+) -> usize {
+    let _ = (dest, destsize, src, srclen, locale);
+    unimplemented!("pg_strnxfrm: utils/adt/pg_locale.rs not yet wired")
 }
 
 /* common code for bpchartypmodin and varchartypmodin */
@@ -326,26 +396,27 @@ pub unsafe fn bpcharout(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 /*
- *		bpcharrecv			- converts external binary format to bpchar  [STUBBED]
+ *		bpcharrecv			- converts external binary format to bpchar
  */
 pub unsafe fn bpcharrecv(fcinfo: FunctionCallInfo) -> Datum {
     let buf: StringInfo = PG_GETARG_POINTER!(fcinfo, 0) as StringInfo;
-    // C: str = pq_getmsgtext(buf, buf->len - buf->cursor, &nbytes);
-    //    result = bpchar_input(str, nbytes, atttypmod, NULL); pfree(str);
-    //    PG_RETURN_BPCHAR_P(result);
-    // TODO(pg-port): pq_getmsgtext needs mb/mbutils + libpq/pqformat.
-    let _ = buf;
-    unimplemented!("bpcharrecv: pq_getmsgtext (mb/mbutils + pqformat) not yet translated")
+    let atttypmod: int32 = PG_GETARG_INT32!(fcinfo, 2);
+    let result: *mut BpChar;
+    let str: *mut c_char;
+    let mut nbytes: c_int = 0;
+
+    str = pq_getmsgtext(buf, (*buf).len - (*buf).cursor, &mut nbytes);
+    result = bpchar_input(str, nbytes as usize, atttypmod, core::ptr::null_mut());
+    pfree(str as *mut c_void);
+    return PointerGetDatum(result as *const c_void); // PG_RETURN_BPCHAR_P
 }
 
 /*
- *		bpcharsend			- converts bpchar to binary format  [STUBBED]
+ *		bpcharsend			- converts bpchar to binary format
  */
 pub unsafe fn bpcharsend(fcinfo: FunctionCallInfo) -> Datum {
     /* Exactly the same as textsend, so share code */
-    // C: return textsend(fcinfo);
-    // TODO(pg-port): textsend uses pq_sendtext (mb/mbutils) + pq_endtypsend (not yet translated).
-    crate::utils::adt::varlena::textsend(fcinfo)
+    return crate::utils::adt::varlena::textsend(fcinfo);
 }
 
 /*
@@ -594,40 +665,65 @@ pub unsafe fn varcharout(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 /*
- *		varcharrecv			- converts external binary format to varchar  [STUBBED]
+ *		varcharrecv			- converts external binary format to varchar
  */
 pub unsafe fn varcharrecv(fcinfo: FunctionCallInfo) -> Datum {
     let buf: StringInfo = PG_GETARG_POINTER!(fcinfo, 0) as StringInfo;
-    // C: str = pq_getmsgtext(buf, buf->len - buf->cursor, &nbytes);
-    //    result = varchar_input(str, nbytes, atttypmod, NULL); pfree(str);
-    //    PG_RETURN_VARCHAR_P(result);
-    // TODO(pg-port): pq_getmsgtext needs mb/mbutils + libpq/pqformat.
-    let _ = buf;
-    unimplemented!("varcharrecv: pq_getmsgtext (mb/mbutils + pqformat) not yet translated")
+    let atttypmod: int32 = PG_GETARG_INT32!(fcinfo, 2);
+    let result: *mut VarChar;
+    let str: *mut c_char;
+    let mut nbytes: c_int = 0;
+
+    str = pq_getmsgtext(buf, (*buf).len - (*buf).cursor, &mut nbytes);
+    result = varchar_input(str, nbytes as usize, atttypmod, core::ptr::null_mut());
+    pfree(str as *mut c_void);
+    return PointerGetDatum(result as *const c_void); // PG_RETURN_VARCHAR_P
 }
 
 /*
- *		varcharsend			- converts varchar to binary format  [STUBBED]
+ *		varcharsend			- converts varchar to binary format
  */
 pub unsafe fn varcharsend(fcinfo: FunctionCallInfo) -> Datum {
     /* Exactly the same as textsend, so share code */
-    // C: return textsend(fcinfo);
-    // TODO(pg-port): textsend uses pq_sendtext (mb/mbutils) + pq_endtypsend (not yet translated).
-    crate::utils::adt::varlena::textsend(fcinfo)
+    return crate::utils::adt::varlena::textsend(fcinfo);
 }
 
 /*
  * varchar_support()
  *
- * Planner support function for the varchar() length coercion function.  [STUBBED]
+ * Planner support function for the varchar() length coercion function.
+ *
+ * Currently, the only interesting thing we can do is flatten calls that set
+ * the new maximum length >= the previous maximum length.  We can ignore the
+ * isExplicit argument, since that only affects truncation cases.
  */
 pub unsafe fn varchar_support(fcinfo: FunctionCallInfo) -> Datum {
-    // C: inspects a SupportRequestSimplify node and may flatten a varchar() call via
-    //    relabel_to_typmod when the new max length >= the old one.
-    // TODO(pg-port): nodes/supportnodes.h (SupportRequestSimplify), nodes/nodeFuncs.h
-    //    (exprTypmod), nodes/primnodes.h (FuncExpr/Const) + relabel_to_typmod not yet translated.
-    let _ = fcinfo;
-    unimplemented!("varchar_support: nodes/supportnodes.h + relabel_to_typmod not yet translated")
+    let rawreq: *mut Node = PG_GETARG_POINTER!(fcinfo, 0) as *mut Node;
+    let mut ret: *mut Node = core::ptr::null_mut();
+
+    if IsA!(rawreq, T_SupportRequestSimplify) {
+        let req: *mut SupportRequestSimplify = rawreq as *mut SupportRequestSimplify;
+        let expr: *mut FuncExpr = (*req).fcall;
+        let typmod: *mut Node;
+
+        Assert!(list_length((*expr).args) >= 2);
+
+        typmod = lsecond((*expr).args) as *mut Node;
+
+        if IsA!(typmod, T_Const) && !(*(typmod as *mut Const)).constisnull {
+            let source: *mut Node = linitial((*expr).args) as *mut Node;
+            let old_typmod: int32 = exprTypmod(source);
+            let new_typmod: int32 = DatumGetInt32((*(typmod as *mut Const)).constvalue);
+            let old_max: int32 = old_typmod - VARHDRSZ;
+            let new_max: int32 = new_typmod - VARHDRSZ;
+
+            if new_typmod < 0 || (old_typmod >= 0 && old_max <= new_max) {
+                ret = relabel_to_typmod(source, new_typmod);
+            }
+        }
+    }
+
+    PG_RETURN_POINTER!(ret);
 }
 
 /*
@@ -775,80 +871,284 @@ unsafe fn check_collation_set(collid: Oid) {
 }
 
 pub unsafe fn bpchareq(fcinfo: FunctionCallInfo) -> Datum {
-    // C: deterministic-collation path does a length-trimmed memcmp; otherwise varstr_cmp.
-    // TODO(pg-port): utils/pg_locale.h (pg_newlocale_from_collation) + varstr_cmp not yet translated.
-    let _ = fcinfo;
-    unimplemented!("bpchareq: utils/pg_locale.h + varstr_cmp not yet translated")
+    let arg1: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 0) as *mut BpChar; // PG_GETARG_BPCHAR_PP(0)
+    let arg2: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 1) as *mut BpChar; // PG_GETARG_BPCHAR_PP(1)
+    let len1: c_int;
+    let len2: c_int;
+    let result: bool;
+    let collid: Oid = PG_GET_COLLATION!(fcinfo);
+    let mylocale: pg_locale_t;
+
+    check_collation_set(collid);
+
+    len1 = bcTruelen(arg1);
+    len2 = bcTruelen(arg2);
+
+    mylocale = pg_newlocale_from_collation(collid);
+
+    if (*mylocale).deterministic {
+        /*
+         * Since we only care about equality or not-equality, we can avoid all
+         * the expense of strcoll() here, and just do bitwise comparison.
+         */
+        if len1 != len2 {
+            result = false;
+        } else {
+            result = memcmp(
+                VARDATA_ANY(arg1 as *const c_char) as *const c_void,
+                VARDATA_ANY(arg2 as *const c_char) as *const c_void,
+                len1 as usize,
+            ) == 0;
+        }
+    } else {
+        result = varstr_cmp(
+            VARDATA_ANY(arg1 as *const c_char),
+            len1,
+            VARDATA_ANY(arg2 as *const c_char),
+            len2,
+            collid,
+        ) == 0;
+    }
+
+    // PG_FREE_IF_COPY(arg1, 0);
+    // PG_FREE_IF_COPY(arg2, 1);
+
+    crate::PG_RETURN_BOOL!(result);
 }
 
 pub unsafe fn bpcharne(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/pg_locale.h + varstr_cmp not yet translated.
-    let _ = fcinfo;
-    unimplemented!("bpcharne: utils/pg_locale.h + varstr_cmp not yet translated")
+    let arg1: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 0) as *mut BpChar; // PG_GETARG_BPCHAR_PP(0)
+    let arg2: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 1) as *mut BpChar; // PG_GETARG_BPCHAR_PP(1)
+    let len1: c_int;
+    let len2: c_int;
+    let result: bool;
+    let collid: Oid = PG_GET_COLLATION!(fcinfo);
+    let mylocale: pg_locale_t;
+
+    check_collation_set(collid);
+
+    len1 = bcTruelen(arg1);
+    len2 = bcTruelen(arg2);
+
+    mylocale = pg_newlocale_from_collation(collid);
+
+    if (*mylocale).deterministic {
+        /*
+         * Since we only care about equality or not-equality, we can avoid all
+         * the expense of strcoll() here, and just do bitwise comparison.
+         */
+        if len1 != len2 {
+            result = true;
+        } else {
+            result = memcmp(
+                VARDATA_ANY(arg1 as *const c_char) as *const c_void,
+                VARDATA_ANY(arg2 as *const c_char) as *const c_void,
+                len1 as usize,
+            ) != 0;
+        }
+    } else {
+        result = varstr_cmp(
+            VARDATA_ANY(arg1 as *const c_char),
+            len1,
+            VARDATA_ANY(arg2 as *const c_char),
+            len2,
+            collid,
+        ) != 0;
+    }
+
+    // PG_FREE_IF_COPY(arg1, 0);
+    // PG_FREE_IF_COPY(arg2, 1);
+
+    crate::PG_RETURN_BOOL!(result);
 }
 
 pub unsafe fn bpcharlt(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): varstr_cmp (utils/varlena.c collation comparison) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("bpcharlt: varstr_cmp not yet translated")
+    let arg1: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 0) as *mut BpChar;
+    let arg2: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 1) as *mut BpChar;
+    let len1: c_int;
+    let len2: c_int;
+    let cmp: c_int;
+
+    len1 = bcTruelen(arg1);
+    len2 = bcTruelen(arg2);
+
+    cmp = varstr_cmp(
+        VARDATA_ANY(arg1 as *const c_char),
+        len1,
+        VARDATA_ANY(arg2 as *const c_char),
+        len2,
+        PG_GET_COLLATION!(fcinfo),
+    );
+
+    // PG_FREE_IF_COPY(arg1, 0);
+    // PG_FREE_IF_COPY(arg2, 1);
+
+    crate::PG_RETURN_BOOL!(cmp < 0);
 }
 
 pub unsafe fn bpcharle(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): varstr_cmp not yet translated.
-    let _ = fcinfo;
-    unimplemented!("bpcharle: varstr_cmp not yet translated")
+    let arg1: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 0) as *mut BpChar;
+    let arg2: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 1) as *mut BpChar;
+    let len1: c_int;
+    let len2: c_int;
+    let cmp: c_int;
+
+    len1 = bcTruelen(arg1);
+    len2 = bcTruelen(arg2);
+
+    cmp = varstr_cmp(
+        VARDATA_ANY(arg1 as *const c_char),
+        len1,
+        VARDATA_ANY(arg2 as *const c_char),
+        len2,
+        PG_GET_COLLATION!(fcinfo),
+    );
+
+    // PG_FREE_IF_COPY(arg1, 0);
+    // PG_FREE_IF_COPY(arg2, 1);
+
+    crate::PG_RETURN_BOOL!(cmp <= 0);
 }
 
 pub unsafe fn bpchargt(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): varstr_cmp not yet translated.
-    let _ = fcinfo;
-    unimplemented!("bpchargt: varstr_cmp not yet translated")
+    let arg1: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 0) as *mut BpChar;
+    let arg2: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 1) as *mut BpChar;
+    let len1: c_int;
+    let len2: c_int;
+    let cmp: c_int;
+
+    len1 = bcTruelen(arg1);
+    len2 = bcTruelen(arg2);
+
+    cmp = varstr_cmp(
+        VARDATA_ANY(arg1 as *const c_char),
+        len1,
+        VARDATA_ANY(arg2 as *const c_char),
+        len2,
+        PG_GET_COLLATION!(fcinfo),
+    );
+
+    // PG_FREE_IF_COPY(arg1, 0);
+    // PG_FREE_IF_COPY(arg2, 1);
+
+    crate::PG_RETURN_BOOL!(cmp > 0);
 }
 
 pub unsafe fn bpcharge(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): varstr_cmp not yet translated.
-    let _ = fcinfo;
-    unimplemented!("bpcharge: varstr_cmp not yet translated")
+    let arg1: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 0) as *mut BpChar;
+    let arg2: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 1) as *mut BpChar;
+    let len1: c_int;
+    let len2: c_int;
+    let cmp: c_int;
+
+    len1 = bcTruelen(arg1);
+    len2 = bcTruelen(arg2);
+
+    cmp = varstr_cmp(
+        VARDATA_ANY(arg1 as *const c_char),
+        len1,
+        VARDATA_ANY(arg2 as *const c_char),
+        len2,
+        PG_GET_COLLATION!(fcinfo),
+    );
+
+    // PG_FREE_IF_COPY(arg1, 0);
+    // PG_FREE_IF_COPY(arg2, 1);
+
+    crate::PG_RETURN_BOOL!(cmp >= 0);
 }
 
 pub unsafe fn bpcharcmp(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): varstr_cmp not yet translated.
-    let _ = fcinfo;
-    unimplemented!("bpcharcmp: varstr_cmp not yet translated")
+    let arg1: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 0) as *mut BpChar;
+    let arg2: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 1) as *mut BpChar;
+    let len1: c_int;
+    let len2: c_int;
+    let cmp: c_int;
+
+    len1 = bcTruelen(arg1);
+    len2 = bcTruelen(arg2);
+
+    cmp = varstr_cmp(
+        VARDATA_ANY(arg1 as *const c_char),
+        len1,
+        VARDATA_ANY(arg2 as *const c_char),
+        len2,
+        PG_GET_COLLATION!(fcinfo),
+    );
+
+    // PG_FREE_IF_COPY(arg1, 0);
+    // PG_FREE_IF_COPY(arg2, 1);
+
+    PG_RETURN_INT32!(cmp);
 }
 
 pub unsafe fn bpchar_sortsupport(fcinfo: FunctionCallInfo) -> Datum {
-    // C: varstr_sortsupport(ssup, BPCHAROID, collid) within ssup_cxt.
-    // TODO(pg-port): utils/sortsupport.h (SortSupport) + varstr_sortsupport not yet translated.
-    let _ = (fcinfo, BPCHAROID);
-    unimplemented!("bpchar_sortsupport: utils/sortsupport.h + varstr_sortsupport not yet translated")
+    let ssup: SortSupport = PG_GETARG_POINTER!(fcinfo, 0) as SortSupport;
+    let collid: Oid = (*ssup).ssup_collation;
+    let oldcontext: MemoryContext;
+
+    oldcontext = MemoryContextSwitchTo((*ssup).ssup_cxt);
+
+    /* Use generic string SortSupport */
+    varstr_sortsupport(ssup, BPCHAROID, collid);
+
+    MemoryContextSwitchTo(oldcontext);
+
+    crate::PG_RETURN_VOID!()
 }
 
 pub unsafe fn bpchar_larger(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): varstr_cmp not yet translated.
-    let _ = fcinfo;
-    unimplemented!("bpchar_larger: varstr_cmp not yet translated")
+    let arg1: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 0) as *mut BpChar;
+    let arg2: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 1) as *mut BpChar;
+    let len1: c_int;
+    let len2: c_int;
+    let cmp: c_int;
+
+    len1 = bcTruelen(arg1);
+    len2 = bcTruelen(arg2);
+
+    cmp = varstr_cmp(
+        VARDATA_ANY(arg1 as *const c_char),
+        len1,
+        VARDATA_ANY(arg2 as *const c_char),
+        len2,
+        PG_GET_COLLATION!(fcinfo),
+    );
+
+    return PointerGetDatum((if cmp >= 0 { arg1 } else { arg2 }) as *const c_void); // PG_RETURN_BPCHAR_P
 }
 
 pub unsafe fn bpchar_smaller(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): varstr_cmp not yet translated.
-    let _ = fcinfo;
-    unimplemented!("bpchar_smaller: varstr_cmp not yet translated")
+    let arg1: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 0) as *mut BpChar;
+    let arg2: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 1) as *mut BpChar;
+    let len1: c_int;
+    let len2: c_int;
+    let cmp: c_int;
+
+    len1 = bcTruelen(arg1);
+    len2 = bcTruelen(arg2);
+
+    cmp = varstr_cmp(
+        VARDATA_ANY(arg1 as *const c_char),
+        len1,
+        VARDATA_ANY(arg2 as *const c_char),
+        len2,
+        PG_GET_COLLATION!(fcinfo),
+    );
+
+    return PointerGetDatum((if cmp <= 0 { arg1 } else { arg2 }) as *const c_void); // PG_RETURN_BPCHAR_P
 }
 
 /*
  * bpchar needs a specialized hash function because we want to ignore
  * trailing blanks in comparisons.
- *
- * NOTE: only the deterministic-collation branch is translated (hash_any of the
- * blank-trimmed data).  The non-deterministic branch needs pg_strnxfrm +
- * pg_newlocale_from_collation (utils/pg_locale.h) -> TODO(pg-port).
  */
 pub unsafe fn hashbpchar(fcinfo: FunctionCallInfo) -> Datum {
     let key: *mut BpChar = PG_GETARG_VARLENA_PP(fcinfo, 0) as *mut BpChar; // PG_GETARG_BPCHAR_PP(0)
     let collid: Oid = PG_GET_COLLATION!(fcinfo);
     let keydata: *mut c_char;
     let keylen: c_int;
+    let mylocale: pg_locale_t;
     let result: Datum;
 
     if collid == 0 {
@@ -862,13 +1162,36 @@ pub unsafe fn hashbpchar(fcinfo: FunctionCallInfo) -> Datum {
     keydata = VARDATA_ANY(key as *const c_char);
     keylen = bcTruelen(key);
 
-    // C: mylocale = pg_newlocale_from_collation(collid);
-    //    if (mylocale->deterministic) result = hash_any(keydata, keylen);
-    //    else { strnxfrm transform then hash_any }.
-    // TODO(pg-port): utils/pg_locale.h + pg_strnxfrm not yet translated; assume deterministic.
-    result = hash_any(keydata as *const c_uchar, keylen);
+    mylocale = pg_newlocale_from_collation(collid);
 
-    /* Avoid leaking memory for toasted inputs (no-op for plain datums). */
+    if (*mylocale).deterministic {
+        result = hash_any(keydata as *const c_uchar, keylen);
+    } else {
+        let bsize: Size;
+        let rsize: Size;
+        let buf: *mut c_char;
+
+        bsize = pg_strnxfrm(core::ptr::null_mut(), 0, keydata, keylen as isize, mylocale) as Size;
+        buf = palloc(bsize + 1) as *mut c_char;
+
+        rsize = pg_strnxfrm(buf, bsize + 1, keydata, keylen as isize, mylocale) as Size;
+
+        /* the second call may return a smaller value than the first */
+        if rsize > bsize {
+            elog!(ERROR, "pg_strnxfrm() returned unexpected result");
+        }
+
+        /*
+         * In principle, there's no reason to include the terminating NUL
+         * character in the hash, but it was done before and the behavior must
+         * be preserved.
+         */
+        result = hash_any(buf as *const u8, (bsize + 1) as c_int);
+
+        pfree(buf as *mut c_void);
+    }
+
+    /* Avoid leaking memory for toasted inputs */
     // PG_FREE_IF_COPY(key, 0);
 
     result
@@ -879,6 +1202,7 @@ pub unsafe fn hashbpcharextended(fcinfo: FunctionCallInfo) -> Datum {
     let collid: Oid = PG_GET_COLLATION!(fcinfo);
     let keydata: *mut c_char;
     let keylen: c_int;
+    let mylocale: pg_locale_t;
     let result: Datum;
 
     if collid == 0 {
@@ -892,12 +1216,42 @@ pub unsafe fn hashbpcharextended(fcinfo: FunctionCallInfo) -> Datum {
     keydata = VARDATA_ANY(key as *const c_char);
     keylen = bcTruelen(key);
 
-    // TODO(pg-port): non-deterministic branch needs pg_strnxfrm + utils/pg_locale.h; assume deterministic.
-    result = hash_any_extended(
-        keydata as *const c_uchar,
-        keylen,
-        crate::PG_GETARG_INT64!(fcinfo, 1) as u64,
-    );
+    mylocale = pg_newlocale_from_collation(collid);
+
+    if (*mylocale).deterministic {
+        result = hash_any_extended(
+            keydata as *const c_uchar,
+            keylen,
+            crate::PG_GETARG_INT64!(fcinfo, 1) as u64,
+        );
+    } else {
+        let bsize: Size;
+        let rsize: Size;
+        let buf: *mut c_char;
+
+        bsize = pg_strnxfrm(core::ptr::null_mut(), 0, keydata, keylen as isize, mylocale) as Size;
+        buf = palloc(bsize + 1) as *mut c_char;
+
+        rsize = pg_strnxfrm(buf, bsize + 1, keydata, keylen as isize, mylocale) as Size;
+
+        /* the second call may return a smaller value than the first */
+        if rsize > bsize {
+            elog!(ERROR, "pg_strnxfrm() returned unexpected result");
+        }
+
+        /*
+         * In principle, there's no reason to include the terminating NUL
+         * character in the hash, but it was done before and the behavior must
+         * be preserved.
+         */
+        result = hash_any_extended(
+            buf as *const u8,
+            (bsize + 1) as c_int,
+            crate::PG_GETARG_INT64!(fcinfo, 1) as u64,
+        );
+
+        pfree(buf as *mut c_void);
+    }
 
     // PG_FREE_IF_COPY(key, 0);
 
@@ -984,10 +1338,17 @@ pub unsafe fn btbpchar_pattern_cmp(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn btbpchar_pattern_sortsupport(fcinfo: FunctionCallInfo) -> Datum {
-    // C: varstr_sortsupport(ssup, BPCHAROID, C_COLLATION_OID) within ssup_cxt.
-    // TODO(pg-port): utils/sortsupport.h + varstr_sortsupport not yet translated.
-    let _ = (fcinfo, BPCHAROID, C_COLLATION_OID);
-    unimplemented!("btbpchar_pattern_sortsupport: utils/sortsupport.h + varstr_sortsupport not yet translated")
+    let ssup: SortSupport = PG_GETARG_POINTER!(fcinfo, 0) as SortSupport;
+    let oldcontext: MemoryContext;
+
+    oldcontext = MemoryContextSwitchTo((*ssup).ssup_cxt);
+
+    /* Use generic string SortSupport, forcing "C" collation */
+    varstr_sortsupport(ssup, BPCHAROID, C_COLLATION_OID);
+
+    MemoryContextSwitchTo(oldcontext);
+
+    crate::PG_RETURN_VOID!()
 }
 
 /// `PG_GETARG_BPCHAR_PP(n)` / `PG_GETARG_VARCHAR_PP(n)`: detoast a packed varlena arg into a

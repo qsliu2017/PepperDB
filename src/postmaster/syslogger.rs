@@ -1550,3 +1550,166 @@ unsafe extern "C" fn sigUsr1Handler(_postgres_signal_arg: c_int) {
     rotation_requested = true as sig_atomic_t;
     SetLatch(MyLatch);
 }
+
+// ---------------------------------------------------------------------------
+// EXEC_BACKEND-only helpers (translated from #ifdef EXEC_BACKEND block).
+// ---------------------------------------------------------------------------
+
+/*
+ * syslogger_fdget() -
+ *
+ * Utility wrapper to grab the file descriptor of an opened error output
+ * file.  Used when building the command to fork the logging collector.
+ */
+#[allow(dead_code)]
+unsafe fn syslogger_fdget(file: *mut FILE) -> c_int {
+    // #ifndef WIN32
+    if !file.is_null() {
+        fileno(file)
+    } else {
+        -1
+    }
+    // #else: return (int) _get_osfhandle(_fileno(file)) / 0 (WIN32, not built)
+}
+
+/*
+ * syslogger_fdopen() -
+ *
+ * Utility wrapper to re-open an error output file, using the given file
+ * descriptor.  Used when parsing arguments in a forked logging collector.
+ */
+#[allow(dead_code)]
+unsafe fn syslogger_fdopen(fd: c_int) -> *mut FILE {
+    let mut file: *mut FILE = null_mut();
+
+    // #ifndef WIN32
+    if fd != -1 {
+        file = fdopen(fd, c"a".as_ptr());
+        setvbuf(file, null_mut(), PG_IOLBF, 0);
+    }
+    // #else: _open_osfhandle path (WIN32, not built)
+
+    file
+}
+
+// ---------------------------------------------------------------------------
+// WIN32-only thread (translated from #ifdef WIN32 block).
+// ---------------------------------------------------------------------------
+
+/*
+ * Worker thread to transfer data from the pipe to the current logfile.
+ *
+ * We need this because on Windows, WaitForMultipleObjects does not work on
+ * unnamed pipes: it always reports "signaled", so the blocking ReadFile won't
+ * block anyway.
+ */
+#[allow(dead_code)]
+unsafe extern "C" fn pipeThread(_arg: *mut c_void) -> c_uint {
+    let mut logbuffer: [c_char; READ_BUF_SIZE as usize] = [0; READ_BUF_SIZE as usize];
+    let mut bytes_in_logbuffer: c_int = 0;
+
+    loop {
+        let mut bytes_read: DWORD = 0;
+        let result: BOOL;
+
+        result = ReadFile(
+            syslogPipe[0] as HANDLE,
+            logbuffer.as_mut_ptr().add(bytes_in_logbuffer as usize) as *mut c_void,
+            (logbuffer.len() as DWORD) - (bytes_in_logbuffer as DWORD),
+            &raw mut bytes_read,
+            null_mut(),
+        );
+
+        /*
+         * Enter critical section before doing anything that might touch
+         * global state shared by the main thread. Anything that uses
+         * palloc()/pfree() in particular are not safe outside the critical
+         * section.
+         */
+        EnterCriticalSection(&raw mut sysloggerSection);
+        if result == 0 {
+            let error: DWORD = GetLastError();
+
+            if error == ERROR_HANDLE_EOF || error == ERROR_BROKEN_PIPE {
+                break;
+            }
+            _dosmaperr(error);
+            ereport!(LOG, errmsg!("could not read from logger pipe: %m"));
+            /* C also: errcode_for_file_access() */
+        } else if bytes_read > 0 {
+            bytes_in_logbuffer += bytes_read as c_int;
+            process_pipe_input(logbuffer.as_mut_ptr(), &raw mut bytes_in_logbuffer);
+        }
+
+        /*
+         * If we've filled the current logfile, nudge the main thread to do a
+         * log rotation.
+         */
+        if Log_RotationSize > 0 {
+            if ftello(syslogFile) >= (Log_RotationSize as pgoff_t) * 1024
+                || (!csvlogFile.is_null()
+                    && ftello(csvlogFile) >= (Log_RotationSize as pgoff_t) * 1024)
+                || (!jsonlogFile.is_null()
+                    && ftello(jsonlogFile) >= (Log_RotationSize as pgoff_t) * 1024)
+            {
+                SetLatch(MyLatch);
+            }
+        }
+        LeaveCriticalSection(&raw mut sysloggerSection);
+    }
+
+    /* We exit the above loop only upon detecting pipe EOF */
+    pipe_eof_seen = true;
+
+    /* if there's any data left then force it out now */
+    flush_pipe_input(logbuffer.as_mut_ptr(), &raw mut bytes_in_logbuffer);
+
+    /* set the latch to waken the main thread, which will quit */
+    SetLatch(MyLatch);
+
+    LeaveCriticalSection(&raw mut sysloggerSection);
+    _endthread();
+    0
+}
+
+// ---- WIN32 primitives (unported; pipeThread is not built on this platform) ----
+#[allow(non_camel_case_types)]
+type DWORD = u32;
+#[allow(non_camel_case_types)]
+type BOOL = c_int;
+#[allow(non_camel_case_types)]
+type HANDLE = *mut c_void;
+const ERROR_HANDLE_EOF: DWORD = 38;
+const ERROR_BROKEN_PIPE: DWORD = 109;
+static mut sysloggerSection: c_int = 0;
+
+#[allow(non_snake_case)]
+unsafe fn ReadFile(
+    _h: HANDLE,
+    _buf: *mut c_void,
+    _n: DWORD,
+    _read: *mut DWORD,
+    _ovl: *mut c_void,
+) -> BOOL {
+    todo!("pg-port: win32 ReadFile")
+}
+#[allow(non_snake_case)]
+unsafe fn EnterCriticalSection(_s: *mut c_int) {
+    todo!("pg-port: win32 EnterCriticalSection")
+}
+#[allow(non_snake_case)]
+unsafe fn LeaveCriticalSection(_s: *mut c_int) {
+    todo!("pg-port: win32 LeaveCriticalSection")
+}
+#[allow(non_snake_case)]
+unsafe fn GetLastError() -> DWORD {
+    todo!("pg-port: win32 GetLastError")
+}
+#[allow(non_snake_case)]
+unsafe fn _dosmaperr(_e: DWORD) {
+    todo!("pg-port: port/win32error.c _dosmaperr")
+}
+#[allow(non_snake_case)]
+unsafe fn _endthread() {
+    todo!("pg-port: win32 _endthread")
+}

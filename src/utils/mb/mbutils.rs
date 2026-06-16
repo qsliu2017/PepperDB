@@ -1402,8 +1402,108 @@ pub unsafe fn SetMessageEncoding(encoding: c_int) {
     Assert!((*MessageEncoding).encoding as c_int == encoding);
 }
 
-// #ifdef ENABLE_NLS  -- pg_bind_textdomain_codeset / raw_pg_bind_textdomain_codeset
-// are only built with NLS support, which is not configured in this port.
+// #ifdef ENABLE_NLS
+/*
+ * Make one bind_textdomain_codeset() call, translating a pg_enc to a gettext
+ * codeset.  Fails for MULE_INTERNAL, an encoding unknown to gettext; can also
+ * fail for gettext-internal causes like out-of-memory.
+ */
+#[cfg(feature = "enable_nls")]
+unsafe fn raw_pg_bind_textdomain_codeset(domainname: *const c_char, encoding: c_int) -> bool {
+    use crate::common::encnames::pg_enc2gettext_tbl;
+    use crate::utils::mmgr::mcxt::CurrentMemoryContext;
+
+    let elog_ok = !CurrentMemoryContext.is_null();
+
+    if !PG_VALID_ENCODING(encoding) || pg_enc2gettext_tbl[encoding as usize].is_null() {
+        return false;
+    }
+
+    if !bind_textdomain_codeset(domainname, pg_enc2gettext_tbl[encoding as usize]).is_null() {
+        return true;
+    }
+
+    if elog_ok {
+        elog!(LOG, "bind_textdomain_codeset failed");
+    } else {
+        crate::utils::error::elog_impl::write_stderr(
+            c"bind_textdomain_codeset failed".as_ptr(),
+        );
+    }
+
+    false
+}
+
+/*
+ * Bind a gettext message domain to the codeset corresponding to the database
+ * encoding.  For SQL_ASCII, instead bind to the codeset implied by LC_CTYPE.
+ * Return the MessageEncoding implied by the new settings.
+ *
+ * On most platforms, gettext defaults to the codeset implied by LC_CTYPE.
+ * When that matches the database encoding, we don't need to do anything.  In
+ * CREATE DATABASE, we enforce or trust that the locale's codeset matches the
+ * database encoding, except for the C locale.  (On Windows, we also permit a
+ * discrepancy under the UTF8 encoding.)  For the C locale, explicitly bind
+ * gettext to the right codeset.
+ *
+ * On Windows, gettext defaults to the Windows ANSI code page.  This is a
+ * convenient departure for software that passes the strings to Windows ANSI
+ * APIs, but we don't do that.  Compel gettext to use database encoding or,
+ * failing that, the LC_CTYPE encoding as it would on other platforms.
+ *
+ * This function is called before elog() and palloc() are usable.
+ */
+#[cfg(feature = "enable_nls")]
+pub unsafe fn pg_bind_textdomain_codeset(domainname: *const c_char) -> c_int {
+    use crate::utils::mmgr::mcxt::CurrentMemoryContext;
+
+    let elog_ok = !CurrentMemoryContext.is_null();
+    let encoding = GetDatabaseEncoding();
+    let mut new_msgenc: c_int;
+
+    // #ifndef WIN32
+    let ctype = setlocale(LC_CTYPE, std::ptr::null());
+
+    if pg_strcasecmp(ctype, c"C".as_ptr()) == 0 || pg_strcasecmp(ctype, c"POSIX".as_ptr()) == 0
+    // #endif
+    {
+        if encoding != PG_SQL_ASCII as c_int
+            && raw_pg_bind_textdomain_codeset(domainname, encoding)
+        {
+            return encoding;
+        }
+    }
+
+    new_msgenc = pg_get_encoding_from_locale(std::ptr::null(), elog_ok);
+    if new_msgenc < 0 {
+        new_msgenc = PG_SQL_ASCII as c_int;
+    }
+
+    // #ifdef WIN32
+    // if !raw_pg_bind_textdomain_codeset(domainname, new_msgenc) {
+    //     /* On failure, the old message encoding remains valid. */
+    //     return GetMessageEncoding();
+    // }
+    // #endif
+
+    new_msgenc
+}
+
+#[cfg(feature = "enable_nls")]
+extern "C" {
+    fn bind_textdomain_codeset(domainname: *const c_char, codeset: *const c_char) -> *mut c_char;
+}
+
+#[cfg(feature = "enable_nls")]
+extern "C" {
+    fn setlocale(category: c_int, locale: *const c_char) -> *mut c_char;
+    fn pg_strcasecmp(s1: *const c_char, s2: *const c_char) -> c_int;
+    fn pg_get_encoding_from_locale(ctype: *const c_char, write_message: bool) -> c_int;
+}
+
+#[cfg(feature = "enable_nls")]
+const LC_CTYPE: c_int = 2;
+// #endif /* ENABLE_NLS */
 
 /*
  * The database encoding, also called the server encoding, represents the
@@ -1447,6 +1547,90 @@ pub unsafe fn PG_encoding_to_char(fcinfo: FunctionCallInfo) -> Datum {
  */
 pub unsafe fn GetMessageEncoding() -> c_int {
     (*MessageEncoding).encoding as c_int
+}
+
+/*
+ * Convert from MessageEncoding to a palloc'd, null terminated utf16 string.
+ * The output parameter utf16len is set to the number of UTF16 code points,
+ * not counting the null terminator.  Returns NULL on SQL_ASCII or error.
+ * (WIN32-only in C.)
+ */
+#[cfg(windows)]
+unsafe fn pgwin32_message_to_UTF16(
+    str: *const c_char,
+    mut len: c_int,
+    utf16len: *mut c_int,
+) -> *mut WCHAR {
+    extern "C" {
+        fn MultiByteToWideChar(
+            code_page: UINT,
+            dw_flags: u32,
+            lp_multi_byte_str: *const c_char,
+            cb_multi_byte: c_int,
+            lp_wide_char_str: *mut WCHAR,
+            cch_wide_char: c_int,
+        ) -> c_int;
+    }
+    const CP_UTF8: UINT = 65001;
+
+    let msgenc = GetMessageEncoding();
+    let utf16: *mut WCHAR;
+    let dstlen: c_int;
+
+    if msgenc == PG_SQL_ASCII as c_int {
+        /* No conversion is possible, and SQL_ASCII is never utf16. */
+        return null_mut();
+    }
+
+    let codepage: UINT = pg_enc2name_tbl[msgenc as usize].codepage;
+
+    /*
+     * Use MultiByteToWideChar directly if there is a corresponding codepage,
+     * or double conversion through UTF8 if not.
+     */
+    if codepage != 0 {
+        utf16 = palloc(core::mem::size_of::<WCHAR>() * (len as usize + 1)) as *mut WCHAR;
+        dstlen = MultiByteToWideChar(codepage, 0, str, len, utf16, len);
+        *utf16.add(dstlen as usize) = 0 as WCHAR;
+    } else {
+        let utf8: *mut c_char;
+
+        /*
+         * XXX pg_do_encoding_conversion() requires a transaction.  In the
+         * absence of one, hope for the input to be valid UTF8.
+         */
+        if IsTransactionState() {
+            utf8 = pg_do_encoding_conversion(
+                str as *mut c_uchar,
+                len,
+                msgenc,
+                PG_UTF8 as c_int,
+            ) as *mut c_char;
+            if utf8 != str as *mut c_char {
+                len = strlen(utf8) as c_int;
+            }
+        } else {
+            utf8 = str as *mut c_char;
+        }
+
+        utf16 = palloc(core::mem::size_of::<WCHAR>() * (len as usize + 1)) as *mut WCHAR;
+        dstlen = MultiByteToWideChar(CP_UTF8, 0, utf8, len, utf16, len);
+        *utf16.add(dstlen as usize) = 0 as WCHAR;
+
+        if utf8 != str as *mut c_char {
+            pfree(utf8 as *mut c_void);
+        }
+    }
+
+    if dstlen == 0 && len > 0 {
+        pfree(utf16 as *mut c_void);
+        return null_mut(); /* error */
+    }
+
+    if !utf16len.is_null() {
+        *utf16len = dstlen;
+    }
+    utf16
 }
 
 /*

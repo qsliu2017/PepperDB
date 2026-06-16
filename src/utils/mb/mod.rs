@@ -6,3 +6,4 @@
 pub mod stringinfo_mb;
 pub mod wstrcmp;
 pub mod wstrncmp;
+pub mod mbutils;

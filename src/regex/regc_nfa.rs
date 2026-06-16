@@ -3802,14 +3802,46 @@ pub unsafe fn dumpnfa(nfa: *mut nfa, f: *mut c_void) {
     // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
 }
 
-// #ifdef REG_DEBUG -- subordinates of dumpnfa (dumpstate/dumparcs/dumparc),
-// dumpcnfa and its subordinates (dumpcstate) are only compiled with REG_DEBUG,
-// which is undefined here, so they are omitted entirely.
+// #ifdef REG_DEBUG -- subordinates of dumpnfa
+
+/*
+ * dumpstate - dump an NFA state in human-readable form
+ */
+pub unsafe fn dumpstate(s: *mut state, f: *mut c_void) {
+    let _ = (s, f);
+    // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
+}
+
+/*
+ * dumparcs - dump out-arcs in human-readable form
+ */
+pub unsafe fn dumparcs(s: *mut state, f: *mut c_void) {
+    let _ = (s, f);
+    // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
+}
+
+/*
+ * dumparc - dump one outarc in readable form, including prefixing tab
+ */
+pub unsafe fn dumparc(a: *mut arc, s: *mut state, f: *mut c_void) {
+    let _ = (a, s, f);
+    // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
+}
 
 /*
  * dumpcnfa - dump a compacted NFA in human-readable form
  */
 pub unsafe fn dumpcnfa(cnfa: *mut cnfa, f: *mut c_void) {
     let _ = (cnfa, f);
+    // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
+}
+
+// #ifdef REG_DEBUG -- subordinates of dumpcnfa
+
+/*
+ * dumpcstate - dump a compacted-NFA state in human-readable form
+ */
+pub unsafe fn dumpcstate(st: c_int, cnfa: *mut cnfa, f: *mut c_void) {
+    let _ = (st, cnfa, f);
     // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
 }

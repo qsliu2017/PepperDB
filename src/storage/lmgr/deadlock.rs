@@ -1178,6 +1178,26 @@ unsafe fn TopoSort(
     true
 }
 
+#[cfg(feature = "DEBUG_DEADLOCK")]
+unsafe fn PrintLockQueue(lock: *mut LOCK, info: *const std::os::raw::c_char) {
+    let waitQueue = &mut (*lock).waitProcs as *mut dclist_head;
+    let mut proc_iter: dlist_iter = std::mem::zeroed();
+
+    print!(
+        "{} lock {:p} queue ",
+        std::ffi::CStr::from_ptr(info).to_string_lossy(),
+        lock
+    );
+
+    dclist_foreach!(proc_iter, waitQueue, {
+        let proc_ = dlist_container!(PGPROC, links, proc_iter.cur);
+        print!(" {}", (*proc_).pid);
+    });
+    println!();
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+}
+
 /*
  * Report a detected deadlock, with available details.
  */

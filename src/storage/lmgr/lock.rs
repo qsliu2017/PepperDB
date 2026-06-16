@@ -5055,3 +5055,77 @@ pub unsafe fn LockWaiterCount(locktag: *const LOCKTAG) -> c_int {
 // (dclist_head in ilist.h contains a dlist_head named "dlist").
 // This impl note is for the integrator.
 // TODO(pg-port): add dclist_foreach! macro to lib/ilist.rs.
+
+/* TODO(pg-port): LOCK_DEBUG-only print helpers (lock.c LOCK_PRINT / PROCLOCK_PRINT macros) */
+#[cfg(any())] /* LOCK_DEBUG build only */
+unsafe fn LOCK_PRINT(_where: *const c_char, _lock: *const LOCK, _type: LOCKMODE) {}
+#[cfg(any())] /* LOCK_DEBUG build only */
+unsafe fn PROCLOCK_PRINT(_where: *const c_char, _proclockP: *const PROCLOCK) {}
+
+/*
+ * Dump all locks in the given proc's myProcLocks lists.
+ *
+ * Caller is responsible for having acquired appropriate LWLocks.
+ */
+#[cfg(any())] /* LOCK_DEBUG build only */
+pub unsafe fn DumpLocks(proc_: *mut PGPROC) {
+    let i: c_int;
+
+    if proc_.is_null() {
+        return;
+    }
+
+    if !(*proc_).waitLock.is_null() {
+        LOCK_PRINT(c"DumpLocks: waiting on".as_ptr(), (*proc_).waitLock, 0);
+    }
+
+    for i in 0..(NUM_LOCK_PARTITIONS as c_int) {
+        let procLocks: *mut dlist_head = &mut (*proc_).myProcLocks[i as usize];
+        let mut iter: dlist_iter = core::mem::zeroed();
+
+        dlist_foreach!(iter, procLocks, {
+            let proclock: *mut PROCLOCK = dlist_container!(PROCLOCK, procLink, iter.cur);
+            let lock: *mut LOCK = (*proclock).tag.myLock;
+
+            Assert!((*proclock).tag.myProc == proc_);
+            PROCLOCK_PRINT(c"DumpLocks".as_ptr(), proclock);
+            LOCK_PRINT(c"DumpLocks".as_ptr(), lock, 0);
+        });
+    }
+}
+
+/*
+ * Dump all lmgr locks.
+ *
+ * Caller is responsible for having acquired appropriate LWLocks.
+ */
+#[cfg(any())] /* LOCK_DEBUG build only */
+pub unsafe fn DumpAllLocks() {
+    let proc_: *mut PGPROC;
+    let mut proclock: *mut PROCLOCK;
+    let lock: *mut LOCK;
+    let mut status: HASH_SEQ_STATUS = core::mem::zeroed();
+
+    proc_ = MyProc;
+
+    if !proc_.is_null() && !(*proc_).waitLock.is_null() {
+        LOCK_PRINT(c"DumpAllLocks: waiting on".as_ptr(), (*proc_).waitLock, 0);
+    }
+
+    hash_seq_init(&raw mut status, LockMethodProcLockHash);
+
+    loop {
+        proclock = hash_seq_search(&raw mut status) as *mut PROCLOCK;
+        if proclock.is_null() {
+            break;
+        }
+        PROCLOCK_PRINT(c"DumpAllLocks".as_ptr(), proclock);
+
+        lock = (*proclock).tag.myLock;
+        if !lock.is_null() {
+            LOCK_PRINT(c"DumpAllLocks".as_ptr(), lock, 0);
+        } else {
+            elog!(LOG, "DumpAllLocks: proclock->tag.myLock = NULL");
+        }
+    }
+}

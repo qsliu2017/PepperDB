@@ -2017,6 +2017,92 @@ unsafe fn ExecEndPlan(planstate: *mut PlanState, estate: *mut EState) {
     ExecCloseRangeTableRelations(estate);
 }
 
+/*
+ * Close any relations that have been opened for ResultRelInfos.
+ */
+pub unsafe fn ExecCloseResultRelations(estate: *mut EState) {
+    /*
+     * close indexes of result relation(s) if any.  (Rels themselves are
+     * closed in ExecCloseRangeTableRelations())
+     *
+     * In addition, close the stub RTs that may be in each resultrel's
+     * ri_ancestorResultRels.
+     */
+    let mut l = if !(*estate).es_opened_result_relations.is_null() {
+        list_head((*estate).es_opened_result_relations)
+    } else {
+        core::ptr::null_mut()
+    };
+    while !l.is_null() {
+        let resultRelInfo = (*l).ptr_value as *mut ResultRelInfo;
+
+        ExecCloseIndices(resultRelInfo);
+        let mut lc = if !(*resultRelInfo).ri_ancestorResultRels.is_null() {
+            list_head((*resultRelInfo).ri_ancestorResultRels)
+        } else {
+            core::ptr::null_mut()
+        };
+        while !lc.is_null() {
+            let rInfo = (*lc).ptr_value as *mut ResultRelInfo;
+
+            /*
+             * Ancestors with RTI > 0 (should only be the root ancestor) are
+             * closed by ExecCloseRangeTableRelations.
+             */
+            if (*rInfo).ri_RangeTableIndex > 0 {
+                lc = lnext((*resultRelInfo).ri_ancestorResultRels, lc);
+                continue;
+            }
+
+            table_close((*rInfo).ri_RelationDesc, NoLock);
+            lc = lnext((*resultRelInfo).ri_ancestorResultRels, lc);
+        }
+        l = lnext((*estate).es_opened_result_relations, l);
+    }
+
+    /* Close any relations that have been opened by ExecGetTriggerResultRel(). */
+    let mut l = if !(*estate).es_trig_target_relations.is_null() {
+        list_head((*estate).es_trig_target_relations)
+    } else {
+        core::ptr::null_mut()
+    };
+    while !l.is_null() {
+        let resultRelInfo = (*l).ptr_value as *mut ResultRelInfo;
+
+        /*
+         * Assert this is a "dummy" ResultRelInfo, see above.  Otherwise we
+         * might be issuing a duplicate close against a Relation opened by
+         * ExecGetRangeTableRelation.
+         */
+        Assert!((*resultRelInfo).ri_RangeTableIndex == 0);
+
+        /*
+         * Since ExecGetTriggerResultRel doesn't call ExecOpenIndices for
+         * these rels, we needn't call ExecCloseIndices either.
+         */
+        Assert!((*resultRelInfo).ri_NumIndices == 0);
+
+        table_close((*resultRelInfo).ri_RelationDesc, NoLock);
+        l = lnext((*estate).es_trig_target_relations, l);
+    }
+}
+
+/*
+ * Close all relations opened by ExecGetRangeTableRelation().
+ *
+ * We do not release any locks we might hold on those rels.
+ */
+pub unsafe fn ExecCloseRangeTableRelations(estate: *mut EState) {
+    let mut i: c_int = 0;
+
+    while i < (*estate).es_range_table_size as c_int {
+        if !(*(*estate).es_relations.add(i as usize)).is_null() {
+            table_close(*(*estate).es_relations.add(i as usize), NoLock);
+        }
+        i += 1;
+    }
+}
+
 /* ----------------------------------------------------------------
  *      ExecutePlan
  *

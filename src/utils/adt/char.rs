@@ -30,9 +30,10 @@ use crate::utils::fmgr::*; // FunctionCallInfo (and the rest of the fmgr.h inter
 // (a glob `use crate::utils::fmgr::*` does NOT bring exported macros into scope).
 use crate::{
     PG_GETARG_CHAR, PG_GETARG_CSTRING, PG_GETARG_DATUM, PG_GETARG_INT32, PG_GETARG_POINTER,
-    PG_RETURN_BOOL, PG_RETURN_CHAR, PG_RETURN_CSTRING, PG_RETURN_INT32,
+    PG_RETURN_BOOL, PG_RETURN_BYTEA_P, PG_RETURN_CHAR, PG_RETURN_CSTRING, PG_RETURN_INT32,
 };
-use crate::lib::stringinfo::StringInfo; // libpq/pqformat.h passes a StringInfo
+use crate::lib::stringinfo::{StringInfo, StringInfoData}; // libpq/pqformat.h passes a StringInfo
+use crate::libpq::pqformat::{pq_begintypsend, pq_endtypsend, pq_getmsgbyte};
 use crate::c::text; // char_text/text_char build/read a text varlena
 use crate::varatt::{pg_detoast_datum_packed, SET_VARSIZE, VARDATA, VARDATA_ANY, VARSIZE_ANY_EXHDR};
 use crate::postgres::{DatumGetPointer, PointerGetDatum};
@@ -154,11 +155,7 @@ pub unsafe fn charout(fcinfo: FunctionCallInfo) -> Datum {
 pub unsafe fn charrecv(fcinfo: FunctionCallInfo) -> Datum {
     let buf: StringInfo = PG_GETARG_POINTER!(fcinfo, 0) as StringInfo;
 
-    // C body:
-    //   PG_RETURN_CHAR(pq_getmsgbyte(buf));
-    // TODO(pg-port): libpq pqformat (pq_getmsgbyte) not yet translated.
-    let _ = buf;
-    unimplemented!("charrecv: libpq/pqformat (pq_getmsgbyte) not yet translated")
+    PG_RETURN_CHAR!(pq_getmsgbyte(buf) as c_char);
 }
 
 /*
@@ -166,16 +163,17 @@ pub unsafe fn charrecv(fcinfo: FunctionCallInfo) -> Datum {
  */
 pub unsafe fn charsend(fcinfo: FunctionCallInfo) -> Datum {
     let arg1: c_char = PG_GETARG_CHAR!(fcinfo, 0);
+    let mut buf: StringInfoData = core::mem::zeroed();
 
-    // C body:
-    //   StringInfoData buf;
-    //   pq_begintypsend(&buf);
-    //   pq_sendbyte(&buf, arg1);
-    //   PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
-    // TODO(pg-port): libpq pqformat (pq_begintypsend / pq_sendbyte /
-    // pq_endtypsend) not yet translated.
-    let _ = arg1;
-    unimplemented!("charsend: libpq/pqformat (pq_sendbyte) not yet translated")
+    pq_begintypsend(&mut buf);
+    pq_sendbyte(&mut buf, arg1);
+    PG_RETURN_BYTEA_P!(pq_endtypsend(&mut buf));
+}
+
+// pq_sendbyte(buf, byt); the Rust pqformat exports pq_sendint8.
+#[inline]
+unsafe fn pq_sendbyte(buf: StringInfo, byt: c_char) {
+    crate::libpq::pqformat::pq_sendint8(buf, byt as u8);
 }
 
 /*****************************************************************************

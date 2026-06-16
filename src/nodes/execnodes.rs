@@ -438,17 +438,21 @@ pub struct PartitionTupleRouting {
     _opaque: [u8; 0],
 }
 
-/// TODO(pg-port): real def `typedef struct TransitionCaptureState` in
-/// commands/trigger.h.
+/// `typedef struct TransitionCaptureState` -- commands/trigger.h.
+/// The `tcs_*_private` pointers are `struct AfterTriggersTableData *` in C
+/// (private to commands/trigger.c); kept as raw `c_void` here to avoid a
+/// cross-module type dependency, and cast at the use site.
 #[repr(C)]
 pub struct TransitionCaptureState {
-    _opaque: [u8; 0],
+    pub tcs_delete_old_table: bool,
+    pub tcs_update_old_table: bool,
+    pub tcs_update_new_table: bool,
+    pub tcs_insert_new_table: bool,
     /// tcs_original_insert_tuple -- commands/trigger.h
     pub tcs_original_insert_tuple: *mut TupleTableSlot,
-    /// tcs_update_new_table -- commands/trigger.h // C home: commands/trigger.h
-    pub tcs_update_new_table: *mut Tuplestorestate,
-    /// tcs_update_old_table -- commands/trigger.h // C home: commands/trigger.h
-    pub tcs_update_old_table: *mut Tuplestorestate,
+    pub tcs_insert_private: *mut core::ffi::c_void,
+    pub tcs_update_private: *mut core::ffi::c_void,
+    pub tcs_delete_private: *mut core::ffi::c_void,
 }
 
 // ParallelHashJoinState / HashJoinTupleData / HashJoinTableData: real defs live

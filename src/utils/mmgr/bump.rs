@@ -98,6 +98,9 @@ use crate::{dlist_container, dlist_foreach, dlist_foreach_modify};
 // elog.h: ERROR severity + the elog! macro (used by the unsupported operations).
 use crate::elog;
 use crate::utils::elog::ERROR;
+// WARNING is used only by BumpCheck under MEMORY_CONTEXT_CHECKING.
+#[cfg(memory_context_checking)]
+use crate::utils::elog::WARNING;
 use core::ffi::{c_char, c_int, c_void};
 // `Assert!` and `IsA!` are brought into scope crate-wide via #[macro_use].
 
@@ -173,9 +176,10 @@ struct BumpBlock {
     /// doubly-linked list of blocks
     node: dlist_node,
     // #ifdef MEMORY_CONTEXT_CHECKING
-    // BumpContext *context;		/* pointer back to the owning context */
+    /// pointer back to the owning context
+    #[cfg(memory_context_checking)]
+    context: *mut BumpContext,
     // #endif
-    // TODO(pg-port): `context: *mut BumpContext` under MEMORY_CONTEXT_CHECKING.
     /// start of free space in this block
     freeptr: *mut c_char,
     /// end of space in this block
@@ -883,15 +887,94 @@ pub unsafe fn BumpStats(
 // find yourself in an infinite loop when trouble occurs, because this
 // routine will be entered again when elog cleanup tries to release memory!
 //
-// TODO(pg-port): translate BumpCheck under a cfg gating MEMORY_CONTEXT_CHECKING.
-// It walks every block's chunk chain, distinguishing external chunks
-// (ExternalChunkGetBlock / MemoryChunkGetPointer) from normal ones
-// (MemoryChunkGetBlock / MemoryChunkGetValue), validates the block->context
-// back-link and the per-chunk block link, warns if an external chunk shares a
-// non-dedicated block, and Asserts total_allocated == context->mem_allocated.
-// Omitted here because the default build (no MEMORY_CONTEXT_CHECKING) never
-// compiles it, and it depends on the not-yet-modeled BumpBlock.context field and
-// the per-chunk MemoryChunk header (Bump_CHUNKHDRSZ == 0 by default).
+// Gated behind `memory_context_checking` (off by default, matching the C
+// #ifdef MEMORY_CONTEXT_CHECKING) so the default build never compiles it; the
+// per-chunk MemoryChunk header (Bump_CHUNKHDRSZ == 0) and BumpBlock.context
+// back-link only exist under that cfg.
+#[cfg(memory_context_checking)]
+pub unsafe fn BumpCheck(context: MemoryContext) {
+    let bump: *mut BumpContext = context as *mut BumpContext;
+    let name = (*context).name;
+    let mut iter: dlist_iter = core::mem::zeroed();
+    let mut total_allocated: Size = 0;
+
+    /* walk all blocks in this context */
+    dlist_foreach!(iter, &mut (*bump).blocks, {
+        let block: *mut BumpBlock = dlist_container!(BumpBlock, node, iter.cur);
+        let mut nchunks: c_int;
+        let mut ptr: *mut c_char;
+        let mut has_external_chunk = false;
+
+        if IsKeeperBlock(bump, block) {
+            total_allocated +=
+                ((*block).endptr as usize).wrapping_sub(bump as *mut c_char as usize) as Size;
+        } else {
+            total_allocated +=
+                ((*block).endptr as usize).wrapping_sub(block as *mut c_char as usize) as Size;
+        }
+
+        /* check block belongs to the correct context */
+        if (*block).context != bump {
+            elog!(
+                WARNING,
+                "problem in Bump {}: bogus context link in block {:p}",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                block
+            );
+        }
+
+        /* now walk through the chunks and count them */
+        nchunks = 0;
+        ptr = (block as *mut c_char).add(Bump_BLOCKHDRSZ);
+
+        while ptr < (*block).freeptr {
+            let chunk: *mut MemoryChunk = ptr as *mut MemoryChunk;
+            let chunkblock: *mut BumpBlock;
+            let chunksize: Size;
+
+            /* allow access to the chunk header */
+            // VALGRIND_MAKE_MEM_DEFINED(chunk, Bump_CHUNKHDRSZ);
+
+            if MemoryChunkIsExternal(chunk) {
+                chunkblock = ExternalChunkGetBlock(chunk);
+                chunksize = ((*block).endptr as usize)
+                    .wrapping_sub(MemoryChunkGetPointer(chunk) as usize)
+                    as Size;
+                has_external_chunk = true;
+            } else {
+                chunkblock = MemoryChunkGetBlock(chunk);
+                chunksize = MemoryChunkGetValue(chunk);
+            }
+
+            /* move to the next chunk */
+            ptr = ptr.add(chunksize + Bump_CHUNKHDRSZ);
+
+            nchunks += 1;
+
+            /* chunks have both block and context pointers, so check both */
+            if chunkblock != block {
+                elog!(
+                    WARNING,
+                    "problem in Bump {}: bogus block link in block {:p}, chunk {:p}",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    block,
+                    chunk
+                );
+            }
+        }
+
+        if has_external_chunk && nchunks > 1 {
+            elog!(
+                WARNING,
+                "problem in Bump {}: external chunk on non-dedicated block {:p}",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                block
+            );
+        }
+    });
+
+    Assert!(total_allocated == (*context).mem_allocated);
+}
 // #endif							/* MEMORY_CONTEXT_CHECKING */
 
 // =============================================================================

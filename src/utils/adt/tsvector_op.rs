@@ -66,8 +66,9 @@ use crate::varatt::*;
 use crate::{
     PG_GETARG_CHAR, PG_GETARG_DATUM, PG_GETARG_POINTER, PG_RETURN_BOOL, PG_RETURN_INT32,
     PG_RETURN_POINTER, PG_FREE_IF_COPY, PG_RETURN_DATUM, DirectFunctionCall2,
-    list_make1, foreach, current_cell,
+    list_make1, foreach, current_cell, DirectFunctionCall1,
 };
+use crate::utils::adt::ts_type::TSQueryGetDatum;
 // pg_list support used by TS_execute_locations (the @@ location-list engine).
 use crate::nodes::pg_list::{List, NIL, lappend, lfirst, list_concat};
 use crate::c::{int32, uint16, uint32, Size, SHORTALIGN};
@@ -82,8 +83,325 @@ use crate::utils::adt::tsquery_util::{
     QueryItem, QueryOperand, TSQuery, GETOPERAND, GETQUERY, OP_AND, OP_NOT, OP_OR, OP_PHRASE, QI_VAL,
 };
 use crate::utils::misc::stack_depth::check_stack_depth;
-use crate::postgres::DatumGetBool;
+use crate::postgres::{DatumGetBool, DatumGetChar, Int16GetDatum, PointerGetDatum};
+use crate::utils::adt::varlena::cstring_to_text_with_len;
+use crate::c::{int8, text};
+use crate::access::common::tupdesc::TupleDesc;
+use crate::access::attnum::AttrNumber;
+use crate::lib::qunique::qunique;
 use core::ffi::{c_char, c_int, c_void};
+
+/*
+ * funcapi.h: set-returning-function machinery.  funcapi.rs is not wired into
+ * the module tree yet, so (mirroring sibling adt modules such as regexp.rs)
+ * the FuncCallContext / AttInMetadata layouts and the get_call_result_type
+ * helper are declared locally with TODO(pg-port) stubs.
+ */
+#[repr(C)]
+struct FuncCallContext {
+    call_cntr: u64,
+    max_calls: u64,
+    user_fctx: *mut c_void,
+    attinmeta: *mut AttInMetadata,
+    multi_call_memory_ctx: MemoryContext,
+    tuple_desc: TupleDesc,
+}
+#[repr(C)]
+struct AttInMetadata {
+    _opaque: [u8; 0],
+}
+/* enum TypeFuncClass member used here. */
+const TYPEFUNC_COMPOSITE: c_int = 0;
+unsafe fn get_call_result_type(
+    _fcinfo: FunctionCallInfo,
+    _resultTypeId: *mut Oid,
+    _resultTupleDesc: *mut TupleDesc,
+) -> c_int {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c get_call_result_type
+}
+
+/* catalog/pg_type.h OIDs used by the array-producing/consuming paths. */
+const TEXTOID: Oid = 25;
+const INT2OID: Oid = 21;
+const INT2ARRAYOID: Oid = 1005;
+const TEXTARRAYOID: Oid = 1009;
+const CHAROID: Oid = 18;
+const TSVECTOROID: Oid = 3614;
+const REGCONFIGOID: Oid = 3734;
+
+/* errcodes.h classifications (errcode() shim ignores the value). */
+const ERRCODE_NULL_VALUE_NOT_ALLOWED: c_int = 0;
+const ERRCODE_ZERO_LENGTH_CHARACTER_STRING: c_int = 0;
+const ERRCODE_INVALID_PARAMETER_VALUE: c_int = 0;
+const ERRCODE_UNDEFINED_COLUMN: c_int = 0;
+const ERRCODE_DATATYPE_MISMATCH: c_int = 0;
+
+extern "C" {
+    fn sprintf(s: *mut c_char, fmt: *const c_char, ...) -> c_int;
+}
+
+// ----------------------------------------------------------------
+//   Unported dependency stubs (TODO(pg-port)).  These mirror the
+//   per-file stub convention used by sibling adt modules until the
+//   underlying units (utils/array.c arrayfuncs, executor/spi.c,
+//   funcapi SRF, commands/trigger.c, catalog/namespace.c, the text
+//   search parser) are translated.
+// ----------------------------------------------------------------
+
+/* utils/array.h construct_array_builtin / deconstruct_array_builtin. */
+unsafe fn construct_array_builtin(_elems: *mut Datum, _nelems: c_int, _elmtype: Oid) -> *mut c_void {
+    unimplemented!() // TODO(pg-port): utils/adt/arrayfuncs.c construct_array_builtin
+}
+unsafe fn deconstruct_array_builtin(
+    _arr: *mut c_void,
+    _elmtype: Oid,
+    _elemsp: *mut *mut Datum,
+    _nullsp: *mut *mut bool,
+    _nelemsp: *mut c_int,
+) {
+    unimplemented!() // TODO(pg-port): utils/adt/arrayfuncs.c deconstruct_array_builtin
+}
+
+/* PG_GETARG_ARRAYTYPE_P(n): detoast + cast to ArrayType (identity for in-line). */
+#[inline]
+unsafe fn PG_GETARG_ARRAYTYPE_P(fcinfo: FunctionCallInfo, n: usize) -> *mut c_void {
+    DatumGetPointer(PG_GETARG_DATUM!(fcinfo, n)) as *mut c_void
+}
+
+/* qsort(base, n, sizeof(int), compare_int) over a c_int array. */
+unsafe fn qsort_int(base: *mut c_int, n: c_int) {
+    let sl = core::slice::from_raw_parts_mut(base, n as usize);
+    sl.sort_by(|a, b| {
+        compare_int(a as *const c_int as *const c_void, b as *const c_int as *const c_void).cmp(&0)
+    });
+}
+
+/* qsort(base, n, sizeof(Datum), compare_text_lexemes) over a Datum array. */
+unsafe fn qsort_datum_lexemes(base: *mut Datum, n: c_int) {
+    let sl = core::slice::from_raw_parts_mut(base, n as usize);
+    sl.sort_by(|a, b| {
+        compare_text_lexemes(a as *const Datum as *const c_void, b as *const Datum as *const c_void)
+            .cmp(&0)
+    });
+}
+
+// SRF_* macros (funcapi.h): expand to local srf_* helper stubs, matching the
+// per-file convention used by sibling adt modules (regexp.rs etc.).
+macro_rules! SRF_IS_FIRSTCALL {
+    ($fcinfo:expr) => { srf_is_firstcall($fcinfo) };
+}
+macro_rules! SRF_FIRSTCALL_INIT {
+    ($fcinfo:expr) => { srf_firstcall_init($fcinfo) };
+}
+macro_rules! SRF_PERCALL_SETUP {
+    ($fcinfo:expr) => { srf_percall_setup($fcinfo) };
+}
+macro_rules! SRF_RETURN_NEXT {
+    ($fcinfo:expr, $fctx:expr, $result:expr) => { return srf_return_next($fcinfo, $fctx, $result) };
+}
+macro_rules! SRF_RETURN_DONE {
+    ($fcinfo:expr, $fctx:expr) => { return srf_return_done($fcinfo, $fctx) };
+}
+
+unsafe fn srf_is_firstcall(_fcinfo: FunctionCallInfo) -> bool {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_firstcall_init(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_percall_setup(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_return_next(
+    _fcinfo: FunctionCallInfo,
+    _fctx: *mut FuncCallContext,
+    _result: Datum,
+) -> Datum {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_return_done(_fcinfo: FunctionCallInfo, _fctx: *mut FuncCallContext) -> Datum {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+
+/* tupdesc.h / funcapi.h tuple-building helpers (executor / access). */
+unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc {
+    unimplemented!() // TODO(pg-port): access/common/tupdesc.c
+}
+unsafe fn TupleDescInitEntry(
+    _td: TupleDesc, _ano: AttrNumber, _name: *const c_char, _typid: Oid, _typmod: i32, _attdim: c_int,
+) {
+    unimplemented!() // TODO(pg-port): access/common/tupdesc.c
+}
+unsafe fn TupleDescGetAttInMetadata(_td: TupleDesc) -> *mut AttInMetadata {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn heap_form_tuple(_td: TupleDesc, _values: *mut Datum, _nulls: *mut bool) -> *mut c_void {
+    unimplemented!() // TODO(pg-port): access/common/heaptuple.c
+}
+unsafe fn BuildTupleFromCStrings(_attinmeta: *mut AttInMetadata, _values: *mut *mut c_char) -> *mut c_void {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+#[inline]
+unsafe fn HeapTupleGetDatum(_tuple: *mut c_void) -> Datum {
+    unimplemented!() // TODO(pg-port): funcapi.h HeapTupleGetDatum
+}
+
+/* mb/pg_wchar.h pg_mblen_range: length of multibyte char at buf, bounded by end. */
+unsafe fn pg_mblen_range(_buf: *const c_char, _end: *const c_char) -> c_int {
+    unimplemented!() // TODO(pg-port): src/common/wchar.c pg_mblen_range
+}
+
+/* executor/spi.h: SPI cursor/plan machinery (ts_stat_sql). */
+type SPIPlanPtr = *mut c_void;
+type Portal = *mut c_void;
+unsafe fn SPI_connect() -> c_int {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+unsafe fn SPI_finish() -> c_int {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+unsafe fn SPI_prepare(_src: *const c_char, _nargs: c_int, _argtypes: *mut Oid) -> SPIPlanPtr {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+unsafe fn SPI_cursor_open(
+    _name: *const c_char, _plan: SPIPlanPtr, _values: *mut Datum, _nulls: *const c_char, _read_only: bool,
+) -> Portal {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+unsafe fn SPI_cursor_fetch(_portal: Portal, _forward: bool, _count: i64) {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+unsafe fn SPI_cursor_close(_portal: Portal) {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+unsafe fn SPI_freeplan(_plan: SPIPlanPtr) -> c_int {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+unsafe fn SPI_freetuptable(_tuptable: *mut SPITupleTable) {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+unsafe fn SPI_gettypeid(_tupdesc: TupleDesc, _fnumber: c_int) -> Oid {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+unsafe fn SPI_getbinval(
+    _row: *mut c_void, _tupdesc: TupleDesc, _fnumber: c_int, _isnull: *mut bool,
+) -> Datum {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+unsafe fn SPI_fnumber(_tupdesc: TupleDesc, _fname: *const c_char) -> c_int {
+    unimplemented!() // TODO(pg-port): executor/spi.c
+}
+const SPI_ERROR_NOATTRIBUTE: c_int = -9;
+#[repr(C)]
+struct SPITupleTable {
+    tupdesc: TupleDesc,
+    vals: *mut *mut c_void,
+}
+extern "C" {
+    static mut SPI_tuptable: *mut SPITupleTable;
+    static SPI_processed: u64;
+}
+#[repr(C)]
+struct TupleDescData {
+    natts: c_int,
+}
+
+/* parser/parse_coerce.h IsBinaryCoercible. */
+unsafe fn IsBinaryCoercible(_srctype: Oid, _targettype: Oid) -> bool {
+    unimplemented!() // TODO(pg-port): parser/parse_coerce.c IsBinaryCoercible
+}
+
+/* utils/builtins.h text_to_cstring. */
+unsafe fn text_to_cstring(_t: *const text) -> *mut c_char {
+    unimplemented!() // TODO(pg-port): utils/adt/varlena.c text_to_cstring
+}
+
+/* catalog/namespace.h: tsconfig name resolution. */
+unsafe fn stringToQualifiedNameList(
+    _string: *const c_char, _escontext: *mut c_void,
+) -> *mut crate::nodes::pg_list::List {
+    unimplemented!() // TODO(pg-port): catalog/namespace.c stringToQualifiedNameList
+}
+unsafe fn get_ts_config_oid(_names: *mut crate::nodes::pg_list::List, _missing_ok: bool) -> Oid {
+    unimplemented!() // TODO(pg-port): commands/tsearchcmds.c get_ts_config_oid
+}
+
+/* The text search parser glue (tsvector.c sibling units). */
+#[repr(C)]
+struct ParsedWord {
+    _opaque: [u8; 0],
+}
+#[repr(C)]
+struct ParsedText {
+    lenwords: c_int,
+    curwords: c_int,
+    pos: c_int,
+    words: *mut ParsedWord,
+}
+unsafe fn parsetext(_cfgId: Oid, _prs: *mut ParsedText, _buf: *mut c_char, _buflen: c_int) {
+    unimplemented!() // TODO(pg-port): tsearch/ts_parse.c parsetext
+}
+unsafe fn make_tsvector(_prs: *mut ParsedText) -> TSVector {
+    unimplemented!() // TODO(pg-port): utils/adt/tsvector.c make_tsvector
+}
+
+/* to_tsvector / plainto_tsquery fmgr entry points (ts_parse / tsquery parser). */
+unsafe fn to_tsvector(_fcinfo: FunctionCallInfo) -> Datum {
+    unimplemented!() // TODO(pg-port): tsearch/to_tsany.c to_tsvector
+}
+unsafe fn plainto_tsquery(_fcinfo: FunctionCallInfo) -> Datum {
+    unimplemented!() // TODO(pg-port): tsearch/to_tsany.c plainto_tsquery
+}
+
+/* commands/trigger.h: trigger manager context + event-bit predicates. */
+#[repr(C)]
+struct TriggerData {
+    tg_event: u32,
+    tg_trigtuple: *mut c_void,
+    tg_newtuple: *mut c_void,
+    tg_trigger: *mut Trigger,
+    tg_relation: *mut RelationData,
+    tg_updatedcols: *mut c_void,
+}
+#[repr(C)]
+struct Trigger {
+    tgnargs: i16,
+    tgargs: *mut *mut c_char,
+}
+#[repr(C)]
+struct RelationData {
+    rd_att: TupleDesc,
+}
+type Relation = *mut RelationData;
+unsafe fn CALLED_AS_TRIGGER(fcinfo: FunctionCallInfo) -> bool {
+    !(*fcinfo).context.is_null()
+        && crate::IsA!((*fcinfo).context as *mut c_void, T_TriggerData)
+}
+unsafe fn TRIGGER_FIRED_FOR_ROW(_tg_event: u32) -> bool {
+    unimplemented!() // TODO(pg-port): commands/trigger.h TRIGGER_FIRED_FOR_ROW
+}
+unsafe fn TRIGGER_FIRED_BEFORE(_tg_event: u32) -> bool {
+    unimplemented!() // TODO(pg-port): commands/trigger.h TRIGGER_FIRED_BEFORE
+}
+unsafe fn TRIGGER_FIRED_BY_INSERT(_tg_event: u32) -> bool {
+    unimplemented!() // TODO(pg-port): commands/trigger.h TRIGGER_FIRED_BY_INSERT
+}
+unsafe fn TRIGGER_FIRED_BY_UPDATE(_tg_event: u32) -> bool {
+    unimplemented!() // TODO(pg-port): commands/trigger.h TRIGGER_FIRED_BY_UPDATE
+}
+unsafe fn bms_is_member(_x: c_int, _set: *mut c_void) -> bool {
+    unimplemented!() // TODO(pg-port): nodes/bitmapset.c bms_is_member
+}
+const FirstLowInvalidHeapAttributeNumber: c_int = -8;
+unsafe fn heap_modify_tuple_by_cols(
+    _tuple: *mut c_void, _tupleDesc: TupleDesc, _nCols: c_int, _replCols: *mut c_int,
+    _replValues: *mut Datum, _replIsnull: *mut bool,
+) -> *mut c_void {
+    unimplemented!() // TODO(pg-port): access/common/heaptuple.c heap_modify_tuple_by_cols
+}
+unsafe fn DatumGetObjectId(d: Datum) -> Oid {
+    d as Oid
+}
 
 /* limits.h INT_MAX, used by TS_phrase_output. */
 const INT_MAX: c_int = c_int::MAX;
@@ -218,6 +536,15 @@ struct TSVectorStat {
 #[inline]
 unsafe fn PG_GETARG_TSVECTOR(datum: Datum) -> TSVector {
     DatumGetTSVector(datum)
+}
+
+/*
+ * PG_GETARG_TSVECTOR_COPY(n): the C macro detoasts into a fresh copy; with
+ * TOAST unported it is the identity for in-line datums (mirrors above).
+ */
+#[inline]
+unsafe fn PG_GETARG_TSVECTOR_COPY(fcinfo: FunctionCallInfo, n: usize) -> TSVector {
+    DatumGetTSVector(PG_GETARG_DATUM!(fcinfo, n))
 }
 
 /*
@@ -442,10 +769,84 @@ pub unsafe fn tsvector_setweight(fcinfo: FunctionCallInfo) -> Datum {
  * TODO(pg-port): needs utils/array.h deconstruct_array_builtin (not yet ported).
  */
 pub unsafe fn tsvector_setweight_by_filter(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    // C body deconstructs the lexeme text[] array, then for each lexeme does a
-    // tsvector_bsearch + WEP_SETWEIGHT loop. Blocked on construct/deconstruct_array.
-    unimplemented!("tsvector_setweight_by_filter: utils/array.h deconstruct_array_builtin not yet translated")
+    let tsin: TSVector = PG_GETARG_TSVECTOR(PG_GETARG_DATUM!(fcinfo, 0));
+    let char_weight: c_char = PG_GETARG_CHAR!(fcinfo, 1);
+    let lexemes: *mut c_void = PG_GETARG_ARRAYTYPE_P(fcinfo, 2);
+
+    let tsout: TSVector;
+    let mut i: c_int;
+    let mut j: c_int;
+    let mut nlexemes: c_int = 0;
+    let mut weight: c_int = 0;
+    let entry: *mut WordEntry;
+    let mut dlexemes: *mut Datum = null_mut();
+    let mut nulls: *mut bool = null_mut();
+
+    match char_weight as u8 {
+        b'A' | b'a' => weight = 3,
+        b'B' | b'b' => weight = 2,
+        b'C' | b'c' => weight = 1,
+        b'D' | b'd' => weight = 0,
+        _ => {
+            /* internal error */
+            elog!(ERROR, "unrecognized weight: {}", char_weight as u8 as char);
+        }
+    }
+
+    tsout = palloc(VARSIZE(tsin as *const c_char) as Size) as TSVector;
+    memcpy(
+        tsout as *mut c_void,
+        tsin as *const c_void,
+        VARSIZE(tsin as *const c_char) as usize,
+    );
+    entry = ARRPTR(tsout);
+
+    deconstruct_array_builtin(lexemes, TEXTOID, &mut dlexemes, &mut nulls, &mut nlexemes);
+
+    /*
+     * Assuming that lexemes array is significantly shorter than tsvector we
+     * can iterate through lexemes performing binary search of each lexeme
+     * from lexemes in tsvector.
+     */
+    i = 0;
+    while i < nlexemes {
+        let lex: *mut c_char;
+        let lex_len: c_int;
+        let lex_pos: c_int;
+
+        /* Ignore null array elements, they surely don't match */
+        if *nulls.add(i as usize) {
+            i += 1;
+            continue;
+        }
+
+        lex = VARDATA(DatumGetPointer(*dlexemes.add(i as usize)) as *const c_char);
+        lex_len = VARSIZE(DatumGetPointer(*dlexemes.add(i as usize)) as *const c_char) as c_int
+            - VARHDRSZ;
+        lex_pos = tsvector_bsearch(tsout, lex, lex_len);
+
+        if lex_pos >= 0 && {
+            j = POSDATALEN(tsout, entry.add(lex_pos as usize));
+            j != 0
+        } {
+            let mut p: *mut WordEntryPos = POSDATAPTR(tsout, entry.add(lex_pos as usize));
+
+            while {
+                let old = j;
+                j -= 1;
+                old != 0
+            } {
+                WEP_SETWEIGHT(&mut *p, weight);
+                p = p.add(1);
+            }
+        }
+        i += 1;
+    }
+
+    PG_FREE_IF_COPY!(fcinfo, tsin, 0);
+    PG_FREE_IF_COPY!(fcinfo, lexemes, 2);
+
+    PG_RETURN_POINTER!(tsout)
 }
 
 /*
@@ -585,14 +986,105 @@ unsafe fn compare_text_lexemes(va: *const c_void, vb: *const c_void) -> c_int {
  * tsvector_delete_str/_arr, which are blocked on utils/array.h + lib/qunique.h.
  * Stubbed to keep the dependency surface small until those land.
  */
-#[allow(dead_code)]
 unsafe fn tsvector_delete_by_indices(
     tsv: TSVector,
     indices_to_delete: *mut c_int,
-    indices_count: c_int,
+    mut indices_count: c_int,
 ) -> TSVector {
-    let _ = (tsv, indices_to_delete, indices_count);
-    unimplemented!("tsvector_delete_by_indices: lib/qunique.h (qunique) not yet translated")
+    let tsout: TSVector;
+    let arrin: *mut WordEntry = ARRPTR(tsv);
+    let arrout: *mut WordEntry;
+    let data: *mut c_char = STRPTR(tsv);
+    let dataout: *mut c_char;
+    let mut i: c_int; /* index in arrin */
+    let mut j: c_int; /* index in arrout */
+    let mut k: c_int; /* index in indices_to_delete */
+    let mut curoff: c_int; /* index in dataout area */
+
+    /*
+     * Sort the filter array to simplify membership checks below.  Also, get
+     * rid of any duplicate entries, so that we can assume that indices_count
+     * is exactly equal to the number of lexemes that will be removed.
+     */
+    if indices_count > 1 {
+        qsort_int(indices_to_delete, indices_count);
+        indices_count = qunique(
+            indices_to_delete as *mut c_void,
+            indices_count as usize,
+            core::mem::size_of::<c_int>(),
+            compare_int,
+        ) as c_int;
+    }
+
+    /*
+     * Here we overestimate tsout size, since we don't know how much space is
+     * used by the deleted lexeme(s).  We will set exact size below.
+     */
+    tsout = palloc0(VARSIZE(tsv as *const c_char) as Size) as TSVector;
+
+    /* This count must be correct because STRPTR(tsout) relies on it. */
+    (*tsout).size = (*tsv).size - indices_count;
+
+    /*
+     * Copy tsv to tsout, skipping lexemes listed in indices_to_delete.
+     */
+    arrout = ARRPTR(tsout);
+    dataout = STRPTR(tsout);
+    curoff = 0;
+    i = 0;
+    j = 0;
+    k = 0;
+    while i < (*tsv).size {
+        /*
+         * If current i is present in indices_to_delete, skip this lexeme.
+         * Since indices_to_delete is already sorted, we only need to check
+         * the current (k'th) entry.
+         */
+        if k < indices_count && i == *indices_to_delete.add(k as usize) {
+            k += 1;
+            i += 1;
+            continue;
+        }
+
+        /* Copy lexeme and its positions and weights */
+        memcpy(
+            dataout.add(curoff as usize) as *mut c_void,
+            data.add((*arrin.add(i as usize)).pos() as usize) as *const c_void,
+            (*arrin.add(i as usize)).len() as usize,
+        );
+        (*arrout.add(j as usize)).set_haspos((*arrin.add(i as usize)).haspos());
+        (*arrout.add(j as usize)).set_len((*arrin.add(i as usize)).len());
+        (*arrout.add(j as usize)).set_pos(curoff as u32);
+        curoff += (*arrin.add(i as usize)).len() as c_int;
+        if (*arrin.add(i as usize)).haspos() != 0 {
+            let len: c_int = POSDATALEN(tsv, arrin.add(i as usize))
+                * core::mem::size_of::<WordEntryPos>() as c_int
+                + core::mem::size_of::<uint16>() as c_int;
+
+            curoff = SHORTALIGN(curoff as usize) as c_int;
+            memcpy(
+                dataout.add(curoff as usize) as *mut c_void,
+                STRPTR(tsv).add(SHORTALIGN(
+                    ((*arrin.add(i as usize)).pos() + (*arrin.add(i as usize)).len()) as usize,
+                )) as *const c_void,
+                len as usize,
+            );
+            curoff += len;
+        }
+
+        j += 1;
+        i += 1;
+    }
+
+    /*
+     * k should now be exactly equal to indices_count. If it isn't then the
+     * caller provided us with indices outside of [0, tsv->size) range and
+     * estimation of tsout's size is wrong.
+     */
+    Assert!(k == indices_count);
+
+    SET_VARSIZE(tsout as *mut c_char, CALCDATASIZE((*tsout).size, curoff) as c_int);
+    tsout
 }
 
 /*
@@ -602,8 +1094,23 @@ unsafe fn tsvector_delete_by_indices(
  * TODO(pg-port): needs tsvector_delete_by_indices (qunique), stubbed above.
  */
 pub unsafe fn tsvector_delete_str(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("tsvector_delete_str: tsvector_delete_by_indices/qunique not yet translated")
+    let tsin: TSVector = PG_GETARG_TSVECTOR(PG_GETARG_DATUM!(fcinfo, 0));
+    let tsout: TSVector;
+    let tlexeme: *mut text = DatumGetPointer(PG_GETARG_DATUM!(fcinfo, 1)) as *mut text;
+    let lexeme: *mut c_char = VARDATA_ANY(tlexeme as *const c_char);
+    let lexeme_len: c_int = VARSIZE_ANY_EXHDR(tlexeme as *const c_char) as c_int;
+    let mut skip_index: c_int;
+
+    skip_index = tsvector_bsearch(tsin, lexeme, lexeme_len);
+    if skip_index == -1 {
+        PG_RETURN_POINTER!(tsin);
+    }
+
+    tsout = tsvector_delete_by_indices(tsin, &mut skip_index, 1);
+
+    PG_FREE_IF_COPY!(fcinfo, tsin, 0);
+    PG_FREE_IF_COPY!(fcinfo, tlexeme, 1);
+    PG_RETURN_POINTER!(tsout)
 }
 
 /*
@@ -613,8 +1120,56 @@ pub unsafe fn tsvector_delete_str(fcinfo: FunctionCallInfo) -> Datum {
  * TODO(pg-port): needs utils/array.h deconstruct_array_builtin + qunique.
  */
 pub unsafe fn tsvector_delete_arr(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("tsvector_delete_arr: utils/array.h deconstruct_array_builtin not yet translated")
+    let tsin: TSVector = PG_GETARG_TSVECTOR(PG_GETARG_DATUM!(fcinfo, 0));
+    let tsout: TSVector;
+    let lexemes: *mut c_void = PG_GETARG_ARRAYTYPE_P(fcinfo, 1);
+    let mut i: c_int;
+    let mut nlex: c_int = 0;
+    let mut skip_count: c_int;
+    let skip_indices: *mut c_int;
+    let mut dlexemes: *mut Datum = null_mut();
+    let mut nulls: *mut bool = null_mut();
+
+    deconstruct_array_builtin(lexemes, TEXTOID, &mut dlexemes, &mut nulls, &mut nlex);
+
+    /*
+     * In typical use case array of lexemes to delete is relatively small. So
+     * here we optimize things for that scenario: iterate through lexarr
+     * performing binary search of each lexeme from lexarr in tsvector.
+     */
+    skip_indices = palloc0(nlex as usize * core::mem::size_of::<c_int>()) as *mut c_int;
+    i = 0;
+    skip_count = 0;
+    while i < nlex {
+        let lex: *mut c_char;
+        let lex_len: c_int;
+        let lex_pos: c_int;
+
+        /* Ignore null array elements, they surely don't match */
+        if *nulls.add(i as usize) {
+            i += 1;
+            continue;
+        }
+
+        lex = VARDATA(DatumGetPointer(*dlexemes.add(i as usize)) as *const c_char);
+        lex_len = VARSIZE(DatumGetPointer(*dlexemes.add(i as usize)) as *const c_char) as c_int
+            - VARHDRSZ;
+        lex_pos = tsvector_bsearch(tsin, lex, lex_len);
+
+        if lex_pos >= 0 {
+            *skip_indices.add(skip_count as usize) = lex_pos;
+            skip_count += 1;
+        }
+        i += 1;
+    }
+
+    tsout = tsvector_delete_by_indices(tsin, skip_indices, skip_count);
+
+    pfree(skip_indices as *mut c_void);
+    PG_FREE_IF_COPY!(fcinfo, tsin, 0);
+    PG_FREE_IF_COPY!(fcinfo, lexemes, 1);
+
+    PG_RETURN_POINTER!(tsout)
 }
 
 /*
@@ -626,8 +1181,91 @@ pub unsafe fn tsvector_delete_arr(fcinfo: FunctionCallInfo) -> Datum {
  * TODO(pg-port): set-returning function -> needs funcapi (SRF) + utils/array.h.
  */
 pub unsafe fn tsvector_unnest(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("tsvector_unnest: funcapi SRF machinery + utils/array.h not yet translated")
+    let mut funcctx: *mut FuncCallContext;
+    let tsin: TSVector;
+
+    if SRF_IS_FIRSTCALL!(fcinfo) {
+        let oldcontext: MemoryContext;
+        let mut tupdesc: TupleDesc;
+
+        funcctx = SRF_FIRSTCALL_INIT!(fcinfo);
+        oldcontext = MemoryContextSwitchTo((*funcctx).multi_call_memory_ctx);
+
+        tupdesc = CreateTemplateTupleDesc(3);
+        TupleDescInitEntry(tupdesc, 1 as AttrNumber, c"lexeme".as_ptr(), TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, 2 as AttrNumber, c"positions".as_ptr(), INT2ARRAYOID, -1, 0);
+        TupleDescInitEntry(tupdesc, 3 as AttrNumber, c"weights".as_ptr(), TEXTARRAYOID, -1, 0);
+        if get_call_result_type(fcinfo, null_mut(), &mut tupdesc) != TYPEFUNC_COMPOSITE {
+            elog!(ERROR, "return type must be a row type");
+        }
+        (*funcctx).tuple_desc = tupdesc;
+
+        (*funcctx).user_fctx = PG_GETARG_TSVECTOR_COPY(fcinfo, 0) as *mut c_void;
+
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    funcctx = SRF_PERCALL_SETUP!(fcinfo);
+    tsin = (*funcctx).user_fctx as TSVector;
+
+    if ((*funcctx).call_cntr as c_int) < (*tsin).size {
+        let arrin: *mut WordEntry = ARRPTR(tsin);
+        let data: *mut c_char = STRPTR(tsin);
+        let tuple: *mut c_void;
+        let mut j: c_int;
+        let i: c_int = (*funcctx).call_cntr as c_int;
+        let mut nulls: [bool; 3] = [false, false, false];
+        let mut values: [Datum; 3] = [0, 0, 0];
+
+        values[0] = PointerGetDatum(cstring_to_text_with_len(
+            data.add((*arrin.add(i as usize)).pos() as usize),
+            (*arrin.add(i as usize)).len() as c_int,
+        ) as *const c_void);
+
+        if (*arrin.add(i as usize)).haspos() != 0 {
+            let posv: *mut WordEntryPosVector;
+            let positions: *mut Datum;
+            let weights: *mut Datum;
+            let mut weight: c_char;
+
+            /*
+             * Internally tsvector stores position and weight in the same
+             * uint16 (2 bits for weight, 14 for position). Here we extract
+             * that in two separate arrays.
+             */
+            posv = _POSVECPTR(tsin, arrin.add(i as usize));
+            positions = palloc((*posv).npos as usize * core::mem::size_of::<Datum>()) as *mut Datum;
+            weights = palloc((*posv).npos as usize * core::mem::size_of::<Datum>()) as *mut Datum;
+            j = 0;
+            while j < (*posv).npos as c_int {
+                *positions.add(j as usize) =
+                    Int16GetDatum(WEP_GETPOS(*(*posv).pos.as_ptr().add(j as usize)) as int16);
+                weight = (b'D' as c_char) - WEP_GETWEIGHT(*(*posv).pos.as_ptr().add(j as usize)) as c_char;
+                *weights.add(j as usize) =
+                    PointerGetDatum(cstring_to_text_with_len(&weight, 1) as *const c_void);
+                j += 1;
+            }
+
+            values[1] = PointerGetDatum(construct_array_builtin(
+                positions,
+                (*posv).npos as c_int,
+                INT2OID,
+            ));
+            values[2] = PointerGetDatum(construct_array_builtin(
+                weights,
+                (*posv).npos as c_int,
+                TEXTOID,
+            ));
+        } else {
+            nulls[1] = true;
+            nulls[2] = true;
+        }
+
+        tuple = heap_form_tuple((*funcctx).tuple_desc, values.as_mut_ptr(), nulls.as_mut_ptr());
+        SRF_RETURN_NEXT!(fcinfo, funcctx, HeapTupleGetDatum(tuple));
+    } else {
+        SRF_RETURN_DONE!(fcinfo, funcctx);
+    }
 }
 
 /*
@@ -636,8 +1274,28 @@ pub unsafe fn tsvector_unnest(fcinfo: FunctionCallInfo) -> Datum {
  * TODO(pg-port): needs utils/array.h construct_array_builtin (not yet ported).
  */
 pub unsafe fn tsvector_to_array(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("tsvector_to_array: utils/array.h construct_array_builtin not yet translated")
+    let tsin: TSVector = PG_GETARG_TSVECTOR(PG_GETARG_DATUM!(fcinfo, 0));
+    let arrin: *mut WordEntry = ARRPTR(tsin);
+    let elements: *mut Datum;
+    let mut i: c_int;
+    let array: *mut c_void;
+
+    elements = palloc((*tsin).size as usize * core::mem::size_of::<Datum>()) as *mut Datum;
+
+    i = 0;
+    while i < (*tsin).size {
+        *elements.add(i as usize) = PointerGetDatum(cstring_to_text_with_len(
+            STRPTR(tsin).add((*arrin.add(i as usize)).pos() as usize),
+            (*arrin.add(i as usize)).len() as c_int,
+        ) as *const c_void);
+        i += 1;
+    }
+
+    array = construct_array_builtin(elements, (*tsin).size, TEXTOID);
+
+    pfree(elements as *mut c_void);
+    PG_FREE_IF_COPY!(fcinfo, tsin, 0);
+    PG_RETURN_POINTER!(array)
 }
 
 /*
@@ -646,8 +1304,84 @@ pub unsafe fn tsvector_to_array(fcinfo: FunctionCallInfo) -> Datum {
  * TODO(pg-port): needs utils/array.h deconstruct_array_builtin + lib/qunique.h.
  */
 pub unsafe fn array_to_tsvector(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("array_to_tsvector: utils/array.h deconstruct_array_builtin not yet translated")
+    let v: *mut c_void = PG_GETARG_ARRAYTYPE_P(fcinfo, 0);
+    let tsout: TSVector;
+    let mut dlexemes: *mut Datum = null_mut();
+    let arrout: *mut WordEntry;
+    let mut nulls: *mut bool = null_mut();
+    let mut nitems: c_int = 0;
+    let mut i: c_int;
+    let tslen: c_int;
+    let mut datalen: c_int = 0;
+    let mut cur: *mut c_char;
+
+    deconstruct_array_builtin(v, TEXTOID, &mut dlexemes, &mut nulls, &mut nitems);
+
+    /*
+     * Reject nulls and zero length strings (maybe we should just ignore them,
+     * instead?)
+     */
+    i = 0;
+    while i < nitems {
+        if *nulls.add(i as usize) {
+            /* C also: errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED) */
+            let _ = errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED);
+            ereport!(ERROR, errmsg!("lexeme array may not contain nulls"));
+        }
+
+        if VARSIZE(DatumGetPointer(*dlexemes.add(i as usize)) as *const c_char) as c_int - VARHDRSZ
+            == 0
+        {
+            /* C also: errcode(ERRCODE_ZERO_LENGTH_CHARACTER_STRING) */
+            let _ = errcode(ERRCODE_ZERO_LENGTH_CHARACTER_STRING);
+            ereport!(ERROR, errmsg!("lexeme array may not contain empty strings"));
+        }
+        i += 1;
+    }
+
+    /* Sort and de-dup, because this is required for a valid tsvector. */
+    if nitems > 1 {
+        qsort_datum_lexemes(dlexemes, nitems);
+        nitems = qunique(
+            dlexemes as *mut c_void,
+            nitems as usize,
+            core::mem::size_of::<Datum>(),
+            compare_text_lexemes,
+        ) as c_int;
+    }
+
+    /* Calculate space needed for surviving lexemes. */
+    i = 0;
+    while i < nitems {
+        datalen +=
+            VARSIZE(DatumGetPointer(*dlexemes.add(i as usize)) as *const c_char) as c_int - VARHDRSZ;
+        i += 1;
+    }
+    tslen = CALCDATASIZE(nitems, datalen) as c_int;
+
+    /* Allocate and fill tsvector. */
+    tsout = palloc0(tslen as Size) as TSVector;
+    SET_VARSIZE(tsout as *mut c_char, tslen);
+    (*tsout).size = nitems;
+
+    arrout = ARRPTR(tsout);
+    cur = STRPTR(tsout);
+    i = 0;
+    while i < nitems {
+        let lex: *mut c_char = VARDATA(DatumGetPointer(*dlexemes.add(i as usize)) as *const c_char);
+        let lex_len: c_int =
+            VARSIZE(DatumGetPointer(*dlexemes.add(i as usize)) as *const c_char) as c_int - VARHDRSZ;
+
+        memcpy(cur as *mut c_void, lex as *const c_void, lex_len as usize);
+        (*arrout.add(i as usize)).set_haspos(0);
+        (*arrout.add(i as usize)).set_len(lex_len as u32);
+        (*arrout.add(i as usize)).set_pos((cur as isize - STRPTR(tsout) as isize) as u32);
+        cur = cur.add(lex_len as usize);
+        i += 1;
+    }
+
+    PG_FREE_IF_COPY!(fcinfo, v, 0);
+    PG_RETURN_POINTER!(tsout)
 }
 
 /*
@@ -656,8 +1390,121 @@ pub unsafe fn array_to_tsvector(fcinfo: FunctionCallInfo) -> Datum {
  * TODO(pg-port): needs utils/array.h deconstruct_array_builtin (not yet ported).
  */
 pub unsafe fn tsvector_filter(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("tsvector_filter: utils/array.h deconstruct_array_builtin not yet translated")
+    let tsin: TSVector = PG_GETARG_TSVECTOR(PG_GETARG_DATUM!(fcinfo, 0));
+    let tsout: TSVector;
+    let weights: *mut c_void = PG_GETARG_ARRAYTYPE_P(fcinfo, 1);
+    let arrin: *mut WordEntry = ARRPTR(tsin);
+    let arrout: *mut WordEntry;
+    let datain: *mut c_char = STRPTR(tsin);
+    let dataout: *mut c_char;
+    let mut dweights: *mut Datum = null_mut();
+    let mut nulls: *mut bool = null_mut();
+    let mut nweights: c_int = 0;
+    let mut i: c_int;
+    let mut j: c_int;
+    let mut cur_pos: c_int = 0;
+    let mut mask: c_char = 0;
+
+    deconstruct_array_builtin(weights, CHAROID, &mut dweights, &mut nulls, &mut nweights);
+
+    i = 0;
+    while i < nweights {
+        let char_weight: c_char;
+
+        if *nulls.add(i as usize) {
+            /* C also: errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED) */
+            let _ = errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED);
+            ereport!(ERROR, errmsg!("weight array may not contain nulls"));
+        }
+
+        char_weight = DatumGetChar(*dweights.add(i as usize));
+        match char_weight as u8 {
+            b'A' | b'a' => mask |= 8,
+            b'B' | b'b' => mask |= 4,
+            b'C' | b'c' => mask |= 2,
+            b'D' | b'd' => mask |= 1,
+            _ => {
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+                let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+                ereport!(
+                    ERROR,
+                    errmsg!("unrecognized weight: \"{}\"", char_weight as u8 as char)
+                );
+            }
+        }
+        i += 1;
+    }
+
+    tsout = palloc0(VARSIZE(tsin as *const c_char) as Size) as TSVector;
+    (*tsout).size = (*tsin).size;
+    arrout = ARRPTR(tsout);
+    dataout = STRPTR(tsout);
+
+    i = 0;
+    j = 0;
+    while i < (*tsin).size {
+        let posvin: *mut WordEntryPosVector;
+        let posvout: *mut WordEntryPosVector;
+        let mut npos: c_int = 0;
+        let mut k: c_int;
+
+        if (*arrin.add(i as usize)).haspos() == 0 {
+            i += 1;
+            continue;
+        }
+
+        posvin = _POSVECPTR(tsin, arrin.add(i as usize));
+        posvout = dataout
+            .add(SHORTALIGN((cur_pos + (*arrin.add(i as usize)).len() as c_int) as usize))
+            as *mut WordEntryPosVector;
+
+        k = 0;
+        while k < (*posvin).npos as c_int {
+            if (mask & (1 << WEP_GETWEIGHT(*(*posvin).pos.as_ptr().add(k as usize)))) != 0 {
+                *(*posvout).pos.as_mut_ptr().add(npos as usize) =
+                    *(*posvin).pos.as_ptr().add(k as usize);
+                npos += 1;
+            }
+            k += 1;
+        }
+
+        /* if no satisfactory positions found, skip lexeme */
+        if npos == 0 {
+            i += 1;
+            continue;
+        }
+
+        (*arrout.add(j as usize)).set_haspos(1);
+        (*arrout.add(j as usize)).set_len((*arrin.add(i as usize)).len());
+        (*arrout.add(j as usize)).set_pos(cur_pos as u32);
+
+        memcpy(
+            dataout.add(cur_pos as usize) as *mut c_void,
+            datain.add((*arrin.add(i as usize)).pos() as usize) as *const c_void,
+            (*arrin.add(i as usize)).len() as usize,
+        );
+        (*posvout).npos = npos as uint16;
+        cur_pos += SHORTALIGN((*arrin.add(i as usize)).len() as usize) as c_int;
+        cur_pos += POSDATALEN(tsout, arrout.add(j as usize))
+            * core::mem::size_of::<WordEntryPos>() as c_int
+            + core::mem::size_of::<uint16>() as c_int;
+        j += 1;
+        i += 1;
+    }
+
+    (*tsout).size = j;
+    if dataout != STRPTR(tsout) {
+        memmove(
+            STRPTR(tsout) as *mut c_void,
+            dataout as *const c_void,
+            cur_pos as usize,
+        );
+    }
+
+    SET_VARSIZE(tsout as *mut c_char, CALCDATASIZE((*tsout).size, cur_pos) as c_int);
+
+    PG_FREE_IF_COPY!(fcinfo, tsin, 0);
+    PG_RETURN_POINTER!(tsout)
 }
 
 pub unsafe fn tsvector_concat(fcinfo: FunctionCallInfo) -> Datum {
@@ -1891,60 +2738,738 @@ pub unsafe fn ts_match_vq(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn ts_match_tt(fcinfo: FunctionCallInfo) -> Datum {
-    // C: to_tsvector(ARG0) @@ plainto_tsquery(ARG1), then ts_match_vq.
-    // TODO(pg-port): to_tsvector / plainto_tsquery (tsvector parser, ts_parse.c)
-    // are not yet ported, so this entry point remains stubbed.
-    let _ = fcinfo;
-    unimplemented!("ts_match_tt: to_tsvector / plainto_tsquery not yet translated")
+    let vector: TSVector;
+    let query: TSQuery;
+    let res: bool;
+
+    vector = DatumGetTSVector(DirectFunctionCall1!(to_tsvector, PG_GETARG_DATUM!(fcinfo, 0)));
+    query = DatumGetTSQuery(DirectFunctionCall1!(plainto_tsquery, PG_GETARG_DATUM!(fcinfo, 1)));
+
+    res = DatumGetBool(DirectFunctionCall2!(
+        ts_match_vq,
+        TSVectorGetDatum(vector),
+        TSQueryGetDatum(query)
+    ));
+
+    pfree(vector as *mut c_void);
+    pfree(query as *mut c_void);
+
+    PG_RETURN_BOOL!(res)
 }
 
 pub unsafe fn ts_match_tq(fcinfo: FunctionCallInfo) -> Datum {
-    // C: to_tsvector(ARG0) @@ ARG1::tsquery, then ts_match_vq.
-    // TODO(pg-port): to_tsvector (ts_parse.c) is not yet ported, so this entry
-    // point remains stubbed.
-    let _ = fcinfo;
-    unimplemented!("ts_match_tq: to_tsvector not yet translated")
+    let vector: TSVector;
+    let query: TSQuery = PG_GETARG_TSQUERY(fcinfo, 1);
+    let res: bool;
+
+    vector = DatumGetTSVector(DirectFunctionCall1!(to_tsvector, PG_GETARG_DATUM!(fcinfo, 0)));
+
+    res = DatumGetBool(DirectFunctionCall2!(
+        ts_match_vq,
+        TSVectorGetDatum(vector),
+        TSQueryGetDatum(query)
+    ));
+
+    pfree(vector as *mut c_void);
+    PG_FREE_IF_COPY!(fcinfo, query, 1);
+
+    PG_RETURN_BOOL!(res)
 }
 
 // ================================================================
-//   ts_stat statistic function support -- STUBBED (needs SPI / SRF)
+//   ts_stat statistic function support
 // ================================================================
-//
-// TODO(pg-port): ts_accum / insertStatEntry / chooseNextStatEntry /
-// walkStatEntryTree / ts_stat_sql build a balanced-tree statistic over rows
-// fetched via SPI (executor/spi.h) and emit them through funcapi SRF. Neither
-// SPI nor the SRF machinery is ported, so ts_stat1/ts_stat2 are stubs.
+
+/*
+ * Returns the number of positions in value 'wptr' within tsvector 'txt',
+ * that have a weight equal to one of the weights in 'weight' bitmask.
+ */
+unsafe fn check_weight(txt: TSVector, wptr: *mut WordEntry, weight: int8) -> c_int {
+    let mut len: c_int = POSDATALEN(txt, wptr);
+    let mut num: c_int = 0;
+    let mut ptr: *mut WordEntryPos = POSDATAPTR(txt, wptr);
+
+    while {
+        let old = len;
+        len -= 1;
+        old != 0
+    } {
+        if (weight & (1 << WEP_GETWEIGHT(*ptr))) != 0 {
+            num += 1;
+        }
+        ptr = ptr.add(1);
+    }
+    num
+}
+
+/*
+ * #define compareStatWord(a,e,t) \
+ *     tsCompareString((a)->lexeme, (a)->lenlexeme, STRPTR(t) + (e)->pos, (e)->len, false)
+ */
+#[inline]
+unsafe fn compareStatWord(a: *mut StatEntry, e: *mut WordEntry, t: TSVector) -> int32 {
+    tsCompareString(
+        (*a).lexeme.as_mut_ptr(),
+        (*a).lenlexeme as c_int,
+        STRPTR(t).add((*e).pos() as usize),
+        (*e).len() as c_int,
+        false,
+    )
+}
+
+unsafe fn insertStatEntry(
+    persistentContext: MemoryContext,
+    stat: *mut TSVectorStat,
+    txt: TSVector,
+    off: uint32,
+) {
+    let we: *mut WordEntry = ARRPTR(txt).add(off as usize);
+    let mut node: *mut StatEntry = (*stat).root;
+    let mut pnode: *mut StatEntry = null_mut();
+    let n: c_int;
+    let mut res: c_int = 0;
+    let mut depth: uint32 = 1;
+
+    if (*stat).weight == 0 {
+        n = if (*we).haspos() != 0 {
+            POSDATALEN(txt, we)
+        } else {
+            1
+        };
+    } else {
+        n = if (*we).haspos() != 0 {
+            check_weight(txt, we, (*stat).weight as int8)
+        } else {
+            0
+        };
+    }
+
+    if n == 0 {
+        return; /* nothing to insert */
+    }
+
+    while !node.is_null() {
+        res = compareStatWord(node, we, txt);
+
+        if res == 0 {
+            break;
+        } else {
+            pnode = node;
+            node = if res < 0 { (*node).left } else { (*node).right };
+        }
+        depth += 1;
+    }
+
+    if depth > (*stat).maxdepth {
+        (*stat).maxdepth = depth;
+    }
+
+    if node.is_null() {
+        node = MemoryContextAlloc(persistentContext, STATENTRYHDRSZ() + (*we).len() as usize)
+            as *mut StatEntry;
+        (*node).left = null_mut();
+        (*node).right = null_mut();
+        (*node).ndoc = 1;
+        (*node).nentry = n as uint32;
+        (*node).lenlexeme = (*we).len();
+        memcpy(
+            (*node).lexeme.as_mut_ptr() as *mut c_void,
+            STRPTR(txt).add((*we).pos() as usize) as *const c_void,
+            (*node).lenlexeme as usize,
+        );
+
+        if pnode.is_null() {
+            (*stat).root = node;
+        } else if res < 0 {
+            (*pnode).left = node;
+        } else {
+            (*pnode).right = node;
+        }
+    } else {
+        (*node).ndoc += 1;
+        (*node).nentry += n as uint32;
+    }
+}
+
+unsafe fn chooseNextStatEntry(
+    persistentContext: MemoryContext,
+    stat: *mut TSVectorStat,
+    txt: TSVector,
+    low: uint32,
+    high: uint32,
+    offset: uint32,
+) {
+    let mut pos: uint32;
+    let middle: uint32 = (low + high) >> 1;
+
+    pos = (low + middle) >> 1;
+    if low != middle && pos >= offset && pos - offset < (*txt).size as uint32 {
+        insertStatEntry(persistentContext, stat, txt, pos - offset);
+    }
+    pos = (high + middle + 1) >> 1;
+    if middle + 1 != high && pos >= offset && pos - offset < (*txt).size as uint32 {
+        insertStatEntry(persistentContext, stat, txt, pos - offset);
+    }
+
+    if low != middle {
+        chooseNextStatEntry(persistentContext, stat, txt, low, middle, offset);
+    }
+    if high != middle + 1 {
+        chooseNextStatEntry(persistentContext, stat, txt, middle + 1, high, offset);
+    }
+}
+
+/*
+ * This is written like a custom aggregate function, because the original plan
+ * was to do just that.  See the C source for the historical note.
+ */
+unsafe fn ts_accum(
+    persistentContext: MemoryContext,
+    mut stat: *mut TSVectorStat,
+    data: Datum,
+) -> *mut TSVectorStat {
+    let txt: TSVector = DatumGetTSVector(data);
+    let mut i: uint32;
+    let mut nbit: uint32 = 0;
+    let offset: uint32;
+
+    if stat.is_null() {
+        /* Init in first */
+        stat = MemoryContextAllocZero(persistentContext, core::mem::size_of::<TSVectorStat>())
+            as *mut TSVectorStat;
+        (*stat).maxdepth = 1;
+    }
+
+    /* simple check of correctness */
+    if txt.is_null() || (*txt).size == 0 {
+        if !txt.is_null() && txt != DatumGetPointer(data) as TSVector {
+            pfree(txt as *mut c_void);
+        }
+        return stat;
+    }
+
+    i = ((*txt).size - 1) as uint32;
+    while i > 0 {
+        nbit += 1;
+        i >>= 1;
+    }
+
+    nbit = 1 << nbit;
+    offset = (nbit - (*txt).size as uint32) / 2;
+
+    insertStatEntry(persistentContext, stat, txt, (nbit >> 1) - offset);
+    chooseNextStatEntry(persistentContext, stat, txt, 0, nbit, offset);
+
+    stat
+}
+
+unsafe fn ts_setup_firstcall(
+    fcinfo: FunctionCallInfo,
+    funcctx: *mut FuncCallContext,
+    stat: *mut TSVectorStat,
+) {
+    let mut tupdesc: TupleDesc = null_mut();
+    let oldcontext: MemoryContext;
+    let mut node: *mut StatEntry;
+
+    (*funcctx).user_fctx = stat as *mut c_void;
+
+    oldcontext = MemoryContextSwitchTo((*funcctx).multi_call_memory_ctx);
+
+    (*stat).stack = palloc0(
+        core::mem::size_of::<*mut StatEntry>() * ((*stat).maxdepth + 1) as usize,
+    ) as *mut *mut StatEntry;
+    (*stat).stackpos = 0;
+
+    node = (*stat).root;
+    /* find leftmost value */
+    if node.is_null() {
+        *(*stat).stack.add((*stat).stackpos as usize) = null_mut();
+    } else {
+        loop {
+            *(*stat).stack.add((*stat).stackpos as usize) = node;
+            if !(*node).left.is_null() {
+                (*stat).stackpos += 1;
+                node = (*node).left;
+            } else {
+                break;
+            }
+        }
+    }
+    Assert!((*stat).stackpos <= (*stat).maxdepth);
+
+    if get_call_result_type(fcinfo, null_mut(), &mut tupdesc) != TYPEFUNC_COMPOSITE {
+        elog!(ERROR, "return type must be a row type");
+    }
+    (*funcctx).tuple_desc = tupdesc;
+    (*funcctx).attinmeta = TupleDescGetAttInMetadata(tupdesc);
+
+    MemoryContextSwitchTo(oldcontext);
+}
+
+unsafe fn walkStatEntryTree(stat: *mut TSVectorStat) -> *mut StatEntry {
+    let mut node: *mut StatEntry = *(*stat).stack.add((*stat).stackpos as usize);
+
+    if node.is_null() {
+        return null_mut();
+    }
+
+    if (*node).ndoc != 0 {
+        /* return entry itself: we already was at left sublink */
+        return node;
+    } else if !(*node).right.is_null()
+        && (*node).right != *(*stat).stack.add(((*stat).stackpos + 1) as usize)
+    {
+        /* go on right sublink */
+        (*stat).stackpos += 1;
+        node = (*node).right;
+
+        /* find most-left value */
+        loop {
+            *(*stat).stack.add((*stat).stackpos as usize) = node;
+            if !(*node).left.is_null() {
+                (*stat).stackpos += 1;
+                node = (*node).left;
+            } else {
+                break;
+            }
+        }
+        Assert!((*stat).stackpos <= (*stat).maxdepth);
+    } else {
+        /* we already return all left subtree, itself and  right subtree */
+        if (*stat).stackpos == 0 {
+            return null_mut();
+        }
+
+        (*stat).stackpos -= 1;
+        return walkStatEntryTree(stat);
+    }
+
+    node
+}
+
+unsafe fn ts_process_call(funcctx: *mut FuncCallContext) -> Datum {
+    let st: *mut TSVectorStat;
+    let entry: *mut StatEntry;
+
+    st = (*funcctx).user_fctx as *mut TSVectorStat;
+
+    entry = walkStatEntryTree(st);
+
+    if !entry.is_null() {
+        let result: Datum;
+        let mut values: [*mut c_char; 3] = [null_mut(); 3];
+        let mut ndoc: [c_char; 16] = [0; 16];
+        let mut nentry: [c_char; 16] = [0; 16];
+        let tuple: *mut c_void;
+
+        values[0] = palloc((*entry).lenlexeme as usize + 1) as *mut c_char;
+        memcpy(
+            values[0] as *mut c_void,
+            (*entry).lexeme.as_ptr() as *const c_void,
+            (*entry).lenlexeme as usize,
+        );
+        *values[0].add((*entry).lenlexeme as usize) = b'\0' as c_char;
+        sprintf(ndoc.as_mut_ptr(), c"%d".as_ptr(), (*entry).ndoc);
+        values[1] = ndoc.as_mut_ptr();
+        sprintf(nentry.as_mut_ptr(), c"%d".as_ptr(), (*entry).nentry);
+        values[2] = nentry.as_mut_ptr();
+
+        tuple = BuildTupleFromCStrings((*funcctx).attinmeta, values.as_mut_ptr());
+        result = HeapTupleGetDatum(tuple);
+
+        pfree(values[0] as *mut c_void);
+
+        /* mark entry as already visited */
+        (*entry).ndoc = 0;
+
+        return result;
+    }
+
+    0 as Datum
+}
+
+unsafe fn ts_stat_sql(
+    persistentContext: MemoryContext,
+    txt: *mut text,
+    ws: *mut text,
+) -> *mut TSVectorStat {
+    let query: *mut c_char = text_to_cstring(txt);
+    let mut stat: *mut TSVectorStat;
+    let mut isnull: bool = false;
+    let portal: Portal;
+    let plan: SPIPlanPtr;
+
+    plan = SPI_prepare(query, 0, null_mut());
+    if plan.is_null() {
+        /* internal error */
+        elog!(
+            ERROR,
+            "SPI_prepare(\"{}\") failed",
+            std::ffi::CStr::from_ptr(query).to_string_lossy()
+        );
+    }
+
+    portal = SPI_cursor_open(null_mut(), plan, null_mut(), null_mut(), true);
+    if portal.is_null() {
+        /* internal error */
+        elog!(
+            ERROR,
+            "SPI_cursor_open(\"{}\") failed",
+            std::ffi::CStr::from_ptr(query).to_string_lossy()
+        );
+    }
+
+    SPI_cursor_fetch(portal, true, 100);
+
+    if SPI_tuptable.is_null()
+        || (*(*SPI_tuptable).tupdesc.cast::<TupleDescData>()).natts != 1
+        || !IsBinaryCoercible(SPI_gettypeid((*SPI_tuptable).tupdesc, 1), TSVECTOROID)
+    {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+        ereport!(ERROR, errmsg!("ts_stat query must return one tsvector column"));
+    }
+
+    stat = MemoryContextAllocZero(persistentContext, core::mem::size_of::<TSVectorStat>())
+        as *mut TSVectorStat;
+    (*stat).maxdepth = 1;
+
+    if !ws.is_null() {
+        let mut buf: *mut c_char;
+        let end: *const c_char;
+
+        buf = VARDATA_ANY(ws as *const c_char);
+        end = buf.add(VARSIZE_ANY_EXHDR(ws as *const c_char) as usize);
+        while (buf as *const c_char) < end {
+            let len: c_int = pg_mblen_range(buf, end);
+
+            if len == 1 {
+                match *buf as u8 {
+                    b'A' | b'a' => (*stat).weight |= 1 << 3,
+                    b'B' | b'b' => (*stat).weight |= 1 << 2,
+                    b'C' | b'c' => (*stat).weight |= 1 << 1,
+                    b'D' | b'd' => (*stat).weight |= 1,
+                    _ => (*stat).weight |= 0,
+                }
+            }
+            buf = buf.add(len as usize);
+        }
+    }
+
+    while SPI_processed > 0 {
+        let mut i: u64;
+
+        i = 0;
+        while i < SPI_processed {
+            let data: Datum = SPI_getbinval(
+                *(*SPI_tuptable).vals.add(i as usize),
+                (*SPI_tuptable).tupdesc,
+                1,
+                &mut isnull,
+            );
+
+            if !isnull {
+                stat = ts_accum(persistentContext, stat, data);
+            }
+            i += 1;
+        }
+
+        SPI_freetuptable(SPI_tuptable);
+        SPI_cursor_fetch(portal, true, 100);
+    }
+
+    SPI_freetuptable(SPI_tuptable);
+    SPI_cursor_close(portal);
+    SPI_freeplan(plan);
+    pfree(query as *mut c_void);
+
+    stat
+}
 
 pub unsafe fn ts_stat1(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("ts_stat1: executor/spi.h (SPI) + funcapi SRF not yet translated")
+    let mut funcctx: *mut FuncCallContext;
+    let result: Datum;
+
+    if SRF_IS_FIRSTCALL!(fcinfo) {
+        let stat: *mut TSVectorStat;
+        let txt: *mut text = DatumGetPointer(PG_GETARG_DATUM!(fcinfo, 0)) as *mut text;
+
+        funcctx = SRF_FIRSTCALL_INIT!(fcinfo);
+        SPI_connect();
+        stat = ts_stat_sql((*funcctx).multi_call_memory_ctx, txt, null_mut());
+        PG_FREE_IF_COPY!(fcinfo, txt, 0);
+        ts_setup_firstcall(fcinfo, funcctx, stat);
+        SPI_finish();
+    }
+
+    funcctx = SRF_PERCALL_SETUP!(fcinfo);
+    result = ts_process_call(funcctx);
+    if result != 0 as Datum {
+        SRF_RETURN_NEXT!(fcinfo, funcctx, result);
+    }
+    SRF_RETURN_DONE!(fcinfo, funcctx);
 }
 
 pub unsafe fn ts_stat2(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("ts_stat2: executor/spi.h (SPI) + funcapi SRF not yet translated")
+    let mut funcctx: *mut FuncCallContext;
+    let result: Datum;
+
+    if SRF_IS_FIRSTCALL!(fcinfo) {
+        let stat: *mut TSVectorStat;
+        let txt: *mut text = DatumGetPointer(PG_GETARG_DATUM!(fcinfo, 0)) as *mut text;
+        let ws: *mut text = DatumGetPointer(PG_GETARG_DATUM!(fcinfo, 1)) as *mut text;
+
+        funcctx = SRF_FIRSTCALL_INIT!(fcinfo);
+        SPI_connect();
+        stat = ts_stat_sql((*funcctx).multi_call_memory_ctx, txt, ws);
+        PG_FREE_IF_COPY!(fcinfo, txt, 0);
+        PG_FREE_IF_COPY!(fcinfo, ws, 1);
+        ts_setup_firstcall(fcinfo, funcctx, stat);
+        SPI_finish();
+    }
+
+    funcctx = SRF_PERCALL_SETUP!(fcinfo);
+    result = ts_process_call(funcctx);
+    if result != 0 as Datum {
+        SRF_RETURN_NEXT!(fcinfo, funcctx, result);
+    }
+    SRF_RETURN_DONE!(fcinfo, funcctx);
 }
 
 // ================================================================
-//   tsvector update trigger -- STUBBED (needs trigger manager / SPI / catalog)
+//   tsvector update trigger
 // ================================================================
 //
-// TODO(pg-port): tsvector_update_trigger* require commands/trigger.h
-// (TriggerData / CALLED_AS_TRIGGER / TRIGGER_FIRED_*), the SPI tuple helpers,
-// catalog/namespace lookups (get_ts_config_oid), the text-search parser
-// (parsetext / make_tsvector from tsvector.c's sibling units), and
-// heap_modify_tuple_by_cols. None are ported yet.
+// Triggers for automatic update of a tsvector column from text column(s).
+//
+// Trigger arguments are either
+//      name of tsvector col, name of tsconfig to use, name(s) of text col(s)
+//      name of tsvector col, name of regconfig col, name(s) of text col(s)
+// ie, tsconfig can either be specified by name, or indirectly as the contents
+// of a regconfig field in the row.  If the name is used, it must be explicitly
+// schema-qualified.
 
 pub unsafe fn tsvector_update_trigger_byid(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return tsvector_update_trigger(fcinfo, false);
-    let _ = fcinfo;
-    unimplemented!("tsvector_update_trigger_byid: trigger manager / SPI / catalog not yet translated")
+    tsvector_update_trigger(fcinfo, false)
 }
 
 pub unsafe fn tsvector_update_trigger_bycolumn(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return tsvector_update_trigger(fcinfo, true);
-    let _ = fcinfo;
-    unimplemented!("tsvector_update_trigger_bycolumn: trigger manager / SPI / catalog not yet translated")
+    tsvector_update_trigger(fcinfo, true)
+}
+
+unsafe fn tsvector_update_trigger(fcinfo: FunctionCallInfo, config_column: bool) -> Datum {
+    let trigdata: *mut TriggerData;
+    let trigger: *mut Trigger;
+    let rel: Relation;
+    let mut rettuple: *mut c_void = null_mut();
+    let tsvector_attr_num: c_int;
+    let mut i: c_int;
+    let mut prs: ParsedText = core::mem::zeroed();
+    let mut datum: Datum;
+    let mut isnull: bool = false;
+    let mut txt: *mut text;
+    let cfgId: Oid;
+    let mut update_needed: bool = false;
+
+    /* Check call context */
+    if !CALLED_AS_TRIGGER(fcinfo) {
+        /* internal error */
+        elog!(ERROR, "tsvector_update_trigger: not fired by trigger manager");
+    }
+
+    trigdata = (*fcinfo).context as *mut TriggerData;
+    if !TRIGGER_FIRED_FOR_ROW((*trigdata).tg_event) {
+        elog!(ERROR, "tsvector_update_trigger: must be fired for row");
+    }
+    if !TRIGGER_FIRED_BEFORE((*trigdata).tg_event) {
+        elog!(ERROR, "tsvector_update_trigger: must be fired BEFORE event");
+    }
+
+    if TRIGGER_FIRED_BY_INSERT((*trigdata).tg_event) {
+        rettuple = (*trigdata).tg_trigtuple;
+        update_needed = true;
+    } else if TRIGGER_FIRED_BY_UPDATE((*trigdata).tg_event) {
+        rettuple = (*trigdata).tg_newtuple;
+        update_needed = false; /* computed below */
+    } else {
+        elog!(ERROR, "tsvector_update_trigger: must be fired for INSERT or UPDATE");
+    }
+
+    trigger = (*trigdata).tg_trigger;
+    rel = (*trigdata).tg_relation;
+
+    if (*trigger).tgnargs < 3 {
+        elog!(ERROR, "tsvector_update_trigger: arguments must be tsvector_field, ts_config, text_field1, ...)");
+    }
+
+    /* Find the target tsvector column */
+    tsvector_attr_num = SPI_fnumber((*rel).rd_att, *(*trigger).tgargs.add(0));
+    if tsvector_attr_num == SPI_ERROR_NOATTRIBUTE {
+        /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */
+        let _ = errcode(ERRCODE_UNDEFINED_COLUMN);
+        ereport!(
+            ERROR,
+            errmsg!(
+                "tsvector column \"{}\" does not exist",
+                std::ffi::CStr::from_ptr(*(*trigger).tgargs.add(0)).to_string_lossy()
+            )
+        );
+    }
+    /* This will effectively reject system columns, so no separate test: */
+    if !IsBinaryCoercible(SPI_gettypeid((*rel).rd_att, tsvector_attr_num), TSVECTOROID) {
+        /* C also: errcode(ERRCODE_DATATYPE_MISMATCH) */
+        let _ = errcode(ERRCODE_DATATYPE_MISMATCH);
+        ereport!(
+            ERROR,
+            errmsg!(
+                "column \"{}\" is not of tsvector type",
+                std::ffi::CStr::from_ptr(*(*trigger).tgargs.add(0)).to_string_lossy()
+            )
+        );
+    }
+
+    /* Find the configuration to use */
+    if config_column {
+        let config_attr_num: c_int;
+
+        config_attr_num = SPI_fnumber((*rel).rd_att, *(*trigger).tgargs.add(1));
+        if config_attr_num == SPI_ERROR_NOATTRIBUTE {
+            /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */
+            let _ = errcode(ERRCODE_UNDEFINED_COLUMN);
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "configuration column \"{}\" does not exist",
+                    std::ffi::CStr::from_ptr(*(*trigger).tgargs.add(1)).to_string_lossy()
+                )
+            );
+        }
+        if !IsBinaryCoercible(SPI_gettypeid((*rel).rd_att, config_attr_num), REGCONFIGOID) {
+            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH) */
+            let _ = errcode(ERRCODE_DATATYPE_MISMATCH);
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "column \"{}\" is not of regconfig type",
+                    std::ffi::CStr::from_ptr(*(*trigger).tgargs.add(1)).to_string_lossy()
+                )
+            );
+        }
+
+        datum = SPI_getbinval(rettuple, (*rel).rd_att, config_attr_num, &mut isnull);
+        if isnull {
+            /* C also: errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED) */
+            let _ = errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED);
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "configuration column \"{}\" must not be null",
+                    std::ffi::CStr::from_ptr(*(*trigger).tgargs.add(1)).to_string_lossy()
+                )
+            );
+        }
+        cfgId = DatumGetObjectId(datum);
+    } else {
+        let names: *mut crate::nodes::pg_list::List;
+
+        names = stringToQualifiedNameList(*(*trigger).tgargs.add(1), null_mut());
+        /* require a schema so that results are not search path dependent */
+        if crate::nodes::pg_list::list_length(names) < 2 {
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "text search configuration name \"{}\" must be schema-qualified",
+                    std::ffi::CStr::from_ptr(*(*trigger).tgargs.add(1)).to_string_lossy()
+                )
+            );
+        }
+        cfgId = get_ts_config_oid(names, false);
+    }
+
+    /* initialize parse state */
+    prs.lenwords = 32;
+    prs.curwords = 0;
+    prs.pos = 0;
+    prs.words =
+        palloc(core::mem::size_of::<ParsedWord>() * prs.lenwords as usize) as *mut ParsedWord;
+
+    /* find all words in indexable column(s) */
+    i = 2;
+    while i < (*trigger).tgnargs as c_int {
+        let numattr: c_int;
+
+        numattr = SPI_fnumber((*rel).rd_att, *(*trigger).tgargs.add(i as usize));
+        if numattr == SPI_ERROR_NOATTRIBUTE {
+            /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */
+            let _ = errcode(ERRCODE_UNDEFINED_COLUMN);
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "column \"{}\" does not exist",
+                    std::ffi::CStr::from_ptr(*(*trigger).tgargs.add(i as usize)).to_string_lossy()
+                )
+            );
+        }
+        if !IsBinaryCoercible(SPI_gettypeid((*rel).rd_att, numattr), TEXTOID) {
+            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH) */
+            let _ = errcode(ERRCODE_DATATYPE_MISMATCH);
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "column \"{}\" is not of a character type",
+                    std::ffi::CStr::from_ptr(*(*trigger).tgargs.add(i as usize)).to_string_lossy()
+                )
+            );
+        }
+
+        if bms_is_member(numattr - FirstLowInvalidHeapAttributeNumber, (*trigdata).tg_updatedcols) {
+            update_needed = true;
+        }
+
+        datum = SPI_getbinval(rettuple, (*rel).rd_att, numattr, &mut isnull);
+        if isnull {
+            i += 1;
+            continue;
+        }
+
+        txt = crate::varatt::pg_detoast_datum_packed(DatumGetPointer(datum) as *mut c_void)
+            as *mut text;
+
+        parsetext(
+            cfgId,
+            &mut prs,
+            VARDATA_ANY(txt as *const c_char),
+            VARSIZE_ANY_EXHDR(txt as *const c_char) as c_int,
+        );
+
+        if txt != DatumGetPointer(datum) as *mut text {
+            pfree(txt as *mut c_void);
+        }
+        i += 1;
+    }
+
+    if update_needed {
+        /* make tsvector value */
+        datum = TSVectorGetDatum(make_tsvector(&mut prs));
+        isnull = false;
+
+        /* and insert it into tuple */
+        rettuple = heap_modify_tuple_by_cols(
+            rettuple,
+            (*rel).rd_att,
+            1,
+            &mut (tsvector_attr_num as c_int),
+            &mut datum,
+            &mut isnull,
+        );
+
+        pfree(DatumGetPointer(datum) as *mut c_void);
+    }
+
+    PointerGetDatum(rettuple)
 }
 
 #[cfg(test)]

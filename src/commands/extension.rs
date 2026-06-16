@@ -39,6 +39,7 @@ pub use crate::postgres::Datum;
 // nodes
 use crate::nodes::nodes::{Node, NodeTag, ParseLoc};
 use crate::nodes::pg_list::List;
+use crate::nodes::pg_list::lfirst;
 use crate::catalog::objectaccess::ObjectAddress;
 
 // Heap tuple
@@ -379,6 +380,10 @@ unsafe fn psprintf(fmt: *const c_char) -> *mut c_char {
 unsafe fn psprintf2(fmt: *const c_char, a: *const c_char) -> *mut c_char {
     let _ = (fmt, a);
     unimplemented!("TODO(pg-port): psprintf2")
+}
+unsafe fn psprintf3(fmt: *const c_char, a: *const c_char, b: *const c_char) -> *mut c_char {
+    let _ = (fmt, a, b);
+    unimplemented!("TODO(pg-port): psprintf3")
 }
 unsafe fn first_path_var_separator(path: *mut c_char) -> *mut c_char {
     let _ = path;
@@ -4600,9 +4605,40 @@ unsafe fn new_ExtensionControlFile(extname: *const c_char) -> *mut ExtensionCont
  * have all macros replaced.
  */
 pub unsafe fn find_in_paths(basename: *const c_char, paths: *mut List) -> *mut c_char {
-    /* foreach(cell, paths) */
-    /* TODO(pg-port): foreach iteration over paths */
-    let _ = (basename, paths);
+    foreach!(cell, paths, {
+        let mut path: *mut c_char = lfirst(current_cell!(cell)) as *mut c_char;
+
+        /* Assert(path != NULL) */
+
+        path = pstrdup(path);
+        canonicalize_path(path);
+
+        /* only absolute paths */
+        if !is_absolute_path(path) {
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "component in parameter \"{}\" is not an absolute path",
+                    "extension_control_path"
+                )
+            );
+            /* C also: errcode(ERRCODE_INVALID_NAME) */
+        }
+
+        let full: *mut c_char = psprintf3(
+            b"%s/%s\0".as_ptr() as *const c_char,
+            path,
+            basename,
+        );
+
+        if pg_file_exists(full) {
+            return full;
+        }
+
+        pfree(path as *mut c_void);
+        pfree(full as *mut c_void);
+    });
+
     null_mut()
 }
 // -------------------------  END PART 5  ----------------------------------

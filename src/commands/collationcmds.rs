@@ -641,6 +641,51 @@ unsafe extern "C" fn cmpaliases(a: *const c_void, b: *const c_void) -> c_int {
 }
 
 /*
+ * Get the comment (display name) for an ICU locale, transcribed to ASCII.
+ * Returns NULL if the display name is not available or is non-ASCII.
+ */
+#[cfg(USE_ICU)]
+unsafe fn get_icu_locale_comment(localename: *const c_char) -> *mut c_char {
+    let mut status: UErrorCode;
+    let mut displayname: [UChar; 128] = [0; 128];
+    let len_uchar: int32;
+    let mut i: int32;
+    let result: *mut c_char;
+
+    status = U_ZERO_ERROR;
+    len_uchar = uloc_getDisplayName(
+        localename,
+        c"en".as_ptr(),
+        displayname.as_mut_ptr(),
+        lengthof!(displayname) as int32,
+        &mut status,
+    );
+    if U_FAILURE(status) {
+        return std::ptr::null_mut(); /* no good reason to raise an error */
+    }
+
+    /* Check for non-ASCII comment (can't use pg_is_ascii for this) */
+    i = 0;
+    while i < len_uchar {
+        if displayname[i as usize] > 127 {
+            return std::ptr::null_mut();
+        }
+        i += 1;
+    }
+
+    /* OK, transcribe */
+    result = palloc((len_uchar + 1) as usize) as *mut c_char;
+    i = 0;
+    while i < len_uchar {
+        *result.add(i as usize) = displayname[i as usize] as c_char;
+        i += 1;
+    }
+    *result.add(len_uchar as usize) = 0;
+
+    result
+}
+
+/*
  * Create a new collation using the input locale 'locale'. (subroutine for
  * pg_import_system_collations())
  *
@@ -733,6 +778,109 @@ unsafe fn create_collation_from_locale(
     }
 
     enc
+}
+
+/* parameter to be passed to the callback function win32_read_locale() */
+#[cfg(ENUM_SYSTEM_LOCALE)]
+#[repr(C)]
+struct CollParam {
+    nspid: Oid,
+    ncreatedp: *mut c_int,
+    nvalidp: *mut c_int,
+}
+
+/*
+ * Callback function for EnumSystemLocalesEx() in
+ * pg_import_system_collations().  Creates a collation for every valid locale
+ * and a POSIX alias collation.
+ *
+ * The callback contract is to return TRUE to continue enumerating and FALSE
+ * to stop enumerating.  We always want to continue.
+ */
+#[cfg(ENUM_SYSTEM_LOCALE)]
+unsafe extern "system" fn win32_read_locale(pStr: LPWSTR, dwFlags: DWORD, lparam: LPARAM) -> BOOL {
+    let param = lparam as *mut CollParam;
+    let mut localebuf: [c_char; NAMEDATALEN] = [0; NAMEDATALEN];
+    let result: c_int;
+    let enc: c_int;
+
+    let _ = dwFlags;
+
+    result = WideCharToMultiByte(
+        CP_ACP,
+        0,
+        pStr,
+        -1,
+        localebuf.as_mut_ptr(),
+        NAMEDATALEN as c_int,
+        std::ptr::null(),
+        std::ptr::null_mut(),
+    );
+
+    if result == 0 {
+        if GetLastError() == ERROR_INSUFFICIENT_BUFFER {
+            elog!(
+                DEBUG1,
+                "skipping locale with too-long name: \"{}\"",
+                cstr_to_string(localebuf.as_ptr())
+            );
+        }
+        return TRUE;
+    }
+    if localebuf[0] == 0 {
+        return TRUE;
+    }
+
+    enc = create_collation_from_locale(
+        localebuf.as_ptr(),
+        (*param).nspid as c_int,
+        (*param).nvalidp,
+        (*param).ncreatedp,
+    );
+    if enc < 0 {
+        return TRUE;
+    }
+
+    /*
+     * Windows will use hyphens between language and territory, where POSIX
+     * uses an underscore. Simply create a POSIX alias.
+     */
+    if !strchr(localebuf.as_ptr(), b'-' as c_int).is_null() {
+        let mut alias: [c_char; NAMEDATALEN] = [0; NAMEDATALEN];
+        let collid: Oid;
+
+        strcpy(alias.as_mut_ptr(), localebuf.as_ptr());
+        let mut p = alias.as_mut_ptr();
+        while *p != 0 {
+            if *p == b'-' as c_char {
+                *p = b'_' as c_char;
+            }
+            p = p.add(1);
+        }
+
+        collid = CollationCreate(
+            alias.as_ptr(),
+            (*param).nspid,
+            GetUserId(),
+            COLLPROVIDER_LIBC,
+            true,
+            enc,
+            localebuf.as_ptr(),
+            localebuf.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            get_collation_actual_version(COLLPROVIDER_LIBC, localebuf.as_ptr()),
+            true,
+            true,
+        );
+        if OidIsValid(collid) {
+            *(*param).ncreatedp += 1;
+
+            CommandCounterIncrement();
+        }
+    }
+
+    TRUE
 }
 
 /*
@@ -1228,3 +1376,59 @@ const ERROR: c_int = 21; // elevel; matches elog.h ERROR
 const NOTICE: c_int = 18;
 const WARNING: c_int = 19;
 const DEBUG1: c_int = 14;
+
+// ICU stubs (only compiled with USE_ICU) -------------------------------------
+#[cfg(USE_ICU)]
+type UErrorCode = c_int; // TODO: ICU unicode/utypes.h
+#[cfg(USE_ICU)]
+type UChar = u16; // TODO: ICU unicode/umachine.h
+#[cfg(USE_ICU)]
+const U_ZERO_ERROR: UErrorCode = 0; // TODO: ICU unicode/utypes.h
+#[cfg(USE_ICU)]
+unsafe fn U_FAILURE(code: UErrorCode) -> bool {
+    code > U_ZERO_ERROR
+}
+#[cfg(USE_ICU)]
+unsafe fn uloc_getDisplayName(
+    _localeID: *const c_char,
+    _displayLocale: *const c_char,
+    _dest: *mut UChar,
+    _destCapacity: int32,
+    _status: *mut UErrorCode,
+) -> int32 {
+    unimplemented!() // TODO: ICU unicode/uloc.h
+}
+
+// WIN32 system-locale enumeration stubs (only compiled with ENUM_SYSTEM_LOCALE)
+#[cfg(ENUM_SYSTEM_LOCALE)]
+type LPWSTR = *mut u16; // TODO: win32
+#[cfg(ENUM_SYSTEM_LOCALE)]
+type LPARAM = isize; // TODO: win32
+#[cfg(ENUM_SYSTEM_LOCALE)]
+const TRUE: BOOL = 1; // TODO: win32
+#[cfg(ENUM_SYSTEM_LOCALE)]
+const CP_ACP: u32 = 0; // TODO: win32
+#[cfg(ENUM_SYSTEM_LOCALE)]
+const ERROR_INSUFFICIENT_BUFFER: DWORD = 122; // TODO: win32
+#[cfg(ENUM_SYSTEM_LOCALE)]
+unsafe fn WideCharToMultiByte(
+    _CodePage: u32,
+    _dwFlags: DWORD,
+    _lpWideCharStr: LPWSTR,
+    _cchWideChar: c_int,
+    _lpMultiByteStr: *mut c_char,
+    _cbMultiByte: c_int,
+    _lpDefaultChar: *const c_char,
+    _lpUsedDefaultChar: *mut c_int,
+) -> c_int {
+    unimplemented!() // TODO: win32 WideCharToMultiByte
+}
+#[cfg(ENUM_SYSTEM_LOCALE)]
+unsafe fn GetLastError() -> DWORD {
+    unimplemented!() // TODO: win32 GetLastError
+}
+#[cfg(ENUM_SYSTEM_LOCALE)]
+extern "C" {
+    fn strchr(s: *const c_char, c: c_int) -> *mut c_char;
+    fn strcpy(dest: *mut c_char, src: *const c_char) -> *mut c_char;
+}

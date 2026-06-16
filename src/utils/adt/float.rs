@@ -36,19 +36,49 @@
 use crate::prelude::*;
 use crate::utils::fmgr::*;
 use crate::{
-    PG_GETARG_BOOL, PG_GETARG_CSTRING, PG_GETARG_FLOAT4, PG_GETARG_FLOAT8, PG_GETARG_INT16,
-    PG_GETARG_INT32, PG_GETARG_POINTER, PG_RETURN_BOOL, PG_RETURN_CSTRING, PG_RETURN_FLOAT4,
-    PG_RETURN_FLOAT8, PG_RETURN_INT16, PG_RETURN_INT32,
+    PG_GETARG_BOOL, PG_GETARG_CSTRING, PG_GETARG_DATUM, PG_GETARG_FLOAT4, PG_GETARG_FLOAT8,
+    PG_GETARG_INT16, PG_GETARG_INT32, PG_GETARG_POINTER, PG_RETURN_BOOL, PG_RETURN_CSTRING,
+    PG_RETURN_FLOAT4, PG_RETURN_FLOAT8, PG_RETURN_INT16, PG_RETURN_INT32, PG_RETURN_NULL,
+    PG_RETURN_POINTER, PG_RETURN_VOID,
 };
 use crate::c::{float4, float8, int16, int32};
 use crate::common::int::pg_add_s32_overflow;
 use crate::port::pgstrcasecmp::pg_strncasecmp;
+use crate::port::port_api::pg_strfromd;
+use crate::utils::sort::sortsupport::{SortSupport, SortSupportData};
 use crate::lib::stringinfo::{StringInfo, StringInfoData};
 use crate::libpq::pqformat::{
     pq_begintypsend, pq_endtypsend, pq_getmsgfloat4, pq_getmsgfloat8, pq_sendfloat4, pq_sendfloat8,
 };
-use crate::postgres::PointerGetDatum;
+use crate::postgres::{DatumGetFloat4, DatumGetFloat8, DatumGetPointer, Float8GetDatum, PointerGetDatum};
+use crate::utils::array::{
+    ARR_DATA_PTR, ARR_DIMS, ARR_ELEMTYPE, ARR_HASNULL, ARR_NDIM, ArrayType,
+};
+use crate::utils::adt::arrayfuncs::construct_array_builtin;
+use crate::executor::nodeAgg::AggCheckCallContext;
+use crate::catalog::pg_type_d::FLOAT8OID;
 use core::ffi::{c_char, c_int, c_void};
+
+/* PG_GETARG_ARRAYTYPE_P(n) / PG_RETURN_ARRAYTYPE_P(x) from utils/array.h. */
+macro_rules! PG_GETARG_ARRAYTYPE_P {
+    ($fcinfo:expr, $n:expr) => {
+        DatumGetPointer(PG_GETARG_DATUM!($fcinfo, $n)) as *mut ArrayType
+    };
+}
+macro_rules! PG_RETURN_ARRAYTYPE_P {
+    ($x:expr) => {
+        PG_RETURN_POINTER!($x as *const c_void)
+    };
+}
+/* Float8GetDatumFast(X) -> Float8GetDatum(X) on pass-by-value platforms. */
+#[inline]
+unsafe fn Float8GetDatumFast(x: float8) -> Datum {
+    Float8GetDatum(x)
+}
+
+/* <float.h>: decimal digits of precision for float/double. */
+const FLT_DIG: c_int = 6;
+const DBL_DIG: c_int = 15;
 
 /* X/Open (XSI) requires <math.h> to provide M_PI, but core POSIX does not */
 const M_PI: f64 = 3.14159265358979323846;
@@ -575,18 +605,15 @@ pub unsafe fn float4in_internal(
 pub unsafe fn float4out(fcinfo: FunctionCallInfo) -> Datum {
     let num: float4 = PG_GETARG_FLOAT4!(fcinfo, 0);
     let ascii = palloc(32) as *mut core::ffi::c_char;
+    let ndig: c_int = FLT_DIG + extra_float_digits;
 
-    /*
-     * Default (extra_float_digits > 0) uses the Ryu shortest-decimal output,
-     * now ported in common/f2s.rs.  The extra_float_digits <= 0 path uses
-     * pg_strfromd (snprintf %.*g) which is not yet ported.
-     */
     if extra_float_digits > 0 {
         crate::common::f2s::float_to_shortest_decimal_buf(num, ascii);
         PG_RETURN_CSTRING!(ascii);
     }
-    // TODO(pg-port): port pg_strfromd for the extra_float_digits <= 0 case.
-    unimplemented!("float4out: pg_strfromd (extra_float_digits<=0 path) not yet translated")
+
+    let _ = pg_strfromd(ascii, 32, ndig, num as f64);
+    PG_RETURN_CSTRING!(ascii)
 }
 
 /*
@@ -758,18 +785,15 @@ pub unsafe fn float8out(fcinfo: FunctionCallInfo) -> Datum {
  */
 pub unsafe fn float8out_internal(num: float8) -> *mut c_char {
     let ascii = palloc(32) as *mut core::ffi::c_char;
+    let ndig: c_int = DBL_DIG + extra_float_digits;
 
-    /*
-     * Default (extra_float_digits > 0) uses the Ryu shortest-decimal output,
-     * now ported in common/d2s.rs.  The extra_float_digits <= 0 path uses
-     * pg_strfromd (snprintf %.*g) which is not yet ported.
-     */
     if extra_float_digits > 0 {
         crate::common::d2s::double_to_shortest_decimal_buf(num, ascii);
         return ascii;
     }
-    // TODO(pg-port): port pg_strfromd for the extra_float_digits <= 0 case.
-    unimplemented!("float8out_internal: pg_strfromd (extra_float_digits<=0 path) not yet translated")
+
+    let _ = pg_strfromd(ascii, 32, ndig, num);
+    ascii
 }
 
 /*
@@ -1010,7 +1034,7 @@ pub unsafe fn btfloat4cmp(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 /* sortsupport comparator for btfloat4sortsupport */
-unsafe fn btfloat4fastcmp(x: Datum, y: Datum, _ssup: *mut c_void) -> c_int {
+unsafe fn btfloat4fastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
     let arg1: float4 = DatumGetFloat4(x);
     let arg2: float4 = DatumGetFloat4(y);
 
@@ -1018,13 +1042,10 @@ unsafe fn btfloat4fastcmp(x: Datum, y: Datum, _ssup: *mut c_void) -> c_int {
 }
 
 pub unsafe fn btfloat4sortsupport(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = btfloat4fastcmp; // silence dead-code until SortSupport is wired
-    // C: SortSupport ssup = (SortSupport) PG_GETARG_POINTER(0);
-    //    ssup->comparator = btfloat4fastcmp;
-    //    PG_RETURN_VOID();
-    // TODO(pg-port): SortSupport (utils/sortsupport.h) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("btfloat4sortsupport: SortSupport not yet translated")
+    let ssup: SortSupport = PG_GETARG_POINTER!(fcinfo, 0) as *mut SortSupportData;
+
+    (*ssup).comparator = Some(btfloat4fastcmp);
+    PG_RETURN_VOID!()
 }
 
 /* float8{eq,ne,lt,le,gt,ge} - float8/float8 comparison operations */
@@ -1088,7 +1109,7 @@ pub unsafe fn btfloat8cmp(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 /* sortsupport comparator for btfloat8sortsupport */
-unsafe fn btfloat8fastcmp(x: Datum, y: Datum, _ssup: *mut c_void) -> c_int {
+unsafe fn btfloat8fastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
     let arg1: float8 = DatumGetFloat8(x);
     let arg2: float8 = DatumGetFloat8(y);
 
@@ -1096,13 +1117,10 @@ unsafe fn btfloat8fastcmp(x: Datum, y: Datum, _ssup: *mut c_void) -> c_int {
 }
 
 pub unsafe fn btfloat8sortsupport(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = btfloat8fastcmp; // silence dead-code until SortSupport is wired
-    // C: SortSupport ssup = (SortSupport) PG_GETARG_POINTER(0);
-    //    ssup->comparator = btfloat8fastcmp;
-    //    PG_RETURN_VOID();
-    // TODO(pg-port): SortSupport (utils/sortsupport.h) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("btfloat8sortsupport: SortSupport not yet translated")
+    let ssup: SortSupport = PG_GETARG_POINTER!(fcinfo, 0) as *mut SortSupportData;
+
+    (*ssup).comparator = Some(btfloat8fastcmp);
+    PG_RETURN_VOID!()
 }
 
 pub unsafe fn btfloat48cmp(fcinfo: FunctionCallInfo) -> Datum {
@@ -2426,138 +2444,888 @@ pub unsafe fn dlgamma(fcinfo: FunctionCallInfo) -> Datum {
  *		=========================
  *
  * The transition datatype for these aggregates is an N-element array of float8.
- * All of them require utils/array.h (ArrayType / PG_GETARG_ARRAYTYPE_P /
- * construct_array_builtin / deconstruct), AggCheckCallContext, and FLOAT8OID,
- * none of which are ported yet, so every function below is stubbed.
  */
 
-// check_float8_array - verifies the transition array; needs ArrayType internals.
-// TODO(pg-port): utils/array.h (ARR_NDIM/ARR_DIMS/ARR_DATA_PTR/FLOAT8OID) not yet translated.
+unsafe fn check_float8_array(transarray: *mut ArrayType, caller: *const c_char, n: c_int) -> *mut float8 {
+    /*
+     * We expect the input to be an N-element float array; verify that. We
+     * don't need to use deconstruct_array() since the array data is just
+     * going to look like a C array of N float8 values.
+     */
+    if ARR_NDIM(transarray) != 1
+        || *ARR_DIMS(transarray) != n
+        || ARR_HASNULL(transarray)
+        || ARR_ELEMTYPE(transarray) != FLOAT8OID
+    {
+        elog!(ERROR, "{}: expected {}-element float8 array", cstr(caller), n);
+    }
+    ARR_DATA_PTR(transarray) as *mut float8
+}
 
+/*
+ * float8_combine
+ *
+ * An aggregate combine function used to combine two 3 fields
+ * aggregate transition data into a single transition data.
+ * This function is used only in two stage aggregation and
+ * shouldn't be called outside aggregate context.
+ */
 pub unsafe fn float8_combine(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h (ArrayType, construct_array_builtin) + AggCheckCallContext.
-    let _ = fcinfo;
-    unimplemented!("float8_combine: utils/array.h + AggCheckCallContext not yet translated")
+    let transarray1: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transarray2: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 1);
+    let transvalues1: *mut float8;
+    let transvalues2: *mut float8;
+    let n1: float8;
+    let sx1: float8;
+    let sxx1: float8;
+    let n2: float8;
+    let sx2: float8;
+    let sxx2: float8;
+    let tmp: float8;
+    let n: float8;
+    let sx: float8;
+    let sxx: float8;
+
+    transvalues1 = check_float8_array(transarray1, c"float8_combine".as_ptr(), 3);
+    transvalues2 = check_float8_array(transarray2, c"float8_combine".as_ptr(), 3);
+
+    n1 = *transvalues1.add(0);
+    sx1 = *transvalues1.add(1);
+    sxx1 = *transvalues1.add(2);
+
+    n2 = *transvalues2.add(0);
+    sx2 = *transvalues2.add(1);
+    sxx2 = *transvalues2.add(2);
+
+    /*--------------------
+     * The transition values combine using a generalization of the
+     * Youngs-Cramer algorithm as follows:
+     *
+     *	N = N1 + N2
+     *	Sx = Sx1 + Sx2
+     *	Sxx = Sxx1 + Sxx2 + N1 * N2 * (Sx1/N1 - Sx2/N2)^2 / N;
+     *
+     * It's worth handling the special cases N1 = 0 and N2 = 0 separately
+     * since those cases are trivial, and we then don't need to worry about
+     * division-by-zero errors in the general case.
+     *--------------------
+     */
+    if n1 == 0.0 {
+        n = n2;
+        sx = sx2;
+        sxx = sxx2;
+    } else if n2 == 0.0 {
+        n = n1;
+        sx = sx1;
+        sxx = sxx1;
+    } else {
+        n = n1 + n2;
+        sx = float8_pl(sx1, sx2);
+        tmp = sx1 / n1 - sx2 / n2;
+        sxx = sxx1 + sxx2 + n1 * n2 * tmp * tmp / n;
+        if sxx.is_infinite() && !sxx1.is_infinite() && !sxx2.is_infinite() {
+            float_overflow_error();
+        }
+    }
+
+    /*
+     * If we're invoked as an aggregate, we can cheat and modify our first
+     * parameter in-place to reduce palloc overhead. Otherwise we construct a
+     * new array with the updated transition data and return it.
+     */
+    if AggCheckCallContext(fcinfo, null_mut()) != 0 {
+        *transvalues1.add(0) = n;
+        *transvalues1.add(1) = sx;
+        *transvalues1.add(2) = sxx;
+
+        PG_RETURN_ARRAYTYPE_P!(transarray1);
+    } else {
+        let mut transdatums: [Datum; 3] = [0; 3];
+        let result: *mut ArrayType;
+
+        transdatums[0] = Float8GetDatumFast(n);
+        transdatums[1] = Float8GetDatumFast(sx);
+        transdatums[2] = Float8GetDatumFast(sxx);
+
+        result = construct_array_builtin(transdatums.as_mut_ptr(), 3, FLOAT8OID);
+
+        PG_RETURN_ARRAYTYPE_P!(result);
+    }
 }
 
 pub unsafe fn float8_accum(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h + AggCheckCallContext not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_accum: utils/array.h + AggCheckCallContext not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let newval: float8 = PG_GETARG_FLOAT8!(fcinfo, 1);
+    let transvalues: *mut float8;
+    let mut n: float8;
+    let mut sx: float8;
+    let mut sxx: float8;
+    let tmp: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_accum".as_ptr(), 3);
+    n = *transvalues.add(0);
+    sx = *transvalues.add(1);
+    sxx = *transvalues.add(2);
+
+    /*
+     * Use the Youngs-Cramer algorithm to incorporate the new value into the
+     * transition values.
+     */
+    n += 1.0;
+    sx += newval;
+    if *transvalues.add(0) > 0.0 {
+        tmp = newval * n - sx;
+        sxx += tmp * tmp / (n * *transvalues.add(0));
+
+        /*
+         * Overflow check.  We only report an overflow error when finite
+         * inputs lead to infinite results.  Note also that Sxx should be NaN
+         * if any of the inputs are infinite, so we intentionally prevent Sxx
+         * from becoming infinite.
+         */
+        if sx.is_infinite() || sxx.is_infinite() {
+            if !(*transvalues.add(1)).is_infinite() && !newval.is_infinite() {
+                float_overflow_error();
+            }
+
+            sxx = get_float8_nan();
+        }
+    } else {
+        /*
+         * At the first input, we normally can leave Sxx as 0.  However, if
+         * the first input is Inf or NaN, we'd better force Sxx to NaN;
+         * otherwise we will falsely report variance zero when there are no
+         * more inputs.
+         */
+        if newval.is_nan() || newval.is_infinite() {
+            sxx = get_float8_nan();
+        }
+    }
+
+    /*
+     * If we're invoked as an aggregate, we can cheat and modify our first
+     * parameter in-place to reduce palloc overhead. Otherwise we construct a
+     * new array with the updated transition data and return it.
+     */
+    if AggCheckCallContext(fcinfo, null_mut()) != 0 {
+        *transvalues.add(0) = n;
+        *transvalues.add(1) = sx;
+        *transvalues.add(2) = sxx;
+
+        PG_RETURN_ARRAYTYPE_P!(transarray);
+    } else {
+        let mut transdatums: [Datum; 3] = [0; 3];
+        let result: *mut ArrayType;
+
+        transdatums[0] = Float8GetDatumFast(n);
+        transdatums[1] = Float8GetDatumFast(sx);
+        transdatums[2] = Float8GetDatumFast(sxx);
+
+        result = construct_array_builtin(transdatums.as_mut_ptr(), 3, FLOAT8OID);
+
+        PG_RETURN_ARRAYTYPE_P!(result);
+    }
 }
 
 pub unsafe fn float4_accum(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h + AggCheckCallContext not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float4_accum: utils/array.h + AggCheckCallContext not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+
+    /* do computations as float8 */
+    let newval: float8 = PG_GETARG_FLOAT4!(fcinfo, 1) as float8;
+    let transvalues: *mut float8;
+    let mut n: float8;
+    let mut sx: float8;
+    let mut sxx: float8;
+    let tmp: float8;
+
+    transvalues = check_float8_array(transarray, c"float4_accum".as_ptr(), 3);
+    n = *transvalues.add(0);
+    sx = *transvalues.add(1);
+    sxx = *transvalues.add(2);
+
+    /*
+     * Use the Youngs-Cramer algorithm to incorporate the new value into the
+     * transition values.
+     */
+    n += 1.0;
+    sx += newval;
+    if *transvalues.add(0) > 0.0 {
+        tmp = newval * n - sx;
+        sxx += tmp * tmp / (n * *transvalues.add(0));
+
+        /*
+         * Overflow check.  We only report an overflow error when finite
+         * inputs lead to infinite results.  Note also that Sxx should be NaN
+         * if any of the inputs are infinite, so we intentionally prevent Sxx
+         * from becoming infinite.
+         */
+        if sx.is_infinite() || sxx.is_infinite() {
+            if !(*transvalues.add(1)).is_infinite() && !newval.is_infinite() {
+                float_overflow_error();
+            }
+
+            sxx = get_float8_nan();
+        }
+    } else {
+        /*
+         * At the first input, we normally can leave Sxx as 0.  However, if
+         * the first input is Inf or NaN, we'd better force Sxx to NaN;
+         * otherwise we will falsely report variance zero when there are no
+         * more inputs.
+         */
+        if newval.is_nan() || newval.is_infinite() {
+            sxx = get_float8_nan();
+        }
+    }
+
+    /*
+     * If we're invoked as an aggregate, we can cheat and modify our first
+     * parameter in-place to reduce palloc overhead. Otherwise we construct a
+     * new array with the updated transition data and return it.
+     */
+    if AggCheckCallContext(fcinfo, null_mut()) != 0 {
+        *transvalues.add(0) = n;
+        *transvalues.add(1) = sx;
+        *transvalues.add(2) = sxx;
+
+        PG_RETURN_ARRAYTYPE_P!(transarray);
+    } else {
+        let mut transdatums: [Datum; 3] = [0; 3];
+        let result: *mut ArrayType;
+
+        transdatums[0] = Float8GetDatumFast(n);
+        transdatums[1] = Float8GetDatumFast(sx);
+        transdatums[2] = Float8GetDatumFast(sxx);
+
+        result = construct_array_builtin(transdatums.as_mut_ptr(), 3, FLOAT8OID);
+
+        PG_RETURN_ARRAYTYPE_P!(result);
+    }
 }
 
 pub unsafe fn float8_avg(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_avg: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sx: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_avg".as_ptr(), 3);
+    n = *transvalues.add(0);
+    sx = *transvalues.add(1);
+    /* ignore Sxx */
+
+    /* SQL defines AVG of no values to be NULL */
+    if n == 0.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_FLOAT8!(sx / n);
 }
 
 pub unsafe fn float8_var_pop(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_var_pop: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxx: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_var_pop".as_ptr(), 3);
+    n = *transvalues.add(0);
+    /* ignore Sx */
+    sxx = *transvalues.add(2);
+
+    /* Population variance is undefined when N is 0, so return NULL */
+    if n == 0.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Note that Sxx is guaranteed to be non-negative */
+
+    PG_RETURN_FLOAT8!(sxx / n);
 }
 
 pub unsafe fn float8_var_samp(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_var_samp: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxx: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_var_samp".as_ptr(), 3);
+    n = *transvalues.add(0);
+    /* ignore Sx */
+    sxx = *transvalues.add(2);
+
+    /* Sample variance is undefined when N is 0 or 1, so return NULL */
+    if n <= 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Note that Sxx is guaranteed to be non-negative */
+
+    PG_RETURN_FLOAT8!(sxx / (n - 1.0));
 }
 
 pub unsafe fn float8_stddev_pop(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_stddev_pop: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxx: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_stddev_pop".as_ptr(), 3);
+    n = *transvalues.add(0);
+    /* ignore Sx */
+    sxx = *transvalues.add(2);
+
+    /* Population stddev is undefined when N is 0, so return NULL */
+    if n == 0.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Note that Sxx is guaranteed to be non-negative */
+
+    PG_RETURN_FLOAT8!(sqrt(sxx / n));
 }
 
 pub unsafe fn float8_stddev_samp(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_stddev_samp: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxx: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_stddev_samp".as_ptr(), 3);
+    n = *transvalues.add(0);
+    /* ignore Sx */
+    sxx = *transvalues.add(2);
+
+    /* Sample stddev is undefined when N is 0 or 1, so return NULL */
+    if n <= 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Note that Sxx is guaranteed to be non-negative */
+
+    PG_RETURN_FLOAT8!(sqrt(sxx / (n - 1.0)));
 }
 
+/*
+ *		=========================
+ *		SQL2003 BINARY AGGREGATES
+ *		=========================
+ *
+ * As with the preceding aggregates, we use the Youngs-Cramer algorithm to
+ * reduce rounding errors in the aggregate final functions.
+ *
+ * The transition datatype for all these aggregates is a 6-element array of
+ * float8, holding the values N, Sx=sum(X), Sxx=sum((X-Sx/N)^2), Sy=sum(Y),
+ * Syy=sum((Y-Sy/N)^2), Sxy=sum((X-Sx/N)*(Y-Sy/N)) in that order.
+ *
+ * Note that Y is the first argument to all these aggregates!
+ */
 pub unsafe fn float8_regr_accum(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h + AggCheckCallContext not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_regr_accum: utils/array.h + AggCheckCallContext not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let newval_y: float8 = PG_GETARG_FLOAT8!(fcinfo, 1);
+    let newval_x: float8 = PG_GETARG_FLOAT8!(fcinfo, 2);
+    let transvalues: *mut float8;
+    let mut n: float8;
+    let mut sx: float8;
+    let mut sxx: float8;
+    let mut sy: float8;
+    let mut syy: float8;
+    let mut sxy: float8;
+    let tmp_x: float8;
+    let tmp_y: float8;
+    let scale: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_regr_accum".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sx = *transvalues.add(1);
+    sxx = *transvalues.add(2);
+    sy = *transvalues.add(3);
+    syy = *transvalues.add(4);
+    sxy = *transvalues.add(5);
+
+    /*
+     * Use the Youngs-Cramer algorithm to incorporate the new values into the
+     * transition values.
+     */
+    n += 1.0;
+    sx += newval_x;
+    sy += newval_y;
+    if *transvalues.add(0) > 0.0 {
+        tmp_x = newval_x * n - sx;
+        tmp_y = newval_y * n - sy;
+        scale = 1.0 / (n * *transvalues.add(0));
+        sxx += tmp_x * tmp_x * scale;
+        syy += tmp_y * tmp_y * scale;
+        sxy += tmp_x * tmp_y * scale;
+
+        /*
+         * Overflow check.  We only report an overflow error when finite
+         * inputs lead to infinite results.  Note also that Sxx, Syy and Sxy
+         * should be NaN if any of the relevant inputs are infinite, so we
+         * intentionally prevent them from becoming infinite.
+         */
+        if sx.is_infinite()
+            || sxx.is_infinite()
+            || sy.is_infinite()
+            || syy.is_infinite()
+            || sxy.is_infinite()
+        {
+            if ((sx.is_infinite() || sxx.is_infinite())
+                && !(*transvalues.add(1)).is_infinite()
+                && !newval_x.is_infinite())
+                || ((sy.is_infinite() || syy.is_infinite())
+                    && !(*transvalues.add(3)).is_infinite()
+                    && !newval_y.is_infinite())
+                || (sxy.is_infinite()
+                    && !(*transvalues.add(1)).is_infinite()
+                    && !newval_x.is_infinite()
+                    && !(*transvalues.add(3)).is_infinite()
+                    && !newval_y.is_infinite())
+            {
+                float_overflow_error();
+            }
+
+            if sxx.is_infinite() {
+                sxx = get_float8_nan();
+            }
+            if syy.is_infinite() {
+                syy = get_float8_nan();
+            }
+            if sxy.is_infinite() {
+                sxy = get_float8_nan();
+            }
+        }
+    } else {
+        /*
+         * At the first input, we normally can leave Sxx et al as 0.  However,
+         * if the first input is Inf or NaN, we'd better force the dependent
+         * sums to NaN; otherwise we will falsely report variance zero when
+         * there are no more inputs.
+         */
+        if newval_x.is_nan() || newval_x.is_infinite() {
+            sxx = get_float8_nan();
+            sxy = sxx;
+        }
+        if newval_y.is_nan() || newval_y.is_infinite() {
+            syy = get_float8_nan();
+            sxy = syy;
+        }
+    }
+
+    /*
+     * If we're invoked as an aggregate, we can cheat and modify our first
+     * parameter in-place to reduce palloc overhead. Otherwise we construct a
+     * new array with the updated transition data and return it.
+     */
+    if AggCheckCallContext(fcinfo, null_mut()) != 0 {
+        *transvalues.add(0) = n;
+        *transvalues.add(1) = sx;
+        *transvalues.add(2) = sxx;
+        *transvalues.add(3) = sy;
+        *transvalues.add(4) = syy;
+        *transvalues.add(5) = sxy;
+
+        PG_RETURN_ARRAYTYPE_P!(transarray);
+    } else {
+        let mut transdatums: [Datum; 6] = [0; 6];
+        let result: *mut ArrayType;
+
+        transdatums[0] = Float8GetDatumFast(n);
+        transdatums[1] = Float8GetDatumFast(sx);
+        transdatums[2] = Float8GetDatumFast(sxx);
+        transdatums[3] = Float8GetDatumFast(sy);
+        transdatums[4] = Float8GetDatumFast(syy);
+        transdatums[5] = Float8GetDatumFast(sxy);
+
+        result = construct_array_builtin(transdatums.as_mut_ptr(), 6, FLOAT8OID);
+
+        PG_RETURN_ARRAYTYPE_P!(result);
+    }
 }
 
+/*
+ * float8_regr_combine
+ *
+ * An aggregate combine function used to combine two 6 fields
+ * aggregate transition data into a single transition data.
+ * This function is used only in two stage aggregation and
+ * shouldn't be called outside aggregate context.
+ */
 pub unsafe fn float8_regr_combine(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h + AggCheckCallContext not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_regr_combine: utils/array.h + AggCheckCallContext not yet translated")
+    let transarray1: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transarray2: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 1);
+    let transvalues1: *mut float8;
+    let transvalues2: *mut float8;
+    let n1: float8;
+    let sx1: float8;
+    let sxx1: float8;
+    let sy1: float8;
+    let syy1: float8;
+    let sxy1: float8;
+    let n2: float8;
+    let sx2: float8;
+    let sxx2: float8;
+    let sy2: float8;
+    let syy2: float8;
+    let sxy2: float8;
+    let tmp1: float8;
+    let tmp2: float8;
+    let n: float8;
+    let sx: float8;
+    let sxx: float8;
+    let sy: float8;
+    let syy: float8;
+    let sxy: float8;
+
+    transvalues1 = check_float8_array(transarray1, c"float8_regr_combine".as_ptr(), 6);
+    transvalues2 = check_float8_array(transarray2, c"float8_regr_combine".as_ptr(), 6);
+
+    n1 = *transvalues1.add(0);
+    sx1 = *transvalues1.add(1);
+    sxx1 = *transvalues1.add(2);
+    sy1 = *transvalues1.add(3);
+    syy1 = *transvalues1.add(4);
+    sxy1 = *transvalues1.add(5);
+
+    n2 = *transvalues2.add(0);
+    sx2 = *transvalues2.add(1);
+    sxx2 = *transvalues2.add(2);
+    sy2 = *transvalues2.add(3);
+    syy2 = *transvalues2.add(4);
+    sxy2 = *transvalues2.add(5);
+
+    /*--------------------
+     * The transition values combine using a generalization of the
+     * Youngs-Cramer algorithm as follows:
+     *
+     *	N = N1 + N2
+     *	Sx = Sx1 + Sx2
+     *	Sxx = Sxx1 + Sxx2 + N1 * N2 * (Sx1/N1 - Sx2/N2)^2 / N
+     *	Sy = Sy1 + Sy2
+     *	Syy = Syy1 + Syy2 + N1 * N2 * (Sy1/N1 - Sy2/N2)^2 / N
+     *	Sxy = Sxy1 + Sxy2 + N1 * N2 * (Sx1/N1 - Sx2/N2) * (Sy1/N1 - Sy2/N2) / N
+     *
+     * It's worth handling the special cases N1 = 0 and N2 = 0 separately
+     * since those cases are trivial, and we then don't need to worry about
+     * division-by-zero errors in the general case.
+     *--------------------
+     */
+    if n1 == 0.0 {
+        n = n2;
+        sx = sx2;
+        sxx = sxx2;
+        sy = sy2;
+        syy = syy2;
+        sxy = sxy2;
+    } else if n2 == 0.0 {
+        n = n1;
+        sx = sx1;
+        sxx = sxx1;
+        sy = sy1;
+        syy = syy1;
+        sxy = sxy1;
+    } else {
+        n = n1 + n2;
+        sx = float8_pl(sx1, sx2);
+        tmp1 = sx1 / n1 - sx2 / n2;
+        sxx = sxx1 + sxx2 + n1 * n2 * tmp1 * tmp1 / n;
+        if sxx.is_infinite() && !sxx1.is_infinite() && !sxx2.is_infinite() {
+            float_overflow_error();
+        }
+        sy = float8_pl(sy1, sy2);
+        tmp2 = sy1 / n1 - sy2 / n2;
+        syy = syy1 + syy2 + n1 * n2 * tmp2 * tmp2 / n;
+        if syy.is_infinite() && !syy1.is_infinite() && !syy2.is_infinite() {
+            float_overflow_error();
+        }
+        sxy = sxy1 + sxy2 + n1 * n2 * tmp1 * tmp2 / n;
+        if sxy.is_infinite() && !sxy1.is_infinite() && !sxy2.is_infinite() {
+            float_overflow_error();
+        }
+    }
+
+    /*
+     * If we're invoked as an aggregate, we can cheat and modify our first
+     * parameter in-place to reduce palloc overhead. Otherwise we construct a
+     * new array with the updated transition data and return it.
+     */
+    if AggCheckCallContext(fcinfo, null_mut()) != 0 {
+        *transvalues1.add(0) = n;
+        *transvalues1.add(1) = sx;
+        *transvalues1.add(2) = sxx;
+        *transvalues1.add(3) = sy;
+        *transvalues1.add(4) = syy;
+        *transvalues1.add(5) = sxy;
+
+        PG_RETURN_ARRAYTYPE_P!(transarray1);
+    } else {
+        let mut transdatums: [Datum; 6] = [0; 6];
+        let result: *mut ArrayType;
+
+        transdatums[0] = Float8GetDatumFast(n);
+        transdatums[1] = Float8GetDatumFast(sx);
+        transdatums[2] = Float8GetDatumFast(sxx);
+        transdatums[3] = Float8GetDatumFast(sy);
+        transdatums[4] = Float8GetDatumFast(syy);
+        transdatums[5] = Float8GetDatumFast(sxy);
+
+        result = construct_array_builtin(transdatums.as_mut_ptr(), 6, FLOAT8OID);
+
+        PG_RETURN_ARRAYTYPE_P!(result);
+    }
 }
 
 pub unsafe fn float8_regr_sxx(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_regr_sxx: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxx: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_regr_sxx".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sxx = *transvalues.add(2);
+
+    /* if N is 0 we should return NULL */
+    if n < 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Note that Sxx is guaranteed to be non-negative */
+
+    PG_RETURN_FLOAT8!(sxx);
 }
 
 pub unsafe fn float8_regr_syy(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_regr_syy: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let syy: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_regr_syy".as_ptr(), 6);
+    n = *transvalues.add(0);
+    syy = *transvalues.add(4);
+
+    /* if N is 0 we should return NULL */
+    if n < 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Note that Syy is guaranteed to be non-negative */
+
+    PG_RETURN_FLOAT8!(syy);
 }
 
 pub unsafe fn float8_regr_sxy(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_regr_sxy: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxy: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_regr_sxy".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sxy = *transvalues.add(5);
+
+    /* if N is 0 we should return NULL */
+    if n < 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* A negative result is valid here */
+
+    PG_RETURN_FLOAT8!(sxy);
 }
 
 pub unsafe fn float8_regr_avgx(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_regr_avgx: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sx: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_regr_avgx".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sx = *transvalues.add(1);
+
+    /* if N is 0 we should return NULL */
+    if n < 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_FLOAT8!(sx / n);
 }
 
 pub unsafe fn float8_regr_avgy(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_regr_avgy: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sy: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_regr_avgy".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sy = *transvalues.add(3);
+
+    /* if N is 0 we should return NULL */
+    if n < 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_FLOAT8!(sy / n);
 }
 
 pub unsafe fn float8_covar_pop(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_covar_pop: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxy: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_covar_pop".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sxy = *transvalues.add(5);
+
+    /* if N is 0 we should return NULL */
+    if n < 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_FLOAT8!(sxy / n);
 }
 
 pub unsafe fn float8_covar_samp(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_covar_samp: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxy: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_covar_samp".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sxy = *transvalues.add(5);
+
+    /* if N is <= 1 we should return NULL */
+    if n < 2.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_FLOAT8!(sxy / (n - 1.0));
 }
 
 pub unsafe fn float8_corr(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_corr: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxx: float8;
+    let syy: float8;
+    let sxy: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_corr".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sxx = *transvalues.add(2);
+    syy = *transvalues.add(4);
+    sxy = *transvalues.add(5);
+
+    /* if N is 0 we should return NULL */
+    if n < 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Note that Sxx and Syy are guaranteed to be non-negative */
+
+    /* per spec, return NULL for horizontal and vertical lines */
+    if sxx == 0.0 || syy == 0.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_FLOAT8!(sxy / sqrt(sxx * syy));
 }
 
 pub unsafe fn float8_regr_r2(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_regr_r2: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxx: float8;
+    let syy: float8;
+    let sxy: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_regr_r2".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sxx = *transvalues.add(2);
+    syy = *transvalues.add(4);
+    sxy = *transvalues.add(5);
+
+    /* if N is 0 we should return NULL */
+    if n < 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Note that Sxx and Syy are guaranteed to be non-negative */
+
+    /* per spec, return NULL for a vertical line */
+    if sxx == 0.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* per spec, return 1.0 for a horizontal line */
+    if syy == 0.0 {
+        PG_RETURN_FLOAT8!(1.0);
+    }
+
+    PG_RETURN_FLOAT8!((sxy * sxy) / (sxx * syy));
 }
 
 pub unsafe fn float8_regr_slope(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_regr_slope: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sxx: float8;
+    let sxy: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_regr_slope".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sxx = *transvalues.add(2);
+    sxy = *transvalues.add(5);
+
+    /* if N is 0 we should return NULL */
+    if n < 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Note that Sxx is guaranteed to be non-negative */
+
+    /* per spec, return NULL for a vertical line */
+    if sxx == 0.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_FLOAT8!(sxy / sxx);
 }
 
 pub unsafe fn float8_regr_intercept(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/array.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("float8_regr_intercept: utils/array.h not yet translated")
+    let transarray: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let transvalues: *mut float8;
+    let n: float8;
+    let sx: float8;
+    let sxx: float8;
+    let sy: float8;
+    let sxy: float8;
+
+    transvalues = check_float8_array(transarray, c"float8_regr_intercept".as_ptr(), 6);
+    n = *transvalues.add(0);
+    sx = *transvalues.add(1);
+    sxx = *transvalues.add(2);
+    sy = *transvalues.add(3);
+    sxy = *transvalues.add(5);
+
+    /* if N is 0 we should return NULL */
+    if n < 1.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Note that Sxx is guaranteed to be non-negative */
+
+    /* per spec, return NULL for a vertical line */
+    if sxx == 0.0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_FLOAT8!((sy - sx * sxy / sxx) / n);
 }
 
 /*

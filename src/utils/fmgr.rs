@@ -33,6 +33,93 @@ use crate::nodes::pg_list::{list_length, list_nth, List};
 use crate::lib::stringinfo::StringInfo; // *mut StringInfoData (lib/stringinfo.h)
 use crate::IsA; // nodes.h IsA! macro (used by the fn_expr-introspection routines)
 
+// toast support routines (access/common/detoast.c)
+use crate::access::common::detoast::{detoast_attr, detoast_attr_slice};
+use crate::varatt::{VARATT_IS_EXTENDED, VARSIZE};
+
+// catalog cache + pg_proc (utils/cache/syscache.c, catalog/pg_proc.h)
+use crate::utils::cache::syscache::{
+    ReleaseSysCache, SearchSysCache1, SysCacheGetAttr, SysCacheGetAttrNotNull,
+};
+use crate::catalog::pg_proc::{Form_pg_proc, FormData_pg_proc};
+use crate::catalog::pg_known_oids::{ClanguageId, INTERNALlanguageId, SQLlanguageId};
+
+// dynamic loader (utils/fmgr/dfmgr.c)
+use crate::utils::fmgr::dfmgr::{load_external_function, lookup_external_function};
+
+// builtin function table (utils/fmgrtab.c)
+use crate::utils::fmgrtab;
+
+// text Datum -> C string (utils/adt/varlena.c via utils/builtins.h)
+use crate::utils::builtins::TextDatumGetCString;
+
+extern "C" {
+    fn strcmp(s1: *const c_char, s2: *const c_char) -> c_int;
+    /* lib/psprintf.c: vararg formatting into a palloc'd buffer */
+    fn psprintf(fmt: *const c_char, ...) -> *mut c_char;
+}
+
+// node construction + introspection
+use crate::nodes::makefuncs::makeConst;
+
+// GUC / userid / pgstat machinery used by fmgr_security_definer
+use crate::utils::misc::guc::{
+    get_config_handle, set_config_with_handle, AtEOXact_GUC, NewGUCNestLevel, TransformGUCArray,
+};
+use crate::miscadmin::{
+    superuser, GetUserId, GetUserIdAndSecContext, SetUserIdAndSecContext,
+    SECURITY_LOCAL_USERID_CHANGE,
+};
+use crate::utils::activity::pgstat_function::{
+    pgstat_end_function_usage, pgstat_init_function_usage,
+};
+use crate::executor::functions::fmgr_sql;
+
+use crate::access::attnum::AttrNumber;
+
+// heap tuple access (catalog rows)
+use crate::access::htup_details::{
+    HeapTuple, HeapTupleHeaderGetRawXmin, HeapTupleIsValid, GETSTRUCT,
+};
+use crate::access::common::heaptuple::heap_attisnull;
+use crate::storage::itemptr::{ItemPointerData, ItemPointerEquals};
+use crate::catalog::pg_language::Form_pg_language;
+use crate::utils::array::ArrayType;
+
+// external C-function lookup cache (dynahash)
+use crate::utils::hash::dynahash::{
+    hash_create, hash_search, HASHACTION, HASHCTL, HASH_BLOBS, HASH_ELEM, HTAB,
+};
+
+// catalog OIDs / attribute numbers (generated *_d.h headers, not yet ported)
+const PROCOID: c_int = 12; /* PROCOID syscache id */
+const LANGOID: c_int = 10; /* LANGOID syscache id */
+const Anum_pg_proc_prosrc: AttrNumber = 29;
+const Anum_pg_proc_probin: AttrNumber = 30;
+const Anum_pg_proc_proconfig: AttrNumber = 34;
+
+// list iteration + helpers
+use crate::nodes::pg_list::{lappend, lfirst, ListCell, NIL};
+use crate::{foreach, forthree, FmgrHookIsNeeded};
+
+// expression-tree introspection (real fn lives in nodes/nodeFuncs.c)
+use crate::nodes::nodeFuncs::exprType;
+// base element type lookup (utils/cache/lsyscache.c)
+use crate::utils::cache::lsyscache::get_base_element_type;
+// set-returning result info + soft-error handling
+use crate::nodes::execnodes::{ExprMultipleResult, ReturnSetInfo};
+use crate::utils::misc::guc::{config_handle, GucAction, GucContext, GucSource};
+use crate::utils::activity::pgstat_function::PgStat_FunctionCallUsage;
+
+// ACL machinery (catalog/aclchk.c, utils/adt/acl.c)
+use crate::catalog::aclchk::{aclcheck_error, object_aclcheck};
+use crate::utils::adt::acl::{AclResult, ACLCHECK_OK};
+use crate::nodes::parsenodes::{
+    AclMode, ObjectType, ACL_EXECUTE, ACL_USAGE, OBJECT_FUNCTION, OBJECT_LANGUAGE,
+};
+use crate::catalog::catalog_oids::{LanguageRelationId, ProcedureRelationId};
+use crate::c::NameStr;
+
 /*
  * ---------------------------------------------------------------------------
  *  fmgr.h  --  Definitions for the Postgres function manager and function-call
@@ -297,27 +384,31 @@ macro_rules! PG_ARGISNULL {
  *
  * Note: it'd be nice if these could be macros, but I see no way to do that
  * without evaluating the arguments multiple times, which is NOT acceptable.
- *
- * TODO(pg-port): these need the toast infrastructure (access/detoast.h);
- * their bodies are stubbed below.
  */
 pub unsafe fn pg_detoast_datum(datum: *mut varlena) -> *mut varlena {
-    // C body uses VARATT_IS_EXTENDED()/detoast_attr(); see access/detoast.c.
-    // TODO(pg-port): toast infrastructure not yet translated.
-    let _ = datum;
-    unimplemented!("pg_detoast_datum: toast infrastructure not yet translated")
+    if VARATT_IS_EXTENDED(datum as *const c_char) {
+        detoast_attr(datum)
+    } else {
+        datum
+    }
 }
 
 pub unsafe fn pg_detoast_datum_copy(datum: *mut varlena) -> *mut varlena {
-    // TODO(pg-port): toast infrastructure not yet translated.
-    let _ = datum;
-    unimplemented!("pg_detoast_datum_copy: toast infrastructure not yet translated")
+    if VARATT_IS_EXTENDED(datum as *const c_char) {
+        detoast_attr(datum)
+    } else {
+        /* Make a modifiable copy of the varlena object */
+        let len: Size = VARSIZE(datum as *const c_char) as Size;
+        let result: *mut varlena = palloc(len) as *mut varlena;
+
+        core::ptr::copy_nonoverlapping(datum as *const u8, result as *mut u8, len);
+        result
+    }
 }
 
 pub unsafe fn pg_detoast_datum_slice(datum: *mut varlena, first: int32, count: int32) -> *mut varlena {
-    // TODO(pg-port): toast infrastructure not yet translated.
-    let _ = (datum, first, count);
-    unimplemented!("pg_detoast_datum_slice: toast infrastructure not yet translated")
+    /* Only get the specified portion from the toast rel */
+    detoast_attr_slice(datum, first, count)
 }
 
 // pg_detoast_datum_packed now lives in crate::varatt (the real identity-for-plain impl);
@@ -851,10 +942,18 @@ pub static mut fmgr_hook: Option<fmgr_hook_type> = None;
 
 /*
  * Hashtable for fast lookup of external C functions
- *
- * TODO(pg-port): CFuncHashTabEntry uses ItemPointerData/HTAB (dfmgr cache);
- * the dynamic C-function cache (lookup_C_func/record_C_func) is not translated.
  */
+#[repr(C)]
+struct CFuncHashTabEntry {
+    /* fn_oid is the hash key and so must be first! */
+    fn_oid: Oid, /* OID of an external C function */
+    fn_xmin: TransactionId, /* for checking up-to-dateness */
+    fn_tid: ItemPointerData,
+    user_fn: PGFunction, /* the function's address */
+    inforec: *const Pg_finfo_record, /* address of its info record */
+}
+
+static mut CFuncHash: *mut HTAB = null_mut();
 
 /*
  * Lookup routines for builtin-function table.  We can search by either Oid
@@ -862,15 +961,23 @@ pub static mut fmgr_hook: Option<fmgr_hook_type> = None;
  */
 
 unsafe fn fmgr_isbuiltin(id: Oid) -> *const FmgrBuiltin {
-    // C body:
-    //   uint16 index;
-    //   if (id > fmgr_last_builtin_oid) return NULL;
-    //   index = fmgr_builtin_oid_index[id];
-    //   if (index == InvalidOidBuiltinMapping) return NULL;
-    //   return &fmgr_builtins[index];
-    // TODO(pg-port): requires generated fmgr_builtins / fmgr_builtin_oid_index.
-    let _ = id;
-    unimplemented!("fmgr_isbuiltin: builtin function table (fmgrtab.c) not yet translated")
+    let index: uint16;
+
+    /* fast lookup only possible if original oid still assigned */
+    if id > fmgrtab::fmgr_last_builtin_oid {
+        return null();
+    }
+
+    /*
+     * Lookup function data. If there's a miss in that range it's likely a
+     * nonexistent function, returning NULL here will trigger an ERROR later.
+     */
+    index = *(&raw const fmgrtab::fmgr_builtin_oid_index as *const uint16).add(id as usize);
+    if index == fmgrtab::InvalidOidBuiltinMapping {
+        return null();
+    }
+
+    (&raw const fmgrtab::fmgr_builtins as *const FmgrBuiltin).add(index as usize)
 }
 
 /*
@@ -879,14 +986,16 @@ unsafe fn fmgr_isbuiltin(id: Oid) -> *const FmgrBuiltin {
  * routine.
  */
 unsafe fn fmgr_lookupByName(name: *const c_char) -> *const FmgrBuiltin {
-    // C body:
-    //   for (i = 0; i < fmgr_nbuiltins; i++)
-    //       if (strcmp(name, fmgr_builtins[i].funcName) == 0)
-    //           return fmgr_builtins + i;
-    //   return NULL;
-    // TODO(pg-port): requires generated fmgr_builtins / fmgr_nbuiltins.
-    let _ = name;
-    unimplemented!("fmgr_lookupByName: builtin function table (fmgrtab.c) not yet translated")
+    let mut i: c_int = 0;
+    let builtins = &raw const fmgrtab::fmgr_builtins as *const FmgrBuiltin;
+
+    while i < fmgrtab::fmgr_nbuiltins {
+        if strcmp(name, (*builtins.add(i as usize)).funcName) == 0 {
+            return builtins.add(i as usize);
+        }
+        i += 1;
+    }
+    null()
 }
 
 /*
@@ -934,7 +1043,7 @@ unsafe fn fmgr_info_cxt_security(
     (*finfo).fn_mcxt = mcxt;
     (*finfo).fn_expr = null_mut(); /* caller may set this later */
 
-    let fbp = fmgr_isbuiltin(functionId);
+    let mut fbp = fmgr_isbuiltin(functionId);
     if !fbp.is_null() {
         /*
          * Fast path for builtin functions: don't bother consulting pg_proc
@@ -949,13 +1058,96 @@ unsafe fn fmgr_info_cxt_security(
     }
 
     /* Otherwise we need the pg_proc entry */
-    // TODO(pg-port): pg_proc lookup via syscache (SearchSysCache1(PROCOID, ...)),
-    // GETSTRUCT(Form_pg_proc), the prolang switch (INTERNAL/C/SQL/other), the
-    // security-definer/proconfig/FmgrHookIsNeeded dispatch to
-    // fmgr_security_definer, and ReleaseSysCache. Not translatable until the
-    // catalog cache (utils/cache/syscache.c) and pg_proc are ported.
-    let _ = ignore_security;
-    unimplemented!("fmgr_info_cxt_security: pg_proc lookup via syscache not yet translated")
+    let procedureTuple: HeapTuple =
+        SearchSysCache1(PROCOID, ObjectIdGetDatum(functionId));
+    if !HeapTupleIsValid(procedureTuple) {
+        elog!(ERROR, "cache lookup failed for function {}", functionId);
+    }
+    let procedureStruct: Form_pg_proc = GETSTRUCT(procedureTuple) as Form_pg_proc;
+
+    (*finfo).fn_nargs = (*procedureStruct).pronargs;
+    (*finfo).fn_strict = (*procedureStruct).proisstrict;
+    (*finfo).fn_retset = (*procedureStruct).proretset;
+
+    /*
+     * If it has prosecdef set, non-null proconfig, or if a plugin wants to
+     * hook function entry/exit, use fmgr_security_definer call handler ---
+     * unless we are being called again by fmgr_security_definer or
+     * fmgr_info_other_lang.
+     *
+     * When using fmgr_security_definer, function stats tracking is always
+     * disabled at the outer level, and instead we set the flag properly in
+     * fmgr_security_definer's private flinfo and implement the tracking
+     * inside fmgr_security_definer.  This loses the ability to charge the
+     * overhead of fmgr_security_definer to the function, but gains the
+     * ability to set the track_functions GUC as a local GUC parameter of an
+     * interesting function and have the right things happen.
+     */
+    if !ignore_security
+        && ((*procedureStruct).prosecdef
+            || !heap_attisnull(procedureTuple, Anum_pg_proc_proconfig as c_int, null_mut())
+            || FmgrHookIsNeeded!(functionId))
+    {
+        (*finfo).fn_addr = Some(fmgr_security_definer);
+        (*finfo).fn_stats = TRACK_FUNC_ALL; /* ie, never track */
+        (*finfo).fn_oid = functionId;
+        ReleaseSysCache(procedureTuple);
+        return;
+    }
+
+    match (*procedureStruct).prolang {
+        x if x == INTERNALlanguageId => {
+            /*
+             * For an ordinary builtin function, we should never get here
+             * because the fmgr_isbuiltin() search above will have succeeded.
+             * However, if the user has done a CREATE FUNCTION to create an
+             * alias for a builtin function, we can end up here.  In that case
+             * we have to look up the function by name.  The name of the
+             * internal function is stored in prosrc (it doesn't have to be
+             * the same as the name of the alias!)
+             */
+            let prosrcdatum = SysCacheGetAttrNotNull(
+                PROCOID,
+                procedureTuple,
+                Anum_pg_proc_prosrc,
+            );
+            let prosrc = TextDatumGetCString(prosrcdatum);
+            fbp = fmgr_lookupByName(prosrc);
+            if fbp.is_null() {
+                let _ = errcode(ERRCODE_UNDEFINED_FUNCTION);
+                ereport!(
+                    ERROR,
+                    errmsg!(
+                        "internal function \"{}\" is not in internal lookup table",
+                        std::ffi::CStr::from_ptr(prosrc).to_string_lossy()
+                    )
+                );
+            }
+            pfree(prosrc as *mut c_void);
+            /* Should we check that nargs, strict, retset match the table? */
+            (*finfo).fn_addr = Some((*fbp).func);
+            /* note this policy is also assumed in fast path above */
+            (*finfo).fn_stats = TRACK_FUNC_ALL; /* ie, never track */
+        }
+
+        x if x == ClanguageId => {
+            fmgr_info_C_lang(functionId, finfo, procedureTuple);
+            (*finfo).fn_stats = TRACK_FUNC_PL; /* ie, track if ALL */
+        }
+
+        x if x == SQLlanguageId => {
+            (*finfo).fn_addr = Some(fmgr_sql);
+            (*finfo).fn_stats = TRACK_FUNC_PL; /* ie, track if ALL */
+        }
+
+        _ => {
+            fmgr_info_other_lang(functionId, finfo, procedureTuple);
+            (*finfo).fn_stats = TRACK_FUNC_OFF; /* ie, track if not OFF */
+        }
+    }
+
+    (*finfo).fn_oid = functionId;
+    ReleaseSysCache(procedureTuple);
 }
 
 /*
@@ -971,26 +1163,166 @@ unsafe fn fmgr_info_cxt_security(
  * memory context.
  */
 pub unsafe fn fmgr_symbol(functionId: Oid, mod_: *mut *mut c_char, f_n: *mut *mut c_char) {
-    // C body: SearchSysCache1(PROCOID, ...), prolang switch on prosrc/probin.
-    // TODO(pg-port): pg_proc lookup via syscache not yet translated.
-    let _ = (functionId, mod_, f_n);
-    unimplemented!("fmgr_symbol: pg_proc lookup via syscache not yet translated")
+    let procedureTuple: HeapTuple =
+        SearchSysCache1(PROCOID, ObjectIdGetDatum(functionId));
+    if !HeapTupleIsValid(procedureTuple) {
+        elog!(ERROR, "cache lookup failed for function {}", functionId);
+    }
+    let procedureStruct: Form_pg_proc = GETSTRUCT(procedureTuple) as Form_pg_proc;
+
+    if (*procedureStruct).prosecdef
+        || !heap_attisnull(procedureTuple, Anum_pg_proc_proconfig as c_int, null_mut())
+        || FmgrHookIsNeeded!(functionId)
+    {
+        *mod_ = null_mut(); /* core binary */
+        *f_n = pstrdup(c"fmgr_security_definer".as_ptr());
+        ReleaseSysCache(procedureTuple);
+        return;
+    }
+
+    /* see fmgr_info_cxt_security for the individual cases */
+    match (*procedureStruct).prolang {
+        x if x == INTERNALlanguageId => {
+            let prosrcattr = SysCacheGetAttrNotNull(
+                PROCOID,
+                procedureTuple,
+                Anum_pg_proc_prosrc,
+            );
+
+            *mod_ = null_mut(); /* core binary */
+            *f_n = TextDatumGetCString(prosrcattr);
+        }
+
+        x if x == ClanguageId => {
+            let prosrcattr = SysCacheGetAttrNotNull(
+                PROCOID,
+                procedureTuple,
+                Anum_pg_proc_prosrc,
+            );
+
+            let probinattr = SysCacheGetAttrNotNull(
+                PROCOID,
+                procedureTuple,
+                Anum_pg_proc_probin,
+            );
+
+            /*
+             * No need to check symbol presence / API version here, already
+             * checked in fmgr_info_cxt_security.
+             */
+            *mod_ = TextDatumGetCString(probinattr);
+            *f_n = TextDatumGetCString(prosrcattr);
+        }
+
+        x if x == SQLlanguageId => {
+            *mod_ = null_mut(); /* core binary */
+            *f_n = pstrdup(c"fmgr_sql".as_ptr());
+        }
+
+        _ => {
+            *mod_ = null_mut();
+            *f_n = null_mut(); /* unknown, pass pointer */
+        }
+    }
+
+    ReleaseSysCache(procedureTuple);
 }
 
 /*
  * Special fmgr_info processing for C-language functions.  Note that
  * finfo->fn_oid is not valid yet.
- *
- * TODO(pg-port): fmgr_info_C_lang needs the dfmgr loader
- * (load_external_function / fetch_finfo_record) and the CFuncHash cache.
  */
+unsafe fn fmgr_info_C_lang(_functionId: Oid, finfo: *mut FmgrInfo, procedureTuple: HeapTuple) {
+    let user_fn: PGFunction;
+    let inforec: *const Pg_finfo_record;
+
+    /*
+     * See if we have the function address cached already
+     */
+    let hashentry = lookup_C_func(procedureTuple);
+    if !hashentry.is_null() {
+        user_fn = (*hashentry).user_fn;
+        inforec = (*hashentry).inforec;
+    } else {
+        /*
+         * Get prosrc and probin strings (link symbol and library filename).
+         * While in general these columns might be null, that's not allowed
+         * for C-language functions.
+         */
+        let prosrcattr =
+            SysCacheGetAttrNotNull(PROCOID, procedureTuple, Anum_pg_proc_prosrc);
+        let prosrcstring = TextDatumGetCString(prosrcattr);
+
+        let probinattr =
+            SysCacheGetAttrNotNull(PROCOID, procedureTuple, Anum_pg_proc_probin);
+        let probinstring = TextDatumGetCString(probinattr);
+
+        /* Look up the function itself */
+        let mut libraryhandle: *mut c_void = null_mut();
+        user_fn = core::mem::transmute::<*mut c_void, PGFunction>(load_external_function(
+            probinstring,
+            prosrcstring,
+            true,
+            &mut libraryhandle,
+        ));
+
+        /* Get the function information record (real or default) */
+        inforec = fetch_finfo_record(libraryhandle, prosrcstring);
+
+        /* Cache the addresses for later calls */
+        record_C_func(procedureTuple, user_fn, inforec);
+
+        pfree(prosrcstring as *mut c_void);
+        pfree(probinstring as *mut c_void);
+    }
+
+    match (*inforec).api_version {
+        1 => {
+            /* New style: call directly */
+            (*finfo).fn_addr = Some(user_fn);
+        }
+        _ => {
+            /* Shouldn't get here if fetch_finfo_record did its job */
+            elog!(
+                ERROR,
+                "unrecognized function API version: {}",
+                (*inforec).api_version
+            );
+        }
+    }
+}
 
 /*
  * Special fmgr_info processing for other-language functions.  Note
  * that finfo->fn_oid is not valid yet.
- *
- * TODO(pg-port): fmgr_info_other_lang needs pg_language syscache lookups.
  */
+unsafe fn fmgr_info_other_lang(_functionId: Oid, finfo: *mut FmgrInfo, procedureTuple: HeapTuple) {
+    let procedureStruct: Form_pg_proc = GETSTRUCT(procedureTuple) as Form_pg_proc;
+    let language: Oid = (*procedureStruct).prolang;
+    let mut plfinfo: FmgrInfo = core::mem::zeroed();
+
+    let languageTuple: HeapTuple =
+        SearchSysCache1(LANGOID, ObjectIdGetDatum(language));
+    if !HeapTupleIsValid(languageTuple) {
+        elog!(ERROR, "cache lookup failed for language {}", language);
+    }
+    let languageStruct: Form_pg_language = GETSTRUCT(languageTuple) as Form_pg_language;
+
+    /*
+     * Look up the language's call handler function, ignoring any attributes
+     * that would normally cause insertion of fmgr_security_definer.  We need
+     * to get back a bare pointer to the actual C-language function.
+     */
+    fmgr_info_cxt_security(
+        (*languageStruct).lanplcallfoid,
+        &mut plfinfo,
+        CurrentMemoryContext,
+        true,
+    );
+    (*finfo).fn_addr = plfinfo.fn_addr;
+
+    ReleaseSysCache(languageTuple);
+}
 
 /*
  * Fetch and validate the information record for the given external function.
@@ -1002,11 +1334,131 @@ pub unsafe fn fmgr_symbol(functionId: Oid, mod_: *mut *mut c_char, f_n: *mut *mu
  * pg_proc.
  */
 pub unsafe fn fetch_finfo_record(filehandle: *mut c_void, funcname: *const c_char) -> *const Pg_finfo_record {
-    // C body: psprintf("pg_finfo_%s"), lookup_external_function(), validate
-    // inforec->api_version.
-    // TODO(pg-port): dynamic loader (dfmgr.c) not yet translated.
-    let _ = (filehandle, funcname);
-    unimplemented!("fetch_finfo_record: dynamic loader (dfmgr.c) not yet translated")
+    let infofuncname = psprintf(c"pg_finfo_%s".as_ptr(), funcname);
+
+    /* Try to look up the info function */
+    let infofunc: Option<PGFInfoFunction> = core::mem::transmute::<
+        *mut c_void,
+        Option<PGFInfoFunction>,
+    >(lookup_external_function(filehandle, infofuncname));
+    if infofunc.is_none() {
+        let _ = errcode(ERRCODE_UNDEFINED_FUNCTION);
+        ereport!(
+            ERROR,
+            errmsg!(
+                "could not find function information for function \"{}\"",
+                std::ffi::CStr::from_ptr(funcname).to_string_lossy()
+            )
+        );
+        /* C also: errhint("SQL-callable functions need an accompanying PG_FUNCTION_INFO_V1(funcname).") */
+        return null(); /* silence compiler */
+    }
+
+    /* Found, so call it */
+    let inforec: *const Pg_finfo_record = (infofunc.unwrap())();
+
+    /* Validate result as best we can */
+    if inforec.is_null() {
+        elog!(
+            ERROR,
+            "null result from info function \"{}\"",
+            std::ffi::CStr::from_ptr(infofuncname).to_string_lossy()
+        );
+    }
+    match (*inforec).api_version {
+        1 => {
+            /* OK, no additional fields to validate */
+        }
+        _ => {
+            let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "unrecognized API version {} reported by info function \"{}\"",
+                    (*inforec).api_version,
+                    std::ffi::CStr::from_ptr(infofuncname).to_string_lossy()
+                )
+            );
+        }
+    }
+
+    pfree(infofuncname as *mut c_void);
+    inforec
+}
+
+/*-------------------------------------------------------------------------
+ *		Routines for caching lookup information for external C functions.
+ *
+ * The routines in dfmgr.c are relatively slow, so we try to avoid running
+ * them more than once per external function per session.  We use a hash table
+ * with the function OID as the lookup key.
+ *-------------------------------------------------------------------------
+ */
+
+/*
+ * lookup_C_func: try to find a C function in the hash table
+ *
+ * If an entry exists and is up to date, return it; else return NULL
+ */
+unsafe fn lookup_C_func(procedureTuple: HeapTuple) -> *mut CFuncHashTabEntry {
+    let mut fn_oid: Oid = (*(GETSTRUCT(procedureTuple) as Form_pg_proc)).oid;
+
+    if CFuncHash.is_null() {
+        return null_mut(); /* no table yet */
+    }
+    let entry = hash_search(
+        CFuncHash,
+        &mut fn_oid as *mut Oid as *const c_void,
+        HASHACTION::HASH_FIND,
+        null_mut(),
+    ) as *mut CFuncHashTabEntry;
+    if entry.is_null() {
+        return null_mut(); /* no such entry */
+    }
+    if (*entry).fn_xmin == HeapTupleHeaderGetRawXmin((*procedureTuple).t_data)
+        && ItemPointerEquals(&mut (*entry).fn_tid, &mut (*procedureTuple).t_self)
+    {
+        return entry; /* OK */
+    }
+    null_mut() /* entry is out of date */
+}
+
+/*
+ * record_C_func: enter (or update) info about a C function in the hash table
+ */
+unsafe fn record_C_func(
+    procedureTuple: HeapTuple,
+    user_fn: PGFunction,
+    inforec: *const Pg_finfo_record,
+) {
+    let mut fn_oid: Oid = (*(GETSTRUCT(procedureTuple) as Form_pg_proc)).oid;
+    let mut found: bool = false;
+
+    /* Create the hash table if it doesn't exist yet */
+    if CFuncHash.is_null() {
+        let mut hash_ctl: HASHCTL = core::mem::zeroed();
+
+        hash_ctl.keysize = core::mem::size_of::<Oid>();
+        hash_ctl.entrysize = core::mem::size_of::<CFuncHashTabEntry>();
+        CFuncHash = hash_create(
+            c"CFuncHash".as_ptr(),
+            100,
+            &mut hash_ctl,
+            HASH_ELEM | HASH_BLOBS,
+        );
+    }
+
+    let entry = hash_search(
+        CFuncHash,
+        &mut fn_oid as *mut Oid as *const c_void,
+        HASHACTION::HASH_ENTER,
+        &mut found,
+    ) as *mut CFuncHashTabEntry;
+    /* OID is already filled in */
+    (*entry).fn_xmin = HeapTupleHeaderGetRawXmin((*procedureTuple).t_data);
+    (*entry).fn_tid = (*procedureTuple).t_self;
+    (*entry).user_fn = user_fn;
+    (*entry).inforec = inforec;
 }
 
 /*
@@ -1041,15 +1493,196 @@ pub unsafe fn fmgr_internal_function(proname: *const c_char) -> Oid {
  * both of these features using the same call handler, because they are
  * often used together and it would be inefficient (as well as notationally
  * messy) to have two levels of call handler involved.
- *
- * TODO(pg-port): fmgr_security_definer needs syscache (pg_proc), GUC stacking
- * (NewGUCNestLevel/AtEOXact_GUC/set_config_with_handle), userid/sec-context
- * (GetUserIdAndSecContext/SetUserIdAndSecContext), pgstat function usage, the
- * fmgr_hook, and the PG_TRY/PG_CATCH error machinery. Stubbed for now.
+ */
+#[repr(C)]
+struct fmgr_security_definer_cache {
+    flinfo: FmgrInfo, /* lookup info for target function */
+    userid: Oid, /* userid to set, or InvalidOid */
+    configNames: *mut List, /* GUC names to set, or NIL */
+    configHandles: *mut List, /* GUC handles to set, or NIL */
+    configValues: *mut List, /* GUC values to set, or NIL */
+    arg: Datum, /* passthrough argument for plugin modules */
+}
+
+/*
+ * Function handler for security-definer/proconfig/plugin-hooked functions.
+ * We extract the OID of the actual function and do a fmgr lookup again.
+ * Then we fetch the pg_proc row and copy the owner ID and proconfig fields.
+ * (All this info is cached for the duration of the current query.)
+ * To execute a call, we temporarily replace the flinfo with the cached
+ * and looked-up one, while keeping the outer fcinfo (which contains all
+ * the actual arguments, etc.) intact.  This is not re-entrant, but then
+ * the fcinfo itself can't be used reentrantly anyway.
  */
 pub unsafe fn fmgr_security_definer(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("fmgr_security_definer: syscache/GUC/pgstat/hooks not yet translated")
+    let result: Datum;
+    let fcache: *mut fmgr_security_definer_cache;
+    let save_flinfo: *mut FmgrInfo;
+    let mut save_userid: Oid = InvalidOid;
+    let mut save_sec_context: c_int = 0;
+    let save_nestlevel: c_int;
+    let mut fcusage: PgStat_FunctionCallUsage = core::mem::zeroed();
+
+    if (*(*fcinfo).flinfo).fn_extra.is_null() {
+        let tuple: HeapTuple;
+        let procedureStruct: Form_pg_proc;
+        let datum: Datum;
+        let mut isnull: bool = false;
+        let oldcxt: MemoryContext;
+
+        fcache = MemoryContextAllocZero(
+            (*(*fcinfo).flinfo).fn_mcxt,
+            core::mem::size_of::<fmgr_security_definer_cache>(),
+        ) as *mut fmgr_security_definer_cache;
+
+        fmgr_info_cxt_security(
+            (*(*fcinfo).flinfo).fn_oid,
+            &mut (*fcache).flinfo,
+            (*(*fcinfo).flinfo).fn_mcxt,
+            true,
+        );
+        (*fcache).flinfo.fn_expr = (*(*fcinfo).flinfo).fn_expr;
+
+        tuple = SearchSysCache1(
+            PROCOID,
+            ObjectIdGetDatum((*(*fcinfo).flinfo).fn_oid),
+        );
+        if !HeapTupleIsValid(tuple) {
+            elog!(
+                ERROR,
+                "cache lookup failed for function {}",
+                (*(*fcinfo).flinfo).fn_oid
+            );
+        }
+        procedureStruct = GETSTRUCT(tuple) as Form_pg_proc;
+
+        if (*procedureStruct).prosecdef {
+            (*fcache).userid = (*procedureStruct).proowner;
+        }
+
+        datum = SysCacheGetAttr(
+            PROCOID,
+            tuple,
+            Anum_pg_proc_proconfig,
+            &mut isnull,
+        );
+        if !isnull {
+            let array: *mut ArrayType;
+
+            oldcxt = MemoryContextSwitchTo((*(*fcinfo).flinfo).fn_mcxt);
+            array = DatumGetArrayTypeP(datum);
+            TransformGUCArray(
+                array as *mut c_void,
+                &mut (*fcache).configNames,
+                &mut (*fcache).configValues,
+            );
+
+            /* transform names to config handles to avoid lookup cost */
+            (*fcache).configHandles = NIL;
+            foreach!(lc, (*fcache).configNames, {
+                let name = lfirst(crate::current_cell!(lc)) as *mut c_char;
+
+                (*fcache).configHandles = lappend(
+                    (*fcache).configHandles,
+                    get_config_handle(name) as *mut c_void,
+                );
+            });
+
+            MemoryContextSwitchTo(oldcxt);
+        }
+
+        ReleaseSysCache(tuple);
+
+        (*(*fcinfo).flinfo).fn_extra = fcache as *mut c_void;
+    } else {
+        fcache = (*(*fcinfo).flinfo).fn_extra as *mut fmgr_security_definer_cache;
+    }
+
+    /* GetUserIdAndSecContext is cheap enough that no harm in a wasted call */
+    GetUserIdAndSecContext(&mut save_userid, &mut save_sec_context);
+    if (*fcache).configNames != NIL {
+        /* Need a new GUC nesting level */
+        save_nestlevel = NewGUCNestLevel();
+    } else {
+        save_nestlevel = 0; /* keep compiler quiet */
+    }
+
+    if OidIsValid((*fcache).userid) {
+        SetUserIdAndSecContext(
+            (*fcache).userid,
+            save_sec_context | SECURITY_LOCAL_USERID_CHANGE,
+        );
+    }
+
+    forthree!(
+        lc1, (*fcache).configNames,
+        lc2, (*fcache).configHandles,
+        lc3, (*fcache).configValues,
+        {
+            let context: GucContext = if superuser() {
+                GucContext::PGC_SUSET
+            } else {
+                GucContext::PGC_USERSET
+            };
+            let source: GucSource = GucSource::PGC_S_SESSION;
+            let action: GucAction = GucAction::GUC_ACTION_SAVE;
+            let name = lfirst(lc1) as *mut c_char;
+            let handle = lfirst(lc2) as *mut config_handle;
+            let value = lfirst(lc3) as *mut c_char;
+
+            let _ = set_config_with_handle(
+                name, handle, value,
+                context, source, GetUserId(),
+                action, true, 0, false,
+            );
+        }
+    );
+
+    /* function manager hook */
+    if let Some(hook) = fmgr_hook {
+        hook(FHET_START, &mut (*fcache).flinfo, &mut (*fcache).arg);
+    }
+
+    /*
+     * We don't need to restore GUC or userid settings on error, because the
+     * ensuing xact or subxact abort will do that.  The PG_TRY block is only
+     * needed to clean up the flinfo link.
+     */
+    save_flinfo = (*fcinfo).flinfo;
+
+    /* PG_TRY(): */
+    (*fcinfo).flinfo = &mut (*fcache).flinfo;
+
+    /* See notes in fmgr_info_cxt_security */
+    pgstat_init_function_usage(fcinfo, &mut fcusage);
+
+    result = FunctionCallInvoke!(fcinfo);
+
+    /*
+     * We could be calling either a regular or a set-returning function,
+     * so we have to test to see what finalize flag to use.
+     */
+    pgstat_end_function_usage(
+        &mut fcusage,
+        (*fcinfo).resultinfo.is_null()
+            || !IsA!((*fcinfo).resultinfo, T_ReturnSetInfo)
+            || (*((*fcinfo).resultinfo as *mut ReturnSetInfo)).isDone != ExprMultipleResult,
+    );
+    /* PG_CATCH(): on error fcinfo->flinfo = save_flinfo; fmgr_hook(FHET_ABORT); PG_RE_THROW(); */
+
+    (*fcinfo).flinfo = save_flinfo;
+
+    if (*fcache).configNames != NIL {
+        AtEOXact_GUC(true, save_nestlevel);
+    }
+    if OidIsValid((*fcache).userid) {
+        SetUserIdAndSecContext(save_userid, save_sec_context);
+    }
+    if let Some(hook) = fmgr_hook {
+        hook(FHET_END, &mut (*fcache).flinfo, &mut (*fcache).arg);
+    }
+
+    result
 }
 
 /*-------------------------------------------------------------------------
@@ -2437,13 +3070,15 @@ pub unsafe fn get_fn_expr_variadic(flinfo: *mut FmgrInfo) -> bool {
  * we can use fn_expr to store opclass options as bytea constant.
  */
 pub unsafe fn set_fn_opclass_options(flinfo: *mut FmgrInfo, options: *mut bytea) {
-    // C: flinfo->fn_expr = (Node *) makeConst(BYTEAOID, -1, InvalidOid, -1,
-    //                                         PointerGetDatum(options),
-    //                                         options == NULL, false);
-    // TODO(pg-port): makeConst (nodes/makefuncs.c) and BYTEAOID (pg_type)
-    // are not yet translated.
-    let _ = (flinfo, options);
-    unimplemented!("set_fn_opclass_options: makeConst / BYTEAOID not yet translated")
+    (*flinfo).fn_expr = makeConst(
+        BYTEAOID,
+        -1,
+        InvalidOid,
+        -1,
+        PointerGetDatum(options as *const c_void),
+        options.is_null(),
+        false,
+    ) as *mut Node;
 }
 
 /*
@@ -2508,8 +3143,76 @@ pub unsafe fn get_fn_opclass_options(flinfo: *mut FmgrInfo) -> *mut bytea {
  * pg_language) and the ACL machinery (object_aclcheck / aclcheck_error).
  */
 pub unsafe fn CheckFunctionValidatorAccess(validatorOid: Oid, functionOid: Oid) -> bool {
-    let _ = (validatorOid, functionOid);
-    unimplemented!("CheckFunctionValidatorAccess: syscache + ACL machinery not yet translated")
+    let mut aclresult: AclResult;
+
+    /*
+     * Get the function's pg_proc entry.  Throw a user-facing error for bad
+     * OID, because validators can be called with user-specified OIDs.
+     */
+    let procTup: HeapTuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(functionOid));
+    if !HeapTupleIsValid(procTup) {
+        let _ = errcode(ERRCODE_UNDEFINED_FUNCTION);
+        ereport!(
+            ERROR,
+            errmsg!("function with OID {} does not exist", functionOid)
+        );
+    }
+    let procStruct: Form_pg_proc = GETSTRUCT(procTup) as Form_pg_proc;
+
+    /*
+     * Fetch pg_language entry to know if this is the correct validation
+     * function for that pg_proc entry.
+     */
+    let langTup: HeapTuple =
+        SearchSysCache1(LANGOID, ObjectIdGetDatum((*procStruct).prolang));
+    if !HeapTupleIsValid(langTup) {
+        elog!(ERROR, "cache lookup failed for language {}", (*procStruct).prolang);
+    }
+    let langStruct: Form_pg_language = GETSTRUCT(langTup) as Form_pg_language;
+
+    if (*langStruct).lanvalidator != validatorOid {
+        let _ = errcode(ERRCODE_INSUFFICIENT_PRIVILEGE);
+        ereport!(
+            ERROR,
+            errmsg!(
+                "language validation function {} called for language {} instead of {}",
+                validatorOid,
+                (*procStruct).prolang,
+                (*langStruct).lanvalidator
+            )
+        );
+    }
+
+    /* first validate that we have permissions to use the language */
+    aclresult = object_aclcheck(
+        LanguageRelationId,
+        (*procStruct).prolang,
+        GetUserId(),
+        ACL_USAGE,
+    );
+    if aclresult != ACLCHECK_OK {
+        aclcheck_error(aclresult, OBJECT_LANGUAGE, NameStr(&(*langStruct).lanname));
+    }
+
+    /*
+     * Check whether we are allowed to execute the function itself. If we can
+     * execute it, there should be no possible side-effect of
+     * compiling/validation that execution can't have.
+     */
+    aclresult = object_aclcheck(
+        ProcedureRelationId,
+        functionOid,
+        GetUserId(),
+        ACL_EXECUTE,
+    );
+    if aclresult != ACLCHECK_OK {
+        aclcheck_error(aclresult, OBJECT_FUNCTION, NameStr(&(*procStruct).proname));
+    }
+
+    ReleaseSysCache(procTup);
+    ReleaseSysCache(langTup);
+
+    true
 }
 
 /*-------------------------------------------------------------------------
@@ -2522,20 +3225,15 @@ pub unsafe fn CheckFunctionValidatorAccess(validatorOid: Oid, functionOid: Oid) 
  *-------------------------------------------------------------------------
  */
 
-/* nodes/nodeFuncs.c */
-#[inline]
-unsafe fn exprType(expr: *const Node) -> Oid {
-    // TODO(pg-port): exprType lives in nodes/nodeFuncs.c (not yet translated).
-    let _ = expr;
-    unimplemented!("exprType: nodes/nodeFuncs.c not yet translated")
-}
+/* exprType (nodes/nodeFuncs.c) and get_base_element_type (utils/cache/lsyscache.c)
+ * are imported at the top of this module. */
 
-/* utils/cache/lsyscache.c */
+/* DatumGetArrayTypeP (utils/array.h): the real detoasting accessor is not yet
+ * ported; provide a local plain-pointer view so proconfig parsing compiles. */
+// TODO(pg-port): real DatumGetArrayTypeP detoasts via pg_detoast_datum.
 #[inline]
-unsafe fn get_base_element_type(typid: Oid) -> Oid {
-    // TODO(pg-port): get_base_element_type lives in utils/cache/lsyscache.c.
-    let _ = typid;
-    unimplemented!("get_base_element_type: utils/cache/lsyscache.c not yet translated")
+unsafe fn DatumGetArrayTypeP(d: Datum) -> *mut ArrayType {
+    pg_detoast_datum(DatumGetPointer(d) as *mut varlena) as *mut ArrayType
 }
 
 /* catalog/pg_type (pg_type.dat) */
@@ -2543,8 +3241,10 @@ unsafe fn get_base_element_type(typid: Oid) -> Oid {
 const BYTEAOID: Oid = 17;
 
 /* errcodes.h classification (errcode() shim ignores the value) */
-// TODO(pg-port): ERRCODE_INVALID_PARAMETER_VALUE from utils/errcodes.h.
+// TODO(pg-port): real ERRCODE_* values come from utils/errcodes.h.
 const ERRCODE_INVALID_PARAMETER_VALUE: c_int = 0;
+const ERRCODE_UNDEFINED_FUNCTION: c_int = 0;
+const ERRCODE_INSUFFICIENT_PRIVILEGE: c_int = 0;
 
 /* nodes/miscnodes.h */
 #[inline]

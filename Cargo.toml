@@ -12,6 +12,12 @@ license = "PostgreSQL"
 name = "postgres"
 path = "src/main.rs"
 
+[features]
+# Debugging-only LWLock statistics gathering (C: #define LWLOCK_STATS).
+lwlock_stats = []
+# Debugging-only memory context consistency checks (C: #define MEMORY_CONTEXT_CHECKING).
+memory_context_checking = []
+
 [profile.dev]
 # PostgreSQL's Assert() maps to Rust debug_assert!, which is enabled here.
 panic = "unwind"

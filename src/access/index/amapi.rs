@@ -29,6 +29,14 @@ use crate::nodes::pg_list::List;
 use crate::nodes::plannodes::ScanDirection;
 use crate::nodes::primnodes::CompareType;
 use crate::utils::fmgr::{FunctionCallInfo, OidFunctionCall0Coll};
+use crate::utils::cache::syscache::{SearchSysCache1, ReleaseSysCache, CLAOID};
+/* AMOID syscache id (utils/syscache.h) - not yet in syscache.rs; SearchSysCache is a dep stub so value is inert. */
+const AMOID: core::ffi::c_int = 2; /* TODO(pg-port): confirm against SysCacheIdentifier enum */
+use crate::access::htup_details::{HeapTuple, HeapTupleIsValid, GETSTRUCT};
+use crate::catalog::pg_opclass::Form_pg_opclass;
+use crate::{PG_GETARG_OID, PG_RETURN_BOOL};
+use crate::utils::palloc::pfree;
+use core::ptr::null_mut;
 
 // ---------------------------------------------------------------------------
 // cmptype.h is not yet ported. CompareType is aliased to c_int in primnodes.
@@ -472,9 +480,47 @@ pub unsafe fn GetIndexAmRoutineByAmId(amoid: Oid, noerror: bool) -> *mut IndexAm
     //   }
     //   ReleaseSysCache(tuple);
     //   return GetIndexAmRoutine(amhandler);
-    let _ = (amoid, noerror, AMTYPE_INDEX);
-    let _phantom: Option<Form_pg_am> = None;
-    unimplemented!("GetIndexAmRoutineByAmId: requires syscache AMOID lookup (syscache.c unported)")
+    let tuple: HeapTuple;
+    let amform: Form_pg_am;
+    let amhandler: crate::postgres_ext::Oid;
+
+    /* Get handler function OID for the access method */
+    tuple = SearchSysCache1(AMOID, ObjectIdGetDatum(amoid));
+    if !HeapTupleIsValid(tuple) {
+        if noerror {
+            return null_mut();
+        }
+        elog!(ERROR, "cache lookup failed for access method {}", amoid);
+    }
+    amform = GETSTRUCT(tuple) as Form_pg_am;
+
+    /* Check if it's an index access method as opposed to some other AM */
+    if (*amform).amtype != AMTYPE_INDEX {
+        if noerror {
+            ReleaseSysCache(tuple);
+            return null_mut();
+        }
+        ereport!(ERROR, errmsg!("access method \"{}\" is not of type {}",
+            std::ffi::CStr::from_ptr((*amform).amname.data.as_ptr()).to_string_lossy(), "INDEX"));
+        /* C also: errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */
+    }
+
+    amhandler = (*amform).amhandler;
+
+    /* Complain if handler OID is invalid */
+    if !RegProcedureIsValid(amhandler) {
+        if noerror {
+            ReleaseSysCache(tuple);
+            return null_mut();
+        }
+        ereport!(ERROR, errmsg!("index access method \"{}\" does not have a handler",
+            std::ffi::CStr::from_ptr((*amform).amname.data.as_ptr()).to_string_lossy()));
+    }
+
+    ReleaseSysCache(tuple);
+
+    /* And finally, call the handler function to get the API struct. */
+    GetIndexAmRoutine(amhandler)
 }
 
 // ---------------------------------------------------------------------------
@@ -579,8 +625,34 @@ pub unsafe fn amvalidate(fcinfo: FunctionCallInfo) -> Datum {
     // let result = ((*amroutine).amvalidate.unwrap())(opclassoid);
     // pfree(amroutine as *mut c_void);
     // PG_RETURN_BOOL!(result)
-    let _ = fcinfo;
-    unimplemented!("amvalidate: requires syscache CLAOID lookup (syscache.c / pg_opclass unported)")
+    let opclassoid: Oid = PG_GETARG_OID!(fcinfo, 0);
+    let result: bool;
+    let classtup: HeapTuple;
+    let classform: Form_pg_opclass;
+    let amoid: Oid;
+    let amroutine: *mut IndexAmRoutine;
+
+    classtup = SearchSysCache1(CLAOID, ObjectIdGetDatum(opclassoid));
+    if !HeapTupleIsValid(classtup) {
+        elog!(ERROR, "cache lookup failed for operator class {}", opclassoid);
+    }
+    classform = GETSTRUCT(classtup) as Form_pg_opclass;
+
+    amoid = (*classform).opcmethod;
+
+    ReleaseSysCache(classtup);
+
+    amroutine = GetIndexAmRoutineByAmId(amoid, false);
+
+    if (*amroutine).amvalidate.is_none() {
+        elog!(ERROR, "function amvalidate is not defined for index access method {}", amoid);
+    }
+
+    result = ((*amroutine).amvalidate.unwrap())(opclassoid);
+
+    pfree(amroutine as *mut core::ffi::c_void);
+
+    PG_RETURN_BOOL!(result)
 }
 
 #[cfg(test)]

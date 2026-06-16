@@ -650,9 +650,75 @@ const INDEX_CREATE_SET_READY: IndexStateFlagsAction = 0;
 const INDEX_CREATE_SET_VALID: IndexStateFlagsAction = 1;
 const INDEX_DROP_CLEAR_VALID: IndexStateFlagsAction = 2;
 const INDEX_DROP_SET_DEAD: IndexStateFlagsAction = 3;
-#[inline]
-unsafe fn index_set_state_flags(_indexId: Oid, _action: IndexStateFlagsAction) {
-    /* TODO(pg-port) */
+unsafe fn index_set_state_flags(indexId: Oid, action: IndexStateFlagsAction) {
+    let pg_index: Relation;
+    let indexTuple: HeapTuple;
+    let indexForm: Form_pg_index;
+
+    /* Open pg_index and fetch a writable copy of the index's tuple */
+    pg_index = table_open(IndexRelationId, RowExclusiveLock);
+
+    indexTuple = SearchSysCacheCopy1(INDEXRELID, ObjectIdGetDatum(indexId));
+    if !HeapTupleIsValid(indexTuple) {
+        elog!(ERROR, "cache lookup failed for index {}", indexId);
+    }
+    indexForm = GETSTRUCT(indexTuple) as Form_pg_index;
+
+    /* Perform the requested state change on the copy */
+    match action {
+        INDEX_CREATE_SET_READY => {
+            /* Set indisready during a CREATE INDEX CONCURRENTLY sequence */
+            Assert!((*indexForm).indislive);
+            Assert!(!(*indexForm).indisready);
+            Assert!(!(*indexForm).indisvalid);
+            (*indexForm).indisready = true;
+        }
+        INDEX_CREATE_SET_VALID => {
+            /* Set indisvalid during a CREATE INDEX CONCURRENTLY sequence */
+            Assert!((*indexForm).indislive);
+            Assert!((*indexForm).indisready);
+            Assert!(!(*indexForm).indisvalid);
+            (*indexForm).indisvalid = true;
+        }
+        INDEX_DROP_CLEAR_VALID => {
+            /*
+             * Clear indisvalid during a DROP INDEX CONCURRENTLY sequence
+             *
+             * If indisready == true we leave it set so the index still gets
+             * maintained by active transactions.  We only need to ensure that
+             * indisvalid is false.  (We don't assert that either is initially
+             * true, though, since we want to be able to retry a DROP INDEX
+             * CONCURRENTLY that failed partway through.)
+             *
+             * Note: the CLUSTER logic assumes that indisclustered cannot be
+             * set on any invalid index, so clear that flag too.  For
+             * cleanliness, also clear indisreplident.
+             */
+            (*indexForm).indisvalid = false;
+            (*indexForm).indisclustered = false;
+            (*indexForm).indisreplident = false;
+        }
+        INDEX_DROP_SET_DEAD => {
+            /*
+             * Clear indisready/indislive during DROP INDEX CONCURRENTLY
+             *
+             * We clear both indisready and indislive, because we not only
+             * want to stop updates, we want to prevent sessions from touching
+             * the index at all.
+             */
+            Assert!(!(*indexForm).indisvalid);
+            Assert!(!(*indexForm).indisclustered);
+            Assert!(!(*indexForm).indisreplident);
+            (*indexForm).indisready = false;
+            (*indexForm).indislive = false;
+        }
+        _ => {}
+    }
+
+    /* ... and update it */
+    CatalogTupleUpdate(pg_index, &mut (*indexTuple).t_self, indexTuple);
+
+    table_close(pg_index, RowExclusiveLock);
 }
 
 // -- smgr / bufmgr ------------------------------------------------------------

@@ -52,12 +52,13 @@ use crate::postgres::{
     CStringGetDatum, DatumGetCString, DatumGetInt32, DatumGetUInt32, DatumGetUInt64, Float8GetDatum,
     Int64GetDatum, PointerGetDatum, UInt32GetDatum, UInt64GetDatum,
 };
-use crate::{PG_DETOAST_DATUM, PG_DETOAST_DATUM_COPY, PG_GETARG_DATUM};
+use crate::{PG_DETOAST_DATUM, PG_DETOAST_DATUM_COPY, PG_DETOAST_DATUM_PACKED, PG_GETARG_DATUM, PG_NARGS};
 use crate::{DirectFunctionCall1, DirectFunctionCall2};
 use crate::utils::adt::float::{
     get_float4_infinity, get_float4_nan, get_float8_infinity, get_float8_nan,
 };
 use crate::common::int::{pg_abs_s32, pg_abs_s64};
+use crate::access::attnum::AttrNumber;
 use crate::common::hashfn::{hash_any, hash_any_extended};
 use crate::miscadmin::CHECK_FOR_INTERRUPTS;
 use crate::nodes::nodes::Node;
@@ -67,6 +68,7 @@ use core::ffi::{c_char, c_int, c_void};
 
 extern "C" {
     fn snprintf(s: *mut c_char, n: usize, fmt: *const c_char, ...) -> c_int;
+    fn printf(fmt: *const c_char, ...) -> c_int;
 }
 
 // fmgr interface helpers from utils/numeric.h.
@@ -559,8 +561,26 @@ unsafe fn estimateHyperLogLog(_cE: *mut hyperLogLogState) -> f64 {
 // TODO(pg-port): trace_sort GUC lives in utils/sortsupport / tuplesort.
 static mut trace_sort: bool = false;
 
-// TODO(pg-port): SortSupport / sortsupport.h infrastructure.
-type SortSupport = *mut c_void;
+// utils/sortsupport.h: SortSupportData.  The full infrastructure lives in
+// utils/sort/sortsupport.rs; the fields the comparison/abbreviation routines
+// below touch are mirrored here (per the sibling-adt local-declaration
+// convention) since funcapi/sortsupport are not yet wired into this module.
+#[repr(C)]
+pub struct SortSupportData {
+    pub ssup_cxt: MemoryContext,
+    pub ssup_collation: Oid,
+    pub ssup_reverse: bool,
+    pub ssup_nulls_first: bool,
+    pub ssup_attno: AttrNumber,
+    pub ssup_extra: *mut c_void,
+    pub comparator: Option<unsafe fn(x: Datum, y: Datum, ssup: SortSupport) -> c_int>,
+    pub abbreviate: bool,
+    pub abbrev_converter: Option<unsafe fn(original: Datum, ssup: SortSupport) -> Datum>,
+    pub abbrev_abort: Option<unsafe fn(memtupcount: c_int, ssup: SortSupport) -> bool>,
+    pub abbrev_full_comparator:
+        Option<unsafe fn(x: Datum, y: Datum, ssup: SortSupport) -> c_int>,
+}
+type SortSupport = *mut SortSupportData;
 
 // TODO(pg-port): pg_prng_state lives in common/pg_prng.h.
 #[repr(C)]
@@ -1279,16 +1299,183 @@ pub unsafe fn numeric_floor(fcinfo: FunctionCallInfo) -> Datum {
     PG_RETURN_NUMERIC!(res)
 }
 
+/*
+ * funcapi.h: set-returning-function machinery.  funcapi.rs is not wired into
+ * the module tree yet, so (mirroring sibling adt modules) the FuncCallContext
+ * layout and the SRF_* macros are declared locally with TODO(pg-port) stubs.
+ */
+#[repr(C)]
+struct FuncCallContext {
+    call_cntr: u64,
+    max_calls: u64,
+    user_fctx: *mut c_void,
+    attinmeta: *mut c_void,
+    multi_call_memory_ctx: MemoryContext,
+    tuple_desc: *mut c_void,
+}
+
+macro_rules! SRF_IS_FIRSTCALL {
+    ($fcinfo:expr) => {
+        srf_is_firstcall($fcinfo)
+    };
+}
+macro_rules! SRF_FIRSTCALL_INIT {
+    ($fcinfo:expr) => {
+        srf_firstcall_init($fcinfo)
+    };
+}
+macro_rules! SRF_PERCALL_SETUP {
+    ($fcinfo:expr) => {
+        srf_percall_setup($fcinfo)
+    };
+}
+macro_rules! SRF_RETURN_NEXT {
+    ($fcinfo:expr, $fctx:expr, $result:expr) => {
+        return srf_return_next($fcinfo, $fctx, $result)
+    };
+}
+macro_rules! SRF_RETURN_DONE {
+    ($fcinfo:expr, $fctx:expr) => {
+        return srf_return_done($fcinfo, $fctx)
+    };
+}
+
+unsafe fn srf_is_firstcall(_fcinfo: FunctionCallInfo) -> bool {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_firstcall_init(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_percall_setup(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_return_next(
+    _fcinfo: FunctionCallInfo,
+    _fctx: *mut FuncCallContext,
+    _result: Datum,
+) -> Datum {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_return_done(_fcinfo: FunctionCallInfo, _fctx: *mut FuncCallContext) -> Datum {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+
 /// generate_series_numeric()
-/// TODO(pg-port): SRF (funcapi.h SRF_* macros + FuncCallContext) not ported.
 pub unsafe fn generate_series_numeric(fcinfo: FunctionCallInfo) -> Datum {
     generate_series_step_numeric(fcinfo)
 }
 
-pub unsafe fn generate_series_step_numeric(_fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): set-returning function machinery (funcapi.h SRF_*) not yet
-    // ported; faithful body depends on FuncCallContext.
-    unimplemented!("generate_series_step_numeric: needs funcapi SRF support")
+pub unsafe fn generate_series_step_numeric(fcinfo: FunctionCallInfo) -> Datum {
+    let fctx: *mut generate_series_numeric_fctx;
+    let mut funcctx: *mut FuncCallContext;
+    let oldcontext: MemoryContext;
+
+    if SRF_IS_FIRSTCALL!(fcinfo) {
+        let start_num: Numeric = PG_GETARG_NUMERIC!(fcinfo, 0);
+        let stop_num: Numeric = PG_GETARG_NUMERIC!(fcinfo, 1);
+        let mut steploc: NumericVar = const_one;
+
+        /* Reject NaN and infinities in start and stop values */
+        if NUMERIC_IS_SPECIAL(start_num) {
+            if NUMERIC_IS_NAN(start_num) {
+                ereport!(ERROR, errmsg!("start value cannot be NaN"));
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            } else {
+                ereport!(ERROR, errmsg!("start value cannot be infinity"));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+        }
+        if NUMERIC_IS_SPECIAL(stop_num) {
+            if NUMERIC_IS_NAN(stop_num) {
+                ereport!(ERROR, errmsg!("stop value cannot be NaN"));
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            } else {
+                ereport!(ERROR, errmsg!("stop value cannot be infinity"));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+        }
+
+        /* see if we were given an explicit step size */
+        if PG_NARGS!(fcinfo) == 3 {
+            let step_num: Numeric = PG_GETARG_NUMERIC!(fcinfo, 2);
+
+            if NUMERIC_IS_SPECIAL(step_num) {
+                if NUMERIC_IS_NAN(step_num) {
+                    ereport!(ERROR, errmsg!("step size cannot be NaN"));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+                } else {
+                    ereport!(ERROR, errmsg!("step size cannot be infinity"));
+                    /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+                }
+            }
+
+            init_var_from_num(step_num, &mut steploc);
+
+            if cmp_var(&steploc, cvar(&const_zero)) == 0 {
+                ereport!(ERROR, errmsg!("step size cannot equal zero"));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+        }
+
+        /* create a function context for cross-call persistence */
+        funcctx = SRF_FIRSTCALL_INIT!(fcinfo);
+
+        /*
+         * Switch to memory context appropriate for multiple function calls.
+         */
+        oldcontext = MemoryContextSwitchTo((*funcctx).multi_call_memory_ctx);
+
+        /* allocate memory for user context */
+        fctx = palloc(core::mem::size_of::<generate_series_numeric_fctx>())
+            as *mut generate_series_numeric_fctx;
+
+        /*
+         * Use fctx to keep state from call to call. Seed current with the
+         * original start value. We must copy the start_num and stop_num
+         * values rather than pointing to them, since we may have detoasted
+         * them in the per-call context.
+         */
+        init_var(&mut (*fctx).current);
+        init_var(&mut (*fctx).stop);
+        init_var(&mut (*fctx).step);
+
+        set_var_from_num(start_num, &mut (*fctx).current);
+        set_var_from_num(stop_num, &mut (*fctx).stop);
+        set_var_from_var(&steploc, &mut (*fctx).step);
+
+        (*funcctx).user_fctx = fctx as *mut c_void;
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP!(fcinfo);
+
+    /*
+     * Get the saved state and use current state as the result of this
+     * iteration.
+     */
+    fctx = (*funcctx).user_fctx as *mut generate_series_numeric_fctx;
+
+    if ((*fctx).step.sign == NUMERIC_POS
+        && cmp_var(&(*fctx).current, &(*fctx).stop) <= 0)
+        || ((*fctx).step.sign == NUMERIC_NEG
+            && cmp_var(&(*fctx).current, &(*fctx).stop) >= 0)
+    {
+        let result: Numeric = make_result(&(*fctx).current);
+
+        /* switch to memory context appropriate for iteration calculation */
+        oldcontext = MemoryContextSwitchTo((*funcctx).multi_call_memory_ctx);
+
+        /* increment current in preparation for next iteration */
+        add_var(&(*fctx).current, &(*fctx).step, &mut (*fctx).current);
+        MemoryContextSwitchTo(oldcontext);
+
+        /* do when there is more left to send */
+        SRF_RETURN_NEXT!(fcinfo, funcctx, NumericGetDatum(result));
+    } else {
+        /* do when there is no more left */
+        SRF_RETURN_DONE!(fcinfo, funcctx);
+    }
 }
 
 /// generate_series_numeric_support()
@@ -1408,17 +1595,232 @@ unsafe fn compute_bucket(
 //
 // ----------------------------------------------------------------------
 
-/// Sort support strategy routine.
-/// TODO(pg-port): SortSupport / sortsupport.h infrastructure not yet ported.
-pub unsafe fn numeric_sortsupport(_fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): full sortsupport (abbreviation) requires utils/sortsupport.h.
-    unimplemented!("numeric_sortsupport: needs sortsupport infrastructure")
+// varatt.h short-varlena helpers (not exported from varatt.rs; mirrored locally
+// per the sibling-adt convention).
+const VARATT_SHORT_MAX: uint32 = 0x7F;
+#[inline]
+unsafe fn VARSIZE_SHORT(ptr: *const c_char) -> uint32 {
+    VARSIZE_1B(ptr)
+}
+#[inline]
+unsafe fn VARDATA_SHORT(ptr: *mut c_char) -> *mut c_char {
+    ptr.add(VARHDRSZ_SHORT as usize)
 }
 
-// numeric_abbrev_convert / numeric_abbrev_abort / numeric_fast_cmp /
-// numeric_cmp_abbrev / numeric_abbrev_convert_var are part of sortsupport and
-// depend on SortSupport; see TODO above.  numeric_abbrev_convert_var's core
-// math is translated here for the 64-bit case for reference.
+/// Sort support strategy routine.
+pub unsafe fn numeric_sortsupport(fcinfo: FunctionCallInfo) -> Datum {
+    let ssup: SortSupport = PG_GETARG_POINTER!(fcinfo, 0) as SortSupport;
+
+    (*ssup).comparator = Some(numeric_fast_cmp);
+
+    if (*ssup).abbreviate {
+        let nss: *mut NumericSortSupport;
+        let oldcontext: MemoryContext = MemoryContextSwitchTo((*ssup).ssup_cxt);
+
+        nss = palloc(core::mem::size_of::<NumericSortSupport>()) as *mut NumericSortSupport;
+
+        /*
+         * palloc a buffer for handling unaligned packed values in addition to
+         * the support struct
+         */
+        (*nss).buf = palloc((VARATT_SHORT_MAX + VARHDRSZ as uint32 + 1) as usize);
+
+        (*nss).input_count = 0;
+        (*nss).estimating = true;
+        initHyperLogLog(&mut (*nss).abbr_card, 10);
+
+        (*ssup).ssup_extra = nss as *mut c_void;
+
+        (*ssup).abbrev_full_comparator = (*ssup).comparator;
+        (*ssup).comparator = Some(numeric_cmp_abbrev);
+        (*ssup).abbrev_converter = Some(numeric_abbrev_convert);
+        (*ssup).abbrev_abort = Some(numeric_abbrev_abort);
+
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    PG_RETURN_VOID!()
+}
+
+/*
+ * Abbreviate a numeric datum, handling NaNs and detoasting
+ * (must not leak memory!)
+ */
+unsafe fn numeric_abbrev_convert(original_datum: Datum, ssup: SortSupport) -> Datum {
+    let nss: *mut NumericSortSupport = (*ssup).ssup_extra as *mut NumericSortSupport;
+    let original_varatt: *mut c_void = PG_DETOAST_DATUM_PACKED!(original_datum) as *mut c_void;
+    let value: Numeric;
+    let result: Datum;
+
+    (*nss).input_count += 1;
+
+    /*
+     * This is to handle packed datums without needing a palloc/pfree cycle;
+     * we keep and reuse a buffer large enough to handle any short datum.
+     */
+    if VARATT_IS_SHORT(original_varatt as *const c_char) {
+        let buf: *mut c_void = (*nss).buf;
+        let sz: Size =
+            (VARSIZE_SHORT(original_varatt as *const c_char) - VARHDRSZ_SHORT as uint32) as Size;
+
+        Assert!(sz <= (VARATT_SHORT_MAX - VARHDRSZ_SHORT as uint32) as Size);
+
+        SET_VARSIZE(buf as *mut c_char, VARHDRSZ + sz as int32);
+        memcpy(
+            VARDATA(buf as *mut c_char) as *mut c_void,
+            VARDATA_SHORT(original_varatt as *mut c_char) as *const c_void,
+            sz as usize,
+        );
+
+        value = buf as Numeric;
+    } else {
+        value = original_varatt as Numeric;
+    }
+
+    if NUMERIC_IS_SPECIAL(value) {
+        if NUMERIC_IS_PINF(value) {
+            result = NUMERIC_ABBREV_PINF;
+        } else if NUMERIC_IS_NINF(value) {
+            result = NUMERIC_ABBREV_NINF;
+        } else {
+            result = NUMERIC_ABBREV_NAN;
+        }
+    } else {
+        let mut var: NumericVar = core::mem::zeroed();
+
+        init_var_from_num(value, &mut var);
+
+        result = numeric_abbrev_convert_var(&var, nss);
+    }
+
+    /* should happen only for external/compressed toasts */
+    if original_varatt as Pointer != DatumGetPointer(original_datum) {
+        pfree(original_varatt);
+    }
+
+    result
+}
+
+/*
+ * Consider whether to abort abbreviation.
+ *
+ * We pay no attention to the cardinality of the non-abbreviated data. There is
+ * no reason to do so: unlike text, we have no fast check for equal values, so
+ * we pay the full overhead whenever the abbreviations are equal regardless of
+ * whether the underlying values are also equal.
+ */
+unsafe fn numeric_abbrev_abort(memtupcount: c_int, ssup: SortSupport) -> bool {
+    let nss: *mut NumericSortSupport = (*ssup).ssup_extra as *mut NumericSortSupport;
+    let abbr_card: f64;
+
+    if memtupcount < 10000 || (*nss).input_count < 10000 || !(*nss).estimating {
+        return false;
+    }
+
+    abbr_card = estimateHyperLogLog(&mut (*nss).abbr_card);
+
+    /*
+     * If we have >100k distinct values, then even if we were sorting many
+     * billion rows we'd likely still break even, and the penalty of undoing
+     * that many rows of abbrevs would probably not be worth it. Stop even
+     * counting at that point.
+     */
+    if abbr_card > 100000.0 {
+        if trace_sort {
+            elog!(
+                LOG,
+                "numeric_abbrev: estimation ends at cardinality {} after {} values ({} rows)",
+                abbr_card,
+                (*nss).input_count,
+                memtupcount
+            );
+        }
+        (*nss).estimating = false;
+        return false;
+    }
+
+    /*
+     * Target minimum cardinality is 1 per ~10k of non-null inputs.  (The
+     * break even point is somewhere between one per 100k rows, where
+     * abbreviation has a very slight penalty, and 1 per 10k where it wins by
+     * a measurable percentage.)  We use the relatively pessimistic 10k
+     * threshold, and add a 0.5 row fudge factor, because it allows us to
+     * abort earlier on genuinely pathological data where we've had exactly
+     * one abbreviated value in the first 10k (non-null) rows.
+     */
+    if abbr_card < (*nss).input_count as f64 / 10000.0 + 0.5 {
+        if trace_sort {
+            elog!(
+                LOG,
+                "numeric_abbrev: aborting abbreviation at cardinality {} below threshold {} after {} values ({} rows)",
+                abbr_card,
+                (*nss).input_count as f64 / 10000.0 + 0.5,
+                (*nss).input_count,
+                memtupcount
+            );
+        }
+        return true;
+    }
+
+    if trace_sort {
+        elog!(
+            LOG,
+            "numeric_abbrev: cardinality {} after {} values ({} rows)",
+            abbr_card,
+            (*nss).input_count,
+            memtupcount
+        );
+    }
+
+    false
+}
+
+/*
+ * Non-fmgr interface to the comparison routine to allow sortsupport to elide
+ * the fmgr call.  The saving here is small given how slow numeric comparisons
+ * are, but it is a required part of the sort support API when abbreviations
+ * are performed.
+ *
+ * Two palloc/pfree cycles could be saved here by using persistent buffers for
+ * aligning short-varlena inputs, but this has not so far been considered to
+ * be worth the effort.
+ */
+unsafe fn numeric_fast_cmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
+    let nx: Numeric = DatumGetNumeric(x);
+    let ny: Numeric = DatumGetNumeric(y);
+    let result: c_int;
+
+    result = cmp_numerics(nx, ny);
+
+    if nx as Pointer != DatumGetPointer(x) {
+        pfree(nx as *mut c_void);
+    }
+    if ny as Pointer != DatumGetPointer(y) {
+        pfree(ny as *mut c_void);
+    }
+
+    result
+}
+
+/*
+ * Compare abbreviations of values. (Abbreviations may be equal where the true
+ * values differ, but if the abbreviations differ, they must reflect the
+ * ordering of the true values.)
+ */
+unsafe fn numeric_cmp_abbrev(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
+    /*
+     * NOTE WELL: this is intentionally backwards, because the abbreviation is
+     * negated relative to the original value, to handle NaN/infinity cases.
+     */
+    if DatumGetNumericAbbrev(x) < DatumGetNumericAbbrev(y) {
+        return 1;
+    }
+    if DatumGetNumericAbbrev(x) > DatumGetNumericAbbrev(y) {
+        return -1;
+    }
+    0
+}
+
 unsafe fn numeric_abbrev_convert_var(var: *const NumericVar, nss: *mut NumericSortSupport) -> Datum {
     let ndigits = (*var).ndigits;
     let weight = (*var).weight;
@@ -4799,6 +5201,97 @@ pub unsafe fn int2int4_sum(fcinfo: FunctionCallInfo) -> Datum {
 
     Int64GetDatum((*transdata).sum)
 }
+
+
+// #ifdef NUMERIC_DEBUG
+//
+// dump_numeric() - Dump a value in the db storage format for debugging
+unsafe fn dump_numeric(str: *const c_char, num: Numeric) {
+    let digits: *mut NumericDigit = NUMERIC_DIGITS(num);
+    let ndigits: c_int;
+    let mut i: c_int;
+
+    ndigits = NUMERIC_NDIGITS(num);
+
+    printf(
+        c"%s: NUMERIC w=%d d=%d ".as_ptr(),
+        str,
+        NUMERIC_WEIGHT(num),
+        NUMERIC_DSCALE(num),
+    );
+    match NUMERIC_SIGN(num) {
+        x if x == NUMERIC_POS => {
+            printf(c"POS".as_ptr());
+        }
+        x if x == NUMERIC_NEG => {
+            printf(c"NEG".as_ptr());
+        }
+        x if x == NUMERIC_NAN => {
+            printf(c"NaN".as_ptr());
+        }
+        x if x == NUMERIC_PINF => {
+            printf(c"Infinity".as_ptr());
+        }
+        x if x == NUMERIC_NINF => {
+            printf(c"-Infinity".as_ptr());
+        }
+        _ => {
+            printf(c"SIGN=0x%x".as_ptr(), NUMERIC_SIGN(num));
+        }
+    }
+
+    i = 0;
+    while i < ndigits {
+        printf(c" %0*d".as_ptr(), DEC_DIGITS, *digits.add(i as usize) as c_int);
+        i += 1;
+    }
+    printf(c"\n".as_ptr());
+}
+
+// dump_var() - Dump a value in the variable format for debugging
+unsafe fn dump_var(str: *const c_char, var: *mut NumericVar) {
+    let mut i: c_int;
+
+    printf(
+        c"%s: VAR w=%d d=%d ".as_ptr(),
+        str,
+        (*var).weight,
+        (*var).dscale,
+    );
+    match (*var).sign {
+        x if x == NUMERIC_POS => {
+            printf(c"POS".as_ptr());
+        }
+        x if x == NUMERIC_NEG => {
+            printf(c"NEG".as_ptr());
+        }
+        x if x == NUMERIC_NAN => {
+            printf(c"NaN".as_ptr());
+        }
+        x if x == NUMERIC_PINF => {
+            printf(c"Infinity".as_ptr());
+        }
+        x if x == NUMERIC_NINF => {
+            printf(c"-Infinity".as_ptr());
+        }
+        _ => {
+            printf(c"SIGN=0x%x".as_ptr(), (*var).sign);
+        }
+    }
+
+    i = 0;
+    while i < (*var).ndigits {
+        printf(
+            c" %0*d".as_ptr(),
+            DEC_DIGITS,
+            *(*var).digits.add(i as usize) as c_int,
+        );
+        i += 1;
+    }
+
+    printf(c"\n".as_ptr());
+}
+// #endif /* NUMERIC_DEBUG */
 
 
 // ----------------------------------------------------------------------

@@ -11,25 +11,44 @@
 //! below.  <stdio.h> snprintf bound via extern "C"; the sscanf-based parser in macaddr_in is
 //! replicated with a manual hex-octet parser (the 7 accepted notations are reproduced exactly).
 //!
-//! STUBBED (dependency not yet ported):
-//!  - macaddr_recv/macaddr_send: libpq/pqformat (pq_getmsgbyte / pq_begintypsend /
-//!    pq_sendbyte / pq_endtypsend) + port/pg_bswap not yet translated.
-//!  - macaddr_sortsupport + macaddr_fast_cmp/macaddr_abbrev_abort/macaddr_abbrev_convert
-//!    (and the macaddr_sortsupport_state struct): utils/sortsupport.h (SortSupport,
-//!    ssup_datum_unsigned_cmp, DatumBigEndianToNative) + lib/hyperloglog (initHyperLogLog/
-//!    addHyperLogLog/estimateHyperLogLog) + utils/guc.h trace_sort.
+//! `#include`s further mapped: libpq/pqformat -> crate::libpq::pqformat (pq_getmsgbyte /
+//! pq_begintypsend / pq_endtypsend; pq_sendbyte is a local shim over pq_sendint8);
+//! port/pg_bswap -> crate::port::pg_bswap (DatumBigEndianToNative); lib/hyperloglog ->
+//! crate::lib::hyperloglog; utils/sortsupport.h -> crate::utils::sort::sortsupport
+//! (SortSupport) + ssup_datum_unsigned_cmp from crate::utils::sort::tuplesort.  trace_sort
+//! GUC is a local stub (it lives behind an extern block in guc_tables).
 
 use crate::prelude::*;
 use crate::utils::fmgr::*;
 use crate::{
     PG_GETARG_CSTRING, PG_GETARG_DATUM, PG_GETARG_INT64, PG_GETARG_POINTER, PG_RETURN_BOOL,
-    PG_RETURN_CSTRING, PG_RETURN_INT32,
+    PG_RETURN_CSTRING, PG_RETURN_INT32, PG_RETURN_VOID,
 };
-use crate::common::hashfn::{hash_any, hash_any_extended};
-use crate::postgres::{DatumGetPointer, PointerGetDatum};
+use crate::c::{uint32, uint64};
+use crate::common::hashfn::{hash_any, hash_any_extended, hash_uint32};
+use crate::port::pg_bswap::DatumBigEndianToNative;
+use crate::postgres::{DatumGetPointer, DatumGetUInt32, PointerGetDatum};
 use crate::nodes::nodes::Node;
-use crate::lib::stringinfo::StringInfo;
+use crate::utils::mmgr::memnodes::MemoryContext;
+use crate::utils::mmgr::mcxt::MemoryContextSwitchTo;
+use crate::lib::stringinfo::{StringInfo, StringInfoData};
+use crate::lib::hyperloglog::{
+    addHyperLogLog, estimateHyperLogLog, hyperLogLogState, initHyperLogLog,
+};
+use crate::libpq::pqformat::{pq_begintypsend, pq_endtypsend, pq_getmsgbyte};
+use crate::utils::sort::sortsupport::{SortSupport, SortSupportData};
+use crate::utils::sort::tuplesort::ssup_datum_unsigned_cmp;
 use core::ffi::{c_char, c_int, c_void};
+
+// TODO(pg-port): trace_sort GUC lives in utils/misc/guc_tables (extern block).
+static mut trace_sort: bool = false;
+
+/* sortsupport for macaddr */
+struct macaddr_sortsupport_state {
+    input_count: i64,        /* number of non-null values seen */
+    estimating: bool,        /* true if estimating cardinality */
+    abbr_card: hyperLogLogState, /* cardinality estimator */
+}
 
 // ---- utils/inet.h: the macaddr internal storage format ----
 /*
@@ -377,12 +396,18 @@ pub unsafe fn macaddr_out(fcinfo: FunctionCallInfo) -> Datum {
  */
 pub unsafe fn macaddr_recv(fcinfo: FunctionCallInfo) -> Datum {
     let buf: StringInfo = PG_GETARG_POINTER!(fcinfo, 0) as StringInfo;
-    // C: addr = palloc(sizeof(macaddr));
-    //    addr->a = pq_getmsgbyte(buf); ... addr->f = pq_getmsgbyte(buf);
-    //    PG_RETURN_MACADDR_P(addr);
-    // TODO(pg-port): libpq/pqformat (pq_getmsgbyte) not yet translated.
-    let _ = buf;
-    unimplemented!("macaddr_recv: libpq/pqformat (pq_getmsgbyte) not yet translated")
+    let addr: *mut macaddr;
+
+    addr = palloc(core::mem::size_of::<macaddr>()) as *mut macaddr;
+
+    (*addr).a = pq_getmsgbyte(buf) as u8;
+    (*addr).b = pq_getmsgbyte(buf) as u8;
+    (*addr).c = pq_getmsgbyte(buf) as u8;
+    (*addr).d = pq_getmsgbyte(buf) as u8;
+    (*addr).e = pq_getmsgbyte(buf) as u8;
+    (*addr).f = pq_getmsgbyte(buf) as u8;
+
+    return MacaddrPGetDatum(addr); // PG_RETURN_MACADDR_P
 }
 
 /*
@@ -390,11 +415,22 @@ pub unsafe fn macaddr_recv(fcinfo: FunctionCallInfo) -> Datum {
  */
 pub unsafe fn macaddr_send(fcinfo: FunctionCallInfo) -> Datum {
     let addr: *mut macaddr = DatumGetMacaddrP(PG_GETARG_DATUM!(fcinfo, 0));
-    // C: pq_begintypsend(&buf); pq_sendbyte(&buf, addr->a); ... addr->f;
-    //    PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
-    // TODO(pg-port): libpq/pqformat not yet translated.
-    let _ = addr;
-    unimplemented!("macaddr_send: libpq/pqformat (pq_sendbyte) not yet translated")
+    let mut buf: StringInfoData = core::mem::zeroed();
+
+    pq_begintypsend(&mut buf);
+    pq_sendbyte(&mut buf, (*addr).a);
+    pq_sendbyte(&mut buf, (*addr).b);
+    pq_sendbyte(&mut buf, (*addr).c);
+    pq_sendbyte(&mut buf, (*addr).d);
+    pq_sendbyte(&mut buf, (*addr).e);
+    pq_sendbyte(&mut buf, (*addr).f);
+    return PointerGetDatum(pq_endtypsend(&mut buf) as *const c_void); // PG_RETURN_BYTEA_P
+}
+
+// pq_sendbyte(buf, byt); the Rust pqformat exports pq_sendint8.
+#[inline]
+unsafe fn pq_sendbyte(buf: StringInfo, byt: u8) {
+    crate::libpq::pqformat::pq_sendint8(buf, byt);
 }
 
 /*
@@ -551,48 +587,181 @@ pub unsafe fn macaddr_trunc(fcinfo: FunctionCallInfo) -> Datum {
  * information necessary to use comparison by abbreviated keys.
  */
 pub unsafe fn macaddr_sortsupport(fcinfo: FunctionCallInfo) -> Datum {
-    // C body sets ssup->comparator = macaddr_fast_cmp and, when ssup->abbreviate,
-    // initializes a macaddr_sortsupport_state (hyperLogLogState abbr_card via
-    // initHyperLogLog) and wires up ssup_datum_unsigned_cmp /
-    // macaddr_abbrev_convert / macaddr_abbrev_abort / macaddr_fast_cmp.
-    // TODO(pg-port): utils/sortsupport.h (SortSupport) + lib/hyperloglog +
-    // MemoryContextSwitchTo abbreviation machinery not yet translated.
-    let _ = fcinfo;
-    unimplemented!("macaddr_sortsupport: utils/sortsupport.h + lib/hyperloglog not yet translated")
+    let ssup = PG_GETARG_POINTER!(fcinfo, 0) as SortSupport;
+
+    (*ssup).comparator = Some(macaddr_fast_cmp);
+    (*ssup).ssup_extra = null_mut();
+
+    if (*ssup).abbreviate {
+        let uss: *mut macaddr_sortsupport_state;
+        let oldcontext: MemoryContext;
+
+        oldcontext = MemoryContextSwitchTo((*ssup).ssup_cxt);
+
+        uss = palloc(core::mem::size_of::<macaddr_sortsupport_state>())
+            as *mut macaddr_sortsupport_state;
+        (*uss).input_count = 0;
+        (*uss).estimating = true;
+        initHyperLogLog(&mut (*uss).abbr_card, 10);
+
+        (*ssup).ssup_extra = uss as *mut c_void;
+
+        (*ssup).comparator = Some(ssup_datum_unsigned_cmp);
+        (*ssup).abbrev_converter = Some(macaddr_abbrev_convert);
+        (*ssup).abbrev_abort = Some(macaddr_abbrev_abort);
+        (*ssup).abbrev_full_comparator = Some(macaddr_fast_cmp);
+
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    PG_RETURN_VOID!();
 }
 
 /*
  * SortSupport "traditional" comparison function. Pulls two MAC addresses from
  * the heap and runs a standard comparison on them.
- *
- * Translated body is preserved (it only needs macaddr_cmp_internal), but the
- * SortSupport type it takes is not yet ported, so it is left stubbed and
- * unreferenced until macaddr_sortsupport is enabled.
  */
-// static int macaddr_fast_cmp(Datum x, Datum y, SortSupport ssup)
-// {
-//     macaddr *arg1 = DatumGetMacaddrP(x);
-//     macaddr *arg2 = DatumGetMacaddrP(y);
-//     return macaddr_cmp_internal(arg1, arg2);
-// }
-// TODO(pg-port): utils/sortsupport.h SortSupport not yet translated.
+unsafe fn macaddr_fast_cmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
+    let arg1 = DatumGetMacaddrP(x);
+    let arg2 = DatumGetMacaddrP(y);
+
+    macaddr_cmp_internal(arg1, arg2)
+}
 
 /*
  * Callback for estimating effectiveness of abbreviated key optimization.
  *
- * static bool macaddr_abbrev_abort(int memtupcount, SortSupport ssup)
- * TODO(pg-port): macaddr_sortsupport_state + lib/hyperloglog (estimateHyperLogLog)
- * + utils/guc.h trace_sort not yet translated.
+ * We pay no attention to the cardinality of the non-abbreviated data, because
+ * there is no equality fast-path within authoritative macaddr comparator.
  */
+unsafe fn macaddr_abbrev_abort(memtupcount: c_int, ssup: SortSupport) -> bool {
+    let uss = (*ssup).ssup_extra as *mut macaddr_sortsupport_state;
+    let abbr_card: f64;
+
+    if memtupcount < 10000 || (*uss).input_count < 10000 || !(*uss).estimating {
+        return false;
+    }
+
+    abbr_card = estimateHyperLogLog(&mut (*uss).abbr_card);
+
+    /*
+     * If we have >100k distinct values, then even if we were sorting many
+     * billion rows we'd likely still break even, and the penalty of undoing
+     * that many rows of abbrevs would probably not be worth it. At this point
+     * we stop counting because we know that we're now fully committed.
+     */
+    if abbr_card > 100000.0 {
+        if trace_sort {
+            elog!(
+                LOG,
+                "macaddr_abbrev: estimation ends at cardinality {} after {} values ({} rows)",
+                abbr_card,
+                (*uss).input_count,
+                memtupcount
+            );
+        }
+        (*uss).estimating = false;
+        return false;
+    }
+
+    /*
+     * Target minimum cardinality is 1 per ~2k of non-null inputs. 0.5 row
+     * fudge factor allows us to abort earlier on genuinely pathological data
+     * where we've had exactly one abbreviated value in the first 2k
+     * (non-null) rows.
+     */
+    if abbr_card < (*uss).input_count as f64 / 2000.0 + 0.5 {
+        if trace_sort {
+            elog!(
+                LOG,
+                "macaddr_abbrev: aborting abbreviation at cardinality {} below threshold {} after {} values ({} rows)",
+                abbr_card,
+                (*uss).input_count as f64 / 2000.0 + 0.5,
+                (*uss).input_count,
+                memtupcount
+            );
+        }
+        return true;
+    }
+
+    if trace_sort {
+        elog!(
+            LOG,
+            "macaddr_abbrev: cardinality {} after {} values ({} rows)",
+            abbr_card,
+            (*uss).input_count,
+            memtupcount
+        );
+    }
+
+    false
+}
 
 /*
  * SortSupport conversion routine. Converts original macaddr representation
  * to abbreviated key representation.
  *
- * static Datum macaddr_abbrev_convert(Datum original, SortSupport ssup)
- * TODO(pg-port): lib/hyperloglog (addHyperLogLog) + hash_uint32 +
- * DatumBigEndianToNative (utils/sortsupport.h) not yet translated.
+ * Packs the bytes of a 6-byte MAC address into a Datum and treats it as an
+ * unsigned integer for purposes of comparison. On a 64-bit machine, there
+ * will be two zeroed bytes of padding. The integer is converted to native
+ * endianness to facilitate easy comparison.
  */
+unsafe fn macaddr_abbrev_convert(original: Datum, ssup: SortSupport) -> Datum {
+    let uss = (*ssup).ssup_extra as *mut macaddr_sortsupport_state;
+    let authoritative = DatumGetMacaddrP(original);
+    let mut res: Datum = 0;
+
+    /*
+     * On a 64-bit machine, zero out the 8-byte datum and copy the 6 bytes of
+     * the MAC address in. There will be two bytes of zero padding on the end
+     * of the least significant bits.
+     */
+    if core::mem::size_of::<Datum>() == 8 {
+        res = 0;
+        core::ptr::copy_nonoverlapping(
+            authoritative as *const u8,
+            &mut res as *mut Datum as *mut u8,
+            core::mem::size_of::<macaddr>(),
+        );
+    } else {
+        core::ptr::copy_nonoverlapping(
+            authoritative as *const u8,
+            &mut res as *mut Datum as *mut u8,
+            core::mem::size_of::<Datum>(),
+        );
+    }
+    (*uss).input_count += 1;
+
+    /*
+     * Cardinality estimation. The estimate uses uint32, so on a 64-bit
+     * architecture, XOR the two 32-bit halves together to produce slightly
+     * more entropy. The two zeroed bytes won't have any practical impact on
+     * this operation.
+     */
+    if (*uss).estimating {
+        let tmp: uint32;
+
+        if core::mem::size_of::<Datum>() == 8 {
+            tmp = (res as uint32) ^ ((res as uint64 >> 32) as uint32);
+        } else {
+            tmp = res as uint32;
+        }
+
+        addHyperLogLog(&mut (*uss).abbr_card, DatumGetUInt32(hash_uint32(tmp)));
+    }
+
+    /*
+     * Byteswap on little-endian machines.
+     *
+     * This is needed so that ssup_datum_unsigned_cmp() (an unsigned integer
+     * 3-way comparator) works correctly on all platforms. Without this, the
+     * comparator would have to call memcmp() with a pair of pointers to the
+     * first byte of each abbreviated key, which is slower.
+     */
+    res = DatumBigEndianToNative(res);
+
+    res
+}
 
 /*
  * Format a C string for an error message via Rust `{}` (lossy).

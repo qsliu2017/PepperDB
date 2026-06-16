@@ -711,16 +711,240 @@ const F_NAMEEQ: Oid = 93;
 // libitial helper aliases
 unsafe fn linitial_node_ColumnRef(list: *const List) -> *mut ColumnRef { unimplemented!() }
 
-/* TODO(pg-port): forward declarations for domain helpers defined later in this file */
+/*
+ * domainAddCheckConstraint - code shared between CREATE and ALTER DOMAIN
+ */
 unsafe fn domainAddCheckConstraint(
-    _domainOid: Oid, _domainNamespace: Oid, _baseTypeOid: Oid, _typMod: c_int,
-    _constr: *mut Constraint, _domainName: *const c_char, _constrAddr: *mut ObjectAddress,
-) -> *mut c_char { /* TODO(pg-port) */ core::ptr::null_mut() }
+    domainOid: Oid, domainNamespace: Oid, baseTypeOid: Oid, typMod: c_int,
+    constr: *mut Constraint, domainName: *const c_char, constrAddr: *mut ObjectAddress,
+) -> *mut c_char {
+    let expr: *mut Node;
+    let ccbin: *mut c_char;
+    let pstate: *mut ParseState;
+    let domVal: *mut CoerceToDomainValue;
+    let ccoid: Oid;
 
+    /* Assert(constr->contype == CONSTR_CHECK); */
+
+    /*
+     * Assign or validate constraint name
+     */
+    if !(*constr).conname.is_null() {
+        if ConstraintNameIsUsed(CONSTRAINT_DOMAIN,
+                                domainOid,
+                                (*constr).conname) {
+            ereport!(ERROR,
+                     errmsg!("constraint \"{}\" for domain \"{}\" already exists",
+                             std::ffi::CStr::from_ptr((*constr).conname).to_string_lossy(),
+                             std::ffi::CStr::from_ptr(domainName).to_string_lossy()));
+            /* C also: errcode(ERRCODE_DUPLICATE_OBJECT) */
+        }
+    } else {
+        (*constr).conname = ChooseConstraintName(domainName,
+                                                 core::ptr::null(),
+                                                 c"check".as_ptr(),
+                                                 domainNamespace,
+                                                 core::ptr::null());
+    }
+
+    /*
+     * Convert the A_EXPR in raw_expr into an EXPR
+     */
+    pstate = make_parsestate(core::ptr::null_mut());
+
+    /*
+     * Set up a CoerceToDomainValue to represent the occurrence of VALUE in
+     * the expression.  Note that it will appear to have the type of the base
+     * type, not the domain.  This seems correct since within the check
+     * expression, we should not assume the input value can be considered a
+     * member of the domain.
+     */
+    domVal = makeNode!(CoerceToDomainValue, T_CoerceToDomainValue) as *mut CoerceToDomainValue;
+    (*domVal).typeId = baseTypeOid;
+    (*domVal).typeMod = typMod;
+    (*domVal).collation = get_typcollation(baseTypeOid);
+    (*domVal).location = -1; /* will be set when/if used */
+
+    (*pstate).p_pre_columnref_hook = Some(replace_domain_constraint_value);
+    (*pstate).p_ref_hook_state = domVal as *mut c_void;
+
+    expr = transformExpr(pstate, (*constr).raw_expr, EXPR_KIND_DOMAIN_CHECK);
+
+    /*
+     * Make sure it yields a boolean result.
+     */
+    let expr = coerce_to_boolean(pstate, expr, c"CHECK".as_ptr());
+
+    /*
+     * Fix up collation information.
+     */
+    assign_expr_collations(pstate, expr);
+
+    /*
+     * Domains don't allow variables (this is probably dead code now that
+     * add_missing_from is history, but let's be sure).
+     */
+    if !(*pstate).p_rtable.is_null() ||
+        contain_var_clause(expr) {
+        ereport!(ERROR,
+                 errmsg!("cannot use table references in domain check constraint"));
+        /* C also: errcode(ERRCODE_INVALID_COLUMN_REFERENCE) */
+    }
+
+    /*
+     * Convert to string form for storage.
+     */
+    ccbin = nodeToString(expr);
+
+    /*
+     * Store the constraint in pg_constraint
+     */
+    ccoid =
+        CreateConstraintEntry((*constr).conname, /* Constraint Name */
+                              domainNamespace,   /* namespace */
+                              CONSTRAINT_CHECK,  /* Constraint Type */
+                              false,             /* Is Deferrable */
+                              false,             /* Is Deferred */
+                              true,              /* Is Enforced */
+                              !(*constr).skip_validation, /* Is Validated */
+                              InvalidOid,        /* no parent constraint */
+                              InvalidOid,        /* not a relation constraint */
+                              core::ptr::null(),
+                              0,
+                              0,
+                              domainOid,         /* domain constraint */
+                              InvalidOid,        /* no associated index */
+                              InvalidOid,        /* Foreign key fields */
+                              core::ptr::null(),
+                              core::ptr::null(),
+                              core::ptr::null(),
+                              core::ptr::null(),
+                              0,
+                              b' ' as c_char,
+                              b' ' as c_char,
+                              core::ptr::null(),
+                              0,
+                              b' ' as c_char,
+                              core::ptr::null(), /* not an exclusion constraint */
+                              expr,              /* Tree form of check constraint */
+                              ccbin,             /* Binary form of check constraint */
+                              true,              /* is local */
+                              0,                 /* inhcount */
+                              false,             /* connoinherit */
+                              false,             /* conperiod */
+                              false);            /* is_internal */
+    if !constrAddr.is_null() {
+        ObjectAddressSet(constrAddr, ConstraintRelationId, ccoid);
+    }
+
+    /*
+     * Return the compiled constraint expression so the calling routine can
+     * perform any additional required tests.
+     */
+    ccbin
+}
+
+/* Parser pre_columnref_hook for domain CHECK constraint parsing */
+unsafe fn replace_domain_constraint_value(pstate: *mut ParseState, cref: *mut c_void) -> *mut Node {
+    let cref = cref as *mut ColumnRef;
+    /*
+     * Check for a reference to "value", and if that's what it is, replace
+     * with a CoerceToDomainValue as prepared for us by
+     * domainAddCheckConstraint. (We handle VALUE as a name, not a keyword, to
+     * avoid breaking a lot of applications that have used VALUE as a column
+     * name in the past.)
+     */
+    if list_length((*cref).fields) == 1 {
+        let field1: *mut Node = linitial((*cref).fields) as *mut Node;
+        let colname: *mut c_char;
+
+        colname = strVal(field1);
+        if strcmp_lit(colname, c"value") == 0 {
+            let domVal: *mut CoerceToDomainValue =
+                copyObject((*pstate).p_ref_hook_state) as *mut CoerceToDomainValue;
+
+            /* Propagate location knowledge, if any */
+            (*domVal).location = (*cref).location;
+            return domVal as *mut Node;
+        }
+    }
+    core::ptr::null_mut()
+}
+
+/*
+ * domainAddNotNullConstraint - code shared between CREATE and ALTER DOMAIN
+ */
 unsafe fn domainAddNotNullConstraint(
-    _domainOid: Oid, _domainNamespace: Oid, _baseTypeOid: Oid, _typMod: c_int,
-    _constr: *mut Constraint, _domainName: *const c_char, _constrAddr: *mut ObjectAddress,
-) { /* TODO(pg-port) */ }
+    domainOid: Oid, domainNamespace: Oid, _baseTypeOid: Oid, _typMod: c_int,
+    constr: *mut Constraint, domainName: *const c_char, constrAddr: *mut ObjectAddress,
+) {
+    let ccoid: Oid;
+
+    /* Assert(constr->contype == CONSTR_NOTNULL); */
+
+    /*
+     * Assign or validate constraint name
+     */
+    if !(*constr).conname.is_null() {
+        if ConstraintNameIsUsed(CONSTRAINT_DOMAIN,
+                                domainOid,
+                                (*constr).conname) {
+            ereport!(ERROR,
+                     errmsg!("constraint \"{}\" for domain \"{}\" already exists",
+                             std::ffi::CStr::from_ptr((*constr).conname).to_string_lossy(),
+                             std::ffi::CStr::from_ptr(domainName).to_string_lossy()));
+            /* C also: errcode(ERRCODE_DUPLICATE_OBJECT) */
+        }
+    } else {
+        (*constr).conname = ChooseConstraintName(domainName,
+                                                 core::ptr::null(),
+                                                 c"not_null".as_ptr(),
+                                                 domainNamespace,
+                                                 core::ptr::null());
+    }
+
+    /*
+     * Store the constraint in pg_constraint
+     */
+    ccoid =
+        CreateConstraintEntry((*constr).conname, /* Constraint Name */
+                              domainNamespace,    /* namespace */
+                              CONSTRAINT_NOTNULL, /* Constraint Type */
+                              false,              /* Is Deferrable */
+                              false,              /* Is Deferred */
+                              true,               /* Is Enforced */
+                              !(*constr).skip_validation, /* Is Validated */
+                              InvalidOid,         /* no parent constraint */
+                              InvalidOid,         /* not a relation constraint */
+                              core::ptr::null(),
+                              0,
+                              0,
+                              domainOid,          /* domain constraint */
+                              InvalidOid,         /* no associated index */
+                              InvalidOid,         /* Foreign key fields */
+                              core::ptr::null(),
+                              core::ptr::null(),
+                              core::ptr::null(),
+                              core::ptr::null(),
+                              0,
+                              b' ' as c_char,
+                              b' ' as c_char,
+                              core::ptr::null(),
+                              0,
+                              b' ' as c_char,
+                              core::ptr::null(), /* not an exclusion constraint */
+                              core::ptr::null(),
+                              core::ptr::null(),
+                              true,              /* is local */
+                              0,                 /* inhcount */
+                              false,             /* connoinherit */
+                              false,             /* conperiod */
+                              false);            /* is_internal */
+
+    if !constrAddr.is_null() {
+        ObjectAddressSet(constrAddr, ConstraintRelationId, ccoid);
+    }
+}
 
 /* =========================================================================
  * Part 2: DefineType, RemoveTypeById

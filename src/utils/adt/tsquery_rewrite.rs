@@ -45,7 +45,18 @@ use crate::utils::adt::tsquery_util::{
 };
 use crate::utils::misc::stack_depth::check_stack_depth;
 
-use crate::{PG_FREE_IF_COPY, PG_GETARG_TSQUERY, PG_GETARG_TSQUERY_COPY, PG_RETURN_POINTER};
+use crate::access::common::tupdesc::TupleDescData;
+use crate::catalog::pg_type_d::TSQUERYOID;
+use crate::executor::spi::{
+    SPIPlanPtr, SPI_connect, SPI_cursor_close, SPI_cursor_fetch, SPI_cursor_open, SPI_finish,
+    SPI_freeplan, SPI_freetuptable, SPI_getbinval, SPI_gettypeid, SPI_prepare, SPI_processed,
+    SPI_tuptable, Portal,
+};
+use crate::utils::adt::ts_type::DatumGetTSQuery;
+use crate::utils::adt::varlena::text_to_cstring;
+
+use crate::{PG_FREE_IF_COPY, PG_GETARG_TEXT_PP, PG_GETARG_TSQUERY, PG_GETARG_TSQUERY_COPY,
+    PG_RETURN_POINTER};
 
 use core::ffi::{c_int, c_void};
 
@@ -316,27 +327,163 @@ pub unsafe fn findsubquery(
 /*
  * ts_rewrite(query tsquery, in text) -- SPI-driven form.
  *
- * STUB: the body is entirely driven by executor/spi.h (SPI_connect, SPI_prepare,
- * SPI_cursor_open, SPI_cursor_fetch, SPI_getbinval, SPI_gettypeid, SPI_freetuptable,
- * SPI_finish, ...), none of which is ported yet.  The per-row substitution it would
- * perform is identical to findsubquery (which is REAL above).
- *
- * TODO(pg-port): once executor/spi.rs exists, port the SPI cursor loop:
- *   - text_to_cstring(in); SPI_connect(); SPI_prepare(buf, 0, NULL);
- *   - SPI_cursor_open + repeated SPI_cursor_fetch(portal, true, 100);
- *   - validate tupdesc->natts == 2 and both columns are TSQUERYOID;
- *   - for each row, SPI_getbinval cols 1,2 -> (qtex, qtsubs), build QTNodes via QT2QTN,
- *     QTNTernary+QTNSort, then tree = findsubquery(tree, qex, qsubs, NULL), re-prep tree
- *     via QTNClearFlags(QTN_NOCHANGE)+QTNTernary+QTNSort for the next pass;
- *   - finally QTNBinary + QTN2QT, or SET_VARSIZE(rewritten, HDRSIZETQ)+size=0 if empty.
+ * Runs the SQL text in "in" as a cursor returning (target tsquery, sample tsquery)
+ * rows, and for each row substitutes "sample" for "target" throughout "query" via
+ * findsubquery.  (This corresponds to the C function tsquery_rewrite_query; see the
+ * note at the top of this file on the swapped C function-name <-> SQL-binding mapping.)
  */
-#[allow(unused_variables)]
 pub unsafe fn tsquery_rewrite(fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum {
     let query: TSQuery = PG_GETARG_TSQUERY_COPY!(fcinfo, 0);
-    // let in_: *mut text = PG_GETARG_TEXT_PP!(fcinfo, 1);
-    // executor/spi.h driven; see TODO above.
-    let _ = query;
-    unimplemented!("tsquery_rewrite: SPI-driven (executor/spi.h) not yet ported");
+    let in_: *mut text = PG_GETARG_TEXT_PP!(fcinfo, 1);
+    let mut rewritten: TSQuery = query;
+    let outercontext: MemoryContext = CurrentMemoryContext;
+    let mut tree: *mut QTNode;
+    let buf: *mut c_char;
+    let plan: SPIPlanPtr;
+    let portal: Portal;
+    let mut isnull: bool = false;
+
+    if (*query).size == 0 {
+        PG_FREE_IF_COPY!(fcinfo, in_, 1);
+        PG_RETURN_POINTER!(rewritten);
+    }
+
+    tree = QT2QTN(GETQUERY(query), GETOPERAND(query));
+    QTNTernary(tree);
+    QTNSort(tree);
+
+    buf = text_to_cstring(in_);
+
+    SPI_connect();
+
+    plan = SPI_prepare(buf, 0, null_mut());
+    if plan.is_null() {
+        elog!(
+            ERROR,
+            "SPI_prepare(\"{}\") failed",
+            std::ffi::CStr::from_ptr(buf).to_string_lossy()
+        );
+    }
+
+    portal = SPI_cursor_open(null_mut(), plan, null_mut(), null_mut(), true);
+    if portal.is_null() {
+        elog!(
+            ERROR,
+            "SPI_cursor_open(\"{}\") failed",
+            std::ffi::CStr::from_ptr(buf).to_string_lossy()
+        );
+    }
+
+    SPI_cursor_fetch(portal, true, 100);
+
+    if SPI_tuptable.is_null()
+        || (*(*SPI_tuptable).tupdesc.cast::<TupleDescData>()).natts != 2
+        || SPI_gettypeid((*SPI_tuptable).tupdesc, 1) != TSQUERYOID
+        || SPI_gettypeid((*SPI_tuptable).tupdesc, 2) != TSQUERYOID
+    {
+        ereport!(
+            ERROR,
+            errmsg!("ts_rewrite query must return two tsquery columns")
+        );
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+    }
+
+    while SPI_processed > 0 && !tree.is_null() {
+        let mut i: u64 = 0;
+
+        while i < SPI_processed && !tree.is_null() {
+            let qdata: Datum = SPI_getbinval(
+                *(*SPI_tuptable).vals.add(i as usize),
+                (*SPI_tuptable).tupdesc,
+                1,
+                &mut isnull,
+            );
+            let sdata: Datum;
+
+            if isnull {
+                i += 1;
+                continue;
+            }
+
+            sdata = SPI_getbinval(
+                *(*SPI_tuptable).vals.add(i as usize),
+                (*SPI_tuptable).tupdesc,
+                2,
+                &mut isnull,
+            );
+
+            if !isnull {
+                let qtex: TSQuery = DatumGetTSQuery(qdata);
+                let qtsubs: TSQuery = DatumGetTSQuery(sdata);
+                let qex: *mut QTNode;
+                let mut qsubs: *mut QTNode = null_mut();
+
+                if (*qtex).size == 0 {
+                    if qtex != DatumGetPointer(qdata) as TSQuery {
+                        pfree(qtex as *mut c_void);
+                    }
+                    if qtsubs != DatumGetPointer(sdata) as TSQuery {
+                        pfree(qtsubs as *mut c_void);
+                    }
+                    i += 1;
+                    continue;
+                }
+
+                qex = QT2QTN(GETQUERY(qtex), GETOPERAND(qtex));
+
+                QTNTernary(qex);
+                QTNSort(qex);
+
+                if (*qtsubs).size != 0 {
+                    qsubs = QT2QTN(GETQUERY(qtsubs), GETOPERAND(qtsubs));
+                }
+
+                let oldcxt = MemoryContextSwitchTo(outercontext);
+                tree = findsubquery(tree, qex, qsubs, null_mut());
+                MemoryContextSwitchTo(oldcxt);
+
+                QTNFree(qex);
+                if qtex != DatumGetPointer(qdata) as TSQuery {
+                    pfree(qtex as *mut c_void);
+                }
+                QTNFree(qsubs);
+                if qtsubs != DatumGetPointer(sdata) as TSQuery {
+                    pfree(qtsubs as *mut c_void);
+                }
+
+                if !tree.is_null() {
+                    /* ready the tree for another pass */
+                    QTNClearFlags(tree, QTN_NOCHANGE);
+                    QTNTernary(tree);
+                    QTNSort(tree);
+                }
+            }
+
+            i += 1;
+        }
+
+        SPI_freetuptable(SPI_tuptable);
+        SPI_cursor_fetch(portal, true, 100);
+    }
+
+    SPI_freetuptable(SPI_tuptable);
+    SPI_cursor_close(portal);
+    SPI_freeplan(plan);
+    SPI_finish();
+
+    if !tree.is_null() {
+        QTNBinary(tree);
+        rewritten = QTN2QT(tree);
+        QTNFree(tree);
+        PG_FREE_IF_COPY!(fcinfo, query, 0);
+    } else {
+        SET_VARSIZE(rewritten as *mut c_char, HDRSIZETQ() as i32);
+        (*rewritten).size = 0;
+    }
+
+    pfree(buf as *mut c_void);
+    PG_FREE_IF_COPY!(fcinfo, in_, 1);
+    PG_RETURN_POINTER!(rewritten);
 }
 
 /*

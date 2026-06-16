@@ -57,6 +57,7 @@ use crate::{
 };
 use crate::catalog::pg_type_d::OIDOID; // catalog/pg_type.h
 use crate::common::int::pg_cmp_u32; // common/int.h
+use crate::utils::adt::arrayfuncs::array_send; // utils/array.c (array_send)
 use crate::lib::stringinfo::{StringInfo, StringInfoData}; // libpq/pqformat.h passes a StringInfo
 use crate::libpq::pqformat::{pq_begintypsend, pq_endtypsend, pq_getmsgint, pq_sendint32}; // libpq/pqformat.h
 use crate::nodes::nodes::{nodeTag, Node, NodeTag}; // nodes/value.h, nodes.h
@@ -342,12 +343,8 @@ pub unsafe fn oidvectorrecv(fcinfo: FunctionCallInfo) -> Datum {
  *		oidvectorsend			- converts oidvector to binary format
  */
 pub unsafe fn oidvectorsend(fcinfo: FunctionCallInfo) -> Datum {
-    // C body:
-    //   /* We don't do check_valid_oidvector, since array_send won't care */
-    //   return array_send(fcinfo);
-    // TODO(pg-port): utils/array.c (array_send) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("oidvectorsend: utils/array.c (array_send) not yet translated")
+    /* We don't do check_valid_oidvector, since array_send won't care */
+    array_send(fcinfo)
 }
 
 /*

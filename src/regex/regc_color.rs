@@ -1194,5 +1194,26 @@ pub unsafe fn colorcomplement(
     }
 }
 
-// #ifdef REG_DEBUG -- dumpcolors() and dumpchr() are only compiled with
-// REG_DEBUG, which is undefined here, so they are omitted entirely.
+// #ifdef REG_DEBUG
+// dumpcolors() and dumpchr() are only compiled when REG_DEBUG is defined,
+// which this port never does.  They are translated as no-op bodies to match
+// the sibling REG_DEBUG dump functions in regc_nfa.rs and regcomp.rs.
+
+/*
+ * dumpcolors - debugging output
+ */
+unsafe fn dumpcolors(cm: *mut colormap, f: *mut c_void /* FILE *; debug output */) {
+    let _ = (cm, f);
+    // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
+}
+
+/*
+ * dumpchr - print a chr
+ *
+ * Kind of char-centric but works well enough for debug use.
+ */
+unsafe fn dumpchr(c: chr, f: *mut c_void /* FILE *; debug output */) {
+    let _ = (c, f);
+    // #ifdef REG_DEBUG -- body compiled out when REG_DEBUG is undefined.
+}
+// #endif /* REG_DEBUG */

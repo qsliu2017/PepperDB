@@ -661,6 +661,220 @@ unsafe fn dsm_impl_sysv(
 }
 
 /*
+ * Operating system primitives to support Windows shared memory.
+ *
+ * Windows shared memory implementation is done using file mapping
+ * which can be backed by either physical file or system paging file.
+ * Current implementation uses system paging file as other effects
+ * like performance are not clear for physical file and it is used in similar
+ * way for main shared memory in windows (i.e. it is backed by system paging
+ * file).
+ */
+#[cfg(windows)]
+unsafe fn dsm_impl_windows(
+    op: dsm_op,
+    handle: dsm_handle,
+    request_size: Size,
+    impl_private: *mut *mut c_void,
+    mapped_address: *mut *mut c_void,
+    mapped_size: *mut Size,
+    elevel: c_int,
+) -> bool {
+    let address: *mut c_char;
+    let hmap: HANDLE;
+    let mut name = [0 as c_char; 64];
+    let mut info: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
+
+    /*
+     * Storing the shared memory segment in the Global\ namespace, can allow
+     * any process running in any session to access that file mapping object
+     * provided that the caller has the required access rights. But to avoid
+     * issues faced in main shared memory, we are using the naming convention
+     * similar to main shared memory. We can change here once issue mentioned
+     * in GetSharedMemName is resolved.
+     */
+    snprintf(
+        name.as_mut_ptr(),
+        64,
+        c"%s.%u".as_ptr(),
+        SEGMENT_NAME_PREFIX.as_ptr() as *const c_char,
+        handle,
+    );
+
+    /*
+     * Handle teardown cases.  Since Windows automatically destroys the object
+     * when no references remain, we can treat it the same as detach.
+     */
+    if op == DSM_OP_DETACH || op == DSM_OP_DESTROY {
+        if !(*mapped_address).is_null() && UnmapViewOfFile(*mapped_address) == 0 {
+            _dosmaperr(GetLastError());
+            ereport!(
+                elevel,
+                errmsg!(
+                    "could not unmap shared memory segment \"{}\": %m",
+                    std::ffi::CStr::from_ptr(name.as_ptr()).to_string_lossy()
+                )
+                // C also: errcode_for_dynamic_shared_memory()
+            );
+            return false;
+        }
+        if !(*impl_private).is_null() && CloseHandle(*impl_private) == 0 {
+            _dosmaperr(GetLastError());
+            ereport!(
+                elevel,
+                errmsg!(
+                    "could not remove shared memory segment \"{}\": %m",
+                    std::ffi::CStr::from_ptr(name.as_ptr()).to_string_lossy()
+                )
+                // C also: errcode_for_dynamic_shared_memory()
+            );
+            return false;
+        }
+
+        *impl_private = std::ptr::null_mut();
+        *mapped_address = std::ptr::null_mut();
+        *mapped_size = 0;
+        return true;
+    }
+
+    /* Create new segment or open an existing one for attach. */
+    if op == DSM_OP_CREATE {
+        let size_high: DWORD;
+        let size_low: DWORD;
+        let errcode: DWORD;
+
+        /* Shifts >= the width of the type are undefined. */
+        #[cfg(target_pointer_width = "64")]
+        {
+            size_high = (request_size >> 32) as DWORD;
+        }
+        #[cfg(not(target_pointer_width = "64"))]
+        {
+            size_high = 0;
+        }
+        size_low = request_size as DWORD;
+
+        /* CreateFileMapping might not clear the error code on success */
+        SetLastError(0);
+
+        hmap = CreateFileMapping(
+            INVALID_HANDLE_VALUE, /* Use the pagefile */
+            std::ptr::null_mut(), /* Default security attrs */
+            PAGE_READWRITE,       /* Memory is read/write */
+            size_high,            /* Upper 32 bits of size */
+            size_low,             /* Lower 32 bits of size */
+            name.as_ptr(),
+        );
+
+        errcode = GetLastError();
+        if errcode == ERROR_ALREADY_EXISTS || errcode == ERROR_ACCESS_DENIED {
+            /*
+             * On Windows, when the segment already exists, a handle for the
+             * existing segment is returned.  We must close it before
+             * returning.  However, if the existing segment is created by a
+             * service, then it returns ERROR_ACCESS_DENIED. We don't do
+             * _dosmaperr here, so errno won't be modified.
+             */
+            if !hmap.is_null() {
+                CloseHandle(hmap);
+            }
+            return false;
+        }
+
+        if hmap.is_null() {
+            _dosmaperr(errcode);
+            ereport!(
+                elevel,
+                errmsg!(
+                    "could not create shared memory segment \"{}\": %m",
+                    std::ffi::CStr::from_ptr(name.as_ptr()).to_string_lossy()
+                )
+                // C also: errcode_for_dynamic_shared_memory()
+            );
+            return false;
+        }
+    } else {
+        hmap = OpenFileMapping(
+            FILE_MAP_WRITE | FILE_MAP_READ,
+            FALSE, /* do not inherit the name */
+            name.as_ptr(),
+        ); /* name of mapping object */
+        if hmap.is_null() {
+            _dosmaperr(GetLastError());
+            ereport!(
+                elevel,
+                errmsg!(
+                    "could not open shared memory segment \"{}\": %m",
+                    std::ffi::CStr::from_ptr(name.as_ptr()).to_string_lossy()
+                )
+                // C also: errcode_for_dynamic_shared_memory()
+            );
+            return false;
+        }
+    }
+
+    /* Map it. */
+    address = MapViewOfFile(hmap, FILE_MAP_WRITE | FILE_MAP_READ, 0, 0, 0) as *mut c_char;
+    if address.is_null() {
+        let save_errno: c_int;
+
+        _dosmaperr(GetLastError());
+        /* Back out what's already been done. */
+        save_errno = errno_get();
+        CloseHandle(hmap);
+        errno_set(save_errno);
+
+        ereport!(
+            elevel,
+            errmsg!(
+                "could not map shared memory segment \"{}\": %m",
+                std::ffi::CStr::from_ptr(name.as_ptr()).to_string_lossy()
+            )
+            // C also: errcode_for_dynamic_shared_memory()
+        );
+        return false;
+    }
+
+    /*
+     * VirtualQuery gives size in page_size units, which is 4K for Windows. We
+     * need size only when we are attaching, but it's better to get the size
+     * when creating new segment to keep size consistent both for
+     * DSM_OP_CREATE and DSM_OP_ATTACH.
+     */
+    if VirtualQuery(
+        address as *mut c_void,
+        &mut info,
+        std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+    ) == 0
+    {
+        let save_errno: c_int;
+
+        _dosmaperr(GetLastError());
+        /* Back out what's already been done. */
+        save_errno = errno_get();
+        UnmapViewOfFile(address as *mut c_void);
+        CloseHandle(hmap);
+        errno_set(save_errno);
+
+        ereport!(
+            elevel,
+            errmsg!(
+                "could not stat shared memory segment \"{}\": %m",
+                std::ffi::CStr::from_ptr(name.as_ptr()).to_string_lossy()
+            )
+            // C also: errcode_for_dynamic_shared_memory()
+        );
+        return false;
+    }
+
+    *mapped_address = address as *mut c_void;
+    *mapped_size = info.RegionSize;
+    *impl_private = hmap;
+
+    true
+}
+
+/*
  * Operating system primitives to support mmap-based shared memory.
  *
  * Calling this "shared memory" is somewhat of a misnomer, because what
@@ -896,6 +1110,90 @@ unsafe fn errcode(_sqlerrcode: c_int) -> c_int {
 
 unsafe fn errcode_for_file_access() -> c_int {
     unimplemented!() // TODO: utils/error/elog.c
+}
+
+// ----------------------------------------------------------------
+// Win32-only stubs for the dsm_impl_windows path (port/win32_port.h etc.).
+// These are only referenced under #[cfg(windows)].
+// ----------------------------------------------------------------
+
+#[cfg(windows)]
+#[allow(non_camel_case_types)]
+type HANDLE = *mut c_void;
+#[cfg(windows)]
+#[allow(non_camel_case_types)]
+type DWORD = u32;
+#[cfg(windows)]
+#[allow(non_camel_case_types)]
+type BOOL = c_int;
+#[cfg(windows)]
+#[allow(non_camel_case_types)]
+type LPSECURITY_ATTRIBUTES = *mut c_void;
+#[cfg(windows)]
+#[allow(non_camel_case_types)]
+type SIZE_T = usize;
+
+#[cfg(windows)]
+#[repr(C)]
+#[allow(non_snake_case)]
+struct MEMORY_BASIC_INFORMATION {
+    BaseAddress: *mut c_void,
+    AllocationBase: *mut c_void,
+    AllocationProtect: DWORD,
+    RegionSize: SIZE_T,
+    State: DWORD,
+    Protect: DWORD,
+    Type: DWORD,
+}
+
+#[cfg(windows)]
+const INVALID_HANDLE_VALUE: HANDLE = usize::MAX as HANDLE;
+#[cfg(windows)]
+const FALSE: BOOL = 0;
+#[cfg(windows)]
+const PAGE_READWRITE: DWORD = 0x04;
+#[cfg(windows)]
+const FILE_MAP_WRITE: DWORD = 0x0002;
+#[cfg(windows)]
+const FILE_MAP_READ: DWORD = 0x0004;
+#[cfg(windows)]
+const ERROR_ALREADY_EXISTS: DWORD = 183;
+#[cfg(windows)]
+const ERROR_ACCESS_DENIED: DWORD = 5;
+
+#[cfg(windows)]
+extern "C" {
+    fn CreateFileMapping(
+        hFile: HANDLE,
+        lpAttributes: LPSECURITY_ATTRIBUTES,
+        flProtect: DWORD,
+        dwMaximumSizeHigh: DWORD,
+        dwMaximumSizeLow: DWORD,
+        lpName: *const c_char,
+    ) -> HANDLE;
+    fn OpenFileMapping(dwDesiredAccess: DWORD, bInheritHandle: BOOL, lpName: *const c_char)
+        -> HANDLE;
+    fn MapViewOfFile(
+        hFileMappingObject: HANDLE,
+        dwDesiredAccess: DWORD,
+        dwFileOffsetHigh: DWORD,
+        dwFileOffsetLow: DWORD,
+        dwNumberOfBytesToMap: SIZE_T,
+    ) -> *mut c_void;
+    fn UnmapViewOfFile(lpBaseAddress: *mut c_void) -> BOOL;
+    fn CloseHandle(hObject: HANDLE) -> BOOL;
+    fn GetLastError() -> DWORD;
+    fn SetLastError(dwErrCode: DWORD);
+    fn VirtualQuery(
+        lpAddress: *mut c_void,
+        lpBuffer: *mut MEMORY_BASIC_INFORMATION,
+        dwLength: SIZE_T,
+    ) -> SIZE_T;
+}
+
+#[cfg(windows)]
+unsafe fn _dosmaperr(_e: DWORD) {
+    // TODO(pg-port): port/win32error.c maps a Windows error code to errno.
 }
 
 #[inline]

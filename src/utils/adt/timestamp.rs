@@ -2781,6 +2781,15 @@ pub unsafe fn timestamp_cmp(fcinfo: FunctionCallInfo) -> Datum {
 
 /* note: this comparator is used for timestamptz also (SIZEOF_DATUM >= 8 on our target) */
 
+/* note: this is used for timestamptz also */
+#[cfg(target_pointer_width = "32")]
+unsafe extern "C" fn timestamp_fastcmp(x: Datum, y: Datum, _ssup: *mut SortSupportData) -> c_int {
+    let a: Timestamp = DatumGetTimestamp(x);
+    let b: Timestamp = DatumGetTimestamp(y);
+
+    timestamp_cmp_internal(a, b) as c_int
+}
+
 pub unsafe fn timestamp_sortsupport(fcinfo: FunctionCallInfo) -> Datum {
     let ssup = PG_GETARG_POINTER!(fcinfo, 0) as SortSupport;
 
@@ -4939,17 +4948,2085 @@ pub unsafe fn timestamptz_age(fcinfo: FunctionCallInfo) -> Datum {
     PG_RETURN_INTERVAL_P!(result);
 }
 
-// TODO(pg-port): the following tail conversion fns were cut off when the
-// translating agent hit its quota; stubbed to keep the module compiling.
+/* timestamp_bin()
+ * Bin timestamp into specified interval using specified origin.
+ */
+pub unsafe fn timestamp_bin(fcinfo: FunctionCallInfo) -> Datum {
+    let stride = PG_GETARG_INTERVAL_P!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMP!(fcinfo, 1);
+    let origin = PG_GETARG_TIMESTAMP!(fcinfo, 2);
+    let mut result: Timestamp;
+    let mut stride_usecs: Timestamp = 0;
+    let mut tm_diff: Timestamp = 0;
+    let tm_modulo: Timestamp;
+    let tm_delta: Timestamp;
+
+    if TIMESTAMP_NOT_FINITE(timestamp) {
+        PG_RETURN_TIMESTAMP!(timestamp);
+    }
+
+    if TIMESTAMP_NOT_FINITE(origin) {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("origin out of range"));
+    }
+
+    if INTERVAL_NOT_FINITE(stride) {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("timestamps cannot be binned into infinite intervals"));
+    }
+
+    if (*stride).month != 0 {
+        /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+        ereport!(ERROR, errmsg!("timestamps cannot be binned into intervals containing months or years"));
+    }
+
+    if pg_mul_s64_overflow((*stride).day as int64, USECS_PER_DAY, &mut stride_usecs)
+        || pg_add_s64_overflow(stride_usecs, (*stride).time, &mut stride_usecs)
+    {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("interval out of range"));
+    }
+
+    if stride_usecs <= 0 {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("stride must be greater than zero"));
+    }
+
+    if pg_sub_s64_overflow(timestamp, origin, &mut tm_diff) {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("interval out of range"));
+    }
+
+    /* These calculations cannot overflow */
+    tm_modulo = tm_diff % stride_usecs;
+    tm_delta = tm_diff - tm_modulo;
+    result = origin + tm_delta;
+
+    /*
+     * We want to round towards -infinity, not 0, when tm_diff is negative and
+     * not a multiple of stride_usecs.  This adjustment *can* cause overflow,
+     * since the result might now be out of the range origin .. timestamp.
+     */
+    if tm_modulo < 0 {
+        if pg_sub_s64_overflow(result, stride_usecs, &mut result) || !IS_VALID_TIMESTAMP(result) {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+    }
+
+    PG_RETURN_TIMESTAMP!(result);
+}
+
+/* timestamp_trunc()
+ * Truncate timestamp to specified units.
+ */
+pub unsafe fn timestamp_trunc(fcinfo: FunctionCallInfo) -> Datum {
+    let units = PG_GETARG_TEXT_PP!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMP!(fcinfo, 1);
+    let mut result: Timestamp = 0;
+    let r#type: c_int;
+    let mut val: c_int = 0;
+    let lowunits: *mut c_char;
+    let mut fsec: fsec_t = 0;
+    let mut tt: pg_tm = std::mem::zeroed();
+    let tm = &mut tt as *mut pg_tm;
+
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+
+    r#type = DecodeUnits(0, lowunits, &mut val);
+
+    if r#type == UNITS {
+        if TIMESTAMP_NOT_FINITE(timestamp) {
+            /*
+             * Errors thrown here for invalid units should exactly match those
+             * below, else there will be unexpected discrepancies between
+             * finite- and infinite-input cases.
+             */
+            match val {
+                DTK_WEEK | DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER
+                | DTK_MONTH | DTK_DAY | DTK_HOUR | DTK_MINUTE | DTK_SECOND | DTK_MILLISEC
+                | DTK_MICROSEC => {
+                    PG_RETURN_TIMESTAMP!(timestamp);
+                }
+                _ => {
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+                    ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                        std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                        std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPOID)).to_string_lossy()));
+                }
+            }
+        }
+
+        if timestamp2tm(timestamp, null_mut(), tm, &mut fsec, null_mut(), null_mut()) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+
+        /* fall-through cascade as in C */
+        let mut matched = true;
+        if val == DTK_WEEK {
+            let mut woy: c_int = date2isoweek((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday);
+            /*
+             * If it is week 52/53 and the month is January, then the week
+             * must belong to the previous year. Also, some December dates
+             * belong to the next year.
+             */
+            if woy >= 52 && (*tm).tm_mon == 1 {
+                (*tm).tm_year -= 1;
+            }
+            if woy <= 1 && (*tm).tm_mon == MONTHS_PER_YEAR {
+                (*tm).tm_year += 1;
+            }
+            isoweek2date(woy, &mut (*tm).tm_year, &mut (*tm).tm_mon, &mut (*tm).tm_mday);
+            let _ = &mut woy;
+            (*tm).tm_hour = 0;
+            (*tm).tm_min = 0;
+            (*tm).tm_sec = 0;
+            fsec = 0;
+        } else if val == DTK_MICROSEC {
+            /* nothing */
+        } else if val == DTK_MILLISEC {
+            fsec = (fsec / 1000) * 1000;
+        } else if val >= DTK_SECOND
+            && matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER
+                | DTK_MONTH | DTK_DAY | DTK_HOUR | DTK_MINUTE | DTK_SECOND)
+        {
+            if val == DTK_MILLENNIUM {
+                /* see comments in timestamptz_trunc */
+                if (*tm).tm_year > 0 {
+                    (*tm).tm_year = (((*tm).tm_year + 999) / 1000) * 1000 - 999;
+                } else {
+                    (*tm).tm_year = -((999 - ((*tm).tm_year - 1)) / 1000) * 1000 + 1;
+                }
+            }
+            if val == DTK_MILLENNIUM || val == DTK_CENTURY {
+                /* see comments in timestamptz_trunc */
+                if (*tm).tm_year > 0 {
+                    (*tm).tm_year = (((*tm).tm_year + 99) / 100) * 100 - 99;
+                } else {
+                    (*tm).tm_year = -((99 - ((*tm).tm_year - 1)) / 100) * 100 + 1;
+                }
+            }
+            if val == DTK_DECADE {
+                /* see comments in timestamptz_trunc */
+                if val != DTK_MILLENNIUM && val != DTK_CENTURY {
+                    if (*tm).tm_year > 0 {
+                        (*tm).tm_year = ((*tm).tm_year / 10) * 10;
+                    } else {
+                        (*tm).tm_year = -((8 - ((*tm).tm_year - 1)) / 10) * 10;
+                    }
+                }
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR) {
+                (*tm).tm_mon = 1;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER) {
+                (*tm).tm_mon = (3 * (((*tm).tm_mon - 1) / 3)) + 1;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH) {
+                (*tm).tm_mday = 1;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH | DTK_DAY) {
+                (*tm).tm_hour = 0;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH | DTK_DAY | DTK_HOUR) {
+                (*tm).tm_min = 0;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH | DTK_DAY | DTK_HOUR | DTK_MINUTE) {
+                (*tm).tm_sec = 0;
+            }
+            fsec = 0;
+        } else {
+            matched = false;
+        }
+
+        if !matched {
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+            ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPOID)).to_string_lossy()));
+        }
+
+        if tm2timestamp(tm, fsec, null_mut(), &mut result) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+    } else {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("unit \"{}\" not recognized for type {}",
+            std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+            std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPOID)).to_string_lossy()));
+    }
+
+    PG_RETURN_TIMESTAMP!(result);
+}
+
+/* timestamptz_bin()
+ * Bin timestamptz into specified interval using specified origin.
+ */
+pub unsafe fn timestamptz_bin(fcinfo: FunctionCallInfo) -> Datum {
+    let stride = PG_GETARG_INTERVAL_P!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMPTZ!(fcinfo, 1);
+    let origin = PG_GETARG_TIMESTAMPTZ!(fcinfo, 2);
+    let mut result: TimestampTz;
+    let mut stride_usecs: TimestampTz = 0;
+    let mut tm_diff: TimestampTz = 0;
+    let tm_modulo: TimestampTz;
+    let tm_delta: TimestampTz;
+
+    if TIMESTAMP_NOT_FINITE(timestamp) {
+        PG_RETURN_TIMESTAMPTZ!(timestamp);
+    }
+
+    if TIMESTAMP_NOT_FINITE(origin) {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("origin out of range"));
+    }
+
+    if INTERVAL_NOT_FINITE(stride) {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("timestamps cannot be binned into infinite intervals"));
+    }
+
+    if (*stride).month != 0 {
+        /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+        ereport!(ERROR, errmsg!("timestamps cannot be binned into intervals containing months or years"));
+    }
+
+    if pg_mul_s64_overflow((*stride).day as int64, USECS_PER_DAY, &mut stride_usecs)
+        || pg_add_s64_overflow(stride_usecs, (*stride).time, &mut stride_usecs)
+    {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("interval out of range"));
+    }
+
+    if stride_usecs <= 0 {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("stride must be greater than zero"));
+    }
+
+    if pg_sub_s64_overflow(timestamp, origin, &mut tm_diff) {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("interval out of range"));
+    }
+
+    /* These calculations cannot overflow */
+    tm_modulo = tm_diff % stride_usecs;
+    tm_delta = tm_diff - tm_modulo;
+    result = origin + tm_delta;
+
+    /*
+     * We want to round towards -infinity, not 0, when tm_diff is negative and
+     * not a multiple of stride_usecs.  This adjustment *can* cause overflow,
+     * since the result might now be out of the range origin .. timestamp.
+     */
+    if tm_modulo < 0 {
+        if pg_sub_s64_overflow(result, stride_usecs, &mut result) || !IS_VALID_TIMESTAMP(result) {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+    }
+
+    PG_RETURN_TIMESTAMPTZ!(result);
+}
+
+/*
+ * Common code for timestamptz_trunc() and timestamptz_trunc_zone().
+ *
+ * tzp identifies the zone to truncate with respect to.  We assume
+ * infinite timestamps have already been rejected.
+ */
+unsafe fn timestamptz_trunc_internal(units: *mut text, timestamp: TimestampTz, tzp: *mut pg_tz) -> TimestampTz {
+    let mut result: TimestampTz = 0;
+    let mut tz: c_int = 0;
+    let r#type: c_int;
+    let mut val: c_int = 0;
+    let mut redotz: bool = false;
+    let lowunits: *mut c_char;
+    let mut fsec: fsec_t = 0;
+    let mut tt: pg_tm = std::mem::zeroed();
+    let tm = &mut tt as *mut pg_tm;
+
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+
+    r#type = DecodeUnits(0, lowunits, &mut val);
+
+    if r#type == UNITS {
+        if TIMESTAMP_NOT_FINITE(timestamp) {
+            /*
+             * Errors thrown here for invalid units should exactly match those
+             * below, else there will be unexpected discrepancies between
+             * finite- and infinite-input cases.
+             */
+            match val {
+                DTK_WEEK | DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER
+                | DTK_MONTH | DTK_DAY | DTK_HOUR | DTK_MINUTE | DTK_SECOND | DTK_MILLISEC
+                | DTK_MICROSEC => {
+                    return timestamp;
+                }
+                _ => {
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+                    ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                        std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                        std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPTZOID)).to_string_lossy()));
+                }
+            }
+        }
+
+        if timestamp2tm(timestamp, &mut tz, tm, &mut fsec, null_mut(), tzp) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+
+        let mut matched = true;
+        if val == DTK_WEEK {
+            let woy: c_int = date2isoweek((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday);
+            /*
+             * If it is week 52/53 and the month is January, then the week
+             * must belong to the previous year. Also, some December dates
+             * belong to the next year.
+             */
+            if woy >= 52 && (*tm).tm_mon == 1 {
+                (*tm).tm_year -= 1;
+            }
+            if woy <= 1 && (*tm).tm_mon == MONTHS_PER_YEAR {
+                (*tm).tm_year += 1;
+            }
+            isoweek2date(woy, &mut (*tm).tm_year, &mut (*tm).tm_mon, &mut (*tm).tm_mday);
+            (*tm).tm_hour = 0;
+            (*tm).tm_min = 0;
+            (*tm).tm_sec = 0;
+            fsec = 0;
+            redotz = true;
+        } else if val == DTK_MICROSEC {
+            /* nothing */
+        } else if val == DTK_MILLISEC {
+            fsec = (fsec / 1000) * 1000;
+        } else if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER
+            | DTK_MONTH | DTK_DAY | DTK_HOUR | DTK_MINUTE | DTK_SECOND)
+        {
+            if val == DTK_MILLENNIUM {
+                /*
+                 * truncating to the millennium? what is this supposed to
+                 * mean? let us put the first year of the millennium... i.e.
+                 * -1000, 1, 1001, 2001...
+                 */
+                if (*tm).tm_year > 0 {
+                    (*tm).tm_year = (((*tm).tm_year + 999) / 1000) * 1000 - 999;
+                } else {
+                    (*tm).tm_year = -((999 - ((*tm).tm_year - 1)) / 1000) * 1000 + 1;
+                }
+            }
+            if val == DTK_MILLENNIUM || val == DTK_CENTURY {
+                /* truncating to the century? as above: -100, 1, 101... */
+                if (*tm).tm_year > 0 {
+                    (*tm).tm_year = (((*tm).tm_year + 99) / 100) * 100 - 99;
+                } else {
+                    (*tm).tm_year = -((99 - ((*tm).tm_year - 1)) / 100) * 100 + 1;
+                }
+            }
+            if val == DTK_DECADE {
+                /*
+                 * truncating to the decade? first year of the decade. must
+                 * not be applied if year was truncated before!
+                 */
+                if val != DTK_MILLENNIUM && val != DTK_CENTURY {
+                    if (*tm).tm_year > 0 {
+                        (*tm).tm_year = ((*tm).tm_year / 10) * 10;
+                    } else {
+                        (*tm).tm_year = -((8 - ((*tm).tm_year - 1)) / 10) * 10;
+                    }
+                }
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR) {
+                (*tm).tm_mon = 1;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER) {
+                (*tm).tm_mon = (3 * (((*tm).tm_mon - 1) / 3)) + 1;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH) {
+                (*tm).tm_mday = 1;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH | DTK_DAY) {
+                (*tm).tm_hour = 0;
+                redotz = true; /* for all cases >= DAY */
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH | DTK_DAY | DTK_HOUR) {
+                (*tm).tm_min = 0;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH | DTK_DAY | DTK_HOUR | DTK_MINUTE) {
+                (*tm).tm_sec = 0;
+            }
+            fsec = 0;
+        } else {
+            matched = false;
+        }
+
+        if !matched {
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+            ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPTZOID)).to_string_lossy()));
+        }
+
+        if redotz {
+            tz = DetermineTimeZoneOffset(tm, tzp);
+        }
+
+        if tm2timestamp(tm, fsec, &mut tz, &mut result) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+    } else {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("unit \"{}\" not recognized for type {}",
+            std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+            std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPTZOID)).to_string_lossy()));
+    }
+
+    result
+}
+
+/* timestamptz_trunc()
+ * Truncate timestamptz to specified units in session timezone.
+ */
+pub unsafe fn timestamptz_trunc(fcinfo: FunctionCallInfo) -> Datum {
+    let units = PG_GETARG_TEXT_PP!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMPTZ!(fcinfo, 1);
+    let result: TimestampTz = timestamptz_trunc_internal(units, timestamp, session_timezone);
+
+    PG_RETURN_TIMESTAMPTZ!(result);
+}
+
+/* timestamptz_trunc_zone()
+ * Truncate timestamptz to specified units in specified timezone.
+ */
+pub unsafe fn timestamptz_trunc_zone(fcinfo: FunctionCallInfo) -> Datum {
+    let units = PG_GETARG_TEXT_PP!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMPTZ!(fcinfo, 1);
+    let zone = PG_GETARG_TEXT_PP!(fcinfo, 2);
+    let result: TimestampTz;
+    let tzp: *mut pg_tz;
+
+    /*
+     * Look up the requested timezone.
+     */
+    tzp = lookup_timezone(zone);
+
+    result = timestamptz_trunc_internal(units, timestamp, tzp);
+
+    PG_RETURN_TIMESTAMPTZ!(result);
+}
+
+/* interval_trunc()
+ * Extract specified field from interval.
+ */
+pub unsafe fn interval_trunc(fcinfo: FunctionCallInfo) -> Datum {
+    let units = PG_GETARG_TEXT_PP!(fcinfo, 0);
+    let interval = PG_GETARG_INTERVAL_P!(fcinfo, 1);
+    let result: *mut Interval;
+    let r#type: c_int;
+    let mut val: c_int = 0;
+    let lowunits: *mut c_char;
+    let mut tt: pg_itm = std::mem::zeroed();
+    let tm = &mut tt as *mut pg_itm;
+
+    result = palloc(std::mem::size_of::<Interval>() as Size) as *mut Interval;
+
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+
+    r#type = DecodeUnits(0, lowunits, &mut val);
+
+    if r#type == UNITS {
+        if INTERVAL_NOT_FINITE(interval) {
+            /*
+             * Errors thrown here for invalid units should exactly match those
+             * below, else there will be unexpected discrepancies between
+             * finite- and infinite-input cases.
+             */
+            match val {
+                DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH
+                | DTK_DAY | DTK_HOUR | DTK_MINUTE | DTK_SECOND | DTK_MILLISEC | DTK_MICROSEC => {
+                    memcpy(result as *mut c_void, interval as *const c_void, std::mem::size_of::<Interval>() as Size);
+                    PG_RETURN_INTERVAL_P!(result);
+                }
+                _ => {
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED); */
+                    /* C also: (val == DTK_WEEK) ? errdetail("Months usually have fractional weeks.") : 0 */
+                    ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                        std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                        std::ffi::CStr::from_ptr(format_type_be(INTERVALOID)).to_string_lossy()));
+                }
+            }
+        }
+
+        interval2itm(*interval, tm);
+
+        let mut matched = true;
+        if val == DTK_MICROSEC {
+            /* nothing */
+        } else if val == DTK_MILLISEC {
+            (*tm).tm_usec = ((*tm).tm_usec / 1000) * 1000;
+        } else if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER
+            | DTK_MONTH | DTK_DAY | DTK_HOUR | DTK_MINUTE | DTK_SECOND)
+        {
+            if val == DTK_MILLENNIUM {
+                /* caution: C division may have negative remainder */
+                (*tm).tm_year = ((*tm).tm_year / 1000) * 1000;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY) {
+                /* caution: C division may have negative remainder */
+                (*tm).tm_year = ((*tm).tm_year / 100) * 100;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE) {
+                /* caution: C division may have negative remainder */
+                (*tm).tm_year = ((*tm).tm_year / 10) * 10;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR) {
+                (*tm).tm_mon = 0;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER) {
+                (*tm).tm_mon = 3 * ((*tm).tm_mon / 3);
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH) {
+                (*tm).tm_mday = 0;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH | DTK_DAY) {
+                (*tm).tm_hour = 0;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH | DTK_DAY | DTK_HOUR) {
+                (*tm).tm_min = 0;
+            }
+            if matches!(val, DTK_MILLENNIUM | DTK_CENTURY | DTK_DECADE | DTK_YEAR | DTK_QUARTER | DTK_MONTH | DTK_DAY | DTK_HOUR | DTK_MINUTE) {
+                (*tm).tm_sec = 0;
+            }
+            (*tm).tm_usec = 0;
+        } else {
+            matched = false;
+        }
+
+        if !matched {
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED); */
+            /* C also: (val == DTK_WEEK) ? errdetail("Months usually have fractional weeks.") : 0 */
+            ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                std::ffi::CStr::from_ptr(format_type_be(INTERVALOID)).to_string_lossy()));
+        }
+
+        if itm2interval(tm, result) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("interval out of range"));
+        }
+    } else {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("unit \"{}\" not recognized for type {}",
+            std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+            std::ffi::CStr::from_ptr(format_type_be(INTERVALOID)).to_string_lossy()));
+    }
+
+    PG_RETURN_INTERVAL_P!(result);
+}
+/* isoweek2j()
+ *
+ *	Return the Julian day which corresponds to the first day (Monday) of the given ISO 8601 year and week.
+ *	Julian days are used to convert between ISO week dates and Gregorian dates.
+ *
+ *	XXX: This function has integer overflow hazards, but restructuring it to
+ *	work with the soft-error handling that its callers do is likely more
+ *	trouble than it's worth.
+ */
+pub unsafe fn isoweek2j(year: c_int, week: c_int) -> c_int {
+    let day0: c_int;
+    let day4: c_int;
+
+    /* fourth day of current year */
+    day4 = date2j(year, 1, 4);
+
+    /* day0 == offset to first day of week (Monday) */
+    day0 = j2day(day4 - 1);
+
+    ((week - 1) * 7) + (day4 - day0)
+}
+
+/* isoweek2date()
+ * Convert ISO week of year number to date.
+ * The year field must be specified with the ISO year!
+ * karel 2000/08/07
+ */
+pub unsafe fn isoweek2date(woy: c_int, year: *mut c_int, mon: *mut c_int, mday: *mut c_int) {
+    j2date(isoweek2j(*year, woy), year, mon, mday);
+}
+
+/* isoweekdate2date()
+ *
+ *	Convert an ISO 8601 week date (ISO year, ISO week) into a Gregorian date.
+ *	Gregorian day of week sent so weekday strings can be supplied.
+ *	Populates year, mon, and mday with the correct Gregorian values.
+ *	year must be passed in as the ISO year.
+ */
+pub unsafe fn isoweekdate2date(
+    isoweek: c_int,
+    wday: c_int,
+    year: *mut c_int,
+    mon: *mut c_int,
+    mday: *mut c_int,
+) {
+    let mut jday: c_int;
+
+    jday = isoweek2j(*year, isoweek);
+    /* convert Gregorian week start (Sunday=1) to ISO week start (Monday=1) */
+    if wday > 1 {
+        jday += wday - 2;
+    } else {
+        jday += 6;
+    }
+    j2date(jday, year, mon, mday);
+}
+
+/* date2isoweek()
+ *
+ *	Returns ISO week number of year.
+ */
+pub unsafe fn date2isoweek(year: c_int, mon: c_int, mday: c_int) -> c_int {
+    let mut result: float8;
+    let mut day0: c_int;
+    let mut day4: c_int;
+    let dayn: c_int;
+
+    /* current day */
+    dayn = date2j(year, mon, mday);
+
+    /* fourth day of current year */
+    day4 = date2j(year, 1, 4);
+
+    /* day0 == offset to first day of week (Monday) */
+    day0 = j2day(day4 - 1);
+
+    /*
+     * We need the first week containing a Thursday, otherwise this day falls
+     * into the previous year for purposes of counting weeks
+     */
+    if dayn < day4 - day0 {
+        day4 = date2j(year - 1, 1, 4);
+
+        /* day0 == offset to first day of week (Monday) */
+        day0 = j2day(day4 - 1);
+    }
+
+    result = ((dayn - (day4 - day0)) / 7 + 1) as float8;
+
+    /*
+     * Sometimes the last few days in a year will fall into the first week of
+     * the next year, so check for this.
+     */
+    if result >= 52.0 {
+        day4 = date2j(year + 1, 1, 4);
+
+        /* day0 == offset to first day of week (Monday) */
+        day0 = j2day(day4 - 1);
+
+        if dayn >= day4 - day0 {
+            result = ((dayn - (day4 - day0)) / 7 + 1) as float8;
+        }
+    }
+
+    result as c_int
+}
+
+/* date2isoyear()
+ *
+ *	Returns ISO 8601 year number.
+ *	Note: zero or negative results follow the year-zero-exists convention.
+ */
+pub unsafe fn date2isoyear(mut year: c_int, mon: c_int, mday: c_int) -> c_int {
+    let result: float8;
+    let mut day0: c_int;
+    let mut day4: c_int;
+    let dayn: c_int;
+
+    /* current day */
+    dayn = date2j(year, mon, mday);
+
+    /* fourth day of current year */
+    day4 = date2j(year, 1, 4);
+
+    /* day0 == offset to first day of week (Monday) */
+    day0 = j2day(day4 - 1);
+
+    /*
+     * We need the first week containing a Thursday, otherwise this day falls
+     * into the previous year for purposes of counting weeks
+     */
+    if dayn < day4 - day0 {
+        day4 = date2j(year - 1, 1, 4);
+
+        /* day0 == offset to first day of week (Monday) */
+        day0 = j2day(day4 - 1);
+
+        year -= 1;
+    }
+
+    result = ((dayn - (day4 - day0)) / 7 + 1) as float8;
+
+    /*
+     * Sometimes the last few days in a year will fall into the first week of
+     * the next year, so check for this.
+     */
+    if result >= 52.0 {
+        day4 = date2j(year + 1, 1, 4);
+
+        /* day0 == offset to first day of week (Monday) */
+        day0 = j2day(day4 - 1);
+
+        if dayn >= day4 - day0 {
+            year += 1;
+        }
+    }
+
+    year
+}
+
+/* date2isoyearday()
+ *
+ *	Returns the ISO 8601 day-of-year, given a Gregorian year, month and day.
+ *	Possible return values are 1 through 371 (364 in non-leap years).
+ */
+pub unsafe fn date2isoyearday(year: c_int, mon: c_int, mday: c_int) -> c_int {
+    date2j(year, mon, mday) - isoweek2j(date2isoyear(year, mon, mday), 1) + 1
+}
+
+/*
+ * NonFiniteTimestampTzPart
+ *
+ *	Used by timestamp_part and timestamptz_part when extracting from infinite
+ *	timestamp[tz].  Returns +/-Infinity if that is the appropriate result,
+ *	otherwise returns zero (which should be taken as meaning to return NULL).
+ *
+ *	Errors thrown here for invalid units should exactly match those that
+ *	would be thrown in the calling functions, else there will be unexpected
+ *	discrepancies between finite- and infinite-input cases.
+ */
+unsafe fn NonFiniteTimestampTzPart(
+    r#type: c_int,
+    unit: c_int,
+    lowunits: *mut c_char,
+    isNegative: bool,
+    isTz: bool,
+) -> float8 {
+    if (r#type != UNITS) && (r#type != RESERV) {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("unit \"{}\" not recognized for type {}",
+            std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+            std::ffi::CStr::from_ptr(format_type_be(if isTz { TIMESTAMPTZOID } else { TIMESTAMPOID })).to_string_lossy()));
+    }
+
+    match unit {
+        /* Oscillating units */
+        DTK_MICROSEC | DTK_MILLISEC | DTK_SECOND | DTK_MINUTE | DTK_HOUR | DTK_DAY | DTK_MONTH
+        | DTK_QUARTER | DTK_WEEK | DTK_DOW | DTK_ISODOW | DTK_DOY | DTK_TZ | DTK_TZ_MINUTE
+        | DTK_TZ_HOUR => 0.0,
+
+        /* Monotonically-increasing units */
+        DTK_YEAR | DTK_DECADE | DTK_CENTURY | DTK_MILLENNIUM | DTK_JULIAN | DTK_ISOYEAR
+        | DTK_EPOCH => {
+            if isNegative {
+                -get_float8_infinity()
+            } else {
+                get_float8_infinity()
+            }
+        }
+
+        _ => {
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+            ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                std::ffi::CStr::from_ptr(format_type_be(if isTz { TIMESTAMPTZOID } else { TIMESTAMPOID })).to_string_lossy()));
+        }
+    }
+}
+
+/* timestamp_part() and extract_timestamp()
+ * Extract specified field from timestamp.
+ */
+unsafe fn timestamp_part_common(fcinfo: FunctionCallInfo, retnumeric: bool) -> Datum {
+    let units = PG_GETARG_TEXT_PP!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMP!(fcinfo, 1);
+    let mut intresult: int64 = 0;
+    let epoch: Timestamp;
+    let mut r#type: c_int;
+    let mut val: c_int = 0;
+    let lowunits: *mut c_char;
+    let mut fsec: fsec_t = 0;
+    let mut tt: pg_tm = std::mem::zeroed();
+    let tm = &mut tt as *mut pg_tm;
+
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+
+    r#type = DecodeUnits(0, lowunits, &mut val);
+    if r#type == UNKNOWN_FIELD {
+        r#type = DecodeSpecial(0, lowunits, &mut val);
+    }
+
+    if TIMESTAMP_NOT_FINITE(timestamp) {
+        let r: f64 = NonFiniteTimestampTzPart(r#type, val, lowunits, TIMESTAMP_IS_NOBEGIN(timestamp), false);
+
+        if r != 0.0 {
+            if retnumeric {
+                if r < 0.0 {
+                    return DirectFunctionCall3!(numeric_in,
+                        CStringGetDatum(c"-Infinity".as_ptr()),
+                        ObjectIdGetDatum(InvalidOid),
+                        Int32GetDatum(-1));
+                } else if r > 0.0 {
+                    return DirectFunctionCall3!(numeric_in,
+                        CStringGetDatum(c"Infinity".as_ptr()),
+                        ObjectIdGetDatum(InvalidOid),
+                        Int32GetDatum(-1));
+                }
+            } else {
+                PG_RETURN_FLOAT8!(r);
+            }
+        } else {
+            PG_RETURN_NULL!(fcinfo);
+        }
+    }
+
+    if r#type == UNITS {
+        if timestamp2tm(timestamp, null_mut(), tm, &mut fsec, null_mut(), null_mut()) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+
+        match val {
+            DTK_MICROSEC => {
+                intresult = (*tm).tm_sec as int64 * 1000000 + fsec as int64;
+            }
+            DTK_MILLISEC => {
+                if retnumeric {
+                    /*---
+                     * tm->tm_sec * 1000 + fsec / 1000
+                     * = (tm->tm_sec * 1'000'000 + fsec) / 1000
+                     */
+                    PG_RETURN_NUMERIC!(int64_div_fast_to_numeric((*tm).tm_sec as int64 * 1000000 + fsec as int64, 3));
+                } else {
+                    PG_RETURN_FLOAT8!((*tm).tm_sec as f64 * 1000.0 + fsec as f64 / 1000.0);
+                }
+            }
+            DTK_SECOND => {
+                if retnumeric {
+                    /*---
+                     * tm->tm_sec + fsec / 1'000'000
+                     * = (tm->tm_sec * 1'000'000 + fsec) / 1'000'000
+                     */
+                    PG_RETURN_NUMERIC!(int64_div_fast_to_numeric((*tm).tm_sec as int64 * 1000000 + fsec as int64, 6));
+                } else {
+                    PG_RETURN_FLOAT8!((*tm).tm_sec as f64 + fsec as f64 / 1000000.0);
+                }
+            }
+            DTK_MINUTE => {
+                intresult = (*tm).tm_min as int64;
+            }
+            DTK_HOUR => {
+                intresult = (*tm).tm_hour as int64;
+            }
+            DTK_DAY => {
+                intresult = (*tm).tm_mday as int64;
+            }
+            DTK_MONTH => {
+                intresult = (*tm).tm_mon as int64;
+            }
+            DTK_QUARTER => {
+                intresult = (((*tm).tm_mon - 1) / 3 + 1) as int64;
+            }
+            DTK_WEEK => {
+                intresult = date2isoweek((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday) as int64;
+            }
+            DTK_YEAR => {
+                if (*tm).tm_year > 0 {
+                    intresult = (*tm).tm_year as int64;
+                } else {
+                    /* there is no year 0, just 1 BC and 1 AD */
+                    intresult = ((*tm).tm_year - 1) as int64;
+                }
+            }
+            DTK_DECADE => {
+                /*
+                 * what is a decade wrt dates? let us assume that decade 199
+                 * is 1990 thru 1999... decade 0 starts on year 1 BC, and -1
+                 * is 11 BC thru 2 BC...
+                 */
+                if (*tm).tm_year >= 0 {
+                    intresult = ((*tm).tm_year / 10) as int64;
+                } else {
+                    intresult = -(((8 - ((*tm).tm_year - 1)) / 10) as int64);
+                }
+            }
+            DTK_CENTURY => {
+                /* ----
+                 * centuries AD, c>0: year in [ (c-1)* 100 + 1 : c*100 ]
+                 * centuries BC, c<0: year in [ c*100 : (c+1) * 100 - 1]
+                 * there is no number 0 century.
+                 * ----
+                 */
+                if (*tm).tm_year > 0 {
+                    intresult = (((*tm).tm_year + 99) / 100) as int64;
+                } else {
+                    /* caution: C division may have negative remainder */
+                    intresult = -(((99 - ((*tm).tm_year - 1)) / 100) as int64);
+                }
+            }
+            DTK_MILLENNIUM => {
+                /* see comments above. */
+                if (*tm).tm_year > 0 {
+                    intresult = (((*tm).tm_year + 999) / 1000) as int64;
+                } else {
+                    intresult = -(((999 - ((*tm).tm_year - 1)) / 1000) as int64);
+                }
+            }
+            DTK_JULIAN => {
+                if retnumeric {
+                    PG_RETURN_NUMERIC!(numeric_add_opt_error(
+                        int64_to_numeric(date2j((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday) as int64),
+                        numeric_div_opt_error(
+                            int64_to_numeric(((((*tm).tm_hour as int64 * MINS_PER_HOUR as int64) + (*tm).tm_min as int64) * SECS_PER_MINUTE as int64 + (*tm).tm_sec as int64) * 1000000 + fsec as int64),
+                            int64_to_numeric(SECS_PER_DAY as int64 * 1000000),
+                            null_mut()),
+                        null_mut()));
+                } else {
+                    PG_RETURN_FLOAT8!(date2j((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday) as f64
+                        + (((((*tm).tm_hour * MINS_PER_HOUR) + (*tm).tm_min) * SECS_PER_MINUTE) as f64
+                            + (*tm).tm_sec as f64 + (fsec as f64 / 1000000.0)) / SECS_PER_DAY as f64);
+                }
+            }
+            DTK_ISOYEAR => {
+                intresult = date2isoyear((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday) as int64;
+                /* Adjust BC years */
+                if intresult <= 0 {
+                    intresult -= 1;
+                }
+            }
+            DTK_DOW | DTK_ISODOW => {
+                intresult = j2day(date2j((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday)) as int64;
+                if val == DTK_ISODOW && intresult == 0 {
+                    intresult = 7;
+                }
+            }
+            DTK_DOY => {
+                intresult = (date2j((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday)
+                    - date2j((*tm).tm_year, 1, 1) + 1) as int64;
+            }
+            _ => {
+                /* DTK_TZ, DTK_TZ_MINUTE, DTK_TZ_HOUR, default */
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+                ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                    std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                    std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPOID)).to_string_lossy()));
+            }
+        }
+    } else if r#type == RESERV {
+        match val {
+            DTK_EPOCH => {
+                epoch = SetEpochTimestamp();
+                /* (timestamp - epoch) / 1000000 */
+                if retnumeric {
+                    let mut result: Numeric;
+
+                    if timestamp < PG_INT64_MAX.wrapping_add(epoch) {
+                        result = int64_div_fast_to_numeric(timestamp - epoch, 6);
+                    } else {
+                        result = numeric_div_opt_error(
+                            numeric_sub_opt_error(int64_to_numeric(timestamp), int64_to_numeric(epoch), null_mut()),
+                            int64_to_numeric(1000000),
+                            null_mut());
+                        result = DatumGetNumeric(DirectFunctionCall2!(numeric_round,
+                            NumericGetDatum(result), Int32GetDatum(6)));
+                    }
+                    PG_RETURN_NUMERIC!(result);
+                } else {
+                    let result: float8;
+
+                    /* try to avoid precision loss in subtraction */
+                    if timestamp < PG_INT64_MAX.wrapping_add(epoch) {
+                        result = (timestamp - epoch) as f64 / 1000000.0;
+                    } else {
+                        result = (timestamp as f64 - epoch as f64) / 1000000.0;
+                    }
+                    PG_RETURN_FLOAT8!(result);
+                }
+            }
+            _ => {
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+                ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                    std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                    std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPOID)).to_string_lossy()));
+            }
+        }
+    } else {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("unit \"{}\" not recognized for type {}",
+            std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+            std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPOID)).to_string_lossy()));
+    }
+
+    if retnumeric {
+        PG_RETURN_NUMERIC!(int64_to_numeric(intresult));
+    } else {
+        PG_RETURN_FLOAT8!(intresult as f64);
+    }
+}
+
+pub unsafe fn timestamp_part(fcinfo: FunctionCallInfo) -> Datum {
+    timestamp_part_common(fcinfo, false)
+}
+
+pub unsafe fn extract_timestamp(fcinfo: FunctionCallInfo) -> Datum {
+    timestamp_part_common(fcinfo, true)
+}
+/* timestamptz_part() and extract_timestamptz()
+ * Extract specified field from timestamp with time zone.
+ */
+unsafe fn timestamptz_part_common(fcinfo: FunctionCallInfo, retnumeric: bool) -> Datum {
+    let units = PG_GETARG_TEXT_PP!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMPTZ!(fcinfo, 1);
+    let mut intresult: int64 = 0;
+    let epoch: Timestamp;
+    let mut tz: c_int = 0;
+    let mut r#type: c_int;
+    let mut val: c_int = 0;
+    let lowunits: *mut c_char;
+    let mut fsec: fsec_t = 0;
+    let mut tt: pg_tm = std::mem::zeroed();
+    let tm = &mut tt as *mut pg_tm;
+
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+
+    r#type = DecodeUnits(0, lowunits, &mut val);
+    if r#type == UNKNOWN_FIELD {
+        r#type = DecodeSpecial(0, lowunits, &mut val);
+    }
+
+    if TIMESTAMP_NOT_FINITE(timestamp) {
+        let r: f64 = NonFiniteTimestampTzPart(r#type, val, lowunits, TIMESTAMP_IS_NOBEGIN(timestamp), true);
+
+        if r != 0.0 {
+            if retnumeric {
+                if r < 0.0 {
+                    return DirectFunctionCall3!(numeric_in,
+                        CStringGetDatum(c"-Infinity".as_ptr()),
+                        ObjectIdGetDatum(InvalidOid),
+                        Int32GetDatum(-1));
+                } else if r > 0.0 {
+                    return DirectFunctionCall3!(numeric_in,
+                        CStringGetDatum(c"Infinity".as_ptr()),
+                        ObjectIdGetDatum(InvalidOid),
+                        Int32GetDatum(-1));
+                }
+            } else {
+                PG_RETURN_FLOAT8!(r);
+            }
+        } else {
+            PG_RETURN_NULL!(fcinfo);
+        }
+    }
+
+    if r#type == UNITS {
+        if timestamp2tm(timestamp, &mut tz, tm, &mut fsec, null_mut(), null_mut()) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+
+        match val {
+            DTK_TZ => {
+                intresult = -tz as int64;
+            }
+            DTK_TZ_MINUTE => {
+                intresult = ((-tz / SECS_PER_MINUTE) % MINS_PER_HOUR) as int64;
+            }
+            DTK_TZ_HOUR => {
+                intresult = (-tz / SECS_PER_HOUR) as int64;
+            }
+            DTK_MICROSEC => {
+                intresult = (*tm).tm_sec as int64 * 1000000 + fsec as int64;
+            }
+            DTK_MILLISEC => {
+                if retnumeric {
+                    /*---
+                     * tm->tm_sec * 1000 + fsec / 1000
+                     * = (tm->tm_sec * 1'000'000 + fsec) / 1000
+                     */
+                    PG_RETURN_NUMERIC!(int64_div_fast_to_numeric((*tm).tm_sec as int64 * 1000000 + fsec as int64, 3));
+                } else {
+                    PG_RETURN_FLOAT8!((*tm).tm_sec as f64 * 1000.0 + fsec as f64 / 1000.0);
+                }
+            }
+            DTK_SECOND => {
+                if retnumeric {
+                    /*---
+                     * tm->tm_sec + fsec / 1'000'000
+                     * = (tm->tm_sec * 1'000'000 + fsec) / 1'000'000
+                     */
+                    PG_RETURN_NUMERIC!(int64_div_fast_to_numeric((*tm).tm_sec as int64 * 1000000 + fsec as int64, 6));
+                } else {
+                    PG_RETURN_FLOAT8!((*tm).tm_sec as f64 + fsec as f64 / 1000000.0);
+                }
+            }
+            DTK_MINUTE => {
+                intresult = (*tm).tm_min as int64;
+            }
+            DTK_HOUR => {
+                intresult = (*tm).tm_hour as int64;
+            }
+            DTK_DAY => {
+                intresult = (*tm).tm_mday as int64;
+            }
+            DTK_MONTH => {
+                intresult = (*tm).tm_mon as int64;
+            }
+            DTK_QUARTER => {
+                intresult = (((*tm).tm_mon - 1) / 3 + 1) as int64;
+            }
+            DTK_WEEK => {
+                intresult = date2isoweek((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday) as int64;
+            }
+            DTK_YEAR => {
+                if (*tm).tm_year > 0 {
+                    intresult = (*tm).tm_year as int64;
+                } else {
+                    /* there is no year 0, just 1 BC and 1 AD */
+                    intresult = ((*tm).tm_year - 1) as int64;
+                }
+            }
+            DTK_DECADE => {
+                /* see comments in timestamp_part */
+                if (*tm).tm_year > 0 {
+                    intresult = ((*tm).tm_year / 10) as int64;
+                } else {
+                    intresult = -(((8 - ((*tm).tm_year - 1)) / 10) as int64);
+                }
+            }
+            DTK_CENTURY => {
+                /* see comments in timestamp_part */
+                if (*tm).tm_year > 0 {
+                    intresult = (((*tm).tm_year + 99) / 100) as int64;
+                } else {
+                    intresult = -(((99 - ((*tm).tm_year - 1)) / 100) as int64);
+                }
+            }
+            DTK_MILLENNIUM => {
+                /* see comments in timestamp_part */
+                if (*tm).tm_year > 0 {
+                    intresult = (((*tm).tm_year + 999) / 1000) as int64;
+                } else {
+                    intresult = -(((999 - ((*tm).tm_year - 1)) / 1000) as int64);
+                }
+            }
+            DTK_JULIAN => {
+                if retnumeric {
+                    PG_RETURN_NUMERIC!(numeric_add_opt_error(
+                        int64_to_numeric(date2j((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday) as int64),
+                        numeric_div_opt_error(
+                            int64_to_numeric(((((*tm).tm_hour as int64 * MINS_PER_HOUR as int64) + (*tm).tm_min as int64) * SECS_PER_MINUTE as int64 + (*tm).tm_sec as int64) * 1000000 + fsec as int64),
+                            int64_to_numeric(SECS_PER_DAY as int64 * 1000000),
+                            null_mut()),
+                        null_mut()));
+                } else {
+                    PG_RETURN_FLOAT8!(date2j((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday) as f64
+                        + (((((*tm).tm_hour * MINS_PER_HOUR) + (*tm).tm_min) * SECS_PER_MINUTE) as f64
+                            + (*tm).tm_sec as f64 + (fsec as f64 / 1000000.0)) / SECS_PER_DAY as f64);
+                }
+            }
+            DTK_ISOYEAR => {
+                intresult = date2isoyear((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday) as int64;
+                /* Adjust BC years */
+                if intresult <= 0 {
+                    intresult -= 1;
+                }
+            }
+            DTK_DOW | DTK_ISODOW => {
+                intresult = j2day(date2j((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday)) as int64;
+                if val == DTK_ISODOW && intresult == 0 {
+                    intresult = 7;
+                }
+            }
+            DTK_DOY => {
+                intresult = (date2j((*tm).tm_year, (*tm).tm_mon, (*tm).tm_mday)
+                    - date2j((*tm).tm_year, 1, 1) + 1) as int64;
+            }
+            _ => {
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+                ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                    std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                    std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPTZOID)).to_string_lossy()));
+            }
+        }
+    } else if r#type == RESERV {
+        match val {
+            DTK_EPOCH => {
+                epoch = SetEpochTimestamp();
+                /* (timestamp - epoch) / 1000000 */
+                if retnumeric {
+                    let mut result: Numeric;
+
+                    if timestamp < PG_INT64_MAX.wrapping_add(epoch) {
+                        result = int64_div_fast_to_numeric(timestamp - epoch, 6);
+                    } else {
+                        result = numeric_div_opt_error(
+                            numeric_sub_opt_error(int64_to_numeric(timestamp), int64_to_numeric(epoch), null_mut()),
+                            int64_to_numeric(1000000),
+                            null_mut());
+                        result = DatumGetNumeric(DirectFunctionCall2!(numeric_round,
+                            NumericGetDatum(result), Int32GetDatum(6)));
+                    }
+                    PG_RETURN_NUMERIC!(result);
+                } else {
+                    let result: float8;
+
+                    /* try to avoid precision loss in subtraction */
+                    if timestamp < PG_INT64_MAX.wrapping_add(epoch) {
+                        result = (timestamp - epoch) as f64 / 1000000.0;
+                    } else {
+                        result = (timestamp as f64 - epoch as f64) / 1000000.0;
+                    }
+                    PG_RETURN_FLOAT8!(result);
+                }
+            }
+            _ => {
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+                ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                    std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                    std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPTZOID)).to_string_lossy()));
+            }
+        }
+    } else {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("unit \"{}\" not recognized for type {}",
+            std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+            std::ffi::CStr::from_ptr(format_type_be(TIMESTAMPTZOID)).to_string_lossy()));
+    }
+
+    if retnumeric {
+        PG_RETURN_NUMERIC!(int64_to_numeric(intresult));
+    } else {
+        PG_RETURN_FLOAT8!(intresult as f64);
+    }
+}
+
+pub unsafe fn timestamptz_part(fcinfo: FunctionCallInfo) -> Datum {
+    timestamptz_part_common(fcinfo, false)
+}
+
+pub unsafe fn extract_timestamptz(fcinfo: FunctionCallInfo) -> Datum {
+    timestamptz_part_common(fcinfo, true)
+}
+
+/*
+ * NonFiniteIntervalPart
+ *
+ *	Used by interval_part when extracting from infinite interval.  Returns
+ *	+/-Infinity if that is the appropriate result, otherwise returns zero
+ *	(which should be taken as meaning to return NULL).
+ *
+ *	Errors thrown here for invalid units should exactly match those that
+ *	would be thrown in the calling functions, else there will be unexpected
+ *	discrepancies between finite- and infinite-input cases.
+ */
+unsafe fn NonFiniteIntervalPart(r#type: c_int, unit: c_int, lowunits: *mut c_char, isNegative: bool) -> float8 {
+    if (r#type != UNITS) && (r#type != RESERV) {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("unit \"{}\" not recognized for type {}",
+            std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+            std::ffi::CStr::from_ptr(format_type_be(INTERVALOID)).to_string_lossy()));
+    }
+
+    match unit {
+        /* Oscillating units */
+        DTK_MICROSEC | DTK_MILLISEC | DTK_SECOND | DTK_MINUTE | DTK_WEEK | DTK_MONTH | DTK_QUARTER => 0.0,
+
+        /* Monotonically-increasing units */
+        DTK_HOUR | DTK_DAY | DTK_YEAR | DTK_DECADE | DTK_CENTURY | DTK_MILLENNIUM | DTK_EPOCH => {
+            if isNegative {
+                -get_float8_infinity()
+            } else {
+                get_float8_infinity()
+            }
+        }
+
+        _ => {
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+            ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                std::ffi::CStr::from_ptr(format_type_be(INTERVALOID)).to_string_lossy()));
+        }
+    }
+}
+
+/* interval_part() and extract_interval()
+ * Extract specified field from interval.
+ */
+unsafe fn interval_part_common(fcinfo: FunctionCallInfo, retnumeric: bool) -> Datum {
+    let units = PG_GETARG_TEXT_PP!(fcinfo, 0);
+    let interval = PG_GETARG_INTERVAL_P!(fcinfo, 1);
+    let mut intresult: int64 = 0;
+    let mut r#type: c_int;
+    let mut val: c_int = 0;
+    let lowunits: *mut c_char;
+    let mut tt: pg_itm = std::mem::zeroed();
+    let tm = &mut tt as *mut pg_itm;
+
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+
+    r#type = DecodeUnits(0, lowunits, &mut val);
+    if r#type == UNKNOWN_FIELD {
+        r#type = DecodeSpecial(0, lowunits, &mut val);
+    }
+
+    if INTERVAL_NOT_FINITE(interval) {
+        let r: f64 = NonFiniteIntervalPart(r#type, val, lowunits, INTERVAL_IS_NOBEGIN(interval));
+
+        if r != 0.0 {
+            if retnumeric {
+                if r < 0.0 {
+                    return DirectFunctionCall3!(numeric_in,
+                        CStringGetDatum(c"-Infinity".as_ptr()),
+                        ObjectIdGetDatum(InvalidOid),
+                        Int32GetDatum(-1));
+                } else if r > 0.0 {
+                    return DirectFunctionCall3!(numeric_in,
+                        CStringGetDatum(c"Infinity".as_ptr()),
+                        ObjectIdGetDatum(InvalidOid),
+                        Int32GetDatum(-1));
+                }
+            } else {
+                PG_RETURN_FLOAT8!(r);
+            }
+        } else {
+            PG_RETURN_NULL!(fcinfo);
+        }
+    }
+
+    if r#type == UNITS {
+        interval2itm(*interval, tm);
+        match val {
+            DTK_MICROSEC => {
+                intresult = (*tm).tm_sec as int64 * 1000000 + (*tm).tm_usec as int64;
+            }
+            DTK_MILLISEC => {
+                if retnumeric {
+                    /*---
+                     * tm->tm_sec * 1000 + fsec / 1000
+                     * = (tm->tm_sec * 1'000'000 + fsec) / 1000
+                     */
+                    PG_RETURN_NUMERIC!(int64_div_fast_to_numeric((*tm).tm_sec as int64 * 1000000 + (*tm).tm_usec as int64, 3));
+                } else {
+                    PG_RETURN_FLOAT8!((*tm).tm_sec as f64 * 1000.0 + (*tm).tm_usec as f64 / 1000.0);
+                }
+            }
+            DTK_SECOND => {
+                if retnumeric {
+                    /*---
+                     * tm->tm_sec + fsec / 1'000'000
+                     * = (tm->tm_sec * 1'000'000 + fsec) / 1'000'000
+                     */
+                    PG_RETURN_NUMERIC!(int64_div_fast_to_numeric((*tm).tm_sec as int64 * 1000000 + (*tm).tm_usec as int64, 6));
+                } else {
+                    PG_RETURN_FLOAT8!((*tm).tm_sec as f64 + (*tm).tm_usec as f64 / 1000000.0);
+                }
+            }
+            DTK_MINUTE => {
+                intresult = (*tm).tm_min as int64;
+            }
+            DTK_HOUR => {
+                intresult = (*tm).tm_hour;
+            }
+            DTK_DAY => {
+                intresult = (*tm).tm_mday as int64;
+            }
+            DTK_WEEK => {
+                intresult = ((*tm).tm_mday / 7) as int64;
+            }
+            DTK_MONTH => {
+                intresult = (*tm).tm_mon as int64;
+            }
+            DTK_QUARTER => {
+                /*
+                 * We want to maintain the rule that a field extracted from a
+                 * negative interval is the negative of the field's value for
+                 * the sign-reversed interval.  The broken-down tm_year and
+                 * tm_mon aren't very helpful for that, so work from
+                 * interval->month.
+                 */
+                if (*interval).month >= 0 {
+                    intresult = (((*tm).tm_mon / 3) + 1) as int64;
+                } else {
+                    intresult = -((((-(*interval).month % MONTHS_PER_YEAR) / 3) + 1) as int64);
+                }
+            }
+            DTK_YEAR => {
+                intresult = (*tm).tm_year as int64;
+            }
+            DTK_DECADE => {
+                /* caution: C division may have negative remainder */
+                intresult = ((*tm).tm_year / 10) as int64;
+            }
+            DTK_CENTURY => {
+                /* caution: C division may have negative remainder */
+                intresult = ((*tm).tm_year / 100) as int64;
+            }
+            DTK_MILLENNIUM => {
+                /* caution: C division may have negative remainder */
+                intresult = ((*tm).tm_year / 1000) as int64;
+            }
+            _ => {
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+                ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
+                    std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+                    std::ffi::CStr::from_ptr(format_type_be(INTERVALOID)).to_string_lossy()));
+            }
+        }
+    } else if r#type == RESERV && val == DTK_EPOCH {
+        if retnumeric {
+            let result: Numeric;
+            let secs_from_day_month: int64;
+            let mut valv: int64 = 0;
+
+            /*
+             * To do this calculation in integer arithmetic even though
+             * DAYS_PER_YEAR is fractional, multiply everything by 4 and then
+             * divide by 4 again at the end.  This relies on DAYS_PER_YEAR
+             * being a multiple of 0.25 and on SECS_PER_DAY being a multiple
+             * of 4.
+             */
+            secs_from_day_month = ((4.0 * DAYS_PER_YEAR) as int64 * ((*interval).month / MONTHS_PER_YEAR) as int64
+                + (4 * DAYS_PER_MONTH) as int64 * ((*interval).month % MONTHS_PER_YEAR) as int64
+                + 4 * (*interval).day as int64) * (SECS_PER_DAY / 4) as int64;
+
+            /*---
+             * result = secs_from_day_month + interval->time / 1'000'000
+             * = (secs_from_day_month * 1'000'000 + interval->time) / 1'000'000
+             */
+
+            /*
+             * Try the computation inside int64; if it overflows, do it in
+             * numeric (slower).  This overflow happens around 10^9 days, so
+             * not common in practice.
+             */
+            if !pg_mul_s64_overflow(secs_from_day_month, 1000000, &mut valv)
+                && !pg_add_s64_overflow(valv, (*interval).time, &mut valv)
+            {
+                result = int64_div_fast_to_numeric(valv, 6);
+            } else {
+                result = numeric_add_opt_error(
+                    int64_div_fast_to_numeric((*interval).time, 6),
+                    int64_to_numeric(secs_from_day_month),
+                    null_mut());
+            }
+
+            PG_RETURN_NUMERIC!(result);
+        } else {
+            let mut result: float8;
+
+            result = (*interval).time as f64 / 1000000.0;
+            result += (DAYS_PER_YEAR * SECS_PER_DAY as f64) * ((*interval).month / MONTHS_PER_YEAR) as f64;
+            result += (DAYS_PER_MONTH as f64 * SECS_PER_DAY as f64) * ((*interval).month % MONTHS_PER_YEAR) as f64;
+            result += (SECS_PER_DAY as f64) * (*interval).day as f64;
+
+            PG_RETURN_FLOAT8!(result);
+        }
+    } else {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("unit \"{}\" not recognized for type {}",
+            std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
+            std::ffi::CStr::from_ptr(format_type_be(INTERVALOID)).to_string_lossy()));
+    }
+
+    if retnumeric {
+        PG_RETURN_NUMERIC!(int64_to_numeric(intresult));
+    } else {
+        PG_RETURN_FLOAT8!(intresult as f64);
+    }
+}
+
+pub unsafe fn interval_part(fcinfo: FunctionCallInfo) -> Datum {
+    interval_part_common(fcinfo, false)
+}
+
+pub unsafe fn extract_interval(fcinfo: FunctionCallInfo) -> Datum {
+    interval_part_common(fcinfo, true)
+}
+/*	timestamp_zone()
+ *	Encode timestamp type with specified time zone.
+ *	This function is just timestamp2timestamptz() except instead of
+ *	shifting to the global timezone, we shift to the specified timezone.
+ *	This is different from the other AT TIME ZONE cases because instead
+ *	of shifting _to_ a new time zone, it sets the time to _be_ the
+ *	specified timezone.
+ */
+pub unsafe fn timestamp_zone(fcinfo: FunctionCallInfo) -> Datum {
+    let zone = PG_GETARG_TEXT_PP!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMP!(fcinfo, 1);
+    let mut result: TimestampTz = 0;
+    let tz: c_int;
+    let mut tzname: [c_char; TZ_STRLEN_MAX as usize + 1] = [0; TZ_STRLEN_MAX as usize + 1];
+    let r#type: c_int;
+    let mut val: c_int = 0;
+    let mut tzp: *mut pg_tz = null_mut();
+    let mut tm: pg_tm = std::mem::zeroed();
+    let mut fsec: fsec_t = 0;
+
+    if TIMESTAMP_NOT_FINITE(timestamp) {
+        PG_RETURN_TIMESTAMPTZ!(timestamp);
+    }
+
+    /*
+     * Look up the requested timezone.
+     */
+    text_to_cstring_buffer(zone, tzname.as_mut_ptr(), std::mem::size_of_val(&tzname) as Size);
+
+    r#type = DecodeTimezoneName(tzname.as_ptr(), &mut val, &mut tzp);
+
+    if r#type == TZNAME_FIXED_OFFSET {
+        /* fixed-offset abbreviation */
+        tz = val;
+        result = dt2local(timestamp, tz);
+    } else if r#type == TZNAME_DYNTZ {
+        /* dynamic-offset abbreviation, resolve using specified time */
+        if timestamp2tm(timestamp, null_mut(), &mut tm, &mut fsec, null_mut(), tzp) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+        tz = -DetermineTimeZoneAbbrevOffset(&mut tm, tzname.as_ptr(), tzp);
+        result = dt2local(timestamp, tz);
+    } else {
+        /* full zone name, rotate to that zone */
+        if timestamp2tm(timestamp, null_mut(), &mut tm, &mut fsec, null_mut(), tzp) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+        tz = DetermineTimeZoneOffset(&mut tm, tzp);
+        let mut tzv = tz;
+        if tm2timestamp(&mut tm, fsec, &mut tzv, &mut result) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+    }
+
+    if !IS_VALID_TIMESTAMP(result) {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("timestamp out of range"));
+    }
+
+    PG_RETURN_TIMESTAMPTZ!(result);
+}
+
+/* timestamp_izone()
+ * Encode timestamp type with specified time interval as time zone.
+ */
+pub unsafe fn timestamp_izone(fcinfo: FunctionCallInfo) -> Datum {
+    let zone = PG_GETARG_INTERVAL_P!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMP!(fcinfo, 1);
+    let result: TimestampTz;
+    let tz: c_int;
+
+    if TIMESTAMP_NOT_FINITE(timestamp) {
+        PG_RETURN_TIMESTAMPTZ!(timestamp);
+    }
+
+    if INTERVAL_NOT_FINITE(zone) {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("interval time zone \"{}\" must be finite",
+            std::ffi::CStr::from_ptr(DatumGetCString(DirectFunctionCall1!(interval_out, PointerGetDatum(zone as *const c_void)))).to_string_lossy()));
+    }
+
+    if (*zone).month != 0 || (*zone).day != 0 {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("interval time zone \"{}\" must not include months or days",
+            std::ffi::CStr::from_ptr(DatumGetCString(DirectFunctionCall1!(interval_out, PointerGetDatum(zone as *const c_void)))).to_string_lossy()));
+    }
+
+    tz = ((*zone).time / USECS_PER_SEC) as c_int;
+
+    result = dt2local(timestamp, tz);
+
+    if !IS_VALID_TIMESTAMP(result) {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("timestamp out of range"));
+    }
+
+    PG_RETURN_TIMESTAMPTZ!(result);
+} /* timestamp_izone() */
+
+/* TimestampTimestampTzRequiresRewrite()
+ *
+ * Returns false if the TimeZone GUC setting causes timestamp_timestamptz and
+ * timestamptz_timestamp to be no-ops, where the return value has the same
+ * bits as the argument.  Since project convention is to assume a GUC changes
+ * no more often than STABLE functions change, the answer is valid that long.
+ */
+pub unsafe fn TimestampTimestampTzRequiresRewrite() -> bool {
+    let mut offset: std::os::raw::c_long = 0;
+
+    if pg_get_timezone_offset(session_timezone, &mut offset) && offset == 0 {
+        return false;
+    }
+    true
+}
+
+/* timestamp_timestamptz()
+ * Convert local timestamp to timestamp at GMT
+ */
+pub unsafe fn timestamp_timestamptz(fcinfo: FunctionCallInfo) -> Datum {
+    let timestamp = PG_GETARG_TIMESTAMP!(fcinfo, 0);
+
+    PG_RETURN_TIMESTAMPTZ!(timestamp2timestamptz(timestamp));
+}
+
+/*
+ * Convert timestamp to timestamp with time zone.
+ *
+ * On successful conversion, *overflow is set to zero if it's not NULL.
+ *
+ * If the timestamp is finite but out of the valid range for timestamptz, then:
+ * if overflow is NULL, we throw an out-of-range error.
+ * if overflow is not NULL, we store +1 or -1 there to indicate the sign
+ * of the overflow, and return the appropriate timestamptz infinity.
+ */
+pub unsafe fn timestamp2timestamptz_opt_overflow(timestamp: Timestamp, overflow: *mut c_int) -> TimestampTz {
+    let mut result: TimestampTz;
+    let mut tt: pg_tm = std::mem::zeroed();
+    let tm = &mut tt as *mut pg_tm;
+    let mut fsec: fsec_t = 0;
+    let tz: c_int;
+
+    if !overflow.is_null() {
+        *overflow = 0;
+    }
+
+    if TIMESTAMP_NOT_FINITE(timestamp) {
+        return timestamp;
+    }
+
+    /* We don't expect this to fail, but check it pro forma */
+    if timestamp2tm(timestamp, null_mut(), tm, &mut fsec, null_mut(), null_mut()) == 0 {
+        tz = DetermineTimeZoneOffset(tm, session_timezone);
+
+        result = dt2local(timestamp, -tz);
+
+        if IS_VALID_TIMESTAMP(result) {
+            return result;
+        } else if !overflow.is_null() {
+            if result < MIN_TIMESTAMP {
+                *overflow = -1;
+                TIMESTAMP_NOBEGIN(&mut result);
+            } else {
+                *overflow = 1;
+                TIMESTAMP_NOEND(&mut result);
+            }
+            return result;
+        }
+    }
+
+    /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+    ereport!(ERROR, errmsg!("timestamp out of range"));
+
+    #[allow(unreachable_code)]
+    {
+        0
+    }
+}
+
+/*
+ * Promote timestamp to timestamptz, throwing error for overflow.
+ */
 unsafe fn timestamp2timestamptz(timestamp: Timestamp) -> TimestampTz {
-    unimplemented!("timestamp2timestamptz: cut-off tail of timestamp.c")
+    timestamp2timestamptz_opt_overflow(timestamp, null_mut())
 }
+
+/* timestamptz_timestamp()
+ * Convert timestamp at GMT to local timestamp
+ */
+pub unsafe fn timestamptz_timestamp(fcinfo: FunctionCallInfo) -> Datum {
+    let timestamp = PG_GETARG_TIMESTAMPTZ!(fcinfo, 0);
+
+    PG_RETURN_TIMESTAMP!(timestamptz2timestamp(timestamp));
+}
+
 unsafe fn timestamptz2timestamp(timestamp: TimestampTz) -> Timestamp {
-    unimplemented!("timestamptz2timestamp: cut-off tail of timestamp.c")
+    let mut result: Timestamp = 0;
+    let mut tt: pg_tm = std::mem::zeroed();
+    let tm = &mut tt as *mut pg_tm;
+    let mut fsec: fsec_t = 0;
+    let mut tz: c_int = 0;
+
+    if TIMESTAMP_NOT_FINITE(timestamp) {
+        result = timestamp;
+    } else {
+        if timestamp2tm(timestamp, &mut tz, tm, &mut fsec, null_mut(), null_mut()) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+        if tm2timestamp(tm, fsec, null_mut(), &mut result) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+    }
+    result
 }
-unsafe fn timestamp2timestamptz_opt_overflow(
-    timestamp: Timestamp,
-    overflow: *mut c_int,
-) -> TimestampTz {
-    unimplemented!("timestamp2timestamptz_opt_overflow: cut-off tail of timestamp.c")
+
+/* timestamptz_zone()
+ * Evaluate timestamp with time zone type at the specified time zone.
+ * Returns a timestamp without time zone.
+ */
+pub unsafe fn timestamptz_zone(fcinfo: FunctionCallInfo) -> Datum {
+    let zone = PG_GETARG_TEXT_PP!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMPTZ!(fcinfo, 1);
+    let mut result: Timestamp = 0;
+    let tz: c_int;
+    let mut tzname: [c_char; TZ_STRLEN_MAX as usize + 1] = [0; TZ_STRLEN_MAX as usize + 1];
+    let r#type: c_int;
+    let mut val: c_int = 0;
+    let mut tzp: *mut pg_tz = null_mut();
+
+    if TIMESTAMP_NOT_FINITE(timestamp) {
+        PG_RETURN_TIMESTAMP!(timestamp);
+    }
+
+    /*
+     * Look up the requested timezone.
+     */
+    text_to_cstring_buffer(zone, tzname.as_mut_ptr(), std::mem::size_of_val(&tzname) as Size);
+
+    r#type = DecodeTimezoneName(tzname.as_ptr(), &mut val, &mut tzp);
+
+    if r#type == TZNAME_FIXED_OFFSET {
+        /* fixed-offset abbreviation */
+        tz = -val;
+        result = dt2local(timestamp, tz);
+    } else if r#type == TZNAME_DYNTZ {
+        /* dynamic-offset abbreviation, resolve using specified time */
+        let mut isdst: c_int = 0;
+
+        tz = DetermineTimeZoneAbbrevOffsetTS(timestamp, tzname.as_ptr(), tzp, &mut isdst);
+        result = dt2local(timestamp, tz);
+    } else {
+        /* full zone name, rotate from that zone */
+        let mut tm: pg_tm = std::mem::zeroed();
+        let mut fsec: fsec_t = 0;
+        let mut tz2: c_int = 0;
+
+        if timestamp2tm(timestamp, &mut tz2, &mut tm, &mut fsec, null_mut(), tzp) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+        if tm2timestamp(&mut tm, fsec, null_mut(), &mut result) != 0 {
+            /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+            ereport!(ERROR, errmsg!("timestamp out of range"));
+        }
+    }
+
+    if !IS_VALID_TIMESTAMP(result) {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("timestamp out of range"));
+    }
+
+    PG_RETURN_TIMESTAMP!(result);
+}
+
+/* timestamptz_izone()
+ * Encode timestamp with time zone type with specified time interval as time zone.
+ * Returns a timestamp without time zone.
+ */
+pub unsafe fn timestamptz_izone(fcinfo: FunctionCallInfo) -> Datum {
+    let zone = PG_GETARG_INTERVAL_P!(fcinfo, 0);
+    let timestamp = PG_GETARG_TIMESTAMPTZ!(fcinfo, 1);
+    let result: Timestamp;
+    let tz: c_int;
+
+    if TIMESTAMP_NOT_FINITE(timestamp) {
+        PG_RETURN_TIMESTAMP!(timestamp);
+    }
+
+    if INTERVAL_NOT_FINITE(zone) {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("interval time zone \"{}\" must be finite",
+            std::ffi::CStr::from_ptr(DatumGetCString(DirectFunctionCall1!(interval_out, PointerGetDatum(zone as *const c_void)))).to_string_lossy()));
+    }
+
+    if (*zone).month != 0 || (*zone).day != 0 {
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        ereport!(ERROR, errmsg!("interval time zone \"{}\" must not include months or days",
+            std::ffi::CStr::from_ptr(DatumGetCString(DirectFunctionCall1!(interval_out, PointerGetDatum(zone as *const c_void)))).to_string_lossy()));
+    }
+
+    tz = -(((*zone).time / USECS_PER_SEC) as c_int);
+
+    result = dt2local(timestamp, tz);
+
+    if !IS_VALID_TIMESTAMP(result) {
+        /* C also: errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE) */
+        ereport!(ERROR, errmsg!("timestamp out of range"));
+    }
+
+    PG_RETURN_TIMESTAMP!(result);
+}
+
+/* generate_series_timestamp()
+ * Generate the set of timestamps from start to finish by step
+ */
+pub unsafe fn generate_series_timestamp(fcinfo: FunctionCallInfo) -> Datum {
+    let funcctx: *mut FuncCallContext;
+    let fctx: *mut generate_series_timestamp_fctx;
+    let result: Timestamp;
+
+    /* stuff done only on the first call of the function */
+    if SRF_IS_FIRSTCALL() {
+        let start = PG_GETARG_TIMESTAMP!(fcinfo, 0);
+        let finish = PG_GETARG_TIMESTAMP!(fcinfo, 1);
+        let step = PG_GETARG_INTERVAL_P!(fcinfo, 2);
+        let oldcontext: MemoryContext;
+
+        /* create a function context for cross-call persistence */
+        let funcctx0 = SRF_FIRSTCALL_INIT();
+
+        /*
+         * switch to memory context appropriate for multiple function calls
+         */
+        oldcontext = MemoryContextSwitchTo((*funcctx0).multi_call_memory_ctx);
+
+        /* allocate memory for user context */
+        let fctx0 = palloc(std::mem::size_of::<generate_series_timestamp_fctx>() as Size)
+            as *mut generate_series_timestamp_fctx;
+
+        /*
+         * Use fctx to keep state from call to call. Seed current with the
+         * original start value
+         */
+        (*fctx0).current = start;
+        (*fctx0).finish = finish;
+        (*fctx0).step = *step;
+
+        /* Determine sign of the interval */
+        (*fctx0).step_sign = interval_sign(&(*fctx0).step);
+
+        if (*fctx0).step_sign == 0 {
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            ereport!(ERROR, errmsg!("step size cannot equal zero"));
+        }
+
+        if INTERVAL_NOT_FINITE(&(*fctx0).step) {
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            ereport!(ERROR, errmsg!("step size cannot be infinite"));
+        }
+
+        (*funcctx0).user_fctx = fctx0 as *mut c_void;
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+
+    /*
+     * get the saved state and use current as the result for this iteration
+     */
+    fctx = (*funcctx).user_fctx as *mut generate_series_timestamp_fctx;
+    result = (*fctx).current;
+
+    if if (*fctx).step_sign > 0 {
+        timestamp_cmp_internal(result, (*fctx).finish) <= 0
+    } else {
+        timestamp_cmp_internal(result, (*fctx).finish) >= 0
+    } {
+        /* increment current in preparation for next iteration */
+        (*fctx).current = DatumGetTimestamp(DirectFunctionCall2!(timestamp_pl_interval,
+            TimestampGetDatum((*fctx).current),
+            PointerGetDatum(&(*fctx).step as *const Interval as *const c_void)));
+
+        /* do when there is more left to send */
+        SRF_RETURN_NEXT(funcctx, TimestampGetDatum(result))
+    } else {
+        /* do when there is no more left */
+        SRF_RETURN_DONE(funcctx)
+    }
+}
+
+/* generate_series_timestamptz()
+ * Generate the set of timestamps from start to finish by step,
+ * doing arithmetic in the specified or session timezone.
+ */
+unsafe fn generate_series_timestamptz_internal(fcinfo: FunctionCallInfo) -> Datum {
+    let funcctx: *mut FuncCallContext;
+    let fctx: *mut generate_series_timestamptz_fctx;
+    let result: TimestampTz;
+
+    /* stuff done only on the first call of the function */
+    if SRF_IS_FIRSTCALL() {
+        let start = PG_GETARG_TIMESTAMPTZ!(fcinfo, 0);
+        let finish = PG_GETARG_TIMESTAMPTZ!(fcinfo, 1);
+        let step = PG_GETARG_INTERVAL_P!(fcinfo, 2);
+        let zone: *mut text = if PG_NARGS!(fcinfo) == 4 { PG_GETARG_TEXT_PP!(fcinfo, 3) } else { null_mut() };
+        let oldcontext: MemoryContext;
+
+        /* create a function context for cross-call persistence */
+        let funcctx0 = SRF_FIRSTCALL_INIT();
+
+        /*
+         * switch to memory context appropriate for multiple function calls
+         */
+        oldcontext = MemoryContextSwitchTo((*funcctx0).multi_call_memory_ctx);
+
+        /* allocate memory for user context */
+        let fctx0 = palloc(std::mem::size_of::<generate_series_timestamptz_fctx>() as Size)
+            as *mut generate_series_timestamptz_fctx;
+
+        /*
+         * Use fctx to keep state from call to call. Seed current with the
+         * original start value
+         */
+        (*fctx0).current = start;
+        (*fctx0).finish = finish;
+        (*fctx0).step = *step;
+        (*fctx0).attimezone = if !zone.is_null() { lookup_timezone(zone) } else { session_timezone };
+
+        /* Determine sign of the interval */
+        (*fctx0).step_sign = interval_sign(&(*fctx0).step);
+
+        if (*fctx0).step_sign == 0 {
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            ereport!(ERROR, errmsg!("step size cannot equal zero"));
+        }
+
+        if INTERVAL_NOT_FINITE(&(*fctx0).step) {
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            ereport!(ERROR, errmsg!("step size cannot be infinite"));
+        }
+
+        (*funcctx0).user_fctx = fctx0 as *mut c_void;
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+
+    /*
+     * get the saved state and use current as the result for this iteration
+     */
+    fctx = (*funcctx).user_fctx as *mut generate_series_timestamptz_fctx;
+    result = (*fctx).current;
+
+    if if (*fctx).step_sign > 0 {
+        timestamp_cmp_internal(result, (*fctx).finish) <= 0
+    } else {
+        timestamp_cmp_internal(result, (*fctx).finish) >= 0
+    } {
+        /* increment current in preparation for next iteration */
+        (*fctx).current = timestamptz_pl_interval_internal((*fctx).current, &mut (*fctx).step, (*fctx).attimezone);
+
+        /* do when there is more left to send */
+        SRF_RETURN_NEXT(funcctx, TimestampTzGetDatum(result))
+    } else {
+        /* do when there is no more left */
+        SRF_RETURN_DONE(funcctx)
+    }
+}
+
+pub unsafe fn generate_series_timestamptz(fcinfo: FunctionCallInfo) -> Datum {
+    generate_series_timestamptz_internal(fcinfo)
+}
+
+pub unsafe fn generate_series_timestamptz_at_zone(fcinfo: FunctionCallInfo) -> Datum {
+    generate_series_timestamptz_internal(fcinfo)
+}
+
+/*
+ * Planner support function for generate_series(timestamp, timestamp, interval)
+ */
+pub unsafe fn generate_series_timestamp_support(fcinfo: FunctionCallInfo) -> Datum {
+    let rawreq = PG_GETARG_POINTER!(fcinfo, 0) as *mut Node;
+    let mut ret: *mut Node = null_mut();
+
+    if IsA!(rawreq, T_SupportRequestRows) {
+        /* Try to estimate the number of rows returned */
+        let req = rawreq as *mut SupportRequestRows;
+
+        if is_funcclause((*req).node) {
+            /* be paranoid */
+            let args: *mut List = (*((*req).node as *mut FuncExpr)).args;
+            let arg1: *mut Node;
+            let arg2: *mut Node;
+            let arg3: *mut Node;
+
+            /* We can use estimated argument values here */
+            arg1 = estimate_expression_value((*req).root, linitial(args) as *mut Node);
+            arg2 = estimate_expression_value((*req).root, lsecond(args) as *mut Node);
+            arg3 = estimate_expression_value((*req).root, lthird(args) as *mut Node);
+
+            /*
+             * If any argument is constant NULL, we can safely assume that zero
+             * rows are returned.  Otherwise, if they're all non-NULL
+             * constants, we can calculate the number of rows that will be
+             * returned.
+             */
+            if (IsA!(arg1, T_Const) && (*(arg1 as *mut Const)).constisnull)
+                || (IsA!(arg2, T_Const) && (*(arg2 as *mut Const)).constisnull)
+                || (IsA!(arg3, T_Const) && (*(arg3 as *mut Const)).constisnull)
+            {
+                (*req).rows = 0.0;
+                ret = req as *mut Node;
+            } else if IsA!(arg1, T_Const) && IsA!(arg2, T_Const) && IsA!(arg3, T_Const) {
+                let start: Timestamp;
+                let finish: Timestamp;
+                let step: *mut Interval;
+                let diff: Datum;
+                let dstep: f64;
+                let mut dummy: int64 = 0;
+
+                start = DatumGetTimestamp((*(arg1 as *mut Const)).constvalue);
+                finish = DatumGetTimestamp((*(arg2 as *mut Const)).constvalue);
+                step = DatumGetIntervalP((*(arg3 as *mut Const)).constvalue);
+
+                /*
+                 * Perform some prechecks which could cause timestamp_mi to
+                 * raise an ERROR.  It's much better to just return some
+                 * default estimate than error out in a support function.
+                 */
+                if !TIMESTAMP_NOT_FINITE(start)
+                    && !TIMESTAMP_NOT_FINITE(finish)
+                    && !pg_sub_s64_overflow(finish, start, &mut dummy)
+                {
+                    diff = DirectFunctionCall2!(timestamp_mi, TimestampGetDatum(finish), TimestampGetDatum(start));
+
+                    /* INTERVAL_TO_MICROSECONDS(i) macro inlined below */
+                    dstep = (((*step).month as f64 * DAYS_PER_MONTH as f64 + (*step).day as f64))
+                        * USECS_PER_DAY as f64 + (*step).time as f64;
+
+                    /* This equation works for either sign of step */
+                    if dstep != 0.0 {
+                        let idiff: *mut Interval = DatumGetIntervalP(diff);
+                        let ddiff: f64 = (((*idiff).month as f64 * DAYS_PER_MONTH as f64 + (*idiff).day as f64))
+                            * USECS_PER_DAY as f64 + (*idiff).time as f64;
+
+                        (*req).rows = floor(ddiff / dstep + 1.0);
+                        ret = req as *mut Node;
+                    }
+                }
+            }
+        }
+    }
+
+    PG_RETURN_POINTER!(ret)
+}
+
+/* timestamp_at_local()
+ * timestamptz_at_local()
+ *
+ * The regression tests do not like two functions with the same proargs and
+ * prosrc but different proname, but the grammar for AT LOCAL needs an
+ * overloaded name to handle both types of timestamp, so we make simple
+ * wrappers for it.
+ */
+pub unsafe fn timestamp_at_local(fcinfo: FunctionCallInfo) -> Datum {
+    timestamp_timestamptz(fcinfo)
+}
+
+pub unsafe fn timestamptz_at_local(fcinfo: FunctionCallInfo) -> Datum {
+    timestamptz_timestamp(fcinfo)
 }

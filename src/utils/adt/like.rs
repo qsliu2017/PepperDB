@@ -103,6 +103,27 @@ fn pg_ascii_tolower(c: u8) -> u8 {
     }
 }
 
+/*
+ * SB_lower_char: case-fold a single byte for single-byte case-insensitive
+ * matching (like.c SB_lower_char).  The real C selects between three folders
+ * based on the collation's ctype info:
+ *   locale->ctype_is_c     -> pg_ascii_tolower(c)   (C/POSIX ctype)
+ *   locale->is_default     -> pg_tolower(c)         (default DB collation)
+ *   else                   -> tolower_l(c, lt)      (libc per-locale)
+ *
+ * Our pg_locale_t is the unit-typed placeholder (see above): it carries no
+ * ctype/provider info, so we cannot reproduce the branch faithfully.  We fold
+ * ASCII only, which is what the merged matcher (getchar_fold) also does.
+ *
+ * TODO(pg-port): real pg_locale ctype dispatch (ctype_is_c / is_default /
+ * tolower_l(c, locale->info.lt)).  pg_tolower lives in
+ * crate::port::pgstrcasecmp::pg_tolower once locale->is_default is available.
+ */
+#[inline]
+fn SB_lower_char(c: u8, _locale: pg_locale_t) -> c_char {
+    pg_ascii_tolower(c) as c_char
+}
+
 /*--------------------
  * Support routine for the matcher (like.c wchareq).  Compares given multibyte
  * streams as wide characters; if they match returns 1 otherwise 0.

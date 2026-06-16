@@ -698,11 +698,85 @@ struct SupportRequestIndexCondition {
 
 // TODO(pg-port): match_index_to_operand (exported in optimizer/paths.h)
 unsafe fn match_index_to_operand(
-    operand: *mut Node,
+    mut operand: *mut Node,
     indexcol: i32,
     index: *mut IndexOptInfo,
 ) -> bool {
-    unimplemented!()
+    let indkey: i32;
+
+    /*
+     * Ignore any PlaceHolderVar node contained in the operand.  This is
+     * needed to be able to apply indexscanning in cases where the operand (or
+     * a subtree) has been wrapped in PlaceHolderVars to enforce separate
+     * identity or as a result of outer joins.
+     */
+    operand = strip_phvs_in_index_operand(operand);
+
+    /*
+     * Ignore any RelabelType node above the operand.  This is needed to be
+     * able to apply indexscanning in binary-compatible-operator cases.
+     *
+     * Note: we must handle nested RelabelType nodes here.  While
+     * eval_const_expressions() will have simplified them to at most one
+     * layer, our prior stripping of PlaceHolderVars may have brought separate
+     * RelabelTypes into adjacency.
+     */
+    while !operand.is_null() && IsA!(operand, T_RelabelType) {
+        operand = (*(operand as *mut RelabelType)).arg as *mut Node;
+    }
+
+    indkey = *(*index).indexkeys.add(indexcol as usize);
+    if indkey != 0 {
+        /*
+         * Simple index column; operand must be a matching Var.
+         */
+        if !operand.is_null()
+            && IsA!(operand, T_Var)
+            && (*(*index).rel).relid == (*(operand as *mut Var)).varno as u32
+            && indkey == (*(operand as *mut Var)).varattno as c_int
+            && (*(operand as *mut Var)).varnullingrels.is_null()
+        {
+            return true;
+        }
+    } else {
+        /*
+         * Index expression; find the correct expression.  (This search could
+         * be avoided, at the cost of complicating all the callers of this
+         * routine; doesn't seem worth it.)
+         */
+        let mut indexpr_item: *mut ListCell;
+        let mut i: i32;
+        let mut indexkey: *mut Node;
+
+        indexpr_item = list_head((*index).indexprs);
+        i = 0;
+        while i < indexcol {
+            if *(*index).indexkeys.add(i as usize) == 0 {
+                if indexpr_item.is_null() {
+                    elog!(ERROR, "wrong number of index expressions");
+                }
+                indexpr_item = lnext((*index).indexprs, indexpr_item);
+            }
+            i += 1;
+        }
+        if indexpr_item.is_null() {
+            elog!(ERROR, "wrong number of index expressions");
+        }
+        indexkey = lfirst(indexpr_item) as *mut Node;
+
+        /*
+         * Does it match the operand?  Again, strip any relabeling.
+         */
+        if !indexkey.is_null() && IsA!(indexkey, T_RelabelType) {
+            indexkey = (*(indexkey as *mut RelabelType)).arg as *mut Node;
+        }
+
+        if equal(indexkey as *const c_void, operand as *const c_void) {
+            return true;
+        }
+    }
+
+    false
 }
 
 // JOIN_SEMI comes from crate::nodes::nodes::JoinType

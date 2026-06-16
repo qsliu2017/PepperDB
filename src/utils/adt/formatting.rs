@@ -7559,3 +7559,101 @@ pub unsafe fn float8_to_char(fcinfo: FunctionCallInfo) -> Datum {
     );
     PG_RETURN_TEXT_P!(fcinfo, result)
 }
+
+/* ----------
+ * DEBUG: Dump the FormatNode Tree (debug)
+ * ----------
+ */
+#[cfg(feature = "debug_to_from_char")]
+const DEBUG_elog_output: c_int = crate::utils::elog::DEBUG3;
+
+#[cfg(feature = "debug_to_from_char")]
+macro_rules! DUMP_THth {
+    ($suf:expr) => {
+        if S_TH($suf) != 0 { "TH" } else if S_th($suf) != 0 { "th" } else { " " }
+    };
+}
+
+#[cfg(feature = "debug_to_from_char")]
+macro_rules! DUMP_FM {
+    ($suf:expr) => {
+        if S_FM($suf) != 0 { "FM" } else { " " }
+    };
+}
+
+#[cfg(feature = "debug_to_from_char")]
+unsafe fn dump_node(node: *mut FormatNode, max: c_int) {
+    let mut n: *mut FormatNode;
+    let mut a: c_int;
+
+    elog!(DEBUG_elog_output, "to_from-char(): DUMP FORMAT");
+
+    a = 0;
+    n = node;
+    while a <= max {
+        if (*n).r#type == NODE_TYPE_ACTION {
+            elog!(
+                DEBUG_elog_output,
+                "{}:\t NODE_TYPE_ACTION '{}'\t({},{})",
+                a,
+                cstr((*(*n).key).name),
+                DUMP_THth!((*n).suffix),
+                DUMP_FM!((*n).suffix)
+            );
+        } else if (*n).r#type == NODE_TYPE_CHAR {
+            elog!(
+                DEBUG_elog_output,
+                "{}:\t NODE_TYPE_CHAR '{}'",
+                a,
+                cstr((*n).character.as_ptr())
+            );
+        } else if (*n).r#type == NODE_TYPE_END {
+            elog!(DEBUG_elog_output, "{}:\t NODE_TYPE_END", a);
+            return;
+        } else {
+            elog!(DEBUG_elog_output, "{}:\t unknown NODE!", a);
+        }
+        n = n.add(1);
+        a += 1;
+    }
+}
+
+/* -----------
+ * DEBUG: Call for debug and for index checking; (Show ASCII char
+ * and defined keyword for each used position
+ * ----------
+ */
+#[cfg(feature = "debug_to_from_char")]
+unsafe fn dump_index(k: *const KeyWord, index: *const c_int) {
+    let mut count: c_int = 0;
+    let mut free_i: c_int = 0;
+
+    elog!(DEBUG_elog_output, "TO-FROM_CHAR: Dump KeyWord Index:");
+
+    for i in 0..KeyWord_INDEX_SIZE as c_int {
+        if *index.add(i as usize) != -1 {
+            elog!(
+                DEBUG_elog_output,
+                "\t{}: {}, ",
+                (i + 32) as u8 as char,
+                cstr((*k.add(*index.add(i as usize) as usize)).name)
+            );
+            count += 1;
+        } else {
+            free_i += 1;
+            elog!(
+                DEBUG_elog_output,
+                "\t({}) {} {}",
+                i,
+                (i + 32) as u8 as char,
+                *index.add(i as usize)
+            );
+        }
+    }
+    elog!(
+        DEBUG_elog_output,
+        "\n\t\tUsed positions: {},\n\t\tFree positions: {}",
+        count,
+        free_i
+    );
+}

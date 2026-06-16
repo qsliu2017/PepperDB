@@ -9,6 +9,8 @@ use crate::prelude::*;
 use crate::utils::init::globals::MyDatabaseId;
 
 use std::ffi::{c_char, c_int, c_void};
+#[cfg(windows)]
+use std::ffi::{c_uint, c_ulong};
 
 // libc types/functions used here.
 #[allow(non_camel_case_types)]
@@ -566,6 +568,144 @@ pub unsafe extern "C" fn strncoll_libc(
     }
 
     result = strcoll_l(arg1n, arg2n, (*locale).info.lt);
+
+    if buf != sbuf.as_mut_ptr() {
+        pfree(buf as *mut c_void);
+    }
+
+    result
+}
+
+/*
+ * strncoll_libc_win32_utf8
+ *
+ * Win32 does not have UTF-8. Convert UTF8 arguments to wide characters and
+ * invoke wcscoll_l().
+ *
+ * An input string length of -1 means that it's NUL-terminated.
+ */
+#[cfg(windows)]
+extern "C" {
+    fn MultiByteToWideChar(
+        code_page: c_uint,
+        flags: c_ulong,
+        mbstr: *const c_char,
+        cbmultibyte: c_int,
+        widechar: *mut u16,
+        cchwidechar: c_int,
+    ) -> c_int;
+    fn GetLastError() -> c_ulong;
+    fn wcscoll_l(a: *const u16, b: *const u16, loc: locale_t) -> c_int;
+    fn strerror(errnum: c_int) -> *mut c_char;
+}
+
+#[cfg(windows)]
+const CP_UTF8: c_uint = 65001;
+
+#[cfg(windows)]
+const PG_UTF8: c_int = 6;
+
+#[cfg(windows)]
+unsafe fn GetDatabaseEncoding() -> c_int {
+    PG_UTF8
+}
+
+#[cfg(windows)]
+unsafe extern "C" fn strncoll_libc_win32_utf8(
+    arg1: *const c_char,
+    mut len1: ssize_t,
+    arg2: *const c_char,
+    mut len2: ssize_t,
+    locale: pg_locale_t,
+) -> c_int {
+    let mut sbuf: [c_char; TEXTBUFLEN] = [0; TEXTBUFLEN];
+    let mut buf: *mut c_char = sbuf.as_mut_ptr();
+    let a1p: *mut c_char;
+    let a2p: *mut c_char;
+    let a1len: c_int;
+    let a2len: c_int;
+    let mut r: c_int;
+    let result: c_int;
+
+    Assert!((*locale).provider == COLLPROVIDER_LIBC);
+    Assert!(GetDatabaseEncoding() == PG_UTF8);
+
+    if len1 == -1 {
+        len1 = strlen(arg1) as ssize_t;
+    }
+    if len2 == -1 {
+        len2 = strlen(arg2) as ssize_t;
+    }
+
+    a1len = (len1 * 2 + 2) as c_int;
+    a2len = (len2 * 2 + 2) as c_int;
+
+    if (a1len + a2len) as usize > TEXTBUFLEN {
+        buf = palloc((a1len + a2len) as usize) as *mut c_char;
+    }
+
+    a1p = buf;
+    a2p = buf.add(a1len as usize);
+
+    /* API does not work for zero-length input */
+    if len1 == 0 {
+        r = 0;
+    } else {
+        r = MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            arg1,
+            len1 as c_int,
+            a1p as *mut u16,
+            a1len / 2,
+        );
+        if r == 0 {
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "could not convert string to UTF-16: error code {}",
+                    GetLastError()
+                )
+            );
+        }
+    }
+    *(a1p as *mut u16).add(r as usize) = 0;
+
+    if len2 == 0 {
+        r = 0;
+    } else {
+        r = MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            arg2,
+            len2 as c_int,
+            a2p as *mut u16,
+            a2len / 2,
+        );
+        if r == 0 {
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "could not convert string to UTF-16: error code {}",
+                    GetLastError()
+                )
+            );
+        }
+    }
+    *(a2p as *mut u16).add(r as usize) = 0;
+
+    *__errno_location() = 0;
+    result = wcscoll_l(a1p as *const u16, a2p as *const u16, (*locale).info.lt);
+    if result == 2147483647 {
+        /* _NLSCMPERROR; missing from mingw headers */
+        ereport!(
+            ERROR,
+            errmsg!(
+                "could not compare Unicode strings: {}",
+                std::ffi::CStr::from_ptr(strerror(*__errno_location())).to_string_lossy()
+            )
+        ); /* C: %m */
+    }
 
     if buf != sbuf.as_mut_ptr() {
         pfree(buf as *mut c_void);

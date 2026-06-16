@@ -717,8 +717,44 @@ pub unsafe fn gistcheckpage(rel: Relation, buf: Buffer) {
 pub unsafe fn gistNewBuffer(r: Relation, heaprel: Relation) -> Buffer {
     unimplemented!()
 }
+/* Can this page be recycled yet? */
 pub unsafe fn gistPageRecyclable(page: Page) -> bool {
-    unimplemented!()
+    if PageIsNew(page) {
+        return true;
+    }
+    if GistPageIsDeleted(page) {
+        /*
+         * The page was deleted, but when? If it was just deleted, a scan
+         * might have seen the downlink to it, and will read the page later.
+         * As long as that can happen, we must keep the deleted page around as
+         * a tombstone.
+         *
+         * For that check if the deletion XID could still be visible to
+         * anyone. If not, then no scan that's still in progress could have
+         * seen its downlink, and we can recycle it.
+         */
+        let deletexid_full: FullTransactionId = GistPageGetDeleteXid(page);
+
+        return GlobalVisCheckRemovableFullXid(null_mut(), deletexid_full);
+    }
+    false
+}
+
+// TODO(pg-port): genuinely-unported deps for gistPageRecyclable.
+unsafe fn PageIsNew(_page: Page) -> bool {
+    unimplemented!() // TODO: storage/bufpage.h
+}
+unsafe fn GistPageIsDeleted(_page: Page) -> bool {
+    unimplemented!() // TODO: access/gist.h
+}
+unsafe fn GistPageGetDeleteXid(_page: Page) -> FullTransactionId {
+    unimplemented!() // TODO: access/gist.h
+}
+unsafe fn GlobalVisCheckRemovableFullXid(
+    _rel: Relation,
+    _xid: FullTransactionId,
+) -> bool {
+    unimplemented!() // TODO: utils/snapmgr.h
 }
 pub unsafe fn gistfillbuffer(page: Page, itup: *mut IndexTuple, len: c_int, off: OffsetNumber) {
     unimplemented!()

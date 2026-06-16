@@ -29,8 +29,23 @@ use crate::common::int::{pg_add_s64_overflow, pg_mul_s64_overflow, pg_sub_s64_ov
 use crate::utils::adt::numutils::{pg_lltoa, pg_strtoint64_safe};
 use crate::lib::stringinfo::{StringInfo, StringInfoData};
 use crate::libpq::pqformat::{pq_begintypsend, pq_endtypsend, pq_getmsgint64, pq_sendint64};
-use crate::postgres::PointerGetDatum;
-use core::ffi::{c_char, c_void};
+use crate::postgres::{Int64GetDatum, PointerGetDatum};
+use crate::PG_NARGS;
+use crate::nodes::nodes::Node;
+use crate::nodes::supportnodes::{SupportRequestRows, SupportRequestWFuncMonotonic};
+use crate::nodes::plannodes::{
+    MonotonicFunction, MONOTONICFUNC_BOTH, MONOTONICFUNC_DECREASING, MONOTONICFUNC_INCREASING,
+    MONOTONICFUNC_NONE,
+};
+use crate::nodes::parsenodes::{
+    FRAMEOPTION_END_UNBOUNDED_FOLLOWING, FRAMEOPTION_START_UNBOUNDED_PRECEDING,
+};
+use crate::nodes::primnodes::{Const, FuncExpr};
+use crate::nodes::pg_list::{linitial, list_length, lsecond, lthird, List, NIL};
+use crate::postgres::DatumGetInt64;
+use crate::optimizer::util::clauses::estimate_expression_value;
+use crate::{IsA, PG_RETURN_POINTER};
+use core::ffi::{c_char, c_int, c_void};
 
 const MAXINT8LEN: usize = 20;
 
@@ -431,12 +446,50 @@ pub unsafe fn int8dec_any(fcinfo: FunctionCallInfo) -> Datum {
     int8dec(fcinfo)
 }
 
-/* int8inc_support - prosupport function for int8inc()/int8inc_any() */
+/*
+ * int8inc_support
+ *		prosupport function for int8inc() and int8inc_any()
+ */
 pub unsafe fn int8inc_support(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): planner support nodes (SupportRequestWFuncMonotonic, MonotonicFunction)
-    // from nodes/supportnodes.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("int8inc_support: planner support nodes not yet translated")
+    let rawreq: *mut Node = PG_GETARG_POINTER!(fcinfo, 0) as *mut Node;
+
+    if IsA!(rawreq, T_SupportRequestWFuncMonotonic) {
+        let req: *mut SupportRequestWFuncMonotonic =
+            rawreq as *mut SupportRequestWFuncMonotonic;
+        let mut monotonic: MonotonicFunction = MONOTONICFUNC_NONE;
+        let frameOptions: c_int = (*(*req).window_clause).frameOptions;
+
+        /* No ORDER BY clause then all rows are peers */
+        if (*(*req).window_clause).orderClause == NIL {
+            monotonic = MONOTONICFUNC_BOTH;
+        } else {
+            /*
+             * Otherwise take into account the frame options.  When the frame
+             * bound is the start of the window then the resulting value can
+             * never decrease, therefore is monotonically increasing
+             */
+            if frameOptions & FRAMEOPTION_START_UNBOUNDED_PRECEDING != 0 {
+                monotonic = core::mem::transmute::<c_int, MonotonicFunction>(
+                    (monotonic as c_int) | (MONOTONICFUNC_INCREASING as c_int),
+                );
+            }
+
+            /*
+             * Likewise, if the frame bound is the end of the window then the
+             * resulting value can never decrease.
+             */
+            if frameOptions & FRAMEOPTION_END_UNBOUNDED_FOLLOWING != 0 {
+                monotonic = core::mem::transmute::<c_int, MonotonicFunction>(
+                    (monotonic as c_int) | (MONOTONICFUNC_DECREASING as c_int),
+                );
+            }
+        }
+
+        (*req).monotonic = monotonic;
+        PG_RETURN_POINTER!(req);
+    }
+
+    PG_RETURN_POINTER!(null_mut::<c_void>())
 }
 
 pub unsafe fn int8larger(fcinfo: FunctionCallInfo) -> Datum {
@@ -763,6 +816,75 @@ pub unsafe fn oidtoi8(fcinfo: FunctionCallInfo) -> Datum {
     PG_RETURN_INT64!(arg as int64);
 }
 
+#[repr(C)]
+struct generate_series_fctx {
+    current: int64,
+    finish: int64,
+    step: int64,
+}
+
+/*
+ * Set-returning-function support (funcapi.h).  funcapi.c is not yet ported, so
+ * FuncCallContext and the SRF_* control-flow macros are declared locally with
+ * TODO(pg-port) stubs, mirroring the numeric.rs precedent.
+ */
+#[repr(C)]
+struct FuncCallContext {
+    call_cntr: u64,
+    max_calls: u64,
+    user_fctx: *mut c_void,
+    attinmeta: *mut c_void,
+    multi_call_memory_ctx: MemoryContext,
+    tuple_desc: *mut c_void,
+}
+
+macro_rules! SRF_IS_FIRSTCALL {
+    ($fcinfo:expr) => {
+        srf_is_firstcall($fcinfo)
+    };
+}
+macro_rules! SRF_FIRSTCALL_INIT {
+    ($fcinfo:expr) => {
+        srf_firstcall_init($fcinfo)
+    };
+}
+macro_rules! SRF_PERCALL_SETUP {
+    ($fcinfo:expr) => {
+        srf_percall_setup($fcinfo)
+    };
+}
+macro_rules! SRF_RETURN_NEXT {
+    ($fcinfo:expr, $result:expr) => {
+        return srf_return_next($fcinfo, $result)
+    };
+}
+macro_rules! SRF_RETURN_DONE {
+    ($fcinfo:expr) => {
+        return srf_return_done($fcinfo)
+    };
+}
+
+unsafe fn srf_is_firstcall(_fcinfo: FunctionCallInfo) -> bool {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_firstcall_init(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_percall_setup(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_return_next(_fcinfo: FunctionCallInfo, _result: Datum) -> Datum {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_return_done(_fcinfo: FunctionCallInfo) -> Datum {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+
+/* is_funcclause - nodes/nodeFuncs.h.  Local copy (not exported), per sibling precedent. */
+unsafe fn is_funcclause(clause: *const Node) -> bool {
+    !clause.is_null() && IsA!(clause, T_FuncExpr)
+}
+
 /*
  * non-persistent numeric series generator
  */
@@ -771,15 +893,145 @@ pub unsafe fn generate_series_int8(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn generate_series_step_int8(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): SRF infrastructure (funcapi.h) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("generate_series_step_int8: SRF infrastructure (funcapi.h) not yet translated")
+    let mut funcctx: *mut FuncCallContext;
+    let fctx: *mut generate_series_fctx;
+    let result: int64;
+    let oldcontext: MemoryContext;
+
+    /* stuff done only on the first call of the function */
+    if SRF_IS_FIRSTCALL!(fcinfo) {
+        let start: int64 = PG_GETARG_INT64!(fcinfo, 0);
+        let finish: int64 = PG_GETARG_INT64!(fcinfo, 1);
+        let mut step: int64 = 1;
+
+        /* see if we were given an explicit step size */
+        if PG_NARGS!(fcinfo) == 3 {
+            step = PG_GETARG_INT64!(fcinfo, 2);
+        }
+        if step == 0 {
+            ereport!(ERROR, errmsg!("step size cannot equal zero"));
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        }
+
+        /* create a function context for cross-call persistence */
+        funcctx = SRF_FIRSTCALL_INIT!(fcinfo);
+
+        /*
+         * switch to memory context appropriate for multiple function calls
+         */
+        oldcontext = MemoryContextSwitchTo((*funcctx).multi_call_memory_ctx);
+
+        /* allocate memory for user context */
+        let fctx_new: *mut generate_series_fctx =
+            palloc(core::mem::size_of::<generate_series_fctx>()) as *mut generate_series_fctx;
+
+        /*
+         * Use fctx to keep state from call to call. Seed current with the
+         * original start value
+         */
+        (*fctx_new).current = start;
+        (*fctx_new).finish = finish;
+        (*fctx_new).step = step;
+
+        (*funcctx).user_fctx = fctx_new as *mut c_void;
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP!(fcinfo);
+
+    /*
+     * get the saved state and use current as the result for this iteration
+     */
+    fctx = (*funcctx).user_fctx as *mut generate_series_fctx;
+    result = (*fctx).current;
+
+    if ((*fctx).step > 0 && (*fctx).current <= (*fctx).finish)
+        || ((*fctx).step < 0 && (*fctx).current >= (*fctx).finish)
+    {
+        /*
+         * Increment current in preparation for next iteration. If next-value
+         * computation overflows, this is the final result.
+         */
+        if pg_add_s64_overflow((*fctx).current, (*fctx).step, &mut (*fctx).current) {
+            (*fctx).step = 0;
+        }
+
+        /* do when there is more left to send */
+        SRF_RETURN_NEXT!(fcinfo, Int64GetDatum(result));
+    } else {
+        /* do when there is no more left */
+        SRF_RETURN_DONE!(fcinfo);
+    }
 }
 
+/*
+ * Planner support function for generate_series(int8, int8 [, int8])
+ */
 pub unsafe fn generate_series_int8_support(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): planner support nodes + optimizer not yet translated.
-    let _ = fcinfo;
-    unimplemented!("generate_series_int8_support: planner support nodes not yet translated")
+    let rawreq: *mut Node = PG_GETARG_POINTER!(fcinfo, 0) as *mut Node;
+    let mut ret: *mut Node = null_mut();
+
+    if IsA!(rawreq, T_SupportRequestRows) {
+        /* Try to estimate the number of rows returned */
+        let req: *mut SupportRequestRows = rawreq as *mut SupportRequestRows;
+
+        if is_funcclause((*req).node) {
+            /* be paranoid */
+            let args: *mut List = (*((*req).node as *mut FuncExpr)).args;
+            let arg1: *mut Node;
+            let arg2: *mut Node;
+            let arg3: *mut Node;
+
+            /* We can use estimated argument values here */
+            arg1 = estimate_expression_value((*req).root, linitial(args) as *mut Node);
+            arg2 = estimate_expression_value((*req).root, lsecond(args) as *mut Node);
+            if list_length(args) >= 3 {
+                arg3 = estimate_expression_value((*req).root, lthird(args) as *mut Node);
+            } else {
+                arg3 = null_mut();
+            }
+
+            /*
+             * If any argument is constant NULL, we can safely assume that
+             * zero rows are returned.  Otherwise, if they're all non-NULL
+             * constants, we can calculate the number of rows that will be
+             * returned.  Use double arithmetic to avoid overflow hazards.
+             */
+            if (IsA!(arg1, T_Const) && (*(arg1 as *mut Const)).constisnull)
+                || (IsA!(arg2, T_Const) && (*(arg2 as *mut Const)).constisnull)
+                || (!arg3.is_null()
+                    && IsA!(arg3, T_Const)
+                    && (*(arg3 as *mut Const)).constisnull)
+            {
+                (*req).rows = 0.0;
+                ret = req as *mut Node;
+            } else if IsA!(arg1, T_Const)
+                && IsA!(arg2, T_Const)
+                && (arg3.is_null() || IsA!(arg3, T_Const))
+            {
+                let start: f64;
+                let finish: f64;
+                let step: f64;
+
+                start = DatumGetInt64((*(arg1 as *mut Const)).constvalue) as f64;
+                finish = DatumGetInt64((*(arg2 as *mut Const)).constvalue) as f64;
+                step = if !arg3.is_null() {
+                    DatumGetInt64((*(arg3 as *mut Const)).constvalue) as f64
+                } else {
+                    1.0
+                };
+
+                /* This equation works for either sign of step */
+                if step != 0.0 {
+                    (*req).rows = ((finish - start + step) / step).floor();
+                    ret = req as *mut Node;
+                }
+            }
+        }
+    }
+
+    PG_RETURN_POINTER!(ret)
 }
 
 #[cfg(test)]

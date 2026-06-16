@@ -6335,37 +6335,354 @@ pub unsafe fn estimate_hashagg_tablesize(
 // =====================================================================
 
 /*
- * add_unique_group_var: add an item to a list of GroupVarInfos.
- * TODO(pg-port): faithful body deferred (needs remove_nulling_relids/equal/
- * exprs_known_equal/foreach_delete_current).
+ * Helper routine for estimate_num_groups: add an item to a list of
+ * GroupVarInfos, but only if it's not known equal to any of the existing
+ * entries.
  */
 unsafe fn add_unique_group_var(
     root: *mut PlannerInfo,
-    varinfos: *mut List,
-    var: *mut Node,
+    mut varinfos: *mut List,
+    mut var: *mut Node,
     vardata: *mut VariableStatData,
 ) -> *mut List {
-    unimplemented!("TODO(pg-port): selfuncs.rs add_unique_group_var")
+    let mut varinfo: *mut GroupVarInfo;
+    let mut isdefault: bool = false;
+
+    let ndistinct = get_variable_numdistinct(vardata, &mut isdefault);
+
+    /*
+     * The nullingrels bits within the var could cause the same var to be
+     * counted multiple times if it's marked with different nullingrels.  They
+     * could also prevent us from matching the var to the expressions in
+     * extended statistics (see estimate_multivariate_ndistinct).  So strip
+     * them out first.
+     */
+    var = remove_nulling_relids(var, (*root).outer_join_rels, std::ptr::null_mut());
+
+    foreach!(lc, varinfos, {
+        varinfo = lfirst(current_cell!(lc)) as *mut GroupVarInfo;
+
+        /* Drop exact duplicates */
+        if equal(var as *const c_void, (*varinfo).var as *const c_void) {
+            return varinfos;
+        }
+
+        /*
+         * Drop known-equal vars, but only if they belong to different
+         * relations (see comments for estimate_num_groups).  We aren't too
+         * fussy about the semantics of "equal" here.
+         */
+        if (*vardata).rel != (*varinfo).rel
+            && exprs_known_equal(root, var, (*varinfo).var, InvalidOid)
+        {
+            if (*varinfo).ndistinct <= ndistinct {
+                /* Keep older item, forget new one */
+                return varinfos;
+            } else {
+                /* Delete the older item */
+                varinfos = foreach_delete_current!(varinfos, lc);
+            }
+        }
+    });
+
+    varinfo = palloc(std::mem::size_of::<GroupVarInfo>()) as *mut GroupVarInfo;
+
+    (*varinfo).var = var;
+    (*varinfo).rel = (*vardata).rel;
+    (*varinfo).ndistinct = ndistinct;
+    (*varinfo).isdefault = isdefault;
+    varinfos = lappend(varinfos, varinfo as *mut c_void);
+    varinfos
 }
 
 /*
- * estimate_num_groups
- * TODO(pg-port): faithful body deferred (needs pull_var_clause/equal/
- * extended-stats helpers).
+ * estimate_num_groups		- Estimate number of groups in a grouped query
+ *
+ * (See the C source comment for the full explanation of the algorithm.)
  */
 pub unsafe fn estimate_num_groups(
     root: *mut PlannerInfo,
     groupExprs: *mut List,
-    input_rows: f64,
+    mut input_rows: f64,
     pgset: *mut *mut List,
     estinfo: *mut EstimationInfo,
 ) -> f64 {
-    unimplemented!("TODO(pg-port): selfuncs.rs estimate_num_groups")
+    let mut varinfos: *mut List = NIL;
+    let mut srf_multiplier: f64 = 1.0;
+    let mut numdistinct: f64;
+    let mut i: c_int;
+
+    /* Zero the estinfo output parameter, if non-NULL */
+    if !estinfo.is_null() {
+        std::ptr::write_bytes(estinfo, 0, 1);
+    }
+
+    /*
+     * We don't ever want to return an estimate of zero groups, as that tends
+     * to lead to division-by-zero and other unpleasantness.  The input_rows
+     * estimate is usually already at least 1, but clamp it just in case it
+     * isn't.
+     */
+    input_rows = clamp_row_est(input_rows);
+
+    /*
+     * If no grouping columns, there's exactly one group.  (This can't happen
+     * for normal cases with GROUP BY or DISTINCT, but it is possible for
+     * corner cases with set operations.)
+     */
+    if groupExprs == NIL || (!pgset.is_null() && *pgset == NIL) {
+        return 1.0;
+    }
+
+    /*
+     * Count groups derived from boolean grouping expressions.  For other
+     * expressions, find the unique Vars used, treating an expression as a Var
+     * if we can find stats for it.  For each one, record the statistical
+     * estimate of number of distinct values (total in its table, without
+     * regard for filtering).
+     */
+    numdistinct = 1.0;
+
+    i = 0;
+    foreach!(l, groupExprs, {
+        let groupexpr = lfirst(current_cell!(l)) as *mut Node;
+        let this_srf_multiplier: f64;
+        let mut vardata: VariableStatData = std::mem::zeroed();
+        let varshere: *mut List;
+
+        /* is expression in this grouping set? */
+        if !pgset.is_null() && {
+            let cur = i;
+            i += 1;
+            !list_member_int(*pgset, cur)
+        } {
+            continue;
+        }
+
+        /*
+         * Set-returning functions in grouping columns are a bit problematic.
+         * The code below will effectively ignore their SRF nature and come up
+         * with a numdistinct estimate as though they were scalar functions.
+         * We compensate by scaling up the end result by the largest SRF
+         * rowcount estimate.
+         */
+        this_srf_multiplier = expression_returns_set_rows(root, groupexpr);
+        if srf_multiplier < this_srf_multiplier {
+            srf_multiplier = this_srf_multiplier;
+        }
+
+        /* Short-circuit for expressions returning boolean */
+        if exprType(groupexpr) == BOOLOID {
+            numdistinct *= 2.0;
+            continue;
+        }
+
+        /*
+         * If examine_variable is able to deduce anything about the GROUP BY
+         * expression, treat it as a single variable even if it's really more
+         * complicated.
+         */
+        examine_variable(root, groupexpr, 0, &mut vardata);
+        if HeapTupleIsValid(vardata.statsTuple) || vardata.isunique {
+            varinfos = add_unique_group_var(root, varinfos, groupexpr, &mut vardata);
+            ReleaseVariableStats!(vardata);
+            continue;
+        }
+        ReleaseVariableStats!(vardata);
+
+        /*
+         * Else pull out the component Vars.  Handle PlaceHolderVars by
+         * recursing into their arguments.
+         */
+        varshere = pull_var_clause(
+            groupexpr,
+            PVC_RECURSE_AGGREGATES | PVC_RECURSE_WINDOWFUNCS | PVC_RECURSE_PLACEHOLDERS,
+        );
+
+        /*
+         * If we find any variable-free GROUP BY item, then either it is a
+         * constant (and we can ignore it) or it contains a volatile function;
+         * in the latter case we punt and assume that each input row will
+         * yield a distinct group.
+         */
+        if varshere == NIL {
+            if contain_volatile_functions(groupexpr) {
+                return input_rows;
+            }
+            continue;
+        }
+
+        /*
+         * Else add variables to varinfos list
+         */
+        foreach!(l2, varshere, {
+            let var = lfirst(current_cell!(l2)) as *mut Node;
+
+            examine_variable(root, var, 0, &mut vardata);
+            varinfos = add_unique_group_var(root, varinfos, var, &mut vardata);
+            ReleaseVariableStats!(vardata);
+        });
+    });
+
+    /*
+     * If now no Vars, we must have an all-constant or all-boolean GROUP BY
+     * list.
+     */
+    if varinfos == NIL {
+        /* Apply SRF multiplier as we would do in the long path */
+        numdistinct *= srf_multiplier;
+        /* Round off */
+        numdistinct = numdistinct.ceil();
+        /* Guard against out-of-range answers */
+        if numdistinct > input_rows {
+            numdistinct = input_rows;
+        }
+        if numdistinct < 1.0 {
+            numdistinct = 1.0;
+        }
+        return numdistinct;
+    }
+
+    /*
+     * Group Vars by relation and estimate total numdistinct.
+     */
+    loop {
+        let varinfo1 = linitial(varinfos) as *mut GroupVarInfo;
+        let rel = (*varinfo1).rel;
+        let mut reldistinct: f64 = 1.0;
+        let mut relmaxndistinct: f64 = reldistinct;
+        let mut relvarcount: c_int = 0;
+        let mut newvarinfos: *mut List = NIL;
+        let mut relvarinfos: *mut List = NIL;
+
+        /*
+         * Split the list of varinfos in two - one for the current rel, one
+         * for remaining Vars on other rels.
+         */
+        relvarinfos = lappend(relvarinfos, varinfo1 as *mut c_void);
+        for_each_from!(l, varinfos, 1, {
+            let varinfo2 = lfirst(current_cell!(l)) as *mut GroupVarInfo;
+
+            if (*varinfo2).rel == (*varinfo1).rel {
+                /* varinfos on current rel */
+                relvarinfos = lappend(relvarinfos, varinfo2 as *mut c_void);
+            } else {
+                /* not time to process varinfo2 yet */
+                newvarinfos = lappend(newvarinfos, varinfo2 as *mut c_void);
+            }
+        });
+
+        /*
+         * Get the numdistinct estimate for the Vars of this rel.
+         */
+        while !relvarinfos.is_null() {
+            let mut mvndistinct: f64 = 0.0;
+
+            if estimate_multivariate_ndistinct(root, rel, &mut relvarinfos, &mut mvndistinct) {
+                reldistinct *= mvndistinct;
+                if relmaxndistinct < mvndistinct {
+                    relmaxndistinct = mvndistinct;
+                }
+                relvarcount += 1;
+            } else {
+                foreach!(l, relvarinfos, {
+                    let varinfo2 = lfirst(current_cell!(l)) as *mut GroupVarInfo;
+
+                    reldistinct *= (*varinfo2).ndistinct;
+                    if relmaxndistinct < (*varinfo2).ndistinct {
+                        relmaxndistinct = (*varinfo2).ndistinct;
+                    }
+                    relvarcount += 1;
+
+                    /*
+                     * When varinfo2's isdefault is set then we'd better set
+                     * the SELFLAG_USED_DEFAULT bit in the EstimationInfo.
+                     */
+                    if !estinfo.is_null() && (*varinfo2).isdefault {
+                        (*estinfo).flags |= SELFLAG_USED_DEFAULT;
+                    }
+                });
+
+                /* we're done with this relation */
+                relvarinfos = NIL;
+            }
+        }
+
+        /*
+         * Sanity check --- don't divide by zero if empty relation.
+         */
+        Assert!(IS_SIMPLE_REL(rel));
+        if (*rel).tuples > 0.0 {
+            /*
+             * Clamp to size of rel, or size of rel / 10 if multiple Vars.
+             */
+            let mut clamp: f64 = (*rel).tuples;
+
+            if relvarcount > 1 {
+                clamp *= 0.1;
+                if clamp < relmaxndistinct {
+                    clamp = relmaxndistinct;
+                    /* for sanity in case some ndistinct is too large: */
+                    if clamp > (*rel).tuples {
+                        clamp = (*rel).tuples;
+                    }
+                }
+            }
+            if reldistinct > clamp {
+                reldistinct = clamp;
+            }
+
+            /*
+             * Update the estimate based on the restriction selectivity,
+             * guarding against division by zero when reldistinct is zero.
+             * Also skip this if we know that we are returning all rows.
+             */
+            if reldistinct > 0.0 && (*rel).rows < (*rel).tuples {
+                /*
+                 * n * (1 - ((N-p)/N)^(N/n)) -- see C comment for derivation.
+                 */
+                reldistinct *= 1.0
+                    - pow(
+                        ((*rel).tuples - (*rel).rows) / (*rel).tuples,
+                        (*rel).tuples / reldistinct,
+                    );
+            }
+            reldistinct = clamp_row_est(reldistinct);
+
+            /*
+             * Update estimate of total distinct groups.
+             */
+            numdistinct *= reldistinct;
+        }
+
+        varinfos = newvarinfos;
+        if varinfos == NIL {
+            break;
+        }
+    }
+
+    /* Now we can account for the effects of any SRFs */
+    numdistinct *= srf_multiplier;
+
+    /* Round off */
+    numdistinct = numdistinct.ceil();
+
+    /* Guard against out-of-range answers */
+    if numdistinct > input_rows {
+        numdistinct = input_rows;
+    }
+    if numdistinct < 1.0 {
+        numdistinct = 1.0;
+    }
+
+    numdistinct
 }
 
 /*
- * estimate_multivariate_bucketsize
- * TODO(pg-port): faithful body deferred (needs extended statistics).
+ * Try to estimate the bucket size of the hash join inner side when the join
+ * condition contains two or more clauses by employing extended statistics.
+ *
+ * Return a list of clauses that didn't fetch any extended statistics.
  */
 pub unsafe fn estimate_multivariate_bucketsize(
     root: *mut PlannerInfo,
@@ -6373,12 +6690,195 @@ pub unsafe fn estimate_multivariate_bucketsize(
     hashclauses: *mut List,
     innerbucketsize: *mut Selectivity,
 ) -> *mut List {
-    unimplemented!("TODO(pg-port): selfuncs.rs estimate_multivariate_bucketsize")
+    let mut clauses: *mut List = list_copy(hashclauses);
+    let mut otherclauses: *mut List = NIL;
+    let mut ndistinct: f64 = 1.0;
+
+    if list_length(hashclauses) <= 1 {
+        /*
+         * Nothing to do for a single clause.  Could we employ univariate
+         * extended stat here?
+         */
+        return hashclauses;
+    }
+
+    while clauses != NIL {
+        let mut relid: c_int = -1;
+        let mut varinfos: *mut List = NIL;
+        let mut origin_rinfos: *mut List = NIL;
+        let mut mvndistinct: f64 = 0.0;
+        let origin_varinfos: *mut List;
+        let mut group_relid: c_int = -1;
+        let mut group_rel: *mut RelOptInfo = std::ptr::null_mut();
+
+        /*
+         * Find clauses, referencing the same single base relation and try to
+         * estimate such a group with extended statistics.
+         */
+        foreach!(lc, clauses, {
+            let rinfo = lfirst_node!(*mut RestrictInfo, T_RestrictInfo, current_cell!(lc));
+            let mut expr: *mut Node;
+            let relids: Relids;
+            let mut varinfo: *mut GroupVarInfo;
+
+            /*
+             * Find the inner side of the join, which we need to estimate the
+             * number of buckets.  Use outer_is_left because the
+             * clause_sides_match_join routine has called on hash clauses.
+             */
+            relids = if (*rinfo).outer_is_left {
+                (*rinfo).right_relids
+            } else {
+                (*rinfo).left_relids
+            };
+            expr = if (*rinfo).outer_is_left {
+                get_rightop((*rinfo).clause)
+            } else {
+                get_leftop((*rinfo).clause)
+            };
+
+            if bms_get_singleton_member(relids, &mut relid)
+                && (**(*root).simple_rel_array.add(relid as usize)).statlist != NIL
+            {
+                let mut is_duplicate = false;
+
+                /*
+                 * This inner-side expression references only one relation.
+                 * Extended statistics on this clause can exist.
+                 */
+                if group_relid < 0 {
+                    let rte = *(*root).simple_rte_array.add(relid as usize);
+
+                    if rte.is_null()
+                        || ((*rte).relkind != RELKIND_RELATION
+                            && (*rte).relkind != RELKIND_MATVIEW
+                            && (*rte).relkind != RELKIND_FOREIGN_TABLE
+                            && (*rte).relkind != RELKIND_PARTITIONED_TABLE)
+                    {
+                        /* Extended statistics can't exist in principle */
+                        otherclauses = lappend(otherclauses, rinfo as *mut c_void);
+                        clauses = foreach_delete_current!(clauses, lc);
+                        continue;
+                    }
+
+                    group_relid = relid;
+                    group_rel = *(*root).simple_rel_array.add(relid as usize);
+                } else if group_relid != relid {
+                    /*
+                     * Being in the group forming state we don't need other
+                     * clauses.
+                     */
+                    continue;
+                }
+
+                /*
+                 * Clear nullingrels to correctly match hash keys.  See
+                 * add_unique_group_var()'s comment for details.
+                 */
+                expr = remove_nulling_relids(expr, (*root).outer_join_rels, std::ptr::null_mut());
+
+                /*
+                 * Detect and exclude exact duplicates from the list of hash
+                 * keys (like add_unique_group_var does).
+                 */
+                foreach!(lc1, varinfos, {
+                    varinfo = lfirst(current_cell!(lc1)) as *mut GroupVarInfo;
+
+                    if !equal(expr as *const c_void, (*varinfo).var as *const c_void) {
+                        continue;
+                    }
+
+                    is_duplicate = true;
+                    break;
+                });
+
+                if is_duplicate {
+                    /*
+                     * Skip exact duplicates. Adding them to the otherclauses
+                     * list also doesn't make sense.
+                     */
+                    continue;
+                }
+
+                /*
+                 * Initialize GroupVarInfo.  We only use it to call
+                 * estimate_multivariate_ndistinct(), which doesn't care about
+                 * ndistinct and isdefault fields.  Thus, skip these fields.
+                 */
+                varinfo = palloc0(std::mem::size_of::<GroupVarInfo>()) as *mut GroupVarInfo;
+                (*varinfo).var = expr;
+                (*varinfo).rel = *(*root).simple_rel_array.add(relid as usize);
+                varinfos = lappend(varinfos, varinfo as *mut c_void);
+
+                /*
+                 * Remember the link to RestrictInfo for the case the clause
+                 * is failed to be estimated.
+                 */
+                origin_rinfos = lappend(origin_rinfos, rinfo as *mut c_void);
+            } else {
+                /* This clause can't be estimated with extended statistics */
+                otherclauses = lappend(otherclauses, rinfo as *mut c_void);
+            }
+
+            clauses = foreach_delete_current!(clauses, lc);
+        });
+
+        if list_length(varinfos) < 2 {
+            /*
+             * Multivariate statistics doesn't apply to single columns except
+             * for expressions, but it has not been implemented yet.
+             */
+            otherclauses = list_concat(otherclauses, origin_rinfos);
+            list_free_deep(varinfos);
+            list_free(origin_rinfos);
+            continue;
+        }
+
+        Assert!(!group_rel.is_null());
+
+        /* Employ the extended statistics. */
+        origin_varinfos = varinfos;
+        loop {
+            let estimated =
+                estimate_multivariate_ndistinct(root, group_rel, &mut varinfos, &mut mvndistinct);
+
+            if !estimated {
+                break;
+            }
+
+            /*
+             * We've got an estimation.  Use ndistinct value in a consistent
+             * way - according to the caller's logic (see final_cost_hashjoin).
+             */
+            if ndistinct < mvndistinct {
+                ndistinct = mvndistinct;
+            }
+            Assert!(ndistinct >= 1.0);
+        }
+
+        Assert!(list_length(origin_varinfos) == list_length(origin_rinfos));
+
+        /* Collect unmatched clauses as otherclauses. */
+        forboth!(lc1, origin_varinfos, lc2, origin_rinfos, {
+            let vinfo = lfirst(lc1) as *mut GroupVarInfo;
+
+            if !list_member_ptr(varinfos, vinfo as *const c_void) {
+                /* Already estimated */
+                continue;
+            }
+
+            /* Can't be estimated here - push to the returning list */
+            otherclauses = lappend(otherclauses, lfirst(lc2));
+        });
+    }
+
+    *innerbucketsize = 1.0 / ndistinct;
+    otherclauses
 }
 
 /*
- * estimate_multivariate_ndistinct
- * TODO(pg-port): faithful body deferred (needs statext_ndistinct_load).
+ * Find the best matching ndistinct extended statistics for the given list of
+ * GroupVarInfos.
  */
 unsafe fn estimate_multivariate_ndistinct(
     root: *mut PlannerInfo,
@@ -6386,13 +6886,626 @@ unsafe fn estimate_multivariate_ndistinct(
     varinfos: *mut *mut List,
     ndistinct: *mut f64,
 ) -> bool {
-    unimplemented!("TODO(pg-port): selfuncs.rs estimate_multivariate_ndistinct")
+    let mut nmatches_vars: c_int;
+    let mut nmatches_exprs: c_int;
+    let mut statOid: Oid = InvalidOid;
+    let stats: *mut MVNDistinct;
+    let mut matched_info: *mut StatisticExtInfo = std::ptr::null_mut();
+    let rte = planner_rt_fetch((*rel).relid, root);
+
+    /* bail out immediately if the table has no extended statistics */
+    if (*rel).statlist.is_null() {
+        return false;
+    }
+
+    /* look for the ndistinct statistics object matching the most vars */
+    nmatches_vars = 0; /* we require at least two matches */
+    nmatches_exprs = 0;
+    foreach!(lc, (*rel).statlist, {
+        let info = lfirst(current_cell!(lc)) as *mut StatisticExtInfo;
+        let mut nshared_vars: c_int = 0;
+        let mut nshared_exprs: c_int = 0;
+
+        /* skip statistics of other kinds */
+        if (*info).kind != STATS_EXT_NDISTINCT {
+            continue;
+        }
+
+        /* skip statistics with mismatching stxdinherit value */
+        if (*info).inherit != (*rte).inh {
+            continue;
+        }
+
+        /*
+         * Determine how many expressions (and variables in non-matched
+         * expressions) match.
+         */
+        foreach!(lc2, *varinfos, {
+            let varinfo = lfirst(current_cell!(lc2)) as *mut GroupVarInfo;
+            let attnum: AttrNumber;
+
+            Assert!((*varinfo).rel == rel);
+
+            /* simple Var, search in statistics keys directly */
+            if IsA_!((*varinfo).var, Var) {
+                attnum = (*((*varinfo).var as *mut Var)).varattno;
+
+                /*
+                 * Ignore system attributes - we don't support statistics on
+                 * them, so can't match them.
+                 */
+                if !AttrNumberIsForUserDefinedAttr(attnum) {
+                    continue;
+                }
+
+                if bms_is_member(attnum as c_int, (*info).keys) {
+                    nshared_vars += 1;
+                }
+
+                continue;
+            }
+
+            /* expression - see if it's in the statistics object */
+            foreach!(lc3, (*info).exprs, {
+                let expr = lfirst(current_cell!(lc3)) as *mut Node;
+
+                if equal((*varinfo).var as *const c_void, expr as *const c_void) {
+                    nshared_exprs += 1;
+                    break;
+                }
+            });
+        });
+
+        /*
+         * The ndistinct extended statistics contain estimates for a minimum
+         * of pairs of columns.  Skip unless we matched at least two columns.
+         */
+        if nshared_vars + nshared_exprs < 2 {
+            continue;
+        }
+
+        /*
+         * Check if these statistics are a better match than the previous best
+         * match and if so, take note of the StatisticExtInfo.
+         */
+        if (nshared_exprs > nmatches_exprs)
+            || ((nshared_exprs == nmatches_exprs) && (nshared_vars > nmatches_vars))
+        {
+            statOid = (*info).statOid;
+            nmatches_vars = nshared_vars;
+            nmatches_exprs = nshared_exprs;
+            matched_info = info;
+        }
+    });
+
+    /* No match? */
+    if statOid == InvalidOid {
+        return false;
+    }
+
+    Assert!(nmatches_vars + nmatches_exprs > 1);
+
+    stats = statext_ndistinct_load(statOid, (*rte).inh);
+
+    /*
+     * If we have a match, search it for the specific item that matches (there
+     * must be one), and construct the output values.
+     */
+    if !stats.is_null() {
+        let mut i: c_int;
+        let mut newlist: *mut List = NIL;
+        let mut item: *mut MVNDistinctItem = std::ptr::null_mut();
+        let mut matched: *mut Bitmapset = std::ptr::null_mut();
+        let attnum_offset: AttrNumber;
+
+        /*
+         * How much we need to offset the attnums? If there are no
+         * expressions, no offset is needed. Otherwise offset enough to move
+         * the lowest one (which is equal to number of expressions) to 1.
+         */
+        if !(*matched_info).exprs.is_null() {
+            attnum_offset = (list_length((*matched_info).exprs) + 1) as AttrNumber;
+        } else {
+            attnum_offset = 0;
+        }
+
+        /* see what actually matched */
+        foreach!(lc2, *varinfos, {
+            let mut idx: c_int;
+            let mut found = false;
+
+            let varinfo = lfirst(current_cell!(lc2)) as *mut GroupVarInfo;
+
+            /*
+             * Process a simple Var expression, by matching it to keys
+             * directly.
+             */
+            if IsA_!((*varinfo).var, Var) {
+                let mut attnum: AttrNumber = (*((*varinfo).var as *mut Var)).varattno;
+
+                /*
+                 * Ignore expressions on system attributes.
+                 */
+                if !AttrNumberIsForUserDefinedAttr(attnum) {
+                    continue;
+                }
+
+                /* Is the variable covered by the statistics object? */
+                if !bms_is_member(attnum as c_int, (*matched_info).keys) {
+                    continue;
+                }
+
+                attnum = attnum + attnum_offset;
+
+                /* ensure sufficient offset */
+                Assert!(AttrNumberIsForUserDefinedAttr(attnum));
+
+                matched = bms_add_member(matched, attnum as c_int);
+
+                found = true;
+            }
+
+            if found {
+                continue;
+            }
+
+            /* expression - see if it's in the statistics object */
+            idx = 0;
+            foreach!(lc3, (*matched_info).exprs, {
+                let expr = lfirst(current_cell!(lc3)) as *mut Node;
+
+                if equal((*varinfo).var as *const c_void, expr as *const c_void) {
+                    let mut attnum: AttrNumber = -(idx + 1) as AttrNumber;
+
+                    attnum = attnum + attnum_offset;
+
+                    /* ensure sufficient offset */
+                    Assert!(AttrNumberIsForUserDefinedAttr(attnum));
+
+                    matched = bms_add_member(matched, attnum as c_int);
+
+                    /* there should be just one matching expression */
+                    break;
+                }
+
+                idx += 1;
+            });
+        });
+
+        /* Find the specific item that exactly matches the combination */
+        i = 0;
+        while i < (*stats).nitems {
+            let mut j: c_int;
+            let tmpitem = (*stats).items.add(i as usize);
+
+            if (*tmpitem).nattributes != bms_num_members(matched) {
+                i += 1;
+                continue;
+            }
+
+            /* assume it's the right item */
+            item = tmpitem;
+
+            /* check that all item attributes/expressions fit the match */
+            j = 0;
+            while j < (*tmpitem).nattributes {
+                let mut attnum: AttrNumber = *(*tmpitem).attributes.add(j as usize);
+
+                attnum = attnum + attnum_offset;
+
+                if !bms_is_member(attnum as c_int, matched) {
+                    /* nah, it's not this item */
+                    item = std::ptr::null_mut();
+                    break;
+                }
+                j += 1;
+            }
+
+            /*
+             * If the item has all the matched attributes, we know it's the
+             * right one.
+             */
+            if !item.is_null() {
+                break;
+            }
+            i += 1;
+        }
+
+        /*
+         * Make sure we found an item.
+         */
+        if item.is_null() {
+            elog!(ERROR, "corrupt MVNDistinct entry");
+        }
+
+        /* Form the output varinfo list, keeping only unmatched ones */
+        foreach!(lc, *varinfos, {
+            let varinfo = lfirst(current_cell!(lc)) as *mut GroupVarInfo;
+            let mut found = false;
+
+            /*
+             * Let's look at plain variables first.
+             */
+            if IsA_!((*varinfo).var, Var) {
+                let mut attnum: AttrNumber = (*((*varinfo).var as *mut Var)).varattno;
+
+                /*
+                 * If it's a system attribute, we're done.  Just keep the
+                 * expression and continue.
+                 */
+                if !AttrNumberIsForUserDefinedAttr(attnum) {
+                    newlist = lappend(newlist, varinfo as *mut c_void);
+                    continue;
+                }
+
+                /* apply the same offset as above */
+                attnum += attnum_offset;
+
+                /* if it's not matched, keep the varinfo */
+                if !bms_is_member(attnum as c_int, matched) {
+                    newlist = lappend(newlist, varinfo as *mut c_void);
+                }
+
+                /* The rest of the loop deals with complex expressions. */
+                continue;
+            }
+
+            /*
+             * Process complex expressions, not just simple Vars.
+             */
+            foreach!(lc3, (*matched_info).exprs, {
+                let expr = lfirst(current_cell!(lc3)) as *mut Node;
+
+                if equal((*varinfo).var as *const c_void, expr as *const c_void) {
+                    found = true;
+                    break;
+                }
+            });
+
+            /* found exact match, skip */
+            if found {
+                continue;
+            }
+
+            newlist = lappend(newlist, varinfo as *mut c_void);
+        });
+
+        *varinfos = newlist;
+        *ndistinct = (*item).ndistinct;
+        return true;
+    }
+
+    false
 }
 
 /*
- * gincostestimate
- * TODO(pg-port): faithful body deferred (needs GIN AM internals:
- * ginGetStats/extractQuery support functions).
+ * Support routines for gincostestimate
+ */
+#[repr(C)]
+struct GinQualCounts {
+    attHasFullScan: [bool; INDEX_MAX_KEYS],
+    attHasNormalScan: [bool; INDEX_MAX_KEYS],
+    partialEntries: f64,
+    exactEntries: f64,
+    searchEntries: f64,
+    arrayScans: f64,
+}
+
+impl Default for GinQualCounts {
+    fn default() -> Self {
+        GinQualCounts {
+            attHasFullScan: [false; INDEX_MAX_KEYS],
+            attHasNormalScan: [false; INDEX_MAX_KEYS],
+            partialEntries: 0.0,
+            exactEntries: 0.0,
+            searchEntries: 0.0,
+            arrayScans: 0.0,
+        }
+    }
+}
+
+/*
+ * Estimate the number of index terms that need to be searched for while
+ * testing the given GIN query, and increment the counts in *counts
+ * appropriately.  If the query is unsatisfiable, return false.
+ */
+unsafe fn gincost_pattern(
+    index: *mut IndexOptInfo,
+    indexcol: c_int,
+    clause_op: Oid,
+    query: Datum,
+    counts: *mut GinQualCounts,
+) -> bool {
+    let mut flinfo: FmgrInfo = std::mem::zeroed();
+    let extractProcOid: Oid;
+    let collation: Oid;
+    let mut strategy_op: c_int = 0;
+    let mut lefttype: Oid = 0;
+    let mut righttype: Oid = 0;
+    let mut nentries: int32 = 0;
+    let mut partial_matches: *mut bool = std::ptr::null_mut();
+    let mut extra_data: *mut Pointer = std::ptr::null_mut();
+    let mut nullFlags: *mut bool = std::ptr::null_mut();
+    let mut searchMode: int32 = GIN_SEARCH_MODE_DEFAULT;
+    let mut i: int32;
+
+    Assert!(indexcol < (*index).nkeycolumns);
+
+    /*
+     * Get the operator's strategy number and declared input data types within
+     * the index opfamily.
+     */
+    get_op_opfamily_properties(
+        clause_op,
+        *(*index).opfamily.add(indexcol as usize),
+        false,
+        &mut strategy_op,
+        &mut lefttype,
+        &mut righttype,
+    );
+
+    /*
+     * GIN always uses the "default" support functions.
+     */
+    extractProcOid = get_opfamily_proc(
+        *(*index).opfamily.add(indexcol as usize),
+        *(*index).opcintype.add(indexcol as usize),
+        *(*index).opcintype.add(indexcol as usize),
+        GIN_EXTRACTQUERY_PROC,
+    );
+
+    if !OidIsValid(extractProcOid) {
+        /* should not happen; throw same error as index_getprocinfo */
+        elog!(
+            ERROR,
+            "missing support function {} for attribute {} of index \"{}\"",
+            GIN_EXTRACTQUERY_PROC,
+            indexcol + 1,
+            std::ffi::CStr::from_ptr(get_rel_name((*index).indexoid)).to_string_lossy()
+        );
+    }
+
+    /*
+     * Choose collation to pass to extractProc (should match initGinState).
+     */
+    if OidIsValid(*(*index).indexcollations.add(indexcol as usize)) {
+        collation = *(*index).indexcollations.add(indexcol as usize);
+    } else {
+        collation = DEFAULT_COLLATION_OID;
+    }
+
+    fmgr_info(extractProcOid, &mut flinfo);
+
+    set_fn_opclass_options(&mut flinfo, *(*index).opclassoptions.add(indexcol as usize));
+
+    FunctionCall7Coll(
+        &mut flinfo,
+        collation,
+        query,
+        PointerGetDatum(&mut nentries as *mut int32 as *const c_void),
+        UInt16GetDatum(strategy_op as uint16),
+        PointerGetDatum(&mut partial_matches as *mut *mut bool as *const c_void),
+        PointerGetDatum(&mut extra_data as *mut *mut Pointer as *const c_void),
+        PointerGetDatum(&mut nullFlags as *mut *mut bool as *const c_void),
+        PointerGetDatum(&mut searchMode as *mut int32 as *const c_void),
+    );
+
+    if nentries <= 0 && searchMode == GIN_SEARCH_MODE_DEFAULT {
+        /* No match is possible */
+        return false;
+    }
+
+    i = 0;
+    while i < nentries {
+        /*
+         * For partial match we haven't any information to estimate number of
+         * matched entries in index, so, we just estimate it as 100
+         */
+        if !partial_matches.is_null() && *partial_matches.add(i as usize) {
+            (*counts).partialEntries += 100.0;
+        } else {
+            (*counts).exactEntries += 1.0;
+        }
+
+        (*counts).searchEntries += 1.0;
+        i += 1;
+    }
+
+    if searchMode == GIN_SEARCH_MODE_DEFAULT {
+        (*counts).attHasNormalScan[indexcol as usize] = true;
+    } else if searchMode == GIN_SEARCH_MODE_INCLUDE_EMPTY {
+        /* Treat "include empty" like an exact-match item */
+        (*counts).attHasNormalScan[indexcol as usize] = true;
+        (*counts).exactEntries += 1.0;
+        (*counts).searchEntries += 1.0;
+    } else {
+        /* It's GIN_SEARCH_MODE_ALL */
+        (*counts).attHasFullScan[indexcol as usize] = true;
+    }
+
+    true
+}
+
+/*
+ * Estimate the number of index terms that need to be searched for while
+ * testing the given GIN index clause, and increment the counts in *counts
+ * appropriately.  If the query is unsatisfiable, return false.
+ */
+unsafe fn gincost_opexpr(
+    root: *mut PlannerInfo,
+    index: *mut IndexOptInfo,
+    indexcol: c_int,
+    clause: *mut OpExpr,
+    counts: *mut GinQualCounts,
+) -> bool {
+    let clause_op = (*clause).opno;
+    let mut operand = lsecond((*clause).args) as *mut Node;
+
+    /* aggressively reduce to a constant, and look through relabeling */
+    operand = estimate_expression_value(root, operand);
+
+    if IsA_!(operand, RelabelType) {
+        operand = (*(operand as *mut RelabelType)).arg as *mut Node;
+    }
+
+    /*
+     * It's impossible to call extractQuery method for unknown operand.  Unless
+     * operand is a Const we can't do much; just assume there will be one
+     * ordinary search entry from the operand at runtime.
+     */
+    if !IsA_!(operand, Const) {
+        (*counts).exactEntries += 1.0;
+        (*counts).searchEntries += 1.0;
+        return true;
+    }
+
+    /* If Const is null, there can be no matches */
+    if (*(operand as *mut Const)).constisnull {
+        return false;
+    }
+
+    /* Otherwise, apply extractQuery and get the actual term counts */
+    gincost_pattern(
+        index,
+        indexcol,
+        clause_op,
+        (*(operand as *mut Const)).constvalue,
+        counts,
+    )
+}
+
+/*
+ * Estimate the number of index terms that need to be searched for while
+ * testing the given GIN index clause, and increment the counts in *counts
+ * appropriately.  If the query is unsatisfiable, return false.
+ *
+ * A ScalarArrayOpExpr will give rise to N separate indexscans at runtime.
+ */
+unsafe fn gincost_scalararrayopexpr(
+    root: *mut PlannerInfo,
+    index: *mut IndexOptInfo,
+    indexcol: c_int,
+    clause: *mut ScalarArrayOpExpr,
+    numIndexEntries: f64,
+    counts: *mut GinQualCounts,
+) -> bool {
+    let clause_op = (*clause).opno;
+    let mut rightop = lsecond((*clause).args) as *mut Node;
+    let arrayval: *mut ArrayType;
+    let mut elmlen: int16 = 0;
+    let mut elmbyval: bool = false;
+    let mut elmalign: c_char = 0;
+    let mut numElems: c_int = 0;
+    let mut elemValues: *mut Datum = std::ptr::null_mut();
+    let mut elemNulls: *mut bool = std::ptr::null_mut();
+    let mut arraycounts: GinQualCounts;
+    let mut numPossible: c_int = 0;
+    let mut i: c_int;
+
+    Assert!((*clause).useOr);
+
+    /* aggressively reduce to a constant, and look through relabeling */
+    rightop = estimate_expression_value(root, rightop);
+
+    if IsA_!(rightop, RelabelType) {
+        rightop = (*(rightop as *mut RelabelType)).arg as *mut Node;
+    }
+
+    /*
+     * It's impossible to call extractQuery method for unknown operand.
+     */
+    if !IsA_!(rightop, Const) {
+        (*counts).exactEntries += 1.0;
+        (*counts).searchEntries += 1.0;
+        (*counts).arrayScans *= estimate_array_length(root, rightop);
+        return true;
+    }
+
+    /* If Const is null, there can be no matches */
+    if (*(rightop as *mut Const)).constisnull {
+        return false;
+    }
+
+    /* Otherwise, extract the array elements and iterate over them */
+    arrayval = DatumGetArrayTypeP((*(rightop as *mut Const)).constvalue);
+    get_typlenbyvalalign(
+        ARR_ELEMTYPE(arrayval),
+        &mut elmlen,
+        &mut elmbyval,
+        &mut elmalign,
+    );
+    deconstruct_array(
+        arrayval,
+        ARR_ELEMTYPE(arrayval),
+        elmlen,
+        elmbyval,
+        elmalign,
+        &mut elemValues,
+        &mut elemNulls,
+        &mut numElems,
+    );
+
+    arraycounts = GinQualCounts::default();
+
+    i = 0;
+    while i < numElems {
+        let mut elemcounts: GinQualCounts;
+
+        /* NULL can't match anything, so ignore, as the executor will */
+        if *elemNulls.add(i as usize) {
+            i += 1;
+            continue;
+        }
+
+        /* Otherwise, apply extractQuery and get the actual term counts */
+        elemcounts = GinQualCounts::default();
+
+        if gincost_pattern(
+            index,
+            indexcol,
+            clause_op,
+            *elemValues.add(i as usize),
+            &mut elemcounts,
+        ) {
+            /* We ignore array elements that are unsatisfiable patterns */
+            numPossible += 1;
+
+            if elemcounts.attHasFullScan[indexcol as usize]
+                && !elemcounts.attHasNormalScan[indexcol as usize]
+            {
+                /*
+                 * Full index scan will be required.
+                 */
+                elemcounts.partialEntries = 0.0;
+                elemcounts.exactEntries = numIndexEntries;
+                elemcounts.searchEntries = numIndexEntries;
+            }
+            arraycounts.partialEntries += elemcounts.partialEntries;
+            arraycounts.exactEntries += elemcounts.exactEntries;
+            arraycounts.searchEntries += elemcounts.searchEntries;
+        }
+        i += 1;
+    }
+
+    if numPossible == 0 {
+        /* No satisfiable patterns in the array */
+        return false;
+    }
+
+    /*
+     * Now add the averages to the global counts.
+     */
+    (*counts).partialEntries += arraycounts.partialEntries / numPossible as f64;
+    (*counts).exactEntries += arraycounts.exactEntries / numPossible as f64;
+    (*counts).searchEntries += arraycounts.searchEntries / numPossible as f64;
+
+    (*counts).arrayScans *= numPossible as f64;
+
+    true
+}
+
+/*
+ * GIN has search behavior completely different from other index types
  */
 pub unsafe fn gincostestimate(
     root: *mut PlannerInfo,
@@ -6404,13 +7517,356 @@ pub unsafe fn gincostestimate(
     indexCorrelation: *mut f64,
     indexPages: *mut f64,
 ) {
-    unimplemented!("TODO(pg-port): selfuncs.rs gincostestimate")
+    let index = (*path).indexinfo;
+    let indexQuals: *mut List = get_quals_from_indexclauses((*path).indexclauses);
+    let selectivityQuals: *mut List;
+    let mut numPages: f64 = (*index).pages;
+    let numTuples: f64 = (*index).tuples;
+    let mut numEntryPages: f64;
+    let mut numDataPages: f64;
+    let numPendingPages: f64;
+    let mut numEntries: f64;
+    let mut counts: GinQualCounts;
+    let mut matchPossible: bool;
+    let mut fullIndexScan: bool;
+    let mut partialScale: f64;
+    let mut entryPagesFetched: f64;
+    let mut dataPagesFetched: f64;
+    let dataPagesFetchedBySel: f64;
+    let qual_op_cost: f64;
+    let qual_arg_cost: f64;
+    let mut spc_random_page_cost: f64 = 0.0;
+    let outer_scans: f64;
+    let indexRel: *mut Relation;
+    let mut ginStats: GinStatsData;
+    let mut i: c_int;
+
+    /*
+     * Obtain statistical information from the meta page, if possible.
+     */
+    if !(*index).hypothetical {
+        /* Lock should have already been obtained in plancat.c */
+        indexRel = index_open((*index).indexoid, NoLock);
+        ginStats = GinStatsData::default();
+        ginGetStats(indexRel, &mut ginStats);
+        index_close(indexRel, NoLock);
+    } else {
+        ginStats = GinStatsData::default();
+    }
+
+    /*
+     * Assuming we got valid (nonzero) stats at all, nPendingPages can be
+     * trusted, but the other fields are data as of the last VACUUM.
+     */
+    if (ginStats.nPendingPages as f64) < numPages {
+        numPendingPages = ginStats.nPendingPages as f64;
+    } else {
+        numPendingPages = 0.0;
+    }
+
+    if numPages > 0.0
+        && (ginStats.nTotalPages as f64) <= numPages
+        && (ginStats.nTotalPages as f64) > numPages / 4.0
+        && ginStats.nEntryPages > 0
+        && ginStats.nEntries > 0
+    {
+        /*
+         * OK, the stats seem close enough to sane to be trusted.
+         */
+        let scale: f64 = numPages / ginStats.nTotalPages as f64;
+
+        numEntryPages = (ginStats.nEntryPages as f64 * scale).ceil();
+        numDataPages = (ginStats.nDataPages as f64 * scale).ceil();
+        numEntries = (ginStats.nEntries as f64 * scale).ceil();
+        /* ensure we didn't round up too much */
+        numEntryPages = Min(numEntryPages, numPages - numPendingPages);
+        numDataPages = Min(numDataPages, numPages - numPendingPages - numEntryPages);
+    } else {
+        /*
+         * Invent some plausible internal statistics based on the index page
+         * count (and clamp that to at least 10 pages, just in case).
+         */
+        numPages = Max(numPages, 10.0);
+        numEntryPages = ((numPages - numPendingPages) * 0.90).floor();
+        numDataPages = numPages - numPendingPages - numEntryPages;
+        numEntries = (numEntryPages * 100.0).floor();
+    }
+
+    /* In an empty index, numEntries could be zero.  Avoid divide-by-zero */
+    if numEntries < 1.0 {
+        numEntries = 1.0;
+    }
+
+    /*
+     * If the index is partial, AND the index predicate with the index-bound
+     * quals to produce a more accurate idea of the number of rows covered.
+     */
+    selectivityQuals = add_predicate_to_index_quals(index, indexQuals);
+
+    /* Estimate the fraction of main-table tuples that will be visited */
+    *indexSelectivity = clauselist_selectivity(
+        root,
+        selectivityQuals,
+        (*(*index).rel).relid as c_int,
+        JoinType::JOIN_INNER,
+        std::ptr::null_mut(),
+    );
+
+    /* fetch estimated page cost for tablespace containing index */
+    get_tablespace_page_costs(
+        (*index).reltablespace,
+        &mut spc_random_page_cost,
+        std::ptr::null_mut(),
+    );
+
+    /*
+     * Generic assumption about index correlation: there isn't any.
+     */
+    *indexCorrelation = 0.0;
+
+    /*
+     * Examine quals to estimate number of search entries & partial matches
+     */
+    counts = GinQualCounts::default();
+    counts.arrayScans = 1.0;
+    matchPossible = true;
+
+    'outer: {
+        foreach!(lc, (*path).indexclauses, {
+            let iclause = lfirst_node!(*mut IndexClause, T_IndexClause, current_cell!(lc));
+
+            foreach!(lc2, (*iclause).indexquals, {
+                let rinfo = lfirst_node!(*mut RestrictInfo, T_RestrictInfo, current_cell!(lc2));
+                let clause = (*rinfo).clause;
+
+                if IsA_!(clause, OpExpr) {
+                    matchPossible = gincost_opexpr(
+                        root,
+                        index,
+                        (*iclause).indexcol,
+                        clause as *mut OpExpr,
+                        &mut counts,
+                    );
+                    if !matchPossible {
+                        break;
+                    }
+                } else if IsA_!(clause, ScalarArrayOpExpr) {
+                    matchPossible = gincost_scalararrayopexpr(
+                        root,
+                        index,
+                        (*iclause).indexcol,
+                        clause as *mut ScalarArrayOpExpr,
+                        numEntries,
+                        &mut counts,
+                    );
+                    if !matchPossible {
+                        break;
+                    }
+                } else {
+                    /* shouldn't be anything else for a GIN index */
+                    elog!(
+                        ERROR,
+                        "unsupported GIN indexqual type: {}",
+                        nodeTag_(clause as *const Node) as c_int
+                    );
+                }
+            });
+            if !matchPossible {
+                break 'outer;
+            }
+        });
+    }
+
+    /* Fall out if there were any provably-unsatisfiable quals */
+    if !matchPossible {
+        *indexStartupCost = 0.0;
+        *indexTotalCost = 0.0;
+        *indexSelectivity = 0.0;
+        return;
+    }
+
+    /*
+     * If attribute has a full scan and at the same time doesn't have normal
+     * scan, then we'll have to scan all non-null entries of that attribute.
+     */
+    fullIndexScan = false;
+    i = 0;
+    while i < (*index).nkeycolumns {
+        if counts.attHasFullScan[i as usize] && !counts.attHasNormalScan[i as usize] {
+            fullIndexScan = true;
+            break;
+        }
+        i += 1;
+    }
+
+    if fullIndexScan || indexQuals == NIL {
+        /*
+         * Full index scan will be required.
+         */
+        counts.partialEntries = 0.0;
+        counts.exactEntries = numEntries;
+        counts.searchEntries = numEntries;
+    }
+
+    /* Will we have more than one iteration of a nestloop scan? */
+    outer_scans = loop_count;
+
+    /*
+     * Compute cost to begin scan, first of all, pay attention to pending
+     * list.
+     */
+    entryPagesFetched = numPendingPages;
+
+    /*
+     * Estimate number of entry pages read.
+     */
+    entryPagesFetched += (counts.searchEntries * pow(numEntryPages, 0.15).round()).ceil();
+
+    /*
+     * Add an estimate of entry pages read by partial match algorithm.
+     */
+    partialScale = counts.partialEntries / numEntries;
+    partialScale = Min(partialScale, 1.0);
+
+    entryPagesFetched += (numEntryPages * partialScale).ceil();
+
+    /*
+     * Partial match algorithm reads all data pages before doing actual scan.
+     */
+    dataPagesFetched = (numDataPages * partialScale).ceil();
+
+    *indexStartupCost = 0.0;
+    *indexTotalCost = 0.0;
+
+    /*
+     * Add a CPU-cost component to represent the costs of initial entry btree
+     * descent.
+     */
+    if numEntries > 1.0 {
+        /* avoid computing log(0) */
+        let descentCost = (numEntries.ln() / 2.0_f64.ln()).ceil() * cpu_operator_cost;
+        *indexStartupCost += descentCost * counts.searchEntries;
+        *indexTotalCost += counts.arrayScans * descentCost * counts.searchEntries;
+    }
+
+    /*
+     * Add a cpu cost per entry-page fetched.
+     */
+    *indexStartupCost +=
+        entryPagesFetched * DEFAULT_PAGE_CPU_MULTIPLIER * cpu_operator_cost;
+    *indexTotalCost += entryPagesFetched
+        * counts.arrayScans
+        * DEFAULT_PAGE_CPU_MULTIPLIER
+        * cpu_operator_cost;
+
+    /*
+     * Add a cpu cost per data-page fetched.
+     */
+    *indexStartupCost +=
+        DEFAULT_PAGE_CPU_MULTIPLIER * cpu_operator_cost * dataPagesFetched;
+
+    /*
+     * Since we add the startup cost to the total cost later on, remove the
+     * initial arrayscan from the total.
+     */
+    *indexTotalCost += dataPagesFetched
+        * (counts.arrayScans - 1.0)
+        * DEFAULT_PAGE_CPU_MULTIPLIER
+        * cpu_operator_cost;
+
+    /*
+     * Calculate cache effects if more than one scan due to nestloops or array
+     * quals.
+     */
+    if outer_scans > 1.0 || counts.arrayScans > 1.0 {
+        entryPagesFetched *= outer_scans * counts.arrayScans;
+        entryPagesFetched = index_pages_fetched(
+            entryPagesFetched,
+            numEntryPages as BlockNumber,
+            numEntryPages,
+            root,
+        );
+        entryPagesFetched /= outer_scans;
+        dataPagesFetched *= outer_scans * counts.arrayScans;
+        dataPagesFetched = index_pages_fetched(
+            dataPagesFetched,
+            numDataPages as BlockNumber,
+            numDataPages,
+            root,
+        );
+        dataPagesFetched /= outer_scans;
+    }
+
+    /*
+     * Here we use random page cost because logically-close pages could be far
+     * apart on disk.
+     */
+    *indexStartupCost += (entryPagesFetched + dataPagesFetched) * spc_random_page_cost;
+
+    /*
+     * Now compute the number of data pages fetched during the scan.
+     */
+    dataPagesFetched = (numDataPages * counts.exactEntries / numEntries).ceil();
+
+    /*
+     * If there is a lot of overlap among the entries, the above calculation
+     * can grossly under-estimate.  As a simple cross-check, calculate a lower
+     * bound based on the overall selectivity of the quals.
+     */
+    dataPagesFetchedBySel = (*indexSelectivity * (numTuples / (BLCKSZ / 3.0))).ceil();
+    if dataPagesFetchedBySel > dataPagesFetched {
+        dataPagesFetched = dataPagesFetchedBySel;
+    }
+
+    /* Add one page cpu-cost to the startup cost */
+    *indexStartupCost +=
+        DEFAULT_PAGE_CPU_MULTIPLIER * cpu_operator_cost * counts.searchEntries;
+
+    /*
+     * Add once again a CPU-cost for those data pages, before amortizing for
+     * cache.
+     */
+    *indexTotalCost += dataPagesFetched
+        * counts.arrayScans
+        * DEFAULT_PAGE_CPU_MULTIPLIER
+        * cpu_operator_cost;
+
+    /* Account for cache effects, the same as above */
+    if outer_scans > 1.0 || counts.arrayScans > 1.0 {
+        dataPagesFetched *= outer_scans * counts.arrayScans;
+        dataPagesFetched = index_pages_fetched(
+            dataPagesFetched,
+            numDataPages as BlockNumber,
+            numDataPages,
+            root,
+        );
+        dataPagesFetched /= outer_scans;
+    }
+
+    /* And apply random_page_cost as the cost per page */
+    *indexTotalCost += *indexStartupCost + dataPagesFetched * spc_random_page_cost;
+
+    /*
+     * Add on index qual eval costs, much as in genericcostestimate.
+     */
+    qual_arg_cost = index_other_operands_eval_cost(root, indexQuals);
+    qual_op_cost = cpu_operator_cost * list_length(indexQuals) as f64;
+
+    *indexStartupCost += qual_arg_cost;
+    *indexTotalCost += qual_arg_cost;
+
+    /*
+     * Add a cpu cost per search entry, corresponding to the actual visited
+     * entries.
+     */
+    *indexTotalCost += (counts.searchEntries * counts.arrayScans) * qual_op_cost;
+    /* Now add a cpu cost per tuple in the posting lists / trees */
+    *indexTotalCost += (numTuples * *indexSelectivity) * cpu_index_tuple_cost;
+    *indexPages = dataPagesFetched;
 }
 
 /*
- * brincostestimate
- * TODO(pg-port): faithful body deferred (needs BRIN AM internals:
- * brinGetStats).
+ * BRIN has search behavior completely different from other index types
  */
 pub unsafe fn brincostestimate(
     root: *mut PlannerInfo,
@@ -6422,5 +7878,204 @@ pub unsafe fn brincostestimate(
     indexCorrelation: *mut f64,
     indexPages: *mut f64,
 ) {
-    unimplemented!("TODO(pg-port): selfuncs.rs brincostestimate")
+    let index = (*path).indexinfo;
+    let indexQuals: *mut List = get_quals_from_indexclauses((*path).indexclauses);
+    let numPages: f64 = (*index).pages;
+    let baserel = (*index).rel;
+    let rte = planner_rt_fetch((*baserel).relid, root);
+    let mut spc_seq_page_cost: f64 = 0.0;
+    let mut spc_random_page_cost: f64 = 0.0;
+    let qual_arg_cost: f64;
+    let qualSelectivity: f64;
+    let mut statsData: BrinStatsData;
+    let indexRanges: f64;
+    let minimalRanges: f64;
+    let estimatedRanges: f64;
+    let mut selec: f64;
+    let indexRel: *mut Relation;
+
+    Assert!((*rte).rtekind == RTE_RELATION);
+
+    /* fetch estimated page cost for the tablespace containing the index */
+    get_tablespace_page_costs(
+        (*index).reltablespace,
+        &mut spc_random_page_cost,
+        &mut spc_seq_page_cost,
+    );
+
+    /*
+     * Obtain some data from the index itself, if possible.  Otherwise invent
+     * some plausible internal statistics based on the relation page count.
+     */
+    if !(*index).hypothetical {
+        /*
+         * A lock should have already been obtained on the index in plancat.c.
+         */
+        indexRel = index_open((*index).indexoid, NoLock);
+        statsData = BrinStatsData::default();
+        brinGetStats(indexRel, &mut statsData);
+        index_close(indexRel, NoLock);
+
+        /* work out the actual number of ranges in the index */
+        indexRanges = Max(
+            ((*baserel).pages / statsData.pagesPerRange as f64).ceil(),
+            1.0,
+        );
+    } else {
+        /*
+         * Assume default number of pages per range, and estimate the number
+         * of ranges based on that.
+         */
+        indexRanges = Max(
+            ((*baserel).pages / BRIN_DEFAULT_PAGES_PER_RANGE as f64).ceil(),
+            1.0,
+        );
+
+        statsData = BrinStatsData::default();
+        statsData.pagesPerRange = BRIN_DEFAULT_PAGES_PER_RANGE as BlockNumber;
+        statsData.revmapNumPages = (indexRanges / REVMAP_PAGE_MAXITEMS) as BlockNumber + 1;
+    }
+
+    /*
+     * Compute index correlation
+     */
+    *indexCorrelation = 0.0;
+
+    foreach!(l, (*path).indexclauses, {
+        let iclause = lfirst_node!(*mut IndexClause, T_IndexClause, current_cell!(l));
+        let mut attnum: AttrNumber =
+            *(*index).indexkeys.add((*iclause).indexcol as usize) as AttrNumber;
+        let mut vardata: VariableStatData = std::mem::zeroed();
+
+        /* attempt to lookup stats in relation for this index column */
+        if attnum != 0 {
+            /* Simple variable -- look to stats for the underlying table */
+            if get_relation_stats_hook.is_some()
+                && (get_relation_stats_hook.unwrap())(root, rte, attnum, &mut vardata)
+            {
+                /*
+                 * The hook took control of acquiring a stats tuple.  If it
+                 * did supply a tuple, it'd better have supplied a freefunc.
+                 */
+                if HeapTupleIsValid(vardata.statsTuple) && vardata.freefunc.is_none() {
+                    elog!(ERROR, "no function provided to release variable stats with");
+                }
+            } else {
+                vardata.statsTuple = SearchSysCache3(
+                    STATRELATTINH,
+                    ObjectIdGetDatum((*rte).relid),
+                    Int16GetDatum(attnum),
+                    BoolGetDatum(false),
+                );
+                vardata.freefunc = Some(ReleaseSysCache);
+            }
+        } else {
+            /*
+             * Looks like we've found an expression column in the index.
+             */
+
+            /* get the attnum from the 0-based index. */
+            attnum = ((*iclause).indexcol + 1) as AttrNumber;
+
+            if get_index_stats_hook.is_some()
+                && (get_index_stats_hook.unwrap())(root, (*index).indexoid, attnum, &mut vardata)
+            {
+                if HeapTupleIsValid(vardata.statsTuple) && vardata.freefunc.is_none() {
+                    elog!(ERROR, "no function provided to release variable stats with");
+                }
+            } else {
+                vardata.statsTuple = SearchSysCache3(
+                    STATRELATTINH,
+                    ObjectIdGetDatum((*index).indexoid),
+                    Int16GetDatum(attnum),
+                    BoolGetDatum(false),
+                );
+                vardata.freefunc = Some(ReleaseSysCache);
+            }
+        }
+
+        if HeapTupleIsValid(vardata.statsTuple) {
+            let mut sslot: AttStatsSlot = std::mem::zeroed();
+
+            if get_attstatsslot(
+                &mut sslot,
+                vardata.statsTuple,
+                STATISTIC_KIND_CORRELATION,
+                InvalidOid,
+                ATTSTATSSLOT_NUMBERS,
+            ) {
+                let mut varCorrelation: f64 = 0.0;
+
+                if sslot.nnumbers > 0 {
+                    varCorrelation = (*sslot.numbers.add(0)).abs() as f64;
+                }
+
+                if varCorrelation > *indexCorrelation {
+                    *indexCorrelation = varCorrelation;
+                }
+
+                free_attstatsslot(&mut sslot);
+            }
+        }
+
+        ReleaseVariableStats!(vardata);
+    });
+
+    qualSelectivity = clauselist_selectivity(
+        root,
+        indexQuals,
+        (*baserel).relid as c_int,
+        JoinType::JOIN_INNER,
+        std::ptr::null_mut(),
+    );
+
+    /*
+     * Now calculate the minimum possible ranges we could match with if all of
+     * the rows were in the perfect order in the table's heap.
+     */
+    minimalRanges = (indexRanges * qualSelectivity).ceil();
+
+    /*
+     * Now estimate the number of ranges that we'll touch by using the
+     * indexCorrelation from the stats.
+     */
+    if *indexCorrelation < 1.0e-10 {
+        estimatedRanges = indexRanges;
+    } else {
+        estimatedRanges = Min(minimalRanges / *indexCorrelation, indexRanges);
+    }
+
+    /* we expect to visit this portion of the table */
+    selec = estimatedRanges / indexRanges;
+
+    CLAMP_PROBABILITY!(selec);
+
+    *indexSelectivity = selec;
+
+    /*
+     * Compute the index qual costs, much as in genericcostestimate.
+     */
+    qual_arg_cost = index_other_operands_eval_cost(root, indexQuals);
+
+    /*
+     * Compute the startup cost as the cost to read the whole revmap
+     * sequentially, including the cost to execute the index quals.
+     */
+    *indexStartupCost = spc_seq_page_cost * statsData.revmapNumPages as f64 * loop_count;
+    *indexStartupCost += qual_arg_cost;
+
+    /*
+     * To read a BRIN index there might be a bit of back and forth over
+     * regular pages.
+     */
+    *indexTotalCost = *indexStartupCost
+        + spc_random_page_cost * (numPages - statsData.revmapNumPages as f64) * loop_count;
+
+    /*
+     * Charge a small amount per range tuple which we expect to match to.
+     */
+    *indexTotalCost +=
+        0.1 * cpu_operator_cost * estimatedRanges * statsData.pagesPerRange as f64;
+
+    *indexPages = (*index).pages;
 }

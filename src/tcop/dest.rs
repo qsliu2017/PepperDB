@@ -16,7 +16,13 @@
 use crate::prelude::*;
 use crate::access::common::tupdesc::TupleDesc;
 use crate::executor::tuptable::TupleTableSlot;
-use core::ffi::c_int;
+use crate::libpq::libpq::pq_putmessage;
+use crate::libpq::protocol::PqMsg_CommandComplete;
+use core::ffi::{c_char, c_int};
+
+extern "C" {
+    fn strlen(s: *const c_char) -> usize;
+}
 
 /*
  * CommandDest is a simplified representation of the command-result-destination
@@ -146,6 +152,20 @@ pub unsafe fn EndCommand(
 ) {
     // TODO(pg-port): needs libpq comm (pq_putmessage).
 }
+/* ----------------
+ *		EndReplicationCommand - stripped down version of EndCommand
+ *
+ *		For use by replication commands.
+ * ----------------
+ */
+pub unsafe fn EndReplicationCommand(commandTag: *const c_char) {
+    pq_putmessage(
+        PqMsg_CommandComplete as c_char,
+        commandTag,
+        strlen(commandTag) + 1,
+    );
+}
+
 pub unsafe fn NullCommand(_dest: CommandDest) {
     // TODO(pg-port): needs libpq comm.
 }

@@ -8,7 +8,7 @@
 //! Portions Copyright (c) 1996-2025, PostgreSQL Global Development Group
 //! Portions Copyright (c) 1994, Regents of the University of California
 
-use crate::c::{int32, PointerIsValid};
+use crate::c::{int32, PointerIsValid, PG_UINT16_MAX};
 use crate::Assert;
 use crate::storage::block::{
     BlockIdData, BlockIdGetBlockNumber, BlockIdSet, BlockNumber, InvalidBlockNumber,
@@ -155,6 +155,63 @@ pub unsafe fn ItemPointerCompare(arg1: ItemPointer, arg2: ItemPointer) -> int32 
     } else {
         0
     }
+}
+
+/*
+ * ItemPointerInc (itemptr.c)
+ *		Increment 'pointer' by 1 only paying attention to the ItemPointer's
+ *		type's range limits and not MaxOffsetNumber and FirstOffsetNumber.
+ *		This may result in 'pointer' becoming !OffsetNumberIsValid.
+ *
+ * If the pointer is already the maximum possible values permitted by the
+ * range of the ItemPointer's types, then do nothing.
+ *
+ * # Safety
+ * `pointer` is writable.
+ */
+pub unsafe fn ItemPointerInc(pointer: ItemPointer) {
+    let mut blk = ItemPointerGetBlockNumberNoCheck(pointer);
+    let mut off = ItemPointerGetOffsetNumberNoCheck(pointer);
+
+    if off == PG_UINT16_MAX {
+        if blk != InvalidBlockNumber {
+            off = 0;
+            blk += 1;
+        }
+    } else {
+        off += 1;
+    }
+
+    ItemPointerSet(pointer, blk, off);
+}
+
+/*
+ * ItemPointerDec (itemptr.c)
+ *		Decrement 'pointer' by 1 only paying attention to the ItemPointer's
+ *		type's range limits and not MaxOffsetNumber and FirstOffsetNumber.
+ *		This may result in 'pointer' becoming !OffsetNumberIsValid.
+ *
+ * If the pointer is already the minimum possible values permitted by the
+ * range of the ItemPointer's types, then do nothing.  This does rely on
+ * FirstOffsetNumber being 1 rather than 0.
+ *
+ * # Safety
+ * `pointer` is writable.
+ */
+pub unsafe fn ItemPointerDec(pointer: ItemPointer) {
+    let mut blk = ItemPointerGetBlockNumberNoCheck(pointer);
+    let mut off = ItemPointerGetOffsetNumberNoCheck(pointer);
+
+    if off == 0 {
+        if blk != 0 {
+            off = PG_UINT16_MAX;
+            blk -= 1;
+        }
+    } else {
+        off -= 1;
+    }
+
+    ItemPointerSet(pointer, blk, off);
 }
 
 // ---- fmgr interface (itemptr.h) ----

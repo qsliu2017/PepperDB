@@ -991,7 +991,6 @@ extern "C" {
     fn pg_atomic_add_fetch_u32(ptr: *mut c_void, add: uint32) -> uint32;
 
     /* tablesync */
-    fn stream_cleanup_files(subid: Oid, xid: TransactionId);
 
     /* IsIndexUsableForReplicaIdentityFull */
     fn IsIndexUsableForReplicaIdentityFull(idxrel: *mut c_void, map: *mut AttrMap) -> bool;
@@ -5036,11 +5035,20 @@ unsafe fn changes_filename(path: *mut c_char, subid: Oid, xid: TransactionId) {
 }
 
 /*
- * stream_cleanup_files (re-exported for use by tablesync)
+ * stream_cleanup_files
  *   Cleanup files for a subscription / toplevel transaction.
  */
-// Note: stream_cleanup_files is declared as an extern "C" import above (from tablesync.c)
-// since it may live there in the C source. If it needs a local impl, add here.
+pub unsafe fn stream_cleanup_files(subid: Oid, xid: TransactionId) {
+    let mut path: [c_char; MAXPGPATH] = [0; MAXPGPATH];
+
+    /* Delete the changes file. */
+    changes_filename(path.as_mut_ptr(), subid, xid);
+    BufFileDeleteFileSet((*MyLogicalRepWorker).stream_fileset, path.as_ptr(), false);
+
+    /* Delete the subxact file, if it exists. */
+    subxact_filename(path.as_mut_ptr(), subid, xid);
+    BufFileDeleteFileSet((*MyLogicalRepWorker).stream_fileset, path.as_ptr(), true);
+}
 
 /*
  * stream_open_file

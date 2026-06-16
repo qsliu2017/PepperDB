@@ -22,7 +22,8 @@ pub use crate::catalog::objectaccess::ObjectAddress;
 
 // Node types
 use crate::nodes::nodes::Node;
-use crate::nodes::pg_list::{List, ListCell};
+use crate::nodes::pg_list::{List, ListCell, lfirst};
+use crate::{foreach, current_cell};
 use crate::nodes::parsenodes::{ObjectType, ObjectType::*, TypeName, ObjectWithArgs};
 use crate::nodes::primnodes::RangeVar;
 
@@ -1638,6 +1639,35 @@ pub unsafe fn construct_md_array(
 
 /// TODO(pg-port): strlist_to_textarray (declared public below)
 
+/* --- syscache id + attnum for pg_attribute (used by pg_get_acl) --- */
+const ATTNUM: c_int = 4;                                /* pg_attribute by (attrelid,attnum) */
+const Anum_pg_attribute_attacl: AttrNumber = 22;
+
+/* TYPALIGN_INT -- attribute alignment char (used by strlist_to_textarray) */
+const TYPALIGN_INT: c_char = b'i' as c_char;
+
+/*
+ * TODO(pg-port): SQL-call ABI helpers.  This file models fcinfo as a raw
+ * *mut c_void (the real FunctionCallInfo / fmgr machinery is not yet wired
+ * here), so the standard PG_GETARG_ / PG_RETURN_ macros cannot be used.  We
+ * provide local stubs with the same shape so the translated bodies stay
+ * faithful and self-consistent.
+ */
+#[inline]
+unsafe fn pg_getarg_datum(_fcinfo: *mut c_void, _n: c_int) -> Datum { 0 }
+#[inline]
+unsafe fn pg_getarg_oid(fcinfo: *mut c_void, n: c_int) -> Oid {
+    DatumGetObjectId(pg_getarg_datum(fcinfo, n))
+}
+#[inline]
+unsafe fn pg_getarg_int32(fcinfo: *mut c_void, n: c_int) -> int32 {
+    pg_getarg_datum(fcinfo, n) as int32
+}
+#[inline]
+unsafe fn pg_getarg_arraytype_p(_fcinfo: *mut c_void, _n: c_int) -> *mut c_void {
+    core::ptr::null_mut()
+}
+
 /// TODO(pg-port): format_procedure_extended
 #[inline]
 pub unsafe fn format_procedure_extended(
@@ -3134,9 +3164,296 @@ unsafe fn textarray_to_strvaluelist(arr: *mut c_void) -> *mut List {
  * SQL-callable version of get_object_address
  */
 pub unsafe fn pg_get_object_address(fcinfo: *mut c_void) -> Datum {
-    // TODO(pg-port): PG_FUNCTION_ARGS / PG_GETARG_* not yet ported; stub
-    let _ = fcinfo;
-    0
+    let ttype: *mut c_char = TextDatumGetCString(pg_getarg_datum(fcinfo, 0));
+    let namearr: *mut c_void = pg_getarg_arraytype_p(fcinfo, 1);
+    let argsarr: *mut c_void = pg_getarg_arraytype_p(fcinfo, 2);
+    let itype: c_int;
+    let r#type: ObjectType;
+    let mut name: *mut List = NIL;
+    let mut typename: *mut TypeName = core::ptr::null_mut();
+    let mut args: *mut List = NIL;
+    let mut objnode: *mut Node = core::ptr::null_mut();
+    let addr: ObjectAddress;
+    let mut tupdesc: *mut c_void = core::ptr::null_mut();
+    let mut values: [Datum; 3] = [0; 3];
+    let mut nulls: [bool; 3] = [false; 3];
+    let htup: HeapTuple;
+    let mut relation: Relation = core::ptr::null_mut();
+
+    /* Decode object type, raise error if unknown */
+    itype = read_objtype_from_string(ttype);
+    if itype < 0 {
+        ereport!(ERROR,
+            errmsg!("unsupported object type \"{}\"",
+                core::ffi::CStr::from_ptr(ttype).to_string_lossy()));
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+    }
+    r#type = core::mem::transmute::<c_int, ObjectType>(itype);
+
+    /*
+     * Convert the text array to the representation appropriate for the given
+     * object type.  Most use a simple string Values list, but there are some
+     * exceptions.
+     */
+    if r#type == OBJECT_TYPE || r#type == OBJECT_DOMAIN || r#type == OBJECT_CAST ||
+        r#type == OBJECT_TRANSFORM || r#type == OBJECT_DOMCONSTRAINT
+    {
+        let mut elems: *mut Datum = core::ptr::null_mut();
+        let mut nulls2: *mut bool = core::ptr::null_mut();
+        let mut nelems: c_int = 0;
+
+        deconstruct_array_builtin(namearr, TEXTOID, &mut elems, &mut nulls2, &mut nelems);
+        if nelems != 1 {
+            ereport!(ERROR,
+                errmsg!("name list length must be exactly {}", 1));
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        }
+        if *nulls2.add(0) {
+            ereport!(ERROR,
+                errmsg!("name or argument lists may not contain nulls"));
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        }
+        typename = typeStringToTypeName(TextDatumGetCString(*elems.add(0)),
+                                        core::ptr::null_mut());
+    } else if r#type == OBJECT_LARGEOBJECT {
+        let mut elems: *mut Datum = core::ptr::null_mut();
+        let mut nulls2: *mut bool = core::ptr::null_mut();
+        let mut nelems: c_int = 0;
+
+        deconstruct_array_builtin(namearr, TEXTOID, &mut elems, &mut nulls2, &mut nelems);
+        if nelems != 1 {
+            ereport!(ERROR,
+                errmsg!("name list length must be exactly {}", 1));
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        }
+        if *nulls2.add(0) {
+            ereport!(ERROR,
+                errmsg!("large object OID may not be null"));
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        }
+        objnode = makeFloat(TextDatumGetCString(*elems.add(0))) as *mut Node;
+    } else {
+        name = textarray_to_strvaluelist(namearr);
+        if name == NIL {
+            ereport!(ERROR,
+                errmsg!("name list length must be at least {}", 1));
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        }
+    }
+
+    /*
+     * If args are given, decode them according to the object type.
+     */
+    if r#type == OBJECT_AGGREGATE ||
+        r#type == OBJECT_FUNCTION ||
+        r#type == OBJECT_PROCEDURE ||
+        r#type == OBJECT_ROUTINE ||
+        r#type == OBJECT_OPERATOR ||
+        r#type == OBJECT_CAST ||
+        r#type == OBJECT_AMOP ||
+        r#type == OBJECT_AMPROC
+    {
+        /* in these cases, the args list must be of TypeName */
+        let mut elems: *mut Datum = core::ptr::null_mut();
+        let mut nulls2: *mut bool = core::ptr::null_mut();
+        let mut nelems: c_int = 0;
+
+        deconstruct_array_builtin(argsarr, TEXTOID, &mut elems, &mut nulls2, &mut nelems);
+
+        args = NIL;
+        for i in 0..nelems as usize {
+            if *nulls2.add(i) {
+                ereport!(ERROR,
+                    errmsg!("name or argument lists may not contain nulls"));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+            args = lappend(args,
+                typeStringToTypeName(TextDatumGetCString(*elems.add(i)),
+                                     core::ptr::null_mut()) as *mut c_void);
+        }
+    } else {
+        /* For all other object types, use string Values */
+        args = textarray_to_strvaluelist(argsarr);
+    }
+
+    /*
+     * get_object_address is pretty sensitive to the length of its input
+     * lists; check that they're what it wants.
+     */
+    match r#type {
+        OBJECT_PUBLICATION_NAMESPACE |
+        OBJECT_USER_MAPPING => {
+            if list_length(name) != 1 {
+                ereport!(ERROR,
+                    errmsg!("name list length must be exactly {}", 1));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+            /* fall through to check args length */
+            if list_length(args) != 1 {
+                ereport!(ERROR,
+                    errmsg!("argument list length must be exactly {}", 1));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+        }
+        OBJECT_DOMCONSTRAINT |
+        OBJECT_CAST |
+        OBJECT_PUBLICATION_REL |
+        OBJECT_DEFACL |
+        OBJECT_TRANSFORM => {
+            if list_length(args) != 1 {
+                ereport!(ERROR,
+                    errmsg!("argument list length must be exactly {}", 1));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+        }
+        OBJECT_OPFAMILY |
+        OBJECT_OPCLASS => {
+            if list_length(name) < 2 {
+                ereport!(ERROR,
+                    errmsg!("name list length must be at least {}", 2));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+        }
+        OBJECT_AMOP |
+        OBJECT_AMPROC => {
+            if list_length(name) < 3 {
+                ereport!(ERROR,
+                    errmsg!("name list length must be at least {}", 3));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+            /* fall through to check args length */
+            if list_length(args) != 2 {
+                ereport!(ERROR,
+                    errmsg!("argument list length must be exactly {}", 2));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+        }
+        OBJECT_OPERATOR => {
+            if list_length(args) != 2 {
+                ereport!(ERROR,
+                    errmsg!("argument list length must be exactly {}", 2));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+        }
+        _ => {}
+    }
+
+    /*
+     * Now build the Node type that get_object_address() expects for the given
+     * type.
+     */
+    match r#type {
+        OBJECT_TABLE |
+        OBJECT_SEQUENCE |
+        OBJECT_VIEW |
+        OBJECT_MATVIEW |
+        OBJECT_INDEX |
+        OBJECT_FOREIGN_TABLE |
+        OBJECT_COLUMN |
+        OBJECT_ATTRIBUTE |
+        OBJECT_COLLATION |
+        OBJECT_CONVERSION |
+        OBJECT_STATISTIC_EXT |
+        OBJECT_TSPARSER |
+        OBJECT_TSDICTIONARY |
+        OBJECT_TSTEMPLATE |
+        OBJECT_TSCONFIGURATION |
+        OBJECT_DEFAULT |
+        OBJECT_POLICY |
+        OBJECT_RULE |
+        OBJECT_TRIGGER |
+        OBJECT_TABCONSTRAINT |
+        OBJECT_OPCLASS |
+        OBJECT_OPFAMILY => {
+            objnode = name as *mut Node;
+        }
+        OBJECT_ACCESS_METHOD |
+        OBJECT_DATABASE |
+        OBJECT_EVENT_TRIGGER |
+        OBJECT_EXTENSION |
+        OBJECT_FDW |
+        OBJECT_FOREIGN_SERVER |
+        OBJECT_LANGUAGE |
+        OBJECT_PARAMETER_ACL |
+        OBJECT_PUBLICATION |
+        OBJECT_ROLE |
+        OBJECT_SCHEMA |
+        OBJECT_SUBSCRIPTION |
+        OBJECT_TABLESPACE => {
+            if list_length(name) != 1 {
+                ereport!(ERROR,
+                    errmsg!("name list length must be exactly {}", 1));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+            objnode = linitial(name) as *mut Node;
+        }
+        OBJECT_TYPE |
+        OBJECT_DOMAIN => {
+            objnode = typename as *mut Node;
+        }
+        OBJECT_CAST |
+        OBJECT_DOMCONSTRAINT |
+        OBJECT_TRANSFORM => {
+            objnode = list_make2(typename as *mut c_void, linitial(args)) as *mut Node;
+        }
+        OBJECT_PUBLICATION_REL => {
+            objnode = list_make2(name as *mut c_void, linitial(args)) as *mut Node;
+        }
+        OBJECT_PUBLICATION_NAMESPACE |
+        OBJECT_USER_MAPPING => {
+            objnode = list_make2(linitial(name), linitial(args)) as *mut Node;
+        }
+        OBJECT_DEFACL => {
+            objnode = lcons(linitial(args), name) as *mut Node;
+        }
+        OBJECT_AMOP |
+        OBJECT_AMPROC => {
+            objnode = list_make2(name as *mut c_void, args as *mut c_void) as *mut Node;
+        }
+        OBJECT_FUNCTION |
+        OBJECT_PROCEDURE |
+        OBJECT_ROUTINE |
+        OBJECT_AGGREGATE |
+        OBJECT_OPERATOR => {
+            let owa: *mut ObjectWithArgs = makeNode!(ObjectWithArgs);
+
+            (*owa).objname = name;
+            (*owa).objargs = args;
+            objnode = owa as *mut Node;
+        }
+        OBJECT_LARGEOBJECT => {
+            /* already handled above */
+        }
+        /* no default, to let compiler warn about missing case */
+        _ => {}
+    }
+
+    if objnode.is_null() {
+        elog!(ERROR, "unrecognized object type: {}", r#type as c_int);
+    }
+
+    addr = get_object_address(r#type, objnode,
+                              &mut relation, AccessShareLock, false);
+
+    /* We don't need the relcache entry, thank you very much */
+    if !relation.is_null() {
+        relation_close(relation, AccessShareLock);
+    }
+
+    if get_call_result_type(fcinfo, core::ptr::null_mut(), &mut tupdesc) != TYPEFUNC_COMPOSITE {
+        elog!(ERROR, "return type must be a row type");
+    }
+
+    values[0] = ObjectIdGetDatum(addr.classId);
+    values[1] = ObjectIdGetDatum(addr.objectId);
+    values[2] = Int32GetDatum(addr.objectSubId);
+    nulls[0] = false;
+    nulls[1] = false;
+    nulls[2] = false;
+
+    htup = heap_form_tuple(tupdesc, values.as_mut_ptr(), nulls.as_mut_ptr());
+
+    HeapTupleGetDatum(htup)
 }
 
 /* ================================================================
@@ -4527,27 +4844,196 @@ unsafe fn getOpFamilyDescription(buffer: *mut StringInfoData, opfid: Oid, missin
  * SQL-level callable version of getObjectDescription
  */
 pub unsafe fn pg_describe_object(fcinfo: *mut c_void) -> Datum {
-    // TODO(pg-port): PG_FUNCTION_ARGS not yet ported; stub
-    let _ = fcinfo;
-    0
+    let classid: Oid = pg_getarg_oid(fcinfo, 0);
+    let objid: Oid = pg_getarg_oid(fcinfo, 1);
+    let objsubid: int32 = pg_getarg_int32(fcinfo, 2);
+    let description: *mut c_char;
+    let mut address = INVALID_OBJECT_ADDRESS;
+
+    /* for "pinned" items in pg_depend, return null */
+    if !OidIsValid(classid) && !OidIsValid(objid) {
+        return 0; /* PG_RETURN_NULL */
+    }
+
+    address.classId = classid;
+    address.objectId = objid;
+    address.objectSubId = objsubid;
+
+    description = getObjectDescription(&address, true);
+
+    if description.is_null() {
+        return 0; /* PG_RETURN_NULL */
+    }
+
+    PointerGetDatum(cstring_to_text(description) as *const c_void) /* PG_RETURN_TEXT_P */
 }
 
 /*
  * SQL-level callable function to obtain object type + identity
  */
 pub unsafe fn pg_identify_object(fcinfo: *mut c_void) -> Datum {
-    // TODO(pg-port): PG_FUNCTION_ARGS not yet ported; stub
-    let _ = fcinfo;
-    0
+    let classid: Oid = pg_getarg_oid(fcinfo, 0);
+    let objid: Oid = pg_getarg_oid(fcinfo, 1);
+    let objsubid: int32 = pg_getarg_int32(fcinfo, 2);
+    let mut schema_oid: Oid = InvalidOid;
+    let mut objname: *const c_char = core::ptr::null();
+    let objidentity: *mut c_char;
+    let mut address = INVALID_OBJECT_ADDRESS;
+    let mut values: [Datum; 4] = [0; 4];
+    let mut nulls: [bool; 4] = [false; 4];
+    let mut tupdesc: *mut c_void = core::ptr::null_mut();
+    let htup: HeapTuple;
+
+    address.classId = classid;
+    address.objectId = objid;
+    address.objectSubId = objsubid;
+
+    if get_call_result_type(fcinfo, core::ptr::null_mut(), &mut tupdesc) != TYPEFUNC_COMPOSITE {
+        elog!(ERROR, "return type must be a row type");
+    }
+
+    if is_objectclass_supported(address.classId) {
+        let objtup: HeapTuple;
+        let catalog: Relation = table_open(address.classId, AccessShareLock);
+
+        objtup = get_catalog_object_by_oid(catalog,
+                                           get_object_attnum_oid(address.classId),
+                                           address.objectId);
+        if !objtup.is_null() {
+            let mut isnull: bool = false;
+            let nsp_attnum: AttrNumber;
+            let name_attnum: AttrNumber;
+
+            nsp_attnum = get_object_attnum_namespace(address.classId);
+            if nsp_attnum != InvalidAttrNumber {
+                schema_oid = heap_getattr(objtup, nsp_attnum,
+                                          RelationGetDescr(catalog), &mut isnull) as Oid;
+                if isnull {
+                    elog!(ERROR, "invalid null namespace in object {}/{}/{}",
+                        address.classId, address.objectId, address.objectSubId);
+                }
+            }
+
+            /*
+             * We only return the object name if it can be used (together with
+             * the schema name, if any) as a unique identifier.
+             */
+            if get_object_namensp_unique(address.classId) {
+                name_attnum = get_object_attnum_name(address.classId);
+                if name_attnum != InvalidAttrNumber {
+                    let name_datum: Datum;
+
+                    name_datum = heap_getattr(objtup, name_attnum,
+                                              RelationGetDescr(catalog), &mut isnull);
+                    if isnull {
+                        elog!(ERROR, "invalid null name in object {}/{}/{}",
+                            address.classId, address.objectId, address.objectSubId);
+                    }
+                    objname = quote_identifier(NameStr(&*DatumGetName(name_datum)));
+                }
+            }
+        }
+
+        table_close(catalog, AccessShareLock);
+    }
+
+    /* object type, which can never be NULL */
+    values[0] = CStringGetTextDatum(getObjectTypeDescription(&address, true));
+    nulls[0] = false;
+
+    /*
+     * Before doing anything, extract the object identity.  If the identity
+     * could not be found, set all the fields except the object type to NULL.
+     */
+    objidentity = getObjectIdentity(&address, true);
+
+    /* schema name */
+    if OidIsValid(schema_oid) && !objidentity.is_null() {
+        let schema: *const c_char = quote_identifier(get_namespace_name(schema_oid));
+
+        values[1] = CStringGetTextDatum(schema);
+        nulls[1] = false;
+    } else {
+        nulls[1] = true;
+    }
+
+    /* object name */
+    if !objname.is_null() && !objidentity.is_null() {
+        values[2] = CStringGetTextDatum(objname);
+        nulls[2] = false;
+    } else {
+        nulls[2] = true;
+    }
+
+    /* object identity */
+    if !objidentity.is_null() {
+        values[3] = CStringGetTextDatum(objidentity);
+        nulls[3] = false;
+    } else {
+        nulls[3] = true;
+    }
+
+    htup = heap_form_tuple(tupdesc, values.as_mut_ptr(), nulls.as_mut_ptr());
+
+    HeapTupleGetDatum(htup)
 }
 
 /*
  * SQL-level callable function to obtain object type + identity
  */
 pub unsafe fn pg_identify_object_as_address(fcinfo: *mut c_void) -> Datum {
-    // TODO(pg-port): PG_FUNCTION_ARGS not yet ported; stub
-    let _ = fcinfo;
-    0
+    let classid: Oid = pg_getarg_oid(fcinfo, 0);
+    let objid: Oid = pg_getarg_oid(fcinfo, 1);
+    let objsubid: int32 = pg_getarg_int32(fcinfo, 2);
+    let mut address = INVALID_OBJECT_ADDRESS;
+    let identity: *mut c_char;
+    let mut names: *mut List = NIL;
+    let mut args: *mut List = NIL;
+    let mut values: [Datum; 3] = [0; 3];
+    let mut nulls: [bool; 3] = [false; 3];
+    let mut tupdesc: *mut c_void = core::ptr::null_mut();
+    let htup: HeapTuple;
+
+    address.classId = classid;
+    address.objectId = objid;
+    address.objectSubId = objsubid;
+
+    if get_call_result_type(fcinfo, core::ptr::null_mut(), &mut tupdesc) != TYPEFUNC_COMPOSITE {
+        elog!(ERROR, "return type must be a row type");
+    }
+
+    /* object type, which can never be NULL */
+    values[0] = CStringGetTextDatum(getObjectTypeDescription(&address, true));
+    nulls[0] = false;
+
+    /* object identity */
+    identity = getObjectIdentityParts(&address, &mut names, &mut args, true);
+    if identity.is_null() {
+        nulls[1] = true;
+        nulls[2] = true;
+    } else {
+        pfree(identity as *mut c_void);
+
+        /* object_names */
+        if names != NIL {
+            values[1] = PointerGetDatum(strlist_to_textarray(names));
+        } else {
+            values[1] = PointerGetDatum(construct_empty_array(TEXTOID));
+        }
+        nulls[1] = false;
+
+        /* object_args */
+        if !args.is_null() {
+            values[2] = PointerGetDatum(strlist_to_textarray(args));
+        } else {
+            values[2] = PointerGetDatum(construct_empty_array(TEXTOID));
+        }
+        nulls[2] = false;
+    }
+
+    htup = heap_form_tuple(tupdesc, values.as_mut_ptr(), nulls.as_mut_ptr());
+
+    HeapTupleGetDatum(htup)
 }
 
 /*
@@ -4555,9 +5041,69 @@ pub unsafe fn pg_identify_object_as_address(fcinfo: *mut c_void) -> Datum {
  * given its catalog OID, object OID and sub-object ID.
  */
 pub unsafe fn pg_get_acl(fcinfo: *mut c_void) -> Datum {
-    // TODO(pg-port): PG_FUNCTION_ARGS not yet ported; stub
-    let _ = fcinfo;
-    0
+    let class_id: Oid = pg_getarg_oid(fcinfo, 0);
+    let object_id: Oid = pg_getarg_oid(fcinfo, 1);
+    let objsubid: int32 = pg_getarg_int32(fcinfo, 2);
+    let catalog_id: Oid;
+    let anum_acl: AttrNumber;
+    let datum: Datum;
+    let mut isnull: bool = false;
+    let tup: HeapTuple;
+
+    /* for "pinned" items in pg_depend, return null */
+    if !OidIsValid(class_id) && !OidIsValid(object_id) {
+        return 0; /* PG_RETURN_NULL */
+    }
+
+    /* for large objects, the catalog to look at is pg_largeobject_metadata */
+    catalog_id = if class_id == LargeObjectRelationId {
+        LargeObjectMetadataRelationId
+    } else {
+        class_id
+    };
+    anum_acl = get_object_attnum_acl(catalog_id);
+
+    /* return NULL if no ACL field for this catalog */
+    if anum_acl == InvalidAttrNumber {
+        return 0; /* PG_RETURN_NULL */
+    }
+
+    /*
+     * If dealing with a relation's attribute (objsubid is set), the ACL is
+     * retrieved from pg_attribute.
+     */
+    if class_id == RelationRelationId && objsubid != 0 {
+        let attnum: AttrNumber = objsubid as AttrNumber;
+
+        tup = SearchSysCacheCopyAttNum(object_id, attnum);
+
+        if !HeapTupleIsValid(tup) {
+            return 0; /* PG_RETURN_NULL */
+        }
+
+        datum = SysCacheGetAttr(ATTNUM, tup, Anum_pg_attribute_attacl,
+                                &mut isnull);
+    } else {
+        let rel: Relation;
+
+        rel = table_open(catalog_id, AccessShareLock);
+
+        tup = get_catalog_object_by_oid(rel, get_object_attnum_oid(catalog_id),
+                                        object_id);
+        if !HeapTupleIsValid(tup) {
+            table_close(rel, AccessShareLock);
+            return 0; /* PG_RETURN_NULL */
+        }
+
+        datum = heap_getattr(tup, anum_acl, RelationGetDescr(rel), &mut isnull);
+        table_close(rel, AccessShareLock);
+    }
+
+    if isnull {
+        return 0; /* PG_RETURN_NULL */
+    }
+
+    datum /* PG_RETURN_DATUM */
 }
 
 /* ================================================================
@@ -5171,9 +5717,46 @@ unsafe fn getRelationIdentity(
  * Auxiliary function to build a TEXT array out of a list of C-strings.
  */
 pub unsafe fn strlist_to_textarray(list: *mut List) -> *mut c_void {
-    // TODO(pg-port): AllocSet, construct_md_array not fully ported; stub.
-    let _ = list;
-    core::ptr::null_mut()
+    let arr: *mut c_void;
+    let datums: *mut Datum;
+    let nulls: *mut bool;
+    let mut j: c_int = 0;
+    let memcxt: MemoryContext;
+    let oldcxt: MemoryContext;
+    let mut lb: [c_int; 1] = [0; 1];
+
+    /* Work in a temp context; easier than individually pfree'ing the Datums */
+    memcxt = AllocSetContextCreate!(
+        CurrentMemoryContext,
+        c"strlist to array".as_ptr(),
+        ALLOCSET_DEFAULT_SIZES
+    );
+    oldcxt = MemoryContextSwitchTo(memcxt);
+
+    datums = palloc(core::mem::size_of::<Datum>() * list_length(list) as usize) as *mut Datum;
+    nulls = palloc(core::mem::size_of::<bool>() * list_length(list) as usize) as *mut bool;
+
+    foreach!(cell, list, {
+        let name: *mut c_char = lfirst(current_cell!(cell)) as *mut c_char;
+
+        if !name.is_null() {
+            *nulls.add(j as usize) = false;
+            *datums.add(j as usize) = CStringGetTextDatum(name);
+            j += 1;
+        } else {
+            *nulls.add(j as usize) = true;
+        }
+    });
+
+    MemoryContextSwitchTo(oldcxt);
+
+    lb[0] = 1;
+    arr = construct_md_array(datums, nulls, 1, &mut j,
+                            lb.as_mut_ptr(), TEXTOID, -1, false, TYPALIGN_INT);
+
+    MemoryContextDelete(memcxt);
+
+    arr
 }
 
 /*

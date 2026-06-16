@@ -1028,17 +1028,59 @@ pub unsafe fn gtsvector_consistent_oldsig(fcinfo: FunctionCallInfo) -> Datum {
     gtsvector_consistent(fcinfo)
 }
 
-pub unsafe fn gtsvector_options(_fcinfo: FunctionCallInfo) -> Datum {
-    /*
-     * local_relopts *relopts = (local_relopts *) PG_GETARG_POINTER(0);
-     * init_local_reloptions(relopts, sizeof(GistTsVectorOptions));
-     * add_local_int_reloption(relopts, "siglen", "signature length",
-     *                         SIGLEN_DEFAULT, 1, SIGLEN_MAX,
-     *                         offsetof(GistTsVectorOptions, siglen));
-     */
-    // TODO(pg-port): access/reloptions.h (local_relopts / init_local_reloptions /
-    // add_local_int_reloption) is not yet ported.
-    unimplemented!("gtsvector_options requires the unported reloptions framework")
+/*
+ * #define SIGLEN_MAX GISTMaxIndexKeySize
+ *
+ * GISTMaxIndexKeySize is a compile-time constant derived from BLCKSZ (8192):
+ *   GISTMaxIndexTupleSize = MAXALIGN_DOWN((BLCKSZ - SizeOfPageHeaderData -
+ *                           sizeof(GISTPageOpaqueData)) / 4 - sizeof(ItemIdData))
+ *   GISTMaxIndexKeySize   = GISTMaxIndexTupleSize - MAXALIGN(sizeof(IndexTupleData))
+ */
+const SIGLEN_MAX: c_int = 2024;
+
+/*
+ * local_relopts plumbing (access/reloptions.h).  The reloptions framework is
+ * ported in src/access/common/reloptions.rs but not yet wired into a module
+ * tree; mirror the brin precedent with local stubs.  TODO(pg-port): import
+ * crate::access::common::reloptions::{local_relopts, init_local_reloptions,
+ * add_local_int_reloption} once that module is declared.
+ */
+#[repr(C)]
+pub struct local_relopts {
+    _private: [u8; 0],
+}
+
+unsafe fn init_local_reloptions(_relopts: *mut local_relopts, _relopt_struct_size: Size) {
+    unimplemented!() // TODO(pg-port): access/reloptions.h
+}
+
+unsafe fn add_local_int_reloption(
+    _relopts: *mut local_relopts,
+    _name: *const c_char,
+    _desc: *const c_char,
+    _default_val: c_int,
+    _min_val: c_int,
+    _max_val: c_int,
+    _offset: c_int,
+) {
+    unimplemented!() // TODO(pg-port): access/reloptions.h
+}
+
+pub unsafe fn gtsvector_options(fcinfo: FunctionCallInfo) -> Datum {
+    let relopts: *mut local_relopts = PG_GETARG_POINTER!(fcinfo, 0) as *mut local_relopts;
+
+    init_local_reloptions(relopts, core::mem::size_of::<GistTsVectorOptions>() as Size);
+    add_local_int_reloption(
+        relopts,
+        c"siglen".as_ptr(),
+        c"signature length".as_ptr(),
+        SIGLEN_DEFAULT,
+        1,
+        SIGLEN_MAX,
+        core::mem::offset_of!(GistTsVectorOptions, siglen) as c_int,
+    );
+
+    PG_RETURN_VOID!()
 }
 
 // ================================================================

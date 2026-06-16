@@ -1692,7 +1692,7 @@ unsafe fn ExecInsert_inner(
     ar_insert_trig_tcs = (*mtstate).mt_transition_capture;
     if (*mtstate).operation == CMD_UPDATE
         && !(*mtstate).mt_transition_capture.is_null()
-        && !(*(*mtstate).mt_transition_capture).tcs_update_new_table.is_null()
+        && (*(*mtstate).mt_transition_capture).tcs_update_new_table
     {
         ExecARUpdateTriggers(
             estate,
@@ -1973,7 +1973,7 @@ unsafe fn ExecDeleteEpilogue(
     ar_delete_trig_tcs = (*mtstate).mt_transition_capture;
     if (*mtstate).operation == CMD_UPDATE
         && !(*mtstate).mt_transition_capture.is_null()
-        && !(*(*mtstate).mt_transition_capture).tcs_update_old_table.is_null()
+        && (*(*mtstate).mt_transition_capture).tcs_update_old_table
     {
         ExecARUpdateTriggers(
             estate,

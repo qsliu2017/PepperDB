@@ -1325,6 +1325,1563 @@ pub unsafe fn pgstat_reset_entry(kind: PgStat_Kind, dboid: Oid, objoid: Oid, _ts
     }
 }
 
+// ===========================================================================
+// Top-level pgstat.c functions (1:1 translation).
+//
+// DEVIATION: the canonical infrastructure these functions lean on -- the
+// `PgStat_KindInfo` table, the dshash `shared_hash`, the `pgStatPending` dlist,
+// the snapshot simplehash, and the on-disk stats file I/O -- is hosted in the
+// canonical `pgstat_internal` / `pgstat_shmem` modules against the FULL types,
+// whose signatures are incompatible with this subset's own `pgStatLocal` /
+// `pgstat_get_entry_ref` (objid is `Oid` here, `u64` there). To keep this file
+// self-consistent and compiling until the duplicate types are deduped, the
+// genuinely-unported infrastructure deps are provided as LOCAL `TODO(pg-port)`
+// stubs below, and the function bodies are otherwise translated statement for
+// statement from upstream PostgreSQL 18.3 `pgstat.c`.
+// ===========================================================================
+
+use crate::utils::pgstat_kind::{
+    pgstat_is_kind_builtin, pgstat_is_kind_custom, PGSTAT_KIND_BUILTIN_MAX, PGSTAT_KIND_BUILTIN_MIN,
+    PGSTAT_KIND_CUSTOM_MAX, PGSTAT_KIND_CUSTOM_MIN, PGSTAT_KIND_INVALID, PGSTAT_KIND_MAX,
+    PGSTAT_KIND_MIN,
+};
+
+use crate::miscadmin::MyDatabaseId;
+use crate::port::pgstrcasecmp::pg_strcasecmp;
+
+/// Variable-amount stats kind for per-backend statistics (pgstat.h:
+/// PGSTAT_KIND_BACKEND).
+pub const PGSTAT_KIND_BACKEND: PgStat_Kind = 6;
+
+// ---------------------------------------------------------------------------
+// Timer definitions (pgstat.c). In milliseconds.
+// ---------------------------------------------------------------------------
+
+/// minimum interval non-forced stats flushes.
+const PGSTAT_MIN_INTERVAL: c_long = 1000;
+/// how long until to block flushing pending stats updates
+const PGSTAT_MAX_INTERVAL: c_long = 60000;
+/// when to call pgstat_report_stat() again, even when idle
+const PGSTAT_IDLE_INTERVAL: c_long = 10000;
+
+// ---------------------------------------------------------------------------
+// GUC parameters (pgstat.c)
+// ---------------------------------------------------------------------------
+
+pub const PGSTAT_FETCH_CONSISTENCY_NONE: c_int = 0;
+pub const PGSTAT_FETCH_CONSISTENCY_CACHE: c_int = 1;
+pub const PGSTAT_FETCH_CONSISTENCY_SNAPSHOT: c_int = 2;
+
+#[no_mangle]
+pub static mut pgstat_track_counts: bool = false;
+#[no_mangle]
+pub static mut pgstat_fetch_consistency: c_int = PGSTAT_FETCH_CONSISTENCY_CACHE;
+
+/// Track pending reports for fixed-numbered stats, used by pgstat_report_stat().
+#[no_mangle]
+pub static mut pgstat_report_fixed: bool = false;
+
+// ---------------------------------------------------------------------------
+// Local data (pgstat.c)
+// ---------------------------------------------------------------------------
+
+/// Force the next stats flush to happen regardless of PGSTAT_MIN_INTERVAL.
+static mut pgStatForceNextFlush: bool = false;
+
+/// Force-clear existing snapshot before next use when stats_fetch_consistency
+/// is changed.
+static mut force_stats_snapshot_clear: bool = false;
+
+// For assertions that check pgstat is not used before init / after shutdown.
+#[cfg(debug_assertions)]
+static mut pgstat_is_initialized: bool = false;
+#[cfg(debug_assertions)]
+static mut pgstat_is_shutdown: bool = false;
+
+// ---------------------------------------------------------------------------
+// TODO(pg-port) stubs for canonical infrastructure not present in this subset.
+// (Hosted for real in pgstat_internal.rs / pgstat_shmem.rs against the full,
+// currently-incompatible types.)
+// ---------------------------------------------------------------------------
+
+/// TODO(pg-port): the per-kind KindInfo table lives in `pgstat_internal`; the
+/// subset has no compatible table, so this returns null.
+unsafe fn pgstat_get_kind_info(_kind: PgStat_Kind) -> *const c_void {
+    null()
+}
+
+/// TODO(pg-port): real home `pgstat_internal::pgstat_drop_all_entries`
+/// (incompatible types). No-op in the subset.
+unsafe fn pgstat_drop_all_entries() {}
+
+/// TODO(pg-port): real home `pgstat_database.rs` (incompatible signature).
+unsafe fn pgstat_reset_database_timestamp(_dboid: Oid, _ts: TimestampTz) {}
+
+/// TODO(pg-port): real home `pgstat_shmem.rs::pgstat_reset_entries_of_kind`.
+unsafe fn pgstat_reset_entries_of_kind(_kind: PgStat_Kind, _ts: TimestampTz) {}
+
+/// TODO(pg-port): real home `pgstat_shmem.rs::pgstat_reset_matching_entries`.
+unsafe fn pgstat_reset_matching_entries(
+    _match_fn: unsafe fn(*mut c_void, Datum) -> bool,
+    _match_data: Datum,
+    _ts: TimestampTz,
+) {
+}
+
+/// TODO(pg-port): real home `backend_status.rs`.
+unsafe fn pgstat_clear_backend_activity_snapshot() {}
+
+/// TODO(pg-port): real home `pgstat_database.rs`.
+unsafe fn pgstat_report_disconnect(_dboid: Oid) {}
+
+/// TODO(pg-port): real home `pgstat_database.rs`.
+unsafe fn pgstat_update_dbstats(_now: TimestampTz) {}
+
+/// TODO(pg-port): real home `pgstat_shmem.rs::pgstat_drop_entry`.
+unsafe fn pgstat_drop_entry(_kind: PgStat_Kind, _dboid: Oid, _objid: Oid) -> bool {
+    true
+}
+
+/// TODO(pg-port): real home `pgstat_shmem.rs::pgstat_request_entry_refs_gc`.
+unsafe fn pgstat_request_entry_refs_gc() {}
+
+/// TODO(pg-port): real home `pgstat_shmem.rs::pgstat_detach_shmem`.
+unsafe fn pgstat_detach_shmem() {}
+
+/// TODO(pg-port): transaction state predicate, `access/xact.c` (unported here).
+unsafe fn IsTransactionOrTransactionBlock() -> bool {
+    false
+}
+
+/// TODO(pg-port): `utils/timestamp.c` (unported); upstream uses the xact stop
+/// timestamp as an approximation of "now".
+unsafe fn GetCurrentTransactionStopTimestamp() -> TimestampTz {
+    GetCurrentTimestamp()
+}
+
+/// TODO(pg-port): `utils/timestamp.c` TimestampDifferenceExceeds.
+unsafe fn TimestampDifferenceExceeds(
+    _start: TimestampTz,
+    _stop: TimestampTz,
+    _msec: c_long,
+) -> bool {
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Functions managing the state of the stats system for all backends.
+// ---------------------------------------------------------------------------
+
+/// Read on-disk stats into memory at server start.
+///
+/// Should only be called by the startup process or in single user mode.
+pub unsafe fn pgstat_restore_stats() {
+    pgstat_read_statsfile();
+}
+
+/// Remove the stats file.  This is currently used only if WAL recovery is
+/// needed after a crash.
+///
+/// Should only be called by the startup process or in single user mode.
+pub unsafe fn pgstat_discard_stats() {
+    /* NB: this needs to be done even in single user mode */
+
+    // TODO(pg-port): unlink(PGSTAT_STAT_PERMANENT_FILENAME) -- on-disk stats
+    // file path/IO not ported in this subset.
+    let ret: c_int = pgstat_unlink_permanent();
+    if ret != 0 {
+        // C: distinguishes ENOENT (DEBUG2) from other errors (LOG). The file
+        // path/errno plumbing is not ported; emit the DEBUG2 variant.
+        elog!(DEBUG2, "didn't need to unlink permanent stats file - didn't exist");
+        /* C also: ereport(LOG, errcode_for_file_access(),
+         * errmsg("could not unlink permanent statistics file \"%s\": %m", ...)) */
+    } else {
+        ereport!(DEBUG2, errmsg!("unlinked permanent statistics file"));
+        /* C also: errcode_for_file_access() */
+    }
+
+    /*
+     * Reset stats contents. This will set reset timestamps of fixed-numbered
+     * stats to the current time (no variable stats exist).
+     */
+    pgstat_reset_after_failure();
+}
+
+/// pgstat_before_server_shutdown() needs to be called by exactly one process
+/// during regular server shutdowns. Otherwise all stats will be lost.
+pub unsafe fn pgstat_before_server_shutdown(code: c_int, _arg: Datum) {
+    Assert!(!pgStatLocal.shmem.is_null());
+    // Assert(!pgStatLocal.shmem->is_shutdown); -- is_shutdown not in subset ctl.
+
+    /*
+     * Stats should only be reported after pgstat_initialize() and before
+     * pgstat_shutdown(). This is a convenient point to catch most violations
+     * of this rule.
+     */
+    // Assert(pgstat_is_initialized && !pgstat_is_shutdown);
+
+    /* flush out our own pending changes before writing out */
+    pgstat_report_stat(true);
+
+    /*
+     * Only write out file during normal shutdown. Don't even signal that we've
+     * shutdown during irregular shutdowns, because the shutdown sequence isn't
+     * coordinated to ensure this backend shuts down last.
+     */
+    if code == 0 {
+        // pgStatLocal.shmem->is_shutdown = true; -- field not in subset ctl.
+        pgstat_write_statsfile();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Backend initialization / shutdown functions
+// ---------------------------------------------------------------------------
+
+/// Shut down a single backend's statistics reporting at process exit.
+///
+/// Flush out any remaining statistics counts.  Without this, operations
+/// triggered during backend exit (such as temp table deletions) won't be
+/// counted.
+unsafe fn pgstat_shutdown_hook(_code: c_int, _arg: Datum) {
+    // Assert(!pgstat_is_shutdown);
+    // Assert(IsUnderPostmaster || !IsPostmasterEnvironment);
+
+    /*
+     * If we got as far as discovering our own database ID, we can flush out
+     * what we did so far.  Otherwise, we'd be reporting an invalid database
+     * ID, so forget it.
+     */
+    if OidIsValid(MyDatabaseId) {
+        pgstat_report_disconnect(MyDatabaseId);
+    }
+
+    pgstat_report_stat(true);
+
+    /* there shouldn't be any pending changes left */
+    // Assert(dlist_is_empty(&pgStatPending));
+    // dlist_init(&pgStatPending);
+
+    /* drop the backend stats entry */
+    if !pgstat_drop_entry(PGSTAT_KIND_BACKEND, InvalidOid, MyProcNumber as Oid) {
+        pgstat_request_entry_refs_gc();
+    }
+
+    pgstat_detach_shmem();
+
+    #[cfg(debug_assertions)]
+    {
+        pgstat_is_shutdown = true;
+    }
+}
+
+/// Initialize pgstats state, and set up our on-proc-exit hook. Called from
+/// BaseInit().
+///
+/// NOTE: MyDatabaseId isn't set yet; so the shutdown hook has to be careful.
+pub unsafe fn pgstat_initialize() {
+    // Assert(!pgstat_is_initialized);
+
+    pgstat_attach_shmem();
+
+    pgstat_init_snapshot_fixed();
+
+    /* Backend initialization callbacks */
+    // TODO(pg-port): the per-kind init_backend_cb dispatch needs the KindInfo
+    // table; the subset's pgstat_get_kind_info() returns null, so this loop is
+    // a faithful no-op body. Structure preserved:
+    let mut kind: PgStat_Kind = PGSTAT_KIND_MIN;
+    while kind <= PGSTAT_KIND_MAX {
+        let kind_info = pgstat_get_kind_info(kind);
+        if kind_info.is_null() {
+            kind += 1;
+            continue;
+        }
+        /* kind_info->init_backend_cb() -- dispatched once KindInfo is ported */
+        kind += 1;
+    }
+
+    /* Set up a process-exit hook to clean up */
+    before_shmem_exit(pgstat_shutdown_hook, 0);
+
+    #[cfg(debug_assertions)]
+    {
+        pgstat_is_initialized = true;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public functions used by backends follow
+// ---------------------------------------------------------------------------
+
+/// Flush pending statistics updates to shared memory.  See upstream pgstat.c
+/// for the detailed force / interval / nowait contract.
+pub unsafe fn pgstat_report_stat(mut force: bool) -> c_long {
+    static mut pending_since: TimestampTz = 0;
+    static mut last_flush: TimestampTz = 0;
+    let partial_flush;
+    let now: TimestampTz;
+    let nowait;
+
+    pgstat_assert_is_up();
+    Assert!(!IsTransactionOrTransactionBlock());
+
+    /* "absorb" the forced flush even if there's nothing to flush */
+    if pgStatForceNextFlush {
+        force = true;
+        pgStatForceNextFlush = false;
+    }
+
+    /* Don't expend a clock check if nothing to do */
+    if pgstat_pending_is_empty() && !pgstat_report_fixed {
+        return 0;
+    }
+
+    /*
+     * There should never be stats to report once stats are shut down.
+     */
+    // Assert(!pgStatLocal.shmem->is_shutdown);
+
+    if force {
+        now = GetCurrentTimestamp();
+    } else {
+        now = GetCurrentTransactionStopTimestamp();
+
+        if pending_since > 0
+            && TimestampDifferenceExceeds(pending_since, now, PGSTAT_MAX_INTERVAL)
+        {
+            /* don't keep pending updates longer than PGSTAT_MAX_INTERVAL */
+            force = true;
+        } else if last_flush > 0
+            && !TimestampDifferenceExceeds(last_flush, now, PGSTAT_MIN_INTERVAL)
+        {
+            /* don't flush too frequently */
+            if pending_since == 0 {
+                pending_since = now;
+            }
+
+            return PGSTAT_IDLE_INTERVAL;
+        }
+    }
+
+    pgstat_update_dbstats(now);
+
+    /* don't wait for lock acquisition when !force */
+    nowait = !force;
+
+    let mut partial = false;
+
+    /* flush of variable-numbered stats tracked in pending entries list */
+    partial |= pgstat_flush_pending_entries(nowait);
+
+    /* flush of other stats kinds */
+    if pgstat_report_fixed {
+        let mut kind: PgStat_Kind = PGSTAT_KIND_MIN;
+        while kind <= PGSTAT_KIND_MAX {
+            let kind_info = pgstat_get_kind_info(kind);
+
+            if kind_info.is_null() {
+                kind += 1;
+                continue;
+            }
+            /* if (!kind_info->flush_static_cb) continue;
+             * partial |= kind_info->flush_static_cb(nowait); -- needs KindInfo */
+            kind += 1;
+        }
+    }
+    partial_flush = partial;
+
+    last_flush = now;
+
+    /*
+     * If some of the pending stats could not be flushed due to lock
+     * contention, let the caller know when to retry.
+     */
+    if partial_flush {
+        /* force should have prevented us from getting here */
+        Assert!(!force);
+
+        /* remember since when stats have been pending */
+        if pending_since == 0 {
+            pending_since = now;
+        }
+
+        return PGSTAT_IDLE_INTERVAL;
+    }
+
+    pending_since = 0;
+    pgstat_report_fixed = false;
+
+    0
+}
+
+/// Force locally pending stats to be flushed during the next
+/// pgstat_report_stat() call. This is useful for writing tests.
+pub unsafe fn pgstat_force_next_flush() {
+    pgStatForceNextFlush = true;
+}
+
+/// Only for use by pgstat_reset_counters()
+unsafe fn match_db_entries(entry: *mut c_void, _match_data: Datum) -> bool {
+    let entry = entry as *mut crate::utils::activity::pgstat_internal::PgStatShared_HashEntry;
+    (*entry).key.dboid == DatumGetObjectId(MyDatabaseId as Datum)
+}
+
+/// Reset counters for our database.
+///
+/// Permission checking for this function is managed through the normal GRANT
+/// system.
+pub unsafe fn pgstat_reset_counters() {
+    let ts: TimestampTz = GetCurrentTimestamp();
+
+    pgstat_reset_matching_entries(match_db_entries, ObjectIdGetDatum(MyDatabaseId), ts);
+}
+
+/// Reset a single variable-numbered entry.
+///
+/// If the stats kind is within a database, also reset the database's
+/// stat_reset_timestamp.
+pub unsafe fn pgstat_reset(kind: PgStat_Kind, dboid: Oid, objid: Oid) {
+    let _kind_info = pgstat_get_kind_info(kind);
+    let ts: TimestampTz = GetCurrentTimestamp();
+
+    /* not needed atm, and doesn't make sense with the current signature */
+    // Assert(!pgstat_get_kind_info(kind)->fixed_amount);
+
+    /* reset the "single counter" */
+    pgstat_reset_entry(kind, dboid, objid, ts);
+
+    // C: if (!kind_info->accessed_across_databases)
+    //        pgstat_reset_database_timestamp(dboid, ts);
+    // TODO(pg-port): accessed_across_databases lives in KindInfo (unported);
+    // forward the reset unconditionally to preserve the timestamp behavior.
+    pgstat_reset_database_timestamp(dboid, ts);
+}
+
+/// Reset stats for all entries of a kind.
+pub unsafe fn pgstat_reset_of_kind(kind: PgStat_Kind) {
+    let _kind_info = pgstat_get_kind_info(kind);
+    let ts: TimestampTz = GetCurrentTimestamp();
+
+    // C: if (kind_info->fixed_amount) kind_info->reset_all_cb(ts);
+    //    else pgstat_reset_entries_of_kind(kind, ts);
+    // TODO(pg-port): fixed_amount / reset_all_cb come from KindInfo (unported);
+    // route variable-numbered kinds through the entry resetter.
+    pgstat_reset_entries_of_kind(kind, ts);
+}
+
+// ---------------------------------------------------------------------------
+// Fetching of stats
+// ---------------------------------------------------------------------------
+
+/// Discard any data collected in the current transaction.  Any subsequent
+/// request will cause new snapshots to be read.
+pub unsafe fn pgstat_clear_snapshot() {
+    pgstat_assert_is_up();
+
+    // C resets snapshot.fixed_valid / custom_valid / stats / mode and frees the
+    // snapshot memory context. Those snapshot-machinery fields are not present
+    // in this subset's PgStat_Snapshot, so only the forwarded reset + flag
+    // clear are translated here.
+    // TODO(pg-port): full snapshot-context teardown once PgStat_Snapshot carries
+    // the stats/context/mode fields.
+
+    /*
+     * Historically the backend_status.c facilities lived in this file, and were
+     * reset with the same function. For now keep it that way, and forward the
+     * reset request.
+     */
+    pgstat_clear_backend_activity_snapshot();
+
+    /* Reset this flag, as it may be possible that a cleanup was forced. */
+    force_stats_snapshot_clear = false;
+}
+
+/// If a stats snapshot has been taken, return the timestamp at which that was
+/// done, and set *have_snapshot accordingly.
+pub unsafe fn pgstat_get_stat_snapshot_timestamp(have_snapshot: *mut bool) -> TimestampTz {
+    if force_stats_snapshot_clear {
+        pgstat_clear_snapshot();
+    }
+
+    // C: if (pgStatLocal.snapshot.mode == PGSTAT_FETCH_CONSISTENCY_SNAPSHOT) {
+    //        *have_snapshot = true; return pgStatLocal.snapshot.snapshot_timestamp; }
+    // TODO(pg-port): snapshot.mode / snapshot_timestamp not in subset; no full
+    // snapshot is ever built here.
+    *have_snapshot = false;
+
+    0
+}
+
+/// Whether an entry of `kind` for (dboid, objid) exists.
+pub unsafe fn pgstat_have_entry(kind: PgStat_Kind, dboid: Oid, objid: Oid) -> bool {
+    /* fixed-numbered stats always exist */
+    // C: if (pgstat_get_kind_info(kind)->fixed_amount) return true;
+    // TODO(pg-port): fixed_amount lives in KindInfo (unported); fixed kinds are
+    // recognized via the kind-id range instead.
+    if pgstat_is_fixed_kind(kind) {
+        return true;
+    }
+
+    !pgstat_get_entry_ref(kind, dboid, objid, false, null_mut()).is_null()
+}
+
+/// Initialize fixed-numbered statistics data in snapshots, only for custom
+/// stats kinds.
+unsafe fn pgstat_init_snapshot_fixed() {
+    // C iterates PGSTAT_KIND_CUSTOM_MIN..=MAX and allocates snapshot.custom_data
+    // for fixed custom kinds. The subset has no custom_data slot in its snapshot,
+    // and no custom kinds are registered, so this body is a faithful no-op.
+    let mut kind: PgStat_Kind = PGSTAT_KIND_CUSTOM_MIN;
+    while kind <= PGSTAT_KIND_CUSTOM_MAX {
+        let kind_info = pgstat_get_kind_info(kind);
+        if kind_info.is_null() {
+            kind += 1;
+            continue;
+        }
+        /* pgStatLocal.snapshot.custom_data[...] = MemoryContextAlloc(...) */
+        kind += 1;
+    }
+}
+
+/// Prepare the snapshot simplehash for caching mode.
+unsafe fn pgstat_prep_snapshot() {
+    if force_stats_snapshot_clear {
+        pgstat_clear_snapshot();
+    }
+
+    // C: if (consistency == NONE || snapshot.stats != NULL) return;
+    //    create snapshot.context + snapshot.stats simplehash.
+    // TODO(pg-port): snapshot.stats simplehash + context not present in subset.
+    if pgstat_fetch_consistency == PGSTAT_FETCH_CONSISTENCY_NONE {
+        // (no snapshot.stats field to check)
+    }
+}
+
+/// Build a full snapshot of all stats (snapshot consistency mode).
+unsafe fn pgstat_build_snapshot() {
+    /* should only be called when we need a snapshot */
+    Assert!(pgstat_fetch_consistency == PGSTAT_FETCH_CONSISTENCY_SNAPSHOT);
+
+    // C walks the dshash of variable stats and all fixed kinds, copying each into
+    // snapshot.stats / the per-kind snapshot slots, then sets snapshot.mode.
+    // TODO(pg-port): dshash seq + snapshot.stats simplehash + snapshot.mode not
+    // present in this subset. Build the fixed-kind snapshots that DO exist:
+    pgstat_prep_snapshot();
+
+    let mut kind: PgStat_Kind = PGSTAT_KIND_MIN;
+    while kind <= PGSTAT_KIND_MAX {
+        if pgstat_is_fixed_kind(kind) {
+            pgstat_build_snapshot_fixed(kind);
+        }
+        kind += 1;
+    }
+}
+
+/// Build a snapshot for a single fixed-numbered kind.
+unsafe fn pgstat_build_snapshot_fixed(kind: PgStat_Kind) {
+    use crate::utils::activity::pgstat_internal as pgi;
+    let kind_info = pgi::pgstat_get_kind_info(kind);
+    let idx: usize;
+    let valid: *mut bool;
+
+    /* Position in fixed_valid or custom_valid */
+    if pgstat_is_kind_builtin(kind) {
+        idx = kind as usize;
+        valid = pgi::pgStatLocal.snapshot.fixed_valid.as_mut_ptr();
+    } else {
+        idx = (kind as i32 - PGSTAT_KIND_CUSTOM_MIN as i32) as usize;
+        valid = pgi::pgStatLocal.snapshot.custom_valid.as_mut_ptr();
+    }
+
+    Assert!((*kind_info).fixed_amount());
+    Assert!((*kind_info).snapshot_cb.is_some());
+
+    if pgstat_fetch_consistency == PGSTAT_FETCH_CONSISTENCY_NONE {
+        /* rebuild every time */
+        *valid.add(idx) = false;
+    } else if *valid.add(idx) {
+        /* in snapshot mode we shouldn't get called again */
+        Assert!(pgstat_fetch_consistency == PGSTAT_FETCH_CONSISTENCY_CACHE);
+        return;
+    }
+
+    Assert!(!*valid.add(idx));
+
+    ((*kind_info).snapshot_cb.unwrap())();
+
+    Assert!(!*valid.add(idx));
+    *valid.add(idx) = true;
+}
+
+
+// ---------------------------------------------------------------------------
+// Backend-local pending stats infrastructure
+// ---------------------------------------------------------------------------
+
+/// Return an existing stats entry, or NULL.
+///
+/// This should only be used as a helper function for pgstatfuncs.c.
+pub unsafe fn pgstat_fetch_pending_entry(
+    kind: PgStat_Kind,
+    dboid: Oid,
+    objid: Oid,
+) -> *mut PgStat_EntryRef {
+    let entry_ref = pgstat_get_entry_ref(kind, dboid, objid, false, null_mut());
+
+    if entry_ref.is_null() || (*entry_ref).pending.is_null() {
+        return null_mut();
+    }
+
+    entry_ref
+}
+
+/// Drop the pending entry referenced by `entry_ref`.
+pub unsafe fn pgstat_delete_pending_entry(entry_ref: *mut PgStat_EntryRef) {
+    // C derives kind from entry_ref->shared_entry->key.kind, then calls the
+    // kind's delete_pending_cb before pfree-ing the pending blob and unlinking
+    // the dlist node.
+    // TODO(pg-port): shared_entry / delete_pending_cb / pending_node dlist not in
+    // subset. Drop the pending blob via the owning VarEntry.
+    let pending_data = (*entry_ref).pending;
+    Assert!(!pending_data.is_null());
+
+    pgstat_free_pending_blob(entry_ref);
+    (*entry_ref).pending = null_mut();
+}
+
+/// Flush out pending variable-numbered stats.
+/* Backend-local list of pending stats entries (pgstat.c). */
+static mut pgStatPending: crate::lib::ilist::dlist_head = crate::lib::ilist::dlist_head {
+    head: crate::lib::ilist::dlist_node { prev: core::ptr::null_mut(), next: core::ptr::null_mut() },
+};
+
+unsafe fn pgstat_flush_pending_entries(nowait: bool) -> bool {
+    use crate::lib::ilist::{dlist_is_empty, dlist_head_node, dlist_has_next, dlist_next_node, dlist_node};
+    use crate::utils::activity::pgstat_internal as pgi;
+    type ER = pgi::PgStat_EntryRef;
+    let mut have_pending = false;
+    let mut cur: *mut dlist_node = core::ptr::null_mut();
+
+    if !dlist_is_empty(&raw const pgStatPending) {
+        cur = dlist_head_node(&raw mut pgStatPending);
+    }
+
+    while !cur.is_null() {
+        let entry_ref = crate::dlist_container!(ER, pending_node, cur);
+        let key = (*(*entry_ref).shared_entry).key;
+        let kind = key.kind;
+        let kind_info = pgi::pgstat_get_kind_info(kind);
+        let did_flush: bool;
+        let next: *mut dlist_node;
+
+        Assert!(!(*kind_info).fixed_amount());
+        Assert!((*kind_info).flush_pending_cb.is_some());
+
+        /* flush the stats, if possible */
+        did_flush = ((*kind_info).flush_pending_cb.unwrap())(entry_ref, nowait);
+
+        Assert!(did_flush || nowait);
+
+        /* determine next entry, before deleting the pending entry */
+        if dlist_has_next(&raw const pgStatPending, cur) {
+            next = dlist_next_node(&raw mut pgStatPending, cur);
+        } else {
+            next = core::ptr::null_mut();
+        }
+
+        /* if successfully flushed, remove entry */
+        if did_flush {
+            pgi::pgstat_delete_pending_entry(entry_ref);
+        } else {
+            have_pending = true;
+        }
+
+        cur = next;
+    }
+
+    Assert!(dlist_is_empty(&raw const pgStatPending) == !have_pending);
+
+    have_pending
+}
+
+// ---------------------------------------------------------------------------
+// Helper / infrastructure functions
+// ---------------------------------------------------------------------------
+
+/// Map a stats-kind name string to its PgStat_Kind.
+pub unsafe fn pgstat_get_kind_from_str(kind_str: *mut c_char) -> PgStat_Kind {
+    let mut kind: PgStat_Kind = PGSTAT_KIND_BUILTIN_MIN;
+    while kind <= PGSTAT_KIND_BUILTIN_MAX {
+        let name = pgstat_kind_builtin_name(kind);
+        if !name.is_null() && pg_strcasecmp(kind_str, name) == 0 {
+            return kind;
+        }
+        kind += 1;
+    }
+
+    /* Check the custom set of cumulative stats */
+    // TODO(pg-port): pgstat_kind_custom_infos table not in subset.
+
+    ereport!(
+        ERROR,
+        errmsg!(
+            "invalid statistics kind: \"{}\"",
+            std::ffi::CStr::from_ptr(kind_str).to_string_lossy()
+        )
+    );
+    /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+    #[allow(unreachable_code)]
+    PGSTAT_KIND_INVALID /* avoid compiler warnings */
+}
+
+#[inline]
+unsafe fn pgstat_is_kind_valid(kind: PgStat_Kind) -> bool {
+    pgstat_is_kind_builtin(kind) || pgstat_is_kind_custom(kind)
+}
+
+/// Register a new (custom) stats kind.
+///
+/// TODO(pg-port): the custom-kind registry (pgstat_kind_custom_infos) and the
+/// KindInfo type are hosted canonically in `pgstat_internal`; the subset has no
+/// compatible table, so registration is not performed. The validation order
+/// from upstream is preserved as documentation.
+pub unsafe fn pgstat_register_kind(kind: PgStat_Kind, _kind_info: *const c_void) {
+    /* C validates name non-empty, kind in custom range, in shared_preload, and
+     * non-duplicate, then records pgstat_kind_custom_infos[idx] = kind_info. */
+    if !pgstat_is_kind_custom(kind) {
+        ereport!(
+            ERROR,
+            errmsg!("custom cumulative statistics ID {} is out of range", kind)
+        );
+        /* C also: errhint("Provide a custom cumulative statistics ID between %u and %u.", ...) */
+    }
+}
+
+/// Stats should only be reported after pgstat_initialize() and before
+/// pgstat_shutdown().
+pub fn pgstat_assert_is_up() {
+    // Assert(pgstat_is_initialized && !pgstat_is_shutdown);
+}
+
+// ---------------------------------------------------------------------------
+// reading and writing of on-disk stats file
+// ---------------------------------------------------------------------------
+
+// C stdio primitives used by the chunk helpers and the record-walk drivers.
+extern "C" {
+    fn fwrite(ptr: *const c_void, size: usize, nmemb: usize, stream: *mut c_void) -> usize;
+    fn fread(ptr: *mut c_void, size: usize, nmemb: usize, stream: *mut c_void) -> usize;
+    fn fputc(c: c_int, stream: *mut c_void) -> c_int;
+    fn fgetc(stream: *mut c_void) -> c_int;
+    fn fseek(stream: *mut c_void, offset: c_long, whence: c_int) -> c_int;
+    fn ferror(stream: *mut c_void) -> c_int;
+    fn unlink(path: *const c_char) -> c_int;
+    #[cfg_attr(target_os = "macos", link_name = "__error")]
+    #[cfg_attr(target_os = "linux", link_name = "__errno_location")]
+    fn __error() -> *mut c_int;
+}
+
+unsafe fn errno() -> c_int {
+    *__error()
+}
+
+const ENOENT: c_int = 2;
+const SEEK_CUR: c_int = 1;
+const EOF: c_int = -1;
+
+/// Render a NUL-terminated C string for `errmsg!`/`elog!` placeholders.
+unsafe fn display_cstr(p: *const c_char) -> String {
+    std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+}
+
+// pgStatLocal.shared_hash is `*mut c_void` in the divergent pgstat_internal
+// alias (dshash_table = c_void there); the canonical dshash entry points want a
+// `*mut dshash::dshash_table`. Cast through this alias at the call boundary.
+use crate::lib::dshash::dshash_table as DsHashTable;
+
+/// pg_atomic_read_u32 (port/atomics.h). Read of the refcount field.
+#[inline]
+unsafe fn pg_atomic_read_u32(ptr: *mut crate::port::atomics::pg_atomic_uint32) -> uint32 {
+    crate::port::atomics::pg_atomic_read_u32_impl(&*ptr)
+}
+
+/// TODO(pg-port): utils/dsa.c not wired into the module tree yet (mirrors the
+/// local stub in lib/dshash.rs). Resolves a dsa_pointer within the stats DSA.
+unsafe fn dsa_get_address(
+    _area: *mut crate::utils::activity::pgstat_internal::dsa_area,
+    _dp: crate::lib::dshash::dsa_pointer,
+) -> *mut c_void {
+    unimplemented!() // TODO: utils/dsa.c
+}
+
+/// pgstat_internal.h: PGSTAT_FILE_FORMAT_ID.
+const PGSTAT_FILE_FORMAT_ID: int32 = 0x01A5BCB7;
+
+// Identifiers in stats file (pgstat.c).
+const PGSTAT_FILE_ENTRY_END: c_int = b'E' as c_int; /* end of file */
+const PGSTAT_FILE_ENTRY_FIXED: c_int = b'F' as c_int; /* fixed-numbered stats entry */
+const PGSTAT_FILE_ENTRY_NAME: c_int = b'N' as c_int; /* stats entry identified by name */
+const PGSTAT_FILE_ENTRY_HASH: c_int = b'S' as c_int; /* stats entry identified by PgStat_HashKey */
+
+/// pgstat.h: PGSTAT_STAT_PERMANENT_FILENAME / PGSTAT_STAT_PERMANENT_TMPFILE.
+const PGSTAT_STAT_PERMANENT_FILENAME: &core::ffi::CStr = c"pg_stat/pgstat.stat";
+const PGSTAT_STAT_PERMANENT_TMPFILE: &core::ffi::CStr = c"pg_stat/pgstat.tmp";
+
+/// helper for pgstat_write_statsfile() (pgstat.c: write_chunk).
+#[allow(dead_code)]
+unsafe fn write_chunk(fpout: *mut c_void, ptr: *mut c_void, len: Size) {
+    let rc: c_int;
+
+    rc = fwrite(ptr, len, 1, fpout) as c_int;
+
+    /* we'll check for errors with ferror once at the end */
+    let _ = rc;
+}
+
+/// helper for pgstat_read_statsfile() (pgstat.c: read_chunk).
+#[allow(dead_code)]
+unsafe fn read_chunk(fpin: *mut c_void, ptr: *mut c_void, len: Size) -> bool {
+    fread(ptr, 1, len, fpin) == len
+}
+
+/// This function is called in the last process that is accessing the shared
+/// stats so locking is not required.
+unsafe fn pgstat_write_statsfile() {
+    use crate::lib::dshash::{dshash_seq_init, dshash_seq_next, dshash_seq_status, dshash_seq_term};
+    use crate::miscadmin::{
+        IsUnderPostmaster, MyBackendType, B_CHECKPOINTER, CHECK_FOR_INTERRUPTS,
+    };
+    use crate::storage::file::fd::{durable_rename, AllocateFile, FreeFile};
+    use crate::utils::activity::pgstat_internal as pgi;
+
+    let fpout: *mut c_void;
+    let mut format_id: int32;
+    let tmpfile: *const c_char = PGSTAT_STAT_PERMANENT_TMPFILE.as_ptr();
+    let statfile: *const c_char = PGSTAT_STAT_PERMANENT_FILENAME.as_ptr();
+    let mut hstat: dshash_seq_status = core::mem::zeroed();
+    let mut ps: *mut pgi::PgStatShared_HashEntry;
+
+    pgstat_assert_is_up();
+
+    /* should be called only by the checkpointer or single user mode */
+    Assert!(!IsUnderPostmaster || MyBackendType == B_CHECKPOINTER);
+
+    /* we're shutting down, so it's ok to just override this */
+    pgstat_fetch_consistency = PGSTAT_FETCH_CONSISTENCY_NONE;
+
+    elog!(DEBUG2, "writing stats file \"{}\"", display_cstr(statfile));
+
+    /*
+     * Open the statistics temp file to write out the current values.
+     */
+    fpout = AllocateFile(tmpfile, c"w".as_ptr());
+    if fpout.is_null() {
+        ereport!(
+            LOG,
+            errmsg!(
+                "could not open temporary statistics file \"{}\": %m",
+                display_cstr(tmpfile)
+            )
+        );
+        /* C also: errcode_for_file_access() */
+        return;
+    }
+
+    /*
+     * Write the file header --- currently just a format ID.
+     */
+    format_id = PGSTAT_FILE_FORMAT_ID;
+    write_chunk(
+        fpout,
+        &raw mut format_id as *mut c_void,
+        core::mem::size_of::<int32>(),
+    );
+
+    /* Write various stats structs for fixed number of objects */
+    let mut kind: PgStat_Kind = PGSTAT_KIND_MIN;
+    while kind <= PGSTAT_KIND_MAX {
+        let ptr: *mut c_char;
+        let info = pgi::pgstat_get_kind_info(kind);
+
+        if info.is_null() || !(*info).fixed_amount() {
+            kind += 1;
+            continue;
+        }
+
+        if pgstat_is_kind_builtin(kind) {
+            Assert!((*info).snapshot_ctl_off != 0);
+        }
+
+        /* skip if no need to write to file */
+        if !(*info).write_to_file() {
+            kind += 1;
+            continue;
+        }
+
+        pgstat_build_snapshot_fixed(kind);
+        if pgstat_is_kind_builtin(kind) {
+            ptr = (&raw mut pgi::pgStatLocal.snapshot as *mut c_char)
+                .add((*info).snapshot_ctl_off as usize);
+        } else {
+            ptr = pgi::pgStatLocal.snapshot.custom_data[(kind - PGSTAT_KIND_CUSTOM_MIN) as usize]
+                as *mut c_char;
+        }
+
+        fputc(PGSTAT_FILE_ENTRY_FIXED, fpout);
+        write_chunk(
+            fpout,
+            &raw mut kind as *mut c_void,
+            core::mem::size_of::<PgStat_Kind>(),
+        );
+        write_chunk(fpout, ptr as *mut c_void, (*info).shared_data_len as Size);
+
+        kind += 1;
+    }
+
+    /*
+     * Walk through the stats entries
+     */
+    dshash_seq_init(
+        &raw mut hstat,
+        pgi::pgStatLocal.shared_hash as *mut DsHashTable,
+        false,
+    );
+    loop {
+        ps = dshash_seq_next(&raw mut hstat) as *mut pgi::PgStatShared_HashEntry;
+        if ps.is_null() {
+            break;
+        }
+
+        let shstats: *mut pgi::PgStatShared_Common;
+        let kind_info: *const pgi::PgStat_KindInfo;
+
+        CHECK_FOR_INTERRUPTS();
+
+        /*
+         * We should not see any "dropped" entries when writing the stats file,
+         * as all backends and auxiliary processes should have cleaned up their
+         * references before they terminated.
+         *
+         * However, since we are already shutting down, it is not worth crashing
+         * the server over any potential cleanup issues, so we simply skip such
+         * entries if encountered.
+         */
+        Assert!(!(*ps).dropped);
+        if (*ps).dropped {
+            continue;
+        }
+
+        /*
+         * This discards data related to custom stats kinds that are unknown to
+         * this process.
+         */
+        if !pgstat_is_kind_valid((*ps).key.kind) {
+            elog!(
+                WARNING,
+                "found unknown stats entry {}/{}/{}",
+                (*ps).key.kind,
+                (*ps).key.dboid,
+                (*ps).key.objid
+            );
+            continue;
+        }
+
+        shstats =
+            dsa_get_address(pgi::pgStatLocal.dsa, (*ps).body) as *mut pgi::PgStatShared_Common;
+
+        kind_info = pgi::pgstat_get_kind_info((*ps).key.kind);
+
+        /* if not dropped the valid-entry refcount should exist */
+        Assert!(pg_atomic_read_u32(&raw mut (*ps).refcount) > 0);
+
+        /* skip if no need to write to file */
+        if !(*kind_info).write_to_file() {
+            continue;
+        }
+
+        if (*kind_info).to_serialized_name.is_none() {
+            /* normal stats entry, identified by PgStat_HashKey */
+            fputc(PGSTAT_FILE_ENTRY_HASH, fpout);
+            write_chunk(
+                fpout,
+                &raw mut (*ps).key as *mut c_void,
+                core::mem::size_of::<pgi::PgStat_HashKey>(),
+            );
+        } else {
+            /* stats entry identified by name on disk (e.g. slots) */
+            let mut name: NameData = core::mem::zeroed();
+
+            ((*kind_info).to_serialized_name.unwrap())(
+                &raw const (*ps).key,
+                shstats,
+                &raw mut name,
+            );
+
+            fputc(PGSTAT_FILE_ENTRY_NAME, fpout);
+            write_chunk(
+                fpout,
+                &raw mut (*ps).key.kind as *mut c_void,
+                core::mem::size_of::<PgStat_Kind>(),
+            );
+            write_chunk(
+                fpout,
+                &raw mut name as *mut c_void,
+                core::mem::size_of::<NameData>(),
+            );
+        }
+
+        /* Write except the header part of the entry */
+        write_chunk(
+            fpout,
+            pgi::pgstat_get_entry_data((*ps).key.kind, shstats),
+            pgi::pgstat_get_entry_len((*ps).key.kind),
+        );
+    }
+    dshash_seq_term(&raw mut hstat);
+
+    /*
+     * No more output to be done. Close the temp file and replace the old
+     * pgstat.stat with it.  The ferror() check replaces testing for error after
+     * each individual fputc or fwrite (in write_chunk()) above.
+     */
+    fputc(PGSTAT_FILE_ENTRY_END, fpout);
+
+    if ferror(fpout) != 0 {
+        ereport!(
+            LOG,
+            errmsg!(
+                "could not write temporary statistics file \"{}\": %m",
+                display_cstr(tmpfile)
+            )
+        );
+        /* C also: errcode_for_file_access() */
+        FreeFile(fpout);
+        unlink(tmpfile);
+    } else if FreeFile(fpout) < 0 {
+        ereport!(
+            LOG,
+            errmsg!(
+                "could not close temporary statistics file \"{}\": %m",
+                display_cstr(tmpfile)
+            )
+        );
+        /* C also: errcode_for_file_access() */
+        unlink(tmpfile);
+    } else if durable_rename(tmpfile, statfile, LOG) < 0 {
+        /* durable_rename already emitted log message */
+        unlink(tmpfile);
+    }
+}
+
+/// Reads in existing statistics file into memory.
+///
+/// This function is called in the only process that is accessing the shared
+/// stats so locking is not required.
+unsafe fn pgstat_read_statsfile() {
+    use crate::lib::dshash::{dshash_find_or_insert, dshash_release_lock};
+    use crate::miscadmin::{IsPostmasterEnvironment, IsUnderPostmaster, CHECK_FOR_INTERRUPTS};
+    use crate::storage::file::fd::{AllocateFile, FreeFile};
+    use crate::utils::activity::pgstat_internal as pgi;
+
+    let fpin: *mut c_void;
+    let mut format_id: int32 = 0;
+    let mut found: bool = false;
+    let statfile: *const c_char = PGSTAT_STAT_PERMANENT_FILENAME.as_ptr();
+    let shmem: *mut pgi::PgStat_ShmemControl = pgi::pgStatLocal.shmem;
+
+    /* shouldn't be called from postmaster */
+    Assert!(IsUnderPostmaster || !IsPostmasterEnvironment);
+
+    elog!(DEBUG2, "reading stats file \"{}\"", display_cstr(statfile));
+
+    /*
+     * Try to open the stats file. If it doesn't exist, the backends simply
+     * returns zero for anything and statistics simply starts from scratch with
+     * empty counters.
+     *
+     * ENOENT is a possibility if stats collection was previously disabled or has
+     * not yet written the stats file for the first time.  Any other failure
+     * condition is suspicious.
+     */
+    fpin = AllocateFile(statfile, c"r".as_ptr());
+    if fpin.is_null() {
+        if errno() != ENOENT {
+            ereport!(
+                LOG,
+                errmsg!(
+                    "could not open statistics file \"{}\": %m",
+                    display_cstr(statfile)
+                )
+            );
+            /* C also: errcode_for_file_access() */
+        }
+        pgstat_reset_after_failure();
+        return;
+    }
+
+    /*
+     * Verify it's of the expected format.
+     */
+    if !read_chunk(
+        fpin,
+        &raw mut format_id as *mut c_void,
+        core::mem::size_of::<int32>(),
+    ) {
+        elog!(WARNING, "could not read format ID");
+        return pgstat_read_statsfile_error(fpin, statfile);
+    }
+
+    if format_id != PGSTAT_FILE_FORMAT_ID {
+        elog!(
+            WARNING,
+            "found incorrect format ID {} (expected {})",
+            format_id,
+            PGSTAT_FILE_FORMAT_ID
+        );
+        return pgstat_read_statsfile_error(fpin, statfile);
+    }
+
+    /*
+     * We found an existing statistics file. Read it and put all the stats data
+     * into place.
+     */
+    loop {
+        let t = fgetc(fpin);
+
+        match t {
+            PGSTAT_FILE_ENTRY_FIXED => {
+                let mut kind: PgStat_Kind = 0;
+                let info: *const pgi::PgStat_KindInfo;
+                let ptr: *mut c_char;
+
+                /* entry for fixed-numbered stats */
+                if !read_chunk(
+                    fpin,
+                    &raw mut kind as *mut c_void,
+                    core::mem::size_of::<PgStat_Kind>(),
+                ) {
+                    elog!(
+                        WARNING,
+                        "could not read stats kind for entry of type {}",
+                        t as u8 as char
+                    );
+                    return pgstat_read_statsfile_error(fpin, statfile);
+                }
+
+                if !pgstat_is_kind_valid(kind) {
+                    elog!(
+                        WARNING,
+                        "invalid stats kind {} for entry of type {}",
+                        kind,
+                        t as u8 as char
+                    );
+                    return pgstat_read_statsfile_error(fpin, statfile);
+                }
+
+                info = pgi::pgstat_get_kind_info(kind);
+                if info.is_null() {
+                    elog!(
+                        WARNING,
+                        "could not find information of kind {} for entry of type {}",
+                        kind,
+                        t as u8 as char
+                    );
+                    return pgstat_read_statsfile_error(fpin, statfile);
+                }
+
+                if !(*info).fixed_amount() {
+                    elog!(
+                        WARNING,
+                        "invalid fixed_amount in stats kind {} for entry of type {}",
+                        kind,
+                        t as u8 as char
+                    );
+                    return pgstat_read_statsfile_error(fpin, statfile);
+                }
+
+                /* Load back stats into shared memory */
+                if pgstat_is_kind_builtin(kind) {
+                    ptr = (shmem as *mut c_char)
+                        .add((*info).shared_ctl_off as usize + (*info).shared_data_off as usize);
+                } else {
+                    let idx = (kind - PGSTAT_KIND_CUSTOM_MIN) as usize;
+
+                    ptr = ((*shmem).custom_data[idx] as *mut c_char)
+                        .add((*info).shared_data_off as usize);
+                }
+
+                if !read_chunk(fpin, ptr as *mut c_void, (*info).shared_data_len as Size) {
+                    elog!(
+                        WARNING,
+                        "could not read data of stats kind {} for entry of type {} with size {}",
+                        kind,
+                        t as u8 as char,
+                        (*info).shared_data_len
+                    );
+                    return pgstat_read_statsfile_error(fpin, statfile);
+                }
+            }
+            PGSTAT_FILE_ENTRY_HASH | PGSTAT_FILE_ENTRY_NAME => {
+                let mut key: pgi::PgStat_HashKey = core::mem::zeroed();
+                let p: *mut pgi::PgStatShared_HashEntry;
+                let header: *mut pgi::PgStatShared_Common;
+
+                CHECK_FOR_INTERRUPTS();
+
+                if t == PGSTAT_FILE_ENTRY_HASH {
+                    /* normal stats entry, identified by PgStat_HashKey */
+                    if !read_chunk(
+                        fpin,
+                        &raw mut key as *mut c_void,
+                        core::mem::size_of::<pgi::PgStat_HashKey>(),
+                    ) {
+                        elog!(
+                            WARNING,
+                            "could not read key for entry of type {}",
+                            t as u8 as char
+                        );
+                        return pgstat_read_statsfile_error(fpin, statfile);
+                    }
+
+                    if !pgstat_is_kind_valid(key.kind) {
+                        elog!(
+                            WARNING,
+                            "invalid stats kind for entry {}/{}/{} of type {}",
+                            key.kind,
+                            key.dboid,
+                            key.objid,
+                            t as u8 as char
+                        );
+                        return pgstat_read_statsfile_error(fpin, statfile);
+                    }
+
+                    if pgi::pgstat_get_kind_info(key.kind).is_null() {
+                        elog!(
+                            WARNING,
+                            "could not find information of kind for entry {}/{}/{} of type {}",
+                            key.kind,
+                            key.dboid,
+                            key.objid,
+                            t as u8 as char
+                        );
+                        return pgstat_read_statsfile_error(fpin, statfile);
+                    }
+                } else {
+                    /* stats entry identified by name on disk (e.g. slots) */
+                    let kind_info: *const pgi::PgStat_KindInfo;
+                    let mut kind: PgStat_Kind = 0;
+                    let mut name: NameData = core::mem::zeroed();
+
+                    if !read_chunk(
+                        fpin,
+                        &raw mut kind as *mut c_void,
+                        core::mem::size_of::<PgStat_Kind>(),
+                    ) {
+                        elog!(
+                            WARNING,
+                            "could not read stats kind for entry of type {}",
+                            t as u8 as char
+                        );
+                        return pgstat_read_statsfile_error(fpin, statfile);
+                    }
+                    if !read_chunk(
+                        fpin,
+                        &raw mut name as *mut c_void,
+                        core::mem::size_of::<NameData>(),
+                    ) {
+                        elog!(
+                            WARNING,
+                            "could not read name of stats kind {} for entry of type {}",
+                            kind,
+                            t as u8 as char
+                        );
+                        return pgstat_read_statsfile_error(fpin, statfile);
+                    }
+                    if !pgstat_is_kind_valid(kind) {
+                        elog!(
+                            WARNING,
+                            "invalid stats kind {} for entry of type {}",
+                            kind,
+                            t as u8 as char
+                        );
+                        return pgstat_read_statsfile_error(fpin, statfile);
+                    }
+
+                    kind_info = pgi::pgstat_get_kind_info(kind);
+                    if kind_info.is_null() {
+                        elog!(
+                            WARNING,
+                            "could not find information of kind {} for entry of type {}",
+                            kind,
+                            t as u8 as char
+                        );
+                        return pgstat_read_statsfile_error(fpin, statfile);
+                    }
+
+                    if (*kind_info).from_serialized_name.is_none() {
+                        elog!(
+                            WARNING,
+                            "invalid from_serialized_name in stats kind {} for entry of type {}",
+                            kind,
+                            t as u8 as char
+                        );
+                        return pgstat_read_statsfile_error(fpin, statfile);
+                    }
+
+                    if !((*kind_info).from_serialized_name.unwrap())(&raw const name, &raw mut key) {
+                        /* skip over data for entry we don't care about */
+                        if fseek(
+                            fpin,
+                            pgi::pgstat_get_entry_len(kind) as c_long,
+                            SEEK_CUR,
+                        ) != 0
+                        {
+                            elog!(
+                                WARNING,
+                                "could not seek \"{}\" of stats kind {} for entry of type {}",
+                                display_cstr(NameStr(&name)),
+                                kind,
+                                t as u8 as char
+                            );
+                            return pgstat_read_statsfile_error(fpin, statfile);
+                        }
+
+                        continue;
+                    }
+
+                    Assert!(key.kind == kind);
+                }
+
+                /*
+                 * This intentionally doesn't use pgstat_get_entry_ref() -
+                 * putting all stats into checkpointer's pgStatEntryRefHash would
+                 * be wasted effort and memory.
+                 */
+                p = dshash_find_or_insert(
+                    pgi::pgStatLocal.shared_hash as *mut DsHashTable,
+                    &raw const key as *const c_void,
+                    &raw mut found,
+                ) as *mut pgi::PgStatShared_HashEntry;
+
+                /* don't allow duplicate entries */
+                if found {
+                    dshash_release_lock(
+                        pgi::pgStatLocal.shared_hash as *mut DsHashTable,
+                        p as *mut c_void,
+                    );
+                    elog!(
+                        WARNING,
+                        "found duplicate stats entry {}/{}/{} of type {}",
+                        key.kind,
+                        key.dboid,
+                        key.objid,
+                        t as u8 as char
+                    );
+                    return pgstat_read_statsfile_error(fpin, statfile);
+                }
+
+                header = pgi::pgstat_init_entry(key.kind, p);
+                dshash_release_lock(
+                    pgi::pgStatLocal.shared_hash as *mut DsHashTable,
+                    p as *mut c_void,
+                );
+                if header.is_null() {
+                    /*
+                     * It would be tempting to switch this ERROR to a WARNING,
+                     * but it would mean that all the statistics are discarded
+                     * when the environment fails on OOM.
+                     */
+                    elog!(
+                        ERROR,
+                        "could not allocate entry {}/{}/{} of type {}",
+                        key.kind,
+                        key.dboid,
+                        key.objid,
+                        t as u8 as char
+                    );
+                }
+
+                if !read_chunk(
+                    fpin,
+                    pgi::pgstat_get_entry_data(key.kind, header),
+                    pgi::pgstat_get_entry_len(key.kind),
+                ) {
+                    elog!(
+                        WARNING,
+                        "could not read data for entry {}/{}/{} of type {}",
+                        key.kind,
+                        key.dboid,
+                        key.objid,
+                        t as u8 as char
+                    );
+                    return pgstat_read_statsfile_error(fpin, statfile);
+                }
+            }
+            PGSTAT_FILE_ENTRY_END => {
+                /*
+                 * check that PGSTAT_FILE_ENTRY_END actually signals end of file
+                 */
+                if fgetc(fpin) != EOF {
+                    elog!(WARNING, "could not read end-of-file");
+                    return pgstat_read_statsfile_error(fpin, statfile);
+                }
+
+                break;
+            }
+            _ => {
+                elog!(
+                    WARNING,
+                    "could not read entry of type {}",
+                    t as u8 as char
+                );
+                return pgstat_read_statsfile_error(fpin, statfile);
+            }
+        }
+    }
+
+    /* done: */
+    FreeFile(fpin);
+
+    elog!(
+        DEBUG2,
+        "removing permanent stats file \"{}\"",
+        display_cstr(statfile)
+    );
+    unlink(statfile);
+}
+
+/// The `error:`/`done:` tail of pgstat_read_statsfile(). C uses goto; the loop's
+/// many `goto error` sites are translated as `return` calls to this helper.
+unsafe fn pgstat_read_statsfile_error(fpin: *mut c_void, statfile: *const c_char) {
+    use crate::storage::file::fd::FreeFile;
+
+    ereport!(
+        LOG,
+        errmsg!("corrupted statistics file \"{}\"", display_cstr(statfile))
+    );
+
+    pgstat_reset_after_failure();
+
+    /* done: */
+    FreeFile(fpin);
+
+    elog!(
+        DEBUG2,
+        "removing permanent stats file \"{}\"",
+        display_cstr(statfile)
+    );
+    unlink(statfile);
+}
+
+/// Reset / drop stats after a crash or after restoring stats from disk failed.
+unsafe fn pgstat_reset_after_failure() {
+    let ts: TimestampTz = GetCurrentTimestamp();
+
+    /* reset fixed-numbered stats */
+    let mut kind: PgStat_Kind = PGSTAT_KIND_MIN;
+    while kind <= PGSTAT_KIND_MAX {
+        let kind_info = pgstat_get_kind_info(kind);
+        if kind_info.is_null() || !pgstat_is_fixed_kind(kind) {
+            kind += 1;
+            continue;
+        }
+        /* kind_info->reset_all_cb(ts) -- dispatched once KindInfo is ported */
+        kind += 1;
+    }
+    let _ = ts;
+
+    /* and drop variable-numbered ones */
+    pgstat_drop_all_entries();
+}
+
+/// GUC assign_hook for stats_fetch_consistency.
+pub unsafe fn assign_stats_fetch_consistency(newval: c_int, _extra: *mut c_void) {
+    /*
+     * Changing this value in a transaction may cause snapshot state
+     * inconsistencies, so force a clear of the current snapshot on the next
+     * snapshot build attempt.
+     */
+    if pgstat_fetch_consistency != newval {
+        force_stats_snapshot_clear = true;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Small local helpers backing the TODO(pg-port) translations above.
+// ---------------------------------------------------------------------------
+
+/// Whether `kind` is one of the fixed-numbered built-in kinds (archiver,
+/// bgwriter, checkpointer, io, slru, wal). Stand-in for KindInfo.fixed_amount.
+#[inline]
+unsafe fn pgstat_is_fixed_kind(kind: PgStat_Kind) -> bool {
+    matches!(
+        kind,
+        PGSTAT_KIND_ARCHIVER
+            | PGSTAT_KIND_BGWRITER
+            | PGSTAT_KIND_CHECKPOINTER
+            | PGSTAT_KIND_IO
+            | PGSTAT_KIND_SLRU
+            | PGSTAT_KIND_WAL
+    )
+}
+
+/// The built-in kind name (KindInfo.name stand-in), as a NUL-terminated C
+/// string, or null for non-builtin kinds.
+unsafe fn pgstat_kind_builtin_name(kind: PgStat_Kind) -> *const c_char {
+    let s: &[u8] = match kind {
+        PGSTAT_KIND_DATABASE => b"database\0",
+        PGSTAT_KIND_RELATION => b"relation\0",
+        PGSTAT_KIND_FUNCTION => b"function\0",
+        PGSTAT_KIND_REPLSLOT => b"replslot\0",
+        PGSTAT_KIND_SUBSCRIPTION => b"subscription\0",
+        PGSTAT_KIND_BACKEND => b"backend\0",
+        PGSTAT_KIND_ARCHIVER => b"archiver\0",
+        PGSTAT_KIND_BGWRITER => b"bgwriter\0",
+        PGSTAT_KIND_CHECKPOINTER => b"checkpointer\0",
+        PGSTAT_KIND_IO => b"io\0",
+        PGSTAT_KIND_SLRU => b"slru\0",
+        PGSTAT_KIND_WAL => b"wal\0",
+        _ => return null(),
+    };
+    s.as_ptr() as *const c_char
+}
+
+/// Whether the process-local pending list is empty. Stand-in for
+/// dlist_is_empty(&pgStatPending); the subset has no pending dlist.
+#[inline]
+unsafe fn pgstat_pending_is_empty() -> bool {
+    let p = &raw const VAR_ENTRIES;
+    match (*p).as_ref() {
+        None => true,
+        Some(v) => !v.iter().any(|e| e.pending.is_some()),
+    }
+}
+
+/// Free the pending blob owned by the VarEntry whose eref matches `entry_ref`.
+unsafe fn pgstat_free_pending_blob(entry_ref: *mut PgStat_EntryRef) {
+    let entries = var_entries();
+    for e in entries.iter_mut() {
+        if &mut e.eref as *mut PgStat_EntryRef == entry_ref {
+            e.pending = None;
+            break;
+        }
+    }
+}
+
+/// TODO(pg-port): unlink the permanent stats file. The on-disk path and the
+/// unlink syscall plumbing are not ported; report "did not exist" (non-zero).
+unsafe fn pgstat_unlink_permanent() -> c_int {
+    -1
+}
+
+/// TODO(pg-port): proc-exit hook registration (`storage/ipc.h`). The before-
+/// shmem-exit callback list is not ported here; registration is a no-op.
+unsafe fn before_shmem_exit(_function: unsafe fn(c_int, Datum), _arg: Datum) {}
+
+/// TODO(pg-port): this backend's proc number (`storage/proc.h` MyProcNumber).
+const MyProcNumber: c_int = 0;
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

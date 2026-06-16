@@ -879,6 +879,89 @@ pub unsafe fn GetNumRegisteredWaitEvents(set: *mut WaitEventSet) -> c_int {
     (*set).nevents
 }
 
+/*
+ * SetLatch uses SIGURG to wake up the process waiting on the latch.
+ *
+ * Wake up WaitLatch, if we're waiting.
+ *
+ * Part of the WAIT_USE_SELF_PIPE path. On macOS the primitive selected is
+ * WAIT_USE_KQUEUE, so the self-pipe globals are not otherwise defined here.
+ */
+unsafe fn latch_sigurg_handler(_postgres_signal_arg: c_int) {
+    if waiting {
+        sendSelfPipeByte();
+    }
+}
+
+/* Send one byte to the self-pipe, to wake up WaitLatch */
+unsafe fn sendSelfPipeByte() {
+    let mut rc: c_int;
+    let dummy: c_char = 0;
+
+    loop {
+        // retry:
+        rc = libc::write(selfpipe_writefd, &dummy as *const c_char as *const c_void, 1) as c_int;
+        if rc < 0 {
+            /* If interrupted by signal, just retry */
+            if errno() == libc::EINTR {
+                continue;
+            }
+
+            /*
+             * If the pipe is full, we don't need to retry, the data that's there
+             * already is enough to wake up WaitLatch.
+             */
+            if errno() == libc::EAGAIN || errno() == libc::EWOULDBLOCK {
+                return;
+            }
+
+            /*
+             * Oops, the write() failed for some other reason. We might be in a
+             * signal handler, so it's not safe to elog(). We have no choice but
+             * silently ignore the error.
+             */
+            return;
+        }
+        break;
+    }
+}
+
+/*
+ * Read all available data from self-pipe or signalfd.
+ *
+ * Note: this is only called when waiting = true.  If it fails and doesn't
+ * return, it must reset that flag first (though ideally, this will never
+ * happen).
+ */
+unsafe fn drain() {
+    let mut buf: [c_char; 1024] = [0; 1024];
+    let mut rc: c_int;
+    let fd: c_int;
+
+    fd = selfpipe_readfd;
+
+    loop {
+        rc = libc::read(fd, buf.as_mut_ptr() as *mut c_void, core::mem::size_of_val(&buf)) as c_int;
+        if rc < 0 {
+            if errno() == libc::EAGAIN || errno() == libc::EWOULDBLOCK {
+                break; /* the descriptor is empty */
+            } else if errno() == libc::EINTR {
+                continue; /* retry */
+            } else {
+                waiting = false;
+                elog!(ERROR, "read() on self-pipe failed: {}", strerror_errno());
+            }
+        } else if rc == 0 {
+            waiting = false;
+            elog!(ERROR, "unexpected EOF on self-pipe");
+        } else if (rc as usize) < core::mem::size_of_val(&buf) {
+            /* we successfully drained the pipe; no need to read() again */
+            break;
+        }
+        /* else buffer wasn't big enough, so read again */
+    }
+}
+
 unsafe fn ResOwnerReleaseWaitEventSet(res: Datum) {
     let set: *mut WaitEventSet = DatumGetPointer(res) as *mut WaitEventSet;
 
@@ -918,6 +1001,12 @@ pub unsafe fn WakeupOtherProc(pid: c_int) {
 // reads to detect postmaster death.
 const POSTMASTER_FD_WATCH: usize = 0;
 static mut postmaster_alive_fds: [c_int; 2] = [-1, -1];
+
+// WAIT_USE_SELF_PIPE globals. Not used on the macOS/kqueue path this file
+// translates; present so the self-pipe handler/drain helpers stay self-consistent.
+// TODO(pg-port): only meaningful under WAIT_USE_SELF_PIPE.
+static mut selfpipe_readfd: c_int = -1;
+static mut selfpipe_writefd: c_int = -1;
 
 // utils/activity/pgstat_wait.c.
 unsafe fn pgstat_report_wait_start(_wait_event_info: uint32) {

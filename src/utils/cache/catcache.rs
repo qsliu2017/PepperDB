@@ -1069,6 +1069,72 @@ pub unsafe fn CatalogCacheFlushCatalog(catId: Oid) {
     // CACHE_elog(DEBUG2, "end of CatalogCacheFlushCatalog call");
 }
 
+//		CatCachePrintStats
+//
+//	Print all cache stats; called at process exit.
+#[cfg(catcache_stats)]
+pub unsafe fn CatCachePrintStats(_code: c_int, _arg: Datum) {
+    let mut iter = core::mem::zeroed::<slist_iter>();
+    let mut cc_searches: c_long = 0;
+    let mut cc_hits: c_long = 0;
+    let mut cc_neg_hits: c_long = 0;
+    let mut cc_newloads: c_long = 0;
+    let mut cc_invals: c_long = 0;
+    let mut cc_nlists: c_long = 0;
+    let mut cc_lsearches: c_long = 0;
+    let mut cc_lhits: c_long = 0;
+
+    slist_foreach!(iter, &mut (*CacheHdr).ch_caches, {
+        let cache = slist_container!(CatCache, cc_next, iter.cur);
+
+        if (*cache).cc_ntup == 0 && (*cache).cc_searches == 0 {
+            continue; // don't print unused caches
+        }
+        elog!(
+            DEBUG2,
+            "catcache {}/{}: {} tup, {} srch, {}+{}={} hits, {}+{}={} loads, {} invals, {} lists, {} lsrch, {} lhits",
+            CStr::from_ptr((*cache).cc_relname).to_string_lossy(),
+            (*cache).cc_indexoid,
+            (*cache).cc_ntup,
+            (*cache).cc_searches,
+            (*cache).cc_hits,
+            (*cache).cc_neg_hits,
+            (*cache).cc_hits + (*cache).cc_neg_hits,
+            (*cache).cc_newloads,
+            (*cache).cc_searches - (*cache).cc_hits - (*cache).cc_neg_hits - (*cache).cc_newloads,
+            (*cache).cc_searches - (*cache).cc_hits - (*cache).cc_neg_hits,
+            (*cache).cc_invals,
+            (*cache).cc_nlist,
+            (*cache).cc_lsearches,
+            (*cache).cc_lhits
+        );
+        cc_searches += (*cache).cc_searches;
+        cc_hits += (*cache).cc_hits;
+        cc_neg_hits += (*cache).cc_neg_hits;
+        cc_newloads += (*cache).cc_newloads;
+        cc_invals += (*cache).cc_invals;
+        cc_nlists += (*cache).cc_nlist as c_long;
+        cc_lsearches += (*cache).cc_lsearches;
+        cc_lhits += (*cache).cc_lhits;
+    });
+    elog!(
+        DEBUG2,
+        "catcache totals: {} tup, {} srch, {}+{}={} hits, {}+{}={} loads, {} invals, {} lists, {} lsrch, {} lhits",
+        (*CacheHdr).ch_ntup,
+        cc_searches,
+        cc_hits,
+        cc_neg_hits,
+        cc_hits + cc_neg_hits,
+        cc_newloads,
+        cc_searches - cc_hits - cc_neg_hits - cc_newloads,
+        cc_searches - cc_hits - cc_neg_hits,
+        cc_invals,
+        cc_nlists,
+        cc_lsearches,
+        cc_lhits
+    );
+}
+
 //		InitCatCache
 //
 //	This allocates and initializes a cache for a system catalog relation.

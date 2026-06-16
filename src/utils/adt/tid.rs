@@ -18,11 +18,12 @@ use crate::{
     PG_GETARG_DATUM, PG_GETARG_INT64, PG_GETARG_POINTER, PG_RETURN_BOOL, PG_RETURN_CSTRING,
     PG_RETURN_INT32,
 };
-use crate::c::{int32, uint64};
+use crate::{foreach, current_cell, IsA};
+use crate::c::{int32, uint64, text, NameStr};
 use crate::storage::block::{BlockIdData, BlockNumber};
 use crate::storage::off::OffsetNumber;
 use crate::storage::itemptr::{
-    DatumGetItemPointer, ItemPointer, ItemPointerCompare, ItemPointerData,
+    DatumGetItemPointer, ItemPointer, ItemPointerCompare, ItemPointerCopy, ItemPointerData,
     ItemPointerGetBlockNumberNoCheck, ItemPointerGetDatum, ItemPointerGetOffsetNumberNoCheck,
     ItemPointerSet,
 };
@@ -32,7 +33,30 @@ use crate::libpq::pqformat::{
 };
 use crate::lib::stringinfo::{StringInfo, StringInfoData};
 use crate::postgres::PointerGetDatum;
-use crate::nodes::nodes::Node;
+use crate::nodes::nodes::{Node, CmdType};
+use crate::nodes::pg_list::{List, ListCell, list_length, linitial};
+use crate::nodes::parsenodes::{Query, RangeTblEntry, ACL_SELECT, AclMode};
+use crate::nodes::primnodes::{Var, TargetEntry, RangeVar, IS_SPECIAL_VARNO};
+use crate::storage::lockdefs::AccessShareLock;
+use crate::access::sysattr::SelfItemPointerAttributeNumber;
+use crate::catalog::pg_type_d::TIDOID;
+use crate::catalog::pg_class::RELKIND_VIEW;
+use crate::catalog::aclchk::{pg_class_aclcheck, aclcheck_error};
+use crate::catalog::objectaddress_impl::get_relkind_objtype;
+use crate::catalog::namespace::makeRangeVarFromNameList;
+use crate::miscadmin::GetUserId;
+use crate::utils::cache::lsyscache::get_namespace_name;
+use crate::utils::rel::{
+    Relation, RelationGetDescr, RelationGetNamespace, RelationGetRelid, RelationGetRelationName,
+};
+use crate::access::common::tupdesc::TupleDescAttr;
+use crate::access::table::table::{table_close, table_open, table_openrv};
+use crate::access::table::tableam::table_tuple_get_latest_tid;
+use crate::access::relscan::{Snapshot, TableScanDesc};
+use crate::utils::adt::acl::{AclResult, AclResult::*, textToQualifiedNameList};
+use crate::nodes::parsenodes::ObjectType;
+use crate::parser::parsetree::{get_tle_by_resno, rt_fetch};
+use crate::rewrite::prs2lock::{RewriteRule, RuleLock};
 use core::ffi::{c_char, c_int, c_ulong, c_void};
 
 const LDELIM: u8 = b'(';
@@ -244,13 +268,190 @@ pub unsafe fn hashtidextended(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 /*
- *	currtid_byrelname - get the latest tid of a tuple in a named relation.  [STUBBED]
+ *	Functions to get latest tid of a specified tuple.
+ *
+ *	Maybe these implementations should be moved to another place
+ */
+
+/*
+ * Utility wrapper for current CTID functions.
+ *		Returns the latest version of a tuple pointing at "tid" for
+ *		relation "rel".
+ */
+unsafe fn currtid_internal(rel: Relation, tid: ItemPointer) -> ItemPointer {
+    let result: ItemPointer;
+    let aclresult: AclResult;
+    let snapshot: Snapshot;
+    let scan: TableScanDesc;
+
+    result = palloc(core::mem::size_of::<ItemPointerData>()) as ItemPointer;
+
+    aclresult = pg_class_aclcheck(RelationGetRelid(rel), GetUserId(), ACL_SELECT);
+    if aclresult != ACLCHECK_OK {
+        aclcheck_error(
+            aclresult,
+            get_relkind_objtype((*(*rel).rd_rel).relkind),
+            RelationGetRelationName(rel),
+        );
+    }
+
+    if (*(*rel).rd_rel).relkind == RELKIND_VIEW {
+        return currtid_for_view(rel, tid);
+    }
+
+    if !RELKIND_HAS_STORAGE((*(*rel).rd_rel).relkind) {
+        ereport!(
+            ERROR,
+            errmsg!(
+                "cannot look at latest visible tid for relation \"{}.{}\"",
+                cstr(get_namespace_name(RelationGetNamespace(rel))),
+                cstr(RelationGetRelationName(rel))
+            )
+        );
+        /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+    }
+
+    ItemPointerCopy(tid, result);
+
+    snapshot = RegisterSnapshot(GetLatestSnapshot());
+    scan = table_beginscan_tid(rel, snapshot);
+    table_tuple_get_latest_tid(scan, result);
+    table_endscan(scan);
+    UnregisterSnapshot(snapshot);
+
+    return result;
+}
+
+/*
+ *	Handle CTIDs of views.
+ *		CTID should be defined in the view and it must
+ *		correspond to the CTID of a base relation.
+ */
+unsafe fn currtid_for_view(viewrel: Relation, tid: ItemPointer) -> ItemPointer {
+    let att = RelationGetDescr(viewrel);
+    let rulelock: *mut RuleLock;
+    let mut rewrite: *mut RewriteRule;
+    let mut i: c_int;
+    let natts: c_int = (*att).natts;
+    let mut tididx: c_int = -1;
+
+    i = 0;
+    while i < natts {
+        let attr = TupleDescAttr(att, i);
+
+        if libc_strcmp(NameStr(&(*attr).attname), c"ctid".as_ptr()) == 0 {
+            if (*attr).atttypid != TIDOID {
+                ereport!(ERROR, errmsg!("ctid isn't of type TID"));
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+            }
+            tididx = i;
+            break;
+        }
+        i += 1;
+    }
+    if tididx < 0 {
+        ereport!(ERROR, errmsg!("currtid cannot handle views with no CTID"));
+        /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+    }
+    rulelock = (*viewrel).rd_rules as *mut RuleLock;
+    if rulelock.is_null() {
+        ereport!(ERROR, errmsg!("the view has no rules"));
+        /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+    }
+    i = 0;
+    while i < (*rulelock).numLocks {
+        rewrite = *(*rulelock).rules.add(i as usize);
+        if (*rewrite).event == CmdType::CMD_SELECT {
+            let query: *mut Query;
+            let tle: *mut TargetEntry;
+
+            if list_length((*rewrite).actions) != 1 {
+                ereport!(ERROR, errmsg!("only one select rule is allowed in views"));
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+            }
+            query = linitial((*rewrite).actions) as *mut Query;
+            tle = get_tle_by_resno((*query).targetList, (tididx + 1) as i16);
+            if !tle.is_null() && !(*tle).expr.is_null() && IsA!((*tle).expr, T_Var) {
+                let var = (*tle).expr as *mut Var;
+                let rte: *mut RangeTblEntry;
+
+                if !IS_SPECIAL_VARNO((*var).varno)
+                    && (*var).varattno == SelfItemPointerAttributeNumber
+                {
+                    rte = rt_fetch((*var).varno as u32, (*query).rtable);
+                    if !rte.is_null() {
+                        let result: ItemPointer;
+                        let rel: Relation;
+
+                        rel = table_open((*rte).relid, AccessShareLock);
+                        result = currtid_internal(rel, tid);
+                        table_close(rel, AccessShareLock);
+                        return result;
+                    }
+                }
+            }
+            break;
+        }
+        i += 1;
+    }
+    elog!(ERROR, "currtid cannot handle this view");
+    return null_mut();
+}
+
+/*
+ * currtid_byrelname
+ *		Get the latest tuple version of the tuple pointing at a CTID, for a
+ *		given relation name.
  */
 pub unsafe fn currtid_byrelname(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): needs the heap/relation/snapshot layer (access/heapam, utils/rel,
-    // table_tuple_get_latest_tid) - not yet translated.
-    let _ = fcinfo;
-    unimplemented!("currtid_byrelname: heap/relation layer not yet translated")
+    let relname = PG_GETARG_DATUM!(fcinfo, 0) as *mut text; // PG_GETARG_TEXT_PP
+    let tid: ItemPointer = DatumGetItemPointer(PG_GETARG_DATUM!(fcinfo, 1));
+    let result: ItemPointer;
+    let relrv: *mut RangeVar;
+    let rel: Relation;
+
+    relrv = makeRangeVarFromNameList(textToQualifiedNameList(relname));
+    rel = table_openrv(relrv, AccessShareLock);
+
+    /* grab the latest tuple version associated to this CTID */
+    result = currtid_internal(rel, tid);
+
+    table_close(rel, AccessShareLock);
+
+    return ItemPointerGetDatum(result); // PG_RETURN_ITEMPOINTER
+}
+
+/* TODO(pg-port): utils/snapmgr.h not yet wired into utils::time::mod. */
+#[allow(non_snake_case)]
+unsafe fn GetLatestSnapshot() -> Snapshot {
+    unimplemented!("GetLatestSnapshot: utils/snapmgr.h not yet ported with reachable home")
+}
+#[allow(non_snake_case)]
+unsafe fn RegisterSnapshot(_snapshot: Snapshot) -> Snapshot {
+    unimplemented!("RegisterSnapshot: utils/snapmgr.h not yet ported with reachable home")
+}
+#[allow(non_snake_case)]
+unsafe fn UnregisterSnapshot(_snapshot: Snapshot) {
+    unimplemented!("UnregisterSnapshot: utils/snapmgr.h not yet ported with reachable home")
+}
+
+/* TODO(pg-port): no pub home yet (only local stubs in nodeTidscan.rs / bootstrap.rs). */
+unsafe fn table_beginscan_tid(_rel: Relation, _snapshot: Snapshot) -> TableScanDesc {
+    unimplemented!("table_beginscan_tid: access/tableam.h not yet ported with pub home")
+}
+unsafe fn table_endscan(_scan: TableScanDesc) {
+    unimplemented!("table_endscan: access/tableam.h not yet ported with pub home")
+}
+
+/* C macro RELKIND_HAS_STORAGE (catalog/pg_class.h); no macro_export home yet. */
+#[allow(non_snake_case)]
+unsafe fn RELKIND_HAS_STORAGE(_relkind: c_char) -> bool {
+    unimplemented!("RELKIND_HAS_STORAGE: catalog/pg_class.h macro not yet ported")
+}
+
+extern "C" {
+    #[link_name = "strcmp"]
+    fn libc_strcmp(a: *const c_char, b: *const c_char) -> c_int;
 }
 
 /*

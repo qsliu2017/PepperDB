@@ -34,7 +34,7 @@ use crate::varatt::*;
 use crate::varatt::pg_detoast_datum_packed;
 use crate::{
     PG_GETARG_BOOL, PG_GETARG_DATUM, PG_GETARG_INT32, PG_GETARG_INT64, PG_GETARG_POINTER,
-    PG_RETURN_BOOL, PG_RETURN_CSTRING, PG_RETURN_INT32, PG_RETURN_INT64,
+    PG_RETURN_BOOL, PG_RETURN_CSTRING, PG_RETURN_INT32, PG_RETURN_INT64, PG_RETURN_POINTER,
 };
 use crate::c::{bits8, int32, int64, uint32, uint64};
 use crate::common::int::pg_add_s32_overflow;
@@ -44,12 +44,26 @@ use crate::libpq::pqformat::{
 use crate::lib::stringinfo::{StringInfo, StringInfoData};
 use crate::nodes::nodes::Node;
 use crate::port::pg_bitutils::pg_popcount;
-use crate::postgres::{DatumGetPointer, Int32GetDatum, PointerGetDatum};
+use crate::postgres::{DatumGetInt32, DatumGetPointer, Int32GetDatum, PointerGetDatum};
+use crate::utils::adt::arrayutils::ArrayGetIntegerTypmods;
+use crate::utils::array::ArrayType;
+use crate::nodes::supportnodes::SupportRequestSimplify;
+use crate::nodes::primnodes::{Const, FuncExpr};
+use crate::nodes::pg_list::{linitial, lsecond, list_length};
+use crate::nodes::nodeFuncs::{exprTypmod, relabel_to_typmod};
+use crate::IsA;
 use core::ffi::{c_char, c_int, c_void};
 
 extern "C" {
     fn memcpy(dst: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
     fn memcmp(a: *const c_void, b: *const c_void, n: usize) -> c_int;
+}
+
+// fmgr.h: PG_GETARG_ARRAYTYPE_P (no detoast wired here; ArrayType is plain pointer).
+macro_rules! PG_GETARG_ARRAYTYPE_P {
+    ($fcinfo:expr, $n:expr) => {
+        DatumGetPointer(PG_GETARG_DATUM!($fcinfo, $n)) as *mut ArrayType
+    };
 }
 
 /* errcodes.h classification (errcode() shim ignores the value). */
@@ -203,22 +217,50 @@ unsafe fn VARBIT_CORRECTLY_PADDED(_vb: *mut VarBit) {
 /*
  * common code for bittypmodin and varbittypmodin
  *
- * TODO(pg-port): utils/array.h ArrayType + ArrayGetIntegerTypmods not yet translated.
- *
  * # Safety
  * `ta` is a valid ArrayType*; `typename` a NUL-terminated C string.
  */
-#[allow(dead_code)]
-unsafe fn anybit_typmodin(ta: *mut c_void, typename: *const c_char) -> int32 {
-    // C body:
-    //   tl = ArrayGetIntegerTypmods(ta, &n);
-    //   if (n != 1) ereport(... "invalid type modifier");
-    //   if (*tl < 1) ereport(... "length for type %s must be at least 1");
-    //   if (*tl > (MaxAttrSize * BITS_PER_BYTE))
-    //       ereport(... "length for type %s cannot exceed %d", MaxAttrSize*BITS_PER_BYTE);
-    //   typmod = *tl; return typmod;
-    let _ = (ta, typename, MaxAttrSize, ERRCODE_INVALID_PARAMETER_VALUE);
-    unimplemented!("anybit_typmodin: utils/array.h (ArrayGetIntegerTypmods) not yet translated")
+unsafe fn anybit_typmodin(ta: *mut ArrayType, typename: *const c_char) -> int32 {
+    let typmod: int32;
+    let tl: *mut int32;
+    let mut n: c_int = 0;
+
+    tl = ArrayGetIntegerTypmods(ta, &mut n);
+
+    /*
+     * we're not too tense about good error message here because grammar
+     * shouldn't allow wrong number of modifiers for BIT
+     */
+    if n != 1 {
+        let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+        ereport!(ERROR, errmsg!("invalid type modifier"));
+    }
+
+    if *tl < 1 {
+        let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+        ereport!(
+            ERROR,
+            errmsg!(
+                "length for type {} must be at least 1",
+                std::ffi::CStr::from_ptr(typename).to_string_lossy()
+            )
+        );
+    }
+    if *tl > (MaxAttrSize * BITS_PER_BYTE) {
+        let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+        ereport!(
+            ERROR,
+            errmsg!(
+                "length for type {} cannot exceed {}",
+                std::ffi::CStr::from_ptr(typename).to_string_lossy(),
+                MaxAttrSize * BITS_PER_BYTE
+            )
+        );
+    }
+
+    typmod = *tl;
+
+    typmod
 }
 
 /*
@@ -495,11 +537,9 @@ pub unsafe fn bit(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn bittypmodin(fcinfo: FunctionCallInfo) -> Datum {
-    // C: ArrayType *ta = PG_GETARG_ARRAYTYPE_P(0);
-    //    PG_RETURN_INT32(anybit_typmodin(ta, "bit"));
-    // TODO(pg-port): utils/array.h (PG_GETARG_ARRAYTYPE_P / ArrayGetIntegerTypmods).
-    let _ = fcinfo;
-    unimplemented!("bittypmodin: utils/array.h (ArrayType) not yet translated")
+    let ta: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+
+    PG_RETURN_INT32!(anybit_typmodin(ta, c"bit".as_ptr()));
 }
 
 pub unsafe fn bittypmodout(fcinfo: FunctionCallInfo) -> Datum {
@@ -755,11 +795,32 @@ pub unsafe fn varbit_send(fcinfo: FunctionCallInfo) -> Datum {
  * Planner support function for the varbit() length coercion function.
  */
 pub unsafe fn varbit_support(fcinfo: FunctionCallInfo) -> Datum {
-    // C body uses IsA(rawreq, SupportRequestSimplify), FuncExpr, exprTypmod,
-    // relabel_to_typmod.
-    // TODO(pg-port): nodes/supportnodes.h + nodes/nodeFuncs.h not yet translated.
-    let _ = fcinfo;
-    unimplemented!("varbit_support: nodes/supportnodes.h (SupportRequestSimplify) not yet translated")
+    let rawreq: *mut Node = PG_GETARG_POINTER!(fcinfo, 0) as *mut Node;
+    let mut ret: *mut Node = std::ptr::null_mut();
+
+    if IsA!(rawreq, T_SupportRequestSimplify) {
+        let req: *mut SupportRequestSimplify = rawreq as *mut SupportRequestSimplify;
+        let expr: *mut FuncExpr = (*req).fcall;
+        let typmod: *mut Node;
+
+        Assert!(list_length((*expr).args) >= 2);
+
+        typmod = lsecond((*expr).args) as *mut Node;
+
+        if IsA!(typmod, T_Const) && !(*(typmod as *mut Const)).constisnull {
+            let source: *mut Node = linitial((*expr).args) as *mut Node;
+            let new_typmod: int32 = DatumGetInt32((*(typmod as *mut Const)).constvalue);
+            let old_max: int32 = exprTypmod(source);
+            let new_max: int32 = new_typmod;
+
+            /* Note: varbit() treats typmod 0 as invalid, so we do too */
+            if new_max <= 0 || (old_max > 0 && old_max <= new_max) {
+                ret = relabel_to_typmod(source, new_typmod);
+            }
+        }
+    }
+
+    PG_RETURN_POINTER!(ret);
 }
 
 /*
@@ -808,11 +869,9 @@ pub unsafe fn varbit(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn varbittypmodin(fcinfo: FunctionCallInfo) -> Datum {
-    // C: ArrayType *ta = PG_GETARG_ARRAYTYPE_P(0);
-    //    PG_RETURN_INT32(anybit_typmodin(ta, "varbit"));
-    // TODO(pg-port): utils/array.h (PG_GETARG_ARRAYTYPE_P / ArrayGetIntegerTypmods).
-    let _ = fcinfo;
-    unimplemented!("varbittypmodin: utils/array.h (ArrayType) not yet translated")
+    let ta: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+
+    PG_RETURN_INT32!(anybit_typmodin(ta, c"varbit".as_ptr()));
 }
 
 pub unsafe fn varbittypmodout(fcinfo: FunctionCallInfo) -> Datum {

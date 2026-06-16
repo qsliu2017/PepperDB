@@ -34,8 +34,9 @@
 //!     it real bytes later).
 //!   - timestamptz_to_str: stubbed to a fixed placeholder C-string (the real
 //!     implementation lives in utils/adt/timestamp.c, not ported).
-//!   - XLogRecGetBlockRefInfo: NOT translated (depends on the full xlogreader
-//!     block-tag accessors); only xlog_desc + xlog_identify are ported here.
+//!   - XLogRecGetBlockRefInfo: translated 1:1; uses the real xlogreader
+//!     block-tag accessors (XLogRecGetBlockTagExtended / XLogRecGetBlock /
+//!     XLogRecHasBlockImage / XLogRecBlockImageApply / XLogRecMaxBlockId).
 //!
 //! The CheckPoint / xl_* struct layouts, the XLOG_* opcode values, the
 //! wal_level name table, and the xlog_identify name table are REAL (faithful to
@@ -43,15 +44,35 @@
 //! is reproduced exactly (Rust {} formatting; LSNs as "{:X}/{:X}").
 
 use crate::appendStringInfo; // crate-root #[macro_export] macro
-use crate::lib::stringinfo::{appendStringInfoString, StringInfo};
+use crate::lib::stringinfo::{appendStringInfoChar, appendStringInfoString, StringInfo};
 use crate::prelude::*;
 
 use crate::access::transam::{
     EpochFromFullTransactionId, FullTransactionId, XidFromFullTransactionId,
 };
 use crate::access::transam::xlogreader::{
-    XLogReaderState, XLogRecGetData, XLogRecGetInfo, XLR_INFO_MASK,
+    BKPIMAGE_COMPRESSED, BKPIMAGE_COMPRESS_LZ4, BKPIMAGE_COMPRESS_PGLZ, BKPIMAGE_COMPRESS_ZSTD,
+    RelFileLocator, XLogReaderState, XLogRecBlockImageApply, XLogRecGetBlock,
+    XLogRecGetBlockTagExtended, XLogRecGetData, XLogRecGetInfo, XLogRecHasBlockImage,
+    XLogRecMaxBlockId, XLR_INFO_MASK,
 };
+use crate::common::relpath::{ForkNumber, MAIN_FORKNUM};
+use crate::pg_config::BLCKSZ;
+
+/// access/block.h: typedef uint32 BlockNumber.
+pub type BlockNumber = uint32;
+
+/// The C `forkNames[]` table (relpath's `forkname` is module-private).
+#[inline]
+fn forkname(fork: ForkNumber) -> *const c_char {
+    match fork {
+        0 => c"main".as_ptr(),  // MAIN_FORKNUM
+        1 => c"fsm".as_ptr(),   // FSM_FORKNUM
+        2 => c"vm".as_ptr(),    // VISIBILITYMAP_FORKNUM
+        3 => c"init".as_ptr(),  // INIT_FORKNUM
+        _ => c"".as_ptr(),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Base types (from access/xlogdefs.h / datatype/timestamp.h / pgtime.h)
@@ -424,6 +445,162 @@ pub fn xlog_identify(info: uint8) -> *const c_char {
     }
 
     id
+}
+
+/*
+ * Returns a string giving information about all the blocks in an
+ * XLogRecord.
+ */
+pub unsafe fn XLogRecGetBlockRefInfo(
+    record: *mut XLogReaderState,
+    pretty: bool,
+    detailed_format: bool,
+    buf: StringInfo,
+    fpi_len: *mut uint32,
+) {
+    assert!(!record.is_null());
+
+    if detailed_format && pretty {
+        appendStringInfoChar(buf, b'\n' as c_char);
+    }
+
+    let mut block_id: c_int = 0;
+    while block_id <= XLogRecMaxBlockId(record) {
+        let mut rlocator: RelFileLocator = std::mem::zeroed();
+        let mut forknum: ForkNumber = 0;
+        let mut blk: BlockNumber = 0;
+
+        if !XLogRecGetBlockTagExtended(
+            record,
+            block_id as uint8,
+            &mut rlocator,
+            &mut forknum,
+            &mut blk as *mut BlockNumber as *mut _,
+            null_mut(),
+        ) {
+            block_id += 1;
+            continue;
+        }
+
+        if detailed_format {
+            /* Get block references in detailed format. */
+
+            if pretty {
+                appendStringInfoChar(buf, b'\t' as c_char);
+            } else if block_id > 0 {
+                appendStringInfoChar(buf, b' ' as c_char);
+            }
+
+            appendStringInfo!(
+                buf,
+                "blkref #{}: rel {}/{}/{} fork {} blk {}",
+                block_id,
+                rlocator.spcOid,
+                rlocator.dbOid,
+                rlocator.relNumber,
+                cstr(forkname(forknum)),
+                blk
+            );
+
+            if XLogRecHasBlockImage(record, block_id as uint8) {
+                let bimg_info: uint8 = (*XLogRecGetBlock(record, block_id as uint8)).bimg_info;
+
+                /* Calculate the amount of FPI data in the record. */
+                if !fpi_len.is_null() {
+                    *fpi_len += (*XLogRecGetBlock(record, block_id as uint8)).bimg_len as uint32;
+                }
+
+                if BKPIMAGE_COMPRESSED(bimg_info) {
+                    let method: *const c_char = if (bimg_info & BKPIMAGE_COMPRESS_PGLZ) != 0 {
+                        c"pglz".as_ptr()
+                    } else if (bimg_info & BKPIMAGE_COMPRESS_LZ4) != 0 {
+                        c"lz4".as_ptr()
+                    } else if (bimg_info & BKPIMAGE_COMPRESS_ZSTD) != 0 {
+                        c"zstd".as_ptr()
+                    } else {
+                        c"unknown".as_ptr()
+                    };
+
+                    appendStringInfo!(
+                        buf,
+                        " (FPW{}); hole: offset: {}, length: {}, \
+                         compression saved: {}, method: {}",
+                        if XLogRecBlockImageApply(record, block_id as uint8) {
+                            ""
+                        } else {
+                            " for WAL verification"
+                        },
+                        (*XLogRecGetBlock(record, block_id as uint8)).hole_offset,
+                        (*XLogRecGetBlock(record, block_id as uint8)).hole_length,
+                        BLCKSZ as uint32
+                            - (*XLogRecGetBlock(record, block_id as uint8)).hole_length as uint32
+                            - (*XLogRecGetBlock(record, block_id as uint8)).bimg_len as uint32,
+                        cstr(method)
+                    );
+                } else {
+                    appendStringInfo!(
+                        buf,
+                        " (FPW{}); hole: offset: {}, length: {}",
+                        if XLogRecBlockImageApply(record, block_id as uint8) {
+                            ""
+                        } else {
+                            " for WAL verification"
+                        },
+                        (*XLogRecGetBlock(record, block_id as uint8)).hole_offset,
+                        (*XLogRecGetBlock(record, block_id as uint8)).hole_length
+                    );
+                }
+            }
+
+            if pretty {
+                appendStringInfoChar(buf, b'\n' as c_char);
+            }
+        } else {
+            /* Get block references in short format. */
+
+            if forknum != MAIN_FORKNUM {
+                appendStringInfo!(
+                    buf,
+                    ", blkref #{}: rel {}/{}/{} fork {} blk {}",
+                    block_id,
+                    rlocator.spcOid,
+                    rlocator.dbOid,
+                    rlocator.relNumber,
+                    cstr(forkname(forknum)),
+                    blk
+                );
+            } else {
+                appendStringInfo!(
+                    buf,
+                    ", blkref #{}: rel {}/{}/{} blk {}",
+                    block_id,
+                    rlocator.spcOid,
+                    rlocator.dbOid,
+                    rlocator.relNumber,
+                    blk
+                );
+            }
+
+            if XLogRecHasBlockImage(record, block_id as uint8) {
+                /* Calculate the amount of FPI data in the record. */
+                if !fpi_len.is_null() {
+                    *fpi_len += (*XLogRecGetBlock(record, block_id as uint8)).bimg_len as uint32;
+                }
+
+                if XLogRecBlockImageApply(record, block_id as uint8) {
+                    appendStringInfoString(buf, c" FPW".as_ptr());
+                } else {
+                    appendStringInfoString(buf, c" FPW for WAL verification".as_ptr());
+                }
+            }
+        }
+
+        block_id += 1;
+    }
+
+    if !detailed_format && pretty {
+        appendStringInfoChar(buf, b'\n' as c_char);
+    }
 }
 
 // ---------------------------------------------------------------------------

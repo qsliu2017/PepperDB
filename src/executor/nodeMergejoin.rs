@@ -666,7 +666,57 @@ unsafe fn check_constant_qual(qual: *mut List, is_const_false: *mut bool) -> boo
  *		when EXEC_MERGEJOINDEBUG is defined
  * ----------------------------------------------------------------
  */
-// #ifdef EXEC_MERGEJOINDEBUG  -- debug-only routines elided (compile to nothing).
+// #ifdef EXEC_MERGEJOINDEBUG
+// The dump routines below are compiled only when EXEC_MERGEJOINDEBUG is defined.
+// They are reached solely through the MJ_dump!() macro, which expands to nothing
+// in this port, so they are gated off via cfg(EXEC_MERGEJOINDEBUG) and never built.
+#[cfg(EXEC_MERGEJOINDEBUG)]
+unsafe fn ExecMergeTupleDumpOuter(mergestate: *mut MergeJoinState) {
+    let outerSlot: *mut TupleTableSlot = (*mergestate).mj_OuterTupleSlot;
+
+    print!("==== outer tuple ====\n");
+    if TupIsNull(outerSlot) {
+        print!("(nil)\n");
+    } else {
+        MJ_debugtup(outerSlot);
+    }
+}
+
+#[cfg(EXEC_MERGEJOINDEBUG)]
+unsafe fn ExecMergeTupleDumpInner(mergestate: *mut MergeJoinState) {
+    let innerSlot: *mut TupleTableSlot = (*mergestate).mj_InnerTupleSlot;
+
+    print!("==== inner tuple ====\n");
+    if TupIsNull(innerSlot) {
+        print!("(nil)\n");
+    } else {
+        MJ_debugtup(innerSlot);
+    }
+}
+
+#[cfg(EXEC_MERGEJOINDEBUG)]
+unsafe fn ExecMergeTupleDumpMarked(mergestate: *mut MergeJoinState) {
+    let markedSlot: *mut TupleTableSlot = (*mergestate).mj_MarkedTupleSlot;
+
+    print!("==== marked tuple ====\n");
+    if TupIsNull(markedSlot) {
+        print!("(nil)\n");
+    } else {
+        MJ_debugtup(markedSlot);
+    }
+}
+
+#[cfg(EXEC_MERGEJOINDEBUG)]
+unsafe fn ExecMergeTupleDump(mergestate: *mut MergeJoinState) {
+    print!("******** ExecMergeTupleDump ********\n");
+
+    ExecMergeTupleDumpOuter(mergestate);
+    ExecMergeTupleDumpInner(mergestate);
+    ExecMergeTupleDumpMarked(mergestate);
+
+    print!("********\n");
+}
+// #endif /* EXEC_MERGEJOINDEBUG */
 
 /* ----------------------------------------------------------------
  *		ExecMergeJoin

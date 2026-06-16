@@ -67,6 +67,7 @@ use crate::pg_config::BLCKSZ;
 use crate::storage::block::{BlockNumber, InvalidBlockNumber};
 use crate::storage::itemptr::{ItemPointer, ItemPointerGetBlockNumber, ItemPointerGetOffsetNumber};
 use crate::storage::off::OffsetNumber;
+use crate::utils::palloc::{MCXT_ALLOC_HUGE, MCXT_ALLOC_ZERO};
 
 // ===========================================================================
 //   STUBS for the DSA / shared (parallel) path - utils/dsa.h, storage/lwlock.h
@@ -90,6 +91,94 @@ fn DsaPointerIsValid(p: dsa_pointer) -> bool {
 // lock; only the shared iterator touches it.
 /// Opaque, pointer-only (storage/lwlock.h not ported).
 pub type LWLock = c_void;
+
+// TODO(pg-port): port.h pg_atomic_uint32 is not wired here; only the shared
+// pagetable/iteration arrays use it for refcounting.
+#[repr(C)]
+pub struct pg_atomic_uint32 {
+    pub value: uint32,
+}
+
+/* LW_EXCLUSIVE (storage/lwlock.h) */
+pub const LW_EXCLUSIVE: c_int = 1;
+/* LWTRANCHE_SHARED_TIDBITMAP (storage/lwlock.h) */
+pub const LWTRANCHE_SHARED_TIDBITMAP: c_int = 0;
+
+// TODO(pg-port): the following DSA / atomics / LWLock primitives are not ported
+// in this crate slice; the shared (parallel) bitmap path calls them.
+unsafe fn dsa_get_address(_area: *mut dsa_area, _dp: dsa_pointer) -> *mut c_void {
+    unimplemented!("dsa_get_address: DSA path not ported");
+}
+unsafe fn dsa_allocate(_area: *mut dsa_area, _size: Size) -> dsa_pointer {
+    unimplemented!("dsa_allocate: DSA path not ported");
+}
+unsafe fn dsa_allocate0(_area: *mut dsa_area, _size: Size) -> dsa_pointer {
+    unimplemented!("dsa_allocate0: DSA path not ported");
+}
+unsafe fn dsa_free(_area: *mut dsa_area, _dp: dsa_pointer) {
+    unimplemented!("dsa_free: DSA path not ported");
+}
+unsafe fn pg_atomic_init_u32(p: *mut pg_atomic_uint32, val: uint32) {
+    (*p).value = val;
+}
+unsafe fn pg_atomic_add_fetch_u32(p: *mut pg_atomic_uint32, add_: uint32) -> uint32 {
+    (*p).value = (*p).value.wrapping_add(add_);
+    (*p).value
+}
+unsafe fn pg_atomic_sub_fetch_u32(p: *mut pg_atomic_uint32, sub_: uint32) -> uint32 {
+    (*p).value = (*p).value.wrapping_sub(sub_);
+    (*p).value
+}
+unsafe fn LWLockInitialize(_lock: *mut LWLock, _tranche_id: c_int) {
+    /* TODO(pg-port): storage/lwlock.h not ported. */
+}
+unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
+    /* TODO(pg-port): storage/lwlock.h not ported. */
+    true
+}
+unsafe fn LWLockRelease(_lock: *mut LWLock) {
+    /* TODO(pg-port): storage/lwlock.h not ported. */
+}
+unsafe fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void {
+    core::ptr::copy_nonoverlapping(src as *const u8, dest as *mut u8, n);
+    dest
+}
+type qsort_arg_comparator =
+    unsafe fn(left: *const c_void, right: *const c_void, arg: *mut c_void) -> c_int;
+unsafe fn qsort_arg(
+    _base: *mut c_void,
+    _nel: Size,
+    _elsize: Size,
+    _cmp: qsort_arg_comparator,
+    _arg: *mut c_void,
+) {
+    // TODO(pg-port): lib/qsort_arg not wired into this slice.
+    unimplemented!("qsort_arg: not ported in this slice");
+}
+
+/*
+ * PTEntryArray (tidbitmap.c): a DSA-allocated array of PagetableEntry shared
+ * across processes, prefixed by an iterator refcount.  STUB shape only.
+ */
+#[repr(C)]
+pub struct PTEntryArray {
+    /// no. of iterator attached
+    pub refcount: pg_atomic_uint32,
+    /// PagetableEntry ptentry[FLEXIBLE_ARRAY_MEMBER]
+    pub ptentry: [PagetableEntry; 0],
+}
+
+/*
+ * PTIterationArray (tidbitmap.c): a DSA-allocated array of pagetable indexes,
+ * prefixed by an iterator refcount.  STUB shape only.
+ */
+#[repr(C)]
+pub struct PTIterationArray {
+    /// no. of iterator attached
+    pub refcount: pg_atomic_uint32,
+    /// int index[FLEXIBLE_ARRAY_MEMBER]
+    pub index: [c_int; 0],
+}
 
 // ===========================================================================
 //                  tidbitmap.h + tidbitmap.c private constants
@@ -496,9 +585,33 @@ pub unsafe fn tbm_free(tbm: *mut TIDBitmap) {
  * # Safety
  * Never call: the shared path is unimplemented.
  */
-pub unsafe fn tbm_free_shared_area(_dsa: *mut dsa_area, _dp: dsa_pointer) {
-    // TODO(pg-port): requires utils/dsa.h + atomic refcounts.
-    unimplemented!("tbm_free_shared_area: DSA/shared path not ported");
+pub unsafe fn tbm_free_shared_area(dsa: *mut dsa_area, dp: dsa_pointer) {
+    let istate: *mut TBMSharedIteratorState =
+        dsa_get_address(dsa, dp) as *mut TBMSharedIteratorState;
+
+    if DsaPointerIsValid((*istate).pagetable) {
+        let ptbase: *mut PTEntryArray =
+            dsa_get_address(dsa, (*istate).pagetable) as *mut PTEntryArray;
+        if pg_atomic_sub_fetch_u32(&raw mut (*ptbase).refcount, 1) == 0 {
+            dsa_free(dsa, (*istate).pagetable);
+        }
+    }
+    if DsaPointerIsValid((*istate).spages) {
+        let ptpages: *mut PTIterationArray =
+            dsa_get_address(dsa, (*istate).spages) as *mut PTIterationArray;
+        if pg_atomic_sub_fetch_u32(&raw mut (*ptpages).refcount, 1) == 0 {
+            dsa_free(dsa, (*istate).spages);
+        }
+    }
+    if DsaPointerIsValid((*istate).schunks) {
+        let ptchunks: *mut PTIterationArray =
+            dsa_get_address(dsa, (*istate).schunks) as *mut PTIterationArray;
+        if pg_atomic_sub_fetch_u32(&raw mut (*ptchunks).refcount, 1) == 0 {
+            dsa_free(dsa, (*istate).schunks);
+        }
+    }
+
+    dsa_free(dsa, dp);
 }
 
 /*
@@ -882,9 +995,169 @@ pub unsafe fn tbm_begin_private_iterate(tbm: *mut TIDBitmap) -> *mut TBMPrivateI
  * # Safety
  * Never call: the shared/DSA path is unimplemented.
  */
-pub unsafe fn tbm_prepare_shared_iterate(_tbm: *mut TIDBitmap) -> dsa_pointer {
-    // TODO(pg-port): requires utils/dsa.h, atomics, qsort_arg, LWLock.
-    unimplemented!("tbm_prepare_shared_iterate: DSA/shared path not ported");
+pub unsafe fn tbm_prepare_shared_iterate(tbm: *mut TIDBitmap) -> dsa_pointer {
+    let dp: dsa_pointer;
+    let istate: *mut TBMSharedIteratorState;
+    let mut ptbase: *mut PTEntryArray = core::ptr::null_mut();
+    let mut ptpages: *mut PTIterationArray = core::ptr::null_mut();
+    let mut ptchunks: *mut PTIterationArray = core::ptr::null_mut();
+
+    Assert!(!(*tbm).dsa.is_null());
+    Assert!((*tbm).iterating != TBM_ITERATING_PRIVATE);
+
+    /*
+     * Allocate TBMSharedIteratorState from DSA to hold the shared members and
+     * lock, this will also be used by multiple worker for shared iterate.
+     */
+    dp = dsa_allocate0(
+        (*tbm).dsa,
+        core::mem::size_of::<TBMSharedIteratorState>(),
+    );
+    istate = dsa_get_address((*tbm).dsa, dp) as *mut TBMSharedIteratorState;
+
+    /*
+     * If we're not already iterating, create and fill the sorted page lists.
+     * (If we are, the sorted page lists are already stored in the TIDBitmap,
+     * and we can just reuse them.)
+     */
+    if (*tbm).iterating == TBM_NOT_ITERATING {
+        let mut idx: c_int;
+        let mut npages: c_int;
+        let mut nchunks: c_int;
+
+        /*
+         * Allocate the page and chunk array memory from the DSA to share
+         * across multiple processes.
+         */
+        if (*tbm).npages != 0 {
+            (*tbm).ptpages = dsa_allocate(
+                (*tbm).dsa,
+                core::mem::size_of::<PTIterationArray>()
+                    + (*tbm).npages as usize * core::mem::size_of::<c_int>(),
+            );
+            ptpages = dsa_get_address((*tbm).dsa, (*tbm).ptpages) as *mut PTIterationArray;
+            pg_atomic_init_u32(&raw mut (*ptpages).refcount, 0);
+        }
+        if (*tbm).nchunks != 0 {
+            (*tbm).ptchunks = dsa_allocate(
+                (*tbm).dsa,
+                core::mem::size_of::<PTIterationArray>()
+                    + (*tbm).nchunks as usize * core::mem::size_of::<c_int>(),
+            );
+            ptchunks = dsa_get_address((*tbm).dsa, (*tbm).ptchunks) as *mut PTIterationArray;
+            pg_atomic_init_u32(&raw mut (*ptchunks).refcount, 0);
+        }
+
+        /*
+         * If TBM status is TBM_HASH then iterate over the pagetable and
+         * convert it to page and chunk arrays.  But if it's in the
+         * TBM_ONE_PAGE mode then directly allocate the space for one entry
+         * from the DSA.
+         */
+        npages = 0;
+        nchunks = 0;
+        if (*tbm).status == TBM_HASH {
+            ptbase = dsa_get_address((*tbm).dsa, (*tbm).dsapagetable) as *mut PTEntryArray;
+
+            let mut i: SimpleHashIterator = (*(*tbm).pagetable).start_iterate();
+            while let Some(page_idx) = (*(*tbm).pagetable).iterate(&mut i) {
+                let page: *const PagetableEntry = pagetable_entry_ptr(tbm, page_idx);
+                idx = page_idx as c_int;
+                if (*page).ischunk {
+                    *(*ptchunks).index.as_mut_ptr().add(nchunks as usize) = idx;
+                    nchunks += 1;
+                } else {
+                    *(*ptpages).index.as_mut_ptr().add(npages as usize) = idx;
+                    npages += 1;
+                }
+            }
+
+            Assert!(npages == (*tbm).npages);
+            Assert!(nchunks == (*tbm).nchunks);
+        } else if (*tbm).status == TBM_ONE_PAGE {
+            /*
+             * In one page mode allocate the space for one pagetable entry,
+             * initialize it, and directly store its index (i.e. 0) in the
+             * page array.
+             */
+            (*tbm).dsapagetable = dsa_allocate(
+                (*tbm).dsa,
+                core::mem::size_of::<PTEntryArray>() + core::mem::size_of::<PagetableEntry>(),
+            );
+            ptbase = dsa_get_address((*tbm).dsa, (*tbm).dsapagetable) as *mut PTEntryArray;
+            memcpy(
+                (*ptbase).ptentry.as_mut_ptr() as *mut c_void,
+                &raw const (*tbm).entry1 as *const c_void,
+                core::mem::size_of::<PagetableEntry>(),
+            );
+            *(*ptpages).index.as_mut_ptr().add(0) = 0;
+        }
+
+        if !ptbase.is_null() {
+            pg_atomic_init_u32(&raw mut (*ptbase).refcount, 0);
+        }
+        if npages > 1 {
+            qsort_arg(
+                (*ptpages).index.as_mut_ptr() as *mut c_void,
+                npages as Size,
+                core::mem::size_of::<c_int>(),
+                tbm_shared_comparator,
+                (*ptbase).ptentry.as_mut_ptr() as *mut c_void,
+            );
+        }
+        if nchunks > 1 {
+            qsort_arg(
+                (*ptchunks).index.as_mut_ptr() as *mut c_void,
+                nchunks as Size,
+                core::mem::size_of::<c_int>(),
+                tbm_shared_comparator,
+                (*ptbase).ptentry.as_mut_ptr() as *mut c_void,
+            );
+        }
+    }
+
+    /*
+     * Store the TBM members in the shared state so that we can share them
+     * across multiple processes.
+     */
+    (*istate).nentries = (*tbm).nentries;
+    (*istate).maxentries = (*tbm).maxentries;
+    (*istate).npages = (*tbm).npages;
+    (*istate).nchunks = (*tbm).nchunks;
+    (*istate).pagetable = (*tbm).dsapagetable;
+    (*istate).spages = (*tbm).ptpages;
+    (*istate).schunks = (*tbm).ptchunks;
+
+    ptbase = dsa_get_address((*tbm).dsa, (*tbm).dsapagetable) as *mut PTEntryArray;
+    ptpages = dsa_get_address((*tbm).dsa, (*tbm).ptpages) as *mut PTIterationArray;
+    ptchunks = dsa_get_address((*tbm).dsa, (*tbm).ptchunks) as *mut PTIterationArray;
+
+    /*
+     * For every shared iterator referring to pagetable and iterator array,
+     * increase the refcount by 1 so that while freeing the shared iterator we
+     * don't free pagetable and iterator array until its refcount becomes 0.
+     */
+    if !ptbase.is_null() {
+        pg_atomic_add_fetch_u32(&raw mut (*ptbase).refcount, 1);
+    }
+    if !ptpages.is_null() {
+        pg_atomic_add_fetch_u32(&raw mut (*ptpages).refcount, 1);
+    }
+    if !ptchunks.is_null() {
+        pg_atomic_add_fetch_u32(&raw mut (*ptchunks).refcount, 1);
+    }
+
+    /* Initialize the iterator lock */
+    LWLockInitialize(&raw mut (*istate).lock, LWTRANCHE_SHARED_TIDBITMAP);
+
+    /* Initialize the shared iterator state */
+    (*istate).schunkbit = 0;
+    (*istate).schunkptr = 0;
+    (*istate).spageptr = 0;
+
+    (*tbm).iterating = TBM_ITERATING_SHARED;
+
+    dp
 }
 
 /*
@@ -1039,11 +1312,91 @@ pub unsafe fn tbm_private_iterate(
  * Never call: the shared/DSA path is unimplemented.
  */
 pub unsafe fn tbm_shared_iterate(
-    _iterator: *mut TBMSharedIterator,
-    _tbmres: *mut TBMIterateResult,
+    iterator: *mut TBMSharedIterator,
+    tbmres: *mut TBMIterateResult,
 ) -> bool {
-    // TODO(pg-port): requires storage/lwlock.h + utils/dsa.h.
-    unimplemented!("tbm_shared_iterate: DSA/shared path not ported");
+    let istate: *mut TBMSharedIteratorState = (*iterator).state;
+    let mut ptbase: *mut PagetableEntry = core::ptr::null_mut();
+    let mut idxpages: *mut c_int = core::ptr::null_mut();
+    let mut idxchunks: *mut c_int = core::ptr::null_mut();
+
+    if !(*iterator).ptbase.is_null() {
+        ptbase = (*((*iterator).ptbase as *mut PTEntryArray)).ptentry.as_mut_ptr();
+    }
+    if !(*iterator).ptpages.is_null() {
+        idxpages = (*((*iterator).ptpages as *mut PTIterationArray)).index.as_mut_ptr();
+    }
+    if !(*iterator).ptchunks.is_null() {
+        idxchunks = (*((*iterator).ptchunks as *mut PTIterationArray)).index.as_mut_ptr();
+    }
+
+    /* Acquire the LWLock before accessing the shared members */
+    LWLockAcquire(&raw mut (*istate).lock, LW_EXCLUSIVE);
+
+    /*
+     * If lossy chunk pages remain, make sure we've advanced schunkptr/
+     * schunkbit to the next set bit.
+     */
+    while (*istate).schunkptr < (*istate).nchunks {
+        let chunk: *const PagetableEntry =
+            ptbase.add(*idxchunks.add((*istate).schunkptr as usize) as usize);
+        let mut schunkbit: c_int = (*istate).schunkbit;
+
+        tbm_advance_schunkbit(chunk, &mut schunkbit);
+        if schunkbit < PAGES_PER_CHUNK {
+            (*istate).schunkbit = schunkbit;
+            break;
+        }
+        /* advance to next chunk */
+        (*istate).schunkptr += 1;
+        (*istate).schunkbit = 0;
+    }
+
+    /*
+     * If both chunk and per-page data remain, must output the numerically
+     * earlier page.
+     */
+    if (*istate).schunkptr < (*istate).nchunks {
+        let chunk: *const PagetableEntry =
+            &*ptbase.add(*idxchunks.add((*istate).schunkptr as usize) as usize);
+        let chunk_blockno: BlockNumber = (*chunk).blockno + (*istate).schunkbit as BlockNumber;
+
+        if (*istate).spageptr >= (*istate).npages
+            || chunk_blockno
+                < (*ptbase.add(*idxpages.add((*istate).spageptr as usize) as usize)).blockno
+        {
+            /* Return a lossy page indicator from the chunk */
+            (*tbmres).blockno = chunk_blockno;
+            (*tbmres).lossy = true;
+            (*tbmres).recheck = true;
+            (*tbmres).internal_page = core::ptr::null();
+            (*istate).schunkbit += 1;
+
+            LWLockRelease(&raw mut (*istate).lock);
+            return true;
+        }
+    }
+
+    if (*istate).spageptr < (*istate).npages {
+        let page: *mut PagetableEntry =
+            ptbase.add(*idxpages.add((*istate).spageptr as usize) as usize);
+
+        (*tbmres).internal_page = page;
+        (*tbmres).blockno = (*page).blockno;
+        (*tbmres).lossy = false;
+        (*tbmres).recheck = (*page).recheck;
+        (*istate).spageptr += 1;
+
+        LWLockRelease(&raw mut (*istate).lock);
+
+        return true;
+    }
+
+    LWLockRelease(&raw mut (*istate).lock);
+
+    /* Nothing more in the bitmap */
+    (*tbmres).blockno = InvalidBlockNumber;
+    false
 }
 
 /*
@@ -1057,13 +1410,13 @@ pub unsafe fn tbm_end_private_iterate(iterator: *mut TBMPrivateIterator) {
 }
 
 /*
- * tbm_end_shared_iterate - finish a shared iteration.  STUB.
+ * tbm_end_shared_iterate - finish a shared iteration.
  *
  * # Safety
- * Never call: the shared/DSA path is unimplemented.
+ * `iterator` was returned by tbm_attach_shared_iterate and is not reused after.
  */
-pub unsafe fn tbm_end_shared_iterate(_iterator: *mut TBMSharedIterator) {
-    unimplemented!("tbm_end_shared_iterate: DSA/shared path not ported");
+pub unsafe fn tbm_end_shared_iterate(iterator: *mut TBMSharedIterator) {
+    pfree(iterator as *mut c_void);
 }
 
 /*
@@ -1340,22 +1693,117 @@ unsafe fn tbm_comparator(left: *const PagetableEntry, right: *const PagetableEnt
  * # Safety
  * Never call: only used by the shared/DSA path.
  */
-#[allow(dead_code)]
-unsafe fn tbm_shared_comparator(_left: *const c_void, _right: *const c_void, _arg: *mut c_void) -> c_int {
-    unimplemented!("tbm_shared_comparator: DSA/shared path not ported");
+unsafe fn tbm_shared_comparator(left: *const c_void, right: *const c_void, arg: *mut c_void) -> c_int {
+    let base: *const PagetableEntry = arg as *const PagetableEntry;
+    let lpage: *const PagetableEntry = base.add(*(left as *const c_int) as usize);
+    let rpage: *const PagetableEntry = base.add(*(right as *const c_int) as usize);
+
+    if (*lpage).blockno < (*rpage).blockno {
+        -1
+    } else if (*lpage).blockno > (*rpage).blockno {
+        1
+    } else {
+        0
+    }
 }
 
 /*
- * tbm_attach_shared_iterate - attach a shared iterator state.  STUB.
+ * tbm_attach_shared_iterate - attach a shared iterator state.
  *
  * # Safety
- * Never call: the shared/DSA path is unimplemented.
+ * `dsa`/`dp` describe a live TBMSharedIteratorState set up by the leader.
  */
 pub unsafe fn tbm_attach_shared_iterate(
-    _dsa: *mut dsa_area,
-    _dp: dsa_pointer,
+    dsa: *mut dsa_area,
+    dp: dsa_pointer,
 ) -> *mut TBMSharedIterator {
-    unimplemented!("tbm_attach_shared_iterate: DSA/shared path not ported");
+    /*
+     * Create the TBMSharedIterator struct, with enough trailing space to
+     * serve the needs of the TBMIterateResult sub-struct.
+     */
+    let iterator =
+        palloc0(core::mem::size_of::<TBMSharedIterator>()) as *mut TBMSharedIterator;
+
+    let istate = dsa_get_address(dsa, dp) as *mut TBMSharedIteratorState;
+
+    (*iterator).state = istate;
+
+    (*iterator).ptbase = dsa_get_address(dsa, (*istate).pagetable);
+
+    if (*istate).npages != 0 {
+        (*iterator).ptpages = dsa_get_address(dsa, (*istate).spages);
+    }
+    if (*istate).nchunks != 0 {
+        (*iterator).ptchunks = dsa_get_address(dsa, (*istate).schunks);
+    }
+
+    iterator
+}
+
+/*
+ * pagetable_allocate
+ *
+ * Callback function for allocating the memory for hashtable elements.
+ * Allocate memory for hashtable elements, using DSA if available.
+ *
+ * Translation note: the C declares this as the SH_ALLOCATE callback for the
+ * simplehash-generated `pagetable_hash`, reaching the owning bitmap through
+ * `pagetable->private_data` and the local context through `pagetable->ctx`.
+ * Our ported `crate::lib::simplehash::SimpleHash` keeps its elements in a `Vec`
+ * and never invokes SH_ALLOCATE/SH_FREE, so this callback has no caller; we
+ * translate it faithfully but take the owning `tbm` (== `pagetable->private_data`)
+ * directly, which is exactly what the C extracts on its first line.  The DSA
+ * branch stays stubbed in line with the rest of this file's shared path.
+ *
+ * # Safety
+ * `tbm` is a valid TIDBitmap.
+ */
+unsafe fn pagetable_allocate(tbm: *mut TIDBitmap, size: Size) -> *mut c_void {
+    if (*tbm).dsa.is_null() {
+        return MemoryContextAllocExtended(
+            (*tbm).mcxt,
+            size,
+            MCXT_ALLOC_HUGE | MCXT_ALLOC_ZERO,
+        );
+    }
+
+    /*
+     * Save the dsapagetable reference in dsapagetableold before allocating
+     * new memory so that pagetable_free can free the old entry.
+     */
+    let _ = size;
+    unimplemented!("pagetable_allocate: DSA/shared path not ported");
+    /* C also:
+     * tbm->dsapagetableold = tbm->dsapagetable;
+     * tbm->dsapagetable = dsa_allocate_extended(tbm->dsa,
+     *                                           sizeof(PTEntryArray) + size,
+     *                                           DSA_ALLOC_HUGE | DSA_ALLOC_ZERO);
+     * ptbase = dsa_get_address(tbm->dsa, tbm->dsapagetable);
+     * return ptbase->ptentry;
+     */
+}
+
+/*
+ * pagetable_free
+ *
+ * Callback function for freeing hash table elements.
+ *
+ * Translation note: see pagetable_allocate; `tbm` is `pagetable->private_data`.
+ *
+ * # Safety
+ * `tbm` is a valid TIDBitmap; `pointer` was returned by pagetable_allocate.
+ */
+unsafe fn pagetable_free(tbm: *mut TIDBitmap, pointer: *mut c_void) {
+    /* pfree the input pointer if DSA is not available */
+    if (*tbm).dsa.is_null() {
+        pfree(pointer);
+    } else if DsaPointerIsValid((*tbm).dsapagetableold) {
+        unimplemented!("pagetable_free: DSA/shared path not ported");
+        /* C also:
+         * dsa_free(tbm->dsa, tbm->dsapagetableold);
+         * tbm->dsapagetableold = InvalidDsaPointer;
+         */
+    }
 }
 
 /*

@@ -2634,16 +2634,49 @@ pub unsafe fn RestoreBlockImage(
 
 /// Extract the FullTransactionId from a WAL record (#ifndef FRONTEND).
 ///
-/// STUB: depends on the running backend's replay state
-/// (TransamVariables->nextXid) which is not ported.
-///
 /// # Safety
 /// `record` is a live reader whose current record is decoded.
-pub unsafe fn XLogRecGetFullXid(_record: *mut XLogReaderState) -> FullTransactionId {
-    // TODO(pg-port): FullTransactionIdFromAllowableAt(TransamVariables->nextXid,
-    //                XLogRecGetXid(record)) -- needs the backend replay state.
-    unimplemented!("XLogRecGetFullXid requires the backend's TransamVariables (not ported)")
+// #ifndef FRONTEND
+pub unsafe fn XLogRecGetFullXid(record: *mut XLogReaderState) -> FullTransactionId {
+    /*
+     * This function is only safe during replay, because it depends on the
+     * replay state.  See AdvanceNextFullTransactionIdPastXid() for more.
+     */
+    Assert!(AmStartupProcess() || !IsUnderPostmaster);
+
+    FullTransactionIdFromAllowableAt(
+        (*TransamVariables).nextXid,
+        XLogRecGetXid(record),
+    )
 }
+// #endif
+
+// TODO(pg-port): backend replay state from access/transam/varsup.c (not ported
+// here). Sibling subtrans.rs defines an equivalent local TransamVariables; this
+// file keeps its own private stub so XLogRecGetFullXid stays self-consistent.
+#[repr(C)]
+struct TransamVariablesData {
+    nextXid: FullTransactionId,
+}
+#[allow(non_upper_case_globals)]
+static mut TransamVariables: *mut TransamVariablesData = core::ptr::null_mut();
+
+// TODO(pg-port): real fn in access/transam/transam.c; xid8funcs.rs/twophase.rs
+// keep their own private copies. Mirror them here until transam.c is ported.
+unsafe fn FullTransactionIdFromAllowableAt(
+    _next_full_xid: FullTransactionId,
+    _xid: TransactionId,
+) -> FullTransactionId {
+    unimplemented!() // TODO(pg-port): access/transam/transam.c
+}
+
+// TODO(pg-port): miscadmin.c globals (not imported here to avoid pulling in
+// unwired backend state); mirror as local stubs.
+unsafe fn AmStartupProcess() -> bool {
+    unimplemented!() // TODO(pg-port): miscadmin.c
+}
+#[allow(non_upper_case_globals)]
+static mut IsUnderPostmaster: bool = false;
 
 // ===========================================================================
 // XLogRecGet* / XLogRecHas* accessor inlines (xlogreader.h macros -> pub fns).

@@ -21,8 +21,8 @@
 //! parser/formatter logic is otherwise self-contained.
 //! TODO(pg-port): wire real locale data once pg_locale.c (PGLC_localeconv) is translated.
 //!
-//! STUBBED (numeric type not yet ported): cash_numeric (cash -> numeric) and numeric_cash
-//! (numeric -> cash) need utils/numeric.h (int64_to_numeric, numeric_round/div/mul/int8).
+//! cash_numeric/numeric_cash use utils/numeric.h (int64_to_numeric, numeric_round/div/mul/int8)
+//! from crate::utils::adt::numeric.
 
 use crate::prelude::*;
 use crate::utils::fmgr::*;
@@ -40,6 +40,9 @@ use crate::port::pgstrcasecmp::pg_toupper;
 use crate::postgres::{DatumGetInt64, Int32GetDatum, Int64GetDatum, PointerGetDatum};
 use crate::utils::adt::float::{float8_div, float8_mul};
 use crate::utils::adt::int8::int8mul;
+use crate::utils::adt::numeric::{
+    int64_to_numeric, numeric_div, numeric_int8, numeric_mul, numeric_round, Numeric,
+};
 use crate::utils::adt::varlena::cstring_to_text_with_len;
 use core::ffi::{c_char, c_int, c_void};
 
@@ -1086,18 +1089,99 @@ pub unsafe fn cash_words(fcinfo: FunctionCallInfo) -> Datum {
  * Convert cash to numeric.
  */
 pub unsafe fn cash_numeric(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/numeric.h (int64_to_numeric, numeric_round/numeric_div) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("cash_numeric: utils/numeric.h (numeric type) not yet translated")
+    let money: Cash = DatumGetCash(PG_GETARG_DATUM!(fcinfo, 0)); // PG_GETARG_CASH
+    let mut result: Datum;
+    let mut fpoint: c_int;
+    let lconvert = &DEFAULT_LCONV; // PGLC_localeconv()
+
+    /* see comments about frac_digits in cash_in() */
+    fpoint = lconvert.frac_digits;
+    if fpoint < 0 || fpoint > 10 {
+        fpoint = 2;
+    }
+
+    /* convert the integral money value to numeric */
+    result = NumericGetDatum(int64_to_numeric(money));
+
+    /* scale appropriately, if needed */
+    if fpoint > 0 {
+        let mut scale: int64;
+        let mut i: c_int;
+        let mut numeric_scale: Datum;
+        let quotient: Datum;
+
+        /* compute required scale factor */
+        scale = 1;
+        i = 0;
+        while i < fpoint {
+            scale *= 10;
+            i += 1;
+        }
+        numeric_scale = NumericGetDatum(int64_to_numeric(scale));
+
+        /*
+         * Given integral inputs approaching INT64_MAX, select_div_scale()
+         * might choose a result scale of zero, causing loss of fractional
+         * digits in the quotient.  We can ensure an exact result by setting
+         * the dscale of either input to be at least as large as the desired
+         * result scale.  numeric_round() will do that for us.
+         */
+        numeric_scale = DirectFunctionCall2Coll(
+            numeric_round,
+            InvalidOid,
+            numeric_scale,
+            Int32GetDatum(fpoint),
+        );
+
+        /* Now we can safely divide ... */
+        quotient = DirectFunctionCall2Coll(numeric_div, InvalidOid, result, numeric_scale);
+
+        /* ... and forcibly round to exactly the intended number of digits */
+        result = DirectFunctionCall2Coll(
+            numeric_round,
+            InvalidOid,
+            quotient,
+            Int32GetDatum(fpoint),
+        );
+    }
+
+    return result; // PG_RETURN_DATUM
 }
 
 /* numeric_cash()
  * Convert numeric to cash.
  */
 pub unsafe fn numeric_cash(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): utils/numeric.h (int64_to_numeric, numeric_mul, numeric_int8) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("numeric_cash: utils/numeric.h (numeric type) not yet translated")
+    let mut amount: Datum = PG_GETARG_DATUM!(fcinfo, 0);
+    let result: Cash;
+    let mut fpoint: c_int;
+    let mut scale: int64;
+    let mut i: c_int;
+    let numeric_scale: Datum;
+    let lconvert = &DEFAULT_LCONV; // PGLC_localeconv()
+
+    /* see comments about frac_digits in cash_in() */
+    fpoint = lconvert.frac_digits;
+    if fpoint < 0 || fpoint > 10 {
+        fpoint = 2;
+    }
+
+    /* compute required scale factor */
+    scale = 1;
+    i = 0;
+    while i < fpoint {
+        scale *= 10;
+        i += 1;
+    }
+
+    /* multiply the input amount by scale factor */
+    numeric_scale = NumericGetDatum(int64_to_numeric(scale));
+    amount = DirectFunctionCall2Coll(numeric_mul, InvalidOid, amount, numeric_scale);
+
+    /* note that numeric_int8 will round to nearest integer for us */
+    result = DatumGetInt64(DirectFunctionCall1Coll(numeric_int8, InvalidOid, amount));
+
+    return CashGetDatum(result); // PG_RETURN_CASH
 }
 
 /* int4_cash()
@@ -1227,6 +1311,12 @@ unsafe fn cstring_dup(s: &str) -> *mut c_char {
     core::ptr::copy_nonoverlapping(s.as_ptr(), p as *mut u8, n);
     *p.add(n) = 0;
     p
+}
+
+/* numeric.h NumericGetDatum (the numeric.rs copy is private). */
+#[inline]
+unsafe fn NumericGetDatum(x: Numeric) -> Datum {
+    PointerGetDatum(x as *const c_void)
 }
 
 /* Format a C string for an error message via Rust `{}` (lossy). */

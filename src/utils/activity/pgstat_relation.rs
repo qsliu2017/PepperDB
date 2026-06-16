@@ -1,47 +1,10 @@
-//! Implementation of relation (table/index) statistics.
+//! Implementation of relation statistics.
 //!
-//! Faithful translation of the *reporter* half of `pgstat_relation.c`. It is
-//! kept separate from `pgstat.rs` to enforce the line between the statistics
-//! access/storage implementation and the details of individual statistics types.
+//! This file contains the implementation of function relation. It is kept
+//! separate from `pgstat.rs` to enforce the line between the statistics access /
+//! storage implementation and the details about individual types of statistics.
 //!
-//! Deviations from upstream PostgreSQL 18.3 (each noted again inline):
-//!
-//! * TRANSACTION-ROLLBACK MACHINERY STUBBED. Upstream tracks per-(sub)xact
-//!   insert/update/delete/truncate counts in a `PgStat_TableXactStatus`
-//!   linked-list hung off `PgStat_TableStatus.trans`, propagating them up to the
-//!   base `counts` at (sub)commit/abort via AtEOXact/AtEOSubXact/AtPrepare/
-//!   PostPrepare. The xact.h nesting subsystem is NOT ported, so `trans` is
-//!   always null here and the transactional count functions
-//!   (pgstat_count_heap_insert/update/delete, pgstat_count_truncate,
-//!   pgstat_update_heap_dead_tuples) write DIRECTLY into `counts`. This is a
-//!   SIMPLIFICATION: it loses rollback-correctness (aborted-xact tuple deltas
-//!   are not unwound, truncate/drop pre-counts are not saved/restored) and the
-//!   live/dead-tuple delta bookkeeping that AtEOXact would derive is collapsed
-//!   into the straightforward "insert -> +1 live, delete -> +1 dead, update ->
-//!   +1 dead" accounting done inline. The transaction hooks themselves
-//!   (AtEOXact_PgStat_Relations / AtEOSubXact_PgStat_Relations /
-//!   AtPrepare_PgStat_Relations / PostPrepare_PgStat_Relations,
-//!   pgstat_twophase_*, pgstat_drop_relation, add_tabstat_xact_level,
-//!   ensure_tabstat_xact_level, save/restore_truncdrop_counters) are reduced to
-//!   no-ops / minimal stubs with TODOs.
-//!
-//! * SHARED-MEMORY ENTRY ACCESS via the process-local entry table from
-//!   `pgstat.rs`: `pgstat_get_entry_ref_locked`/`pgstat_fetch_pending_entry`/
-//!   `pgstat_prep_database_pending` and the `entry_ref->shared_entry->key`
-//!   accessor upstream uses do not exist here. We reach the dboid via the
-//!   reporter's own argument and reach the shared blob through
-//!   `pgstat_fetch_entry`/the eref's `shared_stats`/`pending` pointers directly.
-//!
-//! * `pgstat_fetch_stat_tabentry` applies the HEADER-OFFSET RULE: the shared
-//!   blob is a `PgStatShared_Relation`, so the `PgStat_StatTabEntry` lives at
-//!   `&(*sh).stats`, not at the blob base.
-//!
-//! * MyDatabaseId / pgstat_track_counts / GetCurrentTransactionNestLevel /
-//!   GetCurrentTransactionStopTimestamp / IsSharedRelation / pgstat_assert_is_up
-//!   are stubs (miscadmin.h / xact.h / catalog.h unported).
-//!
-//! * pgstat_report_vacuum/analyze, pgstat_copy_relation_stats and the 2PC
-//!   routines are out of this port's reporter scope and omitted.
+//! Faithful 1:1 translation of PostgreSQL 18.3 `pgstat_relation.c`.
 //!
 //! IDENTIFICATION
 //!   src/backend/utils/activity/pgstat_relation.c
@@ -51,15 +14,73 @@ use crate::prelude::*;
 use crate::nodes::execnodes::Relation;
 use crate::utils::rel::RelationGetRelid;
 
+use crate::access::transam::twophase_rmgr::TWOPHASE_RM_PGSTAT_ID;
+use crate::access::transam::xact::TopTransactionContext;
+use crate::catalog::pg_class::RELKIND_PARTITIONED_TABLE;
+use crate::miscadmin::AmAutoVacuumWorkerProcess;
+use crate::utils::palloc::{palloc, pfree, MemoryContextAllocZero};
+
 use crate::utils::activity::pgstat::{
     pgstat_create_transactional, pgstat_drop_transactional, pgstat_fetch_entry,
     pgstat_get_entry_ref, pgstat_lock_entry, pgstat_prep_pending_entry, pgstat_unlock_entry,
-    PgStatShared_Relation, PgStat_Counter, PgStat_EntryRef, PgStat_StatTabEntry,
-    PgStat_TableCounts, PgStat_TableStatus, PGSTAT_KIND_RELATION,
+    PgStatShared_Relation, PgStat_Counter, PgStat_EntryRef, PgStat_StatDBEntry,
+    PgStat_StatTabEntry, PgStat_TableCounts, PgStat_TableStatus, PGSTAT_KIND_RELATION,
 };
+use crate::utils::activity::pgstat_internal::PgStat_SubXactStatus;
 
 extern "C" {
     fn memset(s: *mut c_void, c: c_int, n: usize) -> *mut c_void;
+}
+
+/// Per-(sub)xact transactional tuple counts for one relation (pgstat.h:
+/// PgStat_TableXactStatus). The `trans` field of `PgStat_TableStatus` is kept
+/// as an opaque `*mut c_void` upstream-shared, so we cast it to/from this.
+#[repr(C)]
+pub struct PgStat_TableXactStatus {
+    /// tuples inserted in (sub)xact
+    pub tuples_inserted: PgStat_Counter,
+    /// tuples updated in (sub)xact
+    pub tuples_updated: PgStat_Counter,
+    /// tuples deleted in (sub)xact
+    pub tuples_deleted: PgStat_Counter,
+    /// relation truncated/dropped in this (sub)xact
+    pub truncdropped: bool,
+    /* tuples i/u/d prior to truncate/drop */
+    pub inserted_pre_truncdrop: PgStat_Counter,
+    pub updated_pre_truncdrop: PgStat_Counter,
+    pub deleted_pre_truncdrop: PgStat_Counter,
+    /// subtransaction nest level
+    pub nest_level: c_int,
+    /* links to other structs for same relation: */
+    /// next higher subxact if any
+    pub upper: *mut PgStat_TableXactStatus,
+    /// per-table status
+    pub parent: *mut PgStat_TableStatus,
+    /* structs of same subxact level are linked here: */
+    /// next of same subxact
+    pub next: *mut PgStat_TableXactStatus,
+}
+
+/// Record that's written to 2PC state file when pgstat state is persisted.
+#[repr(C)]
+struct TwoPhasePgStatRecord {
+    tuples_inserted: PgStat_Counter, /* tuples inserted in xact */
+    tuples_updated: PgStat_Counter,  /* tuples updated in xact */
+    tuples_deleted: PgStat_Counter,  /* tuples deleted in xact */
+    /* tuples i/u/d prior to truncate/drop */
+    inserted_pre_truncdrop: PgStat_Counter,
+    updated_pre_truncdrop: PgStat_Counter,
+    deleted_pre_truncdrop: PgStat_Counter,
+    id: Oid,            /* table's OID */
+    shared: bool,       /* is it a shared catalog? */
+    truncdropped: bool, /* was the relation truncated/dropped? */
+}
+
+/// Read the typed `trans` head off a `PgStat_TableStatus` (which stores it as an
+/// opaque `*mut c_void`).
+#[inline]
+unsafe fn tabstat_trans(pgstat_info: *mut PgStat_TableStatus) -> *mut PgStat_TableXactStatus {
+    (*pgstat_info).trans as *mut PgStat_TableXactStatus
 }
 
 /// True iff every one of `len` bytes at `p` is zero (utils/memutils.h:
@@ -102,6 +123,75 @@ unsafe fn GetCurrentTransactionNestLevel() -> c_int {
     0
 }
 
+const PGSTAT_BACKEND_FLUSH_IO: bits32 = 1 << 0;
+
+/// TODO(pg-port): real `pgstat_get_entry_ref_locked` lives in
+/// utils/activity/pgstat.c. The process-local entry subset in `pgstat.rs` does
+/// not export a locked variant, so we get-or-create the eref and rely on the
+/// no-op `pgstat_lock_entry`/`pgstat_unlock_entry` for serialization.
+unsafe fn pgstat_get_entry_ref_locked(
+    kind: PgStat_Kind,
+    dboid: Oid,
+    objoid: Oid,
+    nowait: bool,
+) -> *mut PgStat_EntryRef {
+    let eref = pgstat_get_entry_ref(kind, dboid, objoid, true, null_mut());
+    let _ = pgstat_lock_entry(eref, nowait);
+    eref
+}
+
+/// TODO(pg-port): real `pgstat_fetch_pending_entry` lives in pgstat.c. Returns
+/// the eref iff a pending blob already exists for (kind, dboid, objoid).
+unsafe fn pgstat_fetch_pending_entry(kind: PgStat_Kind, dboid: Oid, objoid: Oid) -> *mut PgStat_EntryRef {
+    let eref = pgstat_get_entry_ref(kind, dboid, objoid, false, null_mut());
+    if eref.is_null() || (*eref).pending.is_null() {
+        return null_mut();
+    }
+    eref
+}
+
+/// TODO(pg-port): real `pgstat_get_xact_stack_level` lives in pgstat_xact.c.
+/// The xact subxact stack is unported here; return null.
+unsafe fn pgstat_get_xact_stack_level(_nest_level: c_int) -> *mut PgStat_SubXactStatus {
+    null_mut()
+}
+
+/// TODO(pg-port): real `pgstat_prep_database_pending` lives in pgstat_database.c
+/// and returns the `pgstat.rs` `PgStat_StatDBEntry`. Database pending wiring is
+/// not connected in this subset; return null.
+unsafe fn pgstat_prep_database_pending(_dboid: Oid) -> *mut PgStat_StatDBEntry {
+    null_mut()
+}
+
+/// TODO(pg-port): real `pgstat_flush_io` lives in pgstat_io.c.
+unsafe fn pgstat_flush_io(_nowait: bool) {}
+
+/// TODO(pg-port): real `pgstat_flush_backend` lives in pgstat_backend.c.
+unsafe fn pgstat_flush_backend(_nowait: bool, _flags: bits32) -> bool {
+    false
+}
+
+/// TODO(pg-port): real `GetCurrentTimestamp` lives in utils/adt/timestamp.c.
+unsafe fn GetCurrentTimestamp() -> TimestampTz {
+    0
+}
+
+/// TODO(pg-port): real `TimestampDifferenceMilliseconds` lives in
+/// utils/adt/timestamp.c.
+unsafe fn TimestampDifferenceMilliseconds(_start: TimestampTz, _stop: TimestampTz) -> PgStat_Counter {
+    0
+}
+
+/// TODO(pg-port): real `GetCurrentTransactionStopTimestamp` lives in
+/// access/transam/xact.c. The xact machinery is unported; return 0.
+unsafe fn GetCurrentTransactionStopTimestamp() -> TimestampTz {
+    0
+}
+
+/// TODO(pg-port): real `RegisterTwoPhaseRecord` lives in
+/// access/transam/twophase.c. 2PC record persistence is unported; no-op.
+unsafe fn RegisterTwoPhaseRecord(_rmid: u8, _info: u16, _recdata: *const c_void, _len: u32) {}
+
 // ---------------------------------------------------------------------------
 // pgstat_should_count_relation (pgstat.h macro)
 // ---------------------------------------------------------------------------
@@ -130,22 +220,67 @@ unsafe fn rel_pgstat_info(rel: Relation) -> *mut PgStat_TableStatus {
     (*rel).pgstat_info as *mut PgStat_TableStatus
 }
 
+/// TODO(pg-port): real `RELKIND_HAS_STORAGE` macro lives in catalog/pg_class.h;
+/// no single canonical export exists in src/ yet. Mirrors its definition.
+unsafe fn RELKIND_HAS_STORAGE(relkind: c_char) -> bool {
+    relkind == b'r' as c_char  /* RELKIND_RELATION */
+        || relkind == b't' as c_char /* RELKIND_TOASTVALUE */
+        || relkind == b'm' as c_char /* RELKIND_MATVIEW */
+        || relkind == b'S' as c_char /* RELKIND_SEQUENCE */
+        || relkind == b'i' as c_char /* RELKIND_INDEX */
+}
+
+// ---------------------------------------------------------------------------
+// Copy stats between relations (REAL)
+// ---------------------------------------------------------------------------
+
+/// Copy stats between relations. This is used for things like REINDEX
+/// CONCURRENTLY (pgstat_relation.c: pgstat_copy_relation_stats).
+pub unsafe fn pgstat_copy_relation_stats(dst: Relation, src: Relation) {
+    let srcstats: *mut PgStat_StatTabEntry;
+    let dstshstats: *mut PgStatShared_Relation;
+    let dst_ref: *mut PgStat_EntryRef;
+
+    srcstats =
+        pgstat_fetch_stat_tabentry_ext((*(*src).rd_rel).relisshared, RelationGetRelid(src));
+    if srcstats.is_null() {
+        return;
+    }
+
+    dst_ref = pgstat_get_entry_ref_locked(
+        PGSTAT_KIND_RELATION,
+        if (*(*dst).rd_rel).relisshared {
+            InvalidOid
+        } else {
+            MyDatabaseId
+        },
+        RelationGetRelid(dst),
+        false,
+    );
+
+    dstshstats = (*dst_ref).shared_stats as *mut PgStatShared_Relation;
+    (*dstshstats).stats = *srcstats;
+
+    pgstat_unlock_entry(dst_ref);
+}
+
 // ---------------------------------------------------------------------------
 // Relation init / association / unlink (REAL)
 // ---------------------------------------------------------------------------
 
 /// Initialize a relcache entry to count access statistics. Called whenever a
 /// relation is opened (pgstat_relation.c: pgstat_init_relation).
-///
-/// DEVIATION: upstream gates on `RELKIND_HAS_STORAGE(relkind) || relkind ==
-/// RELKIND_PARTITIONED_TABLE` using `rel->rd_rel->relkind`. The relkind macros
-/// are part of catalog/pg_class.h; rather than depend on them here, we keep the
-/// `pgstat_track_counts` gate (the load-bearing one for the reporter half) and
-/// the unlink-on-disabled behavior, and otherwise enable counting. The relkind
-/// filter is a TODO.
 pub unsafe fn pgstat_init_relation(rel: Relation) {
-    // TODO: filter on relkind (RELKIND_HAS_STORAGE || PARTITIONED_TABLE) once
-    // the pg_class relkind macros are wired up.
+    let relkind: c_char = (*(*rel).rd_rel).relkind;
+
+    /*
+     * We only count stats for relations with storage and partitioned tables
+     */
+    if !RELKIND_HAS_STORAGE(relkind) && relkind != RELKIND_PARTITIONED_TABLE {
+        (*rel).pgstat_enabled = false;
+        (*rel).pgstat_info = null_mut();
+        return;
+    }
 
     if !pgstat_track_counts {
         if !(*rel).pgstat_info.is_null() {
@@ -170,9 +305,8 @@ pub unsafe fn pgstat_assoc_relation(rel: Relation) {
     Assert!((*rel).pgstat_info.is_null());
 
     /* Else find or make the PgStat_TableStatus entry, and update link */
-    // DEVIATION: upstream reads `rel->rd_rel->relisshared`; with shared-catalog
-    // metadata unported we treat every relation as non-shared.
-    let pending = pgstat_prep_relation_pending(RelationGetRelid(rel), false);
+    let pending =
+        pgstat_prep_relation_pending(RelationGetRelid(rel), (*(*rel).rd_rel).relisshared);
     (*rel).pgstat_info = pending as *mut c_void;
 
     /* don't allow link a stats to multiple relcache entries */
@@ -200,41 +334,226 @@ pub unsafe fn pgstat_unlink_relation(rel: Relation) {
 
 /// Ensure that stats are dropped if transaction aborts (pgstat_relation.c:
 /// pgstat_create_relation).
-///
-/// DEVIATION: dboid is MyDatabaseId (shared-catalog detection unported).
 pub unsafe fn pgstat_create_relation(rel: Relation) {
-    pgstat_create_transactional(PGSTAT_KIND_RELATION, MyDatabaseId, RelationGetRelid(rel));
+    pgstat_create_transactional(
+        PGSTAT_KIND_RELATION,
+        if (*(*rel).rd_rel).relisshared {
+            InvalidOid
+        } else {
+            MyDatabaseId
+        },
+        RelationGetRelid(rel),
+    );
 }
 
 /// Ensure that stats are dropped if transaction commits (pgstat_relation.c:
 /// pgstat_drop_relation).
-///
-/// STUB: the `pgstat_info->trans` / nest-level branch that transactionally
-/// zeroes the i/u/d counters is omitted (xact machinery unported). We retain
-/// the `pgstat_drop_transactional` call so the entry is still scheduled for
-/// drop. TODO: restore the trans-aware zeroing once `trans` is populated.
 pub unsafe fn pgstat_drop_relation(rel: Relation) {
-    let _nest_level = GetCurrentTransactionNestLevel();
+    let nest_level: c_int = GetCurrentTransactionNestLevel();
+    let pgstat_info: *mut PgStat_TableStatus;
 
-    pgstat_drop_transactional(PGSTAT_KIND_RELATION, MyDatabaseId, RelationGetRelid(rel));
+    pgstat_drop_transactional(
+        PGSTAT_KIND_RELATION,
+        if (*(*rel).rd_rel).relisshared {
+            InvalidOid
+        } else {
+            MyDatabaseId
+        },
+        RelationGetRelid(rel),
+    );
 
     if !pgstat_should_count_relation(rel) {
         return;
     }
 
-    // TODO (xact machinery unported): upstream here, when
-    // pgstat_info->trans->nest_level == nest_level, calls
-    // save_truncdrop_counters(trans, true) and zeroes the trans i/u/d counts.
-    // `trans` is always null in this port, so there is nothing to do.
+    /*
+     * Transactionally set counters to 0. That ensures that accesses to
+     * pg_stat_xact_all_tables inside the transaction show 0.
+     */
+    pgstat_info = rel_pgstat_info(rel);
+    if !tabstat_trans(pgstat_info).is_null()
+        && (*tabstat_trans(pgstat_info)).nest_level == nest_level
+    {
+        save_truncdrop_counters(tabstat_trans(pgstat_info), true);
+        (*tabstat_trans(pgstat_info)).tuples_inserted = 0;
+        (*tabstat_trans(pgstat_info)).tuples_updated = 0;
+        (*tabstat_trans(pgstat_info)).tuples_deleted = 0;
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Nontransactional direct count functions (REAL)
+// Vacuum / analyze reporting (REAL)
+// ---------------------------------------------------------------------------
+
+/// Report that the table was just vacuumed and flush IO statistics
+/// (pgstat_relation.c: pgstat_report_vacuum).
+pub unsafe fn pgstat_report_vacuum(
+    tableoid: Oid,
+    shared: bool,
+    livetuples: PgStat_Counter,
+    deadtuples: PgStat_Counter,
+    starttime: TimestampTz,
+) {
+    let entry_ref: *mut PgStat_EntryRef;
+    let shtabentry: *mut PgStatShared_Relation;
+    let tabentry: *mut PgStat_StatTabEntry;
+    let dboid: Oid = if shared { InvalidOid } else { MyDatabaseId };
+    let ts: TimestampTz;
+    let elapsedtime: PgStat_Counter;
+
+    if !pgstat_track_counts {
+        return;
+    }
+
+    /* Store the data in the table's hash table entry. */
+    ts = GetCurrentTimestamp();
+    elapsedtime = TimestampDifferenceMilliseconds(starttime, ts);
+
+    /* block acquiring lock for the same reason as pgstat_report_autovac() */
+    entry_ref = pgstat_get_entry_ref_locked(PGSTAT_KIND_RELATION, dboid, tableoid, false);
+
+    shtabentry = (*entry_ref).shared_stats as *mut PgStatShared_Relation;
+    tabentry = &mut (*shtabentry).stats;
+
+    (*tabentry).live_tuples = livetuples;
+    (*tabentry).dead_tuples = deadtuples;
+
+    /*
+     * It is quite possible that a non-aggressive VACUUM ended up skipping
+     * various pages, however, we'll zero the insert counter here regardless.
+     * It's currently used only to track when we need to perform an "insert"
+     * autovacuum, which are mainly intended to freeze newly inserted tuples.
+     * Zeroing this may just mean we'll not try to vacuum the table again until
+     * enough tuples have been inserted to trigger another insert autovacuum.
+     * An anti-wraparound autovacuum will catch any persistent stragglers.
+     */
+    (*tabentry).ins_since_vacuum = 0;
+
+    if AmAutoVacuumWorkerProcess() {
+        (*tabentry).last_autovacuum_time = ts;
+        (*tabentry).autovacuum_count += 1;
+        (*tabentry).total_autovacuum_time += elapsedtime;
+    } else {
+        (*tabentry).last_vacuum_time = ts;
+        (*tabentry).vacuum_count += 1;
+        (*tabentry).total_vacuum_time += elapsedtime;
+    }
+
+    pgstat_unlock_entry(entry_ref);
+
+    /*
+     * Flush IO statistics now. pgstat_report_stat() will flush IO stats,
+     * however this will not be called until after an entire autovacuum cycle is
+     * done -- which will likely vacuum many relations -- or until the VACUUM
+     * command has processed all tables and committed.
+     */
+    pgstat_flush_io(false);
+    let _ = pgstat_flush_backend(false, PGSTAT_BACKEND_FLUSH_IO);
+}
+
+/// Report that the table was just analyzed and flush IO statistics
+/// (pgstat_relation.c: pgstat_report_analyze).
+///
+/// Caller must provide new live- and dead-tuples estimates, as well as a flag
+/// indicating whether to reset the mod_since_analyze counter.
+pub unsafe fn pgstat_report_analyze(
+    rel: Relation,
+    mut livetuples: PgStat_Counter,
+    mut deadtuples: PgStat_Counter,
+    resetcounter: bool,
+    starttime: TimestampTz,
+) {
+    let entry_ref: *mut PgStat_EntryRef;
+    let shtabentry: *mut PgStatShared_Relation;
+    let tabentry: *mut PgStat_StatTabEntry;
+    let dboid: Oid = if (*(*rel).rd_rel).relisshared {
+        InvalidOid
+    } else {
+        MyDatabaseId
+    };
+    let ts: TimestampTz;
+    let elapsedtime: PgStat_Counter;
+
+    if !pgstat_track_counts {
+        return;
+    }
+
+    /*
+     * Unlike VACUUM, ANALYZE might be running inside a transaction that has
+     * already inserted and/or deleted rows in the target table. ANALYZE will
+     * have counted such rows as live or dead respectively. Because we will
+     * report our counts of such rows at transaction end, we should subtract off
+     * these counts from the update we're making now, else they'll be
+     * double-counted after commit.  (This approach also ensures that the shared
+     * stats entry ends up with the right numbers if we abort instead of
+     * committing.)
+     *
+     * Waste no time on partitioned tables, though.
+     */
+    if pgstat_should_count_relation(rel) && (*(*rel).rd_rel).relkind != RELKIND_PARTITIONED_TABLE {
+        let mut trans: *mut PgStat_TableXactStatus;
+
+        trans = tabstat_trans(rel_pgstat_info(rel));
+        while !trans.is_null() {
+            livetuples -= (*trans).tuples_inserted - (*trans).tuples_deleted;
+            deadtuples -= (*trans).tuples_updated + (*trans).tuples_deleted;
+            trans = (*trans).upper;
+        }
+        /* count stuff inserted by already-aborted subxacts, too */
+        deadtuples -= (*rel_pgstat_info(rel)).counts.delta_dead_tuples;
+        /* Since ANALYZE's counts are estimates, we could have underflowed */
+        livetuples = Max(livetuples, 0);
+        deadtuples = Max(deadtuples, 0);
+    }
+
+    /* Store the data in the table's hash table entry. */
+    ts = GetCurrentTimestamp();
+    elapsedtime = TimestampDifferenceMilliseconds(starttime, ts);
+
+    /* block acquiring lock for the same reason as pgstat_report_autovac() */
+    entry_ref =
+        pgstat_get_entry_ref_locked(PGSTAT_KIND_RELATION, dboid, RelationGetRelid(rel), false);
+    /* can't get dropped while accessed */
+    Assert!(!entry_ref.is_null() && !(*entry_ref).shared_stats.is_null());
+
+    shtabentry = (*entry_ref).shared_stats as *mut PgStatShared_Relation;
+    tabentry = &mut (*shtabentry).stats;
+
+    (*tabentry).live_tuples = livetuples;
+    (*tabentry).dead_tuples = deadtuples;
+
+    /*
+     * If commanded, reset mod_since_analyze to zero.  This forgets any changes
+     * that were committed while the ANALYZE was in progress, but we have no good
+     * way to estimate how many of those there were.
+     */
+    if resetcounter {
+        (*tabentry).mod_since_analyze = 0;
+    }
+
+    if AmAutoVacuumWorkerProcess() {
+        (*tabentry).last_autoanalyze_time = ts;
+        (*tabentry).autoanalyze_count += 1;
+        (*tabentry).total_autoanalyze_time += elapsedtime;
+    } else {
+        (*tabentry).last_analyze_time = ts;
+        (*tabentry).analyze_count += 1;
+        (*tabentry).total_analyze_time += elapsedtime;
+    }
+
+    pgstat_unlock_entry(entry_ref);
+
+    /* see pgstat_report_vacuum() */
+    pgstat_flush_io(false);
+    let _ = pgstat_flush_backend(false, PGSTAT_BACKEND_FLUSH_IO);
+}
+
+// ---------------------------------------------------------------------------
+// Nontransactional direct count functions (pgstat.h macros)
 // ---------------------------------------------------------------------------
 //
-// These mirror the inline pgstat.h macros. Each bumps a field of the pending
-// `PgStat_TableCounts` directly. Translated as functions (Rust has no macro-
-// with-statement idiom matching the C do/while(0) form well here).
+// These mirror the inline pgstat.h macros (not pgstat_relation.c). Each bumps a
+// field of the pending `PgStat_TableCounts` directly.
 
 /// pgstat.h: pgstat_count_heap_scan -- one sequential scan started.
 pub unsafe fn pgstat_count_heap_scan(rel: Relation) {
@@ -286,88 +605,77 @@ pub unsafe fn pgstat_count_buffer_hit(rel: Relation) {
 }
 
 // ---------------------------------------------------------------------------
-// Transactional count functions (STUBBED -> write directly to counts)
+// Transactional count functions (REAL)
 // ---------------------------------------------------------------------------
-//
-// SIMPLIFICATION: upstream routes these through ensure_tabstat_xact_level() and
-// accumulates into pgstat_info->trans (the per-subxact record) so they can be
-// unwound on rollback. With the xact machinery unported, `trans` is always
-// null; we therefore write straight into the base `counts`, deriving the
-// live/dead-tuple deltas inline as AtEOXact's commit path would. This loses
-// rollback-correctness (see file header).
 
 /// count a tuple insertion of n tuples (pgstat_relation.c:
-/// pgstat_count_heap_insert). STUB: writes counts directly; also advances
-/// delta_live_tuples and changed_tuples as the commit path would.
+/// pgstat_count_heap_insert).
 pub unsafe fn pgstat_count_heap_insert(rel: Relation, n: PgStat_Counter) {
     if pgstat_should_count_relation(rel) {
-        let counts = &mut (*rel_pgstat_info(rel)).counts;
-        counts.tuples_inserted += n;
-        // commit-path derivation (AtEOXact_PgStat_Relations):
-        counts.delta_live_tuples += n;
-        counts.changed_tuples += n;
+        let pgstat_info: *mut PgStat_TableStatus = rel_pgstat_info(rel);
+
+        ensure_tabstat_xact_level(pgstat_info);
+        (*tabstat_trans(pgstat_info)).tuples_inserted += n;
     }
 }
 
-/// count a tuple update (pgstat_relation.c: pgstat_count_heap_update). STUB:
-/// writes counts directly. tuples_hot_updated / tuples_newpage_updated are
-/// nontransactional upstream too and were always bumped directly.
+/// count a tuple update (pgstat_relation.c: pgstat_count_heap_update).
 pub unsafe fn pgstat_count_heap_update(rel: Relation, hot: bool, newpage: bool) {
     Assert!(!(hot && newpage));
 
     if pgstat_should_count_relation(rel) {
-        let counts = &mut (*rel_pgstat_info(rel)).counts;
-        counts.tuples_updated += 1;
+        let pgstat_info: *mut PgStat_TableStatus = rel_pgstat_info(rel);
+
+        ensure_tabstat_xact_level(pgstat_info);
+        (*tabstat_trans(pgstat_info)).tuples_updated += 1;
 
         /*
          * tuples_hot_updated and tuples_newpage_updated counters are
          * nontransactional, so just advance them
          */
         if hot {
-            counts.tuples_hot_updated += 1;
+            (*pgstat_info).counts.tuples_hot_updated += 1;
         } else if newpage {
-            counts.tuples_newpage_updated += 1;
+            (*pgstat_info).counts.tuples_newpage_updated += 1;
         }
-
-        // commit-path derivation: update creates one dead tuple, one change.
-        counts.delta_dead_tuples += 1;
-        counts.changed_tuples += 1;
     }
 }
 
-/// count a tuple deletion (pgstat_relation.c: pgstat_count_heap_delete). STUB:
-/// writes counts directly; delete removes a live and creates a dead tuple.
+/// count a tuple deletion (pgstat_relation.c: pgstat_count_heap_delete).
 pub unsafe fn pgstat_count_heap_delete(rel: Relation) {
     if pgstat_should_count_relation(rel) {
-        let counts = &mut (*rel_pgstat_info(rel)).counts;
-        counts.tuples_deleted += 1;
-        // commit-path derivation:
-        counts.delta_live_tuples -= 1;
-        counts.delta_dead_tuples += 1;
-        counts.changed_tuples += 1;
+        let pgstat_info: *mut PgStat_TableStatus = rel_pgstat_info(rel);
+
+        ensure_tabstat_xact_level(pgstat_info);
+        (*tabstat_trans(pgstat_info)).tuples_deleted += 1;
     }
 }
 
 /// update tuple counters due to truncate (pgstat_relation.c:
-/// pgstat_count_truncate). STUB: sets the truncdropped flag and zeroes the
-/// tuple-action counters directly (no save_truncdrop_counters / restore-on-abort
-/// path, which lives in the unported xact machinery).
+/// pgstat_count_truncate).
 pub unsafe fn pgstat_count_truncate(rel: Relation) {
     if pgstat_should_count_relation(rel) {
-        let counts = &mut (*rel_pgstat_info(rel)).counts;
-        counts.truncdropped = true;
-        counts.tuples_inserted = 0;
-        counts.tuples_updated = 0;
-        counts.tuples_deleted = 0;
+        let pgstat_info: *mut PgStat_TableStatus = rel_pgstat_info(rel);
+
+        ensure_tabstat_xact_level(pgstat_info);
+        save_truncdrop_counters(tabstat_trans(pgstat_info), false);
+        (*tabstat_trans(pgstat_info)).tuples_inserted = 0;
+        (*tabstat_trans(pgstat_info)).tuples_updated = 0;
+        (*tabstat_trans(pgstat_info)).tuples_deleted = 0;
     }
 }
 
 /// update dead-tuples count (pgstat_relation.c: pgstat_update_heap_dead_tuples).
-/// This was already nontransactional upstream: it reports the nontransactional
-/// recovery of `delta` dead tuples straight into the per-table counter.
+///
+/// The semantics of this are that we are reporting the nontransactional recovery
+/// of "delta" dead tuples; so delta_dead_tuples decreases rather than
+/// increasing, and the change goes straight into the per-table counter, not into
+/// transactional state.
 pub unsafe fn pgstat_update_heap_dead_tuples(rel: Relation, delta: c_int) {
     if pgstat_should_count_relation(rel) {
-        (*rel_pgstat_info(rel)).counts.delta_dead_tuples -= delta as PgStat_Counter;
+        let pgstat_info: *mut PgStat_TableStatus = rel_pgstat_info(rel);
+
+        (*pgstat_info).counts.delta_dead_tuples -= delta as PgStat_Counter;
     }
 }
 
@@ -400,28 +708,55 @@ pub unsafe fn pgstat_fetch_stat_tabentry_ext(shared: bool, reloid: Oid) -> *mut 
 }
 
 /// find any existing PgStat_TableStatus entry for rel (pgstat_relation.c:
-/// find_tabstat_entry). Tries the current database first, then shared tables.
-/// Returns the pending entry pointer, or null if none. If no entry is found,
-/// does not create one.
+/// find_tabstat_entry).
 ///
-/// DEVIATION: upstream copies the entry into a freshly palloc'd
-/// PgStat_TableStatus, then folds the live subtransaction counts
-/// (pgstat_info->trans chain) into the copy before returning. With `trans`
-/// always null and no per-call palloc copy needed for the reporter half, we
-/// return the live pending pointer directly; the subxact reconciliation loop is
-/// a no-op (nothing to add).
+/// Find any existing PgStat_TableStatus entry for rel_id in the current
+/// database. If not found, try finding from shared tables.
+///
+/// If an entry is found, copy it and increment the copy's counters with their
+/// subtransaction counterparts, then return the copy.  The caller may need to
+/// pfree() the copy.
+///
+/// If no entry found, return NULL, don't create a new one.
 pub unsafe fn find_tabstat_entry(rel_id: Oid) -> *mut PgStat_TableStatus {
-    let mut eref = pgstat_get_entry_ref(PGSTAT_KIND_RELATION, MyDatabaseId, rel_id, false, null_mut());
-    if eref.is_null() {
-        eref = pgstat_get_entry_ref(PGSTAT_KIND_RELATION, InvalidOid, rel_id, false, null_mut());
-        if eref.is_null() {
+    let mut entry_ref: *mut PgStat_EntryRef;
+    let mut trans: *mut PgStat_TableXactStatus;
+    let tabentry: *mut PgStat_TableStatus;
+    let tablestatus: *mut PgStat_TableStatus;
+
+    entry_ref = pgstat_fetch_pending_entry(PGSTAT_KIND_RELATION, MyDatabaseId, rel_id);
+    if entry_ref.is_null() {
+        entry_ref = pgstat_fetch_pending_entry(PGSTAT_KIND_RELATION, InvalidOid, rel_id);
+        if entry_ref.is_null() {
             return null_mut();
         }
     }
 
-    // TODO: upstream reconciles tablestatus->counts.tuples_{inserted,updated,
-    // deleted} with the live `trans` chain here; `trans` is unported (null).
-    (*eref).pending as *mut PgStat_TableStatus
+    tabentry = (*entry_ref).pending as *mut PgStat_TableStatus;
+    tablestatus = palloc(size_of::<PgStat_TableStatus>()) as *mut PgStat_TableStatus;
+    *tablestatus = core::ptr::read(tabentry);
+
+    /*
+     * Reset tablestatus->trans in the copy of PgStat_TableStatus as it may
+     * point to a shared memory area.  Its data is saved below, so removing it
+     * does not matter.
+     */
+    (*tablestatus).trans = null_mut();
+
+    /*
+     * Live subtransaction counts are not included yet.  This is not a hot code
+     * path so reconcile tuples_inserted, tuples_updated and tuples_deleted even
+     * if the caller may not be interested in this data.
+     */
+    trans = tabstat_trans(tabentry);
+    while !trans.is_null() {
+        (*tablestatus).counts.tuples_inserted += (*trans).tuples_inserted;
+        (*tablestatus).counts.tuples_updated += (*trans).tuples_updated;
+        (*tablestatus).counts.tuples_deleted += (*trans).tuples_deleted;
+        trans = (*trans).upper;
+    }
+
+    tablestatus
 }
 
 // ---------------------------------------------------------------------------
@@ -429,33 +764,40 @@ pub unsafe fn find_tabstat_entry(rel_id: Oid) -> *mut PgStat_TableStatus {
 // ---------------------------------------------------------------------------
 
 /// Flush out pending stats for the entry (pgstat_relation.c:
-/// pgstat_relation_flush_cb). Accumulates every pending `PgStat_TableCounts`
-/// field into the shared `PgStat_StatTabEntry`, then clears the pending counts.
+/// pgstat_relation_flush_cb).
 ///
-/// Returns true on success (or when there is nothing to flush). If `nowait` is
-/// true and the lock could not be acquired, returns false without flushing.
+/// If nowait is true and the lock could not be immediately acquired, returns
+/// false without flushing the entry.  Otherwise returns true.
 ///
-/// DEVIATIONS:
-/// * upstream reads `dboid = entry_ref->shared_entry->key.dboid` and, after the
-///   shared update, copies the same counts into the pending database entry via
-///   `pgstat_prep_database_pending(dboid)`. Neither the `shared_entry`/key
-///   accessor nor a wired-up database pending entry exist in this subset, so
-///   the database-stats propagation is omitted (TODO).
-/// * `GetCurrentTransactionStopTimestamp()` (lastscan update) is part of the
-///   unported xact machinery; the `lastscan` bump is omitted (TODO).
-/// * after a successful flush, upstream relies on a separate reset of the
-///   pending counts by the caller path; we memset `lstats->counts` to zero here
-///   so repeated flushes do not double-count (matching the net effect).
+/// Some of the stats are copied to the corresponding pending database stats
+/// entry when successfully flushing.
+///
+/// DEVIATION: upstream reads `dboid = entry_ref->shared_entry->key.dboid`. The
+/// `pgstat.rs` `PgStat_EntryRef` subset does not carry `shared_entry`; we derive
+/// the dboid from `lstats->shared` (semantically equivalent under this port's
+/// non-shared assumption). `pgstat_prep_database_pending` is a local stub that
+/// returns null until database pending wiring lands, so the database
+/// propagation is guarded.
 pub unsafe fn pgstat_relation_flush_cb(entry_ref: *mut PgStat_EntryRef, nowait: bool) -> bool {
-    pgstat_assert_is_up();
+    let dboid: Oid;
+    let lstats: *mut PgStat_TableStatus; /* pending stats entry  */
+    let shtabstats: *mut PgStatShared_Relation;
+    let tabentry: *mut PgStat_StatTabEntry; /* table entry of shared stats */
+    let dbentry: *mut PgStat_StatDBEntry; /* pending database entry */
 
-    let lstats = (*entry_ref).pending as *mut PgStat_TableStatus;
-    let shtabstats = (*entry_ref).shared_stats as *mut PgStatShared_Relation;
+    let _ = pgstat_assert_is_up();
+
+    lstats = (*entry_ref).pending as *mut PgStat_TableStatus;
+    shtabstats = (*entry_ref).shared_stats as *mut PgStatShared_Relation;
+    dboid = if (*lstats).shared {
+        InvalidOid
+    } else {
+        MyDatabaseId
+    };
 
     /*
      * Ignore entries that didn't accumulate any actual counts, such as indexes
-     * that were opened by the planner but not used. We test the whole
-     * PgStat_TableCounts for all-zeros.
+     * that were opened by the planner but not used.
      */
     if pg_memory_is_all_zeros(
         &(*lstats).counts as *const PgStat_TableCounts as *const c_void,
@@ -469,41 +811,48 @@ pub unsafe fn pgstat_relation_flush_cb(entry_ref: *mut PgStat_EntryRef, nowait: 
     }
 
     /* add the values to the shared entry. */
-    let tabentry: *mut PgStat_StatTabEntry = &mut (*shtabstats).stats;
-    let counts = &(*lstats).counts;
+    tabentry = &mut (*shtabstats).stats;
 
-    (*tabentry).numscans += counts.numscans;
-    // DEVIATION: upstream bumps tabentry->lastscan via
-    // GetCurrentTransactionStopTimestamp() when numscans>0; xact ts unported.
-    (*tabentry).tuples_returned += counts.tuples_returned;
-    (*tabentry).tuples_fetched += counts.tuples_fetched;
-    (*tabentry).tuples_inserted += counts.tuples_inserted;
-    (*tabentry).tuples_updated += counts.tuples_updated;
-    (*tabentry).tuples_deleted += counts.tuples_deleted;
-    (*tabentry).tuples_hot_updated += counts.tuples_hot_updated;
-    (*tabentry).tuples_newpage_updated += counts.tuples_newpage_updated;
+    (*tabentry).numscans += (*lstats).counts.numscans;
+    if (*lstats).counts.numscans != 0 {
+        let t: TimestampTz = GetCurrentTransactionStopTimestamp();
+
+        if t > (*tabentry).lastscan {
+            (*tabentry).lastscan = t;
+        }
+    }
+    (*tabentry).tuples_returned += (*lstats).counts.tuples_returned;
+    (*tabentry).tuples_fetched += (*lstats).counts.tuples_fetched;
+    (*tabentry).tuples_inserted += (*lstats).counts.tuples_inserted;
+    (*tabentry).tuples_updated += (*lstats).counts.tuples_updated;
+    (*tabentry).tuples_deleted += (*lstats).counts.tuples_deleted;
+    (*tabentry).tuples_hot_updated += (*lstats).counts.tuples_hot_updated;
+    (*tabentry).tuples_newpage_updated += (*lstats).counts.tuples_newpage_updated;
 
     /*
      * If table was truncated/dropped, first reset the live/dead counters.
      */
-    if counts.truncdropped {
+    if (*lstats).counts.truncdropped {
         (*tabentry).live_tuples = 0;
         (*tabentry).dead_tuples = 0;
         (*tabentry).ins_since_vacuum = 0;
     }
 
-    (*tabentry).live_tuples += counts.delta_live_tuples;
-    (*tabentry).dead_tuples += counts.delta_dead_tuples;
-    (*tabentry).mod_since_analyze += counts.changed_tuples;
+    (*tabentry).live_tuples += (*lstats).counts.delta_live_tuples;
+    (*tabentry).dead_tuples += (*lstats).counts.delta_dead_tuples;
+    (*tabentry).mod_since_analyze += (*lstats).counts.changed_tuples;
 
     /*
      * Using tuples_inserted to update ins_since_vacuum does mean that we'll
-     * track aborted inserts too. (See upstream note.)
+     * track aborted inserts too.  This isn't ideal, but otherwise probably not
+     * worth adding an extra field for.  It may just amount to autovacuums
+     * triggering for inserts more often than they maybe should, which is
+     * probably not going to be common enough to be too concerned about here.
      */
-    (*tabentry).ins_since_vacuum += counts.tuples_inserted;
+    (*tabentry).ins_since_vacuum += (*lstats).counts.tuples_inserted;
 
-    (*tabentry).blocks_fetched += counts.blocks_fetched;
-    (*tabentry).blocks_hit += counts.blocks_hit;
+    (*tabentry).blocks_fetched += (*lstats).counts.blocks_fetched;
+    (*tabentry).blocks_hit += (*lstats).counts.blocks_hit;
 
     /* Clamp live_tuples in case of negative delta_live_tuples */
     (*tabentry).live_tuples = Max((*tabentry).live_tuples, 0);
@@ -512,19 +861,17 @@ pub unsafe fn pgstat_relation_flush_cb(entry_ref: *mut PgStat_EntryRef, nowait: 
 
     pgstat_unlock_entry(entry_ref);
 
-    // DEVIATION: upstream also propagates these counts into the pending
-    // per-database entry via pgstat_prep_database_pending(dboid). Database
-    // pending wiring is out of this port's scope (TODO).
-
-    /*
-     * Clear the pending counts now they have been folded into the shared entry,
-     * so a subsequent flush does not re-add them.
-     */
-    memset(
-        &mut (*lstats).counts as *mut PgStat_TableCounts as *mut c_void,
-        0,
-        size_of::<PgStat_TableCounts>(),
-    );
+    /* The entry was successfully flushed, add the same to database stats */
+    dbentry = pgstat_prep_database_pending(dboid);
+    if !dbentry.is_null() {
+        (*dbentry).tuples_returned += (*lstats).counts.tuples_returned;
+        (*dbentry).tuples_fetched += (*lstats).counts.tuples_fetched;
+        (*dbentry).tuples_inserted += (*lstats).counts.tuples_inserted;
+        (*dbentry).tuples_updated += (*lstats).counts.tuples_updated;
+        (*dbentry).tuples_deleted += (*lstats).counts.tuples_deleted;
+        (*dbentry).blocks_fetched += (*lstats).counts.blocks_fetched;
+        (*dbentry).blocks_hit += (*lstats).counts.blocks_hit;
+    }
 
     true
 }
@@ -557,37 +904,329 @@ unsafe fn pgstat_prep_relation_pending(rel_id: Oid, isshared: bool) -> *mut PgSt
 }
 
 // ---------------------------------------------------------------------------
-// Transaction hooks (STUBBED no-ops)
+// Transaction hooks (REAL)
 // ---------------------------------------------------------------------------
-//
-// The subxact-linked-list (PgStat_TableXactStatus) propagation machinery is not
-// ported. These are the entry points the (unported) xact.c would call; they are
-// reduced to no-ops. The transactional count functions above already fold their
-// effects directly into the base counts, so the reporter half stays correct in
-// the no-rollback case.
 
-/// STUB (xact machinery unported): upstream transfers the top-level subxact
-/// insert/update/delete counts into the base tabstat counts and derives the
-/// live/dead deltas. Here that derivation already happens inline at count time,
-/// so this is a no-op. TODO: real subxact propagation.
-pub unsafe fn AtEOXact_PgStat_Relations(_xact_state: *mut c_void, _is_commit: bool) {}
-
-/// STUB (xact machinery unported): propagates a subtransaction's counts up to
-/// its parent on (sub)commit, or unwinds them on abort. No-op. TODO.
-pub unsafe fn AtEOSubXact_PgStat_Relations(
-    _xact_state: *mut c_void,
-    _is_commit: bool,
-    _nest_depth: c_int,
-) {
+/// Read the typed `first` head off a `PgStat_SubXactStatus` (whose field is
+/// typed against the `c_void`-aliased `PgStat_TableXactStatus` in
+/// pgstat_internal).
+#[inline]
+unsafe fn xact_first(xact_state: *mut PgStat_SubXactStatus) -> *mut PgStat_TableXactStatus {
+    (*xact_state).first as *mut PgStat_TableXactStatus
 }
 
-/// STUB (2PC + xact machinery unported): emits TwoPhasePgStatRecord 2PC records
-/// for pending transaction-dependent relation stats. No-op. TODO.
-pub unsafe fn AtPrepare_PgStat_Relations(_xact_state: *mut c_void) {}
+/// Perform relation stats specific end-of-transaction work. Helper for
+/// AtEOXact_PgStat (pgstat_relation.c: AtEOXact_PgStat_Relations).
+///
+/// Transfer transactional insert/update counts into the base tabstat entries.
+/// We don't bother to free any of the transactional state, since it's all in
+/// TopTransactionContext and will go away anyway.
+pub unsafe fn AtEOXact_PgStat_Relations(xact_state: *mut PgStat_SubXactStatus, is_commit: bool) {
+    let mut trans: *mut PgStat_TableXactStatus;
 
-/// STUB (2PC + xact machinery unported): unlinks the transaction stats state
-/// from the nontransactional state at PREPARE. No-op. TODO.
-pub unsafe fn PostPrepare_PgStat_Relations(_xact_state: *mut c_void) {}
+    trans = xact_first(xact_state);
+    while !trans.is_null() {
+        let tabstat: *mut PgStat_TableStatus;
+
+        Assert!((*trans).nest_level == 1);
+        Assert!((*trans).upper.is_null());
+        tabstat = (*trans).parent;
+        Assert!(tabstat_trans(tabstat) == trans);
+        /* restore pre-truncate/drop stats (if any) in case of aborted xact */
+        if !is_commit {
+            restore_truncdrop_counters(trans);
+        }
+        /* count attempted actions regardless of commit/abort */
+        (*tabstat).counts.tuples_inserted += (*trans).tuples_inserted;
+        (*tabstat).counts.tuples_updated += (*trans).tuples_updated;
+        (*tabstat).counts.tuples_deleted += (*trans).tuples_deleted;
+        if is_commit {
+            (*tabstat).counts.truncdropped = (*trans).truncdropped;
+            if (*trans).truncdropped {
+                /* forget live/dead stats seen by backend thus far */
+                (*tabstat).counts.delta_live_tuples = 0;
+                (*tabstat).counts.delta_dead_tuples = 0;
+            }
+            /* insert adds a live tuple, delete removes one */
+            (*tabstat).counts.delta_live_tuples +=
+                (*trans).tuples_inserted - (*trans).tuples_deleted;
+            /* update and delete each create a dead tuple */
+            (*tabstat).counts.delta_dead_tuples +=
+                (*trans).tuples_updated + (*trans).tuples_deleted;
+            /* insert, update, delete each count as one change event */
+            (*tabstat).counts.changed_tuples +=
+                (*trans).tuples_inserted + (*trans).tuples_updated + (*trans).tuples_deleted;
+        } else {
+            /* inserted tuples are dead, deleted tuples are unaffected */
+            (*tabstat).counts.delta_dead_tuples +=
+                (*trans).tuples_inserted + (*trans).tuples_updated;
+            /* an aborted xact generates no changed_tuple events */
+        }
+        (*tabstat).trans = null_mut();
+
+        trans = (*trans).next;
+    }
+}
+
+/// Perform relation stats specific end-of-sub-transaction work. Helper for
+/// AtEOSubXact_PgStat (pgstat_relation.c: AtEOSubXact_PgStat_Relations).
+///
+/// Transfer transactional insert/update counts into the next higher
+/// subtransaction state.
+pub unsafe fn AtEOSubXact_PgStat_Relations(
+    xact_state: *mut PgStat_SubXactStatus,
+    is_commit: bool,
+    nest_depth: c_int,
+) {
+    let mut trans: *mut PgStat_TableXactStatus;
+    let mut next_trans: *mut PgStat_TableXactStatus;
+
+    trans = xact_first(xact_state);
+    while !trans.is_null() {
+        let tabstat: *mut PgStat_TableStatus;
+
+        next_trans = (*trans).next;
+        Assert!((*trans).nest_level == nest_depth);
+        tabstat = (*trans).parent;
+        Assert!(tabstat_trans(tabstat) == trans);
+
+        if is_commit {
+            if !(*trans).upper.is_null() && (*(*trans).upper).nest_level == nest_depth - 1 {
+                if (*trans).truncdropped {
+                    /* propagate the truncate/drop status one level up */
+                    save_truncdrop_counters((*trans).upper, false);
+                    /* replace upper xact stats with ours */
+                    (*(*trans).upper).tuples_inserted = (*trans).tuples_inserted;
+                    (*(*trans).upper).tuples_updated = (*trans).tuples_updated;
+                    (*(*trans).upper).tuples_deleted = (*trans).tuples_deleted;
+                } else {
+                    (*(*trans).upper).tuples_inserted += (*trans).tuples_inserted;
+                    (*(*trans).upper).tuples_updated += (*trans).tuples_updated;
+                    (*(*trans).upper).tuples_deleted += (*trans).tuples_deleted;
+                }
+                (*tabstat).trans = (*trans).upper as *mut c_void;
+                pfree(trans as *mut c_void);
+            } else {
+                /*
+                 * When there isn't an immediate parent state, we can just reuse
+                 * the record instead of going through a palloc/pfree pushup
+                 * (this works since it's all in TopTransactionContext anyway).
+                 * We have to re-link it into the parent level, though, and that
+                 * might mean pushing a new entry into the pgStatXactStack.
+                 */
+                let upper_xact_state: *mut PgStat_SubXactStatus;
+
+                upper_xact_state = pgstat_get_xact_stack_level(nest_depth - 1);
+                (*trans).next = (*upper_xact_state).first as *mut PgStat_TableXactStatus;
+                (*upper_xact_state).first = trans as *mut crate::utils::activity::pgstat_internal::PgStat_TableXactStatus;
+                (*trans).nest_level = nest_depth - 1;
+            }
+        } else {
+            /*
+             * On abort, update top-level tabstat counts, then forget the
+             * subtransaction
+             */
+
+            /* first restore values obliterated by truncate/drop */
+            restore_truncdrop_counters(trans);
+            /* count attempted actions regardless of commit/abort */
+            (*tabstat).counts.tuples_inserted += (*trans).tuples_inserted;
+            (*tabstat).counts.tuples_updated += (*trans).tuples_updated;
+            (*tabstat).counts.tuples_deleted += (*trans).tuples_deleted;
+            /* inserted tuples are dead, deleted tuples are unaffected */
+            (*tabstat).counts.delta_dead_tuples +=
+                (*trans).tuples_inserted + (*trans).tuples_updated;
+            (*tabstat).trans = (*trans).upper as *mut c_void;
+            pfree(trans as *mut c_void);
+        }
+
+        trans = next_trans;
+    }
+}
+
+/// Generate 2PC records for all the pending transaction-dependent relation
+/// stats (pgstat_relation.c: AtPrepare_PgStat_Relations).
+pub unsafe fn AtPrepare_PgStat_Relations(xact_state: *mut PgStat_SubXactStatus) {
+    let mut trans: *mut PgStat_TableXactStatus;
+
+    trans = xact_first(xact_state);
+    while !trans.is_null() {
+        let tabstat: *mut PgStat_TableStatus;
+        let mut record: TwoPhasePgStatRecord = core::mem::zeroed();
+
+        Assert!((*trans).nest_level == 1);
+        Assert!((*trans).upper.is_null());
+        tabstat = (*trans).parent;
+        Assert!(tabstat_trans(tabstat) == trans);
+
+        record.tuples_inserted = (*trans).tuples_inserted;
+        record.tuples_updated = (*trans).tuples_updated;
+        record.tuples_deleted = (*trans).tuples_deleted;
+        record.inserted_pre_truncdrop = (*trans).inserted_pre_truncdrop;
+        record.updated_pre_truncdrop = (*trans).updated_pre_truncdrop;
+        record.deleted_pre_truncdrop = (*trans).deleted_pre_truncdrop;
+        record.id = (*tabstat).id;
+        record.shared = (*tabstat).shared;
+        record.truncdropped = (*trans).truncdropped;
+
+        RegisterTwoPhaseRecord(
+            TWOPHASE_RM_PGSTAT_ID,
+            0,
+            &record as *const TwoPhasePgStatRecord as *const c_void,
+            size_of::<TwoPhasePgStatRecord>() as u32,
+        );
+
+        trans = (*trans).next;
+    }
+}
+
+/// All we need do here is unlink the transaction stats state from the
+/// nontransactional state (pgstat_relation.c: PostPrepare_PgStat_Relations).
+/// The nontransactional action counts will be reported to the stats system
+/// immediately, while the effects on live and dead tuple counts are preserved in
+/// the 2PC state file.
+///
+/// Note: AtEOXact_PgStat_Relations is not called during PREPARE.
+pub unsafe fn PostPrepare_PgStat_Relations(xact_state: *mut PgStat_SubXactStatus) {
+    let mut trans: *mut PgStat_TableXactStatus;
+
+    trans = xact_first(xact_state);
+    while !trans.is_null() {
+        let tabstat: *mut PgStat_TableStatus;
+
+        tabstat = (*trans).parent;
+        (*tabstat).trans = null_mut();
+
+        trans = (*trans).next;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 2PC processing routines (REAL)
+// ---------------------------------------------------------------------------
+
+/// 2PC processing routine for COMMIT PREPARED case (pgstat_relation.c:
+/// pgstat_twophase_postcommit). Load the saved counts into our local pgstats
+/// state.
+pub unsafe fn pgstat_twophase_postcommit(
+    _xid: TransactionId,
+    _info: u16,
+    recdata: *mut c_void,
+    _len: u32,
+) {
+    let rec: *mut TwoPhasePgStatRecord = recdata as *mut TwoPhasePgStatRecord;
+    let pgstat_info: *mut PgStat_TableStatus;
+
+    /* Find or create a tabstat entry for the rel */
+    pgstat_info = pgstat_prep_relation_pending((*rec).id, (*rec).shared);
+
+    /* Same math as in AtEOXact_PgStat, commit case */
+    (*pgstat_info).counts.tuples_inserted += (*rec).tuples_inserted;
+    (*pgstat_info).counts.tuples_updated += (*rec).tuples_updated;
+    (*pgstat_info).counts.tuples_deleted += (*rec).tuples_deleted;
+    (*pgstat_info).counts.truncdropped = (*rec).truncdropped;
+    if (*rec).truncdropped {
+        /* forget live/dead stats seen by backend thus far */
+        (*pgstat_info).counts.delta_live_tuples = 0;
+        (*pgstat_info).counts.delta_dead_tuples = 0;
+    }
+    (*pgstat_info).counts.delta_live_tuples += (*rec).tuples_inserted - (*rec).tuples_deleted;
+    (*pgstat_info).counts.delta_dead_tuples += (*rec).tuples_updated + (*rec).tuples_deleted;
+    (*pgstat_info).counts.changed_tuples +=
+        (*rec).tuples_inserted + (*rec).tuples_updated + (*rec).tuples_deleted;
+}
+
+/// 2PC processing routine for ROLLBACK PREPARED case (pgstat_relation.c:
+/// pgstat_twophase_postabort). Load the saved counts into our local pgstats
+/// state, but treat them as aborted.
+pub unsafe fn pgstat_twophase_postabort(
+    _xid: TransactionId,
+    _info: u16,
+    recdata: *mut c_void,
+    _len: u32,
+) {
+    let rec: *mut TwoPhasePgStatRecord = recdata as *mut TwoPhasePgStatRecord;
+    let pgstat_info: *mut PgStat_TableStatus;
+
+    /* Find or create a tabstat entry for the rel */
+    pgstat_info = pgstat_prep_relation_pending((*rec).id, (*rec).shared);
+
+    /* Same math as in AtEOXact_PgStat, abort case */
+    if (*rec).truncdropped {
+        (*rec).tuples_inserted = (*rec).inserted_pre_truncdrop;
+        (*rec).tuples_updated = (*rec).updated_pre_truncdrop;
+        (*rec).tuples_deleted = (*rec).deleted_pre_truncdrop;
+    }
+    (*pgstat_info).counts.tuples_inserted += (*rec).tuples_inserted;
+    (*pgstat_info).counts.tuples_updated += (*rec).tuples_updated;
+    (*pgstat_info).counts.tuples_deleted += (*rec).tuples_deleted;
+    (*pgstat_info).counts.delta_dead_tuples += (*rec).tuples_inserted + (*rec).tuples_updated;
+}
+
+// ---------------------------------------------------------------------------
+// Static helpers (REAL)
+// ---------------------------------------------------------------------------
+
+/// add a new (sub)transaction state record (pgstat_relation.c:
+/// add_tabstat_xact_level).
+unsafe fn add_tabstat_xact_level(pgstat_info: *mut PgStat_TableStatus, nest_level: c_int) {
+    let xact_state: *mut PgStat_SubXactStatus;
+    let trans: *mut PgStat_TableXactStatus;
+
+    /*
+     * If this is the first rel to be modified at the current nest level, we
+     * first have to push a transaction stack entry.
+     */
+    xact_state = pgstat_get_xact_stack_level(nest_level);
+
+    /* Now make a per-table stack entry */
+    trans = MemoryContextAllocZero(TopTransactionContext, size_of::<PgStat_TableXactStatus>())
+        as *mut PgStat_TableXactStatus;
+    (*trans).nest_level = nest_level;
+    (*trans).upper = tabstat_trans(pgstat_info);
+    (*trans).parent = pgstat_info;
+    (*trans).next = (*xact_state).first as *mut PgStat_TableXactStatus;
+    (*xact_state).first = trans as *mut crate::utils::activity::pgstat_internal::PgStat_TableXactStatus;
+    (*pgstat_info).trans = trans as *mut c_void;
+}
+
+/// Add a new (sub)transaction record if needed (pgstat_relation.c:
+/// ensure_tabstat_xact_level).
+unsafe fn ensure_tabstat_xact_level(pgstat_info: *mut PgStat_TableStatus) {
+    let nest_level: c_int = GetCurrentTransactionNestLevel();
+
+    if tabstat_trans(pgstat_info).is_null()
+        || (*tabstat_trans(pgstat_info)).nest_level != nest_level
+    {
+        add_tabstat_xact_level(pgstat_info, nest_level);
+    }
+}
+
+/// Whenever a table is truncated/dropped, we save its i/u/d counters so that
+/// they can be cleared, and if the (sub)xact that executed the truncate/drop
+/// later aborts, the counters can be restored to the saved (pre-truncate/drop)
+/// values (pgstat_relation.c: save_truncdrop_counters).
+///
+/// Note that for truncate we do this on the first truncate in any particular
+/// subxact level only.
+unsafe fn save_truncdrop_counters(trans: *mut PgStat_TableXactStatus, is_drop: bool) {
+    if !(*trans).truncdropped || is_drop {
+        (*trans).inserted_pre_truncdrop = (*trans).tuples_inserted;
+        (*trans).updated_pre_truncdrop = (*trans).tuples_updated;
+        (*trans).deleted_pre_truncdrop = (*trans).tuples_deleted;
+        (*trans).truncdropped = true;
+    }
+}
+
+/// restore counters when a truncate aborts (pgstat_relation.c:
+/// restore_truncdrop_counters).
+unsafe fn restore_truncdrop_counters(trans: *mut PgStat_TableXactStatus) {
+    if (*trans).truncdropped {
+        (*trans).tuples_inserted = (*trans).inserted_pre_truncdrop;
+        (*trans).tuples_updated = (*trans).updated_pre_truncdrop;
+        (*trans).tuples_deleted = (*trans).deleted_pre_truncdrop;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Tests

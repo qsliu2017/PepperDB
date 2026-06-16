@@ -52,26 +52,52 @@ use crate::prelude::*;
 use crate::utils::fmgr::*;
 use crate::varatt::*;
 use crate::{
-    appendStringInfo, appendStringInfoCharMacro, PG_GETARG_DATUM, PG_GETARG_POINTER,
-    PG_GETARG_TEXT_PP, PG_RETURN_BYTEA_P, PG_RETURN_CSTRING, PG_RETURN_NULL, PG_RETURN_TEXT_P,
+    appendStringInfo, appendStringInfoCharMacro, ereport, errmsg, DatumGetTextPP, PG_ARGISNULL,
+    PG_GETARG_DATUM, PG_GETARG_POINTER, PG_GETARG_TEXT_PP, PG_RETURN_BYTEA_P, PG_RETURN_CSTRING,
+    PG_RETURN_DATUM, PG_RETURN_NULL, PG_RETURN_POINTER, PG_RETURN_TEXT_P,
 };
-use crate::c::text;
-use crate::postgres::{DatumGetPointer, PointerGetDatum};
+use crate::catalog::pg_type_d::{
+    DATEOID, TEXTOID, TIMEOID, TIMESTAMPOID, TIMESTAMPTZOID, TIMETZOID,
+};
+use crate::c::{int16, text};
+use crate::postgres::{DatumGetBool, DatumGetPointer, DatumGetUInt32, PointerGetDatum};
 use crate::postgres_ext::Oid;
 use crate::lib::stringinfo::{
-    appendBinaryStringInfo, appendStringInfoString, enlargeStringInfo, StringInfo, StringInfoData,
+    appendBinaryStringInfo, appendStringInfoChar, appendStringInfoString, enlargeStringInfo,
+    initStringInfo, makeStringInfo, StringInfo, StringInfoData,
 };
 use crate::libpq::pqformat::{pq_begintypsend, pq_endtypsend, pq_getmsgtext, pq_sendtext};
 use crate::mb::mbutils::GetDatabaseEncoding;
 use crate::utils::adt::varlena::{
     cstring_to_text, cstring_to_text_with_len, TextDatumGetCString,
 };
-use core::ffi::{c_char, c_int, c_void};
+use core::ffi::{c_char, c_int, c_long, c_void};
 
 // libc bindings (string.h, via postgres.h).  palloc/pfree/pstrdup are prelude.
 extern "C" {
     fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
+    fn memset(s: *mut c_void, c: c_int, n: usize) -> *mut c_void;
     fn strlen(s: *const c_char) -> usize;
+    fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_int;
+}
+
+/* PG_GETARG_BOOL(n) (fmgr.h). */
+macro_rules! PG_GETARG_BOOL {
+    ($fcinfo:expr, $n:expr) => {
+        DatumGetBool(PG_GETARG_DATUM!($fcinfo, $n))
+    };
+}
+
+/* PG_GETARG_ARRAYTYPE_P(n) (array.h). */
+macro_rules! PG_GETARG_ARRAYTYPE_P {
+    ($fcinfo:expr, $n:expr) => {
+        DatumGetPointer(PG_GETARG_DATUM!($fcinfo, $n)) as *mut ArrayType
+    };
+}
+
+/* CStringGetTextDatum(s) == DirectFunctionCall1(textin, CStringGetDatum(s)). */
+unsafe fn CStringGetTextDatum(s: *const c_char) -> Datum {
+    PointerGetDatum(cstring_to_text(s) as *const c_void)
 }
 
 /* errcodes.h classification (errcode() shim ignores the value). */
@@ -344,6 +370,406 @@ pub enum JsonTypeCategory {
     JSONTYPE_CAST,
     JSONTYPE_OTHER,
 }
+use JsonTypeCategory::*;
+
+// ===========================================================================
+// Catalog / fmgr / array / composite / datetime dependencies that live in
+// not-yet-ported .c files.  Declared here with TODO(pg-port) bodies (mirrors the
+// sibling jsonb.rs), so json.c's value-conversion paths translate 1:1 and the
+// file compiles.  Replace with real imports as those modules land.
+// ===========================================================================
+
+/* catalog/pg_proc.h: PROVOLATILE_IMMUTABLE. */
+const PROVOLATILE_IMMUTABLE: c_char = b'i' as c_char;
+
+/*
+ * utils/fmgroids.h: built-in output-function OIDs special-cased by
+ * datum_to_json_internal.  F_TEXTOUT lives in bootstrap; F_VARCHAROUT/F_BPCHAROUT
+ * are not yet exported, so they are declared here as TODO(pg-port) constants with
+ * their real catalog OIDs.
+ */
+const F_TEXTOUT: Oid = 47;
+const F_VARCHAROUT: Oid = 1046;
+const F_BPCHAROUT: Oid = 1045;
+
+/* fmgr.h: output-function call wrappers used by the value-conversion paths. */
+unsafe fn OidFunctionCall1(_functionId: Oid, _arg1: Datum) -> Datum {
+    unimplemented!("json: OidFunctionCall1 (utils/fmgr/fmgr.c) not yet translated")
+}
+
+/* utils/cache/lsyscache.c: function volatility, type physical properties. */
+unsafe fn func_volatile(_funcid: Oid) -> c_char {
+    unimplemented!("json: func_volatile (utils/cache/lsyscache.c) not yet translated")
+}
+unsafe fn get_typlenbyvalalign(
+    _typid: Oid,
+    _typlen: *mut int16,
+    _typbyval: *mut bool,
+    _typalign: *mut c_char,
+) {
+    unimplemented!("json: get_typlenbyvalalign (utils/cache/lsyscache.c) not yet translated")
+}
+
+/* funcapi.h / executor: aggregate context + variadic argument extraction. */
+unsafe fn AggCheckCallContext(
+    _fcinfo: FunctionCallInfo,
+    _aggcontext: *mut MemoryContext,
+) -> bool {
+    unimplemented!("json: AggCheckCallContext (executor/nodeAgg.c) not yet translated")
+}
+unsafe fn extract_variadic_args(
+    _fcinfo: FunctionCallInfo,
+    _variadic_start: c_int,
+    _convert_unknown: bool,
+    _args: *mut *mut Datum,
+    _types: *mut *mut Oid,
+    _nulls: *mut *mut bool,
+) -> c_int {
+    unimplemented!("json: extract_variadic_args (utils/fmgr/funcapi.c) not yet translated")
+}
+
+/* utils/array.h, arrayfuncs.c: array deconstruction. */
+#[repr(C)]
+struct ArrayType {
+    _opaque: [u8; 0],
+}
+unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType {
+    unimplemented!("json: DatumGetArrayTypeP (utils/adt/arrayfuncs.c) not yet translated")
+}
+unsafe fn ARR_ELEMTYPE(_a: *mut ArrayType) -> Oid {
+    unimplemented!("json: ARR_ELEMTYPE (utils/array.h) not yet translated")
+}
+unsafe fn ARR_NDIM(_a: *mut ArrayType) -> c_int {
+    unimplemented!("json: ARR_NDIM (utils/array.h) not yet translated")
+}
+unsafe fn ARR_DIMS(_a: *mut ArrayType) -> *mut c_int {
+    unimplemented!("json: ARR_DIMS (utils/array.h) not yet translated")
+}
+unsafe fn ArrayGetNItems(_ndim: c_int, _dims: *const c_int) -> c_int {
+    unimplemented!("json: ArrayGetNItems (utils/adt/arrayutils.c) not yet translated")
+}
+unsafe fn deconstruct_array(
+    _array: *mut ArrayType,
+    _elmtype: Oid,
+    _elmlen: int16,
+    _elmbyval: bool,
+    _elmalign: c_char,
+    _elemsp: *mut *mut Datum,
+    _nullsp: *mut *mut bool,
+    _nelemsp: *mut c_int,
+) {
+    unimplemented!("json: deconstruct_array (utils/adt/arrayfuncs.c) not yet translated")
+}
+unsafe fn deconstruct_array_builtin(
+    _array: *mut ArrayType,
+    _elmtype: Oid,
+    _elemsp: *mut *mut Datum,
+    _nullsp: *mut *mut bool,
+    _nelemsp: *mut c_int,
+) {
+    unimplemented!("json: deconstruct_array_builtin (utils/adt/arrayfuncs.c) not yet translated")
+}
+
+/* access/htup_details.h + typcache.h: composite (record) deconstruction. */
+type HeapTupleHeader = *mut c_void;
+#[repr(C)]
+struct HeapTupleData {
+    t_len: u32,
+    t_self: [u8; 6],
+    t_tableOid: Oid,
+    t_data: HeapTupleHeader,
+}
+type HeapTuple = *mut HeapTupleData;
+#[repr(C)]
+struct TupleDescData {
+    natts: c_int,
+    _opaque: [u8; 0],
+}
+type TupleDesc = *mut TupleDescData;
+type Form_pg_attribute = *mut FormData_pg_attribute;
+#[repr(C)]
+struct FormData_pg_attribute {
+    _opaque: [u8; 0],
+}
+
+unsafe fn DatumGetHeapTupleHeader(_d: Datum) -> HeapTupleHeader {
+    unimplemented!("json: DatumGetHeapTupleHeader (fmgr.h) not yet translated")
+}
+unsafe fn HeapTupleHeaderGetTypeId(_td: HeapTupleHeader) -> Oid {
+    unimplemented!("json: HeapTupleHeaderGetTypeId (access/htup_details.h) not yet translated")
+}
+unsafe fn HeapTupleHeaderGetTypMod(_td: HeapTupleHeader) -> i32 {
+    unimplemented!("json: HeapTupleHeaderGetTypMod (access/htup_details.h) not yet translated")
+}
+unsafe fn HeapTupleHeaderGetDatumLength(_td: HeapTupleHeader) -> u32 {
+    unimplemented!("json: HeapTupleHeaderGetDatumLength (access/htup_details.h) not yet translated")
+}
+unsafe fn lookup_rowtype_tupdesc(_type_id: Oid, _typmod: i32) -> TupleDesc {
+    unimplemented!("json: lookup_rowtype_tupdesc (utils/cache/typcache.c) not yet translated")
+}
+unsafe fn ReleaseTupleDesc(_tupdesc: TupleDesc) {
+    unimplemented!("json: ReleaseTupleDesc (utils/cache/typcache.c) not yet translated")
+}
+unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> Form_pg_attribute {
+    unimplemented!("json: TupleDescAttr (access/tupdesc.h) not yet translated")
+}
+unsafe fn att_isdropped(_att: Form_pg_attribute) -> bool {
+    unimplemented!("json: attisdropped (access/tupdesc.h) not yet translated")
+}
+unsafe fn att_name(_att: Form_pg_attribute) -> *mut c_char {
+    unimplemented!("json: NameStr(att->attname) (access/tupdesc.h) not yet translated")
+}
+unsafe fn att_typid(_att: Form_pg_attribute) -> Oid {
+    unimplemented!("json: att->atttypid (access/tupdesc.h) not yet translated")
+}
+unsafe fn heap_getattr(
+    _tup: HeapTuple,
+    _attnum: c_int,
+    _tupdesc: TupleDesc,
+    _isnull: *mut bool,
+) -> Datum {
+    unimplemented!("json: heap_getattr (access/htup_details.h) not yet translated")
+}
+
+/* utils/datetime.h: MAXDATELEN for stack date/time buffers. */
+const MAXDATELEN: usize = 128;
+
+// ---------------------------------------------------------------------------
+// utils/date.h + utils/datetime.h + pgtime.h: datetime encoding primitives used
+// by JsonEncodeDateTime.  These live across several not-yet-stable modules
+// (date.rs/datetime.rs/timestamp.rs/xml.rs/pgtime.rs) and several are not yet
+// `pub`-exported, so they are declared here as TODO(pg-port) shims to keep the
+// faithful structure of JsonEncodeDateTime while the file compiles.
+// ---------------------------------------------------------------------------
+type DateADT = i32;
+type TimeADT = i64;
+type Timestamp = i64;
+type TimestampTz = i64;
+type fsec_t = i32;
+const POSTGRES_EPOCH_JDATE: DateADT = 2451545; /* == date2j(2000, 1, 1) */
+const USE_XSD_DATES: c_int = 3;
+const USECS_PER_SEC: Timestamp = 1000000;
+
+#[repr(C)]
+struct TimeTzADT {
+    _opaque: [u8; 0],
+}
+
+/* pgtime.h: broken-down time.  Only the fields json.c touches are mirrored. */
+#[allow(non_snake_case)]
+#[repr(C)]
+struct pg_tm {
+    tm_sec: c_int,
+    tm_min: c_int,
+    tm_hour: c_int,
+    tm_mday: c_int,
+    tm_mon: c_int,
+    tm_year: c_int,
+    tm_wday: c_int,
+    tm_yday: c_int,
+    tm_isdst: c_int,
+    tm_gmtoff: i64,
+    tm_zone: *const c_char,
+}
+
+unsafe fn DatumGetDateADT(_x: Datum) -> DateADT {
+    unimplemented!("json: DatumGetDateADT (utils/date.h) not yet translated")
+}
+unsafe fn DatumGetTimeADT(_x: Datum) -> TimeADT {
+    unimplemented!("json: DatumGetTimeADT (utils/date.h) not yet translated")
+}
+unsafe fn DatumGetTimeTzADTP(_x: Datum) -> *mut TimeTzADT {
+    unimplemented!("json: DatumGetTimeTzADTP (utils/date.h) not yet translated")
+}
+unsafe fn DatumGetTimestamp(_x: Datum) -> Timestamp {
+    unimplemented!("json: DatumGetTimestamp (utils/timestamp.h) not yet translated")
+}
+unsafe fn DatumGetTimestampTz(_x: Datum) -> TimestampTz {
+    unimplemented!("json: DatumGetTimestampTz (utils/timestamp.h) not yet translated")
+}
+unsafe fn DATE_NOT_FINITE(_d: DateADT) -> bool {
+    unimplemented!("json: DATE_NOT_FINITE (utils/date.h) not yet translated")
+}
+unsafe fn TIMESTAMP_NOT_FINITE(_t: Timestamp) -> bool {
+    unimplemented!("json: TIMESTAMP_NOT_FINITE (utils/timestamp.h) not yet translated")
+}
+unsafe fn EncodeSpecialDate(_dt: DateADT, _str: *mut c_char) {
+    unimplemented!("json: EncodeSpecialDate (utils/adt/date.c) not yet translated")
+}
+unsafe fn EncodeSpecialTimestamp(_dt: Timestamp, _str: *mut c_char) {
+    unimplemented!("json: EncodeSpecialTimestamp (utils/adt/timestamp.c) not yet translated")
+}
+unsafe fn j2date(_jd: c_int, _year: *mut c_int, _month: *mut c_int, _day: *mut c_int) {
+    unimplemented!("json: j2date (utils/adt/datetime.c) not yet translated")
+}
+unsafe fn EncodeDateOnly(_tm: *mut pg_tm, _style: c_int, _str: *mut c_char) {
+    unimplemented!("json: EncodeDateOnly (utils/adt/datetime.c) not yet translated")
+}
+unsafe fn EncodeTimeOnly(
+    _tm: *mut pg_tm,
+    _fsec: fsec_t,
+    _print_tz: bool,
+    _tz: c_int,
+    _style: c_int,
+    _str: *mut c_char,
+) {
+    unimplemented!("json: EncodeTimeOnly (utils/adt/datetime.c) not yet translated")
+}
+unsafe fn EncodeDateTime(
+    _tm: *mut pg_tm,
+    _fsec: fsec_t,
+    _print_tz: bool,
+    _tz: c_int,
+    _tzn: *const c_char,
+    _style: c_int,
+    _str: *mut c_char,
+) {
+    unimplemented!("json: EncodeDateTime (utils/adt/datetime.c) not yet translated")
+}
+unsafe fn time2tm(_time: TimeADT, _tm: *mut pg_tm, _fsec: *mut fsec_t) -> c_int {
+    unimplemented!("json: time2tm (utils/adt/date.c) not yet translated")
+}
+unsafe fn timetz2tm(
+    _time: *mut TimeTzADT,
+    _tm: *mut pg_tm,
+    _fsec: *mut fsec_t,
+    _tzp: *mut c_int,
+) -> c_int {
+    unimplemented!("json: timetz2tm (utils/adt/date.c) not yet translated")
+}
+unsafe fn timestamp2tm(
+    _dt: Timestamp,
+    _tzp: *mut c_int,
+    _tm: *mut pg_tm,
+    _fsec: *mut fsec_t,
+    _tzn: *mut *const c_char,
+    _attimezone: *mut c_void,
+) -> c_int {
+    unimplemented!("json: timestamp2tm (utils/adt/timestamp.c) not yet translated")
+}
+
+/* MemoryContextStrdup (utils/mmgr/mcxt.c). */
+unsafe fn MemoryContextStrdup(_context: MemoryContext, _string: *const c_char) -> *mut c_char {
+    unimplemented!("json: MemoryContextStrdup (utils/mmgr/mcxt.c) not yet translated")
+}
+
+// ===========================================================================
+// Local state structs (json.c file-scope).
+// ===========================================================================
+
+/* hash table for key names (HTAB). */
+type JsonUniqueCheckState = *mut c_void; // TODO(pg-port): utils/hsearch.h HTAB
+
+/* Context struct for key uniqueness check during JSON building */
+#[repr(C)]
+struct JsonUniqueBuilderState {
+    check: JsonUniqueCheckState, /* unique check */
+    skipped_keys: StringInfoData, /* skipped keys with NULL values */
+    mcxt: MemoryContext,         /* context for saving skipped keys */
+}
+
+/* State struct for JSON aggregation */
+#[repr(C)]
+struct JsonAggState {
+    str: StringInfo,
+    key_category: JsonTypeCategory,
+    key_output_func: Oid,
+    val_category: JsonTypeCategory,
+    val_output_func: Oid,
+    unique_check: JsonUniqueBuilderState,
+}
+
+// ===========================================================================
+// Support for fast key uniqueness checking.
+//
+// We maintain a hash table of used keys in JSON objects for fast detection of
+// duplicates.  The dynahash layer (utils/hsearch.h) and common/hashfn.h are not
+// yet ported, so hash_create/hash_search/hash_bytes* are declared as local
+// TODO(pg-port) shims; the json_unique_* logic is translated 1:1.
+// ===========================================================================
+
+/* Hash entry for JsonUniqueCheckState */
+#[repr(C)]
+struct JsonUniqueHashEntry {
+    key: *const c_char,
+    key_len: c_int,
+    object_id: c_int,
+}
+
+/* utils/hsearch.h: dynahash control struct + actions (only what we use). */
+#[allow(non_snake_case)]
+#[repr(C)]
+struct HASHCTL {
+    keysize: Size,
+    entrysize: Size,
+    hcxt: MemoryContext,
+    hash: HashValueFunc,
+    r#match: HashCompareFunc,
+}
+type HashValueFunc = unsafe fn(key: *const c_void, keysize: Size) -> u32;
+type HashCompareFunc = unsafe fn(key1: *const c_void, key2: *const c_void, keysize: Size) -> c_int;
+
+const HASH_ELEM: c_int = 0x0008;
+const HASH_CONTEXT: c_int = 0x0040;
+const HASH_FUNCTION: c_int = 0x0010;
+const HASH_COMPARE: c_int = 0x0400;
+const HASH_ENTER: c_int = 1; /* HASHACTION */
+
+unsafe fn hash_create(
+    _tabname: *const c_char,
+    _nelem: c_long,
+    _info: *mut HASHCTL,
+    _flags: c_int,
+) -> JsonUniqueCheckState {
+    unimplemented!("json: hash_create (utils/hash/dynahash.c) not yet translated")
+}
+unsafe fn hash_search(
+    _hashp: JsonUniqueCheckState,
+    _key: *const c_void,
+    _action: c_int,
+    _foundptr: *mut bool,
+) -> *mut c_void {
+    unimplemented!("json: hash_search (utils/hash/dynahash.c) not yet translated")
+}
+unsafe fn hash_bytes(_k: *const u8, _keylen: c_int) -> u32 {
+    unimplemented!("json: hash_bytes (common/hashfn.c) not yet translated")
+}
+unsafe fn hash_bytes_uint32(_k: u32) -> u32 {
+    unimplemented!("json: hash_bytes_uint32 (common/hashfn.c) not yet translated")
+}
+
+/* Functions implementing hash table for key uniqueness check */
+unsafe fn json_unique_hash(key: *const c_void, _keysize: Size) -> u32 {
+    let entry = key as *const JsonUniqueHashEntry;
+    let mut hash: u32 = hash_bytes_uint32((*entry).object_id as u32);
+
+    hash ^= hash_bytes((*entry).key as *const u8, (*entry).key_len);
+
+    DatumGetUInt32(hash as Datum)
+}
+
+unsafe fn json_unique_hash_match(key1: *const c_void, key2: *const c_void, _keysize: Size) -> c_int {
+    let entry1 = key1 as *const JsonUniqueHashEntry;
+    let entry2 = key2 as *const JsonUniqueHashEntry;
+
+    if (*entry1).object_id != (*entry2).object_id {
+        return if (*entry1).object_id > (*entry2).object_id {
+            1
+        } else {
+            -1
+        };
+    }
+
+    if (*entry1).key_len != (*entry2).key_len {
+        return if (*entry1).key_len > (*entry2).key_len {
+            1
+        } else {
+            -1
+        };
+    }
+
+    strncmp((*entry1).key, (*entry2).key, (*entry1).key_len as usize)
+}
 
 // ===========================================================================
 // Input.
@@ -428,62 +854,507 @@ pub unsafe fn json_recv(fcinfo: FunctionCallInfo) -> Datum {
  * TODO(pg-port): needs OidOutputFunctionCall / JsonEncodeDateTime /
  * composite_to_json / array_to_json_internal / escape_json_text dispatch.
  */
-#[allow(dead_code)]
 unsafe fn datum_to_json_internal(
-    _val: Datum,
-    _is_null: bool,
-    _result: StringInfo,
-    _tcategory: JsonTypeCategory,
-    _outfuncoid: Oid,
-    _key_scalar: bool,
+    val: Datum,
+    is_null: bool,
+    result: StringInfo,
+    tcategory: JsonTypeCategory,
+    outfuncoid: Oid,
+    key_scalar: bool,
 ) {
+    let outputstr: *mut c_char;
+    let jsontext: *mut text;
+
     check_stack_depth();
-    unimplemented!("datum_to_json_internal: catalog output funcs / datetime not yet translated")
+
+    /* callers are expected to ensure that null keys are not passed in */
+    Assert!(!(key_scalar && is_null));
+
+    if is_null {
+        appendBinaryStringInfo(result, c"null".as_ptr() as *const c_void, strlen(c"null".as_ptr()) as c_int);
+        return;
+    }
+
+    if key_scalar
+        && (tcategory == JSONTYPE_ARRAY
+            || tcategory == JSONTYPE_COMPOSITE
+            || tcategory == JSONTYPE_JSON
+            || tcategory == JSONTYPE_CAST)
+    {
+        let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+        ereport!(
+            ERROR,
+            errmsg!("key value must be scalar, not array, composite, or json")
+        );
+    }
+
+    match tcategory {
+        JSONTYPE_ARRAY => {
+            array_to_json_internal(val, result, false);
+        }
+        JSONTYPE_COMPOSITE => {
+            composite_to_json(val, result, false);
+        }
+        JSONTYPE_BOOL => {
+            if key_scalar {
+                appendStringInfoChar(result, b'"' as c_char);
+            }
+            if DatumGetBool(val) {
+                appendBinaryStringInfo(result, c"true".as_ptr() as *const c_void, strlen(c"true".as_ptr()) as c_int);
+            } else {
+                appendBinaryStringInfo(
+                    result,
+                    c"false".as_ptr() as *const c_void,
+                    strlen(c"false".as_ptr()) as c_int,
+                );
+            }
+            if key_scalar {
+                appendStringInfoChar(result, b'"' as c_char);
+            }
+        }
+        JSONTYPE_NUMERIC => {
+            let outputstr = OidOutputFunctionCall(outfuncoid, val);
+
+            /*
+             * Don't quote a non-key if it's a valid JSON number (i.e., not
+             * "Infinity", "-Infinity", or "NaN").  Since we know this is a
+             * numeric data type's output, we simplify and open-code the
+             * validation for better performance.
+             */
+            if !key_scalar
+                && ((*outputstr >= b'0' as c_char && *outputstr <= b'9' as c_char)
+                    || (*outputstr == b'-' as c_char
+                        && (*outputstr.add(1) >= b'0' as c_char
+                            && *outputstr.add(1) <= b'9' as c_char)))
+            {
+                appendStringInfoString(result, outputstr);
+            } else {
+                appendStringInfoChar(result, b'"' as c_char);
+                appendStringInfoString(result, outputstr);
+                appendStringInfoChar(result, b'"' as c_char);
+            }
+            pfree(outputstr as *mut c_void);
+        }
+        JSONTYPE_DATE => {
+            let mut buf: [c_char; MAXDATELEN + 1] = [0; MAXDATELEN + 1];
+
+            JsonEncodeDateTime(buf.as_mut_ptr(), val, DATEOID, null());
+            appendStringInfoChar(result, b'"' as c_char);
+            appendStringInfoString(result, buf.as_ptr());
+            appendStringInfoChar(result, b'"' as c_char);
+        }
+        JSONTYPE_TIMESTAMP => {
+            let mut buf: [c_char; MAXDATELEN + 1] = [0; MAXDATELEN + 1];
+
+            JsonEncodeDateTime(buf.as_mut_ptr(), val, TIMESTAMPOID, null());
+            appendStringInfoChar(result, b'"' as c_char);
+            appendStringInfoString(result, buf.as_ptr());
+            appendStringInfoChar(result, b'"' as c_char);
+        }
+        JSONTYPE_TIMESTAMPTZ => {
+            let mut buf: [c_char; MAXDATELEN + 1] = [0; MAXDATELEN + 1];
+
+            JsonEncodeDateTime(buf.as_mut_ptr(), val, TIMESTAMPTZOID, null());
+            appendStringInfoChar(result, b'"' as c_char);
+            appendStringInfoString(result, buf.as_ptr());
+            appendStringInfoChar(result, b'"' as c_char);
+        }
+        JSONTYPE_JSON => {
+            /* JSON and JSONB output will already be escaped */
+            outputstr = OidOutputFunctionCall(outfuncoid, val);
+            appendStringInfoString(result, outputstr);
+            pfree(outputstr as *mut c_void);
+        }
+        JSONTYPE_CAST => {
+            /* outfuncoid refers to a cast function, not an output function */
+            jsontext = DatumGetTextPP!(OidFunctionCall1(outfuncoid, val));
+            appendBinaryStringInfo(
+                result,
+                VARDATA_ANY(jsontext as *const c_char) as *const c_void,
+                VARSIZE_ANY_EXHDR(jsontext as *const c_char) as c_int,
+            );
+            pfree(jsontext as *mut c_void);
+        }
+        _ => {
+            /* special-case text types to save useless palloc/memcpy cycles */
+            if outfuncoid == F_TEXTOUT || outfuncoid == F_VARCHAROUT || outfuncoid == F_BPCHAROUT {
+                escape_json_text(result, DatumGetPointer(val) as *mut text);
+            } else {
+                outputstr = OidOutputFunctionCall(outfuncoid, val);
+                escape_json(result, outputstr);
+                pfree(outputstr as *mut c_void);
+            }
+        }
+    }
 }
 
 /*
  * JsonEncodeDateTime: encode a datetime Datum as an ISO JSON string.
  * TODO(pg-port): needs utils/date.h + utils/datetime.h (j2date/EncodeDateTime/...).
  */
-#[allow(dead_code)]
 pub unsafe fn JsonEncodeDateTime(
-    _buf: *mut c_char,
-    _value: Datum,
-    _typid: Oid,
-    _tzp: *const c_int,
+    mut buf: *mut c_char,
+    value: Datum,
+    typid: Oid,
+    tzp: *const c_int,
 ) -> *mut c_char {
-    let _ = ERRCODE_DATETIME_VALUE_OUT_OF_RANGE;
-    unimplemented!("JsonEncodeDateTime: utils/date.h + utils/datetime.h not yet translated")
+    if buf.is_null() {
+        buf = palloc((MAXDATELEN + 1) as Size) as *mut c_char;
+    }
+
+    match typid {
+        DATEOID => {
+            let date: DateADT;
+            let mut tm: pg_tm = core::mem::zeroed();
+
+            date = DatumGetDateADT(value);
+
+            /* Same as date_out(), but forcing DateStyle */
+            if DATE_NOT_FINITE(date) {
+                EncodeSpecialDate(date, buf);
+            } else {
+                j2date(
+                    date + POSTGRES_EPOCH_JDATE,
+                    &mut tm.tm_year,
+                    &mut tm.tm_mon,
+                    &mut tm.tm_mday,
+                );
+                EncodeDateOnly(&mut tm, USE_XSD_DATES, buf);
+            }
+        }
+        TIMEOID => {
+            let time: TimeADT = DatumGetTimeADT(value);
+            let mut tt: pg_tm = core::mem::zeroed();
+            let tm: *mut pg_tm = &mut tt;
+            let mut fsec: fsec_t = 0;
+
+            /* Same as time_out(), but forcing DateStyle */
+            time2tm(time, tm, &mut fsec);
+            EncodeTimeOnly(tm, fsec, false, 0, USE_XSD_DATES, buf);
+        }
+        TIMETZOID => {
+            let time: *mut TimeTzADT = DatumGetTimeTzADTP(value);
+            let mut tt: pg_tm = core::mem::zeroed();
+            let tm: *mut pg_tm = &mut tt;
+            let mut fsec: fsec_t = 0;
+            let mut tz: c_int = 0;
+
+            /* Same as timetz_out(), but forcing DateStyle */
+            timetz2tm(time, tm, &mut fsec, &mut tz);
+            EncodeTimeOnly(tm, fsec, true, tz, USE_XSD_DATES, buf);
+        }
+        TIMESTAMPOID => {
+            let timestamp: Timestamp;
+            let mut tm: pg_tm = core::mem::zeroed();
+            let mut fsec: fsec_t = 0;
+
+            timestamp = DatumGetTimestamp(value);
+            /* Same as timestamp_out(), but forcing DateStyle */
+            if TIMESTAMP_NOT_FINITE(timestamp) {
+                EncodeSpecialTimestamp(timestamp, buf);
+            } else if timestamp2tm(timestamp, null_mut(), &mut tm, &mut fsec, null_mut(), null_mut())
+                == 0
+            {
+                EncodeDateTime(&mut tm, fsec, false, 0, null(), USE_XSD_DATES, buf);
+            } else {
+                let _ = errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE);
+                ereport!(ERROR, errmsg!("timestamp out of range"));
+            }
+        }
+        TIMESTAMPTZOID => {
+            let mut timestamp: TimestampTz;
+            let mut tm: pg_tm = core::mem::zeroed();
+            let mut tz: c_int = 0;
+            let mut fsec: fsec_t = 0;
+            let mut tzn: *const c_char = null();
+
+            timestamp = DatumGetTimestampTz(value);
+
+            /*
+             * If a time zone is specified, we apply the time-zone shift,
+             * convert timestamptz to pg_tm as if it were without a time
+             * zone, and then use the specified time zone for converting
+             * the timestamp into a string.
+             */
+            if !tzp.is_null() {
+                tz = *tzp;
+                timestamp -= (tz as TimestampTz) * USECS_PER_SEC;
+            }
+
+            /* Same as timestamptz_out(), but forcing DateStyle */
+            if TIMESTAMP_NOT_FINITE(timestamp) {
+                EncodeSpecialTimestamp(timestamp, buf);
+            } else if timestamp2tm(
+                timestamp,
+                if !tzp.is_null() { null_mut() } else { &mut tz },
+                &mut tm,
+                &mut fsec,
+                if !tzp.is_null() { null_mut() } else { &mut tzn },
+                null_mut(),
+            ) == 0
+            {
+                if !tzp.is_null() {
+                    tm.tm_isdst = 1; /* set time-zone presence flag */
+                }
+
+                EncodeDateTime(&mut tm, fsec, true, tz, tzn, USE_XSD_DATES, buf);
+            } else {
+                let _ = errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE);
+                ereport!(ERROR, errmsg!("timestamp out of range"));
+            }
+        }
+        _ => {
+            elog!(ERROR, "unknown jsonb value datetime type oid {}", typid);
+            return null_mut();
+        }
+    }
+
+    buf
 }
 
 /*
- * array_dim_to_json / array_to_json_internal / composite_to_json: STUBBED.
- * TODO(pg-port): need utils/array.h (deconstruct_array, ARR_*) and the composite
- * TupleDesc machinery (lookup_rowtype_tupdesc, heap_getattr).
+ * Process a single dimension of an array.
+ * If it's the innermost dimension, output the values, otherwise call
+ * ourselves recursively to process the next dimension.
  */
-#[allow(dead_code)]
-unsafe fn array_to_json_internal(_array: Datum, _result: StringInfo, _use_line_feeds: bool) {
-    unimplemented!("array_to_json_internal: utils/array.h not yet translated")
-}
-
-#[allow(dead_code)]
-unsafe fn composite_to_json(_composite: Datum, _result: StringInfo, _use_line_feeds: bool) {
-    unimplemented!("composite_to_json: TupleDesc/typcache not yet translated")
-}
-
-/*
- * add_json: thin wrapper around datum_to_json_internal.  STUBBED with its deps.
- */
-#[allow(dead_code)]
-unsafe fn add_json(
-    _val: Datum,
-    _is_null: bool,
-    _result: StringInfo,
-    _val_type: Oid,
-    _key_scalar: bool,
+unsafe fn array_dim_to_json(
+    result: StringInfo,
+    dim: c_int,
+    ndims: c_int,
+    dims: *mut c_int,
+    vals: *mut Datum,
+    nulls: *mut bool,
+    valcount: *mut c_int,
+    tcategory: JsonTypeCategory,
+    outfuncoid: Oid,
+    use_line_feeds: bool,
 ) {
-    let _ = ERRCODE_INVALID_PARAMETER_VALUE;
-    unimplemented!("add_json: json_categorize_type/datum_to_json_internal not yet translated")
+    let mut i: c_int;
+    let sep: *const c_char;
+
+    Assert!(dim < ndims);
+
+    sep = if use_line_feeds {
+        c",\n ".as_ptr()
+    } else {
+        c",".as_ptr()
+    };
+
+    appendStringInfoChar(result, b'[' as c_char);
+
+    i = 1;
+    while i <= *dims.add(dim as usize) {
+        if i > 1 {
+            appendStringInfoString(result, sep);
+        }
+
+        if dim + 1 == ndims {
+            datum_to_json_internal(
+                *vals.add(*valcount as usize),
+                *nulls.add(*valcount as usize),
+                result,
+                tcategory,
+                outfuncoid,
+                false,
+            );
+            *valcount += 1;
+        } else {
+            /*
+             * Do we want line feeds on inner dimensions of arrays? For now
+             * we'll say no.
+             */
+            array_dim_to_json(
+                result,
+                dim + 1,
+                ndims,
+                dims,
+                vals,
+                nulls,
+                valcount,
+                tcategory,
+                outfuncoid,
+                false,
+            );
+        }
+        i += 1;
+    }
+
+    appendStringInfoChar(result, b']' as c_char);
+}
+
+/*
+ * Turn an array into JSON.
+ */
+unsafe fn array_to_json_internal(array: Datum, result: StringInfo, use_line_feeds: bool) {
+    let v: *mut ArrayType = DatumGetArrayTypeP(array);
+    let element_type: Oid = ARR_ELEMTYPE(v);
+    let dim: *mut c_int;
+    let ndim: c_int;
+    let mut nitems: c_int;
+    let mut count: c_int = 0;
+    let mut elements: *mut Datum = null_mut();
+    let mut nulls: *mut bool = null_mut();
+    let mut typlen: int16 = 0;
+    let mut typbyval: bool = false;
+    let mut typalign: c_char = 0;
+    let mut tcategory: JsonTypeCategory = JSONTYPE_NULL;
+    let mut outfuncoid: Oid = InvalidOid;
+
+    ndim = ARR_NDIM(v);
+    dim = ARR_DIMS(v);
+    nitems = ArrayGetNItems(ndim, dim);
+
+    if nitems <= 0 {
+        appendStringInfoString(result, c"[]".as_ptr());
+        return;
+    }
+
+    get_typlenbyvalalign(element_type, &mut typlen, &mut typbyval, &mut typalign);
+
+    json_categorize_type(element_type, false, &mut tcategory, &mut outfuncoid);
+
+    deconstruct_array(
+        v,
+        element_type,
+        typlen,
+        typbyval,
+        typalign,
+        &mut elements,
+        &mut nulls,
+        &mut nitems,
+    );
+
+    array_dim_to_json(
+        result,
+        0,
+        ndim,
+        dim,
+        elements,
+        nulls,
+        &mut count,
+        tcategory,
+        outfuncoid,
+        use_line_feeds,
+    );
+
+    pfree(elements as *mut c_void);
+    pfree(nulls as *mut c_void);
+}
+
+/*
+ * Turn a composite / record into JSON.
+ */
+unsafe fn composite_to_json(composite: Datum, result: StringInfo, use_line_feeds: bool) {
+    let td: HeapTupleHeader;
+    let tupType: Oid;
+    let tupTypmod: i32;
+    let tupdesc: TupleDesc;
+    let mut tmptup: HeapTupleData = core::mem::zeroed();
+    let tuple: HeapTuple;
+    let mut i: c_int;
+    let mut needsep: bool = false;
+    let sep: *const c_char;
+    let seplen: c_int;
+
+    /*
+     * We can avoid expensive strlen() calls by precalculating the separator
+     * length.
+     */
+    sep = if use_line_feeds {
+        c",\n ".as_ptr()
+    } else {
+        c",".as_ptr()
+    };
+    seplen = if use_line_feeds {
+        strlen(c",\n ".as_ptr()) as c_int
+    } else {
+        strlen(c",".as_ptr()) as c_int
+    };
+
+    td = DatumGetHeapTupleHeader(composite);
+
+    /* Extract rowtype info and find a tupdesc */
+    tupType = HeapTupleHeaderGetTypeId(td);
+    tupTypmod = HeapTupleHeaderGetTypMod(td);
+    tupdesc = lookup_rowtype_tupdesc(tupType, tupTypmod);
+
+    /* Build a temporary HeapTuple control structure */
+    tmptup.t_len = HeapTupleHeaderGetDatumLength(td);
+    tmptup.t_data = td;
+    tuple = &mut tmptup;
+
+    appendStringInfoChar(result, b'{' as c_char);
+
+    i = 0;
+    while i < (*tupdesc).natts {
+        let val: Datum;
+        let mut isnull: bool = false;
+        let attname: *mut c_char;
+        let mut tcategory: JsonTypeCategory = JSONTYPE_NULL;
+        let mut outfuncoid: Oid = InvalidOid;
+        let att: Form_pg_attribute = TupleDescAttr(tupdesc, i);
+
+        if att_isdropped(att) {
+            i += 1;
+            continue;
+        }
+
+        if needsep {
+            appendBinaryStringInfo(result, sep as *const c_void, seplen);
+        }
+        needsep = true;
+
+        attname = att_name(att);
+        escape_json(result, attname);
+        appendStringInfoChar(result, b':' as c_char);
+
+        val = heap_getattr(tuple, i + 1, tupdesc, &mut isnull);
+
+        if isnull {
+            tcategory = JSONTYPE_NULL;
+            outfuncoid = InvalidOid;
+        } else {
+            json_categorize_type(att_typid(att), false, &mut tcategory, &mut outfuncoid);
+        }
+
+        datum_to_json_internal(val, isnull, result, tcategory, outfuncoid, false);
+        i += 1;
+    }
+
+    appendStringInfoChar(result, b'}' as c_char);
+    ReleaseTupleDesc(tupdesc);
+}
+
+/*
+ * Append JSON text for "val" to "result".
+ *
+ * This is just a thin wrapper around datum_to_json.  If the same type will be
+ * printed many times, avoid using this; better to do the json_categorize_type
+ * lookups only once.
+ */
+unsafe fn add_json(
+    val: Datum,
+    is_null: bool,
+    result: StringInfo,
+    val_type: Oid,
+    key_scalar: bool,
+) {
+    let mut tcategory: JsonTypeCategory = JSONTYPE_NULL;
+    let mut outfuncoid: Oid = InvalidOid;
+
+    if val_type == InvalidOid {
+        let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+        ereport!(ERROR, errmsg!("could not determine input data type"));
+    }
+
+    if is_null {
+        tcategory = JSONTYPE_NULL;
+        outfuncoid = InvalidOid;
+    } else {
+        json_categorize_type(val_type, false, &mut tcategory, &mut outfuncoid);
+    }
+
+    datum_to_json_internal(val, is_null, result, tcategory, outfuncoid, key_scalar);
 }
 
 /*
@@ -491,56 +1362,118 @@ unsafe fn add_json(
  * TODO(pg-port): array_to_json_internal depends on utils/array.h.
  */
 pub unsafe fn array_to_json(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("array_to_json: utils/array.h not yet translated")
-}
+    let array: Datum = PG_GETARG_DATUM!(fcinfo, 0);
+    let result: StringInfo;
 
-pub unsafe fn array_to_json_pretty(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("array_to_json_pretty: utils/array.h not yet translated")
+    result = makeStringInfo();
+
+    array_to_json_internal(array, result, false);
+
+    PG_RETURN_TEXT_P!(cstring_to_text_with_len((*result).data, (*result).len));
 }
 
 /*
- * SQL function row_to_json(record) / row_to_json(record, pretty bool).
- * TODO(pg-port): composite_to_json depends on TupleDesc/typcache.
+ * SQL function array_to_json(row, prettybool)
+ */
+pub unsafe fn array_to_json_pretty(fcinfo: FunctionCallInfo) -> Datum {
+    let array: Datum = PG_GETARG_DATUM!(fcinfo, 0);
+    let use_line_feeds: bool = PG_GETARG_BOOL!(fcinfo, 1);
+    let result: StringInfo;
+
+    result = makeStringInfo();
+
+    array_to_json_internal(array, result, use_line_feeds);
+
+    PG_RETURN_TEXT_P!(cstring_to_text_with_len((*result).data, (*result).len));
+}
+
+/*
+ * SQL function row_to_json(row)
  */
 pub unsafe fn row_to_json(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("row_to_json: TupleDesc/typcache not yet translated")
-}
+    let array: Datum = PG_GETARG_DATUM!(fcinfo, 0);
+    let result: StringInfo;
 
-pub unsafe fn row_to_json_pretty(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("row_to_json_pretty: TupleDesc/typcache not yet translated")
+    result = makeStringInfo();
+
+    composite_to_json(array, result, false);
+
+    PG_RETURN_TEXT_P!(cstring_to_text_with_len((*result).data, (*result).len));
 }
 
 /*
- * to_json_is_immutable: planner support; needs func_volatile + json_categorize_type.
- * TODO(pg-port): utils/lsyscache.h (func_volatile) not yet translated.
+ * SQL function row_to_json(row, prettybool)
  */
-pub unsafe fn to_json_is_immutable(_typoid: Oid) -> bool {
-    unimplemented!("to_json_is_immutable: lsyscache (func_volatile) not yet translated")
+pub unsafe fn row_to_json_pretty(fcinfo: FunctionCallInfo) -> Datum {
+    let array: Datum = PG_GETARG_DATUM!(fcinfo, 0);
+    let use_line_feeds: bool = PG_GETARG_BOOL!(fcinfo, 1);
+    let result: StringInfo;
+
+    result = makeStringInfo();
+
+    composite_to_json(array, result, use_line_feeds);
+
+    PG_RETURN_TEXT_P!(cstring_to_text_with_len((*result).data, (*result).len));
 }
 
 /*
- * SQL function to_json(anyvalue).
- * TODO(pg-port): needs get_fn_expr_argtype + json_categorize_type + datum_to_json.
+ * Is the given type immutable when coming out of a JSON context?
+ *
+ * At present, datetimes are all considered mutable, because they
+ * depend on timezone.  XXX we should also drill down into objects
+ * and arrays, but do not.
+ */
+pub unsafe fn to_json_is_immutable(typoid: Oid) -> bool {
+    let mut tcategory: JsonTypeCategory = JSONTYPE_NULL;
+    let mut outfuncoid: Oid = InvalidOid;
+
+    json_categorize_type(typoid, false, &mut tcategory, &mut outfuncoid);
+
+    match tcategory {
+        JSONTYPE_BOOL | JSONTYPE_JSON | JSONTYPE_JSONB | JSONTYPE_NULL => true,
+
+        JSONTYPE_DATE | JSONTYPE_TIMESTAMP | JSONTYPE_TIMESTAMPTZ => false,
+
+        JSONTYPE_ARRAY => false, /* TODO recurse into elements */
+
+        JSONTYPE_COMPOSITE => false, /* TODO recurse into fields */
+
+        JSONTYPE_NUMERIC | JSONTYPE_CAST | JSONTYPE_OTHER => {
+            func_volatile(outfuncoid) == PROVOLATILE_IMMUTABLE
+        }
+    }
+}
+
+/*
+ * SQL function to_json(anyvalue)
  */
 pub unsafe fn to_json(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("to_json: json_categorize_type/datum_to_json not yet translated")
+    let val: Datum = PG_GETARG_DATUM!(fcinfo, 0);
+    let val_type: Oid = get_fn_expr_argtype((*fcinfo).flinfo, 0);
+    let mut tcategory: JsonTypeCategory = JSONTYPE_NULL;
+    let mut outfuncoid: Oid = InvalidOid;
+
+    if val_type == InvalidOid {
+        let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+        ereport!(ERROR, errmsg!("could not determine input data type"));
+    }
+
+    json_categorize_type(val_type, false, &mut tcategory, &mut outfuncoid);
+
+    PG_RETURN_DATUM!(datum_to_json(val, tcategory, outfuncoid));
 }
 
 /*
- * datum_to_json: turn a Datum into a json text Datum.  STUBBED with its deps.
+ * Turn a Datum into JSON text.
+ *
+ * tcategory and outfuncoid are from a previous call to json_categorize_type.
  */
-#[allow(dead_code)]
-pub unsafe fn datum_to_json(
-    _val: Datum,
-    _tcategory: JsonTypeCategory,
-    _outfuncoid: Oid,
-) -> Datum {
-    unimplemented!("datum_to_json: datum_to_json_internal not yet translated")
+pub unsafe fn datum_to_json(val: Datum, tcategory: JsonTypeCategory, outfuncoid: Oid) -> Datum {
+    let result: StringInfo = makeStringInfo();
+
+    datum_to_json_internal(val, false, result, tcategory, outfuncoid, false);
+
+    PointerGetDatum(cstring_to_text_with_len((*result).data, (*result).len) as *const c_void)
 }
 
 // ===========================================================================
@@ -549,44 +1482,366 @@ pub unsafe fn datum_to_json(
 // json_categorize_type/datum_to_json_internal.
 // ===========================================================================
 
+/*
+ * json_agg transition function
+ *
+ * aggregate input column as a json array value.
+ */
+unsafe fn json_agg_transfn_worker(fcinfo: FunctionCallInfo, absent_on_null: bool) -> Datum {
+    let mut aggcontext: MemoryContext = null_mut();
+    let oldcontext: MemoryContext;
+    let state: *mut JsonAggState;
+    let val: Datum;
+
+    if !AggCheckCallContext(fcinfo, &mut aggcontext) {
+        /* cannot be called directly because of internal-type argument */
+        elog!(ERROR, "json_agg_transfn called in non-aggregate context");
+    }
+
+    if PG_ARGISNULL!(fcinfo, 0) {
+        let arg_type: Oid = get_fn_expr_argtype((*fcinfo).flinfo, 1);
+
+        if arg_type == InvalidOid {
+            let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+            ereport!(ERROR, errmsg!("could not determine input data type"));
+        }
+
+        /*
+         * Make this state object in a context where it will persist for the
+         * duration of the aggregate call.  MemoryContextSwitchTo is only
+         * needed the first time, as the StringInfo routines make sure they
+         * use the right context to enlarge the object if necessary.
+         */
+        oldcontext = MemoryContextSwitchTo(aggcontext);
+        state = palloc(core::mem::size_of::<JsonAggState>() as Size) as *mut JsonAggState;
+        (*state).str = makeStringInfo();
+        MemoryContextSwitchTo(oldcontext);
+
+        appendStringInfoChar((*state).str, b'[' as c_char);
+        json_categorize_type(
+            arg_type,
+            false,
+            &mut (*state).val_category,
+            &mut (*state).val_output_func,
+        );
+    } else {
+        state = PG_GETARG_POINTER!(fcinfo, 0) as *mut JsonAggState;
+    }
+
+    if absent_on_null && PG_ARGISNULL!(fcinfo, 1) {
+        PG_RETURN_POINTER!(state);
+    }
+
+    if (*(*state).str).len > 1 {
+        appendStringInfoString((*state).str, c", ".as_ptr());
+    }
+
+    /* fast path for NULLs */
+    if PG_ARGISNULL!(fcinfo, 1) {
+        datum_to_json_internal(
+            0 as Datum,
+            true,
+            (*state).str,
+            JSONTYPE_NULL,
+            InvalidOid,
+            false,
+        );
+        PG_RETURN_POINTER!(state);
+    }
+
+    val = PG_GETARG_DATUM!(fcinfo, 1);
+
+    /* add some whitespace if structured type and not first item */
+    if !PG_ARGISNULL!(fcinfo, 0)
+        && (*(*state).str).len > 1
+        && ((*state).val_category == JSONTYPE_ARRAY
+            || (*state).val_category == JSONTYPE_COMPOSITE)
+    {
+        appendStringInfoString((*state).str, c"\n ".as_ptr());
+    }
+
+    datum_to_json_internal(
+        val,
+        false,
+        (*state).str,
+        (*state).val_category,
+        (*state).val_output_func,
+        false,
+    );
+
+    /*
+     * The transition type for json_agg() is declared to be "internal", which
+     * is a pass-by-value type the same size as a pointer.  So we can safely
+     * pass the JsonAggState pointer through nodeAgg.c's machinations.
+     */
+    PG_RETURN_POINTER!(state);
+}
+
+/*
+ * json_agg aggregate function
+ */
 pub unsafe fn json_agg_transfn(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_agg_transfn: nodeAgg/json_categorize_type not yet translated")
+    json_agg_transfn_worker(fcinfo, false)
 }
 
+/*
+ * json_agg_strict aggregate function
+ */
 pub unsafe fn json_agg_strict_transfn(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_agg_strict_transfn: nodeAgg/json_categorize_type not yet translated")
+    json_agg_transfn_worker(fcinfo, true)
 }
 
+/*
+ * json_agg final function
+ */
 pub unsafe fn json_agg_finalfn(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_agg_finalfn: nodeAgg not yet translated")
+    let state: *mut JsonAggState;
+
+    /* cannot be called directly because of internal-type argument */
+    Assert!(AggCheckCallContext(fcinfo, null_mut()));
+
+    state = if PG_ARGISNULL!(fcinfo, 0) {
+        null_mut()
+    } else {
+        PG_GETARG_POINTER!(fcinfo, 0) as *mut JsonAggState
+    };
+
+    /* NULL result for no rows in, as is standard with aggregates */
+    if state.is_null() {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Else return state with appropriate array terminator added */
+    PG_RETURN_TEXT_P!(catenate_stringinfo_string((*state).str, c"]".as_ptr()));
 }
 
+/*
+ * json_object_agg transition function.
+ *
+ * aggregate two input columns as a single json object value.
+ */
+unsafe fn json_object_agg_transfn_worker(
+    fcinfo: FunctionCallInfo,
+    absent_on_null: bool,
+    unique_keys: bool,
+) -> Datum {
+    let mut aggcontext: MemoryContext = null_mut();
+    let oldcontext: MemoryContext;
+    let state: *mut JsonAggState;
+    let out: StringInfo;
+    let mut arg: Datum;
+    let skip: bool;
+    let key_offset: c_int;
+
+    if !AggCheckCallContext(fcinfo, &mut aggcontext) {
+        /* cannot be called directly because of internal-type argument */
+        elog!(ERROR, "json_object_agg_transfn called in non-aggregate context");
+    }
+
+    if PG_ARGISNULL!(fcinfo, 0) {
+        let mut arg_type: Oid;
+
+        /*
+         * Make the StringInfo in a context where it will persist for the
+         * duration of the aggregate call. Switching context is only needed
+         * for this initial step, as the StringInfo and dynahash routines make
+         * sure they use the right context to enlarge the object if necessary.
+         */
+        oldcontext = MemoryContextSwitchTo(aggcontext);
+        state = palloc(core::mem::size_of::<JsonAggState>() as Size) as *mut JsonAggState;
+        (*state).str = makeStringInfo();
+        if unique_keys {
+            json_unique_builder_init(&mut (*state).unique_check);
+        } else {
+            memset(
+                &mut (*state).unique_check as *mut JsonUniqueBuilderState as *mut c_void,
+                0,
+                core::mem::size_of::<JsonUniqueBuilderState>(),
+            );
+        }
+        MemoryContextSwitchTo(oldcontext);
+
+        arg_type = get_fn_expr_argtype((*fcinfo).flinfo, 1);
+
+        if arg_type == InvalidOid {
+            let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+            ereport!(ERROR, errmsg!("could not determine data type for argument {}", 1));
+        }
+
+        json_categorize_type(
+            arg_type,
+            false,
+            &mut (*state).key_category,
+            &mut (*state).key_output_func,
+        );
+
+        arg_type = get_fn_expr_argtype((*fcinfo).flinfo, 2);
+
+        if arg_type == InvalidOid {
+            let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+            ereport!(ERROR, errmsg!("could not determine data type for argument {}", 2));
+        }
+
+        json_categorize_type(
+            arg_type,
+            false,
+            &mut (*state).val_category,
+            &mut (*state).val_output_func,
+        );
+
+        appendStringInfoString((*state).str, c"{ ".as_ptr());
+    } else {
+        state = PG_GETARG_POINTER!(fcinfo, 0) as *mut JsonAggState;
+    }
+
+    /*
+     * Note: since json_object_agg() is declared as taking type "any", the
+     * parser will not do any type conversion on unknown-type literals (that
+     * is, undecorated strings or NULLs).  Such values will arrive here as
+     * type UNKNOWN, which fortunately does not matter to us, since
+     * unknownout() works fine.
+     */
+
+    if PG_ARGISNULL!(fcinfo, 1) {
+        let _ = errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED);
+        ereport!(ERROR, errmsg!("null value not allowed for object key"));
+    }
+
+    /* Skip null values if absent_on_null */
+    skip = absent_on_null && PG_ARGISNULL!(fcinfo, 2);
+
+    if skip {
+        /*
+         * We got a NULL value and we're not storing those; if we're not
+         * testing key uniqueness, we're done.  If we are, use the throwaway
+         * buffer to store the key name so that we can check it.
+         */
+        if !unique_keys {
+            PG_RETURN_POINTER!(state);
+        }
+
+        out = json_unique_builder_get_throwawaybuf(&mut (*state).unique_check);
+    } else {
+        out = (*state).str;
+
+        /*
+         * Append comma delimiter only if we have already output some fields
+         * after the initial string "{ ".
+         */
+        if (*out).len > 2 {
+            appendStringInfoString(out, c", ".as_ptr());
+        }
+    }
+
+    arg = PG_GETARG_DATUM!(fcinfo, 1);
+
+    key_offset = (*out).len;
+
+    datum_to_json_internal(
+        arg,
+        false,
+        out,
+        (*state).key_category,
+        (*state).key_output_func,
+        true,
+    );
+
+    if unique_keys {
+        /*
+         * Copy the key first, instead of pointing into the buffer. It will be
+         * added to the hash table, but the buffer may get reallocated as
+         * we're appending more data to it. That would invalidate pointers to
+         * keys in the current buffer.
+         */
+        let key: *const c_char =
+            MemoryContextStrdup(aggcontext, (*out).data.add(key_offset as usize));
+
+        if !json_unique_check_key(&mut (*state).unique_check.check, key, 0) {
+            let _ = errcode(ERRCODE_DUPLICATE_JSON_OBJECT_KEY_VALUE);
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "duplicate JSON object key value: {}",
+                    std::ffi::CStr::from_ptr(key).to_string_lossy()
+                )
+            );
+        }
+
+        if skip {
+            PG_RETURN_POINTER!(state);
+        }
+    }
+
+    appendStringInfoString((*state).str, c" : ".as_ptr());
+
+    if PG_ARGISNULL!(fcinfo, 2) {
+        arg = 0 as Datum;
+    } else {
+        arg = PG_GETARG_DATUM!(fcinfo, 2);
+    }
+
+    datum_to_json_internal(
+        arg,
+        PG_ARGISNULL!(fcinfo, 2),
+        (*state).str,
+        (*state).val_category,
+        (*state).val_output_func,
+        false,
+    );
+
+    PG_RETURN_POINTER!(state);
+}
+
+/*
+ * json_object_agg aggregate function
+ */
 pub unsafe fn json_object_agg_transfn(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_object_agg_transfn: nodeAgg/json_categorize_type not yet translated")
+    json_object_agg_transfn_worker(fcinfo, false, false)
 }
 
+/*
+ * json_object_agg_strict aggregate function
+ */
 pub unsafe fn json_object_agg_strict_transfn(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_object_agg_strict_transfn: nodeAgg not yet translated")
+    json_object_agg_transfn_worker(fcinfo, true, false)
 }
 
+/*
+ * json_object_agg_unique aggregate function
+ */
 pub unsafe fn json_object_agg_unique_transfn(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_object_agg_unique_transfn: nodeAgg not yet translated")
+    json_object_agg_transfn_worker(fcinfo, false, true)
 }
 
+/*
+ * json_object_agg_unique_strict aggregate function
+ */
 pub unsafe fn json_object_agg_unique_strict_transfn(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_object_agg_unique_strict_transfn: nodeAgg not yet translated")
+    json_object_agg_transfn_worker(fcinfo, true, true)
 }
 
+/*
+ * json_object_agg final function.
+ */
 pub unsafe fn json_object_agg_finalfn(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_object_agg_finalfn: nodeAgg not yet translated")
+    let state: *mut JsonAggState;
+
+    /* cannot be called directly because of internal-type argument */
+    Assert!(AggCheckCallContext(fcinfo, null_mut()));
+
+    state = if PG_ARGISNULL!(fcinfo, 0) {
+        null_mut()
+    } else {
+        PG_GETARG_POINTER!(fcinfo, 0) as *mut JsonAggState
+    };
+
+    /* NULL result for no rows in, as is standard with aggregates */
+    if state.is_null() {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    /* Else return state with appropriate object terminator added */
+    PG_RETURN_TEXT_P!(catenate_stringinfo_string((*state).str, c" }".as_ptr()));
 }
 
 /*
@@ -624,21 +1879,136 @@ unsafe fn catenate_stringinfo_string(buffer: StringInfo, addon: *const c_char) -
 // deconstruct_array_builtin.
 // ===========================================================================
 
-#[allow(dead_code)]
 pub unsafe fn json_build_object_worker(
-    _nargs: c_int,
-    _args: *const Datum,
-    _nulls: *const bool,
-    _types: *const Oid,
-    _absent_on_null: bool,
-    _unique_keys: bool,
+    nargs: c_int,
+    args: *const Datum,
+    nulls: *const bool,
+    types: *const Oid,
+    absent_on_null: bool,
+    unique_keys: bool,
 ) -> Datum {
-    unimplemented!("json_build_object_worker: add_json/json_categorize_type not yet translated")
+    let mut i: c_int;
+    let mut sep: *const c_char = c"".as_ptr();
+    let result: StringInfo;
+    let mut unique_check: JsonUniqueBuilderState = core::mem::zeroed();
+
+    if nargs % 2 != 0 {
+        let _ = errcode(ERRCODE_INVALID_PARAMETER_VALUE);
+        /* C also: errhint("The arguments of %s must consist of alternating keys and values.", "json_build_object()") */
+        ereport!(
+            ERROR,
+            errmsg!("argument list must have even number of elements")
+        );
+    }
+
+    result = makeStringInfo();
+
+    appendStringInfoChar(result, b'{' as c_char);
+
+    if unique_keys {
+        json_unique_builder_init(&mut unique_check);
+    }
+
+    i = 0;
+    while i < nargs {
+        let out: StringInfo;
+        let skip: bool;
+        let key_offset: c_int;
+
+        /* Skip null values if absent_on_null */
+        skip = absent_on_null && *nulls.add((i + 1) as usize);
+
+        if skip {
+            /* If key uniqueness check is needed we must save skipped keys */
+            if !unique_keys {
+                i += 2;
+                continue;
+            }
+
+            out = json_unique_builder_get_throwawaybuf(&mut unique_check);
+        } else {
+            appendStringInfoString(result, sep);
+            sep = c", ".as_ptr();
+            out = result;
+        }
+
+        /* process key */
+        if *nulls.add(i as usize) {
+            let _ = errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED);
+            ereport!(ERROR, errmsg!("null value not allowed for object key"));
+        }
+
+        /* save key offset before appending it */
+        key_offset = (*out).len;
+
+        add_json(*args.add(i as usize), false, out, *types.add(i as usize), true);
+
+        if unique_keys {
+            /*
+             * check key uniqueness after key appending
+             *
+             * Copy the key first, instead of pointing into the buffer. It
+             * will be added to the hash table, but the buffer may get
+             * reallocated as we're appending more data to it. That would
+             * invalidate pointers to keys in the current buffer.
+             */
+            let key: *const c_char = pstrdup((*out).data.add(key_offset as usize));
+
+            if !json_unique_check_key(&mut unique_check.check, key, 0) {
+                let _ = errcode(ERRCODE_DUPLICATE_JSON_OBJECT_KEY_VALUE);
+                ereport!(
+                    ERROR,
+                    errmsg!(
+                        "duplicate JSON object key value: {}",
+                        std::ffi::CStr::from_ptr(key).to_string_lossy()
+                    )
+                );
+            }
+
+            if skip {
+                i += 2;
+                continue;
+            }
+        }
+
+        appendStringInfoString(result, c" : ".as_ptr());
+
+        /* process value */
+        add_json(
+            *args.add((i + 1) as usize),
+            *nulls.add((i + 1) as usize),
+            result,
+            *types.add((i + 1) as usize),
+            false,
+        );
+
+        i += 2;
+    }
+
+    appendStringInfoChar(result, b'}' as c_char);
+
+    PointerGetDatum(cstring_to_text_with_len((*result).data, (*result).len) as *const c_void)
 }
 
+/*
+ * SQL function json_build_object(variadic "any")
+ */
 pub unsafe fn json_build_object(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_build_object: extract_variadic_args/add_json not yet translated")
+    let mut args: *mut Datum = null_mut();
+    let mut nulls: *mut bool = null_mut();
+    let mut types: *mut Oid = null_mut();
+
+    /* build argument values to build the object */
+    let nargs: c_int =
+        extract_variadic_args(fcinfo, 0, true, &mut args, &mut types, &mut nulls);
+
+    if nargs < 0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_DATUM!(json_build_object_worker(
+        nargs, args, nulls, types, false, false
+    ));
 }
 
 pub unsafe fn json_build_object_noargs(_fcinfo: FunctionCallInfo) -> Datum {
@@ -647,20 +2017,62 @@ pub unsafe fn json_build_object_noargs(_fcinfo: FunctionCallInfo) -> Datum {
     PG_RETURN_TEXT_P!(cstring_to_text_with_len(c"{}".as_ptr(), 2));
 }
 
-#[allow(dead_code)]
 pub unsafe fn json_build_array_worker(
-    _nargs: c_int,
-    _args: *const Datum,
-    _nulls: *const bool,
-    _types: *const Oid,
-    _absent_on_null: bool,
+    nargs: c_int,
+    args: *const Datum,
+    nulls: *const bool,
+    types: *const Oid,
+    absent_on_null: bool,
 ) -> Datum {
-    unimplemented!("json_build_array_worker: add_json/json_categorize_type not yet translated")
+    let mut i: c_int;
+    let mut sep: *const c_char = c"".as_ptr();
+    let result: StringInfo;
+
+    result = makeStringInfo();
+
+    appendStringInfoChar(result, b'[' as c_char);
+
+    i = 0;
+    while i < nargs {
+        if absent_on_null && *nulls.add(i as usize) {
+            i += 1;
+            continue;
+        }
+
+        appendStringInfoString(result, sep);
+        sep = c", ".as_ptr();
+        add_json(
+            *args.add(i as usize),
+            *nulls.add(i as usize),
+            result,
+            *types.add(i as usize),
+            false,
+        );
+        i += 1;
+    }
+
+    appendStringInfoChar(result, b']' as c_char);
+
+    PointerGetDatum(cstring_to_text_with_len((*result).data, (*result).len) as *const c_void)
 }
 
+/*
+ * SQL function json_build_array(variadic "any")
+ */
 pub unsafe fn json_build_array(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_build_array: extract_variadic_args/add_json not yet translated")
+    let mut args: *mut Datum = null_mut();
+    let mut nulls: *mut bool = null_mut();
+    let mut types: *mut Oid = null_mut();
+
+    /* build argument values to build the object */
+    let nargs: c_int =
+        extract_variadic_args(fcinfo, 0, true, &mut args, &mut types, &mut nulls);
+
+    if nargs < 0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_DATUM!(json_build_array_worker(nargs, args, nulls, types, false));
 }
 
 pub unsafe fn json_build_array_noargs(_fcinfo: FunctionCallInfo) -> Datum {
@@ -668,14 +2080,172 @@ pub unsafe fn json_build_array_noargs(_fcinfo: FunctionCallInfo) -> Datum {
     PG_RETURN_TEXT_P!(cstring_to_text_with_len(c"[]".as_ptr(), 2));
 }
 
+/*
+ * SQL function json_object(text[])
+ *
+ * take a one or two dimensional array of text as key/value pairs
+ * for a json object.
+ */
 pub unsafe fn json_object(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_object: deconstruct_array_builtin/escape_json_text not yet translated")
+    let in_array: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let ndims: c_int = ARR_NDIM(in_array);
+    let mut result: StringInfoData = core::mem::zeroed();
+    let mut in_datums: *mut Datum = null_mut();
+    let mut in_nulls: *mut bool = null_mut();
+    let mut in_count: c_int = 0;
+    let count: c_int;
+    let mut i: c_int;
+    let rval: *mut text;
+
+    match ndims {
+        0 => {
+            PG_RETURN_DATUM!(CStringGetTextDatum(c"{}".as_ptr()));
+        }
+
+        1 => {
+            if (*ARR_DIMS(in_array).add(0)) % 2 != 0 {
+                let _ = errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR);
+                ereport!(ERROR, errmsg!("array must have even number of elements"));
+            }
+        }
+
+        2 => {
+            if (*ARR_DIMS(in_array).add(1)) != 2 {
+                let _ = errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR);
+                ereport!(ERROR, errmsg!("array must have two columns"));
+            }
+        }
+
+        _ => {
+            let _ = errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR);
+            ereport!(ERROR, errmsg!("wrong number of array subscripts"));
+        }
+    }
+
+    deconstruct_array_builtin(in_array, TEXTOID, &mut in_datums, &mut in_nulls, &mut in_count);
+
+    count = in_count / 2;
+
+    initStringInfo(&mut result);
+
+    appendStringInfoChar(&mut result, b'{' as c_char);
+
+    i = 0;
+    while i < count {
+        if *in_nulls.add((i * 2) as usize) {
+            let _ = errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED);
+            ereport!(ERROR, errmsg!("null value not allowed for object key"));
+        }
+
+        if i > 0 {
+            appendStringInfoString(&mut result, c", ".as_ptr());
+        }
+        escape_json_text(
+            &mut result,
+            DatumGetPointer(*in_datums.add((i * 2) as usize)) as *mut text,
+        );
+        appendStringInfoString(&mut result, c" : ".as_ptr());
+        if *in_nulls.add((i * 2 + 1) as usize) {
+            appendStringInfoString(&mut result, c"null".as_ptr());
+        } else {
+            escape_json_text(
+                &mut result,
+                DatumGetPointer(*in_datums.add((i * 2 + 1) as usize)) as *mut text,
+            );
+        }
+        i += 1;
+    }
+
+    appendStringInfoChar(&mut result, b'}' as c_char);
+
+    pfree(in_datums as *mut c_void);
+    pfree(in_nulls as *mut c_void);
+
+    rval = cstring_to_text_with_len(result.data, result.len);
+    pfree(result.data as *mut c_void);
+
+    PG_RETURN_TEXT_P!(rval);
 }
 
+/*
+ * SQL function json_object(text[], text[])
+ *
+ * take separate key and value arrays of text to construct a json object
+ * pairwise.
+ */
 pub unsafe fn json_object_two_arg(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("json_object_two_arg: deconstruct_array_builtin not yet translated")
+    let key_array: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 0);
+    let val_array: *mut ArrayType = PG_GETARG_ARRAYTYPE_P!(fcinfo, 1);
+    let nkdims: c_int = ARR_NDIM(key_array);
+    let nvdims: c_int = ARR_NDIM(val_array);
+    let mut result: StringInfoData = core::mem::zeroed();
+    let mut key_datums: *mut Datum = null_mut();
+    let mut val_datums: *mut Datum = null_mut();
+    let mut key_nulls: *mut bool = null_mut();
+    let mut val_nulls: *mut bool = null_mut();
+    let mut key_count: c_int = 0;
+    let mut val_count: c_int = 0;
+    let mut i: c_int;
+    let rval: *mut text;
+
+    if nkdims > 1 || nkdims != nvdims {
+        let _ = errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR);
+        ereport!(ERROR, errmsg!("wrong number of array subscripts"));
+    }
+
+    if nkdims == 0 {
+        PG_RETURN_DATUM!(CStringGetTextDatum(c"{}".as_ptr()));
+    }
+
+    deconstruct_array_builtin(key_array, TEXTOID, &mut key_datums, &mut key_nulls, &mut key_count);
+    deconstruct_array_builtin(val_array, TEXTOID, &mut val_datums, &mut val_nulls, &mut val_count);
+
+    if key_count != val_count {
+        let _ = errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR);
+        ereport!(ERROR, errmsg!("mismatched array dimensions"));
+    }
+
+    initStringInfo(&mut result);
+
+    appendStringInfoChar(&mut result, b'{' as c_char);
+
+    i = 0;
+    while i < key_count {
+        if *key_nulls.add(i as usize) {
+            let _ = errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED);
+            ereport!(ERROR, errmsg!("null value not allowed for object key"));
+        }
+
+        if i > 0 {
+            appendStringInfoString(&mut result, c", ".as_ptr());
+        }
+        escape_json_text(
+            &mut result,
+            DatumGetPointer(*key_datums.add(i as usize)) as *mut text,
+        );
+        appendStringInfoString(&mut result, c" : ".as_ptr());
+        if *val_nulls.add(i as usize) {
+            appendStringInfoString(&mut result, c"null".as_ptr());
+        } else {
+            escape_json_text(
+                &mut result,
+                DatumGetPointer(*val_datums.add(i as usize)) as *mut text,
+            );
+        }
+        i += 1;
+    }
+
+    appendStringInfoChar(&mut result, b'}' as c_char);
+
+    pfree(key_datums as *mut c_void);
+    pfree(key_nulls as *mut c_void);
+    pfree(val_datums as *mut c_void);
+    pfree(val_nulls as *mut c_void);
+
+    rval = cstring_to_text_with_len(result.data, result.len);
+    pfree(result.data as *mut c_void);
+
+    PG_RETURN_TEXT_P!(rval);
 }
 
 // ===========================================================================
@@ -834,9 +2404,6 @@ struct JsonUniqueStackEntry {
     object_id: c_int,
 }
 
-/* hash table for key names (HTAB) -- not yet ported. */
-type JsonUniqueCheckState = *mut c_void; // TODO(pg-port): utils/hsearch.h HTAB
-
 /* Context struct for key uniqueness check during JSON parsing */
 #[repr(C)]
 struct JsonUniqueParsingState {
@@ -848,20 +2415,80 @@ struct JsonUniqueParsingState {
 }
 
 /*
- * json_unique_check_init / json_unique_check_key: the dynahash-backed key
- * uniqueness set.  TODO(pg-port): utils/hsearch.h (hash_create/hash_search) +
- * common/hashfn.h wiring not yet translated.
+ * Uniqueness detection support.
+ *
+ * In order to detect uniqueness during building or parsing of a JSON
+ * object, we maintain a hash table of key names already seen.
  */
-unsafe fn json_unique_check_init(_cxt: *mut JsonUniqueCheckState) {
-    unimplemented!("json_unique_check_init: utils/hsearch.h not yet translated")
+unsafe fn json_unique_check_init(cxt: *mut JsonUniqueCheckState) {
+    let mut ctl: HASHCTL = core::mem::zeroed();
+
+    memset(
+        &mut ctl as *mut HASHCTL as *mut c_void,
+        0,
+        core::mem::size_of::<HASHCTL>(),
+    );
+    ctl.keysize = core::mem::size_of::<JsonUniqueHashEntry>();
+    ctl.entrysize = core::mem::size_of::<JsonUniqueHashEntry>();
+    ctl.hcxt = CurrentMemoryContext;
+    ctl.hash = json_unique_hash;
+    ctl.r#match = json_unique_hash_match;
+
+    *cxt = hash_create(
+        c"json object hashtable".as_ptr(),
+        32,
+        &mut ctl,
+        HASH_ELEM | HASH_CONTEXT | HASH_FUNCTION | HASH_COMPARE,
+    );
+}
+
+unsafe fn json_unique_builder_init(cxt: *mut JsonUniqueBuilderState) {
+    json_unique_check_init(&mut (*cxt).check);
+    (*cxt).mcxt = CurrentMemoryContext;
+    (*cxt).skipped_keys.data = null_mut();
 }
 
 unsafe fn json_unique_check_key(
-    _cxt: *mut JsonUniqueCheckState,
-    _key: *const c_char,
-    _object_id: c_int,
+    cxt: *mut JsonUniqueCheckState,
+    key: *const c_char,
+    object_id: c_int,
 ) -> bool {
-    unimplemented!("json_unique_check_key: utils/hsearch.h not yet translated")
+    let mut entry: JsonUniqueHashEntry = core::mem::zeroed();
+    let mut found: bool = false;
+
+    entry.key = key;
+    entry.key_len = strlen(key) as c_int;
+    entry.object_id = object_id;
+
+    hash_search(
+        *cxt,
+        &mut entry as *mut JsonUniqueHashEntry as *const c_void,
+        HASH_ENTER,
+        &mut found,
+    );
+
+    !found
+}
+
+/*
+ * On-demand initialization of a throwaway StringInfo.  This is used to
+ * read a key name that we don't need to store in the output object, for
+ * duplicate key detection when the value is NULL.
+ */
+unsafe fn json_unique_builder_get_throwawaybuf(cxt: *mut JsonUniqueBuilderState) -> StringInfo {
+    let out: StringInfo = &mut (*cxt).skipped_keys;
+
+    if (*out).data.is_null() {
+        let oldcxt: MemoryContext = MemoryContextSwitchTo((*cxt).mcxt);
+
+        initStringInfo(out);
+        MemoryContextSwitchTo(oldcxt);
+    } else {
+        /* Just reset the string to empty */
+        (*out).len = 0;
+    }
+
+    out
 }
 
 /* Semantic actions for key uniqueness check */

@@ -2495,15 +2495,408 @@ unsafe fn auth_peer(port: *mut Port) -> c_int {
  */
 // #ifdef USE_PAM
 
+// PAM library types and constants (security/pam_appl.h, not ported in this
+// build). TODO(pg-port): real PAM bindings (USE_PAM).
+const PAM_MAX_NUM_MSG: c_int = 32;
+const PAM_SUCCESS: c_int = 0;
+const PAM_CONV_ERR: c_int = 19;
+const PAM_PROMPT_ECHO_OFF: c_int = 1;
+const PAM_ERROR_MSG: c_int = 3;
+const PAM_TEXT_INFO: c_int = 4;
+
+#[repr(C)]
+struct pam_message {
+    msg_style: c_int,
+    msg: *const c_char,
+}
+
+#[repr(C)]
+struct pam_response {
+    resp: *mut c_char,
+    resp_retcode: c_int,
+}
+
+// PG_PAM_CONST resolves to const on modern PAM. Statics shared with
+// pam_passwd_conv_proc, set up by CheckPAMAuth before the conversation runs.
+static mut pam_passwd: *const c_char = null();
+static mut pam_port_cludge: *mut Port = null_mut();
+static mut pam_no_password: bool = false;
+
+// PAM item identifiers (security/pam_appl.h).
+const PAM_USER: c_int = 2;
+const PAM_CONV: c_int = 5;
+const PAM_RHOST: c_int = 4;
+
+// Opaque PAM authenticator handle.
+#[repr(C)]
+struct pam_handle_t {
+    _private: [u8; 0],
+}
+
+// struct pam_conv: conversation callback plus appdata pointer.
+#[repr(C)]
+struct pam_conv {
+    conv: Option<
+        unsafe extern "C" fn(c_int, *mut *const pam_message, *mut *mut pam_response, *mut c_void) -> c_int,
+    >,
+    appdata_ptr: *mut c_void,
+}
+
+// static struct pam_conv pam_passw_conv = { &pam_passwd_conv_proc, NULL };
+static mut pam_passw_conv: pam_conv = pam_conv {
+    conv: Some(pam_passwd_conv_proc),
+    appdata_ptr: null_mut(),
+};
+
+// TODO(pg-port): real PAM library bindings (USE_PAM, -lpam).
+unsafe fn pam_start(
+    _service: *const c_char,
+    _user: *const c_char,
+    _conv: *const pam_conv,
+    _pamh: *mut *mut pam_handle_t,
+) -> c_int {
+    unimplemented!() // TODO(pg-port): libpam pam_start
+}
+unsafe fn pam_set_item(_pamh: *mut pam_handle_t, _item_type: c_int, _item: *const c_void) -> c_int {
+    unimplemented!() // TODO(pg-port): libpam pam_set_item
+}
+unsafe fn pam_authenticate(_pamh: *mut pam_handle_t, _flags: c_int) -> c_int {
+    unimplemented!() // TODO(pg-port): libpam pam_authenticate
+}
+unsafe fn pam_acct_mgmt(_pamh: *mut pam_handle_t, _flags: c_int) -> c_int {
+    unimplemented!() // TODO(pg-port): libpam pam_acct_mgmt
+}
+unsafe fn pam_end(_pamh: *mut pam_handle_t, _pam_status: c_int) -> c_int {
+    unimplemented!() // TODO(pg-port): libpam pam_end
+}
+unsafe fn pam_strerror(_pamh: *mut pam_handle_t, _errnum: c_int) -> *const c_char {
+    unimplemented!() // TODO(pg-port): libpam pam_strerror
+}
+
+// TODO(pg-port): libc strdup/calloc/free/strlen for PAM-owned memory.
+extern "C" {
+    fn strdup(s: *const c_char) -> *mut c_char;
+    fn calloc(nmemb: usize, size: usize) -> *mut c_void;
+    fn free(ptr: *mut c_void);
+    fn strlen(s: *const c_char) -> usize;
+}
+
+/*
+ * pam_passwd_conv_proc: PAM conversation function
+ */
+unsafe extern "C" fn pam_passwd_conv_proc(
+    num_msg: c_int,
+    msg: *mut *const pam_message,
+    resp: *mut *mut pam_response,
+    appdata_ptr: *mut c_void,
+) -> c_int {
+    let mut passwd: *const c_char;
+    let reply: *mut pam_response;
+    let mut i: c_int;
+
+    if !appdata_ptr.is_null() {
+        passwd = appdata_ptr as *const c_char;
+    } else {
+        /*
+         * Workaround for Solaris 2.6 where the PAM library is broken and does
+         * not pass appdata_ptr to the conversation routine
+         */
+        passwd = pam_passwd;
+    }
+
+    *resp = null_mut(); /* in case of error exit */
+
+    if num_msg <= 0 || num_msg > PAM_MAX_NUM_MSG {
+        return PAM_CONV_ERR;
+    }
+
+    /*
+     * Explicitly not using palloc here - PAM will free this memory in
+     * pam_end()
+     */
+    reply = calloc(num_msg as usize, core::mem::size_of::<pam_response>()) as *mut pam_response;
+    if reply.is_null() {
+        ereport!(
+            LOG,
+            errmsg!("out of memory")
+        );
+        /* C also: errcode(ERRCODE_OUT_OF_MEMORY) */
+        return PAM_CONV_ERR;
+    }
+
+    i = 0;
+    while i < num_msg {
+        let cur = *msg.add(i as usize);
+        let slot = reply.add(i as usize);
+        match (*cur).msg_style {
+            x if x == PAM_PROMPT_ECHO_OFF => {
+                if strlen(passwd) == 0 {
+                    /*
+                     * Password wasn't passed to PAM the first time around -
+                     * let's go ask the client to send a password, which we
+                     * then stuff into PAM.
+                     */
+                    sendAuthRequest(pam_port_cludge, AUTH_REQ_PASSWORD, null(), 0);
+                    passwd = recv_password_packet(pam_port_cludge);
+                    if passwd.is_null() {
+                        /*
+                         * Client didn't want to send password.  We
+                         * intentionally do not log anything about this,
+                         * either here or at higher levels.
+                         */
+                        pam_no_password = true;
+                        return pam_passwd_conv_fail(reply, num_msg);
+                    }
+                }
+                (*slot).resp = strdup(passwd);
+                if (*slot).resp.is_null() {
+                    return pam_passwd_conv_fail(reply, num_msg);
+                }
+                (*slot).resp_retcode = PAM_SUCCESS;
+            }
+            x if x == PAM_ERROR_MSG => {
+                ereport!(
+                    LOG,
+                    errmsg!(
+                        "error from underlying PAM layer: {}",
+                        CStr::from_ptr((*cur).msg).to_string_lossy()
+                    )
+                );
+                /* FALL THROUGH */
+                /* we don't bother to log TEXT_INFO messages */
+                (*slot).resp = strdup(c"".as_ptr());
+                if (*slot).resp.is_null() {
+                    return pam_passwd_conv_fail(reply, num_msg);
+                }
+                (*slot).resp_retcode = PAM_SUCCESS;
+            }
+            x if x == PAM_TEXT_INFO => {
+                /* we don't bother to log TEXT_INFO messages */
+                (*slot).resp = strdup(c"".as_ptr());
+                if (*slot).resp.is_null() {
+                    return pam_passwd_conv_fail(reply, num_msg);
+                }
+                (*slot).resp_retcode = PAM_SUCCESS;
+            }
+            _ => {
+                let msg_str = if !(*cur).msg.is_null() {
+                    CStr::from_ptr((*cur).msg).to_string_lossy().into_owned()
+                } else {
+                    "(none)".to_string()
+                };
+                ereport!(
+                    LOG,
+                    errmsg!(
+                        "unsupported PAM conversation {}/\"{}\"",
+                        (*cur).msg_style,
+                        msg_str
+                    )
+                );
+                return pam_passwd_conv_fail(reply, num_msg);
+            }
+        }
+        i += 1;
+    }
+
+    *resp = reply;
+    PAM_SUCCESS
+}
+
+/* fail: free up whatever we allocated, return PAM_CONV_ERR */
+unsafe fn pam_passwd_conv_fail(reply: *mut pam_response, num_msg: c_int) -> c_int {
+    let mut i = 0;
+    while i < num_msg {
+        free((*reply.add(i as usize)).resp as *mut c_void);
+        i += 1;
+    }
+    free(reply as *mut c_void);
+
+    PAM_CONV_ERR
+}
+
 /*
  * Check authentication against PAM.
  */
 unsafe fn CheckPAMAuth(port: *mut Port, user: *const c_char, password: *const c_char) -> c_int {
-    // PAM is not linked in this build; the full conversation logic lives in
-    // pam_passwd_conv_proc and CheckPAMAuth in auth.c.
-    // TODO(pg-port): real PAM bindings (USE_PAM).
-    let _ = (port, user, password);
-    unimplemented!() // TODO(pg-port): PAM (USE_PAM)
+    let mut retval: c_int;
+    let mut pamh: *mut pam_handle_t = null_mut();
+
+    /*
+     * We can't entirely rely on PAM to pass through appdata --- it appears
+     * not to work on at least Solaris 2.6.  So use these ugly static
+     * variables instead.
+     */
+    pam_passwd = password;
+    pam_port_cludge = port;
+    pam_no_password = false;
+
+    /*
+     * Set the application data portion of the conversation struct.  This is
+     * later used inside the PAM conversation to pass the password to the
+     * authentication module.
+     */
+    pam_passw_conv.appdata_ptr = password as *mut c_char as *mut c_void; /* from password above, not allocated */
+
+    /* Optionally, one can set the service name in pg_hba.conf */
+    if !(*(*port).hba).pamservice.is_null() && *(*(*port).hba).pamservice != 0 {
+        retval = pam_start(
+            (*(*port).hba).pamservice,
+            c"pgsql@".as_ptr(),
+            &raw const pam_passw_conv,
+            &mut pamh,
+        );
+    } else {
+        retval = pam_start(
+            PGSQL_PAM_SERVICE.as_ptr(),
+            c"pgsql@".as_ptr(),
+            &raw const pam_passw_conv,
+            &mut pamh,
+        );
+    }
+
+    if retval != PAM_SUCCESS {
+        ereport!(
+            LOG,
+            errmsg!(
+                "could not create PAM authenticator: {}",
+                CStr::from_ptr(pam_strerror(pamh, retval)).to_string_lossy()
+            )
+        );
+        pam_passwd = null(); /* Unset pam_passwd */
+        return STATUS_ERROR;
+    }
+
+    retval = pam_set_item(pamh, PAM_USER, user as *const c_void);
+
+    if retval != PAM_SUCCESS {
+        ereport!(
+            LOG,
+            errmsg!(
+                "pam_set_item(PAM_USER) failed: {}",
+                CStr::from_ptr(pam_strerror(pamh, retval)).to_string_lossy()
+            )
+        );
+        pam_passwd = null(); /* Unset pam_passwd */
+        return STATUS_ERROR;
+    }
+
+    if (*(*port).hba).conntype != ctLocal {
+        let mut hostinfo: [c_char; NI_MAXHOST] = [0; NI_MAXHOST];
+        let flags: c_int;
+
+        if (*(*port).hba).pam_use_hostname {
+            flags = 0;
+        } else {
+            flags = NI_NUMERICHOST | NI_NUMERICSERV;
+        }
+
+        retval = pg_getnameinfo_all(
+            &(*port).raddr as *const _ as *const SockAddrStorage,
+            salen_of(&(*port).raddr),
+            hostinfo.as_mut_ptr(),
+            core::mem::size_of_val(&hostinfo) as c_int,
+            null_mut(),
+            0,
+            flags,
+        );
+        if retval != 0 {
+            ereport!(
+                WARNING,
+                errmsg!(
+                    "pg_getnameinfo_all() failed: {}",
+                    CStr::from_ptr(gai_strerror(retval)).to_string_lossy()
+                )
+            );
+            /* C: errmsg_internal */
+            return STATUS_ERROR;
+        }
+
+        retval = pam_set_item(pamh, PAM_RHOST, hostinfo.as_ptr() as *const c_void);
+
+        if retval != PAM_SUCCESS {
+            ereport!(
+                LOG,
+                errmsg!(
+                    "pam_set_item(PAM_RHOST) failed: {}",
+                    CStr::from_ptr(pam_strerror(pamh, retval)).to_string_lossy()
+                )
+            );
+            pam_passwd = null();
+            return STATUS_ERROR;
+        }
+    }
+
+    retval = pam_set_item(pamh, PAM_CONV, &raw const pam_passw_conv as *const c_void);
+
+    if retval != PAM_SUCCESS {
+        ereport!(
+            LOG,
+            errmsg!(
+                "pam_set_item(PAM_CONV) failed: {}",
+                CStr::from_ptr(pam_strerror(pamh, retval)).to_string_lossy()
+            )
+        );
+        pam_passwd = null(); /* Unset pam_passwd */
+        return STATUS_ERROR;
+    }
+
+    retval = pam_authenticate(pamh, 0);
+
+    if retval != PAM_SUCCESS {
+        /* If pam_passwd_conv_proc saw EOF, don't log anything */
+        if !pam_no_password {
+            ereport!(
+                LOG,
+                errmsg!(
+                    "pam_authenticate failed: {}",
+                    CStr::from_ptr(pam_strerror(pamh, retval)).to_string_lossy()
+                )
+            );
+        }
+        pam_passwd = null(); /* Unset pam_passwd */
+        return if pam_no_password { STATUS_EOF } else { STATUS_ERROR };
+    }
+
+    retval = pam_acct_mgmt(pamh, 0);
+
+    if retval != PAM_SUCCESS {
+        /* If pam_passwd_conv_proc saw EOF, don't log anything */
+        if !pam_no_password {
+            ereport!(
+                LOG,
+                errmsg!(
+                    "pam_acct_mgmt failed: {}",
+                    CStr::from_ptr(pam_strerror(pamh, retval)).to_string_lossy()
+                )
+            );
+        }
+        pam_passwd = null(); /* Unset pam_passwd */
+        return if pam_no_password { STATUS_EOF } else { STATUS_ERROR };
+    }
+
+    retval = pam_end(pamh, retval);
+
+    if retval != PAM_SUCCESS {
+        ereport!(
+            LOG,
+            errmsg!(
+                "could not release PAM authenticator: {}",
+                CStr::from_ptr(pam_strerror(pamh, retval)).to_string_lossy()
+            )
+        );
+    }
+
+    pam_passwd = null(); /* Unset pam_passwd */
+
+    if retval == PAM_SUCCESS {
+        set_authn_id(port, user);
+    }
+
+    if retval == PAM_SUCCESS {
+        STATUS_OK
+    } else {
+        STATUS_ERROR
+    }
 }
 // #endif /* USE_PAM */
 

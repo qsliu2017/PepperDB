@@ -46,6 +46,186 @@ pub struct FormData_pg_range {
  */
 pub type Form_pg_range = *mut FormData_pg_range;
 
+/*-------------------------------------------------------------------------
+ *
+ * pg_range.c
+ *	  routines to support manipulation of the pg_range relation
+ *
+ * Source: postgres/src/backend/catalog/pg_range.c
+ *
+ *-------------------------------------------------------------------------
+ */
+use crate::prelude::*;
+
+use crate::access::attnum::AttrNumber;
+use crate::access::htup_details::{HeapTuple, HeapTupleIsValid};
+use crate::access::stratnum::BTEqualStrategyNumber;
+use crate::access::common::scankey::{ScanKeyData, ScanKeyInit};
+use crate::access::index::genam::{
+    SysScanDesc, systable_beginscan, systable_endscan, systable_getnext,
+};
+use crate::access::common::heaptuple::{heap_form_tuple, heap_freetuple};
+use crate::catalog::objectaddress_impl::{table_close, table_open};
+use crate::catalog::objectaccess::ObjectAddress;
+use crate::catalog::catalog_oids::{
+    CollationRelationId, OperatorClassRelationId, ProcedureRelationId,
+    RangeRelationId, TypeRelationId,
+};
+use crate::catalog::dependency::{
+    DEPENDENCY_INTERNAL, DEPENDENCY_NORMAL, ObjectAddresses,
+    add_exact_object_address, free_object_addresses, new_object_addresses,
+    record_object_address_dependencies,
+};
+use crate::catalog::pg_depend::recordDependencyOn;
+use crate::catalog::indexing::{CatalogTupleDelete, CatalogTupleInsert};
+use crate::utils::rel::{Relation, RelationGetDescr};
+use crate::storage::lockdefs::RowExclusiveLock;
+
+// pg_range column numbers (catalog/pg_range.h)
+// TODO(pg-port): replace with generated pg_range_d.h constants.
+const Natts_pg_range: usize = 7;
+const Anum_pg_range_rngtypid: AttrNumber = 1;
+const Anum_pg_range_rngsubtype: AttrNumber = 2;
+const Anum_pg_range_rngmultitypid: AttrNumber = 3;
+const Anum_pg_range_rngcollation: AttrNumber = 4;
+const Anum_pg_range_rngsubopc: AttrNumber = 5;
+const Anum_pg_range_rngcanonical: AttrNumber = 6;
+const Anum_pg_range_rngsubdiff: AttrNumber = 7;
+
+// pg_range index OID (catalog/pg_range.h)
+// TODO(pg-port): replace with generated indexing constant.
+const RangeTypidIndexId: Oid = 3542;
+
+// fmgr OID used in ScanKeyInit (utils/fmgroids.h)
+// TODO(pg-port): replace with generated fmgroids.h constant.
+const F_OIDEQ: RegProcedure = 184;
+
+/* catalog/dependency.h ObjectAddressSet helper. */
+unsafe fn ObjectAddressSet(addr: &mut ObjectAddress, classId: Oid, objectId: Oid) {
+    addr.classId = classId;
+    addr.objectId = objectId;
+    addr.objectSubId = 0;
+}
+
+/*
+ * RangeCreate
+ *		Create an entry in pg_range.
+ */
+pub unsafe fn RangeCreate(
+    rangeTypeOid: Oid,
+    rangeSubType: Oid,
+    rangeCollation: Oid,
+    rangeSubOpclass: Oid,
+    rangeCanonical: RegProcedure,
+    rangeSubDiff: RegProcedure,
+    multirangeTypeOid: Oid,
+) {
+    let pg_range: Relation;
+    let mut values: [Datum; Natts_pg_range] = [0; Natts_pg_range];
+    let mut nulls: [bool; Natts_pg_range] = [false; Natts_pg_range];
+    let tup: HeapTuple;
+    let mut myself: ObjectAddress = core::mem::zeroed();
+    let mut referenced: ObjectAddress = core::mem::zeroed();
+    let mut referencing: ObjectAddress = core::mem::zeroed();
+    let addrs: *mut ObjectAddresses;
+
+    pg_range = table_open(RangeRelationId, RowExclusiveLock);
+
+    nulls = [false; Natts_pg_range];
+
+    values[Anum_pg_range_rngtypid as usize - 1] = ObjectIdGetDatum(rangeTypeOid);
+    values[Anum_pg_range_rngsubtype as usize - 1] = ObjectIdGetDatum(rangeSubType);
+    values[Anum_pg_range_rngcollation as usize - 1] = ObjectIdGetDatum(rangeCollation);
+    values[Anum_pg_range_rngsubopc as usize - 1] = ObjectIdGetDatum(rangeSubOpclass);
+    values[Anum_pg_range_rngcanonical as usize - 1] = ObjectIdGetDatum(rangeCanonical);
+    values[Anum_pg_range_rngsubdiff as usize - 1] = ObjectIdGetDatum(rangeSubDiff);
+    values[Anum_pg_range_rngmultitypid as usize - 1] = ObjectIdGetDatum(multirangeTypeOid);
+
+    tup = heap_form_tuple(RelationGetDescr(pg_range), values.as_ptr(), nulls.as_ptr());
+
+    CatalogTupleInsert(pg_range, tup);
+    heap_freetuple(tup);
+
+    /* record type's dependencies on range-related items */
+    addrs = new_object_addresses();
+
+    ObjectAddressSet(&mut myself, TypeRelationId, rangeTypeOid);
+
+    ObjectAddressSet(&mut referenced, TypeRelationId, rangeSubType);
+    add_exact_object_address(&referenced, addrs);
+
+    ObjectAddressSet(&mut referenced, OperatorClassRelationId, rangeSubOpclass);
+    add_exact_object_address(&referenced, addrs);
+
+    if OidIsValid(rangeCollation) {
+        ObjectAddressSet(&mut referenced, CollationRelationId, rangeCollation);
+        add_exact_object_address(&referenced, addrs);
+    }
+
+    if OidIsValid(rangeCanonical) {
+        ObjectAddressSet(&mut referenced, ProcedureRelationId, rangeCanonical);
+        add_exact_object_address(&referenced, addrs);
+    }
+
+    if OidIsValid(rangeSubDiff) {
+        ObjectAddressSet(&mut referenced, ProcedureRelationId, rangeSubDiff);
+        add_exact_object_address(&referenced, addrs);
+    }
+
+    record_object_address_dependencies(&myself, addrs, DEPENDENCY_NORMAL);
+    free_object_addresses(addrs);
+
+    /* record multirange type's dependency on the range type */
+    referencing.classId = TypeRelationId;
+    referencing.objectId = multirangeTypeOid;
+    referencing.objectSubId = 0;
+    recordDependencyOn(&referencing, &myself, DEPENDENCY_INTERNAL);
+
+    table_close(pg_range, RowExclusiveLock);
+}
+
+/*
+ * RangeDelete
+ *		Remove the pg_range entry for the specified type.
+ */
+pub unsafe fn RangeDelete(rangeTypeOid: Oid) {
+    let pg_range: Relation;
+    let mut key: [ScanKeyData; 1] = core::mem::zeroed();
+    let scan: SysScanDesc;
+    let mut tup: HeapTuple;
+
+    pg_range = table_open(RangeRelationId, RowExclusiveLock);
+
+    ScanKeyInit(
+        &mut key[0],
+        Anum_pg_range_rngtypid,
+        BTEqualStrategyNumber,
+        F_OIDEQ,
+        ObjectIdGetDatum(rangeTypeOid),
+    );
+
+    scan = systable_beginscan(
+        pg_range,
+        RangeTypidIndexId,
+        true,
+        core::ptr::null_mut(),
+        1,
+        key.as_mut_ptr(),
+    );
+
+    loop {
+        tup = systable_getnext(scan) as HeapTuple;
+        if !HeapTupleIsValid(tup) {
+            break;
+        }
+        CatalogTupleDelete(pg_range, &mut (*tup).t_self);
+    }
+
+    systable_endscan(scan);
+
+    table_close(pg_range, RowExclusiveLock);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -154,12 +154,25 @@ pub unsafe fn defGetString(def: *mut DefElem) -> *mut c_char {
 
 /*
  * Extract a numeric value (actually double) from a DefElem.
- *
- * STUB: defGetNumeric is not ported here (the broader numeric handling lives
- * elsewhere); keep the signature.  TODO: port if/when needed.
  */
-pub unsafe fn defGetNumeric(_def: *mut DefElem) -> f64 {
-    unimplemented!("defGetNumeric: not ported (TODO)")
+pub unsafe fn defGetNumeric(def: *mut DefElem) -> f64 {
+    if (*def).arg.is_null() {
+        ereport!(
+            ERROR,
+            errmsg!("{} requires a numeric value", cstr_display((*def).defname))
+        );
+    }
+    match crate::nodes::nodes::nodeTag((*def).arg) {
+        NodeTag::T_Integer => intVal!((*def).arg) as f64,
+        NodeTag::T_Float => floatVal!((*def).arg),
+        _ => {
+            ereport!(
+                ERROR,
+                errmsg!("{} requires a numeric value", cstr_display((*def).defname))
+            );
+            unreachable!()
+        }
+    }
 }
 
 /*

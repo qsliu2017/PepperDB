@@ -28,15 +28,9 @@
 //! come from c.h, already defined in crate::c (re-exported via the prelude).
 //!
 //! STUBBED dependencies (not yet translated):
-//!   - `libpq/pqformat.h` StringInfo serializers (pq_getmsgtext / pq_begintypsend
-//!     / pq_sendtext / pq_endtypsend) => namerecv / namesend are stubbed.
-//!   - `utils/varlena.h`'s varstr_cmp / varstr_sortsupport => the non-C-collation
-//!     path of namecmp and all of btnamesortsupport are stubbed.
-//!   - `miscadmin.h` (GetUserId / GetSessionUserId / GetUserNameFromId) =>
-//!     current_user / session_user are stubbed.
-//!   - `catalog/namespace.h` (fetch_search_path) + `utils/lsyscache.h`
-//!     (get_namespace_name) + `utils/array.h` (construct_array_builtin) =>
-//!     current_schema / current_schemas are stubbed.
+//!   - `utils/varlena.h`'s varstr_cmp / varstr_sortsupport (utils/adt/varlena.c
+//!     still mid-translation) => local TODO(pg-port) stubs; the non-C-collation
+//!     path of namecmp and all of btnamesortsupport route through them.
 //!   - `mb/pg_wchar.h`'s pg_mbcliplen is approximated locally (single-byte clip),
 //!     matching the conservative stub used in parser/scansup.rs and
 //!     utils/mmgr/mcxt.rs (real multibyte clip lives in mb/mbutils.c).
@@ -53,19 +47,25 @@ use crate::{
 use crate::catalog::pg_known_oids::C_COLLATION_OID; // catalog/pg_collation.h
 use crate::catalog::pg_type_d::NAMEOID; // catalog/pg_type.h
 use crate::nodes::execnodes::SortSupport; // SortSupport for btnamesortsupport
-use crate::nodes::pg_list::List; // catalog/namespace.h fetch_search_path returns List *
+use crate::nodes::pg_list::{lfirst_oid, linitial_oid, list_free, list_length, List, ListCell, NIL};
 use crate::pg_config::NAMEDATALEN;
-// NB: the C source calls DirectFunctionCall1(namein, CStringGetDatum(...)) in
-// current_user / session_user / current_schema(s); those are all stubbed (their
-// catalog/miscadmin deps are not yet translated), and DirectFunctionCall1 is a
-// #[macro_export] macro_rules! at the crate root (not importable as a path), so
-// no import is needed here.
-use crate::lib::stringinfo::StringInfo; // libpq/pqformat.h passes a StringInfo
+use crate::{
+    current_cell, foreach, DirectFunctionCall1, PG_RETURN_BYTEA_P, PG_RETURN_DATUM,
+    PG_RETURN_NULL, PG_RETURN_POINTER, PG_RETURN_VOID,
+};
+use crate::postgres::CStringGetDatum;
+// catalog/namespace.h, utils/lsyscache.h, utils/array.h
+use crate::catalog::namespace::fetch_search_path;
+use crate::utils::cache::lsyscache::get_namespace_name;
+use crate::utils::adt::arrayfuncs::construct_array_builtin;
+use crate::utils::array::ArrayType;
+// miscadmin.h
+use crate::miscadmin::{GetSessionUserId, GetUserId, GetUserNameFromId};
+// libpq/pqformat.h
+use crate::libpq::pqformat::{pq_begintypsend, pq_endtypsend, pq_getmsgtext, pq_sendtext};
+use crate::utils::palloc::{palloc, pfree};
+use crate::lib::stringinfo::{StringInfo, StringInfoData}; // libpq/pqformat.h passes a StringInfo
 use core::ffi::{c_char, c_int};
-
-/* errcodes.h classification (errcode() shim ignores the value) */
-// TODO(pg-port): ERRCODE_NAME_TOO_LONG from utils/errcodes.h.
-const ERRCODE_NAME_TOO_LONG: c_int = 0;
 
 // libc string/printf routines (string.h / stdio.h, pulled in via postgres.h in
 // the C source).  Bound directly via `extern "C"`, the same convention as
@@ -102,6 +102,36 @@ unsafe fn strlen(s: *const c_char) -> usize {
 unsafe fn pg_mbcliplen(_mbstr: *const c_char, len: c_int, limit: c_int) -> c_int {
     // TODO(pg-port): real multibyte-boundary clip via pg_encoding_mbliplen (mbutils.c).
     Min(len, limit)
+}
+
+/*
+ * `varstr_cmp` (utils/varlena.h): collation-aware comparison of two strings.
+ *
+ * # Safety
+ * `arg1`/`arg2` are readable for `len1`/`len2` bytes.
+ */
+unsafe fn varstr_cmp(
+    arg1: *const c_char,
+    len1: c_int,
+    arg2: *const c_char,
+    len2: c_int,
+    collid: Oid,
+) -> c_int {
+    // TODO(pg-port): varstr_cmp lives in utils/adt/varlena.c (still mid-translation).
+    let _ = (arg1, len1, arg2, len2, collid);
+    unimplemented!("varstr_cmp: utils/adt/varlena.c not yet translated")
+}
+
+/*
+ * `varstr_sortsupport` (utils/varlena.h): install the generic string SortSupport.
+ *
+ * # Safety
+ * `ssup` points to a SortSupport node.
+ */
+unsafe fn varstr_sortsupport(ssup: SortSupport, typid: Oid, collid: Oid) {
+    // TODO(pg-port): varstr_sortsupport lives in utils/adt/varlena.c (still mid-translation).
+    let _ = (ssup, typid, collid);
+    unimplemented!("varstr_sortsupport: utils/adt/varlena.c not yet translated")
 }
 
 /*
@@ -166,25 +196,24 @@ pub unsafe fn nameout(fcinfo: FunctionCallInfo) -> Datum {
  */
 pub unsafe fn namerecv(fcinfo: FunctionCallInfo) -> Datum {
     let buf: StringInfo = PG_GETARG_POINTER!(fcinfo, 0) as StringInfo;
+    let result: Name;
+    let str: *mut c_char;
+    let mut nbytes: c_int = 0;
 
-    // C body:
-    //   Name        result;
-    //   char       *str;
-    //   int         nbytes;
-    //   str = pq_getmsgtext(buf, buf->len - buf->cursor, &nbytes);
-    //   if (nbytes >= NAMEDATALEN)
-    //       ereport(ERROR,
-    //               (errcode(ERRCODE_NAME_TOO_LONG),
-    //                errmsg("identifier too long"),
-    //                errdetail("Identifier must be less than %d characters.",
-    //                          NAMEDATALEN)));
-    //   result = (NameData *) palloc0(NAMEDATALEN);
-    //   memcpy(result, str, nbytes);
-    //   pfree(str);
-    //   PG_RETURN_NAME(result);
-    // TODO(pg-port): libpq pqformat (pq_getmsgtext) not yet translated.
-    let _ = (buf, ERRCODE_NAME_TOO_LONG);
-    unimplemented!("namerecv: libpq/pqformat (pq_getmsgtext) not yet translated")
+    str = pq_getmsgtext(buf, (*buf).len - (*buf).cursor, &raw mut nbytes);
+    if nbytes >= NAMEDATALEN as c_int {
+        ereport!(
+            ERROR,
+            errmsg!("identifier too long")
+        );
+        /* C also: errcode(ERRCODE_NAME_TOO_LONG),
+         *         errdetail("Identifier must be less than %d characters.",
+         *                   NAMEDATALEN) */
+    }
+    result = palloc0(NAMEDATALEN) as Name;
+    memcpy(result as *mut c_void, str as *const c_void, nbytes as Size);
+    pfree(str as *mut c_void);
+    PG_RETURN_NAME!(result);
 }
 
 /*
@@ -192,16 +221,11 @@ pub unsafe fn namerecv(fcinfo: FunctionCallInfo) -> Datum {
  */
 pub unsafe fn namesend(fcinfo: FunctionCallInfo) -> Datum {
     let s: Name = PG_GETARG_NAME!(fcinfo, 0);
+    let mut buf: StringInfoData = core::mem::zeroed();
 
-    // C body:
-    //   StringInfoData buf;
-    //   pq_begintypsend(&buf);
-    //   pq_sendtext(&buf, NameStr(*s), strlen(NameStr(*s)));
-    //   PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
-    // TODO(pg-port): libpq pqformat (pq_begintypsend / pq_sendtext /
-    // pq_endtypsend) not yet translated.
-    let _ = s;
-    unimplemented!("namesend: libpq/pqformat (pq_sendtext) not yet translated")
+    pq_begintypsend(&raw mut buf);
+    pq_sendtext(&raw mut buf, NameStr(&*s), strlen(NameStr(&*s)) as c_int);
+    PG_RETURN_BYTEA_P!(pq_endtypsend(&raw mut buf));
 }
 
 /*****************************************************************************
@@ -228,12 +252,13 @@ unsafe fn namecmp(arg1: Name, arg2: Name, collid: Oid) -> c_int {
     }
 
     /* Else rely on the varstr infrastructure */
-    // C body:
-    //   return varstr_cmp(NameStr(*arg1), strlen(NameStr(*arg1)),
-    //                     NameStr(*arg2), strlen(NameStr(*arg2)),
-    //                     collid);
-    // TODO(pg-port): varstr_cmp lives in utils/adt/varlena.c (not yet translated).
-    unimplemented!("namecmp: varstr_cmp (utils/adt/varlena.c) not yet translated for non-C collation")
+    varstr_cmp(
+        NameStr(&*arg1),
+        strlen(NameStr(&*arg1)) as c_int,
+        NameStr(&*arg2),
+        strlen(NameStr(&*arg2)) as c_int,
+        collid,
+    )
 }
 
 pub unsafe fn nameeq(fcinfo: FunctionCallInfo) -> Datum {
@@ -287,20 +312,17 @@ pub unsafe fn btnamecmp(fcinfo: FunctionCallInfo) -> Datum {
 
 pub unsafe fn btnamesortsupport(fcinfo: FunctionCallInfo) -> Datum {
     let ssup: SortSupport = PG_GETARG_POINTER!(fcinfo, 0) as SortSupport;
+    let collid: Oid = (*ssup).ssup_collation;
+    let oldcontext: MemoryContext;
 
-    // C body:
-    //   Oid          collid = ssup->ssup_collation;
-    //   MemoryContext oldcontext;
-    //   oldcontext = MemoryContextSwitchTo(ssup->ssup_cxt);
-    //   /* Use generic string SortSupport */
-    //   varstr_sortsupport(ssup, NAMEOID, collid);
-    //   MemoryContextSwitchTo(oldcontext);
-    //   PG_RETURN_VOID();
-    // TODO(pg-port): varstr_sortsupport lives in utils/adt/varlena.c (not yet
-    // translated); also SortSupportData (ssup_collation/ssup_cxt) is only a stub
-    // struct in nodes/execnodes.rs.  On completion the body returns PG_RETURN_VOID!().
-    let _ = (ssup, NAMEOID);
-    unimplemented!("btnamesortsupport: varstr_sortsupport (utils/adt/varlena.c) not yet translated")
+    oldcontext = MemoryContextSwitchTo((*ssup).ssup_cxt);
+
+    /* Use generic string SortSupport */
+    varstr_sortsupport(ssup, NAMEOID, collid);
+
+    MemoryContextSwitchTo(oldcontext);
+
+    PG_RETURN_VOID!();
 }
 
 /*****************************************************************************
@@ -365,72 +387,63 @@ pub unsafe fn namestrcmp(name: Name, str: *const c_char) -> c_int {
  * SQL-functions CURRENT_USER, SESSION_USER
  */
 pub unsafe fn current_user(fcinfo: FunctionCallInfo) -> Datum {
-    // C body:
-    //   PG_RETURN_DATUM(DirectFunctionCall1(namein,
-    //       CStringGetDatum(GetUserNameFromId(GetUserId(), false))));
-    // TODO(pg-port): GetUserId / GetUserNameFromId (miscadmin.h / utils/acl)
-    // not yet translated.
     let _ = fcinfo;
-    unimplemented!("current_user: GetUserId/GetUserNameFromId (miscadmin.h) not yet translated")
+    PG_RETURN_DATUM!(DirectFunctionCall1!(
+        namein,
+        CStringGetDatum(GetUserNameFromId(GetUserId(), false))
+    ));
 }
 
 pub unsafe fn session_user(fcinfo: FunctionCallInfo) -> Datum {
-    // C body:
-    //   PG_RETURN_DATUM(DirectFunctionCall1(namein,
-    //       CStringGetDatum(GetUserNameFromId(GetSessionUserId(), false))));
-    // TODO(pg-port): GetSessionUserId / GetUserNameFromId (miscadmin.h) not yet
-    // translated.
     let _ = fcinfo;
-    unimplemented!("session_user: GetSessionUserId/GetUserNameFromId (miscadmin.h) not yet translated")
+    PG_RETURN_DATUM!(DirectFunctionCall1!(
+        namein,
+        CStringGetDatum(GetUserNameFromId(GetSessionUserId(), false))
+    ));
 }
 
 /*
  * SQL-functions CURRENT_SCHEMA, CURRENT_SCHEMAS
  */
 pub unsafe fn current_schema(fcinfo: FunctionCallInfo) -> Datum {
-    // C body:
-    //   List       *search_path = fetch_search_path(false);
-    //   char       *nspname;
-    //   if (search_path == NIL)
-    //       PG_RETURN_NULL();
-    //   nspname = get_namespace_name(linitial_oid(search_path));
-    //   list_free(search_path);
-    //   if (!nspname)
-    //       PG_RETURN_NULL();       /* recently-deleted namespace? */
-    //   PG_RETURN_DATUM(DirectFunctionCall1(namein, CStringGetDatum(nspname)));
-    // TODO(pg-port): fetch_search_path (catalog/namespace.c) +
-    // get_namespace_name (utils/lsyscache.c) not yet translated.
-    let _search_path: *mut List;
-    let _ = fcinfo;
-    unimplemented!("current_schema: fetch_search_path/get_namespace_name (catalog/namespace.c) not yet translated")
+    let search_path: *mut List = fetch_search_path(false);
+    let nspname: *mut c_char;
+
+    if search_path == NIL {
+        PG_RETURN_NULL!(fcinfo);
+    }
+    nspname = get_namespace_name(linitial_oid(search_path));
+    list_free(search_path);
+    if nspname.is_null() {
+        PG_RETURN_NULL!(fcinfo); /* recently-deleted namespace? */
+    }
+    PG_RETURN_DATUM!(DirectFunctionCall1!(namein, CStringGetDatum(nspname)));
 }
 
 pub unsafe fn current_schemas(fcinfo: FunctionCallInfo) -> Datum {
-    // C body:
-    //   List       *search_path = fetch_search_path(PG_GETARG_BOOL(0));
-    //   ListCell   *l;
-    //   Datum      *names;
-    //   int         i;
-    //   ArrayType  *array;
-    //   names = (Datum *) palloc(list_length(search_path) * sizeof(Datum));
-    //   i = 0;
-    //   foreach(l, search_path)
-    //   {
-    //       char *nspname = get_namespace_name(lfirst_oid(l));
-    //       if (nspname)            /* watch out for deleted namespace */
-    //       {
-    //           names[i] = DirectFunctionCall1(namein, CStringGetDatum(nspname));
-    //           i++;
-    //       }
-    //   }
-    //   list_free(search_path);
-    //   array = construct_array_builtin(names, i, NAMEOID);
-    //   PG_RETURN_POINTER(array);
-    // TODO(pg-port): fetch_search_path (catalog/namespace.c), get_namespace_name
-    // (utils/lsyscache.c) and construct_array_builtin (utils/adt/arrayfuncs.c)
-    // not yet translated.
-    let _ = PG_GETARG_BOOL!(fcinfo, 0);
-    unimplemented!("current_schemas: fetch_search_path/get_namespace_name/construct_array_builtin not yet translated")
+    let search_path: *mut List = fetch_search_path(PG_GETARG_BOOL!(fcinfo, 0));
+    let names: *mut Datum;
+    let mut i: c_int;
+    let array: *mut ArrayType;
+
+    names = palloc(list_length(search_path) as usize * core::mem::size_of::<Datum>()) as *mut Datum;
+    i = 0;
+    foreach!(l, search_path, {
+        let nspname: *mut c_char;
+
+        nspname = get_namespace_name(lfirst_oid(crate::current_cell!(l)));
+        if !nspname.is_null()
+        /* watch out for deleted namespace */
+        {
+            *names.add(i as usize) = DirectFunctionCall1!(namein, CStringGetDatum(nspname));
+            i += 1;
+        }
+    });
+    list_free(search_path);
+
+    array = construct_array_builtin(names, i, NAMEOID);
+
+    PG_RETURN_POINTER!(array);
 }
 
 /*

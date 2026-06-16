@@ -26,9 +26,13 @@ use crate::c::{int32, uint64, CommandId, TransactionId};
 use crate::access::transam::{
     FullTransactionId, FullTransactionIdEquals, FullTransactionIdFollows,
     FullTransactionIdFollowsOrEquals, FullTransactionIdFromU64, FullTransactionIdPrecedes,
-    FullTransactionIdPrecedesOrEquals, TransactionIdEquals, U64FromFullTransactionId,
-    XidFromFullTransactionId,
+    FullTransactionIdPrecedesOrEquals, TransactionIdEquals, TransactionIdIsNormal,
+    U64FromFullTransactionId, XidFromFullTransactionId,
 };
+use crate::access::transam::transam::TransactionIdPrecedes;
+use crate::access::transam::xact::GetStableLatestTransactionId;
+use crate::access::transam::multixact::ReadNextMultiXactId;
+use crate::c::MultiXactId;
 use crate::common::hashfn::{hash_uint32, hash_uint32_extended};
 use crate::common::int::pg_cmp_u32;
 use crate::postgres::{CommandIdGetDatum, DatumGetCommandId, DatumGetTransactionId, TransactionIdGetDatum};
@@ -115,21 +119,35 @@ pub unsafe fn hashxidextended(fcinfo: FunctionCallInfo) -> Datum {
  *		xid_age			- compute age of an XID (relative to latest stable xid)  [STUBBED]
  */
 pub unsafe fn xid_age(fcinfo: FunctionCallInfo) -> Datum {
-    // C: now = GetStableLatestTransactionId(); if (!TransactionIdIsNormal(xid)) return INT_MAX;
-    //    return (int32)(now - xid);
-    // TODO(pg-port): GetStableLatestTransactionId (transam.c transaction state) not translated.
-    let _ = fcinfo;
-    unimplemented!("xid_age: GetStableLatestTransactionId (transam.c) not yet translated")
+    let xid: TransactionId = DatumGetTransactionId(PG_GETARG_DATUM!(fcinfo, 0));
+    let now: TransactionId = GetStableLatestTransactionId();
+
+    /* Permanent XIDs are always infinitely old */
+    if !TransactionIdIsNormal(xid) {
+        PG_RETURN_INT32!(i32::MAX);
+    }
+
+    PG_RETURN_INT32!(now.wrapping_sub(xid) as int32);
 }
 
 /*
  *		mxid_age			- compute age of a multi XID  [STUBBED]
  */
 pub unsafe fn mxid_age(fcinfo: FunctionCallInfo) -> Datum {
-    // C: now = ReadNextMultiXactId(); if (!MultiXactIdIsValid(xid)) return INT_MAX;
-    // TODO(pg-port): ReadNextMultiXactId (access/multixact.c) not translated.
-    let _ = fcinfo;
-    unimplemented!("mxid_age: ReadNextMultiXactId (multixact.c) not yet translated")
+    let xid: TransactionId = DatumGetTransactionId(PG_GETARG_DATUM!(fcinfo, 0));
+    let now: MultiXactId = ReadNextMultiXactId();
+
+    if !MultiXactIdIsValid(xid) {
+        PG_RETURN_INT32!(i32::MAX);
+    }
+
+    PG_RETURN_INT32!(now.wrapping_sub(xid) as int32);
+}
+
+/* private to multixact.c; mirror the trivial definition here */
+#[inline]
+fn MultiXactIdIsValid(multi: MultiXactId) -> bool {
+    multi != crate::access::transam::multixact::InvalidMultiXactId
 }
 
 /*
@@ -148,10 +166,21 @@ pub unsafe fn xidComparator(arg1: *const c_void, arg2: *const c_void) -> c_int {
  * xidLogicalComparator - qsort comparison using logical (wraparound) order.  [STUBBED]
  */
 pub unsafe fn xidLogicalComparator(arg1: *const c_void, arg2: *const c_void) -> c_int {
-    // C uses TransactionIdPrecedes() (wraparound-aware, only valid within an epoch).
-    // TODO(pg-port): TransactionIdPrecedes (transam.c) not yet translated.
-    let _ = (arg1, arg2);
-    unimplemented!("xidLogicalComparator: TransactionIdPrecedes (transam.c) not yet translated")
+    let xid1: TransactionId = *(arg1 as *const TransactionId);
+    let xid2: TransactionId = *(arg2 as *const TransactionId);
+
+    Assert!(TransactionIdIsNormal(xid1));
+    Assert!(TransactionIdIsNormal(xid2));
+
+    if TransactionIdPrecedes(xid1, xid2) {
+        return -1;
+    }
+
+    if TransactionIdPrecedes(xid2, xid1) {
+        return 1;
+    }
+
+    0
 }
 
 pub unsafe fn xid8toxid(fcinfo: FunctionCallInfo) -> Datum {

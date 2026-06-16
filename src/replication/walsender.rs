@@ -18,6 +18,7 @@
 
 use crate::prelude::*;
 use crate::libpq::pqformat::pq_getmsgint;
+use crate::{foreach, current_cell, ereport, elog, errmsg};
 
 use std::ffi::{c_char, c_int, c_uint, c_ulong, c_void};
 
@@ -1213,6 +1214,31 @@ unsafe fn logical_read_xlog_page(
 }
 
 /// Process extra options given to CREATE_REPLICATION_SLOT.
+// Field-access views over the opaque c_void cmd/DefElem stubs used elsewhere in
+// this file. These mirror the real layouts in nodes/replnodes.h and
+// nodes/parsenodes.h so parseCreateReplSlotOptions can read the fields it needs.
+// TODO(pg-port): drop these once CreateReplicationSlotCmd/DefElem aliases are the
+// real types from nodes/replnodes.rs and nodes/parsenodes.rs.
+#[repr(C)]
+struct CreateReplicationSlotCmdFields {
+    r#type: crate::nodes::nodes::NodeTag,
+    slotname: *mut c_char,
+    kind: ReplicationKind,
+    plugin: *mut c_char,
+    temporary: bool,
+    options: *mut crate::nodes::pg_list::List,
+}
+
+#[repr(C)]
+struct DefElemFields {
+    r#type: crate::nodes::nodes::NodeTag,
+    defnamespace: *mut c_char,
+    defname: *mut c_char,
+    arg: *mut crate::nodes::nodes::Node,
+    defaction: c_int,
+    location: c_int,
+}
+
 unsafe fn parseCreateReplSlotOptions(
     cmd: *mut CreateReplicationSlotCmd,
     reserve_wal: *mut bool,
@@ -1220,8 +1246,68 @@ unsafe fn parseCreateReplSlotOptions(
     two_phase: *mut bool,
     failover: *mut bool,
 ) {
-    // ListCell iteration / DefElem field access would need real List/DefElem types.
-    // TODO(pg-port): implement when nodes/parsenodes.h lands.
+    let cmd = cmd as *mut CreateReplicationSlotCmdFields;
+    let mut snapshot_action_given: bool = false;
+    let mut reserve_wal_given: bool = false;
+    let mut two_phase_given: bool = false;
+    let mut failover_given: bool = false;
+
+    /* Parse options */
+    foreach!(lc, (*cmd).options, {
+        let defel = crate::nodes::pg_list::lfirst(crate::current_cell!(lc))
+            as *mut DefElemFields;
+        let defel_void = defel as *const DefElem;
+
+        if libc::strcmp((*defel).defname, b"snapshot\0".as_ptr() as *const c_char) == 0 {
+            if snapshot_action_given || (*cmd).kind != REPLICATION_KIND_LOGICAL {
+                ereport!(ERROR, errmsg!("conflicting or redundant options"));
+                /* C also: errcode(ERRCODE_SYNTAX_ERROR) */
+            }
+
+            let action = defGetString(defel_void);
+            snapshot_action_given = true;
+
+            if libc::strcmp(action, b"export\0".as_ptr() as *const c_char) == 0 {
+                *snapshot_action = CRS_EXPORT_SNAPSHOT;
+            } else if libc::strcmp(action, b"nothing\0".as_ptr() as *const c_char) == 0 {
+                *snapshot_action = CRS_NOEXPORT_SNAPSHOT;
+            } else if libc::strcmp(action, b"use\0".as_ptr() as *const c_char) == 0 {
+                *snapshot_action = CRS_USE_SNAPSHOT;
+            } else {
+                ereport!(ERROR, errmsg!(
+                    "unrecognized value for {} option \"{}\": \"{}\"",
+                    "CREATE_REPLICATION_SLOT",
+                    std::ffi::CStr::from_ptr((*defel).defname).to_string_lossy(),
+                    std::ffi::CStr::from_ptr(action).to_string_lossy()));
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            }
+        } else if libc::strcmp((*defel).defname, b"reserve_wal\0".as_ptr() as *const c_char) == 0 {
+            if reserve_wal_given || (*cmd).kind != REPLICATION_KIND_PHYSICAL {
+                ereport!(ERROR, errmsg!("conflicting or redundant options"));
+                /* C also: errcode(ERRCODE_SYNTAX_ERROR) */
+            }
+
+            reserve_wal_given = true;
+            *reserve_wal = defGetBoolean(defel_void);
+        } else if libc::strcmp((*defel).defname, b"two_phase\0".as_ptr() as *const c_char) == 0 {
+            if two_phase_given || (*cmd).kind != REPLICATION_KIND_LOGICAL {
+                ereport!(ERROR, errmsg!("conflicting or redundant options"));
+                /* C also: errcode(ERRCODE_SYNTAX_ERROR) */
+            }
+            two_phase_given = true;
+            *two_phase = defGetBoolean(defel_void);
+        } else if libc::strcmp((*defel).defname, b"failover\0".as_ptr() as *const c_char) == 0 {
+            if failover_given || (*cmd).kind != REPLICATION_KIND_LOGICAL {
+                ereport!(ERROR, errmsg!("conflicting or redundant options"));
+                /* C also: errcode(ERRCODE_SYNTAX_ERROR) */
+            }
+            failover_given = true;
+            *failover = defGetBoolean(defel_void);
+        } else {
+            elog!(ERROR, "unrecognized option: {}",
+                std::ffi::CStr::from_ptr((*defel).defname).to_string_lossy());
+        }
+    });
 }
 
 /// Create a new replication slot.

@@ -44,22 +44,79 @@ use crate::varatt::*;
 // pg_detoast_datum_packed; the explicit import here wins over the globs.
 use crate::varatt::pg_detoast_datum_packed;
 use crate::{
-    PG_GETARG_DATUM, PG_GETARG_INT32, PG_GETARG_INT64, PG_GETARG_POINTER, PG_RETURN_BOOL,
-    PG_RETURN_INT32, PG_RETURN_INT64,
+    IsA, PG_GETARG_DATUM, PG_GETARG_INT32, PG_GETARG_INT64, PG_GETARG_POINTER, PG_RETURN_BOOL,
+    PG_RETURN_DATUM, PG_RETURN_INT32, PG_RETURN_INT64, PG_RETURN_NULL, PG_RETURN_POINTER,
+    PG_RETURN_VOID, list_make1, makeNode,
 };
 use crate::c::{int32, int64, uint64};
-use crate::catalog::pg_type_d::{CIDROID, INETOID, MACADDR8OID, MACADDROID};
-use crate::common::hashfn::{hash_any, hash_any_extended};
+use crate::catalog::pg_type_d::{BOOLOID, CIDROID, INETOID, MACADDR8OID, MACADDROID};
+use crate::common::hashfn::{hash_any, hash_any_extended, hash_uint32};
 use crate::lib::stringinfo::{StringInfo, StringInfoData};
 use crate::libpq::pqformat::{pq_begintypsend, pq_endtypsend, pq_getmsgbyte, pq_sendint8};
 use crate::nodes::nodes::Node;
 use crate::port::inet_net_ntop::pg_inet_net_ntop;
-use crate::postgres::{DatumGetPointer, Int32GetDatum, PointerGetDatum};
+use crate::postgres::{
+    CStringGetDatum, DatumGetPointer, DatumGetUInt32, Int32GetDatum, PointerGetDatum,
+};
 use crate::postgres_ext::InvalidOid;
 use crate::utils::adt::inet_net_pton::pg_inet_net_pton;
 use crate::utils::adt::mac8::{DatumGetMacaddr8P, DatumGetMacaddrP};
 use crate::utils::adt::varlena::cstring_to_text;
 use core::ffi::{c_char, c_int, c_uchar, c_void};
+
+use crate::access::cmptype::{COMPARE_GE, COMPARE_GT, COMPARE_LE};
+use crate::lib::hyperloglog::{
+    addHyperLogLog, estimateHyperLogLog, hyperLogLogState, initHyperLogLog,
+};
+use crate::nodes::makefuncs::{makeConst, make_opclause};
+use crate::nodes::pg_list::{lappend, linitial, list_length, lsecond, List, NIL};
+use crate::nodes::primnodes::{Const, Expr, FuncExpr, OpExpr};
+use crate::nodes::supportnodes::SupportRequestIndexCondition;
+use crate::optimizer::util::clauses::is_opclause;
+use crate::pg_config::SIZEOF_DATUM;
+use crate::port::pg_bswap::{pg_bswap32, DatumBigEndianToNative};
+use crate::utils::cache::lsyscache::get_opfamily_member_for_cmptype;
+use crate::utils::sort::sortsupport::SortSupport;
+use crate::utils::sort::tuplesort::{ssup_datum_unsigned_cmp, trace_sort};
+use crate::utils::fmgr::{DirectFunctionCall1Coll, DirectFunctionCall2Coll};
+use crate::common::ip::{pg_getnameinfo_all, sockaddr_storage};
+use crate::libpq::libpq_be::Port;
+use crate::miscadmin::MyProcPort;
+use crate::utils::adt::inet_cidr_ntop::pg_inet_cidr_ntop;
+use crate::utils::adt::int::int4in;
+
+/*
+ * Layout of a pqcomm.h SockAddr.  Port.raddr/Port.laddr are typed as an
+ * opaque c_void in the (partially ported) libpq-be.h; the C code accesses
+ * port->raddr.addr.ss_family and port->raddr.salen, so we reinterpret the
+ * pointer through this matching struct.
+ */
+#[repr(C)]
+struct SockAddr {
+    addr: sockaddr_storage,
+    salen: c_int, /* ACCEPT_TYPE_ARG3 (socklen_t) */
+}
+
+/* getnameinfo flags (netdb.h). */
+const NI_NUMERICHOST: c_int = 1;
+const NI_NUMERICSERV: c_int = 2;
+/* Max host / service name lengths (netdb.h). */
+const NI_MAXHOST: usize = 1025;
+const NI_MAXSERV: usize = 32;
+/* socket family discriminators (sys/socket.h). */
+const AF_INET: c_int = 2;
+#[cfg(target_os = "macos")]
+const AF_INET6: c_int = 30;
+#[cfg(not(target_os = "macos"))]
+const AF_INET6: c_int = 10;
+
+/* utils/fmgroids.h: OIDs of network_sub/subeq/sup/supeq (pg_proc.dat). */
+const F_NETWORK_SUB: Oid = 927;
+const F_NETWORK_SUBEQ: Oid = 928;
+const F_NETWORK_SUP: Oid = 929;
+const F_NETWORK_SUPEQ: Oid = 930;
+
+const BITS_PER_BYTE: c_int = 8;
 
 // pstrdup is a backend palloc routine and comes from crate::utils::palloc via the
 // prelude (not a libc symbol); the rest are <string.h> / <stdio.h> libc functions.
@@ -212,10 +269,16 @@ unsafe fn InetPGetDatum(X: *const inet) -> Datum {
  * An IPv4 inet/cidr abbreviated key can use up to 25 bits for subnet
  * component.
  */
-#[allow(dead_code)]
 const ABBREV_BITS_INET4_NETMASK_SIZE: c_int = 6;
-#[allow(dead_code)]
 const ABBREV_BITS_INET4_SUBNET: c_int = 25;
+
+/* sortsupport for inet/cidr */
+#[repr(C)]
+struct network_sortsupport_state {
+    input_count: int64,           /* number of non-null values seen */
+    estimating: bool,             /* true if estimating cardinality */
+    abbr_card: hyperLogLogState,  /* cardinality estimator */
+}
 
 /*
  * Common INET/CIDR input routine
@@ -605,18 +668,40 @@ pub unsafe fn network_cmp(fcinfo: FunctionCallInfo) -> Datum {
  * SortSupport strategy routine
  */
 pub unsafe fn network_sortsupport(fcinfo: FunctionCallInfo) -> Datum {
-    // C body sets ssup->comparator = network_fast_cmp and (when abbreviating)
-    // installs network_abbrev_convert/abort + a hyperLogLog estimator.
-    // TODO(pg-port): utils/sortsupport.h (SortSupport) + lib/hyperloglog not yet translated.
-    let _ = fcinfo;
-    unimplemented!("network_sortsupport: utils/sortsupport.h + lib/hyperloglog not yet translated")
+    let ssup: SortSupport = PG_GETARG_POINTER!(fcinfo, 0) as SortSupport;
+
+    (*ssup).comparator = Some(network_fast_cmp);
+    (*ssup).ssup_extra = null_mut();
+
+    if (*ssup).abbreviate {
+        let uss: *mut network_sortsupport_state;
+        let oldcontext: MemoryContext;
+
+        oldcontext = MemoryContextSwitchTo((*ssup).ssup_cxt);
+
+        uss = palloc(core::mem::size_of::<network_sortsupport_state>() as Size)
+            as *mut network_sortsupport_state;
+        (*uss).input_count = 0;
+        (*uss).estimating = true;
+        initHyperLogLog(&mut (*uss).abbr_card, 10);
+
+        (*ssup).ssup_extra = uss as *mut c_void;
+
+        (*ssup).comparator = Some(ssup_datum_unsigned_cmp);
+        (*ssup).abbrev_converter = Some(network_abbrev_convert);
+        (*ssup).abbrev_abort = Some(network_abbrev_abort);
+        (*ssup).abbrev_full_comparator = Some(network_fast_cmp);
+
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    PG_RETURN_VOID!();
 }
 
 /*
  * SortSupport comparison func
  */
-#[allow(dead_code)]
-unsafe fn network_fast_cmp(x: Datum, y: Datum, _ssup: *mut c_void) -> c_int {
+unsafe fn network_fast_cmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
     let arg1: *mut inet = DatumGetInetPP(x);
     let arg2: *mut inet = DatumGetInetPP(y);
 
@@ -625,23 +710,211 @@ unsafe fn network_fast_cmp(x: Datum, y: Datum, _ssup: *mut c_void) -> c_int {
 
 /*
  * Callback for estimating effectiveness of abbreviated key optimization.
+ *
+ * We pay no attention to the cardinality of the non-abbreviated data, because
+ * there is no equality fast-path within authoritative inet comparator.
  */
-#[allow(dead_code)]
-unsafe fn network_abbrev_abort(memtupcount: c_int, ssup: *mut c_void) -> bool {
-    // TODO(pg-port): utils/sortsupport.h + lib/hyperloglog (network_sortsupport_state) not ported.
-    let _ = (memtupcount, ssup);
-    unimplemented!("network_abbrev_abort: utils/sortsupport.h + lib/hyperloglog not yet translated")
+unsafe fn network_abbrev_abort(memtupcount: c_int, ssup: SortSupport) -> bool {
+    let uss: *mut network_sortsupport_state =
+        (*ssup).ssup_extra as *mut network_sortsupport_state;
+    let abbr_card: f64;
+
+    if memtupcount < 10000 || (*uss).input_count < 10000 || !(*uss).estimating {
+        return false;
+    }
+
+    abbr_card = estimateHyperLogLog(&mut (*uss).abbr_card);
+
+    /*
+     * If we have >100k distinct values, then even if we were sorting many
+     * billion rows we'd likely still break even, and the penalty of undoing
+     * that many rows of abbrevs would probably not be worth it. At this point
+     * we stop counting because we know that we're now fully committed.
+     */
+    if abbr_card > 100000.0 {
+        if trace_sort {
+            elog!(
+                LOG,
+                "network_abbrev: estimation ends at cardinality {} after {} values ({} rows)",
+                abbr_card,
+                (*uss).input_count,
+                memtupcount
+            );
+        }
+        (*uss).estimating = false;
+        return false;
+    }
+
+    /*
+     * Target minimum cardinality is 1 per ~2k of non-null inputs. 0.5 row
+     * fudge factor allows us to abort earlier on genuinely pathological data
+     * where we've had exactly one abbreviated value in the first 2k
+     * (non-null) rows.
+     */
+    if abbr_card < (*uss).input_count as f64 / 2000.0 + 0.5 {
+        if trace_sort {
+            elog!(
+                LOG,
+                "network_abbrev: aborting abbreviation at cardinality {} below threshold {} after {} values ({} rows)",
+                abbr_card,
+                (*uss).input_count as f64 / 2000.0 + 0.5,
+                (*uss).input_count,
+                memtupcount
+            );
+        }
+        return true;
+    }
+
+    if trace_sort {
+        elog!(
+            LOG,
+            "network_abbrev: cardinality {} after {} values ({} rows)",
+            abbr_card,
+            (*uss).input_count,
+            memtupcount
+        );
+    }
+
+    false
 }
 
 /*
  * SortSupport conversion routine.  Converts original inet/cidr representation
  * to an abbreviated key for 3-way unsigned int comparison.
  */
-#[allow(dead_code)]
-unsafe fn network_abbrev_convert(original: Datum, ssup: *mut c_void) -> Datum {
-    // TODO(pg-port): utils/sortsupport.h + lib/hyperloglog + pg_bswap/DatumBigEndianToNative.
-    let _ = (original, ssup);
-    unimplemented!("network_abbrev_convert: utils/sortsupport.h + lib/hyperloglog not yet translated")
+unsafe fn network_abbrev_convert(original: Datum, ssup: SortSupport) -> Datum {
+    let uss: *mut network_sortsupport_state =
+        (*ssup).ssup_extra as *mut network_sortsupport_state;
+    let authoritative: *mut inet = DatumGetInetPP(original);
+    let mut res: Datum;
+    let ipaddr_datum: Datum;
+    let subnet_bitmask: Datum;
+    let network: Datum;
+    let mut subnet_size: c_int;
+
+    Assert!(
+        ip_family(authoritative) == PGSQL_AF_INET
+            || ip_family(authoritative) == PGSQL_AF_INET6
+    );
+
+    /*
+     * Get an unsigned integer representation of the IP address by taking its
+     * first 4 or 8 bytes.
+     *
+     * We're consuming an array of unsigned char, so byteswap on little endian
+     * systems (an inet's ipaddr field stores the most significant byte
+     * first).
+     */
+    if ip_family(authoritative) == PGSQL_AF_INET {
+        let mut ipaddr_datum32: u32 = 0;
+
+        memcpy(
+            &mut ipaddr_datum32 as *mut u32 as *mut c_void,
+            ip_addr(authoritative) as *const c_void,
+            core::mem::size_of::<u32>(),
+        );
+
+        /* Must byteswap on little-endian machines */
+        ipaddr_datum = pg_bswap32(ipaddr_datum32) as Datum;
+
+        /* Initialize result without setting ipfamily bit */
+        res = 0 as Datum;
+    } else {
+        let mut tmp_datum: Datum = 0;
+        memcpy(
+            &mut tmp_datum as *mut Datum as *mut c_void,
+            ip_addr(authoritative) as *const c_void,
+            core::mem::size_of::<Datum>(),
+        );
+
+        /* Must byteswap on little-endian machines */
+        ipaddr_datum = DatumBigEndianToNative(tmp_datum);
+
+        /* Initialize result with ipfamily (most significant) bit set */
+        res = (1 as Datum) << (SIZEOF_DATUM as c_int * BITS_PER_BYTE - 1);
+    }
+
+    /*
+     * ipaddr_datum must be "split": high order bits go in "network" component
+     * of abbreviated key, while low order bits go in "subnet" component when
+     * there is space for one.
+     */
+    subnet_size = ip_maxbits(authoritative) - ip_bits(authoritative) as c_int;
+    Assert!(subnet_size >= 0);
+    /* subnet size must work with prefix ipaddr cases */
+    subnet_size %= SIZEOF_DATUM as c_int * BITS_PER_BYTE;
+    if ip_bits(authoritative) == 0 {
+        /* Fit as many ipaddr bits as possible into subnet */
+        subnet_bitmask = (0 as Datum).wrapping_sub(1);
+        network = 0;
+    } else if (ip_bits(authoritative) as c_int) < SIZEOF_DATUM as c_int * BITS_PER_BYTE {
+        /* Split ipaddr bits between network and subnet */
+        subnet_bitmask = ((1 as Datum) << subnet_size) - 1;
+        network = ipaddr_datum & !subnet_bitmask;
+    } else {
+        /* Fit as many ipaddr bits as possible into network */
+        subnet_bitmask = 0;
+        network = ipaddr_datum;
+    }
+
+    if SIZEOF_DATUM == 8 && ip_family(authoritative) == PGSQL_AF_INET {
+        /*
+         * IPv4 with 8 byte datums: keep all 32 netmasked bits, netmask size,
+         * and most significant 25 subnet bits
+         */
+        let netmask_size: Datum = ip_bits(authoritative) as Datum;
+        let mut subnet: Datum;
+
+        /*
+         * Shift left 31 bits: 6 bits netmask size + 25 subnet bits.
+         */
+        let network = network << (ABBREV_BITS_INET4_NETMASK_SIZE + ABBREV_BITS_INET4_SUBNET);
+
+        /* Shift size to make room for subnet bits at the end */
+        let netmask_size = netmask_size << ABBREV_BITS_INET4_SUBNET;
+
+        /* Extract subnet bits without shifting them */
+        subnet = ipaddr_datum & subnet_bitmask;
+
+        /*
+         * If we have more than 25 subnet bits, we can't fit everything. Shift
+         * subnet down to avoid clobbering bits that are only supposed to be
+         * used for netmask_size.
+         */
+        if subnet_size > ABBREV_BITS_INET4_SUBNET {
+            subnet >>= subnet_size - ABBREV_BITS_INET4_SUBNET;
+        }
+
+        /*
+         * Assemble the final abbreviated key without clobbering the ipfamily
+         * bit that must remain a zero.
+         */
+        res |= network | netmask_size | subnet;
+    } else {
+        /*
+         * 4 byte datums, or IPv6 with 8 byte datums: Use as many of the
+         * netmasked bits as will fit in final abbreviated key. Avoid
+         * clobbering the ipfamily bit that was set earlier.
+         */
+        res |= network >> 1;
+    }
+
+    (*uss).input_count += 1;
+
+    /* Hash abbreviated key */
+    if (*uss).estimating {
+        let tmp: u32;
+
+        if SIZEOF_DATUM == 8 {
+            tmp = (res as u32) ^ ((res as u64 >> 32) as u32);
+        } else {
+            tmp = res as u32;
+        }
+
+        addHyperLogLog(&mut (*uss).abbr_card, DatumGetUInt32(hash_uint32(tmp)));
+    }
+
+    res
 }
 
 /*
@@ -818,22 +1091,59 @@ pub unsafe fn network_overlap(fcinfo: FunctionCallInfo) -> Datum {
 /*
  * Planner support function for network subset/superset operators
  */
+/*
+ * is_funcclause (nodeFuncs.h static inline):
+ *   return clause != NULL && IsA(clause, FuncExpr);
+ */
+#[inline]
+unsafe fn is_funcclause(clause: *const Node) -> bool {
+    !clause.is_null() && IsA!(clause as *mut Node, T_FuncExpr)
+}
+
 pub unsafe fn network_subset_support(fcinfo: FunctionCallInfo) -> Datum {
-    // C body inspects SupportRequestIndexCondition and dispatches to
-    // match_network_function.
-    // TODO(pg-port): nodes/supportnodes.h + nodes/nodeFuncs.h (is_opclause/is_funcclause)
-    // not yet translated.
-    let _ = fcinfo;
-    unimplemented!("network_subset_support: nodes/supportnodes.h not yet translated")
+    let rawreq: *mut Node = PG_GETARG_POINTER!(fcinfo, 0) as *mut Node;
+    let mut ret: *mut Node = null_mut();
+
+    if IsA!(rawreq, T_SupportRequestIndexCondition) {
+        /* Try to convert operator/function call to index conditions */
+        let req: *mut SupportRequestIndexCondition = rawreq as *mut SupportRequestIndexCondition;
+
+        if is_opclause((*req).node as *const c_void) {
+            let clause: *mut OpExpr = (*req).node as *mut OpExpr;
+
+            Assert!(list_length((*clause).args) == 2);
+            ret = match_network_function(
+                linitial((*clause).args) as *mut Node,
+                lsecond((*clause).args) as *mut Node,
+                (*req).indexarg,
+                (*req).funcid,
+                (*req).opfamily,
+            ) as *mut Node;
+        } else if is_funcclause((*req).node) {
+            /* be paranoid */
+            let clause: *mut FuncExpr = (*req).node as *mut FuncExpr;
+
+            Assert!(list_length((*clause).args) == 2);
+            ret = match_network_function(
+                linitial((*clause).args) as *mut Node,
+                lsecond((*clause).args) as *mut Node,
+                (*req).indexarg,
+                (*req).funcid,
+                (*req).opfamily,
+            ) as *mut Node;
+        }
+    }
+
+    PG_RETURN_POINTER!(ret);
 }
 
 /*
  * match_network_function
  *	  Try to generate an indexqual for a network subset/superset function.
  *
- * TODO(pg-port): utils/fmgroids.h (F_NETWORK_*) + match_network_subset deps.
+ * This layer is just concerned with identifying the function and swapping
+ * the arguments if necessary.
  */
-#[allow(dead_code)]
 unsafe fn match_network_function(
     leftop: *mut Node,
     rightop: *mut Node,
@@ -841,30 +1151,142 @@ unsafe fn match_network_function(
     funcid: Oid,
     opfamily: Oid,
 ) -> *mut List {
-    let _ = (leftop, rightop, indexarg, funcid, opfamily);
-    unimplemented!("match_network_function: utils/fmgroids.h (F_NETWORK_*) not yet translated")
+    match funcid {
+        F_NETWORK_SUB => {
+            /* indexkey must be on the left */
+            if indexarg != 0 {
+                return NIL;
+            }
+            match_network_subset(leftop, rightop, false, opfamily)
+        }
+
+        F_NETWORK_SUBEQ => {
+            /* indexkey must be on the left */
+            if indexarg != 0 {
+                return NIL;
+            }
+            match_network_subset(leftop, rightop, true, opfamily)
+        }
+
+        F_NETWORK_SUP => {
+            /* indexkey must be on the right */
+            if indexarg != 1 {
+                return NIL;
+            }
+            match_network_subset(rightop, leftop, false, opfamily)
+        }
+
+        F_NETWORK_SUPEQ => {
+            /* indexkey must be on the right */
+            if indexarg != 1 {
+                return NIL;
+            }
+            match_network_subset(rightop, leftop, true, opfamily)
+        }
+
+        _ => {
+            /*
+             * We'd only get here if somebody attached this support function
+             * to an unexpected function.  Maybe we should complain, but for
+             * now, do nothing.
+             */
+            NIL
+        }
+    }
 }
 
 /*
  * match_network_subset
  *	  Try to generate an indexqual for a network subset function.
- *
- * TODO(pg-port): nodes/makefuncs.h (make_opclause/makeConst) + nodes/pg_list.h +
- * utils/lsyscache.h (get_opfamily_member_for_cmptype).
  */
-#[allow(dead_code)]
 unsafe fn match_network_subset(
     leftop: *mut Node,
     rightop: *mut Node,
     is_eq: bool,
     opfamily: Oid,
 ) -> *mut List {
-    let _ = (leftop, rightop, is_eq, opfamily);
-    unimplemented!("match_network_subset: nodes/makefuncs.h + utils/lsyscache.h not yet translated")
-}
+    let mut result: *mut List;
+    let rightopval: Datum;
+    let datatype: Oid = INETOID;
+    let opr1oid: Oid;
+    let opr2oid: Oid;
+    let opr1right: Datum;
+    let opr2right: Datum;
+    let mut expr: *mut Expr;
 
-/* opaque List for the (stubbed) planner-support routines above. */
-pub enum List {}
+    /*
+     * Can't do anything with a non-constant or NULL comparison value.
+     */
+    if !IsA!(rightop, T_Const) || (*(rightop as *mut Const)).constisnull {
+        return NIL;
+    }
+    rightopval = (*(rightop as *mut Const)).constvalue;
+
+    /*
+     * create clause "key >= network_scan_first( rightopval )", or ">" if the
+     * operator disallows equality.
+     */
+    opr1oid = get_opfamily_member_for_cmptype(
+        opfamily,
+        datatype,
+        datatype,
+        if is_eq { COMPARE_GE } else { COMPARE_GT },
+    );
+    if opr1oid == InvalidOid {
+        return NIL;
+    }
+
+    opr1right = network_scan_first(rightopval);
+
+    expr = make_opclause(
+        opr1oid,
+        BOOLOID,
+        false,
+        leftop as *mut Expr,
+        makeConst(
+            datatype,
+            -1,
+            InvalidOid, /* not collatable */
+            -1,
+            opr1right,
+            false,
+            false,
+        ) as *mut Expr,
+        InvalidOid,
+        InvalidOid,
+    );
+    result = list_make1!(expr);
+
+    /* create clause "key <= network_scan_last( rightopval )" */
+
+    opr2oid = get_opfamily_member_for_cmptype(opfamily, datatype, datatype, COMPARE_LE);
+    if opr2oid == InvalidOid {
+        return NIL;
+    }
+
+    opr2right = network_scan_last(rightopval);
+
+    expr = make_opclause(
+        opr2oid,
+        BOOLOID,
+        false,
+        leftop as *mut Expr,
+        makeConst(
+            datatype,
+            -1,
+            InvalidOid, /* not collatable */
+            -1,
+            opr2right,
+            false,
+            false,
+        ) as *mut Expr,
+        InvalidOid,
+        InvalidOid,
+    );
+    result = lappend(result, expr as *mut c_void);
+
+    result
+}
 
 /*
  * Extract data from a network datatype.
@@ -957,11 +1379,25 @@ pub unsafe fn inet_abbrev(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn cidr_abbrev(fcinfo: FunctionCallInfo) -> Datum {
-    // C body formats via pg_inet_cidr_ntop(ip_family, ip_addr, ip_bits, tmp, sizeof(tmp))
-    // then returns cstring_to_text(tmp).
-    // TODO(pg-port): pg_inet_cidr_ntop (port/inet_cidr_ntop.c) not yet translated.
-    let _ip: *mut inet = DatumGetInetPP(PG_GETARG_DATUM!(fcinfo, 0)); // PG_GETARG_INET_PP
-    unimplemented!("cidr_abbrev: pg_inet_cidr_ntop (port/inet_cidr_ntop.c) not yet translated")
+    let ip: *mut inet = DatumGetInetPP(PG_GETARG_DATUM!(fcinfo, 0)); // PG_GETARG_INET_PP
+    let dst: *mut c_char;
+    /* char tmp[sizeof("xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:255.255.255.255/128")]; */
+    let mut tmp = [0 as c_char; 50];
+
+    dst = pg_inet_cidr_ntop(
+        ip_family(ip) as c_int,
+        ip_addr(ip) as *const c_void,
+        ip_bits(ip) as c_int,
+        tmp.as_mut_ptr(),
+        tmp.len(),
+    );
+
+    if dst.is_null() {
+        let _ = errcode(ERRCODE_INVALID_BINARY_REPRESENTATION);
+        ereport!(ERROR, errmsg!("could not format cidr value: %m"));
+    }
+
+    return PointerGetDatum(cstring_to_text(tmp.as_ptr()) as *const c_void); // PG_RETURN_TEXT_P
 }
 
 pub unsafe fn network_masklen(fcinfo: FunctionCallInfo) -> Datum {
@@ -1396,38 +1832,168 @@ pub unsafe fn network_scan_last(in_: Datum) -> Datum {
  * IP address that the client is connecting from (NULL if Unix socket)
  */
 pub unsafe fn inet_client_addr(fcinfo: FunctionCallInfo) -> Datum {
-    // C body reads MyProcPort->raddr, runs pg_getnameinfo_all, then network_in.
-    // TODO(pg-port): backend MyProcPort (libpq/libpq-be.h, miscadmin.h) + common/ip.h
-    // (pg_getnameinfo_all) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("inet_client_addr: MyProcPort + pg_getnameinfo_all not yet translated")
+    let port: *mut Port = MyProcPort;
+    let mut remote_host = [0 as c_char; NI_MAXHOST];
+    let ret: c_int;
+
+    if port.is_null() {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    let raddr: *mut SockAddr = &raw mut (*port).raddr as *mut c_void as *mut SockAddr;
+
+    match (*raddr).addr.ss_family as c_int {
+        AF_INET | AF_INET6 => {}
+        _ => {
+            PG_RETURN_NULL!(fcinfo);
+        }
+    }
+
+    remote_host[0] = b'\0' as c_char;
+
+    ret = pg_getnameinfo_all(
+        &(*raddr).addr as *const sockaddr_storage,
+        (*raddr).salen,
+        remote_host.as_mut_ptr(),
+        remote_host.len() as c_int,
+        null_mut(),
+        0,
+        NI_NUMERICHOST | NI_NUMERICSERV,
+    );
+    if ret != 0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    clean_ipv6_addr((*raddr).addr.ss_family as c_int, remote_host.as_mut_ptr());
+
+    return InetPGetDatum(network_in(remote_host.as_mut_ptr(), false, null_mut())); // PG_RETURN_INET_P
 }
 
 /*
  * port that the client is connecting from (NULL if Unix socket)
  */
 pub unsafe fn inet_client_port(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): MyProcPort + pg_getnameinfo_all not yet translated.
-    let _ = fcinfo;
-    unimplemented!("inet_client_port: MyProcPort + pg_getnameinfo_all not yet translated")
+    let port: *mut Port = MyProcPort;
+    let mut remote_port = [0 as c_char; NI_MAXSERV];
+    let ret: c_int;
+
+    if port.is_null() {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    let raddr: *mut SockAddr = &raw mut (*port).raddr as *mut c_void as *mut SockAddr;
+
+    match (*raddr).addr.ss_family as c_int {
+        AF_INET | AF_INET6 => {}
+        _ => {
+            PG_RETURN_NULL!(fcinfo);
+        }
+    }
+
+    remote_port[0] = b'\0' as c_char;
+
+    ret = pg_getnameinfo_all(
+        &(*raddr).addr as *const sockaddr_storage,
+        (*raddr).salen,
+        null_mut(),
+        0,
+        remote_port.as_mut_ptr(),
+        remote_port.len() as c_int,
+        NI_NUMERICHOST | NI_NUMERICSERV,
+    );
+    if ret != 0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_DATUM!(DirectFunctionCall1Coll(
+        int4in,
+        InvalidOid,
+        CStringGetDatum(remote_port.as_ptr())
+    ));
 }
 
 /*
  * IP address that the server accepted the connection on (NULL if Unix socket)
  */
 pub unsafe fn inet_server_addr(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): MyProcPort + pg_getnameinfo_all not yet translated.
-    let _ = fcinfo;
-    unimplemented!("inet_server_addr: MyProcPort + pg_getnameinfo_all not yet translated")
+    let port: *mut Port = MyProcPort;
+    let mut local_host = [0 as c_char; NI_MAXHOST];
+    let ret: c_int;
+
+    if port.is_null() {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    let laddr: *mut SockAddr = &raw mut (*port).laddr as *mut c_void as *mut SockAddr;
+
+    match (*laddr).addr.ss_family as c_int {
+        AF_INET | AF_INET6 => {}
+        _ => {
+            PG_RETURN_NULL!(fcinfo);
+        }
+    }
+
+    local_host[0] = b'\0' as c_char;
+
+    ret = pg_getnameinfo_all(
+        &(*laddr).addr as *const sockaddr_storage,
+        (*laddr).salen,
+        local_host.as_mut_ptr(),
+        local_host.len() as c_int,
+        null_mut(),
+        0,
+        NI_NUMERICHOST | NI_NUMERICSERV,
+    );
+    if ret != 0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    clean_ipv6_addr((*laddr).addr.ss_family as c_int, local_host.as_mut_ptr());
+
+    return InetPGetDatum(network_in(local_host.as_mut_ptr(), false, null_mut())); // PG_RETURN_INET_P
 }
 
 /*
  * port that the server accepted the connection on (NULL if Unix socket)
  */
 pub unsafe fn inet_server_port(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): MyProcPort + pg_getnameinfo_all not yet translated.
-    let _ = fcinfo;
-    unimplemented!("inet_server_port: MyProcPort + pg_getnameinfo_all not yet translated")
+    let port: *mut Port = MyProcPort;
+    let mut local_port = [0 as c_char; NI_MAXSERV];
+    let ret: c_int;
+
+    if port.is_null() {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    let laddr: *mut SockAddr = &raw mut (*port).laddr as *mut c_void as *mut SockAddr;
+
+    match (*laddr).addr.ss_family as c_int {
+        AF_INET | AF_INET6 => {}
+        _ => {
+            PG_RETURN_NULL!(fcinfo);
+        }
+    }
+
+    local_port[0] = b'\0' as c_char;
+
+    ret = pg_getnameinfo_all(
+        &(*laddr).addr as *const sockaddr_storage,
+        (*laddr).salen,
+        null_mut(),
+        0,
+        local_port.as_mut_ptr(),
+        local_port.len() as c_int,
+        NI_NUMERICHOST | NI_NUMERICSERV,
+    );
+    if ret != 0 {
+        PG_RETURN_NULL!(fcinfo);
+    }
+
+    PG_RETURN_DATUM!(DirectFunctionCall1Coll(
+        int4in,
+        InvalidOid,
+        CStringGetDatum(local_port.as_ptr())
+    ));
 }
 
 pub unsafe fn inetnot(fcinfo: FunctionCallInfo) -> Datum {

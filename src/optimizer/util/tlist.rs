@@ -447,6 +447,94 @@ pub unsafe fn get_sortgroupref_clause_noerr(
     null_mut()
 }
 
+/// extract_grouping_ops - make an array of the equality operator OIDs
+///     for a SortGroupClause list
+pub unsafe fn extract_grouping_ops(groupClause: *mut List) -> *mut Oid {
+    let numCols = list_length(groupClause);
+    let mut colno: c_int = 0;
+    let groupOperators: *mut Oid;
+
+    groupOperators = palloc(core::mem::size_of::<Oid>() * numCols as usize) as *mut Oid;
+
+    foreach!(glitem, groupClause, {
+        let groupcl = lfirst(current_cell!(glitem)) as *mut SortGroupClause;
+
+        *groupOperators.add(colno as usize) = (*groupcl).eqop;
+        Assert!(OidIsValid(*groupOperators.add(colno as usize)));
+        colno += 1;
+    });
+
+    groupOperators
+}
+
+/// extract_grouping_collations - make an array of the grouping column collations
+///     for a SortGroupClause list
+pub unsafe fn extract_grouping_collations(groupClause: *mut List, tlist: *mut List) -> *mut Oid {
+    let numCols = list_length(groupClause);
+    let mut colno: c_int = 0;
+    let grpCollations: *mut Oid;
+
+    grpCollations = palloc(core::mem::size_of::<Oid>() * numCols as usize) as *mut Oid;
+
+    foreach!(glitem, groupClause, {
+        let groupcl = lfirst(current_cell!(glitem)) as *mut SortGroupClause;
+        let tle = get_sortgroupclause_tle(groupcl, tlist);
+
+        *grpCollations.add(colno as usize) = exprCollation((*tle).expr as *mut Node);
+        colno += 1;
+    });
+
+    grpCollations
+}
+
+/// extract_grouping_cols - make an array of the grouping column resnos
+///     for a SortGroupClause list
+pub unsafe fn extract_grouping_cols(groupClause: *mut List, tlist: *mut List) -> *mut AttrNumber {
+    let grpColIdx: *mut AttrNumber;
+    let numCols = list_length(groupClause);
+    let mut colno: c_int = 0;
+
+    grpColIdx = palloc(core::mem::size_of::<AttrNumber>() * numCols as usize) as *mut AttrNumber;
+
+    foreach!(glitem, groupClause, {
+        let groupcl = lfirst(current_cell!(glitem)) as *mut SortGroupClause;
+        let tle = get_sortgroupclause_tle(groupcl, tlist);
+
+        *grpColIdx.add(colno as usize) = (*tle).resno;
+        colno += 1;
+    });
+
+    grpColIdx
+}
+
+/// grouping_is_sortable - is it possible to implement grouping list by sorting?
+///
+/// This is easy since the parser will have included a sortop if one exists.
+pub unsafe fn grouping_is_sortable(groupClause: *mut List) -> bool {
+    foreach!(glitem, groupClause, {
+        let groupcl = lfirst(current_cell!(glitem)) as *mut SortGroupClause;
+
+        if !OidIsValid((*groupcl).sortop) {
+            return false;
+        }
+    });
+    true
+}
+
+/// grouping_is_hashable - is it possible to implement grouping list by hashing?
+///
+/// We rely on the parser to have set the hashable flag correctly.
+pub unsafe fn grouping_is_hashable(groupClause: *mut List) -> bool {
+    foreach!(glitem, groupClause, {
+        let groupcl = lfirst(current_cell!(glitem)) as *mut SortGroupClause;
+
+        if !(*groupcl).hashable {
+            return false;
+        }
+    });
+    true
+}
+
 //*****************************************************************************
 //      PathTarget manipulation functions
 //*****************************************************************************

@@ -76,6 +76,9 @@ use crate::utils::mmgr::memutils_memorychunk::{
     PointerGetMemoryChunk, MEMORYCHUNK_MAX_BLOCKOFFSET,
 };
 use core::ffi::{c_char, c_int, c_void};
+// elog WARNING level: used only by AllocSetCheck (MEMORY_CONTEXT_CHECKING).
+#[cfg(memory_context_checking)]
+use crate::utils::elog::WARNING;
 // `Assert!` and `IsA!` are brought into scope crate-wide via #[macro_use].
 
 // aset.c uses raw malloc/free/realloc for its blocks.
@@ -1698,19 +1701,193 @@ pub unsafe fn AllocSetStats(
 
 // #ifdef MEMORY_CONTEXT_CHECKING
 //
-// AllocSetCheck
-//		Walk through chunks and check consistency of memory.
-//
-// NOTE: report errors as WARNING, *not* ERROR or FATAL.  Otherwise you'll
-// find yourself in an infinite loop when trouble occurs, because this
-// routine will be entered again when elog cleanup tries to release memory!
-//
-// TODO(pg-port): translate AllocSetCheck under a cfg gating
-// MEMORY_CONTEXT_CHECKING. It walks every block's chunk chain validating block
-// headers, freelist indices, block offsets, sentinels (sentinel_ok), and that
-// total_allocated == context->mem_allocated. Omitted here because the default
-// build (no MEMORY_CONTEXT_CHECKING) never compiles it, and it depends on the
-// not-yet-modeled requested_size field and set_sentinel/sentinel_ok helpers.
+// TODO(pg-port): `sentinel_ok` lives in mcxt.c (MEMORY_CONTEXT_CHECKING-only);
+// not yet ported. Local stub keeps AllocSetCheck self-consistent. The
+// `requested_size` MemoryChunk field is likewise only present under
+// MEMORY_CONTEXT_CHECKING (see memutils_memorychunk.rs TODO).
+#[cfg(memory_context_checking)]
+unsafe fn sentinel_ok(_base: *const c_void, _offset: Size) -> bool {
+    unimplemented!("TODO(pg-port): sentinel_ok (mcxt.c, MEMORY_CONTEXT_CHECKING)")
+}
+
+/// AllocSetCheck
+///		Walk through chunks and check consistency of memory.
+///
+/// NOTE: report errors as WARNING, *not* ERROR or FATAL.  Otherwise you'll
+/// find yourself in an infinite loop when trouble occurs, because this
+/// routine will be entered again when elog cleanup tries to release memory!
+#[cfg(memory_context_checking)]
+unsafe fn AllocSetCheck(context: MemoryContext) {
+    let set = context as AllocSet;
+    let name = (*set).header.name;
+    let mut prevblock: AllocBlock;
+    let mut block: AllocBlock;
+    let mut total_allocated: Size = 0;
+
+    prevblock = core::ptr::null_mut();
+    block = (*set).blocks;
+    while !block.is_null() {
+        let mut bpoz = (block as *mut c_char).add(ALLOC_BLOCKHDRSZ);
+        let blk_used: Size = ((*block).freeptr as usize).wrapping_sub(bpoz as usize);
+        let mut blk_data: Size = 0;
+        let mut nchunks: Size = 0;
+        let mut has_external_chunk = false;
+
+        if IsKeeperBlock(set, block) {
+            total_allocated += ((*block).endptr as usize).wrapping_sub(set as usize);
+        } else {
+            total_allocated += ((*block).endptr as usize).wrapping_sub(block as usize);
+        }
+
+        // Empty block - empty can be keeper-block only
+        if blk_used == 0 {
+            if !IsKeeperBlock(set, block) {
+                elog!(
+                    WARNING,
+                    "problem in alloc set {}: empty block {:p}",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    block
+                );
+            }
+        }
+
+        // Check block header fields
+        if (*block).aset != set
+            || (*block).prev != prevblock
+            || ((*block).freeptr as usize) < (bpoz as usize)
+            || (*block).freeptr > (*block).endptr
+        {
+            elog!(
+                WARNING,
+                "problem in alloc set {}: corrupt header in block {:p}",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                block
+            );
+        }
+
+        // Chunk walker
+        while (bpoz as usize) < ((*block).freeptr as usize) {
+            let chunk = bpoz as *mut MemoryChunk;
+            let chsize: Size;
+            let dsize: Size;
+
+            // Allow access to the chunk header.
+            // VALGRIND_MAKE_MEM_DEFINED(chunk, ALLOC_CHUNKHDRSZ);
+
+            if MemoryChunkIsExternal(chunk) {
+                chsize = ((*block).endptr as usize)
+                    .wrapping_sub(MemoryChunkGetPointer(chunk) as usize); /* aligned chunk size */
+                has_external_chunk = true;
+
+                // make sure this chunk consumes the entire block
+                if chsize + ALLOC_CHUNKHDRSZ != blk_used {
+                    elog!(
+                        WARNING,
+                        "problem in alloc set {}: bad single-chunk {:p} in block {:p}",
+                        std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                        chunk,
+                        block
+                    );
+                }
+            } else {
+                let fidx = MemoryChunkGetValue(chunk) as c_int;
+
+                if !FreeListIdxIsValid(fidx) {
+                    elog!(
+                        WARNING,
+                        "problem in alloc set {}: bad chunk size for chunk {:p} in block {:p}",
+                        std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                        chunk,
+                        block
+                    );
+                }
+
+                chsize = GetChunkSizeFromFreeListIdx(fidx); /* aligned chunk size */
+
+                // Check the stored block offset correctly references this block.
+                if block != MemoryChunkGetBlock(chunk) as AllocBlock {
+                    elog!(
+                        WARNING,
+                        "problem in alloc set {}: bad block offset for chunk {:p} in block {:p}",
+                        std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                        chunk,
+                        block
+                    );
+                }
+            }
+            dsize = (*chunk).requested_size; /* real data */
+
+            // an allocated chunk's requested size must be <= the chsize
+            if dsize != InvalidAllocSize && dsize > chsize {
+                elog!(
+                    WARNING,
+                    "problem in alloc set {}: req size > alloc size for chunk {:p} in block {:p}",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    chunk,
+                    block
+                );
+            }
+
+            // chsize must not be smaller than the first freelist's size
+            if chsize < (1 << ALLOC_MINBITS) {
+                elog!(
+                    WARNING,
+                    "problem in alloc set {}: bad size {} for chunk {:p} in block {:p}",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    chsize,
+                    chunk,
+                    block
+                );
+            }
+
+            // Check for overwrite of padding space in an allocated chunk.
+            if dsize != InvalidAllocSize
+                && dsize < chsize
+                && !sentinel_ok(chunk as *const c_void, ALLOC_CHUNKHDRSZ + dsize)
+            {
+                elog!(
+                    WARNING,
+                    "problem in alloc set {}: detected write past chunk end in block {:p}, chunk {:p}",
+                    std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                    block,
+                    chunk
+                );
+            }
+
+            // if chunk is allocated, disallow access to the chunk header
+            // if (dsize != InvalidAllocSize)
+            //     VALGRIND_MAKE_MEM_NOACCESS(chunk, ALLOC_CHUNKHDRSZ);
+
+            blk_data += chsize;
+            nchunks += 1;
+
+            bpoz = bpoz.add(ALLOC_CHUNKHDRSZ + chsize);
+        }
+
+        if (blk_data + (nchunks * ALLOC_CHUNKHDRSZ)) != blk_used {
+            elog!(
+                WARNING,
+                "problem in alloc set {}: found inconsistent memory block {:p}",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                block
+            );
+        }
+
+        if has_external_chunk && nchunks > 1 {
+            elog!(
+                WARNING,
+                "problem in alloc set {}: external chunk on non-dedicated block {:p}",
+                std::ffi::CStr::from_ptr(name).to_string_lossy(),
+                block
+            );
+        }
+
+        prevblock = block;
+        block = (*block).next;
+    }
+
+    Assert!(total_allocated == (*context).mem_allocated);
+}
 // #endif							/* MEMORY_CONTEXT_CHECKING */
 
 // =============================================================================
@@ -1768,6 +1945,6 @@ pub unsafe fn AllocSetStats(
 // AllocSetContextCreateInternal, AllocSetReset, AllocSetDelete,
 // AllocSetAllocLarge, AllocSetAllocChunkFromBlock, AllocSetAllocFromNewBlock,
 // AllocSetAlloc, AllocSetFree, AllocSetRealloc, AllocSetGetChunkContext,
-// AllocSetGetChunkSpace, AllocSetIsEmpty, AllocSetStats (AllocSetCheck noted as
-// a cfg-gated TODO).
+// AllocSetGetChunkSpace, AllocSetIsEmpty, AllocSetStats, AllocSetCheck
+// (the last cfg-gated behind `memory_context_checking`).
 // =============================================================================

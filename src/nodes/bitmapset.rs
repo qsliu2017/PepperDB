@@ -412,6 +412,19 @@ pub unsafe fn bms_free(a: *mut Bitmapset) {
 }
 
 /*
+ * bms_copy_and_free - copy a set and free the original.
+ *
+ * This is useful for cleaning up after a result has been copied to a longer-
+ * lived context.
+ */
+pub unsafe fn bms_copy_and_free(a: *mut Bitmapset) -> *mut Bitmapset {
+    let c: *mut Bitmapset = bms_copy(a);
+
+    bms_free(a);
+    c
+}
+
+/*
  * bms_union - create and return a new set containing all members from both
  * input sets.  Both inputs are left unmodified.
  *

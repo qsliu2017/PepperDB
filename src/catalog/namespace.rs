@@ -804,6 +804,40 @@ fn space_per_op() -> usize {
 }
 
 // ---------------------------------------------------------------------------
+// SearchPathCache hashtable -- key hash/equal functions used by simplehash
+// (SH_HASH_KEY / SH_EQUAL).
+// ---------------------------------------------------------------------------
+
+#[inline]
+unsafe fn spcachekey_hash(key: SearchPathCacheKey) -> u32 {
+    use crate::common::hashfn_unstable::{
+        fasthash_accum_cstring, fasthash_combine, fasthash_final32, fasthash_init,
+        fasthash_state,
+    };
+
+    let mut hs: fasthash_state = core::mem::zeroed();
+    let sp_len: c_int;
+
+    fasthash_init(&mut hs, 0);
+
+    hs.accum = key.roleid as u64;
+    fasthash_combine(&mut hs);
+
+    /*
+     * Combine search path into the hash and save the length for tweaking the
+     * final mix.
+     */
+    sp_len = fasthash_accum_cstring(&mut hs, key.searchPath) as c_int;
+
+    fasthash_final32(&mut hs, sp_len as u64)
+}
+
+#[inline]
+unsafe fn spcachekey_equal(a: SearchPathCacheKey, b: SearchPathCacheKey) -> bool {
+    a.roleid == b.roleid && strcmp(a.searchPath, b.searchPath) == 0
+}
+
+// ---------------------------------------------------------------------------
 // spcache helpers (wrapping the simplehash table)
 // ---------------------------------------------------------------------------
 

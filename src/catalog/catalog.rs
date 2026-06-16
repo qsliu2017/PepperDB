@@ -57,6 +57,79 @@ extern "C" {
     fn strncmp(a: *const c_char, b: *const c_char, n: usize) -> c_int;
 }
 
+// Real ported dependencies.
+use crate::access::common::scankey::{ScanKeyData, ScanKeyInit};
+use crate::access::index::genam::{
+    systable_beginscan, systable_endscan, systable_getnext, ScanKey, SysScanDesc,
+};
+use crate::access::htup_details::HeapTupleIsValid;
+use crate::access::stratnum::BTEqualStrategyNumber;
+use crate::access::transam::varsup::{GetNewObjectId, StopGeneratingPinnedObjectIds};
+use crate::miscadmin::{superuser, IsBootstrapProcessingMode};
+use crate::utils::time::snapmgr::SnapshotAnyData;
+
+// RelationData accessors (utils/rel.h macros).
+unsafe fn RelationGetRelid(relation: Relation) -> Oid {
+    (*relation).rd_id
+}
+unsafe fn RelationGetNamespace(relation: Relation) -> Oid {
+    (*(*relation).rd_rel).relnamespace
+}
+unsafe fn RelationGetRelationName(relation: Relation) -> *const c_char {
+    (*(*relation).rd_rel).relname.data.as_ptr()
+}
+
+// IsBinaryUpgrade (miscadmin.h); only used in an Assert in GetNewOidWithIndex.
+extern "C" {
+    static mut IsBinaryUpgrade: bool;
+}
+
+// utils/fmgroids.h: oideq() regproc OID.
+// TODO(pg-port): import from a generated fmgroids module.
+const F_OIDEQ: Oid = 184;
+
+// catalog/pg_class index + oid-column constants for GetNewRelFileNumber.
+// TODO(pg-port): hoist into a generated indexing/attribute OID module.
+const ClassOidIndexId: Oid = 2662;
+const Anum_pg_class_oid: AttrNumber = 1;
+
+// GetNewRelFileNumber dependencies.
+use crate::common::relpath::{GetRelationPath, RelPathStr, MAIN_FORKNUM};
+use crate::storage::procnumber::ProcNumberForTempRelations;
+use crate::storage::relfilelocator::RelFileLocatorBackend;
+use crate::catalog::pg_known_oids::GLOBALTABLESPACE_OID;
+
+use crate::miscadmin::{MyDatabaseId, MyDatabaseTableSpace};
+
+pub type ProcNumber = c_int;
+const INVALID_PROC_NUMBER: ProcNumber = -1;
+const InvalidRelFileNumber: RelFileNumber = 0; /* InvalidOid */
+
+extern "C" {
+    fn access(path: *const c_char, mode: c_int) -> c_int;
+}
+const F_OK: c_int = 0;
+
+// storage/smgr.h: relpath(rlocator, forknum) =
+//   GetRelationPath(rlocator.locator.dbOid, rlocator.locator.spcOid,
+//                   rlocator.locator.relNumber, rlocator.backend, forknum)
+#[inline]
+unsafe fn relpath(rlocator: RelFileLocatorBackend, forknum: c_int) -> RelPathStr {
+    GetRelationPath(
+        rlocator.locator.dbOid,
+        rlocator.locator.spcOid,
+        rlocator.locator.relNumber,
+        rlocator.backend,
+        forknum,
+    )
+}
+
+// miscadmin.h. Local (non-exported) to avoid clashing with other modules'
+// crate-level CHECK_FOR_INTERRUPTS; the real handler is not ported.
+macro_rules! CHECK_FOR_INTERRUPTS {
+    () => {{}};
+}
+
 // ----------------------------------------------------------------
 // Constants from access/transam.h (the C build pulls these in via
 // #include "access/transam.h"). src/access/transam.rs currently only
@@ -164,11 +237,8 @@ const GETNEWOID_LOG_MAX_INTERVAL: u64 = 128000000;
  *		This function does not perform any catalog accesses.
  *		Some callers rely on that!
  */
-// STUB: needs RelationGetRelid / rd_rel from the relcache (utils/rel.h), not ported.
-//   return IsSystemClass(RelationGetRelid(relation), relation->rd_rel);
-pub fn IsSystemRelation(_relation: Relation) -> bool {
-    // TODO(pg-port): needs relcache RelationData (RelationGetRelid, rd_rel).
-    unimplemented!()
+pub unsafe fn IsSystemRelation(relation: Relation) -> bool {
+    IsSystemClass(RelationGetRelid(relation), (*relation).rd_rel)
 }
 
 /*
@@ -193,11 +263,8 @@ pub fn IsSystemClass(relid: Oid, reltuple: Form_pg_class) -> bool {
  *		This function does not perform any catalog accesses.
  *		Some callers rely on that!
  */
-// STUB: needs RelationGetRelid from the relcache (utils/rel.h), not ported.
-//   return IsCatalogRelationOid(RelationGetRelid(relation));
-pub fn IsCatalogRelation(_relation: Relation) -> bool {
-    // TODO(pg-port): needs relcache RelationData (RelationGetRelid).
-    unimplemented!()
+pub unsafe fn IsCatalogRelation(relation: Relation) -> bool {
+    IsCatalogRelationOid(RelationGetRelid(relation))
 }
 
 /*
@@ -245,11 +312,8 @@ pub fn IsCatalogTextUniqueIndexOid(relid: Oid) -> bool {
  * IsInplaceUpdateRelation
  *		True iff core code performs inplace updates on the relation.
  */
-// STUB: needs RelationGetRelid from the relcache (utils/rel.h), not ported.
-//   return IsInplaceUpdateOid(RelationGetRelid(relation));
-pub fn IsInplaceUpdateRelation(_relation: Relation) -> bool {
-    // TODO(pg-port): needs relcache RelationData (RelationGetRelid).
-    unimplemented!()
+pub unsafe fn IsInplaceUpdateRelation(relation: Relation) -> bool {
+    IsInplaceUpdateOid(RelationGetRelid(relation))
 }
 
 /*
@@ -266,11 +330,14 @@ pub fn IsInplaceUpdateOid(relid: Oid) -> bool {
  *
  *		Does not perform any catalog accesses.
  */
-// STUB: needs RelationGetNamespace from the relcache (utils/rel.h), not ported.
-//   return IsToastNamespace(RelationGetNamespace(relation));
-pub fn IsToastRelation(_relation: Relation) -> bool {
-    // TODO(pg-port): needs relcache RelationData (RelationGetNamespace).
-    unimplemented!()
+pub unsafe fn IsToastRelation(relation: Relation) -> bool {
+    /*
+     * What we actually check is whether the relation belongs to a pg_toast
+     * namespace.  This should be equivalent because of restrictions that are
+     * enforced elsewhere against creating user relations in, or moving
+     * relations into/out of, a pg_toast namespace.
+     */
+    IsToastNamespace(RelationGetNamespace(relation))
 }
 
 /*
@@ -463,31 +530,111 @@ pub fn IsPinnedObject(classId: Oid, objectId: Oid) -> bool {
  *
  * Caller must have a suitable lock on the relation.
  */
-// STUB: needs systable scans (access/genam.h), GetNewObjectId/CHECK_FOR_INTERRUPTS,
-// bootstrap-mode tests (miscadmin.h), and SnapshotAny (utils/snapmgr.h) - none ported.
-//
-// C body (preserved for the eventual port):
-//   Oid newOid; SysScanDesc scan; ScanKeyData key; bool collides;
-//   uint64 retries = 0; uint64 retries_before_log = GETNEWOID_LOG_THRESHOLD;
-//   Assert(IsSystemRelation(relation));
-//   if (IsBootstrapProcessingMode()) return GetNewObjectId();
-//   Assert(!IsBinaryUpgrade || RelationGetRelid(relation) != TypeRelationId);
-//   do {
-//       CHECK_FOR_INTERRUPTS();
-//       newOid = GetNewObjectId();
-//       ScanKeyInit(&key, oidcolumn, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(newOid));
-//       scan = systable_beginscan(relation, indexId, true, SnapshotAny, 1, &key);
-//       collides = HeapTupleIsValid(systable_getnext(scan));
-//       systable_endscan(scan);
-//       if (retries >= retries_before_log) { ereport(LOG, ...); ... }
-//       retries++;
-//   } while (collides);
-//   if (retries > GETNEWOID_LOG_THRESHOLD) { ereport(LOG, ...); }
-//   return newOid;
-pub fn GetNewOidWithIndex(_relation: Relation, _indexId: Oid, _oidcolumn: AttrNumber) -> Oid {
-    let _ = (GETNEWOID_LOG_THRESHOLD, GETNEWOID_LOG_MAX_INTERVAL);
-    // TODO(pg-port): needs access/genam systable scans, GetNewObjectId, SnapshotAny.
-    unimplemented!()
+pub unsafe fn GetNewOidWithIndex(relation: Relation, indexId: Oid, oidcolumn: AttrNumber) -> Oid {
+    let mut newOid: Oid;
+    let mut scan: SysScanDesc;
+    let mut key: ScanKeyData = core::mem::zeroed();
+    let mut collides: bool;
+    let mut retries: u64 = 0;
+    let mut retries_before_log: u64 = GETNEWOID_LOG_THRESHOLD;
+
+    /* Only system relations are supported */
+    Assert!(IsSystemRelation(relation));
+
+    /* In bootstrap mode, we don't have any indexes to use */
+    if IsBootstrapProcessingMode() {
+        return GetNewObjectId();
+    }
+
+    /*
+     * We should never be asked to generate a new pg_type OID during
+     * pg_upgrade; doing so would risk collisions with the OIDs it wants to
+     * assign.  Hitting this assert means there's some path where we failed to
+     * ensure that a type OID is determined by commands in the dump script.
+     */
+    Assert!(!IsBinaryUpgrade || RelationGetRelid(relation) != TypeRelationId);
+
+    /* Generate new OIDs until we find one not in the table */
+    loop {
+        CHECK_FOR_INTERRUPTS!();
+
+        newOid = GetNewObjectId();
+
+        ScanKeyInit(
+            &mut key,
+            oidcolumn,
+            BTEqualStrategyNumber,
+            F_OIDEQ,
+            ObjectIdGetDatum(newOid),
+        );
+
+        /* see notes above about using SnapshotAny */
+        scan = systable_beginscan(
+            relation,
+            indexId,
+            true,
+            (&raw mut SnapshotAnyData) as *mut c_void,
+            1,
+            &mut key,
+        );
+
+        collides = HeapTupleIsValid(systable_getnext(scan));
+
+        systable_endscan(scan);
+
+        /*
+         * Log that we iterate more than GETNEWOID_LOG_THRESHOLD but have not
+         * yet found OID unused in the relation. Then repeat logging with
+         * exponentially increasing intervals until we iterate more than
+         * GETNEWOID_LOG_MAX_INTERVAL. Finally repeat logging every
+         * GETNEWOID_LOG_MAX_INTERVAL unless an unused OID is found. This
+         * logic is necessary not to fill up the server log with the similar
+         * messages.
+         */
+        if retries >= retries_before_log {
+            ereport!(
+                LOG,
+                errmsg!(
+                    "still searching for an unused OID in relation \"{}\"",
+                    std::ffi::CStr::from_ptr(RelationGetRelationName(relation)).to_string_lossy()
+                )
+            );
+            /* C also: errdetail_plural("OID candidates have been checked %" PRIu64 " time(s), but no unused OID has been found yet.", retries) */
+
+            /*
+             * Double the number of retries to do before logging next until it
+             * reaches GETNEWOID_LOG_MAX_INTERVAL.
+             */
+            if retries_before_log * 2 <= GETNEWOID_LOG_MAX_INTERVAL {
+                retries_before_log *= 2;
+            } else {
+                retries_before_log += GETNEWOID_LOG_MAX_INTERVAL;
+            }
+        }
+
+        retries += 1;
+
+        if !collides {
+            break;
+        }
+    }
+
+    /*
+     * If at least one log message is emitted, also log the completion of OID
+     * assignment.
+     */
+    if retries > GETNEWOID_LOG_THRESHOLD {
+        ereport!(
+            LOG,
+            errmsg!(
+                "new OID has been assigned in relation \"{}\" after {} retries",
+                std::ffi::CStr::from_ptr(RelationGetRelationName(relation)).to_string_lossy(),
+                retries
+            )
+        );
+    }
+
+    newOid
 }
 
 /*
@@ -495,61 +642,248 @@ pub fn GetNewOidWithIndex(_relation: Relation, _indexId: Oid, _oidcolumn: AttrNu
  *		Generate a new relfilenumber that is unique within the
  *		database of the given tablespace.
  */
-// STUB: needs RelFileLocatorBackend, relpath(), MyDatabaseId/MyDatabaseTableSpace,
-// ProcNumberForTempRelations, and filesystem access() - none ported.
-//
-// C body (preserved): see catalog.c GetNewRelFileNumber - switch on relpersistence
-// to pick a ProcNumber, build a RelFileLocatorBackend, then loop calling
-// GetNewOidWithIndex()/GetNewObjectId() until relpath() names a file that doesn't
-// exist (access(rpath.str, F_OK)).
-pub fn GetNewRelFileNumber(
-    _reltablespace: Oid,
-    _pg_class: Relation,
+pub unsafe fn GetNewRelFileNumber(
+    reltablespace: Oid,
+    pg_class: Relation,
     relpersistence: c_char,
 ) -> RelFileNumber {
-    match relpersistence {
-        RELPERSISTENCE_TEMP | RELPERSISTENCE_UNLOGGED | RELPERSISTENCE_PERMANENT => {}
+    let mut rlocator: RelFileLocatorBackend = core::mem::zeroed();
+    let mut rpath: RelPathStr;
+    let mut collides: bool;
+    let procNumber: ProcNumber;
+
+    /*
+     * If we ever get here during pg_upgrade, there's something wrong; all
+     * relfilenumber assignments during a binary-upgrade run should be
+     * determined by commands in the dump script.
+     */
+    Assert!(!IsBinaryUpgrade);
+
+    match relpersistence as u8 {
+        RELPERSISTENCE_TEMP => {
+            procNumber = ProcNumberForTempRelations();
+        }
+        RELPERSISTENCE_UNLOGGED | RELPERSISTENCE_PERMANENT => {
+            procNumber = INVALID_PROC_NUMBER;
+        }
         _ => {
             elog!(ERROR, "invalid relpersistence: {}", relpersistence as u8 as char);
+            return InvalidRelFileNumber; /* placate compiler */
         }
     }
-    // TODO(pg-port): needs RelFileLocatorBackend, relpath(), MyDatabaseId, access().
-    unimplemented!()
+
+    /* This logic should match RelationInitPhysicalAddr */
+    rlocator.locator.spcOid = if reltablespace != InvalidOid {
+        reltablespace
+    } else {
+        MyDatabaseTableSpace
+    };
+    rlocator.locator.dbOid = if rlocator.locator.spcOid == GLOBALTABLESPACE_OID {
+        InvalidOid
+    } else {
+        MyDatabaseId
+    };
+
+    /*
+     * The relpath will vary based on the backend number, so we must
+     * initialize that properly here to make sure that any collisions based on
+     * filename are properly detected.
+     */
+    rlocator.backend = procNumber;
+
+    loop {
+        CHECK_FOR_INTERRUPTS!();
+
+        /* Generate the OID */
+        if !pg_class.is_null() {
+            rlocator.locator.relNumber =
+                GetNewOidWithIndex(pg_class, ClassOidIndexId, Anum_pg_class_oid);
+        } else {
+            rlocator.locator.relNumber = GetNewObjectId();
+        }
+
+        /* Check for existing file of same name */
+        rpath = relpath(rlocator, MAIN_FORKNUM);
+
+        if access(rpath.str.as_ptr(), F_OK) == 0 {
+            /* definite collision */
+            collides = true;
+        } else {
+            /*
+             * Here we have a little bit of a dilemma: if errno is something
+             * other than ENOENT, should we declare a collision and loop? In
+             * practice it seems best to go ahead regardless of the errno.  If
+             * there is a colliding file we will get an smgr failure when we
+             * attempt to create the new relation file.
+             */
+            collides = false;
+        }
+
+        if !collides {
+            break;
+        }
+    }
+
+    rlocator.locator.relNumber
+}
+
+// fmgr / relcache / syscache dependencies for the two SQL-callable wrappers.
+use crate::access::htup_details::GETSTRUCT;
+use crate::access::index::indexam::{index_close, index_open};
+use crate::access::table::table::{table_close, table_open};
+use crate::catalog::pg_attribute::Form_pg_attribute;
+use crate::catalog::pg_type_d::OIDOID;
+use crate::storage::lockdefs::RowExclusiveLock;
+use crate::utils::cache::syscache::{ReleaseSysCache, SearchSysCacheAttName};
+
+// utils/rel.h: IndexRelationGetNumberOfKeyAttributes(relation).
+// TODO(pg-port): not exported as a real fn anywhere; reads rd_index->indnkeyatts.
+unsafe fn IndexRelationGetNumberOfKeyAttributes(relation: Relation) -> c_int {
+    (*(*relation).rd_index).indnkeyatts as c_int
+}
+
+// rd_index->indkey is the int2vector that begins the variable-length region of
+// the pg_index tuple, immediately after the fixed FormData_pg_index fields
+// (not modeled in catalog::pg_index::FormData_pg_index).  Read indkey.values[i]
+// at that offset, matching the C in-memory layout.
+unsafe fn IndexRelationGetKeyAttno(relation: Relation, i: usize) -> AttrNumber {
+    use crate::c::int2vector;
+    use crate::catalog::pg_index::FormData_pg_index;
+    let base = (*relation).rd_index as *const u8;
+    let indkey = base.add(core::mem::size_of::<FormData_pg_index>()) as *const int2vector;
+    *(*indkey).values.as_ptr().add(i)
 }
 
 /*
- * pg_nextoid
- *		SQL callable interface for GetNewOidWithIndex().
+ * SQL callable interface for GetNewOidWithIndex().  Outside of initdb's
+ * direct insertions into catalog tables, and recovering from corruption, this
+ * should rarely be needed.
+ *
+ * Function is intentionally not documented in the user facing docs.
  */
-// STUB: needs the fmgr PG_FUNCTION_ARGS calling convention, superuser(), table_open/
-// index_open, SearchSysCacheAttName/GETSTRUCT, and the relcache - none ported.
-//
-// C body (preserved): superuser() check; table_open(reloid)/index_open(idxoid);
-// IsSystemRelation(rel) check; verify idx belongs to rel; look up the named attr via
-// SearchSysCacheAttName + GETSTRUCT; verify it is type OID and is the sole index key;
-// newoid = GetNewOidWithIndex(rel, idxoid, attno); release/close; PG_RETURN_OID(newoid).
-pub fn pg_nextoid(_fcinfo: *mut c_void) -> Datum {
-    let _ = ERRCODE_INVALID_PARAMETER_VALUE;
-    let _ = ERRCODE_INSUFFICIENT_PRIVILEGE;
-    // TODO(pg-port): needs fmgr SRF interface, syscache, table/index_open, relcache.
-    unimplemented!()
+pub unsafe fn pg_nextoid(fcinfo: *mut c_void) -> Datum {
+    let reloid: Oid = PG_GETARG_OID!(fcinfo, 0);
+    let attname: Name = PG_GETARG_NAME!(fcinfo, 1);
+    let idxoid: Oid = PG_GETARG_OID!(fcinfo, 2);
+    let rel: Relation;
+    let idx: Relation;
+    let atttuple: HeapTuple;
+    let attform: Form_pg_attribute;
+    let attno: AttrNumber;
+    let newoid: Oid;
+
+    /*
+     * As this function is not intended to be used during normal running, and
+     * only supports system catalogs (which require superuser permissions to
+     * modify), just checking for superuser ought to not obstruct valid
+     * usecases.
+     */
+    if !superuser() {
+        ereport!(
+            ERROR,
+            errmsg!("must be superuser to call {}()", "pg_nextoid")
+        );
+        /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */
+    }
+
+    rel = table_open(reloid, RowExclusiveLock);
+    idx = index_open(idxoid, RowExclusiveLock);
+
+    if !IsSystemRelation(rel) {
+        ereport!(
+            ERROR,
+            errmsg!("pg_nextoid() can only be used on system catalogs")
+        );
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+    }
+
+    if (*(*idx).rd_index).indrelid != RelationGetRelid(rel) {
+        ereport!(
+            ERROR,
+            errmsg!(
+                "index \"{}\" does not belong to table \"{}\"",
+                std::ffi::CStr::from_ptr(RelationGetRelationName(idx)).to_string_lossy(),
+                std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
+            )
+        );
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+    }
+
+    atttuple = SearchSysCacheAttName(reloid, NameStr(&*attname));
+    if !HeapTupleIsValid(atttuple) {
+        ereport!(
+            ERROR,
+            errmsg!(
+                "column \"{}\" of relation \"{}\" does not exist",
+                std::ffi::CStr::from_ptr(NameStr(&*attname)).to_string_lossy(),
+                std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
+            )
+        );
+        /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */
+    }
+
+    attform = GETSTRUCT(atttuple) as Form_pg_attribute;
+    attno = (*attform).attnum;
+
+    if (*attform).atttypid != OIDOID {
+        ereport!(
+            ERROR,
+            errmsg!(
+                "column \"{}\" is not of type oid",
+                std::ffi::CStr::from_ptr(NameStr(&*attname)).to_string_lossy()
+            )
+        );
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+    }
+
+    if IndexRelationGetNumberOfKeyAttributes(idx) != 1
+        || IndexRelationGetKeyAttno(idx, 0) != attno
+    {
+        ereport!(
+            ERROR,
+            errmsg!(
+                "index \"{}\" is not the index for column \"{}\"",
+                std::ffi::CStr::from_ptr(RelationGetRelationName(idx)).to_string_lossy(),
+                std::ffi::CStr::from_ptr(NameStr(&*attname)).to_string_lossy()
+            )
+        );
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+    }
+
+    newoid = GetNewOidWithIndex(rel, idxoid, attno);
+
+    ReleaseSysCache(atttuple);
+    table_close(rel, RowExclusiveLock);
+    index_close(idx, RowExclusiveLock);
+
+    PG_RETURN_OID!(newoid);
 }
 
 /*
- * pg_stop_making_pinned_objects
- *		SQL callable interface for StopGeneratingPinnedObjectIds().
+ * SQL callable interface for StopGeneratingPinnedObjectIds().
+ *
+ * This is only to be used by initdb, so it's intentionally not documented in
+ * the user facing docs.
  */
-// STUB: needs superuser() and StopGeneratingPinnedObjectIds() - not ported.
-//
-// C body (preserved):
-//   if (!superuser()) ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-//       errmsg("must be superuser to call %s()", "pg_stop_making_pinned_objects")));
-//   StopGeneratingPinnedObjectIds();
-//   PG_RETURN_VOID();
-pub fn pg_stop_making_pinned_objects(_fcinfo: *mut c_void) -> Datum {
-    let _ = ERRCODE_INSUFFICIENT_PRIVILEGE;
-    // TODO(pg-port): needs fmgr SRF interface, superuser(), StopGeneratingPinnedObjectIds.
-    unimplemented!()
+pub unsafe fn pg_stop_making_pinned_objects(_fcinfo: *mut c_void) -> Datum {
+    /*
+     * Belt-and-suspenders check, since StopGeneratingPinnedObjectIds will
+     * fail anyway in non-single-user mode.
+     */
+    if !superuser() {
+        ereport!(
+            ERROR,
+            errmsg!(
+                "must be superuser to call {}()",
+                "pg_stop_making_pinned_objects"
+            )
+        );
+        /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */
+    }
+
+    StopGeneratingPinnedObjectIds();
+
+    PG_RETURN_VOID!();
 }
 
 #[cfg(test)]

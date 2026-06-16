@@ -287,12 +287,35 @@ pub unsafe fn PrepareSortSupportComparisonShim(cmpFunc: Oid, ssup: SortSupport) 
  * or if no such function exists or it declines to set up the appropriate
  * state, prepare a suitable shim.
  */
-#[allow(unused_variables)]
 unsafe fn FinishSortSupportFunction(opfamily: Oid, opcintype: Oid, ssup: SortSupport) {
-    // TODO(pg-port): needs get_opfamily_proc (lsyscache) and OidFunctionCall1
-    // (fmgr catalog path).  Stubbed until those are ported; the comparison-shim
-    // fallback path it drives (PrepareSortSupportComparisonShim) is fully real.
-    unimplemented!("FinishSortSupportFunction: lsyscache/fmgr catalog path not yet ported")
+    // Look for a sort support function
+    let sortSupportFunction =
+        get_opfamily_proc(opfamily, opcintype, opcintype, BTSORTSUPPORT_PROC);
+    if OidIsValid(sortSupportFunction) {
+        /*
+         * The sort support function can provide a comparator, but it can also
+         * choose not to so (e.g. based on the selected collation).
+         */
+        OidFunctionCall1(sortSupportFunction, PointerGetDatum(ssup as *const c_void));
+    }
+
+    if (*ssup).comparator.is_none() {
+        let sortFunction = get_opfamily_proc(opfamily, opcintype, opcintype, BTORDER_PROC);
+
+        if !OidIsValid(sortFunction) {
+            elog!(
+                ERROR,
+                "missing support function {}({},{}) in opfamily {}",
+                BTORDER_PROC,
+                opcintype,
+                opcintype,
+                opfamily
+            );
+        }
+
+        // We'll use a shim to call the old-style btree comparator
+        PrepareSortSupportComparisonShim(sortFunction, ssup);
+    }
 }
 
 /*

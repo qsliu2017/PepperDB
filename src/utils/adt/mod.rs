@@ -101,3 +101,4 @@ pub mod rangetypes_spgist;
 pub mod pg_locale_libc;
 pub mod xml;
 pub mod jsonpath_exec;
+pub mod pg_locale;

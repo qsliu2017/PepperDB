@@ -12,15 +12,15 @@
 //!   miscadmin.h              -> NOT ported (MyProcPid); only used in the strong-seed
 //!                               fallback, which is stubbed (see initialize_prng)
 //!   utils/fmgrprotos.h       -> crate::utils::fmgr (PG_GETARG_*/PG_RETURN_* macros)
-//!   utils/numeric.h          -> NOT ported (Numeric / PG_GETARG_NUMERIC / random_numeric)
-//!                               => numeric_random stubbed
+//!   utils/numeric.h          -> crate::utils::adt::numeric (Numeric / random_numeric;
+//!                               PG_GETARG_NUMERIC / PG_RETURN_NUMERIC macros)
 //!   utils/timestamp.h        -> NOT ported (TimestampTz / GetCurrentTimestamp); only used
 //!                               in the strong-seed fallback, which is stubbed
 //!
 //! TRANSLATED FULLY: initialize_prng (strong-seed path via pg_strong_random),
-//! setseed, drandom, drandom_normal, int4random, int8random.
-//! STUBBED: numeric_random (numeric.c not yet ported); the time/PID seed fallback
-//! inside initialize_prng (GetCurrentTimestamp / MyProcPid not ported).
+//! setseed, drandom, drandom_normal, int4random, int8random, numeric_random.
+//! STUBBED: the time/PID seed fallback inside initialize_prng
+//! (GetCurrentTimestamp / MyProcPid not ported).
 
 use crate::prelude::*;
 use crate::utils::fmgr::*;
@@ -34,6 +34,32 @@ use crate::common::pg_prng::{
     pg_prng_seed_check, pg_prng_state,
 };
 use crate::port::pg_strong_random::pg_strong_random;
+use crate::utils::adt::numeric::{Numeric, random_numeric};
+use crate::postgres::PointerGetDatum;
+use crate::PG_DETOAST_DATUM;
+
+// PG_GETARG_NUMERIC!/PG_RETURN_NUMERIC! are local macro_rules in each adt unit
+// (formatting.rs / date.rs / numeric.rs), not macro_export; mirror them here.
+// They expand to unqualified DatumGetNumeric/NumericGetDatum, which are likewise
+// file-private helpers - define those too, matching the real numeric.c bodies.
+#[inline]
+unsafe fn DatumGetNumeric(X: Datum) -> Numeric {
+    PG_DETOAST_DATUM!(X) as Numeric
+}
+#[inline]
+fn NumericGetDatum(X: Numeric) -> Datum {
+    PointerGetDatum(X as *const c_void)
+}
+macro_rules! PG_GETARG_NUMERIC {
+    ($fcinfo:expr, $n:expr) => {
+        DatumGetNumeric($crate::PG_GETARG_DATUM!($fcinfo, $n))
+    };
+}
+macro_rules! PG_RETURN_NUMERIC {
+    ($x:expr) => {
+        return NumericGetDatum($x)
+    };
+}
 
 // errcodes.h is not yet ported as a constants module; like the sibling adt
 // units (varchar.rs etc.) we define the one ERRCODE we need locally. errcode()
@@ -203,22 +229,22 @@ pub unsafe fn int8random(fcinfo: FunctionCallInfo) -> Datum {
  *
  *	Returns a random numeric value chosen uniformly in the specified range.
  */
-// TODO(pg-port): needs utils/numeric (Numeric type, PG_GETARG_NUMERIC,
-// PG_RETURN_NUMERIC, random_numeric). numeric.c is not yet ported.
-//
-// Original C body:
-//   Numeric  rmin = PG_GETARG_NUMERIC(0);
-//   Numeric  rmax = PG_GETARG_NUMERIC(1);
-//   Numeric  result;
-//
-//   initialize_prng();
-//
-//   result = random_numeric(&prng_state, rmin, rmax);
-//
-//   PG_RETURN_NUMERIC(result);
 pub unsafe fn numeric_random(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!()
+    let rmin: Numeric = PG_GETARG_NUMERIC!(fcinfo, 0);
+    let rmax: Numeric = PG_GETARG_NUMERIC!(fcinfo, 1);
+    let result: Numeric;
+
+    initialize_prng();
+
+    // random_numeric() lives in numeric.rs, which declares its own (repr(C),
+    // layout-identical) pg_prng_state; cast the shared state pointer to match.
+    result = random_numeric(
+        &raw mut prng_state as *mut crate::utils::adt::numeric::pg_prng_state,
+        rmin,
+        rmax,
+    );
+
+    PG_RETURN_NUMERIC!(result)
 }
 
 #[cfg(test)]

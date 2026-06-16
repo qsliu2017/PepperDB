@@ -2175,29 +2175,362 @@ pub unsafe fn assign_log_destination(_newval: *const c_char, extra: *mut c_void)
     Log_destination = *(extra as *const c_int);
 }
 
+// ---------------------------------------------------------------------------
+// HAVE_SYSLOG support: libc syslog primitives, GUC-backed statics, and limit.
+// These mirror the file-scope declarations guarded by #ifdef HAVE_SYSLOG in
+// elog.c.  The whole syslog code path is compiled only under the
+// `have_syslog` feature, matching the C build's HAVE_SYSLOG configuration.
+// TODO(pg-port): wire syslog_ident/openlog_done to the real guc.c statics once
+// the syslog GUCs land; for now they live here as in the C file.
+// ---------------------------------------------------------------------------
+#[cfg(feature = "have_syslog")]
+const PG_SYSLOG_LIMIT: c_int = 1024;
+
+#[cfg(feature = "have_syslog")]
+static mut syslog_seq: c_ulong = 0;
+#[cfg(feature = "have_syslog")]
+static mut openlog_done: bool = false;
+#[cfg(feature = "have_syslog")]
+static mut syslog_ident: *mut c_char = null_mut();
+#[cfg(feature = "have_syslog")]
+pub static mut syslog_facility: c_int = LOG_LOCAL0;
+
+// syslog priority levels and openlog option/facility bits (sys/syslog.h)
+#[cfg(feature = "have_syslog")]
+const LOG_PID: c_int = 0x01;
+#[cfg(feature = "have_syslog")]
+const LOG_NDELAY: c_int = 0x08;
+#[cfg(feature = "have_syslog")]
+const LOG_NOWAIT: c_int = 0x10;
+#[cfg(feature = "have_syslog")]
+const LOG_LOCAL0: c_int = 16 << 3;
+#[cfg(feature = "have_syslog")]
+pub const LOG_DEBUG: c_int = 7;
+#[cfg(feature = "have_syslog")]
+pub const LOG_INFO: c_int = 6;
+#[cfg(feature = "have_syslog")]
+pub const LOG_NOTICE: c_int = 5;
+#[cfg(feature = "have_syslog")]
+pub const LOG_WARNING: c_int = 4;
+#[cfg(feature = "have_syslog")]
+pub const LOG_ERR: c_int = 3;
+#[cfg(feature = "have_syslog")]
+pub const LOG_CRIT: c_int = 2;
+
+#[cfg(feature = "have_syslog")]
+extern "C" {
+    fn openlog(ident: *const c_char, option: c_int, facility: c_int);
+    fn closelog();
+    fn syslog(priority: c_int, format: *const c_char, ...);
+    fn strchr(s: *const c_char, c: c_int) -> *mut c_char;
+    fn strdup(s: *const c_char) -> *mut c_char;
+    fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
+    fn isspace(c: c_int) -> c_int;
+}
+
 /*
  * GUC assign_hook for syslog_ident
  */
-pub unsafe fn assign_syslog_ident(_newval: *const c_char, _extra: *mut c_void) {
-    // TODO(pg-port): implement syslog ident assignment when HAVE_SYSLOG
-    // Without syslog support, just ignore it
+pub unsafe fn assign_syslog_ident(newval: *const c_char, extra: *mut c_void) {
+    #[cfg(feature = "have_syslog")]
+    {
+        /*
+         * guc.c is likely to call us repeatedly with same parameters, so don't
+         * thrash the syslog connection unnecessarily.  Also, we do not re-open
+         * the connection until needed, since this routine will get called whether
+         * or not Log_destination actually mentions syslog.
+         *
+         * Note that we make our own copy of the ident string rather than relying
+         * on guc.c's.  This may be overly paranoid, but it ensures that we cannot
+         * accidentally free a string that syslog is still using.
+         */
+        if syslog_ident.is_null() || strcmp(syslog_ident, newval) != 0 {
+            if openlog_done {
+                closelog();
+                openlog_done = false;
+            }
+            free(syslog_ident as *mut c_void);
+            syslog_ident = strdup(newval);
+            /* if the strdup fails, we will cope in write_syslog() */
+        }
+    }
+    /* Without syslog support, just ignore it */
 }
 
 /*
  * GUC assign_hook for syslog_facility
  */
-pub unsafe fn assign_syslog_facility(_newval: c_int, _extra: *mut c_void) {
-    // TODO(pg-port): implement syslog facility assignment when HAVE_SYSLOG
-    // Without syslog support, just ignore it
+pub unsafe fn assign_syslog_facility(newval: c_int, extra: *mut c_void) {
+    #[cfg(feature = "have_syslog")]
+    {
+        /*
+         * As above, don't thrash the syslog connection unnecessarily.
+         */
+        if syslog_facility != newval {
+            if openlog_done {
+                closelog();
+                openlog_done = false;
+            }
+            syslog_facility = newval;
+        }
+    }
+    /* Without syslog support, just ignore it */
 }
 
 /*
- * write_syslog -- Write a message line to syslog.
- * TODO(pg-port): implement when HAVE_SYSLOG
+ * Write a message line to syslog
  */
 #[cfg(feature = "have_syslog")]
-unsafe fn write_syslog(_level: c_int, _line: *const c_char) {
-    unimplemented!("write_syslog: HAVE_SYSLOG not supported in this build");
+unsafe fn write_syslog(level: c_int, mut line: *const c_char) {
+    let mut len: c_int;
+    let mut nlpos: *const c_char;
+
+    /* Open syslog connection if not done yet */
+    if !openlog_done {
+        openlog(
+            if !syslog_ident.is_null() {
+                syslog_ident
+            } else {
+                b"postgres\0".as_ptr() as *const c_char
+            },
+            LOG_PID | LOG_NDELAY | LOG_NOWAIT,
+            syslog_facility,
+        );
+        openlog_done = true;
+    }
+
+    /*
+     * We add a sequence number to each log message to suppress "same"
+     * messages.
+     */
+    syslog_seq += 1;
+
+    /*
+     * Our problem here is that many syslog implementations don't handle long
+     * messages in an acceptable manner. While this function doesn't help that
+     * fact, it does work around by splitting up messages into smaller pieces.
+     *
+     * We divide into multiple syslog() calls if message is too long or if the
+     * message contains embedded newline(s).
+     */
+    len = strlen(line) as c_int;
+    nlpos = strchr(line, b'\n' as c_int);
+    if syslog_split_messages && (len > PG_SYSLOG_LIMIT || !nlpos.is_null()) {
+        let mut chunk_nr: c_int = 0;
+
+        while len > 0 {
+            let mut buf = [0 as c_char; PG_SYSLOG_LIMIT as usize + 1];
+            let mut buflen: c_int;
+            let mut i: c_int;
+
+            /* if we start at a newline, move ahead one char */
+            if *line == b'\n' as c_char {
+                line = line.add(1);
+                len -= 1;
+                /* we need to recompute the next newline's position, too */
+                nlpos = strchr(line, b'\n' as c_int);
+                continue;
+            }
+
+            /* copy one line, or as much as will fit, to buf */
+            if !nlpos.is_null() {
+                buflen = nlpos.offset_from(line) as c_int;
+            } else {
+                buflen = len;
+            }
+            buflen = buflen.min(PG_SYSLOG_LIMIT);
+            memcpy(buf.as_mut_ptr() as *mut c_void, line as *const c_void, buflen as usize);
+            buf[buflen as usize] = b'\0' as c_char;
+
+            /* trim to multibyte letter boundary */
+            buflen = pg_mbcliplen(buf.as_ptr(), buflen, buflen);
+            if buflen <= 0 {
+                return;
+            }
+            buf[buflen as usize] = b'\0' as c_char;
+
+            /* already word boundary? */
+            if *line.add(buflen as usize) != b'\0' as c_char
+                && isspace(*line.add(buflen as usize) as c_uchar as c_int) == 0
+            {
+                /* try to divide at word boundary */
+                i = buflen - 1;
+                while i > 0 && isspace(buf[i as usize] as c_uchar as c_int) == 0 {
+                    i -= 1;
+                }
+
+                if i > 0 {
+                    /* else couldn't divide word boundary */
+                    buflen = i;
+                    buf[i as usize] = b'\0' as c_char;
+                }
+            }
+
+            chunk_nr += 1;
+
+            if syslog_sequence_numbers {
+                syslog(level, b"[%lu-%d] %s\0".as_ptr() as *const c_char, syslog_seq, chunk_nr, buf.as_ptr());
+            } else {
+                syslog(level, b"[%d] %s\0".as_ptr() as *const c_char, chunk_nr, buf.as_ptr());
+            }
+
+            line = line.add(buflen as usize);
+            len -= buflen;
+        }
+    } else {
+        /* message short enough */
+        if syslog_sequence_numbers {
+            syslog(level, b"[%lu] %s\0".as_ptr() as *const c_char, syslog_seq, line);
+        } else {
+            syslog(level, b"%s\0".as_ptr() as *const c_char, line);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WIN32 event-log support.  Compiled only on Windows targets, matching the C
+// file's #ifdef WIN32 guards.  The Win32 API surface (RegisterEventSource,
+// ReportEventA/W, GetACP, ...) is not ported; declared here as TODO(pg-port)
+// extern stubs so the event-log path resolves on a Windows build.
+// ---------------------------------------------------------------------------
+#[cfg(windows)]
+type WCHAR = u16;
+#[cfg(windows)]
+type HANDLE = *mut c_void;
+#[cfg(windows)]
+type LPCWSTR = *const WCHAR;
+#[cfg(windows)]
+const INVALID_HANDLE_VALUE: HANDLE = !0usize as HANDLE;
+#[cfg(windows)]
+const EVENTLOG_ERROR_TYPE: c_int = 0x0001;
+#[cfg(windows)]
+const EVENTLOG_WARNING_TYPE: c_int = 0x0002;
+#[cfg(windows)]
+const EVENTLOG_INFORMATION_TYPE: c_int = 0x0004;
+#[cfg(windows)]
+extern "C" {
+    static mut event_source: *mut c_char;
+    fn GetACP() -> c_int;
+    fn pg_codepage_to_encoding(cp: c_int) -> c_int;
+    fn GetMessageEncoding() -> c_int;
+    fn pgwin32_message_to_UTF16(str: *const c_char, len: c_int, encoding: *mut c_int) -> *mut WCHAR;
+    fn RegisterEventSource(lpUNCServerName: *const c_char, lpSourceName: *const c_char) -> HANDLE;
+    fn ReportEventA(
+        hEventLog: HANDLE, wType: c_int, wCategory: c_int, dwEventID: c_int,
+        lpUserSid: *mut c_void, wNumStrings: c_int, dwDataSize: c_int,
+        lpStrings: *const *const c_char, lpRawData: *mut c_void,
+    ) -> c_int;
+    fn ReportEventW(
+        hEventLog: HANDLE, wType: c_int, wCategory: c_int, dwEventID: c_int,
+        lpUserSid: *mut c_void, wNumStrings: c_int, dwDataSize: c_int,
+        lpStrings: *const LPCWSTR, lpRawData: *mut c_void,
+    ) -> c_int;
+}
+#[cfg(windows)]
+const DEFAULT_EVENT_SOURCE: *const c_char = b"PostgreSQL\0".as_ptr() as *const c_char;
+
+#[cfg(windows)]
+/*
+ * Get the PostgreSQL equivalent of the Windows ANSI code page.  "ANSI" system
+ * interfaces (e.g. CreateFileA()) expect string arguments in this encoding.
+ * Every process in a given system will find the same value at all times.
+ */
+unsafe fn GetACPEncoding() -> c_int {
+    static mut encoding: c_int = -2;
+
+    if encoding == -2 {
+        encoding = pg_codepage_to_encoding(GetACP());
+    }
+
+    encoding
+}
+
+#[cfg(windows)]
+/*
+ * Write a message line to the windows event log
+ */
+unsafe fn write_eventlog(level: c_int, line: *const c_char, len: c_int) {
+    let utf16: *mut WCHAR;
+    let mut eventlevel: c_int = EVENTLOG_ERROR_TYPE;
+    static mut evtHandle: HANDLE = INVALID_HANDLE_VALUE;
+
+    if evtHandle == INVALID_HANDLE_VALUE {
+        evtHandle = RegisterEventSource(
+            null_mut(),
+            if !event_source.is_null() {
+                event_source
+            } else {
+                DEFAULT_EVENT_SOURCE
+            },
+        );
+        if evtHandle.is_null() {
+            evtHandle = INVALID_HANDLE_VALUE;
+            return;
+        }
+    }
+
+    match level {
+        DEBUG5 | DEBUG4 | DEBUG3 | DEBUG2 | DEBUG1 | LOG | LOG_SERVER_ONLY | INFO | NOTICE => {
+            eventlevel = EVENTLOG_INFORMATION_TYPE;
+        }
+        WARNING | WARNING_CLIENT_ONLY => {
+            eventlevel = EVENTLOG_WARNING_TYPE;
+        }
+        ERROR | FATAL | PANIC => {
+            eventlevel = EVENTLOG_ERROR_TYPE;
+        }
+        _ => {
+            eventlevel = EVENTLOG_ERROR_TYPE;
+        }
+    }
+
+    /*
+     * If message character encoding matches the encoding expected by
+     * ReportEventA(), call it to avoid the hazards of conversion.  Otherwise,
+     * try to convert the message to UTF16 and write it with ReportEventW().
+     * Fall back on ReportEventA() if conversion failed.
+     *
+     * Since we palloc the structure required for conversion, also fall
+     * through to writing unconverted if we have not yet set up
+     * CurrentMemoryContext.
+     *
+     * Also verify that we are not on our way into error recursion trouble due
+     * to error messages thrown deep inside pgwin32_message_to_UTF16().
+     */
+    if !in_error_recursion_trouble()
+        && !crate::utils::palloc::CurrentMemoryContext.is_null()
+        && GetMessageEncoding() != GetACPEncoding()
+    {
+        utf16 = pgwin32_message_to_UTF16(line, len, null_mut());
+        if !utf16.is_null() {
+            ReportEventW(
+                evtHandle,
+                eventlevel,
+                0,
+                0, /* All events are Id 0 */
+                null_mut(),
+                1,
+                0,
+                &utf16 as *const *mut WCHAR as *const LPCWSTR,
+                null_mut(),
+            );
+            /* XXX Try ReportEventA() when ReportEventW() fails? */
+
+            pfree(utf16 as *mut c_void);
+            return;
+        }
+    }
+    ReportEventA(
+        evtHandle,
+        eventlevel,
+        0,
+        0, /* All events are Id 0 */
+        null_mut(),
+        1,
+        0,
+        &line,
+        null_mut(),
+    );
 }
 
 /*
@@ -2844,6 +3177,34 @@ unsafe fn send_message_to_server_log(edata: *mut ErrorData) {
         appendStringInfoString(&mut buf, b"STATEMENT:  \0".as_ptr() as *const c_char);
         append_with_tabs(&mut buf, debug_query_string);
         appendStringInfoChar(&mut buf, b'\n' as c_char);
+    }
+
+    #[cfg(feature = "have_syslog")]
+    {
+        /* Write to syslog, if enabled */
+        if Log_destination & LOG_DESTINATION_SYSLOG != 0 {
+            let syslog_level: c_int;
+
+            syslog_level = match (*edata).elevel {
+                DEBUG5 | DEBUG4 | DEBUG3 | DEBUG2 | DEBUG1 => LOG_DEBUG,
+                LOG | LOG_SERVER_ONLY | INFO => LOG_INFO,
+                NOTICE | WARNING | WARNING_CLIENT_ONLY => LOG_NOTICE,
+                ERROR => LOG_WARNING,
+                FATAL => LOG_ERR,
+                PANIC => LOG_CRIT,
+                _ => LOG_CRIT,
+            };
+
+            write_syslog(syslog_level, buf.data);
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        /* Write to eventlog, if enabled */
+        if Log_destination & LOG_DESTINATION_EVENTLOG != 0 {
+            write_eventlog((*edata).elevel, buf.data, buf.len);
+        }
     }
 
     /* Write to csvlog, if enabled */

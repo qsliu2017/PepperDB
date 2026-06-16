@@ -44,6 +44,10 @@ use crate::libpq::pqformat::{
     pq_begintypsend, pq_endtypsend, pq_getmsgtext, pq_sendtext,
 };
 use crate::utils::adt::varlena::{textout, textsend};
+use crate::utils::adt::arrayfuncs::{array_out, array_send};
+use crate::utils::adt::r#enum::enum_out;
+use crate::utils::adt::rangetypes::range_out;
+use crate::utils::adt::multirangetypes::multirange_out;
 use crate::{
     PG_GETARG_CSTRING, PG_GETARG_POINTER, PG_RETURN_BYTEA_P, PG_RETURN_CSTRING,
     PG_RETURN_VOID,
@@ -147,17 +151,11 @@ pub unsafe fn anyarray_recv(_fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn anyarray_out(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return array_out(fcinfo);
-    // TODO(pg-port): array_out (utils/adt/arrayfuncs.c) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("anyarray_out: array_out not yet translated")
+    return array_out(fcinfo);
 }
 
 pub unsafe fn anyarray_send(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return array_send(fcinfo);
-    // TODO(pg-port): array_send (utils/adt/arrayfuncs.c) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("anyarray_send: array_send not yet translated")
+    return array_send(fcinfo);
 }
 
 /*
@@ -175,17 +173,11 @@ pub unsafe fn anycompatiblearray_recv(_fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn anycompatiblearray_out(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return array_out(fcinfo);
-    // TODO(pg-port): array_out (utils/adt/arrayfuncs.c) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("anycompatiblearray_out: array_out not yet translated")
+    return array_out(fcinfo);
 }
 
 pub unsafe fn anycompatiblearray_send(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return array_send(fcinfo);
-    // TODO(pg-port): array_send (utils/adt/arrayfuncs.c) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("anycompatiblearray_send: array_send not yet translated")
+    return array_send(fcinfo);
 }
 
 /*
@@ -199,10 +191,7 @@ pub unsafe fn anyenum_in(_fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn anyenum_out(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return enum_out(fcinfo);
-    // TODO(pg-port): enum_out (utils/adt/enum.c) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("anyenum_out: enum_out not yet translated")
+    return enum_out(fcinfo);
 }
 
 /*
@@ -216,10 +205,7 @@ pub unsafe fn anyrange_in(_fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn anyrange_out(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return range_out(fcinfo);
-    // TODO(pg-port): range_out (utils/adt/rangetypes.c) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("anyrange_out: range_out not yet translated")
+    return range_out(fcinfo);
 }
 
 /*
@@ -233,10 +219,7 @@ pub unsafe fn anycompatiblerange_in(_fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn anycompatiblerange_out(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return range_out(fcinfo);
-    // TODO(pg-port): range_out (utils/adt/rangetypes.c) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("anycompatiblerange_out: range_out not yet translated")
+    return range_out(fcinfo);
 }
 
 /*
@@ -250,10 +233,7 @@ pub unsafe fn anymultirange_in(_fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn anymultirange_out(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return multirange_out(fcinfo);
-    // TODO(pg-port): multirange_out (utils/adt/multirangetypes.c) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("anymultirange_out: multirange_out not yet translated")
+    return multirange_out(fcinfo);
 }
 
 /*
@@ -267,10 +247,7 @@ pub unsafe fn anycompatiblemultirange_in(_fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn anycompatiblemultirange_out(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return multirange_out(fcinfo);
-    // TODO(pg-port): multirange_out (utils/adt/multirangetypes.c) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("anycompatiblemultirange_out: multirange_out not yet translated")
+    return multirange_out(fcinfo);
 }
 
 /*

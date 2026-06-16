@@ -17,3 +17,4 @@ pub mod ts_cache;
 pub mod syscache;
 pub mod relmapper;
 pub mod catcache;
+pub mod inval;

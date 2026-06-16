@@ -1864,6 +1864,93 @@ pub unsafe fn pq_putmessage_v2(msgtype: c_char, s: *const c_char, len: Size) -> 
  * Support for TCP Keepalive parameters
  */
 
+/*
+ * On Windows, we need to set both idle and interval at the same time.
+ * We also cannot reset them to the default (setting to zero will
+ * actually set them to zero, not default), therefore we fallback to
+ * the out-of-the-box default instead.
+ */
+// #if defined(WIN32) && defined(SIO_KEEPALIVE_VALS)
+#[cfg(windows)]
+unsafe fn pq_setkeepaliveswin32(port: *mut Port, mut idle: c_int, mut interval: c_int) -> c_int {
+    let mut ka: tcp_keepalive = core::mem::zeroed();
+    let mut retsize: DWORD = 0;
+
+    if idle <= 0 {
+        idle = 2 * 60 * 60; /* default = 2 hours */
+    }
+    if interval <= 0 {
+        interval = 1; /* default = 1 second */
+    }
+
+    ka.onoff = 1;
+    ka.keepalivetime = (idle * 1000) as DWORD;
+    ka.keepaliveinterval = (interval * 1000) as DWORD;
+
+    if WSAIoctl(
+        (*port).sock,
+        SIO_KEEPALIVE_VALS,
+        &mut ka as *mut tcp_keepalive as *mut c_void,
+        core::mem::size_of::<tcp_keepalive>() as DWORD,
+        core::ptr::null_mut(),
+        0,
+        &mut retsize as *mut DWORD,
+        core::ptr::null_mut(),
+        core::ptr::null_mut(),
+    ) != 0
+    {
+        ereport!(
+            LOG,
+            errmsg!(
+                "{}({}) failed: error code {}",
+                "WSAIoctl",
+                "SIO_KEEPALIVE_VALS",
+                WSAGetLastError()
+            )
+        );
+        return STATUS_ERROR;
+    }
+    if (*port).keepalives_idle != idle {
+        (*port).keepalives_idle = idle;
+    }
+    if (*port).keepalives_interval != interval {
+        (*port).keepalives_interval = interval;
+    }
+    STATUS_OK
+}
+
+// TODO(pg-port): Windows socket keepalive deps; unported on the Unix-only port.
+#[cfg(windows)]
+#[allow(non_camel_case_types)]
+type DWORD = u32;
+#[cfg(windows)]
+#[allow(non_snake_case, non_camel_case_types)]
+struct tcp_keepalive {
+    onoff: c_int,
+    keepalivetime: DWORD,
+    keepaliveinterval: DWORD,
+}
+#[cfg(windows)]
+const SIO_KEEPALIVE_VALS: DWORD = 0;
+#[cfg(windows)]
+unsafe fn WSAIoctl(
+    _s: pgsocket,
+    _code: DWORD,
+    _inbuf: *mut c_void,
+    _inlen: DWORD,
+    _outbuf: *mut c_void,
+    _outlen: DWORD,
+    _ret: *mut DWORD,
+    _ov: *mut c_void,
+    _cr: *mut c_void,
+) -> c_int {
+    unimplemented!("TODO(pg-port): WSAIoctl")
+}
+#[cfg(windows)]
+unsafe fn WSAGetLastError() -> c_int {
+    unimplemented!("TODO(pg-port): WSAGetLastError")
+}
+
 pub unsafe fn pq_getkeepalivesidle(port: *mut Port) -> c_int {
     if port.is_null() || port_laddr_family(port) == AF_UNIX {
         return 0;

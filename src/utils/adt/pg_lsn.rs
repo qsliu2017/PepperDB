@@ -21,6 +21,12 @@ use crate::c::uint32;
 use crate::postgres::{DatumGetPointer, DatumGetUInt64, PointerGetDatum, UInt64GetDatum};
 use crate::libpq::pqformat::{pq_begintypsend, pq_endtypsend, pq_getmsgint64, pq_sendint64};
 use crate::access::hash::hashfunc::{hashint8, hashint8extended};
+use crate::utils::adt::numeric::{
+    numeric_add, numeric_in, numeric_is_nan, numeric_pg_lsn, numeric_sub, Numeric,
+};
+use crate::postgres::{CStringGetDatum, Int32GetDatum, ObjectIdGetDatum};
+use crate::utils::fmgr::{DirectFunctionCall1Coll, DirectFunctionCall2Coll, DirectFunctionCall3Coll};
+use crate::postgres_ext::InvalidOid;
 use crate::lib::stringinfo::{StringInfo, StringInfoData};
 use crate::nodes::nodes::Node;
 use core::ffi::{c_char, c_int, c_uint, c_ulong, c_void};
@@ -203,24 +209,110 @@ pub unsafe fn pg_lsn_hash_extended(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 /*----------------------------------------------------------
- *	Arithmetic operators on PostgreSQL LSNs.  [STUBBED - need numeric.c]
+ *	Arithmetic operators on PostgreSQL LSNs.
  *---------------------------------------------------------*/
 
 pub unsafe fn pg_lsn_mi(fcinfo: FunctionCallInfo) -> Datum {
-    // C: returns numeric (lsn1 - lsn2) via numeric_in.
-    // TODO(pg-port): the numeric type (utils/adt/numeric.c) is not yet translated.
-    let _ = fcinfo;
-    unimplemented!("pg_lsn_mi: numeric type (numeric.c) not yet translated")
+    let lsn1: XLogRecPtr = DatumGetLSN(PG_GETARG_DATUM!(fcinfo, 0));
+    let lsn2: XLogRecPtr = DatumGetLSN(PG_GETARG_DATUM!(fcinfo, 1));
+    let mut buf = [0i8; 256];
+    let result: Datum;
+
+    /* Output could be as large as plus or minus 2^63 - 1. */
+    if lsn1 < lsn2 {
+        // "-" UINT64_FORMAT
+        snprintf(buf.as_mut_ptr(), 256, c"-%llu".as_ptr(), lsn2 - lsn1);
+    } else {
+        // UINT64_FORMAT
+        snprintf(buf.as_mut_ptr(), 256, c"%llu".as_ptr(), lsn1 - lsn2);
+    }
+
+    /* Convert to numeric. */
+    result = DirectFunctionCall3Coll(
+        numeric_in,
+        InvalidOid,
+        CStringGetDatum(buf.as_ptr()),
+        ObjectIdGetDatum(0),
+        Int32GetDatum(-1),
+    );
+
+    return result;
 }
+
+/*
+ * Add the number of bytes to pg_lsn, giving a new pg_lsn.
+ * Must handle both positive and negative numbers of bytes.
+ */
 pub unsafe fn pg_lsn_pli(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): numeric type not yet translated.
-    let _ = fcinfo;
-    unimplemented!("pg_lsn_pli: numeric type (numeric.c) not yet translated")
+    let lsn: XLogRecPtr = DatumGetLSN(PG_GETARG_DATUM!(fcinfo, 0));
+    let nbytes: Numeric = DatumGetNumeric(PG_GETARG_DATUM!(fcinfo, 1));
+    let num: Datum;
+    let res: Datum;
+    let mut buf = [0i8; 32];
+
+    if numeric_is_nan(nbytes) {
+        ereport!(ERROR, errmsg!("cannot add NaN to pg_lsn"));
+        /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+    }
+
+    /* Convert to numeric */
+    snprintf(buf.as_mut_ptr(), 32, c"%llu".as_ptr(), lsn);
+    num = DirectFunctionCall3Coll(
+        numeric_in,
+        InvalidOid,
+        CStringGetDatum(buf.as_ptr()),
+        ObjectIdGetDatum(0),
+        Int32GetDatum(-1),
+    );
+
+    /* Add two numerics */
+    res = DirectFunctionCall2Coll(numeric_add, InvalidOid, num, NumericGetDatum(nbytes));
+
+    /* Convert to pg_lsn */
+    return DirectFunctionCall1Coll(numeric_pg_lsn, InvalidOid, res);
 }
+
+/*
+ * Subtract the number of bytes from pg_lsn, giving a new pg_lsn.
+ * Must handle both positive and negative numbers of bytes.
+ */
 pub unsafe fn pg_lsn_mii(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): numeric type not yet translated.
-    let _ = fcinfo;
-    unimplemented!("pg_lsn_mii: numeric type (numeric.c) not yet translated")
+    let lsn: XLogRecPtr = DatumGetLSN(PG_GETARG_DATUM!(fcinfo, 0));
+    let nbytes: Numeric = DatumGetNumeric(PG_GETARG_DATUM!(fcinfo, 1));
+    let num: Datum;
+    let res: Datum;
+    let mut buf = [0i8; 32];
+
+    if numeric_is_nan(nbytes) {
+        ereport!(ERROR, errmsg!("cannot subtract NaN from pg_lsn"));
+        /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
+    }
+
+    /* Convert to numeric */
+    snprintf(buf.as_mut_ptr(), 32, c"%llu".as_ptr(), lsn);
+    num = DirectFunctionCall3Coll(
+        numeric_in,
+        InvalidOid,
+        CStringGetDatum(buf.as_ptr()),
+        ObjectIdGetDatum(0),
+        Int32GetDatum(-1),
+    );
+
+    /* Subtract two numerics */
+    res = DirectFunctionCall2Coll(numeric_sub, InvalidOid, num, NumericGetDatum(nbytes));
+
+    /* Convert to pg_lsn */
+    return DirectFunctionCall1Coll(numeric_pg_lsn, InvalidOid, res);
+}
+
+/* numeric.h fmgr glue (DatumGetNumeric/NumericGetDatum are not pub in numeric.rs). */
+#[inline]
+unsafe fn DatumGetNumeric(x: Datum) -> Numeric {
+    DatumGetPointer(x) as Numeric
+}
+#[inline]
+unsafe fn NumericGetDatum(x: Numeric) -> Datum {
+    PointerGetDatum(x as *const c_void)
 }
 
 /*

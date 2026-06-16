@@ -28,7 +28,10 @@ use std::ffi::{c_char, c_double, c_int, c_uint, c_void};
 use std::ptr;
 
 // lib/ilist types
-use crate::lib::ilist::{dlist_head, dlist_node, slist_head, slist_node};
+use crate::lib::ilist::{
+    dlist_delete, dlist_head, dlist_iter, dlist_mutable_iter, dlist_node, dlist_push_tail,
+    slist_head, slist_node,
+};
 
 // palloc / MemoryContext
 // AllocSetContextCreate, MemoryContextAllocExtended, MemoryContextAllocZero,
@@ -583,6 +586,29 @@ extern "C" {
     fn free(ptr: *mut c_void);
     fn getenv(name: *const c_char) -> *mut c_char;
     fn errno() -> c_int;
+    fn __error() -> *mut c_int;
+    fn strerror(errnum: c_int) -> *mut c_char;
+}
+
+#[inline]
+unsafe fn set_errno(e: c_int) {
+    *__error() = e;
+}
+
+/// Render the current errno as a String, for use where C wrote "%m".
+unsafe fn strerror_string() -> String {
+    std::ffi::CStr::from_ptr(strerror(*__error())).to_string_lossy().into_owned()
+}
+
+/// Borrow a NUL-terminated C string as a byte slice (without the NUL).
+#[inline]
+unsafe fn cstr_bytes<'a>(p: *const c_char) -> &'a [u8] {
+    std::ffi::CStr::from_ptr(p).to_bytes()
+}
+
+/// TODO(pg-port): errcontext() from utils/elog.h; emits an error-context line.
+macro_rules! errcontext {
+    ($($arg:tt)*) => {{ let _ = format!($($arg)*); }};
 }
 
 // ---------------------------------------------------------------------------
@@ -669,6 +695,10 @@ const WARNING: c_int = 19;
 const ERROR: c_int   = 21; // NOTE: PG ERROR == 21 in elog.h
 const FATAL: c_int   = 22;
 const PANIC: c_int   = 23;
+#[allow(dead_code)]
+const EOF: c_int     = -1;
+#[allow(dead_code)]
+const ENOENT: c_int  = 2; // TODO(pg-port): from <errno.h>
 
 // VAR_SET_VALUE etc (parsenodes.h) -- also in guc_funcs.rs but duplicated here for self-containment
 const VAR_SET_VALUE:   c_int = 0;
@@ -1442,6 +1472,16 @@ pub unsafe extern "C" fn guc_name_compare_c(namea: *const c_char, nameb: *const 
     guc_name_compare_rs(a, b)
 }
 
+/*
+ * comparator for qsorting and bsearching guc_variables array
+ */
+pub unsafe extern "C" fn guc_var_compare(a: *const c_void, b: *const c_void) -> c_int {
+    let namea = **(a as *const *const *const c_char);
+    let nameb = **(b as *const *const *const c_char);
+
+    guc_name_compare_c(namea, nameb)
+}
+
 unsafe extern "C" fn guc_name_hash_fn(key: *const c_void, _keysize: usize) -> u32 {
     let name = *(key as *const *const c_char);
     let mut result: u32 = 0;
@@ -1870,8 +1910,17 @@ unsafe fn RemoveGUCFromLists(gconf: *mut config_generic) {
 // ---------------------------------------------------------------------------
 
 unsafe fn set_guc_source(gconf: *mut config_generic, newsource: GucSource) {
-    // Adjust nondef list membership
-    // TODO(pg-port): proper dlist_push_tail / dlist_delete once ilist wrappers exist
+    /* Adjust nondef list membership if appropriate for change */
+    if (*gconf).source == GucSource::PGC_S_DEFAULT {
+        if newsource != GucSource::PGC_S_DEFAULT {
+            dlist_push_tail(&mut guc_nondef_list, &mut (*gconf).nondef_link);
+        }
+    } else {
+        if newsource == GucSource::PGC_S_DEFAULT {
+            dlist_delete(&mut (*gconf).nondef_link);
+        }
+    }
+    /* Now update the source field */
     (*gconf).source = newsource;
 }
 
@@ -3529,9 +3578,69 @@ pub unsafe fn MarkGUCPrefixReserved(className: *const c_char) {
 
 pub unsafe fn get_explain_guc_options(num: *mut c_int) -> *mut *mut config_generic {
     *num = 0;
-    let n = hash_get_num_entries(guc_hashtab) as usize;
-    let result = palloc(std::mem::size_of::<*mut config_generic>() * n) as *mut *mut config_generic;
-    // TODO(pg-port): dlist_foreach over guc_nondef_list when ilist wrappers are available
+
+    /*
+     * While only a fraction of all the GUC variables are marked GUC_EXPLAIN,
+     * it doesn't seem worth dynamically resizing this array.
+     */
+    let result = palloc(std::mem::size_of::<*mut config_generic>() * hash_get_num_entries(guc_hashtab) as usize) as *mut *mut config_generic;
+
+    /* We need only consider GUCs with source not PGC_S_DEFAULT */
+    let mut iter: dlist_iter = std::mem::zeroed();
+    crate::dlist_foreach!(iter, &mut guc_nondef_list, {
+        let conf = crate::dlist_container!(config_generic, nondef_link, iter.cur);
+
+        /* return only parameters marked for inclusion in explain */
+        if ((*conf).flags & GUC_EXPLAIN) == 0 {
+            continue;
+        }
+
+        /* return only options visible to the current user */
+        if !ConfigOptionIsVisible(conf) {
+            continue;
+        }
+
+        /* return only options that are different from their boot values */
+        let modified: bool;
+
+        match (*conf).vartype {
+            config_type::PGC_BOOL => {
+                let lconf = conf as *mut config_bool;
+                modified = (*lconf).boot_val != *(*lconf).variable;
+            }
+            config_type::PGC_INT => {
+                let lconf = conf as *mut config_int;
+                modified = (*lconf).boot_val != *(*lconf).variable;
+            }
+            config_type::PGC_REAL => {
+                let lconf = conf as *mut config_real;
+                modified = (*lconf).boot_val != *(*lconf).variable;
+            }
+            config_type::PGC_STRING => {
+                let lconf = conf as *mut config_string;
+                if (*lconf).boot_val.is_null() && (*(*lconf).variable).is_null() {
+                    modified = false;
+                } else if (*lconf).boot_val.is_null() || (*(*lconf).variable).is_null() {
+                    modified = true;
+                } else {
+                    modified = strcmp((*lconf).boot_val, *(*lconf).variable) != 0;
+                }
+            }
+            config_type::PGC_ENUM => {
+                let lconf = conf as *mut config_enum;
+                modified = (*lconf).boot_val != *(*lconf).variable;
+            }
+        }
+
+        if !modified {
+            continue;
+        }
+
+        /* OK, report it */
+        *result.add(*num as usize) = conf;
+        *num += 1;
+    });
+
     result
 }
 
@@ -3605,6 +3714,217 @@ pub unsafe fn GUCArrayReset(array: *mut c_void) -> *mut c_void {
 }
 
 // ---------------------------------------------------------------------------
+// write_auto_conf_file / replace_auto_config_value
+// ---------------------------------------------------------------------------
+
+const ENOSPC: c_int = 28;
+
+unsafe fn write_auto_conf_file(fd: c_int, filename: *const c_char, head: *mut ConfigVariable) {
+    let mut buf: StringInfoData = std::mem::zeroed();
+
+    initStringInfo(&mut buf);
+
+    /* Emit file header containing warning comment */
+    appendStringInfoString(&mut buf, b"# Do not edit this file manually!\n\0".as_ptr() as *const c_char);
+    appendStringInfoString(&mut buf, b"# It will be overwritten by the ALTER SYSTEM command.\n\0".as_ptr() as *const c_char);
+
+    set_errno(0);
+    if write(fd, buf.data as *const c_void, buf.len as usize) != buf.len as isize {
+        /* if write didn't set errno, assume problem is no disk space */
+        if errno() == 0 {
+            set_errno(ENOSPC);
+        }
+        ereport!(ERROR, errmsg!("could not write to file \"{}\": {}", std::ffi::CStr::from_ptr(filename).to_string_lossy(), strerror_string()));
+        /* C also: errcode_for_file_access() */
+    }
+
+    /* Emit each parameter, properly quoting the value */
+    let mut item = head;
+    while !item.is_null() {
+        resetStringInfo(&mut buf);
+
+        appendStringInfoString(&mut buf, (*item).name);
+        appendStringInfoString(&mut buf, b" = '\0".as_ptr() as *const c_char);
+
+        let escaped = escape_single_quotes_ascii((*item).value);
+        if escaped.is_null() {
+            ereport!(ERROR, errmsg!("out of memory"));
+            /* C also: errcode(ERRCODE_OUT_OF_MEMORY) */
+        }
+        appendStringInfoString(&mut buf, escaped);
+        free(escaped as *mut c_void);
+
+        appendStringInfoString(&mut buf, b"'\n\0".as_ptr() as *const c_char);
+
+        set_errno(0);
+        if write(fd, buf.data as *const c_void, buf.len as usize) != buf.len as isize {
+            /* if write didn't set errno, assume problem is no disk space */
+            if errno() == 0 {
+                set_errno(ENOSPC);
+            }
+            ereport!(ERROR, errmsg!("could not write to file \"{}\": {}", std::ffi::CStr::from_ptr(filename).to_string_lossy(), strerror_string()));
+            /* C also: errcode_for_file_access() */
+        }
+
+        item = (*item).next;
+    }
+
+    /* fsync before considering the write to be successful */
+    if pg_fsync(fd) != 0 {
+        ereport!(ERROR, errmsg!("could not fsync file \"{}\": {}", std::ffi::CStr::from_ptr(filename).to_string_lossy(), strerror_string()));
+        /* C also: errcode_for_file_access() */
+    }
+
+    pfree(buf.data as *mut c_void);
+}
+
+/*
+ * Update the given list of configuration parameters, adding, replacing
+ * or deleting the entry for item "name" (delete if "value" == NULL).
+ */
+unsafe fn replace_auto_config_value(
+    head_p: *mut *mut ConfigVariable,
+    tail_p: *mut *mut ConfigVariable,
+    name: *const c_char,
+    value: *const c_char,
+) {
+    let mut prev: *mut ConfigVariable = ptr::null_mut();
+
+    /*
+     * Remove any existing match(es) for "name".  Normally there'd be at most
+     * one, but if external tools have modified the config file, there could
+     * be more.
+     */
+    let mut item = *head_p;
+    while !item.is_null() {
+        let next = (*item).next;
+        if guc_name_compare_c((*item).name, name) == 0 {
+            /* found a match, delete it */
+            if !prev.is_null() {
+                (*prev).next = next;
+            } else {
+                *head_p = next;
+            }
+            if next.is_null() {
+                *tail_p = prev;
+            }
+
+            pfree((*item).name as *mut c_void);
+            pfree((*item).value as *mut c_void);
+            pfree((*item).filename as *mut c_void);
+            pfree(item as *mut c_void);
+        } else {
+            prev = item;
+        }
+        item = next;
+    }
+
+    /* Done if we're trying to delete it */
+    if value.is_null() {
+        return;
+    }
+
+    /* OK, append a new entry */
+    let item = palloc(std::mem::size_of::<ConfigVariable>()) as *mut ConfigVariable;
+    (*item).name = pstrdup(name);
+    (*item).value = pstrdup(value);
+    (*item).errmsg = ptr::null_mut();
+    (*item).filename = pstrdup(b"\0".as_ptr() as *const c_char); /* new item has no location */
+    (*item).sourceline = 0;
+    (*item).ignore = false;
+    (*item).applied = false;
+    (*item).next = ptr::null_mut();
+
+    if (*head_p).is_null() {
+        *head_p = item;
+    } else {
+        (**tail_p).next = item;
+    }
+    *tail_p = item;
+}
+
+/*
+ * Validate a proposed option setting for GUCArrayAdd/Delete/Reset.
+ *
+ * name is the option name.  value is the proposed value for the Add case,
+ * or NULL for the Delete/Reset cases.  If skipIfNoPermissions is true, it's
+ * not an error to have no permissions to set the option.
+ *
+ * Returns true if OK, false if skipIfNoPermissions is true and user does not
+ * have permission to change this option (all other error cases result in an
+ * error being thrown).
+ */
+unsafe fn validate_option_array_item(name: *const c_char, value: *const c_char, skipIfNoPermissions: bool) -> bool {
+    /*
+     * There are three cases to consider:
+     *
+     * name is a known GUC variable.  Check the value normally, check
+     * permissions normally (i.e., allow if variable is USERSET, or if it's
+     * SUSET and user is superuser or holds ACL_SET permissions).
+     *
+     * name is not known, but exists or can be created as a placeholder (i.e.,
+     * it has a valid custom name).  We allow this case if you're a superuser,
+     * otherwise not.  Superusers are assumed to know what they're doing. We
+     * can't allow it for other users, because when the placeholder is
+     * resolved it might turn out to be a SUSET variable.
+     *
+     * name is not known and can't be created as a placeholder.  Throw error,
+     * unless skipIfNoPermissions or reset_custom is true.  If reset_custom is
+     * true, this is a RESET or RESET ALL operation for an unknown custom GUC
+     * with a reserved prefix, in which case we want to fall through to the
+     * placeholder case described in the preceding paragraph (else there'd be
+     * no way for users to remove them).  Otherwise, return false.
+     */
+    let reset_custom = value.is_null() && valid_custom_variable_name(cstr_bytes(name));
+    let gconf = find_option(name, true, skipIfNoPermissions || reset_custom, ERROR);
+    if gconf.is_null() && !reset_custom {
+        /* not known, failed to make a placeholder */
+        return false;
+    }
+
+    if gconf.is_null() || ((*gconf).flags & GUC_CUSTOM_PLACEHOLDER) != 0 {
+        /*
+         * We cannot do any meaningful check on the value, so only permissions
+         * are useful to check.
+         */
+        if superuser() || pg_parameter_aclcheck(name, GetUserId(), ACL_SET) == ACLCHECK_OK {
+            return true;
+        }
+        if skipIfNoPermissions {
+            return false;
+        }
+        ereport!(ERROR, errmsg!("permission denied to set parameter \"{}\"", std::ffi::CStr::from_ptr(name).to_string_lossy()));
+        /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */
+    }
+
+    /* manual permissions check so we can avoid an error being thrown */
+    if (*gconf).context == GucContext::PGC_USERSET {
+        /* ok */
+    } else if (*gconf).context == GucContext::PGC_SUSET
+        && (superuser() || pg_parameter_aclcheck(name, GetUserId(), ACL_SET) == ACLCHECK_OK)
+    {
+        /* ok */
+    } else if skipIfNoPermissions {
+        return false;
+    }
+    /* if a permissions error should be thrown, let set_config_option do it */
+
+    /* test for permissions and valid option value */
+    set_config_option(
+        name,
+        value,
+        if superuser() { GucContext::PGC_SUSET } else { GucContext::PGC_USERSET },
+        GucSource::PGC_S_TEST,
+        GucAction::GUC_ACTION_SET,
+        false,
+        0,
+        false,
+    );
+
+    true
+}
+
+// ---------------------------------------------------------------------------
 // AlterSystemSetConfigFile
 // ---------------------------------------------------------------------------
 
@@ -3616,22 +3936,435 @@ pub unsafe fn AlterSystemSetConfigFile(altersysstmt: *mut c_void /* AlterSystemS
 }
 
 // ---------------------------------------------------------------------------
-// GUC serialization: EstimateGUCStateSpace / SerializeGUCState / RestoreGUCState
+// GUC serialization: can_skip_gucvar / estimate_variable_size /
+// EstimateGUCStateSpace / do_serialize / do_serialize_binary /
+// serialize_variable / SerializeGUCState / read_gucstate /
+// read_gucstate_binary / guc_restore_error_context_callback / RestoreGUCState
 // ---------------------------------------------------------------------------
 
+/*
+ * can_skip_gucvar:
+ * Decide whether SerializeGUCState can skip sending this GUC variable,
+ * or whether RestoreGUCState can skip resetting this GUC to default.
+ */
+unsafe fn can_skip_gucvar(gconf: *mut config_generic) -> bool {
+    (*gconf).context == GucContext::PGC_POSTMASTER
+        || (*gconf).context == GucContext::PGC_INTERNAL
+        || (*gconf).source == GucSource::PGC_S_DEFAULT
+}
+
+/*
+ * estimate_variable_size:
+ *		Compute space needed for dumping the given GUC variable.
+ *
+ * It's OK to overestimate, but not to underestimate.
+ */
+unsafe fn estimate_variable_size(gconf: *mut config_generic) -> usize {
+    let mut valsize: usize = 0;
+
+    /* Skippable GUCs consume zero space. */
+    if can_skip_gucvar(gconf) {
+        return 0;
+    }
+
+    /* Name, plus trailing zero byte. */
+    let mut size = strlen((*gconf).name) + 1;
+
+    /* Get the maximum display length of the GUC value. */
+    match (*gconf).vartype {
+        config_type::PGC_BOOL => {
+            valsize = 5; /* max(strlen('true'), strlen('false')) */
+        }
+        config_type::PGC_INT => {
+            let conf = gconf as *mut config_int;
+            /*
+             * Instead of getting the exact display length, use max
+             * length.  Also reduce the max length for typical ranges of
+             * small values.  Maximum value is 2147483647, i.e. 10 chars.
+             * Include one byte for sign.
+             */
+            if (*(*conf).variable).abs() < 1000 {
+                valsize = 3 + 1;
+            } else {
+                valsize = 10 + 1;
+            }
+        }
+        config_type::PGC_REAL => {
+            /*
+             * We are going to print it with %e with REALTYPE_PRECISION
+             * fractional digits.  Account for sign, leading digit,
+             * decimal point, and exponent with up to 3 digits.  E.g.
+             * -3.99329042340000021e+110
+             */
+            valsize = 1 + 1 + 1 + REALTYPE_PRECISION + 5;
+        }
+        config_type::PGC_STRING => {
+            let conf = gconf as *mut config_string;
+            /*
+             * If the value is NULL, we transmit it as an empty string.
+             * Although this is not physically the same value, GUC
+             * generally treats a NULL the same as empty string.
+             */
+            if !(*(*conf).variable).is_null() {
+                valsize = strlen(*(*conf).variable);
+            } else {
+                valsize = 0;
+            }
+        }
+        config_type::PGC_ENUM => {
+            let conf = gconf as *mut config_enum;
+            valsize = strlen(config_enum_lookup_by_value(conf, *(*conf).variable));
+        }
+    }
+
+    /* Allow space for terminating zero-byte for value */
+    size = add_size(size, valsize + 1);
+
+    if !(*gconf).sourcefile.is_null() {
+        size = add_size(size, strlen((*gconf).sourcefile));
+    }
+
+    /* Allow space for terminating zero-byte for sourcefile */
+    size = add_size(size, 1);
+
+    /* Include line whenever file is nonempty. */
+    if !(*gconf).sourcefile.is_null() && *(*gconf).sourcefile != 0 {
+        size = add_size(size, std::mem::size_of_val(&(*gconf).sourceline));
+    }
+
+    size = add_size(size, std::mem::size_of_val(&(*gconf).source));
+    size = add_size(size, std::mem::size_of_val(&(*gconf).scontext));
+    size = add_size(size, std::mem::size_of_val(&(*gconf).srole));
+
+    size
+}
+
+/*
+ * EstimateGUCStateSpace:
+ * Returns the size needed to store the GUC state for the current process
+ */
 pub unsafe fn EstimateGUCStateSpace() -> usize {
-    // TODO(pg-port): dlist_foreach over guc_nondef_list when ilist is wired
-    std::mem::size_of::<usize>() // just the size field for now
+    /* Add space reqd for saving the data size of the guc state */
+    let mut size = std::mem::size_of::<usize>();
+
+    /*
+     * Add up the space needed for each GUC variable.
+     *
+     * We need only process non-default GUCs.
+     */
+    let mut iter: dlist_iter = std::mem::zeroed();
+    crate::dlist_foreach!(iter, &mut guc_nondef_list, {
+        let gconf = crate::dlist_container!(config_generic, nondef_link, iter.cur);
+        size = add_size(size, estimate_variable_size(gconf));
+    });
+
+    size
 }
 
+/*
+ * do_serialize:
+ * Copies the formatted string into the destination.  Moves ahead the
+ * destination pointer, and decrements the maxbytes by that many bytes. If
+ * maxbytes is not sufficient to copy the string, error out.
+ *
+ * In C this is variadic with a printf format; here the caller renders the
+ * value into a NUL-terminated byte slice and we copy that.
+ */
+unsafe fn do_serialize(destptr: *mut *mut c_char, maxbytes: *mut usize, s: &[u8]) {
+    if (*maxbytes as isize) <= 0 {
+        elog!(ERROR, "not enough space to serialize GUC state");
+    }
+
+    /* s does not include the NUL terminator; length to write is s.len() */
+    let n = s.len();
+    if n >= *maxbytes {
+        /* This shouldn't happen either, really. */
+        elog!(ERROR, "not enough space to serialize GUC state");
+    }
+
+    memcpy(*destptr as *mut c_void, s.as_ptr() as *const c_void, n);
+    *(*destptr).add(n) = 0; /* NUL terminator */
+
+    /* Shift the destptr ahead of the null terminator */
+    *destptr = (*destptr).add(n + 1);
+    *maxbytes -= n + 1;
+}
+
+/* Binary copy version of do_serialize() */
+unsafe fn do_serialize_binary(destptr: *mut *mut c_char, maxbytes: *mut usize, val: *const c_void, valsize: usize) {
+    if valsize > *maxbytes {
+        elog!(ERROR, "not enough space to serialize GUC state");
+    }
+
+    memcpy(*destptr as *mut c_void, val, valsize);
+    *destptr = (*destptr).add(valsize);
+    *maxbytes -= valsize;
+}
+
+/*
+ * serialize_variable:
+ * Dumps name, value and other information of a GUC variable into destptr.
+ */
+unsafe fn serialize_variable(destptr: *mut *mut c_char, maxbytes: *mut usize, gconf: *mut config_generic) {
+    /* Ignore skippable GUCs. */
+    if can_skip_gucvar(gconf) {
+        return;
+    }
+
+    do_serialize(destptr, maxbytes, cstr_bytes((*gconf).name));
+
+    match (*gconf).vartype {
+        config_type::PGC_BOOL => {
+            let conf = gconf as *mut config_bool;
+            let s: &[u8] = if *(*conf).variable { b"true" } else { b"false" };
+            do_serialize(destptr, maxbytes, s);
+        }
+        config_type::PGC_INT => {
+            let conf = gconf as *mut config_int;
+            let s = format!("{}", *(*conf).variable);
+            do_serialize(destptr, maxbytes, s.as_bytes());
+        }
+        config_type::PGC_REAL => {
+            let conf = gconf as *mut config_real;
+            let s = format!("{:.*e}", REALTYPE_PRECISION, *(*conf).variable);
+            do_serialize(destptr, maxbytes, s.as_bytes());
+        }
+        config_type::PGC_STRING => {
+            let conf = gconf as *mut config_string;
+            /* NULL becomes empty string, see estimate_variable_size() */
+            if (*(*conf).variable).is_null() {
+                do_serialize(destptr, maxbytes, b"");
+            } else {
+                do_serialize(destptr, maxbytes, cstr_bytes(*(*conf).variable));
+            }
+        }
+        config_type::PGC_ENUM => {
+            let conf = gconf as *mut config_enum;
+            do_serialize(destptr, maxbytes, cstr_bytes(config_enum_lookup_by_value(conf, *(*conf).variable)));
+        }
+    }
+
+    if (*gconf).sourcefile.is_null() {
+        do_serialize(destptr, maxbytes, b"");
+    } else {
+        do_serialize(destptr, maxbytes, cstr_bytes((*gconf).sourcefile));
+    }
+
+    if !(*gconf).sourcefile.is_null() && *(*gconf).sourcefile != 0 {
+        do_serialize_binary(destptr, maxbytes, &(*gconf).sourceline as *const c_int as *const c_void, std::mem::size_of_val(&(*gconf).sourceline));
+    }
+
+    do_serialize_binary(destptr, maxbytes, &(*gconf).source as *const GucSource as *const c_void, std::mem::size_of_val(&(*gconf).source));
+    do_serialize_binary(destptr, maxbytes, &(*gconf).scontext as *const GucContext as *const c_void, std::mem::size_of_val(&(*gconf).scontext));
+    do_serialize_binary(destptr, maxbytes, &(*gconf).srole as *const Oid as *const c_void, std::mem::size_of_val(&(*gconf).srole));
+}
+
+/*
+ * SerializeGUCState:
+ * Dumps the complete GUC state onto the memory location at start_address.
+ */
 pub unsafe fn SerializeGUCState(maxsize: usize, start_address: *mut c_char) {
-    // TODO(pg-port): full implementation
-    memcpy(start_address as *mut c_void, &0usize as *const usize as *const c_void, std::mem::size_of::<usize>());
+    /* Reserve space for saving the actual size of the guc state */
+    let szsize = std::mem::size_of::<usize>();
+    debug_assert!(maxsize > szsize);
+    let mut curptr = start_address.add(szsize);
+    let mut bytes_left = maxsize - szsize;
+
+    /* We need only consider GUCs with source not PGC_S_DEFAULT */
+    let mut iter: dlist_iter = std::mem::zeroed();
+    crate::dlist_foreach!(iter, &mut guc_nondef_list, {
+        let gconf = crate::dlist_container!(config_generic, nondef_link, iter.cur);
+        serialize_variable(&mut curptr, &mut bytes_left, gconf);
+    });
+
+    /* Store actual size without assuming alignment of start_address. */
+    let actual_size = maxsize - bytes_left - szsize;
+    memcpy(start_address as *mut c_void, &actual_size as *const usize as *const c_void, szsize);
 }
 
+/*
+ * read_gucstate:
+ * Actually it does not read anything, just returns the srcptr. But it does
+ * move the srcptr past the terminating zero byte, so that the caller is ready
+ * to read the next string.
+ */
+unsafe fn read_gucstate(srcptr: *mut *mut c_char, srcend: *mut c_char) -> *mut c_char {
+    let retptr = *srcptr;
+
+    if *srcptr >= srcend {
+        elog!(ERROR, "incomplete GUC state");
+    }
+
+    /* The string variables are all null terminated */
+    let mut ptr = *srcptr;
+    while ptr < srcend && *ptr != 0 {
+        ptr = ptr.add(1);
+    }
+
+    if ptr >= srcend {
+        elog!(ERROR, "could not find null terminator in GUC state");
+    }
+
+    /* Set the new position to the byte following the terminating NUL */
+    *srcptr = ptr.add(1);
+
+    retptr
+}
+
+/* Binary read version of read_gucstate(). Copies into dest */
+unsafe fn read_gucstate_binary(srcptr: *mut *mut c_char, srcend: *mut c_char, dest: *mut c_void, size: usize) {
+    if (*srcptr).add(size) > srcend {
+        elog!(ERROR, "incomplete GUC state");
+    }
+
+    memcpy(dest, *srcptr as *const c_void, size);
+    *srcptr = (*srcptr).add(size);
+}
+
+/*
+ * Callback used to add a context message when reporting errors that occur
+ * while trying to restore GUCs in parallel workers.
+ */
+unsafe extern "C" fn guc_restore_error_context_callback(arg: *mut c_void) {
+    let error_context_name_and_value = arg as *mut *mut c_char;
+
+    if !error_context_name_and_value.is_null() {
+        errcontext!(
+            "while setting parameter \"{}\" to \"{}\"",
+            std::ffi::CStr::from_ptr(*error_context_name_and_value.add(0)).to_string_lossy(),
+            std::ffi::CStr::from_ptr(*error_context_name_and_value.add(1)).to_string_lossy()
+        );
+    }
+}
+
+/*
+ * RestoreGUCState:
+ * Reads the GUC state at the specified address and sets this process's
+ * GUCs to match.
+ */
 pub unsafe fn RestoreGUCState(gucstate: *mut c_void) {
-    // TODO(pg-port): full implementation
-    let _ = gucstate;
+    let mut srcptr = gucstate as *mut c_char;
+
+    /*
+     * First, ensure that all potentially-shippable GUCs are reset to their
+     * default values.
+     */
+    let mut miter: dlist_mutable_iter = std::mem::zeroed();
+    crate::dlist_foreach_modify!(miter, &mut guc_nondef_list, {
+        let gconf = crate::dlist_container!(config_generic, nondef_link, miter.cur);
+
+        /* Do nothing if non-shippable or if already at PGC_S_DEFAULT. */
+        if can_skip_gucvar(gconf) {
+            continue;
+        }
+
+        /*
+         * We can use InitializeOneGUCOption to reset the GUC to default, but
+         * first we must free any existing subsidiary data to avoid leaking
+         * memory.
+         */
+        debug_assert!((*gconf).stack.is_null());
+        guc_free((*gconf).extra);
+        guc_free((*gconf).last_reported as *mut c_void);
+        guc_free((*gconf).sourcefile as *mut c_void);
+        match (*gconf).vartype {
+            config_type::PGC_BOOL => {
+                let conf = gconf as *mut config_bool;
+                if !(*conf).reset_extra.is_null() && (*conf).reset_extra != (*gconf).extra {
+                    guc_free((*conf).reset_extra);
+                }
+            }
+            config_type::PGC_INT => {
+                let conf = gconf as *mut config_int;
+                if !(*conf).reset_extra.is_null() && (*conf).reset_extra != (*gconf).extra {
+                    guc_free((*conf).reset_extra);
+                }
+            }
+            config_type::PGC_REAL => {
+                let conf = gconf as *mut config_real;
+                if !(*conf).reset_extra.is_null() && (*conf).reset_extra != (*gconf).extra {
+                    guc_free((*conf).reset_extra);
+                }
+            }
+            config_type::PGC_STRING => {
+                let conf = gconf as *mut config_string;
+                guc_free(*(*conf).variable as *mut c_void);
+                if !(*conf).reset_val.is_null() && (*conf).reset_val != *(*conf).variable {
+                    guc_free((*conf).reset_val as *mut c_void);
+                }
+                if !(*conf).reset_extra.is_null() && (*conf).reset_extra != (*gconf).extra {
+                    guc_free((*conf).reset_extra);
+                }
+            }
+            config_type::PGC_ENUM => {
+                let conf = gconf as *mut config_enum;
+                if !(*conf).reset_extra.is_null() && (*conf).reset_extra != (*gconf).extra {
+                    guc_free((*conf).reset_extra);
+                }
+            }
+        }
+        /* Remove it from any lists it's in. */
+        RemoveGUCFromLists(gconf);
+        /* Now we can reset the struct to PGS_S_DEFAULT state. */
+        InitializeOneGUCOption(gconf);
+    });
+
+    /* First item is the length of the subsequent data */
+    let mut len: usize = 0;
+    memcpy(&mut len as *mut usize as *mut c_void, gucstate, std::mem::size_of::<usize>());
+
+    srcptr = srcptr.add(std::mem::size_of::<usize>());
+    let srcend = srcptr.add(len);
+
+    /* If the GUC value check fails, we want errors to show useful context. */
+    let mut error_context_callback: ErrorContextCallback = std::mem::zeroed();
+    error_context_callback.callback = Some(guc_restore_error_context_callback);
+    error_context_callback.previous = error_context_stack;
+    error_context_callback.arg = ptr::null_mut();
+    error_context_stack = &mut error_context_callback;
+
+    /* Restore all the listed GUCs. */
+    while srcptr < srcend {
+        let varname = read_gucstate(&mut srcptr, srcend);
+        let varvalue = read_gucstate(&mut srcptr, srcend);
+        let varsourcefile = read_gucstate(&mut srcptr, srcend);
+        let mut varsourceline: c_int = 0;
+        if *varsourcefile != 0 {
+            read_gucstate_binary(&mut srcptr, srcend, &mut varsourceline as *mut c_int as *mut c_void, std::mem::size_of::<c_int>());
+        } else {
+            varsourceline = 0;
+        }
+        let mut varsource: GucSource = GucSource::PGC_S_DEFAULT;
+        let mut varscontext: GucContext = GucContext::PGC_INTERNAL;
+        let mut varsrole: Oid = 0;
+        read_gucstate_binary(&mut srcptr, srcend, &mut varsource as *mut GucSource as *mut c_void, std::mem::size_of::<GucSource>());
+        read_gucstate_binary(&mut srcptr, srcend, &mut varscontext as *mut GucContext as *mut c_void, std::mem::size_of::<GucContext>());
+        read_gucstate_binary(&mut srcptr, srcend, &mut varsrole as *mut Oid as *mut c_void, std::mem::size_of::<Oid>());
+
+        let mut error_context_name_and_value: [*mut c_char; 2] = [varname, varvalue];
+        error_context_callback.arg = &mut error_context_name_and_value[0] as *mut *mut c_char as *mut c_void;
+        let result = set_config_option_ext(
+            varname,
+            varvalue,
+            varscontext,
+            varsource,
+            varsrole,
+            GucAction::GUC_ACTION_SET,
+            true,
+            ERROR,
+            true,
+        );
+        if result <= 0 {
+            ereport!(ERROR, errmsg!("parameter \"{}\" could not be set", std::ffi::CStr::from_ptr(varname).to_string_lossy()));
+            /* C also: errcode(ERRCODE_INTERNAL_ERROR) */
+        }
+        if *varsourcefile != 0 {
+            set_config_sourcefile(varname, varsourcefile, varsourceline);
+        }
+        error_context_callback.arg = ptr::null_mut();
+    }
+
+    error_context_stack = error_context_callback.previous;
 }
 
 // ---------------------------------------------------------------------------
@@ -3639,12 +4372,230 @@ pub unsafe fn RestoreGUCState(gucstate: *mut c_void) {
 // ---------------------------------------------------------------------------
 
 // exec_backend feature not used in this port; functions omitted
+
+/*
+ *	These routines dump out all non-default GUC options into a binary
+ *	file that is read by all exec'ed backends.  The format is:
+ *
+ *		variable name, string, null terminated
+ *		variable value, string, null terminated
+ *		variable sourcefile, string, null terminated (empty if none)
+ *		variable sourceline, integer
+ *		variable source, integer
+ *		variable scontext, integer
+ *		variable srole, OID
+ */
 #[cfg(any())]
-pub unsafe fn write_nondefault_variables(_context: GucContext) {
-    unimplemented!("write_nondefault_variables: TODO(pg-port)")
+unsafe fn write_one_nondefault_variable(fp: *mut c_void, gconf: *mut config_generic) {
+    debug_assert!((*gconf).source != GucSource::PGC_S_DEFAULT);
+
+    fprintf(fp, c"%s".as_ptr(), (*gconf).name);
+    fputc(0, fp);
+
+    match (*gconf).vartype {
+        config_type::PGC_BOOL => {
+            let conf = gconf as *mut config_bool;
+            if *(*conf).variable {
+                fprintf(fp, c"true".as_ptr());
+            } else {
+                fprintf(fp, c"false".as_ptr());
+            }
+        }
+
+        config_type::PGC_INT => {
+            let conf = gconf as *mut config_int;
+            fprintf(fp, c"%d".as_ptr(), *(*conf).variable);
+        }
+
+        config_type::PGC_REAL => {
+            let conf = gconf as *mut config_real;
+            fprintf(fp, c"%.17g".as_ptr(), *(*conf).variable);
+        }
+
+        config_type::PGC_STRING => {
+            let conf = gconf as *mut config_string;
+            if !(*(*conf).variable).is_null() {
+                fprintf(fp, c"%s".as_ptr(), *(*conf).variable);
+            }
+        }
+
+        config_type::PGC_ENUM => {
+            let conf = gconf as *mut config_enum;
+            fprintf(fp, c"%s".as_ptr(),
+                    config_enum_lookup_by_value(conf, *(*conf).variable));
+        }
+    }
+
+    fputc(0, fp);
+
+    if !(*gconf).sourcefile.is_null() {
+        fprintf(fp, c"%s".as_ptr(), (*gconf).sourcefile);
+    }
+    fputc(0, fp);
+
+    fwrite(&(*gconf).sourceline as *const _ as *const c_void, 1, std::mem::size_of_val(&(*gconf).sourceline), fp);
+    fwrite(&(*gconf).source as *const _ as *const c_void, 1, std::mem::size_of_val(&(*gconf).source), fp);
+    fwrite(&(*gconf).scontext as *const _ as *const c_void, 1, std::mem::size_of_val(&(*gconf).scontext), fp);
+    fwrite(&(*gconf).srole as *const _ as *const c_void, 1, std::mem::size_of_val(&(*gconf).srole), fp);
+}
+
+#[cfg(any())]
+pub unsafe fn write_nondefault_variables(context: GucContext) {
+    let elevel: c_int;
+    let fp: *mut c_void;
+
+    debug_assert!(context == GucContext::PGC_POSTMASTER || context == GucContext::PGC_SIGHUP);
+
+    elevel = if context == GucContext::PGC_SIGHUP { LOG } else { ERROR };
+
+    /*
+     * Open file
+     */
+    fp = AllocateFile(CONFIG_EXEC_PARAMS_NEW.as_ptr() as *const c_char, c"w".as_ptr());
+    if fp.is_null() {
+        ereport!(elevel,
+                 errmsg!("could not write to file \"{}\": {}",
+                         std::ffi::CStr::from_ptr(CONFIG_EXEC_PARAMS_NEW.as_ptr() as *const c_char).to_string_lossy(),
+                         strerror_string()));
+        /* C also: errcode_for_file_access() */
+        return;
+    }
+
+    /* We need only consider GUCs with source not PGC_S_DEFAULT */
+    let mut iter: dlist_iter = std::mem::zeroed();
+    crate::dlist_foreach!(iter, &mut guc_nondef_list, {
+        let gconf = crate::dlist_container!(config_generic, nondef_link, iter.cur);
+        write_one_nondefault_variable(fp, gconf);
+    });
+
+    if FreeFile(fp) != 0 {
+        ereport!(elevel,
+                 errmsg!("could not write to file \"{}\": {}",
+                         std::ffi::CStr::from_ptr(CONFIG_EXEC_PARAMS_NEW.as_ptr() as *const c_char).to_string_lossy(),
+                         strerror_string()));
+        /* C also: errcode_for_file_access() */
+        return;
+    }
+
+    /*
+     * Put new file in place.  This could delay on Win32, but we don't hold
+     * any exclusive locks.
+     */
+    rename(CONFIG_EXEC_PARAMS_NEW.as_ptr() as *const c_char,
+           CONFIG_EXEC_PARAMS.as_ptr() as *const c_char);
+}
+
+/*
+ *	Read string, including null byte from file
+ *
+ *	Return NULL on EOF and nothing read
+ */
+#[cfg(any())]
+unsafe fn read_string_with_null(fp: *mut c_void) -> *mut c_char {
+    let mut i: c_int = 0;
+    let mut ch: c_int;
+    let mut maxlen: c_int = 256;
+    let mut str: *mut c_char = ptr::null_mut();
+
+    loop {
+        ch = fgetc(fp);
+        if ch == EOF {
+            if i == 0 {
+                return ptr::null_mut();
+            } else {
+                elog!(FATAL, "invalid format of exec config params file");
+            }
+        }
+        if i == 0 {
+            str = guc_malloc(FATAL, maxlen as usize) as *mut c_char;
+        } else if i == maxlen {
+            maxlen *= 2;
+            str = guc_realloc(FATAL, str as *mut c_void, maxlen as usize) as *mut c_char;
+        }
+        *str.add(i as usize) = ch as c_char;
+        i += 1;
+        if ch == 0 {
+            break;
+        }
+    }
+
+    str
 }
 
 #[cfg(any())]
 pub unsafe fn read_nondefault_variables() {
-    unimplemented!("read_nondefault_variables: TODO(pg-port)")
+    let fp: *mut c_void;
+    let mut varname: *mut c_char;
+    let mut varvalue: *mut c_char;
+    let mut varsourcefile: *mut c_char;
+    let mut varsourceline: c_int = 0;
+    let mut varsource: GucSource = std::mem::zeroed();
+    let mut varscontext: GucContext = std::mem::zeroed();
+    let mut varsrole: Oid = 0;
+
+    /*
+     * Open file
+     */
+    fp = AllocateFile(CONFIG_EXEC_PARAMS.as_ptr() as *const c_char, c"r".as_ptr());
+    if fp.is_null() {
+        /* File not found is fine */
+        if errno() != ENOENT {
+            ereport!(FATAL,
+                     errmsg!("could not read from file \"{}\": {}",
+                             std::ffi::CStr::from_ptr(CONFIG_EXEC_PARAMS.as_ptr() as *const c_char).to_string_lossy(),
+                             strerror_string()));
+            /* C also: errcode_for_file_access() */
+        }
+        return;
+    }
+
+    loop {
+        varname = read_string_with_null(fp);
+        if varname.is_null() {
+            break;
+        }
+
+        if find_option(varname, true, false, FATAL).is_null() {
+            elog!(FATAL, "failed to locate variable \"{}\" in exec config params file",
+                  std::ffi::CStr::from_ptr(varname).to_string_lossy());
+        }
+
+        varvalue = read_string_with_null(fp);
+        if varvalue.is_null() {
+            elog!(FATAL, "invalid format of exec config params file");
+        }
+        varsourcefile = read_string_with_null(fp);
+        if varsourcefile.is_null() {
+            elog!(FATAL, "invalid format of exec config params file");
+        }
+        if fread(&mut varsourceline as *mut _ as *mut c_void, 1, std::mem::size_of_val(&varsourceline), fp)
+            != std::mem::size_of_val(&varsourceline) {
+            elog!(FATAL, "invalid format of exec config params file");
+        }
+        if fread(&mut varsource as *mut _ as *mut c_void, 1, std::mem::size_of_val(&varsource), fp)
+            != std::mem::size_of_val(&varsource) {
+            elog!(FATAL, "invalid format of exec config params file");
+        }
+        if fread(&mut varscontext as *mut _ as *mut c_void, 1, std::mem::size_of_val(&varscontext), fp)
+            != std::mem::size_of_val(&varscontext) {
+            elog!(FATAL, "invalid format of exec config params file");
+        }
+        if fread(&mut varsrole as *mut _ as *mut c_void, 1, std::mem::size_of_val(&varsrole), fp)
+            != std::mem::size_of_val(&varsrole) {
+            elog!(FATAL, "invalid format of exec config params file");
+        }
+
+        set_config_option_ext(varname, varvalue,
+                              varscontext, varsource, varsrole,
+                              GucAction::GUC_ACTION_SET, true, 0, true);
+        if *varsourcefile != 0 {
+            set_config_sourcefile(varname, varsourcefile, varsourceline);
+        }
+
+        guc_free(varname as *mut c_void);
+        guc_free(varvalue as *mut c_void);
+        guc_free(varsourcefile as *mut c_void);
+    }
+
+    FreeFile(fp);
 }

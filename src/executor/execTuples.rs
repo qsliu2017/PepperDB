@@ -70,14 +70,20 @@ use crate::access::common::heaptuple::{
     heap_tuple_from_minimal_tuple, minimal_tuple_from_heap_tuple,
 };
 use crate::access::htup_details::{
-    heap_getsysattr, HeapTuple, HeapTupleData, HeapTupleHeader, HeapTupleHeaderGetNatts,
-    HeapTupleHeaderGetRawXmin, HeapTupleHasNulls, MinimalTuple, MINIMAL_TUPLE_OFFSET,
+    heap_getsysattr, HeapTuple, HeapTupleData, HeapTupleHeader, HeapTupleHeaderGetDatumLength,
+    HeapTupleHeaderGetNatts, HeapTupleHeaderGetRawXmin, HeapTupleHasNulls, MinimalTuple,
+    MINIMAL_TUPLE_OFFSET,
 };
 use crate::{current_cell, foreach, lfirst_node, IsA};
 use crate::access::tupmacs::{att_addlength_datum, att_addlength_pointer, att_nominal_alignby, att_pointer_alignby};
 use crate::access::common::tupdesc::{
-    CompactAttribute, PinTupleDesc, ReleaseTupleDesc, TupleDesc, TupleDescCompactAttr,
+    CompactAttribute, CreateTemplateTupleDesc, PinTupleDesc, ReleaseTupleDesc, TupleDesc,
+    TupleDescCompactAttr, TupleDescInitEntry, TupleDescInitEntryCollation,
 };
+use crate::executor::execUtils::{ExecCleanTargetListLength, ExecTargetListLength};
+use crate::nodes::nodeFuncs::{exprCollation, exprType, exprTypmod};
+use crate::nodes::primnodes::TargetEntry;
+use crate::nodes::nodes::Node;
 
 use crate::nodes::nodes::NodeTag::T_TupleTableSlot;
 use crate::nodes::pg_list::{lappend, list_free, List};
@@ -150,6 +156,19 @@ unsafe fn IncrBufferRefCount(_buffer: Buffer) {
 unsafe fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool {
     // TODO(pg-port): access/transam/xact.c TransactionIdIsCurrentTransactionId.
     unimplemented!("TransactionIdIsCurrentTransactionId: access/transam/xact.c not yet translated")
+}
+
+/*
+ * DatumGetHeapTupleHeader - STUB (fmgr.h macro: (HeapTupleHeader)
+ * PG_DETOAST_DATUM(X)).  PG_DETOAST_DATUM relies on fmgr/toast machinery that
+ * isn't fully wired here; used only by ExecStoreHeapTupleDatum.
+ *
+ * # Safety
+ * Stub: never returns.
+ */
+unsafe fn DatumGetHeapTupleHeader(_data: Datum) -> HeapTupleHeader {
+    // TODO(pg-port): fmgr.h DatumGetHeapTupleHeader / PG_DETOAST_DATUM.
+    unimplemented!("DatumGetHeapTupleHeader: fmgr.h PG_DETOAST_DATUM not yet translated")
 }
 
 // ============================================================================
@@ -735,73 +754,218 @@ unsafe fn tts_buffer_heap_init(_slot: *mut TupleTableSlot) {}
 unsafe fn tts_buffer_heap_release(_slot: *mut TupleTableSlot) {}
 
 unsafe fn tts_buffer_heap_clear(slot: *mut TupleTableSlot) {
-    // TODO(pg-port): needs BufferIsValid/ReleaseBuffer (storage/bufmgr.c).
-    // C body:
-    //   BufferHeapTupleTableSlot *bslot = (BufferHeapTupleTableSlot *) slot;
-    //   if (TTS_SHOULDFREE(slot)) {
-    //       Assert(!BufferIsValid(bslot->buffer));
-    //       heap_freetuple(bslot->base.tuple);
-    //       slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
-    //   }
-    //   if (BufferIsValid(bslot->buffer)) ReleaseBuffer(bslot->buffer);
-    //   slot->tts_nvalid = 0;
-    //   slot->tts_flags |= TTS_FLAG_EMPTY;
-    //   ItemPointerSetInvalid(&slot->tts_tid);
-    //   bslot->base.tuple = NULL;
-    //   bslot->base.off = 0;
-    //   bslot->buffer = InvalidBuffer;
-    let _ = slot;
-    unimplemented!("tts_buffer_heap_clear: storage/bufmgr.c not yet translated")
+    let bslot = slot as *mut BufferHeapTupleTableSlot;
+
+    /*
+     * Free the memory for heap tuple if allowed. A tuple coming from buffer
+     * can never be freed. But we may have materialized a tuple from buffer.
+     * Such a tuple can be freed.
+     */
+    if TTS_SHOULDFREE(slot) {
+        /* We should have unpinned the buffer while materializing the tuple. */
+        Assert!(!BufferIsValid((*bslot).buffer));
+
+        heap_freetuple((*bslot).base.tuple);
+        (*slot).tts_flags &= !TTS_FLAG_SHOULDFREE;
+    }
+
+    if BufferIsValid((*bslot).buffer) {
+        ReleaseBuffer((*bslot).buffer);
+    }
+
+    (*slot).tts_nvalid = 0;
+    (*slot).tts_flags |= TTS_FLAG_EMPTY;
+    ItemPointerSetInvalid(&mut (*slot).tts_tid);
+    (*bslot).base.tuple = null_mut();
+    (*bslot).base.off = 0;
+    (*bslot).buffer = InvalidBuffer;
 }
 
 unsafe fn tts_buffer_heap_getsomeattrs(slot: *mut TupleTableSlot, natts: c_int) {
-    // C body:
-    //   BufferHeapTupleTableSlot *bslot = (BufferHeapTupleTableSlot *) slot;
-    //   Assert(!TTS_EMPTY(slot));
-    //   slot_deform_heap_tuple(slot, bslot->base.tuple, &bslot->base.off, natts);
-    let _ = (slot, natts);
-    unimplemented!("tts_buffer_heap_getsomeattrs: storage/bufmgr.c not yet translated")
+    let bslot = slot as *mut BufferHeapTupleTableSlot;
+
+    Assert!(!TTS_EMPTY(slot));
+
+    slot_deform_heap_tuple(slot, (*bslot).base.tuple, &mut (*bslot).base.off, natts);
 }
 
 unsafe fn tts_buffer_heap_getsysattr(slot: *mut TupleTableSlot, attnum: c_int, isnull: *mut bool) -> Datum {
-    // C body mirrors tts_heap_getsysattr over bslot->base.tuple.
-    let _ = (slot, attnum, isnull);
-    unimplemented!("tts_buffer_heap_getsysattr: storage/bufmgr.c not yet translated")
+    let bslot = slot as *mut BufferHeapTupleTableSlot;
+
+    Assert!(!TTS_EMPTY(slot));
+
+    /*
+     * In some code paths it's possible to get here with a non-materialized
+     * slot, in which case we can't retrieve system columns.
+     */
+    if (*bslot).base.tuple.is_null() {
+        let _ = errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
+        ereport!(
+            ERROR,
+            errmsg!("cannot retrieve a system column in this context")
+        );
+    }
+
+    heap_getsysattr((*bslot).base.tuple, attnum, (*slot).tts_tupleDescriptor, isnull)
 }
 
+/*
+ * STUB: needs TransactionIdIsCurrentTransactionId (access/transam/xact.c).
+ */
 unsafe fn tts_buffer_is_current_xact_tuple(slot: *mut TupleTableSlot) -> bool {
-    // C body mirrors tts_heap_is_current_xact_tuple over bslot->base.tuple
-    // (also needs TransactionIdIsCurrentTransactionId from xact.c).
-    let _ = slot;
-    unimplemented!("tts_buffer_is_current_xact_tuple: storage/bufmgr.c + xact.c not yet translated")
+    let bslot = slot as *mut BufferHeapTupleTableSlot;
+
+    Assert!(!TTS_EMPTY(slot));
+
+    /*
+     * In some code paths it's possible to get here with a non-materialized
+     * slot, in which case we can't check if tuple is created by the current
+     * transaction.
+     */
+    if (*bslot).base.tuple.is_null() {
+        let _ = errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
+        ereport!(
+            ERROR,
+            errmsg!("don't have a storage tuple in this context")
+        );
+    }
+
+    let xmin: TransactionId = HeapTupleHeaderGetRawXmin((*(*bslot).base.tuple).t_data);
+
+    TransactionIdIsCurrentTransactionId(xmin)
 }
 
 unsafe fn tts_buffer_heap_materialize(slot: *mut TupleTableSlot) {
-    // C body: deform-from-scratch, heap_form_tuple/heap_copytuple, ReleaseBuffer.
-    let _ = slot;
-    unimplemented!("tts_buffer_heap_materialize: storage/bufmgr.c not yet translated")
+    let bslot = slot as *mut BufferHeapTupleTableSlot;
+
+    Assert!(!TTS_EMPTY(slot));
+
+    /* If slot has its tuple already materialized, nothing to do. */
+    if TTS_SHOULDFREE(slot) {
+        return;
+    }
+
+    let oldContext = MemoryContextSwitchTo((*slot).tts_mcxt);
+
+    /*
+     * Have to deform from scratch, otherwise tts_values[] entries could point
+     * into the non-materialized tuple (which might be gone when accessed).
+     */
+    (*bslot).base.off = 0;
+    (*slot).tts_nvalid = 0;
+
+    if (*bslot).base.tuple.is_null() {
+        /*
+         * Normally BufferHeapTupleTableSlot should have a tuple + buffer
+         * associated with it, unless it's materialized (which would've
+         * returned above). But when it's useful to allow storing virtual
+         * tuples in a buffer slot, which then also needs to be
+         * materializable.
+         */
+        (*bslot).base.tuple = heap_form_tuple(
+            (*slot).tts_tupleDescriptor,
+            (*slot).tts_values,
+            (*slot).tts_isnull,
+        );
+    } else {
+        (*bslot).base.tuple = heap_copytuple((*bslot).base.tuple);
+
+        /*
+         * A heap tuple stored in a BufferHeapTupleTableSlot should have a
+         * buffer associated with it, unless it's materialized or virtual.
+         */
+        if likely(BufferIsValid((*bslot).buffer)) {
+            ReleaseBuffer((*bslot).buffer);
+        }
+        (*bslot).buffer = InvalidBuffer;
+    }
+
+    /*
+     * We don't set TTS_FLAG_SHOULDFREE until after releasing the buffer, if
+     * any.  This avoids having a transient state that would fall foul of our
+     * assertions that a slot with TTS_FLAG_SHOULDFREE doesn't own a buffer.
+     * In the unlikely event that ReleaseBuffer() above errors out, we'd
+     * effectively leak the copied tuple, but that seems fairly harmless.
+     */
+    (*slot).tts_flags |= TTS_FLAG_SHOULDFREE;
+
+    MemoryContextSwitchTo(oldContext);
 }
 
 unsafe fn tts_buffer_heap_copyslot(dstslot: *mut TupleTableSlot, srcslot: *mut TupleTableSlot) {
-    // C body: either ExecCopySlotHeapTuple into dstslot, or share the in-buffer
-    // tuple via tts_buffer_heap_store_tuple + copy of HeapTupleData into tupdata.
-    let _ = (dstslot, srcslot);
-    unimplemented!("tts_buffer_heap_copyslot: storage/bufmgr.c not yet translated")
+    let bsrcslot = srcslot as *mut BufferHeapTupleTableSlot;
+    let bdstslot = dstslot as *mut BufferHeapTupleTableSlot;
+
+    /*
+     * If the source slot is of a different kind, or is a buffer slot that has
+     * been materialized / is virtual, make a new copy of the tuple. Otherwise
+     * make a new reference to the in-buffer tuple.
+     */
+    if (*dstslot).tts_ops != (*srcslot).tts_ops
+        || TTS_SHOULDFREE(srcslot)
+        || (*bsrcslot).base.tuple.is_null()
+    {
+        ExecClearTuple(dstslot);
+        (*dstslot).tts_flags &= !TTS_FLAG_EMPTY;
+        let oldContext = MemoryContextSwitchTo((*dstslot).tts_mcxt);
+        (*bdstslot).base.tuple = ExecCopySlotHeapTuple(srcslot);
+        (*dstslot).tts_flags |= TTS_FLAG_SHOULDFREE;
+        MemoryContextSwitchTo(oldContext);
+    } else {
+        Assert!(BufferIsValid((*bsrcslot).buffer));
+
+        tts_buffer_heap_store_tuple(dstslot, (*bsrcslot).base.tuple,
+                                    (*bsrcslot).buffer, false);
+
+        /*
+         * The HeapTupleData portion of the source tuple might be shorter
+         * lived than the destination slot. Therefore copy the HeapTuple into
+         * our slot's tupdata, which is guaranteed to live long enough (but
+         * will still point into the buffer).
+         */
+        memcpy(
+            &mut (*bdstslot).base.tupdata as *mut HeapTupleData as *mut c_void,
+            (*bdstslot).base.tuple as *const c_void,
+            size_of::<HeapTupleData>(),
+        );
+        (*bdstslot).base.tuple = &mut (*bdstslot).base.tupdata;
+    }
 }
 
 unsafe fn tts_buffer_heap_get_heap_tuple(slot: *mut TupleTableSlot) -> HeapTuple {
-    let _ = slot;
-    unimplemented!("tts_buffer_heap_get_heap_tuple: storage/bufmgr.c not yet translated")
+    let bslot = slot as *mut BufferHeapTupleTableSlot;
+
+    Assert!(!TTS_EMPTY(slot));
+
+    if (*bslot).base.tuple.is_null() {
+        tts_buffer_heap_materialize(slot);
+    }
+
+    (*bslot).base.tuple
 }
 
 unsafe fn tts_buffer_heap_copy_heap_tuple(slot: *mut TupleTableSlot) -> HeapTuple {
-    let _ = slot;
-    unimplemented!("tts_buffer_heap_copy_heap_tuple: storage/bufmgr.c not yet translated")
+    let bslot = slot as *mut BufferHeapTupleTableSlot;
+
+    Assert!(!TTS_EMPTY(slot));
+
+    if (*bslot).base.tuple.is_null() {
+        tts_buffer_heap_materialize(slot);
+    }
+
+    heap_copytuple((*bslot).base.tuple)
 }
 
 unsafe fn tts_buffer_heap_copy_minimal_tuple(slot: *mut TupleTableSlot, extra: Size) -> MinimalTuple {
-    let _ = (slot, extra);
-    unimplemented!("tts_buffer_heap_copy_minimal_tuple: storage/bufmgr.c not yet translated")
+    let bslot = slot as *mut BufferHeapTupleTableSlot;
+
+    Assert!(!TTS_EMPTY(slot));
+
+    if (*bslot).base.tuple.is_null() {
+        tts_buffer_heap_materialize(slot);
+    }
+
+    minimal_tuple_from_heap_tuple((*bslot).base.tuple, extra)
 }
 
 /*
@@ -819,27 +983,50 @@ unsafe fn tts_buffer_heap_store_tuple(
     buffer: Buffer,
     transfer_pin: bool,
 ) {
-    // C body:
-    //   BufferHeapTupleTableSlot *bslot = (BufferHeapTupleTableSlot *) slot;
-    //   if (TTS_SHOULDFREE(slot)) {
-    //       Assert(!BufferIsValid(bslot->buffer));
-    //       heap_freetuple(bslot->base.tuple);
-    //       slot->tts_flags &= ~TTS_FLAG_SHOULDFREE;
-    //   }
-    //   slot->tts_flags &= ~TTS_FLAG_EMPTY;
-    //   slot->tts_nvalid = 0;
-    //   bslot->base.tuple = tuple;
-    //   bslot->base.off = 0;
-    //   slot->tts_tid = tuple->t_self;
-    //   if (bslot->buffer != buffer) {
-    //       if (BufferIsValid(bslot->buffer)) ReleaseBuffer(bslot->buffer);
-    //       bslot->buffer = buffer;
-    //       if (!transfer_pin && BufferIsValid(buffer)) IncrBufferRefCount(buffer);
-    //   } else if (transfer_pin && BufferIsValid(buffer)) {
-    //       ReleaseBuffer(buffer);
-    //   }
-    let _ = (slot, tuple, buffer, transfer_pin);
-    unimplemented!("tts_buffer_heap_store_tuple: storage/bufmgr.c not yet translated")
+    let bslot = slot as *mut BufferHeapTupleTableSlot;
+
+    if TTS_SHOULDFREE(slot) {
+        /* materialized slot shouldn't have a buffer to release */
+        Assert!(!BufferIsValid((*bslot).buffer));
+
+        heap_freetuple((*bslot).base.tuple);
+        (*slot).tts_flags &= !TTS_FLAG_SHOULDFREE;
+    }
+
+    (*slot).tts_flags &= !TTS_FLAG_EMPTY;
+    (*slot).tts_nvalid = 0;
+    (*bslot).base.tuple = tuple;
+    (*bslot).base.off = 0;
+    (*slot).tts_tid = (*tuple).t_self;
+
+    /*
+     * If tuple is on a disk page, keep the page pinned as long as we hold a
+     * pointer into it.  We assume the caller already has such a pin.  If
+     * transfer_pin is true, we'll transfer that pin to this slot, if not
+     * we'll pin it again ourselves.
+     *
+     * This is coded to optimize the case where the slot previously held a
+     * tuple on the same disk page: in that case releasing and re-acquiring
+     * the pin is a waste of cycles.  This is a common situation during
+     * seqscans, so it's worth troubling over.
+     */
+    if (*bslot).buffer != buffer {
+        if BufferIsValid((*bslot).buffer) {
+            ReleaseBuffer((*bslot).buffer);
+        }
+
+        (*bslot).buffer = buffer;
+
+        if !transfer_pin && BufferIsValid(buffer) {
+            IncrBufferRefCount(buffer);
+        }
+    } else if transfer_pin && BufferIsValid(buffer) {
+        /*
+         * In transfer_pin mode the caller won't know about the same-page
+         * optimization, so we gotta release its pin.
+         */
+        ReleaseBuffer(buffer);
+    }
 }
 
 // ============================================================================
@@ -1402,15 +1589,22 @@ pub unsafe fn ExecStoreBufferHeapTuple(
     slot: *mut TupleTableSlot,
     buffer: Buffer,
 ) -> *mut TupleTableSlot {
-    // C body:
-    //   Assert(tuple/slot/tupdesc != NULL && BufferIsValid(buffer));
-    //   if (unlikely(!TTS_IS_BUFFERTUPLE(slot)))
-    //       elog(ERROR, "trying to store an on-disk heap tuple into wrong type of slot");
-    //   tts_buffer_heap_store_tuple(slot, tuple, buffer, false);
-    //   slot->tts_tableOid = tuple->t_tableOid;
-    //   return slot;
-    let _ = (tuple, slot, buffer);
-    unimplemented!("ExecStoreBufferHeapTuple: storage/bufmgr.c not yet translated")
+    /*
+     * sanity checks
+     */
+    Assert!(!tuple.is_null());
+    Assert!(!slot.is_null());
+    Assert!(!(*slot).tts_tupleDescriptor.is_null());
+    Assert!(BufferIsValid(buffer));
+
+    if unlikely(!TTS_IS_BUFFERTUPLE(slot)) {
+        elog!(ERROR, "trying to store an on-disk heap tuple into wrong type of slot");
+    }
+    tts_buffer_heap_store_tuple(slot, tuple, buffer, false);
+
+    (*slot).tts_tableOid = (*tuple).t_tableOid;
+
+    slot
 }
 
 /*
@@ -1425,9 +1619,22 @@ pub unsafe fn ExecStorePinnedBufferHeapTuple(
     slot: *mut TupleTableSlot,
     buffer: Buffer,
 ) -> *mut TupleTableSlot {
-    // C body mirrors ExecStoreBufferHeapTuple with transfer_pin=true.
-    let _ = (tuple, slot, buffer);
-    unimplemented!("ExecStorePinnedBufferHeapTuple: storage/bufmgr.c not yet translated")
+    /*
+     * sanity checks
+     */
+    Assert!(!tuple.is_null());
+    Assert!(!slot.is_null());
+    Assert!(!(*slot).tts_tupleDescriptor.is_null());
+    Assert!(BufferIsValid(buffer));
+
+    if unlikely(!TTS_IS_BUFFERTUPLE(slot)) {
+        elog!(ERROR, "trying to store an on-disk heap tuple into wrong type of slot");
+    }
+    tts_buffer_heap_store_tuple(slot, tuple, buffer, true);
+
+    (*slot).tts_tableOid = (*tuple).t_tableOid;
+
+    slot
 }
 
 /*
@@ -1466,19 +1673,18 @@ pub unsafe fn ExecForceStoreHeapTuple(tuple: HeapTuple, slot: *mut TupleTableSlo
     if TTS_IS_HEAPTUPLE(slot) {
         ExecStoreHeapTuple(tuple, slot, shouldFree);
     } else if TTS_IS_BUFFERTUPLE(slot) {
-        // STUB: the buffer-slot branch needs storage/bufmgr (heap_copytuple is fine,
-        // but the slot type itself is buffer-resident and its ops are stubbed).
-        // C body:
-        //   BufferHeapTupleTableSlot *bslot = (BufferHeapTupleTableSlot *) slot;
-        //   ExecClearTuple(slot);
-        //   slot->tts_flags &= ~TTS_FLAG_EMPTY;
-        //   oldContext = MemoryContextSwitchTo(slot->tts_mcxt);
-        //   bslot->base.tuple = heap_copytuple(tuple);
-        //   slot->tts_flags |= TTS_FLAG_SHOULDFREE;
-        //   MemoryContextSwitchTo(oldContext);
-        //   if (shouldFree) pfree(tuple);
-        let _ = (tuple, slot, shouldFree);
-        unimplemented!("ExecForceStoreHeapTuple: BUFFERTUPLE branch needs storage/bufmgr.c");
+        let bslot = slot as *mut BufferHeapTupleTableSlot;
+
+        ExecClearTuple(slot);
+        (*slot).tts_flags &= !TTS_FLAG_EMPTY;
+        let oldContext = MemoryContextSwitchTo((*slot).tts_mcxt);
+        (*bslot).base.tuple = heap_copytuple(tuple);
+        (*slot).tts_flags |= TTS_FLAG_SHOULDFREE;
+        MemoryContextSwitchTo(oldContext);
+
+        if shouldFree {
+            pfree(tuple as *mut c_void);
+        }
     } else {
         ExecClearTuple(slot);
         heap_deform_tuple(
@@ -1603,18 +1809,23 @@ pub unsafe fn ExecStoreAllNullTuple(slot: *mut TupleTableSlot) -> *mut TupleTabl
  * Stub: never returns.
  */
 pub unsafe fn ExecStoreHeapTupleDatum(data: Datum, slot: *mut TupleTableSlot) {
-    // C body:
-    //   HeapTupleData tuple = {0};
-    //   HeapTupleHeader td = DatumGetHeapTupleHeader(data);
-    //   tuple.t_len = HeapTupleHeaderGetDatumLength(td);
-    //   tuple.t_self = td->t_ctid;
-    //   tuple.t_data = td;
-    //   ExecClearTuple(slot);
-    //   heap_deform_tuple(&tuple, slot->tts_tupleDescriptor,
-    //                     slot->tts_values, slot->tts_isnull);
-    //   ExecStoreVirtualTuple(slot);
-    let _ = (data, slot);
-    unimplemented!("ExecStoreHeapTupleDatum: needs DatumGetHeapTupleHeader (fmgr.h)")
+    let mut tuple: HeapTupleData = core::mem::zeroed();
+
+    let td: HeapTupleHeader = DatumGetHeapTupleHeader(data);
+
+    tuple.t_len = HeapTupleHeaderGetDatumLength(td);
+    tuple.t_self = (*td).t_ctid;
+    tuple.t_data = td;
+
+    ExecClearTuple(slot);
+
+    heap_deform_tuple(
+        &mut tuple,
+        (*slot).tts_tupleDescriptor,
+        (*slot).tts_values,
+        (*slot).tts_isnull,
+    );
+    ExecStoreVirtualTuple(slot);
 }
 
 /*
@@ -1785,32 +1996,569 @@ pub unsafe fn slot_getsomeattrs_int(slot: *mut TupleTableSlot, attnum: c_int) {
     }
 }
 
+use crate::nodes::execnodes::{EState, PlanState, ScanState};
+use crate::utils::fmgr::{FmgrInfo, InputFunctionCall};
+use crate::utils::cache::lsyscache::getTypeInputInfo;
+use crate::utils::fmgr::fmgr_info;
+use crate::nodes::pg_list::list_length;
+use crate::utils::adt::name::namestrcpy;
+
+// funcapi.h: AttInMetadata.  The real def lives in crate::utils::fmgr::funcapi
+// (utils/fmgr/funcapi.c), which is not yet mounted as a module, so it is not
+// reachable here.  Mirror the layout locally so the type-from-tuple helpers
+// stay self-consistent.
+// TODO(pg-port): import from crate::utils::fmgr::funcapi once that module is wired.
+#[repr(C)]
+pub struct AttInMetadata {
+    pub tupdesc: TupleDesc,
+    pub attinfuncs: *mut FmgrInfo,
+    pub attioparams: *mut Oid,
+    pub atttypmods: *mut int32,
+}
+use crate::utils::cache::typcache::{assign_record_type_typmod, lookup_rowtype_tupdesc};
+use crate::access::heap::heaptoast::toast_flatten_tuple_to_datum;
+use crate::access::htup_details::{
+    HeapTupleHeaderHasExternal, HeapTupleHeaderGetTypeId, HeapTupleHeaderGetTypMod,
+    HeapTupleHeaderData,
+};
+use crate::access::common::tupdesc::{TupleDescAttr, AttrMissing};
+use crate::catalog::pg_attribute::FormData_pg_attribute;
+use crate::nodes::makefuncs::RECORDOID;
+use crate::nodes::value::String as ValueString;
+use crate::utils::palloc::palloc0;
+use crate::strVal;
+
+type Form_pg_attribute = *mut FormData_pg_attribute;
+
+/* ----------------------------------------------------------------
+ *				convenience initialization routines
+ * ----------------------------------------------------------------
+ */
+
+/* ----------------
+ *		ExecInitResultTypeTL
+ *
+ *		Initialize result type, using the plan node's targetlist.
+ * ----------------
+ */
+pub unsafe fn ExecInitResultTypeTL(planstate: *mut PlanState) {
+    let tupDesc: TupleDesc = ExecTypeFromTL((*(*planstate).plan).targetlist);
+
+    (*planstate).ps_ResultTupleDesc = tupDesc;
+}
+
+/* --------------------------------
+ *		ExecInit{Result,Scan,Extra}TupleSlot[TL]
+ *
+ *		These are convenience routines to initialize the specified slot
+ *		in nodes inheriting the appropriate state.  ExecInitExtraTupleSlot
+ *		is used for initializing special-purpose slots.
+ * --------------------------------
+ */
+
+/* ----------------
+ *		ExecInitResultSlot
+ *
+ *		Initialize result tuple slot, using the tuple descriptor previously
+ *		computed with ExecInitResultTypeTL().
+ * ----------------
+ */
+pub unsafe fn ExecInitResultSlot(planstate: *mut PlanState, tts_ops: *const TupleTableSlotOps) {
+    let slot: *mut TupleTableSlot;
+
+    slot = ExecAllocTableSlot(
+        &raw mut (*(*planstate).state).es_tupleTable,
+        (*planstate).ps_ResultTupleDesc,
+        tts_ops,
+    );
+    (*planstate).ps_ResultTupleSlot = slot;
+
+    (*planstate).resultopsfixed = !(*planstate).ps_ResultTupleDesc.is_null();
+    (*planstate).resultops = tts_ops;
+    (*planstate).resultopsset = true;
+}
+
+/* ----------------
+ *		ExecInitResultTupleSlotTL
+ *
+ *		Initialize result tuple slot, using the plan node's targetlist.
+ * ----------------
+ */
+pub unsafe fn ExecInitResultTupleSlotTL(
+    planstate: *mut PlanState,
+    tts_ops: *const TupleTableSlotOps,
+) {
+    ExecInitResultTypeTL(planstate);
+    ExecInitResultSlot(planstate, tts_ops);
+}
+
+/* ----------------
+ *		ExecInitScanTupleSlot
+ * ----------------
+ */
+pub unsafe fn ExecInitScanTupleSlot(
+    estate: *mut EState,
+    scanstate: *mut ScanState,
+    tupledesc: TupleDesc,
+    tts_ops: *const TupleTableSlotOps,
+) {
+    (*scanstate).ss_ScanTupleSlot =
+        ExecAllocTableSlot(&raw mut (*estate).es_tupleTable, tupledesc, tts_ops);
+    (*scanstate).ps.scandesc = tupledesc;
+    (*scanstate).ps.scanopsfixed = !tupledesc.is_null();
+    (*scanstate).ps.scanops = tts_ops;
+    (*scanstate).ps.scanopsset = true;
+}
+
+/* ----------------
+ *		ExecInitExtraTupleSlot
+ *
+ * Return a newly created slot. If tupledesc is non-NULL the slot will have
+ * that as its fixed tupledesc. Otherwise the caller needs to use
+ * ExecSetSlotDescriptor() to set the descriptor before use.
+ * ----------------
+ */
+pub unsafe fn ExecInitExtraTupleSlot(
+    estate: *mut EState,
+    tupledesc: TupleDesc,
+    tts_ops: *const TupleTableSlotOps,
+) -> *mut TupleTableSlot {
+    ExecAllocTableSlot(&raw mut (*estate).es_tupleTable, tupledesc, tts_ops)
+}
+
+/* ----------------
+ *		ExecInitNullTupleSlot
+ *
+ * Build a slot containing an all-nulls tuple of the given type.
+ * This is used as a substitute for an input tuple when performing an
+ * outer join.
+ * ----------------
+ */
+pub unsafe fn ExecInitNullTupleSlot(
+    estate: *mut EState,
+    tupType: TupleDesc,
+    tts_ops: *const TupleTableSlotOps,
+) -> *mut TupleTableSlot {
+    let slot: *mut TupleTableSlot = ExecInitExtraTupleSlot(estate, tupType, tts_ops);
+
+    ExecStoreAllNullTuple(slot)
+}
+
+/* ----------------------------------------------------------------
+ *		ExecTypeFromTL
+ *
+ *		Generate a tuple descriptor for the result tuple of a targetlist.
+ *		(A parse/plan tlist must be passed, not an ExprState tlist.)
+ *		Note that resjunk columns, if any, are included in the result.
+ * ----------------------------------------------------------------
+ */
+pub unsafe fn ExecTypeFromTL(targetList: *mut List) -> TupleDesc {
+    ExecTypeFromTLInternal(targetList, false)
+}
+
+/* ----------------------------------------------------------------
+ *		ExecCleanTypeFromTL
+ *
+ *		Same as above, but resjunk columns are omitted from the result.
+ * ----------------------------------------------------------------
+ */
+pub unsafe fn ExecCleanTypeFromTL(targetList: *mut List) -> TupleDesc {
+    ExecTypeFromTLInternal(targetList, true)
+}
+
+// ----------------------------------------------------------------
+//      ExecTypeFromTLInternal
+//
+//      Builds a TupleDesc from a targetlist, optionally skipping junk columns.
+// ----------------------------------------------------------------
+unsafe fn ExecTypeFromTLInternal(targetList: *mut List, skipjunk: bool) -> TupleDesc {
+    let typeInfo: TupleDesc;
+    let len: c_int;
+    let mut cur_resno: c_int = 1;
+
+    if skipjunk {
+        len = ExecCleanTargetListLength(targetList);
+    } else {
+        len = ExecTargetListLength(targetList);
+    }
+    typeInfo = CreateTemplateTupleDesc(len);
+
+    foreach!(l, targetList, {
+        let tle = crate::nodes::pg_list::lfirst(current_cell!(l)) as *mut TargetEntry;
+
+        if skipjunk && (*tle).resjunk {
+            continue;
+        }
+        TupleDescInitEntry(
+            typeInfo,
+            cur_resno as AttrNumber,
+            (*tle).resname,
+            exprType((*tle).expr as *const Node),
+            exprTypmod((*tle).expr as *const Node),
+            0,
+        );
+        TupleDescInitEntryCollation(
+            typeInfo,
+            cur_resno as AttrNumber,
+            exprCollation((*tle).expr as *const Node),
+        );
+        cur_resno += 1;
+    });
+
+    typeInfo
+}
+
+/* ----------------------------------------------------------------
+ *		ExecTypeFromExprList
+ *
+ *		Creates a tuple descriptor from a list of Exprs.
+ * ----------------------------------------------------------------
+ */
+pub unsafe fn ExecTypeFromExprList(exprList: *mut List) -> TupleDesc {
+    let typeInfo: TupleDesc;
+    let mut cur_resno: c_int = 1;
+
+    typeInfo = CreateTemplateTupleDesc(list_length(exprList));
+
+    foreach!(lc, exprList, {
+        let e = crate::nodes::pg_list::lfirst(current_cell!(lc)) as *mut Node;
+
+        TupleDescInitEntry(
+            typeInfo,
+            cur_resno as AttrNumber,
+            std::ptr::null(),
+            exprType(e as *const Node),
+            exprTypmod(e as *const Node),
+            0,
+        );
+        TupleDescInitEntryCollation(
+            typeInfo,
+            cur_resno as AttrNumber,
+            exprCollation(e as *const Node),
+        );
+        cur_resno += 1;
+    });
+
+    typeInfo
+}
+
+/*
+ * ExecTypeSetColNames - set column names in a RECORD TupleDesc
+ *
+ * Column names must be provided as an alias list (list of String nodes).
+ */
+pub unsafe fn ExecTypeSetColNames(typeInfo: TupleDesc, namesList: *mut List) {
+    let mut colno: c_int = 0;
+
+    /* It's only OK to change col names in a not-yet-blessed RECORD type */
+    debug_assert!((*typeInfo).tdtypeid == RECORDOID);
+    debug_assert!((*typeInfo).tdtypmod < 0);
+
+    foreach!(lc, namesList, {
+        let cname = strVal!(crate::nodes::pg_list::lfirst(current_cell!(lc))) as *mut c_char;
+        let attr: Form_pg_attribute;
+
+        /* Guard against too-long names list (probably can't happen) */
+        if colno >= (*typeInfo).natts {
+            break;
+        }
+        attr = TupleDescAttr(typeInfo, colno);
+        colno += 1;
+
+        /*
+         * Do nothing for empty aliases or dropped columns (these cases
+         * probably can't arise in RECORD types, either)
+         */
+        if *cname == 0 || (*attr).attisdropped {
+            continue;
+        }
+
+        /* OK, assign the column name */
+        namestrcpy(&raw mut (*attr).attname, cname);
+    });
+}
+
+/*
+ * BlessTupleDesc - make a completed tuple descriptor useful for SRFs
+ *
+ * Rowtype Datums returned by a function must contain valid type information.
+ * This happens "for free" if the tupdesc came from a relcache entry, but
+ * not if we have manufactured a tupdesc for a transient RECORD datatype.
+ * In that case we have to notify typcache.c of the existence of the type.
+ */
+pub unsafe fn BlessTupleDesc(tupdesc: TupleDesc) -> TupleDesc {
+    if (*tupdesc).tdtypeid == RECORDOID && (*tupdesc).tdtypmod < 0 {
+        assign_record_type_typmod(tupdesc);
+    }
+
+    tupdesc /* just for notational convenience */
+}
+
+/*
+ * TupleDescGetAttInMetadata - Build an AttInMetadata structure based on the
+ * supplied TupleDesc. AttInMetadata can be used in conjunction with C strings
+ * to produce a properly formed tuple.
+ */
+pub unsafe fn TupleDescGetAttInMetadata(tupdesc: TupleDesc) -> *mut AttInMetadata {
+    let natts: c_int = (*tupdesc).natts;
+    let mut i: c_int;
+    let mut attinfuncid: Oid = 0;
+    let attinfuncinfo: *mut FmgrInfo;
+    let attioparams: *mut Oid;
+    let atttypmods: *mut int32;
+    let attinmeta: *mut AttInMetadata;
+
+    attinmeta = palloc(size_of::<AttInMetadata>()) as *mut AttInMetadata;
+
+    /* "Bless" the tupledesc so that we can make rowtype datums with it */
+    (*attinmeta).tupdesc = BlessTupleDesc(tupdesc);
+
+    /*
+     * Gather info needed later to call the "in" function for each attribute
+     */
+    attinfuncinfo = palloc0(natts as usize * size_of::<FmgrInfo>()) as *mut FmgrInfo;
+    attioparams = palloc0(natts as usize * size_of::<Oid>()) as *mut Oid;
+    atttypmods = palloc0(natts as usize * size_of::<int32>()) as *mut int32;
+
+    i = 0;
+    while i < natts {
+        let att: Form_pg_attribute = TupleDescAttr(tupdesc, i);
+
+        /* Ignore dropped attributes */
+        if !(*att).attisdropped {
+            let atttypeid: Oid = (*att).atttypid;
+            getTypeInputInfo(atttypeid, &raw mut attinfuncid, attioparams.add(i as usize));
+            fmgr_info(attinfuncid, attinfuncinfo.add(i as usize));
+            *atttypmods.add(i as usize) = (*att).atttypmod;
+        }
+        i += 1;
+    }
+    (*attinmeta).attinfuncs = attinfuncinfo;
+    (*attinmeta).attioparams = attioparams;
+    (*attinmeta).atttypmods = atttypmods;
+
+    attinmeta
+}
+
+/*
+ * BuildTupleFromCStrings - build a HeapTuple given user data in C string form.
+ * values is an array of C strings, one for each attribute of the return tuple.
+ * A NULL string pointer indicates we want to create a NULL field.
+ */
+pub unsafe fn BuildTupleFromCStrings(
+    attinmeta: *mut AttInMetadata,
+    values: *mut *mut c_char,
+) -> HeapTuple {
+    let tupdesc: TupleDesc = (*attinmeta).tupdesc;
+    let natts: c_int = (*tupdesc).natts;
+    let dvalues: *mut Datum;
+    let nulls: *mut bool;
+    let mut i: c_int;
+    let tuple: HeapTuple;
+
+    dvalues = palloc(natts as usize * size_of::<Datum>()) as *mut Datum;
+    nulls = palloc(natts as usize * size_of::<bool>()) as *mut bool;
+
+    /*
+     * Call the "in" function for each non-dropped attribute, even for nulls,
+     * to support domains.
+     */
+    i = 0;
+    while i < natts {
+        if !(*TupleDescCompactAttr(tupdesc, i)).attisdropped {
+            /* Non-dropped attributes */
+            *dvalues.add(i as usize) = InputFunctionCall(
+                (*attinmeta).attinfuncs.add(i as usize),
+                *values.add(i as usize),
+                *(*attinmeta).attioparams.add(i as usize),
+                *(*attinmeta).atttypmods.add(i as usize),
+            );
+            if !(*values.add(i as usize)).is_null() {
+                *nulls.add(i as usize) = false;
+            } else {
+                *nulls.add(i as usize) = true;
+            }
+        } else {
+            /* Handle dropped attributes by setting to NULL */
+            *dvalues.add(i as usize) = 0 as Datum;
+            *nulls.add(i as usize) = true;
+        }
+        i += 1;
+    }
+
+    /*
+     * Form a tuple
+     */
+    tuple = heap_form_tuple(tupdesc, dvalues, nulls);
+
+    /*
+     * Release locally palloc'd space.  XXX would probably be good to pfree
+     * values of pass-by-reference datums, as well.
+     */
+    pfree(dvalues as *mut c_void);
+    pfree(nulls as *mut c_void);
+
+    tuple
+}
+
+/*
+ * HeapTupleHeaderGetDatum - convert a HeapTupleHeader pointer to a Datum.
+ *
+ * This must *not* get applied to an on-disk tuple; the tuple should be
+ * freshly made by heap_form_tuple or some wrapper routine for it (such as
+ * BuildTupleFromCStrings).  Be sure also that the tupledesc used to build
+ * the tuple has a properly "blessed" rowtype.
+ *
+ * Formerly this was a macro equivalent to PointerGetDatum, relying on the
+ * fact that heap_form_tuple fills in the appropriate tuple header fields
+ * for a composite Datum.  However, we now require that composite Datums not
+ * contain any external TOAST pointers.  We do not want heap_form_tuple itself
+ * to enforce that; more specifically, the rule applies only to actual Datums
+ * and not to HeapTuple structures.  Therefore, HeapTupleHeaderGetDatum is
+ * now a function that detects whether there are externally-toasted fields
+ * and constructs a new tuple with inlined fields if so.  We still need
+ * heap_form_tuple to insert the Datum header fields, because otherwise this
+ * code would have no way to obtain a tupledesc for the tuple.
+ */
+pub unsafe fn HeapTupleHeaderGetDatum(tuple: HeapTupleHeader) -> Datum {
+    let result: Datum;
+    let tupDesc: TupleDesc;
+
+    /* No work if there are no external TOAST pointers in the tuple */
+    if !HeapTupleHeaderHasExternal(tuple) {
+        return PointerGetDatum(tuple as *const c_void);
+    }
+
+    /* Use the type data saved by heap_form_tuple to look up the rowtype */
+    tupDesc = lookup_rowtype_tupdesc(
+        HeapTupleHeaderGetTypeId(tuple),
+        HeapTupleHeaderGetTypMod(tuple),
+    );
+
+    /* And do the flattening */
+    result = toast_flatten_tuple_to_datum(
+        tuple,
+        HeapTupleHeaderGetDatumLength(tuple),
+        tupDesc,
+    );
+
+    ReleaseTupleDesc(tupDesc);
+
+    result
+}
+
 // ============================================================================
-//   STUBBED type-info-from-targetlist / SRF helpers.
-//
-//   These need TargetEntry/Expr type extraction (nodeFuncs exprType*), a real
-//   TupleDescInitEntry (syscache), typcache, fmgr, and DestReceiver/PlanState
-//   plumbing - none of which are ported yet.  Signatures are kept; each body is
-//   unimplemented!() with the C dependency noted.  The slot machinery above does
-//   NOT depend on any of these.
-//   TODO(pg-port): translate when nodeFuncs/syscache/typcache/funcapi land.
+//   Functions for sending tuples to the frontend (or other specified
+//   destination) as though it is a SELECT result.  Translated 1:1 from execTuples.c.
+//   The supporting types (DestReceiver, TupOutputState) are imported from the
+//   already-ported tcop/dest and executor modules.
 // ============================================================================
-//
-//   ExecTypeFromTL / ExecCleanTypeFromTL / ExecTypeFromTLInternal /
-//   ExecTypeFromExprList / ExecTypeSetColNames : need List<TargetEntry> +
-//     exprType/exprTypmod/exprCollation + TupleDescInitEntry(Collation).
-//   BlessTupleDesc / TupleDescGetAttInMetadata / BuildTupleFromCStrings /
-//     HeapTupleHeaderGetDatum : need typcache (assign_record_type_typmod /
-//     lookup_rowtype_tupdesc) and fmgr (InputFunctionCall, getTypeInputInfo).
-//   begin_tup_output_tupdesc / do_tup_output / do_text_output_multiline /
-//     end_tup_output / ExecInit*TupleSlot* / ExecInitResultTypeTL :
-//     need DestReceiver + PlanState/EState/ScanState (execnodes), not ported.
-//
-//   They are intentionally omitted (rather than stubbed) here because their
-//   parameter types (TargetEntry, PlanState, DestReceiver, AttInMetadata,
-//   TupOutputState) are themselves unported; adding stub signatures would require
-//   inventing those types.  When the integrator needs them, port the supporting
-//   types first, then translate these straight from the C above.
+
+use crate::tcop::dest::DestReceiver;
+use crate::executor::executor::TupOutputState;
+use crate::nodes::nodes::CmdType;
+use crate::postgres::{DatumGetPointer, PointerGetDatum};
+use crate::utils::builtins::cstring_to_text_with_len;
+
+/*
+ * Functions for sending tuples to the frontend (or other specified destination)
+ * as though it is a SELECT result. These are used by utility commands that
+ * need to project directly to the destination and don't need or want full
+ * table function capability. Currently used by EXPLAIN and SHOW ALL.
+ */
+pub unsafe fn begin_tup_output_tupdesc(
+    dest: *mut DestReceiver,
+    tupdesc: TupleDesc,
+    tts_ops: *const TupleTableSlotOps,
+) -> *mut TupOutputState {
+    let tstate: *mut TupOutputState;
+
+    tstate = palloc(size_of::<TupOutputState>()) as *mut TupOutputState;
+
+    (*tstate).slot = MakeSingleTupleTableSlot(tupdesc, tts_ops);
+    (*tstate).dest = dest;
+
+    ((*(*tstate).dest).rStartup.unwrap())((*tstate).dest, CmdType::CMD_SELECT as c_int, tupdesc);
+
+    tstate
+}
+
+/*
+ * write a single tuple
+ */
+pub unsafe fn do_tup_output(
+    tstate: *mut TupOutputState,
+    values: *const Datum,
+    isnull: *const bool,
+) {
+    let slot: *mut TupleTableSlot = (*tstate).slot;
+    let natts: c_int = (*(*slot).tts_tupleDescriptor).natts;
+
+    /* make sure the slot is clear */
+    ExecClearTuple(slot);
+
+    /* insert data */
+    memcpy(
+        (*slot).tts_values as *mut c_void,
+        values as *const c_void,
+        natts as usize * size_of::<Datum>(),
+    );
+    memcpy(
+        (*slot).tts_isnull as *mut c_void,
+        isnull as *const c_void,
+        natts as usize * size_of::<bool>(),
+    );
+
+    /* mark slot as containing a virtual tuple */
+    ExecStoreVirtualTuple(slot);
+
+    /* send the tuple to the receiver */
+    ((*(*tstate).dest).receiveSlot.unwrap())(slot, (*tstate).dest);
+
+    /* clean up */
+    ExecClearTuple(slot);
+}
+
+/*
+ * write a chunk of text, breaking at newline characters
+ *
+ * Should only be used with a single-TEXT-attribute tupdesc.
+ */
+pub unsafe fn do_text_output_multiline(tstate: *mut TupOutputState, mut txt: *const c_char) {
+    let mut values: [Datum; 1] = [0 as Datum];
+    let isnull: [bool; 1] = [false];
+
+    while *txt != 0 {
+        let eol: *const c_char;
+        let len: c_int;
+
+        let found = strchr(txt, b'\n' as c_int);
+        if !found.is_null() {
+            len = found.offset_from(txt) as c_int;
+            eol = found.add(1);
+        } else {
+            len = strlen(txt) as c_int;
+            eol = txt.add(len as usize);
+        }
+
+        values[0] = PointerGetDatum(cstring_to_text_with_len(txt, len) as *const c_void);
+        do_tup_output(tstate, values.as_ptr(), isnull.as_ptr());
+        pfree(DatumGetPointer(values[0]) as *mut c_void);
+        txt = eol;
+    }
+}
+
+pub unsafe fn end_tup_output(tstate: *mut TupOutputState) {
+    ((*(*tstate).dest).rShutdown.unwrap())((*tstate).dest);
+    /* note that destroying the dest is not ours to do */
+    ExecDropSingleTupleTableSlot((*tstate).slot);
+    pfree(tstate as *mut c_void);
+}
+
+extern "C" {
+    fn strchr(s: *const c_char, c: c_int) -> *mut c_char;
+    fn strlen(s: *const c_char) -> usize;
+}
 
 // ============================================================================
 //   Tests

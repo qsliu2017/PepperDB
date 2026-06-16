@@ -71,8 +71,10 @@ use crate::nodes::execnodes::{
     Snapshot, TupleConversionMap, TupleDesc, TupleTableSlot, TupleTableSlotOps,
 };
 use crate::nodes::nodes::NodeTag::{T_EState, T_ExprContext};
-use crate::nodes::pg_list::{lcons, linitial, list_delete_ptr, List, NIL};
-use crate::{makeNode, AllocSetContextCreate};
+use crate::nodes::pg_list::{lcons, lfirst, linitial, list_delete_ptr, list_head, lnext, List, NIL};
+use crate::nodes::primnodes::{TargetEntry, Var};
+use crate::access::common::tupdesc::TupleDescAttr;
+use crate::{makeNode, AllocSetContextCreate, IsA};
 
 // ----------------------------------------------------------------------------
 // Local typedefs / constants standing in for not-yet-ported headers.
@@ -693,22 +695,62 @@ pub unsafe fn ExecConditionalAssignProjectionInfo(
     unimplemented!("ExecConditionalAssignProjectionInfo: needs execExpr.c + PlanState")
 }
 
-/*
- * tlist_matches_tupdesc - STUB
- *
- * Needs to walk a targetlist of TargetEntry/Var nodes against a TupleDesc;
- * requires Var field access + TupleDescAttr (tupdesc deref), neither ported in
- * a usable form here.  C body preserved in execUtils.c.
- */
 /// # Safety
-/// STUB: needs Var/TargetEntry/TupleDesc deref.
+/// `tlist` is a valid targetlist of `TargetEntry` nodes and `tupdesc` is live.
 unsafe fn tlist_matches_tupdesc(
     _ps: *mut PlanState,
-    _tlist: *mut List,
-    _varno: c_int,
-    _tupdesc: TupleDesc,
+    tlist: *mut List,
+    varno: c_int,
+    tupdesc: TupleDesc,
 ) -> bool {
-    unimplemented!("tlist_matches_tupdesc: needs Var/TupleDesc deref")
+    let numattrs = (*tupdesc).natts;
+    let mut tlist_item = list_head(tlist);
+
+    /* Check the tlist attributes */
+    for attrno in 1..=numattrs {
+        let att_tup = TupleDescAttr(tupdesc, attrno - 1);
+
+        if tlist_item.is_null() {
+            return false; /* tlist too short */
+        }
+        let var = (*(lfirst(tlist_item) as *mut TargetEntry)).expr as *mut Var;
+        if var.is_null() || !IsA!(var, T_Var) {
+            return false; /* tlist item not a Var */
+        }
+        /* if these Asserts fail, planner messed up */
+        debug_assert_eq!((*var).varno, varno);
+        debug_assert_eq!((*var).varlevelsup, 0);
+        if (*var).varattno as c_int != attrno {
+            return false; /* out of order */
+        }
+        if (*att_tup).attisdropped {
+            return false; /* table contains dropped columns */
+        }
+        if (*att_tup).atthasmissing {
+            return false; /* table contains cols with missing values */
+        }
+
+        /*
+         * Note: usually the Var's type should match the tupdesc exactly, but
+         * in situations involving unions of columns that have different
+         * typmods, the Var may have come from above the union and hence have
+         * typmod -1.  This is a legitimate situation since the Var still
+         * describes the column, just not as exactly as the tupdesc does.
+         */
+        if (*var).vartype != (*att_tup).atttypid
+            || ((*var).vartypmod != (*att_tup).atttypmod && (*var).vartypmod != -1)
+        {
+            return false; /* type mismatch */
+        }
+
+        tlist_item = lnext(tlist, tlist_item);
+    }
+
+    if !tlist_item.is_null() {
+        return false; /* tlist too long */
+    }
+
+    true
 }
 
 // ----------------------------------------------------------------

@@ -262,6 +262,74 @@ pub unsafe fn FreePageManagerGet(
     result
 }
 
+#[cfg(feature = "fpm_extra_asserts")]
+unsafe fn sum_free_pages_recurse(
+    fpm: *mut FreePageManager,
+    btp: *mut FreePageBtree,
+    sum: *mut Size,
+) {
+    let base: *mut c_char = fpm_segment_base(fpm);
+
+    Assert!(
+        (*btp).hdr.magic == FREE_PAGE_INTERNAL_MAGIC || (*btp).hdr.magic == FREE_PAGE_LEAF_MAGIC
+    );
+    *sum += 1;
+    if (*btp).hdr.magic == FREE_PAGE_INTERNAL_MAGIC {
+        let mut index: Size = 0;
+
+        while index < (*btp).hdr.nused as Size {
+            let child: *mut FreePageBtree;
+
+            child = relptr_access(base, &(*internal_key(btp, index)).child);
+            sum_free_pages_recurse(fpm, child, sum);
+            index += 1;
+        }
+    }
+}
+
+#[cfg(feature = "fpm_extra_asserts")]
+unsafe fn sum_free_pages(fpm: *mut FreePageManager) -> Size {
+    let mut recycle: *mut FreePageSpanLeader;
+    let base: *mut c_char = fpm_segment_base(fpm);
+    let mut sum: Size = 0;
+    let mut list: usize;
+
+    // Count the spans by scanning the freelists.
+    list = 0;
+    while list < FPM_NUM_FREELISTS {
+        if !relptr_is_null(&(*fpm).freelist[list]) {
+            let mut candidate: *mut FreePageSpanLeader =
+                relptr_access(base, &(*fpm).freelist[list]);
+
+            loop {
+                sum += (*candidate).npages;
+                candidate = relptr_access(base, &(*candidate).next);
+                if candidate.is_null() {
+                    break;
+                }
+            }
+        }
+        list += 1;
+    }
+
+    // Count btree internal pages.
+    if (*fpm).btree_depth > 0 {
+        let root: *mut FreePageBtree = relptr_access(base, &(*fpm).btree_root);
+
+        sum_free_pages_recurse(fpm, root, &mut sum);
+    }
+
+    // Count the recycle list.
+    recycle = relptr_access(base, &(*fpm).btree_recycle);
+    while !recycle.is_null() {
+        Assert!((*recycle).npages == 1);
+        sum += 1;
+        recycle = relptr_access(base, &(*recycle).next);
+    }
+
+    sum
+}
+
 /// Compute the size of the largest run of pages that the user could
 /// successfully get.
 unsafe fn FreePageManagerLargestContiguous(fpm: *mut FreePageManager) -> Size {

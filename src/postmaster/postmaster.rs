@@ -3960,3 +3960,192 @@ unsafe fn process_pm_pmsignal() {
         signal_child(StartupPMChild, SIGUSR2);
     }
 }
+
+/* ----------------------------------------------------------------
+ * WIN32-only: subset waitpid() and dead-child callback machinery
+ * ---------------------------------------------------------------- */
+
+#[cfg(windows)]
+mod win32_deadchild {
+    use super::*;
+    use crate::port::win32_port::pg_queue_signal;
+    use crate::utils::mmgr::mcxt::palloc;
+
+    /* errmsg_internal is treated identically to errmsg in this port */
+    macro_rules! errmsg_internal {
+        ($fmt:literal $(, $arg:expr)*) => { errmsg!($fmt $(, $arg)*) };
+    }
+
+    /* Windows API types used below. */
+    type HANDLE = *mut c_void;
+    type DWORD = u32;
+    type BOOLEAN = u8;
+    type PVOID = *mut c_void;
+    type ULONG_PTR = usize;
+
+    #[repr(C)]
+    struct OVERLAPPED {
+        _opaque: [u8; 0],
+    }
+
+    /* TODO(pg-port): Win32 API - kernel32.dll */
+    extern "system" {
+        fn GetQueuedCompletionStatus(
+            CompletionPort: HANDLE,
+            lpNumberOfBytes: *mut DWORD,
+            lpCompletionKey: *mut ULONG_PTR,
+            lpOverlapped: *mut *mut OVERLAPPED,
+            dwMilliseconds: DWORD,
+        ) -> c_int;
+        fn PostQueuedCompletionStatus(
+            CompletionPort: HANDLE,
+            dwNumberOfBytesTransferred: DWORD,
+            dwCompletionKey: ULONG_PTR,
+            lpOverlapped: *mut OVERLAPPED,
+        ) -> c_int;
+        fn UnregisterWaitEx(WaitHandle: HANDLE, CompletionEvent: HANDLE) -> c_int;
+        fn GetExitCodeProcess(hProcess: HANDLE, lpExitCode: *mut DWORD) -> c_int;
+        fn CloseHandle(hObject: HANDLE) -> c_int;
+        fn GetLastError() -> DWORD;
+        fn RegisterWaitForSingleObject(
+            phNewWaitObject: *mut HANDLE,
+            hObject: HANDLE,
+            Callback: Option<unsafe extern "system" fn(PVOID, BOOLEAN)>,
+            Context: PVOID,
+            dwMilliseconds: ULONG_PTR,
+            dwFlags: ULONG,
+        ) -> c_int;
+    }
+
+    type ULONG = u32;
+
+    const INFINITE: ULONG_PTR = 0xFFFF_FFFF;
+    const WT_EXECUTEONLYONCE: ULONG = 0x0000_0008;
+    const WT_EXECUTEINWAITTHREAD: ULONG = 0x0000_0004;
+
+    static mut win32ChildQueue: HANDLE = core::ptr::null_mut();
+
+    #[repr(C)]
+    struct win32_deadchild_waitinfo {
+        waitHandle: HANDLE,
+        procHandle: HANDLE,
+        procId: DWORD,
+    }
+
+    /*
+     * Subset implementation of waitpid() for Windows.  We assume pid is -1
+     * (that is, check all child processes) and options is WNOHANG (don't wait).
+     */
+    pub(super) unsafe fn waitpid(
+        mut pid: c_int,
+        exitstatus: *mut c_int,
+        _options: c_int,
+    ) -> c_int {
+        let childinfo: *mut win32_deadchild_waitinfo;
+        let mut exitcode: DWORD = 0;
+        let mut dwd: DWORD = 0;
+        let mut key: ULONG_PTR = 0;
+        let mut ovl: *mut OVERLAPPED = core::ptr::null_mut();
+
+        /* Try to consume one win32_deadchild_waitinfo from the queue. */
+        if GetQueuedCompletionStatus(win32ChildQueue, &mut dwd, &mut key, &mut ovl, 0) == 0 {
+            *libc::__errno_location() = libc::EAGAIN;
+            return -1;
+        }
+
+        childinfo = key as *mut win32_deadchild_waitinfo;
+        pid = (*childinfo).procId as c_int;
+
+        /*
+         * Remove handle from wait - required even though it's set to wait only
+         * once
+         */
+        UnregisterWaitEx((*childinfo).waitHandle, core::ptr::null_mut());
+
+        if GetExitCodeProcess((*childinfo).procHandle, &mut exitcode) == 0 {
+            /*
+             * Should never happen. Inform user and set a fixed exitcode.
+             */
+            write_stderr(c"could not read exit code for process\n".as_ptr());
+            exitcode = 255;
+        }
+        *exitstatus = exitcode as c_int;
+
+        /*
+         * Close the process handle.  Only after this point can the PID can be
+         * recycled by the kernel.
+         */
+        CloseHandle((*childinfo).procHandle);
+
+        /*
+         * Free struct that was allocated before the call to
+         * RegisterWaitForSingleObject()
+         */
+        pfree(childinfo as *mut c_void);
+
+        pid
+    }
+
+    /*
+     * Note! Code below executes on a thread pool! All operations must
+     * be thread safe! Note that elog() and friends must *not* be used.
+     */
+    pub(super) unsafe extern "system" fn pgwin32_deadchild_callback(
+        lpParameter: PVOID,
+        TimerOrWaitFired: BOOLEAN,
+    ) {
+        /* Should never happen, since we use INFINITE as timeout value. */
+        if TimerOrWaitFired != 0 {
+            return;
+        }
+
+        /*
+         * Post the win32_deadchild_waitinfo object for waitpid() to deal with. If
+         * that fails, we leak the object, but we also leak a whole process and
+         * get into an unrecoverable state, so there's not much point in worrying
+         * about that.  We'd like to panic, but we can't use that infrastructure
+         * from this thread.
+         */
+        if PostQueuedCompletionStatus(
+            win32ChildQueue,
+            0,
+            lpParameter as ULONG_PTR,
+            core::ptr::null_mut(),
+        ) == 0
+        {
+            write_stderr(c"could not post child completion status\n".as_ptr());
+        }
+
+        /* Queue SIGCHLD signal. */
+        pg_queue_signal(SIGCHLD);
+    }
+
+    /*
+     * Queue a waiter to signal when this child dies.  The wait will be handled
+     * automatically by an operating system thread pool.  The memory and the
+     * process handle will be freed by a later call to waitpid().
+     */
+    pub(super) unsafe fn pgwin32_register_deadchild_callback(procHandle: HANDLE, procId: DWORD) {
+        let childinfo: *mut win32_deadchild_waitinfo;
+
+        childinfo = palloc(core::mem::size_of::<win32_deadchild_waitinfo>())
+            as *mut win32_deadchild_waitinfo;
+        (*childinfo).procHandle = procHandle;
+        (*childinfo).procId = procId;
+
+        if RegisterWaitForSingleObject(
+            &mut (*childinfo).waitHandle,
+            procHandle,
+            Some(pgwin32_deadchild_callback),
+            childinfo as PVOID,
+            INFINITE,
+            WT_EXECUTEONLYONCE | WT_EXECUTEINWAITTHREAD,
+        ) == 0
+        {
+            ereport!(
+                FATAL,
+                errmsg_internal!("could not register process for wait: error code {}", GetLastError())
+            );
+        }
+    }
+}

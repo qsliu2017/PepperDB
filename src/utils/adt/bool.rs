@@ -35,6 +35,7 @@ use crate::port::pgstrcasecmp::pg_strncasecmp; // boolin/parse_bool use the case
 use crate::common::hashfn::{hash_uint32, hash_uint32_extended}; // common/hashfn.h
 use crate::lib::stringinfo::StringInfo; // libpq/pqformat.h passes a StringInfo
 use crate::libpq::pqformat::pq_getmsgbyte;
+use crate::utils::palloc::{MemoryContext, MemoryContextAlloc}; // utils/palloc.h (agg-context alloc)
 use core::ffi::{c_char, c_int, c_void};
 
 /* errcodes.h classification (errcode() shim ignores the value) */
@@ -363,22 +364,28 @@ struct BoolAggState {
 }
 
 unsafe fn makeBoolAggState(fcinfo: FunctionCallInfo) -> *mut BoolAggState {
-    // C body:
-    //   BoolAggState *state;
-    //   MemoryContext agg_context;
-    //   if (!AggCheckCallContext(fcinfo, &agg_context))
-    //       elog(ERROR, "aggregate function called in non-aggregate context");
-    //   state = (BoolAggState *) MemoryContextAlloc(agg_context,
-    //                                               sizeof(BoolAggState));
-    //   state->aggcount = 0;
-    //   state->aggtrue = 0;
-    //   return state;
-    // TODO(pg-port): AggCheckCallContext lives in executor/nodeAgg.c (not yet
-    // translated); MemoryContextAlloc and the BoolAggState init are kept in the
-    // comment above so this stub can be filled once the aggregate call context
-    // is available.
-    let _ = fcinfo;
-    unimplemented!("makeBoolAggState: AggCheckCallContext (executor/nodeAgg.c) not yet translated")
+    let state: *mut BoolAggState;
+    let mut agg_context: MemoryContext = std::ptr::null_mut();
+
+    if !AggCheckCallContext(fcinfo, &raw mut agg_context) {
+        elog!(ERROR, "aggregate function called in non-aggregate context");
+    }
+
+    state = MemoryContextAlloc(agg_context, std::mem::size_of::<BoolAggState>())
+        as *mut BoolAggState;
+    (*state).aggcount = 0;
+    (*state).aggtrue = 0;
+
+    state
+}
+
+/// STUB: `AggCheckCallContext` (executor/nodeAgg.c).
+/// TODO(pg-port): translate executor/nodeAgg.c::AggCheckCallContext.
+unsafe fn AggCheckCallContext(
+    _fcinfo: FunctionCallInfo,
+    _aggcontext: *mut MemoryContext,
+) -> bool {
+    unimplemented!("bool: AggCheckCallContext (executor/nodeAgg.c) not yet translated")
 }
 
 pub unsafe fn bool_accum(fcinfo: FunctionCallInfo) -> Datum {

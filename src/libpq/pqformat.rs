@@ -9,23 +9,18 @@
 //! Portions Copyright (c) 1994, Regents of the University of California
 //!
 //! `#include`s mapped: lib/stringinfo (via crate::lib::stringinfo), port/pg_bswap
-//! (crate::port::pg_bswap pg_hton*/pg_ntoh*).
-//!
-//! STUBBED (deps not yet ported):
-//!  - The character-set-conversion senders/getters pq_sendcountedtext/pq_sendtext/
-//!    pq_sendstring/pq_getmsgtext/pq_getmsgstring/pq_puttextmessage need mb/mbutils
-//!    (pg_server_to_client / pg_client_to_server), not yet translated.
-//!  - The message-framing routines pq_beginmessage[_reuse]/pq_endmessage[_reuse]/
-//!    pq_putemptymessage need the libpq comm layer (pq_putmessage, pqcomm.c).
-//!  - pq_endtypsend returns a `bytea` and needs varatt.h (SET_VARSIZE) + the varlena
-//!    type, not yet translated.
+//! (crate::port::pg_bswap pg_hton*/pg_ntoh*), mb/mbutils (pg_server_to_client /
+//! pg_client_to_server), libpq/libpq (pq_putmessage).
 
 use crate::prelude::*;
 use crate::lib::stringinfo::{
-    appendBinaryStringInfo, appendStringInfoChar, enlargeStringInfo, initStringInfo, StringInfo,
+    appendBinaryStringInfo, appendBinaryStringInfoNT, appendStringInfoChar, enlargeStringInfo,
+    initStringInfo, resetStringInfo, StringInfo,
 };
 use crate::port::pg_bswap::{pg_hton16, pg_hton32, pg_hton64, pg_ntoh16, pg_ntoh32, pg_ntoh64};
-use crate::c::{float4, float8, int64, uint16, uint32, uint64, uint8};
+use crate::c::{float4, float8, int64, uint16, uint32, uint64, uint8, Size};
+use crate::libpq::libpq::pq_putmessage;
+use crate::mb::mbutils::{pg_client_to_server, pg_server_to_client};
 use core::ffi::{c_char, c_int, c_uint, c_void};
 
 /* errcodes.h classification (errcode() shim ignores the value). */
@@ -227,46 +222,184 @@ pub unsafe fn pq_endtypsend(buf: StringInfo) -> *mut crate::c::bytea {
     result
 }
 
-// ---- character-set-conversion senders (need mb/mbutils) ----
+// ---- message framing ----
 
-pub unsafe fn pq_sendcountedtext(buf: StringInfo, str: *const c_char, slen: c_int) {
-    let _ = (buf, str, slen);
-    unimplemented!("pq_sendcountedtext: mb/mbutils (pg_server_to_client) not yet translated")
-}
-pub unsafe fn pq_sendtext(buf: StringInfo, str: *const c_char, slen: c_int) {
-    let _ = (buf, str, slen);
-    unimplemented!("pq_sendtext: mb/mbutils (pg_server_to_client) not yet translated")
-}
-pub unsafe fn pq_sendstring(buf: StringInfo, str: *const c_char) {
-    let _ = (buf, str);
-    unimplemented!("pq_sendstring: mb/mbutils (pg_server_to_client) not yet translated")
-}
-
-// ---- message framing (need libpq comm layer pq_putmessage) ----
-
+/*
+ *		pq_beginmessage		- initialize for sending a message
+ *
+ * # Safety
+ * `buf` points to a (possibly uninitialized) StringInfoData to be init'd.
+ */
 pub unsafe fn pq_beginmessage(buf: StringInfo, msgtype: c_char) {
-    let _ = (buf, msgtype);
-    unimplemented!("pq_beginmessage: libpq comm layer not yet translated")
+    initStringInfo(buf);
+
+    /*
+     * We stash the message type into the buffer's cursor field, expecting
+     * that the pq_sendXXX routines won't touch it.  We could alternatively
+     * make it the first byte of the buffer contents, but this seems easier.
+     */
+    (*buf).cursor = msgtype as c_int;
 }
+
+/*
+ *		pq_beginmessage_reuse - initialize for sending a message, reuse buffer
+ *
+ * This requires the buffer to be allocated in a sufficiently long-lived
+ * memory context.
+ *
+ * # Safety
+ * `buf` was previously initialized and is allocated in a long-lived context.
+ */
 pub unsafe fn pq_beginmessage_reuse(buf: StringInfo, msgtype: c_char) {
-    let _ = (buf, msgtype);
-    unimplemented!("pq_beginmessage_reuse: libpq comm layer not yet translated")
+    resetStringInfo(buf);
+
+    /*
+     * We stash the message type into the buffer's cursor field, expecting
+     * that the pq_sendXXX routines won't touch it.  We could alternatively
+     * make it the first byte of the buffer contents, but this seems easier.
+     */
+    (*buf).cursor = msgtype as c_int;
 }
+
+/*
+ *		pq_endmessage	- send the completed message to the frontend
+ *
+ * The data buffer is pfree()d, but if the StringInfo was allocated with
+ * makeStringInfo then the caller must still pfree it.
+ *
+ * # Safety
+ * `buf` was initialized by [`pq_beginmessage`] and `buf->data` is palloc'd.
+ */
 pub unsafe fn pq_endmessage(buf: StringInfo) {
-    let _ = buf;
-    unimplemented!("pq_endmessage: libpq comm layer (pq_putmessage) not yet translated")
+    /* msgtype was saved in cursor field */
+    let _ = pq_putmessage((*buf).cursor as c_char, (*buf).data, (*buf).len as Size);
+    /* no need to complain about any failure, since pqcomm.c already did */
+    pfree((*buf).data as *mut c_void);
+    (*buf).data = core::ptr::null_mut();
 }
+
+/*
+ *		pq_endmessage_reuse	- send the completed message to the frontend
+ *
+ * The data buffer is *not* freed, allowing to reuse the buffer with
+ * pq_beginmessage_reuse.
+ *
+ * # Safety
+ * See [`pq_endmessage`].
+ */
 pub unsafe fn pq_endmessage_reuse(buf: StringInfo) {
-    let _ = buf;
-    unimplemented!("pq_endmessage_reuse: libpq comm layer (pq_putmessage) not yet translated")
+    /* msgtype was saved in cursor field */
+    let _ = pq_putmessage((*buf).cursor as c_char, (*buf).data, (*buf).len as Size);
 }
+
+// ---- character-set-conversion senders ----
+
+/*
+ *		pq_sendcountedtext - append a counted text string (with character set conversion)
+ *
+ * The data sent to the frontend by this routine is a 4-byte count field
+ * followed by the string.  The count does not include itself, as required by
+ * protocol version 3.0.  The passed text string need not be null-terminated,
+ * and the data sent to the frontend isn't either.
+ *
+ * # Safety
+ * `buf` valid; `str` readable for `slen` bytes.
+ */
+pub unsafe fn pq_sendcountedtext(buf: StringInfo, str: *const c_char, mut slen: c_int) {
+    let p: *mut c_char;
+
+    p = pg_server_to_client(str, slen);
+    if p != str as *mut c_char {
+        /* actual conversion has been done? */
+        slen = strlen(p) as c_int;
+        pq_sendint32(buf, slen as uint32);
+        appendBinaryStringInfoNT(buf, p as *const c_void, slen);
+        pfree(p as *mut c_void);
+    } else {
+        pq_sendint32(buf, slen as uint32);
+        appendBinaryStringInfoNT(buf, str as *const c_void, slen);
+    }
+}
+
+/*
+ *		pq_sendtext		- append a text string (with conversion)
+ *
+ * The passed text string need not be null-terminated, and the data sent
+ * to the frontend isn't either.  Note that this is not actually useful
+ * for direct frontend transmissions, since there'd be no way for the
+ * frontend to determine the string length.  But it is useful for binary
+ * format conversions.
+ *
+ * # Safety
+ * `buf` valid; `str` readable for `slen` bytes.
+ */
+pub unsafe fn pq_sendtext(buf: StringInfo, str: *const c_char, mut slen: c_int) {
+    let p: *mut c_char;
+
+    p = pg_server_to_client(str, slen);
+    if p != str as *mut c_char {
+        /* actual conversion has been done? */
+        slen = strlen(p) as c_int;
+        appendBinaryStringInfo(buf, p as *const c_void, slen);
+        pfree(p as *mut c_void);
+    } else {
+        appendBinaryStringInfo(buf, str as *const c_void, slen);
+    }
+}
+
+/*
+ *		pq_sendstring	- append a null-terminated text string (with conversion)
+ *
+ * NB: passed text string must be null-terminated, and so is the data
+ * sent to the frontend.
+ *
+ * # Safety
+ * `buf` valid; `str` is a NUL-terminated C string.
+ */
+pub unsafe fn pq_sendstring(buf: StringInfo, str: *const c_char) {
+    let mut slen: c_int = strlen(str) as c_int;
+    let p: *mut c_char;
+
+    p = pg_server_to_client(str, slen);
+    if p != str as *mut c_char {
+        /* actual conversion has been done? */
+        slen = strlen(p) as c_int;
+        appendBinaryStringInfoNT(buf, p as *const c_void, slen + 1);
+        pfree(p as *mut c_void);
+    } else {
+        appendBinaryStringInfoNT(buf, str as *const c_void, slen + 1);
+    }
+}
+
+/*
+ *		pq_puttextmessage - generate a character set-converted message in one step
+ *
+ *		This is the same as the pqcomm.c routine pq_putmessage, except that
+ *		the message body is a null-terminated string to which encoding
+ *		conversion applies.
+ *
+ * # Safety
+ * `str` is a NUL-terminated C string.
+ */
 pub unsafe fn pq_puttextmessage(msgtype: c_char, str: *const c_char) {
-    let _ = (msgtype, str);
-    unimplemented!("pq_puttextmessage: libpq comm layer + mbutils not yet translated")
+    let slen: c_int = strlen(str) as c_int;
+    let p: *mut c_char;
+
+    p = pg_server_to_client(str, slen);
+    if p != str as *mut c_char {
+        /* actual conversion has been done? */
+        let _ = pq_putmessage(msgtype, p, (strlen(p) + 1) as Size);
+        pfree(p as *mut c_void);
+        return;
+    }
+    let _ = pq_putmessage(msgtype, str, (slen + 1) as Size);
 }
+
+/*
+ *		pq_putemptymessage - convenience routine for message with empty body
+ */
 pub unsafe fn pq_putemptymessage(msgtype: c_char) {
-    let _ = msgtype;
-    unimplemented!("pq_putemptymessage: libpq comm layer (pq_putmessage) not yet translated")
+    let _ = pq_putmessage(msgtype, core::ptr::null(), 0);
 }
 
 // ----------------------------------------------------------------
@@ -388,19 +521,64 @@ pub unsafe fn pq_copymsgbytes(msg: StringInfo, buf: *mut c_void, datalen: c_int)
 }
 
 /*
- *		pq_getmsgtext	- get a counted text string (with conversion)  [STUBBED]
+ *		pq_getmsgtext	- get a counted text string (with conversion)
+ *
+ *		Always returns a pointer to a freshly palloc'd result.
+ *		The result has a trailing null, *and* we return its strlen in *nbytes.
+ *
+ * # Safety
+ * See [`pq_getmsgbyte`]; `nbytes` must be writable.
  */
 pub unsafe fn pq_getmsgtext(msg: StringInfo, rawbytes: c_int, nbytes: *mut c_int) -> *mut c_char {
-    let _ = (msg, rawbytes, nbytes);
-    unimplemented!("pq_getmsgtext: mb/mbutils (pg_client_to_server) not yet translated")
+    let str: *mut c_char;
+    let mut p: *mut c_char;
+
+    if rawbytes < 0 || rawbytes > ((*msg).len - (*msg).cursor) {
+        ereport!(ERROR, errmsg!("insufficient data left in message"));
+    }
+    str = (*msg).data.add((*msg).cursor as usize);
+    (*msg).cursor += rawbytes;
+
+    p = pg_client_to_server(str, rawbytes);
+    if p != str {
+        /* actual conversion has been done? */
+        *nbytes = strlen(p) as c_int;
+    } else {
+        p = palloc((rawbytes + 1) as Size) as *mut c_char;
+        core::ptr::copy_nonoverlapping(str, p, rawbytes as usize);
+        *p.add(rawbytes as usize) = b'\0' as c_char;
+        *nbytes = rawbytes;
+    }
+    p
 }
 
 /*
- *		pq_getmsgstring - get a null-terminated text string (with conversion)  [STUBBED]
+ *		pq_getmsgstring - get a null-terminated text string (with conversion)
+ *
+ *		May return a pointer directly into the message buffer, or a pointer
+ *		to a palloc'd conversion result.
+ *
+ * # Safety
+ * See [`pq_getmsgbyte`].
  */
 pub unsafe fn pq_getmsgstring(msg: StringInfo) -> *const c_char {
-    let _ = msg;
-    unimplemented!("pq_getmsgstring: mb/mbutils (pg_client_to_server) not yet translated")
+    let str: *mut c_char;
+    let slen: c_int;
+
+    str = (*msg).data.add((*msg).cursor as usize);
+
+    /*
+     * It's safe to use strlen() here because a StringInfo is guaranteed to
+     * have a trailing null byte.  But check we found a null inside the
+     * message.
+     */
+    slen = strlen(str) as c_int;
+    if (*msg).cursor + slen >= (*msg).len {
+        ereport!(ERROR, errmsg!("invalid string in message"));
+    }
+    (*msg).cursor += slen + 1;
+
+    pg_client_to_server(str, slen)
 }
 
 /*

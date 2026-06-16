@@ -55,6 +55,7 @@ use crate::catalog::pg_known_oids::DEFAULT_COLLATION_OID;
 use crate::catalog::pg_type_d::{BOOLOID, INT4OID, INT8OID, OIDOID, RECORDOID, TEXTARRAYOID, TEXTOID};
 use crate::common::hashfn::{hash_combine, hash_uint32};
 use crate::nodes::nodes::Node;
+use crate::nodes::read::stringToNode;
 use crate::nodes::pg_list::List;
 use crate::nodes::primnodes::AttrNumber;
 use crate::pg_config::{ALIGNOF_DOUBLE, ALIGNOF_INT, ALIGNOF_SHORT};
@@ -1436,24 +1437,20 @@ pub unsafe fn BuildDescFromLists(
  * TODO(pg-port): needs nodes/read.c (stringToNode) to deserialize adbin.
  */
 pub unsafe fn TupleDescGetDefault(tupdesc: TupleDesc, attnum: AttrNumber) -> *mut Node {
-    let _ = (tupdesc, attnum);
+    let mut result: *mut Node = null_mut();
 
-    // C body:
-    //   Node       *result = NULL;
-    //   if (tupdesc->constr)
-    //   {
-    //       AttrDefault *attrdef = tupdesc->constr->defval;
-    //       for (int i = 0; i < tupdesc->constr->num_defval; i++)
-    //       {
-    //           if (attrdef[i].adnum == attnum)
-    //           {
-    //               result = stringToNode(attrdef[i].adbin);
-    //               break;
-    //           }
-    //       }
-    //   }
-    //   return result;
-    unimplemented!("TupleDescGetDefault: needs nodes/read.c (stringToNode) to deserialize adbin")
+    if !(*tupdesc).constr.is_null() {
+        let attrdef = (*(*tupdesc).constr).defval;
+
+        for i in 0..(*(*tupdesc).constr).num_defval as c_int {
+            if (*attrdef.add(i as usize)).adnum == attnum {
+                result = stringToNode((*attrdef.add(i as usize)).adbin) as *mut Node;
+                break;
+            }
+        }
+    }
+
+    result
 }
 
 // ----------------------------------------------------------------------------
@@ -1484,12 +1481,19 @@ unsafe fn ResOwnerReleaseTupleDesc(res: Datum) {
  */
 #[allow(dead_code)]
 unsafe fn ResOwnerPrintTupleDesc(res: Datum) -> *mut c_char {
-    let _ = res;
-    // C body:
-    //   TupleDesc tupdesc = (TupleDesc) DatumGetPointer(res);
-    //   return psprintf("TupleDesc %p (%u,%d)",
-    //                   tupdesc, tupdesc->tdtypeid, tupdesc->tdtypmod);
-    unimplemented!("ResOwnerPrintTupleDesc: needs psprintf (utils/mmgr/mcxt.c)")
+    let tupdesc = DatumGetPointer(res) as TupleDesc;
+
+    psprintf(
+        b"TupleDesc %p (%u,%d)\0".as_ptr() as *const c_char,
+        tupdesc as *const c_void,
+        (*tupdesc).tdtypeid,
+        (*tupdesc).tdtypmod,
+    )
+}
+
+extern "C" {
+    /* TODO(pg-port): real psprintf lives in lib/psprintf.c */
+    fn psprintf(fmt: *const c_char, ...) -> *mut c_char;
 }
 
 #[cfg(test)]

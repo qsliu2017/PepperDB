@@ -20,18 +20,22 @@ use crate::{PG_ARGISNULL, PG_GETARG_DATUM};
 use crate::c::{text, ESCAPE_STRING_SYNTAX, SQL_STR_DOUBLE};
 use crate::postgres::{DatumGetPointer, PointerGetDatum};
 use crate::postgres_ext::InvalidOid;
-use crate::utils::adt::varlena::cstring_to_text;
+use crate::utils::adt::varlena::{cstring_to_text, text_to_cstring};
+use crate::utils::adt::ruleutils::quote_identifier;
 use core::ffi::{c_char, c_void};
 
 /*
- * quote_ident - returns a properly quoted identifier.  [STUBBED]
+ * quote_ident - returns a properly quoted identifier.
  */
 pub unsafe fn quote_ident(fcinfo: FunctionCallInfo) -> Datum {
-    // C: str = text_to_cstring(t); qstr = quote_identifier(str);
-    //    PG_RETURN_TEXT_P(cstring_to_text(qstr));
-    // TODO(pg-port): quote_identifier() lives in utils/adt/ruleutils.c (not yet translated).
-    let _ = fcinfo;
-    unimplemented!("quote_ident: quote_identifier (ruleutils.c) not yet translated")
+    let t: *mut text =
+        pg_detoast_datum_packed(DatumGetPointer(PG_GETARG_DATUM!(fcinfo, 0)) as *mut c_void) as *mut text;
+    let qstr: *const c_char;
+    let str: *mut c_char;
+
+    str = text_to_cstring(t);
+    qstr = quote_identifier(str);
+    return PointerGetDatum(cstring_to_text(qstr) as *const c_void); // PG_RETURN_TEXT_P
 }
 
 /*

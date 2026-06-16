@@ -386,6 +386,22 @@ pub unsafe fn xml_in(fcinfo: FunctionCallInfo) -> Datum {
     */
 }
 
+/*
+ * xmlChar_to_encoding -- map a libxml encoding name to a PG encoding id.
+ * (USE_LIBXML gated in C.)
+ */
+#[cfg(any())]
+unsafe fn xmlChar_to_encoding(encoding_name: *const c_char) -> c_int {
+    let encoding: c_int = pg_char_to_encoding(encoding_name as *const c_char);
+
+    if encoding < 0 {
+        ereport!(ERROR, errmsg!("invalid encoding name \"{}\"",
+            std::ffi::CStr::from_ptr(encoding_name as *const c_char).to_string_lossy()));
+        /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+    }
+    encoding
+}
+
 /// xml_out_internal -- shared by xml_out and xml_send.
 /// When USE_LIBXML is not defined, just returns text_to_cstring cast.
 unsafe fn xml_out_internal(x: *mut xmltype, _target_encoding: pg_enc) -> *mut c_char {
@@ -463,6 +479,15 @@ unsafe fn libc_strlen(s: *const c_char) -> usize {
 // String helper conversions (not USE_LIBXML gated)
 // -------------------------------------------------------------------------
 
+/*
+ * appendStringInfoText -- append a text value to a StringInfo.
+ * (USE_LIBXML gated in C.)
+ */
+#[cfg(any())]
+unsafe fn appendStringInfoText(str_: StringInfo, t: *const crate::c::text) {
+    appendBinaryStringInfo(str_, VARDATA_ANY(t as *const c_char), VARSIZE_ANY_EXHDR(t as *const c_char) as c_int);
+}
+
 /// stringinfo_to_xmltype -- wrap a StringInfo as xmltype.
 pub unsafe fn stringinfo_to_xmltype(buf: StringInfo) -> *mut xmltype {
     cstring_to_text_with_len((*buf).data, (*buf).len) as *mut xmltype
@@ -473,10 +498,13 @@ pub unsafe fn cstring_to_xmltype(string: *const c_char) -> *mut xmltype {
     cstring_to_text(string) as *mut xmltype
 }
 
-// #[cfg(any())] USE_LIBXML helper:
-// static unsafe fn xmlBuffer_to_xmltype(buf: xmlBufferPtr) -> *mut xmltype {
-//     cstring_to_text_with_len(xmlBufferContent(buf) as *const c_char, xmlBufferLength(buf)) as *mut xmltype
-// }
+/// xmlBuffer_to_xmltype -- wrap a libxml buffer's contents as xmltype.
+/// (USE_LIBXML gated in C.)
+#[cfg(any())] // USE_LIBXML body:
+unsafe fn xmlBuffer_to_xmltype(buf: xmlBufferPtr) -> *mut xmltype {
+    cstring_to_text_with_len(xmlBufferContent(buf) as *const c_char, xmlBufferLength(buf))
+        as *mut xmltype
+}
 
 // -------------------------------------------------------------------------
 // xmlcomment
@@ -1247,6 +1275,62 @@ pub unsafe fn xml_doctype_in_content(str_: *const c_char) -> bool {
 unsafe fn xml_text2xmlChar(in_: *mut crate::c::text) -> *mut c_char {
     // return text_to_cstring(in_) as *mut xmlChar
     core::ptr::null_mut()
+}
+
+// -------------------------------------------------------------------------
+// libxml memory callbacks (USE_LIBXMLCONTEXT gated in C)
+// -------------------------------------------------------------------------
+
+#[cfg(any())]
+unsafe fn xml_memory_init() {
+    /* Create memory context if not there already */
+    if LibxmlContext.is_null() {
+        LibxmlContext = AllocSetContextCreate(TopMemoryContext,
+            c"Libxml context".as_ptr(),
+            ALLOCSET_DEFAULT_SIZES);
+    }
+
+    /* Re-establish the callbacks even if already set */
+    xmlMemSetup(xml_pfree, xml_palloc, xml_repalloc, xml_pstrdup);
+}
+
+/*
+ * Wrappers for memory management functions
+ */
+#[cfg(any())]
+unsafe fn xml_palloc(size: usize) -> *mut c_void {
+    MemoryContextAlloc(LibxmlContext, size)
+}
+
+#[cfg(any())]
+unsafe fn xml_repalloc(ptr: *mut c_void, size: usize) -> *mut c_void {
+    repalloc(ptr, size)
+}
+
+#[cfg(any())]
+unsafe fn xml_pfree(ptr: *mut c_void) {
+    /* At least some parts of libxml assume xmlFree(NULL) is allowed */
+    if !ptr.is_null() {
+        pfree(ptr);
+    }
+}
+
+#[cfg(any())]
+unsafe fn xml_pstrdup(string: *const c_char) -> *mut c_char {
+    MemoryContextStrdup(LibxmlContext, string)
+}
+
+/*
+ * xmlPgEntityLoader --- entity loader callback function
+ *
+ * Silently prevent any external entity URL from being loaded.  We don't want
+ * to throw an error, so instead make the entity appear to expand to an empty
+ * string.
+ */
+#[cfg(any())]
+unsafe fn xmlPgEntityLoader(_URL: *const c_char, _ID: *const c_char,
+    ctxt: xmlParserCtxtPtr) -> xmlParserInputPtr {
+    xmlNewStringInputStream(ctxt, c"".as_ptr() as *const c_char)
 }
 
 // -------------------------------------------------------------------------
@@ -2693,10 +2777,52 @@ unsafe fn map_sql_type_to_xml_name(typeoid: Oid, typmod: c_int) -> *const c_char
 // -------------------------------------------------------------------------
 
 unsafe fn map_sql_typecoll_to_xmlschema_types(tupdesc_list: *mut List) -> *const c_char {
-    /* TODO(pg-port): iterate tupdesc_list with foreach! to gather unique types. */
-    let _ = tupdesc_list;
-    /* Returns empty string when list iteration is not yet ported. */
-    b"\0".as_ptr() as *const c_char
+    let mut uniquetypes: *mut List = NIL;
+    let mut result: StringInfoData = core::mem::zeroed();
+
+    /* extract all column types used in the set of TupleDescs */
+    crate::foreach!(cell0, tupdesc_list, {
+        let tupdesc: TupleDesc =
+            crate::nodes::pg_list::lfirst(crate::current_cell!(cell0)) as TupleDesc;
+
+        let natts = (*tupdesc).natts;
+        for i in 0..natts {
+            let att: Form_pg_attribute = TupleDescAttr(tupdesc, i);
+
+            if (*att).attisdropped {
+                continue;
+            }
+            uniquetypes =
+                crate::nodes::pg_list::list_append_unique_oid(uniquetypes, (*att).atttypid);
+        }
+    });
+
+    /* add base types of domains */
+    crate::foreach!(cell0, uniquetypes, {
+        let typid: Oid = crate::nodes::pg_list::lfirst_oid(crate::current_cell!(cell0));
+        let basetypid: Oid = getBaseType(typid);
+
+        if basetypid != typid {
+            uniquetypes =
+                crate::nodes::pg_list::list_append_unique_oid(uniquetypes, basetypid);
+        }
+    });
+
+    /* Convert to textual form */
+    initStringInfo(&mut result);
+
+    crate::foreach!(cell0, uniquetypes, {
+        appendStringInfo!(
+            &mut result,
+            "{}\n",
+            cs(map_sql_type_to_xmlschema_type(
+                crate::nodes::pg_list::lfirst_oid(crate::current_cell!(cell0)),
+                -1
+            ))
+        );
+    });
+
+    result.data
 }
 
 // -------------------------------------------------------------------------

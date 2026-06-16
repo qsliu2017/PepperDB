@@ -49,6 +49,7 @@ extern "C" {
     fn unsetenv(name: *const c_char) -> c_int;
     fn strcmp(a: *const c_char, b: *const c_char) -> c_int;
     fn strdup(s: *const c_char) -> *mut c_char;
+    fn getenv(name: *const c_char) -> *mut c_char;
 }
 
 unsafe fn get_progname(_argv0: *const c_char) -> *const c_char { _argv0 }
@@ -206,11 +207,68 @@ unsafe fn init_locale(categoryname: &str, category: c_int, locale: *const c_char
  * Help display should match the options accepted by PostmasterMain() and
  * PostgresMain().
  */
-unsafe fn help(_progname: *const c_char) {
-    // 1:1: a series of printf(_(...)) usage lines (see C source). Omitted text
-    // body; this is a faithful structural translation of the help() routine.
-    // TODO(pg-port): emit the full usage text via the localized printf calls.
+unsafe fn help(progname: *const c_char) {
+    let pn = std::ffi::CStr::from_ptr(progname).to_string_lossy();
+    print!("{pn} is the PostgreSQL server.\n\n");
+    print!("Usage:\n  {pn} [OPTION]...\n\n");
+    print!("Options:\n");
+    print!("  -B NBUFFERS        number of shared buffers\n");
+    print!("  -c NAME=VALUE      set run-time parameter\n");
+    print!("  -C NAME            print value of run-time parameter, then exit\n");
+    print!("  -d 1-5             debugging level\n");
+    print!("  -D DATADIR         database directory\n");
+    print!("  -e                 use European date input format (DMY)\n");
+    print!("  -F                 turn fsync off\n");
+    print!("  -h HOSTNAME        host name or IP address to listen on\n");
+    print!("  -i                 enable TCP/IP connections (deprecated)\n");
+    print!("  -k DIRECTORY       Unix-domain socket location\n");
+    // #ifdef USE_SSL
+    print!("  -l                 enable SSL connections\n");
+    print!("  -N MAX-CONNECT     maximum number of allowed connections\n");
+    print!("  -p PORT            port number to listen on\n");
+    print!("  -s                 show statistics after each query\n");
+    print!("  -S WORK-MEM        set amount of memory for sorts (in kB)\n");
+    print!("  -V, --version      output version information, then exit\n");
+    print!("  --NAME=VALUE       set run-time parameter\n");
+    print!("  --describe-config  describe configuration parameters, then exit\n");
+    print!("  -?, --help         show this help, then exit\n");
+
+    print!("\nDeveloper options:\n");
+    print!("  -f s|i|o|b|t|n|m|h forbid use of some plan types\n");
+    print!("  -O                 allow system table structure changes\n");
+    print!("  -P                 disable system indexes\n");
+    print!("  -t pa|pl|ex        show timings after each query\n");
+    print!("  -T                 send SIGABRT to all backend processes if one dies\n");
+    print!("  -W NUM             wait NUM seconds to allow attach from a debugger\n");
+
+    print!("\nOptions for single-user mode:\n");
+    print!("  --single           selects single-user mode (must be first argument)\n");
+    print!("  DBNAME             database name (defaults to user name)\n");
+    print!("  -d 0-5             override debugging level\n");
+    print!("  -E                 echo statement before execution\n");
+    print!("  -j                 do not use newline as interactive query delimiter\n");
+    print!("  -r FILENAME        send stdout and stderr to given file\n");
+
+    print!("\nOptions for bootstrapping mode:\n");
+    print!("  --boot             selects bootstrapping mode (must be first argument)\n");
+    print!("  --check            selects check mode (must be first argument)\n");
+    print!("  DBNAME             database name (mandatory argument in bootstrapping mode)\n");
+    print!("  -r FILENAME        send stdout and stderr to given file\n");
+
+    print!(
+        "\nPlease read the documentation for the complete list of run-time\n\
+         configuration settings and how to set them on the command line or in\n\
+         the configuration file.\n\n\
+         Report bugs to <{}>.\n",
+        PACKAGE_BUGREPORT
+    );
+    print!("{} home page: <{}>\n", PACKAGE_NAME, PACKAGE_URL);
 }
+
+// TODO(pg-port): real homes in configure-generated pg_config.h
+const PACKAGE_BUGREPORT: &str = "pgsql-bugs@lists.postgresql.org";
+const PACKAGE_NAME: &str = "PostgreSQL";
+const PACKAGE_URL: &str = "https://www.postgresql.org/";
 
 unsafe fn check_root(progname: *const c_char) {
     // #ifndef WIN32
@@ -229,6 +287,30 @@ unsafe fn check_root(progname: *const c_char) {
         write_stderr("real and effective user IDs must match\n");
         exit(1);
     }
+}
+
+/*
+ * At least on linux, set_ps_display() breaks /proc/$pid/environ. The
+ * sanitizer library uses /proc/$pid/environ to implement getenv() as it wants
+ * to work independent of libc. [...] We work around that by defining
+ * __ubsan_default_options, a weak symbol libsanitizer uses to get defaults
+ * from the application, and return getenv("UBSAN_OPTIONS"). But only if main
+ * already was reached, so that we don't end up relying on a not-yet-working
+ * getenv().
+ *
+ * As this function won't get called when not running a sanitizer, it doesn't
+ * seem necessary to only compile it conditionally.
+ */
+// #if __has_attribute(disable_sanitizer_instrumentation)
+// __attribute__((disable_sanitizer_instrumentation))
+#[no_mangle]
+pub unsafe extern "C" fn __ubsan_default_options() -> *const c_char {
+    /* don't call libc before it's guaranteed to be initialized */
+    if !reached_main {
+        return c"".as_ptr();
+    }
+
+    getenv(c"UBSAN_OPTIONS".as_ptr())
 }
 
 // LC_* category ids (POSIX locale.h).

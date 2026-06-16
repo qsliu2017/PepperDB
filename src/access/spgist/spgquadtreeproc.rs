@@ -341,6 +341,44 @@ pub unsafe fn spg_quad_choose(fcinfo: FunctionCallInfo) -> Datum {
     PG_RETURN_VOID!();
 }
 
+// ===========================================================================
+// USE_MEDIAN qsort comparators (C: #ifdef USE_MEDIAN).  USE_MEDIAN is never
+// defined in a default build, so these mirror the dead #ifdef branch via
+// #[cfg(any())] (always-false cfg).  Translated 1:1 from the C comparators.
+// ===========================================================================
+
+/// `static int x_cmp(const void *a, const void *b, void *arg)`
+#[cfg(any())]
+unsafe fn x_cmp(a: *const c_void, b: *const c_void, _arg: *mut c_void) -> c_int {
+    let pa = *(a as *const *mut Point);
+    let pb = *(b as *const *mut Point);
+
+    if (*pa).x == (*pb).x {
+        return 0;
+    }
+    if (*pa).x > (*pb).x {
+        1
+    } else {
+        -1
+    }
+}
+
+/// `static int y_cmp(const void *a, const void *b, void *arg)`
+#[cfg(any())]
+unsafe fn y_cmp(a: *const c_void, b: *const c_void, _arg: *mut c_void) -> c_int {
+    let pa = *(a as *const *mut Point);
+    let pb = *(b as *const *mut Point);
+
+    if (*pa).y == (*pb).y {
+        return 0;
+    }
+    if (*pa).y > (*pb).y {
+        1
+    } else {
+        -1
+    }
+}
+
 /// `Datum spg_quad_picksplit(PG_FUNCTION_ARGS)`
 pub unsafe fn spg_quad_picksplit(fcinfo: FunctionCallInfo) -> Datum {
     let in_ = PG_GETARG_POINTER!(fcinfo, 0) as *mut spgPickSplitIn;

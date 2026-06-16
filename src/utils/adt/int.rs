@@ -23,13 +23,20 @@ use crate::{
     PG_GETARG_INT64, PG_GETARG_POINTER, PG_NARGS, PG_RETURN_BOOL, PG_RETURN_CSTRING,
     PG_RETURN_INT16, PG_RETURN_INT32, PG_RETURN_NULL, PG_RETURN_POINTER,
 };
-use crate::c::{int16, int32, int64, PG_INT16_MIN, PG_INT32_MIN};
+use crate::c::{int16, int32, int64, int2vector, PG_INT16_MIN, PG_INT32_MIN};
+use crate::catalog::pg_type_d::INT2OID;
 use crate::common::int::{
     pg_add_s16_overflow, pg_add_s32_overflow, pg_add_s64_overflow, pg_mul_s16_overflow,
     pg_mul_s32_overflow, pg_sub_s16_overflow, pg_sub_s32_overflow,
 };
-use crate::postgres::{Int32GetDatum, PointerGetDatum};
+use crate::postgres::{DatumGetInt32, Int32GetDatum, PointerGetDatum};
 use crate::postgres_ext::InvalidOid;
+use crate::nodes::nodes::Node;
+use crate::nodes::supportnodes::SupportRequestRows;
+use crate::nodes::primnodes::{Const, FuncExpr};
+use crate::nodes::pg_list::{linitial, list_length, lsecond, lthird, List};
+use crate::optimizer::util::clauses::estimate_expression_value;
+use crate::IsA;
 use crate::lib::stringinfo::{StringInfo, StringInfoData};
 use crate::libpq::pqformat::{pq_begintypsend, pq_endtypsend, pq_getmsgint, pq_sendint16, pq_sendint32};
 use crate::utils::adt::numutils::{pg_itoa, pg_ltoa, pg_strtoint16_safe, pg_strtoint32_safe};
@@ -93,6 +100,33 @@ pub unsafe fn int2send(fcinfo: FunctionCallInfo) -> Datum {
     pq_begintypsend(&mut buf);
     pq_sendint16(&mut buf, arg1 as u16);
     return PointerGetDatum(pq_endtypsend(&mut buf) as *const c_void); // PG_RETURN_BYTEA_P
+}
+
+/*
+ * Confirm that a4 has the properties we expect of an int2vector.
+ *
+ * We need this because there are pathways by which a general int2[] array can
+ * be cast to int2vector, allowing the type's restrictions to be violated.
+ * All code that receives an int2vector as a SQL parameter should check this.
+ *
+ * # Safety
+ * `int2_array` must point to a valid int2vector header.
+ */
+#[allow(dead_code)]
+unsafe fn check_valid_int2vector(int2_array: *const int2vector) {
+    /*
+     * We insist on ndim == 1 and dataoffset == 0 (that is, no nulls) because
+     * otherwise the array's layout will not be what calling code expects.  We
+     * needn't be picky about the index lower bound though.  Checking elemtype
+     * is just paranoia.
+     */
+    if (*int2_array).ndim != 1
+        || (*int2_array).dataoffset != 0
+        || (*int2_array).elemtype != INT2OID
+    {
+        ereport!(ERROR, errmsg!("array is not a valid int2vector"));
+        /* C also: errcode(ERRCODE_DATATYPE_MISMATCH) */
+    }
 }
 
 /*
@@ -902,30 +936,222 @@ pub unsafe fn int2shr(fcinfo: FunctionCallInfo) -> Datum {
     PG_RETURN_INT16!((arg1 as int32).wrapping_shr(arg2 as u32) as int16);
 }
 
+#[repr(C)]
+struct generate_series_fctx {
+    current: int32,
+    finish: int32,
+    step: int32,
+}
+
+/*
+ * Set-returning-function support (funcapi.h).  funcapi.c is not yet ported, so
+ * FuncCallContext and the SRF_* control-flow macros are declared locally with
+ * TODO(pg-port) stubs, mirroring the int8.rs precedent.
+ */
+#[repr(C)]
+struct FuncCallContext {
+    call_cntr: u64,
+    max_calls: u64,
+    user_fctx: *mut c_void,
+    attinmeta: *mut c_void,
+    multi_call_memory_ctx: MemoryContext,
+    tuple_desc: *mut c_void,
+}
+
+macro_rules! SRF_IS_FIRSTCALL {
+    ($fcinfo:expr) => {
+        srf_is_firstcall($fcinfo)
+    };
+}
+macro_rules! SRF_FIRSTCALL_INIT {
+    ($fcinfo:expr) => {
+        srf_firstcall_init($fcinfo)
+    };
+}
+macro_rules! SRF_PERCALL_SETUP {
+    ($fcinfo:expr) => {
+        srf_percall_setup($fcinfo)
+    };
+}
+macro_rules! SRF_RETURN_NEXT {
+    ($fcinfo:expr, $result:expr) => {
+        return srf_return_next($fcinfo, $result)
+    };
+}
+macro_rules! SRF_RETURN_DONE {
+    ($fcinfo:expr) => {
+        return srf_return_done($fcinfo)
+    };
+}
+
+unsafe fn srf_is_firstcall(_fcinfo: FunctionCallInfo) -> bool {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_firstcall_init(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_percall_setup(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_return_next(_fcinfo: FunctionCallInfo, _result: Datum) -> Datum {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+unsafe fn srf_return_done(_fcinfo: FunctionCallInfo) -> Datum {
+    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+}
+
+/* is_funcclause - nodes/nodeFuncs.h.  Local copy (not exported), per sibling precedent. */
+unsafe fn is_funcclause(clause: *const Node) -> bool {
+    !clause.is_null() && IsA!(clause, T_FuncExpr)
+}
+
 /*
  * non-persistent numeric series generator
  */
 pub unsafe fn generate_series_int4(fcinfo: FunctionCallInfo) -> Datum {
-    // C: return generate_series_step_int4(fcinfo);
     generate_series_step_int4(fcinfo)
 }
 
 pub unsafe fn generate_series_step_int4(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): set-returning-function infrastructure (funcapi.h:
-    // SRF_IS_FIRSTCALL/SRF_FIRSTCALL_INIT/SRF_PERCALL_SETUP/SRF_RETURN_NEXT/
-    // SRF_RETURN_DONE, FuncCallContext) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("generate_series_step_int4: SRF infrastructure (funcapi.h) not yet translated")
+    let mut funcctx: *mut FuncCallContext;
+    let fctx: *mut generate_series_fctx;
+    let result: int32;
+    let oldcontext: MemoryContext;
+
+    /* stuff done only on the first call of the function */
+    if SRF_IS_FIRSTCALL!(fcinfo) {
+        let start: int32 = PG_GETARG_INT32!(fcinfo, 0);
+        let finish: int32 = PG_GETARG_INT32!(fcinfo, 1);
+        let mut step: int32 = 1;
+
+        /* see if we were given an explicit step size */
+        if PG_NARGS!(fcinfo) == 3 {
+            step = PG_GETARG_INT32!(fcinfo, 2);
+        }
+        if step == 0 {
+            ereport!(ERROR, errmsg!("step size cannot equal zero"));
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+        }
+
+        /* create a function context for cross-call persistence */
+        funcctx = SRF_FIRSTCALL_INIT!(fcinfo);
+
+        /*
+         * switch to memory context appropriate for multiple function calls
+         */
+        oldcontext = MemoryContextSwitchTo((*funcctx).multi_call_memory_ctx);
+
+        /* allocate memory for user context */
+        let fctx_new: *mut generate_series_fctx =
+            palloc(core::mem::size_of::<generate_series_fctx>()) as *mut generate_series_fctx;
+
+        /*
+         * Use fctx to keep state from call to call. Seed current with the
+         * original start value
+         */
+        (*fctx_new).current = start;
+        (*fctx_new).finish = finish;
+        (*fctx_new).step = step;
+
+        (*funcctx).user_fctx = fctx_new as *mut c_void;
+        MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP!(fcinfo);
+
+    /*
+     * get the saved state and use current as the result for this iteration
+     */
+    fctx = (*funcctx).user_fctx as *mut generate_series_fctx;
+    result = (*fctx).current;
+
+    if ((*fctx).step > 0 && (*fctx).current <= (*fctx).finish)
+        || ((*fctx).step < 0 && (*fctx).current >= (*fctx).finish)
+    {
+        /*
+         * Increment current in preparation for next iteration. If next-value
+         * computation overflows, this is the final result.
+         */
+        if pg_add_s32_overflow((*fctx).current, (*fctx).step, &mut (*fctx).current) {
+            (*fctx).step = 0;
+        }
+
+        /* do when there is more left to send */
+        SRF_RETURN_NEXT!(fcinfo, Int32GetDatum(result));
+    } else {
+        /* do when there is no more left */
+        SRF_RETURN_DONE!(fcinfo);
+    }
 }
 
 /*
  * Planner support function for generate_series(int4, int4 [, int4])
  */
 pub unsafe fn generate_series_int4_support(fcinfo: FunctionCallInfo) -> Datum {
-    // TODO(pg-port): planner support nodes (nodes/supportnodes.h: SupportRequestRows)
-    // + optimizer/optimizer.h (estimate_expression_value, is_funcclause) not yet translated.
-    let _ = fcinfo;
-    unimplemented!("generate_series_int4_support: planner support nodes not yet translated")
+    let rawreq: *mut Node = PG_GETARG_POINTER!(fcinfo, 0) as *mut Node;
+    let mut ret: *mut Node = null_mut();
+
+    if IsA!(rawreq, T_SupportRequestRows) {
+        /* Try to estimate the number of rows returned */
+        let req: *mut SupportRequestRows = rawreq as *mut SupportRequestRows;
+
+        if is_funcclause((*req).node) {
+            /* be paranoid */
+            let args: *mut List = (*((*req).node as *mut FuncExpr)).args;
+            let arg1: *mut Node;
+            let arg2: *mut Node;
+            let arg3: *mut Node;
+
+            /* We can use estimated argument values here */
+            arg1 = estimate_expression_value((*req).root, linitial(args) as *mut Node);
+            arg2 = estimate_expression_value((*req).root, lsecond(args) as *mut Node);
+            if list_length(args) >= 3 {
+                arg3 = estimate_expression_value((*req).root, lthird(args) as *mut Node);
+            } else {
+                arg3 = null_mut();
+            }
+
+            /*
+             * If any argument is constant NULL, we can safely assume that
+             * zero rows are returned.  Otherwise, if they're all non-NULL
+             * constants, we can calculate the number of rows that will be
+             * returned.  Use double arithmetic to avoid overflow hazards.
+             */
+            if (IsA!(arg1, T_Const) && (*(arg1 as *mut Const)).constisnull)
+                || (IsA!(arg2, T_Const) && (*(arg2 as *mut Const)).constisnull)
+                || (!arg3.is_null()
+                    && IsA!(arg3, T_Const)
+                    && (*(arg3 as *mut Const)).constisnull)
+            {
+                (*req).rows = 0.0;
+                ret = req as *mut Node;
+            } else if IsA!(arg1, T_Const)
+                && IsA!(arg2, T_Const)
+                && (arg3.is_null() || IsA!(arg3, T_Const))
+            {
+                let start: f64;
+                let finish: f64;
+                let step: f64;
+
+                start = DatumGetInt32((*(arg1 as *mut Const)).constvalue) as f64;
+                finish = DatumGetInt32((*(arg2 as *mut Const)).constvalue) as f64;
+                step = if !arg3.is_null() {
+                    DatumGetInt32((*(arg3 as *mut Const)).constvalue) as f64
+                } else {
+                    1.0
+                };
+
+                /* This equation works for either sign of step */
+                if step != 0.0 {
+                    (*req).rows = ((finish - start + step) / step).floor();
+                    ret = req as *mut Node;
+                }
+            }
+        }
+    }
+
+    PG_RETURN_POINTER!(ret)
 }
 
 #[cfg(test)]

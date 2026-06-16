@@ -95,6 +95,17 @@ const USE_POSTMASTER_DEATH_SIGNAL: bool = false;
  */
 pub static mut postmaster_possibly_dead: sig_atomic_t = 0; // false
 
+/*
+ * Signal handler to be notified if postmaster dies.
+ *
+ * #ifdef USE_POSTMASTER_DEATH_SIGNAL (compiled out on this platform; kept for
+ * completeness so the death-signal path is a faithful 1:1 translation).
+ */
+#[allow(dead_code)]
+unsafe extern "C" fn postmaster_death_handler(_postgres_signal_arg: c_int) {
+    postmaster_possibly_dead = true as sig_atomic_t;
+}
+
 // ---------------------------------------------------------------------------
 // Local stubs for dependencies not yet ported. // TODO: deps not ported
 // ---------------------------------------------------------------------------

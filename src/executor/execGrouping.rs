@@ -36,6 +36,7 @@ use crate::lib::simplehash::{SimpleHash, SimpleHashOps, SH_STATUS_EMPTY, SH_STAT
 
 use crate::access::htup_details::MinimalTuple;
 use crate::executor::tuptable::{TupleTableSlot, TupleTableSlotOps};
+use crate::executor::tuptable::ExecCopySlotMinimalTupleExtra;
 use crate::nodes::primnodes::AttrNumber;
 
 // ----------------------------------------------------------------------------
@@ -522,15 +523,17 @@ pub unsafe fn ResetTupleHashTable(hashtable: TupleHashTable) {
 
 /// Find or create a hashtable entry for the tuple group containing `slot`.
 ///
-/// TODO(pg-port): the body runs TupleHashTableHash_internal /
-/// LookupTupleHashEntry_internal, which evaluate ExprState via ExecEvalExpr;
-/// blocked on execExpr.c.
+/// If `isnew` is NULL, no new entries are created; NULL is returned when no
+/// match is found.  If `hash` is not NULL, it receives the computed hash.
 pub unsafe fn LookupTupleHashEntry(
     hashtable: TupleHashTable,
     slot: *mut TupleTableSlot,
-    _isnew: *mut bool,
-    _hash: *mut uint32,
+    isnew: *mut bool,
+    hash: *mut uint32,
 ) -> TupleHashEntry {
+    let entry: TupleHashEntry;
+
+    /* Need to run the hash functions in short-lived context */
     let oldContext = MemoryContextSwitchTo((*hashtable).tempcxt);
 
     /* set up data needed by hash and match functions */
@@ -538,10 +541,18 @@ pub unsafe fn LookupTupleHashEntry(
     (*hashtable).in_hash_expr = (*hashtable).tab_hash_expr;
     (*hashtable).cur_eq_func = (*hashtable).tab_eq_func;
 
-    let _ = oldContext;
-    unimplemented!(
-        "LookupTupleHashEntry: TupleHashTableHash_internal/_internal need execExpr.c"
-    )
+    let local_hash = TupleHashTableHash_internal(hashtable, null_mut());
+    entry = LookupTupleHashEntry_internal(hashtable, slot, isnew, local_hash);
+
+    if !hash.is_null() {
+        *hash = local_hash;
+    }
+
+    Assert!(entry.is_null() || (*entry).hash == local_hash);
+
+    MemoryContextSwitchTo(oldContext);
+
+    entry
 }
 
 /// Compute the hash value for a tuple.
@@ -561,22 +572,28 @@ pub unsafe fn TupleHashTableHash(
 }
 
 /// A variant of LookupTupleHashEntry for callers that already computed `hash`.
-///
-/// TODO(pg-port): blocked on execExpr.c (LookupTupleHashEntry_internal).
 pub unsafe fn LookupTupleHashEntryHash(
     hashtable: TupleHashTable,
     slot: *mut TupleTableSlot,
-    _isnew: *mut bool,
-    _hash: uint32,
+    isnew: *mut bool,
+    hash: uint32,
 ) -> TupleHashEntry {
+    let entry: TupleHashEntry;
+
+    /* Need to run the hash functions in short-lived context */
     let oldContext = MemoryContextSwitchTo((*hashtable).tempcxt);
 
+    /* set up data needed by hash and match functions */
     (*hashtable).inputslot = slot;
     (*hashtable).in_hash_expr = (*hashtable).tab_hash_expr;
     (*hashtable).cur_eq_func = (*hashtable).tab_eq_func;
 
-    let _ = oldContext;
-    unimplemented!("LookupTupleHashEntryHash: LookupTupleHashEntry_internal needs execExpr.c")
+    entry = LookupTupleHashEntry_internal(hashtable, slot, isnew, hash);
+    Assert!(entry.is_null() || (*entry).hash == hash);
+
+    MemoryContextSwitchTo(oldContext);
+
+    entry
 }
 
 /// Search for a hashtable entry matching `slot`, creating none.  Supports
@@ -600,6 +617,66 @@ pub unsafe fn FindTupleHashEntry(
 
     let _ = oldContext;
     unimplemented!("FindTupleHashEntry: tuplehash_lookup drives ExprState ops (execExpr.c)")
+}
+
+/// Does the work of LookupTupleHashEntry and LookupTupleHashEntryHash.  Useful
+/// so that we can avoid switching the memory context multiple times for
+/// LookupTupleHashEntry.
+///
+/// NB: This function may or may not change the memory context.  Caller is
+/// expected to change it back.
+#[inline]
+unsafe fn LookupTupleHashEntry_internal(
+    hashtable: TupleHashTable,
+    slot: *mut TupleTableSlot,
+    isnew: *mut bool,
+    hash: uint32,
+) -> TupleHashEntry {
+    let entry: *mut TupleHashEntryData;
+    let key: MinimalTuple = null_mut(); /* flag to reference inputslot */
+
+    let tb = &mut *(*hashtable).hashtab;
+
+    if !isnew.is_null() {
+        let (idx, found) = tb.insert_hash(key, hash);
+        entry = tb.entry_mut(idx) as *mut TupleHashEntryData;
+
+        if found {
+            /* found pre-existing entry */
+            *isnew = false;
+        } else {
+            /* created new entry */
+            *isnew = true;
+
+            /*
+             * SH_STORE_HASH: the inserted entry caches the hash value.  The
+             * generic insert_hash only sets the key/status, so stamp it here.
+             */
+            (*entry).hash = hash;
+
+            MemoryContextSwitchTo((*hashtable).tablecxt);
+
+            /*
+             * Copy the first tuple into the table context, and request
+             * additionalsize extra bytes before the allocation.
+             *
+             * The caller can get a pointer to the additional data with
+             * TupleHashEntryGetAdditional(), and store arbitrary data there.
+             * Placing both the tuple and additional data in the same
+             * allocation avoids the need to store an extra pointer in
+             * TupleHashEntryData or allocate an additional chunk.
+             */
+            (*entry).firstTuple =
+                ExecCopySlotMinimalTupleExtra(slot, (*hashtable).additionalsize);
+        }
+    } else {
+        entry = match tb.lookup_hash(key, hash) {
+            Some(idx) => tb.entry_mut(idx) as *mut TupleHashEntryData,
+            None => null_mut(),
+        };
+    }
+
+    entry
 }
 
 // ----------------------------------------------------------------------------

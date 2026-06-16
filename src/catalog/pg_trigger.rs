@@ -113,3 +113,25 @@ mod tests {
         );
     }
 }
+
+/* pg_trigger attribute numbers (1-based, matching the CATALOG(pg_trigger) column order). */
+pub const Anum_pg_trigger_oid: i16 = 1;
+pub const Anum_pg_trigger_tgrelid: i16 = 2;
+pub const Anum_pg_trigger_tgparentid: i16 = 3;
+pub const Anum_pg_trigger_tgname: i16 = 4;
+pub const Anum_pg_trigger_tgfoid: i16 = 5;
+pub const Anum_pg_trigger_tgtype: i16 = 6;
+pub const Anum_pg_trigger_tgenabled: i16 = 7;
+pub const Anum_pg_trigger_tgisinternal: i16 = 8;
+pub const Anum_pg_trigger_tgconstrrelid: i16 = 9;
+pub const Anum_pg_trigger_tgconstrindid: i16 = 10;
+pub const Anum_pg_trigger_tgconstraint: i16 = 11;
+pub const Anum_pg_trigger_tgdeferrable: i16 = 12;
+pub const Anum_pg_trigger_tginitdeferred: i16 = 13;
+pub const Anum_pg_trigger_tgnargs: i16 = 14;
+pub const Anum_pg_trigger_tgattr: i16 = 15;
+pub const Anum_pg_trigger_tgargs: i16 = 16;
+pub const Anum_pg_trigger_tgqual: i16 = 17;
+pub const Anum_pg_trigger_tgoldtable: i16 = 18;
+pub const Anum_pg_trigger_tgnewtable: i16 = 19;
+pub const Natts_pg_trigger: usize = 19;

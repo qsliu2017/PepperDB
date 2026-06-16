@@ -286,3 +286,547 @@ static win8662iso: [c_uchar; 128] = [
     0xA1, 0xF1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
+
+pub unsafe fn koi8r_to_mic(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_KOI8R as c_int,
+        pg_enc::PG_MULE_INTERNAL as c_int,
+    );
+
+    converted = latin2mic(src, dest, len, LC_KOI8_R as c_int, pg_enc::PG_KOI8R as c_int, no_error);
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn mic_to_koi8r(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_MULE_INTERNAL as c_int,
+        pg_enc::PG_KOI8R as c_int,
+    );
+
+    converted = mic2latin(src, dest, len, LC_KOI8_R as c_int, pg_enc::PG_KOI8R as c_int, no_error);
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn iso_to_mic(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        pg_enc::PG_MULE_INTERNAL as c_int,
+    );
+
+    converted = latin2mic_with_table(
+        src,
+        dest,
+        len,
+        LC_KOI8_R as c_int,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        iso2koi.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn mic_to_iso(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_MULE_INTERNAL as c_int,
+        pg_enc::PG_ISO_8859_5 as c_int,
+    );
+
+    converted = mic2latin_with_table(
+        src,
+        dest,
+        len,
+        LC_KOI8_R as c_int,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        koi2iso.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn win1251_to_mic(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_WIN1251 as c_int,
+        pg_enc::PG_MULE_INTERNAL as c_int,
+    );
+
+    converted = latin2mic_with_table(
+        src,
+        dest,
+        len,
+        LC_KOI8_R as c_int,
+        pg_enc::PG_WIN1251 as c_int,
+        win12512koi.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn mic_to_win1251(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_MULE_INTERNAL as c_int,
+        pg_enc::PG_WIN1251 as c_int,
+    );
+
+    converted = mic2latin_with_table(
+        src,
+        dest,
+        len,
+        LC_KOI8_R as c_int,
+        pg_enc::PG_WIN1251 as c_int,
+        koi2win1251.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn win866_to_mic(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_WIN866 as c_int,
+        pg_enc::PG_MULE_INTERNAL as c_int,
+    );
+
+    converted = latin2mic_with_table(
+        src,
+        dest,
+        len,
+        LC_KOI8_R as c_int,
+        pg_enc::PG_WIN866 as c_int,
+        win8662koi.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn mic_to_win866(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_MULE_INTERNAL as c_int,
+        pg_enc::PG_WIN866 as c_int,
+    );
+
+    converted = mic2latin_with_table(
+        src,
+        dest,
+        len,
+        LC_KOI8_R as c_int,
+        pg_enc::PG_WIN866 as c_int,
+        koi2win866.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn koi8r_to_win1251(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_KOI8R as c_int,
+        pg_enc::PG_WIN1251 as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_KOI8R as c_int,
+        pg_enc::PG_WIN1251 as c_int,
+        koi2win1251.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn win1251_to_koi8r(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_WIN1251 as c_int,
+        pg_enc::PG_KOI8R as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_WIN1251 as c_int,
+        pg_enc::PG_KOI8R as c_int,
+        win12512koi.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn koi8r_to_win866(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_KOI8R as c_int,
+        pg_enc::PG_WIN866 as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_KOI8R as c_int,
+        pg_enc::PG_WIN866 as c_int,
+        koi2win866.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn win866_to_koi8r(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_WIN866 as c_int,
+        pg_enc::PG_KOI8R as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_WIN866 as c_int,
+        pg_enc::PG_KOI8R as c_int,
+        win8662koi.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn win866_to_win1251(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_WIN866 as c_int,
+        pg_enc::PG_WIN1251 as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_WIN866 as c_int,
+        pg_enc::PG_WIN1251 as c_int,
+        win8662win1251.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn win1251_to_win866(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_WIN1251 as c_int,
+        pg_enc::PG_WIN866 as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_WIN1251 as c_int,
+        pg_enc::PG_WIN866 as c_int,
+        win12512win866.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn iso_to_koi8r(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        pg_enc::PG_KOI8R as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        pg_enc::PG_KOI8R as c_int,
+        iso2koi.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn koi8r_to_iso(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_KOI8R as c_int,
+        pg_enc::PG_ISO_8859_5 as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_KOI8R as c_int,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        koi2iso.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn iso_to_win1251(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        pg_enc::PG_WIN1251 as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        pg_enc::PG_WIN1251 as c_int,
+        iso2win1251.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn win1251_to_iso(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_WIN1251 as c_int,
+        pg_enc::PG_ISO_8859_5 as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_WIN1251 as c_int,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        win12512iso.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn iso_to_win866(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        pg_enc::PG_WIN866 as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        pg_enc::PG_WIN866 as c_int,
+        iso2win866.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}
+
+pub unsafe fn win866_to_iso(fcinfo: FunctionCallInfo) -> Datum {
+    let src = PG_GETARG_CSTRING!(fcinfo, 2) as *const c_uchar;
+    let dest = PG_GETARG_CSTRING!(fcinfo, 3) as *mut c_uchar;
+    let len: c_int = PG_GETARG_INT32!(fcinfo, 4);
+    let no_error: bool = PG_GETARG_BOOL!(fcinfo, 5);
+    let converted: c_int;
+
+    check_encoding_conversion_args(
+        PG_GETARG_INT32!(fcinfo, 0),
+        PG_GETARG_INT32!(fcinfo, 1),
+        len,
+        pg_enc::PG_WIN866 as c_int,
+        pg_enc::PG_ISO_8859_5 as c_int,
+    );
+
+    converted = local2local(
+        src,
+        dest,
+        len,
+        pg_enc::PG_WIN866 as c_int,
+        pg_enc::PG_ISO_8859_5 as c_int,
+        win8662iso.as_ptr(),
+        no_error,
+    );
+
+    PG_RETURN_INT32!(converted);
+}

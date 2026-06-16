@@ -883,6 +883,19 @@ unsafe fn ItemPointerSetInvalid(_ip: *mut crate::storage::itemptr::ItemPointerDa
 unsafe fn pg_rotate_left32(v: u32, n: u32) -> u32 {
     v.rotate_left(n)
 }
+/* TODO(pg-port): lib/simplehash.h SH_TYPE (saophash_hash) header; only
+ * private_data is accessed by the saop callbacks below, but the leading fields
+ * are laid out to match SH_TYPE so the field offset is correct. */
+#[repr(C)]
+pub struct saophash_hash {
+    pub size: u64,
+    pub members: u32,
+    pub sizemask: u32,
+    pub grow_threshold: u32,
+    pub data: *mut c_void,
+    pub ctx: MemoryContext,
+    pub private_data: *mut c_void,
+}
 unsafe fn saophash_create(
     _mcxt: MemoryContext,
     _nelements: c_int,
@@ -2653,6 +2666,35 @@ unsafe fn get_cached_rowtype(
  * Do one-time initialization of interpretation machinery.
  * (In the switch-threaded case there's nothing to do.)
  */
+/* TODO(pg-port): EEO_USE_COMPUTED_GOTO ExprEvalOpLookup (only used by the
+ * computed-goto dispatch path, which this switch-threaded port does not use). */
+#[repr(C)]
+struct ExprEvalOpLookup {
+    opcode: *const c_void,
+    op: ExprEvalOp,
+}
+
+/*
+ * Comparator used when building address->opcode lookup table for
+ * ExecEvalStepOp() in the threaded dispatch case.
+ *
+ * C: gated by #if defined(EEO_USE_COMPUTED_GOTO); this port uses switch
+ * threading, so this is retained for fidelity but not referenced.
+ */
+#[allow(dead_code)]
+unsafe extern "C" fn dispatch_compare_ptr(a: *const c_void, b: *const c_void) -> c_int {
+    let la = a as *const ExprEvalOpLookup;
+    let lb = b as *const ExprEvalOpLookup;
+
+    if (*la).opcode < (*lb).opcode {
+        -1
+    } else if (*la).opcode > (*lb).opcode {
+        1
+    } else {
+        0
+    }
+}
+
 unsafe fn ExecInitInterpreter() {
     /* nothing needed for switch-threaded dispatch */
 }
@@ -4090,18 +4132,41 @@ pub unsafe fn ExecEvalScalarArrayOp(state: *mut ExprState, op: *mut ExprEvalStep
 
 /*
  * Hash function for scalar array hash op elements.
+ *
+ * We use the element type's default hash opclass, and the column collation
+ * if the type is collation-sensitive.
  */
-unsafe fn saop_element_hash(tb: *mut c_void, key: Datum) -> u32 {
-    let elements_tab = tb as *mut ScalarArrayOpExprHashTable;
-    /* TODO(pg-port): saophash private_data access */
-    unimplemented!("TODO(pg-port): saop_element_hash - requires saophash_hash layout")
+unsafe fn saop_element_hash(tb: *mut saophash_hash, key: Datum) -> u32 {
+    let elements_tab = (*tb).private_data as *mut ScalarArrayOpExprHashTable;
+    let fcinfo: FunctionCallInfo = &mut (*elements_tab).hash_fcinfo_data;
+    let hash: Datum;
+
+    (*(*fcinfo).args.as_mut_ptr().add(0)).value = key;
+    (*(*fcinfo).args.as_mut_ptr().add(0)).isnull = false;
+
+    hash = ((*elements_tab).hash_finfo.fn_addr.unwrap())(fcinfo);
+
+    DatumGetUInt32(hash)
 }
 
 /*
- * Matching function for scalar array hash op elements.
+ * Matching function for scalar array hash op elements, to be used in hashtable
+ * lookups.
  */
-unsafe fn saop_hash_element_match(tb: *mut c_void, key1: Datum, key2: Datum) -> bool {
-    unimplemented!("TODO(pg-port): saop_hash_element_match - requires saophash_hash layout")
+unsafe fn saop_hash_element_match(tb: *mut saophash_hash, key1: Datum, key2: Datum) -> bool {
+    let result: Datum;
+
+    let elements_tab = (*tb).private_data as *mut ScalarArrayOpExprHashTable;
+    let fcinfo: FunctionCallInfo = (*(*elements_tab).op).d.hashedscalararrayop.fcinfo_data;
+
+    (*(*fcinfo).args.as_mut_ptr().add(0)).value = key1;
+    (*(*fcinfo).args.as_mut_ptr().add(0)).isnull = false;
+    (*(*fcinfo).args.as_mut_ptr().add(1)).value = key2;
+    (*(*fcinfo).args.as_mut_ptr().add(1)).isnull = false;
+
+    result = ((*(*(*elements_tab).op).d.hashedscalararrayop.finfo).fn_addr.unwrap())(fcinfo);
+
+    DatumGetBool(result)
 }
 
 /*

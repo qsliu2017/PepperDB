@@ -13,7 +13,9 @@
 
 use crate::c::{float4, int16, int32, MultiXactId, NameData, TransactionId};
 use crate::postgres_ext::Oid;
-use core::ffi::c_char;
+use crate::prelude::*;
+use crate::utils::error::elog_impl::errdetail_c;
+use core::ffi::{c_char, c_int};
 
 /*
  * FormData_pg_class - the fixed part of a pg_class row.
@@ -131,6 +133,43 @@ pub const REPLICA_IDENTITY_NOTHING: c_char = b'n' as c_char;
 pub const REPLICA_IDENTITY_FULL: c_char = b'f' as c_char;
 /* an explicitly chosen candidate key's columns are used as replica identity */
 pub const REPLICA_IDENTITY_INDEX: c_char = b'i' as c_char;
+
+/*
+ * Issue an errdetail() informing that the relkind is not supported for this
+ * operation.
+ */
+pub unsafe fn errdetail_relkind_not_supported(relkind: c_char) -> c_int {
+    match relkind {
+        RELKIND_RELATION => errdetail_c(c"This operation is not supported for tables.".as_ptr()),
+        RELKIND_INDEX => errdetail_c(c"This operation is not supported for indexes.".as_ptr()),
+        RELKIND_SEQUENCE => {
+            errdetail_c(c"This operation is not supported for sequences.".as_ptr())
+        }
+        RELKIND_TOASTVALUE => {
+            errdetail_c(c"This operation is not supported for TOAST tables.".as_ptr())
+        }
+        RELKIND_VIEW => errdetail_c(c"This operation is not supported for views.".as_ptr()),
+        RELKIND_MATVIEW => {
+            errdetail_c(c"This operation is not supported for materialized views.".as_ptr())
+        }
+        RELKIND_COMPOSITE_TYPE => {
+            errdetail_c(c"This operation is not supported for composite types.".as_ptr())
+        }
+        RELKIND_FOREIGN_TABLE => {
+            errdetail_c(c"This operation is not supported for foreign tables.".as_ptr())
+        }
+        RELKIND_PARTITIONED_TABLE => {
+            errdetail_c(c"This operation is not supported for partitioned tables.".as_ptr())
+        }
+        RELKIND_PARTITIONED_INDEX => {
+            errdetail_c(c"This operation is not supported for partitioned indexes.".as_ptr())
+        }
+        _ => {
+            elog!(ERROR, "unrecognized relkind: '{}'", relkind as u8 as char);
+            0
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

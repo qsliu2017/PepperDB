@@ -63,14 +63,16 @@ use crate::nodes::bitmapset::{
     bms_add_member, bms_add_members, bms_copy, bms_del_member, bms_is_member, bms_next_member,
     bms_num_members, bms_overlap,
 };
-use crate::nodes::makefuncs::{makeNullConst, makeVar};
+use crate::access::attnum::AttrNumber;
+use crate::nodes::bitmapset::bms_make_singleton;
+use crate::nodes::makefuncs::{makeNullConst, makeTargetEntry, makeVar};
 use crate::nodes::nodeFuncs::{exprType, exprTypmod, expression_tree_mutator};
 use crate::nodes::nodes::{Node, NodeTag};
 use crate::nodes::parsenodes::{Query, RangeTblEntry};
 use crate::nodes::pathnodes::{
     AppendRelInfo, PlaceHolderVar, PlannerInfo, RelOptInfo, Relids, RowIdentityVarInfo,
 };
-use crate::nodes::pg_list::{lappend_int, lfirst_int, list_length, list_nth, List};
+use crate::nodes::pg_list::{lappend, lappend_int, lfirst, lfirst_int, list_length, list_nth, List};
 use crate::nodes::primnodes::{
     ConvertRowtypeExpr, CurrentOfExpr, RowExpr, Var, ROWID_VAR, VAR_RETURNING_DEFAULT,
 };
@@ -117,8 +119,107 @@ struct adjust_appendrel_attrs_context {
 // STUBs: relcache / syscache / FDW dependent helpers.
 // ----------------------------------------------------------------------------
 
-/// Opaque Relation handle (utils/rel.h); relcache not yet ported.
-type Relation = *mut c_void;
+/// Relation handle (utils/rel.h).
+type Relation = crate::utils::rel::Relation;
+type TupleDesc = crate::access::common::tupdesc::TupleDesc;
+type Form_pg_attribute = crate::catalog::pg_attribute::Form_pg_attribute;
+
+use crate::catalog::pg_type_d::TIDOID;
+use crate::nodes::makefuncs::RECORDOID;
+use crate::access::sysattr::SelfItemPointerAttributeNumber;
+use crate::foreign::fdwapi::{FdwRoutine, GetFdwRoutineForRelation};
+use crate::utils::reltrigger::TriggerDesc;
+
+const InvalidAttrNumber: AttrNumber = 0;
+
+/// `RELKIND_*` (catalog/pg_class.h): relation-kind discriminators.
+const RELKIND_RELATION: c_char = b'r' as c_char;
+const RELKIND_MATVIEW: c_char = b'm' as c_char;
+const RELKIND_PARTITIONED_TABLE: c_char = b'p' as c_char;
+const RELKIND_FOREIGN_TABLE: c_char = b'f' as c_char;
+
+/// `RelationGetRelid(relation)` (utils/rel.h): `relation->rd_id`.
+unsafe fn RelationGetRelid(relation: Relation) -> Oid {
+    (*relation).rd_id
+}
+
+/// `RelationGetDescr(relation)` (utils/rel.h): `relation->rd_att`.
+unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc {
+    (*relation).rd_att
+}
+
+/// `RelationGetRelationName(relation)` (utils/rel.h):
+/// `NameStr(relation->rd_rel->relname)`.
+unsafe fn RelationGetRelationName(relation: Relation) -> *const c_char {
+    NameStr(&raw const (*(*relation).rd_rel).relname)
+}
+
+/// `TupleDescAttr(tupdesc, i)` (access/tupdesc.h): the i'th attribute.
+unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: c_int) -> Form_pg_attribute {
+    crate::access::common::tupdesc::TupleDescAttr(tupdesc, i)
+}
+
+/// `NameStr(name)` (c.h): pointer to the embedded C string of a NameData.
+unsafe fn NameStr(name: *const crate::c::NameData) -> *const c_char {
+    (*name).data.as_ptr()
+}
+
+/// `SearchSysCacheAttName(relid, attname)` (utils/syscache.h): not yet ported.
+unsafe fn SearchSysCacheAttName(_relid: Oid, _attname: *const c_char) -> *mut c_void {
+    // TODO(pg-port): syscache.c SearchSysCacheAttName not yet ported.
+    unimplemented!("SearchSysCacheAttName: syscache not yet ported")
+}
+
+/// `HeapTupleIsValid(tuple)` (access/htup.h): non-NULL test.
+unsafe fn HeapTupleIsValid(tuple: *mut c_void) -> bool {
+    !tuple.is_null()
+}
+
+/// `GETSTRUCT(tuple)` (access/htup_details.h): the Form pointer from a HeapTuple;
+/// not yet ported.
+unsafe fn GETSTRUCT(_tuple: *mut c_void) -> Form_pg_attribute {
+    // TODO(pg-port): access/htup_details.h GETSTRUCT not yet ported.
+    unimplemented!("GETSTRUCT: htup_details not yet ported")
+}
+
+/// `ReleaseSysCache(tuple)` (utils/syscache.h): not yet ported.
+unsafe fn ReleaseSysCache(_tuple: *mut c_void) {
+    // TODO(pg-port): syscache.c ReleaseSysCache not yet ported.
+}
+
+/// `equal(a, b)` (nodes/equalfuncs.c): structural node equality.
+unsafe fn equal(a: *const c_void, b: *const c_void) -> bool {
+    crate::nodes::equalfuncs::equal(a, b)
+}
+
+/// `get_typavgwidth(typid, typmod)` (utils/lsyscache.h).
+unsafe fn get_typavgwidth(typid: Oid, typmod: int32) -> int32 {
+    crate::utils::cache::lsyscache::get_typavgwidth(typid, typmod)
+}
+
+/// `table_open(relationId, lockmode)` (access/table.h): not yet ported.  STUB.
+unsafe fn table_open(_relationId: Oid, _lockmode: c_int) -> Relation {
+    // TODO(pg-port): access/table.c table_open not yet ported.
+    unimplemented!("table_open: access/table.c not yet ported")
+}
+
+/// `table_close(relation, lockmode)` (access/table.h): not yet ported.  STUB.
+unsafe fn table_close(_relation: Relation, _lockmode: c_int) {
+    // TODO(pg-port): access/table.c table_close not yet ported.
+}
+
+/// `NoLock` (storage/lock.h): the no-lock lock mode.
+const NoLock: c_int = 0;
+
+extern "C" {
+    /// libc `strcmp` (string.h).
+    fn strcmp(a: *const c_char, b: *const c_char) -> c_int;
+}
+
+/// `build_base_rel_tlists(root, final_tlist)` (optimizer/planmain.h).
+unsafe fn build_base_rel_tlists(root: *mut PlannerInfo, final_tlist: *mut List) {
+    crate::optimizer::plan::initsplan::build_base_rel_tlists(root, final_tlist)
+}
 
 /// `get_rel_name(relid)` (utils/lsyscache.h): not yet ported.  Used only in
 /// error-message paths.  STUB.
@@ -149,14 +250,21 @@ unsafe fn find_base_rel_ignore_join(_root: *mut PlannerInfo, _relid: c_int) -> *
  *	  Build an AppendRelInfo for the parent-child pair
  */
 pub unsafe fn make_append_rel_info(
-    _parentrel: Relation,
-    _childrel: Relation,
-    _parentRTindex: Index,
-    _childRTindex: Index,
+    parentrel: Relation,
+    childrel: Relation,
+    parentRTindex: Index,
+    childRTindex: Index,
 ) -> *mut AppendRelInfo {
-    // TODO(pg-port): needs Relation->rd_rel->reltype, RelationGetRelid, and
-    // make_inh_translation_list (relcache + syscache); not yet ported.
-    unimplemented!("make_append_rel_info: needs relcache (rd_rel->reltype, RelationGetRelid)")
+    let appinfo: *mut AppendRelInfo = makeNode!(AppendRelInfo, T_AppendRelInfo);
+
+    (*appinfo).parent_relid = parentRTindex;
+    (*appinfo).child_relid = childRTindex;
+    (*appinfo).parent_reltype = (*(*parentrel).rd_rel).reltype;
+    (*appinfo).child_reltype = (*(*childrel).rd_rel).reltype;
+    make_inh_translation_list(parentrel, childrel, childRTindex, appinfo);
+    (*appinfo).parent_reloid = RelationGetRelid(parentrel);
+
+    appinfo
 }
 
 /*
@@ -165,14 +273,144 @@ pub unsafe fn make_append_rel_info(
  *	  an inheritance child, as well as a reverse-translation array.
  */
 unsafe fn make_inh_translation_list(
-    _oldrelation: Relation,
-    _newrelation: Relation,
-    _newvarno: Index,
-    _appinfo: *mut AppendRelInfo,
+    oldrelation: Relation,
+    newrelation: Relation,
+    newvarno: Index,
+    appinfo: *mut AppendRelInfo,
 ) {
-    // TODO(pg-port): needs RelationGetDescr / TupleDescAttr / SearchSysCacheAttName
-    // (relcache + syscache); not yet ported.
-    unimplemented!("make_inh_translation_list: needs relcache TupleDesc + syscache")
+    let mut vars: *mut List = core::ptr::null_mut();
+    let pcolnos: *mut AttrNumber;
+    let old_tupdesc: TupleDesc = RelationGetDescr(oldrelation);
+    let new_tupdesc: TupleDesc = RelationGetDescr(newrelation);
+    let new_relid: Oid = RelationGetRelid(newrelation);
+    let oldnatts: c_int = (*old_tupdesc).natts;
+    let newnatts: c_int = (*new_tupdesc).natts;
+    let mut new_attno: c_int = 0;
+
+    /* Initialize reverse-translation array with all entries zero */
+    (*appinfo).num_child_cols = newnatts;
+    pcolnos = palloc0(newnatts as usize * core::mem::size_of::<AttrNumber>()) as *mut AttrNumber;
+    (*appinfo).parent_colnos = pcolnos;
+
+    let mut old_attno: c_int = 0;
+    while old_attno < oldnatts {
+        let mut att: Form_pg_attribute;
+        let attname: *const c_char;
+        let atttypid: Oid;
+        let atttypmod: int32;
+        let attcollation: Oid;
+
+        att = TupleDescAttr(old_tupdesc, old_attno);
+        if (*att).attisdropped {
+            /* Just put NULL into this list entry */
+            vars = lappend(vars, core::ptr::null_mut());
+            old_attno += 1;
+            continue;
+        }
+        attname = NameStr(&raw const (*att).attname);
+        atttypid = (*att).atttypid;
+        atttypmod = (*att).atttypmod;
+        attcollation = (*att).attcollation;
+
+        /*
+         * When we are generating the "translation list" for the parent table
+         * of an inheritance set, no need to search for matches.
+         */
+        if oldrelation == newrelation {
+            vars = lappend(
+                vars,
+                makeVar(
+                    newvarno as c_int,
+                    (old_attno + 1) as AttrNumber,
+                    atttypid,
+                    atttypmod,
+                    attcollation,
+                    0,
+                ) as *mut c_void,
+            );
+            *pcolnos.add(old_attno as usize) = (old_attno + 1) as AttrNumber;
+            old_attno += 1;
+            continue;
+        }
+
+        /*
+         * Otherwise we have to search for the matching column by name.
+         * There's no guarantee it'll have the same column position, because
+         * of cases like ALTER TABLE ADD COLUMN and multiple inheritance.
+         * However, in simple cases, the relative order of columns is mostly
+         * the same in both relations, so try the column of newrelation that
+         * follows immediately after the one that we just found, and if that
+         * fails, let syscache handle it.
+         */
+        if new_attno >= newnatts
+            || {
+                att = TupleDescAttr(new_tupdesc, new_attno);
+                (*att).attisdropped
+            }
+            || strcmp(attname, NameStr(&raw const (*att).attname)) != 0
+        {
+            let newtup: *mut c_void;
+
+            newtup = SearchSysCacheAttName(new_relid, attname);
+            if !HeapTupleIsValid(newtup) {
+                elog!(
+                    ERROR,
+                    "could not find inherited attribute \"{}\" of relation \"{}\"",
+                    std::ffi::CStr::from_ptr(attname).to_string_lossy(),
+                    std::ffi::CStr::from_ptr(RelationGetRelationName(newrelation))
+                        .to_string_lossy()
+                );
+            }
+            new_attno = (*(GETSTRUCT(newtup))).attnum as c_int - 1;
+            Assert!(new_attno >= 0 && new_attno < newnatts);
+            ReleaseSysCache(newtup);
+
+            att = TupleDescAttr(new_tupdesc, new_attno);
+        }
+
+        /* Found it, check type and collation match */
+        if atttypid != (*att).atttypid || atttypmod != (*att).atttypmod {
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "attribute \"{}\" of relation \"{}\" does not match parent's type",
+                    std::ffi::CStr::from_ptr(attname).to_string_lossy(),
+                    std::ffi::CStr::from_ptr(RelationGetRelationName(newrelation))
+                        .to_string_lossy()
+                )
+                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION) */
+            );
+        }
+        if attcollation != (*att).attcollation {
+            ereport!(
+                ERROR,
+                errmsg!(
+                    "attribute \"{}\" of relation \"{}\" does not match parent's collation",
+                    std::ffi::CStr::from_ptr(attname).to_string_lossy(),
+                    std::ffi::CStr::from_ptr(RelationGetRelationName(newrelation))
+                        .to_string_lossy()
+                )
+                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION) */
+            );
+        }
+
+        vars = lappend(
+            vars,
+            makeVar(
+                newvarno as c_int,
+                (new_attno + 1) as AttrNumber,
+                atttypid,
+                atttypmod,
+                attcollation,
+                0,
+            ) as *mut c_void,
+        );
+        *pcolnos.add(new_attno as usize) = (old_attno + 1) as AttrNumber;
+        new_attno += 1;
+        old_attno += 1;
+    }
+
+    (*appinfo).translated_vars = vars;
 }
 
 // ----------------------------------------------------------------------------
@@ -800,14 +1038,99 @@ pub unsafe fn find_appinfos_by_relids(
  * (lsyscache.c, not ported).  Keep the signature; body unimplemented!() + TODO.
  */
 pub unsafe fn add_row_identity_var(
-    _root: *mut PlannerInfo,
-    _orig_var: *mut Var,
-    _rtindex: Index,
-    _rowid_name: *const c_char,
+    root: *mut PlannerInfo,
+    orig_var: *mut Var,
+    rtindex: Index,
+    rowid_name: *const c_char,
 ) {
-    // TODO(pg-port): needs equal() (equalfuncs.c STUB) for RowIdentityVarInfo
-    // dedup and get_typavgwidth (lsyscache.c) for width estimation.
-    unimplemented!("add_row_identity_var: needs equal() + get_typavgwidth (not ported)")
+    use crate::nodes::primnodes::{Expr, TargetEntry};
+
+    let tle: *mut TargetEntry;
+    let rowid_var: *mut Var;
+    let mut ridinfo: *mut RowIdentityVarInfo;
+
+    /* For now, the argument must be just a Var of the given rtindex */
+    Assert!(IsA!(orig_var, T_Var));
+    Assert!((*orig_var).varno == rtindex as c_int);
+    Assert!((*orig_var).varlevelsup == 0);
+    Assert!((*orig_var).varnullingrels.is_null());
+
+    /*
+     * If we're doing non-inherited UPDATE/DELETE/MERGE, there's little need
+     * for ROWID_VAR shenanigans.  Just shove the presented Var into the
+     * processed_tlist, and we're done.
+     */
+    if rtindex as c_int == (*(*root).parse).resultRelation {
+        tle = makeTargetEntry(
+            orig_var as *mut Expr,
+            (list_length((*root).processed_tlist) + 1) as AttrNumber,
+            pstrdup(rowid_name),
+            true,
+        );
+        (*root).processed_tlist = lappend((*root).processed_tlist, tle as *mut c_void);
+        return;
+    }
+
+    /*
+     * Otherwise, rtindex should reference a leaf target relation that's being
+     * added to the query during expand_inherited_rtentry().
+     */
+    Assert!(bms_is_member(rtindex as c_int, (*root).leaf_result_relids));
+    Assert!(!(*(*root).append_rel_array.add(rtindex as usize)).is_null());
+
+    /*
+     * We have to find a matching RowIdentityVarInfo, or make one if there is
+     * none.  To allow using equal() to match the vars, change the varno to
+     * ROWID_VAR, leaving all else alone.
+     */
+    rowid_var = copyObject(orig_var as *const Var);
+    /* This could eventually become ChangeVarNodes() */
+    (*rowid_var).varno = ROWID_VAR;
+
+    /* Look for an existing row-id column of the same name */
+    foreach!(lc, (*root).row_identity_vars, {
+        ridinfo = lfirst(current_cell!(lc)) as *mut RowIdentityVarInfo;
+        if strcmp(rowid_name, (*ridinfo).rowidname) != 0 {
+            continue;
+        }
+        if equal(rowid_var as *const c_void, (*ridinfo).rowidvar as *const c_void) {
+            /* Found a match; we need only record that rtindex needs it too */
+            (*ridinfo).rowidrels = bms_add_member((*ridinfo).rowidrels, rtindex as c_int);
+            return;
+        } else {
+            /* Ooops, can't handle this */
+            elog!(
+                ERROR,
+                "conflicting uses of row-identity name \"{}\"",
+                std::ffi::CStr::from_ptr(rowid_name).to_string_lossy()
+            );
+        }
+    });
+
+    /* No request yet, so add a new RowIdentityVarInfo */
+    ridinfo = makeNode!(RowIdentityVarInfo, T_RowIdentityVarInfo);
+    (*ridinfo).rowidvar = copyObject(rowid_var as *const Var);
+    /* for the moment, estimate width using just the datatype info */
+    (*ridinfo).rowidwidth = get_typavgwidth(
+        exprType(rowid_var as *mut Node),
+        exprTypmod(rowid_var as *mut Node),
+    );
+    (*ridinfo).rowidname = pstrdup(rowid_name);
+    (*ridinfo).rowidrels = bms_make_singleton(rtindex as c_int);
+
+    (*root).row_identity_vars = lappend((*root).row_identity_vars, ridinfo as *mut c_void);
+
+    /* Change rowid_var into a reference to this row_identity_vars entry */
+    (*rowid_var).varattno = list_length((*root).row_identity_vars) as AttrNumber;
+
+    /* Push the ROWID_VAR reference variable into processed_tlist */
+    tle = makeTargetEntry(
+        rowid_var as *mut Expr,
+        (list_length((*root).processed_tlist) + 1) as AttrNumber,
+        pstrdup(rowid_name),
+        true,
+    );
+    (*root).processed_tlist = lappend((*root).processed_tlist, tle as *mut c_void);
 }
 
 /*
@@ -821,14 +1144,78 @@ pub unsafe fn add_row_identity_var(
  * the FDW routine (fdwapi.h) for foreign tables; neither is ported.
  */
 pub unsafe fn add_row_identity_columns(
-    _root: *mut PlannerInfo,
-    _rtindex: Index,
-    _target_rte: *mut RangeTblEntry,
-    _target_relation: Relation,
+    root: *mut PlannerInfo,
+    rtindex: Index,
+    target_rte: *mut RangeTblEntry,
+    target_relation: Relation,
 ) {
-    // TODO(pg-port): needs Relation->rd_rel->relkind (relcache) and
-    // GetFdwRoutineForRelation (fdwapi.h); not yet ported.
-    unimplemented!("add_row_identity_columns: needs relcache relkind + FDW routine")
+    use crate::nodes::nodes::CmdType::{CMD_DELETE, CMD_MERGE};
+
+    let commandType = (*(*root).parse).commandType;
+    let relkind: c_char = (*(*target_relation).rd_rel).relkind;
+    let var: *mut Var;
+
+    Assert!(
+        commandType == CMD_UPDATE || commandType == CMD_DELETE || commandType == CMD_MERGE
+    );
+
+    if relkind == RELKIND_RELATION
+        || relkind == RELKIND_MATVIEW
+        || relkind == RELKIND_PARTITIONED_TABLE
+    {
+        /*
+         * Emit CTID so that executor can find the row to merge, update or
+         * delete.
+         */
+        var = makeVar(
+            rtindex as c_int,
+            SelfItemPointerAttributeNumber,
+            TIDOID,
+            -1,
+            InvalidOid,
+            0,
+        );
+        add_row_identity_var(root, var, rtindex, c"ctid".as_ptr());
+    } else if relkind == RELKIND_FOREIGN_TABLE {
+        /*
+         * Let the foreign table's FDW add whatever junk TLEs it wants.
+         */
+        let fdwroutine: *mut FdwRoutine;
+
+        fdwroutine = GetFdwRoutineForRelation(target_relation as *mut c_void, false);
+
+        if (*fdwroutine).AddForeignUpdateTargets.is_some() {
+            ((*fdwroutine).AddForeignUpdateTargets.unwrap())(
+                root as *mut c_void,
+                rtindex,
+                target_rte as *mut c_void,
+                target_relation as *mut c_void,
+            );
+        }
+
+        /*
+         * For UPDATE, we need to make the FDW fetch unchanged columns by
+         * asking it to fetch a whole-row Var.  That's because the top-level
+         * targetlist only contains entries for changed columns, but
+         * ExecUpdate will need to build the complete new tuple.  (Actually,
+         * we only really need this in UPDATEs that are not pushed to the
+         * remote side, but it's hard to tell if that will be the case at the
+         * point when this function is called.)
+         *
+         * We will also need the whole row if there are any row triggers, so
+         * that the executor will have the "old" row to pass to the trigger.
+         * Alas, this misses system columns.
+         */
+        if commandType == CMD_UPDATE
+            || (!(*target_relation).trigdesc.is_null()
+                && ((*((*target_relation).trigdesc as *mut TriggerDesc)).trig_delete_after_row
+                    || (*((*target_relation).trigdesc as *mut TriggerDesc))
+                        .trig_delete_before_row))
+        {
+            var = makeVar(rtindex as c_int, InvalidAttrNumber, RECORDOID, -1, InvalidOid, 0);
+            add_row_identity_var(root, var, rtindex, c"wholerow".as_ptr());
+        }
+    }
 }
 
 /*
@@ -874,13 +1261,14 @@ pub unsafe fn distribute_row_identity_vars(root: *mut PlannerInfo) {
      * it would have used, then re-running build_base_rel_tlists.
      */
     if (*root).row_identity_vars.is_null() {
-        // TODO(pg-port): table_open/table_close (access/table.h) and
-        // build_base_rel_tlists (planmain.c) not yet ported.  This is the
-        // constraint-exclusion edge case (no leaf rels survived).
-        unimplemented!(
-            "distribute_row_identity_vars: empty-row_identity_vars edge case needs \
-             table_open + build_base_rel_tlists (not ported)"
-        )
+        let target_relation: Relation;
+
+        target_relation = table_open((*target_rte).relid, NoLock);
+        add_row_identity_columns(root, result_relation as Index, target_rte, target_relation);
+        table_close(target_relation, NoLock);
+        build_base_rel_tlists(root, (*root).processed_tlist);
+        /* There are no ROWID_VAR Vars in this case, so we're done. */
+        return;
     }
 
     /*

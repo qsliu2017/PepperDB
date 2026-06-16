@@ -3882,3 +3882,19 @@ pub unsafe fn applyLockingClause(
     (*rc).pushedDown = pushedDown;
     (*qry).rowMarks = lappend((*qry).rowMarks, rc as *mut c_void);
 }
+
+/*
+ * Coverage testing for raw_expression_tree_walker().
+ *
+ * When enabled, we run raw_expression_tree_walker() over every DML statement
+ * submitted to parse analysis.  Without this provision, that function is only
+ * applied in limited cases involving CTEs, and we don't really want to have
+ * to test everything inside as well as outside a CTE.
+ */
+#[cfg(feature = "debug_node_tests")]
+unsafe fn test_raw_expression_coverage(node: *mut Node, context: *mut c_void) -> bool {
+    if node.is_null() {
+        return false;
+    }
+    raw_expression_tree_walker(node, Some(test_raw_expression_coverage), context)
+}

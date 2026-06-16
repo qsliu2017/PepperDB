@@ -600,6 +600,26 @@ mod xidcache_debug {
     pub static mut xc_slow_answer: i64    = 0;
 }
 
+// Print stats about effectiveness of XID cache (XIDCACHE_DEBUG only)
+#[cfg(any())] // XIDCACHE_DEBUG not enabled
+fn DisplayXidCache() {
+    use xidcache_debug::*;
+    unsafe {
+        eprintln!(
+            "XidCache: xmin: {}, known: {}, myxact: {}, latest: {}, mainxid: {}, childxid: {}, knownassigned: {}, nooflo: {}, slow: {}",
+            xc_by_recent_xmin,
+            xc_by_known_xact,
+            xc_by_my_xact,
+            xc_by_latest_xid,
+            xc_by_main_xid,
+            xc_by_child_xid,
+            xc_by_known_assigned,
+            xc_no_overflow,
+            xc_slow_answer,
+        );
+    }
+}
+
 // Increment macros (no-ops unless XIDCACHE_DEBUG)
 #[inline] fn xc_by_recent_xmin_inc() {}
 #[inline] fn xc_by_known_xact_inc() {}

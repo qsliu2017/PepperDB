@@ -2025,8 +2025,13 @@ unsafe fn truncate_check_activity(rel: Relation) {
  *	  returns the name corresponding to a typstorage/attstorage enum value
  */
 unsafe fn storage_name(c: c_char) -> *const c_char {
-    /* TODO(pg-port): TYPSTORAGE_* constants not yet in crate */
-    b"???\0".as_ptr() as *const c_char
+    match c {
+        x if x == crate::catalog::pg_type::TYPSTORAGE_PLAIN => b"PLAIN\0".as_ptr() as *const c_char,
+        x if x == crate::catalog::pg_type::TYPSTORAGE_EXTERNAL => b"EXTERNAL\0".as_ptr() as *const c_char,
+        x if x == crate::catalog::pg_type::TYPSTORAGE_EXTENDED => b"EXTENDED\0".as_ptr() as *const c_char,
+        x if x == crate::catalog::pg_type::TYPSTORAGE_MAIN => b"MAIN\0".as_ptr() as *const c_char,
+        _ => b"???\0".as_ptr() as *const c_char,
+    }
 }
 
 /*----------
@@ -5661,8 +5666,76 @@ unsafe fn ATGetQueueEntry(wqueue: *mut *mut List, rel: Relation) -> *mut Altered
 }
 
 unsafe fn alter_table_type_to_string(cmdtype: AlterTableType) -> *const c_char {
-    /* TODO(pg-port): stub -- returns SQL keyword string for ALTER subcommand */
-    ptr::null()
+    match cmdtype {
+        AlterTableType::AT_AddColumn
+        | AlterTableType::AT_AddColumnToView => b"ADD COLUMN\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ColumnDefault
+        | AlterTableType::AT_CookedColumnDefault => b"ALTER COLUMN ... SET DEFAULT\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DropNotNull => b"ALTER COLUMN ... DROP NOT NULL\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetNotNull => b"ALTER COLUMN ... SET NOT NULL\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetExpression => b"ALTER COLUMN ... SET EXPRESSION\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DropExpression => b"ALTER COLUMN ... DROP EXPRESSION\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetStatistics => b"ALTER COLUMN ... SET STATISTICS\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetOptions => b"ALTER COLUMN ... SET\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ResetOptions => b"ALTER COLUMN ... RESET\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetStorage => b"ALTER COLUMN ... SET STORAGE\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetCompression => b"ALTER COLUMN ... SET COMPRESSION\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DropColumn => b"DROP COLUMN\0".as_ptr() as *const c_char,
+        AlterTableType::AT_AddIndex
+        | AlterTableType::AT_ReAddIndex => ptr::null(), /* not real grammar */
+        AlterTableType::AT_AddConstraint
+        | AlterTableType::AT_ReAddConstraint
+        | AlterTableType::AT_ReAddDomainConstraint
+        | AlterTableType::AT_AddIndexConstraint => b"ADD CONSTRAINT\0".as_ptr() as *const c_char,
+        AlterTableType::AT_AlterConstraint => b"ALTER CONSTRAINT\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ValidateConstraint => b"VALIDATE CONSTRAINT\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DropConstraint => b"DROP CONSTRAINT\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ReAddComment => ptr::null(), /* not real grammar */
+        AlterTableType::AT_AlterColumnType => b"ALTER COLUMN ... SET DATA TYPE\0".as_ptr() as *const c_char,
+        AlterTableType::AT_AlterColumnGenericOptions => b"ALTER COLUMN ... OPTIONS\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ChangeOwner => b"OWNER TO\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ClusterOn => b"CLUSTER ON\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DropCluster => b"SET WITHOUT CLUSTER\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetAccessMethod => b"SET ACCESS METHOD\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetLogged => b"SET LOGGED\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetUnLogged => b"SET UNLOGGED\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DropOids => b"SET WITHOUT OIDS\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetTableSpace => b"SET TABLESPACE\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetRelOptions => b"SET\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ResetRelOptions => b"RESET\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ReplaceRelOptions => ptr::null(), /* not real grammar */
+        AlterTableType::AT_EnableTrig => b"ENABLE TRIGGER\0".as_ptr() as *const c_char,
+        AlterTableType::AT_EnableAlwaysTrig => b"ENABLE ALWAYS TRIGGER\0".as_ptr() as *const c_char,
+        AlterTableType::AT_EnableReplicaTrig => b"ENABLE REPLICA TRIGGER\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DisableTrig => b"DISABLE TRIGGER\0".as_ptr() as *const c_char,
+        AlterTableType::AT_EnableTrigAll => b"ENABLE TRIGGER ALL\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DisableTrigAll => b"DISABLE TRIGGER ALL\0".as_ptr() as *const c_char,
+        AlterTableType::AT_EnableTrigUser => b"ENABLE TRIGGER USER\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DisableTrigUser => b"DISABLE TRIGGER USER\0".as_ptr() as *const c_char,
+        AlterTableType::AT_EnableRule => b"ENABLE RULE\0".as_ptr() as *const c_char,
+        AlterTableType::AT_EnableAlwaysRule => b"ENABLE ALWAYS RULE\0".as_ptr() as *const c_char,
+        AlterTableType::AT_EnableReplicaRule => b"ENABLE REPLICA RULE\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DisableRule => b"DISABLE RULE\0".as_ptr() as *const c_char,
+        AlterTableType::AT_AddInherit => b"INHERIT\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DropInherit => b"NO INHERIT\0".as_ptr() as *const c_char,
+        AlterTableType::AT_AddOf => b"OF\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DropOf => b"NOT OF\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ReplicaIdentity => b"REPLICA IDENTITY\0".as_ptr() as *const c_char,
+        AlterTableType::AT_EnableRowSecurity => b"ENABLE ROW SECURITY\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DisableRowSecurity => b"DISABLE ROW SECURITY\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ForceRowSecurity => b"FORCE ROW SECURITY\0".as_ptr() as *const c_char,
+        AlterTableType::AT_NoForceRowSecurity => b"NO FORCE ROW SECURITY\0".as_ptr() as *const c_char,
+        AlterTableType::AT_GenericOptions => b"OPTIONS\0".as_ptr() as *const c_char,
+        AlterTableType::AT_AttachPartition => b"ATTACH PARTITION\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DetachPartition => b"DETACH PARTITION\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DetachPartitionFinalize => b"DETACH PARTITION ... FINALIZE\0".as_ptr() as *const c_char,
+        AlterTableType::AT_AddIdentity => b"ALTER COLUMN ... ADD IDENTITY\0".as_ptr() as *const c_char,
+        AlterTableType::AT_SetIdentity => b"ALTER COLUMN ... SET\0".as_ptr() as *const c_char,
+        AlterTableType::AT_DropIdentity => b"ALTER COLUMN ... DROP IDENTITY\0".as_ptr() as *const c_char,
+        AlterTableType::AT_ReAddStatistics => ptr::null(), /* not real grammar */
+        #[allow(unreachable_patterns)]
+        _ => ptr::null(),
+    }
 }
 
 /*

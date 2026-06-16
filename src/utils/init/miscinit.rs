@@ -167,10 +167,27 @@ const WAIT_EVENT_LOCK_FILE_ADDTODATADIR_WRITE: u32 = 0;
 const WAIT_EVENT_LOCK_FILE_ADDTODATADIR_SYNC: u32 = 0;
 const WAIT_EVENT_LOCK_FILE_RECHECKDATADIR_READ: u32 = 0;
 
-// storage/pg_shmem.h
+// storage/pg_shmem.h (win32_shmem.c PGSharedMemoryIsInUse)
+//
+// PGSharedMemoryIsInUse
+//
+// Is a previously-existing shmem segment still existing and in use?
+//
+// The point of this exercise is to detect the case where a prior postmaster
+// crashed, but it left child backends that are still running.
 unsafe fn PGSharedMemoryIsInUse(_id1: c_ulong, _id2: c_ulong) -> bool {
-    // TODO(pg-port): translate port/sysv_shmem.c PGSharedMemoryIsInUse
-    false
+    let szShareMem: *mut c_char = GetSharedMemName();
+
+    let hmap: crate::port::win32_port::HANDLE = OpenFileMapping(FILE_MAP_READ, FALSE, szShareMem);
+
+    libc::free(szShareMem as *mut c_void);
+
+    if hmap.is_null() {
+        return false;
+    }
+
+    CloseHandle(hmap);
+    true
 }
 
 // utils/varlena.c
@@ -2230,4 +2247,928 @@ pub unsafe extern "C" fn pg_bindtextdomain(_domain: *const c_char) {
     //     pg_bind_textdomain_codeset(domain);
     // }
     // #endif
+}
+
+/*-------------------------------------------------------------------------
+ * The following functions are translated from src/backend/port/win32_shmem.c
+ *-------------------------------------------------------------------------
+ */
+
+/*
+ * See win32_shmem.c: PROTECTIVE_REGION_SIZE is 10 * WIN32_STACK_RLIMIT.
+ */
+const PROTECTIVE_REGION_SIZE: usize = 10 * WIN32_STACK_RLIMIT;
+
+/*
+ * pgwin32_ReserveSharedMemoryRegion(hChild)
+ *
+ * Reserve the memory region that will be used for shared memory in a child
+ * process. It is called before the child process starts, to make sure the
+ * memory is available.
+ *
+ * NOTE! This function executes in the postmaster, and should for this
+ * reason not use elog(FATAL) since that would take down the postmaster.
+ */
+#[no_mangle]
+pub unsafe extern "C" fn pgwin32_ReserveSharedMemoryRegion(
+    hChild: crate::port::win32_port::HANDLE,
+) -> c_int {
+    let mut address: *mut c_void;
+
+    Assert!(!ShmemProtectiveRegion.is_null());
+    Assert!(!UsedShmemSegAddr.is_null());
+    Assert!(UsedShmemSegSize != 0);
+
+    /* ShmemProtectiveRegion */
+    address = VirtualAllocEx(
+        hChild,
+        ShmemProtectiveRegion,
+        PROTECTIVE_REGION_SIZE,
+        MEM_RESERVE,
+        PAGE_NOACCESS,
+    );
+    if address.is_null() {
+        /* Don't use FATAL since we're running in the postmaster */
+        elog!(
+            LOG,
+            "could not reserve shared memory region (addr={:p}) for child {:p}: error code {}",
+            ShmemProtectiveRegion,
+            hChild,
+            GetLastError()
+        );
+        return false as c_int;
+    }
+    if address != ShmemProtectiveRegion {
+        /*
+         * Should never happen - in theory if allocation granularity causes
+         * strange effects it could, so check just in case.
+         *
+         * Don't use FATAL since we're running in the postmaster.
+         */
+        elog!(
+            LOG,
+            "reserved shared memory region got incorrect address {:p}, expected {:p}",
+            address,
+            ShmemProtectiveRegion
+        );
+        return false as c_int;
+    }
+
+    /* UsedShmemSegAddr */
+    address = VirtualAllocEx(
+        hChild,
+        UsedShmemSegAddr,
+        UsedShmemSegSize,
+        MEM_RESERVE,
+        PAGE_READWRITE,
+    );
+    if address.is_null() {
+        elog!(
+            LOG,
+            "could not reserve shared memory region (addr={:p}) for child {:p}: error code {}",
+            UsedShmemSegAddr,
+            hChild,
+            GetLastError()
+        );
+        return false as c_int;
+    }
+    if address != UsedShmemSegAddr {
+        elog!(
+            LOG,
+            "reserved shared memory region got incorrect address {:p}, expected {:p}",
+            address,
+            UsedShmemSegAddr
+        );
+        return false as c_int;
+    }
+
+    true as c_int
+}
+
+/*
+ * pgwin32_SharedMemoryDelete
+ *
+ * Detach from and delete the shared memory segment
+ * (called as an on_shmem_exit callback, hence funny argument list)
+ */
+#[no_mangle]
+pub unsafe extern "C" fn pgwin32_SharedMemoryDelete(_status: c_int, shmId: Datum) {
+    Assert!(DatumGetPointer(shmId) == UsedShmemSegID as *mut c_char);
+    PGSharedMemoryDetach();
+}
+
+/*
+ * GUC check_hook for huge_page_size
+ */
+#[no_mangle]
+pub unsafe extern "C" fn check_huge_page_size(
+    newval: *mut c_int,
+    _extra: *mut *mut c_void,
+    _source: crate::utils::misc::guc::GucSource,
+) -> bool {
+    if *newval != 0 {
+        GUC_check_errdetail!("\"huge_page_size\" must be 0 on this platform.");
+        return false;
+    }
+    true
+}
+
+/* ---- win32_shmem.c globals and unported Win32 deps (TODO(pg-port)) ---- */
+
+static mut ShmemProtectiveRegion: *mut c_void = std::ptr::null_mut();
+static mut UsedShmemSegID: crate::port::win32_port::HANDLE =
+    crate::port::win32_port::INVALID_HANDLE_VALUE;
+static mut UsedShmemSegAddr: *mut c_void = std::ptr::null_mut();
+static mut UsedShmemSegSize: Size = 0;
+
+const WIN32_STACK_RLIMIT: usize = 4194304;
+// PROTECTIVE_REGION_SIZE: at least one thread stack; see win32_shmem.c comment.
+const PROTECTIVE_REGION_SIZE: usize = 10 * WIN32_STACK_RLIMIT;
+const MEM_RESERVE: u32 = 0x2000;
+const MEM_RELEASE: u32 = 0x8000;
+const PAGE_NOACCESS: u32 = 0x01;
+const PAGE_READWRITE: u32 = 0x04;
+const SEC_COMMIT: u32 = 0x8000000;
+const SEC_LARGE_PAGES: u32 = 0x80000000;
+const FILE_MAP_READ: u32 = 0x0004;
+const FILE_MAP_WRITE: u32 = 0x0002;
+const FILE_MAP_LARGE_PAGES: u32 = 0x20000000;
+const DUPLICATE_SAME_ACCESS: u32 = 0x00000002;
+const TOKEN_ADJUST_PRIVILEGES: u32 = 0x0020;
+const TOKEN_QUERY: u32 = 0x0008;
+const SE_PRIVILEGE_ENABLED: u32 = 0x00000002;
+const ERROR_SUCCESS: u32 = 0;
+const ERROR_ALREADY_EXISTS: u32 = 183;
+const ERROR_NOT_ALL_ASSIGNED: u32 = 1300;
+const ERROR_NO_SYSTEM_RESOURCES: u32 = 1450;
+const FALSE: crate::port::win32_port::BOOL = 0;
+const TRUE: crate::port::win32_port::BOOL = 1;
+const SE_LOCK_MEMORY_NAME: &CStr = c"SeLockMemoryPrivilege";
+
+const PGC_INTERNAL: c_int = 3;
+const PGC_S_DYNAMIC_DEFAULT: c_int = 1;
+
+use crate::port::win32_port::GetLastError;
+
+// GetSharedMemName
+//
+// Generate shared memory segment name. Expand the data directory, to generate
+// an identifier unique for this data directory. Then replace all backslashes
+// with forward slashes, since backslashes aren't permitted in global object names.
+unsafe fn GetSharedMemName() -> *mut c_char {
+    let retptr: *mut c_char;
+    let bufsize: DWORD;
+    let r: DWORD;
+
+    bufsize = GetFullPathName(DataDir, 0, std::ptr::null_mut(), std::ptr::null_mut());
+    if bufsize == 0 {
+        elog!(
+            FATAL,
+            "could not get size for full pathname of datadir {}: error code {}",
+            CStr::from_ptr(DataDir).to_string_lossy(),
+            GetLastError()
+        );
+    }
+
+    retptr = libc::malloc(bufsize as usize + 18) as *mut c_char; /* 18 for Global\PostgreSQL: */
+    if retptr.is_null() {
+        elog!(FATAL, "could not allocate memory for shared memory name");
+    }
+
+    libc::strcpy(retptr, c"Global\\PostgreSQL:".as_ptr());
+    r = GetFullPathName(DataDir, bufsize, retptr.add(18), std::ptr::null_mut());
+    if r == 0 || r > bufsize {
+        elog!(
+            FATAL,
+            "could not generate full pathname for datadir {}: error code {}",
+            CStr::from_ptr(DataDir).to_string_lossy(),
+            GetLastError()
+        );
+    }
+
+    /*
+     * XXX: Intentionally overwriting the Global\ part here. This was not the
+     * original approach, but putting it in the actual Global\ namespace
+     * causes permission errors in a lot of cases, so we leave it in the
+     * default namespace for now.
+     */
+    let mut cp: *mut c_char = retptr;
+    while *cp != 0 {
+        if *cp == b'\\' as c_char {
+            *cp = b'/' as c_char;
+        }
+        cp = cp.add(1);
+    }
+
+    retptr
+}
+
+// EnableLockPagesPrivilege
+//
+// Try to acquire SeLockMemoryPrivilege so we can use large pages.
+unsafe fn EnableLockPagesPrivilege(elevel: c_int) -> bool {
+    let mut hToken: crate::port::win32_port::HANDLE = std::ptr::null_mut();
+    let mut tp: TOKEN_PRIVILEGES = std::mem::zeroed();
+    let mut luid: LUID = std::mem::zeroed();
+
+    if OpenProcessToken(
+        GetCurrentProcess(),
+        TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+        &mut hToken,
+    ) == 0
+    {
+        // C also: errdetail("Failed system call was %s.", "OpenProcessToken")
+        ereport!(
+            elevel,
+            errmsg!(
+                "could not enable user right \"{}\": error code {}",
+                "Lock pages in memory",
+                GetLastError()
+            )
+        );
+        return false;
+    }
+
+    if LookupPrivilegeValue(std::ptr::null(), SE_LOCK_MEMORY_NAME.as_ptr(), &mut luid) == 0 {
+        // C also: errdetail("Failed system call was %s.", "LookupPrivilegeValue")
+        ereport!(
+            elevel,
+            errmsg!(
+                "could not enable user right \"{}\": error code {}",
+                "Lock pages in memory",
+                GetLastError()
+            )
+        );
+        CloseHandle(hToken);
+        return false;
+    }
+    tp.PrivilegeCount = 1;
+    tp.Privileges[0].Luid = luid;
+    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+    if AdjustTokenPrivileges(
+        hToken,
+        FALSE,
+        &mut tp,
+        0,
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+    ) == 0
+    {
+        // C also: errdetail("Failed system call was %s.", "AdjustTokenPrivileges")
+        ereport!(
+            elevel,
+            errmsg!(
+                "could not enable user right \"{}\": error code {}",
+                "Lock pages in memory",
+                GetLastError()
+            )
+        );
+        CloseHandle(hToken);
+        return false;
+    }
+
+    if GetLastError() != ERROR_SUCCESS {
+        if GetLastError() == ERROR_NOT_ALL_ASSIGNED {
+            // C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            //   errhint("Assign user right \"%s\" to the Windows user account
+            //   which runs PostgreSQL.", _("Lock pages in memory"))
+            ereport!(
+                elevel,
+                errmsg!("could not enable user right \"{}\"", "Lock pages in memory")
+            );
+        } else {
+            // C also: errdetail("Failed system call was %s.", "AdjustTokenPrivileges")
+            ereport!(
+                elevel,
+                errmsg!(
+                    "could not enable user right \"{}\": error code {}",
+                    "Lock pages in memory",
+                    GetLastError()
+                )
+            );
+        }
+        CloseHandle(hToken);
+        return false;
+    }
+
+    CloseHandle(hToken);
+
+    true
+}
+
+// PGSharedMemoryCreate
+//
+// Create a shared memory segment of the given size and initialize its
+// standard header.
+unsafe fn PGSharedMemoryCreate(size: Size, shim: *mut *mut PGShmemHeader) -> *mut PGShmemHeader {
+    let memAddress: *mut c_void;
+    let hdr: *mut PGShmemHeader;
+    let mut hmap: crate::port::win32_port::HANDLE;
+    let mut hmap2: crate::port::win32_port::HANDLE = std::ptr::null_mut();
+    let szShareMem: *mut c_char;
+    let mut i: c_int;
+    let size_high: DWORD;
+    let size_low: DWORD;
+    let mut largePageSize: usize = 0;
+    let orig_size: Size = size;
+    let mut size: Size = size;
+    let mut flProtect: DWORD = PAGE_READWRITE;
+    let mut desiredAccess: DWORD;
+
+    ShmemProtectiveRegion = VirtualAlloc(
+        std::ptr::null_mut(),
+        PROTECTIVE_REGION_SIZE,
+        MEM_RESERVE,
+        PAGE_NOACCESS,
+    );
+    if ShmemProtectiveRegion.is_null() {
+        elog!(
+            FATAL,
+            "could not reserve memory region: error code {}",
+            GetLastError()
+        );
+    }
+
+    /* Room for a header? */
+    Assert!(size > MAXALIGN!(std::mem::size_of::<PGShmemHeader>()));
+
+    szShareMem = GetSharedMemName();
+
+    UsedShmemSegAddr = std::ptr::null_mut();
+
+    if huge_pages == HUGE_PAGES_ON || huge_pages == HUGE_PAGES_TRY {
+        /* Does the processor support large pages? */
+        largePageSize = GetLargePageMinimum();
+        if largePageSize == 0 {
+            // C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED)
+            ereport!(
+                if huge_pages == HUGE_PAGES_ON { FATAL } else { DEBUG1 },
+                errmsg!("the processor does not support large pages")
+            );
+            ereport!(DEBUG1, errmsg_internal!("disabling huge pages"));
+        } else if !EnableLockPagesPrivilege(if huge_pages == HUGE_PAGES_ON {
+            FATAL
+        } else {
+            DEBUG1
+        }) {
+            ereport!(DEBUG1, errmsg_internal!("disabling huge pages"));
+        } else {
+            /* Huge pages available and privilege enabled, so turn on */
+            flProtect = PAGE_READWRITE | SEC_COMMIT | SEC_LARGE_PAGES;
+
+            /* Round size up as appropriate. */
+            if size % largePageSize != 0 {
+                size += largePageSize - (size % largePageSize);
+            }
+        }
+    }
+
+    'retry: loop {
+        #[cfg(target_pointer_width = "64")]
+        {
+            size_high = (size >> 32) as DWORD;
+        }
+        #[cfg(not(target_pointer_width = "64"))]
+        {
+            size_high = 0;
+        }
+        size_low = size as DWORD;
+
+        /*
+         * When recycling a shared memory segment, it may take a short while
+         * before it gets dropped from the global namespace. So re-try after
+         * sleeping for a second, and continue retrying 10 times.
+         */
+        i = 0;
+        while i < 10 {
+            /*
+             * In case CreateFileMapping() doesn't set the error code to 0 on
+             * success
+             */
+            SetLastError(0);
+
+            hmap = CreateFileMapping(
+                crate::port::win32_port::INVALID_HANDLE_VALUE, /* Use the pagefile */
+                std::ptr::null_mut(),                          /* Default security attrs */
+                flProtect,
+                size_high, /* Size Upper 32 Bits */
+                size_low,  /* Size Lower 32 bits */
+                szShareMem,
+            );
+
+            if hmap.is_null() {
+                if GetLastError() == ERROR_NO_SYSTEM_RESOURCES
+                    && huge_pages == HUGE_PAGES_TRY
+                    && (flProtect & SEC_LARGE_PAGES) != 0
+                {
+                    elog!(
+                        DEBUG1,
+                        "CreateFileMapping({}) with SEC_LARGE_PAGES failed, huge pages disabled",
+                        size
+                    );
+
+                    /*
+                     * Use the original size, not the rounded-up value, when
+                     * falling back to non-huge pages.
+                     */
+                    size = orig_size;
+                    flProtect = PAGE_READWRITE;
+                    continue 'retry;
+                } else {
+                    // C also: errdetail("Failed system call was
+                    //   CreateFileMapping(size=%zu, name=%s).", size, szShareMem)
+                    ereport!(
+                        FATAL,
+                        errmsg!(
+                            "could not create shared memory segment: error code {}",
+                            GetLastError()
+                        )
+                    );
+                }
+            }
+
+            /*
+             * If the segment already existed, CreateFileMapping() will return a
+             * handle to the existing one and set ERROR_ALREADY_EXISTS.
+             */
+            if GetLastError() == ERROR_ALREADY_EXISTS {
+                CloseHandle(hmap); /* Close the handle, since we got a valid one
+                                    * to the previous segment. */
+                hmap = std::ptr::null_mut();
+                Sleep(1000);
+                i += 1;
+                continue;
+            }
+            break;
+        }
+
+        /*
+         * If the last call in the loop still returned ERROR_ALREADY_EXISTS, this
+         * shared memory segment exists and we assume it belongs to somebody else.
+         */
+        if hmap.is_null() {
+            // C also: errhint("Check if there are any old server processes still
+            //   running, and terminate them.")
+            ereport!(
+                FATAL,
+                errmsg!("pre-existing shared memory block is still in use")
+            );
+        }
+
+        libc::free(szShareMem as *mut c_void);
+
+        /*
+         * Make the handle inheritable
+         */
+        if DuplicateHandle(
+            GetCurrentProcess(),
+            hmap,
+            GetCurrentProcess(),
+            &mut hmap2,
+            0,
+            TRUE,
+            DUPLICATE_SAME_ACCESS,
+        ) == 0
+        {
+            // C also: errdetail("Failed system call was DuplicateHandle.")
+            ereport!(
+                FATAL,
+                errmsg!(
+                    "could not create shared memory segment: error code {}",
+                    GetLastError()
+                )
+            );
+        }
+
+        /*
+         * Close the old, non-inheritable handle. If this fails we don't really
+         * care.
+         */
+        if CloseHandle(hmap) == 0 {
+            elog!(
+                LOG,
+                "could not close handle to shared memory: error code {}",
+                GetLastError()
+            );
+        }
+
+        desiredAccess = FILE_MAP_WRITE | FILE_MAP_READ;
+
+        /* Set large pages if wanted. */
+        if (flProtect & SEC_LARGE_PAGES) != 0 {
+            desiredAccess |= FILE_MAP_LARGE_PAGES;
+        }
+
+        /*
+         * Get a pointer to the new shared memory segment. Map the whole segment
+         * at once, and let the system decide on the initial address.
+         */
+        memAddress = MapViewOfFileEx(hmap2, desiredAccess, 0, 0, 0, std::ptr::null_mut());
+        if memAddress.is_null() {
+            // C also: errdetail("Failed system call was MapViewOfFileEx.")
+            ereport!(
+                FATAL,
+                errmsg!(
+                    "could not create shared memory segment: error code {}",
+                    GetLastError()
+                )
+            );
+        }
+
+        /*
+         * OK, we created a new segment.  Mark it as created by this process. The
+         * order of assignments here is critical so that another Postgres process
+         * can't see the header as valid but belonging to an invalid PID!
+         */
+        hdr = memAddress as *mut PGShmemHeader;
+        (*hdr).creatorPID = libc::getpid();
+        (*hdr).magic = PGShmemMagic;
+
+        /*
+         * Initialize space allocation status for segment.
+         */
+        (*hdr).totalsize = size;
+        (*hdr).freeoffset = MAXALIGN!(std::mem::size_of::<PGShmemHeader>());
+        (*hdr).dsm_control = 0;
+
+        /* Save info for possible future use */
+        UsedShmemSegAddr = memAddress;
+        UsedShmemSegSize = size;
+        UsedShmemSegID = hmap2;
+
+        /* Register on-exit routine to delete the new segment */
+        on_shmem_exit(
+            pgwin32_SharedMemoryDelete,
+            PointerGetDatum(hmap2 as *const c_void),
+        );
+
+        *shim = hdr;
+
+        /* Report whether huge pages are in use */
+        SetConfigOption(
+            c"huge_pages_status".as_ptr(),
+            if (flProtect & SEC_LARGE_PAGES) != 0 {
+                c"on".as_ptr()
+            } else {
+                c"off".as_ptr()
+            },
+            PGC_INTERNAL,
+            PGC_S_DYNAMIC_DEFAULT,
+        );
+
+        return hdr;
+    }
+}
+
+// PGSharedMemoryReAttach
+//
+// This is called during startup of a postmaster child process to re-attach to
+// an already existing shared memory segment, using the handle inherited from
+// the postmaster.
+unsafe fn PGSharedMemoryReAttach() {
+    let hdr: *mut PGShmemHeader;
+    let origUsedShmemSegAddr: *mut c_void = UsedShmemSegAddr;
+
+    Assert!(!ShmemProtectiveRegion.is_null());
+    Assert!(!UsedShmemSegAddr.is_null());
+    Assert!(IsUnderPostmaster);
+
+    /*
+     * Release memory region reservations made by the postmaster
+     */
+    if VirtualFree(ShmemProtectiveRegion, 0, MEM_RELEASE) == 0 {
+        elog!(
+            FATAL,
+            "failed to release reserved memory region (addr={:p}): error code {}",
+            ShmemProtectiveRegion,
+            GetLastError()
+        );
+    }
+    if VirtualFree(UsedShmemSegAddr, 0, MEM_RELEASE) == 0 {
+        elog!(
+            FATAL,
+            "failed to release reserved memory region (addr={:p}): error code {}",
+            UsedShmemSegAddr,
+            GetLastError()
+        );
+    }
+
+    hdr = MapViewOfFileEx(
+        UsedShmemSegID,
+        FILE_MAP_READ | FILE_MAP_WRITE,
+        0,
+        0,
+        0,
+        UsedShmemSegAddr,
+    ) as *mut PGShmemHeader;
+    if hdr.is_null() {
+        elog!(
+            FATAL,
+            "could not reattach to shared memory (key={:p}, addr={:p}): error code {}",
+            UsedShmemSegID,
+            UsedShmemSegAddr,
+            GetLastError()
+        );
+    }
+    if hdr as *mut c_void != origUsedShmemSegAddr {
+        elog!(
+            FATAL,
+            "reattaching to shared memory returned unexpected address (got {:p}, expected {:p})",
+            hdr,
+            origUsedShmemSegAddr
+        );
+    }
+    if (*hdr).magic != PGShmemMagic {
+        elog!(
+            FATAL,
+            "reattaching to shared memory returned non-PostgreSQL memory"
+        );
+    }
+    dsm_set_control_handle((*hdr).dsm_control);
+
+    UsedShmemSegAddr = hdr as *mut c_void; /* probably redundant */
+}
+
+// PGSharedMemoryNoReAttach
+//
+// This is called during startup of a postmaster child process when we choose
+// *not* to re-attach to the existing shared memory segment.  We must clean up
+// to leave things in the appropriate state.
+unsafe fn PGSharedMemoryNoReAttach() {
+    Assert!(!ShmemProtectiveRegion.is_null());
+    Assert!(!UsedShmemSegAddr.is_null());
+    Assert!(IsUnderPostmaster);
+
+    /*
+     * Under Windows we will not have mapped the segment, so we don't need to
+     * un-map it.  Just reset UsedShmemSegAddr to show we're not attached.
+     */
+    UsedShmemSegAddr = std::ptr::null_mut();
+
+    /*
+     * We *must* close the inherited shmem segment handle, else Windows will
+     * consider the existence of this process to mean it can't release the
+     * shmem segment yet.  We can now use PGSharedMemoryDetach to do that.
+     */
+    PGSharedMemoryDetach();
+}
+
+// PGSharedMemoryDetach
+//
+// Detach from the shared memory segment, if still attached.
+unsafe fn PGSharedMemoryDetach() {
+    /*
+     * Releasing the protective region liberates an unimportant quantity of
+     * address space, but be tidy.
+     */
+    if !ShmemProtectiveRegion.is_null() {
+        if VirtualFree(ShmemProtectiveRegion, 0, MEM_RELEASE) == 0 {
+            elog!(
+                LOG,
+                "failed to release reserved memory region (addr={:p}): error code {}",
+                ShmemProtectiveRegion,
+                GetLastError()
+            );
+        }
+
+        ShmemProtectiveRegion = std::ptr::null_mut();
+    }
+
+    /* Unmap the view, if it's mapped */
+    if !UsedShmemSegAddr.is_null() {
+        if UnmapViewOfFile(UsedShmemSegAddr) == 0 {
+            elog!(
+                LOG,
+                "could not unmap view of shared memory: error code {}",
+                GetLastError()
+            );
+        }
+
+        UsedShmemSegAddr = std::ptr::null_mut();
+    }
+
+    /* And close the shmem handle, if we have one */
+    if UsedShmemSegID != crate::port::win32_port::INVALID_HANDLE_VALUE {
+        if CloseHandle(UsedShmemSegID) == 0 {
+            elog!(
+                LOG,
+                "could not close handle to shared memory: error code {}",
+                GetLastError()
+            );
+        }
+
+        UsedShmemSegID = crate::port::win32_port::INVALID_HANDLE_VALUE;
+    }
+}
+
+// GetHugePageSize
+//
+// This function is provided for consistency with sysv_shmem.c and does not
+// provide any useful information for Windows.  To obtain the large page size,
+// use GetLargePageMinimum() instead.
+unsafe fn GetHugePageSize(hugepagesize: *mut Size, mmap_flags: *mut c_int) {
+    if !hugepagesize.is_null() {
+        *hugepagesize = 0;
+    }
+    if !mmap_flags.is_null() {
+        *mmap_flags = 0;
+    }
+}
+
+/* ---- unported Win32 deps (TODO(pg-port)) ---- */
+
+type DWORD = crate::port::win32_port::DWORD;
+
+#[repr(C)]
+struct LUID {
+    LowPart: u32,
+    HighPart: i32,
+}
+
+#[repr(C)]
+struct LUID_AND_ATTRIBUTES {
+    Luid: LUID,
+    Attributes: u32,
+}
+
+#[repr(C)]
+struct TOKEN_PRIVILEGES {
+    PrivilegeCount: u32,
+    Privileges: [LUID_AND_ATTRIBUTES; 1],
+}
+
+unsafe fn VirtualAllocEx(
+    _hProcess: crate::port::win32_port::HANDLE,
+    _lpAddress: *mut c_void,
+    _dwSize: usize,
+    _flAllocationType: u32,
+    _flProtect: u32,
+) -> *mut c_void {
+    // TODO(pg-port): Win32 VirtualAllocEx
+    unimplemented!()
+}
+
+unsafe fn VirtualAlloc(
+    _lpAddress: *mut c_void,
+    _dwSize: usize,
+    _flAllocationType: u32,
+    _flProtect: u32,
+) -> *mut c_void {
+    // TODO(pg-port): Win32 VirtualAlloc
+    unimplemented!()
+}
+
+unsafe fn VirtualFree(
+    _lpAddress: *mut c_void,
+    _dwSize: usize,
+    _dwFreeType: u32,
+) -> crate::port::win32_port::BOOL {
+    // TODO(pg-port): Win32 VirtualFree
+    unimplemented!()
+}
+
+unsafe fn GetFullPathName(
+    _lpFileName: *const c_char,
+    _nBufferLength: DWORD,
+    _lpBuffer: *mut c_char,
+    _lpFilePart: *mut *mut c_char,
+) -> DWORD {
+    // TODO(pg-port): Win32 GetFullPathName
+    unimplemented!()
+}
+
+unsafe fn GetLargePageMinimum() -> usize {
+    // TODO(pg-port): Win32 GetLargePageMinimum
+    unimplemented!()
+}
+
+unsafe fn CreateFileMapping(
+    _hFile: crate::port::win32_port::HANDLE,
+    _lpAttributes: *mut c_void,
+    _flProtect: DWORD,
+    _dwMaximumSizeHigh: DWORD,
+    _dwMaximumSizeLow: DWORD,
+    _lpName: *const c_char,
+) -> crate::port::win32_port::HANDLE {
+    // TODO(pg-port): Win32 CreateFileMapping
+    unimplemented!()
+}
+
+unsafe fn OpenFileMapping(
+    _dwDesiredAccess: DWORD,
+    _bInheritHandle: crate::port::win32_port::BOOL,
+    _lpName: *const c_char,
+) -> crate::port::win32_port::HANDLE {
+    // TODO(pg-port): Win32 OpenFileMapping
+    unimplemented!()
+}
+
+unsafe fn MapViewOfFileEx(
+    _hFileMappingObject: crate::port::win32_port::HANDLE,
+    _dwDesiredAccess: DWORD,
+    _dwFileOffsetHigh: DWORD,
+    _dwFileOffsetLow: DWORD,
+    _dwNumberOfBytesToMap: usize,
+    _lpBaseAddress: *mut c_void,
+) -> *mut c_void {
+    // TODO(pg-port): Win32 MapViewOfFileEx
+    unimplemented!()
+}
+
+unsafe fn UnmapViewOfFile(_lpBaseAddress: *mut c_void) -> crate::port::win32_port::BOOL {
+    // TODO(pg-port): Win32 UnmapViewOfFile
+    unimplemented!()
+}
+
+unsafe fn CloseHandle(_hObject: crate::port::win32_port::HANDLE) -> crate::port::win32_port::BOOL {
+    // TODO(pg-port): Win32 CloseHandle
+    unimplemented!()
+}
+
+unsafe fn DuplicateHandle(
+    _hSourceProcessHandle: crate::port::win32_port::HANDLE,
+    _hSourceHandle: crate::port::win32_port::HANDLE,
+    _hTargetProcessHandle: crate::port::win32_port::HANDLE,
+    _lpTargetHandle: *mut crate::port::win32_port::HANDLE,
+    _dwDesiredAccess: DWORD,
+    _bInheritHandle: crate::port::win32_port::BOOL,
+    _dwOptions: DWORD,
+) -> crate::port::win32_port::BOOL {
+    // TODO(pg-port): Win32 DuplicateHandle
+    unimplemented!()
+}
+
+unsafe fn GetCurrentProcess() -> crate::port::win32_port::HANDLE {
+    // TODO(pg-port): Win32 GetCurrentProcess
+    unimplemented!()
+}
+
+unsafe fn SetLastError(_dwErrCode: DWORD) {
+    // TODO(pg-port): Win32 SetLastError
+    unimplemented!()
+}
+
+unsafe fn Sleep(_dwMilliseconds: DWORD) {
+    // TODO(pg-port): Win32 Sleep
+    unimplemented!()
+}
+
+unsafe fn OpenProcessToken(
+    _ProcessHandle: crate::port::win32_port::HANDLE,
+    _DesiredAccess: DWORD,
+    _TokenHandle: *mut crate::port::win32_port::HANDLE,
+) -> crate::port::win32_port::BOOL {
+    // TODO(pg-port): Win32 OpenProcessToken
+    unimplemented!()
+}
+
+unsafe fn LookupPrivilegeValue(
+    _lpSystemName: *const c_char,
+    _lpName: *const c_char,
+    _lpLuid: *mut LUID,
+) -> crate::port::win32_port::BOOL {
+    // TODO(pg-port): Win32 LookupPrivilegeValue
+    unimplemented!()
+}
+
+unsafe fn AdjustTokenPrivileges(
+    _TokenHandle: crate::port::win32_port::HANDLE,
+    _DisableAllPrivileges: crate::port::win32_port::BOOL,
+    _NewState: *mut TOKEN_PRIVILEGES,
+    _BufferLength: DWORD,
+    _PreviousState: *mut TOKEN_PRIVILEGES,
+    _ReturnLength: *mut DWORD,
+) -> crate::port::win32_port::BOOL {
+    // TODO(pg-port): Win32 AdjustTokenPrivileges
+    unimplemented!()
+}
+
+unsafe fn dsm_set_control_handle(h: crate::storage::pg_shmem::dsm_handle) {
+    crate::storage::ipc::dsm::dsm_set_control_handle(h)
+}
+
+unsafe fn on_shmem_exit(function: crate::storage::ipc::ipc::pg_on_exit_callback, arg: Datum) {
+    crate::storage::ipc::ipc::on_shmem_exit(function, arg)
+}
+
+// TODO(pg-port): storage/bufmgr.h -- MAXALIGN (simplified).
+macro_rules! MAXALIGN {
+    ($x:expr) => {
+        (($x + 7) & !7)
+    };
+}
+use MAXALIGN;
+
+// TODO(pg-port): real errmsg_internal - same contract as errmsg! in this shim.
+macro_rules! errmsg_internal {
+    ($($arg:tt)*) => { format!($($arg)*) };
+}
+use errmsg_internal;
+
+// utils/misc/guc_tables.c
+const HUGE_PAGES_ON: c_int = 1;
+const HUGE_PAGES_TRY: c_int = 2;
+extern "C" {
+    static mut huge_pages: c_int;
 }
