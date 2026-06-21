@@ -53,15 +53,9 @@ unsafe fn systable_beginscan_ordered(
     _snapshot: *mut c_void,
     _nkeys: c_int,
     _key: *mut ScanKeyData,
-) -> SysScanDesc {
-    unimplemented!()
-}
-unsafe fn systable_getnext_ordered(_sysscan: SysScanDesc, _direction: ScanDirection) -> HeapTuple {
-    unimplemented!()
-}
-unsafe fn systable_endscan_ordered(_sysscan: SysScanDesc) {
-    unimplemented!()
-}
+) -> SysScanDesc { unimplemented!() }
+unsafe fn systable_getnext_ordered(_sysscan: SysScanDesc, _direction: ScanDirection) -> HeapTuple { unimplemented!() }
+unsafe fn systable_endscan_ordered(_sysscan: SysScanDesc) { unimplemented!() }
 use crate::access::sdir::{ForwardScanDirection, ScanDirection};
 use crate::access::stratnum::{
     BTEqualStrategyNumber, BTGreaterEqualStrategyNumber, BTLessEqualStrategyNumber,
@@ -105,6 +99,7 @@ const TOAST_MAX_CHUNK_SIZE: int32 = 1996;
 // access/heaptoast.h (= MaximumBytesPerTuple(TOAST_TUPLES_PER_PAGE[_MAIN])).
 /* #define TOAST_TUPLE_TARGET TOAST_TUPLE_THRESHOLD */
 pub const TOAST_TUPLE_TARGET: Size = 2048;
+pub const TOAST_TUPLE_THRESHOLD: Size = TOAST_TUPLE_TARGET; // access/heaptoast.h
 /* #define TOAST_TUPLE_TARGET_MAIN MaximumBytesPerTuple(TOAST_TUPLES_PER_PAGE_MAIN) */
 pub const TOAST_TUPLE_TARGET_MAIN: Size = 8160;
 

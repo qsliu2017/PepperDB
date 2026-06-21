@@ -32,7 +32,7 @@ use crate::c::bytea;
 const Anum_pg_tablespace_spcoptions: c_int = 4;
 
 // utils/syscache.h - TABLESPACEOID cache id (STUB: syscache not yet ported)
-const TABLESPACEOID: c_int = 0;
+const TABLESPACEOID: c_int = 69;
 
 /*
  * access/reloptions.h - TableSpaceOpts
@@ -59,13 +59,13 @@ static mut maintenance_io_concurrency: c_int = 0;
 // access/reloptions.h - tablespace_reloptions (STUB: reloptions.c not yet ported)
 // TODO: port reloptions.c
 unsafe fn tablespace_reloptions(_reloptions: Datum, _validate: bool) -> *mut bytea {
-    unimplemented!()
+    crate::access::common::reloptions::tablespace_reloptions(_reloptions, _validate) as _
 }
 
 // utils/syscache.h - SearchSysCache1 (STUB: syscache not yet ported)
 // TODO: port syscache.c
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!()
+    crate::utils::cache::syscache::SearchSysCache1(_cacheId, _key1) as _
 }
 
 // utils/syscache.h - SysCacheGetAttr (STUB: syscache not yet ported)
@@ -76,13 +76,13 @@ unsafe fn SysCacheGetAttr(
     _attributeNumber: c_int,
     _isNull: *mut bool,
 ) -> Datum {
-    unimplemented!()
+    crate::utils::cache::syscache::SysCacheGetAttr(_cacheId, _tup as _, _attributeNumber as _, _isNull)
 }
 
 // utils/syscache.h - ReleaseSysCache (STUB: syscache not yet ported)
 // TODO: port syscache.c
 unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!()
+    crate::utils::cache::syscache::ReleaseSysCache(_tuple as _)
 }
 
 // utils/inval.h - SyscacheCallbackFunction signature
@@ -95,13 +95,13 @@ unsafe fn CacheRegisterSyscacheCallback(
     _func: SyscacheCallbackFunction,
     _arg: Datum,
 ) {
-    unimplemented!()
+    crate::utils::cache::inval::CacheRegisterSyscacheCallback(_cacheid, core::mem::transmute(_func), _arg)
 }
 
 // utils/memutils.h - CreateCacheMemoryContext (STUB: not yet ported)
 // TODO: port CreateCacheMemoryContext
 unsafe fn CreateCacheMemoryContext() {
-    unimplemented!()
+    crate::utils::cache::catcache::CreateCacheMemoryContext()
 }
 
 /* ==================================================================== */

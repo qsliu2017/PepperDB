@@ -16,8 +16,11 @@
 use crate::prelude::*;
 use crate::access::common::tupdesc::TupleDesc;
 use crate::executor::tuptable::TupleTableSlot;
-use crate::libpq::libpq::pq_putmessage;
-use crate::libpq::protocol::PqMsg_CommandComplete;
+use crate::libpq::libpq::{pq_flush, pq_putmessage};
+use crate::libpq::pqformat::{pq_beginmessage, pq_endmessage, pq_putemptymessage, pq_sendint8};
+use crate::libpq::protocol::{PqMsg_CommandComplete, PqMsg_EmptyQueryResponse, PqMsg_ReadyForQuery};
+use crate::lib::stringinfo::StringInfoData;
+use crate::access::transam::xact::TransactionBlockStatusCode;
 use core::ffi::{c_char, c_int};
 
 extern "C" {
@@ -119,6 +122,7 @@ pub unsafe fn None_Receiver() -> *mut DestReceiver {
  * TODO(pg-port): wire DestRemoteSimple -> crate::access::common::printsimple and
  * DestRemote/Execute -> crate::access::common::printtup once those land.
  */
+#[no_mangle]
 pub unsafe fn CreateDestReceiver(dest: CommandDest) -> *mut DestReceiver {
     match dest {
         DestRemote | DestRemoteExecute => {
@@ -129,8 +133,9 @@ pub unsafe fn CreateDestReceiver(dest: CommandDest) -> *mut DestReceiver {
                 as *mut DestReceiver
         }
         DestNone => None_Receiver(),
+        DestTuplestore => crate::executor::tstoreReceiver::CreateTuplestoreDestReceiver(),
         _ => {
-            // TODO(pg-port): debug/SPI/tuplestore/copy/SQLfunction/transientrel/
+            // TODO(pg-port): debug/SPI/copy/SQLfunction/transientrel/
             // tuplequeue/explain-serialize receivers (modules not yet ported).
             unimplemented!("CreateDestReceiver: receiver for {:?} not yet ported", dest)
         }
@@ -146,11 +151,27 @@ pub unsafe fn BeginCommand(_commandTag: CommandTag, _dest: CommandDest) {
     /* no-op in C too for most dests; full impl needs the comm layer */
 }
 pub unsafe fn EndCommand(
-    _qc: *const QueryCompletion,
-    _dest: CommandDest,
-    _force_undecorated_output: bool,
+    qc: *const QueryCompletion,
+    dest: CommandDest,
+    force_undecorated_output: bool,
 ) {
-    // TODO(pg-port): needs libpq comm (pq_putmessage).
+    match dest {
+        DestRemote | DestRemoteExecute | DestRemoteSimple => {
+            let mut completion_tag: [c_char; crate::tcop::cmdtag::COMPLETION_TAG_BUFSIZE] =
+                [0; crate::tcop::cmdtag::COMPLETION_TAG_BUFSIZE];
+            let len = crate::tcop::cmdtag::BuildQueryCompletionString(
+                completion_tag.as_mut_ptr(),
+                &*(qc as *const crate::tcop::cmdtag::QueryCompletion),
+                force_undecorated_output,
+            );
+            let _ = pq_putmessage(
+                PqMsg_CommandComplete as c_char,
+                completion_tag.as_ptr(),
+                len + 1,
+            );
+        }
+        _ => {}
+    }
 }
 /* ----------------
  *		EndReplicationCommand - stripped down version of EndCommand
@@ -166,11 +187,27 @@ pub unsafe fn EndReplicationCommand(commandTag: *const c_char) {
     );
 }
 
-pub unsafe fn NullCommand(_dest: CommandDest) {
-    // TODO(pg-port): needs libpq comm.
+pub unsafe fn NullCommand(dest: CommandDest) {
+    match dest {
+        DestRemote | DestRemoteExecute | DestRemoteSimple => {
+            /* Tell the FE that we saw an empty query string */
+            pq_putemptymessage(PqMsg_EmptyQueryResponse as c_char);
+        }
+        _ => {}
+    }
 }
-pub unsafe fn ReadyForQuery(_dest: CommandDest) {
-    // TODO(pg-port): needs libpq comm.
+pub unsafe fn ReadyForQuery(dest: CommandDest) {
+    match dest {
+        DestRemote | DestRemoteExecute | DestRemoteSimple => {
+            let mut buf: StringInfoData = core::mem::zeroed();
+            pq_beginmessage(&mut buf, PqMsg_ReadyForQuery as c_char);
+            pq_sendint8(&mut buf, TransactionBlockStatusCode());
+            pq_endmessage(&mut buf);
+            /* Flush output at end of cycle in any case. */
+            pq_flush();
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]

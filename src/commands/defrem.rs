@@ -82,7 +82,7 @@ pub unsafe fn CheckIndexCompatible(
     unimplemented!()
 }
 pub unsafe fn GetDefaultOpClass(type_id: Oid, am_id: Oid) -> Oid {
-    unimplemented!()
+    crate::commands::indexcmds::GetDefaultOpClass_full(type_id, am_id)
 }
 pub unsafe fn ResolveOpClass(
     opclass: *const List,

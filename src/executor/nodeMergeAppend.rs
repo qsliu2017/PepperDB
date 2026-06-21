@@ -101,7 +101,7 @@ unsafe fn ExecInitPartitionExecPruning(
     _relids: *mut Bitmapset,
     _initially_valid_subplans: *mut *mut Bitmapset,
 ) -> *mut PartitionPruneState {
-    unimplemented!() // TODO: execPartition.c
+    crate::executor::execPartition::ExecInitPartitionExecPruning(_planstate as _, _n_total_subplans as _, _part_prune_index as _, _relids as _, _initially_valid_subplans as _) as _
 }
 
 unsafe fn ExecFindMatchingSubPlans(
@@ -109,7 +109,7 @@ unsafe fn ExecFindMatchingSubPlans(
     _initial_prune: bool,
     _validsubplan_rtis: *mut *mut Bitmapset,
 ) -> *mut Bitmapset {
-    unimplemented!() // TODO: execPartition.c
+    crate::executor::execPartition::ExecFindMatchingSubPlans(_prunestate as _, _initial_prune as _, _validsubplan_rtis as _) as _
 }
 
 /*

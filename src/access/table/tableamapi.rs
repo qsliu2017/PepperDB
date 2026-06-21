@@ -109,9 +109,7 @@ static mut MyDatabaseId: Oid = InvalidOid;
 // TODO(pg-port): replace with the real catalog lookup (pg_am scan). Stubbed to
 // InvalidOid; the only caller is the stubbed-out catalog branch below.
 #[allow(unused_variables)]
-unsafe fn get_table_am_oid(am_name: *const c_char, missing_ok: bool) -> Oid {
-    unimplemented!("get_table_am_oid: pg_am catalog lookup not yet ported")
-}
+unsafe fn get_table_am_oid(am_name: *const c_char, missing_ok: bool) -> Oid { crate::commands::amcmds::get_table_am_oid(am_name, missing_ok) }
 
 /* ----------------------------------------------------------------
  * GetTableAmRoutine
@@ -157,9 +155,7 @@ pub unsafe fn GetTableAmRoutine(amhandler: Oid) -> *const TableAmRoutine {
 // STUB: the heapam handler (heapam_methods) and the static heap TableAmRoutine
 // live in access/heap/heapam_handler.c, which is not yet ported.
 // TODO(pg-port): return &heapam_methods once heapam_handler.c lands.
-pub unsafe fn GetHeapamTableAmRoutine() -> *const TableAmRoutine {
-    unimplemented!("GetHeapamTableAmRoutine: access/heap/heapam_handler.c not yet ported")
-}
+pub unsafe fn GetHeapamTableAmRoutine() -> *const TableAmRoutine { unimplemented!() }
 
 /* ----------------------------------------------------------------
  * check_default_table_access_method (GUC check hook)

@@ -34,9 +34,14 @@ use crate::lib::ilist::{dclist_head, dlist_node};
 
 // PgStat_Kind and custom-kind constants/predicates.
 use crate::utils::pgstat_kind::{
-    pgstat_is_kind_custom, PgStat_Kind, PGSTAT_KIND_BUILTIN_SIZE, PGSTAT_KIND_CUSTOM_MIN,
-    PGSTAT_KIND_CUSTOM_SIZE,
+    pgstat_is_kind_builtin, pgstat_is_kind_custom, PgStat_Kind, PGSTAT_KIND_ARCHIVER,
+    PGSTAT_KIND_BACKEND, PGSTAT_KIND_BGWRITER, PGSTAT_KIND_BUILTIN_SIZE, PGSTAT_KIND_CHECKPOINTER,
+    PGSTAT_KIND_CUSTOM_MIN, PGSTAT_KIND_CUSTOM_SIZE, PGSTAT_KIND_DATABASE, PGSTAT_KIND_FUNCTION,
+    PGSTAT_KIND_IO, PGSTAT_KIND_RELATION, PGSTAT_KIND_REPLSLOT, PGSTAT_KIND_SLRU,
+    PGSTAT_KIND_SUBSCRIPTION, PGSTAT_KIND_WAL,
 };
+
+use core::mem::{offset_of, size_of};
 
 // LWLock, TimestampTz, BACKEND_NUM_TYPES, SLRU_NUM_ELEMENTS and the concrete
 // per-kind stat payload structs already live in the pgstat subset module.
@@ -49,10 +54,10 @@ use crate::utils::pgstat_kind::{
 // should be deduped by the main agent. Only the leaf stat payload structs and
 // shared scalar aliases are imported from the subset.
 use crate::utils::activity::pgstat::{
-    LWLock, PgStat_ArchiverStats, PgStat_BgWriterStats, PgStat_CheckpointerStats, PgStat_IO,
-    PgStat_SLRUStats, PgStat_StatDBEntry, PgStat_StatFuncEntry, PgStat_StatReplSlotEntry,
-    PgStat_StatSubEntry, PgStat_StatTabEntry, PgStat_WalStats, TimestampTz, BACKEND_NUM_TYPES,
-    SLRU_NUM_ELEMENTS,
+    LWLock, PgStat_ArchiverStats, PgStat_BackendSubEntry, PgStat_BgWriterStats,
+    PgStat_CheckpointerStats, PgStat_FunctionCounts, PgStat_IO, PgStat_SLRUStats, PgStat_StatDBEntry,
+    PgStat_StatFuncEntry, PgStat_StatReplSlotEntry, PgStat_StatSubEntry, PgStat_StatTabEntry,
+    PgStat_TableStatus, PgStat_WalStats, TimestampTz, BACKEND_NUM_TYPES, SLRU_NUM_ELEMENTS,
 };
 
 // ----------------------------------------------------------------------------
@@ -510,61 +515,241 @@ pub struct PgStat_LocalState {
 // Functions in pgstat.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_get_kind_info(_kind: PgStat_Kind) -> *const PgStat_KindInfo {
-    unimplemented!()
+// ----------------------------------------------------------------------------
+// pgstat_kind_builtin_infos -- metadata for every built-in stats kind.
+//
+// 1:1 port of `pgstat_kind_builtin_infos[PGSTAT_KIND_BUILTIN_SIZE]` in
+// pgstat.c. The array is indexed directly by PgStat_Kind (slot 0 ==
+// PGSTAT_KIND_INVALID is left zeroed). Because PgStat_KindInfo carries raw
+// pointers (name, callbacks) it is not Sync, so the const-in-C table is built
+// once on first use into a process-local `static mut` guarded by a `Once`.
+//
+// DEVIATION: every *_cb is left None. The ported per-kind callbacks are plain
+// `unsafe fn` (not `extern "C"`), so they are not assignable to the struct's
+// `Option<unsafe extern "C" fn ...>` fields without an ABI change. StatsShmemInit
+// /StatsShmemSize read only the sizes/offsets/flags, so None is safe for the
+// shared-memory bring-up these tables exist to unblock.
+// ----------------------------------------------------------------------------
+
+const fn kind_info_zeroed() -> PgStat_KindInfo {
+    PgStat_KindInfo {
+        flags: 0,
+        shared_size: 0,
+        snapshot_ctl_off: 0,
+        shared_ctl_off: 0,
+        shared_data_off: 0,
+        shared_data_len: 0,
+        pending_size: 0,
+        init_backend_cb: None,
+        flush_pending_cb: None,
+        delete_pending_cb: None,
+        reset_timestamp_cb: None,
+        to_serialized_name: None,
+        from_serialized_name: None,
+        init_shmem_cb: None,
+        flush_static_cb: None,
+        reset_all_cb: None,
+        snapshot_cb: None,
+        name: core::ptr::null(),
+    }
 }
 
-pub unsafe fn pgstat_register_kind(_kind: PgStat_Kind, _kind_info: *const PgStat_KindInfo) {
-    unimplemented!()
+static mut PGSTAT_KIND_BUILTIN_INFOS: [PgStat_KindInfo; PGSTAT_KIND_BUILTIN_SIZE as usize] =
+    [const { kind_info_zeroed() }; PGSTAT_KIND_BUILTIN_SIZE as usize];
+
+static PGSTAT_KIND_BUILTIN_INIT: std::sync::Once = std::sync::Once::new();
+
+unsafe fn pgstat_init_kind_builtin_infos() {
+    let table = &mut *core::ptr::addr_of_mut!(PGSTAT_KIND_BUILTIN_INFOS);
+
+    // -- variable-numbered kinds --
+
+    {
+        let e = &mut table[PGSTAT_KIND_DATABASE as usize];
+        e.name = c"database".as_ptr();
+        e.set_write_to_file(true);
+        // so pg_stat_database entries can be seen in all databases
+        e.set_accessed_across_databases(true);
+        e.shared_size = size_of::<PgStatShared_Database>() as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_Database, stats) as uint32;
+        e.shared_data_len = size_of::<PgStat_StatDBEntry>() as uint32;
+        e.pending_size = size_of::<PgStat_StatDBEntry>() as uint32;
+    }
+
+    {
+        let e = &mut table[PGSTAT_KIND_RELATION as usize];
+        e.name = c"relation".as_ptr();
+        e.set_write_to_file(true);
+        e.shared_size = size_of::<PgStatShared_Relation>() as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_Relation, stats) as uint32;
+        e.shared_data_len = size_of::<PgStat_StatTabEntry>() as uint32;
+        e.pending_size = size_of::<PgStat_TableStatus>() as uint32;
+    }
+
+    {
+        let e = &mut table[PGSTAT_KIND_FUNCTION as usize];
+        e.name = c"function".as_ptr();
+        e.set_write_to_file(true);
+        e.shared_size = size_of::<PgStatShared_Function>() as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_Function, stats) as uint32;
+        e.shared_data_len = size_of::<PgStat_StatFuncEntry>() as uint32;
+        e.pending_size = size_of::<PgStat_FunctionCounts>() as uint32;
+    }
+
+    {
+        let e = &mut table[PGSTAT_KIND_REPLSLOT as usize];
+        e.name = c"replslot".as_ptr();
+        e.set_write_to_file(true);
+        e.set_accessed_across_databases(true);
+        e.shared_size = size_of::<PgStatShared_ReplSlot>() as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_ReplSlot, stats) as uint32;
+        e.shared_data_len = size_of::<PgStat_StatReplSlotEntry>() as uint32;
+    }
+
+    {
+        let e = &mut table[PGSTAT_KIND_SUBSCRIPTION as usize];
+        e.name = c"subscription".as_ptr();
+        e.set_write_to_file(true);
+        // so pg_stat_subscription_stats entries can be seen in all databases
+        e.set_accessed_across_databases(true);
+        e.shared_size = size_of::<PgStatShared_Subscription>() as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_Subscription, stats) as uint32;
+        e.shared_data_len = size_of::<PgStat_StatSubEntry>() as uint32;
+        e.pending_size = size_of::<PgStat_BackendSubEntry>() as uint32;
+    }
+
+    {
+        let e = &mut table[PGSTAT_KIND_BACKEND as usize];
+        e.name = c"backend".as_ptr();
+        e.set_accessed_across_databases(true);
+        e.shared_size = size_of::<PgStatShared_Backend>() as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_Backend, stats) as uint32;
+        // DEVIATION: PgStat_Backend is `c_void` (size 0) in this port; upstream
+        // uses sizeof(((PgStatShared_Backend *)0)->stats).
+        e.shared_data_len = size_of::<PgStat_Backend>() as uint32;
+    }
+
+    // -- fixed-numbered kinds --
+
+    {
+        let e = &mut table[PGSTAT_KIND_ARCHIVER as usize];
+        e.name = c"archiver".as_ptr();
+        e.init_shmem_cb = Some(crate::utils::activity::pgstat_archiver::pgstat_archiver_init_shmem_cb);
+        e.set_fixed_amount(true);
+        e.set_write_to_file(true);
+        e.snapshot_ctl_off = offset_of!(PgStat_Snapshot, archiver) as uint32;
+        e.shared_ctl_off = offset_of!(PgStat_ShmemControl, archiver) as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_Archiver, stats) as uint32;
+        e.shared_data_len = size_of::<PgStat_ArchiverStats>() as uint32;
+    }
+
+    {
+        let e = &mut table[PGSTAT_KIND_BGWRITER as usize];
+        e.name = c"bgwriter".as_ptr();
+        e.init_shmem_cb = Some(crate::utils::activity::pgstat_bgwriter::pgstat_bgwriter_init_shmem_cb);
+        e.set_fixed_amount(true);
+        e.set_write_to_file(true);
+        e.snapshot_ctl_off = offset_of!(PgStat_Snapshot, bgwriter) as uint32;
+        e.shared_ctl_off = offset_of!(PgStat_ShmemControl, bgwriter) as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_BgWriter, stats) as uint32;
+        e.shared_data_len = size_of::<PgStat_BgWriterStats>() as uint32;
+    }
+
+    {
+        let e = &mut table[PGSTAT_KIND_CHECKPOINTER as usize];
+        e.name = c"checkpointer".as_ptr();
+        e.init_shmem_cb = Some(crate::utils::activity::pgstat_checkpointer::pgstat_checkpointer_init_shmem_cb);
+        e.set_fixed_amount(true);
+        e.set_write_to_file(true);
+        e.snapshot_ctl_off = offset_of!(PgStat_Snapshot, checkpointer) as uint32;
+        e.shared_ctl_off = offset_of!(PgStat_ShmemControl, checkpointer) as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_Checkpointer, stats) as uint32;
+        e.shared_data_len = size_of::<PgStat_CheckpointerStats>() as uint32;
+    }
+
+    {
+        let e = &mut table[PGSTAT_KIND_IO as usize];
+        e.name = c"io".as_ptr();
+        e.init_shmem_cb = Some(crate::utils::activity::pgstat_io::pgstat_io_init_shmem_cb);
+        e.set_fixed_amount(true);
+        e.set_write_to_file(true);
+        e.snapshot_ctl_off = offset_of!(PgStat_Snapshot, io) as uint32;
+        e.shared_ctl_off = offset_of!(PgStat_ShmemControl, io) as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_IO, stats) as uint32;
+        e.shared_data_len = size_of::<PgStat_IO>() as uint32;
+    }
+
+    {
+        let e = &mut table[PGSTAT_KIND_SLRU as usize];
+        e.name = c"slru".as_ptr();
+        e.init_shmem_cb = Some(crate::utils::activity::pgstat_slru::pgstat_slru_init_shmem_cb);
+        e.set_fixed_amount(true);
+        e.set_write_to_file(true);
+        e.snapshot_ctl_off = offset_of!(PgStat_Snapshot, slru) as uint32;
+        e.shared_ctl_off = offset_of!(PgStat_ShmemControl, slru) as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_SLRU, stats) as uint32;
+        e.shared_data_len = size_of::<[PgStat_SLRUStats; SLRU_NUM_ELEMENTS]>() as uint32;
+    }
+
+    {
+        let e = &mut table[PGSTAT_KIND_WAL as usize];
+        e.name = c"wal".as_ptr();
+        e.init_shmem_cb = Some(crate::utils::activity::pgstat_wal::pgstat_wal_init_shmem_cb);
+        e.set_fixed_amount(true);
+        e.set_write_to_file(true);
+        e.snapshot_ctl_off = offset_of!(PgStat_Snapshot, wal) as uint32;
+        e.shared_ctl_off = offset_of!(PgStat_ShmemControl, wal) as uint32;
+        e.shared_data_off = offset_of!(PgStatShared_Wal, stats) as uint32;
+        e.shared_data_len = size_of::<PgStat_WalStats>() as uint32;
+    }
 }
+
+pub unsafe fn pgstat_get_kind_info(kind: PgStat_Kind) -> *const PgStat_KindInfo {
+    if pgstat_is_kind_builtin(kind) {
+        PGSTAT_KIND_BUILTIN_INIT.call_once(|| unsafe { pgstat_init_kind_builtin_infos() });
+        let table = core::ptr::addr_of!(PGSTAT_KIND_BUILTIN_INFOS) as *const PgStat_KindInfo;
+        return table.add(kind as usize);
+    }
+
+    // Custom kinds are not registered in this subset.
+    core::ptr::null()
+}
+
+pub unsafe fn pgstat_register_kind(_kind: PgStat_Kind, _kind_info: *const PgStat_KindInfo) { crate::utils::activity::pgstat::pgstat_register_kind(_kind, _kind_info as _) }
 
 /// `pgstat_assert_is_up()`. Under USE_ASSERT_CHECKING this is an extern
 /// function; otherwise a no-op macro. Translated as a no-op inline.
 #[inline]
 pub fn pgstat_assert_is_up() {}
 
-pub unsafe fn pgstat_delete_pending_entry(_entry_ref: *mut PgStat_EntryRef) {
-    unimplemented!()
-}
+pub unsafe fn pgstat_delete_pending_entry(_entry_ref: *mut PgStat_EntryRef) { unimplemented!() }
 
 pub unsafe fn pgstat_prep_pending_entry(
     _kind: PgStat_Kind,
     _dboid: Oid,
     _objid: u64,
     _created_entry: *mut bool,
-) -> *mut PgStat_EntryRef {
-    unimplemented!()
-}
+) -> *mut PgStat_EntryRef { unimplemented!() }
 
 pub unsafe fn pgstat_fetch_pending_entry(
     _kind: PgStat_Kind,
     _dboid: Oid,
     _objid: u64,
-) -> *mut PgStat_EntryRef {
-    unimplemented!()
-}
+) -> *mut PgStat_EntryRef { unimplemented!() }
 
 pub unsafe fn pgstat_fetch_entry(_kind: PgStat_Kind, _dboid: Oid, _objid: u64) -> *mut c_void {
     unimplemented!()
 }
 
-pub unsafe fn pgstat_snapshot_fixed(_kind: PgStat_Kind) {
-    unimplemented!()
-}
+pub unsafe fn pgstat_snapshot_fixed(_kind: PgStat_Kind) { crate::utils::activity::pgstat::pgstat_snapshot_fixed(_kind) }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_archiver.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_archiver_init_shmem_cb(_stats: *mut c_void) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_archiver_reset_all_cb(_ts: TimestampTz) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_archiver_snapshot_cb() {
-    unimplemented!()
-}
+pub unsafe fn pgstat_archiver_init_shmem_cb(_stats: *mut c_void) { crate::utils::activity::pgstat_archiver::pgstat_archiver_init_shmem_cb(_stats) }
+pub unsafe fn pgstat_archiver_reset_all_cb(_ts: TimestampTz) { crate::utils::activity::pgstat_archiver::pgstat_archiver_reset_all_cb(_ts) }
+pub unsafe fn pgstat_archiver_snapshot_cb() { crate::utils::activity::pgstat_archiver::pgstat_archiver_snapshot_cb() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_backend.c
@@ -576,133 +761,77 @@ pub const PGSTAT_BACKEND_FLUSH_IO: u32 = 1 << 0;
 pub const PGSTAT_BACKEND_FLUSH_WAL: u32 = 1 << 1;
 pub const PGSTAT_BACKEND_FLUSH_ALL: u32 = PGSTAT_BACKEND_FLUSH_IO | PGSTAT_BACKEND_FLUSH_WAL;
 
-pub unsafe fn pgstat_flush_backend(_nowait: bool, _flags: bits32) -> bool {
-    unimplemented!()
-}
-pub unsafe fn pgstat_backend_flush_cb(_nowait: bool) -> bool {
-    unimplemented!()
-}
+pub unsafe fn pgstat_flush_backend(_nowait: bool, _flags: bits32) -> bool { crate::utils::activity::pgstat_backend::pgstat_flush_backend(_nowait, _flags) }
+pub unsafe fn pgstat_backend_flush_cb(_nowait: bool) -> bool { crate::utils::activity::pgstat_backend::pgstat_backend_flush_cb(_nowait) }
 pub unsafe fn pgstat_backend_reset_timestamp_cb(
     _header: *mut PgStatShared_Common,
     _ts: TimestampTz,
-) {
-    unimplemented!()
-}
+) { crate::utils::activity::pgstat_backend::pgstat_backend_reset_timestamp_cb(_header, _ts) }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_bgwriter.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_bgwriter_init_shmem_cb(_stats: *mut c_void) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_bgwriter_reset_all_cb(_ts: TimestampTz) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_bgwriter_snapshot_cb() {
-    unimplemented!()
-}
+pub unsafe fn pgstat_bgwriter_init_shmem_cb(_stats: *mut c_void) { crate::utils::activity::pgstat_bgwriter::pgstat_bgwriter_init_shmem_cb(_stats) }
+pub unsafe fn pgstat_bgwriter_reset_all_cb(_ts: TimestampTz) { crate::utils::activity::pgstat_bgwriter::pgstat_bgwriter_reset_all_cb(_ts) }
+pub unsafe fn pgstat_bgwriter_snapshot_cb() { crate::utils::activity::pgstat_bgwriter::pgstat_bgwriter_snapshot_cb() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_checkpointer.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_checkpointer_init_shmem_cb(_stats: *mut c_void) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_checkpointer_reset_all_cb(_ts: TimestampTz) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_checkpointer_snapshot_cb() {
-    unimplemented!()
-}
+pub unsafe fn pgstat_checkpointer_init_shmem_cb(_stats: *mut c_void) { crate::utils::activity::pgstat_checkpointer::pgstat_checkpointer_init_shmem_cb(_stats) }
+pub unsafe fn pgstat_checkpointer_reset_all_cb(_ts: TimestampTz) { crate::utils::activity::pgstat_checkpointer::pgstat_checkpointer_reset_all_cb(_ts) }
+pub unsafe fn pgstat_checkpointer_snapshot_cb() { crate::utils::activity::pgstat_checkpointer::pgstat_checkpointer_snapshot_cb() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_database.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_report_disconnect(_dboid: Oid) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_update_dbstats(_ts: TimestampTz) {
-    unimplemented!()
-}
-pub unsafe fn AtEOXact_PgStat_Database(_isCommit: bool, _parallel: bool) {
-    unimplemented!()
-}
+pub unsafe fn pgstat_report_disconnect(_dboid: Oid) { crate::utils::activity::pgstat_database::pgstat_report_disconnect(_dboid) }
+pub unsafe fn pgstat_update_dbstats(_ts: TimestampTz) { crate::utils::activity::pgstat_database::pgstat_update_dbstats(_ts) }
+pub unsafe fn AtEOXact_PgStat_Database(_isCommit: bool, _parallel: bool) { crate::utils::activity::pgstat_database::AtEOXact_PgStat_Database(_isCommit, _parallel) }
 
-pub unsafe fn pgstat_prep_database_pending(_dboid: Oid) -> *mut PgStat_StatDBEntry {
-    unimplemented!()
-}
-pub unsafe fn pgstat_reset_database_timestamp(_dboid: Oid, _ts: TimestampTz) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_database_flush_cb(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool {
-    unimplemented!()
-}
+pub unsafe fn pgstat_prep_database_pending(_dboid: Oid) -> *mut PgStat_StatDBEntry { crate::utils::activity::pgstat_database::pgstat_prep_database_pending(_dboid) }
+pub unsafe fn pgstat_reset_database_timestamp(_dboid: Oid, _ts: TimestampTz) { crate::utils::activity::pgstat_database::pgstat_reset_database_timestamp(_dboid, _ts) }
+pub unsafe fn pgstat_database_flush_cb(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool { unimplemented!() }
 pub unsafe fn pgstat_database_reset_timestamp_cb(
     _header: *mut PgStatShared_Common,
     _ts: TimestampTz,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_function.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_function_flush_cb(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool {
-    unimplemented!()
-}
+pub unsafe fn pgstat_function_flush_cb(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool { unimplemented!() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_io.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_flush_io(_nowait: bool) {
-    unimplemented!()
-}
+pub unsafe fn pgstat_flush_io(_nowait: bool) { crate::utils::activity::pgstat_io::pgstat_flush_io(_nowait) }
 
-pub unsafe fn pgstat_io_flush_cb(_nowait: bool) -> bool {
-    unimplemented!()
-}
-pub unsafe fn pgstat_io_init_shmem_cb(_stats: *mut c_void) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_io_reset_all_cb(_ts: TimestampTz) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_io_snapshot_cb() {
-    unimplemented!()
-}
+pub unsafe fn pgstat_io_flush_cb(_nowait: bool) -> bool { crate::utils::activity::pgstat_io::pgstat_io_flush_cb(_nowait) }
+pub unsafe fn pgstat_io_init_shmem_cb(_stats: *mut c_void) { crate::utils::activity::pgstat_io::pgstat_io_init_shmem_cb(_stats) }
+pub unsafe fn pgstat_io_reset_all_cb(_ts: TimestampTz) { crate::utils::activity::pgstat_io::pgstat_io_reset_all_cb(_ts) }
+pub unsafe fn pgstat_io_snapshot_cb() { crate::utils::activity::pgstat_io::pgstat_io_snapshot_cb() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_relation.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn AtEOXact_PgStat_Relations(_xact_state: *mut PgStat_SubXactStatus, _isCommit: bool) {
-    unimplemented!()
-}
+pub unsafe fn AtEOXact_PgStat_Relations(_xact_state: *mut PgStat_SubXactStatus, _isCommit: bool) { crate::utils::activity::pgstat_relation::AtEOXact_PgStat_Relations(_xact_state, _isCommit) }
 pub unsafe fn AtEOSubXact_PgStat_Relations(
     _xact_state: *mut PgStat_SubXactStatus,
     _isCommit: bool,
     _nestDepth: c_int,
-) {
-    unimplemented!()
-}
-pub unsafe fn AtPrepare_PgStat_Relations(_xact_state: *mut PgStat_SubXactStatus) {
-    unimplemented!()
-}
-pub unsafe fn PostPrepare_PgStat_Relations(_xact_state: *mut PgStat_SubXactStatus) {
-    unimplemented!()
-}
+) { crate::utils::activity::pgstat_relation::AtEOSubXact_PgStat_Relations(_xact_state, _isCommit, _nestDepth) }
+pub unsafe fn AtPrepare_PgStat_Relations(_xact_state: *mut PgStat_SubXactStatus) { crate::utils::activity::pgstat_relation::AtPrepare_PgStat_Relations(_xact_state) }
+pub unsafe fn PostPrepare_PgStat_Relations(_xact_state: *mut PgStat_SubXactStatus) { crate::utils::activity::pgstat_relation::PostPrepare_PgStat_Relations(_xact_state) }
 
-pub unsafe fn pgstat_relation_flush_cb(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool {
-    unimplemented!()
-}
-pub unsafe fn pgstat_relation_delete_pending_cb(_entry_ref: *mut PgStat_EntryRef) {
-    unimplemented!()
-}
+pub unsafe fn pgstat_relation_flush_cb(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool { unimplemented!() }
+pub unsafe fn pgstat_relation_delete_pending_cb(_entry_ref: *mut PgStat_EntryRef) { unimplemented!() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_replslot.c
@@ -711,22 +840,16 @@ pub unsafe fn pgstat_relation_delete_pending_cb(_entry_ref: *mut PgStat_EntryRef
 pub unsafe fn pgstat_replslot_reset_timestamp_cb(
     _header: *mut PgStatShared_Common,
     _ts: TimestampTz,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 pub unsafe fn pgstat_replslot_to_serialized_name_cb(
     _key: *const PgStat_HashKey,
     _header: *const PgStatShared_Common,
     _name: *mut NameData,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 pub unsafe fn pgstat_replslot_from_serialized_name_cb(
     _name: *const NameData,
     _key: *mut PgStat_HashKey,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { unimplemented!() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_shmem.c
@@ -735,9 +858,7 @@ pub unsafe fn pgstat_replslot_from_serialized_name_cb(
 pub unsafe fn pgstat_attach_shmem() {
     unimplemented!()
 }
-pub unsafe fn pgstat_detach_shmem() {
-    unimplemented!()
-}
+pub unsafe fn pgstat_detach_shmem() { crate::utils::activity::pgstat_shmem::pgstat_detach_shmem() }
 
 pub unsafe fn pgstat_get_entry_ref(
     _kind: PgStat_Kind,
@@ -748,27 +869,15 @@ pub unsafe fn pgstat_get_entry_ref(
 ) -> *mut PgStat_EntryRef {
     unimplemented!()
 }
-pub unsafe fn pgstat_lock_entry(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool {
-    unimplemented!()
-}
-pub unsafe fn pgstat_lock_entry_shared(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool {
-    unimplemented!()
-}
-pub unsafe fn pgstat_unlock_entry(_entry_ref: *mut PgStat_EntryRef) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_drop_entry(_kind: PgStat_Kind, _dboid: Oid, _objid: u64) -> bool {
-    unimplemented!()
-}
-pub unsafe fn pgstat_drop_all_entries() {
-    unimplemented!()
-}
+pub unsafe fn pgstat_lock_entry(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool { crate::utils::activity::pgstat_shmem::pgstat_lock_entry(_entry_ref, _nowait) }
+pub unsafe fn pgstat_lock_entry_shared(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool { crate::utils::activity::pgstat_shmem::pgstat_lock_entry_shared(_entry_ref, _nowait) }
+pub unsafe fn pgstat_unlock_entry(_entry_ref: *mut PgStat_EntryRef) { crate::utils::activity::pgstat_shmem::pgstat_unlock_entry(_entry_ref) }
+pub unsafe fn pgstat_drop_entry(_kind: PgStat_Kind, _dboid: Oid, _objid: u64) -> bool { crate::utils::activity::pgstat_shmem::pgstat_drop_entry(_kind, _dboid, _objid) }
+pub unsafe fn pgstat_drop_all_entries() { crate::utils::activity::pgstat_shmem::pgstat_drop_all_entries() }
 pub unsafe fn pgstat_drop_matching_entries(
     _do_drop: Option<unsafe extern "C" fn(*mut PgStatShared_HashEntry, Datum) -> bool>,
     _match_data: Datum,
-) {
-    unimplemented!()
-}
+) { crate::utils::activity::pgstat_shmem::pgstat_drop_matching_entries(_do_drop, _match_data) }
 pub unsafe fn pgstat_get_entry_ref_locked(
     _kind: PgStat_Kind,
     _dboid: Oid,
@@ -777,94 +886,56 @@ pub unsafe fn pgstat_get_entry_ref_locked(
 ) -> *mut PgStat_EntryRef {
     unimplemented!()
 }
-pub unsafe fn pgstat_reset_entry(_kind: PgStat_Kind, _dboid: Oid, _objid: u64, _ts: TimestampTz) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_reset_entries_of_kind(_kind: PgStat_Kind, _ts: TimestampTz) {
-    unimplemented!()
-}
+pub unsafe fn pgstat_reset_entry(_kind: PgStat_Kind, _dboid: Oid, _objid: u64, _ts: TimestampTz) { crate::utils::activity::pgstat::pgstat_reset_entry(_kind, _dboid, _objid as _, _ts) }
+pub unsafe fn pgstat_reset_entries_of_kind(_kind: PgStat_Kind, _ts: TimestampTz) { crate::utils::activity::pgstat_shmem::pgstat_reset_entries_of_kind(_kind, _ts) }
 pub unsafe fn pgstat_reset_matching_entries(
     _do_reset: Option<unsafe extern "C" fn(*mut PgStatShared_HashEntry, Datum) -> bool>,
     _match_data: Datum,
     _ts: TimestampTz,
-) {
-    unimplemented!()
-}
+) { crate::utils::activity::pgstat_shmem::pgstat_reset_matching_entries(_do_reset, _match_data, _ts) }
 
-pub unsafe fn pgstat_request_entry_refs_gc() {
-    unimplemented!()
-}
+pub unsafe fn pgstat_request_entry_refs_gc() { crate::utils::activity::pgstat_shmem::pgstat_request_entry_refs_gc() }
 pub unsafe fn pgstat_init_entry(
     _kind: PgStat_Kind,
     _shhashent: *mut PgStatShared_HashEntry,
-) -> *mut PgStatShared_Common {
-    unimplemented!()
-}
+) -> *mut PgStatShared_Common { crate::utils::activity::pgstat_shmem::pgstat_init_entry(_kind, _shhashent) }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_slru.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_slru_flush_cb(_nowait: bool) -> bool {
-    unimplemented!()
-}
-pub unsafe fn pgstat_slru_init_shmem_cb(_stats: *mut c_void) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_slru_reset_all_cb(_ts: TimestampTz) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_slru_snapshot_cb() {
-    unimplemented!()
-}
+pub unsafe fn pgstat_slru_flush_cb(_nowait: bool) -> bool { crate::utils::activity::pgstat_slru::pgstat_slru_flush_cb(_nowait) }
+pub unsafe fn pgstat_slru_init_shmem_cb(_stats: *mut c_void) { crate::utils::activity::pgstat_slru::pgstat_slru_init_shmem_cb(_stats) }
+pub unsafe fn pgstat_slru_reset_all_cb(_ts: TimestampTz) { crate::utils::activity::pgstat_slru::pgstat_slru_reset_all_cb(_ts) }
+pub unsafe fn pgstat_slru_snapshot_cb() { crate::utils::activity::pgstat_slru::pgstat_slru_snapshot_cb() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_wal.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_wal_init_backend_cb() {
-    unimplemented!()
-}
-pub unsafe fn pgstat_wal_flush_cb(_nowait: bool) -> bool {
-    unimplemented!()
-}
-pub unsafe fn pgstat_wal_init_shmem_cb(_stats: *mut c_void) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_wal_reset_all_cb(_ts: TimestampTz) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_wal_snapshot_cb() {
-    unimplemented!()
-}
+pub unsafe fn pgstat_wal_init_backend_cb() { crate::utils::activity::pgstat_wal::pgstat_wal_init_backend_cb() }
+pub unsafe fn pgstat_wal_flush_cb(_nowait: bool) -> bool { crate::utils::activity::pgstat_wal::pgstat_wal_flush_cb(_nowait) }
+pub unsafe fn pgstat_wal_init_shmem_cb(_stats: *mut c_void) { crate::utils::activity::pgstat_wal::pgstat_wal_init_shmem_cb(_stats) }
+pub unsafe fn pgstat_wal_reset_all_cb(_ts: TimestampTz) { crate::utils::activity::pgstat_wal::pgstat_wal_reset_all_cb(_ts) }
+pub unsafe fn pgstat_wal_snapshot_cb() { crate::utils::activity::pgstat_wal::pgstat_wal_snapshot_cb() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_subscription.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_subscription_flush_cb(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool {
-    unimplemented!()
-}
+pub unsafe fn pgstat_subscription_flush_cb(_entry_ref: *mut PgStat_EntryRef, _nowait: bool) -> bool { unimplemented!() }
 pub unsafe fn pgstat_subscription_reset_timestamp_cb(
     _header: *mut PgStatShared_Common,
     _ts: TimestampTz,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 // ----------------------------------------------------------------------------
 // Functions in pgstat_xact.c
 // ----------------------------------------------------------------------------
 
-pub unsafe fn pgstat_get_xact_stack_level(_nest_level: c_int) -> *mut PgStat_SubXactStatus {
-    unimplemented!()
-}
-pub unsafe fn pgstat_drop_transactional(_kind: PgStat_Kind, _dboid: Oid, _objid: u64) {
-    unimplemented!()
-}
-pub unsafe fn pgstat_create_transactional(_kind: PgStat_Kind, _dboid: Oid, _objid: u64) {
-    unimplemented!()
-}
+pub unsafe fn pgstat_get_xact_stack_level(_nest_level: c_int) -> *mut PgStat_SubXactStatus { crate::utils::activity::pgstat_xact::pgstat_get_xact_stack_level(_nest_level) }
+pub unsafe fn pgstat_drop_transactional(_kind: PgStat_Kind, _dboid: Oid, _objid: u64) { crate::utils::activity::pgstat_xact::pgstat_drop_transactional(_kind, _dboid, _objid) }
+pub unsafe fn pgstat_create_transactional(_kind: PgStat_Kind, _dboid: Oid, _objid: u64) { crate::utils::activity::pgstat_xact::pgstat_create_transactional(_kind, _dboid, _objid) }
 
 // ----------------------------------------------------------------------------
 // Variables in pgstat.c
@@ -1062,6 +1133,4 @@ pub unsafe fn pgstat_get_custom_snapshot_data(kind: PgStat_Kind) -> *mut c_void 
 
 // fasthash32 from common/hashfn_unstable.h. TODO: dedup if/when that header is
 // ported. Declared here as a prototype-style stub.
-unsafe fn fasthash32(_data: *const c_char, _len: Size, _seed: uint32) -> uint32 {
-    unimplemented!()
-}
+unsafe fn fasthash32(_data: *const c_char, _len: Size, _seed: uint32) -> uint32 { crate::common::hashfn_unstable::fasthash32(_data as _, _len, _seed as _) }

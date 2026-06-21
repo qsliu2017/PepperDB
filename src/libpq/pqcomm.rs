@@ -111,15 +111,13 @@ const EADDRINUSE: c_int = 48;
 
 // be-secure.c
 unsafe fn secure_read(_port: *mut Port, _ptr: *mut c_void, _len: Size) -> ssize_t {
-    /* TODO(pg-port): real secure_read lives in backend/libpq/be-secure.c */
-    0
+    crate::libpq::be_secure::secure_read(_port, _ptr, _len)
 }
 unsafe fn secure_write(_port: *mut Port, _ptr: *const c_void, _len: Size) -> ssize_t {
-    /* TODO(pg-port): real secure_write lives in backend/libpq/be-secure.c */
-    0
+    crate::libpq::be_secure::secure_write(_port, _ptr, _len)
 }
 unsafe fn secure_close(_port: *mut Port) {
-    /* TODO(pg-port): real secure_close lives in backend/libpq/be-secure.c */
+    crate::libpq::be_secure::secure_close(_port)
 }
 
 // common/ip.c
@@ -129,11 +127,10 @@ unsafe fn pg_getaddrinfo_all(
     _hintp: *const addrinfo,
     _result: *mut *mut addrinfo,
 ) -> c_int {
-    /* TODO(pg-port): real pg_getaddrinfo_all lives in src/port/getaddrinfo.c / common/ip.c */
-    -1
+    crate::common::ip::pg_getaddrinfo_all(_hostname, _servname, _hintp as _, _result as _)
 }
 unsafe fn pg_freeaddrinfo_all(_hint_ai_family: c_int, _ai: *mut addrinfo) {
-    /* TODO(pg-port): real pg_freeaddrinfo_all lives in common/ip.c */
+    crate::common::ip::pg_freeaddrinfo_all(_hint_ai_family, _ai as _)
 }
 unsafe fn pg_getnameinfo_all(
     _addr: *const sockaddr_storage,
@@ -144,8 +141,7 @@ unsafe fn pg_getnameinfo_all(
     _servicelen: c_int,
     _flags: c_int,
 ) -> c_int {
-    /* TODO(pg-port): real pg_getnameinfo_all lives in common/ip.c */
-    -1
+    crate::common::ip::pg_getnameinfo_all(_addr as _, _salen as _, _node, _nodelen, _service, _servicelen, _flags)
 }
 
 // miscadmin.c / utils/init/miscinit.c
@@ -158,9 +154,8 @@ unsafe fn CreateSocketLockFile(
 }
 
 // storage/waiteventset.c
-unsafe fn CreateWaitEventSet(_resowner: *mut c_void, _nevents: c_int) -> *mut WaitEventSet {
-    /* TODO(pg-port): real CreateWaitEventSet lives in storage/ipc/waiteventset.c */
-    null_mut()
+unsafe fn CreateWaitEventSet(resowner: *mut c_void, nevents: c_int) -> *mut WaitEventSet {
+    crate::storage::ipc::waiteventset::CreateWaitEventSet(resowner as _, nevents) as _
 }
 unsafe fn AddWaitEventToSet(
     _set: *mut WaitEventSet,
@@ -169,8 +164,7 @@ unsafe fn AddWaitEventToSet(
     _latch: *mut Latch,
     _user_data: *mut c_void,
 ) -> c_int {
-    /* TODO(pg-port): real AddWaitEventToSet lives in storage/ipc/waiteventset.c */
-    0
+    crate::storage::ipc::waiteventset::AddWaitEventToSet(_set as _, _events, _fd, _latch as _, _user_data)
 }
 unsafe fn ModifyWaitEvent(
     _set: *mut WaitEventSet,
@@ -178,7 +172,7 @@ unsafe fn ModifyWaitEvent(
     _events: u32,
     _latch: *mut Latch,
 ) {
-    /* TODO(pg-port): real ModifyWaitEvent lives in storage/ipc/waiteventset.c */
+    crate::storage::ipc::waiteventset::ModifyWaitEvent(_set as _, _pos, _events, _latch as _)
 }
 unsafe fn WaitEventSetWait(
     _set: *mut WaitEventSet,
@@ -187,8 +181,7 @@ unsafe fn WaitEventSetWait(
     _nevents: c_int,
     _wait_event_info: u32,
 ) -> c_int {
-    /* TODO(pg-port): real WaitEventSetWait lives in storage/ipc/waiteventset.c */
-    0
+    crate::storage::ipc::waiteventset::WaitEventSetWait(_set as _, _timeout, _occurred_events as _, _nevents, _wait_event_info)
 }
 unsafe fn ResetLatch(_latch: *mut Latch) {
     /* TODO(pg-port): real ResetLatch lives in storage/ipc/latch.c */
@@ -654,7 +647,7 @@ pub unsafe fn ListenServerPort(
 ) -> c_int {
     let mut fd: pgsocket;
     let mut err: c_int;
-    let maxconn: c_int;
+    let mut maxconn: c_int;
     let ret: c_int;
     let mut portNumberStr: [c_char; 32] = [0; 32];
     let mut familyDesc: *const c_char;
@@ -735,7 +728,7 @@ pub unsafe fn ListenServerPort(
     }
 
     addr = addrs;
-    while !addr.is_null() {
+    'addr_loop: while !addr.is_null() {
         'continue_addr: {
             if family != AF_UNIX && (*addr).ai_family == AF_UNIX {
                 /*
@@ -754,7 +747,7 @@ pub unsafe fn ListenServerPort(
                         MaxListen
                     )
                 );
-                break; // C: break out of for loop
+                break 'addr_loop; // C: break out of for loop
             }
 
             /* set up address family name for log messages */
@@ -906,7 +899,7 @@ pub unsafe fn ListenServerPort(
             if (*addr).ai_family == AF_UNIX {
                 if Setup_AF_UNIX(service) != STATUS_OK {
                     closesocket(fd);
-                    break; // C: break out of for loop
+                    break 'addr_loop; // C: break out of for loop
                 }
             }
 
@@ -1492,7 +1485,7 @@ pub unsafe fn pq_is_reading_msg() -> bool {
  * --------------------------------
  */
 pub unsafe fn pq_getmessage(s: StringInfo, maxlen: c_int) -> c_int {
-    let mut len: i32;
+    let mut len: i32 = 0;
 
     Assert!(PqCommReadingMsg);
 

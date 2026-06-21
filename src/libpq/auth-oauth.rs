@@ -48,12 +48,10 @@ const COMMERROR: c_int = 19;
 
 // TODO(pg-port): utils/adt/varlena.c SplitDirectoriesString (varlena.h).
 unsafe fn SplitDirectoriesString(
-    _rawstring: *mut c_char,
-    _separator: c_char,
-    _namelist: *mut *mut List,
-) -> bool {
-    false
-}
+    rawstring: *mut c_char,
+    separator: c_char,
+    namelist: *mut *mut List,
+) -> bool { crate::utils::adt::varlena::SplitDirectoriesString(rawstring as _, separator as _, namelist as _) }
 
 // TODO(pg-port): utils/mmgr/mcxt.c psprintf (psprintf.h); varargs not modeled.
 unsafe fn psprintf(fmt: *const c_char, _arg: *const c_char) -> *mut c_char {

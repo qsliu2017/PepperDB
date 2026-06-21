@@ -116,13 +116,16 @@ static mut waiting: bool = false;
 
 /* ResourceOwner support to hold WaitEventSets */
 
-static wait_event_set_resowner_desc: ResourceOwnerDesc = ResourceOwnerDesc {
+// Raw-pointer `name` field makes ResourceOwnerDesc non-Sync; wrap (codebase SyncDesc pattern).
+struct SyncDesc(ResourceOwnerDesc);
+unsafe impl Sync for SyncDesc {}
+static wait_event_set_resowner_desc: SyncDesc = SyncDesc(ResourceOwnerDesc {
     name: b"WaitEventSet\0".as_ptr() as *const c_char,
     release_phase: RESOURCE_RELEASE_AFTER_LOCKS,
     release_priority: RELEASE_PRIO_WAITEVENTSETS,
     ReleaseResource: ResOwnerReleaseWaitEventSet,
     DebugPrint: None,
-};
+});
 
 /* Convenience wrappers over ResourceOwnerRemember/Forget */
 #[inline]
@@ -130,7 +133,7 @@ unsafe fn ResourceOwnerRememberWaitEventSet(owner: ResourceOwner, set: *mut Wait
     ResourceOwnerRemember(
         owner,
         PointerGetDatum(set as *const c_void),
-        &wait_event_set_resowner_desc,
+        &wait_event_set_resowner_desc.0,
     );
 }
 #[inline]
@@ -138,7 +141,7 @@ unsafe fn ResourceOwnerForgetWaitEventSet(owner: ResourceOwner, set: *mut WaitEv
     ResourceOwnerForget(
         owner,
         PointerGetDatum(set as *const c_void),
-        &wait_event_set_resowner_desc,
+        &wait_event_set_resowner_desc.0,
     );
 }
 

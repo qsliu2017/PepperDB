@@ -171,37 +171,37 @@ unsafe fn statext_clauselist_selectivity(
     _estimatedclauses: *mut *mut crate::nodes::bitmapset::Bitmapset,
     _is_or: bool,
 ) -> Selectivity {
-    unimplemented!()
+    crate::statistics::extended_stats::statext_clauselist_selectivity(_root as _, _clauses as _, _varRelid as _, _jointype, _sjinfo as _, _rel as _, _estimatedclauses as _, _is_or)
 }
 
 // TODO(pg-port): real find_base_rel lives in optimizer/util/relnode.rs
 unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo {
-    unimplemented!()
+    crate::optimizer::util::relnode::find_base_rel(_root as _, _relid as _) as _
 }
 
 // TODO(pg-port): real estimate_expression_value lives in optimizer/util/clauses.rs
 unsafe fn estimate_expression_value(_root: *mut PlannerInfo, _node: *mut Node) -> *mut Node {
-    unimplemented!()
+    crate::optimizer::util::clauses::estimate_expression_value(_root as _, _node as _) as _
 }
 
 // TODO(pg-port): real NumRelids lives in optimizer/util/clauses.rs
 unsafe fn NumRelids(_root: *mut PlannerInfo, _clause: *mut Node) -> c_int {
-    unimplemented!()
+    crate::optimizer::util::clauses::NumRelids(_root as _, _clause as _) as _
 }
 
 // TODO(pg-port): real is_pseudo_constant_clause lives in optimizer/util/clauses.rs
 unsafe fn is_pseudo_constant_clause(_clause: *mut Node) -> bool {
-    unimplemented!()
+    crate::optimizer::util::clauses::is_pseudo_constant_clause(_clause as _) as _
 }
 
 // TODO(pg-port): real is_pseudo_constant_clause_relids lives in optimizer/util/clauses.rs
 unsafe fn is_pseudo_constant_clause_relids(_clause: *mut Node, _relids: Relids) -> bool {
-    unimplemented!()
+    crate::optimizer::util::clauses::is_pseudo_constant_clause_relids(_clause as _, _relids as _) as _
 }
 
 // TODO(pg-port): real get_oprrest lives in utils/cache/lsyscache.rs
 unsafe fn get_oprrest(_opno: Oid) -> Oid {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_oprrest(_opno as _) as _
 }
 
 // TODO(pg-port): real restriction_selectivity lives in utils/adt/plancat.rs
@@ -212,7 +212,7 @@ unsafe fn restriction_selectivity(
     _inputcollid: Oid,
     _varRelid: c_int,
 ) -> Selectivity {
-    unimplemented!()
+    crate::optimizer::util::plancat::restriction_selectivity(_root as _, _operatorid as _, _args as _, _inputcollid as _, _varRelid as _)
 }
 
 // TODO(pg-port): real join_selectivity lives in utils/adt/plancat.rs
@@ -224,7 +224,7 @@ unsafe fn join_selectivity(
     _jointype: JoinType,
     _sjinfo: *mut SpecialJoinInfo,
 ) -> Selectivity {
-    unimplemented!()
+    crate::optimizer::util::plancat::join_selectivity(_root as _, _operatorid as _, _args as _, _inputcollid as _, _jointype, _sjinfo as _)
 }
 
 // TODO(pg-port): real function_selectivity lives in utils/adt/plancat.rs
@@ -238,12 +238,12 @@ unsafe fn function_selectivity(
     _jointype: JoinType,
     _sjinfo: *mut SpecialJoinInfo,
 ) -> Selectivity {
-    unimplemented!()
+    crate::optimizer::util::plancat::function_selectivity(_root as _, _funcid as _, _args as _, _inputcollid as _, _is_join, _varRelid as _, _jointype, _sjinfo as _)
 }
 
 // TODO(pg-port): real boolvarsel lives in utils/adt/selfuncs.rs
 unsafe fn boolvarsel(_root: *mut PlannerInfo, _arg: *mut Node, _varRelid: c_int) -> Selectivity {
-    unimplemented!()
+    crate::utils::adt::selfuncs::boolvarsel(_root as _, _arg as _, _varRelid as _)
 }
 
 // TODO(pg-port): real scalararraysel lives in utils/adt/selfuncs.rs
@@ -255,7 +255,7 @@ unsafe fn scalararraysel(
     _jointype: JoinType,
     _sjinfo: *mut SpecialJoinInfo,
 ) -> Selectivity {
-    unimplemented!()
+    crate::utils::adt::selfuncs::scalararraysel(_root as _, _clause as _, _is_join_clause, _varRelid as _, _jointype, _sjinfo as _)
 }
 
 // TODO(pg-port): real rowcomparesel lives in utils/adt/selfuncs.rs
@@ -266,7 +266,7 @@ unsafe fn rowcomparesel(
     _jointype: JoinType,
     _sjinfo: *mut SpecialJoinInfo,
 ) -> Selectivity {
-    unimplemented!()
+    crate::utils::adt::selfuncs::rowcomparesel(_root as _, _clause as _, _varRelid as _, _jointype, _sjinfo as _)
 }
 
 // TODO(pg-port): real nulltestsel lives in utils/adt/selfuncs.rs
@@ -278,7 +278,7 @@ unsafe fn nulltestsel(
     _jointype: JoinType,
     _sjinfo: *mut SpecialJoinInfo,
 ) -> Selectivity {
-    unimplemented!()
+    crate::utils::adt::selfuncs::nulltestsel(_root as _, _nulltesttype, _arg as _, _varRelid as _, _jointype, _sjinfo as _)
 }
 
 // TODO(pg-port): real booltestsel lives in utils/adt/selfuncs.rs
@@ -290,7 +290,7 @@ unsafe fn booltestsel(
     _jointype: JoinType,
     _sjinfo: *mut SpecialJoinInfo,
 ) -> Selectivity {
-    unimplemented!()
+    crate::utils::adt::selfuncs::booltestsel(_root as _, _booltesttype, _arg as _, _varRelid as _, _jointype, _sjinfo as _)
 }
 
 /*
@@ -378,6 +378,7 @@ pub unsafe fn clauselist_selectivity_ext(
     sjinfo: *mut SpecialJoinInfo,
     use_extended_stats: bool,
 ) -> Selectivity {
+    if std::env::var_os("PDB_RX").is_some() { eprintln!("PDB_RX clauselist_selectivity_ext n={}", crate::nodes::pg_list::list_length(clauses)); }
     let mut s1: Selectivity = 1.0;
     let rel: *mut RelOptInfo;
     let mut estimatedclauses: *mut crate::nodes::bitmapset::Bitmapset = core::ptr::null_mut();
@@ -955,6 +956,7 @@ pub unsafe fn clause_selectivity_ext(
     use_extended_stats: bool,
 ) -> Selectivity {
     let mut s1: Selectivity = 0.5; /* default for any unhandled clause type */
+    if std::env::var_os("PDB_RX").is_some() { eprintln!("PDB_RX clause_selectivity_ext clause_null={}", clause.is_null()); }
     let mut rinfo: *mut RestrictInfo = core::ptr::null_mut();
     let mut cacheable: bool = false;
 

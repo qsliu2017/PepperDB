@@ -28,9 +28,9 @@ use core::ffi::c_char;
 
 use crate::prelude::*;
 use crate::{foreach, foreach_oid, current_cell, castNode, IsA, lfirst_node};
-use crate::{PG_GETARG_OID, PG_RETURN_VOID, ObjectAddressSet};
+use crate::{PG_GETARG_OID, PG_RETURN_VOID, list_make1};
 
-use crate::nodes::pg_list::{lfirst, list_length, list_nth_cell, lnext, lappend, lappend_oid, NIL, List, ListCell};
+use crate::nodes::pg_list::{lfirst, linitial, list_length, list_nth_cell, lnext, lappend, lappend_oid, NIL, List, ListCell};
 use crate::nodes::nodes::Node;
 
 use crate::parser::parse_coerce::{check_valid_polymorphic_signature, check_valid_internal_signature};
@@ -44,6 +44,15 @@ use crate::parser::parse_coerce::{check_valid_polymorphic_signature, check_valid
 
 /* fixed catalog cardinality (gencat output); pg_proc has this many columns. */
 const Natts_pg_proc: usize = 33;
+
+/* From catalog/objectaddress.h: ObjectAddressSet(addr, classId, objectId). */
+macro_rules! ObjectAddressSet {
+    ($addr:expr, $classId:expr, $objectId:expr) => {{
+        $addr.classId = $classId;
+        $addr.objectId = $objectId;
+        $addr.objectSubId = 0;
+    }};
+}
 
 /* From access/htup_details.h */
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool { !tuple.is_null() }
@@ -100,8 +109,8 @@ const TypeRelationId: Oid = 1247;
 const TransformRelationId: Oid = 3576;
 const ProcedureOidIndexId: Oid = 2690;
 const RowExclusiveLock: c_int = 3;
-const PROCNAMEARGSNSP: c_int = 0;
-const PROCOID: c_int = 0;
+const PROCNAMEARGSNSP: c_int = 46;
+const PROCOID: c_int = 47;
 
 /* errcodes (utils/errcodes.h) used by ereport calls below. */
 const ERRCODE_TOO_MANY_ARGUMENTS: c_int = 0;
@@ -141,90 +150,90 @@ struct PortalData {
 
 /* ---- genuinely-unported helper deps: local TODO(pg-port) stubs ---- */
 
-unsafe fn get_element_type(_typid: Oid) -> Oid { todo!("TODO(pg-port): get_element_type") }
-unsafe fn namestrcpy(_name: *mut NameData, _s: *const c_char) -> c_int { todo!("TODO(pg-port): namestrcpy") }
-unsafe fn NameGetDatum(_n: *const NameData) -> Datum { todo!("TODO(pg-port): NameGetDatum") }
-unsafe fn nodeToString(_obj: *const c_void) -> *mut c_char { todo!("TODO(pg-port): nodeToString") }
-unsafe fn CStringGetTextDatum(_s: *const c_char) -> Datum { todo!("TODO(pg-port): CStringGetTextDatum") }
-unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char { todo!("TODO(pg-port): TextDatumGetCString") }
-unsafe fn table_open(_relid: Oid, _lockmode: c_int) -> Relation { todo!("TODO(pg-port): table_open") }
-unsafe fn table_close(_rel: Relation, _lockmode: c_int) { todo!("TODO(pg-port): table_close") }
-unsafe fn RelationGetDescr(_rel: Relation) -> TupleDesc { todo!("TODO(pg-port): RelationGetDescr") }
-unsafe fn SearchSysCache1(_id: c_int, _k1: Datum) -> HeapTuple { todo!("TODO(pg-port): SearchSysCache1") }
-unsafe fn SearchSysCache3(_id: c_int, _k1: Datum, _k2: Datum, _k3: Datum) -> HeapTuple { todo!("TODO(pg-port): SearchSysCache3") }
-unsafe fn ReleaseSysCache(_tuple: HeapTuple) { todo!("TODO(pg-port): ReleaseSysCache") }
-unsafe fn SysCacheGetAttr(_id: c_int, _tup: HeapTuple, _attno: usize, _isnull: *mut bool) -> Datum { todo!("TODO(pg-port): SysCacheGetAttr") }
-unsafe fn SysCacheGetAttrNotNull(_id: c_int, _tup: HeapTuple, _attno: usize) -> Datum { todo!("TODO(pg-port): SysCacheGetAttrNotNull") }
-unsafe fn GETSTRUCT(_tup: HeapTuple) -> Form_pg_proc { todo!("TODO(pg-port): GETSTRUCT") }
-unsafe fn object_ownercheck(_classid: Oid, _objectid: Oid, _roleid: Oid) -> bool { todo!("TODO(pg-port): object_ownercheck") }
-unsafe fn aclcheck_error(_aclerr: c_int, _objtype: c_int, _objname: *const c_char) { todo!("TODO(pg-port): aclcheck_error") }
-unsafe fn format_procedure(_procedure_oid: Oid) -> *mut c_char { todo!("TODO(pg-port): format_procedure") }
-unsafe fn build_function_result_tupdesc_t(_proctup: HeapTuple) -> TupleDesc { todo!("TODO(pg-port): build_function_result_tupdesc_t") }
-unsafe fn build_function_result_tupdesc_d(_prokind: c_char, _allargtypes: Datum, _argmodes: Datum, _argnames: Datum) -> TupleDesc { todo!("TODO(pg-port): build_function_result_tupdesc_d") }
-unsafe fn equalRowTypes(_a: TupleDesc, _b: TupleDesc) -> bool { todo!("TODO(pg-port): equalRowTypes") }
-unsafe fn get_func_input_arg_names(_argnames: Datum, _argmodes: Datum, _arg_names: *mut *mut *mut c_char) -> c_int { todo!("TODO(pg-port): get_func_input_arg_names") }
-unsafe fn stringToNode(_s: *const c_char) -> *mut Node { todo!("TODO(pg-port): stringToNode") }
-unsafe fn exprType(_expr: *const Node) -> Oid { todo!("TODO(pg-port): exprType") }
-unsafe fn heap_modify_tuple(_tuple: HeapTuple, _td: TupleDesc, _values: *mut Datum, _nulls: *mut bool, _replaces: *mut bool) -> HeapTuple { todo!("TODO(pg-port): heap_modify_tuple") }
-unsafe fn heap_form_tuple(_td: TupleDesc, _values: *mut Datum, _nulls: *mut bool) -> HeapTuple { todo!("TODO(pg-port): heap_form_tuple") }
-unsafe fn heap_freetuple(_tuple: HeapTuple) { todo!("TODO(pg-port): heap_freetuple") }
-unsafe fn CatalogTupleUpdate(_rel: Relation, _otid: *mut c_void, _tup: HeapTuple) { todo!("TODO(pg-port): CatalogTupleUpdate") }
-unsafe fn CatalogTupleInsert(_rel: Relation, _tup: HeapTuple) { todo!("TODO(pg-port): CatalogTupleInsert") }
-unsafe fn get_user_default_acl(_objtype: c_int, _owner_id: Oid, _nsp_oid: Oid) -> *mut Acl { todo!("TODO(pg-port): get_user_default_acl") }
-unsafe fn GetNewOidWithIndex(_rel: Relation, _index_id: Oid, _oidcolumn: usize) -> Oid { todo!("TODO(pg-port): GetNewOidWithIndex") }
-unsafe fn deleteDependencyRecordsFor(_class_id: Oid, _object_id: Oid, _skip_extension_deps: bool) -> c_long { todo!("TODO(pg-port): deleteDependencyRecordsFor") }
-unsafe fn new_object_addresses() -> *mut ObjectAddresses { todo!("TODO(pg-port): new_object_addresses") }
-unsafe fn add_exact_object_address(_object: *const ObjectAddress, _addrs: *mut ObjectAddresses) { todo!("TODO(pg-port): add_exact_object_address") }
-unsafe fn record_object_address_dependencies(_depender: *const ObjectAddress, _referenced: *mut ObjectAddresses, _behavior: c_char) { todo!("TODO(pg-port): record_object_address_dependencies") }
-unsafe fn free_object_addresses(_addrs: *mut ObjectAddresses) { todo!("TODO(pg-port): free_object_addresses") }
-unsafe fn recordDependencyOnExpr(_depender: *const ObjectAddress, _expr: *const Node, _rtable: *mut List, _behavior: c_char) { todo!("TODO(pg-port): recordDependencyOnExpr") }
-unsafe fn recordDependencyOnOwner(_class_id: Oid, _object_id: Oid, _owner: Oid) { todo!("TODO(pg-port): recordDependencyOnOwner") }
-unsafe fn recordDependencyOnNewAcl(_class_id: Oid, _object_id: Oid, _objsub_id: c_int, _owner: Oid, _acl: *mut Acl) { todo!("TODO(pg-port): recordDependencyOnNewAcl") }
-unsafe fn recordDependencyOnCurrentExtension(_object: *const ObjectAddress, _is_update: bool) { todo!("TODO(pg-port): recordDependencyOnCurrentExtension") }
-unsafe fn InvokeObjectPostCreateHook(_class_id: Oid, _object_id: Oid, _subid: c_int) { todo!("TODO(pg-port): InvokeObjectPostCreateHook") }
-unsafe fn CommandCounterIncrement() { todo!("TODO(pg-port): CommandCounterIncrement") }
-unsafe fn NewGUCNestLevel() -> c_int { todo!("TODO(pg-port): NewGUCNestLevel") }
-unsafe fn ProcessGUCArray(_array: *mut ArrayType, _context: c_int, _source: c_int, _action: c_int) { todo!("TODO(pg-port): ProcessGUCArray") }
-unsafe fn superuser() -> bool { todo!("TODO(pg-port): superuser") }
-unsafe fn OidFunctionCall1(_function_id: Oid, _arg1: Datum) -> Datum { todo!("TODO(pg-port): OidFunctionCall1") }
-unsafe fn AtEOXact_GUC(_is_commit: bool, _nestlevel: c_int) { todo!("TODO(pg-port): AtEOXact_GUC") }
-unsafe fn pgstat_create_function(_proid: Oid) { todo!("TODO(pg-port): pgstat_create_function") }
-unsafe fn CheckFunctionValidatorAccess(_validator_oid: Oid, _function_oid: Oid) -> bool { todo!("TODO(pg-port): CheckFunctionValidatorAccess") }
-unsafe fn fmgr_internal_function(_proname: *const c_char) -> Oid { todo!("TODO(pg-port): fmgr_internal_function") }
-unsafe fn load_external_function(_filename: *const c_char, _funcname: *const c_char, _signal_not_found: bool, _filehandle: *mut *mut c_void) -> *mut c_void { todo!("TODO(pg-port): load_external_function") }
-unsafe fn fetch_finfo_record(_filehandle: *mut c_void, _funcname: *const c_char) -> *mut c_void { todo!("TODO(pg-port): fetch_finfo_record") }
-unsafe fn get_typtype(_typid: Oid) -> c_char { todo!("TODO(pg-port): get_typtype") }
+unsafe fn get_element_type(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_element_type(_typid as _) as _ }
+unsafe fn namestrcpy(_name: *mut NameData, _s: *const c_char) -> c_int { crate::utils::adt::name::namestrcpy(_name as _, _s as _); 0 }
+unsafe fn NameGetDatum(_n: *const NameData) -> Datum { crate::postgres::NameGetDatum(_n as _) as _ }
+unsafe fn nodeToString(_obj: *const c_void) -> *mut c_char { crate::nodes::outfuncs::nodeToString(_obj as _) as _ }
+unsafe fn CStringGetTextDatum(_s: *const c_char) -> Datum { crate::utils::builtins::CStringGetTextDatum(_s as _) as _ }
+unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char { crate::utils::builtins::TextDatumGetCString(_d as _) as _ }
+unsafe fn table_open(_relid: Oid, _lockmode: c_int) -> Relation { crate::access::table::table::table_open(_relid as _, _lockmode as _) as _ }
+unsafe fn table_close(_rel: Relation, _lockmode: c_int) { crate::access::table::table::table_close(_rel as _, _lockmode as _) }
+unsafe fn RelationGetDescr(_rel: Relation) -> TupleDesc { crate::utils::rel::RelationGetDescr(_rel as _) as _ }
+unsafe fn SearchSysCache1(_id: c_int, _k1: Datum) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache1(_id as _, _k1 as _) as _ }
+unsafe fn SearchSysCache3(_id: c_int, _k1: Datum, _k2: Datum, _k3: Datum) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache3(_id as _, _k1 as _, _k2 as _, _k3 as _) as _ }
+unsafe fn ReleaseSysCache(_tuple: HeapTuple) { crate::utils::cache::syscache::ReleaseSysCache(_tuple as _) }
+unsafe fn SysCacheGetAttr(_id: c_int, _tup: HeapTuple, _attno: usize, _isnull: *mut bool) -> Datum { crate::utils::cache::syscache::SysCacheGetAttr(_id as _, _tup as _, _attno as _, _isnull as _) as _ }
+unsafe fn SysCacheGetAttrNotNull(_id: c_int, _tup: HeapTuple, _attno: usize) -> Datum { crate::utils::cache::syscache::SysCacheGetAttrNotNull(_id as _, _tup as _, _attno as _) as _ }
+unsafe fn GETSTRUCT(_tup: HeapTuple) -> Form_pg_proc { crate::access::htup_details::GETSTRUCT(_tup as _) as _ }
+unsafe fn object_ownercheck(_classid: Oid, _objectid: Oid, _roleid: Oid) -> bool { crate::catalog::aclchk::object_ownercheck(_classid as _, _objectid as _, _roleid as _) as _ }
+unsafe fn aclcheck_error(_aclerr: c_int, _objtype: c_int, _objname: *const c_char) { crate::catalog::aclchk::aclcheck_error(core::mem::transmute(_aclerr), core::mem::transmute(_objtype), _objname as _) }
+unsafe fn format_procedure(_procedure_oid: Oid) -> *mut c_char { crate::utils::adt::regproc::format_procedure(_procedure_oid as _) as _ }
+unsafe fn build_function_result_tupdesc_t(_proctup: HeapTuple) -> TupleDesc { crate::utils::fmgr::funcapi::build_function_result_tupdesc_t(_proctup as _) as _ }
+unsafe fn build_function_result_tupdesc_d(_prokind: c_char, _allargtypes: Datum, _argmodes: Datum, _argnames: Datum) -> TupleDesc { crate::utils::fmgr::funcapi::build_function_result_tupdesc_d(_prokind as _, _allargtypes as _, _argmodes as _, _argnames as _) as _ }
+unsafe fn equalRowTypes(_a: TupleDesc, _b: TupleDesc) -> bool { crate::access::common::tupdesc::equalRowTypes(_a as _, _b as _) as _ }
+unsafe fn get_func_input_arg_names(_argnames: Datum, _argmodes: Datum, _arg_names: *mut *mut *mut c_char) -> c_int { crate::utils::fmgr::funcapi::get_func_input_arg_names(_argnames as _, _argmodes as _, _arg_names as _) as _ }
+unsafe fn stringToNode(_s: *const c_char) -> *mut Node { crate::nodes::read::stringToNode(_s as _) as _ }
+unsafe fn exprType(_expr: *const Node) -> Oid { crate::nodes::nodeFuncs::exprType(_expr as _) as _ }
+unsafe fn heap_modify_tuple(_tuple: HeapTuple, _td: TupleDesc, _values: *mut Datum, _nulls: *mut bool, _replaces: *mut bool) -> HeapTuple { crate::access::common::heaptuple::heap_modify_tuple(_tuple as _, _td as _, _values as _, _nulls as _, _replaces as _) as _ }
+unsafe fn heap_form_tuple(_td: TupleDesc, _values: *mut Datum, _nulls: *mut bool) -> HeapTuple { crate::access::common::heaptuple::heap_form_tuple(_td as _, _values as _, _nulls as _) as _ }
+unsafe fn heap_freetuple(_tuple: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(_tuple as _) }
+unsafe fn CatalogTupleUpdate(_rel: Relation, _otid: *mut c_void, _tup: HeapTuple) { crate::catalog::indexing::CatalogTupleUpdate(_rel as _, _otid as _, _tup as _) }
+unsafe fn CatalogTupleInsert(_rel: Relation, _tup: HeapTuple) { crate::catalog::indexing::CatalogTupleInsert(_rel as _, _tup as _) }
+unsafe fn get_user_default_acl(_objtype: c_int, _owner_id: Oid, _nsp_oid: Oid) -> *mut Acl { crate::catalog::aclchk::get_user_default_acl(core::mem::transmute(_objtype), _owner_id as _, _nsp_oid as _) as _ }
+unsafe fn GetNewOidWithIndex(_rel: Relation, _index_id: Oid, _oidcolumn: usize) -> Oid { crate::catalog::catalog::GetNewOidWithIndex(_rel as _, _index_id as _, _oidcolumn as _) as _ }
+unsafe fn deleteDependencyRecordsFor(_class_id: Oid, _object_id: Oid, _skip_extension_deps: bool) -> c_long { crate::catalog::pg_depend::deleteDependencyRecordsFor(_class_id as _, _object_id as _, _skip_extension_deps as _) as _ }
+unsafe fn new_object_addresses() -> *mut ObjectAddresses { crate::catalog::dependency::new_object_addresses() as _ }
+unsafe fn add_exact_object_address(_object: *const ObjectAddress, _addrs: *mut ObjectAddresses) { crate::catalog::dependency::add_exact_object_address(_object as _, _addrs as _) }
+unsafe fn record_object_address_dependencies(_depender: *const ObjectAddress, _referenced: *mut ObjectAddresses, _behavior: c_char) { crate::catalog::dependency::record_object_address_dependencies(_depender as _, _referenced as _, _behavior as _) }
+unsafe fn free_object_addresses(_addrs: *mut ObjectAddresses) { crate::catalog::dependency::free_object_addresses(_addrs as _) }
+unsafe fn recordDependencyOnExpr(_depender: *const ObjectAddress, _expr: *const Node, _rtable: *mut List, _behavior: c_char) { crate::catalog::dependency::recordDependencyOnExpr(_depender as _, _expr as _, _rtable as _, _behavior as _) }
+unsafe fn recordDependencyOnOwner(_class_id: Oid, _object_id: Oid, _owner: Oid) { crate::catalog::pg_shdepend::recordDependencyOnOwner(_class_id as _, _object_id as _, _owner as _) }
+unsafe fn recordDependencyOnNewAcl(_class_id: Oid, _object_id: Oid, _objsub_id: c_int, _owner: Oid, _acl: *mut Acl) { crate::catalog::aclchk::recordDependencyOnNewAcl(_class_id as _, _object_id as _, _objsub_id as _, _owner as _, _acl as _) }
+unsafe fn recordDependencyOnCurrentExtension(_object: *const ObjectAddress, _is_update: bool) { crate::catalog::pg_depend::recordDependencyOnCurrentExtension(_object as _, _is_update as _) }
+unsafe fn InvokeObjectPostCreateHook(_class_id: Oid, _object_id: Oid, _subid: c_int) { crate::parser_link_shims::InvokeObjectPostCreateHook(_class_id as _, _object_id as _, _subid as _) }
+unsafe fn CommandCounterIncrement() { crate::access::transam::xact::CommandCounterIncrement() }
+unsafe fn NewGUCNestLevel() -> c_int { crate::utils::misc::guc::NewGUCNestLevel() as _ }
+unsafe fn ProcessGUCArray(_array: *mut ArrayType, _context: c_int, _source: c_int, _action: c_int) { crate::utils::misc::guc::ProcessGUCArray(_array as _, core::mem::transmute(_context), core::mem::transmute(_source), core::mem::transmute(_action)) }
+unsafe fn superuser() -> bool { crate::utils::misc::superuser::superuser() as _ }
+unsafe fn OidFunctionCall1(_function_id: Oid, _arg1: Datum) -> Datum { crate::utils::fmgr::OidFunctionCall1Coll(_function_id as _, crate::postgres_ext::InvalidOid, _arg1 as _) as _ }
+unsafe fn AtEOXact_GUC(_is_commit: bool, _nestlevel: c_int) { crate::utils::misc::guc::AtEOXact_GUC(_is_commit as _, _nestlevel as _) }
+unsafe fn pgstat_create_function(_proid: Oid) { crate::utils::activity::pgstat_function::pgstat_create_function(_proid as _) }
+unsafe fn CheckFunctionValidatorAccess(_validator_oid: Oid, _function_oid: Oid) -> bool { crate::utils::fmgr::CheckFunctionValidatorAccess(_validator_oid as _, _function_oid as _) as _ }
+unsafe fn fmgr_internal_function(_proname: *const c_char) -> Oid { crate::utils::fmgr::fmgr_internal_function(_proname as _) as _ }
+unsafe fn load_external_function(_filename: *const c_char, _funcname: *const c_char, _signal_not_found: bool, _filehandle: *mut *mut c_void) -> *mut c_void { crate::utils::fmgr::dfmgr::load_external_function(_filename as _, _funcname as _, _signal_not_found as _, _filehandle as _) as _ }
+unsafe fn fetch_finfo_record(_filehandle: *mut c_void, _funcname: *const c_char) -> *mut c_void { crate::utils::fmgr::fetch_finfo_record(_filehandle as _, _funcname as _) as _ }
+unsafe fn get_typtype(_typid: Oid) -> c_char { crate::utils::cache::lsyscache::get_typtype(_typid as _) as _ }
 unsafe fn IsPolymorphicType(_typid: Oid) -> bool { todo!("TODO(pg-port): IsPolymorphicType") }
-unsafe fn format_type_be(_typid: Oid) -> *mut c_char { todo!("TODO(pg-port): format_type_be") }
-unsafe fn pg_parse_query(_query_string: *const c_char) -> *mut List { todo!("TODO(pg-port): pg_parse_query") }
-unsafe fn pg_rewrite_query(_query: *mut Query) -> *mut List { todo!("TODO(pg-port): pg_rewrite_query") }
-unsafe fn AcquireRewriteLocks(_parsetree: *mut Query, _forexecute: bool, _forupdatepusheddown: bool) { todo!("TODO(pg-port): AcquireRewriteLocks") }
-unsafe fn prepare_sql_fn_parse_info(_proceduretuple: HeapTuple, _call_expr: *mut Node, _input_collation: Oid) -> SQLFunctionParseInfoPtr { todo!("TODO(pg-port): prepare_sql_fn_parse_info") }
-unsafe fn sql_fn_parser_setup(_pstate: *mut c_void, _arg: *mut c_void) { todo!("TODO(pg-port): sql_fn_parser_setup") }
-unsafe fn pg_analyze_and_rewrite_withcb(_parsetree: *mut RawStmt, _query_string: *const c_char, _parser_setup: ParserSetupHook, _parser_setup_arg: *mut c_void, _query_env: *mut c_void) -> *mut List { todo!("TODO(pg-port): pg_analyze_and_rewrite_withcb") }
-unsafe fn check_sql_fn_statements(_queryTreeLists: *mut List) { todo!("TODO(pg-port): check_sql_fn_statements") }
-unsafe fn get_func_result_type(_functionId: Oid, _resultTypeId: *mut Oid, _resultTupleDesc: *mut TupleDesc) -> c_int { todo!("TODO(pg-port): get_func_result_type") }
-unsafe fn check_sql_fn_retval(_queryTreeLists: *mut List, _rettype: Oid, _rettupdesc: TupleDesc, _prokind: c_char, _insertDroppedCols: bool) -> bool { todo!("TODO(pg-port): check_sql_fn_retval") }
-unsafe fn geterrposition() -> c_int { todo!("TODO(pg-port): geterrposition") }
-unsafe fn getinternalerrposition() -> c_int { todo!("TODO(pg-port): getinternalerrposition") }
-unsafe fn errposition(_cursorpos: c_int) -> c_int { todo!("TODO(pg-port): errposition") }
-unsafe fn internalerrposition(_cursorpos: c_int) -> c_int { todo!("TODO(pg-port): internalerrposition") }
-unsafe fn internalerrquery(_query: *const c_char) -> c_int { todo!("TODO(pg-port): internalerrquery") }
-unsafe fn pg_mbstrlen_with_len(_mbstr: *const c_char, _limit: c_int) -> c_int { todo!("TODO(pg-port): pg_mbstrlen_with_len") }
-unsafe fn pg_mblen_cstr(_s: *const c_char) -> c_int { todo!("TODO(pg-port): pg_mblen_cstr") }
-unsafe fn deconstruct_array_builtin(_array: *mut ArrayType, _elmtype: Oid, _elemsp: *mut *mut Datum, _nullsp: *mut *mut bool, _nelemsp: *mut c_int) { todo!("TODO(pg-port): deconstruct_array_builtin") }
-unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType { todo!("TODO(pg-port): DatumGetArrayTypeP") }
+unsafe fn format_type_be(_typid: Oid) -> *mut c_char { crate::utils::adt::format_type::format_type_be(_typid as _) as _ }
+unsafe fn pg_parse_query(_query_string: *const c_char) -> *mut List { crate::tcop::postgres::pg_parse_query(_query_string as _) as _ }
+unsafe fn pg_rewrite_query(_query: *mut Query) -> *mut List { crate::tcop::postgres::pg_rewrite_query(_query as _) as _ }
+unsafe fn AcquireRewriteLocks(_parsetree: *mut Query, _forexecute: bool, _forupdatepusheddown: bool) { crate::rewrite::rewriteHandler::AcquireRewriteLocks(_parsetree as _, _forexecute as _, _forupdatepusheddown as _) }
+unsafe fn prepare_sql_fn_parse_info(_proceduretuple: HeapTuple, _call_expr: *mut Node, _input_collation: Oid) -> SQLFunctionParseInfoPtr { crate::executor::functions::prepare_sql_fn_parse_info(_proceduretuple as _, _call_expr as _, _input_collation as _) as _ }
+unsafe fn sql_fn_parser_setup(_pstate: *mut c_void, _arg: *mut c_void) { crate::executor::functions::sql_fn_parser_setup(_pstate as _, _arg as _) }
+unsafe fn pg_analyze_and_rewrite_withcb(_parsetree: *mut RawStmt, _query_string: *const c_char, _parser_setup: ParserSetupHook, _parser_setup_arg: *mut c_void, _query_env: *mut c_void) -> *mut List { crate::tcop::postgres::pg_analyze_and_rewrite_withcb(_parsetree as _, _query_string as _, _parser_setup as _, _parser_setup_arg as _, _query_env as _) as _ }
+unsafe fn check_sql_fn_statements(_queryTreeLists: *mut List) { crate::executor::functions::check_sql_fn_statements(_queryTreeLists as _) }
+unsafe fn get_func_result_type(_functionId: Oid, _resultTypeId: *mut Oid, _resultTupleDesc: *mut TupleDesc) -> c_int { crate::utils::fmgr::funcapi::get_func_result_type(_functionId as _, _resultTypeId as _, _resultTupleDesc as _) as _ }
+unsafe fn check_sql_fn_retval(_queryTreeLists: *mut List, _rettype: Oid, _rettupdesc: TupleDesc, _prokind: c_char, _insertDroppedCols: bool) -> bool { crate::executor::functions::check_sql_fn_retval(_queryTreeLists as _, _rettype as _, _rettupdesc as _, _prokind as _, _insertDroppedCols as _) as _ }
+unsafe fn geterrposition() -> c_int { crate::utils::error::elog_impl::geterrposition() as _ }
+unsafe fn getinternalerrposition() -> c_int { crate::utils::error::elog_impl::getinternalerrposition() as _ }
+unsafe fn errposition(_cursorpos: c_int) -> c_int { crate::utils::error::elog_impl::errposition(_cursorpos as _) as _ }
+unsafe fn internalerrposition(_cursorpos: c_int) -> c_int { crate::utils::error::elog_impl::internalerrposition(_cursorpos as _) as _ }
+unsafe fn internalerrquery(_query: *const c_char) -> c_int { crate::utils::error::elog_impl::internalerrquery(_query as _) as _ }
+unsafe fn pg_mbstrlen_with_len(_mbstr: *const c_char, _limit: c_int) -> c_int { crate::mb::mbutils::pg_mbstrlen_with_len(_mbstr as _, _limit as _) as _ }
+unsafe fn pg_mblen_cstr(_s: *const c_char) -> c_int { crate::mb::mbutils::pg_mblen_cstr(_s as _) as _ }
+unsafe fn deconstruct_array_builtin(_array: *mut ArrayType, _elmtype: Oid, _elemsp: *mut *mut Datum, _nullsp: *mut *mut bool, _nelemsp: *mut c_int) { crate::utils::adt::arrayfuncs::deconstruct_array_builtin(_array as _, _elmtype as _, _elemsp as _, _nullsp as _, _nelemsp as _) }
+unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType { crate::access::nbtree::nbtpreprocesskeys::DatumGetArrayTypeP(_d as _) as _ }
 
 /* errcontext! has no crate-root macro_export; provide a local no-op shim that
  * still formats its argument, matching the sibling-file stub convention. */
 macro_rules! errcontext { ($($arg:tt)*) => {{ let _ = format!($($arg)*); }}; }
 
 /* ArrayType field accessors (utils/array.h macros), as local fns. */
-unsafe fn ARR_NDIM(_a: *mut ArrayType) -> c_int { todo!("TODO(pg-port): ARR_NDIM") }
-unsafe fn ARR_DIMS(_a: *mut ArrayType) -> *mut c_int { todo!("TODO(pg-port): ARR_DIMS") }
-unsafe fn ARR_HASNULL(_a: *mut ArrayType) -> bool { todo!("TODO(pg-port): ARR_HASNULL") }
-unsafe fn ARR_ELEMTYPE(_a: *mut ArrayType) -> Oid { todo!("TODO(pg-port): ARR_ELEMTYPE") }
-unsafe fn ARR_DATA_PTR(_a: *mut ArrayType) -> *mut c_char { todo!("TODO(pg-port): ARR_DATA_PTR") }
+unsafe fn ARR_NDIM(_a: *mut ArrayType) -> c_int { crate::utils::array::ARR_NDIM(_a as _) as _ }
+unsafe fn ARR_DIMS(_a: *mut ArrayType) -> *mut c_int { crate::utils::array::ARR_DIMS(_a as _) as _ }
+unsafe fn ARR_HASNULL(_a: *mut ArrayType) -> bool { crate::utils::array::ARR_HASNULL(_a as _) as _ }
+unsafe fn ARR_ELEMTYPE(_a: *mut ArrayType) -> Oid { crate::utils::array::ARR_ELEMTYPE(_a as _) as _ }
+unsafe fn ARR_DATA_PTR(_a: *mut ArrayType) -> *mut c_char { crate::utils::array::ARR_DATA_PTR(_a as _) as _ }
 
 type Relation = *mut crate::utils::rel::RelationData;
 type HeapTuple = *mut crate::access::htup_details::HeapTupleData;
@@ -257,7 +266,6 @@ pub type regproc = Oid;
  * #[repr(C)] so the field order/layout/size matches the C struct exactly.
  */
 #[repr(C)]
-#[derive(Clone, Copy)]
 pub struct FormData_pg_proc {
     /* oid */
     pub oid: Oid,
@@ -1125,7 +1133,11 @@ pub unsafe fn fmgr_sql_validator(fcinfo: FunctionCallInfo) -> Datum {
     let mut tmp: Datum;
     let prosrc: *mut c_char;
     let mut callback_arg: parse_error_callback_arg = core::mem::zeroed();
-    let mut sqlerrcontext: ErrorContextCallback = core::mem::zeroed();
+    let mut sqlerrcontext: ErrorContextCallback = ErrorContextCallback {
+        callback: sql_function_parse_error_callback,
+        arg: core::ptr::null_mut(),
+        previous: core::ptr::null_mut(),
+    };
     let mut haspolyarg: bool;
     let mut i: c_int;
 
@@ -1191,10 +1203,10 @@ pub unsafe fn fmgr_sql_validator(fcinfo: FunctionCallInfo) -> Datum {
             let stored_query_list: *mut List;
 
             n = stringToNode(TextDatumGetCString(tmp));
-            if IsA!(n, List) {
+            if IsA!(n, T_List) {
                 stored_query_list = linitial(castNode!(List, T_List, n)) as *mut List;
             } else {
-                stored_query_list = list_make1(n as *mut c_void);
+                stored_query_list = list_make1!(n as *mut c_void);
             }
 
             querytree_list = NIL;
@@ -1257,9 +1269,7 @@ pub unsafe fn fmgr_sql_validator(fcinfo: FunctionCallInfo) -> Datum {
             let mut rettupdesc: TupleDesc = null_mut();
 
             check_sql_fn_statements(querytree_list);
-
             let _ = get_func_result_type(funcoid, &raw mut rettype, &raw mut rettupdesc);
-
             let _ = check_sql_fn_retval(querytree_list, rettype, rettupdesc, (*proc).prokind, false);
         }
 
@@ -1296,6 +1306,7 @@ unsafe fn sql_function_parse_error_callback(arg: *mut c_void) {
  *
  * Returns true if a syntax error was processed, false if not.
  */
+#[no_mangle]
 pub unsafe fn function_parse_error_transpose(prosrc: *const c_char) -> bool {
     let mut origerrposition: c_int;
     let newerrposition: c_int;
@@ -1527,17 +1538,8 @@ unsafe fn libc_strcmp(a: *const c_char, b: *const c_char) -> c_int {
 /* DatumGetObjectId (postgres.h); local shim if not imported via prelude. */
 unsafe fn DatumGetObjectId(d: Datum) -> Oid { d as u32 as Oid }
 
-/* FunctionCallInfo (fmgr.h) shape used by the PG_FUNCTION_ARGS validators. */
-type FunctionCallInfo = *mut FunctionCallInfoBaseData;
-#[repr(C)]
-struct FunctionCallInfoBaseData {
-    flinfo: *mut FmgrInfo,
-}
-#[repr(C)]
-struct FmgrInfo {
-    fn_addr: *mut c_void,
-    fn_oid: Oid,
-}
+/* FunctionCallInfo (fmgr.h): use the real fmgr types (they carry flinfo + args). */
+use crate::utils::fmgr::{FunctionCallInfo, FunctionCallInfoBaseData, FmgrInfo};
 
 #[cfg(test)]
 mod tests {

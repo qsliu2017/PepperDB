@@ -63,7 +63,10 @@ use crate::common::hashfn::{hash_any, hash_any_extended};
 use crate::miscadmin::CHECK_FOR_INTERRUPTS;
 use crate::nodes::nodes::Node;
 use crate::port::pgstrcasecmp::pg_strncasecmp;
-use crate::varatt::{SET_VARSIZE, VARDATA, VARDATA_ANY, VARSIZE, VARSIZE_ANY_EXHDR};
+use crate::varatt::{
+    SET_VARSIZE, VARATT_IS_SHORT, VARDATA, VARDATA_ANY, VARHDRSZ_SHORT, VARSIZE, VARSIZE_1B,
+    VARSIZE_ANY_EXHDR,
+};
 use core::ffi::{c_char, c_int, c_void};
 
 extern "C" {
@@ -552,8 +555,8 @@ struct hyperLogLogState {
     hashesArr: *mut u8,
 }
 // TODO(pg-port): real HLL routines live in lib/hyperloglog.
-unsafe fn initHyperLogLog(_cE: *mut hyperLogLogState, _bwidth: u8) {}
-unsafe fn addHyperLogLog(_cE: *mut hyperLogLogState, _hash: uint32) {}
+unsafe fn initHyperLogLog(_cE: *mut hyperLogLogState, _bwidth: u8) { crate::lib::hyperloglog::initHyperLogLog(_cE as _, _bwidth as _) }
+unsafe fn addHyperLogLog(_cE: *mut hyperLogLogState, _hash: uint32) { crate::lib::hyperloglog::addHyperLogLog(_cE as _, _hash as _) }
 unsafe fn estimateHyperLogLog(_cE: *mut hyperLogLogState) -> f64 {
     0.0
 }
@@ -1366,14 +1369,14 @@ pub unsafe fn generate_series_numeric(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn generate_series_step_numeric(fcinfo: FunctionCallInfo) -> Datum {
-    let fctx: *mut generate_series_numeric_fctx;
+    let mut fctx: *mut generate_series_numeric_fctx;
     let mut funcctx: *mut FuncCallContext;
-    let oldcontext: MemoryContext;
+    let mut oldcontext: MemoryContext;
 
     if SRF_IS_FIRSTCALL!(fcinfo) {
         let start_num: Numeric = PG_GETARG_NUMERIC!(fcinfo, 0);
         let stop_num: Numeric = PG_GETARG_NUMERIC!(fcinfo, 1);
-        let mut steploc: NumericVar = const_one;
+        let mut steploc: NumericVar = core::ptr::read(core::ptr::addr_of!(const_one));
 
         /* Reject NaN and infinities in start and stop values */
         if NUMERIC_IS_SPECIAL(start_num) {
@@ -5017,15 +5020,9 @@ struct Int8TransTypeData {
 
 // TODO(pg-port): utils/array.h ArrayType + ARR_DATA_PTR/ARR_HASNULL/ARR_SIZE.
 type ArrayType = *mut c_void;
-unsafe fn ARR_HASNULL(_a: ArrayType) -> bool {
-    false
-}
-unsafe fn ARR_SIZE(_a: ArrayType) -> usize {
-    0
-}
-unsafe fn ARR_OVERHEAD_NONULLS(_n: c_int) -> usize {
-    0
-}
+unsafe fn ARR_HASNULL(_a: ArrayType) -> bool { crate::utils::array::ARR_HASNULL(_a as _) }
+unsafe fn ARR_SIZE(_a: ArrayType) -> usize { crate::utils::array::ARR_SIZE(_a as _) as _ }
+unsafe fn ARR_OVERHEAD_NONULLS(_n: c_int) -> usize { crate::utils::array::ARR_OVERHEAD_NONULLS(_n as _) as _ }
 unsafe fn ARR_DATA_PTR(a: ArrayType) -> *mut c_char {
     a as *mut c_char
 }

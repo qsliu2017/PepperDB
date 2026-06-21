@@ -211,7 +211,7 @@ unsafe fn scanner_yyerror(_message: *const c_char, _yyscanner: core_yyscan_t) {
 }
 
 unsafe fn scanner_isspace(_ch: c_char) -> bool {
-    unimplemented!() // TODO: backend/parser/scansup.c
+    crate::parser::scansup::scanner_isspace(_ch)
 }
 
 unsafe fn scanner_errposition(_location: c_int, _yyscanner: core_yyscan_t) -> c_int {
@@ -231,7 +231,7 @@ unsafe fn cancel_scanner_errposition_callback(_scbstate: *mut ScannerCallbackSta
 }
 
 unsafe fn truncate_identifier(_ident: *mut c_char, _len: c_int, _warn: bool) {
-    unimplemented!() // TODO: backend/parser/scansup.c
+    crate::parser::scansup::truncate_identifier(_ident as _, _len, _warn)
 }
 
 unsafe fn parser_init(_yyext: *mut base_yy_extra_type) {
@@ -247,23 +247,23 @@ unsafe fn pg_yyget_extra(_yyscanner: core_yyscan_t) -> *mut base_yy_extra_type {
 }
 
 unsafe fn is_valid_unicode_codepoint(_c: pg_wchar) -> bool {
-    unimplemented!() // TODO: mb/wchar.c
+    crate::mb::wchar::is_valid_unicode_codepoint(_c as _)
 }
 
 unsafe fn is_utf16_surrogate_first(_c: pg_wchar) -> bool {
-    unimplemented!() // TODO: mb/pg_wchar.h
+    crate::mb::wchar::is_utf16_surrogate_first(_c as _)
 }
 
 unsafe fn is_utf16_surrogate_second(_c: pg_wchar) -> bool {
-    unimplemented!() // TODO: mb/pg_wchar.h
+    crate::mb::wchar::is_utf16_surrogate_second(_c as _)
 }
 
 unsafe fn surrogate_pair_to_codepoint(_first: pg_wchar, _second: pg_wchar) -> pg_wchar {
-    unimplemented!() // TODO: mb/pg_wchar.h
+    crate::mb::wchar::surrogate_pair_to_codepoint(_first as _, _second as _) as _
 }
 
 unsafe fn pg_unicode_to_server(_c: pg_wchar, _s: *mut u8) {
-    unimplemented!() // TODO: mb/mbutils.c
+    crate::utils::mb::mbutils::pg_unicode_to_server(_c as _, _s as _)
 }
 
 // ----------------------------------------------------------------
@@ -278,53 +278,13 @@ unsafe fn pg_unicode_to_server(_c: pg_wchar, _s: *mut u8) {
  * list have the form required by the specified RawParseMode.
  */
 pub unsafe fn raw_parser(str: *const c_char, mode: RawParseMode) -> *mut List {
-    let yyscanner: core_yyscan_t;
-    let mut yyextra: base_yy_extra_type = std::mem::zeroed();
-    let yyresult: c_int;
-
-    /* initialize the flex scanner */
-    yyscanner = scanner_init(
-        str,
-        &mut yyextra.core_yy_extra,
-        &ScanKeywords as *const c_void,
-        &ScanKeywordTokens as *const c_void,
-    );
-
-    /* base_yylex() only needs us to initialize the lookahead token, if any */
-    if mode == RAW_PARSE_DEFAULT {
-        yyextra.have_lookahead = false;
-    } else {
-        /* this array is indexed by RawParseMode enum */
-        static mode_token: [c_int; 6] = [
-            0,                  // RAW_PARSE_DEFAULT
-            MODE_TYPE_NAME,     // RAW_PARSE_TYPE_NAME
-            MODE_PLPGSQL_EXPR,  // RAW_PARSE_PLPGSQL_EXPR
-            MODE_PLPGSQL_ASSIGN1, // RAW_PARSE_PLPGSQL_ASSIGN1
-            MODE_PLPGSQL_ASSIGN2, // RAW_PARSE_PLPGSQL_ASSIGN2
-            MODE_PLPGSQL_ASSIGN3, // RAW_PARSE_PLPGSQL_ASSIGN3
-        ];
-
-        yyextra.have_lookahead = true;
-        yyextra.lookahead_token = mode_token[mode as usize];
-        yyextra.lookahead_yylloc = 0;
-        yyextra.lookahead_end = std::ptr::null_mut();
+    // The flex/bison-generated scanner+grammar (scan.c/gram.c/parser.c) are linked
+    // from C via build.rs; forward to the real C entry point.
+    extern "C" {
+        #[link_name = "raw_parser"]
+        fn c_raw_parser(str: *const c_char, mode: c_int) -> *mut List;
     }
-
-    /* initialize the bison parser */
-    parser_init(&mut yyextra);
-
-    /* Parse! */
-    yyresult = base_yyparse(yyscanner);
-
-    /* Clean up (release memory) */
-    scanner_finish(yyscanner);
-
-    if yyresult != 0 {
-        /* error */
-        return NIL;
-    }
-
-    yyextra.parsetree
+    c_raw_parser(str, mode as c_int)
 }
 
 /*

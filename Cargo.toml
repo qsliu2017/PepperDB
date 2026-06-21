@@ -22,5 +22,11 @@ memory_context_checking = []
 # PostgreSQL's Assert() maps to Rust debug_assert!, which is enabled here.
 panic = "unwind"
 
+[profile.release]
+# Bring-up: keep symbols/line info for backtraces; assertions still off.
+debug = true
+panic = "unwind"
+incremental = true
+
 [dependencies]
 libc = "0.2"

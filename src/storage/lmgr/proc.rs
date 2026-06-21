@@ -58,7 +58,8 @@ unsafe fn pg_atomic_init_u64_impl_native(p: *mut pg_atomic_uint64, v: u64) { cra
 unsafe fn pg_atomic_write_u64_impl(p: *mut pg_atomic_uint64, v: u64) { (*p).value = v; }
 
 // Semaphore API
-use crate::storage::pg_sema::{PGSemaphore, PGSemaphoreCreate, PGSemaphoreReset};
+use crate::storage::pg_sema::PGSemaphore;
+use crate::port::sysv_sema::{PGSemaphoreCreate, PGSemaphoreReset};
 
 // Spinlock API
 use crate::storage::spin::{SpinLockAcquire, SpinLockInit, SpinLockRelease};
@@ -181,28 +182,9 @@ pub struct LWLock {
 // LOCK, PROCLOCK, LOCALLOCK, LOCKTAG, LockMethod (lock.h) -- local minimal stubs.
 // TODO(pg-port): replace when storage/lock.rs lands.
 
-#[repr(C)]
-pub struct LOCKTAG {
-    pub locktag_field1: uint32,
-    pub locktag_field2: uint32,
-    pub locktag_field3: uint32,
-    pub locktag_field4: uint16,
-    pub locktag_type: uint8,
-    pub locktag_lockmethodid: uint8,
-}
+pub use crate::storage::lmgr::lock::LOCKTAG;
 
-#[repr(C)]
-pub struct LOCK {
-    pub tag: LOCKTAG,
-    pub grantMask: LOCKMASK,
-    pub waitMask: LOCKMASK,
-    pub procLocks: dlist_head,
-    pub waitProcs: dclist_head,
-    pub requested: [c_int; 9],
-    pub nRequested: c_int,
-    pub granted: [c_int; 9],
-    pub nGranted: c_int,
-}
+pub use crate::storage::lmgr::lock::LOCK;
 
 #[repr(C)]
 pub struct PROCLOCKTAG {
@@ -210,15 +192,7 @@ pub struct PROCLOCKTAG {
     pub myProc: *mut PGPROC,
 }
 
-#[repr(C)]
-pub struct PROCLOCK {
-    pub tag: PROCLOCKTAG,
-    pub groupLeader: *mut PGPROC,
-    pub holdMask: LOCKMASK,
-    pub releaseMask: LOCKMASK,
-    pub lockLink: dlist_node,
-    pub procLink: dlist_node,
-}
+pub use crate::storage::lmgr::lock::PROCLOCK;
 
 /// LOCALLOCK -- per-backend local lock table entry (storage/lock.h).
 #[repr(C)]
@@ -545,7 +519,6 @@ extern "C" {
     pub static mut IsUnderPostmaster: bool;
     pub static mut MyLatch: *mut ::core::ffi::c_void;
     pub static mut InRecovery: bool;
-    pub static mut InHotStandby: bool;
     pub static mut AutovacuumLauncherPid: c_int;
     pub static mut log_recovery_conflict_waits: bool;
     pub static mut message_level_is_interesting_threshold: c_int;
@@ -569,6 +542,7 @@ pub static mut IdleSessionTimeout: c_int = 0;
 pub static mut log_lock_waits: bool = false;
 
 /// Pointer to this process's PGPROC struct, if any.
+#[no_mangle]
 pub static mut MyProc: *mut PGPROC = ptr::null_mut();
 
 /// This spinlock protects the freelist of recycled PGPROC structures.
@@ -579,6 +553,7 @@ pub static mut MyProc: *mut PGPROC = ptr::null_mut();
 pub static mut ProcStructLock: *mut slock_t = ptr::null_mut();
 
 /// Pointers to shared-memory structures.
+#[no_mangle]
 pub static mut ProcGlobal: *mut PROC_HDR = ptr::null_mut();
 pub static mut AuxiliaryProcs: *mut PGPROC = ptr::null_mut();
 pub static mut PreparedXactProcs: *mut PGPROC = ptr::null_mut();
@@ -605,52 +580,56 @@ macro_rules! CHECK_FOR_INTERRUPTS {
 
 /// TODO(pg-port): storage/lock.c -- LWLockAcquire
 pub unsafe fn LWLockAcquire(lock: *mut LWLock, mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(lock as _, if mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE })
 }
 
 /// TODO(pg-port): storage/lock.c -- LWLockRelease
 pub unsafe fn LWLockRelease(lock: *mut LWLock) {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(lock as _)
 }
 
 /// TODO(pg-port): storage/lwlock.c -- LWLockInitialize
 unsafe fn LWLockInitialize(lock: *mut LWLock, tranche_id: c_int) {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockInitialize(lock as _, tranche_id)
 }
 
 /// TODO(pg-port): storage/lwlock.c -- LWLockReleaseAll
 unsafe fn LWLockReleaseAll() {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockReleaseAll()
 }
 
-/// TODO(pg-port): storage/lwlock.c -- LWLockHeldByMeInMode
+// storage/standby.h: InHotStandby is a macro; in a normal (non-standby) backend
+// it is always false. Local stand-in until hot-standby is wired.
+static mut InHotStandby: bool = false;
+
+/// storage/lwlock.c -- LWLockHeldByMeInMode
 unsafe fn LWLockHeldByMeInMode(lock: *mut LWLock, mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockHeldByMeInMode(lock as _, core::mem::transmute(mode))
 }
 
-/// TODO(pg-port): storage/lwlock.c -- LWLockHeldByMe
+/// storage/lwlock.c -- LWLockHeldByMe
 unsafe fn LWLockHeldByMe(lock: *mut LWLock) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockHeldByMe(lock as _)
 }
 
-/// TODO(pg-port): storage/lock.c -- LockHashPartitionLock
+/// storage/lock.c -- LockHashPartitionLock
 unsafe fn LockHashPartitionLock(hashcode: uint32) -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): storage/lock.c
+    crate::storage::lmgr::lock::LockHashPartitionLock(hashcode) as _
 }
 
-/// TODO(pg-port): storage/lock.c -- LockHashPartitionLockByIndex
+/// storage/lock.c -- LockHashPartitionLockByIndex
 unsafe fn LockHashPartitionLockByIndex(i: usize) -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): storage/lock.c
+    crate::storage::lmgr::lock::LockHashPartitionLockByIndex(i) as _
 }
 
-/// TODO(pg-port): storage/lock.c -- LockHashPartitionLockByProc
+/// storage/lock.h -- LockHashPartitionLockByProc(p) = LockHashPartitionLock(GetNumberFromPGProc(p))
 unsafe fn LockHashPartitionLockByProc(proc_: *const PGPROC) -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): storage/lock.c
+    crate::storage::lmgr::lock::LockHashPartitionLock(GetNumberFromPGProc(proc_) as u32) as _
 }
 
 /// TODO(pg-port): storage/lock.c -- LockTagHashCode
 unsafe fn LockTagHashCode(tag: *const LOCKTAG) -> uint32 {
-    unimplemented!() // TODO(pg-port): storage/lock.c
+    crate::storage::lmgr::lock::LockTagHashCode(tag)
 }
 
 /// TODO(pg-port): storage/lock.c -- LockCheckConflicts
@@ -673,79 +652,74 @@ unsafe fn RemoveFromWaitQueue(proc_: *mut PGPROC, hashcode: uint32) {
     unimplemented!() // TODO(pg-port): storage/lock.c
 }
 
-/// TODO(pg-port): storage/lock.c -- LockReleaseAll
+/// storage/lock.c -- LockReleaseAll
 unsafe fn LockReleaseAll(lockmethodid: c_int, allLocks: bool) {
-    unimplemented!() // TODO(pg-port): storage/lock.c
+    crate::storage::lmgr::lock::LockReleaseAll(lockmethodid as _, allLocks)
 }
 
-/// TODO(pg-port): storage/lock.c -- AbortStrongLockAcquire
+/// storage/lock.c -- AbortStrongLockAcquire
 unsafe fn AbortStrongLockAcquire() {
-    unimplemented!() // TODO(pg-port): storage/lock.c
+    crate::storage::lmgr::lock::AbortStrongLockAcquire()
 }
 
-/// TODO(pg-port): storage/lock.c -- GetAwaitedLock
+/// storage/lock.c -- GetAwaitedLock
 unsafe fn GetAwaitedLock() -> *mut LOCALLOCK {
-    unimplemented!() // TODO(pg-port): storage/lock.c
+    crate::storage::lmgr::lock::GetAwaitedLock() as _
 }
 
-/// TODO(pg-port): storage/lock.c -- ResetAwaitedLock
+/// storage/lock.c -- ResetAwaitedLock
 unsafe fn ResetAwaitedLock() {
-    unimplemented!() // TODO(pg-port): storage/lock.c
+    crate::storage::lmgr::lock::ResetAwaitedLock()
 }
 
-/// TODO(pg-port): storage/lock.c -- GrantAwaitedLock
+/// storage/lock.c -- GrantAwaitedLock
 unsafe fn GrantAwaitedLock() {
-    unimplemented!() // TODO(pg-port): storage/lock.c
+    crate::storage::lmgr::lock::GrantAwaitedLock()
 }
 
 /// TODO(pg-port): storage/procarray.c -- ProcArrayAdd
 unsafe fn ProcArrayAdd(proc_: *mut PGPROC) {
-    unimplemented!() // TODO(pg-port): storage/procarray.c
+    crate::storage::ipc::procarray::ProcArrayAdd(proc_ as _)
 }
 
 /// TODO(pg-port): storage/procarray.c -- ProcArrayRemove
 unsafe fn ProcArrayRemove(proc_: *mut PGPROC, latestXid: TransactionId) {
-    unimplemented!() // TODO(pg-port): storage/procarray.c
+    crate::storage::ipc::procarray::ProcArrayRemove(proc_ as _, latestXid)
 }
 
-/// TODO(pg-port): storage/procarray.c -- GetBlockingAutoVacuumPgproc
+/// storage/lmgr/deadlock.c -- GetBlockingAutoVacuumPgproc
 unsafe fn GetBlockingAutoVacuumPgproc() -> *mut PGPROC {
-    unimplemented!() // TODO(pg-port): storage/procarray.c
+    crate::storage::lmgr::deadlock::GetBlockingAutoVacuumPgproc() as _
 }
 
-/// TODO(pg-port): replication/syncrep.c -- SyncRepCleanupAtProcExit
-unsafe fn SyncRepCleanupAtProcExit() {
-    unimplemented!() // TODO(pg-port): replication/syncrep.c
-}
+/// SyncRepCleanupAtProcExit: no sync replication configured for bring-up -> no-op.
+unsafe fn SyncRepCleanupAtProcExit() {}
 
-/// TODO(pg-port): storage/condition_variable.c -- ConditionVariableCancelSleep
 unsafe fn ConditionVariableCancelSleep() {
-    unimplemented!() // TODO(pg-port): storage/condition_variable.c
+    crate::storage::lmgr::condition_variable::ConditionVariableCancelSleep();
 }
 
-/// TODO(pg-port): storage/lmgr/deadlock.c -- DeadLockCheck
+/// storage/lmgr/deadlock.c -- DeadLockCheck
 unsafe fn DeadLockCheck(proc_: *mut PGPROC) -> DeadLockState {
-    unimplemented!() // TODO(pg-port): storage/lmgr/deadlock.c
+    crate::storage::lmgr::deadlock::DeadLockCheck(proc_ as _) as _
 }
 
-/// TODO(pg-port): storage/lmgr/deadlock.c -- RememberSimpleDeadLock
+/// storage/lmgr/deadlock.c -- RememberSimpleDeadLock
 unsafe fn RememberSimpleDeadLock(
     myProc: *mut PGPROC,
     lockmode: LOCKMODE,
     lock: *mut LOCK,
     conflictProc: *mut PGPROC,
 ) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/deadlock.c
+    crate::storage::lmgr::deadlock::RememberSimpleDeadLock(myProc as _, lockmode as _, lock as _, conflictProc as _)
 }
 
-/// TODO(pg-port): storage/lmgr/deadlock.c -- InitDeadLockChecking
 unsafe fn InitDeadLockChecking() {
-    unimplemented!() // TODO(pg-port): storage/lmgr/deadlock.c
+    crate::storage::lmgr::deadlock::InitDeadLockChecking()
 }
 
-/// TODO(pg-port): storage/lmgr/lwlock.c -- InitLWLockAccess
 unsafe fn InitLWLockAccess() {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::InitLWLockAccess()
 }
 
 /// TODO(pg-port): utils/timeout.c -- timeout types and APIs.
@@ -768,16 +742,16 @@ pub struct DisableTimeoutParams {
 }
 
 unsafe fn enable_timeout_after(id: TimeoutId, delay_ms: c_int) {
-    unimplemented!() // TODO(pg-port): utils/timeout.c
+    crate::utils::misc::timeout::enable_timeout_after(id as _, delay_ms)
 }
 unsafe fn enable_timeouts(timeouts: *const EnableTimeoutParams, count: c_int) {
-    unimplemented!() // TODO(pg-port): utils/timeout.c
+    crate::utils::misc::timeout::enable_timeouts(timeouts as _, count)
 }
 unsafe fn disable_timeout(id: TimeoutId, keep_indicator: bool) {
-    unimplemented!() // TODO(pg-port): utils/timeout.c
+    crate::utils::misc::timeout::disable_timeout(id as _, keep_indicator)
 }
 unsafe fn disable_timeouts(timeouts: *const DisableTimeoutParams, count: c_int) {
-    unimplemented!() // TODO(pg-port): utils/timeout.c
+    crate::utils::misc::timeout::disable_timeouts(timeouts as _, count)
 }
 unsafe fn get_timeout_start_time(id: TimeoutId) -> TimestampTz {
     unimplemented!() // TODO(pg-port): utils/timeout.c
@@ -786,7 +760,7 @@ unsafe fn get_timeout_start_time(id: TimeoutId) -> TimestampTz {
 /// TODO(pg-port): utils/timestamp.h
 pub type TimestampTz = i64;
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!() // TODO(pg-port): utils/timestamp.c
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 unsafe fn TimestampDifference(
     start_time: TimestampTz,
@@ -806,21 +780,21 @@ unsafe fn TimestampDifferenceExceeds(
 
 /// TODO(pg-port): postmaster/autovacuum.h
 unsafe fn AmAutoVacuumWorkerProcess() -> bool {
-    unimplemented!() // TODO(pg-port): postmaster/autovacuum.c
+    crate::miscadmin::AmAutoVacuumWorkerProcess()
 }
 
 /// TODO(pg-port): postmaster -- process identity predicates.
 unsafe fn AmSpecialWorkerProcess() -> bool {
-    unimplemented!() // TODO(pg-port): postmaster
+    crate::miscadmin::AmSpecialWorkerProcess()
 }
 unsafe fn AmBackgroundWorkerProcess() -> bool {
-    unimplemented!() // TODO(pg-port): postmaster
+    crate::miscadmin::AmBackgroundWorkerProcess()
 }
 unsafe fn AmWalSenderProcess() -> bool {
-    unimplemented!() // TODO(pg-port): postmaster
+    crate::miscadmin::AmWalSenderProcess()
 }
 unsafe fn AmRegularBackendProcess() -> bool {
-    unimplemented!() // TODO(pg-port): postmaster
+    crate::miscadmin::AmRegularBackendProcess()
 }
 
 /// TODO(pg-port): storage/standby.c
@@ -864,16 +838,12 @@ unsafe fn GetLockmodeName(lockmethodid: c_int, mode: LOCKMODE) -> *const c_char 
 }
 
 /// TODO(pg-port): pgstat -- wait event reporting.
-unsafe fn pgstat_set_wait_event_storage(ptr: *mut uint32) {
-    unimplemented!() // TODO(pg-port): utils/activity/pgstat.c
-}
-unsafe fn pgstat_reset_wait_event_storage() {
-    unimplemented!() // TODO(pg-port): utils/activity/pgstat.c
-}
+// pgstat wait-event reporting (pg_stat_activity); not needed for bring-up -> no-op.
+unsafe fn pgstat_set_wait_event_storage(_ptr: *mut uint32) {}
+unsafe fn pgstat_reset_wait_event_storage() {}
 
-/// TODO(pg-port): postmaster -- register active child.
 unsafe fn RegisterPostmasterChildActive() {
-    unimplemented!() // TODO(pg-port): postmaster/postmaster.c
+    crate::storage::ipc::pmsignal::RegisterPostmasterChildActive()
 }
 
 /// TODO(pg-port): backend/storage/ipc -- EXEC_BACKEND only.
@@ -922,7 +892,7 @@ unsafe fn message_level_is_interesting(level: c_int) -> bool {
 }
 
 pub const DEBUG1: c_int = -1; // TODO(pg-port): utils/elog.h
-pub const ProcArrayLock: *mut LWLock = ptr::null_mut(); // TODO(pg-port): storage/procarray.c stub
+pub use crate::backend_link_shims::ProcArrayLock; // canonical runtime-assigned global
 
 // PG_WAIT_LOCK / locktag_type from lock.h -- just a u32 shifted value.
 // TODO(pg-port): real macros in storage/lock.h
@@ -1761,6 +1731,9 @@ pub unsafe fn LockErrorCleanup() {
 /// this is implemented by retail releasing of the locks under control of
 /// the ResourceOwner mechanism.
 pub unsafe fn ProcReleaseLocks(isCommit: bool) {
+    if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT ProcReleaseLocks called isCommit={} pid={}", isCommit, std::process::id());
+    }
     if MyProc.is_null() {
         return;
     }

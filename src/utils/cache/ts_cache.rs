@@ -942,11 +942,11 @@ const GucSource_PGC_S_TEST: GucSource = 17;
 const Anum_pg_ts_dict_dictinitoption: c_int = 4;
 const Anum_pg_ts_config_map_mapcfg: c_int = 1;
 
-const TSPARSEROID: c_int = 0;
-const TSDICTOID: c_int = 0;
-const TSTEMPLATEOID: c_int = 0;
-const TSCONFIGOID: c_int = 0;
-const TSCONFIGMAP: c_int = 0;
+const TSPARSEROID: c_int = 78;
+const TSDICTOID: c_int = 76;
+const TSTEMPLATEOID: c_int = 80;
+const TSCONFIGOID: c_int = 74;
+const TSCONFIGMAP: c_int = 72;
 
 const TSConfigMapRelationId: Oid = 3603;
 const TSConfigMapIndexId: Oid = 3609;

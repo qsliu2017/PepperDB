@@ -232,7 +232,7 @@ pub unsafe fn RE_compile_and_cache(text_re: *mut text, cflags: c_int, collation:
     if unlikely(RegexpCacheMemoryContext.is_null()) {
         RegexpCacheMemoryContext = AllocSetContextCreate!(
             TopMemoryContext,
-            "RegexpCacheMemoryContext",
+            c"RegexpCacheMemoryContext".as_ptr(),
             ALLOCSET_SMALL_SIZES
         );
     }
@@ -253,8 +253,13 @@ pub unsafe fn RE_compile_and_cache(text_re: *mut text, cflags: c_int, collation:
      * re-parent it under the longer lived cache context if we make it to the
      * bottom of this function.
      */
+    // NOTE(pg-port): with the context-less bootstrap allocator AllocSetContextCreate!
+    // returns its parent, so creating under CurrentMemoryContext (a per-tuple context)
+    // and later MemoryContextSetParent'ing into the cache reparents the per-tuple
+    // context itself, corrupting the context tree (infinite loop on scan reset).
+    // Create directly under the long-lived cache context and skip the reparent.
     re_temp.cre_context =
-        AllocSetContextCreate!(CurrentMemoryContext, "RegexpMemoryContext", ALLOCSET_SMALL_SIZES);
+        AllocSetContextCreate!(RegexpCacheMemoryContext, c"RegexpMemoryContext".as_ptr(), ALLOCSET_SMALL_SIZES);
     oldcontext = MemoryContextSwitchTo(re_temp.cre_context);
 
     regcomp_result = pg_regcomp(
@@ -310,8 +315,7 @@ pub unsafe fn RE_compile_and_cache(text_re: *mut text, cflags: c_int, collation:
         MemoryContextDelete(re_array[num_res as usize].cre_context);
     }
 
-    /* Re-parent the memory context to our long-lived cache context. */
-    MemoryContextSetParent(re_temp.cre_context as crate::utils::mmgr::memnodes::MemoryContext, RegexpCacheMemoryContext as crate::utils::mmgr::memnodes::MemoryContext);
+    /* Already created under the long-lived cache context above; no reparent. */
 
     if num_res > 0 {
         libc_memmove(
@@ -580,6 +584,7 @@ pub unsafe fn nameregexne(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 pub unsafe fn textregexeq(fcinfo: FunctionCallInfo) -> Datum {
+    if std::env::var_os("PDB_RX").is_some() { eprintln!("PDB_RX textregexeq EXEC reached"); }
     let s: *mut text = PG_GETARG_TEXT_PP!(fcinfo, 0);
     let p: *mut text = PG_GETARG_TEXT_PP!(fcinfo, 1);
 

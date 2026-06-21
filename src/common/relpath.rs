@@ -145,6 +145,7 @@ pub unsafe fn GetDatabasePath(dbOid: Oid, spcOid: Oid) -> *mut c_char {
 /*
  * GetRelationPath - path to a relation's file, returned in-place in a RelPathStr.
  */
+#[no_mangle]
 pub unsafe fn GetRelationPath(
     dbOid: Oid,
     spcOid: Oid,

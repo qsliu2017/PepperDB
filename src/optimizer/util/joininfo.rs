@@ -43,37 +43,45 @@ use crate::{current_cell, foreach};
 
 /// STUB: restrictinfo.c.  TODO port restriction_is_always_true.
 unsafe fn restriction_is_always_true(
-    _root: *mut PlannerInfo,
-    _restrictinfo: *mut RestrictInfo,
+    root: *mut PlannerInfo,
+    restrictinfo: *mut RestrictInfo,
 ) -> bool {
-    // TODO: real implementation in restrictinfo.c
-    false
+    crate::optimizer::plan::initsplan::restriction_is_always_true(root, restrictinfo)
 }
 
 /// STUB: restrictinfo.c.  TODO port restriction_is_always_false.
 unsafe fn restriction_is_always_false(
-    _root: *mut PlannerInfo,
-    _restrictinfo: *mut RestrictInfo,
+    root: *mut PlannerInfo,
+    restrictinfo: *mut RestrictInfo,
 ) -> bool {
-    // TODO: real implementation in restrictinfo.c
-    false
+    crate::optimizer::plan::initsplan::restriction_is_always_false(root, restrictinfo)
 }
 
 /// STUB: relnode.c / restrictinfo.c.  TODO port make_restrictinfo.
 unsafe fn make_restrictinfo(
-    _root: *mut PlannerInfo,
-    _clause: *mut Expr,
-    _is_pushed_down: bool,
-    _has_clone: bool,
-    _is_clone: bool,
-    _pseudoconstant: bool,
-    _security_level: c_int,
-    _required_relids: Relids,
-    _incompatible_relids: Relids,
-    _outer_relids: Relids,
+    root: *mut PlannerInfo,
+    clause: *mut Expr,
+    is_pushed_down: bool,
+    has_clone: bool,
+    is_clone: bool,
+    pseudoconstant: bool,
+    security_level: c_int,
+    required_relids: Relids,
+    incompatible_relids: Relids,
+    outer_relids: Relids,
 ) -> *mut RestrictInfo {
-    // TODO: real implementation in restrictinfo.c
-    unimplemented!("make_restrictinfo stub")
+    crate::optimizer::util::restrictinfo::make_restrictinfo(
+        root,
+        clause,
+        is_pushed_down,
+        has_clone,
+        is_clone,
+        pseudoconstant,
+        security_level as _,
+        required_relids,
+        incompatible_relids,
+        outer_relids,
+    )
 }
 
 /// STUB: relnode.c.  TODO port find_base_rel_ignore_join.
@@ -82,31 +90,26 @@ unsafe fn find_base_rel_ignore_join(
     _root: *mut PlannerInfo,
     _relid: c_int,
 ) -> *mut RelOptInfo {
-    // TODO: real implementation in relnode.c
-    unimplemented!("find_base_rel_ignore_join stub")
+    crate::optimizer::util::relnode::find_base_rel_ignore_join(_root as _, _relid as _) as _
 }
 
 /// STUB: equivclass.c (declared in optimizer/paths.h).  TODO port.
 /// Detect whether there is an EquivalenceClass that could produce a join clause
 /// involving the two given relations.
 pub unsafe fn have_relevant_eclass_joinclause(
-    _root: *mut PlannerInfo,
-    _rel1: *mut RelOptInfo,
-    _rel2: *mut RelOptInfo,
+    root: *mut PlannerInfo,
+    rel1: *mut RelOptInfo,
+    rel2: *mut RelOptInfo,
 ) -> bool {
-    // TODO: real implementation in equivclass.c (scans root->eq_classes for an EC
-    // whose ec_relids overlaps rel1 and rel2 in the required way).
-    unimplemented!("have_relevant_eclass_joinclause stub (equivclass.c)")
+    crate::optimizer::path::equivclass::have_relevant_eclass_joinclause(root, rel1, rel2)
 }
 
-/// STUB: equivclass.c (declared in optimizer/paths.h).  TODO port.
 /// Same as have_relevant_eclass_joinclause but tests rel1 against every other rel.
 pub unsafe fn has_relevant_eclass_joinclause(
-    _root: *mut PlannerInfo,
-    _rel1: *mut RelOptInfo,
+    root: *mut PlannerInfo,
+    rel1: *mut RelOptInfo,
 ) -> bool {
-    // TODO: real implementation in equivclass.c
-    unimplemented!("has_relevant_eclass_joinclause stub (equivclass.c)")
+    crate::optimizer::path::equivclass::has_relevant_eclass_joinclause(root, rel1)
 }
 
 // ---------------------------------------------------------------------------

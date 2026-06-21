@@ -1101,9 +1101,9 @@ unsafe fn ObjectIdGetDatum(_oid: Oid) -> Datum { unimplemented!() /* TODO: postg
 // Local constant stubs for unported dependencies.
 // ---------------------------------------------------------------------------
 
-const RELOID: c_int = 0; // TODO: utils/cache/syscache (SysCacheIdentifier)
-const CLAOID: c_int = 0; // TODO: utils/cache/syscache (SysCacheIdentifier)
-const INDEXRELID: c_int = 0; // TODO: utils/cache/syscache (SysCacheIdentifier)
+const RELOID: c_int = 57; // TODO: utils/cache/syscache (SysCacheIdentifier)
+const CLAOID: c_int = 14; // TODO: utils/cache/syscache (SysCacheIdentifier)
+const INDEXRELID: c_int = 34; // TODO: utils/cache/syscache (SysCacheIdentifier)
 const Anum_pg_index_indclass: crate::access::attnum::AttrNumber = 0; // TODO: catalog/pg_index_d.h
 
 const SPI_OK_UTILITY: c_int = 4; // TODO: executor/spi.h

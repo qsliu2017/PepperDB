@@ -356,27 +356,9 @@ extern "C" {
 pub struct Relation {
     _opaque: [u8; 0],
 }
-#[repr(C)]
-pub struct TupleDesc {
-    pub natts: i32,
-    pub constr: *mut TupleConstr,
-    _opaque: [u8; 0],
-}
-#[repr(C)]
-pub struct TupleConstr {
-    pub has_generated_virtual: bool,
-    _opaque: [u8; 0],
-}
-// pg_attribute form
+pub use crate::access::common::tupdesc::{TupleConstr, TupleDescData as TupleDesc};
+pub use crate::catalog::pg_attribute::FormData_pg_attribute as PgAttribute;
 pub type Form_pg_attribute = *mut PgAttribute;
-#[repr(C)]
-pub struct PgAttribute {
-    pub attgenerated: i8,
-    pub atttypid: Oid,
-    pub atttypmod: i32,
-    pub attcollation: Oid,
-    _opaque: [u8; 0],
-}
 
 const ATTRIBUTE_GENERATED_VIRTUAL: i8 = b'v' as i8;
 
@@ -394,8 +376,11 @@ use TypeFuncClass::*;
 // ReplaceRteVariablesContext is opaque (used via callback)
 #[repr(C)]
 pub struct ReplaceRteVariablesContext {
-    pub callback_arg: *mut c_void,
-    _opaque: [u8; 0],
+    pub callback: *mut c_void,     /* callback function (offset 0) */
+    pub callback_arg: *mut c_void, /* context data for callback (offset 8) */
+    pub target_varno: c_int,
+    pub sublevels_up: c_int,
+    pub inserted_sublink: bool,
 }
 
 // REPLACEVARS_REPORT_ERROR constant
@@ -407,11 +392,7 @@ const NoLock: i32 = 0;
 // TupleDescAttr
 #[inline]
 unsafe fn TupleDescAttr(tupdesc: *mut TupleDesc, i: i32) -> Form_pg_attribute {
-    // In C: TupleDescAttr(tupdesc, i) = &(tupdesc)->attrs[i]
-    // We model this as a raw pointer offset.
-    // The actual layout of TupleDesc in pg has attrs[] as a flexible array
-    // right after the fixed fields. We use a stub that calls a C helper.
-    tuple_desc_attr_stub(tupdesc, i)
+    crate::access::common::tupdesc::TupleDescAttr(tupdesc as _, i) as _
 }
 
 extern "C" {

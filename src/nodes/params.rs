@@ -109,6 +109,7 @@ pub struct ParamsErrorCbData {
 ///
 /// # Safety
 /// Returns a palloc'd ParamListInfo the caller owns.
+#[no_mangle]
 pub unsafe fn makeParamList(numParams: c_int) -> ParamListInfo {
     let size = core::mem::offset_of!(ParamListInfoData, params)
         + numParams as usize * core::mem::size_of::<ParamExternData>();
@@ -520,7 +521,7 @@ extern "C" {
 
 /// TODO(pg-port): utils/datum.c datumCopy.
 unsafe fn datumCopy(_value: Datum, _typByVal: bool, _typLen: c_int) -> Datum {
-    unimplemented!()
+    crate::utils::adt::datum::datumCopy(_value, _typByVal, _typLen)
 }
 
 /// TODO(pg-port): utils/datum.c datumEstimateSpace.
@@ -530,7 +531,7 @@ unsafe fn datumEstimateSpace(
     _typByVal: bool,
     _typLen: c_int,
 ) -> Size {
-    unimplemented!()
+    crate::utils::adt::datum::datumEstimateSpace(_value, _isnull, _typByVal, _typLen)
 }
 
 /// TODO(pg-port): utils/datum.c datumSerialize.
@@ -541,47 +542,47 @@ unsafe fn datumSerialize(
     _typLen: c_int,
     _start_address: *mut *mut c_char,
 ) {
-    unimplemented!()
+    crate::utils::adt::datum::datumSerialize(_value, _isnull, _typByVal, _typLen, _start_address)
 }
 
 /// TODO(pg-port): utils/datum.c datumRestore.
 unsafe fn datumRestore(_start_address: *mut *mut c_char, _isnull: *mut bool) -> Datum {
-    unimplemented!()
+    crate::utils::adt::datum::datumRestore(_start_address, _isnull)
 }
 
 /// TODO(pg-port): utils/cache/lsyscache.c get_typlenbyval.
 unsafe fn get_typlenbyval(_typid: Oid, _typlen: *mut int16, _typbyval: *mut bool) {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_typlenbyval(_typid, _typlen as _, _typbyval)
 }
 
 /// TODO(pg-port): utils/cache/lsyscache.c get_typcollation.
 unsafe fn get_typcollation(_typid: Oid) -> Oid {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_typcollation(_typid)
 }
 
 /// TODO(pg-port): utils/fmgr.c getTypeOutputInfo.
 unsafe fn getTypeOutputInfo(_type: Oid, _typOutput: *mut Oid, _typIsVarlena: *mut bool) {
-    unimplemented!()
+    crate::utils::cache::lsyscache::getTypeOutputInfo(_type, _typOutput, _typIsVarlena)
 }
 
 /// TODO(pg-port): utils/fmgr/fmgr.c OidOutputFunctionCall.
 unsafe fn OidOutputFunctionCall(_functionId: Oid, _val: Datum) -> *mut c_char {
-    unimplemented!()
+    crate::utils::fmgr::OidOutputFunctionCall(_functionId, _val)
 }
 
 /// TODO(pg-port): lib/stringinfo.c initStringInfo.
 unsafe fn initStringInfo(_str: *mut StringInfoData) {
-    unimplemented!()
+    crate::lib::stringinfo::initStringInfo(_str as _)
 }
 
 /// TODO(pg-port): lib/stringinfo.c appendStringInfoString.
 unsafe fn appendStringInfoString(_str: *mut StringInfoData, _s: *const c_char) {
-    unimplemented!()
+    crate::lib::stringinfo::appendStringInfoString(_str as _, _s)
 }
 
 /// TODO(pg-port): mb/stringinfo_mb.c appendStringInfoStringQuoted.
 unsafe fn appendStringInfoStringQuoted(_str: *mut StringInfoData, _s: *const c_char, _maxlen: c_int) {
-    unimplemented!()
+    crate::utils::mb::stringinfo_mb::appendStringInfoStringQuoted(_str as _, _s, _maxlen)
 }
 
 /// TODO(pg-port): common/int.h add_size.

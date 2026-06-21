@@ -47,18 +47,12 @@ unsafe fn strlen(s: *const c_char) -> usize {
 const ERRCODE_DATA_EXCEPTION: c_int = 0;
 
 // --- expandeddatum.h operations (not yet translated; only reached for expanded objects) ---
-unsafe fn EOH_get_flat_size(_eoh: *mut c_void) -> Size {
-    unimplemented!("EOH_get_flat_size: expanded objects (utils/expandeddatum.c) not yet translated")
-}
+unsafe fn EOH_get_flat_size(_eoh: *mut c_void) -> Size { crate::utils::adt::expandeddatum::EOH_get_flat_size(_eoh as _) as _ }
 unsafe fn EOH_flatten_into(_eoh: *mut c_void, _result: *mut c_void, _size: Size) {
     unimplemented!("EOH_flatten_into: expanded objects (utils/expandeddatum.c) not yet translated")
 }
-unsafe fn DatumGetEOHP(_value: Datum) -> *mut c_void {
-    unimplemented!("DatumGetEOHP: expanded objects (utils/expandeddatum.c) not yet translated")
-}
-unsafe fn TransferExpandedObject(_value: Datum, _context: *mut c_void) -> Datum {
-    unimplemented!("TransferExpandedObject: expanded objects not yet translated")
-}
+unsafe fn DatumGetEOHP(_value: Datum) -> *mut c_void { crate::utils::adt::expandeddatum::DatumGetEOHP(_value as _) as _ }
+unsafe fn TransferExpandedObject(_value: Datum, _context: *mut c_void) -> Datum { crate::utils::adt::expandeddatum::TransferExpandedObject(_value as _, _context as _) as _ }
 
 /*
  * toast_raw_datum_size (access/common/detoast.c): logical size (incl. VARHDRSZ) of
@@ -123,6 +117,7 @@ pub unsafe fn datumGetSize(value: Datum, typByVal: bool, typLen: c_int) -> Size 
  * # Safety
  * As datumGetSize.
  */
+#[no_mangle]
 pub unsafe fn datumCopy(value: Datum, typByVal: bool, typLen: c_int) -> Datum {
     let res: Datum;
 
@@ -162,6 +157,7 @@ pub unsafe fn datumCopy(value: Datum, typByVal: bool, typLen: c_int) -> Datum {
  * # Safety
  * As datumCopy.
  */
+#[no_mangle]
 pub unsafe fn datumTransfer(mut value: Datum, typByVal: bool, typLen: c_int) -> Datum {
     if !typByVal
         && typLen == -1
@@ -204,6 +200,7 @@ pub unsafe fn datumIsEqual(value1: Datum, value2: Datum, typByVal: bool, typLen:
  * # Safety
  * As datumGetSize.
  */
+#[no_mangle]
 pub unsafe fn datum_image_eq(value1: Datum, value2: Datum, typByVal: bool, typLen: c_int) -> bool {
     let len1: Size;
     let len2: Size;
@@ -308,6 +305,7 @@ pub unsafe fn btequalimage(fcinfo: FunctionCallInfo) -> Datum {
  * # Safety
  * As datumGetSize.
  */
+#[no_mangle]
 pub unsafe fn datumEstimateSpace(value: Datum, isnull: bool, typByVal: bool, typLen: c_int) -> Size {
     let mut sz: Size = core::mem::size_of::<c_int>();
 
@@ -330,6 +328,7 @@ pub unsafe fn datumEstimateSpace(value: Datum, isnull: bool, typByVal: bool, typ
  * # Safety
  * `*start_address` must have room for datumEstimateSpace(value) bytes.
  */
+#[no_mangle]
 pub unsafe fn datumSerialize(
     value: Datum,
     isnull: bool,
@@ -391,6 +390,7 @@ pub unsafe fn datumSerialize(
  * # Safety
  * `*start_address` points at a buffer produced by datumSerialize.
  */
+#[no_mangle]
 pub unsafe fn datumRestore(start_address: *mut *mut c_char, isnull: *mut bool) -> Datum {
     let mut header: c_int = 0;
 

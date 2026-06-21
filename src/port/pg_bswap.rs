@@ -35,33 +35,39 @@ pub fn pg_bswap64(x: uint64) -> uint64 {
 
 /// `pg_hton16(x)`: host to network (big-endian) byte order.
 #[inline]
-pub fn pg_hton16(x: uint16) -> uint16 {
+#[no_mangle]
+pub extern "C" fn pg_hton16(x: uint16) -> uint16 {
     pg_bswap16(x)
 }
 /// `pg_hton32(x)`
 #[inline]
-pub fn pg_hton32(x: uint32) -> uint32 {
+#[no_mangle]
+pub extern "C" fn pg_hton32(x: uint32) -> uint32 {
     pg_bswap32(x)
 }
 /// `pg_hton64(x)`
 #[inline]
-pub fn pg_hton64(x: uint64) -> uint64 {
+#[no_mangle]
+pub extern "C" fn pg_hton64(x: uint64) -> uint64 {
     pg_bswap64(x)
 }
 
 /// `pg_ntoh16(x)`: network (big-endian) to host byte order.
 #[inline]
-pub fn pg_ntoh16(x: uint16) -> uint16 {
+#[no_mangle]
+pub extern "C" fn pg_ntoh16(x: uint16) -> uint16 {
     pg_bswap16(x)
 }
 /// `pg_ntoh32(x)`
 #[inline]
-pub fn pg_ntoh32(x: uint32) -> uint32 {
+#[no_mangle]
+pub extern "C" fn pg_ntoh32(x: uint32) -> uint32 {
     pg_bswap32(x)
 }
 /// `pg_ntoh64(x)`
 #[inline]
-pub fn pg_ntoh64(x: uint64) -> uint64 {
+#[no_mangle]
+pub extern "C" fn pg_ntoh64(x: uint64) -> uint64 {
     pg_bswap64(x)
 }
 

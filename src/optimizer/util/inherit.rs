@@ -1100,212 +1100,256 @@ extern "C" {
     fn snprintf(s: *mut c_char, n: usize, fmt: *const c_char, ...) -> c_int;
 }
 
-unsafe fn table_open(_relid: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO: access/table.h
+unsafe fn table_open(relid: Oid, lockmode: LOCKMODE) -> Relation {
+    crate::access::table::table::table_open(relid, lockmode as _) as _
 }
-unsafe fn try_table_open(_relid: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO: access/table.h
+unsafe fn try_table_open(relid: Oid, lockmode: LOCKMODE) -> Relation {
+    crate::access::table::table::try_table_open(relid, lockmode as _) as _
 }
-unsafe fn table_close(_rel: Relation, _lockmode: LOCKMODE) {
-    unimplemented!() // TODO: access/table.h
+unsafe fn table_close(rel: Relation, lockmode: LOCKMODE) {
+    crate::access::table::table::table_close(rel as _, lockmode as _)
 }
-unsafe fn get_plan_rowmark(_rowmarks: *mut List, _rtindex: Index) -> *mut PlanRowMark {
-    unimplemented!() // TODO: optimizer/prep.h
+unsafe fn get_plan_rowmark(rowmarks: *mut List, rtindex: Index) -> *mut PlanRowMark {
+    crate::optimizer::prep::preptlist::get_plan_rowmark(rowmarks as _, rtindex as _) as _
 }
 unsafe fn getRTEPermissionInfo(
-    _rteperminfos: *mut List,
-    _rte: *mut RangeTblEntry,
+    rteperminfos: *mut List,
+    rte: *mut RangeTblEntry,
 ) -> *mut RTEPermissionInfo {
-    unimplemented!() // TODO: parser/parse_relation.h
+    crate::parser::parse_relation::getRTEPermissionInfo(rteperminfos as _, rte as _) as _
 }
 unsafe fn find_all_inheritors(
-    _parentrelId: Oid,
-    _lockmode: LOCKMODE,
-    _numparents: *mut *mut List,
+    parentrel_id: Oid,
+    lockmode: LOCKMODE,
+    numparents: *mut *mut List,
 ) -> *mut List {
-    unimplemented!() // TODO: catalog/pg_inherits.h
+    crate::catalog::pg_inherits::find_all_inheritors(parentrel_id, lockmode as _, numparents as _)
+        as _
 }
-unsafe fn expand_planner_arrays(_root: *mut PlannerInfo, _add_size: c_int) {
-    unimplemented!() // TODO: optimizer/planmain.h
+unsafe fn expand_planner_arrays(root: *mut PlannerInfo, add_size: c_int) {
+    crate::optimizer::util::relnode::expand_planner_arrays(root as _, add_size)
 }
 unsafe fn build_simple_rel(
-    _root: *mut PlannerInfo,
-    _relid: Index,
-    _parent: *mut RelOptInfo,
+    root: *mut PlannerInfo,
+    relid: Index,
+    parent: *mut RelOptInfo,
 ) -> *mut RelOptInfo {
-    unimplemented!() // TODO: optimizer/pathnode.h
+    crate::optimizer::util::relnode::build_simple_rel(root as _, relid as _, parent as _) as _
 }
-unsafe fn RELATION_IS_OTHER_TEMP(_rel: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RELATION_IS_OTHER_TEMP(rel: Relation) -> bool {
+    (*(*rel).rd_rel).relpersistence == b't' as c_char && !(*rel).rd_islocaltemp
 }
 unsafe fn makeVar(
-    _varno: Index,
-    _varattno: crate::access::attnum::AttrNumber,
-    _vartype: Oid,
-    _vartypmod: i32,
-    _varcollid: Oid,
-    _varlevelsup: Index,
+    varno: Index,
+    varattno: crate::access::attnum::AttrNumber,
+    vartype: Oid,
+    vartypmod: i32,
+    varcollid: Oid,
+    varlevelsup: Index,
 ) -> *mut Var {
-    unimplemented!() // TODO: nodes/makefuncs.h
+    crate::nodes::makefuncs::makeVar(
+        varno as _,
+        varattno as _,
+        vartype,
+        vartypmod,
+        varcollid,
+        varlevelsup as _,
+    ) as _
 }
 unsafe fn makeWholeRowVar(
-    _rte: *mut RangeTblEntry,
-    _varno: Index,
-    _varlevelsup: Index,
-    _allowScalar: bool,
+    rte: *mut RangeTblEntry,
+    varno: Index,
+    varlevelsup: Index,
+    allow_scalar: bool,
 ) -> *mut Var {
-    unimplemented!() // TODO: nodes/makefuncs.h
+    crate::nodes::makefuncs::makeWholeRowVar(rte as _, varno as _, varlevelsup as _, allow_scalar)
+        as _
 }
 unsafe fn makeTargetEntry(
-    _expr: *mut Expr,
-    _resno: crate::access::attnum::AttrNumber,
-    _resname: *mut c_char,
-    _resjunk: bool,
+    expr: *mut Expr,
+    resno: crate::access::attnum::AttrNumber,
+    resname: *mut c_char,
+    resjunk: bool,
 ) -> *mut TargetEntry {
-    unimplemented!() // TODO: nodes/makefuncs.h
+    crate::nodes::makefuncs::makeTargetEntry(expr as _, resno as _, resname, resjunk) as _
 }
 unsafe fn makeAlias(
-    _aliasname: *const c_char,
-    _colnames: *mut List,
+    aliasname: *const c_char,
+    colnames: *mut List,
 ) -> *mut crate::nodes::primnodes::Alias {
-    unimplemented!() // TODO: nodes/makefuncs.h
+    crate::nodes::makefuncs::makeAlias(aliasname, colnames as _) as _
 }
-unsafe fn makeString(_str: *mut c_char) -> *mut crate::nodes::value::String {
-    unimplemented!() // TODO: nodes/value.h
+unsafe fn makeString(str: *mut c_char) -> *mut crate::nodes::value::String {
+    crate::nodes::value::makeString(str) as _
 }
-unsafe fn planner_rt_fetch(_rti: Index, _root: *mut PlannerInfo) -> *mut RangeTblEntry {
-    unimplemented!() // TODO: parser/parsetree.h
+unsafe fn planner_rt_fetch(rti: Index, root: *mut PlannerInfo) -> *mut RangeTblEntry {
+    crate::optimizer::util::pathnode::planner_rt_fetch(rti as _, root as _) as _
 }
 unsafe fn add_vars_to_targetlist(
-    _root: *mut PlannerInfo,
-    _vars: *mut List,
-    _where_needed: *mut Bitmapset,
+    root: *mut PlannerInfo,
+    vars: *mut List,
+    where_needed: *mut Bitmapset,
 ) {
-    unimplemented!() // TODO: optimizer/planmain.h
+    crate::optimizer::plan::initsplan::add_vars_to_targetlist(root as _, vars as _, where_needed as _)
 }
 unsafe fn PartitionDirectoryLookup(
-    _pdir: crate::partitioning::partdefs::PartitionDirectory,
-    _rel: Relation,
+    pdir: crate::partitioning::partdefs::PartitionDirectory,
+    rel: Relation,
 ) -> PartitionDesc {
-    unimplemented!() // TODO: partitioning/partdesc.h
+    crate::partitioning::partdesc::PartitionDirectoryLookup(pdir as _, rel as _) as _
 }
 unsafe fn has_partition_attrs(
-    _rel: Relation,
-    _attnums: *mut Bitmapset,
-    _used_in_expr: *mut bool,
+    rel: Relation,
+    attnums: *mut Bitmapset,
+    used_in_expr: *mut bool,
 ) -> bool {
-    unimplemented!() // TODO: catalog/partition.h
+    crate::catalog::partition::has_partition_attrs(rel as _, attnums as _, used_in_expr)
 }
-unsafe fn prune_append_rel_partitions(_rel: *mut RelOptInfo) -> *mut Bitmapset {
-    unimplemented!() // TODO: partitioning/partprune.h
+unsafe fn prune_append_rel_partitions(rel: *mut RelOptInfo) -> *mut Bitmapset {
+    crate::partitioning::partprune::prune_append_rel_partitions(rel as _) as _
 }
 unsafe fn make_append_rel_info(
-    _parentrel: Relation,
-    _childrel: Relation,
-    _parentRTindex: Index,
-    _childRTindex: Index,
+    parentrel: Relation,
+    childrel: Relation,
+    parent_rtindex: Index,
+    child_rtindex: Index,
 ) -> *mut AppendRelInfo {
-    unimplemented!() // TODO: optimizer/appendinfo.h
+    crate::optimizer::util::appendinfo::make_append_rel_info(
+        parentrel as _,
+        childrel as _,
+        parent_rtindex as _,
+        child_rtindex as _,
+    ) as _
 }
 unsafe fn select_rowmark_type(
-    _rte: *mut RangeTblEntry,
-    _strength: crate::nodes::lockoptions::LockClauseStrength,
+    rte: *mut RangeTblEntry,
+    strength: crate::nodes::lockoptions::LockClauseStrength,
 ) -> crate::nodes::plannodes::RowMarkType {
-    unimplemented!() // TODO: optimizer/planner.h
+    crate::optimizer::plan::planner::select_rowmark_type(rte as _, strength as _) as _
 }
 unsafe fn add_row_identity_var(
-    _root: *mut PlannerInfo,
-    _orig_var: *mut Var,
-    _rtindex: Index,
-    _rowid_name: *const c_char,
+    root: *mut PlannerInfo,
+    orig_var: *mut Var,
+    rtindex: Index,
+    rowid_name: *const c_char,
 ) {
-    unimplemented!() // TODO: optimizer/planmain.h
+    crate::optimizer::util::appendinfo::add_row_identity_var(
+        root as _,
+        orig_var as _,
+        rtindex as _,
+        rowid_name,
+    )
 }
 unsafe fn add_row_identity_columns(
-    _root: *mut PlannerInfo,
-    _rtindex: Index,
-    _target_rte: *mut RangeTblEntry,
-    _target_relation: Relation,
+    root: *mut PlannerInfo,
+    rtindex: Index,
+    target_rte: *mut RangeTblEntry,
+    target_relation: Relation,
 ) {
-    unimplemented!() // TODO: optimizer/planmain.h
+    crate::optimizer::util::appendinfo::add_row_identity_columns(
+        root as _,
+        rtindex as _,
+        target_rte as _,
+        target_relation as _,
+    )
 }
-unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo {
-    unimplemented!() // TODO: optimizer/pathnode.h
+unsafe fn find_base_rel(root: *mut PlannerInfo, relid: c_int) -> *mut RelOptInfo {
+    crate::optimizer::util::relnode::find_base_rel(root as _, relid) as _
 }
 unsafe fn get_dependent_generated_columns(
-    _root: *mut PlannerInfo,
-    _rti: Index,
-    _target_cols: *mut Bitmapset,
+    root: *mut PlannerInfo,
+    rti: Index,
+    target_cols: *mut Bitmapset,
 ) -> *mut Bitmapset {
-    unimplemented!() // TODO: optimizer/optimizer.h
+    crate::optimizer::util::plancat::get_dependent_generated_columns(
+        root as _,
+        rti as _,
+        target_cols as _,
+    ) as _
 }
 unsafe fn adjust_appendrel_attrs(
-    _root: *mut PlannerInfo,
-    _node: *mut Node,
-    _nappinfos: c_int,
-    _appinfos: *mut *mut AppendRelInfo,
+    root: *mut PlannerInfo,
+    node: *mut Node,
+    nappinfos: c_int,
+    appinfos: *mut *mut AppendRelInfo,
 ) -> *mut Node {
-    unimplemented!() // TODO: optimizer/appendinfo.h
+    crate::optimizer::util::appendinfo::adjust_appendrel_attrs(
+        root as _,
+        node as _,
+        nappinfos,
+        appinfos as _,
+    ) as _
 }
-unsafe fn eval_const_expressions(_root: *mut PlannerInfo, _node: *mut Node) -> *mut Node {
-    unimplemented!() // TODO: optimizer/optimizer.h
+unsafe fn eval_const_expressions(root: *mut PlannerInfo, node: *mut Node) -> *mut Node {
+    crate::optimizer::util::clauses::eval_const_expressions(root as _, node as _) as _
 }
-unsafe fn make_ands_implicit(_clause: *mut Expr) -> *mut List {
-    unimplemented!() // TODO: optimizer/clauses.h
+unsafe fn make_ands_implicit(clause: *mut Expr) -> *mut List {
+    crate::nodes::makefuncs::make_ands_implicit(clause as _) as _
 }
-unsafe fn contain_vars_of_level(_node: *mut Node, _levelsup: c_int) -> bool {
-    unimplemented!() // TODO: optimizer/optimizer.h
+unsafe fn contain_vars_of_level(node: *mut Node, levelsup: c_int) -> bool {
+    crate::optimizer::util::var::contain_vars_of_level(node as _, levelsup)
 }
-unsafe fn contain_volatile_functions(_clause: *mut Node) -> bool {
-    unimplemented!() // TODO: optimizer/optimizer.h
+unsafe fn contain_volatile_functions(clause: *mut Node) -> bool {
+    crate::optimizer::util::clauses::contain_volatile_functions(clause as _)
 }
 unsafe fn make_restrictinfo(
-    _root: *mut PlannerInfo,
-    _clause: *mut Expr,
-    _is_pushed_down: bool,
-    _has_clone: bool,
-    _is_clone: bool,
-    _pseudoconstant: bool,
-    _security_level: Index,
-    _required_relids: *mut crate::nodes::pathnodes::Relids,
-    _incompatible_relids: *mut crate::nodes::pathnodes::Relids,
-    _outer_relids: *mut crate::nodes::pathnodes::Relids,
+    root: *mut PlannerInfo,
+    clause: *mut Expr,
+    is_pushed_down: bool,
+    has_clone: bool,
+    is_clone: bool,
+    pseudoconstant: bool,
+    security_level: Index,
+    required_relids: *mut crate::nodes::pathnodes::Relids,
+    incompatible_relids: *mut crate::nodes::pathnodes::Relids,
+    outer_relids: *mut crate::nodes::pathnodes::Relids,
 ) -> *mut RestrictInfo {
-    unimplemented!() // TODO: optimizer/restrictinfo.h
+    crate::optimizer::util::restrictinfo::make_restrictinfo(
+        root as _,
+        clause as _,
+        is_pushed_down,
+        has_clone,
+        is_clone,
+        pseudoconstant,
+        security_level as _,
+        required_relids as _,
+        incompatible_relids as _,
+        outer_relids as _,
+    ) as _
 }
 unsafe fn restriction_is_always_false(
-    _root: *mut PlannerInfo,
-    _restrictinfo: *mut RestrictInfo,
+    root: *mut PlannerInfo,
+    restrictinfo: *mut RestrictInfo,
 ) -> bool {
-    unimplemented!() // TODO: optimizer/restrictinfo.h
+    crate::optimizer::plan::initsplan::restriction_is_always_false(root as _, restrictinfo as _)
 }
 unsafe fn restriction_is_always_true(
-    _root: *mut PlannerInfo,
-    _restrictinfo: *mut RestrictInfo,
+    root: *mut PlannerInfo,
+    restrictinfo: *mut RestrictInfo,
 ) -> bool {
-    unimplemented!() // TODO: optimizer/restrictinfo.h
+    crate::optimizer::plan::initsplan::restriction_is_always_true(root as _, restrictinfo as _)
 }
-unsafe fn RelationGetRelid(_relation: Relation) -> Oid {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationGetRelid(relation: Relation) -> Oid {
+    crate::utils::rel::RelationGetRelid(relation as _)
 }
-unsafe fn RelationGetDescr(_relation: Relation) -> TupleDesc {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc {
+    crate::utils::rel::RelationGetDescr(relation as _) as _
 }
-unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> Form_pg_attribute {
-    unimplemented!() // TODO: access/tupdesc.h
+unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: c_int) -> Form_pg_attribute {
+    crate::access::common::tupdesc::TupleDescAttr(tupdesc as _, i) as _
 }
-unsafe fn NameStr(_name: crate::c::NameData) -> *const c_char {
-    unimplemented!() // TODO: c.h
+unsafe fn NameStr(name: crate::c::NameData) -> *const c_char {
+    name.data.as_ptr() as *const c_char
 }
 unsafe fn check_stack_depth() {
-    unimplemented!() // TODO: miscadmin.h
+    crate::miscadmin::check_stack_depth()
 }
-unsafe fn IS_SIMPLE_REL(_rel: *mut RelOptInfo) -> bool {
-    unimplemented!() // TODO: nodes/pathnodes.h
+unsafe fn IS_SIMPLE_REL(rel: *mut RelOptInfo) -> bool {
+    crate::nodes::pathnodes::IS_SIMPLE_REL(rel as _)
 }
-unsafe fn IS_OTHER_REL(_rel: *mut RelOptInfo) -> bool {
-    unimplemented!() // TODO: nodes/pathnodes.h
+unsafe fn IS_OTHER_REL(rel: *mut RelOptInfo) -> bool {
+    crate::nodes::pathnodes::IS_OTHER_REL(rel as _)
 }
-unsafe fn copyObject<T>(_from: *const T) -> *mut T {
-    unimplemented!() // TODO: nodes/copyfuncs.c (copyObjectImpl)
+unsafe fn copyObject<T>(from: *const T) -> *mut T {
+    crate::nodes::copyfuncs::copyObjectImpl(from as *const std::ffi::c_void) as *mut T
 }

@@ -81,38 +81,28 @@ pub const MAX_SIMPLE_CHR: chr = 0x7FF;
 //   #define iscdigit(x) pg_wc_isdigit(x)
 //   #define iscspace(x) pg_wc_isspace(x)
 
+use crate::regex::regc_pg_locale::{pg_wc_isalnum, pg_wc_isalpha, pg_wc_isdigit, pg_wc_isspace};
+
 /// #define iscalnum(x) pg_wc_isalnum(x)
 #[inline]
 pub unsafe fn iscalnum(x: chr) -> bool {
-    pg_wc_isalnum(x)
+    pg_wc_isalnum(x) != 0
 }
 
 /// #define iscalpha(x) pg_wc_isalpha(x)
 #[inline]
 pub unsafe fn iscalpha(x: chr) -> bool {
-    pg_wc_isalpha(x)
+    pg_wc_isalpha(x) != 0
 }
 
 /// #define iscdigit(x) pg_wc_isdigit(x)
 #[inline]
 pub unsafe fn iscdigit(x: chr) -> bool {
-    pg_wc_isdigit(x)
+    pg_wc_isdigit(x) != 0
 }
 
 /// #define iscspace(x) pg_wc_isspace(x)
 #[inline]
 pub unsafe fn iscspace(x: chr) -> bool {
-    pg_wc_isspace(x)
-}
-
-// pg_wc_isalnum / pg_wc_isalpha / pg_wc_isdigit / pg_wc_isspace are declared in
-// mb/pg_wchar.h and implemented in the mb subsystem. They are not yet present
-// in the Rust tree; provide extern prototypes so this header compiles. The mb
-// translation should replace these with the real definitions.
-// TODO: dedup - point these at crate::mb::wchar once pg_wc_* are translated.
-unsafe extern "C" {
-    pub fn pg_wc_isalnum(c: pg_wchar) -> bool;
-    pub fn pg_wc_isalpha(c: pg_wchar) -> bool;
-    pub fn pg_wc_isdigit(c: pg_wchar) -> bool;
-    pub fn pg_wc_isspace(c: pg_wchar) -> bool;
+    pg_wc_isspace(x) != 0
 }

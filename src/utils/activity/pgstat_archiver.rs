@@ -67,7 +67,7 @@ pub unsafe fn pgstat_fetch_stat_archiver() -> *mut PgStat_ArchiverStats {
     &mut pgStatLocal.snapshot.archiver
 }
 
-pub unsafe fn pgstat_archiver_init_shmem_cb(stats: *mut c_void) {
+pub unsafe extern "C" fn pgstat_archiver_init_shmem_cb(stats: *mut c_void) {
     let stats_shmem = stats as *mut PgStatShared_Archiver;
 
     LWLockInitialize(&mut (*stats_shmem).lock, LWTRANCHE_PGSTATS_DATA);

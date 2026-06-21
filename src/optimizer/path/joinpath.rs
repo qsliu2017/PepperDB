@@ -157,7 +157,7 @@ unsafe fn lookup_type_cache(_typeid: Oid, _flags: c_int) -> *mut TypeCacheEntry 
 /// exprType -- return type OID of given expression node.
 /// TODO(pg-port): nodes/nodeFuncs.c
 unsafe fn exprType(_expr: *const Node) -> Oid {
-    0 /* TODO(pg-port) */
+    crate::nodes::nodeFuncs::exprType(_expr as _)
 }
 
 /// fdw_GetForeignJoinPaths -- call FDW's GetForeignJoinPaths callback.

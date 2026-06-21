@@ -168,6 +168,7 @@ unsafe impl Sync for pg_enc2name {}
 // The C source uses C99 designated initializers (`[PG_SQL_ASCII] = ...`); the
 // entries below are written in pg_enc discriminant order (PG_SQL_ASCII = 0 ..
 // PG_SHIFT_JIS_2004), which is dense, so this positional array is equivalent.
+#[no_mangle]
 pub static pg_enc2name_tbl: [pg_enc2name; pg_enc::_PG_LAST_ENCODING_ as usize] = [
     /* [PG_SQL_ASCII] */ ENC2NAME(b"SQL_ASCII\0", PG_SQL_ASCII), /* codepage 0 */
     /* [PG_EUC_JP] */ ENC2NAME(b"EUC_JP\0", PG_EUC_JP),          /* codepage 20932 */
@@ -365,6 +366,7 @@ pub unsafe fn pg_valid_client_encoding(name: *const c_char) -> c_int {
     enc
 }
 
+#[no_mangle]
 pub unsafe fn pg_valid_server_encoding(name: *const c_char) -> c_int {
     let enc: c_int;
 

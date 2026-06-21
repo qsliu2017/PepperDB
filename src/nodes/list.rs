@@ -1714,7 +1714,7 @@ unsafe fn copyObjectImpl(from: *const c_void) -> *mut c_void {
         return core::ptr::null_mut();
     }
     let _ = from as *const Node;
-    unimplemented!("copyObjectImpl(): deep node copy not yet translated (copyfuncs.c)");
+    return crate::nodes::copyfuncs::copyObjectImpl(from);
 }
 
 /// A faithful `qsort()` over a raw ListCell array driving a C-style comparator.

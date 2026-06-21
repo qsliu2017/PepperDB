@@ -261,33 +261,21 @@ unsafe fn hash_search(
     unimplemented!() // TODO: utils/hash/dynahash.c
 }
 
-unsafe fn BufFileCreateTemp(_interXact: bool) -> *mut BufFile {
-    unimplemented!() // TODO: storage/file/buffile.c
-}
+unsafe fn BufFileCreateTemp(_interXact: bool) -> *mut BufFile { unimplemented!() }
 
-unsafe fn BufFileClose(_file: *mut BufFile) {
-    unimplemented!() // TODO: storage/file/buffile.c
-}
+unsafe fn BufFileClose(_file: *mut BufFile) { unimplemented!() }
 
-unsafe fn BufFileSeekBlock(_file: *mut BufFile, _blknum: c_long) -> c_int {
-    unimplemented!() // TODO: storage/file/buffile.c
-}
+unsafe fn BufFileSeekBlock(_file: *mut BufFile, _blknum: c_long) -> c_int { unimplemented!() }
 
-unsafe fn BufFileReadExact(_file: *mut BufFile, _ptr: *mut c_void, _size: Size) {
-    unimplemented!() // TODO: storage/file/buffile.c
-}
+unsafe fn BufFileReadExact(_file: *mut BufFile, _ptr: *mut c_void, _size: Size) { unimplemented!() }
 
-unsafe fn BufFileWrite(_file: *mut BufFile, _ptr: *const c_void, _size: Size) {
-    unimplemented!() // TODO: storage/file/buffile.c
-}
+unsafe fn BufFileWrite(_file: *mut BufFile, _ptr: *const c_void, _size: Size) { unimplemented!() }
 
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
 
-unsafe fn IndexRelationGetNumberOfKeyAttributes(_r: Relation) -> c_int {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn IndexRelationGetNumberOfKeyAttributes(_r: Relation) -> c_int { unimplemented!() }
 
 unsafe fn gistDeCompressAtt(
     _giststate: *mut GISTSTATE,
@@ -297,9 +285,7 @@ unsafe fn gistDeCompressAtt(
     _o: OffsetNumber,
     _attdata: *mut GISTENTRY,
     _isnull: *mut bool,
-) {
-    unimplemented!() // TODO: access/gist/gistutil.c
-}
+) { unimplemented!() }
 
 unsafe fn gistpenalty(
     _giststate: *mut GISTSTATE,
@@ -308,18 +294,14 @@ unsafe fn gistpenalty(
     _isNullOrig: bool,
     _add: *mut GISTENTRY,
     _isNullAdd: bool,
-) -> f32 {
-    unimplemented!() // TODO: access/gist/gistutil.c
-}
+) -> f32 { unimplemented!() }
 
 unsafe fn gistgetadjusted(
     _r: Relation,
     _oldtup: IndexTuple,
     _addtup: IndexTuple,
     _giststate: *mut GISTSTATE,
-) -> IndexTuple {
-    unimplemented!() // TODO: access/gist/gistutil.c
-}
+) -> IndexTuple { unimplemented!() }
 
 // snprintf is not used here; elog is provided by prelude.
 

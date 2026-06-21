@@ -233,9 +233,7 @@ unsafe fn pgstat_count_index_scan(rel: Relation) {
 }
 
 // ---- utils/lsyscache.c (NOT ported) ----------------------------------------
-unsafe fn get_func_rettype(funcid: Oid) -> Oid {
-    unimplemented!() // TODO(pg-port): real get_func_rettype lives in utils/cache/lsyscache.c
-}
+unsafe fn get_func_rettype(funcid: Oid) -> Oid { crate::utils::cache::lsyscache::get_func_rettype(funcid) }
 
 // ---- storage/bufmgr.c (NOT ported) -----------------------------------------
 const BUFFER_LOCK_SHARE: c_int = 1;

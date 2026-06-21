@@ -102,9 +102,9 @@ pub struct BTMetaPageData {
 
 // nbtree.h page-flag constants.
 /// TODO(pg-port): BTP_META from access/nbtree.h.
-pub const BTP_META: u16 = 1 << 1;
+pub const BTP_META: u16 = 1 << 3;
 /// TODO(pg-port): BTP_ROOT from access/nbtree.h.
-pub const BTP_ROOT: u16 = 1 << 3;
+pub const BTP_ROOT: u16 = 1 << 1;
 /// TODO(pg-port): BTP_LEAF from access/nbtree.h.
 pub const BTP_LEAF: u16 = 1 << 0;
 /// TODO(pg-port): BTP_INCOMPLETE_SPLIT from access/nbtree.h.
@@ -130,14 +130,12 @@ const InHotStandby: bool = false;
 
 /// TODO(pg-port): BTPageGetMeta() from access/nbtree.h.
 #[allow(non_snake_case)]
-unsafe fn BTPageGetMeta(page: Page) -> *mut BTMetaPageData {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
-}
+unsafe fn BTPageGetMeta(page: Page) -> *mut BTMetaPageData { unimplemented!() }
 
 /// TODO(pg-port): _bt_pageinit() from nbtpage.c (access/nbtree.h).
 #[allow(non_snake_case)]
 unsafe fn _bt_pageinit(page: Page, size: Size) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtpage.c)
+    crate::access::nbtree::nbtpage::_bt_pageinit(page as _, size as _)
 }
 
 /// TODO(pg-port): BTPageSetDeleted() from access/nbtree.h.
@@ -154,50 +152,46 @@ unsafe fn BTreeTupleSetTopParent(itup: *mut IndexTupleData, blkno: BlockNumber) 
 
 /// TODO(pg-port): BTreeTupleGetDownLink() from access/nbtree.h.
 #[allow(non_snake_case)]
-unsafe fn BTreeTupleGetDownLink(itup: IndexTuple) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
-}
+unsafe fn BTreeTupleGetDownLink(itup: IndexTuple) -> BlockNumber { crate::access::nbtree::nbtinsert::BTreeTupleGetDownLink(itup) }
 
 /// TODO(pg-port): BTreeTupleSetDownLink() from access/nbtree.h.
 #[allow(non_snake_case)]
-unsafe fn BTreeTupleSetDownLink(itup: IndexTuple, blkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
-}
+unsafe fn BTreeTupleSetDownLink(itup: IndexTuple, blkno: BlockNumber) { crate::access::nbtree::nbtdedup::BTreeTupleSetDownLink(itup, blkno) }
 
 /// TODO(pg-port): P_FIRSTDATAKEY() from access/nbtree.h (also in nbtdedup.rs stub).
 #[allow(non_snake_case)]
 unsafe fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::P_FIRSTDATAKEY(opaque as _) as _
 }
 
 /// TODO(pg-port): BTPageGetOpaque() from access/nbtree.h (also in nbtdedup.rs stub).
 #[allow(non_snake_case)]
 unsafe fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTPageGetOpaque(page as _) as _
 }
 
 /// TODO(pg-port): P_RIGHTMOST() from access/nbtree.h.
 #[allow(non_snake_case)]
 unsafe fn P_RIGHTMOST(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::P_RIGHTMOST(opaque as _)
 }
 
 /// TODO(pg-port): P_ISLEAF() from access/nbtree.h.
 #[allow(non_snake_case)]
 unsafe fn P_ISLEAF(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtpage::P_ISLEAF(opaque as _)
 }
 
 /// TODO(pg-port): P_INCOMPLETE_SPLIT() from access/nbtree.h.
 #[allow(non_snake_case)]
 unsafe fn P_INCOMPLETE_SPLIT(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtpage::P_INCOMPLETE_SPLIT(opaque as _)
 }
 
 /// TODO(pg-port): P_HAS_GARBAGE() from access/nbtree.h.
 #[allow(non_snake_case)]
 unsafe fn P_HAS_GARBAGE(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::P_HAS_GARBAGE(opaque as _)
 }
 
 /// TODO(pg-port): BlockNumberIsValid() from storage/block.h.
@@ -245,31 +239,31 @@ unsafe fn PageIndexTupleOverwrite(
 /// TODO(pg-port): BufferGetPage() from storage/bufmgr.h.
 #[allow(non_snake_case)]
 unsafe fn BufferGetPage(buffer: Buffer) -> Page {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::access::nbtree::nbtdedup::BufferGetPage(buffer as _) as _
 }
 
 /// TODO(pg-port): BufferGetPageSize() from storage/bufmgr.h.
 #[allow(non_snake_case)]
 unsafe fn BufferGetPageSize(buffer: Buffer) -> Size {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::access::nbtree::nbtpage::BufferGetPageSize(buffer as _) as _
 }
 
 /// TODO(pg-port): BufferGetBlockNumber() from storage/bufmgr.h.
 #[allow(non_snake_case)]
 unsafe fn BufferGetBlockNumber(buffer: Buffer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::access::nbtree::nbtdedup::BufferGetBlockNumber(buffer as _) as _
 }
 
 /// TODO(pg-port): BufferIsValid() from storage/bufmgr.h.
 #[allow(non_snake_case)]
 unsafe fn BufferIsValid(buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::access::nbtree::nbtpage::BufferIsValid(buffer as _)
 }
 
 /// TODO(pg-port): MarkBufferDirty() from storage/bufmgr.h.
 #[allow(non_snake_case)]
 unsafe fn MarkBufferDirty(buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::access::nbtree::nbtdedup::MarkBufferDirty(buffer as _)
 }
 
 /// TODO(pg-port): UnlockReleaseBuffer() from storage/bufmgr.h.
@@ -284,9 +278,7 @@ unsafe fn XLogRecGetBlockData(
     record: *mut XLogReaderState,
     block_id: uint8,
     len: *mut Size,
-) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): access/xlogreader.h
-}
+) -> *mut c_char { crate::access::transam::xlogreader::XLogRecGetBlockData(record, block_id, len) }
 
 /// TODO(pg-port): ResolveRecoveryConflictWithSnapshot() from storage/standby.h.
 #[allow(non_snake_case)]
@@ -304,9 +296,7 @@ unsafe fn ResolveRecoveryConflictWithSnapshotFullXid(
     _snapshotConflictHorizon: FullTransactionId,
     _isCatalogRel: bool,
     _locator: RelFileLocator,
-) {
-    unimplemented!() // TODO(pg-port): storage/standby.c
-}
+) { unimplemented!() }
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -320,7 +310,7 @@ unsafe fn ResolveRecoveryConflictWithSnapshotFullXid(
  * tuples had been added to the page in item-number order, and therefore
  * the one with highest item number appears first (lowest on the page).
  */
-unsafe fn _bt_restore_page(page: Page, from: *mut c_char, len: c_int) {
+pub unsafe fn _bt_restore_page(page: Page, from: *mut c_char, len: c_int) {
     let mut itupdata: IndexTupleData = core::mem::zeroed();
     let mut itemsz: Size;
     let end: *mut c_char = from.add(len as usize);
@@ -379,7 +369,7 @@ unsafe fn _bt_restore_page(page: Page, from: *mut c_char, len: c_int) {
     }
 }
 
-unsafe fn _bt_restore_meta(record: *mut XLogReaderState, block_id: uint8) {
+pub unsafe fn _bt_restore_meta(record: *mut XLogReaderState, block_id: uint8) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let metabuf: Buffer;
     let metapg: Page;
@@ -435,7 +425,7 @@ unsafe fn _bt_restore_meta(record: *mut XLogReaderState, block_id: uint8) {
  * This is a common subroutine of the redo functions of all the WAL record
  * types that can insert a downlink: insert, split, and newroot.
  */
-unsafe fn _bt_clear_incomplete_split(record: *mut XLogReaderState, block_id: uint8) {
+pub unsafe fn _bt_clear_incomplete_split(record: *mut XLogReaderState, block_id: uint8) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let mut buf: Buffer = 0;
 
@@ -454,7 +444,7 @@ unsafe fn _bt_clear_incomplete_split(record: *mut XLogReaderState, block_id: uin
     }
 }
 
-unsafe fn btree_xlog_insert(isleaf: bool, ismeta: bool, posting: bool, record: *mut XLogReaderState) {
+pub unsafe fn btree_xlog_insert(isleaf: bool, ismeta: bool, posting: bool, record: *mut XLogReaderState) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let xlrec: *mut xl_btree_insert = XLogRecGetData(record) as *mut xl_btree_insert;
     let mut buffer: Buffer = 0;
@@ -549,7 +539,7 @@ unsafe fn btree_xlog_insert(isleaf: bool, ismeta: bool, posting: bool, record: *
     }
 }
 
-unsafe fn btree_xlog_split(newitemonleft: bool, record: *mut XLogReaderState) {
+pub unsafe fn btree_xlog_split(newitemonleft: bool, record: *mut XLogReaderState) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let xlrec: *mut xl_btree_split = XLogRecGetData(record) as *mut xl_btree_split;
     let isleaf: bool = (*xlrec).level == 0;
@@ -785,7 +775,7 @@ unsafe fn btree_xlog_split(newitemonleft: bool, record: *mut XLogReaderState) {
     }
 }
 
-unsafe fn btree_xlog_dedup(record: *mut XLogReaderState) {
+pub unsafe fn btree_xlog_dedup(record: *mut XLogReaderState) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let xlrec: *mut xl_btree_dedup = XLogRecGetData(record) as *mut xl_btree_dedup;
     let mut buf: Buffer = 0;
@@ -888,7 +878,7 @@ unsafe fn btree_xlog_dedup(record: *mut XLogReaderState) {
     }
 }
 
-unsafe fn btree_xlog_updates(
+pub unsafe fn btree_xlog_updates(
     page: Page,
     updatedoffsets: *mut OffsetNumber,
     mut updates: *mut xl_btree_update,
@@ -939,7 +929,7 @@ unsafe fn btree_xlog_updates(
     }
 }
 
-unsafe fn btree_xlog_vacuum(record: *mut XLogReaderState) {
+pub unsafe fn btree_xlog_vacuum(record: *mut XLogReaderState) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let xlrec: *mut xl_btree_vacuum = XLogRecGetData(record) as *mut xl_btree_vacuum;
     let mut buffer: Buffer = 0;
@@ -988,7 +978,7 @@ unsafe fn btree_xlog_vacuum(record: *mut XLogReaderState) {
     }
 }
 
-unsafe fn btree_xlog_delete(record: *mut XLogReaderState) {
+pub unsafe fn btree_xlog_delete(record: *mut XLogReaderState) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let xlrec: *mut xl_btree_delete = XLogRecGetData(record) as *mut xl_btree_delete;
     let mut buffer: Buffer = 0;
@@ -1050,7 +1040,7 @@ unsafe fn btree_xlog_delete(record: *mut XLogReaderState) {
     }
 }
 
-unsafe fn btree_xlog_mark_page_halfdead(info: uint8, record: *mut XLogReaderState) {
+pub unsafe fn btree_xlog_mark_page_halfdead(info: uint8, record: *mut XLogReaderState) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let xlrec: *mut xl_btree_mark_page_halfdead =
         XLogRecGetData(record) as *mut xl_btree_mark_page_halfdead;
@@ -1145,7 +1135,7 @@ unsafe fn btree_xlog_mark_page_halfdead(info: uint8, record: *mut XLogReaderStat
     UnlockReleaseBuffer(buffer);
 }
 
-unsafe fn btree_xlog_unlink_page(info: uint8, record: *mut XLogReaderState) {
+pub unsafe fn btree_xlog_unlink_page(info: uint8, record: *mut XLogReaderState) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let xlrec: *mut xl_btree_unlink_page = XLogRecGetData(record) as *mut xl_btree_unlink_page;
     let leftsib: BlockNumber;
@@ -1296,7 +1286,7 @@ unsafe fn btree_xlog_unlink_page(info: uint8, record: *mut XLogReaderState) {
     }
 }
 
-unsafe fn btree_xlog_newroot(record: *mut XLogReaderState) {
+pub unsafe fn btree_xlog_newroot(record: *mut XLogReaderState) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let xlrec: *mut xl_btree_newroot = XLogRecGetData(record) as *mut xl_btree_newroot;
     let buffer: Buffer;
@@ -1361,7 +1351,7 @@ unsafe fn btree_xlog_newroot(record: *mut XLogReaderState) {
  * Consequently, one XID value achieves the same exclusion effect on primary
  * and standby.
  */
-unsafe fn btree_xlog_reuse_page(record: *mut XLogReaderState) {
+pub unsafe fn btree_xlog_reuse_page(record: *mut XLogReaderState) {
     let xlrec: *mut xl_btree_reuse_page = XLogRecGetData(record) as *mut xl_btree_reuse_page;
 
     if InHotStandby {

@@ -107,7 +107,7 @@ pub const LWTRANCHE_SHARED_TIDBITMAP: c_int = 0;
 // TODO(pg-port): the following DSA / atomics / LWLock primitives are not ported
 // in this crate slice; the shared (parallel) bitmap path calls them.
 unsafe fn dsa_get_address(_area: *mut dsa_area, _dp: dsa_pointer) -> *mut c_void {
-    unimplemented!("dsa_get_address: DSA path not ported");
+    crate::utils::mmgr::dsa::dsa_get_address(_area as _, _dp as _)
 }
 unsafe fn dsa_allocate(_area: *mut dsa_area, _size: Size) -> dsa_pointer {
     unimplemented!("dsa_allocate: DSA path not ported");
@@ -116,11 +116,12 @@ unsafe fn dsa_allocate0(_area: *mut dsa_area, _size: Size) -> dsa_pointer {
     unimplemented!("dsa_allocate0: DSA path not ported");
 }
 unsafe fn dsa_free(_area: *mut dsa_area, _dp: dsa_pointer) {
-    unimplemented!("dsa_free: DSA path not ported");
+    crate::utils::mmgr::dsa::dsa_free(_area as _, _dp as _)
 }
 unsafe fn pg_atomic_init_u32(p: *mut pg_atomic_uint32, val: uint32) {
     (*p).value = val;
 }
+#[no_mangle]
 unsafe fn pg_atomic_add_fetch_u32(p: *mut pg_atomic_uint32, add_: uint32) -> uint32 {
     (*p).value = (*p).value.wrapping_add(add_);
     (*p).value
@@ -152,8 +153,7 @@ unsafe fn qsort_arg(
     _cmp: qsort_arg_comparator,
     _arg: *mut c_void,
 ) {
-    // TODO(pg-port): lib/qsort_arg not wired into this slice.
-    unimplemented!("qsort_arg: not ported in this slice");
+    crate::port::qsort::qsort_arg(_base, _nel, _elsize, _cmp, _arg)
 }
 
 /*

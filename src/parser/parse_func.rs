@@ -118,11 +118,11 @@ pub const FUNCDETAIL_WINDOWFUNC: FuncDetailCode = 5;
 pub const FUNCDETAIL_PROCEDURE: FuncDetailCode = 6;
 
 /* Syscache IDs used locally (mirror parse_coerce.rs convention) */
-const PROCOID:  c_int = 0; // TODO(pg-port): real value from syscache_ids.h
-const AGGFNOID: c_int = 0; // TODO(pg-port): real value from syscache_ids.h
+const PROCOID:  c_int = 47;
+const AGGFNOID: c_int = 0;
 
-/* Anum for pg_proc.proargdefaults (column 20 per pg_proc.h) */
-const Anum_pg_proc_proargdefaults: i16 = 20; // TODO(pg-port): verify against pg_proc_d.h
+/* Anum for pg_proc.proargdefaults (column 24 per pg_proc_d.h) */
+const Anum_pg_proc_proargdefaults: i16 = 24;
 
 /* Possible error codes from LookupFuncNameInternal */
 #[derive(PartialEq)]
@@ -450,6 +450,7 @@ pub unsafe fn ParseFuncOrColumn(
         }
         class_form = GETSTRUCT(tup) as Form_pg_aggregate;
         aggkind = (*class_form).aggkind;
+        if std::env::var_os("PDB_AGG").is_some() { eprintln!("PDB_AGG funcid={} aggkind={} numdirect={} sizeof_form={}", funcid, (*class_form).aggkind as c_int, (*class_form).aggnumdirectargs, core::mem::size_of::<FormData_pg_aggregate>()); }
         cat_direct_args = (*class_form).aggnumdirectargs as c_int;
         ReleaseSysCache(tup);
 
@@ -661,15 +662,17 @@ pub unsafe fn ParseFuncOrColumn(
             ereport!(ERROR,
                 errmsg!("procedure {} does not exist",
                         cstr_to_str(func_signature_string(funcname, nargs, argnames,
-                                                          actual_arg_types.as_ptr())))
-                /* C also: errcode(ERRCODE_UNDEFINED_FUNCTION), errhint, parser_errposition */
+                                                          actual_arg_types.as_ptr()))),
+                crate::utils::elog::errhint_field("No procedure matches the given name and argument types. You might need to add explicit type casts."),
+                parser_errposition(pstate, location)
             );
         } else {
             ereport!(ERROR,
                 errmsg!("function {} does not exist",
                         cstr_to_str(func_signature_string(funcname, nargs, argnames,
-                                                          actual_arg_types.as_ptr())))
-                /* C also: errcode(ERRCODE_UNDEFINED_FUNCTION), errhint, parser_errposition */
+                                                          actual_arg_types.as_ptr()))),
+                crate::utils::elog::errhint_field("No function matches the given name and argument types. You might need to add explicit type casts."),
+                parser_errposition(pstate, location)
             );
         }
     }
@@ -851,8 +854,7 @@ pub unsafe fn ParseFuncOrColumn(
         }
 
         /* parse_agg.c does additional aggregate-specific processing */
-        /* TODO(pg-port): transformAggregateCall not yet ported */
-        // transformAggregateCall(pstate, aggref, fargs, agg_order, agg_distinct);
+        crate::parser::parse_agg::transformAggregateCall(pstate as _, aggref as _, fargs as _, agg_order as _, agg_distinct);
 
         retval = aggref as *mut Node;
     } else {

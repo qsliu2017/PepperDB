@@ -725,15 +725,15 @@ unsafe fn Max(a: Size, b: Size) -> Size {
 }
 
 unsafe fn LWLockInitialize(_lock: *mut LWLock, _tranche_id: c_int) {
-    unimplemented!() // TODO: storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockInitialize(_lock as _, _tranche_id)
 }
 
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO: storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, if _mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE })
 }
 
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO: storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 
 unsafe fn BufFileWrite(_file: *mut BufFile, _ptr: *mut c_void, _size: Size) {

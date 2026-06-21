@@ -74,6 +74,7 @@ pub struct BulkWriteState {
 /*
  * Start a bulk write operation on a relation fork.
  */
+#[no_mangle]
 pub unsafe fn smgr_bulk_start_rel(rel: Relation, forknum: ForkNumber) -> *mut BulkWriteState {
     smgr_bulk_start_smgr(
         RelationGetSmgr(rel),
@@ -119,6 +120,7 @@ pub unsafe fn smgr_bulk_start_smgr(
  * This WAL-logs and flushes any remaining pending writes to disk, and fsyncs
  * the relation if needed.
  */
+#[no_mangle]
 pub unsafe fn smgr_bulk_finish(bulkstate: *mut BulkWriteState) {
     /* WAL-log and flush any remaining pages */
     smgr_bulk_flush(bulkstate);
@@ -276,7 +278,7 @@ unsafe fn smgr_bulk_flush(bulkstate: *mut BulkWriteState) {
         } else {
             smgrwrite((*bulkstate).smgr, (*bulkstate).forknum, blkno, page, true);
         }
-        pfree(page as *mut c_void);
+        crate::utils::mmgr::mcxt::pfree(page as *mut c_void);
     }
 
     (*bulkstate).npending = 0;
@@ -290,6 +292,7 @@ unsafe fn smgr_bulk_flush(bulkstate: *mut BulkWriteState) {
  * You are only allowed to write a given block once as part of one bulk write
  * operation.
  */
+#[no_mangle]
 pub unsafe fn smgr_bulk_write(
     bulkstate: *mut BulkWriteState,
     blocknum: BlockNumber,
@@ -319,6 +322,7 @@ pub unsafe fn smgr_bulk_write(
  * This is currently implemented as a simple palloc, but could be implemented
  * using a ring buffer or larger chunks in the future, so don't rely on it.
  */
+#[no_mangle]
 pub unsafe fn smgr_bulk_get_buf(bulkstate: *mut BulkWriteState) -> BulkWriteBuffer {
     MemoryContextAllocAligned(
         (*bulkstate).memcxt as *mut _,
@@ -354,7 +358,7 @@ struct RelFileLocatorBackend {
 // access/xlog.h: GetRedoRecPtr().
 // TODO: port access/transam/xlog.c.
 unsafe fn GetRedoRecPtr() -> XLogRecPtr {
-    unimplemented!()
+    crate::access::transam::xlog::GetRedoRecPtr()
 }
 
 // access/xloginsert.h: log_newpages().
@@ -367,13 +371,15 @@ unsafe fn log_newpages(
     _pages: *mut Page,
     _page_std: bool,
 ) {
-    unimplemented!()
+    crate::access::transam::xloginsert::log_newpages(
+        _rlocator as _, _forknum as _, _num_pages, _blknos, _pages as _, _page_std,
+    )
 }
 
 // storage/smgr.h: smgrnblocks().
 // TODO: port storage/smgr.c.
 unsafe fn smgrnblocks(_reln: SMgrRelation, _forknum: ForkNumber) -> BlockNumber {
-    unimplemented!()
+    crate::storage::smgr::smgr::smgrnblocks(_reln as _, _forknum as _)
 }
 
 // storage/smgr.h: smgrextend().
@@ -385,7 +391,7 @@ unsafe fn smgrextend(
     _buffer: *const c_void,
     _skipFsync: bool,
 ) {
-    unimplemented!()
+    crate::storage::smgr::smgr::smgrextend(_reln as _, _forknum as _, _blocknum, _buffer as _, _skipFsync)
 }
 
 // storage/smgr.h: smgrwrite() (inline wrapper over smgrwritev).
@@ -397,48 +403,60 @@ unsafe fn smgrwrite(
     _buffer: *const c_char,
     _skipFsync: bool,
 ) {
-    unimplemented!()
+    let mut bufs: [*const c_void; 1] = [_buffer as *const c_void];
+    crate::storage::smgr::smgr::smgrwritev(_reln as _, _forknum as _, _blocknum, bufs.as_mut_ptr(), 1, _skipFsync)
 }
 
 // storage/smgr.h: smgrregistersync().
 // TODO: port storage/smgr.c.
 unsafe fn smgrregistersync(_reln: SMgrRelation, _forknum: ForkNumber) {
-    unimplemented!()
+    crate::storage::smgr::smgr::smgrregistersync(_reln as _, _forknum as _)
 }
 
 // storage/smgr.h: smgrimmedsync().
 // TODO: port storage/smgr.c.
 unsafe fn smgrimmedsync(_reln: SMgrRelation, _forknum: ForkNumber) {
-    unimplemented!()
+    crate::storage::smgr::smgr::smgrimmedsync(_reln as _, _forknum as _)
 }
 
 // storage/smgr.h: SmgrIsTemp().
 // TODO: port storage/smgr.c.
 unsafe fn SmgrIsTemp(_reln: SMgrRelation) -> bool {
-    unimplemented!()
+    crate::storage::smgr::smgr::SmgrIsTemp(_reln as _)
 }
 
 // utils/rel.h: RelationGetSmgr().
 // TODO: port the inline accessor from utils/rel.h.
 unsafe fn RelationGetSmgr(_rel: Relation) -> SMgrRelation {
-    unimplemented!()
+    crate::storage::buffer::bufmgr::RelationGetSmgr(_rel as _) as _
 }
 
 // utils/rel.h: RelationNeedsWAL().
 // TODO: port the macro from utils/rel.h.
 unsafe fn RelationNeedsWAL(_rel: Relation) -> bool {
-    unimplemented!()
+    (*(*_rel).rd_rel).relpersistence == b'p' as i8
 }
 
 // stdlib.h: qsort().
 // TODO: route to the libc/port qsort once available.
 unsafe fn qsort(
-    _base: *mut c_void,
-    _nmemb: Size,
-    _size: Size,
-    _compar: Option<unsafe extern "C" fn(*const c_void, *const c_void) -> c_int>,
+    base: *mut c_void,
+    nmemb: Size,
+    size: Size,
+    compar: Option<unsafe extern "C" fn(*const c_void, *const c_void) -> c_int>,
 ) {
-    unimplemented!()
+    extern "C" {
+        #[link_name = "qsort"]
+        fn c_qsort(
+            base: *mut c_void,
+            nmemb: usize,
+            size: usize,
+            compar: unsafe extern "C" fn(*const c_void, *const c_void) -> c_int,
+        );
+    }
+    if let Some(f) = compar {
+        c_qsort(base, nmemb as usize, size as usize, f);
+    }
 }
 
 // storage/proc.h: MyProc (PGPROC*), and the delayChkptFlags bits.
@@ -448,7 +466,6 @@ struct PGPROC {
     delayChkptFlags: c_int,
 }
 
-static mut MyProc: *mut PGPROC = null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 // proc.h: DELAY_CHKPT_START.
 const DELAY_CHKPT_START: c_int = 1 << 0;

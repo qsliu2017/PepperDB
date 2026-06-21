@@ -474,6 +474,7 @@ fn AllocSetFreeIndex(size: Size) -> c_int {
 /// # Safety
 /// `parent` must be NULL or a valid MemoryContext; `name` must be a valid,
 /// statically allocated C string.
+#[no_mangle]
 pub unsafe fn AllocSetContextCreateInternal(
     parent: MemoryContext,
     name: *const c_char,
@@ -1115,6 +1116,9 @@ unsafe fn AllocSetAllocFromNewBlock(
 /// # Safety
 /// `context` must be a valid AllocSet context.
 pub unsafe fn AllocSetAlloc(context: MemoryContext, size: Size, flags: c_int) -> *mut c_void {
+    if std::env::var_os("PDB_BT").is_some() && size > 20000 {
+        eprintln!("PDB_BT AllocSetAlloc ENTRY size={} chunkLimit={}", size, (*(context as AllocSet)).allocChunkLimit);
+    }
     let set: AllocSet = context as AllocSet;
     let block: AllocBlock;
     let chunk: *mut MemoryChunk;

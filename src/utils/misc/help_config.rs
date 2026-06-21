@@ -102,9 +102,7 @@ type mixedStruct = config_generic;
 // ---------------------------------------------------------------------------
 
 // TODO: not ported - utils/guc.c build_guc_variables()
-unsafe fn build_guc_variables() {
-    unimplemented!()
-}
+unsafe fn build_guc_variables() { crate::utils::misc::guc::build_guc_variables() }
 
 // TODO: not ported - utils/guc.c get_guc_variables()
 unsafe fn get_guc_variables(num_vars: *mut c_int) -> *mut *mut config_generic {

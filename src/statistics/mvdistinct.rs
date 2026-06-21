@@ -828,7 +828,7 @@ const STATS_EXT_NDISTINCT: c_char = b'd' as c_char;
 const TYPECACHE_LT_OPR: c_int = 0x0001;
 
 const Anum_pg_statistic_ext_data_stxdndistinct: c_int = 4;
-const STATEXTDATASTXOID: c_int = 0;
+const STATEXTDATASTXOID: c_int = 62;
 
 #[repr(C)]
 pub struct MVNDistinctItem {

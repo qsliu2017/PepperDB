@@ -282,17 +282,11 @@ unsafe fn WaitEventSetWait(
 }
 
 use crate::miscadmin::Latch;
-unsafe fn SetLatch(_latch: *mut Latch) {
-    todo!("pg-port: storage/latch.c SetLatch")
-}
-unsafe fn ResetLatch(_latch: *mut Latch) {
-    todo!("pg-port: storage/latch.c ResetLatch")
-}
+unsafe fn SetLatch(latch: *mut Latch) { crate::storage::ipc::latch::SetLatch(latch as _) }
+unsafe fn ResetLatch(latch: *mut Latch) { crate::storage::ipc::latch::ResetLatch(latch as _) }
 
 // storage/ipc.h
-unsafe fn proc_exit(_code: c_int) {
-    todo!("pg-port: storage/ipc.c proc_exit")
-}
+unsafe fn proc_exit(code: c_int) { crate::storage::ipc::ipc::proc_exit(code as _) }
 
 // utils/memutils.h
 unsafe fn MemoryContextDelete_stub(_ctx: MemoryContext) {
@@ -302,20 +296,14 @@ static mut PostmasterContext: MemoryContext = null_mut();
 
 // postmaster/interrupt.h
 static mut ConfigReloadPending: bool = false;
-unsafe extern "C" fn SignalHandlerForConfigReload(_sig: c_int) {
-    todo!("pg-port: postmaster/interrupt.c SignalHandlerForConfigReload")
-}
+unsafe extern "C" fn SignalHandlerForConfigReload(sig: c_int) { crate::postmaster::interrupt::SignalHandlerForConfigReload(sig as _) }
 
 // utils/guc.h
 const PGC_SIGHUP: c_int = 1;
-unsafe fn ProcessConfigFile(_context: c_int) {
-    todo!("pg-port: utils/misc/guc.c ProcessConfigFile")
-}
+unsafe fn ProcessConfigFile(context: c_int) { crate::utils::misc::guc::ProcessConfigFile(context as _) }
 
 // libpq/pqsignal.h
-unsafe fn pqsignal(_signo: c_int, _func: usize) {
-    todo!("pg-port: port/pqsignal.c pqsignal")
-}
+unsafe fn pqsignal(signo: c_int, func: usize) { crate::libpq::pqsignal::pqsignal(signo as _, func as _) }
 unsafe fn sigUsr1Handler_ptr() -> usize {
     sigUsr1Handler as usize
 }
@@ -331,9 +319,7 @@ unsafe fn sigprocmask(_how: c_int, _set: *const sigset_t, _oldset: *mut sigset_t
 }
 
 // utils/ps_status.h
-unsafe fn init_ps_display(_fixed_part: *const c_char) {
-    todo!("pg-port: utils/misc/ps_status.c init_ps_display")
-}
+unsafe fn init_ps_display(fixed_part: *const c_char) { crate::utils::misc::ps_status::init_ps_display(fixed_part as _) }
 
 // miscadmin.h
 static mut redirection_done: bool = false;
@@ -349,23 +335,19 @@ static mut pg_mode_mask: mode_t = 0o077;
 
 // postmaster/launch_backend.h
 unsafe fn postmaster_child_launch(
-    _child_type: BackendType,
-    _child_slot: c_int,
-    _startup_data: *const c_void,
-    _startup_data_len: usize,
-    _client_sock: *mut c_void,
-) -> pid_t {
-    todo!("pg-port: postmaster/launch_backend.c postmaster_child_launch")
-}
+    child_type: BackendType,
+    child_slot: c_int,
+    startup_data: *const c_void,
+    startup_data_len: usize,
+    client_sock: *mut c_void,
+) -> pid_t { crate::postmaster::launch_backend::postmaster_child_launch(child_type, child_slot as _, startup_data as _, startup_data_len as _, client_sock as _) }
 
 type pid_t = c_int;
 type BackendType = crate::miscadmin::BackendType;
 
 // utils/elog.h - write_stderr writes to the postmaster's original stderr,
 // never to our input pipe.
-unsafe fn write_stderr(fmt: *const c_char) {
-    todo!("pg-port: utils/error/elog.c write_stderr")
-}
+unsafe fn write_stderr(fmt: *const c_char) { crate::utils::error::elog_impl::write_stderr(fmt as _) }
 
 // ---------------------------------------------------------------------------
 // Functions

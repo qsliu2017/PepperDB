@@ -949,8 +949,9 @@ pub struct JsonPathVariable {
 type AclResult = c_int;
 type AclMode = uint32;
 const ACLCHECK_OK: AclResult = 0;
+const ACL_EXECUTE: AclMode = 1 << 7;
 type ObjectType = c_int;
-const OBJECT_FUNCTION: ObjectType = 10;
+const OBJECT_FUNCTION: ObjectType = 19;
 
 /* TODO(pg-port): catalog/pg_proc.h BTORDER_PROC */
 const BTORDER_PROC: c_int = 1;
@@ -974,35 +975,35 @@ const INT4OID: Oid = 23;
 
 /* TODO(pg-port): execExprInterp.c - sibling file, next wave */
 unsafe fn ExecReadyInterpretedExpr(_state: *mut ExprState) {
-    unimplemented!("TODO(pg-port): execExprInterp::ExecReadyInterpretedExpr")
+    crate::executor::execExprInterp::ExecReadyInterpretedExpr(_state as _)
 }
 
 /* TODO(pg-port): jit/jit.h - JIT compilation path */
 unsafe fn jit_compile_expr(_state: *mut ExprState) -> bool {
-    false /* always fall back to interpreter */
+    crate::jit::jit::jit_compile_expr(_state as _) as _
 }
 
 /* TODO(pg-port): optimizer/optimizer.h */
 unsafe fn expression_planner(
     expr: *mut crate::nodes::primnodes::Expr,
 ) -> *mut crate::nodes::primnodes::Expr {
-    unimplemented!("TODO(pg-port): optimizer::expression_planner")
+    crate::optimizer::optimizer::expression_planner(expr as _) as _
 }
 
 /* TODO(pg-port): nodes/nodeFuncs.h */
 unsafe fn expression_tree_walker(
-    _node: *mut Node,
-    _walker: unsafe fn(*mut Node, *mut c_void) -> bool,
-    _context: *mut c_void,
+    node: *mut Node,
+    walker: unsafe fn(*mut Node, *mut c_void) -> bool,
+    context: *mut c_void,
 ) -> bool {
-    unimplemented!("TODO(pg-port): nodes::nodeFuncs::expression_tree_walker")
+    crate::nodes::nodeFuncs::expression_tree_walker(node as _, core::mem::transmute(walker), context) as _
 }
 
 /* TODO(pg-port): nodes/makefuncs.h */
 unsafe fn make_ands_explicit(
     _qual: *mut List,
 ) -> *mut crate::nodes::primnodes::Expr {
-    unimplemented!("TODO(pg-port): nodes::makefuncs::make_ands_explicit")
+    crate::nodes::makefuncs::make_ands_explicit(_qual as _) as _
 }
 
 /* TODO(pg-port): executor/nodeSubplan.c */
@@ -1010,7 +1011,7 @@ unsafe fn ExecInitSubPlan(
     _subplan: *mut SubPlan,
     _parent: *mut PlanState,
 ) -> *mut SubPlanState {
-    unimplemented!("TODO(pg-port): executor::nodeSubplan::ExecInitSubPlan")
+    crate::executor::nodeSubplan::ExecInitSubPlan(_subplan as _, _parent as _) as _
 }
 
 /* TODO(pg-port): executor/execJunk.c */
@@ -1018,7 +1019,7 @@ pub unsafe fn ExecInitJunkFilter(
     _targetlist: *mut List,
     _slot: *mut TupleTableSlot,
 ) -> *mut JunkFilter {
-    unimplemented!("TODO(pg-port): executor::execJunk::ExecInitJunkFilter")
+    crate::executor::execJunk::ExecInitJunkFilter(_targetlist as _, _slot as _) as _
 }
 
 /* TODO(pg-port): executor/execUtils.c */
@@ -1027,7 +1028,7 @@ unsafe fn ExecInitExtraTupleSlot(
     _tupdesc: TupleDesc,
     _tts_ops: *const TupleTableSlotOps,
 ) -> *mut TupleTableSlot {
-    unimplemented!("TODO(pg-port): executor::execUtils::ExecInitExtraTupleSlot")
+    crate::executor::execTuples::ExecInitExtraTupleSlot(_estate as _, _tupdesc as _, _tts_ops as _) as _
 }
 
 /* TODO(pg-port): executor/execUtils.c */
@@ -1035,12 +1036,12 @@ unsafe fn executor_errposition(
     _estate: *mut crate::nodes::execnodes::EState,
     _location: c_int,
 ) -> c_int {
-    0
+    crate::executor::execUtils::executor_errposition(_estate as _, _location as _) as _
 }
 
 /* TODO(pg-port): executor/execUtils.c */
 unsafe fn ExecGetResultType(_ps: *mut PlanState) -> TupleDesc {
-    unimplemented!("TODO(pg-port): executor::execUtils::ExecGetResultType")
+    crate::executor::execUtils::ExecGetResultType(_ps as _) as _
 }
 
 /* TODO(pg-port): executor/execUtils.c */
@@ -1048,40 +1049,42 @@ unsafe fn ExecGetResultSlotOps(
     _ps: *mut PlanState,
     _isfixed: *mut bool,
 ) -> *const TupleTableSlotOps {
-    unimplemented!("TODO(pg-port): executor::execUtils::ExecGetResultSlotOps")
+    crate::executor::execUtils::ExecGetResultSlotOps(_ps as _, _isfixed as _) as _
 }
 
 /* TODO(pg-port): executor/execTuples.c */
 unsafe fn ExecTypeFromExprList(_exprlist: *mut List) -> TupleDesc {
-    unimplemented!("TODO(pg-port): executor::execTuples::ExecTypeFromExprList")
+    crate::executor::execTuples::ExecTypeFromExprList(_exprlist as _) as _
 }
 
 /* TODO(pg-port): executor/execTuples.c */
 unsafe fn ExecTypeSetColNames(_tupdesc: TupleDesc, _colnames: *mut List) {
-    unimplemented!("TODO(pg-port): executor::execTuples::ExecTypeSetColNames")
+    crate::executor::execTuples::ExecTypeSetColNames(_tupdesc as _, _colnames as _)
 }
 
 /* TODO(pg-port): access/common/tupdesc.c */
 unsafe fn BlessTupleDesc(_tupdesc: TupleDesc) {
-    unimplemented!("TODO(pg-port): access::common::tupdesc::BlessTupleDesc")
+    unimplemented!()
 }
 
 /* TODO(pg-port): utils/typcache.c */
 unsafe fn lookup_rowtype_tupdesc(_typid: Oid, _typmod: int32) -> TupleDesc {
-    unimplemented!("TODO(pg-port): utils::typcache::lookup_rowtype_tupdesc")
+    crate::utils::cache::typcache::lookup_rowtype_tupdesc(_typid as _, _typmod as _) as _
 }
 
 /* TODO(pg-port): utils/typcache.c */
 unsafe fn lookup_rowtype_tupdesc_copy(_typid: Oid, _typmod: int32) -> TupleDesc {
-    unimplemented!("TODO(pg-port): utils::typcache::lookup_rowtype_tupdesc_copy")
+    crate::utils::cache::typcache::lookup_rowtype_tupdesc_copy(_typid as _, _typmod as _) as _
 }
 
 /* TODO(pg-port): access/common/tupdesc.c */
-unsafe fn ReleaseTupleDesc(_tupdesc: TupleDesc) {}
+unsafe fn ReleaseTupleDesc(_tupdesc: TupleDesc) {
+    crate::access::common::tupdesc::ReleaseTupleDesc(_tupdesc as _)
+}
 
 /* TODO(pg-port): utils/typcache.c */
 unsafe fn lookup_type_cache(_typid: Oid, _flags: c_int) -> *mut TypeCacheEntry {
-    unimplemented!("TODO(pg-port): utils::typcache::lookup_type_cache")
+    crate::utils::cache::typcache::lookup_type_cache(_typid as _, _flags as _) as _
 }
 
 /* TODO(pg-port): utils/typcache.c */
@@ -1091,7 +1094,7 @@ unsafe fn InitDomainConstraintRef(
     _mcxt: MemoryContext,
     _need_exprstate: bool,
 ) {
-    unimplemented!("TODO(pg-port): utils::typcache::InitDomainConstraintRef")
+    crate::utils::cache::typcache::InitDomainConstraintRef(_typid as _, _ref_ as _, _mcxt as _, _need_exprstate as _)
 }
 
 /* TODO(pg-port): nodes/subscripting.h */
@@ -1099,17 +1102,17 @@ unsafe fn getSubscriptingRoutines(
     _typid: Oid,
     _fnoid: *mut Oid,
 ) -> *const SubscriptRoutines {
-    unimplemented!("TODO(pg-port): nodes::subscripting::getSubscriptingRoutines")
+    crate::utils::cache::lsyscache::getSubscriptingRoutines(_typid as _, _fnoid as _) as _
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
 unsafe fn get_typlen(_typid: Oid) -> int16 {
-    unimplemented!("TODO(pg-port): utils::lsyscache::get_typlen")
+    crate::utils::cache::lsyscache::get_typlen(_typid as _) as _
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
 unsafe fn get_element_type(_typid: Oid) -> Oid {
-    unimplemented!("TODO(pg-port): utils::lsyscache::get_element_type")
+    crate::utils::cache::lsyscache::get_element_type(_typid as _) as _
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
@@ -1119,17 +1122,17 @@ unsafe fn get_typlenbyvalalign(
     _typbyval: *mut bool,
     _typalign: *mut c_char,
 ) {
-    unimplemented!("TODO(pg-port): utils::lsyscache::get_typlenbyvalalign")
+    crate::utils::cache::lsyscache::get_typlenbyvalalign(_typid as _, _typlen as _, _typbyval as _, _typalign as _)
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
 unsafe fn get_func_name(_funcid: Oid) -> *mut c_char {
-    unimplemented!("TODO(pg-port): utils::lsyscache::get_func_name")
+    crate::utils::cache::lsyscache::get_func_name(_funcid as _) as _
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
 unsafe fn format_type_be(_typid: Oid) -> *mut c_char {
-    unimplemented!("TODO(pg-port): utils::lsyscache::format_type_be")
+    crate::utils::adt::format_type::format_type_be(_typid as _) as _
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
@@ -1141,7 +1144,7 @@ unsafe fn get_op_opfamily_properties(
     _lefttype: *mut Oid,
     _righttype: *mut Oid,
 ) {
-    unimplemented!("TODO(pg-port): utils::lsyscache::get_op_opfamily_properties")
+    crate::utils::cache::lsyscache::get_op_opfamily_properties(_opno as _, _opfamily as _, _ordering as _, _strategy as _, _lefttype as _, _righttype as _)
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
@@ -1151,57 +1154,57 @@ unsafe fn get_opfamily_proc(
     _righttype: Oid,
     _procnum: c_int,
 ) -> Oid {
-    unimplemented!("TODO(pg-port): utils::lsyscache::get_opfamily_proc")
+    crate::utils::cache::lsyscache::get_opfamily_proc(_opfamily as _, _lefttype as _, _righttype as _, _procnum as _) as _
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
 unsafe fn getTypeOutputInfo(_typid: Oid, _funcid: *mut Oid, _varlena: *mut bool) {
-    unimplemented!("TODO(pg-port): utils::lsyscache::getTypeOutputInfo")
+    crate::utils::cache::lsyscache::getTypeOutputInfo(_typid as _, _funcid as _, _varlena as _)
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
 unsafe fn getTypeInputInfo(_typid: Oid, _funcid: *mut Oid, _typioparam: *mut Oid) {
-    unimplemented!("TODO(pg-port): utils::lsyscache::getTypeInputInfo")
+    crate::utils::cache::lsyscache::getTypeInputInfo(_typid as _, _funcid as _, _typioparam as _)
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
 unsafe fn get_typtype(_typid: Oid) -> c_char {
-    unimplemented!("TODO(pg-port): utils::lsyscache::get_typtype")
+    crate::utils::cache::lsyscache::get_typtype(_typid as _) as _
 }
 
 /* TODO(pg-port): utils/lsyscache.c */
 unsafe fn getBaseType(_typid: Oid) -> Oid {
-    unimplemented!("TODO(pg-port): utils::lsyscache::getBaseType")
+    crate::utils::cache::lsyscache::getBaseType(_typid as _) as _
 }
 
 /* TODO(pg-port): utils/typcache.c */
 unsafe fn DomainHasConstraints(_typid: Oid) -> bool {
-    unimplemented!("TODO(pg-port): utils::typcache::DomainHasConstraints")
+    crate::utils::cache::typcache::DomainHasConstraints(_typid as _) as _
 }
 
 /* TODO(pg-port): nodes/nodeFuncs.h */
 unsafe fn exprType(_node: *const Node) -> Oid {
-    unimplemented!("TODO(pg-port): nodes::nodeFuncs::exprType")
+    crate::nodes::nodeFuncs::exprType(_node as _) as _
 }
 
 /* TODO(pg-port): nodes/nodeFuncs.h */
 unsafe fn exprTypmod(_node: *const Node) -> int32 {
-    unimplemented!("TODO(pg-port): nodes::nodeFuncs::exprTypmod")
+    crate::nodes::nodeFuncs::exprTypmod(_node as _) as _
 }
 
 /* TODO(pg-port): nodes/nodeFuncs.h */
 unsafe fn exprLocation(_node: *const Node) -> c_int {
-    unimplemented!("TODO(pg-port): nodes::nodeFuncs::exprLocation")
+    crate::nodes::nodeFuncs::exprLocation(_node as _) as _
 }
 
 /* TODO(pg-port): utils/fmgr.c */
 unsafe fn fmgr_info(_funcid: Oid, _finfo: *mut FmgrInfo) {
-    unimplemented!("TODO(pg-port): utils::fmgr::fmgr_info")
+    crate::utils::fmgr::fmgr_info(_funcid as _, _finfo as _)
 }
 
 /* TODO(pg-port): utils/fmgr.c */
 unsafe fn fmgr_info_set_expr(_expr: *mut Node, _finfo: *mut FmgrInfo) {
-    unimplemented!("TODO(pg-port): utils::fmgr::fmgr_info_set_expr")
+    crate::fmgr_info_set_expr!(_expr as crate::utils::fmgr::fmNodePtr, _finfo)
 }
 
 /* TODO(pg-port): utils/fmgr.h */
@@ -1213,33 +1216,44 @@ unsafe fn InitFunctionCallInfoData(
     _context: *mut Node,
     _resultinfo: *mut Node,
 ) {
-    unimplemented!("TODO(pg-port): utils::fmgr::InitFunctionCallInfoData")
+    crate::InitFunctionCallInfoData!(
+        _fcinfo,
+        _finfo,
+        _nargs as core::ffi::c_short,
+        _collation,
+        _context as crate::utils::fmgr::fmNodePtr,
+        _resultinfo as crate::utils::fmgr::fmNodePtr
+    )
 }
 
 /* TODO(pg-port): utils/fmgr.h SizeForFunctionCallInfo macro -> size */
 unsafe fn SizeForFunctionCallInfo(_nargs: c_int) -> usize {
-    unimplemented!("TODO(pg-port): utils::fmgr::SizeForFunctionCallInfo")
+    crate::utils::fmgr::SizeForFunctionCallInfo(_nargs as usize)
 }
 
 /* TODO(pg-port): catalog/objectaccess.h */
 unsafe fn object_aclcheck(
-    _classid: Oid, _objectid: Oid, _roleid: Oid, _mode: AclMode,
+    classid: Oid, objectid: Oid, roleid: Oid, mode: AclMode,
 ) -> AclResult {
-    unimplemented!("TODO(pg-port): catalog::objectaccess::object_aclcheck")
+    core::mem::transmute::<crate::utils::adt::acl::AclResult, AclResult>(
+        crate::catalog::aclchk::object_aclcheck(classid, objectid, roleid, mode as _),
+    )
 }
 
 /* TODO(pg-port): catalog/objectaccess.h */
 unsafe fn aclcheck_error(_result: AclResult, _objtype: ObjectType, _name: *const c_char) {
-    unimplemented!("TODO(pg-port): catalog::objectaccess::aclcheck_error")
+    crate::catalog::aclchk::aclcheck_error(
+        core::mem::transmute::<i32, crate::utils::adt::acl::AclResult>(_result),
+        core::mem::transmute::<i32, crate::nodes::parsenodes::ObjectType>(_objtype),
+        _name as _,
+    )
 }
 
 /* TODO(pg-port): catalog/objectaccess.h */
 unsafe fn InvokeFunctionExecuteHook(_funcid: Oid) {}
 
 /* TODO(pg-port): miscadmin.h */
-unsafe fn GetUserId() -> Oid {
-    unimplemented!("TODO(pg-port): miscadmin::GetUserId")
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 
 /* TODO(pg-port): utils/jsonfuncs.h */
 type JsonTypeCategory = c_int;
@@ -1247,17 +1261,17 @@ unsafe fn json_categorize_type(
     _typid: Oid, _is_jsonb: bool,
     _category: *mut JsonTypeCategory, _outfuncid: *mut Oid,
 ) {
-    unimplemented!("TODO(pg-port): utils::jsonfuncs::json_categorize_type")
+    crate::utils::adt::jsonfuncs::json_categorize_type(_typid as _, _is_jsonb as _, _category as _, _outfuncid as _)
 }
 
 /* TODO(pg-port): nodes/makefuncs.h */
 unsafe fn makeNullConst(_typid: Oid, _typmod: int32, _collid: Oid) -> *mut Node {
-    unimplemented!("TODO(pg-port): nodes::makefuncs::makeNullConst")
+    crate::nodes::makefuncs::makeNullConst(_typid as _, _typmod as _, _collid as _) as _
 }
 
 /* TODO(pg-port): utils/mmgr.h CurrentMemoryContext */
 unsafe fn CurrentMemoryContext() -> MemoryContext {
-    unimplemented!("TODO(pg-port): utils::mmgr::CurrentMemoryContext")
+    crate::utils::palloc::CurrentMemoryContext as _
 }
 
 /* DO_AGGSPLIT_COMBINE: imported from crate::nodes::nodes */
@@ -1265,12 +1279,12 @@ unsafe fn CurrentMemoryContext() -> MemoryContext {
 /* innerPlanState / outerPlanState macros */
 #[inline]
 unsafe fn innerPlanState(node: *mut PlanState) -> *mut PlanState {
-    (*(*node).plan).righttree as *mut _
+    (*node).righttree
 }
 
 #[inline]
 unsafe fn outerPlanState(node: *mut PlanState) -> *mut PlanState {
-    (*(*node).plan).lefttree as *mut _
+    (*node).lefttree
 }
 
 /* check_stack_depth - miscadmin stub */
@@ -1368,6 +1382,7 @@ pub unsafe fn ExecInitExpr(
  * This is the same as ExecInitExpr, except that there is no parent PlanState,
  * and instead we may have a ParamListInfo describing PARAM_EXTERN Params.
  */
+#[no_mangle]
 pub unsafe fn ExecInitExprWithParams(
     node: *mut crate::nodes::primnodes::Expr,
     ext_params: crate::nodes::params::ParamListInfo,
@@ -2220,6 +2235,10 @@ unsafe fn ExecInitExprRec(
                     aggref as *mut c_void,
                 );
             } else {
+                if std::env::var_os("PDB_AGG").is_some() {
+                    let pt = if (*state).parent.is_null() { -1 } else { crate::nodes::nodes::nodeTag((*state).parent as *const crate::nodes::nodes::Node) as i32 };
+                    eprintln!("PDB_AGG Aggref-non-Agg: parent_null={} parent_tag={} (T_AggState=429)", (*state).parent.is_null(), pt);
+                }
                 /* planner messed up */
                 elog!(ERROR, "Aggref found in non-Agg plan node");
             }
@@ -2424,7 +2443,7 @@ unsafe fn ExecInitExprRec(
                 ProcedureRelationId,
                 cmpfuncid,
                 GetUserId(),
-                0, /* ACL_EXECUTE */
+                ACL_EXECUTE,
             );
             if aclresult != ACLCHECK_OK {
                 aclcheck_error(aclresult, OBJECT_FUNCTION, get_func_name(cmpfuncid));
@@ -2436,7 +2455,7 @@ unsafe fn ExecInitExprRec(
                     ProcedureRelationId,
                     (*opexpr).hashfuncid,
                     GetUserId(),
-                    0,
+                    ACL_EXECUTE,
                 );
                 if aclresult != ACLCHECK_OK {
                     aclcheck_error(
@@ -3709,6 +3728,7 @@ unsafe fn ExecInitExprRec(
  * Note that this potentially re-allocates es->steps, therefore no pointer
  * into that array may be used while the expression is still being built.
  */
+#[no_mangle]
 pub unsafe fn ExprEvalPushStep(es: *mut ExprState, s: *const ExprEvalStep) {
     if (*es).steps_alloc == 0 {
         (*es).steps_alloc = 16;
@@ -3749,7 +3769,7 @@ unsafe fn ExecInitFunc(
     let fcinfo: FunctionCallInfo;
 
     /* Check permission to call function */
-    aclresult = object_aclcheck(ProcedureRelationId, funcid, GetUserId(), 0 /* ACL_EXECUTE */);
+    aclresult = object_aclcheck(ProcedureRelationId, funcid, GetUserId(), ACL_EXECUTE);
     if aclresult != ACLCHECK_OK {
         aclcheck_error(aclresult, OBJECT_FUNCTION, get_func_name(funcid));
     }
@@ -4629,7 +4649,7 @@ unsafe fn ExecInitCoerceToDomain(
  */
 pub unsafe fn ExecBuildAggTrans(
     aggstate: *mut AggState,
-    phase: *mut AggStatePerPhase,
+    phase: AggStatePerPhase,
     do_sort: bool,
     do_hash: bool,
     nullcheck: bool,
@@ -4875,7 +4895,7 @@ pub unsafe fn ExecBuildAggTrans(
          * grouping set).
          */
         if do_sort {
-            let process_grouping_sets = if (**phase).numsets > 1 { (**phase).numsets } else { 1 };
+            let process_grouping_sets = if (*phase).numsets > 1 { (*phase).numsets } else { 1 };
             let mut setoff: c_int = 0;
 
             for setno in 0..process_grouping_sets {
@@ -5375,7 +5395,7 @@ pub unsafe fn ExecBuildGroupingEqual(
         let aclresult: AclResult;
 
         /* Check permission to call function */
-        aclresult = object_aclcheck(ProcedureRelationId, foid, GetUserId(), 0);
+        aclresult = object_aclcheck(ProcedureRelationId, foid, GetUserId(), ACL_EXECUTE);
         if aclresult != ACLCHECK_OK {
             aclcheck_error(aclresult, OBJECT_FUNCTION, get_func_name(foid));
         }
@@ -5497,7 +5517,7 @@ pub unsafe fn ExecBuildParamSetEqual(
         let aclresult: AclResult;
 
         /* Check permission to call function */
-        aclresult = object_aclcheck(ProcedureRelationId, foid, GetUserId(), 0);
+        aclresult = object_aclcheck(ProcedureRelationId, foid, GetUserId(), ACL_EXECUTE);
         if aclresult != ACLCHECK_OK {
             aclcheck_error(aclresult, OBJECT_FUNCTION, get_func_name(foid));
         }

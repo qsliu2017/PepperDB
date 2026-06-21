@@ -98,48 +98,38 @@ fn MAKE_SQLSTATE(ch1: c_char, ch2: c_char, ch3: c_char, ch4: c_char, ch5: c_char
 // --- stubs for not-yet-ported called functions ---
 
 // shm_mq.c
-unsafe fn shm_mq_detach(_mqh: *mut shm_mq_handle) {
-    unimplemented!()
-} // TODO: storage/ipc/shm_mq.c
+unsafe fn shm_mq_detach(mqh: *mut shm_mq_handle) { crate::storage::ipc::shm_mq::shm_mq_detach(mqh as _) }
 
 unsafe fn shm_mq_sendv(
-    _mqh: *mut shm_mq_handle,
-    _iov: *const shm_mq_iovec,
-    _iovcnt: c_int,
-    _nowait: bool,
-    _force_flush: bool,
-) -> shm_mq_result {
-    unimplemented!()
-} // TODO: storage/ipc/shm_mq.c
+    mqh: *mut shm_mq_handle,
+    iov: *const shm_mq_iovec,
+    iovcnt: c_int,
+    nowait: bool,
+    force_flush: bool,
+) -> shm_mq_result { unimplemented!() }
 
 // dsm.c
 type on_dsm_detach_callback = unsafe extern "C" fn(seg: *mut dsm_segment, arg: Datum);
-unsafe fn on_dsm_detach(_seg: *mut dsm_segment, _function: on_dsm_detach_callback, _arg: Datum) {
-    unimplemented!()
-} // TODO: storage/ipc/dsm.c
+unsafe fn on_dsm_detach(seg: *mut dsm_segment, function: on_dsm_detach_callback, arg: Datum) { unimplemented!() }
 
 // latch.c
 unsafe fn WaitLatch(
-    _latch: *mut Latch,
-    _wakeEvents: c_int,
-    _timeout: i64,
-    _wait_event_info: u32,
-) -> c_int {
-    unimplemented!()
-} // TODO: storage/ipc/latch.c
+    latch: *mut Latch,
+    wakeEvents: c_int,
+    timeout: i64,
+    wait_event_info: u32,
+) -> c_int { crate::storage::ipc::latch::WaitLatch(latch as _, wakeEvents as _, timeout as _, wait_event_info as _) }
 
 unsafe fn ResetLatch(_latch: *mut Latch) {
-    unimplemented!()
+    crate::storage::ipc::latch::ResetLatch(_latch as _)
 } // TODO: storage/ipc/latch.c
 
 // procsignal.c
 unsafe fn SendProcSignal(
-    _pid: pid_t,
-    _reason: ProcSignalReason,
-    _procNumber: ProcNumber,
-) -> c_int {
-    unimplemented!()
-} // TODO: storage/ipc/procsignal.c
+    pid: pid_t,
+    reason: ProcSignalReason,
+    procNumber: ProcNumber,
+) -> c_int { unimplemented!() }
 
 // parallel.c
 unsafe fn IsParallelWorker() -> bool {

@@ -77,7 +77,7 @@ pub unsafe fn index_pages_fetched(
     index_pages: f64,
     root: *mut PlannerInfo,
 ) -> f64 {
-    unimplemented!()
+    crate::optimizer::path::costsize::index_pages_fetched(tuples_fetched as _, pages as _, index_pages as _, root as _)
 }
 
 pub unsafe fn cost_seqscan(
@@ -85,8 +85,8 @@ pub unsafe fn cost_seqscan(
     root: *mut PlannerInfo,
     baserel: *mut RelOptInfo,
     param_info: *mut ParamPathInfo,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_seqscan(path as _, root as _, baserel as _, param_info as _)
 }
 
 pub unsafe fn cost_samplescan(
@@ -94,8 +94,8 @@ pub unsafe fn cost_samplescan(
     root: *mut PlannerInfo,
     baserel: *mut RelOptInfo,
     param_info: *mut ParamPathInfo,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_samplescan(path as _, root as _, baserel as _, param_info as _)
 }
 
 pub unsafe fn cost_index(
@@ -103,8 +103,8 @@ pub unsafe fn cost_index(
     root: *mut PlannerInfo,
     loop_count: f64,
     partial_path: bool,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_index(path as _, root as _, loop_count as _, partial_path as _)
 }
 
 pub unsafe fn cost_bitmap_heap_scan(
@@ -114,24 +114,24 @@ pub unsafe fn cost_bitmap_heap_scan(
     param_info: *mut ParamPathInfo,
     bitmapqual: *mut Path,
     loop_count: f64,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_bitmap_heap_scan(path as _, root as _, baserel as _, param_info as _, bitmapqual as _, loop_count as _)
 }
 
-pub unsafe fn cost_bitmap_and_node(path: *mut BitmapAndPath, root: *mut PlannerInfo) {
-    unimplemented!()
+pub unsafe fn cost_bitmap_and_node(path: *mut BitmapAndPath, root: *mut PlannerInfo){
+    crate::optimizer::path::costsize::cost_bitmap_and_node(path as _, root as _)
 }
 
-pub unsafe fn cost_bitmap_or_node(path: *mut BitmapOrPath, root: *mut PlannerInfo) {
-    unimplemented!()
+pub unsafe fn cost_bitmap_or_node(path: *mut BitmapOrPath, root: *mut PlannerInfo){
+    crate::optimizer::path::costsize::cost_bitmap_or_node(path as _, root as _)
 }
 
 pub unsafe fn cost_bitmap_tree_node(
     path: *mut Path,
     cost: *mut Cost,
     selec: *mut Selectivity,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_bitmap_tree_node(path as _, cost as _, selec as _)
 }
 
 pub unsafe fn cost_tidscan(
@@ -140,8 +140,8 @@ pub unsafe fn cost_tidscan(
     baserel: *mut RelOptInfo,
     tidquals: *mut List,
     param_info: *mut ParamPathInfo,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_tidscan(path as _, root as _, baserel as _, tidquals as _, param_info as _)
 }
 
 pub unsafe fn cost_tidrangescan(
@@ -150,8 +150,8 @@ pub unsafe fn cost_tidrangescan(
     baserel: *mut RelOptInfo,
     tidrangequals: *mut List,
     param_info: *mut ParamPathInfo,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_tidrangescan(path as _, root as _, baserel as _, tidrangequals as _, param_info as _)
 }
 
 pub unsafe fn cost_subqueryscan(
@@ -160,8 +160,8 @@ pub unsafe fn cost_subqueryscan(
     baserel: *mut RelOptInfo,
     param_info: *mut ParamPathInfo,
     trivial_pathtarget: bool,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_subqueryscan(path as _, root as _, baserel as _, param_info as _, trivial_pathtarget as _)
 }
 
 pub unsafe fn cost_functionscan(
@@ -169,8 +169,8 @@ pub unsafe fn cost_functionscan(
     root: *mut PlannerInfo,
     baserel: *mut RelOptInfo,
     param_info: *mut ParamPathInfo,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_functionscan(path as _, root as _, baserel as _, param_info as _)
 }
 
 pub unsafe fn cost_valuesscan(
@@ -178,8 +178,8 @@ pub unsafe fn cost_valuesscan(
     root: *mut PlannerInfo,
     baserel: *mut RelOptInfo,
     param_info: *mut ParamPathInfo,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_valuesscan(path as _, root as _, baserel as _, param_info as _)
 }
 
 pub unsafe fn cost_tablefuncscan(
@@ -187,8 +187,8 @@ pub unsafe fn cost_tablefuncscan(
     root: *mut PlannerInfo,
     baserel: *mut RelOptInfo,
     param_info: *mut ParamPathInfo,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_tablefuncscan(path as _, root as _, baserel as _, param_info as _)
 }
 
 pub unsafe fn cost_ctescan(
@@ -196,8 +196,8 @@ pub unsafe fn cost_ctescan(
     root: *mut PlannerInfo,
     baserel: *mut RelOptInfo,
     param_info: *mut ParamPathInfo,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_ctescan(path as _, root as _, baserel as _, param_info as _)
 }
 
 pub unsafe fn cost_namedtuplestorescan(
@@ -205,8 +205,8 @@ pub unsafe fn cost_namedtuplestorescan(
     root: *mut PlannerInfo,
     baserel: *mut RelOptInfo,
     param_info: *mut ParamPathInfo,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_namedtuplestorescan(path as _, root as _, baserel as _, param_info as _)
 }
 
 pub unsafe fn cost_resultscan(
@@ -214,12 +214,12 @@ pub unsafe fn cost_resultscan(
     root: *mut PlannerInfo,
     baserel: *mut RelOptInfo,
     param_info: *mut ParamPathInfo,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_resultscan(path as _, root as _, baserel as _, param_info as _)
 }
 
-pub unsafe fn cost_recursive_union(runion: *mut Path, nrterm: *mut Path, rterm: *mut Path) {
-    unimplemented!()
+pub unsafe fn cost_recursive_union(runion: *mut Path, nrterm: *mut Path, rterm: *mut Path){
+    crate::optimizer::path::costsize::cost_recursive_union(runion as _, nrterm as _, rterm as _)
 }
 
 pub unsafe fn cost_sort(
@@ -233,8 +233,8 @@ pub unsafe fn cost_sort(
     comparison_cost: Cost,
     sort_mem: c_int,
     limit_tuples: f64,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_sort(path as _, root as _, pathkeys as _, input_disabled_nodes as _, input_cost as _, tuples as _, width as _, comparison_cost as _, sort_mem as _, limit_tuples as _)
 }
 
 pub unsafe fn cost_incremental_sort(
@@ -250,12 +250,12 @@ pub unsafe fn cost_incremental_sort(
     comparison_cost: Cost,
     sort_mem: c_int,
     limit_tuples: f64,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_incremental_sort(path as _, root as _, pathkeys as _, presorted_keys as _, input_disabled_nodes as _, input_startup_cost as _, input_total_cost as _, input_tuples as _, width as _, comparison_cost as _, sort_mem as _, limit_tuples as _)
 }
 
-pub unsafe fn cost_append(apath: *mut AppendPath) {
-    unimplemented!()
+pub unsafe fn cost_append(apath: *mut AppendPath){
+    crate::optimizer::path::costsize::cost_append(apath as _)
 }
 
 pub unsafe fn cost_merge_append(
@@ -267,8 +267,8 @@ pub unsafe fn cost_merge_append(
     input_startup_cost: Cost,
     input_total_cost: Cost,
     tuples: f64,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_merge_append(path as _, root as _, pathkeys as _, n_streams as _, input_disabled_nodes as _, input_startup_cost as _, input_total_cost as _, tuples as _)
 }
 
 pub unsafe fn cost_material(
@@ -278,8 +278,8 @@ pub unsafe fn cost_material(
     input_total_cost: Cost,
     tuples: f64,
     width: c_int,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_material(path as _, input_disabled_nodes as _, input_startup_cost as _, input_total_cost as _, tuples as _, width as _)
 }
 
 pub unsafe fn cost_agg(
@@ -295,8 +295,8 @@ pub unsafe fn cost_agg(
     input_total_cost: Cost,
     input_tuples: f64,
     input_width: f64,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_agg(path as _, root as _, ::std::mem::transmute::<i32, crate::nodes::nodes::AggStrategy>(aggstrategy), aggcosts as _, numGroupCols as _, numGroups as _, quals as _, disabled_nodes as _, input_startup_cost as _, input_total_cost as _, input_tuples as _, input_width as _)
 }
 
 pub unsafe fn cost_windowagg(
@@ -308,8 +308,8 @@ pub unsafe fn cost_windowagg(
     input_startup_cost: Cost,
     input_total_cost: Cost,
     input_tuples: f64,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_windowagg(path as _, root as _, windowFuncs as _, winclause as _, input_disabled_nodes as _, input_startup_cost as _, input_total_cost as _, input_tuples as _)
 }
 
 pub unsafe fn cost_group(
@@ -322,8 +322,8 @@ pub unsafe fn cost_group(
     input_startup_cost: Cost,
     input_total_cost: Cost,
     input_tuples: f64,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_group(path as _, root as _, numGroupCols as _, numGroups as _, quals as _, input_disabled_nodes as _, input_startup_cost as _, input_total_cost as _, input_tuples as _)
 }
 
 pub unsafe fn initial_cost_nestloop(
@@ -333,8 +333,8 @@ pub unsafe fn initial_cost_nestloop(
     outer_path: *mut Path,
     inner_path: *mut Path,
     extra: *mut JoinPathExtraData,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::initial_cost_nestloop(root as _, workspace as _, ::std::mem::transmute::<i32, crate::nodes::nodes::JoinType>(jointype), outer_path as _, inner_path as _, extra as _)
 }
 
 pub unsafe fn final_cost_nestloop(
@@ -342,8 +342,8 @@ pub unsafe fn final_cost_nestloop(
     path: *mut NestPath,
     workspace: *mut JoinCostWorkspace,
     extra: *mut JoinPathExtraData,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::final_cost_nestloop(root as _, path as _, workspace as _, extra as _)
 }
 
 pub unsafe fn initial_cost_mergejoin(
@@ -357,8 +357,8 @@ pub unsafe fn initial_cost_mergejoin(
     innersortkeys: *mut List,
     outer_presorted_keys: c_int,
     extra: *mut JoinPathExtraData,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::initial_cost_mergejoin(root as _, workspace as _, ::std::mem::transmute::<i32, crate::nodes::nodes::JoinType>(jointype), mergeclauses as _, outer_path as _, inner_path as _, outersortkeys as _, innersortkeys as _, outer_presorted_keys as _, extra as _)
 }
 
 pub unsafe fn final_cost_mergejoin(
@@ -366,8 +366,8 @@ pub unsafe fn final_cost_mergejoin(
     path: *mut MergePath,
     workspace: *mut JoinCostWorkspace,
     extra: *mut JoinPathExtraData,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::final_cost_mergejoin(root as _, path as _, workspace as _, extra as _)
 }
 
 pub unsafe fn initial_cost_hashjoin(
@@ -379,8 +379,8 @@ pub unsafe fn initial_cost_hashjoin(
     inner_path: *mut Path,
     extra: *mut JoinPathExtraData,
     parallel_hash: bool,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::initial_cost_hashjoin(root as _, workspace as _, ::std::mem::transmute::<i32, crate::nodes::nodes::JoinType>(jointype), hashclauses as _, outer_path as _, inner_path as _, extra as _, parallel_hash as _)
 }
 
 pub unsafe fn final_cost_hashjoin(
@@ -388,8 +388,8 @@ pub unsafe fn final_cost_hashjoin(
     path: *mut HashPath,
     workspace: *mut JoinCostWorkspace,
     extra: *mut JoinPathExtraData,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::final_cost_hashjoin(root as _, path as _, workspace as _, extra as _)
 }
 
 pub unsafe fn cost_gather(
@@ -398,8 +398,8 @@ pub unsafe fn cost_gather(
     rel: *mut RelOptInfo,
     param_info: *mut ParamPathInfo,
     rows: *mut f64,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_gather(path as _, root as _, rel as _, param_info as _, rows as _)
 }
 
 pub unsafe fn cost_gather_merge(
@@ -411,20 +411,20 @@ pub unsafe fn cost_gather_merge(
     input_startup_cost: Cost,
     input_total_cost: Cost,
     rows: *mut f64,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::cost_gather_merge(path as _, root as _, rel as _, param_info as _, input_disabled_nodes as _, input_startup_cost as _, input_total_cost as _, rows as _)
 }
 
-pub unsafe fn cost_subplan(root: *mut PlannerInfo, subplan: *mut SubPlan, plan: *mut Plan) {
-    unimplemented!()
+pub unsafe fn cost_subplan(root: *mut PlannerInfo, subplan: *mut SubPlan, plan: *mut Plan){
+    crate::optimizer::path::costsize::cost_subplan(root as _, subplan as _, plan as _)
 }
 
 pub unsafe fn cost_qual_eval(cost: *mut QualCost, quals: *mut List, root: *mut PlannerInfo) {
-    unimplemented!()
+    crate::optimizer::path::costsize::cost_qual_eval(cost as _, quals as _, root as _)
 }
 
 pub unsafe fn cost_qual_eval_node(cost: *mut QualCost, qual: *mut Node, root: *mut PlannerInfo) {
-    unimplemented!()
+    crate::optimizer::path::costsize::cost_qual_eval_node(cost as _, qual as _, root as _)
 }
 
 pub unsafe fn compute_semi_anti_join_factors(
@@ -436,12 +436,12 @@ pub unsafe fn compute_semi_anti_join_factors(
     sjinfo: *mut SpecialJoinInfo,
     restrictlist: *mut List,
     semifactors: *mut SemiAntiJoinFactors,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::compute_semi_anti_join_factors(root as _, joinrel as _, outerrel as _, innerrel as _, ::std::mem::transmute::<i32, crate::nodes::nodes::JoinType>(jointype), sjinfo as _, restrictlist as _, semifactors as _)
 }
 
-pub unsafe fn set_baserel_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo) {
-    unimplemented!()
+pub unsafe fn set_baserel_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo){
+    crate::optimizer::path::costsize::set_baserel_size_estimates(root as _, rel as _)
 }
 
 pub unsafe fn get_parameterized_baserel_size(
@@ -449,7 +449,7 @@ pub unsafe fn get_parameterized_baserel_size(
     rel: *mut RelOptInfo,
     param_clauses: *mut List,
 ) -> f64 {
-    unimplemented!()
+    crate::optimizer::path::costsize::get_parameterized_baserel_size(root as _, rel as _, param_clauses as _)
 }
 
 pub unsafe fn get_parameterized_joinrel_size(
@@ -460,7 +460,7 @@ pub unsafe fn get_parameterized_joinrel_size(
     sjinfo: *mut SpecialJoinInfo,
     restrict_clauses: *mut List,
 ) -> f64 {
-    unimplemented!()
+    crate::optimizer::path::costsize::get_parameterized_joinrel_size(root as _, rel as _, outer_path as _, inner_path as _, sjinfo as _, restrict_clauses as _)
 }
 
 pub unsafe fn set_joinrel_size_estimates(
@@ -470,51 +470,51 @@ pub unsafe fn set_joinrel_size_estimates(
     inner_rel: *mut RelOptInfo,
     sjinfo: *mut SpecialJoinInfo,
     restrictlist: *mut List,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::set_joinrel_size_estimates(root as _, rel as _, outer_rel as _, inner_rel as _, sjinfo as _, restrictlist as _)
 }
 
-pub unsafe fn set_subquery_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo) {
-    unimplemented!()
+pub unsafe fn set_subquery_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo){
+    crate::optimizer::path::costsize::set_subquery_size_estimates(root as _, rel as _)
 }
 
-pub unsafe fn set_function_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo) {
-    unimplemented!()
+pub unsafe fn set_function_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo){
+    crate::optimizer::path::costsize::set_function_size_estimates(root as _, rel as _)
 }
 
-pub unsafe fn set_values_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo) {
-    unimplemented!()
+pub unsafe fn set_values_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo){
+    crate::optimizer::path::costsize::set_values_size_estimates(root as _, rel as _)
 }
 
 pub unsafe fn set_cte_size_estimates(
     root: *mut PlannerInfo,
     rel: *mut RelOptInfo,
     cte_rows: f64,
-) {
-    unimplemented!()
+){
+    crate::optimizer::path::costsize::set_cte_size_estimates(root as _, rel as _, cte_rows as _)
 }
 
-pub unsafe fn set_tablefunc_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo) {
-    unimplemented!()
+pub unsafe fn set_tablefunc_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo){
+    crate::optimizer::path::costsize::set_tablefunc_size_estimates(root as _, rel as _)
 }
 
-pub unsafe fn set_namedtuplestore_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo) {
-    unimplemented!()
+pub unsafe fn set_namedtuplestore_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo){
+    crate::optimizer::path::costsize::set_namedtuplestore_size_estimates(root as _, rel as _)
 }
 
-pub unsafe fn set_result_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo) {
-    unimplemented!()
+pub unsafe fn set_result_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo){
+    crate::optimizer::path::costsize::set_result_size_estimates(root as _, rel as _)
 }
 
-pub unsafe fn set_foreign_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo) {
-    unimplemented!()
+pub unsafe fn set_foreign_size_estimates(root: *mut PlannerInfo, rel: *mut RelOptInfo){
+    crate::optimizer::path::costsize::set_foreign_size_estimates(root as _, rel as _)
 }
 
 pub unsafe fn set_pathtarget_cost_width(
     root: *mut PlannerInfo,
     target: *mut PathTarget,
 ) -> *mut PathTarget {
-    unimplemented!()
+    crate::optimizer::path::costsize::set_pathtarget_cost_width(root as _, target as _)
 }
 
 pub unsafe fn compute_bitmap_pages(
@@ -525,9 +525,9 @@ pub unsafe fn compute_bitmap_pages(
     cost_p: *mut Cost,
     tuples_p: *mut f64,
 ) -> f64 {
-    unimplemented!()
+    crate::optimizer::path::costsize::compute_bitmap_pages(root as _, baserel as _, bitmapqual as _, loop_count as _, cost_p as _, tuples_p as _)
 }
 
 pub unsafe fn compute_gather_rows(path: *mut Path) -> f64 {
-    unimplemented!()
+    crate::optimizer::path::costsize::compute_gather_rows(path as _)
 }

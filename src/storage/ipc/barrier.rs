@@ -45,6 +45,7 @@ pub struct ConditionVariable {
 
 /// STUB of `ConditionVariableInit`.
 #[inline]
+#[no_mangle]
 fn ConditionVariableInit(_cv: *mut ConditionVariable) {
     // TODO: condition_variable.c not ported. Real impl zero-inits the mutex
     // and the proclist of waiters. A zero-filled Barrier already satisfies the

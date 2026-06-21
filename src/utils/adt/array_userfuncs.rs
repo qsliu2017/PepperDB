@@ -267,9 +267,7 @@ unsafe fn deconstruct_array(
     _elemsp: *mut *mut Datum,
     _nullsp: *mut *mut bool,
     _nelemsp: *mut c_int,
-) {
-    unimplemented!("deconstruct_array (arrayfuncs.c) not yet ported");
-}
+) { crate::utils::adt::arrayfuncs::deconstruct_array(_array as _, _elmtype as _, _elmlen as _, _elmbyval, _elmalign as _, _elemsp as _, _nullsp as _, _nelemsp as _) }
 
 /// STUB: `array_set_element` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::array_set_element.
@@ -283,15 +281,11 @@ unsafe fn array_set_element(
     _elmlen: c_int,
     _elmbyval: bool,
     _elmalign: c_char,
-) -> Datum {
-    unimplemented!("array_set_element (arrayfuncs.c) not yet ported");
-}
+) -> Datum { crate::utils::adt::arrayfuncs::array_set_element(_arraydatum as _, _nSubscripts as _, _indx as _, _dataValue as _, _isNull, _arraytyplen as _, _elmlen as _, _elmbyval, _elmalign as _) as _ }
 
 /// STUB: `array_contains_nulls` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::array_contains_nulls.
-unsafe fn array_contains_nulls(_array: *mut ArrayType) -> bool {
-    unimplemented!("array_contains_nulls (arrayfuncs.c) not yet ported");
-}
+unsafe fn array_contains_nulls(_array: *mut ArrayType) -> bool { crate::utils::adt::arrayfuncs::array_contains_nulls(_array as _) }
 
 /// STUB: `array_bitmap_copy` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::array_bitmap_copy.
@@ -301,9 +295,7 @@ unsafe fn array_bitmap_copy(
     _srcbitmap: *const bits8,
     _srcoffset: c_int,
     _nitems: c_int,
-) {
-    unimplemented!("array_bitmap_copy (arrayfuncs.c) not yet ported");
-}
+) { crate::utils::adt::arrayfuncs::array_bitmap_copy(_destbitmap as _, _destoffset as _, _srcbitmap as _, _srcoffset as _, _nitems as _) }
 
 /// STUB: `array_create_iterator` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::array_create_iterator.
@@ -311,21 +303,15 @@ unsafe fn array_create_iterator(
     _arr: *mut ArrayType,
     _slice_ndim: c_int,
     _mstate: *mut ArrayMetaState,
-) -> ArrayIterator {
-    unimplemented!("array_create_iterator (arrayfuncs.c) not yet ported");
-}
+) -> ArrayIterator { crate::utils::adt::arrayfuncs::array_create_iterator(_arr as _, _slice_ndim as _, _mstate as _) as _ }
 
 /// STUB: `array_iterate` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::array_iterate.
-unsafe fn array_iterate(_iterator: ArrayIterator, _value: *mut Datum, _isnull: *mut bool) -> bool {
-    unimplemented!("array_iterate (arrayfuncs.c) not yet ported");
-}
+unsafe fn array_iterate(_iterator: ArrayIterator, _value: *mut Datum, _isnull: *mut bool) -> bool { crate::utils::adt::arrayfuncs::array_iterate(_iterator as _, _value as _, _isnull as _) }
 
 /// STUB: `array_free_iterator` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::array_free_iterator.
-unsafe fn array_free_iterator(_iterator: ArrayIterator) {
-    unimplemented!("array_free_iterator (arrayfuncs.c) not yet ported");
-}
+unsafe fn array_free_iterator(_iterator: ArrayIterator) { crate::utils::adt::arrayfuncs::array_free_iterator(_iterator as _) }
 
 /// STUB: `construct_empty_expanded_array` (utils/adt/array_expanded.c).
 /// TODO(pg-port): translate utils/adt/array_expanded.c::construct_empty_expanded_array.
@@ -333,9 +319,7 @@ unsafe fn construct_empty_expanded_array(
     _element_type: Oid,
     _parentcontext: MemoryContext,
     _metacache: *mut ArrayMetaState,
-) -> *mut ExpandedArrayHeader {
-    unimplemented!("construct_empty_expanded_array (array_expanded.c) not yet ported");
-}
+) -> *mut ExpandedArrayHeader { crate::utils::adt::arrayfuncs::construct_empty_expanded_array(_element_type as _, _parentcontext as _, _metacache as _) as _ }
 
 /// STUB: `PG_GETARG_EXPANDED_ARRAYX` (utils/array.h).
 /// TODO(pg-port): translate utils/adt/array_expanded.c::DatumGetExpandedArrayX.
@@ -355,9 +339,7 @@ unsafe fn AggCheckCallContext(_fcinfo: FunctionCallInfo, _aggcontext: *mut Memor
 
 /// STUB: `get_element_type` (utils/cache/lsyscache.c).
 /// TODO(pg-port): translate utils/cache/lsyscache.c::get_element_type.
-unsafe fn get_element_type(_typid: Oid) -> Oid {
-    unimplemented!("get_element_type (lsyscache.c) not yet ported");
-}
+unsafe fn get_element_type(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_element_type(_typid as _) as _ }
 
 /// STUB: `get_typlenbyvalalign` (utils/cache/lsyscache.c).
 /// TODO(pg-port): translate utils/cache/lsyscache.c::get_typlenbyvalalign.
@@ -366,9 +348,7 @@ unsafe fn get_typlenbyvalalign(
     _typlen: *mut int16,
     _typbyval: *mut bool,
     _typalign: *mut c_char,
-) {
-    unimplemented!("get_typlenbyvalalign (lsyscache.c) not yet ported");
-}
+) { crate::utils::cache::lsyscache::get_typlenbyvalalign(_typid as _, _typlen as _, _typbyval as _, _typalign as _) }
 
 /// STUB: `getTypeBinaryOutputInfo` (utils/cache/lsyscache.c).
 /// TODO(pg-port): translate utils/cache/lsyscache.c::getTypeBinaryOutputInfo.
@@ -388,9 +368,7 @@ unsafe fn initArrayResult(
     _element_type: Oid,
     _rcontext: MemoryContext,
     _subcontext: bool,
-) -> *mut ArrayBuildState {
-    unimplemented!("initArrayResult (arrayfuncs.c) not yet ported");
-}
+) -> *mut ArrayBuildState { crate::utils::adt::arrayfuncs::initArrayResult(_element_type as _, _rcontext as _, _subcontext) as _ }
 
 /// STUB: `initArrayResultWithSize` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::initArrayResultWithSize.
@@ -399,9 +377,7 @@ unsafe fn initArrayResultWithSize(
     _rcontext: MemoryContext,
     _subcontext: bool,
     _initsize: c_int,
-) -> *mut ArrayBuildState {
-    unimplemented!("initArrayResultWithSize (arrayfuncs.c) not yet ported");
-}
+) -> *mut ArrayBuildState { crate::utils::adt::arrayfuncs::initArrayResultWithSize(_element_type as _, _rcontext as _, _subcontext, _initsize as _) as _ }
 
 /// STUB: `initArrayResultArr` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::initArrayResultArr.
@@ -410,9 +386,7 @@ unsafe fn initArrayResultArr(
     _element_type: Oid,
     _rcontext: MemoryContext,
     _subcontext: bool,
-) -> *mut ArrayBuildStateArr {
-    unimplemented!("initArrayResultArr (arrayfuncs.c) not yet ported");
-}
+) -> *mut ArrayBuildStateArr { crate::utils::adt::arrayfuncs::initArrayResultArr(_array_type as _, _element_type as _, _rcontext as _, _subcontext) as _ }
 
 /// STUB: `accumArrayResult` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::accumArrayResult.
@@ -422,9 +396,7 @@ unsafe fn accumArrayResult(
     _disnull: bool,
     _element_type: Oid,
     _rcontext: MemoryContext,
-) -> *mut ArrayBuildState {
-    unimplemented!("accumArrayResult (arrayfuncs.c) not yet ported");
-}
+) -> *mut ArrayBuildState { crate::utils::adt::arrayfuncs::accumArrayResult(_astate as _, _dvalue as _, _disnull, _element_type as _, _rcontext as _) as _ }
 
 /// STUB: `accumArrayResultArr` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::accumArrayResultArr.
@@ -434,9 +406,7 @@ unsafe fn accumArrayResultArr(
     _disnull: bool,
     _array_type: Oid,
     _rcontext: MemoryContext,
-) -> *mut ArrayBuildStateArr {
-    unimplemented!("accumArrayResultArr (arrayfuncs.c) not yet ported");
-}
+) -> *mut ArrayBuildStateArr { crate::utils::adt::arrayfuncs::accumArrayResultArr(_astate as _, _dvalue as _, _disnull, _array_type as _, _rcontext as _) as _ }
 
 /// STUB: `accumArrayResultAny` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::accumArrayResultAny.
@@ -446,15 +416,11 @@ unsafe fn accumArrayResultAny(
     _disnull: bool,
     _input_type: Oid,
     _rcontext: MemoryContext,
-) -> *mut ArrayBuildStateAny {
-    unimplemented!("accumArrayResultAny (arrayfuncs.c) not yet ported");
-}
+) -> *mut ArrayBuildStateAny { crate::utils::adt::arrayfuncs::accumArrayResultAny(_astate as _, _dvalue as _, _disnull, _input_type as _, _rcontext as _) as _ }
 
 /// STUB: `makeArrayResult` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::makeArrayResult.
-unsafe fn makeArrayResult(_astate: *mut ArrayBuildState, _rcontext: MemoryContext) -> Datum {
-    unimplemented!("makeArrayResult (arrayfuncs.c) not yet ported");
-}
+unsafe fn makeArrayResult(_astate: *mut ArrayBuildState, _rcontext: MemoryContext) -> Datum { crate::utils::adt::arrayfuncs::makeArrayResult(_astate as _, _rcontext as _) as _ }
 
 /// STUB: `makeMdArrayResult` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::makeMdArrayResult.
@@ -465,9 +431,7 @@ unsafe fn makeMdArrayResult(
     _lbs: *mut c_int,
     _rcontext: MemoryContext,
     _release: bool,
-) -> Datum {
-    unimplemented!("makeMdArrayResult (arrayfuncs.c) not yet ported");
-}
+) -> Datum { crate::utils::adt::arrayfuncs::makeMdArrayResult(_astate as _, _ndims as _, _dims as _, _lbs as _, _rcontext as _, _release) as _ }
 
 /// STUB: `makeArrayResultArr` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::makeArrayResultArr.
@@ -475,9 +439,7 @@ unsafe fn makeArrayResultArr(
     _astate: *mut ArrayBuildStateArr,
     _rcontext: MemoryContext,
     _release: bool,
-) -> Datum {
-    unimplemented!("makeArrayResultArr (arrayfuncs.c) not yet ported");
-}
+) -> Datum { crate::utils::adt::arrayfuncs::makeArrayResultArr(_astate as _, _rcontext as _, _release) as _ }
 
 /// STUB: `makeArrayResultAny` (utils/adt/arrayfuncs.c).
 /// TODO(pg-port): translate utils/adt/arrayfuncs.c::makeArrayResultAny.
@@ -485,9 +447,7 @@ unsafe fn makeArrayResultAny(
     _astate: *mut ArrayBuildStateAny,
     _rcontext: MemoryContext,
     _release: bool,
-) -> Datum {
-    unimplemented!("makeArrayResultAny (arrayfuncs.c) not yet ported");
-}
+) -> Datum { crate::utils::adt::arrayfuncs::makeArrayResultAny(_astate as _, _rcontext as _, _release) as _ }
 
 /// STUB: `tuplesort_begin_datum` (utils/sort/tuplesort.c).
 /// TODO(pg-port): translate utils/sort/tuplesortvariants.c::tuplesort_begin_datum.
@@ -499,14 +459,10 @@ unsafe fn tuplesort_begin_datum(
     _workMem: c_int,
     _coordinate: *mut c_void,
     _sortopt: c_int,
-) -> *mut Tuplesortstate {
-    unimplemented!("tuplesort_begin_datum (tuplesort.c) not yet ported");
-}
+) -> *mut Tuplesortstate { crate::utils::sort::tuplesortvariants::tuplesort_begin_datum(_datumType as _, _sortOperator as _, _sortCollation as _, _nullsFirstFlag, _workMem as _, _coordinate as _, _sortopt as _) as _ }
 
 /// STUB: `tuplesort_putdatum` (utils/sort/tuplesort.c).
-unsafe fn tuplesort_putdatum(_state: *mut Tuplesortstate, _val: Datum, _isNull: bool) {
-    unimplemented!("tuplesort_putdatum (tuplesort.c) not yet ported");
-}
+unsafe fn tuplesort_putdatum(_state: *mut Tuplesortstate, _val: Datum, _isNull: bool) { crate::utils::sort::tuplesortvariants::tuplesort_putdatum(_state as _, _val as _, _isNull) }
 
 /// STUB: `tuplesort_performsort` (utils/sort/tuplesort.c).
 unsafe fn tuplesort_performsort(_state: *mut Tuplesortstate) {
@@ -521,9 +477,7 @@ unsafe fn tuplesort_getdatum(
     _val: *mut Datum,
     _isNull: *mut bool,
     _abbrev: *mut Datum,
-) -> bool {
-    unimplemented!("tuplesort_getdatum (tuplesort.c) not yet ported");
-}
+) -> bool { crate::utils::sort::tuplesortvariants::tuplesort_getdatum(_state as _, _forward, _copy, _val as _, _isNull as _, _abbrev as _) }
 
 /// STUB: `tuplesort_end` (utils/sort/tuplesort.c).
 unsafe fn tuplesort_end(_state: *mut Tuplesortstate) {

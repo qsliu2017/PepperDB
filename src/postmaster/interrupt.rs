@@ -17,6 +17,7 @@ use crate::prelude::*;
 // booleans (set in a signal handler, polled in the main loop).
 
 /// Set by SIGHUP handler; polled to trigger a configuration reload.
+#[no_mangle]
 pub static mut ConfigReloadPending: bool = false;
 
 /// Set by the shutdown signal handler; polled to trigger process exit.
@@ -110,6 +111,7 @@ pub unsafe fn ProcessMainLoopInterrupts() {
 ///
 /// errno save/restore (C does `int save_errno = errno; ...; errno = save_errno`)
 /// is omitted here: errno is not yet touched by the no-op SetLatch stub.
+#[no_mangle]
 pub unsafe extern "C" fn SignalHandlerForConfigReload(_postgres_signal_arg: c_int) {
     ConfigReloadPending = true;
     SetLatch(&raw mut MyLatch);

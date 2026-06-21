@@ -18,3 +18,6 @@ pub mod syscache;
 pub mod relmapper;
 pub mod catcache;
 pub mod inval;
+pub mod plancache;
+pub mod syscache_ids_gen;
+pub mod schemapg_gen;

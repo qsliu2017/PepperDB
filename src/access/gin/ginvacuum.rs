@@ -1065,9 +1065,7 @@ unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO: storage/bufmgr.h
 }
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 unsafe fn ReadBufferExtended(
     _reln: Relation,
     _forkNum: c_int,
@@ -1096,39 +1094,17 @@ unsafe fn LockBufferForCleanup(_buffer: Buffer) {
 unsafe fn GinPageGetOpaque(_page: Page) -> *mut GinPageOpaqueData {
     unimplemented!() // TODO: access/gin_private.h
 }
-unsafe fn GinPageIsData(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinPageIsLeaf(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinPageIsList(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinPageIsDeleted(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinPageRightMost(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinPageSetDeleted(_page: Page) {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinPageSetDeleteXid(_page: Page, _xid: TransactionId) {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinPageGetDeleteXid(_page: Page) -> TransactionId {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinDataLeafPageIsEmpty(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinDataPageGetPostingItem(_page: Page, _i: OffsetNumber) -> *mut PostingItem {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinPageDeletePostingItem(_page: Page, _off: OffsetNumber) {
-    unimplemented!() // TODO: access/gin_private.h
-}
+unsafe fn GinPageIsData(_page: Page) -> bool { unimplemented!() }
+unsafe fn GinPageIsLeaf(_page: Page) -> bool { unimplemented!() }
+unsafe fn GinPageIsList(_page: Page) -> bool { unimplemented!() }
+unsafe fn GinPageIsDeleted(_page: Page) -> bool { unimplemented!() }
+unsafe fn GinPageRightMost(_page: Page) -> bool { unimplemented!() }
+unsafe fn GinPageSetDeleted(_page: Page) { unimplemented!() }
+unsafe fn GinPageSetDeleteXid(_page: Page, _xid: TransactionId) { unimplemented!() }
+unsafe fn GinPageGetDeleteXid(_page: Page) -> TransactionId { unimplemented!() }
+unsafe fn GinDataLeafPageIsEmpty(_page: Page) -> bool { unimplemented!() }
+unsafe fn GinDataPageGetPostingItem(_page: Page, _i: OffsetNumber) -> *mut PostingItem { unimplemented!() }
+unsafe fn GinPageDeletePostingItem(_page: Page, _off: OffsetNumber) { unimplemented!() }
 unsafe fn PostingItemGetBlockNumber(_pitem: *mut PostingItem) -> BlockNumber {
     unimplemented!() // TODO: access/gin_private.h
 }
@@ -1150,17 +1126,13 @@ unsafe fn GinGetPosting(_itup: IndexTuple) -> *mut c_void {
 unsafe fn SizeOfGinPostingList(_plist: *mut GinPostingList) -> c_int {
     unimplemented!() // TODO: access/gin_private.h
 }
-unsafe fn ginPostingListDecode(_plist: *mut GinPostingList, _ndecoded: *mut c_int) -> ItemPointer {
-    unimplemented!() // TODO: access/gin_private.h
-}
+unsafe fn ginPostingListDecode(_plist: *mut GinPostingList, _ndecoded: *mut c_int) -> ItemPointer { unimplemented!() }
 unsafe fn ginCompressPostingList(
     _ipd: ItemPointer,
     _nipd: c_int,
     _maxsize: usize,
     _nwritten: *mut c_int,
-) -> *mut GinPostingList {
-    unimplemented!() // TODO: access/gin_private.h
-}
+) -> *mut GinPostingList { unimplemented!() }
 unsafe fn GinFormTuple(
     _ginstate: *mut GinState,
     _attnum: OffsetNumber,
@@ -1173,34 +1145,22 @@ unsafe fn GinFormTuple(
 ) -> IndexTuple {
     unimplemented!() // TODO: access/gin_private.h
 }
-unsafe fn gintuple_get_attrnum(_ginstate: *mut GinState, _tuple: IndexTuple) -> OffsetNumber {
-    unimplemented!() // TODO: access/gin_private.h
-}
+unsafe fn gintuple_get_attrnum(_ginstate: *mut GinState, _tuple: IndexTuple) -> OffsetNumber { unimplemented!() }
 unsafe fn gintuple_get_key(
     _ginstate: *mut GinState,
     _tuple: IndexTuple,
     _category: *mut GinNullCategory,
-) -> Datum {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn ginVacuumPostingTreeLeaf(_indexrel: Relation, _buffer: Buffer, _gvs: *mut GinVacuumState) {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn initGinState(_state: *mut GinState, _index: Relation) {
-    unimplemented!() // TODO: access/gin_private.h
-}
+) -> Datum { unimplemented!() }
+unsafe fn ginVacuumPostingTreeLeaf(_indexrel: Relation, _buffer: Buffer, _gvs: *mut GinVacuumState) { unimplemented!() }
+unsafe fn initGinState(_state: *mut GinState, _index: Relation) { unimplemented!() }
 unsafe fn ginInsertCleanup(
     _ginstate: *mut GinState,
     _full_clean: bool,
     _fill_fsm: bool,
     _forceCleanup: bool,
     _stats: *mut IndexBulkDeleteResult,
-) {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn ginUpdateStats(_index: Relation, _stats: *const GinStatsData, _is_build: bool) {
-    unimplemented!() // TODO: access/gin_private.h
-}
+) { unimplemented!() }
+unsafe fn ginUpdateStats(_index: Relation, _stats: *const GinStatsData, _is_build: bool) { unimplemented!() }
 
 unsafe fn PageGetMaxOffsetNumber(_page: Page) -> OffsetNumber {
     unimplemented!() // TODO: storage/bufpage.h
@@ -1227,12 +1187,8 @@ unsafe fn PageAddItem(
     _offsetNumber: OffsetNumber,
     _overwrite: bool,
     _is_heap: bool,
-) -> OffsetNumber {
-    unimplemented!() // TODO: storage/bufpage.h
-}
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO: storage/bufpage.h
-}
+) -> OffsetNumber { unimplemented!() }
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { unimplemented!() }
 unsafe fn PageIsNew(_page: Page) -> bool {
     unimplemented!() // TODO: storage/bufpage.h
 }
@@ -1240,15 +1196,11 @@ unsafe fn IndexTupleSize(_itup: IndexTuple) -> usize {
     unimplemented!() // TODO: access/itup.h
 }
 
-unsafe fn RelationNeedsWAL(_relation: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_relation: Relation) -> bool { unimplemented!() }
 unsafe fn RelationGetRelationName(_relation: Relation) -> *const c_char {
     unimplemented!() // TODO: utils/rel.h
 }
-unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber { unimplemented!() }
 unsafe fn RELATION_IS_LOCAL(_relation: Relation) -> bool {
     unimplemented!() // TODO: utils/rel.h
 }
@@ -1272,36 +1224,18 @@ unsafe fn START_CRIT_SECTION() {
 unsafe fn END_CRIT_SECTION() {
     unimplemented!() // TODO: miscadmin.h
 }
-unsafe fn AmAutoVacuumWorkerProcess() -> bool {
-    unimplemented!() // TODO: miscadmin.h
-}
+unsafe fn AmAutoVacuumWorkerProcess() -> bool { crate::miscadmin::AmAutoVacuumWorkerProcess() }
 
 unsafe fn ReadNextTransactionId() -> TransactionId {
     unimplemented!() // TODO: access/transam.h
 }
-unsafe fn TransactionIdIsValid(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO: access/transam.h
-}
-unsafe fn GlobalVisCheckRemovableXid(_rel: Relation, _xid: TransactionId) -> bool {
-    unimplemented!() // TODO: utils/snapmgr.h
-}
+unsafe fn TransactionIdIsValid(_xid: TransactionId) -> bool { crate::access::transam::TransactionIdIsValid(_xid) }
+unsafe fn GlobalVisCheckRemovableXid(_rel: Relation, _xid: TransactionId) -> bool { unimplemented!() }
 
-unsafe fn PredicateLockPageCombine(_relation: Relation, _oldblkno: BlockNumber, _newblkno: BlockNumber) {
-    unimplemented!() // TODO: storage/predicate.h
-}
-unsafe fn LockRelationForExtension(_relation: Relation, _lockmode: LOCKMODE) {
-    unimplemented!() // TODO: storage/lmgr.h
-}
-unsafe fn UnlockRelationForExtension(_relation: Relation, _lockmode: LOCKMODE) {
-    unimplemented!() // TODO: storage/lmgr.h
-}
-unsafe fn RecordFreeIndexPage(_rel: Relation, _freePage: BlockNumber) {
-    unimplemented!() // TODO: storage/indexfsm.h
-}
-unsafe fn IndexFreeSpaceMapVacuum(_rel: Relation) {
-    unimplemented!() // TODO: storage/indexfsm.h
-}
-unsafe fn vacuum_delay_point(_is_analyze: bool) {
-    unimplemented!() // TODO: commands/vacuum.h
-}
+unsafe fn PredicateLockPageCombine(_relation: Relation, _oldblkno: BlockNumber, _newblkno: BlockNumber) { crate::storage::lmgr::predicate::PredicateLockPageCombine(_relation, _oldblkno, _newblkno) }
+unsafe fn LockRelationForExtension(_relation: Relation, _lockmode: LOCKMODE) { unimplemented!() }
+unsafe fn UnlockRelationForExtension(_relation: Relation, _lockmode: LOCKMODE) { unimplemented!() }
+unsafe fn RecordFreeIndexPage(_rel: Relation, _freePage: BlockNumber) { unimplemented!() }
+unsafe fn IndexFreeSpaceMapVacuum(_rel: Relation) { unimplemented!() }
+unsafe fn vacuum_delay_point(_is_analyze: bool) { crate::commands::vacuum::vacuum_delay_point(_is_analyze) }
 

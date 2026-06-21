@@ -1159,8 +1159,7 @@ pub static mut max_slot_wal_keep_size_mb: c_int = 0;
 pub static mut wal_keep_size_mb: c_int = 0;
 #[allow(non_upper_case_globals)]
 pub static mut wal_segment_size: c_int = 0;
-#[allow(non_upper_case_globals)]
-pub static mut ReplicationSlotControlLock: LWLock = std::ptr::null_mut();
+pub use crate::backend_link_shims::ReplicationSlotControlLock;
 #[allow(non_upper_case_globals)]
 pub static mut ReplicationSlotCtl: *mut ReplicationSlotCtlData = std::ptr::null_mut();
 #[allow(non_upper_case_globals)]
@@ -1188,87 +1187,45 @@ fn LSN_FORMAT_LO(_lsn: XLogRecPtr) -> u32 {
 
 // Function stubs
 unsafe fn ReplicationSlotCreate(
-    _name: *mut c_char,
-    _db_specific: bool,
-    _persistency: c_int,
-    _two_phase: bool,
-    _failover: bool,
-    _synced: bool,
-) {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn ReplicationSlotReserveWal() {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn ReplicationSlotMarkDirty() {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn ReplicationSlotSave() {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn ReplicationSlotRelease() {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn ReplicationSlotPersist() {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn ReplicationSlotDrop(_name: *mut c_char, _nowait: bool) {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn ReplicationSlotAcquire(_name: *mut c_char, _nowait: bool, _error_if_invalid: bool) {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn ReplicationSlotsComputeRequiredXmin(_already_locked: bool) {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn ReplicationSlotsComputeRequiredLSN() {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn CheckSlotPermissions() {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn CheckSlotRequirements() {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn CheckLogicalDecodingRequirements() {
-    unimplemented!() // TODO: replication/logical.c
-}
-unsafe fn GetSlotInvalidationCauseName(_cause: ReplicationSlotInvalidationCause) -> *const c_char {
-    unimplemented!() // TODO: replication/slot.c
-}
-unsafe fn SlotIsPhysical(_slot: *const ReplicationSlot) -> bool {
-    unimplemented!() // TODO: replication/slot.h
-}
-unsafe fn SlotIsLogical(_slot: *const ReplicationSlot) -> bool {
-    unimplemented!() // TODO: replication/slot.h
-}
+    name: *mut c_char,
+    db_specific: bool,
+    persistency: c_int,
+    two_phase: bool,
+    failover: bool,
+    synced: bool,
+) { crate::replication::slot::ReplicationSlotCreate(name as _, db_specific, persistency as _, two_phase, failover, synced) }
+unsafe fn ReplicationSlotReserveWal() { crate::replication::slot::ReplicationSlotReserveWal() }
+unsafe fn ReplicationSlotMarkDirty() { crate::replication::slot::ReplicationSlotMarkDirty() }
+unsafe fn ReplicationSlotSave() { crate::replication::slot::ReplicationSlotSave() }
+unsafe fn ReplicationSlotRelease() { crate::replication::slot::ReplicationSlotRelease() }
+unsafe fn ReplicationSlotPersist() { crate::replication::slot::ReplicationSlotPersist() }
+unsafe fn ReplicationSlotDrop(name: *mut c_char, nowait: bool) { crate::replication::slot::ReplicationSlotDrop(name as _, nowait) }
+unsafe fn ReplicationSlotAcquire(name: *mut c_char, nowait: bool, error_if_invalid: bool) { crate::replication::slot::ReplicationSlotAcquire(name as _, nowait, error_if_invalid) }
+unsafe fn ReplicationSlotsComputeRequiredXmin(already_locked: bool) { crate::replication::slot::ReplicationSlotsComputeRequiredXmin(already_locked) }
+unsafe fn ReplicationSlotsComputeRequiredLSN() { crate::replication::slot::ReplicationSlotsComputeRequiredLSN() }
+unsafe fn CheckSlotPermissions() { crate::replication::slot::CheckSlotPermissions() }
+unsafe fn CheckSlotRequirements() { crate::replication::slot::CheckSlotRequirements() }
+unsafe fn CheckLogicalDecodingRequirements() { crate::replication::logical::logical::CheckLogicalDecodingRequirements() }
+unsafe fn GetSlotInvalidationCauseName(cause: ReplicationSlotInvalidationCause) -> *const c_char { crate::replication::slot::GetSlotInvalidationCauseName(cause) }
+unsafe fn SlotIsPhysical(slot: *const ReplicationSlot) -> bool { crate::replication::slot::SlotIsPhysical(slot as _) }
+unsafe fn SlotIsLogical(slot: *const ReplicationSlot) -> bool { crate::replication::slot::SlotIsLogical(slot as _) }
 unsafe fn CreateInitDecodingContext(
-    _plugin: *mut c_char,
-    _output_plugin_options: *mut std::ffi::c_void,
-    _need_full_snapshot: bool,
-    _restart_lsn: XLogRecPtr,
-    _xl_routine: *mut std::ffi::c_void,
-    _prepare_write: Option<unsafe extern "C" fn()>,
-    _do_write: Option<unsafe extern "C" fn()>,
-    _update_progress: Option<unsafe extern "C" fn()>,
-) -> *mut LogicalDecodingContext {
-    unimplemented!() // TODO: replication/logical.c
-}
-unsafe fn DecodingContextFindStartpoint(_ctx: *mut LogicalDecodingContext) {
-    unimplemented!() // TODO: replication/logical.c
-}
-unsafe fn FreeDecodingContext(_ctx: *mut LogicalDecodingContext) {
-    unimplemented!() // TODO: replication/logical.c
-}
+    plugin: *mut c_char,
+    output_plugin_options: *mut std::ffi::c_void,
+    need_full_snapshot: bool,
+    restart_lsn: XLogRecPtr,
+    xl_routine: *mut std::ffi::c_void,
+    prepare_write: Option<unsafe extern "C" fn()>,
+    do_write: Option<unsafe extern "C" fn()>,
+    update_progress: Option<unsafe extern "C" fn()>,
+) -> *mut LogicalDecodingContext { unimplemented!() }
+unsafe fn DecodingContextFindStartpoint(ctx: *mut LogicalDecodingContext) { crate::replication::logical::logical::DecodingContextFindStartpoint(ctx as _) }
+unsafe fn FreeDecodingContext(ctx: *mut LogicalDecodingContext) { crate::replication::logical::logical::FreeDecodingContext(ctx as _) }
 unsafe fn LogicalSlotAdvanceAndCheckSnapState(
-    _moveto: XLogRecPtr,
-    _found_consistent_snapshot: *mut bool,
-) -> XLogRecPtr {
-    unimplemented!() // TODO: replication/logical.c
-}
-unsafe fn PhysicalWakeupLogicalWalSnd() {
-    unimplemented!() // TODO: replication/walsender.c
-}
+    moveto: XLogRecPtr,
+    found_consistent_snapshot: *mut bool,
+) -> XLogRecPtr { crate::replication::logical::logical::LogicalSlotAdvanceAndCheckSnapState(moveto as _, found_consistent_snapshot as _) }
+unsafe fn PhysicalWakeupLogicalWalSnd() { crate::replication::walsender::PhysicalWakeupLogicalWalSnd() }
 unsafe fn XL_ROUTINE_slotfuncs() -> *mut std::ffi::c_void {
     unimplemented!() // TODO: access/xlogreader.h XL_ROUTINE
 }
@@ -1279,30 +1236,14 @@ unsafe fn get_call_result_type(
 ) -> c_int {
     unimplemented!() // TODO: utils/fmgr/funcapi.c
 }
-unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) {
-    unimplemented!() // TODO: utils/fmgr/funcapi.c
-}
-unsafe fn GetXLogWriteRecPtr() -> XLogRecPtr {
-    unimplemented!() // TODO: access/transam/xlog.c
-}
-unsafe fn GetWALAvailability(_targetLSN: XLogRecPtr) -> WALAvailability {
-    unimplemented!() // TODO: access/transam/xlog.c
-}
-unsafe fn GetFlushRecPtr(_insertTLI: *mut std::ffi::c_void) -> XLogRecPtr {
-    unimplemented!() // TODO: access/transam/xlog.c
-}
-unsafe fn GetXLogReplayRecPtr(_replayTLI: *mut std::ffi::c_void) -> XLogRecPtr {
-    unimplemented!() // TODO: access/transam/xlogrecovery.c
-}
-unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO: access/transam/xlog.c
-}
-unsafe fn XLogGetLastRemovedSegno() -> XLogSegNo {
-    unimplemented!() // TODO: access/transam/xlog.c
-}
-unsafe fn XLogMBVarToSegs(_mb: c_int, _wal_segsz: c_int) -> uint64 {
-    unimplemented!() // TODO: access/xlog_internal.h
-}
+unsafe fn InitMaterializedSRF(fcinfo: FunctionCallInfo, flags: c_int) { crate::utils::fmgr::funcapi::InitMaterializedSRF(fcinfo as _, flags as _) }
+unsafe fn GetXLogWriteRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetXLogWriteRecPtr() }
+unsafe fn GetWALAvailability(targetLSN: XLogRecPtr) -> WALAvailability { crate::access::transam::xlog::GetWALAvailability(targetLSN as _) }
+unsafe fn GetFlushRecPtr(insertTLI: *mut std::ffi::c_void) -> XLogRecPtr { crate::access::transam::xlog::GetFlushRecPtr(insertTLI as _) }
+unsafe fn GetXLogReplayRecPtr(replayTLI: *mut std::ffi::c_void) -> XLogRecPtr { crate::access::transam::xlogrecovery::GetXLogReplayRecPtr(replayTLI as _) }
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
+unsafe fn XLogGetLastRemovedSegno() -> XLogSegNo { crate::access::transam::xlog::XLogGetLastRemovedSegno() }
+unsafe fn XLogMBVarToSegs(mb: c_int, wal_segsz: c_int) -> uint64 { crate::access::transam::xlog_internal::XLogMBVarToSegs(mb as _, wal_segsz as _) as _ }
 unsafe fn LWLockAcquire(_lock: LWLock, _mode: LWLockMode) -> bool {
     unimplemented!() // TODO: storage/lmgr/lwlock.c
 }
@@ -1310,10 +1251,10 @@ unsafe fn LWLockRelease(_lock: LWLock) {
     unimplemented!() // TODO: storage/lmgr/lwlock.c
 }
 unsafe fn SpinLockAcquire(_lock: *mut slock_t) {
-    unimplemented!() // TODO: storage/lmgr/s_lock.c
+    crate::storage::spin::SpinLockAcquire(_lock as _)
 }
 unsafe fn SpinLockRelease(_lock: *mut slock_t) {
-    unimplemented!() // TODO: storage/lmgr/s_lock.c
+    crate::storage::spin::SpinLockRelease(_lock as _)
 }
 unsafe fn heap_form_tuple(
     _tupleDescriptor: TupleDesc,
@@ -1323,52 +1264,36 @@ unsafe fn heap_form_tuple(
     unimplemented!() // TODO: access/common/heaptuple.c
 }
 unsafe fn tuplestore_putvalues(
-    _state: *mut std::ffi::c_void,
-    _tdesc: *mut std::ffi::c_void,
-    _values: *mut Datum,
-    _isnull: *mut bool,
-) {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
-}
+    state: *mut std::ffi::c_void,
+    tdesc: *mut std::ffi::c_void,
+    values: *mut Datum,
+    isnull: *mut bool,
+) { crate::utils::sort::tuplestore::tuplestore_putvalues(state as _, tdesc as _, values as _, isnull as _) }
 unsafe fn initStringInfo(_str: *mut StringInfoData) {
     unimplemented!() // TODO: lib/stringinfo.c
 }
 unsafe fn appendStringInfoString(_str: *mut StringInfoData, _s: *const c_char) {
     unimplemented!() // TODO: lib/stringinfo.c
 }
-unsafe fn load_file(_filename: *const c_char, _restricted: bool) {
-    unimplemented!() // TODO: utils/fmgr/dfmgr.c
-}
-unsafe fn ValidateSlotSyncParams(_elevel: c_int) -> bool {
-    unimplemented!() // TODO: replication/logical/slotsync.c
-}
-unsafe fn CheckAndGetDbnameFromConninfo() -> *mut c_char {
-    unimplemented!() // TODO: replication/logical/slotsync.c
-}
-unsafe fn SyncReplicationSlots(_wrconn: *mut WalReceiverConn) {
-    unimplemented!() // TODO: replication/logical/slotsync.c
-}
+unsafe fn load_file(filename: *const c_char, restricted: bool) { crate::utils::fmgr::dfmgr::load_file(filename as _, restricted) }
+unsafe fn ValidateSlotSyncParams(elevel: c_int) -> bool { crate::replication::logical::slotsync::ValidateSlotSyncParams(elevel as _) }
+unsafe fn CheckAndGetDbnameFromConninfo() -> *mut c_char { crate::replication::logical::slotsync::CheckAndGetDbnameFromConninfo() }
+unsafe fn SyncReplicationSlots(wrconn: *mut WalReceiverConn) { crate::replication::logical::slotsync::SyncReplicationSlots(wrconn as _) }
 unsafe fn walrcv_connect(
-    _conninfo: *mut c_char,
-    _replication: bool,
-    _logical: bool,
-    _must_use_password: bool,
-    _appname: *mut c_char,
-    _err: *mut *mut c_char,
-) -> *mut WalReceiverConn {
-    unimplemented!() // TODO: replication/walreceiver.h
-}
+    conninfo: *mut c_char,
+    replication: bool,
+    logical: bool,
+    must_use_password: bool,
+    appname: *mut c_char,
+    err: *mut *mut c_char,
+) -> *mut WalReceiverConn { unimplemented!() }
 unsafe fn walrcv_disconnect(_wrconn: *mut WalReceiverConn) {
     unimplemented!() // TODO: replication/walreceiver.h
 }
 
 // Datum conversion helper stubs (when not provided by prelude)
-unsafe fn NameGetDatum(_name: *const NameData) -> Datum {
-    unimplemented!() // TODO: utils/fmgr/fmgr.h
-}
-unsafe fn LSNGetDatum(_lsn: XLogRecPtr) -> Datum {
-    unimplemented!() // TODO: utils/pg_lsn.h
-}
+unsafe fn NameGetDatum(name: *const NameData) -> Datum { crate::postgres::NameGetDatum(name as _) }
+unsafe fn LSNGetDatum(lsn: XLogRecPtr) -> Datum { crate::utils::adt::pg_lsn::LSNGetDatum(lsn as _) }
 unsafe fn CStringGetTextDatum(_s: *const c_char) -> Datum {
     unimplemented!() // TODO: utils/builtins.h
 }
@@ -1381,9 +1306,7 @@ unsafe fn BoolGetDatum(_b: bool) -> Datum {
 unsafe fn Int32GetDatum(_i: c_int) -> Datum {
     unimplemented!() // TODO: postgres.h
 }
-unsafe fn Int64GetDatum(_i: i64) -> Datum {
-    unimplemented!() // TODO: postgres.h
-}
+unsafe fn Int64GetDatum(i: i64) -> Datum { crate::postgres::Int64GetDatum(i as _) }
 unsafe fn TransactionIdGetDatum(_xid: TransactionId) -> Datum {
     unimplemented!() // TODO: postgres.h
 }

@@ -82,15 +82,15 @@ unsafe fn systable_beginscan(
     _nkeys: c_int,
     _key: ScanKey,
 ) -> SysScanDesc {
-    unimplemented!()
+    crate::access::index::genam::systable_beginscan(_heapRelation as _, _indexId as _, _indexOK as _, _snapshot as _, _nkeys as _, _key as _) as _
 }
 
 unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple {
-    unimplemented!()
+    crate::access::index::genam::systable_getnext(_sysscan as _) as _
 }
 
 unsafe fn systable_endscan(_sysscan: SysScanDesc) {
-    unimplemented!()
+    crate::access::index::genam::systable_endscan(_sysscan as _)
 }
 
 /* TODO(pg-port): catalog/indexing.h - heap+index DML helpers not ported yet. */
@@ -103,7 +103,7 @@ unsafe fn CatalogTupleUpdate(_heapRel: Relation, _otid: *mut ItemPointerData, _t
 }
 
 unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: *mut ItemPointerData) {
-    unimplemented!()
+    crate::catalog::indexing::CatalogTupleDelete(_heapRel as _, _tid as _)
 }
 
 /* TODO(pg-port): catalog/objectaddress.h - object address resolution not ported yet. */
@@ -551,6 +551,7 @@ pub unsafe fn DeleteComments(oid: Oid, classoid: Oid, subid: int32) {
 /*
  * DeleteSharedComments -- remove comments for a shared object
  */
+#[no_mangle]
 pub unsafe fn DeleteSharedComments(oid: Oid, classoid: Oid) {
     let shdescription: Relation;
     let mut skey: [ScanKeyData; 2] = std::mem::zeroed();

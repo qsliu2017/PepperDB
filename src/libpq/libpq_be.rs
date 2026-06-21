@@ -14,13 +14,12 @@ use crate::port::noblock::pgsocket;
 
 // From libpq/pqcomm.h (not yet ported).
 pub type ProtocolVersion = u32;
-pub type SockAddr = c_void; // TODO: dedup with pqcomm.h SockAddr
+pub use crate::libpq::hba::SockAddr; // canonical SockAddr (pqcomm.h)
 
 // From libpq/hba.h (not yet ported).
 pub type UserAuth = c_int; // TODO: dedup with hba.h UserAuth enum
-// HbaLine's real (still local) definition lives in libpq/auth.rs until hba.h is
-// ported; alias to it so Port.hba field accesses resolve to the real struct.
-pub use crate::libpq::auth::HbaLine; // TODO: dedup with hba.h
+// HbaLine canonical def lives in libpq::hba (hba.h home).
+pub use crate::libpq::hba::HbaLine;
 
 // GSSAPI / SSPI state (system gssapi.h, not ported).
 // pg_gssinfo's real (still local) definition lives in libpq/auth.rs.
@@ -156,24 +155,16 @@ fDKQXkYuNs474553LBgOhgObJ4Oi7Aeij7XFXfBvTFLJ3ivL9pVYFxg5lUl86pVq\n\
  */
 
 /* Initialize global SSL context. */
-pub unsafe fn be_tls_init(isServerStart: bool) -> c_int {
-    unimplemented!()
-}
+pub unsafe fn be_tls_init(isServerStart: bool) -> c_int { unimplemented!() }
 
 /* Destroy global SSL context, if any. */
-pub unsafe fn be_tls_destroy() {
-    unimplemented!()
-}
+pub unsafe fn be_tls_destroy() { unimplemented!() }
 
 /* Attempt to negotiate SSL connection. */
-pub unsafe fn be_tls_open_server(port: *mut Port) -> c_int {
-    unimplemented!()
-}
+pub unsafe fn be_tls_open_server(port: *mut Port) -> c_int { unimplemented!() }
 
 /* Close SSL connection. */
-pub unsafe fn be_tls_close(port: *mut Port) {
-    unimplemented!()
-}
+pub unsafe fn be_tls_close(port: *mut Port) { unimplemented!() }
 
 /* Read data from a secure connection. */
 pub unsafe fn be_tls_read(
@@ -181,9 +172,7 @@ pub unsafe fn be_tls_read(
     ptr: *mut c_void,
     len: Size,
     waitfor: *mut c_int,
-) -> ssize_t {
-    unimplemented!()
-}
+) -> ssize_t { unimplemented!() }
 
 /* Write data to a secure connection. */
 pub unsafe fn be_tls_write(
@@ -191,37 +180,21 @@ pub unsafe fn be_tls_write(
     ptr: *const c_void,
     len: Size,
     waitfor: *mut c_int,
-) -> ssize_t {
-    unimplemented!()
-}
+) -> ssize_t { unimplemented!() }
 
 /* Return information about the SSL connection. */
-pub unsafe fn be_tls_get_cipher_bits(port: *mut Port) -> c_int {
-    unimplemented!()
-}
-pub unsafe fn be_tls_get_version(port: *mut Port) -> *const c_char {
-    unimplemented!()
-}
-pub unsafe fn be_tls_get_cipher(port: *mut Port) -> *const c_char {
-    unimplemented!()
-}
-pub unsafe fn be_tls_get_peer_subject_name(port: *mut Port, ptr: *mut c_char, len: Size) {
-    unimplemented!()
-}
-pub unsafe fn be_tls_get_peer_issuer_name(port: *mut Port, ptr: *mut c_char, len: Size) {
-    unimplemented!()
-}
-pub unsafe fn be_tls_get_peer_serial(port: *mut Port, ptr: *mut c_char, len: Size) {
-    unimplemented!()
-}
+pub unsafe fn be_tls_get_cipher_bits(port: *mut Port) -> c_int { unimplemented!() }
+pub unsafe fn be_tls_get_version(port: *mut Port) -> *const c_char { unimplemented!() }
+pub unsafe fn be_tls_get_cipher(port: *mut Port) -> *const c_char { unimplemented!() }
+pub unsafe fn be_tls_get_peer_subject_name(port: *mut Port, ptr: *mut c_char, len: Size) { unimplemented!() }
+pub unsafe fn be_tls_get_peer_issuer_name(port: *mut Port, ptr: *mut c_char, len: Size) { unimplemented!() }
+pub unsafe fn be_tls_get_peer_serial(port: *mut Port, ptr: *mut c_char, len: Size) { unimplemented!() }
 
 /*
  * Get the server certificate hash for SCRAM channel binding type
  * tls-server-end-point.
  */
-pub unsafe fn be_tls_get_certificate_hash(port: *mut Port, len: *mut Size) -> *mut c_char {
-    unimplemented!()
-}
+pub unsafe fn be_tls_get_certificate_hash(port: *mut Port, len: *mut Size) -> *mut c_char { unimplemented!() }
 
 /* init hook for SSL, the default sets the password callback if appropriate */
 pub type openssl_tls_init_hook_typ =
@@ -235,26 +208,14 @@ extern "C" {
 /*
  * Return information about the GSSAPI authenticated connection
  */
-pub unsafe fn be_gssapi_get_auth(port: *mut Port) -> bool {
-    unimplemented!()
-}
-pub unsafe fn be_gssapi_get_enc(port: *mut Port) -> bool {
-    unimplemented!()
-}
-pub unsafe fn be_gssapi_get_princ(port: *mut Port) -> *const c_char {
-    unimplemented!()
-}
-pub unsafe fn be_gssapi_get_delegation(port: *mut Port) -> bool {
-    unimplemented!()
-}
+pub unsafe fn be_gssapi_get_auth(port: *mut Port) -> bool { unimplemented!() }
+pub unsafe fn be_gssapi_get_enc(port: *mut Port) -> bool { unimplemented!() }
+pub unsafe fn be_gssapi_get_princ(port: *mut Port) -> *const c_char { unimplemented!() }
+pub unsafe fn be_gssapi_get_delegation(port: *mut Port) -> bool { unimplemented!() }
 
 /* Read and write to a GSSAPI-encrypted connection. */
-pub unsafe fn be_gssapi_read(port: *mut Port, ptr: *mut c_void, len: Size) -> ssize_t {
-    unimplemented!()
-}
-pub unsafe fn be_gssapi_write(port: *mut Port, ptr: *const c_void, len: Size) -> ssize_t {
-    unimplemented!()
-}
+pub unsafe fn be_gssapi_read(port: *mut Port, ptr: *mut c_void, len: Size) -> ssize_t { unimplemented!() }
+pub unsafe fn be_gssapi_write(port: *mut Port, ptr: *const c_void, len: Size) -> ssize_t { unimplemented!() }
 
 extern "C" {
     pub static mut FrontendProtocol: ProtocolVersion;
@@ -263,28 +224,12 @@ extern "C" {
 
 /* TCP keepalives configuration. These are no-ops on an AF_UNIX socket. */
 
-pub unsafe fn pq_getkeepalivesidle(port: *mut Port) -> c_int {
-    unimplemented!()
-}
-pub unsafe fn pq_getkeepalivesinterval(port: *mut Port) -> c_int {
-    unimplemented!()
-}
-pub unsafe fn pq_getkeepalivescount(port: *mut Port) -> c_int {
-    unimplemented!()
-}
-pub unsafe fn pq_gettcpusertimeout(port: *mut Port) -> c_int {
-    unimplemented!()
-}
+pub unsafe fn pq_getkeepalivesidle(port: *mut Port) -> c_int { crate::libpq::pqcomm::pq_getkeepalivesidle(port as _) }
+pub unsafe fn pq_getkeepalivesinterval(port: *mut Port) -> c_int { crate::libpq::pqcomm::pq_getkeepalivesinterval(port as _) }
+pub unsafe fn pq_getkeepalivescount(port: *mut Port) -> c_int { crate::libpq::pqcomm::pq_getkeepalivescount(port as _) }
+pub unsafe fn pq_gettcpusertimeout(port: *mut Port) -> c_int { crate::libpq::pqcomm::pq_gettcpusertimeout(port as _) }
 
-pub unsafe fn pq_setkeepalivesidle(idle: c_int, port: *mut Port) -> c_int {
-    unimplemented!()
-}
-pub unsafe fn pq_setkeepalivesinterval(interval: c_int, port: *mut Port) -> c_int {
-    unimplemented!()
-}
-pub unsafe fn pq_setkeepalivescount(count: c_int, port: *mut Port) -> c_int {
-    unimplemented!()
-}
-pub unsafe fn pq_settcpusertimeout(timeout: c_int, port: *mut Port) -> c_int {
-    unimplemented!()
-}
+pub unsafe fn pq_setkeepalivesidle(idle: c_int, port: *mut Port) -> c_int { crate::libpq::pqcomm::pq_setkeepalivesidle(idle as _, port as _) }
+pub unsafe fn pq_setkeepalivesinterval(interval: c_int, port: *mut Port) -> c_int { crate::libpq::pqcomm::pq_setkeepalivesinterval(interval as _, port as _) }
+pub unsafe fn pq_setkeepalivescount(count: c_int, port: *mut Port) -> c_int { crate::libpq::pqcomm::pq_setkeepalivescount(count as _, port as _) }
+pub unsafe fn pq_settcpusertimeout(timeout: c_int, port: *mut Port) -> c_int { crate::libpq::pqcomm::pq_settcpusertimeout(timeout as _, port as _) }

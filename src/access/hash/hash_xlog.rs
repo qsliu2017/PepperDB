@@ -188,9 +188,7 @@ unsafe fn _hash_init_metabuffer(
     unimplemented!() // TODO(pg-port): real _hash_init_metabuffer lives in access/hashpage.c
 }
 
-unsafe fn _hash_initbitmapbuffer(_buf: Buffer, _bmsize: uint16, _initpage: bool) {
-    unimplemented!() // TODO(pg-port): real _hash_initbitmapbuffer lives in access/hashovfl.c
-}
+unsafe fn _hash_initbitmapbuffer(_buf: Buffer, _bmsize: uint16, _initpage: bool) { crate::access::hash::hashovfl::_hash_initbitmapbuffer(_buf, _bmsize, _initpage) }
 
 unsafe fn _hash_initbuf(
     _buf: Buffer,
@@ -198,17 +196,11 @@ unsafe fn _hash_initbuf(
     _num_bucket: uint32,
     _flag: uint32,
     _initpage: bool,
-) {
-    unimplemented!() // TODO(pg-port): real _hash_initbuf lives in access/hashpage.c
-}
+) { crate::access::hash::hashpage::_hash_initbuf(_buf, _max_bucket, _num_bucket, _flag, _initpage) }
 
-unsafe fn _hash_pageinit(_page: Page, _size: Size) {
-    unimplemented!() // TODO(pg-port): real _hash_pageinit lives in access/hashpage.c
-}
+unsafe fn _hash_pageinit(_page: Page, _size: Size) { crate::access::hash::hashpage::_hash_pageinit(_page, _size) }
 
-unsafe fn FlushOneBuffer(_buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): real FlushOneBuffer lives in storage/buffer/bufmgr.c
-}
+unsafe fn FlushOneBuffer(_buffer: Buffer) { crate::storage::buffer::bufmgr::FlushOneBuffer(_buffer) }
 
 unsafe fn ResolveRecoveryConflictWithSnapshot(
     _snapshotConflictHorizon: crate::c::TransactionId,
@@ -227,17 +219,13 @@ unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     unimplemented!() // TODO(pg-port): real BufferGetPage lives in storage/buffer/bufmgr.c
 }
 
-unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size {
-    unimplemented!() // TODO(pg-port): real BufferGetPageSize lives in storage/buffer/bufmgr.c
-}
+unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size { crate::access::nbtree::nbtpage::BufferGetPageSize(_buffer) }
 
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO(pg-port): real BufferGetBlockNumber lives in storage/buffer/bufmgr.c
 }
 
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): real BufferIsValid lives in storage/buf.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
     unimplemented!() // TODO(pg-port): real MarkBufferDirty lives in storage/buffer/bufmgr.c
@@ -259,7 +247,7 @@ unsafe fn hash_xlog_init_meta_page(record: *mut XLogReaderState) {
     let xlrec = XLogRecGetData(record) as *mut xl_hash_init_meta_page;
 
     /* create the index' metapage */
-    metabuf = XLogInitBufferForRedo(record, 0);
+    metabuf = XLogInitBufferForRedo(record as _, 0);
     Assert!(BufferIsValid(metabuf));
     _hash_init_metabuffer(
         metabuf,
@@ -304,7 +292,7 @@ unsafe fn hash_xlog_init_bitmap_page(record: *mut XLogReaderState) {
     /*
      * Initialize bitmap page
      */
-    bitmapbuf = XLogInitBufferForRedo(record, 0);
+    bitmapbuf = XLogInitBufferForRedo(record as _, 0);
     _hash_initbitmapbuffer(bitmapbuf, (*xlrec).bmsize, true);
     PageSetLSN(BufferGetPage(bitmapbuf), lsn);
     MarkBufferDirty(bitmapbuf);
@@ -322,7 +310,7 @@ unsafe fn hash_xlog_init_bitmap_page(record: *mut XLogReaderState) {
     UnlockReleaseBuffer(bitmapbuf);
 
     /* add the new bitmap page to the metapage's list of bitmaps */
-    if XLogReadBufferForRedo(record, 1, &raw mut metabuf) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 1, &raw mut metabuf) == BLK_NEEDS_REDO {
         /*
          * Note: in normal operation, we'd update the metapage while still
          * holding lock on the bitmap page.  But during replay it's not
@@ -357,9 +345,9 @@ unsafe fn hash_xlog_insert(record: *mut XLogReaderState) {
     let lsn: XLogRecPtr = (*record).EndRecPtr;
     let xlrec = XLogRecGetData(record) as *mut xl_hash_insert;
     let mut buffer: Buffer = InvalidBuffer;
-    let page: Page;
+    let mut page: Page;
 
-    if XLogReadBufferForRedo(record, 0, &raw mut buffer) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 0, &raw mut buffer) == BLK_NEEDS_REDO {
         let mut datalen: Size = 0;
         let datapos = XLogRecGetBlockData(record, 0, &raw mut datalen);
 
@@ -384,7 +372,7 @@ unsafe fn hash_xlog_insert(record: *mut XLogReaderState) {
         UnlockReleaseBuffer(buffer);
     }
 
-    if XLogReadBufferForRedo(record, 1, &raw mut buffer) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 1, &raw mut buffer) == BLK_NEEDS_REDO {
         /*
          * Note: in normal operation, we'd update the metapage while still
          * holding lock on the page we inserted into.  But during replay it's
@@ -425,7 +413,7 @@ unsafe fn hash_xlog_add_ovfl_page(record: *mut XLogReaderState) {
     XLogRecGetBlockTag(record, 0, null_mut(), null_mut(), &raw mut rightblk);
     XLogRecGetBlockTag(record, 1, null_mut(), null_mut(), &raw mut leftblk);
 
-    ovflbuf = XLogInitBufferForRedo(record, 0);
+    ovflbuf = XLogInitBufferForRedo(record as _, 0);
     Assert!(BufferIsValid(ovflbuf));
 
     data = XLogRecGetBlockData(record, 0, &raw mut datalen);
@@ -446,7 +434,7 @@ unsafe fn hash_xlog_add_ovfl_page(record: *mut XLogReaderState) {
     PageSetLSN(ovflpage, lsn);
     MarkBufferDirty(ovflbuf);
 
-    if XLogReadBufferForRedo(record, 1, &raw mut leftbuf) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 1, &raw mut leftbuf) == BLK_NEEDS_REDO {
         let leftpage: Page;
         let leftopaque: HashPageOpaque;
 
@@ -472,7 +460,7 @@ unsafe fn hash_xlog_add_ovfl_page(record: *mut XLogReaderState) {
     if XLogRecHasBlockRef(record, 2) {
         let mut mapbuffer: Buffer = InvalidBuffer;
 
-        if XLogReadBufferForRedo(record, 2, &raw mut mapbuffer) == BLK_NEEDS_REDO {
+        if XLogReadBufferForRedo(record as _, 2, &raw mut mapbuffer) == BLK_NEEDS_REDO {
             let mappage: Page = BufferGetPage(mapbuffer) as Page;
             let freep: *mut uint32;
             let bitmap_page_bit: *mut uint32;
@@ -495,7 +483,7 @@ unsafe fn hash_xlog_add_ovfl_page(record: *mut XLogReaderState) {
     if XLogRecHasBlockRef(record, 3) {
         let newmapbuf: Buffer;
 
-        newmapbuf = XLogInitBufferForRedo(record, 3);
+        newmapbuf = XLogInitBufferForRedo(record as _, 3);
 
         _hash_initbitmapbuffer(newmapbuf, (*xlrec).bmsize, true);
 
@@ -508,7 +496,7 @@ unsafe fn hash_xlog_add_ovfl_page(record: *mut XLogReaderState) {
         UnlockReleaseBuffer(newmapbuf);
     }
 
-    if XLogReadBufferForRedo(record, 4, &raw mut metabuf) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 4, &raw mut metabuf) == BLK_NEEDS_REDO {
         let metap: HashMetaPage;
         let page: Page;
         let firstfree_ovflpage: *mut uint32;
@@ -560,7 +548,7 @@ unsafe fn hash_xlog_split_allocate_page(record: *mut XLogReaderState) {
      */
 
     /* replay the record for old bucket */
-    action = XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &raw mut oldbuf);
+    action = XLogReadBufferForRedoExtended(record as _, 0, RBM_NORMAL, true, &raw mut oldbuf);
 
     /*
      * Note that we still update the page even if it was restored from a full
@@ -582,7 +570,7 @@ unsafe fn hash_xlog_split_allocate_page(record: *mut XLogReaderState) {
 
     /* replay the record for new bucket */
     XLogReadBufferForRedoExtended(
-        record,
+        record as _,
         1,
         RBM_ZERO_AND_CLEANUP_LOCK,
         true,
@@ -617,7 +605,7 @@ unsafe fn hash_xlog_split_allocate_page(record: *mut XLogReaderState) {
      */
 
     /* replay the record for metapage changes */
-    if XLogReadBufferForRedo(record, 2, &raw mut metabuf) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 2, &raw mut metabuf) == BLK_NEEDS_REDO {
         let page: Page;
         let metap: HashMetaPage;
 
@@ -678,7 +666,7 @@ unsafe fn hash_xlog_split_allocate_page(record: *mut XLogReaderState) {
 unsafe fn hash_xlog_split_page(record: *mut XLogReaderState) {
     let mut buf: Buffer = InvalidBuffer;
 
-    if XLogReadBufferForRedo(record, 0, &raw mut buf) != BLK_RESTORED {
+    if XLogReadBufferForRedo(record as _, 0, &raw mut buf) != BLK_RESTORED {
         elog!(ERROR, "Hash split record did not contain a full-page image");
     }
 
@@ -696,7 +684,7 @@ unsafe fn hash_xlog_split_complete(record: *mut XLogReaderState) {
     let action: XLogRedoAction;
 
     /* replay the record for old bucket */
-    action = XLogReadBufferForRedo(record, 0, &raw mut oldbuf);
+    action = XLogReadBufferForRedo(record as _, 0, &raw mut oldbuf);
 
     /*
      * Note that we still update the page even if it was restored from a full
@@ -719,7 +707,7 @@ unsafe fn hash_xlog_split_complete(record: *mut XLogReaderState) {
     }
 
     /* replay the record for new bucket */
-    let action: XLogRedoAction = XLogReadBufferForRedo(record, 1, &raw mut newbuf);
+    let action: XLogRedoAction = XLogReadBufferForRedo(record as _, 1, &raw mut newbuf);
 
     /*
      * Note that we still update the page even if it was restored from a full
@@ -761,15 +749,15 @@ unsafe fn hash_xlog_move_page_contents(record: *mut XLogReaderState) {
      * can miss some records or show the same record multiple times.
      */
     if (*xldata).is_prim_bucket_same_wrt {
-        action = XLogReadBufferForRedoExtended(record, 1, RBM_NORMAL, true, &raw mut writebuf);
+        action = XLogReadBufferForRedoExtended(record as _, 1, RBM_NORMAL, true, &raw mut writebuf);
     } else {
         /*
          * we don't care for return value as the purpose of reading bucketbuf
          * is to ensure a cleanup lock on primary bucket page.
          */
-        XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &raw mut bucketbuf);
+        XLogReadBufferForRedoExtended(record as _, 0, RBM_NORMAL, true, &raw mut bucketbuf);
 
-        action = XLogReadBufferForRedo(record, 1, &raw mut writebuf);
+        action = XLogReadBufferForRedo(record as _, 1, &raw mut writebuf);
     }
 
     /* replay the record for adding entries in overflow buffer */
@@ -830,7 +818,7 @@ unsafe fn hash_xlog_move_page_contents(record: *mut XLogReaderState) {
     }
 
     /* replay the record for deleting entries from overflow buffer */
-    if XLogReadBufferForRedo(record, 2, &raw mut deletebuf) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 2, &raw mut deletebuf) == BLK_NEEDS_REDO {
         let page: Page;
         let ptr: *mut c_char;
         let mut len: Size = 0;
@@ -901,16 +889,16 @@ unsafe fn hash_xlog_squeeze_page(record: *mut XLogReaderState) {
      * can miss some records or show the same record multiple times.
      */
     if (*xldata).is_prim_bucket_same_wrt {
-        action = XLogReadBufferForRedoExtended(record, 1, RBM_NORMAL, true, &raw mut writebuf);
+        action = XLogReadBufferForRedoExtended(record as _, 1, RBM_NORMAL, true, &raw mut writebuf);
     } else {
         /*
          * we don't care for return value as the purpose of reading bucketbuf
          * is to ensure a cleanup lock on primary bucket page.
          */
-        XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &raw mut bucketbuf);
+        XLogReadBufferForRedoExtended(record as _, 0, RBM_NORMAL, true, &raw mut bucketbuf);
 
         if (*xldata).ntups > 0 || (*xldata).is_prev_bucket_same_wrt {
-            action = XLogReadBufferForRedo(record, 1, &raw mut writebuf);
+            action = XLogReadBufferForRedo(record as _, 1, &raw mut writebuf);
         } else {
             action = BLK_NOTFOUND;
         }
@@ -997,7 +985,7 @@ unsafe fn hash_xlog_squeeze_page(record: *mut XLogReaderState) {
     }
 
     /* replay the record for initializing overflow buffer */
-    if XLogReadBufferForRedo(record, 2, &raw mut ovflbuf) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 2, &raw mut ovflbuf) == BLK_NEEDS_REDO {
         let ovflpage: Page;
         let ovflopaque: HashPageOpaque;
 
@@ -1022,7 +1010,7 @@ unsafe fn hash_xlog_squeeze_page(record: *mut XLogReaderState) {
 
     /* replay the record for page previous to the freed overflow page */
     if !(*xldata).is_prev_bucket_same_wrt
-        && XLogReadBufferForRedo(record, 3, &raw mut prevbuf) == BLK_NEEDS_REDO
+        && XLogReadBufferForRedo(record as _, 3, &raw mut prevbuf) == BLK_NEEDS_REDO
     {
         let prevpage: Page = BufferGetPage(prevbuf);
         let prevopaque: HashPageOpaque = HashPageGetOpaque(prevpage);
@@ -1040,7 +1028,7 @@ unsafe fn hash_xlog_squeeze_page(record: *mut XLogReaderState) {
     if XLogRecHasBlockRef(record, 4) {
         let mut nextbuf: Buffer = InvalidBuffer;
 
-        if XLogReadBufferForRedo(record, 4, &raw mut nextbuf) == BLK_NEEDS_REDO {
+        if XLogReadBufferForRedo(record as _, 4, &raw mut nextbuf) == BLK_NEEDS_REDO {
             let nextpage: Page = BufferGetPage(nextbuf);
             let nextopaque: HashPageOpaque = HashPageGetOpaque(nextpage);
 
@@ -1069,7 +1057,7 @@ unsafe fn hash_xlog_squeeze_page(record: *mut XLogReaderState) {
      * index updates can be happening concurrently.
      */
     /* replay the record for bitmap page */
-    if XLogReadBufferForRedo(record, 5, &raw mut mapbuf) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 5, &raw mut mapbuf) == BLK_NEEDS_REDO {
         let mappage: Page = BufferGetPage(mapbuf) as Page;
         let freep: *mut uint32;
         let data: *mut c_char;
@@ -1094,7 +1082,7 @@ unsafe fn hash_xlog_squeeze_page(record: *mut XLogReaderState) {
     if XLogRecHasBlockRef(record, 6) {
         let mut metabuf: Buffer = InvalidBuffer;
 
-        if XLogReadBufferForRedo(record, 6, &raw mut metabuf) == BLK_NEEDS_REDO {
+        if XLogReadBufferForRedo(record as _, 6, &raw mut metabuf) == BLK_NEEDS_REDO {
             let metap: HashMetaPage;
             let page: Page;
             let data: *mut c_char;
@@ -1136,15 +1124,15 @@ unsafe fn hash_xlog_delete(record: *mut XLogReaderState) {
      * can miss some records or show the same record multiple times.
      */
     if (*xldata).is_primary_bucket_page {
-        action = XLogReadBufferForRedoExtended(record, 1, RBM_NORMAL, true, &raw mut deletebuf);
+        action = XLogReadBufferForRedoExtended(record as _, 1, RBM_NORMAL, true, &raw mut deletebuf);
     } else {
         /*
          * we don't care for return value as the purpose of reading bucketbuf
          * is to ensure a cleanup lock on primary bucket page.
          */
-        XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &raw mut bucketbuf);
+        XLogReadBufferForRedoExtended(record as _, 0, RBM_NORMAL, true, &raw mut bucketbuf);
 
-        action = XLogReadBufferForRedo(record, 1, &raw mut deletebuf);
+        action = XLogReadBufferForRedo(record as _, 1, &raw mut deletebuf);
     }
 
     /* replay the record for deleting entries in bucket page */
@@ -1204,7 +1192,7 @@ unsafe fn hash_xlog_split_cleanup(record: *mut XLogReaderState) {
     let mut buffer: Buffer = InvalidBuffer;
     let page: Page;
 
-    if XLogReadBufferForRedo(record, 0, &raw mut buffer) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 0, &raw mut buffer) == BLK_NEEDS_REDO {
         let bucket_opaque: HashPageOpaque;
 
         page = BufferGetPage(buffer) as Page;
@@ -1229,7 +1217,7 @@ unsafe fn hash_xlog_update_meta_page(record: *mut XLogReaderState) {
     let mut metabuf: Buffer = InvalidBuffer;
     let page: Page;
 
-    if XLogReadBufferForRedo(record, 0, &raw mut metabuf) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 0, &raw mut metabuf) == BLK_NEEDS_REDO {
         page = BufferGetPage(metabuf);
         metap = HashPageGetMeta(page);
 
@@ -1286,7 +1274,7 @@ unsafe fn hash_xlog_vacuum_one_page(record: *mut XLogReaderState) {
         );
     }
 
-    action = XLogReadBufferForRedoExtended(record, 0, RBM_NORMAL, true, &raw mut buffer);
+    action = XLogReadBufferForRedoExtended(record as _, 0, RBM_NORMAL, true, &raw mut buffer);
 
     if action == BLK_NEEDS_REDO {
         page = BufferGetPage(buffer) as Page;
@@ -1307,7 +1295,7 @@ unsafe fn hash_xlog_vacuum_one_page(record: *mut XLogReaderState) {
         UnlockReleaseBuffer(buffer);
     }
 
-    if XLogReadBufferForRedo(record, 1, &raw mut metabuf) == BLK_NEEDS_REDO {
+    if XLogReadBufferForRedo(record as _, 1, &raw mut metabuf) == BLK_NEEDS_REDO {
         let metapage: Page;
         let metap: HashMetaPage;
 

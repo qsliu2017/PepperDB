@@ -133,13 +133,11 @@ fn BufferIsValid(bufnum: Buffer) -> bool {
  * # Safety
  * Stub: never returns.
  */
-unsafe fn ReleaseBuffer(_buffer: Buffer) {
-    // TODO(pg-port): storage/buffer/bufmgr.c ReleaseBuffer.
-    unimplemented!("ReleaseBuffer: storage/bufmgr.c not yet translated")
+unsafe fn ReleaseBuffer(buffer: Buffer) {
+    crate::storage::buffer::bufmgr::ReleaseBuffer(buffer)
 }
-unsafe fn IncrBufferRefCount(_buffer: Buffer) {
-    // TODO(pg-port): storage/buffer/bufmgr.c IncrBufferRefCount.
-    unimplemented!("IncrBufferRefCount: storage/bufmgr.c not yet translated")
+unsafe fn IncrBufferRefCount(buffer: Buffer) {
+    crate::storage::buffer::bufmgr::IncrBufferRefCount(buffer)
 }
 
 // ============================================================================
@@ -154,8 +152,7 @@ unsafe fn IncrBufferRefCount(_buffer: Buffer) {
  * Stub: never returns.
  */
 unsafe fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool {
-    // TODO(pg-port): access/transam/xact.c TransactionIdIsCurrentTransactionId.
-    unimplemented!("TransactionIdIsCurrentTransactionId: access/transam/xact.c not yet translated")
+    crate::access::transam::xact::TransactionIdIsCurrentTransactionId(_xid as _) as _
 }
 
 /*
@@ -1405,6 +1402,7 @@ pub unsafe fn ExecAllocTableSlot(
  * # Safety
  * `tupleTable` is a List of *mut TupleTableSlot.
  */
+#[no_mangle]
 pub unsafe fn ExecResetTupleTable(tupleTable: *mut List, shouldFree: bool) {
     foreach!(lc, tupleTable, {
         let slot = lfirst_node!(TupleTableSlot, T_TupleTableSlot, current_cell!(lc));
@@ -1746,6 +1744,7 @@ pub unsafe fn ExecForceStoreMinimalTuple(mtup: MinimalTuple, slot: *mut TupleTab
  * # Safety
  * `slot` is EMPTY and has a tupdesc; the Datum/isnull arrays are populated.
  */
+#[no_mangle]
 pub unsafe fn ExecStoreVirtualTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
     /*
      * sanity checks
@@ -2286,6 +2285,7 @@ pub unsafe fn ExecTypeSetColNames(typeInfo: TupleDesc, namesList: *mut List) {
  * not if we have manufactured a tupdesc for a transient RECORD datatype.
  * In that case we have to notify typcache.c of the existence of the type.
  */
+#[no_mangle]
 pub unsafe fn BlessTupleDesc(tupdesc: TupleDesc) -> TupleDesc {
     if (*tupdesc).tdtypeid == RECORDOID && (*tupdesc).tdtypmod < 0 {
         assign_record_type_typmod(tupdesc);
@@ -2420,6 +2420,7 @@ pub unsafe fn BuildTupleFromCStrings(
  * heap_form_tuple to insert the Datum header fields, because otherwise this
  * code would have no way to obtain a tupledesc for the tuple.
  */
+#[no_mangle]
 pub unsafe fn HeapTupleHeaderGetDatum(tuple: HeapTupleHeader) -> Datum {
     let result: Datum;
     let tupDesc: TupleDesc;

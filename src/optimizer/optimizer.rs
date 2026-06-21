@@ -63,7 +63,13 @@ pub unsafe fn clause_selectivity(
     jointype: JoinType,
     sjinfo: *mut SpecialJoinInfo,
 ) -> Selectivity {
-    unimplemented!()
+    crate::optimizer::path::clausesel::clause_selectivity(
+        root as _,
+        clause as _,
+        varRelid as _,
+        jointype,
+        sjinfo as _,
+    ) as _
 }
 
 pub unsafe fn clause_selectivity_ext(
@@ -74,7 +80,14 @@ pub unsafe fn clause_selectivity_ext(
     sjinfo: *mut SpecialJoinInfo,
     use_extended_stats: bool,
 ) -> Selectivity {
-    unimplemented!()
+    crate::optimizer::path::clausesel::clause_selectivity_ext(
+        root as _,
+        clause as _,
+        varRelid as _,
+        jointype,
+        sjinfo as _,
+        use_extended_stats,
+    ) as _
 }
 
 pub unsafe fn clauselist_selectivity(
@@ -84,7 +97,13 @@ pub unsafe fn clauselist_selectivity(
     jointype: JoinType,
     sjinfo: *mut SpecialJoinInfo,
 ) -> Selectivity {
-    unimplemented!()
+    crate::optimizer::path::clausesel::clauselist_selectivity(
+        root as _,
+        clauses as _,
+        varRelid as _,
+        jointype,
+        sjinfo as _,
+    ) as _
 }
 
 pub unsafe fn clauselist_selectivity_ext(
@@ -95,7 +114,14 @@ pub unsafe fn clauselist_selectivity_ext(
     sjinfo: *mut SpecialJoinInfo,
     use_extended_stats: bool,
 ) -> Selectivity {
-    unimplemented!()
+    crate::optimizer::path::clausesel::clauselist_selectivity_ext(
+        root as _,
+        clauses as _,
+        varRelid as _,
+        jointype,
+        sjinfo as _,
+        use_extended_stats,
+    ) as _
 }
 
 /* in path/costsize.c: */
@@ -112,15 +138,22 @@ pub static mut recursive_worktable_factor: f64 = 0.0;
 pub static mut effective_cache_size: c_int = 0;
 
 pub unsafe fn clamp_row_est(nrows: f64) -> f64 {
-    unimplemented!()
+    crate::optimizer::path::costsize::clamp_row_est(nrows)
 }
 
 pub unsafe fn clamp_width_est(tuple_width: int64) -> int32 {
-    unimplemented!()
+    const MAX_ALLOC_SIZE: int64 = 0x3fffffff;
+    if tuple_width < 0 {
+        0
+    } else if tuple_width > MAX_ALLOC_SIZE {
+        MAX_ALLOC_SIZE as int32
+    } else {
+        tuple_width as int32
+    }
 }
 
 pub unsafe fn clamp_cardinality_to_long(x: Cardinality) -> c_long {
-    unimplemented!()
+    crate::optimizer::path::costsize::clamp_cardinality_to_long(x as _) as _
 }
 
 /* in path/indxpath.c: */
@@ -130,7 +163,7 @@ pub unsafe fn is_pseudo_constant_for_index(
     expr: *mut Node,
     index: *mut IndexOptInfo,
 ) -> bool {
-    unimplemented!()
+    crate::optimizer::path::indxpath::is_pseudo_constant_for_index(root as _, expr as _, index as _)
 }
 
 /* in plan/planner.c: */
@@ -152,11 +185,16 @@ pub unsafe fn planner(
     cursorOptions: c_int,
     boundParams: *mut ParamListInfoData,
 ) -> *mut PlannedStmt {
-    unimplemented!()
+    crate::optimizer::plan::planner::planner(
+        parse as _,
+        query_string as _,
+        cursorOptions as _,
+        boundParams as _,
+    ) as _
 }
 
 pub unsafe fn expression_planner(expr: *mut Expr) -> *mut Expr {
-    unimplemented!()
+    crate::optimizer::plan::planner::expression_planner(expr as _) as _
 }
 
 pub unsafe fn expression_planner_with_deps(
@@ -164,15 +202,19 @@ pub unsafe fn expression_planner_with_deps(
     relationOids: *mut *mut List,
     invalItems: *mut *mut List,
 ) -> *mut Expr {
-    unimplemented!()
+    crate::optimizer::plan::planner::expression_planner_with_deps(
+        expr as _,
+        relationOids as _,
+        invalItems as _,
+    ) as _
 }
 
 pub unsafe fn plan_cluster_use_sort(tableOid: Oid, indexOid: Oid) -> bool {
-    unimplemented!()
+    crate::optimizer::plan::planner::plan_cluster_use_sort(tableOid as _, indexOid as _)
 }
 
 pub unsafe fn plan_create_index_workers(tableOid: Oid, indexOid: Oid) -> c_int {
-    unimplemented!()
+    crate::optimizer::plan::planner::plan_create_index_workers(tableOid as _, indexOid as _) as _
 }
 
 /* in plan/setrefs.c: */
@@ -183,51 +225,56 @@ pub unsafe fn extract_query_dependencies(
     invalItems: *mut *mut List,
     hasRowSecurity: *mut bool,
 ) {
-    unimplemented!()
+    crate::optimizer::plan::setrefs::extract_query_dependencies(
+        query as _,
+        relationOids as _,
+        invalItems as _,
+        hasRowSecurity as _,
+    )
 }
 
 /* in prep/prepqual.c: */
 
 pub unsafe fn negate_clause(node: *mut Node) -> *mut Node {
-    unimplemented!()
+    crate::optimizer::prep::prepqual::negate_clause(node as _) as _
 }
 
 pub unsafe fn canonicalize_qual(qual: *mut Expr, is_check: bool) -> *mut Expr {
-    unimplemented!()
+    crate::optimizer::prep::prepqual::canonicalize_qual(qual as _, is_check) as _
 }
 
 /* in util/clauses.c: */
 
 pub unsafe fn contain_mutable_functions(clause: *mut Node) -> bool {
-    unimplemented!()
+    crate::optimizer::util::clauses::contain_mutable_functions(clause as _)
 }
 
 pub unsafe fn contain_mutable_functions_after_planning(expr: *mut Expr) -> bool {
-    unimplemented!()
+    crate::optimizer::util::clauses::contain_mutable_functions_after_planning(expr as _)
 }
 
 pub unsafe fn contain_volatile_functions(clause: *mut Node) -> bool {
-    unimplemented!()
+    crate::optimizer::util::clauses::contain_volatile_functions(clause as _)
 }
 
 pub unsafe fn contain_volatile_functions_after_planning(expr: *mut Expr) -> bool {
-    unimplemented!()
+    crate::optimizer::util::clauses::contain_volatile_functions_after_planning(expr as _)
 }
 
 pub unsafe fn contain_volatile_functions_not_nextval(clause: *mut Node) -> bool {
-    unimplemented!()
+    crate::optimizer::util::clauses::contain_volatile_functions_not_nextval(clause as _)
 }
 
 pub unsafe fn eval_const_expressions(root: *mut PlannerInfo, node: *mut Node) -> *mut Node {
-    unimplemented!()
+    crate::optimizer::util::clauses::eval_const_expressions(root as _, node as _) as _
 }
 
 pub unsafe fn convert_saop_to_hashed_saop(node: *mut Node) {
-    unimplemented!()
+    crate::optimizer::util::clauses::convert_saop_to_hashed_saop(node as _)
 }
 
 pub unsafe fn estimate_expression_value(root: *mut PlannerInfo, node: *mut Node) -> *mut Node {
-    unimplemented!()
+    crate::optimizer::util::clauses::estimate_expression_value(root as _, node as _) as _
 }
 
 pub unsafe fn evaluate_expr(
@@ -236,7 +283,12 @@ pub unsafe fn evaluate_expr(
     result_typmod: int32,
     result_collation: Oid,
 ) -> *mut Expr {
-    unimplemented!()
+    crate::optimizer::util::clauses::evaluate_expr(
+        expr as _,
+        result_type as _,
+        result_typmod as _,
+        result_collation as _,
+    ) as _
 }
 
 pub unsafe fn expand_function_arguments(
@@ -245,7 +297,12 @@ pub unsafe fn expand_function_arguments(
     result_type: Oid,
     func_tuple: *mut HeapTupleData,
 ) -> *mut List {
-    unimplemented!()
+    crate::optimizer::util::clauses::expand_function_arguments(
+        args as _,
+        include_out_arguments,
+        result_type as _,
+        func_tuple as _,
+    ) as _
 }
 
 pub unsafe fn make_SAOP_expr(
@@ -257,7 +314,15 @@ pub unsafe fn make_SAOP_expr(
     exprs: *mut List,
     haveNonConst: bool,
 ) -> *mut ScalarArrayOpExpr {
-    unimplemented!()
+    crate::optimizer::util::clauses::make_SAOP_expr(
+        oper as _,
+        leftexpr as _,
+        coltype as _,
+        arraycollid as _,
+        inputcollid as _,
+        exprs as _,
+        haveNonConst,
+    ) as _
 }
 
 /* in util/predtest.c: */
@@ -267,7 +332,11 @@ pub unsafe fn predicate_implied_by(
     clause_list: *mut List,
     weak: bool,
 ) -> bool {
-    unimplemented!()
+    crate::optimizer::util::predtest::predicate_implied_by(
+        predicate_list as _,
+        clause_list as _,
+        weak,
+    )
 }
 
 pub unsafe fn predicate_refuted_by(
@@ -275,49 +344,53 @@ pub unsafe fn predicate_refuted_by(
     clause_list: *mut List,
     weak: bool,
 ) -> bool {
-    unimplemented!()
+    crate::optimizer::util::predtest::predicate_refuted_by(
+        predicate_list as _,
+        clause_list as _,
+        weak,
+    )
 }
 
 /* in util/tlist.c: */
 
 pub unsafe fn count_nonjunk_tlist_entries(tlist: *mut List) -> c_int {
-    unimplemented!()
+    crate::optimizer::util::tlist::count_nonjunk_tlist_entries(tlist as _) as _
 }
 
 pub unsafe fn get_sortgroupref_tle(sortref: Index, targetList: *mut List) -> *mut TargetEntry {
-    unimplemented!()
+    crate::optimizer::util::tlist::get_sortgroupref_tle(sortref as _, targetList as _) as _
 }
 
 pub unsafe fn get_sortgroupclause_tle(
     sgClause: *mut SortGroupClause,
     targetList: *mut List,
 ) -> *mut TargetEntry {
-    unimplemented!()
+    crate::optimizer::util::tlist::get_sortgroupclause_tle(sgClause as _, targetList as _) as _
 }
 
 pub unsafe fn get_sortgroupclause_expr(
     sgClause: *mut SortGroupClause,
     targetList: *mut List,
 ) -> *mut Node {
-    unimplemented!()
+    crate::optimizer::util::tlist::get_sortgroupclause_expr(sgClause as _, targetList as _) as _
 }
 
 pub unsafe fn get_sortgrouplist_exprs(sgClauses: *mut List, targetList: *mut List) -> *mut List {
-    unimplemented!()
+    crate::optimizer::util::tlist::get_sortgrouplist_exprs(sgClauses as _, targetList as _) as _
 }
 
 pub unsafe fn get_sortgroupref_clause(
     sortref: Index,
     clauses: *mut List,
 ) -> *mut SortGroupClause {
-    unimplemented!()
+    crate::optimizer::util::tlist::get_sortgroupref_clause(sortref as _, clauses as _) as _
 }
 
 pub unsafe fn get_sortgroupref_clause_noerr(
     sortref: Index,
     clauses: *mut List,
 ) -> *mut SortGroupClause {
-    unimplemented!()
+    crate::optimizer::util::tlist::get_sortgroupref_clause_noerr(sortref as _, clauses as _) as _
 }
 
 /* in util/var.c: */
@@ -339,7 +412,7 @@ pub const PVC_RECURSE_PLACEHOLDERS: c_int = 0x0020;
 pub const PVC_INCLUDE_CONVERTROWTYPES: c_int = 0x0040;
 
 pub unsafe fn pull_varnos(root: *mut PlannerInfo, node: *mut Node) -> *mut Bitmapset {
-    unimplemented!()
+    crate::optimizer::util::var::pull_varnos(root as _, node as _) as _
 }
 
 pub unsafe fn pull_varnos_of_level(
@@ -347,35 +420,35 @@ pub unsafe fn pull_varnos_of_level(
     node: *mut Node,
     levelsup: c_int,
 ) -> *mut Bitmapset {
-    unimplemented!()
+    crate::optimizer::util::var::pull_varnos_of_level(root as _, node as _, levelsup as _) as _
 }
 
 pub unsafe fn pull_varattnos(node: *mut Node, varno: Index, varattnos: *mut *mut Bitmapset) {
-    unimplemented!()
+    crate::optimizer::util::var::pull_varattnos(node as _, varno as _, varattnos as _)
 }
 
 pub unsafe fn pull_vars_of_level(node: *mut Node, levelsup: c_int) -> *mut List {
-    unimplemented!()
+    crate::optimizer::util::var::pull_vars_of_level(node as _, levelsup as _) as _
 }
 
 pub unsafe fn contain_var_clause(node: *mut Node) -> bool {
-    unimplemented!()
+    crate::optimizer::util::var::contain_var_clause(node as _)
 }
 
 pub unsafe fn contain_vars_of_level(node: *mut Node, levelsup: c_int) -> bool {
-    unimplemented!()
+    crate::optimizer::util::var::contain_vars_of_level(node as _, levelsup as _)
 }
 
 pub unsafe fn contain_vars_returning_old_or_new(node: *mut Node) -> bool {
-    unimplemented!()
+    crate::optimizer::util::var::contain_vars_returning_old_or_new(node as _)
 }
 
 pub unsafe fn locate_var_of_level(node: *mut Node, levelsup: c_int) -> c_int {
-    unimplemented!()
+    crate::optimizer::util::var::locate_var_of_level(node as _, levelsup as _) as _
 }
 
 pub unsafe fn pull_var_clause(node: *mut Node, flags: c_int) -> *mut List {
-    unimplemented!()
+    crate::optimizer::util::var::pull_var_clause(node as _, flags as _) as _
 }
 
 pub unsafe fn flatten_join_alias_vars(
@@ -383,7 +456,7 @@ pub unsafe fn flatten_join_alias_vars(
     query: *mut Query,
     node: *mut Node,
 ) -> *mut Node {
-    unimplemented!()
+    crate::optimizer::util::var::flatten_join_alias_vars(root as _, query as _, node as _) as _
 }
 
 pub unsafe fn flatten_group_exprs(
@@ -391,5 +464,5 @@ pub unsafe fn flatten_group_exprs(
     query: *mut Query,
     node: *mut Node,
 ) -> *mut Node {
-    unimplemented!()
+    crate::optimizer::util::var::flatten_group_exprs(root as _, query as _, node as _) as _
 }

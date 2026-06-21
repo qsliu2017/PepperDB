@@ -1135,28 +1135,18 @@ unsafe fn XLogReadBufferForRedo(
 ) -> c_int {
     unimplemented!() // TODO: access/transam/xlogutils.c
 }
-unsafe fn XLogInitBufferForRedo(_record: *mut XLogReaderState, _block_id: uint8) -> Buffer {
-    unimplemented!() // TODO: access/transam/xlogutils.c
-}
-unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char {
-    unimplemented!() // TODO: access/transam/xlogreader.c
-}
+unsafe fn XLogInitBufferForRedo(_record: *mut XLogReaderState, _block_id: uint8) -> Buffer { unimplemented!() }
+unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char { crate::access::transam::xlogreader::XLogRecGetData(_record) }
 unsafe fn XLogRecGetBlockData(
     _record: *mut XLogReaderState,
     _block_id: uint8,
     _len: *mut Size,
-) -> *mut c_char {
-    unimplemented!() // TODO: access/transam/xlogreader.c
-}
-unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 {
-    unimplemented!() // TODO: access/transam/xlogreader.h
-}
+) -> *mut c_char { crate::access::transam::xlogreader::XLogRecGetBlockData(_record, _block_id, _len) }
+unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 { crate::access::transam::xlogreader::XLogRecGetInfo(_record) }
 unsafe fn BufferGetPage(_buffer: Buffer) -> *mut c_char {
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/buffer/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
@@ -1174,9 +1164,7 @@ unsafe fn BufferGetTag(
 ) {
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO: storage/page/bufpage.h
-}
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(_page, _lsn) }
 unsafe fn PageGetItem(_page: Page, _itemid: *mut c_void) -> *mut c_char {
     unimplemented!() // TODO: storage/page/bufpage.h
 }
@@ -1186,9 +1174,7 @@ unsafe fn PageGetItemId(_page: Page, _offset: OffsetNumber) -> *mut c_void {
 unsafe fn PageGetMaxOffsetNumber(_page: Page) -> OffsetNumber {
     unimplemented!() // TODO: storage/page/bufpage.h
 }
-unsafe fn PageGetSpecialPointer(_page: Page) -> *mut c_char {
-    unimplemented!() // TODO: storage/page/bufpage.h
-}
+unsafe fn PageGetSpecialPointer(_page: Page) -> *mut c_char { crate::storage::bufpage::PageGetSpecialPointer(_page) }
 unsafe fn PageIsEmpty(_page: Page) -> bool {
     unimplemented!() // TODO: storage/page/bufpage.h
 }
@@ -1199,92 +1185,46 @@ unsafe fn PageAddItem(
     _offset: OffsetNumber,
     _overwrite: bool,
     _is_heap: bool,
-) -> OffsetNumber {
-    unimplemented!() // TODO: storage/page/bufpage.c
-}
+) -> OffsetNumber { crate::storage::bufpage::PageAddItem(_page, _item, _size, _offset, _overwrite, _is_heap) }
 unsafe fn PageIndexTupleDelete(_page: Page, _offset: OffsetNumber) {
     unimplemented!() // TODO: storage/page/bufpage.c
 }
 unsafe fn IndexTupleSize(_itup: IndexTuple) -> Size {
     unimplemented!() // TODO: access/common/itup.h
 }
-unsafe fn OffsetNumberNext(_offset: OffsetNumber) -> OffsetNumber {
-    unimplemented!() // TODO: storage/off.h
-}
-unsafe fn GinPageGetOpaque(_page: Page) -> GinPageOpaque {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinPageIsLeaf(_page: Page) -> bool {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinPageIsData(_page: Page) -> bool {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinPageIsCompressed(_page: Page) -> bool {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinPageSetCompressed(_page: Page) {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinPageSetDeleted(_page: Page) {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinPageSetDeleteXid(_page: Page, _xid: TransactionId) {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinPageSetFullRow(_page: Page) {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinInitBuffer(_buffer: Buffer, _flags: c_int) {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
-unsafe fn GinInitMetabuffer(_buffer: Buffer) {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
-unsafe fn GinDataLeafPageGetPostingList(_page: Page) -> *mut GinPostingList {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinDataLeafPageGetPostingListSize(_page: Page) -> Size {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinDataPageGetData(_page: Page) -> *mut c_char {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinDataPageSetDataSize(_page: Page, _size: Size) {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinDataPageGetPostingItem(_page: Page, _offset: OffsetNumber) -> *mut PostingItem {
-    unimplemented!() // TODO: access/ginblock.h
-}
-unsafe fn GinDataPageAddPostingItem(_page: Page, _data: *mut PostingItem, _offset: OffsetNumber) {
-    unimplemented!() // TODO: access/gin/gindatapage.c
-}
-unsafe fn GinPageDeletePostingItem(_page: Page, _offset: OffsetNumber) {
-    unimplemented!() // TODO: access/gin/gindatapage.c
-}
-unsafe fn GinPageGetMeta(_page: Page) -> *mut GinMetaPageData {
-    unimplemented!() // TODO: access/ginblock.h
-}
+unsafe fn OffsetNumberNext(_offset: OffsetNumber) -> OffsetNumber { crate::storage::off::OffsetNumberNext(_offset) }
+unsafe fn GinPageGetOpaque(_page: Page) -> GinPageOpaque { unimplemented!() }
+unsafe fn GinPageIsLeaf(_page: Page) -> bool { crate::access::gin::ginblock::GinPageIsLeaf(_page) }
+unsafe fn GinPageIsData(_page: Page) -> bool { crate::access::gin::ginblock::GinPageIsData(_page) }
+unsafe fn GinPageIsCompressed(_page: Page) -> bool { crate::access::gin::ginblock::GinPageIsCompressed(_page) }
+unsafe fn GinPageSetCompressed(_page: Page) { crate::access::gin::ginblock::GinPageSetCompressed(_page) }
+unsafe fn GinPageSetDeleted(_page: Page) { crate::access::gin::ginblock::GinPageSetDeleted(_page) }
+unsafe fn GinPageSetDeleteXid(_page: Page, _xid: TransactionId) { crate::access::gin::ginblock::GinPageSetDeleteXid(_page, _xid) }
+unsafe fn GinPageSetFullRow(_page: Page) { crate::access::gin::ginblock::GinPageSetFullRow(_page) }
+unsafe fn GinInitBuffer(_buffer: Buffer, _flags: c_int) { unimplemented!() }
+unsafe fn GinInitMetabuffer(_buffer: Buffer) { unimplemented!() }
+unsafe fn GinDataLeafPageGetPostingList(_page: Page) -> *mut GinPostingList { unimplemented!() }
+unsafe fn GinDataLeafPageGetPostingListSize(_page: Page) -> Size { crate::access::gin::ginblock::GinDataLeafPageGetPostingListSize(_page) as _ }
+unsafe fn GinDataPageGetData(_page: Page) -> *mut c_char { crate::access::gin::ginblock::GinDataPageGetData(_page) }
+unsafe fn GinDataPageSetDataSize(_page: Page, _size: Size) { crate::access::gin::ginblock::GinDataPageSetDataSize(_page, _size as _) }
+unsafe fn GinDataPageGetPostingItem(_page: Page, _offset: OffsetNumber) -> *mut PostingItem { unimplemented!() }
+unsafe fn GinDataPageAddPostingItem(_page: Page, _data: *mut PostingItem, _offset: OffsetNumber) { unimplemented!() }
+unsafe fn GinPageDeletePostingItem(_page: Page, _offset: OffsetNumber) { unimplemented!() }
+unsafe fn GinPageGetMeta(_page: Page) -> *mut GinMetaPageData { unimplemented!() }
 unsafe fn GinSetDownlink(_itup: IndexTuple, _blkno: BlockNumber) {
     unimplemented!() // TODO: access/ginblock.h
 }
-unsafe fn GinNextPostingListSegment(_seg: *mut GinPostingList) -> *mut GinPostingList {
-    unimplemented!() // TODO: access/ginblock.h
-}
+unsafe fn GinNextPostingListSegment(_seg: *mut GinPostingList) -> *mut GinPostingList { unimplemented!() }
 unsafe fn SizeOfGinPostingList(_plist: *mut GinPostingList) -> Size {
     unimplemented!() // TODO: access/ginblock.h
 }
-unsafe fn PostingItemSetBlockNumber(_item: *mut PostingItem, _blkno: BlockNumber) {
-    unimplemented!() // TODO: access/ginblock.h
-}
+unsafe fn PostingItemSetBlockNumber(_item: *mut PostingItem, _blkno: BlockNumber) { unimplemented!() }
 unsafe fn ginCompressPostingList(
     _ipd: ItemPointer,
     _nipd: c_int,
     _maxsize: c_int,
     _nwritten: *mut c_int,
-) -> *mut GinPostingList {
-    unimplemented!() // TODO: access/gin/ginpostinglist.c
-}
+) -> *mut GinPostingList { unimplemented!() }
 unsafe fn ginPostingListDecode(_plist: *mut GinPostingList, _ndecoded: *mut c_int) -> *mut ItemPointerData {
     unimplemented!() // TODO: access/gin/ginpostinglist.c
 }
@@ -1300,18 +1240,10 @@ unsafe fn ginMergeItemPointers(
 unsafe fn BlockIdGetBlockNumber(_blockid: BlockId) -> BlockNumber {
     unimplemented!() // TODO: storage/block.h
 }
-unsafe fn mask_page_lsn_and_checksum(_page: Page) {
-    unimplemented!() // TODO: access/common/bufmask.c
-}
-unsafe fn mask_page_hint_bits(_page: Page) {
-    unimplemented!() // TODO: access/common/bufmask.c
-}
-unsafe fn mask_page_content(_page: Page) {
-    unimplemented!() // TODO: access/common/bufmask.c
-}
-unsafe fn mask_unused_space(_page: Page) {
-    unimplemented!() // TODO: access/common/bufmask.c
-}
+unsafe fn mask_page_lsn_and_checksum(_page: Page) { crate::access::common::bufmask::mask_page_lsn_and_checksum(_page) }
+unsafe fn mask_page_hint_bits(_page: Page) { crate::access::common::bufmask::mask_page_hint_bits(_page) }
+unsafe fn mask_page_content(_page: Page) { crate::access::common::bufmask::mask_page_content(_page) }
+unsafe fn mask_unused_space(_page: Page) { crate::access::common::bufmask::mask_unused_space(_page) }
 
 extern "C" {
     fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;

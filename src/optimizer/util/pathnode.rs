@@ -108,41 +108,45 @@ use crate::nodes::equalfuncs::equal;
 /// TODO(pg-port): parser/parsetree.h - planner_rt_fetch(rti, root)
 #[inline]
 pub unsafe fn planner_rt_fetch(rti: Index, root: *mut PlannerInfo) -> *mut RangeTblEntry {
-    (*(*root).simple_rte_array.add((rti - 1) as usize))
+    if !(*root).simple_rte_array.is_null() {
+        *(*root).simple_rte_array.add(rti as usize)
+    } else {
+        crate::parser::parsetree::rt_fetch(rti, (*(*root).parse).rtable)
+    }
 }
 
 /// TODO(pg-port): optimizer/util/clauses.c - query_supports_distinctness
 pub unsafe fn query_supports_distinctness(
-    _query: *mut crate::nodes::parsenodes::Query,
+    query: *mut crate::nodes::parsenodes::Query,
 ) -> bool {
-    false
+    crate::optimizer::plan::analyzejoins::query_supports_distinctness(query as _)
 }
 
 /// TODO(pg-port): optimizer/util/clauses.c - query_is_distinct_for
 pub unsafe fn query_is_distinct_for(
-    _query: *mut crate::nodes::parsenodes::Query,
-    _colnos: *mut List,
-    _opids: *mut List,
+    query: *mut crate::nodes::parsenodes::Query,
+    colnos: *mut List,
+    opids: *mut List,
 ) -> bool {
-    false
+    crate::optimizer::plan::analyzejoins::query_is_distinct_for(query as _, colnos, opids)
 }
 
 /// TODO(pg-port): parser/parse_clause.c - assignSortGroupRef
 pub unsafe fn assignSortGroupRef(
-    _tle: *mut TargetEntry,
-    _tlist: *mut List,
+    tle: *mut TargetEntry,
+    tlist: *mut List,
 ) -> Index {
-    0
+    crate::parser::parse_clause::assignSortGroupRef(tle as _, tlist)
 }
 
 /// TODO(pg-port): utils/lsyscache.c - get_ordering_op_for_equality_op
-pub unsafe fn get_ordering_op_for_equality_op(_opno: Oid, _use_lhs_type: bool) -> Oid {
-    0
+pub unsafe fn get_ordering_op_for_equality_op(opno: Oid, use_lhs_type: bool) -> Oid {
+    crate::utils::cache::lsyscache::get_ordering_op_for_equality_op(opno, use_lhs_type)
 }
 
 /// TODO(pg-port): utils/lsyscache.c - get_equality_op_for_ordering_op
-pub unsafe fn get_equality_op_for_ordering_op(_opno: Oid, _reverse: *mut bool) -> Oid {
-    0
+pub unsafe fn get_equality_op_for_ordering_op(opno: Oid, reverse: *mut bool) -> Oid {
+    crate::utils::cache::lsyscache::get_equality_op_for_ordering_op(opno, reverse)
 }
 
 /// TODO(pg-port): foreign/fdwapi.h - ReparameterizeForeignPathByChild_function type
@@ -956,6 +960,7 @@ pub unsafe fn create_seqscan_path(
     parallel_workers: c_int,
 ) -> *mut Path {
     let pathnode: *mut Path = makeNode!(Path, T_Path);
+    if std::env::var("PDB_BT").is_ok() { eprintln!("PDB_BT create_seqscan_path makeNode Path -> {:p}", pathnode); }
 
     (*pathnode).pathtype = T_SeqScan;
     (*pathnode).parent = rel;

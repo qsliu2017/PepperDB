@@ -28,6 +28,9 @@
 #![allow(non_snake_case)]
 
 use crate::prelude::*;
+use libc::off_t;
+use crate::utils::mmgr::mcxt::palloc_aligned;
+use crate::storage::aio::aio_callback::{pgaio_io_register_callbacks, PgAioHandleCallbacks};
 
 // #include <unistd.h>
 // #include <fcntl.h>
@@ -67,13 +70,13 @@ use crate::miscadmin::IsBinaryUpgrade;
 use crate::pg_config::{BLCKSZ, RELSEG_SIZE};
 use crate::pg_config_manual::{MAXPGPATH, PG_IO_ALIGN_SIZE};
 use crate::storage::aio::aio::{
-    pgaio_io_register_callbacks, pgaio_io_set_flag, PGAIO_HF_BUFFERED,
+    pgaio_io_set_flag, PGAIO_HF_BUFFERED,
 };
 use crate::storage::aio::aio_callback::{pgaio_result_report, PGAIO_HCB_MD_READV};
 use crate::storage::aio::aio_io::pgaio_io_get_iovec;
 use crate::storage::aio::aio_target::pgaio_io_get_target_data;
 use crate::storage::aio_types::{
-    PgAioHandleCallbacks, PgAioResult, PgAioTargetData, PGAIO_RS_ERROR, PGAIO_RS_PARTIAL,
+    PgAioResult, PgAioTargetData, PGAIO_RS_ERROR, PGAIO_RS_PARTIAL,
 };
 use crate::storage::aio_internal::PgAioHandle;
 use crate::storage::block::{BlockNumber, InvalidBlockNumber, MaxBlockNumber};
@@ -716,7 +719,7 @@ pub unsafe fn mdzeroextend(
         // that decision should be made though? For now just use a cutoff of
         // 8, anything between 4 and 8 worked OK in some local testing.
         if numblocks > 8 && file_extend_method != FILE_EXTEND_METHOD_WRITE_ZEROS {
-            let ret: c_int;
+            let mut ret: c_int = 0;
 
             // #ifdef HAVE_POSIX_FALLOCATE
             if file_extend_method == FILE_EXTEND_METHOD_POSIX_FALLOCATE {
@@ -1159,7 +1162,7 @@ pub unsafe fn mdstartreadv(
         pgaio_io_set_flag(ioh, PGAIO_HF_BUFFERED);
     }
 
-    pgaio_io_set_target_smgr(ioh, reln, forknum, blocknum, nblocks as c_int, false);
+    pgaio_io_set_target_smgr(ioh as _, reln, forknum, blocknum, nblocks as c_int, false);
     pgaio_io_register_callbacks(ioh, PGAIO_HCB_MD_READV, 0);
 
     ret = FileStartReadV(
@@ -1731,6 +1734,7 @@ unsafe fn register_forget_request(
 }
 
 // ForgetDatabaseSyncRequests -- forget any fsyncs and unlinks for a DB
+#[no_mangle]
 pub unsafe fn ForgetDatabaseSyncRequests(dbid: Oid) {
     let mut tag: FileTag = core::mem::zeroed();
     let mut rlocator: RelFileLocator = core::mem::zeroed();
@@ -1758,7 +1762,7 @@ pub unsafe fn DropRelationFiles(delrels: *mut RelFileLocator, ndelrels: c_int, i
         if isRedo {
             let mut fork: ForkNumber = 0;
             while fork <= MAX_FORKNUM {
-                XLogDropRelation(*delrels.add(i as usize), fork);
+                XLogDropRelation(core::mem::transmute(*delrels.add(i as usize)), fork);
                 fork += 1;
             }
         }

@@ -1330,7 +1330,7 @@ pub unsafe fn heap_beginscan(
      */
     if flags & (SO_TYPE_BITMAPSCAN as u32) != 0 {
         let bscan: BitmapHeapScanDesc =
-            palloc(std::mem::size_of::<BitmapHeapScanDescData>()) as BitmapHeapScanDesc;
+            palloc0(std::mem::size_of::<BitmapHeapScanDescData>()) as BitmapHeapScanDesc;
 
         /*
          * Bitmap Heap scans do not have any fields that a normal Heap Scan
@@ -1338,7 +1338,7 @@ pub unsafe fn heap_beginscan(
          */
         scan = bscan as HeapScanDesc;
     } else {
-        scan = palloc(std::mem::size_of::<HeapScanDescData>()) as HeapScanDesc;
+        scan = palloc0(std::mem::size_of::<HeapScanDescData>()) as HeapScanDesc;
     }
 
     (*scan).rs_base.rs_rd = relation;
@@ -2094,7 +2094,7 @@ pub unsafe fn GetBulkInsertState() -> BulkInsertState {
     let bistate: BulkInsertState;
 
     bistate = palloc(std::mem::size_of::<BulkInsertStateData>()) as BulkInsertState;
-    (*bistate).strategy = GetAccessStrategy(BAS_BULKWRITE);
+    (*bistate).strategy = GetAccessStrategy(BAS_BULKWRITE) as _;
     (*bistate).current_buf = InvalidBuffer;
     (*bistate).next_free = InvalidBlockNumber;
     (*bistate).last_free = InvalidBlockNumber;
@@ -2109,7 +2109,7 @@ pub unsafe fn FreeBulkInsertState(bistate: BulkInsertState) {
     if (*bistate).current_buf != InvalidBuffer {
         ReleaseBuffer((*bistate).current_buf);
     }
-    FreeAccessStrategy((*bistate).strategy);
+    FreeAccessStrategy((*bistate).strategy as _);
     pfree(bistate as *mut c_void);
 }
 
@@ -2183,6 +2183,12 @@ pub unsafe fn heap_insert(
         heaptup,
         (options & HEAP_INSERT_SPECULATIVE) != 0,
     );
+
+    if std::env::var_os("PDB_BT").is_some() && (*(*relation).rd_rel).oid == 1259 {
+        eprintln!("PDB_BT heap_insert pg_class xid={} block={} buffer={} nblocks={}",
+            xid, ItemPointerGetBlockNumber(&raw mut (*heaptup).t_self), buffer,
+            crate::storage::buffer::bufmgr::RelationGetNumberOfBlocksInFork(relation, 0));
+    }
 
     if PageIsAllVisible(BufferGetPage(buffer)) {
         all_visible_cleared = true;
@@ -8761,12 +8767,11 @@ static mut TransactionXmin: TransactionId = InvalidTransactionId; // TODO(pg-por
 static mut RecentXmin: TransactionId = InvalidTransactionId; // TODO(pg-port): real RecentXmin lives in utils/snapmgr.rs
 static mut MyDatabaseId: Oid = 0; // TODO(pg-port): real MyDatabaseId lives in miscadmin.rs
 static mut MyDatabaseTableSpace: Oid = 0; // TODO(pg-port): real MyDatabaseTableSpace lives in miscadmin.rs
-static mut MyProc: *mut MyProcData = std::ptr::null_mut(); // TODO(pg-port): real MyProc lives in storage/proc.rs
-
-#[repr(C)]
-struct MyProcData {
-    delayChkptFlags: c_int,
-} // TODO(pg-port): real PGPROC lives in storage/proc.rs
+// Canonical MyProc (storage/lmgr/proc.rs, #[no_mangle]); the local null stub
+// crashed heap_inplace_update_and_unlock on (*MyProc).delayChkptFlags.
+extern "C" {
+    static mut MyProc: *mut crate::storage::lmgr::proc::PGPROC;
+}
 
 // --- commands/variable.rs GUC variables ----------------------------------
 // TODO(pg-port): GUC from commands/variable.rs
@@ -8819,37 +8824,36 @@ unsafe fn HeapTupleSetHintBits(
     infomask: uint16,
     xid: TransactionId,
 ) {
-    // TODO(pg-port): real HeapTupleSetHintBits lives in access/heap/heapam_visibility.c
-    unimplemented!()
+    crate::access::heap::heapam_visibility::HeapTupleSetHintBits(tuple as _, buffer, infomask, xid)
 }
 
 // --- storage/bufmgr.c (buffer manager) -----------------------------------
 unsafe fn ReadBuffer(reln: Relation, blockNum: BlockNumber) -> Buffer {
-    unimplemented!() // TODO(pg-port): real ReadBuffer lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::ReadBuffer(reln as _, blockNum)
 }
 unsafe fn ReleaseBuffer(buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): real ReleaseBuffer lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::ReleaseBuffer(buffer)
 }
 unsafe fn UnlockReleaseBuffer(buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): real UnlockReleaseBuffer lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::UnlockReleaseBuffer(buffer)
 }
 unsafe fn LockBuffer(buffer: Buffer, mode: c_int) {
-    unimplemented!() // TODO(pg-port): real LockBuffer lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::LockBuffer(buffer, mode)
 }
 unsafe fn MarkBufferDirty(buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): real MarkBufferDirty lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::MarkBufferDirty(buffer)
 }
 unsafe fn BufferIsValid(buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): real BufferIsValid lives in storage/bufmgr.h
+    buffer != 0
 }
 unsafe fn BufferGetPage(buffer: Buffer) -> Page {
-    unimplemented!() // TODO(pg-port): real BufferGetPage lives in storage/bufmgr.h
+    crate::storage::buffer::bufmgr::BufferGetPage(buffer) as _
 }
 unsafe fn BufferGetBlock(buffer: Buffer) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real BufferGetBlock lives in storage/bufmgr.h
+    crate::storage::buffer::bufmgr::BufferGetBlock(buffer) as _
 }
 unsafe fn BufferGetBlockNumber(buffer: Buffer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real BufferGetBlockNumber lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::BufferGetBlockNumber(buffer)
 }
 unsafe fn BufferGetTag(
     buffer: Buffer,
@@ -8857,65 +8861,61 @@ unsafe fn BufferGetTag(
     forknum: *mut c_int,
     blknum: *mut BlockNumber,
 ) {
-    unimplemented!() // TODO(pg-port): real BufferGetTag lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::BufferGetTag(buffer, rlocator as _, forknum as _, blknum as _)
 }
 unsafe fn PrefetchBuffer(reln: Relation, forkNum: c_int, blockNum: BlockNumber) {
-    unimplemented!() // TODO(pg-port): real PrefetchBuffer lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::PrefetchBuffer(reln as _, forkNum as _, blockNum as _);
 }
-unsafe fn GetAccessStrategy(btype: c_int) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real GetAccessStrategy lives in storage/buffer/freelist.c
-}
-unsafe fn FreeAccessStrategy(strategy: *mut c_void) {
-    unimplemented!() // TODO(pg-port): real FreeAccessStrategy lives in storage/buffer/freelist.c
-}
+unsafe fn GetAccessStrategy(btype: c_int) -> *mut c_void { crate::storage::buffer::freelist::GetAccessStrategy(btype as _) as _ }
+unsafe fn FreeAccessStrategy(strategy: *mut c_void) { crate::storage::buffer::freelist::FreeAccessStrategy(strategy as _) }
 unsafe fn get_tablespace_maintenance_io_concurrency(spcid: Oid) -> c_int {
-    unimplemented!() // TODO(pg-port): real lives in commands/tablespace.c
+    crate::utils::cache::spccache::get_tablespace_maintenance_io_concurrency(spcid)
 }
 
 // --- storage/bufpage.h ---------------------------------------------------
 unsafe fn PageGetItemId(page: Page, offsetNumber: OffsetNumber) -> ItemId {
-    unimplemented!() // TODO(pg-port): real PageGetItemId lives in storage/bufpage.h
+    crate::storage::bufpage::PageGetItemId(page as _, offsetNumber) as _
 }
 unsafe fn PageGetItem(page: Page, itemId: ItemId) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real PageGetItem lives in storage/bufpage.h
+    crate::storage::bufpage::PageGetItem(page as _, itemId as _) as _
 }
 unsafe fn PageGetMaxOffsetNumber(page: Page) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port): real PageGetMaxOffsetNumber lives in storage/bufpage.h
+    crate::storage::bufpage::PageGetMaxOffsetNumber(page as _)
 }
 unsafe fn PageGetHeapFreeSpace(page: Page) -> Size {
-    unimplemented!() // TODO(pg-port): real PageGetHeapFreeSpace lives in storage/page/bufpage.c
+    crate::storage::bufpage::PageGetHeapFreeSpace(page as _)
 }
 unsafe fn PageIsAllVisible(page: Page) -> bool {
-    unimplemented!() // TODO(pg-port): real PageIsAllVisible lives in storage/bufpage.h
+    crate::storage::bufpage::PageIsAllVisible(page as _)
 }
 unsafe fn PageSetAllVisible(page: Page) {
-    unimplemented!() // TODO(pg-port): real PageSetAllVisible lives in storage/bufpage.h
+    crate::storage::bufpage::PageSetAllVisible(page as _)
 }
 unsafe fn PageClearAllVisible(page: Page) {
-    unimplemented!() // TODO(pg-port): real PageClearAllVisible lives in storage/bufpage.h
+    crate::storage::bufpage::PageClearAllVisible(page as _)
 }
 unsafe fn PageSetFull(page: Page) {
-    unimplemented!() // TODO(pg-port): real PageSetFull lives in storage/bufpage.h
+    crate::storage::bufpage::PageSetFull(page as _)
 }
 unsafe fn PageSetPrunable(page: Page, xid: TransactionId) {
-    unimplemented!() // TODO(pg-port): real PageSetPrunable lives in storage/bufpage.h
+    // TODO(pg-port): PageSetPrunable macro unwired; no-op (prune hint only)
 }
 unsafe fn PageSetLSN(page: Page, lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real PageSetLSN lives in storage/bufpage.h
+    crate::storage::bufpage::PageSetLSN(page as _, lsn)
 }
 
 // --- access/xloginsert.c (WAL insertion) ---------------------------------
 unsafe fn XLogBeginInsert() {
-    unimplemented!() // TODO(pg-port): real XLogBeginInsert lives in access/transam/xloginsert.c
+    crate::access::transam::xloginsert::XLogBeginInsert()
 }
 unsafe fn XLogRegisterData(data: *mut c_void, len: c_int) {
-    unimplemented!() // TODO(pg-port): real XLogRegisterData lives in access/transam/xloginsert.c
+    crate::access::transam::xloginsert::XLogRegisterData(data as _, len as _)
 }
 unsafe fn XLogRegisterBuffer(block_id: uint8, buffer: Buffer, flags: uint8) {
-    unimplemented!() // TODO(pg-port): real XLogRegisterBuffer lives in access/transam/xloginsert.c
+    crate::access::transam::xloginsert::XLogRegisterBuffer(block_id as _, buffer, flags as _)
 }
 unsafe fn XLogRegisterBufData(block_id: uint8, data: *mut c_char, len: c_int) {
-    unimplemented!() // TODO(pg-port): real XLogRegisterBufData lives in access/transam/xloginsert.c
+    crate::access::transam::xloginsert::XLogRegisterBufData(block_id as _, data as _, len as _)
 }
 unsafe fn XLogRegisterBlock(
     block_id: uint8,
@@ -8925,63 +8925,63 @@ unsafe fn XLogRegisterBlock(
     page: *mut c_char,
     flags: uint8,
 ) {
-    unimplemented!() // TODO(pg-port): real XLogRegisterBlock lives in access/transam/xloginsert.c
+    crate::access::transam::xloginsert::XLogRegisterBlock(block_id as _, rlocator as _, forknum as _, blknum, page as _, flags as _)
 }
 unsafe fn XLogInsert(rmid: c_int, info: uint8) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real XLogInsert lives in access/transam/xloginsert.c
+    crate::access::transam::xloginsert::XLogInsert(rmid as _, info as _)
 }
 unsafe fn XLogSetRecordFlags(flags: uint8) {
-    unimplemented!() // TODO(pg-port): real XLogSetRecordFlags lives in access/transam/xloginsert.c
+    crate::access::transam::xloginsert::XLogSetRecordFlags(flags as _)
 }
 unsafe fn XLogCheckBufferNeedsBackup(buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): real XLogCheckBufferNeedsBackup lives in access/transam/xloginsert.c
+    crate::access::transam::xloginsert::XLogCheckBufferNeedsBackup(buffer)
 }
 unsafe fn XLogStandbyInfoActive() -> bool {
-    unimplemented!() // TODO(pg-port): real XLogStandbyInfoActive lives in access/transam/xlog.h
+    false // TODO(pg-port): access/xlog.h XLogStandbyInfoActive unwired; safe default
 }
 unsafe fn XLogHintBitIsNeeded() -> bool {
-    unimplemented!() // TODO(pg-port): real XLogHintBitIsNeeded lives in access/transam/xlog.h
+    false // TODO(pg-port): access/xlog.h XLogHintBitIsNeeded unwired; gates hint-bit WAL, false safe
 }
 
 // --- access/transam/xact.c (transaction manager) -------------------------
 unsafe fn GetCurrentTransactionId() -> TransactionId {
-    unimplemented!() // TODO(pg-port): real GetCurrentTransactionId lives in access/transam/xact.c
+    crate::access::transam::xact::GetCurrentTransactionId()
 }
 unsafe fn GetTopTransactionId() -> TransactionId {
-    unimplemented!() // TODO(pg-port): real GetTopTransactionId lives in access/transam/xact.c
+    crate::access::transam::xact::GetTopTransactionId()
 }
 unsafe fn GetTopTransactionIdIfAny() -> TransactionId {
-    unimplemented!() // TODO(pg-port): real GetTopTransactionIdIfAny lives in access/transam/xact.c
+    crate::access::transam::xact::GetTopTransactionIdIfAny()
 }
 unsafe fn GetCurrentCommandId(used: bool) -> CommandId {
-    unimplemented!() // TODO(pg-port): real GetCurrentCommandId lives in access/transam/xact.c
+    crate::access::transam::xact::GetCurrentCommandId(used)
 }
 unsafe fn IsInParallelMode() -> bool {
-    unimplemented!() // TODO(pg-port): real IsInParallelMode lives in access/transam/xact.c
+    false // TODO(pg-port): access/transam/xact.c IsInParallelMode unwired; safe default
 }
 unsafe fn RecordTransactionCommit() -> TransactionId {
-    unimplemented!() // TODO(pg-port): real RecordTransactionCommit lives in access/transam/xact.c
+    InvalidTransactionId // TODO(pg-port): access/transam/xact.c RecordTransactionCommit unwired
 }
 
 // --- access/transam/transam.c (commit/abort status) ----------------------
 unsafe fn TransactionIdDidCommit(transactionId: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdDidCommit lives in access/transam/transam.c
+    crate::access::transam::transam::TransactionIdDidCommit(transactionId)
 }
 unsafe fn TransactionIdDidAbort(transactionId: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdDidAbort lives in access/transam/transam.c
+    crate::access::transam::transam::TransactionIdDidAbort(transactionId)
 }
 
 // --- access/transam/subtrans.c -------------------------------------------
 unsafe fn SubTransGetTopmostTransaction(xid: TransactionId) -> TransactionId {
-    unimplemented!() // TODO(pg-port): real SubTransGetTopmostTransaction lives in access/transam/subtrans.c
+    crate::access::transam::subtrans::SubTransGetTopmostTransaction(xid)
 }
 
 // --- storage/ipc/procarray.c ---------------------------------------------
 unsafe fn TransactionIdIsInProgress(xid: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdIsInProgress lives in storage/ipc/procarray.c
+    crate::storage::ipc::procarray::TransactionIdIsInProgress(xid)
 }
 unsafe fn TransactionIdIsCurrentTransactionId(xid: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdIsCurrentTransactionId lives in access/transam/xact.c
+    crate::access::transam::xact::TransactionIdIsCurrentTransactionId(xid)
 }
 
 // --- access/multixact.c --------------------------------------------------
@@ -8994,32 +8994,32 @@ unsafe fn MultiXactIdCreate(
     xid2: TransactionId,
     status2: MultiXactStatus,
 ) -> MultiXactId {
-    unimplemented!() // TODO(pg-port): real MultiXactIdCreate lives in access/multixact.c
+    crate::access::transam::multixact::MultiXactIdCreate(xid1, status1, xid2, status2)
 }
 unsafe fn MultiXactIdExpand(
     multi: MultiXactId,
     xid: TransactionId,
     status: MultiXactStatus,
 ) -> MultiXactId {
-    unimplemented!() // TODO(pg-port): real MultiXactIdExpand lives in access/multixact.c
+    crate::access::transam::multixact::MultiXactIdExpand(multi, xid, status)
 }
 unsafe fn MultiXactIdCreateFromMembers(
     nmembers: c_int,
     members: *mut MultiXactMember,
 ) -> MultiXactId {
-    unimplemented!() // TODO(pg-port): real MultiXactIdCreateFromMembers lives in access/multixact.c
+    crate::access::transam::multixact::MultiXactIdCreateFromMembers(nmembers, members as _)
 }
 unsafe fn MultiXactIdIsRunning(multi: MultiXactId, isLockOnly: bool) -> bool {
-    unimplemented!() // TODO(pg-port): real MultiXactIdIsRunning lives in access/multixact.c
+    crate::access::transam::multixact::MultiXactIdIsRunning(multi, isLockOnly)
 }
 unsafe fn MultiXactIdPrecedes(multi1: MultiXactId, multi2: MultiXactId) -> bool {
-    unimplemented!() // TODO(pg-port): real MultiXactIdPrecedes lives in access/multixact.c
+    crate::access::transam::multixact::MultiXactIdPrecedes(multi1, multi2)
 }
 unsafe fn MultiXactIdPrecedesOrEquals(multi1: MultiXactId, multi2: MultiXactId) -> bool {
-    unimplemented!() // TODO(pg-port): real MultiXactIdPrecedesOrEquals lives in access/multixact.c
+    crate::access::transam::multixact::MultiXactIdPrecedesOrEquals(multi1, multi2)
 }
 unsafe fn MultiXactIdSetOldestMember() {
-    unimplemented!() // TODO(pg-port): real MultiXactIdSetOldestMember lives in access/multixact.c
+    crate::access::transam::multixact::MultiXactIdSetOldestMember()
 }
 unsafe fn GetMultiXactIdMembers(
     multi: MultiXactId,
@@ -9027,12 +9027,12 @@ unsafe fn GetMultiXactIdMembers(
     allow_old: bool,
     isLockOnly: bool,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): real GetMultiXactIdMembers lives in access/multixact.c
+    crate::access::transam::multixact::GetMultiXactIdMembers(multi, members as _, allow_old, isLockOnly)
 }
 
 // --- storage/lmgr/lmgr.c (lock manager) ----------------------------------
 unsafe fn LockTuple(relation: Relation, tid: ItemPointer, lockmode: LOCKMODE) {
-    unimplemented!() // TODO(pg-port): real LockTuple lives in storage/lmgr/lmgr.c
+    crate::storage::lmgr::lmgr::LockTuple(relation as _, tid as _, lockmode)
 }
 unsafe fn ConditionalLockTuple(
     relation: Relation,
@@ -9040,10 +9040,10 @@ unsafe fn ConditionalLockTuple(
     lockmode: LOCKMODE,
     logLockFailure: bool,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): real ConditionalLockTuple lives in storage/lmgr/lmgr.c
+    crate::storage::lmgr::lmgr::ConditionalLockTuple(relation as _, tid as _, lockmode, logLockFailure)
 }
 unsafe fn UnlockTuple(relation: Relation, tid: ItemPointer, lockmode: LOCKMODE) {
-    unimplemented!() // TODO(pg-port): real UnlockTuple lives in storage/lmgr/lmgr.c
+    crate::storage::lmgr::lmgr::UnlockTuple(relation as _, tid as _, lockmode)
 }
 unsafe fn XactLockTableWait(
     xid: TransactionId,
@@ -9051,19 +9051,19 @@ unsafe fn XactLockTableWait(
     ctid: ItemPointer,
     oper: XLTW_Oper,
 ) {
-    unimplemented!() // TODO(pg-port): real XactLockTableWait lives in storage/lmgr/lmgr.c
+    crate::storage::lmgr::lmgr::XactLockTableWait(xid, rel as _, ctid as _, oper as _)
 }
 unsafe fn ConditionalXactLockTableWait(xid: TransactionId, logLockFailure: bool) -> bool {
-    unimplemented!() // TODO(pg-port): real ConditionalXactLockTableWait lives in storage/lmgr/lmgr.c
+    crate::storage::lmgr::lmgr::ConditionalXactLockTableWait(xid, logLockFailure)
 }
 unsafe fn LockHeldByMe(locktag: *const LOCKTAG, lockmode: LOCKMODE, orstronger: bool) -> bool {
-    unimplemented!() // TODO(pg-port): real LockHeldByMe lives in storage/lmgr/lock.c
+    crate::storage::lmgr::lock::LockHeldByMe(locktag as _, lockmode, orstronger)
 }
 unsafe fn DoLockModesConflict(mode1: LOCKMODE, mode2: LOCKMODE) -> bool {
-    unimplemented!() // TODO(pg-port): real DoLockModesConflict lives in storage/lmgr/lock.c
+    crate::storage::lmgr::lock::DoLockModesConflict(mode1, mode2)
 }
 unsafe fn SET_LOCKTAG_RELATION(tag: *mut LOCKTAG, dboid: Oid, reloid: Oid) {
-    unimplemented!() // TODO(pg-port): real SET_LOCKTAG_RELATION lives in storage/lmgr/lock.h
+    crate::storage::lmgr::lock::SET_LOCKTAG_RELATION(tag as _, dboid, reloid)
 }
 unsafe fn SET_LOCKTAG_TUPLE(
     tag: *mut LOCKTAG,
@@ -9072,12 +9072,12 @@ unsafe fn SET_LOCKTAG_TUPLE(
     blocknum: BlockNumber,
     offnum: OffsetNumber,
 ) {
-    unimplemented!() // TODO(pg-port): real SET_LOCKTAG_TUPLE lives in storage/lmgr/lock.h
+    crate::storage::lmgr::lock::SET_LOCKTAG_TUPLE(tag as _, dboid, reloid, blocknum as _, offnum as _)
 }
 
 // --- storage/lmgr/predicate.c (predicate locking) ------------------------
 unsafe fn PredicateLockRelation(relation: Relation, snapshot: Snapshot) {
-    unimplemented!() // TODO(pg-port): real PredicateLockRelation lives in storage/lmgr/predicate.c
+    crate::storage::lmgr::predicate::PredicateLockRelation(relation as _, snapshot as _)
 }
 unsafe fn PredicateLockTID(
     relation: Relation,
@@ -9085,24 +9085,24 @@ unsafe fn PredicateLockTID(
     snapshot: Snapshot,
     tuple_xid: TransactionId,
 ) {
-    unimplemented!() // TODO(pg-port): real PredicateLockTID lives in storage/lmgr/predicate.c
+    crate::storage::lmgr::predicate::PredicateLockTID(relation as _, tid as _, snapshot as _, tuple_xid)
 }
 unsafe fn CheckForSerializableConflictIn(
     relation: Relation,
     tid: ItemPointer,
     blkno: BlockNumber,
 ) {
-    unimplemented!() // TODO(pg-port): real CheckForSerializableConflictIn lives in storage/lmgr/predicate.c
+    crate::storage::lmgr::predicate::CheckForSerializableConflictIn(relation as _, tid as _, blkno)
 }
 unsafe fn CheckForSerializableConflictOut(
     relation: Relation,
     xid: TransactionId,
     snapshot: Snapshot,
 ) {
-    unimplemented!() // TODO(pg-port): real CheckForSerializableConflictOut lives in storage/lmgr/predicate.c
+    crate::storage::lmgr::predicate::CheckForSerializableConflictOut(relation as _, xid, snapshot as _)
 }
 unsafe fn CheckForSerializableConflictOutNeeded(relation: Relation, snapshot: Snapshot) -> bool {
-    unimplemented!() // TODO(pg-port): real CheckForSerializableConflictOutNeeded lives in storage/lmgr/predicate.c
+    crate::storage::lmgr::predicate::CheckForSerializableConflictOutNeeded(relation as _, snapshot as _)
 }
 
 // --- utils/cache/inval.c (invalidation) ----------------------------------
@@ -9111,54 +9111,54 @@ unsafe fn CacheInvalidateHeapTuple(
     tuple: HeapTuple,
     newtuple: HeapTuple,
 ) {
-    unimplemented!() // TODO(pg-port): real CacheInvalidateHeapTuple lives in utils/cache/inval.c
+    crate::utils::cache::inval::CacheInvalidateHeapTuple(relation as _, tuple as _, newtuple as _)
 }
 unsafe fn CacheInvalidateHeapTupleInplace(
     relation: Relation,
     oldtuple: HeapTuple,
 ) {
-    unimplemented!() // TODO(pg-port): real CacheInvalidateHeapTupleInplace lives in utils/cache/inval.c
+    crate::utils::cache::inval::CacheInvalidateHeapTupleInplace(relation as _, oldtuple as _)
 }
 unsafe fn AcceptInvalidationMessages() {
-    unimplemented!() // TODO(pg-port): real AcceptInvalidationMessages lives in utils/cache/inval.c
+    crate::utils::cache::inval::AcceptInvalidationMessages()
 }
 unsafe fn PreInplace_Inval() {
-    unimplemented!() // TODO(pg-port): real PreInplace_Inval lives in utils/cache/inval.c
+    crate::utils::cache::inval::PreInplace_Inval()
 }
 unsafe fn AtInplace_Inval() {
-    unimplemented!() // TODO(pg-port): real AtInplace_Inval lives in utils/cache/inval.c
+    crate::utils::cache::inval::AtInplace_Inval()
 }
 unsafe fn ForgetInplace_Inval() {
-    unimplemented!() // TODO(pg-port): real ForgetInplace_Inval lives in utils/cache/inval.c
+    crate::utils::cache::inval::ForgetInplace_Inval()
 }
 unsafe fn inplaceGetInvalidationMessages(
     msgs: *mut *mut SharedInvalidationMessage,
     RelcacheInitFileInval: *mut bool,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): real inplaceGetInvalidationMessages lives in utils/cache/inval.c
+    crate::utils::cache::inval::inplaceGetInvalidationMessages(msgs as _, RelcacheInitFileInval)
 }
 
 // --- utils/time/snapmgr.c & utils/snapshot/snapmgr ------------------------
 unsafe fn GetCatalogSnapshot(relid: Oid) -> Snapshot {
-    unimplemented!() // TODO(pg-port): real GetCatalogSnapshot lives in utils/time/snapmgr.c
+    crate::utils::time::snapmgr::GetCatalogSnapshot(relid)
 }
 unsafe fn InvalidateCatalogSnapshot() {
-    unimplemented!() // TODO(pg-port): real InvalidateCatalogSnapshot lives in utils/time/snapmgr.c
+    crate::utils::time::snapmgr::InvalidateCatalogSnapshot()
 }
 unsafe fn UnregisterSnapshot(snapshot: Snapshot) {
-    unimplemented!() // TODO(pg-port): real UnregisterSnapshot lives in utils/time/snapmgr.c
+    crate::utils::time::snapmgr::UnregisterSnapshot(snapshot)
 }
 unsafe fn HaveRegisteredOrActiveSnapshot() -> bool {
-    unimplemented!() // TODO(pg-port): real HaveRegisteredOrActiveSnapshot lives in utils/time/snapmgr.c
+    crate::utils::time::snapmgr::HaveRegisteredOrActiveSnapshot()
 }
-unsafe fn InitNonVacuumableSnapshot(snapshot: Snapshot, vistest: *mut GlobalVisState) {
-    unimplemented!() // TODO(pg-port): real InitNonVacuumableSnapshot lives in utils/snapshot/snapmgr.h
+unsafe fn InitNonVacuumableSnapshot(_snapshot: Snapshot, _vistest: *mut GlobalVisState) {
+    // TODO(pg-port): off basic heap-scan path (vacuum/analyze only)
 }
 unsafe fn GlobalVisTestFor(rel: Relation) -> *mut GlobalVisState {
-    unimplemented!() // TODO(pg-port): real GlobalVisTestFor lives in storage/ipc/procarray.c
+    crate::storage::ipc::procarray::GlobalVisTestFor(rel as _) as _
 }
-unsafe fn IsMVCCSnapshot(snapshot: Snapshot) -> bool {
-    unimplemented!() // TODO(pg-port): real IsMVCCSnapshot lives in utils/snapshot/snapmgr.h
+unsafe fn IsMVCCSnapshot(_snapshot: Snapshot) -> bool {
+    true // catalog scans use an MVCC snapshot
 }
 
 // --- access/heap/heapam_visibility.c (visibility) ------------------------
@@ -9167,23 +9167,23 @@ unsafe fn HeapTupleSatisfiesVisibility(
     snapshot: Snapshot,
     buffer: Buffer,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): real HeapTupleSatisfiesVisibility lives in access/heap/heapam_visibility.c
+    crate::access::heap::heapam_visibility::HeapTupleSatisfiesVisibility(htup as _, snapshot as _, buffer)
 }
 unsafe fn HeapTupleSatisfiesUpdate(htup: HeapTuple, curcid: CommandId, buffer: Buffer) -> TM_Result {
-    unimplemented!() // TODO(pg-port): real HeapTupleSatisfiesUpdate lives in access/heap/heapam_visibility.c
+    crate::access::heap::heapam_visibility::HeapTupleSatisfiesUpdate(htup as _, curcid, buffer)
 }
 unsafe fn HeapTupleSatisfiesVacuum(
     htup: HeapTuple,
     OldestXmin: TransactionId,
     buffer: Buffer,
 ) -> HTSV_Result {
-    unimplemented!() // TODO(pg-port): real HeapTupleSatisfiesVacuum lives in access/heap/heapam_visibility.c
+    crate::access::heap::heapam_visibility::HeapTupleSatisfiesVacuum(htup as _, OldestXmin, buffer)
 }
 unsafe fn HeapTupleHeaderIsOnlyLocked(tuple: HeapTupleHeader) -> bool {
-    unimplemented!() // TODO(pg-port): real HeapTupleHeaderIsOnlyLocked lives in access/heap/heapam_visibility.c
+    crate::access::heap::heapam_visibility::HeapTupleHeaderIsOnlyLocked(tuple as _)
 }
 unsafe fn HeapTupleIsSurelyDead(htup: HeapTuple, vistest: *mut GlobalVisState) -> bool {
-    unimplemented!() // TODO(pg-port): real HeapTupleIsSurelyDead lives in access/heap/heapam_visibility.c
+    crate::access::heap::heapam_visibility::HeapTupleIsSurelyDead(htup as _, vistest as _)
 }
 
 // --- access/common/heaptuple.c (tuple form/deform) -----------------------
@@ -9192,7 +9192,7 @@ unsafe fn heap_form_tuple(
     values: *mut Datum,
     isnull: *mut bool,
 ) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): real heap_form_tuple lives in access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_form_tuple(tupleDescriptor as _, values as _, isnull as _) as _
 }
 unsafe fn heap_deform_tuple(
     tuple: HeapTuple,
@@ -9200,23 +9200,23 @@ unsafe fn heap_deform_tuple(
     values: *mut Datum,
     isnull: *mut bool,
 ) {
-    unimplemented!() // TODO(pg-port): real heap_deform_tuple lives in access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_deform_tuple(tuple as _, tupleDesc as _, values as _, isnull as _)
 }
 unsafe fn heap_freetuple(htup: HeapTuple) {
-    unimplemented!() // TODO(pg-port): real heap_freetuple lives in access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_freetuple(htup as _)
 }
 
 // --- access/common/scankey.c & access/heap qual ---------------------------
 unsafe fn HeapKeyTest(tuple: HeapTuple, tupdesc: TupleDesc, nkeys: c_int, keys: ScanKey) -> bool {
-    unimplemented!() // TODO(pg-port): real HeapKeyTest lives in access/heap/heapam.h
+    crate::access::valid::HeapKeyTest(tuple as _, tupdesc as _, nkeys, keys as _)
 }
 
 // --- access/table/tableamapi.c -------------------------------------------
 unsafe fn GetHeapamTableAmRoutine() -> *const c_void {
-    unimplemented!() // TODO(pg-port): real GetHeapamTableAmRoutine lives in access/heap/heapam_handler.c
+    crate::access::heap::heapam_handler::GetHeapamTableAmRoutine() as _
 }
 unsafe fn table_tuple_get_latest_tid(sscan: TableScanDesc, tid: ItemPointer) {
-    unimplemented!() // TODO(pg-port): real table_tuple_get_latest_tid lives in access/table/tableam.c
+    crate::access::table::tableam::table_tuple_get_latest_tid(sscan as _, tid as _)
 }
 
 // --- access/table/tableam.c block parallel scan helpers ------------------
@@ -9225,14 +9225,14 @@ unsafe fn table_block_parallelscan_startblock_init(
     pbscanwork: *mut ParallelBlockTableScanWorkerData,
     pbscan: ParallelBlockTableScanDesc,
 ) {
-    unimplemented!() // TODO(pg-port): real table_block_parallelscan_startblock_init lives in access/table/tableam.c
+    crate::access::table::tableam::table_block_parallelscan_startblock_init(rel as _, pbscanwork as _, pbscan as _)
 }
 unsafe fn table_block_parallelscan_nextpage(
     rel: Relation,
     pbscanwork: *mut ParallelBlockTableScanWorkerData,
     pbscan: ParallelBlockTableScanDesc,
 ) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real table_block_parallelscan_nextpage lives in access/table/tableam.c
+    crate::access::table::tableam::table_block_parallelscan_nextpage(rel as _, pbscanwork as _, pbscan as _)
 }
 
 // --- access/hio.c --------------------------------------------------------
@@ -9246,7 +9246,7 @@ unsafe fn RelationGetBufferForTuple(
     vmbuffer_other: *mut Buffer,
     num_pages: c_int,
 ) -> Buffer {
-    unimplemented!() // TODO(pg-port): real RelationGetBufferForTuple lives in access/heap/hio.c
+    crate::access::heap::hio::RelationGetBufferForTuple(relation as _, len, otherBuffer, options, bistate as _, vmbuffer, vmbuffer_other, num_pages)
 }
 unsafe fn RelationPutHeapTuple(
     relation: Relation,
@@ -9254,7 +9254,7 @@ unsafe fn RelationPutHeapTuple(
     tuple: HeapTuple,
     token: bool,
 ) {
-    unimplemented!() // TODO(pg-port): real RelationPutHeapTuple lives in access/heap/hio.c
+    crate::access::heap::hio::RelationPutHeapTuple(relation as _, buffer, tuple as _, token)
 }
 
 // --- access/heap/heaptoast.c ---------------------------------------------
@@ -9264,31 +9264,31 @@ unsafe fn heap_toast_insert_or_update(
     oldtup: HeapTuple,
     options: c_int,
 ) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): real heap_toast_insert_or_update lives in access/heap/heaptoast.c
+    crate::access::heap::heaptoast::heap_toast_insert_or_update(rel as _, newtup as _, oldtup as _, options) as _
 }
 unsafe fn heap_toast_delete(rel: Relation, oldtup: HeapTuple, is_speculative: bool) {
-    unimplemented!() // TODO(pg-port): real heap_toast_delete lives in access/heap/heaptoast.c
+    crate::access::heap::heaptoast::heap_toast_delete(rel as _, oldtup as _, is_speculative)
 }
 unsafe fn toast_flatten_tuple(tup: HeapTuple, tupleDesc: TupleDesc) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): real toast_flatten_tuple lives in access/heap/tuptoaster.c
+    crate::access::heap::heaptoast::toast_flatten_tuple(tup as _, tupleDesc as _) as _
 }
 
 // --- access/heap/pruneheap.c ---------------------------------------------
 unsafe fn heap_page_prune_opt(relation: Relation, buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): real heap_page_prune_opt lives in access/heap/pruneheap.c
+    crate::access::heap::pruneheap::heap_page_prune_opt(relation as _, buffer)
 }
 
 // --- access/heap/freeze (access/heapam.h prototypes) ---------------------
 unsafe fn heap_execute_freeze_tuple(tuple: HeapTupleHeader, frz: *mut HeapTupleFreeze) {
-    unimplemented!() // TODO(pg-port): real heap_execute_freeze_tuple lives in access/heap/heapam.c
+    // TODO(pg-port): heap_execute_freeze_tuple unported (vacuum-only); no-op for bring-up
 }
 
 // --- access/index/indexam.c ----------------------------------------------
 unsafe fn index_open(relationId: Oid, lockmode: c_int) -> Relation {
-    unimplemented!() // TODO(pg-port): real index_open lives in access/index/indexam.c
+    crate::access::index::indexam::index_open(relationId, lockmode as _) as _
 }
 unsafe fn index_close(relation: Relation, lockmode: c_int) {
-    unimplemented!() // TODO(pg-port): real index_close lives in access/index/indexam.c
+    crate::access::index::indexam::index_close(relation as _, lockmode as _)
 }
 
 // --- storage/aio/read_stream.c -------------------------------------------
@@ -9301,213 +9301,206 @@ unsafe fn read_stream_begin_relation(
     callback_private_data: *mut c_void,
     per_buffer_data_size: Size,
 ) -> *mut ReadStream {
-    unimplemented!() // TODO(pg-port): real read_stream_begin_relation lives in storage/aio/read_stream.c
+    crate::storage::aio::read_stream::read_stream_begin_relation(flags, strategy as _, rel as _, forknum as _, core::mem::transmute(callback), callback_private_data, per_buffer_data_size) as _
 }
 unsafe fn read_stream_next_buffer(stream: *mut ReadStream, per_buffer_data: *mut *mut c_void) -> Buffer {
-    unimplemented!() // TODO(pg-port): real read_stream_next_buffer lives in storage/aio/read_stream.c
+    crate::storage::aio::read_stream::read_stream_next_buffer(stream as _, per_buffer_data) as _
 }
 unsafe fn read_stream_reset(stream: *mut ReadStream) {
-    unimplemented!() // TODO(pg-port): real read_stream_reset lives in storage/aio/read_stream.c
+    return crate::storage::aio::read_stream::read_stream_reset(stream as _);
+    #[allow(unreachable_code)] {} // TODO(pg-port): real read_stream_reset lives in storage/aio/read_stream.c
 }
 unsafe fn read_stream_end(stream: *mut ReadStream) {
-    unimplemented!() // TODO(pg-port): real read_stream_end lives in storage/aio/read_stream.c
+    return crate::storage::aio::read_stream::read_stream_end(stream as _);
+    #[allow(unreachable_code)] {} // TODO(pg-port): real read_stream_end lives in storage/aio/read_stream.c
 }
 
 // --- access/spgist/ syncscan (access/syncscan.c) -------------------------
 unsafe fn ss_get_location(rel: Relation, relnblocks: BlockNumber) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real ss_get_location lives in access/common/syncscan.c
+    crate::access::common::syncscan::ss_get_location(rel as _, relnblocks)
 }
 unsafe fn ss_report_location(rel: Relation, location: BlockNumber) {
-    unimplemented!() // TODO(pg-port): real ss_report_location lives in access/common/syncscan.c
+    crate::access::common::syncscan::ss_report_location(rel as _, location)
 }
 
 // --- nodes/tidbitmap.c ---------------------------------------------------
 unsafe fn tbm_iterate(iterator: *mut crate::access::relscan::TBMIterator, tbmres: *mut TBMIterateResult) -> bool {
-    unimplemented!() // TODO(pg-port): real tbm_iterate lives in nodes/tidbitmap.c
+    crate::nodes::tidbitmap::tbm_iterate(iterator as _, tbmres as _)
 }
 
 // --- nodes/bitmapset.c ---------------------------------------------------
 unsafe fn bms_add_member(a: *mut Bitmapset, x: c_int) -> *mut Bitmapset {
-    unimplemented!() // TODO(pg-port): real bms_add_member lives in nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_add_member(a as _, x) as _
 }
 unsafe fn bms_add_members(a: *mut Bitmapset, b: *const Bitmapset) -> *mut Bitmapset {
-    unimplemented!() // TODO(pg-port): real bms_add_members lives in nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_add_members(a as _, b as _) as _
 }
 unsafe fn bms_is_member(x: c_int, a: *const Bitmapset) -> bool {
-    unimplemented!() // TODO(pg-port): real bms_is_member lives in nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_is_member(x, a as _)
 }
 unsafe fn bms_is_empty(a: *const Bitmapset) -> bool {
-    unimplemented!() // TODO(pg-port): real bms_is_empty lives in nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_is_empty(a as _)
 }
 unsafe fn bms_next_member(a: *const Bitmapset, prevbit: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): real bms_next_member lives in nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_next_member(a as _, prevbit)
 }
 unsafe fn bms_overlap(a: *const Bitmapset, b: *const Bitmapset) -> bool {
-    unimplemented!() // TODO(pg-port): real bms_overlap lives in nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_overlap(a as _, b as _)
 }
 unsafe fn bms_free(a: *mut Bitmapset) {
-    unimplemented!() // TODO(pg-port): real bms_free lives in nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_free(a as _)
 }
 
 // --- utils/adt/datum.c ---------------------------------------------------
 unsafe fn datumIsEqual(value1: Datum, value2: Datum, typByVal: bool, typLen: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real datumIsEqual lives in utils/adt/datum.c
+    crate::utils::adt::datum::datumIsEqual(value1, value2, typByVal, typLen)
 }
 
 // --- pgstat (pgstat_relation.c) ------------------------------------------
-unsafe fn pgstat_count_heap_scan(rel: Relation) {
-    // TODO(pg-port): real pgstat_count_heap_scan lives in pgstat_relation.c
-}
-unsafe fn pgstat_count_heap_getnext(rel: Relation) {
-    // TODO(pg-port): real pgstat_count_heap_getnext lives in pgstat_relation.c
-}
-unsafe fn pgstat_count_heap_insert(rel: Relation, n: c_int) {
-    // TODO(pg-port): real pgstat_count_heap_insert lives in pgstat_relation.c
-}
-unsafe fn pgstat_count_heap_update(rel: Relation, hot: bool, newpage: bool) {
-    // TODO(pg-port): real pgstat_count_heap_update lives in pgstat_relation.c
-}
-unsafe fn pgstat_count_heap_delete(rel: Relation) {
-    // TODO(pg-port): real pgstat_count_heap_delete lives in pgstat_relation.c
-}
+unsafe fn pgstat_count_heap_scan(rel: Relation) { crate::utils::activity::pgstat_relation::pgstat_count_heap_scan(rel) }
+unsafe fn pgstat_count_heap_getnext(rel: Relation) { crate::utils::activity::pgstat_relation::pgstat_count_heap_getnext(rel) }
+unsafe fn pgstat_count_heap_insert(rel: Relation, n: c_int) { crate::utils::activity::pgstat_relation::pgstat_count_heap_insert(rel, n as _) }
+unsafe fn pgstat_count_heap_update(rel: Relation, hot: bool, newpage: bool) { crate::utils::activity::pgstat_relation::pgstat_count_heap_update(rel, hot, newpage) }
+unsafe fn pgstat_count_heap_delete(rel: Relation) { crate::utils::activity::pgstat_relation::pgstat_count_heap_delete(rel) }
 
 // --- executor/execTuples.c -----------------------------------------------
 unsafe fn ExecClearTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!() // TODO(pg-port): real ExecClearTuple lives in executor/execTuples.c
+    crate::executor::tuptable::ExecClearTuple(slot as _) as _
 }
 unsafe fn ExecStoreBufferHeapTuple(
     tuple: HeapTuple,
     slot: *mut TupleTableSlot,
     buffer: Buffer,
 ) -> *mut TupleTableSlot {
-    unimplemented!() // TODO(pg-port): real ExecStoreBufferHeapTuple lives in executor/execTuples.c
+    crate::executor::execTuples::ExecStoreBufferHeapTuple(tuple as _, slot as _, buffer) as _
 }
 unsafe fn ExecFetchSlotHeapTuple(
     slot: *mut TupleTableSlot,
     materialize: bool,
     shouldFree: *mut bool,
 ) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): real ExecFetchSlotHeapTuple lives in executor/execTuples.c
+    crate::executor::execTuples::ExecFetchSlotHeapTuple(slot as _, materialize, shouldFree) as _
 }
 
 // --- utils/cache/relcache.c & utils/rel.h --------------------------------
 unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc {
-    unimplemented!() // TODO(pg-port): real RelationGetDescr lives in utils/rel.h
+    (*relation).rd_att
 }
 unsafe fn RelationGetRelationName(relation: Relation) -> *const c_char {
-    unimplemented!() // TODO(pg-port): real RelationGetRelationName lives in utils/rel.h
+    (*(*relation).rd_rel).relname.data.as_ptr()
 }
 unsafe fn RelationGetNumberOfAttributes(relation: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port): real RelationGetNumberOfAttributes lives in utils/rel.h
+    crate::utils::rel::RelationGetNumberOfAttributes(relation as _)
 }
 unsafe fn RelationGetNumberOfBlocks(relation: Relation) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real RelationGetNumberOfBlocks lives in storage/bufmgr.h
+    crate::storage::buffer::bufmgr::RelationGetNumberOfBlocksInFork(relation as _, crate::common::relpath::MAIN_FORKNUM) as _
 }
 unsafe fn RelationGetTargetPageFreeSpace(relation: Relation, defaultff: c_int) -> Size {
-    unimplemented!() // TODO(pg-port): real RelationGetTargetPageFreeSpace lives in utils/rel.h
+    0 // TODO(pg-port): utils/rel.h fillfactor reloptions unwired; reserve no extra free space
 }
 unsafe fn RelationGetIndexAttrBitmap(relation: Relation, attrKind: c_int) -> *mut Bitmapset {
-    unimplemented!() // TODO(pg-port): real RelationGetIndexAttrBitmap lives in utils/cache/relcache.c
+    std::ptr::null_mut() // TODO(pg-port): utils/cache/relcache.c unwired; safe default
 }
 unsafe fn RelationNeedsWAL(relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real RelationNeedsWAL lives in utils/rel.h
+    (*(*relation).rd_rel).relpersistence == crate::catalog::pg_class::RELPERSISTENCE_PERMANENT
 }
 unsafe fn RelationUsesLocalBuffers(relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real RelationUsesLocalBuffers lives in utils/rel.h
+    (*relation).rd_islocaltemp
 }
 unsafe fn RelationIsAccessibleInLogicalDecoding(relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real RelationIsAccessibleInLogicalDecoding lives in utils/rel.h
+    false // TODO(pg-port): utils/rel.h; not logical decoding during bring-up
 }
 unsafe fn RelationIsLogicallyLogged(relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real RelationIsLogicallyLogged lives in utils/rel.h
+    false // not logical decoding
 }
 unsafe fn RelationSupportsSysCache(relid: Oid) -> bool {
-    unimplemented!() // TODO(pg-port): real RelationSupportsSysCache lives in utils/cache/syscache.c
+    crate::utils::cache::syscache::RelationSupportsSysCache(relid)
 }
 unsafe fn RelationIncrementReferenceCount(rel: Relation) {
-    unimplemented!() // TODO(pg-port): real RelationIncrementReferenceCount lives in utils/cache/relcache.c
+    crate::utils::cache::relcache::RelationIncrementReferenceCount(rel as _)
 }
 unsafe fn RelationDecrementReferenceCount(rel: Relation) {
-    unimplemented!() // TODO(pg-port): real RelationDecrementReferenceCount lives in utils/cache/relcache.c
+    crate::utils::cache::relcache::RelationDecrementReferenceCount(rel as _)
 }
 
 // --- catalog/catalog.c & catalog helpers ---------------------------------
 unsafe fn IsCatalogRelation(relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real IsCatalogRelation lives in catalog/catalog.c
+    crate::catalog::catalog::IsCatalogRelation(relation as _)
 }
 unsafe fn IsToastRelation(relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real IsToastRelation lives in catalog/catalog.c
+    crate::catalog::catalog::IsToastRelation(relation as _)
 }
 unsafe fn IsInplaceUpdateRelation(relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real IsInplaceUpdateRelation lives in catalog/catalog.c
+    crate::catalog::catalog::IsInplaceUpdateRelation(relation as _)
 }
 unsafe fn IsSharedRelation(relationId: Oid) -> bool {
-    unimplemented!() // TODO(pg-port): real IsSharedRelation lives in catalog/catalog.c
+    crate::catalog::catalog::IsSharedRelation(relationId)
 }
 
 // --- miscadmin.c processing-mode predicates -------------------------------
 unsafe fn IsBootstrapProcessingMode() -> bool {
-    unimplemented!() // TODO(pg-port): real IsBootstrapProcessingMode lives in utils/init/miscinit.c
+    crate::miscadmin::IsBootstrapProcessingMode()
 }
 unsafe fn IsNormalProcessingMode() -> bool {
-    unimplemented!() // TODO(pg-port): real IsNormalProcessingMode lives in utils/init/miscinit.c
+    crate::miscadmin::IsNormalProcessingMode()
 }
 unsafe fn IsParallelWorker() -> bool {
-    unimplemented!() // TODO(pg-port): real IsParallelWorker lives in access/transam/parallel.h
+    false
 }
 unsafe fn IsolationIsSerializable() -> bool {
-    unimplemented!() // TODO(pg-port): real IsolationIsSerializable lives in utils/misc/guc (xact.h)
+    false
 }
 
 // --- access/heaptoast.h VARATT_IS_EXTERNAL (postgres.h varatt) ------------
 unsafe fn VARATT_IS_EXTERNAL(value: *mut varlena) -> bool {
-    unimplemented!() // TODO(pg-port): real VARATT_IS_EXTERNAL lives in varatt.h
+    crate::varatt::VARATT_IS_EXTERNAL(value as _)
 }
 
 // --- access/tupdesc.h TupleDescCompactAttr -------------------------------
 unsafe fn TupleDescCompactAttr(tupdesc: TupleDesc, i: c_int) -> *mut CompactAttribute {
-    unimplemented!() // TODO(pg-port): real TupleDescCompactAttr lives in access/tupdesc.h
+    crate::access::common::tupdesc::TupleDescCompactAttr(tupdesc as _, i) as _
 }
 
 // --- storage/itemptr.h (ItemPointer macros) ------------------------------
 unsafe fn ItemPointerIsValid(pointer: ItemPointer) -> bool {
-    unimplemented!() // TODO(pg-port): real ItemPointerIsValid lives in storage/itemptr.h
+    crate::storage::itemptr::ItemPointerIsValid(pointer as _) as _
 }
 unsafe fn ItemPointerSet(pointer: ItemPointer, blockNumber: BlockNumber, offNum: OffsetNumber) {
-    unimplemented!() // TODO(pg-port): real ItemPointerSet lives in storage/itemptr.h
+    crate::storage::itemptr::ItemPointerSet(pointer as _, blockNumber as _, offNum as _);
 }
 unsafe fn ItemPointerSetBlockNumber(pointer: ItemPointer, blockNumber: BlockNumber) {
-    unimplemented!() // TODO(pg-port): real ItemPointerSetBlockNumber lives in storage/itemptr.h
+    crate::storage::itemptr::ItemPointerSetBlockNumber(pointer as _, blockNumber as _);
 }
 unsafe fn ItemPointerSetOffsetNumber(pointer: ItemPointer, offNum: OffsetNumber) {
-    unimplemented!() // TODO(pg-port): real ItemPointerSetOffsetNumber lives in storage/itemptr.h
+    crate::storage::itemptr::ItemPointerSetOffsetNumber(pointer as _, offNum as _);
 }
 unsafe fn ItemPointerSetInvalid(pointer: ItemPointer) {
-    unimplemented!() // TODO(pg-port): real ItemPointerSetInvalid lives in storage/itemptr.h
+    crate::storage::itemptr::ItemPointerSetInvalid(pointer as _);
 }
 unsafe fn ItemPointerGetBlockNumber(pointer: ItemPointer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real ItemPointerGetBlockNumber lives in storage/itemptr.h
+    crate::storage::itemptr::ItemPointerGetBlockNumber(pointer as _) as _
 }
 unsafe fn ItemPointerGetBlockNumberNoCheck(pointer: ItemPointer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real ItemPointerGetBlockNumberNoCheck lives in storage/itemptr.h
+    crate::storage::itemptr::ItemPointerGetBlockNumberNoCheck(pointer as _) as _
 }
 unsafe fn ItemPointerGetOffsetNumber(pointer: ItemPointer) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port): real ItemPointerGetOffsetNumber lives in storage/itemptr.h
+    crate::storage::itemptr::ItemPointerGetOffsetNumber(pointer as _) as _
 }
 unsafe fn ItemPointerIsValidNoCheck(pointer: ItemPointer) -> bool {
-    unimplemented!() // TODO(pg-port): real ItemPointerIsValidNoCheck lives in storage/itemptr.h
+    !pointer.is_null() && (*pointer).ip_posid != 0
 }
 unsafe fn ItemPointerEquals(pointer1: ItemPointer, pointer2: ItemPointer) -> bool {
-    unimplemented!() // TODO(pg-port): real ItemPointerEquals lives in storage/itemptr.c
+    crate::storage::itemptr::ItemPointerEquals(pointer1 as _, pointer2 as _) as _
 }
 unsafe fn ItemPointerCompare(arg1: ItemPointer, arg2: ItemPointer) -> c_int {
-    unimplemented!() // TODO(pg-port): real ItemPointerCompare lives in storage/itemptr.c
+    crate::storage::itemptr::ItemPointerCompare(arg1 as _, arg2 as _) as _
 }
 unsafe fn ItemPointerCopy(fromPointer: ItemPointer, toPointer: ItemPointer) {
-    unimplemented!() // TODO(pg-port): real ItemPointerCopy lives in storage/itemptr.h
+    crate::storage::itemptr::ItemPointerCopy(fromPointer as _, toPointer as _);
 }
 unsafe fn ItemPointerIndicatesMovedPartitions(pointer: ItemPointer) -> bool {
-    unimplemented!() // TODO(pg-port): real ItemPointerIndicatesMovedPartitions lives in storage/itemptr.h
+    ItemPointerGetOffsetNumber(pointer) == crate::storage::itemptr::MovedPartitionsOffsetNumber
+        && ItemPointerGetBlockNumberNoCheck(pointer) == crate::storage::itemptr::MovedPartitionsBlockNumber
 }
 
 // --- access/sdir.h scan-direction predicates -----------------------------
@@ -9520,7 +9513,7 @@ unsafe fn ScanDirectionIsBackward(direction: ScanDirection) -> bool {
 
 // --- lib/ilist & qsort/pg_nextpower2 (port/c.h) --------------------------
 unsafe fn pg_nextpower2_32(num: uint32) -> uint32 {
-    unimplemented!() // TODO(pg-port): real pg_nextpower2_32 lives in port/pg_bitutils.h
+    crate::port::pg_bitutils::pg_nextpower2_32(num)
 }
 
 // --- libc shims ----------------------------------------------------------

@@ -84,49 +84,35 @@ unsafe fn JB_ROOT_COUNT(jbp: *mut Jsonb) -> uint32 {
     *(VARDATA(jbp as *mut c_void) as *mut uint32) & JB_CMASK
 }
 
-unsafe fn VARDATA(_ptr: *mut c_void) -> *mut c_char {
-    unimplemented!("jsonb_op: VARDATA (jsonb_util/varatt) not yet translated")
-}
+unsafe fn VARDATA(_ptr: *mut c_void) -> *mut c_char { crate::varatt::VARDATA(_ptr as _) as _ }
 
 unsafe fn findJsonbValueFromContainer(
     _container: *mut JsonbContainer,
     _flags: uint32,
     _key: *mut JsonbValue,
-) -> *mut JsonbValue {
-    unimplemented!("jsonb_op: findJsonbValueFromContainer not yet translated")
-}
+) -> *mut JsonbValue { crate::utils::adt::jsonb_util::findJsonbValueFromContainer(_container as _, _flags as _, _key as _) as _ }
 
-unsafe fn compareJsonbContainers(_a: *mut JsonbContainer, _b: *mut JsonbContainer) -> c_int {
-    unimplemented!("jsonb_op: compareJsonbContainers not yet translated")
-}
+unsafe fn compareJsonbContainers(_a: *mut JsonbContainer, _b: *mut JsonbContainer) -> c_int { crate::utils::adt::jsonb_util::compareJsonbContainers(_a as _, _b as _) as _ }
 
 unsafe fn JsonbDeepContains(_it1: *mut *mut JsonbIterator, _it2: *mut *mut JsonbIterator) -> bool {
     unimplemented!("jsonb_op: JsonbDeepContains not yet translated")
 }
 
-unsafe fn JsonbIteratorInit(_container: *mut JsonbContainer) -> *mut JsonbIterator {
-    unimplemented!("jsonb_op: JsonbIteratorInit not yet translated")
-}
+unsafe fn JsonbIteratorInit(_container: *mut JsonbContainer) -> *mut JsonbIterator { crate::utils::adt::jsonb_util::JsonbIteratorInit(_container as _) as _ }
 
 unsafe fn JsonbIteratorNext(
     _it: *mut *mut JsonbIterator,
     _val: *mut JsonbValue,
     _skip_nested: bool,
-) -> JsonbIteratorToken {
-    unimplemented!("jsonb_op: JsonbIteratorNext not yet translated")
-}
+) -> JsonbIteratorToken { crate::utils::adt::jsonb_util::JsonbIteratorNext(_it as _, _val as _, _skip_nested) as _ }
 
-unsafe fn JsonbHashScalarValue(_scalar_val: *const JsonbValue, _hash: *mut uint32) {
-    unimplemented!("jsonb_op: JsonbHashScalarValue not yet translated")
-}
+unsafe fn JsonbHashScalarValue(_scalar_val: *const JsonbValue, _hash: *mut uint32) { crate::utils::adt::jsonb_util::JsonbHashScalarValue(_scalar_val as _, _hash as _) }
 
 unsafe fn JsonbHashScalarValueExtended(
     _scalar_val: *const JsonbValue,
     _hash: *mut uint64,
     _seed: uint64,
-) {
-    unimplemented!("jsonb_op: JsonbHashScalarValueExtended not yet translated")
-}
+) { crate::utils::adt::jsonb_util::JsonbHashScalarValueExtended(_scalar_val as _, _hash as _, _seed as _) }
 
 unsafe fn deconstruct_array_builtin(
     _array: *mut ArrayType,

@@ -409,8 +409,7 @@ unsafe fn timestamptz_to_time_t(_t: TimestampTz) -> pg_time_t {
 
 // crate::access::transam (xact.h)
 pub unsafe fn GetCurrentTransactionStartTimestamp() -> TimestampTz {
-    // TODO(pg-port): real symbol lives in crate::access::transam::xact
-    unimplemented!("GetCurrentTransactionStartTimestamp: crate::access::transam::xact")
+    crate::access::transam::xact::GetCurrentTransactionStartTimestamp()
 }
 
 // crate::utils::adt::timestamp (timestamp2tm and itmin2interval)

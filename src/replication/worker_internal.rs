@@ -211,237 +211,152 @@ extern "C" {
 
     /* Worker and subscription objects. */
     pub static mut MySubscription: *mut Subscription;
-    pub static mut MyLogicalRepWorker: *mut LogicalRepWorker;
 
     pub static mut in_remote_transaction: bool;
 
     pub static mut InitializingApplyWorker: bool;
 }
 
-pub unsafe fn logicalrep_worker_attach(_slot: c_int) {
-    unimplemented!()
-}
+/* Pointer to this backend's LogicalRepWorker slot (worker.c global). Defined here
+ * (rather than extern) so all importers share one symbol; null during bring-up. */
+pub static mut MyLogicalRepWorker: *mut LogicalRepWorker = core::ptr::null_mut();
+
+pub unsafe fn logicalrep_worker_attach(slot: c_int) { crate::replication::logical::launcher::logicalrep_worker_attach(slot as _) }
 
 pub unsafe fn logicalrep_worker_find(
-    _subid: Oid,
-    _relid: Oid,
-    _only_running: bool,
-) -> *mut LogicalRepWorker {
-    unimplemented!()
-}
+    subid: Oid,
+    relid: Oid,
+    only_running: bool,
+) -> *mut LogicalRepWorker { crate::replication::logical::launcher::logicalrep_worker_find(subid as _, relid as _, only_running) }
 
 pub unsafe fn logicalrep_workers_find(
-    _subid: Oid,
-    _only_running: bool,
-    _acquire_lock: bool,
-) -> *mut List {
-    unimplemented!()
-}
+    subid: Oid,
+    only_running: bool,
+    acquire_lock: bool,
+) -> *mut List { crate::replication::logical::launcher::logicalrep_workers_find(subid as _, only_running, acquire_lock) }
 
 pub unsafe fn logicalrep_worker_launch(
-    _wtype: LogicalRepWorkerType,
-    _dbid: Oid,
-    _subid: Oid,
-    _subname: *const c_char,
-    _userid: Oid,
-    _relid: Oid,
-    _subworker_dsm: dsm_handle,
-) -> bool {
-    unimplemented!()
-}
+    wtype: LogicalRepWorkerType,
+    dbid: Oid,
+    subid: Oid,
+    subname: *const c_char,
+    userid: Oid,
+    relid: Oid,
+    subworker_dsm: dsm_handle,
+) -> bool { crate::replication::logical::launcher::logicalrep_worker_launch(wtype, dbid as _, subid as _, subname as _, userid as _, relid as _, subworker_dsm) }
 
-pub unsafe fn logicalrep_worker_stop(_subid: Oid, _relid: Oid) {
-    unimplemented!()
-}
+pub unsafe fn logicalrep_worker_stop(subid: Oid, relid: Oid) { crate::replication::logical::launcher::logicalrep_worker_stop(subid as _, relid as _) }
 
-pub unsafe fn logicalrep_pa_worker_stop(_winfo: *mut ParallelApplyWorkerInfo) {
-    unimplemented!()
-}
+pub unsafe fn logicalrep_pa_worker_stop(winfo: *mut ParallelApplyWorkerInfo) { crate::replication::logical::launcher::logicalrep_pa_worker_stop(winfo as _) }
 
-pub unsafe fn logicalrep_worker_wakeup(_subid: Oid, _relid: Oid) {
-    unimplemented!()
-}
+pub unsafe fn logicalrep_worker_wakeup(subid: Oid, relid: Oid) { crate::replication::logical::launcher::logicalrep_worker_wakeup(subid as _, relid as _) }
 
-pub unsafe fn logicalrep_worker_wakeup_ptr(_worker: *mut LogicalRepWorker) {
-    unimplemented!()
-}
+pub unsafe fn logicalrep_worker_wakeup_ptr(worker: *mut LogicalRepWorker) { crate::replication::logical::launcher::logicalrep_worker_wakeup_ptr(worker as _) }
 
-pub unsafe fn logicalrep_sync_worker_count(_subid: Oid) -> c_int {
-    unimplemented!()
-}
+pub unsafe fn logicalrep_sync_worker_count(subid: Oid) -> c_int { crate::replication::logical::launcher::logicalrep_sync_worker_count(subid as _) }
 
 pub unsafe fn ReplicationOriginNameForLogicalRep(
-    _suboid: Oid,
-    _relid: Oid,
-    _originname: *mut c_char,
-    _szoriginname: Size,
-) {
-    unimplemented!()
-}
+    suboid: Oid,
+    relid: Oid,
+    originname: *mut c_char,
+    szoriginname: Size,
+) { crate::replication::logical::worker::ReplicationOriginNameForLogicalRep(suboid as _, relid as _, originname as _, szoriginname) }
 
-pub unsafe fn AllTablesyncsReady() -> bool {
-    unimplemented!()
-}
+pub unsafe fn AllTablesyncsReady() -> bool { crate::replication::logical::tablesync::AllTablesyncsReady() }
 
-pub unsafe fn UpdateTwoPhaseState(_suboid: Oid, _new_state: c_char) {
-    unimplemented!()
-}
+pub unsafe fn UpdateTwoPhaseState(suboid: Oid, new_state: c_char) { crate::replication::logical::tablesync::UpdateTwoPhaseState(suboid as _, new_state as _) }
 
-pub unsafe fn process_syncing_tables(_current_lsn: XLogRecPtr) {
-    unimplemented!()
-}
+pub unsafe fn process_syncing_tables(current_lsn: XLogRecPtr) { crate::replication::logical::tablesync::process_syncing_tables(current_lsn as _) }
 
-pub unsafe fn invalidate_syncing_table_states(_arg: Datum, _cacheid: c_int, _hashvalue: uint32) {
-    unimplemented!()
-}
+pub unsafe fn invalidate_syncing_table_states(arg: Datum, cacheid: c_int, hashvalue: uint32) { crate::replication::logical::tablesync::invalidate_syncing_table_states(arg as _, cacheid as _, hashvalue as _) }
 
-pub unsafe fn stream_start_internal(_xid: TransactionId, _first_segment: bool) {
-    unimplemented!()
-}
+pub unsafe fn stream_start_internal(xid: TransactionId, first_segment: bool) { crate::replication::logical::worker::stream_start_internal(xid as _, first_segment) }
 
-pub unsafe fn stream_stop_internal(_xid: TransactionId) {
-    unimplemented!()
-}
+pub unsafe fn stream_stop_internal(xid: TransactionId) { crate::replication::logical::worker::stream_stop_internal(xid as _) }
 
 /* Common streaming function to apply all the spooled messages */
 pub unsafe fn apply_spooled_messages(
-    _stream_fileset: *mut FileSet,
-    _xid: TransactionId,
-    _lsn: XLogRecPtr,
-) {
-    unimplemented!()
-}
+    stream_fileset: *mut FileSet,
+    xid: TransactionId,
+    lsn: XLogRecPtr,
+) { crate::replication::logical::worker::apply_spooled_messages(stream_fileset as _, xid as _, lsn as _) }
 
-pub unsafe fn apply_dispatch(_s: StringInfo) {
-    unimplemented!()
-}
+pub unsafe fn apply_dispatch(s: StringInfo) { crate::replication::logical::worker::apply_dispatch(s as _) }
 
-pub unsafe fn maybe_reread_subscription() {
-    unimplemented!()
-}
+pub unsafe fn maybe_reread_subscription() { crate::replication::logical::worker::maybe_reread_subscription() }
 
-pub unsafe fn stream_cleanup_files(_subid: Oid, _xid: TransactionId) {
-    unimplemented!()
-}
+pub unsafe fn stream_cleanup_files(subid: Oid, xid: TransactionId) { crate::replication::logical::worker::stream_cleanup_files(subid as _, xid as _) }
 
 pub unsafe fn set_stream_options(
-    _options: *mut WalRcvStreamOptions,
-    _slotname: *mut c_char,
-    _origin_startpos: *mut XLogRecPtr,
-) {
-    unimplemented!()
-}
+    options: *mut WalRcvStreamOptions,
+    slotname: *mut c_char,
+    origin_startpos: *mut XLogRecPtr,
+) { crate::replication::logical::worker::set_stream_options(options as _, slotname as _, origin_startpos as _) }
 
-pub unsafe fn start_apply(_origin_startpos: XLogRecPtr) {
-    unimplemented!()
-}
+pub unsafe fn start_apply(origin_startpos: XLogRecPtr) { crate::replication::logical::worker::start_apply(origin_startpos as _) }
 
-pub unsafe fn InitializeLogRepWorker() {
-    unimplemented!()
-}
+pub unsafe fn InitializeLogRepWorker() { crate::replication::logical::worker::InitializeLogRepWorker() }
 
-pub unsafe fn SetupApplyOrSyncWorker(_worker_slot: c_int) {
-    unimplemented!()
-}
+pub unsafe fn SetupApplyOrSyncWorker(worker_slot: c_int) { crate::replication::logical::worker::SetupApplyOrSyncWorker(worker_slot as _) }
 
-pub unsafe fn DisableSubscriptionAndExit() {
-    unimplemented!()
-}
+pub unsafe fn DisableSubscriptionAndExit() { crate::replication::logical::worker::DisableSubscriptionAndExit() }
 
-pub unsafe fn store_flush_position(_remote_lsn: XLogRecPtr, _local_lsn: XLogRecPtr) {
-    unimplemented!()
-}
+pub unsafe fn store_flush_position(remote_lsn: XLogRecPtr, local_lsn: XLogRecPtr) { crate::replication::logical::worker::store_flush_position(remote_lsn as _, local_lsn as _) }
 
 /* Function for apply error callback */
 pub unsafe fn apply_error_callback(_arg: *mut c_void) {
     unimplemented!()
 }
 
-pub unsafe fn set_apply_error_context_origin(_originname: *mut c_char) {
-    unimplemented!()
-}
+pub unsafe fn set_apply_error_context_origin(originname: *mut c_char) { crate::replication::logical::worker::set_apply_error_context_origin(originname as _) }
 
 /* Parallel apply worker setup and interactions */
-pub unsafe fn pa_allocate_worker(_xid: TransactionId) {
-    unimplemented!()
-}
+pub unsafe fn pa_allocate_worker(xid: TransactionId) { unimplemented!() }
 
-pub unsafe fn pa_find_worker(_xid: TransactionId) -> *mut ParallelApplyWorkerInfo {
-    unimplemented!()
-}
+pub unsafe fn pa_find_worker(xid: TransactionId) -> *mut ParallelApplyWorkerInfo { unimplemented!() }
 
-pub unsafe fn pa_detach_all_error_mq() {
-    unimplemented!()
-}
+pub unsafe fn pa_detach_all_error_mq() { unimplemented!() }
 
 pub unsafe fn pa_send_data(
-    _winfo: *mut ParallelApplyWorkerInfo,
-    _nbytes: Size,
-    _data: *const c_void,
-) -> bool {
-    unimplemented!()
-}
+    winfo: *mut ParallelApplyWorkerInfo,
+    nbytes: Size,
+    data: *const c_void,
+) -> bool { unimplemented!() }
 
 pub unsafe fn pa_switch_to_partial_serialize(
-    _winfo: *mut ParallelApplyWorkerInfo,
-    _stream_locked: bool,
-) {
-    unimplemented!()
-}
+    winfo: *mut ParallelApplyWorkerInfo,
+    stream_locked: bool,
+) { unimplemented!() }
 
 pub unsafe fn pa_set_xact_state(
-    _wshared: *mut ParallelApplyWorkerShared,
-    _xact_state: ParallelTransState,
-) {
-    unimplemented!()
-}
+    wshared: *mut ParallelApplyWorkerShared,
+    xact_state: ParallelTransState,
+) { unimplemented!() }
 
-pub unsafe fn pa_set_stream_apply_worker(_winfo: *mut ParallelApplyWorkerInfo) {
-    unimplemented!()
-}
+pub unsafe fn pa_set_stream_apply_worker(winfo: *mut ParallelApplyWorkerInfo) { unimplemented!() }
 
-pub unsafe fn pa_start_subtrans(_current_xid: TransactionId, _top_xid: TransactionId) {
-    unimplemented!()
-}
+pub unsafe fn pa_start_subtrans(current_xid: TransactionId, top_xid: TransactionId) { unimplemented!() }
 
-pub unsafe fn pa_reset_subtrans() {
-    unimplemented!()
-}
+pub unsafe fn pa_reset_subtrans() { unimplemented!() }
 
-pub unsafe fn pa_stream_abort(_abort_data: *mut LogicalRepStreamAbortData) {
-    unimplemented!()
-}
+pub unsafe fn pa_stream_abort(abort_data: *mut LogicalRepStreamAbortData) { unimplemented!() }
 
 pub unsafe fn pa_set_fileset_state(
-    _wshared: *mut ParallelApplyWorkerShared,
-    _fileset_state: PartialFileSetState,
-) {
-    unimplemented!()
-}
+    wshared: *mut ParallelApplyWorkerShared,
+    fileset_state: PartialFileSetState,
+) { unimplemented!() }
 
-pub unsafe fn pa_lock_stream(_xid: TransactionId, _lockmode: LOCKMODE) {
-    unimplemented!()
-}
+pub unsafe fn pa_lock_stream(xid: TransactionId, lockmode: LOCKMODE) { unimplemented!() }
 
-pub unsafe fn pa_unlock_stream(_xid: TransactionId, _lockmode: LOCKMODE) {
-    unimplemented!()
-}
+pub unsafe fn pa_unlock_stream(xid: TransactionId, lockmode: LOCKMODE) { unimplemented!() }
 
-pub unsafe fn pa_lock_transaction(_xid: TransactionId, _lockmode: LOCKMODE) {
-    unimplemented!()
-}
+pub unsafe fn pa_lock_transaction(xid: TransactionId, lockmode: LOCKMODE) { unimplemented!() }
 
-pub unsafe fn pa_unlock_transaction(_xid: TransactionId, _lockmode: LOCKMODE) {
-    unimplemented!()
-}
+pub unsafe fn pa_unlock_transaction(xid: TransactionId, lockmode: LOCKMODE) { unimplemented!() }
 
-pub unsafe fn pa_decr_and_wait_stream_block() {
-    unimplemented!()
-}
+pub unsafe fn pa_decr_and_wait_stream_block() { unimplemented!() }
 
-pub unsafe fn pa_xact_finish(_winfo: *mut ParallelApplyWorkerInfo, _remote_lsn: XLogRecPtr) {
-    unimplemented!()
-}
+pub unsafe fn pa_xact_finish(winfo: *mut ParallelApplyWorkerInfo, remote_lsn: XLogRecPtr) { unimplemented!() }
 
 #[inline]
 pub unsafe fn isParallelApplyWorker(worker: *const LogicalRepWorker) -> bool {

@@ -66,6 +66,7 @@ pub unsafe fn qunique(
 /// Like qunique(), but takes a comparator with an extra user data argument
 /// which is passed through, for compatibility with qsort_arg().
 #[inline]
+#[no_mangle]
 pub unsafe fn qunique_arg(
     array: *mut c_void,
     elements: usize,

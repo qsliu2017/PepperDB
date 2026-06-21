@@ -52,9 +52,7 @@ unsafe fn IsTransactionState() -> bool {
     unimplemented!() // TODO: access/transam/xact.c
 }
 
-unsafe fn GetCurrentTransactionId() -> crate::c::TransactionId {
-    unimplemented!() // TODO: access/transam/xact.c
-}
+unsafe fn GetCurrentTransactionId() -> crate::c::TransactionId { crate::access::transam::xact::GetCurrentTransactionId() }
 
 unsafe fn XLogBeginInsert() {
     unimplemented!() // TODO: access/transam/xloginsert.c
@@ -64,17 +62,13 @@ unsafe fn XLogRegisterData(_data: *mut c_char, _len: c_int) {
     unimplemented!() // TODO: access/transam/xloginsert.c
 }
 
-unsafe fn XLogSetRecordFlags(_flags: uint8) {
-    unimplemented!() // TODO: access/transam/xloginsert.c
-}
+unsafe fn XLogSetRecordFlags(flags: uint8) { crate::access::transam::xloginsert::XLogSetRecordFlags(flags as _) }
 
 unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
     unimplemented!() // TODO: access/transam/xloginsert.c
 }
 
-unsafe fn XLogFlush(_record: XLogRecPtr) {
-    unimplemented!() // TODO: access/transam/xlog.c
-}
+unsafe fn XLogFlush(record: XLogRecPtr) { crate::access::transam::xlog::XLogFlush(record as _) }
 
 /*
  * Generic logical decoding message wal record.

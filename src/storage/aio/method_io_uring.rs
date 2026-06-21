@@ -574,7 +574,7 @@ unsafe extern "C" fn pgaio_uring_completion_error_callback(arg: *mut c_void) {
 unsafe fn pgaio_uring_drain_locked(context: *mut PgAioUringContext) {
     let mut ready: c_int;
     let orig_ready: c_int;
-    let mut errcallback: ErrorContextCallback = std::mem::zeroed();
+    let mut errcallback: ErrorContextCallback = core::mem::zeroed();
 
     Assert!(LWLockHeldByMeInMode(&mut (*context).completion_lock, LW_EXCLUSIVE));
 

@@ -36,7 +36,8 @@ use crate::utils::pgstat_kind::{
 
 // LWLock API from pgstat (stub that matches the rest of the activity module).
 use crate::utils::activity::pgstat::{
-    LWLock, LWLockAcquire, LWLockInitialize, LWLockRelease, LW_EXCLUSIVE, LWTRANCHE_PGSTATS_DATA,
+    LWLock, LWLockAcquire, LWLockInitialize, LWLockRelease, LW_EXCLUSIVE, LW_SHARED,
+    LWTRANCHE_PGSTATS_DATA,
 };
 
 // Datum conversions -- live in crate::postgres via prelude.
@@ -48,7 +49,7 @@ use crate::lib::dshash::{
     dshash_find_or_insert, dshash_get_hash_table_handle, dshash_memcpy, dshash_parameters,
     dshash_release_lock, dshash_seq_init, dshash_seq_next, dshash_seq_status, dshash_seq_term,
     dshash_table, DSA_ALLOC_NO_OOM, DSA_ALLOC_ZERO,
-    InvalidDsaPointer, LW_SHARED,
+    InvalidDsaPointer,
 };
 // dsa_pointer from dshash (the canonical ported location).
 use crate::lib::dshash::{dsa_pointer, dshash_attach};
@@ -80,47 +81,54 @@ unsafe fn dsa_create_in_place(
     _tranche_id: c_int,
     _segment: *mut c_void,
 ) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real dsa_create_in_place lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_create_in_place_ext(
+        _place,
+        _size,
+        _tranche_id,
+        _segment as _,
+        crate::utils::mmgr::dsa::DSA_DEFAULT_INIT_SEGMENT_SIZE,
+        crate::utils::mmgr::dsa::DSA_MAX_SEGMENT_SIZE,
+    ) as *mut c_void
 }
 
 unsafe fn dsa_attach_in_place(_place: *mut c_void, _segment: *mut c_void) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real dsa_attach_in_place lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_attach_in_place(_place, _segment as _) as *mut c_void
 }
 
 unsafe fn dsa_pin(_area: *mut c_void) {
-    unimplemented!() // TODO(pg-port): real dsa_pin lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_pin(_area as _)
 }
 
 unsafe fn dsa_pin_mapping(_area: *mut c_void) {
-    unimplemented!() // TODO(pg-port): real dsa_pin_mapping lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_pin_mapping(_area as _)
 }
 
 unsafe fn dsa_detach(_area: *mut c_void) {
-    unimplemented!() // TODO(pg-port): real dsa_detach lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_detach(_area as _)
 }
 
 unsafe fn dsa_release_in_place(_place: *mut c_void) {
-    unimplemented!() // TODO(pg-port): real dsa_release_in_place lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_release_in_place(_place)
 }
 
 unsafe fn dsa_minimum_size() -> Size {
-    unimplemented!() // TODO(pg-port): real dsa_minimum_size lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_minimum_size()
 }
 
 unsafe fn dsa_set_size_limit(_area: *mut c_void, _limit: i64) {
-    unimplemented!() // TODO(pg-port): real dsa_set_size_limit lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_set_size_limit(_area as _, _limit as _)
 }
 
 unsafe fn dsa_allocate_extended(_area: *mut c_void, _size: Size, _flags: c_int) -> dsa_pointer {
-    unimplemented!() // TODO(pg-port): real dsa_allocate_extended lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_allocate_extended(_area as _, _size, _flags) as _
 }
 
 unsafe fn dsa_get_address(_area: *mut c_void, _ptr: dsa_pointer) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real dsa_get_address lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_get_address(_area as _, _ptr as _)
 }
 
 unsafe fn dsa_free(_area: *mut c_void, _ptr: dsa_pointer) {
-    unimplemented!() // TODO(pg-port): real dsa_free lives in utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_free(_area as _, _ptr as _)
 }
 
 // ---- stubs for atomic u64 operations not yet in the public atomics API -------
@@ -128,34 +136,34 @@ unsafe fn dsa_free(_area: *mut c_void, _ptr: dsa_pointer) {
 // live in port/atomics.h
 
 unsafe fn pg_atomic_init_u64(_ptr: &pg_atomic_uint64, _val: u64) {
-    unimplemented!() // TODO(pg-port): real pg_atomic_init_u64 lives in port/atomics.h
+    crate::port::atomics::generic::pg_atomic_init_u64_impl(_ptr, _val)
 }
 
 unsafe fn pg_atomic_read_u64(_ptr: &pg_atomic_uint64) -> u64 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_read_u64 lives in port/atomics.h
+    crate::port::atomics::generic::pg_atomic_read_u64_impl(_ptr)
 }
 
 unsafe fn pg_atomic_fetch_add_u64(_ptr: &pg_atomic_uint64, _add: i64) -> u64 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_fetch_add_u64 lives in port/atomics.h
+    crate::port::atomics::generic::pg_atomic_fetch_add_u64_impl(_ptr, _add)
 }
 
 unsafe fn pg_atomic_fetch_sub_u32(_ptr: &pg_atomic_uint32, _sub: i32) -> u32 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_fetch_sub_u32 lives in port/atomics.h
+    crate::port::atomics::generic::pg_atomic_fetch_sub_u32_impl(_ptr, _sub)
 }
 
 // ---- stubs for ShmemInitStruct / ShmemAlloc (storage/shmem.h) ---------------
 // TODO(pg-port): real implementations live in storage/ipc/shmem.c
 
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _found)
 }
 
 unsafe fn ShmemAlloc(_size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real ShmemAlloc lives in storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemAlloc(_size)
 }
 
 unsafe fn add_size(_s1: Size, _s2: Size) -> Size {
-    unimplemented!() // TODO(pg-port): real add_size lives in storage/ipc/shmem.c
+    crate::storage::ipc::shmem::add_size(_s1, _s2)
 }
 
 // ---- stubs for IsUnderPostmaster (miscadmin.h) --------------------------------
@@ -173,7 +181,13 @@ const LWTRANCHE_PGSTATS_HASH: c_int = 0; // TODO(pg-port): storage/lwlock.h
 // TODO(pg-port): real LWLockConditionalAcquire lives in storage/lwlock.c
 
 unsafe fn LWLockConditionalAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real LWLockConditionalAcquire lives in storage/lwlock.c
+    use crate::storage::lmgr::lwlock::LWLockMode;
+    let mode = if _mode == 1 {
+        LWLockMode::LW_SHARED
+    } else {
+        LWLockMode::LW_EXCLUSIVE
+    };
+    crate::storage::lmgr::lwlock::LWLockConditionalAcquire(_lock as _, mode)
 }
 
 // ---- OidIsValid (c.h) ---------------------------------------------------------
@@ -1545,14 +1559,14 @@ unsafe fn pgstat_setup_memcxt() {
     if pgStatSharedRefContext.is_null() {
         pgStatSharedRefContext = AllocSetContextCreate!(
             TopMemoryContext,
-            "PgStat Shared Ref",
+            c"PgStat Shared Ref".as_ptr(),
             ALLOCSET_SMALL_SIZES
         );
     }
     if pgStatEntryRefHashContext.is_null() {
         pgStatEntryRefHashContext = AllocSetContextCreate!(
             TopMemoryContext,
-            "PgStat Shared Ref Hash",
+            c"PgStat Shared Ref Hash".as_ptr(),
             ALLOCSET_SMALL_SIZES
         );
     }

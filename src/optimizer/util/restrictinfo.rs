@@ -121,8 +121,8 @@ unsafe fn rinfo_is_pushed_down(rinfo: *const RestrictInfo, joinrelids: Relids) -
  * is safe (it only suppresses an optimization), but not exact.
  */
 // TODO(pg-port): optimizer/clauses.c contain_leaked_vars
-unsafe fn contain_leaked_vars(_clause: *mut Node) -> bool {
-    false
+unsafe fn contain_leaked_vars(clause: *mut Node) -> bool {
+    crate::optimizer::util::clauses::contain_leaked_vars(clause)
 }
 
 /*

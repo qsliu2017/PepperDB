@@ -105,16 +105,16 @@ const PqMsg_RowDescription: c_char = b'T' as c_char;
 //   (pg_server_to_client) is translated.
 // ----------------------------------------------------------------------------
 unsafe fn pq_writestring(buf: StringInfo, str: *const c_char) {
-    let _ = (buf, str);
-    // C body:
-    //   int   slen = strlen(str);
-    //   char *p = pg_server_to_client(str, slen);
-    //   if (p != str) slen = strlen(p);
-    //   Assert(buf->len + slen + 1 <= buf->maxlen);
-    //   memcpy(buf->data + buf->len, p, slen + 1);
-    //   buf->len += slen + 1;
-    //   if (p != str) pfree(p);
-    unimplemented!("pq_writestring: mb/mbutils (pg_server_to_client) not yet translated")
+    // No encoding conversion: client and server encodings match in this build, so
+    // pg_server_to_client is the identity.  Append the string plus its NUL.
+    let slen = strlen(str);
+    enlargeStringInfo(buf, (slen + 1) as c_int);
+    core::ptr::copy_nonoverlapping(
+        str as *const u8,
+        (*buf).data.add((*buf).len as usize) as *mut u8,
+        slen + 1,
+    );
+    (*buf).len += (slen + 1) as c_int;
 }
 
 // ----------------------------------------------------------------------------
@@ -150,8 +150,7 @@ pub type Portal = *mut PortalData;
  * TODO(pg-port): needs tcop/pquery.c (FetchPortalTargetList) + utils/portal.c.
  */
 unsafe fn FetchPortalTargetList(portal: Portal) -> *mut List {
-    let _ = portal;
-    unimplemented!("FetchPortalTargetList: tcop/pquery.c not yet translated")
+    crate::tcop::pquery::FetchPortalTargetList(portal as _) as _
 }
 
 // ----------------------------------------------------------------------------
@@ -167,10 +166,7 @@ unsafe fn FetchPortalTargetList(portal: Portal) -> *mut List {
  *
  * TODO(pg-port): needs utils/cache/lsyscache.c + utils/cache/syscache.c.
  */
-unsafe fn getTypeOutputInfo(r#type: Oid, typOutput: *mut Oid, typIsVarlena: *mut bool) {
-    let _ = (r#type, typOutput, typIsVarlena);
-    unimplemented!("getTypeOutputInfo: lsyscache (TYPEOID syscache) not yet translated")
-}
+unsafe fn getTypeOutputInfo(r#type: Oid, typOutput: *mut Oid, typIsVarlena: *mut bool) { crate::utils::cache::lsyscache::getTypeOutputInfo(r#type, typOutput as _, typIsVarlena as _) }
 
 /*
  * getTypeBinaryOutputInfo (utils/cache/lsyscache.c) -- as above, but for the
@@ -178,10 +174,7 @@ unsafe fn getTypeOutputInfo(r#type: Oid, typOutput: *mut Oid, typIsVarlena: *mut
  *
  * STUBBED: same dependency as getTypeOutputInfo.
  */
-unsafe fn getTypeBinaryOutputInfo(r#type: Oid, typSend: *mut Oid, typIsVarlena: *mut bool) {
-    let _ = (r#type, typSend, typIsVarlena);
-    unimplemented!("getTypeBinaryOutputInfo: lsyscache (TYPEOID syscache) not yet translated")
-}
+unsafe fn getTypeBinaryOutputInfo(r#type: Oid, typSend: *mut Oid, typIsVarlena: *mut bool) { crate::utils::cache::lsyscache::getTypeBinaryOutputInfo(r#type, typSend as _, typIsVarlena as _) }
 
 /*
  * getBaseTypeAndTypmod (utils/cache/lsyscache.c) -- if the given type is a
@@ -194,10 +187,7 @@ unsafe fn getTypeBinaryOutputInfo(r#type: Oid, typSend: *mut Oid, typIsVarlena: 
  *
  * TODO(pg-port): needs utils/cache/lsyscache.c + utils/cache/syscache.c.
  */
-unsafe fn getBaseTypeAndTypmod(typid: Oid, typmod: *mut int32) -> Oid {
-    let _ = (typid, typmod);
-    unimplemented!("getBaseTypeAndTypmod: lsyscache (TYPEOID syscache) not yet translated")
-}
+unsafe fn getBaseTypeAndTypmod(typid: Oid, typmod: *mut int32) -> Oid { crate::utils::cache::lsyscache::getBaseTypeAndTypmod(typid, typmod as _) }
 
 // ----------------------------------------------------------------------------
 //   utils/memdebug.h: VALGRIND_CHECK_MEM_IS_DEFINED is a no-op outside Valgrind.
@@ -312,7 +302,7 @@ unsafe fn printtup_startup(self_: *mut DestReceiver, _operation: c_int, typeinfo
      */
     (*myState).tmpcontext = AllocSetContextCreate!(
         CurrentMemoryContext,
-        "printtup",
+        c"printtup".as_ptr(),
         ALLOCSET_DEFAULT_SIZES
     );
 

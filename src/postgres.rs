@@ -32,6 +32,7 @@ pub const FIELDNO_NULLABLE_DATUM_ISNULL: usize = 1;
 
 /// `DatumGetBool`: any nonzero value is true.
 #[inline]
+#[no_mangle]
 pub fn DatumGetBool(X: Datum) -> bool {
     X != 0
 }
@@ -144,6 +145,12 @@ pub fn PointerGetDatum(X: *const c_void) -> Datum {
     X as Datum
 }
 
+/// `NameGetDatum`. Returns datum representation for a name.
+#[inline]
+pub fn NameGetDatum(X: *const crate::c::NameData) -> Datum {
+    CStringGetDatum(X as *const c_char)
+}
+
 /// `DatumGetCString`.
 #[inline]
 pub fn DatumGetCString(X: Datum) -> *mut c_char {
@@ -216,6 +223,7 @@ pub fn Float4GetDatum(X: float4) -> Datum {
 /// # Safety
 /// See [`DatumGetInt64`].
 #[inline]
+#[no_mangle]
 pub unsafe fn DatumGetFloat8(X: Datum) -> float8 {
     if USE_FLOAT8_BYVAL {
         f64::from_bits(DatumGetInt64(X) as u64)

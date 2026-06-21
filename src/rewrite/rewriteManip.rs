@@ -65,8 +65,13 @@ use crate::nodes::primnodes::{
     PRS2_OLD_VARNO,
 };
 use crate::access::common::attmap::AttrMap;
-use crate::nodes::copyfuncs::copyObjectImpl;
+use crate::access::attnum::InvalidAttrNumber;
+use crate::nodes::parsenodes::RTEKind::RTE_SUBQUERY;
 use crate::nodes::makefuncs::make_and_qual;
+
+unsafe fn copyObjectImpl(_from: *const c_void) -> *mut c_void {
+    crate::nodes::copyfuncs::copyObjectImpl(_from)
+}
 use crate::parser::parse_relation::expandRTE;
 use crate::parser::parse_coerce::coerce_null_to_domain;
 use crate::parser::parsetree::{get_tle_by_resno, rt_fetch};
@@ -1667,7 +1672,7 @@ unsafe fn map_variable_attnos_mutator(node: *mut Node, context: *mut c_void) -> 
             let newvar = palloc(core::mem::size_of::<Var>()) as *mut Var;
             let attno = (*var).varattno;
 
-            *newvar = *var; /* initially copy all fields of the Var */
+            *newvar = core::ptr::read(var); /* initially copy all fields of the Var */
 
             if attno > 0 {
                 /* user-defined column, replace attno */
@@ -1739,7 +1744,7 @@ unsafe fn map_variable_attnos_mutator(node: *mut Node, context: *mut c_void) -> 
             /* whole-row variable, warn caller */
             *(context.found_whole_row) = true;
 
-            *newvar = *var; /* initially copy all fields of the Var */
+            *newvar = core::ptr::read(var); /* initially copy all fields of the Var */
 
             /* This certainly won't work for a RECORD variable. */
             Assert!((*var).vartype != RECORDOID);
@@ -1748,7 +1753,7 @@ unsafe fn map_variable_attnos_mutator(node: *mut Node, context: *mut c_void) -> 
             (*newvar).vartype = context.to_rowtype;
 
             newnode = palloc(core::mem::size_of::<ConvertRowtypeExpr>()) as *mut ConvertRowtypeExpr;
-            *newnode = *r; /* initially copy all fields of the CRE */
+            *newnode = core::ptr::read(r); /* initially copy all fields of the CRE */
             (*newnode).arg = newvar as *mut crate::nodes::primnodes::Expr;
 
             return newnode as *mut Node;

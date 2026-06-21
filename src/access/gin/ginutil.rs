@@ -805,15 +805,11 @@ unsafe fn RelationGetDescr(_index: Relation) -> TupleDesc {
 unsafe fn RelationGetRelationName(_index: Relation) -> *const c_char {
     unimplemented!() // TODO: src/include/utils/rel.h
 }
-unsafe fn RelationNeedsWAL(_index: Relation) -> bool {
-    unimplemented!() // TODO: src/include/utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_index: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_index) }
 unsafe fn TupleDescAttr(_desc: TupleDesc, _i: c_int) -> Form_pg_attribute {
     unimplemented!() // TODO: src/include/access/tupdesc.h
 }
-unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc {
-    unimplemented!() // TODO: src/backend/access/common/tupdesc.c
-}
+unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc { crate::access::common::tupdesc::CreateTemplateTupleDesc(_natts) }
 unsafe fn TupleDescInitEntry(
     _desc: TupleDesc,
     _attributeNumber: AttrNumber,
@@ -821,26 +817,18 @@ unsafe fn TupleDescInitEntry(
     _oidtypeid: Oid,
     _typmod: int32,
     _attdim: c_int,
-) {
-    unimplemented!() // TODO: src/backend/access/common/tupdesc.c
-}
+) { crate::access::common::tupdesc::TupleDescInitEntry(_desc, _attributeNumber, _attributeName, _oidtypeid, _typmod, _attdim) }
 unsafe fn TupleDescInitEntryCollation(
     _desc: TupleDesc,
     _attributeNumber: AttrNumber,
     _collationid: Oid,
-) {
-    unimplemented!() // TODO: src/backend/access/common/tupdesc.c
-}
-unsafe fn index_getprocid(_irel: Relation, _attnum: AttrNumber, _procnum: uint16) -> RegProcedure {
-    unimplemented!() // TODO: src/backend/access/index/indexam.c
-}
+) { crate::access::common::tupdesc::TupleDescInitEntryCollation(_desc, _attributeNumber, _collationid) }
+unsafe fn index_getprocid(_irel: Relation, _attnum: AttrNumber, _procnum: uint16) -> RegProcedure { crate::access::index::indexam::index_getprocid(_irel, _attnum, _procnum) }
 unsafe fn index_getprocinfo(
     _irel: Relation,
     _attnum: AttrNumber,
     _procnum: uint16,
-) -> *mut FmgrInfo {
-    unimplemented!() // TODO: src/backend/access/index/indexam.c
-}
+) -> *mut FmgrInfo { crate::access::index::indexam::index_getprocinfo(_irel, _attnum, _procnum) }
 unsafe fn fmgr_info_copy(_dstinfo: *mut FmgrInfo, _srcinfo: *mut FmgrInfo, _destcxt: MemoryContext) {
     unimplemented!() // TODO: src/backend/utils/fmgr/fmgr.c
 }
@@ -858,18 +846,14 @@ unsafe fn index_getattr(
 unsafe fn GinGetNullCategory(_tuple: IndexTuple, _ginstate: *mut GinState) -> GinNullCategory {
     unimplemented!() // TODO: src/include/access/gin_private.h
 }
-unsafe fn GetFreeIndexPage(_rel: Relation) -> BlockNumber {
-    unimplemented!() // TODO: src/backend/storage/freespace/indexfsm.c
-}
+unsafe fn GetFreeIndexPage(_rel: Relation) -> BlockNumber { crate::storage::freespace::indexfsm::GetFreeIndexPage(_rel) }
 unsafe fn ReadBuffer(_reln: Relation, _blockNum: BlockNumber) -> Buffer {
     unimplemented!() // TODO: src/backend/storage/buffer/bufmgr.c
 }
 unsafe fn ConditionalLockBuffer(_buffer: Buffer) -> bool {
     unimplemented!() // TODO: src/backend/storage/buffer/bufmgr.c
 }
-unsafe fn GinPageIsRecyclable(_page: Page) -> bool {
-    unimplemented!() // TODO: src/include/access/gin_private.h
-}
+unsafe fn GinPageIsRecyclable(_page: Page) -> bool { crate::access::gin::ginvacuum::GinPageIsRecyclable(_page) }
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     unimplemented!() // TODO: src/include/storage/bufmgr.h
 }
@@ -884,36 +868,24 @@ unsafe fn ExtendBufferedRel(
     _forkNum: ForkNumber,
     _strategy: BufferAccessStrategy,
     _flags: uint32,
-) -> Buffer {
-    unimplemented!() // TODO: src/backend/storage/buffer/bufmgr.c
-}
+) -> Buffer { crate::storage::buffer::bufmgr::ExtendBufferedRel(_bmr, _forkNum, _strategy, _flags) }
 unsafe fn BMR_REL(_rel: Relation) -> BufferManagerRelation {
     unimplemented!() // TODO: src/include/storage/bufmgr.h
 }
 unsafe fn PageInit(_page: Page, _pageSize: Size, _specialSize: Size) {
     unimplemented!() // TODO: src/backend/storage/page/bufpage.c
 }
-unsafe fn GinPageGetOpaque(_page: Page) -> GinPageOpaque {
-    unimplemented!() // TODO: src/include/access/gin_private.h
-}
-unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size {
-    unimplemented!() // TODO: src/include/storage/bufmgr.h
-}
-unsafe fn GinPageGetMeta(_page: Page) -> *mut GinMetaPageData {
-    unimplemented!() // TODO: src/include/access/gin_private.h
-}
-unsafe fn FunctionCall2Coll(_flinfo: *mut FmgrInfo, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Datum {
-    unimplemented!() // TODO: src/backend/utils/fmgr/fmgr.c
-}
+unsafe fn GinPageGetOpaque(_page: Page) -> GinPageOpaque { crate::access::gin::ginblock::GinPageGetOpaque(_page) }
+unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size { crate::access::nbtree::nbtpage::BufferGetPageSize(_buffer) }
+unsafe fn GinPageGetMeta(_page: Page) -> *mut GinMetaPageData { crate::access::gin::ginblock::GinPageGetMeta(_page) }
+unsafe fn FunctionCall2Coll(_flinfo: *mut FmgrInfo, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Datum { crate::utils::fmgr::FunctionCall2Coll(_flinfo, _collation, _arg1, _arg2) }
 unsafe fn FunctionCall3Coll(
     _flinfo: *mut FmgrInfo,
     _collation: Oid,
     _arg1: Datum,
     _arg2: Datum,
     _arg3: Datum,
-) -> Datum {
-    unimplemented!() // TODO: src/backend/utils/fmgr/fmgr.c
-}
+) -> Datum { crate::utils::fmgr::FunctionCall3Coll(_flinfo, _collation, _arg1, _arg2, _arg3) }
 unsafe fn qsort_arg(
     _base: *mut c_void,
     _nel: Size,
@@ -923,6 +895,7 @@ unsafe fn qsort_arg(
 ) {
     unimplemented!() // TODO: src/port/qsort_arg.c
 }
+#[no_mangle]
 unsafe fn build_reloptions(
     _reloptions: Datum,
     _validate: bool,
@@ -930,9 +903,7 @@ unsafe fn build_reloptions(
     _relopt_struct_size: Size,
     _relopt_elems: *const relopt_parse_elt,
     _num_relopt_elems: c_int,
-) -> *mut c_void {
-    unimplemented!() // TODO: src/backend/access/common/reloptions.c
-}
+) -> *mut c_void { crate::access::common::reloptions::build_reloptions(_reloptions, _validate, _kind, _relopt_struct_size, _relopt_elems, _num_relopt_elems) }
 unsafe fn UnlockReleaseBuffer(_buffer: Buffer) {
     unimplemented!() // TODO: src/backend/storage/buffer/bufmgr.c
 }
@@ -951,25 +922,17 @@ unsafe fn XLogRegisterBuffer(_block_id: uint8, _buffer: Buffer, _flags: uint8) {
 unsafe fn XLogInsert(_rmid: RmgrId, _info: uint8) -> XLogRecPtr {
     unimplemented!() // TODO: src/backend/access/transam/xloginsert.c
 }
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO: src/include/storage/bufpage.h
-}
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(_page, _lsn) }
 unsafe fn START_CRIT_SECTION() {
     unimplemented!() // TODO: src/include/miscadmin.h
 }
 unsafe fn END_CRIT_SECTION() {
     unimplemented!() // TODO: src/include/miscadmin.h
 }
-unsafe fn OffsetNumberNext(_offsetNumber: OffsetNumber) -> OffsetNumber {
-    unimplemented!() // TODO: src/include/storage/off.h
-}
+unsafe fn OffsetNumberNext(_offsetNumber: OffsetNumber) -> OffsetNumber { crate::storage::off::OffsetNumberNext(_offsetNumber) }
 // Index AM callback stubs (referenced in ginhandler).
-unsafe extern "C" fn ginbuild(_heap: Relation, _index: Relation, _indexInfo: *mut IndexInfo) -> *mut IndexBuildResult {
-    unimplemented!() // TODO: src/backend/access/gin/gininsert.c
-}
-unsafe extern "C" fn ginbuildempty(_index: Relation) {
-    unimplemented!() // TODO: src/backend/access/gin/gininsert.c
-}
+unsafe extern "C" fn ginbuild(_heap: Relation, _index: Relation, _indexInfo: *mut IndexInfo) -> *mut IndexBuildResult { crate::access::gin::gininsert::ginbuild(_heap, _index, _indexInfo) }
+unsafe extern "C" fn ginbuildempty(_index: Relation) { crate::access::gin::gininsert::ginbuildempty(_index) }
 unsafe extern "C" fn gininsert(
     _index: Relation,
     _values: *mut Datum,
@@ -979,23 +942,17 @@ unsafe extern "C" fn gininsert(
     _checkUnique: IndexUniqueCheck,
     _indexUnchanged: bool,
     _indexInfo: *mut IndexInfo,
-) -> bool {
-    unimplemented!() // TODO: src/backend/access/gin/gininsert.c
-}
+) -> bool { crate::access::gin::gininsert::gininsert(_index, _values, _isnull, _ht_ctid, _heapRel, _checkUnique, _indexUnchanged, _indexInfo) }
 unsafe extern "C" fn ginbulkdelete(
     _info: *mut IndexVacuumInfo,
     _stats: *mut IndexBulkDeleteResult,
     _callback: IndexBulkDeleteCallback,
     _callback_state: *mut c_void,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!() // TODO: src/backend/access/gin/ginvacuum.c
-}
+) -> *mut IndexBulkDeleteResult { crate::access::gin::ginvacuum::ginbulkdelete(_info, _stats, _callback, _callback_state) }
 unsafe extern "C" fn ginvacuumcleanup(
     _info: *mut IndexVacuumInfo,
     _stats: *mut IndexBulkDeleteResult,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!() // TODO: src/backend/access/gin/ginvacuum.c
-}
+) -> *mut IndexBulkDeleteResult { crate::access::gin::ginvacuum::ginvacuumcleanup(_info, _stats) }
 unsafe extern "C" fn gincostestimate(
     _root: *mut PlannerInfo,
     _path: *mut IndexPath,
@@ -1005,38 +962,24 @@ unsafe extern "C" fn gincostestimate(
     _indexSelectivity: *mut Selectivity,
     _indexCorrelation: *mut f64,
     _indexPages: *mut f64,
-) {
-    unimplemented!() // TODO: src/backend/utils/adt/selfuncs.c
-}
-unsafe extern "C" fn ginvalidate(_opclassoid: Oid) -> bool {
-    unimplemented!() // TODO: src/backend/access/gin/ginvalidate.c
-}
+) { crate::utils::adt::selfuncs::gincostestimate(_root, _path, _loop_count, _indexStartupCost, _indexTotalCost, _indexSelectivity, _indexCorrelation, _indexPages) }
+unsafe extern "C" fn ginvalidate(_opclassoid: Oid) -> bool { crate::access::gin::ginvalidate::ginvalidate(_opclassoid) }
 unsafe extern "C" fn ginadjustmembers(
     _opfamilyoid: Oid,
     _opclassoid: Oid,
     _operators: *mut List,
     _functions: *mut List,
-) {
-    unimplemented!() // TODO: src/backend/access/gin/ginvalidate.c
-}
-unsafe extern "C" fn ginbeginscan(_rel: Relation, _nkeys: c_int, _norderbys: c_int) -> IndexScanDesc {
-    unimplemented!() // TODO: src/backend/access/gin/ginscan.c
-}
+) { crate::access::gin::ginvalidate::ginadjustmembers(_opfamilyoid, _opclassoid, _operators, _functions) }
+unsafe extern "C" fn ginbeginscan(_rel: Relation, _nkeys: c_int, _norderbys: c_int) -> IndexScanDesc { crate::access::gin::ginscan::ginbeginscan(_rel, _nkeys, _norderbys) }
 unsafe extern "C" fn ginrescan(
     _scan: IndexScanDesc,
     _scankey: ScanKey,
     _nscankeys: c_int,
     _orderbys: ScanKey,
     _norderbys: c_int,
-) {
-    unimplemented!() // TODO: src/backend/access/gin/ginscan.c
-}
-unsafe extern "C" fn gingetbitmap(_scan: IndexScanDesc, _tbm: *mut TIDBitmap) -> int64 {
-    unimplemented!() // TODO: src/backend/access/gin/ginget.c
-}
-unsafe extern "C" fn ginendscan(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: src/backend/access/gin/ginscan.c
-}
+) { crate::access::gin::ginscan::ginrescan(_scan, _scankey, _nscankeys, _orderbys, _norderbys) }
+unsafe extern "C" fn gingetbitmap(_scan: IndexScanDesc, _tbm: *mut TIDBitmap) -> int64 { crate::access::gin::ginget::gingetbitmap(_scan, _tbm) }
+unsafe extern "C" fn ginendscan(_scan: IndexScanDesc) { crate::access::gin::ginscan::ginendscan(_scan) }
 
 // Local type stubs (GIN private types, defined in access/gin_private.h / gin.h).
 pub type GinNullCategory = u8;

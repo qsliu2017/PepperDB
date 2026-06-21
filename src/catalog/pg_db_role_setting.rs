@@ -87,8 +87,8 @@ unsafe fn DatumGetArrayTypeP(d: Datum) -> *mut c_void {
 
 // utils/rel.h - RelationGetDescr.
 // TODO(pg-port): real RelationGetDescr lives in utils/rel.h ((*rel).rd_att).
-unsafe fn RelationGetDescr(_rel: Relation) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real RelationGetDescr lives in utils/rel.h
+unsafe fn RelationGetDescr(rel: Relation) -> *mut c_void {
+    crate::utils::rel::RelationGetDescr(rel as _) as *mut c_void
 }
 
 // access/tableam.h - table_endscan.
@@ -270,7 +270,9 @@ pub unsafe fn AlterSetting(databaseid: Oid, roleid: Oid, setstmt: *mut VariableS
         let nulls: [bool; Natts_pg_db_role_setting] = [false; Natts_pg_db_role_setting];
         let a: *mut c_void;
 
+        if std::env::var_os("PDB_BT").is_some() { eprintln!("PDB_BT AlterSetting before GUCArrayAdd valuestr={:?}", std::ffi::CStr::from_ptr(valuestr)); }
         a = GUCArrayAdd(ptr::null_mut(), (*setstmt).name, valuestr);
+        if std::env::var_os("PDB_BT").is_some() { eprintln!("PDB_BT AlterSetting after GUCArrayAdd a={:p}", a); }
 
         values[(Anum_pg_db_role_setting_setdatabase - 1) as usize] = ObjectIdGetDatum(databaseid);
         values[(Anum_pg_db_role_setting_setrole - 1) as usize] = ObjectIdGetDatum(roleid);
@@ -280,8 +282,10 @@ pub unsafe fn AlterSetting(databaseid: Oid, roleid: Oid, setstmt: *mut VariableS
             values.as_ptr(),
             nulls.as_ptr(),
         );
+        if std::env::var_os("PDB_BT").is_some() { eprintln!("PDB_BT AlterSetting before CatalogTupleInsert"); }
 
         CatalogTupleInsert(rel, newtuple);
+        if std::env::var_os("PDB_BT").is_some() { eprintln!("PDB_BT AlterSetting after CatalogTupleInsert"); }
     }
 
     InvokeObjectPostAlterHookArg(DbRoleSettingRelationId, databaseid, 0, roleid, false);
@@ -297,6 +301,7 @@ pub unsafe fn AlterSetting(databaseid: Oid, roleid: Oid, setstmt: *mut VariableS
  * database, or for a particular role.  (It is of course possible to do both
  * too, but it doesn't make sense for current uses.)
  */
+#[no_mangle]
 pub unsafe fn DropSetting(databaseid: Oid, roleid: Oid) {
     let relsetting: Relation;
     let scan: TableScanDesc;

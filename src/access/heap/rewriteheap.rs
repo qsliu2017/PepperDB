@@ -141,9 +141,7 @@ unsafe fn RelationGetTargetPageFreeSpace(_relation: Relation, _defaultff: c_int)
 }
 
 // TODO(pg-port): real RelationGetNumberOfBlocks lives in utils/rel.h / storage/bufmgr
-unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber {
-    unimplemented!()
-}
+unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber { crate::access::nbtree::nbtpage::RelationGetNumberOfBlocks(_relation) }
 
 // TODO(pg-port): real RelationIsAccessibleInLogicalDecoding lives in utils/rel.h
 unsafe fn RelationIsAccessibleInLogicalDecoding(_relation: Relation) -> bool {
@@ -154,14 +152,10 @@ unsafe fn RelationIsAccessibleInLogicalDecoding(_relation: Relation) -> bool {
 static mut MyDatabaseId: Oid = InvalidOid;
 
 // TODO(pg-port): real GetCurrentTransactionId lives in access/xact.rs
-unsafe fn GetCurrentTransactionId() -> TransactionId {
-    unimplemented!()
-}
+unsafe fn GetCurrentTransactionId() -> TransactionId { crate::access::transam::xact::GetCurrentTransactionId() }
 
 // TODO(pg-port): real GetXLogInsertRecPtr lives in access/transam/xlog.rs
-unsafe fn GetXLogInsertRecPtr() -> XLogRecPtr {
-    unimplemented!()
-}
+unsafe fn GetXLogInsertRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetXLogInsertRecPtr() }
 // TODO(pg-port): real GetRedoRecPtr lives in access/transam/xlog.rs
 unsafe fn GetRedoRecPtr() -> XLogRecPtr {
     unimplemented!()
@@ -171,35 +165,23 @@ unsafe fn GetRedoRecPtr() -> XLogRecPtr {
 unsafe fn ProcArrayGetReplicationSlotXmin(
     _xmin: *mut TransactionId,
     catalog_xmin: *mut TransactionId,
-) {
-    unimplemented!()
-}
+) { crate::storage::ipc::procarray::ProcArrayGetReplicationSlotXmin(_xmin, catalog_xmin) }
 
 // TODO(pg-port): real ReplicationSlotsComputeLogicalRestartLSN lives in replication/slot.rs
-unsafe fn ReplicationSlotsComputeLogicalRestartLSN() -> XLogRecPtr {
-    unimplemented!()
-}
+unsafe fn ReplicationSlotsComputeLogicalRestartLSN() -> XLogRecPtr { crate::replication::slot::ReplicationSlotsComputeLogicalRestartLSN() }
 
 // TODO(pg-port): real bulk_write API (BulkWriteState/BulkWriteBuffer/smgr_bulk_*) lives in storage/bulk_write.rs
 type BulkWriteState = c_void;
 type BulkWriteBuffer = *mut c_void;
-unsafe fn smgr_bulk_start_rel(_rel: Relation, _forknum: c_int) -> *mut BulkWriteState {
-    unimplemented!()
-}
-unsafe fn smgr_bulk_get_buf(_bulkstate: *mut BulkWriteState) -> BulkWriteBuffer {
-    unimplemented!()
-}
+unsafe fn smgr_bulk_start_rel(_rel: Relation, _forknum: c_int) -> *mut BulkWriteState { crate::storage::smgr::bulk_write::smgr_bulk_start_rel(_rel, _forknum as _) }
+unsafe fn smgr_bulk_get_buf(_bulkstate: *mut BulkWriteState) -> BulkWriteBuffer { crate::storage::smgr::bulk_write::smgr_bulk_get_buf(_bulkstate) }
 unsafe fn smgr_bulk_write(
     _bulkstate: *mut BulkWriteState,
     _blocknum: BlockNumber,
     _buf: BulkWriteBuffer,
     _page_std: bool,
-) {
-    unimplemented!()
-}
-unsafe fn smgr_bulk_finish(_bulkstate: *mut BulkWriteState) {
-    unimplemented!()
-}
+) { crate::storage::smgr::bulk_write::smgr_bulk_write(_bulkstate, _blocknum, _buf, _page_std) }
+unsafe fn smgr_bulk_finish(_bulkstate: *mut BulkWriteState) { crate::storage::smgr::bulk_write::smgr_bulk_finish(_bulkstate) }
 
 // TODO(pg-port): real File / fd API (File/FileWrite/FileSync/FileClose/PathNameOpenFile/
 // OpenTransientFile/CloseTransientFile) lives in storage/file/fd.rs
@@ -213,12 +195,8 @@ unsafe fn FileWrite(
 ) -> c_int {
     unimplemented!()
 }
-unsafe fn FileSync(_file: File, _wait_event_info: uint32) -> c_int {
-    unimplemented!()
-}
-unsafe fn FileClose(_file: File) {
-    unimplemented!()
-}
+unsafe fn FileSync(_file: File, _wait_event_info: uint32) -> c_int { crate::storage::file::fd::FileSync(_file, _wait_event_info as _) }
+unsafe fn FileClose(_file: File) { crate::storage::file::fd::FileClose(_file) }
 unsafe fn PathNameOpenFile(_path: *const c_char, _flags: c_int) -> File {
     unimplemented!()
 }
@@ -240,9 +218,7 @@ const PG_BINARY: c_int = 0;
 unsafe fn ftruncate(_fd: c_int, _length: off_t) -> c_int {
     unimplemented!()
 }
-unsafe fn pg_pwrite(_fd: c_int, _buf: *const c_void, _count: usize, _offset: off_t) -> isize {
-    unimplemented!()
-}
+unsafe fn pg_pwrite(_fd: c_int, _buf: *const c_void, _count: usize, _offset: off_t) -> isize { crate::port::port_api::pg_pwrite(_fd, _buf, _count as _, _offset) }
 unsafe fn pg_fsync(_fd: c_int) -> c_int {
     unimplemented!()
 }
@@ -305,12 +281,8 @@ pub struct LogicalRewriteMappingData {
 
 // TODO(pg-port): real XLogReaderState lives in access/transam/xlogreader.rs
 type XLogReaderState = c_void;
-unsafe fn XLogRecGetData(_r: *mut XLogReaderState) -> *mut c_char {
-    unimplemented!()
-}
-unsafe fn XLogRecGetXid(_r: *mut XLogReaderState) -> TransactionId {
-    unimplemented!()
-}
+unsafe fn XLogRecGetData(_r: *mut XLogReaderState) -> *mut c_char { crate::access::transam::xlogreader::XLogRecGetData(_r) }
+unsafe fn XLogRecGetXid(_r: *mut XLogReaderState) -> TransactionId { crate::access::transam::xlogreader::XLogRecGetXid(_r) }
 
 // TODO(pg-port): real dir scanning (DIR/dirent/AllocateDir/ReadDir/FreeDir/get_dirent_type/
 // fsync_fname) lives in storage/file/fd.rs + common/file_utils.rs
@@ -325,9 +297,7 @@ unsafe fn AllocateDir(_dirname: *const c_char) -> *mut DIR {
 unsafe fn ReadDir(_dir: *mut DIR, _dirname: *const c_char) -> *mut dirent {
     unimplemented!()
 }
-unsafe fn FreeDir(_dir: *mut DIR) -> c_int {
-    unimplemented!()
-}
+unsafe fn FreeDir(_dir: *mut DIR) -> c_int { crate::storage::file::fd::FreeDir(_dir) }
 unsafe fn fsync_fname(_fname: *const c_char, _isdir: bool) {
     unimplemented!()
 }

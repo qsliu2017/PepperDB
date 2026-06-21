@@ -246,11 +246,11 @@ pub unsafe fn ExecShutdownCustomScan(node: *mut CustomScanState) {
 // ----------------------------------------------------------------
 
 unsafe fn shm_toc_estimate_chunk(_pcxt: *mut ParallelContext, _sz: Size) {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c (needs pcxt->estimator)
+    unimplemented!()
 }
 
 unsafe fn shm_toc_estimate_keys(_pcxt: *mut ParallelContext, _cnt: Size) {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c (needs pcxt->estimator)
+    unimplemented!()
 }
 
 unsafe fn parallel_context_toc(_pcxt: *mut ParallelContext) -> *mut shm_toc {
@@ -262,13 +262,13 @@ unsafe fn parallel_worker_context_toc(_pwcxt: *mut ParallelWorkerContext) -> *mu
 }
 
 unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _nbytes: Size) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 
 unsafe fn shm_toc_insert(_toc: *mut shm_toc, _key: uint64, _address: *mut c_void) {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 
 unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: uint64, _noError: bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }

@@ -723,32 +723,32 @@ unsafe fn UnlockReleaseBuffer(_buf: Buffer) { unimplemented!() /* storage/bufmgr
 unsafe fn MarkBufferDirty(_buf: Buffer) { unimplemented!() /* storage/bufmgr.c */ }
 unsafe fn BufferGetPage(_buf: Buffer) -> Page { unimplemented!() /* storage/bufmgr.h */ }
 unsafe fn BufferGetBlockNumber(_buf: Buffer) -> BlockNumber { unimplemented!() /* storage/bufmgr.c */ }
-unsafe fn BufferIsValid(_buf: Buffer) -> bool { unimplemented!() /* storage/bufmgr.h */ }
+unsafe fn BufferIsValid(_buf: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buf) }
 unsafe fn ExtendBufferedRel(_bmr: BufferManagerRelation, _fork: c_int, _strategy: *mut std::ffi::c_void, _flags: u32) -> Buffer { unimplemented!() /* storage/bufmgr.c */ }
-unsafe fn PageGetContents(_page: Page) -> *mut c_char { unimplemented!() /* storage/bufpage.h */ }
+unsafe fn PageGetContents(_page: Page) -> *mut c_char { unimplemented!() }
 unsafe fn PageGetItemId(_page: Page, _off: OffsetNumber) -> ItemId { unimplemented!() /* storage/bufpage.h */ }
 unsafe fn PageGetItem(_page: Page, _lp: ItemId) -> *mut std::ffi::c_void { unimplemented!() /* storage/bufpage.h */ }
 unsafe fn PageGetMaxOffsetNumber(_page: Page) -> OffsetNumber { unimplemented!() /* storage/bufpage.h */ }
 unsafe fn PageIsNew(_page: Page) -> bool { unimplemented!() /* storage/bufpage.h */ }
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { unimplemented!() /* storage/bufpage.h */ }
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { unimplemented!() }
 unsafe fn PageIndexTupleDeleteNoCompact(_page: Page, _off: OffsetNumber) { unimplemented!() /* storage/bufpage.c */ }
 unsafe fn ItemIdIsUsed(_lp: ItemId) -> bool { unimplemented!() /* storage/itemid.h */ }
 unsafe fn ItemIdGetLength(_lp: ItemId) -> u32 { unimplemented!() /* storage/itemid.h */ }
-unsafe fn ItemPointerIsValid(_iptr: *const ItemPointerData) -> bool { unimplemented!() /* storage/itemptr.h */ }
-unsafe fn ItemPointerSetInvalid(_iptr: *mut ItemPointerData) { unimplemented!() /* storage/itemptr.h */ }
+unsafe fn ItemPointerIsValid(_iptr: *const ItemPointerData) -> bool { crate::storage::itemptr::ItemPointerIsValid(_iptr) }
+unsafe fn ItemPointerSetInvalid(_iptr: *mut ItemPointerData) { crate::storage::itemptr::ItemPointerSetInvalid(_iptr) }
 unsafe fn ItemPointerSet(_iptr: *mut ItemPointerData, _blk: BlockNumber, _off: OffsetNumber) { unimplemented!() /* storage/itemptr.h */ }
 unsafe fn ItemPointerEquals(_a: *mut ItemPointerData, _b: *mut ItemPointerData) -> bool { unimplemented!() /* storage/itemptr.c */ }
 unsafe fn ItemPointerGetBlockNumber(_iptr: *const ItemPointerData) -> BlockNumber { unimplemented!() /* storage/itemptr.h */ }
 unsafe fn ItemPointerGetOffsetNumber(_iptr: *const ItemPointerData) -> OffsetNumber { unimplemented!() /* storage/itemptr.h */ }
-unsafe fn BRIN_IS_REGULAR_PAGE(_page: Page) -> bool { unimplemented!() /* access/brin_page.h */ }
-unsafe fn BrinPageType(_page: Page) -> u16 { unimplemented!() /* access/brin_page.h */ }
+unsafe fn BRIN_IS_REGULAR_PAGE(_page: Page) -> bool { unimplemented!() }
+unsafe fn BrinPageType(_page: Page) -> u16 { unimplemented!() }
 unsafe fn BlockNumberIsValid(_blk: BlockNumber) -> bool { unimplemented!() /* storage/block.h */ }
-unsafe fn RelationGetNumberOfBlocks(_rel: Relation) -> BlockNumber { unimplemented!() /* storage/bufmgr.h */ }
+unsafe fn RelationGetNumberOfBlocks(_rel: Relation) -> BlockNumber { crate::access::nbtree::nbtpage::RelationGetNumberOfBlocks(_rel) }
 unsafe fn RelationGetRelationName(_rel: Relation) -> *const c_char { unimplemented!() /* utils/rel.h */ }
-unsafe fn RelationNeedsWAL(_rel: Relation) -> bool { unimplemented!() /* utils/rel.h */ }
-unsafe fn brin_page_init(_page: Page, _type: u16) { unimplemented!() /* access/brin_pageops.c */ }
-unsafe fn brin_start_evacuating_page(_irel: Relation, _buf: Buffer) -> bool { unimplemented!() /* access/brin_pageops.c */ }
-unsafe fn brin_evacuate_page(_irel: Relation, _pagesPerRange: BlockNumber, _revmap: *mut BrinRevmap, _buf: Buffer) { unimplemented!() /* access/brin_pageops.c */ }
+unsafe fn RelationNeedsWAL(_rel: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_rel) }
+unsafe fn brin_page_init(_page: Page, _type: u16) { unimplemented!() }
+unsafe fn brin_start_evacuating_page(_irel: Relation, _buf: Buffer) -> bool { crate::access::brin::brin_pageops::brin_start_evacuating_page(_irel, _buf) }
+unsafe fn brin_evacuate_page(_irel: Relation, _pagesPerRange: BlockNumber, _revmap: *mut BrinRevmap, _buf: Buffer) { crate::access::brin::brin_pageops::brin_evacuate_page(_irel, _pagesPerRange, _revmap, _buf) }
 unsafe fn XLogBeginInsert() { unimplemented!() /* access/xloginsert.c */ }
 unsafe fn XLogRegisterData(_data: *mut c_char, _len: c_int) { unimplemented!() /* access/xloginsert.c */ }
 unsafe fn XLogRegisterBuffer(_block_id: u8, _buf: Buffer, _flags: c_int) { unimplemented!() /* access/xloginsert.c */ }

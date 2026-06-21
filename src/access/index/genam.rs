@@ -93,7 +93,6 @@ pub type IndexBulkDeleteCallback =
     Option<unsafe extern "C" fn(itemptr: ItemPointer, state: *mut c_void) -> bool>;
 
 /* struct definitions appear in relscan.h */
-pub type IndexScanDesc = *mut IndexScanDescData;
 pub type SysScanDesc = *mut SysScanDescData;
 
 pub type ParallelIndexScanDesc = *mut ParallelIndexScanDescData;
@@ -131,28 +130,8 @@ macro_rules! IndexScanIsValid {
 
 /* ===================== local stub types ===================== */
 
-#[repr(C)]
-pub struct IndexScanDescData {
-    pub heapRelation: Relation,
-    pub indexRelation: Relation,
-    pub xs_snapshot: Snapshot,
-    pub numberOfKeys: c_int,
-    pub numberOfOrderBys: c_int,
-    pub keyData: ScanKey,
-    pub orderByData: ScanKey,
-    pub xs_want_itup: bool,
-    pub kill_prior_tuple: bool,
-    pub xactStartedInRecovery: bool,
-    pub ignore_killed_tuples: bool,
-    pub opaque: *mut c_void,
-    pub instrument: *mut IndexScanInstrumentation,
-    pub xs_itup: IndexTuple,
-    pub xs_itupdesc: TupleDesc,
-    pub xs_hitup: HeapTuple,
-    pub xs_hitupdesc: TupleDesc,
-    pub xs_heapfetch: *mut c_void,
-    pub xs_recheck: bool,
-}
+pub use crate::access::relscan::{IndexScanDescData, IndexScanDesc};
+
 
 #[repr(C)]
 pub struct SysScanDescData {
@@ -202,12 +181,12 @@ pub unsafe fn RelationGetIndexScan(
 ) -> IndexScanDesc {
     let scan: IndexScanDesc;
 
-    scan = palloc(std::mem::size_of::<IndexScanDescData>()) as IndexScanDesc;
+    scan = palloc0(std::mem::size_of::<IndexScanDescData>()) as IndexScanDesc;
 
     (*scan).heapRelation = std::ptr::null_mut(); /* may be set later */
     (*scan).xs_heapfetch = std::ptr::null_mut();
     (*scan).indexRelation = indexRelation;
-    (*scan).xs_snapshot = InvalidSnapshot; /* caller must initialize this */
+    (*scan).xs_snapshot = InvalidSnapshot as *mut _; /* caller must initialize this */
     (*scan).numberOfKeys = nkeys;
     (*scan).numberOfOrderBys = norderbys;
 
@@ -510,6 +489,34 @@ pub unsafe fn index_compute_xid_horizon_for_tuples(
  * but caller can make additional checks and pass indexOK=false if needed.
  * In standard case indexOK can simply be constant TRUE.
  */
+
+// pg_index fixed part + inline indkey int2vector, for heap-attno -> index-col remap.
+#[repr(C)]
+struct PgIndexFixedWithKey {
+    indexrelid: Oid, indrelid: Oid,
+    indnatts: i16, indnkeyatts: i16,
+    indisunique: bool, indnullsnotdistinct: bool, indisprimary: bool, indisexclusion: bool,
+    indimmediate: bool, indisclustered: bool, indisvalid: bool, indcheckxmin: bool,
+    indisready: bool, indislive: bool, indisreplident: bool,
+    indkey: crate::c::int2vector,
+}
+
+unsafe fn map_heap_attno_to_index(irel: Relation, sk_attno: AttrNumber) -> AttrNumber {
+    let idx = (*irel).rd_index as *const PgIndexFixedWithKey;
+    let n = (*idx).indnatts as isize;
+    let vals = (*idx).indkey.values.as_ptr();
+    let mut j: isize = 0;
+    while j < n {
+        if *vals.offset(j) == sk_attno {
+            return (j + 1) as AttrNumber;
+        }
+        j += 1;
+    }
+    ereport!(ERROR, errmsg!("column is not in index"));
+    #[allow(unreachable_code)]
+    0
+}
+
 pub unsafe fn systable_beginscan(
     heapRelation: Relation,
     indexId: Oid,
@@ -558,11 +565,8 @@ pub unsafe fn systable_beginscan(
                 idxkey.add(i as usize),
                 1,
             );
-
-            // TODO(pg-port): pg_index.indkey (int2vector, CATALOG_VARLEN) is omitted
-            // from the ported FormData_pg_index, so the heap-attno -> index-column
-            // remap below is unavailable. Leave the copied (heap) sk_attno in place;
-            // wire the real remap once int2vector catalog access is ported.
+            (*idxkey.add(i as usize)).sk_attno =
+                map_heap_attno_to_index(irel, (*key.add(i as usize)).sk_attno);
             i += 1;
         }
 
@@ -812,11 +816,8 @@ pub unsafe fn systable_beginscan_ordered(
     while i < nkeys {
 
         std::ptr::copy_nonoverlapping(key.add(i as usize), idxkey.add(i as usize), 1);
-
-        // TODO(pg-port): pg_index.indkey (int2vector, CATALOG_VARLEN) is omitted
-        // from the ported FormData_pg_index, so the heap-attno -> index-column
-        // remap below is unavailable. Leave the copied (heap) sk_attno in place;
-        // wire the real remap once int2vector catalog access is ported.
+        (*idxkey.add(i as usize)).sk_attno =
+            map_heap_attno_to_index(indexRelation, (*key.add(i as usize)).sk_attno);
         i += 1;
     }
 
@@ -928,6 +929,7 @@ pub unsafe fn systable_endscan_ordered(sysscan: SysScanDesc) {
  * "state" to systable_inplace_update_finish() or
  * systable_inplace_update_cancel().
  */
+#[no_mangle]
 pub unsafe fn systable_inplace_update_begin(
     relation: Relation,
     indexId: Oid,
@@ -999,8 +1001,8 @@ pub unsafe fn systable_inplace_update_begin(
 
         if heap_inplace_lock(
             (*scan).heap_rel,
-            (*bslot).base.tuple,
-            (*bslot).buffer,
+            (*bslot).base.tuple as _,
+            (*bslot).buffer as _,
             systable_endscan_callback,
             scan as *mut c_void,
         ) {
@@ -1023,13 +1025,14 @@ unsafe extern "C" fn systable_endscan_callback(arg: *mut c_void) {
  * The tuple cannot change size, and therefore its header fields and null
  * bitmap (if any) don't change either.
  */
+#[no_mangle]
 pub unsafe fn systable_inplace_update_finish(state: *mut c_void, tuple: HeapTuple) {
     let scan: SysScanDesc = state as SysScanDesc;
     let relation: Relation = (*scan).heap_rel;
     let slot: *mut TupleTableSlot = (*scan).slot;
     let bslot: *mut BufferHeapTupleTableSlot = slot as *mut BufferHeapTupleTableSlot;
-    let oldtup: HeapTuple = (*bslot).base.tuple;
-    let buffer: Buffer = (*bslot).buffer;
+    let oldtup: HeapTuple = (*bslot).base.tuple as _;
+    let buffer: Buffer = (*bslot).buffer as _;
 
     heap_inplace_update_and_unlock(relation, oldtup, tuple, buffer);
     systable_endscan(scan);
@@ -1045,8 +1048,8 @@ pub unsafe fn systable_inplace_update_cancel(state: *mut c_void) {
     let relation: Relation = (*scan).heap_rel;
     let slot: *mut TupleTableSlot = (*scan).slot;
     let bslot: *mut BufferHeapTupleTableSlot = slot as *mut BufferHeapTupleTableSlot;
-    let oldtup: HeapTuple = (*bslot).base.tuple;
-    let buffer: Buffer = (*bslot).buffer;
+    let oldtup: HeapTuple = (*bslot).base.tuple as _;
+    let buffer: Buffer = (*bslot).buffer as _;
 
     heap_inplace_unlock(relation, oldtup, buffer);
     systable_endscan(scan);
@@ -1133,16 +1136,9 @@ pub struct IndexTupleData_stub {
     pub t_tid: ItemPointerData_stub,
 }
 
-#[repr(C)]
-pub struct BufferHeapTupleTableSlot {
-    pub base: HeapTupleTableSlot_stub,
-    pub buffer: Buffer,
-}
-
-#[repr(C)]
-pub struct HeapTupleTableSlot_stub {
-    pub tuple: HeapTuple,
-}
+/* Canonical slot layout: a local stub would have the wrong offsets for
+ * base.tuple/buffer (the real base embeds a full TupleTableSlot). */
+pub use crate::executor::tuptable::BufferHeapTupleTableSlot;
 
 /* Constants from unported modules */
 const InvalidSnapshot: Snapshot = std::ptr::null_mut();
@@ -1156,94 +1152,87 @@ const ForwardScanDirection: ScanDirection = 1;
 const ERROR: c_int = 21;
 const WARNING: c_int = 19;
 
+/* access/index/genam.c globals (canonical home) */
+#[no_mangle]
+pub static mut bsysscan: bool = false;
+#[no_mangle]
+pub static mut CheckXidAlive: TransactionId = 0;
+
 /* extern globals (defined elsewhere) */
 extern "C" {
-    static mut bsysscan: bool;
-    static mut CheckXidAlive: TransactionId;
     static mut IgnoreSystemIndexes: bool;
 }
 
 /* helper-fn stubs */
 unsafe fn TransactionStartedDuringRecovery() -> bool {
-    unimplemented!() // TODO: access/transam/xact.c
+    crate::access::transam::xact::TransactionStartedDuringRecovery()
 }
 unsafe fn RelationGetRelid(_relation: Relation) -> Oid {
-    unimplemented!() // TODO: utils/rel.h
+    crate::utils::rel::RelationGetRelid(_relation as _)
 }
 unsafe fn RelationGetRelationName(_relation: Relation) -> *const c_char {
-    unimplemented!() // TODO: utils/rel.h
+    crate::utils::rel::RelationGetRelationName(_relation as _)
 }
 unsafe fn IndexRelationGetNumberOfKeyAttributes(_relation: Relation) -> c_int {
-    unimplemented!() // TODO: utils/rel.h
+    (*(*_relation).rd_index).indnkeyatts as c_int
 }
+#[no_mangle]
 unsafe fn IndexRelationGetNumberOfAttributes(_relation: Relation) -> c_int {
-    unimplemented!() // TODO: utils/rel.h
+    (*(*_relation).rd_rel).relnatts as c_int
 }
-unsafe fn check_enable_rls(_relid: Oid, _checkAsUser: Oid, _noError: bool) -> c_int {
-    unimplemented!() // TODO: utils/rls.c
-}
-unsafe fn pg_class_aclcheck(_table_oid: Oid, _roleid: Oid, _mode: u64) -> AclResult {
-    unimplemented!() // TODO: utils/adt/acl.c
-}
+unsafe fn check_enable_rls(_relid: Oid, _checkAsUser: Oid, _noError: bool) -> c_int { crate::utils::misc::rls::check_enable_rls(_relid, _checkAsUser, _noError) }
+unsafe fn pg_class_aclcheck(table_oid: Oid, roleid: Oid, mode: u64) -> AclResult { crate::catalog::aclchk::pg_class_aclcheck(table_oid, roleid, mode as _) as i32 as AclResult }
 unsafe fn pg_attribute_aclcheck(
-    _table_oid: Oid,
-    _attnum: AttrNumber,
-    _roleid: Oid,
-    _mode: u64,
-) -> AclResult {
-    unimplemented!() // TODO: utils/adt/acl.c
-}
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
-}
-unsafe fn initStringInfo(_str: *mut StringInfoData) {
-    unimplemented!() // TODO: lib/stringinfo.c
+    table_oid: Oid,
+    attnum: AttrNumber,
+    roleid: Oid,
+    mode: u64,
+) -> AclResult { crate::catalog::aclchk::pg_attribute_aclcheck(table_oid, attnum, roleid, mode as _) as i32 as AclResult }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
+unsafe fn initStringInfo(str: *mut StringInfoData) {
+    crate::lib::stringinfo::initStringInfo(str as _)
 }
 unsafe fn appendStringInfo(_str: *mut StringInfoData, _fmt: *const c_char, _arg: *mut c_char) {
     unimplemented!() // TODO: lib/stringinfo.c
 }
-unsafe fn appendStringInfoString(_str: *mut StringInfoData, _s: *const c_char) {
-    unimplemented!() // TODO: lib/stringinfo.c
+unsafe fn appendStringInfoString(str: *mut StringInfoData, s: *const c_char) {
+    crate::lib::stringinfo::appendStringInfoString(str as _, s)
 }
-unsafe fn appendStringInfoChar(_str: *mut StringInfoData, _ch: c_char) {
-    unimplemented!() // TODO: lib/stringinfo.c
+unsafe fn appendStringInfoChar(str: *mut StringInfoData, ch: c_char) {
+    crate::lib::stringinfo::appendStringInfoChar(str as _, ch)
 }
-unsafe fn pg_get_indexdef_columns(_indexrelid: Oid, _pretty: bool) -> *mut c_char {
-    unimplemented!() // TODO: utils/adt/ruleutils.c
+unsafe fn pg_get_indexdef_columns(_indexrelid: Oid, _pretty: bool) -> *mut c_char { unimplemented!() }
+unsafe fn getTypeOutputInfo(type_: Oid, typOutput: *mut Oid, typIsVarlena: *mut bool) {
+    crate::utils::cache::lsyscache::getTypeOutputInfo(type_, typOutput, typIsVarlena)
 }
-unsafe fn getTypeOutputInfo(_type: Oid, _typOutput: *mut Oid, _typIsVarlena: *mut bool) {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
-}
-unsafe fn OidOutputFunctionCall(_functionId: Oid, _val: Datum) -> *mut c_char {
-    unimplemented!() // TODO: utils/fmgr/fmgr.c
-}
+unsafe fn OidOutputFunctionCall(_functionId: Oid, _val: Datum) -> *mut c_char { crate::utils::fmgr::OidOutputFunctionCall(_functionId, _val) }
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::BufferGetPage(_buffer as _) as _
 }
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::BufferGetBlockNumber(_buffer as _) as _
 }
 unsafe fn PageGetItemId(_page: Page, _offsetNumber: OffsetNumber) -> ItemId {
-    unimplemented!() // TODO: storage/bufpage.h
+    crate::storage::bufpage::PageGetItemId(_page as _, _offsetNumber) as _
 }
 unsafe fn PageGetItem(_page: Page, _itemId: ItemId) -> *mut c_void {
-    unimplemented!() // TODO: storage/bufpage.h
+    crate::storage::bufpage::PageGetItem(_page as _, _itemId as _) as _
 }
 unsafe fn ItemIdIsDead(_itemId: ItemId) -> bool {
-    unimplemented!() // TODO: storage/itemid.h
+    crate::storage::itemid::ItemIdIsDead(_itemId as _)
 }
 unsafe fn ItemPointerCopy(_src: ItemPointer, _dst: ItemPointer) {
-    unimplemented!() // TODO: storage/itemptr.h
+    crate::storage::itemptr::ItemPointerCopy(_src as _, _dst as _);
 }
 unsafe fn table_index_delete_tuples(_rel: Relation, _delstate: *mut TM_IndexDeleteOp) -> TransactionId {
     unimplemented!() // TODO: access/table/tableamapi.c
 }
 pub use crate::catalog::index::ReindexIsProcessingIndex;
 unsafe fn index_open(_relationId: Oid, _lockmode: c_int) -> Relation {
-    unimplemented!() // TODO: access/index/indexam.c
+    crate::access::index::indexam::index_open(_relationId as _, _lockmode as _) as _
 }
 unsafe fn index_close(_relation: Relation, _lockmode: c_int) {
-    unimplemented!() // TODO: access/index/indexam.c
+    crate::access::index::indexam::index_close(_relation as _, _lockmode as _);
 }
 unsafe fn index_beginscan(
     _heapRelation: Relation,
@@ -1253,7 +1242,7 @@ unsafe fn index_beginscan(
     _nkeys: c_int,
     _norderbys: c_int,
 ) -> IndexScanDesc {
-    unimplemented!() // TODO: access/index/indexam.c
+    crate::access::index::indexam::index_beginscan(_heapRelation as _, _indexRelation as _, _snapshot as _, _instrument as _, _nkeys as _, _norderbys as _) as _
 }
 unsafe fn index_rescan(
     _scan: IndexScanDesc,
@@ -1262,20 +1251,20 @@ unsafe fn index_rescan(
     _orderbys: ScanKey,
     _norderbys: c_int,
 ) {
-    unimplemented!() // TODO: access/index/indexam.c
+    crate::access::index::indexam::index_rescan(_scan as _, _keys as _, _nkeys as _, _orderbys as _, _norderbys as _);
 }
 unsafe fn index_endscan(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/index/indexam.c
+    crate::access::index::indexam::index_endscan(_scan as _);
 }
 unsafe fn index_getnext_slot(
     _scan: IndexScanDesc,
     _direction: ScanDirection,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!() // TODO: access/index/indexam.c
+    crate::access::index::indexam::index_getnext_slot(_scan as _, _direction as _, _slot as _)
 }
 unsafe fn table_slot_create(_relation: Relation, _reglist: *mut c_void) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: access/table/tableam.c
+    crate::access::table::tableam::table_slot_create(_relation as _, _reglist as _) as _
 }
 unsafe fn table_beginscan_strat(
     _relation: Relation,
@@ -1285,67 +1274,67 @@ unsafe fn table_beginscan_strat(
     _allow_strat: bool,
     _allow_sync: bool,
 ) -> TableScanDesc {
-    unimplemented!() // TODO: access/table/tableam.h
+    crate::access::table::tableam::table_beginscan_strat(_relation as _, _snapshot as _, _nkeys, _key as _, _allow_strat, _allow_sync) as _
 }
 unsafe fn table_endscan(_scan: TableScanDesc) {
-    unimplemented!() // TODO: access/table/tableam.h
+    crate::access::table::tableam::table_endscan(_scan as _)
 }
 unsafe fn table_scan_getnextslot(
     _sscan: TableScanDesc,
     _direction: ScanDirection,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!() // TODO: access/table/tableam.h
+    crate::access::table::tableam::table_scan_getnextslot(_sscan as _, _direction as _, _slot as _)
 }
 unsafe fn table_tuple_satisfies_snapshot(
     _rel: Relation,
     _slot: *mut TupleTableSlot,
     _snapshot: Snapshot,
 ) -> bool {
-    unimplemented!() // TODO: access/table/tableam.h
+    crate::access::table::tableam::table_tuple_satisfies_snapshot(_rel as _, _slot as _, _snapshot as _)
 }
 unsafe fn RegisterSnapshot(_snapshot: Snapshot) -> Snapshot {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::RegisterSnapshot(_snapshot as _) as _
 }
 unsafe fn UnregisterSnapshot(_snapshot: Snapshot) {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::UnregisterSnapshot(_snapshot as _)
 }
 unsafe fn GetCatalogSnapshot(_relid: Oid) -> Snapshot {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::GetCatalogSnapshot(_relid) as _
 }
 unsafe fn ExecFetchSlotHeapTuple(
     _slot: *mut TupleTableSlot,
     _materialize: bool,
     _shouldFree: *mut bool,
 ) -> HeapTuple {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecFetchSlotHeapTuple(_slot as _, _materialize, _shouldFree) as _
 }
 unsafe fn ExecDropSingleTupleTableSlot(_slot: *mut TupleTableSlot) {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecDropSingleTupleTableSlot(_slot as _)
 }
 unsafe fn TransactionIdIsValid(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO: access/transam.h
+    _xid != 0
 }
 unsafe fn TransactionIdIsInProgress(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO: storage/ipc/procarray.c
+    crate::storage::ipc::procarray::TransactionIdIsInProgress(_xid as _)
 }
 unsafe fn TransactionIdDidCommit(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO: access/transam/transam.c
+    crate::access::transam::transam::TransactionIdDidCommit(_xid as _)
 }
 unsafe fn IsInParallelMode() -> bool {
-    unimplemented!() // TODO: access/transam/xact.c
+    crate::access::transam::xact::IsInParallelMode_real()
 }
 unsafe fn IsInplaceUpdateRelation(_relation: Relation) -> bool {
-    unimplemented!() // TODO: catalog/catalog.c
+    crate::catalog::catalog::IsInplaceUpdateRelation(_relation as _)
 }
 unsafe fn IsSystemRelation(_relation: Relation) -> bool {
-    unimplemented!() // TODO: catalog/catalog.c
+    crate::catalog::catalog::IsSystemRelation(_relation as _)
 }
 unsafe fn HeapTupleIsValid(_tuple: HeapTuple) -> bool {
-    unimplemented!() // TODO: access/htup.h
+    !_tuple.is_null()
 }
 unsafe fn TTS_IS_BUFFERTUPLE(_slot: *mut TupleTableSlot) -> bool {
-    unimplemented!() // TODO: executor/tuptable.h
+    crate::executor::tuptable::TTS_IS_BUFFERTUPLE(_slot as _)
 }
 unsafe fn heap_inplace_lock(
     _relation: Relation,
@@ -1354,7 +1343,9 @@ unsafe fn heap_inplace_lock(
     _release_callback: unsafe extern "C" fn(*mut c_void),
     _arg: *mut c_void,
 ) -> bool {
-    unimplemented!() // TODO: access/heap/heapam.c
+    crate::access::heap::heapam::heap_inplace_lock(
+        _relation as _, _oldtup_ptr as _, _buffer, Some(_release_callback), _arg,
+    )
 }
 unsafe fn heap_inplace_update_and_unlock(
     _relation: Relation,
@@ -1362,16 +1353,18 @@ unsafe fn heap_inplace_update_and_unlock(
     _tuple: HeapTuple,
     _buffer: Buffer,
 ) {
-    unimplemented!() // TODO: access/heap/heapam.c
+    crate::access::heap::heapam::heap_inplace_update_and_unlock(
+        _relation as _, _oldtup as _, _tuple as _, _buffer,
+    )
 }
 unsafe fn heap_inplace_unlock(_relation: Relation, _oldtup: HeapTuple, _buffer: Buffer) {
-    unimplemented!() // TODO: access/heap/heapam.c
+    crate::access::heap::heapam::heap_inplace_unlock(_relation as _, _oldtup as _, _buffer)
 }
 unsafe fn heap_copytuple(_tuple: HeapTuple) -> HeapTuple {
-    unimplemented!() // TODO: access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_copytuple(_tuple as _) as _
 }
 unsafe fn PointerIsValid<T>(_ptr: *const T) -> bool {
-    unimplemented!() // TODO: c.h
+    crate::c::PointerIsValid(_ptr)
 }
 
 /* Macro stubs */

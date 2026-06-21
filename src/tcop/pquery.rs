@@ -114,8 +114,7 @@ use crate::utils::time::snapmgr::{
 };
 // utils/snapshot.h
 use crate::utils::snapshot::{InvalidSnapshot, Snapshot};
-// utils/sort/tuplestore.h
-use crate::utils::sort::tuplestore::{tuplestore_gettupleslot, tuplestore_rescan};
+// utils/sort/tuplestore.h (module not yet wired; local stubs below)
 
 // ---------------------------------------------------------------------------
 // DECLARE CURSOR option bits (utils/portal.h)
@@ -131,6 +130,15 @@ const CURSOR_OPT_NO_SCROLL: c_int = 0x0004;
 fn TRACE_POSTGRESQL_QUERY_EXECUTE_START() {}
 #[inline]
 fn TRACE_POSTGRESQL_QUERY_EXECUTE_DONE() {}
+
+// utils/sort/tuplestore.h stubs (module not yet wired); cursor/held-portal paths only.
+unsafe fn tuplestore_gettupleslot(
+    state: *mut c_void,
+    forward: bool,
+    copy: bool,
+    slot: *mut TupleTableSlot,
+) -> bool { crate::utils::sort::tuplestore::tuplestore_gettupleslot(state as _, forward, copy, slot as _) }
+unsafe fn tuplestore_rescan(state: *mut c_void) { crate::utils::sort::tuplestore::tuplestore_rescan(state as _) }
 
 /*
  * ActivePortal is the currently executing Portal (the most closely nested,
@@ -157,9 +165,9 @@ pub unsafe fn CreateQueryDesc(
     (*qd).operation = (*plannedstmt).commandType; /* operation */
     (*qd).plannedstmt = plannedstmt; /* plan */
     (*qd).sourceText = sourceText; /* query text */
-    (*qd).snapshot = RegisterSnapshot(snapshot); /* snapshot */
+    (*qd).snapshot = RegisterSnapshot(snapshot) as _; /* snapshot */
     /* RI check snapshot */
-    (*qd).crosscheck_snapshot = RegisterSnapshot(crosscheck_snapshot);
+    (*qd).crosscheck_snapshot = RegisterSnapshot(crosscheck_snapshot) as _;
     (*qd).dest = dest; /* output dest */
     (*qd).params = params; /* parameter values passed into query */
     (*qd).queryEnv = queryEnv;
@@ -185,8 +193,8 @@ pub unsafe fn FreeQueryDesc(qdesc: *mut QueryDesc) {
     Assert!((*qdesc).estate.is_null());
 
     /* forget our snapshots */
-    UnregisterSnapshot((*qdesc).snapshot);
-    UnregisterSnapshot((*qdesc).crosscheck_snapshot);
+    UnregisterSnapshot((*qdesc).snapshot as _);
+    UnregisterSnapshot((*qdesc).crosscheck_snapshot as _);
 
     /* Only the QueryDesc itself need be freed */
     pfree(qdesc as *mut c_void);
@@ -636,7 +644,7 @@ pub unsafe fn PortalStart(
                     let pstmt: *mut PlannedStmt = PortalGetPrimaryStmt(portal);
 
                     Assert!((*pstmt).commandType == CMD_UTILITY);
-                    (*portal).tupDesc = UtilityTupleDescriptor((*pstmt).utilityStmt);
+                    (*portal).tupDesc = UtilityTupleDescriptor((*pstmt).utilityStmt) as _;
                 }
 
                 /*
@@ -812,12 +820,12 @@ pub unsafe fn PortalRun(
      * CurrentMemoryContext has a similar problem, but the other pointers we
      * save here will be NULL or pointing to longer-lived objects.
      */
-    saveTopTransactionResourceOwner = TopTransactionResourceOwner;
-    saveTopTransactionContext = TopTransactionContext;
+    saveTopTransactionResourceOwner = TopTransactionResourceOwner as _;
+    saveTopTransactionContext = TopTransactionContext as _;
     saveActivePortal = ActivePortal;
     saveResourceOwner = CurrentResourceOwner;
     savePortalContext = PortalContext;
-    saveMemoryContext = CurrentMemoryContext;
+    saveMemoryContext = CurrentMemoryContext as _;
 
     // PG_TRY();
     let try_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -895,13 +903,13 @@ pub unsafe fn PortalRun(
 
         /* Restore global vars and propagate error */
         if saveMemoryContext == saveTopTransactionContext {
-            MemoryContextSwitchTo(TopTransactionContext);
+            MemoryContextSwitchTo(TopTransactionContext as _);
         } else {
             MemoryContextSwitchTo(saveMemoryContext);
         }
         ActivePortal = saveActivePortal;
         if saveResourceOwner == saveTopTransactionResourceOwner {
-            CurrentResourceOwner = TopTransactionResourceOwner;
+            CurrentResourceOwner = TopTransactionResourceOwner as _;
         } else {
             CurrentResourceOwner = saveResourceOwner;
         }
@@ -913,13 +921,13 @@ pub unsafe fn PortalRun(
     // PG_END_TRY();
 
     if saveMemoryContext == saveTopTransactionContext {
-        MemoryContextSwitchTo(TopTransactionContext);
+        MemoryContextSwitchTo(TopTransactionContext as _);
     } else {
         MemoryContextSwitchTo(saveMemoryContext);
     }
     ActivePortal = saveActivePortal;
     if saveResourceOwner == saveTopTransactionResourceOwner {
-        CurrentResourceOwner = TopTransactionResourceOwner;
+        CurrentResourceOwner = TopTransactionResourceOwner as _;
     } else {
         CurrentResourceOwner = saveResourceOwner;
     }
@@ -1008,7 +1016,7 @@ unsafe fn PortalRunSelect(
         if !(*portal).holdStore.is_null() {
             nprocessed = RunFromStore(portal, direction, count as uint64, dest);
         } else {
-            PushActiveSnapshot((*queryDesc).snapshot);
+            PushActiveSnapshot((*queryDesc).snapshot as _);
             ExecutorRun(queryDesc, direction, count as uint64);
             nprocessed = (*(*queryDesc).estate).es_processed;
             PopActiveSnapshot();
@@ -1048,7 +1056,7 @@ unsafe fn PortalRunSelect(
         if !(*portal).holdStore.is_null() {
             nprocessed = RunFromStore(portal, direction, count as uint64, dest);
         } else {
-            PushActiveSnapshot((*queryDesc).snapshot);
+            PushActiveSnapshot((*queryDesc).snapshot as _);
             ExecutorRun(queryDesc, direction, count as uint64);
             nprocessed = (*(*queryDesc).estate).es_processed;
             PopActiveSnapshot();
@@ -1419,7 +1427,7 @@ unsafe fn PortalRunMulti(
         /*
          * Clear subsidiary contexts to recover temporary memory.
          */
-        Assert!((*portal).portalContext == CurrentMemoryContext);
+        Assert!((*portal).portalContext == CurrentMemoryContext as _);
 
         MemoryContextDeleteChildren((*portal).portalContext);
 
@@ -1786,7 +1794,7 @@ unsafe fn DoPortalRewind(portal: Portal) {
     /* Rewind executor, if active */
     queryDesc = (*portal).queryDesc;
     if !queryDesc.is_null() {
-        PushActiveSnapshot((*queryDesc).snapshot);
+        PushActiveSnapshot((*queryDesc).snapshot as _);
         ExecutorRewind(queryDesc);
         PopActiveSnapshot();
     }
@@ -1848,6 +1856,7 @@ pub unsafe fn PlannedStmtRequiresSnapshot(pstmt: *mut PlannedStmt) -> bool {
  * and thereby destroy all snapshots.  This function can be called to
  * re-establish the Portal-level snapshot when none exists.
  */
+#[no_mangle]
 pub unsafe fn EnsurePortalSnapshotExists() {
     let portal: Portal;
 

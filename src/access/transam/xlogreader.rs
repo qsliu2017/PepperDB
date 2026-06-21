@@ -104,6 +104,7 @@ pub type ForkNumber = c_int;
 
 /// `XLogRecPtrIsInvalid(r)` (xlogdefs.h).
 #[inline]
+#[no_mangle]
 pub fn XLogRecPtrIsInvalid(r: XLogRecPtr) -> bool {
     r == InvalidXLogRecPtr
 }
@@ -2651,15 +2652,8 @@ pub unsafe fn XLogRecGetFullXid(record: *mut XLogReaderState) -> FullTransaction
 }
 // #endif
 
-// TODO(pg-port): backend replay state from access/transam/varsup.c (not ported
-// here). Sibling subtrans.rs defines an equivalent local TransamVariables; this
-// file keeps its own private stub so XLogRecGetFullXid stays self-consistent.
-#[repr(C)]
-struct TransamVariablesData {
-    nextXid: FullTransactionId,
-}
-#[allow(non_upper_case_globals)]
-static mut TransamVariables: *mut TransamVariablesData = core::ptr::null_mut();
+pub use crate::access::transam::varsup::TransamVariablesData;
+pub use crate::access::transam::varsup::TransamVariables;
 
 // TODO(pg-port): real fn in access/transam/transam.c; xid8funcs.rs/twophase.rs
 // keep their own private copies. Mirror them here until transam.c is ported.
@@ -2672,9 +2666,7 @@ unsafe fn FullTransactionIdFromAllowableAt(
 
 // TODO(pg-port): miscadmin.c globals (not imported here to avoid pulling in
 // unwired backend state); mirror as local stubs.
-unsafe fn AmStartupProcess() -> bool {
-    unimplemented!() // TODO(pg-port): miscadmin.c
-}
+unsafe fn AmStartupProcess() -> bool { crate::miscadmin::AmStartupProcess() }
 #[allow(non_upper_case_globals)]
 static mut IsUnderPostmaster: bool = false;
 

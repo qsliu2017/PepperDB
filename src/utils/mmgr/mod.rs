@@ -5,6 +5,8 @@
 //! the final step rewires `palloc`/`pfree` to dispatch through these contexts.
 
 pub mod portalmem;
+pub mod dsa;
+pub mod freepage;
 pub mod alignedalloc;
 pub mod aset;
 pub mod bump;

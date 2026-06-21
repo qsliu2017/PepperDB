@@ -599,10 +599,10 @@ pub struct guts {
 // prototypes for functions exported from regcomp.c to regexec.c
 // ---------------------------------------------------------------------------
 
-pub unsafe fn pg_set_regex_collation(_collation: Oid) {
-    unimplemented!()
+pub unsafe fn pg_set_regex_collation(collation: Oid) {
+    crate::regex::regc_pg_locale::pg_set_regex_collation(collation)
 }
 
-pub unsafe fn pg_reg_getcolor(_cm: *mut colormap, _c: chr) -> color {
-    unimplemented!()
+pub unsafe fn pg_reg_getcolor(cm: *mut colormap, c: chr) -> color {
+    crate::regex::regc_color::pg_reg_getcolor(cm, c)
 }

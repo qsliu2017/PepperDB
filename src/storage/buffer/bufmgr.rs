@@ -63,6 +63,8 @@ use crate::utils::activity::pgstat_io::{
 use crate::storage::procnumber::{MyProcNumber, INVALID_PROC_NUMBER, ProcNumber};
 use crate::utils::resowner::resowner::{
     ResourceOwnerEnlarge, CurrentResourceOwner,
+    ResourceOwnerDesc, RESOURCE_RELEASE_BEFORE_LOCKS,
+    RELEASE_PRIO_BUFFER_IOS, RELEASE_PRIO_BUFFER_PINS,
 };
 use crate::storage::buf_internals::{
     ResourceOwnerRememberBuffer, ResourceOwnerForgetBuffer,
@@ -91,6 +93,7 @@ unsafe fn pg_atomic_unlocked_write_u32(ptr: &pg_atomic_uint32, val: uint32) {
 
 // buf.h: BufferIsValid -- a buffer id is valid iff it is not InvalidBuffer.
 #[inline]
+#[no_mangle]
 fn BufferIsValid(buffer: Buffer) -> bool {
     buffer != InvalidBuffer
 }
@@ -152,6 +155,8 @@ pub const READ_BUFFERS_SYNCHRONOUSLY: c_int = 1 << 0;
 pub const READ_BUFFERS_ISSUE_ADVICE: c_int = 1 << 1;
 pub const READ_BUFFERS_ZERO_ON_ERROR: c_int = 1 << 2;
 pub const READ_BUFFERS_IGNORE_CHECKSUM_FAILURES: c_int = 1 << 3;
+/* PepperDB-internal: pin+allocate the buffer but skip the disk read (caller zero-fills) */
+pub const READ_BUFFERS_ZERO_FILL: c_int = 1 << 8;
 
 // READ_STREAM_* flags
 pub const READ_STREAM_FULL: c_int = 1 << 0;
@@ -210,6 +215,10 @@ pub const IOMETHOD_SYNC: c_int = 0;
 // ignore_checksum_failure GUC
 pub static mut ignore_checksum_failure: bool = false;
 
+// track_io_timing / zero_damaged_pages GUCs (globals.c / bufmgr.c)
+static mut track_io_timing: bool = false;
+static mut zero_damaged_pages: bool = false;
+
 // PIV flags for PageIsVerified
 pub const PIV_LOG_LOG: c_int = 1 << 0;
 pub const PIV_IGNORE_CHECKSUM_FAILURE: c_int = 1 << 1;
@@ -223,7 +232,7 @@ pub const BAS_BULKWRITE: c_int = 2;
 pub const BAS_VACUUM: c_int = 3;
 
 // NUM_AUXILIARY_PROCS
-pub const NUM_AUXILIARY_PROCS: c_int = 5;
+pub const NUM_AUXILIARY_PROCS: c_int = crate::storage::lmgr::proc::NUM_AUXILIARY_PROCS as c_int; // canonical: proc.rs 6+MAX_IO_WORKERS
 
 // WAIT_EVENT_* constants (stubs)
 pub const WAIT_EVENT_BUFFER_IO: uint32 = 0;
@@ -285,9 +294,9 @@ pub struct PGIOAlignedBlock {
 // ErrorContextCallback (utils/error/elog.h) -- minimal stub
 #[repr(C)]
 pub struct ErrorContextCallback {
+    pub previous: *mut ErrorContextCallback,
     pub callback: Option<unsafe fn(*mut c_void)>,
     pub arg: *mut c_void,
-    pub previous: *mut ErrorContextCallback,
 }
 #[allow(improper_ctypes)]
 extern "C" {
@@ -306,7 +315,11 @@ pub struct SmgrCachedNblocks {
 
 #[inline]
 unsafe fn smgr_cached_nblocks_ptr(smgr: SMgrRelation) -> *mut BlockNumber {
-    (*(smgr as *mut SmgrCachedNblocks)).smgr_cached_nblocks.as_mut_ptr()
+    // Use the canonical SMgrRelationData layout: the hand-rolled SmgrCachedNblocks
+    // omitted smgr_targblock (which sits between smgr_rlocator and
+    // smgr_cached_nblocks), so it pointed 4 bytes early and every extension
+    // clobbered smgr_targblock with nblocks -> bogus btree fastpath target block.
+    (*(smgr as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_cached_nblocks.as_mut_ptr()
 }
 
 #[repr(C)]
@@ -360,11 +373,7 @@ pub unsafe fn BMR_SMGR(smgr: SMgrRelation, relpersistence: c_char) -> BufferMana
 
 // Relation opaque
 pub type Relation = *mut RelationData;
-#[repr(C)]
-pub struct RelationData {
-    pub rd_locator: RelFileLocator,
-    pub rd_rel: *mut FormPgClass,
-}
+pub use crate::utils::rel::RelationData;
 #[repr(C)]
 pub struct FormPgClass {
     pub relpersistence: c_char,
@@ -377,65 +386,66 @@ pub struct FormPgClass {
 
 #[inline]
 unsafe fn smgropen(_rlocator: RelFileLocator, _backend: c_int) -> SMgrRelation {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    crate::storage::smgr::smgr::smgropen(_rlocator, _backend as _) as _
 }
 
 #[inline]
 unsafe fn smgrprefetch(
     _reln: SMgrRelation, _forknum: ForkNumber, _blocknum: BlockNumber, _nblocks: c_int,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    crate::storage::smgr::smgr::smgrprefetch(_reln as _, _forknum as _, _blocknum, _nblocks)
 }
 
 #[inline]
 unsafe fn smgrnblocks(_reln: SMgrRelation, _forknum: ForkNumber) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    crate::storage::smgr::smgr::smgrnblocks(_reln as _, _forknum as _)
 }
 
 #[inline]
 unsafe fn smgrnblocks_cached(_reln: SMgrRelation, _forknum: ForkNumber) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    crate::storage::smgr::smgr::smgrnblocks_cached(_reln as _, _forknum as _)
 }
 
 #[inline]
 unsafe fn smgrexists(_reln: SMgrRelation, _forknum: ForkNumber) -> bool {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    crate::storage::smgr::smgr::smgrexists(_reln as _, _forknum as _)
 }
 
 #[inline]
-unsafe fn smgrcreate(_reln: SMgrRelation, _forknum: ForkNumber, _recovery: bool) {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+unsafe fn smgrcreate(reln: SMgrRelation, forknum: ForkNumber, recovery: bool) {
+    crate::storage::smgr::smgr::smgrcreate(reln as _, forknum as _, recovery)
 }
 
 #[inline]
 unsafe fn smgrextend(
-    _reln: SMgrRelation, _forknum: ForkNumber, _blocknum: BlockNumber,
-    _data: *const c_void, _skip_fsync: bool,
+    reln: SMgrRelation, forknum: ForkNumber, blocknum: BlockNumber,
+    data: *const c_void, skip_fsync: bool,
 ) {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    crate::storage::smgr::smgr::smgrextend(reln as _, forknum as _, blocknum, data as _, skip_fsync)
 }
 
 #[inline]
 unsafe fn smgrzeroextend(
-    _reln: SMgrRelation, _forknum: ForkNumber, _blocknum: BlockNumber,
-    _nblocks: c_int, _skip_fsync: bool,
+    reln: SMgrRelation, forknum: ForkNumber, blocknum: BlockNumber,
+    nblocks: c_int, skip_fsync: bool,
 ) {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    crate::storage::smgr::smgr::smgrzeroextend(reln as _, forknum as _, blocknum, nblocks, skip_fsync)
 }
 
 #[inline]
 unsafe fn smgrwrite(
-    _reln: SMgrRelation, _forknum: ForkNumber, _blocknum: BlockNumber,
-    _buffer: *const c_void, _skip_fsync: bool,
+    reln: SMgrRelation, forknum: ForkNumber, blocknum: BlockNumber,
+    buffer: *const c_void, skip_fsync: bool,
 ) {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    let buffers: [*const c_void; 1] = [buffer];
+    crate::storage::smgr::smgr::smgrwritev(reln as _, forknum as _, blocknum, buffers.as_ptr() as *mut *const c_void, 1, skip_fsync)
 }
 
 #[inline]
 unsafe fn smgrmaxcombine(
     _reln: SMgrRelation, _forknum: ForkNumber, _blocknum: BlockNumber,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    crate::storage::smgr::smgr::smgrmaxcombine(_reln as _, _forknum as _, _blocknum) as _
 }
 
 #[inline]
@@ -443,19 +453,22 @@ unsafe fn smgrstartreadv(
     _ioh: *mut PgAioHandle, _reln: SMgrRelation, _forknum: ForkNumber,
     _blocknum: BlockNumber, _io_pages: *const *mut c_void, _nblocks: c_int,
 ) {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    crate::storage::smgr::smgr::smgrstartreadv(_ioh as _, _reln as _, _forknum as _, _blocknum, _io_pages as _, _nblocks as _)
 }
 
 #[inline]
 unsafe fn smgrwriteback(
     _reln: SMgrRelation, _forknum: ForkNumber, _blocknum: BlockNumber, _nblocks: usize,
 ) {
-    unimplemented!() // TODO(pg-port): storage/smgr.c
+    crate::storage::smgr::smgr::smgrwriteback(_reln as _, _forknum as _, _blocknum, _nblocks as _)
 }
 
 #[inline]
-unsafe fn RelationGetSmgr(_rel: Relation) -> SMgrRelation {
-    unimplemented!() // TODO(pg-port): utils/cache/relcache.c
+pub unsafe fn RelationGetSmgr(rel: Relation) -> SMgrRelation {
+    if (*rel).rd_smgr.is_null() {
+        (*rel).rd_smgr = crate::storage::smgr::smgr::smgropen((*rel).rd_locator, (*rel).rd_backend) as _;
+    }
+    (*rel).rd_smgr as _
 }
 
 #[inline]
@@ -465,62 +478,59 @@ unsafe fn RelationUsesLocalBuffers(rel: Relation) -> bool {
 
 #[inline]
 unsafe fn RELATION_IS_OTHER_TEMP(rel: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): utils/cache/relcache.c
+    (*(*rel).rd_rel).relpersistence == b't' as i8 && !(*rel).rd_islocaltemp
 }
 
 #[inline]
-unsafe fn LockRelationForExtension(_rel: Relation, _lockmode: c_int) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lmgr.c
+unsafe fn LockRelationForExtension(rel: Relation, lockmode: c_int) {
+    crate::storage::lmgr::lmgr::LockRelationForExtension(rel as _, lockmode)
 }
 
 #[inline]
-unsafe fn UnlockRelationForExtension(_rel: Relation, _lockmode: c_int) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lmgr.c
+unsafe fn UnlockRelationForExtension(rel: Relation, lockmode: c_int) {
+    crate::storage::lmgr::lmgr::UnlockRelationForExtension(rel as _, lockmode)
 }
 
 pub const ExclusiveLock: c_int = 8;
 
 #[inline]
 unsafe fn PageSetChecksumCopy(_page: Page, _blkno: BlockNumber) -> *const c_void {
-    unimplemented!() // TODO(pg-port): storage/page/checksum.c
+    crate::storage::bufpage::PageSetChecksumCopy(_page as _, _blkno) as _
 }
 
 #[inline]
 unsafe fn PageIsVerified(
     _page: Page, _blkno: BlockNumber, _flags: c_int, _failed_checksum: *mut bool,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): storage/page/bufpage.c
+    crate::storage::bufpage::PageIsVerified(_page as _, _blkno, _flags, _failed_checksum)
 }
 
 #[inline]
 unsafe fn PageIsNew(_page: Page) -> bool {
-    unimplemented!() // TODO(pg-port): storage/page/bufpage.c
+    crate::storage::bufpage::PageIsNew(_page as _)
 }
 
 #[inline]
 unsafe fn PageGetLSN(_page: *const c_void) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): storage/page/bufpage.c
+    crate::storage::bufpage::PageGetLSN(_page as _)
 }
 
 #[inline]
 unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): storage/page/bufpage.c
+    crate::storage::bufpage::PageSetLSN(_page as _, _lsn)
 }
 
 #[inline]
+#[no_mangle]
 pub unsafe fn BufferGetPage(buffer: Buffer) -> Page {
-    // BufHdrGetBlock on shared buffers; local uses LocalBufHdrGetBlock
-    if BufferIsLocal(buffer) {
-        unimplemented!() // TODO(pg-port): use LocalBufHdrGetBlock
-    } else {
-        BufHdrGetBlock(GetBufferDescriptor((buffer - 1) as u32)) as Page
-    }
+    BufferGetBlock(buffer) as Page
 }
 
 #[inline]
 pub unsafe fn BufferGetBlock(buffer: Buffer) -> *mut c_void {
+    assert!(BufferIsValid(buffer));
     if BufferIsLocal(buffer) {
-        unimplemented!() // TODO(pg-port)
+        LocalBufHdrGetBlock(GetLocalBufferDescriptor((-buffer - 1) as u32))
     } else {
         BufHdrGetBlock(GetBufferDescriptor((buffer - 1) as u32))
     }
@@ -812,27 +822,33 @@ unsafe fn UnlockBuffers_lwlocks() {
 
 #[inline]
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, if _mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE })
 }
 
 #[inline]
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 
 #[inline]
 unsafe fn LWLockConditionalAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::lmgr::lwlock::LWLockConditionalAcquire(
+        _lock as _,
+        if _mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE },
+    )
 }
 
 #[inline]
 unsafe fn LWLockHeldByMe(_lock: *mut LWLock) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::lmgr::lwlock::LWLockHeldByMe(_lock as _)
 }
 
 #[inline]
 unsafe fn LWLockHeldByMeInMode(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::lmgr::lwlock::LWLockHeldByMeInMode(
+        _lock as _,
+        if _mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE },
+    )
 }
 
 #[inline]
@@ -947,44 +963,164 @@ unsafe fn ResourceOwnerRememberBufferIO(_owner: *mut c_void, _buffer: Buffer) {
 // counterparts (ReadBuffer_common's local branch, ExtendBufferedRelLocal,
 // LocalRelSize/smgrnblocks, FlushLocalRelationBuffers, DropRelationLocalBuffers)
 // are not yet wired up here; stubbed to keep signatures faithful.
-#[inline]
 unsafe fn ReadLocalBuffer(
-    _reln: Relation,
-    _fork: ForkNumber,
-    _block: BlockNumber,
-    _mode: ReadBufferMode,
+    reln: Relation,
+    fork: ForkNumber,
+    block: BlockNumber,
+    mode: ReadBufferMode,
 ) -> Buffer {
-    unimplemented!() // TODO(pg-port)
+    use crate::storage::buffer::localbuf::{
+        LocalBufferAlloc, StartLocalBufferIO, TerminateLocalBufferIO,
+    };
+
+    /* P_NEW is handled by ExtendBufferedRel(). */
+    if block == P_NEW {
+        let mut blockNum: BlockNumber = 0;
+        let mut flags: uint32 = EB_SKIP_EXTENSION_LOCK;
+        if mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK {
+            flags |= EB_LOCK_FIRST;
+        }
+        return ExtendBufferedRel(BMR_REL(reln), fork, null_mut(), flags);
+    }
+
+    let smgr = RelationGetSmgr(reln);
+
+    let mut found: bool = false;
+    let bufHdr = LocalBufferAlloc(smgr as _, fork, block, &mut found);
+    let buf = BufferDescriptorGetBuffer(bufHdr);
+
+    if found {
+        pgstat_count_buffer_hit(reln);
+        if VacuumCostActive {
+            VacuumCostBalance += VacuumCostPageHit;
+        }
+        pgBufferUsage.local_blks_hit += 1;
+        if mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK {
+            ZeroAndLockBuffer(buf, mode);
+        }
+        return buf;
+    }
+
+    /* Not found, so we need to read (or zero) the page. */
+    pgstat_count_buffer_read(reln);
+    if VacuumCostActive {
+        VacuumCostBalance += VacuumCostPageMiss;
+    }
+    pgBufferUsage.local_blks_read += 1;
+
+    if mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK {
+        /* ZeroAndLockBuffer zero-fills and sets BM_VALID for local buffers. */
+        ZeroAndLockBuffer(buf, mode);
+        return buf;
+    }
+
+    let bufBlock = LocalBufHdrGetBlock(bufHdr);
+
+    /* Begin the read; for local buffers this never blocks. */
+    if StartLocalBufferIO(bufHdr, true, false) {
+        let io_start = pgstat_prepare_io_time(track_io_timing);
+
+        let mut bufv: [*mut c_void; 1] = [bufBlock];
+        crate::storage::smgr::smgr::smgrreadv(
+            smgr as _, fork as _, block, bufv.as_mut_ptr(), 1,
+        );
+
+        pgstat_count_io_op_time(
+            IOOBJECT_TEMP_RELATION, IOCONTEXT_NORMAL, IOOP_READ,
+            io_start, 1, BLCKSZ as u64,
+        );
+
+        /* check for garbage data */
+        let mut failed_checksum = false;
+        let piv_flags = crate::storage::bufpage::PIV_LOG_WARNING;
+        if !PageIsVerified(bufBlock as Page, block, piv_flags, &mut failed_checksum) {
+            if mode == RBM_ZERO_ON_ERROR || zero_damaged_pages {
+                core::ptr::write_bytes(bufBlock as *mut u8, 0, BLCKSZ);
+            } else {
+                ereport!(ERROR,
+                    errmsg!("invalid page in block {} of relation (temp)", block));
+            }
+        }
+
+        /* Set BM_VALID, terminate IO, and wake up any waiters. */
+        TerminateLocalBufferIO(bufHdr, false, BM_VALID, false);
+    }
+
+    buf
 }
 
-#[inline]
 unsafe fn ExtendLocalRelation(
-    _bmr: BufferManagerRelation,
-    _fork: ForkNumber,
+    mut bmr: BufferManagerRelation,
+    fork: ForkNumber,
     _strategy: BufferAccessStrategy,
-    _flags: uint32,
-    _blockNum_p: *mut BlockNumber,
+    flags: uint32,
+    blockNum_p: *mut BlockNumber,
 ) -> Buffer {
-    unimplemented!() // TODO(pg-port)
+    /* ExtendBufferedRelLocal() dereferences bmr.smgr, so make sure it is set. */
+    if bmr.smgr.is_null() {
+        bmr.smgr = RelationGetSmgr(bmr.rel);
+        bmr.relpersistence = (*(*bmr.rel).rd_rel).relpersistence;
+    }
+
+    let mut buffer: Buffer = InvalidBuffer;
+    let mut extended_by: uint32 = 0;
+
+    let lbmr = crate::storage::buffer::localbuf::BufferManagerRelation {
+        rel: bmr.rel as *mut c_void,
+        smgr: bmr.smgr as _,
+        relpersistence: bmr.relpersistence,
+    };
+
+    let first_block = crate::storage::buffer::localbuf::ExtendBufferedRelLocal(
+        lbmr, fork, flags, 1, InvalidBlockNumber, &mut buffer, &mut extended_by,
+    );
+
+    assert_eq!(extended_by, 1);
+
+    *blockNum_p = first_block;
+    buffer
 }
 
 #[inline]
-unsafe fn LocalRelSize(_rel: Relation, _fork: ForkNumber) -> BlockNumber {
-    unimplemented!() // TODO(pg-port)
+unsafe fn LocalRelSize(rel: Relation, fork: ForkNumber) -> BlockNumber {
+    smgrnblocks(RelationGetSmgr(rel), fork)
 }
 
 #[inline]
 unsafe fn DropLocalRelFileLocatorBuffers(
-    _rlocator: RelFileLocator,
-    _fork: ForkNumber,
-    _first: BlockNumber,
+    rlocator: RelFileLocator,
+    fork: ForkNumber,
+    first: BlockNumber,
 ) {
-    // TODO(pg-port)
+    crate::storage::buffer::localbuf::DropRelationLocalBuffers(rlocator, fork, first)
 }
 
-#[inline]
-unsafe fn FlushLocalRelationBuffers(_rel: Relation) {
-    // TODO(pg-port)
+unsafe fn FlushLocalRelationBuffers(rel: Relation) {
+    use crate::storage::buffer::localbuf::{NLocBuffer, FlushLocalBuffer, PinLocalBuffer, UnpinLocalBuffer};
+
+    let srel = RelationGetSmgr(rel);
+
+    for i in 0..NLocBuffer {
+        let bufHdr = GetLocalBufferDescriptor(i as u32);
+        let buf_state = pg_atomic_read_u32(&(*bufHdr).state);
+        if BufTagMatchesRelFileLocator(&(*bufHdr).tag, &(*rel).rd_locator)
+            && (buf_state & (BM_VALID | BM_DIRTY)) == (BM_VALID | BM_DIRTY)
+        {
+            /* Make sure we can handle the pin */
+            ReservePrivateRefCountEntry();
+            ResourceOwnerEnlarge(CurrentResourceOwner);
+
+            /*
+             * Pin/unpin mostly to make valgrind work, but it also seems like
+             * the right thing to do.
+             */
+            PinLocalBuffer(bufHdr, false);
+
+            FlushLocalBuffer(bufHdr, srel as _);
+
+            UnpinLocalBuffer(BufferDescriptorGetBuffer(bufHdr));
+        }
+    }
 }
 
 #[inline]
@@ -1495,6 +1631,7 @@ pub unsafe fn ReadBuffer(reln: Relation, blockNum: BlockNumber) -> Buffer {
 // ----------------------------------------------------------------
 // ReadBufferExtended
 // ----------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn ReadBufferExtended(
     reln: Relation,
     forkNum: ForkNumber,
@@ -1606,46 +1743,90 @@ pub unsafe fn ExtendBufferedRelBy(
 // Extend relation until it has at least extend_to blocks.
 // ----------------------------------------------------------------
 pub unsafe fn ExtendBufferedRelTo(
-    bmr: BufferManagerRelation,
+    mut bmr: BufferManagerRelation,
     forkNum: ForkNumber,
     strategy: BufferAccessStrategy,
-    flags: uint32,
+    mut flags: uint32,
     extend_to: BlockNumber,
     blockNum_p: *mut BlockNumber,
 ) -> Buffer {
     assert!(!bmr.rel.is_null() || !bmr.smgr.is_null());
+    assert!(extend_to != InvalidBlockNumber && extend_to > 0);
+
+    if bmr.smgr.is_null() {
+        bmr.smgr = RelationGetSmgr(bmr.rel);
+        bmr.relpersistence = (*(*bmr.rel).rd_rel).relpersistence;
+    }
+
+    /*
+     * If desired, create the file if it doesn't exist.  If
+     * smgr_cached_nblocks[fork] is positive then it must exist, no need for an
+     * smgrexists call.
+     */
+    let cached = *smgr_cached_nblocks_ptr(bmr.smgr).add(forkNum as usize);
+    if (flags & EB_CREATE_FORK_IF_NEEDED) != 0
+        && (cached == 0 || cached == InvalidBlockNumber)
+        && !smgrexists(bmr.smgr, forkNum)
+    {
+        if !bmr.rel.is_null() {
+            LockRelationForExtension(bmr.rel, ExclusiveLock);
+        }
+
+        /* recheck, fork might have been created concurrently */
+        if !smgrexists(bmr.smgr, forkNum) {
+            smgrcreate(bmr.smgr, forkNum, (flags & EB_PERFORMING_RECOVERY) != 0);
+        }
+
+        if !bmr.rel.is_null() {
+            UnlockRelationForExtension(bmr.rel, ExclusiveLock);
+        }
+    }
+
+    /* If requested, invalidate size cache, so that smgrnblocks asks the kernel. */
+    if (flags & EB_CLEAR_SIZE_CACHE) != 0 {
+        *smgr_cached_nblocks_ptr(bmr.smgr).add(forkNum as usize) = InvalidBlockNumber;
+    }
 
     let mut first_new_block: BlockNumber = 0;
     let mut extended_by: uint32 = 0;
+    let mut buffer: Buffer = InvalidBuffer;
 
     /*
      * Loop until we have extended the relation far enough.  Note that it may
      * be that another backend extended it in the meantime.
      */
     loop {
-        let current_size: BlockNumber;
-        if !bmr.smgr.is_null() {
-            current_size = smgrnblocks(bmr.smgr, forkNum);
-        } else {
-            current_size = smgrnblocks(RelationGetSmgr(bmr.rel), forkNum);
-        }
+        let current_size = smgrnblocks(bmr.smgr, forkNum);
 
         if current_size >= extend_to {
-            *blockNum_p = extend_to - 1;
-            return InvalidBuffer;
+            /*
+             * Already big enough (possibly because another backend extended
+             * it concurrently).  Read the target block to return it pinned.
+             */
+            if buffer == InvalidBuffer {
+                buffer = ReadBufferExtended(
+                    bmr.rel, forkNum, extend_to - 1, RBM_NORMAL, strategy,
+                );
+            }
+            break;
         }
 
         let extend_by = extend_to - current_size;
-        let buf = ExtendBufferedRelCommon(
+        buffer = ExtendBufferedRelCommon(
             bmr, forkNum, strategy, flags,
             extend_by, &mut first_new_block, &mut extended_by,
         );
-        if buf != InvalidBuffer {
-            *blockNum_p = first_new_block;
-            return buf;
+        if buffer != InvalidBuffer {
+            /* The first newly-extended block; that's what callers want. */
+            break;
         }
-        /* someone else extended; loop */
+        /* someone else extended; loop and re-read */
     }
+
+    if !blockNum_p.is_null() {
+        *blockNum_p = extend_to - 1;
+    }
+    buffer
 }
 
 // ----------------------------------------------------------------
@@ -1891,6 +2072,10 @@ unsafe fn ReadBuffer_common(
     if mode == RBM_ZERO_ON_ERROR {
         flags |= READ_BUFFERS_ZERO_ON_ERROR;
     }
+    if mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK {
+        /* allocate+pin the block but do not read it from disk; ZeroAndLockBuffer below zero-fills */
+        flags |= READ_BUFFERS_ZERO_FILL;
+    }
     if ignore_checksum_failure {
         flags |= READ_BUFFERS_IGNORE_CHECKSUM_FAILURES;
     }
@@ -1938,10 +2123,73 @@ unsafe fn StartReadBuffersImpl(
     } else {
         IOOBJECT_RELATION
     };
-    let io_context = IOContextForStrategy(strategy);
+    let io_context = if persistence == RELPERSISTENCE_TEMP {
+        IOCONTEXT_NORMAL
+    } else {
+        IOContextForStrategy(strategy)
+    };
 
     let nblocks_val = *nblocks as usize;
     assert!(nblocks_val >= 1);
+
+    /*
+     * Temporary relations live in backend-local buffers; allocate/find them
+     * via LocalBufferAlloc and read missing pages synchronously.  Local
+     * buffers never use the AIO path.
+     */
+    if persistence == RELPERSISTENCE_TEMP {
+        use crate::storage::buffer::localbuf::{
+            LocalBufferAlloc, StartLocalBufferIO, TerminateLocalBufferIO,
+        };
+
+        for i in 0..nblocks_val {
+            let cur_block = blockNum + i as BlockNumber;
+            let mut found: bool = false;
+            let bufHdr = LocalBufferAlloc(smgr, forknum, cur_block, &mut found);
+            let buf = BufferDescriptorGetBuffer(bufHdr);
+            *buffers.add(i) = buf;
+
+            if found {
+                pgBufferUsage.local_blks_hit += 1;
+                pgstat_count_io_op(io_object, io_context, IOOP_HIT, 1, 0);
+                if VacuumCostActive {
+                    VacuumCostBalance += VacuumCostPageHit;
+                }
+                continue;
+            }
+
+            /* Not found; read the page from disk into the local buffer. */
+            if StartLocalBufferIO(bufHdr, true, false) {
+                let bufBlock = LocalBufHdrGetBlock(bufHdr);
+                let io_start = pgstat_prepare_io_time(track_io_timing);
+                if (flags & READ_BUFFERS_ZERO_FILL) == 0 {
+                    let mut bufv: [*mut c_void; 1] = [bufBlock];
+                    crate::storage::smgr::smgr::smgrreadv(
+                        smgr as _, forknum as _, cur_block, bufv.as_mut_ptr(), 1,
+                    );
+                    pgstat_count_io_op_time(
+                        io_object, io_context, IOOP_READ, io_start, 1, BLCKSZ as u64,
+                    );
+                    pgBufferUsage.local_blks_read += 1;
+
+                    let mut failed_checksum = false;
+                    let piv_flags = crate::storage::bufpage::PIV_LOG_WARNING;
+                    if !PageIsVerified(bufBlock as Page, cur_block, piv_flags, &mut failed_checksum) {
+                        if (flags & READ_BUFFERS_ZERO_ON_ERROR) != 0 || zero_damaged_pages {
+                            core::ptr::write_bytes(bufBlock as *mut u8, 0, BLCKSZ);
+                        } else {
+                            ereport!(ERROR,
+                                errmsg!("invalid page in block {} of temporary relation", cur_block));
+                        }
+                    }
+                }
+                TerminateLocalBufferIO(bufHdr, false, BM_VALID, false);
+            }
+        }
+
+        (*operation).nblocks_done = nblocks_val as i16;
+        return false;
+    }
 
     let mut io_buffers_start: c_int = 0;
     let mut need_io: bool = false;
@@ -2029,13 +2277,18 @@ unsafe fn StartReadBuffersImpl(
         }
     }
 
-    /* Synchronous fallback */
-    smgrstartreadv(
-        null_mut(), smgr, forknum, blockNum,
-        io_pages_storage.as_ptr(),
-        nblocks_val as c_int,
-    );
-    pgstat_count_io_op(io_object, io_context, IOOP_READ, nblocks_val as uint32, (nblocks_val * BLCKSZ) as u64);
+    /* Synchronous fallback: read directly into the buffers now (io_wref left
+     * invalid, so WaitReadBuffers skips the wait and only verifies/terminates).
+     * For zero-fill mode (RBM_ZERO_AND_LOCK/CLEANUP), skip the disk read entirely;
+     * the caller's ZeroAndLockBuffer fills the page. */
+    if (flags & READ_BUFFERS_ZERO_FILL) == 0 {
+        crate::storage::smgr::smgr::smgrreadv(
+            smgr as _, forknum, blockNum,
+            io_pages_storage.as_ptr() as *mut *mut c_void,
+            nblocks_val as BlockNumber,
+        );
+        pgstat_count_io_op(io_object, io_context, IOOP_READ, nblocks_val as uint32, (nblocks_val * BLCKSZ) as u64);
+    }
 
     /* Mark I/O complete immediately for sync case */
     for idx in 0..nblocks_val {
@@ -2236,6 +2489,7 @@ pub unsafe fn WaitReadBuffers(operation: *mut ReadBuffersOperation) {
         }
 
         let buf_state2 = LockBufHdr(bufHdr);
+        UnlockBufHdr(bufHdr, buf_state2);
         TerminateBufferIO(bufHdr, failed_checksum, BM_VALID, true);
     }
 }
@@ -2324,50 +2578,48 @@ unsafe fn BufferAlloc(
     }
 
     /*
-     * Not in the buffer pool.  We have to get a victim buffer and read the
-     * page from disk.
+     * Didn't find it in the buffer pool.  We'll have to initialize a new
+     * buffer.  Remember to unlock the mapping lock while doing the work.
+     */
+    LWLockRelease(newPartitionLock);
+
+    /*
+     * Acquire a victim buffer.  Somebody else might try to do the same, we
+     * don't hold any conflicting locks.  If so we'll have to undo our work
+     * later.
      */
     let victim_buf = GetVictimBuffer(strategy, newHash, &newTag);
-    if victim_buf == InvalidBuffer {
-        /* could not get a victim - shouldn't happen */
-        LWLockRelease(newPartitionLock);
-        elog!(ERROR, "no victim buffer available");
-    }
-
     let bufHdr = GetBufferDescriptor((victim_buf - 1) as u32);
 
     /*
-     * Insert tag into buffer table, and acquire content lock.
+     * Try to make a hashtable entry for the buffer under its new tag.  If
+     * somebody else inserted another buffer for the tag, we'll release the
+     * victim buffer we acquired and use the already inserted one.
      */
+    LWLockAcquire(newPartitionLock, LW_EXCLUSIVE);
     let old_buf_id = BufTableInsert(&mut newTag, newHash, victim_buf - 1);
     if old_buf_id >= 0 {
         /*
-         * Someone else inserted it while we were holding the partition lock;
-         * re-use their buffer.
+         * Got a collision.  Someone has already done what we were about to do.
+         * We'll just handle this as if it were found in the buffer pool in the
+         * first place.  First, give up the buffer we were planning to use.
          */
-        let old_buf = old_buf_id + 1;
+        UnpinBuffer(victim_buf);
 
-        /* Unpin our victim buffer */
-        let victim_state = LockBufHdr(bufHdr);
-        let victim_new_state = victim_state - BUF_REFCOUNT_ONE;
-        UnlockBufHdr(bufHdr, victim_new_state);
-
-        /* Clear old tag from victim */
-        /* We already removed any old mapping when selecting the victim */
+        /*
+         * The victim buffer we acquired previously is clean and unused, let it
+         * be found again quickly.
+         */
+        StrategyFreeBuffer(bufHdr);
 
         /* Switch to the existing buffer */
+        let old_buf = old_buf_id + 1;
         let old_bufHdr = GetBufferDescriptor(old_buf_id as u32);
-        let buf_state = LockBufHdr(old_bufHdr);
 
+        let buf_state = LockBufHdr(old_bufHdr);
         let new_state = buf_state + BUF_REFCOUNT_ONE;
         UnlockBufHdr(old_bufHdr, new_state);
         LWLockRelease(newPartitionLock);
-
-        /* forget the reservation we used for victim, get fresh one */
-        let victim_ref = GetPrivateRefCountEntry(victim_buf, false);
-        if !victim_ref.is_null() {
-            ForgetPrivateRefCountEntry(victim_ref);
-        }
 
         let ref_ = NewPrivateRefCountEntry(old_buf);
         (*ref_).refcount += 1;
@@ -2461,38 +2713,38 @@ pub unsafe fn InvalidateBuffer(buf: *mut BufferDesc) {
 // Try to evict a victim buffer.  Returns true on success.
 // ----------------------------------------------------------------
 unsafe fn InvalidateVictimBuffer(buf_hdr: *mut BufferDesc) -> bool {
-    let buf = BufferDescriptorGetBuffer(buf_hdr);
-
+    /* have buffer pinned, so it's safe to read tag without lock */
     let mut tag = (*buf_hdr).tag;
 
-    /* If the buffer isn't dirty and isn't pinned, evict it */
     let hash = BufTableHashCode(&mut tag);
     let partitionLock = BufMappingPartitionLock(hash);
 
+    if std::env::var_os("PDB_EVICT").is_some() { eprintln!("PDB_EVICT InvalidateVictimBuffer buf_id={} hash={} tag=({},{},{},{},{})", (*buf_hdr).buf_id, hash, tag.spcOid, tag.dbOid, tag.relNumber, tag.forkNum, tag.blockNum); }
     LWLockAcquire(partitionLock, LW_EXCLUSIVE);
 
-    let buf_state = LockBufHdr(buf_hdr);
+    let mut buf_state = LockBufHdr(buf_hdr);
 
-    /* If pinned, cannot evict */
-    if BUF_STATE_GET_REFCOUNT(buf_state) != 0 {
+    /*
+     * If somebody else pinned the buffer since, or even worse, dirtied it,
+     * give up on this buffer: It's clearly in use.  (We hold exactly one pin,
+     * so refcount > 1 means another backend pinned it.)
+     */
+    if BUF_STATE_GET_REFCOUNT(buf_state) != 1 || (buf_state & BM_DIRTY) != 0 {
         UnlockBufHdr(buf_hdr, buf_state);
         LWLockRelease(partitionLock);
         return false;
     }
 
-    /* If dirty, cannot evict without flushing; try sync later */
-    if (buf_state & BM_DIRTY) != 0 {
-        UnlockBufHdr(buf_hdr, buf_state);
-        LWLockRelease(partitionLock);
-        return false;
-    }
-
-    BufTableDelete(&mut tag, hash);
-
-    let mut new_state = buf_state;
-    new_state &= !(BM_VALID | BM_TAG_VALID | BM_DIRTY | BM_JUST_DIRTIED | BM_CHECKPOINT_NEEDED | BM_IO_ERROR);
+    /*
+     * Clear out the buffer's tag and flags and usagecount.  This keeps our
+     * pin (refcount bits) intact.
+     */
     ClearBufferTag(&mut (*buf_hdr).tag);
-    UnlockBufHdr(buf_hdr, new_state);
+    buf_state &= !(BUF_FLAG_MASK | BUF_USAGECOUNT_MASK);
+    UnlockBufHdr(buf_hdr, buf_state);
+
+    /* finally delete buffer from the buffer mapping table */
+    BufTableDelete(&mut tag, hash);
 
     LWLockRelease(partitionLock);
 
@@ -2511,72 +2763,92 @@ unsafe fn GetVictimBuffer(
 ) -> Buffer {
     let io_context = IOContextForStrategy(strategy);
 
+    /*
+     * Ensure, while the spinlock's not yet held, that there's a free refcount
+     * entry, and a resource owner slot for the pin.
+     */
+    ReservePrivateRefCountEntry();
+    ResourceOwnerEnlarge(CurrentResourceOwner);
+
+    /* we return here if a prospective victim buffer gets used concurrently */
     'again: loop {
         let mut buf_state: uint32 = 0;
         let mut from_ring: bool = false;
+
+        /*
+         * Select a victim buffer.  The buffer is returned with its header
+         * spinlock still held!
+         */
         let bufHdr = StrategyGetBuffer(strategy, &mut buf_state, &mut from_ring);
         let buf = BufferDescriptorGetBuffer(bufHdr);
 
-        /*
-         * If the buffer is pinned or has IO in progress, reject it.
-         */
-        if BUF_STATE_GET_REFCOUNT(buf_state) != 0
-            || (buf_state & BM_IO_IN_PROGRESS) != 0
-        {
-            StrategyFreeBuffer(bufHdr);
-            continue 'again;
-        }
+        /* Pin the buffer and then release the buffer spinlock */
+        PinBuffer_Locked(bufHdr);
 
         /*
-         * If the buffer is dirty, write it out before reuse.
+         * If the buffer was dirty, try to write it out.  There is a race
+         * condition here, in that someone might dirty it after we released
+         * the buffer header lock above, or even while we are writing it out
+         * (since our share-lock won't prevent hint-bit updates).  We will
+         * recheck the dirty bit after re-locking the buffer header.
          */
         if (buf_state & BM_DIRTY) != 0 {
-            if StrategyRejectBuffer(strategy, bufHdr, false) {
-                continue 'again;
-            }
-
-            /* Need to write the buffer */
-            if !PinBuffer_Locked(bufHdr) {
-                /* Got unlocked while we were waiting; redo */
-                continue 'again;
-            }
-
-            /* Start IO */
-            if !StartBufferIO(bufHdr, false, false) {
-                /* IO already in progress or buffer became clean */
+            let content_lock = BufferDescriptorGetContentLock(bufHdr);
+            if !LWLockConditionalAcquire(content_lock, LW_SHARED) {
+                /*
+                 * Someone else has locked the buffer, so give it up and loop
+                 * back to get another one.
+                 */
                 UnpinBuffer(buf);
                 continue 'again;
             }
 
-            FlushBuffer(bufHdr, null_mut(), io_object_for_bufhdr(bufHdr), io_context);
-            TerminateBufferIO(bufHdr, false, 0, false);
-            UnpinBuffer(buf);
+            /*
+             * If using a nondefault strategy, and writing the buffer would
+             * require a WAL flush, let the strategy decide whether to go
+             * ahead and write/reuse the buffer or to choose another victim.
+             */
+            if !strategy.is_null() {
+                let lsn = {
+                    let s = LockBufHdr(bufHdr);
+                    let l = BufferGetLSN(bufHdr);
+                    UnlockBufHdr(bufHdr, s);
+                    l
+                };
+                if XLogNeedsFlush(lsn) && StrategyRejectBuffer(strategy, bufHdr, from_ring) {
+                    LWLockRelease(content_lock);
+                    UnpinBuffer(buf);
+                    continue 'again;
+                }
+            }
 
-            pgstat_count_io_op(
-                io_object_for_bufhdr(bufHdr), io_context,
-                IOOP_EVICT, 1, BLCKSZ as u64,
-            );
-        } else {
-            pgstat_count_io_op(
-                io_object_for_bufhdr(bufHdr), io_context,
-                IOOP_EVICT, 1, BLCKSZ as u64,
+            /* OK, do the I/O */
+            FlushBuffer(bufHdr, null_mut(), IOOBJECT_RELATION, io_context);
+            LWLockRelease(content_lock);
+
+            ScheduleBufferTagForWriteback(
+                core::ptr::addr_of_mut!(BackendWritebackContext),
+                io_context,
+                &(*bufHdr).tag,
             );
         }
 
-        /* Try to invalidate the buffer */
-        if !InvalidateVictimBuffer(bufHdr) {
+        if (buf_state & BM_VALID) != 0 {
+            pgstat_count_io_op(
+                IOOBJECT_RELATION, io_context,
+                if from_ring { IOOP_REUSE } else { IOOP_EVICT }, 1, 0,
+            );
+        }
+
+        /*
+         * If the buffer has an entry in the buffer mapping table, delete it.
+         * This can fail because another backend could have pinned or dirtied
+         * the buffer.
+         */
+        if (buf_state & BM_TAG_VALID) != 0 && !InvalidateVictimBuffer(bufHdr) {
+            UnpinBuffer(buf);
             continue 'again;
         }
-
-        /* Successfully claimed victim */
-        /* Pin it */
-        let buf_state2 = LockBufHdr(bufHdr);
-        let new_state = buf_state2 + BUF_REFCOUNT_ONE;
-        UnlockBufHdr(bufHdr, new_state);
-
-        let ref_ = NewPrivateRefCountEntry(buf);
-        (*ref_).refcount += 1;
-        ResourceOwnerRememberBuffer(CurrentResourceOwner, buf);
 
         return buf;
     }
@@ -2733,46 +3005,24 @@ unsafe fn ExtendBufferedRelShared(
     ReservePrivateRefCountEntry();
     ResourceOwnerEnlarge(CurrentResourceOwner);
 
-    LWLockAcquire(partitionLock, LW_EXCLUSIVE);
-
-    /* Check if it's already in the pool (race condition) */
-    let existing = BufTableLookup(&mut newTag, newHash);
-    if existing >= 0 {
-        /* Use it */
-        let buf = existing + 1;
-        let bufHdr = GetBufferDescriptor(existing as u32);
-        let buf_state = LockBufHdr(bufHdr);
-        let new_state = buf_state + BUF_REFCOUNT_ONE;
-        UnlockBufHdr(bufHdr, new_state);
-        LWLockRelease(partitionLock);
-
-        let ref_ = NewPrivateRefCountEntry(buf);
-        (*ref_).refcount += 1;
-        ResourceOwnerRememberBuffer(CurrentResourceOwner, buf);
-        return buf;
-    }
-
-    /* Get a victim and tag it */
+    /*
+     * Acquire a victim buffer before taking the mapping lock, matching
+     * BufferAlloc: GetVictimBuffer acquires partition locks of its own and
+     * must not run while we hold a conflicting mapping lock.
+     */
     let buf = GetVictimBuffer(strategy, newHash, &newTag);
     let bufHdr = GetBufferDescriptor((buf - 1) as u32);
 
+    LWLockAcquire(partitionLock, LW_EXCLUSIVE);
+
     let old_buf_id = BufTableInsert(&mut newTag, newHash, buf - 1);
     if old_buf_id >= 0 {
-        /* Someone raced us */
+        /* Someone raced us; give up our victim and use theirs. */
         let old_buf = old_buf_id + 1;
         let old_bufHdr = GetBufferDescriptor(old_buf_id as u32);
 
-        let victim_state = LockBufHdr(bufHdr);
-        UnlockBufHdr(bufHdr, victim_state - BUF_REFCOUNT_ONE);
-
-        /* Forget private ref for victim */
-        let victim_ref = GetPrivateRefCountEntry(buf, false);
-        if !victim_ref.is_null() {
-            (*victim_ref).refcount -= 1;
-            if (*victim_ref).refcount == 0 {
-                ForgetPrivateRefCountEntry(victim_ref);
-            }
-        }
+        UnpinBuffer(buf);
+        StrategyFreeBuffer(bufHdr);
 
         let buf_state = LockBufHdr(old_bufHdr);
         let new_state = buf_state + BUF_REFCOUNT_ONE;
@@ -2782,6 +3032,11 @@ unsafe fn ExtendBufferedRelShared(
         let ref_ = NewPrivateRefCountEntry(old_buf);
         (*ref_).refcount += 1;
         ResourceOwnerRememberBuffer(CurrentResourceOwner, old_buf);
+        /* EB_LOCK_FIRST must lock the returned buffer on every path, not just the
+         * fall-through victim path below. */
+        if (flags & EB_LOCK_FIRST) != 0 {
+            LWLockAcquire(BufferDescriptorGetContentLock(old_bufHdr), 0 /* LW_EXCLUSIVE */);
+        }
         return old_buf;
     }
 
@@ -2814,6 +3069,16 @@ unsafe fn ExtendBufferedRelShared(
         BLCKSZ as u64,
     );
 
+    if (flags & EB_LOCK_FIRST) != 0 {
+        LWLockAcquire(BufferDescriptorGetContentLock(bufHdr), 0 /* LW_EXCLUSIVE */);
+        if std::env::var_os("PDB_BT").is_some() {
+            eprintln!("PDB_BT ExtendCommon EB_LOCK_FIRST buf={} held_after={}",
+                buf, LWLockHeldByMeInMode(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE));
+        }
+    } else if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT ExtendCommon NO-EB_LOCK_FIRST buf={} flags={}", buf, flags);
+    }
+
     buf
 }
 
@@ -2842,16 +3107,20 @@ pub unsafe fn MarkBufferDirty(buffer: Buffer) {
     }
 
     if BufferIsLocal(buffer) {
-        use crate::storage::buffer::localbuf::LocalRefCount;
-        let idx = (-buffer - 1) as usize;
-        assert!(*LocalRefCount.add(idx) > 0);
-        let bufHdr = GetLocalBufferDescriptor((((-buffer - 1) as usize)) as u32);
-        pg_atomic_fetch_or_u32(&(*bufHdr).state, BM_DIRTY | BM_JUST_DIRTIED);
+        crate::storage::buffer::localbuf::MarkLocalBufferDirty(buffer);
         return;
     }
 
     let bufHdr = GetBufferDescriptor((buffer - 1) as u32);
-    assert!(LWLockHeldByMeInMode(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE));
+    if std::env::var_os("PDB_BT").is_some()
+        && !LWLockHeldByMeInMode(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE)
+    {
+        let t = (*bufHdr).tag;
+        eprintln!("PDB_BT MarkBufferDirty NO-LOCK buf={} rel={} fork={} blk={}",
+            buffer, BufTagGetRelFileLocator(&t).relNumber, t.forkNum, t.blockNum);
+    }
+    // PG's original is Assert() (debug-only); match that rather than aborting release builds.
+    crate::Assert!(LWLockHeldByMeInMode(BufferDescriptorGetContentLock(bufHdr), LW_EXCLUSIVE));
 
     let buf_state = pg_atomic_fetch_or_u32(&mut (*bufHdr).state, BM_DIRTY | BM_JUST_DIRTIED);
 
@@ -2874,14 +3143,25 @@ pub unsafe fn ReleaseAndReadBuffer(
     relation: Relation,
     blockNum: BlockNumber,
 ) -> Buffer {
+    let forkNum: ForkNumber = MAIN_FORKNUM;
     if BufferIsValid(buffer) {
         if BufferIsLocal(buffer) {
-            use crate::storage::buffer::localbuf::LocalRefCount;
-            let idx = (-buffer - 1) as usize;
-            if *LocalRefCount.add(idx) > 0 {
-                *LocalRefCount.add(idx) -= 1;
+            let bufHdr = GetLocalBufferDescriptor((-buffer - 1) as u32);
+            if (*bufHdr).tag.blockNum == blockNum
+                && BufTagMatchesRelFileLocator(&(*bufHdr).tag, &(*relation).rd_locator)
+                && BufTagGetForkNum(&(*bufHdr).tag) == forkNum
+            {
+                return buffer;
             }
+            crate::storage::buffer::localbuf::UnpinLocalBuffer(buffer);
         } else {
+            let bufHdr = GetBufferDescriptor((buffer - 1) as u32);
+            if (*bufHdr).tag.blockNum == blockNum
+                && BufTagMatchesRelFileLocator(&(*bufHdr).tag, &(*relation).rd_locator)
+                && BufTagGetForkNum(&(*bufHdr).tag) == forkNum
+            {
+                return buffer;
+            }
             UnpinBuffer(buffer);
         }
     }
@@ -3356,12 +3636,23 @@ pub unsafe fn AssertNotCatalogBufferLock(_lock: *mut LWLock) {
 // DebugPrintBufferRefcount
 // ----------------------------------------------------------------
 pub unsafe fn DebugPrintBufferRefcount(buffer: Buffer) {
-    let bufHdr = GetBufferDescriptor((buffer - 1) as u32);
+    assert!(BufferIsValid(buffer));
+    let bufHdr: *mut BufferDesc;
+    let loccount: i32;
+    if BufferIsLocal(buffer) {
+        bufHdr = GetLocalBufferDescriptor((-buffer - 1) as u32);
+        loccount = *crate::storage::buffer::localbuf::LocalRefCount.offset((-buffer - 1) as isize);
+    } else {
+        bufHdr = GetBufferDescriptor((buffer - 1) as u32);
+        loccount = GetPrivateRefCount(buffer);
+    }
     let buf_state = pg_atomic_read_u32(&(*bufHdr).state);
-    elog!(LOG, "buffer {}: refcount={}, flags={:#010x}",
+    elog!(LOG, "buffer {}: blockNum={}, refcount={} {}, flags={:#010x}",
         buffer,
+        (*bufHdr).tag.blockNum,
         BUF_STATE_GET_REFCOUNT(buf_state),
-        buf_state);
+        loccount,
+        buf_state & BUF_FLAG_MASK);
 }
 
 // ----------------------------------------------------------------
@@ -3376,6 +3667,7 @@ pub unsafe fn CheckPointBuffers(flags: c_int) {
 // ----------------------------------------------------------------
 // BufferGetBlockNumber
 // ----------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn BufferGetBlockNumber(buffer: Buffer) -> BlockNumber {
     assert!(BufferIsValid(buffer));
     if BufferIsLocal(buffer) {
@@ -3491,6 +3783,7 @@ pub unsafe fn BufferIsPermanent(buffer: Buffer) -> bool {
 // Safe because we're reading a single 8-byte value that on x86 is
 // always read atomically.
 // ----------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn BufferGetLSNAtomic(buffer: Buffer) -> XLogRecPtr {
     let page = BufferGetPage(buffer);
     /* On modern platforms this is always an aligned 8-byte read. */
@@ -3623,6 +3916,7 @@ unsafe fn FindAndDropRelationBuffers(
 // ----------------------------------------------------------------
 // DropDatabaseBuffers
 // ----------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn DropDatabaseBuffers(dbid: Oid) {
     for buf_id in 0..NBuffers {
         let bufHdr = GetBufferDescriptor(buf_id as u32);
@@ -3753,6 +4047,9 @@ pub unsafe fn RelationCopyStorageUsingBuffer(
     let src_smgr = smgropen(src_rlocator, INVALID_PROC_NUMBER);
     let dst_smgr = smgropen(dst_rlocator, INVALID_PROC_NUMBER);
     let nblocks = smgrnblocks(src_smgr, forkNum);
+    if std::env::var_os("PDB_BT").is_some() && forkNum == 0 {
+        eprintln!("PDB_BT RelCopyStorage src_rel={} fork={} nblocks={}", src_rlocator.relNumber, forkNum, nblocks);
+    }
 
     for blockno in 0..nblocks {
         let src_buf = ReadBufferWithoutRelcache(src_rlocator, forkNum, blockno, RBM_NORMAL, null_mut(), permanent);
@@ -3767,7 +4064,7 @@ pub unsafe fn RelationCopyStorageUsingBuffer(
         );
 
         MarkBufferDirty(dst_buf);
-        LWLockRelease(BufferDescriptorGetContentLock(GetBufferDescriptor((dst_buf - 1) as u32)));
+        /* UnlockReleaseBuffer releases the content lock and unpins */
         UnlockReleaseBuffer(dst_buf);
         LWLockRelease(BufferDescriptorGetContentLock(GetBufferDescriptor((src_buf - 1) as u32)));
         ReleaseBuffer(src_buf);
@@ -3852,10 +4149,7 @@ pub unsafe fn ReleaseBuffer(buffer: Buffer) {
         elog!(ERROR, "bad buffer ID: {}", buffer);
     }
     if BufferIsLocal(buffer) {
-        use crate::storage::buffer::localbuf::LocalRefCount;
-        let idx = (-buffer - 1) as usize;
-        assert!(*LocalRefCount.add(idx) > 0);
-        *LocalRefCount.add(idx) -= 1;
+        crate::storage::buffer::localbuf::UnpinLocalBuffer(buffer);
         return;
     }
     UnpinBuffer(buffer);
@@ -3872,6 +4166,7 @@ pub unsafe fn UnlockReleaseBuffer(buffer: Buffer) {
 // ----------------------------------------------------------------
 // IncrBufferRefCount
 // ----------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn IncrBufferRefCount(buffer: Buffer) {
     assert!(BufferIsValid(buffer));
     ResourceOwnerEnlarge(CurrentResourceOwner);
@@ -3880,12 +4175,11 @@ pub unsafe fn IncrBufferRefCount(buffer: Buffer) {
         use crate::storage::buffer::localbuf::LocalRefCount;
         let idx = (-buffer - 1) as usize;
         *LocalRefCount.add(idx) += 1;
-        return;
+    } else {
+        let ref_ = GetPrivateRefCountEntry(buffer, true);
+        assert!(!ref_.is_null(), "buffer {} not pinned", buffer);
+        (*ref_).refcount += 1;
     }
-
-    let ref_ = GetPrivateRefCountEntry(buffer, true);
-    assert!(!ref_.is_null(), "buffer {} not pinned", buffer);
-    (*ref_).refcount += 1;
     ResourceOwnerRememberBuffer(CurrentResourceOwner, buffer);
 }
 
@@ -3895,6 +4189,7 @@ pub unsafe fn IncrBufferRefCount(buffer: Buffer) {
 // Mark a buffer dirty when no exclusive lock is held.
 // Only used for hint bits.
 // ----------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn MarkBufferDirtyHint(buffer: Buffer, buffer_std: bool) {
     assert!(BufferIsValid(buffer));
 
@@ -4710,15 +5005,30 @@ pub unsafe fn EvictRelUnpinnedBuffers(
 pub unsafe fn ResOwnerReleaseBuffer(res: Datum) {
     let buffer = res as Buffer;
     if BufferIsLocal(buffer) {
-        use crate::storage::buffer::localbuf::LocalRefCount;
-        let idx = (-buffer - 1) as usize;
-        if *LocalRefCount.add(idx) > 0 {
-            *LocalRefCount.add(idx) -= 1;
-        }
+        crate::storage::buffer::localbuf::UnpinLocalBufferNoOwner(buffer);
         return;
     }
     UnpinBufferNoOwner(buffer);
 }
+
+// ResourceOwner descriptors for buffer I/Os and pins (bufmgr.c statics; exported
+// so storage/buf_internals.rs extern decls resolve).
+#[no_mangle]
+pub static buffer_io_resowner_desc: ResourceOwnerDesc = ResourceOwnerDesc {
+    name: b"buffer io\0".as_ptr() as *const c_char,
+    release_phase: RESOURCE_RELEASE_BEFORE_LOCKS,
+    release_priority: RELEASE_PRIO_BUFFER_IOS,
+    ReleaseResource: ResOwnerReleaseBufferIO,
+    DebugPrint: Some(ResOwnerPrintBufferIO),
+};
+#[no_mangle]
+pub static buffer_pin_resowner_desc: ResourceOwnerDesc = ResourceOwnerDesc {
+    name: b"buffer pin\0".as_ptr() as *const c_char,
+    release_phase: RESOURCE_RELEASE_BEFORE_LOCKS,
+    release_priority: RELEASE_PRIO_BUFFER_PINS,
+    ReleaseResource: ResOwnerReleaseBufferPin,
+    DebugPrint: Some(ResOwnerPrintBufferPin),
+};
 
 pub unsafe fn ResOwnerReleaseBufferIO(res: Datum) {
     let buffer = res as Buffer;

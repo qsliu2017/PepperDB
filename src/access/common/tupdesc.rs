@@ -279,6 +279,7 @@ pub unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: c_int) -> Form_pg_attribute {
  * `tupdesc` must be live and `i` in 0..natts.
  */
 #[inline]
+#[no_mangle]
 pub unsafe fn TupleDescCompactAttr(tupdesc: TupleDesc, i: c_int) -> *mut CompactAttribute {
     let cattr = (&mut (*tupdesc).compact_attrs as *mut [CompactAttribute; FLEXIBLE_ARRAY_MEMBER]
         as *mut CompactAttribute)
@@ -476,6 +477,7 @@ pub unsafe fn verify_compact_attribute(tupdesc: TupleDesc, attnum: c_int) {
  * Tuple type ID information is initially set for an anonymous record type;
  * caller can overwrite this if needed.
  */
+#[no_mangle]
 pub unsafe fn CreateTemplateTupleDesc(natts: c_int) -> TupleDesc {
     /*
      * sanity checks
@@ -537,6 +539,7 @@ pub unsafe fn CreateTupleDesc(natts: c_int, attrs: *mut Form_pg_attribute) -> Tu
  *
  * !!! Constraints and defaults are not copied !!!
  */
+#[no_mangle]
 pub unsafe fn CreateTupleDescCopy(tupdesc: TupleDesc) -> TupleDesc {
     let desc = CreateTemplateTupleDesc((*tupdesc).natts);
 
@@ -872,6 +875,7 @@ pub unsafe fn IncrTupleDescRefCount(tupdesc: TupleDesc) {
  * Do not apply this to tupdescs that are not being refcounted.  (Use the
  * macro ReleaseTupleDesc for tupdescs of uncertain status.)
  */
+#[no_mangle]
 pub unsafe fn DecrTupleDescRefCount(tupdesc: TupleDesc) {
     Assert!((*tupdesc).tdrefcount > 0);
 
@@ -1188,6 +1192,7 @@ pub unsafe fn hashRowType(desc: TupleDesc) -> uint32 {
  * TODO(pg-port): needs utils/syscache.c (SearchSysCache1) + access/htup_details.h
  * (GETSTRUCT) + catalog/pg_type Form_pg_type.
  */
+#[no_mangle]
 pub unsafe fn TupleDescInitEntry(
     desc: TupleDesc,
     attributeNumber: AttrNumber,
@@ -1196,55 +1201,48 @@ pub unsafe fn TupleDescInitEntry(
     typmod: int32,
     attdim: c_int,
 ) {
-    let _ = (desc, attributeNumber, attributeName, oidtypeid, typmod, attdim);
+    let att: crate::catalog::pg_attribute::Form_pg_attribute = TupleDescAttr(desc, (attributeNumber - 1) as c_int) as _;
 
-    // C body:
-    //   HeapTuple   tuple;
-    //   Form_pg_type typeForm;
-    //   Form_pg_attribute att;
-    //
-    //   Assert(PointerIsValid(desc));
-    //   Assert(attributeNumber >= 1);
-    //   Assert(attributeNumber <= desc->natts);
-    //   Assert(attdim >= 0);
-    //   Assert(attdim <= PG_INT16_MAX);
-    //
-    //   att = TupleDescAttr(desc, attributeNumber - 1);
-    //   att->attrelid = 0;          /* dummy value */
-    //
-    //   if (attributeName == NULL)
-    //       MemSet(NameStr(att->attname), 0, NAMEDATALEN);
-    //   else if (attributeName != NameStr(att->attname))
-    //       namestrcpy(&(att->attname), attributeName);
-    //
-    //   att->atttypmod = typmod;
-    //   att->attnum = attributeNumber;
-    //   att->attndims = attdim;
-    //   att->attnotnull = false;
-    //   att->atthasdef = false;
-    //   att->atthasmissing = false;
-    //   att->attidentity = '\0';
-    //   att->attgenerated = '\0';
-    //   att->attisdropped = false;
-    //   att->attislocal = true;
-    //   att->attinhcount = 0;
-    //
-    //   tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(oidtypeid));
-    //   if (!HeapTupleIsValid(tuple))
-    //       elog(ERROR, "cache lookup failed for type %u", oidtypeid);
-    //   typeForm = (Form_pg_type) GETSTRUCT(tuple);
-    //
-    //   att->atttypid = oidtypeid;
-    //   att->attlen = typeForm->typlen;
-    //   att->attbyval = typeForm->typbyval;
-    //   att->attalign = typeForm->typalign;
-    //   att->attstorage = typeForm->typstorage;
-    //   att->attcompression = InvalidCompressionMethod;
-    //   att->attcollation = typeForm->typcollation;
-    //
-    //   populate_compact_attribute(desc, attributeNumber - 1);
-    //   ReleaseSysCache(tuple);
-    unimplemented!("TupleDescInitEntry: needs utils/syscache.c (SearchSysCache1 for TYPEOID)")
+    (*att).attrelid = 0;
+
+    if attributeName.is_null() {
+        core::ptr::write_bytes(&mut (*att).attname as *mut _ as *mut u8, 0, 64);
+    } else {
+        namestrcpy(&mut (*att).attname as *mut _ as _, attributeName);
+    }
+
+    (*att).atttypmod = typmod;
+    (*att).attnum = attributeNumber;
+    (*att).attndims = attdim as int16;
+    (*att).attnotnull = false;
+    (*att).atthasdef = false;
+    (*att).atthasmissing = false;
+    (*att).attidentity = 0;
+    (*att).attgenerated = 0;
+    (*att).attisdropped = false;
+    (*att).attislocal = true;
+    (*att).attinhcount = 0;
+
+    let tuple = crate::utils::cache::syscache::SearchSysCache1(
+        crate::utils::cache::syscache_ids_gen::TYPEOID,
+        crate::postgres::ObjectIdGetDatum(oidtypeid),
+    );
+    if tuple.is_null() { elog!(ERROR, "cache lookup failed for type {}", oidtypeid);
+    }
+    let typeForm: crate::catalog::pg_type::Form_pg_type =
+        crate::access::htup_details::GETSTRUCT(tuple as _) as _;
+
+    (*att).atttypid = oidtypeid;
+    (*att).attlen = (*typeForm).typlen;
+    (*att).attbyval = (*typeForm).typbyval;
+    (*att).attalign = (*typeForm).typalign;
+    (*att).attstorage = (*typeForm).typstorage;
+    (*att).attcompression = b'\0' as c_char;
+    (*att).attcollation = (*typeForm).typcollation;
+
+    populate_compact_attribute(desc, (attributeNumber - 1) as c_int);
+
+    crate::utils::cache::syscache::ReleaseSysCache(tuple);
 }
 
 /*
@@ -1357,6 +1355,7 @@ pub unsafe fn TupleDescInitBuiltinEntry(
  * Assign a nondefault collation to a previously initialized tuple descriptor
  * entry.
  */
+#[no_mangle]
 pub unsafe fn TupleDescInitEntryCollation(
     desc: TupleDesc,
     attributeNumber: AttrNumber,

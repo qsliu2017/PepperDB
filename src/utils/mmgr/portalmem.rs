@@ -39,10 +39,11 @@ use crate::{
 // access/xact.h: subxact / nesting-level / commit-ts helpers, and
 // CurTransactionResourceOwner.
 use crate::utils::resowner::resowner::{
-    CurTransactionResourceOwner, ResourceOwner, ResourceOwnerCreate, ResourceOwnerDelete,
+    ResourceOwner, ResourceOwnerCreate, ResourceOwnerDelete,
     ResourceOwnerNewParent, ResourceOwnerRelease, RESOURCE_RELEASE_AFTER_LOCKS,
     RESOURCE_RELEASE_BEFORE_LOCKS, RESOURCE_RELEASE_LOCKS,
 };
+use crate::access::transam::xact::CurTransactionResourceOwner;
 
 // commands/portalcmds.h
 use crate::commands::portalcmds::{PersistHoldablePortal, PortalCleanup};
@@ -90,40 +91,26 @@ use crate::utils::portal::{
 
 // access/xact.h: subtransaction / nesting bookkeeping (xact.c not yet ported).
 // TODO(pg-port): real GetCurrentSubTransactionId lives in access/transam/xact.rs
-unsafe fn GetCurrentSubTransactionId() -> SubTransactionId {
-    unimplemented!("GetCurrentSubTransactionId: crate::access::transam::xact")
-}
+unsafe fn GetCurrentSubTransactionId() -> SubTransactionId { crate::access::transam::xact::GetCurrentSubTransactionId() }
 // TODO(pg-port): real GetCurrentTransactionNestLevel lives in access/transam/xact.rs
-unsafe fn GetCurrentTransactionNestLevel() -> c_int {
-    unimplemented!("GetCurrentTransactionNestLevel: crate::access::transam::xact")
-}
+unsafe fn GetCurrentTransactionNestLevel() -> c_int { crate::access::transam::xact::GetCurrentTransactionNestLevel() }
 
 // utils/timestamp.h: statement-start timestamp (timestamp.c stub upstream).
 // TODO(pg-port): real GetCurrentStatementStartTimestamp lives in access/transam/xact.rs
-unsafe fn GetCurrentStatementStartTimestamp() -> TimestampTz {
-    unimplemented!("GetCurrentStatementStartTimestamp: crate::access::transam::xact")
-}
+unsafe fn GetCurrentStatementStartTimestamp() -> TimestampTz { crate::utils::adt::timestamp::GetCurrentStatementStartTimestamp() }
 
 // utils/plancache.h: cached-plan refcounting (plancache.c not yet ported).
 // TODO(pg-port): real ReleaseCachedPlan lives in utils/cache/plancache.rs
-unsafe fn ReleaseCachedPlan(plan: *mut CachedPlan, owner: ResourceOwner) {
-    unimplemented!("ReleaseCachedPlan: crate::utils::cache::plancache")
-}
+unsafe fn ReleaseCachedPlan(plan: *mut CachedPlan, owner: ResourceOwner) { crate::utils::cache::plancache::ReleaseCachedPlan(plan as _, owner) }
 
 // utils/snapmgr.h: active-snapshot / registered-snapshot management
 // (snapmgr.c not yet ported).
 // TODO(pg-port): real UnregisterSnapshotFromOwner lives in utils/time/snapmgr.rs
-unsafe fn UnregisterSnapshotFromOwner(snapshot: Snapshot, owner: ResourceOwner) {
-    unimplemented!("UnregisterSnapshotFromOwner: crate::utils::time::snapmgr")
-}
+unsafe fn UnregisterSnapshotFromOwner(snapshot: Snapshot, owner: ResourceOwner) { crate::utils::time::snapmgr::UnregisterSnapshotFromOwner(snapshot, owner) }
 // TODO(pg-port): real ActiveSnapshotSet lives in utils/time/snapmgr.rs
-unsafe fn ActiveSnapshotSet() -> bool {
-    unimplemented!("ActiveSnapshotSet: crate::utils::time::snapmgr")
-}
+unsafe fn ActiveSnapshotSet() -> bool { crate::utils::time::snapmgr::ActiveSnapshotSet() }
 // TODO(pg-port): real PopActiveSnapshot lives in utils/time/snapmgr.rs
-unsafe fn PopActiveSnapshot() {
-    unimplemented!("PopActiveSnapshot: crate::utils::time::snapmgr")
-}
+unsafe fn PopActiveSnapshot() { crate::utils::time::snapmgr::PopActiveSnapshot() }
 
 // utils/tuplestore.h: tuplestore for holdable cursors (tuplestore.c not yet ported).
 // TODO(pg-port): real tuplestore_begin_heap lives in utils/sort/tuplestore.rs
@@ -132,11 +119,11 @@ unsafe fn tuplestore_begin_heap(
     interXact: bool,
     maxKBytes: c_int,
 ) -> *mut Tuplestorestate {
-    unimplemented!("tuplestore_begin_heap: crate::utils::sort::tuplestore")
+    crate::utils::sort::tuplestore::tuplestore_begin_heap(randomAccess, interXact, maxKBytes) as _
 }
 // TODO(pg-port): real tuplestore_end lives in utils/sort/tuplestore.rs
 unsafe fn tuplestore_end(state: *mut Tuplestorestate) {
-    unimplemented!("tuplestore_end: crate::utils::sort::tuplestore")
+    crate::utils::sort::tuplestore::tuplestore_end(state as _)
 }
 // TODO(pg-port): real tuplestore_putvalues lives in utils/sort/tuplestore.rs
 unsafe fn tuplestore_putvalues(
@@ -145,7 +132,7 @@ unsafe fn tuplestore_putvalues(
     values: *mut Datum,
     isnull: *mut bool,
 ) {
-    unimplemented!("tuplestore_putvalues: crate::utils::sort::tuplestore")
+    crate::utils::sort::tuplestore::tuplestore_putvalues(state as _, tdesc as _, values as _, isnull as _)
 }
 
 // miscadmin.h / utils/guc.h: work_mem GUC. The prelude pulls in palloc etc.;
@@ -170,9 +157,7 @@ pub struct ReturnSetInfo {
     // ... remaining fields elided until execnodes.h lands.
 }
 // TODO(pg-port): real InitMaterializedSRF lives in utils/fmgr/funcapi.rs
-unsafe fn InitMaterializedSRF(fcinfo: crate::utils::fmgr::FunctionCallInfo, flags: bits32) {
-    unimplemented!("InitMaterializedSRF: crate::utils::fmgr::funcapi")
-}
+unsafe fn InitMaterializedSRF(fcinfo: crate::utils::fmgr::FunctionCallInfo, flags: bits32) { unimplemented!() }
 
 // Re-exported portal.h types used in this file.
 use crate::utils::portal::{CachedPlan, TimestampTz, Tuplestorestate};
@@ -372,7 +357,7 @@ pub unsafe fn CreatePortal(name: *const c_char, allowDup: bool, dupSilent: bool)
     )) as crate::utils::mmgr::memnodes::MemoryContext;
 
     /* create a resource owner for the portal */
-    (*portal).resowner = ResourceOwnerCreate(CurTransactionResourceOwner, c"Portal".as_ptr());
+    (*portal).resowner = ResourceOwnerCreate(CurTransactionResourceOwner as _, c"Portal".as_ptr());
 
     /* initialize portal fields that don't start off zero */
     (*portal).status = PORTAL_NEW;
@@ -544,6 +529,7 @@ pub unsafe fn PortalCreateHoldStore(portal: Portal) {
  * A pinned portal is still unpinned and dropped at transaction or
  * subtransaction abort.
  */
+#[no_mangle]
 pub unsafe fn PinPortal(portal: Portal) {
     if (*portal).portalPinned {
         elog!(ERROR, "portal already pinned");
@@ -552,6 +538,7 @@ pub unsafe fn PinPortal(portal: Portal) {
     (*portal).portalPinned = true;
 }
 
+#[no_mangle]
 pub unsafe fn UnpinPortal(portal: Portal) {
     if !(*portal).portalPinned {
         elog!(ERROR, "portal not pinned");
@@ -975,10 +962,12 @@ pub unsafe fn AtAbort_Portals() {
         let portal: Portal = (*hentry).portal;
 
         /*
-         * When elog(FATAL) is progress, we need to set the active portal to
-         * failed, so that PortalCleanup() doesn't run the executor shutdown.
+         * Errors propagate via siglongjmp, which bypasses PortalRun's Rust
+         * catch_unwind (where PG marks the active portal failed). So mark any
+         * still-active portal failed here, not only during shmem_exit, else the
+         * next command's CreatePortal hits "cannot drop active portal".
          */
-        if (*portal).status == PORTAL_ACTIVE && shmem_exit_inprogress {
+        if (*portal).status == PORTAL_ACTIVE {
             MarkPortalFailed(portal);
         }
 

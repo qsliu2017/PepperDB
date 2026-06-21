@@ -12,7 +12,7 @@ use core::ffi::c_void;
 
 // pg_config.h's PG_VERSION_STR (build-generated).  TODO(pg-port): emit the real
 // platform/compiler string from the build; this is the PepperDB stand-in.
-const PG_VERSION_STR: &core::ffi::CStr =
+pub const PG_VERSION_STR: &core::ffi::CStr =
     c"PostgreSQL 18.3 (PepperDB, a Rust translation of the PostgreSQL backend)";
 
 pub unsafe fn pgsql_version(fcinfo: FunctionCallInfo) -> Datum {

@@ -76,18 +76,11 @@ pub struct BTStackData {
 }
 pub type BTStack = *mut BTStackData;
 
-/// TODO(pg-port): BTScanInsertData / BTScanInsert live in access/nbtree.h.
-#[repr(C)]
-pub struct BTScanInsertData {
-    pub heapkeyspace: bool,
-    pub anynullkeys: bool,
-    pub nextkey: bool,
-    pub pivotsearch: bool,
-    pub allequalimage: bool,
-    pub scantid: *mut ItemPointerData,
-    // scankeys follow (flexible, not modelled here)
-}
-pub type BTScanInsert = *mut BTScanInsertData;
+// BTScanInsertData / BTScanInsert (access/nbtree.h): use the single canonical
+// layout from nbtutils so insert and search agree on field offsets.  A divergent
+// local definition here clobbered `keysz` when writing `scantid` (wrong offset),
+// making _bt_doinsert descend to the wrong leaf.
+pub use crate::access::nbtree::nbtutils::{BTScanInsertData, BTScanInsert};
 
 /// TODO(pg-port): BTInsertStateData / BTInsertState live in access/nbtree.h.
 #[repr(C)]
@@ -116,14 +109,9 @@ pub struct BTMetaPageData {
     pub btm_allequalimage: bool,
 }
 
-/// TODO(pg-port): SnapshotData (utils/snapshot.h).
-#[repr(C)]
-pub struct SnapshotData {
-    pub xmin: TransactionId,
-    pub xmax: TransactionId,
-    pub speculativeToken: uint32,
-    // ... more fields elided
-}
+// SnapshotData (utils/snapshot.h): use the canonical layout so _bt_check_unique's
+// dirty snapshot matches the visibility routines' field offsets.
+pub use crate::utils::snapshot::SnapshotData;
 
 pub type TransactionId = uint32;
 
@@ -137,10 +125,11 @@ pub const InvalidOffsetNumber_: OffsetNumber = 0;
 pub const BTREE_METAPAGE: BlockNumber = 0;
 /// TODO(pg-port): from access/nbtree.h.
 pub const BTREE_NOVAC_VERSION: uint32 = 4;
+/// access/nbtree.h: BTP_LEAF = (1<<0), BTP_ROOT = (1<<1). (Were swapped, which
+/// made split-created leaf pages fail P_ISLEAF -> leaf tuples read as downlinks.)
+pub const BTP_LEAF: u16 = 1 << 0;
 /// TODO(pg-port): from access/nbtree.h.
-pub const BTP_ROOT: u16 = 1 << 0;
-/// TODO(pg-port): from access/nbtree.h.
-pub const BTP_LEAF: u16 = 1 << 1;
+pub const BTP_ROOT: u16 = 1 << 1;
 /// TODO(pg-port): from access/nbtree.h.
 pub const BTP_HAS_GARBAGE: u16 = 1 << 6;
 /// TODO(pg-port): from access/nbtree.h.
@@ -180,54 +169,54 @@ pub const BTREE_FASTPATH_MIN_LEVEL: c_int = 2;
 // ------------------------------------------------------------------
 
 /// TODO(pg-port): access/nbtree.h – build scan key for insertion.
-unsafe fn _bt_mkscankey(rel: Relation, itup: IndexTuple) -> BTScanInsert {
-    unimplemented!() // TODO(pg-port)
+pub unsafe fn _bt_mkscankey(rel: Relation, itup: IndexTuple) -> BTScanInsert {
+    crate::access::nbtree::nbtutils::_bt_mkscankey(rel as _, itup as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – binary search on leaf for insert.
 unsafe fn _bt_binsrch_insert(rel: Relation, insertstate: BTInsertState) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtsearch::_bt_binsrch_insert(rel as _, insertstate as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – general tree descent for insert.
-unsafe fn _bt_search(
+pub unsafe fn _bt_search(
     rel: Relation,
     heaprel: Relation,
     key: BTScanInsert,
     bufp: *mut Buffer,
     access: c_int,
 ) -> BTStack {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtsearch::_bt_search(rel as _, heaprel as _, key as _, bufp as _, access as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – release a buffer.
 unsafe fn _bt_relbuf(rel: Relation, buf: Buffer) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_relbuf(rel as _, buf as _)
 }
 /// TODO(pg-port): access/nbtree.h – release one buf and get another.
 unsafe fn _bt_relandgetbuf(rel: Relation, obuf: Buffer, blkno: BlockNumber, access: c_int) -> Buffer {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_relandgetbuf(rel as _, obuf as _, blkno as _, access as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – get a buffer.
 unsafe fn _bt_getbuf(rel: Relation, blkno: BlockNumber, access: c_int) -> Buffer {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_getbuf(rel as _, blkno as _, access as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – allocate a new buffer.
 unsafe fn _bt_allocbuf(rel: Relation, heaprel: Relation) -> Buffer {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_allocbuf(rel as _, heaprel as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – free a descent stack.
 unsafe fn _bt_freestack(stack: BTStack) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtutils::_bt_freestack(stack as _)
 }
 /// TODO(pg-port): access/nbtree.h – compare key against page slot.
 unsafe fn _bt_compare(rel: Relation, key: BTScanInsert, page: Page, offnum: OffsetNumber) -> c_int {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtsearch::_bt_compare(rel as _, key as _, page as _, offnum as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – conditional lock on buffer.
 unsafe fn _bt_conditionallockbuf(rel: Relation, buf: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_conditionallockbuf(rel as _, buf as _)
 }
 /// TODO(pg-port): access/nbtree.h – check page magic/version.
 unsafe fn _bt_checkpage(rel: Relation, buf: Buffer) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_checkpage(rel as _, buf as _)
 }
 /// TODO(pg-port): access/nbtree.h – truncate tuple for pivot.
 unsafe fn _bt_truncate(
@@ -236,7 +225,7 @@ unsafe fn _bt_truncate(
     firstright: IndexTuple,
     itup_key: BTScanInsert,
 ) -> IndexTuple {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtutils::_bt_truncate(rel as _, lastleft as _, firstright as _, itup_key as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – swap TIDs within a posting list.
 unsafe fn _bt_swap_posting(
@@ -244,11 +233,11 @@ unsafe fn _bt_swap_posting(
     oposting: IndexTuple,
     postingoff: c_int,
 ) -> IndexTuple {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::_bt_swap_posting(newitem as _, oposting as _, postingoff as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – init a btree page.
 unsafe fn _bt_pageinit(page: Page, size: Size) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_pageinit(page as _, size as _)
 }
 /// TODO(pg-port): access/nbtree.h – find split location.
 unsafe fn _bt_findsplitloc(
@@ -259,99 +248,99 @@ unsafe fn _bt_findsplitloc(
     newitem: IndexTuple,
     newitemonleft: *mut bool,
 ) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtsplitloc::_bt_findsplitloc(rel as _, page as _, newitemoff as _, newitemsz as _, newitem as _, newitemonleft as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – get root page height.
 unsafe fn _bt_getrootheight(rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_getrootheight(rel as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – upgrade meta page format.
 unsafe fn _bt_upgrademetapage(page: Page) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_upgrademetapage(page as _)
 }
 /// TODO(pg-port): access/nbtree.h – get vacuum cycle id.
 unsafe fn _bt_vacuum_cycleid(rel: Relation) -> u16 {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtutils::_bt_vacuum_cycleid(rel as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – get endpoint page at level.
 unsafe fn _bt_get_endpoint(rel: Relation, level: uint32, rightmost: bool) -> Buffer {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtsearch::_bt_get_endpoint(rel as _, level as _, rightmost) as _
 }
 /// TODO(pg-port): access/nbtree.h – delete items from page.
 unsafe fn _bt_delitems_delete_check(rel: Relation, buf: Buffer, heapRel: Relation, delstate: *mut TM_IndexDeleteOp) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_delitems_delete_check(rel as _, buf as _, heapRel as _, delstate as _)
 }
 /// TODO(pg-port): access/nbtree.h – bottom-up deletion pass.
 unsafe fn _bt_bottomupdel_pass(rel: Relation, buf: Buffer, heapRel: Relation, newitemsz: Size) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::_bt_bottomupdel_pass(rel as _, buf as _, heapRel as _, newitemsz as _)
 }
 /// TODO(pg-port): access/nbtree.h – deduplication pass.
 unsafe fn _bt_dedup_pass(rel: Relation, buf: Buffer, newitem: IndexTuple, newitemsz: Size, isunique: bool) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::_bt_dedup_pass(rel as _, buf as _, newitem as _, newitemsz as _, isunique)
 }
 /// TODO(pg-port): access/nbtree.h – check 1/3 page constraint.
 unsafe fn _bt_check_third_page(rel: Relation, heapRel: Relation, heapkeyspace: bool, page: Page, itup: IndexTuple) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtutils::_bt_check_third_page(rel as _, heapRel as _, heapkeyspace, page as _, itup as _)
 }
 /// TODO(pg-port): access/nbtree.h – BTreeTupleGetDownLink.
-unsafe fn BTreeTupleGetDownLink(itup: IndexTuple) -> BlockNumber {
-    unimplemented!() // TODO(pg-port)
+pub unsafe fn BTreeTupleGetDownLink(itup: IndexTuple) -> BlockNumber {
+    (((*itup).t_tid.ip_blkid.bi_hi as u32) << 16) | ((*itup).t_tid.ip_blkid.bi_lo as u32)
 }
 /// TODO(pg-port): access/nbtree.h – BTreeTupleSetDownLink.
 unsafe fn BTreeTupleSetDownLink(itup: IndexTuple, blkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTreeTupleSetDownLink(itup as _, blkno)
 }
 /// TODO(pg-port): access/nbtree.h – BTreeTupleSetNAtts.
 unsafe fn BTreeTupleSetNAtts(itup: IndexTuple, natts: c_int, ishighkey: bool) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTreeTupleSetNAtts(itup as _, natts, ishighkey)
 }
 /// TODO(pg-port): access/nbtree.h – BTreeTupleGetNAtts.
-unsafe fn BTreeTupleGetNAtts(itup: IndexTuple, rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port)
+pub unsafe fn BTreeTupleGetNAtts(itup: IndexTuple, rel: Relation) -> c_int {
+    if crate::access::nbtree::nbtdedup::BTreeTupleIsPivot(itup as _) { ((*itup).t_tid.ip_posid & 0x0FFF) as c_int } else { (*(*rel).rd_rel).relnatts as c_int }
 }
 /// TODO(pg-port): access/nbtree.h – BTreeTupleIsPosting.
 unsafe fn BTreeTupleIsPosting(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTreeTupleIsPosting(itup as _)
 }
 /// TODO(pg-port): access/nbtree.h – BTreeTupleIsPivot.
 unsafe fn BTreeTupleIsPivot(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTreeTupleIsPivot(itup as _)
 }
 /// TODO(pg-port): access/nbtree.h – BTreeTupleGetNPosting.
 unsafe fn BTreeTupleGetNPosting(itup: IndexTuple) -> c_int {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTreeTupleGetNPosting(itup as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – BTreeTupleGetPostingN.
 unsafe fn BTreeTupleGetPostingN(itup: IndexTuple, n: c_int) -> *mut ItemPointerData {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTreeTupleGetPostingN(itup as _, n as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – P_RIGHTMOST.
 unsafe fn P_RIGHTMOST(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::P_RIGHTMOST(opaque as _)
 }
 /// TODO(pg-port): access/nbtree.h – P_ISLEAF.
 unsafe fn P_ISLEAF(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::P_ISLEAF(opaque as _)
 }
 /// TODO(pg-port): access/nbtree.h – P_ISROOT.
 unsafe fn P_ISROOT(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::P_ISROOT(opaque as _)
 }
 /// TODO(pg-port): access/nbtree.h – P_LEFTMOST.
 unsafe fn P_LEFTMOST(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::P_LEFTMOST(opaque as _)
 }
 /// TODO(pg-port): access/nbtree.h – P_IGNORE.
-unsafe fn P_IGNORE(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port)
+pub unsafe fn P_IGNORE(opaque: BTPageOpaque) -> bool {
+    ((*opaque).btpo_flags & 20) != 0
 }
 /// TODO(pg-port): access/nbtree.h – P_INCOMPLETE_SPLIT.
 unsafe fn P_INCOMPLETE_SPLIT(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::P_INCOMPLETE_SPLIT(opaque as _)
 }
 /// TODO(pg-port): access/nbtree.h – P_HAS_GARBAGE.
 unsafe fn P_HAS_GARBAGE(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::P_HAS_GARBAGE(opaque as _)
 }
 /// TODO(pg-port): access/nbtree.h – P_HIKEY.
 pub const P_HIKEY: OffsetNumber = 1;
@@ -360,104 +349,110 @@ pub const P_FIRSTKEY: OffsetNumber = 2;
 /// TODO(pg-port): access/nbtree.h – P_NONE.
 pub const P_NONE: BlockNumber = 0;
 /// TODO(pg-port): access/nbtree.h – P_FIRSTDATAKEY.
-unsafe fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port)
+pub unsafe fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber {
+    crate::access::nbtree::nbtdedup::P_FIRSTDATAKEY(opaque as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – BTPageGetOpaque.
 unsafe fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTPageGetOpaque(page as _) as _
 }
 /// TODO(pg-port): access/nbtree.h – BTPageGetMeta.
-unsafe fn BTPageGetMeta(page: Page) -> *mut BTMetaPageData {
-    unimplemented!() // TODO(pg-port)
+pub unsafe fn BTPageGetMeta(page: Page) -> *mut BTMetaPageData {
+    crate::storage::bufpage::PageGetContents(page as _) as *mut BTMetaPageData
 }
 /// TODO(pg-port): access/nbtree.h – BTGetDeduplicateItems.
 unsafe fn BTGetDeduplicateItems(rel: Relation) -> bool {
     unimplemented!() // TODO(pg-port)
 }
-/// TODO(pg-port): utils/rel.h – RelationGetTargetBlock.
+/// utils/rel.h - RelationGetTargetBlock: cached insertion target, or InvalidBlockNumber.
 unsafe fn RelationGetTargetBlock(rel: Relation) -> BlockNumber {
-    unimplemented!() // TODO(pg-port)
+    let smgr = (*rel).rd_smgr;
+    if smgr.is_null() {
+        InvalidBlockNumber
+    } else {
+        (*(smgr as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_targblock
+    }
 }
-/// TODO(pg-port): utils/rel.h – RelationSetTargetBlock.
+/// utils/rel.h - RelationSetTargetBlock: open smgr and set the insertion target.
 unsafe fn RelationSetTargetBlock(rel: Relation, blkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port)
+    let smgr = crate::storage::buffer::bufmgr::RelationGetSmgr(rel as _);
+    (*(smgr as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_targblock = blkno;
 }
 /// TODO(pg-port): utils/rel.h – RelationGetRelationName.
 unsafe fn RelationGetRelationName(rel: Relation) -> *const c_char {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::RelationGetRelationName(rel as _) as _
 }
 /// TODO(pg-port): utils/rel.h – RelationGetDescr.
 unsafe fn RelationGetDescr(rel: Relation) -> *mut c_void {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtsearch::RelationGetDescr(rel as _) as _
 }
 /// TODO(pg-port): utils/rel.h – RelationNeedsWAL.
 unsafe fn RelationNeedsWAL(rel: Relation) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::RelationNeedsWAL(rel as _)
 }
 /// TODO(pg-port): utils/rel.h – IndexRelationGetNumberOfAttributes.
 unsafe fn IndexRelationGetNumberOfAttributes(rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtsearch::IndexRelationGetNumberOfAttributes(rel as _) as _
 }
 /// TODO(pg-port): utils/rel.h – IndexRelationGetNumberOfKeyAttributes.
 unsafe fn IndexRelationGetNumberOfKeyAttributes(rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::IndexRelationGetNumberOfKeyAttributes(rel as _) as _
 }
 /// TODO(pg-port): storage/bufmgr.h – ReadBuffer.
 unsafe fn ReadBuffer(rel: Relation, blkno: BlockNumber) -> Buffer {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::ReadBuffer(rel as _, blkno as _) as _
 }
 /// TODO(pg-port): storage/bufmgr.h – ReleaseBuffer.
 unsafe fn ReleaseBuffer(buf: Buffer) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::ReleaseBuffer(buf as _)
 }
 /// TODO(pg-port): storage/bufmgr.h – MarkBufferDirty.
 unsafe fn MarkBufferDirty(buf: Buffer) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::MarkBufferDirty(buf as _)
 }
 /// TODO(pg-port): storage/bufmgr.h – MarkBufferDirtyHint.
 unsafe fn MarkBufferDirtyHint(buf: Buffer, buffer_std: bool) {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::buffer::bufmgr::MarkBufferDirtyHint(buf, buffer_std)
 }
 /// TODO(pg-port): storage/bufmgr.h – BufferGetPage.
 unsafe fn BufferGetPage(buf: Buffer) -> Page {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BufferGetPage(buf as _) as _
 }
 /// TODO(pg-port): storage/bufmgr.h – BufferGetBlockNumber.
 unsafe fn BufferGetBlockNumber(buf: Buffer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BufferGetBlockNumber(buf as _) as _
 }
 /// TODO(pg-port): storage/bufmgr.h – BufferGetPageSize.
 unsafe fn BufferGetPageSize(buf: Buffer) -> Size {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::BufferGetPageSize(buf as _) as _
 }
 /// TODO(pg-port): storage/bufmgr.h – BufferIsValid.
 unsafe fn BufferIsValid(buf: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::BufferIsValid(buf as _)
 }
 /// TODO(pg-port): storage/bufmgr.h – BlockNumberIsValid.
 unsafe fn BlockNumberIsValid(blkno: BlockNumber) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::BlockNumberIsValid(blkno as _)
 }
 /// TODO(pg-port): storage/bufmgr.h – TransactionIdIsValid.
 unsafe fn TransactionIdIsValid(xid: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port)
+    xid != 0
 }
 /// TODO(pg-port): storage/lmgr.h – SpeculativeInsertionWait.
 unsafe fn SpeculativeInsertionWait(xwait: TransactionId, token: uint32) {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::lmgr::lmgr::SpeculativeInsertionWait(xwait as _, token as _)
 }
 /// TODO(pg-port): storage/lmgr.h – XactLockTableWait.
 unsafe fn XactLockTableWait(xwait: TransactionId, rel: Relation, tid: *const ItemPointerData, why: c_int) {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::lmgr::lmgr::XactLockTableWait(xwait as _, rel as _, tid as _, why as _)
 }
 /// TODO(pg-port): storage/predicate.h – CheckForSerializableConflictIn.
 unsafe fn CheckForSerializableConflictIn(rel: Relation, tuple: *const c_void, blkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::lmgr::predicate::CheckForSerializableConflictIn(rel as _, tuple as _, blkno as _)
 }
 /// TODO(pg-port): storage/predicate.h – PredicateLockPageSplit.
 unsafe fn PredicateLockPageSplit(rel: Relation, oldblkno: BlockNumber, newblkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::lmgr::predicate::PredicateLockPageSplit(rel as _, oldblkno as _, newblkno as _)
 }
 /// TODO(pg-port): access/tableam.h – table_index_fetch_tuple_check.
 unsafe fn table_index_fetch_tuple_check(
@@ -466,44 +461,46 @@ unsafe fn table_index_fetch_tuple_check(
     snapshot: *mut SnapshotData,
     all_dead: *mut bool,
 ) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::table::tableam::table_index_fetch_tuple_check(rel as _, tid as _, snapshot as _, all_dead as _)
 }
-/// TODO(pg-port): utils/snapshot.h – InitDirtySnapshot.
+/// utils/snapshot.h - InitDirtySnapshot: mark snapshot as SNAPSHOT_DIRTY.
 unsafe fn InitDirtySnapshot(snap: *mut SnapshotData) {
-    unimplemented!() // TODO(pg-port)
+    (*snap).snapshot_type = crate::utils::snapshot::SNAPSHOT_DIRTY;
+    (*snap).xmin = 0;
+    (*snap).xmax = 0;
 }
 /// TODO(pg-port): utils/snapshot.h – SnapshotSelf (global singleton).
 static mut SnapshotSelf: *mut SnapshotData = core::ptr::null_mut();
 /// TODO(pg-port): access/xloginsert.h – XLogBeginInsert.
 unsafe fn XLogBeginInsert() {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::XLogBeginInsert()
 }
 /// TODO(pg-port): access/xloginsert.h – XLogRegisterData.
 unsafe fn XLogRegisterData(data: *const c_void, len: c_int) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::XLogRegisterData(data as _, len as _)
 }
 /// TODO(pg-port): access/xloginsert.h – XLogRegisterBuffer.
 unsafe fn XLogRegisterBuffer(block_id: u8, buf: Buffer, flags: c_int) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::XLogRegisterBuffer(block_id as _, buf as _, flags as _)
 }
 /// TODO(pg-port): access/xloginsert.h – XLogRegisterBufData.
 unsafe fn XLogRegisterBufData(block_id: u8, data: *const c_void, len: c_int) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::XLogRegisterBufData(block_id as _, data as _, len as _)
 }
 /// TODO(pg-port): access/xloginsert.h – XLogInsert.
 unsafe fn XLogInsert(rmid: u8, info: u8) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::XLogInsert(rmid as _, info as _) as _
 }
 /// TODO(pg-port): catalog/index.h – index_deform_tuple.
 unsafe fn index_deform_tuple(itup: IndexTuple, tupdesc: *mut c_void, values: *mut Datum, isnull: *mut bool) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::common::indextuple::index_deform_tuple(itup as _, tupdesc as _, values as _, isnull as _)
 }
 /// TODO(pg-port): catalog/index.h – BuildIndexValueDescription.
 unsafe fn BuildIndexValueDescription(rel: Relation, values: *mut Datum, isnull: *mut bool) -> *mut c_char {
-    unimplemented!() // TODO(pg-port)
+    crate::access::index::genam::BuildIndexValueDescription(rel as _, values as _, isnull as _) as _
 }
 /// TODO(pg-port): common/int.h – pg_cmp_u32.
-unsafe fn pg_cmp_u32(a: uint32, b: uint32) -> c_int {
+pub unsafe fn pg_cmp_u32(a: uint32, b: uint32) -> c_int {
     if a < b { -1 } else if a > b { 1 } else { 0 }
 }
 /// TODO(pg-port): lib/qunique.h – qunique.
@@ -513,7 +510,7 @@ unsafe fn qunique(
     sz: usize,
     cmp: unsafe fn(*const c_void, *const c_void) -> c_int,
 ) -> usize {
-    unimplemented!() // TODO(pg-port)
+    crate::lib::qunique::qunique(array as _, n as _, sz as _, cmp as _)
 }
 /// TODO(pg-port): lmgr.h constant XLTW_InsertIndex.
 pub const XLTW_InsertIndex: c_int = 9;
@@ -572,6 +569,7 @@ pub const UNIQUE_CHECK_EXISTING: IndexUniqueCheck = 3;
 pub const BT_READ: c_int = 1;
 pub const BT_WRITE: c_int = 2;
 
+#[no_mangle]
 pub unsafe fn _bt_doinsert(
     rel: Relation,
     itup: IndexTuple,
@@ -588,6 +586,10 @@ pub unsafe fn _bt_doinsert(
 
     /* we need an insertion scan key to do our search, so build one */
     itup_key = _bt_mkscankey(rel, itup);
+
+    if std::env::var("PDB_BT").is_ok() && (*(*rel).rd_rel).oid == 2663 {
+        eprintln!("PDB_BT _bt_doinsert idx=2663 itup_key.keysz={} heapkeyspace={}", (*itup_key).keysz, (*itup_key).heapkeyspace);
+    }
 
     if checkingunique {
         if !(*itup_key).anynullkeys {
@@ -746,6 +748,10 @@ pub unsafe fn _bt_doinsert(
                 stack,
                 heapRel,
             );
+            if std::env::var("PDB_BT").is_ok() && (*(*rel).rd_rel).oid == 2663 {
+                eprintln!("PDB_BT _bt_doinsert idx=2663 WRITE blkno={} newitemoff={} itemsz={}",
+                    BufferGetBlockNumber(insertstate.buf), newitemoff, insertstate.itemsz);
+            }
             _bt_insertonpg(
                 rel,
                 heapRel,
@@ -814,7 +820,7 @@ pub unsafe fn _bt_doinsert(
  * that it isn't useful to apply the optimization when there is contention,
  * since each per-backend cache won't stay valid for long.
  */
-unsafe fn _bt_search_insert(
+pub unsafe fn _bt_search_insert(
     rel: Relation,
     heaprel: Relation,
     insertstate: *mut BTInsertStateData,
@@ -908,7 +914,7 @@ unsafe fn _bt_search_insert(
  * indexes.  So do not call here when there are NULL values in scan key and
  * the index uses the default NULLS DISTINCT mode.
  */
-unsafe fn _bt_check_unique(
+pub unsafe fn _bt_check_unique(
     rel: Relation,
     insertstate: *mut BTInsertStateData,
     heapRel: Relation,
@@ -1020,6 +1026,16 @@ unsafe fn _bt_check_unique(
                     /* Advanced curitup */
                     curitup = PageGetItem(page, curitemid) as IndexTuple;
                     Assert!(!BTreeTupleIsPivot(curitup));
+                    if std::env::var("PDB_BT").is_ok() {
+                        let mut i1 = false; let mut i2 = false; let mut j1 = false; let mut j2 = false;
+                        let td = crate::utils::rel::RelationGetDescr(rel as _) as _;
+                        let d1 = crate::access::common::indextuple::index_getattr(curitup, 1, td, &mut i1);
+                        let d2 = crate::access::common::indextuple::index_getattr(curitup, 2, td, &mut i2);
+                        let it = (*insertstate).itup;
+                        let e1 = crate::access::common::indextuple::index_getattr(it, 1, td, &mut j1);
+                        let e2 = crate::access::common::indextuple::index_getattr(it, 2, td, &mut j2);
+                        eprintln!("PDB_BT _bt_check_unique idx={} EQUAL keysz={} off={} cand=({:#x},{:#x}) insert=({:#x},{:#x})", (*(*rel).rd_rel).oid, (*itup_key).keysz, offset, d1, d2, e1, e2);
+                    }
                 }
 
                 /* okay, we gotta fetch the heap tuple using htid ... */
@@ -1114,7 +1130,7 @@ unsafe fn _bt_check_unique(
                     if table_index_fetch_tuple_check(
                         heapRel,
                         &mut htid,
-                        SnapshotSelf,
+                        &raw mut crate::utils::time::snapmgr::SnapshotSelfData as *mut SnapshotData,
                         core::ptr::null_mut(),
                     ) {
                         /* Normal case --- it's still live */
@@ -1343,7 +1359,7 @@ unsafe fn _bt_check_unique(
  *		advantage of them.  This avoids repeating comparisons that we made in
  *		_bt_check_unique() already.
  */
-unsafe fn _bt_findinsertloc(
+pub unsafe fn _bt_findinsertloc(
     rel: Relation,
     insertstate: *mut BTInsertStateData,
     checkingunique: bool,
@@ -1566,7 +1582,7 @@ unsafe fn _bt_findinsertloc(
 
 /// TODO(pg-port): common/pg_prng.h – pg_prng_uint32 (wraps global state).
 unsafe fn pg_prng_uint32() -> uint32 {
-    unimplemented!() // TODO(pg-port)
+    crate::common::pg_prng::pg_prng_uint32(&mut crate::common::pg_prng::pg_global_prng_state)
 }
 
 /*
@@ -1581,7 +1597,7 @@ unsafe fn pg_prng_uint32() -> uint32 {
  * This is more aggressive than it needs to be for non-unique !heapkeyspace
  * indexes.
  */
-unsafe fn _bt_stepright(
+pub unsafe fn _bt_stepright(
     rel: Relation,
     heaprel: Relation,
     insertstate: *mut BTInsertStateData,
@@ -1664,7 +1680,7 @@ unsafe fn _bt_stepright(
  *		INCOMPLETE_SPLIT flag on it, and release the buffer.
  *----------
  */
-unsafe fn _bt_insertonpg(
+pub unsafe fn _bt_insertonpg(
     rel: Relation,
     heaprel: Relation,
     itup_key: BTScanInsert,
@@ -2114,7 +2130,7 @@ unsafe fn _bt_insertonpg(
  *		Returns the new right sibling of buf, pinned and write-locked.
  *		The pin and lock on buf are maintained.
  */
-unsafe fn _bt_split(
+pub unsafe fn _bt_split(
     rel: Relation,
     heaprel: Relation,
     itup_key: BTScanInsert,
@@ -3142,7 +3158,7 @@ unsafe fn _bt_split(
  * isroot - we split the true root
  * isonly - we split a page alone on its level (might have been fast root)
  */
-unsafe fn _bt_insert_parent(
+pub unsafe fn _bt_insert_parent(
     rel: Relation,
     heaprel: Relation,
     buf: Buffer,
@@ -3502,7 +3518,7 @@ pub unsafe fn _bt_getstackbuf(
  *		The new root buffer is returned to caller which has to unlock/unpin
  *		lbuf, rbuf & rootbuf.
  */
-unsafe fn _bt_newlevel(
+pub unsafe fn _bt_newlevel(
     rel: Relation,
     heaprel: Relation,
     lbuf: Buffer,
@@ -3715,7 +3731,7 @@ unsafe fn _bt_newlevel(
  *		despite using some of the same infrastructure.
  */
 #[inline]
-unsafe fn _bt_pgaddtup(
+pub unsafe fn _bt_pgaddtup(
     page: Page,
     itemsize: Size,
     itup: IndexTuple,
@@ -3775,7 +3791,7 @@ unsafe fn _bt_pgaddtup(
  * linear search, and so are likely to get some benefit from using it as a
  * gating condition.)
  */
-unsafe fn _bt_delete_or_dedup_one_page(
+pub unsafe fn _bt_delete_or_dedup_one_page(
     rel: Relation,
     heapRel: Relation,
     insertstate: *mut BTInsertStateData,
@@ -3924,7 +3940,7 @@ unsafe fn _bt_delete_or_dedup_one_page(
  *
  * See nbtree/README for further details on simple index tuple deletion.
  */
-unsafe fn _bt_simpledel_pass(
+pub unsafe fn _bt_simpledel_pass(
     rel: Relation,
     buffer: Buffer,
     heapRel: Relation,
@@ -4063,7 +4079,7 @@ unsafe fn _bt_simpledel_pass(
  *
  * Returns final array, and sets *nblocks to its final size for caller.
  */
-unsafe fn _bt_deadblocks(
+pub unsafe fn _bt_deadblocks(
     page: Page,
     deletable: *mut OffsetNumber,
     ndeletable: c_int,
@@ -4172,7 +4188,7 @@ unsafe fn qsort(
  * _bt_blk_cmp() -- qsort comparison function for _bt_simpledel_pass
  */
 #[inline]
-unsafe fn _bt_blk_cmp(arg1: *const c_void, arg2: *const c_void) -> c_int {
+pub unsafe fn _bt_blk_cmp(arg1: *const c_void, arg2: *const c_void) -> c_int {
     let b1: BlockNumber = *(arg1 as *const BlockNumber);
     let b2: BlockNumber = *(arg2 as *const BlockNumber);
 

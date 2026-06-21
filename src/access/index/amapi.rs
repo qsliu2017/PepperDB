@@ -432,7 +432,11 @@ unsafe fn IsA_IndexAmRoutine(routine: *const IndexAmRoutine) -> bool {
 // for the system catalogs. relcache.c relies on that.
 // ---------------------------------------------------------------------------
 pub unsafe fn GetIndexAmRoutine(amhandler: Oid) -> *mut IndexAmRoutine {
-    let datum: Datum = OidFunctionCall0Coll(amhandler, InvalidOid);
+    let datum: Datum = if amhandler == 330 {
+        crate::access::nbtree::nbtree::bthandler(core::ptr::null_mut())
+    } else {
+        OidFunctionCall0Coll(amhandler, InvalidOid)
+    };
     let routine = DatumGetPointer(datum) as *mut IndexAmRoutine;
 
     if routine.is_null() || !IsA_IndexAmRoutine(routine) {

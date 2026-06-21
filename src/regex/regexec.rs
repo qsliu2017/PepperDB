@@ -516,7 +516,7 @@ unsafe fn find(v: *mut vars, cnfa: *mut cnfa, cm: *mut colormap) -> c_int {
     let open: *mut chr; /* open and close of range of possible starts */
     let close: *mut chr;
     let mut hitend: c_int = 0;
-    let shorter = if ((*(*(*v).g).tree).flags & SHORTER) != 0 { 1 } else { 0 };
+    let shorter = if ((*(*(*v).g).tree).flags as c_int & SHORTER) != 0 { 1 } else { 0 };
 
     /* first, a shot with the search RE */
     s = newdfa(v, &mut (*(*v).g).search, cm, &mut (*v).dfa1);
@@ -1170,7 +1170,7 @@ unsafe fn caltdissect(
     begin: *mut chr, /* beginning of relevant substring */
     end: *mut chr,   /* end of same */
 ) -> c_int {
-    let d: *mut dfa;
+    let mut d: *mut dfa;
     let mut er: c_int;
 
     Assert!((*t).op == b'|' as c_char);

@@ -66,7 +66,7 @@ use crate::access::attnum::AttrNumber;
 use crate::access::common::tupdesc::TupleDesc;
 use crate::commands::copy::{
     CopyFormatOptions, CopyHeaderChoice, CopyLogVerbosityChoice, CopyOnErrorChoice,
-    COPY_HEADER_MATCH, COPY_LOG_VERBOSITY_VERBOSE, COPY_ON_ERROR_STOP,
+    COPY_HEADER_FALSE, COPY_HEADER_MATCH, COPY_LOG_VERBOSITY_VERBOSE, COPY_ON_ERROR_STOP,
 };
 use crate::commands::copyapi::CopyFromState;
 use crate::commands::copyfrom_internal::{
@@ -83,7 +83,7 @@ use crate::lib::stringinfo::{
 };
 use crate::libpq::pqformat::{
     pq_beginmessage, pq_copymsgbytes, pq_endmessage, pq_getmsgstring,
-    pq_sendint16, pq_sendbyte,
+    pq_sendint16, pq_sendint8,
 };
 use crate::libpq::protocol::{
     PqMsg_CopyInResponse, PqMsg_CopyData, PqMsg_CopyDone, PqMsg_CopyFail,
@@ -115,59 +115,47 @@ static BinarySignature: [u8; 11] = *b"PGCOPY\n\xff\r\n\0";
 
 /* TODO(pg-port): pq_getbyte from libpq/libpq-be.h */
 unsafe fn pq_getbyte() -> c_int {
-    unimplemented!() // TODO(pg-port): real pq_getbyte in libpq/be-fsstubs.c
+    crate::libpq::libpq::pq_getbyte() as _
 }
 
 /* TODO(pg-port): pq_startmsgread from libpq/libpq.h */
 unsafe fn pq_startmsgread() {
-    unimplemented!() // TODO(pg-port): real pq_startmsgread in libpq
+    crate::libpq::libpq::pq_startmsgread()
 }
 
 /* TODO(pg-port): pq_getmessage from libpq/libpq.h */
 unsafe fn pq_getmessage(_buf: StringInfo, _maxsize: Size) -> c_int {
-    unimplemented!() // TODO(pg-port): real pq_getmessage in libpq
+    crate::libpq::libpq::pq_getmessage(_buf as _, _maxsize as _) as _
 }
 
 /* TODO(pg-port): pq_flush from libpq/libpq.h */
 unsafe fn pq_flush() -> c_int {
-    unimplemented!() // TODO(pg-port): real pq_flush in libpq
+    crate::libpq::libpq::pq_flush() as _
 }
 
 /* TODO(pg-port): RelationGetDescr from utils/rel.h */
 unsafe fn RelationGetDescr(rel: Relation) -> TupleDesc {
-    unimplemented!() // TODO(pg-port): real RelationGetDescr in utils/rel.h
+    crate::utils::rel::RelationGetDescr(rel as _) as _
 }
 
 /* TODO(pg-port): TupleDescAttr from access/tupdesc.h */
 unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: c_int) -> *mut FormData_pg_attribute {
-    unimplemented!() // TODO(pg-port): real TupleDescAttr in access/tupdesc.h
+    crate::access::common::tupdesc::TupleDescAttr(tupdesc as _, i as _) as _
 }
 
-/* TODO(pg-port): Form_pg_attribute and FormData_pg_attribute from catalog/pg_attribute.h */
-pub type Form_pg_attribute = *mut FormData_pg_attribute;
-#[repr(C)]
-pub struct FormData_pg_attribute {
-    pub attname: NameData,
-    pub atttypid: Oid,
-    pub attnum: AttrNumber,
-    pub atttypmod: i32,
-    pub attisdropped: bool,
-    pub attgenerated: c_char,
-}
-#[repr(C)]
-pub struct NameData {
-    _data: [c_char; 64],
-}
+/* Canonical attribute types (re-exported to keep field layouts correct). */
+pub use crate::catalog::pg_attribute::{FormData_pg_attribute, Form_pg_attribute};
+pub use crate::c::NameData;
 
 /* TODO(pg-port): NameStr from c.h */
 #[allow(non_snake_case)]
 unsafe fn NameStr(name: &NameData) -> *const c_char {
-    name._data.as_ptr()
+    name.data.as_ptr()
 }
 
 /* TODO(pg-port): namestrcmp from utils/builtins.h */
 unsafe fn namestrcmp(_name: *const NameData, _str_: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): real namestrcmp in utils/builtins.h
+    crate::utils::adt::name::namestrcmp(_name as _, _str_ as _) as _
 }
 
 /* TODO(pg-port): strncmp from libc */
@@ -178,17 +166,17 @@ unsafe fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_int {
 
 /* TODO(pg-port): repalloc from utils/palloc.h */
 unsafe fn repalloc(ptr: *mut c_void, size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real repalloc in utils/palloc.h
+    crate::utils::palloc::repalloc(ptr as _, size as _) as _
 }
 
 /* TODO(pg-port): pg_verifymbstr from mb/pg_wchar.h */
 unsafe fn pg_verifymbstr(_mbstr: *const c_char, _len: c_int, _noError: bool) -> bool {
-    unimplemented!() // TODO(pg-port): real pg_verifymbstr in mb/pg_wchar.h
+    crate::utils::mb::mbutils::pg_verifymbstr(_mbstr as _, _len as _, _noError)
 }
 
 /* TODO(pg-port): CopyLimitPrintoutLength from commands/copyfrom.rs */
 unsafe fn CopyLimitPrintoutLength(str_: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real CopyLimitPrintoutLength in commands/copyfrom.rs
+    crate::commands::copyfrom::CopyLimitPrintoutLength(str_ as _) as _
 }
 
 /* TODO(pg-port): memmove from libc */
@@ -248,7 +236,7 @@ pub unsafe fn ReceiveCopyBegin(cstate: CopyFromState) {
     let mut i: c_int;
 
     pq_beginmessage(&mut buf, PqMsg_CopyInResponse as c_char);
-    pq_sendbyte(&mut buf, format as u8); /* overall format */
+    pq_sendint8(&mut buf, format as u8); /* overall format */
     pq_sendint16(&mut buf, natts as u16);
     i = 0;
     while i < natts {
@@ -341,12 +329,12 @@ unsafe fn CopyGetData(
 
                 while (*(*cs).fe_msgbuf).cursor >= (*(*cs).fe_msgbuf).len {
                     /* Try to receive another message */
-                    let mtype: c_int;
+                    let mut mtype: c_int;
                     let maxmsglen: Size;
 
                     // readmessage:
                     'readmessage: loop {
-                        HOLD_CANCEL_INTERRUPTS!();
+                        HOLD_CANCEL_INTERRUPTS();
                         pq_startmsgread();
                         mtype = pq_getbyte();
                         if mtype == -1
@@ -388,7 +376,7 @@ unsafe fn CopyGetData(
                                 )
                             );
                         }
-                        RESUME_CANCEL_INTERRUPTS!();
+                        RESUME_CANCEL_INTERRUPTS();
                         /* ... and process it */
                         if mtype == PqMsg_CopyData as c_int {
                             break 'readmessage;
@@ -906,7 +894,7 @@ unsafe fn NextCopyFromRawFieldsInternal(
     Assert!(!(*cs).opts.binary);
 
     /* on input check that the header line is correct if needed */
-    if (*cs).cur_lineno == 0 && (*cs).opts.header_line != 0 /* COPY_HEADER_FALSE */ {
+    if (*cs).cur_lineno == 0 && (*cs).opts.header_line != COPY_HEADER_FALSE {
         let mut cur: *mut ListCell;
         let tupDesc: TupleDesc;
 
@@ -1036,7 +1024,7 @@ pub unsafe fn NextCopyFrom(
     let defexprs: *mut *mut ExprState = (*cs).defexprs;
 
     tupDesc = RelationGetDescr((*cs).rel);
-    num_phys_attrs = (*tupDesc).natts;
+    num_phys_attrs = (*tupDesc).natts as AttrNumber;
 
     /* Initialize all values for row to NULL */
     MemSet(
@@ -1177,14 +1165,14 @@ unsafe fn CopyFromTextLikeOneRow(
                 }
 
                 if is_csv {
-                    if string.is_null() && (*cs).opts.force_notnull_flags[m as usize] {
+                    if string.is_null() && *(*cs).opts.force_notnull_flags.add(m as usize) {
                         /*
                          * FORCE_NOT_NULL option is set and column is NULL - convert
                          * it to the NULL string.
                          */
                         string = (*cs).opts.null_print;
                     } else if !string.is_null()
-                        && (*cs).opts.force_null_flags[m as usize]
+                        && *(*cs).opts.force_null_flags.add(m as usize)
                         && strncmp(string, (*cs).opts.null_print, (*cs).opts.null_print_len as usize) == 0
                         && {
                             // also check exact length

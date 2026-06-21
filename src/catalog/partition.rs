@@ -65,9 +65,7 @@ unsafe fn systable_beginscan(
     _snapshot: *mut SnapshotData,
     _nkeys: c_int,
     _key: ScanKey,
-) -> SysScanDesc {
-    unimplemented!()
-}
+) -> SysScanDesc { unimplemented!() }
 
 unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple {
     unimplemented!()
@@ -82,9 +80,9 @@ unsafe fn systable_endscan(_sysscan: SysScanDesc) {
  * the syscache id constants.
  */
 // TODO(pg-port): replace with generated RELOID syscache id.
-const RELOID: c_int = 0;
+const RELOID: c_int = 57;
 // TODO(pg-port): replace with generated PARTRELID syscache id.
-const PARTRELID: c_int = 0;
+const PARTRELID: c_int = 45;
 
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
     unimplemented!()
@@ -100,22 +98,16 @@ unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
 
 /* TODO(pg-port): utils/rel.h - RelationGetIndexList not ported yet. */
 unsafe fn RelationGetIndexList(_relation: Relation) -> *mut List {
-    unimplemented!()
+    crate::utils::cache::relcache::RelationGetIndexList(_relation as _) as _
 }
 
 /* TODO(pg-port): utils/partcache.h - partition-key accessors not ported yet. */
 unsafe fn RelationGetPartitionKey(_rel: Relation) -> PartitionKey {
     unimplemented!()
 }
-unsafe fn get_partition_natts(_key: PartitionKey) -> c_int {
-    unimplemented!()
-}
-unsafe fn get_partition_exprs(_key: PartitionKey) -> *mut List {
-    unimplemented!()
-}
-unsafe fn get_partition_col_attnum(_key: PartitionKey, _col: c_int) -> AttrNumber {
-    unimplemented!()
-}
+unsafe fn get_partition_natts(_key: PartitionKey) -> c_int { crate::utils::cache::partcache::get_partition_natts(_key as _) }
+unsafe fn get_partition_exprs(_key: PartitionKey) -> *mut List { crate::utils::cache::partcache::get_partition_exprs(_key as _) }
+unsafe fn get_partition_col_attnum(_key: PartitionKey, _col: c_int) -> AttrNumber { crate::utils::cache::partcache::get_partition_col_attnum(_key as _, _col as _) as _ }
 
 /*
  * get_partition_parent

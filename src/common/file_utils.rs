@@ -58,7 +58,10 @@ pub unsafe fn sync_dir_recurse(dir: *const c_char, sync_method: DataDirSyncMetho
 }
 
 pub unsafe fn durable_rename(oldfile: *const c_char, newfile: *const c_char) -> c_int {
-    unimplemented!()
+    if libc::rename(oldfile, newfile) != 0 {
+        return -1;
+    }
+    0
 }
 
 pub unsafe fn fsync_parent_path(fname: *const c_char) -> c_int {

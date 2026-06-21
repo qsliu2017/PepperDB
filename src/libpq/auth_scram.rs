@@ -138,9 +138,7 @@ const ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION: c_int = 0;
 
 // TODO(pg-port): real GetMockAuthenticationNonce lives in access/xlog.c
 //   (declared in src/include/access/xlog.h).
-unsafe fn GetMockAuthenticationNonce() -> *mut c_char {
-    unimplemented!("TODO(pg-port): GetMockAuthenticationNonce lives in access/xlog.c")
-}
+unsafe fn GetMockAuthenticationNonce() -> *mut c_char { crate::access::transam::xlog::GetMockAuthenticationNonce() }
 
 // ---------------------------------------------------------------------------
 // Minimal libc-style helpers (mirrors pattern in scram_common.rs / base64.rs)
@@ -324,6 +322,7 @@ unsafe fn psprintf_v(sig_b64: *const c_char) -> *mut c_char {
 pub static mut scram_sha_256_iterations: c_int = SCRAM_SHA_256_DEFAULT_ITERATIONS;
 
 /// SASL mechanism callbacks for SCRAM-SHA-256.
+#[no_mangle]
 pub static pg_be_scram_mech: pg_be_sasl_mech = pg_be_sasl_mech {
     get_mechanisms: Some(unsafe { core::mem::transmute(scram_get_mechanisms as unsafe extern "C" fn(_, _)) }),
     init: Some(unsafe { core::mem::transmute(scram_init as unsafe extern "C" fn(_, _, _) -> _) }),

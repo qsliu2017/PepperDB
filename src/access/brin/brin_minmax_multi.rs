@@ -181,9 +181,7 @@ struct inet_struct {
 pub struct local_relopts {
     _opaque: [u8; 0],
 }
-unsafe fn init_local_reloptions(_relopts: *mut local_relopts, _relopt_struct_size: Size) {
-    unimplemented!() // TODO(pg-port): access/reloptions.h
-}
+unsafe fn init_local_reloptions(_relopts: *mut local_relopts, _relopt_struct_size: Size) { unimplemented!() }
 unsafe fn add_local_int_reloption(
     _relopts: *mut local_relopts,
     _name: *const c_char,
@@ -192,12 +190,8 @@ unsafe fn add_local_int_reloption(
     _min_val: c_int,
     _max_val: c_int,
     _offset: c_int,
-) {
-    unimplemented!() // TODO(pg-port): access/reloptions.h
-}
-unsafe fn byteasend(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!() // TODO(pg-port): utils/varlena.h
-}
+) { unimplemented!() }
+unsafe fn byteasend(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::varlena::byteasend(_fcinfo) }
 
 /*
  * appendStringInfo variadic shims (lib/stringinfo.h).  The C source calls the

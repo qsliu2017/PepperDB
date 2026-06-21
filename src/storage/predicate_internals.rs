@@ -448,7 +448,7 @@ pub fn InvalidSerializableXact() -> *mut SERIALIZABLEXACT {
  * locking internals.
  */
 pub unsafe fn GetPredicateLockStatusData() -> *mut PredicateLockData {
-    unimplemented!()
+    crate::storage::lmgr::predicate::GetPredicateLockStatusData()
 }
 
 pub unsafe fn GetSafeSnapshotBlockingPids(
@@ -456,5 +456,5 @@ pub unsafe fn GetSafeSnapshotBlockingPids(
     output: *mut c_int,
     output_size: c_int,
 ) -> c_int {
-    unimplemented!()
+    crate::storage::lmgr::predicate::GetSafeSnapshotBlockingPids(blocked_pid, output, output_size)
 }

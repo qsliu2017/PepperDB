@@ -437,6 +437,7 @@ use canonicalize_state::*;
 //
 // # Safety
 // `path` must point to a valid, mutable, NUL-terminated C string.
+#[no_mangle]
 pub unsafe fn canonicalize_path(path: *mut c_char) {
     /* All server-safe encodings are alike here, so just use PG_SQL_ASCII */
     canonicalize_path_enc(path, PG_SQL_ASCII);
@@ -1122,6 +1123,7 @@ pub unsafe fn get_home_path(ret_path: *mut c_char) -> bool {
 //
 // # Safety
 // `path` must point to a valid, mutable, NUL-terminated C string.
+#[no_mangle]
 pub unsafe fn get_parent_directory(path: *mut c_char) {
     trim_directory(path);
 }

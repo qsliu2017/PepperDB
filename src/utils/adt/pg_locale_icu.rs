@@ -1340,8 +1340,8 @@ const Anum_pg_collation_colllocale: c_int = 8;
 const Anum_pg_collation_collicurules: c_int = 9;
 
 // TODO(pg-port): utils/syscache.h - syscache ids.
-const DATABASEOID: c_int = 0;
-const COLLOID: c_int = 0;
+const DATABASEOID: c_int = 21;
+const COLLOID: c_int = 16;
 
 // TODO(pg-port): access/htup.h - opaque heap tuple pointer.
 #[allow(non_camel_case_types)]

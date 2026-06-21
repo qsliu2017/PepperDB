@@ -111,9 +111,7 @@ fn get_opfamily_proc(_opfamily: Oid, _lefttype: Oid, _righttype: Oid, _procnum: 
 }
 
 /// STUB for `get_op_rettype(opno)` (utils/lsyscache.c).
-fn get_op_rettype(_opno: Oid) -> Oid {
-    unimplemented!("STUB: get_op_rettype (utils/lsyscache.c not ported)")
-}
+fn get_op_rettype(_opno: Oid) -> Oid { unimplemented!() }
 
 /// STUB for `format_procedure(procoid)` (utils/regproc.c) - message text only.
 fn format_procedure(_procoid: Oid) -> String {

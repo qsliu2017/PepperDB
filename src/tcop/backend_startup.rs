@@ -264,8 +264,8 @@ unsafe fn BackendInitialize(client_sock: *mut ClientSocket, cac: CAC_state) {
     remote_host[0] = b'\0' as c_char;
     remote_port[0] = b'\0' as c_char;
     ret = pg_getnameinfo_all(
-        &raw mut (*port).raddr.addr,
-        (*port).raddr.salen,
+        &raw mut (*port).raddr.addr as *mut _,
+        (*port).raddr.salen as Size,
         remote_host.as_mut_ptr(),
         std::mem::size_of_val(&remote_host) as Size,
         remote_port.as_mut_ptr(),
@@ -1193,7 +1193,7 @@ pub const B_WAL_SENDER: c_int = 0;
 pub const B_BACKEND: c_int = 0;
 
 // whereToSendOutput value
-pub const DestRemote: c_int = 0;
+pub const DestRemote: c_int = 2;
 
 #[repr(C)]
 pub struct ClientSocket {
@@ -1210,21 +1210,9 @@ pub struct SockAddr {
     pub ss_family: c_int,
 }
 
-#[repr(C)]
-pub struct Port {
-    pub remote_host: *mut c_char,
-    pub remote_port: *mut c_char,
-    pub remote_hostname: *mut c_char,
-    pub raddr: SockAddrStorage,
-    pub laddr: SockAddrStorage,
-    pub proto: ProtocolVersion,
-    pub database_name: *mut c_char,
-    pub user_name: *mut c_char,
-    pub cmdline_options: *mut c_char,
-    pub application_name: *mut c_char,
-    pub guc_options: *mut List,
-    pub ssl_in_use: bool,
-}
+// Use the canonical Port (libpq-be.h). A local struct with a different field
+// order put remote_host at offset 0, overwriting libpq_be::Port.sock.
+pub use crate::libpq::libpq_be::Port;
 
 #[repr(C)]
 pub struct SockAddrStorage {
@@ -1273,22 +1261,23 @@ pub struct SigSet {
 unsafe fn Assert(_cond: bool) {}
 
 unsafe fn ReserveExternalFD() {
-    unimplemented!() // TODO: storage/fd.c
+    crate::storage::file::fd::ReserveExternalFD()
 }
 unsafe fn pg_usleep(_micros: i64) {
-    unimplemented!() // TODO: port/pgsleep.c
+    let ts = libc::timespec { tv_sec: _micros / 1_000_000, tv_nsec: (_micros % 1_000_000) * 1000 };
+    libc::nanosleep(&ts, core::ptr::null_mut());
 }
 unsafe fn pq_init(_client_sock: *mut ClientSocket) -> *mut Port {
-    unimplemented!() // TODO: libpq/pqcomm.c
+    crate::libpq::libpq::pq_init(_client_sock as _) as _
 }
 unsafe fn pqsignal(_signo: c_int, _func: usize) {
-    unimplemented!() // TODO: libpq/pqsignal.c
+    crate::libpq::pqsignal::pqsignal(_signo, core::mem::transmute(_func));
 }
 unsafe fn InitializeTimeouts() {
-    unimplemented!() // TODO: utils/misc/timeout.c
+    crate::utils::misc::timeout::InitializeTimeouts()
 }
 unsafe fn sigprocmask(_how: c_int, _set: *const SigSet, _oldset: *mut SigSet) -> c_int {
-    unimplemented!() // TODO: libc
+    libc::sigprocmask(_how, _set as *const _, _oldset as *mut _)
 }
 unsafe fn pg_getnameinfo_all(
     _addr: *mut SockAddr,
@@ -1299,101 +1288,106 @@ unsafe fn pg_getnameinfo_all(
     _servicelen: Size,
     _flags: c_int,
 ) -> c_int {
-    unimplemented!() // TODO: common/ip.c
+    crate::common::ip::pg_getnameinfo_all(_addr as _, _salen as _, _node, _nodelen as _, _service, _servicelen as _, _flags)
 }
 unsafe fn MemoryContextStrdup(_ctx: MemoryContext, _s: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO: utils/mmgr/mcxt.c
+    // palloc is the active context-agnostic allocator in this port; ctx (a
+    // bootstrap sentinel here) has no real methods, so use pstrdup directly.
+    crate::utils::palloc::pstrdup(_s)
 }
 unsafe fn RegisterTimeout(_id: c_int, _handler: unsafe extern "C" fn()) -> c_int {
-    unimplemented!() // TODO: utils/misc/timeout.c
+    crate::utils::misc::timeout::RegisterTimeout(_id, _handler)
 }
 unsafe fn enable_timeout_after(_id: c_int, _delay_ms: i64) {
-    unimplemented!() // TODO: utils/misc/timeout.c
+    crate::utils::misc::timeout::enable_timeout_after(_id, _delay_ms as c_int)
 }
 unsafe fn disable_timeout(_id: c_int, _keep_indicator: bool) {
-    unimplemented!() // TODO: utils/misc/timeout.c
+    crate::utils::misc::timeout::disable_timeout(_id, _keep_indicator)
 }
 unsafe fn check_on_shmem_exit_lists_are_empty() {
-    unimplemented!() // TODO: storage/ipc/ipc.c
+    crate::storage::ipc::ipc::check_on_shmem_exit_lists_are_empty()
 }
 unsafe fn proc_exit(_code: c_int) -> ! {
-    unimplemented!() // TODO: storage/ipc/ipc.c
+    crate::storage::ipc::ipc::proc_exit(_code)
 }
 unsafe fn InitProcess() {
-    unimplemented!() // TODO: storage/lmgr/proc.c
+    crate::storage::lmgr::proc::InitProcess()
 }
 unsafe fn PostgresMain(_dbname: *const c_char, _username: *const c_char) {
-    unimplemented!() // TODO: tcop/postgres.c
+    crate::tcop::postgres::PostgresMain(_dbname, _username)
 }
 unsafe fn GetBackendTypeDesc(_backend_type: c_int) -> *const c_char {
-    unimplemented!() // TODO: utils/init/miscinit.c
+    crate::miscadmin::GetBackendTypeDesc(_backend_type as _)
 }
 unsafe fn init_ps_display(_fixed_part: *const c_char) {
-    unimplemented!() // TODO: utils/misc/ps_status.c
+    crate::utils::misc::ps_status::init_ps_display(_fixed_part)
 }
 unsafe fn set_ps_display(_activity: *const c_char) {
-    unimplemented!() // TODO: utils/misc/ps_status.c
+    crate::utils::misc::ps_status::set_ps_display(_activity)
 }
 unsafe fn pq_startmsgread() {
-    unimplemented!() // TODO: libpq/pqcomm.c
+    crate::libpq::libpq::pq_startmsgread()
 }
 unsafe fn pq_endmsgread() {
-    unimplemented!() // TODO: libpq/pqcomm.c
+    crate::libpq::libpq::pq_endmsgread()
 }
 unsafe fn pq_peekbyte() -> c_int {
-    unimplemented!() // TODO: libpq/pqcomm.c
+    crate::libpq::libpq::pq_peekbyte()
 }
 unsafe fn pq_getbytes(_s: *mut c_char, _len: Size) -> c_int {
-    unimplemented!() // TODO: libpq/pqcomm.c
+    crate::libpq::libpq::pq_getbytes(_s as *mut c_void, _len)
 }
 unsafe fn pq_buffer_remaining_data() -> Size {
-    unimplemented!() // TODO: libpq/pqcomm.c
+    crate::libpq::libpq::pq_buffer_remaining_data() as Size
 }
 unsafe fn secure_write(_port: *mut Port, _ptr: *mut c_void, _len: Size) -> isize {
-    unimplemented!() // TODO: libpq/be-secure.c
+    crate::libpq::libpq::secure_write(_port as _, _ptr as *const c_void, _len)
 }
 unsafe fn pg_ntoh32(_x: uint32) -> uint32 {
-    unimplemented!() // TODO: port/pg_bswap.h
+    uint32::from_be(_x)
 }
 unsafe fn parse_bool(_value: *const c_char, _result: *mut bool) -> bool {
-    unimplemented!() // TODO: utils/adt/bool.c
+    crate::utils::adt::bool::parse_bool(_value, _result)
 }
 unsafe fn pg_clean_ascii(_str: *const c_char, _alloc_len: c_int) -> *mut c_char {
-    unimplemented!() // TODO: common/string.c
+    crate::common::string::pg_clean_ascii(_str, _alloc_len)
 }
 unsafe fn SendCancelRequest(_backendPID: c_int, _cancelAuthCode: *const c_char, _len: c_int) {
-    unimplemented!() // TODO: postmaster/postmaster.c
+    crate::storage::ipc::procsignal::SendCancelRequest(_backendPID, _cancelAuthCode as *const u8, _len)
 }
 // appendStringInfo is a printf-style variadic macro in C; the translated call
 // sites pass a C format string and a single value, so a local stub fn preserves
 // those call sites without forcing a Rust `format!` string-literal.
-unsafe fn appendStringInfo<T>(_str: *mut StringInfoData, _fmt: *const c_char, _arg: T) {
-    unimplemented!() // TODO: lib/stringinfo.c (printf-style append)
+unsafe fn appendStringInfo(_str: *mut StringInfoData, _fmt: *const c_char, _arg: *const c_char) {
+    // All call sites use a "%s"-style format with a single C-string argument.
+    let mut buf = [0 as c_char; 1024];
+    libc::snprintf(buf.as_mut_ptr(), 1024, _fmt, _arg);
+    appendStringInfoString(_str, buf.as_ptr());
 }
 unsafe fn pq_beginmessage(_buf: *mut StringInfoData, _msgtype: c_char) {
-    unimplemented!() // TODO: libpq/pqformat.c
+    crate::libpq::pqformat::pq_beginmessage(_buf as _, _msgtype)
 }
 unsafe fn pq_sendint32(_buf: *mut StringInfoData, _i: uint32) {
-    unimplemented!() // TODO: libpq/pqformat.c
+    crate::libpq::pqformat::pq_sendint32(_buf as _, _i)
 }
 unsafe fn pq_sendstring(_buf: *mut StringInfoData, _str: *const c_char) {
-    unimplemented!() // TODO: libpq/pqformat.c
+    crate::libpq::pqformat::pq_sendstring(_buf as _, _str)
 }
 unsafe fn pq_endmessage(_buf: *mut StringInfoData) {
-    unimplemented!() // TODO: libpq/pqformat.c
+    crate::libpq::pqformat::pq_endmessage(_buf as _)
 }
 unsafe fn SplitIdentifierString(
-    _rawstring: *mut c_char,
-    _separator: c_char,
-    _namelist: *mut *mut List,
+    rawstring: *mut c_char,
+    separator: c_char,
+    namelist: *mut *mut List,
 ) -> bool {
-    unimplemented!() // TODO: utils/adt/varlena.c
+    crate::utils::adt::varlena::SplitIdentifierString(rawstring, separator, namelist as *mut _)
 }
 unsafe fn pg_strcasecmp(_a: *const c_char, _b: *const c_char) -> c_int {
-    unimplemented!() // TODO: port/pgstrcasecmp.c
+    crate::port::pgstrcasecmp::pg_strcasecmp(_a, _b)
 }
-unsafe fn guc_malloc(_elevel: c_int, _size: Size) -> *mut c_void {
-    unimplemented!() // TODO: utils/misc/guc.c
+unsafe fn guc_malloc(elevel: c_int, size: Size) -> *mut c_void {
+    crate::utils::misc::guc::guc_malloc(elevel, size)
 }
 
 // GUC_check_errdetail is a macro in C; provide a minimal stub macro here.

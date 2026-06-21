@@ -49,9 +49,9 @@ unsafe fn INTERRUPT(_re: *mut regex_t) {
 /// regguts.h: #define STACK_TOO_DEEP(re) ((*((struct fns *)(re)->re_fns)->stack_too_deep)())
 /// regc_nfa.c calls STACK_TOO_DEEP(nfa->v->re); we route through the nfa to its
 /// vars' regex_t and dispatch via the fns table in re_fns.
-unsafe fn STACK_TOO_DEEP(nfa: *mut nfa) -> c_int {
+unsafe fn STACK_TOO_DEEP(nfa: *mut nfa) -> bool {
     let re: *mut regex_t = (*((*nfa).v as *mut vars)).re;
-    guts_STACK_TOO_DEEP((*re).re_fns as *mut fns)
+    guts_STACK_TOO_DEEP((*re).re_fns as *mut fns) != 0
 }
 
 // ---------------------------------------------------------------------------
@@ -60,35 +60,7 @@ unsafe fn STACK_TOO_DEEP(nfa: *mut nfa) -> c_int {
 // faithful layout here; regguts::vars is an opaque c_void, so callers cast.
 // TODO(pg-port): unify with regcomp.c's struct vars once that file is ported.
 // ---------------------------------------------------------------------------
-#[repr(C)]
-pub struct vars {
-    pub re: *mut regex_t,
-    pub now: *const chr,
-    pub stop: *const chr,
-    pub err: c_int,
-    pub cflags: c_int,
-    pub lasttype: c_int,
-    pub nexttype: c_int,
-    pub nextvalue: chr,
-    pub lexcon: c_int,
-    pub nsubexp: c_int,
-    pub subs: *mut *mut subre,
-    pub nsubs: Size,
-    pub sub10: [*mut subre; 10],
-    pub nfa: *mut nfa,
-    pub cm: *mut colormap,
-    pub nlcolor: color,
-    pub wordchrs: *mut state,
-    pub tree: *mut subre,
-    pub treechain: *mut subre,
-    pub treefree: *mut subre,
-    pub ntree: c_int,
-    pub cv: *mut c_void,
-    pub cv2: *mut c_void,
-    pub lacons: *mut subre,
-    pub nlacons: c_int,
-    pub spaceused: Size,
-}
+pub use crate::regex::regcomp::vars;
 
 // ---------------------------------------------------------------------------
 // arc type codes (regcomp.c #defines, since regc_nfa.c is #included by it).
@@ -122,10 +94,11 @@ pub const COMPATIBLE: c_int = 3;
 /// replace arc's color with constraint color
 pub const REPLACEARC: c_int = 4;
 
-/// #define COLORED(a) ((a)->type == PLAIN || (a)->type == AHEAD || (a)->type == BEHIND)
+/// #define COLORED(a) ((a)->co >= 0 && ((a)->type == PLAIN || AHEAD || BEHIND))
 #[inline]
 unsafe fn COLORED(a: *const arc) -> bool {
-    (*a).r#type == PLAIN || (*a).r#type == AHEAD || (*a).r#type == BEHIND
+    (*a).co >= 0
+        && ((*a).r#type == PLAIN || (*a).r#type == AHEAD || (*a).r#type == BEHIND)
 }
 
 // ---------------------------------------------------------------------------
@@ -174,37 +147,8 @@ unsafe fn ERR(nfa: *mut nfa, e: c_int) -> c_int {
     VERR((*nfa).v as *mut vars, e)
 }
 
-// ---------------------------------------------------------------------------
-// Dependencies defined in regc_color.c (not yet ported).
-// TODO(pg-port): replace these stubs once regc_color.c is translated.
-// ---------------------------------------------------------------------------
-
-unsafe fn maxcolor(_cm: *mut colormap) -> color {
-    unimplemented!() // TODO(pg-port): regc_color.c maxcolor
-}
-
-unsafe fn pseudocolor(_cm: *mut colormap) -> color {
-    unimplemented!() // TODO(pg-port): regc_color.c pseudocolor
-}
-
-unsafe fn colorchain(_cm: *mut colormap, _a: *mut arc) {
-    unimplemented!() // TODO(pg-port): regc_color.c colorchain
-}
-
-unsafe fn uncolorchain(_cm: *mut colormap, _a: *mut arc) {
-    unimplemented!() // TODO(pg-port): regc_color.c uncolorchain
-}
-
-unsafe fn rainbow(
-    _nfa: *mut nfa,
-    _cm: *mut colormap,
-    _r#type: c_int,
-    _but: color,
-    _from: *mut state,
-    _to: *mut state,
-) {
-    unimplemented!() // TODO(pg-port): regc_color.c rainbow
-}
+// Dependencies defined in regc_color.c.
+use crate::regex::regc_color::{colorchain, maxcolor, pseudocolor, rainbow, uncolorchain};
 
 // ---------------------------------------------------------------------------
 // NFA construction and teardown.
@@ -539,7 +483,7 @@ pub unsafe fn allocarc(nfa: *mut nfa) -> *mut arc /* NULL for failure */ {
     /* first, recycle anything that's on the freelist */
     if !(*nfa).freearcs.is_null() {
         a = (*nfa).freearcs;
-        (*nfa).freearcs = (*a).freechain;
+        (*nfa).freearcs = (*a).outchain;
     }
     /* otherwise, is there anything left in the last arcbatch? */
     else if !(*nfa).lastab.is_null() && (*nfa).lastabused < (*(*nfa).lastab).narcs {
@@ -634,7 +578,7 @@ pub unsafe fn freearc(nfa: *mut nfa, victim: *mut arc) {
     (*victim).inchainRev = null_mut();
     (*victim).outchain = null_mut();
     (*victim).outchainRev = null_mut();
-    (*victim).freechain = (*nfa).freearcs;
+    (*victim).outchain = (*nfa).freearcs;
     (*nfa).freearcs = victim;
 }
 
@@ -1355,7 +1299,7 @@ pub unsafe fn delsub(
  */
 pub unsafe fn deltraverse(nfa: *mut nfa, leftend: *mut state, s: *mut state) {
     let mut a: *mut arc;
-    let to: *mut state;
+    let mut to: *mut state;
 
     /* Since this is recursive, it could be driven to stack overflow */
     if STACK_TOO_DEEP(nfa) {

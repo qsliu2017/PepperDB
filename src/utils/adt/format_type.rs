@@ -35,44 +35,45 @@ use crate::utils::fmgr::FunctionCallInfo;
 const F_ARRAY_SUBSCRIPT_HANDLER: Oid = 1284;
 
 /* catalog/pg_type.h: IsTrueArrayType(typeForm). */
+#[no_mangle]
 unsafe fn IsTrueArrayType(typeForm: Form_pg_type) -> bool {
     OidIsValid((*typeForm).typelem) && (*typeForm).typsubscript == F_ARRAY_SUBSCRIPT_HANDLER
 }
 
 /* utils/syscache.h: TYPEOID cache id. */
-const TYPEOID: c_int = 0;
+const TYPEOID: c_int = 82;
 
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!()
+    crate::utils::cache::syscache::SearchSysCache1(_cacheId as _, _key1 as _) as _
 }
 
 unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!()
+    crate::utils::cache::syscache::ReleaseSysCache(_tuple as _)
 }
 
 /* catalog/namespace.h */
 unsafe fn TypeIsVisible(_typid: Oid) -> bool {
-    unimplemented!()
+    crate::catalog::namespace::TypeIsVisible(_typid as _) as _
 }
 
 /* utils/lsyscache.h */
 unsafe fn get_namespace_name_or_temp(_nspid: Oid) -> *mut c_char {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_namespace_name_or_temp(_nspid as _) as _
 }
 
 /* utils/adt/numeric.c */
 unsafe fn numeric_maximum_size(_typemod: int32) -> int32 {
-    unimplemented!()
+    crate::utils::adt::numeric::numeric_maximum_size(_typemod as _) as _
 }
 
 /* mb/pg_wchar.h */
 unsafe fn pg_encoding_max_length(_encoding: c_int) -> c_int {
-    unimplemented!()
+    crate::mb::pg_wchar::pg_encoding_max_length(_encoding as _) as _
 }
 
 /* mb/mbutils.c */
 unsafe fn GetDatabaseEncoding() -> c_int {
-    unimplemented!()
+    crate::utils::mb::mbutils::GetDatabaseEncoding() as _
 }
 
 /* psprintf("%s(%d)", ...) replacement for printTypmod, default branch. */
@@ -187,8 +188,7 @@ pub unsafe fn format_type_extended(
             return null_mut();
         } else if (flags & FORMAT_TYPE_ALLOW_INVALID as bits16) != 0 {
             return pstrdup(c"???".as_ptr());
-        } else {
-            elog!(ERROR, "cache lookup failed for type {}", type_oid);
+        } else { elog!(ERROR, "cache lookup failed for type {}", type_oid);
         }
     }
     typeform = GETSTRUCT(tuple) as Form_pg_type;
@@ -210,8 +210,7 @@ pub unsafe fn format_type_extended(
                 return null_mut();
             } else if (flags & FORMAT_TYPE_ALLOW_INVALID as bits16) != 0 {
                 return pstrdup(c"???[]".as_ptr());
-            } else {
-                elog!(ERROR, "cache lookup failed for type {}", type_oid);
+            } else { elog!(ERROR, "cache lookup failed for type {}", type_oid);
             }
         }
         typeform = GETSTRUCT(tuple) as Form_pg_type;
@@ -392,6 +391,7 @@ pub unsafe fn format_type_extended(
  *
  * The result is always a palloc'd string.
  */
+#[no_mangle]
 pub unsafe fn format_type_be(type_oid: Oid) -> *mut c_char {
     format_type_extended(type_oid, -1, 0)
 }

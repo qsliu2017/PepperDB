@@ -451,9 +451,7 @@ fn XLogRecPtrIsInvalid(lsn: XLogRecPtr) -> bool {
 
 // ARR_* varlena array accessors (utils/array.h).
 #[allow(non_snake_case)]
-unsafe fn ARR_NDIM(_arr: *mut ArrayType) -> c_int {
-    unimplemented!() // TODO(pg-port): utils/array.h ARR_NDIM lives in utils/adt/array
-}
+unsafe fn ARR_NDIM(arr: *mut ArrayType) -> c_int { crate::utils::array::ARR_NDIM(arr as _) }
 #[allow(non_snake_case)]
 unsafe fn ARR_ELEMTYPE(_arr: *mut ArrayType) -> Oid {
     unimplemented!() // TODO(pg-port): utils/array.h ARR_ELEMTYPE lives in utils/adt/array
@@ -461,13 +459,9 @@ unsafe fn ARR_ELEMTYPE(_arr: *mut ArrayType) -> Oid {
 
 // VARDATA_ANY / VARSIZE_ANY_EXHDR (c.h / postgres.h varlena access).
 #[allow(non_snake_case)]
-unsafe fn VARDATA_ANY(_ptr: *mut bytea) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): postgres.h VARDATA_ANY
-}
+unsafe fn VARDATA_ANY(ptr: *mut bytea) -> *mut c_char { crate::varatt::VARDATA_ANY(ptr as _) }
 #[allow(non_snake_case)]
-unsafe fn VARSIZE_ANY_EXHDR(_ptr: *mut bytea) -> Size {
-    unimplemented!() // TODO(pg-port): postgres.h VARSIZE_ANY_EXHDR
-}
+unsafe fn VARSIZE_ANY_EXHDR(ptr: *mut bytea) -> Size { crate::varatt::VARSIZE_ANY_EXHDR(ptr as _) as _ }
 
 // ---------------------------------------------------------------------------
 // Type aliases / external dependencies (stubbed where not yet ported).
@@ -594,77 +588,43 @@ pub const InvalidXLogRecPtr: XLogRecPtr = 0;
 #[allow(non_upper_case_globals)]
 pub static mut MyReplicationSlot: *mut ReplicationSlot = std::ptr::null_mut();
 #[allow(non_upper_case_globals)]
-pub static mut CurrentResourceOwner: ResourceOwner = std::ptr::null_mut();
+extern "C" { pub static mut CurrentResourceOwner: ResourceOwner; }
 
 // ---------------------------------------------------------------------------
 // Function stubs (symbols not yet ported elsewhere in the tree).
 // ---------------------------------------------------------------------------
 
-unsafe fn CheckSlotPermissions() {
-    unimplemented!() // TODO(pg-port): real CheckSlotPermissions lives in replication/slot.c
-}
-unsafe fn CheckLogicalDecodingRequirements() {
-    unimplemented!() // TODO(pg-port): real CheckLogicalDecodingRequirements lives in replication/logical/logical.c
-}
-unsafe fn ReplicationSlotAcquire(_name: *mut c_char, _nowait: bool, _error_if_invalid: bool) {
-    unimplemented!() // TODO(pg-port): real ReplicationSlotAcquire lives in replication/slot.c
-}
-unsafe fn ReplicationSlotRelease() {
-    unimplemented!() // TODO(pg-port): real ReplicationSlotRelease lives in replication/slot.c
-}
-unsafe fn ReplicationSlotMarkDirty() {
-    unimplemented!() // TODO(pg-port): real ReplicationSlotMarkDirty lives in replication/slot.c
-}
+unsafe fn CheckSlotPermissions() { crate::replication::slot::CheckSlotPermissions() }
+unsafe fn CheckLogicalDecodingRequirements() { crate::replication::logical::logical::CheckLogicalDecodingRequirements() }
+unsafe fn ReplicationSlotAcquire(name: *mut c_char, nowait: bool, error_if_invalid: bool) { crate::replication::slot::ReplicationSlotAcquire(name as _, nowait, error_if_invalid) }
+unsafe fn ReplicationSlotRelease() { crate::replication::slot::ReplicationSlotRelease() }
+unsafe fn ReplicationSlotMarkDirty() { crate::replication::slot::ReplicationSlotMarkDirty() }
 unsafe fn CreateDecodingContext(
-    _start_lsn: XLogRecPtr,
-    _output_plugin_options: *mut List,
-    _need_full_snapshot: bool,
-    _xl_routine: *mut c_void,
-    _prepare_write: Option<LogicalOutputPluginWriterPrepareWrite>,
-    _do_write: Option<LogicalOutputPluginWriterWrite>,
-    _update_progress: Option<LogicalOutputPluginWriterUpdateProgress>,
-) -> *mut LogicalDecodingContext {
-    unimplemented!() // TODO(pg-port): real CreateDecodingContext lives in replication/logical/logical.c
-}
-unsafe fn FreeDecodingContext(_ctx: *mut LogicalDecodingContext) {
-    unimplemented!() // TODO(pg-port): real FreeDecodingContext lives in replication/logical/logical.c
-}
+    start_lsn: XLogRecPtr,
+    output_plugin_options: *mut List,
+    need_full_snapshot: bool,
+    xl_routine: *mut c_void,
+    prepare_write: Option<LogicalOutputPluginWriterPrepareWrite>,
+    do_write: Option<LogicalOutputPluginWriterWrite>,
+    update_progress: Option<LogicalOutputPluginWriterUpdateProgress>,
+) -> *mut LogicalDecodingContext { crate::replication::logical::logical::CreateDecodingContext(start_lsn as _, output_plugin_options as _, need_full_snapshot, xl_routine as _, prepare_write as _, do_write as _, update_progress as _) }
+unsafe fn FreeDecodingContext(ctx: *mut LogicalDecodingContext) { crate::replication::logical::logical::FreeDecodingContext(ctx as _) }
 unsafe fn LogicalDecodingProcessRecord(
-    _ctx: *mut LogicalDecodingContext,
-    _record: *mut XLogReaderState,
-) {
-    unimplemented!() // TODO(pg-port): real LogicalDecodingProcessRecord lives in replication/logical/decode.c
-}
-unsafe fn LogicalConfirmReceivedLocation(_lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real LogicalConfirmReceivedLocation lives in replication/logical/logical.c
-}
-unsafe fn WaitForStandbyConfirmation(_wait_for_lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real WaitForStandbyConfirmation lives in replication/walsender.c
-}
-unsafe fn InvalidateSystemCaches() {
-    unimplemented!() // TODO(pg-port): real InvalidateSystemCaches lives in utils/cache/inval.c
-}
-unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO(pg-port): real RecoveryInProgress lives in access/transam/xlog.c
-}
-unsafe fn GetFlushRecPtr(_insertTLI: *mut c_void) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real GetFlushRecPtr lives in access/transam/xlog.c
-}
-unsafe fn GetXLogReplayRecPtr(_replayTLI: *mut c_void) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real GetXLogReplayRecPtr lives in access/transam/xlogrecovery.c
-}
-unsafe fn XLogBeginRead(_state: *mut XLogReaderState, _rec_ptr: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real XLogBeginRead lives in access/transam/xlogreader.c
-}
+    ctx: *mut LogicalDecodingContext,
+    record: *mut XLogReaderState,
+) { crate::replication::logical::decode::LogicalDecodingProcessRecord(ctx as _, record as _) }
+unsafe fn LogicalConfirmReceivedLocation(lsn: XLogRecPtr) { crate::replication::logical::logical::LogicalConfirmReceivedLocation(lsn as _) }
+unsafe fn WaitForStandbyConfirmation(wait_for_lsn: XLogRecPtr) { crate::replication::slot::WaitForStandbyConfirmation(wait_for_lsn as _) }
+unsafe fn InvalidateSystemCaches() { crate::utils::cache::inval::InvalidateSystemCaches() }
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
+unsafe fn GetFlushRecPtr(insertTLI: *mut c_void) -> XLogRecPtr { crate::access::transam::xlog::GetFlushRecPtr(insertTLI as _) }
+unsafe fn GetXLogReplayRecPtr(replayTLI: *mut c_void) -> XLogRecPtr { crate::access::transam::xlogrecovery::GetXLogReplayRecPtr(replayTLI as _) }
+unsafe fn XLogBeginRead(state: *mut XLogReaderState, rec_ptr: XLogRecPtr) { crate::access::transam::xlogreader::XLogBeginRead(state as _, rec_ptr as _) }
 unsafe fn XLogReadRecord(
-    _state: *mut XLogReaderState,
-    _errormsg: *mut *mut c_char,
-) -> *mut XLogRecord {
-    unimplemented!() // TODO(pg-port): real XLogReadRecord lives in access/transam/xlogreader.c
-}
-unsafe fn array_contains_nulls(_array: *mut ArrayType) -> bool {
-    unimplemented!() // TODO(pg-port): real array_contains_nulls lives in utils/adt/arrayfuncs.c
-}
+    state: *mut XLogReaderState,
+    errormsg: *mut *mut c_char,
+) -> *mut XLogRecord { crate::access::transam::xlogreader::XLogReadRecord(state as _, errormsg as _) }
+unsafe fn array_contains_nulls(array: *mut ArrayType) -> bool { crate::utils::adt::arrayfuncs::array_contains_nulls(array as _) }
 unsafe fn deconstruct_array_builtin(
     _array: *mut ArrayType,
     _elmtype: Oid,
@@ -674,9 +634,7 @@ unsafe fn deconstruct_array_builtin(
 ) {
     unimplemented!() // TODO(pg-port): real deconstruct_array_builtin lives in utils/adt/arrayfuncs.c
 }
-unsafe fn resetStringInfo(_str: StringInfo) {
-    unimplemented!() // TODO(pg-port): real resetStringInfo lives in lib/stringinfo.c
-}
+unsafe fn resetStringInfo(str: StringInfo) { crate::lib::stringinfo::resetStringInfo(str as _) }
 unsafe fn pg_verify_mbstr(
     _encoding: c_int,
     _mbstr: *const c_char,
@@ -691,17 +649,13 @@ unsafe fn GetDatabaseEncoding() -> c_int {
 unsafe fn format_procedure(_procedure_oid: Oid) -> *mut c_char {
     unimplemented!() // TODO(pg-port): real format_procedure lives in utils/adt/regproc.c
 }
-unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) {
-    unimplemented!() // TODO(pg-port): real InitMaterializedSRF lives in utils/fmgr/funcapi.c
-}
+unsafe fn InitMaterializedSRF(fcinfo: FunctionCallInfo, flags: c_int) { crate::utils::fmgr::funcapi::InitMaterializedSRF(fcinfo as _, flags as _) }
 unsafe fn tuplestore_putvalues(
-    _state: *mut Tuplestorestate,
-    _tdesc: TupleDesc,
-    _values: *mut Datum,
-    _isnull: *mut bool,
-) {
-    unimplemented!() // TODO(pg-port): real tuplestore_putvalues lives in utils/sort/tuplestore.c
-}
+    state: *mut Tuplestorestate,
+    tdesc: TupleDesc,
+    values: *mut Datum,
+    isnull: *mut bool,
+) { crate::utils::sort::tuplestore::tuplestore_putvalues(state as _, tdesc, values as _, isnull as _) }
 unsafe fn text_to_cstring(_t: *const text) -> *mut c_char {
     unimplemented!() // TODO(pg-port): real text_to_cstring lives in utils/adt/varlena.c
 }

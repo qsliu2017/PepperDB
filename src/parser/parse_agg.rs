@@ -144,27 +144,27 @@ struct SubstituteGroupedColumnsContext {
 
 // TODO(pg-port): nodes/nodeFuncs.c contain_vars_of_level
 unsafe fn contain_vars_of_level(node: *mut Node, levelsup: c_int) -> bool {
-    false
+    crate::optimizer::util::var::contain_vars_of_level(node as _, levelsup)
 }
 // TODO(pg-port): nodes/nodeFuncs.c locate_var_of_level
 unsafe fn locate_var_of_level(node: *mut Node, levelsup: c_int) -> c_int {
-    -1
+    crate::optimizer::util::var::locate_var_of_level(node as _, levelsup)
 }
 // TODO(pg-port): nodes/nodeFuncs.c contain_aggs_of_level
 unsafe fn contain_aggs_of_level(node: *mut Node, levelsup: c_int) -> bool {
-    false
+    crate::rewrite::rewriteManip::contain_aggs_of_level(node as _, levelsup)
 }
 // TODO(pg-port): nodes/nodeFuncs.c locate_agg_of_level
 unsafe fn locate_agg_of_level(node: *mut Node, levelsup: c_int) -> c_int {
-    -1
+    crate::rewrite::rewriteManip::locate_agg_of_level(node as _, levelsup)
 }
 // TODO(pg-port): nodes/nodeFuncs.c contain_windowfuncs
 unsafe fn contain_windowfuncs(node: *mut Node) -> bool {
-    false
+    crate::rewrite::rewriteManip::contain_windowfuncs(node as _)
 }
 // TODO(pg-port): nodes/nodeFuncs.c locate_windowfunc
 unsafe fn locate_windowfunc(node: *mut Node) -> c_int {
-    -1
+    crate::rewrite::rewriteManip::locate_windowfunc(node as _)
 }
 // TODO(pg-port): optimizer/optimizer.c flatten_join_alias_vars
 unsafe fn flatten_join_alias_vars(
@@ -172,11 +172,11 @@ unsafe fn flatten_join_alias_vars(
     qry: *mut Query,
     node: *mut Node,
 ) -> *mut Node {
-    node
+    crate::optimizer::util::var::flatten_join_alias_vars(_root as _, qry as _, node as _) as _
 }
 // TODO(pg-port): nodes/equalfuncs.c equal
 unsafe fn equal(a: *const c_void, b: *const c_void) -> bool {
-    false
+    crate::nodes::equalfuncs::equal(a as _, b as _)
 }
 // TODO(pg-port): copyfuncs.c copyObject
 unsafe fn copyObject<T>(node: *mut T) -> *mut T {
@@ -190,7 +190,7 @@ unsafe fn check_functional_grouping(
     _groupClauseCommonVars: *mut List,
     _constraintDeps: *mut *mut List,
 ) -> bool {
-    false
+    crate::catalog::pg_constraint::check_functional_grouping(_relid, _varno, _varlevelsup, _groupClauseCommonVars as _, _constraintDeps as _)
 }
 // TODO(pg-port): catalog/pg_proc.c get_func_signature
 unsafe fn get_func_signature(
@@ -198,7 +198,7 @@ unsafe fn get_func_signature(
     _argtypes: *mut *mut Oid,
     _nargs: *mut c_int,
 ) -> Oid {
-    InvalidOid
+    crate::utils::cache::lsyscache::get_func_signature(_funcid, _argtypes as _, _nargs)
 }
 // TODO(pg-port): parser/parse_coerce.c enforce_generic_type_consistency
 unsafe fn enforce_generic_type_consistency(
@@ -208,7 +208,7 @@ unsafe fn enforce_generic_type_consistency(
     _rettype: Oid,
     _allow_poly: bool,
 ) -> Oid {
-    InvalidOid
+    crate::parser::parse_coerce::enforce_generic_type_consistency(_actual_arg_types as _, _declared_arg_types as _, _nargs, _rettype, _allow_poly)
 }
 // TODO(pg-port): catalog/pg_type.h IsPolymorphicType macro
 fn IsPolymorphicType(typid: Oid) -> bool {
@@ -216,17 +216,19 @@ fn IsPolymorphicType(typid: Oid) -> bool {
 }
 // TODO(pg-port): utils/lsyscache.c SearchSysCache1
 unsafe fn SearchSysCache1(_cacheid: c_int, _key: Datum) -> *mut c_void {
-    core::ptr::null_mut()
+    crate::utils::cache::syscache::SearchSysCache1(_cacheid, _key) as _
 }
 // TODO(pg-port): utils/cache/catcache.c ReleaseSysCache
-unsafe fn ReleaseSysCache(_tuple: *mut c_void) {}
+unsafe fn ReleaseSysCache(_tuple: *mut c_void) {
+    crate::utils::cache::syscache::ReleaseSysCache(_tuple as _)
+}
 // TODO(pg-port): access/htup_details.h HeapTupleIsValid
 unsafe fn HeapTupleIsValid(tuple: *mut c_void) -> bool {
     !tuple.is_null()
 }
 // TODO(pg-port): access/htup_details.h GETSTRUCT
 unsafe fn GETSTRUCT(tup: *mut c_void) -> *mut c_void {
-    core::ptr::null_mut()
+    crate::access::htup_details::GETSTRUCT(tup as _)
 }
 // TODO(pg-port): catalog/pg_type.h Form_pg_type
 struct FormData_pg_type {
@@ -236,7 +238,7 @@ struct FormData_pg_type {
 }
 type Form_pg_type = *mut FormData_pg_type;
 
-const TYPEOID: c_int = 0; // syscache id stub
+const TYPEOID: c_int = 82; // syscache id stub
 
 // ObjectIdGetDatum stub
 unsafe fn ObjectIdGetDatum(oid: Oid) -> Datum {
@@ -1184,7 +1186,7 @@ unsafe fn get_sortgroupclause_expr(
     _sgc: *mut SortGroupClause,
     _tlist: *mut List,
 ) -> *mut Node {
-    core::ptr::null_mut()
+    crate::optimizer::util::tlist::get_sortgroupclause_expr(_sgc as _, _tlist as _) as _
 }
 
 // get_sortgroupclause_tle stub
@@ -1193,7 +1195,7 @@ unsafe fn get_sortgroupclause_tle(
     _sgc: *mut SortGroupClause,
     _tlist: *mut List,
 ) -> *mut TargetEntry {
-    core::ptr::null_mut()
+    crate::optimizer::util::tlist::get_sortgroupclause_tle(_sgc as _, _tlist as _) as _
 }
 
 /*
@@ -1560,10 +1562,8 @@ unsafe fn substitute_grouped_columns_mutator(
             let colname = std::ffi::CStr::from_ptr(attname).to_string_lossy();
             ereport!(ERROR,
                 errmsg!("column \"{}.{}\" must appear in the GROUP BY clause or be used in an aggregate function",
-                    relname, colname)
-                /* C also: errcode(ERRCODE_GROUPING_ERROR),
-                   in_agg_direct_args ? errdetail("Direct arguments of an ordered-set aggregate must use only grouped columns.") : 0,
-                   parser_errposition((*context).pstate, (*var).location) */
+                    relname, colname),
+                parser_errposition((*context).pstate, (*var).location)
             );
         } else {
             let relname = std::ffi::CStr::from_ptr((*(*rte).eref).aliasname).to_string_lossy();

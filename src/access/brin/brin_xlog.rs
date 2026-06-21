@@ -55,27 +55,18 @@ const XLOG_BRIN_INIT_PAGE: uint8 = 0x80;
 type XLogRedoAction = c_int;
 const BLK_NEEDS_REDO: XLogRedoAction = 0;
 
-unsafe fn XLogInitBufferForRedo(_record: *mut XLogReaderState, _block_id: uint8) -> Buffer {
-    // TODO: xlogutils.c not ported
-    unimplemented!("XLogInitBufferForRedo: xlogutils.c (deferred)")
-}
+unsafe fn XLogInitBufferForRedo(_record: *mut XLogReaderState, _block_id: uint8) -> Buffer { unimplemented!() }
 
 unsafe fn XLogReadBufferForRedo(
     _record: *mut XLogReaderState,
     _block_id: uint8,
     _buf: *mut Buffer,
-) -> XLogRedoAction {
-    // TODO: xlogutils.c not ported
-    unimplemented!("XLogReadBufferForRedo: xlogutils.c (deferred)")
-}
+) -> XLogRedoAction { unimplemented!() }
 
 // ---------------------------------------------------------------------------
 // bufmgr.h: buffer-manager helpers (not yet ported).
 // ---------------------------------------------------------------------------
-unsafe fn BufferIsValid(_bufnum: Buffer) -> bool {
-    // TODO: bufmgr.c not ported
-    unimplemented!("BufferIsValid: bufmgr.c (deferred)")
-}
+unsafe fn BufferIsValid(_bufnum: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_bufnum) }
 
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     // TODO: bufmgr.c not ported
@@ -100,25 +91,16 @@ unsafe fn UnlockReleaseBuffer(_buffer: Buffer) {
 // ---------------------------------------------------------------------------
 // brin_page.c / brin_pageops.c / brin_revmap.c helpers (not yet ported).
 // ---------------------------------------------------------------------------
-unsafe fn brin_metapage_init(_page: Page, _pagesPerRange: BlockNumber, _version: uint16) {
-    // TODO: brin_page.c not ported
-    unimplemented!("brin_metapage_init: brin_page.c (deferred)")
-}
+unsafe fn brin_metapage_init(_page: Page, _pagesPerRange: BlockNumber, _version: uint16) { crate::access::brin::brin_pageops::brin_metapage_init(_page, _pagesPerRange, _version) }
 
-unsafe fn brin_page_init(_page: Page, _type_: uint16) {
-    // TODO: brin_page.c not ported
-    unimplemented!("brin_page_init: brin_page.c (deferred)")
-}
+unsafe fn brin_page_init(_page: Page, _type_: uint16) { crate::access::brin::brin_pageops::brin_page_init(_page, _type_) }
 
 unsafe fn brinSetHeapBlockItemptr(
     _buf: Buffer,
     _pagesPerRange: BlockNumber,
     _heapBlk: BlockNumber,
     _tid: ItemPointerData,
-) {
-    // TODO: brin_revmap.c not ported
-    unimplemented!("brinSetHeapBlockItemptr: brin_revmap.c (deferred)")
-}
+) { crate::access::brin::brin_revmap::brinSetHeapBlockItemptr(_buf, _pagesPerRange, _heapBlk, _tid) }
 
 // ---------------------------------------------------------------------------
 // BrinTuple (access/brin_tuple.h) - not yet ported.

@@ -330,70 +330,82 @@ pub struct IoMethodOps {
     pub wait_one: Option<unsafe extern "C" fn(ioh: *mut PgAioHandle, ref_generation: uint64)>,
 }
 
+impl IoMethodOps {
+    pub const DEFAULT: IoMethodOps = IoMethodOps {
+        wait_on_fd_before_close: false,
+        shmem_size: None,
+        shmem_init: None,
+        init_backend: None,
+        needs_synchronous_execution: None,
+        submit: None,
+        wait_one: None,
+    };
+}
+
 /* aio.c */
 pub unsafe fn pgaio_io_was_recycled(
     _ioh: *mut PgAioHandle,
     _ref_generation: uint64,
     _state: *mut PgAioHandleState,
 ) -> bool {
-    unimplemented!()
+    crate::storage::aio::aio::pgaio_io_was_recycled(_ioh, _ref_generation, _state)
 }
 pub unsafe fn pgaio_io_stage(_ioh: *mut PgAioHandle, _op: PgAioOp) {
-    unimplemented!()
+    crate::storage::aio::aio::pgaio_io_stage(_ioh, _op)
 }
 pub unsafe fn pgaio_io_process_completion(_ioh: *mut PgAioHandle, _result: c_int) {
-    unimplemented!()
+    crate::storage::aio::aio::pgaio_io_process_completion(_ioh, _result)
 }
 pub unsafe fn pgaio_io_prepare_submit(_ioh: *mut PgAioHandle) {
-    unimplemented!()
+    crate::storage::aio::aio::pgaio_io_prepare_submit(_ioh)
 }
 pub unsafe fn pgaio_io_needs_synchronous_execution(_ioh: *mut PgAioHandle) -> bool {
-    unimplemented!()
+    crate::storage::aio::aio::pgaio_io_needs_synchronous_execution(_ioh)
 }
 pub unsafe fn pgaio_io_get_state_name(_ioh: *mut PgAioHandle) -> *const c_char {
-    unimplemented!()
+    crate::storage::aio::aio::pgaio_io_get_state_name(_ioh)
 }
 pub unsafe fn pgaio_result_status_string(_rs: PgAioResultStatus) -> *const c_char {
-    unimplemented!()
+    crate::storage::aio::aio::pgaio_result_status_string(_rs)
 }
 pub unsafe fn pgaio_shutdown(_code: c_int, _arg: Datum) {
-    unimplemented!()
+    crate::storage::aio::aio::pgaio_shutdown(_code, _arg)
 }
 
 /* aio_callback.c */
 pub unsafe fn pgaio_io_call_stage(_ioh: *mut PgAioHandle) {
-    unimplemented!()
+    crate::storage::aio::aio_callback::pgaio_io_call_stage(_ioh)
 }
 pub unsafe fn pgaio_io_call_complete_shared(_ioh: *mut PgAioHandle) {
-    unimplemented!()
+    crate::storage::aio::aio_callback::pgaio_io_call_complete_shared(_ioh)
 }
 pub unsafe fn pgaio_io_call_complete_local(_ioh: *mut PgAioHandle) -> PgAioResult {
-    unimplemented!()
+    crate::storage::aio::aio_callback::pgaio_io_call_complete_local(_ioh)
 }
 
 /* aio_io.c */
 pub unsafe fn pgaio_io_perform_synchronously(_ioh: *mut PgAioHandle) {
-    unimplemented!()
+    crate::storage::aio::aio_io::pgaio_io_perform_synchronously(_ioh)
 }
 pub unsafe fn pgaio_io_get_op_name(_ioh: *mut PgAioHandle) -> *const c_char {
-    unimplemented!()
+    crate::storage::aio::aio_io::pgaio_io_get_op_name(_ioh)
 }
 pub unsafe fn pgaio_io_uses_fd(_ioh: *mut PgAioHandle, _fd: c_int) -> bool {
-    unimplemented!()
+    crate::storage::aio::aio_io::pgaio_io_uses_fd(_ioh, _fd)
 }
 pub unsafe fn pgaio_io_get_iovec_length(_ioh: *mut PgAioHandle, _iov: *mut *mut iovec) -> c_int {
-    unimplemented!()
+    crate::storage::aio::aio_io::pgaio_io_get_iovec_length(_ioh, _iov as _)
 }
 
 /* aio_target.c */
 pub unsafe fn pgaio_io_can_reopen(_ioh: *mut PgAioHandle) -> bool {
-    unimplemented!()
+    crate::storage::aio::aio_target::pgaio_io_can_reopen(_ioh)
 }
 pub unsafe fn pgaio_io_reopen(_ioh: *mut PgAioHandle) {
-    unimplemented!()
+    crate::storage::aio::aio_target::pgaio_io_reopen(_ioh)
 }
 pub unsafe fn pgaio_io_get_target_name(_ioh: *mut PgAioHandle) -> *const c_char {
-    unimplemented!()
+    crate::storage::aio::aio_target::pgaio_io_get_target_name(_ioh)
 }
 
 /*

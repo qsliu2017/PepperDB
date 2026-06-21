@@ -30,9 +30,7 @@ const RM_MAX_ID: usize = u8::MAX as usize;
 // ---------------------------------------------------------------------------
 
 // TODO: port InitMaterializedSRF (src/backend/utils/fmgr/funcapi.c)
-unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) {
-    unimplemented!()
-}
+unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) { crate::utils::fmgr::funcapi::InitMaterializedSRF(_fcinfo as _, _flags as _) }
 
 // TODO: port tuplestore_putvalues (src/backend/utils/sort/tuplestore.c)
 unsafe fn tuplestore_putvalues(
@@ -64,6 +62,7 @@ unsafe fn tuplestore_putvalues(
  */
 // TODO: replace the None callbacks below with the real per-rmgr function
 // pointers named in crate::access::rmgrlist::RMGR_LIST once those modules port.
+#[no_mangle]
 pub static mut RmgrTable: [RmgrData; RM_MAX_ID + 1] = {
     // An all-NULL/None entry, used both as the array initializer and for the
     // unregistered (custom) slots.

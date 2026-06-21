@@ -1041,29 +1041,13 @@ struct TargetEntry {
     ressortgroupref: u32,
     resjunk: bool,
 }
-#[repr(C)]
-struct Aggref {
-    aggfnoid: Oid,
-    aggkind: c_char,
-    aggdirectargs: *mut List,
-    args: *mut List,
-    aggfilter: *mut Expr,
-}
+use crate::nodes::primnodes::Aggref;
 #[repr(C)]
 struct WindowFunc {
     args: *mut List,
     aggfilter: *mut Expr,
 }
-#[repr(C)]
-struct CaseExpr {
-    args: *mut List,
-    defresult: *mut Expr,
-}
-#[repr(C)]
-struct CaseWhen {
-    expr: *mut Expr,
-    result: *mut Expr,
-}
+use crate::nodes::primnodes::{CaseExpr, CaseWhen};
 #[repr(C)]
 struct SubscriptingRef {
     refupperindexpr: *mut List,
@@ -1085,8 +1069,8 @@ const AGGKIND_NORMAL: char = 'n';
 const AGGKIND_ORDERED_SET: char = 'o';
 const AGGKIND_HYPOTHETICAL: char = 'h';
 const DEFAULT_COLLATION_OID: Oid = 100;
-const QTW_IGNORE_RANGE_TABLE: c_int = 0x02;
-const QTW_IGNORE_CTE_SUBQUERIES: c_int = 0x04;
+const QTW_IGNORE_RANGE_TABLE: c_int = 0x08;
+const QTW_IGNORE_CTE_SUBQUERIES: c_int = 0x02;
 
 #[allow(non_snake_case)]
 const fn OidIsValid(objectId: Oid) -> bool {
@@ -1099,58 +1083,28 @@ unsafe fn query_tree_walker(
     _walker: *const (),
     _context: *mut c_void,
     _flags: c_int,
-) -> bool {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
-}
+) -> bool { crate::nodes::nodeFuncs::query_tree_walker(_query, core::mem::transmute(_walker), _context, _flags) }
 unsafe fn expression_tree_walker(
     _node: *mut Node,
     _walker: *const (),
     _context: *mut c_void,
-) -> bool {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
-}
-unsafe fn exprLocation(_expr: *mut Node) -> c_int {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
-}
-unsafe fn exprCollation(_expr: *mut Node) -> Oid {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
-}
-unsafe fn exprType(_expr: *mut Node) -> Oid {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
-}
-unsafe fn exprTypmod(_expr: *mut Node) -> i32 {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
-}
-unsafe fn exprSetCollation(_expr: *mut Node, _collation: Oid) {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
-}
-unsafe fn exprSetInputCollation(_expr: *mut Node, _inputcollation: Oid) {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
-}
-unsafe fn get_typcollation(_typid: Oid) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
-}
-unsafe fn get_func_variadictype(_funcid: Oid) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
-}
+) -> bool { crate::nodes::nodeFuncs::expression_tree_walker(_node, core::mem::transmute(_walker), _context) }
+unsafe fn exprLocation(_expr: *mut Node) -> c_int { crate::nodes::nodeFuncs::exprLocation(_expr) }
+unsafe fn exprCollation(_expr: *mut Node) -> Oid { crate::nodes::nodeFuncs::exprCollation(_expr) }
+unsafe fn exprType(_expr: *mut Node) -> Oid { crate::nodes::nodeFuncs::exprType(_expr) }
+unsafe fn exprTypmod(_expr: *mut Node) -> i32 { crate::nodes::nodeFuncs::exprTypmod(_expr) }
+unsafe fn exprSetCollation(_expr: *mut Node, _collation: Oid) { crate::nodes::nodeFuncs::exprSetCollation(_expr, _collation) }
+unsafe fn exprSetInputCollation(_expr: *mut Node, _inputcollation: Oid) { crate::nodes::nodeFuncs::exprSetInputCollation(_expr, _inputcollation) }
+unsafe fn get_typcollation(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_typcollation(_typid) }
+unsafe fn get_func_variadictype(_funcid: Oid) -> Oid { crate::utils::cache::lsyscache::get_func_variadictype(_funcid) }
 unsafe fn makeRelabelType(
     _arg: *mut Expr,
     _rtype: Oid,
     _rtypmod: i32,
     _rcollid: Oid,
     _rformat: CoercionForm,
-) -> *mut Node {
-    unimplemented!() // TODO: nodes/makefuncs.c
-}
-unsafe fn lappend_oid(_list: *mut List, _datum: Oid) -> *mut List {
-    unimplemented!() // TODO: nodes/list.c
-}
-unsafe fn list_length(_l: *const List) -> c_int {
-    unimplemented!() // TODO: nodes/pg_list.h
-}
-unsafe fn list_head(_l: *const List) -> *mut ListCell {
-    unimplemented!() // TODO: nodes/pg_list.h
-}
-unsafe fn lnext(_l: *const List, _c: *const ListCell) -> *mut ListCell {
-    unimplemented!() // TODO: nodes/pg_list.h
-}
+) -> *mut Node { crate::nodes::makefuncs::makeRelabelType(_arg as _, _rtype, _rtypmod, _rcollid, core::mem::transmute(_rformat)) as *mut Node }
+unsafe fn lappend_oid(_list: *mut List, _datum: Oid) -> *mut List { crate::nodes::pg_list::lappend_oid(_list, _datum) }
+unsafe fn list_length(_l: *const List) -> c_int { crate::nodes::pg_list::list_length(_l) }
+unsafe fn list_head(_l: *const List) -> *mut ListCell { crate::nodes::pg_list::list_head(_l) }
+unsafe fn lnext(_l: *const List, _c: *const ListCell) -> *mut ListCell { crate::nodes::pg_list::lnext(_l, _c) }

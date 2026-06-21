@@ -164,7 +164,7 @@ unsafe fn VARATT_IS_EXTERNAL_ONDISK(ptr: *const c_char) -> bool {
 
 // TYPEOID: utils/syscache.h enum SysCacheIdentifier (the type cache id).
 // TODO(pg-port): real TYPEOID lives in utils/syscache.h (generated).
-const TYPEOID: c_int = 0;
+const TYPEOID: c_int = 82;
 
 // RelationGetIdentityKeyBitmap: utils/cache/relcache.c is not yet ported.
 // TODO(pg-port): real RelationGetIdentityKeyBitmap lives in utils/cache/relcache.c.
@@ -215,6 +215,7 @@ pub unsafe fn logicalrep_write_begin(out: StringInfo, txn: *mut ReorderBufferTXN
 /*
  * Read transaction BEGIN from the stream.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_read_begin(in_: StringInfo, begin_data: *mut LogicalRepBeginData) {
     /* read fields */
     (*begin_data).final_lsn = pq_getmsgint64(in_) as XLogRecPtr;
@@ -249,6 +250,7 @@ pub unsafe fn logicalrep_write_commit(
 /*
  * Read transaction COMMIT from the stream.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_read_commit(in_: StringInfo, commit_data: *mut LogicalRepCommitData) {
     /* read flags (unused for now) */
     let flags: uint8 = pq_getmsgbyte(in_) as uint8;
@@ -945,6 +947,7 @@ pub unsafe fn logicalrep_write_rel(
 /*
  * Read the relation info from stream and return as LogicalRepRelation.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_read_rel(in_: StringInfo) -> *mut LogicalRepRelation {
     let rel = palloc(core::mem::size_of::<LogicalRepRelation>()) as *mut LogicalRepRelation;
 
@@ -999,6 +1002,7 @@ pub unsafe fn logicalrep_write_typ(out: StringInfo, xid: TransactionId, typoid: 
 /*
  * Read type info from the output stream.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_read_typ(in_: StringInfo, ltyp: *mut LogicalRepTyp) {
     (*ltyp).remoteid = pq_getmsgint(in_, 4);
 

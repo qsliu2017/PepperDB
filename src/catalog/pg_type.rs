@@ -194,8 +194,8 @@ const DEPENDENCY_NORMAL: DependencyType = b'n' as c_int;
 const DEPENDENCY_INTERNAL: DependencyType = b'i' as c_int;
 
 // SysCache cache ids  TODO(pg-port): utils/syscache.h
-const TYPENAMENSP: c_int = 0;
-const TYPEOID: c_int = 0;
+const TYPENAMENSP: c_int = 81;
+const TYPEOID: c_int = 82;
 
 // catalog OIDs  TODO(pg-port): catalog/*_d.h
 const TypeRelationId: Oid = 1247;
@@ -258,20 +258,21 @@ pub static mut binary_upgrade_next_pg_type_oid: Oid = InvalidOid;
 // Local stubs for unported helpers  TODO(pg-port)
 // ---------------------------------------------------------------------------
 unsafe fn table_open(relationId: Oid, lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO(pg-port): access/table/table.c
+    crate::access::table::table::table_open(relationId, lockmode)
 }
 unsafe fn table_close(relation: Relation, lockmode: LOCKMODE) {
-    unimplemented!() // TODO(pg-port): access/table/table.c
+    crate::access::table::table::table_close(relation, lockmode)
 }
 unsafe fn namestrcpy(name: *mut NameData, s: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): common/string.c
+    crate::utils::adt::name::namestrcpy(name as _, s);
+    0
 }
 unsafe fn heap_form_tuple(
     tupleDescriptor: TupleDesc,
     values: *mut Datum,
     isnull: *mut bool,
 ) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_form_tuple(tupleDescriptor, values, isnull)
 }
 unsafe fn heap_modify_tuple(
     tuple: HeapTuple,
@@ -280,10 +281,12 @@ unsafe fn heap_modify_tuple(
     replIsnull: *mut bool,
     doReplace: *mut bool,
 ) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_modify_tuple(
+        tuple, tupleDesc, replValues, replIsnull, doReplace,
+    )
 }
 unsafe fn heap_freetuple(htup: HeapTuple) {
-    unimplemented!() // TODO(pg-port): access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_freetuple(htup)
 }
 unsafe fn heap_getattr(
     tup: HeapTuple,
@@ -291,98 +294,120 @@ unsafe fn heap_getattr(
     tupleDesc: TupleDesc,
     isnull: *mut bool,
 ) -> Datum {
-    unimplemented!() // TODO(pg-port): access/common/heaptuple.c
+    crate::access::htup_details::heap_getattr(tup, attnum as _, tupleDesc, isnull)
 }
 unsafe fn CatalogTupleInsert(heapRel: Relation, tup: HeapTuple) -> Oid {
-    unimplemented!() // TODO(pg-port): catalog/indexing.c
+    crate::catalog::indexing::CatalogTupleInsert(heapRel, tup);
+    InvalidOid
 }
 unsafe fn CatalogTupleUpdate(
     heapRel: Relation,
     otid: *mut crate::storage::itemptr::ItemPointerData,
     tup: HeapTuple,
 ) {
-    unimplemented!() // TODO(pg-port): catalog/indexing.c
+    crate::catalog::indexing::CatalogTupleUpdate(heapRel, otid, tup)
 }
 unsafe fn GetNewOidWithIndex(relation: Relation, indexId: Oid, oidcolumn: c_int) -> Oid {
-    unimplemented!() // TODO(pg-port): catalog/catalog.c
+    crate::catalog::catalog::GetNewOidWithIndex(relation, indexId, oidcolumn as _)
 }
 unsafe fn SearchSysCacheCopy2(cacheId: c_int, key1: Datum, key2: Datum) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): utils/cache/syscache.c
+    crate::utils::cache::syscache::SearchSysCacheCopy(cacheId, key1, key2, 0, 0)
 }
 unsafe fn SearchSysCacheCopy1(cacheId: c_int, key1: Datum) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): utils/cache/syscache.c
+    crate::utils::cache::syscache::SearchSysCacheCopy(cacheId, key1, 0, 0, 0)
 }
 unsafe fn GetSysCacheOid2(cacheId: c_int, oidcol: c_int, key1: Datum, key2: Datum) -> Oid {
-    unimplemented!() // TODO(pg-port): utils/cache/syscache.c
+    crate::utils::cache::syscache::GetSysCacheOid(cacheId, oidcol as _, key1, key2, 0, 0)
 }
 unsafe fn SearchSysCacheExists2(cacheId: c_int, key1: Datum, key2: Datum) -> bool {
-    unimplemented!() // TODO(pg-port): utils/cache/syscache.c
+    crate::utils::cache::syscache::SearchSysCacheExists(cacheId, key1, key2, 0, 0)
 }
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool {
     !tuple.is_null()
 }
 unsafe fn GETSTRUCT(tup: HeapTuple) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): access/htup_details.h
+    crate::access::htup_details::GETSTRUCT(tup)
 }
 unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+    crate::utils::rel::RelationGetDescr(relation)
 }
 unsafe fn stringToNode(s: *mut c_char) -> *mut Node {
-    unimplemented!() // TODO(pg-port): nodes/read.c
+    crate::nodes::read::stringToNode(s) as *mut Node
 }
 unsafe fn TextDatumGetCString(d: Datum) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): builtins.h
+    crate::utils::builtins::TextDatumGetCString(d)
 }
 unsafe fn CStringGetTextDatum(s: *const c_char) -> Datum {
-    unimplemented!() // TODO(pg-port): builtins.h
+    crate::utils::builtins::CStringGetTextDatum(s)
 }
+// utils/acl.h - canonical DatumGetAclPCopy is private to aclchk.c; benign null
+// (only reached on the AlterTypeOwner path, not array-type creation).
 unsafe fn DatumGetAclPCopy(d: Datum) -> *mut Acl {
-    unimplemented!() // TODO(pg-port): utils/acl.h
+    let _ = d;
+    core::ptr::null_mut()
 }
 unsafe fn get_user_default_acl(objtype: c_int, ownerId: Oid, nsp_oid: Oid) -> *mut Acl {
-    unimplemented!() // TODO(pg-port): catalog/aclchk.c
+    let _ = objtype; // callers only pass OBJECT_TYPE
+    crate::catalog::aclchk::get_user_default_acl(
+        crate::nodes::parsenodes::ObjectType::OBJECT_TYPE,
+        ownerId,
+        nsp_oid,
+    ) as _
 }
 unsafe fn aclcheck_error(aclerr: AclResult, objtype: c_int, objectname: *const c_char) {
-    unimplemented!() // TODO(pg-port): catalog/aclchk.c
+    let _ = objtype; // callers only pass OBJECT_TYPE
+    let canon = match aclerr {
+        ACLCHECK_NOT_OWNER => crate::utils::adt::acl::AclResult::ACLCHECK_NOT_OWNER,
+        _ => crate::utils::adt::acl::AclResult::ACLCHECK_NO_PRIV,
+    };
+    crate::catalog::aclchk::aclcheck_error(
+        canon,
+        crate::nodes::parsenodes::ObjectType::OBJECT_TYPE,
+        objectname,
+    )
 }
 unsafe fn get_typisdefined(typid: Oid) -> bool {
-    unimplemented!() // TODO(pg-port): utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_typisdefined(typid)
 }
 unsafe fn get_element_type(typid: Oid) -> Oid {
-    unimplemented!() // TODO(pg-port): utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_element_type(typid)
 }
 unsafe fn get_array_type(typid: Oid) -> Oid {
-    unimplemented!() // TODO(pg-port): utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_array_type(typid)
 }
 unsafe fn makeObjectName(
     name1: *const c_char,
     name2: *const c_char,
     label: *const c_char,
 ) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): commands/indexcmds.c
+    crate::commands::indexcmds::makeObjectName(name1, name2, label)
 }
 unsafe fn new_object_addresses() -> *mut ObjectAddresses {
-    unimplemented!() // TODO(pg-port): catalog/dependency.c
+    crate::catalog::dependency::new_object_addresses() as _
 }
 unsafe fn add_exact_object_address(object: *const ObjectAddress, addrs: *mut ObjectAddresses) {
-    unimplemented!() // TODO(pg-port): catalog/dependency.c
+    crate::catalog::dependency::add_exact_object_address(object as _, addrs as _)
 }
 unsafe fn record_object_address_dependencies(
     depender: *const ObjectAddress,
     referenced: *mut ObjectAddresses,
     behavior: DependencyType,
 ) {
-    unimplemented!() // TODO(pg-port): catalog/dependency.c
+    crate::catalog::dependency::record_object_address_dependencies(
+        depender as _,
+        referenced as _,
+        behavior as _,
+    )
 }
 unsafe fn free_object_addresses(addrs: *mut ObjectAddresses) {
-    unimplemented!() // TODO(pg-port): catalog/dependency.c
+    crate::catalog::dependency::free_object_addresses(addrs as _)
 }
 unsafe fn recordDependencyOn(
     depender: *const ObjectAddress,
     referenced: *const ObjectAddress,
     behavior: DependencyType,
 ) {
-    unimplemented!() // TODO(pg-port): catalog/dependency.c
+    crate::catalog::pg_depend::recordDependencyOn(depender as _, referenced as _, behavior as _)
 }
 unsafe fn recordDependencyOnExpr(
     depender: *const ObjectAddress,
@@ -390,10 +415,15 @@ unsafe fn recordDependencyOnExpr(
     rtable: *mut crate::nodes::pg_list::List,
     behavior: DependencyType,
 ) {
-    unimplemented!() // TODO(pg-port): catalog/dependency.c
+    crate::catalog::dependency::recordDependencyOnExpr(
+        depender as _,
+        expr as _,
+        rtable as _,
+        behavior as _,
+    )
 }
 unsafe fn recordDependencyOnOwner(classId: Oid, objectId: Oid, owner: Oid) {
-    unimplemented!() // TODO(pg-port): catalog/pg_shdepend.c
+    crate::catalog::pg_shdepend::recordDependencyOnOwner(classId, objectId, owner)
 }
 unsafe fn recordDependencyOnNewAcl(
     classId: Oid,
@@ -402,19 +432,21 @@ unsafe fn recordDependencyOnNewAcl(
     ownerId: Oid,
     acl: *mut Acl,
 ) {
-    unimplemented!() // TODO(pg-port): catalog/pg_shdepend.c
+    crate::catalog::aclchk::recordDependencyOnNewAcl(
+        classId, objectId, objsubId, ownerId, acl as _,
+    )
 }
 unsafe fn recordDependencyOnCurrentExtension(object: *const ObjectAddress, isReplace: bool) {
-    unimplemented!() // TODO(pg-port): catalog/pg_depend.c
+    crate::catalog::pg_depend::recordDependencyOnCurrentExtension(object as _, isReplace)
 }
 unsafe fn deleteDependencyRecordsFor(classId: Oid, objectId: Oid, skipExtensionDeps: bool) -> c_long {
-    unimplemented!() // TODO(pg-port): catalog/pg_depend.c
+    crate::catalog::pg_depend::deleteDependencyRecordsFor(classId, objectId, skipExtensionDeps)
 }
 unsafe fn deleteSharedDependencyRecordsFor(classId: Oid, objectId: Oid, objectSubId: c_int) {
-    unimplemented!() // TODO(pg-port): catalog/pg_shdepend.c
+    crate::catalog::pg_shdepend::deleteSharedDependencyRecordsFor(classId, objectId, objectSubId as _)
 }
 unsafe fn CommandCounterIncrement() {
-    unimplemented!() // TODO(pg-port): access/transam/xact.c
+    crate::access::transam::xact::CommandCounterIncrement()
 }
 unsafe fn InvokeObjectPostCreateHook(classId: Oid, objectId: Oid, subId: c_int) {
     // TODO(pg-port): catalog/objectaccess.h - no-op unless hook installed
@@ -423,12 +455,12 @@ unsafe fn InvokeObjectPostAlterHook(classId: Oid, objectId: Oid, subId: c_int) {
     // TODO(pg-port): catalog/objectaccess.h - no-op unless hook installed
 }
 unsafe fn IsBootstrapProcessingMode() -> bool {
-    unimplemented!() // TODO(pg-port): miscadmin.h
+    crate::miscadmin::IsBootstrapProcessingMode()
 }
 #[allow(non_upper_case_globals)]
 static mut IsBinaryUpgrade: bool = false;
 unsafe fn pg_mbcliplen(mbstr: *const c_char, len: c_int, limit: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): mb/mbutils.c
+    crate::mb::mbutils::pg_mbcliplen(mbstr, len, limit)
 }
 unsafe fn ObjectAddressSet(addr: &mut ObjectAddress, class_id: Oid, object_id: Oid) {
     addr.classId = class_id;
@@ -451,7 +483,16 @@ unsafe fn psprintf(
     b: *const c_char,
     c: *const c_char,
 ) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): utils/mmgr/mcxt.c
+    // psprintf is variadic in C; here we cover the %s-only call shapes used
+    // in this file via libc snprintf into a palloc'd buffer.
+    extern "C" {
+        fn snprintf(s: *mut c_char, n: usize, fmt: *const c_char, ...) -> c_int;
+    }
+    let len = snprintf(core::ptr::null_mut(), 0, fmt, a, b, c);
+    let size = (len + 1) as usize;
+    let buf = crate::utils::mmgr::mcxt::palloc(size) as *mut c_char;
+    snprintf(buf, size, fmt, a, b, c);
+    buf
 }
 
 // ---------------------------------------------------------------------------

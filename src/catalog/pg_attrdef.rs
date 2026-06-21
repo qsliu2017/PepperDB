@@ -31,7 +31,7 @@ use crate::access::index::genam::{systable_beginscan, systable_endscan, systable
 use crate::access::table::table::{table_open, table_close};
 use crate::access::common::relation::{relation_open, relation_close};
 use crate::catalog::catalog::GetNewOidWithIndex;
-use crate::nodes::outfuncs::nodeToString;
+unsafe fn nodeToString(_obj: *const core::ffi::c_void) -> *mut c_char { crate::nodes::outfuncs::nodeToString(_obj as _) }
 use crate::catalog::catalog_oids::{AttrDefaultRelationId, AttributeRelationId, RelationRelationId};
 use crate::storage::lockdefs::{RowExclusiveLock, AccessShareLock, AccessExclusiveLock, NoLock};
 use crate::catalog::pg_attribute::Form_pg_attribute;
@@ -48,10 +48,11 @@ const Anum_pg_attrdef_adbin: AttrNumber   = 4;
 const Natts_pg_attrdef: usize             = 4;
 
 // -- pg_attribute column number (catalog/pg_attribute.h) ------------------
+const Natts_pg_attribute: usize = 43;
 const Anum_pg_attribute_atthasdef: AttrNumber = 13;
 
 // -- Syscache IDs (utils/syscache.h) --------------------------------------
-const ATTNUM: c_int = 4;
+const ATTNUM: c_int = 7;
 
 // -- B-tree strategy / function OIDs --------------------------------------
 const BTEqualStrategyNumber: StrategyNumber = 3;
@@ -85,27 +86,34 @@ const InvalidObjectAddress: ObjectAddress = ObjectAddress {
 };
 
 /// TODO(pg-port): catalog/indexing.c CatalogTupleInsert
-unsafe fn CatalogTupleInsert(_heapRel: Relation, _tup: HeapTuple) {}
+unsafe fn CatalogTupleInsert(heapRel: Relation, tup: HeapTuple) { crate::catalog::indexing::CatalogTupleInsert(heapRel as _, tup as _); }
 
 /// TODO(pg-port): catalog/indexing.c CatalogTupleUpdate
 unsafe fn CatalogTupleUpdate(
-    _heapRel: Relation,
-    _otid: *mut crate::storage::itemptr::ItemPointerData,
-    _tup: HeapTuple,
+    heapRel: Relation,
+    otid: *mut crate::storage::itemptr::ItemPointerData,
+    tup: HeapTuple,
 ) {
+    crate::catalog::indexing::CatalogTupleUpdate(heapRel as _, otid as _, tup as _);
 }
 
 /// TODO(pg-port): catalog/indexing.c CatalogTupleDelete
-unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData) {}
+unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData) { crate::catalog::indexing::CatalogTupleDelete(_heapRel as _, _tid as _) }
 
 /// TODO(pg-port): utils/cache/syscache.c SearchSysCacheCopy2
-unsafe fn SearchSysCacheCopy2(_cacheId: c_int, _key1: Datum, _key2: Datum) -> HeapTuple {
-    null_mut()
+unsafe fn SearchSysCacheCopy2(cacheId: c_int, key1: Datum, key2: Datum) -> HeapTuple {
+    let tuple = crate::utils::cache::syscache::SearchSysCache2(cacheId, key1, key2);
+    if !HeapTupleIsValid(tuple) {
+        return tuple;
+    }
+    let newtuple = crate::access::common::heaptuple::heap_copytuple(tuple as _) as HeapTuple;
+    crate::utils::cache::syscache::ReleaseSysCache(tuple);
+    newtuple
 }
 
 /// TODO(pg-port): utils/adt/varlena.c CStringGetTextDatum
-unsafe fn CStringGetTextDatum(_s: *const c_char) -> Datum {
-    0 as Datum
+unsafe fn CStringGetTextDatum(s: *const c_char) -> Datum {
+    crate::utils::builtins::CStringGetTextDatum(s)
 }
 
 /// TODO(pg-port): catalog/pg_depend.c recordDependencyOn
@@ -113,8 +121,7 @@ unsafe fn recordDependencyOn(
     _depender: *const ObjectAddress,
     _referenced: *const ObjectAddress,
     _behavior: c_char,
-) {
-}
+) { crate::catalog::pg_depend::recordDependencyOn(_depender as _, _referenced as _, _behavior as _) }
 
 /// TODO(pg-port): catalog/dependency.c recordDependencyOnSingleRelExpr
 unsafe fn recordDependencyOnSingleRelExpr(
@@ -124,8 +131,7 @@ unsafe fn recordDependencyOnSingleRelExpr(
     _behavior: c_char,
     _self_behavior: c_char,
     _reverse_self: bool,
-) {
-}
+) { crate::catalog::dependency::recordDependencyOnSingleRelExpr(_depender as _, _expr as _, _relId as _, _behavior as _, _self_behavior as _, _reverse_self as _) }
 
 /// TODO(pg-port): catalog/dependency.c performDeletion
 unsafe fn performDeletion(_object: *const ObjectAddress, _behavior: DropBehavior, _flags: c_int) {}
@@ -165,7 +171,6 @@ pub unsafe fn StoreAttrDefault(
     let attrdefOid: Oid;
     let mut colobject: ObjectAddress = core::mem::zeroed();
     let mut defobject: ObjectAddress = core::mem::zeroed();
-
     adrel = table_open(AttrDefaultRelationId, RowExclusiveLock);
 
     /*
@@ -181,7 +186,6 @@ pub unsafe fn StoreAttrDefault(
     values[Anum_pg_attrdef_adrelid as usize - 1] = ObjectIdGetDatum(RelationGetRelid(rel));
     values[Anum_pg_attrdef_adnum as usize - 1] = Int16GetDatum(attnum);
     values[Anum_pg_attrdef_adbin as usize - 1] = CStringGetTextDatum(adbin);
-
     tuple = heap_form_tuple((*adrel).rd_att, values.as_ptr(), nulls.as_ptr());
     CatalogTupleInsert(adrel, tuple);
 

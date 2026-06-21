@@ -212,12 +212,12 @@ const Anum_pg_foreign_table_ftserver: c_int = 2;
 const Anum_pg_foreign_table_ftoptions: c_int = 3;
 
 /* Syscache IDs (utils/syscache.h)  TODO(pg-port) */
-const FOREIGNDATAWRAPPERNAME: c_int = 0;
-const FOREIGNDATAWRAPPEROID: c_int = 1;
-const FOREIGNSERVERNAME: c_int = 2;
-const FOREIGNSERVEROID: c_int = 3;
-const USERMAPPINGUSERSERVER: c_int = 4;
-const USERMAPPINGOID: c_int = 5;
+const FOREIGNDATAWRAPPERNAME: c_int = 29;
+const FOREIGNDATAWRAPPEROID: c_int = 30;
+const FOREIGNSERVERNAME: c_int = 31;
+const FOREIGNSERVEROID: c_int = 32;
+const USERMAPPINGUSERSERVER: c_int = 84;
+const USERMAPPINGOID: c_int = 83;
 
 /* Type OIDs (catalog/pg_type.h)  TODO(pg-port) */
 const TEXTOID: Oid = 25;
@@ -271,8 +271,8 @@ const ERRCODE_FDW_NO_SCHEMAS: c_int = 0;
  * Stubs for functions defined in other .c files  TODO(pg-port)
  * -------------------------------------------------------------------------- */
 
-unsafe fn table_open(relid: Oid, lockmode: LOCKMODE) -> Relation { unimplemented!() }
-unsafe fn table_close(rel: Relation, lockmode: LOCKMODE) { unimplemented!() }
+unsafe fn table_open(relid: Oid, lockmode: LOCKMODE) -> Relation { crate::access::table::table::table_open(relid as _, lockmode as _) as _ }
+unsafe fn table_close(rel: Relation, lockmode: LOCKMODE) { crate::access::table::table::table_close(rel as _, lockmode as _); }
 
 unsafe fn SearchSysCacheCopy1(cacheId: c_int, key1: Datum) -> HeapTuple { unimplemented!() }
 unsafe fn GetSysCacheOid2(cacheId: c_int, oidAttNum: c_int, key1: Datum, key2: Datum) -> Oid {
@@ -288,7 +288,7 @@ unsafe fn SysCacheGetAttr(
 }
 
 unsafe fn HeapTupleIsValid(tup: HeapTuple) -> bool { !tup.is_null() }
-unsafe fn GETSTRUCT(tup: HeapTuple) -> *mut c_void { unimplemented!() }
+unsafe fn GETSTRUCT(tup: HeapTuple) -> *mut c_void { crate::access::htup_details::GETSTRUCT(tup as _) as _ }
 unsafe fn heap_getattr(tup: HeapTuple, attnum: c_int, desc: TupleDesc, isnull: *mut bool) -> Datum {
     unimplemented!()
 }
@@ -304,38 +304,38 @@ unsafe fn heap_modify_tuple(
 ) -> HeapTuple {
     unimplemented!()
 }
-unsafe fn heap_freetuple(tup: HeapTuple) { unimplemented!() }
+unsafe fn heap_freetuple(tup: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(tup as _); }
 
 unsafe fn RelationGetDescr(rel: Relation) -> TupleDesc { unimplemented!() }
 unsafe fn rd_att(rel: Relation) -> TupleDesc { unimplemented!() }
 
-unsafe fn CatalogTupleInsert(rel: Relation, tup: HeapTuple) -> Oid { unimplemented!() }
+unsafe fn CatalogTupleInsert(rel: Relation, tup: HeapTuple) -> Oid { crate::catalog::indexing::CatalogTupleInsert(rel as _, tup as _) as _ }
 unsafe fn CatalogTupleUpdate(rel: Relation, otid: *mut ItemPointerData, tup: HeapTuple) {
     unimplemented!()
 }
 unsafe fn t_self(tup: HeapTuple) -> *mut ItemPointerData { unimplemented!() }
 
-unsafe fn GetNewOidWithIndex(rel: Relation, indexId: Oid, oidcolno: c_int) -> Oid { unimplemented!() }
+unsafe fn GetNewOidWithIndex(rel: Relation, indexId: Oid, oidcolno: c_int) -> Oid { crate::catalog::catalog::GetNewOidWithIndex(rel as _, indexId as _, oidcolno as _) as _ }
 
-unsafe fn superuser() -> bool { unimplemented!() }
-unsafe fn superuser_arg(roleid: Oid) -> bool { unimplemented!() }
-unsafe fn GetUserId() -> Oid { unimplemented!() }
+unsafe fn superuser() -> bool { crate::utils::misc::superuser::superuser() as _ }
+unsafe fn superuser_arg(roleid: Oid) -> bool { crate::utils::misc::superuser::superuser_arg(roleid as _) as _ }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() as _ }
 
-unsafe fn object_ownercheck(classid: Oid, objectid: Oid, roleid: Oid) -> bool { unimplemented!() }
+unsafe fn object_ownercheck(classid: Oid, objectid: Oid, roleid: Oid) -> bool { crate::catalog::aclchk::object_ownercheck(classid as _, objectid as _, roleid as _) as _ }
 unsafe fn object_aclcheck(classid: Oid, objectid: Oid, roleid: Oid, mode: AclMode) -> AclResult {
     unimplemented!()
 }
 unsafe fn aclcheck_error(aclerr: AclResult, objtype: ObjectType, objectname: *const c_char) {
     unimplemented!()
 }
-unsafe fn check_can_set_role(member: Oid, role: Oid) { unimplemented!() }
+unsafe fn check_can_set_role(member: Oid, role: Oid) { crate::utils::adt::acl::check_can_set_role(member as _, role as _); }
 
 unsafe fn aclnewowner(old_acl: *mut Acl, oldOwnerId: Oid, newOwnerId: Oid) -> *mut Acl {
     unimplemented!()
 }
 unsafe fn DatumGetAclP(X: Datum) -> *mut Acl { unimplemented!() }
 
-unsafe fn changeDependencyOnOwner(classId: Oid, objectId: Oid, newOwnerId: Oid) { unimplemented!() }
+unsafe fn changeDependencyOnOwner(classId: Oid, objectId: Oid, newOwnerId: Oid) { crate::catalog::pg_shdepend::changeDependencyOnOwner(classId as _, objectId as _, newOwnerId as _); }
 unsafe fn recordDependencyOn(
     depender: *const ObjectAddress,
     referenced: *const ObjectAddress,
@@ -343,7 +343,7 @@ unsafe fn recordDependencyOn(
 ) {
     unimplemented!()
 }
-unsafe fn recordDependencyOnOwner(classId: Oid, objectId: Oid, owner: Oid) { unimplemented!() }
+unsafe fn recordDependencyOnOwner(classId: Oid, objectId: Oid, owner: Oid) { crate::catalog::pg_shdepend::recordDependencyOnOwner(classId as _, objectId as _, owner as _); }
 unsafe fn recordDependencyOnCurrentExtension(object: *const ObjectAddress, isReplace: bool) {
     unimplemented!()
 }
@@ -358,13 +358,13 @@ unsafe fn deleteDependencyRecordsForClass(
 unsafe fn performDeletion(object: *const ObjectAddress, behavior: DropBehavior, flags: c_int) {
     unimplemented!()
 }
-unsafe fn checkMembershipInCurrentExtension(object: *const ObjectAddress) { unimplemented!() }
+unsafe fn checkMembershipInCurrentExtension(object: *const ObjectAddress) { crate::catalog::pg_depend::checkMembershipInCurrentExtension(object as _); }
 
 unsafe fn InvokeObjectPostCreateHook(classId: Oid, objectId: Oid, subId: c_int) {}
 unsafe fn InvokeObjectPostAlterHook(classId: Oid, objectId: Oid, subId: c_int) {}
 
-unsafe fn defGetString(def: *const DefElem) -> *mut c_char { unimplemented!() }
-unsafe fn errorConflictingDefElem(def: *const DefElem, pstate: *mut ParseState) { unimplemented!() }
+unsafe fn defGetString(def: *const DefElem) -> *mut c_char { crate::commands::define::defGetString(def as _) as _ }
+unsafe fn errorConflictingDefElem(def: *const DefElem, pstate: *mut ParseState) { crate::commands::define::errorConflictingDefElem(def as _, pstate as _); }
 
 unsafe fn LookupFuncName(
     funcname: *const List,
@@ -374,10 +374,10 @@ unsafe fn LookupFuncName(
 ) -> Oid {
     unimplemented!()
 }
-unsafe fn get_func_rettype(funcid: Oid) -> Oid { unimplemented!() }
-unsafe fn NameListToString(names: *const List) -> *mut c_char { unimplemented!() }
+unsafe fn get_func_rettype(funcid: Oid) -> Oid { crate::utils::cache::lsyscache::get_func_rettype(funcid as _) as _ }
+unsafe fn NameListToString(names: *const List) -> *mut c_char { crate::catalog::namespace::NameListToString(names as _) as _ }
 
-unsafe fn untransformRelOptions(options: Datum) -> *mut List { unimplemented!() }
+unsafe fn untransformRelOptions(options: Datum) -> *mut List { crate::access::common::reloptions::untransformRelOptions(options as _) as _ }
 unsafe fn list_delete_cell(list: *mut List, cell: *mut ListCell) -> *mut List { unimplemented!() }
 unsafe fn lappend(list: *mut List, datum: *mut c_void) -> *mut List { unimplemented!() }
 
@@ -393,34 +393,34 @@ unsafe fn accumArrayResult(
 unsafe fn makeArrayResult(astate: *mut ArrayBuildState, rcontext: MemoryContext) -> Datum {
     unimplemented!()
 }
-unsafe fn construct_empty_array(elmtype: Oid) -> *mut c_void { unimplemented!() }
+unsafe fn construct_empty_array(elmtype: Oid) -> *mut c_void { crate::utils::adt::arrayfuncs::construct_empty_array(elmtype as _) as _ }
 
 unsafe fn OidFunctionCall2(functionId: Oid, arg1: Datum, arg2: Datum) -> Datum { unimplemented!() }
 unsafe fn DirectFunctionCall1(func: unsafe fn(*mut c_void) -> Datum, arg1: Datum) -> Datum {
     unimplemented!()
 }
-unsafe fn namein(fcinfo: *mut c_void) -> Datum { unimplemented!() }
+unsafe fn namein(fcinfo: *mut c_void) -> Datum { crate::utils::adt::name::namein(fcinfo as _) as _ }
 
-unsafe fn GetForeignDataWrapper(fdwid: Oid) -> *mut ForeignDataWrapper { unimplemented!() }
+unsafe fn GetForeignDataWrapper(fdwid: Oid) -> *mut ForeignDataWrapper { crate::foreign::foreign::GetForeignDataWrapper(fdwid as _) as _ }
 unsafe fn GetForeignDataWrapperByName(name: *const c_char, missing_ok: bool) -> *mut ForeignDataWrapper {
     unimplemented!()
 }
 unsafe fn GetForeignServerByName(name: *const c_char, missing_ok: bool) -> *mut ForeignServer {
     unimplemented!()
 }
-unsafe fn GetFdwRoutine(fdwhandler: Oid) -> *mut FdwRoutine { unimplemented!() }
+unsafe fn GetFdwRoutine(fdwhandler: Oid) -> *mut FdwRoutine { crate::foreign::foreign::GetFdwRoutine(fdwhandler as _) as _ }
 unsafe fn get_foreign_server_oid(servername: *const c_char, missing_ok: bool) -> Oid {
     unimplemented!()
 }
 
-unsafe fn get_rolespec_oid(role: *mut RoleSpec, missing_ok: bool) -> Oid { unimplemented!() }
+unsafe fn get_rolespec_oid(role: *mut RoleSpec, missing_ok: bool) -> Oid { crate::utils::adt::acl::get_rolespec_oid(role as _, missing_ok as _) as _ }
 unsafe fn MappingUserName(useid: Oid) -> *mut c_char { unimplemented!() }
 
-unsafe fn LookupCreationNamespace(nspname: *const c_char) -> Oid { unimplemented!() }
+unsafe fn LookupCreationNamespace(nspname: *const c_char) -> Oid { crate::catalog::namespace::LookupCreationNamespace(nspname as _) as _ }
 unsafe fn IsImportableForeignTable(tablename: *const c_char, stmt: *mut ImportForeignSchemaStmt) -> bool {
     unimplemented!()
 }
-unsafe fn pg_parse_query(query_string: *const c_char) -> *mut List { unimplemented!() }
+unsafe fn pg_parse_query(query_string: *const c_char) -> *mut List { crate::tcop::postgres::pg_parse_query(query_string as _) as _ }
 unsafe fn ProcessUtility(
     pstmt: *mut PlannedStmt,
     queryString: *const c_char,
@@ -433,7 +433,7 @@ unsafe fn ProcessUtility(
 ) {
     unimplemented!()
 }
-unsafe fn CommandCounterIncrement() { unimplemented!() }
+unsafe fn CommandCounterIncrement() { crate::access::transam::xact::CommandCounterIncrement(); }
 
 unsafe fn pstrdup(string: *const c_char) -> *mut c_char { unimplemented!() }
 unsafe fn palloc(size: usize) -> *mut c_void { unimplemented!() }
@@ -446,7 +446,7 @@ unsafe fn ObjectAddressSet(addr: *mut ObjectAddress, class_id: Oid, object_id: O
     (*addr).objectId = object_id;
     (*addr).objectSubId = 0;
 }
-unsafe fn CStringGetTextDatum(s: *const c_char) -> Datum { unimplemented!() }
+unsafe fn CStringGetTextDatum(s: *const c_char) -> Datum { crate::utils::builtins::CStringGetTextDatum(s as _) as _ }
 
 /* errcontext-callback helpers (utils/elog.c)  TODO(pg-port) */
 unsafe fn geterrposition() -> c_int { unimplemented!() }

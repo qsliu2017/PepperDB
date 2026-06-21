@@ -364,12 +364,12 @@ unsafe fn ExecEvalExpr(
     _econtext: *mut ExprContext,
     _isNull: *mut bool,
 ) -> Datum {
-    unimplemented!() // TODO: executor/execExprInterp.c
+    crate::executor::executor::ExecEvalExpr(_state as _, _econtext as _, _isNull as _) as _
 }
 
 /* optimizer/clauses.c: contain_subplans() */
 unsafe fn contain_subplans(_clause: *mut Node) -> bool {
-    unimplemented!() // TODO: optimizer/util/clauses.c
+    crate::optimizer::util::clauses::contain_subplans(_clause as _) as _
 }
 
 /* jit/jit.h: PGJIT_NONE */

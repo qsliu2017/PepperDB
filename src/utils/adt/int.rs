@@ -139,16 +139,104 @@ unsafe fn check_valid_int2vector(int2_array: *const int2vector) {
  * `int2s` must point to `n` readable int16s (or be null).
  */
 pub unsafe fn buildint2vector(int2s: *const int16, n: c_int) -> *mut c_void {
-    let _ = (int2s, n);
-    unimplemented!("buildint2vector: int2vector type + utils/array.h not yet translated")
+    const INT2OID: Oid = 21;
+    // Int2VectorSize(n) = offsetof(int2vector, values) + n * sizeof(int16)
+    let hdr = core::mem::offset_of!(int2vector, values);
+    let size = hdr + (n as usize) * core::mem::size_of::<int16>();
+    let result = crate::utils::palloc::palloc0(size) as *mut int2vector;
+
+    if n > 0 && !int2s.is_null() {
+        core::ptr::copy_nonoverlapping(int2s, (*result).values.as_mut_ptr(), n as usize);
+    }
+
+    crate::varatt::SET_VARSIZE(result as *mut c_char, size as int32);
+    (*result).ndim = 1;
+    (*result).dataoffset = 0; /* never any nulls */
+    (*result).elemtype = INT2OID;
+    (*result).dim1 = n;
+    (*result).lbound1 = 0;
+
+    result as *mut c_void
 }
 
 /*
  *		int2vectorin			- converts "num num ..." to internal form
  */
 pub unsafe fn int2vectorin(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("int2vectorin: int2vector type + utils/array.h not yet translated")
+    extern "C" {
+        fn isspace(c: c_int) -> c_int;
+        fn strtol(s: *const c_char, endp: *mut *mut c_char, base: c_int) -> core::ffi::c_long;
+    }
+    const INT2OID: Oid = 21;
+    const T_ErrorSaveContext: c_int = 447;
+    const ERR_OOR: c_int = 50331778; /* MAKE_SQLSTATE 22003 */
+    const ERR_INVAL: c_int = 33685634; /* MAKE_SQLSTATE 22P02 */
+    let escontext: *mut Node = (*fcinfo).context;
+    // Soft-or-hard error: returns true if handled softly (caller should bail).
+    let soft = |sqlerrcode: c_int, msg: &str| -> bool {
+        if !escontext.is_null() && *(escontext as *const c_int) == T_ErrorSaveContext {
+            let esc = escontext as *mut crate::nodes::miscnodes::ErrorSaveContext;
+            (*esc).error_occurred = true;
+            if (*esc).details_wanted {
+                let m = crate::utils::mmgr::mcxt::palloc(msg.len() + 1) as *mut c_char;
+                core::ptr::copy_nonoverlapping(msg.as_ptr() as *const c_char, m, msg.len());
+                *m.add(msg.len()) = 0;
+                let ed = crate::utils::mmgr::mcxt::palloc0(
+                    core::mem::size_of::<crate::utils::error::elog_impl::ErrorData>(),
+                ) as *mut crate::utils::error::elog_impl::ErrorData;
+                (*ed).sqlerrcode = sqlerrcode;
+                (*ed).message = m;
+                (*esc).error_data = ed as *mut _;
+            }
+            true
+        } else {
+            false
+        }
+    };
+    let mut int_string: *mut c_char = PG_GETARG_CSTRING!(fcinfo, 0);
+    let hdr = core::mem::offset_of!(int2vector, values);
+    let nalloc = 32usize;
+    let result = crate::utils::palloc::palloc0(hdr + nalloc * core::mem::size_of::<int16>()) as *mut int2vector;
+    let mut n: c_int = 0;
+    loop {
+        while *int_string != 0 && isspace(*int_string as u8 as c_int) != 0 {
+            int_string = int_string.add(1);
+        }
+        if *int_string == 0 {
+            break;
+        }
+        if n as usize >= nalloc {
+            ereport!(ERROR, errmsg!("int2vector too long"));
+        }
+        let mut endp: *mut c_char = core::ptr::null_mut();
+        let cur = std::ffi::CStr::from_ptr(int_string).to_string_lossy().into_owned();
+        let l = strtol(int_string, &mut endp, 10);
+        if int_string == endp {
+            let m = format!("invalid input syntax for type smallint: \"{}\"", cur);
+            if soft(ERR_INVAL, &m) { PG_RETURN_NULL!(fcinfo); }
+            ereport!(ERROR, errmsg!("invalid input syntax for type smallint: \"{}\"", cur));
+        }
+        if l < SHRT_MIN as core::ffi::c_long || l > SHRT_MAX as core::ffi::c_long {
+            let m = format!("value \"{}\" is out of range for type smallint", cur);
+            if soft(ERR_OOR, &m) { PG_RETURN_NULL!(fcinfo); }
+            ereport!(ERROR, errmsg!("value \"{}\" is out of range for type smallint", cur));
+        }
+        if *endp != 0 && *endp != b' ' as c_char {
+            let m = format!("invalid input syntax for type smallint: \"{}\"", cur);
+            if soft(ERR_INVAL, &m) { PG_RETURN_NULL!(fcinfo); }
+            ereport!(ERROR, errmsg!("invalid input syntax for type smallint: \"{}\"", cur));
+        }
+        *(*result).values.as_mut_ptr().add(n as usize) = l as int16;
+        int_string = endp;
+        n += 1;
+    }
+    crate::varatt::SET_VARSIZE(result as *mut c_char, (hdr + (n as usize) * core::mem::size_of::<int16>()) as int32);
+    (*result).ndim = 1;
+    (*result).dataoffset = 0;
+    (*result).elemtype = INT2OID;
+    (*result).dim1 = n;
+    (*result).lbound1 = 0;
+    PG_RETURN_POINTER!(result);
 }
 
 /*
@@ -984,20 +1072,29 @@ macro_rules! SRF_RETURN_DONE {
     };
 }
 
-unsafe fn srf_is_firstcall(_fcinfo: FunctionCallInfo) -> bool {
-    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+unsafe fn srf_is_firstcall(fcinfo: FunctionCallInfo) -> bool {
+    (*(*fcinfo).flinfo).fn_extra.is_null()
 }
-unsafe fn srf_firstcall_init(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
-    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+unsafe fn srf_firstcall_init(fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    crate::utils::fmgr::funcapi::init_MultiFuncCall(fcinfo) as *mut FuncCallContext
 }
-unsafe fn srf_percall_setup(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
-    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+unsafe fn srf_percall_setup(fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    crate::utils::fmgr::funcapi::per_MultiFuncCall(fcinfo) as *mut FuncCallContext
 }
-unsafe fn srf_return_next(_fcinfo: FunctionCallInfo, _result: Datum) -> Datum {
-    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+unsafe fn srf_return_next(fcinfo: FunctionCallInfo, result: Datum) -> Datum {
+    let funcctx = (*(*fcinfo).flinfo).fn_extra as *mut FuncCallContext;
+    (*funcctx).call_cntr += 1;
+    let rsi = (*fcinfo).resultinfo as *mut crate::nodes::execnodes::ReturnSetInfo;
+    (*rsi).isDone = crate::nodes::execnodes::ExprDoneCond::ExprMultipleResult;
+    result
 }
-unsafe fn srf_return_done(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+unsafe fn srf_return_done(fcinfo: FunctionCallInfo) -> Datum {
+    let funcctx = (*(*fcinfo).flinfo).fn_extra as *mut crate::utils::fmgr::funcapi::FuncCallContext;
+    crate::utils::fmgr::funcapi::end_MultiFuncCall(fcinfo, funcctx);
+    let rsi = (*fcinfo).resultinfo as *mut crate::nodes::execnodes::ReturnSetInfo;
+    (*rsi).isDone = crate::nodes::execnodes::ExprDoneCond::ExprEndResult;
+    (*fcinfo).isnull = true;
+    0 as Datum
 }
 
 /* is_funcclause - nodes/nodeFuncs.h.  Local copy (not exported), per sibling precedent. */

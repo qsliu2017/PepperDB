@@ -85,9 +85,7 @@ unsafe fn construct_array_builtin(
 
 // utils/fmgr/funcapi.c - InitMaterializedSRF.
 // TODO: port InitMaterializedSRF (src/backend/utils/fmgr/funcapi.c)
-unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) {
-    unimplemented!()
-}
+unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) { crate::utils::fmgr::funcapi::InitMaterializedSRF(_fcinfo as _, _flags as _) }
 
 // utils/sort/tuplestore.c - tuplestore_putvalues.
 // TODO: port tuplestore_putvalues (src/backend/utils/sort/tuplestore.c)
@@ -96,27 +94,19 @@ unsafe fn tuplestore_putvalues(
     _tdesc: TupleDesc,
     _values: *mut Datum,
     _isnull: *mut bool,
-) {
-    unimplemented!()
-}
+) { crate::utils::sort::tuplestore::tuplestore_putvalues(_state as _, _tdesc as _, _values as _, _isnull as _) }
 
 // storage/proc.h - BackendPidGetProc.
 // TODO: port BackendPidGetProc (src/backend/storage/lmgr/proc.c)
-unsafe fn BackendPidGetProc(_pid: c_int) -> *mut PGPROC {
-    unimplemented!()
-}
+unsafe fn BackendPidGetProc(_pid: c_int) -> *mut PGPROC { crate::storage::ipc::procarray::BackendPidGetProc(_pid as _) as _ }
 
 // storage/proc.h - AuxiliaryPidGetProc.
 // TODO: port AuxiliaryPidGetProc (src/backend/storage/lmgr/proc.c)
-unsafe fn AuxiliaryPidGetProc(_pid: c_int) -> *mut PGPROC {
-    unimplemented!()
-}
+unsafe fn AuxiliaryPidGetProc(_pid: c_int) -> *mut PGPROC { crate::storage::lmgr::proc::AuxiliaryPidGetProc(_pid as _) as _ }
 
 // storage/proc.h - GetNumberFromPGProc.
 // TODO: port GetNumberFromPGProc (storage/proc.h macro/inline)
-unsafe fn GetNumberFromPGProc(_proc: *mut PGPROC) -> ProcNumber {
-    unimplemented!()
-}
+unsafe fn GetNumberFromPGProc(_proc: *mut PGPROC) -> ProcNumber { crate::storage::lmgr::proc::GetNumberFromPGProc(_proc as _) as _ }
 
 // storage/procsignal.h - SendProcSignal.
 // TODO: port SendProcSignal (src/backend/storage/ipc/procsignal.c)
@@ -124,9 +114,7 @@ unsafe fn SendProcSignal(
     _pid: c_int,
     _reason: ProcSignalReason,
     _procNumber: ProcNumber,
-) -> c_int {
-    unimplemented!()
-}
+) -> c_int { unimplemented!() }
 
 // Opaque/aliased types used through pointers only (until centrally ported).
 #[allow(non_camel_case_types)]

@@ -47,17 +47,13 @@ unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
 
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 
 unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
 
-unsafe fn MarkBufferDirtyHint(_buffer: Buffer, _buffer_std: bool) {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
-}
+unsafe fn MarkBufferDirtyHint(_buffer: Buffer, _buffer_std: bool) { crate::storage::buffer::bufmgr::MarkBufferDirtyHint(_buffer, _buffer_std) }
 
 // ---------------------------------------------------------------------------
 // Declarations merged from access/hash/hash.h that are needed by hashutil.c
@@ -816,9 +812,7 @@ pub struct relopt_parse_elt {
 	pub offset: c_int,           /* offset of field in result struct */
 }
 
-unsafe fn index_getprocinfo(irel: Relation, attnum: AttrNumber, procnum: uint16) -> *mut FmgrInfo {
-	unimplemented!() // TODO: access/index/indexam.c
-}
+unsafe fn index_getprocinfo(irel: Relation, attnum: AttrNumber, procnum: uint16) -> *mut FmgrInfo { crate::access::index::indexam::index_getprocinfo(irel, attnum, procnum) }
 
 unsafe fn get_opfamily_proc(opfamily: Oid, lefttype: Oid, righttype: Oid, procnum: c_int) -> RegProcedure {
 	unimplemented!() // TODO: utils/cache/lsyscache.c
@@ -832,13 +826,11 @@ unsafe fn build_reloptions(
 	relopt_elems: *const relopt_parse_elt,
 	num_relopt_elems: c_int,
 ) -> *mut c_void {
-	unimplemented!() // TODO: access/common/reloptions.c
+	crate::access::common::reloptions::build_reloptions(
+		reloptions, validate, kind as _, relopt_struct_size, relopt_elems as _, num_relopt_elems,
+	)
 }
 
-unsafe fn _hash_getbuf(rel: Relation, blkno: BlockNumber, access: c_int, flags: c_int) -> Buffer {
-	unimplemented!() // TODO: access/hash/hashpage.c
-}
+unsafe fn _hash_getbuf(rel: Relation, blkno: BlockNumber, access: c_int, flags: c_int) -> Buffer { unimplemented!() }
 
-unsafe fn _hash_relbuf(rel: Relation, buf: Buffer) {
-	unimplemented!() // TODO: access/hash/hashpage.c
-}
+unsafe fn _hash_relbuf(rel: Relation, buf: Buffer) { unimplemented!() }

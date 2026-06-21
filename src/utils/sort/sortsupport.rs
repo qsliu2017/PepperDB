@@ -50,30 +50,23 @@ pub const GIST_AM_OID: Oid = 783; // access/gist.h (pg_am OID of the gist AM)
 /// `get_ordering_op_properties` (utils/lsyscache.c). STUB.
 // TODO(pg-port): port lsyscache.c; resolves an ordering operator into its
 // opfamily / opcintype / compare-type.
-#[allow(unused_variables)]
 unsafe fn get_ordering_op_properties(
     opno: Oid,
     opfamily: *mut Oid,
     opcintype: *mut Oid,
     cmptype: *mut CompareType,
 ) -> bool {
-    unimplemented!("get_ordering_op_properties: lsyscache not yet ported")
+    crate::utils::cache::lsyscache::get_ordering_op_properties(opno, opfamily, opcintype, cmptype as _)
 }
 
-/// `get_opfamily_proc` (utils/lsyscache.c). STUB.
-// TODO(pg-port): port lsyscache.c; looks up a support proc OID in pg_amproc.
-#[allow(unused_variables)]
+#[inline]
 unsafe fn get_opfamily_proc(opfamily: Oid, lefttype: Oid, righttype: Oid, procnum: c_int) -> Oid {
-    unimplemented!("get_opfamily_proc: lsyscache not yet ported")
+    crate::utils::cache::lsyscache::get_opfamily_proc(opfamily, lefttype, righttype, procnum as i16)
 }
 
-/// `OidFunctionCall1` (fmgr.h convenience for PointerGetDatum(ssup)). STUB.
-// TODO(pg-port): the real OidFunctionCall1 lives in crate::utils::fmgr but
-// depends on fmgr_info catalog lookups not yet wired; stubbed here for the
-// sortsupport-setup paths that are themselves stubbed.
-#[allow(unused_variables)]
+#[inline]
 unsafe fn OidFunctionCall1(functionId: Oid, arg1: Datum) -> Datum {
-    unimplemented!("OidFunctionCall1: fmgr catalog path not yet ported")
+    crate::utils::fmgr::OidFunctionCall1Coll(functionId, crate::postgres_ext::InvalidOid, arg1)
 }
 
 // ---------------------------------------------------------------------------
@@ -325,10 +318,20 @@ unsafe fn FinishSortSupportFunction(opfamily: Oid, opcintype: Oid, ssup: SortSup
  * filled in ssup_cxt, ssup_collation, and ssup_nulls_first.  This will fill
  * in ssup_reverse as well as the comparator function pointer.
  */
-#[allow(unused_variables)]
 pub unsafe fn PrepareSortSupportFromOrderingOp(orderingOp: Oid, ssup: SortSupport) {
-    // TODO(pg-port): needs get_ordering_op_properties (lsyscache).
-    unimplemented!("PrepareSortSupportFromOrderingOp: lsyscache not yet ported")
+    let mut opfamily: Oid = InvalidOid;
+    let mut opcintype: Oid = InvalidOid;
+    let mut cmptype: CompareType = 0;
+
+    Assert!((*ssup).comparator.is_none());
+
+    if !get_ordering_op_properties(orderingOp, &mut opfamily, &mut opcintype, &mut cmptype) {
+        elog!(ERROR, "operator {} is not a valid ordering operator", orderingOp);
+    }
+
+    (*ssup).ssup_reverse = cmptype == COMPARE_GT;
+
+    FinishSortSupportFunction(opfamily, opcintype, ssup);
 }
 
 /*
@@ -339,11 +342,28 @@ pub unsafe fn PrepareSortSupportFromOrderingOp(orderingOp: Oid, ssup: SortSuppor
  * will fill in ssup_reverse (based on the supplied argument), as well as the
  * comparator function pointer.
  */
-#[allow(unused_variables)]
 pub unsafe fn PrepareSortSupportFromIndexRel(indexRel: Relation, reverse: bool, ssup: SortSupport) {
-    // TODO(pg-port): needs relcache Relation accessors (rd_opfamily/rd_opcintype/
-    // rd_indam/rd_rel) plus FinishSortSupportFunction.
-    unimplemented!("PrepareSortSupportFromIndexRel: relcache not yet ported")
+    let rel = indexRel as *mut crate::utils::rel::RelationData;
+    let attno = (*ssup).ssup_attno as usize;
+    let opfamily: Oid = *(*rel).rd_opfamily.add(attno - 1);
+    let opcintype: Oid = *(*rel).rd_opcintype.add(attno - 1);
+
+    Assert!((*ssup).comparator.is_none());
+
+    if (*(*rel).rd_rel).relam != crate::utils::sort::tuplesortvariants::BTREE_AM_OID {
+        elog!(ERROR, "unexpected non-btree AM: {}", (*(*rel).rd_rel).relam);
+    }
+    if !(*((*rel).rd_indam as *const crate::access::index::amapi::IndexAmRoutine)).amcanorder {
+        elog!(
+            ERROR,
+            "operator class found for attribute {} of index does not provide ordering operators",
+            (*ssup).ssup_attno
+        );
+    }
+
+    /* Get a comparator function for this opfamily/datatype (might be a shim) */
+    (*ssup).ssup_reverse = reverse;
+    FinishSortSupportFunction(opfamily, opcintype, ssup);
 }
 
 /*

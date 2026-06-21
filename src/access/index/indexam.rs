@@ -926,6 +926,7 @@ pub unsafe fn index_getprocid(irel: Relation, attnum: AttrNumber, procnum: uint1
 // any relcache rebuild!  Therefore, either use the callinfo right away,
 // or save it only after having acquired some type of lock on the index rel.
 // ----------------
+#[no_mangle]
 pub unsafe fn index_getprocinfo(
     irel: Relation,
     attnum: AttrNumber,
@@ -1147,41 +1148,39 @@ pub struct OidVectorStub {
 // ----------------------------------------------------------------
 
 unsafe fn relation_open(_relationId: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO: access/relation.c
+    crate::access::common::relation::relation_open(_relationId as _, _lockmode as _) as _
 }
 unsafe fn try_relation_open(_relationId: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO: access/relation.c
+    crate::access::common::relation::try_relation_open(_relationId as _, _lockmode as _) as _
 }
 unsafe fn RelationClose(_relation: Relation) {
-    unimplemented!() // TODO: utils/cache/relcache.c
+    crate::utils::cache::relcache::RelationClose(_relation as _);
 }
 unsafe fn UnlockRelationId(_relid: *mut LockRelId, _lockmode: LOCKMODE) {
-    unimplemented!() // TODO: storage/lmgr/lmgr.c
+    crate::storage::lmgr::lmgr::UnlockRelationId(_relid as _, _lockmode as _);
 }
 unsafe fn CheckForSerializableConflictIn(
     _relation: Relation,
     _tid: ItemPointer,
     _blkno: BlockNumber,
-) {
-    unimplemented!() // TODO: storage/lmgr/predicate.c
-}
+) { unimplemented!() }
 unsafe fn PredicateLockRelation(_relation: Relation, _snapshot: Snapshot) {
-    unimplemented!() // TODO: storage/lmgr/predicate.c
+    crate::storage::lmgr::predicate::PredicateLockRelation(_relation as _, _snapshot as _);
 }
 unsafe fn RelationIncrementReferenceCount(_rel: Relation) {
-    unimplemented!() // TODO: utils/cache/relcache.c
+    crate::utils::cache::relcache::RelationIncrementReferenceCount(_rel as _);
 }
 unsafe fn RelationDecrementReferenceCount(_rel: Relation) {
-    unimplemented!() // TODO: utils/cache/relcache.c
+    crate::utils::cache::relcache::RelationDecrementReferenceCount(_rel as _);
 }
 unsafe fn table_index_fetch_begin(_rel: Relation) -> *mut IndexFetchTableData {
-    unimplemented!() // TODO: access/table/tableam.c
+    crate::access::table::tableam::table_index_fetch_begin(_rel as _) as _
 }
 unsafe fn table_index_fetch_reset(_scan: *mut IndexFetchTableData) {
-    unimplemented!() // TODO: access/table/tableam.c
+    crate::access::table::tableam::table_index_fetch_reset(_scan as _)
 }
 unsafe fn table_index_fetch_end(_scan: *mut IndexFetchTableData) {
-    unimplemented!() // TODO: access/table/tableam.c
+    crate::access::table::tableam::table_index_fetch_end(_scan as _);
 }
 unsafe fn table_index_fetch_tuple(
     _scan: *mut IndexFetchTableData,
@@ -1191,54 +1190,44 @@ unsafe fn table_index_fetch_tuple(
     _call_again: *mut bool,
     _all_dead: *mut bool,
 ) -> bool {
-    unimplemented!() // TODO: access/table/tableam.c
+    crate::access::table::tableam::table_index_fetch_tuple(_scan as _, _tid as _, _snapshot as _, _slot as _, _call_again as _, _all_dead as _) as _
 }
 unsafe fn UnregisterSnapshot(_snapshot: Snapshot) {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::UnregisterSnapshot(_snapshot as _)
 }
 unsafe fn RegisterSnapshot(_snapshot: Snapshot) -> Snapshot {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::RegisterSnapshot(_snapshot as _) as _
 }
-unsafe fn RestoreSnapshot(_start_address: *mut std::ffi::c_char) -> Snapshot {
-    unimplemented!() // TODO: utils/time/snapmgr.c
-}
-unsafe fn SerializeSnapshot(_snapshot: Snapshot, _start_address: *mut std::ffi::c_char) {
-    unimplemented!() // TODO: utils/time/snapmgr.c
-}
-unsafe fn EstimateSnapshotSpace(_snapshot: Snapshot) -> Size {
-    unimplemented!() // TODO: utils/time/snapmgr.c
-}
+unsafe fn RestoreSnapshot(_start_address: *mut std::ffi::c_char) -> Snapshot { crate::utils::time::snapmgr::RestoreSnapshot(_start_address as _) }
+unsafe fn SerializeSnapshot(_snapshot: Snapshot, _start_address: *mut std::ffi::c_char) { crate::utils::time::snapmgr::SerializeSnapshot(_snapshot, _start_address as _) }
+unsafe fn EstimateSnapshotSpace(_snapshot: Snapshot) -> Size { crate::utils::time::snapmgr::EstimateSnapshotSpace(_snapshot) }
 unsafe fn IndexScanEnd(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/index/genam.c
+    crate::access::index::genam::IndexScanEnd(_scan as _)
 }
 unsafe fn pgstat_count_index_tuples(_rel: Relation, _n: int64) {
-    unimplemented!() // TODO: pgstat.h (inline)
+    { let _=(_rel,_n); }
 }
 unsafe fn pgstat_count_heap_fetch(_rel: Relation) {
-    unimplemented!() // TODO: pgstat.h (inline)
+    { let _=_rel; }
 }
 unsafe fn fmgr_info_cxt(_functionId: Oid, _finfo: *mut FmgrInfo, _mcxt: MemoryContext) {
-    unimplemented!() // TODO: utils/fmgr/fmgr.c
+    crate::utils::fmgr::fmgr_info_cxt(_functionId as _, _finfo as _, _mcxt as _);
 }
 unsafe fn set_fn_opclass_options(_finfo: *mut FmgrInfo, _options: *mut bytea) {
-    unimplemented!() // TODO: utils/fmgr/fmgr.c
+    // no-op: opclass options unused for catalog index support functions
 }
 unsafe fn RelationGetIndexAttOptions(_relation: Relation, _copy: bool) -> *mut *mut bytea {
-    unimplemented!() // TODO: utils/cache/relcache.c
+    core::ptr::null_mut() // catalog indexes carry no per-attribute opclass options
 }
 unsafe fn FunctionCall1(_flinfo: *mut FmgrInfo, _arg1: Datum) -> Datum {
     unimplemented!() // TODO: utils/fmgr/fmgr.c
 }
-unsafe fn init_local_reloptions(_relopts: *mut local_relopts, _relopt_struct_size: Size) {
-    unimplemented!() // TODO: access/common/reloptions.c
-}
+unsafe fn init_local_reloptions(_relopts: *mut local_relopts, _relopt_struct_size: Size) { unimplemented!() }
 unsafe fn build_local_reloptions(
     _relopts: *mut local_relopts,
     _options: Datum,
     _validate: bool,
-) -> *mut bytea {
-    unimplemented!() // TODO: access/common/reloptions.c
-}
+) -> *mut bytea { unimplemented!() }
 unsafe fn SysCacheGetAttrNotNull(
     _cacheId: c_int,
     _tup: *mut HeapTupleData,
@@ -1246,12 +1235,10 @@ unsafe fn SysCacheGetAttrNotNull(
 ) -> Datum {
     unimplemented!() // TODO: utils/cache/syscache.c
 }
-unsafe fn generate_opclass_name(_opclass: Oid) -> *mut std::ffi::c_char {
-    unimplemented!() // TODO: utils/adt/ruleutils.c
-}
+unsafe fn generate_opclass_name(_opclass: Oid) -> *mut std::ffi::c_char { unimplemented!() }
 pub use crate::catalog::index::ReindexIsProcessingIndex;
 unsafe fn RelationGetRelid(_relation: Relation) -> Oid {
-    unimplemented!() // TODO: utils/rel.h (inline)
+    crate::utils::rel::RelationGetRelid(_relation as _) as _
 }
 
 // Inline helpers / macros from headers, stubbed locally
@@ -1270,24 +1257,22 @@ unsafe fn IndexScanIsValid(scan: IndexScanDesc) -> bool {
 // unlikely() comes from the prelude (crate::c::unlikely).
 #[inline]
 unsafe fn ItemPointerIsValid(_pointer: ItemPointer) -> bool {
-    unimplemented!() // TODO: storage/itemptr.h
+    crate::storage::itemptr::ItemPointerIsValid(_pointer as _)
 }
 #[inline]
 unsafe fn ItemPointerEquals(_p1: ItemPointer, _p2: ItemPointer) -> bool {
-    unimplemented!() // TODO: storage/itemptr.c
+    crate::storage::itemptr::ItemPointerEquals(_p1 as _, _p2 as _)
 }
 #[inline]
 unsafe fn TransactionIdIsValid(_xid: crate::c::TransactionId) -> bool {
-    unimplemented!() // TODO: access/transam.h
+    crate::access::transam::TransactionIdIsValid(_xid as _)
 }
 #[inline]
 unsafe fn IsMVCCSnapshot(_snapshot: Snapshot) -> bool {
-    unimplemented!() // TODO: utils/snapmgr.h
+    (*_snapshot).snapshot_type == 0 // SNAPSHOT_MVCC
 }
 #[inline]
-unsafe fn RelFileLocatorEquals(_a: RelFileLocator, _b: RelFileLocator) -> bool {
-    unimplemented!() // TODO: storage/relfilelocator.h
-}
+unsafe fn RelFileLocatorEquals(_a: RelFileLocator, _b: RelFileLocator) -> bool { unimplemented!() }
 #[inline]
 unsafe fn RegProcedureIsValid(p: RegProcedure) -> bool {
     p != InvalidOid
@@ -1305,13 +1290,9 @@ unsafe fn OffsetToPointer(base: *mut c_void, offset: Size) -> *mut c_void {
     (base as *mut u8).add(offset) as *mut c_void
 }
 #[inline]
-unsafe fn Float8GetDatum(_value: f64) -> Datum {
-    unimplemented!() // TODO: utils/fmgr/fmgr.c
-}
+unsafe fn Float8GetDatum(_value: f64) -> Datum { crate::postgres::Float8GetDatum(_value as _) }
 #[inline]
-unsafe fn Float4GetDatum(_value: f32) -> Datum {
-    unimplemented!() // TODO: utils/fmgr/fmgr.c
-}
+unsafe fn Float4GetDatum(_value: f32) -> Datum { crate::postgres::Float4GetDatum(_value as _) }
 #[inline]
 unsafe fn PointerGetDatum(_p: *mut c_void) -> Datum {
     unimplemented!() // TODO: postgres.h
@@ -1331,7 +1312,7 @@ pub const InvalidBlockNumber: BlockNumber = 0xFFFF_FFFF;
 pub const InvalidSnapshot: Snapshot = ptr::null_mut();
 pub const RELKIND_INDEX: std::ffi::c_char = b'i' as std::ffi::c_char;
 pub const RELKIND_PARTITIONED_INDEX: std::ffi::c_char = b'I' as std::ffi::c_char;
-pub const INDEXRELID: c_int = 0; // TODO: utils/syscache.h
+pub const INDEXRELID: c_int = 34; // TODO: utils/syscache.h
 pub const Anum_pg_index_indclass: AttrNumber = 0; // TODO: catalog/pg_index.h
 pub const FLOAT8OID: Oid = 701;
 pub const FLOAT4OID: Oid = 700;

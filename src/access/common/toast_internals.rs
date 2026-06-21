@@ -363,19 +363,11 @@ unsafe fn htup_t_self(_toasttup: HeapTuple) -> ItemPointer {
 //   access/table, access/heapam, access/genam, catalog deps - local stubs.
 // ----------------------------------------------------------------------------
 // TODO(pg-port): access/table.h table_open / table_close.
-unsafe fn table_open(_relationId: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!("toast_internals: table_open not yet ported")
-}
-unsafe fn table_close(_relation: Relation, _lockmode: LOCKMODE) {
-    unimplemented!("toast_internals: table_close not yet ported")
-}
+unsafe fn table_open(_relationId: Oid, _lockmode: LOCKMODE) -> Relation { unimplemented!() }
+unsafe fn table_close(_relation: Relation, _lockmode: LOCKMODE) { unimplemented!() }
 // TODO(pg-port): access/genam.h index_open / index_close.
-unsafe fn index_open(_relationId: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!("toast_internals: index_open not yet ported")
-}
-unsafe fn index_close(_relation: Relation, _lockmode: LOCKMODE) {
-    unimplemented!("toast_internals: index_close not yet ported")
-}
+unsafe fn index_open(_relationId: Oid, _lockmode: LOCKMODE) -> Relation { unimplemented!() }
+unsafe fn index_close(_relation: Relation, _lockmode: LOCKMODE) { unimplemented!() }
 // TODO(pg-port): access/genam.h index_insert.
 unsafe fn index_insert(
     _indexRelation: Relation,
@@ -386,9 +378,7 @@ unsafe fn index_insert(
     _checkUnique: IndexUniqueCheck,
     _indexUnchanged: bool,
     _indexInfo: *mut c_void,
-) -> bool {
-    unimplemented!("toast_internals: index_insert not yet ported")
-}
+) -> bool { unimplemented!() }
 // TODO(pg-port): access/htup_details.h heap_form_tuple / heap_freetuple.
 unsafe fn heap_form_tuple(
     _tupleDescriptor: TupleDesc,
@@ -397,9 +387,7 @@ unsafe fn heap_form_tuple(
 ) -> HeapTuple {
     unimplemented!("toast_internals: heap_form_tuple not yet ported")
 }
-unsafe fn heap_freetuple(_htup: HeapTuple) {
-    unimplemented!("toast_internals: heap_freetuple not yet ported")
-}
+unsafe fn heap_freetuple(_htup: HeapTuple) { unimplemented!() }
 // TODO(pg-port): access/heapam.h heap_insert.
 unsafe fn heap_insert(
     _relation: Relation,
@@ -407,20 +395,12 @@ unsafe fn heap_insert(
     _cid: CommandId,
     _options: c_int,
     _bistate: *mut c_void,
-) {
-    unimplemented!("toast_internals: heap_insert not yet ported")
-}
+) { unimplemented!() }
 // TODO(pg-port): access/heapam.h simple_heap_delete / heap_abort_speculative.
-unsafe fn simple_heap_delete(_relation: Relation, _tid: ItemPointer) {
-    unimplemented!("toast_internals: simple_heap_delete not yet ported")
-}
-unsafe fn heap_abort_speculative(_relation: Relation, _tid: ItemPointer) {
-    unimplemented!("toast_internals: heap_abort_speculative not yet ported")
-}
+unsafe fn simple_heap_delete(_relation: Relation, _tid: ItemPointer) { unimplemented!() }
+unsafe fn heap_abort_speculative(_relation: Relation, _tid: ItemPointer) { unimplemented!() }
 // TODO(pg-port): access/xact.h GetCurrentCommandId.
-unsafe fn GetCurrentCommandId(_used: bool) -> CommandId {
-    unimplemented!("toast_internals: GetCurrentCommandId not yet ported")
-}
+unsafe fn GetCurrentCommandId(_used: bool) -> CommandId { crate::access::transam::xact::GetCurrentCommandId(_used) }
 // TODO(pg-port): catalog/catalog.h GetNewOidWithIndex.
 unsafe fn GetNewOidWithIndex(_relation: Relation, _indexId: Oid, _oidcolumn: AttrNumber) -> Oid {
     unimplemented!("toast_internals: GetNewOidWithIndex not yet ported")
@@ -430,7 +410,7 @@ unsafe fn RelationGetRelid(_relation: Relation) -> Oid {
     unimplemented!("toast_internals: RelationGetRelid not yet ported")
 }
 unsafe fn RelationGetIndexList(_relation: Relation) -> *mut List {
-    unimplemented!("toast_internals: RelationGetIndexList not yet ported")
+    crate::utils::cache::relcache::RelationGetIndexList(_relation as _) as _
 }
 // TODO(pg-port): access/genam.h systable scan helpers.
 unsafe fn systable_beginscan(
@@ -455,19 +435,11 @@ unsafe fn systable_beginscan_ordered(
     _snapshot: Snapshot,
     _nkeys: c_int,
     _key: *mut ScanKeyData,
-) -> SysScanDesc {
-    unimplemented!("toast_internals: systable_beginscan_ordered not yet ported")
-}
-unsafe fn systable_getnext_ordered(_sysscan: SysScanDesc, _direction: c_int) -> HeapTuple {
-    unimplemented!("toast_internals: systable_getnext_ordered not yet ported")
-}
-unsafe fn systable_endscan_ordered(_sysscan: SysScanDesc) {
-    unimplemented!("toast_internals: systable_endscan_ordered not yet ported")
-}
+) -> SysScanDesc { unimplemented!() }
+unsafe fn systable_getnext_ordered(_sysscan: SysScanDesc, _direction: c_int) -> HeapTuple { unimplemented!() }
+unsafe fn systable_endscan_ordered(_sysscan: SysScanDesc) { unimplemented!() }
 // TODO(pg-port): utils/snapmgr.h HaveRegisteredOrActiveSnapshot.
-unsafe fn HaveRegisteredOrActiveSnapshot() -> bool {
-    unimplemented!("toast_internals: HaveRegisteredOrActiveSnapshot not yet ported")
-}
+unsafe fn HaveRegisteredOrActiveSnapshot() -> bool { crate::utils::time::snapmgr::HaveRegisteredOrActiveSnapshot() }
 
 // ----------------------------------------------------------------------------
 //   pglz_compress_datum (inlined from access/common/toast_compression.c)

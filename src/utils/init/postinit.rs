@@ -75,10 +75,10 @@ type Relation = *mut RelationData;
 // ---------------------------------------------------------------------------
 const Anum_pg_database_datname: i16 = 2;
 const Anum_pg_database_oid: i16 = 1;
-const Anum_pg_database_datcollate: i16 = 16;
-const Anum_pg_database_datctype: i16 = 17;
-const Anum_pg_database_datcollversion: i16 = 20;
-const Anum_pg_database_datlocale: i16 = 18;
+const Anum_pg_database_datcollate: i16 = 13;
+const Anum_pg_database_datctype: i16 = 14;
+const Anum_pg_database_datcollversion: i16 = 17;
+const Anum_pg_database_datlocale: i16 = 15;
 
 // pg_database index OIDs (catalog/catalog.rs already has them; reuse literals
 // to avoid a cross-module const reference that would require pub visibility there)
@@ -86,7 +86,7 @@ const DatabaseNameIndexId: Oid = 2671;
 const DatabaseOidIndexId: Oid = 2672;
 
 // fmgr regproc OIDs for built-in comparison functions
-const F_NAMEEQ: RegProcedure = 69; // nameeq (name, name)
+const F_NAMEEQ: RegProcedure = 62; // nameeq (name, name)
 const F_OIDEQ: RegProcedure = 184; // oideq (oid, oid)
 
 // COLLPROVIDER_LIBC ('c') from pg_collation.h
@@ -98,15 +98,15 @@ const COLLPROVIDER_LIBC: c_char = b'c' as c_char;
 // ---------------------------------------------------------------------------
 type GucContext = c_int;
 type GucSource = c_int;
-const PGC_INTERNAL: GucContext = 3;
-const PGC_BACKEND: GucContext = 5;
-const PGC_SU_BACKEND: GucContext = 6;
+const PGC_INTERNAL: GucContext = 0;
+const PGC_BACKEND: GucContext = 4;
+const PGC_SU_BACKEND: GucContext = 3;
 const PGC_S_DYNAMIC_DEFAULT: GucSource = 1;
-const PGC_S_CLIENT: GucSource = 7;
+const PGC_S_CLIENT: GucSource = 9;
 const PGC_S_DATABASE_USER: GucSource = 8;
-const PGC_S_USER: GucSource = 9;
-const PGC_S_DATABASE: GucSource = 10;
-const PGC_S_GLOBAL: GucSource = 11;
+const PGC_S_USER: GucSource = 7;
+const PGC_S_DATABASE: GucSource = 6;
+const PGC_S_GLOBAL: GucSource = 5;
 
 // ---------------------------------------------------------------------------
 // Syscache SysScanDesc
@@ -141,67 +141,67 @@ unsafe fn criticalSharedRelcachesBuilt() -> bool {
 
 // TODO(pg-port): real RelationCacheInitialize lives in utils/cache/relcache.c
 unsafe fn RelationCacheInitialize() {
-    unimplemented!() // TODO(pg-port): real RelationCacheInitialize lives in utils/cache/relcache.c
+    crate::utils::cache::relcache::RelationCacheInitialize()
 }
 
 // TODO(pg-port): real RelationCacheInitializePhase2 lives in utils/cache/relcache.c
 unsafe fn RelationCacheInitializePhase2() {
-    unimplemented!() // TODO(pg-port): real RelationCacheInitializePhase2 lives in utils/cache/relcache.c
+    crate::utils::cache::relcache::RelationCacheInitializePhase2()
 }
 
 // TODO(pg-port): real RelationCacheInitializePhase3 lives in utils/cache/relcache.c
 unsafe fn RelationCacheInitializePhase3() {
-    unimplemented!() // TODO(pg-port): real RelationCacheInitializePhase3 lives in utils/cache/relcache.c
+    crate::utils::cache::relcache::RelationCacheInitializePhase3()
 }
 
 // TODO(pg-port): real InitCatalogCache lives in utils/cache/syscache.c
 unsafe fn InitCatalogCache() {
-    unimplemented!() // TODO(pg-port): real InitCatalogCache lives in utils/cache/syscache.c
+    crate::utils::cache::syscache::InitCatalogCache()
 }
 
 // TODO(pg-port): real InitPlanCache lives in utils/cache/plancache.c
 unsafe fn InitPlanCache() {
-    unimplemented!() // TODO(pg-port): real InitPlanCache lives in utils/cache/plancache.c
+    crate::utils::cache::plancache::InitPlanCache()
 }
 
 // TODO(pg-port): real InitProcessPhase2 lives in storage/lmgr/proc.c
 unsafe fn InitProcessPhase2() {
-    unimplemented!() // TODO(pg-port): real InitProcessPhase2 lives in storage/lmgr/proc.c
+    crate::storage::lmgr::proc::InitProcessPhase2()
 }
 
 // TODO(pg-port): real StartupXLOG lives in access/transam/xlog.c
 unsafe fn StartupXLOG() {
-    unimplemented!() // TODO(pg-port): real StartupXLOG lives in access/transam/xlog.c
+    crate::access::transam::xlog::StartupXLOG();
 }
 
 // TODO(pg-port): real CreateAuxProcessResourceOwner lives in postmaster/auxprocess.c
 unsafe fn CreateAuxProcessResourceOwner() {
-    unimplemented!() // TODO(pg-port): real CreateAuxProcessResourceOwner lives in postmaster/auxprocess.c
+    crate::utils::resowner::resowner::CreateAuxProcessResourceOwner();
 }
 
 // TODO(pg-port): real ReleaseAuxProcessResources lives in postmaster/auxprocess.c
 unsafe fn ReleaseAuxProcessResources(_is_commit: bool) {
-    unimplemented!() // TODO(pg-port): real ReleaseAuxProcessResources lives in postmaster/auxprocess.c
+    crate::utils::resowner::resowner::ReleaseAuxProcessResources(_is_commit);
 }
 
 // TODO(pg-port): real StartTransactionCommand lives in access/transam/xact.c
 unsafe fn StartTransactionCommand() {
-    unimplemented!() // TODO(pg-port): real StartTransactionCommand lives in access/transam/xact.c
+    crate::access::transam::xact::StartTransactionCommand()
 }
 
 // TODO(pg-port): real CommitTransactionCommand lives in access/transam/xact.c
 unsafe fn CommitTransactionCommand() {
-    unimplemented!() // TODO(pg-port): real CommitTransactionCommand lives in access/transam/xact.c
+    crate::access::transam::xact::CommitTransactionCommand()
 }
 
 // TODO(pg-port): real AbortOutOfAnyTransaction lives in access/transam/xact.c
 unsafe fn AbortOutOfAnyTransaction() {
-    unimplemented!() // TODO(pg-port): real AbortOutOfAnyTransaction lives in access/transam/xact.c
+    crate::access::transam::xact::AbortOutOfAnyTransaction()
 }
 
 // TODO(pg-port): real SetCurrentStatementStartTimestamp lives in access/transam/xact.c
 unsafe fn SetCurrentStatementStartTimestamp() {
-    unimplemented!() // TODO(pg-port): real SetCurrentStatementStartTimestamp lives in access/transam/xact.c
+    crate::access::transam::xact::SetCurrentStatementStartTimestamp()
 }
 
 // TODO(pg-port): real XactIsoLevel lives in access/transam/xact.c
@@ -210,12 +210,12 @@ const XACT_READ_COMMITTED: c_int = 1;
 
 // TODO(pg-port): real SharedInvalBackendInit lives in storage/ipc/sinval.c
 unsafe fn SharedInvalBackendInit(_sendOnly: bool) {
-    unimplemented!() // TODO(pg-port): real SharedInvalBackendInit lives in storage/ipc/sinval.c
+    crate::storage::ipc::sinvaladt::SharedInvalBackendInit(_sendOnly)
 }
 
 // TODO(pg-port): real ProcSignalInit lives in storage/ipc/procsignal.c
 unsafe fn ProcSignalInit(_cancel_key: *const uint8, _cancel_key_length: c_int) {
-    unimplemented!() // TODO(pg-port): real ProcSignalInit lives in storage/ipc/procsignal.c
+    crate::storage::ipc::procsignal::ProcSignalInit(_cancel_key, _cancel_key_length)
 }
 
 // TODO(pg-port): real CheckDeadLockAlert lives in storage/lmgr/deadlock.c
@@ -225,27 +225,27 @@ unsafe extern "C" fn CheckDeadLockAlert() {
 
 // TODO(pg-port): real InvalidateCatalogSnapshot lives in utils/snapmgr.c
 unsafe fn InvalidateCatalogSnapshot() {
-    unimplemented!() // TODO(pg-port): real InvalidateCatalogSnapshot lives in utils/snapmgr.c
+    crate::utils::time::snapmgr::InvalidateCatalogSnapshot()
 }
 
 // TODO(pg-port): real GetCatalogSnapshot lives in utils/snapmgr.c
 unsafe fn GetCatalogSnapshot(_relid: Oid) -> Snapshot {
-    unimplemented!() // TODO(pg-port): real GetCatalogSnapshot lives in utils/snapmgr.c
+    crate::utils::time::snapmgr::GetCatalogSnapshot(_relid) as _
 }
 
 // TODO(pg-port): real RegisterSnapshot lives in utils/snapmgr.c
 unsafe fn RegisterSnapshot(_snapshot: Snapshot) -> Snapshot {
-    unimplemented!() // TODO(pg-port): real RegisterSnapshot lives in utils/snapmgr.c
+    crate::utils::time::snapmgr::RegisterSnapshot(_snapshot as _) as _
 }
 
 // TODO(pg-port): real UnregisterSnapshot lives in utils/snapmgr.c
 unsafe fn UnregisterSnapshot(_snapshot: Snapshot) {
-    unimplemented!() // TODO(pg-port): real UnregisterSnapshot lives in utils/snapmgr.c
+    crate::utils::time::snapmgr::UnregisterSnapshot(_snapshot as _)
 }
 
 // TODO(pg-port): real LockReleaseAll lives in storage/lmgr/lock.c
 unsafe fn LockReleaseAll(_lockmethodid: u16, _allLocks: bool) {
-    unimplemented!() // TODO(pg-port): real LockReleaseAll lives in storage/lmgr/lock.c
+    crate::storage::lmgr::lock::LockReleaseAll(_lockmethodid as _, _allLocks)
 }
 
 // USER_LOCKMETHOD = 2 (storage/lmgr/lock.h)
@@ -256,22 +256,22 @@ static mut CurrentResourceOwner: *mut c_void = core::ptr::null_mut();
 
 // TODO(pg-port): real pgstat_beinit lives in utils/activity/pgstat.c
 unsafe fn pgstat_beinit() {
-    unimplemented!() // TODO(pg-port): real pgstat_beinit lives in utils/activity/pgstat.c
+    // best-effort backend stats; no-op for bring-up
 }
 
 // TODO(pg-port): real pgstat_bestart_initial lives in utils/activity/pgstat.c
 unsafe fn pgstat_bestart_initial() {
-    unimplemented!() // TODO(pg-port): real pgstat_bestart_initial lives in utils/activity/pgstat.c
+    // best-effort backend stats; no-op for bring-up
 }
 
 // TODO(pg-port): real pgstat_bestart_final lives in utils/activity/pgstat.c
 unsafe fn pgstat_bestart_final() {
-    unimplemented!() // TODO(pg-port): real pgstat_bestart_final lives in utils/activity/pgstat.c
+    // best-effort backend stats; no-op for bring-up
 }
 
 // TODO(pg-port): real pgstat_bestart_security lives in utils/activity/pgstat.c
 unsafe fn pgstat_bestart_security() {
-    unimplemented!() // TODO(pg-port): real pgstat_bestart_security lives in utils/activity/pgstat.c
+    // best-effort backend stats; no-op for bring-up
 }
 
 // TODO(pg-port): real pgstat_before_server_shutdown lives in utils/activity/pgstat.c
@@ -281,72 +281,69 @@ unsafe extern "C" fn pgstat_before_server_shutdown(_code: c_int, _arg: Datum) {
 
 // TODO(pg-port): real pgstat_initialize lives in utils/activity/pgstat.c
 unsafe fn pgstat_initialize() {
-    unimplemented!() // TODO(pg-port): real pgstat_initialize lives in utils/activity/pgstat.c
+    crate::utils::activity::pgstat::pgstat_initialize()
 }
 
 // TODO(pg-port): real pgaio_init_backend lives in storage/aio/aio_subsys.c
 unsafe fn pgaio_init_backend() {
-    unimplemented!() // TODO(pg-port): real pgaio_init_backend lives in storage/aio/aio_subsys.c
+    crate::storage::aio::aio_init::pgaio_init_backend()
 }
 
 // TODO(pg-port): real InitSync lives in storage/sync.c
 unsafe fn InitSync() {
-    unimplemented!() // TODO(pg-port): real InitSync lives in storage/sync.c
+    crate::storage::sync::sync::InitSync()
 }
 
 // TODO(pg-port): real smgrinit lives in storage/smgr/smgr.c
 unsafe fn smgrinit() {
-    unimplemented!() // TODO(pg-port): real smgrinit lives in storage/smgr/smgr.c
+    crate::storage::smgr::smgr::smgrinit()
 }
 
 // TODO(pg-port): real InitBufferManagerAccess lives in storage/buffer/bufmgr.c
 unsafe fn InitBufferManagerAccess() {
-    unimplemented!() // TODO(pg-port): real InitBufferManagerAccess lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::InitBufferManagerAccess()
 }
 
 // TODO(pg-port): real InitTemporaryFileAccess lives in storage/file/fd.c
 unsafe fn InitTemporaryFileAccess() {
-    unimplemented!() // TODO(pg-port): real InitTemporaryFileAccess lives in storage/file/fd.c
+    crate::storage::file::fd::InitTemporaryFileAccess()
 }
 
 // TODO(pg-port): real InitLockManagerAccess lives in storage/lmgr/lock.c
 unsafe fn InitLockManagerAccess() {
-    unimplemented!() // TODO(pg-port): real InitLockManagerAccess lives in storage/lmgr/lock.c
+    crate::storage::lmgr::lock::InitLockManagerAccess()
 }
 
-// TODO(pg-port): real ReplicationSlotInitialize lives in replication/slot.c
 unsafe fn ReplicationSlotInitialize() {
-    unimplemented!() // TODO(pg-port): real ReplicationSlotInitialize lives in replication/slot.c
+    crate::replication::slot::ReplicationSlotInitialize()
 }
 
 // TODO(pg-port): real DebugFileOpen lives in utils/misc/ps_status.c
-unsafe fn DebugFileOpen() {
-    unimplemented!() // TODO(pg-port): real DebugFileOpen lives in utils/misc/ps_status.c
-}
+unsafe fn DebugFileOpen() {}
 
 // TODO(pg-port): real InitFileAccess lives in storage/file/fd.c
 unsafe fn InitFileAccess() {
-    unimplemented!() // TODO(pg-port): real InitFileAccess lives in storage/file/fd.c
+    crate::storage::file::fd::InitFileAccess()
 }
 
 // TODO(pg-port): real SetLatch lives in storage/ipc/latch.c
 unsafe fn SetLatch(_latch: *mut c_void) {
-    unimplemented!() // TODO(pg-port): real SetLatch lives in storage/ipc/latch.c
+    crate::storage::ipc::latch::SetLatch(_latch as _);
 }
 
 // TODO(pg-port): real initialize_acl lives in utils/acl.c
 unsafe fn initialize_acl() {
-    unimplemented!() // TODO(pg-port): real initialize_acl lives in utils/acl.c
+    crate::utils::adt::acl::initialize_acl();
 }
 
 // TODO(pg-port): real object_aclcheck lives in utils/acl.c
 unsafe fn object_aclcheck(
-    _classid: Oid,
-    _objid: Oid,
-    _roleid: Oid,
-    _mode: AclMode,
+    classid: Oid,
+    objid: Oid,
+    roleid: Oid,
+    mode: AclMode,
 ) -> AclResult {
-    unimplemented!() // TODO(pg-port): real object_aclcheck lives in utils/acl.c
+    crate::catalog::aclchk::object_aclcheck(classid as _, objid as _, roleid as _, mode as _) as _
 }
 
 // TODO(pg-port): real AclMode/AclResult live in utils/acl.h
@@ -357,49 +354,49 @@ const ACLCHECK_OK: AclResult = 0;
 
 // TODO(pg-port): real CountDBConnections lives in storage/lmgr/procarray.c
 unsafe fn CountDBConnections(_dbid: Oid) -> c_int {
-    unimplemented!() // TODO(pg-port): real CountDBConnections lives in storage/lmgr/procarray.c
+    crate::storage::ipc::procarray::CountDBConnections(_dbid as _) as _
 }
 
 // TODO(pg-port): real HaveNFreeProcs lives in storage/lmgr/procarray.c
 unsafe fn HaveNFreeProcs(_n: c_int, _nfree: *mut c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real HaveNFreeProcs lives in storage/lmgr/procarray.c
+    crate::storage::lmgr::proc::HaveNFreeProcs(_n as _, _nfree as _)
 }
 
 // TODO(pg-port): real has_privs_of_role lives in utils/acl.c
 unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool {
-    unimplemented!() // TODO(pg-port): real has_privs_of_role lives in utils/acl.c
+    crate::utils::adt::acl::has_privs_of_role(_member as _, _role as _)
 }
 
 // TODO(pg-port): real superuser() lives in utils/misc/superuser.c
 unsafe fn superuser() -> bool {
-    unimplemented!() // TODO(pg-port): real superuser() lives in utils/misc/superuser.c
+    crate::miscadmin::superuser()
 }
 
 // TODO(pg-port): real GetDatabasePath lives in storage/file/fd.c (or catalog/storage.c)
 unsafe fn GetDatabasePath(_dbid: Oid, _tablespace: Oid) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real GetDatabasePath lives in catalog/storage.c
+    crate::common::relpath::GetDatabasePath(_dbid as _, _tablespace as _) as _
 }
 
 use crate::mb::mbutils::SetDatabaseEncoding;
 
 // TODO(pg-port): real GetDatabaseEncodingName lives in mb/pg_wchar.c
 unsafe fn GetDatabaseEncodingName() -> *const c_char {
-    unimplemented!() // TODO(pg-port): real GetDatabaseEncodingName lives in mb/pg_wchar.c
+    crate::mb::mbutils::GetDatabaseEncodingName() as _
 }
 
 // TODO(pg-port): real SetConfigOption lives in utils/misc/guc.c
 unsafe fn SetConfigOption(
-    _name: *const c_char,
-    _value: *const c_char,
-    _context: GucContext,
-    _source: GucSource,
+    name: *const c_char,
+    value: *const c_char,
+    context: GucContext,
+    source: GucSource,
 ) {
-    unimplemented!() // TODO(pg-port): real SetConfigOption lives in utils/misc/guc.c
+    crate::utils::misc::guc::SetConfigOption(name, value, core::mem::transmute(context), core::mem::transmute(source))
 }
 
 // TODO(pg-port): real pg_perm_setlocale lives in port/pg_locale.c
 unsafe fn pg_perm_setlocale(_category: c_int, _locale: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real pg_perm_setlocale lives in port/pg_locale.c
+    crate::utils::adt::pg_locale::pg_perm_setlocale(_category as _, _locale as _) as _
 }
 
 // TODO(pg-port): real database_ctype_is_c lives in utils/adt/pg_locale.c
@@ -407,20 +404,20 @@ static mut database_ctype_is_c: bool = false;
 
 // TODO(pg-port): real init_database_collation lives in utils/adt/pg_locale.c
 unsafe fn init_database_collation() {
-    unimplemented!() // TODO(pg-port): real init_database_collation lives in utils/adt/pg_locale.c
+    crate::utils::adt::pg_locale::init_database_collation();
 }
 
 // TODO(pg-port): real get_collation_actual_version lives in utils/adt/pg_locale.c
 unsafe fn get_collation_actual_version(
-    _provider: c_char,
-    _locale: *const c_char,
+    provider: c_char,
+    locale: *const c_char,
 ) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real get_collation_actual_version lives in utils/adt/pg_locale.c
+    crate::utils::adt::pg_locale::get_collation_actual_version(provider, locale)
 }
 
 // TODO(pg-port): real TextDatumGetCString lives in utils/adt/varlena.c
-unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real TextDatumGetCString lives in utils/adt/varlena.c
+unsafe fn TextDatumGetCString(d: Datum) -> *mut c_char {
+    crate::utils::adt::varlena::TextDatumGetCString(d)
 }
 
 // TODO(pg-port): real quote_identifier lives in utils/adt/ruleutils.c
@@ -430,28 +427,28 @@ unsafe fn quote_identifier(_ident: *const c_char) -> *const c_char {
 
 // TODO(pg-port): real InitializeSearchPath lives in catalog/namespace.c
 unsafe fn InitializeSearchPath() {
-    unimplemented!() // TODO(pg-port): real InitializeSearchPath lives in catalog/namespace.c
+    crate::catalog::namespace::InitializeSearchPath();
 }
 
 // TODO(pg-port): real InitializeClientEncoding lives in mb/pg_wchar.c
 unsafe fn InitializeClientEncoding() {
-    unimplemented!() // TODO(pg-port): real InitializeClientEncoding lives in mb/pg_wchar.c
+    crate::mb::mbutils::InitializeClientEncoding();
 }
 
 // TODO(pg-port): real process_session_preload_libraries lives in utils/misc/miscinit.c
 unsafe fn process_session_preload_libraries() {
-    unimplemented!() // TODO(pg-port): real process_session_preload_libraries lives in utils/misc/miscinit.c
+    crate::miscadmin::process_session_preload_libraries();
 }
 
 // TODO(pg-port): real ApplySetting lives in catalog/pg_db_role_setting.c
 unsafe fn ApplySetting(
-    _snapshot: Snapshot,
-    _databaseid: Oid,
-    _roleid: Oid,
-    _relsetting: Relation,
-    _source: GucSource,
+    snapshot: Snapshot,
+    databaseid: Oid,
+    roleid: Oid,
+    relsetting: Relation,
+    source: GucSource,
 ) {
-    unimplemented!() // TODO(pg-port): real ApplySetting lives in catalog/pg_db_role_setting.c
+    crate::catalog::pg_db_role_setting::ApplySetting(snapshot as _, databaseid, roleid, relsetting as _, core::mem::transmute(source))
 }
 
 // TODO(pg-port): real process_postgres_switches lives in tcop/postgres.c
@@ -461,33 +458,34 @@ unsafe fn process_postgres_switches(
     _ctx: GucContext,
     _dbname: *mut *const c_char,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): real process_postgres_switches lives in tcop/postgres.c
+    crate::tcop::postgres::process_postgres_switches(_argc as _, _argv as _, _ctx as _, _dbname as _);
+    0
 }
 
 // TODO(pg-port): real set_ps_display lives in utils/misc/ps_status.c
 unsafe fn set_ps_display(_activity: *const c_char) {
-    unimplemented!() // TODO(pg-port): real set_ps_display lives in utils/misc/ps_status.c
+    crate::utils::misc::ps_status::set_ps_display(_activity as _);
 }
 
 // TODO(pg-port): real ClientAuthentication lives in libpq/auth.c
 unsafe fn ClientAuthentication(_port: *mut c_void) {
-    unimplemented!() // TODO(pg-port): real ClientAuthentication lives in libpq/auth.c
+    crate::libpq::auth::ClientAuthentication(_port as _);
 }
 
 // TODO(pg-port): real GetCurrentTimestamp lives in utils/adt/timestamp.c
 use crate::utils::init::globals::TimestampTz;
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!() // TODO(pg-port): real GetCurrentTimestamp lives in utils/adt/timestamp.c
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 
 // TODO(pg-port): real database_is_invalid_form lives in commands/dbcommands.c
 unsafe fn database_is_invalid_form(_form: Form_pg_database) -> bool {
-    unimplemented!() // TODO(pg-port): real database_is_invalid_form lives in commands/dbcommands.c
+    false // TODO(pg-port): commands::dbcommands not declared; normal db is valid
 }
 
 // TODO(pg-port): real namestrcmp lives in utils/adt/name.c (stub exists in utils/builtins.rs)
 unsafe fn namestrcmp(_name: *const NameData, _str: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): real namestrcmp lives in utils/adt/name.c
+    crate::utils::builtins::namestrcmp(_name as _, _str as _) as _
 }
 
 // TODO(pg-port): real am_walsender / am_db_walsender live in replication/walsender.c
@@ -517,8 +515,11 @@ static mut conn_timing: ConnTimingData = ConnTimingData {
     auth_end: 0,
 };
 
-// TODO(pg-port): real ClientAuthInProgress lives in libpq/auth.c
-static mut ClientAuthInProgress: bool = false;
+// ClientAuthInProgress is the process-global flag (defined in backend_link_shims);
+// declare it extern so the reset here clears the same symbol elog reads.
+extern "C" {
+    static mut ClientAuthInProgress: bool;
+}
 
 // TODO(pg-port): real MyClientConnectionInfo / auth_method / authn_id live in
 //   libpq/libpq-be.h; using opaque pointer here
@@ -639,7 +640,7 @@ use crate::access::table::tableam::table_beginscan_catalog;
 
 // TODO(pg-port): real table_endscan lives in access/tableam.h (inline via scan_end vtable)
 unsafe fn table_endscan(_scan: TableScanDesc) {
-    unimplemented!() // TODO(pg-port): real table_endscan lives in access/tableam.h
+    crate::access::table::tableam::table_endscan(_scan as _)
 }
 
 // pg_nextpower2_32 for InitializeFastPathLocks
@@ -649,8 +650,8 @@ use crate::port::pg_bitutils::pg_nextpower2_32;
 // Max/Min come from crate::c via the import above
 
 // LC_COLLATE / LC_CTYPE (libc constants)
-const LC_COLLATE: c_int = 1;
-const LC_CTYPE: c_int = 0;
+const LC_COLLATE: c_int = libc::LC_COLLATE;
+const LC_CTYPE: c_int = libc::LC_CTYPE;
 
 /*** InitPostgres support ***/
 

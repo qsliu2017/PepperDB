@@ -283,7 +283,7 @@ pub unsafe fn ResetPromoteSignaled() {
 /*
  * Set a flag indicating that it's time to log a progress report.
  */
-pub unsafe fn startup_progress_timeout_handler() {
+pub unsafe extern "C" fn startup_progress_timeout_handler() {
     startup_progress_timer_expired = true as sig_atomic_t;
 }
 
@@ -398,91 +398,75 @@ static mut wal_receiver_create_temp_slot: bool = false;
 const PGC_SIGHUP: c_int = 0;
 
 // access/xlog.h - wake the recovery process / request walreceiver restart.
-unsafe fn WakeupRecovery() {
-    unimplemented!() // TODO: dep not ported (access/transam/xlog.c)
-}
-unsafe fn StartupRequestWalReceiverRestart() {
-    unimplemented!() // TODO: dep not ported (access/transam/xlog.c)
-}
+unsafe fn WakeupRecovery() { crate::access::transam::xlogrecovery::WakeupRecovery() }
+unsafe fn StartupRequestWalReceiverRestart() { crate::access::transam::xlogrecovery::StartupRequestWalReceiverRestart() }
 unsafe fn StartupXLOG() {
-    unimplemented!() // TODO: dep not ported (access/transam/xlog.c)
+    crate::access::transam::xlog::StartupXLOG()
 }
 
 // utils/guc.h - re-read the config file.
-unsafe fn ProcessConfigFile(_context: c_int) {
-    unimplemented!() // TODO: dep not ported (utils/misc/guc.c)
-}
+unsafe fn ProcessConfigFile(context: c_int) { unimplemented!() }
 
 // storage/ipc.h - process-exit machinery.
 unsafe fn proc_exit(_code: c_int) -> ! {
-    unimplemented!() // TODO: dep not ported (storage/ipc/ipc.c)
+    crate::storage::ipc::ipc::proc_exit(_code)
 }
 unsafe fn on_shmem_exit(_function: Option<unsafe extern "C" fn(c_int, Datum)>, _arg: Datum) {
-    unimplemented!() // TODO: dep not ported (storage/ipc/ipc.c)
+    crate::storage::ipc::ipc::on_shmem_exit(core::mem::transmute(_function), _arg)
 }
 
 // storage/pmsignal.h - is the postmaster still alive?
 unsafe fn PostmasterIsAlive() -> bool {
-    unimplemented!() // TODO: dep not ported (storage/ipc/pmsignal.c)
+    crate::storage::ipc::pmsignal::PostmasterIsAliveInternal()
 }
 
 // storage/procsignal.h - SIGUSR1 handler and barrier processing.
-unsafe extern "C" fn procsignal_sigusr1_handler(_postgres_signal_arg: c_int) {
-    unimplemented!() // TODO: dep not ported (storage/ipc/procsignal.c)
-}
+unsafe extern "C" fn procsignal_sigusr1_handler(postgres_signal_arg: c_int) { crate::storage::ipc::procsignal::procsignal_sigusr1_handler(postgres_signal_arg as _) }
 static mut ProcSignalBarrierPending: bool = false;
 unsafe fn ProcessProcSignalBarrier() {
-    unimplemented!() // TODO: dep not ported (storage/ipc/procsignal.c)
+    crate::storage::ipc::procsignal::ProcessProcSignalBarrier()
 }
 
 // miscadmin.h / utils/mmgr - log-memory-contexts request handling.
 static mut LogMemoryContextPending: bool = false;
 unsafe fn ProcessLogMemoryContextInterrupt() {
-    unimplemented!() // TODO: dep not ported (utils/mmgr/mcxt.c)
+    crate::utils::mmgr::mcxt::ProcessLogMemoryContextInterrupt()
 }
 
 // access/xlogutils.h - shutdown the recovery transaction environment.
 unsafe fn ShutdownRecoveryTransactionEnvironment() {
-    unimplemented!() // TODO: dep not ported (storage/ipc/standby.c)
+    // exit-time recovery-txn cleanup; storage/ipc/standby.rs is unwired -> no-op for bring-up.
 }
 
 // utils/timeout.h - timeout registration / control.
 unsafe fn InitializeTimeouts() {
-    unimplemented!() // TODO: dep not ported (utils/misc/timeout.c)
+    crate::utils::misc::timeout::InitializeTimeouts()
 }
 unsafe fn RegisterTimeout(_id: TimeoutId, _handler: timeout_handler_proc) {
-    unimplemented!() // TODO: dep not ported (utils/misc/timeout.c)
+    crate::utils::misc::timeout::RegisterTimeout(core::mem::transmute(_id), core::mem::transmute(_handler));
 }
 unsafe fn disable_timeout(_id: TimeoutId, _keep_indicator: bool) {
-    unimplemented!() // TODO: dep not ported (utils/misc/timeout.c)
+    crate::utils::misc::timeout::disable_timeout(core::mem::transmute(_id), _keep_indicator)
 }
 unsafe fn enable_timeout_every(_id: TimeoutId, _fin_time: TimestampTz, _delay_ms: int64) {
-    unimplemented!() // TODO: dep not ported (utils/misc/timeout.c)
+    crate::utils::misc::timeout::enable_timeout_every(core::mem::transmute(_id), _fin_time as _, _delay_ms as c_int)
 }
 
 // storage/standby.h - standby timeout handlers.
-unsafe extern "C" fn StandbyDeadLockHandler() {
-    unimplemented!() // TODO: dep not ported (storage/ipc/standby.c)
-}
-unsafe extern "C" fn StandbyTimeoutHandler() {
-    unimplemented!() // TODO: dep not ported (storage/ipc/standby.c)
-}
-unsafe extern "C" fn StandbyLockTimeoutHandler() {
-    unimplemented!() // TODO: dep not ported (storage/ipc/standby.c)
-}
+unsafe extern "C" fn StandbyDeadLockHandler() { unimplemented!() }
+unsafe extern "C" fn StandbyTimeoutHandler() { unimplemented!() }
+unsafe extern "C" fn StandbyLockTimeoutHandler() { unimplemented!() }
 
 // utils/timestamp.h - timestamp helpers.
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!() // TODO: dep not ported (utils/adt/timestamp.c)
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 unsafe fn TimestampDifference(
-    _start: TimestampTz,
-    _stop: TimestampTz,
-    _secs: *mut c_long,
-    _microsecs: *mut c_int,
-) {
-    unimplemented!() // TODO: dep not ported (utils/adt/timestamp.c)
-}
+    start: TimestampTz,
+    stop: TimestampTz,
+    secs: *mut c_long,
+    microsecs: *mut c_int,
+) { crate::utils::adt::timestamp::TimestampDifference(start as _, stop as _, secs as _, microsecs as _) }
 #[inline]
 unsafe fn TimestampTzPlusMilliseconds(tz: TimestampTz, ms: int64) -> TimestampTz {
     // From timestamp.h macro: (tz) + ((ms) * (int64) 1000)

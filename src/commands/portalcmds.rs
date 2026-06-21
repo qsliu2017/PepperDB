@@ -50,41 +50,23 @@ unsafe fn linitial_node_Query(_l: *mut List) -> *mut Query {
     unimplemented!() // TODO: nodes/pg_list.h
 }
 
-unsafe fn IsQueryIdEnabled() -> bool {
-    unimplemented!() // TODO: nodes/queryjumble.h
-}
+unsafe fn IsQueryIdEnabled() -> bool { crate::nodes::queryjumble::IsQueryIdEnabled() }
 unsafe fn JumbleQuery(_query: *mut Query) -> *mut JumbleState {
     unimplemented!() // TODO: nodes/queryjumble.c
 }
-unsafe fn RequireTransactionBlock(_isTopLevel: bool, _stmtType: *const c_char) {
-    unimplemented!() // TODO: access/xact.c
-}
-unsafe fn InSecurityRestrictedOperation() -> bool {
-    unimplemented!() // TODO: utils/misc/guc.c
-}
-unsafe fn QueryRewrite(_query: *mut Query) -> *mut List {
-    unimplemented!() // TODO: rewrite/rewriteHandler.c
-}
-unsafe fn list_length(_l: *mut List) -> c_int {
-    unimplemented!() // TODO: nodes/list.c
-}
+unsafe fn RequireTransactionBlock(_isTopLevel: bool, _stmtType: *const c_char) { crate::access::transam::xact::RequireTransactionBlock(_isTopLevel, _stmtType as _) }
+unsafe fn InSecurityRestrictedOperation() -> bool { crate::miscadmin::InSecurityRestrictedOperation() }
+unsafe fn QueryRewrite(_query: *mut Query) -> *mut List { crate::rewrite::rewriteHandler::QueryRewrite(_query as _) as _ }
+unsafe fn list_length(_l: *mut List) -> c_int { crate::nodes::pg_list::list_length(_l as _) }
 unsafe fn pg_plan_query(
     _query: *mut Query,
     _query_string: *const c_char,
     _cursorOptions: c_int,
     _boundParams: ParamListInfo,
-) -> *mut PlannedStmt {
-    unimplemented!() // TODO: tcop/postgres.c
-}
-unsafe fn CreatePortal(_name: *const c_char, _allowDup: bool, _dupSilent: bool) -> Portal {
-    unimplemented!() // TODO: utils/mmgr/portalmem.c
-}
-unsafe fn copyObjectImpl(_from: *const c_void) -> *mut c_void {
-    unimplemented!() // TODO: nodes/copyfuncs.c
-}
-unsafe fn pstrdup(_s: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO: utils/mmgr/mcxt.c
-}
+) -> *mut PlannedStmt { crate::tcop::postgres::pg_plan_query(_query as _, _query_string as _, _cursorOptions, _boundParams) as _ }
+unsafe fn CreatePortal(_name: *const c_char, _allowDup: bool, _dupSilent: bool) -> Portal { unimplemented!("CreatePortal") }
+unsafe fn copyObjectImpl(_from: *const c_void) -> *mut c_void { unimplemented!("copyObjectImpl") }
+unsafe fn pstrdup(_s: *const c_char) -> *mut c_char { crate::utils::cache::lsyscache::pstrdup(_s as _) as _ }
 unsafe fn PortalDefineQuery(
     _portal: Portal,
     _prepStmtName: *const c_char,
@@ -92,89 +74,43 @@ unsafe fn PortalDefineQuery(
     _commandTag: c_int,
     _stmts: *mut List,
     _cplan: *mut c_void,
-) {
-    unimplemented!() // TODO: utils/mmgr/portalmem.c
-}
-unsafe fn list_make1(_datum: *mut c_void) -> *mut List {
-    unimplemented!() // TODO: nodes/list.c
-}
-unsafe fn copyParamList(_from: ParamListInfo) -> ParamListInfo {
-    unimplemented!() // TODO: nodes/params.c
-}
-unsafe fn ExecSupportsBackwardScan(_node: *mut c_void) -> bool {
-    unimplemented!() // TODO: executor/execAmi.c
-}
+) { unimplemented!("PortalDefineQuery") }
+unsafe fn list_make1(_datum: *mut c_void) -> *mut List { crate::utils::adt::xml::list_make1(_datum as _) as _ }
+unsafe fn copyParamList(_from: ParamListInfo) -> ParamListInfo { unimplemented!("copyParamList") }
+unsafe fn ExecSupportsBackwardScan(_node: *mut c_void) -> bool { crate::executor::execAmi::ExecSupportsBackwardScan(_node as _) }
 unsafe fn PortalStart(
     _portal: Portal,
     _params: ParamListInfo,
     _eflags: c_int,
     _snapshot: *mut c_void,
-) {
-    unimplemented!() // TODO: tcop/pquery.c
-}
-unsafe fn GetActiveSnapshot() -> *mut c_void {
-    unimplemented!() // TODO: utils/time/snapmgr.c
-}
+) { unimplemented!("PortalStart") }
+unsafe fn GetActiveSnapshot() -> *mut c_void { crate::utils::adt::acl::GetActiveSnapshot() as _ }
 
-unsafe fn GetPortalByName(_name: *const c_char) -> Portal {
-    unimplemented!() // TODO: utils/mmgr/portalmem.c
-}
-unsafe fn PortalIsValid(_p: Portal) -> bool {
-    unimplemented!() // TODO: utils/portal.h
-}
+unsafe fn GetPortalByName(_name: *const c_char) -> Portal { unimplemented!("GetPortalByName") }
+unsafe fn PortalIsValid(_p: Portal) -> bool { unimplemented!("PortalIsValid") }
 unsafe fn PortalRunFetch(
     _portal: Portal,
     _fdirection: c_int,
     _count: c_long,
     _dest: *mut DestReceiver,
-) -> u64 {
-    unimplemented!() // TODO: tcop/pquery.c
-}
-unsafe fn SetQueryCompletion(_qc: *mut QueryCompletion, _commandTag: c_int, _nprocessed: u64) {
-    unimplemented!() // TODO: tcop/cmdtag.h
-}
+) -> u64 { unimplemented!("PortalRunFetch") }
+unsafe fn SetQueryCompletion(_qc: *mut QueryCompletion, _commandTag: c_int, _nprocessed: u64) { unimplemented!("SetQueryCompletion") }
 
-unsafe fn PortalHashTableDeleteAll() {
-    unimplemented!() // TODO: utils/mmgr/portalmem.c
-}
-unsafe fn PortalDrop(_portal: Portal, _isError: bool) {
-    unimplemented!() // TODO: utils/mmgr/portalmem.c
-}
+unsafe fn PortalHashTableDeleteAll() { crate::utils::mmgr::portalmem::PortalHashTableDeleteAll() }
+unsafe fn PortalDrop(_portal: Portal, _isError: bool) { unimplemented!("PortalDrop") }
 
-unsafe fn ExecutorFinish(_queryDesc: *mut QueryDesc) {
-    unimplemented!() // TODO: executor/execMain.c
-}
-unsafe fn ExecutorEnd(_queryDesc: *mut QueryDesc) {
-    unimplemented!() // TODO: executor/execMain.c
-}
-unsafe fn FreeQueryDesc(_queryDesc: *mut QueryDesc) {
-    unimplemented!() // TODO: tcop/pquery.c
-}
+unsafe fn ExecutorFinish(_queryDesc: *mut QueryDesc) { crate::executor::execMain::ExecutorFinish(_queryDesc as _) }
+unsafe fn ExecutorEnd(_queryDesc: *mut QueryDesc) { crate::executor::execMain::ExecutorEnd(_queryDesc as _) }
+unsafe fn FreeQueryDesc(_queryDesc: *mut QueryDesc) { crate::tcop::pquery::FreeQueryDesc(_queryDesc as _) }
 
-unsafe fn CreateTupleDescCopy(_tupdesc: *mut c_void) -> *mut c_void {
-    unimplemented!() // TODO: access/common/tupdesc.c
-}
-unsafe fn MarkPortalActive(_portal: Portal) {
-    unimplemented!() // TODO: utils/mmgr/portalmem.c
-}
-unsafe fn MarkPortalFailed(_portal: Portal) {
-    unimplemented!() // TODO: utils/mmgr/portalmem.c
-}
-unsafe fn PushActiveSnapshot(_snap: *mut c_void) {
-    unimplemented!() // TODO: utils/time/snapmgr.c
-}
-unsafe fn PopActiveSnapshot() {
-    unimplemented!() // TODO: utils/time/snapmgr.c
-}
-unsafe fn ExecutorRewind(_queryDesc: *mut QueryDesc) {
-    unimplemented!() // TODO: executor/execMain.c
-}
-unsafe fn ExecutorRun(_queryDesc: *mut QueryDesc, _direction: ScanDirection, _count: u64) {
-    unimplemented!() // TODO: executor/execMain.c
-}
-unsafe fn CreateDestReceiver(_dest: c_int) -> *mut DestReceiver {
-    unimplemented!() // TODO: tcop/dest.c
-}
+unsafe fn CreateTupleDescCopy(_tupdesc: *mut c_void) -> *mut c_void { crate::access::common::tupdesc::CreateTupleDescCopy(_tupdesc as _) as _ }
+unsafe fn MarkPortalActive(_portal: Portal) { unimplemented!("MarkPortalActive") }
+unsafe fn MarkPortalFailed(_portal: Portal) { unimplemented!("MarkPortalFailed") }
+unsafe fn PushActiveSnapshot(_snap: *mut c_void) { crate::utils::time::snapmgr::PushActiveSnapshot(_snap as _) }
+unsafe fn PopActiveSnapshot() { crate::utils::time::snapmgr::PopActiveSnapshot() }
+unsafe fn ExecutorRewind(_queryDesc: *mut QueryDesc) { crate::executor::execMain::ExecutorRewind(_queryDesc as _) }
+unsafe fn ExecutorRun(_queryDesc: *mut QueryDesc, _direction: ScanDirection, _count: u64) { crate::executor::execMain::ExecutorRun(_queryDesc as _, _direction, _count) }
+unsafe fn CreateDestReceiver(_dest: c_int) -> *mut DestReceiver { unimplemented!("CreateDestReceiver") }
 unsafe fn SetTuplestoreDestReceiverParams(
     _self_: *mut DestReceiver,
     _tStore: *mut c_void,
@@ -182,25 +118,17 @@ unsafe fn SetTuplestoreDestReceiverParams(
     _detoast: bool,
     _target_tupdesc: *mut c_void,
     _map: *const c_char,
-) {
-    unimplemented!() // TODO: executor/tstoreReceiver.c
-}
-unsafe fn tuplestore_skiptuples(_state: *mut c_void, _ntuples: i64, _forward: bool) -> bool {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
-}
-unsafe fn tuplestore_rescan(_state: *mut c_void) {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
-}
-unsafe fn MemoryContextDeleteChildren(_context: MemoryContext) {
-    unimplemented!() // TODO: utils/mmgr/mcxt.c
-}
+) { crate::executor::tstoreReceiver::SetTuplestoreDestReceiverParams(_self_ as _, _tStore as _, _tContext, _detoast, _target_tupdesc as _, _map as _) }
+unsafe fn tuplestore_skiptuples(_state: *mut c_void, _ntuples: i64, _forward: bool) -> bool { unimplemented!("tuplestore_skiptuples") }
+unsafe fn tuplestore_rescan(_state: *mut c_void) { unimplemented!("tuplestore_rescan") }
+unsafe fn MemoryContextDeleteChildren(_context: MemoryContext) { crate::utils::mmgr::mcxt::MemoryContextDeleteChildren(_context) }
 
 // Globals (declared elsewhere in PostgreSQL).
 static mut None_Receiver: *mut DestReceiver = std::ptr::null_mut();
 static mut post_parse_analyze_hook: Option<unsafe fn(*mut ParseState, *mut Query, *mut JumbleState)> =
     None;
 static mut ActivePortal: Portal = std::ptr::null_mut();
-static mut CurrentResourceOwner: ResourceOwner = std::ptr::null_mut();
+use crate::utils::resowner::resowner::CurrentResourceOwner;
 static mut PortalContext: MemoryContext = std::ptr::null_mut();
 
 // Constants.
@@ -496,16 +424,16 @@ pub unsafe fn PortalCleanup(portal: Portal) {
             let saveResourceOwner: ResourceOwner;
 
             // We must make the portal's resource owner current
-            saveResourceOwner = CurrentResourceOwner;
+            saveResourceOwner = CurrentResourceOwner as _;
             if !portal_resowner(portal).is_null() {
-                CurrentResourceOwner = portal_resowner(portal);
+                CurrentResourceOwner = portal_resowner(portal) as _;
             }
 
             ExecutorFinish(queryDesc);
             ExecutorEnd(queryDesc);
             FreeQueryDesc(queryDesc);
 
-            CurrentResourceOwner = saveResourceOwner;
+            CurrentResourceOwner = saveResourceOwner as _;
         }
     }
 }
@@ -548,7 +476,7 @@ pub unsafe fn PersistHoldablePortal(portal: Portal) {
 
     // Set up global portal context pointers.
     saveActivePortal = ActivePortal;
-    saveResourceOwner = CurrentResourceOwner;
+    saveResourceOwner = CurrentResourceOwner as _;
     savePortalContext = PortalContext;
 
     // PG_TRY()
@@ -557,7 +485,7 @@ pub unsafe fn PersistHoldablePortal(portal: Portal) {
 
         ActivePortal = portal;
         if !portal_resowner(portal).is_null() {
-            CurrentResourceOwner = portal_resowner(portal);
+            CurrentResourceOwner = portal_resowner(portal) as _;
         }
         PortalContext = portal_portalContext(portal) as MemoryContext;
 
@@ -652,7 +580,7 @@ pub unsafe fn PersistHoldablePortal(portal: Portal) {
 
         // Restore global vars and propagate error
         ActivePortal = saveActivePortal;
-        CurrentResourceOwner = saveResourceOwner;
+        CurrentResourceOwner = saveResourceOwner as _;
         PortalContext = savePortalContext;
 
         // PG_RE_THROW();
@@ -666,7 +594,7 @@ pub unsafe fn PersistHoldablePortal(portal: Portal) {
     set_portal_status(portal, PORTAL_READY);
 
     ActivePortal = saveActivePortal;
-    CurrentResourceOwner = saveResourceOwner;
+    CurrentResourceOwner = saveResourceOwner as _;
     PortalContext = savePortalContext;
 
     PopActiveSnapshot();
@@ -712,57 +640,23 @@ unsafe fn plan_planTree(_plan: *mut PlannedStmt) -> *mut c_void {
     unimplemented!() // TODO: nodes/plannodes.h PlannedStmt.planTree
 }
 
-unsafe fn portal_portalContext(_portal: Portal) -> *mut c_void {
-    unimplemented!() // TODO: utils/portal.h PortalData.portalContext
-}
-unsafe fn portal_cursorOptions(_portal: Portal) -> c_int {
-    unimplemented!() // TODO: utils/portal.h PortalData.cursorOptions
-}
-unsafe fn set_portal_cursorOptions(_portal: Portal, _v: c_int) {
-    unimplemented!() // TODO: utils/portal.h PortalData.cursorOptions
-}
-unsafe fn portal_strategy(_portal: Portal) -> c_int {
-    unimplemented!() // TODO: utils/portal.h PortalData.strategy
-}
-unsafe fn portal_queryDesc(_portal: Portal) -> *mut QueryDesc {
-    unimplemented!() // TODO: utils/portal.h PortalData.queryDesc
-}
-unsafe fn set_portal_queryDesc(_portal: Portal, _v: *mut QueryDesc) {
-    unimplemented!() // TODO: utils/portal.h PortalData.queryDesc
-}
-unsafe fn portal_status(_portal: Portal) -> c_int {
-    unimplemented!() // TODO: utils/portal.h PortalData.status
-}
-unsafe fn set_portal_status(_portal: Portal, _v: c_int) {
-    unimplemented!() // TODO: utils/portal.h PortalData.status
-}
-unsafe fn portal_resowner(_portal: Portal) -> ResourceOwner {
-    unimplemented!() // TODO: utils/portal.h PortalData.resowner
-}
-unsafe fn portal_createSubid(_portal: Portal) -> u32 {
-    unimplemented!() // TODO: utils/portal.h PortalData.createSubid
-}
-unsafe fn portal_holdContext(_portal: Portal) -> *mut c_void {
-    unimplemented!() // TODO: utils/portal.h PortalData.holdContext
-}
-unsafe fn portal_holdStore(_portal: Portal) -> *mut c_void {
-    unimplemented!() // TODO: utils/portal.h PortalData.holdStore
-}
-unsafe fn portal_holdSnapshot(_portal: Portal) -> *mut c_void {
-    unimplemented!() // TODO: utils/portal.h PortalData.holdSnapshot
-}
-unsafe fn portal_tupDesc(_portal: Portal) -> *mut c_void {
-    unimplemented!() // TODO: utils/portal.h PortalData.tupDesc
-}
-unsafe fn set_portal_tupDesc(_portal: Portal, _v: *mut c_void) {
-    unimplemented!() // TODO: utils/portal.h PortalData.tupDesc
-}
-unsafe fn portal_atEnd(_portal: Portal) -> bool {
-    unimplemented!() // TODO: utils/portal.h PortalData.atEnd
-}
-unsafe fn portal_portalPos(_portal: Portal) -> u64 {
-    unimplemented!() // TODO: utils/portal.h PortalData.portalPos
-}
+unsafe fn portal_portalContext(_portal: Portal) -> *mut c_void { (*(_portal as *mut crate::utils::portal::PortalData)).portalContext as _ }
+unsafe fn portal_cursorOptions(_portal: Portal) -> c_int { (*(_portal as *mut crate::utils::portal::PortalData)).cursorOptions as _ }
+unsafe fn set_portal_cursorOptions(_portal: Portal, _v: c_int) { (*(_portal as *mut crate::utils::portal::PortalData)).cursorOptions = _v as _; }
+unsafe fn portal_strategy(_portal: Portal) -> c_int { (*(_portal as *mut crate::utils::portal::PortalData)).strategy as _ }
+unsafe fn portal_queryDesc(_portal: Portal) -> *mut QueryDesc { (*(_portal as *mut crate::utils::portal::PortalData)).queryDesc as _ }
+unsafe fn set_portal_queryDesc(_portal: Portal, _v: *mut QueryDesc) { (*(_portal as *mut crate::utils::portal::PortalData)).queryDesc = _v as _; }
+unsafe fn portal_status(_portal: Portal) -> c_int { (*(_portal as *mut crate::utils::portal::PortalData)).status as _ }
+unsafe fn set_portal_status(_portal: Portal, _v: c_int) { (*(_portal as *mut crate::utils::portal::PortalData)).status = _v as _; }
+unsafe fn portal_resowner(_portal: Portal) -> ResourceOwner { (*(_portal as *mut crate::utils::portal::PortalData)).resowner as _ }
+unsafe fn portal_createSubid(_portal: Portal) -> u32 { (*(_portal as *mut crate::utils::portal::PortalData)).createSubid as _ }
+unsafe fn portal_holdContext(_portal: Portal) -> *mut c_void { (*(_portal as *mut crate::utils::portal::PortalData)).holdContext as _ }
+unsafe fn portal_holdStore(_portal: Portal) -> *mut c_void { (*(_portal as *mut crate::utils::portal::PortalData)).holdStore as _ }
+unsafe fn portal_holdSnapshot(_portal: Portal) -> *mut c_void { (*(_portal as *mut crate::utils::portal::PortalData)).holdSnapshot as _ }
+unsafe fn portal_tupDesc(_portal: Portal) -> *mut c_void { (*(_portal as *mut crate::utils::portal::PortalData)).tupDesc as _ }
+unsafe fn set_portal_tupDesc(_portal: Portal, _v: *mut c_void) { (*(_portal as *mut crate::utils::portal::PortalData)).tupDesc = _v as _; }
+unsafe fn portal_atEnd(_portal: Portal) -> bool { (*(_portal as *mut crate::utils::portal::PortalData)).atEnd as _ }
+unsafe fn portal_portalPos(_portal: Portal) -> u64 { (*(_portal as *mut crate::utils::portal::PortalData)).portalPos as _ }
 
 unsafe fn querydesc_snapshot(_qd: *mut QueryDesc) -> *mut c_void {
     unimplemented!() // TODO: executor/execdesc.h QueryDesc.snapshot

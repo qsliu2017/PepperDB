@@ -34,7 +34,7 @@ use crate::access::common::tupdesc::TupleDesc;
 use crate::access::index::amapi::IndexAmRoutine;
 use crate::catalog::pg_class::Form_pg_class;
 use crate::catalog::pg_index::Form_pg_index;
-use crate::common::blkreftable::RelFileLocator; // storage/relfilelocator.h shape
+use crate::storage::relfilelocator::RelFileLocator; // storage/relfilelocator.h (canonical)
 use crate::nodes::bitmapset::Bitmapset;
 use crate::nodes::pg_list::List;
 use crate::utils::fmgr::FmgrInfo;
@@ -273,6 +273,7 @@ pub unsafe fn RelationGetNumberOfAttributes(relation: Relation) -> c_int {
  *		Returns tuple descriptor for a relation.
  */
 #[inline]
+#[no_mangle]
 pub unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc {
     (*relation).rd_att
 }
@@ -286,6 +287,7 @@ pub unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc {
  * *mut c_char pointing at that array's first byte.
  */
 #[inline]
+#[no_mangle]
 pub unsafe fn RelationGetRelationName(relation: Relation) -> *mut c_char {
     &mut (*(*relation).rd_rel).relname as *mut _ as *mut c_char
 }

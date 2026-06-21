@@ -182,10 +182,27 @@ macro_rules! SRF_RETURN_DONE {
 // ereturn(escontext, dummy, ...) soft-error macro (elog.h) -- not yet ported.
 macro_rules! ereturn {
     ($escontext:expr, $dummy:expr, $($arg:tt)*) => {{
-        let _ = &$escontext;
+        let __ctx = $escontext as *mut Node;
+        if SOFT_ERROR_FLAG(__ctx) {
+            return $dummy;
+        }
         $crate::utils::elog::emit_log(ERROR, &format!($($arg)*), file!(), line!());
         return $dummy;
     }};
+}
+
+/*
+ * SOFT_ERROR_FLAG: if `escontext` is a real ErrorSaveContext, record that a soft
+ * error occurred and return true; otherwise return false.
+ */
+#[inline]
+unsafe fn SOFT_ERROR_FLAG(escontext: *mut Node) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    if !escontext.is_null() && *(escontext as *const c_int) == T_ErrorSaveContext {
+        (*(escontext as *mut crate::nodes::miscnodes::ErrorSaveContext)).error_occurred = true;
+        return true;
+    }
+    false
 }
 
 // LWLock machinery (storage/lwlock.h) -- not yet ported; stubbed locally.
@@ -195,24 +212,20 @@ type LWLock = c_void;
 enum LWMode {
     LW_SHARED,
 }
-static mut XactTruncationLock: *mut LWLock = std::ptr::null_mut();
+use crate::backend_link_shims::XactTruncationLock;
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: LWMode) -> bool {
     unimplemented!() // TODO: storage/lmgr/lwlock.c
 }
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 unsafe fn LWLockHeldByMe(_lock: *mut LWLock) -> bool {
     unimplemented!() // TODO: storage/lmgr/lwlock.c
 }
 
-// TransamVariables shared state (access/transam.h) -- not yet ported.
-#[repr(C)]
-struct VariableCacheData {
-    oldestClogXid: TransactionId,
-}
-#[allow(non_upper_case_globals)]
-static mut TransamVariables: *mut VariableCacheData = std::ptr::null_mut();
+// TransamVariables shared state (access/transam.h).
+pub use crate::access::transam::varsup::TransamVariablesData as VariableCacheData;
+pub use crate::access::transam::varsup::TransamVariables;
 
 /*
  * If defined, use bsearch() function for searching for xid8s in snapshots

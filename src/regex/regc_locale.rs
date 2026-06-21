@@ -211,7 +211,7 @@ static CLASS_NAMES: [Option<&'static str>; NUM_CCLASSES + 1] = [
 // character classification cvecs by asking libc, even for Unicode.
 
 // element - map collating-element name to chr
-unsafe fn element(
+pub unsafe fn element(
     v: *mut vars,           // context
     startp: *const chr,     // points to start of name
     endp: *const chr,       // points just past end of name
@@ -247,7 +247,7 @@ unsafe fn element(
 }
 
 // range - supply cvec for a range, including legality check
-unsafe fn range(
+pub unsafe fn range(
     v: *mut vars, // context
     a: chr,       // range start
     b: chr,       // range end, might equal a
@@ -324,7 +324,7 @@ unsafe fn before(x: chr, y: chr) -> c_int {
 
 // eclass - supply cvec for an equivalence class
 // Must include case counterparts on request.
-unsafe fn eclass(
+pub unsafe fn eclass(
     v: *mut vars, // context
     c: chr,       // Collating element representing the equivalence class.
     cases: c_int, // all cases?
@@ -356,7 +356,7 @@ unsafe fn eclass(
 // lookupcclass - lookup a character class identified by name
 //
 // On failure, sets an error code in *v; the result is then garbage.
-unsafe fn lookupcclass(
+pub unsafe fn lookupcclass(
     v: *mut vars,       // context (for returning errors)
     startp: *const chr, // where the name starts
     endp: *const chr,   // just past the end of the name
@@ -395,7 +395,7 @@ unsafe fn lookupcclass(
 // The returned cvec might be either a transient cvec gotten from getcvec(),
 // or a permanently cached one from pg_ctype_get_cache().  This is okay
 // because callers are not supposed to explicitly free the result either way.
-unsafe fn cclasscvec(
+pub unsafe fn cclasscvec(
     v: *mut vars,                  // context
     cclasscode: char_classes,      // class to build a cvec for
     cases: c_int,                  // case-independent?
@@ -487,7 +487,7 @@ unsafe fn cclasscvec(
 }
 
 // cclass_column_index - get appropriate high colormap column index for chr
-unsafe fn cclass_column_index(cm: *mut colormap, c: chr) -> c_int {
+pub unsafe fn cclass_column_index(cm: *mut colormap, c: chr) -> c_int {
     let mut colnum: c_int = 0;
 
     // Shouldn't go through all these pushups for simple chrs
@@ -537,7 +537,7 @@ unsafe fn cclass_column_index(cm: *mut colormap, c: chr) -> c_int {
 //
 // This is a shortcut, preferably an efficient one, for simple characters;
 // messy cases are done via range().
-unsafe fn allcases(
+pub unsafe fn allcases(
     v: *mut vars, // context
     c: chr,       // character to get case equivs of
 ) -> *mut cvec {
@@ -562,7 +562,7 @@ unsafe fn allcases(
 // Note that it does not need to report anything except equal/unequal.
 // Note also that the length is exact, and the comparison should not
 // stop at embedded NULs!
-unsafe fn cmp(
+pub unsafe extern "C" fn cmp(
     x: *const chr, // strings to compare
     y: *const chr,
     len: usize, // exact length of comparison
@@ -581,7 +581,7 @@ unsafe fn cmp(
 // Note that it does not need to report anything except equal/unequal.
 // Note also that the length is exact, and the comparison should not
 // stop at embedded NULs!
-unsafe fn casecmp(
+pub unsafe extern "C" fn casecmp(
     x: *const chr, // strings to compare
     y: *const chr,
     len: usize, // exact length of comparison

@@ -75,6 +75,7 @@ pub unsafe fn MemoryContextDelete(_context: MemoryContext) {
 /// # Safety
 /// Matches the C signature; the argument is ignored here.
 #[inline]
+#[no_mangle]
 pub unsafe fn MemoryContextReset(_context: MemoryContext) {
     // TODO(pg-port): release the context's allocations (utils/mmgr/mcxt.c).
     let _ = _context;

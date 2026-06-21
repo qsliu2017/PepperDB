@@ -2071,7 +2071,7 @@ pub type Index = c_uint;
 // pg_statistic_ext / pg_statistic_ext_data
 const STATS_EXT_DEPENDENCIES: c_char = b'f' as c_char; // catalog/pg_statistic_ext.h
 const Anum_pg_statistic_ext_data_stxddependencies: c_int = 5; // catalog/pg_statistic_ext_data.h
-const STATEXTDATASTXOID: c_int = 0; // utils/syscache.h
+const STATEXTDATASTXOID: c_int = 62; // utils/syscache.h
 
 const TYPECACHE_LT_OPR: c_int = 0x0001; // utils/typcache.h
 

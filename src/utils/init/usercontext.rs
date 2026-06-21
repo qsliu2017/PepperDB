@@ -24,9 +24,7 @@ const ERRCODE_INSUFFICIENT_PRIVILEGE: c_int = 0;
 /* --- Locally stubbed (not yet ported) callees. --- */
 
 // TODO: port acl.c member_can_set_role
-unsafe fn member_can_set_role(_member: Oid, _role: Oid) -> bool {
-    unimplemented!()
-}
+unsafe fn member_can_set_role(_member: Oid, _role: Oid) -> bool { crate::utils::adt::acl::member_can_set_role(_member, _role) }
 
 // TODO: port guc.c NewGUCNestLevel
 unsafe fn NewGUCNestLevel() -> c_int {
@@ -48,6 +46,7 @@ unsafe fn AtEOXact_GUC(_isCommit: bool, _nestLevel: c_int) {
  * SECURITY_RESTRICTED_OPERATION is imposed and a new GUC nest level is
  * created so that any settings changes can be rolled back.
  */
+#[no_mangle]
 pub unsafe fn SwitchToUntrustedUser(userid: Oid, context: *mut UserContext) {
     /* Get the current user ID and security context. */
     GetUserIdAndSecContext(
@@ -102,6 +101,7 @@ pub unsafe fn SwitchToUntrustedUser(userid: Oid, context: *mut UserContext) {
  * If we created a new GUC nest level, also roll back any changes that were
  * made within it.
  */
+#[no_mangle]
 pub unsafe fn RestoreUserContext(context: *mut UserContext) {
     if (*context).save_nestlevel != -1 {
         AtEOXact_GUC(false, (*context).save_nestlevel);

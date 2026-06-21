@@ -1213,9 +1213,7 @@ unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
 }
 
 #[allow(non_snake_case)]
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 
 #[allow(non_snake_case)]
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
@@ -1232,6 +1230,4 @@ unsafe fn ResolveRecoveryConflictWithSnapshot(
     _snapshotConflictHorizon: TransactionId,
     _isCatalogRel: bool,
     _locator: RelFileLocator,
-) {
-    unimplemented!() // TODO: storage/standby.c
-}
+) { crate::storage::ipc::standby::ResolveRecoveryConflictWithSnapshot(_snapshotConflictHorizon, _isCatalogRel, _locator) }

@@ -265,7 +265,7 @@ pub unsafe fn BackgroundWriterMain(_startup_data: *const c_void, startup_data_le
      */
     bgwriter_context = AllocSetContextCreate!(
         TopMemoryContext,
-        "Background Writer",
+        c"Background Writer".as_ptr(),
         ALLOCSET_DEFAULT_SIZES
     );
     MemoryContextSwitchTo(bgwriter_context);

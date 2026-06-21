@@ -157,6 +157,10 @@ pub type SlruScanCallback =
 pub unsafe fn SimpleLruGetBankLock(ctl: SlruCtl, pageno: int64) -> *mut LWLock {
     let bankno: c_int;
 
+    if std::env::var_os("PDB_BT").is_some() && (*ctl).nbanks == 0 {
+        eprintln!("PDB_BT SimpleLruGetBankLock ctl={:p} nbanks=0 dir={:?}",
+            ctl, std::ffi::CStr::from_ptr((*ctl).Dir.as_ptr()));
+    }
     bankno = (pageno % (*ctl).nbanks as int64) as c_int;
     &mut (*(*(*ctl).shared).bank_locks.add(bankno as usize)).lock
 }
@@ -196,35 +200,43 @@ const PG_BINARY: c_int = 0;
 // unistd.h / stdio.h
 const SEEK_END: c_int = 2;
 
-// LWLock and friends from storage/lwlock.h (not ported yet).
-#[repr(C)]
-pub struct LWLock {
-    _private: [u8; 0],
-}
+// LWLock and friends from storage/lwlock.h: use the canonical LWLock and give
+// LWLockPadded its real cache-line size so the SLRU bank/buffer lock arrays are
+// correctly sized, strided, and initialized (a zero-size stub aliased all locks
+// at offset 0 -> garbage state -> LWLockAcquire blocked forever).
+pub use crate::storage::lmgr::lwlock::LWLock;
 #[repr(C)]
 pub struct LWLockPadded {
     pub lock: LWLock,
+    _pad: [u8; crate::storage::lmgr::lwlock::LWLOCK_PADDED_SIZE - core::mem::size_of::<LWLock>()],
 }
 pub const LW_EXCLUSIVE: c_int = 0; // TODO(pg-port): storage/lwlock.h
 pub const LW_SHARED: c_int = 1; // TODO(pg-port): storage/lwlock.h
 
+#[inline]
+fn lwlock_mode(mode: c_int) -> crate::storage::lmgr::lwlock::LWLockMode {
+    match mode {
+        LW_EXCLUSIVE => crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE,
+        _ => crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED,
+    }
+}
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, lwlock_mode(_mode))
 }
 unsafe fn LWLockConditionalAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockConditionalAcquire(_lock as _, lwlock_mode(_mode))
 }
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 unsafe fn LWLockInitialize(_lock: *mut LWLock, _tranche_id: c_int) {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockInitialize(_lock as _, _tranche_id)
 }
 unsafe fn LWLockHeldByMe(_lock: *mut LWLock) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockHeldByMe(_lock as _)
 }
 unsafe fn LWLockHeldByMeInMode(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockHeldByMeInMode(_lock as _, lwlock_mode(_mode))
 }
 
 // pg_atomic_uint64 and ops from port/atomics.h (not ported yet).
@@ -233,13 +245,20 @@ pub struct pg_atomic_uint64 {
     pub value: u64,
 }
 unsafe fn pg_atomic_init_u64(_ptr: *mut pg_atomic_uint64, _val: u64) {
-    unimplemented!() // TODO(pg-port): port/atomics.h
+    crate::port::atomics::generic::pg_atomic_init_u64_impl(
+        &*(_ptr as *const crate::port::atomics::pg_atomic_uint64),
+        _val,
+    )
 }
 unsafe fn pg_atomic_read_u64(_ptr: *mut pg_atomic_uint64) -> u64 {
-    unimplemented!() // TODO(pg-port): port/atomics.h
+    crate::port::atomics::generic::pg_atomic_read_u64_impl(&*(_ptr
+        as *const crate::port::atomics::pg_atomic_uint64))
 }
 unsafe fn pg_atomic_write_u64(_ptr: *mut pg_atomic_uint64, _val: u64) {
-    unimplemented!() // TODO(pg-port): port/atomics.h
+    crate::port::atomics::generic::pg_atomic_write_u64_impl(
+        &*(_ptr as *const crate::port::atomics::pg_atomic_uint64),
+        _val,
+    )
 }
 
 // SyncRequestHandler and sync requests from storage/sync.h (not ported yet).
@@ -255,7 +274,11 @@ pub struct FileTag {
     // ... TODO(pg-port): storage/sync.h
 }
 unsafe fn RegisterSyncRequest(_ftag: *const FileTag, r#type: c_int, _retryOnError: bool) -> bool {
-    unimplemented!() // TODO(pg-port): storage/sync.c
+    let req = match r#type {
+        SYNC_FORGET_REQUEST => crate::storage::sync::sync::SyncRequestType::SYNC_FORGET_REQUEST,
+        _ => crate::storage::sync::sync::SyncRequestType::SYNC_REQUEST,
+    };
+    crate::storage::sync::sync::RegisterSyncRequest(_ftag as _, req, _retryOnError)
 }
 
 // fd / dir helpers --- TODO(pg-port): real defs live in storage/file/fd.c
@@ -269,41 +292,41 @@ pub struct dirent {
     // ... TODO(pg-port): <dirent.h>
 }
 unsafe fn OpenTransientFile(_fileName: *const c_char, _fileFlags: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): storage/file/fd.c
+    crate::storage::file::fd::OpenTransientFile(_fileName, _fileFlags)
 }
 unsafe fn CloseTransientFile(_fd: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): storage/file/fd.c
+    crate::storage::file::fd::CloseTransientFile(_fd)
 }
 unsafe fn AllocateDir(_dirname: *const c_char) -> *mut DIR {
-    unimplemented!() // TODO(pg-port): storage/file/fd.c
+    crate::storage::file::fd::AllocateDir(_dirname) as _
 }
 unsafe fn ReadDir(_dir: *mut DIR, _dirname: *const c_char) -> *mut dirent {
-    unimplemented!() // TODO(pg-port): storage/file/fd.c
+    crate::storage::file::fd::ReadDir(_dir as _, _dirname) as _
 }
 unsafe fn FreeDir(_dir: *mut DIR) -> c_int {
-    unimplemented!() // TODO(pg-port): storage/file/fd.c
+    crate::storage::file::fd::FreeDir(_dir as _)
 }
 unsafe fn pg_fsync(_fd: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): storage/file/fd.c
+    crate::storage::file::fd::pg_fsync(_fd)
 }
 unsafe fn fsync_fname(_fname: *const c_char, _isdir: bool) {
-    unimplemented!() // TODO(pg-port): storage/file/fd.c
+    crate::storage::file::fd::fsync_fname(_fname, _isdir)
 }
 unsafe fn pg_pread(_fd: c_int, _buf: *mut c_void, _amount: usize, _offset: i64) -> isize {
-    unimplemented!() // TODO(pg-port): storage/file/fd.c
+    crate::port::port_api::pg_pread(_fd, _buf, _amount, _offset)
 }
 unsafe fn pg_pwrite(_fd: c_int, _buf: *const c_void, _amount: usize, _offset: i64) -> isize {
-    unimplemented!() // TODO(pg-port): storage/file/fd.c
+    crate::port::port_api::pg_pwrite(_fd, _buf, _amount, _offset)
 }
 
 // shmem.h
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _found)
 }
 
 // port/strlcpy.c, port/strtoi64.c
 unsafe fn strlcpy(_dst: *mut c_char, _src: *const c_char, _siz: usize) -> usize {
-    unimplemented!() // TODO(pg-port): port/strlcpy.c
+    crate::port::strlcpy::strlcpy(_dst, _src, _siz)
 }
 unsafe fn strtoi64(_str: *const c_char, _endptr: *mut *mut c_char, _base: c_int) -> int64 {
     unimplemented!() // TODO(pg-port): common/string.c
@@ -311,28 +334,28 @@ unsafe fn strtoi64(_str: *const c_char, _endptr: *mut *mut c_char, _base: c_int)
 
 // pgstat counters --- TODO(pg-port): pgstat.h / pgstat_slru.c
 unsafe fn pgstat_get_slru_index(_name: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): utils/activity/pgstat_slru.c
+    crate::utils::activity::pgstat_slru::pgstat_get_slru_index(_name)
 }
 unsafe fn pgstat_count_slru_page_zeroed(_idx: c_int) {
-    unimplemented!() // TODO(pg-port): utils/activity/pgstat_slru.c
+    crate::utils::activity::pgstat_slru::pgstat_count_slru_page_zeroed(_idx)
 }
 unsafe fn pgstat_count_slru_page_hit(_idx: c_int) {
-    unimplemented!() // TODO(pg-port): utils/activity/pgstat_slru.c
+    crate::utils::activity::pgstat_slru::pgstat_count_slru_page_hit(_idx)
 }
 unsafe fn pgstat_count_slru_page_read(_idx: c_int) {
-    unimplemented!() // TODO(pg-port): utils/activity/pgstat_slru.c
+    crate::utils::activity::pgstat_slru::pgstat_count_slru_page_read(_idx)
 }
 unsafe fn pgstat_count_slru_page_written(_idx: c_int) {
-    unimplemented!() // TODO(pg-port): utils/activity/pgstat_slru.c
+    crate::utils::activity::pgstat_slru::pgstat_count_slru_page_written(_idx)
 }
 unsafe fn pgstat_count_slru_page_exists(_idx: c_int) {
-    unimplemented!() // TODO(pg-port): utils/activity/pgstat_slru.c
+    crate::utils::activity::pgstat_slru::pgstat_count_slru_page_exists(_idx)
 }
 unsafe fn pgstat_count_slru_flush(_idx: c_int) {
-    unimplemented!() // TODO(pg-port): utils/activity/pgstat_slru.c
+    crate::utils::activity::pgstat_slru::pgstat_count_slru_flush(_idx)
 }
 unsafe fn pgstat_count_slru_truncate(_idx: c_int) {
-    unimplemented!() // TODO(pg-port): utils/activity/pgstat_slru.c
+    crate::utils::activity::pgstat_slru::pgstat_count_slru_truncate(_idx)
 }
 
 // wait-event reporting --- TODO(pg-port): utils/activity/wait_event.c
@@ -341,15 +364,15 @@ const WAIT_EVENT_SLRU_WRITE: uint32 = 0;
 const WAIT_EVENT_SLRU_SYNC: uint32 = 0;
 const WAIT_EVENT_SLRU_FLUSH_SYNC: uint32 = 0;
 unsafe fn pgstat_report_wait_start(_wait_event_info: uint32) {
-    unimplemented!() // TODO(pg-port): utils/activity/wait_event.c
+    // wait-event telemetry; no-op for bring-up
 }
 unsafe fn pgstat_report_wait_end() {
-    unimplemented!() // TODO(pg-port): utils/activity/wait_event.c
+    // wait-event telemetry; no-op for bring-up
 }
 
 // xlog interactions --- TODO(pg-port): access/xlog.c
 unsafe fn XLogFlush(_record: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): access/xlog.c
+    crate::access::transam::xlog::XLogFlush(_record)
 }
 unsafe fn XLogRecPtrIsInvalid(record: XLogRecPtr) -> bool {
     record == 0 // InvalidXLogRecPtr
@@ -839,10 +862,10 @@ pub const FirstNormalTransactionId: TransactionId = 3; // TODO(pg-port): access/
 
 // transam.c --- TODO(pg-port): access/transam/transam.c
 unsafe fn TransactionIdPrecedes(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): access/transam/transam.c
+    crate::access::transam::transam::TransactionIdPrecedes(_id1, _id2)
 }
 unsafe fn TransactionIdFollowsOrEquals(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): access/transam/transam.c
+    crate::access::transam::transam::TransactionIdFollowsOrEquals(_id1, _id2)
 }
 
 /*

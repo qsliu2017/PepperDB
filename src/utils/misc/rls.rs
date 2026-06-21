@@ -24,7 +24,7 @@ pub const RLS_ENABLED: c_int = 2;
 pub static mut row_security: bool = false;
 
 // utils/syscache.h: cache id for pg_class indexed by oid.
-const RELOID: c_int = 0;
+const RELOID: c_int = 57;
 
 /*
  * check_enable_rls
@@ -44,6 +44,7 @@ const RELOID: c_int = 0;
  * an ereport() if the user has attempted to bypass RLS and they are not
  * allowed to.
  */
+#[no_mangle]
 pub unsafe fn check_enable_rls(relid: Oid, checkAsUser: Oid, noError: bool) -> c_int {
     let user_id: Oid = if OidIsValid(checkAsUser) {
         checkAsUser
@@ -162,32 +163,24 @@ pub unsafe fn row_security_active_name(fcinfo: FunctionCallInfo) -> Datum {
 /// STUB: utils/cache/syscache.c SearchSysCache1.
 // TODO(pg-port): utils/cache/syscache.c not ported.
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!("TODO(pg-port): SearchSysCache1 (utils/cache/syscache.c not ported)")
+    crate::utils::cache::syscache::SearchSysCache1(_cacheId, _key1) as _
 }
 
-/// STUB: utils/cache/syscache.c ReleaseSysCache.
-// TODO(pg-port): utils/cache/syscache.c not ported.
 unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!("TODO(pg-port): ReleaseSysCache (utils/cache/syscache.c not ported)")
+    crate::utils::cache::syscache::ReleaseSysCache(_tuple as _)
 }
 
-/// STUB: utils/adt/acl.c has_bypassrls_privilege.
-// TODO(pg-port): utils/adt/acl.c not ported.
 unsafe fn has_bypassrls_privilege(_roleid: Oid) -> bool {
-    unimplemented!("TODO(pg-port): has_bypassrls_privilege (utils/adt/acl.c not ported)")
+    crate::catalog::aclchk::has_bypassrls_privilege(_roleid)
 }
 
-/// STUB: catalog/aclchk.c object_ownercheck.
-// TODO(pg-port): catalog/aclchk.c not ported.
 unsafe fn object_ownercheck(_classid: Oid, _objectid: Oid, _roleid: Oid) -> bool {
-    unimplemented!("TODO(pg-port): object_ownercheck (catalog/aclchk.c not ported)")
+    crate::catalog::aclchk::object_ownercheck(_classid, _objectid, _roleid)
 }
 
-/// STUB: utils/adt/ruleutils.c / lsyscache.c get_rel_name.
-// TODO(pg-port): utils/cache/lsyscache.c not ported.
 #[allow(dead_code)]
 unsafe fn get_rel_name(_relid: Oid) -> *mut c_char {
-    unimplemented!("TODO(pg-port): get_rel_name (utils/cache/lsyscache.c not ported)")
+    crate::utils::cache::lsyscache::get_rel_name(_relid) as _
 }
 
 /// STUB: nodes/makefuncs.c makeRangeVarFromNameList.

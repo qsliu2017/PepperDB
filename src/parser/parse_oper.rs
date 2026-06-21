@@ -617,17 +617,21 @@ unsafe fn op_error(
     location: c_int,
 ) {
     if fdresult == FUNCDETAIL_MULTIPLE {
-        elog!(
+        ereport!(
             ERROR,
-            "operator is not unique: {}",
-            CStr_to_str(op_signature_string(op, arg1, arg2))
+            errmsg!("operator is not unique: {}",
+                CStr_to_str(op_signature_string(op, arg1, arg2))),
+            crate::utils::elog::errhint_field("Could not choose a best candidate operator. You might need to add explicit type casts."),
+            crate::parser::parse_node::parser_errposition(pstate, location)
         );
         unreachable!();
     } else {
-        elog!(
+        ereport!(
             ERROR,
-            "operator does not exist: {}",
-            CStr_to_str(op_signature_string(op, arg1, arg2))
+            errmsg!("operator does not exist: {}",
+                CStr_to_str(op_signature_string(op, arg1, arg2))),
+            crate::utils::elog::errhint_field("No operator matches the given name and argument types. You might need to add explicit type casts."),
+            crate::parser::parse_node::parser_errposition(pstate, location)
         );
         unreachable!();
     }
@@ -1096,60 +1100,22 @@ unsafe fn CStr_to_str<'a>(s: *const c_char) -> &'a str {
 
 // HeapTuple, HeapTupleIsValid, GETSTRUCT imported from crate::access::htup_details
 
-// TODO: catalog/pg_operator.h
-pub type Form_pg_operator = *mut FormData_pg_operator;
-#[repr(C)]
-pub struct FormData_pg_operator {
-    pub oid: Oid,
-    pub oprcode: Oid,
-    pub oprleft: Oid,
-    pub oprright: Oid,
-    pub oprresult: Oid,
-}
+pub use crate::catalog::pg_operator::{FormData_pg_operator, Form_pg_operator};
 
 // TODO: nodes/parsenodes.h
 pub use crate::parser::parse_node::ParseState;
 pub use crate::nodes::parsenodes::ObjectWithArgs;
 pub type TypeName = std::ffi::c_void;
 pub type Expr = std::ffi::c_void;
-#[repr(C)]
-pub struct OpExpr {
-    pub opno: Oid,
-    pub opfuncid: Oid,
-    pub opresulttype: Oid,
-    pub opretset: bool,
-    pub args: *mut List,
-    pub location: c_int,
-}
-#[repr(C)]
-pub struct ScalarArrayOpExpr {
-    pub opno: Oid,
-    pub opfuncid: Oid,
-    pub hashfuncid: Oid,
-    pub negfuncid: Oid,
-    pub useOr: bool,
-    pub args: *mut List,
-    pub location: c_int,
-}
+pub use crate::nodes::primnodes::{OpExpr, ScalarArrayOpExpr};
 
 // TODO: parser/parse_node.h
 pub type ParseCallbackState = std::ffi::c_void;
 
-// TODO: utils/typcache.h
-#[repr(C)]
-pub struct TypeCacheEntry {
-    pub lt_opr: Oid,
-    pub eq_opr: Oid,
-    pub gt_opr: Oid,
-    pub hash_proc: Oid,
-}
-pub const TYPECACHE_LT_OPR: c_int = 0;
-pub const TYPECACHE_EQ_OPR: c_int = 0;
-pub const TYPECACHE_GT_OPR: c_int = 0;
-pub const TYPECACHE_HASH_PROC: c_int = 0;
-unsafe fn lookup_type_cache(_type_id: Oid, _flags: c_int) -> *mut TypeCacheEntry {
-    unimplemented!() // TODO: utils/typcache.c
-}
+use crate::utils::cache::typcache::{
+    TypeCacheEntry, TYPECACHE_LT_OPR, TYPECACHE_EQ_OPR, TYPECACHE_GT_OPR, TYPECACHE_HASH_PROC,
+};
+unsafe fn lookup_type_cache(type_id: Oid, flags: c_int) -> *mut TypeCacheEntry { crate::utils::cache::lsyscache::lookup_type_cache(type_id, flags) as _ }
 
 // TODO: parser/parse_func.h
 pub type FuncDetailCode = c_int;
@@ -1158,141 +1124,87 @@ pub const FUNCDETAIL_MULTIPLE: FuncDetailCode = 1;
 pub const FUNCDETAIL_NORMAL: FuncDetailCode = 2;
 
 // TODO: catalog/namespace.h (FuncCandidateList)
-#[repr(C)]
-pub struct _FuncCandidateList {
-    pub next: *mut _FuncCandidateList,
-    pub oid: Oid,
-    pub args: [Oid; 1], /* FLEXIBLE_ARRAY_MEMBER */
-}
-pub type FuncCandidateList = *mut _FuncCandidateList;
+pub use crate::catalog::namespace::{_FuncCandidateList, FuncCandidateList};
 
-unsafe fn OpernameGetOprid(_names: *mut List, _oprleft: Oid, _oprright: Oid) -> Oid {
-    unimplemented!() // TODO: catalog/namespace.c
-}
+unsafe fn OpernameGetOprid(_names: *mut List, _oprleft: Oid, _oprright: Oid) -> Oid { crate::catalog::namespace::OpernameGetOprid(_names as _, _oprleft, _oprright) }
 unsafe fn OpernameGetCandidates(
     _names: *mut List,
     _oprkind: c_char,
     _missing_schema_ok: bool,
-) -> FuncCandidateList {
-    unimplemented!() // TODO: catalog/namespace.c
-}
-unsafe fn LookupExplicitNamespace(_nspname: *const c_char, _missing_ok: bool) -> Oid {
-    unimplemented!() // TODO: catalog/namespace.c
-}
-unsafe fn fetch_search_path_array(_sarray: *mut Oid, _sarray_len: c_int) -> c_int {
-    unimplemented!() // TODO: catalog/namespace.c
-}
+) -> FuncCandidateList { crate::catalog::namespace::OpernameGetCandidates(_names as _, _oprkind, _missing_schema_ok) as _ }
+unsafe fn LookupExplicitNamespace(_nspname: *const c_char, _missing_ok: bool) -> Oid { crate::catalog::namespace::LookupExplicitNamespace(_nspname as _, _missing_ok) }
+unsafe fn fetch_search_path_array(_sarray: *mut Oid, _sarray_len: c_int) -> c_int { crate::catalog::namespace::fetch_search_path_array(_sarray as _, _sarray_len) }
 unsafe fn DeconstructQualifiedName(
     _names: *mut List,
     _nspname_p: *mut *mut c_char,
     _objname_p: *mut *mut c_char,
-) {
-    unimplemented!() // TODO: catalog/namespace.c
-}
+) { crate::catalog::namespace::DeconstructQualifiedName(_names as _, _nspname_p as _, _objname_p as _) }
 
 unsafe fn func_match_argtypes(
     _nargs: c_int,
     _input_typeids: *mut Oid,
     _raw_candidates: FuncCandidateList,
     _candidates: *mut FuncCandidateList,
-) -> c_int {
-    unimplemented!() // TODO: parser/parse_func.c
-}
+) -> c_int { crate::parser::parse_func::func_match_argtypes(_nargs, _input_typeids as _, _raw_candidates as _, _candidates as _) }
 unsafe fn func_select_candidate(
     _nargs: c_int,
     _input_typeids: *mut Oid,
     _candidates: FuncCandidateList,
-) -> FuncCandidateList {
-    unimplemented!() // TODO: parser/parse_func.c
-}
+) -> FuncCandidateList { crate::parser::parse_func::func_select_candidate(_nargs, _input_typeids as _, _candidates as _) as _ }
 unsafe fn make_fn_arguments(
     _pstate: *mut ParseState,
     _fargs: *mut List,
     _actual_arg_types: *mut Oid,
     _declared_arg_types: *mut Oid,
-) {
-    unimplemented!() // TODO: parser/parse_func.c
-}
+) { crate::parser::parse_func::make_fn_arguments(_pstate as _, _fargs as _, _actual_arg_types as _, _declared_arg_types as _) }
 
 unsafe fn LookupTypeNameOid(
     _pstate: *mut ParseState,
     _typeName: *mut TypeName,
     _missing_ok: bool,
-) -> Oid {
-    unimplemented!() // TODO: parser/parse_type.c
-}
+) -> Oid { crate::parser::parse_type::LookupTypeNameOid(_pstate as _, _typeName as _, _missing_ok) }
 
 // TODO: parser/parse_coerce.h
-unsafe fn IsBinaryCoercible(_srctype: Oid, _targettype: Oid) -> bool {
-    unimplemented!() // TODO: parser/parse_coerce.c
-}
+unsafe fn IsBinaryCoercible(_srctype: Oid, _targettype: Oid) -> bool { crate::parser::parse_coerce::IsBinaryCoercible(_srctype, _targettype) }
 unsafe fn enforce_generic_type_consistency(
     _actual_arg_types: *mut Oid,
     _declared_arg_types: *mut Oid,
     _nargs: c_int,
     _rettype: Oid,
     _allow_poly: bool,
-) -> Oid {
-    unimplemented!() // TODO: parser/parse_coerce.c
-}
+) -> Oid { crate::parser::parse_coerce::enforce_generic_type_consistency(_actual_arg_types as _, _declared_arg_types as _, _nargs, _rettype, _allow_poly) }
 
 // TODO: nodes/nodeFuncs.h
-unsafe fn exprType(_expr: *const Node) -> Oid {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
-}
+unsafe fn exprType(_expr: *const Node) -> Oid { crate::nodes::nodeFuncs::exprType(_expr as _) }
 
 // TODO: utils/syscache.h
-pub const OPEROID: c_int = 0;
-unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!() // TODO: utils/cache/syscache.c
-}
-unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!() // TODO: utils/cache/syscache.c
-}
+pub const OPEROID: c_int = 40;
+unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache1(_cacheId, _key1) }
+unsafe fn ReleaseSysCache(_tuple: HeapTuple) { crate::utils::cache::syscache::ReleaseSysCache(_tuple) }
 
 // TODO: utils/inval.h
-pub const OPERNAMENSP: c_int = 0;
-pub const CASTSOURCETARGET: c_int = 0;
+pub const OPERNAMENSP: c_int = 39;
+pub const CASTSOURCETARGET: c_int = 12;
 unsafe fn CacheRegisterSyscacheCallback(
     _cacheid: c_int,
     _func: unsafe fn(Datum, c_int, uint32),
     _arg: Datum,
-) {
-    unimplemented!() // TODO: utils/cache/inval.c
-}
+) { crate::utils::adt::acl::CacheRegisterSyscacheCallback(_cacheid, core::mem::transmute(_func), _arg) }
 
 // TODO: utils/lsyscache.h
-unsafe fn getBaseType(_typid: Oid) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
-}
-unsafe fn get_base_element_type(_typid: Oid) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
-}
-unsafe fn get_array_type(_typid: Oid) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
-}
-unsafe fn get_func_retset(_funcid: Oid) -> bool {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
-}
+unsafe fn getBaseType(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::getBaseType(_typid) }
+unsafe fn get_base_element_type(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_base_element_type(_typid) }
+unsafe fn get_array_type(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_array_type(_typid) }
+unsafe fn get_func_retset(_funcid: Oid) -> bool { crate::utils::cache::lsyscache::get_func_retset(_funcid) }
 
 // TODO: utils/builtins.h
-unsafe fn format_type_be(_type_oid: Oid) -> *const c_char {
-    unimplemented!() // TODO: utils/adt/format_type.c
-}
+unsafe fn format_type_be(_type_oid: Oid) -> *const c_char { crate::utils::cache::lsyscache::format_type_be(_type_oid) as _ }
 
 // TODO: nodes/makefuncs.h / list helpers
-unsafe fn list_length(_l: *const List) -> c_int {
-    unimplemented!() // TODO: nodes/list.c
-}
-unsafe fn list_make1(_d1: *mut std::ffi::c_void) -> *mut List {
-    unimplemented!() // TODO: nodes/list.c
-}
-unsafe fn list_make2(_d1: *mut std::ffi::c_void, _d2: *mut std::ffi::c_void) -> *mut List {
-    unimplemented!() // TODO: nodes/list.c
-}
-unsafe fn NameListToString(_names: *mut List) -> *const c_char {
-    unimplemented!() // TODO: catalog/namespace.c
-}
+unsafe fn list_length(_l: *const List) -> c_int { crate::nodes::pg_list::list_length(_l as _) }
+unsafe fn list_make1(_d1: *mut std::ffi::c_void) -> *mut List { crate::list_make1!(_d1) as _ }
+unsafe fn list_make2(_d1: *mut std::ffi::c_void, _d2: *mut std::ffi::c_void) -> *mut List { crate::list_make2!(_d1, _d2) as _ }
+unsafe fn NameListToString(_names: *mut List) -> *const c_char { crate::catalog::namespace::NameListToString(_names as _) as _ }
 
 // TODO: lib/stringinfo.h
 #[repr(C)]
@@ -1302,22 +1214,28 @@ pub struct StringInfoData {
     pub maxlen: c_int,
     pub cursor: c_int,
 }
-unsafe fn initStringInfo(_str: *mut StringInfoData) {
-    unimplemented!() // TODO: lib/stringinfo.c
-}
+unsafe fn initStringInfo(_str: *mut StringInfoData) { crate::lib::stringinfo::initStringInfo(_str as _) }
 extern "C" {
     fn appendStringInfo(str: *mut StringInfoData, fmt: *const c_char, ...);
 }
-unsafe fn appendStringInfoString(_str: *mut StringInfoData, _s: *const c_char) {
-    unimplemented!() // TODO: lib/stringinfo.c
-}
+unsafe fn appendStringInfoString(_str: *mut StringInfoData, _s: *const c_char) { crate::lib::stringinfo::appendStringInfoString(_str as _, _s as _) }
 
 // TODO: utils/hsearch.h
 pub type HTAB = std::ffi::c_void;
 #[repr(C)]
 pub struct HASHCTL {
+    pub num_partitions: c_long_t,
+    pub ssize: c_long_t,
+    pub dsize: c_long_t,
+    pub max_dsize: c_long_t,
     pub keysize: Size,
     pub entrysize: Size,
+    pub hash: *mut std::ffi::c_void,
+    pub match_: *mut std::ffi::c_void,
+    pub keycopy: *mut std::ffi::c_void,
+    pub alloc: *mut std::ffi::c_void,
+    pub hcxt: *mut std::ffi::c_void,
+    pub hctl: *mut std::ffi::c_void,
 }
 #[repr(C)]
 pub struct HASH_SEQ_STATUS {
@@ -1326,7 +1244,7 @@ pub struct HASH_SEQ_STATUS {
     pub curEntry: *mut std::ffi::c_void,
 }
 pub const HASH_ELEM: c_int = 0x0008;
-pub const HASH_BLOBS: c_int = 0x0010;
+pub const HASH_BLOBS: c_int = 0x0020;
 pub const HASH_FIND: c_int = 0;
 pub const HASH_ENTER: c_int = 1;
 pub const HASH_REMOVE: c_int = 2;
@@ -1335,23 +1253,15 @@ unsafe fn hash_create(
     _nelem: c_long_t,
     _info: *mut HASHCTL,
     _flags: c_int,
-) -> *mut HTAB {
-    unimplemented!() // TODO: utils/hash/dynahash.c
-}
+) -> *mut HTAB { crate::utils::hash::dynahash::hash_create(_tabname as _, _nelem, _info as _, _flags) as _ }
 unsafe fn hash_search(
     _hashp: *mut HTAB,
     _key_ptr: *mut std::ffi::c_void,
     _action: c_int,
     _found_ptr: *mut bool,
-) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: utils/hash/dynahash.c
-}
-unsafe fn hash_seq_init(_status: *mut HASH_SEQ_STATUS, _hashp: *mut HTAB) {
-    unimplemented!() // TODO: utils/hash/dynahash.c
-}
-unsafe fn hash_seq_search(_status: *mut HASH_SEQ_STATUS) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: utils/hash/dynahash.c
-}
+) -> *mut std::ffi::c_void { crate::utils::hash::dynahash::hash_search(_hashp as _, _key_ptr as _, core::mem::transmute(_action), _found_ptr as _) as _ }
+unsafe fn hash_seq_init(_status: *mut HASH_SEQ_STATUS, _hashp: *mut HTAB) { crate::utils::hash::dynahash::hash_seq_init(_status as _, _hashp as _) }
+unsafe fn hash_seq_search(_status: *mut HASH_SEQ_STATUS) -> *mut std::ffi::c_void { crate::utils::hash::dynahash::hash_seq_search(_status as _) as _ }
 type c_long_t = std::ffi::c_long;
 
 // TODO: parser/parsenodes.h types (Oid constants)
@@ -1370,23 +1280,15 @@ unsafe fn setup_parser_errposition_callback(
     _pcbstate: *mut ParseCallbackState,
     _pstate: *mut ParseState,
     _location: c_int,
-) {
-    unimplemented!() // TODO: parser/parse_node.c
-}
-unsafe fn cancel_parser_errposition_callback(_pcbstate: *mut ParseCallbackState) {
-    unimplemented!() // TODO: parser/parse_node.c
-}
+) { crate::parser::parse_node::setup_parser_errposition_callback(_pcbstate as _, _pstate as _, _location) }
+unsafe fn cancel_parser_errposition_callback(_pcbstate: *mut ParseCallbackState) { crate::parser::parse_node::cancel_parser_errposition_callback(_pcbstate as _) }
 
 // TODO: parser/parse_func.h
 unsafe fn check_srf_call_placement(
     _pstate: *mut ParseState,
     _last_srf: *mut Node,
     _location: c_int,
-) {
-    unimplemented!() // TODO: parser/parse_func.c
-}
+) { crate::parser::parse_func::check_srf_call_placement(_pstate as _, _last_srf as _, _location) }
 
-unsafe fn strlcpy(_dst: *mut c_char, _src: *const c_char, _siz: usize) -> usize {
-    unimplemented!() // TODO: port/strlcpy.c
-}
+unsafe fn strlcpy(_dst: *mut c_char, _src: *const c_char, _siz: usize) -> usize { crate::port::strlcpy::strlcpy(_dst as _, _src as _, _siz) }
 // MemSet provided by crate::c (re-exported via crate::prelude::*)

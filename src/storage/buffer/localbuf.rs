@@ -78,9 +78,8 @@ pub struct BufferManagerRelation {
 pub type GucSource = c_int;
 pub const PGC_S_TEST: GucSource = 16;
 
-// executor/instrument.h: instr_time.
-// TODO: dedup (executor/instrument.h not ported yet)
-pub type instr_time = u64;
+// executor/instrument.h: instr_time (matches pgstat_io's instr_time = int64).
+use crate::utils::activity::pgstat_io::instr_time;
 
 /// pgstat.h: BufferUsage (only fields used here).
 // TODO: dedup (pgstat.h / instrument.h not ported yet)
@@ -97,22 +96,13 @@ pub static mut pgBufferUsage: BufferUsage = BufferUsage {
     local_blks_dirtied: 0,
 };
 
-/// pgstat.h: IOObject.
-// TODO: dedup
-pub type IOObject = c_int;
-pub const IOOBJECT_TEMP_RELATION: IOObject = 1;
-
-/// pgstat.h: IOContext.
-// TODO: dedup
-pub type IOContext = c_int;
-pub const IOCONTEXT_NORMAL: IOContext = 2;
-
-/// pgstat.h: IOOp.
-// TODO: dedup
-pub type IOOp = c_int;
-pub const IOOP_WRITE: IOOp = 0;
-pub const IOOP_EXTEND: IOOp = 1;
-pub const IOOP_EVICT: IOOp = 2;
+// pgstat.h: IOObject / IOContext / IOOp.  Use the canonical pgstat_io types so
+// the values match the Assert()s inside pgstat_count_io_op().
+use crate::utils::activity::pgstat_io::{
+    IOObject, IOContext, IOOp,
+    IOOBJECT_TEMP_RELATION, IOCONTEXT_NORMAL,
+    IOOP_WRITE, IOOP_EXTEND, IOOP_EVICT,
+};
 
 // miscadmin.h: track_io_timing GUC.
 // TODO: dedup
@@ -139,30 +129,34 @@ unsafe fn IsParallelWorker() -> bool {
 // ---- atomics (port/atomics.h) --------------------------------------------
 
 #[inline]
-unsafe fn pg_atomic_read_u32(_ptr: *mut pg_atomic_uint32) -> u32 {
-    unimplemented!() // TODO: port/atomics.h
+unsafe fn pg_atomic_read_u32(ptr: *mut pg_atomic_uint32) -> u32 {
+    crate::port::atomics::pg_atomic_read_u32_impl(&*ptr)
 }
 
 #[inline]
-unsafe fn pg_atomic_unlocked_write_u32(_ptr: *mut pg_atomic_uint32, _val: u32) {
-    unimplemented!() // TODO: port/atomics.h
+unsafe fn pg_atomic_unlocked_write_u32(ptr: *mut pg_atomic_uint32, val: u32) {
+    crate::port::atomics::generic::pg_atomic_unlocked_write_u32_impl(&*ptr, val);
 }
 
 // ---- AIO wait refs (storage/aio_types.h) ---------------------------------
+//
+// BufferDesc.io_wref is aio_types::PgAioWaitRef; the canonical wref helpers
+// take aio::aio::PgAioWaitRef.  The two structs share an identical 3x u32
+// layout, so cast the pointer across.
 
 #[inline]
-unsafe fn pgaio_wref_valid(_iow: *mut PgAioWaitRef) -> bool {
-    unimplemented!() // TODO: storage/aio.c
+unsafe fn pgaio_wref_valid(iow: *mut PgAioWaitRef) -> bool {
+    crate::storage::aio::aio::pgaio_wref_valid(iow as *mut crate::storage::aio::aio::PgAioWaitRef)
 }
 
 #[inline]
-unsafe fn pgaio_wref_wait(_iow: *mut PgAioWaitRef) {
-    unimplemented!() // TODO: storage/aio.c
+unsafe fn pgaio_wref_wait(iow: *mut PgAioWaitRef) {
+    crate::storage::aio::aio::pgaio_wref_wait(iow as *mut crate::storage::aio::aio::PgAioWaitRef)
 }
 
 #[inline]
-unsafe fn pgaio_wref_clear(_iow: *mut PgAioWaitRef) {
-    unimplemented!() // TODO: storage/aio.c
+unsafe fn pgaio_wref_clear(iow: *mut PgAioWaitRef) {
+    crate::storage::aio::aio::pgaio_wref_clear(iow as *mut crate::storage::aio::aio::PgAioWaitRef)
 }
 
 // ---- smgr (storage/smgr.h) -----------------------------------------------
@@ -192,45 +186,53 @@ unsafe fn smgr_rlocator_backend(smgr: SMgrRelation) -> *mut RelFileLocatorBacken
 }
 
 #[inline]
-unsafe fn smgropen(_rlocator: RelFileLocator, _backend: c_int) -> SMgrRelation {
-    unimplemented!() // TODO: storage/smgr.c
+unsafe fn smgropen(rlocator: RelFileLocator, backend: c_int) -> SMgrRelation {
+    crate::storage::smgr::smgr::smgropen(rlocator, backend as _) as _
 }
 
 #[inline]
 unsafe fn smgrprefetch(
-    _reln: SMgrRelation,
-    _forknum: ForkNumber,
-    _blocknum: BlockNumber,
-    _nblocks: c_int,
+    reln: SMgrRelation,
+    forknum: ForkNumber,
+    blocknum: BlockNumber,
+    nblocks: c_int,
 ) -> bool {
-    unimplemented!() // TODO: storage/smgr.c
+    crate::storage::smgr::smgr::smgrprefetch(reln as _, forknum as _, blocknum, nblocks)
 }
 
 #[inline]
 unsafe fn smgrwrite(
-    _reln: SMgrRelation,
-    _forknum: ForkNumber,
-    _blocknum: BlockNumber,
-    _buffer: *const c_void,
-    _skipFsync: bool,
+    reln: SMgrRelation,
+    forknum: ForkNumber,
+    blocknum: BlockNumber,
+    buffer: *const c_void,
+    skipFsync: bool,
 ) {
-    unimplemented!() // TODO: storage/smgr.c
+    let buffers: [*const c_void; 1] = [buffer];
+    crate::storage::smgr::smgr::smgrwritev(
+        reln as _,
+        forknum as _,
+        blocknum,
+        buffers.as_ptr() as *mut *const c_void,
+        1,
+        skipFsync,
+    )
 }
 
 #[inline]
-unsafe fn smgrnblocks(_reln: SMgrRelation, _forknum: ForkNumber) -> BlockNumber {
-    unimplemented!() // TODO: storage/smgr.c
+unsafe fn smgrnblocks(reln: SMgrRelation, forknum: ForkNumber) -> BlockNumber {
+    crate::storage::smgr::smgr::smgrnblocks(reln as _, forknum as _)
 }
 
 #[inline]
 unsafe fn smgrzeroextend(
-    _reln: SMgrRelation,
-    _forknum: ForkNumber,
-    _blocknum: BlockNumber,
-    _nblocks: c_int,
-    _skipFsync: bool,
+    reln: SMgrRelation,
+    forknum: ForkNumber,
+    blocknum: BlockNumber,
+    nblocks: c_int,
+    skipFsync: bool,
 ) {
-    unimplemented!() // TODO: storage/smgr.c
+    crate::storage::smgr::smgr::smgrzeroextend(reln as _, forknum as _, blocknum, nblocks, skipFsync)
 }
 
 // ---- bufpage (storage/bufpage.h) -----------------------------------------
@@ -239,78 +241,93 @@ type Page = *mut c_char;
 type Block = *mut c_void;
 
 #[inline]
-unsafe fn PageSetChecksumInplace(_page: Page, _blkno: BlockNumber) {
-    unimplemented!() // TODO: storage/bufpage.c
+unsafe fn PageSetChecksumInplace(page: Page, blkno: BlockNumber) {
+    crate::storage::bufpage::PageSetChecksumInplace(page as _, blkno)
 }
 
 // ---- pgstat (pgstat.h / pgstat_io.c) -------------------------------------
 
 #[inline]
-unsafe fn pgstat_prepare_io_time(_track_io_timing: bool) -> instr_time {
-    unimplemented!() // TODO: utils/activity/pgstat_io.c
+unsafe fn pgstat_prepare_io_time(track: bool) -> instr_time {
+    crate::utils::activity::pgstat_io::pgstat_prepare_io_time(track)
 }
 
 #[inline]
 unsafe fn pgstat_count_io_op_time(
-    _io_object: IOObject,
-    _io_context: IOContext,
-    _io_op: IOOp,
-    _start_time: instr_time,
-    _cnt: u32,
-    _bytes: u64,
+    io_object: IOObject,
+    io_context: IOContext,
+    io_op: IOOp,
+    start_time: instr_time,
+    cnt: u32,
+    bytes: u64,
 ) {
-    unimplemented!() // TODO: utils/activity/pgstat_io.c
+    crate::utils::activity::pgstat_io::pgstat_count_io_op_time(
+        io_object, io_context, io_op, start_time, cnt, bytes,
+    )
 }
 
 #[inline]
 unsafe fn pgstat_count_io_op(
-    _io_object: IOObject,
-    _io_context: IOContext,
-    _io_op: IOOp,
-    _cnt: u32,
-    _bytes: u64,
+    io_object: IOObject,
+    io_context: IOContext,
+    io_op: IOOp,
+    cnt: u32,
+    bytes: u64,
 ) {
-    unimplemented!() // TODO: utils/activity/pgstat_io.c
+    crate::utils::activity::pgstat_io::pgstat_count_io_op(io_object, io_context, io_op, cnt, bytes)
 }
 
 // ---- resowner (utils/resowner.h) -----------------------------------------
 
 #[inline]
-unsafe fn ResourceOwnerRememberBuffer(_owner: *mut c_void, _buffer: Buffer) {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c (resowner integration)
+unsafe fn ResourceOwnerRememberBuffer(owner: *mut c_void, buffer: Buffer) {
+    crate::storage::buf_internals::ResourceOwnerRememberBuffer(owner as _, buffer)
 }
 
 #[inline]
-unsafe fn ResourceOwnerForgetBuffer(_owner: *mut c_void, _buffer: Buffer) {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c (resowner integration)
+unsafe fn ResourceOwnerForgetBuffer(owner: *mut c_void, buffer: Buffer) {
+    crate::storage::buf_internals::ResourceOwnerForgetBuffer(owner as _, buffer)
 }
 
 // ---- relpath (common/relpath.h) ------------------------------------------
 
-#[repr(C)]
-struct RelPathStr {
-    str_: [c_char; 1],
-}
+use crate::common::relpath::RelPathStr;
 
 #[inline]
-unsafe fn relpath(_rlocator: *mut RelFileLocatorBackend, _forknum: ForkNumber) -> RelPathStr {
-    unimplemented!() // TODO: common/relpath.c
+unsafe fn relpath(rlocator: *mut RelFileLocatorBackend, forknum: ForkNumber) -> RelPathStr {
+    let loc = (*rlocator).locator;
+    crate::common::relpath::GetRelationPath(
+        loc.dbOid,
+        loc.spcOid,
+        loc.relNumber,
+        (*rlocator).backend,
+        forknum,
+    )
 }
 
 #[inline]
 unsafe fn relpathbackend(
-    _rlocator: RelFileLocator,
-    _backend: c_int,
-    _forknum: ForkNumber,
+    rlocator: RelFileLocator,
+    backend: c_int,
+    forknum: ForkNumber,
 ) -> RelPathStr {
-    unimplemented!() // TODO: common/relpath.c
+    crate::common::relpath::GetRelationPath(
+        rlocator.dbOid,
+        rlocator.spcOid,
+        rlocator.relNumber,
+        backend,
+        forknum,
+    )
 }
 
 // ---- bufmgr.h debug helper -----------------------------------------------
 
 #[inline]
 unsafe fn DebugPrintBufferRefcount(_buffer: Buffer) -> *mut c_char {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+    // Only reached on a local-buffer leak (an assertion-failure path).  The
+    // canonical helper logs via elog and returns void; here we keep the
+    // C-shaped "returns a pfree-able string" API and hand back null.
+    null_mut()
 }
 
 // ---- io_direct (storage/fd.h) --------------------------------------------

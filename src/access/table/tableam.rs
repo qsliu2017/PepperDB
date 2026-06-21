@@ -563,6 +563,7 @@ pub unsafe fn table_slot_callbacks(relation: Relation) -> *const TupleTableSlotO
     tts_cb
 }
 
+#[no_mangle]
 pub unsafe fn table_slot_create(
     relation: Relation,
     reglist: *mut *mut List,
@@ -586,6 +587,31 @@ pub unsafe fn table_slot_create(
  * ----------------------------------------------------------------------------
  */
 
+pub unsafe fn table_beginscan(
+    rel: Relation,
+    snapshot: Snapshot,
+    nkeys: c_int,
+    key: *mut ScanKeyData,
+) -> TableScanDesc {
+    let flags: uint32 =
+        (SO_TYPE_SEQSCAN | SO_ALLOW_STRAT | SO_ALLOW_SYNC | SO_ALLOW_PAGEMODE) as uint32;
+
+    ((*((*rel).rd_tableam as *const TableAmRoutine)).scan_begin.unwrap())(
+        rel,
+        snapshot,
+        nkeys,
+        key,
+        std::ptr::null_mut(),
+        flags,
+    )
+}
+
+pub unsafe fn table_rescan(scan: TableScanDesc, key: *mut ScanKeyData) {
+    ((*((*(*scan).rs_rd).rd_tableam as *const TableAmRoutine)).scan_rescan.unwrap())(
+        scan, key, false, false, false, false,
+    )
+}
+
 pub unsafe fn table_beginscan_catalog(
     relation: Relation,
     nkeys: c_int,
@@ -607,6 +633,43 @@ pub unsafe fn table_beginscan_catalog(
         std::ptr::null_mut(),
         flags,
     )
+}
+
+pub unsafe fn table_beginscan_strat(
+    relation: Relation,
+    snapshot: Snapshot,
+    nkeys: c_int,
+    key: *mut ScanKeyData,
+    allow_strat: bool,
+    allow_sync: bool,
+) -> TableScanDesc {
+    let mut flags: uint32 = (SO_TYPE_SEQSCAN | SO_ALLOW_PAGEMODE) as uint32;
+    if allow_strat { flags |= SO_ALLOW_STRAT as uint32; }
+    if allow_sync { flags |= SO_ALLOW_SYNC as uint32; }
+    ((*((*relation).rd_tableam as *const TableAmRoutine)).scan_begin.unwrap())(
+        relation, snapshot, nkeys, key, std::ptr::null_mut(), flags,
+    )
+}
+
+pub unsafe fn table_endscan(scan: TableScanDesc) {
+    ((*((*(*scan).rs_rd).rd_tableam as *const TableAmRoutine)).scan_end.unwrap())(scan)
+}
+
+pub unsafe fn table_scan_getnextslot(
+    sscan: TableScanDesc,
+    direction: ScanDirection,
+    slot: *mut TupleTableSlot,
+) -> bool {
+    (*slot).tts_tableOid = RelationGetRelid((*sscan).rs_rd);
+    ((*((*(*sscan).rs_rd).rd_tableam as *const TableAmRoutine)).scan_getnextslot.unwrap())(sscan, direction, slot)
+}
+
+pub unsafe fn table_tuple_satisfies_snapshot(
+    rel: Relation,
+    slot: *mut TupleTableSlot,
+    snapshot: Snapshot,
+) -> bool {
+    ((*((*rel).rd_tableam as *const TableAmRoutine)).tuple_satisfies_snapshot.unwrap())(rel, slot, snapshot)
 }
 
 
@@ -649,6 +712,10 @@ pub unsafe fn table_parallelscan_initialize(
         Assert!(snapshot == SnapshotAny);
         (*pscan).phs_snapshot_any = true;
     }
+}
+
+pub unsafe fn table_parallelscan_reinitialize(rel: Relation, pscan: ParallelTableScanDesc) {
+    ((*((*rel).rd_tableam as *const TableAmRoutine)).parallelscan_reinitialize.unwrap())(rel, pscan)
 }
 
 pub unsafe fn table_beginscan_parallel(
@@ -1231,6 +1298,10 @@ pub unsafe fn table_index_fetch_end(scan: *mut IndexFetchTableData) {
     ((*((*(*scan).rel).rd_tableam as *const TableAmRoutine)).index_fetch_end.unwrap())(scan);
 }
 
+pub unsafe fn table_index_fetch_reset(scan: *mut IndexFetchTableData) {
+    ((*((*(*scan).rel).rd_tableam as *const TableAmRoutine)).index_fetch_reset.unwrap())(scan);
+}
+
 /*
  * Fetches, as part of an index scan, tuple at `tid` into `slot`.
  */
@@ -1313,8 +1384,8 @@ pub unsafe fn table_tuple_update(
  * ----------------------------------------------------------------------------
  */
 
-unsafe fn rint(_x: f64) -> f64 {
-    unimplemented!() // TODO: math.h
+unsafe fn rint(x: f64) -> f64 {
+    x.round_ties_even()
 }
 
 /* add_size - Size addition with overflow check (shmem.h) */
@@ -1333,72 +1404,58 @@ static mut CheckXidAlive: TransactionId = 0;
 static mut bsysscan: bool = false;
 
 /* TODO: storage/itemptr.h accessors */
-unsafe fn ItemPointerGetBlockNumberNoCheck(_pointer: ItemPointer) -> BlockNumber {
-    unimplemented!()
-}
-unsafe fn ItemPointerGetOffsetNumberNoCheck(_pointer: ItemPointer) -> OffsetNumber {
-    unimplemented!()
-}
+unsafe fn ItemPointerGetBlockNumberNoCheck(_pointer: ItemPointer) -> BlockNumber { crate::storage::itemptr::ItemPointerGetBlockNumberNoCheck(_pointer as _) }
+unsafe fn ItemPointerGetOffsetNumberNoCheck(_pointer: ItemPointer) -> OffsetNumber { crate::storage::itemptr::ItemPointerGetOffsetNumberNoCheck(_pointer as _) }
 
 /* TODO: executor/tuptable.h, access/htup */
 unsafe fn MakeSingleTupleTableSlot(
     _tupdesc: *mut c_void,
     _tts_ops: *const TupleTableSlotOps,
 ) -> *mut TupleTableSlot {
-    unimplemented!()
+    crate::executor::execTuples::MakeSingleTupleTableSlot(_tupdesc as _, _tts_ops as _) as _
 }
 unsafe fn ExecDropSingleTupleTableSlot(_slot: *mut TupleTableSlot) {
-    unimplemented!()
+    crate::executor::execTuples::ExecDropSingleTupleTableSlot(_slot as _)
 }
 
 /* TODO: utils/rel.h accessors */
 unsafe fn RelationGetRelid(_relation: Relation) -> Oid {
-    unimplemented!()
+    crate::utils::rel::RelationGetRelid(_relation as _)
 }
 unsafe fn RelationGetDescr(_relation: Relation) -> *mut c_void {
-    unimplemented!()
+    crate::utils::rel::RelationGetDescr(_relation as _) as _
 }
 unsafe fn RelationGetRelationName(_relation: Relation) -> *const c_char {
-    unimplemented!()
+    crate::utils::rel::RelationGetRelationName(_relation as _)
 }
 unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber {
-    unimplemented!()
+    crate::storage::buffer::bufmgr::RelationGetNumberOfBlocksInFork(_relation as _, 0)
 }
-unsafe fn RelationGetSmgr(_relation: Relation) -> *mut c_void {
-    unimplemented!()
-}
-unsafe fn RelationUsesLocalBuffers(_relation: Relation) -> bool {
-    unimplemented!()
-}
-unsafe fn RelationGetFillFactor(_relation: Relation, _defaultff: c_int) -> c_int {
-    unimplemented!()
+unsafe fn RelationGetSmgr(_relation: Relation) -> *mut c_void { crate::storage::buffer::bufmgr::RelationGetSmgr(_relation) as _ }
+unsafe fn RelationUsesLocalBuffers(_relation: Relation) -> bool { crate::access::nbtree::nbtpage::RelationUsesLocalBuffers(_relation) }
+unsafe fn RelationGetFillFactor(_relation: Relation, defaultff: c_int) -> c_int {
+    defaultff
 }
 
-/* TODO: utils/snapshot.h, utils/snapmgr.h */
-pub const SnapshotAny: Snapshot = std::ptr::null_mut();
+/* SnapshotAny == &SnapshotAnyData (utils/snapmgr.h) */
+#[allow(non_upper_case_globals)]
+pub const SnapshotAny: Snapshot =
+    &raw mut crate::utils::time::snapmgr::SnapshotAnyData as Snapshot;
 unsafe fn RegisterSnapshot(snapshot: Snapshot) -> Snapshot {
-    snapshot
+    crate::utils::time::snapmgr::RegisterSnapshot(snapshot as _) as _
 }
-unsafe fn GetCatalogSnapshot(_relid: Oid) -> Snapshot {
-    unimplemented!()
+unsafe fn GetCatalogSnapshot(relid: Oid) -> Snapshot {
+    crate::utils::time::snapmgr::GetCatalogSnapshot(relid) as _
 }
 unsafe fn IsMVCCSnapshot(_snapshot: Snapshot) -> bool {
     unimplemented!()
 }
-unsafe fn EstimateSnapshotSpace(_snapshot: Snapshot) -> Size {
-    unimplemented!()
-}
-unsafe fn SerializeSnapshot(_snapshot: Snapshot, _start_address: *mut c_char) {
-    unimplemented!()
-}
-unsafe fn RestoreSnapshot(_start_address: *mut c_char) -> Snapshot {
-    unimplemented!()
-}
+unsafe fn EstimateSnapshotSpace(_snapshot: Snapshot) -> Size { crate::utils::time::snapmgr::EstimateSnapshotSpace(_snapshot) }
+unsafe fn SerializeSnapshot(_snapshot: Snapshot, _start_address: *mut c_char) { crate::utils::time::snapmgr::SerializeSnapshot(_snapshot, _start_address) }
+unsafe fn RestoreSnapshot(_start_address: *mut c_char) -> Snapshot { crate::utils::time::snapmgr::RestoreSnapshot(_start_address) }
 
 /* TODO: access/xact.h */
-unsafe fn GetCurrentCommandId(_used: bool) -> CommandId {
-    unimplemented!()
-}
+unsafe fn GetCurrentCommandId(_used: bool) -> CommandId { crate::access::transam::xact::GetCurrentCommandId(_used) }
 
 /* TODO: storage/smgr.h */
 unsafe fn smgrnblocks(_reln: *mut c_void, _forknum: ForkNumber) -> BlockNumber {
@@ -1406,30 +1463,26 @@ unsafe fn smgrnblocks(_reln: *mut c_void, _forknum: ForkNumber) -> BlockNumber {
 }
 
 /* TODO: optimizer/plancat.c, optimizer/cost.h */
-unsafe fn clamp_row_est(_nrows: f64) -> f64 {
-    unimplemented!()
+unsafe fn clamp_row_est(nrows: f64) -> f64 {
+    crate::optimizer::path::costsize::clamp_row_est(nrows)
 }
-unsafe fn get_rel_data_width(_rel: Relation, _attr_widths: *mut int32) -> int32 {
-    unimplemented!()
+unsafe fn get_rel_data_width(rel: Relation, attr_widths: *mut int32) -> int32 {
+    crate::optimizer::util::plancat::get_rel_data_width(rel as _, attr_widths)
 }
 
 /* TODO: access/syncscan.h */
-unsafe fn ss_get_location(_rel: Relation, _relnblocks: BlockNumber) -> BlockNumber {
-    unimplemented!()
-}
-unsafe fn ss_report_location(_rel: Relation, _location: BlockNumber) {
-    unimplemented!()
-}
+unsafe fn ss_get_location(_rel: Relation, _relnblocks: BlockNumber) -> BlockNumber { crate::access::common::syncscan::ss_get_location(_rel, _relnblocks) }
+unsafe fn ss_report_location(_rel: Relation, _location: BlockNumber) { crate::access::common::syncscan::ss_report_location(_rel, _location) }
 
 /* TODO: storage/spin.h */
 unsafe fn SpinLockInit(_lock: *mut slock_t) {
-    unimplemented!()
+    crate::storage::spin::SpinLockInit(_lock as _)
 }
 unsafe fn SpinLockAcquire(_lock: *mut slock_t) {
-    unimplemented!()
+    crate::storage::spin::SpinLockAcquire(_lock as _)
 }
 unsafe fn SpinLockRelease(_lock: *mut slock_t) {
-    unimplemented!()
+    crate::storage::spin::SpinLockRelease(_lock as _)
 }
 
 /* TODO: port/atomics.h */

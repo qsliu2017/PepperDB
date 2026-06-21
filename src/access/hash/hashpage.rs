@@ -288,34 +288,22 @@ pub struct ItemPointerData {
 // Stubbed callees from other (not-yet-ported) translation units.
 // ---------------------------------------------------------------------------
 
-unsafe fn _hash_spareindex(_num_bucket: uint32) -> uint32 {
-    unimplemented!() // TODO(pg-port): access/hashutil.c
-}
+unsafe fn _hash_spareindex(_num_bucket: uint32) -> uint32 { crate::access::hash::hashutil::_hash_spareindex(_num_bucket) }
 
-unsafe fn _hash_get_totalbuckets(_splitpoint_phase: uint32) -> uint32 {
-    unimplemented!() // TODO(pg-port): access/hashutil.c
-}
+unsafe fn _hash_get_totalbuckets(_splitpoint_phase: uint32) -> uint32 { crate::access::hash::hashutil::_hash_get_totalbuckets(_splitpoint_phase) }
 
-unsafe fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: c_int) {
-    unimplemented!() // TODO(pg-port): access/hashutil.c
-}
+unsafe fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: c_int) { crate::access::hash::hashutil::_hash_checkpage(_rel, _buf, _flags) }
 
 unsafe fn _hash_hashkey2bucket(
     _hashkey: uint32,
     _maxbucket: uint32,
     _highmask: uint32,
     _lowmask: uint32,
-) -> Bucket {
-    unimplemented!() // TODO(pg-port): access/hashutil.c
-}
+) -> Bucket { crate::access::hash::hashutil::_hash_hashkey2bucket(_hashkey, _maxbucket, _highmask, _lowmask) }
 
-unsafe fn _hash_get_indextuple_hashkey(_itup: IndexTuple) -> uint32 {
-    unimplemented!() // TODO(pg-port): access/hashutil.c
-}
+unsafe fn _hash_get_indextuple_hashkey(_itup: IndexTuple) -> uint32 { crate::access::hash::hashutil::_hash_get_indextuple_hashkey(_itup) }
 
-unsafe fn _hash_get_newblock_from_oldbucket(_rel: Relation, _old_bucket: Bucket) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): access/hashutil.c
-}
+unsafe fn _hash_get_newblock_from_oldbucket(_rel: Relation, _old_bucket: Bucket) -> BlockNumber { crate::access::hash::hashutil::_hash_get_newblock_from_oldbucket(_rel, _old_bucket) }
 
 unsafe fn _hash_pgaddmultitup(
     _rel: Relation,
@@ -323,22 +311,16 @@ unsafe fn _hash_pgaddmultitup(
     _itups: *mut IndexTuple,
     _itup_offsets: *mut OffsetNumber,
     _nitups: uint16,
-) {
-    unimplemented!() // TODO(pg-port): access/hashinsert.c
-}
+) { crate::access::hash::hashinsert::_hash_pgaddmultitup(_rel, _buf, _itups, _itup_offsets, _nitups) }
 
 unsafe fn _hash_addovflpage(
     _rel: Relation,
     _metabuf: Buffer,
     _buf: Buffer,
     _retain_pin: bool,
-) -> Buffer {
-    unimplemented!() // TODO(pg-port): access/hashovfl.c
-}
+) -> Buffer { crate::access::hash::hashovfl::_hash_addovflpage(_rel, _metabuf, _buf, _retain_pin) }
 
-unsafe fn _hash_initbitmapbuffer(_buf: Buffer, _bmsize: uint16, _initpage: bool) {
-    unimplemented!() // TODO(pg-port): access/hashovfl.c
-}
+unsafe fn _hash_initbitmapbuffer(_buf: Buffer, _bmsize: uint16, _initpage: bool) { crate::access::hash::hashovfl::_hash_initbitmapbuffer(_buf, _bmsize, _initpage) }
 
 unsafe fn hashbucketcleanup(
     _rel: Relation,
@@ -358,9 +340,7 @@ unsafe fn hashbucketcleanup(
     unimplemented!() // TODO(pg-port): access/hash.c
 }
 
-unsafe fn index_getprocid(_irel: Relation, _attnum: AttrNumber, _procnum: uint16) -> RegProcedure {
-    unimplemented!() // TODO(pg-port): access/index/indexam.c
-}
+unsafe fn index_getprocid(_irel: Relation, _attnum: AttrNumber, _procnum: uint16) -> RegProcedure { crate::access::index::indexam::index_getprocid(_irel, _attnum, _procnum) }
 
 type AttrNumber = i16;
 
@@ -395,15 +375,11 @@ unsafe fn ExtendBufferedRel(
     _forkNum: ForkNumber,
     _strategy: BufferAccessStrategy,
     _flags: uint32,
-) -> Buffer {
-    unimplemented!() // TODO(pg-port): storage/buffer/bufmgr.c
-}
+) -> Buffer { crate::storage::buffer::bufmgr::ExtendBufferedRel(_bmr, _forkNum, _strategy as _, _flags) }
 
-type BufferManagerRelation = *mut c_void;
+type BufferManagerRelation = crate::storage::buffer::bufmgr::BufferManagerRelation;
 
-unsafe fn BMR_REL(_rel: Relation) -> BufferManagerRelation {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
-}
+unsafe fn BMR_REL(_rel: Relation) -> BufferManagerRelation { crate::storage::buffer::bufmgr::BMR_REL(_rel as _) }
 
 unsafe fn ReleaseBuffer(_buffer: Buffer) {
     unimplemented!() // TODO(pg-port): storage/buffer/bufmgr.c
@@ -417,13 +393,9 @@ unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
     unimplemented!() // TODO(pg-port): storage/buffer/bufmgr.c
 }
 
-unsafe fn ConditionalLockBufferForCleanup(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): storage/buffer/bufmgr.c
-}
+unsafe fn ConditionalLockBufferForCleanup(_buffer: Buffer) -> bool { crate::storage::buffer::bufmgr::ConditionalLockBufferForCleanup(_buffer) }
 
-unsafe fn IsBufferCleanupOK(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): storage/buffer/bufmgr.c
-}
+unsafe fn IsBufferCleanupOK(_buffer: Buffer) -> bool { crate::storage::buffer::bufmgr::IsBufferCleanupOK(_buffer) }
 
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
     unimplemented!() // TODO(pg-port): storage/buffer/bufmgr.c
@@ -433,17 +405,13 @@ unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     unimplemented!() // TODO(pg-port): storage/bufmgr.h
 }
 
-unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
-}
+unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size { crate::access::nbtree::nbtpage::BufferGetPageSize(_buffer) }
 
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO(pg-port): storage/buffer/bufmgr.c
 }
 
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 
 unsafe fn PageInit(_page: Page, _pageSize: Size, _specialSize: Size) {
     unimplemented!() // TODO(pg-port): storage/bufpage.c
@@ -453,13 +421,9 @@ unsafe fn PageSetChecksumInplace(_page: Page, _blkno: BlockNumber) {
     unimplemented!() // TODO(pg-port): storage/bufpage.c
 }
 
-unsafe fn RelationGetNumberOfBlocksInFork(_relation: Relation, _forkNum: ForkNumber) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): storage/smgr/smgr.c
-}
+unsafe fn RelationGetNumberOfBlocksInFork(_relation: Relation, _forkNum: ForkNumber) -> BlockNumber { crate::storage::buffer::bufmgr::RelationGetNumberOfBlocksInFork(_relation, _forkNum) }
 
-unsafe fn RelationGetSmgr(_rel: Relation) -> SMgrRelation {
-    unimplemented!() // TODO(pg-port): utils/rel.h
-}
+unsafe fn RelationGetSmgr(_rel: Relation) -> SMgrRelation { crate::storage::buffer::bufmgr::RelationGetSmgr(_rel) as _ }
 
 type SMgrRelation = *mut c_void;
 
@@ -469,17 +433,11 @@ unsafe fn smgrextend(
     _blocknum: BlockNumber,
     _buffer: *const c_char,
     _skipFsync: bool,
-) {
-    unimplemented!() // TODO(pg-port): storage/smgr/smgr.c
-}
+) { crate::storage::smgr::smgr::smgrextend(_reln as _, _forknum, _blocknum, _buffer as _, _skipFsync) }
 
-unsafe fn RelationNeedsWAL(_relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_relation) }
 
-unsafe fn PredicateLockPageSplit(_rel: Relation, _oldblkno: BlockNumber, _newblkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/predicate.c
-}
+unsafe fn PredicateLockPageSplit(_rel: Relation, _oldblkno: BlockNumber, _newblkno: BlockNumber) { crate::storage::lmgr::predicate::PredicateLockPageSplit(_rel as _, _oldblkno, _newblkno) }
 
 unsafe fn CHECK_FOR_INTERRUPTS() {
     unimplemented!() // TODO(pg-port): miscadmin.h
@@ -491,9 +449,7 @@ unsafe fn log_newpage(
     _blkno: BlockNumber,
     _page: Page,
     _page_std: bool,
-) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): access/transam/xloginsert.c
-}
+) -> XLogRecPtr { crate::access::transam::xloginsert::log_newpage(_rlocator as _, _forknum, _blkno, _page, _page_std) }
 
 type RelFileLocator = c_void;
 
@@ -861,7 +817,7 @@ pub unsafe fn _hash_init(rel: Relation, num_tuples: f64, forkNum: ForkNumber) ->
         ffactor = 10;
     }
 
-    procid = index_getprocid(rel, 1, HASHSTANDARD_PROC);
+    procid = index_getprocid(rel, 1, HASHSTANDARD_PROC as u16);
 
     /*
      * We initialize the metapage, the first N bucket pages, and the first
@@ -1982,7 +1938,7 @@ pub unsafe fn _hash_finish_split(
     let bucket_nblkno: BlockNumber;
     let mut npageopaque: HashPageOpaque;
     let nbucket: Bucket;
-    let mut found: bool;
+    let mut found: bool = false;
 
     /* Initialize hash tables used to track TIDs */
     hash_ctl.keysize = core::mem::size_of::<ItemPointerData>() as Size;

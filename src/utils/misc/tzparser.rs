@@ -60,9 +60,7 @@ pub struct TimeZoneAbbrevTable {
 unsafe fn ConvertTimeZoneAbbrevs(
     _abbrevs: *mut tzEntry,
     _n: c_int,
-) -> *mut TimeZoneAbbrevTable {
-    unimplemented!()
-}
+) -> *mut TimeZoneAbbrevTable { unimplemented!() }
 
 /* ----------------------------------------------------------------
  * storage/fd.h: AllocateFile/AllocateDir/FreeFile/FreeDir.
@@ -630,7 +628,7 @@ pub unsafe fn load_tzoffsets(filename: *const c_char) -> *mut TimeZoneAbbrevTabl
      */
     tmpContext = AllocSetContextCreate!(
         CurrentMemoryContext,
-        "TZParserMemory",
+        c"TZParserMemory".as_ptr(),
         ALLOCSET_SMALL_SIZES
     ) as *mut _;
     oldContext = MemoryContextSwitchTo(tmpContext);

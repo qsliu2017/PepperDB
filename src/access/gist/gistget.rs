@@ -187,9 +187,7 @@ pub struct GISTSearchHeapItemUnion {
 unsafe fn ReadBuffer(_reln: Relation, _blockNum: BlockNumber) -> Buffer {
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/buffer/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
@@ -205,15 +203,11 @@ unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
 unsafe fn BufferGetLSNAtomic(_buffer: Buffer) -> crate::access::transam::xlogdefs::XLogRecPtr {
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
-unsafe fn MarkBufferDirtyHint(_buffer: Buffer, _buffer_std: bool) {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
-}
+unsafe fn MarkBufferDirtyHint(_buffer: Buffer, _buffer_std: bool) { crate::storage::buffer::bufmgr::MarkBufferDirtyHint(_buffer, _buffer_std) }
 unsafe fn PredicateLockPage(_relation: Relation, _blkno: BlockNumber, _snapshot: *mut std::ffi::c_void) {
     unimplemented!() // TODO: storage/lmgr/predicate.c
 }
-unsafe fn gistcheckpage(_rel: Relation, _buf: Buffer) {
-    unimplemented!() // TODO: access/gist/gistutil.c
-}
+unsafe fn gistcheckpage(_rel: Relation, _buf: Buffer) { unimplemented!() }
 unsafe fn GistPageGetOpaque(_page: Page) -> GISTPageOpaque {
     unimplemented!() // TODO: access/gist.h
 }
@@ -232,9 +226,7 @@ unsafe fn GistPageGetNSN(_page: Page) -> GistNSN {
 unsafe fn GistMarkPageHasGarbage(_page: Page) {
     unimplemented!() // TODO: access/gist.h
 }
-unsafe fn GistTupleIsInvalid(_tuple: IndexTuple) -> bool {
-    unimplemented!() // TODO: access/gist_private.h
-}
+unsafe fn GistTupleIsInvalid(_tuple: IndexTuple) -> bool { unimplemented!() }
 unsafe fn PageGetItemId(_page: Page, _offnum: OffsetNumber) -> ItemId {
     unimplemented!() // TODO: storage/bufpage.h
 }
@@ -244,9 +236,7 @@ unsafe fn PageGetItem(_page: Page, _iid: ItemId) -> *mut std::ffi::c_void {
 unsafe fn PageGetMaxOffsetNumber(_page: Page) -> OffsetNumber {
     unimplemented!() // TODO: storage/bufpage.h
 }
-unsafe fn ItemIdMarkDead(_iid: ItemId) {
-    unimplemented!() // TODO: storage/itemid.h
-}
+unsafe fn ItemIdMarkDead(_iid: ItemId) { unimplemented!() }
 unsafe fn ItemIdIsDead(_iid: ItemId) -> bool {
     unimplemented!() // TODO: storage/itemid.h
 }
@@ -277,9 +267,7 @@ unsafe fn gistdentryinit(
     _o: OffsetNumber,
     _l: bool,
     _isNull: bool,
-) {
-    unimplemented!() // TODO: access/gist/gistutil.c
-}
+) { unimplemented!() }
 unsafe fn gistFetchTuple(
     _giststate: *mut GISTSTATEData,
     _r: Relation,
@@ -295,18 +283,10 @@ unsafe fn FunctionCall5Coll(
     _arg3: Datum,
     _arg4: Datum,
     _arg5: Datum,
-) -> Datum {
-    unimplemented!() // TODO: utils/fmgr/fmgr.c
-}
-unsafe fn pairingheap_is_empty(_heap: *mut pairingheap) -> bool {
-    unimplemented!() // TODO: lib/pairingheap.c
-}
-unsafe fn pairingheap_remove_first(_heap: *mut pairingheap) -> *mut pairingheap_node {
-    unimplemented!() // TODO: lib/pairingheap.c
-}
-unsafe fn pairingheap_add(_heap: *mut pairingheap, _node: *mut pairingheap_node) {
-    unimplemented!() // TODO: lib/pairingheap.c
-}
+) -> Datum { unimplemented!() }
+unsafe fn pairingheap_is_empty(_heap: *mut pairingheap) -> bool { unimplemented!() }
+unsafe fn pairingheap_remove_first(_heap: *mut pairingheap) -> *mut pairingheap_node { unimplemented!() }
+unsafe fn pairingheap_add(_heap: *mut pairingheap, _node: *mut pairingheap_node) { unimplemented!() }
 unsafe fn tbm_add_tuples(
     _tbm: *mut TIDBitmap,
     _tids: *mut ItemPointerData,
@@ -320,15 +300,9 @@ unsafe fn index_store_float8_orderby_distances(
     _orderByTypes: *mut Oid,
     _distances: *mut IndexOrderByDistance,
     _recheckOrderBy: bool,
-) {
-    unimplemented!() // TODO: access/index/indexam.c
-}
-unsafe fn index_getprocid(_irel: Relation, _attnum: c_int, _procnum: u16) -> Oid {
-    unimplemented!() // TODO: access/index/genam.c
-}
-unsafe fn IndexRelationGetNumberOfKeyAttributes(_relation: Relation) -> c_int {
-    unimplemented!() // TODO: utils/rel.h
-}
+) { unimplemented!() }
+unsafe fn index_getprocid(_irel: Relation, _attnum: c_int, _procnum: u16) -> Oid { unimplemented!() }
+unsafe fn IndexRelationGetNumberOfKeyAttributes(_relation: Relation) -> c_int { unimplemented!() }
 unsafe fn get_float8_infinity() -> f64 {
     unimplemented!() // TODO: utils/float.h
 }

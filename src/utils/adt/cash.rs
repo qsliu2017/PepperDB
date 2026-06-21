@@ -262,6 +262,24 @@ unsafe fn cash_div_int64(c: Cash, i: int64) -> Cash {
     c / i
 }
 
+/*
+ * Report an input error through the real errsave mechanism so
+ * pg_input_is_valid / pg_input_error_info see a populated ErrorSaveContext;
+ * for a null/non-ErrorSaveContext this raises a hard ERROR.
+ */
+#[inline]
+unsafe fn cash_input_soft_error(escontext: *mut crate::nodes::nodes::Node, errcode_val: c_int, msg: String) {
+    if crate::utils::error::elog_impl::errsave_start(escontext, core::ptr::null()) {
+        crate::utils::error::elog_impl::errcode_impl(errcode_val);
+        if let Ok(c) = std::ffi::CString::new(msg) {
+            crate::utils::error::elog_impl::errmsg_c(c.as_ptr());
+        }
+        crate::utils::error::elog_impl::errsave_finish(
+            escontext, c"cash.rs".as_ptr(), 0, c"cash_in".as_ptr(),
+        );
+    }
+}
+
 /* cash_in()
  * Convert a string to a cash data type.
  * Format is [$]###[,]###[.##]
@@ -389,16 +407,9 @@ pub unsafe fn cash_in(fcinfo: FunctionCallInfo) -> Datum {
                 || pg_sub_s64_overflow(value, digit, &mut value)
             {
                 // ereturn(escontext, ...) -> hard ERROR for now
-                let _ = escontext;
-                let _ = errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE);
-                ereport!(
-                    ERROR,
-                    errmsg!(
-                        "value \"{}\" is out of range for type {}",
-                        cstr(str),
-                        "money"
-                    )
-                );
+                cash_input_soft_error(escontext as *mut crate::nodes::nodes::Node, 50331778,
+                format!("value \"{}\" is out of range for type money", std::ffi::CStr::from_ptr(str).to_string_lossy()));
+            return 0 as Datum;
             }
 
             if seen_dot {
@@ -423,32 +434,18 @@ pub unsafe fn cash_in(fcinfo: FunctionCallInfo) -> Datum {
     if isdigit(*s as u8 as c_int) != 0 && *s as u8 >= b'5' {
         /* remember we build the value in the negative */
         if pg_sub_s64_overflow(value, 1, &mut value) {
-            let _ = escontext;
-            let _ = errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE);
-            ereport!(
-                ERROR,
-                errmsg!(
-                    "value \"{}\" is out of range for type {}",
-                    cstr(str),
-                    "money"
-                )
-            );
+            cash_input_soft_error(escontext as *mut crate::nodes::nodes::Node, 50331778,
+                format!("value \"{}\" is out of range for type money", std::ffi::CStr::from_ptr(str).to_string_lossy()));
+            return 0 as Datum;
         }
     }
 
     /* adjust for less than required decimal places */
     while dec < fpoint as Cash {
         if pg_mul_s64_overflow(value, 10, &mut value) {
-            let _ = escontext;
-            let _ = errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE);
-            ereport!(
-                ERROR,
-                errmsg!(
-                    "value \"{}\" is out of range for type {}",
-                    cstr(str),
-                    "money"
-                )
-            );
+            cash_input_soft_error(escontext as *mut crate::nodes::nodes::Node, 50331778,
+                format!("value \"{}\" is out of range for type money", std::ffi::CStr::from_ptr(str).to_string_lossy()));
+            return 0 as Datum;
         }
         dec += 1;
     }
@@ -472,16 +469,9 @@ pub unsafe fn cash_in(fcinfo: FunctionCallInfo) -> Datum {
         } else if strncmp(s, csymbol, strlen(csymbol)) == 0 {
             s = s.add(strlen(csymbol));
         } else {
-            let _ = escontext;
-            let _ = errcode(ERRCODE_INVALID_TEXT_REPRESENTATION);
-            ereport!(
-                ERROR,
-                errmsg!(
-                    "invalid input syntax for type {}: \"{}\"",
-                    "money",
-                    cstr(str)
-                )
-            );
+            cash_input_soft_error(escontext as *mut crate::nodes::nodes::Node, 33685634,
+                format!("invalid input syntax for type money: \"{}\"", std::ffi::CStr::from_ptr(str).to_string_lossy()));
+            return 0 as Datum;
         }
     }
 
@@ -491,16 +481,9 @@ pub unsafe fn cash_in(fcinfo: FunctionCallInfo) -> Datum {
      */
     if sgn > 0 {
         if value == PG_INT64_MIN {
-            let _ = escontext;
-            let _ = errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE);
-            ereport!(
-                ERROR,
-                errmsg!(
-                    "value \"{}\" is out of range for type {}",
-                    cstr(str),
-                    "money"
-                )
-            );
+            cash_input_soft_error(escontext as *mut crate::nodes::nodes::Node, 50331778,
+                format!("value \"{}\" is out of range for type money", std::ffi::CStr::from_ptr(str).to_string_lossy()));
+            return 0 as Datum;
         }
         result = -value;
     } else {

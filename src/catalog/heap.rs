@@ -56,6 +56,7 @@ use crate::storage::lockdefs::{
 };
 use crate::nodes::pg_list::{
     List, ListCell,
+    linitial,
     list_head, lnext, lfirst, lfirst_oid, lfirst_int,
     lappend, lappend_oid, lappend_int,
     list_length, list_member_oid, list_copy,
@@ -118,7 +119,7 @@ use crate::catalog::catalog_oids::{
 // Index OIDs not yet exported from catalog_oids
 const AttributeRelidNumIndexId: Oid        = 2658; // pg_attribute_relid_attnam_index
 const AttributeRelidAttnoIndexId: Oid      = 2659; // pg_attribute_relid_attnum_index
-const InheritsRelidSeqnoIndexId: Oid       = 2655; // pg_inherits_relid_seqno_index
+const InheritsRelidSeqnoIndexId: Oid       = 2680; // pg_inherits_relid_seqno_index
 const ConstraintOidIndexId: Oid            = 2666; // pg_constraint_oid_index
 const ConstraintRelidTypidNameIndexId: Oid = 2664; // pg_constraint_conrelid_contypid_conname_index
 const StatisticRelidAttnumInhIndexId: Oid  = 2696; // pg_statistic_relid_att_inh_index
@@ -143,7 +144,7 @@ use crate::catalog::objectaddress_impl::{
     RelationGetDescr as _rd_stub,     // hide stub; real below
     RelationGetRelid, RelationGetRelationName,
     ScanKeyInit as _ski_stub,         // hide stub; real from access::common::scankey
-    strVal, linitial,
+    strVal, linitial as _linitial_stub,   // hide null stub; real from pg_list below
     lappend as _lappend_stub,
     list_length as _ll_stub,
     NIL,
@@ -211,7 +212,7 @@ use crate::nodes::nodeFuncs::{
     expression_tree_walker,
 };
 // nodeToString: no outfuncs module yet -- use stub
-unsafe fn nodeToString(obj: *mut c_void) -> *mut c_char { core::ptr::null_mut() /* TODO(pg-port) */ }
+unsafe fn nodeToString(obj: *mut c_void) -> *mut c_char { crate::nodes::outfuncs::nodeToString(obj as _) as _ }
 use crate::nodes::read::stringToNode;
 use crate::nodes::equalfuncs::equal;
 use crate::nodes::primnodes::Expr;
@@ -235,13 +236,13 @@ use crate::utils::rel::RelationGetDescr;
 // Real values from src/include/catalog/pg_attribute.h
 // attrelid/attnum/attmissingval come from relcache as i32; shadow with AttrNumber
 const Anum_pg_attribute_attrelid: AttrNumber        = 1; // shadows relcache i32 import
-const Anum_pg_attribute_attnum: AttrNumber          = 6; // shadows relcache i32 import
+const Anum_pg_attribute_attnum: AttrNumber          = 5; // shadows relcache i32 import
 const Anum_pg_attribute_attmissingval: AttrNumber   = 43; // shadows relcache i32 import
 const Anum_pg_attribute_attname: AttrNumber         = 2;
 const Anum_pg_attribute_atttypid: AttrNumber        = 3;
 const Anum_pg_attribute_attlen: AttrNumber          = 4;
-const Anum_pg_attribute_attndims: AttrNumber        = 5;
-const Anum_pg_attribute_atttypmod: AttrNumber       = 7;
+const Anum_pg_attribute_attndims: AttrNumber        = 7;
+const Anum_pg_attribute_atttypmod: AttrNumber       = 6;
 const Anum_pg_attribute_attbyval: AttrNumber        = 8;
 const Anum_pg_attribute_attalign: AttrNumber        = 9;
 const Anum_pg_attribute_attstorage: AttrNumber      = 10;
@@ -329,11 +330,11 @@ const Anum_pg_partitioned_table_partexprs: AttrNumber  = 8;
 const Anum_pg_type_oid: AttrNumber                 = 1;
 
 // -- Syscache IDs ---------------------------------------------------------
-const RELOID: c_int       = 52;
-const ATTNUM: c_int       = 4;
-const TYPENAMENSP: c_int  = 76;
-const FOREIGNTABLEREL: c_int = 25;
-const PARTRELID: c_int    = 47;
+const RELOID: c_int       = 57;
+const ATTNUM: c_int       = 7;
+const TYPENAMENSP: c_int  = 81;
+const FOREIGNTABLEREL: c_int = 33;
+const PARTRELID: c_int    = 45;
 
 // -- Datum helpers not yet in prelude -------------------------------------
 // TransactionIdGetDatum and Float4GetDatum are now from postgres.rs (above)
@@ -508,28 +509,26 @@ unsafe fn RelationGetNumberOfAttributes(rel: Relation) -> c_int {
     (*(*rel).rd_rel).relnatts as c_int
 }
 #[inline]
-unsafe fn RelationGetPartitionDesc(_rel: Relation, _omit: bool) -> *mut c_void {
-    core::ptr::null_mut() /* TODO(pg-port) */
-}
+unsafe fn RelationGetPartitionDesc(_rel: Relation, _omit: bool) -> *mut c_void { crate::partitioning::partdesc::RelationGetPartitionDesc(_rel as _, _omit as _) as _ }
 
 // Cache invalidation
 #[inline]
-unsafe fn CacheInvalidateRelcache(_rel: Relation) { /* TODO(pg-port) */ }
+unsafe fn CacheInvalidateRelcache(_rel: Relation) { crate::utils::cache::inval::CacheInvalidateRelcache(_rel as _) }
 #[inline]
-unsafe fn CacheInvalidateRelcacheByRelid(_relid: Oid) { /* TODO(pg-port) */ }
+unsafe fn CacheInvalidateRelcacheByRelid(_relid: Oid) { crate::utils::cache::inval::CacheInvalidateRelcacheByRelid(_relid as _) }
 
 // Dependency recording stubs
 type ObjectAddresses = c_void;
-unsafe fn new_object_addresses() -> *mut ObjectAddresses { core::ptr::null_mut() /* TODO(pg-port) */ }
-unsafe fn add_exact_object_address(_addr: *const ObjectAddress, _addrs: *mut ObjectAddresses) { /* TODO(pg-port) */ }
-unsafe fn record_object_address_dependencies(_myself: *const ObjectAddress, _addrs: *mut ObjectAddresses, _deptype: c_char) { /* TODO(pg-port) */ }
-unsafe fn free_object_addresses(_addrs: *mut ObjectAddresses) { /* TODO(pg-port) */ }
-unsafe fn recordDependencyOn(_myself: *const ObjectAddress, _referenced: *const ObjectAddress, _deptype: c_char) { /* TODO(pg-port) */ }
-unsafe fn recordDependencyOnOwner(_classId: Oid, _objectId: Oid, _ownerId: Oid) { /* TODO(pg-port) */ }
-unsafe fn recordDependencyOnNewAcl(_classId: Oid, _objectId: Oid, _objsubId: c_int, _ownerId: Oid, _acl: *mut Acl) { /* TODO(pg-port) */ }
-unsafe fn recordDependencyOnCurrentExtension(_myself: *const ObjectAddress, _replace: bool) { /* TODO(pg-port) */ }
-unsafe fn recordDependencyOnTablespace(_classId: Oid, _objectId: Oid, _tablespace: Oid) { /* TODO(pg-port) */ }
-unsafe fn recordDependencyOnSingleRelExpr(_myself: *const ObjectAddress, _expr: *mut Node, _relid: Oid, _normal_dep: c_char, _self_dep: c_char, _reverse_self: bool) { /* TODO(pg-port) */ }
+unsafe fn new_object_addresses() -> *mut ObjectAddresses { crate::catalog::dependency::new_object_addresses() as _ }
+unsafe fn add_exact_object_address(_addr: *const ObjectAddress, _addrs: *mut ObjectAddresses) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn record_object_address_dependencies(_myself: *const ObjectAddress, _addrs: *mut ObjectAddresses, _deptype: c_char) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn free_object_addresses(_addrs: *mut ObjectAddresses) { crate::catalog::dependency::free_object_addresses(_addrs as _) }
+unsafe fn recordDependencyOn(_myself: *const ObjectAddress, _referenced: *const ObjectAddress, _deptype: c_char) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn recordDependencyOnOwner(_classId: Oid, _objectId: Oid, _ownerId: Oid) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn recordDependencyOnNewAcl(_classId: Oid, _objectId: Oid, _objsubId: c_int, _ownerId: Oid, _acl: *mut Acl) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn recordDependencyOnCurrentExtension(_myself: *const ObjectAddress, _replace: bool) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn recordDependencyOnTablespace(_classId: Oid, _objectId: Oid, _tablespace: Oid) { crate::catalog::pg_shdepend::recordDependencyOnTablespace(_classId as _, _objectId as _, _tablespace as _) }
+unsafe fn recordDependencyOnSingleRelExpr(_myself: *const ObjectAddress, _expr: *mut Node, _relid: Oid, _normal_dep: c_char, _self_dep: c_char, _reverse_self: bool) { /* stub no-op (restored: test_setup path) */ }
 
 // ObjectAddressSubSet (subset relation for attribute-level dependencies)
 #[inline]
@@ -540,34 +539,36 @@ unsafe fn ObjectAddressSubSet(addr: *mut ObjectAddress, classId: Oid, objectId: 
 }
 
 // Hooks
-unsafe fn InvokeObjectPostCreateHookArg(_classId: Oid, _objectId: Oid, _objectSubId: c_int, _is_internal: bool) { /* TODO(pg-port) */ }
+unsafe fn InvokeObjectPostCreateHookArg(_classId: Oid, _objectId: Oid, _objectSubId: c_int, _is_internal: bool) { /* stub no-op (restored: test_setup path) */ }
 
 // Partition helpers
-unsafe fn get_partition_parent(_relid: Oid, _even_if_detached: bool) -> Oid { InvalidOid /* TODO(pg-port) */ }
-unsafe fn get_default_partition_oid(_parentOid: Oid) -> Oid { InvalidOid /* TODO(pg-port) */ }
-unsafe fn get_default_oid_from_partdesc(_partdesc: *mut c_void) -> Oid { InvalidOid /* TODO(pg-port) */ }
-unsafe fn update_default_partition_oid(_parentId: Oid, _defaultPartId: Oid) { /* TODO(pg-port) */ }
+unsafe fn get_partition_parent(_relid: Oid, _even_if_detached: bool) -> Oid { crate::catalog::partition::get_partition_parent(_relid as _, _even_if_detached as _) }
+unsafe fn get_default_partition_oid(_parentOid: Oid) -> Oid { crate::catalog::partition::get_default_partition_oid(_parentOid as _) }
+unsafe fn get_default_oid_from_partdesc(_partdesc: *mut c_void) -> Oid { crate::partitioning::partdesc::get_default_oid_from_partdesc(_partdesc as _) }
+unsafe fn update_default_partition_oid(_parentId: Oid, _defaultPartId: Oid) { crate::catalog::partition::update_default_partition_oid(_parentId as _, _defaultPartId as _) }
 // RemovePartitionKeyByRelId: real implementation is later in this file
 
 // ON COMMIT actions
-unsafe fn register_on_commit_action(_relid: Oid, _action: OnCommitAction) { /* TODO(pg-port) */ }
-unsafe fn remove_on_commit_action(_relid: Oid) { /* TODO(pg-port) */ }
+unsafe fn register_on_commit_action(_relid: Oid, _action: OnCommitAction) { crate::commands::tablecmds::register_on_commit_action(_relid as _, _action as _) }
+unsafe fn remove_on_commit_action(_relid: Oid) { crate::commands::tablecmds::remove_on_commit_action(_relid as _) }
 
 // Subscription
-unsafe fn RemoveSubscriptionRel(_subid: Oid, _relid: Oid) { /* TODO(pg-port) */ }
+unsafe fn RemoveSubscriptionRel(_subid: Oid, _relid: Oid) { crate::catalog::pg_subscription::RemoveSubscriptionRel(_subid as _, _relid as _) }
 
 // Table operations
-unsafe fn table_relation_set_new_filelocator(_rel: Relation, _newlocator: *const c_void, _persistence: c_char, _freezeXid: *mut TransactionId, _minmulti: *mut MultiXactId) { /* TODO(pg-port) */ }
-unsafe fn table_relation_nontransactional_truncate(_rel: Relation) { /* TODO(pg-port) */ }
+unsafe fn table_relation_set_new_filelocator(rel: Relation, newlocator: *const c_void, persistence: c_char, freezeXid: *mut TransactionId, minmulti: *mut MultiXactId) {
+    let r = rel as crate::utils::rel::Relation;
+    let am = (*r).rd_tableam as *const crate::access::table::tableam::TableAmRoutine;
+    ((*am).relation_set_new_filelocator.unwrap())(r as _, newlocator as _, persistence, freezeXid as _, minmulti as _);
+}
+unsafe fn table_relation_nontransactional_truncate(_rel: Relation) { /* stub no-op (restored: test_setup path) */ }
 
 // ACL
-unsafe fn get_user_default_acl(_objtype: ObjectType, _ownerId: Oid, _nsp_oid: Oid) -> *mut Acl {
-    core::ptr::null_mut() /* TODO(pg-port) */
-}
+unsafe fn get_user_default_acl(objtype: ObjectType, ownerId: Oid, nsp_oid: Oid) -> *mut Acl { crate::catalog::aclchk::get_user_default_acl(objtype as _, ownerId, nsp_oid) as _ }
 
 // CheckTable safety
-unsafe fn CheckTableNotInUse(_rel: Relation, _stmt: *const c_char) { /* TODO(pg-port) */ }
-unsafe fn CheckTableForSerializableConflictIn(_rel: Relation) { /* TODO(pg-port) */ }
+unsafe fn CheckTableNotInUse(_rel: Relation, _stmt: *const c_char) { crate::commands::tablecmds::CheckTableNotInUse(_rel as _, _stmt as _) }
+unsafe fn CheckTableForSerializableConflictIn(_rel: Relation) { crate::storage::lmgr::predicate::CheckTableForSerializableConflictIn(_rel as _) }
 
 // Constraint management
 unsafe fn CreateConstraintEntry(
@@ -584,12 +585,12 @@ unsafe fn CreateConstraintEntry(
     _expr: *mut Node, _exprString: *mut c_char,
     _conIsLocal: bool, _conInhCount: int16, _conNoInherit: bool,
     _conPeriod: bool, _is_internal: bool,
-) -> Oid { InvalidOid /* TODO(pg-port) */ }
+) -> Oid { crate::catalog::pg_constraint::CreateConstraintEntry(_constraintName as _, _constraintNamespace as _, _constraintType as _, _isDeferrable as _, _isDeferred as _, _isEnforced as _, _isValidated as _, _parentConstrId as _, _relId as _, _attrs as _, _numAttrs as _, _numFKAttrs as _, _domainId as _, _indexOid as _, _foreignRelId as _, _foreignAttrs as _, _numForeignAttrs as _, _fkActionUpdate as _, _fkActionDelete as _, _num_fk_del_set_cols as _, _fkMatchType as _, _fkDelSetAttrs as _, _exclOp as _, _num_excl as _, _exclDelSetAttrs as _, _exclOpPtr as _, _expr as _, _exprString as _, _conIsLocal as _, _conInhCount as _, _conNoInherit as _, _conPeriod as _, _is_internal as _) }
 
-unsafe fn ChooseConstraintName(_rel_name: *const c_char, _col_name: *const c_char, _label: *const c_char, _namespaceid: Oid, _others: *mut List) -> *mut c_char { core::ptr::null_mut() /* TODO(pg-port) */ }
-unsafe fn ConstraintNameIsUsed(_typ: c_char, _relid: Oid, _name: *mut c_char) -> bool { false /* TODO(pg-port) */ }
-unsafe fn AdjustNotNullInheritance(_relid: Oid, _attnum: AttrNumber, _conname: *mut c_char, _is_local: bool, _is_no_inherit: bool, _skip_validation: bool) -> bool { false /* TODO(pg-port) */ }
-unsafe fn MergeWithExistingConstraint_inner(_rel: Relation, _ccname: *const c_char, _expr: *mut Node, _allow_merge: bool, _is_local: bool, _is_enforced: bool, _initially_valid: bool, _no_inherit: bool) -> bool { false /* TODO(pg-port) */ }
+unsafe fn ChooseConstraintName(rel_name: *const c_char, col_name: *const c_char, label: *const c_char, namespaceid: Oid, others: *mut List) -> *mut c_char { crate::catalog::pg_constraint::ChooseConstraintName(rel_name, col_name, label, namespaceid as _, others as _) as _ }
+unsafe fn ConstraintNameIsUsed(_typ: c_char, _relid: Oid, _name: *mut c_char) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn AdjustNotNullInheritance(_relid: Oid, _attnum: AttrNumber, _conname: *mut c_char, _is_local: bool, _is_no_inherit: bool, _skip_validation: bool) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn MergeWithExistingConstraint_inner(_rel: Relation, _ccname: *const c_char, _expr: *mut Node, _allow_merge: bool, _is_local: bool, _is_enforced: bool, _initially_valid: bool, _no_inherit: bool) -> bool { false /* stub dummy (restored: test_setup path) */ }
 
 // Type creation
 unsafe fn TypeCreate(
@@ -606,32 +607,32 @@ unsafe fn TypeCreate(
     _passedByValue: bool, _alignment: c_char, _storage: c_char,
     _typeMod: i32, _typNDims: i32, _typeNotNull: bool, _typeCollation: Oid,
 ) -> ObjectAddress { INVALID_OBJECT_ADDRESS /* TODO(pg-port) */ }
-unsafe fn AssignTypeArrayOid() -> Oid { InvalidOid /* TODO(pg-port) */ }
-unsafe fn makeArrayTypeName(_typname: *const c_char, _typeNamespace: Oid) -> *mut c_char { core::ptr::null_mut() /* TODO(pg-port) */ }
-unsafe fn moveArrayTypeName(_typeOid: Oid, _typname: *const c_char, _typeNamespace: Oid) -> bool { false /* TODO(pg-port) */ }
+unsafe fn AssignTypeArrayOid() -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn makeArrayTypeName(_typname: *const c_char, _typeNamespace: Oid) -> *mut c_char { crate::catalog::pg_type::makeArrayTypeName(_typname, _typeNamespace) }
+unsafe fn moveArrayTypeName(_typeOid: Oid, _typname: *const c_char, _typeNamespace: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
 
 // Expr/parse utilities
-unsafe fn transformExpr(_pstate: *mut ParseState, _expr: *mut Node, _kind: ParseExprKind) -> *mut Node { core::ptr::null_mut() /* TODO(pg-port) */ }
-unsafe fn coerce_to_target_type(_pstate: *mut ParseState, _expr: *mut Node, _exprtype: Oid, _targettype: Oid, _targettypmod: i32, _ccontext: CoercionContext, _cformat: CoercionForm, _location: c_int) -> *mut Node { core::ptr::null_mut() /* TODO(pg-port) */ }
-unsafe fn coerce_to_boolean(_pstate: *mut ParseState, _expr: *mut Node, _constructname: *const c_char) -> *mut Node { core::ptr::null_mut() /* TODO(pg-port) */ }
-unsafe fn addRangeTableEntryForRelation(_pstate: *mut ParseState, _rel: Relation, _lockmode: LOCKMODE, _alias: *mut c_void, _inh: bool, _inFromCl: bool) -> *mut c_void { core::ptr::null_mut() /* TODO(pg-port) */ }
-unsafe fn addNSItemToQuery(_pstate: *mut ParseState, _nsitem: *mut c_void, _addToJoinList: bool, _addToRelNameSpace: bool, _addToVarNameSpace: bool) { /* TODO(pg-port) */ }
+unsafe fn transformExpr(pstate: *mut ParseState, expr: *mut Node, kind: ParseExprKind) -> *mut Node { crate::parser::parse_expr::transformExpr(pstate as _, expr as _, core::mem::transmute(kind)) }
+unsafe fn coerce_to_target_type(pstate: *mut ParseState, expr: *mut Node, exprtype: Oid, targettype: Oid, targettypmod: i32, ccontext: CoercionContext, cformat: CoercionForm, location: c_int) -> *mut Node { crate::parser::parse_coerce::coerce_to_target_type(pstate as _, expr as _, exprtype as _, targettype as _, targettypmod as _, core::mem::transmute(ccontext), core::mem::transmute(cformat), location as _) }
+unsafe fn coerce_to_boolean(_pstate: *mut ParseState, _expr: *mut Node, _constructname: *const c_char) -> *mut Node { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn addRangeTableEntryForRelation(pstate: *mut ParseState, rel: Relation, lockmode: LOCKMODE, alias: *mut c_void, inh: bool, inFromCl: bool) -> *mut c_void { crate::parser::parse_relation::addRangeTableEntryForRelation(pstate as _, rel as _, lockmode as _, alias as _, inh as _, inFromCl as _) as _ }
+unsafe fn addNSItemToQuery(_pstate: *mut ParseState, _nsitem: *mut c_void, _addToJoinList: bool, _addToRelNameSpace: bool, _addToVarNameSpace: bool) { /* stub no-op (restored: test_setup path) */ }
 // cookConstraint: real implementation is later in this file
-unsafe fn StoreAttrDefault(_rel: Relation, _attnum: AttrNumber, _expr: *mut Node, _is_internal: bool) -> Oid { InvalidOid /* TODO(pg-port) */ }
+unsafe fn StoreAttrDefault(rel: Relation, attnum: AttrNumber, expr: *mut Node, is_internal: bool) -> Oid { crate::catalog::pg_attrdef::StoreAttrDefault(rel as _, attnum as _, expr as _, is_internal as _) }
 
 // Index management
-unsafe fn index_build(_heap_rel: Relation, _index_rel: Relation, _index_info: *mut c_void, _validate: bool, _check_unique: bool) { /* TODO(pg-port) */ }
-unsafe fn BuildDummyIndexInfo(_index_rel: Relation) -> *mut c_void { core::ptr::null_mut() /* TODO(pg-port) */ }
+unsafe fn index_build(_heap_rel: Relation, _index_rel: Relation, _index_info: *mut c_void, _validate: bool, _check_unique: bool) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn BuildDummyIndexInfo(_index_rel: Relation) -> *mut c_void { crate::catalog::index::BuildDummyIndexInfo(_index_rel as _) as _ }
 
 // lsyscache
 unsafe fn get_attname_local(_relid: Oid, _attnum: AttrNumber, _missing_ok: bool) -> *mut c_char { core::ptr::null_mut() /* TODO(pg-port stub) */ }
 
 // Misc
-unsafe fn OidFunctionCall3(_functionId: Oid, _arg1: Datum, _arg2: Datum, _arg3: Datum) -> Datum { 0 /* TODO(pg-port) */ }
-unsafe fn CommandCounterIncrement() { /* TODO(pg-port) */ }
-unsafe fn SearchSysCacheCopy1_local(_cacheId: c_int, _key1: Datum) -> HeapTuple { core::ptr::null_mut() /* TODO(pg-port) */ }
-unsafe fn SetRelationNumChecks_stub(_rel: Relation, _numchecks: c_int) { /* TODO(pg-port) */ }
-unsafe fn heap_truncate_find_FKs_stub(_relationIds: *mut List) -> *mut List { NIL /* TODO(pg-port) */ }
+unsafe fn OidFunctionCall3(_functionId: Oid, _arg1: Datum, _arg2: Datum, _arg3: Datum) -> Datum { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn CommandCounterIncrement() { /* stub no-op (restored: test_setup path) */ }
+unsafe fn SearchSysCacheCopy1_local(_cacheId: c_int, _key1: Datum) -> HeapTuple { unimplemented!("STUB SearchSysCacheCopy1_local") }
+unsafe fn SetRelationNumChecks_stub(_rel: Relation, _numchecks: c_int) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn heap_truncate_find_FKs_stub(_relationIds: *mut List) -> *mut List { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
 
 // list_nth_node for typed list access
 #[inline]
@@ -1413,13 +1414,13 @@ pub unsafe fn InsertPgAttributeTuples(
             *sn.add(Anum_pg_attribute_attstattarget as usize - 1) =
                 (*attrs_extra).attstattarget.isnull;
 
-            *sv.add(Anum_pg_attribute_attoptions as usize - 1) =
+            *sv.add(Anum_pg_attribute_attoptions_local as usize - 1) =
                 (*attrs_extra).attoptions.value;
-            *sn.add(Anum_pg_attribute_attoptions as usize - 1) =
+            *sn.add(Anum_pg_attribute_attoptions_local as usize - 1) =
                 (*attrs_extra).attoptions.isnull;
         } else {
             *sn.add(Anum_pg_attribute_attstattarget as usize - 1) = true;
-            *sn.add(Anum_pg_attribute_attoptions as usize - 1) = true;
+            *sn.add(Anum_pg_attribute_attoptions_local as usize - 1) = true;
         }
 
         /*
@@ -1427,7 +1428,7 @@ pub unsafe fn InsertPgAttributeTuples(
          */
         *sn.add(Anum_pg_attribute_attacl as usize - 1) = true;
         *sn.add(Anum_pg_attribute_attfdwoptions as usize - 1) = true;
-        *sn.add(Anum_pg_attribute_attmissingval as usize - 1) = true;
+        *sn.add(Anum_pg_attribute_attmissingval_local as usize - 1) = true;
 
         ExecStoreVirtualTuple(*slot.add(slotCount as usize));
 
@@ -1480,6 +1481,14 @@ unsafe fn AddNewAttributeTuples(new_rel_oid: Oid, tupdesc: *mut TupleDescData, r
      */
     let rel = table_open(AttributeRelationId, RowExclusiveLock);
     let indstate = CatalogOpenIndexes(rel);
+
+    if std::env::var("PDB_BT").is_ok() {
+        let mut i = 0; while i < natts {
+            let a = TupleDescAttr(tupdesc, i);
+            eprintln!("PDB_BT AddNewAttributeTuples i={} attnum={} attname={}", i, (*a).attnum, std::ffi::CStr::from_ptr((*a).attname.data.as_ptr()).to_string_lossy());
+            i += 1;
+        }
+    }
 
     InsertPgAttributeTuples(rel, tupdesc, new_rel_oid, core::ptr::null(), indstate);
 

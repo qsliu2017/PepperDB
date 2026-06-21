@@ -2899,9 +2899,7 @@ unsafe fn SpGistPageGetFreeSpace(page: Page, n: c_int) -> c_int {
 }
 
 // ---- utils/rel.h -----------------------------------------------------------
-unsafe fn RelationNeedsWAL(rel: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): src/include/utils/rel.h
-}
+unsafe fn RelationNeedsWAL(rel: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(rel) }
 
 // ---- storage/bufmgr.c / storage/bufmgr.h -----------------------------------
 pub const BUFFER_LOCK_EXCLUSIVE: c_int = 2;
@@ -2930,6 +2928,4 @@ unsafe fn BufferGetPage(buffer: Buffer) -> Page {
 unsafe fn BufferGetBlockNumber(buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO(pg-port): src/backend/storage/buffer/bufmgr.c
 }
-unsafe fn BufferIsValid(buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): src/include/storage/bufmgr.h
-}
+unsafe fn BufferIsValid(buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(buffer) }

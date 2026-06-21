@@ -134,6 +134,7 @@ pub unsafe fn WSASocket(
 pub unsafe fn ioctlsocket(_s: SOCKET, _cmd: c_long, _argp: *mut c_ulong) -> c_int {
     todo!("TODO(pg-port): ioctlsocket")
 }
+#[no_mangle]
 pub unsafe fn closesocket(_s: SOCKET) -> c_int {
     todo!("TODO(pg-port): closesocket")
 }
@@ -1614,7 +1615,6 @@ pub const CRASHDUMP_MAX_PATH: usize = 260; /* _MAX_PATH */
 pub const GENERIC_WRITE: DWORD = 0x40000000;
 pub const FILE_SHARE_WRITE: DWORD = 0x00000002;
 pub const CREATE_ALWAYS: DWORD = 2;
-pub const FALSE: BOOL = 0;
 
 /* MINIDUMP_TYPE flags (dbghelp.h) */
 pub type MINIDUMP_TYPE = c_int;

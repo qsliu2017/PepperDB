@@ -67,22 +67,16 @@ pub type TimestampTz = crate::c::int64;
 
 // utils/cache/lsyscache.h: get_namespace_name / get_rel_name. Not yet ported.
 // TODO(pg-port): real symbols live in utils/cache/lsyscache.c.
-unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): utils/cache/lsyscache.c
-}
-unsafe fn get_rel_name(_relid: Oid) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): utils/cache/lsyscache.c
-}
+unsafe fn get_namespace_name(nspid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_namespace_name(nspid as _) }
+unsafe fn get_rel_name(relid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_rel_name(relid as _) }
 
 // replication/origin.h: replorigin_by_oid. Not yet ported.
 // TODO(pg-port): real symbol lives in replication/logical/origin.c.
 unsafe fn replorigin_by_oid(
-    _roident: RepOriginId,
-    _missing_ok: bool,
-    _roname: *mut *mut c_char,
-) -> bool {
-    unimplemented!() // TODO(pg-port): replication/logical/origin.c
-}
+    roident: RepOriginId,
+    missing_ok: bool,
+    roname: *mut *mut c_char,
+) -> bool { crate::replication::logical::origin::replorigin_by_oid(roident as _, missing_ok, roname as _) }
 
 // utils/adt/timestamp.h: timestamptz_to_str. The real one lives in
 // crate::utils::adt::timestamp, returning *const c_char.
@@ -95,18 +89,14 @@ use crate::storage::lmgr::lmgr::CheckRelationOidLockedByMe;
 // catalog/index.h: BuildIndexInfo. executor/execIndexing.h: FormIndexDatum.
 // TODO(pg-port): real BuildIndexInfo lives in catalog/index.c; real
 // FormIndexDatum lives in access/index/index.c (declared in execIndexing.h).
-unsafe fn BuildIndexInfo(_index: Relation) -> *mut crate::nodes::execnodes::IndexInfo {
-    unimplemented!() // TODO(pg-port): catalog/index.c
-}
+unsafe fn BuildIndexInfo(index: Relation) -> *mut crate::nodes::execnodes::IndexInfo { crate::catalog::index::BuildIndexInfo(index as _) as _ }
 unsafe fn FormIndexDatum(
-    _indexInfo: *mut crate::nodes::execnodes::IndexInfo,
-    _slot: *mut TupleTableSlot,
-    _estate: *mut EState,
-    _values: *mut Datum,
-    _isnull: *mut bool,
-) {
-    unimplemented!() // TODO(pg-port): executor/execIndexing.c (FormIndexDatum)
-}
+    indexInfo: *mut crate::nodes::execnodes::IndexInfo,
+    slot: *mut TupleTableSlot,
+    estate: *mut EState,
+    values: *mut Datum,
+    isnull: *mut bool,
+) { crate::catalog::index::FormIndexDatum(indexInfo as _, slot as _, estate as _, values as _, isnull as _) }
 
 // replication/logicalrelation.h: GetRelationIdentityOrPK. The real one lives in
 // replication/logicalrelation.rs.
@@ -214,6 +204,7 @@ static CONFLICT_TYPE_NAMES: [&str; CONFLICT_NUM_TYPES] = [
  *
  * Return true if the commit timestamp data was found, false otherwise.
  */
+#[no_mangle]
 pub unsafe fn GetTupleTransactionInfo(
     localslot: *mut TupleTableSlot,
     xmin: *mut TransactionId,
@@ -255,6 +246,7 @@ pub unsafe fn GetTupleTransactionInfo(
  * The caller must ensure that all the indexes passed in ConflictTupleInfo are
  * locked so that we can fetch and display the conflicting key values.
  */
+#[no_mangle]
 pub unsafe fn ReportApplyConflict(
     estate: *mut EState,
     relinfo: *mut ResultRelInfo,
@@ -308,6 +300,7 @@ pub unsafe fn ReportApplyConflict(
  * Find all unique indexes to check for a conflict and store them into
  * ResultRelInfo.
  */
+#[no_mangle]
 pub unsafe fn InitConflictIndexes(relInfo: *mut ResultRelInfo) {
     let mut uniqueIndexes: *mut List = crate::nodes::pg_list::NIL;
 

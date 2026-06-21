@@ -100,6 +100,7 @@ unsafe fn PathNameDeleteTemporaryDir(_dirname: *const c_char) {
  * Under the covers the set is one or more directories which will eventually
  * be deleted.
  */
+#[no_mangle]
 pub unsafe fn FileSetInit(fileset: *mut FileSet) {
     static mut counter: uint32 = 0;
 

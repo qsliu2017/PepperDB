@@ -110,7 +110,7 @@ pub unsafe fn pgstat_fetch_stat_bgwriter() -> *mut PgStat_BgWriterStats {
     &mut pgStatLocal.snapshot.bgwriter
 }
 
-pub unsafe fn pgstat_bgwriter_init_shmem_cb(stats: *mut c_void) {
+pub unsafe extern "C" fn pgstat_bgwriter_init_shmem_cb(stats: *mut c_void) {
     let stats_shmem = stats as *mut PgStatShared_BgWriter;
 
     LWLockInitialize(&mut (*stats_shmem).lock, LWTRANCHE_PGSTATS_DATA);

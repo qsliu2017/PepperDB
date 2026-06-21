@@ -383,13 +383,13 @@ macro_rules! innerPlan {
 use innerPlan;
 
 unsafe fn tuplestore_select_read_pointer(_state: *mut Tuplestorestate, _ptr: c_int) {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_select_read_pointer(_state as _, _ptr as _)
 }
 unsafe fn tuplestore_ateof(_state: *mut Tuplestorestate) -> bool {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_ateof(_state as _) as _
 }
 unsafe fn tuplestore_advance(_state: *mut Tuplestorestate, _forward: bool) -> bool {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_advance(_state as _, _forward as _) as _
 }
 unsafe fn tuplestore_gettupleslot(
     _state: *mut Tuplestorestate,
@@ -397,45 +397,45 @@ unsafe fn tuplestore_gettupleslot(
     _copy: bool,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_gettupleslot(_state as _, _forward as _, _copy as _, _slot as _) as _
 }
 unsafe fn tuplestore_puttupleslot(_state: *mut Tuplestorestate, _slot: *mut TupleTableSlot) {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_puttupleslot(_state as _, _slot as _)
 }
 unsafe fn tuplestore_begin_heap(
     _randomAccess: bool,
     _interXact: bool,
     _maxKBytes: c_int,
 ) -> *mut Tuplestorestate {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_begin_heap(_randomAccess as _, _interXact as _, _maxKBytes as _) as _
 }
 unsafe fn tuplestore_set_eflags(_state: *mut Tuplestorestate, _eflags: c_int) {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_set_eflags(_state as _, _eflags as _)
 }
 unsafe fn tuplestore_alloc_read_pointer(_state: *mut Tuplestorestate, _eflags: c_int) -> c_int {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_alloc_read_pointer(_state as _, _eflags as _) as _
 }
 unsafe fn tuplestore_rescan(_state: *mut Tuplestorestate) {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_rescan(_state as _)
 }
 unsafe fn tuplestore_clear(_state: *mut Tuplestorestate) {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_clear(_state as _)
 }
 unsafe fn tuplestore_end(_state: *mut Tuplestorestate) {
-    unimplemented!() // TODO: utils/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_end(_state as _)
 }
 
 unsafe fn ExecProcNode(_node: *mut PlanState) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/execProcnode.c
+    crate::executor::executor::ExecProcNode(_node as _) as _
 }
 unsafe fn ExecCopySlot(
     _dstslot: *mut TupleTableSlot,
     _srcslot: *mut TupleTableSlot,
 ) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::tuptable::ExecCopySlot(_dstslot as _, _srcslot as _) as _
 }
 unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::tuptable::ExecClearTuple(_slot as _) as _
 }
 unsafe fn ExecScan(
     _node: *mut crate::nodes::execnodes::ScanState,
@@ -445,7 +445,7 @@ unsafe fn ExecScan(
     unimplemented!() // TODO: executor/execScan.c
 }
 unsafe fn ExecScanReScan(_node: *mut crate::nodes::execnodes::ScanState) {
-    unimplemented!() // TODO: executor/execScan.c
+    crate::executor::execScan::ExecScanReScan(_node as _)
 }
 unsafe fn ExecAssignExprContext(_estate: *mut EState, _planstate: *mut PlanState) {
     unimplemented!() // TODO: executor/execUtils.c
@@ -456,25 +456,25 @@ unsafe fn ExecInitScanTupleSlot(
     _tupledesc: *mut TupleDesc,
     _tts_ops: *const TupleTableSlotOps,
 ) {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecInitScanTupleSlot(_estate as _, _scanstate as _, _tupledesc as _, _tts_ops as _)
 }
 unsafe fn ExecGetResultType(_planstate: *mut PlanState) -> *mut TupleDesc {
     unimplemented!() // TODO: executor/execUtils.c
 }
 unsafe fn ExecInitResultTypeTL(_planstate: *mut PlanState) {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecInitResultTypeTL(_planstate as _)
 }
 unsafe fn ExecAssignScanProjectionInfo(_node: *mut crate::nodes::execnodes::ScanState) {
-    unimplemented!() // TODO: executor/execScan.c
+    crate::executor::execScan::ExecAssignScanProjectionInfo(_node as _)
 }
 unsafe fn ExecInitQual(
     _qual: *mut crate::nodes::pg_list::List,
     _parent: *mut PlanState,
 ) -> *mut crate::nodes::execnodes::ExprState {
-    unimplemented!() // TODO: executor/execExpr.c
+    crate::executor::execExpr::ExecInitQual(_qual as _, _parent as _) as _
 }
 unsafe fn list_nth(_list: *const crate::nodes::pg_list::List, _n: c_int) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: nodes/list.c
+    crate::nodes::pg_list::list_nth(_list as _, _n as _) as _
 }
 
 // TupleDesc (access/tupdesc.h) - referenced via stub signatures

@@ -54,18 +54,18 @@ extern "C" {
 
 unsafe fn get_progname(_argv0: *const c_char) -> *const c_char { _argv0 }
 unsafe fn save_ps_display_args(_argc: c_int, argv: *mut *mut c_char) -> *mut *mut c_char { argv }
-unsafe fn MemoryContextInit() { /* TODO(pg-port): utils/mmgr/mcxt.c */ }
+unsafe fn MemoryContextInit() { crate::utils::mmgr::mcxt::MemoryContextInit() }
 unsafe fn set_stack_base() -> usize { 0 }
 unsafe fn set_pglocale_pgservice(_argv0: *const c_char, _domain: *const c_char) {}
 unsafe fn pg_perm_setlocale(_category: c_int, _locale: *const c_char) -> *mut c_char { 1 as *mut c_char }
 unsafe fn write_stderr(_msg: &str) {}
 unsafe fn get_user_name_or_exit(_progname: *const c_char) -> *const c_char { c"postgres".as_ptr() }
-unsafe fn BootstrapModeMain(_argc: c_int, _argv: *mut *mut c_char, _check_only: bool) { unimplemented!("TODO(pg-port): bootstrap/bootstrap.c") }
-unsafe fn GucInfoMain() { unimplemented!("TODO(pg-port): utils/misc/guc.c") }
-unsafe fn PostgresSingleUserMain(_argc: c_int, _argv: *mut *mut c_char, _username: *mut c_char) { unimplemented!("TODO(pg-port): tcop/postgres.c") }
-unsafe fn PostmasterMain(_argc: c_int, _argv: *mut *mut c_char) { unimplemented!("TODO(pg-port): postmaster/postmaster.c") }
+use crate::postmaster::postmaster::PostmasterMain;
+use crate::bootstrap::bootstrap::BootstrapModeMain;
+use crate::tcop::postgres::PostgresSingleUserMain;
+use crate::utils::misc::help_config::GucInfoMain;
 
-static mut MyProcPid: c_int = 0;
+use crate::utils::init::globals::MyProcPid; // real global (ipc.rs proc_exit checks it), not a local shadow
 static mut progname: *const c_char = core::ptr::null();
 
 pub unsafe fn main(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
@@ -207,8 +207,8 @@ unsafe fn init_locale(categoryname: &str, category: c_int, locale: *const c_char
  * Help display should match the options accepted by PostmasterMain() and
  * PostgresMain().
  */
-unsafe fn help(progname: *const c_char) {
-    let pn = std::ffi::CStr::from_ptr(progname).to_string_lossy();
+unsafe fn help(progname0: *const c_char) {
+    let pn = std::ffi::CStr::from_ptr(progname0).to_string_lossy();
     print!("{pn} is the PostgreSQL server.\n\n");
     print!("Usage:\n  {pn} [OPTION]...\n\n");
     print!("Options:\n");
@@ -270,7 +270,7 @@ const PACKAGE_BUGREPORT: &str = "pgsql-bugs@lists.postgresql.org";
 const PACKAGE_NAME: &str = "PostgreSQL";
 const PACKAGE_URL: &str = "https://www.postgresql.org/";
 
-unsafe fn check_root(progname: *const c_char) {
+unsafe fn check_root(progname0: *const c_char) {
     // #ifndef WIN32
     if geteuid() == 0 {
         write_stderr(
@@ -283,7 +283,7 @@ unsafe fn check_root(progname: *const c_char) {
     }
 
     if getuid() != geteuid() {
-        let _ = progname;
+        let _ = progname0;
         write_stderr("real and effective user IDs must match\n");
         exit(1);
     }

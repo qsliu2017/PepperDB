@@ -437,11 +437,11 @@ unsafe fn search_plan_tree(
 // ---------------------------------------------------------------------------
 
 unsafe fn get_rel_name(_relid: Oid) -> *mut c_char {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_rel_name(_relid as _) as _
 }
 
 unsafe fn GetPortalByName(_name: *mut c_char) -> Portal {
-    unimplemented!() // TODO: utils/mmgr/portalmem.c
+    crate::utils::mmgr::portalmem::GetPortalByName(_name as _) as _
 }
 
 unsafe fn PortalIsValid(p: Portal) -> bool {
@@ -453,11 +453,11 @@ unsafe fn RowMarkRequiresRowShareLock(_marktype: RowMarkType) -> bool {
 }
 
 unsafe fn ItemPointerIsValid(_pointer: ItemPointer) -> bool {
-    unimplemented!() // TODO: storage/itemptr.h
+    crate::storage::itemptr::ItemPointerIsValid(_pointer as _) as _
 }
 
 unsafe fn TupIsNull(_slot: *mut crate::nodes::execnodes::TupleTableSlot) -> bool {
-    unimplemented!() // TODO: executor/tuptable.h
+    crate::executor::tuptable::TupIsNull(_slot as _) as _
 }
 
 unsafe fn slot_getsysattr(
@@ -465,7 +465,7 @@ unsafe fn slot_getsysattr(
     _attnum: AttrNumber,
     _isnull: *mut bool,
 ) -> Datum {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::tuptable::slot_getsysattr(_slot as _, _attnum as _, _isnull as _) as _
 }
 
 unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char {
@@ -477,5 +477,5 @@ unsafe fn RelationGetRelid(_relation: *mut crate::utils::rel::RelationData) -> O
 }
 
 unsafe fn outerPlanState(_node: *mut PlanState) -> *mut PlanState {
-    unimplemented!() // TODO: nodes/execnodes.h
+    crate::nodes::execnodes::outerPlanState(_node as _) as _
 }

@@ -58,9 +58,9 @@ pub unsafe fn CreateQueryDesc(
     queryEnv: *mut QueryEnvironment,
     instrument_options: c_int,
 ) -> *mut QueryDesc {
-    unimplemented!()
+    crate::tcop::pquery::CreateQueryDesc(plannedstmt as _, sourceText as _, snapshot as _, crosscheck_snapshot as _, dest as _, params as _, queryEnv as _, instrument_options as _) as _
 }
 
 pub unsafe fn FreeQueryDesc(qdesc: *mut QueryDesc) {
-    unimplemented!()
+    crate::tcop::pquery::FreeQueryDesc(qdesc as _)
 }

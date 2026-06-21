@@ -3,6 +3,7 @@
 //! So far: the shared-memory table-of-contents (`shm_toc`).
 
 pub mod shm_mq;
+pub mod waiteventset;
 pub mod dsm;
 pub mod barrier;
 pub mod dsm_registry;

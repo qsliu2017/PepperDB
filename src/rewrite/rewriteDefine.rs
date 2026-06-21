@@ -51,34 +51,34 @@ use crate::access::attnum::AttrNumber;
 // ---------------------------------------------------------------------------
 
 unsafe fn nodeToString(obj: *const Node) -> *mut c_char {
-    unimplemented!() // TODO: nodes/outfuncs.c
+    crate::nodes::outfuncs::nodeToString(obj as _)
 }
 unsafe fn namestrcpy(name: *mut NameData, s: *const c_char) -> c_int {
     unimplemented!() // TODO: common/string.c
 }
 unsafe fn table_open(relationId: Oid, lockmode: c_int) -> Relation {
-    unimplemented!() // TODO: access/table/table.c
+    crate::access::table::table::table_open(relationId, lockmode as _)
 }
 unsafe fn table_close(relation: Relation, lockmode: c_int) {
-    unimplemented!() // TODO: access/table/table.c
+    crate::access::table::table::table_close(relation, lockmode as _)
 }
 unsafe fn relation_open(relationId: Oid, lockmode: c_int) -> Relation {
-    unimplemented!() // TODO: access/common/relation.c
+    crate::access::common::relation::relation_open(relationId, lockmode as _)
 }
 unsafe fn relation_close(relation: Relation, lockmode: c_int) {
-    unimplemented!() // TODO: access/common/relation.c
+    crate::access::common::relation::relation_close(relation, lockmode as _)
 }
 unsafe fn SearchSysCache2(cacheId: c_int, key1: Datum, key2: Datum) -> HeapTuple {
-    unimplemented!() // TODO: utils/cache/syscache.c
+    crate::utils::cache::syscache::SearchSysCache2(cacheId, key1, key2)
 }
 unsafe fn SearchSysCache1(cacheId: c_int, key1: Datum) -> HeapTuple {
-    unimplemented!() // TODO: utils/cache/syscache.c
+    crate::utils::cache::syscache::SearchSysCache1(cacheId, key1)
 }
 unsafe fn SearchSysCacheCopy2(cacheId: c_int, key1: Datum, key2: Datum) -> HeapTuple {
     unimplemented!() // TODO: utils/cache/syscache.c
 }
 unsafe fn ReleaseSysCache(tuple: HeapTuple) {
-    unimplemented!() // TODO: utils/cache/syscache.c
+    crate::utils::cache::syscache::ReleaseSysCache(tuple)
 }
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool {
     !tuple.is_null()
@@ -90,42 +90,42 @@ unsafe fn heap_modify_tuple(
     replIsnull: *mut bool,
     doReplace: *mut bool,
 ) -> HeapTuple {
-    unimplemented!() // TODO: access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_modify_tuple(tuple, tupleDesc, replValues as _, replIsnull as _, doReplace as _)
 }
 unsafe fn heap_form_tuple(
     tupleDescriptor: TupleDesc,
     values: *mut Datum,
     isnull: *mut bool,
 ) -> HeapTuple {
-    unimplemented!() // TODO: access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_form_tuple(tupleDescriptor, values as _, isnull as _)
 }
 unsafe fn heap_freetuple(htup: HeapTuple) {
-    unimplemented!() // TODO: access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_freetuple(htup)
 }
 unsafe fn CatalogTupleInsert(heapRel: Relation, tup: HeapTuple) {
-    unimplemented!() // TODO: catalog/indexing.c
+    crate::catalog::indexing::CatalogTupleInsert(heapRel, tup)
 }
 unsafe fn CatalogTupleUpdate(heapRel: Relation, otid: *mut ItemPointerData, tup: HeapTuple) {
-    unimplemented!() // TODO: catalog/indexing.c
+    crate::catalog::indexing::CatalogTupleUpdate(heapRel, otid as _, tup)
 }
 unsafe fn GetNewOidWithIndex(relation: Relation, indexId: Oid, oidcolumn: AttrNumber) -> Oid {
-    unimplemented!() // TODO: catalog/catalog.c
+    crate::catalog::catalog::GetNewOidWithIndex(relation, indexId, oidcolumn)
 }
 unsafe fn get_rel_name(relid: Oid) -> *mut c_char {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_rel_name(relid)
 }
 unsafe fn get_rel_relkind(relid: Oid) -> c_char {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_rel_relkind(relid)
 }
 unsafe fn deleteDependencyRecordsFor(classId: Oid, objectId: Oid, skipExtensionDeps: bool) -> c_long {
-    unimplemented!() // TODO: catalog/pg_depend.c
+    crate::catalog::pg_depend::deleteDependencyRecordsFor(classId, objectId, skipExtensionDeps)
 }
 unsafe fn recordDependencyOn(
     depender: *const ObjectAddress,
     referenced: *const ObjectAddress,
     behavior: c_int,
 ) {
-    unimplemented!() // TODO: catalog/pg_depend.c
+    crate::catalog::pg_depend::recordDependencyOn(depender as _, referenced as _, behavior as _)
 }
 unsafe fn recordDependencyOnExpr(
     depender: *const ObjectAddress,
@@ -133,10 +133,10 @@ unsafe fn recordDependencyOnExpr(
     rtable: *mut List,
     behavior: c_int,
 ) {
-    unimplemented!() // TODO: rewrite/rewriteHandler.c (catalog/dependency.c)
+    crate::catalog::dependency::recordDependencyOnExpr(depender as _, expr as _, rtable, behavior as _)
 }
 unsafe fn getInsertSelectQuery(parsetree: *mut Query, subquery_ptr: *mut *mut *mut Query) -> *mut Query {
-    unimplemented!() // TODO: rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::getInsertSelectQuery(parsetree, subquery_ptr)
 }
 unsafe fn transformRuleStmt(
     stmt: *mut RuleStmt,
@@ -144,10 +144,10 @@ unsafe fn transformRuleStmt(
     actions: *mut *mut List,
     whereClause: *mut *mut Node,
 ) {
-    unimplemented!() // TODO: parser/parse_utilcmd.c
+    crate::parser::parse_utilcmd::transformRuleStmt(stmt, queryString, actions, whereClause)
 }
 unsafe fn RangeVarGetRelid(relation: *const RangeVar, lockmode: c_int, missing_ok: bool) -> Oid {
-    unimplemented!() // TODO: catalog/namespace.c
+    crate::catalog::namespace::RangeVarGetRelid(relation, lockmode as _, missing_ok)
 }
 unsafe fn RangeVarGetRelidExtended(
     relation: *const RangeVar,
@@ -156,18 +156,18 @@ unsafe fn RangeVarGetRelidExtended(
     callback: RangeVarGetRelidCallback,
     callback_arg: *mut c_void,
 ) -> Oid {
-    unimplemented!() // TODO: catalog/namespace.c
+    crate::catalog::namespace::RangeVarGetRelidExtended(relation, lockmode as _, flags, callback, callback_arg)
 }
 type RangeVarGetRelidCallback =
     Option<unsafe extern "C" fn(*const RangeVar, Oid, Oid, *mut c_void)>;
 unsafe fn IsSystemRelation(relation: Relation) -> bool {
-    unimplemented!() // TODO: catalog/catalog.c
+    crate::catalog::catalog::IsSystemRelation(relation)
 }
 unsafe fn IsSystemClass(relid: Oid, reltuple: Form_pg_class) -> bool {
-    unimplemented!() // TODO: catalog/catalog.c
+    crate::catalog::catalog::IsSystemClass(relid, reltuple as _)
 }
 unsafe fn object_ownercheck(classid: Oid, objectid: Oid, roleid: Oid) -> bool {
-    unimplemented!() // TODO: catalog/aclchk.c
+    crate::catalog::aclchk::object_ownercheck(classid, objectid, roleid)
 }
 unsafe fn aclcheck_error(aclerr: c_int, objtype: c_int, objectname: *const c_char) {
     unimplemented!() // TODO: catalog/aclchk.c
@@ -175,26 +175,24 @@ unsafe fn aclcheck_error(aclerr: c_int, objtype: c_int, objectname: *const c_cha
 unsafe fn get_relkind_objtype(relkind: c_char) -> c_int {
     unimplemented!() // TODO: catalog/objectaddress.c
 }
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn errdetail_relkind_not_supported(relkind: c_char) -> c_int {
-    unimplemented!() // TODO: catalog/pg_class.c
+    crate::catalog::pg_class::errdetail_relkind_not_supported(relkind)
 }
 unsafe fn SetRelationRuleStatus(relationId: Oid, relHasRules: bool) {
-    unimplemented!() // TODO: rewrite/rewriteSupport.c
+    crate::rewrite::rewriteSupport::SetRelationRuleStatus(relationId, relHasRules)
 }
 unsafe fn IsDefinedRewriteRule(owningRel: Oid, ruleName: *const c_char) -> bool {
-    unimplemented!() // TODO: rewrite/rewriteSupport.c
+    crate::rewrite::rewriteSupport::IsDefinedRewriteRule(owningRel, ruleName)
 }
 unsafe fn CacheInvalidateRelcache(relation: Relation) {
-    unimplemented!() // TODO: utils/cache/inval.c
+    crate::utils::cache::inval::CacheInvalidateRelcache(relation)
 }
 unsafe fn exprType(expr: *const Node) -> Oid {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::exprType(expr)
 }
 unsafe fn exprTypmod(expr: *const Node) -> i32 {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::exprTypmod(expr)
 }
 unsafe fn expression_tree_walker(
     node: *mut Node,
@@ -212,18 +210,18 @@ unsafe fn query_tree_walker(
     unimplemented!() // TODO: nodes/nodeFuncs.c
 }
 unsafe fn format_type_be(type_oid: Oid) -> *mut c_char {
-    unimplemented!() // TODO: utils/adt/format_type.c
+    crate::utils::adt::format_type::format_type_be(type_oid)
 }
 unsafe fn format_type_with_typemod(type_oid: Oid, typemod: i32) -> *mut c_char {
-    unimplemented!() // TODO: utils/adt/format_type.c
+    crate::utils::adt::format_type::format_type_with_typemod(type_oid, typemod)
 }
 unsafe fn pstrdup(string: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO: utils/mmgr/mcxt.c
+    crate::utils::mmgr::mcxt::pstrdup(string)
 }
 
 // Datum conversion helpers not in prelude
 unsafe fn CStringGetTextDatum(s: *const c_char) -> Datum {
-    unimplemented!() // TODO: utils/builtins.h (cstring_to_text)
+    crate::utils::builtins::CStringGetTextDatum(s)
 }
 unsafe fn NameGetDatum(name: *const NameData) -> Datum {
     PointerGetDatum(name as *const c_void)
@@ -244,11 +242,12 @@ unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: c_int) -> Form_pg_attribute {
     crate::access::common::tupdesc::TupleDescAttr(tupdesc, i) as *mut _
 }
 unsafe fn GETSTRUCT(tup: HeapTuple) -> *mut c_void {
-    unimplemented!() // TODO: access/htup_details.h
+    crate::access::htup_details::GETSTRUCT(tup as _)
 }
 unsafe fn InvokeObjectPostCreateHook(classId: Oid, objectId: Oid, subId: c_int) {
     unimplemented!() // TODO: catalog/objectaccess.h
 }
+#[no_mangle]
 unsafe fn InvokeObjectPostAlterHook(classId: Oid, objectId: Oid, subId: c_int) {
     unimplemented!() // TODO: catalog/objectaccess.h
 }
@@ -304,8 +303,8 @@ const DEPENDENCY_INTERNAL: c_int = b'i' as c_int;
 const ACLCHECK_NOT_OWNER: c_int = 2;
 
 // syscache ids (utils/syscache.h placeholders)
-const RULERELNAME: c_int = 0;
-const RELOID: c_int = 1;
+const RULERELNAME: c_int = 60;
+const RELOID: c_int = 57;
 
 // rtekind
 use crate::nodes::parsenodes::RTEKind::RTE_SUBQUERY;

@@ -44,13 +44,9 @@ extern "C" {
     pub static mut BackgroundWorkerList: dlist_head;
 }
 
-pub unsafe fn BackgroundWorkerShmemSize() -> Size {
-    unimplemented!()
-}
+pub unsafe fn BackgroundWorkerShmemSize() -> Size { crate::postmaster::bgworker::BackgroundWorkerShmemSize() }
 
-pub unsafe fn BackgroundWorkerShmemInit() {
-    unimplemented!()
-}
+pub unsafe fn BackgroundWorkerShmemInit() { crate::postmaster::bgworker::BackgroundWorkerShmemInit() }
 
 pub unsafe fn BackgroundWorkerStateChange(allow_new_workers: bool) {
     unimplemented!()
@@ -68,13 +64,9 @@ pub unsafe fn ReportBackgroundWorkerExit(rw: *mut RegisteredBgWorker) {
     unimplemented!()
 }
 
-pub unsafe fn BackgroundWorkerStopNotifications(pid: pid_t) {
-    unimplemented!()
-}
+pub unsafe fn BackgroundWorkerStopNotifications(pid: pid_t) { crate::postmaster::bgworker::BackgroundWorkerStopNotifications(pid) }
 
-pub unsafe fn ForgetUnstartedBackgroundWorkers() {
-    unimplemented!()
-}
+pub unsafe fn ForgetUnstartedBackgroundWorkers() { crate::postmaster::bgworker::ForgetUnstartedBackgroundWorkers() }
 
 pub unsafe fn ResetBackgroundWorkerCrashTimes() {
     unimplemented!()
@@ -82,6 +74,4 @@ pub unsafe fn ResetBackgroundWorkerCrashTimes() {
 
 /* Entry point for background worker processes */
 /* pg_noreturn */
-pub unsafe fn BackgroundWorkerMain(startup_data: *const c_void, startup_data_len: crate::c::Size) -> ! {
-    unimplemented!()
-}
+pub unsafe fn BackgroundWorkerMain(startup_data: *const c_void, startup_data_len: crate::c::Size) -> ! { crate::postmaster::bgworker::BackgroundWorkerMain(startup_data as _, startup_data_len) }

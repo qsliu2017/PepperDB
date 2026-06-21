@@ -149,31 +149,33 @@ pub const XLOG_BTREE_DEDUP: u8 = 0x60;
 
 // nbtree.h inline helpers / macros (stubs).
 /// TODO(pg-port): IndexRelationGetNumberOfKeyAttributes() (access/relscan.h via rel.h).
-unsafe fn IndexRelationGetNumberOfKeyAttributes(rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+pub unsafe fn IndexRelationGetNumberOfKeyAttributes(rel: Relation) -> c_int {
+    (*(*rel).rd_index).indnkeyatts as c_int
 }
 /// TODO(pg-port): P_FIRSTDATAKEY() (access/nbtree.h).
-unsafe fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber {
+    if (*opaque).btpo_next == 0 { 1 } else { 2 }
 }
 /// TODO(pg-port): BTPageGetOpaque() (access/nbtree.h).
-unsafe fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
+    crate::storage::bufpage::PageGetSpecialPointer(page) as _
 }
 /// TODO(pg-port): P_RIGHTMOST() (access/nbtree.h).
-unsafe fn P_RIGHTMOST(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+pub unsafe fn P_RIGHTMOST(opaque: BTPageOpaque) -> bool {
+    (*opaque).btpo_next == 0
 }
 /// TODO(pg-port): P_HAS_GARBAGE() (access/nbtree.h).
-unsafe fn P_HAS_GARBAGE(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+pub unsafe fn P_HAS_GARBAGE(opaque: BTPageOpaque) -> bool {
+    ((*opaque).btpo_flags & 64) != 0
 }
 /// TODO(pg-port): P_HIKEY (access/nbtree.h).
 pub const P_HIKEY: OffsetNumber = 1;
 
 /// TODO(pg-port): _bt_keep_natts_fast() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_keep_natts_fast(rel: Relation, lastleft: IndexTuple, firstright: IndexTuple) -> c_int {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtutils::_bt_keep_natts_fast(rel as _, lastleft as _, firstright as _) as _
 }
 /// TODO(pg-port): _bt_delitems_delete_check() (nbtpage.c / access/nbtree.h).
 unsafe fn _bt_delitems_delete_check(
@@ -182,89 +184,127 @@ unsafe fn _bt_delitems_delete_check(
     heapRel: Relation,
     delstate: *mut TM_IndexDeleteOp,
 ) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtpage.c)
+    crate::access::nbtree::nbtpage::_bt_delitems_delete_check(rel as _, buf as _, heapRel as _, delstate as _)
 }
 /// TODO(pg-port): BTreeTupleIsPivot() (access/nbtree.h).
-unsafe fn BTreeTupleIsPivot(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+pub unsafe fn BTreeTupleIsPivot(itup: IndexTuple) -> bool {
+    ((*itup).t_info & 0x2000) != 0 && ((*itup).t_tid.ip_posid & 0x2000) == 0
 }
 /// TODO(pg-port): BTreeTupleIsPosting() (access/nbtree.h).
-unsafe fn BTreeTupleIsPosting(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn BTreeTupleIsPosting(itup: IndexTuple) -> bool {
+    ((*itup).t_info & 0x2000) != 0 && ((*itup).t_tid.ip_posid & 0x2000) != 0
+}
+/// access/nbtree.h BTreeTupleSetDownLink: store a child block number in a pivot
+/// tuple's t_tid block field (inverse of BTreeTupleGetDownLink).
+pub unsafe fn BTreeTupleSetDownLink(itup: IndexTuple, blkno: BlockNumber) {
+    crate::storage::itemptr::ItemPointerSetBlockNumber(&mut (*itup).t_tid, blkno);
+}
+/// access/nbtree.h BTreeTupleSetNAtts: mark a pivot tuple and store its key-attr
+/// count (plus the heap-TID flag) in the offset field of t_tid.
+pub unsafe fn BTreeTupleSetNAtts(itup: IndexTuple, natts: c_int, heaptid: bool) {
+    const BT_PIVOT_HEAP_TID_ATTR: u16 = 0x8000;
+    (*itup).t_info |= INDEX_ALT_TID_MASK; /* 0x2000 */
+    let mut n = natts as u16;
+    if heaptid {
+        n |= BT_PIVOT_HEAP_TID_ATTR;
+    }
+    crate::storage::itemptr::ItemPointerSetOffsetNumber(&mut (*itup).t_tid, n);
 }
 /// TODO(pg-port): BTreeTupleGetNPosting() (access/nbtree.h).
-unsafe fn BTreeTupleGetNPosting(posting: IndexTuple) -> c_int {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn BTreeTupleGetNPosting(posting: IndexTuple) -> c_int {
+    ((*posting).t_tid.ip_posid & 0x0FFF) as c_int
 }
 /// TODO(pg-port): BTreeTupleGetPosting() (access/nbtree.h).
-unsafe fn BTreeTupleGetPosting(posting: IndexTuple) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn BTreeTupleGetPosting(posting: IndexTuple) -> ItemPointer {
+    (posting as *mut core::ffi::c_char).add(BTreeTupleGetPostingOffset(posting) as usize) as ItemPointer
 }
 /// TODO(pg-port): BTreeTupleGetPostingN() (access/nbtree.h).
-unsafe fn BTreeTupleGetPostingN(posting: IndexTuple, n: c_int) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+pub unsafe fn BTreeTupleGetPostingN(posting: IndexTuple, n: c_int) -> ItemPointer {
+    (BTreeTupleGetPosting(posting) as *mut ItemPointerData).add(n as usize) as ItemPointer
 }
 /// TODO(pg-port): BTreeTupleGetPostingOffset() (access/nbtree.h).
-unsafe fn BTreeTupleGetPostingOffset(posting: IndexTuple) -> uint32 {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+pub unsafe fn BTreeTupleGetPostingOffset(posting: IndexTuple) -> uint32 {
+    ((((*posting).t_tid.ip_blkid.bi_hi as u32) << 16) | ((*posting).t_tid.ip_blkid.bi_lo as u32)) as uint32
 }
-/// TODO(pg-port): BTreeTupleSetPosting() (access/nbtree.h).
+/// BTreeTupleSetPosting() (access/nbtree.h): mark as posting-list tuple, store
+/// nhtids in ip_posid and the posting offset in ip_blkid (matches the getters).
 unsafe fn BTreeTupleSetPosting(itup: IndexTuple, nhtids: uint16, postingoffset: c_int) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    (*itup).t_info |= INDEX_ALT_TID_MASK;
+    crate::storage::itemptr::ItemPointerSetOffsetNumber(&mut (*itup).t_tid, nhtids);
+    (*itup).t_tid.ip_blkid.bi_hi = ((postingoffset as u32) >> 16) as u16;
+    (*itup).t_tid.ip_blkid.bi_lo = ((postingoffset as u32) & 0xFFFF) as u16;
 }
 /// TODO(pg-port): BTreeTupleGetHeapTID() (access/nbtree.h).
-unsafe fn BTreeTupleGetHeapTID(itup: IndexTuple) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+pub unsafe fn BTreeTupleGetHeapTID(itup: IndexTuple) -> ItemPointer {
+    if BTreeTupleIsPivot(itup) {
+        if ((*itup).t_tid.ip_posid & 0x1000) != 0 {
+            (itup as *mut core::ffi::c_char)
+                .add(crate::access::common::indextuple::IndexTupleSize(itup as _) - core::mem::size_of::<ItemPointerData>())
+                as ItemPointer
+        } else { core::ptr::null_mut() }
+    } else if BTreeTupleIsPosting(itup) {
+        BTreeTupleGetPosting(itup)
+    } else {
+        &mut (*itup).t_tid as *mut ItemPointerData as ItemPointer
+    }
 }
 /// TODO(pg-port): BTreeTupleGetMaxHeapTID() (access/nbtree.h).
-unsafe fn BTreeTupleGetMaxHeapTID(itup: IndexTuple) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+pub unsafe fn BTreeTupleGetMaxHeapTID(itup: IndexTuple) -> ItemPointer {
+    if BTreeTupleIsPosting(itup) {
+        let n = BTreeTupleGetNPosting(itup);
+        BTreeTupleGetPostingN(itup, n - 1)
+    } else {
+        &mut (*itup).t_tid as *mut ItemPointerData as ItemPointer
+    }
 }
 
 // bufmgr.h / xloginsert.h / miscadmin.h stubs.
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn BufferGetPage(buf: Buffer) -> Page {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn BufferGetPage(buf: Buffer) -> Page {
+    crate::storage::buffer::bufmgr::BufferGetPage(buf) as _
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn BufferGetBlockNumber(buf: Buffer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn BufferGetBlockNumber(buf: Buffer) -> BlockNumber {
+    crate::storage::buffer::bufmgr::BufferGetBlockNumber(buf)
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn MarkBufferDirty(buf: Buffer) {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn MarkBufferDirty(buf: Buffer) {
+    crate::storage::buffer::bufmgr::MarkBufferDirty(buf)
 }
 /// TODO(pg-port): utils/rel.h.
-unsafe fn RelationNeedsWAL(rel: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+pub unsafe fn RelationNeedsWAL(rel: Relation) -> bool {
+    (*(*rel).rd_rel).relpersistence == b'p' as i8
 }
 /// TODO(pg-port): miscadmin.h.
 unsafe fn START_CRIT_SECTION() {
-    unimplemented!() // TODO(pg-port): miscadmin.h
+    
 }
 /// TODO(pg-port): miscadmin.h.
 unsafe fn END_CRIT_SECTION() {
-    unimplemented!() // TODO(pg-port): miscadmin.h
+    
 }
 /// TODO(pg-port): access/xloginsert.h.
-unsafe fn XLogBeginInsert() {
-    unimplemented!() // TODO(pg-port): access/xloginsert.h
+pub unsafe fn XLogBeginInsert() {
+    
 }
 /// TODO(pg-port): access/xloginsert.h.
-unsafe fn XLogRegisterBuffer(block_id: c_int, buffer: Buffer, flags: c_int) {
-    unimplemented!() // TODO(pg-port): access/xloginsert.h
+pub unsafe fn XLogRegisterBuffer(block_id: c_int, buffer: Buffer, flags: c_int) {
+    let _=(block_id,buffer,flags);
 }
 /// TODO(pg-port): access/xloginsert.h.
-unsafe fn XLogRegisterData(data: *mut c_void, len: c_int) {
-    unimplemented!() // TODO(pg-port): access/xloginsert.h
+pub unsafe fn XLogRegisterData(data: *mut c_void, len: c_int) {
+    let _=(data,len);
 }
 /// TODO(pg-port): access/xloginsert.h.
-unsafe fn XLogRegisterBufData(block_id: c_int, data: *mut c_void, len: c_int) {
-    unimplemented!() // TODO(pg-port): access/xloginsert.h
+pub unsafe fn XLogRegisterBufData(block_id: c_int, data: *mut c_void, len: c_int) {
+    let _=(block_id,data,len);
 }
 /// TODO(pg-port): access/xloginsert.h.
-unsafe fn XLogInsert(rmid: u8, info: u8) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): access/xloginsert.h
+pub unsafe fn XLogInsert(rmid: u8, info: u8) -> XLogRecPtr {
+    let _=(rmid,info); 0
 }
 
 // ----------------------------------------------------------------------------
@@ -884,7 +924,7 @@ pub unsafe fn _bt_dedup_finish_pending(newpage: Page, state: BTDedupState) -> Si
  * delete for each deletion operation, with low variance across related
  * deletion operations.
  */
-unsafe fn _bt_bottomupdel_finish_pending(
+pub unsafe fn _bt_bottomupdel_finish_pending(
     page: Page,
     state: BTDedupState,
     delstate: *mut TM_IndexDeleteOp,
@@ -1019,7 +1059,7 @@ unsafe fn _bt_bottomupdel_finish_pending(
  * left by previous passes.  Each pass will find a large contiguous group of
  * smaller duplicate tuples to merge together at the end of the page.
  */
-unsafe fn _bt_do_singleval(
+pub unsafe fn _bt_do_singleval(
     rel: Relation,
     page: Page,
     state: BTDedupState,
@@ -1062,7 +1102,7 @@ unsafe fn _bt_do_singleval(
  * strategy deduplication pass for a given leaf page will generally find only
  * plain non-pivot tuples -- see _bt_do_singleval() comments.)
  */
-unsafe fn _bt_singleval_fillfactor(page: Page, state: BTDedupState, newitemsz: Size) {
+pub unsafe fn _bt_singleval_fillfactor(page: Page, state: BTDedupState, newitemsz: Size) {
     let mut leftfree: Size;
     let reduction: c_int;
 
@@ -1330,7 +1370,7 @@ pub unsafe fn _bt_swap_posting(
  * tuple.  Used within assertions.
  */
 #[cfg(debug_assertions)]
-unsafe fn _bt_posting_valid(posting: IndexTuple) -> bool {
+pub unsafe fn _bt_posting_valid(posting: IndexTuple) -> bool {
     let mut last: ItemPointerData = core::mem::zeroed();
     let mut htid: ItemPointer;
 
@@ -1364,6 +1404,6 @@ unsafe fn _bt_posting_valid(posting: IndexTuple) -> bool {
 }
 
 #[cfg(not(debug_assertions))]
-unsafe fn _bt_posting_valid(posting: IndexTuple) -> bool {
+pub unsafe fn _bt_posting_valid(posting: IndexTuple) -> bool {
     true
 }

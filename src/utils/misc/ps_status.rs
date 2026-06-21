@@ -470,5 +470,5 @@ unsafe fn write_stderr(_fmt: *const c_char) {
 }
 
 unsafe fn GetBackendTypeDesc(_backend_type: c_int) -> *const c_char {
-    unimplemented!() // TODO: src/backend/utils/init/miscinit.c
+    crate::miscadmin::GetBackendTypeDesc(_backend_type as _)
 }

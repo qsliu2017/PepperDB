@@ -436,9 +436,7 @@ unsafe fn PG_NARGS(fcinfo: FunctionCallInfo) -> c_int {
 ///
 /// TODO(pg-port): implement once crate::utils::adt::tsvector_op ports it.
 #[inline]
-unsafe fn tsquery_requires_match(_curitem: *mut QueryItem) -> bool {
-    unimplemented!("tsquery_requires_match: tsvector_op.c not yet translated")
-}
+unsafe fn tsquery_requires_match(_curitem: *mut QueryItem) -> bool { crate::utils::adt::tsvector_op::tsquery_requires_match(_curitem as _) }
 
 // ================================================================
 //   tests

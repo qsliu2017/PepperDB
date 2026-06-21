@@ -166,22 +166,22 @@ unsafe fn tuplestore_begin_heap(
     _interXact: bool,
     _maxKBytes: c_int,
 ) -> *mut Tuplestorestate {
-    std::ptr::null_mut() // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_begin_heap(_randomaccess as _, _interXact as _, _maxKBytes as _) as _
 }
 unsafe fn tuplestore_set_eflags(_state: *mut Tuplestorestate, _eflags: c_int) {
-    // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_set_eflags(_state as _, _eflags as _)
 }
 unsafe fn tuplestore_alloc_read_pointer(
     _state: *mut Tuplestorestate,
     _eflags: c_int,
 ) -> c_int {
-    0 // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_alloc_read_pointer(_state as _, _eflags as _) as _
 }
 unsafe fn tuplestore_select_read_pointer(_state: *mut Tuplestorestate, _ptr: c_int) {
-    // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_select_read_pointer(_state as _, _ptr as _)
 }
 unsafe fn tuplestore_puttupleslot(_state: *mut Tuplestorestate, _slot: *mut TupleTableSlot) {
-    // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_puttupleslot(_state as _, _slot as _)
 }
 unsafe fn tuplestore_gettupleslot(
     _state: *mut Tuplestorestate,
@@ -189,29 +189,29 @@ unsafe fn tuplestore_gettupleslot(
     _copy: bool,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    false // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_gettupleslot(_state as _, _forward as _, _copy as _, _slot as _) as _
 }
 unsafe fn tuplestore_skiptuples(
     _state: *mut Tuplestorestate,
     _ntuples: int64,
     _forward: bool,
 ) -> bool {
-    false // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_skiptuples(_state as _, _ntuples as _, _forward as _) as _
 }
 unsafe fn tuplestore_advance(_state: *mut Tuplestorestate, _forward: bool) -> bool {
-    false // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_advance(_state as _, _forward as _) as _
 }
 unsafe fn tuplestore_clear(_state: *mut Tuplestorestate) {
-    // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_clear(_state as _)
 }
 unsafe fn tuplestore_end(_state: *mut Tuplestorestate) {
-    // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_end(_state as _)
 }
 unsafe fn tuplestore_in_memory(_state: *mut Tuplestorestate) -> bool {
-    true // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_in_memory(_state as _) as _
 }
 unsafe fn tuplestore_trim(_state: *mut Tuplestorestate) {
-    // TODO(pg-port): tuplestore
+    crate::utils::sort::tuplestore::tuplestore_trim(_state as _)
 }
 
 /// TODO(pg-port): utils/guc.h work_mem
@@ -238,7 +238,7 @@ unsafe fn MemoryContextAllocZero(_ctx: MemoryContext, _sz: Size) -> *mut c_void 
 }
 /// TODO(pg-port): utils/memutils.h MemoryContextGetParent
 unsafe fn MemoryContextGetParent(_ctx: MemoryContext) -> MemoryContext {
-    std::ptr::null_mut() // TODO(pg-port): utils/memutils
+    crate::utils::mmgr::mcxt::MemoryContextGetParent(_ctx as _) as _
 }
 
 /// TODO(pg-port): utils/expandeddatum.h DatumIsReadWriteExpandedObject
@@ -263,7 +263,7 @@ unsafe fn datumCopy(value: Datum, typByVal: bool, typLen: int16) -> Datum {
 
 /// TODO(pg-port): nodes/nodeFuncs.h equal
 unsafe fn equal(a: *const c_void, b: *const c_void) -> bool {
-    false // TODO(pg-port): nodes/equalfuncs
+    crate::nodes::equalfuncs::equal(a as _, b as _) as _
 }
 
 /// TODO(pg-port): utils/cache/lsyscache.h slot_getattr
@@ -272,20 +272,20 @@ unsafe fn slot_getattr(
     _attnum: c_int,
     _isnull: *mut bool,
 ) -> Datum {
-    0 // TODO(pg-port): access/common/slot
+    crate::executor::tuptable::slot_getattr(_slot as _, _attnum as _, _isnull as _) as _
 }
 
 /// TODO(pg-port): nodes/pg_list.h list_nth
 unsafe fn list_nth(list: *mut List, n: c_int) -> *mut c_void {
-    std::ptr::null_mut() // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::list_nth(list as _, n as _) as _
 }
 /// TODO(pg-port): nodes/pg_list.h list_length
 unsafe fn list_length(list: *const List) -> c_int {
-    0 // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::list_length(list as _) as _
 }
 /// TODO(pg-port): nodes/pg_list.h lfirst
 unsafe fn lfirst(cell: *mut c_void) -> *mut c_void {
-    std::ptr::null_mut() // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::lfirst(cell as _) as _
 }
 
 /// TODO(pg-port): nodes/nodes.h makeNode(WindowAggState)
@@ -303,10 +303,10 @@ unsafe fn InstrCountFiltered1(_node: *mut WindowAggState, _n: c_int) {
 }
 /// TODO(pg-port): executor/executor.h outerPlanState / outerPlan
 unsafe fn outerPlanState(node: *mut WindowAggState) -> *mut PlanState {
-    std::ptr::null_mut() // TODO(pg-port): executor/executor
+    crate::nodes::execnodes::outerPlanState(node as _) as _
 }
 unsafe fn outerPlan(node: *mut WindowAgg) -> *mut Plan {
-    std::ptr::null_mut() // TODO(pg-port): executor/executor
+    crate::nodes::plannodes::outerPlan(node as _) as _
 }
 /// TODO(pg-port): executor/executor.h ResetExprContext
 unsafe fn ResetExprContext(_econtext: *mut ExprContext) {
@@ -345,7 +345,7 @@ struct FormData_pg_proc {
 type Form_pg_proc = *mut FormData_pg_proc;
 /// TODO(pg-port): access/htup_details.h GETSTRUCT
 unsafe fn GETSTRUCT<T>(tup: HeapTuple) -> *mut T {
-    std::ptr::null_mut() // TODO(pg-port): access/htup_details
+    crate::access::htup_details::GETSTRUCT(tup as _) as _
 }
 /// TODO(pg-port): catalog/objectaccess.h InvokeFunctionExecuteHook
 unsafe fn InvokeFunctionExecuteHook(_objectId: Oid) {
@@ -2827,7 +2827,7 @@ unsafe fn TextDatumGetCString(d: Datum) -> *mut std::os::raw::c_char {
 }
 /// TODO(pg-port): parser/parse_coerce.h IsBinaryCoercible
 unsafe fn IsBinaryCoercible(_srctype: Oid, _targettype: Oid) -> bool {
-    false // TODO(pg-port): parser/parse_coerce
+    crate::parser::parse_coerce::IsBinaryCoercible(_srctype as _, _targettype as _) as _
 }
 /// TODO(pg-port): executor/executor.h outerPlan(node) for generic Plan
 unsafe fn outerPlan_node(node: *mut Plan) -> *mut Plan {

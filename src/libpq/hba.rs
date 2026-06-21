@@ -285,7 +285,7 @@ unsafe fn pg_range_sockaddr(
     _netaddr: *const sockaddr_storage,
     _netmask: *const sockaddr_storage,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): common/ip.c pg_range_sockaddr
+    crate::libpq::ifaddr::pg_range_sockaddr(_addr as _, _netaddr as _, _netmask as _)
 }
 
 unsafe fn pg_sockaddr_cidr_mask(
@@ -293,7 +293,7 @@ unsafe fn pg_sockaddr_cidr_mask(
     _numbits: *mut c_char,
     _family: c_int,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): common/ip.c pg_sockaddr_cidr_mask
+    crate::libpq::ifaddr::pg_sockaddr_cidr_mask(_mask as _, _numbits, _family)
 }
 
 unsafe fn pg_getaddrinfo_all(
@@ -302,11 +302,11 @@ unsafe fn pg_getaddrinfo_all(
     _hintp: *const addrinfo,
     _result: *mut *mut addrinfo,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): common/ip.c pg_getaddrinfo_all
+    crate::common::ip::pg_getaddrinfo_all(_hostname, _servname, _hintp as _, _result as _)
 }
 
 unsafe fn pg_freeaddrinfo_all(_hint_ai_family: c_int, _ai: *mut addrinfo) {
-    unimplemented!() // TODO(pg-port): common/ip.c pg_freeaddrinfo_all
+    crate::common::ip::pg_freeaddrinfo_all(_hint_ai_family, _ai as _)
 }
 
 unsafe fn pg_getnameinfo_all(
@@ -318,22 +318,20 @@ unsafe fn pg_getnameinfo_all(
     _servicelen: c_int,
     _flags: c_int,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): common/ip.c pg_getnameinfo_all
+    crate::common::ip::pg_getnameinfo_all(_addr as _, _salen, _node, _nodelen, _service, _servicelen, _flags)
 }
 
 // libpq/ifaddr.h
 unsafe fn pg_foreach_ifaddr(_callback: PgIfAddrCallback, _cb_data: *mut c_void) -> c_int {
-    unimplemented!() // TODO(pg-port): libpq/ifaddr.c pg_foreach_ifaddr
+    crate::libpq::ifaddr::pg_foreach_ifaddr(core::mem::transmute(_callback), _cb_data)
 }
 
 // libpq/oauth.h
 unsafe fn check_oauth_validator(
-    _hba: *mut HbaLine,
-    _elevel: c_int,
-    _err_msg: *mut *mut c_char,
-) -> bool {
-    unimplemented!() // TODO(pg-port): libpq/auth-oauth.c check_oauth_validator
-}
+    hba: *mut HbaLine,
+    elevel: c_int,
+    err_msg: *mut *mut c_char,
+) -> bool { unimplemented!() }
 
 // utils/varlena.h
 unsafe fn SplitGUCList(
@@ -341,7 +339,7 @@ unsafe fn SplitGUCList(
     _separator: c_char,
     _namelist: *mut *mut List,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): utils/adt/varlena.c SplitGUCList
+    crate::utils::adt::varlena::SplitGUCList(_rawstring, _separator, _namelist as _)
 }
 
 // utils/builtins.h - psprintf-family vararg helpers are stubbed (see callers,
@@ -353,7 +351,7 @@ unsafe fn psprintf_stub(s: *const c_char) -> *mut c_char {
 
 // common/string.h
 unsafe fn pg_strip_crlf(_str: *mut c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): common/string.c pg_strip_crlf
+    crate::common::string::pg_strip_crlf(_str)
 }
 
 // common/pg_get_line.h
@@ -362,15 +360,15 @@ unsafe fn pg_get_line_append(
     _buf: StringInfo,
     _hint: *mut c_void,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): common/pg_get_line.c pg_get_line_append
+    crate::common::pg_get_line::pg_get_line_append(_stream as _, _buf as _, _hint as _)
 }
 
 // stdio.h FILE state checks.
 unsafe fn feof(_stream: *mut FILE) -> c_int {
-    unimplemented!() // TODO(pg-port): libc feof
+    libc::feof(_stream as *mut libc::FILE)
 }
 unsafe fn ferror(_stream: *mut FILE) -> c_int {
-    unimplemented!() // TODO(pg-port): libc ferror
+    libc::ferror(_stream as *mut libc::FILE)
 }
 
 // <netdb.h> resolver (system).
@@ -380,39 +378,39 @@ unsafe fn getaddrinfo(
     _hints: *const addrinfo,
     _res: *mut *mut addrinfo,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): system getaddrinfo
+    libc::getaddrinfo(_node, _service, _hints as _, _res as _)
 }
 unsafe fn freeaddrinfo(_res: *mut addrinfo) {
-    unimplemented!() // TODO(pg-port): system freeaddrinfo
+    libc::freeaddrinfo(_res as _)
 }
 unsafe fn gai_strerror(_ecode: c_int) -> *const c_char {
-    unimplemented!() // TODO(pg-port): system gai_strerror
+    libc::gai_strerror(_ecode)
 }
 
 // libc string/mem primitives (string.h, stdlib.h).
 unsafe fn strlen(_s: *const c_char) -> usize {
-    unimplemented!() // TODO(pg-port): libc strlen
+    libc::strlen(_s)
 }
 unsafe fn strcmp(_a: *const c_char, _b: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): libc strcmp
+    libc::strcmp(_a, _b)
 }
 unsafe fn strchr(_s: *const c_char, _c: c_int) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): libc strchr
+    libc::strchr(_s, _c)
 }
 unsafe fn strstr(_haystack: *const c_char, _needle: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): libc strstr
+    libc::strstr(_haystack, _needle)
 }
 unsafe fn strcat(_dst: *mut c_char, _src: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): libc strcat
+    libc::strcat(_dst, _src)
 }
 unsafe fn atoi(_s: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): libc atoi
+    libc::atoi(_s)
 }
 unsafe fn memcpy_c(_dst: *mut c_void, _src: *const c_void, _n: usize) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): libc memcpy
+    libc::memcpy(_dst, _src, _n)
 }
 unsafe fn memset_c(_dst: *mut c_void, _ch: c_int, _n: usize) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): libc memset
+    libc::memset(_dst, _ch, _n)
 }
 
 // HBA/ident file path GUCs (guc.c / postmaster).
@@ -524,6 +522,7 @@ const _: () = assert!(UserAuthName.len() == (USER_AUTH_LAST + 1) as usize);
  * isblank() exists in the ISO C99 spec, but it's not very portable yet,
  * so provide our own version.
  */
+#[no_mangle]
 pub fn pg_isblank(c: c_char) -> bool {
     c == b' ' as c_char || c == b'\t' as c_char || c == b'\r' as c_char
 }
@@ -1125,7 +1124,7 @@ pub unsafe fn tokenize_auth_file(
     let mut buf: StringInfoData = core::mem::zeroed();
     let linecxt: MemoryContext;
     let funccxt: MemoryContext; /* context of this function's caller */
-    let mut tokenerrcontext: ErrorContextCallback = core::mem::zeroed();
+    let mut tokenerrcontext: ErrorContextCallback = ErrorContextCallback::none();
     let mut callback_arg: tokenize_error_callback_arg = core::mem::zeroed();
 
     Assert!(!tokenize_context.is_null());

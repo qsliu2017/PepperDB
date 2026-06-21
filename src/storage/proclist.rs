@@ -19,7 +19,7 @@ pub struct PGPROC {
 // TODO: dedup with storage/proc.rs once it lands.
 #[inline]
 pub unsafe fn GetPGProcByNumber(_n: c_int) -> *mut PGPROC {
-    unimplemented!()
+    crate::storage::lmgr::proc::GetPGProcByNumber(_n as _) as *mut PGPROC
 }
 
 /*
@@ -192,7 +192,7 @@ macro_rules! proclist_delete {
         $crate::storage::proclist::proclist_delete_offset(
             $list,
             $procno,
-            $crate::offset_of!($crate::storage::proc::PGPROC, $link_member),
+            $crate::offset_of!($crate::storage::lmgr::proc::PGPROC, $link_member),
         )
     };
 }
@@ -203,7 +203,7 @@ macro_rules! proclist_push_head {
         $crate::storage::proclist::proclist_push_head_offset(
             $list,
             $procno,
-            $crate::offset_of!($crate::storage::proc::PGPROC, $link_member),
+            $crate::offset_of!($crate::storage::lmgr::proc::PGPROC, $link_member),
         )
     };
 }
@@ -214,7 +214,7 @@ macro_rules! proclist_push_tail {
         $crate::storage::proclist::proclist_push_tail_offset(
             $list,
             $procno,
-            $crate::offset_of!($crate::storage::proc::PGPROC, $link_member),
+            $crate::offset_of!($crate::storage::lmgr::proc::PGPROC, $link_member),
         )
     };
 }
@@ -224,7 +224,7 @@ macro_rules! proclist_pop_head_node {
     ($list:expr, $link_member:ident) => {
         $crate::storage::proclist::proclist_pop_head_node_offset(
             $list,
-            $crate::offset_of!($crate::storage::proc::PGPROC, $link_member),
+            $crate::offset_of!($crate::storage::lmgr::proc::PGPROC, $link_member),
         )
     };
 }
@@ -235,7 +235,7 @@ macro_rules! proclist_contains {
         $crate::storage::proclist::proclist_contains_offset(
             $list,
             $procno,
-            $crate::offset_of!($crate::storage::proc::PGPROC, $link_member),
+            $crate::offset_of!($crate::storage::lmgr::proc::PGPROC, $link_member),
         )
     };
 }
@@ -256,7 +256,7 @@ macro_rules! proclist_contains {
 #[macro_export]
 macro_rules! proclist_foreach_modify {
     ($iter:expr, $lhead:expr, $link_member:ident, $body:block) => {{
-        let __off = $crate::offset_of!($crate::storage::proc::PGPROC, $link_member);
+        let __off = $crate::offset_of!($crate::storage::lmgr::proc::PGPROC, $link_member);
         ($iter).cur = (*($lhead)).head;
         ($iter).next = if ($iter).cur == $crate::storage::procnumber::INVALID_PROC_NUMBER {
             $crate::storage::procnumber::INVALID_PROC_NUMBER

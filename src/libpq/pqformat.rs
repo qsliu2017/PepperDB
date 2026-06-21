@@ -114,6 +114,7 @@ pub unsafe fn pq_sendint32(buf: StringInfo, i: uint32) {
 /// # Safety
 /// See [`pq_sendint8`].
 #[inline]
+#[no_mangle]
 pub unsafe fn pq_sendint64(buf: StringInfo, i: uint64) {
     enlargeStringInfo(buf, core::mem::size_of::<uint64>() as c_int);
     pq_writeint64(buf, i);
@@ -230,6 +231,7 @@ pub unsafe fn pq_endtypsend(buf: StringInfo) -> *mut crate::c::bytea {
  * # Safety
  * `buf` points to a (possibly uninitialized) StringInfoData to be init'd.
  */
+#[no_mangle]
 pub unsafe fn pq_beginmessage(buf: StringInfo, msgtype: c_char) {
     initStringInfo(buf);
 
@@ -270,6 +272,7 @@ pub unsafe fn pq_beginmessage_reuse(buf: StringInfo, msgtype: c_char) {
  * # Safety
  * `buf` was initialized by [`pq_beginmessage`] and `buf->data` is palloc'd.
  */
+#[no_mangle]
 pub unsafe fn pq_endmessage(buf: StringInfo) {
     /* msgtype was saved in cursor field */
     let _ = pq_putmessage((*buf).cursor as c_char, (*buf).data, (*buf).len as Size);
@@ -356,6 +359,7 @@ pub unsafe fn pq_sendtext(buf: StringInfo, str: *const c_char, mut slen: c_int) 
  * # Safety
  * `buf` valid; `str` is a NUL-terminated C string.
  */
+#[no_mangle]
 pub unsafe fn pq_sendstring(buf: StringInfo, str: *const c_char) {
     let mut slen: c_int = strlen(str) as c_int;
     let p: *mut c_char;
@@ -412,6 +416,7 @@ pub unsafe fn pq_putemptymessage(msgtype: c_char) {
  * # Safety
  * `msg` points to a valid StringInfo whose `data` is valid for `len` bytes.
  */
+#[no_mangle]
 pub unsafe fn pq_getmsgbyte(msg: StringInfo) -> c_int {
     if (*msg).cursor >= (*msg).len {
         ereport!(ERROR, errmsg!("no data left in message"));
@@ -427,6 +432,7 @@ pub unsafe fn pq_getmsgbyte(msg: StringInfo) -> c_int {
  * # Safety
  * See [`pq_getmsgbyte`].
  */
+#[no_mangle]
 pub unsafe fn pq_getmsgint(msg: StringInfo, b: c_int) -> c_uint {
     match b {
         1 => {
@@ -460,6 +466,7 @@ pub unsafe fn pq_getmsgint(msg: StringInfo, b: c_int) -> c_uint {
  * # Safety
  * See [`pq_getmsgbyte`].
  */
+#[no_mangle]
 pub unsafe fn pq_getmsgint64(msg: StringInfo) -> int64 {
     let mut n64: uint64 = 0;
     pq_copymsgbytes(msg, &mut n64 as *mut uint64 as *mut c_void, core::mem::size_of::<uint64>() as c_int);

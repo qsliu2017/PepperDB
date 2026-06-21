@@ -351,13 +351,10 @@ extern "C" {
     fn get_language_name(langoid: Oid, missing_ok: bool) -> *mut c_char;
     fn get_namespace_name_or_temp(nspid: Oid) -> *mut c_char;
     fn get_tablespace_name(spcid: Oid) -> *mut c_char;
-    fn generate_collation_name(collid: Oid) -> *mut c_char;
 }
 // TODO(pg-port): utils/builtins stubs
 extern "C" {
     fn format_type_be(type_oid: Oid) -> *mut c_char;
-    fn quote_identifier(ident: *const c_char) -> *const c_char;
-    fn quote_qualified_identifier(qualifier: *const c_char, ident: *const c_char) -> *const c_char;
     fn text_to_cstring(t: *const text) -> *mut c_char;
     fn cstring_to_text(s: *const c_char) -> *mut text;
     fn cstring_to_text_with_len(s: *const c_char, len: i32) -> *mut text;
@@ -489,7 +486,6 @@ extern "C" {
     fn lookup_type_cache(type_id: Oid, flags: i32) -> *mut TypeCacheEntry;
     fn RelationGetDescr(rel: Relation) -> TupleDesc;
     fn RelationGetRelationName(rel: Relation) -> *const c_char;
-    fn CurrentMemoryContext: MemoryContext;
     fn outerPlan(plan: *mut Plan) -> *mut Plan;
     fn innerPlan(plan: *mut Plan) -> *mut Plan;
     fn IsA_fn(node: *const Node, tag: NodeTag) -> bool;
@@ -575,7 +571,7 @@ pub unsafe extern "C" fn pg_get_ruledef(fcinfo: FunctionCallInfo) -> Datum {
     res = pg_get_ruledef_worker(ruleoid, prettyFlags);
 
     if res.is_null() {
-        return PG_RETURN_NULL!();
+        PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -592,7 +588,7 @@ pub unsafe extern "C" fn pg_get_ruledef_ext(fcinfo: FunctionCallInfo) -> Datum {
     res = pg_get_ruledef_worker(ruleoid, prettyFlags);
 
     if res.is_null() {
-        return PG_RETURN_NULL!();
+        PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -695,7 +691,7 @@ pub unsafe extern "C" fn pg_get_viewdef(fcinfo: FunctionCallInfo) -> Datum {
     res = pg_get_viewdef_worker(viewoid, prettyFlags, WRAP_COLUMN_DEFAULT);
 
     if res.is_null() {
-        return PG_RETURN_NULL!();
+        PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -713,7 +709,7 @@ pub unsafe extern "C" fn pg_get_viewdef_ext(fcinfo: FunctionCallInfo) -> Datum {
     res = pg_get_viewdef_worker(viewoid, prettyFlags, WRAP_COLUMN_DEFAULT);
 
     if res.is_null() {
-        return PG_RETURN_NULL!();
+        PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -732,7 +728,7 @@ pub unsafe extern "C" fn pg_get_viewdef_wrap(fcinfo: FunctionCallInfo) -> Datum 
     res = pg_get_viewdef_worker(viewoid, prettyFlags, wrap);
 
     if res.is_null() {
-        return PG_RETURN_NULL!();
+        PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -755,7 +751,7 @@ pub unsafe extern "C" fn pg_get_viewdef_name(fcinfo: FunctionCallInfo) -> Datum 
     res = pg_get_viewdef_worker(viewoid, prettyFlags, WRAP_COLUMN_DEFAULT);
 
     if res.is_null() {
-        return PG_RETURN_NULL!();
+        PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -779,7 +775,7 @@ pub unsafe extern "C" fn pg_get_viewdef_name_ext(fcinfo: FunctionCallInfo) -> Da
     res = pg_get_viewdef_worker(viewoid, prettyFlags, WRAP_COLUMN_DEFAULT);
 
     if res.is_null() {
-        return PG_RETURN_NULL!();
+        PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -874,7 +870,7 @@ pub unsafe extern "C" fn pg_get_triggerdef(fcinfo: FunctionCallInfo) -> Datum {
     res = pg_get_triggerdef_worker(trigid, false);
 
     if res.is_null() {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -888,7 +884,7 @@ pub unsafe extern "C" fn pg_get_triggerdef_ext(fcinfo: FunctionCallInfo) -> Datu
     res = pg_get_triggerdef_worker(trigid, pretty);
 
     if res.is_null() {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -1195,7 +1191,7 @@ pub unsafe extern "C" fn pg_get_indexdef(fcinfo: FunctionCallInfo) -> Datum {
     );
 
     if res.is_null() {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -1218,7 +1214,7 @@ pub unsafe extern "C" fn pg_get_indexdef_ext(fcinfo: FunctionCallInfo) -> Datum 
     );
 
     if res.is_null() {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -1602,7 +1598,7 @@ pub unsafe extern "C" fn pg_get_statisticsobjdef(fcinfo: FunctionCallInfo) -> Da
     res = pg_get_statisticsobj_worker(statextid, false, true);
 
     if res.is_null() {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -1624,7 +1620,7 @@ pub unsafe extern "C" fn pg_get_statisticsobjdef_columns(fcinfo: FunctionCallInf
     res = pg_get_statisticsobj_worker(statextid, true, true);
 
     if res.is_null() {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -1827,7 +1823,7 @@ pub unsafe extern "C" fn pg_get_statisticsobjdef_expressions(fcinfo: FunctionCal
     statexttup = SearchSysCache1(STATEXTOID as i32, ObjectIdGetDatum(statextid));
 
     if !HeapTupleIsValid(statexttup) {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     // Does the stats object have expressions?
@@ -1836,7 +1832,7 @@ pub unsafe extern "C" fn pg_get_statisticsobjdef_expressions(fcinfo: FunctionCal
     // no expressions? we're done
     if !has_exprs {
         ReleaseSysCache(statexttup);
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     statextrec = GETSTRUCT(statexttup) as Form_pg_statistic_ext;
@@ -1885,7 +1881,7 @@ pub unsafe extern "C" fn pg_get_partkeydef(fcinfo: FunctionCallInfo) -> Datum {
     res = pg_get_partkeydef_worker(relid, PRETTYFLAG_INDENT, false, true);
 
     if res.is_null() {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -2068,7 +2064,7 @@ pub unsafe extern "C" fn pg_get_partition_constraintdef(fcinfo: FunctionCallInfo
 
     // Quick exit if no partition constraint
     if constr_expr.is_null() {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     // Deparse and return the constraint expression.
@@ -2114,7 +2110,7 @@ pub unsafe extern "C" fn pg_get_constraintdef(fcinfo: FunctionCallInfo) -> Datum
     res = pg_get_constraintdef_worker(constraint_id, false, pretty_flags, true);
 
     if res.is_null() {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -2131,7 +2127,7 @@ pub unsafe extern "C" fn pg_get_constraintdef_ext(fcinfo: FunctionCallInfo) -> D
     res = pg_get_constraintdef_worker(constraint_id, false, pretty_flags, true);
 
     if res.is_null() {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     PG_RETURN_TEXT_P!(string_to_text(res))
@@ -2591,7 +2587,7 @@ pub unsafe extern "C" fn pg_get_expr(fcinfo: FunctionCallInfo) -> Datum {
     if !result.is_null() {
         PG_RETURN_TEXT_P!(result)
     } else {
-        pg_return_null!(fcinfo)
+        PG_RETURN_NULL!(fcinfo)
     }
 }
 
@@ -2608,7 +2604,7 @@ pub unsafe extern "C" fn pg_get_expr_ext(fcinfo: FunctionCallInfo) -> Datum {
     if !result.is_null() {
         PG_RETURN_TEXT_P!(result)
     } else {
-        pg_return_null!(fcinfo)
+        PG_RETURN_NULL!(fcinfo)
     }
 }
 
@@ -2640,8 +2636,8 @@ unsafe fn pg_get_expr_worker(expr: *mut text, relid: Oid, pretty_flags: i32) -> 
     if !tst.is_null() && IsA(tst as *mut c_void, Query) {
         ereport!(
             ERROR,
-            errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-            errmsg("input is a query, not an expression")
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+            errmsg!("input is a query, not an expression")
         );
     }
 
@@ -2651,16 +2647,16 @@ unsafe fn pg_get_expr_worker(expr: *mut text, relid: Oid, pretty_flags: i32) -> 
         if !bms_is_subset(relids as Relids, bms_make_singleton(1)) {
             ereport!(
                 ERROR,
-                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("expression contains variables of more than one relation")
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+                errmsg!("expression contains variables of more than one relation")
             );
         }
     } else {
         if !bms_is_empty(relids as Relids) {
             ereport!(
                 ERROR,
-                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("expression contains variables")
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
+                errmsg!("expression contains variables")
             );
         }
     }
@@ -2750,8 +2746,8 @@ pub unsafe extern "C" fn pg_get_serial_sequence(fcinfo: FunctionCallInfo) -> Dat
     if attnum == InvalidAttrNumber {
         ereport!(
             ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg(
+            /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */
+            errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 CStr::from_ptr(column).to_str().unwrap_or(""),
                 CStr::from_ptr((*tablerv).relname).to_str().unwrap_or("")
@@ -2813,10 +2809,10 @@ pub unsafe extern "C" fn pg_get_serial_sequence(fcinfo: FunctionCallInfo) -> Dat
 
         result = generate_qualified_relation_name(sequence_id);
 
-        return PG_RETURN_TEXT_P!(string_to_text(result));
+        PG_RETURN_TEXT_P!(string_to_text(result));
     }
 
-    pg_return_null!(fcinfo)
+    PG_RETURN_NULL!(fcinfo)
 }
 
 // pg_get_functiondef
@@ -2847,7 +2843,7 @@ pub unsafe extern "C" fn pg_get_functiondef(fcinfo: FunctionCallInfo) -> Datum {
     // Look up the function
     proctup = SearchSysCache1(PROCOID as i32, ObjectIdGetDatum(funcid));
     if !HeapTupleIsValid(proctup) {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     proc_ = GETSTRUCT(proctup) as Form_pg_proc;
@@ -2856,8 +2852,8 @@ pub unsafe extern "C" fn pg_get_functiondef(fcinfo: FunctionCallInfo) -> Datum {
     if (*proc_).prokind == PROKIND_AGGREGATE as c_char {
         ereport!(
             ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg("\"{}\" is an aggregate function", CStr::from_ptr(name).to_str().unwrap_or(""))
+            /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
+            errmsg!("\"{}\" is an aggregate function", CStr::from_ptr(name).to_str().unwrap_or(""))
         );
     }
 
@@ -3098,7 +3094,7 @@ pub unsafe extern "C" fn pg_get_function_arguments(fcinfo: FunctionCallInfo) -> 
 
     proctup = SearchSysCache1(PROCOID as i32, ObjectIdGetDatum(funcid));
     if !HeapTupleIsValid(proctup) {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     initStringInfo(&mut buf);
@@ -3121,7 +3117,7 @@ pub unsafe extern "C" fn pg_get_function_identity_arguments(fcinfo: FunctionCall
 
     proctup = SearchSysCache1(PROCOID as i32, ObjectIdGetDatum(funcid));
     if !HeapTupleIsValid(proctup) {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     initStringInfo(&mut buf);
@@ -3143,14 +3139,14 @@ pub unsafe extern "C" fn pg_get_function_result(fcinfo: FunctionCallInfo) -> Dat
 
     proctup = SearchSysCache1(PROCOID as i32, ObjectIdGetDatum(funcid));
     if !HeapTupleIsValid(proctup) {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     if (GETSTRUCT(proctup) as Form_pg_proc != std::ptr::null_mut())
         && (*(GETSTRUCT(proctup) as Form_pg_proc)).prokind == PROKIND_PROCEDURE as c_char
     {
         ReleaseSysCache(proctup);
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     initStringInfo(&mut buf);
@@ -3409,13 +3405,13 @@ pub unsafe extern "C" fn pg_get_function_arg_default(fcinfo: FunctionCallInfo) -
 
     proctup = SearchSysCache1(PROCOID as i32, ObjectIdGetDatum(funcid));
     if !HeapTupleIsValid(proctup) {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     numargs = get_func_arg_info(proctup, &mut argtypes, &mut argnames, &mut argmodes);
     if nth_arg < 1 || nth_arg > numargs || !is_input_argument(nth_arg - 1, argmodes) {
         ReleaseSysCache(proctup);
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     nth_inputarg = 0;
@@ -3430,7 +3426,7 @@ pub unsafe extern "C" fn pg_get_function_arg_default(fcinfo: FunctionCallInfo) -
     proargdefaults = SysCacheGetAttr(PROCOID as i32, proctup, Anum_pg_proc_proargdefaults as i32, &mut isnull);
     if isnull {
         ReleaseSysCache(proctup);
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     let tmp_str = TextDatumGetCString!(proargdefaults);
@@ -3445,7 +3441,7 @@ pub unsafe extern "C" fn pg_get_function_arg_default(fcinfo: FunctionCallInfo) -
 
     if nth_default < 0 || nth_default >= list_length(argdefaults) {
         ReleaseSysCache(proctup);
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
     node = list_nth(argdefaults, nth_default) as *mut Node;
     str_ = deparse_expression(node, NIL, false, false);
@@ -3534,13 +3530,13 @@ pub unsafe extern "C" fn pg_get_function_sqlbody(fcinfo: FunctionCallInfo) -> Da
     // Look up the function
     proctup = SearchSysCache1(PROCOID as i32, ObjectIdGetDatum(funcid));
     if !HeapTupleIsValid(proctup) {
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     let _ = SysCacheGetAttr(PROCOID as i32, proctup, Anum_pg_proc_prosqlbody as i32, &mut isnull);
     if isnull {
         ReleaseSysCache(proctup);
-        return pg_return_null!(fcinfo);
+        return PG_RETURN_NULL!(fcinfo);
     }
 
     print_function_sqlbody(&mut buf, proctup);
@@ -5039,7 +5035,7 @@ unsafe fn make_ruledef(
         _ => {
             ereport!(
                 ERROR,
-                errmsg(
+                errmsg!(
                     "rule \"{}\" has unsupported event type {}",
                     std::ffi::CStr::from_ptr(rulename).to_str().unwrap_or(""),
                     ev_type as i32
@@ -9607,8 +9603,8 @@ fn get_func_expr(expr: *mut FuncExpr, context: *mut deparse_context, showimplici
          */
         if list_length((*expr).args) > FUNC_MAX_ARGS as i32 {
             ereport!(ERROR,
-                errcode(ERRCODE_TOO_MANY_ARGUMENTS),
-                /* C also: */ errmsg("too many arguments"));
+                /* C also: errcode(ERRCODE_TOO_MANY_ARGUMENTS) */
+                errmsg!("too many arguments"));
         }
         nargs = 0;
         argnames = std::ptr::null_mut();
@@ -9822,8 +9818,8 @@ fn get_windowfunc_expr_helper(
 
         if list_length((*wfunc).args) > FUNC_MAX_ARGS as i32 {
             ereport!(ERROR,
-                errcode(ERRCODE_TOO_MANY_ARGUMENTS),
-                /* C also: */ errmsg("too many arguments"));
+                /* C also: errcode(ERRCODE_TOO_MANY_ARGUMENTS) */
+                errmsg!("too many arguments"));
         }
         let mut l = list_head((*wfunc).args);
         while !l.is_null() {

@@ -224,9 +224,7 @@ unsafe fn varstr_cmp(
     _arg2: *const c_char,
     _len2: c_int,
     _collid: Oid,
-) -> c_int {
-    unimplemented!("TODO(pg-port): utils/adt/varlena.c varstr_cmp")
-}
+) -> c_int { crate::utils::adt::varlena::varstr_cmp(_arg1 as _, _len1 as _, _arg2 as _, _len2 as _, _collid as _) as _ }
 
 /*
  * Operator / opfamily / collation OIDs are emitted by genbki into

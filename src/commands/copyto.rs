@@ -119,33 +119,42 @@ extern "C" {
 // TODO(pg-port): real getTypeOutputInfo / getTypeBinaryOutputInfo live in
 // utils/cache/lsyscache.c (TYPEOID syscache) -- not yet translated.
 unsafe fn getTypeOutputInfo(_type: Oid, _typOutput: *mut Oid, _typIsVarlena: *mut bool) {
-    unimplemented!("getTypeOutputInfo: utils/cache/lsyscache.c not yet translated")
+    crate::utils::cache::lsyscache::getTypeOutputInfo(_type as _, _typOutput as _, _typIsVarlena as _)
 }
 unsafe fn getTypeBinaryOutputInfo(_type: Oid, _typSend: *mut Oid, _typIsVarlena: *mut bool) {
-    unimplemented!("getTypeBinaryOutputInfo: utils/cache/lsyscache.c not yet translated")
+    crate::utils::cache::lsyscache::getTypeBinaryOutputInfo(
+        _type as _, _typSend as _, _typIsVarlena as _,
+    )
 }
 
-// TODO(pg-port): real table scan AM wrappers live in access/tableam.h.
+// table_beginscan dispatches the AM scan_begin routine directly (no pub wrapper
+// in tableam yet); mirrors executor/nodeSeqscan.rs.
 unsafe fn table_beginscan(
     _rel: Relation,
     _snapshot: Snapshot,
     _nkeys: c_int,
     _key: *mut c_void,
 ) -> TableScanDesc {
-    unimplemented!() // TODO: access/tableam.h
+    use crate::access::table::tableam::{
+        TableAmRoutine, SO_ALLOW_PAGEMODE, SO_ALLOW_STRAT, SO_ALLOW_SYNC, SO_TYPE_SEQSCAN,
+    };
+    let flags = (SO_TYPE_SEQSCAN | SO_ALLOW_STRAT | SO_ALLOW_SYNC | SO_ALLOW_PAGEMODE) as u32;
+    ((*((*_rel).rd_tableam as *const TableAmRoutine)).scan_begin.unwrap())(
+        _rel as _, _snapshot as _, _nkeys, _key as _, core::ptr::null_mut(), flags,
+    ) as _
 }
 unsafe fn table_scan_getnextslot(
     _sscan: TableScanDesc,
     _direction: crate::access::sdir::ScanDirection,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_scan_getnextslot(_sscan as _, _direction, _slot as _)
 }
 unsafe fn table_endscan(_scan: TableScanDesc) {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_endscan(_scan as _)
 }
 unsafe fn table_slot_create(_rel: Relation, _reglist: *mut *mut List) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: access/table/tableam.c
+    crate::access::table::tableam::table_slot_create(_rel as _, _reglist as _) as _
 }
 
 // TODO(pg-port): planner/rewriter entry points live in tcop/postgres.c.
@@ -156,7 +165,9 @@ unsafe fn pg_analyze_and_rewrite_fixedparams(
     _numParams: c_int,
     _queryEnv: *mut c_void,
 ) -> *mut List {
-    unimplemented!() // TODO: tcop/postgres.c
+    crate::tcop::postgres::pg_analyze_and_rewrite_fixedparams(
+        _parsetree as _, _query_string as _, _paramTypes as _, _numParams as _, _queryEnv as _,
+    ) as _
 }
 unsafe fn pg_plan_query(
     _querytree: *mut Query,
@@ -164,40 +175,42 @@ unsafe fn pg_plan_query(
     _cursorOptions: c_int,
     _boundParams: *mut c_void,
 ) -> *mut PlannedStmt {
-    unimplemented!() // TODO: tcop/postgres.c
+    crate::tcop::postgres::pg_plan_query(
+        _querytree as _, _query_string as _, _cursorOptions as _, _boundParams as _,
+    ) as _
 }
 
 // TODO(pg-port): snapshot management lives in utils/time/snapmgr.c.
 unsafe fn GetActiveSnapshot() -> Snapshot {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::GetActiveSnapshot() as _
 }
 unsafe fn PushCopiedSnapshot(_snapshot: Snapshot) {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::PushCopiedSnapshot(_snapshot as _)
 }
 unsafe fn UpdateActiveSnapshotCommandId() {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::UpdateActiveSnapshotCommandId()
 }
 unsafe fn PopActiveSnapshot() {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::PopActiveSnapshot()
 }
 
 // TODO(pg-port): file/pipe descriptor helpers live in storage/file/fd.c.
 unsafe fn AllocateFile(_name: *const c_char, _mode: *const c_char) -> *mut FILE {
-    unimplemented!() // TODO: storage/file/fd.c
+    crate::storage::file::fd::AllocateFile(_name as _, _mode as _) as _
 }
 unsafe fn FreeFile(_file: *mut FILE) -> c_int {
-    unimplemented!() // TODO: storage/file/fd.c
+    crate::storage::file::fd::FreeFile(_file as _) as _
 }
 unsafe fn OpenPipeStream(_command: *const c_char, _mode: *const c_char) -> *mut FILE {
-    unimplemented!() // TODO: storage/file/fd.c
+    crate::storage::file::fd::OpenPipeStream(_command as _, _mode as _) as _
 }
 unsafe fn ClosePipeStream(_file: *mut FILE) -> c_int {
-    unimplemented!() // TODO: storage/file/fd.c
+    crate::storage::file::fd::ClosePipeStream(_file as _) as _
 }
 
-// TODO(pg-port): RelationIsPopulated lives in utils/rel.h.
+// RelationIsPopulated reads rd_rel->relispopulated (utils/rel.h macro).
 unsafe fn RelationIsPopulated(_rel: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
+    (*(*_rel).rd_rel).relispopulated
 }
 
 // TODO(pg-port): whereToSendOutput is a global in tcop/postgres.c; not yet ported.

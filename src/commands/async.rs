@@ -73,105 +73,103 @@ const LW_EXCLUSIVE: c_int = 1;
 const LW_SHARED: c_int = 2;
 
 #[allow(non_snake_case)]
-unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    // TODO(pg-port): storage/lwlock.c
-    unimplemented!()
+unsafe fn LWLockAcquire(lock: *mut LWLock, mode: c_int) -> bool {
+    use crate::storage::lmgr::lwlock::LWLockMode;
+    let real_mode = match mode {
+        LW_SHARED => LWLockMode::LW_SHARED,
+        _ => LWLockMode::LW_EXCLUSIVE,
+    };
+    crate::storage::lmgr::lwlock::LWLockAcquire(lock as _, real_mode)
 }
 #[allow(non_snake_case)]
-unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    // TODO(pg-port): storage/lwlock.c
-    unimplemented!()
+unsafe fn LWLockRelease(lock: *mut LWLock) {
+    crate::storage::lmgr::lwlock::LWLockRelease(lock as _)
 }
 
 // NotifyQueueLock / NotifyQueueTailLock (storage/lwlocknames.h -- built-in LWLocks)
-#[allow(non_upper_case_globals)]
-static mut NotifyQueueLock: *mut LWLock = ptr::null_mut();
-#[allow(non_upper_case_globals)]
-static mut NotifyQueueTailLock: *mut LWLock = ptr::null_mut();
+use crate::backend_link_shims::NotifyQueueLock;
+use crate::backend_link_shims::NotifyQueueTailLock;
 
-#[repr(C)]
-pub struct SlruSharedData {
-    pub page_buffer: *mut *mut c_char,
-    pub page_dirty:  *mut bool,
-}
-pub type SlruShared = *mut SlruSharedData;
-
-#[repr(C)]
-pub struct SlruCtlData {
-    pub shared:        SlruShared,
-    pub PagePrecedes:  Option<unsafe fn(i64, i64) -> bool>,
-}
-pub type SlruCtl = *mut SlruCtlData;
+// Canonical SLRU types (slru.h). Local stubs here were UNDER-SIZED: NotifyCtlData
+// is a by-value static, and SimpleLruInit (canonical) wrote the full layout past
+// the 2-field stub, overflowing adjacent BSS globals.
+pub use crate::access::transam::slru::{SlruSharedData, SlruShared, SlruCtlData, SlruCtl};
 
 #[allow(non_snake_case)]
-unsafe fn SimpleLruGetBankLock(_ctl: SlruCtl, _pageno: i64) -> *mut LWLock {
-    // TODO(pg-port): access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruGetBankLock(ctl: SlruCtl, pageno: i64) -> *mut LWLock {
+    crate::access::transam::slru::SimpleLruGetBankLock(ctl as _, pageno) as _
 }
 #[allow(non_snake_case)]
-unsafe fn SimpleLruZeroPage(_ctl: SlruCtl, _pageno: i64) -> c_int {
-    // TODO(pg-port): access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruZeroPage(ctl: SlruCtl, pageno: i64) -> c_int {
+    crate::access::transam::slru::SimpleLruZeroPage(ctl as _, pageno)
 }
 #[allow(non_snake_case)]
-unsafe fn SimpleLruReadPage(_ctl: SlruCtl, _pageno: i64, _write_ok: bool,
-                              _xid: TransactionId) -> c_int {
-    // TODO(pg-port): access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruReadPage(ctl: SlruCtl, pageno: i64, write_ok: bool,
+                              xid: TransactionId) -> c_int {
+    crate::access::transam::slru::SimpleLruReadPage(ctl as _, pageno, write_ok, xid)
 }
 #[allow(non_snake_case)]
-unsafe fn SimpleLruReadPage_ReadOnly(_ctl: SlruCtl, _pageno: i64,
-                                      _xid: TransactionId) -> c_int {
-    // TODO(pg-port): access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruReadPage_ReadOnly(ctl: SlruCtl, pageno: i64,
+                                      xid: TransactionId) -> c_int {
+    crate::access::transam::slru::SimpleLruReadPage_ReadOnly(ctl as _, pageno, xid)
 }
 #[allow(non_snake_case)]
-unsafe fn SimpleLruTruncate(_ctl: SlruCtl, _cutoffPage: i64) {
-    // TODO(pg-port): access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruTruncate(ctl: SlruCtl, cutoffPage: i64) {
+    crate::access::transam::slru::SimpleLruTruncate(ctl as _, cutoffPage)
 }
 #[allow(non_snake_case)]
-unsafe fn SimpleLruInit(_ctl: SlruCtl, _name: *const c_char, _nslots: c_int,
-                         _nlsns: c_int, _subdir: *const c_char,
-                         _buffer_tranche_id: c_int, _slru_tranche_id: c_int,
-                         _sync_handler: c_int, _long_segment_names: bool) {
-    // TODO(pg-port): access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruInit(ctl: SlruCtl, name: *const c_char, nslots: c_int,
+                         nlsns: c_int, subdir: *const c_char,
+                         buffer_tranche_id: c_int, slru_tranche_id: c_int,
+                         sync_handler: c_int, long_segment_names: bool) {
+    use crate::storage::sync::sync::SyncRequestHandler;
+    // This module's SYNC_HANDLER_NONE is -1; the real enum's is 5. The only
+    // value ever passed here is SYNC_HANDLER_NONE, so map it directly.
+    let real_handler: c_int = match sync_handler {
+        SYNC_HANDLER_NONE => SyncRequestHandler::SYNC_HANDLER_NONE as c_int,
+        other => other,
+    };
+    crate::access::transam::slru::SimpleLruInit(
+        ctl as _, name, nslots, nlsns, subdir, buffer_tranche_id, slru_tranche_id,
+        real_handler, long_segment_names,
+    )
 }
 #[allow(non_snake_case)]
-unsafe fn SimpleLruShmemSize(_nslots: c_int, _nlsns: c_int) -> Size {
-    // TODO(pg-port): access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruShmemSize(nslots: c_int, nlsns: c_int) -> Size {
+    crate::access::transam::slru::SimpleLruShmemSize(nslots, nlsns)
 }
 #[allow(non_snake_case)]
-unsafe fn SlruScanDirectory(_ctl: SlruCtl,
+unsafe fn SlruScanDirectory(ctl: SlruCtl,
                               _callback: Option<unsafe fn(SlruCtl, *const c_char, i64) -> bool>,
-                              _data: *mut c_void) -> bool {
-    // TODO(pg-port): access/slru.c
-    unimplemented!()
+                              data: *mut c_void) -> bool {
+    // The only callback ever passed here is SlruScanDirCbDeleteAll; forward to
+    // the real one directly to avoid an ABI/arity mismatch on the fn pointer.
+    crate::access::transam::slru::SlruScanDirectory(
+        ctl as _,
+        crate::access::transam::slru::SlruScanDirCbDeleteAll,
+        data,
+    )
 }
 #[allow(non_snake_case)]
-unsafe fn SlruScanDirCbDeleteAll(_ctl: SlruCtl, _fname: *const c_char,
-                                  _segno: i64) -> bool {
-    // TODO(pg-port): access/slru.c
-    unimplemented!()
+unsafe fn SlruScanDirCbDeleteAll(ctl: SlruCtl, fname: *const c_char,
+                                  segno: i64) -> bool {
+    crate::access::transam::slru::SlruScanDirCbDeleteAll(
+        ctl as _, fname as *mut c_char, segno, ptr::null_mut(),
+    )
 }
 
 #[allow(non_snake_case)]
-unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size,
-                           _foundPtr: *mut bool) -> *mut c_void {
-    // TODO(pg-port): storage/shmem.c
-    unimplemented!()
+unsafe fn ShmemInitStruct(name: *const c_char, size: Size,
+                           foundPtr: *mut bool) -> *mut c_void {
+    crate::storage::ipc::shmem::ShmemInitStruct(name, size, foundPtr)
 }
 #[allow(non_snake_case)]
-unsafe fn mul_size(_s1: Size, _s2: Size) -> Size {
-    // TODO(pg-port): storage/shmem.c
-    unimplemented!()
+unsafe fn mul_size(s1: Size, s2: Size) -> Size {
+    crate::storage::ipc::shmem::mul_size(s1, s2)
 }
 #[allow(non_snake_case)]
-unsafe fn add_size(_s1: Size, _s2: Size) -> Size {
-    // TODO(pg-port): storage/shmem.c
-    unimplemented!()
+unsafe fn add_size(s1: Size, s2: Size) -> Size {
+    crate::storage::ipc::shmem::add_size(s1, s2)
 }
 
 // tranche ids (lwlock.h / lwlocknames.h)
@@ -209,23 +207,27 @@ extern "C" {
 const PROCSIG_NOTIFY_INTERRUPT: c_int = 4;
 
 #[allow(non_snake_case)]
-unsafe fn SendProcSignal(_pid: int32, _signal: c_int,
-                          _procNumber: ProcNumber) -> c_int {
-    // TODO(pg-port): storage/procsignal.c
-    unimplemented!()
+unsafe fn SendProcSignal(pid: int32, signal: c_int,
+                          procNumber: ProcNumber) -> c_int {
+    use crate::storage::ipc::procsignal::ProcSignalReason;
+    let _ = signal; // only PROCSIG_NOTIFY_INTERRUPT is ever sent from here
+    crate::storage::ipc::procsignal::SendProcSignal(
+        pid, ProcSignalReason::PROCSIG_NOTIFY_INTERRUPT, procNumber,
+    )
 }
 
 #[allow(non_snake_case)]
-unsafe fn SetLatch(_latch: *mut c_void) {
-    // TODO(pg-port): storage/latch.c
-    unimplemented!()
+unsafe fn SetLatch(latch: *mut c_void) {
+    crate::storage::ipc::latch::SetLatch(latch as _)
 }
 
 #[allow(non_snake_case)]
-unsafe fn before_shmem_exit(_function: unsafe fn(c_int, Datum),
-                              _arg: Datum) {
-    // TODO(pg-port): storage/ipc.c
-    unimplemented!()
+unsafe fn before_shmem_exit(function: unsafe fn(c_int, Datum),
+                              arg: Datum) {
+    crate::storage::ipc::ipc::before_shmem_exit(
+        std::mem::transmute::<_, crate::storage::ipc::ipc::pg_on_exit_callback>(function),
+        arg,
+    )
 }
 
 // Snapshot (utils/snapshot.h)
@@ -253,9 +255,8 @@ unsafe fn XidInMVCCSnapshot(_xid: TransactionId, _snap: Snapshot) -> bool {
 }
 
 #[allow(non_snake_case)]
-unsafe fn TransactionIdDidCommit(_xid: TransactionId) -> bool {
-    // TODO(pg-port): access/transam/transam.c
-    unimplemented!()
+unsafe fn TransactionIdDidCommit(xid: TransactionId) -> bool {
+    crate::access::transam::transam::TransactionIdDidCommit(xid)
 }
 #[allow(non_snake_case)]
 unsafe fn GetCurrentTransactionId() -> TransactionId {
@@ -365,16 +366,32 @@ const HASH_FIND:     c_int = 0;
 const HASH_ENTER:    c_int = 1;
 
 #[allow(non_snake_case)]
-unsafe fn hash_create(_tabname: *const c_char, _nelem: i64,
-                       _info: *mut HASHCTL, _flags: c_int) -> *mut HTAB {
-    // TODO(pg-port): utils/hash/dynahash.c
-    unimplemented!()
+unsafe fn hash_create(tabname: *const c_char, nelem: i64,
+                       info: *mut HASHCTL, flags: c_int) -> *mut HTAB {
+    use crate::utils::hash::dynahash as dh;
+    // Translate this module's local HASHCTL/flags to the real dynahash ones.
+    let mut real_info: dh::HASHCTL = core::mem::zeroed();
+    real_info.keysize = (*info).keysize;
+    real_info.entrysize = (*info).entrysize;
+    real_info.hash = std::mem::transmute::<_, dh::HashValueFunc>((*info).hash);
+    real_info.r#match = std::mem::transmute::<_, dh::HashCompareFunc>((*info).match_fn);
+    real_info.hcxt = (*info).hcxt as _;
+    let mut real_flags: c_int = 0;
+    if flags & HASH_ELEM != 0 { real_flags |= dh::HASH_ELEM; }
+    if flags & HASH_FUNCTION != 0 { real_flags |= dh::HASH_FUNCTION; }
+    if flags & HASH_COMPARE != 0 { real_flags |= dh::HASH_COMPARE; }
+    if flags & HASH_CONTEXT != 0 { real_flags |= dh::HASH_CONTEXT; }
+    dh::hash_create(tabname, nelem, &real_info, real_flags) as _
 }
 #[allow(non_snake_case)]
-unsafe fn hash_search(_hashp: *mut HTAB, _keyPtr: *const c_void,
-                       _action: c_int, _foundPtr: *mut bool) -> *mut c_void {
-    // TODO(pg-port): utils/hash/dynahash.c
-    unimplemented!()
+unsafe fn hash_search(hashp: *mut HTAB, keyPtr: *const c_void,
+                       action: c_int, foundPtr: *mut bool) -> *mut c_void {
+    use crate::utils::hash::dynahash::HASHACTION;
+    let real_action = match action {
+        HASH_ENTER => HASHACTION::HASH_ENTER,
+        _ => HASHACTION::HASH_FIND,
+    };
+    crate::utils::hash::dynahash::hash_search(hashp as _, keyPtr, real_action, foundPtr)
 }
 #[allow(non_snake_case)]
 unsafe fn hash_any(_k: *const u8, _keylen: c_int) -> Datum {
@@ -475,9 +492,8 @@ extern "C" {
     static mut TopTransactionContext: MemoryContext;
 }
 #[allow(non_snake_case)]
-unsafe fn MemoryContextAlloc(_cxt: MemoryContext, _size: Size) -> *mut c_void {
-    // TODO(pg-port): utils/mmgr/mcxt.c
-    unimplemented!()
+unsafe fn MemoryContextAlloc(cxt: MemoryContext, size: Size) -> *mut c_void {
+    crate::utils::mmgr::mcxt::MemoryContextAlloc(cxt as _, size)
 }
 
 // ---------------------------------------------------------------------------
@@ -633,10 +649,7 @@ static mut asyncQueueControl: *mut AsyncQueueControl = ptr::null_mut();
 }
 
 /// The SLRU buffer area through which we access the notification queue.
-static mut NotifyCtlData: SlruCtlData = SlruCtlData {
-    shared: ptr::null_mut(),
-    PagePrecedes: None,
-};
+static mut NotifyCtlData: SlruCtlData = unsafe { core::mem::zeroed() };
 #[inline] fn NotifyCtl() -> SlruCtl { unsafe { &mut NotifyCtlData as SlruCtl } }
 
 // ---------------------------------------------------------------------------
@@ -752,7 +765,7 @@ unsafe fn asyncQueuePageDiff(p: i64, q: i64) -> i64 {
  * Previously this function accounted for a wraparound.
  */
 #[inline]
-unsafe fn asyncQueuePagePrecedes(p: i64, q: i64) -> bool {
+unsafe extern "C" fn asyncQueuePagePrecedes(p: i64, q: i64) -> bool {
     p < q
 }
 

@@ -163,21 +163,59 @@ const ERRCODE_FEATURE_NOT_SUPPORTED: c_int = 0;
  */
 macro_rules! ereturn {
     ($escontext:expr, $dummy:expr, $($arg:tt)*) => {{
-        let _ = &$escontext;
-        ereport!(ERROR, $($arg)*);
+        let __msg: String = { $($arg)* };
+        soft_error_record($escontext as *mut Node, &__msg);
         #[allow(unreachable_code)]
         return $dummy;
     }};
 }
 
 /*
- * SOFT_ERROR_OCCURRED(escontext): with the elog shim always raising at ERROR,
- * control never returns from a soft-error site, so this is effectively always
- * false here.  Mirror crate::nodes::miscnodes semantics.
+ * soft_error_record: report a (soft or hard) input error through the real
+ * errsave mechanism so pg_input_is_valid / pg_input_error_info see a populated
+ * ErrorSaveContext.  errsave_start sets error_occurred and (when details are
+ * wanted) opens a real error stack frame; for a null/non-ErrorSaveContext it
+ * punts to errstart(ERROR) and errsave_finish then raises a hard ERROR.
+ * All geo input failures are 22P02 (invalid_text_representation).
  */
 #[inline]
-unsafe fn SOFT_ERROR_OCCURRED(_escontext: *mut Node) -> bool {
+unsafe fn soft_error_record(escontext: *mut Node, msg: &str) {
+    const ERRCODE_INVALID_TEXT_REPRESENTATION_REAL: c_int = 33685634; /* 22P02 */
+    if crate::utils::error::elog_impl::errsave_start(escontext, core::ptr::null()) {
+        crate::utils::error::elog_impl::errcode_impl(ERRCODE_INVALID_TEXT_REPRESENTATION_REAL);
+        if let Ok(c) = std::ffi::CString::new(msg) {
+            crate::utils::error::elog_impl::errmsg_c(c.as_ptr());
+        }
+        crate::utils::error::elog_impl::errsave_finish(
+            escontext, c"geo_ops.rs".as_ptr(), 0, c"geo_ops".as_ptr(),
+        );
+    }
+}
+
+/*
+ * SOFT_ERROR_FLAG: if `escontext` is a real ErrorSaveContext, record that a soft
+ * error occurred and return true (caller returns its dummy without raising);
+ * otherwise return false so the caller raises a hard ERROR.
+ */
+#[inline]
+unsafe fn SOFT_ERROR_FLAG(escontext: *mut Node) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    if !escontext.is_null() && *(escontext as *const c_int) == T_ErrorSaveContext {
+        (*(escontext as *mut crate::nodes::miscnodes::ErrorSaveContext)).error_occurred = true;
+        return true;
+    }
     false
+}
+
+/*
+ * SOFT_ERROR_OCCURRED(escontext): true once a soft error has been recorded.
+ */
+#[inline]
+unsafe fn SOFT_ERROR_OCCURRED(escontext: *mut Node) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    !escontext.is_null()
+        && *(escontext as *const c_int) == T_ErrorSaveContext
+        && (*(escontext as *const crate::nodes::miscnodes::ErrorSaveContext)).error_occurred
 }
 
 /*
@@ -2132,6 +2170,7 @@ unsafe fn point_eq_point(pt1: *mut Point, pt2: *mut Point) -> bool {
  *  "Arithmetic" operators on points.
  *---------------------------------------------------------*/
 
+#[no_mangle]
 pub unsafe fn point_distance(fcinfo: FunctionCallInfo) -> Datum {
     let pt1: *mut Point = PG_GETARG_POINT_P!(fcinfo, 0);
     let pt2: *mut Point = PG_GETARG_POINT_P!(fcinfo, 1);
@@ -2320,6 +2359,7 @@ pub unsafe fn lseg_length(fcinfo: FunctionCallInfo) -> Datum {
  **  find intersection of the two lines, and see if it falls on
  **  both segments.
  */
+#[no_mangle]
 pub unsafe fn lseg_intersect(fcinfo: FunctionCallInfo) -> Datum {
     let l1: *mut LSEG = PG_GETARG_LSEG_P!(fcinfo, 0);
     let l2: *mut LSEG = PG_GETARG_LSEG_P!(fcinfo, 1);
@@ -2475,6 +2515,7 @@ unsafe fn lseg_interpt_lseg(result: *mut Point, l1: *mut LSEG, l2: *mut LSEG) ->
     return true;
 }
 
+#[no_mangle]
 pub unsafe fn lseg_interpt(fcinfo: FunctionCallInfo) -> Datum {
     let l1: *mut LSEG = PG_GETARG_LSEG_P!(fcinfo, 0);
     let l2: *mut LSEG = PG_GETARG_LSEG_P!(fcinfo, 1);

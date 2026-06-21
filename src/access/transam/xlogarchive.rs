@@ -114,44 +114,32 @@ unsafe fn replace_percent_placeholders(
     unimplemented!() // TODO: common/percentrepl.c
 }
 
-unsafe fn pgstat_report_wait_start(_wait_event_info: uint32) {
-    unimplemented!() // TODO: pgstat.c
-}
+unsafe fn pgstat_report_wait_start(_wait_event_info: uint32) { crate::parser_link_shims::pgstat_report_wait_start(_wait_event_info as _) }
 
-unsafe fn pgstat_report_wait_end() {
-    unimplemented!() // TODO: pgstat.c
-}
+unsafe fn pgstat_report_wait_end() { crate::parser_link_shims::pgstat_report_wait_end() }
 
-unsafe fn PreRestoreCommand() {
-    unimplemented!() // TODO: postmaster/startup.c
-}
+unsafe fn PreRestoreCommand() { crate::postmaster::startup::PreRestoreCommand() }
 
-unsafe fn PostRestoreCommand() {
-    unimplemented!() // TODO: postmaster/startup.c
-}
+unsafe fn PostRestoreCommand() { crate::postmaster::startup::PostRestoreCommand() }
 
-unsafe fn proc_exit(_code: c_int) -> ! {
-    unimplemented!() // TODO: storage/ipc.c
-}
+unsafe fn proc_exit(_code: c_int) -> ! { crate::storage::ipc::ipc::proc_exit(_code as _) }
 
 unsafe fn wait_result_is_signal(_exit_status: c_int, _signum: c_int) -> bool {
     unimplemented!() // TODO: common/wait_error.c
 }
 
-unsafe fn wait_result_is_any_signal(_exit_status: c_int, _include_command_not_found: bool) -> bool {
-    unimplemented!() // TODO: common/wait_error.c
-}
+unsafe fn wait_result_is_any_signal(_exit_status: c_int, _include_command_not_found: bool) -> bool { crate::common::wait_error::wait_result_is_any_signal(_exit_status as _, _include_command_not_found as _) }
 
 unsafe fn wait_result_to_str(_exit_status: c_int) -> *mut c_char {
     unimplemented!() // TODO: common/wait_error.c
 }
 
-unsafe fn durable_rename(_oldfile: *const c_char, _newfile: *const c_char, _elevel: c_int) -> c_int {
-    unimplemented!() // TODO: storage/fd.c
+unsafe fn durable_rename(oldfile: *const c_char, newfile: *const c_char, elevel: c_int) -> c_int {
+    crate::storage::file::fd::durable_rename(oldfile, newfile, elevel)
 }
 
-unsafe fn XLogArchivingActive() -> bool {
-    unimplemented!() // TODO: access/xlog.h
+pub unsafe fn XLogArchivingActive() -> bool {
+    XLogArchiveMode > 0 /* ARCHIVE_MODE_OFF */
 }
 
 unsafe fn XLogArchivingAlways() -> bool {
@@ -162,37 +150,23 @@ unsafe fn GetRecoveryState() -> c_int {
     unimplemented!() // TODO: xlog.c
 }
 
-unsafe fn AllocateFile(_name: *const c_char, _mode: *const c_char) -> *mut c_void {
-    unimplemented!() // TODO: storage/fd.c
-}
+unsafe fn AllocateFile(_name: *const c_char, _mode: *const c_char) -> *mut c_void { crate::storage::file::fd::AllocateFile(_name as _, _mode as _) }
 
-unsafe fn FreeFile(_file: *mut c_void) -> c_int {
-    unimplemented!() // TODO: storage/fd.c
-}
+unsafe fn FreeFile(_file: *mut c_void) -> c_int { crate::storage::file::fd::FreeFile(_file as _) }
 
 unsafe fn StatusFilePath(_path: *mut c_char, _xlog: *const c_char, _suffix: *const c_char) {
     unimplemented!() // TODO: xlog_internal.h
 }
 
-unsafe fn IsTLHistoryFileName(_fname: *const c_char) -> bool {
-    unimplemented!() // TODO: xlog_internal.h
-}
+unsafe fn IsTLHistoryFileName(_fname: *const c_char) -> bool { crate::access::transam::xlog_internal::IsTLHistoryFileName(_fname as _) }
 
-unsafe fn PgArchForceDirScan() {
-    unimplemented!() // TODO: postmaster/pgarch.c
-}
+unsafe fn PgArchForceDirScan() { crate::postmaster::pgarch::PgArchForceDirScan() }
 
-unsafe fn PgArchWakeup() {
-    unimplemented!() // TODO: postmaster/pgarch.c
-}
+unsafe fn PgArchWakeup() { crate::postmaster::pgarch::PgArchWakeup() }
 
-unsafe fn WalSndRqstFileReload() {
-    unimplemented!() // TODO: replication/walsender.c
-}
+unsafe fn WalSndRqstFileReload() { crate::replication::walsender::WalSndRqstFileReload() }
 
-unsafe fn WalSndWakeup(_physical: bool, _logical: bool) {
-    unimplemented!() // TODO: replication/walsender.c
-}
+unsafe fn WalSndWakeup(_physical: bool, _logical: bool) { crate::replication::walsender::WalSndWakeup(_physical as _, _logical as _) }
 
 /*
  * Attempt to retrieve the specified file from off-line archival storage.

@@ -50,14 +50,15 @@ use crate::prelude::*;
 use core::ffi::{c_char, c_int, c_long, c_void};
 
 use crate::access::transam::xlogdefs::{
-    InvalidXLogRecPtr, LSN_FORMAT_ARGS, XLogRecPtr, XLogSegNo,
+    InvalidXLogRecPtr, LSN_FORMAT_ARGS, XLogRecPtr, XLogSegNo, XLogRecPtrIsValid,
 };
 use crate::access::transam::xlogreader::XLogRecPtrIsInvalid;
 use crate::access::transam::transam::{TransactionIdFollows, TransactionIdPrecedes};
 use crate::access::transam::{InvalidTransactionId, TransactionIdIsValid};
-use crate::access::transam::xlog::{wal_level, WAL_LEVEL_LOGICAL, XLogGetLastRemovedSegno,
+use crate::access::transam::xlog::{wal_level, XLogGetLastRemovedSegno,
     XLogGetReplicationSlotMinimumLSN};
-use crate::access::transam::xlogfuncs::{
+use crate::access::rmgrdesc::xlogdesc::WAL_LEVEL_LOGICAL;
+use crate::storage::ipc::latch::{
     WL_EXIT_ON_PM_DEATH, WL_LATCH_SET, WL_TIMEOUT,
 };
 use crate::access::transam::xloginsert::GetRedoRecPtr;
@@ -71,11 +72,12 @@ use crate::libpq::pqsignal::{
     SIGTERM, SIGUSR1, SIGUSR2, SIG_DFL,
 };
 use crate::miscadmin::{
-    init_ps_display, AmLogicalSlotSyncWorkerProcess, BaseInit, GetProcessingMode,
-    InitPostgres, MyLatch, MyProcPid, SetProcessingMode, TimestampTz,
-    B_SLOTSYNC_WORKER, CHECK_FOR_INTERRUPTS, HOLD_INTERRUPTS, InitProcessing,
+    AmLogicalSlotSyncWorkerProcess, BaseInit, GetProcessingMode,
+    InitPostgres, MyBackendType, MyLatch, MyProcPid, SetProcessingMode, TimestampTz,
+    B_SLOTSYNC_WORKER, HOLD_INTERRUPTS, InitProcessing,
     InvalidPid, NormalProcessing,
 };
+use crate::utils::misc::ps_status::init_ps_display;
 use crate::nodes::execnodes::Tuplestorestate;
 use crate::nodes::pg_list::{lappend, list_free_deep, List, NIL};
 use crate::postgres::{DatumGetBool, DatumGetPointer, DatumGetTransactionId, PointerGetDatum,
@@ -101,7 +103,21 @@ use crate::utils::adt::timestamp::GetCurrentTimestamp;
 use crate::utils::misc::guc::{ProcessConfigFile, SetConfigOption};
 use crate::postmaster::interrupt::ConfigReloadPending;
 
-// foreach_ptr! macro is available crate-wide via #[macro_export].
+// foreach_ptr! is #[macro_export]; pull it into textual scope explicitly.
+use crate::foreach_ptr;
+
+// Local macro stubs (not #[macro_export]; kept local per the port convention).
+macro_rules! CHECK_FOR_INTERRUPTS {
+    () => { crate::miscadmin::CHECK_FOR_INTERRUPTS() };
+}
+macro_rules! Min { ($a:expr, $b:expr) => { core::cmp::min($a, $b) }; }
+macro_rules! Max { ($a:expr, $b:expr) => { core::cmp::max($a, $b) }; }
+macro_rules! XLByteToSeg {
+    ($xlrp:expr, $logSegNo:ident, $wal_segsz:expr) => {
+        $logSegNo = ($xlrp / ($wal_segsz as $crate::access::transam::xlogdefs::XLogRecPtr))
+            as $crate::access::transam::xlogdefs::XLogSegNo;
+    };
+}
 
 // ---------------------------------------------------------------------------
 // Constants from headers not yet ported (with TODO(pg-port)) and libc bits
@@ -222,7 +238,7 @@ unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
 }
 // TTSOpsMinimalTuple - executor/execTuples.c.
 // TODO(pg-port): reference real TTSOpsMinimalTuple once visibility allows.
-static TTSOpsMinimalTuple: c_void = ();
+static TTSOpsMinimalTuple: () = ();
 
 // Datum conversion helpers (utils/builtins.h, utils/pg_lsn.h).
 unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char {
@@ -262,7 +278,7 @@ unsafe fn LWLockRelease(_lock: LWLock) {
     // TODO(pg-port)
 }
 // ProcArrayLock (storage/lwlocknames.h). TODO(pg-port).
-static mut ProcArrayLock: LWLock = core::ptr::null_mut();
+use crate::backend_link_shims::ProcArrayLock;
 
 // procarray.h.
 unsafe fn GetOldestSafeDecodingTransactionId(_catalogOnly: bool) -> TransactionId {
@@ -1187,8 +1203,8 @@ unsafe fn synchronize_slots(wrconn: *mut WalReceiverConn) -> bool {
     }
 
     /* Construct the remote_slot tuple and synchronize each slot locally */
-    tupslot = MakeSingleTupleTableSlot((*res).tupledesc, &TTSOpsMinimalTuple as *const _ as *const c_void);
-    while tuplestore_gettupleslot((*res).tuplestore, true, false, tupslot) {
+    tupslot = MakeSingleTupleTableSlot((*res).tupledesc as TupleDesc, &TTSOpsMinimalTuple as *const _ as *const c_void);
+    while tuplestore_gettupleslot((*res).tuplestore as *mut Tuplestorestate, true, false, tupslot) {
         let mut isnull: bool = false;
         let remote_slot: *mut RemoteSlot = palloc0(core::mem::size_of::<RemoteSlot>()) as *mut RemoteSlot;
         let mut d: Datum;
@@ -1350,8 +1366,8 @@ unsafe fn validate_remote_info(wrconn: *mut WalReceiverConn) {
         // C also: errhint("Check if \"primary_slot_name\" is configured correctly.");
     }
 
-    tupslot = MakeSingleTupleTableSlot((*res).tupledesc, &TTSOpsMinimalTuple as *const _ as *const c_void);
-    if !tuplestore_gettupleslot((*res).tuplestore, true, false, tupslot) {
+    tupslot = MakeSingleTupleTableSlot((*res).tupledesc as TupleDesc, &TTSOpsMinimalTuple as *const _ as *const c_void);
+    if !tuplestore_gettupleslot((*res).tuplestore as *mut Tuplestorestate, true, false, tupslot) {
         elog!(
             ERROR,
             "failed to fetch tuple for the primary server slot specified by \"primary_slot_name\""
@@ -1524,7 +1540,7 @@ unsafe fn slotsync_reread_config() {
     Assert!(sync_replication_slots);
 
     ConfigReloadPending = false;
-    ProcessConfigFile(PGC_SIGHUP);
+    ProcessConfigFile(crate::utils::misc::guc::GucContext::PGC_SIGHUP);
 
     conninfo_changed = strcmp(old_primary_conninfo, PrimaryConnInfo) != 0;
     primary_slotname_changed = strcmp(old_primary_slotname, PrimarySlotName) != 0;
@@ -1831,7 +1847,7 @@ pub unsafe extern "C" fn ReplSlotSyncWorkerMain(_startup_data: *const c_void, st
      * any user table locally, but it's good to retain it here for added
      * precaution.
      */
-    SetConfigOption(c"search_path".as_ptr(), c"".as_ptr(), PGC_SUSET, PGC_S_OVERRIDE);
+    SetConfigOption(c"search_path".as_ptr(), c"".as_ptr(), crate::utils::misc::guc::GucContext::PGC_SUSET, crate::utils::misc::guc::GucSource::PGC_S_OVERRIDE);
 
     dbname = CheckAndGetDbnameFromConninfo();
 
@@ -2047,7 +2063,7 @@ pub unsafe extern "C" fn SlotSyncWorkerCanRestart() -> bool {
     let curtime: time_t = time(null_mut());
 
     /* Return false if too soon since last start. */
-    if (curtime - (*SlotSyncCtx).last_start_time) as u32
+    if ((curtime - (*SlotSyncCtx).last_start_time) as u32)
         < SLOTSYNC_RESTART_INTERVAL_SEC as u32
     {
         return false;

@@ -556,7 +556,7 @@ unsafe fn strncmp(s1: *const c_char, s2: *const c_char, n: usize) -> c_int {
 // GUC default_statistics_target (utils/misc/guc_tables.c).
 static mut default_statistics_target: c_int = 100; // TODO(pg-port): real default_statistics_target lives in utils/misc/guc.c
 
-unsafe fn vacuum_delay_point(_is_analyze: bool) { /* TODO(pg-port): real vacuum_delay_point lives in commands/vacuum.rs */ }
+unsafe fn vacuum_delay_point(_is_analyze: bool) { unimplemented!("STUB vacuum_delay_point") }
 
 /* ---- Local stub types for unported dependencies ---- */
 /* TODO(pg-port): real VacAttrStats/AnalyzeAttrFetchFunc live in commands/vacuum.rs */

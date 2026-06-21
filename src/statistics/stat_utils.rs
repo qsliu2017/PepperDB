@@ -31,7 +31,7 @@ pub struct StatsArgInfo {
 }
 
 /* Syscache id for pg_class by relid (utils/syscache.h not ported). */
-const RELOID: c_int = 0;
+const RELOID: c_int = 57;
 
 /* catalog/pg_database.h: pg_database relation OID. */
 const DatabaseRelationId: Oid = 1262;

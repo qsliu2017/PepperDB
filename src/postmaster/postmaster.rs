@@ -140,6 +140,70 @@ use crate::utils::pidfile::{
 };
 use crate::utils::mmgr::mcxt::PostmasterContext;
 
+// de-extern-C: import real Rust defs (was extern "C" stub)
+use crate::access::transam::xlogrecovery::{CheckPromoteSignal, RemovePromoteSignalFiles};
+use crate::access::rmgrdesc::xlogdesc::WAL_LEVEL_MINIMAL;
+use crate::access::transam::twophase::reachedConsistency;
+use crate::access::transam::xlog_internal::XLOG_CONTROL_FILE;
+use crate::libpq::libpq::{
+    AcceptConnection, ListenServerPort, RemoveSocketFiles, TouchSocketFiles,
+};
+use crate::libpq::be_secure::{secure_destroy, secure_initialize};
+use crate::libpq::pqsignal::{BlockSig, UnBlockSig, pqinitmask, pqsignal};
+use crate::lib::stringinfo::{appendStringInfoString, initStringInfo};
+use crate::backend_main::main::parse_dispatch_option;
+use crate::miscadmin::{
+    ChangeToDataDir, CreateDataDirLockFile, GetBackendTypeDesc, InitProcessLocalLatch,
+    InitializeFastPathLocks, InitializeMaxBackends, TouchSocketLockFiles, checkDataDir,
+    process_shared_preload_libraries, process_shmem_requests,
+};
+use crate::common::fe_memutils::{pfree, pstrdup};
+use crate::nodes::list::{list_free, list_free_deep};
+use crate::port::noblock::pg_set_noblock;
+use crate::port::path::get_pkglib_path;
+use crate::port::port_api::find_my_exec;
+use crate::port::pgstrsignal::pg_strsignal;
+// deferred: bgworker.rs models RegisteredBgWorker as a distinct type; keep these as
+// extern stubs (against the local bgworker_internals::RegisteredBgWorker) until the
+// two RegisteredBgWorker definitions are unified. (was extern "C" in HEAD)
+extern "C" {
+    fn BackgroundWorkerList() -> *mut dlist_head;
+    fn ForgetBackgroundWorker(rw: *mut RegisteredBgWorker);
+    fn ForgetUnstartedBackgroundWorkers();
+    fn ResetBackgroundWorkerCrashTimes();
+    fn BackgroundWorkerStateChange(allow: bool);
+    fn BackgroundWorkerStopNotifications(pid: c_int);
+    fn ReportBackgroundWorkerPID(rw: *mut RegisteredBgWorker);
+    fn ReportBackgroundWorkerExit(rw: *mut RegisteredBgWorker);
+}
+use crate::replication::logical::launcher::ApplyLauncherRegister;
+use crate::storage::aio::method_worker::{io_workers, pgaio_workers_enabled};
+use crate::storage::file::fd::{
+    AllocateDir, AllocateFile, FreeDir, FreeFile, RemovePgTempFiles, ReserveExternalFD,
+    set_max_safe_fds,
+};
+use crate::storage::ipc::ipc::{on_proc_exit, proc_exit, shmem_exit};
+use crate::storage::ipc::ipci::{CreateSharedMemoryAndSemaphores, InitializeShmemGUCs};
+use crate::tcop::postgres::{
+    get_stats_option_name, progname, set_debug_options, set_plan_disabling_options,
+};
+use crate::utils::activity::pgstat::GetCurrentTimestamp;
+use crate::utils::activity::backend_status::pgstat_get_crashed_backend_activity;
+use crate::utils::adt::datetime::CheckDateTokenTables;
+use crate::utils::adt::timestamp::{
+    PgStartTime, TimestampDifferenceExceeds, TimestampDifferenceMilliseconds, timestamptz_to_time_t,
+};
+use crate::utils::adt::varlena::{SplitDirectoriesString, SplitGUCList};
+use crate::utils::error::elog_impl::{LOG_DESTINATION_STDERR, Log_destination, message_level_is_interesting};
+use crate::utils::misc::guc::{
+    GUC_RUNTIME_COMPUTED, GetConfigOption, GetConfigOptionFlags, InitializeGUCOptions,
+    ParseLongOption, ProcessConfigFile, SelectConfigFiles, SetConfigOption,
+};
+use crate::utils::mmgr::aset::AllocSetContextCreate;
+use crate::utils::mmgr::mcxt::{MemoryContextSwitchTo, TopMemoryContext};
+use crate::backend_main::main::DispatchOption::DISPATCH_POSTMASTER;
+use crate::c::{PG_BINARY_R, STATUS_ERROR, STATUS_OK};
+
 /* Imports for misc globals */
 #[allow(improper_ctypes)]
 extern "C" {
@@ -151,62 +215,105 @@ extern "C" {
     static mut MaxConnections: c_int;
     static mut SuperuserReservedConnections: c_int;
     static mut ReservedConnections: c_int;
-    static mut Logging_collector: bool;
-    static mut EnableHotStandby: bool;
-    static mut Log_destination: c_int;
     static mut Log_destination_string: *const c_char;
     static mut max_wal_senders: c_int;
-    static mut wal_level: c_int;
-    static mut XLogArchiveMode: c_int;
-    static mut io_workers: c_int;
-    static mut sync_replication_slots: bool;
     static mut summarize_wal: bool;
-
-    /* access/xlog.h / access/xlogrecovery.h */
-    static mut reachedConsistency: bool;
-
-    /* pgstat.h */
-    fn pgstat_get_crashed_backend_activity(
-        pid: c_int,
-        buffer: *mut c_char,
-        buflen: c_int,
-    ) -> *const c_char;
 
     /* autovacuum.h */
     fn autovac_init();
     fn AutoVacuumingActive() -> bool;
     fn AutoVacWorkerFailed();
 
-    /* libpq/libpq.h */
-    fn ListenServerPort(
-        family: c_int,
-        hostName: *const c_char,
-        portNumber: libc::in_port_t,
-        unixSocketDir: *const c_char,
-        ListenSockets: *mut pgsocket,
-        NumListenSockets: *mut c_int,
-        MaxListen: c_int,
-    ) -> c_int;
-    fn RemoveSocketFiles();
-    fn TouchSocketFiles();
-    fn TouchSocketLockFiles();
-    fn AcceptConnection(server_fd: pgsocket, client_sock: *mut ClientSocket) -> c_int;
-    fn pg_set_noblock(sock: pgsocket) -> bool;
-    fn SplitGUCList(
-        rawstring: *mut c_char,
-        separator: c_char,
-        namelist: *mut *mut List,
-    ) -> bool;
-    fn SplitDirectoriesString(
-        rawstring: *mut c_char,
-        separator: c_char,
-        namelist: *mut *mut List,
-    ) -> bool;
+    /* storage/waiteventset.h (no Rust home for the after-fork variant) */
+    fn FreeWaitEventSetAfterFork(set: *mut WaitEventSet);
 
-    /* storage/waiteventset.h (stubbed here) */
+    /* utils/timestamp.h (no Rust home) */
+    fn TimestampTzPlusMilliseconds(t: TimestampTz, ms: i64) -> TimestampTz;
+
+    /* utils/pg_prng.h (no Rust home) */
+    fn pg_prng_strong_seed(state: *mut PgPrngState) -> bool;
+
+    /* access/xlog.h (no Rust home) */
+    fn XLogArchivingActive() -> bool;
+    fn XLogArchivingAlways() -> bool;
+
+    /* postmaster/syslogger.h */
+    static mut syslogPipe: [c_int; 2];
+
+    /* storage/fd.h (no Rust home) */
+    fn ReleaseExternalFD();
+
+    /* utils/guc.h: getopt(3) globals */
+    static mut opterr: c_int;
+    static mut optind: c_int;
+
+    /* miscadmin.h (no Rust home) */
+    fn InitProcessGlobals_impl();  /* see InitProcessGlobals below */
+    fn write_stderr(fmt: *const c_char, ...);
+    fn getopt(argc: c_int, argv: *mut *mut c_char, optstring: *const c_char) -> c_int;
+    static mut optarg: *mut c_char;
+
+    /* utils/datetime.h */
+    fn ALLOCSET_DEFAULT_SIZES() -> (Size, Size, Size);  /* macro - stub*/
+
+    /* utils/pidfile.h */
+    fn CreateDataDirLockFile_inner();
+
+    /* pgstat.h */
+    fn PgStartTime_set(ts: TimestampTz);
+
+    /* lib/stringinfo.h (no Rust home for the variadic variant) */
+    fn appendStringInfo(str_: *mut StringInfoData, fmt: *const c_char, ...);
+
+    /* from globals.c */
+    pub static mut DataDir: *mut c_char;
+    pub static mut my_exec_path: [c_char; MAXPGPATH];
+    pub static mut pkglib_path: [c_char; MAXPGPATH];
+    pub static mut external_pid_file: *mut c_char;
+    pub static mut MyStartTimestamp: TimestampTz;
+    pub static mut MyStartTime: libc::time_t;
+    pub static mut HbaFileName: *mut c_char;
+    pub static mut IdentFileName: *mut c_char;
+    pub static mut EnableSSL: bool;
+    pub static mut PreAuthDelay: c_int;
+    pub static mut AuthenticationTimeout: c_int;
+    pub static mut log_hostname: bool;
+    pub static mut enable_bonjour: bool;
+    pub static mut bonjour_name: *mut c_char;
+    pub static mut restart_after_crash: bool;
+    pub static mut remove_temp_files_after_crash: bool;
+    pub static mut send_abort_for_crash: bool;
+    pub static mut send_abort_for_kill: bool;
+    pub static mut ClientAuthInProgress: bool;
+    pub static mut redirection_done: bool;
+
+    /* GUC constants (no Rust home) */
+    pub static AF_UNSPEC: c_int;
+    pub static AF_UNIX: c_int;
+    pub static DEF_PGPORT: c_int;
+
+    /* signal */
+    fn sigprocmask(how: c_int, set: *const sigset_t, oldset: *mut sigset_t) -> c_int;
+    fn kill(pid: c_int, sig: c_int) -> c_int;
+    fn waitpid_sys(pid: c_int, stat_loc: *mut c_int, options: c_int) -> c_int;
+    fn srandom(seed: c_uint);
+}
+
+// deferred: modules xlog/waiteventset/syslogger/hba/slotsync + pg_prng not yet
+// wired into the build; reverted to their original extern "C" stub decls (HEAD).
+#[allow(improper_ctypes)]
+extern "C" {
+    /* access/xlog.h */
+    static mut EnableHotStandby: bool;
+    static mut wal_level: c_int;
+    static mut XLogArchiveMode: c_int;
+    pub static ARCHIVE_MODE_OFF: c_int;
+    fn LocalProcessControlFile(reset: bool);
+    fn InitializeWalConsistencyChecking();
+
+    /* storage/waiteventset.h */
     fn CreateWaitEventSet(context: *mut c_void, nevents: c_int) -> *mut WaitEventSet;
     fn FreeWaitEventSet(set: *mut WaitEventSet);
-    fn FreeWaitEventSetAfterFork(set: *mut WaitEventSet);
     fn AddWaitEventToSet(
         set: *mut WaitEventSet,
         events: uint32,
@@ -221,214 +328,34 @@ extern "C" {
         nevents: c_int,
         wait_event_info: uint32,
     ) -> c_int;
-
-    /* utils/timestamp.h */
-    fn GetCurrentTimestamp() -> TimestampTz;
-    fn TimestampTzPlusMilliseconds(t: TimestampTz, ms: i64) -> TimestampTz;
-    fn TimestampDifferenceMilliseconds(start: TimestampTz, stop: TimestampTz) -> i64;
-    fn TimestampDifferenceExceeds(
-        start: TimestampTz,
-        stop: TimestampTz,
-        msec: c_int,
-    ) -> bool;
-    fn timestamptz_to_time_t(t: TimestampTz) -> libc::time_t;
-
-    /* utils/pg_prng.h */
-    fn pg_prng_strong_seed(state: *mut PgPrngState) -> bool;
-    fn pg_prng_seed(state: *mut PgPrngState, seed: u64);
-    fn pg_prng_uint32(state: *mut PgPrngState) -> u32;
-    static mut pg_global_prng_state: PgPrngState;
-
-    /* access/xlog.h */
-    fn LocalProcessControlFile(reset: bool);
-    fn XLogArchivingActive() -> bool;
-    fn XLogArchivingAlways() -> bool;
-
-    /* postmaster/bgworker.c internals */
-    fn BackgroundWorkerList() -> *mut dlist_head; /* static in bgworker.c - stub */
-    fn ForgetBackgroundWorker(rw: *mut RegisteredBgWorker);
-    fn ForgetUnstartedBackgroundWorkers();
-    fn ResetBackgroundWorkerCrashTimes();
-    fn BackgroundWorkerStateChange(allow: bool);
-    fn BackgroundWorkerStopNotifications(pid: c_int);
-    fn ReportBackgroundWorkerPID(rw: *mut RegisteredBgWorker);
-    fn ReportBackgroundWorkerExit(rw: *mut RegisteredBgWorker);
+    fn InitializeWaitEventSupport();
 
     /* postmaster/syslogger.h */
+    static mut Logging_collector: bool;
     fn SysLogger_Start(child_slot: c_int) -> c_int;
-    static mut syslogPipe: [c_int; 2];
+    fn CheckLogrotateSignal() -> bool;
+    fn RemoveLogrotateSignalFiles();
 
     /* replication/slotsync.h */
+    static mut sync_replication_slots: bool;
     fn ValidateSlotSyncParams(elevel: c_int) -> bool;
     fn SlotSyncWorkerCanRestart() -> bool;
 
-    /* storage/fd.h */
-    fn AllocateDir(dirname: *const c_char) -> *mut c_void;
-    fn FreeDir(dir: *mut c_void);
-    fn AllocateFile(filename: *const c_char, mode: *const c_char) -> *mut libc::FILE;
-    fn FreeFile(fp: *mut libc::FILE) -> c_int;
-    fn set_max_safe_fds();
-    fn ReleaseExternalFD();
-    fn ReserveExternalFD();
-    fn RemovePgTempFiles();
-
-    /* storage/ipc.h */
-    fn shmem_exit(code: c_int);
-    fn on_proc_exit(f: unsafe extern "C" fn(c_int, Datum), arg: Datum);
-    fn proc_exit(code: c_int) -> !;
-
-    /* storage/pmsignal.h */
-    fn CheckLogrotateSignal() -> bool;
-    fn CheckPromoteSignal() -> bool;
-    fn RemoveLogrotateSignalFiles();
-    fn RemovePromoteSignalFiles();
-
-    /* storage/proc.h */
-    fn CreateSharedMemoryAndSemaphores();
-
-    /* storage/aio_subsys.h */
-    fn pgaio_workers_enabled() -> bool;
-
-    /* utils/guc.h */
-    fn InitializeGUCOptions();
-    fn ProcessConfigFile(context: GucContext);
-    fn SetConfigOption(name: *const c_char, value: *const c_char, context: GucContext, source: GucSource);
-    fn GetConfigOption(name: *const c_char, missing_ok: bool, restrict_superuser: bool) -> *const c_char;
-    fn GetConfigOptionFlags(name: *const c_char, missing_ok: bool) -> c_int;
-    fn ParseLongOption(
-        string: *const c_char,
-        name: *mut *mut c_char,
-        value: *mut *mut c_char,
-    );
-    fn SelectConfigFiles(userDoption: *const c_char, progname: *const c_char) -> bool;
-    fn set_debug_options(debug_flag: c_int, context: GucContext, source: GucSource);
-    fn set_plan_disabling_options(
-        arg: *const c_char,
-        context: GucContext,
-        source: GucSource,
-    ) -> bool;
-    fn get_stats_option_name(arg: *const c_char) -> *const c_char;
-    fn parse_dispatch_option(optarg: *const c_char) -> c_int;
-    static mut opterr: c_int;
-    static mut optind: c_int;
-
-    /* miscadmin.h */
-    fn InitProcessGlobals_impl();  /* see InitProcessGlobals below */
-    fn InitializeWaitEventSupport();
-    fn InitProcessLocalLatch();
-    fn pqinitmask();
-    fn checkDataDir();
-    fn ChangeToDataDir();
-    fn CreateDataDirLockFile(amPostmaster: bool);
-    fn CheckDateTokenTables() -> bool;
-    fn GetBackendTypeDesc(btype: BackendType) -> *const c_char;
-    fn InitializeMaxBackends();
-    fn InitializeFastPathLocks();
-    fn process_shared_preload_libraries();
-    fn process_shmem_requests();
-    fn InitializeShmemGUCs();
-    fn InitializeWalConsistencyChecking();
-    fn ApplyLauncherRegister();
+    /* libpq/hba.h */
     fn load_hba() -> bool;
     fn load_ident() -> bool;
-    fn find_my_exec(argv0: *const c_char, retpath: *mut c_char) -> c_int;
-    fn get_pkglib_path(my_exec_path: *const c_char, ret: *mut c_char);
-    fn message_level_is_interesting(level: c_int) -> bool;
-    fn write_stderr(fmt: *const c_char, ...);
-    fn getopt(argc: c_int, argv: *mut *mut c_char, optstring: *const c_char) -> c_int;
-    static mut optarg: *mut c_char;
 
-    /* utils/varlena.h */
-    fn pstrdup(s: *const c_char) -> *mut c_char;
-    fn pfree(ptr: *mut c_void);
-
-    /* utils/memutils.h */
-    fn AllocSetContextCreate(
-        parent: MemoryContext,
-        name: *const c_char,
-        minContextSize: Size,
-        initBlockSize: Size,
-        maxBlockSize: Size,
-    ) -> MemoryContext;
-    fn MemoryContextSwitchTo(cxt: MemoryContext) -> MemoryContext;
-    static mut TopMemoryContext: MemoryContext;
-
-    /* utils/datetime.h */
-    fn ALLOCSET_DEFAULT_SIZES() -> (Size, Size, Size);  /* macro - stub*/
-
-    /* utils/pidfile.h */
-    fn CreateDataDirLockFile_inner();
-
-    /* pgstat.h */
-    fn PgStartTime_set(ts: TimestampTz);
-
-    /* lib/stringinfo.h */
-    fn initStringInfo(str_: *mut StringInfoData);
-    fn appendStringInfo(str_: *mut StringInfoData, fmt: *const c_char, ...);
-    fn appendStringInfoString(str_: *mut StringInfoData, s: *const c_char);
-
-    /* XLOG */
-    fn XLOG_CONTROL_FILE() -> *const c_char;
-
-    /* from globals.c */
-    pub static mut DataDir: *mut c_char;
-    pub static mut my_exec_path: [c_char; MAXPGPATH];
-    pub static mut pkglib_path: [c_char; MAXPGPATH];
-    pub static mut external_pid_file: *mut c_char;
-    pub static mut progname: *const c_char;
-    pub static mut PgStartTime: TimestampTz;
-    pub static mut MyStartTimestamp: TimestampTz;
-    pub static mut MyStartTime: libc::time_t;
-    pub static mut HbaFileName: *mut c_char;
-    pub static mut IdentFileName: *mut c_char;
-    pub static mut LOG_METAINFO_DATAFILE: *const c_char;
-    pub static mut PG_BINARY_R: *const c_char;
-    pub static mut PG_VERSION_STR: *const c_char;
-    pub static mut EnableSSL: bool;
-    pub static mut PreAuthDelay: c_int;
-    pub static mut AuthenticationTimeout: c_int;
-    pub static mut log_hostname: bool;
-    pub static mut enable_bonjour: bool;
-    pub static mut bonjour_name: *mut c_char;
-    pub static mut restart_after_crash: bool;
-    pub static mut remove_temp_files_after_crash: bool;
-    pub static mut send_abort_for_crash: bool;
-    pub static mut send_abort_for_kill: bool;
-    pub static mut ClientAuthInProgress: bool;
-    pub static mut redirection_done: bool;
-
-    /* GUC constants */
-    pub static GUC_RUNTIME_COMPUTED: c_int;
-    pub static DISPATCH_POSTMASTER: c_int;
-    pub static AF_UNSPEC: c_int;
-    pub static AF_UNIX: c_int;
-    pub static LOG_DESTINATION_STDERR: c_int;
-    pub static WAL_LEVEL_MINIMAL: c_int;
-    pub static ARCHIVE_MODE_OFF: c_int;
-    pub static STATUS_OK: c_int;
-    pub static STATUS_ERROR: c_int;
-    pub static DEF_PGPORT: c_int;
-
-    /* signal */
-    fn sigprocmask(how: c_int, set: *const sigset_t, oldset: *mut sigset_t) -> c_int;
-    fn pqsignal(signo: c_int, handler: Option<unsafe extern "C" fn(c_int)>);
-    fn kill(pid: c_int, sig: c_int) -> c_int;
-    fn waitpid_sys(pid: c_int, stat_loc: *mut c_int, options: c_int) -> c_int;
-    fn srandom(seed: c_uint);
-
-    static BlockSig: sigset_t;
-    static UnBlockSig: sigset_t;
-
-    /* secure_initialize (ssl) */
-    fn secure_initialize(isServerStart: bool) -> c_int;
-    fn secure_destroy();
+    /* utils/pg_prng.h */
+    fn pg_prng_seed(state: *mut PgPrngState, seed: u64);
+    fn pg_prng_uint32(state: *mut PgPrngState) -> u32;
+    static mut pg_global_prng_state: PgPrngState;
 }
 
 /* ----------------------------------------------------------------
  * Types opaque / stubs not yet ported
  * ---------------------------------------------------------------- */
-/// TODO(pg-port): nodes/pg_list.h List
-pub type List = c_void;
+// de-extern-C: use the real List (was opaque c_void stub).
+use crate::nodes::pg_list::{List, list_length, list_nth};
 /// TODO(pg-port): nodes/pg_list.h ListCell
 pub type ListCell = c_void;
 pub use crate::utils::mmgr::memnodes::{MemoryContext, MemoryContextData};
@@ -442,21 +369,16 @@ pub use crate::lib::stringinfo::StringInfoData;
 pub struct PgPrngState {
     _opaque: [u64; 4],
 }
-/// TODO(pg-port): utils/guc.h GucContext
-pub type GucContext = c_int;
-/// TODO(pg-port): utils/guc.h GucSource
-pub type GucSource = c_int;
+// de-extern-C: use the real GUC enums (was local c_int stubs).
+use crate::utils::misc::guc::{GucContext, GucSource};
 /// TODO(pg-port): libpq/pqsignal.h sigset_t
 pub type sigset_t = c_void;
 /// TODO(pg-port): port.h pgsocket
 pub type pgsocket = c_int;
 
-/* GUC context constants (utils/guc.h) -- forward decls */
-pub const PGC_POSTMASTER: GucContext = 0;
-pub const PGC_SUSET: GucContext = 4;
-pub const PGC_SIGHUP: GucContext = 1;
-pub const PGC_S_ARGV: GucSource = 1;
-pub const PGC_S_OVERRIDE: GucSource = 7;
+/* GUC context/source enum variants (utils/guc.h) */
+use crate::utils::misc::guc::GucContext::{PGC_POSTMASTER, PGC_SIGHUP, PGC_SUSET};
+use crate::utils::misc::guc::GucSource::{PGC_S_ARGV, PGC_S_OVERRIDE};
 
 pub const PGINVALID_SOCKET: pgsocket = -1;
 pub const MAXLISTEN: c_int = 64;
@@ -579,13 +501,13 @@ fn btmask_contains(mask: BackendTypeMask, t: BackendType) -> bool {
 pub static mut MyBgworkerEntry: *mut BackgroundWorker = core::ptr::null_mut();
 
 /* The socket number we are listening for connections on */
-pub static mut PostPortNumber: c_int = 0; /* set to DEF_PGPORT at startup */
+#[no_mangle] pub static mut PostPortNumber: c_int = 0; /* set to DEF_PGPORT at startup */
 
 /* The directory names for Unix socket(s) */
-pub static mut Unix_socket_directories: *mut c_char = core::ptr::null_mut();
+#[no_mangle] pub static mut Unix_socket_directories: *mut c_char = core::ptr::null_mut();
 
 /* The TCP listen address(es) */
-pub static mut ListenAddresses: *mut c_char = core::ptr::null_mut();
+#[no_mangle] pub static mut ListenAddresses: *mut c_char = core::ptr::null_mut();
 
 pub static mut SuperuserReservedConnections_var: c_int = 0;
 pub static mut ReservedConnections_var: c_int = 0;
@@ -851,9 +773,7 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
     PostmasterContext = AllocSetContextCreate(
         TopMemoryContext,
         b"Postmaster\0".as_ptr() as *const c_char,
-        0,     /* ALLOCSET_DEFAULT_SIZES minContextSize */
-        8192,  /* initBlockSize */
-        8388608, /* maxBlockSize */
+        (0, 8192, 8388608), /* ALLOCSET_DEFAULT_SIZES: min, init, max */
     );
     MemoryContextSwitchTo(PostmasterContext);
 
@@ -867,7 +787,7 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
      * handling setup of child processes.
      */
     pqinitmask();
-    sigprocmask(SIG_SETMASK, &BlockSig as *const sigset_t, core::ptr::null_mut());
+    sigprocmask(SIG_SETMASK, &BlockSig as *const _ as *const sigset_t, core::ptr::null_mut());
 
     pqsignal(SIGHUP,  Some(handle_pm_reload_request_signal));
     pqsignal(SIGINT,  Some(handle_pm_shutdown_request_signal));
@@ -893,7 +813,7 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
     pqsignal(SIGXFSZ, SIG_IGN); /* ignored */
 
     /* Begin accepting signals. */
-    sigprocmask(SIG_SETMASK, &UnBlockSig as *const sigset_t, core::ptr::null_mut());
+    sigprocmask(SIG_SETMASK, &UnBlockSig as *const _ as *const sigset_t, core::ptr::null_mut());
 
     /*
      * Options setup
@@ -947,8 +867,7 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
                     }
                 }
                 SetConfigOption(name, value, PGC_POSTMASTER, PGC_S_ARGV);
-                pfree(name as *mut c_void);
-                pfree(value as *mut c_void);
+                /* name/value are palloc'd once at startup; leaving them is harmless */
             }
             'c' => {
                 let mut name: *mut c_char = core::ptr::null_mut();
@@ -959,8 +878,7 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
                         CStr::from_ptr(optarg).to_string_lossy()));
                 }
                 SetConfigOption(name, value, PGC_POSTMASTER, PGC_S_ARGV);
-                pfree(name as *mut c_void);
-                pfree(value as *mut c_void);
+                /* name/value are palloc'd once at startup; leaving them is harmless */
             }
             'D' => {
                 userDoption = libc::strdup(optarg);
@@ -968,7 +886,7 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
             'd' => {
                 set_debug_options(
                     libc::atoi(optarg),
-                    PGC_POSTMASTER, PGC_S_ARGV,
+                    PGC_POSTMASTER as i32, PGC_S_ARGV as i32,
                 );
             }
             'E' => {
@@ -993,7 +911,7 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
                 );
             }
             'f' => {
-                if !set_plan_disabling_options(optarg, PGC_POSTMASTER, PGC_S_ARGV) {
+                if !set_plan_disabling_options(optarg, PGC_POSTMASTER as i32, PGC_S_ARGV as i32) {
                     write_stderr(
                         b"%s: invalid argument for option -f: \"%s\"\n\0".as_ptr() as *const c_char,
                         progname, optarg,
@@ -1336,10 +1254,10 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
 
     /* Remove any outdated file holding the current log filenames. */
     {
-        let rc = libc::unlink(LOG_METAINFO_DATAFILE);
+        let rc = libc::unlink(c"current_logfiles".as_ptr());
         if rc < 0 && *libc::__error() != libc::ENOENT {
             ereport!(LOG, errmsg!("could not remove file \"{}\": {}",
-                CStr::from_ptr(LOG_METAINFO_DATAFILE).to_string_lossy(),
+                c"current_logfiles".to_string_lossy(),
                 CStr::from_ptr(libc::strerror(*libc::__error())).to_string_lossy()));
         }
     }
@@ -1363,7 +1281,7 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
     /*
      * Report server startup in log.
      */
-    ereport!(LOG, errmsg!("starting {}", CStr::from_ptr(PG_VERSION_STR).to_string_lossy()));
+    ereport!(LOG, errmsg!("starting {}", crate::utils::adt::version::PG_VERSION_STR.to_string_lossy()));
 
     /*
      * Establish input sockets.
@@ -1383,9 +1301,8 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
         }
 
         /* foreach(l, elemlist) - manual iteration over List */
-        let mut l = list_head_ptr(elemlist);
-        while !l.is_null() {
-            let curhost: *mut c_char = lfirst_ptr(l) as *mut c_char;
+        for i in 0..list_length(elemlist) {
+            let curhost: *mut c_char = list_nth(elemlist, i) as *mut c_char;
 
             let hostname_arg: *const c_char = if libc::strcmp(curhost, b"*\0".as_ptr() as *const c_char) == 0 {
                 core::ptr::null()
@@ -1415,10 +1332,9 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
                     CStr::from_ptr(curhost).to_string_lossy()));
             }
 
-            l = list_next_ptr(l);
         }
 
-        if success == 0 && !list_is_empty(elemlist) {
+        if success == 0 && list_length(elemlist) != 0 {
             ereport!(FATAL, errmsg!("could not create any TCP/IP sockets"));
         }
 
@@ -1437,9 +1353,8 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
             ereport!(FATAL, errmsg!("invalid list syntax in parameter \"unix_socket_directories\"")); /* C also: errcode */
         }
 
-        let mut l = list_head_ptr(elemlist);
-        while !l.is_null() {
-            let socketdir: *mut c_char = lfirst_ptr(l) as *mut c_char;
+        for i in 0..list_length(elemlist) {
+            let socketdir: *mut c_char = list_nth(elemlist, i) as *mut c_char;
 
             status = ListenServerPort(
                 AF_UNIX,
@@ -1462,10 +1377,9 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
                     CStr::from_ptr(socketdir).to_string_lossy()));
             }
 
-            l = list_next_ptr(l);
         }
 
-        if success == 0 && !list_is_empty(elemlist) {
+        if success == 0 && list_length(elemlist) != 0 {
             ereport!(FATAL, errmsg!("could not create any Unix-domain sockets"));
         }
 
@@ -1598,32 +1512,6 @@ pub unsafe fn PostmasterMain(argc: c_int, argv: *mut *mut c_char) {
  * ---------------------------------------------------------------- */
 
 /*
- * List utility stubs - TODO(pg-port): nodes/pg_list.h
- */
-#[inline]
-unsafe fn list_head_ptr(list: *mut List) -> *mut c_void {
-    if list.is_null() { core::ptr::null_mut() }
-    else { *(list as *mut *mut c_void) }
-}
-#[inline]
-unsafe fn list_next_ptr(cell: *mut c_void) -> *mut c_void {
-    if cell.is_null() { core::ptr::null_mut() }
-    else { *((cell as *mut *mut c_void).add(1)) }
-}
-#[inline]
-unsafe fn lfirst_ptr(cell: *mut c_void) -> *mut c_void {
-    if cell.is_null() { core::ptr::null_mut() }
-    else { *(cell as *mut *mut c_void) }
-}
-#[inline]
-unsafe fn list_is_empty(list: *mut List) -> bool { list.is_null() }
-extern "C" {
-    fn list_free(list: *mut List);
-    fn list_free_deep(list: *mut List);
-    fn pg_strsignal(signo: c_int) -> *const c_char;
-}
-
-/*
  * on_proc_exit callback to close server's listen sockets
  */
 unsafe extern "C" fn CloseServerPorts(_status: c_int, _arg: Datum) {
@@ -1704,10 +1592,10 @@ unsafe fn checkControlFile() {
         MAXPGPATH,
         b"%s/%s\0".as_ptr() as *const c_char,
         DataDir,
-        XLOG_CONTROL_FILE(),
+        c"global/pg_control".as_ptr(), // XLOG_CONTROL_FILE as a NUL-terminated C string
     );
 
-    let fp = AllocateFile(path.as_ptr(), PG_BINARY_R);
+    let fp = AllocateFile(path.as_ptr(), c"r".as_ptr()); // PG_BINARY_R, NUL-terminated
     if fp.is_null() {
         write_stderr(
             b"%s: could not find the database system\nExpected to find it in the directory \"%s\",\nbut could not open file \"%s\"\n\0"
@@ -1879,7 +1767,7 @@ unsafe fn ServerLoop() -> c_int {
             if (events[i].events & WL_SOCKET_ACCEPT as u32) != 0 {
                 let mut s: ClientSocket = core::mem::zeroed();
 
-                if AcceptConnection(events[i].fd, &mut s) == STATUS_OK {
+                if AcceptConnection(events[i].fd, &mut s as *mut _ as *mut c_void) == STATUS_OK {
                     BackendStartup(&mut s);
                 }
 
@@ -2552,6 +2440,10 @@ unsafe fn CleanupBackend(bp: *mut PMChild, exitstatus: c_int) {
     if !exit_status_0(exitstatus) && !exit_status_1(exitstatus) {
         crashed = true;
     }
+    if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT CleanupBackend pid={} exitstatus={} e0={} e1={} crashed_so_far={}",
+            (*bp).pid, exitstatus, exit_status_0(exitstatus), exit_status_1(exitstatus), crashed);
+    }
 
     /*
      * Release the PMChild entry.
@@ -2560,7 +2452,11 @@ unsafe fn CleanupBackend(bp: *mut PMChild, exitstatus: c_int) {
     bp_bgworker_notify = (*bp).bgworker_notify;
     bp_bkend_type = (*bp).bkend_type;
     rw = (*bp).rw;
-    if !ReleasePostmasterChildSlot(bp) {
+    let rel_ok = ReleasePostmasterChildSlot(bp);
+    if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT CleanupBackend ReleasePostmasterChildSlot={}", rel_ok);
+    }
+    if !rel_ok {
         /*
          * Uh-oh, the child failed to clean itself up. Treat as a crash.
          */

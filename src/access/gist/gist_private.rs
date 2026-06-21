@@ -543,9 +543,7 @@ pub struct GISTPageSplitInfo {
 // ===========================================================================
 
 /* gist.c */
-pub unsafe fn gistbuildempty(index: Relation) {
-    unimplemented!()
-}
+pub unsafe fn gistbuildempty(index: Relation) { unimplemented!() }
 pub unsafe fn gistinsert(
     r: Relation,
     values: *mut Datum,
@@ -555,18 +553,10 @@ pub unsafe fn gistinsert(
     checkUnique: IndexUniqueCheck,
     indexUnchanged: bool,
     indexInfo: *mut IndexInfo,
-) -> bool {
-    unimplemented!()
-}
-pub unsafe fn createTempGistContext() -> MemoryContext {
-    unimplemented!()
-}
-pub unsafe fn initGISTstate(index: Relation) -> *mut GISTSTATE {
-    unimplemented!()
-}
-pub unsafe fn freeGISTstate(giststate: *mut GISTSTATE) {
-    unimplemented!()
-}
+) -> bool { unimplemented!() }
+pub unsafe fn createTempGistContext() -> MemoryContext { unimplemented!() }
+pub unsafe fn initGISTstate(index: Relation) -> *mut GISTSTATE { unimplemented!() }
+pub unsafe fn freeGISTstate(giststate: *mut GISTSTATE) { unimplemented!() }
 pub unsafe fn gistdoinsert(
     r: Relation,
     itup: IndexTuple,
@@ -574,9 +564,7 @@ pub unsafe fn gistdoinsert(
     giststate: *mut GISTSTATE,
     heapRel: Relation,
     is_build: bool,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 pub unsafe fn gistplacetopage(
     rel: Relation,
@@ -592,9 +580,7 @@ pub unsafe fn gistplacetopage(
     markfollowright: bool,
     heapRel: Relation,
     is_build: bool,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { unimplemented!() }
 
 pub unsafe fn gistSplit(
     r: Relation,
@@ -612,18 +598,14 @@ pub unsafe fn gistXLogPageDelete(
     xid: FullTransactionId,
     parentBuffer: Buffer,
     downlinkOffset: OffsetNumber,
-) -> XLogRecPtr {
-    unimplemented!()
-}
+) -> XLogRecPtr { unimplemented!() }
 
 pub unsafe fn gistXLogPageReuse(
     rel: Relation,
     heaprel: Relation,
     blkno: BlockNumber,
     deleteXid: FullTransactionId,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 pub unsafe fn gistXLogUpdate(
     buffer: Buffer,
@@ -632,9 +614,7 @@ pub unsafe fn gistXLogUpdate(
     itup: *mut IndexTuple,
     ituplen: c_int,
     leftchildbuf: Buffer,
-) -> XLogRecPtr {
-    unimplemented!()
-}
+) -> XLogRecPtr { unimplemented!() }
 
 pub unsafe fn gistXLogDelete(
     buffer: Buffer,
@@ -642,9 +622,7 @@ pub unsafe fn gistXLogDelete(
     ntodelete: c_int,
     snapshotConflictHorizon: TransactionId,
     heaprel: Relation,
-) -> XLogRecPtr {
-    unimplemented!()
-}
+) -> XLogRecPtr { unimplemented!() }
 
 pub unsafe fn gistXLogSplit(
     page_is_leaf: bool,
@@ -653,42 +631,26 @@ pub unsafe fn gistXLogSplit(
     orignsn: GistNSN,
     leftchildbuf: Buffer,
     markfollowright: bool,
-) -> XLogRecPtr {
-    unimplemented!()
-}
+) -> XLogRecPtr { unimplemented!() }
 
-pub unsafe fn gistXLogAssignLSN() -> XLogRecPtr {
-    unimplemented!()
-}
+pub unsafe fn gistXLogAssignLSN() -> XLogRecPtr { crate::access::gist::gistxlog::gistXLogAssignLSN() }
 
 /* gistget.c */
-pub unsafe fn gistgettuple(scan: IndexScanDesc, dir: ScanDirection) -> bool {
-    unimplemented!()
-}
-pub unsafe fn gistgetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> int64 {
-    unimplemented!()
-}
-pub unsafe fn gistcanreturn(index: Relation, attno: c_int) -> bool {
-    unimplemented!()
-}
+pub unsafe fn gistgettuple(scan: IndexScanDesc, dir: ScanDirection) -> bool { unimplemented!() }
+pub unsafe fn gistgetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> int64 { unimplemented!() }
+pub unsafe fn gistcanreturn(index: Relation, attno: c_int) -> bool { unimplemented!() }
 
 /* gistvalidate.c */
-pub unsafe fn gistvalidate(opclassoid: Oid) -> bool {
-    unimplemented!()
-}
+pub unsafe fn gistvalidate(opclassoid: Oid) -> bool { crate::access::gist::gistvalidate::gistvalidate(opclassoid) }
 pub unsafe fn gistadjustmembers(
     opfamilyoid: Oid,
     opclassoid: Oid,
     operators: *mut List,
     functions: *mut List,
-) {
-    unimplemented!()
-}
+) { crate::access::gist::gistvalidate::gistadjustmembers(opfamilyoid, opclassoid, operators, functions) }
 
 /* gistutil.c */
-pub unsafe fn gistoptions(reloptions: Datum, validate: bool) -> *mut bytea {
-    unimplemented!()
-}
+pub unsafe fn gistoptions(reloptions: Datum, validate: bool) -> *mut bytea { crate::access::gist::gistutil::gistoptions(reloptions, validate) }
 pub unsafe fn gistproperty(
     index_oid: Oid,
     attno: c_int,
@@ -696,27 +658,17 @@ pub unsafe fn gistproperty(
     propname: *const c_char,
     res: *mut bool,
     isnull: *mut bool,
-) -> bool {
-    unimplemented!()
-}
-pub unsafe fn gistfitpage(itvec: *mut IndexTuple, len: c_int) -> bool {
-    unimplemented!()
-}
+) -> bool { crate::access::gist::gistutil::gistproperty(index_oid, attno, prop, propname, res, isnull) }
+pub unsafe fn gistfitpage(itvec: *mut IndexTuple, len: c_int) -> bool { crate::access::gist::gistutil::gistfitpage(itvec, len) }
 pub unsafe fn gistnospace(
     page: Page,
     itvec: *mut IndexTuple,
     len: c_int,
     todelete: OffsetNumber,
     freespace: Size,
-) -> bool {
-    unimplemented!()
-}
-pub unsafe fn gistcheckpage(rel: Relation, buf: Buffer) {
-    unimplemented!()
-}
-pub unsafe fn gistNewBuffer(r: Relation, heaprel: Relation) -> Buffer {
-    unimplemented!()
-}
+) -> bool { crate::access::gist::gistutil::gistnospace(page, itvec, len, todelete, freespace) }
+pub unsafe fn gistcheckpage(rel: Relation, buf: Buffer) { crate::access::gist::gistutil::gistcheckpage(rel, buf) }
+pub unsafe fn gistNewBuffer(r: Relation, heaprel: Relation) -> Buffer { crate::access::gist::gistutil::gistNewBuffer(r, heaprel) }
 /* Can this page be recycled yet? */
 pub unsafe fn gistPageRecyclable(page: Page) -> bool {
     if PageIsNew(page) {
@@ -753,56 +705,40 @@ unsafe fn GistPageGetDeleteXid(_page: Page) -> FullTransactionId {
 unsafe fn GlobalVisCheckRemovableFullXid(
     _rel: Relation,
     _xid: FullTransactionId,
-) -> bool {
-    unimplemented!() // TODO: utils/snapmgr.h
-}
-pub unsafe fn gistfillbuffer(page: Page, itup: *mut IndexTuple, len: c_int, off: OffsetNumber) {
-    unimplemented!()
-}
-pub unsafe fn gistextractpage(page: Page, len: *mut c_int /* out */) -> *mut IndexTuple {
-    unimplemented!()
-}
+) -> bool { crate::storage::ipc::procarray::GlobalVisCheckRemovableFullXid(_rel, _xid) }
+pub unsafe fn gistfillbuffer(page: Page, itup: *mut IndexTuple, len: c_int, off: OffsetNumber) { crate::access::gist::gistutil::gistfillbuffer(page, itup, len, off) }
+pub unsafe fn gistextractpage(page: Page, len: *mut c_int /* out */) -> *mut IndexTuple { crate::access::gist::gistutil::gistextractpage(page, len) }
 pub unsafe fn gistjoinvector(
     itvec: *mut IndexTuple,
     len: *mut c_int,
     additvec: *mut IndexTuple,
     addlen: c_int,
-) -> *mut IndexTuple {
-    unimplemented!()
-}
+) -> *mut IndexTuple { crate::access::gist::gistutil::gistjoinvector(itvec, len, additvec, addlen) }
 pub unsafe fn gistfillitupvec(
     vec: *mut IndexTuple,
     veclen: c_int,
     memlen: *mut c_int,
-) -> *mut IndexTupleData {
-    unimplemented!()
-}
+) -> *mut IndexTupleData { crate::access::gist::gistutil::gistfillitupvec(vec, veclen, memlen) }
 
 pub unsafe fn gistunion(
     r: Relation,
     itvec: *mut IndexTuple,
     len: c_int,
     giststate: *mut GISTSTATE,
-) -> IndexTuple {
-    unimplemented!()
-}
+) -> IndexTuple { crate::access::gist::gistutil::gistunion(r, itvec, len, giststate) }
 pub unsafe fn gistgetadjusted(
     r: Relation,
     oldtup: IndexTuple,
     addtup: IndexTuple,
     giststate: *mut GISTSTATE,
-) -> IndexTuple {
-    unimplemented!()
-}
+) -> IndexTuple { crate::access::gist::gistutil::gistgetadjusted(r, oldtup, addtup, giststate) }
 pub unsafe fn gistFormTuple(
     giststate: *mut GISTSTATE,
     r: Relation,
     attdata: *const Datum,
     isnull: *const bool,
     isleaf: bool,
-) -> IndexTuple {
-    unimplemented!()
-}
+) -> IndexTuple { crate::access::gist::gistutil::gistFormTuple(giststate, r, attdata, isnull, isleaf) }
 pub unsafe fn gistCompressValues(
     giststate: *mut GISTSTATE,
     r: Relation,
@@ -810,25 +746,17 @@ pub unsafe fn gistCompressValues(
     isnull: *const bool,
     isleaf: bool,
     compatt: *mut Datum,
-) {
-    unimplemented!()
-}
+) { crate::access::gist::gistutil::gistCompressValues(giststate, r, attdata, isnull, isleaf, compatt) }
 
 pub unsafe fn gistchoose(
     r: Relation,
     p: Page,
     it: IndexTuple,
     giststate: *mut GISTSTATE,
-) -> OffsetNumber {
-    unimplemented!()
-}
+) -> OffsetNumber { crate::access::gist::gistutil::gistchoose(r, p, it, giststate as _) }
 
-pub unsafe fn GISTInitBuffer(b: Buffer, f: uint32) {
-    unimplemented!()
-}
-pub unsafe fn gistinitpage(page: Page, f: uint32) {
-    unimplemented!()
-}
+pub unsafe fn GISTInitBuffer(b: Buffer, f: uint32) { crate::access::gist::gistutil::GISTInitBuffer(b, f) }
+pub unsafe fn gistinitpage(page: Page, f: uint32) { crate::access::gist::gistutil::gistinitpage(page, f) }
 pub unsafe fn gistdentryinit(
     giststate: *mut GISTSTATE,
     nkey: c_int,
@@ -839,9 +767,7 @@ pub unsafe fn gistdentryinit(
     o: OffsetNumber,
     l: bool,
     isNull: bool,
-) {
-    unimplemented!()
-}
+) { crate::access::gist::gistutil::gistdentryinit(giststate, nkey, e, k, r, pg, o, l, isNull) }
 
 pub unsafe fn gistpenalty(
     giststate: *mut GISTSTATE,
@@ -850,21 +776,15 @@ pub unsafe fn gistpenalty(
     isNullOrig: bool,
     add: *mut GISTENTRY,
     isNullAdd: bool,
-) -> f32 {
-    unimplemented!()
-}
+) -> f32 { crate::access::gist::gistutil::gistpenalty(giststate, attno, orig, isNullOrig, add, isNullAdd) }
 pub unsafe fn gistMakeUnionItVec(
     giststate: *mut GISTSTATE,
     itvec: *mut IndexTuple,
     len: c_int,
     attr: *mut Datum,
     isnull: *mut bool,
-) {
-    unimplemented!()
-}
-pub unsafe fn gistKeyIsEQ(giststate: *mut GISTSTATE, attno: c_int, a: Datum, b: Datum) -> bool {
-    unimplemented!()
-}
+) { crate::access::gist::gistutil::gistMakeUnionItVec(giststate, itvec, len, attr, isnull) }
+pub unsafe fn gistKeyIsEQ(giststate: *mut GISTSTATE, attno: c_int, a: Datum, b: Datum) -> bool { crate::access::gist::gistutil::gistKeyIsEQ(giststate, attno, a, b) }
 pub unsafe fn gistDeCompressAtt(
     giststate: *mut GISTSTATE,
     r: Relation,
@@ -873,16 +793,12 @@ pub unsafe fn gistDeCompressAtt(
     o: OffsetNumber,
     attdata: *mut GISTENTRY,
     isnull: *mut bool,
-) {
-    unimplemented!()
-}
+) { crate::access::gist::gistutil::gistDeCompressAtt(giststate, r, tuple, p, o, attdata, isnull) }
 pub unsafe fn gistFetchTuple(
     giststate: *mut GISTSTATE,
     r: Relation,
     tuple: IndexTuple,
-) -> HeapTuple {
-    unimplemented!()
-}
+) -> HeapTuple { crate::access::gist::gistutil::gistFetchTuple(giststate, r, tuple) }
 pub unsafe fn gistMakeUnionKey(
     giststate: *mut GISTSTATE,
     attno: c_int,
@@ -892,13 +808,9 @@ pub unsafe fn gistMakeUnionKey(
     isnull2: bool,
     dst: *mut Datum,
     dstisnull: *mut bool,
-) {
-    unimplemented!()
-}
+) { crate::access::gist::gistutil::gistMakeUnionKey(giststate, attno, entry1, isnull1, entry2, isnull2, dst, dstisnull) }
 
-pub unsafe fn gistGetFakeLSN(rel: Relation) -> XLogRecPtr {
-    unimplemented!()
-}
+pub unsafe fn gistGetFakeLSN(rel: Relation) -> XLogRecPtr { crate::access::gist::gistutil::gistGetFakeLSN(rel) }
 
 /* gistvacuum.c */
 pub unsafe fn gistbulkdelete(
@@ -906,15 +818,11 @@ pub unsafe fn gistbulkdelete(
     stats: *mut IndexBulkDeleteResult,
     callback: IndexBulkDeleteCallback,
     callback_state: *mut c_void,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!()
-}
+) -> *mut IndexBulkDeleteResult { unimplemented!() }
 pub unsafe fn gistvacuumcleanup(
     info: *mut IndexVacuumInfo,
     stats: *mut IndexBulkDeleteResult,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!()
-}
+) -> *mut IndexBulkDeleteResult { unimplemented!() }
 
 /* gistsplit.c */
 pub unsafe fn gistSplitByKey(
@@ -925,52 +833,38 @@ pub unsafe fn gistSplitByKey(
     giststate: *mut GISTSTATE,
     v: *mut GistSplitVector,
     attno: c_int,
-) {
-    unimplemented!()
-}
+) { crate::access::gist::gistsplit::gistSplitByKey(r, page, itup, len, giststate, v, attno) }
 
 /* gistbuild.c */
 pub unsafe fn gistbuild(
     heap: Relation,
     index: Relation,
     indexInfo: *mut IndexInfo,
-) -> *mut IndexBuildResult {
-    unimplemented!()
-}
+) -> *mut IndexBuildResult { unimplemented!() }
 
 /* gistbuildbuffers.c */
 pub unsafe fn gistInitBuildBuffers(
     pagesPerBuffer: c_int,
     levelStep: c_int,
     maxLevel: c_int,
-) -> *mut GISTBuildBuffers {
-    unimplemented!()
-}
+) -> *mut GISTBuildBuffers { unimplemented!() }
 pub unsafe fn gistGetNodeBuffer(
     gfbb: *mut GISTBuildBuffers,
     giststate: *mut GISTSTATE,
     nodeBlocknum: BlockNumber,
     level: c_int,
-) -> *mut GISTNodeBuffer {
-    unimplemented!()
-}
+) -> *mut GISTNodeBuffer { unimplemented!() }
 pub unsafe fn gistPushItupToNodeBuffer(
     gfbb: *mut GISTBuildBuffers,
     nodeBuffer: *mut GISTNodeBuffer,
     itup: IndexTuple,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 pub unsafe fn gistPopItupFromNodeBuffer(
     gfbb: *mut GISTBuildBuffers,
     nodeBuffer: *mut GISTNodeBuffer,
     itup: *mut IndexTuple,
-) -> bool {
-    unimplemented!()
-}
-pub unsafe fn gistFreeBuildBuffers(gfbb: *mut GISTBuildBuffers) {
-    unimplemented!()
-}
+) -> bool { unimplemented!() }
+pub unsafe fn gistFreeBuildBuffers(gfbb: *mut GISTBuildBuffers) { unimplemented!() }
 pub unsafe fn gistRelocateBuildBuffersOnSplit(
     gfbb: *mut GISTBuildBuffers,
     giststate: *mut GISTSTATE,
@@ -978,9 +872,5 @@ pub unsafe fn gistRelocateBuildBuffersOnSplit(
     level: c_int,
     buffer: Buffer,
     splitinfo: *mut List,
-) {
-    unimplemented!()
-}
-pub unsafe fn gistUnloadNodeBuffers(gfbb: *mut GISTBuildBuffers) {
-    unimplemented!()
-}
+) { unimplemented!() }
+pub unsafe fn gistUnloadNodeBuffers(gfbb: *mut GISTBuildBuffers) { unimplemented!() }

@@ -437,7 +437,8 @@ pub fn pg_rotate_right32(word: uint32, n: c_int) -> uint32 {
 }
 
 #[inline]
-pub fn pg_rotate_left32(word: uint32, n: c_int) -> uint32 {
+#[no_mangle]
+pub extern "C" fn pg_rotate_left32(word: uint32, n: c_int) -> uint32 {
     (word << n) | (word >> (32 - n))
 }
 

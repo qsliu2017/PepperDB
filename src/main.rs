@@ -78,6 +78,7 @@ pub use postgres_ext::Oid;
 pub mod c;
 pub mod postgres;
 pub mod varatt;
+pub use core::mem::offset_of;
 
 // ---- Standalone top-level headers (src/include/*.h) ----
 pub mod pg_config_manual;
@@ -89,7 +90,16 @@ pub mod pgtime;
 pub mod postgres_fe;
 pub mod windowapi;
 
+// ---- Link shims: C symbols for boot-path extern "C" stubs (see pepperdb-regress M2) ----
+pub mod backend_link_shims;
+// ---- Link shims: C symbols the linked C parser (scan.c/gram.c) calls into Rust ----
+pub mod parser_link_shims;
+
 // ---- Backend support subsystems ----
+// Explicit #[path]: the crate root is itself src/main.rs, so a bare `mod main`
+// is ambiguous (E0761) with this file; point it at the directory module.
+#[path = "main/mod.rs"]
+pub mod backend_main;
 pub mod access;
 pub mod backup;
 pub mod catalog;
@@ -124,6 +134,22 @@ pub mod lib;
 pub mod prelude;
 
 fn main() {
-    // TODO(pg-port): translate postgres/src/backend/main/main.c (PostgresMain entry).
+    // Real backend entry lives in crate::backend_main::main (backend/main/main.c),
+    // wired and compiling. Activating it (the code below) pulls the postmaster boot
+    // path out of dead-strip and currently fails to link on ~130 extern "C" stub
+    // symbols (122 have real Rust homes to import; see memory pepperdb-regress / M1).
+    // Keep the stub entry until that de-stubbing lands so the build stays green.
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let args: Vec<std::ffi::CString> = std::env::args_os()
+            .map(|a| std::ffi::CString::new(a.as_bytes()).expect("argv contains NUL"))
+            .collect();
+        let mut argv: Vec<*mut core::ffi::c_char> =
+            args.iter().map(|a| a.as_ptr() as *mut core::ffi::c_char).collect();
+        argv.push(core::ptr::null_mut());
+        let argc = args.len() as core::ffi::c_int;
+        let code = unsafe { crate::backend_main::main::main(argc, argv.as_mut_ptr()) };
+        std::process::exit(code);
+    }
     eprintln!("PepperDB: PostgreSQL backend port (work in progress).");
 }

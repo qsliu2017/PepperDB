@@ -48,10 +48,10 @@ use crate::foreign::fdwapi::FdwRoutine;
 
 // foreign/fdwapi.h
 unsafe fn GetFdwRoutineForRelation(_relation: Relation, _makecopy: bool) -> *mut FdwRoutine {
-    unimplemented!() // TODO: foreign/foreign.c
+    crate::foreign::foreign::GetFdwRoutineForRelation(_relation as _, _makecopy as _) as _
 }
 unsafe fn GetFdwRoutineByServerId(_serverid: Oid) -> *mut FdwRoutine {
-    unimplemented!() // TODO: foreign/foreign.c
+    crate::foreign::foreign::GetFdwRoutineByServerId(_serverid as _) as _
 }
 
 // utils/rel.h
@@ -82,19 +82,19 @@ pub struct shm_toc_estimator {
     _opaque: [u8; 0],
 }
 unsafe fn shm_toc_estimate_chunk(_e: *mut shm_toc_estimator, _sz: Size) {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    unimplemented!()
 }
 unsafe fn shm_toc_estimate_keys(_e: *mut shm_toc_estimator, _cnt: Size) {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    unimplemented!()
 }
 unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _nbytes: Size) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 unsafe fn shm_toc_insert(_toc: *mut shm_toc, _key: uint64, _address: *mut c_void) {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: uint64, _noError: bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }
 
 // ----------------------------------------------------------------

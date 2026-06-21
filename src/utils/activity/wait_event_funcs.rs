@@ -49,9 +49,7 @@ unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) {
 }
 
 // TODO: port GetWaitEventCustomNames (src/backend/utils/activity/wait_event.c)
-unsafe fn GetWaitEventCustomNames(_classId: uint32, _nwaitevents: *mut c_int) -> *mut *mut c_char {
-    unimplemented!()
-}
+unsafe fn GetWaitEventCustomNames(_classId: uint32, _nwaitevents: *mut c_int) -> *mut *mut c_char { crate::utils::activity::wait_event::GetWaitEventCustomNames(_classId, _nwaitevents) }
 
 // TODO: port tuplestore_putvalues (src/backend/utils/sort/tuplestore.c)
 // Note: an unrelated translation exists in executor/tstoreReceiver.rs (private);

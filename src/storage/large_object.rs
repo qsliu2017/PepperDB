@@ -65,35 +65,35 @@ pub static mut lo_compat_privileges: bool = false;
 
 /* inversion stuff in inv_api.c */
 pub unsafe fn close_lo_relation(_isCommit: bool) {
-    unimplemented!()
+    crate::storage::large_object::inv_api::close_lo_relation(_isCommit)
 }
 
 pub unsafe fn inv_create(_lobjId: Oid) -> Oid {
-    unimplemented!()
+    crate::storage::large_object::inv_api::inv_create(_lobjId)
 }
 
 pub unsafe fn inv_open(_lobjId: Oid, _flags: c_int, _mcxt: MemoryContext) -> *mut LargeObjectDesc {
-    unimplemented!()
+    crate::storage::large_object::inv_api::inv_open(_lobjId, _flags, _mcxt as _)
 }
 
 pub unsafe fn inv_close(_obj_desc: *mut LargeObjectDesc) {
-    unimplemented!()
+    crate::storage::large_object::inv_api::inv_close(_obj_desc)
 }
 
 pub unsafe fn inv_drop(_lobjId: Oid) -> c_int {
-    unimplemented!()
+    crate::storage::large_object::inv_api::inv_drop(_lobjId)
 }
 
 pub unsafe fn inv_seek(_obj_desc: *mut LargeObjectDesc, _offset: int64, _whence: c_int) -> int64 {
-    unimplemented!()
+    crate::storage::large_object::inv_api::inv_seek(_obj_desc, _offset, _whence)
 }
 
 pub unsafe fn inv_tell(_obj_desc: *mut LargeObjectDesc) -> int64 {
-    unimplemented!()
+    crate::storage::large_object::inv_api::inv_tell(_obj_desc)
 }
 
 pub unsafe fn inv_read(_obj_desc: *mut LargeObjectDesc, _buf: *mut c_char, _nbytes: c_int) -> c_int {
-    unimplemented!()
+    crate::storage::large_object::inv_api::inv_read(_obj_desc, _buf, _nbytes)
 }
 
 pub unsafe fn inv_write(
@@ -101,11 +101,11 @@ pub unsafe fn inv_write(
     _buf: *const c_char,
     _nbytes: c_int,
 ) -> c_int {
-    unimplemented!()
+    crate::storage::large_object::inv_api::inv_write(_obj_desc, _buf, _nbytes)
 }
 
 pub unsafe fn inv_truncate(_obj_desc: *mut LargeObjectDesc, _len: int64) {
-    unimplemented!()
+    crate::storage::large_object::inv_api::inv_truncate(_obj_desc, _len)
 }
 
 use std::ffi::c_char;

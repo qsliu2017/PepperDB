@@ -281,8 +281,19 @@ static mcxt_methods: [MemoryContextMethods; 16] = [
         stats: Some(BumpStats),
         // #ifdef MEMORY_CONTEXT_CHECKING check: Some(BumpCheck) -- omitted
     },
-    // [MCTX_8_UNUSED_ID] -- BOGUS_MCTX
-    bogus_mctx(),
+    // [MCTX_8_UNUSED_ID] -- bootstrap (simple) allocator from utils/palloc.rs, so
+    // mcxt's header-based dispatch recognizes its chunks (size<<4 | 8 header).
+    MemoryContextMethods {
+        alloc: Some(crate::utils::palloc::bootstrap_alloc),
+        free_p: Some(crate::utils::palloc::bootstrap_free),
+        realloc: Some(crate::utils::palloc::bootstrap_realloc),
+        reset: Some(crate::utils::palloc::bootstrap_reset),
+        delete_context: Some(crate::utils::palloc::bootstrap_delete),
+        get_chunk_context: Some(crate::utils::palloc::bootstrap_get_chunk_context),
+        get_chunk_space: Some(crate::utils::palloc::bootstrap_get_chunk_space),
+        is_empty: Some(crate::utils::palloc::bootstrap_is_empty),
+        stats: None,
+    },
     // [MCTX_9_UNUSED_ID] -- BOGUS_MCTX
     bogus_mctx(),
     // [MCTX_10_UNUSED_ID] -- BOGUS_MCTX
@@ -324,10 +335,12 @@ const _: () = {
  * CurrentMemoryContext
  *		Default memory context for allocations.
  *
- * NOTE: distinct from the bootstrap `utils::palloc::CurrentMemoryContext`; this
- * is the REAL one. Not re-exported yet, so the two coexist.
+ * Unified with the prelude-exported `utils::palloc::CurrentMemoryContext` so the
+ * whole backend shares one active-context global (mcxt switches and palloc/prelude
+ * switches stay in sync; otherwise error recovery restores one and leaves the
+ * other dangling/null).
  */
-pub static mut CurrentMemoryContext: MemoryContext = core::ptr::null_mut();
+pub use crate::utils::palloc::CurrentMemoryContext;
 
 /*
  * Standard top-level contexts. For a description of the purpose of each
@@ -335,7 +348,9 @@ pub static mut CurrentMemoryContext: MemoryContext = core::ptr::null_mut();
  */
 pub static mut TopMemoryContext: MemoryContext = core::ptr::null_mut();
 pub static mut ErrorContext: MemoryContext = core::ptr::null_mut();
+#[no_mangle]
 pub static mut PostmasterContext: MemoryContext = core::ptr::null_mut();
+#[no_mangle]
 pub static mut CacheMemoryContext: MemoryContext = core::ptr::null_mut();
 pub static mut MessageContext: MemoryContext = core::ptr::null_mut();
 pub static mut TopTransactionContext: MemoryContext = core::ptr::null_mut();
@@ -544,6 +559,9 @@ unsafe fn BogusGetChunkContext(pointer: *mut c_void) -> MemoryContext {
 }
 
 unsafe fn BogusGetChunkSpace(pointer: *mut c_void) -> Size {
+    if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT BogusGetChunkSpace ptr={:p}\n{}", pointer, std::backtrace::Backtrace::force_capture());
+    }
     elog!(
         ERROR,
         "GetMemoryChunkSpace called with invalid pointer {:p} (header 0x{:016x})",
@@ -709,7 +727,8 @@ pub unsafe fn MemoryContextResetChildren(context: MemoryContext) {
  * # Safety
  * `context` must be a valid MemoryContext.
  */
-pub unsafe fn MemoryContextDelete(context: MemoryContext) {
+#[no_mangle]
+pub unsafe extern "C" fn MemoryContextDelete(context: MemoryContext) {
     let mut curr: MemoryContext;
 
     Assert!(MemoryContextIsValid(context));
@@ -798,6 +817,7 @@ unsafe fn MemoryContextDeleteOnly(context: MemoryContext) {
  * # Safety
  * `context` must be a valid MemoryContext.
  */
+#[no_mangle]
 pub unsafe fn MemoryContextDeleteChildren(context: MemoryContext) {
     Assert!(MemoryContextIsValid(context));
 
@@ -880,6 +900,7 @@ unsafe fn MemoryContextCallResetCallbacks(context: MemoryContext) {
  * # Safety
  * `context` must be valid; `id` must be NULL or a valid C string outliving it.
  */
+#[no_mangle]
 pub unsafe fn MemoryContextSetIdentifier(context: MemoryContext, id: *const c_char) {
     Assert!(MemoryContextIsValid(context));
     (*context).ident = id;
@@ -906,6 +927,7 @@ pub unsafe fn MemoryContextSetIdentifier(context: MemoryContext, id: *const c_ch
  * # Safety
  * `context` must be valid; `new_parent` must be NULL or a valid MemoryContext.
  */
+#[no_mangle]
 pub unsafe fn MemoryContextSetParent(context: MemoryContext, new_parent: MemoryContext) {
     Assert!(MemoryContextIsValid(context));
     Assert!(context != new_parent);
@@ -1004,6 +1026,7 @@ pub unsafe fn GetMemoryChunkSpace(pointer: *mut c_void) -> Size {
  * # Safety
  * `context` must be a valid MemoryContext.
  */
+#[no_mangle]
 pub unsafe fn MemoryContextGetParent(context: MemoryContext) -> MemoryContext {
     Assert!(MemoryContextIsValid(context));
 
@@ -1501,6 +1524,12 @@ pub unsafe fn MemoryContextCreate(
     (*node).r#type = tag;
     (*node).isReset = true;
     (*node).methods = &mcxt_methods[method_id as usize];
+    if std::env::var_os("PDB_BT").is_some() && tag == NodeTag::T_AllocSetContext {
+        eprintln!("PDB_BT MemoryContextCreate tag={} method_id={} methods={:p} alloc_fn={:?} realAllocSetAlloc={:?}",
+            tag as i32, method_id as i32, (*node).methods,
+            (*(*node).methods).alloc.map(|f| f as usize),
+            crate::utils::mmgr::aset::AllocSetAlloc as usize);
+    }
     (*node).parent = parent;
     (*node).firstchild = core::ptr::null_mut();
     (*node).mem_allocated = 0;
@@ -1586,6 +1615,7 @@ pub unsafe fn MemoryContextSizeFailure(_context: MemoryContext, size: Size, _fla
  * # Safety
  * `context` must be a valid MemoryContext.
  */
+#[no_mangle]
 pub unsafe fn MemoryContextAlloc(context: MemoryContext, size: Size) -> *mut c_void {
     let ret: *mut c_void;
 
@@ -1793,6 +1823,12 @@ pub unsafe fn palloc(size: Size) -> *mut c_void {
      * this call, consider making it the responsibility of the 'alloc'
      * function instead.
      */
+    if std::env::var_os("PDB_BT").is_some() && size > 20000 {
+        let a = (*(*context).methods).alloc;
+        eprintln!("PDB_BT mcxt::palloc size={} ctx_type={} alloc_fn={:?} AllocSetAlloc={:?}",
+            size, (*context).r#type as i32, a.map(|f| f as usize),
+            crate::utils::mmgr::aset::AllocSetAlloc as usize);
+    }
     ret = ((*(*context).methods).alloc.unwrap())(context, size, 0);
     /* We expect OOM to be handled by the alloc function */
     Assert!(!ret.is_null());

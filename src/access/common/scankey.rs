@@ -101,6 +101,7 @@ pub const SK_ORDER_BY: c_int = 0x0100; /* scankey is for ORDER BY op */
  * itself, because that's what will be used for any subsidiary info attached
  * to the ScanKey's FmgrInfo record.
  */
+#[no_mangle]
 pub unsafe fn ScanKeyEntryInitialize(
     entry: ScanKey,
     flags: c_int,

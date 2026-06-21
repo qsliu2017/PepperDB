@@ -13,29 +13,13 @@ use crate::prelude::*;
 
 use std::ffi::c_int;
 
+use crate::regex::regcomp::vars;
 use crate::regex::regcustom::chr;
 use crate::regex::regerror::REG_ESPACE;
 use crate::regex::regguts::cvec;
-
-// ---------------------------------------------------------------------------
-// Local stubs for items defined in regcomp.c (not yet ported).
-//
-// struct vars is the regex compilation context; only its `cv` (transient cvec)
-// and `err` fields are touched here. The real definition lives in regcomp.c.
-// TODO: replace with the real `struct vars` once regcomp.c is translated.
-// ---------------------------------------------------------------------------
-
-#[repr(C)]
-pub struct vars {
-    /// transient cvec used while interpreting bracket expressions
-    pub cv: *mut cvec,
-    /// error code captured by the ERR() macro
-    pub err: c_int,
-    // ... other fields omitted in this partial port
-}
+use crate::utils::palloc::{palloc_extended, pfree, MCXT_ALLOC_NO_OOM};
 
 /// C: #define ERR(e) VERR(NULL, (e))  -- records an error in the vars context.
-/// TODO: route through the real ERR() once regcomp.c is ported.
 unsafe fn ERR(v: *mut vars, e: c_int) {
     if (*v).err == 0 {
         (*v).err = e;
@@ -51,19 +35,6 @@ unsafe fn MALLOC(n: usize) -> *mut std::ffi::c_void {
 /// C: #define FREE(p) pfree(VS(p))
 unsafe fn FREE(p: *mut std::ffi::c_void) {
     pfree(p);
-}
-
-// palloc_extended / pfree / MCXT_ALLOC_NO_OOM come from the memory-manager
-// subsystem. Provide local stubs if not yet wired by the prelude.
-// TODO: import from crate::utils::mmgr once available.
-const MCXT_ALLOC_NO_OOM: c_int = 0x02;
-
-unsafe fn palloc_extended(_size: usize, _flags: c_int) -> *mut std::ffi::c_void {
-    unimplemented!()
-}
-
-unsafe fn pfree(_pointer: *mut std::ffi::c_void) {
-    unimplemented!()
 }
 
 /// newcvec - allocate a new cvec

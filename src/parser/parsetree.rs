@@ -28,14 +28,14 @@ pub unsafe fn rt_fetch(rangetable_index: Index, rangetable: *const List) -> *mut
  * variable name or alias for that attribute of that RTE.
  */
 pub unsafe fn get_rte_attribute_name(_rte: *mut RangeTblEntry, _attnum: AttrNumber) -> *mut c_char {
-    unimplemented!()
+    crate::parser::parse_relation::get_rte_attribute_name(_rte as _, _attnum as _) as _
 }
 
 /*
  * Check whether an attribute of an RTE has been dropped
  */
 pub unsafe fn get_rte_attribute_is_dropped(_rte: *mut RangeTblEntry, _attnum: AttrNumber) -> bool {
-    unimplemented!()
+    crate::parser::parse_relation::get_rte_attribute_is_dropped(_rte as _, _attnum as _)
 }
 
 /* ----------------
@@ -44,7 +44,7 @@ pub unsafe fn get_rte_attribute_is_dropped(_rte: *mut RangeTblEntry, _attnum: At
  */
 
 pub unsafe fn get_tle_by_resno(_tlist: *mut List, _resno: AttrNumber) -> *mut TargetEntry {
-    unimplemented!()
+    crate::parser::parse_relation::get_tle_by_resno(_tlist as _, _resno as _) as _
 }
 
 /* ----------------
@@ -53,5 +53,5 @@ pub unsafe fn get_tle_by_resno(_tlist: *mut List, _resno: AttrNumber) -> *mut Ta
  */
 
 pub unsafe fn get_parse_rowmark(_qry: *mut Query, _rtindex: Index) -> *mut RowMarkClause {
-    unimplemented!()
+    crate::parser::parse_relation::get_parse_rowmark(_qry as _, _rtindex as _) as _
 }

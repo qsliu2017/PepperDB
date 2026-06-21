@@ -18,7 +18,7 @@ use crate::{castNode, current_cell, foreach, IsA};
 // ---------------------------------------------------------------------------
 
 unsafe fn InstrEndLoop(_instr: *mut c_void) {
-    unimplemented!() // TODO: src/backend/executor/instrument.c
+    crate::executor::instrument::InstrEndLoop(_instr as _)
 }
 
 unsafe fn UpdateChangedParamSet(_node: *mut PlanState, _newchg: *mut c_void) {
@@ -26,15 +26,15 @@ unsafe fn UpdateChangedParamSet(_node: *mut PlanState, _newchg: *mut c_void) {
 }
 
 unsafe fn ExecReScanSetParamPlan(_node: *mut SubPlanState, _parent: *mut PlanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeSubplan.c
+    crate::executor::nodeSubplan::ExecReScanSetParamPlan(_node as _, _parent as _)
 }
 
 unsafe fn ReScanExprContext(_econtext: *mut c_void) {
-    unimplemented!() // TODO: src/backend/executor/execUtils.c
+    crate::executor::execUtils::ReScanExprContext(_econtext as _)
 }
 
 unsafe fn bms_free(_a: *mut c_void) {
-    unimplemented!() // TODO: src/backend/nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_free(_a as _)
 }
 
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> *mut c_void {
@@ -54,88 +54,184 @@ unsafe fn HeapTupleIsValid(tuple: *mut c_void) -> bool {
 }
 
 unsafe fn GETSTRUCT(_tuple: *mut c_void) -> *mut c_void {
-    unimplemented!() // TODO: src/include/access/htup_details.h
+    crate::access::htup_details::GETSTRUCT(_tuple as _) as _
 }
 
 unsafe fn GetIndexAmRoutineByAmId(_amoid: Oid, _noerror: bool) -> *mut IndexAmRoutine {
-    unimplemented!() // TODO: src/backend/access/index/amapi.c
+    crate::access::index::amapi::GetIndexAmRoutineByAmId(_amoid as _, _noerror as _) as _
 }
 
 // Per-node ReScan routines
-unsafe fn ExecReScanResult(_node: *mut PlanState) { unimplemented!() } // TODO: nodeResult.c
-unsafe fn ExecReScanProjectSet(_node: *mut PlanState) { unimplemented!() } // TODO: nodeProjectSet.c
-unsafe fn ExecReScanModifyTable(_node: *mut PlanState) { unimplemented!() } // TODO: nodeModifyTable.c
+unsafe fn ExecReScanResult(_node: *mut PlanState) {
+    crate::executor::nodeResult::ExecReScanResult(_node as _)
+} // TODO: nodeResult.c
+unsafe fn ExecReScanProjectSet(_node: *mut PlanState) {
+    crate::executor::nodeProjectSet::ExecReScanProjectSet(_node as _)
+} // TODO: nodeProjectSet.c
+unsafe fn ExecReScanModifyTable(_node: *mut PlanState) {
+    crate::executor::nodeModifyTable::ExecReScanModifyTable(_node as _)
+} // TODO: nodeModifyTable.c
 unsafe fn ExecReScanAppend(_node: *mut PlanState) { unimplemented!() } // TODO: nodeAppend.c
-unsafe fn ExecReScanMergeAppend(_node: *mut PlanState) { unimplemented!() } // TODO: nodeMergeAppend.c
-unsafe fn ExecReScanRecursiveUnion(_node: *mut PlanState) { unimplemented!() } // TODO: nodeRecursiveunion.c
-unsafe fn ExecReScanBitmapAnd(_node: *mut PlanState) { unimplemented!() } // TODO: nodeBitmapAnd.c
-unsafe fn ExecReScanBitmapOr(_node: *mut PlanState) { unimplemented!() } // TODO: nodeBitmapOr.c
-unsafe fn ExecReScanSeqScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeSeqscan.c
-unsafe fn ExecReScanSampleScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeSamplescan.c
-unsafe fn ExecReScanGather(_node: *mut PlanState) { unimplemented!() } // TODO: nodeGather.c
-unsafe fn ExecReScanGatherMerge(_node: *mut PlanState) { unimplemented!() } // TODO: nodeGatherMerge.c
-unsafe fn ExecReScanIndexScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeIndexscan.c
-unsafe fn ExecReScanIndexOnlyScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeIndexonlyscan.c
-unsafe fn ExecReScanBitmapIndexScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeBitmapIndexscan.c
-unsafe fn ExecReScanBitmapHeapScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeBitmapHeapscan.c
-unsafe fn ExecReScanTidScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeTidscan.c
-unsafe fn ExecReScanTidRangeScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeTidrangescan.c
-unsafe fn ExecReScanSubqueryScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeSubqueryscan.c
-unsafe fn ExecReScanFunctionScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeFunctionscan.c
-unsafe fn ExecReScanTableFuncScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeTableFuncscan.c
-unsafe fn ExecReScanValuesScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeValuesscan.c
-unsafe fn ExecReScanCteScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeCtescan.c
-unsafe fn ExecReScanNamedTuplestoreScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeNamedtuplestorescan.c
-unsafe fn ExecReScanWorkTableScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeWorktablescan.c
-unsafe fn ExecReScanForeignScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeForeignscan.c
-unsafe fn ExecReScanCustomScan(_node: *mut PlanState) { unimplemented!() } // TODO: nodeCustom.c
-unsafe fn ExecReScanNestLoop(_node: *mut PlanState) { unimplemented!() } // TODO: nodeNestloop.c
-unsafe fn ExecReScanMergeJoin(_node: *mut PlanState) { unimplemented!() } // TODO: nodeMergejoin.c
-unsafe fn ExecReScanHashJoin(_node: *mut PlanState) { unimplemented!() } // TODO: nodeHashjoin.c
-unsafe fn ExecReScanMaterial(_node: *mut PlanState) { unimplemented!() } // TODO: nodeMaterial.c
-unsafe fn ExecReScanMemoize(_node: *mut PlanState) { unimplemented!() } // TODO: nodeMemoize.c
-unsafe fn ExecReScanSort(_node: *mut PlanState) { unimplemented!() } // TODO: nodeSort.c
-unsafe fn ExecReScanIncrementalSort(_node: *mut PlanState) { unimplemented!() } // TODO: nodeIncrementalSort.c
-unsafe fn ExecReScanGroup(_node: *mut PlanState) { unimplemented!() } // TODO: nodeGroup.c
-unsafe fn ExecReScanAgg(_node: *mut PlanState) { unimplemented!() } // TODO: nodeAgg.c
-unsafe fn ExecReScanWindowAgg(_node: *mut PlanState) { unimplemented!() } // TODO: nodeWindowAgg.c
-unsafe fn ExecReScanUnique(_node: *mut PlanState) { unimplemented!() } // TODO: nodeUnique.c
-unsafe fn ExecReScanHash(_node: *mut PlanState) { unimplemented!() } // TODO: nodeHash.c
-unsafe fn ExecReScanSetOp(_node: *mut PlanState) { unimplemented!() } // TODO: nodeSetOp.c
-unsafe fn ExecReScanLockRows(_node: *mut PlanState) { unimplemented!() } // TODO: nodeLockRows.c
-unsafe fn ExecReScanLimit(_node: *mut PlanState) { unimplemented!() } // TODO: nodeLimit.c
+unsafe fn ExecReScanMergeAppend(_node: *mut PlanState) {
+    crate::executor::nodeMergeAppend::ExecReScanMergeAppend(_node as _)
+} // TODO: nodeMergeAppend.c
+unsafe fn ExecReScanRecursiveUnion(_node: *mut PlanState) {
+    crate::executor::nodeRecursiveunion::ExecReScanRecursiveUnion(_node as _)
+} // TODO: nodeRecursiveunion.c
+unsafe fn ExecReScanBitmapAnd(_node: *mut PlanState) {
+    crate::executor::nodeBitmapAnd::ExecReScanBitmapAnd(_node as _)
+} // TODO: nodeBitmapAnd.c
+unsafe fn ExecReScanBitmapOr(_node: *mut PlanState) {
+    crate::executor::nodeBitmapOr::ExecReScanBitmapOr(_node as _)
+} // TODO: nodeBitmapOr.c
+unsafe fn ExecReScanSeqScan(_node: *mut PlanState) {
+    crate::executor::nodeSeqscan::ExecReScanSeqScan(_node as _)
+} // TODO: nodeSeqscan.c
+unsafe fn ExecReScanSampleScan(_node: *mut PlanState) {
+    crate::executor::nodeSamplescan::ExecReScanSampleScan(_node as _)
+} // TODO: nodeSamplescan.c
+unsafe fn ExecReScanGather(_node: *mut PlanState) {
+    crate::executor::nodeGather::ExecReScanGather(_node as _)
+} // TODO: nodeGather.c
+unsafe fn ExecReScanGatherMerge(_node: *mut PlanState) {
+    crate::executor::nodeGatherMerge::ExecReScanGatherMerge(_node as _)
+} // TODO: nodeGatherMerge.c
+unsafe fn ExecReScanIndexScan(_node: *mut PlanState) {
+    crate::executor::nodeIndexscan::ExecReScanIndexScan(_node as _)
+} // TODO: nodeIndexscan.c
+unsafe fn ExecReScanIndexOnlyScan(_node: *mut PlanState) {
+    crate::executor::nodeIndexonlyscan::ExecReScanIndexOnlyScan(_node as _)
+} // TODO: nodeIndexonlyscan.c
+unsafe fn ExecReScanBitmapIndexScan(_node: *mut PlanState) {
+    crate::executor::nodeBitmapIndexscan::ExecReScanBitmapIndexScan(_node as _)
+} // TODO: nodeBitmapIndexscan.c
+unsafe fn ExecReScanBitmapHeapScan(_node: *mut PlanState) {
+    crate::executor::nodeBitmapHeapscan::ExecReScanBitmapHeapScan(_node as _)
+} // TODO: nodeBitmapHeapscan.c
+unsafe fn ExecReScanTidScan(_node: *mut PlanState) {
+    crate::executor::nodeTidscan::ExecReScanTidScan(_node as _)
+} // TODO: nodeTidscan.c
+unsafe fn ExecReScanTidRangeScan(_node: *mut PlanState) {
+    crate::executor::nodeTidrangescan::ExecReScanTidRangeScan(_node as _)
+} // TODO: nodeTidrangescan.c
+unsafe fn ExecReScanSubqueryScan(_node: *mut PlanState) {
+    crate::executor::nodeSubqueryscan::ExecReScanSubqueryScan(_node as _)
+} // TODO: nodeSubqueryscan.c
+unsafe fn ExecReScanFunctionScan(_node: *mut PlanState) {
+    crate::executor::nodeFunctionscan::ExecReScanFunctionScan(_node as _)
+} // TODO: nodeFunctionscan.c
+unsafe fn ExecReScanTableFuncScan(_node: *mut PlanState) {
+    crate::executor::nodeTableFuncscan::ExecReScanTableFuncScan(_node as _)
+} // TODO: nodeTableFuncscan.c
+unsafe fn ExecReScanValuesScan(_node: *mut PlanState) {
+    crate::executor::nodeValuesscan::ExecReScanValuesScan(_node as _)
+} // TODO: nodeValuesscan.c
+unsafe fn ExecReScanCteScan(_node: *mut PlanState) {
+    crate::executor::nodeCtescan::ExecReScanCteScan(_node as _)
+} // TODO: nodeCtescan.c
+unsafe fn ExecReScanNamedTuplestoreScan(_node: *mut PlanState) {
+    crate::executor::nodeNamedtuplestorescan::ExecReScanNamedTuplestoreScan(_node as _)
+} // TODO: nodeNamedtuplestorescan.c
+unsafe fn ExecReScanWorkTableScan(_node: *mut PlanState) {
+    crate::executor::nodeWorktablescan::ExecReScanWorkTableScan(_node as _)
+} // TODO: nodeWorktablescan.c
+unsafe fn ExecReScanForeignScan(_node: *mut PlanState) {
+    crate::executor::nodeForeignscan::ExecReScanForeignScan(_node as _)
+} // TODO: nodeForeignscan.c
+unsafe fn ExecReScanCustomScan(_node: *mut PlanState) {
+    crate::executor::nodeCustom::ExecReScanCustomScan(_node as _)
+} // TODO: nodeCustom.c
+unsafe fn ExecReScanNestLoop(_node: *mut PlanState) {
+    crate::executor::nodeNestloop::ExecReScanNestLoop(_node as _)
+} // TODO: nodeNestloop.c
+unsafe fn ExecReScanMergeJoin(_node: *mut PlanState) {
+    crate::executor::nodeMergejoin::ExecReScanMergeJoin(_node as _)
+} // TODO: nodeMergejoin.c
+unsafe fn ExecReScanHashJoin(_node: *mut PlanState) {
+    crate::executor::nodeHashjoin::ExecReScanHashJoin(_node as _)
+} // TODO: nodeHashjoin.c
+unsafe fn ExecReScanMaterial(_node: *mut PlanState) {
+    crate::executor::nodeMaterial::ExecReScanMaterial(_node as _)
+} // TODO: nodeMaterial.c
+unsafe fn ExecReScanMemoize(_node: *mut PlanState) {
+    crate::executor::nodeMemoize::ExecReScanMemoize(_node as _)
+} // TODO: nodeMemoize.c
+unsafe fn ExecReScanSort(_node: *mut PlanState) {
+    crate::executor::nodeSort::ExecReScanSort(_node as _)
+} // TODO: nodeSort.c
+unsafe fn ExecReScanIncrementalSort(_node: *mut PlanState) {
+    crate::executor::nodeIncrementalSort::ExecReScanIncrementalSort(_node as _)
+} // TODO: nodeIncrementalSort.c
+unsafe fn ExecReScanGroup(_node: *mut PlanState) {
+    crate::executor::nodeGroup::ExecReScanGroup(_node as _)
+} // TODO: nodeGroup.c
+unsafe fn ExecReScanAgg(_node: *mut PlanState) {
+    crate::executor::nodeAgg::ExecReScanAgg(_node as _)
+} // TODO: nodeAgg.c
+unsafe fn ExecReScanWindowAgg(_node: *mut PlanState) {
+    crate::executor::nodeWindowAgg::ExecReScanWindowAgg(_node as _)
+} // TODO: nodeWindowAgg.c
+unsafe fn ExecReScanUnique(_node: *mut PlanState) {
+    crate::executor::nodeUnique::ExecReScanUnique(_node as _)
+} // TODO: nodeUnique.c
+unsafe fn ExecReScanHash(_node: *mut PlanState) {
+    crate::executor::nodeHash::ExecReScanHash(_node as _)
+} // TODO: nodeHash.c
+unsafe fn ExecReScanSetOp(_node: *mut PlanState) {
+    crate::executor::nodeSetOp::ExecReScanSetOp(_node as _)
+} // TODO: nodeSetOp.c
+unsafe fn ExecReScanLockRows(_node: *mut PlanState) {
+    crate::executor::nodeLockRows::ExecReScanLockRows(_node as _)
+} // TODO: nodeLockRows.c
+unsafe fn ExecReScanLimit(_node: *mut PlanState) {
+    crate::executor::nodeLimit::ExecReScanLimit(_node as _)
+} // TODO: nodeLimit.c
 
 // Per-node MarkPos routines
-unsafe fn ExecIndexMarkPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeIndexscan.c
-unsafe fn ExecIndexOnlyMarkPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeIndexonlyscan.c
-unsafe fn ExecCustomMarkPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeCustom.c
-unsafe fn ExecMaterialMarkPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeMaterial.c
-unsafe fn ExecSortMarkPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeSort.c
-unsafe fn ExecResultMarkPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeResult.c
+unsafe fn ExecIndexMarkPos(_node: *mut PlanState) {
+    crate::executor::nodeIndexscan::ExecIndexMarkPos(_node as _)
+} // TODO: nodeIndexscan.c
+unsafe fn ExecIndexOnlyMarkPos(_node: *mut PlanState) {
+    crate::executor::nodeIndexonlyscan::ExecIndexOnlyMarkPos(_node as _)
+} // TODO: nodeIndexonlyscan.c
+unsafe fn ExecCustomMarkPos(_node: *mut PlanState) {
+    crate::executor::nodeCustom::ExecCustomMarkPos(_node as _)
+} // TODO: nodeCustom.c
+unsafe fn ExecMaterialMarkPos(_node: *mut PlanState) {
+    crate::executor::nodeMaterial::ExecMaterialMarkPos(_node as _)
+} // TODO: nodeMaterial.c
+unsafe fn ExecSortMarkPos(_node: *mut PlanState) {
+    crate::executor::nodeSort::ExecSortMarkPos(_node as _)
+} // TODO: nodeSort.c
+unsafe fn ExecResultMarkPos(_node: *mut PlanState) {
+    crate::executor::nodeResult::ExecResultMarkPos(_node as _)
+} // TODO: nodeResult.c
 
 // Per-node RestrPos routines
-unsafe fn ExecIndexRestrPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeIndexscan.c
-unsafe fn ExecIndexOnlyRestrPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeIndexonlyscan.c
-unsafe fn ExecCustomRestrPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeCustom.c
-unsafe fn ExecMaterialRestrPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeMaterial.c
-unsafe fn ExecSortRestrPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeSort.c
-unsafe fn ExecResultRestrPos(_node: *mut PlanState) { unimplemented!() } // TODO: nodeResult.c
+unsafe fn ExecIndexRestrPos(_node: *mut PlanState) {
+    crate::executor::nodeIndexscan::ExecIndexRestrPos(_node as _)
+} // TODO: nodeIndexscan.c
+unsafe fn ExecIndexOnlyRestrPos(_node: *mut PlanState) {
+    crate::executor::nodeIndexonlyscan::ExecIndexOnlyRestrPos(_node as _)
+} // TODO: nodeIndexonlyscan.c
+unsafe fn ExecCustomRestrPos(_node: *mut PlanState) {
+    crate::executor::nodeCustom::ExecCustomRestrPos(_node as _)
+} // TODO: nodeCustom.c
+unsafe fn ExecMaterialRestrPos(_node: *mut PlanState) {
+    crate::executor::nodeMaterial::ExecMaterialRestrPos(_node as _)
+} // TODO: nodeMaterial.c
+unsafe fn ExecSortRestrPos(_node: *mut PlanState) {
+    crate::executor::nodeSort::ExecSortRestrPos(_node as _)
+} // TODO: nodeSort.c
+unsafe fn ExecResultRestrPos(_node: *mut PlanState) {
+    crate::executor::nodeResult::ExecResultRestrPos(_node as _)
+} // TODO: nodeResult.c
 
 // ---------------------------------------------------------------------------
 // Stub types (defined fully in their own modules once ported).
 // ---------------------------------------------------------------------------
 
-#[repr(C)]
-pub struct PlanState {
-    pub instrument: *mut c_void,
-    pub chgParam: *mut c_void,
-    pub initPlan: *mut List,
-    pub subPlan: *mut List,
-    pub ps_ExprContext: *mut c_void,
-    pub plan: *mut Plan,
-    pub lefttree: *mut PlanState,
-    pub righttree: *mut PlanState,
-}
+pub use crate::nodes::execnodes::PlanState;
 
 #[repr(C)]
 pub struct SubPlanState {
@@ -204,7 +300,7 @@ unsafe fn outerPlan(node: *mut Plan) -> *mut Plan {
 pub unsafe fn ExecReScan(node: *mut PlanState) {
     /* If collecting timing stats, update them */
     if !(*node).instrument.is_null() {
-        InstrEndLoop((*node).instrument);
+        InstrEndLoop((*node).instrument as _);
     }
 
     /*
@@ -227,7 +323,7 @@ pub unsafe fn ExecReScan(node: *mut PlanState) {
 
             if !(*(*splan).plan).extParam.is_null() {
                 /* don't care about child local Params */
-                UpdateChangedParamSet(splan, (*node).chgParam);
+                UpdateChangedParamSet(splan, (*node).chgParam as _);
             }
             if !(*splan).chgParam.is_null() {
                 ExecReScanSetParamPlan(sstate, node);
@@ -238,21 +334,21 @@ pub unsafe fn ExecReScan(node: *mut PlanState) {
             let splan = (*sstate).planstate;
 
             if !(*(*splan).plan).extParam.is_null() {
-                UpdateChangedParamSet(splan, (*node).chgParam);
+                UpdateChangedParamSet(splan, (*node).chgParam as _);
             }
         });
         /* Well. Now set chgParam for child trees. */
         if !outerPlanState(node).is_null() {
-            UpdateChangedParamSet(outerPlanState(node), (*node).chgParam);
+            UpdateChangedParamSet(outerPlanState(node), (*node).chgParam as _);
         }
         if !innerPlanState(node).is_null() {
-            UpdateChangedParamSet(innerPlanState(node), (*node).chgParam);
+            UpdateChangedParamSet(innerPlanState(node), (*node).chgParam as _);
         }
     }
 
     /* Call expression callbacks */
     if !(*node).ps_ExprContext.is_null() {
-        ReScanExprContext((*node).ps_ExprContext);
+        ReScanExprContext((*node).ps_ExprContext as _);
     }
 
     /* And do node-type-specific processing */
@@ -305,7 +401,7 @@ pub unsafe fn ExecReScan(node: *mut PlanState) {
     }
 
     if !(*node).chgParam.is_null() {
-        bms_free((*node).chgParam);
+        bms_free((*node).chgParam as _);
         (*node).chgParam = std::ptr::null_mut();
     }
 }

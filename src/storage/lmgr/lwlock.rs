@@ -79,39 +79,68 @@ pub struct pg_atomic_uint32 {
     pub value: u32,
 }
 
-unsafe fn pg_atomic_init_u32(_ptr: *mut pg_atomic_uint32, _val: u32) {
-    unimplemented!() // TODO(pg-port): real pg_atomic_init_u32 lives in port/atomics.h
+unsafe fn pg_atomic_init_u32(ptr: *mut pg_atomic_uint32, val: u32) {
+    crate::port::atomics::pg_atomic_init_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        val,
+    )
 }
-unsafe fn pg_atomic_read_u32(_ptr: *mut pg_atomic_uint32) -> u32 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_read_u32 lives in port/atomics.h
+unsafe fn pg_atomic_read_u32(ptr: *mut pg_atomic_uint32) -> u32 {
+    crate::port::atomics::pg_atomic_read_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+    )
 }
 unsafe fn pg_atomic_compare_exchange_u32(
-    _ptr: *mut pg_atomic_uint32,
-    _expected: *mut u32,
-    _newval: u32,
+    ptr: *mut pg_atomic_uint32,
+    expected: *mut u32,
+    newval: u32,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): real pg_atomic_compare_exchange_u32 lives in port/atomics.h
+    crate::port::atomics::pg_atomic_compare_exchange_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        &mut *expected,
+        newval,
+    )
 }
-unsafe fn pg_atomic_fetch_or_u32(_ptr: *mut pg_atomic_uint32, _or_: u32) -> u32 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_fetch_or_u32 lives in port/atomics.h
+unsafe fn pg_atomic_fetch_or_u32(ptr: *mut pg_atomic_uint32, or_: u32) -> u32 {
+    crate::port::atomics::generic::pg_atomic_fetch_or_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        or_,
+    )
 }
-unsafe fn pg_atomic_fetch_and_u32(_ptr: *mut pg_atomic_uint32, _and_: u32) -> u32 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_fetch_and_u32 lives in port/atomics.h
+unsafe fn pg_atomic_fetch_and_u32(ptr: *mut pg_atomic_uint32, and_: u32) -> u32 {
+    crate::port::atomics::generic::pg_atomic_fetch_and_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        and_,
+    )
 }
-unsafe fn pg_atomic_fetch_add_u32(_ptr: *mut pg_atomic_uint32, _add_: u32) -> u32 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_fetch_add_u32 lives in port/atomics.h
+unsafe fn pg_atomic_fetch_add_u32(ptr: *mut pg_atomic_uint32, add_: u32) -> u32 {
+    crate::port::atomics::pg_atomic_fetch_add_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        add_ as i32,
+    )
 }
-unsafe fn pg_atomic_fetch_sub_u32(_ptr: *mut pg_atomic_uint32, _sub_: u32) -> u32 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_fetch_sub_u32 lives in port/atomics.h
+unsafe fn pg_atomic_fetch_sub_u32(ptr: *mut pg_atomic_uint32, sub_: u32) -> u32 {
+    crate::port::atomics::generic::pg_atomic_fetch_sub_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        sub_ as i32,
+    )
 }
-unsafe fn pg_atomic_sub_fetch_u32(_ptr: *mut pg_atomic_uint32, _sub_: u32) -> u32 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_sub_fetch_u32 lives in port/atomics.h
+unsafe fn pg_atomic_sub_fetch_u32(ptr: *mut pg_atomic_uint32, sub_: u32) -> u32 {
+    crate::port::atomics::generic::pg_atomic_sub_fetch_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        sub_ as i32,
+    )
 }
-unsafe fn pg_atomic_read_u64(_ptr: *mut pg_atomic_uint64) -> u64 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_read_u64 lives in port/atomics.h
+unsafe fn pg_atomic_read_u64(ptr: *mut pg_atomic_uint64) -> u64 {
+    crate::port::atomics::generic::pg_atomic_read_u64_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint64),
+    )
 }
-unsafe fn pg_atomic_exchange_u64(_ptr: *mut pg_atomic_uint64, _newval: u64) -> u64 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_exchange_u64 lives in port/atomics.h
+unsafe fn pg_atomic_exchange_u64(ptr: *mut pg_atomic_uint64, newval: u64) -> u64 {
+    crate::port::atomics::generic::pg_atomic_exchange_u64_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint64),
+        newval,
+    )
 }
 unsafe fn pg_write_barrier() {
     // TODO(pg-port): real pg_write_barrier lives in port/atomics.h
@@ -135,37 +164,45 @@ static mut MyProcPid: c_int = 0; // TODO(pg-port): miscadmin.h
 
 // MyProc and PGSemaphore* (storage/proc.h, storage/pg_sema.h)
 // TODO(pg-port): real MyProc lives in storage/proc.h.
-static mut MyProc: *mut PGPROC = std::ptr::null_mut();
-unsafe fn PGSemaphoreLock(_sema: PGSemaphore) {
-    unimplemented!() // TODO(pg-port): real PGSemaphoreLock lives in storage/pg_sema.c
+extern "C" { pub static mut MyProc: *mut PGPROC; }
+unsafe fn PGSemaphoreLock(sema: PGSemaphore) {
+    crate::storage::pg_sema::PGSemaphoreLock(sema as _)
 }
-unsafe fn PGSemaphoreUnlock(_sema: PGSemaphore) {
-    unimplemented!() // TODO(pg-port): real PGSemaphoreUnlock lives in storage/pg_sema.c
+unsafe fn PGSemaphoreUnlock(sema: PGSemaphore) {
+    crate::storage::pg_sema::PGSemaphoreUnlock(sema as _)
 }
 type PGSemaphore = *mut c_void; // TODO(pg-port): real PGSemaphore lives in storage/pg_sema.h
 
 // PGPROC field accessors --- PGPROC is an opaque stub from proclist.rs.
 // The real fields (lwWaiting, lwWaitMode, sem) live in storage/proc.h.
 // TODO(pg-port): real PGPROC fields live in storage/proc.h.
-unsafe fn pgproc_lwWaiting(_p: *mut PGPROC) -> LWLockWaitState {
-    unimplemented!() // TODO(pg-port): real PGPROC.lwWaiting lives in storage/proc.h
+unsafe fn pgproc_lwWaiting(p: *mut PGPROC) -> LWLockWaitState {
+    match (*(p as *mut crate::storage::lmgr::proc::PGPROC)).lwWaiting {
+        1 => LW_WS_WAITING,
+        2 => LW_WS_PENDING_WAKEUP,
+        _ => LW_WS_NOT_WAITING,
+    }
 }
-unsafe fn pgproc_set_lwWaiting(_p: *mut PGPROC, _v: LWLockWaitState) {
-    unimplemented!() // TODO(pg-port): real PGPROC.lwWaiting lives in storage/proc.h
+unsafe fn pgproc_set_lwWaiting(p: *mut PGPROC, v: LWLockWaitState) {
+    (*(p as *mut crate::storage::lmgr::proc::PGPROC)).lwWaiting = v as u8;
 }
-unsafe fn pgproc_lwWaitMode(_p: *mut PGPROC) -> LWLockMode {
-    unimplemented!() // TODO(pg-port): real PGPROC.lwWaitMode lives in storage/proc.h
+unsafe fn pgproc_lwWaitMode(p: *mut PGPROC) -> LWLockMode {
+    match (*(p as *mut crate::storage::lmgr::proc::PGPROC)).lwWaitMode {
+        1 => LW_SHARED,
+        2 => LW_WAIT_UNTIL_FREE,
+        _ => LW_EXCLUSIVE,
+    }
 }
-unsafe fn pgproc_set_lwWaitMode(_p: *mut PGPROC, _v: LWLockMode) {
-    unimplemented!() // TODO(pg-port): real PGPROC.lwWaitMode lives in storage/proc.h
+unsafe fn pgproc_set_lwWaitMode(p: *mut PGPROC, v: LWLockMode) {
+    (*(p as *mut crate::storage::lmgr::proc::PGPROC)).lwWaitMode = v as u8;
 }
-unsafe fn pgproc_sem(_p: *mut PGPROC) -> PGSemaphore {
-    unimplemented!() // TODO(pg-port): real PGPROC.sem lives in storage/proc.h
+unsafe fn pgproc_sem(p: *mut PGPROC) -> PGSemaphore {
+    (*(p as *mut crate::storage::lmgr::proc::PGPROC)).sem as PGSemaphore
 }
 
 // ShmemAlloc (storage/ipc/shmem.c)
-unsafe fn ShmemAlloc(_size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real ShmemAlloc lives in storage/ipc/shmem.c
+unsafe fn ShmemAlloc(size: Size) -> *mut c_void {
+    crate::storage::ipc::shmem::ShmemAlloc(size)
 }
 
 // add_size / mul_size (storage/shmem.h)
@@ -180,11 +217,16 @@ unsafe fn mul_size(s1: Size, s2: Size) -> Size {
 // repalloc0_array is a macro in utils/palloc.h.
 // TODO(pg-port): real repalloc0_array lives in utils/palloc.h.
 unsafe fn repalloc0_array_charptr(
-    _ptr: *mut *const c_char,
-    _oldcount: c_int,
-    _newcount: c_int,
+    ptr: *mut *const c_char,
+    oldcount: c_int,
+    newcount: c_int,
 ) -> *mut *const c_char {
-    unimplemented!() // TODO(pg-port): real repalloc0_array lives in utils/palloc.h
+    let elemsize = core::mem::size_of::<*const c_char>();
+    crate::utils::palloc::repalloc0(
+        ptr as *mut c_void,
+        elemsize * oldcount as usize,
+        elemsize * newcount as usize,
+    ) as *mut *const c_char
 }
 
 // pgstat wait-event reporting (utils/activity/wait_event.c, pgstat.h)
@@ -426,6 +468,7 @@ pub union LWLockPadded {
 }
 
 /// extern PGDLLIMPORT LWLockPadded *MainLWLockArray;
+#[no_mangle]
 pub static mut MainLWLockArray: *mut LWLockPadded = std::ptr::null_mut();
 
 /// struct for storing named tranche information
@@ -696,6 +739,66 @@ pub unsafe fn LWLockShmemSize() -> Size {
     size
 }
 
+/// Point the builtin (individual) LWLock name globals at their slots in
+/// `MainLWLockArray`.  In C each `<Name>Lock` is the macro
+/// `(&MainLWLockArray[<Name>_LWLOCK_ID].lock)`, resolved at compile time.
+/// Here the globals are runtime pointers that must be assigned once the array
+/// exists, i.e. after `InitializeLWLocks` in the postmaster.  Only globals with
+/// a single canonical (`#[no_mangle]`) definition are assigned; the rest are
+/// still module-private stubs with no shared symbol to point here.
+pub unsafe fn InitializeBuiltinLWLockPointers() {
+    macro_rules! assign {
+        ($global:ident, $id:ident) => {
+            crate::backend_link_shims::$global = &raw mut (*MainLWLockArray
+                .add(crate::storage::lwlocklist::$id as usize))
+                .lock as *mut _ as *mut c_void;
+        };
+    }
+    assign!(ShmemIndexLock, ShmemIndex_LWLOCK_ID);
+    assign!(OidGenLock, OidGen_LWLOCK_ID);
+    assign!(XidGenLock, XidGen_LWLOCK_ID);
+    assign!(ProcArrayLock, ProcArray_LWLOCK_ID);
+    assign!(SInvalReadLock, SInvalRead_LWLOCK_ID);
+    assign!(SInvalWriteLock, SInvalWrite_LWLOCK_ID);
+    assign!(WALBufMappingLock, WALBufMapping_LWLOCK_ID);
+    assign!(WALWriteLock, WALWrite_LWLOCK_ID);
+    assign!(ControlFileLock, ControlFile_LWLOCK_ID);
+    assign!(MultiXactGenLock, MultiXactGen_LWLOCK_ID);
+    assign!(RelCacheInitLock, RelCacheInit_LWLOCK_ID);
+    assign!(CheckpointerCommLock, CheckpointerComm_LWLOCK_ID);
+    assign!(TwoPhaseStateLock, TwoPhaseState_LWLOCK_ID);
+    assign!(TablespaceCreateLock, TablespaceCreate_LWLOCK_ID);
+    assign!(BtreeVacuumLock, BtreeVacuum_LWLOCK_ID);
+    assign!(AddinShmemInitLock, AddinShmemInit_LWLOCK_ID);
+    assign!(AutovacuumLock, Autovacuum_LWLOCK_ID);
+    assign!(AutovacuumScheduleLock, AutovacuumSchedule_LWLOCK_ID);
+    assign!(SyncScanLock, SyncScan_LWLOCK_ID);
+    assign!(RelationMappingLock, RelationMapping_LWLOCK_ID);
+    assign!(NotifyQueueLock, NotifyQueue_LWLOCK_ID);
+    assign!(SerializableXactHashLock, SerializableXactHash_LWLOCK_ID);
+    assign!(SerializableFinishedListLock, SerializableFinishedList_LWLOCK_ID);
+    assign!(SerializablePredicateListLock, SerializablePredicateList_LWLOCK_ID);
+    assign!(SyncRepLock, SyncRep_LWLOCK_ID);
+    assign!(BackgroundWorkerLock, BackgroundWorker_LWLOCK_ID);
+    assign!(DynamicSharedMemoryControlLock, DynamicSharedMemoryControl_LWLOCK_ID);
+    assign!(AutoFileLock, AutoFile_LWLOCK_ID);
+    assign!(ReplicationSlotAllocationLock, ReplicationSlotAllocation_LWLOCK_ID);
+    assign!(ReplicationSlotControlLock, ReplicationSlotControl_LWLOCK_ID);
+    assign!(CommitTsLock, CommitTs_LWLOCK_ID);
+    assign!(ReplicationOriginLock, ReplicationOrigin_LWLOCK_ID);
+    assign!(MultiXactTruncationLock, MultiXactTruncation_LWLOCK_ID);
+    assign!(LogicalRepWorkerLock, LogicalRepWorker_LWLOCK_ID);
+    assign!(XactTruncationLock, XactTruncation_LWLOCK_ID);
+    assign!(WrapLimitsVacuumLock, WrapLimitsVacuum_LWLOCK_ID);
+    assign!(NotifyQueueTailLock, NotifyQueueTail_LWLOCK_ID);
+    assign!(WaitEventCustomLock, WaitEventCustom_LWLOCK_ID);
+    assign!(WALSummarizerLock, WALSummarizer_LWLOCK_ID);
+    assign!(DSMRegistryLock, DSMRegistry_LWLOCK_ID);
+    assign!(InjectionPointLock, InjectionPoint_LWLOCK_ID);
+    assign!(SerialControlLock, SerialControl_LWLOCK_ID);
+    assign!(AioWorkerSubmissionQueueLock, AioWorkerSubmissionQueue_LWLOCK_ID);
+}
+
 /// Allocate shmem space for the main LWLock array and all tranches and
 /// initialize it.  We also register extension LWLock tranches here.
 pub unsafe fn CreateLWLocks() {
@@ -725,6 +828,9 @@ pub unsafe fn CreateLWLocks() {
 
         /* Initialize all LWLocks */
         InitializeLWLocks();
+
+        /* Point builtin LWLock name globals at their slots in the array */
+        InitializeBuiltinLWLockPointers();
     }
 
     /* Register named extension LWLock tranches in the current process. */
@@ -959,6 +1065,7 @@ pub unsafe fn RequestNamedLWLockTranche(tranche_name: *const c_char, num_lwlocks
 }
 
 /// LWLockInitialize - initialize a new lwlock; it's initially unlocked
+#[no_mangle]
 pub unsafe fn LWLockInitialize(lock: *mut LWLock, tranche_id: c_int) {
     pg_atomic_init_u32(&mut (*lock).state, LW_FLAG_RELEASE_OK);
     // #ifdef LOCK_DEBUG: pg_atomic_init_u32(&lock->nwaiters, 0) --- omitted
@@ -967,8 +1074,8 @@ pub unsafe fn LWLockInitialize(lock: *mut LWLock, tranche_id: c_int) {
 }
 
 // strlcpy (port/strlcpy.c)
-unsafe fn strlcpy(_dst: *mut c_char, _src: *const c_char, _siz: usize) -> usize {
-    unimplemented!() // TODO(pg-port): real strlcpy lives in port/strlcpy.c
+unsafe fn strlcpy(dst: *mut c_char, src: *const c_char, siz: usize) -> usize {
+    crate::port::strlcpy::strlcpy(dst, src, siz)
 }
 
 /// Report start of wait event for light-weight locks.
@@ -1364,6 +1471,7 @@ unsafe fn LWLockDequeueSelf(lock: *mut LWLock) {
 /// was available immediately, false if we had to sleep.
 ///
 /// Side effect: cancel/die interrupts are held off until lock release.
+#[no_mangle]
 pub unsafe fn LWLockAcquire(lock: *mut LWLock, mode: LWLockMode) -> bool {
     let proc_: *mut PGPROC = MyProc;
     let mut result: bool = true;
@@ -2026,6 +2134,7 @@ pub unsafe fn LWLockDisown(lock: *mut LWLock) {
 }
 
 /// LWLockRelease - release a previously acquired lock
+#[no_mangle]
 pub unsafe fn LWLockRelease(lock: *mut LWLock) {
     let mode: LWLockMode;
 

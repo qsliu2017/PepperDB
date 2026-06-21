@@ -5,6 +5,7 @@
 //! src/backend/utils/adt/pg_locale_libc.c
 
 use crate::prelude::*;
+use crate::utils::cache::syscache_ids_gen::{COLLOID, DATABASEOID};
 
 use crate::utils::init::globals::MyDatabaseId;
 
@@ -919,40 +920,7 @@ extern "C" {
 }
 
 // utils/pg_locale.h
-#[repr(C)]
-pub struct collate_methods {
-    pub strncoll: Option<
-        unsafe extern "C" fn(*const c_char, ssize_t, *const c_char, ssize_t, pg_locale_t) -> c_int,
-    >,
-    pub strnxfrm: Option<
-        unsafe extern "C" fn(*mut c_char, usize, *const c_char, ssize_t, pg_locale_t) -> usize,
-    >,
-    pub strnxfrm_prefix: Option<
-        unsafe extern "C" fn(*mut c_char, usize, *const c_char, ssize_t, pg_locale_t) -> usize,
-    >,
-    pub strxfrm_is_safe: bool,
-}
-unsafe impl Sync for collate_methods {}
-
-#[repr(C)]
-pub union locale_info {
-    pub lt: locale_t,
-    pub builtin: *mut c_void,
-    pub icu: *mut c_void,
-}
-
-#[repr(C)]
-pub struct pg_locale_struct {
-    pub provider: c_char,
-    pub deterministic: bool,
-    pub collate_is_c: bool,
-    pub ctype_is_c: bool,
-    pub is_default: bool,
-    pub collate: *const collate_methods,
-    pub ctype: *const c_void,
-    pub info: locale_info,
-}
-pub type pg_locale_t = *mut pg_locale_struct;
+pub use crate::utils::adt::pg_locale::{collate_methods, locale_info, pg_locale_struct, pg_locale_t};
 
 const COLLPROVIDER_LIBC: c_char = b'c' as c_char;
 
@@ -960,14 +928,12 @@ const COLLPROVIDER_LIBC: c_char = b'c' as c_char;
 const DEFAULT_COLLATION_OID: Oid = 100;
 
 // catalog attribute numbers
-const Anum_pg_database_datcollate: c_int = 16;
-const Anum_pg_database_datctype: c_int = 17;
+const Anum_pg_database_datcollate: c_int = 13;
+const Anum_pg_database_datctype: c_int = 14;
 const Anum_pg_collation_collcollate: c_int = 8;
 const Anum_pg_collation_collctype: c_int = 9;
 
 // syscache ids
-const DATABASEOID: c_int = 0;
-const COLLOID: c_int = 0;
 
 #[allow(non_camel_case_types)]
 type HeapTuple = *mut c_void;
@@ -975,25 +941,25 @@ type HeapTuple = *mut c_void;
 type MemoryContext = *mut c_void;
 
 unsafe fn pg_database_encoding_max_length() -> c_int {
-    unimplemented!() // TODO: mb/pg_wchar.c
+    crate::mb::mbutils::pg_database_encoding_max_length()
 }
 unsafe fn SearchSysCache1(_cacheid: c_int, _key: Datum) -> HeapTuple {
-    unimplemented!() // TODO: utils/cache/syscache.c
+    crate::utils::cache::syscache::SearchSysCache1(_cacheid, _key) as _
 }
 unsafe fn SysCacheGetAttrNotNull(_cacheid: c_int, _tup: HeapTuple, _attnum: c_int) -> Datum {
-    unimplemented!() // TODO: utils/cache/syscache.c
+    crate::utils::cache::syscache::SysCacheGetAttrNotNull(_cacheid, _tup as _, _attnum as _)
 }
 unsafe fn ReleaseSysCache(_tup: HeapTuple) {
-    unimplemented!() // TODO: utils/cache/catcache.c
+    crate::utils::cache::syscache::ReleaseSysCache(_tup as _)
 }
 unsafe fn HeapTupleIsValid(tup: HeapTuple) -> bool {
     !tup.is_null()
 }
 unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char {
-    unimplemented!() // TODO: utils/adt/varlena.c
+    crate::utils::adt::varlena::TextDatumGetCString(_d)
 }
 unsafe fn MemoryContextAllocZero(_context: MemoryContext, _size: usize) -> *mut c_void {
-    unimplemented!() // TODO: utils/mmgr/mcxt.c
+    crate::utils::palloc::MemoryContextAllocZero(_context as _, _size) as _
 }
 unsafe fn pg_tolower(c: u8) -> u8 {
     let _ = c;
@@ -1004,17 +970,17 @@ unsafe fn pg_toupper(c: u8) -> u8 {
     unimplemented!() // TODO: src/port/pgstrcasecmp.c
 }
 unsafe fn pg_strcasecmp(_a: *const c_char, _b: *const c_char) -> c_int {
-    unimplemented!() // TODO: src/port/pgstrcasecmp.c
+    crate::port::pgstrcasecmp::pg_strcasecmp(_a as _, _b as _)
 }
 unsafe fn pg_strncasecmp(_a: *const c_char, _b: *const c_char, _n: usize) -> c_int {
-    unimplemented!() // TODO: src/port/pgstrcasecmp.c
+    crate::port::pgstrcasecmp::pg_strncasecmp(_a as _, _b as _, _n as _)
 }
 unsafe fn pstrdup(_s: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO: utils/mmgr/mcxt.c
+    crate::utils::palloc::pstrdup(_s as _) as _
 }
 unsafe fn pnstrdup(_s: *const c_char, _len: usize) -> *mut c_char {
-    unimplemented!() // TODO: utils/mmgr/mcxt.c
+    crate::utils::palloc::pnstrdup(_s as _, _len) as _
 }
 unsafe fn pg_verifymbstr(_mbstr: *const c_char, _len: c_int, _noError: bool) -> bool {
-    unimplemented!() // TODO: mb/mbutils.c
+    crate::mb::mbutils::pg_verifymbstr(_mbstr as _, _len, _noError)
 }

@@ -44,7 +44,7 @@ const Anum_pg_language_lanacl: usize = 9;
 const LanguageOidIndexId: Oid = 2681; // pg_language_oid_index
 
 // utils/syscache.h syscache id for LANGNAME (value not load-bearing here)
-const LANGNAME: c_int = 0;
+const LANGNAME: c_int = 35;
 
 // catalog/dependency.h
 const DEPENDENCY_NORMAL: c_char = b'n' as c_char;

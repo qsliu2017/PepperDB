@@ -234,8 +234,8 @@ const Anum_pg_subscription_rel_srsubstate: usize = 3;
 const Anum_pg_subscription_rel_srsublsn: c_int = 4;
 
 /* syscache ids - utils/syscache.h */
-const SUBSCRIPTIONOID: c_int = 0;
-const SUBSCRIPTIONRELMAP: c_int = 0;
+const SUBSCRIPTIONOID: c_int = 67;
+const SUBSCRIPTIONRELMAP: c_int = 68;
 
 /* storage/lockdefs.h */
 const NoLock: c_int = 0;
@@ -286,6 +286,7 @@ pub unsafe fn GetPublicationsStr(
 /*
  * Fetch the subscription from the syscache.
  */
+#[no_mangle]
 pub unsafe fn GetSubscription(subid: Oid, missing_ok: bool) -> *mut Subscription {
     let tup: HeapTuple;
     let sub: *mut Subscription;
@@ -361,6 +362,7 @@ pub unsafe fn GetSubscription(subid: Oid, missing_ok: bool) -> *mut Subscription
  * Return number of subscriptions defined in given database.
  * Used by dropdb() to check if database can indeed be dropped.
  */
+#[no_mangle]
 pub unsafe fn CountDBSubscriptions(dbid: Oid) -> c_int {
     let mut nsubs: c_int = 0;
     let rel: Relation;
@@ -398,6 +400,7 @@ pub unsafe fn CountDBSubscriptions(dbid: Oid) -> c_int {
 /*
  * Free memory allocated by subscription struct.
  */
+#[no_mangle]
 pub unsafe fn FreeSubscription(sub: *mut Subscription) {
     pfree((*sub).name as *mut c_void);
     pfree((*sub).conninfo as *mut c_void);
@@ -856,11 +859,11 @@ struct ScanKeyData {
 }
 
 unsafe fn table_open(_relationId: Oid, _lockmode: c_int) -> Relation {
-    unimplemented!() // TODO(pg-port): access/table/table.c table_open
+    crate::access::table::table::table_open(_relationId as _, _lockmode as _) as _
 }
 
 unsafe fn table_close(_rel: Relation, _lockmode: c_int) {
-    unimplemented!() // TODO(pg-port): access/table/table.c table_close
+    crate::access::table::table::table_close(_rel as _, _lockmode as _)
 }
 
 unsafe fn RelationGetDescr(_rel: Relation) -> TupleDesc {
@@ -873,9 +876,7 @@ unsafe fn ScanKeyInit(
     _strategy: u16,
     _procedure: Oid,
     _argument: Datum,
-) {
-    unimplemented!() // TODO(pg-port): access/common/scankey.c ScanKeyInit
-}
+) { crate::access::common::scankey::ScanKeyInit(_entry as _, _attributeNumber as _, _strategy as _, _procedure as _, _argument as _) }
 
 unsafe fn systable_beginscan(
     _heapRelation: Relation,
@@ -884,9 +885,7 @@ unsafe fn systable_beginscan(
     _snapshot: *mut c_void,
     _nkeys: c_int,
     _key: *mut ScanKeyData,
-) -> SysScanDesc {
-    unimplemented!() // TODO(pg-port): access/index/genam.c systable_beginscan
-}
+) -> SysScanDesc { unimplemented!() }
 
 unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple {
     unimplemented!() // TODO(pg-port): access/index/genam.c systable_getnext
@@ -901,32 +900,30 @@ unsafe fn table_beginscan_catalog(
     _nkeys: c_int,
     _key: *mut ScanKeyData,
 ) -> TableScanDesc {
-    unimplemented!() // TODO(pg-port): access/table/tableam.c table_beginscan_catalog
+    crate::access::table::tableam::table_beginscan_catalog(_relation as _, _nkeys as _, _key as _) as _
 }
 
 unsafe fn heap_getnext(_scan: TableScanDesc, _direction: c_int) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): access/heap/heapam.c heap_getnext
+    crate::access::heap::heapam::heap_getnext(_scan as _, _direction as _) as _
 }
 
 unsafe fn table_endscan(_scan: TableScanDesc) {
-    unimplemented!() // TODO(pg-port): access/table/tableam.c table_endscan
+    crate::access::table::tableam::table_endscan(_scan as _)
 }
 
 unsafe fn HeapTupleIsValid(_tuple: HeapTuple) -> bool {
-    unimplemented!() // TODO(pg-port): access/htup.h HeapTupleIsValid
+    !_tuple.is_null()
 }
 
 unsafe fn GETSTRUCT(_tuple: HeapTuple) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): access/htup_details.h GETSTRUCT
+    crate::access::htup_details::GETSTRUCT(_tuple as _)
 }
 
 unsafe fn heap_form_tuple(
     _tupleDescriptor: TupleDesc,
     _values: *mut Datum,
     _isnull: *mut bool,
-) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): access/common/heaptuple.c heap_form_tuple
-}
+) -> HeapTuple { crate::access::common::heaptuple::heap_form_tuple(_tupleDescriptor as _, _values as _, _isnull as _) }
 
 unsafe fn heap_modify_tuple(
     _tuple: HeapTuple,
@@ -934,25 +931,17 @@ unsafe fn heap_modify_tuple(
     _replValues: *mut Datum,
     _replIsnull: *mut bool,
     _doReplace: *mut bool,
-) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): access/common/heaptuple.c heap_modify_tuple
-}
+) -> HeapTuple { crate::access::common::heaptuple::heap_modify_tuple(_tuple as _, _tupleDesc as _, _replValues as _, _replIsnull as _, _doReplace as _) }
 
-unsafe fn heap_freetuple(_htup: HeapTuple) {
-    unimplemented!() // TODO(pg-port): access/common/heaptuple.c heap_freetuple
-}
+unsafe fn heap_freetuple(_htup: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(_htup as _) }
 
 unsafe fn CatalogTupleInsert(_heapRel: Relation, _tup: HeapTuple) {
     unimplemented!() // TODO(pg-port): catalog/indexing.c CatalogTupleInsert
 }
 
-unsafe fn CatalogTupleUpdate(_heapRel: Relation, _otid: ItemPointer, _tup: HeapTuple) {
-    unimplemented!() // TODO(pg-port): catalog/indexing.c CatalogTupleUpdate
-}
+unsafe fn CatalogTupleUpdate(_heapRel: Relation, _otid: ItemPointer, _tup: HeapTuple) { crate::catalog::indexing::CatalogTupleUpdate(_heapRel as _, _otid as _, _tup as _) }
 
-unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: ItemPointer) {
-    unimplemented!() // TODO(pg-port): catalog/indexing.c CatalogTupleDelete
-}
+unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: ItemPointer) { crate::catalog::indexing::CatalogTupleDelete(_heapRel as _, _tid as _) }
 
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
     unimplemented!() // TODO(pg-port): utils/cache/syscache.c SearchSysCache1
@@ -999,9 +988,7 @@ unsafe fn superuser_arg(_roleid: Oid) -> bool {
     unimplemented!() // TODO(pg-port): utils/misc/superuser.c superuser_arg
 }
 
-unsafe fn get_subscription_name(_subid: Oid, _missing_ok: bool) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): utils/cache/lsyscache.c get_subscription_name
-}
+unsafe fn get_subscription_name(_subid: Oid, _missing_ok: bool) -> *mut c_char { crate::utils::cache::lsyscache::get_subscription_name(_subid as _, _missing_ok as _) }
 
 unsafe fn quote_literal_cstr(_rawstr: *mut c_char) -> *mut c_char {
     unimplemented!() // TODO(pg-port): utils/adt/quote.c quote_literal_cstr
@@ -1015,9 +1002,7 @@ unsafe fn appendStringInfoChar(_str: StringInfo, _ch: c_char) {
     unimplemented!() // TODO(pg-port): lib/stringinfo.c appendStringInfoChar
 }
 
-unsafe fn DatumGetArrayTypeP(_x: Datum) -> *mut ArrayType {
-    unimplemented!() // TODO(pg-port): utils/array.h DatumGetArrayTypeP
-}
+unsafe fn DatumGetArrayTypeP(_x: Datum) -> *mut ArrayType { unimplemented!() }
 
 #[cfg(test)]
 mod tests {

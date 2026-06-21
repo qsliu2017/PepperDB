@@ -155,10 +155,7 @@ pub type bytea = c_void;
 // TODO(pg-port): dedup when access/genam.h lands.
 pub type SysScanDesc = *mut c_void;
 // TODO(pg-port): dedup when access/skey.h lands.
-#[repr(C)]
-pub struct ScanKeyData {
-    _opaque: [u8; 0],
-}
+pub use crate::access::common::scankey::ScanKeyData;
 // TODO(pg-port): dedup when commands/defrem.h lands.
 #[repr(C)]
 pub struct AttributeOpts {
@@ -196,7 +193,7 @@ pub struct MultiSortSupportData {
 const StatisticExtRelationId: Oid = 3381;
 const StatisticExtDataRelationId: Oid = 3429;
 const StatisticRelationId: Oid = 2619;
-const StatisticExtRelidIndexId: Oid = 3380;
+const StatisticExtRelidIndexId: Oid = 3379;
 const CHAROID: Oid = 18;
 const FLOAT4OID: Oid = 700;
 const InvalidOid: Oid = 0;
@@ -206,9 +203,9 @@ const InvalidAttrNumber: c_int = 0;
 const FirstLowInvalidHeapAttributeNumber: c_int = -8;
 const MaxAttrNumber: c_int = 1600;
 
-const STATEXTOID: c_int = 0; // TODO(pg-port): utils/syscache.h
-const STATEXTDATASTXOID: c_int = 0; // TODO(pg-port): utils/syscache.h
-const TYPEOID: c_int = 0; // TODO(pg-port): utils/syscache.h
+const STATEXTOID: c_int = 64; // TODO(pg-port): utils/syscache.h
+const STATEXTDATASTXOID: c_int = 62; // TODO(pg-port): utils/syscache.h
+const TYPEOID: c_int = 82; // TODO(pg-port): utils/syscache.h
 
 const F_OIDEQ: Oid = 184; // TODO(pg-port): utils/fmgroids.h
 const F_EQSEL: Oid = 101; // TODO(pg-port): utils/fmgroids.h
@@ -319,21 +316,33 @@ const BMS_SINGLETON: c_int = 1; // TODO(pg-port): nodes/bitmapset.h
 // TODO(pg-port): nodes/list.c.
 unsafe fn lappend(_list: *mut List, _datum: *mut c_void) -> *mut List { unimplemented!() }
 unsafe fn lappend_int(_list: *mut List, _datum: c_int) -> *mut List { unimplemented!() }
-unsafe fn list_length(_l: *const List) -> c_int { unimplemented!() }
-unsafe fn list_free(_list: *mut List) {}
+unsafe fn list_length(_l: *const List) -> c_int { crate::nodes::pg_list::list_length(_l as _) }
+unsafe fn list_free(_list: *mut List) { crate::nodes::pg_list::list_free(_list as _) }
 unsafe fn linitial(_l: *const List) -> *mut c_void { unimplemented!() }
 unsafe fn lsecond(_l: *const List) -> *mut c_void { unimplemented!() }
 const NIL: *mut List = core::ptr::null_mut();
 
-// TODO(pg-port): access/table.c.
-unsafe fn table_open(_relationId: Oid, _lockmode: c_int) -> Relation { unimplemented!() }
-unsafe fn table_close(_relation: Relation, _lockmode: c_int) {}
+// access/table.c.
+unsafe fn table_open(_relationId: Oid, _lockmode: c_int) -> Relation {
+    crate::access::table::table::table_open(_relationId, _lockmode as _) as _
+}
+unsafe fn table_close(_relation: Relation, _lockmode: c_int) {
+    crate::access::table::table::table_close(_relation as _, _lockmode as _)
+}
 
-// TODO(pg-port): access/genam.c.
-unsafe fn systable_beginscan(_heapRelation: Relation, _indexId: Oid, _indexOK: bool, _snapshot: *mut c_void, _nkeys: c_int, _key: *mut ScanKeyData) -> SysScanDesc { unimplemented!() }
-unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple { unimplemented!() }
-unsafe fn systable_endscan(_sysscan: SysScanDesc) {}
-unsafe fn ScanKeyInit(_entry: *mut ScanKeyData, _attributeNumber: c_int, _strategy: c_int, _procedure: Oid, _argument: Datum) {}
+// access/genam.c.
+unsafe fn systable_beginscan(_heapRelation: Relation, _indexId: Oid, _indexOK: bool, _snapshot: *mut c_void, _nkeys: c_int, _key: *mut ScanKeyData) -> SysScanDesc {
+    crate::access::index::genam::systable_beginscan(_heapRelation as _, _indexId, _indexOK, _snapshot as _, _nkeys, _key as _) as _
+}
+unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple {
+    crate::access::index::genam::systable_getnext(_sysscan as _) as _
+}
+unsafe fn systable_endscan(_sysscan: SysScanDesc) {
+    crate::access::index::genam::systable_endscan(_sysscan as _)
+}
+unsafe fn ScanKeyInit(_entry: *mut ScanKeyData, _attributeNumber: c_int, _strategy: c_int, _procedure: Oid, _argument: Datum) {
+    crate::access::common::scankey::ScanKeyInit(_entry as _, _attributeNumber as _, _strategy as _, _procedure, _argument)
+}
 
 // TODO(pg-port): access/common/heaptuple.c.
 unsafe fn heap_attisnull(_tup: HeapTuple, _attnum: c_int, _tupleDesc: TupleDesc) -> bool { unimplemented!() }

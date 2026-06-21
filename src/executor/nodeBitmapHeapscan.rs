@@ -67,32 +67,32 @@ type ParallelWorkerContext = c_void;
 const InvalidDsaPointer: dsa_pointer = 0;
 
 unsafe fn MultiExecProcNode(_node: *mut PlanState) -> *mut c_void {
-    unimplemented!() // TODO: src/backend/executor/execProcnode.c
+    crate::executor::execProcnode::MultiExecProcNode(_node as _) as _
 }
 unsafe fn IsA_TIDBitmap(_tbm: *mut TIDBitmap) -> bool {
     unimplemented!() // TODO: src/backend/nodes/tidbitmap.c
 }
 unsafe fn tbm_prepare_shared_iterate(_tbm: *mut TIDBitmap) -> dsa_pointer {
-    unimplemented!() // TODO: src/backend/nodes/tidbitmap.c
+    crate::nodes::tidbitmap::tbm_prepare_shared_iterate(_tbm as _) as _
 }
 unsafe fn tbm_begin_iterate(
     _tbm: *mut TIDBitmap,
     _dsa: *mut dsa_area,
     _dsp: dsa_pointer,
 ) -> TBMIterator {
-    unimplemented!() // TODO: src/backend/nodes/tidbitmap.c
+    crate::nodes::tidbitmap::tbm_begin_iterate(_tbm as _, _dsa as _, _dsp as _)
 }
 unsafe fn tbm_exhausted(_iterator: *mut TBMIterator) -> bool {
-    unimplemented!() // TODO: src/backend/nodes/tidbitmap.c
+    unimplemented!()
 }
 unsafe fn tbm_end_iterate(_iterator: *mut TBMIterator) {
-    unimplemented!() // TODO: src/backend/nodes/tidbitmap.c
+    crate::nodes::tidbitmap::tbm_end_iterate(_iterator as _)
 }
 unsafe fn tbm_free(_tbm: *mut TIDBitmap) {
-    unimplemented!() // TODO: src/backend/nodes/tidbitmap.c
+    crate::nodes::tidbitmap::tbm_free(_tbm as _)
 }
 unsafe fn tbm_free_shared_area(_dsa: *mut dsa_area, _dsp: dsa_pointer) {
-    unimplemented!() // TODO: src/backend/nodes/tidbitmap.c
+    crate::nodes::tidbitmap::tbm_free_shared_area(_dsa as _, _dsp as _)
 }
 unsafe fn table_beginscan_bm(
     _rel: *mut c_void,
@@ -115,16 +115,16 @@ unsafe fn table_rescan(_scan: TableScanDesc, _key: *mut c_void) {
     unimplemented!() // TODO: src/include/access/tableam.h
 }
 unsafe fn table_endscan(_scan: TableScanDesc) {
-    unimplemented!() // TODO: src/include/access/tableam.h
+    crate::access::table::tableam::table_endscan(_scan as _)
 }
 unsafe fn table_slot_callbacks(_rel: *mut c_void) -> *const c_void {
-    unimplemented!() // TODO: src/include/access/tableam.h
+    crate::access::table::tableam::table_slot_callbacks(_rel as _) as _
 }
 unsafe fn ExecQualAndReset(_state: *mut ExprState, _econtext: *mut ExprContext) -> bool {
-    unimplemented!() // TODO: src/include/executor/executor.h
+    crate::executor::executor::ExecQualAndReset(_state as _, _econtext as _) as _
 }
 unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: src/backend/executor/execTuples.c
+    crate::executor::tuptable::ExecClearTuple(_slot as _) as _
 }
 unsafe fn ExecScan(
     _node: *mut ScanState,
@@ -134,16 +134,16 @@ unsafe fn ExecScan(
     unimplemented!() // TODO: src/backend/executor/execScan.c
 }
 unsafe fn ExecScanReScan(_node: *mut ScanState) {
-    unimplemented!() // TODO: src/backend/executor/execScan.c
+    crate::executor::execScan::ExecScanReScan(_node as _)
 }
 unsafe fn ExecReScan(_node: *mut PlanState) {
-    unimplemented!() // TODO: src/backend/executor/execAmi.c
+    crate::executor::execAmi::ExecReScan(_node as _)
 }
 unsafe fn ExecEndNode(_node: *mut PlanState) {
-    unimplemented!() // TODO: src/backend/executor/execProcnode.c
+    crate::executor::execProcnode::ExecEndNode(_node as _)
 }
 unsafe fn ExecInitNode(_node: *mut Plan, _estate: *mut EState, _eflags: c_int) -> *mut PlanState {
-    unimplemented!() // TODO: src/backend/executor/execProcnode.c
+    crate::executor::execProcnode::ExecInitNode(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecAssignExprContext(_estate: *mut EState, _planstate: *mut PlanState) {
     unimplemented!() // TODO: src/backend/executor/execUtils.c
@@ -161,16 +161,16 @@ unsafe fn ExecInitScanTupleSlot(
     _tupledesc: *mut c_void,
     _tts_ops: *const c_void,
 ) {
-    unimplemented!() // TODO: src/backend/executor/execTuples.c
+    crate::executor::execTuples::ExecInitScanTupleSlot(_estate as _, _scanstate as _, _tupledesc as _, _tts_ops as _)
 }
 unsafe fn ExecInitResultTypeTL(_planstate: *mut PlanState) {
-    unimplemented!() // TODO: src/backend/executor/execTuples.c
+    crate::executor::execTuples::ExecInitResultTypeTL(_planstate as _)
 }
 unsafe fn ExecAssignScanProjectionInfo(_node: *mut ScanState) {
-    unimplemented!() // TODO: src/backend/executor/execScan.c
+    crate::executor::execScan::ExecAssignScanProjectionInfo(_node as _)
 }
 unsafe fn ExecInitQual(_qual: *mut c_void, _parent: *mut PlanState) -> *mut ExprState {
-    unimplemented!() // TODO: src/backend/executor/execExpr.c
+    crate::executor::execExpr::ExecInitQual(_qual as _, _parent as _) as _
 }
 unsafe fn RelationGetDescr(_rel: *mut c_void) -> *mut c_void {
     unimplemented!() // TODO: src/include/utils/rel.h
@@ -191,7 +191,7 @@ unsafe fn SpinLockInit(_lock: *mut crate::nodes::execnodes::slock_t) {
     unimplemented!() // TODO: src/include/storage/spin.h
 }
 unsafe fn ConditionVariableBroadcast(_cv: *mut crate::nodes::execnodes::ConditionVariable) {
-    unimplemented!() // TODO: src/backend/storage/lmgr/condition_variable.c
+    crate::storage::lmgr::condition_variable::ConditionVariableBroadcast(_cv as _)
 }
 unsafe fn ConditionVariableInit(_cv: *mut crate::nodes::execnodes::ConditionVariable) {
     unimplemented!() // TODO: src/backend/storage/lmgr/condition_variable.c
@@ -200,25 +200,25 @@ unsafe fn ConditionVariableSleep(
     _cv: *mut crate::nodes::execnodes::ConditionVariable,
     _wait_event_info: u32,
 ) {
-    unimplemented!() // TODO: src/backend/storage/lmgr/condition_variable.c
+    crate::storage::lmgr::condition_variable::ConditionVariableSleep(_cv as _, _wait_event_info as _)
 }
 unsafe fn ConditionVariableCancelSleep() -> bool {
-    unimplemented!() // TODO: src/backend/storage/lmgr/condition_variable.c
+    crate::storage::lmgr::condition_variable::ConditionVariableCancelSleep() as _
 }
 unsafe fn shm_toc_estimate_chunk(_estimator: *mut c_void, _size: Size) {
-    unimplemented!() // TODO: src/include/storage/shm_toc.h
+    unimplemented!()
 }
 unsafe fn shm_toc_estimate_keys(_estimator: *mut c_void, _keys: Size) {
-    unimplemented!() // TODO: src/include/storage/shm_toc.h
+    unimplemented!()
 }
 unsafe fn shm_toc_allocate(_toc: *mut c_void, _nbytes: Size) -> *mut c_void {
-    unimplemented!() // TODO: src/backend/storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 unsafe fn shm_toc_insert(_toc: *mut c_void, _key: u64, _address: *mut c_void) {
-    unimplemented!() // TODO: src/backend/storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 unsafe fn shm_toc_lookup(_toc: *mut c_void, _key: u64, _noError: bool) -> *mut c_void {
-    unimplemented!() // TODO: src/backend/storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }
 unsafe fn add_size(s1: Size, s2: Size) -> Size {
     s1 + s2 // TODO: src/backend/utils/misc/guc.c (faithful add_size with overflow check)

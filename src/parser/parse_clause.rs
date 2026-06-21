@@ -169,7 +169,7 @@ const RELKIND_MATVIEW:         c_char = b'm' as c_char;
 const RELKIND_PARTITIONED_TABLE: c_char = b'p' as c_char;
 
 // catalog/pg_am.h  (AMPROCNUM SysCache index for amproc tuples)
-const AMPROCNUM: c_int = 0; // stub: catcache not yet ported
+const AMPROCNUM: c_int = 5; // stub: catcache not yet ported
 
 // ---------------------------------------------------------------------------
 // Stubs for unported siblings
@@ -177,31 +177,31 @@ const AMPROCNUM: c_int = 0; // stub: catcache not yet ported
 
 // TODO(pg-port): nodes/nodeFuncs.c  contain_vars_of_level
 unsafe fn contain_vars_of_level(node: *mut Node, levelsup: c_int) -> bool {
-    false
+    crate::optimizer::util::var::contain_vars_of_level(node as _, levelsup)
 }
 // TODO(pg-port): nodes/nodeFuncs.c  locate_var_of_level
 unsafe fn locate_var_of_level(node: *mut Node, levelsup: c_int) -> c_int {
-    -1
+    crate::optimizer::util::var::locate_var_of_level(node as _, levelsup)
 }
 // TODO(pg-port): nodes/nodeFuncs.c  contain_aggs_of_level
 unsafe fn contain_aggs_of_level(node: *mut Node, levelsup: c_int) -> bool {
-    false
+    crate::rewrite::rewriteManip::contain_aggs_of_level(node as _, levelsup)
 }
 // TODO(pg-port): nodes/nodeFuncs.c  locate_agg_of_level
 unsafe fn locate_agg_of_level(node: *mut Node, levelsup: c_int) -> c_int {
-    -1
+    crate::rewrite::rewriteManip::locate_agg_of_level(node as _, levelsup)
 }
 // TODO(pg-port): nodes/nodeFuncs.c  contain_windowfuncs
 unsafe fn contain_windowfuncs(node: *mut Node) -> bool {
-    false
+    crate::rewrite::rewriteManip::contain_windowfuncs(node as _)
 }
 // TODO(pg-port): nodes/nodeFuncs.c  locate_windowfunc
 unsafe fn locate_windowfunc(node: *mut Node) -> c_int {
-    -1
+    crate::rewrite::rewriteManip::locate_windowfunc(node as _)
 }
 // TODO(pg-port): nodes/equalfuncs.c  equal
 unsafe fn equal(a: *mut c_void, b: *mut c_void) -> bool {
-    false
+    crate::nodes::equalfuncs::equal(a as _, b as _)
 }
 
 // copyObject helper (copyfuncs not yet enabled)
@@ -218,12 +218,18 @@ unsafe fn parse_sub_analyze(
     locked_from_parent: bool,
     resolve_unknowns: bool,
 ) -> *mut Query {
-    todo!("parse_sub_analyze")
+    crate::parser::analyze::parse_sub_analyze(
+        parseTree as _,
+        parentParseState as _,
+        queryEnv as _,
+        locked_from_parent as _,
+        resolve_unknowns as _,
+    ) as _
 }
 
 // TODO(pg-port): parser/analyze.c
 unsafe fn transformStmt(pstate: *mut ParseState, parseTree: *mut Node) -> *mut Query {
-    todo!("transformStmt")
+    crate::parser::analyze::transformStmt(pstate as _, parseTree as _) as _
 }
 
 // TODO(pg-port): parser/parse_target.c
@@ -235,7 +241,14 @@ unsafe fn transformTargetEntry(
     colname: *const c_char,
     resjunk: bool,
 ) -> *mut TargetEntry {
-    todo!("transformTargetEntry")
+    crate::parser::parse_target::transformTargetEntry(
+        pstate as _,
+        node as _,
+        expr as _,
+        exprKind as _,
+        colname as _,
+        resjunk as _,
+    ) as _
 }
 
 // TODO(pg-port): parser/parse_oper.c
@@ -249,27 +262,36 @@ unsafe fn get_sort_group_operators(
     gtOpr: *mut Oid,
     isHashable: *mut bool,
 ) {
-    todo!("get_sort_group_operators")
+    crate::parser::parse_oper::get_sort_group_operators(
+        argtype as _,
+        needLT as _,
+        needEQ as _,
+        needGT as _,
+        ltOpr as _,
+        eqOpr as _,
+        gtOpr as _,
+        isHashable as _,
+    )
 }
 
 // TODO(pg-port): parser/parse_oper.c
 unsafe fn compatible_oper_opid(op: *mut List, arg1: Oid, arg2: Oid, noError: bool) -> Oid {
-    todo!("compatible_oper_opid")
+    crate::parser::parse_oper::compatible_oper_opid(op as _, arg1 as _, arg2 as _, noError as _) as _
 }
 
 // TODO(pg-port): utils/cache/lsyscache.c
 unsafe fn get_equality_op_for_ordering_op(opno: Oid, reverse: *mut bool) -> Oid {
-    todo!("get_equality_op_for_ordering_op")
+    crate::utils::cache::lsyscache::get_equality_op_for_ordering_op(opno as _, reverse as _) as _
 }
 
 // TODO(pg-port): utils/cache/lsyscache.c
 unsafe fn op_hashjoinable(opno: Oid, inputtype: Oid) -> bool {
-    todo!("op_hashjoinable")
+    crate::utils::cache::lsyscache::op_hashjoinable(opno as _, inputtype as _) as _
 }
 
 // TODO(pg-port): utils/cache/lsyscache.c
 unsafe fn get_commutator(opno: Oid) -> Oid {
-    todo!("get_commutator")
+    crate::utils::cache::lsyscache::get_commutator(opno as _) as _
 }
 
 // TODO(pg-port): optimizer/optimizer.c
@@ -277,7 +299,7 @@ unsafe fn get_sortgroupclause_expr(
     sgClause: *mut SortGroupClause,
     targetList: *mut List,
 ) -> *mut Node {
-    todo!("get_sortgroupclause_expr")
+    crate::optimizer::util::tlist::get_sortgroupclause_expr(sgClause as _, targetList as _) as _
 }
 
 // TODO(pg-port): optimizer/optimizer.c
@@ -285,12 +307,12 @@ unsafe fn get_sortgroupclause_tle(
     sgClause: *mut SortGroupClause,
     targetList: *mut List,
 ) -> *mut TargetEntry {
-    todo!("get_sortgroupclause_tle")
+    crate::optimizer::util::tlist::get_sortgroupclause_tle(sgClause as _, targetList as _) as _
 }
 
 // TODO(pg-port): optimizer/optimizer.c
 unsafe fn get_sortgroupref_tle(sortref: Index, targetList: *mut List) -> *mut TargetEntry {
-    todo!("get_sortgroupref_tle")
+    crate::optimizer::util::tlist::get_sortgroupref_tle(sortref as _, targetList as _) as _
 }
 
 // TODO(pg-port): optimizer/optimizer.c
@@ -300,7 +322,12 @@ unsafe fn get_ordering_op_properties(
     opcintype: *mut Oid,
     cmptype: *mut c_int,
 ) -> bool {
-    todo!("get_ordering_op_properties")
+    crate::utils::cache::lsyscache::get_ordering_op_properties(
+        opno as _,
+        opfamily as _,
+        opcintype as _,
+        cmptype as _,
+    ) as _
 }
 
 // TODO(pg-port): parser/parse_coerce.c
@@ -309,7 +336,7 @@ unsafe fn coerce_to_boolean(
     node: *mut Node,
     constructName: *const c_char,
 ) -> *mut Node {
-    todo!("coerce_to_boolean")
+    crate::parser::parse_coerce::coerce_to_boolean(pstate as _, node as _, constructName as _) as _
 }
 
 // TODO(pg-port): parser/parse_coerce.c
@@ -319,7 +346,12 @@ unsafe fn coerce_to_specific_type(
     targetTypeId: Oid,
     constructName: *const c_char,
 ) -> *mut Node {
-    todo!("coerce_to_specific_type")
+    crate::parser::parse_coerce::coerce_to_specific_type(
+        pstate as _,
+        node as _,
+        targetTypeId as _,
+        constructName as _,
+    ) as _
 }
 
 // TODO(pg-port): parser/parse_coerce.c
@@ -330,7 +362,13 @@ unsafe fn coerce_to_specific_type_typmod(
     targetTypmod: int32,
     constructName: *const c_char,
 ) -> *mut Node {
-    todo!("coerce_to_specific_type_typmod")
+    crate::parser::parse_coerce::coerce_to_specific_type_typmod(
+        pstate as _,
+        node as _,
+        targetTypeId as _,
+        targetTypmod as _,
+        constructName as _,
+    ) as _
 }
 
 // TODO(pg-port): parser/parse_coerce.c
@@ -344,7 +382,16 @@ unsafe fn coerce_type(
     cformat: c_int,
     location: c_int,
 ) -> *mut Node {
-    todo!("coerce_type")
+    crate::parser::parse_coerce::coerce_type(
+        pstate as _,
+        node as _,
+        inputTypeId as _,
+        targetTypeId as _,
+        targetTypmod as _,
+        core::mem::transmute(ccontext),
+        core::mem::transmute(cformat),
+        location as _,
+    ) as _
 }
 
 // TODO(pg-port): parser/parse_coerce.c
@@ -354,7 +401,12 @@ unsafe fn can_coerce_type(
     targetTypeIds: *const Oid,
     ccontext: c_int,
 ) -> bool {
-    todo!("can_coerce_type")
+    crate::parser::parse_coerce::can_coerce_type(
+        nargs as _,
+        inputTypeIds as _,
+        targetTypeIds as _,
+        core::mem::transmute(ccontext),
+    ) as _
 }
 
 // TODO(pg-port): parser/parse_oper.c  select_common_type
@@ -364,7 +416,12 @@ pub unsafe fn select_common_type(
     context: *const c_char,
     which_expr: *mut *mut Node,
 ) -> Oid {
-    todo!("select_common_type")
+    crate::parser::parse_coerce::select_common_type(
+        pstate as _,
+        exprs as _,
+        context as _,
+        which_expr as _,
+    ) as _
 }
 
 // TODO(pg-port): parser/parse_oper.c  select_common_typmod
@@ -373,7 +430,7 @@ pub unsafe fn select_common_typmod(
     exprs: *mut List,
     common_type: Oid,
 ) -> int32 {
-    todo!("select_common_typmod")
+    crate::parser::parse_coerce::select_common_typmod(pstate as _, exprs as _, common_type as _) as _
 }
 
 // TODO(pg-port): parser/parse_relation.c  colNameToVar
@@ -383,7 +440,12 @@ unsafe fn colNameToVar(
     localonly: bool,
     location: c_int,
 ) -> *mut Node {
-    todo!("colNameToVar")
+    crate::parser::parse_relation::colNameToVar(
+        pstate as _,
+        colname as _,
+        localonly as _,
+        location as _,
+    ) as _
 }
 
 // TODO(pg-port): catalog/namespace.c
@@ -393,32 +455,33 @@ unsafe fn LookupFuncName(
     argtypes: *const Oid,
     noError: bool,
 ) -> Oid {
-    todo!("LookupFuncName")
+    crate::parser::parse_func::LookupFuncName(
+        funcname as _,
+        nargs as _,
+        argtypes as _,
+        noError as _,
+    ) as _
 }
 
 // TODO(pg-port): catalog/namespace.c
 unsafe fn NameListToString(names: *mut List) -> *const c_char {
-    todo!("NameListToString")
+    crate::catalog::namespace::NameListToString(names as _) as _
 }
 
 // TODO(pg-port): catalog/namespace.c
 unsafe fn get_opclass_oid(am_id: Oid, opclass_name: *mut List, missing_ok: bool) -> Oid {
-    todo!("get_opclass_oid")
+    crate::commands::opclasscmds::get_opclass_oid(am_id, opclass_name as _, missing_ok)
 }
 
 // TODO(pg-port): utils/cache/lsyscache.c
 unsafe fn get_func_rettype(funcid: Oid) -> Oid {
-    todo!("get_func_rettype")
+    crate::utils::cache::lsyscache::get_func_rettype(funcid as _) as _
 }
 
 // TODO(pg-port): access/tsmapi.h  TsmRoutine / GetTsmRoutine
-#[repr(C)]
-struct TsmRoutine {
-    parameterTypes: *mut List,    // OID list of parameter types
-    repeatable_across_queries: bool,
-}
+use crate::access::tsmapi::TsmRoutine;
 unsafe fn GetTsmRoutine(handlerOid: Oid) -> *mut TsmRoutine {
-    todo!("GetTsmRoutine")
+    crate::access::tsmapi::GetTsmRoutine(handlerOid as _) as _
 }
 
 // TODO(pg-port): catalog/pg_amproc.h  Form_pg_amproc
@@ -443,12 +506,17 @@ unsafe fn get_relation_constraint_attnos(
     missing_ok: bool,
     constraintOid: *mut Oid,
 ) -> *mut Bitmapset {
-    todo!("get_relation_constraint_attnos")
+    crate::catalog::pg_constraint::get_relation_constraint_attnos(
+        relid as _,
+        conname as _,
+        missing_ok as _,
+        constraintOid as _,
+    ) as _
 }
 
 // TODO(pg-port): catalog/catalog.c  IsCatalogRelation
 unsafe fn IsCatalogRelation(rel: Relation) -> bool {
-    false
+    crate::catalog::catalog::IsCatalogRelation(rel as _)
 }
 
 // TODO(pg-port): catalog/catalog.c  RelationIsUsedAsCatalogTable
@@ -466,27 +534,32 @@ unsafe fn transformJsonTable(
     pstate: *mut ParseState,
     jt: *mut c_void,
 ) -> *mut ParseNamespaceItem {
-    todo!("transformJsonTable")
+    crate::parser::parse_jsontable::transformJsonTable(pstate as _, jt as _) as _
 }
 
 // TODO(pg-port): nodes/makefuncs.c  makeGroupingSet
 unsafe fn makeGroupingSet(kind: GroupingSetKind, content: *mut List, location: c_int) -> *mut GroupingSet {
-    todo!("makeGroupingSet")
+    crate::nodes::makefuncs::makeGroupingSet(kind as _, content as _, location as _) as _
 }
 
 // TODO(pg-port): nodes/makefuncs.c  makeFuncCall
 unsafe fn makeFuncCall(funcname: *mut List, args: *mut List, coerce: c_int, location: c_int) -> *mut FuncCall {
-    todo!("makeFuncCall")
+    crate::nodes::makefuncs::makeFuncCall(
+        funcname as _,
+        args as _,
+        core::mem::transmute(coerce),
+        location as _,
+    ) as _
 }
 
 // TODO(pg-port): parser/parse_func.c  FigureColname
 unsafe fn FigureColname(node: *mut Node) -> *const c_char {
-    todo!("FigureColname")
+    crate::parser::parse_target::FigureColname(node as _) as _
 }
 
 // TODO(pg-port): utils/cache/lsyscache.c  assign_list_collations
 unsafe fn assign_list_collations(pstate: *mut ParseState, exprs: *mut List) {
-    // stub
+    crate::parser::parse_collate::assign_list_collations(pstate as _, exprs as _)
 }
 
 // TODO(pg-port): utils/cache/lsyscache.c  SystemFuncName
@@ -501,7 +574,12 @@ unsafe fn typenameTypeIdAndMod(
     typeId_p: *mut Oid,
     typmod_p: *mut int32,
 ) {
-    todo!("typenameTypeIdAndMod")
+    crate::parser::parse_type::typenameTypeIdAndMod(
+        pstate as _,
+        typename_ as _,
+        typeId_p as _,
+        typmod_p as _,
+    )
 }
 
 // TODO(pg-port): parser/parse_node.c  ParseExprKindName

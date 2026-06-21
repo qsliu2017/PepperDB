@@ -373,6 +373,7 @@ unsafe fn tuplestore_begin_common(
  * maxKBytes: how much data to store in memory (any data beyond this
  * amount is paged to disk).  When in doubt, use work_mem.
  */
+#[no_mangle]
 pub unsafe fn tuplestore_begin_heap(
     randomAccess: bool,
     interXact: bool,
@@ -635,6 +636,7 @@ pub unsafe fn tuplestore_select_read_pointer(state: *mut Tuplestorestate, ptr: c
  * Returns the number of tuples added since creation or the last
  * tuplestore_clear().
  */
+#[no_mangle]
 pub unsafe fn tuplestore_tuple_count(state: *mut Tuplestorestate) -> int64 {
     (*state).tuples
 }
@@ -816,6 +818,7 @@ pub unsafe fn tuplestore_puttupleslot(state: *mut Tuplestorestate, slot: *mut Tu
  * "Standard" case to copy from a HeapTuple.  This is actually now somewhat
  * deprecated, but not worth getting rid of in view of the number of callers.
  */
+#[no_mangle]
 pub unsafe fn tuplestore_puttuple(state: *mut Tuplestorestate, tuple: HeapTuple) {
     let mut tuple = tuple;
     let oldcxt: MemoryContext = MemoryContextSwitchTo((*state).context);
@@ -835,6 +838,7 @@ pub unsafe fn tuplestore_puttuple(state: *mut Tuplestorestate, tuple: HeapTuple)
  * Similar to tuplestore_puttuple(), but work from values + nulls arrays.
  * This avoids an extra tuple-construction operation.
  */
+#[no_mangle]
 pub unsafe fn tuplestore_putvalues(
     state: *mut Tuplestorestate,
     tdesc: TupleDesc,

@@ -3071,6 +3071,7 @@ fn islegal_check_2nd_byte(source0: c_uchar, a: c_uchar) -> bool {
  * Fills the provided buffer with two bytes such that:
  *   pg_encoding_mblen(dst) == 2 && pg_encoding_verifymbstr(dst) == 0
  */
+#[no_mangle]
 pub unsafe fn pg_encoding_set_invalid(encoding: c_int, dst: *mut c_char) {
     Assert!(pg_encoding_max_length(encoding) > 1);
 
@@ -3319,6 +3320,7 @@ const LATIN1_TBL: pg_wchar_tbl = pg_wchar_tbl {
  * (See the C source for the full description of when pg_encoding_mblen() may be
  * used vs. pg_encoding_mblen_or_incomplete().)
  */
+#[no_mangle]
 pub unsafe fn pg_encoding_mblen(encoding: c_int, mbstr: *const c_char) -> c_int {
     if PG_VALID_ENCODING(encoding) {
         (pg_wchar_table[encoding as usize].mblen.unwrap())(mbstr as *const c_uchar)
@@ -3389,6 +3391,7 @@ pub unsafe fn pg_encoding_verifymbchar(encoding: c_int, mbstr: *const c_char, le
  * Returns the number of input bytes (<= len) that form a valid string.
  * (See comments above for full details of the mbverifystr API.)
  */
+#[no_mangle]
 pub unsafe fn pg_encoding_verifymbstr(encoding: c_int, mbstr: *const c_char, len: c_int) -> c_int {
     if PG_VALID_ENCODING(encoding) {
         (pg_wchar_table[encoding as usize].mbverifystr.unwrap())(mbstr as *const c_uchar, len)
@@ -3400,6 +3403,7 @@ pub unsafe fn pg_encoding_verifymbstr(encoding: c_int, mbstr: *const c_char, len
 /*
  * fetch maximum length of a given encoding
  */
+#[no_mangle]
 pub fn pg_encoding_max_length(encoding: c_int) -> c_int {
     Assert!(PG_VALID_ENCODING(encoding));
 

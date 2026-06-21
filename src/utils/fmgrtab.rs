@@ -24,16 +24,8 @@ pub struct FmgrBuiltin {
 
 // FmgrBuiltin embeds a PGFunction fn-pointer; harmless here (placeholder until
 // the generated fmgrtab.c lands as real Rust statics).
-#[allow(improper_ctypes)]
-extern "C" {
-    pub static fmgr_builtins: [FmgrBuiltin; 0];
-
-    /* number of entries in table */
-    pub static fmgr_nbuiltins: c_int;
-
-    /* highest function OID in table */
-    pub static fmgr_last_builtin_oid: Oid;
-}
+unsafe impl Sync for FmgrBuiltin {}
+pub use crate::utils::fmgrtab_gen::{fmgr_builtins, fmgr_nbuiltins, fmgr_last_builtin_oid};
 
 /*
  * Mapping from a builtin function's OID to its index in the fmgr_builtins
@@ -41,6 +33,8 @@ extern "C" {
  */
 pub const InvalidOidBuiltinMapping: uint16 = PG_UINT16_MAX;
 
+pub use crate::utils::fmgrtab_gen::fmgr_builtin_oid_index;
+#[cfg(any())]
 extern "C" {
-    pub static fmgr_builtin_oid_index: [uint16; 0];
+    pub static __unused_fmgr_builtin_oid_index: [uint16; 0];
 }

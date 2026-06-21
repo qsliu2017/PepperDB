@@ -25,6 +25,7 @@
 
 use crate::prelude::*; // postgres.h: Datum, palloc/pstrdup/pfree, elog!/ereport!/errmsg!, Size, etc.
 use core::ffi::{c_char, c_int, c_void, CStr};
+use crate::utils::cache::syscache_ids_gen::{COLLOID, DATABASEOID};
 
 use crate::postgres_ext::{InvalidOid, Oid};
 use crate::c::{uint32, OidIsValid};
@@ -296,9 +297,16 @@ pub struct collate_methods {
 unsafe impl Sync for collate_methods {}
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct pg_locale_builtin_info {
+    pub locale: *const c_char,
+    pub casemap_full: bool,
+}
+
+#[repr(C)]
 pub union locale_info {
+    pub builtin: pg_locale_builtin_info,
     pub lt: locale_t,
-    pub builtin: *mut c_void,
     pub icu: *mut c_void,
 }
 
@@ -1330,11 +1338,11 @@ unsafe fn create_pg_locale(collid: Oid, context: MemoryContext) -> pg_locale_t {
     collform = GETSTRUCT(tp) as Form_pg_collation;
 
     if (*collform).collprovider == COLLPROVIDER_BUILTIN {
-        result = create_pg_locale_builtin(collid, context);
+        result = create_pg_locale_builtin(collid, context) as pg_locale_t;
     } else if (*collform).collprovider == COLLPROVIDER_ICU {
         result = create_pg_locale_icu(collid, context);
     } else if (*collform).collprovider == COLLPROVIDER_LIBC {
-        result = create_pg_locale_libc(collid, context);
+        result = create_pg_locale_libc(collid, context as *mut c_void) as pg_locale_t;
     } else {
         /* shouldn't happen */
         PGLOCALE_SUPPORT_ERROR!("create_pg_locale", (*collform).collprovider);
@@ -1425,11 +1433,12 @@ pub unsafe fn init_database_collation() {
     dbform = GETSTRUCT(tup) as Form_pg_database;
 
     if (*dbform).datlocprovider == COLLPROVIDER_BUILTIN {
-        result = create_pg_locale_builtin(DEFAULT_COLLATION_OID, TopMemoryContext);
+        result = create_pg_locale_builtin(DEFAULT_COLLATION_OID, TopMemoryContext) as pg_locale_t;
     } else if (*dbform).datlocprovider == COLLPROVIDER_ICU {
         result = create_pg_locale_icu(DEFAULT_COLLATION_OID, TopMemoryContext);
     } else if (*dbform).datlocprovider == COLLPROVIDER_LIBC {
-        result = create_pg_locale_libc(DEFAULT_COLLATION_OID, TopMemoryContext);
+        result = create_pg_locale_libc(DEFAULT_COLLATION_OID, TopMemoryContext as *mut c_void)
+            as pg_locale_t;
     } else {
         /* shouldn't happen */
         PGLOCALE_SUPPORT_ERROR!("init_database_collation", (*dbform).datlocprovider);
@@ -2012,14 +2021,74 @@ pub unsafe fn icu_validate_locale(loc_str: *const c_char) {
 // Declared locally (not imported from port_api) because this file uses the
 // faithful `lconv` layout above, whereas port_api::lconv is an opaque c_void.
 unsafe fn pg_localeconv_r(
-    _lc_monetary: *const c_char,
-    _lc_numeric: *const c_char,
-    _output: *mut lconv,
+    lc_monetary: *const c_char,
+    lc_numeric: *const c_char,
+    output: *mut lconv,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): port/pg_localeconv_r.c
+    extern "C" {
+        fn localeconv() -> *mut libc::lconv;
+        fn newlocale(mask: c_int, locale: *const c_char, base: libc::locale_t) -> libc::locale_t;
+        fn uselocale(loc: libc::locale_t) -> libc::locale_t;
+        fn freelocale(loc: libc::locale_t);
+    }
+    core::ptr::write_bytes(output, 0, 1);
+
+    let loc_num = newlocale(libc::LC_NUMERIC_MASK, lc_numeric, core::ptr::null_mut());
+    let loc_mon = newlocale(libc::LC_MONETARY_MASK, lc_monetary, core::ptr::null_mut());
+    if loc_num.is_null() || loc_mon.is_null() {
+        if !loc_num.is_null() { freelocale(loc_num); }
+        if !loc_mon.is_null() { freelocale(loc_mon); }
+        return -1;
+    }
+
+    /* numeric fields from lc_numeric */
+    let saved = uselocale(loc_num);
+    let lc = localeconv();
+    (*output).decimal_point = strdup((*lc).decimal_point);
+    (*output).thousands_sep = strdup((*lc).thousands_sep);
+    (*output).grouping = strdup((*lc).grouping);
+
+    /* monetary fields from lc_monetary */
+    uselocale(loc_mon);
+    let lc = localeconv();
+    (*output).int_curr_symbol = strdup((*lc).int_curr_symbol);
+    (*output).currency_symbol = strdup((*lc).currency_symbol);
+    (*output).mon_decimal_point = strdup((*lc).mon_decimal_point);
+    (*output).mon_thousands_sep = strdup((*lc).mon_thousands_sep);
+    (*output).mon_grouping = strdup((*lc).mon_grouping);
+    (*output).positive_sign = strdup((*lc).positive_sign);
+    (*output).negative_sign = strdup((*lc).negative_sign);
+    (*output).int_frac_digits = (*lc).int_frac_digits as c_char;
+    (*output).frac_digits = (*lc).frac_digits as c_char;
+    (*output).p_cs_precedes = (*lc).p_cs_precedes as c_char;
+    (*output).p_sep_by_space = (*lc).p_sep_by_space as c_char;
+    (*output).n_cs_precedes = (*lc).n_cs_precedes as c_char;
+    (*output).n_sep_by_space = (*lc).n_sep_by_space as c_char;
+    (*output).p_sign_posn = (*lc).p_sign_posn as c_char;
+    (*output).n_sign_posn = (*lc).n_sign_posn as c_char;
+    (*output).int_p_cs_precedes = (*lc).int_p_cs_precedes as c_char;
+    (*output).int_p_sep_by_space = (*lc).int_p_sep_by_space as c_char;
+    (*output).int_n_cs_precedes = (*lc).int_n_cs_precedes as c_char;
+    (*output).int_n_sep_by_space = (*lc).int_n_sep_by_space as c_char;
+    (*output).int_p_sign_posn = (*lc).int_p_sign_posn as c_char;
+    (*output).int_n_sign_posn = (*lc).int_n_sign_posn as c_char;
+
+    uselocale(saved);
+    freelocale(loc_num);
+    freelocale(loc_mon);
+    0
 }
-unsafe fn pg_localeconv_free(_output: *mut lconv) {
-    unimplemented!() // TODO(pg-port): port/pg_localeconv_r.c
+unsafe fn pg_localeconv_free(output: *mut lconv) {
+    extern "C" { fn free(p: *mut core::ffi::c_void); }
+    let fields = [
+        (*output).decimal_point, (*output).thousands_sep, (*output).grouping,
+        (*output).int_curr_symbol, (*output).currency_symbol,
+        (*output).mon_decimal_point, (*output).mon_thousands_sep, (*output).mon_grouping,
+        (*output).positive_sign, (*output).negative_sign,
+    ];
+    for f in fields {
+        if !f.is_null() { free(f as *mut core::ffi::c_void); }
+    }
 }
 
 // --- lib/simplehash.h (collation_cache simplehash instantiation) ------------
@@ -2051,31 +2120,29 @@ unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool {
     !tuple.is_null()
 }
 
-unsafe fn GETSTRUCT(_tuple: HeapTuple) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): access/htup_details.h
+unsafe fn GETSTRUCT(tuple: HeapTuple) -> *mut c_void {
+    crate::access::htup_details::GETSTRUCT(tuple as _) as *mut c_void
 }
 
-unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): utils/cache/syscache.c
+unsafe fn SearchSysCache1(cacheId: c_int, key1: Datum) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCache1(cacheId, key1) as _
 }
 unsafe fn SysCacheGetAttr(
-    _cacheId: c_int,
-    _tup: HeapTuple,
-    _attributeNumber: c_int,
-    _isNull: *mut bool,
+    cacheId: c_int,
+    tup: HeapTuple,
+    attributeNumber: c_int,
+    isNull: *mut bool,
 ) -> Datum {
-    unimplemented!() // TODO(pg-port): utils/cache/syscache.c
+    crate::utils::cache::syscache::SysCacheGetAttr(cacheId, tup as _, attributeNumber as _, isNull)
 }
-unsafe fn SysCacheGetAttrNotNull(_cacheId: c_int, _tup: HeapTuple, _attributeNumber: c_int) -> Datum {
-    unimplemented!() // TODO(pg-port): utils/cache/syscache.c
+unsafe fn SysCacheGetAttrNotNull(cacheId: c_int, tup: HeapTuple, attributeNumber: c_int) -> Datum {
+    crate::utils::cache::syscache::SysCacheGetAttrNotNull(cacheId, tup as _, attributeNumber as _)
 }
-unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!() // TODO(pg-port): utils/cache/catcache.c
+unsafe fn ReleaseSysCache(tuple: HeapTuple) {
+    crate::utils::cache::syscache::ReleaseSysCache(tuple as _)
 }
 
 // utils/syscache.h cache ids.
-const COLLOID: c_int = 0;
-const DATABASEOID: c_int = 0;
 
 // --- catalog attribute numbers (pg_collation.h / pg_database.h) -------------
 const Anum_pg_collation_collversion: c_int = 10;
@@ -2093,10 +2160,7 @@ pub struct FormData_pg_collation {
 type Form_pg_collation = *mut FormData_pg_collation;
 
 // --- catalog/pg_database.h: Form_pg_database --------------------------------
-#[repr(C)]
-pub struct FormData_pg_database {
-    pub datlocprovider: c_char,
-}
+use crate::catalog::pg_database::FormData_pg_database;
 #[allow(non_camel_case_types)]
 type Form_pg_database = *mut FormData_pg_database;
 

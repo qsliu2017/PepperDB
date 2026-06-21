@@ -86,23 +86,23 @@ const OBJECT_FUNCTION: ObjectType = 0;
  * ------------------------------------------------------------------ */
 
 unsafe fn exprType(_expr: *mut Node) -> Oid {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::exprType(_expr as _) as _
 }
 unsafe fn exprLocation(_expr: *mut Node) -> c_int {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::exprLocation(_expr as _) as _
 }
 unsafe fn type_is_rowtype(_typid: Oid) -> bool {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::type_is_rowtype(_typid as _) as _
 }
 unsafe fn tuplestore_begin_heap(
     _randomAccess: bool,
     _interXact: bool,
     _maxKBytes: c_int,
 ) -> *mut Tuplestorestate {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_begin_heap(_randomAccess as _, _interXact as _, _maxKBytes as _) as _
 }
 unsafe fn tuplestore_puttuple(_state: *mut Tuplestorestate, _tuple: *mut HeapTupleData) {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_puttuple(_state as _, _tuple as _)
 }
 unsafe fn tuplestore_putvalues(
     _state: *mut Tuplestorestate,
@@ -110,7 +110,7 @@ unsafe fn tuplestore_putvalues(
     _values: *mut Datum,
     _isnull: *mut bool,
 ) {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_putvalues(_state as _, _tdesc as _, _values as _, _isnull as _)
 }
 unsafe fn tuplestore_gettupleslot(
     _state: *mut Tuplestorestate,
@@ -118,19 +118,19 @@ unsafe fn tuplestore_gettupleslot(
     _copy: bool,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_gettupleslot(_state as _, _forward as _, _copy as _, _slot as _) as _
 }
 unsafe fn tuplestore_end(_state: *mut Tuplestorestate) {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_end(_state as _)
 }
 unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc {
-    unimplemented!() // TODO: access/common/tupdesc.c
+    crate::access::common::tupdesc::CreateTemplateTupleDesc(_natts as _) as _
 }
 unsafe fn CreateTupleDescCopy(_tupdesc: TupleDesc) -> TupleDesc {
-    unimplemented!() // TODO: access/common/tupdesc.c
+    crate::access::common::tupdesc::CreateTupleDescCopy(_tupdesc as _) as _
 }
 unsafe fn FreeTupleDesc(_tupdesc: TupleDesc) {
-    unimplemented!() // TODO: access/common/tupdesc.c
+    crate::access::common::tupdesc::FreeTupleDesc(_tupdesc as _)
 }
 unsafe fn TupleDescInitEntry(
     _desc: TupleDesc,
@@ -140,25 +140,25 @@ unsafe fn TupleDescInitEntry(
     _typmod: i32,
     _attdim: c_int,
 ) {
-    unimplemented!() // TODO: access/common/tupdesc.c
+    crate::access::common::tupdesc::TupleDescInitEntry(_desc as _, _attributeNumber as _, _attributeName as _, _oidtypeid as _, _typmod as _, _attdim as _)
 }
 unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> Form_pg_attribute {
-    unimplemented!() // TODO: access/common/tupdesc.c
+    crate::access::common::tupdesc::TupleDescAttr(_tupdesc as _, _i as _) as _
 }
 unsafe fn lookup_rowtype_tupdesc_copy(_type_id: Oid, _typmod: i32) -> TupleDesc {
-    unimplemented!() // TODO: utils/cache/typcache.c
+    crate::utils::cache::typcache::lookup_rowtype_tupdesc_copy(_type_id as _, _typmod as _) as _
 }
 unsafe fn DatumGetHeapTupleHeader(_d: Datum) -> HeapTupleHeader {
-    unimplemented!() // TODO: access/htup_details.h
+    _d as HeapTupleHeader
 }
 unsafe fn HeapTupleHeaderGetTypeId(_td: HeapTupleHeader) -> Oid {
-    unimplemented!() // TODO: access/htup_details.h
+    crate::access::htup_details::HeapTupleHeaderGetTypeId(_td as _) as _
 }
 unsafe fn HeapTupleHeaderGetTypMod(_td: HeapTupleHeader) -> i32 {
-    unimplemented!() // TODO: access/htup_details.h
+    crate::access::htup_details::HeapTupleHeaderGetTypMod(_td as _) as _
 }
 unsafe fn HeapTupleHeaderGetDatumLength(_td: HeapTupleHeader) -> u32 {
-    unimplemented!() // TODO: access/htup_details.h
+    crate::access::htup_details::HeapTupleHeaderGetDatumLength(_td as _) as _
 }
 unsafe fn object_aclcheck(
     _classid: Oid,
@@ -166,16 +166,20 @@ unsafe fn object_aclcheck(
     _roleid: Oid,
     _mode: c_int,
 ) -> AclResult {
-    unimplemented!() // TODO: catalog/aclchk.c
+    core::mem::transmute::<crate::utils::adt::acl::AclResult, AclResult>(
+        crate::catalog::aclchk::object_aclcheck(_classid, _objectid, _roleid, _mode as _),
+    )
 }
 unsafe fn aclcheck_error(_aclerr: AclResult, _objtype: ObjectType, _objectname: *const c_char) {
-    unimplemented!() // TODO: catalog/aclchk.c
+    crate::catalog::aclchk::aclcheck_error(
+        core::mem::transmute::<i32, crate::utils::adt::acl::AclResult>(_aclerr),
+        core::mem::transmute::<i32, crate::nodes::parsenodes::ObjectType>(_objtype),
+        _objectname as _,
+    )
 }
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn get_func_name(_funcid: Oid) -> *mut c_char {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_func_name(_funcid as _) as _
 }
 unsafe fn InvokeFunctionExecuteHook(_objectId: Oid) {
     // TODO: catalog/objectaccess.h -- no-op when no hook registered
@@ -185,25 +189,25 @@ unsafe fn get_expr_result_type(
     _resultTypeId: *mut Oid,
     _resultTupleDesc: *mut TupleDesc,
 ) -> TypeFuncClass {
-    unimplemented!() // TODO: utils/fmgr/funcapi.c
+    crate::utils::fmgr::funcapi::get_expr_result_type(_expr as _, _resultTypeId as _, _resultTupleDesc as _) as _
 }
 unsafe fn MakeSingleTupleTableSlot(
     _tupdesc: TupleDesc,
     _tts_ops: *const TupleTableSlotOps,
 ) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::MakeSingleTupleTableSlot(_tupdesc as _, _tts_ops as _) as _
 }
 pub unsafe fn ExecFetchSlotHeapTupleDatum(_slot: *mut TupleTableSlot) -> Datum {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecFetchSlotHeapTupleDatum(_slot as _) as _
 }
 unsafe fn check_stack_depth() {
-    // TODO: tcop/postgres.c
+    crate::miscadmin::check_stack_depth()
 }
 unsafe fn IsBinaryCoercible(_srctype: Oid, _targettype: Oid) -> bool {
-    unimplemented!() // TODO: parser/parse_coerce.c
+    crate::parser::parse_coerce::IsBinaryCoercible(_srctype as _, _targettype as _) as _
 }
 unsafe fn format_type_be(_type_oid: Oid) -> *mut c_char {
-    unimplemented!() // TODO: utils/adt/format_type.c
+    crate::utils::adt::format_type::format_type_be(_type_oid as _) as _
 }
 
 /* utils/guc.c: work_mem */
@@ -214,30 +218,30 @@ extern "C" {
 /* attribute accessors -- placeholders matching C field access on
  * Form_pg_attribute (treated opaquely here). */
 unsafe fn attr_atttypid(_attr: Form_pg_attribute) -> Oid {
-    unimplemented!() // TODO: catalog/pg_attribute.h
+    (*(_attr as *const crate::catalog::pg_attribute::FormData_pg_attribute)).atttypid as _
 }
 unsafe fn attr_attisdropped(_attr: Form_pg_attribute) -> bool {
-    unimplemented!() // TODO: catalog/pg_attribute.h
+    (*(_attr as *const crate::catalog::pg_attribute::FormData_pg_attribute)).attisdropped
 }
 unsafe fn attr_attlen(_attr: Form_pg_attribute) -> i16 {
-    unimplemented!() // TODO: catalog/pg_attribute.h
+    (*(_attr as *const crate::catalog::pg_attribute::FormData_pg_attribute)).attlen as _
 }
 unsafe fn attr_attalign(_attr: Form_pg_attribute) -> c_char {
-    unimplemented!() // TODO: catalog/pg_attribute.h
+    (*(_attr as *const crate::catalog::pg_attribute::FormData_pg_attribute)).attalign as _
 }
 
 /* TupleDesc field accessors (natts, tdtypeid, tdtypmod, tdrefcount). */
 unsafe fn tupdesc_natts(_tupdesc: TupleDesc) -> c_int {
-    unimplemented!() // TODO: access/tupdesc.h
+    (*_tupdesc).natts as _
 }
 unsafe fn tupdesc_tdtypeid(_tupdesc: TupleDesc) -> Oid {
-    unimplemented!() // TODO: access/tupdesc.h
+    (*_tupdesc).tdtypeid as _
 }
 unsafe fn tupdesc_tdtypmod(_tupdesc: TupleDesc) -> i32 {
-    unimplemented!() // TODO: access/tupdesc.h
+    (*_tupdesc).tdtypmod as _
 }
 unsafe fn tupdesc_tdrefcount(_tupdesc: TupleDesc) -> c_int {
-    unimplemented!() // TODO: access/tupdesc.h
+    (*_tupdesc).tdrefcount as _
 }
 
 /* catalog/pg_proc.h */
@@ -246,6 +250,22 @@ const ProcedureRelationId: Oid = 1255;
 const ACL_EXECUTE: c_int = 1 << 5;
 /* miscadmin.h: FUNC_MAX_ARGS */
 const FUNC_MAX_ARGS: c_int = 100;
+
+/* ReturnSetInfo cannot be mem::zeroed (SetFunctionReturnMode has no 0 variant);
+ * mirror the C "= {0}" by constructing it with placeholder fields that callers
+ * overwrite before use. */
+unsafe fn new_rsinfo() -> ReturnSetInfo {
+    ReturnSetInfo {
+        r#type: NodeTag::T_Invalid,
+        econtext: null_mut(),
+        expectedDesc: null_mut(),
+        allowedModes: 0,
+        returnMode: SFRM_ValuePerCall,
+        isDone: ExprSingleResult,
+        setResult: null_mut(),
+        setDesc: null_mut(),
+    }
+}
 
 /* static function decls (translated below) */
 
@@ -319,7 +339,7 @@ pub unsafe fn ExecMakeTableFunctionResult(
     let mut returnsSet: bool = false;
     let fcinfo: FunctionCallInfo;
     let mut fcusage: PgStat_FunctionCallUsage = std::mem::zeroed();
-    let mut rsinfo: ReturnSetInfo = std::mem::zeroed();
+    let mut rsinfo: ReturnSetInfo = new_rsinfo();
     let mut tmptup: HeapTupleData = std::mem::zeroed();
     let callerContext: MemoryContext;
     let mut first_time: bool = true;
@@ -748,7 +768,7 @@ pub unsafe fn ExecMakeFunctionResultSet(
     let mut result: Datum;
     let mut fcinfo: FunctionCallInfo;
     let mut fcusage: PgStat_FunctionCallUsage = std::mem::zeroed();
-    let mut rsinfo: ReturnSetInfo = std::mem::zeroed();
+    let mut rsinfo: ReturnSetInfo = new_rsinfo();
     let mut callit: bool;
     let mut i: c_int;
 

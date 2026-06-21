@@ -117,8 +117,7 @@ unsafe fn pg_write_barrier() {
 
 #[inline]
 unsafe fn pg_atomic_write_u32(_ptr: *mut pg_atomic_uint32, _val: uint32) {
-    // TODO: route to crate::port::atomics real implementation once available.
-    unimplemented!()
+    (*_ptr).value.store(_val, core::sync::atomic::Ordering::Release);
 }
 
 // ==========================================================================
@@ -352,10 +351,11 @@ extern "C" {
     pub static mut BufferDescriptors: *mut BufferDescPadded;
     pub static mut BufferIOCVArray: *mut ConditionVariableMinimallyPadded;
     pub static mut BackendWritebackContext: WritebackContext;
-
-    /* in localbuf.c */
-    pub static mut LocalBufferDescriptors: *mut BufferDesc;
 }
+
+/* in localbuf.c (canonical home) */
+#[no_mangle]
+pub static mut LocalBufferDescriptors: *mut BufferDesc = core::ptr::null_mut();
 
 #[inline]
 pub unsafe fn GetBufferDescriptor(id: uint32) -> *mut BufferDesc {
@@ -392,8 +392,8 @@ pub const FREENEXT_NOT_IN_LIST: c_int = -2;
 // ---- Buffer header spinlock ----------------------------------------------
 
 pub unsafe fn LockBufHdr(desc: *mut BufferDesc) -> uint32 {
-    let _ = desc;
-    unimplemented!()
+    let old = (*desc).state.value.fetch_or(BM_LOCKED, core::sync::atomic::Ordering::Acquire);
+    old | BM_LOCKED
 }
 
 #[inline]
@@ -469,8 +469,7 @@ pub unsafe fn ResourceOwnerForgetBufferIO(owner: ResourceOwner, buffer: Buffer) 
 
 /* bufmgr.c */
 pub unsafe fn WritebackContextInit(context: *mut WritebackContext, max_pending: *mut c_int) {
-    let _ = (context, max_pending);
-    unimplemented!()
+    crate::storage::buffer::bufmgr::WritebackContextInit(context as _, max_pending)
 }
 pub unsafe fn IssuePendingWritebacks(wb_context: *mut WritebackContext, io_context: IOContext) {
     let _ = (wb_context, io_context);
@@ -487,8 +486,7 @@ pub unsafe fn ScheduleBufferTagForWriteback(
 
 /* solely to make it easier to write tests */
 pub unsafe fn StartBufferIO(buf: *mut BufferDesc, forInput: bool, nowait: bool) -> bool {
-    let _ = (buf, forInput, nowait);
-    unimplemented!()
+    crate::storage::buffer::bufmgr::StartBufferIO(buf as _, forInput, nowait)
 }
 pub unsafe fn TerminateBufferIO(
     buf: *mut BufferDesc,
@@ -497,102 +495,84 @@ pub unsafe fn TerminateBufferIO(
     forget_owner: bool,
     release_aio: bool,
 ) {
-    let _ = (buf, clear_dirty, set_flag_bits, forget_owner, release_aio);
-    unimplemented!()
+    crate::storage::buffer::bufmgr::TerminateBufferIO(buf as _, clear_dirty, set_flag_bits, forget_owner)
 }
 
 /* freelist.c */
 pub unsafe fn IOContextForStrategy(strategy: BufferAccessStrategy) -> IOContext {
-    let _ = strategy;
-    unimplemented!()
+    core::mem::transmute(crate::storage::buffer::freelist::IOContextForStrategy(strategy as _))
 }
 pub unsafe fn StrategyGetBuffer(
     strategy: BufferAccessStrategy,
     buf_state: *mut uint32,
     from_ring: *mut bool,
 ) -> *mut BufferDesc {
-    let _ = (strategy, buf_state, from_ring);
-    unimplemented!()
+    crate::storage::buffer::freelist::StrategyGetBuffer(strategy as _, buf_state, from_ring) as _
 }
 pub unsafe fn StrategyFreeBuffer(buf: *mut BufferDesc) {
-    let _ = buf;
-    unimplemented!()
+    crate::storage::buffer::freelist::StrategyFreeBuffer(buf as _)
 }
 pub unsafe fn StrategyRejectBuffer(
     strategy: BufferAccessStrategy,
     buf: *mut BufferDesc,
     from_ring: bool,
 ) -> bool {
-    let _ = (strategy, buf, from_ring);
-    unimplemented!()
+    crate::storage::buffer::freelist::StrategyRejectBuffer(strategy as _, buf as _, from_ring)
 }
 
 pub unsafe fn StrategySyncStart(complete_passes: *mut uint32, num_buf_alloc: *mut uint32) -> c_int {
-    let _ = (complete_passes, num_buf_alloc);
-    unimplemented!()
+    crate::storage::buffer::freelist::StrategySyncStart(complete_passes, num_buf_alloc)
 }
 pub unsafe fn StrategyNotifyBgWriter(bgwprocno: c_int) {
-    let _ = bgwprocno;
-    unimplemented!()
+    crate::storage::buffer::freelist::StrategyNotifyBgWriter(bgwprocno)
 }
 
 pub unsafe fn StrategyShmemSize() -> Size {
-    unimplemented!()
+    crate::storage::buffer::freelist::StrategyShmemSize()
 }
 pub unsafe fn StrategyInitialize(init: bool) {
-    let _ = init;
-    unimplemented!()
+    crate::storage::buffer::freelist::StrategyInitialize(init)
 }
 pub unsafe fn have_free_buffer() -> bool {
-    unimplemented!()
+    crate::storage::buffer::freelist::have_free_buffer()
 }
 
 /* buf_table.c */
 pub unsafe fn BufTableShmemSize(size: c_int) -> Size {
-    let _ = size;
-    unimplemented!()
+    crate::storage::buffer::buf_table::BufTableShmemSize(size)
 }
 pub unsafe fn InitBufTable(size: c_int) {
-    let _ = size;
-    unimplemented!()
+    crate::storage::buffer::buf_table::InitBufTable(size)
 }
 pub unsafe fn BufTableHashCode(tagPtr: *mut BufferTag) -> uint32 {
-    let _ = tagPtr;
-    unimplemented!()
+    crate::storage::buffer::buf_table::BufTableHashCode(tagPtr as _)
 }
 pub unsafe fn BufTableLookup(tagPtr: *mut BufferTag, hashcode: uint32) -> c_int {
-    let _ = (tagPtr, hashcode);
-    unimplemented!()
+    crate::storage::buffer::buf_table::BufTableLookup(tagPtr as _, hashcode)
 }
 pub unsafe fn BufTableInsert(tagPtr: *mut BufferTag, hashcode: uint32, buf_id: c_int) -> c_int {
-    let _ = (tagPtr, hashcode, buf_id);
-    unimplemented!()
+    crate::storage::buffer::buf_table::BufTableInsert(tagPtr as _, hashcode, buf_id)
 }
 pub unsafe fn BufTableDelete(tagPtr: *mut BufferTag, hashcode: uint32) {
-    let _ = (tagPtr, hashcode);
-    unimplemented!()
+    crate::storage::buffer::buf_table::BufTableDelete(tagPtr as _, hashcode)
 }
 
 /* localbuf.c */
 pub unsafe fn PinLocalBuffer(buf_hdr: *mut BufferDesc, adjust_usagecount: bool) -> bool {
-    let _ = (buf_hdr, adjust_usagecount);
-    unimplemented!()
+    crate::storage::buffer::localbuf::PinLocalBuffer(buf_hdr as _, adjust_usagecount)
 }
 pub unsafe fn UnpinLocalBuffer(buffer: Buffer) {
-    let _ = buffer;
-    unimplemented!()
+    crate::storage::buffer::localbuf::UnpinLocalBuffer(buffer)
 }
 pub unsafe fn UnpinLocalBufferNoOwner(buffer: Buffer) {
-    let _ = buffer;
-    unimplemented!()
+    crate::storage::buffer::localbuf::UnpinLocalBufferNoOwner(buffer)
 }
 pub unsafe fn PrefetchLocalBuffer(
     smgr: SMgrRelation,
     forkNum: ForkNumber,
     blockNum: BlockNumber,
 ) -> PrefetchBufferResult {
-    let _ = (smgr, forkNum, blockNum);
-    unimplemented!()
+    crate::storage::buffer::localbuf::PrefetchLocalBuffer(smgr as _, forkNum, blockNum)
 }
 pub unsafe fn LocalBufferAlloc(
     smgr: SMgrRelation,
@@ -600,8 +580,7 @@ pub unsafe fn LocalBufferAlloc(
     blockNum: BlockNumber,
     foundPtr: *mut bool,
 ) -> *mut BufferDesc {
-    let _ = (smgr, forkNum, blockNum, foundPtr);
-    unimplemented!()
+    crate::storage::buffer::localbuf::LocalBufferAlloc(smgr as _, forkNum, blockNum, foundPtr) as _
 }
 pub unsafe fn ExtendBufferedRelLocal(
     bmr: BufferManagerRelation,
@@ -616,8 +595,7 @@ pub unsafe fn ExtendBufferedRelLocal(
     unimplemented!()
 }
 pub unsafe fn MarkLocalBufferDirty(buffer: Buffer) {
-    let _ = buffer;
-    unimplemented!()
+    crate::storage::buffer::localbuf::MarkLocalBufferDirty(buffer)
 }
 pub unsafe fn TerminateLocalBufferIO(
     bufHdr: *mut BufferDesc,
@@ -625,34 +603,27 @@ pub unsafe fn TerminateLocalBufferIO(
     set_flag_bits: uint32,
     release_aio: bool,
 ) {
-    let _ = (bufHdr, clear_dirty, set_flag_bits, release_aio);
-    unimplemented!()
+    crate::storage::buffer::localbuf::TerminateLocalBufferIO(bufHdr as _, clear_dirty, set_flag_bits, release_aio)
 }
 pub unsafe fn StartLocalBufferIO(bufHdr: *mut BufferDesc, forInput: bool, nowait: bool) -> bool {
-    let _ = (bufHdr, forInput, nowait);
-    unimplemented!()
+    crate::storage::buffer::localbuf::StartLocalBufferIO(bufHdr as _, forInput, nowait)
 }
 pub unsafe fn FlushLocalBuffer(bufHdr: *mut BufferDesc, reln: SMgrRelation) {
-    let _ = (bufHdr, reln);
-    unimplemented!()
+    crate::storage::buffer::localbuf::FlushLocalBuffer(bufHdr as _, reln as _)
 }
 pub unsafe fn InvalidateLocalBuffer(bufHdr: *mut BufferDesc, check_unreferenced: bool) {
-    let _ = (bufHdr, check_unreferenced);
-    unimplemented!()
+    crate::storage::buffer::localbuf::InvalidateLocalBuffer(bufHdr as _, check_unreferenced)
 }
 pub unsafe fn DropRelationLocalBuffers(
     rlocator: RelFileLocator,
     forkNum: ForkNumber,
     firstDelBlock: BlockNumber,
 ) {
-    let _ = (rlocator, forkNum, firstDelBlock);
-    unimplemented!()
+    crate::storage::buffer::localbuf::DropRelationLocalBuffers(rlocator, forkNum, firstDelBlock)
 }
 pub unsafe fn DropRelationAllLocalBuffers(rlocator: RelFileLocator) {
-    let _ = rlocator;
-    unimplemented!()
+    crate::storage::buffer::localbuf::DropRelationAllLocalBuffers(rlocator)
 }
 pub unsafe fn AtEOXact_LocalBuffers(isCommit: bool) {
-    let _ = isCommit;
-    unimplemented!()
+    crate::storage::buffer::localbuf::AtEOXact_LocalBuffers(isCommit)
 }

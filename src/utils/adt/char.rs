@@ -172,6 +172,7 @@ pub unsafe fn charsend(fcinfo: FunctionCallInfo) -> Datum {
 
 // pq_sendbyte(buf, byt); the Rust pqformat exports pq_sendint8.
 #[inline]
+#[no_mangle]
 unsafe fn pq_sendbyte(buf: StringInfo, byt: c_char) {
     crate::libpq::pqformat::pq_sendint8(buf, byt as u8);
 }

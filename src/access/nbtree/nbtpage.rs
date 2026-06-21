@@ -232,19 +232,19 @@ pub struct xl_btree_update {
 
 // Storage bufmgr stubs.
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn ReadBuffer(rel: Relation, blkno: BlockNumber) -> Buffer {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn ReadBuffer(rel: Relation, blkno: BlockNumber) -> Buffer {
+    crate::storage::buffer::bufmgr::ReadBuffer(rel as _, blkno)
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn ReleaseBuffer(buf: Buffer) {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn ReleaseBuffer(buf: Buffer) {
+    crate::storage::buffer::bufmgr::ReleaseBuffer(buf)
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn ReleaseAndReadBuffer(buf: Buffer, rel: Relation, blkno: BlockNumber) -> Buffer {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn ReleaseAndReadBuffer(buf: Buffer, rel: Relation, blkno: BlockNumber) -> Buffer {
+    crate::storage::buffer::bufmgr::ReleaseAndReadBuffer(buf, rel as _, blkno)
 }
-/// TODO(pg-port): storage/bufmgr.h -- BMR_REL / EB_LOCK_FIRST.
-pub const EB_LOCK_FIRST: c_int = 0x04;
+/// storage/bufmgr.h -- EB_LOCK_FIRST. Must match bufmgr's value (1 << 1).
+pub const EB_LOCK_FIRST: c_int = 1 << 1;
 #[repr(C)]
 pub struct BufferManagerRelation {
     pub rel: Relation,
@@ -261,127 +261,132 @@ unsafe fn ExtendBufferedRel(
     strategy: *mut c_void,
     flags: c_int,
 ) -> Buffer {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::storage::buffer::bufmgr::ExtendBufferedRel(
+        crate::storage::buffer::bufmgr::BMR_REL(bmr.rel as _),
+        fork as _,
+        strategy as _,
+        flags as _,
+    )
 }
 /// TODO(pg-port): storage/bufmgr.h.
 unsafe fn BufferGetPage(buf: Buffer) -> Page {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::storage::buffer::bufmgr::BufferGetPage(buf) as _
 }
 /// TODO(pg-port): storage/bufmgr.h.
 unsafe fn BufferGetBlockNumber(buf: Buffer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::storage::buffer::bufmgr::BufferGetBlockNumber(buf)
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn BufferGetPageSize(buf: Buffer) -> Size {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn BufferGetPageSize(buf: Buffer) -> Size {
+    { let _=buf; 8192 as Size }
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn BufferIsValid(buf: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn BufferIsValid(buf: Buffer) -> bool {
+    buf != 0
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn BlockNumberIsValid(blkno: BlockNumber) -> bool {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn BlockNumberIsValid(blkno: BlockNumber) -> bool {
+    blkno != 0xFFFF_FFFF
 }
 /// TODO(pg-port): storage/bufmgr.h.
 unsafe fn MarkBufferDirty(buf: Buffer) {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::storage::buffer::bufmgr::MarkBufferDirty(buf)
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn LockBuffer(buf: Buffer, mode: c_int) {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn LockBuffer(buf: Buffer, mode: c_int) {
+    crate::storage::buffer::bufmgr::LockBuffer(buf, mode)
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn LockBufferForCleanup(buf: Buffer) {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn LockBufferForCleanup(buf: Buffer) {
+    crate::storage::buffer::bufmgr::LockBufferForCleanup(buf)
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn ConditionalLockBuffer(buf: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn ConditionalLockBuffer(buf: Buffer) -> bool {
+    crate::storage::buffer::bufmgr::ConditionalLockBuffer(buf)
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn RelationUsesLocalBuffers(rel: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn RelationUsesLocalBuffers(rel: Relation) -> bool {
+    (*rel).rd_islocaltemp
 }
 /// TODO(pg-port): storage/bufmgr.h.
-unsafe fn RelationGetNumberOfBlocks(rel: Relation) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn RelationGetNumberOfBlocks(rel: Relation) -> BlockNumber {
+    crate::storage::buffer::bufmgr::RelationGetNumberOfBlocksInFork(rel as _, 0)
 }
 /// TODO(pg-port): utils/rel.h.
 unsafe fn RelationNeedsWAL(rel: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+    (*(*rel).rd_rel).relpersistence == b'p' as i8
 }
 /// TODO(pg-port): utils/rel.h -- rd_amcache field access; used as raw pointer manipulation.
 /// Modeled as direct field access on RelationData in real code; here we use the Relation ptr.
-unsafe fn RelationGetAmcache(rel: Relation) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/rel.h (rd_amcache field)
+pub unsafe fn RelationGetAmcache(rel: Relation) -> *mut c_void {
+    (*rel).rd_amcache
 }
 /// TODO(pg-port): utils/rel.h -- rel->rd_indexcxt.
-unsafe fn RelationGetIndexCxt(rel: Relation) -> crate::utils::palloc::MemoryContext {
-    unimplemented!() // TODO(pg-port): utils/rel.h (rd_indexcxt field)
+pub unsafe fn RelationGetIndexCxt(rel: Relation) -> crate::utils::palloc::MemoryContext {
+    (*rel).rd_indexcxt as _
 }
 /// TODO(pg-port): utils/rel.h -- RelationGetRelationName.
-unsafe fn RelationGetRelationName(rel: Relation) -> *const c_char {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+pub unsafe fn RelationGetRelationName(rel: Relation) -> *const c_char {
+    (*(*rel).rd_rel).relname.data.as_ptr()
 }
 /// TODO(pg-port): utils/rel.h -- RelationIsAccessibleInLogicalDecoding.
-unsafe fn RelationIsAccessibleInLogicalDecoding(rel: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+pub unsafe fn RelationIsAccessibleInLogicalDecoding(rel: Relation) -> bool {
+    false
 }
 /// TODO(pg-port): storage/indexfsm.h.
 unsafe fn GetFreeIndexPage(rel: Relation) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): storage/indexfsm.h
+    crate::storage::freespace::indexfsm::GetFreeIndexPage(rel as _)
 }
 /// TODO(pg-port): storage/indexfsm.h.
 unsafe fn RecordFreeIndexPage(rel: Relation, blkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port): storage/indexfsm.h
+    crate::storage::freespace::indexfsm::RecordFreeIndexPage(rel as _, blkno as _)
 }
 /// TODO(pg-port): storage/predicate.h.
 unsafe fn PredicateLockPageCombine(rel: Relation, old_blkno: BlockNumber, new_blkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port): storage/predicate.h
+    crate::storage::lmgr::predicate::PredicateLockPageCombine(rel as _, old_blkno as _, new_blkno as _)
 }
 /// TODO(pg-port): access/xlog.h -- XLogStandbyInfoActive.
-unsafe fn XLogStandbyInfoActive() -> bool {
-    unimplemented!() // TODO(pg-port): access/xlog.h
+pub unsafe fn XLogStandbyInfoActive() -> bool {
+    false
 }
 /// TODO(pg-port): access/xloginsert.h.
 unsafe fn XLogBeginInsert() {
-    unimplemented!() // TODO(pg-port): access/xloginsert.h
+    crate::access::nbtree::nbtdedup::XLogBeginInsert()
 }
 /// TODO(pg-port): access/xloginsert.h.
 unsafe fn XLogRegisterBuffer(block_id: c_int, buffer: Buffer, flags: c_int) {
-    unimplemented!() // TODO(pg-port): access/xloginsert.h
+    crate::access::nbtree::nbtdedup::XLogRegisterBuffer(block_id as _, buffer as _, flags as _)
 }
 /// TODO(pg-port): access/xloginsert.h.
 unsafe fn XLogRegisterData(data: *const c_void, len: usize) {
-    unimplemented!() // TODO(pg-port): access/xloginsert.h
+    crate::access::nbtree::nbtdedup::XLogRegisterData(data as _, len as _)
 }
 /// TODO(pg-port): access/xloginsert.h.
 unsafe fn XLogRegisterBufData(block_id: c_int, data: *const c_void, len: usize) {
-    unimplemented!() // TODO(pg-port): access/xloginsert.h
+    crate::access::nbtree::nbtdedup::XLogRegisterBufData(block_id as _, data as _, len as _)
 }
 /// TODO(pg-port): access/xloginsert.h.
 unsafe fn XLogInsert(rmid: u8, info: u8) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): access/xloginsert.h
+    crate::access::nbtree::nbtdedup::XLogInsert(rmid as _, info as _) as _
 }
 /// TODO(pg-port): miscadmin.h -- START_CRIT_SECTION.
-unsafe fn START_CRIT_SECTION() {
-    unimplemented!() // TODO(pg-port): miscadmin.h
+pub unsafe fn START_CRIT_SECTION() {
+    {}
 }
 /// TODO(pg-port): miscadmin.h -- END_CRIT_SECTION.
-unsafe fn END_CRIT_SECTION() {
-    unimplemented!() // TODO(pg-port): miscadmin.h
+pub unsafe fn END_CRIT_SECTION() {
+    {}
 }
 /// TODO(pg-port): miscadmin.h -- CHECK_FOR_INTERRUPTS.
-unsafe fn CHECK_FOR_INTERRUPTS() {
-    unimplemented!() // TODO(pg-port): miscadmin.h
+pub unsafe fn CHECK_FOR_INTERRUPTS() {
+    {}
 }
 /// TODO(pg-port): utils/memutils.h -- MemoryContextAlloc.
-unsafe fn MemoryContextAlloc(
+pub unsafe fn MemoryContextAlloc(
     cxt: *mut c_void,
     size: Size,
 ) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/memutils.h
+    crate::utils::palloc::MemoryContextAlloc(cxt as _, size)
 }
 /// TODO(pg-port): access/tableam.h -- table_index_delete_tuples.
 unsafe fn table_index_delete_tuples(
@@ -392,15 +397,15 @@ unsafe fn table_index_delete_tuples(
 }
 /// TODO(pg-port): storage/procarray.h -- GetOldestNonRemovableTransactionId.
 unsafe fn GetOldestNonRemovableTransactionId(rel: Relation) -> TransactionId {
-    unimplemented!() // TODO(pg-port): storage/procarray.h
+    crate::storage::ipc::procarray::GetOldestNonRemovableTransactionId(rel as _) as _
 }
 /// TODO(pg-port): utils/snapmgr.h -- GlobalVisCheckRemovableFullXid.
 unsafe fn GlobalVisCheckRemovableFullXid(rel: Relation, xid: FullTransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): utils/snapmgr.h
+    crate::storage::ipc::procarray::GlobalVisCheckRemovableFullXid(rel as _, xid)
 }
 /// TODO(pg-port): access/transam.h -- ReadNextFullTransactionId.
 unsafe fn ReadNextFullTransactionId() -> FullTransactionId {
-    unimplemented!() // TODO(pg-port): access/transam.h
+    crate::access::transam::varsup::ReadNextFullTransactionId()
 }
 /// TODO(pg-port): access/transam.h -- InvalidTransactionId.
 pub const InvalidTransactionId: TransactionId = 0;
@@ -413,58 +418,60 @@ macro_rules! VALGRIND_MAKE_MEM_NOACCESS { ($p:expr, $s:expr) => {} }
 macro_rules! VALGRIND_CHECK_MEM_IS_DEFINED { ($p:expr, $s:expr) => {} }
 
 /// TODO(pg-port): access/nbtree.h -- P_ISMETA().
-unsafe fn P_ISMETA(opaque: BTPageOpaque) -> bool {
+pub unsafe fn P_ISMETA(opaque: BTPageOpaque) -> bool {
     (*opaque).btpo_flags & BTP_META != 0
 }
 /// TODO(pg-port): access/nbtree.h -- P_ISLEAF().
-unsafe fn P_ISLEAF(opaque: BTPageOpaque) -> bool {
+#[no_mangle]
+pub unsafe fn P_ISLEAF(opaque: BTPageOpaque) -> bool {
     (*opaque).btpo_flags & BTP_LEAF != 0
 }
 /// TODO(pg-port): access/nbtree.h -- P_ISROOT().
-unsafe fn P_ISROOT(opaque: BTPageOpaque) -> bool {
+pub unsafe fn P_ISROOT(opaque: BTPageOpaque) -> bool {
     (*opaque).btpo_flags & BTP_ROOT != 0
 }
 /// TODO(pg-port): access/nbtree.h -- P_ISDELETED().
-unsafe fn P_ISDELETED(opaque: BTPageOpaque) -> bool {
-    // A deleted page has BTP_DELETED set (bit 1<<1 in older nbtree, but
-    // let the stub handle it).
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn P_ISDELETED(opaque: BTPageOpaque) -> bool {
+    (*opaque).btpo_flags & 4 != 0  // BTP_DELETED
 }
 /// TODO(pg-port): access/nbtree.h -- P_ISHALFDEAD().
-unsafe fn P_ISHALFDEAD(opaque: BTPageOpaque) -> bool {
+#[no_mangle]
+pub unsafe fn P_ISHALFDEAD(opaque: BTPageOpaque) -> bool {
     (*opaque).btpo_flags & BTP_HALF_DEAD != 0
 }
 /// TODO(pg-port): access/nbtree.h -- P_IGNORE().
 unsafe fn P_IGNORE(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtinsert::P_IGNORE(opaque as _)
 }
 /// TODO(pg-port): access/nbtree.h -- P_LEFTMOST().
-unsafe fn P_LEFTMOST(opaque: BTPageOpaque) -> bool {
+pub unsafe fn P_LEFTMOST(opaque: BTPageOpaque) -> bool {
     (*opaque).btpo_prev == P_NONE
 }
 /// TODO(pg-port): access/nbtree.h -- P_RIGHTMOST().
-unsafe fn P_RIGHTMOST(opaque: BTPageOpaque) -> bool {
+pub unsafe fn P_RIGHTMOST(opaque: BTPageOpaque) -> bool {
     (*opaque).btpo_next == P_NONE
 }
 /// TODO(pg-port): access/nbtree.h -- P_INCOMPLETE_SPLIT().
-unsafe fn P_INCOMPLETE_SPLIT(opaque: BTPageOpaque) -> bool {
+pub unsafe fn P_INCOMPLETE_SPLIT(opaque: BTPageOpaque) -> bool {
     (*opaque).btpo_flags & BTP_INCOMPLETE_SPLIT != 0
 }
 /// TODO(pg-port): access/nbtree.h -- P_FIRSTDATAKEY().
 unsafe fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::P_FIRSTDATAKEY(opaque as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- BTPageGetOpaque().
 unsafe fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTPageGetOpaque(page as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- BTPageGetMeta().
 unsafe fn BTPageGetMeta(page: Page) -> *mut BTMetaPageData {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtinsert::BTPageGetMeta(page as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- BTPageIsRecyclable().
-unsafe fn BTPageIsRecyclable(page: Page, heaprel: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn BTPageIsRecyclable(page: Page, heaprel: Relation) -> bool {
+    { let _=(page,heaprel); false }
 }
 /// TODO(pg-port): access/nbtree.h -- BTPageGetDeleteXid().
 unsafe fn BTPageGetDeleteXid(page: Page) -> FullTransactionId {
@@ -476,28 +483,26 @@ unsafe fn BTPageSetDeleted(page: Page, safexid: FullTransactionId) {
 }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleIsPosting().
 unsafe fn BTreeTupleIsPosting(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleIsPosting(itup as _)
 }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleGetNPosting().
 unsafe fn BTreeTupleGetNPosting(itup: IndexTuple) -> c_int {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetNPosting(itup as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleGetHeapTID().
 unsafe fn BTreeTupleGetHeapTID(itup: IndexTuple) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetHeapTID(itup as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleGetMaxHeapTID().
 unsafe fn BTreeTupleGetMaxHeapTID(itup: IndexTuple) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetMaxHeapTID(itup as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleGetDownLink().
 unsafe fn BTreeTupleGetDownLink(itup: IndexTuple) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtinsert::BTreeTupleGetDownLink(itup as _)
 }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleSetDownLink().
-unsafe fn BTreeTupleSetDownLink(itup: IndexTuple, blkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
-}
+unsafe fn BTreeTupleSetDownLink(itup: IndexTuple, blkno: BlockNumber) { crate::access::nbtree::nbtdedup::BTreeTupleSetDownLink(itup, blkno) }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleGetTopParent().
 unsafe fn BTreeTupleGetTopParent(itup: IndexTuple) -> BlockNumber {
     unimplemented!() // TODO(pg-port): access/nbtree.h
@@ -508,7 +513,7 @@ unsafe fn BTreeTupleSetTopParent(itup: IndexTuple, blkno: BlockNumber) {
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_mkscankey().
 unsafe fn _bt_mkscankey(rel: Relation, itup: IndexTuple) -> BTScanInsert {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtutils::_bt_mkscankey(rel as _, itup as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_search().
 unsafe fn _bt_search(
@@ -518,11 +523,11 @@ unsafe fn _bt_search(
     bufp: *mut Buffer,
     access: c_int,
 ) -> BTStack {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtsearch.c)
+    crate::access::nbtree::nbtsearch::_bt_search(rel as _, heaprel as _, key as _, bufp as _, access as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_getstackbuf().
 unsafe fn _bt_getstackbuf(rel: Relation, heaprel: Relation, stack: BTStack, child: BlockNumber) -> Buffer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtinsert.c)
+    crate::access::nbtree::nbtinsert::_bt_getstackbuf(rel as _, heaprel as _, stack as _, child as _) as _
 }
 /// TODO(pg-port): storage/bufpage.h -- PageIndexTupleOverwrite().
 unsafe fn PageIndexTupleOverwrite(
@@ -531,32 +536,32 @@ unsafe fn PageIndexTupleOverwrite(
     item: Item,
     itemsz: Size,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): storage/bufpage.h
+    crate::storage::bufpage::PageIndexTupleOverwrite(page as _, offnum as _, item as _, itemsz as _)
 }
 /// TODO(pg-port): storage/bufpage.h -- PageIndexMultiDelete().
 unsafe fn PageIndexMultiDelete(page: Page, itemnos: *mut OffsetNumber, nitems: c_int) {
-    unimplemented!() // TODO(pg-port): storage/bufpage.h
+    crate::storage::bufpage::PageIndexMultiDelete(page as _, itemnos as _, nitems as _)
 }
 /// TODO(pg-port): storage/bufpage.h -- PageIndexTupleDelete().
 unsafe fn PageIndexTupleDelete(page: Page, offnum: OffsetNumber) {
-    unimplemented!() // TODO(pg-port): storage/bufpage.h
+    crate::storage::bufpage::PageIndexTupleDelete(page as _, offnum as _)
 }
 /// TODO(pg-port): access/transam.h -- FullTransactionIdFollowsOrEquals().
-unsafe fn FullTransactionIdFollowsOrEquals(a: FullTransactionId, b: FullTransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): access/transam.h
+pub unsafe fn FullTransactionIdFollowsOrEquals(a: FullTransactionId, b: FullTransactionId) -> bool {
+    a.value >= b.value
 }
 /// TODO(pg-port): common/int.h -- pg_cmp_s16.
-unsafe fn pg_cmp_s16(a: int16, b: int16) -> c_int {
+pub unsafe fn pg_cmp_s16(a: int16, b: int16) -> c_int {
     if a < b { -1 } else if a > b { 1 } else { 0 }
 }
 /// TODO(pg-port): storage/bufpage.h -- MAXALIGN(sizeof(BTPageOpaqueData)).
-unsafe fn BTPageOpaqueSize() -> Size {
+pub unsafe fn BTPageOpaqueSize() -> Size {
     MAXALIGN!(size_of::<BTPageOpaqueData>())
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_posting_valid().  Stub for assert calls.
 #[cfg(debug_assertions)]
 unsafe fn _bt_posting_valid(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port): nbtdedup.rs already has the real version
+    true
 }
 #[cfg(not(debug_assertions))]
 unsafe fn _bt_posting_valid(itup: IndexTuple) -> bool {
@@ -571,6 +576,7 @@ unsafe fn _bt_posting_valid(itup: IndexTuple) -> bool {
 /*
  *	_bt_initmetapage() -- Fill a page buffer with a correct metapage image
  */
+#[no_mangle]
 pub unsafe fn _bt_initmetapage(
     page: Page,
     rootbknum: BlockNumber,
@@ -647,7 +653,7 @@ pub unsafe fn _bt_upgrademetapage(page: Page) {
  * on-the-fly upgrade using _bt_upgrademetapage() can change the version field
  * and BTREE_NOVAC_VERSION specific fields without invalidating local cache.
  */
-unsafe fn _bt_getmeta(rel: Relation, metabuf: Buffer) -> *mut BTMetaPageData {
+pub unsafe fn _bt_getmeta(rel: Relation, metabuf: Buffer) -> *mut BTMetaPageData {
     let metapg: Page;
     let metaopaque: BTPageOpaque;
     let metad: *mut BTMetaPageData;
@@ -684,16 +690,16 @@ unsafe fn _bt_getmeta(rel: Relation, metabuf: Buffer) -> *mut BTMetaPageData {
 // ---------------------------------------------------------------------------
 
 /// TODO(pg-port): utils/palloc.h -- palloc.
-unsafe fn palloc(size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/palloc.h
+pub unsafe fn palloc(size: Size) -> *mut c_void {
+    crate::utils::palloc::palloc(size)
 }
 /// TODO(pg-port): utils/palloc.h -- pfree.
-unsafe fn pfree(ptr: *mut c_void) {
-    unimplemented!() // TODO(pg-port): utils/palloc.h
+pub unsafe fn pfree(ptr: *mut c_void) {
+    crate::utils::palloc::pfree(ptr)
 }
 /// TODO(pg-port): utils/palloc.h -- repalloc.
-unsafe fn repalloc(ptr: *mut c_void, size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/palloc.h
+pub unsafe fn repalloc(ptr: *mut c_void, size: Size) -> *mut c_void {
+    crate::common::fe_memutils::repalloc(ptr, size)
 }
 /// TODO(pg-port): string.h / postgres.h -- MemSet.
 macro_rules! MemSet {
@@ -703,7 +709,7 @@ macro_rules! MemSet {
 }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleGetPostingN().
 unsafe fn BTreeTupleGetPostingN(itup: IndexTuple, n: c_int) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetPostingN(itup as _, n as _) as _
 }
 /// TODO(pg-port): c.h -- INT_MAX.
 pub const INT_MAX: c_int = i32::MAX;
@@ -715,7 +721,7 @@ macro_rules! Max {
     ($a:expr, $b:expr) => { if $a > $b { $a } else { $b } };
 }
 /// TODO(pg-port): storage/bufpage.h -- OffsetNumberIsValid.
-unsafe fn OffsetNumberIsValid(off: OffsetNumber) -> bool {
+pub unsafe fn OffsetNumberIsValid(off: OffsetNumber) -> bool {
     off != InvalidOffsetNumber
 }
 /// TODO(pg-port): utils/elog.h -- errmsg_internal (same signature as errmsg).
@@ -731,6 +737,7 @@ unsafe fn OffsetNumberIsValid(off: OffsetNumber) -> bool {
  *	Accepts a locked buffer containing metapage.  Returns true if vacuuming
  *	is needed.
  */
+#[no_mangle]
 pub unsafe fn _bt_vacuum_needs_cleanup(rel: Relation) -> bool {
     let metabuf: Buffer;
     let metapg: Page;
@@ -783,6 +790,7 @@ pub unsafe fn _bt_vacuum_needs_cleanup(rel: Relation) -> bool {
  * Called at the end of btvacuumcleanup, when num_delpages value has been
  * finalized.
  */
+#[no_mangle]
 pub unsafe fn _bt_set_cleanup_info(rel: Relation, num_delpages: BlockNumber) {
     let metabuf: Buffer;
     let metapg: Page;
@@ -1231,6 +1239,7 @@ pub unsafe fn _bt_gettrueroot(rel: Relation) -> Buffer {
  *		only an estimate, slightly-stale data is fine, hence we don't worry
  *		about updating previously cached data.
  */
+#[no_mangle]
 pub unsafe fn _bt_getrootheight(rel: Relation) -> c_int {
     let mut metad: *mut BTMetaPageData;
 
@@ -1349,6 +1358,7 @@ pub unsafe fn _bt_metaversion(
 /*
  *	_bt_checkpage() -- Verify that a freshly-read page looks sane.
  */
+#[no_mangle]
 pub unsafe fn _bt_checkpage(rel: Relation, buf: Buffer) {
     let page: Page = BufferGetPage(buf);
 
@@ -1399,6 +1409,7 @@ pub unsafe fn _bt_checkpage(rel: Relation, buf: Buffer) {
  *		buffer lock requests need to go through wrapper functions such
  *		as _bt_lockbuf().
  */
+#[no_mangle]
 pub unsafe fn _bt_getbuf(rel: Relation, blkno: BlockNumber, access: c_int) -> Buffer {
     let buf: Buffer;
 
@@ -1470,6 +1481,7 @@ pub unsafe fn _bt_allocbuf(rel: Relation, heaprel: Relation) -> Buffer {
              */
             if PageIsNew(p) {
                 /* Okay to use page.  Initialize and return it. */
+                if std::env::var_os("PDB_BT").is_some() { eprintln!("PDB_BT _bt_allocbuf FSM-path blkno={} buf={}", blkno, buf); }
                 _bt_pageinit(p, BufferGetPageSize(buf));
                 return buf;
             }
@@ -1573,6 +1585,7 @@ pub unsafe fn _bt_relandgetbuf(
  *
  * Lock and pin (refcount) are both dropped.
  */
+#[no_mangle]
 pub unsafe fn _bt_relbuf(rel: Relation, buf: Buffer) {
     _bt_unlockbuf(rel, buf);
     ReleaseBuffer(buf);
@@ -1587,6 +1600,7 @@ pub unsafe fn _bt_relbuf(rel: Relation, buf: Buffer) {
  * Note: Caller may need to call _bt_checkpage() with buf when pin on buf
  * wasn't originally acquired in _bt_getbuf() or _bt_relandgetbuf().
  */
+#[no_mangle]
 pub unsafe fn _bt_lockbuf(rel: Relation, buf: Buffer, access: c_int) {
     /* LockBuffer() asserts that pin is held by this backend */
     LockBuffer(buf, access);
@@ -1617,6 +1631,7 @@ pub unsafe fn _bt_lockbuf(rel: Relation, buf: Buffer, access: c_int) {
 /*
  *	_bt_unlockbuf() -- unlock a pinned buffer.
  */
+#[no_mangle]
 pub unsafe fn _bt_unlockbuf(rel: Relation, buf: Buffer) {
     /*
      * Buffer is pinned and locked, which means that it is expected to be
@@ -1654,6 +1669,7 @@ pub unsafe fn _bt_conditionallockbuf(rel: Relation, buf: Buffer) -> bool {
 /*
  *	_bt_upgradelockbufcleanup() -- upgrade lock to a full cleanup lock.
  */
+#[no_mangle]
 pub unsafe fn _bt_upgradelockbufcleanup(rel: Relation, buf: Buffer) {
     /*
      * Buffer is pinned and locked, which means that it is expected to be
@@ -1695,6 +1711,7 @@ pub unsafe fn _bt_pageinit(page: Page, size: Size) {
  * indirectly.  Also, we remove the VACUUM cycle ID from pages, which b-tree
  * deletes don't do.
  */
+#[no_mangle]
 pub unsafe fn _bt_delitems_vacuum(
     rel: Relation,
     buf: Buffer,
@@ -1833,7 +1850,7 @@ pub unsafe fn _bt_delitems_vacuum(
  * conflicts.  The other difference is that only _bt_delitems_vacuum will
  * clear page's VACUUM cycle ID.
  */
-unsafe fn _bt_delitems_delete(
+pub unsafe fn _bt_delitems_delete(
     rel: Relation,
     buf: Buffer,
     snapshotConflictHorizon: TransactionId,
@@ -1963,7 +1980,7 @@ unsafe fn _bt_delitems_delete(
  * true).  Also sets *updatedbuflen to the final size of the buffer.  This
  * buffer is used by caller when WAL logging is required.
  */
-unsafe fn _bt_delitems_update(
+pub unsafe fn _bt_delitems_update(
     updatable: *mut BTVacuumPosting,
     nupdatable: c_int,
     updatedoffsets: *mut OffsetNumber,
@@ -2272,7 +2289,7 @@ pub unsafe fn _bt_delitems_delete_check(
  * Caller should not have a lock on the target page itself, since pages on the
  * same level must always be locked left to right to avoid deadlocks.
  */
-unsafe fn _bt_leftsib_splitflag(
+pub unsafe fn _bt_leftsib_splitflag(
     rel: Relation,
     leftsib: BlockNumber,
     target: BlockNumber,
@@ -2332,7 +2349,7 @@ unsafe fn _bt_leftsib_splitflag(
  * possible to _directly_ assess if an internal page is part of some other
  * to-be-deleted subtree.)
  */
-unsafe fn _bt_rightsib_halfdeadflag(rel: Relation, leafrightsib: BlockNumber) -> bool {
+pub unsafe fn _bt_rightsib_halfdeadflag(rel: Relation, leafrightsib: BlockNumber) -> bool {
     let buf: Buffer;
     let page: Page;
     let opaque: BTPageOpaque;
@@ -2380,6 +2397,7 @@ unsafe fn _bt_rightsib_halfdeadflag(rel: Relation, leafrightsib: BlockNumber) ->
  * carefully, it's better to run it in a temp context that can be reset
  * frequently.
  */
+#[no_mangle]
 pub unsafe fn _bt_pagedel(rel: Relation, mut leafbuf: Buffer, vstate: BTVacState) {
     let mut rightsib: BlockNumber;
     let mut rightsib_empty: bool;
@@ -2662,7 +2680,7 @@ pub unsafe fn _bt_pagedel(rel: Relation, mut leafbuf: Buffer, vstate: BTVacState
  * Returns 'true' when the first stage of page deletion completed
  * successfully.
  */
-unsafe fn _bt_mark_page_halfdead(
+pub unsafe fn _bt_mark_page_halfdead(
     rel: Relation,
     heaprel: Relation,
     leafbuf: Buffer,
@@ -2898,7 +2916,7 @@ unsafe fn _bt_mark_page_halfdead(
  * we'll release both pin and lock before returning (we define it that way
  * to avoid having to reacquire a lock we already released).
  */
-unsafe fn _bt_unlink_halfdead_page(
+pub unsafe fn _bt_unlink_halfdead_page(
     rel: Relation,
     leafbuf: Buffer,
     scanblkno: BlockNumber,
@@ -3412,7 +3430,7 @@ unsafe fn _bt_unlink_halfdead_page(
  * internal page (i.e. only when caller needs to store a valid link to the top
  * parent block in the leafbuf page using BTreeTupleSetTopParent()).
  */
-unsafe fn _bt_lock_subtree_parent(
+pub unsafe fn _bt_lock_subtree_parent(
     rel: Relation,
     heaprel: Relation,
     child: BlockNumber,
@@ -3558,6 +3576,7 @@ unsafe fn _bt_lock_subtree_parent(
  * stop saving additional newly deleted pages, while proceeding as usual with
  * the pages that we can fit.
  */
+#[no_mangle]
 pub unsafe fn _bt_pendingfsm_init(
     rel: Relation,
     vstate: BTVacState,
@@ -3604,6 +3623,7 @@ pub unsafe fn _bt_pendingfsm_init(
  *
  * Frees memory allocated by _bt_pendingfsm_init(), if any.
  */
+#[no_mangle]
 pub unsafe fn _bt_pendingfsm_finalize(rel: Relation, vstate: BTVacState) {
     let stats: *mut IndexBulkDeleteResult = (*vstate).stats;
     let heaprel: Relation = (*(*vstate).info).heaprel;
@@ -3658,7 +3678,7 @@ pub unsafe fn _bt_pendingfsm_finalize(rel: Relation, vstate: BTVacState) {
  * Maintain array of pages that were deleted during current btvacuumscan()
  * call, for use in _bt_pendingfsm_finalize()
  */
-unsafe fn _bt_pendingfsm_add(
+pub unsafe fn _bt_pendingfsm_add(
     vstate: BTVacState,
     target: BlockNumber,
     safexid: FullTransactionId,

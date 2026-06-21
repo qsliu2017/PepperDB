@@ -1245,7 +1245,7 @@ unsafe fn ExecInitPartitionExecPruning(
     _relids: *mut Bitmapset,
     _initially_valid_subplans: *mut *mut Bitmapset,
 ) -> *mut PartitionPruneState {
-    unimplemented!() // TODO: execPartition.c
+    crate::executor::execPartition::ExecInitPartitionExecPruning(_planstate as _, _n_total_subplans as _, _part_prune_index as _, _relids as _, _initially_valid_subplans as _) as _
 }
 
 unsafe fn ExecFindMatchingSubPlans(
@@ -1253,7 +1253,7 @@ unsafe fn ExecFindMatchingSubPlans(
     _initial_prune: bool,
     _validsubplan_rtis: *mut *mut Bitmapset,
 ) -> *mut Bitmapset {
-    unimplemented!() // TODO: execPartition.c
+    crate::executor::execPartition::ExecFindMatchingSubPlans(_prunestate as _, _initial_prune as _, _validsubplan_rtis as _) as _
 }
 
 unsafe fn ExecGetCommonSlotOps(
@@ -1264,19 +1264,19 @@ unsafe fn ExecGetCommonSlotOps(
 }
 
 unsafe fn ExecInitResultTupleSlotTL(_planstate: *mut PlanState, _tts_ops: *const TupleTableSlotOps) {
-    unimplemented!() // TODO: execTuples.c
+    crate::executor::execTuples::ExecInitResultTupleSlotTL(_planstate as _, _tts_ops as _)
 }
 
 unsafe fn ExecInitNode(_node: *mut Plan, _estate: *mut EState, _eflags: c_int) -> *mut PlanState {
-    unimplemented!() // TODO: execProcnode.c
+    crate::executor::execProcnode::ExecInitNode(_node as _, _estate as _, _eflags as _) as _
 }
 
 unsafe fn ExecEndNode(_node: *mut PlanState) {
-    unimplemented!() // TODO: execProcnode.c
+    crate::executor::execProcnode::ExecEndNode(_node as _)
 }
 
 unsafe fn ExecReScan(_node: *mut PlanState) {
-    unimplemented!() // TODO: execAmi.c
+    crate::executor::execAmi::ExecReScan(_node as _)
 }
 
 unsafe fn UpdateChangedParamSet(_node: *mut PlanState, _newchg: *mut Bitmapset) {
@@ -1284,71 +1284,71 @@ unsafe fn UpdateChangedParamSet(_node: *mut PlanState, _newchg: *mut Bitmapset) 
 }
 
 unsafe fn ExecAsyncRequest(_areq: *mut AsyncRequest) {
-    unimplemented!() // TODO: execAsync.c
+    crate::executor::execAsync::ExecAsyncRequest(_areq as _)
 }
 
 unsafe fn ExecAsyncConfigureWait(_areq: *mut AsyncRequest) {
-    unimplemented!() // TODO: execAsync.c
+    crate::executor::execAsync::ExecAsyncConfigureWait(_areq as _)
 }
 
 unsafe fn ExecAsyncNotify(_areq: *mut AsyncRequest) {
-    unimplemented!() // TODO: execAsync.c
+    crate::executor::execAsync::ExecAsyncNotify(_areq as _)
 }
 
 unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: execTuples.c
+    crate::executor::tuptable::ExecClearTuple(_slot as _) as _
 }
 
 unsafe fn ExecProcNode(_node: *mut PlanState) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor.h
+    crate::executor::executor::ExecProcNode(_node as _) as _
 }
 
 unsafe fn TupIsNull(_slot: *mut TupleTableSlot) -> bool {
-    unimplemented!() // TODO: tuptable.h
+    crate::executor::tuptable::TupIsNull(_slot as _) as _
 }
 
 unsafe fn bms_num_members(_a: *const Bitmapset) -> c_int {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_num_members(_a as _) as _
 }
 
 unsafe fn bms_add_range(_a: *mut Bitmapset, _lower: c_int, _upper: c_int) -> *mut Bitmapset {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_add_range(_a as _, _lower as _, _upper as _) as _
 }
 
 unsafe fn bms_add_member(_a: *mut Bitmapset, _x: c_int) -> *mut Bitmapset {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_add_member(_a as _, _x as _) as _
 }
 
 unsafe fn bms_next_member(_a: *const Bitmapset, _prevbit: c_int) -> c_int {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_next_member(_a as _, _prevbit as _) as _
 }
 
 unsafe fn bms_prev_member(_a: *const Bitmapset, _prevbit: c_int) -> c_int {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_prev_member(_a as _, _prevbit as _) as _
 }
 
 unsafe fn bms_is_empty(_a: *const Bitmapset) -> bool {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_is_empty(_a as _) as _
 }
 
 unsafe fn bms_is_member(_x: c_int, _a: *const Bitmapset) -> bool {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_is_member(_x as _, _a as _) as _
 }
 
 unsafe fn bms_overlap(_a: *const Bitmapset, _b: *const Bitmapset) -> bool {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_overlap(_a as _, _b as _) as _
 }
 
 unsafe fn bms_intersect(_a: *const Bitmapset, _b: *const Bitmapset) -> *mut Bitmapset {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_intersect(_a as _, _b as _) as _
 }
 
 unsafe fn bms_del_members(_a: *mut Bitmapset, _b: *const Bitmapset) -> *mut Bitmapset {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_del_members(_a as _, _b as _) as _
 }
 
 unsafe fn bms_free(_a: *mut Bitmapset) {
-    unimplemented!() // TODO: bitmapset.c
+    crate::nodes::bitmapset::bms_free(_a as _)
 }
 
 unsafe fn ScanDirectionIsForward(_direction: ScanDirection) -> bool {
@@ -1360,27 +1360,27 @@ unsafe fn add_size(_s1: Size, _s2: Size) -> Size {
 }
 
 unsafe fn shm_toc_estimate_chunk(_e: *mut shm_toc_estimator, _sz: Size) {
-    unimplemented!() // TODO: shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_estimate_chunk(_e as _, _sz as _)
 }
 
 unsafe fn shm_toc_estimate_keys(_e: *mut shm_toc_estimator, _cnt: Size) {
-    unimplemented!() // TODO: shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_estimate_keys(_e as _, _cnt as _)
 }
 
 unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _nbytes: Size) -> *mut c_void {
-    unimplemented!() // TODO: shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 
 unsafe fn shm_toc_insert(_toc: *mut shm_toc, _key: u64, _address: *mut c_void) {
-    unimplemented!() // TODO: shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 
 unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: u64, _noError: bool) -> *mut c_void {
-    unimplemented!() // TODO: shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }
 
 unsafe fn LWLockInitialize(_lock: *mut LWLock, _tranche_id: c_int) {
-    unimplemented!() // TODO: lwlock.c
+    crate::storage::lmgr::lwlock::LWLockInitialize(_lock as _, _tranche_id as _)
 }
 
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: LWLockMode) -> bool {
@@ -1392,7 +1392,7 @@ unsafe fn LWLockRelease(_lock: *mut LWLock) {
 }
 
 unsafe fn CreateWaitEventSet(_resowner: *mut ResourceOwnerData, _nevents: c_int) -> *mut WaitEventSet {
-    unimplemented!() // TODO: waiteventset.c
+    crate::storage::ipc::waiteventset::CreateWaitEventSet(_resowner as _, _nevents as _) as _
 }
 
 unsafe fn AddWaitEventToSet(
@@ -1402,15 +1402,15 @@ unsafe fn AddWaitEventToSet(
     _latch: *mut Latch,
     _user_data: *mut c_void,
 ) -> c_int {
-    unimplemented!() // TODO: waiteventset.c
+    crate::storage::ipc::waiteventset::AddWaitEventToSet(_set as _, _events as _, _fd as _, _latch as _, _user_data as _) as _
 }
 
 unsafe fn GetNumRegisteredWaitEvents(_set: *mut WaitEventSet) -> c_int {
-    unimplemented!() // TODO: waiteventset.c
+    crate::storage::ipc::waiteventset::GetNumRegisteredWaitEvents(_set as _) as _
 }
 
 unsafe fn FreeWaitEventSet(_set: *mut WaitEventSet) {
-    unimplemented!() // TODO: waiteventset.c
+    crate::storage::ipc::waiteventset::FreeWaitEventSet(_set as _)
 }
 
 unsafe fn WaitEventSetWait(
@@ -1420,19 +1420,19 @@ unsafe fn WaitEventSetWait(
     _nevents: c_int,
     _wait_event_info: u32,
 ) -> c_int {
-    unimplemented!() // TODO: waiteventset.c
+    crate::storage::ipc::waiteventset::WaitEventSetWait(_set as _, _timeout as _, _occurred_events as _, _nevents as _, _wait_event_info as _) as _
 }
 
 unsafe fn ResetLatch(_latch: *mut Latch) {
-    unimplemented!() // TODO: latch.c
+    crate::storage::ipc::latch::ResetLatch(_latch as _)
 }
 
 unsafe fn list_length(_l: *const List) -> c_int {
-    unimplemented!() // TODO: pg_list.h
+    crate::nodes::pg_list::list_length(_l as _) as _
 }
 
 unsafe fn list_nth(_list: *const List, _n: c_int) -> *mut c_void {
-    unimplemented!() // TODO: list.c
+    crate::nodes::pg_list::list_nth(_list as _, _n as _) as _
 }
 
 unsafe fn memset(_s: *mut c_void, _c: c_int, _n: Size) -> *mut c_void {

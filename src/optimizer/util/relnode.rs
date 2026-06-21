@@ -136,12 +136,12 @@ struct JoinHashEntry {
 
 /// TODO(pg-port): utils/cache/lsyscache.c op_strict
 unsafe fn op_strict(opno: Oid) -> bool {
-    unimplemented!("TODO(pg-port): lsyscache op_strict")
+    crate::utils::cache::lsyscache::op_strict(opno)
 }
 
 /// TODO(pg-port): utils/cache/lsyscache.c op_in_opfamily
 unsafe fn op_in_opfamily(opno: Oid, opfamily: Oid) -> bool {
-    unimplemented!("TODO(pg-port): lsyscache op_in_opfamily")
+    crate::utils::cache::lsyscache::op_in_opfamily(opno, opfamily)
 }
 
 /// TODO(pg-port): utils/cache/lsyscache.c get_opfamily_member
@@ -151,12 +151,12 @@ unsafe fn get_opfamily_member(
     righttype: Oid,
     strategy: i16,
 ) -> Oid {
-    unimplemented!("TODO(pg-port): lsyscache get_opfamily_member")
+    crate::utils::cache::lsyscache::get_opfamily_member(opfamily, lefttype, righttype, strategy)
 }
 
 /// TODO(pg-port): utils/cache/lsyscache.c get_mergejoin_opfamilies
 unsafe fn get_mergejoin_opfamilies(opno: Oid) -> *mut List {
-    unimplemented!("TODO(pg-port): lsyscache get_mergejoin_opfamilies")
+    unimplemented!()
 }
 
 /* optimizer/plancat.h -- get_relation_info */
@@ -168,7 +168,7 @@ unsafe fn get_relation_info(
     inhparent: bool,
     rel: *mut RelOptInfo,
 ) {
-    unimplemented!("TODO(pg-port): plancat get_relation_info")
+    crate::optimizer::util::plancat::get_relation_info(root, relationObjectId, inhparent, rel)
 }
 
 /* rewrite/rowsecurity.h / parser -- getRTEPermissionInfo */
@@ -178,7 +178,7 @@ unsafe fn getRTEPermissionInfo(
     rteperminfos: *mut List,
     rte: *mut RangeTblEntry,
 ) -> *mut RTEPermissionInfo {
-    unimplemented!("TODO(pg-port): rowsecurity getRTEPermissionInfo")
+    crate::parser::parse_relation::getRTEPermissionInfo(rteperminfos, rte)
 }
 
 /* nodes/nodeFuncs.h -- copyObject */
@@ -192,7 +192,7 @@ unsafe fn copyObject<T>(obj: *const T) -> *mut T {
 
 /// TODO(pg-port): nodes/equalfuncs.c equal
 unsafe fn equal(a: *const c_void, b: *const c_void) -> bool {
-    unimplemented!("TODO(pg-port): equalfuncs equal")
+    crate::nodes::equalfuncs::equal(a, b)
 }
 
 /* miscadmin.h -- GetUserId */
@@ -245,11 +245,7 @@ unsafe fn repalloc0_array_appendrel(
     ptr
 }
 
-/* RTEPermissionInfo (opaque here -- stub type) */
-#[repr(C)]
-pub struct RTEPermissionInfo {
-    pub checkAsUser: Oid,
-}
+pub use crate::nodes::parsenodes::RTEPermissionInfo;
 
 /* clamp_width_est helper -- from optimizer/plan/planner.c */
 /// Clamp a tuple-width estimate to fit in a c_int.

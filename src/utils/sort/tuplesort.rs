@@ -58,6 +58,10 @@ use crate::utils::mmgr::bump::BumpContextCreate;
 use crate::utils::mmgr::mcxt::{
     repalloc_huge, GetMemoryChunkSpace, MemoryContextResetOnly,
 };
+// tuplesort is built around memory contexts (sortcontext/tuplecontext, USEMEM
+// accounting via GetMemoryChunkSpace, MemoryContextReset). Use the context-aware
+// mcxt allocators, not the prelude's simple palloc (whose chunks have no mcxt header).
+use crate::utils::mmgr::mcxt::{palloc, palloc0, pfree, repalloc};
 use crate::utils::sort::logtape::{
     LogicalTape, LogicalTapeBackspace, LogicalTapeClose, LogicalTapeCreate, LogicalTapeFreeze,
     LogicalTapeImport, LogicalTapeRead, LogicalTapeRewindForRead, LogicalTapeSeek,
@@ -740,20 +744,22 @@ pub unsafe fn tuplesort_begin_common(
      * Memory context surviving tuplesort_reset.  This memory context holds
      * data which is useful to keep while sorting multiple similar batches.
      */
-    maincontext = AllocSetContextCreate!(
+    // Use a real AllocSet context (not the bootstrap macro stub) so mcxt-aware
+    // allocation/accounting (GetMemoryChunkSpace, MemoryContextReset) works here.
+    maincontext = crate::utils::mmgr::aset::AllocSetContextCreate(
         CurrentMemoryContext,
         c"TupleSort main".as_ptr(),
-        ALLOCSET_DEFAULT_SIZES
+        ALLOCSET_DEFAULT_SIZES,
     );
 
     /*
      * Create a working memory context for one sort operation.  The content of
      * this context is deleted by tuplesort_reset.
      */
-    sortcontext = AllocSetContextCreate!(
+    sortcontext = crate::utils::mmgr::aset::AllocSetContextCreate(
         maincontext,
         c"TupleSort sort".as_ptr(),
-        ALLOCSET_DEFAULT_SIZES
+        ALLOCSET_DEFAULT_SIZES,
     );
 
     /*
@@ -891,8 +897,14 @@ unsafe fn tuplesort_begin_batch(state: *mut Tuplesortstate) {
         (*state).memtupsize = INITIAL_MEMTUPSIZE();
     }
     if (*state).memtuples.is_null() {
+        if std::env::var_os("PDB_BT").is_some() {
+            let c = crate::utils::mmgr::mcxt::CurrentMemoryContext;
+            eprintln!("PDB_BT tuplesort memtuples ctx={:p} type={} methods={:p} aset_methods={:p}",
+                c, if c.is_null() {-1} else {(*c).r#type as i32}, if c.is_null(){core::ptr::null()}else{(*c).methods as *const _ as *const ()},
+                core::ptr::null::<()>());
+        }
         (*state).memtuples =
-            palloc((*state).memtupsize as usize * core::mem::size_of::<SortTuple>())
+            crate::utils::mmgr::mcxt::palloc((*state).memtupsize as usize * core::mem::size_of::<SortTuple>())
                 as *mut SortTuple;
         USEMEM(state, GetMemoryChunkSpace((*state).memtuples as *mut c_void) as int64);
     }

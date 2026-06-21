@@ -685,12 +685,8 @@ unsafe fn DsaPointerIsValid(p: dsa_pointer) -> bool {
 }
 
 // storage/itemptr.h
-unsafe fn ItemPointerGetBlockNumber(_pointer: ItemPointer) -> BlockNumber {
-    unimplemented!() // TODO: storage/itemptr.h
-}
-unsafe fn ItemPointerGetOffsetNumber(_pointer: ItemPointer) -> OffsetNumber {
-    unimplemented!() // TODO: storage/itemptr.h
-}
+unsafe fn ItemPointerGetBlockNumber(_pointer: ItemPointer) -> BlockNumber { crate::storage::itemptr::ItemPointerGetBlockNumber(_pointer as _) }
+unsafe fn ItemPointerGetOffsetNumber(_pointer: ItemPointer) -> OffsetNumber { crate::storage::itemptr::ItemPointerGetOffsetNumber(_pointer as _) }
 
 // utils/memutils.h
 unsafe fn BumpContextCreate(
@@ -699,18 +695,14 @@ unsafe fn BumpContextCreate(
     _minContextSize: usize,
     _initBlockSize: usize,
     _maxBlockSize: usize,
-) -> MemoryContext {
-    unimplemented!() // TODO: utils/mmgr/bump.c
-}
+) -> MemoryContext { unimplemented!() }
 unsafe fn AllocSetContextCreate(
     _parent: MemoryContext,
     _name: *const c_char,
     _minContextSize: usize,
     _initBlockSize: usize,
     _maxBlockSize: usize,
-) -> MemoryContext {
-    unimplemented!() // TODO: utils/mmgr/aset.c
-}
+) -> MemoryContext { crate::backend_link_shims::AllocSetContextCreate(_parent as _, _name as _, _minContextSize, _initBlockSize, _maxBlockSize) as _ }
 unsafe fn MemoryContextDelete(_context: MemoryContext) {
     unimplemented!() // TODO: utils/mmgr/mcxt.c
 }
@@ -720,15 +712,9 @@ unsafe fn dsa_create_ext(
     _tranche_id: c_int,
     _init_segment_size: usize,
     _max_segment_size: usize,
-) -> *mut dsa_area {
-    unimplemented!() // TODO: utils/mmgr/dsa.c
-}
-unsafe fn dsa_attach(_handle: dsa_handle) -> *mut dsa_area {
-    unimplemented!() // TODO: utils/mmgr/dsa.c
-}
-unsafe fn dsa_detach(_area: *mut dsa_area) {
-    unimplemented!() // TODO: utils/mmgr/dsa.c
-}
+) -> *mut dsa_area { unimplemented!() }
+unsafe fn dsa_attach(_handle: dsa_handle) -> *mut dsa_area { unimplemented!() }
+unsafe fn dsa_detach(_area: *mut dsa_area) { unimplemented!() }
 
 // lib/radixtree.h (templated local_ts_* / shared_ts_*)
 unsafe fn local_ts_create(_ctx: MemoryContext) -> *mut local_ts_radix_tree {

@@ -92,27 +92,27 @@ pub static mut disable_cost: Cost = 1.0e10;
 
 pub static mut max_parallel_workers_per_gather: c_int = 2;
 
-pub static mut enable_seqscan: bool = true;
-pub static mut enable_indexscan: bool = true;
-pub static mut enable_indexonlyscan: bool = true;
-pub static mut enable_bitmapscan: bool = true;
-pub static mut enable_tidscan: bool = true;
-pub static mut enable_sort: bool = true;
-pub static mut enable_incremental_sort: bool = true;
-pub static mut enable_hashagg: bool = true;
-pub static mut enable_nestloop: bool = true;
-pub static mut enable_material: bool = true;
-pub static mut enable_memoize: bool = true;
-pub static mut enable_mergejoin: bool = true;
-pub static mut enable_hashjoin: bool = true;
-pub static mut enable_gathermerge: bool = true;
-pub static mut enable_partitionwise_join: bool = false;
-pub static mut enable_partitionwise_aggregate: bool = false;
-pub static mut enable_parallel_append: bool = true;
-pub static mut enable_parallel_hash: bool = true;
-pub static mut enable_partition_pruning: bool = true;
-pub static mut enable_presorted_aggregate: bool = true;
-pub static mut enable_async_append: bool = true;
+#[no_mangle] pub static mut enable_seqscan: bool = true;
+#[no_mangle] pub static mut enable_indexscan: bool = true;
+#[no_mangle] pub static mut enable_indexonlyscan: bool = true;
+#[no_mangle] pub static mut enable_bitmapscan: bool = true;
+#[no_mangle] pub static mut enable_tidscan: bool = true;
+#[no_mangle] pub static mut enable_sort: bool = true;
+#[no_mangle] pub static mut enable_incremental_sort: bool = true;
+#[no_mangle] pub static mut enable_hashagg: bool = true;
+#[no_mangle] pub static mut enable_nestloop: bool = true;
+#[no_mangle] pub static mut enable_material: bool = true;
+#[no_mangle] pub static mut enable_memoize: bool = true;
+#[no_mangle] pub static mut enable_mergejoin: bool = true;
+#[no_mangle] pub static mut enable_hashjoin: bool = true;
+#[no_mangle] pub static mut enable_gathermerge: bool = true;
+#[no_mangle] pub static mut enable_partitionwise_join: bool = false;
+#[no_mangle] pub static mut enable_partitionwise_aggregate: bool = false;
+#[no_mangle] pub static mut enable_parallel_append: bool = true;
+#[no_mangle] pub static mut enable_parallel_hash: bool = true;
+#[no_mangle] pub static mut enable_partition_pruning: bool = true;
+#[no_mangle] pub static mut enable_presorted_aggregate: bool = true;
+#[no_mangle] pub static mut enable_async_append: bool = true;
 
 // ---------------------------------------------------------------------------
 // Local constants / macros
@@ -213,8 +213,7 @@ pub unsafe fn get_tablespace_page_costs(
     random_page_cost_out: *mut f64,
     seq_page_cost_out: *mut f64,
 ) {
-    if !random_page_cost_out.is_null() { *random_page_cost_out = random_page_cost; }
-    if !seq_page_cost_out.is_null() { *seq_page_cost_out = seq_page_cost; }
+    crate::utils::cache::spccache::get_tablespace_page_costs(spcOid as _, random_page_cost_out as _, seq_page_cost_out as _)
 }
 
 /// TODO(pg-port): access/tsmapi.h GetTsmRoutine.
@@ -229,12 +228,12 @@ pub unsafe fn compute_parallel_worker(
     _index_pages: f64,
     _max_workers: c_int,
 ) -> c_int {
-    0
+    crate::optimizer::path::allpaths::compute_parallel_worker(_rel as _, _heap_pages as _, _index_pages as _, _max_workers as _)
 }
 
 /// TODO(pg-port): optimizer/pathnode.h find_base_rel.
 pub unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo {
-    core::ptr::null_mut()
+    crate::optimizer::util::relnode::find_base_rel(_root as _, _relid as _) as _
 }
 
 /// TODO(pg-port): optimizer/pathnode.h fetch_upper_rel.
@@ -243,7 +242,7 @@ pub unsafe fn fetch_upper_rel(
     _kind: c_int,
     _relids: Relids,
 ) -> *mut RelOptInfo {
-    core::ptr::null_mut()
+    crate::optimizer::util::relnode::fetch_upper_rel(_root as _, core::mem::transmute::<i32, crate::nodes::pathnodes::UpperRelationKind>(_kind), _relids as _) as _
 }
 
 /// TODO(pg-port): optimizer/paths.h pathkeys_contained_in.
@@ -251,7 +250,7 @@ pub unsafe fn pathkeys_contained_in(
     _keys1: *mut List,
     _keys2: *mut List,
 ) -> bool {
-    false
+    crate::optimizer::path::pathkeys::pathkeys_contained_in(_keys1 as _, _keys2 as _)
 }
 
 /// TODO(pg-port): optimizer/paths.h mergejoinscansel.
@@ -266,10 +265,7 @@ pub unsafe fn mergejoinscansel(
     rightstartsel: *mut Selectivity,
     rightendsel: *mut Selectivity,
 ) {
-    *leftstartsel = 0.0;
-    *leftendsel = 1.0;
-    *rightstartsel = 0.0;
-    *rightendsel = 1.0;
+    crate::utils::adt::selfuncs::mergejoinscansel(_root as _, _clause as _, _opfamily as _, _strategy as _, _nulls_first, leftstartsel as _, leftendsel as _, rightstartsel as _, rightendsel as _)
 }
 
 /// TODO(pg-port): optimizer/restrictinfo.h is_redundant_with_indexclauses.
@@ -277,7 +273,7 @@ pub unsafe fn is_redundant_with_indexclauses(
     _rinfo: *mut crate::nodes::pathnodes::RestrictInfo,
     _indexclauses: *mut List,
 ) -> bool {
-    false
+    crate::optimizer::path::equivclass::is_redundant_with_indexclauses(_rinfo as _, _indexclauses as _)
 }
 
 /// TODO(pg-port): optimizer/restrictinfo.h join_clause_is_movable_into.
@@ -286,7 +282,7 @@ pub unsafe fn join_clause_is_movable_into(
     _currentrelids: Relids,
     _joinrelids: Relids,
 ) -> bool {
-    false
+    crate::optimizer::util::restrictinfo::join_clause_is_movable_into(_rinfo as _, _currentrelids as _, _joinrelids as _)
 }
 
 /// TODO(pg-port): optimizer/placeholder.h find_placeholder_info.
@@ -294,7 +290,7 @@ pub unsafe fn find_placeholder_info(
     _root: *mut PlannerInfo,
     _phv: *mut PlaceHolderVar,
 ) -> *mut crate::nodes::pathnodes::PlaceHolderInfo {
-    core::ptr::null_mut()
+    crate::optimizer::util::placeholder::find_placeholder_info(_root as _, _phv as _) as _
 }
 
 /// TODO(pg-port): optimizer/equivclass.h find_derived_clause_for_ec_member.
@@ -303,7 +299,7 @@ pub unsafe fn find_derived_clause_for_ec_member(
     _ec: *mut EquivalenceClass,
     _em: *mut EquivalenceMember,
 ) -> *mut crate::nodes::pathnodes::RestrictInfo {
-    core::ptr::null_mut()
+    crate::optimizer::path::equivclass::find_derived_clause_for_ec_member(_root as _, _ec as _, _em as _) as _
 }
 
 /// TODO(pg-port): optimizer/clauses.h / selfuncs.h clauselist_selectivity.
@@ -314,7 +310,7 @@ pub unsafe fn clauselist_selectivity(
     _jointype: JoinType,
     _sjinfo: *const SpecialJoinInfo,
 ) -> Selectivity {
-    1.0
+    crate::optimizer::path::clausesel::clauselist_selectivity(_root as _, _clauses as _, _varRelid as _, _jointype, _sjinfo as _)
 }
 
 /// TODO(pg-port): optimizer/clauses.h clause_selectivity.
@@ -325,7 +321,7 @@ pub unsafe fn clause_selectivity(
     _jointype: JoinType,
     _sjinfo: *const SpecialJoinInfo,
 ) -> Selectivity {
-    1.0
+    crate::optimizer::path::clausesel::clause_selectivity(_root as _, _clause as _, _varRelid as _, _jointype, _sjinfo as _)
 }
 
 /// TODO(pg-port): optimizer/selfuncs.h estimate_num_groups.
@@ -336,7 +332,7 @@ pub unsafe fn estimate_num_groups(
     _pgset: *mut *mut List,
     _estinfo: *mut EstimationInfo,
 ) -> f64 {
-    DEFAULT_NUM_DISTINCT
+    crate::utils::adt::selfuncs::estimate_num_groups(_root as _, _groupExprs as _, _input_rows as _, _pgset as _, _estinfo as _)
 }
 
 /// TODO(pg-port): optimizer/selfuncs.h estimate_array_length.
@@ -344,7 +340,7 @@ pub unsafe fn estimate_array_length(
     _root: *mut PlannerInfo,
     _arraynode: *mut Node,
 ) -> f64 {
-    10.0
+    crate::utils::adt::selfuncs::estimate_array_length(_root as _, _arraynode as _)
 }
 
 /// TODO(pg-port): optimizer/selfuncs.h estimate_hash_bucket_stats.
@@ -355,8 +351,7 @@ pub unsafe fn estimate_hash_bucket_stats(
     mcvfreq: *mut Selectivity,
     bucketsize_frac: *mut Selectivity,
 ) {
-    *mcvfreq = 0.0;
-    *bucketsize_frac = 0.01;
+    crate::utils::adt::selfuncs::estimate_hash_bucket_stats(_root as _, _hashkey as _, _nbuckets as _, mcvfreq as _, bucketsize_frac as _)
 }
 
 /// TODO(pg-port): statistics/statistics.h estimate_multivariate_bucketsize.
@@ -366,7 +361,7 @@ pub unsafe fn estimate_multivariate_bucketsize(
     _hashclauses: *mut List,
     _bucketsize_frac: *mut Selectivity,
 ) -> *mut List {
-    core::ptr::null_mut()
+    crate::utils::adt::selfuncs::estimate_multivariate_bucketsize(_root as _, _inner as _, _hashclauses as _, _bucketsize_frac as _) as _
 }
 
 /// TODO(pg-port): selfuncs.h EstimationInfo struct.
@@ -383,37 +378,37 @@ pub unsafe fn expression_returns_set_rows(
     _root: *mut PlannerInfo,
     _expr: *mut Node,
 ) -> f64 {
-    1.0
+    crate::optimizer::util::clauses::expression_returns_set_rows(_root as _, _expr as _)
 }
 
 /// TODO(pg-port): utils/lsyscache.h get_typavgwidth.
 pub unsafe fn get_typavgwidth(_typeOid: Oid, _typmod: i32) -> i32 {
-    32
+    crate::utils::cache::lsyscache::get_typavgwidth(_typeOid as _, _typmod as _)
 }
 
 /// TODO(pg-port): utils/lsyscache.h get_attavgwidth.
 pub unsafe fn get_attavgwidth(_reloid: Oid, _attnum: i16) -> i32 {
-    0
+    crate::utils::cache::lsyscache::get_attavgwidth(_reloid as _, _attnum as _)
 }
 
 /// TODO(pg-port): utils/lsyscache.h get_relation_data_width.
 pub unsafe fn get_relation_data_width(_reloid: Oid, _attr_widths: *mut i32) -> i32 {
-    0
+    crate::optimizer::util::plancat::get_relation_data_width(_reloid as _, _attr_widths as _)
 }
 
 /// TODO(pg-port): utils/lsyscache.h get_opcode.
 pub unsafe fn get_opcode(_opid: Oid) -> Oid {
-    0
+    crate::utils::cache::lsyscache::get_opcode(_opid as _)
 }
 
 /// TODO(pg-port): utils/lsyscache.h getTypeInputInfo.
+#[no_mangle]
 pub unsafe fn getTypeInputInfo(
     _typid: Oid,
     func: *mut Oid,
     typioparam: *mut Oid,
 ) {
-    *func = 0;
-    *typioparam = 0;
+    crate::utils::cache::lsyscache::getTypeInputInfo(_typid as _, func as _, typioparam as _)
 }
 
 /// TODO(pg-port): utils/lsyscache.h getTypeOutputInfo.
@@ -422,18 +417,17 @@ pub unsafe fn getTypeOutputInfo(
     func: *mut Oid,
     typisvarlena: *mut bool,
 ) {
-    *func = 0;
-    *typisvarlena = false;
+    crate::utils::cache::lsyscache::getTypeOutputInfo(_typid as _, func as _, typisvarlena as _)
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.h exprType.
 pub unsafe fn exprType(_node: *const Node) -> Oid {
-    0
+    crate::nodes::nodeFuncs::exprType(_node as _)
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.h exprTypmod.
 pub unsafe fn exprTypmod(_node: *const Node) -> i32 {
-    -1
+    crate::nodes::nodeFuncs::exprTypmod(_node as _)
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.h expression_tree_walker.
@@ -450,12 +444,13 @@ pub unsafe fn pull_varnos(
     _root: *mut PlannerInfo,
     _node: *mut Node,
 ) -> *mut Bitmapset {
-    core::ptr::null_mut()
+    crate::optimizer::util::var::pull_varnos(_root as _, _node as _) as _
 }
 
 /// TODO(pg-port): nodes/makefuncs.h make_ands_implicit.
+#[no_mangle]
 pub unsafe fn make_ands_implicit(_expr: *mut Expr) -> *mut List {
-    core::ptr::null_mut()
+    crate::nodes::makefuncs::make_ands_implicit(_expr as _) as _
 }
 
 /// TODO(pg-port): optimizer/plancat.h add_function_cost.
@@ -465,23 +460,27 @@ pub unsafe fn add_function_cost(
     _node: *mut Node,
     cost: *mut QualCost,
 ) {
-    (*cost).per_tuple += unsafe { cpu_operator_cost };
+    crate::optimizer::util::plancat::add_function_cost(_root as _, _funcid as _, _node as _, cost as _)
 }
 
 /// TODO(pg-port): optimizer/clauses.h set_opfuncid.
-pub unsafe fn set_opfuncid(_opexpr: *mut OpExpr) {}
+pub unsafe fn set_opfuncid(_opexpr: *mut OpExpr) {
+    crate::nodes::nodeFuncs::set_opfuncid(_opexpr as _)
+}
 
 /// TODO(pg-port): optimizer/clauses.h set_sa_opfuncid.
-pub unsafe fn set_sa_opfuncid(_saop: *mut ScalarArrayOpExpr) {}
+pub unsafe fn set_sa_opfuncid(_saop: *mut ScalarArrayOpExpr) {
+    crate::nodes::nodeFuncs::set_sa_opfuncid(_saop as _)
+}
 
 /// TODO(pg-port): nodes/nodeFuncs.h get_rightop.
 pub unsafe fn get_rightop(_clause: *mut Node) -> *mut Node {
-    core::ptr::null_mut()
+    crate::nodes::print::get_rightop(_clause as _) as _
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.h get_leftop.
 pub unsafe fn get_leftop(_clause: *mut Node) -> *mut Node {
-    core::ptr::null_mut()
+    crate::nodes::print::get_leftop(_clause as _) as _
 }
 
 /// TODO(pg-port): executor/nodeAgg.h hash_agg_entry_size.
@@ -490,7 +489,7 @@ pub unsafe fn hash_agg_entry_size(
     _input_width: f64,
     _transitionSpace: usize,
 ) -> f64 {
-    64.0
+    crate::executor::nodeAgg::hash_agg_entry_size(_numAggs as _, _input_width as _, _transitionSpace as _)
 }
 
 /// TODO(pg-port): executor/nodeAgg.h hash_agg_set_limits.
@@ -502,9 +501,7 @@ pub unsafe fn hash_agg_set_limits(
     ngroups_limit: *mut u64,
     num_partitions: *mut c_int,
 ) {
-    *mem_limit = (unsafe { work_mem } as usize) * 1024;
-    *ngroups_limit = u64::MAX;
-    *num_partitions = 32;
+    crate::executor::nodeAgg::hash_agg_set_limits(_hashentrysize as _, _ngroups as _, _aggtranssize as _, mem_limit as _, ngroups_limit as _, num_partitions as _)
 }
 
 /// TODO(pg-port): executor/nodeHash.h ExecChooseHashTableSize.
@@ -519,39 +516,37 @@ pub unsafe fn ExecChooseHashTableSize(
     numbatches: *mut c_int,
     num_skew_mcvs: *mut c_int,
 ) {
-    *numbuckets = 1024;
-    *numbatches = 1;
-    *num_skew_mcvs = 0;
+    crate::executor::nodeHash::ExecChooseHashTableSize(_ntuples as _, _tupwidth as _, _useskew, _try_combined_hash_mem, _parallel_workers as _, _space_allowed as _, numbuckets as _, numbatches as _, num_skew_mcvs as _)
 }
 
 /// TODO(pg-port): executor/nodeMemoize.h ExecEstimateCacheEntryOverheadBytes.
 pub unsafe fn ExecEstimateCacheEntryOverheadBytes(_tuples: f64) -> f64 {
-    8.0
+    crate::executor::nodeMemoize::ExecEstimateCacheEntryOverheadBytes(_tuples as _)
 }
 
 /// TODO(pg-port): executor/executor.h ExecSupportsMarkRestore.
 pub unsafe fn ExecSupportsMarkRestore(_path: *const Path) -> bool {
-    false
+    crate::executor::execAmi::ExecSupportsMarkRestore(_path as _)
 }
 
 /// TODO(pg-port): executor/executor.h ExecMaterializesOutput.
 pub unsafe fn ExecMaterializesOutput(_nodetag: NodeTag) -> bool {
-    false
+    crate::executor::execAmi::ExecMaterializesOutput(_nodetag)
 }
 
 /// TODO(pg-port): utils/tuplesort.h tuplesort_merge_order.
 pub unsafe fn tuplesort_merge_order(_sort_mem_bytes: i64) -> f64 {
-    6.0
+    crate::utils::sort::tuplesort::tuplesort_merge_order(_sort_mem_bytes as _) as _
 }
 
 /// TODO(pg-port): utils/tidbitmap.h tbm_calculate_entries.
 pub unsafe fn tbm_calculate_entries(_limit_bytes: usize) -> f64 {
-    1.0e6
+    crate::nodes::tidbitmap::tbm_calculate_entries(_limit_bytes as _) as _
 }
 
 /// TODO(pg-port): executor/nodeHash.h get_hash_memory_limit.
 pub unsafe fn get_hash_memory_limit() -> f64 {
-    (unsafe { work_mem } as f64) * 1024.0
+    crate::executor::nodeHash::get_hash_memory_limit() as _
 }
 
 /// TODO(pg-port): optimizer/selfuncs.h get_sortgrouplist_exprs.
@@ -559,7 +554,7 @@ pub unsafe fn get_sortgrouplist_exprs(
     _sortClauses: *mut List,
     _targetList: *mut List,
 ) -> *mut List {
-    core::ptr::null_mut()
+    crate::optimizer::util::tlist::get_sortgrouplist_exprs(_sortClauses as _, _targetList as _) as _
 }
 
 /// TODO(pg-port): pathnodes.h IS_OUTER_JOIN macro.
@@ -4965,6 +4960,7 @@ pub unsafe fn set_baserel_size_estimates(
     rel: *mut RelOptInfo,
 ) {
     /* Should only be applied to base relations */
+    if std::env::var_os("PDB_RX").is_some() { eprintln!("PDB_RX set_baserel_size_estimates relid={}", (*rel).relid); }
     Assert!((*rel).relid > 0);
 
     let nrows = (*rel).tuples

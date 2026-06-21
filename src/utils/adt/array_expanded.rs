@@ -152,9 +152,7 @@ unsafe fn get_typlenbyvalalign(
     _typlen: *mut int16,
     _typbyval: *mut bool,
     _typalign: *mut c_char,
-) {
-    unimplemented!("get_typlenbyvalalign (lsyscache.c) not yet ported");
-}
+) { crate::utils::cache::lsyscache::get_typlenbyvalalign(_typid as _, _typlen as _, _typbyval as _, _typalign as _) }
 
 /// STUB: `deconstruct_array` (utils/adt/arrayfuncs.c) - splits a flat ArrayType
 /// into freshly-palloc'd Datum and (optionally) isnull arrays. Used only by
@@ -170,9 +168,7 @@ unsafe fn deconstruct_array(
     _elemsp: *mut *mut Datum,
     _nullsp: *mut *mut bool,
     _nelemsp: *mut c_int,
-) {
-    unimplemented!("deconstruct_array (arrayfuncs.c) not yet ported");
-}
+) { crate::utils::adt::arrayfuncs::deconstruct_array(_array as _, _elmtype as _, _elmlen as _, _elmbyval, _elmalign as _, _elemsp as _, _nullsp as _, _nelemsp as _) }
 
 /// STUB: `CopyArrayEls` (utils/adt/arrayfuncs.c) - copies element Datums into the
 /// data area of a freshly-built flat array, optionally freeing the source data.
@@ -188,9 +184,7 @@ unsafe fn CopyArrayEls(
     _typbyval: bool,
     _typalign: c_char,
     _freedata: bool,
-) {
-    unimplemented!("CopyArrayEls (arrayfuncs.c) not yet ported");
-}
+) { crate::utils::adt::arrayfuncs::CopyArrayEls(_array as _, _values as _, _nulls as _, _nitems as _, _typlen as _, _typbyval, _typalign as _, _freedata) }
 
 // ----------------------------------------------------------------------------
 //   "Methods" required for an expanded object
@@ -214,6 +208,7 @@ static EA_methods: ExpandedObjectMethods = ExpandedObjectMethods {
 /// type data across calls; if so, pass a metacache pointer, making sure that
 /// metacache->element_type is initialized to InvalidOid before first call. If
 /// no cross-call caching is required, pass NULL for metacache.
+#[no_mangle]
 pub unsafe fn expand_array(
     arraydatum: Datum,
     parentcontext: MemoryContext,

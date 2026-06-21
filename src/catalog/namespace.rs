@@ -272,6 +272,7 @@ pub type RangeVarGetRelidCallback = Option<
  * Calls RangeVarGetRelidExtended with missing_ok flag.
  */
 #[inline]
+#[no_mangle]
 pub unsafe fn RangeVarGetRelid(
     relation: *const RangeVar,
     lockmode: LOCKMODE,
@@ -498,36 +499,13 @@ extern "C" {
 // ---------------------------------------------------------------------------
 // Syscache ID stubs -- TODO(pg-port): move to proper syscache module
 // ---------------------------------------------------------------------------
-const RELOID: c_int = 26;
-const TYPEOID: c_int = 31;
-const TYPENAMENSP: c_int = 29; // TODO(pg-port): syscache id for (pg_type name, nsp)
-const PROCOID: c_int = 21;
-const PROCNAMEARGSNSP: c_int = 20;
-const OPEROID: c_int = 18;
-const OPERNAMENSP: c_int = 19;
-const CLAOID: c_int = 5;
-const CLAAMNAMENSP: c_int = 4;
-const OPFAMILYOID: c_int = 22;
-const OPFAMILYAMNAMENSP: c_int = 23;
-const COLLOID: c_int = 8;
-const COLLNAMEENCNSP: c_int = 7;
-const CONVOID: c_int = 9;
-const CONNAMENSP: c_int = 10;
-const STATEXTOID: c_int = 27;
-const STATEXTNAMENSP: c_int = 28;
-const TSPARSEROID: c_int = 32;
-const TSPARSERNAMENSP: c_int = 33;
-const TSDICTOID: c_int = 34;
-const TSDICTNAMENSP: c_int = 35;
-const TSTEMPLATEOID: c_int = 36;
-const TSTEMPLATENAMENSP: c_int = 37;
-const TSCONFIGOID: c_int = 38;
-const TSCONFIGNAMENSP: c_int = 39;
-const NAMESPACENAME: c_int = 17;
-const AUTHOID: c_int = 2;
-const AUTHMEMROLEMEM: c_int = 3;
-const DATABASEOID: c_int = 11;
-const NAMESPACEOID: c_int = 16;
+use crate::utils::cache::syscache_ids_gen::{
+    RELOID, TYPEOID, TYPENAMENSP, PROCOID, PROCNAMEARGSNSP, OPEROID, OPERNAMENSP,
+    CLAOID, CLAAMNAMENSP, OPFAMILYOID, OPFAMILYAMNAMENSP, COLLOID, COLLNAMEENCNSP,
+    CONVOID, CONNAMENSP, STATEXTOID, STATEXTNAMENSP, TSPARSEROID, TSPARSERNAMENSP,
+    TSDICTOID, TSDICTNAMENSP, TSTEMPLATEOID, TSTEMPLATENAMENSP, TSCONFIGOID,
+    TSCONFIGNAMENSP, NAMESPACENAME, AUTHOID, AUTHMEMROLEMEM, DATABASEOID, NAMESPACEOID,
+};
 
 // Anum_ stubs (attribute numbers)
 const Anum_pg_type_oid: c_int = 1;
@@ -542,7 +520,7 @@ const Anum_pg_ts_template_oid: c_int = 1;
 const Anum_pg_ts_config_oid: c_int = 1;
 const Anum_pg_namespace_oid: c_int = 1;
 const Anum_pg_proc_proallargtypes: c_int = 21;
-const Anum_pg_proc_proargnames: c_int = 22;
+const Anum_pg_proc_proargnames: c_int = 23;
 
 // AclMode / AclResult / ObjectType stubs
 pub type AclMode = u32;
@@ -602,32 +580,10 @@ const FUNC_PARAM_IN: c_char = b'i' as c_char;
 const FUNC_PARAM_INOUT: c_char = b'b' as c_char;
 const FUNC_PARAM_VARIADIC: c_char = b'v' as c_char;
 
-// CatCList and CatCTup stubs (utils/catcache.h)
-#[repr(C)]
-pub struct CatCTup {
-    pub tuple: HeapTupleData,
-}
-
-#[repr(C)]
-pub struct HeapTupleData {
-    pub t_len: u32,
-    pub t_self: ItemPointerData,
-    pub t_tableOid: Oid,
-    pub t_data: *mut c_void,
-}
-
-#[repr(C)]
-pub struct ItemPointerData {
-    pub ip_blkid: [u8; 4],
-    pub ip_posid: u16,
-}
-
-#[repr(C)]
-pub struct CatCList {
-    pub n_members: c_int,
-    pub ordered: bool,
-    pub members: *mut *mut CatCTup,
-}
+// Canonical catcache + heap-tuple types (the local stubs had wrong layouts).
+use crate::utils::cache::catcache::{CatCList, CatCTup};
+use crate::access::htup_details::HeapTupleData;
+use crate::storage::itemptr::ItemPointerData;
 
 // PGPROC partial stub
 #[repr(C)]
@@ -670,23 +626,50 @@ pub struct NspHashTable {
 static mut SearchPathCache: *mut NspHashTable = core::ptr::null_mut();
 static mut LastSearchPathCacheEntry: *mut SearchPathCacheEntry = core::ptr::null_mut();
 
+// Minimal stand-in for PG's generated simplehash (nsphash_*).  The search-path
+// cache is small; a Vec of individually-palloc'd (stable-pointer) entries with
+// linear search by (roleid, searchPath) suffices.  TODO(pg-port): real simplehash.
+unsafe fn nsphash_create(
+    _ctx: MemoryContext,
+    _nelem: u32,
+    _private_data: *mut c_void,
+) -> *mut NspHashTable {
+    Box::into_raw(Box::new(Vec::<*mut SearchPathCacheEntry>::new())) as *mut NspHashTable
+}
+unsafe fn nsphash_lookup(
+    tb: *mut NspHashTable,
+    key: SearchPathCacheKey,
+) -> *mut SearchPathCacheEntry {
+    let v = &*(tb as *mut Vec<*mut SearchPathCacheEntry>);
+    for &e in v.iter() {
+        if (*e).key.roleid == key.roleid && strcmp((*e).key.searchPath, key.searchPath) == 0 {
+            return e;
+        }
+    }
+    core::ptr::null_mut()
+}
+unsafe fn nsphash_insert(
+    tb: *mut NspHashTable,
+    key: SearchPathCacheKey,
+    found: *mut bool,
+) -> *mut SearchPathCacheEntry {
+    let existing = nsphash_lookup(tb, key);
+    if !existing.is_null() {
+        if !found.is_null() { *found = true; }
+        return existing;
+    }
+    let v = &mut *(tb as *mut Vec<*mut SearchPathCacheEntry>);
+    let e = palloc0(core::mem::size_of::<SearchPathCacheEntry>()) as *mut SearchPathCacheEntry;
+    (*e).key = key;
+    v.push(e);
+    if !found.is_null() { *found = false; }
+    e
+}
+unsafe fn nsphash_get_num_entries(tb: *mut NspHashTable) -> u32 {
+    (*(tb as *mut Vec<*mut SearchPathCacheEntry>)).len() as u32
+}
+
 extern "C" {
-    // simplehash operations -- TODO(pg-port): port simplehash or keep as extern
-    fn nsphash_create(
-        ctx: MemoryContext,
-        nelem: u32,
-        private_data: *mut c_void,
-    ) -> *mut NspHashTable;
-    fn nsphash_lookup(
-        tb: *mut NspHashTable,
-        key: SearchPathCacheKey,
-    ) -> *mut SearchPathCacheEntry;
-    fn nsphash_insert(
-        tb: *mut NspHashTable,
-        key: SearchPathCacheKey,
-        found: *mut bool,
-    ) -> *mut SearchPathCacheEntry;
-    fn nsphash_get_num_entries(tb: *mut NspHashTable) -> u32;
 
     // get_func_arg_info (utils/lsyscache.h)
     fn get_func_arg_info(
@@ -736,14 +719,16 @@ extern "C" {
     // TopMemoryContext (from utils/memutils.h)
     static TopMemoryContext: MemoryContext;
 
-    // array helpers (utils/array.h)
-    fn DatumGetArrayTypeP(d: Datum) -> *mut ArrayType;
-    fn ARR_DIMS(arr: *mut ArrayType) -> *mut c_int;
-    fn ARR_NDIM(arr: *mut ArrayType) -> c_int;
-    fn ARR_HASNULL(arr: *mut ArrayType) -> bool;
-    fn ARR_ELEMTYPE(arr: *mut ArrayType) -> Oid;
-    fn ARR_DATA_PTR(arr: *mut ArrayType) -> *mut c_void;
 }
+
+// array helpers (utils/array.h) - local stubs until utils/adt/array.rs is wired
+// (matches the convention used in pg_proc.rs/selfuncs.rs/extended_stats.rs).
+unsafe fn DatumGetArrayTypeP(d: Datum) -> *mut ArrayType { unimplemented!() }
+unsafe fn ARR_DIMS(arr: *mut ArrayType) -> *mut c_int { unimplemented!("TODO(pg-port): utils/adt/array ARR_DIMS") }
+unsafe fn ARR_NDIM(arr: *mut ArrayType) -> c_int { crate::utils::array::ARR_NDIM(arr as _) }
+unsafe fn ARR_HASNULL(arr: *mut ArrayType) -> bool { crate::utils::array::ARR_HASNULL(arr as _) }
+unsafe fn ARR_ELEMTYPE(arr: *mut ArrayType) -> Oid { unimplemented!("TODO(pg-port): utils/adt/array ARR_ELEMTYPE") }
+unsafe fn ARR_DATA_PTR(arr: *mut ArrayType) -> *mut c_void { crate::utils::array::ARR_DATA_PTR(arr as _) as _ }
 
 // Opaque array type for palloc compat
 #[repr(C)]
@@ -753,8 +738,8 @@ pub struct ArrayType {
 
 // NodeTag stubs
 pub type NodeTag = u32;
-const T_String: NodeTag = 602;
-const T_A_Star: NodeTag = 600;
+const T_String: NodeTag = 468;
+const T_A_Star: NodeTag = 77;
 
 // OIDOID
 const OIDOID: Oid = 26;
@@ -778,7 +763,7 @@ extern "C" {
 // pg_proc.proargtypes is CATALOG_VARLEN and not a fixed field of FormData_pg_proc.
 // TODO(pg-port): pg_proc.proargtypes (CATALOG_VARLEN) accessor not ported.
 unsafe fn pg_proc_proargtypes_values(_procform: Form_pg_proc) -> *mut Oid {
-    unimplemented!("pg_proc.proargtypes (CATALOG_VARLEN) accessor not ported")
+    (*_procform).proargtypes.values.as_mut_ptr()
 }
 
 // Max() macro equivalent
@@ -978,6 +963,7 @@ unsafe fn spcache_insert(
  * Callback allows caller to check permissions or acquire additional locks
  * prior to grabbing the relation lock.
  */
+#[no_mangle]
 pub unsafe fn RangeVarGetRelidExtended(
     relation: *const RangeVar,
     lockmode: LOCKMODE,
@@ -1431,6 +1417,7 @@ pub unsafe fn RangeVarAdjustRelationPersistence(newRelation: *mut RangeVar, nspi
  *		Try to resolve an unqualified relation name.
  *		Returns OID if relation found in search path, else InvalidOid.
  */
+#[no_mangle]
 pub unsafe fn RelnameGetRelid(relname: *const c_char) -> Oid {
     let mut relid: Oid;
     let mut l: *mut ListCell;
@@ -1775,7 +1762,7 @@ pub unsafe fn FuncnameGetCandidates(
 
     i = 0;
     while i < (*catlist).n_members {
-        let proctup: HeapTuple = &mut (*(*(*catlist).members.add(i as usize))).tuple
+        let proctup: HeapTuple = &mut (*(*(*catlist).members.as_ptr().add(i as usize))).tuple
             as *mut HeapTupleData as HeapTuple;
         let procform: Form_pg_proc = GETSTRUCT(proctup) as Form_pg_proc;
         let mut proargtypes: *mut Oid = pg_proc_proargtypes_values(procform);
@@ -2448,7 +2435,7 @@ pub unsafe fn OpernameGetOprid(names: *mut List, oprleft: Oid, oprright: Oid) ->
         }
 
         while i < (*catlist).n_members {
-            let opertup: HeapTuple = &mut (*(*(*catlist).members.add(i as usize))).tuple
+            let opertup: HeapTuple = &mut (*(*(*catlist).members.as_ptr().add(i as usize))).tuple
                 as *mut HeapTupleData as HeapTuple;
             let operform: Form_pg_operator = GETSTRUCT(opertup) as Form_pg_operator;
 
@@ -2529,7 +2516,7 @@ pub unsafe fn OpernameGetCandidates(
 
     i = 0;
     while i < (*catlist).n_members {
-        let opertup: HeapTuple = &mut (*(*(*catlist).members.add(i as usize))).tuple
+        let opertup: HeapTuple = &mut (*(*(*catlist).members.as_ptr().add(i as usize))).tuple
             as *mut HeapTupleData as HeapTuple;
         let operform: Form_pg_operator = GETSTRUCT(opertup) as Form_pg_operator;
         let mut pathpos: c_int = 0;
@@ -4117,6 +4104,7 @@ pub unsafe fn QualifiedNameGetCreationNamespace(
  * If missing_ok is false, throw an error if namespace name not found.  If
  * true, just return InvalidOid.
  */
+#[no_mangle]
 pub unsafe fn get_namespace_oid(nspname: *const c_char, missing_ok: bool) -> Oid {
     let oid: Oid;
 
@@ -4136,6 +4124,7 @@ pub unsafe fn get_namespace_oid(nspname: *const c_char, missing_ok: bool) -> Oid
  * makeRangeVarFromNameList
  *		Utility routine to convert a qualified-name list into RangeVar form.
  */
+#[no_mangle]
 pub unsafe fn makeRangeVarFromNameList(names: *const List) -> *mut RangeVar {
     let rel: *mut RangeVar = makeRangeVar(
         core::ptr::null_mut(),
@@ -4249,6 +4238,7 @@ pub unsafe fn NameListToQuotedString(names: *const List) -> *mut c_char {
 /*
  * isTempNamespace - is the given namespace my temporary-table namespace?
  */
+#[no_mangle]
 pub unsafe fn isTempNamespace(namespaceId: Oid) -> bool {
     OidIsValid(myTempNamespace) && myTempNamespace == namespaceId
 }
@@ -4562,6 +4552,7 @@ pub unsafe fn SearchPathMatchesCurrentEnvironment(path: *mut SearchPathMatcher) 
  * Note that this will only find collations that work with the current
  * database's encoding.
  */
+#[no_mangle]
 pub unsafe fn get_collation_oid(collname: *mut List, missing_ok: bool) -> Oid {
     let mut schemaname: *mut c_char = core::ptr::null_mut();
     let mut collation_name: *mut c_char = core::ptr::null_mut();
@@ -4681,6 +4672,7 @@ pub unsafe fn get_conversion_oid(conname: *mut List, missing_ok: bool) -> Oid {
 /*
  * FindDefaultConversionProc - find default encoding conversion proc
  */
+#[no_mangle]
 pub unsafe fn FindDefaultConversionProc(for_encoding: i32, to_encoding: i32) -> Oid {
     let mut proc_: Oid;
     let mut l: *mut ListCell;

@@ -3194,8 +3194,8 @@ const RTE_RELATION: c_int = 0;
 
 /* ----- Syscache ids (utils/syscache.h) ----- */
 // TODO(pg-port): real values live in utils/syscache.h (generated)
-const CONSTROID: c_int = 0;
-const COLLOID: c_int = 0;
+const CONSTROID: c_int = 19;
+const COLLOID: c_int = 16;
 
 /* ----- Snapshot constants ----- */
 // TODO(pg-port): real values live in utils/snapmgr.h / utils/snapshot.h
@@ -3224,10 +3224,10 @@ static mut SPI_tuptable: *mut SPITupleTable = std::ptr::null_mut();
 
 unsafe fn SPI_connect() -> c_int { 0 }
 unsafe fn SPI_finish() -> c_int { SPI_OK_FINISH }
-unsafe fn SPI_prepare(_src: *const c_char, _nargs: c_int, _argtypes: *mut Oid) -> SPIPlanPtr { std::ptr::null_mut() }
-unsafe fn SPI_keepplan(_plan: SPIPlanPtr) -> c_int { 0 }
-unsafe fn SPI_freeplan(_plan: SPIPlanPtr) -> c_int { 0 }
-unsafe fn SPI_plan_is_valid(_plan: SPIPlanPtr) -> bool { false }
+unsafe fn SPI_prepare(_src: *const c_char, _nargs: c_int, _argtypes: *mut Oid) -> SPIPlanPtr { crate::executor::spi::SPI_prepare(_src as _, _nargs as _, _argtypes as _) as _ }
+unsafe fn SPI_keepplan(_plan: SPIPlanPtr) -> c_int { crate::executor::spi::SPI_keepplan(_plan as _) as _ }
+unsafe fn SPI_freeplan(_plan: SPIPlanPtr) -> c_int { crate::executor::spi::SPI_freeplan(_plan as _) as _ }
+unsafe fn SPI_plan_is_valid(_plan: SPIPlanPtr) -> bool { crate::executor::spi::SPI_plan_is_valid(_plan as _) }
 unsafe fn SPI_result_code_string(_code: c_int) -> *const c_char { c"".as_ptr() }
 unsafe fn SPI_execute_snapshot(
     _plan: SPIPlanPtr, _values: *mut Datum, _nulls: *mut c_char,
@@ -3263,11 +3263,11 @@ pub struct TupleTableSlotOps {
 #[allow(non_upper_case_globals)]
 static TTSOpsVirtual: TupleTableSlotOps = TupleTableSlotOps { _opaque: [] };
 unsafe fn slot_getattr(_slot: *mut TupleTableSlot, _attnum: c_int, isnull: *mut bool) -> Datum { *isnull = false; 0 }
-unsafe fn slot_attisnull(_slot: *mut TupleTableSlot, _attnum: c_int) -> bool { false }
-unsafe fn slot_is_current_xact_tuple(_slot: *mut TupleTableSlot) -> bool { false }
+unsafe fn slot_attisnull(_slot: *mut TupleTableSlot, _attnum: c_int) -> bool { crate::executor::tuptable::slot_attisnull(_slot as _, _attnum as _) }
+unsafe fn slot_is_current_xact_tuple(_slot: *mut TupleTableSlot) -> bool { crate::executor::tuptable::slot_is_current_xact_tuple(_slot as _) }
 unsafe fn MakeSingleTupleTableSlot(_tupdesc: TupleDesc, _ops: *const TupleTableSlotOps) -> *mut TupleTableSlot { std::ptr::null_mut() }
-unsafe fn ExecStoreVirtualTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot { std::ptr::null_mut() }
-unsafe fn ExecDropSingleTupleTableSlot(_slot: *mut TupleTableSlot) {}
+unsafe fn ExecStoreVirtualTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot { crate::executor::execTuples::ExecStoreVirtualTuple(_slot as _) as _ }
+unsafe fn ExecDropSingleTupleTableSlot(_slot: *mut TupleTableSlot) { crate::executor::execTuples::ExecDropSingleTupleTableSlot(_slot as _) }
 unsafe fn ExecCheckPermissions(_rtes: *mut List, _perminfos: *mut List, _ereport_on_violation: bool) -> bool { true }
 
 /* ----- HeapTuple / TupleDesc (real types imported at top) ----- */
@@ -3298,9 +3298,9 @@ unsafe fn NameStr(name: *mut NameData) -> *mut c_char {
     name as *mut c_char
 }
 
-unsafe fn attnumAttName(_rel: Relation, _attnum: int16) -> *mut NameData { std::ptr::null_mut() }
-unsafe fn attnumTypeId(_rel: Relation, _attnum: int16) -> Oid { InvalidOid }
-unsafe fn attnumCollationId(_rel: Relation, _attnum: int16) -> Oid { InvalidOid }
+unsafe fn attnumAttName(_rel: Relation, _attnum: int16) -> *mut NameData { crate::parser::parse_relation::attnumAttName(_rel as _, _attnum as _) as _ }
+unsafe fn attnumTypeId(_rel: Relation, _attnum: int16) -> Oid { crate::parser::parse_relation::attnumTypeId(_rel as _, _attnum as _) as _ }
+unsafe fn attnumCollationId(_rel: Relation, _attnum: int16) -> Oid { crate::parser::parse_relation::attnumCollationId(_rel as _, _attnum as _) as _ }
 
 /* ----- Relation accessors (utils/rel.h) ----- */
 // RelationGetForm is imported from utils::rel; the rest are simple field reads
@@ -3374,8 +3374,8 @@ pub struct dlist_mutable_iter {
     pub end: *mut dlist_node,
 }
 unsafe fn dclist_count(head: *const dclist_head) -> u32 { (*head).count }
-unsafe fn dclist_push_tail(_head: *mut dclist_head, _node: *mut dlist_node) {}
-unsafe fn dclist_delete_from(_head: *mut dclist_head, _node: *mut dlist_node) {}
+unsafe fn dclist_push_tail(_head: *mut dclist_head, _node: *mut dlist_node) { crate::lib::ilist::dclist_push_tail(_head as _, _node as _) }
+unsafe fn dclist_delete_from(_head: *mut dclist_head, _node: *mut dlist_node) { crate::lib::ilist::dclist_delete_from(_head as _, _node as _) }
 /* dclist_foreach_modify(iter, head, body): iterate the valid list. */
 unsafe fn dclist_foreach_modify<F: FnMut(*mut dlist_node)>(_iter: *mut dlist_mutable_iter, head: *mut dclist_head, mut body: F) {
     let mut cur = (*head).head.head.next;
@@ -3417,7 +3417,7 @@ unsafe fn hash_search(_htab: *mut HTAB, _key: *const c_void, _action: c_int, fou
 type SyscacheCallbackFunction = unsafe fn(Datum, c_int, uint32);
 unsafe fn SearchSysCache1(_cacheid: c_int, _key1: Datum) -> HeapTuple { std::ptr::null_mut() }
 unsafe fn ReleaseSysCache(_tuple: HeapTuple) {}
-unsafe fn GetSysCacheHashValue1(_cacheid: c_int, _key1: Datum) -> uint32 { 0 }
+unsafe fn GetSysCacheHashValue1(_cacheid: c_int, _key1: Datum) -> uint32 { crate::utils::cache::syscache::GetSysCacheHashValue1(_cacheid as _, _key1 as _) as _ }
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool { !tuple.is_null() }
 unsafe fn GETSTRUCT(_tuple: HeapTuple) -> *mut c_void { std::ptr::null_mut() }
 unsafe fn CacheRegisterSyscacheCallback(_cacheid: c_int, _func: SyscacheCallbackFunction, _arg: Datum) {}
@@ -3434,17 +3434,17 @@ unsafe fn DeconstructFkConstraintRow(
     _ff_eq_oprs: *mut Oid,
     _num_delete_set_cols: *mut c_int,
     _delete_set_cols: *mut int16,
-) {}
+) { crate::catalog::pg_constraint::DeconstructFkConstraintRow(_tuple as _, _numfks as _, _conkey as _, _confkey as _, _pf_eq_oprs as _, _pp_eq_oprs as _, _ff_eq_oprs as _, _num_delete_set_cols as _, _delete_set_cols as _) }
 
 /* ----- index/opclass & temporal-FK opers (catalog/index.c, utils/adt/rangetypes.c) ----- */
 // TODO(pg-port): get_index_column_opclass lives in utils/cache/lsyscache.c
-unsafe fn get_index_column_opclass(_index_oid: Oid, _attno: c_int) -> Oid { InvalidOid }
+unsafe fn get_index_column_opclass(_index_oid: Oid, _attno: c_int) -> Oid { crate::utils::cache::lsyscache::get_index_column_opclass(_index_oid as _, _attno as _) as _ }
 // TODO(pg-port): FindFKPeriodOpers lives in utils/adt/rangetypes.c
 unsafe fn FindFKPeriodOpers(_opclass: Oid, _contained_by: *mut Oid, _agged_contained_by: *mut Oid, _intersect: *mut Oid) {}
 
 /* ----- lsyscache / type output (utils/cache/lsyscache.c, utils/fmgr.c) ----- */
 // TODO(pg-port): these live in utils/cache/lsyscache.c & utils/fmgr.c
-unsafe fn get_opcode(_opno: Oid) -> Oid { InvalidOid }
+unsafe fn get_opcode(_opno: Oid) -> Oid { crate::utils::cache::lsyscache::get_opcode(_opno as _) as _ }
 unsafe fn op_input_types(_opno: Oid, lefttype: *mut Oid, righttype: *mut Oid) { *lefttype = InvalidOid; *righttype = InvalidOid; }
 unsafe fn getTypeOutputInfo(_type: Oid, typoutput: *mut Oid, typisvarlena: *mut bool) { *typoutput = InvalidOid; *typisvarlena = false; }
 unsafe fn OidOutputFunctionCall(_functionId: Oid, _val: Datum) -> *mut c_char { c"".as_ptr() as *mut c_char }
@@ -3454,29 +3454,29 @@ unsafe fn format_type_be(_type_oid: Oid) -> *mut c_char { c"".as_ptr() as *mut c
 /* ----- parse_coerce (parser/parse_coerce.c) ----- */
 // TODO(pg-port): these live in parser/parse_coerce.c
 unsafe fn find_coercion_pathway(_target: Oid, _source: Oid, _ccontext: c_int, funcid: *mut Oid) -> CoercionPathType { *funcid = InvalidOid; COERCION_PATH_NONE }
-unsafe fn IsBinaryCoercible(_src: Oid, _target: Oid) -> bool { false }
+unsafe fn IsBinaryCoercible(_src: Oid, _target: Oid) -> bool { crate::parser::parse_coerce::IsBinaryCoercible(_src as _, _target as _) }
 
 /* ----- ruleutils (utils/adt/ruleutils.c) ----- */
 // TODO(pg-port): these live in utils/adt/ruleutils.c
 unsafe fn generate_operator_clause(_buf: StringInfo, _leftop: *const c_char, _leftoptype: Oid, _opoid: Oid, _rightop: *const c_char, _rightoptype: Oid) {}
-unsafe fn pg_get_partconstrdef_string(_partitionId: Oid, _aliasname: *const c_char) -> *mut c_char { std::ptr::null_mut() }
+unsafe fn pg_get_partconstrdef_string(_partitionId: Oid, _aliasname: *const c_char) -> *mut c_char { unimplemented!() }
 
 /* ----- fmgr call helpers (utils/fmgr.c) ----- */
 // TODO(pg-port): FunctionCall* live in utils/fmgr.c
-unsafe fn fmgr_info_cxt(_functionId: Oid, _finfo: *mut FmgrInfo, _mcxt: MemoryContext) {}
-unsafe fn FunctionCall2Coll(_flinfo: *mut FmgrInfo, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Datum { 0 }
+unsafe fn fmgr_info_cxt(_functionId: Oid, _finfo: *mut FmgrInfo, _mcxt: MemoryContext) { crate::utils::fmgr::fmgr_info_cxt(_functionId as _, _finfo as _, _mcxt as _) }
+unsafe fn FunctionCall2Coll(_flinfo: *mut FmgrInfo, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Datum { crate::utils::fmgr::FunctionCall2Coll(_flinfo as _, _collation as _, _arg1 as _, _arg2 as _) as _ }
 unsafe fn FunctionCall3(_flinfo: *mut FmgrInfo, _arg1: Datum, _arg2: Datum, _arg3: Datum) -> Datum { 0 }
 
 /* ----- acl / rls / misc (utils/acl.c, utils/rls.c, miscadmin.c, access/xact.c) ----- */
 // TODO(pg-port): these live across utils/acl.c, utils/rls.c, miscadmin.c, access/xact.c, catalog/aclchk.c
-unsafe fn GetUserId() -> Oid { InvalidOid }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn GetUserIdAndSecContext(userid: *mut Oid, sec_context: *mut c_int) { *userid = InvalidOid; *sec_context = 0; }
 unsafe fn SetUserIdAndSecContext(_userid: Oid, _sec_context: c_int) {}
-unsafe fn has_bypassrls_privilege(_roleid: Oid) -> bool { false }
-unsafe fn object_ownercheck(_classid: Oid, _objectid: Oid, _roleid: Oid) -> bool { false }
+unsafe fn has_bypassrls_privilege(_roleid: Oid) -> bool { crate::catalog::aclchk::has_bypassrls_privilege(_roleid as _) }
+unsafe fn object_ownercheck(_classid: Oid, _objectid: Oid, _roleid: Oid) -> bool { crate::catalog::aclchk::object_ownercheck(_classid as _, _objectid as _, _roleid as _) }
 unsafe fn pg_class_aclcheck(_table_oid: Oid, _roleid: Oid, _mode: AclMode) -> AclResult { ACLCHECK_OK }
 unsafe fn pg_attribute_aclcheck(_table_oid: Oid, _attnum: int16, _roleid: Oid, _mode: AclMode) -> AclResult { ACLCHECK_OK }
-unsafe fn check_enable_rls(_relid: Oid, _checkAsUser: Oid, _noError: bool) -> c_int { 0 }
+unsafe fn check_enable_rls(_relid: Oid, _checkAsUser: Oid, _noError: bool) -> c_int { crate::utils::misc::rls::check_enable_rls(_relid as _, _checkAsUser as _, _noError) as _ }
 unsafe fn CommandCounterIncrement() {}
 
 /* RelationRelationId (catalog/pg_class_d.h) */
@@ -3488,7 +3488,7 @@ const RelationRelationId: Oid = 1259;
 #[allow(non_upper_case_globals)]
 static mut maintenance_work_mem: c_int = 65536;
 unsafe fn NewGUCNestLevel() -> c_int { 0 }
-unsafe fn AtEOXact_GUC(_isCommit: bool, _nestLevel: c_int) {}
+unsafe fn AtEOXact_GUC(_isCommit: bool, _nestLevel: c_int) { crate::utils::misc::guc::AtEOXact_GUC(_isCommit, _nestLevel as _) }
 unsafe fn set_config_option(_name: *const c_char, _value: *const c_char, _context: c_int, _source: c_int, _action: c_int, _changeVal: bool, _elevel: c_int, _is_reload: bool) -> c_int { 0 }
 
 /* ----- Datum helpers not in postgres.rs ----- */

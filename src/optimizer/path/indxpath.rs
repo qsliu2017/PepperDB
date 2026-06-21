@@ -87,8 +87,8 @@ const BOOLOID: Oid = 16;
 /// RECORDOID (catalog/pg_type.h)
 const RECORDOID: Oid = 2249;
 
-/// FirstLowInvalidHeapAttributeNumber (access/sysattr.h)
-const FirstLowInvalidHeapAttributeNumber: i32 = -8;
+/// FirstLowInvalidHeapAttributeNumber (access/sysattr.h) = -7
+const FirstLowInvalidHeapAttributeNumber: i32 = -7;
 
 /// INDEX_MAX_KEYS (access/index_am_properties.h / pg_config_manual.h)
 const INDEX_MAX_KEYS: usize = 32;
@@ -182,7 +182,10 @@ unsafe fn create_index_path(
     _loop_count: f64,
     _partial_path: bool,
 ) -> *mut IndexPath {
-    unimplemented!()
+    crate::optimizer::util::pathnode::create_index_path(
+        _root, _index, _indexclauses, _orderbyclauses, _orderbyclausecols, _pathkeys,
+        _indexscandir, _index_only_scan, _required_outer, _loop_count, _partial_path,
+    )
 }
 
 // TODO(pg-port): real create_bitmap_heap_path lives in optimizer/pathnode.rs
@@ -194,7 +197,9 @@ unsafe fn create_bitmap_heap_path(
     _loop_count: f64,
     _parallel_degree: i32,
 ) -> *mut BitmapHeapPath {
-    unimplemented!()
+    crate::optimizer::util::pathnode::create_bitmap_heap_path(
+        _root, _rel, _bitmapqual, _required_outer, _loop_count, _parallel_degree,
+    )
 }
 
 // TODO(pg-port): real create_bitmap_and_path lives in optimizer/pathnode.rs
@@ -203,7 +208,7 @@ unsafe fn create_bitmap_and_path(
     _rel: *mut RelOptInfo,
     _bitmapquals: *mut List,
 ) -> *mut BitmapAndPath {
-    unimplemented!()
+    crate::optimizer::util::pathnode::create_bitmap_and_path(_root, _rel, _bitmapquals)
 }
 
 // TODO(pg-port): real create_bitmap_or_path lives in optimizer/pathnode.rs
@@ -212,7 +217,7 @@ unsafe fn create_bitmap_or_path(
     _rel: *mut RelOptInfo,
     _bitmapquals: *mut List,
 ) -> *mut BitmapOrPath {
-    unimplemented!()
+    crate::optimizer::util::pathnode::create_bitmap_or_path(_root, _rel, _bitmapquals)
 }
 
 // TODO(pg-port): real create_partial_bitmap_paths lives in optimizer/pathnode.rs
@@ -221,22 +226,22 @@ unsafe fn create_partial_bitmap_paths(
     _rel: *mut RelOptInfo,
     _bitmapqual: *mut Path,
 ) {
-    unimplemented!()
+    crate::optimizer::path::allpaths::create_partial_bitmap_paths(_root, _rel, _bitmapqual)
 }
 
 // TODO(pg-port): real add_path lives in optimizer/pathnode.rs
 unsafe fn add_path(_parent_rel: *mut RelOptInfo, _new_path: *mut Path) {
-    unimplemented!()
+    crate::optimizer::util::pathnode::add_path(_parent_rel, _new_path)
 }
 
 // TODO(pg-port): real add_partial_path lives in optimizer/pathnode.rs
 unsafe fn add_partial_path(_parent_rel: *mut RelOptInfo, _new_path: *mut Path) {
-    unimplemented!()
+    crate::optimizer::util::pathnode::add_partial_path(_parent_rel, _new_path)
 }
 
 // TODO(pg-port): real cost_bitmap_tree_node lives in optimizer/path/costsize.rs
 unsafe fn cost_bitmap_tree_node(path: *mut Path, cost: *mut Cost, selec: *mut Selectivity) {
-    unimplemented!()
+    crate::optimizer::path::costsize::cost_bitmap_tree_node(path, cost, selec)
 }
 
 // TODO(pg-port): real cost_bitmap_heap_scan lives in optimizer/path/costsize.rs
@@ -248,7 +253,9 @@ unsafe fn cost_bitmap_heap_scan(
     _bitmapqual: *mut Path,
     _loop_count: f64,
 ) {
-    unimplemented!()
+    crate::optimizer::path::costsize::cost_bitmap_heap_scan(
+        _path, _root, _baserel, _param_info, _bitmapqual, _loop_count,
+    )
 }
 
 // TODO(pg-port): real PATH_REQ_OUTER macro - returns param_info's ppi_req_outer or NULL
@@ -263,7 +270,7 @@ unsafe fn PATH_REQ_OUTER(path: *mut Path) -> Relids {
 
 // TODO(pg-port): real has_useful_pathkeys lives in optimizer/path/pathkeys.rs
 unsafe fn has_useful_pathkeys(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) -> bool {
-    unimplemented!()
+    crate::optimizer::path::pathkeys::has_useful_pathkeys(_root, _rel)
 }
 
 // TODO(pg-port): real build_index_pathkeys lives in optimizer/path/pathkeys.rs
@@ -272,7 +279,7 @@ unsafe fn build_index_pathkeys(
     _index: *mut IndexOptInfo,
     _scandir: i32,
 ) -> *mut List {
-    unimplemented!()
+    crate::optimizer::path::pathkeys::build_index_pathkeys(_root, _index, _scandir)
 }
 
 // TODO(pg-port): real truncate_useless_pathkeys lives in optimizer/path/pathkeys.rs
@@ -281,7 +288,7 @@ unsafe fn truncate_useless_pathkeys(
     _rel: *mut RelOptInfo,
     _pathkeys: *mut List,
 ) -> *mut List {
-    unimplemented!()
+    crate::optimizer::path::pathkeys::truncate_useless_pathkeys(_root, _rel, _pathkeys)
 }
 
 // TODO(pg-port): ScanDirection constants from nodes/plannodes.h
@@ -294,7 +301,7 @@ const BackwardScanDirection: i32 = -1;
 
 // TODO(pg-port): restriction_is_or_clause
 unsafe fn restriction_is_or_clause(rinfo: *mut RestrictInfo) -> bool {
-    unimplemented!()
+    crate::optimizer::util::restrictinfo::restriction_is_or_clause(rinfo)
 }
 
 // TODO(pg-port): restriction_is_securely_promotable
@@ -302,17 +309,17 @@ unsafe fn restriction_is_securely_promotable(
     rinfo: *mut RestrictInfo,
     rel: *mut RelOptInfo,
 ) -> bool {
-    unimplemented!()
+    crate::optimizer::util::restrictinfo::restriction_is_securely_promotable(rinfo, rel)
 }
 
 // TODO(pg-port): join_clause_is_movable_to
 unsafe fn join_clause_is_movable_to(rinfo: *mut RestrictInfo, rel: *mut RelOptInfo) -> bool {
-    unimplemented!()
+    crate::optimizer::util::restrictinfo::join_clause_is_movable_to(rinfo, rel)
 }
 
 // TODO(pg-port): commute_restrictinfo
 unsafe fn commute_restrictinfo(rinfo: *mut RestrictInfo, comm_op: Oid) -> *mut RestrictInfo {
-    unimplemented!()
+    crate::optimizer::util::restrictinfo::commute_restrictinfo(rinfo, comm_op)
 }
 
 // TODO(pg-port): make_plain_restrictinfo
@@ -329,12 +336,26 @@ unsafe fn make_plain_restrictinfo(
     _incompatible_relids: Relids,
     _outer_relids: Relids,
 ) -> *mut RestrictInfo {
-    unimplemented!()
+    crate::optimizer::util::restrictinfo::make_plain_restrictinfo(
+        _root, _clause, _orclause, _is_pushed_down, _has_clone, _is_clone, _pseudoconstant,
+        _security_level as _, _required_relids, _incompatible_relids, _outer_relids,
+    )
 }
 
 // TODO(pg-port): make_simple_restrictinfo
 unsafe fn make_simple_restrictinfo(root: *mut PlannerInfo, clause: *mut Expr) -> *mut RestrictInfo {
-    unimplemented!()
+    crate::optimizer::util::restrictinfo::make_restrictinfo(
+        root,
+        clause,
+        true,
+        false,
+        false,
+        false,
+        0,
+        core::ptr::null_mut(),
+        core::ptr::null_mut(),
+        core::ptr::null_mut(),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -343,22 +364,22 @@ unsafe fn make_simple_restrictinfo(root: *mut PlannerInfo, clause: *mut Expr) ->
 
 // TODO(pg-port): contain_volatile_functions
 unsafe fn contain_volatile_functions(node: *mut c_void) -> bool {
-    unimplemented!()
+    crate::optimizer::util::clauses::contain_volatile_functions(node as _)
 }
 
 // TODO(pg-port): pull_varnos
 unsafe fn pull_varnos(root: *mut PlannerInfo, node: *mut c_void) -> Relids {
-    unimplemented!()
+    crate::optimizer::util::var::pull_varnos(root, node as _)
 }
 
 // TODO(pg-port): pull_varattnos
 unsafe fn pull_varattnos(node: *mut c_void, varno: u32, varattnos: *mut *mut Bitmapset) {
-    unimplemented!()
+    crate::optimizer::util::var::pull_varattnos(node as _, varno as _, varattnos)
 }
 
 // TODO(pg-port): contain_var_clause
 unsafe fn contain_var_clause(node: *mut c_void) -> bool {
-    unimplemented!()
+    crate::optimizer::util::var::contain_var_clause(node as _)
 }
 
 // TODO(pg-port): predicate_implied_by
@@ -367,12 +388,12 @@ unsafe fn predicate_implied_by(
     clause_list: *mut List,
     weak: bool,
 ) -> bool {
-    unimplemented!()
+    crate::optimizer::util::predtest::predicate_implied_by(predicate_list, clause_list, weak)
 }
 
 // TODO(pg-port): contain_mutable_functions
 unsafe fn contain_mutable_functions(node: *mut c_void) -> bool {
-    unimplemented!()
+    crate::optimizer::util::clauses::contain_mutable_functions(node as _)
 }
 
 // TODO(pg-port): generate_implied_equalities_for_column (optimizer/paths.h)
@@ -391,7 +412,16 @@ unsafe fn generate_implied_equalities_for_column(
     _callback_arg: *mut c_void,
     _prohibited_rels: Relids,
 ) -> *mut List {
-    unimplemented!()
+    crate::optimizer::path::equivclass::generate_implied_equalities_for_column(
+        _root,
+        _rel,
+        core::mem::transmute::<
+            EcMembersFuncType,
+            crate::optimizer::path::equivclass::ec_matches_callback_type,
+        >(_callback),
+        _callback_arg,
+        _prohibited_rels,
+    )
 }
 
 // TODO(pg-port): generate_join_implied_equalities (optimizer/paths.h)
@@ -402,12 +432,14 @@ unsafe fn generate_join_implied_equalities(
     _inner_rel: *mut RelOptInfo,
     _sjinfo: *mut SpecialJoinInfo,
 ) -> *mut List {
-    unimplemented!()
+    crate::optimizer::path::equivclass::generate_join_implied_equalities(
+        _root, _join_relids, _outer_relids, _inner_rel, _sjinfo,
+    )
 }
 
 // TODO(pg-port): find_childrel_parents (optimizer/optimizer.h)
 unsafe fn find_childrel_parents(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) -> Relids {
-    unimplemented!()
+    crate::optimizer::util::relnode::find_childrel_parents(_root, _rel)
 }
 
 // TODO(pg-port): estimate_num_groups (utils/selfuncs.h)
@@ -418,22 +450,24 @@ unsafe fn estimate_num_groups(
     _pgset: *mut *mut List,
     _pginfo: *mut *mut c_void,
 ) -> f64 {
-    unimplemented!()
+    crate::utils::adt::selfuncs::estimate_num_groups(
+        _root as _, _groupExprs as _, _input_rows, _pgset as _, _pginfo as _,
+    )
 }
 
 // TODO(pg-port): IS_DUMMY_REL macro
 unsafe fn IS_DUMMY_REL(rel: *mut RelOptInfo) -> bool {
-    unimplemented!()
+    crate::optimizer::path::joinrels::is_dummy_rel_impl(rel)
 }
 
 // TODO(pg-port): IS_SIMPLE_REL macro
 unsafe fn IS_SIMPLE_REL(rel: *mut RelOptInfo) -> bool {
-    unimplemented!()
+    crate::nodes::pathnodes::IS_SIMPLE_REL(rel)
 }
 
 // TODO(pg-port): get_plan_rowmark (optimizer/plan/planner.h)
 unsafe fn get_plan_rowmark(_rowmarks: *mut List, _relid: u32) -> *mut c_void {
-    unimplemented!()
+    crate::optimizer::prep::preptlist::get_plan_rowmark(_rowmarks, _relid as _) as _
 }
 
 // ---------------------------------------------------------------------------
@@ -442,17 +476,17 @@ unsafe fn get_plan_rowmark(_rowmarks: *mut List, _relid: u32) -> *mut c_void {
 
 // TODO(pg-port): get_commutator
 unsafe fn get_commutator(opno: Oid) -> Oid {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_commutator(opno)
 }
 
 // TODO(pg-port): op_in_opfamily
 unsafe fn op_in_opfamily(opno: Oid, opfamily: Oid) -> bool {
-    unimplemented!()
+    crate::utils::cache::lsyscache::op_in_opfamily(opno, opfamily)
 }
 
 // TODO(pg-port): get_op_opfamily_strategy
 unsafe fn get_op_opfamily_strategy(opno: Oid, opfamily: Oid) -> i32 {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_op_opfamily_strategy(opno, opfamily)
 }
 
 // TODO(pg-port): get_op_opfamily_properties
@@ -464,52 +498,56 @@ unsafe fn get_op_opfamily_properties(
     lefttype: *mut Oid,
     righttype: *mut Oid,
 ) {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_op_opfamily_properties(
+        opno, opfamily, need_strategy, strategy, lefttype, righttype,
+    )
 }
 
 // TODO(pg-port): get_op_opfamily_sortfamily
 unsafe fn get_op_opfamily_sortfamily(opno: Oid, opfamily: Oid) -> Oid {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_op_opfamily_sortfamily(opno, opfamily)
 }
 
 // TODO(pg-port): get_opfamily_member
 unsafe fn get_opfamily_member(opfamily: Oid, lefttype: Oid, righttype: Oid, strategy: i32) -> Oid {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_opfamily_member(opfamily, lefttype, righttype, strategy as _)
 }
 
 // TODO(pg-port): get_func_support
 unsafe fn get_func_support(funcid: Oid) -> Oid {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_func_support(funcid)
 }
 
 // TODO(pg-port): get_array_type
 unsafe fn get_array_type(typid: Oid) -> Oid {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_array_type(typid)
 }
 
 // TODO(pg-port): OidFunctionCall1
 unsafe fn OidFunctionCall1(functionId: Oid, arg1: usize) -> usize {
-    unimplemented!()
+    crate::utils::fmgr::OidFunctionCall1Coll(functionId, InvalidOid, arg1)
 }
 
 // TODO(pg-port): DatumGetPointer
 unsafe fn DatumGetPointer(datum: usize) -> *mut c_void {
-    unimplemented!()
+    crate::postgres::DatumGetPointer(datum) as *mut c_void
 }
 
 // TODO(pg-port): PointerGetDatum
 unsafe fn PointerGetDatum(ptr: *mut c_void) -> usize {
-    unimplemented!()
+    crate::postgres::PointerGetDatum(ptr)
 }
 
 // TODO(pg-port): IsBuiltinBooleanOpfamily
 unsafe fn IsBuiltinBooleanOpfamily(opfamily: Oid) -> bool {
-    unimplemented!()
+    const BOOL_BTREE_FAM_OID: Oid = 424;
+    const BOOL_HASH_FAM_OID: Oid = 2222;
+    opfamily == BOOL_BTREE_FAM_OID || opfamily == BOOL_HASH_FAM_OID
 }
 
 // TODO(pg-port): set_opfuncid
 unsafe fn set_opfuncid(clause: *mut OpExpr) {
-    unimplemented!()
+    crate::nodes::nodeFuncs::set_opfuncid(clause)
 }
 
 // ---------------------------------------------------------------------------
@@ -518,15 +556,15 @@ unsafe fn set_opfuncid(clause: *mut OpExpr) {
 
 // TODO(pg-port): makeNode
 unsafe fn makeNode_IndexClause() -> *mut IndexClause {
-    unimplemented!()
+    crate::makeNode!(IndexClause, T_IndexClause)
 }
 
 unsafe fn makeNode_OpExpr() -> *mut OpExpr {
-    unimplemented!()
+    crate::makeNode!(OpExpr, T_OpExpr)
 }
 
 unsafe fn makeNode_RowCompareExpr() -> *mut RowCompareExpr {
-    unimplemented!()
+    crate::makeNode!(RowCompareExpr, T_RowCompareExpr)
 }
 
 // TODO(pg-port): make_opclause
@@ -539,50 +577,64 @@ unsafe fn make_opclause(
     opcollid: Oid,
     inputcollid: Oid,
 ) -> *mut Expr {
-    unimplemented!()
+    crate::nodes::makefuncs::make_opclause(
+        opno, opresulttype, opretset, leftop, rightop, opcollid, inputcollid,
+    )
 }
 
 // TODO(pg-port): make_orclause
 unsafe fn make_orclause(orclauses: *mut List) -> *mut Expr {
-    unimplemented!()
+    crate::nodes::makefuncs::make_orclause(orclauses)
 }
 
 // TODO(pg-port): makeBoolConst
 unsafe fn makeBoolConst(value: bool, isnull: bool) -> *mut Node {
-    unimplemented!()
+    crate::nodes::makefuncs::makeBoolConst(value, isnull)
 }
 
 // TODO(pg-port): copyObject
 unsafe fn copyObject_list(obj: *mut List) -> *mut List {
-    unimplemented!()
+    crate::nodes::copyfuncs::copyObjectImpl(obj as *const c_void) as *mut List
 }
 
 unsafe fn copyObject_node(obj: *mut c_void) -> *mut c_void {
-    unimplemented!()
+    crate::nodes::copyfuncs::copyObjectImpl(obj as *const c_void)
 }
 
 // TODO(pg-port): exprType
 unsafe fn exprType(expr: *mut c_void) -> Oid {
-    unimplemented!()
+    crate::nodes::nodeFuncs::exprType(expr as *const Node)
 }
 
 // TODO(pg-port): get_leftop / get_rightop (nodes/nodeFuncs.h)
 unsafe fn get_leftop(clause: *const c_void) -> *mut Node {
-    unimplemented!()
+    let expr = clause as *const OpExpr;
+    if (*expr).args != NIL {
+        linitial((*expr).args) as *mut Node
+    } else {
+        core::ptr::null_mut()
+    }
 }
 
 unsafe fn get_rightop(clause: *const c_void) -> *mut Node {
-    unimplemented!()
+    let expr = clause as *const OpExpr;
+    if list_length((*expr).args) >= 2 {
+        lsecond((*expr).args) as *mut Node
+    } else {
+        core::ptr::null_mut()
+    }
 }
 
 // TODO(pg-port): is_notclause (nodes/nodeFuncs.h)
 unsafe fn is_notclause(clause: *const c_void) -> bool {
-    unimplemented!()
+    !clause.is_null()
+        && IsA!(clause, T_BoolExpr)
+        && (*(clause as *const BoolExpr)).boolop == crate::nodes::primnodes::NOT_EXPR
 }
 
 // TODO(pg-port): get_notclausearg (nodes/nodeFuncs.h)
 unsafe fn get_notclausearg(notclause: *mut Expr) -> *mut Expr {
-    unimplemented!()
+    linitial((*(notclause as *mut BoolExpr)).args) as *mut Expr
 }
 
 // TODO(pg-port): is_andclause / is_orclause (nodes/nodeFuncs.h)
@@ -604,7 +656,7 @@ unsafe fn expression_tree_walker(
     walker: unsafe fn(*mut Node, *mut c_void) -> bool,
     context: *mut c_void,
 ) -> bool {
-    unimplemented!()
+    crate::nodes::nodeFuncs::expression_tree_walker_impl(node, Some(walker), context)
 }
 
 // TODO(pg-port): expression_tree_mutator (nodes/nodeFuncs.h)
@@ -613,7 +665,7 @@ unsafe fn expression_tree_mutator(
     mutator: unsafe fn(*mut Node, *mut c_void) -> *mut Node,
     context: *mut c_void,
 ) -> *mut Node {
-    unimplemented!()
+    crate::nodes::nodeFuncs::expression_tree_mutator_impl(node, Some(mutator), context)
 }
 
 // TODO(pg-port): nodeTag macro
@@ -623,7 +675,7 @@ unsafe fn nodeTag(node: *const c_void) -> NodeTag {
 
 // TODO(pg-port): equal (nodes/equalfuncs.h)
 unsafe fn equal(a: *const c_void, b: *const c_void) -> bool {
-    unimplemented!()
+    crate::nodes::equalfuncs::equal(a, b)
 }
 
 // TODO(pg-port): OidIsValid
@@ -634,12 +686,12 @@ fn OidIsValid(oid: Oid) -> bool {
 
 // TODO(pg-port): pfree
 unsafe fn pfree(ptr: *mut c_void) {
-    unimplemented!()
+    crate::utils::palloc::pfree(ptr)
 }
 
 // TODO(pg-port): palloc
 unsafe fn palloc(size: usize) -> *mut c_void {
-    unimplemented!()
+    crate::utils::palloc::palloc(size)
 }
 
 // TODO(pg-port): MemSet
@@ -649,11 +701,13 @@ unsafe fn MemSet(s: *mut c_void, c: i32, n: usize) {
 
 // TODO(pg-port): MemoryContextSwitchTo (utils/palloc.h)
 unsafe fn MemoryContextSwitchTo(context: *mut c_void) -> *mut c_void {
-    unimplemented!()
+    crate::utils::palloc::MemoryContextSwitchTo(context as _) as *mut c_void
 }
 
-// TODO(pg-port): enable_indexonlyscan GUC
-static mut enable_indexonlyscan: bool = true;
+// TODO(pg-port): index-only-scan EXECUTOR (nodeIndexonlyscan.rs) is unported
+// (~50 stubs). Disable index-only scans until it's ported so the planner uses
+// regular index scans (identical results). Re-enable after porting the executor.
+static mut enable_indexonlyscan: bool = false;
 
 // TODO(pg-port): make_SAOP_expr (nodes/makefuncs.h)
 unsafe fn make_SAOP_expr(
@@ -665,7 +719,9 @@ unsafe fn make_SAOP_expr(
     consts: *mut List,
     have_non_const: bool,
 ) -> *mut ScalarArrayOpExpr {
-    unimplemented!()
+    crate::optimizer::util::clauses::make_SAOP_expr(
+        opno, indexexpr, consttype, constcollid, inputcollid, consts, have_non_const,
+    )
 }
 
 // TODO(pg-port): setup_eclass_member_iterator / eclass_member_iterator_next
@@ -674,11 +730,11 @@ unsafe fn setup_eclass_member_iterator(
     ec: *mut EquivalenceClass,
     relids: Relids,
 ) {
-    unimplemented!()
+    crate::optimizer::path::equivclass::setup_eclass_member_iterator(it, ec, relids)
 }
 
 unsafe fn eclass_member_iterator_next(it: *mut EquivalenceMemberIterator) -> *mut EquivalenceMember {
-    unimplemented!()
+    crate::optimizer::path::equivclass::eclass_member_iterator_next(it)
 }
 
 // TODO(pg-port): SupportRequestIndexCondition node (nodes/supportnodes.h)
@@ -697,7 +753,7 @@ struct SupportRequestIndexCondition {
 }
 
 // TODO(pg-port): match_index_to_operand (exported in optimizer/paths.h)
-unsafe fn match_index_to_operand(
+pub unsafe fn match_index_to_operand(
     mut operand: *mut Node,
     indexcol: i32,
     index: *mut IndexOptInfo,

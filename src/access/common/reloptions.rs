@@ -50,14 +50,18 @@ use crate::access::gist::gist_private::{
     GIST_DEFAULT_FILLFACTOR, GIST_MIN_FILLFACTOR, GIST_OPTION_BUFFERING_AUTO,
     GIST_OPTION_BUFFERING_OFF, GIST_OPTION_BUFFERING_ON,
 }; // access/gist_private.h
-use crate::access::hash::hash::{HASH_DEFAULT_FILLFACTOR, HASH_MIN_FILLFACTOR}; // access/hash.h
+// access/hash.h (HASH_*_FILLFACTOR); hash.rs is not split out as a submodule yet,
+// so define locally matching postgres/src/include/access/hash.h.
+const HASH_DEFAULT_FILLFACTOR: c_int = 75;
+const HASH_MIN_FILLFACTOR: c_int = 10;
 use crate::access::heap::heaptoast::{TOAST_TUPLE_TARGET, TOAST_TUPLE_TARGET_MAIN}; // access/heaptoast.h
 use crate::access::htup_details::{fastgetattr, HeapTuple, GETSTRUCT}; // access/htup_details.h
 use crate::access::index::amapi::amoptions_function; // access/amapi.h (amoptions_function)
 use crate::access::spgist::spgist_private::{SPGIST_DEFAULT_FILLFACTOR, SPGIST_MIN_FILLFACTOR}; // access/spgist_private.h
 use crate::catalog::pg_class::{
-    Form_pg_class, RELKIND_INDEX, RELKIND_MATVIEW, RELKIND_PARTITIONED_INDEX,
-    RELKIND_PARTITIONED_TABLE, RELKIND_RELATION, RELKIND_TOASTVALUE, RELKIND_VIEW,
+    Form_pg_class, RELKIND_FOREIGN_TABLE, RELKIND_INDEX, RELKIND_MATVIEW,
+    RELKIND_PARTITIONED_INDEX, RELKIND_PARTITIONED_TABLE, RELKIND_RELATION,
+    RELKIND_TOASTVALUE, RELKIND_VIEW,
 }; // catalog/pg_class.h
 use crate::catalog::pg_type_d::TEXTOID; // catalog/pg_type.h
 use crate::commands::defrem::{defGetBoolean, defGetString}; // commands/defrem.h
@@ -80,17 +84,12 @@ use crate::utils::builtins::{parse_bool, TextDatumGetCString}; // utils/builtins
 use crate::utils::misc::guc::{parse_int, parse_real, MAX_KILOBYTES}; // utils/guc.h
 use crate::utils::mmgr::mcxt::MemoryContextStrdup; // utils/memutils.h (MemoryContextStrdup)
 
-use crate::{elog, ereport, errmsg};
+use crate::{elog, ereport, errmsg, foreach};
 
 // ----- gettext no-ops (C: _() / gettext_noop / errdetail_internal "%s") -----
 macro_rules! gettext_noop {
     ($s:literal) => {
         concat!($s, "\0").as_ptr() as *const c_char
-    };
-}
-macro_rules! _ {
-    ($s:expr) => {
-        $s
     };
 }
 
@@ -1461,7 +1460,7 @@ pub unsafe fn transformRelOptions(
             cell = NIL as *mut ListCell;
             {
                 let mut __i: c_int = 0;
-                while __i < list_length(defList) {
+                'foreach: while __i < list_length(defList) {
                     cell = (*defList).elements.offset(__i as isize);
                     let def: *mut DefElem = *(cell as *mut *mut DefElem);
                     let kw_len: c_int;
@@ -1483,7 +1482,7 @@ pub unsafe fn transformRelOptions(
                             && *text_str.offset(kw_len as isize) == b'=' as c_char
                             && strncmp(text_str, (*def).defname, kw_len as usize) == 0
                         {
-                            break; // C: break out of the foreach -> cell stays set
+                            break 'foreach; // C: break out of the foreach -> cell stays set
                         }
                     }
                     cell = NIL as *mut ListCell;
@@ -1800,7 +1799,7 @@ unsafe fn parseRelOptionsInternal(
     /* It's worth avoiding memory leaks in this function */
     pfree(optiondatums as *mut c_void);
 
-    if (array as *mut c_void) != DatumGetPointer(options) {
+    if (array as *mut c_void) != DatumGetPointer(options) as *mut c_void {
         pfree(array as *mut c_void);
     }
 }
@@ -2338,6 +2337,7 @@ pub unsafe fn default_reloptions(reloptions: Datum, validate: bool, kind: relopt
  * Parses "reloptions" provided by the caller, returning them in a
  * structure containing the parsed options.  (See the C source for details.)
  */
+#[no_mangle]
 pub unsafe fn build_reloptions(
     reloptions: Datum,
     validate: bool,

@@ -27,13 +27,11 @@ unsafe fn tuplestore_gettupleslot(
     _copy: bool,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    // TODO(pg-port): port src/backend/utils/sort/tuplestore.c
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_gettupleslot(_state as _, _forward as _, _copy as _, _slot as _) as _
 }
 
 unsafe fn tuplestore_rescan(_state: *mut Tuplestorestate) {
-    // TODO(pg-port): port src/backend/utils/sort/tuplestore.c
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_rescan(_state as _)
 }
 
 /* ----------------------------------------------------------------

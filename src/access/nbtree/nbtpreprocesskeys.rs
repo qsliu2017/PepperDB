@@ -31,6 +31,7 @@
 #![allow(improper_ctypes)]
 
 use crate::prelude::*;
+use crate::access::nbtree::nbtree::{BTScanOpaqueData, BTScanOpaque};
 
 use std::ffi::{c_char, c_int, c_void};
 use std::mem::size_of;
@@ -60,7 +61,6 @@ use crate::postgres::{DatumGetBool, DatumGetInt32, DatumGetPointer, PointerGetDa
 // ---------------------------------------------------------------------------
 use super::nbtutils::{
     BTArrayKeyInfo, BTSkipArraySupport,
-    BTScanOpaqueData, BTScanOpaque,
     IndexScanDescData, IndexScanDesc,
     ScanDirection, NoMovementScanDirection,
     SK_BT_REQFWD, SK_BT_REQBKWD, SK_BT_DESC, SK_BT_NULLS_FIRST,
@@ -120,7 +120,7 @@ pub struct ArrayType {
 
 /// TODO(pg-port): BTCommuteStrategyNumber from access/stratnum.h.
 #[inline]
-unsafe fn BTCommuteStrategyNumber(strat: StrategyNumber) -> StrategyNumber {
+pub unsafe fn BTCommuteStrategyNumber(strat: StrategyNumber) -> StrategyNumber {
     (BTMaxStrategyNumber + 1) - strat
 }
 
@@ -149,7 +149,7 @@ extern "C" {
     ) -> Datum;
 
     /// TODO(pg-port): index_getprocinfo from access/index/indexam.c.
-    fn index_getprocinfo(rel: Relation, attnum: c_int, procnum: uint32) -> *mut FmgrInfo;
+    pub fn index_getprocinfo(rel: Relation, attnum: c_int, procnum: uint32) -> *mut FmgrInfo;
 
     /// TODO(pg-port): RelationGetRelationName from utils/rel.h.
     fn RelationGetRelationName(rel: Relation) -> *const c_char;
@@ -237,25 +237,25 @@ extern "C" {
 
 /// TODO(pg-port): OidIsValid macro from c.h.
 #[inline]
-unsafe fn OidIsValid(oid: Oid) -> bool {
+pub unsafe fn OidIsValid(oid: Oid) -> bool {
     oid != InvalidOid
 }
 
 /// TODO(pg-port): RegProcedureIsValid macro (same as OidIsValid).
 #[inline]
-unsafe fn RegProcedureIsValid(proc_: RegProcedure) -> bool {
+pub unsafe fn RegProcedureIsValid(proc_: RegProcedure) -> bool {
     OidIsValid(proc_)
 }
 
 /// TODO(pg-port): ARR_ELEMTYPE from utils/array.h.
 #[inline]
-unsafe fn ARR_ELEMTYPE(a: *mut ArrayType) -> Oid {
+pub unsafe fn ARR_ELEMTYPE(a: *mut ArrayType) -> Oid {
     (*a).elemtype
 }
 
 /// TODO(pg-port): DatumGetArrayTypeP from utils/array.h (detoast).
 #[inline]
-unsafe fn DatumGetArrayTypeP(d: Datum) -> *mut ArrayType {
+pub unsafe fn DatumGetArrayTypeP(d: Datum) -> *mut ArrayType {
     // TODO(pg-port): should call PG_DETOAST_DATUM when ported.
     d as *mut ArrayType
 }
@@ -775,7 +775,7 @@ pub unsafe fn _bt_preprocess_keys(scan: IndexScanDesc) {
  * there shouldn't be any problem, since the index's indoptions are certainly
  * not going to change while the scankey survives.
  */
-unsafe fn _bt_fix_scankey_strategy(skey: ScanKey, indoption: *mut int16) -> bool {
+pub unsafe fn _bt_fix_scankey_strategy(skey: ScanKey, indoption: *mut int16) -> bool {
     let addflags: c_int;
 
     addflags = (*indoption.add(((*skey).sk_attno - 1) as usize) as c_int) << SK_BT_INDOPTION_SHIFT;
@@ -885,7 +885,7 @@ unsafe fn _bt_fix_scankey_strategy(skey: ScanKey, indoption: *mut int16) -> bool
  * from scan to scan within a query, and so we'd just re-mark the same way
  * anyway on a rescan.  Something to keep an eye on though.
  */
-unsafe fn _bt_mark_scankey_required(skey: ScanKey) {
+pub unsafe fn _bt_mark_scankey_required(skey: ScanKey) {
     let addflags: c_int;
 
     addflags = match (*skey).sk_strategy {
@@ -954,7 +954,7 @@ unsafe fn _bt_mark_scankey_required(skey: ScanKey) {
  *
  * [full C comment preserved; see C source for details]
  */
-unsafe fn _bt_compare_scankey_args(
+pub unsafe fn _bt_compare_scankey_args(
     scan: IndexScanDesc,
     op: ScanKey,
     leftarg: ScanKey,
@@ -1181,7 +1181,7 @@ unsafe fn _bt_compare_scankey_args(
  * Note: it's up to caller to deal with IS [NOT] NULL scan keys, as well as
  * row comparison scan keys.  We only deal with scalar scan keys.
  */
-unsafe fn _bt_compare_array_scankey_args(
+pub unsafe fn _bt_compare_array_scankey_args(
     scan: IndexScanDesc,
     arraysk: ScanKey,
     skey: ScanKey,
@@ -1222,7 +1222,7 @@ unsafe fn _bt_compare_array_scankey_args(
  * every array element is eliminated by a redundant scalar scan key have an
  * unsatisfiable qual, which we handle by setting *qual_ok=false for caller.
  */
-unsafe fn _bt_saoparray_shrink(
+pub unsafe fn _bt_saoparray_shrink(
     scan: IndexScanDesc,
     arraysk: ScanKey,
     skey: ScanKey,
@@ -1377,7 +1377,7 @@ unsafe fn _bt_saoparray_shrink(
  * The array's final elements are the range of values that still satisfy the
  * array's final low_compare and high_compare.
  */
-unsafe fn _bt_skiparray_shrink(
+pub unsafe fn _bt_skiparray_shrink(
     scan: IndexScanDesc,
     skey: ScanKey,
     array: *mut BTArrayKeyInfo,
@@ -1459,7 +1459,7 @@ unsafe fn _bt_skiparray_shrink(
  *
  * [full C comment preserved; see C source]
  */
-unsafe fn _bt_skiparray_strat_adjust(
+pub unsafe fn _bt_skiparray_strat_adjust(
     scan: IndexScanDesc,
     arraysk: ScanKey,
     array: *mut BTArrayKeyInfo,
@@ -1494,7 +1494,7 @@ unsafe fn _bt_skiparray_strat_adjust(
 /*
  * Convert skip array's < high_compare key into a <= key
  */
-unsafe fn _bt_skiparray_strat_decrement(
+pub unsafe fn _bt_skiparray_strat_decrement(
     scan: IndexScanDesc,
     arraysk: ScanKey,
     array: *mut BTArrayKeyInfo,
@@ -1553,7 +1553,7 @@ unsafe fn _bt_skiparray_strat_decrement(
 /*
  * Convert skip array's > low_compare key into a >= key
  */
-unsafe fn _bt_skiparray_strat_increment(
+pub unsafe fn _bt_skiparray_strat_increment(
     scan: IndexScanDesc,
     arraysk: ScanKey,
     array: *mut BTArrayKeyInfo,
@@ -1627,7 +1627,7 @@ unsafe fn _bt_skiparray_strat_increment(
  * Only call here when _bt_compare_scankey_args returned false at least once
  * (otherwise, calling here will just waste cycles).
  */
-unsafe fn _bt_unmark_keys(scan: IndexScanDesc, keyDataMap: *mut c_int) {
+pub unsafe fn _bt_unmark_keys(scan: IndexScanDesc, keyDataMap: *mut c_int) {
     let so: BTScanOpaque = (*scan).opaque as BTScanOpaque;
     let mut attno: AttrNumber;
     let unmarkikey: *mut bool;
@@ -1944,7 +1944,7 @@ unsafe extern "C" fn _bt_reorder_array_cmp(a: *const c_void, b: *const c_void) -
  * routines (e.g., _bt_fix_scankey_strategy) _can_ modify scan->keyData[], but
  * we can't make that work here because our modifications are non-idempotent.
  */
-unsafe fn _bt_preprocess_array_keys(
+pub unsafe fn _bt_preprocess_array_keys(
     scan: IndexScanDesc,
     new_numberOfKeys: *mut c_int,
 ) -> ScanKey {
@@ -2084,7 +2084,7 @@ unsafe fn _bt_preprocess_array_keys(
             /* Initialize skip array specific BTArrayKeyInfo fields */
             attr = TupleDescCompactAttr(RelationGetDescr(rel), (attno_skip - 1) as c_int);
             reverse = (*indoption.add(attno_skip as usize - 1) & INDOPTION_DESC) != 0;
-            (*(*so).arrayKeys.add(numArrayKeys as usize)).attlen = (*attr).attlen;
+            (*(*so).arrayKeys.add(numArrayKeys as usize)).attlen = (*attr).attlen as _;
             (*(*so).arrayKeys.add(numArrayKeys as usize)).attbyval = (*attr).attbyval;
             (*(*so).arrayKeys.add(numArrayKeys as usize)).null_elem = true; /* for now */
             (*(*so).arrayKeys.add(numArrayKeys as usize)).sksup =
@@ -2382,7 +2382,7 @@ unsafe fn _bt_preprocess_array_keys(
  * necessary for correctness; it's just an optimization.  Non-array equality
  * scan keys are slightly faster than equivalent array scan keys at runtime.
  */
-unsafe fn _bt_preprocess_array_keys_final(scan: IndexScanDesc, keyDataMap: *mut c_int) {
+pub unsafe fn _bt_preprocess_array_keys_final(scan: IndexScanDesc, keyDataMap: *mut c_int) {
     let so: BTScanOpaque = (*scan).opaque as BTScanOpaque;
     let rel: Relation = (*scan).indexRelation;
     let mut arrayidx: c_int = 0;
@@ -2602,7 +2602,7 @@ unsafe fn _bt_preprocess_array_keys_final(scan: IndexScanDesc, keyDataMap: *mut 
  * a = 1 AND d >= 1                  a = 1 AND skip b AND skip c AND d >= 1
  * a = 1 AND b >= 42 AND d > 1       a = 1 AND range skip b AND skip c AND d > 1
  */
-unsafe fn _bt_num_array_keys(
+pub unsafe fn _bt_num_array_keys(
     scan: IndexScanDesc,
     skip_eq_ops_out: *mut Oid,
     numSkipArrayKeys_out: *mut c_int,
@@ -2783,7 +2783,7 @@ unsafe fn _bt_num_array_keys(
  * comparison semantics.  strat should be BTLessStrategyNumber to get the
  * least element, or BTGreaterStrategyNumber to get the greatest.
  */
-unsafe fn _bt_find_extreme_element(
+pub unsafe fn _bt_find_extreme_element(
     scan: IndexScanDesc,
     skey: ScanKey,
     elemtype: Oid,
@@ -2871,7 +2871,7 @@ unsafe fn _bt_find_extreme_element(
  * way, *sortprocp will point to a same-type ORDER proc (since that's the only
  * safe way to sort/deduplicate the array associated with caller's scan key).
  */
-unsafe fn _bt_setup_array_cmp(
+pub unsafe fn _bt_setup_array_cmp(
     scan: IndexScanDesc,
     skey: ScanKey,
     elemtype: Oid,
@@ -2977,7 +2977,7 @@ unsafe fn _bt_setup_array_cmp(
  * semantics, and sortproc is a corresponding ORDER proc.  If reverse is true,
  * we sort in descending order.
  */
-unsafe fn _bt_sort_array_elements(
+pub unsafe fn _bt_sort_array_elements(
     skey: ScanKey,
     sortproc: *mut FmgrInfo,
     reverse: bool,
@@ -3039,7 +3039,7 @@ unsafe fn _bt_sort_array_elements(
  * return false if the required comparisons cannot be made (caller must keep
  * both arrays when this happens).
  */
-unsafe fn _bt_merge_arrays(
+pub unsafe fn _bt_merge_arrays(
     scan: IndexScanDesc,
     skey: ScanKey,
     sortproc: *mut FmgrInfo,

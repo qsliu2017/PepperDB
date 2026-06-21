@@ -112,7 +112,7 @@ macro_rules! intVal {
 #[macro_export]
 macro_rules! floatVal {
     ($v:expr) => {
-        $crate::nodes::value::atof((*$crate::castNode!(Float, T_Float, $v)).fval)
+        $crate::nodes::value::atof((*$crate::castNode!($crate::nodes::value::Float, T_Float, $v)).fval)
     };
 }
 

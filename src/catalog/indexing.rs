@@ -67,9 +67,7 @@ unsafe fn FormIndexDatum(
     _estate: *mut c_void,
     _values: *mut Datum,
     _isnull: *mut bool,
-) {
-    unimplemented!()
-}
+) { crate::catalog::index::FormIndexDatum(_indexInfo as _, _slot as _, _estate as _, _values, _isnull) }
 
 // TODO(pg-port): real `index_insert` in access/index/indexam.c.
 unsafe fn index_insert(
@@ -81,14 +79,10 @@ unsafe fn index_insert(
     _checkUnique: IndexUniqueCheck,
     _indexUnchanged: bool,
     _indexInfo: *mut IndexInfo,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { crate::access::index::indexam::index_insert(_indexRelation, _values, _isnull, _heap_t_ctid, _heapRelation, _checkUnique as _, _indexUnchanged, _indexInfo as _) }
 
 // TODO(pg-port): real `simple_heap_insert` in access/heap/heapam.c.
-unsafe fn simple_heap_insert(_relation: Relation, _tup: HeapTuple) -> Oid {
-    unimplemented!()
-}
+unsafe fn simple_heap_insert(_relation: Relation, _tup: HeapTuple) -> Oid { crate::access::heap::heapam::simple_heap_insert(_relation, _tup); crate::postgres_ext::InvalidOid }
 
 // TODO(pg-port): real `simple_heap_update` in access/heap/heapam.c.
 unsafe fn simple_heap_update(
@@ -96,14 +90,10 @@ unsafe fn simple_heap_update(
     _otid: ItemPointer,
     _tup: HeapTuple,
     _update_indexes: *mut TU_UpdateIndexes,
-) {
-    unimplemented!()
-}
+) { crate::access::heap::heapam::simple_heap_update(_relation, _otid, _tup, _update_indexes as _) }
 
 // TODO(pg-port): real `simple_heap_delete` in access/heap/heapam.c.
-unsafe fn simple_heap_delete(_relation: Relation, _tid: ItemPointer) {
-    unimplemented!()
-}
+unsafe fn simple_heap_delete(_relation: Relation, _tid: ItemPointer) { crate::access::heap::heapam::simple_heap_delete(_relation, _tid) }
 
 // TODO(pg-port): real `heap_multi_insert` in access/heap/heapam.c.
 unsafe fn heap_multi_insert(
@@ -113,18 +103,14 @@ unsafe fn heap_multi_insert(
     _cid: CommandId,
     _options: c_int,
     _bistate: *mut c_void,
-) {
-    unimplemented!()
-}
+) { crate::access::heap::heapam::heap_multi_insert(_relation, _slots, _ntuples, _cid, _options, _bistate as _) }
 
 // TODO(pg-port): real `heap_freetuple` is ported in access/common/heaptuple.rs,
 // but to avoid a cross-module cycle issue use the canonical one.
 use crate::access::common::heaptuple::heap_freetuple;
 
 // TODO(pg-port): real `GetCurrentCommandId` in access/transam/xact.c.
-unsafe fn GetCurrentCommandId(_used: bool) -> CommandId {
-    unimplemented!()
-}
+unsafe fn GetCurrentCommandId(_used: bool) -> CommandId { crate::access::transam::xact::GetCurrentCommandId(_used) }
 
 /*
  * CatalogOpenIndexes - open the indexes on a system catalog.
@@ -269,6 +255,11 @@ unsafe fn CatalogIndexInsert(
             values.as_mut_ptr(),
             isnull.as_mut_ptr(),
         );
+
+        if std::env::var("PDB_BT").is_ok() && (*(*index).rd_rel).oid == 2663 {
+            let nm = if values[0] != 0 { std::ffi::CStr::from_ptr(DatumGetPointer(values[0]) as *const c_char).to_string_lossy().into_owned() } else { String::from("<null>") };
+            eprintln!("PDB_BT CatalogIndexInsert idx=2663 slot_relname='{}' val1={:#x}", nm, values[1]);
+        }
 
         /*
          * The index AM does the rest.
@@ -434,6 +425,7 @@ pub unsafe fn CatalogTuplesMultiInsertWithInfo(
  * and building the index info structures is moderately expensive.
  * (Use CatalogTupleUpdateWithInfo in such cases.)
  */
+#[no_mangle]
 pub unsafe fn CatalogTupleUpdate(heapRel: Relation, otid: ItemPointer, tup: HeapTuple) {
     let indstate: CatalogIndexState;
     let mut updateIndexes: TU_UpdateIndexes = TU_All;
@@ -486,6 +478,7 @@ pub unsafe fn CatalogTupleUpdateWithInfo(
  * optimize.  If we ever need that, rather than touching a lot of call sites,
  * it might be better to do something about caching CatalogIndexState.
  */
+#[no_mangle]
 pub unsafe fn CatalogTupleDelete(heapRel: Relation, tid: ItemPointer) {
     simple_heap_delete(heapRel, tid);
 }

@@ -23,33 +23,29 @@ use crate::miscadmin::TimestampTz;
  * Identifiers for timeout reasons.  Note that in case multiple timeouts
  * trigger at the same time, they are serviced in the order of this enum.
  */
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(C)]
-pub enum TimeoutId {
-    /* Predefined timeout reasons */
-    STARTUP_PACKET_TIMEOUT = 0,
-    DEADLOCK_TIMEOUT,
-    LOCK_TIMEOUT,
-    STATEMENT_TIMEOUT,
-    STANDBY_DEADLOCK_TIMEOUT,
-    STANDBY_TIMEOUT,
-    STANDBY_LOCK_TIMEOUT,
-    IDLE_IN_TRANSACTION_SESSION_TIMEOUT,
-    TRANSACTION_TIMEOUT,
-    IDLE_SESSION_TIMEOUT,
-    IDLE_STATS_UPDATE_TIMEOUT,
-    CLIENT_CONNECTION_CHECK_TIMEOUT,
-    STARTUP_PROGRESS_TIMEOUT,
-    /* First user-definable timeout reason */
-    USER_TIMEOUT,
-    /* Maximum number of timeout reasons */
-    // MAX_TIMEOUTS = USER_TIMEOUT + 10
-}
+// Modeled as c_int, not a Rust enum: user-defined timeouts occupy indices
+// USER_TIMEOUT..MAX_TIMEOUTS, which are not named variants, so a validity-
+// restricted enum would make storing those indices undefined behavior.
+pub type TimeoutId = c_int;
 
-pub use TimeoutId::*;
+/* Predefined timeout reasons */
+pub const STARTUP_PACKET_TIMEOUT: TimeoutId = 0;
+pub const DEADLOCK_TIMEOUT: TimeoutId = 1;
+pub const LOCK_TIMEOUT: TimeoutId = 2;
+pub const STATEMENT_TIMEOUT: TimeoutId = 3;
+pub const STANDBY_DEADLOCK_TIMEOUT: TimeoutId = 4;
+pub const STANDBY_TIMEOUT: TimeoutId = 5;
+pub const STANDBY_LOCK_TIMEOUT: TimeoutId = 6;
+pub const IDLE_IN_TRANSACTION_SESSION_TIMEOUT: TimeoutId = 7;
+pub const TRANSACTION_TIMEOUT: TimeoutId = 8;
+pub const IDLE_SESSION_TIMEOUT: TimeoutId = 9;
+pub const IDLE_STATS_UPDATE_TIMEOUT: TimeoutId = 10;
+pub const CLIENT_CONNECTION_CHECK_TIMEOUT: TimeoutId = 11;
+pub const STARTUP_PROGRESS_TIMEOUT: TimeoutId = 12;
+/* First user-definable timeout reason */
+pub const USER_TIMEOUT: TimeoutId = 13;
 
-/* USER_TIMEOUT is value 13 in the enum above. */
-pub const USER_TIMEOUT_VAL: i32 = TimeoutId::USER_TIMEOUT as i32;
+pub const USER_TIMEOUT_VAL: i32 = USER_TIMEOUT;
 /* MAX_TIMEOUTS = USER_TIMEOUT + 10 */
 pub const MAX_TIMEOUTS: usize = (USER_TIMEOUT_VAL + 10) as usize;
 
@@ -111,7 +107,7 @@ struct timeout_params {
 impl timeout_params {
     const fn new() -> Self {
         timeout_params {
-            index: TimeoutId::STARTUP_PACKET_TIMEOUT,
+            index: STARTUP_PACKET_TIMEOUT,
             active: false,
             indicator: false,
             timeout_handler: None,
@@ -475,7 +471,7 @@ unsafe extern "C" fn handle_sig_alarm(_postgres_signal_arg: c_int) {
      * SIGALRM is always cause for waking anything waiting on the process
      * latch.
      */
-    SetLatch(MyLatch);
+    SetLatch(MyLatch as _);
 
     /*
      * Always reset signal_pending, even if !alarm_enabled, since indeed no
@@ -907,10 +903,10 @@ pub unsafe fn get_timeout_finish_time(id: TimeoutId) -> TimestampTz {
 // Local helpers / stubs for unported dependencies
 // ====================================================================
 
-/* Map an integer to a TimeoutId (the enum is contiguous 0..MAX_TIMEOUTS). */
+/* Map an integer to a TimeoutId (TimeoutId is c_int; indices are 0..MAX_TIMEOUTS). */
 #[inline]
 fn timeout_id_from_int(i: c_int) -> TimeoutId {
-    unsafe { core::mem::transmute::<u32, TimeoutId>(i as u32) }
+    i
 }
 
 /* struct itimerval / setitimer from <sys/time.h> */
@@ -933,38 +929,42 @@ extern "C" {
     fn setitimer(which: c_int, new_value: *const itimerval, old_value: *mut itimerval) -> c_int;
 }
 
-unsafe fn pqsignal(_signo: c_int, _func: unsafe extern "C" fn(c_int)) {
-    unimplemented!() // TODO: src/port/pqsignal.c
+unsafe fn pqsignal(signo: c_int, func: unsafe extern "C" fn(c_int)) {
+    crate::libpq::pqsignal::pqsignal(signo, Some(func));
 }
 
 unsafe fn HOLD_INTERRUPTS() {
-    unimplemented!() // TODO: src/include/miscadmin.h
+    crate::miscadmin::HOLD_INTERRUPTS()
 }
 
 unsafe fn RESUME_INTERRUPTS() {
-    unimplemented!() // TODO: src/include/miscadmin.h
+    crate::miscadmin::RESUME_INTERRUPTS()
 }
 
 unsafe fn SetLatch(_latch: *mut Latch) {
-    unimplemented!() // TODO: src/backend/storage/ipc/latch.c
+    crate::storage::ipc::latch::SetLatch(_latch as _)
 }
 
-#[allow(non_upper_case_globals)]
-static mut MyLatch: *mut Latch = core::ptr::null_mut();
+use crate::utils::init::globals::MyLatch;
 
 struct Latch;
 
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!() // TODO: src/backend/utils/adt/timestamp.c
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 
 unsafe fn TimestampDifference(
-    _start_time: TimestampTz,
-    _stop_time: TimestampTz,
-    _secs: *mut i64,
-    _microsecs: *mut c_int,
+    start_time: TimestampTz,
+    stop_time: TimestampTz,
+    secs: *mut i64,
+    microsecs: *mut c_int,
 ) {
-    unimplemented!() // TODO: src/backend/utils/adt/timestamp.c
+    crate::utils::adt::timestamp::TimestampDifference(
+        start_time,
+        stop_time,
+        secs as *mut std::os::raw::c_long,
+        microsecs,
+    )
 }
 
 #[inline]

@@ -40,7 +40,7 @@ use crate::access::common::tupdesc::{
 };
 use crate::access::heap::heaptoast::toast_flatten_tuple;
 use crate::access::htup_details::{
-    BITMAPLEN, HeapTupleData, HeapTupleHasExternal, HeapTupleHeader,
+    BITMAPLEN, HeapTuple, HeapTupleData, HeapTupleHasExternal, HeapTupleHeader,
     HeapTupleHeaderGetDatumLength, HeapTupleHeaderGetTypMod, HeapTupleHeaderGetTypeId,
     HeapTupleHeaderHasExternal, HeapTupleHeaderSetDatumLength, HeapTupleHeaderSetNatts,
     HeapTupleHeaderSetTypMod, HeapTupleHeaderSetTypeId, SizeofHeapTupleHeader,
@@ -71,8 +71,9 @@ use crate::utils::mmgr::mcxt::{
 };
 use crate::utils::mmgr::memnodes::MemoryContext;
 use crate::utils::palloc::{pfree, MemoryContextCallback};
+use crate::c::varlena;
 use crate::varatt::{
-    varlena, VARATT_IS_EXTERNAL, VARATT_IS_EXTERNAL_EXPANDED_RW,
+    VARATT_IS_EXTERNAL, VARATT_IS_EXTERNAL_EXPANDED_RW,
 };
 use core::ffi::{c_char, c_int, c_void, CStr};
 
@@ -289,6 +290,7 @@ static ER_methods: ExpandedObjectMethods = ExpandedObjectMethods {
 /// expanded_record_set_tuple(erh, NULL, false, false).
 ///
 /// The expanded object will be a child of parentcontext.
+#[no_mangle]
 pub unsafe fn make_expanded_record_from_typeid(
     type_id: Oid,
     typmod: int32,
@@ -422,6 +424,7 @@ pub unsafe fn make_expanded_record_from_typeid(
 /// equivalent to a NULL composite value (not ROW(NULL, NULL, ...)).
 ///
 /// The expanded object will be a child of parentcontext.
+#[no_mangle]
 pub unsafe fn make_expanded_record_from_tupdesc(
     mut tupdesc: TupleDesc,
     parentcontext: MemoryContext,
@@ -544,6 +547,7 @@ pub unsafe fn make_expanded_record_from_tupdesc(
 /// tuple might be in the source expanded record.
 ///
 /// The expanded object will be a child of parentcontext.
+#[no_mangle]
 pub unsafe fn make_expanded_record_from_exprecord(
     olderh: *mut ExpandedRecordHeader,
     parentcontext: MemoryContext,
@@ -649,6 +653,7 @@ pub unsafe fn make_expanded_record_from_exprecord(
 ///
 /// Alternatively, tuple can be NULL, in which case we just set the expanded
 /// record to be empty.
+#[no_mangle]
 pub unsafe fn expanded_record_set_tuple(
     erh: *mut ExpandedRecordHeader,
     mut tuple: HeapTuple,
@@ -1038,6 +1043,7 @@ unsafe fn ER_flatten_into(
 /// erh->er_tupdesc if ER_FLAG_DVALUES_VALID is set; otherwise it should call
 /// expanded_record_get_tupdesc.  This function is the out-of-line portion
 /// of expanded_record_get_tupdesc.
+#[no_mangle]
 pub unsafe fn expanded_record_fetch_tupdesc(erh: *mut ExpandedRecordHeader) -> TupleDesc {
     let tupdesc: TupleDesc;
 
@@ -1088,6 +1094,7 @@ pub unsafe fn expanded_record_fetch_tupdesc(erh: *mut ExpandedRecordHeader) -> T
 /// datum.
 ///
 /// Returns NULL if expanded record is empty.
+#[no_mangle]
 pub unsafe fn expanded_record_get_tuple(erh: *mut ExpandedRecordHeader) -> HeapTuple {
     /* Easy case if we still have original tuple */
     if ((*erh).flags & ER_FLAG_FVALUE_VALID) != 0 {
@@ -1145,6 +1152,7 @@ pub unsafe fn DatumGetExpandedRecord(mut d: Datum) -> *mut ExpandedRecordHeader 
 ///
 /// Note that if the object is currently empty ("null"), this will change
 /// it to represent a row of nulls.
+#[no_mangle]
 pub unsafe fn deconstruct_expanded_record(erh: *mut ExpandedRecordHeader) {
     let tupdesc: TupleDesc;
     let dvalues: *mut Datum;
@@ -1200,6 +1208,7 @@ pub unsafe fn deconstruct_expanded_record(erh: *mut ExpandedRecordHeader) {
 ///
 /// If there is a field named "fieldname", fill in the contents of finfo
 /// and return "true".  Else return "false" without changing *finfo.
+#[no_mangle]
 pub unsafe fn expanded_record_lookup_field(
     erh: *mut ExpandedRecordHeader,
     fieldname: *const c_char,
@@ -1244,6 +1253,7 @@ pub unsafe fn expanded_record_lookup_field(
 ///
 /// expanded_record_get_field is the frontend for this; it handles the
 /// easy inline-able cases.
+#[no_mangle]
 pub unsafe fn expanded_record_fetch_field(
     erh: *mut ExpandedRecordHeader,
     fnumber: c_int,
@@ -1286,6 +1296,7 @@ pub unsafe fn expanded_record_fetch_field(
 ///
 /// Internal callers can pass check_constraints = false to skip application
 /// of domain constraints.  External callers should never do that.
+#[no_mangle]
 pub unsafe fn expanded_record_set_field_internal(
     erh: *mut ExpandedRecordHeader,
     fnumber: c_int,
@@ -1422,6 +1433,7 @@ pub unsafe fn expanded_record_set_field_internal(
 /// Unlike repeated application of expanded_record_set_field(), this does not
 /// guarantee to leave the expanded record in a non-corrupt state in event
 /// of an error.
+#[no_mangle]
 pub unsafe fn expanded_record_set_fields(
     erh: *mut ExpandedRecordHeader,
     newValues: *const Datum,

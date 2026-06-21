@@ -193,27 +193,21 @@ static mut error_context_stack: *mut ErrorContextCallback = core::ptr::null_mut(
 /// Load an output plugin and call its _PG_output_plugin_init entry point.
 /// TODO(pg-port): real load_external_function lives in utils/fmgr/dfmgr.c
 unsafe fn load_external_function(
-    _filename: *const c_char,
-    _funcname: *const c_char,
-    _signal_not_found: bool,
-    _filehandle: *mut *mut c_void,
-) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real load_external_function lives in utils/fmgr/dfmgr.c
-}
+    filename: *const c_char,
+    funcname: *const c_char,
+    signal_not_found: bool,
+    filehandle: *mut *mut c_void,
+) -> *mut c_void { crate::utils::fmgr::dfmgr::load_external_function(filename as _, funcname as _, signal_not_found, filehandle as _) }
 
 /// Return the WAL level currently active on a standby.
-unsafe fn GetActiveWalLevelOnStandby() -> c_int {
-    unimplemented!() // TODO(pg-port): real GetActiveWalLevelOnStandby lives in access/transam/xlogrecovery.c
-}
+unsafe fn GetActiveWalLevelOnStandby() -> c_int { crate::access::transam::xlog::GetActiveWalLevelOnStandby() as _ }
 
 /// GUC wal_level; 2 == logical.
 pub static mut wal_level: c_int = 0; // TODO(pg-port): GUC, access/xlog.c
 pub const WAL_LEVEL_LOGICAL: c_int = 2; // access/xlog.h
 
 /// True when the backend is in a transaction or transaction block.
-unsafe fn IsTransactionOrTransactionBlock() -> bool {
-    unimplemented!() // TODO(pg-port): real IsTransactionOrTransactionBlock lives in access/transam/xact.c
-}
+unsafe fn IsTransactionOrTransactionBlock() -> bool { crate::access::transam::xact::IsTransactionOrTransactionBlock() }
 
 /// True when we are inside a transaction.
 unsafe fn IsTransactionState() -> bool {
@@ -226,24 +220,16 @@ unsafe fn GetTopTransactionIdIfAny() -> TransactionId {
 }
 
 /// True when the server is in recovery (standby) mode.
-unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO(pg-port): real RecoveryInProgress lives in access/transam/xlog.c
-}
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
 
 /// True when replication slot syncing is underway.
-unsafe fn IsSyncingReplicationSlots() -> bool {
-    unimplemented!() // TODO(pg-port): real IsSyncingReplicationSlots lives in replication/slotsync.c
-}
+unsafe fn IsSyncingReplicationSlots() -> bool { crate::replication::logical::slotsync::IsSyncingReplicationSlots() }
 
 /// Invalidate all non-timetravel catalog caches.
-unsafe fn InvalidateSystemCaches() {
-    unimplemented!() // TODO(pg-port): real InvalidateSystemCaches lives in utils/cache/inval.c
-}
+unsafe fn InvalidateSystemCaches() { crate::utils::cache::inval::InvalidateSystemCaches() }
 
 /// Wait until all specified standbys have confirmed receipt up to moveto.
-unsafe fn WaitForStandbyConfirmation(_moveto: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real WaitForStandbyConfirmation lives in replication/walsender.c
-}
+unsafe fn WaitForStandbyConfirmation(moveto: XLogRecPtr) { crate::replication::slot::WaitForStandbyConfirmation(moveto as _) }
 
 /// Local WAL page-read callback (XLogReaderRoutine.page_read).
 /// TODO(pg-port): real read_local_xlog_page lives in access/transam/xlogutils.c
@@ -261,10 +247,10 @@ pub static mut MyDatabaseId: Oid = InvalidOid; // TODO(pg-port): utils/init/glob
 pub static mut bsysscan: bool = false; // TODO(pg-port): replication/logical/logical.c
 
 /// ReplicationSlotControlLock (replication/slot.c).
-static mut ReplicationSlotControlLock: *mut LWLock = core::ptr::null_mut(); // TODO(pg-port)
+use crate::backend_link_shims::ReplicationSlotControlLock;
 
 /// ProcArrayLock: protects shared proc array. (storage/lmgr/procarray.c)
-static mut ProcArrayLock: *mut LWLock = core::ptr::null_mut(); // TODO(pg-port)
+use crate::backend_link_shims::ProcArrayLock;
 
 /// CHECK_FOR_INTERRUPTS: inline no-op until the real macro is ported.
 #[inline(always)]
@@ -420,7 +406,7 @@ unsafe fn StartupDecodingContext(
 
     context = AllocSetContextCreate!(
         CurrentMemoryContext,
-        c"Logical decoding context",
+        c"Logical decoding context".as_ptr(),
         ALLOCSET_DEFAULT_SIZES
     ) as MemoryContext;
     old_context = MemoryContextSwitchTo(context);
@@ -449,10 +435,10 @@ unsafe fn StartupDecodingContext(
      * streaming anyway.
      */
     if !IsTransactionOrTransactionBlock() {
-        LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+        LWLockAcquire(ProcArrayLock as *mut LWLock, LW_EXCLUSIVE);
         (*MyProc).statusFlags |= PROC_IN_LOGICAL_DECODING;
         (*(*ProcGlobal).statusFlags.add((*MyProc).pgxactoff as usize)) = (*MyProc).statusFlags;
-        LWLockRelease(ProcArrayLock);
+        LWLockRelease(ProcArrayLock as *mut LWLock);
     }
 
     (*ctx).slot = slot;
@@ -693,8 +679,8 @@ pub unsafe fn CreateInitDecodingContext(
      *
      * ----
      */
-    LWLockAcquire(ReplicationSlotControlLock, LW_EXCLUSIVE);
-    LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+    LWLockAcquire(ReplicationSlotControlLock as *mut LWLock, LW_EXCLUSIVE);
+    LWLockAcquire(ProcArrayLock as *mut LWLock, LW_EXCLUSIVE);
 
     xmin_horizon = GetOldestSafeDecodingTransactionId(!need_full_snapshot);
 
@@ -708,8 +694,8 @@ pub unsafe fn CreateInitDecodingContext(
 
     ReplicationSlotsComputeRequiredXmin(true);
 
-    LWLockRelease(ProcArrayLock);
-    LWLockRelease(ReplicationSlotControlLock);
+    LWLockRelease(ProcArrayLock as *mut LWLock);
+    LWLockRelease(ReplicationSlotControlLock as *mut LWLock);
 
     ReplicationSlotMarkDirty();
     ReplicationSlotSave();

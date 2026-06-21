@@ -88,15 +88,12 @@ use crate::access::htup_details::{HeapTuple, HeapTupleIsValid, GETSTRUCT};
 use crate::utils::cache::syscache::{
     SearchSysCache1, SearchSysCache2, ReleaseSysCache,
 };
-/* CASTSOURCETARGET / PROCOID / RELOID: local stubs matching lsyscache.rs convention */
-const CASTSOURCETARGET: c_int = 0;
-const PROCOID: c_int = 0;
-const RELOID: c_int = 0;
+use crate::utils::cache::syscache_ids_gen::{CASTSOURCETARGET, PROCOID, RELOID};
 
 /* ---- lsyscache utilities ---- */
 use crate::utils::cache::lsyscache::{
     format_type_be,
-    get_array_type, get_element_type,
+    get_array_type, get_element_type, get_base_element_type,
     getBaseType, getBaseTypeAndTypmod,
     get_typtype, type_is_collatable,
     get_type_category_preferred,
@@ -172,7 +169,7 @@ unsafe fn psprintf1(msg: *const c_char) -> *mut c_char {
 /* ---- typeInheritsFrom: catalog/pg_inherits.c ---- */
 /* TODO(pg-port): real fn; needs pg_inherits syscache lookup */
 unsafe fn typeInheritsFrom(_subclassTypeId: Oid, _superclassTypeId: Oid) -> bool {
-    false
+    crate::catalog::pg_inherits::typeInheritsFrom(_subclassTypeId, _superclassTypeId)
 }
 
 /* ---- type_is_array: utils/cache/lsyscache.c ---- */
@@ -184,7 +181,7 @@ unsafe fn type_is_array(typid: Oid) -> bool {
 /* ---- type_is_array_domain: utils/cache/lsyscache.c ---- */
 /* TODO(pg-port): real fn; checks domain chain for array base type */
 unsafe fn type_is_array_domain(typid: Oid) -> bool {
-    type_is_array(getBaseType(typid))
+    get_base_element_type(typid) != InvalidOid
 }
 
 /* ---- IsPolymorphicType / IsPolymorphicTypeFamily1 / IsPolymorphicTypeFamily2 ---- */
@@ -225,6 +222,7 @@ unsafe fn IsPolymorphicTypeFamily2(typid: Oid) -> bool {
  * so that callers can generate custom error messages indicating context.)
  * =========================================================================
  */
+#[no_mangle]
 pub unsafe fn coerce_to_target_type(
     pstate: *mut ParseState,
     expr: *mut Node,
@@ -2785,6 +2783,7 @@ pub unsafe fn IsPreferredType(category: TYPCATEGORY, r#type: Oid) -> bool {
 /* IsBinaryCoercible()
  *		Check if srctype is binary-coercible to targettype.
  */
+#[no_mangle]
 pub unsafe fn IsBinaryCoercible(srctype: Oid, targettype: Oid) -> bool {
     let mut castoid: Oid = InvalidOid;
     IsBinaryCoercibleWithCast(srctype, targettype, &mut castoid)

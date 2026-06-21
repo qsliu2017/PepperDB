@@ -58,9 +58,7 @@ pub const InvalidAttrNumber: AttrNumber = 0;
 //   crate::executor::execTuples.
 // ============================================================================
 unsafe fn ExecCleanTypeFromTL(_targetList: *mut List) -> TupleDesc {
-    unimplemented!(
-        "ExecCleanTypeFromTL: needs nodeFuncs exprType*/TupleDescInitEntry (execTuples.c)"
-    )
+    crate::executor::execTuples::ExecCleanTypeFromTL(_targetList as _) as _
 }
 
 /// ExecInitJunkFilter

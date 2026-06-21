@@ -219,7 +219,7 @@ pub unsafe fn pgstat_slru_flush_cb(nowait: bool) -> bool {
     false
 }
 
-pub unsafe fn pgstat_slru_init_shmem_cb(stats: *mut c_void) {
+pub unsafe extern "C" fn pgstat_slru_init_shmem_cb(stats: *mut c_void) {
     let stats_shmem = stats as *mut PgStatShared_SLRU;
 
     LWLockInitialize(&mut (*stats_shmem).lock, LWTRANCHE_PGSTATS_DATA);

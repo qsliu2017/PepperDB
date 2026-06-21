@@ -128,6 +128,7 @@ pub unsafe fn ItemPointerSetInvalid(pointer: *mut ItemPointerData) {
  * # Safety
  * Both pointers reference valid ItemPointerData.
  */
+#[no_mangle]
 pub unsafe fn ItemPointerEquals(pointer1: ItemPointer, pointer2: ItemPointer) -> bool {
     ItemPointerGetBlockNumber(pointer1) == ItemPointerGetBlockNumber(pointer2)
         && ItemPointerGetOffsetNumber(pointer1) == ItemPointerGetOffsetNumber(pointer2)

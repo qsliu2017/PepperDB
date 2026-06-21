@@ -394,10 +394,9 @@ pub unsafe fn XLogPrefetcherAllocate(reader: *mut XLogReaderState) -> *mut XLogP
     let prefetcher = palloc0(core::mem::size_of::<XLogPrefetcher>()) as *mut XLogPrefetcher;
     (*prefetcher).reader = reader;
 
-    let mut ctl = HASHCTL {
-        keysize: core::mem::size_of::<RelFileLocator>(),
-        entrysize: core::mem::size_of::<XLogPrefetcherFilter>(),
-    };
+    let mut ctl: HASHCTL = core::mem::zeroed();
+    ctl.keysize = core::mem::size_of::<RelFileLocator>();
+    ctl.entrysize = core::mem::size_of::<XLogPrefetcherFilter>();
     (*prefetcher).filter_table = hash_create(
         c"XLogPrefetcherFilterTable".as_ptr(),
         1024,
@@ -1151,16 +1150,8 @@ unsafe fn pg_atomic_write_u64(ptr: *mut pg_atomic_uint64, val: u64) {
 
 // ---- dynahash stubs ---------------------------------------------------------
 
-type HTAB = c_void;
+use crate::utils::hash::dynahash::{HTAB, HASHCTL, HASH_ELEM, HASH_BLOBS};
 
-#[repr(C)]
-struct HASHCTL {
-    keysize: usize,
-    entrysize: usize,
-}
-
-const HASH_ELEM: c_int = 0x0008;
-const HASH_BLOBS: c_int = 0x0010;
 const HASH_ENTER: c_int = 1;
 const HASH_FIND: c_int = 0;
 const HASH_REMOVE: c_int = 2;
@@ -1172,7 +1163,7 @@ unsafe fn hash_create(
     _info: *mut HASHCTL,
     _flags: c_int,
 ) -> *mut HTAB {
-    unimplemented!() // TODO(pg-port): real hash_create lives in utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_create(_tabname, _nelem, _info, _flags)
 }
 
 // TODO(pg-port): real hash_search lives in utils/hash/dynahash.c
@@ -1182,12 +1173,12 @@ unsafe fn hash_search(
     _action: c_int,
     _foundPtr: *mut bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real hash_search lives in utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_search(_hashp, _keyPtr, core::mem::transmute(_action), _foundPtr)
 }
 
 // TODO(pg-port): real hash_destroy lives in utils/hash/dynahash.c
 unsafe fn hash_destroy(_hashp: *mut HTAB) {
-    unimplemented!() // TODO(pg-port): real hash_destroy lives in utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_destroy(_hashp)
 }
 
 // ---- palloc / pfree ---------------------------------------------------------
@@ -1237,7 +1228,7 @@ unsafe fn ShmemInitStruct(
     _size: usize,
     _found: *mut bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size as Size, _found)
 }
 
 // ---- PrefetchSharedBuffer stub ----------------------------------------------
@@ -1276,14 +1267,12 @@ unsafe fn TimestampTzGetDatum(_tz: TimestampTz) -> Datum {
 // ---- GetCurrentTimestamp stub -----------------------------------------------
 // TODO(pg-port): real GetCurrentTimestamp lives in utils/timestamp.c
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!() // TODO(pg-port): real GetCurrentTimestamp lives in utils/timestamp.c
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 
 // ---- funcapi stubs ----------------------------------------------------------
 // TODO(pg-port): real InitMaterializedSRF lives in utils/fmgr/funcapi.c
-unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) {
-    unimplemented!() // TODO(pg-port): real InitMaterializedSRF lives in utils/fmgr/funcapi.c
-}
+unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) { crate::utils::fmgr::funcapi::InitMaterializedSRF(_fcinfo as _, _flags as _) }
 
 // TODO(pg-port): real tuplestore_putvalues lives in utils/sort/tuplestore.c
 unsafe fn tuplestore_putvalues(

@@ -181,9 +181,7 @@ pub unsafe fn GinPageSetDeleteXid(page: Page, xid: TransactionId) {
     (*(page as PageHeader)).pd_prune_xid = xid;
 }
 
-pub unsafe fn GinPageIsRecyclable(page: Page) -> bool {
-    unimplemented!()
-}
+pub unsafe fn GinPageIsRecyclable(page: Page) -> bool { unimplemented!() }
 
 /*
  * We use our own ItemPointerGet(BlockNumber|OffsetNumber)

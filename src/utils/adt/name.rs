@@ -117,9 +117,7 @@ unsafe fn varstr_cmp(
     len2: c_int,
     collid: Oid,
 ) -> c_int {
-    // TODO(pg-port): varstr_cmp lives in utils/adt/varlena.c (still mid-translation).
-    let _ = (arg1, len1, arg2, len2, collid);
-    unimplemented!("varstr_cmp: utils/adt/varlena.c not yet translated")
+    crate::utils::adt::varlena::varstr_cmp(arg1, len1, arg2, len2, collid)
 }
 
 /*
@@ -129,9 +127,7 @@ unsafe fn varstr_cmp(
  * `ssup` points to a SortSupport node.
  */
 unsafe fn varstr_sortsupport(ssup: SortSupport, typid: Oid, collid: Oid) {
-    // TODO(pg-port): varstr_sortsupport lives in utils/adt/varlena.c (still mid-translation).
-    let _ = (ssup, typid, collid);
-    unimplemented!("varstr_sortsupport: utils/adt/varlena.c not yet translated")
+    crate::utils::adt::varlena::varstr_sortsupport(ssup as _, typid, collid)
 }
 
 /*
@@ -306,7 +302,6 @@ pub unsafe fn namege(fcinfo: FunctionCallInfo) -> Datum {
 pub unsafe fn btnamecmp(fcinfo: FunctionCallInfo) -> Datum {
     let arg1: Name = PG_GETARG_NAME!(fcinfo, 0);
     let arg2: Name = PG_GETARG_NAME!(fcinfo, 1);
-
     PG_RETURN_INT32!(namecmp(arg1, arg2, PG_GET_COLLATION!(fcinfo)));
 }
 

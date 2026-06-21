@@ -862,13 +862,13 @@ const ForeignServerRelationId: Oid = 1417; // TODO: catalog/pg_foreign_server.h
 const UserMappingRelationId: Oid = 1418;   // TODO: catalog/pg_user_mapping.h
 
 // SysCache enum ids (treated as opaque c_int)
-const FOREIGNDATAWRAPPEROID: c_int = 0; // TODO: utils/syscache.h
-const FOREIGNDATAWRAPPERNAME: c_int = 0; // TODO: utils/syscache.h
-const FOREIGNSERVEROID: c_int = 0;      // TODO: utils/syscache.h
-const FOREIGNSERVERNAME: c_int = 0;     // TODO: utils/syscache.h
-const FOREIGNTABLEREL: c_int = 0;       // TODO: utils/syscache.h
-const USERMAPPINGUSERSERVER: c_int = 0; // TODO: utils/syscache.h
-const ATTNUM: c_int = 0;                // TODO: utils/syscache.h
+const FOREIGNDATAWRAPPEROID: c_int = 30; // TODO: utils/syscache.h
+const FOREIGNDATAWRAPPERNAME: c_int = 29; // TODO: utils/syscache.h
+const FOREIGNSERVEROID: c_int = 32;      // TODO: utils/syscache.h
+const FOREIGNSERVERNAME: c_int = 31;     // TODO: utils/syscache.h
+const FOREIGNTABLEREL: c_int = 33;       // TODO: utils/syscache.h
+const USERMAPPINGUSERSERVER: c_int = 84; // TODO: utils/syscache.h
+const ATTNUM: c_int = 7;                // TODO: utils/syscache.h
 
 // Catalog attribute number constants
 const Anum_pg_foreign_data_wrapper_fdwoptions: c_int = 0; // TODO: catalog/pg_foreign_data_wrapper.h

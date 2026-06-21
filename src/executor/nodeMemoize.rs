@@ -245,19 +245,19 @@ pub struct shm_toc_estimator {
     _opaque: [u8; 0],
 }
 unsafe fn shm_toc_estimate_chunk(_e: *mut shm_toc_estimator, _sz: Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 unsafe fn shm_toc_estimate_keys(_e: *mut shm_toc_estimator, _cnt: Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _nbytes: Size) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 unsafe fn shm_toc_insert(_toc: *mut shm_toc, _key: uint64, _address: *mut c_void) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: uint64, _noError: bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }
 
 // storage/shmem.h
@@ -280,7 +280,7 @@ unsafe fn get_op_hash_functions(
     _lhs_procno: *mut Oid,
     _rhs_procno: *mut Oid,
 ) -> bool {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_op_hash_functions(_opno as _, _lhs_procno as _, _rhs_procno as _) as _
 }
 unsafe fn get_opcode(_opno: Oid) -> Oid {
     unimplemented!() // TODO: utils/cache/lsyscache.c

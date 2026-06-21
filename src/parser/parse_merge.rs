@@ -100,7 +100,7 @@ unsafe fn list_nth(list: *mut List, n: c_int) -> *mut c_void {
 // parse_target.h). Stubbed locally until ported.
 
 unsafe fn transformWithClause(_pstate: *mut ParseState, _withClause: *mut c_void) -> *mut List {
-    unimplemented!()
+    crate::parser::parse_cte::transformWithClause(_pstate as _, _withClause as _) as _
 }
 unsafe fn setTargetTable(
     _pstate: *mut ParseState,
@@ -109,17 +109,17 @@ unsafe fn setTargetTable(
     _alsoSource: bool,
     _requiredPerms: AclMode,
 ) -> c_int {
-    unimplemented!()
+    crate::parser::parse_clause::setTargetTable(_pstate as _, _relation as _, _inh, _alsoSource, _requiredPerms as _)
 }
 unsafe fn transformFromClause(_pstate: *mut ParseState, _frmList: *mut List) {
-    unimplemented!()
+    crate::parser::parse_clause::transformFromClause(_pstate as _, _frmList as _)
 }
 unsafe fn GetNSItemByRangeTablePosn(
     _pstate: *mut ParseState,
     _varno: c_int,
     _sublevels_up: c_int,
 ) -> *mut ParseNamespaceItem {
-    unimplemented!()
+    crate::parser::parse_relation::GetNSItemByRangeTablePosn(_pstate as _, _varno, _sublevels_up) as _
 }
 unsafe fn addNSItemToQuery(
     _pstate: *mut ParseState,
@@ -128,7 +128,7 @@ unsafe fn addNSItemToQuery(
     _addToRelNameSpace: bool,
     _addToVarNameSpace: bool,
 ) {
-    unimplemented!()
+    crate::parser::parse_relation::addNSItemToQuery(_pstate as _, _nsitem as _, _addToJoinList, _addToRelNameSpace, _addToVarNameSpace)
 }
 unsafe fn transformExpr(
     _pstate: *mut ParseState,
@@ -158,7 +158,7 @@ unsafe fn checkInsertTargets(
     _cols: *mut List,
     _attrnos: *mut *mut List,
 ) -> *mut List {
-    unimplemented!()
+    crate::parser::parse_target::checkInsertTargets(_pstate as _, _cols as _, _attrnos as _) as _
 }
 unsafe fn transformExpressionList(
     _pstate: *mut ParseState,
@@ -179,15 +179,15 @@ unsafe fn transformInsertRow(
     unimplemented!()
 }
 unsafe fn transformUpdateTargetList(_pstate: *mut ParseState, _targetList: *mut List) -> *mut List {
-    unimplemented!()
+    crate::parser::analyze::transformUpdateTargetList(_pstate as _, _targetList as _) as _
 }
 unsafe fn assign_query_collations(_pstate: *mut ParseState, _query: *mut Query) {
-    unimplemented!()
+    crate::parser::parse_collate::assign_query_collations(_pstate as _, _query as _)
 }
 
 /* access/table.h: errdetail_relkind_not_supported (not ported yet) */
 unsafe fn errdetail_relkind_not_supported(_relkind: c_char) -> c_int {
-    unimplemented!()
+    crate::catalog::pg_class::errdetail_relkind_not_supported(_relkind)
 }
 
 // ---------------------------------------------------------------------------

@@ -159,6 +159,4 @@ pub unsafe fn SnapBuildRestoreSnapshot(
     lsn: XLogRecPtr,
     context: MemoryContext,
     missing_ok: bool,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { crate::replication::logical::snapbuild::SnapBuildRestoreSnapshot(ondisk as _, lsn as _, context, missing_ok) }

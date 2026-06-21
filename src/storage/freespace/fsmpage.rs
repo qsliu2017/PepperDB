@@ -64,8 +64,7 @@ const BUFFER_LOCK_EXCLUSIVE: c_int = 2;
  */
 #[allow(unused_variables)]
 unsafe fn BufferGetPage(buf: Buffer) -> Page {
-    // TODO: real impl reads BufferDescriptors / BufferBlocks once bufmgr.c is ported.
-    unimplemented!("BufferGetPage: storage/buffer/bufmgr.c not yet ported")
+    crate::storage::buffer::bufmgr::BufferGetPage(buf as _) as _
 }
 
 #[allow(unused_variables)]
@@ -75,20 +74,17 @@ unsafe fn BufferGetTag(
     forknum: *mut crate::common::relpath::ForkNumber,
     blknum: *mut BlockNumber,
 ) {
-    // TODO: real impl in storage/buffer/bufmgr.c.
-    unimplemented!("BufferGetTag: storage/buffer/bufmgr.c not yet ported")
+    crate::storage::buffer::bufmgr::BufferGetTag(buf as _, rlocator as _, forknum as _, blknum as _)
 }
 
 #[allow(unused_variables)]
 unsafe fn LockBuffer(buf: Buffer, mode: c_int) {
-    // TODO: real impl in storage/buffer/bufmgr.c.
-    unimplemented!("LockBuffer: storage/buffer/bufmgr.c not yet ported")
+    crate::storage::buffer::bufmgr::LockBuffer(buf as _, mode)
 }
 
 #[allow(unused_variables)]
 unsafe fn MarkBufferDirtyHint(buf: Buffer, buffer_std: bool) {
-    // TODO: real impl in storage/buffer/bufmgr.c.
-    unimplemented!("MarkBufferDirtyHint: storage/buffer/bufmgr.c not yet ported")
+    crate::storage::buffer::bufmgr::MarkBufferDirtyHint(buf as _, buffer_std)
 }
 
 // ----------------------------------------------------------------------------

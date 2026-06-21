@@ -173,17 +173,15 @@ pub const HEAPTUPLE_DELETE_IN_PROGRESS: HTSV_Result = 4;
 
 // TODO(pg-port): real TransactionIdIsCurrentTransactionId lives in access/transam/xact.c
 unsafe fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool {
-    false
+    crate::access::transam::xact::TransactionIdIsCurrentTransactionId(_xid)
 }
 
-// TODO(pg-port): real TransactionIdIsInProgress lives in storage/ipc/procarray.c
 unsafe fn TransactionIdIsInProgress(_xid: TransactionId) -> bool {
-    false
+    crate::storage::ipc::procarray::TransactionIdIsInProgress(_xid)
 }
 
-// TODO(pg-port): real XidInMVCCSnapshot lives in utils/time/snapmgr.c
 unsafe fn XidInMVCCSnapshot(_xid: TransactionId, _snapshot: Snapshot) -> bool {
-    false
+    crate::utils::time::snapmgr::XidInMVCCSnapshot(_xid, _snapshot as _)
 }
 
 // TODO(pg-port): real GlobalVisTestIsRemovableXid lives in storage/ipc/procarray.c
@@ -1068,6 +1066,13 @@ unsafe fn HeapTupleSatisfiesDirty(htup: HeapTuple, snapshot: Snapshot, buffer: B
  */
 unsafe fn HeapTupleSatisfiesMVCC(htup: HeapTuple, snapshot: Snapshot, buffer: Buffer) -> bool {
     let tuple: HeapTupleHeader = (*htup).t_data;
+    if std::env::var_os("PDB_BT").is_some() {
+        let rx = HeapTupleHeaderGetRawXmin(tuple);
+        if rx > 700 {
+            eprintln!("PDB_BT MVCC-call tableOid={} xmin={} xminCommitted={} snap_xmax={}",
+                (*htup).t_tableOid, rx, HeapTupleHeaderXminCommitted(tuple), (*snapshot).xmax);
+        }
+    }
 
     /*
      * Assert that the caller has registered the snapshot.  This function
@@ -1082,6 +1087,12 @@ unsafe fn HeapTupleSatisfiesMVCC(htup: HeapTuple, snapshot: Snapshot, buffer: Bu
     Assert!((*htup).t_tableOid != InvalidOid);
 
     if !HeapTupleHeaderXminCommitted(tuple) {
+        if std::env::var("PDB_BT").is_ok() {
+            let rx = HeapTupleHeaderGetRawXmin(tuple);
+            if rx > 700 {
+                eprintln!("PDB_BT MVCC noncommitted xmin={} isCurrent={} xmininvalid={} topxid={}", rx, TransactionIdIsCurrentTransactionId(rx), HeapTupleHeaderXminInvalid(tuple), crate::access::transam::xact::GetTopTransactionIdIfAny());
+            }
+        }
         if HeapTupleHeaderXminInvalid(tuple) {
             return false;
         }
@@ -1117,6 +1128,9 @@ unsafe fn HeapTupleSatisfiesMVCC(htup: HeapTuple, snapshot: Snapshot, buffer: Bu
                 }
             }
         } else if TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetRawXmin(tuple)) {
+            if std::env::var("PDB_BT").is_ok() {
+                eprintln!("PDB_BT MVCC own-xact xmin={} cmin={} curcid={} -> {}", HeapTupleHeaderGetRawXmin(tuple), HeapTupleHeaderGetCmin(tuple), (*snapshot).curcid, HeapTupleHeaderGetCmin(tuple) < (*snapshot).curcid);
+            }
             if HeapTupleHeaderGetCmin(tuple) >= (*snapshot).curcid {
                 return false; /* inserted after scan started */
             }

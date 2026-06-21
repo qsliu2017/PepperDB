@@ -1457,9 +1457,7 @@ const GIST_UNLOCK: c_int = 0; /* BUFFER_LOCK_UNLOCK */
 const MAIN_FORKNUM: c_int = 0;
 const EB_LOCK_FIRST: uint32 = 1 << 5;
 
-unsafe fn IndexRelationGetNumberOfKeyAttributes(_relation: Relation) -> c_int {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn IndexRelationGetNumberOfKeyAttributes(_relation: Relation) -> c_int { crate::access::nbtree::nbtdedup::IndexRelationGetNumberOfKeyAttributes(_relation) }
 unsafe fn PageIsEmpty(_page: Page) -> bool {
     unimplemented!() // TODO: storage/bufpage.h
 }
@@ -1476,21 +1474,15 @@ unsafe fn PageAddItem(
     _offsetNumber: OffsetNumber,
     _overwrite: bool,
     _is_heap: bool,
-) -> OffsetNumber {
-    unimplemented!() // TODO: storage/bufpage.h
-}
+) -> OffsetNumber { crate::storage::bufpage::PageAddItem(_page, _item, _size, _offsetNumber, _overwrite, _is_heap) }
 unsafe fn PageGetFreeSpace(_page: Page) -> Size {
     unimplemented!() // TODO: storage/bufpage.h
 }
 unsafe fn PageGetSpecialSize(_page: Page) -> uint16 {
     unimplemented!() // TODO: storage/bufpage.h
 }
-unsafe fn PageGetSpecialPointer(_page: Page) -> *mut c_char {
-    unimplemented!() // TODO: storage/bufpage.h
-}
-unsafe fn PageGetContents(_page: Page) -> *mut c_char {
-    unimplemented!() // TODO: storage/bufpage.h
-}
+unsafe fn PageGetSpecialPointer(_page: Page) -> *mut c_char { crate::storage::bufpage::PageGetSpecialPointer(_page) }
+unsafe fn PageGetContents(_page: Page) -> *mut c_char { crate::storage::bufpage::PageGetContents(_page) }
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     unimplemented!() // TODO: storage/bufmgr.h
 }
@@ -1520,24 +1512,14 @@ unsafe fn ExtendBufferedRel(
 unsafe fn BMR_REL(_p: Relation) -> BufferManagerRelation {
     unimplemented!() // TODO: storage/bufmgr.h
 }
-unsafe fn GetFreeIndexPage(_rel: Relation) -> BlockNumber {
-    unimplemented!() // TODO: storage/indexfsm.h
-}
-unsafe fn XLogStandbyInfoActive() -> bool {
-    unimplemented!() // TODO: access/xlog.h
-}
-unsafe fn RelationNeedsWAL(_rel: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn GetFreeIndexPage(_rel: Relation) -> BlockNumber { crate::storage::freespace::indexfsm::GetFreeIndexPage(_rel) }
+unsafe fn XLogStandbyInfoActive() -> bool { crate::access::nbtree::nbtpage::XLogStandbyInfoActive() }
+unsafe fn RelationNeedsWAL(_rel: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_rel) }
 unsafe fn RelationIsPermanent(_rel: Relation) -> bool {
     unimplemented!() // TODO: utils/rel.h
 }
-unsafe fn GetXLogInsertRecPtr() -> XLogRecPtr {
-    unimplemented!() // TODO: access/xlog.h
-}
-unsafe fn GetFakeLSNForUnloggedRel() -> XLogRecPtr {
-    unimplemented!() // TODO: access/xlog.h
-}
+unsafe fn GetXLogInsertRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetXLogInsertRecPtr() }
+unsafe fn GetFakeLSNForUnloggedRel() -> XLogRecPtr { crate::access::transam::xlog::GetFakeLSNForUnloggedRel() }
 unsafe fn build_reloptions(
     _reloptions: Datum,
     _validate: bool,
@@ -1545,19 +1527,13 @@ unsafe fn build_reloptions(
     _relopt_struct_size: Size,
     _relopt_elems: *const relopt_parse_elt,
     _num_relopt_elems: c_int,
-) -> *mut c_void {
-    unimplemented!() // TODO: access/common/reloptions.c
-}
-unsafe fn get_index_column_opclass(_index_oid: Oid, _attno: c_int) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
-}
+) -> *mut c_void { unimplemented!() }
+unsafe fn get_index_column_opclass(_index_oid: Oid, _attno: c_int) -> Oid { crate::utils::cache::lsyscache::get_index_column_opclass(_index_oid, _attno) }
 unsafe fn get_opclass_opfamily_and_input_type(
     _opclass: Oid,
     _opfamily: *mut Oid,
     _opcintype: *mut Oid,
-) -> bool {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
-}
+) -> bool { crate::utils::cache::lsyscache::get_opclass_opfamily_and_input_type(_opclass, _opfamily, _opcintype) }
 unsafe fn get_opfamily_proc(
     _opfamily: Oid,
     _lefttype: Oid,
@@ -1578,7 +1554,7 @@ unsafe fn SearchSysCacheExists4(
 
 // Catcache id (utils/syscache.h) and pg_type ANYOID (catalog/pg_type.h).
 // TODO: dedup once syscache.h / pg_type.h are ported.
-const AMPROCNUM: c_int = 0;
+const AMPROCNUM: c_int = 5;
 const ANYOID: Oid = 2276;
 
 // relpersistence values (catalog/pg_class.h). TODO: dedup.

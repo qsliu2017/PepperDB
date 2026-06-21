@@ -136,18 +136,20 @@ type RelFileNumber = Oid;
 
 extern "C" {
     static TableSpaceRelationId: Oid;
-    static TablespaceOidIndexId: Oid;
     static GLOBALTABLESPACE_OID: Oid;
     static InvalidOid: Oid;
     static MyDatabaseId: Oid;
     static MyDatabaseTableSpace: Oid;
     static IsBinaryUpgrade: bool;
     static allowSystemTableMods: bool;
-    static InRecovery: bool;
     static DataDir: *mut c_char;
-    static pg_dir_create_mode: c_int;
     static mut TopTransactionContext: MemoryContext;
 }
+
+// pg_tablespace OID index id (catalog/pg_tablespace_d.h)  TODO(pg-port)
+const TablespaceOidIndexId: Oid = 2697;
+use crate::access::transam::xlogutils::InRecovery;
+use crate::common::file_perm::pg_dir_create_mode;
 
 /* GUC variables */
 #[no_mangle] pub static mut default_tablespace: *mut c_char = null_mut();
@@ -197,9 +199,9 @@ const ACL_CREATE: c_int = 0x0004;
 // BTEqualStrategyNumber  TODO(pg-port)
 const BTEqualStrategyNumber: c_int = 3;
 
-// F_NAMEEQ / F_OIDEQ  TODO(pg-port)
-const F_NAMEEQ: Oid = 0;
-const F_OIDEQ: Oid = 0;
+// F_NAMEEQ / F_OIDEQ from utils/fmgroids.h
+const F_NAMEEQ: Oid = 62;
+const F_OIDEQ: Oid = 184;
 
 // ForwardScanDirection  TODO(pg-port)
 const ForwardScanDirection: c_int = 1;
@@ -227,23 +229,13 @@ const PROCSIGNAL_BARRIER_SMGRRELEASE: c_int = 1;
 
 extern "C" {
     fn superuser() -> bool;
-    fn get_rolespec_oid(rolespec: *mut c_void, missing_ok: bool) -> Oid;
     fn GetUserId() -> Oid;
     fn pstrdup(str_: *const c_char) -> *mut c_char;
-    fn canonicalize_path(path: *mut c_char);
-    fn is_absolute_path(path: *const c_char) -> bool;
-    fn path_is_prefix_of_path(path1: *const c_char, path2: *const c_char) -> bool;
-    fn IsReservedName(name: *const c_char) -> bool;
     fn table_open(relationId: Oid, lockmode: LOCKMODE) -> Relation;
     fn table_close(relation: Relation, lockmode: LOCKMODE);
     fn GetNewOidWithIndex(relation: Relation, indexId: Oid, oidcolumn: i16) -> Oid;
     fn namein(fcinfo: *mut c_void) -> Datum;
-    fn DirectFunctionCall1Coll(func: *const c_void, collation: Oid, arg1: Datum) -> Datum;
-    fn transformRelOptions(oldOptions: Datum, defList: *mut List, namspace: *const c_char,
-                           validnsps: *mut *mut c_char, acceptOidsOff: bool, isReset: bool) -> Datum;
-    fn tablespace_reloptions(reloptions: Datum, validate: bool) -> Datum;
     fn heap_form_tuple(tupleDescriptor: TupleDesc, values: *mut Datum, isnull: *mut bool) -> HeapTuple;
-    fn heap_freetuple(htup: HeapTuple);
     fn heap_copytuple(tuple: HeapTuple) -> HeapTuple;
     fn heap_modify_tuple(tuple: HeapTuple, tupleDesc: TupleDesc, replValues: *mut Datum,
                          replIsnull: *mut bool, doReplace: *mut bool) -> HeapTuple;
@@ -271,8 +263,6 @@ extern "C" {
     fn RelationGetDescr(relation: Relation) -> TupleDesc;
     fn LWLockAcquire(lock: *mut c_void, mode: LWLockMode) -> bool;
     fn LWLockRelease(lock: *mut c_void);
-    // TablespaceCreateLock is a named LWLock; expose a getter  TODO(pg-port)
-    fn TablespaceCreateLock() -> *mut c_void;
     fn GetDatabasePath(dbOid: Oid, spcOid: Oid) -> *mut c_char;
     fn MakePGDirectory(directoryName: *const c_char) -> c_int;
     fn pg_mkdir_p(path: *mut c_char, omode: c_int) -> c_int;
@@ -285,7 +275,6 @@ extern "C" {
     fn EmitProcSignalBarrier(r#type: c_int) -> u64;
     fn ResolveRecoveryConflictWithTablespace(tsid: Oid);
     fn ForceSyncCommit();
-    fn InvokeObjectPostCreateHookArg(classId: Oid, objectId: Oid, subId: c_int, is_internal: bool);
     fn InvokeObjectDropHookArg(classId: Oid, objectId: Oid, subId: c_int, dropflags: c_int);
     fn InvokeObjectPostAlterHookArg(classId: Oid, objectId: Oid, subId: c_int,
                                     auxiliaryId: Oid, is_internal: bool);
@@ -319,6 +308,42 @@ extern "C" {
     fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
 }
 
+/* Forwarding wrappers to canonical Rust impls (not #[no_mangle]).  TODO(pg-port) */
+#[inline] unsafe fn get_rolespec_oid(rolespec: *mut c_void, missing_ok: bool) -> Oid {
+    crate::utils::adt::acl::get_rolespec_oid(rolespec as *const _, missing_ok)
+}
+#[inline] unsafe fn canonicalize_path(path: *mut c_char) {
+    crate::port::port_api::canonicalize_path(path)
+}
+#[inline] unsafe fn is_absolute_path(path: *const c_char) -> bool {
+    crate::port::port_api::is_absolute_path(path)
+}
+#[inline] unsafe fn path_is_prefix_of_path(path1: *const c_char, path2: *const c_char) -> bool {
+    crate::port::port_api::path_is_prefix_of_path(path1, path2)
+}
+#[inline] unsafe fn IsReservedName(name: *const c_char) -> bool {
+    crate::catalog::catalog::IsReservedName(name)
+}
+#[inline] unsafe fn DirectFunctionCall1Coll(func: *const c_void, collation: Oid, arg1: Datum) -> Datum {
+    crate::utils::fmgr::DirectFunctionCall1Coll(core::mem::transmute(func), collation, arg1)
+}
+#[inline] unsafe fn transformRelOptions(oldOptions: Datum, defList: *mut List, namspace: *const c_char,
+                                        validnsps: *mut *mut c_char, acceptOidsOff: bool, isReset: bool) -> Datum {
+    crate::access::common::reloptions::transformRelOptions(
+        oldOptions, defList, namspace, validnsps as *const *const c_char, acceptOidsOff, isReset)
+}
+#[inline] unsafe fn tablespace_reloptions(reloptions: Datum, validate: bool) -> Datum {
+    crate::access::common::reloptions::tablespace_reloptions(reloptions, validate) as Datum
+}
+#[inline] unsafe fn heap_freetuple(htup: HeapTuple) {
+    crate::access::common::heaptuple::heap_freetuple(htup)
+}
+/* Object-access hook: no-op unless an extension registers it.  TODO(pg-port) */
+#[inline] unsafe fn InvokeObjectPostCreateHookArg(_classId: Oid, _objectId: Oid, _subId: c_int, _is_internal: bool) {}
+
+// TablespaceCreateLock: named LWLock; read the canonical runtime-assigned global.
+unsafe fn TablespaceCreateLock() -> *mut c_void { crate::backend_link_shims::TablespaceCreateLock }
+
 // errno helpers / S_ISxxx macros and a few inline helpers  TODO(pg-port)
 extern "C" { fn __error() -> *mut c_int; }
 #[cfg(not(target_os = "macos"))]
@@ -332,8 +357,13 @@ const ENOENT: c_int = 2;
 const EEXIST: c_int = 17;
 
 // stat helpers: extract st_mode and test the file type.  TODO(pg-port)
-extern "C" {
-    fn pgport_stat_mode(buf: *const stat_struct) -> u32;
+// st_mode (mode_t = u16) offset in libc `struct stat`: 4 on Darwin (after st_dev i32),
+// 24 on Linux (after st_dev u64, st_ino u64, st_nlink u64).
+#[inline] unsafe fn pgport_stat_mode(buf: *const stat_struct) -> u32 {
+    #[cfg(target_os = "macos")] const ST_MODE_OFF: usize = 4;
+    #[cfg(not(target_os = "macos"))] const ST_MODE_OFF: usize = 24;
+    let p = (buf as *const u8).add(ST_MODE_OFF) as *const u16;
+    (*p) as u32
 }
 const S_IFMT: u32 = 0o170000;
 const S_IFDIR: u32 = 0o040000;
@@ -350,18 +380,43 @@ const S_IFLNK: u32 = 0o120000;
 #[inline] fn CStringGetDatum(s: *const c_char) -> Datum { s as Datum }
 #[inline] fn OidIsValid(oid: Oid) -> bool { oid != unsafe { InvalidOid } }
 
-// psprintf shims  TODO(pg-port)
+// psprintf shims: format into a palloc'd buffer via libc snprintf.  TODO(pg-port)
 extern "C" {
-    fn psprintf_s_u(fmt: *const c_char, s: *const c_char, u: Oid) -> *mut c_char;
-    fn psprintf_s_s(fmt: *const c_char, a: *const c_char, b: *const c_char) -> *mut c_char;
-    fn psprintf_u(fmt: *const c_char, u: Oid) -> *mut c_char;
-    fn psprintf_s_u_s(fmt: *const c_char, a: *const c_char, b: Oid, c: *const c_char) -> *mut c_char;
+    fn snprintf(s: *mut c_char, n: usize, fmt: *const c_char, ...) -> c_int;
+}
+unsafe fn psprintf_fmt2<A: Copy, B: Copy>(fmt: *const c_char, a: A, b: B) -> *mut c_char {
+    let need = snprintf(null_mut(), 0, fmt, a, b);
+    let len = if need < 0 { 0 } else { need as usize };
+    let buf = palloc(len + 1) as *mut c_char;
+    snprintf(buf, len + 1, fmt, a, b);
+    buf
+}
+unsafe fn psprintf_s_u(fmt: *const c_char, s: *const c_char, u: Oid) -> *mut c_char {
+    psprintf_fmt2(fmt, s, u)
+}
+unsafe fn psprintf_s_s(fmt: *const c_char, a: *const c_char, b: *const c_char) -> *mut c_char {
+    psprintf_fmt2(fmt, a, b)
+}
+unsafe fn psprintf_u(fmt: *const c_char, u: Oid) -> *mut c_char {
+    let need = snprintf(null_mut(), 0, fmt, u);
+    let len = if need < 0 { 0 } else { need as usize };
+    let buf = palloc(len + 1) as *mut c_char;
+    snprintf(buf, len + 1, fmt, u);
+    buf
+}
+unsafe fn psprintf_s_u_s(fmt: *const c_char, a: *const c_char, b: Oid, c: *const c_char) -> *mut c_char {
+    let need = snprintf(null_mut(), 0, fmt, a, b, c);
+    let len = if need < 0 { 0 } else { need as usize };
+    let buf = palloc(len + 1) as *mut c_char;
+    snprintf(buf, len + 1, fmt, a, b, c);
+    buf
 }
 
 // InvokeObjectPostCreateHook / InvokeObjectDropHook / InvokeObjectPostAlterHook wrappers
 #[inline] unsafe fn InvokeObjectPostCreateHook(classId: Oid, objectId: Oid, subId: c_int) {
     InvokeObjectPostCreateHookArg(classId, objectId, subId, false);
 }
+#[no_mangle]
 #[inline] unsafe fn InvokeObjectDropHook(classId: Oid, objectId: Oid, subId: c_int) {
     InvokeObjectDropHookArg(classId, objectId, subId, 0);
 }

@@ -231,11 +231,31 @@ pub unsafe fn ArrayGetIntegerTypmods(arr: *mut ArrayType, n: *mut c_int) -> *mut
         let _ = errcode(ERRCODE_ARRAY_SUBSCRIPT_ERROR);
         ereport!(ERROR, errmsg!("typmod array must be one-dimensional"));
     }
-    // C: if (array_contains_nulls(arr)) ereport(...); deconstruct_array_builtin(...);
-    //    result[i] = pg_strtoint32(DatumGetCString(elem_values[i]));
-    // TODO(pg-port): array_contains_nulls + deconstruct_array_builtin (arrayfuncs.c) not yet translated.
-    let _ = n;
-    unimplemented!("ArrayGetIntegerTypmods: deconstruct_array_builtin (arrayfuncs.c) not yet translated")
+    if crate::utils::adt::arrayfuncs::array_contains_nulls(arr) {
+        let _ = errcode(ERRCODE_ARRAY_ELEMENT_ERROR);
+        ereport!(ERROR, errmsg!("typmod array must not contain nulls"));
+    }
+
+    // cstring: typlen=-2, typbyval=false, typalign='c'
+    let mut elem_values: *mut crate::postgres::Datum = core::ptr::null_mut();
+    crate::utils::adt::arrayfuncs::deconstruct_array(
+        arr,
+        crate::catalog::pg_type_d::CSTRINGOID,
+        -2,
+        false,
+        b'c' as c_char,
+        &mut elem_values,
+        core::ptr::null_mut(),
+        n,
+    );
+
+    let cnt = *n;
+    let result = crate::utils::palloc::palloc(cnt as usize * core::mem::size_of::<int32>()) as *mut int32;
+    for i in 0..cnt {
+        *result.add(i as usize) =
+            crate::utils::builtins::pg_strtoint32(crate::postgres::DatumGetCString(*elem_values.add(i as usize)));
+    }
+    result
 }
 
 #[cfg(test)]

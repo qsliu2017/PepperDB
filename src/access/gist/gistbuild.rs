@@ -278,30 +278,18 @@ extern "C" {
 // TODO(pg-port) stubbed externs (defined in other .c translation units).
 // ----------------------------------------------------------------
 
-unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber {
-    // TODO(pg-port): storage/bufmgr.h
-    unimplemented!("RelationGetNumberOfBlocks")
-}
+unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber { crate::access::nbtree::nbtpage::RelationGetNumberOfBlocks(_relation) }
 unsafe fn RelationGetRelationName(_relation: Relation) -> *const c_char {
     // TODO(pg-port): utils/rel.h
     unimplemented!("RelationGetRelationName")
 }
-unsafe fn IndexRelationGetNumberOfKeyAttributes(_relation: Relation) -> c_int {
-    // TODO(pg-port): utils/rel.h
-    unimplemented!("IndexRelationGetNumberOfKeyAttributes")
-}
-unsafe fn RelationNeedsWAL(_relation: Relation) -> bool {
-    // TODO(pg-port): utils/rel.h
-    unimplemented!("RelationNeedsWAL")
-}
+unsafe fn IndexRelationGetNumberOfKeyAttributes(_relation: Relation) -> c_int { crate::access::nbtree::nbtdedup::IndexRelationGetNumberOfKeyAttributes(_relation) }
+unsafe fn RelationNeedsWAL(_relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_relation) }
 unsafe fn RelationGetSmgr(_reln: Relation) -> *mut c_void {
     // TODO(pg-port): utils/rel.h
     unimplemented!("RelationGetSmgr")
 }
-unsafe fn index_getprocid(_irel: Relation, _attnum: AttrNumber, _procnum: u16) -> Oid {
-    // TODO(pg-port): access/index/indexam.c
-    unimplemented!("index_getprocid")
-}
+unsafe fn index_getprocid(_irel: Relation, _attnum: AttrNumber, _procnum: u16) -> Oid { crate::access::index::indexam::index_getprocid(_irel, _attnum, _procnum as _) as _ }
 unsafe fn OidIsValid(objectId: Oid) -> bool {
     objectId != 0
 }
@@ -336,23 +324,14 @@ unsafe fn smgr_bulk_start_rel(_rel: Relation, _forknum: c_int) -> *mut BulkWrite
     // TODO(pg-port): storage/smgr/bulk_write.c
     unimplemented!("smgr_bulk_start_rel")
 }
-unsafe fn smgr_bulk_get_buf(_bulkstate: *mut BulkWriteState) -> BulkWriteBuffer {
-    // TODO(pg-port): storage/smgr/bulk_write.c
-    unimplemented!("smgr_bulk_get_buf")
-}
+unsafe fn smgr_bulk_get_buf(_bulkstate: *mut BulkWriteState) -> BulkWriteBuffer { crate::storage::smgr::bulk_write::smgr_bulk_get_buf(_bulkstate) }
 unsafe fn smgr_bulk_write(
     _bulkstate: *mut BulkWriteState,
     _blocknum: BlockNumber,
     _buf: BulkWriteBuffer,
     _page_std: bool,
-) {
-    // TODO(pg-port): storage/smgr/bulk_write.c
-    unimplemented!("smgr_bulk_write")
-}
-unsafe fn smgr_bulk_finish(_bulkstate: *mut BulkWriteState) {
-    // TODO(pg-port): storage/smgr/bulk_write.c
-    unimplemented!("smgr_bulk_finish")
-}
+) { crate::storage::smgr::bulk_write::smgr_bulk_write(_bulkstate, _blocknum, _buf, _page_std) }
+unsafe fn smgr_bulk_finish(_bulkstate: *mut BulkWriteState) { crate::storage::smgr::bulk_write::smgr_bulk_finish(_bulkstate) }
 unsafe fn hash_create(
     _tabname: *const c_char,
     _nelem: c_long,
@@ -395,10 +374,7 @@ unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     // TODO(pg-port): storage/buffer/bufmgr.c
     unimplemented!("BufferGetBlockNumber")
 }
-unsafe fn PageGetSpecialPointer(_page: Page) -> *mut c_char {
-    // TODO(pg-port): storage/bufpage.h
-    unimplemented!("PageGetSpecialPointer")
-}
+unsafe fn PageGetSpecialPointer(_page: Page) -> *mut c_char { crate::storage::bufpage::PageGetSpecialPointer(_page) }
 unsafe fn PageGetItemId(_page: Page, _offsetNumber: OffsetNumber) -> *mut ItemIdData {
     // TODO(pg-port): storage/bufpage.h
     unimplemented!("PageGetItemId")
@@ -426,18 +402,12 @@ unsafe fn PageAddItem(
     // TODO(pg-port): storage/bufpage.c
     unimplemented!("PageAddItem")
 }
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    // TODO(pg-port): storage/bufpage.h
-    unimplemented!("PageSetLSN")
-}
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(_page, _lsn) }
 unsafe fn ItemPointerGetBlockNumber(_pointer: *const ItemPointerData) -> BlockNumber {
     // TODO(pg-port): storage/itemptr.h
     unimplemented!("ItemPointerGetBlockNumber")
 }
-unsafe fn ItemPointerSetBlockNumber(_pointer: *mut ItemPointerData, _blockNumber: BlockNumber) {
-    // TODO(pg-port): storage/itemptr.h
-    unimplemented!("ItemPointerSetBlockNumber")
-}
+unsafe fn ItemPointerSetBlockNumber(_pointer: *mut ItemPointerData, _blockNumber: BlockNumber) { crate::storage::itemptr::ItemPointerSetBlockNumber(_pointer, _blockNumber) }
 unsafe fn TupleDescCompactAttr(_tupdesc: *mut c_void, _i: c_int) -> *mut CompactAttribute {
     // TODO(pg-port): access/tupdesc.h
     unimplemented!("TupleDescCompactAttr")

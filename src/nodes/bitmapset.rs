@@ -405,6 +405,7 @@ pub unsafe fn bms_make_singleton(x: c_int) -> *mut Bitmapset {
  * # Safety
  * `a` must be NULL or a palloc'd Bitmapset.
  */
+#[no_mangle]
 pub unsafe fn bms_free(a: *mut Bitmapset) {
     if !a.is_null() {
         pfree(a as *mut c_void);

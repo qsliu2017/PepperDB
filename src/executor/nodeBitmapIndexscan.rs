@@ -52,11 +52,11 @@ type ParallelWorkerContext = c_void;
 // ----------------------------------------------------------------
 
 unsafe fn index_open(_relationId: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO: access/genam.h (index.c)
+    crate::access::index::indexam::index_open(_relationId as _, _lockmode as _) as _
 }
 
 unsafe fn index_close(_relation: Relation, _lockmode: LOCKMODE) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_close(_relation as _, _lockmode as _)
 }
 
 unsafe fn index_beginscan_bitmap(
@@ -65,7 +65,7 @@ unsafe fn index_beginscan_bitmap(
     _instrument: *mut IndexScanInstrumentation,
     _nkeys: c_int,
 ) -> IndexScanDesc {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_beginscan_bitmap(_indexRelation as _, _snapshot as _, _instrument as _, _nkeys as _) as _
 }
 
 unsafe fn index_rescan(
@@ -75,15 +75,15 @@ unsafe fn index_rescan(
     _orderbys: *mut ScanKeyData,
     _norderbys: c_int,
 ) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_rescan(_scan as _, _keys as _, _nkeys as _, _orderbys as _, _norderbys as _)
 }
 
 unsafe fn index_endscan(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_endscan(_scan as _)
 }
 
 unsafe fn index_getbitmap(_scan: IndexScanDesc, _bitmap: *mut TIDBitmap) -> i64 {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_getbitmap(_scan as _, _bitmap as _) as _
 }
 
 unsafe fn ExecIndexBuildScanKeys(
@@ -98,7 +98,7 @@ unsafe fn ExecIndexBuildScanKeys(
     _arrayKeys: *mut *mut IndexArrayKeyInfo,
     _numArrayKeys: *mut c_int,
 ) {
-    unimplemented!() // TODO: executor/nodeIndexscan.c
+    crate::executor::nodeIndexscan::ExecIndexBuildScanKeys(_planstate as _, _index as _, _quals as _, _isorderby as _, _scanKeys as _, _numScanKeys as _, _runtimeKeys as _, _numRuntimeKeys as _, _arrayKeys as _, _numArrayKeys as _)
 }
 
 unsafe fn ExecIndexEvalRuntimeKeys(
@@ -106,7 +106,7 @@ unsafe fn ExecIndexEvalRuntimeKeys(
     _runtimeKeys: *mut IndexRuntimeKeyInfo,
     _numRuntimeKeys: c_int,
 ) {
-    unimplemented!() // TODO: executor/nodeIndexscan.c
+    crate::executor::nodeIndexscan::ExecIndexEvalRuntimeKeys(_econtext as _, _runtimeKeys as _, _numRuntimeKeys as _)
 }
 
 unsafe fn ExecIndexEvalArrayKeys(
@@ -114,14 +114,14 @@ unsafe fn ExecIndexEvalArrayKeys(
     _arrayKeys: *mut IndexArrayKeyInfo,
     _numArrayKeys: c_int,
 ) -> bool {
-    unimplemented!() // TODO: executor/nodeIndexscan.c
+    crate::executor::nodeIndexscan::ExecIndexEvalArrayKeys(_econtext as _, _arrayKeys as _, _numArrayKeys as _) as _
 }
 
 unsafe fn ExecIndexAdvanceArrayKeys(
     _arrayKeys: *mut IndexArrayKeyInfo,
     _numArrayKeys: c_int,
 ) -> bool {
-    unimplemented!() // TODO: executor/nodeIndexscan.c
+    crate::executor::nodeIndexscan::ExecIndexAdvanceArrayKeys(_arrayKeys as _, _numArrayKeys as _) as _
 }
 
 unsafe fn IsParallelWorker() -> bool {
@@ -129,19 +129,19 @@ unsafe fn IsParallelWorker() -> bool {
 }
 
 unsafe fn shm_toc_estimate_chunk(_estimator: *mut c_void, _size: Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 
 unsafe fn shm_toc_estimate_keys(_estimator: *mut c_void, _nkeys: Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 
 unsafe fn shm_toc_allocate(_toc: *mut c_void, _nbytes: Size) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 
 unsafe fn shm_toc_insert(_toc: *mut c_void, _key: u64, _address: *mut c_void) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 
 unsafe fn shm_toc_lookup(
@@ -149,7 +149,7 @@ unsafe fn shm_toc_lookup(
     _key: u64,
     _noError: bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }
 
 // Global stubs (would be `extern` globals in C).

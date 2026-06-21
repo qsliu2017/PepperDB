@@ -134,17 +134,17 @@ pub unsafe fn XLogInsertRecord(
     _num_fpi: c_int,
     _topxid_included: bool,
 ) -> XLogRecPtr {
-    unimplemented!("TODO(pg-port): real XLogInsertRecord lives in access/transam/xlog.c")
+    crate::access::transam::xlog::XLogInsertRecord(_rdata, _fpw_lsn, _flags, _num_fpi, _topxid_included)
 }
 
 /// TODO(pg-port): real GetFullPageWriteInfo lives in access/transam/xlog.c
 pub unsafe fn GetFullPageWriteInfo(redo_rec_ptr: *mut XLogRecPtr, do_page_writes: *mut bool) {
-    unimplemented!("TODO(pg-port): real GetFullPageWriteInfo lives in access/transam/xlog.c")
+    crate::access::transam::xlog::GetFullPageWriteInfo(redo_rec_ptr, do_page_writes)
 }
 
 /// TODO(pg-port): real GetRedoRecPtr lives in access/transam/xlog.c
 pub unsafe fn GetRedoRecPtr() -> XLogRecPtr {
-    unimplemented!("TODO(pg-port): real GetRedoRecPtr lives in access/transam/xlog.c")
+    crate::access::transam::xlog::GetRedoRecPtr()
 }
 
 /// TODO(pg-port): real BufferGetTag lives in storage/buffer/bufmgr.c
@@ -154,33 +154,23 @@ pub unsafe fn BufferGetTag(
     _forknum: *mut ForkNumber,
     _blknum: *mut BlockNumber,
 ) {
-    unimplemented!("TODO(pg-port): real BufferGetTag lives in storage/buffer/bufmgr.c")
+    crate::storage::buffer::bufmgr::BufferGetTag(_buffer, _rlocator as _, _forknum as _, _blknum as _)
 }
 
 /// TODO(pg-port): real BufferGetPage lives in storage/buffer/bufmgr.c
-pub unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
-    unimplemented!("TODO(pg-port): real BufferGetPage lives in storage/buffer/bufmgr.c")
-}
+pub unsafe fn BufferGetPage(_buffer: Buffer) -> Page { crate::storage::buffer::bufmgr::BufferGetPage(_buffer) }
 
 /// TODO(pg-port): real BufferIsExclusiveLocked lives in storage/buffer/bufmgr.c
-pub unsafe fn BufferIsExclusiveLocked(_buffer: Buffer) -> bool {
-    unimplemented!("TODO(pg-port): real BufferIsExclusiveLocked lives in storage/buffer/bufmgr.c")
-}
+pub unsafe fn BufferIsExclusiveLocked(_buffer: Buffer) -> bool { crate::storage::buffer::bufmgr::BufferIsExclusiveLocked(_buffer) }
 
 /// TODO(pg-port): real BufferIsDirty lives in storage/buffer/bufmgr.c
-pub unsafe fn BufferIsDirty(_buffer: Buffer) -> bool {
-    unimplemented!("TODO(pg-port): real BufferIsDirty lives in storage/buffer/bufmgr.c")
-}
+pub unsafe fn BufferIsDirty(_buffer: Buffer) -> bool { crate::storage::buffer::bufmgr::BufferIsDirty(_buffer) }
 
 /// TODO(pg-port): real BufferGetBlock lives in storage/buffer/bufmgr.c
-pub unsafe fn BufferGetBlock(_buffer: Buffer) -> *mut c_char {
-    unimplemented!("TODO(pg-port): real BufferGetBlock lives in storage/buffer/bufmgr.c")
-}
+pub unsafe fn BufferGetBlock(_buffer: Buffer) -> *mut c_char { crate::storage::buffer::bufmgr::BufferGetBlock(_buffer) as *mut c_char }
 
 /// TODO(pg-port): real BufferGetLSNAtomic lives in storage/buffer/bufmgr.c
-pub unsafe fn BufferGetLSNAtomic(_buffer: Buffer) -> XLogRecPtr {
-    unimplemented!("TODO(pg-port): real BufferGetLSNAtomic lives in storage/buffer/bufmgr.c")
-}
+pub unsafe fn BufferGetLSNAtomic(_buffer: Buffer) -> XLogRecPtr { crate::storage::buffer::bufmgr::BufferGetLSNAtomic(_buffer) }
 
 /// TODO(pg-port): real ReadBufferExtended lives in storage/buffer/bufmgr.c
 pub unsafe fn ReadBufferExtended(
@@ -189,45 +179,31 @@ pub unsafe fn ReadBufferExtended(
     _blk: BlockNumber,
     _mode: c_int,
     _strategy: *mut c_void,
-) -> Buffer {
-    unimplemented!("TODO(pg-port): real ReadBufferExtended lives in storage/buffer/bufmgr.c")
-}
+) -> Buffer { crate::storage::buffer::bufmgr::ReadBufferExtended(_rel as _, _fork as _, _blk, _mode as _, _strategy as _) }
 
 /// TODO(pg-port): real LockBuffer lives in storage/buffer/bufmgr.c
 pub unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
-    unimplemented!("TODO(pg-port): real LockBuffer lives in storage/buffer/bufmgr.c")
+    crate::storage::buffer::bufmgr::LockBuffer(_buffer, _mode)
 }
 
 /// TODO(pg-port): real UnlockReleaseBuffer lives in storage/buffer/bufmgr.c
 pub unsafe fn UnlockReleaseBuffer(_buffer: Buffer) {
-    unimplemented!("TODO(pg-port): real UnlockReleaseBuffer lives in storage/buffer/bufmgr.c")
+    crate::storage::buffer::bufmgr::UnlockReleaseBuffer(_buffer)
 }
 
 /// TODO(pg-port): real MarkBufferDirty lives in storage/buffer/bufmgr.c
 pub unsafe fn MarkBufferDirty(_buffer: Buffer) {
-    unimplemented!("TODO(pg-port): real MarkBufferDirty lives in storage/buffer/bufmgr.c")
+    crate::storage::buffer::bufmgr::MarkBufferDirty(_buffer)
 }
 
 /// TODO(pg-port): real GetCurrentTransactionIdIfAny lives in access/transam/xact.c
-pub unsafe fn GetCurrentTransactionIdIfAny() -> TransactionId {
-    unimplemented!(
-        "TODO(pg-port): real GetCurrentTransactionIdIfAny lives in access/transam/xact.c"
-    )
-}
+pub unsafe fn GetCurrentTransactionIdIfAny() -> TransactionId { crate::access::transam::xact::GetCurrentTransactionIdIfAny() }
 
 /// TODO(pg-port): real GetTopTransactionIdIfAny lives in access/transam/xact.c
-pub unsafe fn GetTopTransactionIdIfAny() -> TransactionId {
-    unimplemented!(
-        "TODO(pg-port): real GetTopTransactionIdIfAny lives in access/transam/xact.c"
-    )
-}
+pub unsafe fn GetTopTransactionIdIfAny() -> TransactionId { crate::access::transam::xact::GetTopTransactionIdIfAny() }
 
 /// TODO(pg-port): real IsSubxactTopXidLogPending lives in access/transam/xact.c
-pub unsafe fn IsSubxactTopXidLogPending() -> bool {
-    unimplemented!(
-        "TODO(pg-port): real IsSubxactTopXidLogPending lives in access/transam/xact.c"
-    )
-}
+pub unsafe fn IsSubxactTopXidLogPending() -> bool { crate::access::transam::xact::IsSubxactTopXidLogPending() }
 
 /// TODO(pg-port): real replorigin_session_origin lives in replication/origin.c
 pub static mut replorigin_session_origin: RepOriginId = InvalidRepOriginId;
@@ -240,8 +216,7 @@ pub struct PGPROC {
 }
 
 /// TODO(pg-port): real MyProc lives in storage/lmgr/proc.c
-pub static mut MyProc: *mut PGPROC = null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 /// TODO(pg-port): real DELAY_CHKPT_START lives in storage/proc.h
 pub const DELAY_CHKPT_START: c_int = 1 << 0;
 
@@ -409,7 +384,8 @@ pub unsafe fn XLogEnsureRecordSpace(mut max_block_id: c_int, mut ndatas: c_int) 
     }
     nbuffers = max_block_id + 1;
 
-    if nbuffers > max_registered_buffers {
+    let old_registered: c_int = max_registered_buffers;
+    if nbuffers > old_registered {
         registered_buffers = repalloc(
             registered_buffers as *mut c_void,
             size_of::<registered_buffer>() * nbuffers as usize,
@@ -419,11 +395,9 @@ pub unsafe fn XLogEnsureRecordSpace(mut max_block_id: c_int, mut ndatas: c_int) 
          * At least the padding bytes in the structs must be zeroed, because
          * they are included in WAL data, but initialize it all for tidiness.
          */
-        write_bytes(
-            registered_buffers.add(max_registered_buffers as usize),
-            0u8,
-            (nbuffers - max_registered_buffers) as usize * size_of::<registered_buffer>(),
-        );
+        let zero_from: usize = old_registered as usize;
+        let zero_count: usize = (nbuffers as usize - zero_from) * size_of::<registered_buffer>();
+        write_bytes(registered_buffers.add(zero_from) as *mut u8, 0u8, zero_count);
         max_registered_buffers = nbuffers;
     }
 
@@ -1736,6 +1710,10 @@ pub unsafe fn InitXLogInsert() {
         hdr_scratch =
             MemoryContextAllocZero(xloginsert_cxt, HEADER_SCRATCH_SIZE()) as *mut c_char;
     }
+
+    /* C initializes `mainrdata_last = &mainrdata_head` statically; do it here.
+     * mainrdata_head stands in for the sentinel's .next (field 0), so alias it. */
+    mainrdata_last = &raw mut mainrdata_head as *mut XLogRecData;
 }
 
 // --------------------------------------------------------------------------
@@ -1744,5 +1722,5 @@ pub unsafe fn InitXLogInsert() {
 
 /// TODO(pg-port): real XLogInsertAllowed lives in access/transam/xlog.c
 pub unsafe fn XLogInsertAllowed() -> bool {
-    unimplemented!("TODO(pg-port): real XLogInsertAllowed lives in access/transam/xlog.c")
+    crate::access::transam::xlog::XLogInsertAllowed()
 }

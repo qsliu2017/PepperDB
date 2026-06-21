@@ -39,9 +39,7 @@ pub struct OutputPluginOptions {
 pub type LogicalOutputPluginInit =
     Option<unsafe extern "C" fn(cb: *mut OutputPluginCallbacks)>;
 
-pub unsafe fn _PG_output_plugin_init(cb: *mut OutputPluginCallbacks) {
-    unimplemented!()
-}
+pub unsafe fn _PG_output_plugin_init(cb: *mut OutputPluginCallbacks) { crate::replication::pgoutput::pgoutput::_PG_output_plugin_init(cb as _) }
 
 /*
  * Callback that gets called in a user-defined plugin. ctx->private_data can
@@ -311,14 +309,8 @@ pub struct OutputPluginCallbacks {
 }
 
 /* Functions in replication/logical/logical.c */
-pub unsafe fn OutputPluginPrepareWrite(ctx: *mut LogicalDecodingContext, last_write: bool) {
-    unimplemented!()
-}
+pub unsafe fn OutputPluginPrepareWrite(ctx: *mut LogicalDecodingContext, last_write: bool) { crate::replication::logical::logical::OutputPluginPrepareWrite(ctx as _, last_write) }
 
-pub unsafe fn OutputPluginWrite(ctx: *mut LogicalDecodingContext, last_write: bool) {
-    unimplemented!()
-}
+pub unsafe fn OutputPluginWrite(ctx: *mut LogicalDecodingContext, last_write: bool) { crate::replication::logical::logical::OutputPluginWrite(ctx as _, last_write) }
 
-pub unsafe fn OutputPluginUpdateProgress(ctx: *mut LogicalDecodingContext, skipped_xact: bool) {
-    unimplemented!()
-}
+pub unsafe fn OutputPluginUpdateProgress(ctx: *mut LogicalDecodingContext, skipped_xact: bool) { crate::replication::logical::logical::OutputPluginUpdateProgress(ctx as _, skipped_xact) }

@@ -82,15 +82,15 @@ use crate::access::transam::{
 pub struct LWLock;
 pub const LW_SHARED: c_int = 0;
 pub const LW_EXCLUSIVE: c_int = 1;
-unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool { unimplemented!() }
-unsafe fn LWLockRelease(_lock: *mut LWLock) { unimplemented!() }
-unsafe fn LWLockConditionalAcquire(_lock: *mut LWLock, _mode: c_int) -> bool { unimplemented!() }
-unsafe fn LWLockHeldByMe(_lock: *mut LWLock) -> bool { unimplemented!() }
-unsafe fn LWLockHeldByMeInMode(_lock: *mut LWLock, _mode: c_int) -> bool { unimplemented!() }
+unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool { crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, core::mem::transmute(_mode)) }
+unsafe fn LWLockRelease(_lock: *mut LWLock) { crate::storage::lmgr::lwlock::LWLockRelease(_lock as _) }
+unsafe fn LWLockConditionalAcquire(_lock: *mut LWLock, _mode: c_int) -> bool { crate::storage::lmgr::lwlock::LWLockConditionalAcquire(_lock as _, core::mem::transmute(_mode)) }
+unsafe fn LWLockHeldByMe(_lock: *mut LWLock) -> bool { crate::storage::lmgr::lwlock::LWLockHeldByMe(_lock as _) }
+unsafe fn LWLockHeldByMeInMode(_lock: *mut LWLock, _mode: c_int) -> bool { crate::storage::lmgr::lwlock::LWLockHeldByMeInMode(_lock as _, core::mem::transmute(_mode)) }
 
 // TODO(pg-port): real lock handles live in storage/lmgr/lwlocklist.h
-unsafe fn ProcArrayLock() -> *mut LWLock { unimplemented!() }
-unsafe fn XidGenLock() -> *mut LWLock { unimplemented!() }
+unsafe fn ProcArrayLock() -> *mut LWLock { crate::backend_link_shims::ProcArrayLock as *mut LWLock }
+unsafe fn XidGenLock() -> *mut LWLock { crate::backend_link_shims::XidGenLock as *mut LWLock }
 
 // TODO(pg-port): real PGPROC/PROC_HDR live in storage/proc.h
 pub const PGPROC_MAX_CACHED_SUBXIDS: c_int = 64;
@@ -146,60 +146,27 @@ unsafe fn pg_write_barrier() { core::sync::atomic::fence(core::sync::atomic::Ord
 
 /// PGPROC -- per-backend process descriptor.
 /// TODO(pg-port): real PGPROC lives in storage/proc.h; this is a faithful-enough stub.
-#[repr(C)]
-pub struct PGPROC {
-    /// transaction id, or InvalidTransactionId if none
-    pub xid: TransactionId,
-    /// subtransaction-XID cache status
-    pub subxidStatus: XidCacheStatus,
-    /// cached subtransaction XIDs
-    pub subxids: SubXidCache,
-    /// OS process id of backend, or 0 if prepared xact
-    pub pid: c_int,
-    /// virtual transaction id
-    pub vxid: VXidCache,
-    /// lowest Xid of snapshot (transaction's xmin)
-    pub xmin: TransactionId,
-    /// OID of database this backend is using
-    pub databaseId: Oid,
-    /// OID of role used to log in
-    pub roleId: Oid,
-    /// index into ProcGlobal arrays
-    pub pgxactoff: c_int,
-    /// flags for various states (PROC_* below)
-    pub statusFlags: uint8,
-    /// checkpoint delay flags
-    pub delayChkptFlags: c_int,
-    /// recovery conflict pending?
-    pub recoveryConflictPending: bool,
-    /// true if regular backend (not worker/aux)
-    pub isRegularBackend: bool,
-    /// semaphore to sleep on
-    pub sem: PGSemaphore,
-    /// group-clear linked list
-    pub procArrayGroupMember: bool,
-    pub procArrayGroupMemberXid: TransactionId,
-    pub procArrayGroupNext: pg_atomic_uint32,
-    /// lock this process is waiting for, or NULL
-    pub waitLock: *mut c_void,
-    // ... TODO(pg-port): storage/proc.h has many more fields
-}
+pub use crate::storage::lmgr::proc::PGPROC;
 
 /// PROC_HDR -- global process table descriptor.
 /// TODO(pg-port): real PROC_HDR lives in storage/proc.h.
 #[repr(C)]
 pub struct PROC_HDR {
+    // Field order MUST match the canonical proc::PROC_HDR so the dense-array
+    // pointers (written by InitProcGlobal) are read at the right offsets.
     pub allProcs: *mut PGPROC,
-    pub allProcCount: uint32,
     pub xids: *mut TransactionId,
     pub subxidStates: *mut XidCacheStatus,
     pub statusFlags: *mut uint8,
+    pub allProcCount: uint32,
+    // freeProcs/autovacFreeProcs/bgworkerFreeProcs/walsenderFreeProcs (4 dlist_head = 64 bytes)
+    _pad_freelists: [u64; 8],
     pub procArrayGroupFirst: pg_atomic_uint32,
     // ... TODO(pg-port): storage/proc.h
 }
 
-pub static mut ProcGlobal: *mut PROC_HDR = core::ptr::null_mut(); // TODO(pg-port): real ProcGlobal lives in storage/lmgr/proc.c
-pub static mut MyProc: *mut PGPROC = core::ptr::null_mut();       // TODO(pg-port): real MyProc lives in storage/lmgr/proc.c
+extern "C" { pub static mut ProcGlobal: *mut PROC_HDR; } // canonical: proc::ProcGlobal
+pub use crate::storage::lmgr::proc::MyProc; // canonical (set by InitProcess)
 
 // PROC status flags -- TODO(pg-port): real values in storage/proc.h
 pub const PROC_IN_VACUUM: uint8               = 0x01;
@@ -215,27 +182,20 @@ unsafe fn GetPGProcByNumber(n: c_int) -> *mut PGPROC {
 unsafe fn GetNumberFromPGProc(proc_: *const PGPROC) -> c_int {
     proc_.offset_from((*ProcGlobal).allProcs) as c_int
 }
-pub const NUM_AUXILIARY_PROCS: c_int = 5; // TODO(pg-port): real value in storage/proc.h
+pub const NUM_AUXILIARY_PROCS: c_int = crate::storage::lmgr::proc::NUM_AUXILIARY_PROCS as c_int; // canonical: proc.rs 6+MAX_IO_WORKERS
 
 // ProcNumber types -- TODO(pg-port): real defs in storage/procnumber.h
 pub type ProcNumber = c_int;
-pub static mut MyProcNumber: c_int = 0;
+extern "C" { pub static mut MyProcNumber: c_int; }
 pub use crate::storage::procnumber::INVALID_PROC_NUMBER;
 
 // PGSemaphore -- TODO(pg-port): real type in storage/pg_sema.h
-unsafe fn PGSemaphoreLock(_sema: PGSemaphore) { unimplemented!() }
-unsafe fn PGSemaphoreUnlock(_sema: PGSemaphore) { unimplemented!() }
+unsafe fn PGSemaphoreLock(_sema: PGSemaphore) { crate::storage::pg_sema::PGSemaphoreLock(_sema as _) }
+unsafe fn PGSemaphoreUnlock(_sema: PGSemaphore) { crate::storage::pg_sema::PGSemaphoreUnlock(_sema as _) }
 
-// TransamVariablesData -- TODO(pg-port): real type in access/transam/varsup.c
-#[repr(C)]
-pub struct TransamVariablesData {
-    pub nextXid: FullTransactionId,
-    pub oldestXid: TransactionId,
-    pub latestCompletedXid: FullTransactionId,
-    pub xactCompletionCount: uint64,
-    // ... TODO(pg-port): access/transam.h
-}
-pub static mut TransamVariables: *mut TransamVariablesData = core::ptr::null_mut(); // TODO(pg-port): real TransamVariables lives in access/transam/varsup.c
+// TransamVariablesData -- canonical type in access/transam/varsup.c
+pub use crate::access::transam::varsup::TransamVariablesData;
+pub use crate::access::transam::varsup::TransamVariables; // canonical (set by VarsupShmemInit)
 
 // Relation type stub -- TODO(pg-port): real type in utils/rel.h
 pub use crate::utils::rel::{Relation, RelationData};
@@ -248,9 +208,9 @@ pub struct FormData_pg_class {
     pub relkind: u8,
     pub relisshared: bool,
 }
-unsafe fn IsCatalogRelation(_rel: Relation) -> bool { unimplemented!() } // TODO(pg-port): real fn in catalog/catalog.c
-unsafe fn RelationIsAccessibleInLogicalDecoding(_rel: Relation) -> bool { unimplemented!() } // TODO(pg-port): real fn in utils/rel.h
-unsafe fn RELATION_IS_LOCAL(_rel: Relation) -> bool { unimplemented!() } // TODO(pg-port): real macro in utils/rel.h
+unsafe fn IsCatalogRelation(rel: Relation) -> bool { crate::catalog::catalog::IsCatalogRelation(rel as _) }
+unsafe fn RelationIsAccessibleInLogicalDecoding(rel: Relation) -> bool { crate::utils::cache::relcache::RelationIsAccessibleInLogicalDecoding(rel as _) }
+unsafe fn RELATION_IS_LOCAL(rel: Relation) -> bool { (*(rel as crate::utils::rel::Relation)).rd_islocaltemp }
 
 // Snapshot types -- real type in utils/snapshot.rs
 pub use crate::utils::snapshot::{SnapshotData, Snapshot};
@@ -315,11 +275,11 @@ unsafe fn pg_lfind32(needle: uint32, haystack: *const uint32, n: c_int) -> bool 
 }
 
 // Misc stubs
-unsafe fn RecoveryInProgress() -> bool { unimplemented!() } // TODO(pg-port): real fn in access/transam/xlogutils.c
-unsafe fn AmStartupProcess() -> bool { unimplemented!() }   // TODO(pg-port): real fn in miscadmin.c
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
+unsafe fn AmStartupProcess() -> bool { crate::miscadmin::AmStartupProcess() }
 pub static mut IsUnderPostmaster: bool = false;             // TODO(pg-port): real global in utils/misc/injection_point.c
-unsafe fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool { unimplemented!() } // TODO(pg-port): real fn in access/transam/xact.c
-unsafe fn IsBootstrapProcessingMode() -> bool { unimplemented!() }         // TODO(pg-port): real fn in utils/init/postinit.c
+unsafe fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool { crate::access::transam::xact::TransactionIdIsCurrentTransactionId(_xid) }
+unsafe fn IsBootstrapProcessingMode() -> bool { crate::miscadmin::IsBootstrapProcessingMode() }         // TODO(pg-port): real fn in utils/init/postinit.c
 unsafe fn FullTransactionIdIsNormal(fxid: FullTransactionId) -> bool {
     FullTransactionIdFollowsOrEquals(fxid, FirstNormalFullTransactionId)
 }
@@ -347,7 +307,7 @@ unsafe fn UINT32_ACCESS_ONCE(var: TransactionId) -> uint32 {
 }
 
 // Shmem allocation -- TODO(pg-port): real fn in storage/ipc/shmem.c
-unsafe fn ShmemInitStruct(_name: *const i8, _size: Size, _found: *mut bool) -> *mut c_void { unimplemented!() }
+unsafe fn ShmemInitStruct(_name: *const i8, _size: Size, _found: *mut bool) -> *mut c_void { crate::storage::ipc::shmem::ShmemInitStruct(_name as *const c_char, _size, _found) }
 unsafe fn add_size(s1: Size, s2: Size) -> Size { s1 + s2 }
 unsafe fn mul_size(s1: Size, s2: usize) -> Size { s1 * s2 }
 
@@ -366,42 +326,46 @@ unsafe fn lnext(_list: *mut List, _lc: *mut ListCell) -> *mut ListCell { unimple
 unsafe fn lfirst_int(_lc: *mut ListCell) -> c_int { unimplemented!() }
 unsafe fn list_free(_list: *mut List) { unimplemented!() }
 
-// Globals from miscadmin / auth
-pub static mut MaxBackends: c_int = 0;            // TODO(pg-port): real value in storage/proc.h
+// Globals from miscadmin / auth. MaxBackends is the canonical #[no_mangle] global
+// (utils::init::globals), set by InitializeMaxBackends; a local copy here stayed 0
+// -> PROCARRAY_MAXPROCS()=0 -> "too many clients" on the first ProcArrayAdd.
+extern "C" {
+    pub static mut MaxBackends: c_int;
+}
 pub static mut max_prepared_xacts: c_int = 0;     // TODO(pg-port): real value in access/twophase.c
 pub static mut EnableHotStandby: bool = false;    // TODO(pg-port): real value in access/xlogdefs.h
 
 pub static mut RecentXmin: TransactionId = InvalidTransactionId;     // TODO(pg-port): real global in utils/snapmgr.c
 pub static mut TransactionXmin: TransactionId = InvalidTransactionId; // TODO(pg-port): real global in utils/snapmgr.c
 pub static mut MyDatabaseId: Oid = InvalidOid;                        // TODO(pg-port): real global in utils/adt/acl.c
-unsafe fn GetUserId() -> Oid { unimplemented!() }                    // TODO(pg-port): real fn in utils/adt/acl.c
-unsafe fn GetCurrentCommandId(_increment: bool) -> uint32 { unimplemented!() } // TODO(pg-port): real fn in access/transam/xact.c
-unsafe fn superuser_arg(_roleId: Oid) -> bool { unimplemented!() }              // TODO(pg-port): real fn in utils/adt/acl.c
-unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool { unimplemented!() } // TODO(pg-port): real fn in utils/adt/acl.c
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }                    // TODO(pg-port): real fn in utils/adt/acl.c
+unsafe fn GetCurrentCommandId(_increment: bool) -> uint32 { crate::access::transam::xact::GetCurrentCommandId(_increment) }
+unsafe fn superuser_arg(_roleId: Oid) -> bool { crate::utils::misc::superuser::superuser_arg(_roleId) }              // TODO(pg-port): real fn in utils/adt/acl.c
+unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool { crate::utils::adt::acl::has_privs_of_role(_member, _role) } // TODO(pg-port): real fn in utils/adt/acl.c
 pub const ROLE_PG_SIGNAL_BACKEND: Oid = 0;                                      // TODO(pg-port): real value in catalog/pg_authid.h
-unsafe fn get_database_name(_db: Oid) -> *const i8 { unimplemented!() }        // TODO(pg-port): real fn in commands/dbcommands.c
+unsafe fn get_database_name(_db: Oid) -> *const i8 { crate::commands::dbcommands::get_database_name(_db) as _ }        // TODO(pg-port): real fn in commands/dbcommands.c
 
 // ProcSignal -- TODO(pg-port): real type in storage/ipc/procsignal.h
 pub type ProcSignalReason = c_int;
-unsafe fn SendProcSignal(_pid: c_int, _reason: ProcSignalReason, _procNumber: ProcNumber) -> c_int { unimplemented!() }
+unsafe fn SendProcSignal(_pid: c_int, _reason: ProcSignalReason, _procNumber: ProcNumber) -> c_int { crate::storage::ipc::procsignal::SendProcSignal(_pid as _, core::mem::transmute(_reason), _procNumber as _) }
 
 // subtrans -- TODO(pg-port): real fns in access/transam/subtrans.c
-unsafe fn SubTransGetTopmostTransaction(_xid: TransactionId) -> TransactionId { unimplemented!() }
-unsafe fn SubTransSetParent(_xid: TransactionId, _parent: TransactionId) { unimplemented!() }
-unsafe fn ExtendSUBTRANS(_nextXid: TransactionId) { unimplemented!() }
+unsafe fn SubTransGetTopmostTransaction(_xid: TransactionId) -> TransactionId { crate::access::transam::subtrans::SubTransGetTopmostTransaction(_xid) }
+unsafe fn SubTransSetParent(_xid: TransactionId, _parent: TransactionId) { crate::access::transam::subtrans::SubTransSetParent(_xid, _parent) }
+unsafe fn ExtendSUBTRANS(_nextXid: TransactionId) { crate::access::transam::subtrans::ExtendSUBTRANS(_nextXid) }
 
 // twophase -- TODO(pg-port): real fn in access/transam/twophase.c
-unsafe fn StandbyTransactionIdIsPrepared(_xid: TransactionId) -> bool { unimplemented!() }
+unsafe fn StandbyTransactionIdIsPrepared(_xid: TransactionId) -> bool { crate::access::transam::twophase::StandbyTransactionIdIsPrepared(_xid) }
 
 // varsup -- TODO(pg-port): real fn in access/transam/varsup.c
-unsafe fn AdvanceNextFullTransactionIdPastXid(_xid: TransactionId) { unimplemented!() }
+unsafe fn AdvanceNextFullTransactionIdPastXid(_xid: TransactionId) { crate::access::transam::varsup::AdvanceNextFullTransactionIdPastXid(_xid) }
 
 // standby/locks -- TODO(pg-port): real fn in access/transam/standby.c
 unsafe fn StandbyReleaseOldLocks(_oldestXid: TransactionId) { unimplemented!() }
 
 // clog -- TODO(pg-port): real fns in access/transam/clog.c
-unsafe fn TransactionIdDidCommit(_xid: TransactionId) -> bool { unimplemented!() }
-unsafe fn TransactionIdDidAbort(_xid: TransactionId) -> bool { unimplemented!() }
+unsafe fn TransactionIdDidCommit(_xid: TransactionId) -> bool { crate::access::transam::transam::TransactionIdDidCommit(_xid) }
+unsafe fn TransactionIdDidAbort(_xid: TransactionId) -> bool { crate::access::transam::transam::TransactionIdDidAbort(_xid) }
 
 // xidLogicalComparator -- TODO(pg-port): real fn in utils/adt/xid.c / transam.c
 unsafe fn xidLogicalComparator(a: *const c_void, b: *const c_void) -> c_int {
@@ -430,19 +394,19 @@ unsafe fn qsort(base: *mut c_void, nmemb: usize, size: usize,
 }
 
 // malloc/free wrappers
-unsafe fn malloc(size: usize) -> *mut c_void { unimplemented!() }
-unsafe fn free(ptr: *mut c_void) { unimplemented!() }
+unsafe fn malloc(size: usize) -> *mut c_void { libc::malloc(size) }
+unsafe fn free(ptr: *mut c_void) { libc::free(ptr) }
 
 // kill syscall
-unsafe fn kill(_pid: c_int, _sig: c_int) -> c_int { unimplemented!() }
+unsafe fn kill(_pid: c_int, _sig: c_int) -> c_int { libc::kill(_pid, _sig) }
 pub const SIGTERM: c_int = 15;
 
 // pg_usleep
-unsafe fn pg_usleep(_usec: i64) { unimplemented!() }
+unsafe fn pg_usleep(_usec: i64) { crate::port::pgsleep::pg_usleep(_usec as _) }
 
 // Timestamp helpers
 pub type TimestampTz = int64;
-unsafe fn GetCurrentTimestamp() -> TimestampTz { unimplemented!() }
+unsafe fn GetCurrentTimestamp() -> TimestampTz { crate::utils::adt::timestamp::GetCurrentTimestamp() as _ }
 unsafe fn TimestampTzPlusMilliseconds(ts: TimestampTz, ms: i64) -> TimestampTz { ts + ms * 1000 }
 
 // StringInfo
@@ -774,7 +738,7 @@ pub unsafe fn ProcArrayAdd(proc_: *mut PGPROC) {
     *pgprocnos_ptr(array_p).add(index as usize) = GetNumberFromPGProc(proc_);
     (*proc_).pgxactoff = index;
     *(*ProcGlobal).xids.add(index as usize) = (*proc_).xid;
-    *(*ProcGlobal).subxidStates.add(index as usize) = core::ptr::read(&(*proc_).subxidStatus);
+    *(*ProcGlobal).subxidStates.add(index as usize) = core::mem::transmute::<_, XidCacheStatus>(core::ptr::read(&(*proc_).subxidStatus));
     *(*ProcGlobal).statusFlags.add(index as usize) = (*proc_).statusFlags;
 
     (*array_p).numProcs += 1;
@@ -1016,7 +980,7 @@ unsafe fn ProcArrayGroupClearXid(proc_: *mut PGPROC, latestXid: TransactionId) {
     (*proc_).procArrayGroupMemberXid = latestXid;
     nextidx = pg_atomic_read_u32(&(*procglobal).procArrayGroupFirst);
     loop {
-        pg_atomic_write_u32(&mut (*proc_).procArrayGroupNext, nextidx);
+        pg_atomic_write_u32(core::ptr::addr_of_mut!((*proc_).procArrayGroupNext) as *mut _, nextidx);
         if pg_atomic_compare_exchange_u32(&mut (*procglobal).procArrayGroupFirst,
                                           &mut nextidx,
                                           pgprocno as uint32) {
@@ -1037,7 +1001,7 @@ unsafe fn ProcArrayGroupClearXid(proc_: *mut PGPROC, latestXid: TransactionId) {
         pgstat_report_wait_start(WAIT_EVENT_PROCARRAY_GROUP_UPDATE);
         loop {
             // acts as a read barrier
-            PGSemaphoreLock((*proc_).sem);
+            PGSemaphoreLock((*proc_).sem as _);
             if !(*proc_).procArrayGroupMember {
                 break;
             }
@@ -1045,12 +1009,12 @@ unsafe fn ProcArrayGroupClearXid(proc_: *mut PGPROC, latestXid: TransactionId) {
         }
         pgstat_report_wait_end();
 
-        Assert!(pg_atomic_read_u32(&(*proc_).procArrayGroupNext) == INVALID_PROC_NUMBER as uint32);
+        Assert!(pg_atomic_read_u32(core::ptr::addr_of!((*proc_).procArrayGroupNext) as *const _) == INVALID_PROC_NUMBER as uint32);
 
         // Fix semaphore count for any absorbed wakeups
         while extra_waits > 0 {
             extra_waits -= 1;
-            PGSemaphoreUnlock((*proc_).sem);
+            PGSemaphoreUnlock((*proc_).sem as _);
         }
         return;
     }
@@ -1074,7 +1038,7 @@ unsafe fn ProcArrayGroupClearXid(proc_: *mut PGPROC, latestXid: TransactionId) {
         let nextproc: *mut PGPROC = allProcs.add(nextidx as usize);
         ProcArrayEndTransactionInternal(nextproc, (*nextproc).procArrayGroupMemberXid);
         // Move to next proc in list.
-        nextidx = pg_atomic_read_u32(&(*nextproc).procArrayGroupNext);
+        nextidx = pg_atomic_read_u32(core::ptr::addr_of!((*nextproc).procArrayGroupNext) as *const _);
     }
 
     // We're done with the lock now.
@@ -1086,8 +1050,8 @@ unsafe fn ProcArrayGroupClearXid(proc_: *mut PGPROC, latestXid: TransactionId) {
      */
     while wakeidx != INVALID_PROC_NUMBER as uint32 {
         let nextproc: *mut PGPROC = allProcs.add(wakeidx as usize);
-        wakeidx = pg_atomic_read_u32(&(*nextproc).procArrayGroupNext);
-        pg_atomic_write_u32(&mut (*nextproc).procArrayGroupNext, INVALID_PROC_NUMBER as uint32);
+        wakeidx = pg_atomic_read_u32(core::ptr::addr_of!((*nextproc).procArrayGroupNext) as *const _);
+        pg_atomic_write_u32(core::ptr::addr_of_mut!((*nextproc).procArrayGroupNext) as *mut _, INVALID_PROC_NUMBER as uint32);
 
         // ensure all previous writes are visible before follower continues.
         pg_write_barrier();
@@ -1095,7 +1059,7 @@ unsafe fn ProcArrayGroupClearXid(proc_: *mut PGPROC, latestXid: TransactionId) {
         (*nextproc).procArrayGroupMember = false;
 
         if nextproc != MyProc {
-            PGSemaphoreUnlock((*nextproc).sem);
+            PGSemaphoreUnlock((*nextproc).sem as _);
         }
     }
 }
@@ -2130,6 +2094,10 @@ pub unsafe fn GetSnapshotData(snapshot: Snapshot) -> Snapshot {
     xmax = XidFromFullTransactionId(latest_completed);
     TransactionIdAdvance(&mut xmax);
     Assert!(TransactionIdIsNormal(xmax));
+    if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT GetSnapshotData pid={} latestCompletedXid={} xmax={}",
+            std::process::id(), XidFromFullTransactionId(latest_completed), xmax);
+    }
 
     // initialize xmin calculation with xmax
     xmin = xmax;
@@ -3394,6 +3362,7 @@ pub unsafe fn CountOtherDBBackends(database_id: Oid,
 
 /// TerminateOtherDBBackends - terminate existing connections to the specified
 /// database.  Used by DROP DATABASE with FORCE.
+#[no_mangle]
 pub unsafe fn TerminateOtherDBBackends(database_id: Oid) {
     let array_p = procArray;
     let mut pids: *mut List = NIL;

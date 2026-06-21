@@ -120,15 +120,25 @@ pub struct shm_toc { _opaque: [u8; 0] }
 pub struct shm_toc_estimator { _opaque: [u8; 0] }
 
 #[inline]
-unsafe fn shm_toc_estimate_chunk(_est: *mut shm_toc_estimator, _size: usize) { /* TODO(pg-port) */ }
+unsafe fn shm_toc_estimate_chunk(_est: *mut shm_toc_estimator, _size: usize) {
+    unimplemented!()
+}
 #[inline]
-unsafe fn shm_toc_estimate_keys(_est: *mut shm_toc_estimator, _nkeys: c_int) { /* TODO(pg-port) */ }
+unsafe fn shm_toc_estimate_keys(_est: *mut shm_toc_estimator, _nkeys: c_int) {
+    unimplemented!()
+}
 #[inline]
-unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _size: usize) -> *mut c_void { /* TODO(pg-port) */ null_mut() }
+unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _size: usize) -> *mut c_void {
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _size as _) as _
+}
 #[inline]
-unsafe fn shm_toc_insert(_toc: *mut shm_toc, _key: u64, _address: *mut c_void) { /* TODO(pg-port) */ }
+unsafe fn shm_toc_insert(_toc: *mut shm_toc, _key: u64, _address: *mut c_void) {
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
+}
 #[inline]
-unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: u64, _noError: bool) -> *mut c_void { /* TODO(pg-port) */ null_mut() }
+unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: u64, _noError: bool) -> *mut c_void {
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
+}
 
 // TODO(pg-port): access/parallel.h -- ParallelWorkerNumber
 static ParallelWorkerNumber: c_int = -1;
@@ -146,19 +156,33 @@ use crate::utils::memutils::MaxAllocSize;
 use crate::storage::ipc::barrier::Barrier;
 
 #[inline]
-unsafe fn BarrierPhase(b: *mut Barrier) -> c_int { /* TODO(pg-port) */ 0 }
+unsafe fn BarrierPhase(b: *mut Barrier) -> c_int {
+    crate::storage::ipc::barrier::BarrierPhase(b as _) as _
+}
 #[inline]
-unsafe fn BarrierAttach(b: *mut Barrier) -> c_int { /* TODO(pg-port) */ 0 }
+unsafe fn BarrierAttach(b: *mut Barrier) -> c_int {
+    crate::storage::ipc::barrier::BarrierAttach(b as _) as _
+}
 #[inline]
-unsafe fn BarrierDetach(b: *mut Barrier) { /* TODO(pg-port) */ }
+unsafe fn BarrierDetach(b: *mut Barrier) {
+    unimplemented!()
+}
 #[inline]
-unsafe fn BarrierArriveAndWait(b: *mut Barrier, wait_event: u32) -> bool { /* TODO(pg-port) */ false }
+unsafe fn BarrierArriveAndWait(b: *mut Barrier, wait_event: u32) -> bool {
+    crate::storage::ipc::barrier::BarrierArriveAndWait(b as _, wait_event as _) as _
+}
 #[inline]
-unsafe fn BarrierArriveAndDetach(b: *mut Barrier) -> bool { /* TODO(pg-port) */ false }
+unsafe fn BarrierArriveAndDetach(b: *mut Barrier) -> bool {
+    crate::storage::ipc::barrier::BarrierArriveAndDetach(b as _) as _
+}
 #[inline]
-unsafe fn BarrierArriveAndDetachExceptLast(b: *mut Barrier) -> bool { /* TODO(pg-port) */ false }
+unsafe fn BarrierArriveAndDetachExceptLast(b: *mut Barrier) -> bool {
+    crate::storage::ipc::barrier::BarrierArriveAndDetachExceptLast(b as _) as _
+}
 #[inline]
-unsafe fn BarrierInit(b: *mut Barrier, n: c_int) { /* TODO(pg-port) */ }
+unsafe fn BarrierInit(b: *mut Barrier, n: c_int) {
+    crate::storage::ipc::barrier::BarrierInit(b as _, n as _)
+}
 
 // TODO(pg-port): WAIT_EVENT_HASH_* constants (from wait_event.h)
 const WAIT_EVENT_HASH_BUILD_ALLOCATE: u32 = 0;
@@ -179,9 +203,13 @@ unsafe fn dsa_allocate(_area: *mut dsa_area, _size: usize) -> dsa_pointer { /* T
 #[inline]
 unsafe fn dsa_allocate0(_area: *mut dsa_area, _size: usize) -> dsa_pointer { /* TODO(pg-port) */ 0 }
 #[inline]
-unsafe fn dsa_free(_area: *mut dsa_area, _dp: dsa_pointer) { /* TODO(pg-port) */ }
+unsafe fn dsa_free(_area: *mut dsa_area, _dp: dsa_pointer) {
+    crate::utils::mmgr::dsa::dsa_free(_area as _, _dp as _)
+}
 #[inline]
-unsafe fn dsa_get_address(_area: *mut dsa_area, _dp: dsa_pointer) -> *mut c_void { /* TODO(pg-port) */ null_mut() }
+unsafe fn dsa_get_address(_area: *mut dsa_area, _dp: dsa_pointer) -> *mut c_void {
+    crate::utils::mmgr::dsa::dsa_get_address(_area as _, _dp as _) as _
+}
 const InvalidDsaPointer: dsa_pointer = 0;
 #[inline]
 fn DsaPointerIsValid(p: dsa_pointer) -> bool { p != InvalidDsaPointer }
@@ -210,25 +238,39 @@ const SHARED_TUPLESTORE_SINGLE_PASS: c_int = 0;
 unsafe fn sts_initialize(
     _sts: *mut SharedTuplestore, _npart: c_int, _mymember: c_int,
     _keysize: usize, _flags: c_int, _fileset: *mut SharedFileSet, _name: *const c_char,
-) -> *mut SharedTuplestoreAccessor { /* TODO(pg-port) */ null_mut() }
+) -> *mut SharedTuplestoreAccessor {
+    crate::utils::sort::sharedtuplestore::sts_initialize(_sts as _, _npart as _, _mymember as _, _keysize as _, _flags as _, _fileset as _, _name as _) as _
+}
 #[inline]
 unsafe fn sts_attach(
     _sts: *mut SharedTuplestore, _mymember: c_int, _fileset: *mut SharedFileSet,
-) -> *mut SharedTuplestoreAccessor { /* TODO(pg-port) */ null_mut() }
+) -> *mut SharedTuplestoreAccessor {
+    crate::utils::sort::sharedtuplestore::sts_attach(_sts as _, _mymember as _, _fileset as _) as _
+}
 #[inline]
-unsafe fn sts_begin_parallel_scan(_acc: *mut SharedTuplestoreAccessor) { /* TODO(pg-port) */ }
+unsafe fn sts_begin_parallel_scan(_acc: *mut SharedTuplestoreAccessor) {
+    crate::utils::sort::sharedtuplestore::sts_begin_parallel_scan(_acc as _)
+}
 #[inline]
-unsafe fn sts_end_parallel_scan(_acc: *mut SharedTuplestoreAccessor) { /* TODO(pg-port) */ }
+unsafe fn sts_end_parallel_scan(_acc: *mut SharedTuplestoreAccessor) {
+    crate::utils::sort::sharedtuplestore::sts_end_parallel_scan(_acc as _)
+}
 #[inline]
-unsafe fn sts_end_write(_acc: *mut SharedTuplestoreAccessor) { /* TODO(pg-port) */ }
+unsafe fn sts_end_write(_acc: *mut SharedTuplestoreAccessor) {
+    crate::utils::sort::sharedtuplestore::sts_end_write(_acc as _)
+}
 #[inline]
 unsafe fn sts_puttuple(
     _acc: *mut SharedTuplestoreAccessor, _meta: *const c_void, _tuple: MinimalTuple,
-) { /* TODO(pg-port) */ }
+) {
+    crate::utils::sort::sharedtuplestore::sts_puttuple(_acc as _, _meta as _, _tuple as _)
+}
 #[inline]
 unsafe fn sts_parallel_scan_next(
     _acc: *mut SharedTuplestoreAccessor, _hashvalue: *mut uint32,
-) -> MinimalTuple { /* TODO(pg-port) */ null_mut() }
+) -> MinimalTuple {
+    crate::utils::sort::sharedtuplestore::sts_parallel_scan_next(_acc as _, _hashvalue as _) as _
+}
 
 // TODO(pg-port): catalog/pg_statistic.h / utils/lsyscache.h stubs
 #[repr(C)]
@@ -244,9 +286,13 @@ const ATTSTATSSLOT_NUMBERS: c_int = 0x02;
 unsafe fn get_attstatsslot(
     _sslot: *mut AttStatsSlot, _tuple: *mut crate::access::htup_details::HeapTupleData,
     _kind: c_int, _collid: Oid, _flags: c_int,
-) -> bool { /* TODO(pg-port) */ false }
+) -> bool {
+    crate::utils::cache::lsyscache::get_attstatsslot(_sslot as _, _tuple as _, _kind as _, _collid as _, _flags as _) as _
+}
 #[inline]
-unsafe fn free_attstatsslot(_sslot: *mut AttStatsSlot) { /* TODO(pg-port) */ }
+unsafe fn free_attstatsslot(_sslot: *mut AttStatsSlot) {
+    crate::utils::cache::lsyscache::free_attstatsslot(_sslot as _)
+}
 
 // TODO(pg-port): utils/syscache.h stubs for SearchSysCache3 / ReleaseSysCache
 #[inline]
@@ -273,44 +319,60 @@ unsafe fn ObjectIdGetDatum(v: Oid) -> Datum { v as Datum }
 #[inline]
 unsafe fn FunctionCall1Coll(
     _fn: *mut FmgrInfo, _collation: Oid, _arg1: Datum,
-) -> Datum { /* TODO(pg-port) */ 0 }
+) -> Datum {
+    crate::utils::fmgr::FunctionCall1Coll(_fn as _, _collation as _, _arg1 as _) as _
+}
 
 // TODO(pg-port): access/htup_details.h match-flag helpers
 #[inline]
-unsafe fn HeapTupleHeaderClearMatch(t: MinimalTuple) { /* TODO(pg-port) */ }
+unsafe fn HeapTupleHeaderClearMatch(t: MinimalTuple) {
+    crate::access::htup_details::HeapTupleHeaderClearMatch(t as _)
+}
 #[inline]
-unsafe fn HeapTupleHeaderHasMatch(t: MinimalTuple) -> bool { /* TODO(pg-port) */ false }
+unsafe fn HeapTupleHeaderHasMatch(t: MinimalTuple) -> bool {
+    crate::access::htup_details::HeapTupleHeaderHasMatch(t as _) as _
+}
 
 // TODO(pg-port): storage/buffile.h
 #[inline]
-unsafe fn BufFileClose(_f: *mut BufFile) { /* TODO(pg-port) */ }
+unsafe fn BufFileClose(_f: *mut BufFile) {
+    crate::storage::file::buffile::BufFileClose(_f as _)
+}
 
 // TODO(pg-port): commands/tablespace.h
 #[inline]
-unsafe fn PrepareTempTablespaces() { /* TODO(pg-port) */ }
+unsafe fn PrepareTempTablespaces() {
+    crate::commands::tablespace::PrepareTempTablespaces()
+}
 
 // TODO(pg-port): executor/nodeHashjoin.h
 #[inline]
 unsafe fn ExecHashJoinSaveTuple(
     _tuple: MinimalTuple, _hashvalue: uint32,
     _fileptr: *mut *mut BufFile, _hashtable: HashJoinTable,
-) { /* TODO(pg-port) */ }
+) {
+    crate::executor::nodeHashjoin::ExecHashJoinSaveTuple(_tuple as _, _hashvalue as _, _fileptr as _, _hashtable as _)
+}
 
 // TODO(pg-port): access/htup_details.h heap_free_minimal_tuple
 #[inline]
-unsafe fn heap_free_minimal_tuple(_t: MinimalTuple) { /* TODO(pg-port) */ }
+unsafe fn heap_free_minimal_tuple(_t: MinimalTuple) {
+    crate::access::common::heaptuple::heap_free_minimal_tuple(_t as _)
+}
 
 // TODO(pg-port): ExecQualAndReset (executor/executor.h)
 #[inline]
 unsafe fn ExecQualAndReset(_clauses: *mut ExprState, _econtext: *mut ExprContext) -> bool {
-    /* TODO(pg-port) */ false
+    crate::executor::executor::ExecQualAndReset(_clauses as _, _econtext as _) as _
 }
 // TODO(pg-port): ResetExprContext
 #[inline]
 unsafe fn ResetExprContext(_econtext: *mut ExprContext) { /* TODO(pg-port) */ }
 // TODO(pg-port): outerPlan / outerPlanState macros
 #[inline]
-unsafe fn outerPlan(node: *mut Hash) -> *mut Plan { /* TODO(pg-port) */ null_mut() }
+unsafe fn outerPlan(node: *mut Hash) -> *mut Plan {
+    crate::nodes::plannodes::outerPlan(node as _) as _
+}
 #[inline]
 unsafe fn outerPlanState(node: *mut HashState) -> *mut PlanState {
     use crate::nodes::execnodes::outerPlanState as _outerPlanState;

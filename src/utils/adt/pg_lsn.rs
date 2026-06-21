@@ -56,6 +56,7 @@ pub unsafe fn DatumGetLSN(x: Datum) -> XLogRecPtr {
     DatumGetUInt64(x)
 }
 #[inline]
+#[no_mangle]
 pub fn LSNGetDatum(x: XLogRecPtr) -> Datum {
     UInt64GetDatum(x)
 }

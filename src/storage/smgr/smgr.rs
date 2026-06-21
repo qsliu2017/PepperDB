@@ -202,28 +202,28 @@ const PGAIO_TID_SMGR: c_int = 0;
 
 // TODO(pg-port): real pgaio_io_* helpers live in storage/aio.c (storage/aio.h).
 unsafe fn pgaio_io_get_target_data(_ioh: *mut PgAioHandle) -> *mut PgAioTargetData {
-    unimplemented!("pgaio_io_get_target_data not yet ported")
+    crate::storage::aio::aio_target::pgaio_io_get_target_data(_ioh as _) as _
 }
 unsafe fn pgaio_io_get_op_data(_ioh: *mut PgAioHandle) -> *mut PgAioOpData {
-    unimplemented!("pgaio_io_get_op_data not yet ported")
+    crate::storage::aio::aio_io::pgaio_io_get_op_data(_ioh as _) as _
 }
 unsafe fn pgaio_io_set_target(_ioh: *mut PgAioHandle, _targetid: c_int) {
     unimplemented!("pgaio_io_set_target not yet ported")
 }
 unsafe fn pgaio_io_get_owner(_ioh: *mut PgAioHandle) -> ProcNumber {
-    unimplemented!("pgaio_io_get_owner not yet ported")
+    crate::storage::aio::aio::pgaio_io_get_owner(_ioh as _) as _
 }
 unsafe fn pgaio_io_get_op(_ioh: *mut PgAioHandle) -> c_int {
-    unimplemented!("pgaio_io_get_op not yet ported")
+    crate::storage::aio::aio_io::pgaio_io_get_op(_ioh as _) as _
 }
 
 // TODO(pg-port): real buffer-manager helpers live in storage/buffer/bufmgr.c
 // (storage/bufmgr.h).
 unsafe fn FlushRelationsAllBuffers(_smgrs: *mut SMgrRelation, _nrels: c_int) {
-    unimplemented!("FlushRelationsAllBuffers not yet ported")
+    crate::storage::buffer::bufmgr::FlushRelationsAllBuffers(_smgrs as _, _nrels)
 }
 unsafe fn DropRelationsAllBuffers(_smgr_reln: *mut SMgrRelation, _nlocators: c_int) {
-    unimplemented!("DropRelationsAllBuffers not yet ported")
+    crate::storage::buffer::bufmgr::DropRelationsAllBuffers(_smgr_reln as _, _nlocators)
 }
 unsafe fn DropRelationBuffers(
     _smgr_reln: SMgrRelation,
@@ -231,74 +231,52 @@ unsafe fn DropRelationBuffers(
     _nforks: c_int,
     _firstdelblock: *mut BlockNumber,
 ) {
-    unimplemented!("DropRelationBuffers not yet ported")
+    crate::storage::buffer::bufmgr::DropRelationBuffers(_smgr_reln as _, _forknum as _, _nforks, _firstdelblock as _)
 }
 
 // TODO(pg-port): real CacheInvalidateSmgr lives in utils/cache/inval.c
 // (utils/inval.h).
 unsafe fn CacheInvalidateSmgr(_rlocator: RelFileLocatorBackend) {
-    unimplemented!("CacheInvalidateSmgr not yet ported")
+    crate::utils::cache::inval::CacheInvalidateSmgr(_rlocator)
 }
 
 // TODO(pg-port): the smgrsw[] dispatch table references md.c functions.  md.c
 // is not yet ported, so these are local stubs that unimplemented!().  Real
 // implementations live in storage/smgr/md.c (storage/md.h).
-unsafe fn mdinit() {
-    unimplemented!("mdinit not yet ported")
-}
-unsafe fn mdopen(_reln: SMgrRelation) {
-    unimplemented!("mdopen not yet ported")
-}
-unsafe fn mdclose(_reln: SMgrRelation, _forknum: ForkNumber) {
-    unimplemented!("mdclose not yet ported")
-}
-unsafe fn mdcreate(_reln: SMgrRelation, _forknum: ForkNumber, _isRedo: bool) {
-    unimplemented!("mdcreate not yet ported")
-}
-unsafe fn mdexists(_reln: SMgrRelation, _forknum: ForkNumber) -> bool {
-    unimplemented!("mdexists not yet ported")
-}
-unsafe fn mdunlink(_rlocator: RelFileLocatorBackend, _forknum: ForkNumber, _isRedo: bool) {
-    unimplemented!("mdunlink not yet ported")
-}
+unsafe fn mdinit() { crate::storage::smgr::md::mdinit() }
+unsafe fn mdopen(_reln: SMgrRelation) { crate::storage::smgr::md::mdopen(_reln) }
+unsafe fn mdclose(_reln: SMgrRelation, _forknum: ForkNumber) { crate::storage::smgr::md::mdclose(_reln, _forknum) }
+unsafe fn mdcreate(_reln: SMgrRelation, _forknum: ForkNumber, _isRedo: bool) { crate::storage::smgr::md::mdcreate(_reln, _forknum, _isRedo) }
+unsafe fn mdexists(_reln: SMgrRelation, _forknum: ForkNumber) -> bool { crate::storage::smgr::md::mdexists(_reln, _forknum) }
+unsafe fn mdunlink(_rlocator: RelFileLocatorBackend, _forknum: ForkNumber, _isRedo: bool) { crate::storage::smgr::md::mdunlink(_rlocator, _forknum, _isRedo) }
 unsafe fn mdextend(
     _reln: SMgrRelation,
     _forknum: ForkNumber,
     _blocknum: BlockNumber,
     _buffer: *const c_void,
     _skipFsync: bool,
-) {
-    unimplemented!("mdextend not yet ported")
-}
+) { crate::storage::smgr::md::mdextend(_reln, _forknum, _blocknum, _buffer, _skipFsync) }
 unsafe fn mdzeroextend(
     _reln: SMgrRelation,
     _forknum: ForkNumber,
     _blocknum: BlockNumber,
     _nblocks: c_int,
     _skipFsync: bool,
-) {
-    unimplemented!("mdzeroextend not yet ported")
-}
+) { crate::storage::smgr::md::mdzeroextend(_reln, _forknum, _blocknum, _nblocks, _skipFsync) }
 unsafe fn mdprefetch(
     _reln: SMgrRelation,
     _forknum: ForkNumber,
     _blocknum: BlockNumber,
     _nblocks: c_int,
-) -> bool {
-    unimplemented!("mdprefetch not yet ported")
-}
-unsafe fn mdmaxcombine(_reln: SMgrRelation, _forknum: ForkNumber, _blocknum: BlockNumber) -> uint32 {
-    unimplemented!("mdmaxcombine not yet ported")
-}
+) -> bool { crate::storage::smgr::md::mdprefetch(_reln, _forknum, _blocknum, _nblocks) }
+unsafe fn mdmaxcombine(_reln: SMgrRelation, _forknum: ForkNumber, _blocknum: BlockNumber) -> uint32 { crate::storage::smgr::md::mdmaxcombine(_reln, _forknum, _blocknum) }
 unsafe fn mdreadv(
     _reln: SMgrRelation,
     _forknum: ForkNumber,
     _blocknum: BlockNumber,
     _buffers: *mut *mut c_void,
     _nblocks: BlockNumber,
-) {
-    unimplemented!("mdreadv not yet ported")
-}
+) { crate::storage::smgr::md::mdreadv(_reln, _forknum, _blocknum, _buffers, _nblocks) }
 unsafe fn mdstartreadv(
     _ioh: *mut PgAioHandle,
     _reln: SMgrRelation,
@@ -306,9 +284,7 @@ unsafe fn mdstartreadv(
     _blocknum: BlockNumber,
     _buffers: *mut *mut c_void,
     _nblocks: BlockNumber,
-) {
-    unimplemented!("mdstartreadv not yet ported")
-}
+) { crate::storage::smgr::md::mdstartreadv(_ioh as _, _reln, _forknum, _blocknum, _buffers, _nblocks) }
 unsafe fn mdwritev(
     _reln: SMgrRelation,
     _forknum: ForkNumber,
@@ -316,42 +292,28 @@ unsafe fn mdwritev(
     _buffers: *mut *const c_void,
     _nblocks: BlockNumber,
     _skipFsync: bool,
-) {
-    unimplemented!("mdwritev not yet ported")
-}
+) { crate::storage::smgr::md::mdwritev(_reln, _forknum, _blocknum, _buffers, _nblocks, _skipFsync) }
 unsafe fn mdwriteback(
     _reln: SMgrRelation,
     _forknum: ForkNumber,
     _blocknum: BlockNumber,
     _nblocks: BlockNumber,
-) {
-    unimplemented!("mdwriteback not yet ported")
-}
-unsafe fn mdnblocks(_reln: SMgrRelation, _forknum: ForkNumber) -> BlockNumber {
-    unimplemented!("mdnblocks not yet ported")
-}
+) { crate::storage::smgr::md::mdwriteback(_reln, _forknum, _blocknum, _nblocks) }
+unsafe fn mdnblocks(_reln: SMgrRelation, _forknum: ForkNumber) -> BlockNumber { crate::storage::smgr::md::mdnblocks(_reln, _forknum) }
 unsafe fn mdtruncate(
     _reln: SMgrRelation,
     _forknum: ForkNumber,
     _old_blocks: BlockNumber,
     _nblocks: BlockNumber,
-) {
-    unimplemented!("mdtruncate not yet ported")
-}
-unsafe fn mdimmedsync(_reln: SMgrRelation, _forknum: ForkNumber) {
-    unimplemented!("mdimmedsync not yet ported")
-}
-unsafe fn mdregistersync(_reln: SMgrRelation, _forknum: ForkNumber) {
-    unimplemented!("mdregistersync not yet ported")
-}
+) { crate::storage::smgr::md::mdtruncate(_reln, _forknum, _old_blocks, _nblocks) }
+unsafe fn mdimmedsync(_reln: SMgrRelation, _forknum: ForkNumber) { crate::storage::smgr::md::mdimmedsync(_reln, _forknum) }
+unsafe fn mdregistersync(_reln: SMgrRelation, _forknum: ForkNumber) { crate::storage::smgr::md::mdregistersync(_reln, _forknum) }
 unsafe fn mdfd(
     _reln: SMgrRelation,
     _forknum: ForkNumber,
     _blocknum: BlockNumber,
     _off: *mut uint32,
-) -> c_int {
-    unimplemented!("mdfd not yet ported")
-}
+) -> c_int { crate::storage::smgr::md::mdfd(_reln, _forknum, _blocknum, _off) }
 
 // ----------------------------------------------------------------------------
 // smgr.h declarations (merged in, as Rust has no headers)

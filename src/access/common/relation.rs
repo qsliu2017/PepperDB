@@ -34,7 +34,7 @@ const MAX_LOCKMODES: c_int = 10;
 
 /// storage/syscache.h: syscache id for pg_class indexed by OID.
 // TODO(pg-port): replace with the real RELOID constant once syscache.h is ported.
-const RELOID: c_int = 0;
+const RELOID: c_int = 57;
 
 /// access/xact.h: XACT_FLAGS_ACCESSEDTEMPNAMESPACE bit.
 const XACT_FLAGS_ACCESSEDTEMPNAMESPACE: c_int = 1 << 0;
@@ -46,19 +46,19 @@ static mut MyXactFlags: c_int = 0;
 /// STUB: storage/lmgr.h LockRelationOid.
 // TODO(pg-port): storage/lmgr.c not ported.
 unsafe fn LockRelationOid(_relid: Oid, _lockmode: LOCKMODE) {
-    unimplemented!("TODO(pg-port): LockRelationOid (storage/lmgr.c not ported)")
+    crate::storage::lmgr::lmgr::LockRelationOid(_relid, _lockmode)
 }
 
 /// STUB: storage/lmgr.h UnlockRelationOid.
 // TODO(pg-port): storage/lmgr.c not ported.
 unsafe fn UnlockRelationOid(_relid: Oid, _lockmode: LOCKMODE) {
-    unimplemented!("TODO(pg-port): UnlockRelationOid (storage/lmgr.c not ported)")
+    crate::storage::lmgr::lmgr::UnlockRelationOid(_relid, _lockmode)
 }
 
 /// STUB: storage/lmgr.h UnlockRelationId.
 // TODO(pg-port): storage/lmgr.c not ported.
 unsafe fn UnlockRelationId(_relid: *mut LockRelId, _lockmode: LOCKMODE) {
-    unimplemented!("TODO(pg-port): UnlockRelationId (storage/lmgr.c not ported)")
+    crate::storage::lmgr::lmgr::UnlockRelationId(_relid as _, _lockmode)
 }
 
 /// STUB: storage/lmgr.h CheckRelationLockedByMe.
@@ -68,25 +68,25 @@ unsafe fn CheckRelationLockedByMe(
     _lockmode: LOCKMODE,
     _orstronger: bool,
 ) -> bool {
-    unimplemented!("TODO(pg-port): CheckRelationLockedByMe (storage/lmgr.c not ported)")
+    crate::storage::lmgr::lmgr::CheckRelationLockedByMe(_relation as _, _lockmode, _orstronger)
 }
 
 /// STUB: utils/relcache.h RelationIdGetRelation.
 // TODO(pg-port): utils/cache/relcache.c not ported.
 unsafe fn RelationIdGetRelation(_relation_id: Oid) -> Relation {
-    unimplemented!("TODO(pg-port): RelationIdGetRelation (utils/cache/relcache.c not ported)")
+    crate::utils::cache::relcache::RelationIdGetRelation(_relation_id) as _
 }
 
 /// STUB: utils/relcache.h RelationClose.
 // TODO(pg-port): utils/cache/relcache.c not ported.
 unsafe fn RelationClose(_relation: Relation) {
-    unimplemented!("TODO(pg-port): RelationClose (utils/cache/relcache.c not ported)")
+    crate::utils::cache::relcache::RelationClose(_relation as _)
 }
 
 /// STUB: utils/rel.h RelationUsesLocalBuffers.
 // TODO(pg-port): real macro inspects relation->rd_rel->relpersistence == TEMP.
 unsafe fn RelationUsesLocalBuffers(_relation: Relation) -> bool {
-    unimplemented!("TODO(pg-port): RelationUsesLocalBuffers (utils/rel.h not ported)")
+    false // non-temp catalogs do not use local buffers
 }
 
 /// STUB: catalog/namespace.h RangeVarGetRelid.
@@ -96,20 +96,18 @@ unsafe fn RangeVarGetRelid(
     _lockmode: LOCKMODE,
     _missing_ok: bool,
 ) -> Oid {
-    unimplemented!("TODO(pg-port): RangeVarGetRelid (catalog/namespace.c not ported)")
+    crate::catalog::namespace::RangeVarGetRelid(_relation as _, _lockmode, _missing_ok)
 }
 
 /// STUB: storage/sinval.h AcceptInvalidationMessages.
 // TODO(pg-port): storage/ipc/sinval.c not ported.
 unsafe fn AcceptInvalidationMessages() {
-    unimplemented!("TODO(pg-port): AcceptInvalidationMessages (storage/ipc/sinval.c not ported)")
+    crate::utils::cache::inval::AcceptInvalidationMessages()
 }
 
 /// STUB: utils/syscache.h SearchSysCacheExists1.
 // TODO(pg-port): utils/cache/syscache.c not ported.
-unsafe fn SearchSysCacheExists1(_cache_id: c_int, _key1: Datum) -> bool {
-    unimplemented!("TODO(pg-port): SearchSysCacheExists1 (utils/cache/syscache.c not ported)")
-}
+unsafe fn SearchSysCacheExists1(_cache_id: c_int, _key1: Datum) -> bool { crate::utils::cache::syscache::SearchSysCacheExists1(_cache_id, _key1) }
 
 // ----------------------------------------------------------------------------
 // relation_open - open any relation by relation OID

@@ -109,7 +109,7 @@ const RELKIND_SEQUENCE: c_char = b'S' as c_char;
 
 // syscache id (utils/syscache.h)
 // TODO(pg-port): replace with generated syscache enum.
-const TYPEOID: c_int = 0;
+const TYPEOID: c_int = 82;
 
 /// Test if an object is required for basic database functionality.
 ///
@@ -1470,79 +1470,68 @@ unsafe fn libc_strcmp(a: *const c_char, b: *const c_char) -> c_int {
     }
 }
 
-// TODO(pg-port): executor/tuptable.h slot ops vtable; not yet ported.
-extern "C" {
-    static TTSOpsHeapTuple: c_void;
-}
+use crate::executor::execTuples::TTSOpsHeapTuple;
 
-// TODO(pg-port): executor/execTuples.c MakeSingleTupleTableSlot
 unsafe fn MakeSingleTupleTableSlot(
-    _tupdesc: crate::access::common::tupdesc::TupleDesc,
-    _tts_ops: *const c_void,
+    tupdesc: crate::access::common::tupdesc::TupleDesc,
+    tts_ops: *const crate::executor::tuptable::TupleTableSlotOps,
 ) -> *mut TupleTableSlot {
-    unimplemented!()
+    crate::executor::execTuples::MakeSingleTupleTableSlot(tupdesc as _, tts_ops) as _
 }
-// TODO(pg-port): executor/execTuples.c ExecDropSingleTupleTableSlot
-unsafe fn ExecDropSingleTupleTableSlot(_slot: *mut TupleTableSlot) {}
-// TODO(pg-port): executor/execTuples.c ExecClearTuple
-unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    null_mut()
+unsafe fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot) {
+    crate::executor::execTuples::ExecDropSingleTupleTableSlot(slot as _)
 }
-// TODO(pg-port): executor/execTuples.c ExecStoreVirtualTuple
-unsafe fn ExecStoreVirtualTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    null_mut()
+unsafe fn ExecClearTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
+    crate::executor::tuptable::ExecClearTuple(slot as _) as _
 }
-// TODO(pg-port): utils/rel.h RelationGetDescr
-unsafe fn RelationGetDescr(_relation: Relation) -> crate::access::common::tupdesc::TupleDesc {
-    unimplemented!()
+unsafe fn ExecStoreVirtualTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
+    crate::executor::execTuples::ExecStoreVirtualTuple(slot as _) as _
 }
-// TODO(pg-port): utils/rel.h RelationGetRelid
-unsafe fn RelationGetRelid(_relation: Relation) -> Oid {
-    unimplemented!()
+unsafe fn RelationGetDescr(relation: Relation) -> crate::access::common::tupdesc::TupleDesc {
+    crate::utils::rel::RelationGetDescr(relation as _) as _
 }
-// TODO(pg-port): utils/rel.h RelationGetForm
+unsafe fn RelationGetRelid(relation: Relation) -> Oid {
+    crate::utils::rel::RelationGetRelid(relation as _)
+}
 unsafe fn RelationGetForm(
-    _relation: Relation,
+    relation: Relation,
 ) -> *mut crate::catalog::pg_class::FormData_pg_class {
-    unimplemented!()
+    crate::utils::rel::RelationGetForm(relation as _) as _
 }
-// TODO(pg-port): access/htup.h heap_copytuple
-unsafe fn heap_copytuple(_tuple: HeapTuple) -> HeapTuple {
-    unimplemented!()
+unsafe fn heap_copytuple(tuple: HeapTuple) -> HeapTuple {
+    crate::access::common::heaptuple::heap_copytuple(tuple as _) as _
 }
-// TODO(pg-port): access/htup.h heap_freetuple
-unsafe fn heap_freetuple(_htup: HeapTuple) {}
-// TODO(pg-port): catalog/indexing.c CatalogTupleDelete
+unsafe fn heap_freetuple(htup: HeapTuple) {
+    crate::access::common::heaptuple::heap_freetuple(htup as _)
+}
 unsafe fn CatalogTupleDelete(
-    _heapRel: Relation,
-    _tid: *mut crate::storage::itemptr::ItemPointerData,
+    heapRel: Relation,
+    tid: *mut crate::storage::itemptr::ItemPointerData,
 ) {
+    crate::catalog::indexing::CatalogTupleDelete(heapRel as _, tid as _)
 }
-// TODO(pg-port): catalog/indexing.c CatalogTupleUpdate
 unsafe fn CatalogTupleUpdate(
-    _heapRel: Relation,
-    _otid: *mut crate::storage::itemptr::ItemPointerData,
-    _tup: HeapTuple,
+    heapRel: Relation,
+    otid: *mut crate::storage::itemptr::ItemPointerData,
+    tup: HeapTuple,
 ) {
+    crate::catalog::indexing::CatalogTupleUpdate(heapRel as _, otid as _, tup as _)
 }
-// TODO(pg-port): utils/cache/lsyscache.c get_rel_relkind
-unsafe fn get_rel_relkind(_relid: Oid) -> c_char {
-    unimplemented!()
+unsafe fn get_rel_relkind(relid: Oid) -> c_char {
+    crate::utils::cache::lsyscache::get_rel_relkind(relid)
 }
-// TODO(pg-port): utils/cache/lsyscache.c get_attname
-unsafe fn get_attname(_relid: Oid, _attnum: AttrNumber, _missing_ok: bool) -> *const c_char {
-    unimplemented!()
+unsafe fn get_attname(relid: Oid, attnum: AttrNumber, missing_ok: bool) -> *const c_char {
+    crate::utils::cache::lsyscache::get_attname(relid, attnum, missing_ok)
 }
-// TODO(pg-port): utils/cache/lsyscache.c get_attnum
-unsafe fn get_attnum(_relid: Oid, _attname: *const c_char) -> AttrNumber {
-    unimplemented!()
+unsafe fn get_attnum(relid: Oid, attname: *const c_char) -> AttrNumber {
+    crate::utils::cache::lsyscache::get_attnum(relid, attname)
 }
-// TODO(pg-port): utils/cache/syscache.c SearchSysCache1
-unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!()
+unsafe fn SearchSysCache1(cacheId: c_int, key1: Datum) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCache1(cacheId, key1) as _
 }
-// TODO(pg-port): utils/cache/syscache.c ReleaseSysCache
-unsafe fn ReleaseSysCache(_tuple: HeapTuple) {}
+unsafe fn ReleaseSysCache(tuple: HeapTuple) {
+    crate::utils::cache::syscache::ReleaseSysCache(tuple as _)
+}
 // access/attnum.h
 const InvalidAttrNumber: AttrNumber = 0;
 

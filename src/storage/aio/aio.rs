@@ -180,6 +180,7 @@ const PGAIO_TID_INVALID_LOCAL: PgAioTargetID = 0;
  * NOTE: io_uring is Linux-only; it is not included on this Darwin port.
  * The table below mirrors the C array but omits the io_uring entry.
  */
+#[no_mangle]
 pub static io_method_options: [config_enum_entry; 3] = [
     config_enum_entry {
         name: b"sync\0".as_ptr() as *const c_char,

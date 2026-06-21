@@ -90,15 +90,15 @@ pub unsafe fn CleanQuerytext(
     location: *mut c_int,
     len: *mut c_int,
 ) -> *const std::ffi::c_char {
-    unimplemented!()
+    crate::nodes::queryjumblefuncs::CleanQuerytext(query, location, len)
 }
 
 pub unsafe fn JumbleQuery(query: *mut Query) -> *mut JumbleState {
-    unimplemented!()
+    crate::nodes::queryjumblefuncs::JumbleQuery(query as _) as _
 }
 
 pub unsafe fn EnableQueryId() {
-    unimplemented!()
+    crate::nodes::queryjumblefuncs::EnableQueryId()
 }
 
 /*

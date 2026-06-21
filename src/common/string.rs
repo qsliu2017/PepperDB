@@ -149,6 +149,7 @@ pub unsafe fn pg_str_endswith(str: *const c_char, end: *const c_char) -> bool {
  * original (libc `strtol` may set it, and we additionally set ERANGE on int
  * overflow).
  */
+#[no_mangle]
 pub unsafe fn strtoint(str: *const c_char, endptr: *mut *mut c_char, base: c_int) -> c_int {
     let val: c_long;
 

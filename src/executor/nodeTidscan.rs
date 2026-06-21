@@ -56,7 +56,7 @@ const TIDOID: Oid = 27;
 // ----------------------------------------------------------------
 
 unsafe fn is_opclause(_clause: *const c_void) -> bool {
-    unimplemented!() // TODO: nodes/nodeFuncs.h
+    crate::optimizer::util::clauses::is_opclause(_clause as _) as _
 }
 
 unsafe fn get_leftop(_clause: *const Expr) -> *mut Node {
@@ -68,7 +68,7 @@ unsafe fn get_rightop(_clause: *const Expr) -> *mut Node {
 }
 
 unsafe fn ExecInitExpr(_node: *mut Expr, _parent: *mut PlanState) -> *mut ExprState {
-    unimplemented!() // TODO: executor/execExpr.c
+    crate::executor::execExpr::ExecInitExpr(_node as _, _parent as _) as _
 }
 
 unsafe fn ExecEvalExprSwitchContext(
@@ -76,7 +76,7 @@ unsafe fn ExecEvalExprSwitchContext(
     _econtext: *mut ExprContext,
     _isNull: *mut bool,
 ) -> Datum {
-    unimplemented!() // TODO: executor/executor.h
+    crate::executor::executor::ExecEvalExprSwitchContext(_state as _, _econtext as _, _isNull as _) as _
 }
 
 unsafe fn execCurrentOf(
@@ -85,7 +85,7 @@ unsafe fn execCurrentOf(
     _table_oid: Oid,
     _current_tid: *mut ItemPointerData,
 ) -> bool {
-    unimplemented!() // TODO: executor/execCurrent.c
+    crate::executor::execCurrent::execCurrentOf(_cexpr as _, _econtext as _, _table_oid as _, _current_tid as _) as _
 }
 
 unsafe fn DatumGetArrayTypeP(_x: Datum) -> ArrayType {
@@ -107,7 +107,7 @@ unsafe fn table_beginscan_tid(_rel: Relation, _snapshot: Snapshot) -> TableScanD
 }
 
 unsafe fn table_endscan(_scan: TableScanDesc) {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_endscan(_scan as _)
 }
 
 unsafe fn table_rescan(_scan: TableScanDesc, _key: *mut c_void) {
@@ -119,7 +119,7 @@ unsafe fn table_tuple_tid_valid(_scan: TableScanDesc, _tid: ItemPointer) -> bool
 }
 
 unsafe fn table_tuple_get_latest_tid(_scan: TableScanDesc, _tid: ItemPointer) {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_tuple_get_latest_tid(_scan as _, _tid as _)
 }
 
 unsafe fn table_tuple_fetch_row_version(
@@ -132,7 +132,7 @@ unsafe fn table_tuple_fetch_row_version(
 }
 
 unsafe fn table_slot_callbacks(_rel: Relation) -> *const c_void {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_slot_callbacks(_rel as _) as _
 }
 
 unsafe fn RelationGetRelid(_rel: Relation) -> Oid {
@@ -152,11 +152,11 @@ unsafe fn ExecScan(
 }
 
 unsafe fn ExecScanReScan(_node: *mut ScanState) {
-    unimplemented!() // TODO: executor/execScan.c
+    crate::executor::execScan::ExecScanReScan(_node as _)
 }
 
 unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/tuptable.h
+    crate::executor::tuptable::ExecClearTuple(_slot as _) as _
 }
 
 unsafe fn ExecAssignExprContext(_estate: *mut EState, _ps: *mut PlanState) {
@@ -177,19 +177,19 @@ unsafe fn ExecInitScanTupleSlot(
     _tupdesc: *mut c_void,
     _tts_ops: *const c_void,
 ) {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecInitScanTupleSlot(_estate as _, _scanstate as _, _tupdesc as _, _tts_ops as _)
 }
 
 unsafe fn ExecInitResultTypeTL(_ps: *mut PlanState) {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecInitResultTypeTL(_ps as _)
 }
 
 unsafe fn ExecAssignScanProjectionInfo(_node: *mut ScanState) {
-    unimplemented!() // TODO: executor/execScan.c
+    crate::executor::execScan::ExecAssignScanProjectionInfo(_node as _)
 }
 
 unsafe fn ExecInitQual(_qual: *mut List, _parent: *mut PlanState) -> *mut ExprState {
-    unimplemented!() // TODO: executor/execExpr.c
+    crate::executor::execExpr::ExecInitQual(_qual as _, _parent as _) as _
 }
 
 // qunique.h: de-duplicate a pre-sorted array in place, returning the new length.

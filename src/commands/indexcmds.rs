@@ -146,27 +146,30 @@ use crate::access::cmptype::{COMPARE_CONTAINED_BY, COMPARE_EQ, COMPARE_OVERLAP};
 use crate::access::index::amapi::amoptions_function;
 
 /* TODO(pg-port): catalog/indexing.h */
-unsafe fn CatalogTupleUpdate(_rel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData, _tup: HeapTuple) { /* TODO(pg-port) */ }
-unsafe fn CatalogTupleDelete(_rel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData) { /* TODO(pg-port) */ }
+unsafe fn CatalogTupleUpdate(_rel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData, _tup: HeapTuple) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn CatalogTupleDelete(_rel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/index.h */
-unsafe fn index_check_primary_key(_rel: Relation, _indexInfo: *mut IndexInfo, _is_alter_table: bool, _stmt: *mut IndexStmt) { /* TODO(pg-port) */ }
-unsafe fn index_set_state_flags(_indexRelationId: Oid, _flags: bits16) { /* TODO(pg-port) */ }
-unsafe fn index_concurrently_build(_tableId: Oid, _indexRelationId: Oid) { /* TODO(pg-port) */ }
-unsafe fn index_concurrently_create_copy(_heapRel: Relation, _oldIndexId: Oid, _tablespaceOid: Oid, _concurrentName: *const c_char) -> Oid { /* TODO(pg-port) */ InvalidOid }
-unsafe fn index_concurrently_swap(_newIndexId: Oid, _oldIndexId: Oid, _oldName: *const c_char) { /* TODO(pg-port) */ }
-unsafe fn index_concurrently_set_dead(_tableId: Oid, _indexId: Oid) { /* TODO(pg-port) */ }
-unsafe fn validate_index(_tableId: Oid, _indexId: Oid, _snapshot: Snapshot) { /* TODO(pg-port) */ }
+unsafe fn index_check_primary_key(_rel: Relation, _indexInfo: *mut IndexInfo, _is_alter_table: bool, _stmt: *mut IndexStmt) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn index_set_state_flags(_indexRelationId: Oid, _flags: bits16) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn index_concurrently_build(_tableId: Oid, _indexRelationId: Oid) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn index_concurrently_create_copy(_heapRel: Relation, _oldIndexId: Oid, _tablespaceOid: Oid, _concurrentName: *const c_char) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn index_concurrently_swap(_newIndexId: Oid, _oldIndexId: Oid, _oldName: *const c_char) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn index_concurrently_set_dead(_tableId: Oid, _indexId: Oid) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn validate_index(_tableId: Oid, _indexId: Oid, _snapshot: Snapshot) { /* stub no-op (restored: test_setup path) */ }
 unsafe fn makeIndexInfo(
-    _numattrs: c_int, _numkeyattrs: c_int, _amoid: Oid,
-    _expressions: *mut crate::nodes::pg_list::List, _predicate: *mut crate::nodes::pg_list::List,
-    _unique: bool, _nulls_not_distinct: bool,
-    _isready: bool, _concurrent: bool, _summarizing: bool, _iswithoutoverlaps: bool,
+    numattrs: c_int, numkeyattrs: c_int, amoid: Oid,
+    expressions: *mut crate::nodes::pg_list::List, predicate: *mut crate::nodes::pg_list::List,
+    unique: bool, nulls_not_distinct: bool,
+    isready: bool, concurrent: bool, summarizing: bool, iswithoutoverlaps: bool,
 ) -> *mut IndexInfo {
-    /* TODO(pg-port) */ core::ptr::null_mut()
+    crate::nodes::makefuncs::makeIndexInfo(
+        numattrs, numkeyattrs, amoid, expressions as _, predicate as _,
+        unique, nulls_not_distinct, isready, concurrent, summarizing, iswithoutoverlaps,
+    ) as _
 }
-unsafe fn BuildIndexInfo(_indexRel: Relation) -> *mut IndexInfo {
-    /* TODO(pg-port) */ core::ptr::null_mut()
+unsafe fn BuildIndexInfo(indexRel: Relation) -> *mut IndexInfo {
+    crate::catalog::index::BuildIndexInfo(indexRel) as _
 }
 unsafe fn CompareIndexInfo(
     _info1: *mut IndexInfo, _info2: *mut IndexInfo,
@@ -177,28 +180,36 @@ unsafe fn CompareIndexInfo(
 
 /* TODO(pg-port): catalog/index.h: index_create */
 unsafe fn index_create(
-    _heapRelation: Relation,
-    _indexRelationName: *const c_char,
-    _indexRelationId: Oid,
-    _parentIndexRelid: Oid,
-    _parentConstraintId: Oid,
-    _relFileNumber: RelFileNumber,
-    _indexInfo: *mut IndexInfo,
-    _indexColNames: *mut crate::nodes::pg_list::List,
-    _accessMethodObjectId: Oid,
-    _tableSpaceId: Oid,
-    _collationIds: *const Oid,
-    _opclassIds: *const Oid,
-    _opclassOptions: *const Datum,
-    _coloptions: *const int16,
-    _stattargets: *const c_void,
-    _reloptions: Datum,
-    _flags: bits16,
-    _constr_flags: bits16,
-    _allow_system_table_mods: bool,
-    _is_internal: bool,
-    _constraintId: *mut Oid,
-) -> Oid { /* TODO(pg-port) */ InvalidOid }
+    heapRelation: Relation,
+    indexRelationName: *const c_char,
+    indexRelationId: Oid,
+    parentIndexRelid: Oid,
+    parentConstraintId: Oid,
+    relFileNumber: RelFileNumber,
+    indexInfo: *mut IndexInfo,
+    indexColNames: *mut crate::nodes::pg_list::List,
+    accessMethodObjectId: Oid,
+    tableSpaceId: Oid,
+    collationIds: *const Oid,
+    opclassIds: *const Oid,
+    opclassOptions: *const Datum,
+    coloptions: *const int16,
+    stattargets: *const c_void,
+    reloptions: Datum,
+    flags: bits16,
+    constr_flags: bits16,
+    allow_system_table_mods: bool,
+    is_internal: bool,
+    constraintId: *mut Oid,
+) -> Oid {
+    crate::catalog::index::index_create(
+        heapRelation, indexRelationName, indexRelationId, parentIndexRelid,
+        parentConstraintId, relFileNumber, indexInfo as _, indexColNames as _,
+        accessMethodObjectId, tableSpaceId, collationIds, opclassIds, opclassOptions,
+        coloptions, stattargets as _, reloptions, flags, constr_flags,
+        allow_system_table_mods, is_internal, constraintId,
+    )
+}
 
 /* TODO(pg-port): catalog/index.h: reindex_index, reindex_relation */
 unsafe fn reindex_index(
@@ -216,15 +227,15 @@ unsafe fn reindex_relation(
 ) -> bool { /* TODO(pg-port) */ false }
 
 /* TODO(pg-port): catalog/catalog.h */
-unsafe fn IsCatalogRelationOid(_relid: Oid) -> bool { /* TODO(pg-port) */ false }
-unsafe fn IsSystemClass(_relid: Oid, _classtuple: *const c_void) -> bool { /* TODO(pg-port) */ false }
-unsafe fn IsSystemRelation(_rel: Relation) -> bool { /* TODO(pg-port) */ false }
-unsafe fn IsToastNamespace(_ns: Oid) -> bool { /* TODO(pg-port) */ false }
-unsafe fn isTempNamespace(_ns: Oid) -> bool { /* TODO(pg-port) */ false }
+unsafe fn IsCatalogRelationOid(_relid: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn IsSystemClass(_relid: Oid, _classtuple: *const c_void) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn IsSystemRelation(_rel: Relation) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn IsToastNamespace(_ns: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn isTempNamespace(_ns: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/namespace.h */
-unsafe fn DeconstructQualifiedName(_names: *const crate::nodes::pg_list::List, _schemaname: *mut *mut c_char, _objname: *mut *mut c_char) { /* TODO(pg-port) */ }
-unsafe fn LookupExplicitNamespace(_nspname: *const c_char, _missing_ok: bool) -> Oid { /* TODO(pg-port) */ InvalidOid }
+unsafe fn DeconstructQualifiedName(_names: *const crate::nodes::pg_list::List, _schemaname: *mut *mut c_char, _objname: *mut *mut c_char) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn LookupExplicitNamespace(_nspname: *const c_char, _missing_ok: bool) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
 unsafe fn RangeVarGetRelidExtended(
     _relation: *const RangeVar,
     _lockmode: LOCKMODE,
@@ -232,25 +243,25 @@ unsafe fn RangeVarGetRelidExtended(
     _callback: unsafe fn(*const RangeVar, Oid, Oid, *mut c_void),
     _callback_arg: *mut c_void,
 ) -> Oid { /* TODO(pg-port) */ InvalidOid }
-unsafe fn RangeVarCallbackMaintainsTable(_relation: *const RangeVar, _relId: Oid, _oldRelId: Oid, _arg: *mut c_void) { /* TODO(pg-port) */ }
+unsafe fn RangeVarCallbackMaintainsTable(_relation: *const RangeVar, _relId: Oid, _oldRelId: Oid, _arg: *mut c_void) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/pg_inherits.h */
-unsafe fn find_all_inheritors(_relId: Oid, _lockmode: LOCKMODE, _numparents: *mut c_int) -> *mut crate::nodes::pg_list::List { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn has_superclass(_classOid: Oid) -> bool { /* TODO(pg-port) */ false }
-unsafe fn StoreSingleInheritance(_relid: Oid, _parentOid: Oid, _seqNumber: i32) { /* TODO(pg-port) */ }
+unsafe fn find_all_inheritors(_relId: Oid, _lockmode: LOCKMODE, _numparents: *mut c_int) -> *mut crate::nodes::pg_list::List { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn has_superclass(_classOid: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn StoreSingleInheritance(_relid: Oid, _parentOid: Oid, _seqNumber: i32) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/pg_constraint.h */
-unsafe fn ConstraintSetParentConstraint(_constrOid: Oid, _parentConstrOid: Oid, _childRelid: Oid) { /* TODO(pg-port) */ }
-unsafe fn ConstraintNameExists(_name: *const c_char, _namespaceId: Oid) -> bool { /* TODO(pg-port) */ false }
+unsafe fn ConstraintSetParentConstraint(_constrOid: Oid, _parentConstrOid: Oid, _childRelid: Oid) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn ConstraintNameExists(_name: *const c_char, _namespaceId: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/indexing.h */
-unsafe fn SearchSysCacheLockedCopy1(_cacheId: c_int, _key: Datum) -> HeapTuple { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn UnlockTuple(_rel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData, _lockmode: LOCKMODE) { /* TODO(pg-port) */ }
+unsafe fn SearchSysCacheLockedCopy1(_cacheId: c_int, _key: Datum) -> HeapTuple { unimplemented!("STUB SearchSysCacheLockedCopy1") }
+unsafe fn UnlockTuple(_rel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData, _lockmode: LOCKMODE) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/objectaddress.h */
-unsafe fn IndexGetRelation(_indexId: Oid, _missing_ok: bool) -> Oid { /* TODO(pg-port) */ InvalidOid }
-unsafe fn recordDependencyOn(_depender: *const ObjectAddress, _referenced: *const ObjectAddress, _deptype: c_char) { /* TODO(pg-port) */ }
-unsafe fn deleteDependencyRecordsForClass(_classId: Oid, _objectId: Oid, _refClassId: Oid, _deptype: c_char) { /* TODO(pg-port) */ }
+unsafe fn IndexGetRelation(_indexId: Oid, _missing_ok: bool) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn recordDependencyOn(_depender: *const ObjectAddress, _referenced: *const ObjectAddress, _deptype: c_char) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn deleteDependencyRecordsForClass(_classId: Oid, _objectId: Oid, _refClassId: Oid, _deptype: c_char) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): utils/acl.h */
 type AclResult = c_int;
@@ -261,9 +272,9 @@ const ACL_CREATE: AclMode = 1 << 2;
 const ACL_MAINTAIN: AclMode = 1 << 16;
 unsafe fn object_aclcheck(_classid: Oid, _objectid: Oid, _roleid: Oid, _mode: AclMode) -> AclResult { /* TODO(pg-port) */ ACLCHECK_OK }
 unsafe fn pg_class_aclcheck(_tableoid: Oid, _roleid: Oid, _mode: AclMode) -> AclResult { /* TODO(pg-port) */ ACLCHECK_OK }
-unsafe fn object_ownercheck(_classid: Oid, _objectid: Oid, _userid: Oid) -> bool { /* TODO(pg-port) */ true }
-unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool { /* TODO(pg-port) */ false }
-unsafe fn aclcheck_error(_aclerr: AclResult, _objtype: ObjectType, _objectname: *const c_char) { /* TODO(pg-port) */ }
+unsafe fn object_ownercheck(_classid: Oid, _objectid: Oid, _userid: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn aclcheck_error(_aclerr: AclResult, _objtype: ObjectType, _objectname: *const c_char) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/pg_authid.h */
 const ROLE_PG_MAINTAIN: Oid = 4544;
@@ -275,21 +286,21 @@ type Snapshot = *mut SnapshotData;
 type RelFileNumber = crate::nodes::parsenodes::RelFileNumber;
 
 /* TODO(pg-port): utils/lsyscache.h */
-unsafe fn get_opclass_input_type(_opclassOid: Oid) -> Oid { /* TODO(pg-port) */ InvalidOid }
-unsafe fn IsPolymorphicType(_typeId: Oid) -> bool { /* TODO(pg-port) */ false }
-unsafe fn IsBinaryCoercible(_srctype: Oid, _targtype: Oid) -> bool { /* TODO(pg-port) */ false }
-unsafe fn type_is_collatable(_typeId: Oid) -> bool { /* TODO(pg-port) */ false }
+unsafe fn get_opclass_input_type(_opclassOid: Oid) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn IsPolymorphicType(_typeId: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn IsBinaryCoercible(_srctype: Oid, _targtype: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn type_is_collatable(_typeId: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
 unsafe fn TypeCategory(_typeId: Oid) -> c_char { /* TODO(pg-port) */ b'S' as c_char }
 type TYPCATEGORY = c_char;
-unsafe fn IsPreferredType(_category: TYPCATEGORY, _typeId: Oid) -> bool { /* TODO(pg-port) */ false }
+unsafe fn IsPreferredType(_category: TYPCATEGORY, _typeId: Oid) -> bool { false /* stub dummy (restored: test_setup path) */ }
 unsafe fn getBaseType(_typeId: Oid) -> Oid { /* TODO(pg-port) */ _typeId }
-unsafe fn format_type_be(_typeId: Oid) -> *mut c_char { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn format_operator(_opId: Oid) -> *mut c_char { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn get_collation_oid(_name: *mut crate::nodes::pg_list::List, _missing_ok: bool) -> Oid { /* TODO(pg-port) */ InvalidOid }
-unsafe fn NameListToString(_names: *const crate::nodes::pg_list::List) -> *mut c_char { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn get_namespace_oid(_nspname: *const c_char, _missing_ok: bool) -> Oid { /* TODO(pg-port) */ InvalidOid }
-unsafe fn get_tablespace_oid(_spcname: *const c_char, _missing_ok: bool) -> Oid { /* TODO(pg-port) */ InvalidOid }
-unsafe fn get_tablespace_name(_spcoid: Oid) -> *mut c_char { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn format_type_be(_typeId: Oid) -> *mut c_char { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn format_operator(_opId: Oid) -> *mut c_char { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn get_collation_oid(_name: *mut crate::nodes::pg_list::List, _missing_ok: bool) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn NameListToString(_names: *const crate::nodes::pg_list::List) -> *mut c_char { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn get_namespace_oid(_nspname: *const c_char, _missing_ok: bool) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn get_tablespace_oid(_spcname: *const c_char, _missing_ok: bool) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn get_tablespace_name(_spcoid: Oid) -> *mut c_char { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): parser/parse_utilcmd.h */
 unsafe fn generateClonedIndexStmt(
@@ -304,23 +315,25 @@ type Form_pg_am = *mut FormData_pg_am;
 #[repr(C)]
 struct FormData_pg_am {
     pub oid: Oid,
+    pub amname: crate::c::NameData,
     pub amhandler: Oid, /* regproc */
+    pub amtype: c_char,
 }
 
 /* TODO(pg-port): access/amapi.h accessor */
-unsafe fn GetIndexAmRoutine(_amhandler: Oid) -> *mut IndexAmRoutine { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn GetIndexAmRoutine(amhandler: Oid) -> *mut IndexAmRoutine { crate::access::index::amapi::GetIndexAmRoutine(amhandler) }
 
 /* TODO(pg-port): access/tableam.h */
-unsafe fn try_table_open(_relId: Oid, _lockmode: LOCKMODE) -> Relation { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn table_beginscan_catalog(_rel: Relation, _nkeys: c_int, _key: *const ScanKeyData) -> *mut c_void { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn heap_getnext(_scan: *mut c_void, _dir: c_int) -> HeapTuple { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn table_endscan(_scan: *mut c_void) { /* TODO(pg-port) */ }
+unsafe fn try_table_open(_relId: Oid, _lockmode: LOCKMODE) -> Relation { unimplemented!("STUB try_table_open") }
+unsafe fn table_beginscan_catalog(_rel: Relation, _nkeys: c_int, _key: *const ScanKeyData) -> *mut c_void { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn heap_getnext(_scan: *mut c_void, _dir: c_int) -> HeapTuple { unimplemented!("STUB heap_getnext") }
+unsafe fn table_endscan(_scan: *mut c_void) { /* stub no-op (restored: test_setup path) */ }
 
 const ForwardScanDirection: c_int = 1;
 
 /* TODO(pg-port): utils/rel.h tuple desc attr */
-unsafe fn TupleDescAttr(_desc: TupleDesc, _attno: c_int) -> *mut FormData_pg_attribute {
-    /* TODO(pg-port) */ core::ptr::null_mut()
+unsafe fn TupleDescAttr(desc: TupleDesc, attno: c_int) -> *mut FormData_pg_attribute {
+    crate::access::common::tupdesc::TupleDescAttr(desc, attno) as *mut FormData_pg_attribute
 }
 
 /* TODO(pg-port): utils/rel.h partition info */
@@ -341,34 +354,34 @@ struct PartitionDescData {
     pub oids: *mut Oid,
 }
 
-unsafe fn RelationGetPartitionKey_(_rel: Relation) -> PartitionKey { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn RelationGetPartitionDesc_(_rel: Relation, _include_detached: bool) -> PartitionDesc { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn RelationGetIndexList_(_rel: Relation) -> *mut crate::nodes::pg_list::List { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn RelationGetIndexExpressions_(_rel: Relation) -> *mut crate::nodes::pg_list::List { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn RelationGetIndexPredicate_(_rel: Relation) -> *mut crate::nodes::pg_list::List { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn RelationGetExclusionInfo(_rel: Relation, _operators: *mut *mut Oid, _procs: *mut *mut Oid, _strats: *mut *mut uint16) { /* TODO(pg-port) */ }
+unsafe fn RelationGetPartitionKey_(_rel: Relation) -> PartitionKey { unimplemented!("STUB RelationGetPartitionKey_") }
+unsafe fn RelationGetPartitionDesc_(_rel: Relation, _include_detached: bool) -> PartitionDesc { unimplemented!("STUB RelationGetPartitionDesc_") }
+unsafe fn RelationGetIndexList_(_rel: Relation) -> *mut crate::nodes::pg_list::List { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn RelationGetIndexExpressions_(_rel: Relation) -> *mut crate::nodes::pg_list::List { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn RelationGetIndexPredicate_(_rel: Relation) -> *mut crate::nodes::pg_list::List { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn RelationGetExclusionInfo(_rel: Relation, _operators: *mut *mut Oid, _procs: *mut *mut Oid, _strats: *mut *mut uint16) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/pg_attribute.h */
 const ATTRIBUTE_GENERATED_VIRTUAL: c_char = b'v' as c_char;
 
 /* TODO(pg-port): nodes/bitmapset.h */
 type Bitmapset = c_void;
-unsafe fn pull_varattnos(_expr: *mut Node, _varno: c_int, _varattnos: *mut *mut Bitmapset) { /* TODO(pg-port) */ }
-unsafe fn bms_is_member(_x: c_int, _a: *const Bitmapset) -> bool { /* TODO(pg-port) */ false }
+unsafe fn pull_varattnos(_expr: *mut Node, _varno: c_int, _varattnos: *mut *mut Bitmapset) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn bms_is_member(_x: c_int, _a: *const Bitmapset) -> bool { false /* stub dummy (restored: test_setup path) */ }
 unsafe fn bms_next_member(_a: *const Bitmapset, _prevbit: c_int) -> c_int { /* TODO(pg-port) */ -2 }
 
 /* TODO(pg-port): include/access/attnum.h */
 const FirstLowInvalidHeapAttributeNumber: c_int = -8;
 
 /* TODO(pg-port): nodes/makefuncs.h */
-unsafe fn make_ands_implicit(_expr: *mut Expr) -> *mut crate::nodes::pg_list::List { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn make_ands_implicit(_expr: *mut Expr) -> *mut crate::nodes::pg_list::List { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): optimizer/optimizer.h */
-unsafe fn contain_mutable_functions_after_planning(_expr: *mut Expr) -> bool { /* TODO(pg-port) */ false }
+unsafe fn contain_mutable_functions_after_planning(_expr: *mut Expr) -> bool { false /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): nodes/nodeFuncs.h exprType, exprCollation */
-unsafe fn exprType(_expr: *mut Node) -> Oid { /* TODO(pg-port) */ InvalidOid }
-unsafe fn exprCollation(_expr: *mut Node) -> Oid { /* TODO(pg-port) */ InvalidOid }
+unsafe fn exprType(_expr: *mut Node) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn exprCollation(_expr: *mut Node) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): nodes/primnodes.h CollateExpr, Var */
 #[repr(C)]
@@ -393,16 +406,16 @@ macro_rules! IsA_local {
 }
 
 /* TODO(pg-port): utils/rel.h: RELATION_IS_OTHER_TEMP */
-unsafe fn RELATION_IS_OTHER_TEMP(_rel: Relation) -> bool { /* TODO(pg-port) */ false }
+unsafe fn RELATION_IS_OTHER_TEMP(_rel: Relation) -> bool { false /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): miscadmin.h */
 static mut allowSystemTableMods: bool = false;
-unsafe fn IsBootstrapProcessingMode() -> bool { /* TODO(pg-port) */ false }
+unsafe fn IsBootstrapProcessingMode() -> bool { false /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/heap.h */
-unsafe fn CheckTableNotInUse(_rel: Relation, _stmt: *const c_char) { /* TODO(pg-port) */ }
-unsafe fn heap_copytuple(_tup: HeapTuple) -> HeapTuple { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn heap_freetuple(_tup: HeapTuple) { /* TODO(pg-port) */ }
+unsafe fn CheckTableNotInUse(_rel: Relation, _stmt: *const c_char) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn heap_copytuple(_tup: HeapTuple) -> HeapTuple { unimplemented!("STUB heap_copytuple") }
+unsafe fn heap_freetuple(_tup: HeapTuple) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/pg_inherits.h attribute numbers */
 const Anum_pg_inherits_inhrelid: AttrNumber = 1;
@@ -423,15 +436,15 @@ type Form_pg_class = *mut FormData_pg_class;
 /* TODO(pg-port): utils/fmgr.h */
 type FmgrInfo = c_void;
 const F_ARRAY_EQ: Oid = 382;
-unsafe fn fmgr_info(_functionId: Oid, _finfo: *mut FmgrInfo) { /* TODO(pg-port) */ }
-unsafe fn FunctionCall2Coll(_flinfo: *mut FmgrInfo, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Datum { /* TODO(pg-port) */ 0 }
+unsafe fn fmgr_info(_functionId: Oid, _finfo: *mut FmgrInfo) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn FunctionCall2Coll(_flinfo: *mut FmgrInfo, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Datum { 0 /* stub dummy (restored: test_setup path) */ }
 const C_COLLATION_OID: Oid = 950;
 
 /* TODO(pg-port): utils/snapshot.h */
-unsafe fn InitDirtySnapshot(_snapshot: *mut SnapshotData) { /* TODO(pg-port) */ }
+unsafe fn InitDirtySnapshot(_snapshot: *mut SnapshotData) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/namespace.h */
-unsafe fn get_database_name(_dbid: Oid) -> *mut c_char { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn get_database_name(_dbid: Oid) -> *mut c_char { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/pg_opclass.h */
 type Form_pg_opclass = *mut FormData_pg_opclass;
@@ -484,61 +497,63 @@ unsafe fn DatumGetPointer(d: Datum) -> *mut c_void { d as *mut c_void }
 unsafe fn DatumGetBool(d: Datum) -> bool { d != 0 }
 
 /* TODO(pg-port): catalog/indexing.h heap_attisnull */
-unsafe fn heap_attisnull(_tup: HeapTuple, _attno: c_int, _tupDesc: TupleDesc) -> bool { /* TODO(pg-port) */ false }
+unsafe fn heap_attisnull(_tup: HeapTuple, _attno: c_int, _tupDesc: TupleDesc) -> bool { false /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): access/reloptions.h */
-unsafe fn transformRelOptions(_baseOptions: Datum, _defList: *mut crate::nodes::pg_list::List, _namspace: *const c_char, _validnsps: *const *const c_char, _acceptOidsOff: bool, _isReset: bool) -> Datum { /* TODO(pg-port) */ 0 }
-unsafe fn index_reloptions(_amoptions: amoptions_function, _reloptions: Datum, _validate: bool) -> *mut c_void { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn transformRelOptions(_baseOptions: Datum, _defList: *mut crate::nodes::pg_list::List, _namspace: *const c_char, _validnsps: *const *const c_char, _acceptOidsOff: bool, _isReset: bool) -> Datum { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn index_reloptions(_amoptions: amoptions_function, _reloptions: Datum, _validate: bool) -> *mut c_void { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): commands/tablespace.h */
-unsafe fn GetDefaultTablespace(_relpersistence: c_char, _partitioned: bool) -> Oid { /* TODO(pg-port) */ InvalidOid }
+unsafe fn GetDefaultTablespace(_relpersistence: c_char, _partitioned: bool) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): commands/tablecmds.h */
-unsafe fn build_attrmap_by_name(_dst: TupleDesc, _src: TupleDesc, _missing_ok: bool) -> *mut AttrMap { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn free_attrmap(_map: *mut AttrMap) { /* TODO(pg-port) */ }
+unsafe fn build_attrmap_by_name(_dst: TupleDesc, _src: TupleDesc, _missing_ok: bool) -> *mut AttrMap { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn free_attrmap(_map: *mut AttrMap) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): commands/defrem.h */
-unsafe fn defGetBoolean(_def: *const DefElem) -> bool { /* TODO(pg-port) */ false }
-unsafe fn defGetString(_def: *const DefElem) -> *mut c_char { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn defGetBoolean(_def: *const DefElem) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn defGetString(_def: *const DefElem) -> *mut c_char { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): commands/comment.h */
-unsafe fn CreateComments(_objectId: Oid, _classId: Oid, _subId: i32, _comment: *const c_char) { /* TODO(pg-port) */ }
+unsafe fn CreateComments(_objectId: Oid, _classId: Oid, _subId: i32, _comment: *const c_char) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): commands/event_trigger.h */
-unsafe fn EventTriggerCollectSimpleCommand(_address: ObjectAddress, _secondaryObject: ObjectAddress, _parsetree: *mut Node) { /* TODO(pg-port) */ }
+unsafe fn EventTriggerCollectSimpleCommand(_address: ObjectAddress, _secondaryObject: ObjectAddress, _parsetree: *mut Node) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/objectaddress.h */
-unsafe fn op_input_types(_opId: Oid, _lefttype: *mut Oid, _righttype: *mut Oid) { /* TODO(pg-port) */ }
-unsafe fn compatible_oper_opid(_op: *const crate::nodes::pg_list::List, _arg1: Oid, _arg2: Oid, _noError: bool) -> Oid { /* TODO(pg-port) */ InvalidOid }
+unsafe fn op_input_types(_opId: Oid, _lefttype: *mut Oid, _righttype: *mut Oid) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn compatible_oper_opid(_op: *const crate::nodes::pg_list::List, _arg1: Oid, _arg2: Oid, _noError: bool) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): access/index/amapi.h */
-unsafe fn IndexAmTranslateCompareType(_cmptype: CompareType, _amid: Oid, _opfamilyId: Oid, _errorOK: bool) -> StrategyNumber { /* TODO(pg-port) */ 0 }
+unsafe fn IndexAmTranslateCompareType(_cmptype: CompareType, _amid: Oid, _opfamilyId: Oid, _errorOK: bool) -> StrategyNumber { unimplemented!("STUB IndexAmTranslateCompareType") }
 const InvalidStrategy: StrategyNumber = 0;
 
 /* TODO(pg-port): catalog/catalog.h */
-unsafe fn SetRelationHasSubclass(_relid: Oid, _relhassubclass: bool) { /* TODO(pg-port) */ }
+unsafe fn SetRelationHasSubclass(_relid: Oid, _relhassubclass: bool) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): access/partitioning */
 const PARTITION_STRATEGY_HASH: c_char = b'h' as c_char;
 const HTEqualStrategyNumber: StrategyNumber = 1;
 
 /* TODO(pg-port): storage/procarray.h */
-unsafe fn SetInvalidVirtualTransactionId(_vxid: *mut VirtualTransactionId) { /* TODO(pg-port) */ }
-unsafe fn VirtualXactLock(_vxid: VirtualTransactionId, _wait: bool) { /* TODO(pg-port) */ }
+unsafe fn SetInvalidVirtualTransactionId(_vxid: *mut VirtualTransactionId) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn VirtualXactLock(_vxid: VirtualTransactionId, _wait: bool) { /* stub no-op (restored: test_setup path) */ }
 unsafe fn VirtualTransactionIdIsValid(vxid: VirtualTransactionId) -> bool { vxid.localTransactionId != 0 }
 unsafe fn VirtualTransactionIdEquals(a: VirtualTransactionId, b: VirtualTransactionId) -> bool {
     a.procNumber == b.procNumber && a.localTransactionId == b.localTransactionId
 }
 
 /* TODO(pg-port): storage/proc.h ProcNumberGetProc */
-unsafe fn ProcNumberGetProc(_procNumber: crate::storage::ipc::procarray::ProcNumber) -> *mut PGPROC { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn ProcArrayLock() -> *mut LWLock { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn MyProc() -> *mut PGPROC { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn ProcNumberGetProc(_procNumber: crate::storage::ipc::procarray::ProcNumber) -> *mut PGPROC { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn ProcArrayLock() -> *mut LWLock {
+    crate::backend_link_shims::ProcArrayLock as *mut LWLock
+}
+unsafe fn MyProc() -> *mut PGPROC { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): utils/pg_rusage.h */
 #[repr(C)]
 struct PGRUsage { tv: [i64; 4] }
-unsafe fn pg_rusage_init(_ru0: *mut PGRUsage) { /* TODO(pg-port) */ }
+unsafe fn pg_rusage_init(_ru0: *mut PGRUsage) { /* stub no-op (restored: test_setup path) */ }
 unsafe fn pg_rusage_show(_ru0: *const PGRUsage) -> *const c_char { b"\0".as_ptr() as *const c_char }
 
 /* TODO(pg-port): catalog/pg_database.h */
@@ -548,7 +563,7 @@ const GLOBALTABLESPACE_OID: Oid = 1664;
 const DatabaseRelationId: Oid = 1262;
 
 /* TODO(pg-port): utils/builtins.h */
-unsafe fn strlcpy(dst: *mut c_char, src: *const c_char, siz: usize) -> usize { /* TODO(pg-port) */ 0 }
+unsafe fn strlcpy(dst: *mut c_char, src: *const c_char, siz: usize) -> usize { 0 /* stub dummy (restored: test_setup path) */ }
 const NAMEDATALEN: usize = 64;
 
 /* sort order constants imported from nodes/parsenodes */
@@ -574,13 +589,13 @@ unsafe fn RELKIND_HAS_PARTITIONS(relkind: c_char) -> bool {
 unsafe fn pg_mbcliplen(_mbstr: *const c_char, _len: usize, _limit: usize) -> usize { /* TODO(pg-port) */ _limit }
 
 /* TODO(pg-port): catalog/pg_class.h RelFileNumberIsValid */
-unsafe fn RelFileNumberIsValid(_fnum: RelFileNumber) -> bool { /* TODO(pg-port) */ false }
+unsafe fn RelFileNumberIsValid(_fnum: RelFileNumber) -> bool { false /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/dependency.h */
 type ObjectAddresses = c_void;
-unsafe fn new_object_addresses() -> *mut ObjectAddresses { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn add_exact_object_address(_object: *const ObjectAddress, _addrs: *mut ObjectAddresses) { /* TODO(pg-port) */ }
-unsafe fn performMultipleDeletions(_objects: *mut ObjectAddresses, _behavior: c_int, _flags: c_int) { /* TODO(pg-port) */ }
+unsafe fn new_object_addresses() -> *mut ObjectAddresses { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn add_exact_object_address(_object: *const ObjectAddress, _addrs: *mut ObjectAddresses) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn performMultipleDeletions(_objects: *mut ObjectAddresses, _behavior: c_int, _flags: c_int) { /* stub no-op (restored: test_setup path) */ }
 const DROP_RESTRICT: c_int = 0;
 const PERFORM_DELETION_CONCURRENT_LOCK: c_int = 1 << 2;
 const PERFORM_DELETION_INTERNAL: c_int = 1 << 0;
@@ -589,43 +604,42 @@ const PERFORM_DELETION_INTERNAL: c_int = 1 << 0;
 const DEPENDENCY_PARTITION_PRI: c_char = b'P' as c_char;
 const DEPENDENCY_PARTITION_SEC: c_char = b'p' as c_char; /* TODO(pg-port): real value */
 const InplaceUpdateTupleLock: LOCKMODE = ShareLock; /* TODO(pg-port): real value = 3 */
-unsafe fn relation_open(_relid: Oid, _lockmode: LOCKMODE) -> Relation { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn relation_close(_rel: Relation, _lockmode: LOCKMODE) { /* TODO(pg-port) */ }
+unsafe fn relation_open(_relid: Oid, _lockmode: LOCKMODE) -> Relation { unimplemented!("STUB relation_open") }
+unsafe fn relation_close(_rel: Relation, _lockmode: LOCKMODE) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/pg_namespace.h */
 const Anum_pg_opclass_opcmethod: AttrNumber = 2;
 
 /* TODO(pg-port): utils/injection_point.h */
-unsafe fn INJECTION_POINT(_name: *const c_char, _arg: *mut c_void) { /* TODO(pg-port) */ }
+unsafe fn INJECTION_POINT(_name: *const c_char, _arg: *mut c_void) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): utils/builtins.h */
-unsafe fn pstrdup(s: *const c_char) -> *mut c_char { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn pstrdup(s: *const c_char) -> *mut c_char { crate::utils::palloc::pstrdup(s) }
 
 /* TODO(pg-port): xact.h CHECK_FOR_INTERRUPTS */
-unsafe fn CHECK_FOR_INTERRUPTS() { /* TODO(pg-port) */ }
+unsafe fn CHECK_FOR_INTERRUPTS() { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): utils/memutils.h - PortalContext */
 static mut PortalContext: MemoryContext = core::ptr::null_mut();
 
 /* TODO(pg-port): utils/snap.h -- SearchSysCacheAttName */
-unsafe fn SearchSysCacheAttName(_relid: Oid, _attname: *const c_char) -> HeapTuple { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn SearchSysCacheAttName(relid: Oid, attname: *const c_char) -> HeapTuple { crate::utils::cache::syscache::SearchSysCacheAttName(relid, attname) }
 
-/* TODO(pg-port): utils/typcache.h -- ResolveOpClass calls */
 unsafe fn ResolveOpClass(
-    _opclass: *const crate::nodes::pg_list::List,
-    _attrType: Oid,
-    _accessMethodName: *const c_char,
-    _accessMethodId: Oid,
-) -> Oid { /* TODO(pg-port) */ InvalidOid }
+    opclass: *const crate::nodes::pg_list::List,
+    attrType: Oid,
+    accessMethodName: *const c_char,
+    accessMethodId: Oid,
+) -> Oid { ResolveOpClass_full(opclass, attrType, accessMethodName, accessMethodId) }
 
 /* TODO(pg-port): catalog/index.h INDEX_CREATE_SET_VALID */
 const INDEX_CREATE_SET_VALID: bits16 = 0x0020; /* TODO(pg-port) */
 
 /* TODO(pg-port): utils/rel.h CacheInvalidateRelcacheByRelid */
-unsafe fn CacheInvalidateRelcacheByRelid(_relid: Oid) { /* TODO(pg-port) */ }
+unsafe fn CacheInvalidateRelcacheByRelid(_relid: Oid) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): utils/rel.h SET_LOCKTAG_RELATION */
-unsafe fn SET_LOCKTAG_RELATION(tag: *mut LOCKTAG, db_id: Oid, rel_id: Oid) { /* TODO(pg-port) */ }
+unsafe fn SET_LOCKTAG_RELATION(tag: *mut LOCKTAG, db_id: Oid, rel_id: Oid) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/index.h ObjectAddressSet */
 unsafe fn ObjectAddressSet(addr: *mut ObjectAddress, classId: Oid, objectId: Oid) {
@@ -643,24 +657,24 @@ unsafe fn list_length_(_list: *const crate::nodes::pg_list::List) -> c_int {
 }
 
 /* TODO(pg-port): catalog/pg_class.h GETSTRUCT variants */
-unsafe fn GETSTRUCT_pg_am(tup: HeapTuple) -> Form_pg_am { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn GETSTRUCT_pg_index(tup: HeapTuple) -> Form_pg_index { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn GETSTRUCT_pg_opclass(tup: HeapTuple) -> Form_pg_opclass { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn GETSTRUCT_pg_class(tup: HeapTuple) -> Form_pg_class { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn GETSTRUCT_pg_inherits(tup: HeapTuple) -> Form_pg_inherits { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn GETSTRUCT(tup: HeapTuple) -> *mut c_void { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn GETSTRUCT_pg_am(tup: HeapTuple) -> Form_pg_am { GETSTRUCT(tup) as _ }
+unsafe fn GETSTRUCT_pg_index(tup: HeapTuple) -> Form_pg_index { GETSTRUCT(tup) as _ }
+unsafe fn GETSTRUCT_pg_opclass(tup: HeapTuple) -> Form_pg_opclass { GETSTRUCT(tup) as _ }
+unsafe fn GETSTRUCT_pg_class(tup: HeapTuple) -> Form_pg_class { GETSTRUCT(tup) as _ }
+unsafe fn GETSTRUCT_pg_inherits(tup: HeapTuple) -> Form_pg_inherits { GETSTRUCT(tup) as _ }
+unsafe fn GETSTRUCT(tup: HeapTuple) -> *mut c_void { crate::access::htup_details::GETSTRUCT(tup as _) }
 
 /* TODO(pg-port): utils/snapshot.h snapshot stack */
-unsafe fn GetTransactionSnapshot() -> Snapshot { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn PushActiveSnapshot(_snap: Snapshot) { /* TODO(pg-port) */ }
-unsafe fn PopActiveSnapshot() { /* TODO(pg-port) */ }
+unsafe fn GetTransactionSnapshot() -> Snapshot { unimplemented!("STUB GetTransactionSnapshot") }
+unsafe fn PushActiveSnapshot(_snap: Snapshot) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn PopActiveSnapshot() { /* stub no-op (restored: test_setup path) */ }
 unsafe fn RegisterSnapshot(snap: Snapshot) -> Snapshot { /* TODO(pg-port) */ snap }
-unsafe fn UnregisterSnapshot(_snap: Snapshot) { /* TODO(pg-port) */ }
-unsafe fn ActiveSnapshotSet() -> bool { /* TODO(pg-port) */ true }
+unsafe fn UnregisterSnapshot(_snap: Snapshot) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn ActiveSnapshotSet() -> bool { false /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): syscache IDs from utils/syscache.h */
 const AMNAME: c_int = 1;
-const RELOID: c_int = 43;
+const RELOID: c_int = 57;
 const F_OIDEQ: Oid = 184; /* oideq from fmgroids.h */
 
 /* TODO(pg-port): SearchSysCacheExists1 */
@@ -669,7 +683,7 @@ unsafe fn SearchSysCacheExists1(cacheId: c_int, key1: crate::postgres::Datum) ->
 }
 
 /* TODO(pg-port): lsyscache.h get_relation_idx_constraint_oid */
-unsafe fn get_relation_idx_constraint_oid(_relid: Oid, _indexId: Oid) -> Oid { /* TODO(pg-port) */ InvalidOid }
+unsafe fn get_relation_idx_constraint_oid(_relid: Oid, _indexId: Oid) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
 
 /* palloc array helpers */
 macro_rules! palloc_array {
@@ -718,7 +732,7 @@ unsafe fn cstr_display(s: *const c_char) -> std::borrow::Cow<'static, str> {
 }
 
 /* TODO(pg-port): utils/errcodes.h error code stubs used below */
-unsafe fn errcontext(_fmt: *const c_char) { /* TODO(pg-port) */ }
+unsafe fn errcontext(_fmt: *const c_char) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): utils/elog.h ErrorContextCallback */
 #[repr(C)]
@@ -736,15 +750,15 @@ static mut error_context_stack: *mut ErrorContextCallback = core::ptr::null_mut(
 
 /* TODO(pg-port): utils/memutils.h */
 type MemoryContext = *mut c_void;
-unsafe fn AllocSetContextCreate(_parent: MemoryContext, _name: *const c_char, _mincontextsize: usize, _initblocksize: usize, _maxblocksize: usize) -> MemoryContext { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn MemoryContextSwitchTo(_context: MemoryContext) -> MemoryContext { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn MemoryContextDelete(_context: MemoryContext) { /* TODO(pg-port) */ }
+unsafe fn AllocSetContextCreate(_parent: MemoryContext, _name: *const c_char, _mincontextsize: usize, _initblocksize: usize, _maxblocksize: usize) -> MemoryContext { unimplemented!("STUB AllocSetContextCreate") }
+unsafe fn MemoryContextSwitchTo(_context: MemoryContext) -> MemoryContext { unimplemented!("STUB MemoryContextSwitchTo") }
+unsafe fn MemoryContextDelete(_context: MemoryContext) { /* stub no-op (restored: test_setup path) */ }
 const ALLOCSET_SMALL_SIZES: usize = 0; /* TODO(pg-port) */
 const ALLOCSET_DEFAULT_SIZES: usize = 0; /* TODO(pg-port) */
 
-unsafe fn pfree(_ptr: *mut c_void) { /* TODO(pg-port) */ }
-unsafe fn palloc(size: usize) -> *mut c_void { /* TODO(pg-port) */ core::ptr::null_mut() }
-unsafe fn strcpy(dst: *mut c_char, src: *const c_char) -> *mut c_char { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn pfree(_ptr: *mut c_void) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn palloc(size: usize) -> *mut c_void { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
+unsafe fn strcpy(dst: *mut c_char, src: *const c_char) -> *mut c_char { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): access/htup_details.h NameStr */
 unsafe fn NameStr(name: *const [c_char; 64]) -> *const c_char { (*name).as_ptr() }
@@ -757,14 +771,14 @@ const DEPENDENCY_PARTITION_PRI_REAL: c_char = b'i' as c_char; /* TODO(pg-port): 
 type TableScanDesc = *mut c_void;
 
 /* TODO(pg-port): commands/tablecmds.h */
-unsafe fn IndexSetParentIndex_(_idx: Relation, _parent: Oid) { /* TODO(pg-port) */ }
+unsafe fn IndexSetParentIndex_(_idx: Relation, _parent: Oid) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): parser/parse_utilcmd.h ParseState */
 type ParseState = c_void;
-unsafe fn parser_errposition(_pstate: *const ParseState, _location: c_int) -> c_int { /* TODO(pg-port) */ 0 }
+unsafe fn parser_errposition(_pstate: *const ParseState, _location: c_int) -> c_int { 0 /* stub dummy (restored: test_setup path) */ }
 
 /* TODO(pg-port): commands/indexcmds.h ChooseRelationName exposed */
-unsafe fn ChooseRelationName_stub(_name1: *const c_char, _name2: *const c_char, _label: *const c_char, _namespaceid: Oid, _isconstraint: bool) -> *mut c_char { /* TODO(pg-port) */ core::ptr::null_mut() }
+unsafe fn ChooseRelationName_stub(_name1: *const c_char, _name2: *const c_char, _label: *const c_char, _namespaceid: Oid, _isconstraint: bool) -> *mut c_char { core::ptr::null_mut() /* stub dummy (restored: test_setup path) */ }
 
 /* ===========================================================================
  * CheckIndexCompatible
@@ -2466,7 +2480,9 @@ pub unsafe fn GetDefaultOpClass_full(type_id_in: Oid, am_id: Oid) -> Oid {
 
     let scan = systable_beginscan(rel, OpclassAmNameNspIndexId, true, core::ptr::null_mut(), 1, skey.as_mut_ptr());
 
+    let mut _it = 0;
     loop {
+        _it += 1;
         let tup = systable_getnext(scan as *mut crate::access::index::genam::SysScanDescData) as HeapTuple;
         if !HeapTupleIsValid(tup) { break; }
 

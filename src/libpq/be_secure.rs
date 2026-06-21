@@ -13,7 +13,7 @@ use crate::libpq::libpq_be::{
 use crate::storage::ipc::latch::{
     WaitEvent, WL_LATCH_SET, WL_POSTMASTER_DEATH, WL_SOCKET_READABLE, WL_SOCKET_WRITEABLE,
 };
-use crate::tcop::tcopprot::{ProcessClientReadInterrupt, ProcessClientWriteInterrupt};
+use crate::tcop::postgres::{ProcessClientReadInterrupt, ProcessClientWriteInterrupt};
 
 /* From <sys/types.h>: ssize_t. */
 pub type ssize_t = isize;
@@ -420,22 +420,22 @@ const ERRCODE_ADMIN_SHUTDOWN: c_int = 0;
 
 /* storage/ipc/latch.rs: ModifyWaitEvent / WaitEventSetWait / ResetLatch are not yet pub-exported. */
 unsafe fn ModifyWaitEvent(
-    _set: *mut crate::nodes::execnodes::WaitEventSet,
-    _pos: c_int,
-    _events: uint32,
-    _latch: *mut c_void,
+    set: *mut crate::nodes::execnodes::WaitEventSet,
+    pos: c_int,
+    events: uint32,
+    latch: *mut c_void,
 ) {
-    unimplemented!()
+    crate::storage::ipc::waiteventset::ModifyWaitEvent(set as _, pos, events, latch as _)
 }
 
 unsafe fn WaitEventSetWait(
-    _set: *mut crate::nodes::execnodes::WaitEventSet,
-    _timeout: c_long,
-    _occurred_events: *mut WaitEvent,
-    _nevents: c_int,
-    _wait_event_info: uint32,
+    set: *mut crate::nodes::execnodes::WaitEventSet,
+    timeout: c_long,
+    occurred_events: *mut WaitEvent,
+    nevents: c_int,
+    wait_event_info: uint32,
 ) -> c_int {
-    unimplemented!()
+    crate::storage::ipc::waiteventset::WaitEventSetWait(set as _, timeout as _, occurred_events as _, nevents, wait_event_info)
 }
 
 unsafe fn ResetLatch(_latch: *mut c_void) {}

@@ -41,8 +41,8 @@ use crate::parser::parse_node::{ParseExprKind, ParseLoc, ParseState};
 
 use crate::utils::adt::format_type::{format_type_be, format_type_with_typemod};
 use crate::utils::adt::selfuncs::TypeCacheEntry;
-unsafe fn lookup_type_cache(_type_id: Oid, _flags: c_int) -> *mut TypeCacheEntry { unimplemented!() } // TODO(pg-port): utils/cache/typcache.c
-unsafe fn get_negator(_opno: Oid) -> Oid { 0 } // TODO(pg-port): utils/cache/lsyscache.c
+unsafe fn lookup_type_cache(_type_id: Oid, _flags: c_int) -> *mut TypeCacheEntry { crate::utils::cache::typcache::lookup_type_cache(_type_id, _flags) as _ } // TODO(pg-port): utils/cache/typcache.c
+unsafe fn get_negator(_opno: Oid) -> Oid { crate::utils::cache::lsyscache::get_negator(_opno) } // TODO(pg-port): utils/cache/lsyscache.c
 
 extern "C" {
     fn strcmp(a: *const c_char, b: *const c_char) -> c_int;

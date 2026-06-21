@@ -59,7 +59,7 @@ unsafe fn get_rightop(_clause: *const Expr) -> *mut Node {
 }
 
 unsafe fn ExecInitExpr(_node: *mut Expr, _parent: *mut PlanState) -> *mut ExprState {
-    unimplemented!() // TODO: executor/execExpr.c
+    crate::executor::execExpr::ExecInitExpr(_node as _, _parent as _) as _
 }
 
 unsafe fn ExecEvalExprSwitchContext(
@@ -67,17 +67,17 @@ unsafe fn ExecEvalExprSwitchContext(
     _econtext: *mut ExprContext,
     _isNull: *mut bool,
 ) -> Datum {
-    unimplemented!() // TODO: executor/executor.h
+    crate::executor::executor::ExecEvalExprSwitchContext(_state as _, _econtext as _, _isNull as _) as _
 }
 
 // itemptr.h: increment/decrement an ItemPointer.  The result may not be a
 // valid item pointer.
 unsafe fn ItemPointerInc(_pointer: *mut ItemPointerData) {
-    unimplemented!() // TODO: storage/itemptr.h
+    crate::storage::itemptr::ItemPointerInc(_pointer as _)
 }
 
 unsafe fn ItemPointerDec(_pointer: *mut ItemPointerData) {
-    unimplemented!() // TODO: storage/itemptr.h
+    crate::storage::itemptr::ItemPointerDec(_pointer as _)
 }
 
 unsafe fn table_beginscan_tidrange(
@@ -106,11 +106,11 @@ unsafe fn table_scan_getnextslot_tidrange(
 }
 
 unsafe fn table_endscan(_scan: TableScanDesc) {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_endscan(_scan as _)
 }
 
 unsafe fn table_slot_callbacks(_rel: *mut c_void) -> *const c_void {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_slot_callbacks(_rel as _) as _
 }
 
 unsafe fn ExecScan(
@@ -122,11 +122,11 @@ unsafe fn ExecScan(
 }
 
 unsafe fn ExecScanReScan(_node: *mut ScanState) {
-    unimplemented!() // TODO: executor/execScan.c
+    crate::executor::execScan::ExecScanReScan(_node as _)
 }
 
 unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/tuptable.h
+    crate::executor::tuptable::ExecClearTuple(_slot as _) as _
 }
 
 unsafe fn ExecAssignExprContext(_estate: *mut EState, _ps: *mut PlanState) {
@@ -147,19 +147,19 @@ unsafe fn ExecInitScanTupleSlot(
     _tupdesc: *mut c_void,
     _tts_ops: *const c_void,
 ) {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecInitScanTupleSlot(_estate as _, _scanstate as _, _tupdesc as _, _tts_ops as _)
 }
 
 unsafe fn ExecInitResultTypeTL(_ps: *mut PlanState) {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecInitResultTypeTL(_ps as _)
 }
 
 unsafe fn ExecAssignScanProjectionInfo(_node: *mut ScanState) {
-    unimplemented!() // TODO: executor/execScan.c
+    crate::executor::execScan::ExecAssignScanProjectionInfo(_node as _)
 }
 
 unsafe fn ExecInitQual(_qual: *mut List, _parent: *mut PlanState) -> *mut ExprState {
-    unimplemented!() // TODO: executor/execExpr.c
+    crate::executor::execExpr::ExecInitQual(_qual as _, _parent as _) as _
 }
 
 unsafe fn RelationGetDescr(_rel: *mut c_void) -> *mut c_void {

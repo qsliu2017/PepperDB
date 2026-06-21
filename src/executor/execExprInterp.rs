@@ -75,8 +75,11 @@ unsafe fn pgstat_init_function_usage(
     _fcinfo: FunctionCallInfo,
     _fusage: *mut PgStat_FunctionCallUsage,
 ) {
+    crate::utils::activity::pgstat_function::pgstat_init_function_usage(_fcinfo as _, _fusage as _)
 }
-unsafe fn pgstat_end_function_usage(_fusage: *mut PgStat_FunctionCallUsage, _finalize: bool) {}
+unsafe fn pgstat_end_function_usage(_fusage: *mut PgStat_FunctionCallUsage, _finalize: bool) {
+    crate::utils::activity::pgstat_function::pgstat_end_function_usage(_fusage as _, _finalize as _)
+}
 
 /* TODO(pg-port): utils/expandedrecord.h */
 #[repr(C)]
@@ -104,13 +107,15 @@ unsafe fn DatumIsReadWriteExpandedObject(_d: Datum, _isnull: bool, _typlen: i16)
     false
 }
 unsafe fn DatumGetEOHP(_d: Datum) -> *mut ExpandedRecordHeader {
-    unimplemented!("TODO(pg-port): expandeddatum::DatumGetEOHP")
+    crate::utils::adt::expandeddatum::DatumGetEOHP(_d as _) as _
 }
-unsafe fn DeleteExpandedObject(_d: Datum) {}
+unsafe fn DeleteExpandedObject(_d: Datum) {
+    crate::utils::adt::expandeddatum::DeleteExpandedObject(_d as _)
+}
 
 /* TODO(pg-port): utils/datum.h */
-unsafe fn datumCopy(_value: Datum, _typbyval: bool, _typlen: i16) -> Datum {
-    unimplemented!("TODO(pg-port): utils::datum::datumCopy")
+unsafe fn datumCopy(value: Datum, typbyval: bool, typlen: i16) -> Datum {
+    crate::utils::adt::datum::datumCopy(value, typbyval, typlen as c_int)
 }
 
 /* TODO(pg-port): access/tuptoast.h */
@@ -119,7 +124,7 @@ unsafe fn toast_build_flattened_tuple(
     _values: *mut Datum,
     _isnull: *mut bool,
 ) -> *mut crate::access::htup_details::HeapTupleData {
-    unimplemented!("TODO(pg-port): access::tuptoast::toast_build_flattened_tuple")
+    crate::access::heap::heaptoast::toast_build_flattened_tuple(_tupdesc as _, _values as _, _isnull as _) as _
 }
 
 /* TODO(pg-port): access/heapam.h heap_* functions */
@@ -128,7 +133,7 @@ unsafe fn heap_attisnull(
     _attnum: c_int,
     _tupdesc: crate::access::common::tupdesc::TupleDesc,
 ) -> bool {
-    unimplemented!("TODO(pg-port): access::heapam::heap_attisnull")
+    crate::access::common::heaptuple::heap_attisnull(_tup as _, _attnum as _, _tupdesc as _) as _
 }
 unsafe fn heap_getattr(
     _tup: *mut crate::access::htup_details::HeapTupleData,
@@ -144,7 +149,7 @@ unsafe fn heap_deform_tuple(
     _values: *mut Datum,
     _isnull: *mut bool,
 ) {
-    unimplemented!("TODO(pg-port): access::heapam::heap_deform_tuple")
+    crate::access::common::heaptuple::heap_deform_tuple(_tup as _, _tupdesc as _, _values as _, _isnull as _)
 }
 unsafe fn heap_form_tuple(
     _tupdesc: crate::access::common::tupdesc::TupleDesc,
@@ -164,7 +169,7 @@ unsafe fn heap_copy_tuple_as_datum(
     _tup: *mut crate::access::htup_details::HeapTupleData,
     _tupdesc: crate::access::common::tupdesc::TupleDesc,
 ) -> Datum {
-    unimplemented!("TODO(pg-port): heap_copy_tuple_as_datum")
+    crate::access::common::heaptuple::heap_copy_tuple_as_datum(_tup as _, _tupdesc as _) as _
 }
 
 /* TODO(pg-port): access/tupconvert.h */
@@ -172,28 +177,34 @@ unsafe fn execute_attr_map_tuple(
     _tup: *mut crate::access::htup_details::HeapTupleData,
     _map: *mut crate::access::common::tupconvert::TupleConversionMap,
 ) -> *mut crate::access::htup_details::HeapTupleData {
-    unimplemented!("TODO(pg-port): access::tupconvert::execute_attr_map_tuple")
+    crate::access::common::tupconvert::execute_attr_map_tuple(_tup as _, _map as _) as _
 }
 unsafe fn convert_tuples_by_name(
     _indesc: crate::access::common::tupdesc::TupleDesc,
     _outdesc: crate::access::common::tupdesc::TupleDesc,
 ) -> *mut crate::access::common::tupconvert::TupleConversionMap {
-    unimplemented!("TODO(pg-port): access::tupconvert::convert_tuples_by_name")
+    crate::access::common::tupconvert::convert_tuples_by_name(_indesc as _, _outdesc as _) as _
 }
 
 /* TODO(pg-port): access/tupdesc.h ref-count */
-unsafe fn IncrTupleDescRefCount(_tupdesc: crate::access::common::tupdesc::TupleDesc) {}
-unsafe fn DecrTupleDescRefCount(_tupdesc: crate::access::common::tupdesc::TupleDesc) {}
+unsafe fn IncrTupleDescRefCount(_tupdesc: crate::access::common::tupdesc::TupleDesc) {
+    crate::access::common::tupdesc::IncrTupleDescRefCount(_tupdesc as _)
+}
+unsafe fn DecrTupleDescRefCount(_tupdesc: crate::access::common::tupdesc::TupleDesc) {
+    crate::access::common::tupdesc::DecrTupleDescRefCount(_tupdesc as _)
+}
 unsafe fn CreateTupleDescCopy(
     _tupdesc: crate::access::common::tupdesc::TupleDesc,
 ) -> crate::access::common::tupdesc::TupleDesc {
-    unimplemented!("TODO(pg-port): CreateTupleDescCopy")
+    crate::access::common::tupdesc::CreateTupleDescCopy(_tupdesc as _) as _
 }
-unsafe fn ReleaseTupleDesc(_tupdesc: crate::access::common::tupdesc::TupleDesc) {}
+unsafe fn ReleaseTupleDesc(_tupdesc: crate::access::common::tupdesc::TupleDesc) {
+    crate::access::common::tupdesc::ReleaseTupleDesc(_tupdesc as _)
+}
 unsafe fn BlessTupleDesc(
     _tupdesc: crate::access::common::tupdesc::TupleDesc,
 ) -> crate::access::common::tupdesc::TupleDesc {
-    unimplemented!("TODO(pg-port): BlessTupleDesc")
+    crate::executor::execTuples::BlessTupleDesc(_tupdesc as _) as _
 }
 
 /* TODO(pg-port): utils/typcache.h */
@@ -209,14 +220,14 @@ unsafe fn lookup_rowtype_tupdesc(
     _typid: Oid,
     _typmod: i32,
 ) -> crate::access::common::tupdesc::TupleDesc {
-    unimplemented!("TODO(pg-port): utils::typcache::lookup_rowtype_tupdesc")
+    crate::utils::cache::typcache::lookup_rowtype_tupdesc(_typid as _, _typmod as _) as _
 }
 unsafe fn lookup_rowtype_tupdesc_domain(
     _typid: Oid,
     _typmod: i32,
     _noerror: bool,
 ) -> crate::access::common::tupdesc::TupleDesc {
-    unimplemented!("TODO(pg-port): utils::typcache::lookup_rowtype_tupdesc_domain")
+    crate::utils::cache::typcache::lookup_rowtype_tupdesc_domain(_typid as _, _typmod as _, _noerror as _) as _
 }
 unsafe fn domain_check_safe(
     _value: Datum,
@@ -236,7 +247,7 @@ unsafe fn get_typlenbyvalalign(
     _typbyval: *mut bool,
     _typalign: *mut c_char,
 ) {
-    unimplemented!("TODO(pg-port): utils::lsyscache::get_typlenbyvalalign")
+    crate::utils::cache::lsyscache::get_typlenbyvalalign(_typid as _, _typlen as _, _typbyval as _, _typalign as _)
 }
 unsafe fn format_type_be(_typid: Oid) -> *mut c_char {
     unimplemented!("TODO(pg-port): utils::lsyscache::format_type_be")
@@ -260,9 +271,11 @@ unsafe fn construct_empty_array(_element_type: Oid) -> *mut ArrayType {
     unimplemented!("TODO(pg-port): utils::array::construct_empty_array")
 }
 unsafe fn ArrayGetNItems(_ndim: c_int, _dims: *const c_int) -> c_int {
-    unimplemented!("TODO(pg-port): utils::array::ArrayGetNItems")
+    crate::utils::adt::arrayutils::ArrayGetNItems(_ndim as _, _dims as _) as _
 }
-unsafe fn ArrayCheckBounds(_ndim: c_int, _dims: *const c_int, _lbs: *const c_int) {}
+unsafe fn ArrayCheckBounds(_ndim: c_int, _dims: *const c_int, _lbs: *const c_int) {
+    crate::utils::adt::arrayutils::ArrayCheckBounds(_ndim as _, _dims as _, _lbs as _)
+}
 unsafe fn array_bitmap_copy(
     _destbitmap: *mut u8,
     _destoffset: c_int,
@@ -270,7 +283,7 @@ unsafe fn array_bitmap_copy(
     _srcoffset: c_int,
     _nitems: c_int,
 ) {
-    unimplemented!("TODO(pg-port): utils::array::array_bitmap_copy")
+    crate::utils::adt::arrayfuncs::array_bitmap_copy(_destbitmap as _, _destoffset as _, _srcbitmap as _, _srcoffset as _, _nitems as _)
 }
 unsafe fn array_map(
     _arraydatum: Datum,
@@ -279,7 +292,7 @@ unsafe fn array_map(
     _resultelemtype: Oid,
     _amstate: *mut crate::utils::adt::arrayfuncs::ArrayMapState,
 ) -> Datum {
-    unimplemented!("TODO(pg-port): utils::array::array_map")
+    crate::utils::adt::arrayfuncs::array_map(_arraydatum as _, _elemexprstate as _, _econtext as _, _resultelemtype as _, _amstate as _) as _
 }
 unsafe fn DatumGetArrayTypePCopy(_d: Datum) -> *mut ArrayType {
     unimplemented!("TODO(pg-port): DatumGetArrayTypePCopy")
@@ -302,28 +315,32 @@ unsafe fn ARR_LBOUND(a: *mut ArrayType) -> *mut c_int {
     ARR_DIMS(a).add(ARR_NDIM(a) as usize)
 }
 unsafe fn ARR_OVERHEAD_WITHNULLS(ndims: c_int, nitems: c_int) -> i32 {
-    unimplemented!("TODO(pg-port): ARR_OVERHEAD_WITHNULLS")
+    crate::utils::array::ARR_OVERHEAD_WITHNULLS(ndims as _, nitems as _) as _
 }
 unsafe fn ARR_OVERHEAD_NONULLS(ndims: c_int) -> i32 {
-    unimplemented!("TODO(pg-port): ARR_OVERHEAD_NONULLS")
+    crate::utils::array::ARR_OVERHEAD_NONULLS(ndims as _) as _
 }
 unsafe fn ARR_DATA_PTR(a: *mut ArrayType) -> *mut c_char {
-    unimplemented!("TODO(pg-port): ARR_DATA_PTR")
+    crate::utils::array::ARR_DATA_PTR(a as _) as _
 }
 unsafe fn ARR_NULLBITMAP(a: *mut ArrayType) -> *mut u8 {
-    core::ptr::null_mut() /* stub */
+    crate::utils::array::ARR_NULLBITMAP(a as _) as _
 }
-unsafe fn ARR_HASNULL(a: *mut ArrayType) -> bool { false }
+unsafe fn ARR_HASNULL(a: *mut ArrayType) -> bool {
+    crate::utils::array::ARR_HASNULL(a as _) as _
+}
 unsafe fn ARR_SIZE(a: *mut ArrayType) -> usize {
-    unimplemented!("TODO(pg-port): ARR_SIZE")
+    crate::utils::array::ARR_SIZE(a as _) as _
 }
 unsafe fn ARR_DATA_OFFSET(a: *mut ArrayType) -> usize {
-    unimplemented!("TODO(pg-port): ARR_DATA_OFFSET")
+    crate::utils::array::ARR_DATA_OFFSET(a as _) as _
 }
 unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType {
     unimplemented!("TODO(pg-port): DatumGetArrayTypeP")
 }
-unsafe fn SET_VARSIZE(a: *mut ArrayType, _sz: usize) {}
+unsafe fn SET_VARSIZE(a: *mut ArrayType, _sz: usize) {
+    crate::varatt::SET_VARSIZE(a as _, _sz as _)
+}
 const MAXDIM: usize = 6;
 type bits8 = u8;
 unsafe fn MaxAllocSize() -> usize { 0x3fffffff }
@@ -343,31 +360,31 @@ unsafe fn pstrdup(s: *const c_char) -> *mut c_char {
 
 /* TODO(pg-port): MemoryContext switch / current */
 unsafe fn MemoryContextSwitchTo(cxt: MemoryContext) -> MemoryContext {
-    unimplemented!("TODO(pg-port): MemoryContextSwitchTo")
+    crate::utils::mmgr::mcxt::MemoryContextSwitchTo(cxt as _) as _
 }
 unsafe fn CurrentMemoryContext() -> MemoryContext {
-    unimplemented!("TODO(pg-port): CurrentMemoryContext")
+    crate::utils::palloc::CurrentMemoryContext as _
 }
 unsafe fn MemoryContextGetParent(_cxt: MemoryContext) -> MemoryContext {
-    unimplemented!("TODO(pg-port): MemoryContextGetParent")
+    crate::utils::mmgr::mcxt::MemoryContextGetParent(_cxt as _) as _
 }
 
 /* TODO(pg-port): utils/fmgr.h FunctionCallInvoke / InitFunctionCallInfoData */
 unsafe fn FunctionCallInvoke(fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("TODO(pg-port): FunctionCallInvoke")
+    crate::FunctionCallInvoke!(fcinfo)
 }
 unsafe fn InitFunctionCallInfoData(
-    _fcinfo: *mut crate::utils::fmgr::FunctionCallInfoBaseData,
-    _finfo: *mut FmgrInfo,
-    _nargs: c_int,
-    _collation: Oid,
-    _context: *mut crate::nodes::nodes::Node,
-    _resultinfo: *mut crate::nodes::nodes::Node,
+    fcinfo: *mut crate::utils::fmgr::FunctionCallInfoBaseData,
+    finfo: *mut FmgrInfo,
+    nargs: c_int,
+    collation: Oid,
+    context: *mut crate::nodes::nodes::Node,
+    resultinfo: *mut crate::nodes::nodes::Node,
 ) {
-    unimplemented!("TODO(pg-port): InitFunctionCallInfoData")
+    crate::InitFunctionCallInfoData!(fcinfo, finfo, nargs as i16, collation, context, resultinfo);
 }
 unsafe fn fmgr_info(_funcid: Oid, _finfo: *mut FmgrInfo) {
-    unimplemented!("TODO(pg-port): fmgr_info")
+    crate::utils::fmgr::fmgr_info(_funcid as _, _finfo as _)
 }
 unsafe fn fmgr_info_set_expr(_expr: *mut crate::nodes::nodes::Node, _finfo: *mut FmgrInfo) {
     unimplemented!("TODO(pg-port): fmgr_info_set_expr")
@@ -381,7 +398,7 @@ unsafe fn FunctionCall2Coll(
     _arg1: Datum,
     _arg2: Datum,
 ) -> Datum {
-    unimplemented!("TODO(pg-port): FunctionCall2Coll")
+    crate::utils::fmgr::FunctionCall2Coll(_finfo as _, _collation as _, _arg1 as _, _arg2 as _) as _
 }
 
 /* TODO(pg-port): utils/builtins.h / utils/date.h / utils/timestamp.h */
@@ -390,28 +407,52 @@ type TimeTzADT = [u8; 0]; /* opaque */
 type TimeADT = i64;
 type Timestamp = i64;
 type TimestampTz = i64;
-unsafe fn GetSQLCurrentDate() -> DateADT { unimplemented!("TODO(pg-port)") }
-unsafe fn GetSQLCurrentTime(_typmod: i32) -> *mut TimeTzADT { unimplemented!("TODO(pg-port)") }
-unsafe fn GetSQLCurrentTimestamp(_typmod: i32) -> TimestampTz { unimplemented!("TODO(pg-port)") }
-unsafe fn GetSQLLocalTime(_typmod: i32) -> TimeADT { unimplemented!("TODO(pg-port)") }
-unsafe fn GetSQLLocalTimestamp(_typmod: i32) -> Timestamp { unimplemented!("TODO(pg-port)") }
-unsafe fn DateADTGetDatum(_d: DateADT) -> Datum { unimplemented!("TODO(pg-port)") }
-unsafe fn TimeTzADTPGetDatum(_d: *mut TimeTzADT) -> Datum { unimplemented!("TODO(pg-port)") }
+unsafe fn GetSQLCurrentDate() -> DateADT {
+    crate::utils::adt::date::GetSQLCurrentDate() as _
+}
+unsafe fn GetSQLCurrentTime(_typmod: i32) -> *mut TimeTzADT {
+    crate::utils::adt::date::GetSQLCurrentTime(_typmod as _) as _
+}
+unsafe fn GetSQLCurrentTimestamp(_typmod: i32) -> TimestampTz {
+    crate::utils::adt::timestamp::GetSQLCurrentTimestamp(_typmod as _) as _
+}
+unsafe fn GetSQLLocalTime(_typmod: i32) -> TimeADT {
+    crate::utils::adt::date::GetSQLLocalTime(_typmod as _) as _
+}
+unsafe fn GetSQLLocalTimestamp(_typmod: i32) -> Timestamp {
+    crate::utils::adt::timestamp::GetSQLLocalTimestamp(_typmod as _) as _
+}
+unsafe fn DateADTGetDatum(_d: DateADT) -> Datum {
+    crate::utils::adt::date::DateADTGetDatum(_d as _) as _
+}
+unsafe fn TimeTzADTPGetDatum(_d: *mut TimeTzADT) -> Datum {
+    crate::utils::adt::date::TimeTzADTPGetDatum(_d as _) as _
+}
 unsafe fn TimestampTzGetDatum(_d: TimestampTz) -> Datum { unimplemented!("TODO(pg-port)") }
-unsafe fn TimeADTGetDatum(_d: TimeADT) -> Datum { unimplemented!("TODO(pg-port)") }
+unsafe fn TimeADTGetDatum(_d: TimeADT) -> Datum {
+    crate::utils::adt::date::TimeADTGetDatum(_d as _) as _
+}
 unsafe fn TimestampGetDatum(_d: Timestamp) -> Datum { unimplemented!("TODO(pg-port)") }
 unsafe fn current_user(
     _fcinfo: *mut crate::utils::fmgr::FunctionCallInfoBaseData,
-) -> Datum { unimplemented!("TODO(pg-port)") }
+) -> Datum {
+    crate::utils::adt::name::current_user(_fcinfo as _) as _
+}
 unsafe fn session_user(
     _fcinfo: *mut crate::utils::fmgr::FunctionCallInfoBaseData,
-) -> Datum { unimplemented!("TODO(pg-port)") }
+) -> Datum {
+    crate::utils::adt::name::session_user(_fcinfo as _) as _
+}
 unsafe fn current_database(
     _fcinfo: *mut crate::utils::fmgr::FunctionCallInfoBaseData,
-) -> Datum { unimplemented!("TODO(pg-port)") }
+) -> Datum {
+    crate::utils::adt::misc::current_database(_fcinfo as _) as _
+}
 unsafe fn current_schema(
     _fcinfo: *mut crate::utils::fmgr::FunctionCallInfoBaseData,
-) -> Datum { unimplemented!("TODO(pg-port)") }
+) -> Datum {
+    crate::utils::adt::name::current_schema(_fcinfo as _) as _
+}
 
 /* TODO(pg-port): executor/nodeSubplan.h */
 use crate::nodes::execnodes::SubPlanState;
@@ -420,13 +461,13 @@ unsafe fn ExecSubPlan(
     _econtext: *mut ExprContext,
     _isnull: *mut bool,
 ) -> Datum {
-    unimplemented!("TODO(pg-port): executor::nodeSubplan::ExecSubPlan")
+    crate::executor::nodeSubplan::ExecSubPlan(_sstate as _, _econtext as _, _isnull as _) as _
 }
 unsafe fn ExecSetParamPlan(
     _execplan: *mut c_void,
     _econtext: *mut ExprContext,
 ) {
-    unimplemented!("TODO(pg-port): executor::nodeSubplan::ExecSetParamPlan")
+    crate::executor::nodeSubplan::ExecSetParamPlan(_execplan as _, _econtext as _)
 }
 
 /* TODO(pg-port): executor/executor.h */
@@ -434,32 +475,42 @@ unsafe fn ExecFilterJunk(
     _jf: *mut crate::nodes::execnodes::JunkFilter,
     _slot: *mut TupleTableSlot,
 ) -> *mut TupleTableSlot {
-    unimplemented!("TODO(pg-port): executor::execJunk::ExecFilterJunk")
+    crate::executor::execJunk::ExecFilterJunk(_jf as _, _slot as _) as _
 }
 
 /* TODO(pg-port): executor/tuptable.h slot_* */
-unsafe fn slot_getsomeattrs(_slot: *mut TupleTableSlot, _attnum: c_int) {}
+unsafe fn slot_getsomeattrs(_slot: *mut TupleTableSlot, _attnum: c_int) {
+    crate::executor::tuptable::slot_getsomeattrs(_slot as _, _attnum as _)
+}
 unsafe fn slot_getattr(
     _slot: *mut TupleTableSlot,
     _attnum: crate::access::attnum::AttrNumber,
     _isnull: *mut bool,
 ) -> Datum {
-    unimplemented!("TODO(pg-port): executor::tuptable::slot_getattr")
+    crate::executor::tuptable::slot_getattr(_slot as _, _attnum as _, _isnull as _) as _
 }
 unsafe fn slot_getsysattr(
     _slot: *mut TupleTableSlot,
     _attnum: c_int,
     _isnull: *mut bool,
 ) -> Datum {
-    unimplemented!("TODO(pg-port): executor::tuptable::slot_getsysattr")
+    crate::executor::tuptable::slot_getsysattr(_slot as _, _attnum as _, _isnull as _) as _
 }
-unsafe fn slot_getallattrs(_slot: *mut TupleTableSlot) {}
-unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) {}
-unsafe fn ExecStoreVirtualTuple(_slot: *mut TupleTableSlot) {}
+unsafe fn slot_getallattrs(_slot: *mut TupleTableSlot) {
+    crate::executor::tuptable::slot_getallattrs(_slot as _)
+}
+unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) {
+    unimplemented!()
+}
+unsafe fn ExecStoreVirtualTuple(_slot: *mut TupleTableSlot) {
+    unimplemented!()
+}
 /* TODO(pg-port): executor/execTuples.h */
-unsafe fn ExecMaterializeSlot(_slot: *mut TupleTableSlot) {}
+unsafe fn ExecMaterializeSlot(_slot: *mut TupleTableSlot) {
+    crate::executor::tuptable::ExecMaterializeSlot(_slot as _)
+}
 unsafe fn ExecCopySlotMinimalTuple(_slot: *mut TupleTableSlot) -> *mut crate::access::htup_details::MinimalTupleData {
-    unimplemented!("TODO(pg-port): ExecCopySlotMinimalTuple")
+    crate::executor::tuptable::ExecCopySlotMinimalTuple(_slot as _) as _
 }
 /* TODO(pg-port): utils/expandedrecord.h */
 unsafe fn make_expanded_record_from_tuple(
@@ -479,7 +530,7 @@ unsafe fn build_virtual_tuple(
 }
 /* TODO(pg-port): utils/array.h CStringGetTextDatum */
 unsafe fn CStringGetTextDatum(_s: *const c_char) -> Datum {
-    unimplemented!("TODO(pg-port): CStringGetTextDatum")
+    crate::utils::builtins::CStringGetTextDatum(_s as _) as _
 }
 /* TODO(pg-port): none_fn placeholder for null function pointer */
 unsafe fn none_fn(_fcinfo: *mut crate::utils::fmgr::FunctionCallInfoBaseData) -> Datum {
@@ -489,18 +540,19 @@ unsafe fn ExecCopySlot(
     _dstslot: *mut TupleTableSlot,
     _srcslot: *mut TupleTableSlot,
 ) {
+    unimplemented!()
 }
 unsafe fn ExecQual(
     _state: *mut ExprState,
     _econtext: *mut ExprContext,
 ) -> bool {
-    unimplemented!("TODO(pg-port): executor::ExecQual")
+    crate::executor::executor::ExecQual(_state as _, _econtext as _) as _
 }
 
 /* TODO(pg-port): utils/xml.h */
 type xmltype = [u8; 0]; /* opaque */
 unsafe fn xmlconcat(_vals: *mut crate::nodes::pg_list::List) -> *mut xmltype {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::xml::xmlconcat(_vals as _) as _
 }
 unsafe fn xmlelement(
     _xexpr: *mut crate::nodes::primnodes::XmlExpr,
@@ -509,14 +561,14 @@ unsafe fn xmlelement(
     _argvalue: *mut Datum,
     _argnull: *mut bool,
 ) -> *mut xmltype {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::xml::xmlelement(_xexpr as _, _named_argvalue as _, _named_argnull as _, _argvalue as _, _argnull as _) as _
 }
 unsafe fn xmlparse(
     _data: *mut text,
     _xmloption: c_int,
     _preserve_whitespace: bool,
 ) -> *mut xmltype {
-    unimplemented!("TODO(pg-port)")
+    unimplemented!()
 }
 unsafe fn xmlpi(
     _name: *const c_char,
@@ -524,31 +576,31 @@ unsafe fn xmlpi(
     _argisnull: bool,
     _resnull: *mut bool,
 ) -> *mut xmltype {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::xml::xmlpi(_name as _, _arg as _, _argisnull as _, _resnull as _) as _
 }
 unsafe fn xmlroot(
     _data: *mut xmltype,
     _version: *mut text,
     _standalone: c_int,
 ) -> *mut xmltype {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::xml::xmlroot(_data as _, _version as _, _standalone as _) as _
 }
 unsafe fn xmltotext_with_options(
     _data: *mut xmltype,
     _xmloption: c_int,
     _indent: bool,
 ) -> *mut text {
-    unimplemented!("TODO(pg-port)")
+    unimplemented!()
 }
 unsafe fn xml_is_document(_arg: *mut xmltype) -> bool {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::xml::xml_is_document(_arg as _) as _
 }
 unsafe fn map_sql_value_to_xml_value(
     _value: Datum,
     _typid: Oid,
     _xml_escape_strings: bool,
 ) -> *const c_char {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::xml::map_sql_value_to_xml_value(_value as _, _typid as _, _xml_escape_strings as _) as _
 }
 unsafe fn DatumGetXmlP(_d: Datum) -> *mut xmltype {
     unimplemented!("TODO(pg-port)")
@@ -573,7 +625,7 @@ pub struct StringInfoData {
     pub cursor: usize,
 }
 unsafe fn initStringInfo(_buf: *mut StringInfoData) {
-    unimplemented!("TODO(pg-port)")
+    crate::lib::stringinfo::initStringInfo(_buf as _)
 }
 unsafe fn appendStringInfo(_buf: *mut StringInfoData, _fmt: *const c_char) {
     unimplemented!("TODO(pg-port)")
@@ -632,7 +684,7 @@ unsafe fn JsonbPGetDatum(_jb: *mut Jsonb) -> Datum {
     unimplemented!("TODO(pg-port)")
 }
 unsafe fn JsonbValueToJsonb(_val: *mut JsonbValue) -> *mut Jsonb {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::jsonb_util::JsonbValueToJsonb(_val as _) as _
 }
 unsafe fn jsonb_out(_arg: Datum) -> Datum {
     unimplemented!("TODO(pg-port)")
@@ -644,18 +696,20 @@ unsafe fn jsonb_from_text(_js: *mut text, _unique: bool) -> Datum {
     unimplemented!("TODO(pg-port)")
 }
 unsafe fn json_validate(_js: *mut text, _unique: bool, _throw: bool) -> bool {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::json::json_validate(_js as _, _unique as _, _throw as _) as _
 }
 unsafe fn datum_to_jsonb(_value: Datum, _category: c_int, _outfuncid: Oid) -> Datum {
     unimplemented!("TODO(pg-port)")
 }
 unsafe fn datum_to_json(_value: Datum, _category: c_int, _outfuncid: Oid) -> Datum {
-    unimplemented!("TODO(pg-port)")
+    unimplemented!()
 }
 unsafe fn json_build_array_worker(
     _nargs: c_int, _arg_values: *mut Datum, _arg_nulls: *mut bool,
     _arg_types: *mut Oid, _absent_on_null: bool,
-) -> Datum { unimplemented!("TODO(pg-port)") }
+) -> Datum {
+    crate::utils::adt::json::json_build_array_worker(_nargs as _, _arg_values as _, _arg_nulls as _, _arg_types as _, _absent_on_null as _) as _
+}
 unsafe fn jsonb_build_array_worker(
     _nargs: c_int, _arg_values: *mut Datum, _arg_nulls: *mut bool,
     _arg_types: *mut Oid, _absent_on_null: bool,
@@ -663,7 +717,9 @@ unsafe fn jsonb_build_array_worker(
 unsafe fn json_build_object_worker(
     _nargs: c_int, _arg_values: *mut Datum, _arg_nulls: *mut bool,
     _arg_types: *mut Oid, _absent_on_null: bool, _unique: bool,
-) -> Datum { unimplemented!("TODO(pg-port)") }
+) -> Datum {
+    crate::utils::adt::json::json_build_object_worker(_nargs as _, _arg_values as _, _arg_nulls as _, _arg_types as _, _absent_on_null as _, _unique as _) as _
+}
 unsafe fn jsonb_build_object_worker(
     _nargs: c_int, _arg_values: *mut Datum, _arg_nulls: *mut bool,
     _arg_types: *mut Oid, _absent_on_null: bool, _unique: bool,
@@ -677,7 +733,7 @@ const JSON_TOKEN_TRUE: c_int = 5;
 const JSON_TOKEN_FALSE: c_int = 6;
 const JSON_TOKEN_NULL: c_int = 7;
 unsafe fn json_get_first_token(_js: *mut text, _throw: bool) -> c_int {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::jsonfuncs::json_get_first_token(_js as _, _throw as _) as _
 }
 
 /* TODO(pg-port): utils/jsonpath.h */
@@ -691,20 +747,20 @@ unsafe fn DatumGetJsonPathP(_d: Datum) -> *mut JsonPath {
 unsafe fn JsonPathExists(
     _item: Datum, _path: *mut JsonPath, _error: *mut bool, _args: *mut c_void,
 ) -> bool {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::jsonpath_exec::JsonPathExists(_item as _, _path as _, _error as _, _args as _) as _
 }
 unsafe fn JsonPathQuery(
     _item: Datum, _path: *mut JsonPath, _wrapper: c_int,
     _empty: *mut bool, _error: *mut bool, _args: *mut c_void,
     _column_name: *const c_char,
 ) -> Datum {
-    unimplemented!("TODO(pg-port)")
+    unimplemented!()
 }
 unsafe fn JsonPathValue(
     _item: Datum, _path: *mut JsonPath, _empty: *mut bool,
     _error: *mut bool, _args: *mut c_void, _column_name: *const c_char,
 ) -> *mut JsonbValue {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::jsonpath_exec::JsonPathValue(_item as _, _path as _, _empty as _, _error as _, _args as _, _column_name as _) as _
 }
 unsafe fn json_populate_type(
     _jb: Datum, _jb_typid: Oid, _typid: Oid, _typmod: i32,
@@ -712,7 +768,7 @@ unsafe fn json_populate_type(
     _isnull: *mut bool, _omit_quotes: bool,
     _escontext: *mut crate::nodes::nodes::Node,
 ) -> Datum {
-    unimplemented!("TODO(pg-port)")
+    crate::utils::adt::jsonfuncs::json_populate_type(_jb as _, _jb_typid as _, _typid as _, _typmod as _, _cache as _, _mcxt as _, _isnull as _, _omit_quotes as _, _escontext as _) as _
 }
 
 /* TODO(pg-port): DirectFunctionCall1 etc */
@@ -722,15 +778,33 @@ unsafe fn DirectFunctionCall1(
 ) -> Datum {
     unimplemented!("TODO(pg-port): DirectFunctionCall1")
 }
-unsafe fn numeric_out(_d: Datum) -> Datum { unimplemented!("TODO(pg-port)") }
-unsafe fn boolout(_d: Datum) -> Datum { unimplemented!("TODO(pg-port)") }
-unsafe fn date_out(_d: Datum) -> Datum { unimplemented!("TODO(pg-port)") }
-unsafe fn time_out(_d: Datum) -> Datum { unimplemented!("TODO(pg-port)") }
-unsafe fn timetz_out(_d: Datum) -> Datum { unimplemented!("TODO(pg-port)") }
-unsafe fn timestamp_out(_d: Datum) -> Datum { unimplemented!("TODO(pg-port)") }
-unsafe fn timestamptz_out(_d: Datum) -> Datum { unimplemented!("TODO(pg-port)") }
-unsafe fn bool_int4(_d: Datum) -> Datum { unimplemented!("TODO(pg-port)") }
-unsafe fn textin(_d: Datum) -> Datum { unimplemented!("TODO(pg-port)") }
+unsafe fn numeric_out(_d: Datum) -> Datum {
+    crate::utils::adt::numeric::numeric_out(_d as _) as _
+}
+unsafe fn boolout(_d: Datum) -> Datum {
+    crate::utils::adt::bool::boolout(_d as _) as _
+}
+unsafe fn date_out(_d: Datum) -> Datum {
+    crate::utils::adt::date::date_out(_d as _) as _
+}
+unsafe fn time_out(_d: Datum) -> Datum {
+    crate::utils::adt::date::time_out(_d as _) as _
+}
+unsafe fn timetz_out(_d: Datum) -> Datum {
+    crate::utils::adt::date::timetz_out(_d as _) as _
+}
+unsafe fn timestamp_out(_d: Datum) -> Datum {
+    crate::utils::adt::timestamp::timestamp_out(_d as _) as _
+}
+unsafe fn timestamptz_out(_d: Datum) -> Datum {
+    crate::utils::adt::timestamp::timestamptz_out(_d as _) as _
+}
+unsafe fn bool_int4(_d: Datum) -> Datum {
+    crate::utils::adt::int::bool_int4(_d as _) as _
+}
+unsafe fn textin(_d: Datum) -> Datum {
+    crate::utils::adt::varlena::textin(_d as _) as _
+}
 
 /* TODO(pg-port): nodes/execnodes.h ModifyTableState / MergeActionState */
 #[repr(C)]
@@ -766,23 +840,35 @@ unsafe fn exec_rt_fetch(
     _rti: Index,
     _estate: *mut crate::nodes::execnodes::EState,
 ) -> *mut RangeTblEntry {
-    unimplemented!("TODO(pg-port): exec_rt_fetch")
+    crate::executor::executor::exec_rt_fetch(_rti as _, _estate as _) as _
 }
 
 /* TODO(pg-port): nodes/pg_list.h helpers used in xmlexpr */
 use crate::nodes::pg_list::{List, NIL};
-unsafe fn list_length(_list: *mut List) -> c_int { 0 }
-unsafe fn list_nth(_list: *mut List, _n: c_int) -> *mut c_void { core::ptr::null_mut() }
-unsafe fn list_nth_int(_list: *mut List, _n: c_int) -> c_int { 0 }
+unsafe fn list_length(_list: *mut List) -> c_int {
+    crate::nodes::pg_list::list_length(_list as _) as _
+}
+unsafe fn list_nth(_list: *mut List, _n: c_int) -> *mut c_void {
+    crate::nodes::pg_list::list_nth(_list as _, _n as _) as _
+}
+unsafe fn list_nth_int(_list: *mut List, _n: c_int) -> c_int {
+    crate::nodes::pg_list::list_nth_int(_list as _, _n as _) as _
+}
 unsafe fn list_member_int(_list: *mut List, _datum: c_int) -> bool { false }
 macro_rules! forboth {
     ($lc:ident, $list1:expr, $lc2:ident, $list2:expr, $body:block) => {
         /* TODO(pg-port): forboth stub */ {}
     };
 }
-unsafe fn lfirst(_lc: *mut c_void) -> *mut c_void { core::ptr::null_mut() }
-unsafe fn lfirst_int(_lc: *mut c_void) -> c_int { 0 }
-unsafe fn strVal(_lc: *mut c_void) -> *mut c_char { core::ptr::null_mut() }
+unsafe fn lfirst(_lc: *mut c_void) -> *mut c_void {
+    crate::nodes::pg_list::lfirst(_lc as _) as _
+}
+unsafe fn lfirst_int(_lc: *mut c_void) -> c_int {
+    crate::nodes::pg_list::lfirst_int(_lc as _) as _
+}
+unsafe fn strVal(_lc: *mut c_void) -> *mut c_char {
+    crate::catalog::objectaddress_impl::strVal(_lc as _) as _
+}
 
 /* TODO(pg-port): nodes/primnodes.h SVFOp constants */
 use crate::nodes::primnodes::SQLValueFunctionOp;
@@ -840,7 +926,7 @@ use crate::access::cmptype::{COMPARE_GE, COMPARE_GT, COMPARE_LE, COMPARE_LT};
 
 /* TODO(pg-port): nodes/pg_list.h bms_is_member */
 unsafe fn bms_is_member(_x: c_int, _a: *const c_void) -> bool {
-    unimplemented!("TODO(pg-port): bms_is_member")
+    crate::nodes::bitmapset::bms_is_member(_x as _, _a as _) as _
 }
 
 /* TODO(pg-port): utils/tuplesort.h */
@@ -849,13 +935,13 @@ unsafe fn tuplesort_putdatum(
     _val: Datum,
     _isnull: bool,
 ) {
-    unimplemented!("TODO(pg-port): tuplesort_putdatum")
+    crate::utils::sort::tuplesortvariants::tuplesort_putdatum(_state as _, _val as _, _isnull as _)
 }
 unsafe fn tuplesort_puttupleslot(
     _state: *mut c_void,
     _slot: *mut TupleTableSlot,
 ) {
-    unimplemented!("TODO(pg-port): tuplesort_puttupleslot")
+    crate::utils::sort::tuplesortvariants::tuplesort_puttupleslot(_state as _, _slot as _)
 }
 
 /* TODO(pg-port): HeapTupleHeader accessors */
@@ -867,17 +953,23 @@ unsafe fn DatumGetHeapTupleHeader(_d: Datum) -> *mut HeapTupleHeader {
     unimplemented!("TODO(pg-port)")
 }
 unsafe fn HeapTupleHeaderGetTypeId(_h: *mut HeapTupleHeader) -> Oid {
-    unimplemented!("TODO(pg-port)")
+    crate::access::htup_details::HeapTupleHeaderGetTypeId(_h as _) as _
 }
 unsafe fn HeapTupleHeaderGetTypMod(_h: *mut HeapTupleHeader) -> i32 {
-    unimplemented!("TODO(pg-port)")
+    crate::access::htup_details::HeapTupleHeaderGetTypMod(_h as _) as _
 }
 unsafe fn HeapTupleHeaderGetDatumLength(_h: *mut HeapTupleHeader) -> u32 {
-    unimplemented!("TODO(pg-port)")
+    crate::access::htup_details::HeapTupleHeaderGetDatumLength(_h as _) as _
 }
-unsafe fn HeapTupleHeaderSetTypeId(_h: *mut HeapTupleHeader, _typid: Oid) {}
-unsafe fn HeapTupleHeaderSetTypMod(_h: *mut HeapTupleHeader, _typmod: i32) {}
-unsafe fn ItemPointerSetInvalid(_ip: *mut crate::storage::itemptr::ItemPointerData) {}
+unsafe fn HeapTupleHeaderSetTypeId(_h: *mut HeapTupleHeader, _typid: Oid) {
+    crate::access::htup_details::HeapTupleHeaderSetTypeId(_h as _, _typid as _)
+}
+unsafe fn HeapTupleHeaderSetTypMod(_h: *mut HeapTupleHeader, _typmod: i32) {
+    crate::access::htup_details::HeapTupleHeaderSetTypMod(_h as _, _typmod as _)
+}
+unsafe fn ItemPointerSetInvalid(_ip: *mut crate::storage::itemptr::ItemPointerData) {
+    crate::storage::itemptr::ItemPointerSetInvalid(_ip as _)
+}
 
 /* TODO(pg-port): pg_bitutils.h / utils/hsearch.h */
 unsafe fn pg_rotate_left32(v: u32, n: u32) -> u32 {
@@ -919,29 +1011,43 @@ unsafe fn saophash_lookup(
 
 /* TODO(pg-port): array att_* macros */
 unsafe fn fetch_att(_s: *const c_char, _typbyval: bool, _typlen: i16) -> Datum {
-    unimplemented!("TODO(pg-port): fetch_att")
+    crate::access::tupmacs::fetch_att(_s as _, _typbyval as _, _typlen as _) as _
 }
 unsafe fn att_addlength_pointer(
     _s: *const c_char,
     _typlen: i16,
     _ptr: *const c_char,
 ) -> *const c_char {
-    unimplemented!("TODO(pg-port): att_addlength_pointer")
+    crate::access::tupmacs::att_addlength_pointer(_s as _, _typlen as _, _ptr as _) as _
 }
 unsafe fn att_align_nominal(_s: *const c_char, _typalign: c_char) -> *const c_char {
-    unimplemented!("TODO(pg-port): att_align_nominal")
+    crate::access::tupmacs::att_align_nominal(_s as _, _typalign as _) as _
 }
 
-/* TODO(pg-port): errsave / SOFT_ERROR_OCCURRED */
+/* errsave(context, ...): record a soft error into a real ErrorSaveContext and
+ * return; otherwise raise a hard ERROR. */
 unsafe fn errsave(
-    _context: *mut crate::nodes::nodes::Node,
+    context: *mut crate::nodes::nodes::Node,
     _code: c_int,
-    _msg: *const c_char,
+    msg: *const c_char,
 ) {
-    unimplemented!("TODO(pg-port): errsave")
+    const T_ErrorSaveContext: c_int = 447;
+    if !context.is_null() && *(context as *const c_int) == T_ErrorSaveContext {
+        (*(context as *mut ErrorSaveContext)).error_occurred = true;
+        return;
+    }
+    crate::utils::elog::emit_log(
+        ERROR,
+        &std::ffi::CStr::from_ptr(msg).to_string_lossy(),
+        file!(),
+        line!(),
+    );
 }
-unsafe fn SOFT_ERROR_OCCURRED(_escontext: *const ErrorSaveContext) -> bool {
-    unimplemented!("TODO(pg-port): SOFT_ERROR_OCCURRED")
+unsafe fn SOFT_ERROR_OCCURRED(escontext: *const ErrorSaveContext) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    !escontext.is_null()
+        && *(escontext as *const c_int) == T_ErrorSaveContext
+        && (*escontext).error_occurred
 }
 
 /* TODO(pg-port): nodes/primnodes.h JSON_VALUE_OP enum re-export */
@@ -5280,7 +5386,7 @@ pub unsafe fn ExecEvalAggOrderedTransDatum(
 
     /* store the input value in the sort object */
     tuplesort_putdatum(
-        *(*pertrans).sortstates.add(setno as usize),
+        *(*pertrans).sortstates.add(setno as usize) as *mut c_void,
         *(*op).resvalue,
         *(*op).resnull,
     );
@@ -5303,7 +5409,7 @@ pub unsafe fn ExecEvalAggOrderedTransTuple(
     (*pertrans).sortslot = (*econtext).ecxt_outertuple;
 
     tuplesort_puttupleslot(
-        *(*pertrans).sortstates.add(setno as usize),
+        *(*pertrans).sortstates.add(setno as usize) as *mut c_void,
         (*pertrans).sortslot,
     );
 }

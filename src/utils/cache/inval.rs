@@ -105,7 +105,7 @@ unsafe fn ObjectIdGetDatum(oid: Oid) -> Datum {
 }
 
 // SysCacheIdentifier value used here (catalog/syscache_ids.h, generated).
-const RELOID: c_int = 27;
+const RELOID: c_int = 57;
 
 // ----------------------------------------------------------------
 // TODO(pg-port) stubs for dependencies in OTHER .c files.
@@ -113,16 +113,16 @@ const RELOID: c_int = 27;
 
 // utils/snapmgr.c
 unsafe fn InvalidateCatalogSnapshot() {
-    // TODO(pg-port): utils/time/snapmgr.c
+    crate::utils::time::snapmgr::InvalidateCatalogSnapshot()
 }
 
 // utils/cache/relcache.c
-unsafe fn RelationCacheInvalidate(_debug_discard: bool) {
-    // TODO(pg-port): utils/cache/relcache.c
+unsafe fn RelationCacheInvalidate(debug_discard: bool) {
+    crate::utils::cache::relcache::RelationCacheInvalidate(debug_discard)
 }
 
-unsafe fn RelationCacheInvalidateEntry(_relationId: Oid) {
-    // TODO(pg-port): utils/cache/relcache.c
+unsafe fn RelationCacheInvalidateEntry(relationId: Oid) {
+    crate::utils::cache::relcache::RelationCacheInvalidateEntry(relationId as _)
 }
 
 unsafe fn RelationCacheInitFilePreInvalidate() {
@@ -903,7 +903,7 @@ pub unsafe fn LocalExecuteInvalidationMessage(msg: *mut SharedInvalidationMessag
          */
         let mut rlocator: RelFileLocatorBackend = core::mem::zeroed();
 
-        rlocator.locator = (*msg).sm.rlocator;
+        rlocator.locator = core::mem::transmute((*msg).sm.rlocator);
         rlocator.backend = (((*msg).sm.backend_hi as c_int) << 16) | ((*msg).sm.backend_lo as c_int);
         smgrreleaserellocator(rlocator);
     } else if (*msg).id == SHAREDINVALRELMAP_ID {
@@ -1048,7 +1048,7 @@ pub unsafe fn xactGetCommittedInvalidationMessages(
         + NumMessagesInGroup(&(*transInvalInfo).ii.CurrentCmdInvalidMsgs);
 
     msgarray = MemoryContextAlloc(
-        CurTransactionContext,
+        CurTransactionContext as crate::utils::mmgr::memnodes::MemoryContext,
         (nummsgs as usize) * core::mem::size_of::<SharedInvalidationMessage>(),
     ) as *mut SharedInvalidationMessage;
     *msgs = msgarray;
@@ -1239,7 +1239,7 @@ pub unsafe fn AtEOXact_Inval(isCommit: bool) {
     /* Must be at top of stack */
     Assert!((*transInvalInfo).my_level == 1 && (*transInvalInfo).parent.is_null());
 
-    INJECTION_POINT!("transaction-end-process-inval", null_mut());
+    INJECTION_POINT!("transaction-end-process-inval", null_mut::<c_void>());
 
     if isCommit {
         /*
@@ -1439,6 +1439,9 @@ pub unsafe fn CommandEndInvalidationMessages() {
      * bootstrap does it, and also ABORT issued when not in a transaction. So
      * just quietly return if no state to work on.
      */
+    if std::env::var("PDB_BT").is_ok() {
+        eprintln!("PDB_BT CommandEndInvalidationMessages transInvalInfo_null={}", transInvalInfo.is_null());
+    }
     if transInvalInfo.is_null() {
         return;
     }
@@ -1515,10 +1518,10 @@ unsafe fn CacheInvalidateHeapTupleCommon(
         RegisterSnapshotInvalidation(info, databaseId, tupleRelId);
     } else {
         PrepareToInvalidateCacheTuple(
-            relation,
+            relation as *mut c_void,
             tuple,
             newtuple,
-            RegisterCatcacheInvalidation,
+            Some(RegisterCatcacheInvalidation),
             info as *mut c_void,
         );
     }
@@ -1753,7 +1756,7 @@ pub unsafe fn CacheInvalidateSmgr(rlocator: RelFileLocatorBackend) {
     msg.sm.id = SHAREDINVALSMGR_ID;
     msg.sm.backend_hi = (rlocator.backend >> 16) as int8;
     msg.sm.backend_lo = (rlocator.backend & 0xffff) as uint16;
-    msg.sm.rlocator = rlocator.locator;
+    msg.sm.rlocator = core::mem::transmute(rlocator.locator);
     /* check AddCatcacheInvalidationMessage() for an explanation */
     VALGRIND_MAKE_MEM_DEFINED!(&msg, core::mem::size_of_val(&msg));
 
@@ -1791,7 +1794,8 @@ pub unsafe fn CacheInvalidateRelmap(databaseId: Oid) {
  * NOTE: Hash value zero will be passed if a cache reset request is received.
  * In this case the called routines should flush all cached state.
  */
-pub unsafe fn CacheRegisterSyscacheCallback(
+#[no_mangle]
+pub unsafe extern "C" fn CacheRegisterSyscacheCallback(
     cacheid: c_int,
     func: SyscacheCallbackFunction,
     arg: Datum,
@@ -1833,7 +1837,8 @@ pub unsafe fn CacheRegisterSyscacheCallback(
  * NOTE: InvalidOid will be passed if a cache reset request is received.
  * In this case the called routines should flush all cached state.
  */
-pub unsafe fn CacheRegisterRelcacheCallback(func: RelcacheCallbackFunction, arg: Datum) {
+#[no_mangle]
+pub unsafe extern "C" fn CacheRegisterRelcacheCallback(func: RelcacheCallbackFunction, arg: Datum) {
     if relcache_callback_count >= MAX_RELCACHE_CALLBACKS as c_int {
         elog!(FATAL, "out of relcache_callback_list slots");
     }

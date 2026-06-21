@@ -345,18 +345,10 @@ macro_rules! PG_RETURN_NUMERIC {
         return NumericGetDatum($x)
     };
 }
-unsafe fn int64_to_numeric(_val: int64) -> Numeric {
-    unimplemented!("int64_to_numeric: crate::utils::adt::numeric")
-}
-unsafe fn int64_div_fast_to_numeric(_val1: int64, _log10val2: c_int) -> Numeric {
-    unimplemented!("int64_div_fast_to_numeric: crate::utils::adt::numeric")
-}
-unsafe fn numeric_in(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("numeric_in: crate::utils::adt::numeric")
-}
-unsafe fn numeric_round(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("numeric_round: crate::utils::adt::numeric")
-}
+unsafe fn int64_to_numeric(_val: int64) -> Numeric { crate::utils::adt::numeric::int64_to_numeric(_val as _) as _ }
+unsafe fn int64_div_fast_to_numeric(_val1: int64, _log10val2: c_int) -> Numeric { crate::utils::adt::numeric::int64_div_fast_to_numeric(_val1 as _, _log10val2 as _) as _ }
+unsafe fn numeric_in(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_in(_fcinfo as _) as _ }
+unsafe fn numeric_round(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_round(_fcinfo as _) as _ }
 unsafe fn numeric_add_opt_error(_n1: Numeric, _n2: Numeric, _have_error: *mut bool) -> Numeric {
     unimplemented!("numeric_add_opt_error: crate::utils::adt::numeric")
 }
@@ -368,39 +360,25 @@ unsafe fn numeric_div_opt_error(_n1: Numeric, _n2: Numeric, _have_error: *mut bo
 }
 
 // --- int8 hashing (TODO(pg-port): crate::utils::adt::int8) ---
-unsafe fn hashint8(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("hashint8: crate::utils::adt::int8")
-}
-unsafe fn hashint8extended(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("hashint8extended: crate::utils::adt::int8")
-}
+unsafe fn hashint8(_fcinfo: FunctionCallInfo) -> Datum { crate::access::hash::hashfunc::hashint8(_fcinfo as _) as _ }
+unsafe fn hashint8extended(_fcinfo: FunctionCallInfo) -> Datum { crate::access::hash::hashfunc::hashint8extended(_fcinfo as _) as _ }
 #[allow(non_snake_case)]
 fn Int64GetDatumFast(X: int64) -> Datum {
     Int64GetDatum(X)
 }
 
 // --- datetime.h helpers not yet exported from datetime.rs ---
-unsafe fn DecodeUnits(_field: c_int, _lowtoken: *const c_char, _val: *mut c_int) -> c_int {
-    unimplemented!("DecodeUnits: crate::utils::adt::datetime")
-}
-unsafe fn DecodeSpecial(_field: c_int, _lowtoken: *const c_char, _val: *mut c_int) -> c_int {
-    unimplemented!("DecodeSpecial: crate::utils::adt::datetime")
-}
-unsafe fn date2j(_year: c_int, _month: c_int, _day: c_int) -> c_int {
-    unimplemented!("date2j: crate::utils::adt::datetime")
-}
-unsafe fn j2day(_date: c_int) -> c_int {
-    unimplemented!("j2day: crate::utils::adt::datetime")
-}
+unsafe fn DecodeUnits(_field: c_int, _lowtoken: *const c_char, _val: *mut c_int) -> c_int { crate::utils::adt::datetime::DecodeUnits(_field as _, _lowtoken as _, _val as _) as _ }
+unsafe fn DecodeSpecial(_field: c_int, _lowtoken: *const c_char, _val: *mut c_int) -> c_int { crate::utils::adt::datetime::DecodeSpecial(_field as _, _lowtoken as _, _val as _) as _ }
+unsafe fn date2j(_year: c_int, _month: c_int, _day: c_int) -> c_int { crate::utils::adt::datetime::date2j(_year as _, _month as _, _day as _) as _ }
+unsafe fn j2day(_date: c_int) -> c_int { crate::utils::adt::datetime::j2day(_date as _) as _ }
 unsafe fn ValidateDate(
     _fmask: c_int,
     _isjulian: bool,
     _is2digits: bool,
     _bc: bool,
     _tm: *mut pg_tm,
-) -> c_int {
-    unimplemented!("ValidateDate: crate::utils::adt::datetime")
-}
+) -> c_int { crate::utils::adt::datetime::ValidateDate(_fmask as _, _isjulian, _is2digits, _bc, _tm as _) as _ }
 unsafe fn EncodeDateTime(
     _tm: *mut pg_tm,
     _fsec: fsec_t,
@@ -409,30 +387,20 @@ unsafe fn EncodeDateTime(
     _tzn: *const c_char,
     _style: c_int,
     _str: *mut c_char,
-) {
-    unimplemented!("EncodeDateTime: crate::utils::adt::datetime")
-}
-unsafe fn DetermineTimeZoneOffset(_tm: *mut pg_tm, _tzp: *mut pg_tz) -> c_int {
-    unimplemented!("DetermineTimeZoneOffset: crate::utils::adt::datetime")
-}
+) { crate::utils::adt::datetime::EncodeDateTime(_tm as _, _fsec as _, _print_tz, _tz as _, _tzn as _, _style as _, _str as _) }
+unsafe fn DetermineTimeZoneOffset(_tm: *mut pg_tm, _tzp: *mut pg_tz) -> c_int { crate::utils::adt::datetime::DetermineTimeZoneOffset(_tm as _, _tzp as _) as _ }
 unsafe fn DetermineTimeZoneAbbrevOffset(
     _tm: *mut pg_tm,
     _abbr: *const c_char,
     _tzp: *mut pg_tz,
-) -> c_int {
-    unimplemented!("DetermineTimeZoneAbbrevOffset: crate::utils::adt::datetime")
-}
+) -> c_int { crate::utils::adt::datetime::DetermineTimeZoneAbbrevOffset(_tm as _, _abbr as _, _tzp as _) as _ }
 unsafe fn DetermineTimeZoneAbbrevOffsetTS(
     _ts: TimestampTz,
     _abbr: *const c_char,
     _tzp: *mut pg_tz,
     _isdst: *mut c_int,
-) -> c_int {
-    unimplemented!("DetermineTimeZoneAbbrevOffsetTS: crate::utils::adt::datetime")
-}
-unsafe fn DecodeTimezoneNameToTz(_tzname: *const c_char) -> *mut pg_tz {
-    unimplemented!("DecodeTimezoneNameToTz: crate::utils::adt::datetime")
-}
+) -> c_int { crate::utils::adt::datetime::DetermineTimeZoneAbbrevOffsetTS(_ts as _, _abbr as _, _tzp as _, _isdst as _) as _ }
+unsafe fn DecodeTimezoneNameToTz(_tzname: *const c_char) -> *mut pg_tz { crate::utils::adt::datetime::DecodeTimezoneNameToTz(_tzname as _) as _ }
 unsafe fn itmin2interval(itm_in: *const pg_itm_in, span: *mut Interval) -> c_int {
     // forward to the real impl defined in this file
     itmin2interval_impl(itm_in, span)
@@ -445,9 +413,7 @@ unsafe fn ParseDateTime(
     _ftype: *mut c_int,
     _maxfields: c_int,
     _numfields: *mut c_int,
-) -> c_int {
-    unimplemented!("ParseDateTime: crate::utils::adt::datetime")
-}
+) -> c_int { crate::utils::adt::datetime::ParseDateTime(_str as _, _workbuf as _, _buflen as _, _field as _, _ftype as _, _maxfields as _, _numfields as _) as _ }
 unsafe fn DecodeDateTime(
     _field: *mut *mut c_char,
     _ftype: *const c_int,
@@ -457,27 +423,21 @@ unsafe fn DecodeDateTime(
     _fsec: *mut fsec_t,
     _tzp: *mut c_int,
     _extra: *mut DateTimeErrorExtra,
-) -> c_int {
-    unimplemented!("DecodeDateTime: crate::utils::adt::datetime")
-}
+) -> c_int { crate::utils::adt::datetime::DecodeDateTime(_field as _, _ftype as _, _nf as _, _dtype as _, _tm as _, _fsec as _, _tzp as _, _extra as _) as _ }
 unsafe fn DateTimeParseError(
     _dterr: c_int,
     _extra: *const DateTimeErrorExtra,
     _str: *const c_char,
     _datatype: *const c_char,
     _escontext: *mut c_void,
-) {
-    unimplemented!("DateTimeParseError: crate::utils::adt::datetime")
-}
+) { crate::utils::adt::datetime::DateTimeParseError(_dterr as _, _extra as _, _str as _, _datatype as _, _escontext as _) }
 
 // --- parser/scansup.h ---
 unsafe fn downcase_truncate_identifier(
     _ident: *const c_char,
     _len: c_int,
     _warn: bool,
-) -> *mut c_char {
-    unimplemented!("downcase_truncate_identifier: crate::parser::scansup")
-}
+) -> *mut c_char { crate::parser::scansup::downcase_truncate_identifier(_ident as _, _len as _, _warn) as _ }
 
 // --- varlena/format helpers ---
 unsafe fn text_to_cstring_buffer(_src: *const text, _dst: *mut c_char, _dstlen: Size) {
@@ -496,19 +456,19 @@ unsafe fn pg_get_timezone_offset(_tz: *mut pg_tz, _offset: *mut std::os::raw::c_
 
 // --- pgtime helpers (TODO(pg-port): crate::pgtime / crate::pgtz) ---
 pub type pg_time_t = i64;
-unsafe fn pg_localtime(_timep: *const pg_time_t, _tz: *mut pg_tz) -> *mut pg_tm {
-    unimplemented!("pg_localtime: crate::pgtime")
+unsafe fn pg_localtime(timep: *const pg_time_t, tz: *mut pg_tz) -> *mut pg_tm {
+    crate::pgtime::pg_localtime(timep as _, tz as _) as _
 }
-unsafe fn pg_gmtime(_timep: *const pg_time_t) -> *mut pg_tm {
-    unimplemented!("pg_gmtime: crate::pgtime")
+unsafe fn pg_gmtime(timep: *const pg_time_t) -> *mut pg_tm {
+    crate::pgtime::pg_gmtime(timep as _) as _
 }
 unsafe fn pg_strftime(
-    _s: *mut c_char,
-    _maxsize: Size,
-    _format: *const c_char,
-    _tm: *mut pg_tm,
+    s: *mut c_char,
+    maxsize: Size,
+    format: *const c_char,
+    tm: *mut pg_tm,
 ) -> Size {
-    unimplemented!("pg_strftime: crate::pgtime")
+    crate::pgtime::pg_strftime(s as _, maxsize as _, format as _, tm as _) as _
 }
 
 #[repr(C)]
@@ -516,13 +476,20 @@ struct timeval {
     tv_sec: i64,
     tv_usec: i64,
 }
-unsafe fn gettimeofday(_tp: *mut timeval, _tz: *mut c_void) -> c_int {
-    unimplemented!("gettimeofday: libc")
+unsafe fn gettimeofday(tp: *mut timeval, _tz: *mut c_void) -> c_int {
+    // Bridge libc::timeval (tv_usec: i32 on macOS) to this module's local timeval (i64 fields).
+    let mut t: libc::timeval = core::mem::zeroed();
+    let r = libc::gettimeofday(&mut t, core::ptr::null_mut());
+    if !tp.is_null() {
+        (*tp).tv_sec = t.tv_sec as i64;
+        (*tp).tv_usec = t.tv_usec as i64;
+    }
+    r
 }
 
 // --- access/xact.h (TODO(pg-port): crate::access::transam::xact) ---
 pub unsafe fn GetCurrentStatementStartTimestamp() -> TimestampTz {
-    unimplemented!("GetCurrentStatementStartTimestamp: crate::access::transam::xact")
+    crate::access::transam::xact::GetCurrentStatementStartTimestamp()
 }
 
 // --- funcapi.h SRF / aggregate plumbing (TODO(pg-port): crate::funcapi) ---
@@ -549,15 +516,11 @@ unsafe fn SRF_RETURN_DONE(_funcctx: *mut FuncCallContext) -> Datum {
 unsafe fn AggCheckCallContext(
     _fcinfo: FunctionCallInfo,
     _aggcontext: *mut MemoryContext,
-) -> bool {
-    unimplemented!("AggCheckCallContext: crate::executor::nodeAgg")
-}
+) -> bool { crate::executor::nodeAgg::AggCheckCallContext(_fcinfo as _, _aggcontext as _) != 0 }
 
 // --- utils/array.h (TODO(pg-port): crate::utils::adt::array) ---
 pub type ArrayType = c_void;
-unsafe fn ArrayGetIntegerTypmods(_arr: *mut ArrayType, _n: *mut c_int) -> *mut int32 {
-    unimplemented!("ArrayGetIntegerTypmods: crate::utils::adt::arrayutils")
-}
+unsafe fn ArrayGetIntegerTypmods(_arr: *mut ArrayType, _n: *mut c_int) -> *mut int32 { crate::utils::adt::arrayutils::ArrayGetIntegerTypmods(_arr as _, _n as _) as _ }
 macro_rules! PG_GETARG_ARRAYTYPE_P {
     ($fcinfo:expr, $n:expr) => {
         DatumGetPointer(PG_GETARG_DATUM!($fcinfo, $n)) as *mut ArrayType
@@ -577,18 +540,12 @@ pub struct SupportRequestRows {
     pub node: *mut Node,
     pub rows: f64,
 }
-unsafe fn TemporalSimplify(_max_precis: int32, _node: *mut Node) -> *mut Node {
-    unimplemented!("TemporalSimplify: crate::utils::adt::date")
-}
+unsafe fn TemporalSimplify(_max_precis: int32, _node: *mut Node) -> *mut Node { crate::utils::adt::datetime::TemporalSimplify(_max_precis as _, _node as _) as _ }
 unsafe fn exprTypmod(_expr: *mut Node) -> int32 {
     unimplemented!("exprTypmod: crate::nodes::nodeFuncs")
 }
-unsafe fn relabel_to_typmod(_expr: *mut Node, _typmod: int32) -> *mut Node {
-    unimplemented!("relabel_to_typmod: crate::optimizer")
-}
-unsafe fn estimate_expression_value(_root: *mut c_void, _node: *mut Node) -> *mut Node {
-    unimplemented!("estimate_expression_value: crate::optimizer")
-}
+unsafe fn relabel_to_typmod(_expr: *mut Node, _typmod: int32) -> *mut Node { crate::nodes::nodeFuncs::relabel_to_typmod(_expr as _, _typmod as _) as _ }
+unsafe fn estimate_expression_value(_root: *mut c_void, _node: *mut Node) -> *mut Node { crate::optimizer::optimizer::estimate_expression_value(_root as _, _node as _) as _ }
 unsafe fn is_funcclause(_node: *mut Node) -> bool {
     unimplemented!("is_funcclause: crate::nodes::nodeFuncs")
 }
@@ -654,6 +611,7 @@ pub static mut PgStartTime: TimestampTz = 0;
 
 /* Set at configuration reload */
 #[allow(non_upper_case_globals)]
+#[no_mangle]
 pub static mut PgReloadTime: TimestampTz = 0;
 
 #[repr(C)]
@@ -2286,6 +2244,7 @@ pub unsafe fn TimestampDifferenceMilliseconds(
  * Both inputs must be ordinary finite timestamps (in current usage,
  * they'll be results from GetCurrentTimestamp()).
  */
+#[no_mangle]
 pub unsafe fn TimestampDifferenceExceeds(
     start_time: TimestampTz,
     stop_time: TimestampTz,
@@ -5031,7 +4990,7 @@ pub unsafe fn timestamp_trunc(fcinfo: FunctionCallInfo) -> Datum {
     let mut tt: pg_tm = std::mem::zeroed();
     let tm = &mut tt as *mut pg_tm;
 
-    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units as *const c_char), VARSIZE_ANY_EXHDR(units as *const c_char) as c_int, false);
 
     r#type = DecodeUnits(0, lowunits, &mut val);
 
@@ -5247,7 +5206,7 @@ unsafe fn timestamptz_trunc_internal(units: *mut text, timestamp: TimestampTz, t
     let mut tt: pg_tm = std::mem::zeroed();
     let tm = &mut tt as *mut pg_tm;
 
-    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units as *const c_char), VARSIZE_ANY_EXHDR(units as *const c_char) as c_int, false);
 
     r#type = DecodeUnits(0, lowunits, &mut val);
 
@@ -5433,7 +5392,7 @@ pub unsafe fn interval_trunc(fcinfo: FunctionCallInfo) -> Datum {
 
     result = palloc(std::mem::size_of::<Interval>() as Size) as *mut Interval;
 
-    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units as *const c_char), VARSIZE_ANY_EXHDR(units as *const c_char) as c_int, false);
 
     r#type = DecodeUnits(0, lowunits, &mut val);
 
@@ -5460,7 +5419,7 @@ pub unsafe fn interval_trunc(fcinfo: FunctionCallInfo) -> Datum {
             }
         }
 
-        interval2itm(*interval, tm);
+        interval2itm(core::ptr::read(interval), tm);
 
         let mut matched = true;
         if val == DTK_MICROSEC {
@@ -5741,6 +5700,7 @@ unsafe fn NonFiniteTimestampTzPart(
             ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
                 std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
                 std::ffi::CStr::from_ptr(format_type_be(if isTz { TIMESTAMPTZOID } else { TIMESTAMPOID })).to_string_lossy()));
+            0.0
         }
     }
 }
@@ -5760,7 +5720,7 @@ unsafe fn timestamp_part_common(fcinfo: FunctionCallInfo, retnumeric: bool) -> D
     let mut tt: pg_tm = std::mem::zeroed();
     let tm = &mut tt as *mut pg_tm;
 
-    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units as *const c_char), VARSIZE_ANY_EXHDR(units as *const c_char) as c_int, false);
 
     r#type = DecodeUnits(0, lowunits, &mut val);
     if r#type == UNKNOWN_FIELD {
@@ -5998,7 +5958,7 @@ unsafe fn timestamptz_part_common(fcinfo: FunctionCallInfo, retnumeric: bool) ->
     let mut tt: pg_tm = std::mem::zeroed();
     let tm = &mut tt as *mut pg_tm;
 
-    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units as *const c_char), VARSIZE_ANY_EXHDR(units as *const c_char) as c_int, false);
 
     r#type = DecodeUnits(0, lowunits, &mut val);
     if r#type == UNKNOWN_FIELD {
@@ -6256,6 +6216,7 @@ unsafe fn NonFiniteIntervalPart(r#type: c_int, unit: c_int, lowunits: *mut c_cha
             ereport!(ERROR, errmsg!("unit \"{}\" not supported for type {}",
                 std::ffi::CStr::from_ptr(lowunits).to_string_lossy(),
                 std::ffi::CStr::from_ptr(format_type_be(INTERVALOID)).to_string_lossy()));
+            0.0
         }
     }
 }
@@ -6273,7 +6234,7 @@ unsafe fn interval_part_common(fcinfo: FunctionCallInfo, retnumeric: bool) -> Da
     let mut tt: pg_itm = std::mem::zeroed();
     let tm = &mut tt as *mut pg_itm;
 
-    lowunits = downcase_truncate_identifier(VARDATA_ANY(units), VARSIZE_ANY_EXHDR(units) as c_int, false);
+    lowunits = downcase_truncate_identifier(VARDATA_ANY(units as *const c_char), VARSIZE_ANY_EXHDR(units as *const c_char) as c_int, false);
 
     r#type = DecodeUnits(0, lowunits, &mut val);
     if r#type == UNKNOWN_FIELD {
@@ -6305,7 +6266,7 @@ unsafe fn interval_part_common(fcinfo: FunctionCallInfo, retnumeric: bool) -> Da
     }
 
     if r#type == UNITS {
-        interval2itm(*interval, tm);
+        interval2itm(core::ptr::read(interval), tm);
         match val {
             DTK_MICROSEC => {
                 intresult = (*tm).tm_sec as int64 * 1000000 + (*tm).tm_usec as int64;
@@ -6802,7 +6763,7 @@ pub unsafe fn generate_series_timestamp(fcinfo: FunctionCallInfo) -> Datum {
          */
         (*fctx0).current = start;
         (*fctx0).finish = finish;
-        (*fctx0).step = *step;
+        (*fctx0).step = core::ptr::read(step);
 
         /* Determine sign of the interval */
         (*fctx0).step_sign = interval_sign(&(*fctx0).step);
@@ -6883,7 +6844,7 @@ unsafe fn generate_series_timestamptz_internal(fcinfo: FunctionCallInfo) -> Datu
          */
         (*fctx0).current = start;
         (*fctx0).finish = finish;
-        (*fctx0).step = *step;
+        (*fctx0).step = core::ptr::read(step);
         (*fctx0).attimezone = if !zone.is_null() { lookup_timezone(zone) } else { session_timezone };
 
         /* Determine sign of the interval */

@@ -225,10 +225,7 @@ unsafe fn relpathperm(locator: RelFileLocator, forkno: ForkNumber) -> RelPathStr
     let _ = (locator, forkno);
     unimplemented!() // TODO: common/relpath.c
 }
-unsafe fn message_level_is_interesting(elevel: c_int) -> bool {
-    let _ = elevel;
-    unimplemented!() // TODO: utils/error/elog.c
-}
+unsafe fn message_level_is_interesting(elevel: c_int) -> bool { crate::utils::error::elog_impl::message_level_is_interesting(elevel as _) }
 unsafe fn hash_create(
     tabname: *const c_char,
     nelem: c_long,
@@ -247,22 +244,10 @@ unsafe fn hash_search(
     let _ = (hashp, keyPtr, action, foundPtr);
     unimplemented!() // TODO: utils/hash/dynahash.c
 }
-unsafe fn hash_seq_init(status: *mut HASH_SEQ_STATUS, hashp: *mut HTAB) {
-    let _ = (status, hashp);
-    unimplemented!() // TODO: utils/hash/dynahash.c
-}
-unsafe fn hash_seq_search(status: *mut HASH_SEQ_STATUS) -> *mut c_void {
-    let _ = status;
-    unimplemented!() // TODO: utils/hash/dynahash.c
-}
-unsafe fn hash_get_num_entries(hashp: *mut HTAB) -> c_long {
-    let _ = hashp;
-    unimplemented!() // TODO: utils/hash/dynahash.c
-}
-unsafe fn hash_destroy(hashp: *mut HTAB) {
-    let _ = hashp;
-    unimplemented!() // TODO: utils/hash/dynahash.c
-}
+unsafe fn hash_seq_init(status: *mut HASH_SEQ_STATUS, hashp: *mut HTAB) { crate::utils::hash::dynahash::hash_seq_init(status as _, hashp as _) }
+unsafe fn hash_seq_search(status: *mut HASH_SEQ_STATUS) -> *mut c_void { crate::utils::hash::dynahash::hash_seq_search(status as _) }
+unsafe fn hash_get_num_entries(hashp: *mut HTAB) -> c_long { crate::utils::hash::dynahash::hash_get_num_entries(hashp as _) }
+unsafe fn hash_destroy(hashp: *mut HTAB) { crate::utils::hash::dynahash::hash_destroy(hashp as _) }
 unsafe fn RelFileLocatorEquals(a: RelFileLocator, b: RelFileLocator) -> bool {
     a.relNumber == b.relNumber && a.dbOid == b.dbOid && a.spcOid == b.spcOid
 }
@@ -277,18 +262,9 @@ unsafe fn XLogRecGetBlockTagExtended(
     let _ = (record, block_id, rlocator, forknum, blknum, prefetch_buffer);
     unimplemented!() // TODO: access/transam/xlogreader.c
 }
-unsafe fn XLogRecGetBlock(record: *mut XLogReaderState, block_id: uint8) -> *mut DecodedBkpBlock {
-    let _ = (record, block_id);
-    unimplemented!() // TODO: access/transam/xlogreader.c
-}
-unsafe fn XLogRecBlockImageApply(record: *mut XLogReaderState, block_id: uint8) -> bool {
-    let _ = (record, block_id);
-    unimplemented!() // TODO: access/transam/xlogreader.c
-}
-unsafe fn XLogRecHasBlockImage(record: *mut XLogReaderState, block_id: uint8) -> bool {
-    let _ = (record, block_id);
-    unimplemented!() // TODO: access/transam/xlogreader.c
-}
+unsafe fn XLogRecGetBlock(record: *mut XLogReaderState, block_id: uint8) -> *mut DecodedBkpBlock { unimplemented!() }
+unsafe fn XLogRecBlockImageApply(record: *mut XLogReaderState, block_id: uint8) -> bool { crate::access::transam::xlogreader::XLogRecBlockImageApply(record as _, block_id as _) }
+unsafe fn XLogRecHasBlockImage(record: *mut XLogReaderState, block_id: uint8) -> bool { crate::access::transam::xlogreader::XLogRecHasBlockImage(record as _, block_id as _) }
 unsafe fn RestoreBlockImage(
     record: *mut XLogReaderState,
     block_id: uint8,
@@ -301,26 +277,14 @@ unsafe fn BufferGetPage(buffer: Buffer) -> Page {
     let _ = buffer;
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
-unsafe fn PageIsNew(page: Page) -> bool {
-    let _ = page;
-    unimplemented!() // TODO: storage/page/bufpage.c
-}
-unsafe fn PageSetLSN(page: Page, lsn: XLogRecPtr) {
-    let _ = (page, lsn);
-    unimplemented!() // TODO: storage/page/bufpage.c
-}
-unsafe fn PageGetLSN(page: Page) -> XLogRecPtr {
-    let _ = page;
-    unimplemented!() // TODO: storage/page/bufpage.c
-}
+unsafe fn PageIsNew(page: Page) -> bool { crate::storage::bufpage::PageIsNew(page as _) }
+unsafe fn PageSetLSN(page: Page, lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(page as _, lsn as _) }
+unsafe fn PageGetLSN(page: Page) -> XLogRecPtr { crate::storage::bufpage::PageGetLSN(page as _) }
 unsafe fn MarkBufferDirty(buffer: Buffer) {
     let _ = buffer;
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
-unsafe fn FlushOneBuffer(buffer: Buffer) {
-    let _ = buffer;
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
-}
+unsafe fn FlushOneBuffer(buffer: Buffer) { crate::storage::buffer::bufmgr::FlushOneBuffer(buffer as _) }
 unsafe fn BufferIsValid(buffer: Buffer) -> bool {
     buffer != InvalidBuffer
 }
@@ -371,40 +335,24 @@ unsafe fn smgropen(rlocator: RelFileLocator, backend: c_int) -> SMgrRelation {
     let _ = (rlocator, backend);
     unimplemented!() // TODO: storage/smgr/smgr.c
 }
-unsafe fn smgrcreate(reln: SMgrRelation, forknum: ForkNumber, isRedo: bool) {
-    let _ = (reln, forknum, isRedo);
-    unimplemented!() // TODO: storage/smgr/smgr.c
-}
+unsafe fn smgrcreate(reln: SMgrRelation, forknum: ForkNumber, isRedo: bool) { crate::storage::smgr::smgr::smgrcreate(reln as _, forknum as _, isRedo as _) }
 unsafe fn smgrnblocks(reln: SMgrRelation, forknum: ForkNumber) -> BlockNumber {
     let _ = (reln, forknum);
     unimplemented!() // TODO: storage/smgr/smgr.c
 }
-unsafe fn smgrdestroyall() {
-    unimplemented!() // TODO: storage/smgr/smgr.c
-}
+unsafe fn smgrdestroyall() { crate::storage::smgr::smgr::smgrdestroyall() }
 unsafe fn BMR_SMGR(smgr: SMgrRelation, relpersistence: c_char) -> BufferManagerRelation {
     let _ = relpersistence;
     BufferManagerRelation { smgr }
 }
-unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO: access/transam/xlog.c
-}
-unsafe fn GetFlushRecPtr(insertTLI: *mut TimeLineID) -> XLogRecPtr {
-    let _ = insertTLI;
-    unimplemented!() // TODO: access/transam/xlog.c
-}
-unsafe fn GetXLogReplayRecPtr(replayTLI: *mut TimeLineID) -> XLogRecPtr {
-    let _ = replayTLI;
-    unimplemented!() // TODO: access/transam/xlogrecovery.c
-}
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
+unsafe fn GetFlushRecPtr(insertTLI: *mut TimeLineID) -> XLogRecPtr { crate::access::transam::xlog::GetFlushRecPtr(insertTLI as _) }
+unsafe fn GetXLogReplayRecPtr(replayTLI: *mut TimeLineID) -> XLogRecPtr { crate::access::transam::xlogrecovery::GetXLogReplayRecPtr(replayTLI as _) }
 unsafe fn readTimeLineHistory(targetTLI: TimeLineID) -> *mut List {
     let _ = targetTLI;
     unimplemented!() // TODO: access/transam/timeline.c
 }
-unsafe fn tliOfPointInHistory(ptr: XLogRecPtr, history: *mut List) -> TimeLineID {
-    let _ = (ptr, history);
-    unimplemented!() // TODO: access/transam/timeline.c
-}
+unsafe fn tliOfPointInHistory(ptr: XLogRecPtr, history: *mut List) -> TimeLineID { crate::access::transam::timeline::tliOfPointInHistory(ptr as _, history as _) }
 unsafe fn tliSwitchPoint(
     tli: TimeLineID,
     history: *mut List,
@@ -435,10 +383,7 @@ unsafe fn XLogFileName(
     let _ = (fname, tli, logSegNo, wal_segsz_bytes);
     unimplemented!() // TODO: access/transam/xlog_internal.h
 }
-unsafe fn BasicOpenFile(fileName: *const c_char, fileFlags: c_int) -> c_int {
-    let _ = (fileName, fileFlags);
-    unimplemented!() // TODO: storage/file/fd.c
-}
+unsafe fn BasicOpenFile(fileName: *const c_char, fileFlags: c_int) -> c_int { crate::storage::file::fd::BasicOpenFile(fileName as _, fileFlags as _) }
 unsafe fn WALRead(
     state: *mut XLogReaderState,
     buf: *mut c_char,
@@ -454,9 +399,7 @@ unsafe fn pg_usleep(microsec: c_long) {
     let _ = microsec;
     unimplemented!() // TODO: port/pgsleep.c
 }
-unsafe fn errcode_for_file_access() -> c_int {
-    unimplemented!() // TODO: utils/error/elog.c
-}
+unsafe fn errcode_for_file_access() -> c_int { crate::utils::error::elog_impl::errcode_for_file_access() }
 
 extern "C" {
     fn close(fd: c_int) -> c_int;

@@ -234,6 +234,7 @@ unsafe fn fetchatt(att: *const CompactAttribute, T: *const c_char) -> Datum {
  * (1-based) is positive; `isnull` is writable.
  */
 #[inline]
+#[no_mangle]
 pub unsafe fn index_getattr(
     tup: IndexTuple,
     attnum: c_int,

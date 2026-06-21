@@ -99,7 +99,7 @@ const OIDOID: Oid = 26;
 
 // utils/cache/syscache.h - SysCacheIdentifier RELOID.
 // TODO(pg-port): replace with generated utils/syscache.h constant.
-const RELOID: c_int = 0;
+const RELOID: c_int = 57;
 
 // catalog/dependency.h - DependencyType.
 // TODO(pg-port): replace with the catalog/dependency.h DependencyType enum.
@@ -337,9 +337,7 @@ unsafe fn get_rel_relkind(_relid: Oid) -> c_char {
 }
 
 /* TODO(pg-port): utils/init/miscinit.c - current user id. */
-unsafe fn GetUserId() -> Oid {
-    unimplemented!()
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 
 /* TODO(pg-port): utils/array.c - DatumGetArrayTypePCopy not ported yet. */
 unsafe fn DatumGetArrayTypePCopy(_d: Datum) -> *mut ArrayType {
@@ -550,7 +548,7 @@ pub unsafe fn RelationBuildRowSecurity(relation: Relation) {
      */
     rscxt = AllocSetContextCreate!(
         CurrentMemoryContext,
-        "row security descriptor",
+        c"row security descriptor".as_ptr(),
         ALLOCSET_SMALL_SIZES
     );
     MemoryContextCopyAndSetIdentifier(rscxt, RelationGetRelationName(relation));

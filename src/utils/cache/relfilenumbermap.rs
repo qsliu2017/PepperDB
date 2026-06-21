@@ -343,9 +343,7 @@ unsafe fn CreateCacheMemoryContext() {
 }
 
 // TODO: not ported - utils/cache/relmapper.c
-unsafe fn RelationMapFilenumberToOid(_filenumber: RelFileNumber, _shared: bool) -> Oid {
-    unimplemented!()
-}
+unsafe fn RelationMapFilenumberToOid(_filenumber: RelFileNumber, _shared: bool) -> Oid { crate::utils::cache::relmapper::RelationMapFilenumberToOid(_filenumber, _shared) }
 
 // TODO: not ported - access/index/genam.c
 unsafe fn systable_beginscan(

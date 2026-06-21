@@ -23,9 +23,9 @@ use crate::miscadmin::CritSectionCount;
 
 /* ---- locally-stubbed, not-yet-ported dependencies ---- */
 
-/// transam/xact.c (not yet ported)
-unsafe fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool {
-    unimplemented!()
+/// transam/xact.c
+unsafe fn TransactionIdIsCurrentTransactionId(xid: TransactionId) -> bool {
+    crate::access::transam::xact::TransactionIdIsCurrentTransactionId(xid)
 }
 
 /// shmem.c add_size (not yet exported there); faithful overflow-checked add.

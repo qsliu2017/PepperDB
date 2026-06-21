@@ -273,6 +273,7 @@ pub unsafe fn negate_clause(node: *mut Node) -> *mut Node {
  *
  * Returns the modified qualification.
  */
+#[no_mangle]
 pub unsafe fn canonicalize_qual(qual: *mut Expr, is_check: bool) -> *mut Expr {
     /* Quick exit for empty qual */
     if qual.is_null() {

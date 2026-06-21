@@ -62,46 +62,11 @@ const ENOENT: c_int = 2;
 // used by storage/file/copydir.rs.  TODO: dedup once a shared, field-bearing
 // dirent definition exists.
 // ---------------------------------------------------------------------------
-#[allow(non_camel_case_types)]
-#[repr(C)]
-struct dirent {
-    _private: [u8; 0],
-}
-
-#[allow(non_camel_case_types)]
-#[repr(C)]
-struct DIR {
-    _private: [u8; 0],
-}
+use crate::storage::file::fd::{dirent, DIR, AllocateDir, ReadDir, FreeDir, fsync_fname};
 
 #[inline]
 unsafe fn dirent_d_name(de: *const dirent) -> *const c_char {
-    #[cfg(target_os = "macos")]
-    let off: isize = 21;
-    #[cfg(not(target_os = "macos"))]
-    let off: isize = 19;
-    (de as *const u8).offset(off) as *const c_char
-}
-
-// ---------------------------------------------------------------------------
-// Stubs for not-yet-ported callees.
-// ---------------------------------------------------------------------------
-
-// storage/fd.h: AllocateDir/ReadDir/FreeDir.  TODO: port storage/file/fd.c.
-unsafe fn AllocateDir(_dirname: *const c_char) -> *mut DIR {
-    unimplemented!()
-}
-unsafe fn ReadDir(_dir: *mut DIR, _dirname: *const c_char) -> *mut dirent {
-    unimplemented!()
-}
-unsafe fn FreeDir(_dir: *mut DIR) -> c_int {
-    unimplemented!()
-}
-
-// common/file_utils.h: fsync_fname.  TODO: import once common/file_utils.rs
-// exposes it for this path (copydir.rs uses it through its own import).
-unsafe fn fsync_fname(_fname: *const c_char, _isdir: bool) {
-    unimplemented!()
+    (*de).d_name.as_ptr()
 }
 
 // utils/elog.h: errcode_for_file_access.  TODO: real ereport machinery.

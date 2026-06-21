@@ -30,7 +30,7 @@ pub struct AttributeOpts {
 }
 
 // TODO: not ported - utils/syscache.h. SysCacheIdentifier for pg_attribute by (attrelid, attnum).
-const ATTNUM: c_int = 0;
+const ATTNUM: c_int = 7;
 
 // TODO: not ported - catalog/pg_attribute.h.
 const Anum_pg_attribute_attoptions: c_int = 0;
@@ -78,9 +78,7 @@ unsafe fn CreateCacheMemoryContext() {
 }
 
 // TODO: not ported - access/reloptions.h.
-unsafe fn attribute_reloptions(_reloptions: Datum, _validate: bool) -> *mut bytea {
-    unimplemented!()
-}
+unsafe fn attribute_reloptions(_reloptions: Datum, _validate: bool) -> *mut bytea { crate::access::common::reloptions::attribute_reloptions(_reloptions, _validate) }
 
 // ---------------------------------------------------------------------------
 // attoptcache

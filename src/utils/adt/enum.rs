@@ -105,8 +105,8 @@ const AccessShareLock: c_int = 1;
 const TYPALIGN_INT: c_char = b'i' as c_char;
 
 // syscache ids
-const ENUMOID: c_int = 0;
-const ENUMTYPOIDNAME: c_int = 0;
+const ENUMOID: c_int = 23;
+const ENUMTYPOIDNAME: c_int = 24;
 
 // pg_enum index/relation oids and attribute numbers
 const EnumRelationId: Oid = 3501;

@@ -126,6 +126,7 @@ fn s_lock_stuck(file: *const c_char, line: c_int, func: *const c_char) -> ! {
 /// Spins on `TAS_SPIN` (here: `tas`) until the lock is acquired, performing the
 /// backoff delay each contended iteration, then finalizes the tuning estimate.
 /// Returns the number of delays incurred.
+#[no_mangle]
 pub fn s_lock(
     lock: *mut slock_t,
     file: *const c_char,

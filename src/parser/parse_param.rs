@@ -84,7 +84,7 @@ struct VarParamState {
 /// `get_typcollation` (utils/cache/lsyscache.c) - default collation of a type.
 /// TODO(pg-port): use the real lsyscache routine once ported.
 unsafe fn get_typcollation(_typid: Oid) -> Oid {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_typcollation(_typid)
 }
 
 /// `parser_errposition` (parser/parse_node.c) - report an error cursor position.
@@ -92,7 +92,7 @@ unsafe fn get_typcollation(_typid: Oid) -> Oid {
 /// ereport; here it is a no-op placeholder.
 /// TODO(pg-port): wire to the real parse_node.c routine once ported.
 unsafe fn parser_errposition(_pstate: *mut ParseState, _location: c_int) -> c_int {
-    0
+    crate::parser::parse_node::parser_errposition(_pstate as _, _location)
 }
 
 /*

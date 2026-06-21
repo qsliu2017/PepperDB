@@ -44,17 +44,13 @@ use crate::{current_cell, foreach, list_make1_int, list_make1_oid};
  * crate tree, so stub these locally until it lands.
  */
 // TODO(pg-port): import from utils::time::snapmgr once wired.
-unsafe fn ActiveSnapshotSet() -> bool {
-    unimplemented!("TODO(pg-port): ActiveSnapshotSet")
-}
+unsafe fn ActiveSnapshotSet() -> bool { crate::utils::time::snapmgr::ActiveSnapshotSet() }
 // TODO(pg-port): import from utils::time::snapmgr once wired.
 unsafe fn GetActiveSnapshot() -> Snapshot {
     unimplemented!("TODO(pg-port): GetActiveSnapshot")
 }
 // TODO(pg-port): import from utils::time::snapmgr once wired.
-unsafe fn XidInMVCCSnapshot(_xid: TransactionId, _snapshot: Snapshot) -> bool {
-    unimplemented!("TODO(pg-port): XidInMVCCSnapshot")
-}
+unsafe fn XidInMVCCSnapshot(_xid: TransactionId, _snapshot: Snapshot) -> bool { crate::utils::time::snapmgr::XidInMVCCSnapshot(_xid as _, _snapshot as _) }
 
 /*
  * access/genam.h scan helpers and access/htup_details.h tuple helpers.
@@ -120,12 +116,11 @@ const InheritsRelidSeqnoIndexId: Oid = 2680;
 // TODO(pg-port): replace with generated F_OIDEQ.
 const F_OIDEQ: RegProcedure = 184;
 
-// TODO(pg-port): replace with generated RELOID syscache id (syscache.h).
-const RELOID: c_int = 52;
+use crate::utils::cache::syscache::RELOID;
 
 // TODO(pg-port): SearchSysCacheExists1 (utils/cache/syscache.c not ported as macro yet).
 unsafe fn SearchSysCacheExists1(_cacheId: c_int, _key1: Datum) -> bool {
-    unimplemented!("TODO(pg-port): SearchSysCacheExists1")
+    crate::utils::cache::syscache::SearchSysCacheExists(_cacheId, _key1, 0, 0, 0)
 }
 
 /*
@@ -215,7 +210,7 @@ pub unsafe fn find_inheritance_children_extended(
         ObjectIdGetDatum(parentrelId),
     );
 
-    scan = systable_beginscan(relation, InheritsParentIndexId, true, null_mut(), 1, key.as_mut_ptr());
+    scan = systable_beginscan(relation, InheritsParentIndexId, false, null_mut(), 1, key.as_mut_ptr());
 
     loop {
         inheritsTuple = systable_getnext(scan);
@@ -358,6 +353,7 @@ pub unsafe fn find_inheritance_children_extended(
  * NB - No current callers of this routine are interested in children being
  * concurrently detached, so there's no provision to include them.
  */
+#[no_mangle]
 pub unsafe fn find_all_inheritors(
     parentrelId: Oid,
     lockmode: LOCKMODE,
@@ -390,8 +386,8 @@ pub unsafe fn find_all_inheritors(
      * that we can't keep pointers into the output lists; but an index is
      * sufficient.
      */
-    rels_list = list_make1_oid(parentrelId);
-    rel_numparents = list_make1_int(0);
+    rels_list = list_make1_oid!(parentrelId);
+    rel_numparents = list_make1_int!(0);
 
     foreach!(l, rels_list, {
         let currentrel: Oid = lfirst_oid(current_cell!(l));
@@ -496,7 +492,7 @@ pub unsafe fn has_superclass(relationId: Oid) -> bool {
         F_OIDEQ,
         ObjectIdGetDatum(relationId),
     );
-    scan = systable_beginscan(catalog, InheritsRelidSeqnoIndexId, true, null_mut(), 1, &mut skey);
+    scan = systable_beginscan(catalog, InheritsRelidSeqnoIndexId, false, null_mut(), 1, &mut skey);
     result = HeapTupleIsValid(systable_getnext(scan));
     systable_endscan(scan);
     table_close(catalog, AccessShareLock);
@@ -540,7 +536,7 @@ pub unsafe fn typeInheritsFrom(subclassTypeId: Oid, superclassTypeId: Oid) -> bo
     /*
      * Begin the search at the relation itself, so add its relid to the queue.
      */
-    queue = list_make1_oid(subclassRelid);
+    queue = list_make1_oid!(subclassRelid);
     visited = null_mut(); /* NIL */
 
     inhrel = table_open(InheritsRelationId, AccessShareLock);
@@ -582,7 +578,7 @@ pub unsafe fn typeInheritsFrom(subclassTypeId: Oid, superclassTypeId: Oid) -> bo
             ObjectIdGetDatum(this_relid),
         );
 
-        inhscan = systable_beginscan(inhrel, InheritsRelidSeqnoIndexId, true, null_mut(), 1, &mut skey);
+        inhscan = systable_beginscan(inhrel, InheritsRelidSeqnoIndexId, false, null_mut(), 1, &mut skey);
 
         loop {
             inhtup = systable_getnext(inhscan);
@@ -686,7 +682,7 @@ pub unsafe fn DeleteInheritsTuple(
         F_OIDEQ,
         ObjectIdGetDatum(inhrelid),
     );
-    scan = systable_beginscan(catalogRelation, InheritsRelidSeqnoIndexId, true, null_mut(), 1, &mut key);
+    scan = systable_beginscan(catalogRelation, InheritsRelidSeqnoIndexId, false, null_mut(), 1, &mut key);
 
     loop {
         inheritsTuple = systable_getnext(scan);
@@ -773,7 +769,7 @@ pub unsafe fn PartitionHasPendingDetach(partoid: Oid) -> bool {
         F_OIDEQ,
         ObjectIdGetDatum(partoid),
     );
-    scan = systable_beginscan(catalogRelation, InheritsRelidSeqnoIndexId, true, null_mut(), 1, &mut key);
+    scan = systable_beginscan(catalogRelation, InheritsRelidSeqnoIndexId, false, null_mut(), 1, &mut key);
 
     loop {
         inheritsTuple = systable_getnext(scan);

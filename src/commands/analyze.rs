@@ -50,9 +50,43 @@ use crate::foreach;
 type RelationData = crate::utils::rel::RelationData;
 type Relation = *mut RelationData;
 
-// VacAttrStats / VacAttrStatsP  TODO(pg-port)
-#[repr(C)] pub struct VacAttrStats { _opaque: [u8; 0] }
+// VacAttrStats / VacAttrStatsP - layout mirrors commands/vacuum.h VacAttrStats.
+#[repr(C)]
+pub struct VacAttrStats {
+    pub attstattarget: c_int,
+    pub attrtypid: Oid,
+    pub attrtypmod: i32,
+    pub attrtype: Form_pg_type,
+    pub attrcollid: Oid,
+    pub anl_context: MemoryContext,
+    pub compute_stats: AnalyzeAttrComputeStatsFunc,
+    pub minrows: c_int,
+    pub extra_data: *mut c_void,
+    pub stats_valid: bool,
+    pub stanullfrac: f32,
+    pub stawidth: i32,
+    pub stadistinct: f32,
+    pub stakind: [i16; STATISTIC_NUM_SLOTS],
+    pub staop: [Oid; STATISTIC_NUM_SLOTS],
+    pub stacoll: [Oid; STATISTIC_NUM_SLOTS],
+    pub numnumbers: [c_int; STATISTIC_NUM_SLOTS],
+    pub stanumbers: [*mut f32; STATISTIC_NUM_SLOTS],
+    pub numvalues: [c_int; STATISTIC_NUM_SLOTS],
+    pub stavalues: [*mut Datum; STATISTIC_NUM_SLOTS],
+    pub statypid: [Oid; STATISTIC_NUM_SLOTS],
+    pub statyplen: [i16; STATISTIC_NUM_SLOTS],
+    pub statypbyval: [bool; STATISTIC_NUM_SLOTS],
+    pub statypalign: [c_char; STATISTIC_NUM_SLOTS],
+    pub tupattnum: c_int,
+    pub rows: *mut HeapTuple,
+    pub tupDesc: TupleDesc,
+    pub exprvals: *mut Datum,
+    pub exprnulls: *mut bool,
+    pub rowstride: c_int,
+}
 type VacAttrStatsP = *mut VacAttrStats;
+pub type AnalyzeAttrComputeStatsFunc =
+    Option<unsafe fn(stats: VacAttrStatsP, fetchfunc: AnalyzeAttrFetchFunc, samplerows: c_int, totalrows: f64)>;
 
 // AcquireSampleRowsFunc  TODO(pg-port)
 type AcquireSampleRowsFunc = unsafe extern "C" fn(
@@ -96,30 +130,52 @@ macro_rules! CHECK_FOR_INTERRUPTS {
 }
 
 // table_beginscan_analyze / table_scan_analyze_next_block /
-// table_scan_analyze_next_tuple / table_endscan  TODO(pg-port):
-// these are static inline wrappers in access/tableam.h, not yet ported.
-unsafe fn table_beginscan_analyze(_relation: Relation) -> TableScanDesc {
-    core::ptr::null_mut()
-}
-unsafe fn table_scan_analyze_next_block(_scan: TableScanDesc,
-                                        _stream: *mut ReadStream) -> bool {
-    false
-}
-unsafe fn table_scan_analyze_next_tuple(_scan: TableScanDesc,
-                                        _oldest_xmin: TransactionId,
-                                        _liverows: *mut f64,
-                                        _deadrows: *mut f64,
-                                        _slot: *mut TupleTableSlot) -> bool {
-    false
-}
-unsafe fn table_endscan(_scan: TableScanDesc) {}
+// table_scan_analyze_next_tuple / table_endscan: static inline wrappers from
+// access/tableam.h, dispatching through rel->rd_tableam (TableAmRoutine).
+use crate::access::table::tableam::{TableAmRoutine, SO_TYPE_ANALYZE, SO_ALLOW_STRAT, SO_ALLOW_SYNC};
 
-// ReadStream  TODO(pg-port)
-#[repr(C)] pub struct ReadStream { _opaque: [u8; 0] }
+unsafe fn table_beginscan_analyze(relation: Relation) -> TableScanDesc {
+    let flags: uint32 = (SO_TYPE_ANALYZE | SO_ALLOW_STRAT | SO_ALLOW_SYNC) as uint32;
+    ((*((*relation).rd_tableam as *const TableAmRoutine)).scan_begin.unwrap())(
+        relation as _,
+        core::ptr::null_mut(),
+        0,
+        core::ptr::null_mut(),
+        core::ptr::null_mut(),
+        flags,
+    ) as _
+}
+unsafe fn table_scan_analyze_next_block(scan: TableScanDesc,
+                                        stream: *mut ReadStream) -> bool {
+    let rel = scan_rs_rd(scan);
+    ((*((*rel).rd_tableam as *const TableAmRoutine)).scan_analyze_next_block.unwrap())(
+        scan as _,
+        stream as _,
+    )
+}
+unsafe fn table_scan_analyze_next_tuple(scan: TableScanDesc,
+                                        oldest_xmin: TransactionId,
+                                        liverows: *mut f64,
+                                        deadrows: *mut f64,
+                                        slot: *mut TupleTableSlot) -> bool {
+    let rel = scan_rs_rd(scan);
+    ((*((*rel).rd_tableam as *const TableAmRoutine)).scan_analyze_next_tuple.unwrap())(
+        scan as _,
+        oldest_xmin,
+        liverows,
+        deadrows,
+        slot as _,
+    )
+}
+unsafe fn table_endscan(scan: TableScanDesc) {
+    let rel = scan_rs_rd(scan);
+    ((*((*rel).rd_tableam as *const TableAmRoutine)).scan_end.unwrap())(scan as _)
+}
 
-// BlockSamplerData / ReservoirStateData  TODO(pg-port)
-#[repr(C)] pub struct BlockSamplerData { _opaque: [u8; 0] }
-#[repr(C)] pub struct ReservoirStateData { _opaque: [u8; 0] }
+// ReadStream / BlockSamplerData / ReservoirStateData: canonical structs.
+pub use crate::storage::aio::read_stream::ReadStream;
+pub use crate::utils::misc::sampling::BlockSamplerData;
+pub use crate::utils::misc::sampling::ReservoirStateData;
 
 // PGRUsage  TODO(pg-port)
 #[repr(C)] pub struct PGRUsage { _opaque: [u8; 0] }
@@ -151,16 +207,21 @@ type CatalogIndexState = *mut CatalogIndexStateData;
     tupno: c_int,
 }
 
-// StdAnalyzeData  TODO(pg-port)
-#[repr(C)] pub struct StdAnalyzeData { _opaque: [u8; 0] }
+// StdAnalyzeData - analyze.c std_typanalyze private data.
+#[repr(C)]
+pub struct StdAnalyzeData {
+    pub eqopr: Oid,
+    pub eqfunc: Oid,
+    pub ltopr: Oid,
+}
 
 // FmgrInfo  TODO(pg-port)
 #[repr(C)] pub struct FmgrInfo { _opaque: [u8; 0] }
 
-// Form_pg_attribute / Form_pg_type  TODO(pg-port)
-#[repr(C)] pub struct FormData_pg_attribute { _opaque: [u8; 0] }
+// Form_pg_attribute / Form_pg_type
+use crate::catalog::pg_attribute::FormData_pg_attribute;
 type Form_pg_attribute = *mut FormData_pg_attribute;
-#[repr(C)] pub struct FormData_pg_type { _opaque: [u8; 0] }
+use crate::catalog::pg_type::FormData_pg_type;
 type Form_pg_type = *mut FormData_pg_type;
 
 // StringInfoData  TODO(pg-port)
@@ -194,63 +255,28 @@ extern "C" {
                             verbose: bool, lmode: c_int) -> Relation;
     fn vacuum_is_permitted_for_relation(relid: Oid, classForm: *mut c_void,
                                         options: c_int) -> bool;
-    fn vac_open_indexes(relation: Relation, lockmode: c_int,
-                        nindexes: *mut c_int, Irel: *mut *mut Relation);
-    fn vac_close_indexes(nindexes: c_int, Irel: *mut Relation, lockmode: c_int);
-    fn vac_update_relstats(relation: Relation, num_pages: BlockNumber,
-                           num_tuples: f64, num_allvisible: BlockNumber,
-                           num_allfrozen: BlockNumber, hasindex: bool,
-                           frozenxid: TransactionId, minmulti: c_int,
-                           a: *mut c_void, b: *mut c_void,
-                           in_outer_xact: bool);
     fn vacuum_delay_point(is_analyze: bool);
 
     // access/relation.h
     fn relation_close(relation: Relation, lockmode: c_int);
 
-    // access/visibilitymap.h
-    fn visibilitymap_count(rel: Relation, all_visible: *mut BlockNumber,
-                           all_frozen: *mut BlockNumber);
-
     // access/xact.h
     fn CommandCounterIncrement();
-
-    // access/transam.h
-    fn GetOldestNonRemovableTransactionId(rel: Relation) -> TransactionId;
 
     // access/tupconvert.h
     fn convert_tuples_by_name(indesc: TupleDesc, outdesc: TupleDesc)
         -> *mut TupleConversionMap;
-    fn execute_attr_map_tuple(tuple: HeapTuple, map: *mut TupleConversionMap) -> HeapTuple;
-    fn free_conversion_map(map: *mut TupleConversionMap);
-    fn equalRowTypes(tupdesc1: TupleDesc, tupdesc2: TupleDesc) -> bool;
-
-    // catalog/index.h
-    fn BuildIndexInfo(index: Relation) -> *mut IndexInfo;
-    fn SetRelationHasSubclass(relid: Oid, relhassubclass: bool);
 
     // catalog/pg_inherits.h
     fn find_all_inheritors(parentrelId: Oid, lockmode: c_int,
                            numparents: *mut c_int) -> *mut List;
 
-    // commands/vacuum.h
-    fn index_vacuum_cleanup(ivinfo: *mut IndexVacuumInfo,
-                            stats: *mut IndexBulkDeleteResult) -> *mut IndexBulkDeleteResult;
-
     // executor/executor.h
     fn CreateExecutorState() -> *mut EState;
     fn FreeExecutorState(estate: *mut EState);
-    fn ExecPrepareQual(qual: *mut List, estate: *mut EState) -> *mut ExprState;
-    fn ExecQual(qual: *mut ExprState, econtext: *mut ExprContext) -> bool;
     fn GetPerTupleExprContext(estate: *mut EState) -> *mut ExprContext;
-    fn ResetExprContext(econtext: *mut ExprContext);
 
     // executor/tuptable.h
-    fn MakeSingleTupleTableSlot(tupdesc: TupleDesc, tts_ops: *const c_void)
-        -> *mut TupleTableSlot;
-    fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot);
-    fn ExecStoreHeapTuple(tuple: HeapTuple, slot: *mut TupleTableSlot,
-                          shouldFree: bool) -> *mut TupleTableSlot;
     fn ExecCopySlotHeapTuple(slot: *mut TupleTableSlot) -> HeapTuple;
 
     // foreign/fdwapi.h
@@ -259,29 +285,9 @@ extern "C" {
     // miscadmin.h
     fn GetUserIdAndSecContext(userid: *mut Oid, sec_context: *mut c_int);
     fn SetUserIdAndSecContext(userid: Oid, sec_context: c_int);
-    fn NewGUCNestLevel() -> c_int;
-    fn RestrictSearchPath();
-    fn AtEOXact_GUC(isCommit: bool, nestLevel: c_int);
-    fn AmAutoVacuumWorkerProcess() -> bool;
 
     // pgstat.h
-    fn pgstat_progress_start_command(cmdtype: c_int, relid: Oid);
-    fn pgstat_progress_end_command();
     fn pgstat_progress_update_param(index: c_int, val: i64);
-    fn pgstat_progress_update_multi_param(nparam: c_int, index: *const c_int,
-                                          val: *const i64);
-    fn pgstat_report_analyze(rel: Relation, livetuples: f64, deadtuples: f64,
-                             resetcounter: bool, starttime: TimestampTz);
-
-    // statistics/statistics.h
-    fn ComputeExtStatisticsRows(onerel: Relation, natts: c_int,
-                                vacattrstats: *mut VacAttrStatsP) -> c_int;
-    fn BuildRelationExtStatistics(onerel: Relation, inh: bool, totalrows: f64,
-                                  numrows: c_int, rows: *mut HeapTuple,
-                                  natts: c_int, vacattrstats: *mut VacAttrStatsP);
-
-    // utils/attoptcache.h
-    fn get_attribute_options(relid: Oid, attnum: c_int) -> *mut AttributeOpts;
 
     // utils/datum.h
     fn datumCopy(value: Datum, typByVal: bool, typLen: i16) -> Datum;
@@ -289,10 +295,6 @@ extern "C" {
     // utils/lsyscache.h
     fn get_namespace_name(nspid: Oid) -> *mut c_char;
     fn get_database_name(dbid: Oid) -> *mut c_char;
-    fn attnameAttNum(rel: Relation, attname: *const c_char, sysColOK: bool) -> c_int;
-    fn get_sort_group_operators(argtype: Oid, needLT: bool, needEQ: bool, needGT: bool,
-                                ltOpr: *mut Oid, eqOpr: *mut Oid, gtOpr: *mut Oid,
-                                isHashable: *mut bool);
     fn get_opcode(opno: Oid) -> Oid;
 
     // utils/memutils.h
@@ -304,22 +306,13 @@ extern "C" {
     fn MemoryContextReset(context: MemoryContext);
 
     // utils/pg_rusage.h
-    fn pg_rusage_init(ru: *mut PGRUsage);
     fn pg_rusage_show(ru: *const PGRUsage) -> *const c_char;
 
     // utils/sampling.h
-    fn BlockSampler_Init(bs: *mut BlockSamplerData, nblocks: BlockNumber,
-                         samplesize: c_int, randseed: u32) -> BlockNumber;
     fn BlockSampler_HasMore(bs: *mut BlockSamplerData) -> bool;
     fn BlockSampler_Next(bs: *mut BlockSamplerData) -> BlockNumber;
-    fn reservoir_init_selection_state(rstate: *mut ReservoirStateData, n: c_int);
     fn reservoir_get_next_S(rstate: *mut ReservoirStateData, t: f64, n: c_int) -> f64;
     fn sampler_random_fract(randstate: *mut c_void) -> f64;
-
-    // utils/sortsupport.h
-    fn PrepareSortSupportFromOrderingOp(opno: Oid, ssup: *mut SortSupportData);
-    fn ApplySortComparator(datum1: Datum, isnull1: bool, datum2: Datum,
-                           isnull2: bool, ssup: *mut SortSupportData) -> c_int;
 
     // utils/syscache.h
     fn SearchSysCache2(cacheId: c_int, key1: Datum, key2: Datum) -> HeapTuple;
@@ -333,11 +326,6 @@ extern "C" {
     fn GetCurrentTimestamp() -> TimestampTz;
     fn TimestampDifferenceExceeds(start_time: TimestampTz, stop_time: TimestampTz,
                                   msec: c_int) -> bool;
-    fn TimestampDifferenceMilliseconds(start_time: TimestampTz,
-                                       stop_time: TimestampTz) -> i64;
-
-    // access/detoast.h
-    fn toast_raw_datum_size(value: Datum) -> usize;
 
     // heap/heaptuple.h
     fn heap_freetuple(htup: HeapTuple);
@@ -360,14 +348,10 @@ extern "C" {
     // utils/array.h
     fn construct_array(elems: *mut Datum, nelems: c_int, elmtype: Oid,
                        elmlen: i16, elmbyval: bool, elmalign: c_char) -> *mut ArrayType;
-    fn construct_array_builtin(elems: *mut Datum, nelems: c_int, elmtype: Oid)
-        -> *mut ArrayType;
 
     // fmgr.h
     fn OidFunctionCall1(functionId: Oid, arg1: Datum) -> Datum;
     fn fmgr_info(functionId: Oid, finfo: *mut FmgrInfo);
-    fn FunctionCall2Coll(flinfo: *mut FmgrInfo, collation: Oid,
-                         arg1: Datum, arg2: Datum) -> Datum;
 
     // nodes/nodeFuncs.h
     fn exprType(expr: *const Node) -> Oid;
@@ -377,10 +361,6 @@ extern "C" {
     // parser/parse_oper.h (via statistics)
     // std_typanalyze is defined below in this file
 
-    // executor/nodeIndexscan.h (via access/tableam.h)
-    fn FormIndexDatum(indexInfo: *mut IndexInfo, slot: *mut TupleTableSlot,
-                      estate: *mut EState, values: *mut Datum, isnull: *mut bool);
-
     // read stream
     fn read_stream_begin_relation(flags: c_int, strategy: BufferAccessStrategy,
                                   relation: Relation, forknum: c_int,
@@ -389,12 +369,6 @@ extern "C" {
                                   callback_private_data: *mut c_void,
                                   per_buffer_data_size: usize) -> *mut ReadStream;
     fn read_stream_end(stream: *mut ReadStream);
-
-    // instrumentation
-    fn BufferUsageAccumDiff(dst: *mut BufferUsage, add: *const BufferUsage,
-                            sub: *const BufferUsage);
-    fn WalUsageAccumDiff(dst: *mut WalUsage, add: *const WalUsage,
-                         sub: *const WalUsage);
 
     // lib/stringinfo.h
     fn initStringInfo(str_: *mut StringInfoData);
@@ -414,16 +388,10 @@ extern "C" {
     fn RelationGetRelationName(rel: Relation) -> *const c_char;
     fn RelationGetNamespace(rel: Relation) -> Oid;
     fn RelationGetIndexList(relation: Relation) -> *mut List;
-    fn qsort_interruptible(base: *mut c_void, nmemb: usize, size: usize,
-                           cmp: unsafe extern "C" fn(*const c_void, *const c_void,
-                                                     *mut c_void) -> c_int,
-                           arg: *mut c_void);
     fn pg_prng_uint32(state: *mut c_void) -> u32;
 
     // GUC / globals
     static pg_global_prng_state: c_void;
-    static pgWalUsage: WalUsage;
-    static pgBufferUsage: BufferUsage;
     static pgStatBlockReadTime: PgStat_Counter;
     static pgStatBlockWriteTime: PgStat_Counter;
     static MyDatabaseId: Oid;
@@ -431,18 +399,183 @@ extern "C" {
     static track_cost_delay_timing: bool;
     static mut MyBEEntry: *mut c_void;
 
-    // TTSOpsHeapTuple
-    static TTSOpsHeapTuple: c_void;
-
     // Relation macros (as fns in C)
     fn RELATION_IS_OTHER_TEMP(relation: Relation) -> bool;
-    fn RELKIND_HAS_STORAGE(relkind: c_char) -> bool;
 
     // strVal / lfirst helpers exposed as fns  TODO(pg-port)
     fn strVal(v: *mut c_void) -> *const c_char;
     fn TupleDescAttr(tupdesc: TupleDesc, attno: c_int) -> Form_pg_attribute;
     fn GETSTRUCT(tuple: HeapTuple) -> *mut c_void;
     fn HeapTupleIsValid(htup: HeapTuple) -> bool;
+}
+
+// Forwarding wrappers to canonical Rust impls (Rust-mangled, not #[no_mangle]).
+unsafe fn vac_open_indexes(relation: Relation, lockmode: c_int,
+                           nindexes: *mut c_int, Irel: *mut *mut Relation) {
+    crate::commands::vacuum::vac_open_indexes(relation as _, lockmode as _, nindexes, Irel as _)
+}
+unsafe fn vac_close_indexes(nindexes: c_int, Irel: *mut Relation, lockmode: c_int) {
+    crate::commands::vacuum::vac_close_indexes(nindexes, Irel as _, lockmode as _)
+}
+unsafe fn vac_update_relstats(relation: Relation, num_pages: BlockNumber,
+                              num_tuples: f64, num_allvisible: BlockNumber,
+                              num_allfrozen: BlockNumber, hasindex: bool,
+                              frozenxid: TransactionId, minmulti: c_int,
+                              a: *mut c_void, b: *mut c_void,
+                              in_outer_xact: bool) {
+    crate::commands::vacuum::vac_update_relstats(relation as _, num_pages, num_tuples,
+        num_allvisible, num_allfrozen, hasindex, frozenxid, minmulti as _,
+        a as _, b as _, in_outer_xact)
+}
+unsafe fn visibilitymap_count(rel: Relation, all_visible: *mut BlockNumber,
+                              all_frozen: *mut BlockNumber) {
+    crate::access::heap::visibilitymap::visibilitymap_count(rel as _, all_visible, all_frozen)
+}
+unsafe fn GetOldestNonRemovableTransactionId(rel: Relation) -> TransactionId {
+    crate::storage::ipc::procarray::GetOldestNonRemovableTransactionId(rel as _) as _
+}
+unsafe fn execute_attr_map_tuple(tuple: HeapTuple, map: *mut TupleConversionMap) -> HeapTuple {
+    crate::access::common::tupconvert::execute_attr_map_tuple(tuple as _, map as _) as _
+}
+unsafe fn free_conversion_map(map: *mut TupleConversionMap) {
+    crate::access::common::tupconvert::free_conversion_map(map as _)
+}
+unsafe fn equalRowTypes(tupdesc1: TupleDesc, tupdesc2: TupleDesc) -> bool {
+    crate::access::common::tupdesc::equalRowTypes(tupdesc1 as _, tupdesc2 as _)
+}
+unsafe fn BuildIndexInfo(index: Relation) -> *mut IndexInfo {
+    crate::catalog::index::BuildIndexInfo(index as _) as _
+}
+unsafe fn SetRelationHasSubclass(relid: Oid, relhassubclass: bool) {
+    crate::commands::tablecmds::SetRelationHasSubclass(relid, relhassubclass)
+}
+unsafe fn index_vacuum_cleanup(ivinfo: *mut IndexVacuumInfo,
+                               stats: *mut IndexBulkDeleteResult) -> *mut IndexBulkDeleteResult {
+    crate::access::index::indexam::index_vacuum_cleanup(ivinfo as _, stats as _) as _
+}
+unsafe fn ExecPrepareQual(qual: *mut List, estate: *mut EState) -> *mut ExprState {
+    crate::executor::execExpr::ExecPrepareQual(qual as _, estate as _) as _
+}
+unsafe fn ExecQual(qual: *mut ExprState, econtext: *mut ExprContext) -> bool {
+    crate::executor::executor::ExecQual(qual as _, econtext as _)
+}
+unsafe fn ResetExprContext(econtext: *mut ExprContext) {
+    crate::executor::execUtils::ResetExprContext(econtext as _)
+}
+unsafe fn MakeSingleTupleTableSlot(tupdesc: TupleDesc, tts_ops: *const c_void)
+    -> *mut TupleTableSlot {
+    crate::executor::functions::MakeSingleTupleTableSlot(tupdesc as _, tts_ops as _) as _
+}
+unsafe fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot) {
+    crate::executor::execTuples::ExecDropSingleTupleTableSlot(slot as _)
+}
+unsafe fn ExecStoreHeapTuple(tuple: HeapTuple, slot: *mut TupleTableSlot,
+                             shouldFree: bool) -> *mut TupleTableSlot {
+    crate::executor::execTuples::ExecStoreHeapTuple(tuple as _, slot as _, shouldFree) as _
+}
+unsafe fn NewGUCNestLevel() -> c_int {
+    crate::utils::misc::guc::NewGUCNestLevel()
+}
+unsafe fn RestrictSearchPath() {
+    crate::utils::misc::guc::RestrictSearchPath()
+}
+unsafe fn AtEOXact_GUC(isCommit: bool, nestLevel: c_int) {
+    crate::utils::misc::guc::AtEOXact_GUC(isCommit, nestLevel)
+}
+unsafe fn AmAutoVacuumWorkerProcess() -> bool {
+    crate::miscadmin::AmAutoVacuumWorkerProcess()
+}
+unsafe fn pgstat_progress_start_command(cmdtype: c_int, relid: Oid) {
+    crate::utils::activity::backend_progress::pgstat_progress_start_command(
+        core::mem::transmute::<c_int, crate::utils::activity::backend_progress::ProgressCommandType>(cmdtype), relid)
+}
+unsafe fn pgstat_progress_end_command() {
+    crate::utils::activity::backend_progress::pgstat_progress_end_command()
+}
+unsafe fn pgstat_progress_update_multi_param(nparam: c_int, index: *const c_int,
+                                             val: *const i64) {
+    crate::utils::activity::backend_progress::pgstat_progress_update_multi_param(nparam, index, val as _)
+}
+unsafe fn pgstat_report_analyze(rel: Relation, livetuples: f64, deadtuples: f64,
+                                resetcounter: bool, starttime: TimestampTz) {
+    crate::utils::activity::pgstat_relation::pgstat_report_analyze(rel as _, livetuples as _,
+        deadtuples as _, resetcounter, starttime)
+}
+unsafe fn ComputeExtStatisticsRows(onerel: Relation, natts: c_int,
+                                   vacattrstats: *mut VacAttrStatsP) -> c_int {
+    crate::statistics::extended_stats::ComputeExtStatisticsRows(onerel as _, natts, vacattrstats as _)
+}
+unsafe fn BuildRelationExtStatistics(onerel: Relation, inh: bool, totalrows: f64,
+                                     numrows: c_int, rows: *mut HeapTuple,
+                                     natts: c_int, vacattrstats: *mut VacAttrStatsP) {
+    crate::statistics::extended_stats::BuildRelationExtStatistics(onerel as _, inh, totalrows,
+        numrows, rows as _, natts, vacattrstats as _)
+}
+unsafe fn get_attribute_options(relid: Oid, attnum: c_int) -> *mut AttributeOpts {
+    crate::utils::cache::attoptcache::get_attribute_options(relid, attnum) as _
+}
+unsafe fn attnameAttNum(rel: Relation, attname: *const c_char, sysColOK: bool) -> c_int {
+    crate::parser::parse_relation::attnameAttNum(rel as _, attname, sysColOK)
+}
+unsafe fn get_sort_group_operators(argtype: Oid, needLT: bool, needEQ: bool, needGT: bool,
+                                   ltOpr: *mut Oid, eqOpr: *mut Oid, gtOpr: *mut Oid,
+                                   isHashable: *mut bool) {
+    crate::parser::parse_oper::get_sort_group_operators(argtype, needLT, needEQ, needGT,
+        ltOpr, eqOpr, gtOpr, isHashable)
+}
+unsafe fn pg_rusage_init(ru: *mut PGRUsage) {
+    crate::utils::misc::pg_rusage::pg_rusage_init(ru as _)
+}
+unsafe fn BlockSampler_Init(bs: *mut BlockSamplerData, nblocks: BlockNumber,
+                            samplesize: c_int, randseed: u32) -> BlockNumber {
+    crate::utils::misc::sampling::BlockSampler_Init(bs as _, nblocks, samplesize, randseed as _)
+}
+unsafe fn reservoir_init_selection_state(rstate: *mut ReservoirStateData, n: c_int) {
+    crate::utils::misc::sampling::reservoir_init_selection_state(rstate as _, n)
+}
+unsafe fn PrepareSortSupportFromOrderingOp(opno: Oid, ssup: *mut SortSupportData) {
+    crate::utils::sort::sortsupport::PrepareSortSupportFromOrderingOp(opno, ssup as _)
+}
+unsafe fn ApplySortComparator(datum1: Datum, isnull1: bool, datum2: Datum,
+                              isnull2: bool, ssup: *mut SortSupportData) -> c_int {
+    crate::utils::sort::sortsupport::ApplySortComparator(datum1, isnull1, datum2, isnull2, ssup as _)
+}
+unsafe fn TimestampDifferenceMilliseconds(start_time: TimestampTz,
+                                          stop_time: TimestampTz) -> i64 {
+    crate::utils::adt::timestamp::TimestampDifferenceMilliseconds(start_time, stop_time) as _
+}
+unsafe fn toast_raw_datum_size(value: Datum) -> usize {
+    crate::access::common::detoast::toast_raw_datum_size(value) as _
+}
+unsafe fn construct_array_builtin(elems: *mut Datum, nelems: c_int, elmtype: Oid)
+    -> *mut ArrayType {
+    crate::utils::adt::arrayfuncs::construct_array_builtin(elems, nelems, elmtype) as _
+}
+unsafe fn FunctionCall2Coll(flinfo: *mut FmgrInfo, collation: Oid,
+                            arg1: Datum, arg2: Datum) -> Datum {
+    crate::utils::fmgr::FunctionCall2Coll(flinfo as _, collation, arg1, arg2)
+}
+unsafe fn FormIndexDatum(indexInfo: *mut IndexInfo, slot: *mut TupleTableSlot,
+                         estate: *mut EState, values: *mut Datum, isnull: *mut bool) {
+    crate::catalog::index::FormIndexDatum(indexInfo as _, slot as _, estate as _, values, isnull)
+}
+unsafe fn BufferUsageAccumDiff(dst: *mut BufferUsage, add: *const BufferUsage,
+                               sub: *const BufferUsage) {
+    crate::executor::instrument::BufferUsageAccumDiff(dst as _, add as _, sub as _)
+}
+unsafe fn WalUsageAccumDiff(dst: *mut WalUsage, add: *const WalUsage,
+                            sub: *const WalUsage) {
+    crate::executor::instrument::WalUsageAccumDiff(dst as _, add as _, sub as _)
+}
+unsafe fn qsort_interruptible(base: *mut c_void, nmemb: usize, size: usize,
+                              cmp: unsafe extern "C" fn(*const c_void, *const c_void,
+                                                        *mut c_void) -> c_int,
+                              arg: *mut c_void) {
+    crate::utils::sort::qsort_interruptible::qsort_interruptible(base, nmemb, size,
+        core::mem::transmute(cmp), arg)
+}
+unsafe fn RELKIND_HAS_STORAGE(relkind: c_char) -> bool {
+    matches!(relkind as u8 as char, 'r' | 'i' | 'S' | 't' | 'm')
 }
 
 // FdwRoutine stub  TODO(pg-port)
@@ -466,7 +599,9 @@ pub struct AttributeOpts {
 // Constants  TODO(pg-port)
 const VACOPT_VERBOSE: c_int = 1 << 0;
 const VACOPT_VACUUM: c_int = 1 << 1;
-const ALLOCSET_DEFAULT_SIZES: usize = 0; /* placeholder - real C macro passes 3 args */
+const ALLOCSET_DEFAULT_MINSIZE: usize = 0;
+const ALLOCSET_DEFAULT_INITSIZE: usize = 8 * 1024;
+const ALLOCSET_DEFAULT_MAXSIZE: usize = 8 * 1024 * 1024;
 const SECURITY_RESTRICTED_OPERATION: c_int = 0x0002;
 const ShareUpdateExclusiveLock: c_int = 4;
 const AccessShareLock: c_int = 1;
@@ -490,9 +625,9 @@ const STATISTIC_NUM_SLOTS: usize = 5;
 const STATISTIC_KIND_MCV: i16 = 1;
 const STATISTIC_KIND_HISTOGRAM: i16 = 2;
 const STATISTIC_KIND_CORRELATION: i16 = 3;
-const ATTNUM: c_int = 14;
-const TYPEOID: c_int = 26;
-const STATRELATTINH: c_int = 27;
+const ATTNUM: c_int = 7;
+const TYPEOID: c_int = 82;
+const STATRELATTINH: c_int = 65;
 const FLOAT4OID: Oid = 700;
 const INFO: c_int = 17;
 const DEBUG2: c_int = 12;
@@ -731,185 +866,169 @@ pub unsafe fn analyze_rel(relid: Oid, relation: *mut RangeVar,
  * -------------------------------------------------------------------------- */
 
 #[inline]
+unsafe fn rd_rel(rel: Relation) -> *mut crate::catalog::pg_class::FormData_pg_class {
+    (*rel).rd_rel
+}
+
+#[inline]
 unsafe fn vacparams_options(params: *mut VacuumParams) -> c_int {
-    // TODO(pg-port): read params->options
-    0
+    (*(params as *mut crate::commands::vacuum::VacuumParamsFull)).options
 }
 
 #[inline]
 unsafe fn vacparams_log_min_duration(params: *mut VacuumParams) -> i64 {
-    // TODO(pg-port): read params->log_min_duration
-    -1
+    (*(params as *mut crate::commands::vacuum::VacuumParamsFull)).log_min_duration as i64
 }
 
 #[inline]
 unsafe fn rel_relkind(rel: Relation) -> c_char {
-    // TODO(pg-port): read rel->rd_rel->relkind
-    0
+    (*rd_rel(rel)).relkind
 }
 
 #[inline]
 unsafe fn rel_rd_rel(rel: Relation) -> *mut c_void {
-    // TODO(pg-port): return rel->rd_rel
-    core::ptr::null_mut()
+    (*rel).rd_rel as *mut c_void
 }
 
 #[inline]
 unsafe fn rel_relhassubclass(rel: Relation) -> bool {
-    // TODO(pg-port): read rel->rd_rel->relhassubclass
-    false
+    (*rd_rel(rel)).relhassubclass
 }
 
 #[inline]
 unsafe fn rel_relowner(rel: Relation) -> Oid {
-    // TODO(pg-port): read rel->rd_rel->relowner
-    0
+    (*rd_rel(rel)).relowner
 }
 
 #[inline]
 unsafe fn rel_reltuples(rel: Relation) -> f32 {
-    // TODO(pg-port): read rel->rd_rel->reltuples
-    0.0
+    (*rd_rel(rel)).reltuples
 }
 
 #[inline]
 unsafe fn rel_rd_att(rel: Relation) -> TupleDesc {
-    // TODO(pg-port): read rel->rd_att
-    core::ptr::null_mut()
+    (*rel).rd_att
 }
 
 #[inline]
 unsafe fn rel_rd_indcollation(rel: Relation, i: usize) -> Oid {
-    // TODO(pg-port): read rel->rd_indcollation[i]
-    0
+    *(*rel).rd_indcollation.add(i)
 }
 
 #[inline]
 unsafe fn indexinfo_ii_Expressions(ii: *mut IndexInfo) -> *mut List {
-    // TODO(pg-port): read indexInfo->ii_Expressions
-    core::ptr::null_mut()
+    (*ii).ii_Expressions
 }
 
 #[inline]
 unsafe fn indexinfo_ii_NumIndexAttrs(ii: *mut IndexInfo) -> c_int {
-    // TODO(pg-port): read indexInfo->ii_NumIndexAttrs
-    0
+    (*ii).ii_NumIndexAttrs
 }
 
 #[inline]
 unsafe fn indexinfo_ii_IndexAttrNumbers(ii: *mut IndexInfo, i: usize) -> c_int {
-    // TODO(pg-port): read indexInfo->ii_IndexAttrNumbers[i]
-    0
+    (*ii).ii_IndexAttrNumbers[i] as c_int
 }
 
 #[inline]
 unsafe fn indexinfo_ii_Predicate(ii: *mut IndexInfo) -> *mut List {
-    // TODO(pg-port): read indexInfo->ii_Predicate
-    core::ptr::null_mut()
+    (*ii).ii_Predicate
 }
 
 #[inline]
 unsafe fn tupdesc_natts(td: TupleDesc) -> c_int {
-    // TODO(pg-port): read tupdesc->natts
-    0
+    (*td).natts
 }
 
 #[inline]
 unsafe fn scan_rs_rd(scan: TableScanDesc) -> Relation {
-    // TODO(pg-port): read scan->rs_rd
-    core::ptr::null_mut()
+    (*(scan as *mut crate::access::relscan::TableScanDescData)).rs_rd as Relation
 }
 
 #[inline]
 unsafe fn econtext_set_scantuple(ec: *mut ExprContext, slot: *mut TupleTableSlot) {
-    // TODO(pg-port): ec->ecxt_scantuple = slot
+    (*ec).ecxt_scantuple = slot;
 }
 
 #[inline]
 unsafe fn vacattrstats_minrows(stats: *mut VacAttrStats) -> c_int {
-    // TODO(pg-port): read stats->minrows
-    0
+    (*stats).minrows
 }
 
 #[inline]
 unsafe fn vacattrstats_rows(stats: *mut VacAttrStats) -> *mut HeapTuple {
-    // TODO(pg-port): read stats->rows
-    core::ptr::null_mut()
+    (*stats).rows
 }
 
 #[inline]
 unsafe fn vacattrstats_set_rows(stats: *mut VacAttrStats, rows: *mut HeapTuple) {
-    // TODO(pg-port): stats->rows = rows
+    (*stats).rows = rows;
 }
 
 #[inline]
 unsafe fn vacattrstats_set_tupDesc(stats: *mut VacAttrStats, tupDesc: TupleDesc) {
-    // TODO(pg-port): stats->tupDesc = tupDesc
+    (*stats).tupDesc = tupDesc;
 }
 
 #[inline]
 unsafe fn vacattrstats_compute_stats(stats: *mut VacAttrStats,
-                                     fetchfunc: AnalyzeAttrFetchFunc,
+                                     fetchfunc: unsafe fn(VacAttrStatsP, c_int, *mut bool) -> Datum,
                                      samplerows: c_int, totalrows: f64) {
-    // TODO(pg-port): stats->compute_stats(stats, fetchfunc, samplerows, totalrows)
+    ((*stats).compute_stats.unwrap())(stats, Some(fetchfunc), samplerows, totalrows);
 }
 
 #[inline]
 unsafe fn vacattrstats_tupattnum(stats: *mut VacAttrStats) -> c_int {
-    // TODO(pg-port): read stats->tupattnum
-    0
+    (*stats).tupattnum
 }
 
 #[inline]
 unsafe fn vacattrstats_exprvals(stats: *mut VacAttrStats) -> *mut Datum {
-    // TODO(pg-port): read stats->exprvals
-    core::ptr::null_mut()
+    (*stats).exprvals
 }
 
 #[inline]
 unsafe fn vacattrstats_set_exprvals(stats: *mut VacAttrStats, v: *mut Datum) {
-    // TODO(pg-port): stats->exprvals = v
+    (*stats).exprvals = v;
 }
 
 #[inline]
 unsafe fn vacattrstats_exprnulls(stats: *mut VacAttrStats) -> *mut bool {
-    // TODO(pg-port): read stats->exprnulls
-    core::ptr::null_mut()
+    (*stats).exprnulls
 }
 
 #[inline]
 unsafe fn vacattrstats_set_exprnulls(stats: *mut VacAttrStats, v: *mut bool) {
-    // TODO(pg-port): stats->exprnulls = v
+    (*stats).exprnulls = v;
 }
 
 #[inline]
 unsafe fn vacattrstats_set_rowstride(stats: *mut VacAttrStats, v: c_int) {
-    // TODO(pg-port): stats->rowstride = v
+    (*stats).rowstride = v;
 }
 
 #[inline]
 unsafe fn vacattrstats_stats_valid(stats: *mut VacAttrStats) -> bool {
-    // TODO(pg-port): read stats->stats_valid
-    false
+    (*stats).stats_valid
 }
 
 // AnalyzeAttrFetchFunc type alias
-type AnalyzeAttrFetchFunc = unsafe extern "C" fn(stats: VacAttrStatsP,
-                                                  rownum: c_int,
-                                                  isNull: *mut bool) -> Datum;
+type AnalyzeAttrFetchFunc = Option<unsafe fn(stats: VacAttrStatsP,
+                                             rownum: c_int,
+                                             isNull: *mut bool) -> Datum>;
 
-// std_fetch_func and ind_fetch_func are C-ABI callbacks
-unsafe extern "C" fn std_fetch_func(stats: VacAttrStatsP, rownum: c_int,
-                                     isNull: *mut bool) -> Datum
+// std_fetch_func and ind_fetch_func -- analyze.c
+unsafe fn std_fetch_func(stats: VacAttrStatsP, rownum: c_int,
+                         isNull: *mut bool) -> Datum
 {
-    let attnum = vacattrstats_tupattnum(stats);
-    let tuple = *(stats as *mut *mut HeapTupleData).add(rownum as usize); // placeholder
-    let tupDesc = core::ptr::null_mut(); // placeholder
+    let attnum = (*stats).tupattnum;
+    let tuple = *(*stats).rows.add(rownum as usize);
+    let tupDesc = (*stats).tupDesc;
     heap_getattr(tuple, attnum, tupDesc, isNull)
 }
 
-unsafe extern "C" fn ind_fetch_func(stats: VacAttrStatsP, rownum: c_int,
-                                     isNull: *mut bool) -> Datum
+unsafe fn ind_fetch_func(stats: VacAttrStatsP, rownum: c_int,
+                         isNull: *mut bool) -> Datum
 {
     /* exprvals and exprnulls are already offset for proper column */
     let i = rownum * vacattrstats_rowstride(stats);
@@ -919,8 +1038,7 @@ unsafe extern "C" fn ind_fetch_func(stats: VacAttrStatsP, rownum: c_int,
 
 #[inline]
 unsafe fn vacattrstats_rowstride(stats: *mut VacAttrStats) -> c_int {
-    // TODO(pg-port): read stats->rowstride
-    0
+    (*stats).rowstride
 }
 
 // MIN helper
@@ -990,7 +1108,9 @@ unsafe fn do_analyze_rel(onerel: Relation, params: *mut VacuumParams,
      */
     anl_context = AllocSetContextCreate(CurrentMemoryContext(),
                                         b"Analyze\0".as_ptr() as *const c_char,
-                                        0, 0, 0);
+                                        ALLOCSET_DEFAULT_MINSIZE,
+                                        ALLOCSET_DEFAULT_INITSIZE,
+                                        ALLOCSET_DEFAULT_MAXSIZE);
     caller_context = MemoryContextSwitchTo(anl_context);
 
     /*
@@ -1220,7 +1340,9 @@ unsafe fn do_analyze_rel(onerel: Relation, params: *mut VacuumParams,
 
         col_context = AllocSetContextCreate(anl_context,
                                             b"Analyze Column\0".as_ptr() as *const c_char,
-                                            0, 0, 0);
+                                            ALLOCSET_DEFAULT_MINSIZE,
+                                            ALLOCSET_DEFAULT_INITSIZE,
+                                            ALLOCSET_DEFAULT_MAXSIZE);
         old_context = MemoryContextSwitchTo(col_context);
 
         i = 0;
@@ -1426,10 +1548,14 @@ unsafe fn do_analyze_rel(onerel: Relation, params: *mut VacuumParams,
 
             // memset(&bufferusage, 0, size_of::<BufferUsage>());
             bufferusage = core::mem::zeroed();
-            BufferUsageAccumDiff(&mut bufferusage, &pgBufferUsage, &startbufferusage);
+            BufferUsageAccumDiff(&mut bufferusage,
+                core::ptr::addr_of!(crate::storage::buffer::bufmgr::pgBufferUsage) as *const BufferUsage,
+                &startbufferusage);
             // memset(&walusage, 0, size_of::<WalUsage>());
             walusage = core::mem::zeroed();
-            WalUsageAccumDiff(&mut walusage, &pgWalUsage, &startwalusage);
+            WalUsageAccumDiff(&mut walusage,
+                core::ptr::addr_of!(crate::executor::instrument::pgWalUsage) as *const WalUsage,
+                &startwalusage);
 
             total_blks_hit = bufferusage_shared_blks_hit(&bufferusage) +
                 bufferusage_local_blks_hit(&bufferusage);
@@ -1538,7 +1664,7 @@ unsafe fn do_analyze_rel(onerel: Relation, params: *mut VacuumParams,
 
 // Additional accessor stubs used in do_analyze_rel  TODO(pg-port)
 #[inline] unsafe fn CurrentMemoryContext() -> MemoryContext { core::ptr::null_mut() }
-#[inline] unsafe fn vacattrstats_set_stadistinct(_s: *mut VacAttrStats, _v: f32) {}
+#[inline] unsafe fn vacattrstats_set_stadistinct(_s: *mut VacAttrStats, _v: f32) { (*_s).stadistinct = _v; }
 #[inline] unsafe fn ivinfo_set_index(_i: *mut IndexVacuumInfo, _r: Relation) {}
 #[inline] unsafe fn ivinfo_set_heaprel(_i: *mut IndexVacuumInfo, _r: Relation) {}
 #[inline] unsafe fn ivinfo_set_analyze_only(_i: *mut IndexVacuumInfo, _v: bool) {}
@@ -1576,7 +1702,9 @@ unsafe fn compute_index_stats(onerel: Relation, totalrows: f64,
 
     ind_context = AllocSetContextCreate(anl_context,
                                         b"Analyze Index\0".as_ptr() as *const c_char,
-                                        0, 0, 0);
+                                        ALLOCSET_DEFAULT_MINSIZE,
+                                        ALLOCSET_DEFAULT_INITSIZE,
+                                        ALLOCSET_DEFAULT_MAXSIZE);
     old_context = MemoryContextSwitchTo(ind_context);
 
     ind = 0;
@@ -1612,7 +1740,7 @@ unsafe fn compute_index_stats(onerel: Relation, totalrows: f64,
         econtext = GetPerTupleExprContext(estate);
         /* Need a slot to hold the current heap tuple, too */
         slot = MakeSingleTupleTableSlot(RelationGetDescr(onerel),
-                                        &TTSOpsHeapTuple as *const c_void);
+                                        core::ptr::addr_of!(crate::executor::execTuples::TTSOpsHeapTuple) as *const c_void);
 
         /* Arrange for econtext's scan tuple to be the tuple under test */
         econtext_set_scantuple(econtext, slot);
@@ -1731,9 +1859,9 @@ unsafe fn compute_index_stats(onerel: Relation, totalrows: f64,
 }
 
 // Additional accessor stubs used in compute_index_stats  TODO(pg-port)
-#[inline] unsafe fn vacattrstats_attrtype(_s: *mut VacAttrStats) -> *mut FormData_pg_type { core::ptr::null_mut() }
-#[inline] unsafe fn attrtype_typbyval(_t: *mut FormData_pg_type) -> bool { false }
-#[inline] unsafe fn attrtype_typlen(_t: *mut FormData_pg_type) -> i16 { 0 }
+#[inline] unsafe fn vacattrstats_attrtype(_s: *mut VacAttrStats) -> *mut FormData_pg_type { (*_s).attrtype }
+#[inline] unsafe fn attrtype_typbyval(_t: *mut FormData_pg_type) -> bool { (*_t).typbyval }
+#[inline] unsafe fn attrtype_typlen(_t: *mut FormData_pg_type) -> i16 { (*_t).typlen }
 
 /*
  * examine_attribute -- pre-analysis of a single column
@@ -1872,26 +2000,26 @@ unsafe fn examine_attribute(onerel: Relation, attnum: c_int,
 }
 
 // Additional stubs for examine_attribute  TODO(pg-port)
-#[inline] unsafe fn attr_attisdropped(_a: Form_pg_attribute) -> bool { false }
-#[inline] unsafe fn attr_attgenerated(_a: Form_pg_attribute) -> c_char { 0 }
-#[inline] unsafe fn attr_atttypid(_a: Form_pg_attribute) -> Oid { 0 }
-#[inline] unsafe fn attr_atttypmod(_a: Form_pg_attribute) -> i32 { 0 }
-#[inline] unsafe fn attr_attcollation(_a: Form_pg_attribute) -> Oid { 0 }
-#[inline] unsafe fn attrtype_typanalyze(_t: Form_pg_type) -> Oid { 0 }
-#[inline] unsafe fn attrtype_typalign(_t: Form_pg_type) -> c_char { 0 }
-#[inline] unsafe fn vacattrstats_set_attstattarget(_s: *mut VacAttrStats, _v: c_int) {}
-#[inline] unsafe fn vacattrstats_set_attrtypid(_s: *mut VacAttrStats, _v: Oid) {}
-#[inline] unsafe fn vacattrstats_set_attrtypmod(_s: *mut VacAttrStats, _v: i32) {}
-#[inline] unsafe fn vacattrstats_set_attrcollid(_s: *mut VacAttrStats, _v: Oid) {}
-#[inline] unsafe fn vacattrstats_set_attrtype(_s: *mut VacAttrStats, _v: Form_pg_type) {}
-#[inline] unsafe fn vacattrstats_set_anl_context(_s: *mut VacAttrStats, _v: MemoryContext) {}
-#[inline] unsafe fn vacattrstats_set_tupattnum(_s: *mut VacAttrStats, _v: c_int) {}
-#[inline] unsafe fn vacattrstats_attrtypid(_s: *mut VacAttrStats) -> Oid { 0 }
-#[inline] unsafe fn vacattrstats_set_statypid(_s: *mut VacAttrStats, _i: usize, _v: Oid) {}
-#[inline] unsafe fn vacattrstats_set_statyplen(_s: *mut VacAttrStats, _i: usize, _v: i16) {}
-#[inline] unsafe fn vacattrstats_set_statypbyval(_s: *mut VacAttrStats, _i: usize, _v: bool) {}
-#[inline] unsafe fn vacattrstats_set_statypalign(_s: *mut VacAttrStats, _i: usize, _v: c_char) {}
-#[inline] unsafe fn vacattrstats_has_compute_stats(_s: *mut VacAttrStats) -> bool { false }
+#[inline] unsafe fn attr_attisdropped(_a: Form_pg_attribute) -> bool { (*_a).attisdropped }
+#[inline] unsafe fn attr_attgenerated(_a: Form_pg_attribute) -> c_char { (*_a).attgenerated }
+#[inline] unsafe fn attr_atttypid(_a: Form_pg_attribute) -> Oid { (*_a).atttypid }
+#[inline] unsafe fn attr_atttypmod(_a: Form_pg_attribute) -> i32 { (*_a).atttypmod }
+#[inline] unsafe fn attr_attcollation(_a: Form_pg_attribute) -> Oid { (*_a).attcollation }
+#[inline] unsafe fn attrtype_typanalyze(_t: Form_pg_type) -> Oid { (*_t).typanalyze }
+#[inline] unsafe fn attrtype_typalign(_t: Form_pg_type) -> c_char { (*_t).typalign }
+#[inline] unsafe fn vacattrstats_set_attstattarget(_s: *mut VacAttrStats, _v: c_int) { (*_s).attstattarget = _v; }
+#[inline] unsafe fn vacattrstats_set_attrtypid(_s: *mut VacAttrStats, _v: Oid) { (*_s).attrtypid = _v; }
+#[inline] unsafe fn vacattrstats_set_attrtypmod(_s: *mut VacAttrStats, _v: i32) { (*_s).attrtypmod = _v; }
+#[inline] unsafe fn vacattrstats_set_attrcollid(_s: *mut VacAttrStats, _v: Oid) { (*_s).attrcollid = _v; }
+#[inline] unsafe fn vacattrstats_set_attrtype(_s: *mut VacAttrStats, _v: Form_pg_type) { (*_s).attrtype = _v; }
+#[inline] unsafe fn vacattrstats_set_anl_context(_s: *mut VacAttrStats, _v: MemoryContext) { (*_s).anl_context = _v; }
+#[inline] unsafe fn vacattrstats_set_tupattnum(_s: *mut VacAttrStats, _v: c_int) { (*_s).tupattnum = _v; }
+#[inline] unsafe fn vacattrstats_attrtypid(_s: *mut VacAttrStats) -> Oid { (*_s).attrtypid }
+#[inline] unsafe fn vacattrstats_set_statypid(_s: *mut VacAttrStats, _i: usize, _v: Oid) { (*_s).statypid[_i] = _v; }
+#[inline] unsafe fn vacattrstats_set_statyplen(_s: *mut VacAttrStats, _i: usize, _v: i16) { (*_s).statyplen[_i] = _v; }
+#[inline] unsafe fn vacattrstats_set_statypbyval(_s: *mut VacAttrStats, _i: usize, _v: bool) { (*_s).statypbyval[_i] = _v; }
+#[inline] unsafe fn vacattrstats_set_statypalign(_s: *mut VacAttrStats, _i: usize, _v: c_char) { (*_s).statypalign[_i] = _v; }
+#[inline] unsafe fn vacattrstats_has_compute_stats(_s: *mut VacAttrStats) -> bool { (*_s).compute_stats.is_some() }
 
 
 /*
@@ -2565,22 +2693,22 @@ unsafe fn update_attstats(relid: Oid, inh: bool, natts: c_int,
 }
 
 // Accessor stubs for update_attstats  TODO(pg-port)
-#[inline] unsafe fn vacattrstats_stanullfrac(_s: *mut VacAttrStats) -> f32 { 0.0 }
-#[inline] unsafe fn vacattrstats_stawidth(_s: *mut VacAttrStats) -> i32 { 0 }
-#[inline] unsafe fn vacattrstats_stadistinct(_s: *mut VacAttrStats) -> f32 { 0.0 }
-#[inline] unsafe fn vacattrstats_stakind(_s: *mut VacAttrStats, _k: usize) -> i16 { 0 }
-#[inline] unsafe fn vacattrstats_staop(_s: *mut VacAttrStats, _k: usize) -> Oid { 0 }
-#[inline] unsafe fn vacattrstats_stacoll(_s: *mut VacAttrStats, _k: usize) -> Oid { 0 }
-#[inline] unsafe fn vacattrstats_numnumbers(_s: *mut VacAttrStats, _k: usize) -> c_int { 0 }
-#[inline] unsafe fn vacattrstats_stanumbers(_s: *mut VacAttrStats, _k: usize, _n: usize) -> f32 { 0.0 }
-#[inline] unsafe fn vacattrstats_numvalues(_s: *mut VacAttrStats, _k: usize) -> c_int { 0 }
+#[inline] unsafe fn vacattrstats_stanullfrac(_s: *mut VacAttrStats) -> f32 { (*_s).stanullfrac }
+#[inline] unsafe fn vacattrstats_stawidth(_s: *mut VacAttrStats) -> i32 { (*_s).stawidth }
+#[inline] unsafe fn vacattrstats_stadistinct(_s: *mut VacAttrStats) -> f32 { (*_s).stadistinct }
+#[inline] unsafe fn vacattrstats_stakind(_s: *mut VacAttrStats, _k: usize) -> i16 { (*_s).stakind[_k] }
+#[inline] unsafe fn vacattrstats_staop(_s: *mut VacAttrStats, _k: usize) -> Oid { (*_s).staop[_k] }
+#[inline] unsafe fn vacattrstats_stacoll(_s: *mut VacAttrStats, _k: usize) -> Oid { (*_s).stacoll[_k] }
+#[inline] unsafe fn vacattrstats_numnumbers(_s: *mut VacAttrStats, _k: usize) -> c_int { (*_s).numnumbers[_k] }
+#[inline] unsafe fn vacattrstats_stanumbers(_s: *mut VacAttrStats, _k: usize, _n: usize) -> f32 { *(*_s).stanumbers[_k].add(_n) }
+#[inline] unsafe fn vacattrstats_numvalues(_s: *mut VacAttrStats, _k: usize) -> c_int { (*_s).numvalues[_k] }
 #[inline] unsafe fn vacattrstats_stavalues(_s: *mut VacAttrStats, _k: usize) -> *mut Datum {
-    core::ptr::null_mut()
+    (*_s).stavalues[_k]
 }
-#[inline] unsafe fn vacattrstats_statypid(_s: *mut VacAttrStats, _k: usize) -> Oid { 0 }
-#[inline] unsafe fn vacattrstats_statyplen(_s: *mut VacAttrStats, _k: usize) -> i16 { 0 }
-#[inline] unsafe fn vacattrstats_statypbyval(_s: *mut VacAttrStats, _k: usize) -> bool { false }
-#[inline] unsafe fn vacattrstats_statypalign(_s: *mut VacAttrStats, _k: usize) -> c_char { 0 }
+#[inline] unsafe fn vacattrstats_statypid(_s: *mut VacAttrStats, _k: usize) -> Oid { (*_s).statypid[_k] }
+#[inline] unsafe fn vacattrstats_statyplen(_s: *mut VacAttrStats, _k: usize) -> i16 { (*_s).statyplen[_k] }
+#[inline] unsafe fn vacattrstats_statypbyval(_s: *mut VacAttrStats, _k: usize) -> bool { (*_s).statypbyval[_k] }
+#[inline] unsafe fn vacattrstats_statypalign(_s: *mut VacAttrStats, _k: usize) -> c_char { (*_s).statypalign[_k] }
 
 /*
  * std_typanalyze -- the default type-specific typanalyze function
@@ -2650,14 +2778,14 @@ pub unsafe fn std_typanalyze(stats: *mut VacAttrStats) -> bool {
 }
 
 // Accessor stubs for std_typanalyze  TODO(pg-port)
-#[inline] unsafe fn vacattrstats_attstattarget(_s: *mut VacAttrStats) -> c_int { 0 }
-#[inline] unsafe fn vacattrstats_set_extra_data(_s: *mut VacAttrStats, _v: *mut c_void) {}
+#[inline] unsafe fn vacattrstats_attstattarget(_s: *mut VacAttrStats) -> c_int { (*_s).attstattarget }
+#[inline] unsafe fn vacattrstats_set_extra_data(_s: *mut VacAttrStats, _v: *mut c_void) { (*_s).extra_data = _v; }
 #[inline] unsafe fn vacattrstats_set_compute_stats(_s: *mut VacAttrStats,
-    _f: unsafe fn(VacAttrStatsP, AnalyzeAttrFetchFunc, c_int, f64)) {}
-#[inline] unsafe fn vacattrstats_set_minrows(_s: *mut VacAttrStats, _v: c_int) {}
-#[inline] unsafe fn stdanalyzedata_set_eqopr(_m: *mut StdAnalyzeData, _v: Oid) {}
-#[inline] unsafe fn stdanalyzedata_set_eqfunc(_m: *mut StdAnalyzeData, _v: Oid) {}
-#[inline] unsafe fn stdanalyzedata_set_ltopr(_m: *mut StdAnalyzeData, _v: Oid) {}
+    _f: unsafe fn(VacAttrStatsP, AnalyzeAttrFetchFunc, c_int, f64)) { (*_s).compute_stats = Some(_f); }
+#[inline] unsafe fn vacattrstats_set_minrows(_s: *mut VacAttrStats, _v: c_int) { (*_s).minrows = _v; }
+#[inline] unsafe fn stdanalyzedata_set_eqopr(_m: *mut StdAnalyzeData, _v: Oid) { (*_m).eqopr = _v; }
+#[inline] unsafe fn stdanalyzedata_set_eqfunc(_m: *mut StdAnalyzeData, _v: Oid) { (*_m).eqfunc = _v; }
+#[inline] unsafe fn stdanalyzedata_set_ltopr(_m: *mut StdAnalyzeData, _v: Oid) { (*_m).ltopr = _v; }
 
 /*
  *	compute_trivial_stats() -- compute very basic column statistics
@@ -2687,7 +2815,7 @@ unsafe fn compute_trivial_stats(stats: VacAttrStatsP,
 
         vacuum_delay_point(true);
 
-        value = fetchfunc(stats, i, &mut isnull);
+        value = (fetchfunc.unwrap())(stats, i, &mut isnull);
 
         /* Check for null/nonnull */
         if isnull {
@@ -2740,9 +2868,9 @@ unsafe fn compute_trivial_stats(stats: VacAttrStatsP,
 // Accessor / helper stubs for compute_trivial_stats  TODO(pg-port)
 // attrtype_typbyval, attrtype_typlen, vacattrstats_attrtype,
 // vacattrstats_set_stadistinct already defined above.
-#[inline] unsafe fn vacattrstats_set_stats_valid(_s: *mut VacAttrStats, _v: bool) {}
-#[inline] unsafe fn vacattrstats_set_stanullfrac(_s: *mut VacAttrStats, _v: f32) {}
-#[inline] unsafe fn vacattrstats_set_stawidth(_s: *mut VacAttrStats, _v: i32) {}
+#[inline] unsafe fn vacattrstats_set_stats_valid(_s: *mut VacAttrStats, _v: bool) { (*_s).stats_valid = _v; }
+#[inline] unsafe fn vacattrstats_set_stanullfrac(_s: *mut VacAttrStats, _v: f32) { (*_s).stanullfrac = _v; }
+#[inline] unsafe fn vacattrstats_set_stawidth(_s: *mut VacAttrStats, _v: i32) { (*_s).stawidth = _v; }
 #[inline] unsafe fn libc_strlen(s: *const c_char) -> usize {
     // TODO(pg-port): strlen
     let mut n: usize = 0;
@@ -2808,7 +2936,7 @@ unsafe fn compute_distinct_stats(stats: VacAttrStatsP,
 
         vacuum_delay_point(true);
 
-        value = fetchfunc(stats, i, &mut isnull);
+        value = (fetchfunc.unwrap())(stats, i, &mut isnull);
 
         /* Check for null/nonnull */
         if isnull {
@@ -3104,19 +3232,19 @@ struct TrackItem {
 #[inline] unsafe fn trackitem_set_value(t: *mut TrackItem, i: c_int, v: Datum) { (*t.add(i as usize)).value = v; }
 #[inline] unsafe fn trackitem_count(t: *mut TrackItem, i: c_int) -> c_int { (*t.add(i as usize)).count }
 #[inline] unsafe fn trackitem_set_count(t: *mut TrackItem, i: c_int, v: c_int) { (*t.add(i as usize)).count = v; }
-#[inline] unsafe fn vacattrstats_extra_data(_s: *mut VacAttrStats) -> *mut c_void { core::ptr::null_mut() }
-#[inline] unsafe fn vacattrstats_attrcollid(_s: *mut VacAttrStats) -> Oid { 0 }
-#[inline] unsafe fn vacattrstats_anl_context(_s: *mut VacAttrStats) -> MemoryContext { core::ptr::null_mut() }
-#[inline] unsafe fn stdanalyzedata_eqfunc(_m: *mut StdAnalyzeData) -> Oid { 0 }
-#[inline] unsafe fn stdanalyzedata_eqopr(_m: *mut StdAnalyzeData) -> Oid { 0 }
-#[inline] unsafe fn stdanalyzedata_ltopr(_m: *mut StdAnalyzeData) -> Oid { 0 }
-#[inline] unsafe fn vacattrstats_set_stakind(_s: *mut VacAttrStats, _k: usize, _v: i16) {}
-#[inline] unsafe fn vacattrstats_set_staop(_s: *mut VacAttrStats, _k: usize, _v: Oid) {}
-#[inline] unsafe fn vacattrstats_set_stacoll(_s: *mut VacAttrStats, _k: usize, _v: Oid) {}
-#[inline] unsafe fn vacattrstats_set_stanumbers_ptr(_s: *mut VacAttrStats, _k: usize, _v: *mut float4) {}
-#[inline] unsafe fn vacattrstats_set_numnumbers(_s: *mut VacAttrStats, _k: usize, _v: c_int) {}
-#[inline] unsafe fn vacattrstats_set_stavalues_ptr(_s: *mut VacAttrStats, _k: usize, _v: *mut Datum) {}
-#[inline] unsafe fn vacattrstats_set_numvalues(_s: *mut VacAttrStats, _k: usize, _v: c_int) {}
+#[inline] unsafe fn vacattrstats_extra_data(_s: *mut VacAttrStats) -> *mut c_void { (*_s).extra_data }
+#[inline] unsafe fn vacattrstats_attrcollid(_s: *mut VacAttrStats) -> Oid { (*_s).attrcollid }
+#[inline] unsafe fn vacattrstats_anl_context(_s: *mut VacAttrStats) -> MemoryContext { (*_s).anl_context }
+#[inline] unsafe fn stdanalyzedata_eqfunc(_m: *mut StdAnalyzeData) -> Oid { (*_m).eqfunc }
+#[inline] unsafe fn stdanalyzedata_eqopr(_m: *mut StdAnalyzeData) -> Oid { (*_m).eqopr }
+#[inline] unsafe fn stdanalyzedata_ltopr(_m: *mut StdAnalyzeData) -> Oid { (*_m).ltopr }
+#[inline] unsafe fn vacattrstats_set_stakind(_s: *mut VacAttrStats, _k: usize, _v: i16) { (*_s).stakind[_k] = _v; }
+#[inline] unsafe fn vacattrstats_set_staop(_s: *mut VacAttrStats, _k: usize, _v: Oid) { (*_s).staop[_k] = _v; }
+#[inline] unsafe fn vacattrstats_set_stacoll(_s: *mut VacAttrStats, _k: usize, _v: Oid) { (*_s).stacoll[_k] = _v; }
+#[inline] unsafe fn vacattrstats_set_stanumbers_ptr(_s: *mut VacAttrStats, _k: usize, _v: *mut float4) { (*_s).stanumbers[_k] = _v; }
+#[inline] unsafe fn vacattrstats_set_numnumbers(_s: *mut VacAttrStats, _k: usize, _v: c_int) { (*_s).numnumbers[_k] = _v; }
+#[inline] unsafe fn vacattrstats_set_stavalues_ptr(_s: *mut VacAttrStats, _k: usize, _v: *mut Datum) { (*_s).stavalues[_k] = _v; }
+#[inline] unsafe fn vacattrstats_set_numvalues(_s: *mut VacAttrStats, _k: usize, _v: c_int) { (*_s).numvalues[_k] = _v; }
 
 /*
  *	compute_scalar_stats() -- compute column statistics
@@ -3181,7 +3309,7 @@ unsafe fn compute_scalar_stats(stats: VacAttrStatsP,
 
         vacuum_delay_point(true);
 
-        value = fetchfunc(stats, i, &mut isnull);
+        value = (fetchfunc.unwrap())(stats, i, &mut isnull);
 
         /* Check for null/nonnull */
         if isnull {

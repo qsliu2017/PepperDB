@@ -36,9 +36,19 @@
 
 use crate::prelude::*;
 
+use crate::{foreach, current_cell, IsA};
 use crate::access::attnum::AttrNumber;
-use crate::nodes::pg_list::{List, ListCell};
+use crate::nodes::primnodes::MergeAction;
+use crate::access::common::tupdesc::TupleDesc;
+use crate::catalog::pg_attribute::Form_pg_attribute;
+use crate::nodes::nodes::{CmdType, Node};
+use crate::nodes::parsenodes::{Query, RangeTblEntry, RTEKind};
+use crate::nodes::pathnodes::PlannerInfo;
+use crate::nodes::pg_list::{lfirst, List, ListCell};
+use crate::nodes::plannodes::PlanRowMark;
+use crate::nodes::primnodes::{Const, Expr, TargetEntry, Var};
 use crate::postgres_ext::Oid;
+use crate::utils::rel::Relation;
 
 extern "C" {
     fn snprintf(s: *mut c_char, n: usize, fmt: *const c_char, ...) -> c_int;
@@ -225,9 +235,9 @@ pub unsafe fn preprocess_targetlist(root: *mut PlannerInfo) {
      */
     foreach!(lc, (*root).rowMarks, {
         let rc: *mut PlanRowMark = lfirst(current_cell!(lc)) as *mut PlanRowMark;
-        let var: *mut Var;
+        let mut var: *mut Var;
         let mut resname: [c_char; 32] = [0; 32];
-        let tle: *mut TargetEntry;
+        let mut tle: *mut TargetEntry;
 
         /* child rels use the same junk attrs as their parents */
         if (*rc).rti != (*rc).prti {
@@ -568,15 +578,15 @@ const PVC_RECURSE_WINDOWFUNCS: u32 = 0x0002;
 const ROW_MARK_COPY: c_int = 6;
 
 unsafe fn rt_fetch(rangetable_index: c_int, rangetable: *mut List) -> *mut RangeTblEntry {
-    unimplemented!() // TODO: src/include/parser/parsetree.h
+    crate::parser::parsetree::rt_fetch(rangetable_index as _, rangetable as _) as _
 }
 
 unsafe fn table_open(relationId: Oid, lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO: src/backend/access/table/table.c
+    crate::access::table::table::table_open(relationId as _, lockmode as _) as _
 }
 
 unsafe fn table_close(relation: Relation, lockmode: LOCKMODE) {
-    unimplemented!() // TODO: src/backend/access/table/table.c
+    crate::access::table::table::table_close(relation as _, lockmode as _)
 }
 
 unsafe fn add_row_identity_columns(
@@ -585,19 +595,24 @@ unsafe fn add_row_identity_columns(
     target_rte: *mut RangeTblEntry,
     target_relation: Relation,
 ) {
-    unimplemented!() // TODO: src/backend/optimizer/util/appendinfo.c
+    crate::optimizer::util::appendinfo::add_row_identity_columns(
+        root as _,
+        rtindex as _,
+        target_rte as _,
+        target_relation as _,
+    )
 }
 
 unsafe fn pull_var_clause(node: *mut Node, flags: c_int) -> *mut List {
-    unimplemented!() // TODO: src/backend/optimizer/util/var.c
+    crate::optimizer::util::var::pull_var_clause(node as _, flags) as _
 }
 
 unsafe fn list_concat_copy(list1: *mut List, list2: *mut List) -> *mut List {
-    unimplemented!() // TODO: src/backend/nodes/list.c
+    crate::nodes::list::list_concat_copy(list1 as _, list2 as _) as _
 }
 
 unsafe fn tlist_member(node: *mut Expr, targetlist: *mut List) -> *mut TargetEntry {
-    unimplemented!() // TODO: src/backend/optimizer/util/tlist.c
+    crate::optimizer::util::tlist::tlist_member(node as _, targetlist as _) as _
 }
 
 unsafe fn makeTargetEntry(
@@ -606,11 +621,11 @@ unsafe fn makeTargetEntry(
     resname: *mut c_char,
     resjunk: bool,
 ) -> *mut TargetEntry {
-    unimplemented!() // TODO: src/backend/nodes/makefuncs.c
+    crate::nodes::makefuncs::makeTargetEntry(expr as _, resno as _, resname as _, resjunk) as _
 }
 
 unsafe fn flatCopyTargetEntry(src_tle: *mut TargetEntry) -> *mut TargetEntry {
-    unimplemented!() // TODO: src/backend/nodes/makefuncs.c
+    crate::nodes::makefuncs::flatCopyTargetEntry(src_tle as _) as _
 }
 
 unsafe fn makeVar(
@@ -621,7 +636,14 @@ unsafe fn makeVar(
     varcollid: Oid,
     varlevelsup: Index,
 ) -> *mut Var {
-    unimplemented!() // TODO: src/backend/nodes/makefuncs.c
+    crate::nodes::makefuncs::makeVar(
+        varno as _,
+        varattno as _,
+        vartype as _,
+        vartypmod as _,
+        varcollid as _,
+        varlevelsup as _,
+    ) as _
 }
 
 unsafe fn makeWholeRowVar(
@@ -630,7 +652,7 @@ unsafe fn makeWholeRowVar(
     varlevelsup: Index,
     allowScalar: bool,
 ) -> *mut Var {
-    unimplemented!() // TODO: src/backend/nodes/makefuncs.c
+    crate::nodes::makefuncs::makeWholeRowVar(rte as _, varno as _, varlevelsup as _, allowScalar) as _
 }
 
 unsafe fn makeConst(
@@ -642,7 +664,15 @@ unsafe fn makeConst(
     constisnull: bool,
     constbyval: bool,
 ) -> *mut Const {
-    unimplemented!() // TODO: src/backend/nodes/makefuncs.c
+    crate::nodes::makefuncs::makeConst(
+        consttype as _,
+        consttypmod as _,
+        constcollid as _,
+        constlen as _,
+        constvalue as _,
+        constisnull,
+        constbyval,
+    ) as _
 }
 
 unsafe fn coerce_null_to_domain(
@@ -652,51 +682,57 @@ unsafe fn coerce_null_to_domain(
     typlen: c_int,
     typbyval: bool,
 ) -> *mut Node {
-    unimplemented!() // TODO: src/backend/parser/parse_coerce.c
+    crate::parser::parse_coerce::coerce_null_to_domain(
+        typid as _,
+        typmod as _,
+        collation as _,
+        typlen as _,
+        typbyval,
+    ) as _
 }
 
 unsafe fn eval_const_expressions(root: *mut PlannerInfo, node: *mut Node) -> *mut Node {
-    unimplemented!() // TODO: src/backend/optimizer/util/clauses.c
+    crate::optimizer::util::clauses::eval_const_expressions(root as _, node as _) as _
 }
 
 unsafe fn getBaseTypeAndTypmod(typid: Oid, typmod: *mut int32) -> Oid {
-    unimplemented!() // TODO: src/backend/utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::getBaseTypeAndTypmod(typid as _, typmod as _) as _
 }
 
 unsafe fn list_head(l: *mut List) -> *mut ListCell {
-    unimplemented!() // TODO: src/include/nodes/pg_list.h
+    crate::nodes::pg_list::list_head(l as _) as _
 }
 
 unsafe fn lnext(l: *mut List, cell: *mut ListCell) -> *mut ListCell {
-    unimplemented!() // TODO: src/include/nodes/pg_list.h
+    crate::nodes::pg_list::lnext(l as _, cell as _) as _
 }
 
 unsafe fn lappend(list: *mut List, datum: *mut c_void) -> *mut List {
-    unimplemented!() // TODO: src/backend/nodes/list.c
+    crate::nodes::list::lappend(list as _, datum as _) as _
 }
 
 unsafe fn lappend_int(list: *mut List, datum: c_int) -> *mut List {
-    unimplemented!() // TODO: src/backend/nodes/list.c
+    crate::nodes::list::lappend_int(list as _, datum) as _
 }
 
 unsafe fn list_free(list: *mut List) {
-    unimplemented!() // TODO: src/backend/nodes/list.c
+    crate::nodes::list::list_free(list as _)
 }
 
 unsafe fn list_length(l: *mut List) -> c_int {
-    unimplemented!() // TODO: src/include/nodes/pg_list.h
+    crate::nodes::pg_list::list_length(l as _)
 }
 
 unsafe fn RelationGetNumberOfAttributes(relation: Relation) -> c_int {
-    unimplemented!() // TODO: src/include/utils/rel.h
+    crate::utils::rel::RelationGetNumberOfAttributes(relation as _)
 }
 
 unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: c_int) -> Form_pg_attribute {
-    unimplemented!() // TODO: src/include/access/tupdesc.h
+    crate::access::common::tupdesc::TupleDescAttr(tupdesc as _, i) as _
 }
 
 unsafe fn pstrdup(s: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO: src/backend/utils/mmgr/mcxt.c
+    crate::utils::mmgr::mcxt::pstrdup(s as _) as _
 }
 
 /* Attribute number constants (src/include/access/sysattr.h) */

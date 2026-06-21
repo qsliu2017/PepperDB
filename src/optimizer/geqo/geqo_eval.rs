@@ -60,7 +60,7 @@ pub unsafe fn geqo_eval(root: *mut PlannerInfo, tour: *mut Gene, num_gene: c_int
      * temp context a child of the planner's normal context, so that it will
      * be freed even if we abort via ereport(ERROR).
      */
-    mycontext = AllocSetContextCreate!(CurrentMemoryContext, "GEQO", ALLOCSET_DEFAULT_SIZES)
+    mycontext = AllocSetContextCreate!(CurrentMemoryContext, c"GEQO".as_ptr(), ALLOCSET_DEFAULT_SIZES)
         as *mut _;
     oldcxt = MemoryContextSwitchTo(mycontext);
 

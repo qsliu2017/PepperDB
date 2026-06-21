@@ -259,8 +259,7 @@ unsafe fn LWLockRelease(_lock: *mut LWLock) {
 
 /* WALSummarizerLock (lwlock.h). TODO(pg-port): generated lock array. */
 unsafe fn WALSummarizerLock() -> *mut LWLock {
-    /* TODO(pg-port): real lock from the generated lock array */
-    null_mut()
+    crate::backend_link_shims::WALSummarizerLock as *mut LWLock
 }
 
 /* ShmemInitStruct (shmem.h). TODO(pg-port). */
@@ -269,8 +268,7 @@ unsafe fn ShmemInitStruct(
     _size: Size,
     _found: *mut bool,
 ) -> *mut c_void {
-    /* TODO(pg-port): not ported */
-    null_mut()
+    crate::storage::ipc::shmem::ShmemInitStruct(_name as *const c_char, _size as Size, _found)
 }
 
 /* ProcessConfigFile (guc.h). TODO(pg-port). */
@@ -492,8 +490,7 @@ struct PGPROC {
 struct PROC_HDR {
     allProcs: *mut PGPROC,
 }
-static mut ProcGlobal: *mut PROC_HDR = null_mut();
-
+extern "C" { pub static mut ProcGlobal: *mut PROC_HDR; }
 unsafe fn GetPGProcByNumber(pgprocno: ProcNumber) -> *mut PGPROC {
     /* TODO(pg-port): real GetPGProcByNumber from proc.h */
     &raw mut (*(*ProcGlobal).allProcs.add(pgprocno as usize))
@@ -767,7 +764,7 @@ pub unsafe fn WalSummarizerMain(_startup_data: *const c_void, startup_data_len: 
     LWLockRelease(WALSummarizerLock());
 
     /* Create and switch to a memory context that we can reset on error. */
-    context = AllocSetContextCreate!(TopMemoryContext, "Wal Summarizer", ALLOCSET_DEFAULT_SIZES);
+    context = AllocSetContextCreate!(TopMemoryContext, c"Wal Summarizer".as_ptr(), ALLOCSET_DEFAULT_SIZES);
     MemoryContextSwitchTo(context);
 
     /*

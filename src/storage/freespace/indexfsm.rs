@@ -34,24 +34,24 @@ use core::ffi::c_int;
 ///
 /// # Safety
 /// `rel` must be a valid Relation once freespace.c is ported.
-unsafe fn GetPageWithFreeSpace(_rel: Relation, _spaceNeeded: c_int) -> BlockNumber {
-    unimplemented!("TODO: storage/freespace.c not ported")
+unsafe fn GetPageWithFreeSpace(rel: Relation, spaceNeeded: c_int) -> BlockNumber {
+    crate::storage::freespace::freespace::GetPageWithFreeSpace(rel as _, spaceNeeded as crate::c::Size)
 }
 
 /// STUB for freespace.c:RecordPageWithFreeSpace.
 ///
 /// # Safety
 /// `rel` must be a valid Relation once freespace.c is ported.
-unsafe fn RecordPageWithFreeSpace(_rel: Relation, _heapBlk: BlockNumber, _spaceAvail: c_int) {
-    unimplemented!("TODO: storage/freespace.c not ported")
+unsafe fn RecordPageWithFreeSpace(rel: Relation, heapBlk: BlockNumber, spaceAvail: c_int) {
+    crate::storage::freespace::freespace::RecordPageWithFreeSpace(rel as _, heapBlk, spaceAvail as crate::c::Size)
 }
 
 /// STUB for freespace.c:FreeSpaceMapVacuum.
 ///
 /// # Safety
 /// `rel` must be a valid Relation once freespace.c is ported.
-unsafe fn FreeSpaceMapVacuum(_rel: Relation) {
-    unimplemented!("TODO: storage/freespace.c not ported")
+unsafe fn FreeSpaceMapVacuum(rel: Relation) {
+    crate::storage::freespace::freespace::FreeSpaceMapVacuum(rel as _);
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +78,7 @@ pub unsafe fn GetFreeIndexPage(rel: Relation) -> BlockNumber {
 ///
 /// # Safety
 /// `rel` must reference a valid index relation.
+#[no_mangle]
 pub unsafe fn RecordFreeIndexPage(rel: Relation, freeBlock: BlockNumber) {
     RecordPageWithFreeSpace(rel, freeBlock, (BLCKSZ - 1) as c_int);
 }
@@ -94,6 +95,7 @@ pub unsafe fn RecordUsedIndexPage(rel: Relation, usedBlock: BlockNumber) {
 ///
 /// # Safety
 /// `rel` must reference a valid index relation.
+#[no_mangle]
 pub unsafe fn IndexFreeSpaceMapVacuum(rel: Relation) {
     FreeSpaceMapVacuum(rel);
 }

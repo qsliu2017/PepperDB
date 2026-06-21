@@ -272,7 +272,15 @@ pub unsafe fn XLogFileName(
     _logSegNo: XLogSegNo,
     _wal_segsz_bytes: c_int,
 ) {
-    unimplemented!()
+    let segs = XLogSegmentsPerXLogId(_wal_segsz_bytes);
+    libc::snprintf(
+        _fname,
+        MAXFNAMELEN,
+        b"%08X%08X%08X\0".as_ptr() as *const c_char,
+        _tli,
+        (_logSegNo / segs) as uint32,
+        (_logSegNo % segs) as uint32,
+    );
 }
 
 #[inline]
@@ -317,7 +325,15 @@ pub unsafe fn XLogFilePath(
     _logSegNo: XLogSegNo,
     _wal_segsz_bytes: c_int,
 ) {
-    unimplemented!()
+    let segs = XLogSegmentsPerXLogId(_wal_segsz_bytes);
+    libc::snprintf(
+        _path,
+        MAXPGPATH,
+        b"pg_wal/%08X%08X%08X\0".as_ptr() as *const c_char,
+        _tli,
+        (_logSegNo / segs) as uint32,
+        (_logSegNo % segs) as uint32,
+    );
 }
 
 #[inline]
@@ -476,18 +492,10 @@ extern "C" {
     pub static mut RmgrTable: [RmgrData; 0]; /* RmgrData RmgrTable[] */
 }
 
-pub unsafe fn RmgrStartup() {
-    unimplemented!()
-}
-pub unsafe fn RmgrCleanup() {
-    unimplemented!()
-}
-pub unsafe fn RmgrNotFound(_rmid: RmgrId) {
-    unimplemented!()
-}
-pub unsafe fn RegisterCustomRmgr(_rmid: RmgrId, _rmgr: *const RmgrData) {
-    unimplemented!()
-}
+pub unsafe fn RmgrStartup() { crate::access::transam::rmgr::RmgrStartup() }
+pub unsafe fn RmgrCleanup() { crate::access::transam::rmgr::RmgrCleanup() }
+pub unsafe fn RmgrNotFound(_rmid: RmgrId) { crate::access::transam::rmgr::RmgrNotFound(_rmid as _) }
+pub unsafe fn RegisterCustomRmgr(_rmid: RmgrId, _rmgr: *const RmgrData) { crate::access::transam::rmgr::RegisterCustomRmgr(_rmid as _, _rmgr as _) }
 
 /* #ifndef FRONTEND */
 #[inline]
@@ -510,16 +518,10 @@ pub unsafe fn GetRmgr(rmid: RmgrId) -> RmgrData {
 /*
  * Exported to support xlog switching from checkpointer
  */
-pub unsafe fn GetLastSegSwitchData(_lastSwitchLSN: *mut XLogRecPtr) -> pg_time_t {
-    unimplemented!()
-}
-pub unsafe fn RequestXLogSwitch(_mark_unimportant: bool) -> XLogRecPtr {
-    unimplemented!()
-}
+pub unsafe fn GetLastSegSwitchData(_lastSwitchLSN: *mut XLogRecPtr) -> pg_time_t { crate::access::transam::xlog::GetLastSegSwitchData(_lastSwitchLSN as _) }
+pub unsafe fn RequestXLogSwitch(_mark_unimportant: bool) -> XLogRecPtr { crate::access::transam::xlog::RequestXLogSwitch(_mark_unimportant as _) }
 
-pub unsafe fn GetOldestRestartPoint(_oldrecptr: *mut XLogRecPtr, _oldtli: *mut TimeLineID) {
-    unimplemented!()
-}
+pub unsafe fn GetOldestRestartPoint(_oldrecptr: *mut XLogRecPtr, _oldtli: *mut TimeLineID) { crate::access::transam::xlog::GetOldestRestartPoint(_oldrecptr as _, _oldtli as _) }
 
 pub unsafe fn XLogRecGetBlockRefInfo(
     _record: *mut XLogReaderState,

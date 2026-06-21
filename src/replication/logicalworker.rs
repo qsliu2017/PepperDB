@@ -7,38 +7,20 @@ use crate::postgres_ext::Oid;
 // sig_atomic_t is conventionally c_int.
 pub static mut ParallelApplyMessagePending: ::std::ffi::c_int = 0;
 
-pub unsafe fn ApplyWorkerMain(main_arg: Datum) {
-    unimplemented!()
-}
+pub unsafe fn ApplyWorkerMain(main_arg: Datum) { crate::replication::logical::worker::ApplyWorkerMain(main_arg as _) }
 
-pub unsafe fn ParallelApplyWorkerMain(main_arg: Datum) {
-    unimplemented!()
-}
+pub unsafe fn ParallelApplyWorkerMain(main_arg: Datum) { unimplemented!() }
 
-pub unsafe fn TablesyncWorkerMain(main_arg: Datum) {
-    unimplemented!()
-}
+pub unsafe fn TablesyncWorkerMain(main_arg: Datum) { crate::replication::logical::tablesync::TablesyncWorkerMain(main_arg as _) }
 
-pub unsafe fn IsLogicalWorker() -> bool {
-    unimplemented!()
-}
+pub unsafe fn IsLogicalWorker() -> bool { crate::replication::logical::worker::IsLogicalWorker() }
 
-pub unsafe fn IsLogicalParallelApplyWorker() -> bool {
-    unimplemented!()
-}
+pub unsafe fn IsLogicalParallelApplyWorker() -> bool { crate::replication::logical::worker::IsLogicalParallelApplyWorker() }
 
-pub unsafe fn HandleParallelApplyMessageInterrupt() {
-    unimplemented!()
-}
+pub unsafe fn HandleParallelApplyMessageInterrupt() { unimplemented!() }
 
-pub unsafe fn ProcessParallelApplyMessages() {
-    unimplemented!()
-}
+pub unsafe fn ProcessParallelApplyMessages() { unimplemented!() }
 
-pub unsafe fn LogicalRepWorkersWakeupAtCommit(subid: Oid) {
-    unimplemented!()
-}
+pub unsafe fn LogicalRepWorkersWakeupAtCommit(subid: Oid) { crate::replication::logical::worker::LogicalRepWorkersWakeupAtCommit(subid as _) }
 
-pub unsafe fn AtEOXact_LogicalRepWorkers(isCommit: bool) {
-    unimplemented!()
-}
+pub unsafe fn AtEOXact_LogicalRepWorkers(isCommit: bool) { crate::replication::logical::worker::AtEOXact_LogicalRepWorkers(isCommit) }

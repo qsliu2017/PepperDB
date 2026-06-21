@@ -42,9 +42,7 @@ unsafe fn LWLockRelease(_lock: LWLockId) {
 }
 
 /// storage/lwlock.h LWLockConditionalAcquire(). TODO: not yet ported.
-unsafe fn LWLockConditionalAcquire(_lock: LWLockId, _mode: LWLockMode) -> bool {
-    unimplemented!()
-}
+unsafe fn LWLockConditionalAcquire(_lock: LWLockId, _mode: LWLockMode) -> bool { unimplemented!() }
 
 /// storage/shmem.h ShmemInitStruct(). TODO: not yet ported.
 unsafe fn ShmemInitStruct(
@@ -52,8 +50,7 @@ unsafe fn ShmemInitStruct(
     _size: Size,
     found_ptr: *mut bool,
 ) -> *mut c_void {
-    let _ = found_ptr;
-    unimplemented!()
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size as Size, found_ptr)
 }
 
 // miscadmin.h IsUnderPostmaster (extern global).

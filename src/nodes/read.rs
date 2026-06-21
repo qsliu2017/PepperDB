@@ -376,16 +376,11 @@ pub unsafe fn nodeRead(mut token: *const c_char, mut tok_len: c_int) -> *mut c_v
 
     match r#type {
         LEFT_BRACE => {
-            // parseNodeString() lives in the GENERATED readfuncs.c
-            // (crate::nodes::readfuncs), which is not yet ported.
-            //
-            //   result = parseNodeString();
-            //   token = pg_strtok(&tok_len);
-            //   if (token == NULL || token[0] != '}')
-            //       elog(ERROR, "did not find '}' at end of input node");
-            //
-            // TODO(pg-port): replace with crate::nodes::readfuncs::parseNodeString()
-            unimplemented!("parseNodeString() (readfuncs.c, not yet ported)");
+            result = crate::nodes::readfuncs::parseNodeString();
+            token = pg_strtok(&mut tok_len);
+            if token.is_null() || *token != b'}' as c_char {
+                crate::elog!(crate::utils::elog::ERROR, "did not find '}}' at end of input node");
+            }
         }
         LEFT_PAREN => {
             let mut l: *mut List = NIL;

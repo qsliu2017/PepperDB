@@ -50,7 +50,7 @@ unsafe fn LWLockRelease(_l: *mut c_void) {
 }
 
 // TODO: port ControlFileLock (src/include/storage/lwlocknames.h)
-static mut ControlFileLock: *mut c_void = core::ptr::null_mut();
+use crate::backend_link_shims::ControlFileLock;
 const LW_SHARED: c_int = 1;
 
 // TODO: port wal_segment_size GUC (src/backend/access/transam/xlog.c)

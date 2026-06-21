@@ -52,8 +52,7 @@ pub struct Latch {
 /// MyProc - the backend's own PGPROC pointer.
 // TODO(pg-port): real MyProc lives in storage/proc.c (globals.c)
 #[allow(non_upper_case_globals)]
-static mut MyProc: *mut PGPROC = core::ptr::null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 /// MyLatch - pointer to the backend's own process latch.
 // TODO(pg-port): real MyLatch lives in storage/ipc/latch.c / globals.c
 #[allow(non_upper_case_globals)]
@@ -63,14 +62,14 @@ static mut MyLatch: *mut Latch = core::ptr::null_mut();
 // TODO(pg-port): real SetLatch lives in storage/ipc/latch.c
 #[inline]
 unsafe fn SetLatch(_latch: *mut Latch) {
-    unimplemented!() // TODO(pg-port): real SetLatch lives in storage/ipc/latch.c
+    crate::storage::ipc::latch::SetLatch(_latch as _)
 }
 
 /// ResetLatch - reset a latch after waking.
 // TODO(pg-port): real ResetLatch lives in storage/ipc/latch.c
 #[inline]
 unsafe fn ResetLatch(_latch: *mut Latch) {
-    unimplemented!() // TODO(pg-port): real ResetLatch lives in storage/ipc/latch.c
+    crate::storage::ipc::latch::ResetLatch(_latch as _)
 }
 
 /// WaitLatch - block until a latch is set or a timeout occurs.

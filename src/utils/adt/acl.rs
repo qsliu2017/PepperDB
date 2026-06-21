@@ -24,6 +24,7 @@
 
 use crate::prelude::*; // postgres.h: Datum, palloc/palloc0/pfree, elog!/ereport!/errmsg!, Size, etc.
 use core::ffi::{c_char, c_int, c_void};
+use crate::utils::cache::syscache_ids_gen::{ATTNAME, AUTHMEMMEMROLE, AUTHMEMROLEMEM, AUTHNAME, AUTHOID, DATABASEOID};
 
 use crate::postgres_ext::{InvalidOid, Oid};
 use crate::c::{int32, uint32, uint64};
@@ -332,12 +333,6 @@ use crate::port::pgstrcasecmp::pg_strcasecmp;
 // Syscache cache-id constants (catalog/syscache_ids.h).  Most of these are not
 // yet exported from the ported syscache module, so they are defined locally.
 // TODO(pg-port): real values live in crate::catalog::syscache_ids / pg_*_d.h.
-pub const AUTHOID: c_int = 11;
-pub const AUTHNAME: c_int = 10;
-pub const ATTNAME: c_int = 0;
-pub const DATABASEOID: c_int = 25;
-pub const AUTHMEMMEMROLE: c_int = 7;
-pub const AUTHMEMROLEMEM: c_int = 8;
 
 // Anum_pg_authid_oid (catalog/pg_authid.h).
 // TODO(pg-port): real value lives in crate::catalog::pg_authid.
@@ -3840,6 +3835,7 @@ unsafe fn roles_is_member_of(
 }
 
 /// Does member have the privileges of role (directly or indirectly)?
+#[no_mangle]
 pub unsafe fn has_privs_of_role(member: Oid, role: Oid) -> bool {
     /* Fast path for simple case */
     if member == role {

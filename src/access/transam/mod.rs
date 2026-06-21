@@ -27,6 +27,7 @@ pub const MaxTransactionId: TransactionId = 0xFFFF_FFFF;
  *		transaction ID manipulation macros
  * ---------------- */
 #[inline]
+#[no_mangle]
 pub fn TransactionIdIsValid(xid: TransactionId) -> bool {
     xid != InvalidTransactionId
 }
@@ -166,6 +167,7 @@ mod tests {
 
 // Submodules under access/transam.
 pub mod xloginsert;
+pub mod xlog;
 pub mod xlogprefetcher;
 pub mod twophase;
 pub mod multixact;

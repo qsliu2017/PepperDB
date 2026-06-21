@@ -275,8 +275,7 @@ struct PGPROC {
 }
 
 /// TODO(pg-port): real ProcGlobal lives in storage/lmgr/proc.c
-static mut ProcGlobal: *mut PROC_HDR = null_mut();
-
+extern "C" { pub static mut ProcGlobal: *mut PROC_HDR; }
 /// TODO(pg-port): real GetPGProcByNumber lives in storage/lmgr/proc.h
 unsafe fn GetPGProcByNumber(_n: ProcNumber) -> *mut PGPROC {
     /* TODO(pg-port): real GetPGProcByNumber lives in storage/lmgr/proc.h */
@@ -291,8 +290,7 @@ const LW_EXCLUSIVE: c_int = 2;
 
 /// TODO(pg-port): real CheckpointerCommLock lives in storage/lmgr/lwlock.c
 unsafe fn CheckpointerCommLock() -> *mut LWLock {
-    /* TODO(pg-port): real CheckpointerCommLock lives in storage/lmgr/lwlock.c */
-    null_mut()
+    crate::backend_link_shims::CheckpointerCommLock as *mut LWLock
 }
 
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
@@ -381,8 +379,7 @@ unsafe fn ShmemInitStruct(
     _size: Size,
     _found: *mut bool,
 ) -> *mut c_void {
-    /* TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c */
-    null_mut()
+    crate::storage::ipc::shmem::ShmemInitStruct(_name as *const c_char, _size as Size, _found)
 }
 
 // pg_usleep. TODO: import from port layer.
@@ -585,7 +582,7 @@ pub unsafe fn CheckpointerMain(_startup_data: *const c_void, startup_data_len: S
      */
     checkpointer_context = AllocSetContextCreate!(
         TopMemoryContext,
-        "Checkpointer",
+        c"Checkpointer".as_ptr(),
         ALLOCSET_DEFAULT_SIZES
     );
     MemoryContextSwitchTo(checkpointer_context);
@@ -686,7 +683,10 @@ pub unsafe fn CheckpointerMain(_startup_data: *const c_void, startup_data_len: S
      * Advertise our proc number that backends can use to wake us up while
      * we're sleeping.
      */
-    (*ProcGlobal).checkpointerProc = crate::storage::procnumber::MyProcNumber;
+    // ProcGlobal here is a 1-field local PROC_HDR stub whose checkpointerProc sits at
+    // offset 0 = canonical allProcs; write through the canonical layout to avoid clobbering it.
+    (*(ProcGlobal as *mut crate::storage::lmgr::proc::PROC_HDR)).checkpointerProc =
+        crate::storage::procnumber::MyProcNumber as _;
 
     /*
      * Loop until we've been asked to write the shutdown checkpoint or

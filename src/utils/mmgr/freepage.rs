@@ -48,6 +48,7 @@
 use crate::c::{Min, Size};
 // utils/elog.h: FATAL log level for elog!.
 use crate::utils::elog::FATAL;
+use crate::{appendStringInfo, elog};
 // miscadmin.h: check_stack_depth().
 use crate::miscadmin::check_stack_depth;
 // lib/stringinfo.h: StringInfo + append/init helpers.

@@ -166,8 +166,7 @@ static mut ProcGlobal_storage: PROC_HDR = PROC_HDR {
     walwriterProc: INVALID_PROC_NUMBER,
 };
 // In C, ProcGlobal is a pointer; mirror via a static pointer into our storage.
-static mut ProcGlobal: *mut PROC_HDR = &raw mut ProcGlobal_storage;
-
+extern "C" { pub static mut ProcGlobal: *mut PROC_HDR; }
 // sigjmp_buf: a fixed-size opaque buffer matching the platform's jmp_buf. We do
 // not actually perform a setjmp here (elog.c machinery not ported); the loop's
 // recovery path is preserved structurally for a faithful translation. The
@@ -226,7 +225,7 @@ pub unsafe fn WalWriterMain(_startup_data: *const c_void, startup_data_len: Size
      */
     walwriter_context = AllocSetContextCreate!(
         TopMemoryContext,
-        "Wal Writer",
+        c"Wal Writer".as_ptr(),
         ALLOCSET_DEFAULT_SIZES
     );
     MemoryContextSwitchTo(walwriter_context);
@@ -303,7 +302,8 @@ pub unsafe fn WalWriterMain(_startup_data: *const c_void, startup_data_len: Size
      * Advertise our proc number that backends can use to wake us up while we're
      * sleeping.
      */
-    (*ProcGlobal).walwriterProc = MyProcNumber;
+    // local PROC_HDR stub field offset != canonical; write through canonical layout.
+    (*(ProcGlobal as *mut crate::storage::lmgr::proc::PROC_HDR)).walwriterProc = MyProcNumber as _;
 
     /*
      * Loop forever

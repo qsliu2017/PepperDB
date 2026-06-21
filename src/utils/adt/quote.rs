@@ -21,8 +21,11 @@ use crate::c::{text, ESCAPE_STRING_SYNTAX, SQL_STR_DOUBLE};
 use crate::postgres::{DatumGetPointer, PointerGetDatum};
 use crate::postgres_ext::InvalidOid;
 use crate::utils::adt::varlena::{cstring_to_text, text_to_cstring};
-use crate::utils::adt::ruleutils::quote_identifier;
 use core::ffi::{c_char, c_void};
+
+unsafe fn quote_identifier(_ident: *const c_char) -> *const c_char {
+    unimplemented!("TODO(pg-port): wire utils/adt/ruleutils")
+}
 
 /*
  * quote_ident - returns a properly quoted identifier.

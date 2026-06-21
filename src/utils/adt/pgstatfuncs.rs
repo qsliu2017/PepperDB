@@ -359,9 +359,7 @@ unsafe fn UINT32_ACCESS_ONCE(var: *const uint32) -> uint32 {
 // Cross-file dependency stubs (TODO(pg-port)). All from OTHER .c/.h files.
 // ---------------------------------------------------------------------------
 
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO(pg-port): utils/misc/miscinit.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool {
     unimplemented!() // TODO(pg-port): utils/adt/acl.c
 }

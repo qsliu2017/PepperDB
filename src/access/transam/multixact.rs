@@ -920,7 +920,7 @@ unsafe fn RecordNewMultiXact(
      */
     if InRecovery
         && next_pageno != pageno
-        && pg_atomic_read_u64(&mut (*(*MultiXactOffsetCtl()).shared).latest_page_number)
+        && pg_atomic_read_u64(&raw mut (*(*MultiXactOffsetCtl()).shared).latest_page_number as *mut _)
             == pageno as u64
     {
         elog!(DEBUG1, "next offsets page is not initialized, initializing it now");
@@ -2096,7 +2096,7 @@ pub unsafe fn StartupMultiXact() {
      */
     pageno = MultiXactIdToOffsetPage(multi);
     pg_atomic_write_u64(
-        &mut (*(*MultiXactOffsetCtl()).shared).latest_page_number,
+        &raw mut (*(*MultiXactOffsetCtl()).shared).latest_page_number as *mut _,
         pageno as u64,
     );
 
@@ -2105,7 +2105,7 @@ pub unsafe fn StartupMultiXact() {
      */
     pageno = MXOffsetToMemberPage(offset);
     pg_atomic_write_u64(
-        &mut (*(*MultiXactMemberCtl()).shared).latest_page_number,
+        &raw mut (*(*MultiXactMemberCtl()).shared).latest_page_number as *mut _,
         pageno as u64,
     );
 }
@@ -2136,7 +2136,7 @@ pub unsafe fn TrimMultiXact() {
      */
     pageno = MultiXactIdToOffsetPage(nextMXact);
     pg_atomic_write_u64(
-        &mut (*(*MultiXactOffsetCtl()).shared).latest_page_number,
+        &raw mut (*(*MultiXactOffsetCtl()).shared).latest_page_number as *mut _,
         pageno as u64,
     );
 
@@ -2183,7 +2183,7 @@ pub unsafe fn TrimMultiXact() {
      */
     pageno = MXOffsetToMemberPage(offset);
     pg_atomic_write_u64(
-        &mut (*(*MultiXactMemberCtl()).shared).latest_page_number,
+        &raw mut (*(*MultiXactMemberCtl()).shared).latest_page_number as *mut _,
         pageno as u64,
     );
 
@@ -3426,11 +3426,11 @@ unsafe fn INJECTION_POINT_LOAD(_name: *const c_char) {}
 unsafe fn INJECTION_POINT_CACHED(_name: *const c_char, _arg: *mut c_void) {}
 
 // memory mgmt helpers --- TODO(pg-port): real palloc/pfree live in utils/mmgr/mcxt.c
-unsafe fn palloc(_size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real palloc lives in utils/mmgr/mcxt.c
+unsafe fn palloc(size: Size) -> *mut c_void {
+    crate::utils::palloc::palloc(size)
 }
-unsafe fn pfree(_ptr: *mut c_void) {
-    unimplemented!() // TODO(pg-port): real pfree lives in utils/mmgr/mcxt.c
+unsafe fn pfree(ptr: *mut c_void) {
+    crate::utils::palloc::pfree(ptr)
 }
 unsafe fn add_size(s1: Size, s2: Size) -> Size {
     s1 + s2 // TODO(pg-port): real add_size lives in storage/ipc/shmem.c (with overflow check)
@@ -3440,24 +3440,30 @@ unsafe fn mul_size(s1: Size, s2: Size) -> Size {
 }
 
 pub type MemoryContext = *mut c_void; // TODO(pg-port): real MemoryContext lives in utils/palloc.h / nodes/memnodes.h
+#[no_mangle]
 pub static mut TopTransactionContext: MemoryContext = core::ptr::null_mut(); // TODO(pg-port): real TopTransactionContext lives in utils/mmgr/mcxt.c
 pub static mut TopMemoryContext: MemoryContext = core::ptr::null_mut(); // TODO(pg-port): real TopMemoryContext lives in utils/mmgr/mcxt.c
 pub const ALLOCSET_SMALL_SIZES: c_int = 0; // TODO(pg-port): real macro lives in utils/memutils.h
 unsafe fn AllocSetContextCreate(
-    _parent: MemoryContext,
-    _name: *const c_char,
+    parent: MemoryContext,
+    name: *const c_char,
     _sizes: c_int,
 ) -> MemoryContext {
-    unimplemented!() // TODO(pg-port): real AllocSetContextCreateInternal lives in utils/mmgr/aset.c
+    // ALLOCSET_SMALL_SIZES (utils/memutils.h) expands to the small-sizes triple.
+    crate::utils::mmgr::aset::AllocSetContextCreate(
+        parent as _,
+        name,
+        crate::utils::memutils::ALLOCSET_SMALL_SIZES,
+    ) as MemoryContext
 }
-unsafe fn MemoryContextAlloc(_context: MemoryContext, _size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real MemoryContextAlloc lives in utils/mmgr/mcxt.c
+unsafe fn MemoryContextAlloc(context: MemoryContext, size: Size) -> *mut c_void {
+    crate::utils::mmgr::mcxt::MemoryContextAlloc(context as _, size)
 }
-unsafe fn MemoryContextStrdup(_context: MemoryContext, _str: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real MemoryContextStrdup lives in utils/mmgr/mcxt.c
+unsafe fn MemoryContextStrdup(context: MemoryContext, str: *const c_char) -> *mut c_char {
+    crate::utils::mmgr::mcxt::MemoryContextStrdup(context as _, str)
 }
-unsafe fn MemoryContextSwitchTo(_context: MemoryContext) -> MemoryContext {
-    unimplemented!() // TODO(pg-port): real MemoryContextSwitchTo lives in utils/mmgr/mcxt.c
+unsafe fn MemoryContextSwitchTo(context: MemoryContext) -> MemoryContext {
+    crate::utils::mmgr::mcxt::MemoryContextSwitchTo(context as _) as MemoryContext
 }
 
 // StringInfo --- TODO(pg-port): real defs live in lib/stringinfo.h
@@ -3546,15 +3552,9 @@ unsafe fn dclist_push_head(_head: *mut dclist_head, _node: *mut dlist_node) {
 unsafe fn dclist_count(_head: *mut dclist_head) -> Size {
     unimplemented!() // TODO(pg-port): real dclist_count lives in lib/ilist.h
 }
-unsafe fn dclist_tail_node(_head: *mut dclist_head) -> *mut dlist_node {
-    unimplemented!() // TODO(pg-port): real dclist_tail_node lives in lib/ilist.h
-}
-unsafe fn dclist_delete_from(_head: *mut dclist_head, _node: *mut dlist_node) {
-    unimplemented!() // TODO(pg-port): real dclist_delete_from lives in lib/ilist.h
-}
-unsafe fn dclist_move_head(_head: *mut dclist_head, _node: *mut dlist_node) {
-    unimplemented!() // TODO(pg-port): real dclist_move_head lives in lib/ilist.h
-}
+unsafe fn dclist_tail_node(_head: *mut dclist_head) -> *mut dlist_node { unimplemented!() }
+unsafe fn dclist_delete_from(_head: *mut dclist_head, _node: *mut dlist_node) { crate::lib::ilist::dclist_delete_from(_head as _, _node as _) }
+unsafe fn dclist_move_head(_head: *mut dclist_head, _node: *mut dlist_node) { crate::lib::ilist::dclist_move_head(_head as _, _node as _) }
 
 // SLRU --- TODO(pg-port): real definitions live in access/slru.h / slru.c -----
 pub const SLRU_PAGES_PER_SEGMENT: c_int = 32; // TODO(pg-port): real value lives in access/slru.h
@@ -3571,81 +3571,94 @@ pub type SlruShared = *mut SlruSharedData;
 
 pub type SlruPagePrecedesFunction = unsafe extern "C" fn(int64, int64) -> bool;
 
-#[repr(C)]
-pub struct SlruCtlData {
-    pub shared: SlruShared,
-    pub PagePrecedes: Option<SlruPagePrecedesFunction>,
-    // ... TODO(pg-port): access/slru.h
-}
-pub type SlruCtl = *mut SlruCtlData;
+pub use crate::access::transam::slru::{SlruCtlData, SlruCtl};
 
 pub type SlruScanCallback =
     unsafe extern "C" fn(SlruCtl, *mut c_char, int64, *mut c_void) -> bool;
 
-unsafe fn SimpleLruGetBankLock(_ctl: SlruCtl, _pageno: int64) -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): real SimpleLruGetBankLock lives in access/slru.c
+unsafe fn SimpleLruGetBankLock(ctl: SlruCtl, pageno: int64) -> *mut LWLock {
+    crate::access::transam::slru::SimpleLruGetBankLock(ctl as _, pageno) as *mut LWLock
 }
 unsafe fn SimpleLruReadPage(
-    _ctl: SlruCtl,
-    _pageno: int64,
-    _write_ok: bool,
-    _xid: TransactionId,
+    ctl: SlruCtl,
+    pageno: int64,
+    write_ok: bool,
+    xid: TransactionId,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): real SimpleLruReadPage lives in access/slru.c
+    crate::access::transam::slru::SimpleLruReadPage(ctl as _, pageno, write_ok, xid)
 }
-unsafe fn SimpleLruReadPage_ReadOnly(_ctl: SlruCtl, _pageno: int64, _xid: TransactionId) -> c_int {
-    unimplemented!() // TODO(pg-port): real SimpleLruReadPage_ReadOnly lives in access/slru.c
+unsafe fn SimpleLruReadPage_ReadOnly(ctl: SlruCtl, pageno: int64, xid: TransactionId) -> c_int {
+    crate::access::transam::slru::SimpleLruReadPage_ReadOnly(ctl as _, pageno, xid)
 }
-unsafe fn SimpleLruZeroPage(_ctl: SlruCtl, _pageno: int64) -> c_int {
-    unimplemented!() // TODO(pg-port): real SimpleLruZeroPage lives in access/slru.c
+unsafe fn SimpleLruZeroPage(ctl: SlruCtl, pageno: int64) -> c_int {
+    crate::access::transam::slru::SimpleLruZeroPage(ctl as _, pageno)
 }
-unsafe fn SimpleLruWritePage(_ctl: SlruCtl, _slotno: c_int) {
-    unimplemented!() // TODO(pg-port): real SimpleLruWritePage lives in access/slru.c
+unsafe fn SimpleLruWritePage(ctl: SlruCtl, slotno: c_int) {
+    crate::access::transam::slru::SimpleLruWritePage(ctl as _, slotno)
 }
-unsafe fn SimpleLruWriteAll(_ctl: SlruCtl, _allow_redirtied: bool) {
-    unimplemented!() // TODO(pg-port): real SimpleLruWriteAll lives in access/slru.c
+unsafe fn SimpleLruWriteAll(ctl: SlruCtl, allow_redirtied: bool) {
+    crate::access::transam::slru::SimpleLruWriteAll(ctl as _, allow_redirtied)
 }
-unsafe fn SimpleLruTruncate(_ctl: SlruCtl, _cutoffPage: int64) {
-    unimplemented!() // TODO(pg-port): real SimpleLruTruncate lives in access/slru.c
+unsafe fn SimpleLruTruncate(ctl: SlruCtl, cutoffPage: int64) {
+    crate::access::transam::slru::SimpleLruTruncate(ctl as _, cutoffPage)
 }
-unsafe fn SimpleLruDoesPhysicalPageExist(_ctl: SlruCtl, _pageno: int64) -> bool {
-    unimplemented!() // TODO(pg-port): real SimpleLruDoesPhysicalPageExist lives in access/slru.c
+unsafe fn SimpleLruDoesPhysicalPageExist(ctl: SlruCtl, pageno: int64) -> bool {
+    crate::access::transam::slru::SimpleLruDoesPhysicalPageExist(ctl as _, pageno)
 }
 unsafe fn SimpleLruInit(
-    _ctl: SlruCtl,
-    _name: *const c_char,
-    _nslots: c_int,
-    _nlsns: c_int,
-    _subdir: *const c_char,
-    _buffer_tranche_id: c_int,
-    _bank_tranche_id: c_int,
-    _sync_handler: c_int,
-    _long_segment_names: bool,
+    ctl: SlruCtl,
+    name: *const c_char,
+    nslots: c_int,
+    nlsns: c_int,
+    subdir: *const c_char,
+    buffer_tranche_id: c_int,
+    bank_tranche_id: c_int,
+    sync_handler: c_int,
+    long_segment_names: bool,
 ) {
-    unimplemented!() // TODO(pg-port): real SimpleLruInit lives in access/slru.c
+    crate::access::transam::slru::SimpleLruInit(
+        ctl as _,
+        name,
+        nslots,
+        nlsns,
+        subdir,
+        buffer_tranche_id,
+        bank_tranche_id,
+        sync_handler,
+        long_segment_names,
+    )
 }
-unsafe fn SimpleLruShmemSize(_nslots: c_int, _nlsns: c_int) -> Size {
-    unimplemented!() // TODO(pg-port): real SimpleLruShmemSize lives in access/slru.c
+unsafe fn SimpleLruShmemSize(nslots: c_int, nlsns: c_int) -> Size {
+    crate::access::transam::slru::SimpleLruShmemSize(nslots, nlsns)
 }
-unsafe fn SlruPagePrecedesUnitTests(_ctl: SlruCtl, _per_page: c_int) {
-    unimplemented!() // TODO(pg-port): real SlruPagePrecedesUnitTests lives in access/slru.c
+unsafe fn SlruPagePrecedesUnitTests(ctl: SlruCtl, per_page: c_int) {
+    #[cfg(debug_assertions)] crate::access::transam::slru::SlruPagePrecedesUnitTests(ctl as _, per_page);
 }
-unsafe fn SlruScanDirectory(_ctl: SlruCtl, _callback: SlruScanCallback, _data: *mut c_void) -> bool {
-    unimplemented!() // TODO(pg-port): real SlruScanDirectory lives in access/slru.c
+unsafe fn SlruScanDirectory(ctl: SlruCtl, callback: SlruScanCallback, data: *mut c_void) -> bool {
+    crate::access::transam::slru::SlruScanDirectory(
+        ctl as _,
+        core::mem::transmute::<
+            SlruScanCallback,
+            crate::access::transam::slru::SlruScanCallback,
+        >(callback),
+        data,
+    )
 }
-unsafe fn SlruDeleteSegment(_ctl: SlruCtl, _segno: int64) {
-    unimplemented!() // TODO(pg-port): real SlruDeleteSegment lives in access/slru.c
+unsafe fn SlruDeleteSegment(ctl: SlruCtl, segno: int64) {
+    crate::access::transam::slru::SlruDeleteSegment(ctl as _, segno)
 }
-unsafe fn SlruSyncFileTag(_ctl: SlruCtl, _ftag: *const FileTag, _path: *mut c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): real SlruSyncFileTag lives in access/slru.c
+unsafe fn SlruSyncFileTag(ctl: SlruCtl, ftag: *const FileTag, path: *mut c_char) -> c_int {
+    crate::access::transam::slru::SlruSyncFileTag(ctl as _, ftag as _, path)
 }
-unsafe fn check_slru_buffers(_name: *const c_char, _newval: *mut c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real check_slru_buffers lives in access/slru.c
+unsafe fn check_slru_buffers(name: *const c_char, newval: *mut c_int) -> bool {
+    crate::access::transam::slru::check_slru_buffers(name, newval)
 }
 
 // GUC variables --- TODO(pg-port): real defs live in access/slru.c / utils/misc/guc_tables.c
-pub static mut multixact_offset_buffers: c_int = 0; // TODO(pg-port): access/slru.c
-pub static mut multixact_member_buffers: c_int = 0; // TODO(pg-port): access/slru.c
+extern "C" {
+    pub static mut multixact_offset_buffers: c_int; // canonical: utils/init/globals.rs
+    pub static mut multixact_member_buffers: c_int; // canonical: utils/init/globals.rs
+}
 pub static mut autovacuum_multixact_freeze_max_age: c_int = 0; // TODO(pg-port): postmaster/autovacuum.c
 
 // GUC types -------------------------------------------------------------------
@@ -3670,17 +3683,25 @@ pub const SYNC_HANDLER_MULTIXACT_MEMBER: c_int = 0; // TODO(pg-port): storage/sy
 
 // Named LWLocks --- TODO(pg-port): real ones live in storage/lwlocknames.h
 unsafe fn MultiXactGenLock() -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): real MultiXactGenLock lives in storage/lwlock.c (named LWLock)
+    // GetNamedLWLock(MultiXactGenLock) == &MainLWLockArray[id].lock
+    &raw mut (*crate::storage::lmgr::lwlock::MainLWLockArray
+        .add(crate::storage::lwlocklist::MultiXactGen_LWLOCK_ID as usize))
+    .lock as *mut LWLock
 }
 unsafe fn MultiXactTruncationLock() -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): real MultiXactTruncationLock lives in storage/lwlock.c (named LWLock)
+    &raw mut (*crate::storage::lmgr::lwlock::MainLWLockArray
+        .add(crate::storage::lwlocklist::MultiXactTruncation_LWLOCK_ID as usize))
+    .lock as *mut LWLock
 }
 
-unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real LWLockAcquire lives in storage/lwlock.c
+unsafe fn LWLockAcquire(lock: *mut LWLock, mode: c_int) -> bool {
+    crate::storage::lmgr::lwlock::LWLockAcquire(
+        lock as _,
+        core::mem::transmute::<c_int, crate::storage::lmgr::lwlock::LWLockMode>(mode),
+    )
 }
-unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO(pg-port): real LWLockRelease lives in storage/lwlock.c
+unsafe fn LWLockRelease(lock: *mut LWLock) {
+    crate::storage::lmgr::lwlock::LWLockRelease(lock as _)
 }
 
 // Sync / file tags --- TODO(pg-port): real FileTag lives in storage/sync.h ----
@@ -3699,39 +3720,31 @@ pub const RM_MULTIXACT_ID: u8 = 0; // TODO(pg-port): real value lives in access/
 pub const XLR_INFO_MASK: uint8 = 0x0F; // TODO(pg-port): real value lives in access/xlogrecord.h
 
 unsafe fn XLogBeginInsert() {
-    unimplemented!() // TODO(pg-port): real XLogBeginInsert lives in access/xloginsert.c
+    crate::access::transam::xloginsert::XLogBeginInsert()
 }
-unsafe fn XLogRegisterData(_data: *mut c_char, _len: usize) {
-    unimplemented!() // TODO(pg-port): real XLogRegisterData lives in access/xloginsert.c
+unsafe fn XLogRegisterData(data: *mut c_char, len: usize) {
+    crate::access::transam::xloginsert::XLogRegisterData(data as *const c_void, len as u32)
 }
-unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real XLogInsert lives in access/xloginsert.c
+unsafe fn XLogInsert(rmid: u8, info: uint8) -> XLogRecPtr {
+    crate::access::transam::xloginsert::XLogInsert(rmid, info)
 }
-unsafe fn XLogFlush(_record: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real XLogFlush lives in access/xlog.c
+unsafe fn XLogFlush(record: XLogRecPtr) {
+    crate::access::transam::xlog::XLogFlush(record)
 }
-unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 {
-    unimplemented!() // TODO(pg-port): real XLogRecGetInfo lives in access/xlogreader.h
-}
-unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real XLogRecGetData lives in access/xlogreader.h
-}
-unsafe fn XLogRecGetXid(_record: *mut XLogReaderState) -> TransactionId {
-    unimplemented!() // TODO(pg-port): real XLogRecGetXid lives in access/xlogreader.h
-}
-unsafe fn XLogRecHasAnyBlockRefs(_record: *mut XLogReaderState) -> bool {
-    unimplemented!() // TODO(pg-port): real XLogRecHasAnyBlockRefs lives in access/xlogreader.h
-}
+unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 { crate::access::transam::xlogreader::XLogRecGetInfo(_record as _) }
+unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char { crate::access::transam::xlogreader::XLogRecGetData(_record as _) }
+unsafe fn XLogRecGetXid(_record: *mut XLogReaderState) -> TransactionId { crate::access::transam::xlogreader::XLogRecGetXid(_record as _) }
+unsafe fn XLogRecHasAnyBlockRefs(_record: *mut XLogReaderState) -> bool { crate::access::transam::xlogreader::XLogRecHasAnyBlockRefs(_record as _) }
 
 // Recovery state --- TODO(pg-port): real defs live in access/xlog*.h
 pub static mut InRecovery: bool = false; // TODO(pg-port): real InRecovery lives in access/xlogutils.h
 unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO(pg-port): real RecoveryInProgress lives in access/xlog.c
+    crate::access::transam::xlog::RecoveryInProgress()
 }
 
 // Shared memory --- TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c
-unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c
+unsafe fn ShmemInitStruct(name: *const c_char, size: Size, found: *mut bool) -> *mut c_void {
+    crate::storage::ipc::shmem::ShmemInitStruct(name, size, found)
 }
 
 // Atomics --- TODO(pg-port): real pg_atomic_* live in port/atomics.h ----------
@@ -3739,35 +3752,38 @@ unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) 
 pub struct pg_atomic_uint64 {
     pub value: u64,
 }
-unsafe fn pg_atomic_read_u64(_ptr: *mut pg_atomic_uint64) -> u64 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_read_u64 lives in port/atomics.h
+unsafe fn pg_atomic_read_u64(ptr: *mut pg_atomic_uint64) -> u64 {
+    crate::port::atomics::pg_atomic_read_u64_impl_native(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint64),
+    )
 }
-unsafe fn pg_atomic_write_u64(_ptr: *mut pg_atomic_uint64, _val: u64) {
-    unimplemented!() // TODO(pg-port): real pg_atomic_write_u64 lives in port/atomics.h
+unsafe fn pg_atomic_write_u64(ptr: *mut pg_atomic_uint64, val: u64) {
+    crate::port::atomics::generic::pg_atomic_write_u64_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint64),
+        val,
+    )
 }
 
 // Transaction id helpers --- TODO(pg-port): real defs live in access/transam.* */
 pub const FirstNormalTransactionId: TransactionId = 3; // TODO(pg-port): real value lives in access/transam.h
-unsafe fn TransactionIdPrecedes(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdPrecedes lives in access/transam.c
+unsafe fn TransactionIdPrecedes(id1: TransactionId, id2: TransactionId) -> bool {
+    crate::access::transam::transam::TransactionIdPrecedes(id1, id2)
 }
-unsafe fn TransactionIdIsValid(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdIsValid lives in access/transam.h
+unsafe fn TransactionIdIsValid(xid: TransactionId) -> bool {
+    crate::access::transam::TransactionIdIsValid(xid)
 }
-unsafe fn TransactionIdEquals(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdEquals lives in access/transam.h
+unsafe fn TransactionIdEquals(id1: TransactionId, id2: TransactionId) -> bool {
+    crate::access::transam::TransactionIdEquals(id1, id2)
 }
 unsafe fn TransactionIdIsInProgress(_xid: TransactionId) -> bool {
     unimplemented!() // TODO(pg-port): real TransactionIdIsInProgress lives in storage/ipc/procarray.c
 }
-unsafe fn TransactionIdDidCommit(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdDidCommit lives in access/transam/transam.c
+unsafe fn TransactionIdDidCommit(xid: TransactionId) -> bool {
+    crate::access::transam::transam::TransactionIdDidCommit(xid)
 }
-unsafe fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdIsCurrentTransactionId lives in access/transam/xact.c
-}
-unsafe fn AdvanceNextFullTransactionIdPastXid(_xid: TransactionId) {
-    unimplemented!() // TODO(pg-port): real AdvanceNextFullTransactionIdPastXid lives in access/transam/varsup.c
+unsafe fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool { crate::access::transam::xact::TransactionIdIsCurrentTransactionId(_xid as _) }
+unsafe fn AdvanceNextFullTransactionIdPastXid(xid: TransactionId) {
+    crate::access::transam::varsup::AdvanceNextFullTransactionIdPastXid(xid)
 }
 
 // Misc / process state --- TODO(pg-port): real defs live in miscadmin.h etc.
@@ -3795,9 +3811,7 @@ pub const DELAY_CHKPT_START: c_int = 1 << 0; // TODO(pg-port): real value lives 
 
 // Postmaster signals --- TODO(pg-port): real defs live in storage/pmsignal.h --
 pub const PMSIGNAL_START_AUTOVAC_LAUNCHER: c_int = 0; // TODO(pg-port): storage/pmsignal.h
-unsafe fn SendPostmasterSignal(_reason: c_int) {
-    unimplemented!() // TODO(pg-port): real SendPostmasterSignal lives in storage/ipc/pmsignal.c
-}
+unsafe fn SendPostmasterSignal(_reason: c_int) { crate::storage::ipc::pmsignal::SendPostmasterSignal(_reason as _) }
 
 // dbcommands --- TODO(pg-port): real get_database_name lives in commands/dbcommands.c
 unsafe fn get_database_name(_dbid: Oid) -> *mut c_char {
@@ -3809,9 +3823,7 @@ pub const TWOPHASE_RM_MULTIXACT_ID: uint8 = 0; // TODO(pg-port): access/twophase
 unsafe fn RegisterTwoPhaseRecord(_rmid: uint8, _info: uint16, _data: *mut c_void, _len: u32) {
     unimplemented!() // TODO(pg-port): real RegisterTwoPhaseRecord lives in access/transam/twophase.c
 }
-unsafe fn TwoPhaseGetDummyProcNumber(_xid: TransactionId, _lock_held: bool) -> ProcNumber {
-    unimplemented!() // TODO(pg-port): real TwoPhaseGetDummyProcNumber lives in access/transam/twophase.c
-}
+unsafe fn TwoPhaseGetDummyProcNumber(_xid: TransactionId, _lock_held: bool) -> ProcNumber { crate::access::transam::twophase::TwoPhaseGetDummyProcNumber(_xid as _, _lock_held as _) }
 
 // funcapi / SRF --- TODO(pg-port): real defs live in funcapi.h ----------------
 pub type FunctionCallInfo = *mut c_void; // TODO(pg-port): fmgr.h

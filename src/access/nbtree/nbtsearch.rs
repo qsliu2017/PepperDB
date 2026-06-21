@@ -194,42 +194,12 @@ pub struct BTReadPageState {
 }
 
 /// TODO(pg-port): BTScanOpaqueData / BTScanOpaque live in access/nbtree.h.
-#[repr(C)]
-pub struct BTScanOpaqueData {
-    pub currPos:        BTScanPosData,
-    pub markPos:        BTScanPosData,
-    pub markItemIndex:  c_int,
-    pub dropPin:        bool,
-    pub scanBehind:     bool,
-    pub oppositeDirCheck: bool,
-    pub needPrimScan:   bool,
-    pub qual_ok:        bool,
-    pub numArrayKeys:   c_int,
-    pub numKilled:      c_int,
-    pub arrayKeys:      *mut BTArrayKeyInfo,
-    pub keyData:        ScanKey,
-    pub numberOfKeys:   c_int,
-    pub currTuples:     *mut c_char,
-    pub markTuples:     *mut c_char,
-    pub killedItems:    *mut c_int,
-}
-pub type BTScanOpaque = *mut BTScanOpaqueData;
+pub use crate::access::nbtree::nbtree::{BTScanOpaqueData, BTScanOpaque};
+
 
 /// TODO(pg-port): IndexScanDescData / IndexScanDesc live in access/relscan.h.
-#[repr(C)]
-pub struct IndexScanDescData {
-    pub indexRelation:     Relation,
-    pub xs_snapshot:       *mut c_void,
-    pub xs_heaptid:        ItemPointerData,
-    pub xs_itup:           IndexTuple,
-    pub opaque:            *mut c_void,
-    pub numberOfKeys:      c_int,
-    pub keyData:           ScanKey,
-    pub ignore_killed_tuples: bool,
-    pub parallel_scan:     *mut c_void,
-    pub instrument:        *mut IndexScanInstrData,
-}
-pub type IndexScanDesc = *mut IndexScanDescData;
+pub use crate::access::relscan::{IndexScanDescData, IndexScanDesc};
+
 
 /// TODO(pg-port): IndexScanInstr lives in nodes/execnodes.h.
 #[repr(C)]
@@ -245,9 +215,9 @@ pub const NoMovementScanDirection: ScanDirection = 0;
 
 // nbtree.h constants / types
 /// TODO(pg-port): from access/nbtree.h.
-pub const BT_READ: c_int = 0;
+pub const BT_READ: c_int = 1;
 /// TODO(pg-port): from access/nbtree.h.
-pub const BT_WRITE: c_int = 1;
+pub const BT_WRITE: c_int = 2;
 /// TODO(pg-port): from access/nbtree.h.
 pub const P_HIKEY: OffsetNumber = 1;
 /// TODO(pg-port): from access/nbtree.h: max TIDs per btree leaf page.
@@ -271,161 +241,161 @@ pub type RegProcedure = Oid;
 // nbtree.h macros (stubs)
 /// TODO(pg-port): BTPageGetOpaque() (access/nbtree.h).
 unsafe fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTPageGetOpaque(page as _) as _
 }
 /// TODO(pg-port): P_ISLEAF() (access/nbtree.h).
 unsafe fn P_ISLEAF(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtpage::P_ISLEAF(opaque as _)
 }
 /// TODO(pg-port): P_RIGHTMOST() (access/nbtree.h).
 unsafe fn P_RIGHTMOST(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::P_RIGHTMOST(opaque as _)
 }
 /// TODO(pg-port): P_LEFTMOST() (access/nbtree.h).
 unsafe fn P_LEFTMOST(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtpage::P_LEFTMOST(opaque as _)
 }
 /// TODO(pg-port): P_IGNORE() (access/nbtree.h).
 unsafe fn P_IGNORE(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtinsert::P_IGNORE(opaque as _)
 }
 /// TODO(pg-port): P_INCOMPLETE_SPLIT() (access/nbtree.h).
 unsafe fn P_INCOMPLETE_SPLIT(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtpage::P_INCOMPLETE_SPLIT(opaque as _)
 }
 /// TODO(pg-port): P_ISDELETED() (access/nbtree.h).
 unsafe fn P_ISDELETED(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtpage::P_ISDELETED(opaque as _)
 }
 /// TODO(pg-port): P_FIRSTDATAKEY() (access/nbtree.h).
 unsafe fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::P_FIRSTDATAKEY(opaque as _) as _
 }
 /// TODO(pg-port): BTreeTupleIsPivot() (access/nbtree.h).
 unsafe fn BTreeTupleIsPivot(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleIsPivot(itup as _)
 }
 /// TODO(pg-port): BTreeTupleIsPosting() (access/nbtree.h).
 unsafe fn BTreeTupleIsPosting(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleIsPosting(itup as _)
 }
 /// TODO(pg-port): BTreeTupleGetDownLink() (access/nbtree.h).
 unsafe fn BTreeTupleGetDownLink(itup: IndexTuple) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtinsert::BTreeTupleGetDownLink(itup as _)
 }
 /// TODO(pg-port): BTreeTupleGetNAtts() (access/nbtree.h).
 unsafe fn BTreeTupleGetNAtts(itup: IndexTuple, rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtinsert::BTreeTupleGetNAtts(itup as _, rel as _)
 }
 /// TODO(pg-port): BTreeTupleGetNPosting() (access/nbtree.h).
 unsafe fn BTreeTupleGetNPosting(posting: IndexTuple) -> c_int {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetNPosting(posting as _) as _
 }
 /// TODO(pg-port): BTreeTupleGetPostingN() (access/nbtree.h).
 unsafe fn BTreeTupleGetPostingN(posting: IndexTuple, n: c_int) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetPostingN(posting as _, n as _) as _
 }
 /// TODO(pg-port): BTreeTupleGetPostingOffset() (access/nbtree.h).
 unsafe fn BTreeTupleGetPostingOffset(posting: IndexTuple) -> uint32 {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetPostingOffset(posting as _) as _
 }
 /// TODO(pg-port): BTreeTupleGetHeapTID() (access/nbtree.h).
 unsafe fn BTreeTupleGetHeapTID(itup: IndexTuple) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetHeapTID(itup as _) as _
 }
 /// TODO(pg-port): BTreeTupleGetMaxHeapTID() (access/nbtree.h).
 unsafe fn BTreeTupleGetMaxHeapTID(itup: IndexTuple) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetMaxHeapTID(itup as _) as _
 }
 /// TODO(pg-port): IndexRelationGetNumberOfKeyAttributes() (utils/rel.h).
 unsafe fn IndexRelationGetNumberOfKeyAttributes(rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+    (*(*rel).rd_index).indnkeyatts as c_int
 }
 /// TODO(pg-port): IndexRelationGetNumberOfAttributes() (utils/rel.h).
-unsafe fn IndexRelationGetNumberOfAttributes(rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+pub unsafe fn IndexRelationGetNumberOfAttributes(rel: Relation) -> c_int {
+    (*(*rel).rd_rel).relnatts as c_int
 }
 /// TODO(pg-port): RelationGetDescr() (utils/rel.h).
-unsafe fn RelationGetDescr(rel: Relation) -> TupleDesc {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+pub unsafe fn RelationGetDescr(rel: Relation) -> TupleDesc {
+    (*rel).rd_att as _
 }
 /// TODO(pg-port): RelationGetRelationName() (utils/rel.h).
 unsafe fn RelationGetRelationName(rel: Relation) -> *const c_char {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+    (*(*rel).rd_rel).relname.data.as_ptr()
 }
 /// TODO(pg-port): RelationNeedsWAL() (utils/rel.h).
 unsafe fn RelationNeedsWAL(rel: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+    (*(*rel).rd_rel).relpersistence == b'p' as i8
 }
 /// TODO(pg-port): BufferGetPage() (storage/bufmgr.h).
 unsafe fn BufferGetPage(buf: Buffer) -> Page {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::storage::buffer::bufmgr::BufferGetPage(buf) as _
 }
 /// TODO(pg-port): BufferGetBlockNumber() (storage/bufmgr.h).
 unsafe fn BufferGetBlockNumber(buf: Buffer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    crate::storage::buffer::bufmgr::BufferGetBlockNumber(buf)
 }
 /// TODO(pg-port): BufferIsValid() (storage/bufmgr.h).
 unsafe fn BufferIsValid(buf: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+    buf != 0
 }
 /// TODO(pg-port): BufferGetLSNAtomic() (storage/bufmgr.h).
-unsafe fn BufferGetLSNAtomic(buf: Buffer) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn BufferGetLSNAtomic(buf: Buffer) -> XLogRecPtr {
+    crate::storage::buffer::bufmgr::BufferGetLSNAtomic(buf) as _
 }
 /// TODO(pg-port): IncrBufferRefCount() (storage/bufmgr.h).
-unsafe fn IncrBufferRefCount(buf: Buffer) {
-    unimplemented!() // TODO(pg-port): storage/bufmgr.h
+pub unsafe fn IncrBufferRefCount(buf: Buffer) {
+    crate::storage::buffer::bufmgr::IncrBufferRefCount(buf)
 }
 /// TODO(pg-port): InvalidBuffer constant (storage/buf.h).
 pub const InvalidBuffer: Buffer = 0;
 /// TODO(pg-port): _bt_getroot() (nbtpage.c / access/nbtree.h).
 unsafe fn _bt_getroot(rel: Relation, heaprel: Relation, access: c_int) -> Buffer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtpage.c)
+    crate::access::nbtree::nbtpage::_bt_getroot(rel as _, heaprel as _, access as _) as _
 }
 /// TODO(pg-port): _bt_gettrueroot() (nbtpage.c / access/nbtree.h).
 unsafe fn _bt_gettrueroot(rel: Relation) -> Buffer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtpage.c)
+    crate::access::nbtree::nbtpage::_bt_gettrueroot(rel as _) as _
 }
 /// TODO(pg-port): _bt_getbuf() (nbtpage.c / access/nbtree.h).
 unsafe fn _bt_getbuf(rel: Relation, blkno: BlockNumber, access: c_int) -> Buffer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtpage.c)
+    crate::access::nbtree::nbtpage::_bt_getbuf(rel as _, blkno as _, access as _) as _
 }
 /// TODO(pg-port): _bt_relbuf() (nbtpage.c / access/nbtree.h).
 unsafe fn _bt_relbuf(rel: Relation, buf: Buffer) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtpage.c)
+    crate::access::nbtree::nbtpage::_bt_relbuf(rel as _, buf as _)
 }
 /// TODO(pg-port): _bt_relandgetbuf() (nbtpage.c / access/nbtree.h).
 unsafe fn _bt_relandgetbuf(rel: Relation, obuf: Buffer, blkno: BlockNumber, access: c_int) -> Buffer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtpage.c)
+    crate::access::nbtree::nbtpage::_bt_relandgetbuf(rel as _, obuf as _, blkno as _, access as _) as _
 }
 /// TODO(pg-port): _bt_lockbuf() (nbtpage.c / access/nbtree.h).
 unsafe fn _bt_lockbuf(rel: Relation, buf: Buffer, access: c_int) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtpage.c)
+    crate::access::nbtree::nbtpage::_bt_lockbuf(rel as _, buf as _, access as _)
 }
 /// TODO(pg-port): _bt_unlockbuf() (nbtpage.c / access/nbtree.h).
 unsafe fn _bt_unlockbuf(rel: Relation, buf: Buffer) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtpage.c)
+    crate::access::nbtree::nbtpage::_bt_unlockbuf(rel as _, buf as _)
 }
 /// TODO(pg-port): _bt_finish_split() (nbtinsert.c / access/nbtree.h).
 unsafe fn _bt_finish_split(rel: Relation, heaprel: Relation, buf: Buffer, stack: BTStack) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtinsert.c)
+    crate::access::nbtree::nbtinsert::_bt_finish_split(rel as _, heaprel as _, buf as _, stack as _)
 }
 /// TODO(pg-port): _bt_freestack() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_freestack(stack: BTStack) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtutils::_bt_freestack(stack as _)
 }
 /// TODO(pg-port): _bt_metaversion() (nbtpage.c / access/nbtree.h).
 unsafe fn _bt_metaversion(rel: Relation, heapkeyspace: *mut bool, allequalimage: *mut bool) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtpage.c)
+    crate::access::nbtree::nbtpage::_bt_metaversion(rel as _, heapkeyspace as _, allequalimage as _)
 }
 /// TODO(pg-port): _bt_preprocess_keys() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_preprocess_keys(scan: IndexScanDesc) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtpreprocesskeys::_bt_preprocess_keys(scan as _)
 }
 /// TODO(pg-port): _bt_start_array_keys() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_start_array_keys(scan: IndexScanDesc, dir: ScanDirection) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtutils::_bt_start_array_keys(scan as _, dir as _)
 }
 /// TODO(pg-port): _bt_checkkeys() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_checkkeys(
@@ -435,7 +405,7 @@ unsafe fn _bt_checkkeys(
     itup: IndexTuple,
     indnatts: c_int,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtutils::_bt_checkkeys(scan as _, pstate as _, array_keys, itup as _, indnatts as _)
 }
 /// TODO(pg-port): _bt_scanbehind_checkkeys() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_scanbehind_checkkeys(
@@ -443,11 +413,11 @@ unsafe fn _bt_scanbehind_checkkeys(
     dir: ScanDirection,
     finaltup: IndexTuple,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtutils::_bt_scanbehind_checkkeys(scan as _, dir as _, finaltup as _)
 }
 /// TODO(pg-port): _bt_set_startikey() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_set_startikey(scan: IndexScanDesc, pstate: *mut BTReadPageState) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtutils::_bt_set_startikey(scan as _, pstate as _)
 }
 /// TODO(pg-port): _bt_check_natts() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_check_natts(
@@ -456,11 +426,11 @@ unsafe fn _bt_check_natts(
     page: Page,
     offnum: OffsetNumber,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtutils::_bt_check_natts(rel as _, heapkeyspace, page as _, offnum as _)
 }
 /// TODO(pg-port): _bt_killitems() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_killitems(scan: IndexScanDesc) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtutils::_bt_killitems(scan as _)
 }
 /// TODO(pg-port): _bt_parallel_seize() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_parallel_seize(
@@ -469,7 +439,7 @@ unsafe fn _bt_parallel_seize(
     lastcurrblkno: *mut BlockNumber,
     first: bool,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtree::_bt_parallel_seize(scan as _, blkno as _, lastcurrblkno as _, first)
 }
 /// TODO(pg-port): _bt_parallel_release() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_parallel_release(
@@ -477,72 +447,82 @@ unsafe fn _bt_parallel_release(
     blkno: BlockNumber,
     lastcurrblkno: BlockNumber,
 ) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtree::_bt_parallel_release(scan as _, blkno as _, lastcurrblkno as _)
 }
 /// TODO(pg-port): _bt_parallel_done() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_parallel_done(scan: IndexScanDesc) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtree::_bt_parallel_done(scan as _)
 }
 /// TODO(pg-port): _bt_parallel_primscan_schedule() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_parallel_primscan_schedule(scan: IndexScanDesc, currblkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtree::_bt_parallel_primscan_schedule(scan as _, currblkno as _)
 }
 /// TODO(pg-port): index_getprocinfo() (utils/rel.h).
 unsafe fn index_getprocinfo(rel: Relation, attno: AttrNumber, procno: c_int) -> *mut FmgrInfo {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+    crate::access::nbtree::nbtpreprocesskeys::index_getprocinfo(rel as _, attno as _, procno as _) as _
 }
 /// TODO(pg-port): index_getattr() (access/common/indextuple.h).
-unsafe fn index_getattr(
+pub unsafe fn index_getattr(
     tup: IndexTuple,
     attnum: c_int,
     tupleDesc: TupleDesc,
     isnull: *mut bool,
 ) -> Datum {
-    unimplemented!() // TODO(pg-port): access/common/indextuple.h
+    crate::access::common::indextuple::index_getattr(tup as _, attnum, tupleDesc as _, isnull) as _
 }
 /// TODO(pg-port): get_opfamily_proc() (utils/lsyscache.h).
-unsafe fn get_opfamily_proc(opfamily: Oid, lefttype: Oid, righttype: Oid, procnum: c_int) -> RegProcedure {
-    unimplemented!() // TODO(pg-port): utils/lsyscache.h
+pub unsafe fn get_opfamily_proc(opfamily: Oid, lefttype: Oid, righttype: Oid, procnum: c_int) -> RegProcedure {
+    crate::utils::cache::lsyscache::get_opfamily_proc(opfamily, lefttype, righttype, procnum as _) as _
 }
 /// TODO(pg-port): RegProcedureIsValid() (utils/builtins.h).
 unsafe fn RegProcedureIsValid(proc_: RegProcedure) -> bool {
     proc_ != InvalidOid
 }
 /// TODO(pg-port): PredicateLockPage() (storage/predicate.h).
-unsafe fn PredicateLockPage(rel: Relation, blkno: BlockNumber, snapshot: *mut c_void) {
-    unimplemented!() // TODO(pg-port): storage/predicate.h
+pub unsafe fn PredicateLockPage(rel: Relation, blkno: BlockNumber, snapshot: *mut c_void) {
+    { let _=(rel,blkno,snapshot); }
 }
 /// TODO(pg-port): PredicateLockRelation() (storage/predicate.h).
-unsafe fn PredicateLockRelation(rel: Relation, snapshot: *mut c_void) {
-    unimplemented!() // TODO(pg-port): storage/predicate.h
+pub unsafe fn PredicateLockRelation(rel: Relation, snapshot: *mut c_void) {
+    { let _=(rel,snapshot); }
 }
 /// TODO(pg-port): IsolationIsSerializable() (access/xact.h).
-unsafe fn IsolationIsSerializable() -> bool {
-    unimplemented!() // TODO(pg-port): access/xact.h
+pub unsafe fn IsolationIsSerializable() -> bool {
+    false
 }
 /// TODO(pg-port): pgstat_count_index_scan() (pgstat.h).
-unsafe fn pgstat_count_index_scan(rel: Relation) {
-    unimplemented!() // TODO(pg-port): pgstat.h
+pub unsafe fn pgstat_count_index_scan(rel: Relation) {
+    { let _=rel; }
 }
 /// TODO(pg-port): CHECK_FOR_INTERRUPTS() (miscadmin.h).
 unsafe fn CHECK_FOR_INTERRUPTS() {
-    unimplemented!() // TODO(pg-port): miscadmin.h
+    {}
 }
 /// TODO(pg-port): BTScanPosIsValid() (access/nbtree.h).
-unsafe fn BTScanPosIsValid(pos: &BTScanPosData) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn BTScanPosIsValid(pos: &BTScanPosData) -> bool {
+    pos.currPage != 0xFFFF_FFFF // BlockNumberIsValid(currPage)
 }
 /// TODO(pg-port): BTScanPosIsPinned() (access/nbtree.h).
-unsafe fn BTScanPosIsPinned(pos: &BTScanPosData) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn BTScanPosIsPinned(pos: &BTScanPosData) -> bool {
+    pos.buf != 0 // BufferIsValid(buf)
 }
 /// TODO(pg-port): BTScanPosUnpinIfPinned() (access/nbtree.h).
-unsafe fn BTScanPosUnpinIfPinned(pos: &mut BTScanPosData) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn BTScanPosUnpinIfPinned(pos: &mut BTScanPosData) {
+    if pos.buf != 0 {
+        crate::storage::buffer::bufmgr::ReleaseBuffer(pos.buf);
+        pos.buf = 0;
+    }
 }
 /// TODO(pg-port): BTScanPosInvalidate() (access/nbtree.h).
-unsafe fn BTScanPosInvalidate(pos: &mut BTScanPosData) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+#[no_mangle]
+pub unsafe fn BTScanPosInvalidate(pos: &mut BTScanPosData) {
+    pos.buf = 0;
+    pos.currPage = 0xFFFF_FFFF;
+    pos.nextPage = 0xFFFF_FFFF;
+    pos.prevPage = 0xFFFF_FFFF;
 }
 /// TODO(pg-port): ScanDirectionIsForward() (access/sdir.h).
 #[inline]
@@ -564,9 +544,13 @@ fn INVERT_COMPARE_RESULT(r: &mut i32) {
 
 // Relation field access helpers (stubs)
 /// TODO(pg-port): rel->rd_opcintype[] access.
-unsafe fn rd_opcintype(rel: Relation, i: usize) -> Oid { unimplemented!() }
+pub unsafe fn rd_opcintype(rel: Relation, i: usize) -> Oid {
+    *(*rel).rd_opcintype.add(i)
+}
 /// TODO(pg-port): rel->rd_opfamily[] access.
-unsafe fn rd_opfamily(rel: Relation, i: usize) -> Oid { unimplemented!() }
+pub unsafe fn rd_opfamily(rel: Relation, i: usize) -> Oid {
+    *(*rel).rd_opfamily.add(i)
+}
 
 // ---------------------------------------------------------------------------
 // Functions
@@ -761,7 +745,7 @@ pub unsafe fn _bt_search(
  * 'access'.  If we move right, we release the buffer and lock and acquire
  * the same on the right sibling.  Return value is the buffer we stop at.
  */
-unsafe fn _bt_moveright(
+pub unsafe fn _bt_moveright(
     rel: Relation,
     heaprel: Relation,
     key: BTScanInsert,
@@ -862,7 +846,7 @@ unsafe fn _bt_moveright(
  * the given page.  _bt_binsrch() has no lock or refcount side effects
  * on the buffer.
  */
-unsafe fn _bt_binsrch(rel: Relation, key: BTScanInsert, buf: Buffer) -> OffsetNumber {
+pub unsafe fn _bt_binsrch(rel: Relation, key: BTScanInsert, buf: Buffer) -> OffsetNumber {
     let page: Page;
     let opaque: BTPageOpaque;
     let mut low: OffsetNumber;
@@ -1110,7 +1094,7 @@ pub unsafe fn _bt_binsrch_insert(rel: Relation, insertstate: BTInsertState) -> O
  * Returns offset into posting list where caller's scantid belongs.
  *----------
  */
-unsafe fn _bt_binsrch_posting(key: BTScanInsert, page: Page, offnum: OffsetNumber) -> c_int {
+pub unsafe fn _bt_binsrch_posting(key: BTScanInsert, page: Page, offnum: OffsetNumber) -> c_int {
     let itup: IndexTuple;
     let itemid: *mut crate::storage::itemid::ItemIdData;
     let mut low: c_int;
@@ -1412,6 +1396,7 @@ pub const InvalidBlockNumber: BlockNumber = 0xFFFF_FFFF;
  * Within this routine, we build a temporary insertion-type scankey to use
  * in locating the scan start position.
  */
+#[no_mangle]
 pub unsafe fn _bt_first(scan: IndexScanDesc, dir: ScanDirection) -> bool {
     let rel: Relation = (*scan).indexRelation;
     let so: BTScanOpaque = (*scan).opaque as BTScanOpaque;
@@ -1431,7 +1416,17 @@ pub unsafe fn _bt_first(scan: IndexScanDesc, dir: ScanDirection) -> bool {
      * Examine the scan keys and eliminate any redundant keys; also mark the
      * keys that must be matched to continue the scan.
      */
+    if std::env::var("PDB_IS").is_ok() {
+        eprintln!("[_bt_first] numberOfKeys={} numArrayKeys={}", (*scan).numberOfKeys, (*so).numArrayKeys);
+        for i in 0..(*scan).numberOfKeys {
+            let k = (*scan).keyData.add(i as usize);
+            eprintln!("  key[{}] attno={} strat={} flags={:#x} arg={}", i, (*k).sk_attno, (*k).sk_strategy, (*k).sk_flags, (*k).sk_argument);
+        }
+    }
     _bt_preprocess_keys(scan);
+    if std::env::var("PDB_IS").is_ok() {
+        eprintln!("[_bt_first] after preprocess qual_ok={} numberOfKeys(so)={}", (*so).qual_ok, (*so).numberOfKeys);
+    }
 
     /*
      * Quit now if _bt_preprocess_keys() discovered that the scan keys can
@@ -1485,7 +1480,7 @@ pub unsafe fn _bt_first(scan: IndexScanDesc, dir: ScanDirection) -> bool {
      */
     pgstat_count_index_scan(rel);
     if !(*scan).instrument.is_null() {
-        (*(*scan).instrument).nsearches += 1;
+        if !(*scan).instrument.is_null() { *((*scan).instrument as *mut u64) += 1; }
     }
 
     /*----------
@@ -1618,7 +1613,7 @@ pub unsafe fn _bt_first(scan: IndexScanDesc, dir: ScanDirection) -> bool {
 
                     let mut arridx: c_int = 0;
                     while arridx < (*so).numArrayKeys {
-                        array = (*so).arrayKeys.add(arridx as usize);
+                        array = (*so).arrayKeys.add(arridx as usize) as _;
                         if (*array).scan_key == ikey {
                             break;
                         }
@@ -2059,6 +2054,11 @@ pub unsafe fn _bt_first(scan: IndexScanDesc, dir: ScanDirection) -> bool {
     Assert!(ScanDirectionIsBackward(dir) == inskey.backward);
     stack = _bt_search(rel, core::ptr::null_mut(), &raw mut inskey, &raw mut (*so).currPos.buf, BT_READ);
 
+    if std::env::var("PDB_BT").is_ok() && (*(*rel).rd_rel).oid == 2663 {
+        eprintln!("PDB_BT _bt_first idx=2663 SEARCH leaf_blkno={} keysz={}",
+            if BufferIsValid((*so).currPos.buf) { BufferGetBlockNumber((*so).currPos.buf) as i64 } else { -1 }, inskey.keysz);
+    }
+
     /* don't need to keep the stack around... */
     _bt_freestack(stack);
 
@@ -2075,7 +2075,7 @@ pub unsafe fn _bt_first(scan: IndexScanDesc, dir: ScanDirection) -> bool {
          * writer wouldn't see our predicate lock.
          */
         if IsolationIsSerializable() {
-            PredicateLockRelation(rel, (*scan).xs_snapshot);
+            PredicateLockRelation(rel, (*scan).xs_snapshot as _);
             stack = _bt_search(rel, core::ptr::null_mut(), &raw mut inskey, &raw mut (*so).currPos.buf, BT_READ);
             _bt_freestack(stack);
         }
@@ -2131,6 +2131,7 @@ pub unsafe fn _bt_first(scan: IndexScanDesc, dir: ScanDirection) -> bool {
  *		still be possible for the scan to return tuples by changing direction,
  *		though we'll need to call _bt_first anew in that other direction.
  */
+#[no_mangle]
 pub unsafe fn _bt_next(scan: IndexScanDesc, dir: ScanDirection) -> bool {
     let so: BTScanOpaque = (*scan).opaque as BTScanOpaque;
 
@@ -2180,7 +2181,7 @@ pub unsafe fn _bt_next(scan: IndexScanDesc, dir: ScanDirection) -> bool {
  *
  * Returns true if any matching items found on the page, false if none.
  */
-unsafe fn _bt_readpage(
+pub unsafe fn _bt_readpage(
     scan: IndexScanDesc,
     dir: ScanDirection,
     mut offnum: OffsetNumber,
@@ -2222,7 +2223,7 @@ unsafe fn _bt_readpage(
         }
     }
 
-    PredicateLockPage(rel, (*so).currPos.currPage, (*scan).xs_snapshot);
+    PredicateLockPage(rel, (*so).currPos.currPage, (*scan).xs_snapshot as _);
 
     /* initialize local variables */
     indnatts = IndexRelationGetNumberOfAttributes(rel);
@@ -2573,7 +2574,7 @@ unsafe fn _bt_readpage(
 }
 
 /* Save an index item into so->currPos.items[itemIndex] */
-unsafe fn _bt_saveitem(
+pub unsafe fn _bt_saveitem(
     so: BTScanOpaque,
     itemIndex: c_int,
     offnum: OffsetNumber,
@@ -2605,7 +2606,7 @@ unsafe fn _bt_saveitem(
  * Returns an offset into tuple storage space that main tuple is stored at if
  * needed.
  */
-unsafe fn _bt_setuppostingitems(
+pub unsafe fn _bt_setuppostingitems(
     so: BTScanOpaque,
     itemIndex: c_int,
     offnum: OffsetNumber,
@@ -2646,7 +2647,7 @@ unsafe fn _bt_setuppostingitems(
  * posting list tuple.  Caller passes its return value as tupleOffset.
  */
 #[inline]
-unsafe fn _bt_savepostingitem(
+pub unsafe fn _bt_savepostingitem(
     so: BTScanOpaque,
     itemIndex: c_int,
     offnum: OffsetNumber,
@@ -2672,7 +2673,7 @@ unsafe fn _bt_savepostingitem(
  * index scan by setting the relevant fields in caller's index scan descriptor
  */
 #[inline]
-unsafe fn _bt_returnitem(scan: IndexScanDesc, so: BTScanOpaque) {
+pub unsafe fn _bt_returnitem(scan: IndexScanDesc, so: BTScanOpaque) {
     let currItem: *mut BTScanPosItem = &raw mut (*so).currPos.items[(*so).currPos.itemIndex as usize];
 
     /* Most recent _bt_readpage must have succeeded */
@@ -2696,7 +2697,7 @@ unsafe fn _bt_returnitem(scan: IndexScanDesc, so: BTScanOpaque) {
  * never locked. (Actually, when so->dropPin there won't even be a pin held,
  * though so->currPos.currPage must still be set to a valid block number.)
  */
-unsafe fn _bt_steppage(scan: IndexScanDesc, dir: ScanDirection) -> bool {
+pub unsafe fn _bt_steppage(scan: IndexScanDesc, dir: ScanDirection) -> bool {
     let so: BTScanOpaque = (*scan).opaque as BTScanOpaque;
     let blkno: BlockNumber;
     let lastcurrblkno: BlockNumber;
@@ -2800,7 +2801,7 @@ unsafe fn _bt_steppage(scan: IndexScanDesc, dir: ScanDirection) -> bool {
  * We always release the scan for a parallel scan caller, regardless of
  * success or failure; we'll call _bt_parallel_release as soon as possible.
  */
-unsafe fn _bt_readfirstpage(scan: IndexScanDesc, offnum: OffsetNumber, dir: ScanDirection) -> bool {
+pub unsafe fn _bt_readfirstpage(scan: IndexScanDesc, offnum: OffsetNumber, dir: ScanDirection) -> bool {
     let so: BTScanOpaque = (*scan).opaque as BTScanOpaque;
 
     (*so).numKilled = 0; /* just paranoia */
@@ -2886,7 +2887,7 @@ unsafe fn _bt_readfirstpage(scan: IndexScanDesc, offnum: OffsetNumber, dir: Scan
  * We always release the scan for a parallel scan caller, regardless of
  * success or failure; we'll call _bt_parallel_release as soon as possible.
  */
-unsafe fn _bt_readnextpage(
+pub unsafe fn _bt_readnextpage(
     scan: IndexScanDesc,
     mut blkno: BlockNumber,
     mut lastcurrblkno: BlockNumber,
@@ -3020,7 +3021,7 @@ unsafe fn _bt_readnextpage(
  * It is possible for the returned leaf page to be half-dead; caller must
  * check that condition and step left again when required.
  */
-unsafe fn _bt_lock_and_validate_left(
+pub unsafe fn _bt_lock_and_validate_left(
     rel: Relation,
     blkno: *mut BlockNumber,
     mut lastcurrblkno: BlockNumber,
@@ -3220,7 +3221,7 @@ pub unsafe fn _bt_get_endpoint(rel: Relation, level: u32, rightmost: bool) -> Bu
  * Parallel scan callers must have seized the scan before calling here.
  * Exit conditions are the same as for _bt_first().
  */
-unsafe fn _bt_endpoint(scan: IndexScanDesc, dir: ScanDirection) -> bool {
+pub unsafe fn _bt_endpoint(scan: IndexScanDesc, dir: ScanDirection) -> bool {
     let rel: Relation = (*scan).indexRelation;
     let so: BTScanOpaque = (*scan).opaque as BTScanOpaque;
     let page: Page;
@@ -3241,7 +3242,7 @@ unsafe fn _bt_endpoint(scan: IndexScanDesc, dir: ScanDirection) -> bool {
          * Empty index. Lock the whole relation, as nothing finer to lock
          * exists.
          */
-        PredicateLockRelation(rel, (*scan).xs_snapshot);
+        PredicateLockRelation(rel, (*scan).xs_snapshot as _);
         _bt_parallel_done(scan);
         return false;
     }

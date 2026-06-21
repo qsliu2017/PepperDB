@@ -298,8 +298,7 @@ unsafe fn VacuumUpdateCosts() {}
 pub struct PGPROC {
     pub statusFlags: u8,
 }
-pub static mut MyProc: *mut PGPROC = null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 /*
  * DSM keys for parallel vacuum.  Unlike other parallel execution code, since
  * we don't need to worry about DSM keys conflicting with plan_node_id we can

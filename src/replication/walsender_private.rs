@@ -30,9 +30,10 @@ pub type TimestampTz = i64;
 /// TODO: dedup when storage/spin.h / s_lock.h lands.
 pub type slock_t = c_int;
 
-/// STUB: opaque `ConditionVariable` from storage/condition_variable.h.
-/// TODO: dedup when condition_variable.h lands.
-pub type ConditionVariable = c_void;
+/// Canonical ConditionVariable (real layout: spinlock + wakeup proclist), so the
+/// WalSndCtlData CV fields are correctly sized/offset and WalSndShmemSize accounts
+/// for them (a zero-size c_void stub aliased all three CVs at one offset).
+pub use crate::storage::lmgr::condition_variable::ConditionVariable;
 
 /// STUB: `NUM_SYNC_REP_WAIT_MODE` from replication/syncrep.h.  Mirrors the C
 /// value (SYNC_REP_WAIT_WRITE, _FLUSH, _APPLY => 3).

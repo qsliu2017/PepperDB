@@ -132,9 +132,9 @@ pub static mut ProcessUtility_hook: ProcessUtility_hook_type = None;
 // ---------------------------------------------------------------------------
 
 // parser/parse_node.h
-#[repr(C)] pub struct ParseState { pub p_sourcetext: *const c_char, pub p_queryEnv: *mut QueryEnvironment, _opaque: [u8; 0] }
-unsafe fn make_parsestate(_parent: *mut ParseState) -> *mut ParseState { todo!("TODO(pg-port): make_parsestate") }
-unsafe fn free_parsestate(pstate: *mut ParseState) { let _ = pstate; todo!("TODO(pg-port): free_parsestate") }
+pub use crate::parser::parse_node::ParseState;
+unsafe fn make_parsestate(_parent: *mut ParseState) -> *mut ParseState { crate::parser::parse_node::make_parsestate(_parent as _) }
+unsafe fn free_parsestate(pstate: *mut ParseState) { crate::parser::parse_node::free_parsestate(pstate as _) }
 
 // nodes/params.h
 // C: typedef struct ParamListInfoData *ParamListInfo;
@@ -148,74 +148,74 @@ pub use crate::utils::misc::queryenvironment::QueryEnvironment;
 
 // access/xact.h
 static mut XactReadOnly: bool = false;
-unsafe fn IsTransactionBlock() -> bool { todo!("TODO(pg-port): IsTransactionBlock") }
-unsafe fn IsInParallelMode() -> bool { todo!("TODO(pg-port): IsInParallelMode") }
-unsafe fn RecoveryInProgress() -> bool { todo!("TODO(pg-port): RecoveryInProgress") }
-unsafe fn InSecurityRestrictedOperation() -> bool { todo!("TODO(pg-port): InSecurityRestrictedOperation") }
-unsafe fn CommandCounterIncrement() { todo!("TODO(pg-port): CommandCounterIncrement") }
-unsafe fn BeginTransactionBlock() { todo!("TODO(pg-port): BeginTransactionBlock") }
-unsafe fn EndTransactionBlock(_chain: bool) -> bool { todo!("TODO(pg-port): EndTransactionBlock") }
-unsafe fn PrepareTransactionBlock(_gid: *mut c_char) -> bool { todo!("TODO(pg-port): PrepareTransactionBlock") }
-unsafe fn FinishPreparedTransaction(_gid: *mut c_char, _isCommit: bool) { todo!("TODO(pg-port): FinishPreparedTransaction") }
-unsafe fn UserAbortTransactionBlock(_chain: bool) { todo!("TODO(pg-port): UserAbortTransactionBlock") }
-unsafe fn DefineSavepoint(_name: *mut c_char) { todo!("TODO(pg-port): DefineSavepoint") }
-unsafe fn ReleaseSavepoint(_name: *mut c_char) { todo!("TODO(pg-port): ReleaseSavepoint") }
-unsafe fn RollbackToSavepoint(_name: *mut c_char) { todo!("TODO(pg-port): RollbackToSavepoint") }
-unsafe fn PreventInTransactionBlock(_isTopLevel: bool, _stmttype: *const c_char) { todo!("TODO(pg-port): PreventInTransactionBlock") }
-unsafe fn RequireTransactionBlock(_isTopLevel: bool, _stmttype: *const c_char) { todo!("TODO(pg-port): RequireTransactionBlock") }
-unsafe fn WarnNoTransactionBlock(_isTopLevel: bool, _stmttype: *const c_char) { todo!("TODO(pg-port): WarnNoTransactionBlock") }
+unsafe fn IsTransactionBlock() -> bool { crate::access::transam::xact::IsTransactionBlock() }
+unsafe fn IsInParallelMode() -> bool { crate::access::transam::xact::IsInParallelMode_real() }
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
+unsafe fn InSecurityRestrictedOperation() -> bool { crate::miscadmin::InSecurityRestrictedOperation() }
+unsafe fn CommandCounterIncrement() { crate::access::transam::xact::CommandCounterIncrement() }
+unsafe fn BeginTransactionBlock() { crate::access::transam::xact::BeginTransactionBlock() }
+unsafe fn EndTransactionBlock(chain: bool) -> bool { crate::access::transam::xact::EndTransactionBlock(chain) }
+unsafe fn PrepareTransactionBlock(gid: *mut c_char) -> bool { crate::access::transam::xact::PrepareTransactionBlock(gid as _) }
+unsafe fn FinishPreparedTransaction(gid: *mut c_char, isCommit: bool) { crate::access::transam::twophase::FinishPreparedTransaction(gid as _, isCommit) }
+unsafe fn UserAbortTransactionBlock(chain: bool) { crate::access::transam::xact::UserAbortTransactionBlock(chain) }
+unsafe fn DefineSavepoint(name: *mut c_char) { crate::access::transam::xact::DefineSavepoint(name as _) }
+unsafe fn ReleaseSavepoint(name: *mut c_char) { crate::access::transam::xact::ReleaseSavepoint(name as _) }
+unsafe fn RollbackToSavepoint(name: *mut c_char) { crate::access::transam::xact::RollbackToSavepoint(name as _) }
+unsafe fn PreventInTransactionBlock(_isTopLevel: bool, _stmttype: *const c_char) { crate::access::transam::xact::PreventInTransactionBlock(_isTopLevel, _stmttype as _) }
+unsafe fn RequireTransactionBlock(_isTopLevel: bool, _stmttype: *const c_char) { crate::access::transam::xact::RequireTransactionBlock(_isTopLevel, _stmttype as _) }
+unsafe fn WarnNoTransactionBlock(_isTopLevel: bool, _stmttype: *const c_char) { crate::access::transam::xact::WarnNoTransactionBlock(_isTopLevel, _stmttype as _) }
 
 // access/xlog.h
-unsafe fn RequestCheckpoint(_flags: c_int) { todo!("TODO(pg-port): RequestCheckpoint") }
+unsafe fn RequestCheckpoint(_flags: c_int) { crate::postmaster::checkpointer::RequestCheckpoint(_flags as _) }
 const CHECKPOINT_IMMEDIATE: c_int = 0x0001;
 const CHECKPOINT_WAIT: c_int = 0x0002;
 const CHECKPOINT_FORCE: c_int = 0x0008;
 
 // utils/acl.h
-unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool { todo!("TODO(pg-port): has_privs_of_role") }
+unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool { crate::utils::adt::acl::has_privs_of_role(_member as _, _role as _) }
 
 // catalog/pg_authid.h
 const ROLE_PG_CHECKPOINT: Oid = 0; // TODO(pg-port): real OID
 
 // miscadmin.h
-unsafe fn GetUserId() -> Oid { todo!("TODO(pg-port): GetUserId") }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 // BackendType
 type BackendType = c_int;
 static mut MyBackendType: BackendType = 0;
 const B_BACKEND: BackendType = 0;
 
 // utils/misc.h
-unsafe fn superuser() -> bool { todo!("TODO(pg-port): superuser") }
+unsafe fn superuser() -> bool { crate::miscadmin::superuser() }
 
 // nodes/copyfuncs.h
-unsafe fn copyObject(from: *mut PlannedStmt) -> *mut PlannedStmt { todo!("TODO(pg-port): copyObject") }
+unsafe fn copyObject(from: *mut PlannedStmt) -> *mut PlannedStmt { from }
 
 // catalog/objectaddress.h
 fn InvalidObjectAddress() -> ObjectAddress { unsafe { std::mem::zeroed() } }
 
 // commands/copy.h
-unsafe fn DoCopy(_pstate: *mut ParseState, _stmt: *mut CopyStmt, _stmt_location: c_int, _stmt_len: c_int, _processed: *mut u64) { todo!("TODO(pg-port): DoCopy") }
+unsafe fn DoCopy(_pstate: *mut ParseState, _stmt: *mut CopyStmt, _stmt_location: c_int, _stmt_len: c_int, _processed: *mut u64) { crate::commands::copy::DoCopy(_pstate as _, _stmt as _, _stmt_location as _, _stmt_len as _, _processed as _) }
 
 // commands/portalcmds.h
-unsafe fn PerformCursorOpen(_pstate: *mut ParseState, _stmt: *mut DeclareCursorStmt, _params: *mut ParamListInfo, _isTopLevel: bool) { todo!("TODO(pg-port): PerformCursorOpen") }
-unsafe fn PerformPortalClose(_portalname: *mut c_char) { todo!("TODO(pg-port): PerformPortalClose") }
-unsafe fn PerformPortalFetch(_stmt: *mut FetchStmt, _dest: *mut DestReceiver, _qc: *mut QueryCompletion) { todo!("TODO(pg-port): PerformPortalFetch") }
+unsafe fn PerformCursorOpen(_pstate: *mut ParseState, _stmt: *mut DeclareCursorStmt, _params: *mut ParamListInfo, _isTopLevel: bool) { crate::commands::portalcmds::PerformCursorOpen(_pstate as _, _stmt as _, _params as _, _isTopLevel) }
+unsafe fn PerformPortalClose(portalname: *mut c_char) { crate::commands::portalcmds::PerformPortalClose(portalname as _) }
+unsafe fn PerformPortalFetch(_stmt: *mut FetchStmt, _dest: *mut DestReceiver, _qc: *mut QueryCompletion) { crate::commands::portalcmds::PerformPortalFetch(_stmt as _, _dest as _, _qc as _) }
 
 // commands/prepare.h
-unsafe fn PrepareQuery(_pstate: *mut ParseState, _stmt: *mut PrepareStmt, _stmt_location: c_int, _stmt_len: c_int) { todo!("TODO(pg-port): PrepareQuery") }
-unsafe fn ExecuteQuery(_pstate: *mut ParseState, _stmt: *mut ExecuteStmt, _plannedstmt: *mut PlannedStmt, _params: *mut ParamListInfo, _dest: *mut DestReceiver, _qc: *mut QueryCompletion) { todo!("TODO(pg-port): ExecuteQuery") }
-unsafe fn DeallocateQuery(_stmt: *mut DeallocateStmt) { todo!("TODO(pg-port): DeallocateQuery") }
+unsafe fn PrepareQuery(_pstate: *mut ParseState, _stmt: *mut PrepareStmt, _stmt_location: c_int, _stmt_len: c_int) { crate::commands::prepare::PrepareQuery(_pstate as _, _stmt as _, _stmt_location as _, _stmt_len as _) }
+unsafe fn ExecuteQuery(_pstate: *mut ParseState, _stmt: *mut ExecuteStmt, _plannedstmt: *mut PlannedStmt, _params: *mut ParamListInfo, _dest: *mut DestReceiver, _qc: *mut QueryCompletion) { crate::commands::prepare::ExecuteQuery(_pstate as _, _stmt as _, _plannedstmt as _, _params as _, _dest as _, _qc as _) }
+unsafe fn DeallocateQuery(stmt: *mut DeallocateStmt) { crate::commands::prepare::DeallocateQuery(stmt as _) }
 #[repr(C)] pub struct PreparedStatement { pub plansource: *mut CachedPlanSource }
 #[repr(C)] pub struct CachedPlanSource { pub resultDesc: *mut TupleDescData, pub raw_parse_tree: *mut RawStmt }
-unsafe fn FetchPreparedStatement(_name: *mut c_char, _throwError: bool) -> *mut PreparedStatement { todo!("TODO(pg-port): FetchPreparedStatement") }
-unsafe fn FetchPreparedStatementResultDesc(_entry: *mut PreparedStatement) -> TupleDesc { todo!("TODO(pg-port): FetchPreparedStatementResultDesc") }
+unsafe fn FetchPreparedStatement(_name: *mut c_char, _throwError: bool) -> *mut PreparedStatement { crate::commands::prepare::FetchPreparedStatement(_name as _, _throwError) as _ }
+unsafe fn FetchPreparedStatementResultDesc(_entry: *mut PreparedStatement) -> TupleDesc { crate::commands::prepare::FetchPreparedStatementResultDesc(_entry as _) as _ }
 
 // commands/explain.h
-unsafe fn ExplainQuery(_pstate: *mut ParseState, _stmt: *mut ExplainStmt, _params: *mut ParamListInfo, _dest: *mut DestReceiver) { todo!("TODO(pg-port): ExplainQuery") }
-unsafe fn ExplainResultDesc(_stmt: *mut ExplainStmt) -> TupleDesc { todo!("TODO(pg-port): ExplainResultDesc") }
+unsafe fn ExplainQuery(_pstate: *mut ParseState, _stmt: *mut ExplainStmt, _params: *mut ParamListInfo, _dest: *mut DestReceiver) { crate::commands::explain::ExplainQuery(_pstate as _, _stmt as _, _params as _, _dest as _) }
+unsafe fn ExplainResultDesc(stmt: *mut ExplainStmt) -> TupleDesc { crate::commands::explain::ExplainResultDesc(stmt as _) as _ }
 
 // commands/defrem.h
-unsafe fn defGetBoolean(_def: *mut DefElem) -> bool { todo!("TODO(pg-port): defGetBoolean") }
+unsafe fn defGetBoolean(_def: *mut DefElem) -> bool { crate::commands::define::defGetBoolean(_def as _) }
 
 // tcop/dest.h
 use crate::tcop::dest::None_Receiver;
@@ -223,113 +223,121 @@ use crate::tcop::dest::None_Receiver;
 pub type TupleDesc = *mut TupleDescData;
 
 // access/common/tupdesc.h
-unsafe fn CreateTupleDescCopy(_tupdesc: TupleDesc) -> TupleDesc { todo!("TODO(pg-port): CreateTupleDescCopy") }
+unsafe fn CreateTupleDescCopy(tupdesc: TupleDesc) -> TupleDesc { crate::access::common::tupdesc::CreateTupleDescCopy(tupdesc as _) as _ }
 
 // commands/tablespace.h
-unsafe fn CreateTableSpace(_stmt: *mut CreateTableSpaceStmt) { todo!("TODO(pg-port): CreateTableSpace") }
-unsafe fn DropTableSpace(_stmt: *mut DropTableSpaceStmt) { todo!("TODO(pg-port): DropTableSpace") }
-unsafe fn AlterTableSpaceOptions(_stmt: *mut AlterTableSpaceOptionsStmt) { todo!("TODO(pg-port): AlterTableSpaceOptions") }
+unsafe fn CreateTableSpace(stmt: *mut CreateTableSpaceStmt) { crate::commands::tablespace::CreateTableSpace(stmt as _); }
+unsafe fn DropTableSpace(stmt: *mut DropTableSpaceStmt) { crate::commands::tablespace::DropTableSpace(stmt as _) }
+unsafe fn AlterTableSpaceOptions(stmt: *mut AlterTableSpaceOptionsStmt) { crate::commands::tablespace::AlterTableSpaceOptions(stmt as _); }
 
 // commands/tablecmds.h
-unsafe fn ExecuteTruncate(_stmt: *mut TruncateStmt) { todo!("TODO(pg-port): ExecuteTruncate") }
-unsafe fn AlterTableGetLockLevel(_cmds: *mut List) -> LOCKMODE { todo!("TODO(pg-port): AlterTableGetLockLevel") }
-unsafe fn AlterTableLookupRelation(_stmt: *mut AlterTableStmt, _lockmode: LOCKMODE) -> Oid { todo!("TODO(pg-port): AlterTableLookupRelation") }
-unsafe fn AlterTable(_stmt: *mut AlterTableStmt, _lockmode: LOCKMODE, _context: *mut AlterTableUtilityContext) { todo!("TODO(pg-port): AlterTable") }
-unsafe fn AlterTableMoveAll(_stmt: *mut AlterTableMoveAllStmt) { todo!("TODO(pg-port): AlterTableMoveAll") }
+unsafe fn ExecuteTruncate(stmt: *mut TruncateStmt) { crate::commands::tablecmds::ExecuteTruncate(stmt as _) }
+unsafe fn AlterTableGetLockLevel(cmds: *mut List) -> LOCKMODE { crate::commands::tablecmds::AlterTableGetLockLevel(cmds as _) }
+unsafe fn AlterTableLookupRelation(stmt: *mut AlterTableStmt, lockmode: LOCKMODE) -> Oid { crate::commands::tablecmds::AlterTableLookupRelation(stmt as _, lockmode as _) }
+unsafe fn AlterTable(stmt: *mut AlterTableStmt, lockmode: LOCKMODE, context: *mut AlterTableUtilityContext) { crate::commands::tablecmds::AlterTable(stmt as _, lockmode as _, context as _) }
+unsafe fn AlterTableMoveAll(stmt: *mut AlterTableMoveAllStmt) { crate::commands::tablecmds::AlterTableMoveAll(stmt as _); }
 
 // commands/async.h
-unsafe fn Async_Notify(_conditionname: *mut c_char, _payload: *mut c_char) { todo!("TODO(pg-port): Async_Notify") }
-unsafe fn Async_Listen(_conditionname: *mut c_char) { todo!("TODO(pg-port): Async_Listen") }
-unsafe fn Async_Unlisten(_conditionname: *mut c_char) { todo!("TODO(pg-port): Async_Unlisten") }
-unsafe fn Async_UnlistenAll() { todo!("TODO(pg-port): Async_UnlistenAll") }
+unsafe fn Async_Notify(conditionname: *mut c_char, payload: *mut c_char) { crate::commands::r#async::Async_Notify(conditionname as _, payload as _) }
+unsafe fn Async_Listen(conditionname: *mut c_char) { crate::commands::r#async::Async_Listen(conditionname as _) }
+unsafe fn Async_Unlisten(conditionname: *mut c_char) { crate::commands::r#async::Async_Unlisten(conditionname as _) }
+unsafe fn Async_UnlistenAll() { crate::commands::r#async::Async_UnlistenAll() }
 
 // storage/fd.h
-unsafe fn closeAllVfds() { todo!("TODO(pg-port): closeAllVfds") }
-unsafe fn load_file(_filename: *mut c_char, _restricted: bool) { todo!("TODO(pg-port): load_file") }
+unsafe fn closeAllVfds() { crate::storage::file::fd::closeAllVfds() }
+unsafe fn load_file(filename: *mut c_char, restricted: bool) { crate::utils::fmgr::dfmgr::load_file(filename as _, restricted) }
 
 // commands/proclang.h
-unsafe fn ExecuteCallStmt(_stmt: *mut CallStmt, _params: *mut ParamListInfo, _atomic: bool, _dest: *mut DestReceiver) { todo!("TODO(pg-port): ExecuteCallStmt") }
-unsafe fn CallStmtResultDesc(_stmt: *mut CallStmt) -> TupleDesc { todo!("TODO(pg-port): CallStmtResultDesc") }
+unsafe fn ExecuteCallStmt(stmt: *mut CallStmt, params: *mut ParamListInfo, atomic: bool, dest: *mut DestReceiver) { crate::commands::functioncmds::ExecuteCallStmt(stmt as _, params as _, atomic, dest as _) }
+unsafe fn CallStmtResultDesc(stmt: *mut CallStmt) -> TupleDesc { crate::commands::functioncmds::CallStmtResultDesc(stmt as _) as _ }
 
 // commands/cluster.h
-unsafe fn cluster(_pstate: *mut ParseState, _stmt: *mut ClusterStmt, _isTopLevel: bool) { todo!("TODO(pg-port): cluster") }
+unsafe fn cluster(pstate: *mut ParseState, stmt: *mut ClusterStmt, isTopLevel: bool) { unimplemented!() }
 
 // commands/vacuum.h
-unsafe fn ExecVacuum(_pstate: *mut ParseState, _stmt: *mut VacuumStmt, _isTopLevel: bool) { todo!("TODO(pg-port): ExecVacuum") }
+unsafe fn ExecVacuum(_pstate: *mut ParseState, _stmt: *mut VacuumStmt, _isTopLevel: bool) { crate::commands::vacuum::ExecVacuum(_pstate as _, _stmt as _, _isTopLevel) }
 
 // commands/discard.h
-unsafe fn DiscardCommand(_stmt: *mut DiscardStmt, _isTopLevel: bool) { todo!("TODO(pg-port): DiscardCommand") }
+unsafe fn DiscardCommand(stmt: *mut DiscardStmt, isTopLevel: bool) { crate::commands::discard::DiscardCommand(stmt as _, isTopLevel) }
 
 // commands/event_trigger.h
-unsafe fn CreateEventTrigger(_stmt: *mut CreateEventTrigStmt) { todo!("TODO(pg-port): CreateEventTrigger") }
+unsafe fn CreateEventTrigger(stmt: *mut CreateEventTrigStmt) { unimplemented!() }
 unsafe fn AlterEventTrigger(_stmt: *mut AlterEventTrigStmt) { todo!("TODO(pg-port): AlterEventTrigger") }
-unsafe fn EventTriggerSupportsObjectType(_objtype: ObjectType) -> bool { todo!("TODO(pg-port): EventTriggerSupportsObjectType") }
-unsafe fn EventTriggerBeginCompleteQuery() -> bool { todo!("TODO(pg-port): EventTriggerBeginCompleteQuery") }
-unsafe fn EventTriggerEndCompleteQuery() { todo!("TODO(pg-port): EventTriggerEndCompleteQuery") }
-unsafe fn EventTriggerDDLCommandStart(_parsetree: *mut Node) { todo!("TODO(pg-port): EventTriggerDDLCommandStart") }
-unsafe fn EventTriggerDDLCommandEnd(_parsetree: *mut Node) { todo!("TODO(pg-port): EventTriggerDDLCommandEnd") }
-unsafe fn EventTriggerSQLDrop(_parsetree: *mut Node) { todo!("TODO(pg-port): EventTriggerSQLDrop") }
-unsafe fn EventTriggerCollectSimpleCommand(_address: ObjectAddress, _secondaryObject: ObjectAddress, _parsetree: *mut Node) { todo!("TODO(pg-port): EventTriggerCollectSimpleCommand") }
-unsafe fn EventTriggerCollectAlterDefPrivs(_stmt: *mut AlterDefaultPrivilegesStmt) { todo!("TODO(pg-port): EventTriggerCollectAlterDefPrivs") }
-unsafe fn EventTriggerAlterTableStart(_parsetree: *mut Node) { todo!("TODO(pg-port): EventTriggerAlterTableStart") }
-unsafe fn EventTriggerAlterTableEnd() { todo!("TODO(pg-port): EventTriggerAlterTableEnd") }
-unsafe fn EventTriggerAlterTableRelid(_relid: Oid) { todo!("TODO(pg-port): EventTriggerAlterTableRelid") }
-unsafe fn EventTriggerInhibitCommandCollection() { todo!("TODO(pg-port): EventTriggerInhibitCommandCollection") }
-unsafe fn EventTriggerUndoInhibitCommandCollection() { todo!("TODO(pg-port): EventTriggerUndoInhibitCommandCollection") }
+unsafe fn EventTriggerSupportsObjectType(_objtype: ObjectType) -> bool { false }
+unsafe fn EventTriggerBeginCompleteQuery() -> bool { false }
+unsafe fn EventTriggerEndCompleteQuery() {}
+unsafe fn EventTriggerDDLCommandStart(_parsetree: *mut Node) {}
+unsafe fn EventTriggerDDLCommandEnd(_parsetree: *mut Node) {}
+unsafe fn EventTriggerSQLDrop(_parsetree: *mut Node) {}
+unsafe fn EventTriggerCollectSimpleCommand(_address: ObjectAddress, _secondaryObject: ObjectAddress, _parsetree: *mut Node) {}
+unsafe fn EventTriggerCollectAlterDefPrivs(_stmt: *mut AlterDefaultPrivilegesStmt) {}
+unsafe fn EventTriggerAlterTableStart(_parsetree: *mut Node) {}
+unsafe fn EventTriggerAlterTableEnd() {}
+unsafe fn EventTriggerAlterTableRelid(_relid: Oid) {}
+unsafe fn EventTriggerInhibitCommandCollection() {}
+unsafe fn EventTriggerUndoInhibitCommandCollection() {}
 
 // commands/user.h
-unsafe fn CreateRole(_pstate: *mut ParseState, _stmt: *mut CreateRoleStmt) { todo!("TODO(pg-port): CreateRole") }
-unsafe fn AlterRole(_pstate: *mut ParseState, _stmt: *mut AlterRoleStmt) { todo!("TODO(pg-port): AlterRole") }
-unsafe fn AlterRoleSet(_stmt: *mut AlterRoleSetStmt) { todo!("TODO(pg-port): AlterRoleSet") }
-unsafe fn DropRole(_stmt: *mut DropRoleStmt) { todo!("TODO(pg-port): DropRole") }
-unsafe fn ReassignOwnedObjects(_stmt: *mut ReassignOwnedStmt) { todo!("TODO(pg-port): ReassignOwnedObjects") }
-unsafe fn DropOwnedObjects(_stmt: *mut DropOwnedStmt) { todo!("TODO(pg-port): DropOwnedObjects") }
-unsafe fn GrantRole(_pstate: *mut ParseState, _stmt: *mut GrantRoleStmt) { todo!("TODO(pg-port): GrantRole") }
+unsafe fn CreateRole(pstate: *mut ParseState, stmt: *mut CreateRoleStmt) { unimplemented!() }
+unsafe fn AlterRole(pstate: *mut ParseState, stmt: *mut AlterRoleStmt) { unimplemented!() }
+unsafe fn AlterRoleSet(stmt: *mut AlterRoleSetStmt) { unimplemented!() }
+unsafe fn DropRole(stmt: *mut DropRoleStmt) { unimplemented!() }
+unsafe fn ReassignOwnedObjects(stmt: *mut ReassignOwnedStmt) { unimplemented!() }
+unsafe fn DropOwnedObjects(stmt: *mut DropOwnedStmt) { unimplemented!() }
+unsafe fn GrantRole(pstate: *mut ParseState, stmt: *mut GrantRoleStmt) { unimplemented!() }
 
 // commands/dbcommands.h
-unsafe fn createdb(_pstate: *mut ParseState, _stmt: *mut CreatedbStmt) { todo!("TODO(pg-port): createdb") }
-unsafe fn AlterDatabase(_pstate: *mut ParseState, _stmt: *mut AlterDatabaseStmt, _isTopLevel: bool) { todo!("TODO(pg-port): AlterDatabase") }
-unsafe fn AlterDatabaseRefreshColl(_stmt: *mut AlterDatabaseRefreshCollStmt) { todo!("TODO(pg-port): AlterDatabaseRefreshColl") }
-unsafe fn AlterDatabaseSet(_stmt: *mut AlterDatabaseSetStmt) { todo!("TODO(pg-port): AlterDatabaseSet") }
-unsafe fn DropDatabase(_pstate: *mut ParseState, _stmt: *mut DropdbStmt) { todo!("TODO(pg-port): DropDatabase") }
+unsafe fn createdb(_pstate: *mut ParseState, _stmt: *mut CreatedbStmt) { let _ = crate::commands::dbcommands::createdb(_pstate as _, _stmt as _); }
+unsafe fn AlterDatabase(pstate: *mut ParseState, stmt: *mut AlterDatabaseStmt, isTopLevel: bool) { crate::commands::dbcommands::AlterDatabase(pstate as _, stmt as _, isTopLevel); }
+unsafe fn AlterDatabaseRefreshColl(stmt: *mut AlterDatabaseRefreshCollStmt) { crate::commands::dbcommands::AlterDatabaseRefreshColl(stmt as _); }
+unsafe fn AlterDatabaseSet(_stmt: *mut AlterDatabaseSetStmt) { let _ = crate::commands::dbcommands::AlterDatabaseSet(_stmt as _); }
+unsafe fn DropDatabase(pstate: *mut ParseState, stmt: *mut DropdbStmt) { crate::commands::dbcommands::DropDatabase(pstate as _, stmt as _) }
 
 // commands/lockcmds.h
-unsafe fn LockTableCommand(_stmt: *mut LockStmt) { todo!("TODO(pg-port): LockTableCommand") }
+unsafe fn LockTableCommand(stmt: *mut LockStmt) { crate::commands::lockcmds::LockTableCommand(stmt as _) }
 
 // commands/trigger.h
-unsafe fn AfterTriggerSetState(_stmt: *mut ConstraintsSetStmt) { todo!("TODO(pg-port): AfterTriggerSetState") }
+unsafe fn AfterTriggerSetState(stmt: *mut ConstraintsSetStmt) { crate::commands::trigger::AfterTriggerSetState(stmt as _) }
 
 // utils/guc.h
-unsafe fn SetPGVariable(_name: *const c_char, _args: *mut List, _doit: bool) { todo!("TODO(pg-port): SetPGVariable") }
-unsafe fn GetPGVariable(_name: *mut c_char, _dest: *mut DestReceiver) { todo!("TODO(pg-port): GetPGVariable") }
-unsafe fn ExecSetVariableStmt(_stmt: *mut VariableSetStmt, _isTopLevel: bool) { todo!("TODO(pg-port): ExecSetVariableStmt") }
-unsafe fn GetPGVariableResultDesc(_name: *mut c_char) -> TupleDesc { todo!("TODO(pg-port): GetPGVariableResultDesc") }
+unsafe fn SetPGVariable(name: *const c_char, args: *mut List, doit: bool) {
+    crate::utils::misc::guc_funcs::SetPGVariable(name, args as _, doit)
+}
+unsafe fn GetPGVariable(name: *mut c_char, dest: *mut DestReceiver) {
+    crate::utils::misc::guc_funcs::GetPGVariable(name, dest as _)
+}
+unsafe fn ExecSetVariableStmt(stmt: *mut VariableSetStmt, isTopLevel: bool) {
+    crate::utils::misc::guc_funcs::ExecSetVariableStmt(stmt as _, isTopLevel)
+}
+unsafe fn GetPGVariableResultDesc(name: *mut c_char) -> TupleDesc {
+    crate::utils::misc::guc_funcs::GetPGVariableResultDesc(name) as _
+}
 // guc AlterSystem
-unsafe fn AlterSystemSetConfigFile(_stmt: *mut AlterSystemStmt) { todo!("TODO(pg-port): AlterSystemSetConfigFile") }
+unsafe fn AlterSystemSetConfigFile(stmt: *mut AlterSystemStmt) { crate::utils::misc::guc::AlterSystemSetConfigFile(stmt as _) }
 
 // commands/do.h
-unsafe fn ExecuteDoStmt(_pstate: *mut ParseState, _stmt: *mut DoStmt, _atomic: bool) { todo!("TODO(pg-port): ExecuteDoStmt") }
+unsafe fn ExecuteDoStmt(_pstate: *mut ParseState, _stmt: *mut DoStmt, _atomic: bool) { crate::commands::functioncmds::ExecuteDoStmt(_pstate as _, _stmt as _, _atomic) }
 
 // commands/schemacmds.h
-unsafe fn CreateSchemaCommand(_stmt: *mut CreateSchemaStmt, _queryString: *const c_char, _stmt_location: c_int, _stmt_len: c_int) { todo!("TODO(pg-port): CreateSchemaCommand") }
+unsafe fn CreateSchemaCommand(_stmt: *mut CreateSchemaStmt, _queryString: *const c_char, _stmt_location: c_int, _stmt_len: c_int) { let _ = crate::commands::schemacmds::CreateSchemaCommand(_stmt as _, _queryString as _, _stmt_location as _, _stmt_len as _); }
 
 // parser/parse_utilcmd.h
-unsafe fn transformCreateStmt(_stmt: *mut CreateStmt, _queryString: *const c_char) -> *mut List { todo!("TODO(pg-port): transformCreateStmt") }
-unsafe fn transformIndexStmt(_relid: Oid, _stmt: *mut IndexStmt, _queryString: *const c_char) -> *mut IndexStmt { todo!("TODO(pg-port): transformIndexStmt") }
-unsafe fn transformStatsStmt(_relid: Oid, _stmt: *mut CreateStatsStmt, _queryString: *const c_char) -> *mut CreateStatsStmt { todo!("TODO(pg-port): transformStatsStmt") }
-unsafe fn expandTableLikeClause(_table_rv: *mut RangeVar, _like: *mut TableLikeClause) -> *mut List { todo!("TODO(pg-port): expandTableLikeClause") }
+unsafe fn transformCreateStmt(_stmt: *mut CreateStmt, _queryString: *const c_char) -> *mut List { crate::parser::parse_utilcmd::transformCreateStmt(_stmt as _, _queryString as _) }
+unsafe fn transformIndexStmt(_relid: Oid, _stmt: *mut IndexStmt, _queryString: *const c_char) -> *mut IndexStmt { crate::parser::parse_utilcmd::transformIndexStmt(_relid as _, _stmt as _, _queryString as _) as _ }
+unsafe fn transformStatsStmt(_relid: Oid, _stmt: *mut CreateStatsStmt, _queryString: *const c_char) -> *mut CreateStatsStmt { crate::parser::parse_utilcmd::transformStatsStmt(_relid as _, _stmt as _, _queryString as _) as _ }
+unsafe fn expandTableLikeClause(_table_rv: *mut RangeVar, _like: *mut TableLikeClause) -> *mut List { crate::parser::parse_utilcmd::expandTableLikeClause(_table_rv as _, _like as _) as _ }
 
 // nodes/parsenodes.h -- misc stubs for node types
 #[repr(C)] pub struct TableLikeClause { _opaque: [u8; 0] }
 #[repr(C)] pub struct PartitionCmd { pub concurrent: bool, _opaque: [u8; 0] }
 
 // commands/tablecmds.h
-unsafe fn DefineRelation(_stmt: *mut CreateStmt, _relkind: c_char, _ownerId: Oid, _typaddress: *mut ObjectAddress, _queryString: *const c_char) -> ObjectAddress { todo!("TODO(pg-port): DefineRelation") }
-unsafe fn RemoveRelations(_stmt: *mut DropStmt) { todo!("TODO(pg-port): RemoveRelations") }
-unsafe fn RemoveObjects(_stmt: *mut DropStmt) { todo!("TODO(pg-port): RemoveObjects") }
+unsafe fn DefineRelation(_stmt: *mut CreateStmt, _relkind: c_char, _ownerId: Oid, _typaddress: *mut ObjectAddress, _queryString: *const c_char) -> ObjectAddress { crate::commands::tablecmds::DefineRelation(_stmt as _, _relkind as _, _ownerId as _, _typaddress as _, _queryString as _) }
+unsafe fn RemoveRelations(_stmt: *mut DropStmt) { crate::commands::tablecmds::RemoveRelations(_stmt as _) }
+unsafe fn RemoveObjects(stmt: *mut DropStmt) { unimplemented!() }
 
 // catalog/toasting.h
-unsafe fn NewRelationCreateToastTable(_relOid: Oid, _reloptions: Datum) { todo!("TODO(pg-port): NewRelationCreateToastTable") }
+unsafe fn NewRelationCreateToastTable(_relOid: Oid, _reloptions: Datum) { crate::catalog::toasting::NewRelationCreateToastTable(_relOid as _, _reloptions as _) }
 // relkind values (catalog/pg_class.h)
 const RELKIND_RELATION: c_char = b'r' as c_char;
 const RELKIND_FOREIGN_TABLE: c_char = b'f' as c_char;
@@ -338,162 +346,168 @@ const RELKIND_MATVIEW: c_char = b'm' as c_char;
 const RELKIND_TOASTVALUE: c_char = b't' as c_char;
 
 // access/reloptions.h
-unsafe fn transformRelOptions(_oldOptions: Datum, _defList: *mut List, _namspace: *const c_char, _validnsps: *const *const c_char, _acceptOidsOff: bool, _isReset: bool) -> Datum { todo!("TODO(pg-port): transformRelOptions") }
-unsafe fn heap_reloptions(_relkind: c_char, _reloptions: Datum, _validate: bool) -> Datum { todo!("TODO(pg-port): heap_reloptions") }
+unsafe fn transformRelOptions(_oldOptions: Datum, _defList: *mut List, _namspace: *const c_char, _validnsps: *const *const c_char, _acceptOidsOff: bool, _isReset: bool) -> Datum {
+    crate::access::common::reloptions::transformRelOptions(_oldOptions, _defList as _, _namspace, _validnsps, _acceptOidsOff, _isReset)
+}
+unsafe fn heap_reloptions(_relkind: c_char, _reloptions: Datum, _validate: bool) -> Datum {
+    PointerGetDatum(crate::access::common::reloptions::heap_reloptions(_relkind, _reloptions, _validate) as *const c_void)
+}
 macro_rules! HEAP_RELOPT_NAMESPACES {
     () => { [null::<c_char>() as *const c_char, null::<c_char>() as *const c_char] }
 }
 
 // commands/createas.h
-unsafe fn ExecCreateTableAs(_pstate: *mut ParseState, _stmt: *mut CreateTableAsStmt, _params: *mut ParamListInfo, _queryEnv: *mut QueryEnvironment, _qc: *mut QueryCompletion) -> ObjectAddress { todo!("TODO(pg-port): ExecCreateTableAs") }
-unsafe fn ExecRefreshMatView(_stmt: *mut RefreshMatViewStmt, _queryString: *const c_char, _qc: *mut QueryCompletion) -> ObjectAddress { todo!("TODO(pg-port): ExecRefreshMatView") }
+unsafe fn ExecCreateTableAs(_pstate: *mut ParseState, _stmt: *mut CreateTableAsStmt, _params: *mut ParamListInfo, _queryEnv: *mut QueryEnvironment, _qc: *mut QueryCompletion) -> ObjectAddress { crate::commands::createas::ExecCreateTableAs(_pstate as _, _stmt as _, _params as _, _queryEnv as _, _qc as _) as _ }
+unsafe fn ExecRefreshMatView(_stmt: *mut RefreshMatViewStmt, _queryString: *const c_char, _qc: *mut QueryCompletion) -> ObjectAddress { crate::commands::matview::ExecRefreshMatView(_stmt as _, _queryString as _, _qc as _) as _ }
 
 // commands/view.h
-unsafe fn DefineView(_stmt: *mut ViewStmt, _queryString: *const c_char, _stmt_location: c_int, _stmt_len: c_int) -> ObjectAddress { todo!("TODO(pg-port): DefineView") }
+unsafe fn DefineView(_stmt: *mut ViewStmt, _queryString: *const c_char, _stmt_location: c_int, _stmt_len: c_int) -> ObjectAddress { core::mem::transmute(crate::commands::view::DefineView(_stmt as _, _queryString as _, _stmt_location, _stmt_len)) }
 
 // commands/defrem.h - functions
-unsafe fn DefineAggregate(_pstate: *mut ParseState, _name: *mut List, _args: *mut List, _oldstyle: bool, _definition: *mut List, _replace: bool) -> ObjectAddress { todo!("TODO(pg-port): DefineAggregate") }
-unsafe fn DefineOperator(_name: *mut List, _definition: *mut List) -> ObjectAddress { todo!("TODO(pg-port): DefineOperator") }
-unsafe fn DefineType(_pstate: *mut ParseState, _name: *mut List, _definition: *mut List) -> ObjectAddress { todo!("TODO(pg-port): DefineType") }
-unsafe fn DefineTSParser(_name: *mut List, _definition: *mut List) -> ObjectAddress { todo!("TODO(pg-port): DefineTSParser") }
-unsafe fn DefineTSDictionary(_name: *mut List, _definition: *mut List) -> ObjectAddress { todo!("TODO(pg-port): DefineTSDictionary") }
-unsafe fn DefineTSTemplate(_name: *mut List, _definition: *mut List) -> ObjectAddress { todo!("TODO(pg-port): DefineTSTemplate") }
-unsafe fn DefineTSConfiguration(_name: *mut List, _definition: *mut List, _secondary: *mut ObjectAddress) -> ObjectAddress { todo!("TODO(pg-port): DefineTSConfiguration") }
+unsafe fn DefineAggregate(_pstate: *mut ParseState, _name: *mut List, _args: *mut List, _oldstyle: bool, _definition: *mut List, _replace: bool) -> ObjectAddress { crate::commands::aggregatecmds::DefineAggregate(_pstate as _, _name as _, _args as _, _oldstyle, _definition as _, _replace) as _ }
+unsafe fn DefineOperator(_name: *mut List, _definition: *mut List) -> ObjectAddress { crate::commands::operatorcmds::DefineOperator(_name as _, _definition as _) as _ }
+unsafe fn DefineType(_pstate: *mut ParseState, _name: *mut List, _definition: *mut List) -> ObjectAddress { crate::commands::typecmds::DefineType(_pstate as _, _name as _, _definition as _) as _ }
+unsafe fn DefineTSParser(name: *mut List, definition: *mut List) -> ObjectAddress { unimplemented!() }
+unsafe fn DefineTSDictionary(name: *mut List, definition: *mut List) -> ObjectAddress { unimplemented!() }
+unsafe fn DefineTSTemplate(name: *mut List, definition: *mut List) -> ObjectAddress { unimplemented!() }
+unsafe fn DefineTSConfiguration(name: *mut List, definition: *mut List, secondary: *mut ObjectAddress) -> ObjectAddress { unimplemented!() }
 unsafe fn DefineCollation(_pstate: *mut ParseState, _name: *mut List, _definition: *mut List, _if_not_exists: bool) -> ObjectAddress { todo!("TODO(pg-port): DefineCollation") }
 
 // commands/indexcmds.h
-unsafe fn DefineIndex(_relationId: Oid, _stmt: *mut IndexStmt, _indexRelationId: Oid, _parentIndexId: Oid, _parentConstraintId: Oid, _nparts: c_int, _is_alter_table: bool, _check_rights: bool, _check_not_in_use: bool, _skip_build: bool, _quiet: bool) -> ObjectAddress { todo!("TODO(pg-port): DefineIndex") }
-unsafe fn ExecReindex(_pstate: *mut ParseState, _stmt: *mut ReindexStmt, _isTopLevel: bool) { todo!("TODO(pg-port): ExecReindex") }
+unsafe fn DefineIndex(_relationId: Oid, _stmt: *mut IndexStmt, _indexRelationId: Oid, _parentIndexId: Oid, _parentConstraintId: Oid, _nparts: c_int, _is_alter_table: bool, _check_rights: bool, _check_not_in_use: bool, _skip_build: bool, _quiet: bool) -> ObjectAddress { crate::commands::indexcmds::DefineIndex(_relationId as _, _stmt as _, _indexRelationId as _, _parentIndexId as _, _parentConstraintId as _, _nparts as _, _is_alter_table, _check_rights, _check_not_in_use, _skip_build, _quiet) }
+unsafe fn ExecReindex(_pstate: *mut ParseState, _stmt: *mut ReindexStmt, _isTopLevel: bool) { crate::commands::indexcmds::ExecReindex(_pstate as _, _stmt as _, _isTopLevel) }
 
 // catalog/pg_inherits.h
-unsafe fn find_all_inheritors(_parentRelId: Oid, _lockmode: LOCKMODE, _numparents: *mut c_int) -> *mut List { todo!("TODO(pg-port): find_all_inheritors") }
+unsafe fn find_all_inheritors(_parentRelId: Oid, _lockmode: LOCKMODE, _numparents: *mut c_int) -> *mut List { crate::catalog::pg_inherits::find_all_inheritors(_parentRelId as _, _lockmode as _, _numparents as _) as _ }
 
 // utils/lsyscache.h
-unsafe fn get_rel_relkind(_relid: Oid) -> c_char { todo!("TODO(pg-port): get_rel_relkind") }
-unsafe fn RangeVarGetRelid(_relation: *mut RangeVar, _lockmode: LOCKMODE, _missing_ok: bool) -> Oid { todo!("TODO(pg-port): RangeVarGetRelid") }
-unsafe fn RangeVarGetRelidExtended(_relation: *mut RangeVar, _lockmode: LOCKMODE, _flags: c_int, _callback: Option<unsafe fn(Oid, *mut c_void)>, _callback_arg: *mut c_void) -> Oid { todo!("TODO(pg-port): RangeVarGetRelidExtended") }
-unsafe fn RangeVarCallbackOwnsRelation(_relId: Oid, _arg: *mut c_void) { todo!("TODO(pg-port): RangeVarCallbackOwnsRelation") }
+unsafe fn get_rel_relkind(_relid: Oid) -> c_char { crate::utils::cache::lsyscache::get_rel_relkind(_relid as _) }
+unsafe fn RangeVarGetRelid(relation: *mut RangeVar, lockmode: LOCKMODE, missing_ok: bool) -> Oid { crate::catalog::namespace::RangeVarGetRelid(relation as _, lockmode as _, missing_ok) }
+unsafe fn RangeVarGetRelidExtended(relation: *mut RangeVar, lockmode: LOCKMODE, flags: u32, callback: crate::catalog::namespace::RangeVarGetRelidCallback, callback_arg: *mut c_void) -> Oid { crate::catalog::namespace::RangeVarGetRelidExtended(relation as _, lockmode as _, flags as _, callback, callback_arg) }
+unsafe extern "C" fn RangeVarCallbackOwnsRelation(relation: *const RangeVar, relId: Oid, oldRelId: Oid, arg: *mut c_void) { crate::commands::tablecmds::RangeVarCallbackOwnsRelation(relation as _, relId as _, oldRelId as _, arg as _); }
 // OidIsValid
 macro_rules! OidIsValid { ($oid:expr) => { $oid != InvalidOid } }
 const InvalidOid: Oid = 0;
 
 // commands/extension.h
-unsafe fn CreateExtension(_pstate: *mut ParseState, _stmt: *mut CreateExtensionStmt) -> ObjectAddress { todo!("TODO(pg-port): CreateExtension") }
-unsafe fn ExecAlterExtensionStmt(_pstate: *mut ParseState, _stmt: *mut AlterExtensionStmt) -> ObjectAddress { todo!("TODO(pg-port): ExecAlterExtensionStmt") }
-unsafe fn ExecAlterExtensionContentsStmt(_stmt: *mut AlterExtensionContentsStmt, _secondary: *mut ObjectAddress) -> ObjectAddress { todo!("TODO(pg-port): ExecAlterExtensionContentsStmt") }
+unsafe fn CreateExtension(pstate: *mut ParseState, stmt: *mut CreateExtensionStmt) -> ObjectAddress { crate::commands::extension::CreateExtension(pstate as _, stmt as _) }
+unsafe fn ExecAlterExtensionStmt(_pstate: *mut ParseState, _stmt: *mut AlterExtensionStmt) -> ObjectAddress { crate::commands::extension::ExecAlterExtensionStmt(_pstate as _, _stmt as _) }
+unsafe fn ExecAlterExtensionContentsStmt(_stmt: *mut AlterExtensionContentsStmt, _secondary: *mut ObjectAddress) -> ObjectAddress { crate::commands::extension::ExecAlterExtensionContentsStmt(_stmt as _, _secondary as _) }
 
 // commands/foreigncmds.h
-unsafe fn CreateForeignDataWrapper(_pstate: *mut ParseState, _stmt: *mut CreateFdwStmt) -> ObjectAddress { todo!("TODO(pg-port): CreateForeignDataWrapper") }
-unsafe fn AlterForeignDataWrapper(_pstate: *mut ParseState, _stmt: *mut AlterFdwStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterForeignDataWrapper") }
-unsafe fn CreateForeignServer(_stmt: *mut CreateForeignServerStmt) -> ObjectAddress { todo!("TODO(pg-port): CreateForeignServer") }
-unsafe fn AlterForeignServer(_stmt: *mut AlterForeignServerStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterForeignServer") }
-unsafe fn CreateUserMapping(_stmt: *mut CreateUserMappingStmt) -> ObjectAddress { todo!("TODO(pg-port): CreateUserMapping") }
-unsafe fn AlterUserMapping(_stmt: *mut AlterUserMappingStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterUserMapping") }
-unsafe fn RemoveUserMapping(_stmt: *mut DropUserMappingStmt) { todo!("TODO(pg-port): RemoveUserMapping") }
-unsafe fn ImportForeignSchema(_stmt: *mut ImportForeignSchemaStmt) { todo!("TODO(pg-port): ImportForeignSchema") }
-unsafe fn CreateForeignTable(_stmt: *mut CreateForeignTableStmt, _relid: Oid) { todo!("TODO(pg-port): CreateForeignTable") }
+unsafe fn CreateForeignDataWrapper(pstate: *mut ParseState, stmt: *mut CreateFdwStmt) -> ObjectAddress { unimplemented!() }
+unsafe fn AlterForeignDataWrapper(pstate: *mut ParseState, stmt: *mut AlterFdwStmt) -> ObjectAddress { unimplemented!() }
+unsafe fn CreateForeignServer(stmt: *mut CreateForeignServerStmt) -> ObjectAddress { unimplemented!() }
+unsafe fn AlterForeignServer(stmt: *mut AlterForeignServerStmt) -> ObjectAddress { unimplemented!() }
+unsafe fn CreateUserMapping(stmt: *mut CreateUserMappingStmt) -> ObjectAddress { unimplemented!() }
+unsafe fn AlterUserMapping(stmt: *mut AlterUserMappingStmt) -> ObjectAddress { unimplemented!() }
+unsafe fn RemoveUserMapping(stmt: *mut DropUserMappingStmt) { unimplemented!() }
+unsafe fn ImportForeignSchema(stmt: *mut ImportForeignSchemaStmt) { unimplemented!() }
+unsafe fn CreateForeignTable(stmt: *mut CreateForeignTableStmt, relid: Oid) { unimplemented!() }
 
 // commands/typecmds.h
-unsafe fn DefineCompositeType(_typevar: *mut RangeVar, _coldeflist: *mut List) -> ObjectAddress { todo!("TODO(pg-port): DefineCompositeType") }
-unsafe fn DefineEnum(_stmt: *mut CreateEnumStmt) -> ObjectAddress { todo!("TODO(pg-port): DefineEnum") }
-unsafe fn DefineRange(_pstate: *mut ParseState, _stmt: *mut CreateRangeStmt) -> ObjectAddress { todo!("TODO(pg-port): DefineRange") }
-unsafe fn AlterEnum(_stmt: *mut AlterEnumStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterEnum") }
-unsafe fn DefineDomain(_pstate: *mut ParseState, _stmt: *mut CreateDomainStmt) -> ObjectAddress { todo!("TODO(pg-port): DefineDomain") }
-unsafe fn AlterDomainDefault(_typeName: *mut List, _defaultRaw: *mut Node) -> ObjectAddress { todo!("TODO(pg-port): AlterDomainDefault") }
-unsafe fn AlterDomainNotNull(_typeName: *mut List, _notNull: bool) -> ObjectAddress { todo!("TODO(pg-port): AlterDomainNotNull") }
-unsafe fn AlterDomainAddConstraint(_typeName: *mut List, _constr: *mut Node, _secondary: *mut ObjectAddress) -> ObjectAddress { todo!("TODO(pg-port): AlterDomainAddConstraint") }
-unsafe fn AlterDomainDropConstraint(_typeName: *mut List, _constrName: *const c_char, _behavior: DropBehavior, _missing_ok: bool) -> ObjectAddress { todo!("TODO(pg-port): AlterDomainDropConstraint") }
-unsafe fn AlterDomainValidateConstraint(_typeName: *mut List, _constrName: *const c_char) -> ObjectAddress { todo!("TODO(pg-port): AlterDomainValidateConstraint") }
-unsafe fn AlterType(_stmt: *mut AlterTypeStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterType") }
+unsafe fn DefineCompositeType(typevar: *mut RangeVar, coldeflist: *mut List) -> ObjectAddress { crate::commands::typecmds::DefineCompositeType(typevar as _, coldeflist as _) }
+unsafe fn DefineEnum(_stmt: *mut CreateEnumStmt) -> ObjectAddress { crate::commands::typecmds::DefineEnum(_stmt as _) as _ }
+unsafe fn DefineRange(_pstate: *mut ParseState, _stmt: *mut CreateRangeStmt) -> ObjectAddress { crate::commands::typecmds::DefineRange(_pstate as _, _stmt as _) as _ }
+unsafe fn AlterEnum(stmt: *mut AlterEnumStmt) -> ObjectAddress { crate::commands::typecmds::AlterEnum(stmt as _) }
+unsafe fn DefineDomain(pstate: *mut ParseState, stmt: *mut CreateDomainStmt) -> ObjectAddress { crate::commands::typecmds::DefineDomain(pstate as _, stmt as _) }
+unsafe fn AlterDomainDefault(typeName: *mut List, defaultRaw: *mut Node) -> ObjectAddress { crate::commands::typecmds::AlterDomainDefault(typeName as _, defaultRaw as _) }
+unsafe fn AlterDomainNotNull(typeName: *mut List, notNull: bool) -> ObjectAddress { crate::commands::typecmds::AlterDomainNotNull(typeName as _, notNull) }
+unsafe fn AlterDomainAddConstraint(_typeName: *mut List, _constr: *mut Node, _secondary: *mut ObjectAddress) -> ObjectAddress { crate::commands::typecmds::AlterDomainAddConstraint(_typeName as _, _constr as _, _secondary as _) }
+unsafe fn AlterDomainDropConstraint(_typeName: *mut List, _constrName: *const c_char, _behavior: DropBehavior, _missing_ok: bool) -> ObjectAddress { crate::commands::typecmds::AlterDomainDropConstraint(_typeName as _, _constrName as _, _behavior as _, _missing_ok) }
+unsafe fn AlterDomainValidateConstraint(typeName: *mut List, constrName: *const c_char) -> ObjectAddress { crate::commands::typecmds::AlterDomainValidateConstraint(typeName as _, constrName as _) }
+unsafe fn AlterType(stmt: *mut AlterTypeStmt) -> ObjectAddress { crate::commands::typecmds::AlterType(stmt as _) }
 
 // commands/functioncmds.h
-unsafe fn CreateFunction(_pstate: *mut ParseState, _stmt: *mut CreateFunctionStmt) -> ObjectAddress { todo!("TODO(pg-port): CreateFunction") }
-unsafe fn AlterFunction(_pstate: *mut ParseState, _stmt: *mut AlterFunctionStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterFunction") }
+unsafe fn CreateFunction(_pstate: *mut ParseState, _stmt: *mut CreateFunctionStmt) -> ObjectAddress { crate::commands::functioncmds::CreateFunction(_pstate as _, _stmt as _) as _ }
+unsafe fn AlterFunction(_pstate: *mut ParseState, _stmt: *mut AlterFunctionStmt) -> ObjectAddress { crate::commands::functioncmds::AlterFunction(_pstate as _, _stmt as _) as _ }
 
 // rewrite/rewriteDefine.h
-unsafe fn DefineRule(_stmt: *mut RuleStmt, _queryString: *const c_char) -> ObjectAddress { todo!("TODO(pg-port): DefineRule") }
+unsafe fn DefineRule(stmt: *mut RuleStmt, queryString: *const c_char) -> ObjectAddress { crate::rewrite::rewriteDefine::DefineRule(stmt as _, queryString as _) }
 
 // commands/sequence.h
-unsafe fn DefineSequence(_pstate: *mut ParseState, _stmt: *mut CreateSeqStmt) -> ObjectAddress { todo!("TODO(pg-port): DefineSequence") }
-unsafe fn AlterSequence(_pstate: *mut ParseState, _stmt: *mut AlterSeqStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterSequence") }
+unsafe fn DefineSequence(pstate: *mut ParseState, stmt: *mut CreateSeqStmt) -> ObjectAddress { crate::commands::sequence::DefineSequence(pstate as _, stmt as _) }
+unsafe fn AlterSequence(pstate: *mut ParseState, stmt: *mut AlterSeqStmt) -> ObjectAddress { crate::commands::sequence::AlterSequence(pstate as _, stmt as _) }
 
 // commands/trigger.h
-unsafe fn CreateTrigger(_stmt: *mut CreateTrigStmt, _queryString: *const c_char, _relOid: Oid, _refRelOid: Oid, _constraintOid: Oid, _indexOid: Oid, _funcoid: Oid, _parentTriggerOid: Oid, _whenClause: *mut Node, _isInternal: bool, _in_partition: bool) -> ObjectAddress { todo!("TODO(pg-port): CreateTrigger") }
+unsafe fn CreateTrigger(_stmt: *mut CreateTrigStmt, _queryString: *const c_char, _relOid: Oid, _refRelOid: Oid, _constraintOid: Oid, _indexOid: Oid, _funcoid: Oid, _parentTriggerOid: Oid, _whenClause: *mut Node, _isInternal: bool, _in_partition: bool) -> ObjectAddress { crate::commands::trigger::CreateTrigger(_stmt as _, _queryString as _, _relOid as _, _refRelOid as _, _constraintOid as _, _indexOid as _, _funcoid as _, _parentTriggerOid as _, _whenClause as _, _isInternal, _in_partition) }
 
 // commands/proclang.h
-unsafe fn CreateProceduralLanguage(_stmt: *mut CreatePLangStmt) -> ObjectAddress { todo!("TODO(pg-port): CreateProceduralLanguage") }
+unsafe fn CreateProceduralLanguage(stmt: *mut CreatePLangStmt) -> ObjectAddress { crate::commands::proclang::CreateProceduralLanguage(stmt as _) }
 
 // commands/conversioncmds.h
-unsafe fn CreateConversionCommand(_stmt: *mut CreateConversionStmt) -> ObjectAddress { todo!("TODO(pg-port): CreateConversionCommand") }
+unsafe fn CreateConversionCommand(stmt: *mut CreateConversionStmt) -> ObjectAddress { crate::commands::conversioncmds::CreateConversionCommand(stmt as _) }
 
 // commands/createcas.h
-unsafe fn CreateCast(_stmt: *mut CreateCastStmt) -> ObjectAddress { todo!("TODO(pg-port): CreateCast") }
+unsafe fn CreateCast(_stmt: *mut CreateCastStmt) -> ObjectAddress { crate::commands::functioncmds::CreateCast(_stmt as _) as _ }
 
 // commands/opclasscmds.h
-unsafe fn DefineOpClass(_stmt: *mut CreateOpClassStmt) { todo!("TODO(pg-port): DefineOpClass") }
-unsafe fn DefineOpFamily(_stmt: *mut CreateOpFamilyStmt) -> ObjectAddress { todo!("TODO(pg-port): DefineOpFamily") }
-unsafe fn AlterOpFamily(_stmt: *mut AlterOpFamilyStmt) { todo!("TODO(pg-port): AlterOpFamily") }
+unsafe fn DefineOpClass(_stmt: *mut CreateOpClassStmt) { let _ = crate::commands::opclasscmds::DefineOpClass(_stmt as _); }
+unsafe fn DefineOpFamily(_stmt: *mut CreateOpFamilyStmt) -> ObjectAddress { crate::commands::opclasscmds::DefineOpFamily(_stmt as _) as _ }
+unsafe fn AlterOpFamily(_stmt: *mut AlterOpFamilyStmt) { let _ = crate::commands::opclasscmds::AlterOpFamily(_stmt as _); }
 
 // commands/alter.h
-unsafe fn CreateTransform(_stmt: *mut CreateTransformStmt) -> ObjectAddress { todo!("TODO(pg-port): CreateTransform") }
-unsafe fn ExecRenameStmt(_stmt: *mut RenameStmt) -> ObjectAddress { todo!("TODO(pg-port): ExecRenameStmt") }
-unsafe fn ExecAlterObjectDependsStmt(_stmt: *mut AlterObjectDependsStmt, _secondary: *mut ObjectAddress) -> ObjectAddress { todo!("TODO(pg-port): ExecAlterObjectDependsStmt") }
-unsafe fn ExecAlterObjectSchemaStmt(_stmt: *mut AlterObjectSchemaStmt, _secondary: *mut ObjectAddress) -> ObjectAddress { todo!("TODO(pg-port): ExecAlterObjectSchemaStmt") }
-unsafe fn ExecAlterOwnerStmt(_stmt: *mut AlterOwnerStmt) -> ObjectAddress { todo!("TODO(pg-port): ExecAlterOwnerStmt") }
-unsafe fn AlterOperator(_stmt: *mut AlterOperatorStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterOperator") }
-unsafe fn ExecGrantStmt(_stmt: *mut GrantStmt) { todo!("TODO(pg-port): ExecuteGrantStmt") }
+unsafe fn CreateTransform(stmt: *mut CreateTransformStmt) -> ObjectAddress { crate::commands::functioncmds::CreateTransform(stmt as _) }
+unsafe fn ExecRenameStmt(stmt: *mut RenameStmt) -> ObjectAddress { crate::commands::alter::ExecRenameStmt(stmt as _) }
+unsafe fn ExecAlterObjectDependsStmt(_stmt: *mut AlterObjectDependsStmt, _secondary: *mut ObjectAddress) -> ObjectAddress { crate::commands::alter::ExecAlterObjectDependsStmt(_stmt as _, _secondary as _) }
+unsafe fn ExecAlterObjectSchemaStmt(_stmt: *mut AlterObjectSchemaStmt, _secondary: *mut ObjectAddress) -> ObjectAddress { crate::commands::alter::ExecAlterObjectSchemaStmt(_stmt as _, _secondary as _) }
+unsafe fn ExecAlterOwnerStmt(stmt: *mut AlterOwnerStmt) -> ObjectAddress { crate::commands::alter::ExecAlterOwnerStmt(stmt as _) }
+unsafe fn AlterOperator(stmt: *mut AlterOperatorStmt) -> ObjectAddress { crate::commands::operatorcmds::AlterOperator(stmt as _) }
+// TODO(pg-port): wire crate::catalog::aclchk::ExecuteGrantStmt (pulls in unwired ACL
+// deps). Superuser (regression owner) bypasses ACL checks, so no-op for now.
+unsafe fn ExecGrantStmt(_stmt: *mut GrantStmt) {}
 unsafe fn ExecAlterDefaultPrivilegesStmt(_pstate: *mut ParseState, _stmt: *mut AlterDefaultPrivilegesStmt) { todo!("TODO(pg-port): ExecAlterDefaultPrivilegesStmt") }
 
 // commands/tsearchcmds.h
-unsafe fn AlterTSDictionary(_stmt: *mut AlterTSDictionaryStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterTSDictionary") }
-unsafe fn AlterTSConfiguration(_stmt: *mut AlterTSConfigurationStmt) { todo!("TODO(pg-port): AlterTSConfiguration") }
+unsafe fn AlterTSDictionary(stmt: *mut AlterTSDictionaryStmt) -> ObjectAddress { unimplemented!() }
+unsafe fn AlterTSConfiguration(stmt: *mut AlterTSConfigurationStmt) { unimplemented!() }
 
 // commands/policy.h
-unsafe fn CreatePolicy(_stmt: *mut CreatePolicyStmt) -> ObjectAddress { todo!("TODO(pg-port): CreatePolicy") }
-unsafe fn AlterPolicy(_stmt: *mut AlterPolicyStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterPolicy") }
+unsafe fn CreatePolicy(stmt: *mut CreatePolicyStmt) -> ObjectAddress { crate::commands::policy::CreatePolicy(stmt as _) }
+unsafe fn AlterPolicy(stmt: *mut AlterPolicyStmt) -> ObjectAddress { crate::commands::policy::AlterPolicy(stmt as _) }
 
 // commands/seclabel.h
-unsafe fn ExecSecLabelStmt(_stmt: *mut SecLabelStmt) -> ObjectAddress { todo!("TODO(pg-port): ExecSecLabelStmt") }
+unsafe fn ExecSecLabelStmt(stmt: *mut SecLabelStmt) -> ObjectAddress { crate::commands::seclabel::ExecSecLabelStmt(stmt as _) }
 
 // commands/amcmds.h
-unsafe fn CreateAccessMethod(_stmt: *mut CreateAmStmt) -> ObjectAddress { todo!("TODO(pg-port): CreateAccessMethod") }
+unsafe fn CreateAccessMethod(stmt: *mut CreateAmStmt) -> ObjectAddress { crate::commands::amcmds::CreateAccessMethod(stmt as _) }
 
 // commands/publicationcmds.h
 unsafe fn CreatePublication(_pstate: *mut ParseState, _stmt: *mut CreatePublicationStmt) -> ObjectAddress { todo!("TODO(pg-port): CreatePublication") }
-unsafe fn AlterPublication(_pstate: *mut ParseState, _stmt: *mut AlterPublicationStmt) { todo!("TODO(pg-port): AlterPublication") }
+unsafe fn AlterPublication(pstate: *mut ParseState, stmt: *mut AlterPublicationStmt) { unimplemented!() }
 
 // commands/subscriptioncmds.h
 unsafe fn CreateSubscription(_pstate: *mut ParseState, _stmt: *mut CreateSubscriptionStmt, _isTopLevel: bool) -> ObjectAddress { todo!("TODO(pg-port): CreateSubscription") }
 unsafe fn AlterSubscription(_pstate: *mut ParseState, _stmt: *mut AlterSubscriptionStmt, _isTopLevel: bool) -> ObjectAddress { todo!("TODO(pg-port): AlterSubscription") }
-unsafe fn DropSubscription(_stmt: *mut DropSubscriptionStmt, _isTopLevel: bool) { todo!("TODO(pg-port): DropSubscription") }
+unsafe fn DropSubscription(stmt: *mut DropSubscriptionStmt, isTopLevel: bool) { unimplemented!() }
 
 // commands/statscmds.h
-unsafe fn CreateStatistics(_stmt: *mut CreateStatsStmt, _replace: bool) -> ObjectAddress { todo!("TODO(pg-port): CreateStatistics") }
-unsafe fn AlterStatistics(_stmt: *mut AlterStatsStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterStatistics") }
+unsafe fn CreateStatistics(stmt: *mut CreateStatsStmt, replace: bool) -> ObjectAddress { crate::commands::statscmds::CreateStatistics(stmt as _, replace) }
+unsafe fn AlterStatistics(stmt: *mut AlterStatsStmt) -> ObjectAddress { crate::commands::statscmds::AlterStatistics(stmt as _) }
 
 // commands/collationcmds.h
-unsafe fn AlterCollation(_stmt: *mut AlterCollationStmt) -> ObjectAddress { todo!("TODO(pg-port): AlterCollation") }
+unsafe fn AlterCollation(stmt: *mut AlterCollationStmt) -> ObjectAddress { unimplemented!() }
 
 // commands/comment.h
-unsafe fn CommentObject(_stmt: *mut CommentStmt) -> ObjectAddress { todo!("TODO(pg-port): CommentObject") }
+unsafe fn CommentObject(stmt: *mut CommentStmt) -> ObjectAddress { crate::commands::comment::CommentObject(stmt as _) }
 
 // commands/prepare.h Portal API
 #[repr(C)] pub struct Portal { pub tupDesc: TupleDesc, _opaque: [u8; 0] }
-unsafe fn GetPortalByName(_name: *mut c_char) -> *mut Portal { todo!("TODO(pg-port): GetPortalByName") }
-unsafe fn PortalIsValid(_portal: *mut Portal) -> bool { todo!("TODO(pg-port): PortalIsValid") }
+unsafe fn GetPortalByName(name: *mut c_char) -> *mut Portal { crate::utils::mmgr::portalmem::GetPortalByName(name as _) as _ }
+unsafe fn PortalIsValid(portal: *mut Portal) -> bool { crate::utils::portal::PortalIsValid(portal as _) }
 
 // catalog/pg_type_d.h
 const RECORDOID: Oid = 2249;
 
 // nodes/pg_list.h helpers
-unsafe fn linitial(list: *mut List) -> *mut c_void { todo!("TODO(pg-port): linitial") }
-unsafe fn list_delete_first(list: *mut List) -> *mut List { todo!("TODO(pg-port): list_delete_first") }
-unsafe fn list_concat(list1: *mut List, list2: *mut List) -> *mut List { todo!("TODO(pg-port): list_concat") }
-unsafe fn list_free(list: *mut List) { todo!("TODO(pg-port): list_free") }
-unsafe fn list_length(list: *mut List) -> c_int { todo!("TODO(pg-port): list_length") }
-unsafe fn list_make1(item: *mut Node) -> *mut List { todo!("TODO(pg-port): list_make1") }
-unsafe fn lfirst_oid(lc: *mut crate::nodes::pg_list::ListCell) -> Oid { todo!("TODO(pg-port): lfirst_oid") }
-unsafe fn lfirst(lc: *mut crate::nodes::pg_list::ListCell) -> *mut c_void { todo!("TODO(pg-port): lfirst") }
+unsafe fn linitial(list: *mut List) -> *mut c_void { crate::nodes::pg_list::linitial(list as _) }
+unsafe fn list_delete_first(list: *mut List) -> *mut List { crate::nodes::pg_list::list_delete_first(list as _) }
+unsafe fn list_concat(list1: *mut List, list2: *mut List) -> *mut List { crate::nodes::pg_list::list_concat(list1 as _, list2 as _) }
+unsafe fn list_free(list: *mut List) { crate::nodes::pg_list::list_free(list as _) }
+unsafe fn list_length(list: *mut List) -> c_int { crate::nodes::pg_list::list_length(list as _) }
+unsafe fn list_make1(item: *mut Node) -> *mut List { crate::list_make1!(item) }
+unsafe fn lfirst_oid(lc: *mut crate::nodes::pg_list::ListCell) -> Oid { crate::nodes::pg_list::lfirst_oid(lc as _) }
+unsafe fn lfirst(lc: *mut crate::nodes::pg_list::ListCell) -> *mut c_void { crate::nodes::pg_list::lfirst(lc as _) }
 
 // libc
 extern "C" {
@@ -980,7 +994,7 @@ pub unsafe fn standard_ProcessUtility(
 
     pstate = make_parsestate(null_mut());
     (*pstate).p_sourcetext = queryString;
-    (*pstate).p_queryEnv = queryEnv;
+    (*pstate).p_queryEnv = queryEnv as *mut c_void;
 
     match nodeTag(parsetree) {
         /*

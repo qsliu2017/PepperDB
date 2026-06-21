@@ -116,34 +116,33 @@ unsafe fn search_amproc_list(_opfamilyoid: Oid) -> *const CatCList {
     unimplemented!("STUB: catcache AMPROCNUM list (utils/catcache.c not ported)")
 }
 
-/// STUB for `get_opfamily_name(opfamilyoid, false)` (utils/lsyscache.c).
-fn get_opfamily_name(_opfamilyoid: Oid, _missing_ok: bool) -> String {
-    unimplemented!("STUB: get_opfamily_name (utils/lsyscache.c not ported)")
+unsafe fn cstr_to_string(p: *mut c_char) -> String {
+    if p.is_null() { return String::new(); }
+    core::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
 }
 
-/// STUB for `get_opclass_input_type(opclassoid)` (utils/lsyscache.c).
-fn get_opclass_input_type(_opclassoid: Oid) -> Oid {
-    unimplemented!("STUB: get_opclass_input_type (utils/lsyscache.c not ported)")
+unsafe fn get_opfamily_name(opfamilyoid: Oid, missing_ok: bool) -> String {
+    cstr_to_string(crate::utils::cache::lsyscache::get_opfamily_name(opfamilyoid, missing_ok))
 }
 
-/// STUB for `CommandCounterIncrement()` (access/transam/xact.c).
-fn CommandCounterIncrement() {
-    unimplemented!("STUB: CommandCounterIncrement (access/transam/xact.c not ported)")
+unsafe fn get_opclass_input_type(opclassoid: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_opclass_input_type(opclassoid)
 }
 
-/// STUB for `format_procedure(procoid)` (utils/regproc.c).
-fn format_procedure(_procoid: Oid) -> String {
-    unimplemented!("STUB: format_procedure (utils/regproc.c not ported)")
+unsafe fn CommandCounterIncrement() {
+    crate::access::transam::xact::CommandCounterIncrement()
 }
 
-/// STUB for `format_operator(operoid)` (utils/regproc.c).
-fn format_operator(_operoid: Oid) -> String {
-    unimplemented!("STUB: format_operator (utils/regproc.c not ported)")
+unsafe fn format_procedure(procoid: Oid) -> String {
+    cstr_to_string(crate::utils::adt::regproc::format_procedure(procoid))
 }
 
-/// STUB for `format_type_be(typeoid)` (utils/adt/format_type.c).
-fn format_type_be(_typeoid: Oid) -> String {
-    unimplemented!("STUB: format_type_be (utils/adt/format_type.c not ported)")
+unsafe fn format_operator(operoid: Oid) -> String {
+    cstr_to_string(crate::utils::adt::regproc::format_operator(operoid))
+}
+
+unsafe fn format_type_be(typeoid: Oid) -> String {
+    cstr_to_string(crate::utils::builtins::format_type_be(typeoid))
 }
 
 // ===========================================================================

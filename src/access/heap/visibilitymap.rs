@@ -691,116 +691,119 @@ const BUFFER_LOCK_UNLOCK: c_int = 0; // TODO(pg-port): real BUFFER_LOCK_UNLOCK l
 const BUFFER_LOCK_EXCLUSIVE: c_int = 2; // TODO(pg-port): real BUFFER_LOCK_EXCLUSIVE lives in storage/bufmgr.rs
 
 // storage/bufmgr.h - ReadBufferMode
-const RBM_ZERO_ON_ERROR: c_int = 4; // TODO(pg-port): real RBM_ZERO_ON_ERROR lives in storage/bufmgr.rs
+const RBM_ZERO_ON_ERROR: c_int = 3;
 
 // storage/bufmgr.h - ExtendBufferedFlags
-const EB_CREATE_FORK_IF_NEEDED: c_int = 1 << 1; // TODO(pg-port): real EB_CREATE_FORK_IF_NEEDED lives in storage/bufmgr.rs
-const EB_CLEAR_SIZE_CACHE: c_int = 1 << 2; // TODO(pg-port): real EB_CLEAR_SIZE_CACHE lives in storage/bufmgr.rs
+const EB_CREATE_FORK_IF_NEEDED: c_int = 1 << 4;
+const EB_CLEAR_SIZE_CACHE: c_int = 1 << 3;
 
 // miscadmin.h
 static mut InRecovery: bool = false; // TODO(pg-port): real InRecovery lives in access/xlog.rs
 
-unsafe fn RelationGetSmgr(_rel: Relation) -> SMgrRelation {
-    unimplemented!() // TODO(pg-port): real RelationGetSmgr lives in utils/rel.h
+unsafe fn RelationGetSmgr(rel: Relation) -> SMgrRelation {
+    crate::storage::buffer::bufmgr::RelationGetSmgr(rel as _) as _
 }
-unsafe fn RelationNeedsWAL(_rel: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real RelationNeedsWAL lives in utils/rel.h
+unsafe fn RelationNeedsWAL(rel: Relation) -> bool {
+    crate::access::nbtree::nbtdedup::RelationNeedsWAL(rel as _)
 }
 #[allow(dead_code)]
-unsafe fn RelationGetRelationName(_rel: Relation) -> *const c_char {
-    unimplemented!() // TODO(pg-port): real RelationGetRelationName lives in utils/rel.h
+unsafe fn RelationGetRelationName(rel: Relation) -> *const c_char {
+    crate::utils::rel::RelationGetRelationName(rel as _) as _
 }
 
-unsafe fn smgrexists(_reln: SMgrRelation, _forknum: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real smgrexists lives in storage/smgr/smgr.c
+unsafe fn smgrexists(reln: SMgrRelation, forknum: c_int) -> bool {
+    crate::storage::smgr::smgr::smgrexists(reln as _, forknum)
 }
-unsafe fn smgrnblocks(_reln: SMgrRelation, _forknum: c_int) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real smgrnblocks lives in storage/smgr/smgr.c
+unsafe fn smgrnblocks(reln: SMgrRelation, forknum: c_int) -> BlockNumber {
+    crate::storage::smgr::smgr::smgrnblocks(reln as _, forknum)
 }
-unsafe fn smgr_rlocator(_reln: SMgrRelation) -> crate::storage::relfilelocator::RelFileLocatorBackend {
-    unimplemented!() // TODO(pg-port): real reln->smgr_rlocator field access (storage/smgr/smgr.h)
+unsafe fn smgr_rlocator(reln: SMgrRelation) -> crate::storage::relfilelocator::RelFileLocatorBackend {
+    core::mem::transmute((*(reln as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_rlocator)
 }
 
 unsafe fn ReadBufferExtended(
-    _rel: Relation,
-    _forknum: c_int,
-    _blkno: BlockNumber,
-    _mode: c_int,
-    _strategy: *mut c_void,
+    rel: Relation,
+    forknum: c_int,
+    blkno: BlockNumber,
+    mode: c_int,
+    strategy: *mut c_void,
 ) -> Buffer {
-    unimplemented!() // TODO(pg-port): real ReadBufferExtended lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::ReadBufferExtended(rel as _, forknum, blkno, mode as _, strategy as _) as _
 }
 unsafe fn ExtendBufferedRelTo(
-    _bmr: *mut c_void,
-    _forknum: c_int,
+    bmr: *mut c_void,
+    forknum: c_int,
     _strategy: *mut c_void,
-    _flags: c_int,
-    _extend_to: BlockNumber,
+    flags: c_int,
+    extend_to: BlockNumber,
     _mode: c_int,
 ) -> Buffer {
-    unimplemented!() // TODO(pg-port): real ExtendBufferedRelTo lives in storage/buffer/bufmgr.c
+    let bmr = *Box::from_raw(bmr as *mut crate::storage::buffer::bufmgr::BufferManagerRelation);
+    crate::storage::buffer::bufmgr::ExtendBufferedRelTo(
+        bmr, forknum, core::ptr::null_mut(), flags as _, extend_to, core::ptr::null_mut(),
+    )
 }
-unsafe fn BMR_REL(_rel: Relation) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real BMR_REL macro lives in storage/bufmgr.h
+unsafe fn BMR_REL(rel: Relation) -> *mut c_void {
+    Box::into_raw(Box::new(crate::storage::buffer::bufmgr::BMR_REL(rel as _))) as *mut c_void
 }
-unsafe fn ReleaseBuffer(_buf: Buffer) {
-    unimplemented!() // TODO(pg-port): real ReleaseBuffer lives in storage/buffer/bufmgr.c
+unsafe fn ReleaseBuffer(buf: Buffer) {
+    crate::storage::buffer::bufmgr::ReleaseBuffer(buf as _)
 }
-unsafe fn UnlockReleaseBuffer(_buf: Buffer) {
-    unimplemented!() // TODO(pg-port): real UnlockReleaseBuffer lives in storage/buffer/bufmgr.c
+unsafe fn UnlockReleaseBuffer(buf: Buffer) {
+    crate::storage::buffer::bufmgr::UnlockReleaseBuffer(buf as _)
 }
-unsafe fn LockBuffer(_buf: Buffer, _mode: c_int) {
-    unimplemented!() // TODO(pg-port): real LockBuffer lives in storage/buffer/bufmgr.c
+unsafe fn LockBuffer(buf: Buffer, mode: c_int) {
+    crate::storage::buffer::bufmgr::LockBuffer(buf as _, mode)
 }
-unsafe fn MarkBufferDirty(_buf: Buffer) {
-    unimplemented!() // TODO(pg-port): real MarkBufferDirty lives in storage/buffer/bufmgr.c
+unsafe fn MarkBufferDirty(buf: Buffer) {
+    crate::storage::buffer::bufmgr::MarkBufferDirty(buf as _)
 }
-unsafe fn BufferIsValid(_buf: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): real BufferIsValid lives in storage/bufmgr.h
+unsafe fn BufferIsValid(buf: Buffer) -> bool {
+    buf != InvalidBuffer
 }
-unsafe fn BufferGetBlockNumber(_buf: Buffer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real BufferGetBlockNumber lives in storage/buffer/bufmgr.c
+unsafe fn BufferGetBlockNumber(buf: Buffer) -> BlockNumber {
+    crate::storage::buffer::bufmgr::BufferGetBlockNumber(buf as _)
 }
-unsafe fn BufferGetPage(_buf: Buffer) -> Page {
-    unimplemented!() // TODO(pg-port): real BufferGetPage lives in storage/bufmgr.h
+unsafe fn BufferGetPage(buf: Buffer) -> Page {
+    crate::storage::buffer::bufmgr::BufferGetPage(buf as _) as _
 }
 
-unsafe fn PageGetContents(_page: Page) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real PageGetContents lives in storage/bufpage.h
+unsafe fn PageGetContents(page: Page) -> *mut c_void {
+    crate::storage::bufpage::PageGetContents(page as _) as _
 }
-unsafe fn PageIsNew(_page: Page) -> bool {
-    unimplemented!() // TODO(pg-port): real PageIsNew lives in storage/bufpage.h
+unsafe fn PageIsNew(page: Page) -> bool {
+    crate::storage::bufpage::PageIsNew(page as _)
 }
-unsafe fn PageInit(_page: Page, _pageSize: usize, _specialSize: usize) {
-    unimplemented!() // TODO(pg-port): real PageInit lives in storage/page/bufpage.c
+unsafe fn PageInit(page: Page, pageSize: usize, specialSize: usize) {
+    crate::storage::bufpage::PageInit(page as _, pageSize, specialSize)
 }
 #[allow(dead_code)]
-unsafe fn PageIsAllVisible(_page: Page) -> bool {
-    unimplemented!() // TODO(pg-port): real PageIsAllVisible lives in storage/bufpage.h
+unsafe fn PageIsAllVisible(page: Page) -> bool {
+    crate::storage::bufpage::PageIsAllVisible(page as _)
 }
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real PageSetLSN lives in storage/bufpage.h
+unsafe fn PageSetLSN(page: Page, lsn: XLogRecPtr) {
+    crate::storage::bufpage::PageSetLSN(page as _, lsn)
 }
 
-unsafe fn CacheInvalidateSmgr(_rlocator: crate::storage::relfilelocator::RelFileLocatorBackend) {
-    unimplemented!() // TODO(pg-port): real CacheInvalidateSmgr lives in utils/cache/inval.c
+unsafe fn CacheInvalidateSmgr(rlocator: crate::storage::relfilelocator::RelFileLocatorBackend) {
+    crate::utils::cache::inval::CacheInvalidateSmgr(core::mem::transmute(rlocator))
 }
 
 unsafe fn log_heap_visible(
-    _rel: Relation,
-    _heap_buffer: Buffer,
-    _vm_buffer: Buffer,
-    _snapshotConflictHorizon: TransactionId,
-    _vmflags: uint8,
+    rel: Relation,
+    heap_buffer: Buffer,
+    vm_buffer: Buffer,
+    snapshotConflictHorizon: TransactionId,
+    vmflags: uint8,
 ) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real log_heap_visible lives in access/heap/heapam.c
+    crate::access::heap::heapam::log_heap_visible(rel as _, heap_buffer as _, vm_buffer as _, snapshotConflictHorizon, vmflags)
 }
-unsafe fn log_newpage_buffer(_buf: Buffer, _page_std: bool) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real log_newpage_buffer lives in access/transam/xloginsert.c
+unsafe fn log_newpage_buffer(buf: Buffer, page_std: bool) -> XLogRecPtr {
+    crate::access::transam::xloginsert::log_newpage_buffer(buf as _, page_std)
 }
 
 unsafe fn XLogHintBitIsNeeded() -> bool {
-    unimplemented!() // TODO(pg-port): real XLogHintBitIsNeeded lives in access/xlog.h
+    false // access/xlog.h unwired; gates hint-bit WAL, false is safe
 }
 
 fn START_CRIT_SECTION() {

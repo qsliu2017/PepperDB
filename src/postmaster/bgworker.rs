@@ -329,7 +329,7 @@ unsafe fn LWLockRelease(_lock: *mut LWLock) {}
 // TODO(pg-port): GetMainLWLockArray()[BackgroundWorker_LWLOCK_ID] once
 //   storage/lwlock.c is ported.
 unsafe fn BackgroundWorkerLock() -> *mut LWLock {
-    null_mut()
+    crate::backend_link_shims::BackgroundWorkerLock as *mut LWLock
 }
 
 // PMSIGNAL_BACKGROUND_WORKER_CHANGE = 6 (storage/pmsignal.h).
@@ -348,20 +348,16 @@ const WAIT_EVENT_BGWORKER_SHUTDOWN: u32 = 0;
 // WaitLatch / ResetLatch (storage/latch.h / latch.c).
 // TODO(pg-port): real WaitLatch/ResetLatch live in storage/latch.c
 unsafe fn WaitLatch(
-    _latch: *mut Latch,
-    _wakeEvents: c_int,
-    _timeout: c_long,
-    _wait_event_info: u32,
-) -> c_int {
-    0
-}
+    latch: *mut Latch,
+    wakeEvents: c_int,
+    timeout: c_long,
+    wait_event_info: u32,
+) -> c_int { crate::storage::ipc::latch::WaitLatch(latch as _, wakeEvents as _, timeout as _, wait_event_info as _) }
 unsafe fn ResetLatch(_latch: *mut Latch) {}
 
 // PostmasterMarkPIDForWorkerNotify (postmaster/postmaster.c).
 // TODO(pg-port): real PostmasterMarkPIDForWorkerNotify lives in postmaster/postmaster.c
-unsafe fn PostmasterMarkPIDForWorkerNotify(_pid: pid_t) -> bool {
-    true
-}
+unsafe fn PostmasterMarkPIDForWorkerNotify(pid: pid_t) -> bool { crate::postmaster::postmaster::PostmasterMarkPIDForWorkerNotify(pid) }
 
 // SIG_IGN function pointer (signal.h value = 1).
 #[inline]
@@ -473,6 +469,12 @@ pub unsafe fn BackgroundWorkerShmemSize() -> Size {
  */
 pub unsafe fn BackgroundWorkerShmemInit() {
     let mut found: bool = false;
+
+    // bring-up: BackgroundWorkerList's static init can't be self-referential (a const can't
+    // take its own address), so it's null-initialized; make it a valid empty dlist before use.
+    if BackgroundWorkerList.head.next.is_null() {
+        crate::lib::ilist::dlist_init(&raw mut BackgroundWorkerList);
+    }
 
     BackgroundWorkerData = ShmemInitStruct(
         c"Background Worker Data".as_ptr(),
@@ -1322,6 +1324,7 @@ pub unsafe fn BackgroundWorkerInitializeConnection(
 /*
  * Connect background worker to a database using OIDs.
  */
+#[no_mangle]
 pub unsafe fn BackgroundWorkerInitializeConnectionByOid(dboid: Oid, useroid: Oid, flags: u32) {
     let worker: *mut BackgroundWorker = MyBgworkerEntry;
     let mut init_flags: bits32 = 0; /* never honor session_preload_libraries */
@@ -1371,6 +1374,7 @@ pub unsafe fn BackgroundWorkerBlockSignals() {
     sigprocmask(SIG_SETMASK, &raw const BlockSig, null_mut());
 }
 
+#[no_mangle]
 pub unsafe fn BackgroundWorkerUnblockSignals() {
     sigprocmask(SIG_SETMASK, &raw const UnBlockSig, null_mut());
 }

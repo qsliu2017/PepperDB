@@ -325,13 +325,12 @@ struct HashBuildState {
  * Hash handler function: return IndexAmRoutine with access method parameters
  * and callbacks.
  */
-#[no_mangle]
-pub unsafe extern "C" fn hashhandler(fcinfo: FunctionCallInfo) -> Datum {
+pub unsafe fn hashhandler(fcinfo: FunctionCallInfo) -> Datum {
     let amroutine: *mut IndexAmRoutine = makeNode!(IndexAmRoutine, T_IndexAmRoutine);
 
-    (*amroutine).amstrategies = HTMaxStrategyNumber;
-    (*amroutine).amsupport = HASHNProcs as int16;
-    (*amroutine).amoptsprocnum = HASHOPTIONS_PROC as int16;
+    (*amroutine).amstrategies = HTMaxStrategyNumber as u16;
+    (*amroutine).amsupport = HASHNProcs as u16;
+    (*amroutine).amoptsprocnum = HASHOPTIONS_PROC as u16;
     (*amroutine).amcanorder = false;
     (*amroutine).amcanorderbyop = false;
     (*amroutine).amcanhash = true;
@@ -354,32 +353,32 @@ pub unsafe extern "C" fn hashhandler(fcinfo: FunctionCallInfo) -> Datum {
     (*amroutine).amparallelvacuumoptions = VACUUM_OPTION_PARALLEL_BULKDEL;
     (*amroutine).amkeytype = INT4OID;
 
-    (*amroutine).ambuild = Some(hashbuild);
-    (*amroutine).ambuildempty = Some(hashbuildempty);
-    (*amroutine).aminsert = Some(hashinsert);
+    (*amroutine).ambuild = Some(core::mem::transmute(hashbuild as *const ()));
+    (*amroutine).ambuildempty = Some(core::mem::transmute(hashbuildempty as *const ()));
+    (*amroutine).aminsert = Some(core::mem::transmute(hashinsert as *const ()));
     (*amroutine).aminsertcleanup = None;
-    (*amroutine).ambulkdelete = Some(hashbulkdelete);
-    (*amroutine).amvacuumcleanup = Some(hashvacuumcleanup);
+    (*amroutine).ambulkdelete = Some(core::mem::transmute(hashbulkdelete as *const ()));
+    (*amroutine).amvacuumcleanup = Some(core::mem::transmute(hashvacuumcleanup as *const ()));
     (*amroutine).amcanreturn = None;
-    (*amroutine).amcostestimate = Some(hashcostestimate);
+    (*amroutine).amcostestimate = Some(core::mem::transmute(hashcostestimate as *const ()));
     (*amroutine).amgettreeheight = None;
-    (*amroutine).amoptions = Some(hashoptions);
+    (*amroutine).amoptions = Some(core::mem::transmute(hashoptions as *const ()));
     (*amroutine).amproperty = None;
     (*amroutine).ambuildphasename = None;
-    (*amroutine).amvalidate = Some(hashvalidate);
-    (*amroutine).amadjustmembers = Some(hashadjustmembers);
-    (*amroutine).ambeginscan = Some(hashbeginscan);
-    (*amroutine).amrescan = Some(hashrescan);
-    (*amroutine).amgettuple = Some(hashgettuple);
-    (*amroutine).amgetbitmap = Some(hashgetbitmap);
-    (*amroutine).amendscan = Some(hashendscan);
+    (*amroutine).amvalidate = Some(core::mem::transmute(hashvalidate as *const ()));
+    (*amroutine).amadjustmembers = Some(core::mem::transmute(hashadjustmembers as *const ()));
+    (*amroutine).ambeginscan = Some(core::mem::transmute(hashbeginscan as *const ()));
+    (*amroutine).amrescan = Some(core::mem::transmute(hashrescan as *const ()));
+    (*amroutine).amgettuple = Some(core::mem::transmute(hashgettuple as *const ()));
+    (*amroutine).amgetbitmap = Some(core::mem::transmute(hashgetbitmap as *const ()));
+    (*amroutine).amendscan = Some(core::mem::transmute(hashendscan as *const ()));
     (*amroutine).ammarkpos = None;
     (*amroutine).amrestrpos = None;
     (*amroutine).amestimateparallelscan = None;
     (*amroutine).aminitparallelscan = None;
     (*amroutine).amparallelrescan = None;
-    (*amroutine).amtranslatestrategy = Some(hashtranslatestrategy);
-    (*amroutine).amtranslatecmptype = Some(hashtranslatecmptype);
+    (*amroutine).amtranslatestrategy = Some(core::mem::transmute(hashtranslatestrategy as *const ()));
+    (*amroutine).amtranslatecmptype = Some(core::mem::transmute(hashtranslatecmptype as *const ()));
 
     PG_RETURN_POINTER!(amroutine as *mut c_void)
 }
@@ -409,7 +408,7 @@ pub unsafe extern "C" fn hashbuild(
         elog!(
             ERROR,
             "index \"{}\" already contains data",
-            RelationGetRelationName(index)
+            core::ffi::CStr::from_ptr(RelationGetRelationName(index)).to_string_lossy()
         );
     }
 
@@ -776,7 +775,7 @@ pub unsafe extern "C" fn hashbulkdelete(
     let mut cur_maxbucket: Bucket;
     let mut cur_bucket: Bucket;
     let mut metabuf: Buffer = InvalidBuffer as Buffer;
-    let metap: HashMetaPage;
+    let mut metap: HashMetaPage;
     let mut cachedmetap: HashMetaPage;
 
     tuples_removed = 0.0;
@@ -1052,7 +1051,7 @@ pub unsafe extern "C" fn hashbucketcleanup(
              * To remove the dead tuples, we strictly want to rely on results
              * of callback function.  refer btvacuumpage for detailed reason.
              */
-            if callback.is_some() && callback.unwrap()(htup, callback_state) {
+            if callback.is_some() && callback.unwrap()(htup as _, callback_state) {
                 kill_tuple = true;
                 if !tuples_removed.is_null() {
                     *tuples_removed += 1.0;
@@ -1289,15 +1288,11 @@ const REGBUF_STANDARD: c_int = 0x04;
 const REGBUF_NO_IMAGE: c_int = 0x01;
 const REGBUF_NO_CHANGE: c_int = 0x40;
 
-unsafe fn HashPageGetMeta(_page: Page) -> HashMetaPage {
-    unimplemented!() // TODO: hash.h
-}
+unsafe fn HashPageGetMeta(_page: Page) -> HashMetaPage { crate::access::hash::hashutil::HashPageGetMeta(_page) as _ }
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     unimplemented!() // TODO: storage/bufmgr.h
 }
-unsafe fn BufferIsInvalid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/buf.h
-}
+unsafe fn BufferIsInvalid(_buffer: Buffer) -> bool { crate::storage::buf::BufferIsInvalid(_buffer) }
 unsafe fn ReadBufferExtended(
     _reln: Relation,
     _forkNum: ForkNumber,
@@ -1313,46 +1308,42 @@ unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
 unsafe fn LockBufferForCleanup(_buffer: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.h
 }
-unsafe fn IsBufferCleanupOK(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn IsBufferCleanupOK(_buffer: Buffer) -> bool { crate::storage::buffer::bufmgr::IsBufferCleanupOK(_buffer) }
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.h
 }
-unsafe fn RelationNeedsWAL(_relation: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
-unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn RelationNeedsWAL(_relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_relation) }
+unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber { crate::access::nbtree::nbtpage::RelationGetNumberOfBlocks(_relation) }
 unsafe fn estimate_rel_size(
-    _rel: Relation,
-    _attr_widths: *mut int32,
-    _pages: *mut BlockNumber,
-    _tuples: *mut f64,
-    _allvisfrac: *mut f64,
+    rel: Relation,
+    attr_widths: *mut int32,
+    pages: *mut BlockNumber,
+    tuples: *mut f64,
+    allvisfrac: *mut f64,
 ) {
-    unimplemented!() // TODO: optimizer/plancat.c
+    crate::optimizer::util::plancat::estimate_rel_size_local(rel as _, attr_widths, pages, tuples, allvisfrac)
 }
 unsafe fn table_index_build_scan(
-    _heap: Relation,
-    _index: Relation,
-    _indexInfo: *mut IndexInfo,
-    _allow_sync: bool,
-    _progress: bool,
-    _callback: Option<
+    heap: Relation,
+    index: Relation,
+    indexInfo: *mut IndexInfo,
+    allow_sync: bool,
+    progress: bool,
+    callback: Option<
         unsafe extern "C" fn(Relation, ItemPointer, *mut Datum, *mut bool, bool, *mut c_void),
     >,
-    _callback_state: *mut c_void,
-    _scan: *mut c_void,
+    callback_state: *mut c_void,
+    scan: *mut c_void,
 ) -> f64 {
-    unimplemented!() // TODO: access/tableam.h
+    let am = (*heap).rd_tableam as *const crate::access::table::tableam::TableAmRoutine;
+    ((*am).index_build_range_scan.unwrap())(
+        heap as _, index as _, indexInfo as _, allow_sync, false, progress,
+        0, !0u32, core::mem::transmute(callback), callback_state, scan as _,
+    )
 }
-unsafe fn vacuum_delay_point(_is_analyze: bool) {
-    unimplemented!() // TODO: commands/vacuum.h
-}
-unsafe fn memcpy(_dest: *mut c_void, _src: *const c_void, _n: usize) -> *mut c_void {
-    unimplemented!() // TODO: <string.h>
+unsafe fn vacuum_delay_point(_is_analyze: bool) { crate::commands::vacuum::vacuum_delay_point(_is_analyze) }
+unsafe fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void {
+    core::ptr::copy_nonoverlapping(src as *const u8, dest as *mut u8, n); dest
 }
 unsafe fn XLogBeginInsert() {
     unimplemented!() // TODO: access/xloginsert.h
@@ -1370,123 +1361,73 @@ unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
     unimplemented!() // TODO: access/xloginsert.h
 }
 
-unsafe fn _hash_spareindex(_num_bucket: uint32) -> uint32 {
-    unimplemented!() // TODO: hashutil.c
-}
-unsafe fn _hash_init(_rel: Relation, _num_tuples: f64, _forkNum: ForkNumber) -> uint32 {
-    unimplemented!() // TODO: hashpage.c
-}
-unsafe fn _h_spoolinit(_heap: Relation, _index: Relation, _num_buckets: uint32) -> *mut HSpool {
-    unimplemented!() // TODO: hashsort.c
-}
-unsafe fn _h_spooldestroy(_hspool: *mut HSpool) {
-    unimplemented!() // TODO: hashsort.c
-}
+unsafe fn _hash_spareindex(_num_bucket: uint32) -> uint32 { crate::access::hash::hashutil::_hash_spareindex(_num_bucket) }
+unsafe fn _hash_init(_rel: Relation, _num_tuples: f64, _forkNum: ForkNumber) -> uint32 { crate::access::hash::hashpage::_hash_init(_rel, _num_tuples, _forkNum) }
+unsafe fn _h_spoolinit(_heap: Relation, _index: Relation, _num_buckets: uint32) -> *mut HSpool { crate::access::hash::hashsort::_h_spoolinit(_heap, _index, _num_buckets) }
+unsafe fn _h_spooldestroy(_hspool: *mut HSpool) { crate::access::hash::hashsort::_h_spooldestroy(_hspool) }
 unsafe fn _h_spool(
     _hspool: *mut HSpool,
     _self_: ItemPointer,
     _values: *const Datum,
     _isnull: *const bool,
-) {
-    unimplemented!() // TODO: hashsort.c
-}
-unsafe fn _h_indexbuild(_hspool: *mut HSpool, _heapRel: Relation) {
-    unimplemented!() // TODO: hashsort.c
-}
+) { crate::access::hash::hashsort::_h_spool(_hspool, _self_, _values, _isnull) }
+unsafe fn _h_indexbuild(_hspool: *mut HSpool, _heapRel: Relation) { crate::access::hash::hashsort::_h_indexbuild(_hspool, _heapRel) }
 unsafe fn _hash_convert_tuple(
     _index: Relation,
     _user_values: *mut Datum,
     _user_isnull: *mut bool,
     _index_values: *mut Datum,
     _index_isnull: *mut bool,
-) -> bool {
-    unimplemented!() // TODO: hashutil.c
-}
-unsafe fn _hash_doinsert(_rel: Relation, _itup: IndexTuple, _heapRel: Relation, _sorted: bool) {
-    unimplemented!() // TODO: hashinsert.c
-}
-unsafe fn _hash_first(_scan: IndexScanDesc, _dir: ScanDirection) -> bool {
-    unimplemented!() // TODO: hashsearch.c
-}
-unsafe fn _hash_next(_scan: IndexScanDesc, _dir: ScanDirection) -> bool {
-    unimplemented!() // TODO: hashsearch.c
-}
-unsafe fn _hash_kill_items(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: hashutil.c
-}
-unsafe fn _hash_dropscanbuf(_rel: Relation, _so: HashScanOpaque) {
-    unimplemented!() // TODO: hashpage.c
-}
+) -> bool { crate::access::hash::hashutil::_hash_convert_tuple(_index, _user_values, _user_isnull, _index_values, _index_isnull) }
+unsafe fn _hash_doinsert(_rel: Relation, _itup: IndexTuple, _heapRel: Relation, _sorted: bool) { crate::access::hash::hashinsert::_hash_doinsert(_rel, _itup, _heapRel, _sorted) }
+unsafe fn _hash_first(_scan: IndexScanDesc, _dir: ScanDirection) -> bool { crate::access::hash::hashsearch::_hash_first(_scan, _dir) }
+unsafe fn _hash_next(_scan: IndexScanDesc, _dir: ScanDirection) -> bool { crate::access::hash::hashsearch::_hash_next(_scan, _dir) }
+unsafe fn _hash_kill_items(_scan: IndexScanDesc) { crate::access::hash::hashutil::_hash_kill_items(_scan) }
+unsafe fn _hash_dropscanbuf(_rel: Relation, _so: HashScanOpaque) { crate::access::hash::hashpage::_hash_dropscanbuf(_rel, _so) }
 unsafe fn _hash_getcachedmetap(
     _rel: Relation,
     _metabuf: *mut Buffer,
     _force_refresh: bool,
-) -> HashMetaPage {
-    unimplemented!() // TODO: hashpage.c
-}
-unsafe fn _hash_getbuf(_rel: Relation, _blkno: BlockNumber, _access: c_int, _flags: c_int) -> Buffer {
-    unimplemented!() // TODO: hashpage.c
-}
+) -> HashMetaPage { crate::access::hash::hashpage::_hash_getcachedmetap(_rel, _metabuf, _force_refresh) as _ }
+unsafe fn _hash_getbuf(_rel: Relation, _blkno: BlockNumber, _access: c_int, _flags: c_int) -> Buffer { crate::access::hash::hashpage::_hash_getbuf(_rel, _blkno, _access, _flags) }
 unsafe fn _hash_getbuf_with_strategy(
     _rel: Relation,
     _blkno: BlockNumber,
     _access: c_int,
     _flags: c_int,
     _bstrategy: BufferAccessStrategy,
-) -> Buffer {
-    unimplemented!() // TODO: hashpage.c
-}
-unsafe fn _hash_relbuf(_rel: Relation, _buf: Buffer) {
-    unimplemented!() // TODO: hashpage.c
-}
-unsafe fn _hash_dropbuf(_rel: Relation, _buf: Buffer) {
-    unimplemented!() // TODO: hashpage.c
-}
-unsafe fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: c_int) {
-    unimplemented!() // TODO: hashutil.c
-}
+) -> Buffer { crate::access::hash::hashpage::_hash_getbuf_with_strategy(_rel, _blkno, _access, _flags, _bstrategy as _) }
+unsafe fn _hash_relbuf(_rel: Relation, _buf: Buffer) { crate::access::hash::hashpage::_hash_relbuf(_rel, _buf) }
+unsafe fn _hash_dropbuf(_rel: Relation, _buf: Buffer) { crate::access::hash::hashpage::_hash_dropbuf(_rel, _buf) }
+unsafe fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: c_int) { crate::access::hash::hashutil::_hash_checkpage(_rel, _buf, _flags) }
 unsafe fn _hash_squeezebucket(
     _rel: Relation,
     _bucket: Bucket,
     _bucket_blkno: BlockNumber,
     _bucket_buf: Buffer,
     _bstrategy: BufferAccessStrategy,
-) {
-    unimplemented!() // TODO: hashovfl.c
-}
+) { crate::access::hash::hashovfl::_hash_squeezebucket(_rel, _bucket, _bucket_blkno, _bucket_buf, _bstrategy as _) }
 unsafe fn _hash_hashkey2bucket(
     _hashkey: uint32,
     _maxbucket: uint32,
     _highmask: uint32,
     _lowmask: uint32,
-) -> Bucket {
-    unimplemented!() // TODO: hashutil.c
-}
-unsafe fn _hash_get_indextuple_hashkey(_itup: IndexTuple) -> uint32 {
-    unimplemented!() // TODO: hashutil.c
-}
+) -> Bucket { crate::access::hash::hashutil::_hash_hashkey2bucket(_hashkey, _maxbucket, _highmask, _lowmask) }
+unsafe fn _hash_get_indextuple_hashkey(_itup: IndexTuple) -> uint32 { crate::access::hash::hashutil::_hash_get_indextuple_hashkey(_itup) }
 unsafe fn _hash_get_newbucket_from_oldbucket(
     _rel: Relation,
     _old_bucket: Bucket,
     _lowmask: uint32,
     _maxbucket: uint32,
-) -> Bucket {
-    unimplemented!() // TODO: hashutil.c
-}
-unsafe fn hashoptions(_reloptions: Datum, _validate: bool) -> *mut bytea {
-    unimplemented!() // TODO: hashutil.c
-}
-unsafe fn hashvalidate(_opclassoid: Oid) -> bool {
-    unimplemented!() // TODO: hashvalidate.c
-}
+) -> Bucket { crate::access::hash::hashutil::_hash_get_newbucket_from_oldbucket(_rel, _old_bucket, _lowmask, _maxbucket) }
+unsafe fn hashoptions(_reloptions: Datum, _validate: bool) -> *mut bytea { crate::access::hash::hashutil::hashoptions(_reloptions, _validate) }
+unsafe fn hashvalidate(_opclassoid: Oid) -> bool { crate::access::hash::hashvalidate::hashvalidate(_opclassoid) }
 unsafe fn hashadjustmembers(
     _opfamilyoid: Oid,
     _opclassoid: Oid,
     _operators: *mut List,
     _functions: *mut List,
-) {
-    unimplemented!() // TODO: hashvalidate.c
-}
+) { crate::access::hash::hashvalidate::hashadjustmembers(_opfamilyoid, _opclassoid, _operators, _functions) }
 unsafe fn hashcostestimate(
     _root: *mut c_void,
     _path: *mut c_void,
@@ -1496,6 +1437,4 @@ unsafe fn hashcostestimate(
     _indexSelectivity: *mut Selectivity,
     _indexCorrelation: *mut f64,
     _indexPages: *mut f64,
-) {
-    unimplemented!() // TODO: selfuncs.c / index_selfuncs.h
-}
+) { crate::utils::adt::selfuncs::hashcostestimate(_root as _, _path as _, _loop_count, _indexStartupCost, _indexTotalCost, _indexSelectivity, _indexCorrelation, _indexPages) }

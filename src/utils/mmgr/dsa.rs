@@ -43,6 +43,7 @@ use crate::postgres::{DatumGetPointer, Datum, PointerGetDatum};
 use crate::utils::palloc::{palloc, pfree};
 // utils/memutils.h: alloc size validity checks.
 use crate::utils::memutils::{AllocHugeSizeIsValid, AllocSizeIsValid};
+use crate::utils::elog::{ERROR, FATAL};
 // port/pg_bitutils.h: leftmost set bit position over size_t.
 use crate::port::pg_bitutils::pg_leftmost_one_pos_size_t;
 // elog/ereport macros.
@@ -108,20 +109,11 @@ pub struct dsm_segment {
 pub type ResourceOwner = *mut c_void;
 
 // storage/lwlock.h: LWLock and lock modes.
-#[repr(C)]
-pub struct LWLock {
-    pub _private: [u8; 0],
-}
-pub type LWLockMode = c_int;
-pub const LW_EXCLUSIVE: LWLockMode = 0;
+pub use crate::storage::lmgr::lwlock::{LWLock, LWLockMode};
+pub use crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE;
 
 // utils/freepage.h: FreePageManager and FPM_PAGE_SIZE.
-#[repr(C)]
-pub struct FreePageManager {
-    pub _private: [u8; 0],
-}
-// freepage.h: FPM_PAGE_SIZE is BLCKSZ (8192) here.
-pub const FPM_PAGE_SIZE: Size = 8192;
+pub use crate::utils::mmgr::freepage::{FreePageManager, FPM_PAGE_SIZE};
 
 // errcodes used by ereport (folded into "C also:" comments below).
 // ERRCODE_OUT_OF_MEMORY, ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE.
@@ -143,13 +135,9 @@ unsafe fn dsm_segment_handle(_seg: *mut dsm_segment) -> dsm_handle {
     unimplemented!("dsm_segment_handle: storage/dsm.c not yet ported")
 }
 // TODO(pg-port): storage/dsm.c
-unsafe fn dsm_pin_segment(_seg: *mut dsm_segment) {
-    unimplemented!("dsm_pin_segment: storage/dsm.c not yet ported")
-}
+unsafe fn dsm_pin_segment(_seg: *mut dsm_segment) { unimplemented!() }
 // TODO(pg-port): storage/dsm.c
-unsafe fn dsm_unpin_segment(_handle: dsm_handle) {
-    unimplemented!("dsm_unpin_segment: storage/dsm.c not yet ported")
-}
+unsafe fn dsm_unpin_segment(_handle: dsm_handle) { crate::storage::ipc::dsm::dsm_unpin_segment(_handle) }
 // TODO(pg-port): storage/dsm.c
 unsafe fn dsm_detach(_seg: *mut dsm_segment) {
     unimplemented!("dsm_detach: storage/dsm.c not yet ported")
@@ -169,40 +157,37 @@ unsafe fn on_dsm_detach(
 
 // TODO(pg-port): storage/lwlock.c
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: LWLockMode) -> bool {
-    unimplemented!("LWLockAcquire: storage/lwlock.c not yet ported")
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, _mode)
 }
 // TODO(pg-port): storage/lwlock.c
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!("LWLockRelease: storage/lwlock.c not yet ported")
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 // TODO(pg-port): storage/lwlock.c
 unsafe fn LWLockInitialize(_lock: *mut LWLock, _tranche_id: c_int) {
-    unimplemented!("LWLockInitialize: storage/lwlock.c not yet ported")
+    crate::storage::lmgr::lwlock::LWLockInitialize(_lock as _, _tranche_id)
 }
 // TODO(pg-port): storage/lwlock.c
 unsafe fn LWLockHeldByMe(_lock: *mut LWLock) -> bool {
-    unimplemented!("LWLockHeldByMe: storage/lwlock.c not yet ported")
+    crate::storage::lmgr::lwlock::LWLockHeldByMe(_lock as _)
 }
 
-// TODO(pg-port): utils/freepage.c
 unsafe fn FreePageManagerInitialize(_fpm: *mut FreePageManager, _base: *mut c_char) {
-    unimplemented!("FreePageManagerInitialize: utils/freepage.c not yet ported")
+    crate::utils::mmgr::freepage::FreePageManagerInitialize(_fpm, _base)
 }
-// TODO(pg-port): utils/freepage.c
 unsafe fn FreePageManagerGet(
     _fpm: *mut FreePageManager,
     _npages: Size,
     _first_page: *mut Size,
 ) -> bool {
-    unimplemented!("FreePageManagerGet: utils/freepage.c not yet ported")
+    crate::utils::mmgr::freepage::FreePageManagerGet(_fpm, _npages, _first_page)
 }
-// TODO(pg-port): utils/freepage.c
 unsafe fn FreePageManagerPut(_fpm: *mut FreePageManager, _first_page: Size, _npages: Size) {
-    unimplemented!("FreePageManagerPut: utils/freepage.c not yet ported")
+    crate::utils::mmgr::freepage::FreePageManagerPut(_fpm, _first_page, _npages)
 }
-// TODO(pg-port): utils/freepage.c
+// freepage.h: fpm_largest(fpm) == (fpm->contiguous_pages).
 unsafe fn fpm_largest(_fpm: *mut FreePageManager) -> Size {
-    unimplemented!("fpm_largest: utils/freepage.c not yet ported")
+    (*_fpm).contiguous_pages
 }
 // freepage.h: fpm_size_to_pages(size) - number of pages needed to hold size.
 #[inline]
@@ -344,7 +329,7 @@ unsafe fn NextFreeObjectIndex_set(object: *mut c_char, value: uint16) {
 }
 
 // The possible allocation sizes for small objects.
-static dsa_size_classes: [uint16; 40] = [
+static dsa_size_classes: [uint16; 38] = [
     core::mem::size_of::<dsa_area_span>() as uint16,
     0, // special size classes
     8, 16, 24, 32, 40, 48, 56, 64, // 8 classes separated by 8 bytes
@@ -356,7 +341,7 @@ static dsa_size_classes: [uint16; 40] = [
     2616, 3120, 3640, 4096, // 4 classes separated by ~512 bytes
     5456, 6552, 7280, 8192, // 4 classes separated by ~1024 bytes
 ];
-const DSA_NUM_SIZE_CLASSES: usize = 40;
+const DSA_NUM_SIZE_CLASSES: usize = 38;
 
 // Special size classes.
 const DSA_SCLASS_BLOCK_OF_SPANS: usize = 0;
@@ -1339,7 +1324,7 @@ unsafe fn transfer_first_span(
     span = dsa_get_address(area, span_pointer) as *mut dsa_area_span;
     (*pool).spans[fromclass as usize] = (*span).nextspan;
     if DsaPointerIsValid((*span).nextspan) {
-        nextspan = dsa_get_address(area, (*span).nextspan) as *mut dsa_area_span;
+        let nextspan = dsa_get_address(area, (*span).nextspan) as *mut dsa_area_span;
         (*nextspan).prevspan = InvalidDsaPointer;
     }
 

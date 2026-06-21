@@ -20,29 +20,7 @@ extern "C" {
 // are not yet translated.
 // ---------------------------------------------------------------------------
 
-// TODO(pg-port): pg_locale.h not ported - struct pg_locale_struct / pg_locale_t.
-#[repr(C)]
-pub struct pg_locale_struct {
-    pub deterministic: bool,
-    pub collate_is_c: bool,
-    pub ctype_is_c: bool,
-    pub provider: c_char,
-    pub info: pg_locale_info,
-}
-
-#[repr(C)]
-pub union pg_locale_info {
-    pub builtin: pg_locale_builtin_info,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct pg_locale_builtin_info {
-    pub locale: *const c_char,
-    pub casemap_full: bool,
-}
-
-pub type pg_locale_t = *mut pg_locale_struct;
+pub use crate::utils::adt::pg_locale::{pg_locale_struct, pg_locale_t};
 
 // TODO(pg-port): catalog/pg_collation.h - COLLPROVIDER_BUILTIN.
 const COLLPROVIDER_BUILTIN: c_char = b'b' as c_char;
@@ -51,8 +29,8 @@ const COLLPROVIDER_BUILTIN: c_char = b'b' as c_char;
 const DEFAULT_COLLATION_OID: Oid = 100;
 
 // TODO(pg-port): utils/syscache.h - syscache ids.
-const DATABASEOID: c_int = 0;
-const COLLOID: c_int = 0;
+const DATABASEOID: c_int = 21;
+const COLLOID: c_int = 16;
 
 // TODO(pg-port): catalog/pg_database.h - attribute number.
 const Anum_pg_database_datlocale: c_int = 0;

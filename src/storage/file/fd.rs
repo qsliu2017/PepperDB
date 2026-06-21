@@ -554,7 +554,7 @@ unsafe fn posix_fallocate(_fd: c_int, _offset: off_t, _len: off_t) -> c_int {
 
 // forkname_chars stub (access/rel.h)
 // TODO(pg-port): wire up access/rel.c
-unsafe fn forkname_chars(_str: *const c_char, _fork: *mut c_void) -> c_int { 0 }
+unsafe fn forkname_chars(_str: *const c_char, _fork: *mut c_void) -> c_int { crate::common::relpath::forkname_chars(_str, _fork as _) }
 
 // get_dirent_type stub (common/file_utils.h)
 // TODO(pg-port): wire up common/file_utils.c
@@ -2554,6 +2554,7 @@ pub unsafe fn CloseTransientFile(fd: c_int) -> c_int {
 /*
  * AllocateDir --- opendir() with FD release if needed
  */
+#[no_mangle]
 pub unsafe fn AllocateDir(dirname: *const c_char) -> *mut DIR {
     let mut dir: *mut DIR;
 
@@ -2602,6 +2603,7 @@ pub unsafe fn AllocateDir(dirname: *const c_char) -> *mut DIR {
 /*
  * ReadDir --- readdir() with ereport on error.
  */
+#[no_mangle]
 pub unsafe fn ReadDir(dir: *mut DIR, dirname: *const c_char) -> *mut dirent {
     ReadDirExtended(dir, dirname, ERROR)
 }
@@ -2647,6 +2649,7 @@ pub unsafe fn ReadDirExtended(dir: *mut DIR, dirname: *const c_char, elevel: c_i
 /*
  * Close a directory opened with AllocateDir.
  */
+#[no_mangle]
 pub unsafe fn FreeDir(dir: *mut DIR) -> c_int {
     /* Nothing to do if AllocateDir failed */
     if dir.is_null() {

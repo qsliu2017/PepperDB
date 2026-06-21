@@ -94,7 +94,7 @@ pub struct BindParamCbData {
 pub type Oid = u32;
 pub type Datum = usize;
 pub type CommandTag = c_int;
-pub type QueryCompletion = c_void;
+pub type QueryCompletion = crate::tcop::cmdtag::QueryCompletion;
 pub type Portal = *mut c_void;
 pub type DestReceiver = c_void;
 pub type ParamListInfo = *mut c_void;
@@ -131,7 +131,7 @@ pub const PQ_LARGE_MESSAGE_LIMIT: c_int = (MaxAllocSize - 1) as c_int;
 
 // Stub extern functions - TODO(pg-port): wire to real impls when available
 unsafe fn raw_parser(_query_string: *const c_char, _mode: c_int) -> *mut List {
-    unimplemented!() // TODO(pg-port): src/backend/parser/parser.c
+    crate::parser::parser::raw_parser(core::mem::transmute(_query_string), core::mem::transmute(_mode)) as _
 }
 
 unsafe fn parse_analyze_fixedparams(
@@ -141,7 +141,7 @@ unsafe fn parse_analyze_fixedparams(
     _numParams: c_int,
     _queryEnv: *mut QueryEnvironment,
 ) -> *mut Query {
-    unimplemented!() // TODO(pg-port): src/backend/parser/analyze.c
+    crate::parser::analyze::parse_analyze_fixedparams(_parsetree as _, _query_string as _, _paramTypes as _, _numParams as _, _queryEnv as _) as _
 }
 
 unsafe fn parse_analyze_varparams(
@@ -151,7 +151,7 @@ unsafe fn parse_analyze_varparams(
     _numParams: *mut c_int,
     _queryEnv: *mut QueryEnvironment,
 ) -> *mut Query {
-    unimplemented!() // TODO(pg-port): src/backend/parser/analyze.c
+    crate::parser::analyze::parse_analyze_varparams(_parsetree as _, _query_string as _, _paramTypes as _, _numParams as _, _queryEnv as _) as _
 }
 
 unsafe fn parse_analyze_withcb(
@@ -161,11 +161,11 @@ unsafe fn parse_analyze_withcb(
     _parserSetupArg: *mut c_void,
     _queryEnv: *mut QueryEnvironment,
 ) -> *mut Query {
-    unimplemented!() // TODO(pg-port): src/backend/parser/analyze.c
+    crate::parser::analyze::parse_analyze_withcb(_parsetree as _, _query_string as _, core::mem::transmute(_parserSetup), _parserSetupArg as _, _queryEnv as _) as _
 }
 
 unsafe fn QueryRewrite(_query: *mut Query) -> *mut List {
-    unimplemented!() // TODO(pg-port): src/backend/rewrite/rewriteHandler.c
+    crate::rewrite::rewriteHandler::QueryRewrite(_query as _) as _
 }
 
 unsafe fn planner(
@@ -174,15 +174,15 @@ unsafe fn planner(
     _cursorOptions: c_int,
     _boundParams: ParamListInfo,
 ) -> *mut PlannedStmt {
-    unimplemented!() // TODO(pg-port): src/backend/optimizer/plan/planner.c
+    crate::optimizer::plan::planner::planner(_querytree as _, _query_string as _, _cursorOptions as _, _boundParams as _) as _
 }
 
 unsafe fn analyze_requires_snapshot(_parsetree: *mut RawStmt) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/parser/analyze.c
+    crate::parser::analyze::analyze_requires_snapshot(_parsetree as _)
 }
 
 unsafe fn CreatePortal(_name: *const c_char, _allowDup: bool, _dupSilent: bool) -> Portal {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/portalmem.c
+    crate::utils::mmgr::portalmem::CreatePortal(_name as _, _allowDup, _dupSilent) as _
 }
 
 unsafe fn PortalDefineQuery(
@@ -193,15 +193,15 @@ unsafe fn PortalDefineQuery(
     _stmts: *mut List,
     _cplan: *mut CachedPlan,
 ) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/portalmem.c
+    crate::utils::mmgr::portalmem::PortalDefineQuery(core::mem::transmute(_portal), core::mem::transmute(_prepStmtName), core::mem::transmute(_sourceText), core::mem::transmute(_commandTag), core::mem::transmute(_stmts), core::mem::transmute(_cplan))
 }
 
 unsafe fn PortalStart(_portal: Portal, _params: ParamListInfo, _eflags: c_int, _snapshot: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/pquery.c
+    crate::tcop::pquery::PortalStart(_portal as _, _params as _, _eflags, _snapshot as _)
 }
 
 unsafe fn PortalSetResultFormat(_portal: Portal, _nFormats: c_int, _formats: *mut i16) {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/pquery.c
+    crate::tcop::pquery::PortalSetResultFormat(_portal as _, _nFormats, _formats as _)
 }
 
 unsafe fn PortalRun(
@@ -212,147 +212,147 @@ unsafe fn PortalRun(
     _altdest: *mut DestReceiver,
     _qc: *mut QueryCompletion,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/pquery.c
+    crate::tcop::pquery::PortalRun(_portal as _, _count as _, _isTopLevel, _dest as _, _altdest as _, _qc as _)
 }
 
 unsafe fn PortalDrop(_portal: Portal, _isTopCommit: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/portalmem.c
+    crate::utils::mmgr::portalmem::PortalDrop(_portal as _, _isTopCommit)
 }
 
 unsafe fn PortalIsValid(_portal: Portal) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/portalmem.c
+    crate::utils::portal::PortalIsValid(_portal as _)
 }
 
 unsafe fn GetPortalByName(_name: *const c_char) -> Portal {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/portalmem.c
+    crate::utils::mmgr::portalmem::GetPortalByName(_name as _) as _
 }
 
 unsafe fn CreateDestReceiver(_dest: CommandDest) -> *mut DestReceiver {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/dest.c
+    crate::tcop::dest::CreateDestReceiver(core::mem::transmute(_dest)) as _
 }
 
 unsafe fn SetRemoteDestReceiverParams(_self_: *mut DestReceiver, _portal: Portal) {
-    unimplemented!() // TODO(pg-port): src/backend/access/common/printtup.c
+    crate::access::common::printtup::SetRemoteDestReceiverParams(_self_ as _, _portal as _)
 }
 
 unsafe fn BeginCommand(_commandTag: CommandTag, _dest: CommandDest) {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/dest.c
+    crate::tcop::dest::BeginCommand(core::mem::transmute(_commandTag), core::mem::transmute(_dest))
 }
 
 unsafe fn EndCommand(_qc: *const QueryCompletion, _dest: CommandDest, _force_undecorated_output: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/dest.c
+    crate::tcop::dest::EndCommand(core::mem::transmute(_qc), core::mem::transmute(_dest), _force_undecorated_output)
 }
 
 unsafe fn NullCommand(_dest: CommandDest) {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/dest.c
+    crate::tcop::dest::NullCommand(core::mem::transmute(_dest))
 }
 
 unsafe fn ReadyForQuery(_dest: CommandDest) {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqcomm.c
+    crate::tcop::dest::ReadyForQuery(core::mem::transmute(_dest))
 }
 
 unsafe fn CreateCommandTag(_parsetree: *mut Node) -> CommandTag {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/cmdtag.c
+    crate::tcop::utility::CreateCommandTag(_parsetree as _) as _
 }
 
 unsafe fn GetCommandTagNameAndLen(_commandTag: CommandTag, _len: *mut usize) -> *const c_char {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/cmdtag.c
+    crate::tcop::cmdtag::GetCommandTagNameAndLen(core::mem::transmute(_commandTag), core::mem::transmute(_len)) as _
 }
 
 unsafe fn GetCommandLogLevel(_parsetree: *mut Node) -> c_int {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/utility.c
+    crate::tcop::utility::GetCommandLogLevel(_parsetree as _) as _
 }
 
 unsafe fn set_ps_display(_activity: *const c_char) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/ps_status.c
+    crate::utils::misc::ps_status::set_ps_display(_activity as _)
 }
 
 unsafe fn set_ps_display_with_len(_activity: *const c_char, _len: usize) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/ps_status.c
+    crate::utils::misc::ps_status::set_ps_display_with_len(_activity as _, _len as _)
 }
 
 unsafe fn pgstat_report_activity(_state: c_int, _cmd_str: *const c_char) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/activity/pgstat_activity.c
+    crate::utils::activity::backend_status::pgstat_report_activity(_state as _, _cmd_str as _)
 }
 
 unsafe fn pgstat_report_query_id(_queryId: u64, _force: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/activity/pgstat_activity.c
+    crate::utils::activity::backend_status::pgstat_report_query_id(_queryId as _, _force)
 }
 
 unsafe fn pgstat_report_plan_id(_planId: u64, _force: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/activity/pgstat_activity.c
+    crate::utils::activity::backend_status::pgstat_report_plan_id(_planId as _, _force)
 }
 
 unsafe fn pgstat_report_connect(_dbid: Oid) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/activity/pgstat_activity.c
+    crate::utils::activity::pgstat_database::pgstat_report_connect(_dbid as _)
 }
 
 unsafe fn pgstat_report_recovery_conflict(_reason: ProcSignalReason) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/activity/pgstat.c
+    crate::utils::activity::pgstat_database::pgstat_report_recovery_conflict(_reason as _)
 }
 
 unsafe fn pgstat_report_stat(_force: bool) -> i64 {
-    unimplemented!() // TODO(pg-port): src/backend/utils/activity/pgstat.c
+    crate::utils::activity::pgstat::pgstat_report_stat(_force) as _
 }
 
 unsafe fn StartTransactionCommand() {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::StartTransactionCommand()
 }
 
 unsafe fn CommitTransactionCommand() {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::CommitTransactionCommand()
 }
 
 unsafe fn AbortCurrentTransaction() {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::AbortCurrentTransaction()
 }
 
 unsafe fn CommandCounterIncrement() {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::CommandCounterIncrement()
 }
 
 unsafe fn IsTransactionState() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::IsTransactionState()
 }
 
 unsafe fn IsTransactionOrTransactionBlock() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::IsTransactionOrTransactionBlock()
 }
 
 unsafe fn IsAbortedTransactionBlockState() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::IsAbortedTransactionBlockState()
 }
 
 unsafe fn IsSubTransaction() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::IsSubTransaction()
 }
 
 unsafe fn BeginImplicitTransactionBlock() {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::BeginImplicitTransactionBlock()
 }
 
 unsafe fn EndImplicitTransactionBlock() {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::EndImplicitTransactionBlock()
 }
 
 unsafe fn GetTransactionSnapshot() -> *mut c_void {
-    unimplemented!() // TODO(pg-port): src/backend/utils/time/snapmgr.c
+    crate::utils::time::snapmgr::GetTransactionSnapshot() as _
 }
 
 unsafe fn PushActiveSnapshot(_snap: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/time/snapmgr.c
+    crate::utils::time::snapmgr::PushActiveSnapshot(_snap as _)
 }
 
 unsafe fn PopActiveSnapshot() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/time/snapmgr.c
+    crate::utils::time::snapmgr::PopActiveSnapshot()
 }
 
 unsafe fn ActiveSnapshotSet() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/time/snapmgr.c
+    crate::utils::time::snapmgr::ActiveSnapshotSet()
 }
 
 unsafe fn InvalidateCatalogSnapshotConditionally() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/time/snapmgr.c
+    crate::utils::time::snapmgr::InvalidateCatalogSnapshotConditionally()
 }
 
 unsafe fn AllocSetContextCreate(
@@ -362,167 +362,159 @@ unsafe fn AllocSetContextCreate(
     _initBlockSize: usize,
     _maxBlockSize: usize,
 ) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/aset.c
+    crate::utils::mmgr::aset::AllocSetContextCreateInternal(_parent as _, _name, _minContextSize, _initBlockSize, _maxBlockSize) as _
 }
 
 unsafe fn MemoryContextSwitchTo(_context: *mut c_void) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): src/include/utils/palloc.h
+    crate::utils::mmgr::mcxt::MemoryContextSwitchTo(_context as _) as _
 }
 
 unsafe fn MemoryContextDelete(_context: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/mcxt.c
+    crate::utils::mmgr::mcxt::MemoryContextDelete(_context as _)
 }
 
 unsafe fn MemoryContextReset(_context: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/mcxt.c
+    crate::utils::mmgr::mcxt::MemoryContextReset(_context as _)
 }
 
 unsafe fn MemoryContextSetParent(_context: *mut c_void, _newparent: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/mcxt.c
+    crate::utils::mmgr::mcxt::MemoryContextSetParent(_context as _, _newparent as _)
 }
 
 unsafe fn MemoryContextCheck(_context: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/mcxt.c
+    unimplemented!()
 }
 
 unsafe fn MemoryContextStats(_context: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/mcxt.c
+    crate::utils::mmgr::mcxt::MemoryContextStats(_context as _)
 }
 
 unsafe fn FlushErrorState() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/error/elog.c
+    crate::utils::error::elog_impl::FlushErrorState()
 }
 
 unsafe fn EmitErrorReport() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/error/elog.c
+    crate::utils::error::elog_impl::EmitErrorReport()
 }
 
 unsafe fn elog_node_display(_lev: c_int, _title: *const c_char, _obj: *mut c_void, _pretty: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/nodes/print.c
+    crate::nodes::print::elog_node_display(_lev as _, _title as _, _obj as _, _pretty)
 }
 
-unsafe fn copyObject(_obj: *mut c_void) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): src/backend/nodes/copyfuncs.c
-}
+unsafe fn copyObject(obj: *mut c_void) -> *mut c_void { crate::parser_link_shims::copyObject(obj as _) }
 
 unsafe fn equal(_a: *mut c_void, _b: *mut c_void) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/nodes/equalfuncs.c
+    crate::nodes::equalfuncs::equal(_a as _, _b as _)
 }
 
-unsafe fn nodeToStringWithLocations(_obj: *mut c_void) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): src/backend/nodes/outfuncs.c
-}
+unsafe fn nodeToStringWithLocations(obj: *mut c_void) -> *mut c_char { crate::nodes::outfuncs::nodeToStringWithLocations(obj as _) }
 
-unsafe fn stringToNodeWithLocations(_str: *const c_char) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): src/backend/nodes/readfuncs.c
-}
+unsafe fn stringToNodeWithLocations(str: *const c_char) -> *mut c_void { crate::nodes::read::stringToNodeWithLocations(str as _) }
 
 unsafe fn resetStringInfo(_str: StringInfo) {
-    unimplemented!() // TODO(pg-port): src/backend/lib/stringinfo.c
+    crate::lib::stringinfo::resetStringInfo(_str as _)
 }
 
 unsafe fn initStringInfo(_str: *mut StringInfoData) {
-    unimplemented!() // TODO(pg-port): src/backend/lib/stringinfo.c
+    crate::lib::stringinfo::initStringInfo(_str as _)
 }
 
 unsafe fn initReadOnlyStringInfo(_str: *mut StringInfoData, _data: *mut c_char, _len: c_int) {
-    unimplemented!() // TODO(pg-port): src/backend/lib/stringinfo.c
+    crate::lib::stringinfo::initReadOnlyStringInfo(_str as _, _data as _, _len as _)
 }
 
 unsafe fn appendStringInfoChar(_str: StringInfo, _ch: c_char) {
-    unimplemented!() // TODO(pg-port): src/backend/lib/stringinfo.c
+    crate::lib::stringinfo::appendStringInfoChar(_str as _, _ch as _)
 }
 
 unsafe fn appendStringInfoString(_str: StringInfo, _s: *const c_char) {
-    unimplemented!() // TODO(pg-port): src/backend/lib/stringinfo.c
+    crate::lib::stringinfo::appendStringInfoString(_str as _, _s as _)
 }
 
 unsafe fn appendStringInfo(_str: StringInfo, _fmt: *const c_char) {
-    unimplemented!() // TODO(pg-port): src/backend/lib/stringinfo.c
+    unimplemented!()
 }
 
-unsafe fn appendStringInfoStringQuoted(_str: StringInfo, _s: *const c_char, _maxlen: c_int) {
-    unimplemented!() // TODO(pg-port): src/backend/mb/stringinfo_mb.c
-}
+unsafe fn appendStringInfoStringQuoted(str: StringInfo, s: *const c_char, maxlen: c_int) { crate::utils::mb::stringinfo_mb::appendStringInfoStringQuoted(str as _, s as _, maxlen as _) }
 
 unsafe fn pq_startmsgread() {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqmq.c
+    crate::libpq::pqcomm::pq_startmsgread()
 }
 
 unsafe fn pq_getbyte() -> c_int {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqcomm.c
+    crate::libpq::pqcomm::pq_getbyte() as _
 }
 
 unsafe fn pq_getmessage(_s: StringInfo, _maxlen: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqcomm.c
+    crate::libpq::pqcomm::pq_getmessage(_s as _, _maxlen as _) as _
 }
 
 unsafe fn pq_getmsgstring(_s: StringInfo) -> *const c_char {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_getmsgstring(_s as _) as _
 }
 
 unsafe fn pq_getmsgint(_s: StringInfo, _b: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_getmsgint(_s as _, _b as _) as _
 }
 
 unsafe fn pq_getmsgbyte(_s: StringInfo) -> c_int {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_getmsgbyte(_s as _) as _
 }
 
 unsafe fn pq_getmsgbytes(_s: StringInfo, _datalen: c_int) -> *const c_char {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_getmsgbytes(_s as _, _datalen as _) as _
 }
 
 unsafe fn pq_getmsgend(_s: StringInfo) {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_getmsgend(_s as _)
 }
 
 unsafe fn pq_putemptymessage(_msgtype: c_int) {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_putemptymessage(_msgtype as _)
 }
 
 unsafe fn pq_beginmessage(_s: *mut StringInfoData, _msgtype: c_int) {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_beginmessage(_s as _, _msgtype as _)
 }
 
 unsafe fn pq_beginmessage_reuse(_s: *mut StringInfoData, _msgtype: c_int) {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_beginmessage_reuse(_s as _, _msgtype as _)
 }
 
 unsafe fn pq_sendint16(_s: *mut StringInfoData, _i: i16) {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_sendint16(_s as _, _i as _)
 }
 
 unsafe fn pq_sendint32(_s: *mut StringInfoData, _i: i32) {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_sendint32(_s as _, _i as _)
 }
 
 unsafe fn pq_sendbytes(_s: *mut StringInfoData, _data: *const c_char, _datalen: usize) {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_sendbytes(_s as _, _data as _, _datalen as _)
 }
 
 unsafe fn pq_endmessage(_s: *mut StringInfoData) {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_endmessage(_s as _)
 }
 
 unsafe fn pq_endmessage_reuse(_s: *mut StringInfoData) {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqformat.c
+    crate::libpq::pqformat::pq_endmessage_reuse(_s as _)
 }
 
 unsafe fn pq_flush() {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqcomm.c
+    crate::libpq::libpq::pq_flush();
 }
 
 unsafe fn pq_comm_reset() {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqcomm.c
+    crate::libpq::libpq::pq_comm_reset()
 }
 
 unsafe fn pq_check_connection() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqcomm.c
+    crate::libpq::pqcomm::pq_check_connection()
 }
 
 unsafe fn pq_is_reading_msg() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/libpq/pqcomm.c
+    crate::libpq::libpq::pq_is_reading_msg()
 }
 
 unsafe fn CreateCachedPlan(
@@ -530,29 +522,27 @@ unsafe fn CreateCachedPlan(
     _query_string: *const c_char,
     _commandTag: CommandTag,
 ) -> *mut CachedPlanSource {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/plancache.c
+    unimplemented!()
 }
 
 unsafe fn CompleteCachedPlan(
-    _plansource: *mut CachedPlanSource,
-    _querytree_list: *mut List,
-    _queryCacheContext: *mut c_void,
-    _param_types: *mut Oid,
-    _num_params: c_int,
-    _parserSetup: ParserSetupHook,
-    _parserSetupArg: *mut c_void,
-    _cursor_options: c_int,
-    _fixed_result: bool,
-) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/plancache.c
-}
+    plansource: *mut CachedPlanSource,
+    querytree_list: *mut List,
+    queryCacheContext: *mut c_void,
+    param_types: *mut Oid,
+    num_params: c_int,
+    parserSetup: ParserSetupHook,
+    parserSetupArg: *mut c_void,
+    cursor_options: c_int,
+    fixed_result: bool,
+) { unimplemented!() }
 
 unsafe fn SaveCachedPlan(_plansource: *mut CachedPlanSource) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/plancache.c
+    crate::utils::cache::plancache::SaveCachedPlan(_plansource as _)
 }
 
 unsafe fn DropCachedPlan(_plansource: *mut CachedPlanSource) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/plancache.c
+    crate::utils::cache::plancache::DropCachedPlan(_plansource as _)
 }
 
 unsafe fn StorePreparedStatement(
@@ -560,15 +550,15 @@ unsafe fn StorePreparedStatement(
     _plansource: *mut CachedPlanSource,
     _from_sql: bool,
 ) {
-    unimplemented!() // TODO(pg-port): src/backend/commands/prepare.c
+    crate::commands::prepare::StorePreparedStatement(_stmt_name as _, _plansource as _, _from_sql)
 }
 
 unsafe fn FetchPreparedStatement(_stmt_name: *const c_char, _throwError: bool) -> *mut PreparedStatement {
-    unimplemented!() // TODO(pg-port): src/backend/commands/prepare.c
+    crate::commands::prepare::FetchPreparedStatement(_stmt_name as _, _throwError) as _
 }
 
 unsafe fn DropPreparedStatement(_stmt_name: *const c_char, _showError: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/commands/prepare.c
+    crate::commands::prepare::DropPreparedStatement(_stmt_name as _, _showError)
 }
 
 unsafe fn GetCachedPlan(
@@ -577,14 +567,14 @@ unsafe fn GetCachedPlan(
     _snapshot: *mut c_void,
     _queryEnv: *mut QueryEnvironment,
 ) -> *mut CachedPlan {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/plancache.c
+    crate::utils::cache::plancache::GetCachedPlan(_plansource as _, _boundParams as _, _snapshot as _, _queryEnv as _) as _
 }
 
 unsafe fn CachedPlanGetTargetList(
     _plansource: *mut CachedPlanSource,
     _queryEnv: *mut QueryEnvironment,
 ) -> *mut List {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/plancache.c
+    crate::utils::cache::plancache::CachedPlanGetTargetList(_plansource as _, _queryEnv as _) as _
 }
 
 unsafe fn SendRowDescriptionMessage(
@@ -593,15 +583,15 @@ unsafe fn SendRowDescriptionMessage(
     _targetlist: *mut List,
     _formats: *mut i16,
 ) {
-    unimplemented!() // TODO(pg-port): src/backend/access/common/printtup.c
+    crate::access::common::printtup::SendRowDescriptionMessage(_buf as _, _typeinfo as _, _targetlist as _, _formats as _)
 }
 
-unsafe fn FetchPortalTargetList(_portal: Portal) -> *mut List {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/pquery.c
+unsafe fn FetchPortalTargetList(_portal: Portal) -> *mut List { return crate::tcop::pquery::FetchPortalTargetList(_portal as _); #[allow(unreachable_code)]
+    unimplemented!()
 }
 
 unsafe fn makeParamList(_numParams: c_int) -> ParamListInfo {
-    unimplemented!() // TODO(pg-port): src/backend/nodes/params.c
+    crate::nodes::params::makeParamList(_numParams as _) as _
 }
 
 unsafe fn BuildParamLogString(
@@ -609,23 +599,23 @@ unsafe fn BuildParamLogString(
     _knownTextValues: *mut *mut c_char,
     _maxlen: c_int,
 ) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): src/backend/nodes/params.c
+    crate::nodes::params::BuildParamLogString(_params as _, _knownTextValues as _, _maxlen as _) as _
 }
 
 unsafe fn ParamsErrorCallback(_arg: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/backend/nodes/params.c
+    crate::nodes::params::ParamsErrorCallback(_arg as _)
 }
 
 unsafe fn getTypeInputInfo(_type_: Oid, _typinput: *mut Oid, _typioparam: *mut Oid) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/lsyscache.c
+    crate::utils::cache::lsyscache::getTypeInputInfo(_type_ as _, _typinput as _, _typioparam as _)
 }
 
 unsafe fn getTypeBinaryInputInfo(_type_: Oid, _typreceive: *mut Oid, _typioparam: *mut Oid) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/lsyscache.c
+    crate::utils::cache::lsyscache::getTypeBinaryInputInfo(_type_ as _, _typreceive as _, _typioparam as _)
 }
 
 unsafe fn OidInputFunctionCall(_functionId: Oid, _str: *mut c_char, _typioparam: Oid, _typmod: i32) -> Datum {
-    unimplemented!() // TODO(pg-port): src/backend/utils/fmgr.c
+    crate::utils::fmgr::OidInputFunctionCall(_functionId as _, _str as _, _typioparam as _, _typmod as _) as _
 }
 
 unsafe fn OidReceiveFunctionCall(
@@ -634,59 +624,59 @@ unsafe fn OidReceiveFunctionCall(
     _typioparam: Oid,
     _typmod: i32,
 ) -> Datum {
-    unimplemented!() // TODO(pg-port): src/backend/utils/fmgr.c
+    crate::utils::fmgr::OidReceiveFunctionCall(_functionId as _, _buf as _, _typioparam as _, _typmod as _) as _
 }
 
 unsafe fn pg_client_to_server(_s: *const c_char, _len: c_int) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): src/backend/mb/mbutils.c
+    crate::utils::mb::mbutils::pg_client_to_server(_s as _, _len as _) as _
 }
 
 unsafe fn HandleFunctionRequest(_input_message: StringInfo) {
-    unimplemented!() // TODO(pg-port): src/backend/tcop/fastpath.c
+    crate::tcop::fastpath::HandleFunctionRequest(_input_message as _)
 }
 
 unsafe fn exec_replication_command(_query_string: *const c_char) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/replication/walsender.c
+    crate::replication::walsender::exec_replication_command(_query_string as _)
 }
 
 unsafe fn enable_timeout_after(_timeoutId: c_int, _delay_ms: i64) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/timeout.c
+    crate::utils::misc::timeout::enable_timeout_after(_timeoutId, _delay_ms as c_int)
 }
 
 unsafe fn disable_timeout(_timeoutId: c_int, _keepOffset: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/timeout.c
+    crate::utils::misc::timeout::disable_timeout(_timeoutId, _keepOffset)
 }
 
 unsafe fn disable_all_timeouts(_keepOffset: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/timeout.c
+    crate::utils::misc::timeout::disable_all_timeouts(_keepOffset)
 }
 
 unsafe fn get_timeout_active(_timeoutId: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/timeout.c
+    crate::utils::misc::timeout::get_timeout_active(_timeoutId)
 }
 
 unsafe fn get_timeout_indicator(_timeoutId: c_int, _reset_indicator: bool) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/timeout.c
+    crate::utils::misc::timeout::get_timeout_indicator(_timeoutId, _reset_indicator)
 }
 
 unsafe fn get_timeout_finish_time(_timeoutId: c_int) -> i64 {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/timeout.c
+    crate::utils::misc::timeout::get_timeout_finish_time(_timeoutId)
 }
 
 unsafe fn InitializeTimeouts() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/timeout.c
+    crate::utils::misc::timeout::InitializeTimeouts()
 }
 
 unsafe fn GetCurrentStatementStartTimestamp() -> i64 {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::GetCurrentStatementStartTimestamp()
 }
 
 unsafe fn GetCurrentTimestamp() -> i64 {
-    unimplemented!() // TODO(pg-port): src/backend/utils/adt/timestamp.c
+    crate::utils::adt::timestamp::GetCurrentTimestamp() as _
 }
 
 unsafe fn TimestampDifference(_start_time: i64, _stop_time: i64, _secs: *mut i64, _microsecs: *mut c_int) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/adt/timestamp.c
+    crate::utils::adt::timestamp::TimestampDifference(_start_time as _, _stop_time as _, _secs as _, _microsecs as _)
 }
 
 unsafe fn TimestampDifferenceMicroseconds(_start_time: i64, _stop_time: i64) -> u64 {
@@ -694,79 +684,73 @@ unsafe fn TimestampDifferenceMicroseconds(_start_time: i64, _stop_time: i64) -> 
 }
 
 unsafe fn SetCurrentStatementStartTimestamp() {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xact.c
+    crate::access::transam::xact::SetCurrentStatementStartTimestamp()
 }
 
 unsafe fn LockErrorCleanup() {
-    unimplemented!() // TODO(pg-port): src/backend/storage/lmgr/lock.c
+    crate::storage::lmgr::proc::LockErrorCleanup()
 }
 
 unsafe fn GetAwaitedLock() -> *mut c_void {
-    unimplemented!() // TODO(pg-port): src/backend/storage/lmgr/lock.c
+    crate::storage::lmgr::lock::GetAwaitedLock() as _
 }
 
 unsafe fn HoldingBufferPinThatDelaysRecovery() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::HoldingBufferPinThatDelaysRecovery()
 }
 
 unsafe fn GetStartupBufferPinWaitBufId() -> c_int {
-    unimplemented!() // TODO(pg-port): src/backend/storage/buffer/bufmgr.c
+    crate::storage::lmgr::proc::GetStartupBufferPinWaitBufId() as _
 }
 
 unsafe fn CheckDeadLockAlert() {
-    unimplemented!() // TODO(pg-port): src/backend/storage/lmgr/deadlock.c
+    crate::storage::lmgr::proc::CheckDeadLockAlert()
 }
 
 unsafe fn ProcessCatchupInterrupt() {
-    unimplemented!() // TODO(pg-port): src/backend/storage/ipc/sinval.c
+    crate::storage::ipc::sinval::ProcessCatchupInterrupt()
 }
 
-unsafe fn ProcessNotifyInterrupt(_flush: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/commands/async.c
-}
+unsafe fn ProcessNotifyInterrupt(flush: bool) { unimplemented!() }
 
 unsafe fn ProcessParallelMessages() {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/parallel.c
+    crate::access::transam::parallel::ProcessParallelMessages()
 }
 
-unsafe fn ProcessParallelApplyMessages() {
-    unimplemented!() // TODO(pg-port): src/backend/replication/logicalworker.c
-}
+unsafe fn ProcessParallelApplyMessages() { unimplemented!() }
 
 unsafe fn ProcessProcSignalBarrier() {
-    unimplemented!() // TODO(pg-port): src/backend/storage/ipc/procsignal.c
+    crate::storage::ipc::procsignal::ProcessProcSignalBarrier()
 }
 
 unsafe fn ProcessLogMemoryContextInterrupt() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/mcxt.c
+    crate::utils::mmgr::mcxt::ProcessLogMemoryContextInterrupt()
 }
 
 unsafe fn PortalErrorCleanup() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/mmgr/portalmem.c
+    crate::utils::mmgr::portalmem::PortalErrorCleanup()
 }
 
-unsafe fn ReplicationSlotRelease() {
-    unimplemented!() // TODO(pg-port): src/backend/replication/slot.c
-}
+unsafe fn ReplicationSlotRelease() { crate::replication::slot::ReplicationSlotRelease() }
 
 unsafe fn ReplicationSlotCleanup(_forWalSender: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/replication/slot.c
+    crate::replication::slot::ReplicationSlotCleanup(_forWalSender)
 }
 
 unsafe fn jit_reset_after_error() {
-    unimplemented!() // TODO(pg-port): src/backend/jit/jit.c
+    crate::jit::jit::jit_reset_after_error()
 }
 
 unsafe fn WalSndSignals() {
-    unimplemented!() // TODO(pg-port): src/backend/replication/walsender.c
+    crate::replication::walsender::WalSndSignals()
 }
 
 unsafe fn WalSndErrorCleanup() {
-    unimplemented!() // TODO(pg-port): src/backend/replication/walsender.c
+    crate::replication::walsender::WalSndErrorCleanup()
 }
 
 unsafe fn InitWalSender() {
-    unimplemented!() // TODO(pg-port): src/backend/replication/walsender.c
+    crate::replication::walsender::InitWalSender()
 }
 
 unsafe fn SetConfigOption(
@@ -775,79 +759,79 @@ unsafe fn SetConfigOption(
     _context: GucContext,
     _source: GucSource,
 ) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/guc.c
+    crate::utils::misc::guc::SetConfigOption(core::mem::transmute(_name), core::mem::transmute(_value), core::mem::transmute(_context), core::mem::transmute(_source))
 }
 
 unsafe fn GetQuitSignalReason() -> c_int {
-    unimplemented!() // TODO(pg-port): src/backend/postmaster/pmsignal.c
+    crate::storage::ipc::pmsignal::GetQuitSignalReason() as _
 }
 
 unsafe fn InitStandaloneProcess(_progname: *const c_char) {
-    unimplemented!() // TODO(pg-port): src/backend/postmaster/postmaster.c
+    crate::utils::init::miscinit::InitStandaloneProcess(_progname as _)
 }
 
 unsafe fn InitializeGUCOptions() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/guc.c
+    crate::utils::misc::guc::InitializeGUCOptions()
 }
 
 unsafe fn SelectConfigFiles(_userDoption: *const c_char, _progname: *const c_char) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/guc.c
+    crate::utils::misc::guc::SelectConfigFiles(_userDoption as _, _progname as _)
 }
 
 unsafe fn checkDataDir() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/miscadmin.c
+    crate::utils::init::miscinit::checkDataDir()
 }
 
 unsafe fn ChangeToDataDir() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/miscadmin.c
+    crate::utils::init::miscinit::ChangeToDataDir()
 }
 
 unsafe fn CreateDataDirLockFile(_amPostmaster: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/miscadmin.c
+    crate::utils::init::miscinit::CreateDataDirLockFile(_amPostmaster)
 }
 
 unsafe fn LocalProcessControlFile(_update_cksum: bool) {
-    unimplemented!() // TODO(pg-port): src/backend/postmaster/postmaster.c
+    crate::access::transam::xlog::LocalProcessControlFile(_update_cksum)
 }
 
 unsafe fn process_shared_preload_libraries() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/fmgr/dfmgr.c
+    crate::utils::init::miscinit::process_shared_preload_libraries()
 }
 
 unsafe fn InitializeMaxBackends() {
-    unimplemented!() // TODO(pg-port): src/backend/postmaster/postmaster.c
+    crate::utils::init::postinit::InitializeMaxBackends()
 }
 
 unsafe fn InitPostmasterChildSlots() {
-    unimplemented!() // TODO(pg-port): src/backend/postmaster/postmaster.c
+    crate::postmaster::pmchild::InitPostmasterChildSlots()
 }
 
 unsafe fn InitializeFastPathLocks() {
-    unimplemented!() // TODO(pg-port): src/backend/storage/lmgr/lock.c
+    crate::utils::init::postinit::InitializeFastPathLocks()
 }
 
 unsafe fn process_shmem_requests() {
-    unimplemented!() // TODO(pg-port): src/backend/postmaster/postmaster.c
+    crate::utils::init::miscinit::process_shmem_requests()
 }
 
 unsafe fn InitializeShmemGUCs() {
-    unimplemented!() // TODO(pg-port): src/backend/postmaster/postmaster.c
+    crate::storage::ipc::ipci::InitializeShmemGUCs()
 }
 
 unsafe fn InitializeWalConsistencyChecking() {
-    unimplemented!() // TODO(pg-port): src/backend/access/transam/xlog.c
+    crate::access::transam::xlog::InitializeWalConsistencyChecking()
 }
 
 unsafe fn CreateSharedMemoryAndSemaphores() {
-    unimplemented!() // TODO(pg-port): src/backend/storage/ipc/ipci.c
+    crate::storage::ipc::ipci::CreateSharedMemoryAndSemaphores()
 }
 
 unsafe fn set_max_safe_fds() {
-    unimplemented!() // TODO(pg-port): src/backend/storage/file/fd.c
+    crate::storage::file::fd::set_max_safe_fds()
 }
 
 unsafe fn InitProcess() {
-    unimplemented!() // TODO(pg-port): src/backend/storage/lmgr/proc.c
+    crate::storage::lmgr::proc::InitProcess()
 }
 
 unsafe fn InitPostgres(
@@ -858,39 +842,39 @@ unsafe fn InitPostgres(
     _flags: c_int,
     _out_dbname: *mut *const c_char,
 ) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/init/postinit.c
+    crate::utils::init::postinit::InitPostgres(_in_dbname, _dboid, _username, _useroid, _flags as _, _out_dbname as *mut c_char)
 }
 
 unsafe fn BaseInit() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/init/globals.c
+    crate::utils::init::postinit::BaseInit()
 }
 
 unsafe fn BeginReportingGUCOptions() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/guc.c
+    crate::utils::misc::guc::BeginReportingGUCOptions()
 }
 
 unsafe fn ReportChangedGUCOptions() {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/guc.c
+    crate::utils::misc::guc::ReportChangedGUCOptions()
 }
 
 unsafe fn EventTriggerOnLogin() {
-    unimplemented!() // TODO(pg-port): src/backend/commands/event_trigger.c
+    // No login event triggers on a fresh cluster; no-op for bring-up.
 }
 
 unsafe fn on_proc_exit(_function: unsafe extern "C" fn(c_int, Datum), _arg: Datum) {
-    unimplemented!() // TODO(pg-port): src/backend/storage/ipc/ipc.c
+    crate::storage::ipc::ipc::on_proc_exit(core::mem::transmute(_function), _arg)
 }
 
 unsafe fn proc_exit(_code: c_int) -> ! {
-    unimplemented!() // TODO(pg-port): src/backend/storage/ipc/ipc.c
+    crate::storage::ipc::ipc::proc_exit(_code)
 }
 
 unsafe fn ProcessConfigFile(_context: GucContext) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/guc.c
+    crate::utils::misc::guc::ProcessConfigFile(core::mem::transmute(_context))
 }
 
 unsafe fn ParseLongOption(_string: *const c_char, _name: *mut *mut c_char, _value: *mut *mut c_char) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/guc.c
+    crate::utils::misc::guc::ParseLongOption(_string, _name, _value)
 }
 
 unsafe fn SplitIdentifierString(
@@ -898,87 +882,85 @@ unsafe fn SplitIdentifierString(
     _separator: c_char,
     _namelist: *mut *mut List,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/adt/varlena.c
+    crate::utils::adt::varlena::SplitIdentifierString(_rawstring as _, _separator as _, _namelist as _)
 }
 
 unsafe fn pg_strcasecmp(_s1: *const c_char, _s2: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): src/port/pgstrcasecmp.c
+    crate::port::pgstrcasecmp::pg_strcasecmp(_s1 as _, _s2 as _) as _
 }
 
 unsafe fn guc_malloc(_elevel: c_int, _size: usize) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/guc.c
+    crate::utils::misc::guc::guc_malloc(_elevel as _, _size as _) as _
 }
 
 unsafe fn WaitEventSetCanReportClosed() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/storage/ipc/latch.c
+    crate::storage::ipc::waiteventset::WaitEventSetCanReportClosed()
 }
 
 unsafe fn pg_prng_double(_state: *mut c_void) -> f64 {
-    unimplemented!() // TODO(pg-port): src/common/pg_prng.c
+    crate::common::pg_prng::pg_prng_double(_state as _) as _
 }
 
 unsafe fn pg_strong_random(_buf: *mut c_void, _len: usize) -> bool {
-    unimplemented!() // TODO(pg-port): src/common/pg_strong_random.c
+    crate::port::pg_strong_random::pg_strong_random(_buf as _, _len as _)
 }
 
 unsafe fn INJECTION_POINT(_name: *const c_char, _arg: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/injection_point.c
+    unimplemented!()
 }
 
-unsafe fn parse_dispatch_option(_opt: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): src/backend/main/main.c
-}
+unsafe fn parse_dispatch_option(opt: *const c_char) -> c_int { unimplemented!() }
 
 unsafe fn SignalHandlerForConfigReload(_sig: c_int) {
-    unimplemented!() // TODO(pg-port): src/backend/postmaster/interrupt.c
+    crate::postmaster::interrupt::SignalHandlerForConfigReload(_sig as _)
 }
 
 unsafe fn procsignal_sigusr1_handler(_sig: c_int) {
-    unimplemented!() // TODO(pg-port): src/backend/storage/ipc/procsignal.c
+    crate::storage::ipc::procsignal::procsignal_sigusr1_handler(_sig as _)
 }
 
 unsafe fn AmAutoVacuumWorkerProcess() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/miscadmin.c
+    crate::miscadmin::AmAutoVacuumWorkerProcess()
 }
 
 unsafe fn IsLogicalWorker() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/replication/logicalworker.c
+    crate::replication::logical::worker::IsLogicalWorker()
 }
 
 unsafe fn IsLogicalLauncher() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/replication/logicallauncher.c
+    crate::replication::logical::launcher::IsLogicalLauncher()
 }
 
 unsafe fn AmWalReceiverProcess() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/miscadmin.c
+    crate::miscadmin::AmWalReceiverProcess()
 }
 
 unsafe fn AmBackgroundWorkerProcess() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/miscadmin.c
+    crate::miscadmin::AmBackgroundWorkerProcess()
 }
 
 unsafe fn AmIoWorkerProcess() -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/miscadmin.c
+    crate::miscadmin::AmIoWorkerProcess()
 }
 
 unsafe fn IsExternalConnectionBackend(_backendType: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/miscadmin.c
+    crate::miscadmin::IsExternalConnectionBackend(_backendType as _)
 }
 
 unsafe fn GetProcessingMode() -> c_int {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/miscadmin.c
+    crate::miscadmin::GetProcessingMode() as c_int
 }
 
-unsafe fn SetProcessingMode(_mode: c_int) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/misc/miscadmin.c
+unsafe fn SetProcessingMode(mode: c_int) {
+    crate::miscadmin::SetProcessingMode(mode as _)
 }
 
 unsafe fn strlcpy(_dst: *mut c_char, _src: *const c_char, _siz: usize) -> usize {
-    unimplemented!() // TODO(pg-port): src/port/strlcpy.c
+    crate::port::strlcpy::strlcpy(_dst as _, _src as _, _siz as _) as _
 }
 
 unsafe fn SetLatch(_latch: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/backend/storage/ipc/latch.c
+    crate::storage::ipc::latch::SetLatch(_latch as _)
 }
 
 // ---------------------------------------------------------------------------
@@ -990,6 +972,7 @@ unsafe fn SetLatch(_latch: *mut c_void) {
 pub static mut debug_query_string: *const c_char = std::ptr::null();
 
 // Note: whereToSendOutput is initialized for the bootstrap/standalone case
+#[no_mangle]
 pub static mut whereToSendOutput: CommandDest = DestDebug;
 
 /// flag for logging end of session
@@ -1004,6 +987,7 @@ pub static mut PostAuthDelay: c_int = 0;
 pub static mut client_connection_check_interval: c_int = 0;
 
 /// flags for non-system relation kinds to restrict use
+#[no_mangle]
 pub static mut restrict_nonsystem_relation_kind: c_int = 0;
 
 // ----------------
@@ -1631,19 +1615,19 @@ pub unsafe fn pg_rewrite_query(query: *mut Query) -> *mut List {
 // ---------------------------------------------------------------------------
 
 unsafe fn palloc(_size: usize) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): src/include/utils/palloc.h
+    crate::utils::mmgr::mcxt::palloc(_size as _) as _
 }
 
 unsafe fn pfree(_pointer: *mut c_void) {
-    unimplemented!() // TODO(pg-port): src/include/utils/palloc.h
+    crate::utils::mmgr::mcxt::pfree(_pointer as _)
 }
 
 unsafe fn pstrdup(_s: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): src/include/utils/palloc.h
+    crate::utils::cache::lsyscache::pstrdup(_s as _) as _
 }
 
 unsafe fn pnstrdup(_s: *const c_char, _len: c_int) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): src/include/utils/palloc.h
+    crate::common::fe_memutils::pnstrdup(_s as _, _len as _) as _
 }
 
 unsafe fn palloc_array(_size: usize, _count: usize) -> *mut c_void {
@@ -1655,51 +1639,41 @@ unsafe fn palloc0_array(_size: usize, _count: usize) -> *mut c_void {
 }
 
 unsafe fn lappend(_list: *mut List, _datum: *mut c_void) -> *mut List {
-    unimplemented!() // TODO(pg-port): src/backend/lib/list.c
+    crate::nodes::pg_list::lappend(_list as _, _datum as _) as _
 }
 
 unsafe fn list_free(_list: *mut List) {
-    unimplemented!() // TODO(pg-port): src/backend/lib/list.c
+    crate::nodes::pg_list::list_free(_list as _)
 }
 
-unsafe fn errmsg_internal(_fmt: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn errmsg_internal(_fmt: *const c_char) -> c_int { 0 }
 
-unsafe fn errdetail_internal(_fmt: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn errdetail_internal(_fmt: *const c_char) -> c_int { 0 }
 
-unsafe fn errcontext(_fmt: *const c_char) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn errcontext(_fmt: *const c_char) {}
 
-unsafe fn errhidestmt(_b: bool) -> c_int {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn errhidestmt(_b: bool) -> c_int { 0 }
 
-unsafe fn errhint(_fmt: *const c_char) -> c_int {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn errhint(_fmt: *const c_char) -> c_int { 0 }
 
 unsafe fn pqsignal(_signo: c_int, _handler: *mut c_void) {
-    unimplemented!() // TODO(pg-port)
+    crate::libpq::pqsignal::pqsignal(_signo, core::mem::transmute(_handler));
 }
 
 unsafe fn sigaddset(_set: *mut c_void, _signo: c_int) {
-    unimplemented!() // TODO(pg-port)
+    libc::sigaddset(_set as *mut libc::sigset_t, _signo);
 }
 
 unsafe fn sigprocmask(_how: c_int, _set: *mut c_void, _oset: *mut c_void) {
-    unimplemented!() // TODO(pg-port)
+    libc::sigprocmask(_how, _set as *const libc::sigset_t, _oset as *mut libc::sigset_t);
 }
 
 unsafe fn getrusage(_who: c_int, _rusage: *mut c_void) {
-    unimplemented!() // TODO(pg-port)
+    libc::getrusage(_who, _rusage as *mut libc::rusage);
 }
 
 unsafe fn gettimeofday(_tv: *mut c_void, _tz: *mut c_void) {
-    unimplemented!() // TODO(pg-port)
+    libc::gettimeofday(_tv as *mut libc::timeval, _tz as *mut libc::c_void);
 }
 
 unsafe fn pg_strcasecmp_dup(_s1: *const c_char, _s2: *const c_char) -> c_int {
@@ -1725,7 +1699,7 @@ unsafe fn snprintf_stub(
 
 pub static mut MyXactFlags: u32 = 0;
 
-pub static mut MyProc: *mut c_void = std::ptr::null_mut();
+extern "C" { pub static mut MyProc: *mut c_void; }
 pub static mut MyProcPort: *mut Port = std::ptr::null_mut();
 pub static mut MyDatabaseId: Oid = 0;
 pub static mut MyCancelKey: [u8; 32] = [0u8; 32];
@@ -1802,7 +1776,12 @@ pub struct PgPrngState {
     pub s1: u64,
 }
 
-pub static mut error_context_stack: *mut ErrorContextCallback = std::ptr::null_mut();
+// The process-global error_context_stack (#[no_mangle] in utils/error/elog_impl.rs).
+// Must be the SAME storage errfinish + parser callbacks use, else stale entries
+// from an aborted statement form a self-cycle in the next statement's callback list.
+extern "C" {
+    pub static mut error_context_stack: *mut ErrorContextCallback;
+}
 
 pub static mut log_connections: u32 = 0;
 
@@ -1831,7 +1810,7 @@ pub const XACT_FLAGS_PIPELINING: u32 = 0x0004;
 pub const PARAM_FLAG_CONST: u32 = 0x0001;
 pub const CURSOR_OPT_PARALLEL_OK: c_int = 0x0010;
 pub const CURSOR_OPT_BINARY: c_int = 0x0002;
-pub const CMD_UTILITY: c_int = 5;
+pub const CMD_UTILITY: c_int = 6;
 pub const TRANS_STMT_COMMIT: c_int = 0;
 pub const TRANS_STMT_PREPARE: c_int = 1;
 pub const TRANS_STMT_ROLLBACK: c_int = 2;
@@ -1933,8 +1912,8 @@ pub const SIGCHLD: c_int = 20;
 pub const SIGALRM: c_int = 14;
 
 /* C: sigset_t BlockSig, UnBlockSig -- opaque OS signal masks (see pqsignal.h) */
-pub static mut BlockSig: SigSet = SigSet { __val: [0; 16] };
-pub static mut UnBlockSig: SigSet = SigSet { __val: [0; 16] };
+#[no_mangle] pub static mut BlockSig: SigSet = SigSet { __val: [0; 16] };
+#[no_mangle] pub static mut UnBlockSig: SigSet = SigSet { __val: [0; 16] };
 
 #[repr(C)]
 pub struct SigSet {
@@ -1958,11 +1937,11 @@ unsafe fn getopt(
     _argv: *mut *mut c_char,
     _optstring: *const c_char,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): libc getopt
+    crate::port::getopt::getopt(_argc as _, _argv as _, _optstring as _) as _
 }
 
 unsafe fn GUC_check_errdetail(_fmt: *const c_char) {
-    unimplemented!() // TODO(pg-port)
+    unimplemented!()
 }
 
 unsafe fn guc_malloc_stub(_elevel: c_int, _size: usize) -> *mut c_void {
@@ -2041,17 +2020,17 @@ pub unsafe fn pg_plan_queries(
         let query: *mut Query = lfirst_node!(Query, T_Query, crate::current_cell!(query_list));
         let stmt: *mut PlannedStmt;
 
-        if (*(query as *mut QueryStub)).commandType == CMD_UTILITY {
+        let query_c = query as *mut crate::nodes::parsenodes::Query;
+        if (*query_c).commandType as c_int == CMD_UTILITY {
             /* Utility commands require no planning. */
-            stmt = makeNode!(PlannedStmtStub, T_PlannedStmt) as *mut PlannedStmt;
-            let stmt_s = stmt as *mut PlannedStmtStub;
-            let query_s = query as *mut QueryStub;
-            (*stmt_s).commandType = CMD_UTILITY;
-            (*stmt_s).canSetTag = (*query_s).canSetTag;
-            (*stmt_s).utilityStmt = (*query_s).utilityStmt;
-            (*stmt_s).stmt_location = (*query_s).stmt_location;
-            (*stmt_s).stmt_len = (*query_s).stmt_len;
-            (*stmt_s).queryId = (*query_s).queryId;
+            let stmt_c = makeNode!(crate::nodes::plannodes::PlannedStmt, T_PlannedStmt);
+            (*stmt_c).commandType = (*query_c).commandType;
+            (*stmt_c).canSetTag = (*query_c).canSetTag;
+            (*stmt_c).utilityStmt = (*query_c).utilityStmt;
+            (*stmt_c).stmt_location = (*query_c).stmt_location;
+            (*stmt_c).stmt_len = (*query_c).stmt_len;
+            (*stmt_c).queryId = (*query_c).queryId;
+            stmt = stmt_c as *mut PlannedStmt;
         } else {
             stmt = pg_plan_query(query, query_string, cursorOptions, boundParams);
         }
@@ -2419,6 +2398,11 @@ struct PortalStub {
 
 #[repr(C)]
 struct DestReceiverStub {
+    // Must mirror dest::DestReceiver's field order so rDestroy lands at the right
+    // offset (it is the 4th field, not the 1st).
+    pub receiveSlot: Option<unsafe fn(*mut c_void, *mut DestReceiver) -> bool>,
+    pub rStartup: Option<unsafe fn(*mut DestReceiver, c_int, *mut c_void)>,
+    pub rShutdown: Option<unsafe fn(*mut DestReceiver)>,
     pub rDestroy: Option<unsafe fn(*mut DestReceiver)>,
 }
 
@@ -5090,6 +5074,10 @@ pub static mut progname: *const c_char = b"postgres\0".as_ptr() as *const c_char
 // postgres main loop -- all backends, interactive or otherwise loop here.
 // ---------------------------------------------------------------------------
 pub unsafe fn PostgresMain(dbname: *const c_char, username: *const c_char) {
+    if std::env::var("PDB_BACKEND_SLEEP").is_ok() {
+        eprintln!("PDB_BACKEND_PID {}", std::process::id());
+        std::thread::sleep(std::time::Duration::from_secs(8));
+    }
     // These locals must be "volatile" in C; in Rust we handle via normal mutability
     let mut send_ready_for_query: bool = true;
     let mut idle_in_transaction_timeout_enabled: bool = false;
@@ -5283,7 +5271,51 @@ pub unsafe fn PostgresMain(dbname: *const c_char, username: *const c_char) {
     //     RESUME_INTERRUPTS();
     // }
 
-    // PG_exception_stack = &local_sigjmp_buf;
+    /*
+     * If an exception is encountered, processing resumes here so we abort the
+     * current transaction and start a new one.  This is the real sigsetjmp
+     * recovery point; pg_re_throw siglongjmps back to it.
+     */
+    let mut local_sigjmp_buf = crate::utils::error::elog_impl::PgSigjmpBuf::new();
+    if crate::utils::error::elog_impl::sigsetjmp(&raw mut local_sigjmp_buf, 1) != 0 {
+        /*
+         * Error recovery, reached via siglongjmp from pg_re_throw.
+         * Port of the sigsetjmp(local_sigjmp_buf) != 0 block in postgres.c.
+         */
+        error_context_stack = std::ptr::null_mut();
+
+        disable_all_timeouts(false);
+        QueryCancelPending = false;
+        idle_in_transaction_timeout_enabled = false;
+        idle_session_timeout_enabled = false;
+
+        DoingCommandRead = false;
+
+        pq_comm_reset();
+
+        EmitErrorReport();
+
+        debug_query_string = std::ptr::null();
+
+        AbortCurrentTransaction();
+
+        PortalErrorCleanup();
+
+        MemoryContextSwitchTo(MessageContext);
+        FlushErrorState();
+
+        if doing_extended_query_message {
+            ignore_till_sync = true;
+        }
+
+        xact_started = false;
+
+        send_ready_for_query = true;
+    }
+
+    /* Now we can handle ereport(ERROR) */
+    crate::utils::error::elog_impl::PG_exception_stack =
+        (&raw mut local_sigjmp_buf) as *mut c_void;
 
     if !ignore_till_sync {
         send_ready_for_query = true; /* initially, or after error */
@@ -5433,6 +5465,9 @@ pub unsafe fn PostgresMain(dbname: *const c_char, username: *const c_char) {
          * (3) read a command (loop blocks here)
          */
         firstchar = ReadCommand(&mut input_message);
+        if std::env::var_os("PDB_BT").is_some() {
+            eprintln!("PDB_BT PostgresMain firstchar={} pid={}", firstchar, std::process::id());
+        }
 
         /*
          * (4) turn off the idle-in-transaction and idle-session timeouts.

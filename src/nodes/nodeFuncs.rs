@@ -120,9 +120,8 @@ fn check_stack_depth() {}
 /// # Safety
 /// Trivially safe; stubbed pending lsyscache.
 #[inline]
-unsafe fn get_opcode(_opno: Oid) -> Oid {
-    // TODO(pg-port): utils/cache/lsyscache.c
-    unimplemented!("get_opcode: lsyscache not yet translated")
+unsafe fn get_opcode(opno: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_opcode(opno)
 }
 
 /// `get_promoted_array_type(typeid)` (utils/cache/lsyscache.c).
@@ -131,8 +130,7 @@ unsafe fn get_opcode(_opno: Oid) -> Oid {
 /// Trivially safe; stubbed pending lsyscache.
 #[inline]
 unsafe fn get_promoted_array_type(_typeid: Oid) -> Oid {
-    // TODO(pg-port): utils/cache/lsyscache.c
-    unimplemented!("get_promoted_array_type: lsyscache not yet translated")
+    crate::utils::cache::lsyscache::get_promoted_array_type(_typeid)
 }
 
 /// `getTypeInputInfo(type, &typinput, &typioparam)` (utils/cache/lsyscache.c).
@@ -141,8 +139,7 @@ unsafe fn get_promoted_array_type(_typeid: Oid) -> Oid {
 /// Output pointers must be valid; stubbed pending lsyscache.
 #[inline]
 unsafe fn getTypeInputInfo(_typ: Oid, _typinput: *mut Oid, _typioparam: *mut Oid) {
-    // TODO(pg-port): utils/cache/lsyscache.c
-    unimplemented!("getTypeInputInfo: lsyscache not yet translated")
+    crate::utils::cache::lsyscache::getTypeInputInfo(_typ, _typinput, _typioparam)
 }
 
 /// `getTypeOutputInfo(type, &typoutput, &typisvarlena)` (utils/cache/lsyscache.c).
@@ -151,8 +148,7 @@ unsafe fn getTypeInputInfo(_typ: Oid, _typinput: *mut Oid, _typioparam: *mut Oid
 /// Output pointers must be valid; stubbed pending lsyscache.
 #[inline]
 unsafe fn getTypeOutputInfo(_typ: Oid, _typoutput: *mut Oid, _typisvarlena: *mut bool) {
-    // TODO(pg-port): utils/cache/lsyscache.c
-    unimplemented!("getTypeOutputInfo: lsyscache not yet translated")
+    crate::utils::cache::lsyscache::getTypeOutputInfo(_typ, _typoutput, _typisvarlena)
 }
 
 /// `format_type_be(type_oid)` (utils/adt/format_type.c): error-message helper.
@@ -161,8 +157,7 @@ unsafe fn getTypeOutputInfo(_typ: Oid, _typoutput: *mut Oid, _typisvarlena: *mut
 /// Trivially safe; stubbed pending format_type.
 #[inline]
 unsafe fn format_type_be(_type_oid: Oid) -> *mut c_char {
-    // TODO(pg-port): utils/adt/format_type.c
-    unimplemented!("format_type_be: format_type not yet translated")
+    crate::utils::adt::format_type::format_type_be(_type_oid)
 }
 
 /// `copyObject(node)` (nodes/copyfuncs.c): deep-copy an arbitrary Node.
@@ -171,8 +166,7 @@ unsafe fn format_type_be(_type_oid: Oid) -> *mut c_char {
 /// `node` must be NULL or a valid node pointer.
 #[inline]
 unsafe fn copyObject<T>(node: *const T) -> *mut T {
-    // TODO(pg-port): nodes/copyfuncs.c (copyObjectImpl is private in pg_list.rs)
-    unimplemented!("copyObject: copyfuncs not yet translated")
+    crate::nodes::copyfuncs::copyObjectImpl(node as *const c_void) as *mut T
 }
 
 /// `ERRCODE_UNDEFINED_OBJECT` SQLSTATE class; used purely for classification.
@@ -2118,6 +2112,7 @@ pub unsafe fn check_functions_in_node(
  * subselects of an already-planned expression tree.  This is OK for current
  * uses, but may need to be revisited in future.
  */
+#[no_mangle]
 pub unsafe fn expression_tree_walker_impl(
     node: *mut Node,
     walker: tree_walker_callback,

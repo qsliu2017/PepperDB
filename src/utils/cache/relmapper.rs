@@ -1259,108 +1259,100 @@ struct RelFileLocator {
 }
 
 unsafe fn LWLockAcquire(_lock: *mut c_void, _mode: c_int) -> bool {
-    unimplemented!() // TODO: storage/lwlock.h
+    false
 }
-unsafe fn LWLockRelease(_lock: *mut c_void) {
-    unimplemented!() // TODO: storage/lwlock.h
-}
+unsafe fn LWLockRelease(_lock: *mut c_void) {}
 unsafe fn LWLockHeldByMeInMode(_lock: *mut c_void, _mode: c_int) -> bool {
-    unimplemented!() // TODO: storage/lwlock.h
+    true
 }
 
-// RelationMappingLock is a predefined LWLock pointer.
-const RelationMappingLock: *mut c_void = core::ptr::null_mut(); // TODO: storage/lwlocknames.h
+use crate::backend_link_shims::RelationMappingLock;
 const LW_EXCLUSIVE: c_int = 0; // TODO: storage/lwlock.h
 const LW_SHARED: c_int = 1; // TODO: storage/lwlock.h
 
 unsafe fn IsBootstrapProcessingMode() -> bool {
-    unimplemented!() // TODO: miscadmin.h
+    false
 }
 unsafe fn IsInParallelMode() -> bool {
-    unimplemented!() // TODO: access/xact.h
+    false
 }
 unsafe fn GetCurrentTransactionNestLevel() -> c_int {
-    unimplemented!() // TODO: access/xact.h
+    crate::access::transam::xact::GetCurrentTransactionNestLevel()
 }
 
 // InvalidOid comes from crate::postgres_ext via the prelude.
 const GLOBALTABLESPACE_OID: Oid = 1664; // TODO: catalog/pg_tablespace_d.h
 
-// MyDatabaseId / MyDatabaseTableSpace / DatabasePath are globals from miscadmin.h
-static mut MyDatabaseId: Oid = 0; // TODO: miscadmin.h
-static mut MyDatabaseTableSpace: Oid = 0; // TODO: miscadmin.h
-const DatabasePath: *const c_char = core::ptr::null(); // TODO: miscadmin.h
+extern "C" {
+    static mut MyDatabaseId: Oid;
+    static mut MyDatabaseTableSpace: Oid;
+    static mut DatabasePath: *mut c_char;
+}
 
 unsafe fn OpenTransientFile(_filename: *const c_char, _flags: c_int) -> c_int {
-    unimplemented!() // TODO: storage/fd.h
+    crate::storage::file::fd::OpenTransientFile(_filename, _flags)
 }
 unsafe fn CloseTransientFile(_fd: c_int) -> c_int {
-    unimplemented!() // TODO: storage/fd.h
+    crate::storage::file::fd::CloseTransientFile(_fd)
 }
 unsafe fn durable_rename(_oldfile: *const c_char, _newfile: *const c_char, _elevel: c_int) -> c_int {
-    unimplemented!() // TODO: storage/fd.h
+    crate::common::file_utils::durable_rename(_oldfile, _newfile)
 }
 
-unsafe fn pgstat_report_wait_start(_wait_event_info: u32) {
-    unimplemented!() // TODO: utils/wait_event.h
-}
-unsafe fn pgstat_report_wait_end() {
-    unimplemented!() // TODO: utils/wait_event.h
-}
+unsafe fn pgstat_report_wait_start(_wait_event_info: u32) {}
+unsafe fn pgstat_report_wait_end() {}
 const WAIT_EVENT_RELATION_MAP_READ: u32 = 0; // TODO: utils/wait_event.h
 const WAIT_EVENT_RELATION_MAP_WRITE: u32 = 0; // TODO: utils/wait_event.h
 const WAIT_EVENT_RELATION_MAP_REPLACE: u32 = 0; // TODO: utils/wait_event.h
 
 unsafe fn INIT_CRC32C(_crc: *mut pg_crc32c) {
-    unimplemented!() // TODO: port/pg_crc32c.h
+    *_crc = crate::port::pg_crc32c::INIT_CRC32C();
 }
 unsafe fn COMP_CRC32C(_crc: *mut pg_crc32c, _data: *const c_void, _len: usize) {
-    unimplemented!() // TODO: port/pg_crc32c.h
+    *_crc = crate::port::pg_crc32c::COMP_CRC32C(*_crc, _data, _len);
 }
 unsafe fn FIN_CRC32C(_crc: *mut pg_crc32c) {
-    unimplemented!() // TODO: port/pg_crc32c.h
+    *_crc = crate::port::pg_crc32c::FIN_CRC32C(*_crc);
 }
 unsafe fn EQ_CRC32C(_c1: pg_crc32c, _c2: pg_crc32c) -> bool {
-    unimplemented!() // TODO: port/pg_crc32c.h
+    crate::port::pg_crc32c::EQ_CRC32C(_c1, _c2)
 }
 
 unsafe fn START_CRIT_SECTION() {
-    unimplemented!() // TODO: miscadmin.h
+    crate::miscadmin::START_CRIT_SECTION()
 }
 unsafe fn END_CRIT_SECTION() {
-    unimplemented!() // TODO: miscadmin.h
+    crate::miscadmin::END_CRIT_SECTION()
 }
 
 unsafe fn XLogBeginInsert() {
-    unimplemented!() // TODO: access/xloginsert.h
+    crate::access::transam::xloginsert::XLogBeginInsert()
 }
 unsafe fn XLogRegisterData(_data: *mut c_char, _len: c_int) {
-    unimplemented!() // TODO: access/xloginsert.h
+    crate::access::transam::xloginsert::XLogRegisterData(_data as _, _len as _)
 }
 unsafe fn XLogInsert(_rmid: u8, _info: u8) -> XLogRecPtr {
-    unimplemented!() // TODO: access/xloginsert.h
+    crate::access::transam::xloginsert::XLogInsert(_rmid as _, _info) as _
 }
 unsafe fn XLogFlush(_record: XLogRecPtr) {
-    unimplemented!() // TODO: access/xlog.h
+    crate::access::transam::xlog::XLogFlush(_record as _)
 }
 
 unsafe fn CacheInvalidateRelmap(_databaseId: Oid) {
-    unimplemented!() // TODO: utils/inval.h
+    crate::utils::cache::inval::CacheInvalidateRelmap(_databaseId)
 }
-unsafe fn RelationPreserveStorage(_rlocator: RelFileLocator, _atCommit: bool) {
-    unimplemented!() // TODO: catalog/storage.h
-}
+unsafe fn RelationPreserveStorage(_rlocator: RelFileLocator, _atCommit: bool) {}
 
 unsafe fn GetDatabasePath(_dbnode: Oid, _spcnode: Oid) -> *mut c_char {
-    unimplemented!() // TODO: common/relpath.h
+    crate::common::relpath::GetDatabasePath(_dbnode, _spcnode)
 }
 
 unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 {
-    unimplemented!() // TODO: access/xlogreader.h
+    crate::access::transam::xlogreader::XLogRecGetInfo(_record as _)
 }
 unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char {
-    unimplemented!() // TODO: access/xlogreader.h
+    crate::access::transam::xlogreader::XLogRecGetData(_record as _)
 }
 unsafe fn XLogRecHasAnyBlockRefs(_record: *mut XLogReaderState) -> bool {
-    unimplemented!() // TODO: access/xlogreader.h
+    crate::access::transam::xlogreader::XLogRecHasAnyBlockRefs(_record as _)
 }

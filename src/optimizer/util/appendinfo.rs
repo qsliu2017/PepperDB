@@ -165,9 +165,8 @@ unsafe fn NameStr(name: *const crate::c::NameData) -> *const c_char {
 }
 
 /// `SearchSysCacheAttName(relid, attname)` (utils/syscache.h): not yet ported.
-unsafe fn SearchSysCacheAttName(_relid: Oid, _attname: *const c_char) -> *mut c_void {
-    // TODO(pg-port): syscache.c SearchSysCacheAttName not yet ported.
-    unimplemented!("SearchSysCacheAttName: syscache not yet ported")
+unsafe fn SearchSysCacheAttName(relid: Oid, attname: *const c_char) -> *mut c_void {
+    crate::utils::cache::syscache::SearchSysCacheAttName(relid, attname) as _
 }
 
 /// `HeapTupleIsValid(tuple)` (access/htup.h): non-NULL test.
@@ -177,14 +176,13 @@ unsafe fn HeapTupleIsValid(tuple: *mut c_void) -> bool {
 
 /// `GETSTRUCT(tuple)` (access/htup_details.h): the Form pointer from a HeapTuple;
 /// not yet ported.
-unsafe fn GETSTRUCT(_tuple: *mut c_void) -> Form_pg_attribute {
-    // TODO(pg-port): access/htup_details.h GETSTRUCT not yet ported.
-    unimplemented!("GETSTRUCT: htup_details not yet ported")
+unsafe fn GETSTRUCT(tuple: *mut c_void) -> Form_pg_attribute {
+    crate::access::htup_details::GETSTRUCT(tuple as _) as _
 }
 
 /// `ReleaseSysCache(tuple)` (utils/syscache.h): not yet ported.
-unsafe fn ReleaseSysCache(_tuple: *mut c_void) {
-    // TODO(pg-port): syscache.c ReleaseSysCache not yet ported.
+unsafe fn ReleaseSysCache(tuple: *mut c_void) {
+    crate::utils::cache::syscache::ReleaseSysCache(tuple as _)
 }
 
 /// `equal(a, b)` (nodes/equalfuncs.c): structural node equality.
@@ -198,14 +196,13 @@ unsafe fn get_typavgwidth(typid: Oid, typmod: int32) -> int32 {
 }
 
 /// `table_open(relationId, lockmode)` (access/table.h): not yet ported.  STUB.
-unsafe fn table_open(_relationId: Oid, _lockmode: c_int) -> Relation {
-    // TODO(pg-port): access/table.c table_open not yet ported.
-    unimplemented!("table_open: access/table.c not yet ported")
+unsafe fn table_open(relationId: Oid, lockmode: c_int) -> Relation {
+    crate::access::table::table::table_open(relationId, lockmode) as _
 }
 
 /// `table_close(relation, lockmode)` (access/table.h): not yet ported.  STUB.
-unsafe fn table_close(_relation: Relation, _lockmode: c_int) {
-    // TODO(pg-port): access/table.c table_close not yet ported.
+unsafe fn table_close(relation: Relation, lockmode: c_int) {
+    crate::access::table::table::table_close(relation as _, lockmode)
 }
 
 /// `NoLock` (storage/lock.h): the no-lock lock mode.
@@ -223,22 +220,19 @@ unsafe fn build_base_rel_tlists(root: *mut PlannerInfo, final_tlist: *mut List) 
 
 /// `get_rel_name(relid)` (utils/lsyscache.h): not yet ported.  Used only in
 /// error-message paths.  STUB.
-unsafe fn get_rel_name(_relid: Oid) -> *mut c_char {
-    // TODO(pg-port): lsyscache.c get_rel_name (syscache lookup) not yet ported.
-    core::ptr::null_mut()
+unsafe fn get_rel_name(relid: Oid) -> *mut c_char {
+    crate::utils::cache::lsyscache::get_rel_name(relid)
 }
 
 /// `find_base_rel(root, relid)` (optimizer/pathnode.h): not yet ported.  STUB.
-unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo {
-    // TODO(pg-port): relnode.c find_base_rel not yet ported.
-    unimplemented!("find_base_rel: relnode.c not yet ported")
+unsafe fn find_base_rel(root: *mut PlannerInfo, relid: c_int) -> *mut RelOptInfo {
+    crate::optimizer::util::relnode::find_base_rel(root, relid)
 }
 
 /// `find_base_rel_ignore_join(root, relid)` (optimizer/pathnode.h): not yet
 /// ported.  STUB.
-unsafe fn find_base_rel_ignore_join(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo {
-    // TODO(pg-port): relnode.c find_base_rel_ignore_join not yet ported.
-    unimplemented!("find_base_rel_ignore_join: relnode.c not yet ported")
+unsafe fn find_base_rel_ignore_join(root: *mut PlannerInfo, relid: c_int) -> *mut RelOptInfo {
+    crate::optimizer::util::relnode::find_base_rel_ignore_join(root, relid)
 }
 
 // ----------------------------------------------------------------------------

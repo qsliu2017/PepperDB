@@ -236,23 +236,21 @@ pub unsafe fn GetNamedDSMSegment(
 
 // -- Local stubs for not-yet-ported callees --
 
-// storage/lwlock.h: DSMRegistryLock is a predefined named lock.
-// TODO: storage/lwlocknames - replace with the real lock pointer.
-const DSMRegistryLock: *mut LWLock = null_mut();
+use crate::backend_link_shims::DSMRegistryLock;
 
 // TODO: storage/ipc/shmem.c
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found_ptr: *mut bool) -> *mut c_void {
-    unimplemented!()
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _found_ptr)
 }
 
 // TODO: storage/lwlock.c
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!()
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, if _mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE })
 }
 
 // TODO: storage/lwlock.c
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!()
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 
 // TODO: utils/dsa.c
@@ -262,22 +260,22 @@ unsafe fn dsa_create(_tranche_id: c_int) -> *mut dsa_area {
 
 // TODO: utils/dsa.c
 unsafe fn dsa_attach(_handle: dsa_handle) -> *mut dsa_area {
-    unimplemented!()
+    crate::utils::mmgr::dsa::dsa_attach(_handle as _) as _
 }
 
 // TODO: utils/dsa.c
 unsafe fn dsa_pin(_area: *mut dsa_area) {
-    unimplemented!()
+    crate::utils::mmgr::dsa::dsa_pin(_area as _)
 }
 
 // TODO: utils/dsa.c
 unsafe fn dsa_pin_mapping(_area: *mut dsa_area) {
-    unimplemented!()
+    crate::utils::mmgr::dsa::dsa_pin_mapping(_area as _)
 }
 
 // TODO: utils/dsa.c
 unsafe fn dsa_get_handle(_area: *mut dsa_area) -> dsa_handle {
-    unimplemented!()
+    crate::utils::mmgr::dsa::dsa_get_handle(_area as _) as _
 }
 
 // TODO: lib/dshash.c
@@ -286,7 +284,7 @@ unsafe fn dshash_create(
     _params: *const dshash_parameters,
     _arg: *mut c_void,
 ) -> *mut dshash_table {
-    unimplemented!()
+    crate::lib::dshash::dshash_create(_area as _, _params as _, _arg) as _
 }
 
 // TODO: lib/dshash.c
@@ -296,12 +294,12 @@ unsafe fn dshash_attach(
     _handle: dshash_table_handle,
     _arg: *mut c_void,
 ) -> *mut dshash_table {
-    unimplemented!()
+    crate::lib::dshash::dshash_attach(_area as _, _params as _, _handle as _, _arg) as _
 }
 
 // TODO: lib/dshash.c
 unsafe fn dshash_get_hash_table_handle(_hash_table: *mut dshash_table) -> dshash_table_handle {
-    unimplemented!()
+    crate::lib::dshash::dshash_get_hash_table_handle(_hash_table as _) as _
 }
 
 // TODO: lib/dshash.c
@@ -310,12 +308,12 @@ unsafe fn dshash_find_or_insert(
     _key: *const c_void,
     _found: *mut bool,
 ) -> *mut c_void {
-    unimplemented!()
+    crate::lib::dshash::dshash_find_or_insert(_hash_table as _, _key, _found)
 }
 
 // TODO: lib/dshash.c
 unsafe fn dshash_release_lock(_hash_table: *mut dshash_table, _entry: *mut c_void) {
-    unimplemented!()
+    crate::lib::dshash::dshash_release_lock(_hash_table as _, _entry)
 }
 
 // TODO: lib/dshash.c
@@ -335,37 +333,37 @@ unsafe fn dshash_strcpy(_dest: *mut c_void, _src: *const c_void, _size: Size, _a
 
 // TODO: storage/dsm.c
 unsafe fn dsm_create(_size: Size, _flags: c_int) -> *mut dsm_segment {
-    unimplemented!()
+    crate::storage::ipc::dsm::dsm_create(_size, _flags) as _
 }
 
 // TODO: storage/dsm.c
 unsafe fn dsm_attach(_h: dsm_handle) -> *mut dsm_segment {
-    unimplemented!()
+    crate::storage::ipc::dsm::dsm_attach(_h as _) as _
 }
 
 // TODO: storage/dsm.c
 unsafe fn dsm_find_mapping(_h: dsm_handle) -> *mut dsm_segment {
-    unimplemented!()
+    crate::storage::ipc::dsm::dsm_find_mapping(_h as _) as _
 }
 
 // TODO: storage/dsm.c
 unsafe fn dsm_segment_handle(_seg: *mut dsm_segment) -> dsm_handle {
-    unimplemented!()
+    crate::storage::ipc::dsm::dsm_segment_handle(_seg as _) as _
 }
 
 // TODO: storage/dsm.c
 unsafe fn dsm_segment_address(_seg: *mut dsm_segment) -> *mut c_void {
-    unimplemented!()
+    crate::storage::ipc::dsm::dsm_segment_address(_seg as _)
 }
 
 // TODO: storage/dsm.c
 unsafe fn dsm_pin_segment(_seg: *mut dsm_segment) {
-    unimplemented!()
+    crate::storage::ipc::dsm::dsm_pin_segment(_seg as _)
 }
 
 // TODO: storage/dsm.c
 unsafe fn dsm_pin_mapping(_seg: *mut dsm_segment) {
-    unimplemented!()
+    crate::storage::ipc::dsm::dsm_pin_mapping(_seg as _)
 }
 
 // string.h: bound directly via extern "C".

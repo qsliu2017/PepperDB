@@ -378,6 +378,7 @@ pub unsafe fn slot_getsomeattrs(slot: *mut TupleTableSlot, attnum: c_int) {
 /// slot_getallattrs -- force ALL entries of the slot's Datum/isnull arrays to
 /// be valid.  Caller may then extract data directly from those arrays.
 #[inline]
+#[no_mangle]
 pub unsafe fn slot_getallattrs(slot: *mut TupleTableSlot) {
     slot_getsomeattrs(slot, (*(*slot).tts_tupleDescriptor).natts);
 }
@@ -440,6 +441,7 @@ pub unsafe fn slot_is_current_xact_tuple(slot: *mut TupleTableSlot) -> bool {
 
 /// ExecClearTuple -- clear the slot's contents.
 #[inline]
+#[no_mangle]
 pub unsafe fn ExecClearTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
     ((*(*slot).tts_ops).clear.unwrap())(slot);
 
@@ -457,7 +459,7 @@ pub unsafe fn ExecMaterializeSlot(slot: *mut TupleTableSlot) {
 }
 
 /// ExecCopySlotHeapTuple -- return HeapTuple allocated in caller's context.
-#[inline]
+#[no_mangle]
 pub unsafe fn ExecCopySlotHeapTuple(slot: *mut TupleTableSlot) -> HeapTuple {
     Assert!(!TTS_EMPTY(slot));
 
@@ -488,6 +490,7 @@ pub unsafe fn ExecCopySlotMinimalTupleExtra(
 /// target slot and source slot types need to match.  Currently 'dstslot' and
 /// 'srcslot' must have the same number of attributes.
 #[inline]
+#[no_mangle]
 pub unsafe fn ExecCopySlot(
     dstslot: *mut TupleTableSlot,
     srcslot: *mut TupleTableSlot,

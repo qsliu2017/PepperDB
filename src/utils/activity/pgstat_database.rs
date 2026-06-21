@@ -150,6 +150,7 @@ unsafe fn TimestampDifference(
 // ---------------------------------------------------------------------------
 
 /// Remove entry for the database being dropped.
+#[no_mangle]
 pub unsafe fn pgstat_drop_database(databaseid: Oid) {
     crate::utils::activity::pgstat::pgstat_drop_transactional(
         PGSTAT_KIND_DATABASE,

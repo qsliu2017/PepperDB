@@ -152,10 +152,13 @@ extern "C" {
 }
 
 /*
- * Configurable GUC parameter (extra_float_digits).  GUC machinery is not ported;
- * the default value is 1.  Only referenced by the (stubbed) *out functions.
+ * Configurable GUC parameter (extra_float_digits).  This IS the GUC-backed
+ * variable (guc_tables.rs points its config_int entry at this symbol via the
+ * unmangled name), so SET extra_float_digits updates it and the *out functions
+ * below observe it.  Boot default 1 (matches the GUC boot_val).
  */
 #[allow(non_upper_case_globals)]
+#[no_mangle]
 pub static mut extra_float_digits: c_int = 1;
 
 /* Cached constants for degree-based trig functions */
@@ -486,12 +489,43 @@ pub unsafe fn float4in(fcinfo: FunctionCallInfo) -> Datum {
  * platform-independent way of inputting floats.  Behaves essentially like
  * strtof + ereport on error.
  */
+/// ereturn(escontext, ...): record a soft error if escontext is an
+/// ErrorSaveContext sink and return true; otherwise return false so the caller
+/// raises a hard ERROR.
+unsafe fn float_input_soft_error(
+    escontext: *mut crate::nodes::nodes::Node,
+    sqlerrcode: c_int,
+    msg: std::string::String,
+) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    if escontext.is_null() || *(escontext as *const c_int) != T_ErrorSaveContext {
+        return false;
+    }
+    let esc = escontext as *mut crate::nodes::miscnodes::ErrorSaveContext;
+    (*esc).error_occurred = true;
+    if (*esc).details_wanted {
+        let m = palloc(msg.len() + 1) as *mut c_char;
+        core::ptr::copy_nonoverlapping(msg.as_ptr() as *const c_char, m, msg.len());
+        *m.add(msg.len()) = 0;
+        let ed = crate::utils::mmgr::mcxt::palloc0(
+            core::mem::size_of::<crate::utils::error::elog_impl::ErrorData>(),
+        ) as *mut crate::utils::error::elog_impl::ErrorData;
+        (*ed).sqlerrcode = sqlerrcode;
+        (*ed).message = m;
+        (*esc).error_data = ed as *mut _;
+    }
+    true
+}
+
+const ERRCODE_INVALID_TEXT_REPRESENTATION_FLOAT: c_int = 33685634; /* 22P02 */
+const ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE_FLOAT: c_int = 50331778; /* 22003 */
+
 pub unsafe fn float4in_internal(
     mut num: *mut c_char,
     endptr_p: *mut *mut c_char,
     type_name: *const c_char,
     orig_string: *const c_char,
-    _escontext: *mut crate::nodes::nodes::Node,
+    escontext: *mut crate::nodes::nodes::Node,
 ) -> float4 {
     let mut val: float4;
     let mut endptr: *mut c_char = null_mut();
@@ -503,6 +537,10 @@ pub unsafe fn float4in_internal(
 
     /* Check for an empty-string input to begin with. */
     if *num == 0 {
+        if float_input_soft_error(escontext, ERRCODE_INVALID_TEXT_REPRESENTATION_FLOAT,
+            format!("invalid input syntax for type {}: \"{}\"", cstr(type_name), cstr(orig_string))) {
+            return 0.0;
+        }
         ereport!(
             ERROR,
             errmsg!(
@@ -557,6 +595,10 @@ pub unsafe fn float4in_internal(
                 let errnumber = pstrdup(num);
                 *errnumber.offset(endptr.offset_from(num)) = 0;
 
+                if float_input_soft_error(escontext, ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE_FLOAT,
+                    format!("\"{}\" is out of range for type real", cstr(errnumber))) {
+                    return 0.0;
+                }
                 ereport!(
                     ERROR,
                     errmsg!("\"{}\" is out of range for type real", cstr(errnumber))
@@ -564,6 +606,10 @@ pub unsafe fn float4in_internal(
                 return 0.0;
             }
         } else {
+            if float_input_soft_error(escontext, ERRCODE_INVALID_TEXT_REPRESENTATION_FLOAT,
+                format!("invalid input syntax for type {}: \"{}\"", cstr(type_name), cstr(orig_string))) {
+                return 0.0;
+            }
             ereport!(
                 ERROR,
                 errmsg!(
@@ -585,6 +631,10 @@ pub unsafe fn float4in_internal(
     if !endptr_p.is_null() {
         *endptr_p = endptr;
     } else if *endptr != 0 {
+        if float_input_soft_error(escontext, ERRCODE_INVALID_TEXT_REPRESENTATION_FLOAT,
+            format!("invalid input syntax for type {}: \"{}\"", cstr(type_name), cstr(orig_string))) {
+            return 0.0;
+        }
         ereport!(
             ERROR,
             errmsg!(
@@ -606,6 +656,15 @@ pub unsafe fn float4out(fcinfo: FunctionCallInfo) -> Datum {
     let num: float4 = PG_GETARG_FLOAT4!(fcinfo, 0);
     let ascii = palloc(32) as *mut core::ffi::c_char;
     let ndig: c_int = FLT_DIG + extra_float_digits;
+
+    if num.is_nan() {
+        libc::strcpy(ascii, c"NaN".as_ptr());
+        PG_RETURN_CSTRING!(ascii);
+    }
+    if num.is_infinite() {
+        libc::strcpy(ascii, if num > 0.0 { c"Infinity".as_ptr() } else { c"-Infinity".as_ptr() });
+        PG_RETURN_CSTRING!(ascii);
+    }
 
     if extra_float_digits > 0 {
         crate::common::f2s::float_to_shortest_decimal_buf(num, ascii);
@@ -665,7 +724,7 @@ pub unsafe fn float8in_internal(
     endptr_p: *mut *mut c_char,
     type_name: *const c_char,
     orig_string: *const c_char,
-    _escontext: *mut crate::nodes::nodes::Node,
+    escontext: *mut crate::nodes::nodes::Node,
 ) -> float8 {
     let mut val: float8;
     let mut endptr: *mut c_char = null_mut();
@@ -677,6 +736,10 @@ pub unsafe fn float8in_internal(
 
     /* Check for an empty-string input to begin with. */
     if *num == 0 {
+        if float_input_soft_error(escontext, ERRCODE_INVALID_TEXT_REPRESENTATION_FLOAT,
+            format!("invalid input syntax for type {}: \"{}\"", cstr(type_name), cstr(orig_string))) {
+            return 0.0;
+        }
         ereport!(
             ERROR,
             errmsg!(
@@ -726,6 +789,10 @@ pub unsafe fn float8in_internal(
             if val == 0.0 || val >= f64::INFINITY || val <= -f64::INFINITY {
                 let errnumber = pstrdup(num);
                 *errnumber.offset(endptr.offset_from(num)) = 0;
+                if float_input_soft_error(escontext, ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE_FLOAT,
+                    format!("\"{}\" is out of range for type double precision", cstr(errnumber))) {
+                    return 0.0;
+                }
                 ereport!(
                     ERROR,
                     errmsg!(
@@ -736,6 +803,10 @@ pub unsafe fn float8in_internal(
                 return 0.0;
             }
         } else {
+            if float_input_soft_error(escontext, ERRCODE_INVALID_TEXT_REPRESENTATION_FLOAT,
+                format!("invalid input syntax for type {}: \"{}\"", cstr(type_name), cstr(orig_string))) {
+                return 0.0;
+            }
             ereport!(
                 ERROR,
                 errmsg!(
@@ -757,6 +828,10 @@ pub unsafe fn float8in_internal(
     if !endptr_p.is_null() {
         *endptr_p = endptr;
     } else if *endptr != 0 {
+        if float_input_soft_error(escontext, ERRCODE_INVALID_TEXT_REPRESENTATION_FLOAT,
+            format!("invalid input syntax for type {}: \"{}\"", cstr(type_name), cstr(orig_string))) {
+            return 0.0;
+        }
         ereport!(
             ERROR,
             errmsg!(
@@ -786,6 +861,15 @@ pub unsafe fn float8out(fcinfo: FunctionCallInfo) -> Datum {
 pub unsafe fn float8out_internal(num: float8) -> *mut c_char {
     let ascii = palloc(32) as *mut core::ffi::c_char;
     let ndig: c_int = DBL_DIG + extra_float_digits;
+
+    if num.is_nan() {
+        libc::strcpy(ascii, c"NaN".as_ptr());
+        return ascii;
+    }
+    if num.is_infinite() {
+        libc::strcpy(ascii, if num > 0.0 { c"Infinity".as_ptr() } else { c"-Infinity".as_ptr() });
+        return ascii;
+    }
 
     if extra_float_digits > 0 {
         crate::common::d2s::double_to_shortest_decimal_buf(num, ascii);

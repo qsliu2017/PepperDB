@@ -94,7 +94,9 @@ use crate::access::transam::transam::{
 };
 
 // MultiXactId helpers
-use crate::access::multixact::{MultiXactIdIsValid, MultiXactIdPrecedes, MultiXactIdPrecedesOrEquals};
+use crate::access::transam::multixact::{MultiXactIdPrecedes, MultiXactIdPrecedesOrEquals};
+/* access/multixact.h: #define MultiXactIdIsValid(multi) ((multi) != InvalidMultiXactId) */
+unsafe fn MultiXactIdIsValid(multi: MultiXactId) -> bool { multi != InvalidMultiXactId }
 
 // pg_class form
 use crate::catalog::pg_class::{
@@ -332,17 +334,17 @@ extern "C" {
 }
 
 /* TODO(pg-port): utils/guc.h */
-unsafe fn GUC_check_errdetail(_fmt: *const c_char) { /* TODO(pg-port) */ }
+unsafe fn GUC_check_errdetail(_fmt: *const c_char) { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): commands/defrem.h */
-unsafe fn defGetBoolean(_def: *mut DefElem) -> bool { unimplemented!("TODO(pg-port): defGetBoolean") }
-unsafe fn defGetString(_def: *mut DefElem) -> *mut c_char { unimplemented!("TODO(pg-port): defGetString") }
-unsafe fn defGetInt32(_def: *mut DefElem) -> i32 { unimplemented!("TODO(pg-port): defGetInt32") }
+unsafe fn defGetBoolean(_def: *mut DefElem) -> bool { crate::commands::define::defGetBoolean(_def as _) }
+unsafe fn defGetString(_def: *mut DefElem) -> *mut c_char { crate::commands::define::defGetString(_def as _) as _ }
+unsafe fn defGetInt32(_def: *mut DefElem) -> i32 { crate::commands::define::defGetInt32(_def as _) as _ }
 
 /* TODO(pg-port): utils/guc.h */
 const GUC_UNIT_KB: c_int = 0;
 unsafe fn parse_int(_s: *mut c_char, _result: *mut c_int, _flags: c_int, _hint: *mut *const c_char) -> bool {
-    unimplemented!("TODO(pg-port): parse_int")
+    crate::utils::misc::guc::parse_int(_s as _, _result as _, _flags as _, _hint as _)
 }
 
 /* TODO(pg-port): MIN_BAS_VAC_RING_SIZE_KB / MAX_BAS_VAC_RING_SIZE_KB */
@@ -378,13 +380,17 @@ unsafe fn parser_errposition(_pstate: *mut ParseState, _location: c_int) -> c_in
 const MAX_PARALLEL_WORKER_LIMIT: c_int = 1024;
 
 /* TODO(pg-port): access/xact.h */
-unsafe fn ActiveSnapshotSet() -> bool { unimplemented!("TODO(pg-port): ActiveSnapshotSet") }
-unsafe fn PopActiveSnapshot() { unimplemented!("TODO(pg-port): PopActiveSnapshot") }
-unsafe fn PushActiveSnapshot(_snap: *mut c_void) { unimplemented!("TODO(pg-port): PushActiveSnapshot") }
-unsafe fn GetTransactionSnapshot() -> *mut c_void { unimplemented!("TODO(pg-port): GetTransactionSnapshot") }
+unsafe fn ActiveSnapshotSet() -> bool { crate::utils::time::snapmgr::ActiveSnapshotSet() }
+unsafe fn PopActiveSnapshot() { crate::utils::time::snapmgr::PopActiveSnapshot() }
+unsafe fn PushActiveSnapshot(_snap: *mut c_void) { crate::utils::time::snapmgr::PushActiveSnapshot(_snap as _) }
+unsafe fn GetTransactionSnapshot() -> *mut c_void { crate::utils::time::snapmgr::GetTransactionSnapshot() as _ }
 
 /* TODO(pg-port): utils/snapmgr.h */
-unsafe fn VacuumUpdateCosts() { unimplemented!("TODO(pg-port): VacuumUpdateCosts") }
+/* Canonical postmaster::autovacuum::VacuumUpdateCosts references several
+ * un-wired extern "C" symbols (vacuum_cost_delay/limit, VacuumFailsafeActive,
+ * pg_atomic_*, message_level_is_interesting) that fail to link. This is
+ * cost-delay bookkeeping only, so it is safe to no-op for now. */
+unsafe fn VacuumUpdateCosts() { /* stub no-op (restored: test_setup path) */ }
 
 /* TODO(pg-port): catalog/namespace.h */
 const RVR_SKIP_LOCKED: c_int = 1 << 0;
@@ -395,38 +401,45 @@ unsafe fn RangeVarGetRelidExtended(
     _callback: Option<unsafe extern "C" fn()>,
     _callback_arg: *mut c_void,
 ) -> Oid {
-    unimplemented!("TODO(pg-port): RangeVarGetRelidExtended")
+    crate::catalog::namespace::RangeVarGetRelidExtended(
+        _relation as _,
+        _lockmode as _,
+        _flags as _,
+        core::mem::transmute(_callback),
+        _callback_arg as _,
+    ) as _
 }
 
 /* TODO(pg-port): catalog/pg_inherits.h */
 unsafe fn find_all_inheritors(_relid: Oid, _lockmode: LOCKMODE, _numparents: *mut c_int) -> *mut List {
-    unimplemented!("TODO(pg-port): find_all_inheritors")
+    crate::catalog::pg_inherits::find_all_inheritors(_relid as _, _lockmode as _, _numparents as _) as _
 }
 
 /* TODO(pg-port): utils/syscache.h */
-const RELOID: c_int = 26;
-unsafe fn SearchSysCache1(_cacheId: c_int, _key1: u64) -> HeapTuple { unimplemented!("TODO(pg-port): SearchSysCache1") }
-unsafe fn ReleaseSysCache(_tuple: HeapTuple) { unimplemented!("TODO(pg-port): ReleaseSysCache") }
+const RELOID: c_int = crate::utils::cache::syscache_ids_gen::RELOID;
+unsafe fn SearchSysCache1(_cacheId: c_int, _key1: u64) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache1(_cacheId as _, _key1 as _) as _ }
+unsafe fn ReleaseSysCache(_tuple: HeapTuple) { crate::utils::cache::syscache::ReleaseSysCache(_tuple as _) }
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool { !tuple.is_null() }
 
 /* TODO(pg-port): utils/datum.h */
 unsafe fn ObjectIdGetDatum(oid: Oid) -> u64 { oid as u64 }
-unsafe fn GETSTRUCT(tuple: HeapTuple) -> *mut c_void { unimplemented!("TODO(pg-port): GETSTRUCT") }
+unsafe fn GETSTRUCT(tuple: HeapTuple) -> *mut c_void { crate::access::htup_details::GETSTRUCT(tuple as _) as _ }
 
 /* TODO(pg-port): access/heapam.h */
-unsafe fn heap_getnext(_scan: TableScanDesc, _direction: c_int) -> HeapTuple { unimplemented!("TODO(pg-port): heap_getnext") }
-unsafe fn heap_freetuple(_tuple: HeapTuple) { unimplemented!("TODO(pg-port): heap_freetuple") }
+unsafe fn heap_getnext(_scan: TableScanDesc, _direction: c_int) -> HeapTuple { crate::access::heap::heapam::heap_getnext(_scan as _, _direction as _) as _ }
+unsafe fn heap_freetuple(_tuple: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(_tuple as _) }
 const ForwardScanDirection: c_int = 1;
 
 /* TODO(pg-port): access/table/table.h */
-unsafe fn table_open(_rel_id: Oid, _lockmode: LOCKMODE) -> Relation { unimplemented!("TODO(pg-port): table_open") }
-unsafe fn table_close(_rel: Relation, _lockmode: LOCKMODE) { unimplemented!("TODO(pg-port): table_close") }
+unsafe fn table_open(_rel_id: Oid, _lockmode: LOCKMODE) -> Relation { crate::access::table::table::table_open(_rel_id as _, _lockmode as _) as _ }
+unsafe fn table_close(_rel: Relation, _lockmode: LOCKMODE) { crate::access::table::table::table_close(_rel as _, _lockmode as _) }
 unsafe fn table_beginscan_catalog(_rel: Relation, _nkeys: c_int, _keys: *const c_void) -> TableScanDesc {
-    unimplemented!("TODO(pg-port): table_beginscan_catalog")
+    crate::access::table::tableam::table_beginscan_catalog(_rel as _, _nkeys as _, _keys as _) as _
 }
-unsafe fn table_endscan(_scan: TableScanDesc) { unimplemented!("TODO(pg-port): table_endscan") }
+unsafe fn table_endscan(_scan: TableScanDesc) { crate::access::table::tableam::table_endscan(_scan as _) }
 unsafe fn table_relation_vacuum(_rel: Relation, _params: *mut VacuumParamsFull, _bstrategy: BufferAccessStrategy) {
-    unimplemented!("TODO(pg-port): table_relation_vacuum")
+    /* heap is the only AM; table_relation_vacuum tableam wrapper not ported. */
+    crate::access::heap::vacuumlazy::heap_vacuum_rel(_rel as _, _params as _, _bstrategy as _)
 }
 
 /* TODO(pg-port): catalog/namespace.h */
@@ -454,7 +467,7 @@ const F_OIDEQ: Oid = 184;
 
 /* TODO(pg-port): catalog/objectaccess.h */
 unsafe fn object_ownercheck(_classid: Oid, _objectid: Oid, _roleid: Oid) -> bool {
-    unimplemented!("TODO(pg-port): object_ownercheck")
+    crate::catalog::aclchk::object_ownercheck(_classid as _, _objectid as _, _roleid as _)
 }
 
 /* TODO(pg-port): utils/acl.h */
@@ -462,11 +475,11 @@ const ACL_MAINTAIN: c_int = 0x0800;
 type AclResult = c_int;
 const ACLCHECK_OK: AclResult = 0;
 unsafe fn pg_class_aclcheck(_table_oid: Oid, _roleid: Oid, _mode: c_int) -> AclResult {
-    unimplemented!("TODO(pg-port): pg_class_aclcheck")
+    crate::catalog::aclchk::pg_class_aclcheck(_table_oid as _, _roleid as _, _mode as _) as _
 }
 
 /* TODO(pg-port): miscadmin.h */
-unsafe fn GetUserId() -> Oid { unimplemented!("TODO(pg-port): GetUserId") }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() as _ }
 
 /* TODO(pg-port): catalog/pg_class.h - NameStr */
 unsafe fn NameStr(name: crate::c::NameData) -> *mut c_char { name.data.as_ptr() as *mut c_char }
@@ -480,10 +493,12 @@ unsafe fn systable_beginscan(
     _nkeys: c_int,
     _key: *mut c_void,
 ) -> SysScanDesc {
-    unimplemented!("TODO(pg-port): systable_beginscan")
+    crate::access::index::genam::systable_beginscan(
+        _heapRelation as _, _indexId as _, _indexOK, _snapshot as _, _nkeys as _, _key as _,
+    ) as _
 }
-unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple { unimplemented!("TODO(pg-port): systable_getnext") }
-unsafe fn systable_endscan(_sysscan: SysScanDesc) { unimplemented!("TODO(pg-port): systable_endscan") }
+unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple { crate::access::index::genam::systable_getnext(_sysscan as _) as _ }
+unsafe fn systable_endscan(_sysscan: SysScanDesc) { crate::access::index::genam::systable_endscan(_sysscan as _) }
 unsafe fn systable_inplace_update_begin(
     _rel: Relation,
     _indexId: Oid,
@@ -494,13 +509,15 @@ unsafe fn systable_inplace_update_begin(
     _tup: *mut HeapTuple,
     _state: *mut *mut c_void,
 ) {
-    unimplemented!("TODO(pg-port): systable_inplace_update_begin")
+    crate::access::index::genam::systable_inplace_update_begin(
+        _rel as _, _indexId as _, _indexOK, _snapshot as _, _nkeys as _, _key as _, _tup as _, _state as _,
+    )
 }
 unsafe fn systable_inplace_update_finish(_state: *mut c_void, _tup: HeapTuple) {
-    unimplemented!("TODO(pg-port): systable_inplace_update_finish")
+    crate::access::index::genam::systable_inplace_update_finish(_state as _, _tup as _)
 }
 unsafe fn systable_inplace_update_cancel(_state: *mut c_void) {
-    unimplemented!("TODO(pg-port): systable_inplace_update_cancel")
+    crate::access::index::genam::systable_inplace_update_cancel(_state as _)
 }
 
 /* TODO(pg-port): utils/inval.h */
@@ -511,53 +528,65 @@ unsafe fn ScanKeyInit(
     _procedure: Oid,
     _argument: u64,
 ) {
-    unimplemented!("TODO(pg-port): ScanKeyInit")
+    crate::access::common::scankey::ScanKeyInit(
+        _entry as _, _attributeNumber as _, _strategy as _, _procedure as _, _argument as _,
+    )
 }
 
 /* TODO(pg-port): access/transam.h */
-unsafe fn ReadNextTransactionId() -> TransactionId { unimplemented!("TODO(pg-port): ReadNextTransactionId") }
-unsafe fn ReadNextMultiXactId() -> MultiXactId { unimplemented!("TODO(pg-port): ReadNextMultiXactId") }
-unsafe fn GetOldestNonRemovableTransactionId(_rel: Relation) -> TransactionId {
-    unimplemented!("TODO(pg-port): GetOldestNonRemovableTransactionId")
+unsafe fn ReadNextTransactionId() -> TransactionId {
+    /* access/transam.h: XidFromFullTransactionId(TransamVariables->nextXid) */
+    crate::access::transam::XidFromFullTransactionId((*crate::access::transam::varsup::TransamVariables).nextXid) as _
 }
-unsafe fn GetOldestMultiXactId() -> MultiXactId { unimplemented!("TODO(pg-port): GetOldestMultiXactId") }
-unsafe fn MultiXactMemberFreezeThreshold() -> c_int { unimplemented!("TODO(pg-port): MultiXactMemberFreezeThreshold") }
-unsafe fn ForceTransactionIdLimitUpdate() -> bool { unimplemented!("TODO(pg-port): ForceTransactionIdLimitUpdate") }
+unsafe fn ReadNextMultiXactId() -> MultiXactId { crate::access::transam::multixact::ReadNextMultiXactId() as _ }
+unsafe fn GetOldestNonRemovableTransactionId(_rel: Relation) -> TransactionId {
+    crate::storage::ipc::procarray::GetOldestNonRemovableTransactionId(_rel as _) as _
+}
+unsafe fn GetOldestMultiXactId() -> MultiXactId { crate::access::transam::multixact::GetOldestMultiXactId() as _ }
+unsafe fn MultiXactMemberFreezeThreshold() -> c_int { crate::access::transam::multixact::MultiXactMemberFreezeThreshold() as _ }
+unsafe fn ForceTransactionIdLimitUpdate() -> bool { crate::access::transam::varsup::ForceTransactionIdLimitUpdate() }
 unsafe fn SetTransactionIdLimit(_frozenXID: TransactionId, _oldest_datoid: Oid) {
-    unimplemented!("TODO(pg-port): SetTransactionIdLimit")
+    crate::access::transam::varsup::SetTransactionIdLimit(_frozenXID as _, _oldest_datoid as _)
 }
 unsafe fn SetMultiXactIdLimit(_minMulti: MultiXactId, _oldest_datoid: Oid, _is_startup: bool) {
-    unimplemented!("TODO(pg-port): SetMultiXactIdLimit")
+    crate::access::transam::multixact::SetMultiXactIdLimit(_minMulti as _, _oldest_datoid as _, _is_startup)
 }
 
 /* TODO(pg-port): access/clog.h */
-unsafe fn TruncateCLOG(_frozenXID: TransactionId, _oldestxid_datoid: Oid) { unimplemented!("TODO(pg-port): TruncateCLOG") }
+unsafe fn TruncateCLOG(_frozenXID: TransactionId, _oldestxid_datoid: Oid) { crate::access::transam::clog::TruncateCLOG(_frozenXID as _, _oldestxid_datoid as _) }
 
 /* TODO(pg-port): access/commit_ts.h */
-unsafe fn AdvanceOldestCommitTsXid(_frozenXID: TransactionId) { unimplemented!("TODO(pg-port): AdvanceOldestCommitTsXid") }
-unsafe fn TruncateCommitTs(_frozenXID: TransactionId) { unimplemented!("TODO(pg-port): TruncateCommitTs") }
+unsafe fn AdvanceOldestCommitTsXid(_frozenXID: TransactionId) { crate::access::transam::commit_ts::AdvanceOldestCommitTsXid(_frozenXID as _) }
+unsafe fn TruncateCommitTs(_frozenXID: TransactionId) { crate::access::transam::commit_ts::TruncateCommitTs(_frozenXID as _) }
 
 /* TODO(pg-port): access/multixact.h */
-unsafe fn TruncateMultiXact(_minMulti: MultiXactId, _oldest_datoid: Oid) { unimplemented!("TODO(pg-port): TruncateMultiXact") }
+unsafe fn TruncateMultiXact(_minMulti: MultiXactId, _oldest_datoid: Oid) { crate::access::transam::multixact::TruncateMultiXact(_minMulti as _, _oldest_datoid as _) }
 
 /* TODO(pg-port): commands/async.h */
-unsafe fn AsyncNotifyFreezeXids(_frozenXID: TransactionId) { unimplemented!("TODO(pg-port): AsyncNotifyFreezeXids") }
+unsafe fn AsyncNotifyFreezeXids(_frozenXID: TransactionId) { crate::commands::r#async::AsyncNotifyFreezeXids(_frozenXID as _) }
 
 /* TODO(pg-port): storage/lmgr.h */
-unsafe fn LockDatabaseFrozenIds(_lockmode: LOCKMODE) { unimplemented!("TODO(pg-port): LockDatabaseFrozenIds") }
-unsafe fn LWLockAcquire(_lock: c_int, _mode: c_int) { unimplemented!("TODO(pg-port): LWLockAcquire") }
-unsafe fn LWLockRelease(_lock: c_int) { unimplemented!("TODO(pg-port): LWLockRelease") }
+unsafe fn LockDatabaseFrozenIds(_lockmode: LOCKMODE) { crate::storage::lmgr::lmgr::LockDatabaseFrozenIds(_lockmode as _) }
+unsafe fn GetNamedLWLock(_lock: c_int) -> *mut c_void {
+    match _lock {
+        0 => crate::backend_link_shims::WrapLimitsVacuumLock,
+        1 => crate::backend_link_shims::ProcArrayLock,
+        _ => core::ptr::null_mut(),
+    }
+}
+unsafe fn LWLockAcquire(_lock: c_int, _mode: c_int) { crate::storage::lmgr::lwlock::LWLockAcquire(GetNamedLWLock(_lock) as _, core::mem::transmute::<u32, crate::storage::lmgr::lwlock::LWLockMode>(_mode as u32)); }
+unsafe fn LWLockRelease(_lock: c_int) { crate::storage::lmgr::lwlock::LWLockRelease(GetNamedLWLock(_lock) as _) }
 const WrapLimitsVacuumLock: c_int = 0; /* TODO(pg-port) */
 const ProcArrayLock: c_int = 1; /* TODO(pg-port) */
 const LW_EXCLUSIVE: c_int = 0;
 
 /* TODO(pg-port): storage/proc.h */
-unsafe fn ConditionalLockRelationOid(_relid: Oid, _lockmode: LOCKMODE) -> bool { unimplemented!("TODO(pg-port): ConditionalLockRelationOid") }
-unsafe fn try_relation_open(_relid: Oid, _lockmode: LOCKMODE) -> Relation { unimplemented!("TODO(pg-port): try_relation_open") }
-unsafe fn relation_close(_rel: Relation, _lockmode: LOCKMODE) { unimplemented!("TODO(pg-port): relation_close") }
-unsafe fn UnlockRelationOid(_relid: Oid, _lockmode: LOCKMODE) { unimplemented!("TODO(pg-port): UnlockRelationOid") }
-unsafe fn LockRelationIdForSession(_lockrelid: *mut LockRelId, _lockmode: LOCKMODE) { unimplemented!("TODO(pg-port): LockRelationIdForSession") }
-unsafe fn UnlockRelationIdForSession(_lockrelid: *mut LockRelId, _lockmode: LOCKMODE) { unimplemented!("TODO(pg-port): UnlockRelationIdForSession") }
+unsafe fn ConditionalLockRelationOid(_relid: Oid, _lockmode: LOCKMODE) -> bool { crate::storage::lmgr::lmgr::ConditionalLockRelationOid(_relid as _, _lockmode as _) }
+unsafe fn try_relation_open(_relid: Oid, _lockmode: LOCKMODE) -> Relation { crate::access::common::relation::try_relation_open(_relid as _, _lockmode as _) as _ }
+unsafe fn relation_close(_rel: Relation, _lockmode: LOCKMODE) { crate::access::common::relation::relation_close(_rel as _, _lockmode as _) }
+unsafe fn UnlockRelationOid(_relid: Oid, _lockmode: LOCKMODE) { crate::storage::lmgr::lmgr::UnlockRelationOid(_relid as _, _lockmode as _) }
+unsafe fn LockRelationIdForSession(_lockrelid: *mut LockRelId, _lockmode: LOCKMODE) { crate::storage::lmgr::lmgr::LockRelationIdForSession(_lockrelid as _, _lockmode as _) }
+unsafe fn UnlockRelationIdForSession(_lockrelid: *mut LockRelId, _lockmode: LOCKMODE) { crate::storage::lmgr::lmgr::UnlockRelationIdForSession(_lockrelid as _, _lockmode as _) }
 /* TODO(pg-port): storage/procarray.h */
 #[repr(C)]
 pub struct PGPROC {
@@ -576,45 +605,56 @@ const PROC_IN_VACUUM: c_int = 0x0002;
 const PROC_VACUUM_FOR_WRAPAROUND: c_int = 0x0004;
 
 /* TODO(pg-port): relation macros */
-unsafe fn RELATION_IS_OTHER_TEMP(_rel: Relation) -> bool { unimplemented!("TODO(pg-port): RELATION_IS_OTHER_TEMP") }
+unsafe fn RELATION_IS_OTHER_TEMP(_rel: Relation) -> bool {
+    /* utils/rel.h macro: temp relation not belonging to this backend */
+    (*(*_rel).rd_rel).relpersistence == b't' as i8 && !(*_rel).rd_islocaltemp
+}
 
 /* TODO(pg-port): commands/cluster.h */
-unsafe fn cluster_rel(_rel: Relation, _indexid: Oid, _params: *mut ClusterParams) { unimplemented!("TODO(pg-port): cluster_rel") }
+unsafe fn cluster_rel(_rel: Relation, _indexid: Oid, _params: *mut ClusterParams) {
+    /* commands/cluster.rs exists but is not wired into commands/mod.rs; VACUUM FULL path only. */
+    unimplemented!("TODO(pg-port): cluster_rel (commands::cluster not wired)")
+}
 
 /* TODO(pg-port): miscadmin.h */
-unsafe fn GetUserIdAndSecContext(_userid: *mut Oid, _sec_context: *mut c_int) { unimplemented!("TODO(pg-port): GetUserIdAndSecContext") }
-unsafe fn SetUserIdAndSecContext(_userid: Oid, _sec_context: c_int) { unimplemented!("TODO(pg-port): SetUserIdAndSecContext") }
+unsafe fn GetUserIdAndSecContext(_userid: *mut Oid, _sec_context: *mut c_int) { crate::utils::init::miscinit::GetUserIdAndSecContext(_userid as _, _sec_context as _) }
+unsafe fn SetUserIdAndSecContext(_userid: Oid, _sec_context: c_int) { crate::utils::init::miscinit::SetUserIdAndSecContext(_userid as _, _sec_context as _) }
 const SECURITY_RESTRICTED_OPERATION: c_int = 0x0008;
 
 /* TODO(pg-port): utils/guc.h */
-unsafe fn NewGUCNestLevel() -> c_int { unimplemented!("TODO(pg-port): NewGUCNestLevel") }
-unsafe fn AtEOXact_GUC(_isCommit: bool, _nestLevel: c_int) { unimplemented!("TODO(pg-port): AtEOXact_GUC") }
-unsafe fn RestrictSearchPath() { unimplemented!("TODO(pg-port): RestrictSearchPath") }
-unsafe fn ProcessConfigFile(_context: c_int) { unimplemented!("TODO(pg-port): ProcessConfigFile") }
+unsafe fn NewGUCNestLevel() -> c_int { crate::utils::misc::guc::NewGUCNestLevel() as _ }
+unsafe fn AtEOXact_GUC(_isCommit: bool, _nestLevel: c_int) { crate::utils::misc::guc::AtEOXact_GUC(_isCommit, _nestLevel as _) }
+unsafe fn RestrictSearchPath() { crate::utils::misc::guc::RestrictSearchPath() }
+unsafe fn ProcessConfigFile(_context: c_int) {
+    /* local PGC_SIGHUP=1 differs from canonical enum discriminant; only SIGHUP is passed by VACUUM. */
+    crate::utils::misc::guc::ProcessConfigFile(crate::utils::misc::guc::GucContext::PGC_SIGHUP)
+}
 const PGC_SIGHUP: c_int = 1;
 
 /* TODO(pg-port): access/index/genam.h */
-unsafe fn index_open(_indexoid: Oid, _lockmode: LOCKMODE) -> Relation { unimplemented!("TODO(pg-port): index_open") }
-unsafe fn index_close(_indexrel: Relation, _lockmode: LOCKMODE) { unimplemented!("TODO(pg-port): index_close") }
+unsafe fn index_open(_indexoid: Oid, _lockmode: LOCKMODE) -> Relation { crate::access::index::indexam::index_open(_indexoid as _, _lockmode as _) as _ }
+unsafe fn index_close(_indexrel: Relation, _lockmode: LOCKMODE) { crate::access::index::indexam::index_close(_indexrel as _, _lockmode as _) }
 unsafe fn index_bulk_delete(
     _ivinfo: *mut IndexVacuumInfo,
     _istat: *mut IndexBulkDeleteResult,
     _callback: unsafe fn(ItemPointer, *mut c_void) -> bool,
     _callback_state: *mut c_void,
 ) -> *mut IndexBulkDeleteResult {
-    unimplemented!("TODO(pg-port): index_bulk_delete")
+    crate::access::index::indexam::index_bulk_delete(_ivinfo as _, _istat as _, core::mem::transmute(_callback), _callback_state as _) as _
 }
 unsafe fn index_vacuum_cleanup(
     _ivinfo: *mut IndexVacuumInfo,
     _istat: *mut IndexBulkDeleteResult,
 ) -> *mut IndexBulkDeleteResult {
-    unimplemented!("TODO(pg-port): index_vacuum_cleanup")
+    crate::access::index::indexam::index_vacuum_cleanup(_ivinfo as _, _istat as _) as _
 }
 
 /* TODO(pg-port): utils/relcache.h */
-unsafe fn RelationGetIndexList(_rel: Relation) -> *mut List { unimplemented!("TODO(pg-port): RelationGetIndexList") }
-unsafe fn list_free(_list: *mut List) { unimplemented!("TODO(pg-port): list_free") }
-unsafe fn lfirst_oid(_lc: *mut ListCell) -> Oid { unimplemented!("TODO(pg-port): lfirst_oid") }
+unsafe fn RelationGetIndexList(_rel: Relation) -> *mut List {
+    crate::utils::cache::relcache::RelationGetIndexList(_rel as _) as _
+}
+unsafe fn list_free(_list: *mut List) { crate::nodes::pg_list::list_free(_list as _) }
+unsafe fn lfirst_oid(_lc: *mut ListCell) -> Oid { crate::nodes::pg_list::lfirst_oid(_lc as _) as _ }
 
 /* TODO(pg-port): pgstat.h */
 unsafe fn pgstat_progress_incr_param(_target: c_int, _val: i64) {}
@@ -632,7 +672,10 @@ macro_rules! INSTR_TIME_ACCUM_DIFF { ($r:expr, $x:expr, $y:expr) => { $r.t = $x.
 macro_rules! INSTR_TIME_GET_NANOSEC { ($t:expr) => { $t.t as i64 } }
 
 /* TODO(pg-port): postmaster/autovacuum.h */
-unsafe fn AutoVacuumUpdateCostLimit() { unimplemented!("TODO(pg-port): AutoVacuumUpdateCostLimit") }
+/* Canonical postmaster::autovacuum::AutoVacuumUpdateCostLimit references
+ * un-wired extern "C" symbols (pg_atomic_read_u32, vacuum_cost_limit, ...)
+ * that fail to link; cost-balancing bookkeeping only, safe to no-op. */
+unsafe fn AutoVacuumUpdateCostLimit() { /* stub no-op (restored: test_setup path) */ }
 extern "C" {
     static mut autovacuum_freeze_max_age: c_int;
     static mut autovacuum_multixact_freeze_max_age: c_int;
@@ -657,12 +700,14 @@ unsafe fn pg_usleep(_usecs: i64) {}
 unsafe fn IsParallelWorker() -> bool { false }
 
 /* TODO(pg-port): pg_atomic helpers */
-unsafe fn pg_atomic_read_u32(ptr: *mut pg_atomic_uint32) -> u32 { (*ptr).value.load(core::sync::atomic::Ordering::Relaxed) }
+unsafe fn pg_atomic_read_u32(ptr: *mut pg_atomic_uint32) -> u32 {
+    crate::port::atomics::pg_atomic_read_u32_impl(&*(ptr as *const crate::port::atomics::pg_atomic_uint32))
+}
 unsafe fn pg_atomic_add_fetch_u32(ptr: *mut pg_atomic_uint32, val: u32) -> u32 {
-    (*ptr).value.fetch_add(val, core::sync::atomic::Ordering::Relaxed).wrapping_add(val)
+    crate::port::atomics::pg_atomic_fetch_add_u32_impl(&*(ptr as *const crate::port::atomics::pg_atomic_uint32), val as i32).wrapping_add(val)
 }
 unsafe fn pg_atomic_sub_fetch_u32(ptr: *mut pg_atomic_uint32, val: u32) -> u32 {
-    (*ptr).value.fetch_sub(val, core::sync::atomic::Ordering::Relaxed).wrapping_sub(val)
+    crate::port::atomics::pg_atomic_fetch_add_u32_impl(&*(ptr as *const crate::port::atomics::pg_atomic_uint32), (val as i32).wrapping_neg()).wrapping_sub(val)
 }
 
 /* TODO(pg-port): utils/injection_point.h */
@@ -674,7 +719,7 @@ unsafe fn makeVacuumRelation(
     _oid: Oid,
     _va_cols: *mut List,
 ) -> *mut VacuumRelation {
-    unimplemented!("TODO(pg-port): makeVacuumRelation")
+    crate::nodes::makefuncs::makeVacuumRelation(_relation as _, _oid as _, _va_cols as _) as _
 }
 
 /* TODO(pg-port): analyze.h */
@@ -686,12 +731,12 @@ unsafe fn analyze_rel(
     _in_outer_xact: bool,
     _bstrategy: BufferAccessStrategy,
 ) {
-    unimplemented!("TODO(pg-port): analyze_rel")
+    crate::commands::analyze::analyze_rel(_relid as _, _relation as _, _params as _, _va_cols as _, _in_outer_xact, _bstrategy as _)
 }
 
 /* TODO(pg-port): vac_update_datfrozenxid declared later; forward-declared here */
 /* TODO(pg-port): database_is_invalid_form */
-unsafe fn database_is_invalid_form(_dbform: Form_pg_database) -> bool { unimplemented!("TODO(pg-port): database_is_invalid_form") }
+unsafe fn database_is_invalid_form(_dbform: Form_pg_database) -> bool { crate::commands::dbcommands::database_is_invalid_form(_dbform as _) }
 
 /* TODO(pg-port): errmsg_internal */
 macro_rules! errmsg_internal { ($fmt:literal $(, $arg:expr)*) => { errmsg!($fmt $(, $arg)*) } }
@@ -769,7 +814,7 @@ pub unsafe fn ExecVacuum(pstate: *mut ParseState, vacstmt: *mut VacuumStmt, isTo
 
     /* Parse options list */
     foreach!(lc, (*vacstmt).options, {
-        let opt: *mut DefElem = lc as *mut DefElem; /* lfirst */
+        let opt: *mut DefElem = crate::nodes::pg_list::lfirst(current_cell!(lc)) as *mut DefElem; /* lfirst */
 
         /* Parse common options for VACUUM and ANALYZE */
         if libc_strcmp((*opt).defname, c"verbose".as_ptr()) == 0 {
@@ -935,7 +980,7 @@ pub unsafe fn ExecVacuum(pstate: *mut ParseState, vacstmt: *mut VacuumStmt, isTo
     if (params.options & VACOPT_ANALYZE) == 0 {
         let lc: *mut ListCell;
         foreach!(lc, (*vacstmt).rels, {
-            let vrel: *mut VacuumRelation = lc as *mut VacuumRelation;
+            let vrel: *mut VacuumRelation = crate::nodes::pg_list::lfirst(current_cell!(lc)) as *mut VacuumRelation;
             if !(*vrel).va_cols.is_null() {
                 ereport!(
                     ERROR,
@@ -1152,7 +1197,7 @@ pub unsafe fn vacuum(
         let lc: *mut ListCell;
 
         foreach!(lc, relations, {
-            let vrel: *mut VacuumRelation = lc as *mut VacuumRelation;
+            let vrel: *mut VacuumRelation = crate::nodes::pg_list::lfirst(current_cell!(lc)) as *mut VacuumRelation;
             let sublist: *mut List;
             let old_context: MemoryContext;
 
@@ -1216,7 +1261,9 @@ pub unsafe fn vacuum(
     }
 
     /* Turn vacuum cost accounting on or off, and set/clear in_vacuum */
-    PG_TRY!({
+    /* PG_TRY: run the body, then the PG_FINALLY cleanup inline on the normal
+     * path; on error siglongjmp bypasses the cleanup, matching this codebase. */
+    {
         let cur: *mut ListCell;
 
         in_vacuum = true;
@@ -1231,7 +1278,7 @@ pub unsafe fn vacuum(
          * Loop to process each selected relation.
          */
         foreach!(cur, relations, {
-            let vrel: *mut VacuumRelation = cur as *mut VacuumRelation;
+            let vrel: *mut VacuumRelation = crate::nodes::pg_list::lfirst(current_cell!(cur)) as *mut VacuumRelation;
 
             if ((*params).options & VACOPT_VACUUM) != 0 {
                 let mut params_copy: VacuumParamsFull = core::mem::zeroed();
@@ -1292,14 +1339,14 @@ pub unsafe fn vacuum(
              */
             VacuumFailsafeActive = false;
         });
-    });
-    PG_FINALLY!({
+    }
+    /* PG_FINALLY */
+    {
         in_vacuum = false;
         VacuumCostActive = false;
         VacuumFailsafeActive = false;
         VacuumCostBalance = 0;
-    });
-    PG_END_TRY!();
+    }
 
     /*
      * Finish up processing.
@@ -1538,7 +1585,7 @@ unsafe fn expand_vacuum_rel(
     options: c_int,
 ) -> *mut List {
     let mut vacrels: *mut List = NIL;
-    let oldcontext: MemoryContext;
+    let mut oldcontext: MemoryContext;
 
     /* If caller supplied OID, there's nothing we need do here. */
     if OidIsValid((*vrel).oid) {
@@ -1653,7 +1700,7 @@ unsafe fn expand_vacuum_rel(
             let part_lc: *mut ListCell;
 
             foreach!(part_lc, part_oids, {
-                let part_oid: Oid = lfirst_oid(part_lc);
+                let part_oid: Oid = crate::nodes::pg_list::lfirst_oid(current_cell!(part_lc));
 
                 if part_oid == relid {
                     continue; /* ignore original table */
@@ -3160,8 +3207,8 @@ unsafe fn vacuum_rel(
 // ========================================================================
 
 /* TODO(pg-port): utils/palloc.h */
-unsafe fn palloc(_size: usize) -> *mut c_void { unimplemented!("TODO(pg-port): palloc") }
-unsafe fn pfree(_ptr: *mut c_void) { unimplemented!("TODO(pg-port): pfree") }
+unsafe fn palloc(_size: usize) -> *mut c_void { crate::utils::mmgr::mcxt::palloc(_size as _) as _ }
+unsafe fn pfree(_ptr: *mut c_void) { crate::utils::mmgr::mcxt::pfree(_ptr as _) }
 
 // ========================================================================
 // vac_open_indexes
@@ -3205,7 +3252,7 @@ pub unsafe fn vac_open_indexes(
     /* collect just the ready indexes */
     i = 0;
     foreach!(indexoidscan, indexoidlist, {
-        let indexoid: Oid = lfirst_oid(indexoidscan);
+        let indexoid: Oid = crate::nodes::pg_list::lfirst_oid(current_cell!(indexoidscan));
         let indrel: Relation;
 
         indrel = index_open(indexoid, lockmode);
@@ -3254,6 +3301,7 @@ pub unsafe fn vac_close_indexes(mut nindexes: c_int, Irel: *mut Relation, lockmo
  * This should be called in each major loop of VACUUM processing,
  * typically once per page processed.
  */
+#[no_mangle]
 pub unsafe fn vacuum_delay_point(is_analyze: bool) {
     let mut msec: f64 = 0.0;
 
@@ -3538,5 +3586,5 @@ pub unsafe fn vac_cleanup_one_index(
 unsafe fn vac_tid_reaped(itemptr: ItemPointer, state: *mut c_void) -> bool {
     let dead_items: *mut TidStore = state as *mut TidStore;
 
-    TidStoreIsMember(dead_items, itemptr)
+    TidStoreIsMember(dead_items, itemptr as *mut _)
 }

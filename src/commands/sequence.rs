@@ -219,10 +219,10 @@ const RELKIND_PARTITIONED_TABLE: c_char = b'p' as c_char;
 const RM_SEQ_ID: u8 = 1;
 const XLOG_SEQ_LOG: u8 = 0x00;
 const XLR_INFO_MASK: u8 = 0x0F;
-const REGBUF_WILL_INIT: c_int = 0x04;
+const REGBUF_WILL_INIT: c_int = 0x04 | 0x02;
 const BUFFER_LOCK_EXCLUSIVE: c_int = 2;
 
-const EB_LOCK_FIRST: c_int = 1 << 4;
+const EB_LOCK_FIRST: c_int = 1 << 1;
 const EB_SKIP_EXTENSION_LOCK: c_int = 1 << 0;
 
 
@@ -260,8 +260,8 @@ const RVR_MISSING_OK: c_int = 1 << 0;
 const TYPEFUNC_COMPOSITE: c_int = 0;
 
 // Syscache ids  TODO(pg-port)
-const SEQRELID: c_int = 0;
-const RELOID: c_int = 1;
+const SEQRELID: c_int = 61;
+const RELOID: c_int = 57;
 
 // Catalog OIDs  TODO(pg-port)
 const RelationRelationId: Oid = 1259;
@@ -280,37 +280,43 @@ const InvalidObjectAddress: ObjectAddress = ObjectAddress {
  * These are functions defined in OTHER .c files.
  * -------------------------------------------------------------------------- */
 
-unsafe fn makeColumnDef(colname: *const c_char, typeOid: Oid, typmod: i32, collOid: Oid) -> *mut ColumnDef { unimplemented!() }
-unsafe fn DefineRelation(stmt: *mut CreateStmt, relkind: c_char, ownerId: Oid, typaddress: *mut ObjectAddress, queryString: *const c_char) -> ObjectAddress { unimplemented!() }
-unsafe fn RangeVarGetAndCheckCreationNamespace(relation: *mut RangeVar, lockmode: c_int, existing_relation_id: *mut Oid) -> Oid { unimplemented!() }
-unsafe fn checkMembershipInCurrentExtension(object: *const ObjectAddress) { unimplemented!() }
-unsafe fn sequence_open(relid: Oid, lockmode: c_int) -> Relation { unimplemented!() }
-unsafe fn sequence_close(relation: Relation, lockmode: c_int) { unimplemented!() }
-unsafe fn table_open(relationId: Oid, lockmode: c_int) -> Relation { unimplemented!() }
-unsafe fn table_close(relation: Relation, lockmode: c_int) { unimplemented!() }
-unsafe fn relation_openrv(relation: *const RangeVar, lockmode: c_int) -> Relation { unimplemented!() }
-unsafe fn relation_close(relation: Relation, lockmode: c_int) { unimplemented!() }
-unsafe fn try_relation_open(relationId: Oid, lockmode: c_int) -> Relation { unimplemented!() }
-unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc { unimplemented!() }
-unsafe fn RelationGetRelationName(relation: Relation) -> *const c_char { unimplemented!() }
-unsafe fn RelationGetRelid(relation: Relation) -> Oid { unimplemented!() }
-unsafe fn RelationGetNamespace(relation: Relation) -> Oid { unimplemented!() }
-unsafe fn RelationNeedsWAL(relation: Relation) -> bool { unimplemented!() }
-unsafe fn RelationIsPermanent(relation: Relation) -> bool { unimplemented!() }
-unsafe fn RELATION_IS_OTHER_TEMP(relation: Relation) -> bool { unimplemented!() }
-unsafe fn RelationSetNewRelfilenumber(relation: Relation, persistence: c_char) { unimplemented!() }
-unsafe fn heap_form_tuple(tupleDescriptor: TupleDesc, values: *mut Datum, isnull: *mut bool) -> HeapTuple { unimplemented!() }
-unsafe fn heap_copytuple(tuple: HeapTuple) -> HeapTuple { unimplemented!() }
-unsafe fn heap_freetuple(htup: HeapTuple) { unimplemented!() }
-unsafe fn HeapTupleGetDatum(tuple: HeapTuple) -> Datum { unimplemented!() }
-unsafe fn GETSTRUCT(tuple: HeapTuple) -> *mut c_void { unimplemented!() }
-unsafe fn CatalogTupleInsert(heapRel: Relation, tup: HeapTuple) -> Oid { unimplemented!() }
-unsafe fn CatalogTupleUpdate(heapRel: Relation, otid: *mut c_void, tup: HeapTuple) { unimplemented!() }
-unsafe fn CatalogTupleDelete(heapRel: Relation, otid: *mut c_void) { unimplemented!() }
-unsafe fn SearchSysCache1(cacheId: c_int, key1: Datum) -> HeapTuple { unimplemented!() }
-unsafe fn SearchSysCacheCopy1(cacheId: c_int, key1: Datum) -> HeapTuple { unimplemented!() }
-unsafe fn SearchSysCacheExists1(cacheId: c_int, key1: Datum) -> bool { unimplemented!() }
-unsafe fn ReleaseSysCache(tuple: HeapTuple) { unimplemented!() }
+unsafe fn makeColumnDef(colname: *const c_char, typeOid: Oid, typmod: i32, collOid: Oid) -> *mut ColumnDef { crate::nodes::makefuncs::makeColumnDef(colname as _, typeOid as _, typmod as _, collOid as _) as _ }
+unsafe fn DefineRelation(stmt: *mut CreateStmt, relkind: c_char, ownerId: Oid, typaddress: *mut ObjectAddress, queryString: *const c_char) -> ObjectAddress { crate::commands::tablecmds::DefineRelation(stmt as _, relkind as _, ownerId as _, typaddress as _, queryString as _) as _ }
+unsafe fn RangeVarGetAndCheckCreationNamespace(relation: *mut RangeVar, lockmode: c_int, existing_relation_id: *mut Oid) -> Oid { crate::catalog::namespace::RangeVarGetAndCheckCreationNamespace(relation as _, lockmode as _, existing_relation_id as _) as _ }
+unsafe fn checkMembershipInCurrentExtension(object: *const ObjectAddress) { crate::catalog::pg_depend::checkMembershipInCurrentExtension(object as _); }
+unsafe fn sequence_open(relid: Oid, lockmode: c_int) -> Relation { crate::access::sequence::sequence::sequence_open(relid as _, lockmode as _) as _ }
+unsafe fn sequence_close(relation: Relation, lockmode: c_int) { crate::access::sequence::sequence::sequence_close(relation as _, lockmode as _); }
+unsafe fn table_open(relationId: Oid, lockmode: c_int) -> Relation { crate::access::table::table::table_open(relationId as _, lockmode as _) as _ }
+unsafe fn table_close(relation: Relation, lockmode: c_int) { crate::access::table::table::table_close(relation as _, lockmode as _); }
+unsafe fn relation_openrv(relation: *const RangeVar, lockmode: c_int) -> Relation { crate::access::common::relation::relation_openrv(relation as _, lockmode as _) as _ }
+unsafe fn relation_close(relation: Relation, lockmode: c_int) { crate::access::common::relation::relation_close(relation as _, lockmode as _); }
+unsafe fn try_relation_open(relationId: Oid, lockmode: c_int) -> Relation { crate::access::common::relation::try_relation_open(relationId as _, lockmode as _) as _ }
+unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc { crate::utils::rel::RelationGetDescr(relation as _) as _ }
+unsafe fn RelationGetRelationName(relation: Relation) -> *const c_char { crate::utils::rel::RelationGetRelationName(relation as _) as _ }
+unsafe fn RelationGetRelid(relation: Relation) -> Oid { crate::utils::rel::RelationGetRelid(relation as _) as _ }
+unsafe fn RelationGetNamespace(relation: Relation) -> Oid { crate::utils::rel::RelationGetNamespace(relation as _) as _ }
+unsafe fn RelationNeedsWAL(relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(relation as _) as _ }
+unsafe fn RelationIsPermanent(relation: Relation) -> bool { crate::utils::cache::relcache::RelationIsPermanent(relation as _) as _ }
+unsafe fn RELATION_IS_OTHER_TEMP(relation: Relation) -> bool { crate::backend_link_shims::RELATION_IS_OTHER_TEMP(relation as _) as _ }
+unsafe fn RelationSetNewRelfilenumber(relation: Relation, persistence: c_char) { crate::utils::cache::relcache::RelationSetNewRelfilenumber(relation as _, persistence as _); }
+unsafe fn heap_form_tuple(tupleDescriptor: TupleDesc, values: *mut Datum, isnull: *mut bool) -> HeapTuple { crate::access::common::heaptuple::heap_form_tuple(tupleDescriptor as _, values as _, isnull as _) as _ }
+unsafe fn heap_copytuple(tuple: HeapTuple) -> HeapTuple { crate::access::common::heaptuple::heap_copytuple(tuple as _) as _ }
+unsafe fn heap_freetuple(htup: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(htup as _); }
+unsafe fn HeapTupleGetDatum(tuple: HeapTuple) -> Datum { crate::executor::execTuples::HeapTupleHeaderGetDatum((*tuple).t_data as _) as _ }
+unsafe fn GETSTRUCT(tuple: HeapTuple) -> *mut c_void { crate::access::htup_details::GETSTRUCT(tuple as _) as _ }
+unsafe fn CatalogTupleInsert(heapRel: Relation, tup: HeapTuple) -> Oid { crate::catalog::indexing::CatalogTupleInsert(heapRel as _, tup as _); 0 as Oid }
+unsafe fn CatalogTupleUpdate(heapRel: Relation, otid: *mut c_void, tup: HeapTuple) { crate::catalog::indexing::CatalogTupleUpdate(heapRel as _, otid as _, tup as _); }
+unsafe fn CatalogTupleDelete(heapRel: Relation, otid: *mut c_void) { crate::catalog::indexing::CatalogTupleDelete(heapRel as _, otid as _); }
+unsafe fn SearchSysCache1(cacheId: c_int, key1: Datum) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache1(cacheId as _, key1 as _) as _ }
+unsafe fn SearchSysCacheCopy1(cacheId: c_int, key1: Datum) -> HeapTuple {
+    let tup = SearchSysCache1(cacheId, key1);
+    if tup.is_null() { return tup; }
+    let newtup = heap_copytuple(tup);
+    ReleaseSysCache(tup);
+    newtup
+}
+unsafe fn SearchSysCacheExists1(cacheId: c_int, key1: Datum) -> bool { crate::utils::cache::syscache::SearchSysCacheExists1(cacheId as _, key1 as _) as _ }
+unsafe fn ReleaseSysCache(tuple: HeapTuple) { crate::utils::cache::syscache::ReleaseSysCache(tuple as _); }
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool { !tuple.is_null() }
 unsafe fn OidIsValid(objectId: Oid) -> bool { objectId != InvalidOid }
 unsafe fn ObjectIdGetDatum(X: Oid) -> Datum { crate::postgres::ObjectIdGetDatum(X) }
@@ -318,75 +324,80 @@ unsafe fn Int64GetDatum(X: i64) -> Datum { crate::postgres::Int64GetDatum(X) }
 unsafe fn Int64GetDatumFast(X: i64) -> Datum { crate::postgres::Int64GetDatum(X) }
 unsafe fn BoolGetDatum(X: bool) -> Datum { crate::postgres::BoolGetDatum(X) }
 
-unsafe fn pg_class_aclcheck(table_oid: Oid, roleid: Oid, mode: u32) -> AclResult { unimplemented!() }
-unsafe fn GetUserId() -> Oid { unimplemented!() }
-unsafe fn PreventCommandIfReadOnly(cmdname: *const c_char) { unimplemented!() }
-unsafe fn PreventCommandIfParallelMode(cmdname: *const c_char) { unimplemented!() }
+unsafe fn pg_class_aclcheck(table_oid: Oid, roleid: Oid, mode: u32) -> AclResult { crate::catalog::aclchk::pg_class_aclcheck(table_oid as _, roleid as _, mode as _) as _ }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() as _ }
+unsafe fn PreventCommandIfReadOnly(cmdname: *const c_char) { crate::tcop::utility::PreventCommandIfReadOnly(cmdname as _); }
+unsafe fn PreventCommandIfParallelMode(cmdname: *const c_char) { crate::tcop::utility::PreventCommandIfParallelMode(cmdname as _); }
 
-unsafe fn RangeVarGetRelid(relation: *const RangeVar, lockmode: c_int, missing_ok: bool) -> Oid { unimplemented!() }
-unsafe fn RangeVarGetRelidExtended(relation: *const RangeVar, lockmode: c_int, flags: c_int, callback: RangeVarGetRelidCallback, callback_arg: *mut c_void) -> Oid { unimplemented!() }
+unsafe fn RangeVarGetRelid(relation: *const RangeVar, lockmode: c_int, missing_ok: bool) -> Oid { crate::catalog::namespace::RangeVarGetRelid(relation as _, lockmode as _, missing_ok as _) as _ }
+unsafe fn RangeVarGetRelidExtended(relation: *const RangeVar, lockmode: c_int, flags: c_int, callback: RangeVarGetRelidCallback, callback_arg: *mut c_void) -> Oid { crate::catalog::namespace::RangeVarGetRelidExtended(relation as _, lockmode as _, flags as _, core::mem::transmute(callback), callback_arg as _) as _ }
 type RangeVarGetRelidCallback = Option<unsafe extern "C" fn(*const RangeVar, Oid, Oid, *mut c_void)>;
-unsafe extern "C" fn RangeVarCallbackOwnsRelation(relation: *const RangeVar, relId: Oid, oldRelId: Oid, arg: *mut c_void) { unimplemented!() }
-unsafe fn makeRangeVarFromNameList(names: *mut List) -> *mut RangeVar { unimplemented!() }
-unsafe fn textToQualifiedNameList(textval: *mut c_void) -> *mut List { unimplemented!() }
+unsafe extern "C" fn RangeVarCallbackOwnsRelation(relation: *const RangeVar, relId: Oid, oldRelId: Oid, arg: *mut c_void) { crate::commands::tablecmds::RangeVarCallbackOwnsRelation(relation as _, relId as _, oldRelId as _, arg as _); }
+unsafe fn makeRangeVarFromNameList(names: *mut List) -> *mut RangeVar { crate::catalog::namespace::makeRangeVarFromNameList(names as _) as _ }
+unsafe fn textToQualifiedNameList(textval: *mut c_void) -> *mut List { crate::utils::adt::varlena::textToQualifiedNameList(textval as _) as _ }
 
-unsafe fn LockRelationOid(relid: Oid, lockmode: c_int) { unimplemented!() }
+unsafe fn LockRelationOid(relid: Oid, lockmode: c_int) { crate::storage::lmgr::lmgr::LockRelationOid(relid as _, lockmode as _); }
 
-unsafe fn ExtendBufferedRel(bmr: BulkMaxRelHandle, fork: ForkNumber, strategy: *mut c_void, flags: c_int) -> Buffer { unimplemented!() }
+unsafe fn ExtendBufferedRel(bmr: BulkMaxRelHandle, fork: ForkNumber, strategy: *mut c_void, flags: c_int) -> Buffer { crate::storage::buffer::bufmgr::ExtendBufferedRel(crate::storage::buffer::bufmgr::BMR_REL(bmr as _), fork as _, strategy as _, flags as _) as _ }
 type BulkMaxRelHandle = *mut c_void;
-unsafe fn BMR_REL(rel: Relation) -> BulkMaxRelHandle { unimplemented!() }
-unsafe fn BufferGetBlockNumber(buffer: Buffer) -> BlockNumber { unimplemented!() }
-unsafe fn BufferGetPage(buffer: Buffer) -> Page { unimplemented!() }
-unsafe fn BufferGetPageSize(buffer: Buffer) -> Size { unimplemented!() }
-unsafe fn ReadBuffer(reln: Relation, blockNum: BlockNumber) -> Buffer { unimplemented!() }
-unsafe fn LockBuffer(buffer: Buffer, mode: c_int) { unimplemented!() }
-unsafe fn MarkBufferDirty(buffer: Buffer) { unimplemented!() }
-unsafe fn MarkBufferDirtyHint(buffer: Buffer, buffer_std: bool) { unimplemented!() }
-unsafe fn UnlockReleaseBuffer(buffer: Buffer) { unimplemented!() }
-unsafe fn PageInit(page: Page, pageSize: Size, specialSize: Size) { unimplemented!() }
-unsafe fn PageGetSpecialPointer(page: Page) -> *mut c_char { unimplemented!() }
-unsafe fn PageGetItemId(page: Page, offsetNumber: OffsetNumber) -> ItemId { unimplemented!() }
+unsafe fn BMR_REL(rel: Relation) -> BulkMaxRelHandle { rel as _ }
+unsafe fn BufferGetBlockNumber(buffer: Buffer) -> BlockNumber { crate::storage::buffer::bufmgr::BufferGetBlockNumber(buffer as _) as _ }
+unsafe fn BufferGetPage(buffer: Buffer) -> Page { crate::storage::buffer::bufmgr::BufferGetPage(buffer as _) as _ }
+unsafe fn BufferGetPageSize(buffer: Buffer) -> Size { crate::access::nbtree::nbtpage::BufferGetPageSize(buffer as _) as _ }
+unsafe fn ReadBuffer(reln: Relation, blockNum: BlockNumber) -> Buffer { crate::storage::buffer::bufmgr::ReadBuffer(reln as _, blockNum as _) as _ }
+unsafe fn LockBuffer(buffer: Buffer, mode: c_int) { crate::storage::buffer::bufmgr::LockBuffer(buffer as _, mode as _); }
+unsafe fn MarkBufferDirty(buffer: Buffer) { crate::storage::buffer::bufmgr::MarkBufferDirty(buffer as _); }
+unsafe fn MarkBufferDirtyHint(buffer: Buffer, buffer_std: bool) { crate::storage::buffer::bufmgr::MarkBufferDirtyHint(buffer as _, buffer_std as _); }
+unsafe fn UnlockReleaseBuffer(buffer: Buffer) { crate::storage::buffer::bufmgr::UnlockReleaseBuffer(buffer as _); }
+unsafe fn PageInit(page: Page, pageSize: Size, specialSize: Size) { crate::storage::bufpage::PageInit(page as _, pageSize as _, specialSize as _); }
+unsafe fn PageGetSpecialPointer(page: Page) -> *mut c_char { crate::storage::bufpage::PageGetSpecialPointer(page as _) as _ }
+unsafe fn PageGetItemId(page: Page, offsetNumber: OffsetNumber) -> ItemId { crate::storage::bufpage::PageGetItemId(page as _, offsetNumber as _) as _ }
 type ItemId = *mut c_void;
-unsafe fn PageGetItem(page: Page, itemId: ItemId) -> *mut c_char { unimplemented!() }
-unsafe fn PageAddItem(page: Page, item: Item, size: Size, offsetNumber: OffsetNumber, overwrite: bool, is_heap: bool) -> OffsetNumber { unimplemented!() }
-unsafe fn PageGetLSN(page: Page) -> XLogRecPtr { unimplemented!() }
-unsafe fn PageSetLSN(page: Page, lsn: XLogRecPtr) { unimplemented!() }
-unsafe fn ItemIdIsNormal(lp: ItemId) -> bool { unimplemented!() }
-unsafe fn ItemIdGetLength(lp: ItemId) -> u32 { unimplemented!() }
-unsafe fn ItemPointerSet(pointer: *mut c_void, blockNumber: BlockNumber, offNum: OffsetNumber) { unimplemented!() }
+unsafe fn PageGetItem(page: Page, itemId: ItemId) -> *mut c_char { crate::storage::bufpage::PageGetItem(page as _, itemId as _) as _ }
+unsafe fn PageAddItem(page: Page, item: Item, size: Size, offsetNumber: OffsetNumber, overwrite: bool, is_heap: bool) -> OffsetNumber { crate::storage::bufpage::PageAddItem(page as _, item as _, size as _, offsetNumber as _, overwrite as _, is_heap as _) as _ }
+unsafe fn PageGetLSN(page: Page) -> XLogRecPtr { crate::storage::bufpage::PageGetLSN(page as _) as _ }
+unsafe fn PageSetLSN(page: Page, lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(page as _, lsn as _); }
+unsafe fn ItemIdIsNormal(lp: ItemId) -> bool { crate::storage::itemid::ItemIdIsNormal(lp as _) as _ }
+unsafe fn ItemIdGetLength(lp: ItemId) -> u32 { crate::storage::itemid::ItemIdGetLength(lp as _) as _ }
+unsafe fn ItemPointerSet(pointer: *mut c_void, blockNumber: BlockNumber, offNum: OffsetNumber) { crate::storage::itemptr::ItemPointerSet(pointer as _, blockNumber as _, offNum as _); }
 
-unsafe fn HeapTupleHeaderSetXmin(tup: HeapTupleHeader, xid: u32) { unimplemented!() }
-unsafe fn HeapTupleHeaderSetXminFrozen(tup: HeapTupleHeader) { unimplemented!() }
-unsafe fn HeapTupleHeaderSetCmin(tup: HeapTupleHeader, cid: u32) { unimplemented!() }
-unsafe fn HeapTupleHeaderSetXmax(tup: HeapTupleHeader, xid: u32) { unimplemented!() }
-unsafe fn HeapTupleHeaderGetRawXmax(tup: HeapTupleHeader) -> u32 { unimplemented!() }
+unsafe fn HeapTupleHeaderSetXmin(tup: HeapTupleHeader, xid: u32) { crate::access::htup_details::HeapTupleHeaderSetXmin(tup as _, xid as _); }
+unsafe fn HeapTupleHeaderSetXminFrozen(tup: HeapTupleHeader) { crate::access::htup_details::HeapTupleHeaderSetXminFrozen(tup as _); }
+unsafe fn HeapTupleHeaderSetCmin(tup: HeapTupleHeader, cid: u32) { crate::access::htup_details::HeapTupleHeaderSetCmin(tup as _, cid as _); }
+unsafe fn HeapTupleHeaderSetXmax(tup: HeapTupleHeader, xid: u32) { crate::access::htup_details::HeapTupleHeaderSetXmax(tup as _, xid as _); }
+unsafe fn HeapTupleHeaderGetRawXmax(tup: HeapTupleHeader) -> u32 { crate::access::htup_details::HeapTupleHeaderGetRawXmax(tup as _) as _ }
 
-unsafe fn GetTopTransactionId() -> u32 { unimplemented!() }
-unsafe fn GetRedoRecPtr() -> XLogRecPtr { unimplemented!() }
-unsafe fn RecoveryInProgress() -> bool { unimplemented!() }
+unsafe fn GetTopTransactionId() -> u32 { crate::access::transam::xact::GetTopTransactionId() as _ }
+unsafe fn GetRedoRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetRedoRecPtr() as _ }
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() as _ }
 
-unsafe fn smgropen(rlocator: RelFileLocator, backend: c_int) -> SMgrRelation { unimplemented!() }
-unsafe fn smgrcreate(reln: SMgrRelation, forknum: ForkNumber, isRedo: bool) { unimplemented!() }
-unsafe fn smgrclose(reln: SMgrRelation) { unimplemented!() }
-unsafe fn log_smgrcreate(rlocator: *const RelFileLocator, forkNum: ForkNumber) { unimplemented!() }
-unsafe fn FlushRelationBuffers(rel: Relation) { unimplemented!() }
+unsafe fn smgropen(rlocator: RelFileLocator, backend: c_int) -> SMgrRelation { crate::storage::smgr::smgr::smgropen(rlocator as _, backend as _) as _ }
+unsafe fn smgrcreate(reln: SMgrRelation, forknum: ForkNumber, isRedo: bool) { crate::storage::smgr::smgr::smgrcreate(reln as _, forknum as _, isRedo as _); }
+unsafe fn smgrclose(reln: SMgrRelation) { crate::storage::smgr::smgr::smgrclose(reln as _); }
+unsafe fn log_smgrcreate(rlocator: *const RelFileLocator, forkNum: ForkNumber) { crate::catalog::storage::log_smgrcreate(rlocator as _, forkNum as _); }
+unsafe fn FlushRelationBuffers(rel: Relation) { crate::storage::buffer::bufmgr::FlushRelationBuffers(rel as _); }
 
-unsafe fn XLogBeginInsert() { unimplemented!() }
-unsafe fn XLogRegisterBuffer(block_id: u8, buffer: Buffer, flags: c_int) { unimplemented!() }
-unsafe fn XLogRegisterData(data: *mut c_void, len: c_int) { unimplemented!() }
-unsafe fn XLogInsert(rmid: u8, info: u8) -> XLogRecPtr { unimplemented!() }
-unsafe fn XLogInitBufferForRedo(record: *mut XLogReaderState, block_id: u8) -> Buffer { unimplemented!() }
-unsafe fn XLogRecGetInfo(record: *mut XLogReaderState) -> u8 { unimplemented!() }
-unsafe fn XLogRecGetData(record: *mut XLogReaderState) -> *mut c_char { unimplemented!() }
-unsafe fn XLogRecGetDataLen(record: *mut XLogReaderState) -> u32 { unimplemented!() }
-unsafe fn record_EndRecPtr(record: *mut XLogReaderState) -> XLogRecPtr { unimplemented!() }
+unsafe fn XLogBeginInsert() { crate::access::transam::xloginsert::XLogBeginInsert(); }
+unsafe fn XLogRegisterBuffer(block_id: u8, buffer: Buffer, flags: c_int) { crate::access::transam::xloginsert::XLogRegisterBuffer(block_id as _, buffer as _, flags as _); }
+unsafe fn XLogRegisterData(data: *mut c_void, len: c_int) { crate::access::transam::xloginsert::XLogRegisterData(data as _, len as _); }
+unsafe fn XLogInsert(rmid: u8, info: u8) -> XLogRecPtr { crate::access::transam::xloginsert::XLogInsert(rmid as _, info as _) as _ }
+unsafe fn XLogInitBufferForRedo(record: *mut XLogReaderState, block_id: u8) -> Buffer { crate::access::transam::xlogutils::XLogInitBufferForRedo(record as _, block_id as _) as _ }
+unsafe fn XLogRecGetInfo(record: *mut XLogReaderState) -> u8 { crate::access::transam::xlogreader::XLogRecGetInfo(record as _) as _ }
+unsafe fn XLogRecGetData(record: *mut XLogReaderState) -> *mut c_char { crate::access::transam::xlogreader::XLogRecGetData(record as _) as _ }
+unsafe fn XLogRecGetDataLen(record: *mut XLogReaderState) -> u32 { crate::access::transam::xlogreader::XLogRecGetDataLen(record as _) as _ }
+unsafe fn record_EndRecPtr(record: *mut XLogReaderState) -> XLogRecPtr { (*(record as *mut crate::access::transam::xlogreader::XLogReaderState)).EndRecPtr as _ }
 
-unsafe fn mask_page_lsn_and_checksum(page: Page) { unimplemented!() }
-unsafe fn mask_unused_space(page: Page) { unimplemented!() }
+unsafe fn mask_page_lsn_and_checksum(page: Page) { crate::access::common::bufmask::mask_page_lsn_and_checksum(page as _); }
+unsafe fn mask_unused_space(page: Page) { crate::access::common::bufmask::mask_unused_space(page as _); }
 
-unsafe fn hash_create(tabname: *const c_char, nelem: c_long, info: *mut HASHCTL, flags: c_int) -> *mut HTAB { unimplemented!() }
-unsafe fn hash_search(hashp: *mut HTAB, keyPtr: *const c_void, action: c_int, foundPtr: *mut bool) -> *mut c_void { unimplemented!() }
-unsafe fn hash_destroy(hashp: *mut HTAB) { unimplemented!() }
+unsafe fn hash_create(tabname: *const c_char, nelem: c_long, info: *mut HASHCTL, flags: c_int) -> *mut HTAB {
+    let mut ctl: crate::utils::hash::dynahash::HASHCTL = core::mem::zeroed();
+    ctl.keysize = (*info).keysize;
+    ctl.entrysize = (*info).entrysize;
+    crate::utils::hash::dynahash::hash_create(tabname as _, nelem as _, &ctl, flags as _) as _
+}
+unsafe fn hash_search(hashp: *mut HTAB, keyPtr: *const c_void, action: c_int, foundPtr: *mut bool) -> *mut c_void { crate::utils::hash::dynahash::hash_search(hashp as _, keyPtr as _, core::mem::transmute(action), foundPtr as _) as _ }
+unsafe fn hash_destroy(hashp: *mut HTAB) { crate::utils::hash::dynahash::hash_destroy(hashp as _); }
 const HASH_ENTER: c_int = 1;
 #[repr(C)]
 struct HASHCTL {
@@ -394,52 +405,56 @@ struct HASHCTL {
     entrysize: Size,
 }
 
-unsafe fn defGetInt64(def: *mut DefElem) -> i64 { unimplemented!() }
-unsafe fn defGetTypeName(def: *mut DefElem) -> *mut TypeName { unimplemented!() }
-unsafe fn defGetQualifiedName(def: *mut DefElem) -> *mut List { unimplemented!() }
-unsafe fn errorConflictingDefElem(defel: *mut DefElem, pstate: *mut ParseState) { unimplemented!() }
-unsafe fn typenameTypeId(pstate: *mut ParseState, typeName: *mut TypeName) -> Oid { unimplemented!() }
-unsafe fn format_type_be(type_oid: Oid) -> *mut c_char { unimplemented!() }
-unsafe fn boolVal(node: *mut Node) -> bool { unimplemented!() }
-unsafe fn strVal(node: *mut c_void) -> *mut c_char { unimplemented!() }
-unsafe fn makeFloat(numericStr: *mut c_char) -> *mut Node { unimplemented!() }
-unsafe fn makeBoolean(val: bool) -> *mut Node { unimplemented!() }
-unsafe fn makeDefElem(name: *mut c_char, arg: *mut Node, location: c_int) -> *mut DefElem { unimplemented!() }
-unsafe fn psprintf_int64(val: i64) -> *mut c_char { unimplemented!() }
-unsafe fn linitial(l: *mut List) -> *mut c_void { unimplemented!() }
-unsafe fn llast(l: *mut List) -> *mut c_void { unimplemented!() }
-unsafe fn lfirst(lc: *mut ListCell) -> *mut c_void { unimplemented!() }
+unsafe fn defGetInt64(def: *mut DefElem) -> i64 { crate::commands::define::defGetInt64(def as _) as _ }
+unsafe fn defGetTypeName(def: *mut DefElem) -> *mut TypeName { crate::commands::define::defGetTypeName(def as _) as _ }
+unsafe fn defGetQualifiedName(def: *mut DefElem) -> *mut List { crate::commands::define::defGetQualifiedName(def as _) as _ }
+unsafe fn errorConflictingDefElem(defel: *mut DefElem, pstate: *mut ParseState) { crate::commands::define::errorConflictingDefElem(defel as _, pstate as _); }
+unsafe fn typenameTypeId(pstate: *mut ParseState, typeName: *mut TypeName) -> Oid { crate::parser::parse_type::typenameTypeId(pstate as _, typeName as _) as _ }
+unsafe fn format_type_be(type_oid: Oid) -> *mut c_char { crate::utils::adt::format_type::format_type_be(type_oid as _) as _ }
+unsafe fn boolVal(node: *mut Node) -> bool { crate::boolVal!(node) }
+unsafe fn strVal(node: *mut c_void) -> *mut c_char { crate::strVal!(node) as _ }
+unsafe fn makeFloat(numericStr: *mut c_char) -> *mut Node { crate::nodes::value::makeFloat(numericStr as _) as _ }
+unsafe fn makeBoolean(val: bool) -> *mut Node { crate::nodes::value::makeBoolean(val as _) as _ }
+unsafe fn makeDefElem(name: *mut c_char, arg: *mut Node, location: c_int) -> *mut DefElem { crate::nodes::makefuncs::makeDefElem(name as _, arg as _, location as _) as _ }
+unsafe fn psprintf_int64(val: i64) -> *mut c_char {
+    let buf = crate::utils::mmgr::mcxt::palloc(32) as *mut c_char;
+    crate::utils::adt::numutils::pg_lltoa(val as _, buf as _);
+    buf
+}
+unsafe fn linitial(l: *mut List) -> *mut c_void { crate::nodes::pg_list::linitial(l as _) as _ }
+unsafe fn llast(l: *mut List) -> *mut c_void { crate::nodes::pg_list::llast(l as _) as _ }
+unsafe fn lfirst(lc: *mut ListCell) -> *mut c_void { crate::nodes::pg_list::lfirst(lc as _) as _ }
 
-unsafe fn get_attnum(relid: Oid, attname: *const c_char) -> AttrNumber { unimplemented!() }
-unsafe fn get_rel_name(relid: Oid) -> *mut c_char { unimplemented!() }
-unsafe fn sequenceIsOwned(seqId: Oid, deptype: c_char, tableId: *mut Oid, colId: *mut i32) -> bool { unimplemented!() }
-unsafe fn deleteDependencyRecordsForClass(classId: Oid, objectId: Oid, refclassId: Oid, deptype: c_char) -> c_long { unimplemented!() }
-unsafe fn recordDependencyOn(depender: *const ObjectAddress, referenced: *const ObjectAddress, behavior: DependencyType) { unimplemented!() }
-unsafe fn errdetail_relkind_not_supported(relkind: c_char) -> c_int { unimplemented!() }
-unsafe fn InvokeObjectPostAlterHook(classId: Oid, objectId: Oid, subId: c_int) { unimplemented!() }
+unsafe fn get_attnum(relid: Oid, attname: *const c_char) -> AttrNumber { crate::utils::cache::lsyscache::get_attnum(relid as _, attname as _) as _ }
+unsafe fn get_rel_name(relid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_rel_name(relid as _) as _ }
+unsafe fn sequenceIsOwned(seqId: Oid, deptype: c_char, tableId: *mut Oid, colId: *mut i32) -> bool { crate::catalog::pg_depend::sequenceIsOwned(seqId as _, deptype as _, tableId as _, colId as _) as _ }
+unsafe fn deleteDependencyRecordsForClass(classId: Oid, objectId: Oid, refclassId: Oid, deptype: c_char) -> c_long { crate::catalog::pg_depend::deleteDependencyRecordsForClass(classId as _, objectId as _, refclassId as _, deptype as _) as _ }
+unsafe fn recordDependencyOn(depender: *const ObjectAddress, referenced: *const ObjectAddress, behavior: DependencyType) { crate::catalog::pg_depend::recordDependencyOn(depender as _, referenced as _, behavior as _); }
+unsafe fn errdetail_relkind_not_supported(relkind: c_char) -> c_int { crate::catalog::pg_class::errdetail_relkind_not_supported(relkind as _) as _ }
+unsafe fn InvokeObjectPostAlterHook(classId: Oid, objectId: Oid, subId: c_int) { /* no-op: object_access_hook not installed */ }
 unsafe fn ObjectAddressSet(addr: &mut ObjectAddress, class_id: Oid, object_id: Oid) {
     addr.classId = class_id;
     addr.objectId = object_id;
     addr.objectSubId = 0;
 }
 
-unsafe fn get_call_result_type(fcinfo: FunctionCallInfo, resultTypeId: *mut Oid, resultTupleDesc: *mut TupleDesc) -> c_int { unimplemented!() }
-unsafe fn CreateTemplateTupleDesc(natts: c_int) -> TupleDesc { unimplemented!() }
-unsafe fn TupleDescInitEntry(desc: TupleDesc, attributeNumber: AttrNumber, attributeName: *const c_char, oidtypeid: Oid, typmod: i32, attdim: c_int) { unimplemented!() }
-unsafe fn BlessTupleDesc(tupdesc: TupleDesc) -> TupleDesc { unimplemented!() }
+unsafe fn get_call_result_type(fcinfo: FunctionCallInfo, resultTypeId: *mut Oid, resultTupleDesc: *mut TupleDesc) -> c_int { crate::utils::fmgr::funcapi::get_call_result_type(fcinfo as _, resultTypeId as _, resultTupleDesc as _) as _ }
+unsafe fn CreateTemplateTupleDesc(natts: c_int) -> TupleDesc { crate::access::common::tupdesc::CreateTemplateTupleDesc(natts as _) as _ }
+unsafe fn TupleDescInitEntry(desc: TupleDesc, attributeNumber: AttrNumber, attributeName: *const c_char, oidtypeid: Oid, typmod: i32, attdim: c_int) { crate::access::common::tupdesc::TupleDescInitEntry(desc as _, attributeNumber as _, attributeName as _, oidtypeid as _, typmod as _, attdim as _); }
+unsafe fn BlessTupleDesc(tupdesc: TupleDesc) -> TupleDesc { crate::executor::execTuples::BlessTupleDesc(tupdesc as _) as _ }
 
 // Accessors for MyProc / resource-owner globals  TODO(pg-port)
-unsafe fn MyProc_vxid_lxid() -> LocalTransactionId { unimplemented!() }
-unsafe fn CurrentResourceOwner_get() -> ResourceOwner { unimplemented!() }
-unsafe fn CurrentResourceOwner_set(owner: ResourceOwner) { unimplemented!() }
-unsafe fn TopTransactionResourceOwner_get() -> ResourceOwner { unimplemented!() }
+unsafe fn MyProc_vxid_lxid() -> LocalTransactionId { (*crate::storage::lmgr::proc::MyProc).vxid.lxid as _ }
+unsafe fn CurrentResourceOwner_get() -> ResourceOwner { crate::utils::resowner::resowner::CurrentResourceOwner as _ }
+unsafe fn CurrentResourceOwner_set(owner: ResourceOwner) { crate::utils::resowner::resowner::CurrentResourceOwner = owner as _; }
+unsafe fn TopTransactionResourceOwner_get() -> ResourceOwner { crate::utils::resowner::resowner::TopTransactionResourceOwner as _ }
 
-unsafe fn START_CRIT_SECTION() { unimplemented!() }
-unsafe fn END_CRIT_SECTION() { unimplemented!() }
+unsafe fn START_CRIT_SECTION() { crate::miscadmin::START_CRIT_SECTION(); }
+unsafe fn END_CRIT_SECTION() { crate::miscadmin::END_CRIT_SECTION(); }
 
-unsafe fn palloc_page(size: Size) -> Page { unimplemented!() }
+unsafe fn palloc_page(size: Size) -> Page { crate::utils::mmgr::mcxt::palloc(size as _) as Page }
 
-unsafe fn libc_strcmp(a: *const c_char, b: *const c_char) -> c_int { unimplemented!() }
+unsafe fn libc_strcmp(a: *const c_char, b: *const c_char) -> c_int { libc::strcmp(a, b) }
 unsafe fn BoolIsValid(b: bool) -> bool { b == false || b == true }
 
 /* --------------------------------------------------------------------------
@@ -906,11 +921,11 @@ pub unsafe fn DeleteSequenceTuple(relid: Oid) {
  * called the function directly.
  */
 pub unsafe extern "C" fn nextval(fcinfo: FunctionCallInfo) -> Datum {
-    let seqin: *mut c_void = crate::PG_GETARG_TEXT_PP!(fcinfo, 0);
+    let seqin = crate::PG_GETARG_TEXT_PP!(fcinfo, 0);
     let sequence: *mut RangeVar;
     let relid: Oid;
 
-    sequence = makeRangeVarFromNameList(textToQualifiedNameList(seqin));
+    sequence = makeRangeVarFromNameList(textToQualifiedNameList(seqin as _));
 
     /*
      * XXX: This is not safe in the presence of concurrent DDL, but acquiring
@@ -925,7 +940,7 @@ pub unsafe extern "C" fn nextval(fcinfo: FunctionCallInfo) -> Datum {
     crate::PG_RETURN_INT64!(nextval_internal(relid, true));
 }
 
-pub unsafe extern "C" fn nextval_oid(fcinfo: FunctionCallInfo) -> Datum {
+pub unsafe fn nextval_oid(fcinfo: FunctionCallInfo) -> Datum {
     let relid: Oid = crate::PG_GETARG_OID!(fcinfo, 0);
 
     crate::PG_RETURN_INT64!(nextval_internal(relid, true));
@@ -1170,7 +1185,7 @@ pub unsafe fn nextval_internal(relid: Oid, check_permissions: bool) -> i64 {
     return result;
 }
 
-pub unsafe extern "C" fn currval_oid(fcinfo: FunctionCallInfo) -> Datum {
+pub unsafe fn currval_oid(fcinfo: FunctionCallInfo) -> Datum {
     let relid: Oid = crate::PG_GETARG_OID!(fcinfo, 0);
     let result: i64;
     let mut elm: SeqTable = core::ptr::null_mut();
@@ -1199,7 +1214,7 @@ pub unsafe extern "C" fn currval_oid(fcinfo: FunctionCallInfo) -> Datum {
     crate::PG_RETURN_INT64!(result);
 }
 
-pub unsafe extern "C" fn lastval(fcinfo: FunctionCallInfo) -> Datum {
+pub unsafe fn lastval(fcinfo: FunctionCallInfo) -> Datum {
     let seqrel: Relation;
     let result: i64;
 
@@ -1349,7 +1364,7 @@ unsafe fn do_setval(relid: Oid, next: i64, iscalled: bool) {
  * Implement the 2 arg setval procedure.
  * See do_setval for discussion.
  */
-pub unsafe extern "C" fn setval_oid(fcinfo: FunctionCallInfo) -> Datum {
+pub unsafe fn setval_oid(fcinfo: FunctionCallInfo) -> Datum {
     let relid: Oid = crate::PG_GETARG_OID!(fcinfo, 0);
     let next: i64 = crate::PG_GETARG_INT64!(fcinfo, 1);
 
@@ -1362,7 +1377,7 @@ pub unsafe extern "C" fn setval_oid(fcinfo: FunctionCallInfo) -> Datum {
  * Implement the 3 arg setval procedure.
  * See do_setval for discussion.
  */
-pub unsafe extern "C" fn setval3_oid(fcinfo: FunctionCallInfo) -> Datum {
+pub unsafe fn setval3_oid(fcinfo: FunctionCallInfo) -> Datum {
     let relid: Oid = crate::PG_GETARG_OID!(fcinfo, 0);
     let next: i64 = crate::PG_GETARG_INT64!(fcinfo, 1);
     let iscalled: bool = crate::PG_GETARG_BOOL!(fcinfo, 2);
@@ -1441,7 +1456,8 @@ unsafe fn init_sequence(relid: Oid, p_elm: *mut SeqTable, p_rel: *mut Relation) 
      * should not matter.
      */
     if !found {
-        /* relid already filled in */
+        /* relid is the hash key; set it explicitly (don't rely on keycopy) */
+        (*elm).relid = relid;
         (*elm).filenumber = InvalidRelFileNumber;
         (*elm).lxid = InvalidLocalTransactionId;
         (*elm).last_valid = false;

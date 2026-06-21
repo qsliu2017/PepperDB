@@ -98,106 +98,108 @@ pub unsafe fn ListenServerPort(
     NumListenSockets: *mut c_int,
     MaxListen: c_int,
 ) -> c_int {
-    unimplemented!()
+    crate::libpq::pqcomm::ListenServerPort(
+        family, hostName, portNumber, unixSocketDir, ListenSockets, NumListenSockets, MaxListen,
+    )
 }
 
 pub unsafe fn AcceptConnection(server_fd: pgsocket, client_sock: *mut ClientSocket) -> c_int {
-    unimplemented!()
+    crate::libpq::pqcomm::AcceptConnection(server_fd, client_sock as _)
 }
 
 pub unsafe fn TouchSocketFiles() {
-    unimplemented!()
+    crate::libpq::pqcomm::TouchSocketFiles()
 }
 
 pub unsafe fn RemoveSocketFiles() {
-    unimplemented!()
+    crate::libpq::pqcomm::RemoveSocketFiles()
 }
 
 pub unsafe fn pq_init(client_sock: *mut ClientSocket) -> *mut Port {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_init(client_sock as _) as _
 }
 
 pub unsafe fn pq_getbytes(b: *mut c_void, len: Size) -> c_int {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_getbytes(b, len)
 }
 
 pub unsafe fn pq_startmsgread() {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_startmsgread()
 }
 
 pub unsafe fn pq_endmsgread() {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_endmsgread()
 }
 
 pub unsafe fn pq_is_reading_msg() -> bool {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_is_reading_msg()
 }
 
 pub unsafe fn pq_getmessage(s: StringInfo, maxlen: c_int) -> c_int {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_getmessage(s as _, maxlen)
 }
 
 pub unsafe fn pq_getbyte() -> c_int {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_getbyte()
 }
 
 pub unsafe fn pq_peekbyte() -> c_int {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_peekbyte()
 }
 
 pub unsafe fn pq_getbyte_if_available(c: *mut u8) -> c_int {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_getbyte_if_available(c)
 }
 
 pub unsafe fn pq_buffer_remaining_data() -> ssize_t {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_buffer_remaining_data()
 }
 
 pub unsafe fn pq_putmessage_v2(msgtype: c_char, s: *const c_char, len: Size) -> c_int {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_putmessage_v2(msgtype, s, len)
 }
 
 pub unsafe fn pq_check_connection() -> bool {
-    unimplemented!()
+    crate::libpq::pqcomm::pq_check_connection()
 }
 
 /*
  * prototypes for functions in be-secure.c
  */
 pub unsafe fn secure_initialize(isServerStart: bool) -> c_int {
-    unimplemented!()
+    crate::libpq::be_secure::secure_initialize(isServerStart)
 }
 
 pub unsafe fn secure_loaded_verify_locations() -> bool {
-    unimplemented!()
+    crate::libpq::be_secure::secure_loaded_verify_locations()
 }
 
 pub unsafe fn secure_destroy() {
-    unimplemented!()
+    crate::libpq::be_secure::secure_destroy()
 }
 
 pub unsafe fn secure_open_server(port: *mut Port) -> c_int {
-    unimplemented!()
+    crate::libpq::be_secure::secure_open_server(port as _)
 }
 
 pub unsafe fn secure_close(port: *mut Port) {
-    unimplemented!()
+    crate::libpq::be_secure::secure_close(port as _)
 }
 
 pub unsafe fn secure_read(port: *mut Port, ptr: *mut c_void, len: Size) -> ssize_t {
-    unimplemented!()
+    crate::libpq::be_secure::secure_read(port as _, ptr, len)
 }
 
 pub unsafe fn secure_write(port: *mut Port, ptr: *const c_void, len: Size) -> ssize_t {
-    unimplemented!()
+    crate::libpq::be_secure::secure_write(port as _, ptr, len)
 }
 
 pub unsafe fn secure_raw_read(port: *mut Port, ptr: *mut c_void, len: Size) -> ssize_t {
-    unimplemented!()
+    crate::libpq::be_secure::secure_raw_read(port as _, ptr, len)
 }
 
 pub unsafe fn secure_raw_write(port: *mut Port, ptr: *const c_void, len: Size) -> ssize_t {
-    unimplemented!()
+    crate::libpq::be_secure::secure_raw_write(port as _, ptr, len)
 }
 
 /*
@@ -233,7 +235,8 @@ extern "C" {
  */
 // C-gated by ENABLE_GSS; declared unconditionally here (stub-only).
 pub unsafe fn secure_open_gssapi(port: *mut Port) -> ssize_t {
-    unimplemented!()
+    let _ = port;
+    unimplemented!() // GSSAPI not enabled in bring-up
 }
 
 // enum ssl_protocol_versions
@@ -252,13 +255,9 @@ pub unsafe fn run_ssl_passphrase_command(
     is_server_start: bool,
     buf: *mut c_char,
     size: c_int,
-) -> c_int {
-    unimplemented!()
-}
+) -> c_int { crate::libpq::be_secure_common::run_ssl_passphrase_command(prompt as _, is_server_start, buf as _, size as _) }
 
 pub unsafe fn check_ssl_key_file_permissions(
     ssl_key_file_arg: *const c_char,
     isServerStart: bool,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { crate::libpq::be_secure_common::check_ssl_key_file_permissions(ssl_key_file_arg as _, isServerStart) }

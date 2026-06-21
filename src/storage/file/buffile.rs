@@ -318,6 +318,7 @@ unsafe fn MakeNewFileSetSegment(buffile: *mut BufFile, segment: c_int) -> File {
  * more uniquely named temporary directory, names don't conflict with
  * unrelated SharedFileSet objects.
  */
+#[no_mangle]
 pub unsafe fn BufFileCreateFileSet(fileset: *mut FileSet, name: *const c_char) -> *mut BufFile {
     let file: *mut BufFile;
 
@@ -340,6 +341,7 @@ pub unsafe fn BufFileCreateFileSet(fileset: *mut FileSet, name: *const c_char) -
  * that missing files can be safely ignored, then return NULL if the BufFile
  * with the given name is not found, otherwise, throw an error.
  */
+#[no_mangle]
 pub unsafe fn BufFileOpenFileSet(
     fileset: *mut FileSet,
     name: *const c_char,
@@ -418,6 +420,7 @@ pub unsafe fn BufFileOpenFileSet(
  * that it exists and has been exported or closed otherwise missing_ok should
  * be passed true.
  */
+#[no_mangle]
 pub unsafe fn BufFileDeleteFileSet(fileset: *mut FileSet, name: *const c_char, missing_ok: bool) {
     let mut segment_name: [c_char; MAXPGPATH] = [0; MAXPGPATH];
     let mut segment: c_int = 0;
@@ -463,6 +466,7 @@ pub unsafe fn BufFileExportFileSet(file: *mut BufFile) {
  *
  * Like fclose(), this also implicitly FileCloses the underlying File.
  */
+#[no_mangle]
 pub unsafe fn BufFileClose(file: *mut BufFile) {
     let mut i: c_int;
 
@@ -704,6 +708,7 @@ pub unsafe fn BufFileRead(file: *mut BufFile, ptr: *mut c_void, size: usize) -> 
 /*
  * Require read of exactly the specified size.
  */
+#[no_mangle]
 pub unsafe fn BufFileReadExact(file: *mut BufFile, ptr: *mut c_void, size: usize) {
     BufFileReadCommon(file, ptr, size, true, false);
 }
@@ -712,6 +717,7 @@ pub unsafe fn BufFileReadExact(file: *mut BufFile, ptr: *mut c_void, size: usize
  * Require read of exactly the specified size, but optionally allow end of
  * file (in which case 0 is returned).
  */
+#[no_mangle]
 pub unsafe fn BufFileReadMaybeEOF(
     file: *mut BufFile,
     ptr: *mut c_void,
@@ -727,6 +733,7 @@ pub unsafe fn BufFileReadMaybeEOF(
  * Like fwrite() except we assume 1-byte element size and report errors via
  * ereport().
  */
+#[no_mangle]
 pub unsafe fn BufFileWrite(file: *mut BufFile, mut ptr: *const c_void, mut size: usize) {
     let mut nthistime: usize;
 
@@ -791,6 +798,7 @@ unsafe fn BufFileFlush(file: *mut BufFile) {
  * Result is 0 if OK, EOF if not.  Logical position is not moved if an
  * impossible seek is attempted.
  */
+#[no_mangle]
 pub unsafe fn BufFileSeek(
     file: *mut BufFile,
     fileno: c_int,
@@ -888,6 +896,7 @@ pub unsafe fn BufFileSeek(
     0
 }
 
+#[no_mangle]
 pub unsafe fn BufFileTell(file: *mut BufFile, fileno: *mut c_int, offset: *mut off_t) {
     *fileno = (*file).curFile;
     *offset = (*file).curOffset + (*file).pos as off_t;
@@ -986,6 +995,7 @@ pub unsafe fn BufFileAppend(target: *mut BufFile, source: *mut BufFile) -> int64
  * Truncate a BufFile created by BufFileCreateFileSet up to the given fileno
  * and the offset.
  */
+#[no_mangle]
 pub unsafe fn BufFileTruncateFileSet(file: *mut BufFile, fileno: c_int, offset: off_t) {
     let mut numFiles: c_int = (*file).numFiles;
     let mut newFile: c_int = fileno;

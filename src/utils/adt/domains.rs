@@ -76,29 +76,21 @@ unsafe fn InitDomainConstraintRef(
     _ref_: *mut DomainConstraintRef,
     _refctx: MemoryContext,
     _need_exprstate: bool,
-) {
-    unimplemented!("InitDomainConstraintRef: utils/cache/typcache.c not yet translated")
-}
+) { crate::utils::cache::typcache::InitDomainConstraintRef(_type_id as _, _ref_ as _, _refctx as _, _need_exprstate) }
 
-unsafe fn UpdateDomainConstraintRef(_ref_: *mut DomainConstraintRef) {
-    unimplemented!("UpdateDomainConstraintRef: utils/cache/typcache.c not yet translated")
-}
+unsafe fn UpdateDomainConstraintRef(_ref_: *mut DomainConstraintRef) { crate::utils::cache::typcache::UpdateDomainConstraintRef(_ref_ as _) }
 
 /* utils/lsyscache.h */
-unsafe fn getTypeInputInfo(_typ: Oid, _typinput: *mut Oid, _typioparam: *mut Oid) {
-    unimplemented!("getTypeInputInfo: utils/cache/lsyscache.c not yet translated")
-}
+unsafe fn getTypeInputInfo(_typ: Oid, _typinput: *mut Oid, _typioparam: *mut Oid) { crate::utils::cache::lsyscache::getTypeInputInfo(_typ as _, _typinput as _, _typioparam as _) }
 
 unsafe fn getTypeBinaryInputInfo(_typ: Oid, _typreceive: *mut Oid, _typioparam: *mut Oid) {
     unimplemented!("getTypeBinaryInputInfo: utils/cache/lsyscache.c not yet translated")
 }
 
-unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char {
-    unimplemented!("get_namespace_name: utils/cache/lsyscache.c not yet translated")
-}
+unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_namespace_name(_nspid as _) as _ }
 
 /* utils/syscache.h */
-const TYPEOID: c_int = 0;
+const TYPEOID: c_int = 82;
 
 unsafe fn SearchSysCache1(_cache_id: c_int, _key1: Datum) -> HeapTuple {
     unimplemented!("SearchSysCache1: utils/cache/syscache.c not yet translated")
@@ -470,6 +462,7 @@ pub unsafe fn domain_recv(fcinfo: FunctionCallInfo) -> Datum {
  * say, a FmgrInfo structure, or they can be NULL, in which case the
  * setup is repeated for each call.
  */
+#[no_mangle]
 pub unsafe fn domain_check(
     value: Datum,
     isnull: bool,

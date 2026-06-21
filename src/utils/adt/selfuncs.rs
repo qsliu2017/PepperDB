@@ -250,13 +250,6 @@ const ATTSTATSSLOT_NUMBERS: c_int = 0x02;
 // utils/typcache.h: lookup_type_cache() flags
 const TYPECACHE_EQ_OPR: c_int = 0x0001;
 
-// nodes/parsenodes.h: rtekind values
-const RTE_RELATION: c_int = 0;
-const RTE_SUBQUERY: c_int = 1;
-const RTE_JOIN: c_int = 2;
-const RTE_FUNCTION: c_int = 3;
-const RTE_VALUES: c_int = 5;
-const RTE_CTE: c_int = 6;
 
 // catalog/pg_class.h: relkind values
 const RELKIND_RELATION: c_char = b'r' as c_char;
@@ -319,115 +312,15 @@ use crate::nodes::nodes::JoinType::{JOIN_ANTI, JOIN_FULL, JOIN_INNER, JOIN_LEFT,
 // =====================================================================
 // Opaque node / catalog struct stubs (real homes noted)
 // =====================================================================
-// TODO(pg-port): real PlannerInfo lives in nodes/pathnodes.rs
-#[repr(C)]
-pub struct PlannerInfo {
-    pub parse: *mut Query,
-    pub glob: *mut PlannerGlobal,
-    pub parent_root: *mut PlannerInfo,
-    pub simple_rel_array: *mut *mut RelOptInfo,
-    pub simple_rte_array: *mut *mut RangeTblEntry,
-    pub append_rel_array: *mut *mut AppendRelInfo,
-    pub outer_join_rels: Relids,
-    pub cte_plan_ids: *mut List,
-    pub aggtransinfos: *mut List,
-    _private: [u8; 0],
-}
-
-// TODO(pg-port): real RelOptInfo lives in nodes/pathnodes.rs
-#[repr(C)]
-pub struct RelOptInfo {
-    pub relid: Index,
-    pub relids: Relids,
-    pub rows: f64,
-    pub tuples: f64,
-    pub pages: f64,
-    pub rtekind: c_int,
-    pub indexlist: *mut List,
-    pub statlist: *mut List,
-    pub subroot: *mut PlannerInfo,
-    pub userid: Oid,
-    _private: [u8; 0],
-}
-
-// TODO(pg-port): real RestrictInfo lives in nodes/pathnodes.rs
-#[repr(C)]
-pub struct RestrictInfo {
-    pub clause: *mut Expr,
-    pub outer_is_left: bool,
-    pub left_relids: Relids,
-    pub right_relids: Relids,
-    _private: [u8; 0],
-}
-
-// TODO(pg-port): real SpecialJoinInfo lives in nodes/pathnodes.rs
-#[repr(C)]
-pub struct SpecialJoinInfo {
-    pub min_righthand: Relids,
-    pub syn_lefthand: Relids,
-    pub syn_righthand: Relids,
-    pub jointype: JoinType,
-    _private: [u8; 0],
-}
-
-// TODO(pg-port): real IndexOptInfo lives in nodes/pathnodes.rs
-#[repr(C)]
-pub struct IndexOptInfo {
-    pub indexoid: Oid,
-    pub rel: *mut RelOptInfo,
-    pub pages: f64,
-    pub tuples: f64,
-    pub tree_height: c_int,
-    pub ncolumns: c_int,
-    pub nkeycolumns: c_int,
-    pub indexkeys: *mut c_int,
-    pub indexcollations: *mut Oid,
-    pub opfamily: *mut Oid,
-    pub opcintype: *mut Oid,
-    pub sortopfamily: *mut Oid,
-    pub reverse_sort: *mut bool,
-    pub canreturn: *mut bool,
-    pub relam: Oid,
-    pub indexprs: *mut List,
-    pub indpred: *mut List,
-    pub predOK: bool,
-    pub unique: bool,
-    pub hypothetical: bool,
-    pub reltablespace: Oid,
-    pub opclassoptions: *mut *mut c_void,
-    _private: [u8; 0],
-}
-
-// TODO(pg-port): real IndexPath lives in nodes/pathnodes.rs
-#[repr(C)]
-pub struct IndexPath {
-    pub indexinfo: *mut IndexOptInfo,
-    pub indexclauses: *mut List,
-    pub indexorderbys: *mut List,
-    _private: [u8; 0],
-}
-
-// TODO(pg-port): real Path lives in nodes/pathnodes.rs
-#[repr(C)]
-pub struct Path {
-    pub pathtarget: *mut PathTarget,
-    _private: [u8; 0],
-}
-
-// TODO(pg-port): real PathTarget lives in nodes/pathnodes.rs
-#[repr(C)]
-pub struct PathTarget {
-    pub width: c_int,
-    _private: [u8; 0],
-}
-
-// TODO(pg-port): real PlannerGlobal lives in nodes/pathnodes.rs
-#[repr(C)]
-pub struct PlannerGlobal {
-    pub lastPHId: c_int,
-    pub subroots: *mut List,
-    _private: [u8; 0],
-}
+// Planner/parse node structs are owned by the real planner; use the canonical
+// layouts (selfuncs only borrows these by pointer, never constructs them).
+pub use crate::nodes::pathnodes::{
+    AppendRelInfo, IndexOptInfo, IndexPath, Path, PathTarget, PlannerGlobal, PlannerInfo,
+    RelOptInfo, RestrictInfo, SpecialJoinInfo,
+};
+pub use crate::nodes::parsenodes::{Query, RTEPermissionInfo, RangeTblEntry};
+pub use crate::nodes::parsenodes::RTEKind::{RTE_CTE, RTE_RELATION, RTE_SUBQUERY, RTE_VALUES};
+pub use crate::nodes::primnodes::{Alias, TargetEntry};
 
 // TODO(pg-port): real QualCost lives in nodes/pathnodes.rs
 #[repr(C)]
@@ -437,68 +330,8 @@ pub struct QualCost {
     pub per_tuple: Cost,
 }
 
-// TODO(pg-port): real AggClauseCosts lives in nodes/pathnodes.rs
-#[repr(C)]
-pub struct AggClauseCosts {
-    pub transitionSpace: Size,
-    _private: [u8; 0],
-}
-
-// TODO(pg-port): real Query/RangeTblEntry/etc live in nodes/parsenodes.rs
-#[repr(C)]
-pub struct Query {
-    pub rteperminfos: *mut List,
-    pub cteList: *mut List,
-    pub setOperations: *mut Node,
-    pub groupingSets: *mut List,
-    pub returningList: *mut List,
-    pub targetList: *mut List,
-    pub distinctClause: *mut List,
-    pub groupClause: *mut List,
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct RangeTblEntry {
-    pub rtekind: c_int,
-    pub relid: Oid,
-    pub relkind: c_char,
-    pub inh: bool,
-    pub security_barrier: bool,
-    pub securityQuals: *mut List,
-    pub ctelevelsup: Index,
-    pub ctename: *mut c_char,
-    pub self_reference: bool,
-    pub eref: *mut Alias,
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct Alias {
-    pub aliasname: *mut c_char,
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct RTEPermissionInfo {
-    pub checkAsUser: Oid,
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct AppendRelInfo {
-    pub parent_relid: Index,
-    pub num_child_cols: c_int,
-    pub parent_colnos: *mut AttrNumber,
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct TargetEntry {
-    pub expr: *mut Expr,
-    pub resjunk: bool,
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct CommonTableExpr {
-    pub ctename: *mut c_char,
-    _private: [u8; 0],
-}
+pub use crate::nodes::pathnodes::AggClauseCosts;
+pub use crate::nodes::parsenodes::CommonTableExpr;
 
 // nodes/primnodes.h node types come from nodes::primnodes (imported above).
 // PlaceHolderVar lives in nodes::pathnodes.
@@ -570,6 +403,8 @@ pub struct AttStatsSlot {
     pub nvalues: c_int,
     pub numbers: *mut float4,
     pub nnumbers: c_int,
+    pub values_arr: *mut core::ffi::c_void,
+    pub numbers_arr: *mut core::ffi::c_void,
 }
 
 /*
@@ -609,10 +444,7 @@ pub struct IndexScanDescData {
     _private: [u8; 0],
 }
 type IndexScanDesc = *mut IndexScanDescData;
-#[repr(C)]
-pub struct ScanKeyData {
-    _private: [u8; 64],
-}
+pub use crate::access::common::scankey::ScanKeyData;
 type ScanKey = *mut ScanKeyData;
 type ItemPointer = *mut ItemPointerData;
 #[repr(C)]
@@ -741,95 +573,95 @@ const MONTHS_PER_YEAR: f64 = 12.0;
 // =====================================================================
 
 // --- utils/cache/lsyscache.c ---
-unsafe fn get_negator(opno: Oid) -> Oid { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_negator") }
-unsafe fn get_commutator(opno: Oid) -> Oid { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_commutator") }
-unsafe fn get_opcode(opno: Oid) -> Oid { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_opcode") }
-unsafe fn get_oprrest(opno: Oid) -> RegProcedure { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_oprrest") }
-unsafe fn get_oprjoin(opno: Oid) -> RegProcedure { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_oprjoin") }
-unsafe fn get_base_element_type(typid: Oid) -> Oid { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_base_element_type") }
-unsafe fn get_typlenbyval(typid: Oid, typlen: *mut int16, typbyval: *mut bool) { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_typlenbyval") }
-unsafe fn get_typlenbyvalalign(typid: Oid, typlen: *mut int16, typbyval: *mut bool, typalign: *mut c_char) { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_typlenbyvalalign") }
-unsafe fn get_opfamily_member(opfamily: Oid, lefttype: Oid, righttype: Oid, strategy: StrategyNumber) -> Oid { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_opfamily_member") }
-unsafe fn get_opfamily_method(opfamily: Oid) -> Oid { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_opfamily_method") }
-unsafe fn get_opfamily_proc(opfamily: Oid, lefttype: Oid, righttype: Oid, procnum: uint16) -> Oid { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_opfamily_proc") }
-unsafe fn get_op_opfamily_strategy(opno: Oid, opfamily: Oid) -> c_int { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_op_opfamily_strategy") }
-unsafe fn get_op_opfamily_properties(opno: Oid, opfamily: Oid, ordering_op: bool, strategy: *mut c_int, lefttype: *mut Oid, righttype: *mut Oid) { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_op_opfamily_properties") }
-unsafe fn comparison_ops_are_compatible(opno1: Oid, opno2: Oid) -> bool { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs comparison_ops_are_compatible") }
-unsafe fn get_func_leakproof(func_oid: Oid) -> bool { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_func_leakproof") }
-unsafe fn get_func_name(func_oid: Oid) -> *mut c_char { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_func_name") }
-unsafe fn get_rel_name(relid: Oid) -> *mut c_char { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_rel_name") }
-unsafe fn get_attstatsslot(sslot: *mut AttStatsSlot, statstuple: HeapTuple, reqkind: int16, reqop: Oid, flags: c_int) -> bool { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_attstatsslot") }
-unsafe fn free_attstatsslot(sslot: *mut AttStatsSlot) { unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs free_attstatsslot") }
+unsafe fn get_negator(opno: Oid) -> Oid { crate::utils::cache::lsyscache::get_negator(opno as _) as _ }
+unsafe fn get_commutator(opno: Oid) -> Oid { crate::utils::cache::lsyscache::get_commutator(opno as _) as _ }
+unsafe fn get_opcode(opno: Oid) -> Oid { crate::utils::cache::lsyscache::get_opcode(opno as _) as _ }
+unsafe fn get_oprrest(opno: Oid) -> RegProcedure { crate::utils::cache::lsyscache::get_oprrest(opno as _) as _ }
+unsafe fn get_oprjoin(opno: Oid) -> RegProcedure { crate::utils::cache::lsyscache::get_oprjoin(opno as _) as _ }
+unsafe fn get_base_element_type(typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_base_element_type(typid as _) as _ }
+unsafe fn get_typlenbyval(typid: Oid, typlen: *mut int16, typbyval: *mut bool) { crate::utils::cache::lsyscache::get_typlenbyval(typid, typlen as _, typbyval) }
+unsafe fn get_typlenbyvalalign(typid: Oid, typlen: *mut int16, typbyval: *mut bool, typalign: *mut c_char) { crate::utils::cache::lsyscache::get_typlenbyvalalign(typid, typlen as _, typbyval, typalign) }
+unsafe fn get_opfamily_member(opfamily: Oid, lefttype: Oid, righttype: Oid, strategy: StrategyNumber) -> Oid { crate::utils::cache::lsyscache::get_opfamily_member(opfamily, lefttype, righttype, strategy as _) }
+unsafe fn get_opfamily_method(opfamily: Oid) -> Oid { crate::utils::cache::lsyscache::get_opfamily_method(opfamily) }
+unsafe fn get_opfamily_proc(opfamily: Oid, lefttype: Oid, righttype: Oid, procnum: uint16) -> Oid { crate::utils::cache::lsyscache::get_opfamily_proc(opfamily, lefttype, righttype, procnum as _) }
+unsafe fn get_op_opfamily_strategy(opno: Oid, opfamily: Oid) -> c_int { crate::utils::cache::lsyscache::get_op_opfamily_strategy(opno, opfamily) }
+unsafe fn get_op_opfamily_properties(opno: Oid, opfamily: Oid, ordering_op: bool, strategy: *mut c_int, lefttype: *mut Oid, righttype: *mut Oid) { crate::utils::cache::lsyscache::get_op_opfamily_properties(opno, opfamily, ordering_op, strategy, lefttype, righttype) }
+unsafe fn comparison_ops_are_compatible(opno1: Oid, opno2: Oid) -> bool { crate::utils::cache::lsyscache::comparison_ops_are_compatible(opno1, opno2) }
+unsafe fn get_func_leakproof(func_oid: Oid) -> bool { crate::utils::cache::lsyscache::get_func_leakproof(func_oid) }
+unsafe fn get_func_name(func_oid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_func_name(func_oid) }
+unsafe fn get_rel_name(relid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_rel_name(relid) }
+unsafe fn get_attstatsslot(sslot: *mut AttStatsSlot, statstuple: HeapTuple, reqkind: int16, reqop: Oid, flags: c_int) -> bool { crate::utils::cache::lsyscache::get_attstatsslot(sslot as _, statstuple as _, reqkind as _, reqop, flags) }
+unsafe fn free_attstatsslot(sslot: *mut AttStatsSlot) { crate::utils::cache::lsyscache::free_attstatsslot(sslot as _) }
 
 // --- utils/cache/typcache.c ---
-unsafe fn lookup_type_cache(type_id: Oid, flags: c_int) -> *mut TypeCacheEntry { unimplemented!("TODO(pg-port): utils/cache/typcache.rs lookup_type_cache") }
+unsafe fn lookup_type_cache(type_id: Oid, flags: c_int) -> *mut TypeCacheEntry { crate::utils::cache::typcache::lookup_type_cache(type_id, flags) as _ }
 
 // --- utils/cache/syscache.c ---
-unsafe fn SearchSysCache3(cacheId: c_int, key1: Datum, key2: Datum, key3: Datum) -> HeapTuple { unimplemented!("TODO(pg-port): utils/cache/syscache.rs SearchSysCache3") }
-unsafe fn ReleaseSysCache(tuple: HeapTuple) { unimplemented!("TODO(pg-port): utils/cache/syscache.rs ReleaseSysCache") }
-const STATRELATTINH: c_int = 0; // TODO(pg-port): syscacheid in utils/cache/syscache.rs
+unsafe fn SearchSysCache3(cacheId: c_int, key1: Datum, key2: Datum, key3: Datum) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache3(cacheId, key1, key2, key3) as _ }
+unsafe fn ReleaseSysCache(tuple: HeapTuple) { crate::utils::cache::syscache::ReleaseSysCache(tuple as _) }
+const STATRELATTINH: c_int = 65; // TODO(pg-port): syscacheid in utils/cache/syscache.rs
 
 // --- access/index AM translation (access/amapi.c) ---
 unsafe fn IndexAmTranslateStrategy(strategy: c_int, amoid: Oid, opfamily: Oid, guaranteed: bool) -> c_int { unimplemented!("TODO(pg-port): access/amapi.rs IndexAmTranslateStrategy") }
 unsafe fn IndexAmTranslateCompareType(cmptype: c_int, amoid: Oid, opfamily: Oid, guaranteed: bool) -> c_int { unimplemented!("TODO(pg-port): access/amapi.rs IndexAmTranslateCompareType") }
 
 // --- optimizer (clausesel/plancat/cost/paths/util) ---
-unsafe fn clauselist_selectivity(root: *mut PlannerInfo, clauses: *mut List, varRelid: c_int, jointype: JoinType, sjinfo: *mut SpecialJoinInfo) -> Selectivity { unimplemented!("TODO(pg-port): optimizer/path/clausesel.rs clauselist_selectivity") }
-unsafe fn clause_selectivity(root: *mut PlannerInfo, clause: *mut Node, varRelid: c_int, jointype: JoinType, sjinfo: *mut SpecialJoinInfo) -> Selectivity { unimplemented!("TODO(pg-port): optimizer/path/clausesel.rs clause_selectivity") }
-unsafe fn restriction_selectivity(root: *mut PlannerInfo, operatorid: Oid, args: *mut List, inputcollid: Oid, varRelid: c_int) -> Selectivity { unimplemented!("TODO(pg-port): optimizer/util/plancat.rs restriction_selectivity") }
-unsafe fn join_selectivity(root: *mut PlannerInfo, operatorid: Oid, args: *mut List, inputcollid: Oid, jointype: JoinType, sjinfo: *mut SpecialJoinInfo) -> Selectivity { unimplemented!("TODO(pg-port): optimizer/util/plancat.rs join_selectivity") }
-unsafe fn estimate_expression_value(root: *mut PlannerInfo, node: *mut Node) -> *mut Node { unimplemented!("TODO(pg-port): optimizer/util/clauses.rs estimate_expression_value") }
-unsafe fn expression_returns_set_rows(root: *mut PlannerInfo, clause: *mut Node) -> f64 { unimplemented!("TODO(pg-port): optimizer/util/clauses.rs expression_returns_set_rows") }
-unsafe fn contain_volatile_functions(clause: *mut Node) -> bool { unimplemented!("TODO(pg-port): optimizer/util/clauses.rs contain_volatile_functions") }
-unsafe fn find_base_rel(root: *mut PlannerInfo, relid: c_int) -> *mut RelOptInfo { unimplemented!("TODO(pg-port): optimizer/util/relnode.rs find_base_rel") }
-unsafe fn find_base_rel_noerr(root: *mut PlannerInfo, relid: Index) -> *mut RelOptInfo { unimplemented!("TODO(pg-port): optimizer/util/relnode.rs find_base_rel_noerr") }
-unsafe fn find_join_rel(root: *mut PlannerInfo, relids: Relids) -> *mut RelOptInfo { unimplemented!("TODO(pg-port): optimizer/util/relnode.rs find_join_rel") }
-unsafe fn has_unique_index(rel: *mut RelOptInfo, attno: AttrNumber) -> bool { unimplemented!("TODO(pg-port): optimizer/util/plancat.rs has_unique_index") }
-unsafe fn match_index_to_operand(operand: *mut Node, indexcol: c_int, index: *mut IndexOptInfo) -> bool { unimplemented!("TODO(pg-port): optimizer/path/indxpath.rs match_index_to_operand") }
-unsafe fn exprs_known_equal(root: *mut PlannerInfo, item1: *mut Node, item2: *mut Node, opfamily: Oid) -> bool { unimplemented!("TODO(pg-port): optimizer/path/equivclass.rs exprs_known_equal") }
-unsafe fn cost_qual_eval_node(cost: *mut QualCost, qual: *mut Node, root: *mut PlannerInfo) { unimplemented!("TODO(pg-port): optimizer/path/costsize.rs cost_qual_eval_node") }
-unsafe fn index_pages_fetched(tuples_fetched: f64, pages: BlockNumber, index_pages: f64, root: *mut PlannerInfo) -> f64 { unimplemented!("TODO(pg-port): optimizer/path/costsize.rs index_pages_fetched") }
-unsafe fn get_tablespace_page_costs(spcid: Oid, spc_random_page_cost: *mut f64, spc_seq_page_cost: *mut f64) { unimplemented!("TODO(pg-port): utils/cache/spccache.rs get_tablespace_page_costs") }
-unsafe fn clamp_row_est(nrows: f64) -> f64 { unimplemented!("TODO(pg-port): optimizer/path/costsize.rs clamp_row_est") }
-unsafe fn predicate_implied_by(predicate_list: *mut List, clause_list: *mut List, weak: bool) -> bool { unimplemented!("TODO(pg-port): optimizer/util/predtest.rs predicate_implied_by") }
-unsafe fn hash_agg_entry_size(numTrans: c_int, tupleWidth: Size, transitionSpace: Size) -> Size { unimplemented!("TODO(pg-port): executor/nodeAgg.rs hash_agg_entry_size") }
-unsafe fn NumRelids(root: *mut PlannerInfo, clause: *mut Node) -> c_int { unimplemented!("TODO(pg-port): optimizer/util/clauses.rs NumRelids") }
-unsafe fn statext_ndistinct_load(mvoid: Oid, inh: bool) -> *mut MVNDistinct { unimplemented!("TODO(pg-port): statistics/extended_stats.rs statext_ndistinct_load") }
-unsafe fn statext_expressions_load(stxoid: Oid, inh: bool, idx: c_int) -> HeapTuple { unimplemented!("TODO(pg-port): statistics/extended_stats.rs statext_expressions_load") }
+unsafe fn clauselist_selectivity(root: *mut PlannerInfo, clauses: *mut List, varRelid: c_int, jointype: JoinType, sjinfo: *mut SpecialJoinInfo) -> Selectivity { crate::optimizer::path::clausesel::clauselist_selectivity(root as _, clauses as _, varRelid, jointype as _, sjinfo as _) as _ }
+unsafe fn clause_selectivity(root: *mut PlannerInfo, clause: *mut Node, varRelid: c_int, jointype: JoinType, sjinfo: *mut SpecialJoinInfo) -> Selectivity { crate::optimizer::path::clausesel::clause_selectivity(root as _, clause as _, varRelid, jointype as _, sjinfo as _) as _ }
+unsafe fn restriction_selectivity(root: *mut PlannerInfo, operatorid: Oid, args: *mut List, inputcollid: Oid, varRelid: c_int) -> Selectivity { crate::optimizer::util::plancat::restriction_selectivity(root as _, operatorid, args as _, inputcollid, varRelid) as _ }
+unsafe fn join_selectivity(root: *mut PlannerInfo, operatorid: Oid, args: *mut List, inputcollid: Oid, jointype: JoinType, sjinfo: *mut SpecialJoinInfo) -> Selectivity { crate::optimizer::util::plancat::join_selectivity(root as _, operatorid, args as _, inputcollid, jointype as _, sjinfo as _) as _ }
+unsafe fn estimate_expression_value(root: *mut PlannerInfo, node: *mut Node) -> *mut Node { crate::optimizer::util::clauses::estimate_expression_value(root as _, node as _) as _ }
+unsafe fn expression_returns_set_rows(root: *mut PlannerInfo, clause: *mut Node) -> f64 { crate::optimizer::util::clauses::expression_returns_set_rows(root as _, clause as _) as _ }
+unsafe fn contain_volatile_functions(clause: *mut Node) -> bool { crate::optimizer::util::clauses::contain_volatile_functions(clause as _) }
+unsafe fn find_base_rel(root: *mut PlannerInfo, relid: c_int) -> *mut RelOptInfo { crate::optimizer::util::relnode::find_base_rel(root as _, relid) as _ }
+unsafe fn find_base_rel_noerr(root: *mut PlannerInfo, relid: Index) -> *mut RelOptInfo { crate::optimizer::util::relnode::find_base_rel_noerr(root as _, relid as _) as _ }
+unsafe fn find_join_rel(root: *mut PlannerInfo, relids: Relids) -> *mut RelOptInfo { crate::optimizer::util::relnode::find_join_rel(root as _, relids as _) as _ }
+unsafe fn has_unique_index(rel: *mut RelOptInfo, attno: AttrNumber) -> bool { crate::optimizer::util::plancat::has_unique_index(rel as _, attno) }
+unsafe fn match_index_to_operand(operand: *mut Node, indexcol: c_int, index: *mut IndexOptInfo) -> bool { crate::optimizer::path::indxpath::match_index_to_operand(operand as _, indexcol, index as _) }
+unsafe fn exprs_known_equal(root: *mut PlannerInfo, item1: *mut Node, item2: *mut Node, opfamily: Oid) -> bool { crate::optimizer::path::equivclass::exprs_known_equal(root as _, item1 as _, item2 as _, opfamily) }
+unsafe fn cost_qual_eval_node(cost: *mut QualCost, qual: *mut Node, root: *mut PlannerInfo) { crate::optimizer::path::costsize::cost_qual_eval_node(cost as _, qual as _, root as _) }
+unsafe fn index_pages_fetched(tuples_fetched: f64, pages: BlockNumber, index_pages: f64, root: *mut PlannerInfo) -> f64 { crate::optimizer::path::costsize::index_pages_fetched(tuples_fetched, pages, index_pages, root as _) }
+unsafe fn get_tablespace_page_costs(spcid: Oid, spc_random_page_cost: *mut f64, spc_seq_page_cost: *mut f64) { crate::utils::cache::spccache::get_tablespace_page_costs(spcid, spc_random_page_cost, spc_seq_page_cost) }
+unsafe fn clamp_row_est(nrows: f64) -> f64 { crate::optimizer::path::costsize::clamp_row_est(nrows) }
+unsafe fn predicate_implied_by(predicate_list: *mut List, clause_list: *mut List, weak: bool) -> bool { crate::optimizer::util::predtest::predicate_implied_by(predicate_list as _, clause_list as _, weak) }
+unsafe fn hash_agg_entry_size(numTrans: c_int, tupleWidth: Size, transitionSpace: Size) -> Size { crate::executor::nodeAgg::hash_agg_entry_size(numTrans, tupleWidth as _, transitionSpace as _) as _ }
+unsafe fn NumRelids(root: *mut PlannerInfo, clause: *mut Node) -> c_int { crate::optimizer::util::clauses::NumRelids(root as _, clause as _) }
+unsafe fn statext_ndistinct_load(mvoid: Oid, inh: bool) -> *mut MVNDistinct { crate::statistics::mvdistinct::statext_ndistinct_load(mvoid, inh) as _ }
+unsafe fn statext_expressions_load(stxoid: Oid, inh: bool, idx: c_int) -> HeapTuple { crate::statistics::extended_stats::statext_expressions_load(stxoid, inh, idx) as _ }
 
 // --- nodes/nodeFuncs.c, rewrite/rewriteManip.c, optimizer ---
-unsafe fn exprType(expr: *mut Node) -> Oid { unimplemented!("TODO(pg-port): nodes/nodeFuncs.rs exprType") }
-unsafe fn exprTypmod(expr: *mut Node) -> int32 { unimplemented!("TODO(pg-port): nodes/nodeFuncs.rs exprTypmod") }
-unsafe fn exprCollation(expr: *mut Node) -> Oid { unimplemented!("TODO(pg-port): nodes/nodeFuncs.rs exprCollation") }
-unsafe fn equal(a: *const c_void, b: *const c_void) -> bool { unimplemented!("TODO(pg-port): nodes/equalfuncs.rs equal") }
-unsafe fn is_opclause(clause: *mut Node) -> bool { unimplemented!("TODO(pg-port): nodes/nodeFuncs.rs is_opclause") }
-unsafe fn get_leftop(clause: *mut Expr) -> *mut Node { unimplemented!("TODO(pg-port): nodes/nodeFuncs.rs get_leftop") }
-unsafe fn get_rightop(clause: *mut Expr) -> *mut Node { unimplemented!("TODO(pg-port): nodes/nodeFuncs.rs get_rightop") }
-unsafe fn pull_varnos(root: *mut PlannerInfo, node: *mut Node) -> Relids { unimplemented!("TODO(pg-port): optimizer/util/var.rs pull_varnos") }
-unsafe fn pull_var_clause(node: *mut Node, flags: c_int) -> *mut List { unimplemented!("TODO(pg-port): optimizer/util/var.rs pull_var_clause") }
-unsafe fn remove_nulling_relids(node: *mut Node, removable_relids: Relids, except_relids: Relids) -> *mut Node { unimplemented!("TODO(pg-port): rewrite/rewriteManip.rs remove_nulling_relids") }
-unsafe fn expression_tree_walker(node: *mut Node, walker: unsafe fn(*mut Node, *mut c_void) -> bool, context: *mut c_void) -> bool { unimplemented!("TODO(pg-port): nodes/nodeFuncs.rs expression_tree_walker") }
-unsafe fn expression_tree_mutator(node: *mut Node, mutator: unsafe fn(*mut Node, *mut c_void) -> *mut Node, context: *mut c_void) -> *mut Node { unimplemented!("TODO(pg-port): nodes/nodeFuncs.rs expression_tree_mutator") }
+unsafe fn exprType(expr: *mut Node) -> Oid { crate::nodes::nodeFuncs::exprType(expr as _) }
+unsafe fn exprTypmod(expr: *mut Node) -> int32 { crate::nodes::nodeFuncs::exprTypmod(expr as _) as _ }
+unsafe fn exprCollation(expr: *mut Node) -> Oid { crate::nodes::nodeFuncs::exprCollation(expr as _) }
+unsafe fn equal(a: *const c_void, b: *const c_void) -> bool { crate::nodes::equalfuncs::equal(a as _, b as _) }
+unsafe fn is_opclause(clause: *mut Node) -> bool { crate::optimizer::util::clauses::is_opclause(clause as _) }
+unsafe fn get_leftop(clause: *mut Expr) -> *mut Node { crate::nodes::print::get_leftop(clause as _) as _ }
+unsafe fn get_rightop(clause: *mut Expr) -> *mut Node { crate::nodes::print::get_rightop(clause as _) as _ }
+unsafe fn pull_varnos(root: *mut PlannerInfo, node: *mut Node) -> Relids { crate::optimizer::util::var::pull_varnos(root as _, node as _) as _ }
+unsafe fn pull_var_clause(node: *mut Node, flags: c_int) -> *mut List { crate::optimizer::util::var::pull_var_clause(node as _, flags) as _ }
+unsafe fn remove_nulling_relids(node: *mut Node, removable_relids: Relids, except_relids: Relids) -> *mut Node { crate::rewrite::rewriteManip::remove_nulling_relids(node as _, removable_relids as _, except_relids as _) as _ }
+unsafe fn expression_tree_walker(node: *mut Node, walker: unsafe fn(*mut Node, *mut c_void) -> bool, context: *mut c_void) -> bool { crate::nodes::nodeFuncs::expression_tree_walker_impl(node as _, Some(core::mem::transmute(walker)), context) }
+unsafe fn expression_tree_mutator(node: *mut Node, mutator: unsafe fn(*mut Node, *mut c_void) -> *mut Node, context: *mut c_void) -> *mut Node { crate::nodes::nodeFuncs::expression_tree_mutator_impl(node as _, Some(core::mem::transmute(mutator)), context) as _ }
 const PVC_RECURSE_AGGREGATES: c_int = 0x0002;
 const PVC_RECURSE_WINDOWFUNCS: c_int = 0x0008;
 const PVC_RECURSE_PLACEHOLDERS: c_int = 0x0020;
 
 // --- parser/parsetree.c, parse_relation, parse_clause ---
-unsafe fn getRTEPermissionInfo(rteperminfos: *mut List, rte: *mut RangeTblEntry) -> *mut RTEPermissionInfo { unimplemented!("TODO(pg-port): parser/parse_relation.rs getRTEPermissionInfo") }
-unsafe fn get_tle_by_resno(tlist: *mut List, resno: AttrNumber) -> *mut TargetEntry { unimplemented!("TODO(pg-port): parser/parsetree.rs get_tle_by_resno") }
-unsafe fn targetIsInSortList(tle: *mut TargetEntry, sortop: Oid, sortlist: *mut List) -> bool { unimplemented!("TODO(pg-port): parser/parse_clause.rs targetIsInSortList") }
-unsafe fn makeConst(consttype: Oid, consttypmod: int32, constcollid: Oid, constlen: c_int, constvalue: Datum, constisnull: bool, constbyval: bool) -> *mut Const { unimplemented!("TODO(pg-port): nodes/makefuncs.rs makeConst") }
+unsafe fn getRTEPermissionInfo(rteperminfos: *mut List, rte: *mut RangeTblEntry) -> *mut RTEPermissionInfo { crate::parser::parse_relation::getRTEPermissionInfo(rteperminfos as _, rte as _) as _ }
+unsafe fn get_tle_by_resno(tlist: *mut List, resno: AttrNumber) -> *mut TargetEntry { crate::parser::parse_relation::get_tle_by_resno(tlist as _, resno) as _ }
+unsafe fn targetIsInSortList(tle: *mut TargetEntry, sortop: Oid, sortlist: *mut List) -> bool { crate::parser::parse_clause::targetIsInSortList(tle as _, sortop, sortlist as _) }
+unsafe fn makeConst(consttype: Oid, consttypmod: int32, constcollid: Oid, constlen: c_int, constvalue: Datum, constisnull: bool, constbyval: bool) -> *mut Const { crate::nodes::makefuncs::makeConst(consttype, consttypmod, constcollid, constlen, constvalue, constisnull, constbyval) as _ }
 
 // --- utils/adt: array, datum, network, numeric, timestamp ---
-unsafe fn DatumGetArrayTypeP(d: Datum) -> *mut ArrayType { unimplemented!("TODO(pg-port): utils/adt/arrayfuncs.rs DatumGetArrayTypeP") }
+unsafe fn DatumGetArrayTypeP(d: Datum) -> *mut ArrayType { crate::access::nbtree::nbtpreprocesskeys::DatumGetArrayTypeP(d as _) as _ }
 unsafe fn deconstruct_array(array: *mut ArrayType, elmtype: Oid, elmlen: int16, elmbyval: bool, elmalign: c_char, elemsp: *mut *mut Datum, nullsp: *mut *mut bool, nelemsp: *mut c_int) { unimplemented!("TODO(pg-port): utils/adt/arrayfuncs.rs deconstruct_array") }
 unsafe fn ARR_ELEMTYPE(a: *mut ArrayType) -> Oid { unimplemented!("TODO(pg-port): utils/adt/array.rs ARR_ELEMTYPE") }
-unsafe fn ARR_NDIM(a: *mut ArrayType) -> c_int { unimplemented!("TODO(pg-port): utils/adt/array.rs ARR_NDIM") }
+unsafe fn ARR_NDIM(a: *mut ArrayType) -> c_int { crate::utils::array::ARR_NDIM(a as _) as _ }
 unsafe fn ARR_DIMS(a: *mut ArrayType) -> *mut c_int { unimplemented!("TODO(pg-port): utils/adt/array.rs ARR_DIMS") }
-unsafe fn ArrayGetNItems(ndim: c_int, dims: *mut c_int) -> c_int { unimplemented!("TODO(pg-port): utils/adt/arrayutils.rs ArrayGetNItems") }
+unsafe fn ArrayGetNItems(ndim: c_int, dims: *mut c_int) -> c_int { crate::utils::adt::arrayutils::ArrayGetNItems(ndim as _, dims as _) as _ }
 unsafe fn datumCopy(value: Datum, typByVal: bool, typLen: int16) -> Datum { unimplemented!("TODO(pg-port): utils/adt/datum.rs datumCopy") }
 unsafe fn convert_network_to_scalar(value: Datum, typid: Oid, failure: *mut bool) -> f64 { unimplemented!("TODO(pg-port): utils/adt/network.rs convert_network_to_scalar") }
-unsafe fn date2timestamp_no_overflow(dateVal: int32) -> f64 { unimplemented!("TODO(pg-port): utils/adt/date.rs date2timestamp_no_overflow") }
+unsafe fn date2timestamp_no_overflow(dateVal: int32) -> f64 { crate::utils::adt::date::date2timestamp_no_overflow(dateVal as _) as _ }
 
 // --- access/table, index, visibilitymap, bufmgr, tableam, snapmgr ---
 unsafe fn table_open(relationId: Oid, lockmode: c_int) -> *mut Relation { unimplemented!("TODO(pg-port): access/table/table.rs table_open") }
@@ -837,72 +669,72 @@ unsafe fn table_close(relation: *mut Relation, lockmode: c_int) { unimplemented!
 unsafe fn index_open(relationId: Oid, lockmode: c_int) -> *mut Relation { unimplemented!("TODO(pg-port): access/index/indexam.rs index_open") }
 unsafe fn index_close(relation: *mut Relation, lockmode: c_int) { unimplemented!("TODO(pg-port): access/index/indexam.rs index_close") }
 unsafe fn table_slot_create(relation: *mut Relation, reglist: *mut *mut List) -> *mut TupleTableSlot { unimplemented!("TODO(pg-port): access/table/tableam.rs table_slot_create") }
-unsafe fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot) { unimplemented!("TODO(pg-port): executor/execTuples.rs ExecDropSingleTupleTableSlot") }
-unsafe fn ExecClearTuple(slot: *mut TupleTableSlot) { unimplemented!("TODO(pg-port): executor/execTuples.rs ExecClearTuple") }
+unsafe fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot) { crate::executor::execTuples::ExecDropSingleTupleTableSlot(slot as _) }
+unsafe fn ExecClearTuple(slot: *mut TupleTableSlot) { unimplemented!() }
 unsafe fn index_beginscan(heapRelation: *mut Relation, indexRelation: *mut Relation, snapshot: *mut SnapshotData, instrument: *mut c_void, nkeys: c_int, norderbys: c_int) -> IndexScanDesc { unimplemented!("TODO(pg-port): access/index/indexam.rs index_beginscan") }
 unsafe fn index_rescan(scan: IndexScanDesc, keys: ScanKey, nkeys: c_int, orderbys: ScanKey, norderbys: c_int) { unimplemented!("TODO(pg-port): access/index/indexam.rs index_rescan") }
-unsafe fn index_endscan(scan: IndexScanDesc) { unimplemented!("TODO(pg-port): access/index/indexam.rs index_endscan") }
-unsafe fn index_getnext_tid(scan: IndexScanDesc, direction: ScanDirection) -> ItemPointer { unimplemented!("TODO(pg-port): access/index/indexam.rs index_getnext_tid") }
-unsafe fn index_fetch_heap(scan: IndexScanDesc, slot: *mut TupleTableSlot) -> bool { unimplemented!("TODO(pg-port): access/index/indexam.rs index_fetch_heap") }
+unsafe fn index_endscan(scan: IndexScanDesc) { crate::access::index::indexam::index_endscan(scan as _) }
+unsafe fn index_getnext_tid(scan: IndexScanDesc, direction: ScanDirection) -> ItemPointer { crate::access::index::indexam::index_getnext_tid(scan as _, direction as _) as _ }
+unsafe fn index_fetch_heap(scan: IndexScanDesc, slot: *mut TupleTableSlot) -> bool { crate::access::index::indexam::index_fetch_heap(scan as _, slot as _) }
 unsafe fn index_deform_tuple(tup: *mut c_void, tupleDescriptor: *mut c_void, values: *mut Datum, isnull: *mut bool) { unimplemented!("TODO(pg-port): access/common/indextuple.rs index_deform_tuple") }
 unsafe fn ScanKeyEntryInitialize(entry: ScanKey, flags: c_int, attributeNumber: AttrNumber, strategy: StrategyNumber, subtype: Oid, collation: Oid, procedure: RegProcedure, argument: Datum) { unimplemented!("TODO(pg-port): access/common/scankey.rs ScanKeyEntryInitialize") }
 unsafe fn VM_ALL_VISIBLE(rel: *mut Relation, block: BlockNumber, vmbuf: *mut Buffer) -> bool { unimplemented!("TODO(pg-port): access/heap/visibilitymap.rs VM_ALL_VISIBLE") }
 unsafe fn ReleaseBuffer(buffer: Buffer) { unimplemented!("TODO(pg-port): storage/buffer/bufmgr.rs ReleaseBuffer") }
-unsafe fn GlobalVisTestFor(rel: *mut Relation) -> *mut c_void { unimplemented!("TODO(pg-port): storage/ipc/procarray.rs GlobalVisTestFor") }
-unsafe fn ItemPointerGetBlockNumber(pointer: ItemPointer) -> BlockNumber { unimplemented!("TODO(pg-port): storage/itemptr.rs ItemPointerGetBlockNumber") }
-unsafe fn ItemPointerGetBlockNumberNoCheck(pointer: ItemPointer) -> BlockNumber { unimplemented!("TODO(pg-port): storage/itemptr.rs ItemPointerGetBlockNumberNoCheck") }
-unsafe fn ItemPointerGetOffsetNumberNoCheck(pointer: ItemPointer) -> OffsetNumber { unimplemented!("TODO(pg-port): storage/itemptr.rs ItemPointerGetOffsetNumberNoCheck") }
+unsafe fn GlobalVisTestFor(rel: *mut Relation) -> *mut c_void { crate::storage::ipc::procarray::GlobalVisTestFor(rel as _) as _ }
+unsafe fn ItemPointerGetBlockNumber(pointer: ItemPointer) -> BlockNumber { crate::storage::itemptr::ItemPointerGetBlockNumber(pointer as _) as _ }
+unsafe fn ItemPointerGetBlockNumberNoCheck(pointer: ItemPointer) -> BlockNumber { crate::storage::itemptr::ItemPointerGetBlockNumberNoCheck(pointer as _) as _ }
+unsafe fn ItemPointerGetOffsetNumberNoCheck(pointer: ItemPointer) -> OffsetNumber { crate::storage::itemptr::ItemPointerGetOffsetNumberNoCheck(pointer as _) as _ }
 unsafe fn RelationGetRelationName(relation: *mut Relation) -> *mut c_char { unimplemented!("TODO(pg-port): utils/rel.rs RelationGetRelationName") }
 
 // --- access/gin.c, access/brin.c stats ---
-unsafe fn ginGetStats(index: *mut Relation, stats: *mut GinStatsData) { unimplemented!("TODO(pg-port): access/gin/ginutil.rs ginGetStats") }
-unsafe fn brinGetStats(index: *mut Relation, stats: *mut BrinStatsData) { unimplemented!("TODO(pg-port): access/brin/brin.rs brinGetStats") }
+unsafe fn ginGetStats(index: *mut Relation, stats: *mut GinStatsData) { unimplemented!() }
+unsafe fn brinGetStats(index: *mut Relation, stats: *mut BrinStatsData) { crate::access::brin::brin::brinGetStats(index as _, stats as _) }
 
 // --- utils/mmgr ---
 // palloc/palloc0/pfree/pstrdup/MemoryContext*/AllocSetContextCreate/
 // ALLOCSET_DEFAULT_SIZES/CurrentMemoryContext come from the prelude.
 
 // --- utils/acl ---
-unsafe fn pg_class_aclcheck(table_oid: Oid, roleid: Oid, mode: u64) -> c_int { unimplemented!("TODO(pg-port): utils/adt/acl.rs pg_class_aclcheck") }
+unsafe fn pg_class_aclcheck(table_oid: Oid, roleid: Oid, mode: u64) -> c_int { crate::catalog::aclchk::pg_class_aclcheck(table_oid as _, roleid as _, mode as _) as _ }
 unsafe fn pg_attribute_aclcheck(table_oid: Oid, attnum: AttrNumber, roleid: Oid, mode: u64) -> c_int { unimplemented!("TODO(pg-port): utils/adt/acl.rs pg_attribute_aclcheck") }
 unsafe fn pg_attribute_aclcheck_all(table_oid: Oid, roleid: Oid, mode: u64, how: c_int) -> c_int { unimplemented!("TODO(pg-port): utils/adt/acl.rs pg_attribute_aclcheck_all") }
-unsafe fn GetUserId() -> Oid { unimplemented!("TODO(pg-port): utils/init/miscinit.rs GetUserId") }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 
 // --- pg_locale ---
 unsafe fn pg_newlocale_from_collation(collid: Oid) -> pg_locale_t { unimplemented!("TODO(pg-port): utils/adt/pg_locale.rs pg_newlocale_from_collation") }
 unsafe fn pg_strxfrm(dest: *mut c_char, src: *const c_char, destsize: usize, locale: pg_locale_t) -> usize { unimplemented!("TODO(pg-port): utils/adt/pg_locale.rs pg_strxfrm") }
 
 // --- bitmapset ---
-unsafe fn bms_is_empty(a: Relids) -> bool { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_is_empty") }
-unsafe fn bms_is_member(x: c_int, a: Relids) -> bool { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_is_member") }
-unsafe fn bms_is_subset(a: Relids, b: Relids) -> bool { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_is_subset") }
-unsafe fn bms_overlap(a: Relids, b: Relids) -> bool { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_overlap") }
-unsafe fn bms_difference(a: Relids, b: Relids) -> Relids { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_difference") }
-unsafe fn bms_free(a: Relids) { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_free") }
-unsafe fn bms_get_singleton_member(a: Relids, member: *mut c_int) -> bool { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_get_singleton_member") }
-unsafe fn bms_make_singleton(x: c_int) -> Relids { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_make_singleton") }
-unsafe fn bms_add_member(a: Relids, x: c_int) -> Relids { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_add_member") }
-unsafe fn bms_num_members(a: Relids) -> c_int { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_num_members") }
-unsafe fn bms_next_member(a: Relids, prevbit: c_int) -> c_int { unimplemented!("TODO(pg-port): nodes/bitmapset.rs bms_next_member") }
+unsafe fn bms_is_empty(a: Relids) -> bool { crate::nodes::bitmapset::bms_is_empty(a as _) }
+unsafe fn bms_is_member(x: c_int, a: Relids) -> bool { crate::nodes::bitmapset::bms_is_member(x, a as _) }
+unsafe fn bms_is_subset(a: Relids, b: Relids) -> bool { crate::nodes::bitmapset::bms_is_subset(a as _, b as _) }
+unsafe fn bms_overlap(a: Relids, b: Relids) -> bool { crate::nodes::bitmapset::bms_overlap(a as _, b as _) }
+unsafe fn bms_difference(a: Relids, b: Relids) -> Relids { crate::nodes::bitmapset::bms_difference(a as _, b as _) as _ }
+unsafe fn bms_free(a: Relids) { crate::nodes::bitmapset::bms_free(a as _) }
+unsafe fn bms_get_singleton_member(a: Relids, member: *mut c_int) -> bool { crate::nodes::bitmapset::bms_get_singleton_member(a as _, member as _) }
+unsafe fn bms_make_singleton(x: c_int) -> Relids { crate::nodes::bitmapset::bms_make_singleton(x) as _ }
+unsafe fn bms_add_member(a: Relids, x: c_int) -> Relids { crate::nodes::bitmapset::bms_add_member(a as _, x) as _ }
+unsafe fn bms_num_members(a: Relids) -> c_int { crate::nodes::bitmapset::bms_num_members(a as _) as _ }
+unsafe fn bms_next_member(a: Relids, prevbit: c_int) -> c_int { crate::nodes::bitmapset::bms_next_member(a as _, prevbit) as _ }
 
 // --- array_selfuncs.c (sibling) ---
 unsafe fn scalararraysel_containment(root: *mut PlannerInfo, leftop: *mut Node, rightop: *mut Node, elemtype: Oid, isEquality: bool, useOr: bool, varRelid: c_int) -> Selectivity { unimplemented!("TODO(pg-port): utils/adt/array_selfuncs.rs scalararraysel_containment") }
 
 // --- fmgr ---
-unsafe fn fmgr_info(functionId: Oid, finfo: *mut FmgrInfo) { unimplemented!("TODO(pg-port): utils/fmgr.rs fmgr_info") }
-unsafe fn set_fn_opclass_options(flinfo: *mut FmgrInfo, options: *mut c_void) { unimplemented!("TODO(pg-port): utils/fmgr.rs set_fn_opclass_options") }
-unsafe fn FunctionCall2Coll(flinfo: *mut FmgrInfo, collation: Oid, arg1: Datum, arg2: Datum) -> Datum { unimplemented!("TODO(pg-port): utils/fmgr.rs FunctionCall2Coll") }
+unsafe fn fmgr_info(functionId: Oid, finfo: *mut FmgrInfo) { crate::utils::fmgr::fmgr_info(functionId as _, finfo as _) }
+unsafe fn set_fn_opclass_options(flinfo: *mut FmgrInfo, options: *mut c_void) { crate::utils::fmgr::set_fn_opclass_options(flinfo as _, options as _) }
+unsafe fn FunctionCall2Coll(flinfo: *mut FmgrInfo, collation: Oid, arg1: Datum, arg2: Datum) -> Datum { crate::utils::fmgr::FunctionCall2Coll(flinfo as _, collation as _, arg1 as _, arg2 as _) as _ }
 
 // DirectFunctionCall1 for numeric_float8_no_overflow / similar single-arg.
 // fmgroids: numeric_float8_no_overflow lives in utils/adt/numeric.rs
 unsafe fn numeric_float8_no_overflow(fcinfo: FunctionCallInfo) -> Datum { unimplemented!("TODO(pg-port): utils/adt/numeric.rs numeric_float8_no_overflow") }
 
 // FunctionCall4Coll / FunctionCall5Coll / FunctionCall7Coll (utils/fmgr.rs)
-unsafe fn FunctionCall4Coll(flinfo: *mut FmgrInfo, collation: Oid, arg1: Datum, arg2: Datum, arg3: Datum, arg4: Datum) -> Datum { unimplemented!("TODO(pg-port): utils/fmgr.rs FunctionCall4Coll") }
-unsafe fn FunctionCall5Coll(flinfo: *mut FmgrInfo, collation: Oid, arg1: Datum, arg2: Datum, arg3: Datum, arg4: Datum, arg5: Datum) -> Datum { unimplemented!("TODO(pg-port): utils/fmgr.rs FunctionCall5Coll") }
-unsafe fn FunctionCall7Coll(flinfo: *mut FmgrInfo, collation: Oid, arg1: Datum, arg2: Datum, arg3: Datum, arg4: Datum, arg5: Datum, arg6: Datum, arg7: Datum) -> Datum { unimplemented!("TODO(pg-port): utils/fmgr.rs FunctionCall7Coll") }
+unsafe fn FunctionCall4Coll(flinfo: *mut FmgrInfo, collation: Oid, arg1: Datum, arg2: Datum, arg3: Datum, arg4: Datum) -> Datum { crate::utils::fmgr::FunctionCall4Coll(flinfo as _, collation as _, arg1 as _, arg2 as _, arg3 as _, arg4 as _) as _ }
+unsafe fn FunctionCall5Coll(flinfo: *mut FmgrInfo, collation: Oid, arg1: Datum, arg2: Datum, arg3: Datum, arg4: Datum, arg5: Datum) -> Datum { crate::utils::fmgr::FunctionCall5Coll(flinfo as _, collation as _, arg1 as _, arg2 as _, arg3 as _, arg4 as _, arg5 as _) as _ }
+unsafe fn FunctionCall7Coll(flinfo: *mut FmgrInfo, collation: Oid, arg1: Datum, arg2: Datum, arg3: Datum, arg4: Datum, arg5: Datum, arg6: Datum, arg7: Datum) -> Datum { crate::utils::fmgr::FunctionCall7Coll(flinfo as _, collation as _, arg1 as _, arg2 as _, arg3 as _, arg4 as _, arg5 as _, arg6 as _, arg7 as _) as _ }
 // DirectFunctionCall5Coll for eqjoinsel re-entry
-unsafe fn DirectFunctionCall5Coll(func: unsafe fn(FunctionCallInfo) -> Datum, collation: Oid, arg1: Datum, arg2: Datum, arg3: Datum, arg4: Datum, arg5: Datum) -> Datum { unimplemented!("TODO(pg-port): utils/fmgr.rs DirectFunctionCall5Coll local helper") }
+unsafe fn DirectFunctionCall5Coll(func: unsafe fn(FunctionCallInfo) -> Datum, collation: Oid, arg1: Datum, arg2: Datum, arg3: Datum, arg4: Datum, arg5: Datum) -> Datum { crate::utils::fmgr::DirectFunctionCall5Coll(func as _, collation as _, arg1 as _, arg2 as _, arg3 as _, arg4 as _, arg5 as _) as _ }
 
 // DatumGet helpers not present in postgres.rs prelude
 unsafe fn DatumGetInt64(d: Datum) -> i64 { d as i64 }
@@ -915,8 +747,8 @@ unsafe fn DatumGetIntervalP(d: Datum) -> *mut Interval { DatumGetPointer(d) as *
 unsafe fn DatumGetTimeTzADTP(d: Datum) -> *mut TimeTzADT { DatumGetPointer(d) as *mut TimeTzADT }
 unsafe fn DatumGetByteaPP(d: Datum) -> *mut bytea { DatumGetPointer(d) as *mut bytea }
 unsafe fn TextDatumGetCString(d: Datum) -> *mut c_char { unimplemented!("TODO(pg-port): utils/adt/varlena.rs TextDatumGetCString") }
-unsafe fn VARSIZE_ANY_EXHDR(p: *mut bytea) -> c_int { unimplemented!("TODO(pg-port): c.h VARSIZE_ANY_EXHDR") }
-unsafe fn VARDATA_ANY(p: *mut bytea) -> *mut c_char { unimplemented!("TODO(pg-port): c.h VARDATA_ANY") }
+unsafe fn VARSIZE_ANY_EXHDR(p: *mut bytea) -> c_int { crate::varatt::VARSIZE_ANY_EXHDR(p as _) as _ }
+unsafe fn VARDATA_ANY(p: *mut bytea) -> *mut c_char { crate::varatt::VARDATA_ANY(p as _) as _ }
 unsafe fn NameStr(n: &NameData) -> *const c_char { n.data.as_ptr() }
 
 // IS_SIMPLE_REL / planner_rt_fetch helpers (pathnodes.h, parsetree.h)
@@ -933,7 +765,9 @@ use crate::nodes::pg_list::{
     list_head, list_length, list_member_int, list_member_ptr, list_nth, list_nth_int, lnext,
     lsecond, ListCell,
 };
-use crate::{current_cell, foreach, list_make2};
+use crate::{
+    current_cell, for_each_from, forboth, foreach, foreach_delete_current, lfirst_node, list_make2,
+};
 // fmgr / PG_* macros (crate-root #[macro_export]).
 use crate::{
     DirectFunctionCall1, FunctionCallInvoke, InitFunctionCallInfoData, LOCAL_FCINFO,
@@ -951,6 +785,36 @@ const NIL: *mut List = std::ptr::null_mut();
  */
 pub unsafe fn eqsel(fcinfo: FunctionCallInfo) -> Datum {
     PG_RETURN_FLOAT8!(eqsel_internal(fcinfo, false) as float8)
+}
+
+// Restriction-selectivity estimators for pattern-match operators (LIKE/regex).
+// patternsel() (histogram/prefix-based estimation, utils/adt/selfuncs.c) is not
+// yet ported; return the fixed default match selectivity so the planner gets a
+// usable estimate. This only affects plan costing, not query results.
+pub unsafe fn regexeqsel(_fcinfo: FunctionCallInfo) -> Datum {
+    if std::env::var_os("PDB_RX").is_some() { eprintln!("PDB_RX regexeqsel called"); }
+    PG_RETURN_FLOAT8!(DEFAULT_MATCH_SEL as float8)
+}
+pub unsafe fn regexnesel(_fcinfo: FunctionCallInfo) -> Datum {
+    PG_RETURN_FLOAT8!((1.0 - DEFAULT_MATCH_SEL) as float8)
+}
+pub unsafe fn likesel(_fcinfo: FunctionCallInfo) -> Datum {
+    PG_RETURN_FLOAT8!(DEFAULT_MATCH_SEL as float8)
+}
+pub unsafe fn nlikesel(_fcinfo: FunctionCallInfo) -> Datum {
+    PG_RETURN_FLOAT8!((1.0 - DEFAULT_MATCH_SEL) as float8)
+}
+pub unsafe fn icregexeqsel(_fcinfo: FunctionCallInfo) -> Datum {
+    PG_RETURN_FLOAT8!(DEFAULT_MATCH_SEL as float8)
+}
+pub unsafe fn icregexnesel(_fcinfo: FunctionCallInfo) -> Datum {
+    PG_RETURN_FLOAT8!((1.0 - DEFAULT_MATCH_SEL) as float8)
+}
+pub unsafe fn iclikesel(_fcinfo: FunctionCallInfo) -> Datum {
+    PG_RETURN_FLOAT8!(DEFAULT_MATCH_SEL as float8)
+}
+pub unsafe fn icnlikesel(_fcinfo: FunctionCallInfo) -> Datum {
+    PG_RETURN_FLOAT8!((1.0 - DEFAULT_MATCH_SEL) as float8)
 }
 
 /*
@@ -1280,17 +1144,17 @@ unsafe fn scalarineqsel(
             let mut block: f64;
             let density: f64;
 
-            if (*(*vardata).rel).pages == 0.0 {
+            if (*(*vardata).rel).pages == 0 {
                 return 1.0;
             }
 
             itemptr = DatumGetPointer(constval) as ItemPointer;
             block = ItemPointerGetBlockNumberNoCheck(itemptr) as f64;
 
-            let mut density = (*(*vardata).rel).tuples / ((*(*vardata).rel).pages - 0.5);
+            let mut density = (*(*vardata).rel).tuples / ((*(*vardata).rel).pages as f64 - 0.5);
 
             /* If target is the last page, use half the density. */
-            if block >= (*(*vardata).rel).pages - 1.0 {
+            if block >= (*(*vardata).rel).pages as f64 - 1.0 {
                 density *= 0.5;
             }
 
@@ -1299,7 +1163,7 @@ unsafe fn scalarineqsel(
                 block += Min(offset as f64 / density, 1.0);
             }
 
-            let mut selec = block / ((*(*vardata).rel).pages - 0.5);
+            let mut selec = block / ((*(*vardata).rel).pages as f64 - 0.5);
 
             if iseq == isgt && (*(*vardata).rel).tuples >= 1.0 {
                 selec -= 1.0 / (*(*vardata).rel).tuples;
@@ -5408,8 +5272,8 @@ pub unsafe fn genericcostestimate(
     /*
      * Estimate the number of index pages that will be retrieved.
      */
-    if (*index).pages > 1.0 && (*index).tuples > 1.0 {
-        numIndexPages = ceil(numIndexTuples * (*index).pages / (*index).tuples);
+    if (*index).pages as f64 > 1.0 && (*index).tuples > 1.0 {
+        numIndexPages = ceil(numIndexTuples * (*index).pages as f64 / (*index).tuples);
     } else {
         numIndexPages = 1.0;
     }
@@ -5436,8 +5300,8 @@ pub unsafe fn genericcostestimate(
         /* use Mackert and Lohman formula to adjust for cache effects */
         pages_fetched = index_pages_fetched(
             pages_fetched,
-            (*index).pages as BlockNumber,
             (*index).pages,
+            (*index).pages as f64,
             root,
         );
 
@@ -5552,6 +5416,7 @@ unsafe fn list_make1_local(d: *mut c_void) -> *mut List {
     lappend(NIL, d)
 }
 
+#[no_mangle]
 pub unsafe fn btcostestimate(
     root: *mut PlannerInfo,
     path: *mut IndexPath,
@@ -5663,7 +5528,7 @@ pub unsafe fn btcostestimate(
 
                     num_sa_scans *= ndistinct;
 
-                    if (*index).pages < num_sa_scans {
+                    if ((*index).pages as f64) < num_sa_scans {
                         num_sa_scans = num_sa_scans_prev_cols;
                         break;
                     }
@@ -5773,7 +5638,7 @@ pub unsafe fn btcostestimate(
         /*
          * Clamp the number of descents to at most 1/3 the number of pages.
          */
-        num_sa_scans = Min(num_sa_scans, ceil((*index).pages * 0.3333333));
+        num_sa_scans = Min(num_sa_scans, ceil((*index).pages as f64 * 0.3333333));
         num_sa_scans = Max(num_sa_scans, 1.0);
 
         numIndexTuples = rint(numIndexTuples / num_sa_scans);
@@ -5867,8 +5732,8 @@ pub unsafe fn gistcostestimate(
      * 100.
      */
     if (*index).tree_height < 0 {
-        if (*index).pages > 1.0 {
-            (*index).tree_height = (log((*index).pages) / log(100.0)) as c_int;
+        if (*index).pages as f64 > 1.0 {
+            (*index).tree_height = (log((*index).pages as f64) / log(100.0)) as c_int;
         } else {
             (*index).tree_height = 0;
         }
@@ -5914,8 +5779,8 @@ pub unsafe fn spgcostestimate(
     genericcostestimate(root, path, loop_count, &mut costs);
 
     if (*index).tree_height < 0 {
-        if (*index).pages > 1.0 {
-            (*index).tree_height = (log((*index).pages) / log(100.0)) as c_int;
+        if (*index).pages as f64 > 1.0 {
+            (*index).tree_height = (log((*index).pages as f64) / log(100.0)) as c_int;
         } else {
             (*index).tree_height = 0;
         }
@@ -6716,7 +6581,7 @@ pub unsafe fn estimate_multivariate_bucketsize(
          * estimate such a group with extended statistics.
          */
         foreach!(lc, clauses, {
-            let rinfo = lfirst_node!(*mut RestrictInfo, T_RestrictInfo, current_cell!(lc));
+            let rinfo = lfirst_node!(RestrictInfo, T_RestrictInfo, current_cell!(lc));
             let mut expr: *mut Node;
             let relids: Relids;
             let mut varinfo: *mut GroupVarInfo;
@@ -7276,7 +7141,7 @@ unsafe fn gincost_pattern(
 
     fmgr_info(extractProcOid, &mut flinfo);
 
-    set_fn_opclass_options(&mut flinfo, *(*index).opclassoptions.add(indexcol as usize));
+    set_fn_opclass_options(&mut flinfo, *(*index).opclassoptions.add(indexcol as usize) as *mut c_void);
 
     FunctionCall7Coll(
         &mut flinfo,
@@ -7520,7 +7385,7 @@ pub unsafe fn gincostestimate(
     let index = (*path).indexinfo;
     let indexQuals: *mut List = get_quals_from_indexclauses((*path).indexclauses);
     let selectivityQuals: *mut List;
-    let mut numPages: f64 = (*index).pages;
+    let mut numPages: f64 = (*index).pages as f64;
     let numTuples: f64 = (*index).tuples;
     let mut numEntryPages: f64;
     let mut numDataPages: f64;
@@ -7633,10 +7498,10 @@ pub unsafe fn gincostestimate(
 
     'outer: {
         foreach!(lc, (*path).indexclauses, {
-            let iclause = lfirst_node!(*mut IndexClause, T_IndexClause, current_cell!(lc));
+            let iclause = lfirst_node!(IndexClause, T_IndexClause, current_cell!(lc));
 
             foreach!(lc2, (*iclause).indexquals, {
-                let rinfo = lfirst_node!(*mut RestrictInfo, T_RestrictInfo, current_cell!(lc2));
+                let rinfo = lfirst_node!(RestrictInfo, T_RestrictInfo, current_cell!(lc2));
                 let clause = (*rinfo).clause;
 
                 if IsA_!(clause, OpExpr) {
@@ -7880,7 +7745,7 @@ pub unsafe fn brincostestimate(
 ) {
     let index = (*path).indexinfo;
     let indexQuals: *mut List = get_quals_from_indexclauses((*path).indexclauses);
-    let numPages: f64 = (*index).pages;
+    let numPages: f64 = (*index).pages as f64;
     let baserel = (*index).rel;
     let rte = planner_rt_fetch((*baserel).relid, root);
     let mut spc_seq_page_cost: f64 = 0.0;
@@ -7918,7 +7783,7 @@ pub unsafe fn brincostestimate(
 
         /* work out the actual number of ranges in the index */
         indexRanges = Max(
-            ((*baserel).pages / statsData.pagesPerRange as f64).ceil(),
+            ((*baserel).pages as f64 / statsData.pagesPerRange as f64).ceil(),
             1.0,
         );
     } else {
@@ -7927,7 +7792,7 @@ pub unsafe fn brincostestimate(
          * of ranges based on that.
          */
         indexRanges = Max(
-            ((*baserel).pages / BRIN_DEFAULT_PAGES_PER_RANGE as f64).ceil(),
+            ((*baserel).pages as f64 / BRIN_DEFAULT_PAGES_PER_RANGE as f64).ceil(),
             1.0,
         );
 
@@ -7942,7 +7807,7 @@ pub unsafe fn brincostestimate(
     *indexCorrelation = 0.0;
 
     foreach!(l, (*path).indexclauses, {
-        let iclause = lfirst_node!(*mut IndexClause, T_IndexClause, current_cell!(l));
+        let iclause = lfirst_node!(IndexClause, T_IndexClause, current_cell!(l));
         let mut attnum: AttrNumber =
             *(*index).indexkeys.add((*iclause).indexcol as usize) as AttrNumber;
         let mut vardata: VariableStatData = std::mem::zeroed();
@@ -8077,5 +7942,5 @@ pub unsafe fn brincostestimate(
     *indexTotalCost +=
         0.1 * cpu_operator_cost * estimatedRanges * statsData.pagesPerRange as f64;
 
-    *indexPages = (*index).pages;
+    *indexPages = (*index).pages as f64;
 }

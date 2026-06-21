@@ -757,7 +757,7 @@ pub unsafe fn GetNextLocalTransactionId() -> LocalTransactionId {
  * Number of auxiliary process slots (proc.h).  Not yet ported as a shared
  * constant; mirror the value used elsewhere in the tree.
  */
-const NUM_AUXILIARY_PROCS: c_int = 6;
+const NUM_AUXILIARY_PROCS: c_int = crate::storage::lmgr::proc::NUM_AUXILIARY_PROCS as c_int; // canonical: proc.rs 6+MAX_IO_WORKERS
 
 /* LWLock and its acquisition modes live in storage/lwlock.h (not ported yet). */
 pub type LWLock = c_void;
@@ -765,9 +765,9 @@ pub type LWLockMode = c_int;
 const LW_EXCLUSIVE: LWLockMode = 0;
 const LW_SHARED: LWLockMode = 1;
 
-/* Named individual LWLocks (lwlocknames.h, generated; not ported yet). */
-static mut SInvalReadLock: *mut LWLock = std::ptr::null_mut();
-static mut SInvalWriteLock: *mut LWLock = std::ptr::null_mut();
+/* Named individual LWLocks (lwlocknames.h): canonical runtime-assigned globals. */
+use crate::backend_link_shims::SInvalReadLock;
+use crate::backend_link_shims::SInvalWriteLock;
 
 /* Process-signal reasons (storage/procsignal.h, not ported yet). */
 type ProcSignalReason = c_int;
@@ -788,43 +788,35 @@ fn mul_size(s1: Size, s2: Size) -> Size {
 }
 
 unsafe fn ShmemInitStruct(name: *const c_char, size: Size, found_ptr: *mut bool) -> *mut c_void {
-    let _ = (name, size, found_ptr);
-    unimplemented!() // TODO: storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(name, size as Size, found_ptr)
 }
 
 unsafe fn SpinLockInit(lock: *mut slock_t) {
-    let _ = lock;
-    unimplemented!() // TODO: storage/lmgr/s_lock.c
+    crate::storage::spin::SpinLockInit(lock as _)
 }
 
 unsafe fn SpinLockAcquire(lock: *mut slock_t) {
-    let _ = lock;
-    unimplemented!() // TODO: storage/lmgr/s_lock.c
+    crate::storage::spin::SpinLockAcquire(lock as _)
 }
 
 unsafe fn SpinLockRelease(lock: *mut slock_t) {
-    let _ = lock;
-    unimplemented!() // TODO: storage/lmgr/s_lock.c
+    crate::storage::spin::SpinLockRelease(lock as _)
 }
 
 unsafe fn LWLockAcquire(lock: *mut LWLock, mode: LWLockMode) -> bool {
-    let _ = (lock, mode);
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(lock as _, core::mem::transmute(mode))
 }
 
 unsafe fn LWLockRelease(lock: *mut LWLock) {
-    let _ = lock;
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(lock as _)
 }
 
 unsafe fn on_shmem_exit(function: unsafe extern "C" fn(c_int, Datum), arg: Datum) {
-    let _ = (function, arg);
-    unimplemented!() // TODO: storage/ipc/ipc.c
+    crate::storage::ipc::ipc::on_shmem_exit(core::mem::transmute(function), arg)
 }
 
 unsafe fn SendProcSignal(pid: pid_t, reason: ProcSignalReason, procNumber: ProcNumber) -> c_int {
-    let _ = (pid, reason, procNumber);
-    unimplemented!() // TODO: storage/ipc/procsignal.c
+    crate::storage::ipc::procsignal::SendProcSignal(pid, core::mem::transmute(reason), procNumber as _)
 }
 
 #[allow(non_snake_case)]

@@ -98,6 +98,15 @@ const ALLOCSET_DEFAULT_MINSIZE: Size = ALLOCSET_DEFAULT_SIZES.0;
 const ALLOCSET_DEFAULT_INITSIZE: Size = ALLOCSET_DEFAULT_SIZES.1;
 const ALLOCSET_DEFAULT_MAXSIZE: Size = ALLOCSET_DEFAULT_SIZES.2;
 
+/// `NoLock` from storage/lockdefs.h.
+const NoLock: crate::storage::lockdefs::LOCKMODE = 0;
+
+/// `IsParallelWorker()` from access/parallel.h.
+/// TODO(pg-port): access/parallel.h not ported.
+unsafe fn IsParallelWorker() -> bool {
+    false
+}
+
 // ----------------------------------------------------------------
 //				 Executor state and memory management functions
 // ----------------------------------------------------------------
@@ -117,6 +126,7 @@ const ALLOCSET_DEFAULT_MAXSIZE: Size = ALLOCSET_DEFAULT_SIZES.2;
 /// # Safety
 /// Allocates via the current memory context; caller owns the returned EState and
 /// must release it with [`FreeExecutorState`].
+#[no_mangle]
 pub unsafe fn CreateExecutorState() -> *mut EState {
     let estate: *mut EState;
     let qcontext: MemoryContext;
@@ -219,6 +229,7 @@ pub unsafe fn CreateExecutorState() -> *mut EState {
  */
 /// # Safety
 /// `estate` must be a live EState produced by [`CreateExecutorState`].
+#[no_mangle]
 pub unsafe fn FreeExecutorState(estate: *mut EState) {
     /*
      * Shut down and free any remaining ExprContexts.  We do this explicitly
@@ -341,6 +352,7 @@ unsafe fn CreateExprContextInternal(
  */
 /// # Safety
 /// See [`CreateExprContextInternal`].
+#[no_mangle]
 pub unsafe fn CreateExprContext(estate: *mut EState) -> *mut ExprContext {
     CreateExprContextInternal(
         estate,
@@ -469,6 +481,7 @@ pub unsafe fn CreateStandaloneExprContext() -> *mut ExprContext {
  */
 /// # Safety
 /// `econtext` must be a live ExprContext.
+#[no_mangle]
 pub unsafe fn FreeExprContext(econtext: *mut ExprContext, isCommit: bool) {
     let estate: *mut EState;
 
@@ -544,6 +557,7 @@ pub unsafe fn MakePerTupleExprContext(estate: *mut EState) -> *mut ExprContext {
 /// # Safety
 /// `estate` must be a live EState.
 #[inline]
+#[no_mangle]
 pub unsafe fn GetPerTupleExprContext(estate: *mut EState) -> *mut ExprContext {
     if !(*estate).es_per_tuple_exprcontext.is_null() {
         (*estate).es_per_tuple_exprcontext
@@ -602,11 +616,9 @@ pub unsafe fn ResetPerTupleExprContext(estate: *mut EState) {
  * wrapper whose body is a STUB.
  */
 /// # Safety
-/// STUB: needs the PlanState ps_ExprContext field (execnodes PlanState).
-pub unsafe fn ExecAssignExprContext(_estate: *mut EState, _planstate: *mut PlanState) {
-    // TODO(pg-port): needs PlanState.ps_ExprContext (execExpr.c / PlanState init).
-    // planstate->ps_ExprContext = CreateExprContext(estate);
-    unimplemented!("ExecAssignExprContext: needs PlanState.ps_ExprContext")
+/// `planstate` must be a valid PlanState.
+pub unsafe fn ExecAssignExprContext(estate: *mut EState, planstate: *mut PlanState) {
+    (*planstate).ps_ExprContext = CreateExprContext(estate);
 }
 
 /* ----------------
@@ -614,11 +626,9 @@ pub unsafe fn ExecAssignExprContext(_estate: *mut EState, _planstate: *mut PlanS
  * ----------------
  */
 /// # Safety
-/// STUB: needs PlanState.ps_ResultTupleDesc.
-pub unsafe fn ExecGetResultType(_planstate: *mut PlanState) -> TupleDesc {
-    // TODO(pg-port): needs PlanState.ps_ResultTupleDesc.
-    // return planstate->ps_ResultTupleDesc;
-    unimplemented!("ExecGetResultType: needs PlanState.ps_ResultTupleDesc")
+/// `planstate` must be a valid PlanState.
+pub unsafe fn ExecGetResultType(planstate: *mut PlanState) -> TupleDesc {
+    (*planstate).ps_ResultTupleDesc
 }
 
 /*
@@ -627,16 +637,31 @@ pub unsafe fn ExecGetResultType(_planstate: *mut PlanState) -> TupleDesc {
 /// # Safety
 /// STUB: needs PlanState result-slot-ops fields + TTSOpsVirtual.
 pub unsafe fn ExecGetResultSlotOps(
-    _planstate: *mut PlanState,
-    _isfixed: *mut bool,
+    planstate: *mut PlanState,
+    isfixed: *mut bool,
 ) -> *const TupleTableSlotOps {
-    // TODO(pg-port): needs PlanState.{resultopsset,resultops,resultopsfixed,
-    //   ps_ResultTupleSlot} + TTSOpsVirtual (execTuples).  C body preserved:
-    // if (planstate->resultopsset && planstate->resultops) { ... }
-    // if (isfixed) { ... }
-    // if (!planstate->ps_ResultTupleSlot) return &TTSOpsVirtual;
-    // return planstate->ps_ResultTupleSlot->tts_ops;
-    unimplemented!("ExecGetResultSlotOps: needs PlanState result-slot fields")
+    if (*planstate).resultopsset && !(*planstate).resultops.is_null() {
+        if !isfixed.is_null() {
+            *isfixed = (*planstate).resultopsfixed;
+        }
+        return (*planstate).resultops;
+    }
+
+    if !isfixed.is_null() {
+        if (*planstate).resultopsset {
+            *isfixed = (*planstate).resultopsfixed;
+        } else if !(*planstate).ps_ResultTupleSlot.is_null() {
+            *isfixed = crate::executor::tuptable::TTS_FIXED((*planstate).ps_ResultTupleSlot);
+        } else {
+            *isfixed = false;
+        }
+    }
+
+    if (*planstate).ps_ResultTupleSlot.is_null() {
+        return &crate::executor::execTuples::TTSOpsVirtual;
+    }
+
+    (*(*planstate).ps_ResultTupleSlot).tts_ops
 }
 
 /*
@@ -645,11 +670,28 @@ pub unsafe fn ExecGetResultSlotOps(
 /// # Safety
 /// STUB: depends on ExecGetResultSlotOps.
 pub unsafe fn ExecGetCommonSlotOps(
-    _planstates: *mut *mut PlanState,
-    _nplans: c_int,
+    planstates: *mut *mut PlanState,
+    nplans: c_int,
 ) -> *const TupleTableSlotOps {
-    // TODO(pg-port): depends on ExecGetResultSlotOps (PlanState result-slot fields).
-    unimplemented!("ExecGetCommonSlotOps: depends on ExecGetResultSlotOps")
+    let mut isfixed: bool = false;
+
+    if nplans <= 0 {
+        return core::ptr::null();
+    }
+    let result = ExecGetResultSlotOps(*planstates.add(0), &mut isfixed);
+    if !isfixed {
+        return core::ptr::null();
+    }
+    for i in 1..nplans {
+        let thisops = ExecGetResultSlotOps(*planstates.add(i as usize), &mut isfixed);
+        if !isfixed {
+            return core::ptr::null();
+        }
+        if result != thisops {
+            return core::ptr::null();
+        }
+    }
+    result
 }
 
 /*
@@ -657,9 +699,12 @@ pub unsafe fn ExecGetCommonSlotOps(
  */
 /// # Safety
 /// STUB: needs outerPlanState/innerPlanState (PlanState).
-pub unsafe fn ExecGetCommonChildSlotOps(_ps: *mut PlanState) -> *const TupleTableSlotOps {
-    // TODO(pg-port): needs outerPlanState/innerPlanState + ExecGetCommonSlotOps.
-    unimplemented!("ExecGetCommonChildSlotOps: needs PlanState child links")
+pub unsafe fn ExecGetCommonChildSlotOps(ps: *mut PlanState) -> *const TupleTableSlotOps {
+    let mut planstates: [*mut PlanState; 2] = [
+        crate::nodes::execnodes::outerPlanState(ps),
+        crate::nodes::execnodes::innerPlanState(ps),
+    ];
+    ExecGetCommonSlotOps(planstates.as_mut_ptr(), 2)
 }
 
 /* ----------------
@@ -669,11 +714,15 @@ pub unsafe fn ExecGetCommonChildSlotOps(_ps: *mut PlanState) -> *const TupleTabl
  * ----------------
  */
 /// # Safety
-/// STUB: needs ExecBuildProjectionInfo (execExpr.c).
-pub unsafe fn ExecAssignProjectionInfo(_planstate: *mut PlanState, _inputDesc: TupleDesc) {
-    // TODO(pg-port): needs execExpr.c (ExecBuildProjectionInfo) + PlanState fields.
-    // planstate->ps_ProjInfo = ExecBuildProjectionInfo(...);
-    unimplemented!("ExecAssignProjectionInfo: needs ExecBuildProjectionInfo")
+/// `planstate` must be a valid PlanState.
+pub unsafe fn ExecAssignProjectionInfo(planstate: *mut PlanState, inputDesc: TupleDesc) {
+    (*planstate).ps_ProjInfo = crate::executor::execExpr::ExecBuildProjectionInfo(
+        (*(*planstate).plan).targetlist,
+        (*planstate).ps_ExprContext,
+        (*planstate).ps_ResultTupleSlot,
+        planstate,
+        inputDesc,
+    );
 }
 
 /* ----------------
@@ -684,15 +733,29 @@ pub unsafe fn ExecAssignProjectionInfo(_planstate: *mut PlanState, _inputDesc: T
  * ----------------
  */
 /// # Safety
-/// STUB: needs tlist_matches_tupdesc + execExpr.c + PlanState fields.
+/// `planstate` must be a valid PlanState.
 pub unsafe fn ExecConditionalAssignProjectionInfo(
-    _planstate: *mut PlanState,
-    _inputDesc: TupleDesc,
-    _varno: c_int,
+    planstate: *mut PlanState,
+    inputDesc: TupleDesc,
+    varno: c_int,
 ) {
-    // TODO(pg-port): needs tlist_matches_tupdesc (Var/TargetEntry deref),
-    //   ExecInitResultSlot/TTSOpsVirtual, ExecAssignProjectionInfo.
-    unimplemented!("ExecConditionalAssignProjectionInfo: needs execExpr.c + PlanState")
+    if tlist_matches_tupdesc(planstate, (*(*planstate).plan).targetlist, varno, inputDesc) {
+        (*planstate).ps_ProjInfo = core::ptr::null_mut();
+        (*planstate).resultopsset = (*planstate).scanopsset;
+        (*planstate).resultopsfixed = (*planstate).scanopsfixed;
+        (*planstate).resultops = (*planstate).scanops;
+    } else {
+        if (*planstate).ps_ResultTupleSlot.is_null() {
+            crate::executor::execTuples::ExecInitResultSlot(
+                planstate,
+                &raw const crate::executor::execTuples::TTSOpsVirtual,
+            );
+            (*planstate).resultops = &raw const crate::executor::execTuples::TTSOpsVirtual;
+            (*planstate).resultopsfixed = true;
+            (*planstate).resultopsset = true;
+        }
+        ExecAssignProjectionInfo(planstate, inputDesc);
+    }
 }
 
 /// # Safety
@@ -762,10 +825,14 @@ unsafe fn tlist_matches_tupdesc(
  * ----------------
  */
 /// # Safety
-/// STUB: needs ScanState.ss_ScanTupleSlot + ExecSetSlotDescriptor.
-pub unsafe fn ExecAssignScanType(_scanstate: *mut c_void, _tupDesc: TupleDesc) {
-    // TODO(pg-port): needs ScanState (execnodes) + ExecSetSlotDescriptor (execTuples).
-    unimplemented!("ExecAssignScanType: needs ScanState + ExecSetSlotDescriptor")
+/// `scanstate` must be a valid ScanState.
+pub unsafe fn ExecAssignScanType(
+    scanstate: *mut crate::nodes::execnodes::ScanState,
+    tupDesc: TupleDesc,
+) {
+    let slot: *mut TupleTableSlot = (*scanstate).ss_ScanTupleSlot;
+
+    crate::executor::execTuples::ExecSetSlotDescriptor(slot, tupDesc);
 }
 
 /* ----------------
@@ -773,15 +840,18 @@ pub unsafe fn ExecAssignScanType(_scanstate: *mut c_void, _tupDesc: TupleDesc) {
  * ----------------
  */
 /// # Safety
-/// STUB: needs ScanState + ExecInitScanTupleSlot + outerPlanState.
+/// `scanstate` must be a valid ScanState.
 pub unsafe fn ExecCreateScanSlotFromOuterPlan(
-    _estate: *mut EState,
-    _scanstate: *mut c_void,
-    _tts_ops: *const TupleTableSlotOps,
+    estate: *mut EState,
+    scanstate: *mut c_void,
+    tts_ops: *const TupleTableSlotOps,
 ) {
-    // TODO(pg-port): needs ScanState, outerPlanState, ExecGetResultType,
-    //   ExecInitScanTupleSlot.
-    unimplemented!("ExecCreateScanSlotFromOuterPlan: needs ScanState slot init")
+    let scanstate = scanstate as *mut crate::nodes::execnodes::ScanState;
+    let outerPlan: *mut PlanState =
+        crate::nodes::execnodes::outerPlanState(&raw mut (*scanstate).ps);
+    let tupDesc: TupleDesc = ExecGetResultType(outerPlan);
+
+    crate::executor::execTuples::ExecInitScanTupleSlot(estate, scanstate, tupDesc, tts_ops);
 }
 
 /* ----------------------------------------------------------------
@@ -794,9 +864,10 @@ pub unsafe fn ExecCreateScanSlotFromOuterPlan(
 /// # Safety
 /// STUB: needs PlannedStmt.resultRelations deref (plannodes).
 pub unsafe fn ExecRelationIsTargetRelation(_estate: *mut EState, _scanrelid: Index) -> bool {
-    // TODO(pg-port): needs es_plannedstmt->resultRelations + list_member_int.
-    // return list_member_int(estate->es_plannedstmt->resultRelations, scanrelid);
-    unimplemented!("ExecRelationIsTargetRelation: needs PlannedStmt deref")
+    crate::nodes::pg_list::list_member_int(
+        (*(*_estate).es_plannedstmt).resultRelations as _,
+        _scanrelid as c_int,
+    )
 }
 
 /* ----------------------------------------------------------------
@@ -808,13 +879,35 @@ pub unsafe fn ExecRelationIsTargetRelation(_estate: *mut EState, _scanrelid: Ind
 /// # Safety
 /// STUB: needs relcache/tableam (Relation is opaque) + ExecGetRangeTableRelation.
 pub unsafe fn ExecOpenScanRelation(
-    _estate: *mut EState,
-    _scanrelid: Index,
-    _eflags: c_int,
+    estate: *mut EState,
+    scanrelid: Index,
+    eflags: c_int,
 ) -> crate::nodes::execnodes::Relation {
-    // TODO(pg-port): needs ExecGetRangeTableRelation + RelationIsScannable
-    //   (utils/rel.h) + EXEC_FLAG_* (executor.h).
-    unimplemented!("ExecOpenScanRelation: needs relcache/tableam")
+    /* Open the relation. */
+    let rel = ExecGetRangeTableRelation(estate, scanrelid, false);
+
+    /*
+     * Complain if we're attempting a scan of an unscannable relation, except
+     * when the query won't actually be run.
+     */
+    if (eflags
+        & (crate::executor::executor::EXEC_FLAG_EXPLAIN_ONLY
+            | crate::executor::executor::EXEC_FLAG_WITH_NO_DATA))
+        == 0
+        && !(*(*rel).rd_rel).relispopulated
+    {
+        ereport!(
+            ERROR,
+            errmsg!(
+                "materialized view \"{}\" has not been populated",
+                core::ffi::CStr::from_ptr(crate::utils::rel::RelationGetRelationName(rel))
+                    .to_string_lossy()
+            ) /* C also: errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+              errhint("Use the REFRESH MATERIALIZED VIEW command.") */
+        );
+    }
+
+    rel
 }
 
 /*
@@ -823,15 +916,35 @@ pub unsafe fn ExecOpenScanRelation(
  */
 /// # Safety
 /// STUB: needs es_unpruned_relids + the es_relations Relation array (relcache).
+#[no_mangle]
 pub unsafe fn ExecInitRangeTable(
-    _estate: *mut EState,
-    _rangeTable: *mut List,
-    _permInfos: *mut List,
-    _unpruned_relids: *mut crate::nodes::bitmapset::Bitmapset,
+    estate: *mut EState,
+    rangeTable: *mut List,
+    permInfos: *mut List,
+    unpruned_relids: *mut crate::nodes::bitmapset::Bitmapset,
 ) {
-    // TODO(pg-port): the Relation-array palloc0 + es_unpruned_relids handling needs
-    //   the Relation type (relcache).  C body preserved in execUtils.c.
-    unimplemented!("ExecInitRangeTable: needs relcache (Relation array)")
+    /* Remember the range table List as-is */
+    (*estate).es_range_table = rangeTable;
+
+    /* ... and the RTEPermissionInfo List too */
+    (*estate).es_rteperminfos = permInfos;
+
+    /* Set size of associated arrays */
+    (*estate).es_range_table_size = crate::nodes::pg_list::list_length(rangeTable) as Index;
+
+    (*estate).es_unpruned_relids = unpruned_relids as _;
+
+    /*
+     * Allocate an array to store an open Relation corresponding to each
+     * rangetable entry, and initialize entries to NULL.
+     */
+    (*estate).es_relations = palloc0(
+        (*estate).es_range_table_size as usize
+            * size_of::<crate::nodes::execnodes::Relation>(),
+    ) as *mut crate::nodes::execnodes::Relation;
+
+    (*estate).es_result_relations = null_mut();
+    (*estate).es_rowmarks = null_mut();
 }
 
 /*
@@ -841,14 +954,35 @@ pub unsafe fn ExecInitRangeTable(
 /// # Safety
 /// STUB: needs relcache/tableam (table_open) + exec_rt_fetch + parallel.h.
 pub unsafe fn ExecGetRangeTableRelation(
-    _estate: *mut EState,
-    _rti: Index,
-    _isResultRel: bool,
+    estate: *mut EState,
+    rti: Index,
+    isResultRel: bool,
 ) -> crate::nodes::execnodes::Relation {
-    // TODO(pg-port): needs exec_rt_fetch (parse_relation), table_open (table.h),
-    //   IsParallelWorker (parallel.h), CheckRelationLockedByMe (lmgr.h),
-    //   bms_is_member (bitmapset).  C body preserved in execUtils.c.
-    unimplemented!("ExecGetRangeTableRelation: needs relcache/tableam")
+    Assert!(rti > 0 && rti <= (*estate).es_range_table_size);
+
+    if !isResultRel
+        && !crate::nodes::bitmapset::bms_is_member(rti as c_int, (*estate).es_unpruned_relids as _)
+    {
+        elog!(ERROR, "trying to open a pruned relation");
+    }
+
+    let mut rel = *(*estate).es_relations.add((rti - 1) as usize);
+    if rel.is_null() {
+        /* First time through, so open the relation */
+        let rte = crate::executor::executor::exec_rt_fetch(rti, estate);
+
+        Assert!((*rte).rtekind == crate::nodes::parsenodes::RTEKind::RTE_RELATION);
+
+        if !IsParallelWorker() {
+            rel = crate::access::table::table::table_open((*rte).relid, NoLock);
+        } else {
+            rel = crate::access::table::table::table_open((*rte).relid, (*rte).rellockmode);
+        }
+
+        *(*estate).es_relations.add((rti - 1) as usize) = rel;
+    }
+
+    rel
 }
 
 /*
@@ -859,12 +993,30 @@ pub unsafe fn ExecGetRangeTableRelation(
 /// # Safety
 /// STUB: needs ExecGetRangeTableRelation + InitResultRelInfo (nodeModifyTable).
 pub unsafe fn ExecInitResultRelation(
-    _estate: *mut EState,
-    _resultRelInfo: *mut ResultRelInfo,
-    _rti: Index,
+    estate: *mut EState,
+    resultRelInfo: *mut ResultRelInfo,
+    rti: Index,
 ) {
-    // TODO(pg-port): needs ExecGetRangeTableRelation, InitResultRelInfo, lappend.
-    unimplemented!("ExecInitResultRelation: needs relcache + InitResultRelInfo")
+    let resultRelationDesc = ExecGetRangeTableRelation(estate, rti, true);
+    crate::executor::execMain::InitResultRelInfo(
+        resultRelInfo,
+        resultRelationDesc,
+        rti,
+        null_mut(),
+        (*estate).es_instrument,
+    );
+
+    if (*estate).es_result_relations.is_null() {
+        (*estate).es_result_relations = palloc0(
+            (*estate).es_range_table_size as usize * size_of::<*mut ResultRelInfo>(),
+        ) as *mut *mut ResultRelInfo;
+    }
+    *(*estate).es_result_relations.add((rti - 1) as usize) = resultRelInfo;
+
+    (*estate).es_opened_result_relations = crate::nodes::pg_list::lappend(
+        (*estate).es_opened_result_relations,
+        resultRelInfo as *mut c_void,
+    );
 }
 
 /*
@@ -1077,11 +1229,19 @@ pub unsafe fn ExecTargetListLength(targetlist: *mut List) -> c_int {
  * Number of items in a tlist, not including any resjunk items
  */
 /// # Safety
-/// STUB: needs TargetEntry.resjunk deref (primnodes) within foreach.
-pub unsafe fn ExecCleanTargetListLength(_targetlist: *mut List) -> c_int {
-    // TODO(pg-port): needs TargetEntry deref (lfirst_node(TargetEntry, tl)->resjunk).
-    // foreach(tl, targetlist) { if (!curTle->resjunk) len++; }
-    unimplemented!("ExecCleanTargetListLength: needs TargetEntry.resjunk deref")
+/// `targetlist` must be a valid List of TargetEntry nodes, or NIL.
+pub unsafe fn ExecCleanTargetListLength(targetlist: *mut List) -> c_int {
+    let mut len: c_int = 0;
+    let n = crate::nodes::pg_list::list_length(targetlist);
+    let mut i: c_int = 0;
+    while i < n {
+        let curTle = (*(*targetlist).elements.add(i as usize)).ptr_value as *mut TargetEntry;
+        if !(*curTle).resjunk {
+            len += 1;
+        }
+        i += 1;
+    }
+    len
 }
 
 /*
@@ -1141,6 +1301,7 @@ pub unsafe fn ExecGetChildToRootMap(_resultRelInfo: *mut ResultRelInfo) -> *mut 
 
 /// # Safety
 /// STUB: needs tupconvert + relcache + attrmap.
+#[no_mangle]
 pub unsafe fn ExecGetRootToChildMap(
     _resultRelInfo: *mut ResultRelInfo,
     _estate: *mut EState,

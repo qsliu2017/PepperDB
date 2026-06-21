@@ -220,8 +220,12 @@ pub struct ParseCallbackState {
 // Stubs for unported callees.
 // ---------------------------------------------------------------------------
 
-// utils/elog.h: error_context_stack (the real type is *mut ErrorContextCallback).
-static mut error_context_stack: *mut ErrorContextCallback = null_mut();
+// utils/elog.h: error_context_stack -- the process-global #[no_mangle] symbol
+// defined in utils/error/elog_impl.rs.  Must be the SAME storage errfinish walks,
+// or parser errposition callbacks never fire.
+extern "C" {
+    static mut error_context_stack: *mut ErrorContextCallback;
+}
 
 // utils/errcodes.h (not yet ported).
 const ERRCODE_TOO_MANY_COLUMNS: c_int = 0;
@@ -252,7 +256,7 @@ fn OidIsValid(objectId: Oid) -> bool {
 
 // utils/lsyscache.h: getBaseTypeAndTypmod (not yet ported).
 unsafe fn getBaseTypeAndTypmod(typid: Oid, _typmod: *mut int32) -> Oid {
-    unimplemented!()
+    crate::utils::cache::lsyscache::getBaseTypeAndTypmod(typid, _typmod as _)
 }
 
 // utils/typcache.h: getSubscriptingRoutines (not yet ported).
@@ -260,43 +264,40 @@ unsafe fn getSubscriptingRoutines(
     _containerType: Oid,
     _typelem: *mut Oid,
 ) -> *const SubscriptRoutines {
-    unimplemented!()
+    crate::utils::cache::lsyscache::getSubscriptingRoutines(_containerType, _typelem) as _
 }
 
 // utils/builtins.h: format_type_be (not yet ported).
 unsafe fn format_type_be(_type_oid: Oid) -> *mut c_char {
-    unimplemented!()
+    crate::utils::adt::format_type::format_type_be(_type_oid as _) as _
 }
 
 // mb/pg_wchar.h: pg_mbstrlen_with_len (not yet ported).
 unsafe fn pg_mbstrlen_with_len(_mbstr: *const c_char, _limit: c_int) -> c_int {
-    unimplemented!()
+    crate::utils::mb::mbutils::pg_mbstrlen_with_len(_mbstr as _, _limit as _) as _
 }
 
-// utils/builtins.h: pg_strtoint64_safe (not yet ported).
 unsafe fn pg_strtoint64_safe(_s: *const c_char, _escontext: *mut Node) -> int64 {
-    unimplemented!()
+    crate::utils::builtins::pg_strtoint64_safe(_s, _escontext as _)
 }
 
-// access/table.h: table_close (not yet ported).
 unsafe fn table_close(_relation: Relation, _lockmode: c_int) {
-    unimplemented!()
+    crate::access::table::table::table_close(_relation as _, _lockmode as _)
 }
 
-// utils/elog.h: errposition / geterrcode (not yet ported).
 unsafe fn errposition(_cursorpos: c_int) -> c_int {
-    unimplemented!()
+    crate::utils::error::elog_impl::errposition(_cursorpos)
 }
 unsafe fn geterrcode() -> c_int {
-    unimplemented!()
+    crate::utils::error::elog_impl::geterrcode()
 }
 
 // fmgr-callable builtins invoked via DirectFunctionCall3 (not yet ported).
 unsafe fn numeric_in(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum {
-    unimplemented!()
+    crate::utils::adt::numeric::numeric_in(_fcinfo as _) as _
 }
 unsafe fn bit_in(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum {
-    unimplemented!()
+    crate::utils::adt::varbit::bit_in(_fcinfo as _) as _
 }
 
 /*
@@ -364,6 +365,7 @@ pub unsafe fn free_parsestate(pstate: *mut ParseState) {
  * This is expected to be used within an ereport() call.  The return value
  * is a dummy (always 0, in fact).
  */
+#[no_mangle]
 pub unsafe fn parser_errposition(pstate: *mut ParseState, location: c_int) -> c_int {
     let pos: c_int;
 
@@ -377,7 +379,7 @@ pub unsafe fn parser_errposition(pstate: *mut ParseState, location: c_int) -> c_
     }
     /* Convert offset to character number */
     pos = pg_mbstrlen_with_len((*pstate).p_sourcetext, location) + 1;
-    /* And pass it to the ereport mechanism */
+    /* And pass it to the ereport mechanism (mutates the in-flight ErrorData) */
     errposition(pos)
 }
 

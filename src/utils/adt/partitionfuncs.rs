@@ -28,7 +28,7 @@ const TYPEFUNC_COMPOSITE: c_int = 1;
 
 // utils/syscache.h: RELOID syscache id.
 // TODO(pg-port): replace with the real RELOID constant once syscache.h is ported.
-const RELOID: c_int = 0;
+const RELOID: c_int = 57;
 
 // funcapi.h: cross-call persistence context for set-returning functions.
 // TODO(pg-port): replace with the real FuncCallContext once funcapi.c is ported.
@@ -83,9 +83,7 @@ unsafe fn get_call_result_type(
 
 // utils/syscache.h: SearchSysCacheExists1(RELOID, ...)
 // TODO(pg-port): utils/cache/syscache.c not ported.
-unsafe fn SearchSysCacheExists1(_cache_id: c_int, _key1: Datum) -> bool {
-    unimplemented!("TODO(pg-port): SearchSysCacheExists1 (utils/cache/syscache.c not ported)")
-}
+unsafe fn SearchSysCacheExists1(_cache_id: c_int, _key1: Datum) -> bool { crate::utils::cache::syscache::SearchSysCacheExists1(_cache_id as _, _key1 as _) }
 
 // utils/lsyscache.h: get_rel_relkind()
 unsafe fn get_rel_relkind(_relid: Oid) -> c_char {
@@ -93,9 +91,7 @@ unsafe fn get_rel_relkind(_relid: Oid) -> c_char {
 }
 
 // utils/lsyscache.h: get_rel_relispartition()
-unsafe fn get_rel_relispartition(_relid: Oid) -> bool {
-    unimplemented!("TODO(pg-port): get_rel_relispartition (utils/cache/lsyscache.c not ported)")
-}
+unsafe fn get_rel_relispartition(_relid: Oid) -> bool { crate::utils::cache::lsyscache::get_rel_relispartition(_relid as _) }
 
 // catalog/pg_inherits.h: find_all_inheritors()
 unsafe fn find_all_inheritors(_parentrelId: Oid, _lockmode: LOCKMODE, _numparents: *mut List) -> *mut List {
@@ -103,9 +99,7 @@ unsafe fn find_all_inheritors(_parentrelId: Oid, _lockmode: LOCKMODE, _numparent
 }
 
 // catalog/partition.h: get_partition_ancestors()
-unsafe fn get_partition_ancestors(_relid: Oid) -> *mut List {
-    unimplemented!("TODO(pg-port): get_partition_ancestors (catalog/partition.c not ported)")
-}
+unsafe fn get_partition_ancestors(_relid: Oid) -> *mut List { crate::catalog::partition::get_partition_ancestors(_relid as _) as _ }
 
 // HeapTupleGetDatum(tuple)
 unsafe fn HeapTupleGetDatum(_tuple: HeapTuple) -> Datum {

@@ -997,7 +997,7 @@ pub unsafe fn StartupCLOG() {
      * Initialize our idea of the latest page number.
      */
     pg_atomic_write_u64(
-        &mut (*(*XactCtl()).shared).latest_page_number,
+        &raw mut (*(*XactCtl()).shared).latest_page_number as *mut _,
         pageno as u64,
     );
 }
@@ -1297,9 +1297,9 @@ unsafe fn MemSet(start: *mut c_void, val: c_int, len: Size) {
 
 // GUC types -------------------------------------------------------------------
 pub type GucSource = c_int; // TODO(pg-port): real GucSource lives in utils/guc.h
-pub const PGC_S_DYNAMIC_DEFAULT: GucSource = 0; // TODO(pg-port): real value lives in utils/guc.h
-pub const PGC_S_OVERRIDE: GucSource = 0; // TODO(pg-port): real value lives in utils/guc.h
-pub const PGC_POSTMASTER: c_int = 0; // TODO(pg-port): real value lives in utils/guc.h
+pub const PGC_S_DYNAMIC_DEFAULT: GucSource = 1; // TODO(pg-port): real value lives in utils/guc.h
+pub const PGC_S_OVERRIDE: GucSource = 10; // TODO(pg-port): real value lives in utils/guc.h
+pub const PGC_POSTMASTER: c_int = 1; // TODO(pg-port): real value lives in utils/guc.h
 
 // SLRU --- TODO(pg-port): real definitions live in access/slru.h / slru.c -----
 #[repr(C)]
@@ -1315,13 +1315,7 @@ pub type SlruShared = *mut SlruSharedData;
 
 pub type SlruPagePrecedesFunction = unsafe extern "C" fn(int64, int64) -> bool;
 
-#[repr(C)]
-pub struct SlruCtlData {
-    pub shared: SlruShared,
-    pub PagePrecedes: Option<SlruPagePrecedesFunction>,
-    // ... TODO(pg-port): access/slru.h
-}
-pub type SlruCtl = *mut SlruCtlData;
+pub use crate::access::transam::slru::{SlruCtlData, SlruCtl};
 
 pub const SLRU_MAX_ALLOWED_BUFFERS: c_int = 0; // TODO(pg-port): real value lives in access/slru.h
 
@@ -1329,7 +1323,7 @@ pub type SlruScanCallback =
     unsafe extern "C" fn(SlruCtl, *mut c_char, int64, *mut c_void) -> bool;
 
 unsafe fn SimpleLruGetBankLock(_ctl: SlruCtl, _pageno: int64) -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): real SimpleLruGetBankLock lives in access/slru.c
+    crate::access::transam::slru::SimpleLruGetBankLock(_ctl as _, _pageno) as _ // TODO(pg-port): real SimpleLruGetBankLock lives in access/slru.c
 }
 unsafe fn SimpleLruReadPage(
     _ctl: SlruCtl,
@@ -1337,22 +1331,22 @@ unsafe fn SimpleLruReadPage(
     _write_ok: bool,
     _xid: TransactionId,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port): real SimpleLruReadPage lives in access/slru.c
+    crate::access::transam::slru::SimpleLruReadPage(_ctl as _, _pageno, _write_ok, _xid) // TODO(pg-port): real SimpleLruReadPage lives in access/slru.c
 }
 unsafe fn SimpleLruReadPage_ReadOnly(_ctl: SlruCtl, _pageno: int64, _xid: TransactionId) -> c_int {
-    unimplemented!() // TODO(pg-port): real SimpleLruReadPage_ReadOnly lives in access/slru.c
+    crate::access::transam::slru::SimpleLruReadPage_ReadOnly(_ctl as _, _pageno, _xid) // TODO(pg-port): real SimpleLruReadPage_ReadOnly lives in access/slru.c
 }
 unsafe fn SimpleLruZeroPage(_ctl: SlruCtl, _pageno: int64) -> c_int {
-    unimplemented!() // TODO(pg-port): real SimpleLruZeroPage lives in access/slru.c
+    crate::access::transam::slru::SimpleLruZeroPage(_ctl as _, _pageno) // TODO(pg-port): real SimpleLruZeroPage lives in access/slru.c
 }
 unsafe fn SimpleLruWritePage(_ctl: SlruCtl, _slotno: c_int) {
-    unimplemented!() // TODO(pg-port): real SimpleLruWritePage lives in access/slru.c
+    crate::access::transam::slru::SimpleLruWritePage(_ctl as _, _slotno) // TODO(pg-port): real SimpleLruWritePage lives in access/slru.c
 }
 unsafe fn SimpleLruWriteAll(_ctl: SlruCtl, _allow_redirtied: bool) {
-    unimplemented!() // TODO(pg-port): real SimpleLruWriteAll lives in access/slru.c
+    crate::access::transam::slru::SimpleLruWriteAll(_ctl as _, _allow_redirtied) // TODO(pg-port): real SimpleLruWriteAll lives in access/slru.c
 }
 unsafe fn SimpleLruTruncate(_ctl: SlruCtl, _cutoffPage: int64) {
-    unimplemented!() // TODO(pg-port): real SimpleLruTruncate lives in access/slru.c
+    crate::access::transam::slru::SimpleLruTruncate(_ctl as _, _cutoffPage) // TODO(pg-port): real SimpleLruTruncate lives in access/slru.c
 }
 unsafe fn SimpleLruInit(
     _ctl: SlruCtl,
@@ -1365,22 +1359,32 @@ unsafe fn SimpleLruInit(
     _sync_handler: c_int,
     _long_segment_names: bool,
 ) {
-    unimplemented!() // TODO(pg-port): real SimpleLruInit lives in access/slru.c
+    crate::access::transam::slru::SimpleLruInit(
+        _ctl as _,
+        _name,
+        _nslots,
+        _nlsns,
+        _subdir,
+        _buffer_tranche_id,
+        _bank_tranche_id,
+        core::mem::transmute(_sync_handler),
+        _long_segment_names,
+    ) // TODO(pg-port): real SimpleLruInit lives in access/slru.c
 }
 unsafe fn SimpleLruShmemSize(_nslots: c_int, _nlsns: c_int) -> Size {
-    unimplemented!() // TODO(pg-port): real SimpleLruShmemSize lives in access/slru.c
+    crate::access::transam::slru::SimpleLruShmemSize(_nslots, _nlsns) // TODO(pg-port): real SimpleLruShmemSize lives in access/slru.c
 }
 unsafe fn SimpleLruAutotuneBuffers(_divisor: c_int, _max: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): real SimpleLruAutotuneBuffers lives in access/slru.c
+    crate::access::transam::slru::SimpleLruAutotuneBuffers(_divisor, _max) // TODO(pg-port): real SimpleLruAutotuneBuffers lives in access/slru.c
 }
 unsafe fn SlruPagePrecedesUnitTests(_ctl: SlruCtl, _per_page: c_int) {
-    unimplemented!() // TODO(pg-port): real SlruPagePrecedesUnitTests lives in access/slru.c
+    #[cfg(debug_assertions)] crate::access::transam::slru::SlruPagePrecedesUnitTests(_ctl as _, _per_page);
 }
 unsafe fn SlruScanDirectory(_ctl: SlruCtl, _callback: SlruScanCallback, _data: *mut c_void) -> bool {
-    unimplemented!() // TODO(pg-port): real SlruScanDirectory lives in access/slru.c
+    crate::access::transam::slru::SlruScanDirectory(_ctl as _, core::mem::transmute(_callback), _data) // TODO(pg-port): real SlruScanDirectory lives in access/slru.c
 }
 unsafe fn SlruSyncFileTag(_ctl: SlruCtl, _ftag: *const FileTag, _path: *mut c_char) -> c_int {
-    unimplemented!() // TODO(pg-port): real SlruSyncFileTag lives in access/slru.c
+    crate::access::transam::slru::SlruSyncFileTag(_ctl as _, _ftag as _, _path) // TODO(pg-port): real SlruSyncFileTag lives in access/slru.c
 }
 unsafe extern "C" fn SlruScanDirCbReportPresence(
     _ctl: SlruCtl,
@@ -1388,10 +1392,10 @@ unsafe extern "C" fn SlruScanDirCbReportPresence(
     _segpage: int64,
     _data: *mut c_void,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): real SlruScanDirCbReportPresence lives in access/slru.c
+    crate::access::transam::slru::SlruScanDirCbReportPresence(_ctl as _, _filename, _segpage, _data) // TODO(pg-port): real SlruScanDirCbReportPresence lives in access/slru.c
 }
 unsafe fn check_slru_buffers(_name: *const c_char, _newval: *mut c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real check_slru_buffers lives in access/slru.c
+    crate::access::transam::slru::check_slru_buffers(_name, _newval) // TODO(pg-port): real check_slru_buffers lives in access/slru.c
 }
 
 // GUC variable --- TODO(pg-port): real transaction_buffers lives in access/slru.c
@@ -1411,16 +1415,16 @@ pub const LWTRANCHE_XACT_SLRU: c_int = 0; // TODO(pg-port): real value lives in 
 pub const SYNC_HANDLER_CLOG: c_int = 0; // TODO(pg-port): real value lives in storage/sync.h
 
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real LWLockAcquire lives in storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, core::mem::transmute(_mode)) // TODO(pg-port): real LWLockAcquire lives in storage/lwlock.c
 }
 unsafe fn LWLockConditionalAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real LWLockConditionalAcquire lives in storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockConditionalAcquire(_lock as _, core::mem::transmute(_mode)) // TODO(pg-port): real LWLockConditionalAcquire lives in storage/lwlock.c
 }
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO(pg-port): real LWLockRelease lives in storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _) // TODO(pg-port): real LWLockRelease lives in storage/lwlock.c
 }
 unsafe fn LWLockHeldByMeInMode(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real LWLockHeldByMeInMode lives in storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockHeldByMeInMode(_lock as _, core::mem::transmute(_mode)) // TODO(pg-port): real LWLockHeldByMeInMode lives in storage/lwlock.c
 }
 
 // Sync / file tags --- TODO(pg-port): real FileTag lives in storage/sync.h ----
@@ -1439,25 +1443,25 @@ pub const RM_CLOG_ID: u8 = 0; // TODO(pg-port): real value lives in access/rmgrl
 pub const XLR_INFO_MASK: uint8 = 0x0F; // TODO(pg-port): real value lives in access/xlogrecord.h
 
 unsafe fn XLogBeginInsert() {
-    unimplemented!() // TODO(pg-port): real XLogBeginInsert lives in access/xloginsert.c
+    crate::access::transam::xloginsert::XLogBeginInsert() // TODO(pg-port): real XLogBeginInsert lives in access/xloginsert.c
 }
 unsafe fn XLogRegisterData(_data: *mut c_char, _len: usize) {
-    unimplemented!() // TODO(pg-port): real XLogRegisterData lives in access/xloginsert.c
+    crate::access::transam::xloginsert::XLogRegisterData(_data as *const c_void, _len as u32) // TODO(pg-port): real XLogRegisterData lives in access/xloginsert.c
 }
 unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real XLogInsert lives in access/xloginsert.c
+    crate::access::transam::xloginsert::XLogInsert(_rmid, _info) // TODO(pg-port): real XLogInsert lives in access/xloginsert.c
 }
 unsafe fn XLogFlush(_record: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real XLogFlush lives in access/xlog.c
+    crate::access::transam::xlog::XLogFlush(_record) // TODO(pg-port): real XLogFlush lives in access/xlog.c
 }
 unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 {
-    unimplemented!() // TODO(pg-port): real XLogRecGetInfo lives in access/xlogreader.h
+    crate::access::transam::xlogreader::XLogRecGetInfo(_record as _) // TODO(pg-port): real XLogRecGetInfo lives in access/xlogreader.h
 }
 unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real XLogRecGetData lives in access/xlogreader.h
+    crate::access::transam::xlogreader::XLogRecGetData(_record as _) // TODO(pg-port): real XLogRecGetData lives in access/xlogreader.h
 }
 unsafe fn XLogRecHasAnyBlockRefs(_record: *mut XLogReaderState) -> bool {
-    unimplemented!() // TODO(pg-port): real XLogRecHasAnyBlockRefs lives in access/xlogreader.h
+    crate::access::transam::xlogreader::XLogRecHasAnyBlockRefs(_record as _) // TODO(pg-port): real XLogRecHasAnyBlockRefs lives in access/xlogreader.h
 }
 
 #[inline]
@@ -1475,7 +1479,12 @@ unsafe fn SetConfigOption(
     _context: c_int,
     _source: GucSource,
 ) {
-    unimplemented!() // TODO(pg-port): real SetConfigOption lives in utils/misc/guc.c
+    crate::utils::misc::guc::SetConfigOption(
+        _name,
+        _value,
+        core::mem::transmute(_context),
+        core::mem::transmute(_source),
+    ) // TODO(pg-port): real SetConfigOption lives in utils/misc/guc.c
 }
 
 // Atomics --- TODO(pg-port): real pg_atomic_* live in port/atomics.h ----------
@@ -1489,60 +1498,53 @@ pub struct pg_atomic_uint32 {
 }
 
 unsafe fn pg_atomic_read_u32(_ptr: *mut pg_atomic_uint32) -> uint32 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_read_u32 lives in port/atomics.h
+    crate::port::atomics::pg_atomic_read_u32_impl(&*(_ptr as *const crate::port::atomics::pg_atomic_uint32)) // TODO(pg-port): real pg_atomic_read_u32 lives in port/atomics.h
 }
 unsafe fn pg_atomic_write_u32(_ptr: *mut pg_atomic_uint32, _val: uint32) {
-    unimplemented!() // TODO(pg-port): real pg_atomic_write_u32 lives in port/atomics.h
+    crate::port::atomics::pg_atomic_write_u32_impl(&*(_ptr as *const crate::port::atomics::pg_atomic_uint32), _val) // TODO(pg-port): real pg_atomic_write_u32 lives in port/atomics.h
 }
 unsafe fn pg_atomic_exchange_u32(_ptr: *mut pg_atomic_uint32, _newval: uint32) -> uint32 {
-    unimplemented!() // TODO(pg-port): real pg_atomic_exchange_u32 lives in port/atomics.h
+    crate::port::atomics::generic::pg_atomic_exchange_u32_impl(&*(_ptr as *const crate::port::atomics::pg_atomic_uint32), _newval) // TODO(pg-port): real pg_atomic_exchange_u32 lives in port/atomics.h
 }
 unsafe fn pg_atomic_compare_exchange_u32(
     _ptr: *mut pg_atomic_uint32,
     _expected: *mut uint32,
     _newval: uint32,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): real pg_atomic_compare_exchange_u32 lives in port/atomics.h
+    crate::port::atomics::pg_atomic_compare_exchange_u32_impl(&*(_ptr as *const crate::port::atomics::pg_atomic_uint32), &mut *_expected, _newval) // TODO(pg-port): real pg_atomic_compare_exchange_u32 lives in port/atomics.h
 }
 unsafe fn pg_atomic_write_u64(_ptr: *mut pg_atomic_uint64, _val: u64) {
-    unimplemented!() // TODO(pg-port): real pg_atomic_write_u64 lives in port/atomics.h
+    crate::port::atomics::generic::pg_atomic_write_u64_impl(&*(_ptr as *const crate::port::atomics::pg_atomic_uint64), _val) // TODO(pg-port): real pg_atomic_write_u64 lives in port/atomics.h
 }
 unsafe fn pg_write_barrier() {
     // TODO(pg-port): real pg_write_barrier lives in port/atomics.h
 }
 
 // Transaction id helpers --- TODO(pg-port): real defs live in access/transam.* */
-#[repr(C)]
-pub struct FullTransactionId {
-    pub value: u64,
-}
+pub use crate::access::transam::FullTransactionId;
 
 pub const InvalidTransactionId: TransactionId = 0; // TODO(pg-port): real value lives in access/transam.h
 pub const FirstNormalTransactionId: TransactionId = 3; // TODO(pg-port): real value lives in access/transam.h
 pub const MaxTransactionId: TransactionId = 0xFFFFFFFF; // TODO(pg-port): real value lives in access/transam.h
 
 unsafe fn XidFromFullTransactionId(_fxid: FullTransactionId) -> TransactionId {
-    unimplemented!() // TODO(pg-port): real XidFromFullTransactionId lives in access/transam.h
+    crate::access::transam::XidFromFullTransactionId(_fxid) // TODO(pg-port): real XidFromFullTransactionId lives in access/transam.h
 }
 unsafe fn TransactionIdPrecedes(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdPrecedes lives in access/transam.c
+    crate::access::transam::transam::TransactionIdPrecedes(_id1, _id2) // TODO(pg-port): real TransactionIdPrecedes lives in access/transam.c
 }
 unsafe fn TransactionIdIsValid(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdIsValid lives in access/transam.h
+    crate::access::transam::TransactionIdIsValid(_xid) // TODO(pg-port): real TransactionIdIsValid lives in access/transam.h
 }
 unsafe fn TransactionIdEquals(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdEquals lives in access/transam.h
+    crate::access::transam::TransactionIdEquals(_id1, _id2) // TODO(pg-port): real TransactionIdEquals lives in access/transam.h
 }
 unsafe fn AdvanceOldestClogXid(_oldest_xact: TransactionId) {
-    unimplemented!() // TODO(pg-port): real AdvanceOldestClogXid lives in access/transam/varsup.c
+    crate::access::transam::varsup::AdvanceOldestClogXid(_oldest_xact) // TODO(pg-port): real AdvanceOldestClogXid lives in access/transam/varsup.c
 }
 
-#[repr(C)]
-pub struct TransamVariablesData {
-    pub nextXid: FullTransactionId,
-    // ... TODO(pg-port): access/transam.h
-}
-pub static mut TransamVariables: *mut TransamVariablesData = core::ptr::null_mut(); // TODO(pg-port): real TransamVariables lives in access/transam/varsup.c
+pub use crate::access::transam::varsup::TransamVariablesData;
+pub use crate::access::transam::varsup::TransamVariables;
 
 // PGPROC / proc globals --- TODO(pg-port): real defs live in storage/proc.h ---
 #[repr(C)]
@@ -1580,34 +1582,30 @@ pub struct PROC_HDR {
     // ... TODO(pg-port): storage/proc.h
 }
 
-pub static mut ProcGlobal: *mut PROC_HDR = core::ptr::null_mut(); // TODO(pg-port): real ProcGlobal lives in storage/lmgr/proc.c
-pub static mut MyProc: *mut PGPROC = core::ptr::null_mut(); // TODO(pg-port): real MyProc lives in storage/lmgr/proc.c
+extern "C" { pub static mut ProcGlobal: *mut PROC_HDR; } // canonical: proc::ProcGlobal
+extern "C" { pub static mut MyProc: *mut PGPROC; } // canonical: proc::MyProc (#[no_mangle])
 
 // ProcNumber --- TODO(pg-port): real defs live in storage/procnumber.h --------
 pub static mut MyProcNumber: c_int = 0; // TODO(pg-port): real MyProcNumber lives in storage/procnumber.h
 pub const INVALID_PROC_NUMBER: c_int = -1; // TODO(pg-port): real value lives in storage/procnumber.h
 
 unsafe fn GetPGProcByNumber(_n: c_int) -> *mut PGPROC {
-    unimplemented!() // TODO(pg-port): real GetPGProcByNumber lives in storage/proc.h
+    crate::storage::lmgr::proc::GetPGProcByNumber(_n) as _ // TODO(pg-port): real GetPGProcByNumber lives in storage/proc.h
 }
 
 // Semaphore --- TODO(pg-port): real defs live in storage/pg_sema.h ------------
 pub type PGSemaphore = *mut c_void;
 unsafe fn PGSemaphoreLock(_sema: PGSemaphore) {
-    unimplemented!() // TODO(pg-port): real PGSemaphoreLock lives in port/*_sema.c
+    crate::port::sysv_sema::PGSemaphoreLock(_sema as _) // TODO(pg-port): real PGSemaphoreLock lives in port/*_sema.c
 }
 unsafe fn PGSemaphoreUnlock(_sema: PGSemaphore) {
-    unimplemented!() // TODO(pg-port): real PGSemaphoreUnlock lives in port/*_sema.c
+    crate::port::sysv_sema::PGSemaphoreUnlock(_sema as _) // TODO(pg-port): real PGSemaphoreUnlock lives in port/*_sema.c
 }
 
 // pgstat wait events --- TODO(pg-port): real defs live in utils/wait_event.h --
 pub const WAIT_EVENT_XACT_GROUP_UPDATE: uint32 = 0; // TODO(pg-port): real value lives in utils/wait_event.h
-unsafe fn pgstat_report_wait_start(_wait_event_info: uint32) {
-    unimplemented!() // TODO(pg-port): real pgstat_report_wait_start lives in utils/activity/wait_event.c
-}
-unsafe fn pgstat_report_wait_end() {
-    unimplemented!() // TODO(pg-port): real pgstat_report_wait_end lives in utils/activity/wait_event.c
-}
+unsafe fn pgstat_report_wait_start(_wait_event_info: uint32) { crate::parser_link_shims::pgstat_report_wait_start(_wait_event_info as _) }
+unsafe fn pgstat_report_wait_end() { crate::parser_link_shims::pgstat_report_wait_end() }
 
 // Tracepoints --- TODO(pg-port): real defs live in pg_trace.h (DTrace) --------
 #[inline]

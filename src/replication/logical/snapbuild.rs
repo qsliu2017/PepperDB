@@ -325,119 +325,93 @@ unsafe fn NormalTransactionIdFollows(id1: TransactionId, id2: TransactionId) -> 
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferXidHasBaseSnapshot(
-    _reorder: *mut ReorderBuffer,
-    _xid: TransactionId,
-) -> bool {
-    unimplemented!() // TODO(pg-port): real ReorderBufferXidHasBaseSnapshot in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+    xid: TransactionId,
+) -> bool { crate::replication::logical::reorderbuffer::ReorderBufferXidHasBaseSnapshot(reorder as _, xid as _) }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferSetBaseSnapshot(
-    _reorder: *mut ReorderBuffer,
-    _xid: TransactionId,
-    _lsn: XLogRecPtr,
-    _snap: Snapshot,
-) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferSetBaseSnapshot in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+    xid: TransactionId,
+    lsn: XLogRecPtr,
+    snap: Snapshot,
+) { crate::replication::logical::reorderbuffer::ReorderBufferSetBaseSnapshot(reorder as _, xid as _, lsn as _, snap) }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferXidSetCatalogChanges(
-    _reorder: *mut ReorderBuffer,
-    _xid: TransactionId,
-    _lsn: XLogRecPtr,
-) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferXidSetCatalogChanges in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+    xid: TransactionId,
+    lsn: XLogRecPtr,
+) { crate::replication::logical::reorderbuffer::ReorderBufferXidSetCatalogChanges(reorder as _, xid as _, lsn as _) }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferAddNewTupleCids(
-    _reorder: *mut ReorderBuffer,
-    _top_xid: TransactionId,
-    _lsn: XLogRecPtr,
-    _target_locator: RelFileLocator,
-    _target_tid: ItemPointerData,
-    _cmin: CommandId,
-    _cmax: CommandId,
-    _combocid: CommandId,
-) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAddNewTupleCids in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+    top_xid: TransactionId,
+    lsn: XLogRecPtr,
+    target_locator: RelFileLocator,
+    target_tid: ItemPointerData,
+    cmin: CommandId,
+    cmax: CommandId,
+    combocid: CommandId,
+) { unimplemented!() }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferAddNewCommandId(
-    _reorder: *mut ReorderBuffer,
-    _xid: TransactionId,
-    _lsn: XLogRecPtr,
-    _cid: CommandId,
-) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAddNewCommandId in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+    xid: TransactionId,
+    lsn: XLogRecPtr,
+    cid: CommandId,
+) { crate::replication::logical::reorderbuffer::ReorderBufferAddNewCommandId(reorder as _, xid as _, lsn as _, cid as _) }
 
 /// TODO(pg-port): real home reorderbuffer.c.
-pub unsafe fn ReorderBufferGetOldestXmin(_reorder: *mut ReorderBuffer) -> TransactionId {
-    unimplemented!() // TODO(pg-port): real ReorderBufferGetOldestXmin in reorderbuffer.c
-}
+pub unsafe fn ReorderBufferGetOldestXmin(reorder: *mut ReorderBuffer) -> TransactionId { crate::replication::logical::reorderbuffer::ReorderBufferGetOldestXmin(reorder as _) }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferGetOldestTXN(
-    _reorder: *mut ReorderBuffer,
-) -> *mut ReorderBufferTXN {
-    unimplemented!() // TODO(pg-port): real ReorderBufferGetOldestTXN in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+) -> *mut ReorderBufferTXN { unimplemented!() }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferSetRestartPoint(
-    _reorder: *mut ReorderBuffer,
-    _lsn: XLogRecPtr,
-) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferSetRestartPoint in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+    lsn: XLogRecPtr,
+) { crate::replication::logical::reorderbuffer::ReorderBufferSetRestartPoint(reorder as _, lsn as _) }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferGetCatalogChangesXacts(
-    _reorder: *mut ReorderBuffer,
-) -> *mut TransactionId {
-    unimplemented!() // TODO(pg-port): real ReorderBufferGetCatalogChangesXacts in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+) -> *mut TransactionId { crate::replication::logical::reorderbuffer::ReorderBufferGetCatalogChangesXacts(reorder as _) }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferXidHasCatalogChanges(
-    _reorder: *mut ReorderBuffer,
-    _xid: TransactionId,
-) -> bool {
-    unimplemented!() // TODO(pg-port): real ReorderBufferXidHasCatalogChanges in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+    xid: TransactionId,
+) -> bool { crate::replication::logical::reorderbuffer::ReorderBufferXidHasCatalogChanges(reorder as _, xid as _) }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferAddSnapshot(
-    _reorder: *mut ReorderBuffer,
-    _xid: TransactionId,
-    _lsn: XLogRecPtr,
-    _snap: Snapshot,
-) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAddSnapshot in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+    xid: TransactionId,
+    lsn: XLogRecPtr,
+    snap: Snapshot,
+) { crate::replication::logical::reorderbuffer::ReorderBufferAddSnapshot(reorder as _, xid as _, lsn as _, snap) }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferGetInvalidations(
-    _reorder: *mut ReorderBuffer,
-    _xid: TransactionId,
-    _msgs: *mut *mut SharedInvalidationMessage,
-) -> u32 {
-    unimplemented!() // TODO(pg-port): real ReorderBufferGetInvalidations in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+    xid: TransactionId,
+    msgs: *mut *mut SharedInvalidationMessage,
+) -> u32 { crate::replication::logical::reorderbuffer::ReorderBufferGetInvalidations(reorder as _, xid as _, msgs as _) }
 
 /// TODO(pg-port): real home reorderbuffer.c.
 pub unsafe fn ReorderBufferAddDistributedInvalidations(
-    _reorder: *mut ReorderBuffer,
-    _xid: TransactionId,
-    _lsn: XLogRecPtr,
-    _ninvalidations: u32,
-    _msgs: *mut SharedInvalidationMessage,
-) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAddDistributedInvalidations in reorderbuffer.c
-}
+    reorder: *mut ReorderBuffer,
+    xid: TransactionId,
+    lsn: XLogRecPtr,
+    ninvalidations: u32,
+    msgs: *mut SharedInvalidationMessage,
+) { crate::replication::logical::reorderbuffer::ReorderBufferAddDistributedInvalidations(reorder as _, xid as _, lsn as _, ninvalidations as _, msgs as _) }
 
 /// rbtxn_is_prepared - check whether a transaction is a prepared (2PC) one.
 /// TODO(pg-port): real home reorderbuffer.c.
@@ -448,59 +422,45 @@ unsafe fn rbtxn_is_prepared(txn: *const ReorderBufferTXN) -> bool {
 
 /// dclist_count - count entries in a doubly-counted list.
 /// TODO(pg-port): real home lib/ilist.h / lib/ilist.c.
-unsafe fn dclist_count(_head: *const CatalogChangeDList) -> Size {
-    unimplemented!() // TODO(pg-port): real dclist_count in lib/ilist.c
-}
+unsafe fn dclist_count(head: *const CatalogChangeDList) -> Size { crate::lib::ilist::dclist_count(head as _) as _ }
 
 // ---------- Slot / logical.c stubs  TODO(pg-port) ----------
 
 /// TODO(pg-port): real home replication/logical.c.
-pub unsafe fn LogicalIncreaseXminForSlot(_lsn: XLogRecPtr, _xmin: TransactionId) {
-    unimplemented!() // TODO(pg-port): real LogicalIncreaseXminForSlot in replication/logical.c
-}
+pub unsafe fn LogicalIncreaseXminForSlot(lsn: XLogRecPtr, xmin: TransactionId) { crate::replication::logical::logical::LogicalIncreaseXminForSlot(lsn as _, xmin as _) }
 
 /// TODO(pg-port): real home replication/logical.c.
 pub unsafe fn LogicalIncreaseRestartDecodingForSlot(
-    _current_lsn: XLogRecPtr,
-    _restart_lsn: XLogRecPtr,
-) {
-    unimplemented!() // TODO(pg-port): real LogicalIncreaseRestartDecodingForSlot in replication/logical.c
-}
+    current_lsn: XLogRecPtr,
+    restart_lsn: XLogRecPtr,
+) { crate::replication::logical::logical::LogicalIncreaseRestartDecodingForSlot(current_lsn as _, restart_lsn as _) }
 
 /// TODO(pg-port): real home replication/slot.c.
-pub unsafe fn ReplicationSlotsComputeLogicalRestartLSN() -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real ReplicationSlotsComputeLogicalRestartLSN in replication/slot.c
-}
+pub unsafe fn ReplicationSlotsComputeLogicalRestartLSN() -> XLogRecPtr { crate::replication::slot::ReplicationSlotsComputeLogicalRestartLSN() }
 
 // ---------- ProcArray / xact stubs  TODO(pg-port) ----------
 
 /// TODO(pg-port): real home storage/procarray.c.
-pub unsafe fn GetOldestSafeDecodingTransactionId(_copy_xacts: bool) -> TransactionId {
-    unimplemented!() // TODO(pg-port): real GetOldestSafeDecodingTransactionId in storage/procarray.c
-}
+pub unsafe fn GetOldestSafeDecodingTransactionId(copy_xacts: bool) -> TransactionId { crate::storage::ipc::procarray::GetOldestSafeDecodingTransactionId(copy_xacts) }
 
 /// TODO(pg-port): real home storage/procarray.c (extern PGDLLIMPORT).
-pub unsafe fn GetMaxSnapshotXidCount() -> c_int {
-    unimplemented!() // TODO(pg-port): real GetMaxSnapshotXidCount in storage/procarray.c
-}
+pub unsafe fn GetMaxSnapshotXidCount() -> c_int { crate::storage::ipc::procarray::GetMaxSnapshotXidCount() }
 
 /// TODO(pg-port): real home storage/lmgr/lwlock.c.
 pub unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real LWLockAcquire in storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, if _mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE })
 }
 
 /// TODO(pg-port): real home storage/lmgr/lwlock.c.
 pub unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO(pg-port): real LWLockRelease in storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 
 /// ProcArrayLock (storage/procarray.c extern).
-pub static mut ProcArrayLock: *mut LWLock = core::ptr::null_mut();
+pub use crate::backend_link_shims::ProcArrayLock;
 
 /// TODO(pg-port): real home access/transam/xact.c.
-pub unsafe fn IsTransactionOrTransactionBlock() -> bool {
-    unimplemented!() // TODO(pg-port): real IsTransactionOrTransactionBlock in access/transam/xact.c
-}
+pub unsafe fn IsTransactionOrTransactionBlock() -> bool { crate::access::transam::xact::IsTransactionOrTransactionBlock() }
 
 /// TODO(pg-port): real home access/transam/xact.c.
 pub unsafe fn IsTransactionState() -> bool {
@@ -508,14 +468,10 @@ pub unsafe fn IsTransactionState() -> bool {
 }
 
 /// TODO(pg-port): real home access/transam/xact.c.
-pub unsafe fn StartTransactionCommand() {
-    unimplemented!() // TODO(pg-port): real StartTransactionCommand in access/transam/xact.c
-}
+pub unsafe fn StartTransactionCommand() { crate::access::transam::xact::StartTransactionCommand() }
 
 /// TODO(pg-port): real home access/transam/xact.c.
-pub unsafe fn AbortCurrentTransaction() {
-    unimplemented!() // TODO(pg-port): real AbortCurrentTransaction in access/transam/xact.c
-}
+pub unsafe fn AbortCurrentTransaction() { crate::access::transam::xact::AbortCurrentTransaction() }
 
 /// TODO(pg-port): real home access/transam/xact.c (GUC variable).
 pub static mut XactIsoLevel: c_int = 0;
@@ -523,50 +479,34 @@ pub static mut XactReadOnly: bool = false;
 pub const XACT_REPEATABLE_READ: c_int = 2;
 
 /// TODO(pg-port): real home utils/snapmgr.c.
-pub unsafe fn InvalidateCatalogSnapshot() {
-    unimplemented!() // TODO(pg-port): real InvalidateCatalogSnapshot in utils/snapmgr.c
-}
+pub unsafe fn InvalidateCatalogSnapshot() { crate::utils::time::snapmgr::InvalidateCatalogSnapshot() }
 
 /// TODO(pg-port): real home utils/snapmgr.c.
-pub unsafe fn HaveRegisteredOrActiveSnapshot() -> bool {
-    unimplemented!() // TODO(pg-port): real HaveRegisteredOrActiveSnapshot in utils/snapmgr.c
-}
+pub unsafe fn HaveRegisteredOrActiveSnapshot() -> bool { crate::utils::time::snapmgr::HaveRegisteredOrActiveSnapshot() }
 
 /// TODO(pg-port): real home utils/snapmgr.c.
-pub unsafe fn HistoricSnapshotActive() -> bool {
-    unimplemented!() // TODO(pg-port): real HistoricSnapshotActive in utils/snapmgr.c
-}
+pub unsafe fn HistoricSnapshotActive() -> bool { crate::utils::time::snapmgr::HistoricSnapshotActive() }
 
 /// TODO(pg-port): real home utils/snapmgr.c.
-pub unsafe fn ExportSnapshot(_snap: Snapshot) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real ExportSnapshot in utils/snapmgr.c
-}
+pub unsafe fn ExportSnapshot(snap: Snapshot) -> *mut c_char { crate::utils::time::snapmgr::ExportSnapshot(snap as _) }
 
 /// TODO(pg-port): real home access/transam/xact.c.
-pub unsafe fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdIsCurrentTransactionId in access/transam/xact.c
-}
+pub unsafe fn TransactionIdIsCurrentTransactionId(xid: TransactionId) -> bool { crate::access::transam::xact::TransactionIdIsCurrentTransactionId(xid as _) }
 
 /// TODO(pg-port): real home storage/lmgr/lmgr.c.
 pub unsafe fn XactLockTableWait(
-    _xid: TransactionId,
-    _rel: *mut c_void,
-    _ctid: *mut c_void,
-    _reason: c_int,
-) {
-    unimplemented!() // TODO(pg-port): real XactLockTableWait in storage/lmgr/lmgr.c
-}
+    xid: TransactionId,
+    rel: *mut c_void,
+    ctid: *mut c_void,
+    reason: c_int,
+) { crate::storage::lmgr::lmgr::XactLockTableWait(xid as _, rel as _, ctid as _, reason as _) }
 pub const XLTW_None: c_int = 0;
 
 /// TODO(pg-port): real home storage/standby.c.
-pub unsafe fn LogStandbySnapshot() {
-    unimplemented!() // TODO(pg-port): real LogStandbySnapshot in storage/standby.c
-}
+pub unsafe fn LogStandbySnapshot() { unimplemented!() }
 
 /// TODO(pg-port): real home access/transam/xlog.c.
-pub unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO(pg-port): real RecoveryInProgress in access/transam/xlog.c
-}
+pub unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
 
 /// TODO(pg-port): real home access/transam/xlog.c.
 pub unsafe fn GetRedoRecPtr() -> XLogRecPtr {
@@ -596,19 +536,13 @@ unsafe fn fsync_fname(_fname: *const c_char, _isdir: bool) {
 }
 
 /// TODO(pg-port): real home storage/file/fd.c.
-unsafe fn AllocateDir(_dirname: *const c_char) -> *mut DIR {
-    unimplemented!() // TODO(pg-port): real AllocateDir in storage/file/fd.c
-}
+unsafe fn AllocateDir(dirname: *const c_char) -> *mut DIR { unimplemented!() }
 
 /// TODO(pg-port): real home storage/file/fd.c.
-unsafe fn ReadDir(_dir: *mut DIR, _dirname: *const c_char) -> *mut dirent {
-    unimplemented!() // TODO(pg-port): real ReadDir in storage/file/fd.c
-}
+unsafe fn ReadDir(dir: *mut DIR, dirname: *const c_char) -> *mut dirent { unimplemented!() }
 
 /// TODO(pg-port): real home storage/file/fd.c.
-unsafe fn FreeDir(_dir: *mut DIR) -> c_int {
-    unimplemented!() // TODO(pg-port): real FreeDir in storage/file/fd.c
-}
+unsafe fn FreeDir(dir: *mut DIR) -> c_int { crate::storage::file::fd::FreeDir(dir as _) }
 
 /// TODO(pg-port): real home common/file_utils.c.
 unsafe fn get_dirent_type(
@@ -731,7 +665,7 @@ pub unsafe fn AllocateSnapshotBuilder(
     /* allocate memory in own context, to have better accountability */
     context = AllocSetContextCreate!(
         CurrentMemoryContext,
-        c"snapshot builder context",
+        c"snapshot builder context".as_ptr(),
         ALLOCSET_DEFAULT_SIZES
     ) as MemoryContext;
     oldcontext = MemoryContextSwitchTo(context);
@@ -1035,9 +969,9 @@ pub unsafe fn SnapBuildInitialSnapshot(builder: *mut SnapBuild) -> Snapshot {
      * horizon would have bad consequences, therefore always double-check that
      * the horizon is enforced.
      */
-    LWLockAcquire(ProcArrayLock, LW_SHARED);
+    LWLockAcquire(ProcArrayLock as *mut LWLock, LW_SHARED);
     safeXid = GetOldestSafeDecodingTransactionId(false);
-    LWLockRelease(ProcArrayLock);
+    LWLockRelease(ProcArrayLock as *mut LWLock);
 
     if TransactionIdFollows(safeXid, (*snap).xmin) {
         ereport!(ERROR, errmsg!("cannot build an initial slot snapshot as oldest safe xid {} follows snapshot's xmin {}",

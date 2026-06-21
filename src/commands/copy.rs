@@ -156,32 +156,30 @@ static XactReadOnly: bool = false;
  * Local stubs for unported helper functions
  * =================================================================== */
 
-unsafe fn has_privs_of_role(_roleid: Oid, _role2: Oid) -> bool {
-    unimplemented!() // TODO: utils/acl.c
+unsafe fn has_privs_of_role(roleid: Oid, role2: Oid) -> bool {
+    crate::utils::adt::acl::has_privs_of_role(roleid as _, role2 as _)
 }
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
+unsafe fn table_openrv(relation: *mut RangeVar, lockmode: LOCKMODE) -> Relation {
+    crate::access::table::table::table_openrv(relation as _, lockmode as _) as _
 }
-unsafe fn table_openrv(_relation: *mut RangeVar, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO: access/table/table.c
+unsafe fn table_close(rel: Relation, lockmode: LOCKMODE) {
+    crate::access::table::table::table_close(rel as _, lockmode as _)
 }
-unsafe fn table_close(_rel: Relation, _lockmode: LOCKMODE) {
-    unimplemented!() // TODO: access/table/table.c
+unsafe fn RelationGetRelid(rel: Relation) -> Oid {
+    crate::utils::rel::RelationGetRelid(rel as _) as _
 }
-unsafe fn RelationGetRelid(_rel: Relation) -> Oid {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationGetDescr(rel: Relation) -> TupleDesc {
+    crate::utils::rel::RelationGetDescr(rel as _) as _
 }
-unsafe fn RelationGetDescr(_rel: Relation) -> TupleDesc {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationGetNamespace(rel: Relation) -> Oid {
+    crate::utils::rel::RelationGetNamespace(rel as _) as _
 }
-unsafe fn RelationGetNamespace(_rel: Relation) -> Oid {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationGetRelationName(rel: Relation) -> *mut c_char {
+    crate::utils::rel::RelationGetRelationName(rel as _) as _
 }
-unsafe fn RelationGetRelationName(_rel: Relation) -> *mut c_char {
-    unimplemented!() // TODO: utils/rel.h
-}
-unsafe fn RelationGetNumberOfAttributes(_rel: Relation) -> c_int {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationGetNumberOfAttributes(rel: Relation) -> c_int {
+    crate::utils::rel::RelationGetNumberOfAttributes(rel as _) as _
 }
 unsafe fn addRangeTableEntryForRelation(
     _pstate: *mut ParseState,
@@ -191,7 +189,9 @@ unsafe fn addRangeTableEntryForRelation(
     _inh: bool,
     _inFromCl: bool,
 ) -> *mut ParseNamespaceItem {
-    unimplemented!() // TODO: parser/parse_relation.c
+    crate::parser::parse_relation::addRangeTableEntryForRelation(
+        _pstate as _, _rel as _, _lockmode as _, _alias as _, _inh, _inFromCl,
+    ) as _
 }
 unsafe fn addNSItemToQuery(
     _pstate: *mut ParseState,
@@ -200,77 +200,81 @@ unsafe fn addNSItemToQuery(
     _addToRelNameSpace: bool,
     _addToVarNameSpace: bool,
 ) {
-    unimplemented!() // TODO: parser/parse_relation.c
+    crate::parser::parse_relation::addNSItemToQuery(
+        _pstate as _, _nsitem as _, _addToJoinList, _addToRelNameSpace, _addToVarNameSpace,
+    )
 }
 unsafe fn transformExpr(
     _pstate: *mut ParseState,
     _expr: *mut Node,
     _exprKind: ParseExprKind,
 ) -> *mut Node {
-    unimplemented!() // TODO: parser/parse_expr.c
+    crate::parser::parse_expr::transformExpr(_pstate as _, _expr as _, _exprKind) as _
 }
 unsafe fn coerce_to_boolean(
     _pstate: *mut ParseState,
     _node: *mut Node,
     _constructName: *const c_char,
 ) -> *mut Node {
-    unimplemented!() // TODO: parser/parse_coerce.c
+    crate::parser::parse_coerce::coerce_to_boolean(_pstate as _, _node as _, _constructName) as _
 }
 unsafe fn assign_expr_collations(_pstate: *mut ParseState, _expr: *mut Node) {
-    unimplemented!() // TODO: parser/parse_collate.c
+    crate::parser::parse_collate::assign_expr_collations(_pstate as _, _expr as _)
 }
 unsafe fn pull_varattnos(_node: *mut Node, _varno: c_int, _varattnos: *mut *mut Bitmapset) {
-    unimplemented!() // TODO: optimizer/util/var.c
+    crate::optimizer::util::var::pull_varattnos(_node as _, _varno as _, _varattnos as _)
 }
 unsafe fn bms_is_member(_x: c_int, _a: *mut Bitmapset) -> bool {
-    unimplemented!() // TODO: nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_is_member(_x as _, _a as _)
 }
 unsafe fn bms_add_range(_a: *mut Bitmapset, _lower: c_int, _upper: c_int) -> *mut Bitmapset {
-    unimplemented!() // TODO: nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_add_range(_a as _, _lower as _, _upper as _) as _
 }
 unsafe fn bms_del_member(_a: *mut Bitmapset, _x: c_int) -> *mut Bitmapset {
-    unimplemented!() // TODO: nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_del_member(_a as _, _x as _) as _
 }
 unsafe fn bms_add_member(_a: *mut Bitmapset, _x: c_int) -> *mut Bitmapset {
-    unimplemented!() // TODO: nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_add_member(_a as _, _x as _) as _
 }
 unsafe fn bms_next_member(_a: *mut Bitmapset, _prevbit: c_int) -> c_int {
-    unimplemented!() // TODO: nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_next_member(_a as _, _prevbit as _) as _
 }
 unsafe fn get_attname(_relid: Oid, _attnum: AttrNumber, _missing_ok: bool) -> *mut c_char {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_attname(_relid as _, _attnum as _, _missing_ok) as _
 }
 unsafe fn eval_const_expressions(_root: *mut c_void, _node: *mut Node) -> *mut Node {
-    unimplemented!() // TODO: optimizer/util/clauses.c
+    crate::optimizer::util::clauses::eval_const_expressions(_root as _, _node as _) as _
 }
 unsafe fn canonicalize_qual(_qual: *mut c_void, _is_check: bool) -> *mut c_void {
-    unimplemented!() // TODO: optimizer/prep/prepqual.c
+    crate::optimizer::prep::prepqual::canonicalize_qual(_qual as _, _is_check) as _
 }
 unsafe fn make_ands_implicit(_clause: *mut c_void) -> *mut List {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::make_ands_implicit(_clause as _) as _
 }
 unsafe fn ExecCheckPermissions(
     _rangeTable: *mut List,
     _rteperminfos: *mut List,
     _ereport_on_violation: bool,
 ) -> bool {
-    unimplemented!() // TODO: executor/execMain.c
+    crate::executor::execMain::ExecCheckPermissions(
+        _rangeTable as _, _rteperminfos as _, _ereport_on_violation,
+    )
 }
 unsafe fn check_enable_rls(_relid: Oid, _checkAsUser: Oid, _noError: bool) -> c_int {
-    unimplemented!() // TODO: utils/misc/rls.c
+    crate::utils::misc::rls::check_enable_rls(_relid as _, _checkAsUser as _, _noError) as _
 }
 unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_namespace_name(_nspid as _) as _
 }
 unsafe fn makeRangeVar(
     _schemaname: *mut c_char,
     _relname: *mut c_char,
     _location: c_int,
 ) -> *mut RangeVar {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeRangeVar(_schemaname as _, _relname as _, _location as _) as _
 }
 unsafe fn PreventCommandIfReadOnly(_cmdname: *const c_char) {
-    unimplemented!() // TODO: access/transam/xact.c
+    crate::tcop::utility::PreventCommandIfReadOnly(_cmdname as _)
 }
 unsafe fn BeginCopyFrom(
     _pstate: *mut ParseState,
@@ -282,13 +286,16 @@ unsafe fn BeginCopyFrom(
     _attnamelist: *mut List,
     _options: *mut List,
 ) -> CopyFromState {
-    unimplemented!() // TODO: commands/copyfrom.c
+    crate::commands::copyfrom::BeginCopyFrom(
+        _pstate as _, _rel as _, _whereClause as _, _filename as _, _is_program,
+        core::mem::transmute(_data_source_cb), _attnamelist as _, _options as _,
+    ) as _
 }
 unsafe fn CopyFrom(_cstate: CopyFromState) -> uint64 {
-    unimplemented!() // TODO: commands/copyfrom.c
+    crate::commands::copyfrom::CopyFrom(_cstate as _) as _
 }
 unsafe fn EndCopyFrom(_cstate: CopyFromState) {
-    unimplemented!() // TODO: commands/copyfrom.c
+    crate::commands::copyfrom::EndCopyFrom(_cstate as _)
 }
 unsafe fn BeginCopyTo(
     _pstate: *mut ParseState,
@@ -301,43 +308,46 @@ unsafe fn BeginCopyTo(
     _attnamelist: *mut List,
     _options: *mut List,
 ) -> CopyToState {
-    unimplemented!() // TODO: commands/copyto.c
+    crate::commands::copyto::BeginCopyTo(
+        _pstate as _, _rel as _, _raw_query as _, _queryRelId as _, _filename as _, _is_program,
+        core::mem::transmute(_data_dest_cb), _attnamelist as _, _options as _,
+    ) as _
 }
 unsafe fn DoCopyTo(_cstate: CopyToState) -> uint64 {
-    unimplemented!() // TODO: commands/copyto.c
+    crate::commands::copyto::DoCopyTo(_cstate as _) as _
 }
 unsafe fn EndCopyTo(_cstate: CopyToState) {
-    unimplemented!() // TODO: commands/copyto.c
+    crate::commands::copyto::EndCopyTo(_cstate as _)
 }
 unsafe fn defGetString(_def: *mut DefElem) -> *mut c_char {
-    unimplemented!() // TODO: commands/define.c
+    crate::commands::define::defGetString(_def as _) as _
 }
 unsafe fn defGetBoolean(_def: *mut DefElem) -> bool {
-    unimplemented!() // TODO: commands/define.c
+    crate::commands::define::defGetBoolean(_def as _)
 }
 unsafe fn defGetInt64(_def: *mut DefElem) -> int64 {
-    unimplemented!() // TODO: commands/define.c
+    crate::commands::define::defGetInt64(_def as _) as _
 }
 unsafe fn errorConflictingDefElem(_defel: *mut DefElem, _pstate: *mut ParseState) {
-    unimplemented!() // TODO: commands/define.c
+    crate::commands::define::errorConflictingDefElem(_defel as _, _pstate as _)
 }
 unsafe fn parser_errposition(_pstate: *mut ParseState, _location: c_int) -> c_int {
-    unimplemented!() // TODO: parser/parse_node.c
+    crate::parser::parse_node::parser_errposition(_pstate as _, _location as _) as _
 }
 unsafe fn pg_char_to_encoding(_name: *const c_char) -> c_int {
-    unimplemented!() // TODO: mb/encnames.c
+    crate::common::encnames::pg_char_to_encoding(_name as _) as _
 }
 unsafe fn pg_strtoint64(_s: *const c_char) -> int64 {
-    unimplemented!() // TODO: utils/adt/numutils.c
+    crate::utils::adt::numutils::pg_strtoint64(_s as _) as _
 }
 unsafe fn TupleDescCompactAttr(_tupdesc: TupleDesc, _i: c_int) -> *mut CompactAttribute {
-    unimplemented!() // TODO: access/tupdesc.h
+    crate::access::common::tupdesc::TupleDescCompactAttr(_tupdesc as _, _i as _) as _
 }
 unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> Form_pg_attribute {
-    unimplemented!() // TODO: access/tupdesc.h
+    crate::access::common::tupdesc::TupleDescAttr(_tupdesc as _, _i as _) as _
 }
 unsafe fn namestrcmp(_name: *mut NameData, _str: *const c_char) -> c_int {
-    unimplemented!() // TODO: utils/adt/name.c
+    crate::utils::adt::name::namestrcmp(_name as _, _str as _) as _
 }
 
 extern "C" {
@@ -348,34 +358,12 @@ extern "C" {
     fn pg_strcasecmp(s1: *const c_char, s2: *const c_char) -> c_int;
 }
 
-/* Stub node types for makeNode / castNode usage */
-#[repr(C)]
-pub struct ParseNamespaceItem {
-    pub p_perminfo: *mut RTEPermissionInfo,
-}
-#[repr(C)]
-pub struct RTEPermissionInfo {
-    pub requiredPerms: u64,
-    pub insertedCols: *mut Bitmapset,
-    pub selectedCols: *mut Bitmapset,
-}
-#[repr(C)]
-pub struct CompactAttribute {
-    pub attisdropped: bool,
-    pub attgenerated: c_char,
-}
-pub type Form_pg_attribute = *mut FormData_pg_attribute;
-#[repr(C)]
-pub struct FormData_pg_attribute {
-    pub attname: NameData,
-    pub attnum: AttrNumber,
-    pub attisdropped: bool,
-    pub attgenerated: c_char,
-}
-#[repr(C)]
-pub struct NameData {
-    _data: [c_char; 64],
-}
+/* Canonical node/attribute types (re-exported to keep field layouts correct). */
+pub use crate::parser::parse_node::ParseNamespaceItem;
+pub use crate::nodes::parsenodes::RTEPermissionInfo;
+pub use crate::access::common::tupdesc::CompactAttribute;
+pub use crate::catalog::pg_attribute::{FormData_pg_attribute, Form_pg_attribute};
+pub use crate::c::NameData;
 
 /* ===================================================================
  * copy.c implementation
@@ -465,7 +453,7 @@ pub unsafe fn DoCopy(
             false,
         );
 
-        perminfo = (*nsitem).p_perminfo;
+        perminfo = (*nsitem).p_perminfo as *mut RTEPermissionInfo;
         (*perminfo).requiredPerms = if is_from { ACL_INSERT } else { ACL_SELECT };
 
         if !(*stmt).whereClause.is_null() {
@@ -538,9 +526,9 @@ pub unsafe fn DoCopy(
 
             attno = lfirst_int(current_cell!(cur)) - FirstLowInvalidHeapAttributeNumber as i32;
             bms = if is_from {
-                &mut (*perminfo).insertedCols
+                &mut (*perminfo).insertedCols as *mut _ as *mut *mut Bitmapset
             } else {
-                &mut (*perminfo).selectedCols
+                &mut (*perminfo).selectedCols as *mut _ as *mut *mut Bitmapset
             };
 
             *bms = bms_add_member(*bms, attno);
@@ -1342,7 +1330,7 @@ pub unsafe fn CopyGetAttnums(
         while i < attr_count {
             let attr: *mut CompactAttribute = TupleDescCompactAttr(tupDesc, i);
 
-            if (*attr).attisdropped || (*attr).attgenerated != 0 {
+            if (*attr).attisdropped || (*attr).attgenerated {
                 i += 1;
                 continue;
             }

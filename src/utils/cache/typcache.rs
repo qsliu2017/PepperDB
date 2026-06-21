@@ -117,10 +117,10 @@ use crate::utils::rel::{Relation, RelationGetDescr};
 
 /* TODO(pg-port): real syscache identifiers live in utils/cache/syscache.rs
  * (SysCacheIdentifier enum).  Stub the IDs typcache.c uses until they exist. */
-const TYPEOID: c_int = 0;
-const CLAOID: c_int = 0;
-const CONSTROID: c_int = 0;
-const RANGETYPE: c_int = 0;
+const TYPEOID: c_int = 82;
+const CLAOID: c_int = 14;
+const CONSTROID: c_int = 19;
+const RANGETYPE: c_int = 55;
 
 /* TODO(pg-port): real F_OIDEQ lives in utils/fmgroids.h (generated). */
 const F_OIDEQ: crate::c::RegProcedure = 184;
@@ -163,39 +163,39 @@ unsafe fn ReleaseSysCache(tuple: HeapTuple) {
 }
 
 /* TODO(pg-port): real lsyscache routines live in utils/cache/lsyscache.rs. */
-unsafe fn GetDefaultOpClass(_type_id: Oid, _am_id: Oid) -> Oid {
-    InvalidOid
+unsafe fn GetDefaultOpClass(type_id: Oid, am_id: Oid) -> Oid {
+    crate::commands::indexcmds::GetDefaultOpClass_full(type_id, am_id)
 }
-unsafe fn get_opclass_family(_opclass: Oid) -> Oid {
-    InvalidOid
+unsafe fn get_opclass_family(opclass: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_opclass_family(opclass)
 }
-unsafe fn get_opclass_input_type(_opclass: Oid) -> Oid {
-    InvalidOid
+unsafe fn get_opclass_input_type(opclass: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_opclass_input_type(opclass)
 }
 unsafe fn get_opfamily_member(
-    _opfamily: Oid,
-    _lefttype: Oid,
-    _righttype: Oid,
-    _strategy: int16,
+    opfamily: Oid,
+    lefttype: Oid,
+    righttype: Oid,
+    strategy: int16,
 ) -> Oid {
-    InvalidOid
+    crate::utils::cache::lsyscache::get_opfamily_member(opfamily, lefttype, righttype, strategy)
 }
 unsafe fn get_opfamily_proc(
-    _opfamily: Oid,
-    _lefttype: Oid,
-    _righttype: Oid,
-    _procnum: int16,
+    opfamily: Oid,
+    lefttype: Oid,
+    righttype: Oid,
+    procnum: int16,
 ) -> Oid {
-    InvalidOid
+    crate::utils::cache::lsyscache::get_opfamily_proc(opfamily, lefttype, righttype, procnum)
 }
-unsafe fn get_opcode(_opno: Oid) -> Oid {
-    InvalidOid
+unsafe fn get_opcode(opno: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_opcode(opno)
 }
-unsafe fn get_base_element_type(_typid: Oid) -> Oid {
-    InvalidOid
+unsafe fn get_base_element_type(typid: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_base_element_type(typid)
 }
-unsafe fn getBaseTypeAndTypmod(_typid: Oid, _typmod: *mut int32) -> Oid {
-    InvalidOid
+unsafe fn getBaseTypeAndTypmod(typid: Oid, typmod: *mut int32) -> Oid {
+    crate::utils::cache::lsyscache::getBaseTypeAndTypmod(typid, typmod)
 }
 unsafe fn get_multirange_range(_multirangeOid: Oid) -> Oid {
     InvalidOid
@@ -293,9 +293,7 @@ unsafe fn DecrTupleDescRefCount(tupdesc: TupleDesc) {
 }
 unsafe fn FreeTupleDesc(_tupdesc: TupleDesc) {}
 unsafe fn PinTupleDesc(_tupdesc: TupleDesc) {}
-unsafe fn TupleDescSize(_tupdesc: TupleDesc) -> Size {
-    0
-}
+unsafe fn TupleDescSize(_tupdesc: TupleDesc) -> Size { crate::access::common::tupdesc::TupleDescSize(_tupdesc) }
 unsafe fn TupleDescCopy(_dst: TupleDesc, _src: TupleDesc) {}
 
 /* TODO(pg-port): real equalRowTypes/hashRowType live in access/common/tupdesc.rs. */
@@ -372,38 +370,26 @@ unsafe fn dshash_create(
     _area: *mut dsa_area,
     _params: *const dshash_parameters,
     _arg: *mut c_void,
-) -> *mut dshash_table {
-    null_mut()
-}
+) -> *mut dshash_table { unimplemented!() }
 unsafe fn dshash_attach(
     _area: *mut dsa_area,
     _params: *const dshash_parameters,
     _handle: dshash_table_handle,
     _arg: *mut c_void,
-) -> *mut dshash_table {
-    null_mut()
-}
+) -> *mut dshash_table { unimplemented!() }
 unsafe fn dshash_detach(_hash_table: *mut dshash_table) {}
-unsafe fn dshash_get_hash_table_handle(_hash_table: *mut dshash_table) -> dshash_table_handle {
-    0
-}
+unsafe fn dshash_get_hash_table_handle(_hash_table: *mut dshash_table) -> dshash_table_handle { unimplemented!() }
 unsafe fn dshash_find(
     _hash_table: *mut dshash_table,
     _key: *const c_void,
     _exclusive: bool,
-) -> *mut c_void {
-    null_mut()
-}
+) -> *mut c_void { unimplemented!() }
 unsafe fn dshash_find_or_insert(
     _hash_table: *mut dshash_table,
     _key: *const c_void,
     _found: *mut bool,
-) -> *mut c_void {
-    null_mut()
-}
-unsafe fn dshash_delete_key(_hash_table: *mut dshash_table, _key: *const c_void) -> bool {
-    false
-}
+) -> *mut c_void { unimplemented!() }
+unsafe fn dshash_delete_key(_hash_table: *mut dshash_table, _key: *const c_void) -> bool { unimplemented!() }
 unsafe fn dshash_release_lock(_hash_table: *mut dshash_table, _entry: *mut c_void) {}
 unsafe extern "C" fn dshash_memcpy(_a: *mut c_void, _b: *const c_void, _size: Size, _arg: *mut c_void) {
 }
@@ -412,12 +398,8 @@ unsafe extern "C" fn dshash_memcmp(
     _b: *const c_void,
     _size: Size,
     _arg: *mut c_void,
-) -> c_int {
-    0
-}
-unsafe extern "C" fn dshash_memhash(_a: *const c_void, _size: Size, _arg: *mut c_void) -> uint32 {
-    0
-}
+) -> c_int { crate::lib::dshash::dshash_memcmp(_a, _b, _size, _arg) }
+unsafe extern "C" fn dshash_memhash(_a: *const c_void, _size: Size, _arg: *mut c_void) -> uint32 { crate::lib::dshash::dshash_memhash(_a, _size, _arg) }
 unsafe fn pg_atomic_init_u32(ptr: *mut pg_atomic_uint32, val: uint32) {
     *ptr = val;
 }
@@ -886,6 +868,7 @@ unsafe extern "C" fn type_cache_syshash(key: *const c_void, keysize: Size) -> ui
  * TypeCacheEntry items for TYPTYPE_COMPOSITE.  So, tupdesc can't get
  * invalidated during the lookup_type_cache() call.
  */
+#[no_mangle]
 pub unsafe fn lookup_type_cache(type_id: Oid, mut flags: c_int) -> *mut TypeCacheEntry {
     let mut typentry: *mut TypeCacheEntry;
     let mut found: bool = false;
@@ -2535,6 +2518,7 @@ unsafe fn lookup_rowtype_tupdesc_internal(type_id: Oid, typmod: int32, noError: 
  * case PinTupleDesc/ReleaseTupleDesc are no-ops; but in these cases
  * the tupdesc is guaranteed to live till process exit.)
  */
+#[no_mangle]
 pub unsafe fn lookup_rowtype_tupdesc(type_id: Oid, typmod: int32) -> TupleDesc {
     let tupDesc: TupleDesc;
 

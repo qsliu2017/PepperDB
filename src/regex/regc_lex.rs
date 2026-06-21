@@ -40,35 +40,7 @@ use crate::regex::regex::{
 // TODO(pg-port): unify with regcomp.c's struct vars once #include relationship
 // is resolved in the Rust tree.
 // ---------------------------------------------------------------------------
-#[repr(C)]
-pub struct vars {
-    pub re: *mut regex_t,
-    pub now: *const chr,
-    pub stop: *const chr,
-    pub err: c_int,
-    pub cflags: c_int,
-    pub lasttype: c_int,
-    pub nexttype: c_int,
-    pub nextvalue: chr,
-    pub lexcon: c_int,
-    pub nsubexp: c_int,
-    pub subs: *mut *mut subre,
-    pub nsubs: usize,
-    pub sub10: [*mut subre; 10],
-    pub nfa: *mut nfa,
-    pub cm: *mut colormap,
-    pub nlcolor: color,
-    pub wordchrs: *mut state,
-    pub tree: *mut subre,
-    pub treechain: *mut subre,
-    pub treefree: *mut subre,
-    pub ntree: c_int,
-    pub cv: *mut c_void,
-    pub cv2: *mut c_void,
-    pub lacons: *mut subre,
-    pub nlacons: c_int,
-    pub spaceused: usize,
-}
+pub use crate::regex::regcomp::vars;
 
 // ---------------------------------------------------------------------------
 // scanning macros (know about v)
@@ -370,7 +342,7 @@ pub unsafe fn prefixes(v: *mut vars) {
  * Returns 1 normal, 0 failure.
  */
 pub unsafe fn next(v: *mut vars) -> c_int {
-    let c: chr;
+    let mut c: chr;
 
     'next_restart: loop {
         // loop here after eating a comment

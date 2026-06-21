@@ -46,13 +46,7 @@ pub struct SysScanDescData {
     pub irel: Relation, // index relation, or NULL for heap scan
 }
 
-#[repr(C)]
-pub struct FormData_pg_attribute {
-    pub atttypid: Oid,
-    pub attlen: i16,
-    pub attnotnull: bool,
-    pub attbyval: bool,
-}
+pub use crate::catalog::pg_attribute::FormData_pg_attribute;
 
 #[repr(C)]
 pub struct NameData {
@@ -177,24 +171,22 @@ type c_short = i16;
 // ---- TODO(pg-port) dependency stubs (functions in other .c files) ----
 
 unsafe fn table_open(_relationId: Oid, _lockmode: c_int) -> Relation {
-    // TODO(pg-port): access/table/table.c
-    null_mut()
+    crate::access::table::table::table_open(_relationId as _, _lockmode as _) as _
 }
 unsafe fn table_close(_relation: Relation, _lockmode: c_int) {
-    // TODO(pg-port): access/table/table.c
+    crate::access::table::table::table_close(_relation as _, _lockmode as _);
 }
 unsafe fn index_open(_relationId: Oid, _lockmode: c_int) -> Relation {
-    // TODO(pg-port): access/index/indexam.c
-    null_mut()
+    crate::access::index::indexam::index_open(_relationId as _, _lockmode as _) as _
 }
 unsafe fn index_close(_relation: Relation, _lockmode: c_int) {
-    // TODO(pg-port): access/index/indexam.c
+    crate::access::index::indexam::index_close(_relation as _, _lockmode as _);
 }
 unsafe fn LockRelationOid(_relid: Oid, _lockmode: c_int) {
-    // TODO(pg-port): storage/lmgr/lmgr.c
+    crate::storage::lmgr::lmgr::LockRelationOid(_relid as _, _lockmode as _);
 }
 unsafe fn UnlockRelationOid(_relid: Oid, _lockmode: c_int) {
-    // TODO(pg-port): storage/lmgr/lmgr.c
+    crate::storage::lmgr::lmgr::UnlockRelationOid(_relid as _, _lockmode as _);
 }
 unsafe fn systable_beginscan(
     _heapRelation: Relation,
@@ -204,39 +196,32 @@ unsafe fn systable_beginscan(
     _nkeys: c_int,
     _key: *mut ScanKeyData,
 ) -> SysScanDesc {
-    // TODO(pg-port): access/index/genam.c
-    null_mut()
+    crate::access::index::genam::systable_beginscan(_heapRelation as _, _indexId as _, _indexOK, _snapshot as _, _nkeys as _, _key as _) as _
 }
 unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple {
-    // TODO(pg-port): access/index/genam.c
-    null_mut()
+    crate::access::index::genam::systable_getnext(_sysscan as _) as _
 }
 unsafe fn systable_endscan(_sysscan: SysScanDesc) {
-    // TODO(pg-port): access/index/genam.c
+    crate::access::index::genam::systable_endscan(_sysscan as _);
 }
 unsafe fn CreateTupleDescCopyConstr(_tupdesc: TupleDesc) -> TupleDesc {
-    // TODO(pg-port): access/common/tupdesc.c
-    null_mut()
+    crate::access::common::tupdesc::CreateTupleDescCopyConstr(_tupdesc as _) as _
 }
 unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> Form_pg_attribute {
-    // TODO(pg-port): access/tupdesc.h
-    null_mut()
+    crate::access::common::tupdesc::TupleDescAttr(_tupdesc as _, _i as _) as _
 }
 unsafe fn RelationGetDescr(_relation: Relation) -> TupleDesc {
-    // TODO(pg-port): utils/rel.h
-    null_mut()
+    crate::utils::rel::RelationGetDescr(_relation as _) as _
 }
 unsafe fn RelationGetRelationName(_relation: Relation) -> *const c_char {
-    // TODO(pg-port): utils/rel.h
-    c"(unknown)".as_ptr()
+    crate::utils::rel::RelationGetRelationName(_relation as _) as _
 }
 unsafe fn RelationGetForm_relisshared(_relation: Relation) -> bool {
     // TODO(pg-port): utils/rel.h (RelationGetForm(rel)->relisshared)
     false
 }
 unsafe fn RelationGetRelid(_relation: Relation) -> Oid {
-    // TODO(pg-port): utils/rel.h
-    InvalidOid
+    crate::utils::rel::RelationGetRelid(_relation as _) as _
 }
 unsafe fn rd_index_indisunique(_relation: Relation) -> bool {
     // TODO(pg-port): utils/rel.h (rel->rd_index->indisunique)
@@ -252,8 +237,7 @@ unsafe fn fastgetattr(
     _tupdesc: TupleDesc,
     _isnull: *mut bool,
 ) -> Datum {
-    // TODO(pg-port): access/htup_details.h
-    0
+    crate::access::htup_details::fastgetattr(_tup as _, _attnum as _, _tupdesc as _, _isnull as _) as _
 }
 unsafe fn heap_getattr(
     _tup: HeapTuple,
@@ -261,19 +245,16 @@ unsafe fn heap_getattr(
     _tupdesc: TupleDesc,
     _isnull: *mut bool,
 ) -> Datum {
-    // TODO(pg-port): access/htup_details.h
-    0
+    crate::access::htup_details::heap_getattr(_tup as _, _attnum as _, _tupdesc as _, _isnull as _) as _
 }
 unsafe fn heap_freetuple(_htup: HeapTuple) {
-    // TODO(pg-port): access/common/heaptuple.c
+    crate::access::common::heaptuple::heap_freetuple(_htup as _);
 }
 unsafe fn toast_flatten_tuple(_tup: HeapTuple, _tupdesc: TupleDesc) -> HeapTuple {
-    // TODO(pg-port): access/heap/heaptoast.c
-    null_mut()
+    crate::access::heap::heaptoast::toast_flatten_tuple(_tup as _, _tupdesc as _) as _
 }
 unsafe fn HeapTupleHasExternal(_tuple: HeapTuple) -> bool {
-    // TODO(pg-port): access/htup_details.h
-    false
+    crate::access::htup_details::HeapTupleHasExternal(_tuple as _)
 }
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool {
     !tuple.is_null()
@@ -300,39 +281,35 @@ unsafe fn AttributeNumberIsValid(attno: c_int) -> bool {
     attno != 0
 }
 unsafe fn datumCopy(value: Datum, _typByVal: bool, _typLen: c_int) -> Datum {
-    // TODO(pg-port): utils/adt/datum.c
-    value
+    crate::utils::adt::datum::datumCopy(value as _, _typByVal, _typLen as _) as _
 }
 unsafe fn namestrcpy(_name: *mut NameData, _str: *const c_char) {
-    // TODO(pg-port): utils/adt/name.c
+    crate::utils::adt::name::namestrcpy(_name as _, _str as _);
 }
 unsafe fn pg_prng_uint32(_state: *mut pg_prng_state) -> uint32 {
-    // TODO(pg-port): common/pg_prng.c
-    0
+    crate::common::pg_prng::pg_prng_uint32(_state as _) as _
 }
 unsafe fn IsTransactionState() -> bool {
-    // TODO(pg-port): access/transam/xact.c
-    true
+    crate::access::transam::xact::IsTransactionState()
 }
 unsafe fn IsBootstrapProcessingMode() -> bool {
     // TODO(pg-port): utils/init/miscinit.c
     false
 }
 unsafe fn CallSyscacheCallbacks(_cacheid: c_int, _hashvalue: uint32) {
-    // TODO(pg-port): utils/cache/inval.c
+    crate::utils::cache::inval::CallSyscacheCallbacks(_cacheid as _, _hashvalue as _);
 }
 unsafe fn ResourceOwnerEnlarge(_owner: ResourceOwner) {
-    // TODO(pg-port): utils/resowner/resowner.c
+    crate::utils::resowner::resowner::ResourceOwnerEnlarge(_owner as _);
 }
 unsafe fn ResourceOwnerRemember(_owner: ResourceOwner, _value: Datum, _kind: *const ResourceOwnerDesc) {
-    // TODO(pg-port): utils/resowner/resowner.c
+    crate::utils::resowner::resowner::ResourceOwnerRemember(_owner as _, _value as _, _kind as _);
 }
 unsafe fn ResourceOwnerForget(_owner: ResourceOwner, _value: Datum, _kind: *const ResourceOwnerDesc) {
-    // TODO(pg-port): utils/resowner/resowner.c
+    crate::utils::resowner::resowner::ResourceOwnerForget(_owner as _, _value as _, _kind as _);
 }
 unsafe fn palloc_aligned(size: usize, _alignto: usize, _flags: c_int) -> *mut c_void {
-    // TODO(pg-port): utils/mmgr/mcxt.c
-    palloc(size)
+    crate::utils::mmgr::mcxt::palloc_aligned(size as _, _alignto as _, _flags as _) as _
 }
 unsafe fn psprintf_2(_fmt: *const c_char) -> *mut c_char {
     // TODO(pg-port): lib/psprintf.c -- callers build the string inline
@@ -341,23 +318,19 @@ unsafe fn psprintf_2(_fmt: *const c_char) -> *mut c_char {
 
 // fmgr support stubs
 unsafe fn fmgr_info_cxt(_functionId: Oid, _finfo: *mut c_void, _mcxt: MemoryContext) {
-    // TODO(pg-port): utils/fmgr/fmgr.c
+    crate::utils::fmgr::fmgr_info_cxt(_functionId, _finfo as _, _mcxt)
 }
 unsafe fn DirectFunctionCall1Coll(_func: c_int, _collation: Oid, _arg1: Datum) -> Datum {
-    // TODO(pg-port): utils/fmgr/fmgr.c
-    0
+    0 // TODO(pg-port): fmgr DirectFunctionCall needs PGFunction not OID; off NAME-key path
 }
 unsafe fn DirectFunctionCall2Coll(_func: c_int, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Datum {
-    // TODO(pg-port): utils/fmgr/fmgr.c
-    0
+    0 // TODO(pg-port): off NAME-key path
 }
 unsafe fn DirectFunctionCall1(_func: c_int, _arg1: Datum) -> Datum {
-    // TODO(pg-port): utils/fmgr/fmgr.c
-    0
+    0 // TODO(pg-port): off NAME-key path
 }
 unsafe fn DirectFunctionCall2(_func: c_int, _arg1: Datum, _arg2: Datum) -> Datum {
-    // TODO(pg-port): utils/fmgr/fmgr.c
-    0
+    0 // TODO(pg-port): off NAME-key path
 }
 
 // Datum getters / makers (utils stubs)
@@ -393,14 +366,14 @@ unsafe fn NameStr(name: *mut NameData) -> *mut c_char {
 }
 
 // fmgroids stubs (utils/fmgroids.h)
-const F_BOOLEQ: Oid = 0;
-const F_CHAREQ: Oid = 0;
-const F_NAMEEQ: Oid = 0;
-const F_INT2EQ: Oid = 0;
-const F_INT4EQ: Oid = 0;
-const F_TEXTEQ: Oid = 0;
-const F_OIDEQ: Oid = 0;
-const F_OIDVECTOREQ: Oid = 0;
+const F_BOOLEQ: Oid = 60;
+const F_CHAREQ: Oid = 61;
+const F_NAMEEQ: Oid = 62;
+const F_INT2EQ: Oid = 63;
+const F_INT4EQ: Oid = 65;
+const F_TEXTEQ: Oid = 67;
+const F_OIDEQ: Oid = 184;
+const F_OIDVECTOREQ: Oid = 679;
 
 // pg_type / pg_collation OIDs (catalog stubs)
 const BOOLOID: Oid = 16;
@@ -432,19 +405,10 @@ const oidvectoreq: c_int = 0;
 const hashoidvector: c_int = 0;
 
 // syscache.h cache IDs referenced here (genbki stubs)
-const TYPEOID: c_int = 0;
-const ATTNUM: c_int = 0;
-const INDEXRELID: c_int = 0;
-const AMOID: c_int = 0;
-const AMNAME: c_int = 0;
-const AUTHNAME: c_int = 0;
-const AUTHOID: c_int = 0;
-const AUTHMEMMEMROLE: c_int = 0;
-const DATABASEOID: c_int = 0;
+use crate::utils::cache::syscache_ids_gen::{TYPEOID, ATTNUM, INDEXRELID, AMOID, AMNAME, AUTHNAME, AUTHOID, AUTHMEMMEMROLE, DATABASEOID};
 
 // misc globals (TODO(pg-port): backend globals)
-static mut criticalRelcachesBuilt: bool = false;
-static mut criticalSharedRelcachesBuilt: bool = false;
+use crate::utils::cache::relcache::{criticalRelcachesBuilt, criticalSharedRelcachesBuilt};
 static mut CacheMemoryContext: MemoryContext = null_mut();
 
 // TODO(pg-port): common/pg_prng.c -- pg_prng_state
@@ -544,8 +508,10 @@ unsafe fn ResourceOwnerForgetCatCacheListRef(owner: ResourceOwner, list: *mut Ca
     ResourceOwnerForget(owner, PointerGetDatum(list as *const c_void), &catlistref_resowner_desc);
 }
 
-// CurrentResourceOwner (TODO(pg-port): utils/resowner/resowner.c)
-static mut CurrentResourceOwner: ResourceOwner = null_mut();
+// CurrentResourceOwner: reference the canonical global defined in resowner.rs.
+extern "C" {
+    static mut CurrentResourceOwner: ResourceOwner;
+}
 
 // Hash and equality functions for system types that are used as cache key
 // fields.  In some cases, we just call the regular SQL-callable functions for
@@ -782,6 +748,10 @@ unsafe fn CatalogCacheComputeTupleHashValue(
         }
     }
 
+    if std::env::var("PDB_BT").is_ok() && (*cache).cc_indexoid == 2663 {
+        let nm = if v1 != 0 { std::ffi::CStr::from_ptr(DatumGetPointer(v1) as *const c_char).to_string_lossy().into_owned() } else { String::from("<null>") };
+        eprintln!("PDB_BT ComputeTupleHash RELNAMENSP keyno=[{},{}] relname='{}' relnamespace={}", cc_keyno[0], cc_keyno[1], nm, v2);
+    }
     CatalogCacheComputeHashValue(cache, nkeys, v1, v2, v3, v4)
 }
 
@@ -897,6 +867,10 @@ unsafe fn CatCacheRemoveCList(cache: *mut CatCache, cl: *mut CatCList) {
 pub unsafe fn CatCacheInvalidate(cache: *mut CatCache, hashValue: uint32) {
     let hashIndex: Index;
     let mut iter = core::mem::zeroed::<dlist_mutable_iter>();
+
+    if std::env::var("PDB_BT").is_ok() && (*cache).cc_indexoid == 2663 {
+        eprintln!("PDB_BT CatCacheInvalidate RELNAMENSP hash={}", hashValue);
+    }
 
     // CACHE_elog(DEBUG2, "CatCacheInvalidate: called");
 
@@ -1392,6 +1366,9 @@ unsafe fn CatalogCacheInitializeCache(cache: *mut CatCache) {
             CacheMemoryContext,
         );
 
+        // Initialize sk_flags (CatCache is palloc'd, not zeroed)
+        (*cache).cc_skey[i].sk_flags = 0;
+
         // Initialize sk_attno suitably for HeapKeyTest() and heap scans
         (*cache).cc_skey[i].sk_attno = (*cache).cc_keyno[i] as AttrNumber;
 
@@ -1538,6 +1515,9 @@ unsafe fn SearchCatCacheInternal(
     // one-time startup overhead for each cache
     ConditionalCatalogCacheInitializeCache(cache);
 
+    if std::env::var_os("PDB_AM").is_some() && (*cache).cc_reloid == 2601 {
+        eprintln!("PDB_AM ENTER pg_am-cache cc_id={} cc_indexoid={} nkeys={} v1={}", (*cache).id, (*cache).cc_indexoid, nkeys, v1 as u64);
+    }
     (*cache).cc_searches += 1;
 
     // Initialize local parameter array
@@ -1584,13 +1564,17 @@ unsafe fn SearchCatCacheInternal(
             // CACHE_elog(DEBUG2, "SearchCatCache(%s): found in bucket %d", ...)
 
             (*cache).cc_hits += 1;
-
             return &mut (*ct).tuple;
         } else {
             // CACHE_elog(DEBUG2, "SearchCatCache(%s): found neg entry in bucket %d", ...)
 
+            if std::env::var("PDB_BT").is_ok() && (*cache).cc_indexoid == 2663 {
+                eprintln!("PDB_BT SearchCatCache RELNAMENSP NEGATIVE-HIT hash={}", hashValue);
+            }
+            if std::env::var_os("PDB_AM").is_some() && (*cache).cc_indexoid == 2651 {
+                eprintln!("PDB_AM NEG-HIT pg_am key={:?}", std::ffi::CStr::from_ptr(crate::postgres::DatumGetCString(v1)));
+            }
             (*cache).cc_neg_hits += 1;
-
             return null_mut();
         }
     });
@@ -1674,6 +1658,36 @@ unsafe fn SearchCatCacheMiss(
             break; // assume only one match
         }
 
+        if std::env::var("PDB_BT").is_ok() && (*cache).cc_indexoid == 2663 {
+            // probe via heap seqscan (indexOK=false): keyed match count, and full-scan total
+            let sd2 = systable_beginscan(relation, (*cache).cc_indexoid, false, null_mut(), nkeys, cur_skey.as_mut_ptr());
+            let mut nmatch = 0;
+            loop { let t2 = systable_getnext(sd2); if !HeapTupleIsValid(t2) { break; } nmatch += 1; }
+            systable_endscan(sd2);
+            let sd3 = systable_beginscan(relation, 0, false, null_mut(), 0, null_mut());
+            let mut ntotal = 0;
+            loop { let t3 = systable_getnext(sd3); if !HeapTupleIsValid(t3) { break; } ntotal += 1; }
+            systable_endscan(sd3);
+            let nblocks = crate::storage::buffer::bufmgr::RelationGetNumberOfBlocksInFork(relation as _, 0 /* MAIN_FORKNUM */);
+            eprintln!("PDB_BT SearchCatCacheMiss RELNAMENSP idx_found={} seqscan_keyed={} pg_class_total_visible={} nblocks={} curcmdid={} xid={}",
+                !ct.is_null(), nmatch, ntotal, nblocks,
+                crate::access::transam::xact::GetCurrentCommandId(false),
+                crate::access::transam::xact::GetCurrentTransactionIdIfAny());
+        }
+
+        if std::env::var_os("PDB_AM").is_some() && (*cache).cc_indexoid == 2651 {
+            let sd2 = systable_beginscan(relation, (*cache).cc_indexoid, false, null_mut(), nkeys, cur_skey.as_mut_ptr());
+            let mut nmatch = 0;
+            loop { let t2 = systable_getnext(sd2); if !HeapTupleIsValid(t2) { break; } nmatch += 1; }
+            systable_endscan(sd2);
+            let sd3 = systable_beginscan(relation, 0, false, null_mut(), 0, null_mut());
+            let mut ntotal = 0;
+            loop { let t3 = systable_getnext(sd3); if !HeapTupleIsValid(t3) { break; } ntotal += 1; }
+            systable_endscan(sd3);
+            eprintln!("PDB_AM SearchCatCacheMiss pg_am key={:?} idx_found={} indexOK={} keyed_heap_match={} total={} sk_attno={} sk_coll={}",
+                std::ffi::CStr::from_ptr(crate::postgres::DatumGetCString(v1)), !ct.is_null(), IndexScanOK(cache), nmatch, ntotal, cur_skey[0].sk_attno, cur_skey[0].sk_collation);
+        }
+
         systable_endscan(scandesc);
 
         if !stale {
@@ -1691,6 +1705,10 @@ unsafe fn SearchCatCacheMiss(
             return null_mut();
         }
 
+        if std::env::var_os("PDB_AM").is_some() && (*cache).cc_indexoid == 2651 {
+            eprintln!("PDB_AM CREATE-NEGATIVE pg_am key={:?} criticalRelcachesBuilt={}",
+                std::ffi::CStr::from_ptr(crate::postgres::DatumGetCString(v1)), criticalRelcachesBuilt);
+        }
         ct = CatalogCacheCreateEntry(cache, null_mut(), arguments.as_mut_ptr(), hashValue, hashIndex);
 
         // Creating a negative cache entry shouldn't fail
@@ -2061,6 +2079,9 @@ pub unsafe fn SearchCatCacheList(
 
     (*cache).cc_nlist += 1;
 
+    eprintln!("PDB_CATLIST reloid={} nmembers={} cl={:p} m0={:p}",
+        (*cache).cc_reloid, (*cl).n_members, cl,
+        if (*cl).n_members > 0 { *(*cl).members.as_ptr() } else { core::ptr::null_mut() });
     // Finally, bump the list's refcount and return it
     (*cl).refcount += 1;
     ResourceOwnerRememberCatCacheListRef(CurrentResourceOwner, cl);
@@ -2106,13 +2127,6 @@ unsafe fn CatalogCacheCreateEntry(
 
     if !ntp.is_null() {
         let mut dtp: HeapTuple = null_mut();
-
-        // To ensure we have test coverage for the retry paths in our callers,
-        // make debug builds randomly fail about 0.1% of the times through this
-        // code path, even when there's no toasted fields. (USE_ASSERT_CHECKING)
-        if pg_prng_uint32(core::ptr::addr_of_mut!(pg_global_prng_state)) <= (PG_UINT32_MAX / 1000) {
-            return null_mut();
-        }
 
         // If there are any out-of-line toasted fields in the tuple, expand
         // them in-line.
@@ -2314,6 +2328,10 @@ pub unsafe fn PrepareToInvalidateCacheTuple(
 
         hashvalue = CatalogCacheComputeTupleHashValue(ccp, (*ccp).cc_nkeys, tuple);
         dbid = if (*ccp).cc_relisshared { 0 as Oid } else { MyDatabaseId };
+
+        if std::env::var("PDB_BT").is_ok() && (*ccp).cc_indexoid == 2663 {
+            eprintln!("PDB_BT PrepareToInvalidate RELNAMENSP cacheid={} hashvalue={} dbid={}", (*ccp).id, hashvalue, dbid);
+        }
 
         (function.unwrap())((*ccp).id, hashvalue, dbid, context);
 

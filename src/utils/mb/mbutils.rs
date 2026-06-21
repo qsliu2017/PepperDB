@@ -2027,6 +2027,7 @@ pub unsafe fn check_encoding_conversion_args(
  * note: len is remaining length of string, not length of character;
  * len must be greater than zero (or we'd neglect initializing "buf").
  */
+#[no_mangle]
 pub unsafe fn report_invalid_encoding(encoding: c_int, mbstr: *const c_char, len: c_int) -> ! {
     let l: c_int = pg_encoding_mblen_or_incomplete(encoding, mbstr, len as Size);
 

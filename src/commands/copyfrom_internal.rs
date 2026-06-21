@@ -196,14 +196,19 @@ pub struct CopyFromStateData {
 }
 
 // ---------------------------------------------------------------------------
-// Function prototypes.
+// copyfromparse.c holds the real parse-layer implementations. It is not declared
+// in commands/mod.rs, so wire it here as a submodule via #[path]; the prototypes
+// below forward to it.
 // ---------------------------------------------------------------------------
+#[path = "copyfromparse.rs"]
+pub mod copyfromparse;
+
 pub unsafe fn ReceiveCopyBegin(cstate: CopyFromState) {
-    unimplemented!()
+    copyfromparse::ReceiveCopyBegin(cstate as _)
 }
 
 pub unsafe fn ReceiveCopyBinaryHeader(cstate: CopyFromState) {
-    unimplemented!()
+    copyfromparse::ReceiveCopyBinaryHeader(cstate as _)
 }
 
 /* One-row callbacks for built-in formats defined in copyfromparse.c */
@@ -213,7 +218,7 @@ pub unsafe fn CopyFromTextOneRow(
     values: *mut Datum,
     nulls: *mut bool,
 ) -> bool {
-    unimplemented!()
+    copyfromparse::CopyFromTextOneRow(cstate as _, econtext as _, values as _, nulls as _)
 }
 
 pub unsafe fn CopyFromCSVOneRow(
@@ -222,7 +227,7 @@ pub unsafe fn CopyFromCSVOneRow(
     values: *mut Datum,
     nulls: *mut bool,
 ) -> bool {
-    unimplemented!()
+    copyfromparse::CopyFromCSVOneRow(cstate as _, econtext as _, values as _, nulls as _)
 }
 
 pub unsafe fn CopyFromBinaryOneRow(
@@ -231,5 +236,5 @@ pub unsafe fn CopyFromBinaryOneRow(
     values: *mut Datum,
     nulls: *mut bool,
 ) -> bool {
-    unimplemented!()
+    copyfromparse::CopyFromBinaryOneRow(cstate as _, econtext as _, values as _, nulls as _)
 }

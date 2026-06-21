@@ -184,9 +184,7 @@ unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.h
 }
-unsafe fn MarkBufferDirtyHint(_buffer: Buffer, _buffer_std: bool) {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn MarkBufferDirtyHint(_buffer: Buffer, _buffer_std: bool) { crate::storage::buffer::bufmgr::MarkBufferDirtyHint(_buffer, _buffer_std) }
 unsafe fn UnlockReleaseBuffer(_buffer: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.h
 }
@@ -209,9 +207,7 @@ unsafe fn PageGetMaxOffsetNumber(_page: Page) -> OffsetNumber {
 unsafe fn PageIsNew(_page: Page) -> bool {
     unimplemented!() // TODO: storage/bufpage.h
 }
-unsafe fn PageGetContents(_page: Page) -> *mut c_char {
-    unimplemented!() // TODO: storage/bufpage.h
-}
+unsafe fn PageGetContents(_page: Page) -> *mut c_char { crate::storage::bufpage::PageGetContents(_page) }
 unsafe fn PageGetFreeSpace(_page: Page) -> Size {
     unimplemented!() // TODO: storage/bufpage.h
 }
@@ -221,9 +217,7 @@ unsafe fn PageGetExactFreeSpace(_page: Page) -> Size {
 unsafe fn PageInit(_page: Page, _pageSize: Size, _specialSize: Size) {
     unimplemented!() // TODO: storage/bufpage.h
 }
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO: storage/bufpage.h
-}
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(_page, _lsn) }
 unsafe fn PageAddItem(
     _page: Page,
     _item: Item,
@@ -231,9 +225,7 @@ unsafe fn PageAddItem(
     _offsetNumber: OffsetNumber,
     _overwrite: bool,
     _is_heap: bool,
-) -> OffsetNumber {
-    unimplemented!() // TODO: storage/bufpage.h
-}
+) -> OffsetNumber { crate::storage::bufpage::PageAddItem(_page, _item, _size, _offsetNumber, _overwrite, _is_heap) }
 unsafe fn PageIndexTupleOverwrite(
     _page: Page,
     _offnum: OffsetNumber,
@@ -246,9 +238,7 @@ unsafe fn PageIndexTupleDeleteNoCompact(_page: Page, _offnum: OffsetNumber) {
     unimplemented!() // TODO: storage/bufpage.h
 }
 
-unsafe fn ItemIdIsNormal(_itemId: ItemId) -> bool {
-    unimplemented!() // TODO: storage/itemid.h
-}
+unsafe fn ItemIdIsNormal(_itemId: ItemId) -> bool { unimplemented!() }
 unsafe fn ItemIdIsUsed(_itemId: ItemId) -> bool {
     unimplemented!() // TODO: storage/itemid.h
 }
@@ -263,9 +253,7 @@ unsafe fn ItemPointerSet(_pointer: *mut ItemPointerData, _blockNumber: BlockNumb
 unsafe fn RelationGetRelationName(_rel: Relation) -> *const c_char {
     unimplemented!() // TODO: utils/rel.h
 }
-unsafe fn RelationNeedsWAL(_rel: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_rel: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_rel) }
 unsafe fn RelationGetTargetBlock(_rel: Relation) -> BlockNumber {
     unimplemented!() // TODO: utils/rel.h
 }
@@ -283,23 +271,15 @@ unsafe fn UnlockRelationForExtension(_relation: Relation, _lockmode: c_int) {
     unimplemented!() // TODO: storage/lmgr.h
 }
 
-unsafe fn GetPageWithFreeSpace(_rel: Relation, _spaceNeeded: Size) -> BlockNumber {
-    unimplemented!() // TODO: storage/freespace.h
-}
-unsafe fn RecordPageWithFreeSpace(_rel: Relation, _heapBlk: BlockNumber, _spaceAvail: Size) {
-    unimplemented!() // TODO: storage/freespace.h
-}
+unsafe fn GetPageWithFreeSpace(_rel: Relation, _spaceNeeded: Size) -> BlockNumber { crate::storage::freespace::freespace::GetPageWithFreeSpace(_rel, _spaceNeeded) }
+unsafe fn RecordPageWithFreeSpace(_rel: Relation, _heapBlk: BlockNumber, _spaceAvail: Size) { crate::storage::freespace::freespace::RecordPageWithFreeSpace(_rel, _heapBlk, _spaceAvail) }
 unsafe fn RecordAndGetPageWithFreeSpace(
     _rel: Relation,
     _oldPage: BlockNumber,
     _oldSpaceAvail: Size,
     _spaceNeeded: Size,
-) -> BlockNumber {
-    unimplemented!() // TODO: storage/freespace.h
-}
-unsafe fn FreeSpaceMapVacuumRange(_rel: Relation, _start: BlockNumber, _end: BlockNumber) {
-    unimplemented!() // TODO: storage/freespace.h
-}
+) -> BlockNumber { crate::storage::freespace::freespace::RecordAndGetPageWithFreeSpace(_rel, _oldPage, _oldSpaceAvail, _spaceNeeded) }
+unsafe fn FreeSpaceMapVacuumRange(_rel: Relation, _start: BlockNumber, _end: BlockNumber) { crate::storage::freespace::freespace::FreeSpaceMapVacuumRange(_rel, _start, _end) }
 
 unsafe fn XLogBeginInsert() {
     unimplemented!() // TODO: access/xloginsert.h
@@ -316,49 +296,31 @@ unsafe fn XLogRegisterBufData(_block_id: u8, _data: *const c_void, _len: Size) {
 unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
     unimplemented!() // TODO: access/xloginsert.h
 }
-unsafe fn log_newpage_buffer(_buffer: Buffer, _page_std: bool) -> XLogRecPtr {
-    unimplemented!() // TODO: access/xloginsert.h
-}
+unsafe fn log_newpage_buffer(_buffer: Buffer, _page_std: bool) -> XLogRecPtr { crate::access::transam::xloginsert::log_newpage_buffer(_buffer, _page_std) }
 
 // brin_revmap.h
-unsafe fn brinRevmapExtend(_revmap: *mut BrinRevmap, _heapBlk: BlockNumber) {
-    unimplemented!() // TODO: access/brin_revmap.h
-}
-unsafe fn brinLockRevmapPageForUpdate(_revmap: *mut BrinRevmap, _heapBlk: BlockNumber) -> Buffer {
-    unimplemented!() // TODO: access/brin_revmap.h
-}
+unsafe fn brinRevmapExtend(_revmap: *mut BrinRevmap, _heapBlk: BlockNumber) { crate::access::brin::brin_revmap::brinRevmapExtend(_revmap, _heapBlk) }
+unsafe fn brinLockRevmapPageForUpdate(_revmap: *mut BrinRevmap, _heapBlk: BlockNumber) -> Buffer { crate::access::brin::brin_revmap::brinLockRevmapPageForUpdate(_revmap, _heapBlk) }
 unsafe fn brinSetHeapBlockItemptr(
     _buf: Buffer,
     _pagesPerRange: BlockNumber,
     _heapBlk: BlockNumber,
     _tid: ItemPointerData,
-) {
-    unimplemented!() // TODO: access/brin_revmap.h
-}
+) { unimplemented!() }
 
 // brin_tuple.c
-unsafe fn brin_tuples_equal(_a: *const BrinTuple, _alen: Size, _b: *const BrinTuple, _blen: Size) -> bool {
-    unimplemented!() // TODO: access/brin_tuple.h
-}
+unsafe fn brin_tuples_equal(_a: *const BrinTuple, _alen: Size, _b: *const BrinTuple, _blen: Size) -> bool { crate::access::brin::brin_tuple::brin_tuples_equal(_a, _alen, _b, _blen) }
 unsafe fn brin_copy_tuple(
     _tuple: *mut BrinTuple,
     _len: Size,
     _dest: *mut BrinTuple,
     _destsz: *mut Size,
-) -> *mut BrinTuple {
-    unimplemented!() // TODO: access/brin_tuple.h
-}
+) -> *mut BrinTuple { crate::access::brin::brin_tuple::brin_copy_tuple(_tuple, _len, _dest, _destsz) }
 
 // brin_page.h accessor macros (expressed as helpers).
-unsafe fn BRIN_IS_REGULAR_PAGE(_page: Page) -> bool {
-    unimplemented!() // TODO: access/brin_page.h
-}
-unsafe fn BRIN_IS_META_PAGE(_page: Page) -> bool {
-    unimplemented!() // TODO: access/brin_page.h
-}
-unsafe fn BRIN_IS_REVMAP_PAGE(_page: Page) -> bool {
-    unimplemented!() // TODO: access/brin_page.h
-}
+unsafe fn BRIN_IS_REGULAR_PAGE(_page: Page) -> bool { crate::access::brin::brin_page::BRIN_IS_REGULAR_PAGE(_page) }
+unsafe fn BRIN_IS_META_PAGE(_page: Page) -> bool { crate::access::brin::brin_page::BRIN_IS_META_PAGE(_page) }
+unsafe fn BRIN_IS_REVMAP_PAGE(_page: Page) -> bool { crate::access::brin::brin_page::BRIN_IS_REVMAP_PAGE(_page) }
 /// Returns a mutable reference to the flags field of the page's special space,
 /// matching the C lvalue macro BrinPageFlags(page).
 unsafe fn BrinPageFlags(_page: Page) -> &'static mut uint16 {

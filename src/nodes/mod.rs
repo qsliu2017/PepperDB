@@ -10,9 +10,11 @@ pub mod extensible;
 pub mod lockoptions;
 pub mod makefuncs;
 pub mod miscnodes;
-// TODO: copyfuncs.rs written but deferred - ManuallyDrop union-field access needs
-// explicit deref + copyObjectImpl dedups with the pg_list.rs stub.
-// pub mod copyfuncs;
+pub mod copyfuncs;
+pub mod outfuncs;
+// outfuncs deferred: surfaces many errors when compiled; wire in a later
+// milestone once their cross-module deps land. Consumers use local stubs meanwhile.
+pub mod list;
 pub mod multibitmapset;
 pub mod nodeFuncs;
 pub mod nodes;

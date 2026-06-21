@@ -117,9 +117,7 @@ use crate::utils::cache::lsyscache::{
 use crate::utils::cache::syscache::{
     SearchSysCache1, ReleaseSysCache, SysCacheGetAttr,
 };
-// TODO(pg-port): catalog/syscache_ids.h -- generated cache IDs
-const AGGFNOID: c_int = 1; // placeholder; real value from syscache_ids.h
-const PROCOID: c_int = 28; // placeholder; real value from syscache_ids.h
+use crate::utils::cache::syscache_ids_gen::{AGGFNOID, PROCOID};
 use crate::utils::builtins::{format_type_be, TextDatumGetCString};
 use crate::utils::hash::dynahash::my_log2;
 use crate::miscadmin::{CHECK_FOR_INTERRUPTS, GetUserId};
@@ -171,16 +169,16 @@ struct hyperLogLogState {
 }
 
 unsafe fn initHyperLogLog(_cE: *mut hyperLogLogState, _bwidth: u8) {
-    // TODO(pg-port): lib/hyperloglog
+    crate::lib::hyperloglog::initHyperLogLog(_cE as _, _bwidth as _)
 }
 unsafe fn addHyperLogLog(_cE: *mut hyperLogLogState, _hash: uint32) {
-    // TODO(pg-port): lib/hyperloglog
+    crate::lib::hyperloglog::addHyperLogLog(_cE as _, _hash as _)
 }
 unsafe fn estimateHyperLogLog(_cE: *mut hyperLogLogState) -> f64 {
-    0.0 // TODO(pg-port): lib/hyperloglog
+    crate::lib::hyperloglog::estimateHyperLogLog(_cE as _) as _
 }
 unsafe fn freeHyperLogLog(_cE: *mut hyperLogLogState) {
-    // TODO(pg-port): lib/hyperloglog
+    crate::lib::hyperloglog::freeHyperLogLog(_cE as _)
 }
 
 /// TODO(pg-port): common/hashfn.h hash_bytes_uint32
@@ -209,7 +207,7 @@ unsafe fn tuplesort_begin_heap(
     _coordinate: *mut c_void,
     _flags: c_int,
 ) -> *mut Tuplesortstate {
-    std::ptr::null_mut() // TODO(pg-port): tuplesort.c
+    crate::utils::sort::tuplesortvariants::tuplesort_begin_heap(_tupDesc as _, _nkeys as _, _attNums as _, _sortOperators as _, _collations as _, _nullsFirstFlags as _, _workMem as _, _coordinate as _, _flags as _) as _
 }
 unsafe fn tuplesort_begin_datum(
     _datumType: Oid,
@@ -220,13 +218,13 @@ unsafe fn tuplesort_begin_datum(
     _coordinate: *mut c_void,
     _flags: c_int,
 ) -> *mut Tuplesortstate {
-    std::ptr::null_mut() // TODO(pg-port): tuplesort.c
+    crate::utils::sort::tuplesortvariants::tuplesort_begin_datum(_datumType as _, _sortOperator as _, _sortCollation as _, _nullsFirstFlag as _, _workMem as _, _coordinate as _, _flags as _) as _
 }
 unsafe fn tuplesort_performsort(_state: *mut Tuplesortstate) {
-    // TODO(pg-port): tuplesort.c
+    crate::utils::sort::tuplesort::tuplesort_performsort(_state as _)
 }
 unsafe fn tuplesort_end(_state: *mut Tuplesortstate) {
-    // TODO(pg-port): tuplesort.c
+    crate::utils::sort::tuplesort::tuplesort_end(_state as _)
 }
 unsafe fn tuplesort_gettupleslot(
     _state: *mut Tuplesortstate,
@@ -235,7 +233,7 @@ unsafe fn tuplesort_gettupleslot(
     _slot: *mut TupleTableSlot,
     _abbrevp: *mut Datum,
 ) -> bool {
-    false // TODO(pg-port): tuplesort.c
+    crate::utils::sort::tuplesortvariants::tuplesort_gettupleslot(_state as _, _forward as _, _copy as _, _slot as _, _abbrevp as _) as _
 }
 unsafe fn tuplesort_getdatum(
     _state: *mut Tuplesortstate,
@@ -245,10 +243,10 @@ unsafe fn tuplesort_getdatum(
     _isNull: *mut bool,
     _abbrevp: *mut Datum,
 ) -> bool {
-    false // TODO(pg-port): tuplesort.c
+    crate::utils::sort::tuplesortvariants::tuplesort_getdatum(_state as _, _forward as _, _copy as _, _val as _, _isNull as _, _abbrevp as _) as _
 }
 unsafe fn tuplesort_puttupleslot(_state: *mut Tuplesortstate, _slot: *mut TupleTableSlot) {
-    // TODO(pg-port): tuplesort.c
+    crate::utils::sort::tuplesortvariants::tuplesort_puttupleslot(_state as _, _slot as _)
 }
 
 /// TODO(pg-port): utils/tuplesort.h TUPLESORT_NONE
@@ -263,8 +261,12 @@ pub struct ParallelContext {
 }
 use crate::storage::ipc::shm_toc::{shm_toc, shm_toc_estimator, shm_toc_allocate, shm_toc_insert};
 /// TODO(pg-port): shm_toc_estimate_chunk / shm_toc_estimate_keys
-unsafe fn shm_toc_estimate_chunk(_e: *mut shm_toc_estimator, _sz: Size) {}
-unsafe fn shm_toc_estimate_keys(_e: *mut shm_toc_estimator, _cnt: Size) {}
+unsafe fn shm_toc_estimate_chunk(_e: *mut shm_toc_estimator, _sz: Size) {
+    unimplemented!()
+}
+unsafe fn shm_toc_estimate_keys(_e: *mut shm_toc_estimator, _cnt: Size) {
+    unimplemented!()
+}
 
 #[repr(C)]
 pub struct ParallelWorkerContext {
@@ -274,16 +276,16 @@ use crate::storage::ipc::shm_toc::shm_toc_lookup;
 
 /// TODO(pg-port): utils/memutils.h
 unsafe fn CreateWorkExprContext(_estate: *mut EState) -> *mut ExprContext {
-    std::ptr::null_mut() // TODO(pg-port): utils/memutils
+    crate::executor::execUtils::CreateWorkExprContext(_estate as _) as _
 }
 unsafe fn AllocSetContextCreate(
-    _parent: MemoryContext,
-    _name: *const c_char,
-    _minctx: Size,
-    _initctx: Size,
-    _maxctx: Size,
+    parent: MemoryContext,
+    name: *const c_char,
+    minctx: Size,
+    initctx: Size,
+    maxctx: Size,
 ) -> MemoryContext {
-    std::ptr::null_mut() // TODO(pg-port): utils/mmgr/mcxt
+    crate::utils::mmgr::aset::AllocSetContextCreateInternal(parent as _, name, minctx, initctx, maxctx) as _
 }
 unsafe fn BumpContextCreate(
     _parent: MemoryContext,
@@ -292,7 +294,7 @@ unsafe fn BumpContextCreate(
     _initctx: Size,
     _maxctx: Size,
 ) -> MemoryContext {
-    std::ptr::null_mut() // TODO(pg-port): utils/mmgr/mcxt
+    crate::utils::mmgr::bump::BumpContextCreate(_parent as _, _name as _, _minctx as _, _initctx as _, _maxctx as _) as _
 }
 const ALLOCSET_DEFAULT_MINSIZE: Size = 0;
 const ALLOCSET_DEFAULT_INITSIZE: Size = 8192;
@@ -309,7 +311,7 @@ unsafe fn MemoryContextReset(_context: MemoryContext) {
     // TODO(pg-port): utils/mmgr/mcxt
 }
 unsafe fn MemoryContextMemAllocated(_context: MemoryContext, _recurse: bool) -> Size {
-    0 // TODO(pg-port): utils/mmgr/mcxt
+    crate::utils::mmgr::mcxt::MemoryContextMemAllocated(_context as _, _recurse as _) as _
 }
 unsafe fn MemoryContextSwitchTo(context: MemoryContext) -> MemoryContext {
     context // TODO(pg-port): utils/mmgr/mcxt
@@ -318,7 +320,7 @@ unsafe fn ResetExprContext(_econtext: *mut ExprContext) {
     // TODO(pg-port): executor/executor
 }
 unsafe fn ReScanExprContext(_econtext: *mut ExprContext) {
-    // TODO(pg-port): executor/executor
+    crate::executor::execUtils::ReScanExprContext(_econtext as _)
 }
 unsafe fn RegisterExprContextCallback(
     _econtext: *mut ExprContext,
@@ -331,7 +333,7 @@ type ExprContextCallbackFunction = unsafe fn(Datum);
 
 /// TODO(pg-port): optimizer/optimizer.h
 unsafe fn get_aggregate_argtypes(_aggref: *mut Aggref, _inputTypes: *mut Oid) -> c_int {
-    0 // TODO(pg-port): optimizer/optimizer
+    crate::parser::parse_agg::get_aggregate_argtypes(_aggref as _, _inputTypes as _) as _
 }
 unsafe fn build_aggregate_transfn_expr(
     _inputTypes: *const Oid,
@@ -345,7 +347,7 @@ unsafe fn build_aggregate_transfn_expr(
     _transfnexpr: *mut *mut Expr,
     _invtransfnexpr: *mut *mut Expr,
 ) {
-    // TODO(pg-port): parser/parse_agg.c
+    crate::parser::parse_agg::build_aggregate_transfn_expr(_inputTypes as _, _numArguments as _, _numDirectArgs as _, _aggVariadic as _, _aggtranstype as _, _inputcollid as _, _transfn_oid as _, _invtransfn_oid as _, _transfnexpr as _, _invtransfnexpr as _)
 }
 unsafe fn build_aggregate_finalfn_expr(
     _inputTypes: *const Oid,
@@ -356,22 +358,22 @@ unsafe fn build_aggregate_finalfn_expr(
     _finalfn_oid: Oid,
     _finalfnexpr: *mut *mut Expr,
 ) {
-    // TODO(pg-port): parser/parse_agg.c
+    crate::parser::parse_agg::build_aggregate_finalfn_expr(_inputTypes as _, _numFinalArgs as _, _aggtranstype as _, _aggresulttype as _, _inputcollid as _, _finalfn_oid as _, _finalfnexpr as _)
 }
 unsafe fn build_aggregate_serialfn_expr(_serialfn_oid: Oid, _serialfnexpr: *mut *mut Expr) {
-    // TODO(pg-port): parser/parse_agg.c
+    crate::parser::parse_agg::build_aggregate_serialfn_expr(_serialfn_oid as _, _serialfnexpr as _)
 }
 unsafe fn build_aggregate_deserialfn_expr(
     _deserialfn_oid: Oid,
     _deserialfnexpr: *mut *mut Expr,
 ) {
-    // TODO(pg-port): parser/parse_agg.c
+    crate::parser::parse_agg::build_aggregate_deserialfn_expr(_deserialfn_oid as _, _deserialfnexpr as _)
 }
 unsafe fn AGGKIND_IS_ORDERED_SET(aggkind: c_char) -> bool {
     aggkind != 'n' as c_char // TODO(pg-port): nodes/primnodes.h AGGKIND_NORMAL='n'
 }
 unsafe fn IsBinaryCoercible(_srctype: Oid, _targettype: Oid) -> bool {
-    false // TODO(pg-port): parser/parse_coerce.h
+    crate::parser::parse_coerce::IsBinaryCoercible(_srctype as _, _targettype as _) as _
 }
 
 /// TODO(pg-port): utils/acl.h
@@ -379,12 +381,12 @@ type AclResult = c_int;
 const ACLCHECK_OK: AclResult = 0;
 /// TODO(pg-port): catalog/objectaccess.h
 unsafe fn object_aclcheck(
-    _classid: Oid,
-    _objectid: Oid,
-    _roleid: Oid,
-    _mode: AclMode,
+    classid: Oid,
+    objectid: Oid,
+    roleid: Oid,
+    mode: AclMode,
 ) -> AclResult {
-    ACLCHECK_OK // TODO(pg-port): utils/acl
+    crate::catalog::aclchk::object_aclcheck(classid as _, objectid as _, roleid as _, mode as _) as _
 }
 type AclMode = u64;
 const ACL_EXECUTE: AclMode = 1 << 3;
@@ -403,36 +405,18 @@ unsafe fn InvokeFunctionExecuteHook(_objectId: Oid) {
     // TODO(pg-port): catalog/objectaccess
 }
 
-/// TODO(pg-port): catalog/pg_aggregate.h Form_pg_aggregate / GETSTRUCT
-#[repr(C)]
-struct FormData_pg_aggregate {
-    pub aggfinalfn: Oid,
-    pub aggcombinefn: Oid,
-    pub aggtransfn: Oid,
-    pub aggserialfn: Oid,
-    pub aggdeserialfn: Oid,
-    pub aggfinalextra: bool,
-    // ... more fields
-}
-type Form_pg_aggregate = *mut FormData_pg_aggregate;
-
-/// TODO(pg-port): catalog/pg_proc.h Form_pg_proc
-#[repr(C)]
-struct FormData_pg_proc {
-    pub proowner: Oid,
-    // ... more fields
-}
-type Form_pg_proc = *mut FormData_pg_proc;
+use crate::catalog::pg_aggregate::{FormData_pg_aggregate, Form_pg_aggregate};
+use crate::catalog::pg_proc::{FormData_pg_proc, Form_pg_proc};
 
 /// TODO(pg-port): nodes/pg_list.h GETSTRUCT
 unsafe fn GETSTRUCT<T>(tup: HeapTuple) -> *mut T {
-    std::ptr::null_mut() // TODO(pg-port): access/htup_details
+    crate::access::htup_details::GETSTRUCT(tup as _) as _
 }
 
 /// TODO(pg-port): utils/syscache.h cache IDs
 const AGGFNOID_CACHE: c_int = 1; // placeholder; real value in syscache.h
-/// TODO(pg-port): catalog/pg_aggregate.h Anum_pg_aggregate_agginitval
-const Anum_pg_aggregate_agginitval: c_int = 15;
+/// catalog/pg_aggregate_d.h Anum_pg_aggregate_agginitval
+const Anum_pg_aggregate_agginitval: c_int = 21;
 
 /// TODO(pg-port): catalog/pg_type.h INTERNALOID
 use crate::catalog::pg_type_d::INTERNALOID;
@@ -447,16 +431,16 @@ fn OidIsValid(oid: Oid) -> bool {
 
 /// TODO(pg-port): utils/builtins.h OidInputFunctionCall
 unsafe fn OidInputFunctionCall(
-    _typinput: Oid,
-    _string: *mut c_char,
-    _typioparam: Oid,
-    _atttypmod: i32,
+    typinput: Oid,
+    string: *mut c_char,
+    typioparam: Oid,
+    atttypmod: i32,
 ) -> Datum {
-    0 // TODO(pg-port): utils/fmgr
+    crate::utils::fmgr::OidInputFunctionCall(typinput, string, typioparam, atttypmod)
 }
-/// TODO(pg-port): utils/lsyscache.h getTypeInputInfo
-unsafe fn getTypeInputInfo(_type_oid: Oid, _typinput: *mut Oid, _typioparam: *mut Oid) {
-    // TODO(pg-port): utils/cache/lsyscache
+/// utils/lsyscache.h getTypeInputInfo
+unsafe fn getTypeInputInfo(type_oid: Oid, typinput: *mut Oid, typioparam: *mut Oid) {
+    crate::utils::cache::lsyscache::getTypeInputInfo(type_oid, typinput, typioparam)
 }
 
 /// TODO(pg-port): utils/expandeddatum.h MakeExpandedObjectReadOnly
@@ -511,100 +495,99 @@ macro_rules! castNode {
 /// TODO(pg-port): nodes/nodes.h makeNode(AggState)
 unsafe fn makeNode_AggState() -> *mut AggState {
     let p = palloc0(core::mem::size_of::<AggState>()) as *mut AggState;
-    // zero-filled by palloc0; NodeTag set implicitly
+    (*p).ss.ps.r#type = NodeTag::T_AggState;
     p
 }
 
 /// ScanTupleHashTable -- TODO(pg-port): execGrouping.c simplehash iterator.
 unsafe fn ScanTupleHashTable(
-    _hashtable: TupleHashTable,
-    _iter: *mut TupleHashIterator,
+    hashtable: TupleHashTable,
+    iter: *mut TupleHashIterator,
 ) -> TupleHashEntry {
-    std::ptr::null_mut() // TODO(pg-port): execGrouping simplehash
+    crate::executor::execGrouping::ScanTupleHashTable(hashtable as _, iter as _) as _
 }
 
 /// ResetTupleHashIterator -- TODO(pg-port): execGrouping.c simplehash iterator.
 unsafe fn ResetTupleHashIterator(
-    _hashtable: TupleHashTable,
-    _iter: *mut TupleHashIterator,
+    hashtable: TupleHashTable,
+    iter: *mut TupleHashIterator,
 ) {
-    // TODO(pg-port): execGrouping simplehash
+    crate::executor::execGrouping::ResetTupleHashIterator(hashtable as _, iter as _)
 }
 
-/// TODO(pg-port): utils/datum.h datumCopy
 unsafe fn datumCopy(value: Datum, typByVal: bool, typLen: i16) -> Datum {
-    value // TODO(pg-port): utils/adt/datum
+    crate::utils::adt::datum::datumCopy(value, typByVal, typLen as c_int)
 }
 
 /// TODO(pg-port): nodes/pg_list.h list macros
 unsafe fn lappend(list: *mut List, datum: *mut c_void) -> *mut List {
-    list // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::lappend(list as _, datum as _) as _
 }
 unsafe fn lcons_int(datum: c_int, list: *mut List) -> *mut List {
-    list // TODO(pg-port): nodes/pg_list
+    crate::nodes::list::lcons_int(datum as _, list as _) as _
 }
 unsafe fn llast(list: *mut List) -> *mut c_void {
-    std::ptr::null_mut() // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::llast(list as _) as _
 }
 unsafe fn list_delete_last(list: *mut List) -> *mut List {
-    list // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::list_delete_last(list as _) as _
 }
-unsafe fn list_free_deep(_list: *mut List) {
-    // TODO(pg-port): nodes/pg_list
+unsafe fn list_free_deep(list: *mut List) {
+    crate::nodes::pg_list::list_free_deep(list as _)
 }
-unsafe fn list_free(_list: *mut List) {
-    // TODO(pg-port): nodes/pg_list
+unsafe fn list_free(list: *mut List) {
+    crate::nodes::pg_list::list_free(list as _)
 }
 unsafe fn list_nth(_list: *mut List, _n: c_int) -> *mut c_void {
-    std::ptr::null_mut() // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::list_nth(_list as _, _n as _) as _
 }
 unsafe fn list_length(list: *const List) -> c_int {
-    0 // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::list_length(list as _) as _
 }
-unsafe fn list_nth_node(_list: *mut List, _n: c_int) -> *mut c_void {
-    std::ptr::null_mut() // TODO(pg-port): nodes/pg_list
+unsafe fn list_nth_node(list: *mut List, n: c_int) -> *mut c_void {
+    crate::nodes::pg_list::list_nth(list as _, n as _) as _
 }
 unsafe fn linitial_int(_list: *const List) -> c_int {
-    0 // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::linitial_int(_list as _) as _
 }
 unsafe fn lfirst(cell: *mut c_void) -> *mut c_void {
-    std::ptr::null_mut() // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::lfirst(cell as _) as _
 }
 unsafe fn lfirst_int(cell: *mut c_void) -> c_int {
-    0 // TODO(pg-port): nodes/pg_list
+    crate::nodes::pg_list::lfirst_int(cell as _) as _
 }
 type ListCell = c_void;
 
 /// TODO(pg-port): nodes/bitmapset.h
 unsafe fn bms_add_member(a: *mut Bitmapset, x: c_int) -> *mut Bitmapset {
-    a // TODO(pg-port): nodes/bitmapset
+    crate::nodes::bitmapset::bms_add_member(a as _, x as _) as _
 }
 unsafe fn bms_add_members(a: *mut Bitmapset, b: *const Bitmapset) -> *mut Bitmapset {
-    a // TODO(pg-port): nodes/bitmapset
+    crate::nodes::bitmapset::bms_add_members(a as _, b as _) as _
 }
 unsafe fn bms_del_member(a: *mut Bitmapset, x: c_int) -> *mut Bitmapset {
     a // TODO(pg-port): nodes/bitmapset
 }
 unsafe fn bms_copy(a: *const Bitmapset) -> *mut Bitmapset {
-    std::ptr::null_mut() // TODO(pg-port): nodes/bitmapset
+    crate::nodes::bitmapset::bms_copy(a as _) as _
 }
 unsafe fn bms_union(a: *mut Bitmapset, b: *mut Bitmapset) -> *mut Bitmapset {
-    std::ptr::null_mut() // TODO(pg-port): nodes/bitmapset
+    crate::nodes::bitmapset::bms_union(a as _, b as _) as _
 }
 unsafe fn bms_free(a: *mut Bitmapset) {
-    // TODO(pg-port): nodes/bitmapset
+    crate::nodes::bitmapset::bms_free(a as _)
 }
 unsafe fn bms_is_member(x: c_int, a: *const Bitmapset) -> bool {
-    false // TODO(pg-port): nodes/bitmapset
+    crate::nodes::bitmapset::bms_is_member(x as _, a as _) as _
 }
 unsafe fn bms_next_member(a: *const Bitmapset, prev: c_int) -> c_int {
-    -2 // TODO(pg-port): nodes/bitmapset -- -2 signals end
+    crate::nodes::bitmapset::bms_next_member(a as _, prev as _) as _
 }
 unsafe fn bms_num_members(a: *const Bitmapset) -> c_int {
-    0 // TODO(pg-port): nodes/bitmapset
+    crate::nodes::bitmapset::bms_num_members(a as _) as _
 }
 unsafe fn bms_overlap(a: *const Bitmapset, b: *const Bitmapset) -> bool {
-    false // TODO(pg-port): nodes/bitmapset
+    crate::nodes::bitmapset::bms_overlap(a as _, b as _) as _
 }
 
 /// InstrCountFiltered1 -- TODO(pg-port): executor/instrument.h
@@ -723,90 +706,9 @@ pub struct AggStatePerAggDataFull {
     pub resulttypeByVal: bool,
 }
 
-/// Full definition of AggStatePerTransData (extends the partial stub in execnodes.rs).
-// C home: nodeAgg.c
-/// NOTE: execnodes.rs already has a partial AggStatePerTransData used by execExpr.rs.
-/// We add the remaining fields here with a note; the real impl should merge these.
-#[repr(C)]
-pub struct AggStatePerTransDataFull {
-    // -- fields already in execnodes.rs stub (must be layout-compatible) --
-    /// Aggref for this transition state
-    pub aggref: *mut Aggref,
-    /// total # of inputs including ORDER BY cols
-    pub numInputs: c_int,
-    /// # of non-ORDER-BY inputs (transfn args after the transvalue)
-    pub numTransInputs: c_int,
-    /// number of sort columns (ORDER BY / DISTINCT)
-    pub numSortCols: c_int,
-    /// number of distinct cols
-    pub numDistinctCols: c_int,
-    /// sorting/distinct required?
-    pub aggsortrequired: bool,
-    /// virtual slot for inputs to sorter
-    pub sortslot: *mut TupleTableSlot,
-    /// call info for transition function
-    pub transfn_fcinfo: FunctionCallInfo,
-    /// Oid of deserialization function (InvalidOid if none)
-    pub deserialfn_oid: Oid,
-    /// deserialization function info
-    pub deserialfn: FmgrInfo,
-    /// call info for deserialization function
-    pub deserialfn_fcinfo: FunctionCallInfo,
-    /// is transition value pass-by-value?
-    pub transtypeByVal: bool,
-    /// is initval NULL?
-    pub initValueIsNull: bool,
-
-    // -- additional fields not in the stub --
-    /// is transition state shared with another aggregate? // C home: nodeAgg.c
-    pub aggshared: bool,
-    /// collation for transition function
-    pub aggCollation: Oid,
-    /// Oid of transition function (or combinefn)
-    pub transfn_oid: Oid,
-    /// Oid of serialization function (InvalidOid if none)
-    pub serialfn_oid: Oid,
-    /// transition function FmgrInfo
-    pub transfn: FmgrInfo,
-    /// serialization function FmgrInfo
-    pub serialfn: FmgrInfo,
-    /// call info for serialization function
-    pub serialfn_fcinfo: FunctionCallInfo,
-    /// OID of aggregate's declared transition type
-    pub aggtranstype: Oid,
-    /// transition type length (bytes; -1 = varlen)
-    pub transtypeLen: i16,
-    /// initial transition value
-    pub initValue: Datum,
-    /// length of input type (-1 = varlen; only if numInputs==1)
-    pub inputtypeLen: i16,
-    /// is input type pass-by-value? (only if numInputs==1)
-    pub inputtypeByVal: bool,
-    /// last value seen for DISTINCT (single-input case)
-    pub lastdatum: Datum,
-    /// is lastdatum NULL?
-    pub lastisnull: bool,
-    /// have we set lastdatum yet?
-    pub haslast: bool,
-    /// uniqslot for multi-col DISTINCT ordering
-    pub uniqslot: *mut TupleTableSlot,
-    /// tuple descriptor for sort operations
-    pub sortdesc: *mut c_void, // TupleDesc
-    /// sort column indices
-    pub sortColIdx: *mut i16,
-    /// sort operator OIDs
-    pub sortOperators: *mut Oid,
-    /// sort collation OIDs
-    pub sortCollations: *mut Oid,
-    /// NULLS FIRST flags
-    pub sortNullsFirst: *mut bool,
-    /// fmgrinfo for single-input equality check (DISTINCT)
-    pub equalfnOne: FmgrInfo,
-    /// ExprState for multi-col equality (DISTINCT)
-    pub equalfnMulti: *mut ExprState,
-    /// per-groupingset sort states
-    pub sortstates: *mut *mut Tuplesortstate,
-}
+/// AggStatePerTransDataFull is unified with the canonical AggStatePerTransData
+/// in execnodes.rs (single shared layout for nodeAgg and the executor).
+pub use crate::nodes::execnodes::AggStatePerTransData as AggStatePerTransDataFull;
 
 /// Full definition of AggStatePerGroupData (private to nodeAgg.c).
 // C home: nodeAgg.c
@@ -987,7 +889,7 @@ unsafe fn initialize_phase(aggstate: *mut AggState, newphase: c_int) {
  * Helper: outerPlanState
  */
 unsafe fn outerPlanState(node: *mut PlanState) -> *mut PlanState {
-    (*(*node).plan).lefttree as *mut c_void as *mut PlanState // TODO(pg-port): real outerPlanState
+    crate::nodes::execnodes::outerPlanState(node)
 }
 
 // --------------------------------------------------------------------------
@@ -1349,7 +1251,7 @@ unsafe fn process_ordered_aggregate_single(
                     && !*isNull
                     && oldAbbrevVal == newAbbrevVal
                     && DatumGetBool(FunctionCall2Coll(
-                        &mut (*pertrans).equalfnOne,
+                        &mut (*pertrans).equalfnOneFull,
                         (*pertrans).aggCollation,
                         oldVal,
                         *newVal,
@@ -1440,7 +1342,7 @@ unsafe fn process_ordered_aggregate_multi(
         if numDistinctCols == 0
             || !haveOldValue
             || newAbbrevVal != oldAbbrevVal
-            || !ExecQual((*pertrans).equalfnMulti, tmpcontext)
+            || !ExecQual((*pertrans).equalfnMultiFull, tmpcontext)
         {
             /*
              * Extract the first numTransInputs columns as datums to pass to
@@ -2083,7 +1985,7 @@ unsafe fn find_hash_columns(aggstate: *mut AggState) {
             (*perhash).numCols,
             (*(*perhash).aggnode).grpOperators,
             &mut (*perhash).eqfuncoids,
-            &mut (*perhash).hashfunctions as *mut *mut FmgrInfo as *mut *mut c_void,
+            &mut (*perhash).hashfunctions as *mut *mut FmgrInfo as _,
         );
         (*perhash).hashslot = ExecAllocTableSlot(
             &mut (*estate).es_tupleTable as *mut *mut List as *mut *mut c_void,
@@ -2104,7 +2006,7 @@ unsafe fn ExecAllocTableSlot(
     _desc: *mut c_void,
     _tts_ops: *const TupleTableSlotOps,
 ) -> *mut TupleTableSlot {
-    std::ptr::null_mut() // TODO(pg-port): executor/execTuples
+    crate::executor::execTuples::ExecAllocTableSlot(_tupleTable as _, _desc as _, _tts_ops as _) as _
 }
 
 /// TODO(pg-port): pg_compat.h MAXALIGN
@@ -3705,8 +3607,7 @@ pub unsafe fn ExecInitAgg(node: *mut Agg, estate: *mut EState, eflags: c_int) ->
     outerPlan = (*node).plan.lefttree; // outerPlan(node)
     let outerPlanState_node =
         ExecInitNode(outerPlan, estate, eflags);
-    (*aggstate).ss.ps.plan = &raw mut (*node).plan;
-    // outerPlanState(aggstate) = outerPlanState_node -- stored via plan tree
+    (*aggstate).ss.ps.lefttree = outerPlanState_node; // outerPlanState(aggstate) = ...
 
     /*
      * initialize source tuple type.
@@ -3753,8 +3654,16 @@ pub unsafe fn ExecInitAgg(node: *mut Agg, estate: *mut EState, eflags: c_int) ->
      * We should now have found all Aggrefs in the targetlist and quals.
      */
     numaggrefs = list_length((*aggstate).aggs);
-    // foreach(l, aggstate->aggs)
-    // TODO(pg-port): iterate list to find max_aggno and max_transno
+    max_aggno = -1;
+    max_transno = -1;
+    {
+        let n = list_length((*aggstate).aggs);
+        for idx in 0..n {
+            let aggref = list_nth((*aggstate).aggs, idx) as *mut Aggref;
+            max_aggno = Max!(max_aggno, (*aggref).aggno);
+            max_transno = Max!(max_transno, (*aggref).aggtransno);
+        }
+    }
     (*aggstate).numaggs = max_aggno + 1;
     numaggs = (*aggstate).numaggs;
     (*aggstate).numtrans = max_transno + 1;
@@ -3778,15 +3687,152 @@ pub unsafe fn ExecInitAgg(node: *mut Agg, estate: *mut EState, eflags: c_int) ->
         (*phase0).grouped_cols = palloc(numHashes as Size * core::mem::size_of::<*mut Bitmapset>()) as *mut *mut Bitmapset;
     }
 
-    // TODO(pg-port): full phase/hash initialization loop (phaseidx loop)
-    // This requires list iteration over node->chain; skeleton below
-    // phase = 0;
-    // for phaseidx in 0..=list_length(node->chain) { ... }
+    let phases = (*aggstate).phases as *mut PerphaseFull;
+    let mut phase: c_int = 0;
+    for phaseidx in 0..=list_length((*node).chain) {
+        let aggnode: *mut Agg;
+        let sortnode: *mut Sort;
+
+        if phaseidx > 0 {
+            aggnode = list_nth_node((*node).chain, phaseidx - 1) as *mut Agg;
+            sortnode = castNode!(Sort, (*aggnode).plan.lefttree);
+        } else {
+            aggnode = node;
+            sortnode = std::ptr::null_mut();
+        }
+
+        Assert!(phase <= 1 || !sortnode.is_null());
+
+        if (*aggnode).aggstrategy == AGG_HASHED || (*aggnode).aggstrategy == AGG_MIXED {
+            let phasedata = phases.add(0);
+            let mut cols: *mut Bitmapset = std::ptr::null_mut();
+
+            Assert!(phase == 0);
+            let i = (*phasedata).numsets;
+            (*phasedata).numsets += 1;
+            let perhash = ((*aggstate).perhash as *mut PerhashFull).add(i as usize);
+
+            /* phase 0 always points to the "real" Agg in the hash case */
+            (*phasedata).aggnode = node;
+            (*phasedata).aggstrategy = (*node).aggstrategy;
+
+            /* but the actual Agg node representing this hash is saved here */
+            (*perhash).aggnode = aggnode;
+
+            (*perhash).numCols = (*aggnode).numCols;
+            *(*phasedata).gset_lengths.add(i as usize) = (*aggnode).numCols;
+
+            for j in 0..(*aggnode).numCols {
+                cols = bms_add_member(cols, *(*aggnode).grpColIdx.add(j as usize) as c_int);
+            }
+
+            *(*phasedata).grouped_cols.add(i as usize) = cols;
+
+            all_grouped_cols = bms_add_members(all_grouped_cols, cols);
+            continue;
+        } else {
+            phase += 1;
+            let phasedata = phases.add(phase as usize);
+            let num_sets = list_length((*aggnode).groupingSets);
+
+            (*phasedata).numsets = num_sets;
+
+            if num_sets != 0 {
+                (*phasedata).gset_lengths =
+                    palloc(num_sets as Size * core::mem::size_of::<c_int>()) as *mut c_int;
+                (*phasedata).grouped_cols =
+                    palloc(num_sets as Size * core::mem::size_of::<*mut Bitmapset>())
+                        as *mut *mut Bitmapset;
+
+                let nsets = list_length((*aggnode).groupingSets);
+                for i in 0..nsets {
+                    let gset = list_nth((*aggnode).groupingSets, i) as *mut List;
+                    let current_length = list_length(gset);
+                    let mut cols: *mut Bitmapset = std::ptr::null_mut();
+
+                    /* planner forces this to be correct */
+                    for j in 0..current_length {
+                        cols = bms_add_member(cols, *(*aggnode).grpColIdx.add(j as usize) as c_int);
+                    }
+
+                    *(*phasedata).grouped_cols.add(i as usize) = cols;
+                    *(*phasedata).gset_lengths.add(i as usize) = current_length;
+                }
+
+                all_grouped_cols =
+                    bms_add_members(all_grouped_cols, *(*phasedata).grouped_cols.add(0));
+            } else {
+                Assert!(phaseidx == 0);
+
+                (*phasedata).gset_lengths = std::ptr::null_mut();
+                (*phasedata).grouped_cols = std::ptr::null_mut();
+            }
+
+            /*
+             * If we are grouping, precompute fmgr lookup data for inner loop.
+             */
+            if (*aggnode).aggstrategy == AGG_SORTED {
+                (*phasedata).eqfunctions =
+                    palloc0((*aggnode).numCols as Size * core::mem::size_of::<*mut ExprState>())
+                        as *mut *mut ExprState;
+
+                /* for each grouping set */
+                for k in 0..(*phasedata).numsets {
+                    let length = *(*phasedata).gset_lengths.add(k as usize);
+
+                    if length == 0 {
+                        continue;
+                    }
+
+                    if !(*(*phasedata).eqfunctions.add((length - 1) as usize)).is_null() {
+                        continue;
+                    }
+
+                    *(*phasedata).eqfunctions.add((length - 1) as usize) = execTuplesMatchPrepare(
+                        scanDesc as *mut c_void,
+                        length,
+                        (*aggnode).grpColIdx,
+                        (*aggnode).grpOperators,
+                        (*aggnode).grpCollations,
+                        &raw mut (*aggstate).ss.ps as *mut c_void,
+                    ) as *mut ExprState;
+                }
+
+                /* and for all grouped columns, unless already computed */
+                if (*aggnode).numCols > 0
+                    && (*(*phasedata).eqfunctions.add(((*aggnode).numCols - 1) as usize)).is_null()
+                {
+                    *(*phasedata).eqfunctions.add(((*aggnode).numCols - 1) as usize) =
+                        execTuplesMatchPrepare(
+                            scanDesc as *mut c_void,
+                            (*aggnode).numCols,
+                            (*aggnode).grpColIdx,
+                            (*aggnode).grpOperators,
+                            (*aggnode).grpCollations,
+                            &raw mut (*aggstate).ss.ps as *mut c_void,
+                        ) as *mut ExprState;
+                }
+            }
+
+            (*phasedata).aggnode = aggnode;
+            (*phasedata).aggstrategy = (*aggnode).aggstrategy;
+            (*phasedata).sortnode = sortnode;
+        }
+    }
 
     /*
      * Convert all_grouped_cols to a descending-order list.
      */
-    // TODO(pg-port): bms iteration over all_grouped_cols
+    {
+        let mut i: c_int = -1;
+        loop {
+            i = bms_next_member(all_grouped_cols, i);
+            if i < 0 {
+                break;
+            }
+            (*aggstate).all_grouped_cols = lcons_int(i, (*aggstate).all_grouped_cols);
+        }
+    }
 
     /*
      * Set up aggregate-result storage in the output expr context.
@@ -3885,20 +3931,304 @@ pub unsafe fn ExecInitAgg(node: *mut Agg, estate: *mut EState, eflags: c_int) ->
      * Perform lookups of aggregate function info, and initialize the
      * unchanging fields of the per-agg and per-trans data.
      */
-    // TODO(pg-port): foreach(l, aggstate->aggs) -- full aggregate initialization
-    // This is the large loop around SearchSysCache1(AGGFNOID,...) etc.
-    // Skeleton only -- real port requires list iteration.
+    {
+        let naggs = list_length((*aggstate).aggs);
+        for aidx in 0..naggs {
+            let aggref = list_nth((*aggstate).aggs, aidx) as *mut Aggref;
+            let mut aggTransFnInputTypes: [Oid; FUNC_MAX_ARGS as usize] =
+                [0; FUNC_MAX_ARGS as usize];
+            let numAggTransFnArgs: c_int;
+            let numDirectArgs: c_int;
+            let aggform: Form_pg_aggregate;
+            let mut aclresult: AclResult;
+            let finalfn_oid: Oid;
+            let mut serialfn_oid: Oid;
+            let mut deserialfn_oid: Oid;
+            let aggOwner: Oid;
+            let mut finalfnexpr: *mut Expr = std::ptr::null_mut();
+            let aggtranstype: Oid;
+
+            /* Planner should have assigned aggregate to correct level */
+            Assert!((*aggref).agglevelsup == 0);
+            /* ... and the split mode should match */
+            Assert!((*aggref).aggsplit == (*aggstate).aggsplit);
+
+            let peragg = peraggs.add((*aggref).aggno as usize);
+
+            /* Check if we initialized the state for this aggregate already. */
+            if !(*peragg).aggref.is_null() {
+                continue;
+            }
+
+            (*peragg).aggref = aggref;
+            (*peragg).transno = (*aggref).aggtransno;
+
+            /* Fetch the pg_aggregate row */
+            let aggTuple = SearchSysCache1(
+                AGGFNOID,
+                ObjectIdGetDatum((*aggref).aggfnoid),
+            );
+            if aggTuple.is_null() {
+                elog!(ERROR, "cache lookup failed for aggregate {}", (*aggref).aggfnoid);
+            }
+            aggform = GETSTRUCT::<FormData_pg_aggregate>(aggTuple);
+
+            /* Check permission to call aggregate function */
+            aclresult = object_aclcheck(
+                ProcedureRelationId,
+                (*aggref).aggfnoid,
+                GetUserId(),
+                ACL_EXECUTE,
+            );
+            if aclresult != ACLCHECK_OK {
+                aclcheck_error(aclresult, OBJECT_AGGREGATE, get_func_name((*aggref).aggfnoid));
+            }
+            InvokeFunctionExecuteHook((*aggref).aggfnoid);
+
+            /* planner recorded transition state type in the Aggref itself */
+            aggtranstype = (*aggref).aggtranstype;
+            Assert!(OidIsValid(aggtranstype));
+
+            /* Final function only required if we're finalizing the aggregates */
+            if DO_AGGSPLIT_SKIPFINAL((*aggstate).aggsplit) {
+                finalfn_oid = InvalidOid;
+            } else {
+                finalfn_oid = (*aggform).aggfinalfn;
+            }
+            (*peragg).finalfn_oid = finalfn_oid;
+
+            serialfn_oid = InvalidOid;
+            deserialfn_oid = InvalidOid;
+
+            /*
+             * Check if serialization/deserialization is required.  We only do
+             * it for aggregates that have transtype INTERNAL.
+             */
+            if aggtranstype == INTERNALOID {
+                if DO_AGGSPLIT_SERIALIZE((*aggstate).aggsplit) {
+                    Assert!(DO_AGGSPLIT_SKIPFINAL((*aggstate).aggsplit));
+                    if !OidIsValid((*aggform).aggserialfn) {
+                        elog!(ERROR, "serialfunc not provided for serialization aggregation");
+                    }
+                    serialfn_oid = (*aggform).aggserialfn;
+                }
+                if DO_AGGSPLIT_DESERIALIZE((*aggstate).aggsplit) {
+                    Assert!(DO_AGGSPLIT_COMBINE((*aggstate).aggsplit));
+                    if !OidIsValid((*aggform).aggdeserialfn) {
+                        elog!(ERROR, "deserialfunc not provided for deserialization aggregation");
+                    }
+                    deserialfn_oid = (*aggform).aggdeserialfn;
+                }
+            }
+
+            /* Check that aggregate owner has permission to call component fns */
+            {
+                let procTuple = SearchSysCache1(
+                    PROCOID,
+                    ObjectIdGetDatum((*aggref).aggfnoid),
+                );
+                if procTuple.is_null() {
+                    elog!(ERROR, "cache lookup failed for function {}", (*aggref).aggfnoid);
+                }
+                aggOwner = (*GETSTRUCT::<FormData_pg_proc>(procTuple)).proowner;
+                ReleaseSysCache(procTuple);
+
+                if OidIsValid(finalfn_oid) {
+                    aclresult = object_aclcheck(ProcedureRelationId, finalfn_oid, aggOwner, ACL_EXECUTE);
+                    if aclresult != ACLCHECK_OK {
+                        aclcheck_error(aclresult, OBJECT_FUNCTION, get_func_name(finalfn_oid));
+                    }
+                    InvokeFunctionExecuteHook(finalfn_oid);
+                }
+                if OidIsValid(serialfn_oid) {
+                    aclresult = object_aclcheck(ProcedureRelationId, serialfn_oid, aggOwner, ACL_EXECUTE);
+                    if aclresult != ACLCHECK_OK {
+                        aclcheck_error(aclresult, OBJECT_FUNCTION, get_func_name(serialfn_oid));
+                    }
+                    InvokeFunctionExecuteHook(serialfn_oid);
+                }
+                if OidIsValid(deserialfn_oid) {
+                    aclresult = object_aclcheck(ProcedureRelationId, deserialfn_oid, aggOwner, ACL_EXECUTE);
+                    if aclresult != ACLCHECK_OK {
+                        aclcheck_error(aclresult, OBJECT_FUNCTION, get_func_name(deserialfn_oid));
+                    }
+                    InvokeFunctionExecuteHook(deserialfn_oid);
+                }
+            }
+
+            /*
+             * Get actual datatypes of the (nominal) aggregate inputs.
+             */
+            numAggTransFnArgs =
+                get_aggregate_argtypes(aggref, aggTransFnInputTypes.as_mut_ptr());
+
+            /* Count the "direct" arguments, if any */
+            numDirectArgs = list_length((*aggref).aggdirectargs);
+
+            /* Detect how many arguments to pass to the finalfn */
+            if (*aggform).aggfinalextra {
+                (*peragg).numFinalArgs = numAggTransFnArgs + 1;
+            } else {
+                (*peragg).numFinalArgs = numDirectArgs + 1;
+            }
+
+            /* Initialize any direct-argument expressions */
+            (*peragg).aggdirectargs =
+                ExecInitExprList((*aggref).aggdirectargs, &raw mut (*aggstate).ss.ps);
+
+            /*
+             * build expression trees using actual argument & result types for
+             * the finalfn, if it exists and is required.
+             */
+            if OidIsValid(finalfn_oid) {
+                build_aggregate_finalfn_expr(
+                    aggTransFnInputTypes.as_mut_ptr(),
+                    (*peragg).numFinalArgs,
+                    aggtranstype,
+                    (*aggref).aggtype,
+                    (*aggref).inputcollid,
+                    finalfn_oid,
+                    &mut finalfnexpr,
+                );
+                fmgr_info(finalfn_oid, &mut (*peragg).finalfn);
+                fmgr_info_set_expr!(finalfnexpr as *mut Node, &mut (*peragg).finalfn);
+            }
+
+            /* get info about the output value's datatype */
+            get_typlenbyval(
+                (*aggref).aggtype,
+                &mut (*peragg).resulttypeLen,
+                &mut (*peragg).resulttypeByVal,
+            );
+
+            /*
+             * Build working state for invoking the transition function, if we
+             * haven't done it already.
+             */
+            let pertrans = pertransstates.add((*aggref).aggtransno as usize);
+            if (*pertrans).aggref.is_null() {
+                let initValue: Datum;
+                let mut initValueIsNull: bool = false;
+                let transfn_oid: Oid;
+
+                if DO_AGGSPLIT_COMBINE((*aggstate).aggsplit) {
+                    transfn_oid = (*aggform).aggcombinefn;
+                    if !OidIsValid(transfn_oid) {
+                        elog!(ERROR, "combinefn not set for aggregate function");
+                    }
+                } else {
+                    transfn_oid = (*aggform).aggtransfn;
+                }
+
+                aclresult = object_aclcheck(ProcedureRelationId, transfn_oid, aggOwner, ACL_EXECUTE);
+                if aclresult != ACLCHECK_OK {
+                    aclcheck_error(aclresult, OBJECT_FUNCTION, get_func_name(transfn_oid));
+                }
+                InvokeFunctionExecuteHook(transfn_oid);
+
+                let textInitVal = SysCacheGetAttr(
+                    AGGFNOID,
+                    aggTuple,
+                    Anum_pg_aggregate_agginitval as crate::access::attnum::AttrNumber,
+                    &mut initValueIsNull,
+                );
+                if initValueIsNull {
+                    initValue = 0 as Datum;
+                } else {
+                    initValue = GetAggInitVal(textInitVal, aggtranstype);
+                }
+
+                if DO_AGGSPLIT_COMBINE((*aggstate).aggsplit) {
+                    let combineFnInputTypes: [Oid; 2] = [aggtranstype, aggtranstype];
+
+                    (*pertrans).numTransInputs = 1;
+
+                    build_pertrans_for_aggref(
+                        pertrans, aggstate, estate, aggref, transfn_oid, aggtranstype,
+                        serialfn_oid, deserialfn_oid, initValue, initValueIsNull,
+                        combineFnInputTypes.as_ptr(), 2,
+                    );
+
+                    if (*pertrans).transfn.fn_strict && aggtranstype == INTERNALOID {
+                        ereport!(ERROR, errmsg!(
+                            "combine function with transition type {} must not be declared STRICT",
+                            std::ffi::CStr::from_ptr(format_type_be(aggtranstype)).to_string_lossy()
+                        ));
+                    }
+                } else {
+                    if AGGKIND_IS_ORDERED_SET((*aggref).aggkind) {
+                        (*pertrans).numTransInputs = list_length((*aggref).args);
+                    } else {
+                        (*pertrans).numTransInputs = numAggTransFnArgs;
+                    }
+
+                    build_pertrans_for_aggref(
+                        pertrans, aggstate, estate, aggref, transfn_oid, aggtranstype,
+                        serialfn_oid, deserialfn_oid, initValue, initValueIsNull,
+                        aggTransFnInputTypes.as_ptr(), numAggTransFnArgs,
+                    );
+
+                    if (*pertrans).transfn.fn_strict && (*pertrans).initValueIsNull
+                        && (numAggTransFnArgs <= numDirectArgs
+                            || !IsBinaryCoercible(
+                                aggTransFnInputTypes[numDirectArgs as usize],
+                                aggtranstype,
+                            ))
+                    {
+                        ereport!(ERROR, errmsg!(
+                            "aggregate {} needs to have compatible input type and transition type",
+                            (*aggref).aggfnoid
+                        ));
+                    }
+                }
+            } else {
+                (*pertrans).aggshared = true;
+            }
+            ReleaseSysCache(aggTuple);
+        }
+    }
 
     /*
      * Last, check whether any more aggregates got added onto the node.
      */
-    numaggrefs = list_length((*aggstate).aggs);
-    // TODO(pg-port): if numaggrefs != saved_numaggrefs: ereport nested agg error
+    if numaggrefs != list_length((*aggstate).aggs) {
+        ereport!(ERROR, errmsg!("aggregate function calls cannot be nested"));
+    }
 
     /*
      * Build expressions doing all the transition work at once.
      */
-    // TODO(pg-port): foreach phase: phase->evaltrans = ExecBuildAggTrans(...)
+    for phaseidx in 0..(*aggstate).numphases {
+        let phase_p = ((*aggstate).phases as *mut PerphaseFull).add(phaseidx as usize);
+        let mut dohash = false;
+        let mut dosort = false;
+
+        /* phase 0 doesn't necessarily exist */
+        if (*phase_p).aggnode.is_null() {
+            continue;
+        }
+
+        if (*aggstate).aggstrategy == AGG_MIXED && phaseidx == 1 {
+            dohash = true;
+            dosort = true;
+        } else if (*aggstate).aggstrategy == AGG_MIXED && phaseidx == 0 {
+            continue;
+        } else if (*phase_p).aggstrategy == AGG_PLAIN || (*phase_p).aggstrategy == AGG_SORTED {
+            dohash = false;
+            dosort = true;
+        } else if (*phase_p).aggstrategy == AGG_HASHED {
+            dohash = true;
+            dosort = false;
+        } else {
+            Assert!(false);
+        }
+
+        (*phase_p).evaltrans =
+            ExecBuildAggTrans(aggstate, phase_p as AggStatePerPhase, dosort, dohash, false);
+
+        /* cache compiled expression for outer slot without NULL check */
+        (*phase_p).evaltrans_cache[0][0] = (*phase_p).evaltrans;
+    }
 
     aggstate
 }
@@ -4112,7 +4442,7 @@ unsafe fn build_pertrans_for_aggref(
 
         /* lookup / build the necessary comparators */
         if numDistinctCols == 1 {
-            fmgr_info(get_opcode(*ops.add(0)), &mut (*pertrans).equalfnOne);
+            fmgr_info(get_opcode(*ops.add(0)), &mut (*pertrans).equalfnOneFull);
         } else {
             let eq_result = execTuplesMatchPrepare(
                 (*pertrans).sortdesc as *mut c_void,
@@ -4122,7 +4452,7 @@ unsafe fn build_pertrans_for_aggref(
                 (*pertrans).sortCollations,
                 &raw mut (*aggstate).ss.ps as *mut c_void,
             );
-            (*pertrans).equalfnMulti = eq_result as *mut ExprState;
+            (*pertrans).equalfnMultiFull = eq_result as *mut ExprState;
         }
         pfree(ops as *mut c_void);
     }

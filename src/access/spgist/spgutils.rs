@@ -1593,8 +1593,8 @@ pub const RELKIND_PARTITIONED_INDEX: c_char = b'I' as c_char;
 /// TODO(pg-port): real value lives in access/toast_compression.h.
 pub const InvalidCompressionMethod: c_char = 0;
 /// TODO(pg-port): real value lives in utils/syscache.h (SysCacheIdentifier).
-pub const TYPEOID: c_int = 0;
-pub const AMOPSTRATEGY: c_int = 0;
+pub const TYPEOID: c_int = 82;
+pub const AMOPSTRATEGY: c_int = 4;
 /// TODO(pg-port): real value lives in catalog/pg_amop.h.
 pub const AMOP_ORDER: c_char = b'o' as c_char;
 /// TODO(pg-port): real value lives in access/reloptions.h.
@@ -1721,23 +1721,15 @@ unsafe fn SGNTDATUM(tup: SpGistNodeTuple, state: *mut SpGistState) -> Datum {
 }
 
 // ---- relcache field helpers (utils/rel.h) ----------------------------------
-unsafe fn IndexRelationGetNumberOfKeyAttributes(index: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port): utils/rel.h
-}
-unsafe fn IndexRelationGetNumberOfAttributes(index: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port): utils/rel.h
-}
+unsafe fn IndexRelationGetNumberOfKeyAttributes(index: Relation) -> c_int { crate::access::nbtree::nbtdedup::IndexRelationGetNumberOfKeyAttributes(index) }
+unsafe fn IndexRelationGetNumberOfAttributes(index: Relation) -> c_int { crate::access::nbtree::nbtsearch::IndexRelationGetNumberOfAttributes(index) }
 unsafe fn CStr_display(p: *mut c_char) -> &'static str {
     "" // TODO(pg-port): utils/rel.h (RelationGetRelationName) - format helper
 }
 
 // ---- index AM accessor (access/index/indexam.c) ----------------------------
-unsafe fn index_getprocinfo(irel: Relation, attnum: AttrNumber, procnum: uint16) -> *mut FmgrInfo {
-    unimplemented!() // TODO(pg-port): src/backend/access/index/indexam.c
-}
-unsafe fn index_getprocid(irel: Relation, attnum: AttrNumber, procnum: uint16) -> RegProcedure {
-    unimplemented!() // TODO(pg-port): src/backend/access/index/indexam.c
-}
+unsafe fn index_getprocinfo(irel: Relation, attnum: AttrNumber, procnum: uint16) -> *mut FmgrInfo { crate::access::index::indexam::index_getprocinfo(irel, attnum, procnum) }
+unsafe fn index_getprocid(irel: Relation, attnum: AttrNumber, procnum: uint16) -> RegProcedure { crate::access::index::indexam::index_getprocid(irel, attnum, procnum) }
 
 // ---- buffer manager (storage/bufmgr.c) -------------------------------------
 pub const BUFFER_LOCK_UNLOCK: c_int = 0;
@@ -1772,9 +1764,7 @@ unsafe fn MarkBufferDirty(buffer: Buffer) {
 unsafe fn BufferGetPage(buffer: Buffer) -> Page {
     unimplemented!() // TODO(pg-port): src/include/storage/bufmgr.h
 }
-unsafe fn BufferGetPageSize(buffer: Buffer) -> Size {
-    unimplemented!() // TODO(pg-port): src/include/storage/bufmgr.h
-}
+unsafe fn BufferGetPageSize(buffer: Buffer) -> Size { crate::access::nbtree::nbtpage::BufferGetPageSize(buffer) }
 unsafe fn BufferGetBlockNumber(buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO(pg-port): src/backend/storage/buffer/bufmgr.c
 }
@@ -1783,17 +1773,13 @@ unsafe fn ExtendBufferedRel(
     forkNum: ForkNumber,
     strategy: BufferAccessStrategy,
     flags: uint32,
-) -> Buffer {
-    unimplemented!() // TODO(pg-port): src/backend/storage/buffer/bufmgr.c
-}
+) -> Buffer { unimplemented!() }
 unsafe fn BMR_REL(rel: Relation) -> BufferManagerRelation {
     unimplemented!() // TODO(pg-port): src/include/storage/bufmgr.h
 }
 
 // ---- index FSM (storage/indexfsm.c) ----------------------------------------
-unsafe fn GetFreeIndexPage(rel: Relation) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): src/backend/storage/freespace/indexfsm.c
-}
+unsafe fn GetFreeIndexPage(rel: Relation) -> BlockNumber { crate::storage::freespace::indexfsm::GetFreeIndexPage(rel) }
 
 // ---- reloptions (access/reloptions.c) --------------------------------------
 unsafe fn build_reloptions(
@@ -1803,9 +1789,7 @@ unsafe fn build_reloptions(
     relopt_struct_size: Size,
     relopt_elems: *const relopt_parse_elt,
     num_relopt_elems: c_int,
-) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): src/backend/access/common/reloptions.c
-}
+) -> *mut c_void { unimplemented!() }
 
 // ---- transaction / xact (access/xact.c) ------------------------------------
 unsafe fn GetTopTransactionIdIfAny() -> TransactionId {
@@ -1833,36 +1817,22 @@ unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool {
 }
 
 // ---- lsyscache / type helpers (utils/cache/lsyscache.c) --------------------
-unsafe fn getBaseType(typid: Oid) -> Oid {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/lsyscache.c
-}
-unsafe fn get_atttype(relid: Oid, attnum: AttrNumber) -> Oid {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/lsyscache.c
-}
-unsafe fn get_index_column_opclass(index_oid: Oid, attno: c_int) -> Oid {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/lsyscache.c
-}
+unsafe fn getBaseType(typid: Oid) -> Oid { crate::utils::cache::lsyscache::getBaseType(typid) }
+unsafe fn get_atttype(relid: Oid, attnum: AttrNumber) -> Oid { crate::utils::cache::lsyscache::get_atttype(relid, attnum) }
+unsafe fn get_index_column_opclass(index_oid: Oid, attno: c_int) -> Oid { crate::utils::cache::lsyscache::get_index_column_opclass(index_oid, attno) }
 unsafe fn get_opclass_opfamily_and_input_type(
     opclass: Oid,
     opfamily: *mut Oid,
     opcintype: *mut Oid,
-) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/lsyscache.c
-}
-unsafe fn get_op_rettype(opno: Oid) -> Oid {
-    unimplemented!() // TODO(pg-port): src/backend/utils/cache/lsyscache.c
-}
-unsafe fn opfamily_can_sort_type(opfamilyoid: Oid, datatypeoid: Oid) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/access/index/amvalidate.c
-}
+) -> bool { crate::utils::cache::lsyscache::get_opclass_opfamily_and_input_type(opclass, opfamily, opcintype) }
+unsafe fn get_op_rettype(opno: Oid) -> Oid { crate::utils::cache::lsyscache::get_op_rettype(opno) }
+unsafe fn opfamily_can_sort_type(opfamilyoid: Oid, datatypeoid: Oid) -> bool { crate::access::index::amvalidate::opfamily_can_sort_type(opfamilyoid, datatypeoid) }
 unsafe fn IsPolymorphicType(typid: Oid) -> bool {
     unimplemented!() // TODO(pg-port): src/include/catalog/pg_type.h
 }
 
 // ---- parse_coerce (parser/parse_coerce.c) ----------------------------------
-unsafe fn IsBinaryCoercible(srctype: Oid, targettype: Oid) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/parser/parse_coerce.c
-}
+unsafe fn IsBinaryCoercible(srctype: Oid, targettype: Oid) -> bool { crate::parser::parse_coerce::IsBinaryCoercible(srctype, targettype) }
 
 // ---- nodeFuncs / pg_list (nodes/*) -----------------------------------------
 unsafe fn exprType(expr: *mut Node) -> Oid {
@@ -1888,12 +1858,8 @@ unsafe extern "C" fn spgbuild(
     heap: Relation,
     index: Relation,
     indexInfo: *mut IndexInfo,
-) -> *mut IndexBuildResult {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spginsert.c
-}
-unsafe extern "C" fn spgbuildempty(index: Relation) {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spginsert.c
-}
+) -> *mut IndexBuildResult { crate::access::spgist::spginsert::spgbuild(heap, index, indexInfo) }
+unsafe extern "C" fn spgbuildempty(index: Relation) { crate::access::spgist::spginsert::spgbuildempty(index) }
 unsafe extern "C" fn spginsert(
     index: Relation,
     values: *mut Datum,
@@ -1903,26 +1869,18 @@ unsafe extern "C" fn spginsert(
     checkUnique: IndexUniqueCheck,
     indexUnchanged: bool,
     indexInfo: *mut IndexInfo,
-) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spginsert.c
-}
+) -> bool { crate::access::spgist::spginsert::spginsert(index, values, isnull, ht_ctid, heapRel, checkUnique, indexUnchanged, indexInfo) }
 unsafe extern "C" fn spgbulkdelete(
     info: *mut IndexVacuumInfo,
     stats: *mut IndexBulkDeleteResult,
     callback: IndexBulkDeleteCallback,
     callback_state: *mut c_void,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spgvacuum.c
-}
+) -> *mut IndexBulkDeleteResult { unimplemented!() }
 unsafe extern "C" fn spgvacuumcleanup(
     info: *mut IndexVacuumInfo,
     stats: *mut IndexBulkDeleteResult,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spgvacuum.c
-}
-unsafe extern "C" fn spgcanreturn(index: Relation, attno: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spgscan.c
-}
+) -> *mut IndexBulkDeleteResult { unimplemented!() }
+unsafe extern "C" fn spgcanreturn(index: Relation, attno: c_int) -> bool { crate::access::spgist::spgscan::spgcanreturn(index, attno) }
 unsafe extern "C" fn spgcostestimate(
     root: *mut PlannerInfo,
     path: *mut IndexPath,
@@ -1932,9 +1890,7 @@ unsafe extern "C" fn spgcostestimate(
     indexSelectivity: *mut Selectivity,
     indexCorrelation: *mut f64,
     indexPages: *mut f64,
-) {
-    unimplemented!() // TODO(pg-port): src/backend/utils/adt/selfuncs.c
-}
+) { unimplemented!() }
 unsafe extern "C" fn spgoptions_cb(reloptions: Datum, validate: bool) -> *mut bytea {
     spgoptions(reloptions, validate)
 }
@@ -1948,38 +1904,24 @@ unsafe extern "C" fn spgproperty_cb(
 ) -> bool {
     spgproperty(index_oid, attno, prop, propname, res, isnull)
 }
-unsafe extern "C" fn spgvalidate(opclassoid: Oid) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spgvalidate.c
-}
+unsafe extern "C" fn spgvalidate(opclassoid: Oid) -> bool { crate::access::spgist::spgvalidate::spgvalidate(opclassoid) }
 unsafe extern "C" fn spgadjustmembers(
     opfamilyoid: Oid,
     opclassoid: Oid,
     operators: *mut List,
     functions: *mut List,
-) {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spgvalidate.c
-}
-unsafe extern "C" fn spgbeginscan(rel: Relation, nkeys: c_int, norderbys: c_int) -> IndexScanDesc {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spgscan.c
-}
+) { crate::access::spgist::spgvalidate::spgadjustmembers(opfamilyoid, opclassoid, operators, functions) }
+unsafe extern "C" fn spgbeginscan(rel: Relation, nkeys: c_int, norderbys: c_int) -> IndexScanDesc { unimplemented!() }
 unsafe extern "C" fn spgrescan(
     scan: IndexScanDesc,
     scankey: ScanKey,
     nscankeys: c_int,
     orderbys: ScanKey,
     norderbys: c_int,
-) {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spgscan.c
-}
-unsafe extern "C" fn spggettuple(scan: IndexScanDesc, direction: ScanDirection) -> bool {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spgscan.c
-}
-unsafe extern "C" fn spggetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> int64 {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spgscan.c
-}
-unsafe extern "C" fn spgendscan(scan: IndexScanDesc) {
-    unimplemented!() // TODO(pg-port): src/backend/access/spgist/spgscan.c
-}
+) { unimplemented!() }
+unsafe extern "C" fn spggettuple(scan: IndexScanDesc, direction: ScanDirection) -> bool { unimplemented!() }
+unsafe extern "C" fn spggetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> int64 { unimplemented!() }
+unsafe extern "C" fn spgendscan(scan: IndexScanDesc) { unimplemented!() }
 
 // `c_ushort` mirrors C `unsigned short` for spgFormNodeTuple's infomask.
 type c_ushort = u16;

@@ -51,24 +51,18 @@ pub struct fp_info {
 pub type AclResult = c_int;
 const ACLCHECK_OK: AclResult = 0;
 
-const PROCOID: c_int = 0; // syscache id; stubbed
+const PROCOID: c_int = 47; // syscache id; stubbed
 
 /* access/xact.c */
-unsafe fn IsAbortedTransactionBlockState() -> bool {
-    unimplemented!("STUB: access/xact.c not ported")
-}
+unsafe fn IsAbortedTransactionBlockState() -> bool { crate::access::transam::xact::IsAbortedTransactionBlockState() }
 
 /* utils/time/snapmgr.c */
 type Snapshot = *mut c_void;
 unsafe fn GetTransactionSnapshot() -> Snapshot {
     unimplemented!("STUB: utils/time/snapmgr.c not ported")
 }
-unsafe fn PushActiveSnapshot(_snapshot: Snapshot) {
-    unimplemented!("STUB: utils/time/snapmgr.c not ported")
-}
-unsafe fn PopActiveSnapshot() {
-    unimplemented!("STUB: utils/time/snapmgr.c not ported")
-}
+unsafe fn PushActiveSnapshot(snapshot: Snapshot) { crate::utils::time::snapmgr::PushActiveSnapshot(snapshot as _) }
+unsafe fn PopActiveSnapshot() { crate::utils::time::snapmgr::PopActiveSnapshot() }
 
 /* utils/cache/syscache.c */
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
@@ -80,60 +74,40 @@ unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
 
 /* utils/adt/acl.c + catalog acl */
 unsafe fn object_aclcheck(
-    _classid: Oid,
-    _objectid: Oid,
-    _roleid: Oid,
-    _mode: AclMode,
-) -> AclResult {
-    unimplemented!("STUB: catalog/aclchk.c not ported")
-}
-unsafe fn aclcheck_error(_aclerr: AclResult, _objtype: ObjectType, _objectname: *const c_char) {
-    unimplemented!("STUB: catalog/aclchk.c not ported")
-}
+    classid: Oid,
+    objectid: Oid,
+    roleid: Oid,
+    mode: AclMode,
+) -> AclResult { unimplemented!() }
+unsafe fn aclcheck_error(aclerr: AclResult, objtype: ObjectType, objectname: *const c_char) { unimplemented!() }
 
 /* utils/cache/lsyscache.c */
 unsafe fn getTypeOutputInfo(_type: Oid, _typOutput: *mut Oid, _typIsVarlena: *mut bool) {
     unimplemented!("STUB: utils/cache/lsyscache.c not ported")
 }
-unsafe fn getTypeBinaryOutputInfo(_type: Oid, _typSend: *mut Oid, _typIsVarlena: *mut bool) {
-    unimplemented!("STUB: utils/cache/lsyscache.c not ported")
-}
+unsafe fn getTypeBinaryOutputInfo(r#type: Oid, typSend: *mut Oid, typIsVarlena: *mut bool) { crate::utils::cache::lsyscache::getTypeBinaryOutputInfo(r#type as _, typSend as _, typIsVarlena as _) }
 unsafe fn getTypeInputInfo(_type: Oid, _typInput: *mut Oid, _typIOParam: *mut Oid) {
     unimplemented!("STUB: utils/cache/lsyscache.c not ported")
 }
-unsafe fn getTypeBinaryInputInfo(_type: Oid, _typReceive: *mut Oid, _typIOParam: *mut Oid) {
-    unimplemented!("STUB: utils/cache/lsyscache.c not ported")
-}
-unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char {
-    unimplemented!("STUB: utils/cache/lsyscache.c not ported")
-}
-unsafe fn get_func_name(_funcid: Oid) -> *mut c_char {
-    unimplemented!("STUB: utils/cache/lsyscache.c not ported")
-}
+unsafe fn getTypeBinaryInputInfo(r#type: Oid, typReceive: *mut Oid, typIOParam: *mut Oid) { crate::utils::cache::lsyscache::getTypeBinaryInputInfo(r#type as _, typReceive as _, typIOParam as _) }
+unsafe fn get_namespace_name(nspid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_namespace_name(nspid as _) }
+unsafe fn get_func_name(funcid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_func_name(funcid as _) }
 
 /* fmgr.c convenience callers */
-unsafe fn OidOutputFunctionCall(_functionId: Oid, _val: Datum) -> *mut c_char {
-    unimplemented!("STUB: utils/fmgr/fmgr.c OidOutputFunctionCall not ported")
-}
-unsafe fn OidSendFunctionCall(_functionId: Oid, _val: Datum) -> *mut bytea {
-    unimplemented!("STUB: utils/fmgr/fmgr.c OidSendFunctionCall not ported")
-}
+unsafe fn OidOutputFunctionCall(functionId: Oid, val: Datum) -> *mut c_char { crate::utils::fmgr::OidOutputFunctionCall(functionId as _, val as _) }
+unsafe fn OidSendFunctionCall(functionId: Oid, val: Datum) -> *mut bytea { crate::utils::fmgr::OidSendFunctionCall(functionId as _, val as _) }
 unsafe fn OidInputFunctionCall(
-    _functionId: Oid,
-    _str: *mut c_char,
-    _typioparam: Oid,
-    _typmod: int32,
-) -> Datum {
-    unimplemented!("STUB: utils/fmgr/fmgr.c OidInputFunctionCall not ported")
-}
+    functionId: Oid,
+    str: *mut c_char,
+    typioparam: Oid,
+    typmod: int32,
+) -> Datum { crate::utils::fmgr::OidInputFunctionCall(functionId as _, str as _, typioparam as _, typmod as _) }
 unsafe fn OidReceiveFunctionCall(
-    _functionId: Oid,
-    _buf: StringInfo,
-    _typioparam: Oid,
-    _typmod: int32,
-) -> Datum {
-    unimplemented!("STUB: utils/fmgr/fmgr.c OidReceiveFunctionCall not ported")
-}
+    functionId: Oid,
+    buf: StringInfo,
+    typioparam: Oid,
+    typmod: int32,
+) -> Datum { crate::utils::fmgr::OidReceiveFunctionCall(functionId as _, buf, typioparam as _, typmod as _) }
 
 /* mb/mbutils.c */
 unsafe fn pg_client_to_server(_s: *const c_char, _len: c_int) -> *mut c_char {
@@ -146,41 +120,21 @@ unsafe fn check_log_duration(_msec_str: *mut c_char, _was_logged: bool) -> c_int
 }
 
 /* libpq/pqformat.c + libpq/pqcomm.c */
-unsafe fn pq_beginmessage(_buf: *mut StringInfoData, _msgtype: u8) {
-    unimplemented!("STUB: libpq/pqformat.c not ported")
-}
-unsafe fn pq_sendint32(_buf: *mut StringInfoData, _i: int32) {
-    unimplemented!("STUB: libpq/pqformat.c not ported")
-}
-unsafe fn pq_sendcountedtext(_buf: *mut StringInfoData, _str: *const c_char, _slen: c_int) {
-    unimplemented!("STUB: libpq/pqformat.c not ported")
-}
-unsafe fn pq_sendbytes(_buf: *mut StringInfoData, _data: *const c_char, _datalen: c_int) {
-    unimplemented!("STUB: libpq/pqformat.c not ported")
-}
-unsafe fn pq_endmessage(_buf: *mut StringInfoData) {
-    unimplemented!("STUB: libpq/pqformat.c not ported")
-}
-unsafe fn pq_getmsgint(_msg: StringInfo, _b: c_int) -> c_uint {
-    unimplemented!("STUB: libpq/pqformat.c not ported")
-}
-unsafe fn pq_getmsgbytes(_msg: StringInfo, _datalen: c_int) -> *const c_char {
-    unimplemented!("STUB: libpq/pqformat.c not ported")
-}
-unsafe fn pq_getmsgend(_msg: StringInfo) {
-    unimplemented!("STUB: libpq/pqformat.c not ported")
-}
+unsafe fn pq_beginmessage(buf: *mut StringInfoData, msgtype: u8) { crate::libpq::pqformat::pq_beginmessage(buf as _, msgtype as _) }
+unsafe fn pq_sendint32(buf: *mut StringInfoData, i: int32) { crate::libpq::pqformat::pq_sendint32(buf as _, i as _) }
+unsafe fn pq_sendcountedtext(buf: *mut StringInfoData, str: *const c_char, slen: c_int) { crate::libpq::pqformat::pq_sendcountedtext(buf as _, str as _, slen as _) }
+unsafe fn pq_sendbytes(buf: *mut StringInfoData, data: *const c_char, datalen: c_int) { crate::libpq::pqformat::pq_sendbytes(buf as _, data as _, datalen as _) }
+unsafe fn pq_endmessage(buf: *mut StringInfoData) { crate::libpq::pqformat::pq_endmessage(buf as _) }
+unsafe fn pq_getmsgint(msg: StringInfo, b: c_int) -> c_uint { crate::libpq::pqformat::pq_getmsgint(msg as _, b as _) }
+unsafe fn pq_getmsgbytes(msg: StringInfo, datalen: c_int) -> *const c_char { crate::libpq::pqformat::pq_getmsgbytes(msg as _, datalen as _) }
+unsafe fn pq_getmsgend(msg: StringInfo) { crate::libpq::pqformat::pq_getmsgend(msg as _) }
 
 /* lib/stringinfo.c */
 unsafe fn initStringInfo(_str: *mut StringInfoData) {
     unimplemented!("STUB: lib/stringinfo.c not ported")
 }
-unsafe fn resetStringInfo(_str: *mut StringInfoData) {
-    unimplemented!("STUB: lib/stringinfo.c not ported")
-}
-unsafe fn appendBinaryStringInfo(_str: *mut StringInfoData, _data: *const c_char, _datalen: c_int) {
-    unimplemented!("STUB: lib/stringinfo.c not ported")
-}
+unsafe fn resetStringInfo(str: *mut StringInfoData) { crate::lib::stringinfo::resetStringInfo(str as _) }
+unsafe fn appendBinaryStringInfo(str: *mut StringInfoData, data: *const c_char, datalen: c_int) { crate::lib::stringinfo::appendBinaryStringInfo(str as _, data as _, datalen as _) }
 
 /*
  * proargtypes is an oidvector that lives beyond the CATALOG_VARLEN cutoff of

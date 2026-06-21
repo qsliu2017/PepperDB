@@ -111,10 +111,12 @@ pub unsafe fn BlockSampler_Init(
     Min((*bs).n as BlockNumber, (*bs).N)
 }
 
+#[no_mangle]
 pub unsafe fn BlockSampler_HasMore(bs: BlockSampler) -> bool {
     ((*bs).t < (*bs).N) && ((*bs).m < (*bs).n)
 }
 
+#[no_mangle]
 pub unsafe fn BlockSampler_Next(bs: BlockSampler) -> BlockNumber {
     let mut K: BlockNumber = (*bs).N - (*bs).t; /* remaining blocks */
     let k: c_int = (*bs).n - (*bs).m; /* blocks still to sample */
@@ -198,6 +200,7 @@ pub unsafe fn reservoir_init_selection_state(rs: ReservoirState, n: c_int) {
     (*rs).W = exp(-log(sampler_random_fract(&mut (*rs).randstate)) / n as f64);
 }
 
+#[no_mangle]
 pub unsafe fn reservoir_get_next_S(rs: ReservoirState, mut t: f64, n: c_int) -> f64 {
     let S: f64;
 
@@ -283,6 +286,7 @@ pub unsafe fn sampler_random_init_state(seed: uint32, randstate: *mut pg_prng_st
 }
 
 /* Select a random value R uniformly distributed in (0 - 1) */
+#[no_mangle]
 pub unsafe fn sampler_random_fract(randstate: *mut pg_prng_state) -> f64 {
     let mut res: f64;
 

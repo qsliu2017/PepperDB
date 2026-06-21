@@ -432,6 +432,7 @@ pub unsafe fn SendProcSignal(
  * Callers are entitled to assume that this function will not throw ERROR
  * or FATAL.
  */
+#[no_mangle]
 pub unsafe fn EmitProcSignalBarrier(type_: ProcSignalBarrierType) -> uint64 {
     let flagbit: uint32 = 1u32 << (type_ as u32);
     let generation: uint64;
@@ -501,6 +502,7 @@ pub unsafe fn EmitProcSignalBarrier(type_: ProcSignalBarrierType) -> uint64 {
  * WaitForProcSignalBarrier - wait until it is guaranteed that all changes
  * requested by a specific call to EmitProcSignalBarrier() have taken effect.
  */
+#[no_mangle]
 pub unsafe fn WaitForProcSignalBarrier(generation: uint64) {
     Assert!(generation <= pg_atomic_read_u64(&mut (*ProcSignal).psh_barrierGeneration));
 
@@ -935,7 +937,7 @@ pub const SIGUSR1: c_int = 10;
 pub const SIGINT: c_int = 2;
 pub const ESRCH: c_int = 3;
 
-pub const NUM_AUXILIARY_PROCS: c_int = 9;
+pub const NUM_AUXILIARY_PROCS: c_int = crate::storage::lmgr::proc::NUM_AUXILIARY_PROCS as c_int; // canonical: proc.rs 6+MAX_IO_WORKERS
 
 pub const WAIT_EVENT_PROC_SIGNAL_BARRIER: uint32 = 0;
 
@@ -961,7 +963,7 @@ unsafe fn set_errno(_e: c_int) {
 }
 
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _found)
 }
 
 unsafe fn mul_size(s1: Size, s2: Size) -> Size {

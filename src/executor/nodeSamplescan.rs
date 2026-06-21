@@ -61,11 +61,11 @@ type TableScanDesc = *mut c_void;
 // ----------------------------------------------------------------
 
 unsafe fn table_slot_callbacks(_rel: *mut c_void) -> *const c_void {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_slot_callbacks(_rel as _) as _
 }
 
 unsafe fn table_endscan(_scan: TableScanDesc) {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_endscan(_scan as _)
 }
 
 unsafe fn table_beginscan_sampling(

@@ -333,34 +333,10 @@ pub struct PGPROC_vxid {
     pub lxid: LocalTransactionId,
 }
 
-/// Minimal PGPROC stub with fields referenced by lock.c.
-/// TODO(pg-port): real PGPROC lives in storage/lmgr/proc.c.
-#[repr(C)]
-pub struct PGPROC {
-    pub links: dlist_node,
-    pub lockGroupLeader: *mut PGPROC,
-    pub lockGroupMembers: dlist_head,
-    pub lockGroupLink: dlist_node,
-    pub waitLock: *mut LOCK,
-    pub waitProcLock: *mut PROCLOCK,
-    pub waitLockMode: LOCKMODE,
-    pub waitStatus: ProcWaitStatus,
-    pub statusFlags: uint8,
-    pub pid: c_int,
-    pub xid: TransactionId,
-    pub vxid: PGPROC_vxid,
-    pub databaseId: Oid,
-    pub fpInfoLock: LWLock,
-    pub fpVXIDLock: bool,
-    pub fpLocalTransactionId: LocalTransactionId,
-    /// Fast-path lock bits, one u64 per group
-    pub fpLockBits: [u64; FP_LOCK_GROUPS_PER_BACKEND_MAX],
-    /// Fast-path relation OIDs (indexed by flat slot number)
-    pub fpRelId: *mut Oid,
-    pub myProcLocks: [dlist_head; NUM_LOCK_PARTITIONS],
-    /* TODO(pg-port): canonical PGPROC in lmgr/proc.rs; local stub extended */
-    pub waitStart: u64,
-}
+// PGPROC: use the canonical full definition from lmgr/proc.rs (the local stub
+// had a different layout -- e.g. fpLockBits inline vs pointer -- which put
+// myProcLocks at the wrong offset and crashed SetupLockInTable).
+pub use crate::storage::lmgr::proc::PGPROC;
 
 pub type ProcWaitStatus = c_int;
 pub const PROC_WAIT_STATUS_OK: ProcWaitStatus = 0;
@@ -396,22 +372,9 @@ pub const LW_EXCLUSIVE: c_int = 2;
 pub type HTAB = c_void;
 pub type Size = usize;
 
-#[repr(C)]
-pub struct HASHCTL {
-    pub keysize: Size,
-    pub entrysize: Size,
-    pub hash: Option<unsafe extern "C" fn(key: *const c_void, keysize: Size) -> uint32>,
-    pub num_partitions: c_long,
-    pub hcxt: MemoryContext,
-}
+pub use crate::utils::hash::dynahash::{HASHCTL, HASH_ELEM, HASH_BLOBS, HASH_FUNCTION, HASH_PARTITION, HASH_CONTEXT};
 
-pub type HASH_SEQ_STATUS = c_void;
-
-pub const HASH_ELEM: c_int = 0x001;
-pub const HASH_BLOBS: c_int = 0x004;
-pub const HASH_FUNCTION: c_int = 0x010;
-pub const HASH_PARTITION: c_int = 0x020;
-pub const HASH_CONTEXT: c_int = 0x100;
+pub use crate::utils::hash::dynahash::HASH_SEQ_STATUS;
 
 pub const HASH_FIND: c_int = 0;
 pub const HASH_ENTER: c_int = 1;
@@ -498,7 +461,7 @@ unsafe fn FAST_PATH_INDEX(index: u32) -> u32 {
 unsafe fn FAST_PATH_GET_BITS(proc_: *const PGPROC, n: u32) -> u64 {
     let grp = FAST_PATH_GROUP(n) as usize;
     let idx = FAST_PATH_INDEX(n);
-    ((*proc_).fpLockBits[grp] >> (FAST_PATH_BITS_PER_SLOT * idx)) & FAST_PATH_MASK
+    ((*(*proc_).fpLockBits.add((grp) as usize)) >> (FAST_PATH_BITS_PER_SLOT * idx)) & FAST_PATH_MASK
 }
 #[inline]
 unsafe fn FAST_PATH_BIT_POSITION(n: u32, l: u32) -> u32 {
@@ -507,17 +470,17 @@ unsafe fn FAST_PATH_BIT_POSITION(n: u32, l: u32) -> u32 {
 #[inline]
 unsafe fn FAST_PATH_SET_LOCKMODE(proc_: *mut PGPROC, n: u32, l: u32) {
     let grp = FAST_PATH_GROUP(n) as usize;
-    (*proc_).fpLockBits[grp] |= 1u64 << FAST_PATH_BIT_POSITION(n, l);
+    (*(*proc_).fpLockBits.add((grp) as usize)) |= 1u64 << FAST_PATH_BIT_POSITION(n, l);
 }
 #[inline]
 unsafe fn FAST_PATH_CLEAR_LOCKMODE(proc_: *mut PGPROC, n: u32, l: u32) {
     let grp = FAST_PATH_GROUP(n) as usize;
-    (*proc_).fpLockBits[grp] &= !(1u64 << FAST_PATH_BIT_POSITION(n, l));
+    (*(*proc_).fpLockBits.add((grp) as usize)) &= !(1u64 << FAST_PATH_BIT_POSITION(n, l));
 }
 #[inline]
 unsafe fn FAST_PATH_CHECK_LOCKMODE(proc_: *const PGPROC, n: u32, l: u32) -> bool {
     let grp = FAST_PATH_GROUP(n) as usize;
-    ((*proc_).fpLockBits[grp] & (1u64 << FAST_PATH_BIT_POSITION(n, l))) != 0
+    ((*(*proc_).fpLockBits.add((grp) as usize)) & (1u64 << FAST_PATH_BIT_POSITION(n, l))) != 0
 }
 
 /// EligibleForRelationFastPath -- can this lock use the fast path?
@@ -691,7 +654,9 @@ pub unsafe fn LockHashPartitionLock(hashcode: uint32) -> *mut LWLock {
     LockHashPartitionLockByIndex(LockHashPartition(hashcode))
 }
 pub unsafe fn LockHashPartitionLockByIndex(i: usize) -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): storage/lwlock.c
+    let padded = crate::storage::lmgr::lwlock::MainLWLockArray
+        .add(crate::storage::lmgr::lwlock::LOCK_MANAGER_LWLOCK_OFFSET as usize + i);
+    &raw mut (*padded).lock as *mut LWLock
 }
 
 // ============================================================
@@ -833,19 +798,16 @@ static mut FastPathStrongRelationLocks: *mut FastPathStrongRelationLockData = pt
 
 // miscadmin.h
 static mut MyDatabaseId: Oid = InvalidOid;
-pub static mut MyProcNumber: ProcNumber = INVALID_PROC_NUMBER;
-
+extern "C" { pub static mut MyProcNumber: ProcNumber; }
 // storage/proc.h
-pub static mut MyProc: *mut PGPROC = ptr::null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 // storage/ipc/procarray.c
-pub static mut ProcGlobal: *mut PROC_HDR = ptr::null_mut();
-
+extern "C" { pub static mut ProcGlobal: *mut PROC_HDR; }
 // utils/init/globals.c
 static mut max_prepared_xacts: c_int = 0;
 
 // utils/resource_owner.h
-pub static mut CurrentResourceOwner: ResourceOwner = ptr::null_mut();
+extern "C" { pub static mut CurrentResourceOwner: ResourceOwner; }
 
 // utils/palloc.h / memory context
 pub type TopMemoryContext = *mut c_void;
@@ -881,7 +843,7 @@ unsafe fn hash_create(
     info: *const HASHCTL,
     flags: c_int,
 ) -> *mut HTAB {
-    unimplemented!() // TODO(pg-port): utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_create(tabname, nelem, info as _, flags) as _
 }
 unsafe fn ShmemInitHash(
     name: *const c_char,
@@ -890,14 +852,14 @@ unsafe fn ShmemInitHash(
     infoP: *const HASHCTL,
     hash_flags: c_int,
 ) -> *mut HTAB {
-    unimplemented!() // TODO(pg-port): storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitHash(name, init_size, max_size, infoP as _, hash_flags) as _
 }
 unsafe fn ShmemInitStruct(
     name: *const c_char,
     size: Size,
     foundPtr: *mut bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(name, size, foundPtr)
 }
 unsafe fn hash_search(
     hashp: *mut HTAB,
@@ -905,7 +867,12 @@ unsafe fn hash_search(
     action: c_int,
     foundPtr: *mut bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_search(
+        hashp as _,
+        keyPtr,
+        core::mem::transmute::<c_int, crate::utils::hash::dynahash::HASHACTION>(action),
+        foundPtr,
+    )
 }
 unsafe fn hash_search_with_hash_value(
     hashp: *mut HTAB,
@@ -914,103 +881,112 @@ unsafe fn hash_search_with_hash_value(
     action: c_int,
     foundPtr: *mut bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_search_with_hash_value(
+        hashp as _,
+        keyPtr,
+        hashvalue,
+        core::mem::transmute::<c_int, crate::utils::hash::dynahash::HASHACTION>(action),
+        foundPtr,
+    )
 }
 unsafe fn hash_update_hash_key(
     hashp: *mut HTAB,
     existingEntry: *mut c_void,
     newKey: *const c_void,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_update_hash_key(hashp as _, existingEntry, newKey)
 }
 unsafe fn hash_destroy(hashp: *mut HTAB) {
-    unimplemented!() // TODO(pg-port): utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_destroy(hashp as _)
 }
 unsafe fn hash_seq_init(status: *mut HASH_SEQ_STATUS, hashp: *mut HTAB) {
-    unimplemented!() // TODO(pg-port): utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_seq_init(status as _, hashp as _)
 }
 unsafe fn hash_seq_search(status: *mut HASH_SEQ_STATUS) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_seq_search(status as _)
 }
 unsafe fn hash_get_num_entries(hashp: *mut HTAB) -> c_long {
-    unimplemented!() // TODO(pg-port): utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_get_num_entries(hashp as _)
 }
 unsafe fn hash_estimate_size(num_entries: c_long, entrysize: Size) -> Size {
-    unimplemented!() // TODO(pg-port): utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_estimate_size(num_entries, entrysize)
 }
 unsafe fn get_hash_value(hashp: *mut HTAB, keyPtr: *const c_void) -> uint32 {
-    unimplemented!() // TODO(pg-port): utils/hash/dynahash.c
+    crate::utils::hash::dynahash::get_hash_value(hashp as _, keyPtr)
 }
 
 // LWLock stubs
 unsafe fn LWLockAcquire(lock: *mut LWLock, mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(
+        lock as _,
+        core::mem::transmute::<c_int, crate::storage::lmgr::lwlock::LWLockMode>(mode),
+    )
 }
 unsafe fn LWLockRelease(lock: *mut LWLock) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(lock as _)
 }
 
 // SpinLock stubs
 unsafe fn SpinLockInit(lock: *mut slock_t) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/s_lock.c
+    crate::storage::spin::SpinLockInit(lock as _)
 }
 unsafe fn SpinLockAcquire(lock: *mut slock_t) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/s_lock.c
+    crate::storage::spin::SpinLockAcquire(lock as _)
 }
 unsafe fn SpinLockRelease(lock: *mut slock_t) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/s_lock.c
+    crate::storage::spin::SpinLockRelease(lock as _)
 }
 
 // palloc / memory context stubs
 unsafe fn MemoryContextAlloc(cxt: *mut c_void, size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/mmgr/mcxt.c
+    crate::utils::palloc::MemoryContextAlloc(cxt as _, size)
 }
 unsafe fn repalloc(ptr: *mut c_void, size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/mmgr/mcxt.c
+    crate::utils::palloc::repalloc(ptr, size)
 }
 unsafe fn palloc(size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/mmgr/mcxt.c
+    crate::utils::palloc::palloc(size)
 }
 unsafe fn palloc0(size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/mmgr/mcxt.c
+    crate::utils::palloc::palloc0(size)
 }
 unsafe fn pfree(ptr: *mut c_void) {
-    unimplemented!() // TODO(pg-port): utils/mmgr/mcxt.c
+    crate::utils::palloc::pfree(ptr)
 }
 
 // resowner.h stubs
 unsafe fn ResourceOwnerRememberLock(owner: ResourceOwner, locallock: *mut LOCALLOCK) {
-    unimplemented!() // TODO(pg-port): utils/resowner/resowner.c
+    crate::utils::resowner::resowner::ResourceOwnerRememberLock(owner as _, locallock as _)
 }
 unsafe fn ResourceOwnerForgetLock(owner: ResourceOwner, locallock: *mut LOCALLOCK) {
-    unimplemented!() // TODO(pg-port): utils/resowner/resowner.c
+    crate::utils::resowner::resowner::ResourceOwnerForgetLock(owner as _, locallock as _)
 }
 unsafe fn ResourceOwnerGetParent(owner: ResourceOwner) -> ResourceOwner {
-    unimplemented!() // TODO(pg-port): utils/resowner/resowner.c
+    crate::utils::resowner::resowner::ResourceOwnerGetParent(owner as _) as _
 }
 
 // proc.c stubs
 unsafe fn ProcSleep(locallock: *mut LOCALLOCK) -> ProcWaitStatus {
-    unimplemented!() // TODO(pg-port): storage/lmgr/proc.c
+    crate::storage::lmgr::proc::ProcSleep(locallock as _) as _
 }
 unsafe fn ProcLockWakeup(lockMethodTable: LockMethod, lock: *mut LOCK) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/proc.c
+    crate::storage::lmgr::proc::ProcLockWakeup(lockMethodTable as _, lock as _)
 }
 unsafe fn JoinWaitQueue(
     locallock: *mut LOCALLOCK,
     lockMethodTable: LockMethod,
     dontWait: bool,
 ) -> ProcWaitStatus {
-    unimplemented!() // TODO(pg-port): storage/lmgr/proc.c
+    crate::storage::lmgr::proc::JoinWaitQueue(locallock as _, lockMethodTable as _, dontWait) as _
 }
 unsafe fn DeadLockReport() -> ! {
     panic!("DeadLockReport") // TODO(pg-port): storage/lmgr/deadlock.c
 }
 unsafe fn ProcNumberGetProc(procNumber: ProcNumber) -> *mut PGPROC {
-    unimplemented!() // TODO(pg-port): storage/lmgr/proc.c
+    crate::storage::ipc::procarray::ProcNumberGetProc(procNumber as _) as _
 }
 unsafe fn BackendPidGetProcWithLock(pid: c_int) -> *mut PGPROC {
-    unimplemented!() // TODO(pg-port): storage/ipc/procarray.c
+    crate::storage::ipc::procarray::BackendPidGetProcWithLock(pid) as _
 }
 
 // access/xlog.h
@@ -1046,17 +1022,13 @@ unsafe fn TwoPhaseGetXidByVirtualXID(
     unimplemented!() // TODO(pg-port): access/transam/twophase.c
 }
 
-// utils/ps_status.h stubs
-unsafe fn set_ps_display_suffix(suffix: *const c_char) {
-    unimplemented!() // TODO(pg-port): utils/misc/ps_status.c
-}
-unsafe fn set_ps_display_remove_suffix() {
-    unimplemented!() // TODO(pg-port): utils/misc/ps_status.c
-}
+// utils/ps_status.h stubs -- process-title decoration is cosmetic; no-op for now.
+unsafe fn set_ps_display_suffix(_suffix: *const c_char) {}
+unsafe fn set_ps_display_remove_suffix() {}
 
 // procarray.h
 unsafe fn ProcArrayLock() -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): storage/ipc/procarray.c
+    crate::backend_link_shims::ProcArrayLock as *mut LWLock
 }
 
 // pg_atomic.h
@@ -1085,7 +1057,7 @@ unsafe fn initStringInfo(buf: *mut StringInfoData) {
 
 // dclist_count (lib/ilist.h)
 unsafe fn dclist_count(dcl: *const dclist_head) -> c_int {
-    unimplemented!() // TODO(pg-port): lib/ilist.c
+    crate::lib::ilist::dclist_count(dcl) as _
 }
 
 // MemSet (c.h)
@@ -3240,7 +3212,7 @@ unsafe fn FastPathTransferRelationLocks(
          *
          * Also skip groups without any registered fast-path locks.
          */
-        if (*proc_).databaseId != (*locktag).locktag_field1 || (*proc_).fpLockBits[group as usize] == 0 {
+        if (*proc_).databaseId != (*locktag).locktag_field1 || (*(*proc_).fpLockBits.add((group as usize) as usize)) == 0 {
             LWLockRelease(&raw mut (*proc_).fpInfoLock as *mut LWLock);
             i += 1;
             continue;
@@ -3492,7 +3464,7 @@ pub unsafe fn GetLockConflicts(
              * no fast-path locks in this group, skip it.
              */
             if (*proc_).databaseId != (*locktag).locktag_field1
-                || (*proc_).fpLockBits[group as usize] == 0
+                || (*(*proc_).fpLockBits.add((group as usize) as usize)) == 0
             {
                 LWLockRelease(&raw mut (*proc_).fpInfoLock as *mut LWLock);
                 i += 1;
@@ -3744,7 +3716,7 @@ unsafe fn CheckForSessionAndXactLocks() {
     /* Create a local hash table keyed by LOCKTAG only */
     hash_ctl.keysize = size_of::<LOCKTAG>();
     hash_ctl.entrysize = size_of::<PerLockTagEntry>();
-    hash_ctl.hcxt = CurrentMemoryContext;
+    hash_ctl.hcxt = CurrentMemoryContext as _;
 
     let lockhtab = hash_create(
         c"CheckForSessionAndXactLocks table".as_ptr(),
@@ -4150,7 +4122,7 @@ pub unsafe fn GetLockStatusData() -> *mut LockData {
         let mut g: u32 = 0;
         while g < FastPathLockGroupsPerBackend as u32 {
             /* Skip groups without registered fast-path locks */
-            if (*proc_).fpLockBits[g as usize] == 0 {
+            if (*(*proc_).fpLockBits.add((g as usize) as usize)) == 0 {
                 g += 1;
                 continue;
             }

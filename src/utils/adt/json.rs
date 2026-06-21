@@ -289,9 +289,7 @@ unsafe fn pg_parse_json_or_errsave(
     _lex: *mut JsonLexContext,
     _sem: *mut JsonSemAction,
     _escontext: *mut c_void,
-) -> bool {
-    unimplemented!("pg_parse_json_or_errsave: common/jsonapi.c not yet translated")
-}
+) -> bool { crate::utils::adt::jsonfuncs::pg_parse_json_or_errsave(_lex as _, _sem as _, _escontext as _) }
 
 /*
  * pg_parse_json_or_ereport: parse; raise ERROR on any failure.
@@ -326,9 +324,7 @@ unsafe fn json_errsave_error(
     _error: JsonParseErrorType,
     _lex: *mut JsonLexContext,
     _escontext: *mut c_void,
-) {
-    unimplemented!("json_errsave_error: utils/jsonfuncs.c not yet translated")
-}
+) { crate::utils::adt::jsonfuncs::json_errsave_error(_error as _, _lex as _, _escontext as _) }
 
 // ===========================================================================
 // Forward declarations of the stubbed function-library helpers (json.c statics).
@@ -345,9 +341,7 @@ unsafe fn json_categorize_type(
     _is_jsonb: bool,
     _tcategory: *mut JsonTypeCategory,
     _outfuncoid: *mut Oid,
-) {
-    unimplemented!("json_categorize_type: catalog (lsyscache/typcache) not yet translated")
-}
+) { crate::utils::adt::jsonfuncs::json_categorize_type(_typoid as _, _is_jsonb, _tcategory as _, _outfuncoid as _) }
 
 /*
  * utils/jsonfuncs.h: JsonTypeCategory enum.  Declared for the stubbed builder
@@ -398,25 +392,19 @@ unsafe fn OidFunctionCall1(_functionId: Oid, _arg1: Datum) -> Datum {
 }
 
 /* utils/cache/lsyscache.c: function volatility, type physical properties. */
-unsafe fn func_volatile(_funcid: Oid) -> c_char {
-    unimplemented!("json: func_volatile (utils/cache/lsyscache.c) not yet translated")
-}
+unsafe fn func_volatile(_funcid: Oid) -> c_char { crate::utils::cache::lsyscache::func_volatile(_funcid as _) as _ }
 unsafe fn get_typlenbyvalalign(
     _typid: Oid,
     _typlen: *mut int16,
     _typbyval: *mut bool,
     _typalign: *mut c_char,
-) {
-    unimplemented!("json: get_typlenbyvalalign (utils/cache/lsyscache.c) not yet translated")
-}
+) { crate::utils::cache::lsyscache::get_typlenbyvalalign(_typid as _, _typlen as _, _typbyval as _, _typalign as _) }
 
 /* funcapi.h / executor: aggregate context + variadic argument extraction. */
 unsafe fn AggCheckCallContext(
     _fcinfo: FunctionCallInfo,
     _aggcontext: *mut MemoryContext,
-) -> bool {
-    unimplemented!("json: AggCheckCallContext (executor/nodeAgg.c) not yet translated")
-}
+) -> bool { crate::executor::nodeAgg::AggCheckCallContext(_fcinfo as _, _aggcontext as _) != 0 }
 unsafe fn extract_variadic_args(
     _fcinfo: FunctionCallInfo,
     _variadic_start: c_int,
@@ -424,30 +412,22 @@ unsafe fn extract_variadic_args(
     _args: *mut *mut Datum,
     _types: *mut *mut Oid,
     _nulls: *mut *mut bool,
-) -> c_int {
-    unimplemented!("json: extract_variadic_args (utils/fmgr/funcapi.c) not yet translated")
-}
+) -> c_int { crate::utils::fmgr::funcapi::extract_variadic_args(_fcinfo as _, _variadic_start as _, _convert_unknown, _args as _, _types as _, _nulls as _) as _ }
 
 /* utils/array.h, arrayfuncs.c: array deconstruction. */
 #[repr(C)]
 struct ArrayType {
     _opaque: [u8; 0],
 }
-unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType {
-    unimplemented!("json: DatumGetArrayTypeP (utils/adt/arrayfuncs.c) not yet translated")
-}
+unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType { crate::access::nbtree::nbtpreprocesskeys::DatumGetArrayTypeP(_d as _) as _ }
 unsafe fn ARR_ELEMTYPE(_a: *mut ArrayType) -> Oid {
     unimplemented!("json: ARR_ELEMTYPE (utils/array.h) not yet translated")
 }
-unsafe fn ARR_NDIM(_a: *mut ArrayType) -> c_int {
-    unimplemented!("json: ARR_NDIM (utils/array.h) not yet translated")
-}
+unsafe fn ARR_NDIM(_a: *mut ArrayType) -> c_int { crate::utils::array::ARR_NDIM(_a as _) as _ }
 unsafe fn ARR_DIMS(_a: *mut ArrayType) -> *mut c_int {
     unimplemented!("json: ARR_DIMS (utils/array.h) not yet translated")
 }
-unsafe fn ArrayGetNItems(_ndim: c_int, _dims: *const c_int) -> c_int {
-    unimplemented!("json: ArrayGetNItems (utils/adt/arrayutils.c) not yet translated")
-}
+unsafe fn ArrayGetNItems(_ndim: c_int, _dims: *const c_int) -> c_int { crate::utils::adt::arrayutils::ArrayGetNItems(_ndim as _, _dims as _) as _ }
 unsafe fn deconstruct_array(
     _array: *mut ArrayType,
     _elmtype: Oid,
@@ -457,9 +437,7 @@ unsafe fn deconstruct_array(
     _elemsp: *mut *mut Datum,
     _nullsp: *mut *mut bool,
     _nelemsp: *mut c_int,
-) {
-    unimplemented!("json: deconstruct_array (utils/adt/arrayfuncs.c) not yet translated")
-}
+) { crate::utils::adt::arrayfuncs::deconstruct_array(_array as _, _elmtype as _, _elmlen as _, _elmbyval, _elmalign as _, _elemsp as _, _nullsp as _, _nelemsp as _) }
 unsafe fn deconstruct_array_builtin(
     _array: *mut ArrayType,
     _elmtype: Oid,
@@ -495,21 +473,11 @@ struct FormData_pg_attribute {
 unsafe fn DatumGetHeapTupleHeader(_d: Datum) -> HeapTupleHeader {
     unimplemented!("json: DatumGetHeapTupleHeader (fmgr.h) not yet translated")
 }
-unsafe fn HeapTupleHeaderGetTypeId(_td: HeapTupleHeader) -> Oid {
-    unimplemented!("json: HeapTupleHeaderGetTypeId (access/htup_details.h) not yet translated")
-}
-unsafe fn HeapTupleHeaderGetTypMod(_td: HeapTupleHeader) -> i32 {
-    unimplemented!("json: HeapTupleHeaderGetTypMod (access/htup_details.h) not yet translated")
-}
-unsafe fn HeapTupleHeaderGetDatumLength(_td: HeapTupleHeader) -> u32 {
-    unimplemented!("json: HeapTupleHeaderGetDatumLength (access/htup_details.h) not yet translated")
-}
-unsafe fn lookup_rowtype_tupdesc(_type_id: Oid, _typmod: i32) -> TupleDesc {
-    unimplemented!("json: lookup_rowtype_tupdesc (utils/cache/typcache.c) not yet translated")
-}
-unsafe fn ReleaseTupleDesc(_tupdesc: TupleDesc) {
-    unimplemented!("json: ReleaseTupleDesc (utils/cache/typcache.c) not yet translated")
-}
+unsafe fn HeapTupleHeaderGetTypeId(_td: HeapTupleHeader) -> Oid { crate::access::htup_details::HeapTupleHeaderGetTypeId(_td as _) as _ }
+unsafe fn HeapTupleHeaderGetTypMod(_td: HeapTupleHeader) -> i32 { crate::access::htup_details::HeapTupleHeaderGetTypMod(_td as _) as _ }
+unsafe fn HeapTupleHeaderGetDatumLength(_td: HeapTupleHeader) -> u32 { crate::access::htup_details::HeapTupleHeaderGetDatumLength(_td as _) as _ }
+unsafe fn lookup_rowtype_tupdesc(_type_id: Oid, _typmod: i32) -> TupleDesc { crate::utils::cache::typcache::lookup_rowtype_tupdesc(_type_id as _, _typmod as _) as _ }
+unsafe fn ReleaseTupleDesc(_tupdesc: TupleDesc) { crate::access::common::tupdesc::ReleaseTupleDesc(_tupdesc as _) }
 unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> Form_pg_attribute {
     unimplemented!("json: TupleDescAttr (access/tupdesc.h) not yet translated")
 }
@@ -572,39 +540,19 @@ struct pg_tm {
     tm_zone: *const c_char,
 }
 
-unsafe fn DatumGetDateADT(_x: Datum) -> DateADT {
-    unimplemented!("json: DatumGetDateADT (utils/date.h) not yet translated")
-}
-unsafe fn DatumGetTimeADT(_x: Datum) -> TimeADT {
-    unimplemented!("json: DatumGetTimeADT (utils/date.h) not yet translated")
-}
-unsafe fn DatumGetTimeTzADTP(_x: Datum) -> *mut TimeTzADT {
-    unimplemented!("json: DatumGetTimeTzADTP (utils/date.h) not yet translated")
-}
-unsafe fn DatumGetTimestamp(_x: Datum) -> Timestamp {
-    unimplemented!("json: DatumGetTimestamp (utils/timestamp.h) not yet translated")
-}
+unsafe fn DatumGetDateADT(_x: Datum) -> DateADT { crate::utils::adt::date::DatumGetDateADT(_x as _) as _ }
+unsafe fn DatumGetTimeADT(_x: Datum) -> TimeADT { crate::utils::adt::date::DatumGetTimeADT(_x as _) as _ }
+unsafe fn DatumGetTimeTzADTP(_x: Datum) -> *mut TimeTzADT { crate::utils::adt::date::DatumGetTimeTzADTP(_x as _) as _ }
+unsafe fn DatumGetTimestamp(_x: Datum) -> Timestamp { crate::utils::adt::xml::DatumGetTimestamp(_x as _) as _ }
 unsafe fn DatumGetTimestampTz(_x: Datum) -> TimestampTz {
     unimplemented!("json: DatumGetTimestampTz (utils/timestamp.h) not yet translated")
 }
-unsafe fn DATE_NOT_FINITE(_d: DateADT) -> bool {
-    unimplemented!("json: DATE_NOT_FINITE (utils/date.h) not yet translated")
-}
-unsafe fn TIMESTAMP_NOT_FINITE(_t: Timestamp) -> bool {
-    unimplemented!("json: TIMESTAMP_NOT_FINITE (utils/timestamp.h) not yet translated")
-}
-unsafe fn EncodeSpecialDate(_dt: DateADT, _str: *mut c_char) {
-    unimplemented!("json: EncodeSpecialDate (utils/adt/date.c) not yet translated")
-}
-unsafe fn EncodeSpecialTimestamp(_dt: Timestamp, _str: *mut c_char) {
-    unimplemented!("json: EncodeSpecialTimestamp (utils/adt/timestamp.c) not yet translated")
-}
-unsafe fn j2date(_jd: c_int, _year: *mut c_int, _month: *mut c_int, _day: *mut c_int) {
-    unimplemented!("json: j2date (utils/adt/datetime.c) not yet translated")
-}
-unsafe fn EncodeDateOnly(_tm: *mut pg_tm, _style: c_int, _str: *mut c_char) {
-    unimplemented!("json: EncodeDateOnly (utils/adt/datetime.c) not yet translated")
-}
+unsafe fn DATE_NOT_FINITE(_d: DateADT) -> bool { crate::utils::adt::date::DATE_NOT_FINITE(_d as _) }
+unsafe fn TIMESTAMP_NOT_FINITE(_t: Timestamp) -> bool { crate::utils::adt::date::TIMESTAMP_NOT_FINITE(_t as _) }
+unsafe fn EncodeSpecialDate(_dt: DateADT, _str: *mut c_char) { crate::utils::adt::date::EncodeSpecialDate(_dt as _, _str as _) }
+unsafe fn EncodeSpecialTimestamp(_dt: Timestamp, _str: *mut c_char) { crate::utils::adt::timestamp::EncodeSpecialTimestamp(_dt as _, _str as _) }
+unsafe fn j2date(_jd: c_int, _year: *mut c_int, _month: *mut c_int, _day: *mut c_int) { crate::utils::adt::datetime::j2date(_jd as _, _year as _, _month as _, _day as _) }
+unsafe fn EncodeDateOnly(_tm: *mut pg_tm, _style: c_int, _str: *mut c_char) { crate::utils::adt::datetime::EncodeDateOnly(_tm as _, _style as _, _str as _) }
 unsafe fn EncodeTimeOnly(
     _tm: *mut pg_tm,
     _fsec: fsec_t,
@@ -612,9 +560,7 @@ unsafe fn EncodeTimeOnly(
     _tz: c_int,
     _style: c_int,
     _str: *mut c_char,
-) {
-    unimplemented!("json: EncodeTimeOnly (utils/adt/datetime.c) not yet translated")
-}
+) { crate::utils::adt::datetime::EncodeTimeOnly(_tm as _, _fsec as _, _print_tz, _tz as _, _style as _, _str as _) }
 unsafe fn EncodeDateTime(
     _tm: *mut pg_tm,
     _fsec: fsec_t,
@@ -623,12 +569,8 @@ unsafe fn EncodeDateTime(
     _tzn: *const c_char,
     _style: c_int,
     _str: *mut c_char,
-) {
-    unimplemented!("json: EncodeDateTime (utils/adt/datetime.c) not yet translated")
-}
-unsafe fn time2tm(_time: TimeADT, _tm: *mut pg_tm, _fsec: *mut fsec_t) -> c_int {
-    unimplemented!("json: time2tm (utils/adt/date.c) not yet translated")
-}
+) { crate::utils::adt::datetime::EncodeDateTime(_tm as _, _fsec as _, _print_tz, _tz as _, _tzn as _, _style as _, _str as _) }
+unsafe fn time2tm(_time: TimeADT, _tm: *mut pg_tm, _fsec: *mut fsec_t) -> c_int { crate::utils::adt::date::time2tm(_time as _, _tm as _, _fsec as _) as _ }
 unsafe fn timetz2tm(
     _time: *mut TimeTzADT,
     _tm: *mut pg_tm,
@@ -644,9 +586,7 @@ unsafe fn timestamp2tm(
     _fsec: *mut fsec_t,
     _tzn: *mut *const c_char,
     _attimezone: *mut c_void,
-) -> c_int {
-    unimplemented!("json: timestamp2tm (utils/adt/timestamp.c) not yet translated")
-}
+) -> c_int { crate::utils::adt::timestamp::timestamp2tm(_dt as _, _tzp as _, _tm as _, _fsec as _, _tzn as _, _attimezone as _) as _ }
 
 /* MemoryContextStrdup (utils/mmgr/mcxt.c). */
 unsafe fn MemoryContextStrdup(_context: MemoryContext, _string: *const c_char) -> *mut c_char {
@@ -720,23 +660,15 @@ unsafe fn hash_create(
     _nelem: c_long,
     _info: *mut HASHCTL,
     _flags: c_int,
-) -> JsonUniqueCheckState {
-    unimplemented!("json: hash_create (utils/hash/dynahash.c) not yet translated")
-}
+) -> JsonUniqueCheckState { crate::utils::hash::dynahash::hash_create(_tabname as _, _nelem as _, _info as _, _flags as _) as _ }
 unsafe fn hash_search(
     _hashp: JsonUniqueCheckState,
     _key: *const c_void,
     _action: c_int,
     _foundptr: *mut bool,
-) -> *mut c_void {
-    unimplemented!("json: hash_search (utils/hash/dynahash.c) not yet translated")
-}
-unsafe fn hash_bytes(_k: *const u8, _keylen: c_int) -> u32 {
-    unimplemented!("json: hash_bytes (common/hashfn.c) not yet translated")
-}
-unsafe fn hash_bytes_uint32(_k: u32) -> u32 {
-    unimplemented!("json: hash_bytes_uint32 (common/hashfn.c) not yet translated")
-}
+) -> *mut c_void { unimplemented!() }
+unsafe fn hash_bytes(_k: *const u8, _keylen: c_int) -> u32 { crate::common::hashfn::hash_bytes(_k as _, _keylen as _) as _ }
+unsafe fn hash_bytes_uint32(_k: u32) -> u32 { crate::common::hashfn::hash_bytes_uint32(_k as _) as _ }
 
 /* Functions implementing hash table for key uniqueness check */
 unsafe fn json_unique_hash(key: *const c_void, _keysize: Size) -> u32 {

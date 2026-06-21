@@ -92,43 +92,43 @@ unsafe fn IsParallelWorker() -> bool {
 
 /* storage/shm_toc.h (TODO: storage/ipc/shm_toc.c -- type identity differs). */
 unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _nbytes: Size) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 unsafe fn shm_toc_insert(_toc: *mut shm_toc, _key: u64, _address: *mut c_void) {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: u64, _noError: bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }
 unsafe fn shm_toc_estimate_chunk(_e: *mut c_void, _sz: Size) {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_estimate_chunk(_e as _, _sz as _)
 }
 unsafe fn shm_toc_estimate_keys(_e: *mut c_void, _cnt: Size) {
-    unimplemented!() // TODO: storage/ipc/shm_toc.c
+    crate::storage::ipc::shm_toc::shm_toc_estimate_keys(_e as _, _cnt as _)
 }
 
 /* storage/shm_mq.h (TODO: storage/ipc/shm_mq.c -- type identity differs). */
 unsafe fn shm_mq_create(_address: *mut c_void, _size: Size) -> *mut shm_mq {
-    unimplemented!() // TODO: storage/ipc/shm_mq.c
+    crate::storage::ipc::shm_mq::shm_mq_create(_address as _, _size as _) as _
 }
 unsafe fn shm_mq_set_receiver(_mq: *mut shm_mq, _proc: *mut PGPROC) {
-    unimplemented!() // TODO: storage/ipc/shm_mq.c
+    crate::storage::ipc::shm_mq::shm_mq_set_receiver(_mq as _, _proc as _)
 }
 unsafe fn shm_mq_set_sender(_mq: *mut shm_mq, _proc: *mut PGPROC) {
-    unimplemented!() // TODO: storage/ipc/shm_mq.c
+    crate::storage::ipc::shm_mq::shm_mq_set_sender(_mq as _, _proc as _)
 }
 unsafe fn shm_mq_attach(
     _mq: *mut shm_mq,
     _seg: *mut dsm_segment,
     _handle: *mut BackgroundWorkerHandle,
 ) -> *mut shm_mq_handle {
-    unimplemented!() // TODO: storage/ipc/shm_mq.c
+    crate::storage::ipc::shm_mq::shm_mq_attach(_mq as _, _seg as _, _handle as _) as _
 }
 unsafe fn shm_mq_detach(_mqh: *mut shm_mq_handle) {
-    unimplemented!() // TODO: storage/ipc/shm_mq.c
+    crate::storage::ipc::shm_mq::shm_mq_detach(_mqh as _)
 }
 unsafe fn shm_mq_set_handle(_mqh: *mut shm_mq_handle, _handle: *mut BackgroundWorkerHandle) {
-    unimplemented!() // TODO: storage/ipc/shm_mq.c
+    crate::storage::ipc::shm_mq::shm_mq_set_handle(_mqh as _, _handle as _)
 }
 
 /* utils/dsa.h (TODO: utils/mmgr/dsa.c -- dsm_segment/dsa_pointer identity differs). */
@@ -136,13 +136,13 @@ unsafe fn dsa_allocate(_area: *mut dsa_area, _size: Size) -> dsa_pointer {
     unimplemented!() // TODO: utils/mmgr/dsa.c
 }
 unsafe fn dsa_free(_area: *mut dsa_area, _dp: dsa_pointer) {
-    unimplemented!() // TODO: utils/mmgr/dsa.c
+    crate::utils::mmgr::dsa::dsa_free(_area as _, _dp as _)
 }
 unsafe fn dsa_get_address(_area: *mut dsa_area, _dp: dsa_pointer) -> *mut c_void {
-    unimplemented!() // TODO: utils/mmgr/dsa.c
+    crate::utils::mmgr::dsa::dsa_get_address(_area as _, _dp as _) as _
 }
 unsafe fn dsa_minimum_size() -> Size {
-    unimplemented!() // TODO: utils/mmgr/dsa.c
+    crate::utils::mmgr::dsa::dsa_minimum_size() as _
 }
 unsafe fn dsa_create_in_place(
     _place: *mut c_void,
@@ -153,32 +153,32 @@ unsafe fn dsa_create_in_place(
     unimplemented!() // TODO: utils/mmgr/dsa.c
 }
 unsafe fn dsa_attach_in_place(_place: *mut c_void, _segment: *mut dsm_segment) -> *mut dsa_area {
-    unimplemented!() // TODO: utils/mmgr/dsa.c
+    crate::utils::mmgr::dsa::dsa_attach_in_place(_place as _, _segment as _) as _
 }
 unsafe fn dsa_detach(_area: *mut dsa_area) {
-    unimplemented!() // TODO: utils/mmgr/dsa.c
+    crate::utils::mmgr::dsa::dsa_detach(_area as _)
 }
 
 /* nodes/params.h (TODO: nodes/params.c). */
 unsafe fn EstimateParamListSpace(_paramLI: ParamListInfo) -> Size {
-    unimplemented!() // TODO: nodes/params.c
+    crate::nodes::params::EstimateParamListSpace(_paramLI as _) as _
 }
 unsafe fn SerializeParamList(_paramLI: ParamListInfo, _start_address: *mut *mut c_char) {
-    unimplemented!() // TODO: nodes/params.c
+    crate::nodes::params::SerializeParamList(_paramLI as _, _start_address as _)
 }
 unsafe fn RestoreParamList(_start_address: *mut *mut c_char) -> ParamListInfo {
-    unimplemented!() // TODO: nodes/params.c
+    crate::nodes::params::RestoreParamList(_start_address as _) as _
 }
 
 /* executor/tqueue.h (TODO: executor/tqueue.c). */
 unsafe fn CreateTupleQueueReader(_handle: *mut shm_mq_handle) -> *mut TupleQueueReader {
-    unimplemented!() // TODO: executor/tqueue.c
+    crate::executor::tqueue::CreateTupleQueueReader(_handle as _) as _
 }
 unsafe fn DestroyTupleQueueReader(_reader: *mut TupleQueueReader) {
-    unimplemented!() // TODO: executor/tqueue.c
+    crate::executor::tqueue::DestroyTupleQueueReader(_reader as _)
 }
 unsafe fn CreateTupleQueueDestReceiver(_handle: *mut shm_mq_handle) -> *mut DestReceiver {
-    unimplemented!() // TODO: executor/tqueue.c
+    crate::executor::tqueue::CreateTupleQueueDestReceiver(_handle as _) as _
 }
 
 /* access/parallel.h: silence "unused import" by referencing here. */

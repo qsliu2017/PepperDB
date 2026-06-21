@@ -43,18 +43,10 @@ pub struct xl_smgr_truncate {
     pub flags: c_int,
 }
 
-pub unsafe fn log_smgrcreate(rlocator: *const RelFileLocator, forkNum: ForkNumber) {
-    unimplemented!()
-}
+pub unsafe fn log_smgrcreate(rlocator: *const RelFileLocator, forkNum: ForkNumber) { crate::catalog::storage::log_smgrcreate(rlocator as _, forkNum as _) }
 
-pub unsafe fn smgr_redo(record: *mut XLogReaderState) {
-    unimplemented!()
-}
+pub unsafe fn smgr_redo(record: *mut XLogReaderState) { crate::catalog::storage::smgr_redo(record as _) }
 
-pub unsafe fn smgr_desc(buf: StringInfo, record: *mut XLogReaderState) {
-    unimplemented!()
-}
+pub unsafe fn smgr_desc(buf: StringInfo, record: *mut XLogReaderState) { crate::access::rmgrdesc::smgrdesc::smgr_desc(buf as _, record as _) }
 
-pub unsafe fn smgr_identify(info: uint8) -> *const c_char {
-    unimplemented!()
-}
+pub unsafe fn smgr_identify(info: uint8) -> *const c_char { crate::access::rmgrdesc::smgrdesc::smgr_identify(info as _) }

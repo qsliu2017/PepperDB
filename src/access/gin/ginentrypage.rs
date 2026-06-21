@@ -911,9 +911,7 @@ unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
     unimplemented!() // TODO: src/backend/storage/buffer/bufmgr.c
 }
-unsafe fn RelationNeedsWAL(_index: Relation) -> bool {
-    unimplemented!() // TODO: src/include/utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_index: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_index) }
 unsafe fn RelationGetRelationName(_relation: Relation) -> *const c_char {
     unimplemented!() // TODO: src/include/utils/rel.h
 }

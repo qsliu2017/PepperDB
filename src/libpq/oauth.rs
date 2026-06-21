@@ -91,6 +91,4 @@ pub unsafe fn check_oauth_validator(
     hbaline: *mut HbaLine,
     elevel: c_int,
     err_msg: *mut *mut c_char,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { unimplemented!() }

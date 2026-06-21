@@ -249,12 +249,15 @@ pub struct EndOfWalRecoveryInfo {
 pub struct tablespaceinfo {
     pub oid: Oid,
     pub path: *mut c_char,
+    pub rpath: *mut c_char,
+    pub size: int64,
 }
 
 // ---------------------------------------------------------------------------
 // GUC variables
 // ---------------------------------------------------------------------------
 
+#[no_mangle]
 pub static mut recovery_target_action_options: [config_enum_entry; 4] = [
     config_enum_entry { name: b"pause\0".as_ptr() as *const c_char, val: RECOVERY_TARGET_ACTION_PAUSE, hidden: false },
     config_enum_entry { name: b"promote\0".as_ptr() as *const c_char, val: RECOVERY_TARGET_ACTION_PROMOTE, hidden: false },
@@ -400,6 +403,7 @@ static mut backupEndRequired: bool = false;
 /*
  * Have we reached a consistent database state?
  */
+#[no_mangle]
 pub static mut reachedConsistency: bool = false;
 
 /* Buffers dedicated to consistency checks of size BLCKSZ */
@@ -453,39 +457,40 @@ pub type GucSource = c_int;
 
 /// TODO(pg-port): ShmemInitStruct lives in storage/shmem.h
 unsafe fn ShmemInitStruct(_name: &str, _size: Size, _found: *mut bool) -> *mut c_void {
-    unimplemented!("TODO(pg-port): ShmemInitStruct lives in storage/shmem.h")
+    let cname = std::ffi::CString::new(_name).unwrap();
+    crate::storage::ipc::shmem::ShmemInitStruct(cname.as_ptr(), _size, _found)
 }
 /// TODO(pg-port): SpinLockInit lives in storage/spin.h
 unsafe fn SpinLockInit(_lock: *mut slock_t) {
-    unimplemented!("TODO(pg-port): SpinLockInit")
+    crate::storage::spin::SpinLockInit(_lock as _)
 }
 /// TODO(pg-port): SpinLockAcquire lives in storage/spin.h
 unsafe fn SpinLockAcquire(_lock: *mut slock_t) {
-    unimplemented!("TODO(pg-port): SpinLockAcquire")
+    crate::storage::spin::SpinLockAcquire(_lock as _)
 }
 /// TODO(pg-port): SpinLockRelease lives in storage/spin.h
 unsafe fn SpinLockRelease(_lock: *mut slock_t) {
-    unimplemented!("TODO(pg-port): SpinLockRelease")
+    crate::storage::spin::SpinLockRelease(_lock as _)
 }
 /// TODO(pg-port): InitSharedLatch lives in storage/latch.h
 unsafe fn InitSharedLatch(_latch: *mut Latch) {
-    unimplemented!("TODO(pg-port): InitSharedLatch")
+    crate::storage::ipc::latch::InitSharedLatch(_latch as _)
 }
 /// TODO(pg-port): OwnLatch lives in storage/latch.h
 unsafe fn OwnLatch(_latch: *mut Latch) {
-    unimplemented!("TODO(pg-port): OwnLatch")
+    crate::storage::ipc::latch::OwnLatch(_latch as _)
 }
 /// TODO(pg-port): DisownLatch lives in storage/latch.h
 unsafe fn DisownLatch(_latch: *mut Latch) {
-    unimplemented!("TODO(pg-port): DisownLatch")
+    crate::storage::ipc::latch::DisownLatch(_latch as _)
 }
 /// TODO(pg-port): SetLatch lives in storage/latch.h
 unsafe fn SetLatch(_latch: *mut Latch) {
-    unimplemented!("TODO(pg-port): SetLatch")
+    crate::storage::ipc::latch::SetLatch(_latch as _)
 }
 /// TODO(pg-port): ResetLatch lives in storage/latch.h
 unsafe fn ResetLatch(_latch: *mut Latch) {
-    unimplemented!("TODO(pg-port): ResetLatch")
+    crate::storage::ipc::latch::ResetLatch(_latch as _)
 }
 /// TODO(pg-port): WaitLatch lives in storage/latch.h
 unsafe fn WaitLatch(_latch: *mut Latch, _wakeEvents: c_int, _timeout: i64, _wait_event: u32) -> c_int {
@@ -493,7 +498,7 @@ unsafe fn WaitLatch(_latch: *mut Latch, _wakeEvents: c_int, _timeout: i64, _wait
 }
 /// TODO(pg-port): ConditionVariableInit lives in storage/condition_variable.h
 unsafe fn ConditionVariableInit(_cv: *mut ConditionVariable) {
-    unimplemented!("TODO(pg-port): ConditionVariableInit")
+    crate::storage::lmgr::condition_variable::ConditionVariableInit(_cv as _)
 }
 /// TODO(pg-port): ConditionVariableTimedSleep lives in storage/condition_variable.h
 unsafe fn ConditionVariableTimedSleep(_cv: *mut ConditionVariable, _timeout: c_int, _wait_event: u32) {
@@ -504,24 +509,22 @@ unsafe fn ConditionVariableCancelSleep() {
     unimplemented!("TODO(pg-port): ConditionVariableCancelSleep")
 }
 /// TODO(pg-port): ConditionVariableBroadcast lives in storage/condition_variable.h
-unsafe fn ConditionVariableBroadcast(_cv: *mut ConditionVariable) {
-    unimplemented!("TODO(pg-port): ConditionVariableBroadcast")
-}
+unsafe fn ConditionVariableBroadcast(_cv: *mut ConditionVariable) { crate::storage::lmgr::condition_variable::ConditionVariableBroadcast(_cv as _) }
 /// TODO(pg-port): palloc lives in utils/palloc.h
 unsafe fn palloc(_size: Size) -> *mut c_void {
-    unimplemented!("TODO(pg-port): palloc")
+    crate::utils::palloc::palloc(_size)
 }
 /// TODO(pg-port): palloc0 lives in utils/palloc.h
 unsafe fn palloc0(_size: Size) -> *mut c_void {
-    unimplemented!("TODO(pg-port): palloc0")
+    crate::utils::palloc::palloc0(_size)
 }
 /// TODO(pg-port): pfree lives in utils/palloc.h
 unsafe fn pfree(_ptr: *mut c_void) {
-    unimplemented!("TODO(pg-port): pfree")
+    crate::utils::palloc::pfree(_ptr)
 }
 /// TODO(pg-port): pstrdup lives in utils/palloc.h
 unsafe fn pstrdup(_s: *const c_char) -> *mut c_char {
-    unimplemented!("TODO(pg-port): pstrdup")
+    crate::utils::palloc::pstrdup(_s)
 }
 /// TODO(pg-port): psprintf lives in utils/elog.h
 unsafe fn psprintf(_fmt: *const c_char) -> *mut c_char {
@@ -546,91 +549,91 @@ unsafe fn XLogReaderAllocate(
     _routine: XLogReaderRoutine,
     _private_data: *mut c_void,
 ) -> *mut XLogReaderState {
-    unimplemented!("TODO(pg-port): XLogReaderAllocate")
+    crate::access::transam::xlogreader::XLogReaderAllocate(_wal_segment_size, _waldir, &_routine, _private_data)
 }
 /// TODO(pg-port): XLogReaderFree lives in access/xlogreader.h
 unsafe fn XLogReaderFree(_xlogreader: *mut XLogReaderState) {
-    unimplemented!("TODO(pg-port): XLogReaderFree")
+    crate::access::transam::xlogreader::XLogReaderFree(_xlogreader)
 }
 /// TODO(pg-port): XLogReaderSetDecodeBuffer lives in access/xlogreader.h
 unsafe fn XLogReaderSetDecodeBuffer(_xlogreader: *mut XLogReaderState, _buf: *mut c_void, _size: Size) {
-    unimplemented!("TODO(pg-port): XLogReaderSetDecodeBuffer")
+    crate::access::transam::xlogreader::XLogReaderSetDecodeBuffer(_xlogreader, _buf, _size)
 }
 /// TODO(pg-port): XLogReaderValidatePageHeader lives in access/xlogreader.h
 unsafe fn XLogReaderValidatePageHeader(_xlogreader: *mut XLogReaderState, _recptr: XLogRecPtr, _buf: *mut c_char) -> bool {
-    unimplemented!("TODO(pg-port): XLogReaderValidatePageHeader")
+    crate::access::transam::xlogreader::XLogReaderValidatePageHeader(_xlogreader, _recptr, _buf)
 }
 /// TODO(pg-port): XLogReaderResetError lives in access/xlogreader.h
 unsafe fn XLogReaderResetError(_xlogreader: *mut XLogReaderState) {
-    unimplemented!("TODO(pg-port): XLogReaderResetError")
+    crate::access::transam::xlogreader::XLogReaderResetError(_xlogreader)
 }
 /// TODO(pg-port): XLogPrefetcherAllocate lives in access/xlogprefetcher.h
 unsafe fn XLogPrefetcherAllocate(_xlogreader: *mut XLogReaderState) -> *mut XLogPrefetcher {
-    unimplemented!("TODO(pg-port): XLogPrefetcherAllocate")
+    crate::access::transam::xlogprefetcher::XLogPrefetcherAllocate(_xlogreader)
 }
 /// TODO(pg-port): XLogPrefetcherFree lives in access/xlogprefetcher.h
 unsafe fn XLogPrefetcherFree(_xlogprefetcher: *mut XLogPrefetcher) {
-    unimplemented!("TODO(pg-port): XLogPrefetcherFree")
+    crate::access::transam::xlogprefetcher::XLogPrefetcherFree(_xlogprefetcher)
 }
 /// TODO(pg-port): XLogPrefetcherBeginRead lives in access/xlogprefetcher.h
 unsafe fn XLogPrefetcherBeginRead(_xlogprefetcher: *mut XLogPrefetcher, _recptr: XLogRecPtr) {
-    unimplemented!("TODO(pg-port): XLogPrefetcherBeginRead")
+    crate::access::transam::xlogprefetcher::XLogPrefetcherBeginRead(_xlogprefetcher, _recptr)
 }
 /// TODO(pg-port): XLogPrefetcherReadRecord lives in access/xlogprefetcher.h
 unsafe fn XLogPrefetcherReadRecord(_xlogprefetcher: *mut XLogPrefetcher, _errormsg: *mut *mut c_char) -> *mut XLogRecord {
-    unimplemented!("TODO(pg-port): XLogPrefetcherReadRecord")
+    crate::access::transam::xlogprefetcher::XLogPrefetcherReadRecord(_xlogprefetcher, _errormsg) as *mut XLogRecord
 }
 /// TODO(pg-port): XLogPrefetcherGetReader lives in access/xlogprefetcher.h
 unsafe fn XLogPrefetcherGetReader(_xlogprefetcher: *mut XLogPrefetcher) -> *mut XLogReaderState {
-    unimplemented!("TODO(pg-port): XLogPrefetcherGetReader")
+    crate::access::transam::xlogprefetcher::XLogPrefetcherGetReader(_xlogprefetcher)
 }
 /// TODO(pg-port): XLogPrefetcherComputeStats lives in access/xlogprefetcher.h
 unsafe fn XLogPrefetcherComputeStats(_xlogprefetcher: *mut XLogPrefetcher) {
-    unimplemented!("TODO(pg-port): XLogPrefetcherComputeStats")
+    crate::access::transam::xlogprefetcher::XLogPrefetcherComputeStats(_xlogprefetcher)
 }
 /// TODO(pg-port): XLogPrefetchReconfigure lives in access/xlogprefetcher.h
 unsafe fn XLogPrefetchReconfigure() {
-    unimplemented!("TODO(pg-port): XLogPrefetchReconfigure")
+    crate::access::transam::xlogprefetcher::XLogPrefetchReconfigure()
 }
 /// TODO(pg-port): XLogRecGetData lives in access/xlogreader.h
 unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_void {
-    unimplemented!("TODO(pg-port): XLogRecGetData")
+    crate::access::transam::xlogreader::XLogRecGetData(_record) as *mut c_void
 }
 /// TODO(pg-port): XLogRecGetInfo lives in access/xlogreader.h
 unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> u8 {
-    unimplemented!("TODO(pg-port): XLogRecGetInfo")
+    crate::access::transam::xlogreader::XLogRecGetInfo(_record)
 }
 /// TODO(pg-port): XLogRecGetRmid lives in access/xlogreader.h
 unsafe fn XLogRecGetRmid(_record: *mut XLogReaderState) -> u8 {
-    unimplemented!("TODO(pg-port): XLogRecGetRmid")
+    crate::access::transam::xlogreader::XLogRecGetRmid(_record)
 }
 /// TODO(pg-port): XLogRecGetXid lives in access/xlogreader.h
 unsafe fn XLogRecGetXid(_record: *mut XLogReaderState) -> TransactionId {
-    unimplemented!("TODO(pg-port): XLogRecGetXid")
+    crate::access::transam::xlogreader::XLogRecGetXid(_record)
 }
 /// TODO(pg-port): XLogRecGetPrev lives in access/xlogreader.h
 unsafe fn XLogRecGetPrev(_record: *mut XLogReaderState) -> XLogRecPtr {
-    unimplemented!("TODO(pg-port): XLogRecGetPrev")
+    crate::access::transam::xlogreader::XLogRecGetPrev(_record)
 }
 /// TODO(pg-port): XLogRecGetDataLen lives in access/xlogreader.h
 unsafe fn XLogRecGetDataLen(_record: *mut XLogReaderState) -> u32 {
-    unimplemented!("TODO(pg-port): XLogRecGetDataLen")
+    crate::access::transam::xlogreader::XLogRecGetDataLen(_record)
 }
 /// TODO(pg-port): XLogRecMaxBlockId lives in access/xlogreader.h
 unsafe fn XLogRecMaxBlockId(_record: *mut XLogReaderState) -> c_int {
-    unimplemented!("TODO(pg-port): XLogRecMaxBlockId")
+    crate::access::transam::xlogreader::XLogRecMaxBlockId(_record)
 }
 /// TODO(pg-port): XLogRecHasAnyBlockRefs lives in access/xlogreader.h
 unsafe fn XLogRecHasAnyBlockRefs(_record: *mut XLogReaderState) -> bool {
-    unimplemented!("TODO(pg-port): XLogRecHasAnyBlockRefs")
+    crate::access::transam::xlogreader::XLogRecHasAnyBlockRefs(_record)
 }
 /// TODO(pg-port): XLogRecHasBlockImage lives in access/xlogreader.h
 unsafe fn XLogRecHasBlockImage(_record: *mut XLogReaderState, _id: c_int) -> bool {
-    unimplemented!("TODO(pg-port): XLogRecHasBlockImage")
+    crate::access::transam::xlogreader::XLogRecHasBlockImage(_record, _id as u8)
 }
 /// TODO(pg-port): XLogRecBlockImageApply lives in access/xlogreader.h
 unsafe fn XLogRecBlockImageApply(_record: *mut XLogReaderState, _id: c_int) -> bool {
-    unimplemented!("TODO(pg-port): XLogRecBlockImageApply")
+    crate::access::transam::xlogreader::XLogRecBlockImageApply(_record, _id as u8)
 }
 /// TODO(pg-port): XLogRecGetBlockTagExtended lives in access/xlogreader.h
 unsafe fn XLogRecGetBlockTagExtended(
@@ -657,18 +660,12 @@ pub struct RelFileLocator {
     pub relNumber: Oid,
 }
 
-/// TODO(pg-port): XLogReaderRoutine lives in access/xlogreader.h
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct XLogReaderRoutine {
-    pub page_read: Option<unsafe extern "C" fn(*mut XLogReaderState, XLogRecPtr, c_int, XLogRecPtr, *mut c_char) -> c_int>,
-    pub segment_open: Option<unsafe extern "C" fn()>,
-    pub segment_close: Option<unsafe extern "C" fn(*mut XLogReaderState)>,
-}
+// XLogReaderRoutine: use the canonical definition from access/xlogreader.
+use crate::access::transam::xlogreader::XLogReaderRoutine;
 
 /// TODO(pg-port): XLogRecPtr validity check - XRecOffIsValid
 unsafe fn XRecOffIsValid(_recptr: XLogRecPtr) -> bool {
-    unimplemented!("TODO(pg-port): XRecOffIsValid")
+    crate::access::transam::xlog_internal::XRecOffIsValid(_recptr)
 }
 /// TODO(pg-port): XLogRecPtrIsInvalid macro
 #[inline]
@@ -687,31 +684,31 @@ fn lsn_lo(lsn: XLogRecPtr) -> u32 { lsn as u32 }
 
 /// TODO(pg-port): tliOfPointInHistory lives in access/timeline.c
 unsafe fn tliOfPointInHistory(_point: XLogRecPtr, _history: *mut List) -> TimeLineID {
-    unimplemented!("TODO(pg-port): tliOfPointInHistory")
+    crate::access::transam::timeline::tliOfPointInHistory(_point, _history)
 }
 /// TODO(pg-port): tliSwitchPoint lives in access/timeline.c
 unsafe fn tliSwitchPoint(_tli: TimeLineID, _history: *mut List, _nextTLI: *mut TimeLineID) -> XLogRecPtr {
-    unimplemented!("TODO(pg-port): tliSwitchPoint")
+    crate::access::transam::timeline::tliSwitchPoint(_tli, _history, _nextTLI)
 }
 /// TODO(pg-port): tliInHistory lives in access/timeline.c
 unsafe fn tliInHistory(_tli: TimeLineID, _history: *mut List) -> bool {
-    unimplemented!("TODO(pg-port): tliInHistory")
+    crate::access::transam::timeline::tliInHistory(_tli, _history)
 }
 /// TODO(pg-port): readTimeLineHistory lives in access/timeline.c
 unsafe fn readTimeLineHistory(_targetTLI: TimeLineID) -> *mut List {
-    unimplemented!("TODO(pg-port): readTimeLineHistory")
+    crate::access::transam::timeline::readTimeLineHistory(_targetTLI)
 }
 /// TODO(pg-port): findNewestTimeLine lives in access/timeline.c
 unsafe fn findNewestTimeLine(_startTLI: TimeLineID) -> TimeLineID {
-    unimplemented!("TODO(pg-port): findNewestTimeLine")
+    crate::access::transam::timeline::findNewestTimeLine(_startTLI)
 }
 /// TODO(pg-port): existsTimeLineHistory lives in access/timeline.c
 unsafe fn existsTimeLineHistory(_tli: TimeLineID) -> bool {
-    unimplemented!("TODO(pg-port): existsTimeLineHistory")
+    crate::access::transam::timeline::existsTimeLineHistory(_tli)
 }
 /// TODO(pg-port): restoreTimeLineHistoryFiles lives in access/timeline.c
 unsafe fn restoreTimeLineHistoryFiles(_from: TimeLineID, _to: TimeLineID) {
-    unimplemented!("TODO(pg-port): restoreTimeLineHistoryFiles")
+    crate::access::transam::timeline::restoreTimeLineHistoryFiles(_from, _to)
 }
 /// TODO(pg-port): RestoreArchivedFile lives in access/xlogarchive.c
 unsafe fn RestoreArchivedFile(
@@ -721,23 +718,23 @@ unsafe fn RestoreArchivedFile(
     _wal_segment_size: c_int,
     _inRedo: bool,
 ) -> bool {
-    unimplemented!("TODO(pg-port): RestoreArchivedFile")
+    crate::access::transam::xlogarchive::RestoreArchivedFile(_path, _xlogfname, _recoveryxlog, _wal_segment_size as _, _inRedo)
 }
 /// TODO(pg-port): KeepFileRestoredFromArchive lives in access/xlogarchive.c
 unsafe fn KeepFileRestoredFromArchive(_path: *const c_char, _xlogfname: *const c_char) {
-    unimplemented!("TODO(pg-port): KeepFileRestoredFromArchive")
+    crate::access::transam::xlogarchive::KeepFileRestoredFromArchive(_path, _xlogfname)
 }
 /// TODO(pg-port): XLogShutdownWalRcv lives in access/xlogarchive.c
 unsafe fn XLogShutdownWalRcv() {
-    unimplemented!("TODO(pg-port): XLogShutdownWalRcv")
+    crate::access::transam::xlog::XLogShutdownWalRcv()
 }
 /// TODO(pg-port): SwitchIntoArchiveRecovery lives in access/xlogarchive.c
 unsafe fn SwitchIntoArchiveRecovery(_endRecPtr: XLogRecPtr, _replayTLI: TimeLineID) {
-    unimplemented!("TODO(pg-port): SwitchIntoArchiveRecovery")
+    crate::access::transam::xlog::SwitchIntoArchiveRecovery(_endRecPtr, _replayTLI)
 }
 /// TODO(pg-port): wal_segment_close lives in access/xlog.c
-unsafe extern "C" fn wal_segment_close(_xlogreader: *mut XLogReaderState) {
-    unimplemented!("TODO(pg-port): wal_segment_close")
+unsafe fn wal_segment_close(state: *mut XLogReaderState) {
+    crate::access::transam::xlogutils::wal_segment_close(state as _)
 }
 /// TODO(pg-port): XLByteToSeg - macro/inline in access/xlog_internal.h
 #[inline]
@@ -756,39 +753,39 @@ unsafe fn XLogSegmentOffset(lsn: XLogRecPtr, wal_segsz_bytes: c_int) -> u32 {
 }
 /// TODO(pg-port): XLogFileName - macro/fn in access/xlog_internal.h
 unsafe fn XLogFileName(_buf: *mut c_char, _tli: TimeLineID, _segno: XLogSegNo, _wal_segment_size: c_int) {
-    unimplemented!("TODO(pg-port): XLogFileName")
+    crate::access::transam::xlog_internal::XLogFileName(_buf, _tli, _segno, _wal_segment_size)
 }
 /// TODO(pg-port): XLogFilePath - macro/fn in access/xlog_internal.h
 unsafe fn XLogFilePath(_buf: *mut c_char, _tli: TimeLineID, _segno: XLogSegNo, _wal_segment_size: c_int) {
-    unimplemented!("TODO(pg-port): XLogFilePath")
+    crate::access::transam::xlog_internal::XLogFilePath(_buf, _tli, _segno, _wal_segment_size)
 }
 /// TODO(pg-port): XLogCheckpointNeeded lives in access/xlog.c
 unsafe fn XLogCheckpointNeeded(_segno: XLogSegNo) -> bool {
-    unimplemented!("TODO(pg-port): XLogCheckpointNeeded")
+    crate::access::transam::xlog::XLogCheckpointNeeded(_segno)
 }
 /// TODO(pg-port): GetRedoRecPtr lives in access/xlog.c
 unsafe fn GetRedoRecPtr() -> XLogRecPtr {
-    unimplemented!("TODO(pg-port): GetRedoRecPtr")
+    crate::access::transam::xlog::GetRedoRecPtr()
 }
 /// TODO(pg-port): RequestCheckpoint lives in postmaster/bgwriter.c
 unsafe fn RequestCheckpoint(_flags: c_int) {
-    unimplemented!("TODO(pg-port): RequestCheckpoint")
+    crate::postmaster::checkpointer::RequestCheckpoint(_flags)
 }
 /// TODO(pg-port): BasicOpenFile lives in storage/fd.c
 unsafe fn BasicOpenFile(_path: *const c_char, _flags: c_int) -> c_int {
-    unimplemented!("TODO(pg-port): BasicOpenFile")
+    crate::storage::file::fd::BasicOpenFile(_path, _flags)
 }
 /// TODO(pg-port): BasicOpenFilePerm lives in storage/fd.c
 unsafe fn BasicOpenFilePerm(_path: *const c_char, _flags: c_int, _mode: u32) -> c_int {
-    unimplemented!("TODO(pg-port): BasicOpenFilePerm")
+    crate::storage::file::fd::BasicOpenFilePerm(_path, _flags, _mode as _)
 }
 /// TODO(pg-port): AllocateFile lives in storage/fd.c
 unsafe fn AllocateFile(_path: *const c_char, _mode: *const c_char) -> *mut c_void {
-    unimplemented!("TODO(pg-port): AllocateFile")
+    crate::storage::file::fd::AllocateFile(_path, _mode)
 }
 /// TODO(pg-port): FreeFile lives in storage/fd.c
 unsafe fn FreeFile(_file: *mut c_void) -> c_int {
-    unimplemented!("TODO(pg-port): FreeFile")
+    crate::storage::file::fd::FreeFile(_file)
 }
 /// TODO(pg-port): AllocateDir lives in storage/fd.c
 unsafe fn AllocateDir(_path: *const c_char) -> *mut c_void {
@@ -805,27 +802,25 @@ pub struct dirent {
 }
 /// TODO(pg-port): durable_rename lives in storage/fd.c
 unsafe fn durable_rename(_oldpath: *const c_char, _newpath: *const c_char, _elevel: c_int) -> c_int {
-    unimplemented!("TODO(pg-port): durable_rename")
+    crate::storage::file::fd::durable_rename(_oldpath, _newpath, _elevel)
 }
 /// TODO(pg-port): pg_fsync lives in storage/fd.c
 unsafe fn pg_fsync(_fd: c_int) -> c_int {
-    unimplemented!("TODO(pg-port): pg_fsync")
+    crate::storage::file::fd::pg_fsync(_fd)
 }
 /// TODO(pg-port): pg_pread lives in port.h
 unsafe fn pg_pread(_fd: c_int, _buf: *mut c_void, _size: usize, _offset: i64) -> isize {
-    unimplemented!("TODO(pg-port): pg_pread")
+    libc::pread(_fd, _buf, _size, _offset)
 }
 /// TODO(pg-port): get_dirent_type lives in common/file_utils.h
 unsafe fn get_dirent_type(_path: *const c_char, _de: *mut dirent, _look_through_symlinks: bool, _elevel: c_int) -> c_int {
     unimplemented!("TODO(pg-port): get_dirent_type")
 }
 /// TODO(pg-port): remove_tablespace_symlink lives in commands/tablespace.c
-unsafe fn remove_tablespace_symlink(_linkloc: *const c_char) {
-    unimplemented!("TODO(pg-port): remove_tablespace_symlink")
-}
+unsafe fn remove_tablespace_symlink(_linkloc: *const c_char) { crate::commands::tablespace::remove_tablespace_symlink(_linkloc as _) }
 /// TODO(pg-port): IsBootstrapProcessingMode lives in miscadmin.h
 unsafe fn IsBootstrapProcessingMode() -> bool {
-    unimplemented!("TODO(pg-port): IsBootstrapProcessingMode")
+    crate::miscadmin::IsBootstrapProcessingMode()
 }
 /// TODO(pg-port): IsUnderPostmaster lives in miscadmin.h
 pub static mut IsUnderPostmaster: bool = false;
@@ -856,23 +851,21 @@ pub static mut wal_retrieve_retry_interval: c_int = 5000;
 
 /// TODO(pg-port): disable_startup_progress_timeout lives in postmaster/startup.c
 unsafe fn disable_startup_progress_timeout() {
-    unimplemented!("TODO(pg-port): disable_startup_progress_timeout")
+    crate::postmaster::startup::disable_startup_progress_timeout()
 }
 /// TODO(pg-port): begin_startup_progress_phase lives in postmaster/startup.c
 unsafe fn begin_startup_progress_phase() {
-    unimplemented!("TODO(pg-port): begin_startup_progress_phase")
+    crate::postmaster::startup::begin_startup_progress_phase()
 }
 /// TODO(pg-port): SendPostmasterSignal lives in storage/pmsignal.h
-unsafe fn SendPostmasterSignal(_signal: c_int) {
-    unimplemented!("TODO(pg-port): SendPostmasterSignal")
-}
+unsafe fn SendPostmasterSignal(_signal: c_int) { crate::storage::ipc::pmsignal::SendPostmasterSignal(_signal as _) }
 /// TODO(pg-port): PMSIGNAL_RECOVERY_STARTED etc
 pub const PMSIGNAL_RECOVERY_STARTED: c_int = 5;
 pub const PMSIGNAL_RECOVERY_CONSISTENT: c_int = 6;
 pub const PMSIGNAL_BEGIN_HOT_STANDBY: c_int = 7;
 /// TODO(pg-port): ProcessStartupProcInterrupts lives in postmaster/startup.c
 unsafe fn ProcessStartupProcInterrupts() {
-    unimplemented!("TODO(pg-port): ProcessStartupProcInterrupts")
+    crate::postmaster::startup::ProcessStartupProcInterrupts()
 }
 /// TODO(pg-port): RmgrStartup lives in access/rmgr.c
 unsafe fn RmgrStartup() {
@@ -883,9 +876,7 @@ unsafe fn RmgrCleanup() {
     unimplemented!("TODO(pg-port): RmgrCleanup")
 }
 /// TODO(pg-port): GetRmgr lives in access/rmgr.c
-unsafe fn GetRmgr(_rmid: u8) -> RmgrData {
-    unimplemented!("TODO(pg-port): GetRmgr")
-}
+unsafe fn GetRmgr(_rmid: u8) -> RmgrData { unimplemented!() }
 /// TODO(pg-port): RmgrData lives in access/rmgr.h
 #[repr(C)]
 pub struct RmgrData {
@@ -897,15 +888,15 @@ pub struct RmgrData {
 }
 /// TODO(pg-port): AdvanceNextFullTransactionIdPastXid lives in access/transam/varsup.c
 unsafe fn AdvanceNextFullTransactionIdPastXid(_xid: TransactionId) {
-    unimplemented!("TODO(pg-port): AdvanceNextFullTransactionIdPastXid")
+    crate::access::transam::varsup::AdvanceNextFullTransactionIdPastXid(_xid)
 }
 /// TODO(pg-port): RecordKnownAssignedTransactionIds lives in storage/procarray.c
 unsafe fn RecordKnownAssignedTransactionIds(_xid: TransactionId) {
-    unimplemented!("TODO(pg-port): RecordKnownAssignedTransactionIds")
+    crate::storage::ipc::procarray::RecordKnownAssignedTransactionIds(_xid)
 }
 /// TODO(pg-port): KnownAssignedTransactionIdsIdleMaintenance lives in storage/procarray.c
 unsafe fn KnownAssignedTransactionIdsIdleMaintenance() {
-    unimplemented!("TODO(pg-port): KnownAssignedTransactionIdsIdleMaintenance")
+    crate::storage::ipc::procarray::KnownAssignedTransactionIdsIdleMaintenance()
 }
 /// TODO(pg-port): AllowCascadeReplication lives in replication/walsender.c
 unsafe fn AllowCascadeReplication() -> bool {
@@ -913,19 +904,19 @@ unsafe fn AllowCascadeReplication() -> bool {
 }
 /// TODO(pg-port): WalSndWakeup lives in replication/walsender.c
 unsafe fn WalSndWakeup(_tliswitch: bool, _logical: bool) {
-    unimplemented!("TODO(pg-port): WalSndWakeup")
+    crate::replication::walsender::WalSndWakeup(_tliswitch, _logical)
 }
 /// TODO(pg-port): WalRcvForceReply lives in replication/walreceiver.c
 unsafe fn WalRcvForceReply() {
-    unimplemented!("TODO(pg-port): WalRcvForceReply")
+    crate::replication::walreceiver::WalRcvForceReply()
 }
 /// TODO(pg-port): WalRcvRunning lives in replication/walreceiver.c
 unsafe fn WalRcvRunning() -> bool {
-    unimplemented!("TODO(pg-port): WalRcvRunning")
+    crate::replication::walreceiverfuncs::WalRcvRunning()
 }
 /// TODO(pg-port): WalRcvStreaming lives in replication/walreceiver.c
 unsafe fn WalRcvStreaming() -> bool {
-    unimplemented!("TODO(pg-port): WalRcvStreaming")
+    crate::replication::walreceiverfuncs::WalRcvStreaming()
 }
 /// TODO(pg-port): GetWalRcvFlushRecPtr lives in replication/walreceiver.c
 unsafe fn GetWalRcvFlushRecPtr(_latestChunkStart: *mut XLogRecPtr, _tli: *mut TimeLineID) -> XLogRecPtr {
@@ -936,33 +927,21 @@ unsafe fn RequestXLogStreaming(_tli: TimeLineID, _ptr: XLogRecPtr, _conninfo: *c
     unimplemented!("TODO(pg-port): RequestXLogStreaming")
 }
 /// TODO(pg-port): SetInstallXLogFileSegmentActive lives in replication/walreceiver.c
-unsafe fn SetInstallXLogFileSegmentActive() {
-    unimplemented!("TODO(pg-port): SetInstallXLogFileSegmentActive")
-}
+unsafe fn SetInstallXLogFileSegmentActive() { crate::access::transam::xlog::SetInstallXLogFileSegmentActive() }
 /// TODO(pg-port): ResetInstallXLogFileSegmentActive lives in replication/walreceiver.c
-unsafe fn ResetInstallXLogFileSegmentActive() {
-    unimplemented!("TODO(pg-port): ResetInstallXLogFileSegmentActive")
-}
+unsafe fn ResetInstallXLogFileSegmentActive() { crate::access::transam::xlog::ResetInstallXLogFileSegmentActive() }
 /// TODO(pg-port): IsInstallXLogFileSegmentActive lives in replication/walreceiver.c
-unsafe fn IsInstallXLogFileSegmentActive() -> bool {
-    unimplemented!("TODO(pg-port): IsInstallXLogFileSegmentActive")
-}
+unsafe fn IsInstallXLogFileSegmentActive() -> bool { crate::access::transam::xlog::IsInstallXLogFileSegmentActive() }
 /// TODO(pg-port): ShutDownSlotSync lives in replication/slotsync.c
 unsafe fn ShutDownSlotSync() {
-    unimplemented!("TODO(pg-port): ShutDownSlotSync")
+    // No slot-sync worker runs on a primary during bring-up; nothing to stop.
 }
 /// TODO(pg-port): ReachedEndOfBackup lives in access/xlog.c
-unsafe fn ReachedEndOfBackup(_endRecPtr: XLogRecPtr, _tli: TimeLineID) {
-    unimplemented!("TODO(pg-port): ReachedEndOfBackup")
-}
+unsafe fn ReachedEndOfBackup(_endRecPtr: XLogRecPtr, _tli: TimeLineID) { crate::access::transam::xlog::ReachedEndOfBackup(_endRecPtr as _, _tli as _) }
 /// TODO(pg-port): RemoveNonParentXlogFiles lives in access/xlog.c
-unsafe fn RemoveNonParentXlogFiles(_switchpoint: XLogRecPtr, _newTLI: TimeLineID) {
-    unimplemented!("TODO(pg-port): RemoveNonParentXlogFiles")
-}
+unsafe fn RemoveNonParentXlogFiles(_switchpoint: XLogRecPtr, _newTLI: TimeLineID) { crate::access::transam::xlog::RemoveNonParentXlogFiles(_switchpoint as _, _newTLI as _) }
 /// TODO(pg-port): XLogCheckInvalidPages lives in access/xlog.c
-unsafe fn XLogCheckInvalidPages() {
-    unimplemented!("TODO(pg-port): XLogCheckInvalidPages")
-}
+unsafe fn XLogCheckInvalidPages() { crate::access::transam::xlogutils::XLogCheckInvalidPages() }
 /// TODO(pg-port): XReadBufferExtended lives in access/xlogutils.c
 unsafe fn XLogReadBufferExtended(
     _rlocator: RelFileLocator,
@@ -978,9 +957,7 @@ unsafe fn BufferGetPage(_buf: c_int) -> *mut c_void {
     unimplemented!("TODO(pg-port): BufferGetPage")
 }
 /// TODO(pg-port): PageGetLSN lives in storage/bufpage.h
-unsafe fn PageGetLSN(_page: *mut c_void) -> XLogRecPtr {
-    unimplemented!("TODO(pg-port): PageGetLSN")
-}
+unsafe fn PageGetLSN(_page: *mut c_void) -> XLogRecPtr { crate::storage::bufpage::PageGetLSN(_page as _) }
 /// TODO(pg-port): LockBuffer lives in storage/buffer/bufmgr.c
 unsafe fn LockBuffer(_buf: c_int, _mode: c_int) {
     unimplemented!("TODO(pg-port): LockBuffer")
@@ -990,24 +967,22 @@ unsafe fn UnlockReleaseBuffer(_buf: c_int) {
     unimplemented!("TODO(pg-port): UnlockReleaseBuffer")
 }
 /// TODO(pg-port): BufferIsValid lives in storage/buf.h
-unsafe fn BufferIsValid(_buf: c_int) -> bool {
-    unimplemented!("TODO(pg-port): BufferIsValid")
-}
+unsafe fn BufferIsValid(_buf: c_int) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buf as _) }
 /// TODO(pg-port): AmStartupProcess lives in miscadmin.h
 unsafe fn AmStartupProcess() -> bool {
-    unimplemented!("TODO(pg-port): AmStartupProcess")
+    crate::miscadmin::AmStartupProcess()
 }
 /// TODO(pg-port): GetCurrentTimestamp lives in utils/timestamp.c
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!("TODO(pg-port): GetCurrentTimestamp")
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 /// TODO(pg-port): timestamptz_to_str lives in utils/timestamp.c
 unsafe fn timestamptz_to_str(_t: TimestampTz) -> *const c_char {
-    unimplemented!("TODO(pg-port): timestamptz_to_str")
+    crate::utils::adt::timestamp::timestamptz_to_str(_t)
 }
 /// TODO(pg-port): TimestampDifferenceExceeds lives in utils/timestamp.c
 unsafe fn TimestampDifferenceExceeds(_t1: TimestampTz, _t2: TimestampTz, _msec: c_int) -> bool {
-    unimplemented!("TODO(pg-port): TimestampDifferenceExceeds")
+    crate::utils::adt::timestamp::TimestampDifferenceExceeds(_t1, _t2, _msec)
 }
 /// TODO(pg-port): TimestampTzPlusMilliseconds lives in utils/timestamp.c
 unsafe fn TimestampTzPlusMilliseconds(ts: TimestampTz, ms: i64) -> TimestampTz {
@@ -1015,7 +990,7 @@ unsafe fn TimestampTzPlusMilliseconds(ts: TimestampTz, ms: i64) -> TimestampTz {
 }
 /// TODO(pg-port): TimestampDifferenceMilliseconds lives in utils/timestamp.c
 unsafe fn TimestampDifferenceMilliseconds(_start: TimestampTz, _stop: TimestampTz) -> i64 {
-    unimplemented!("TODO(pg-port): TimestampDifferenceMilliseconds")
+    crate::utils::adt::timestamp::TimestampDifferenceMilliseconds(_start, _stop)
 }
 /// TODO(pg-port): DirectFunctionCall3 lives in utils/fmgr.c
 unsafe fn DirectFunctionCall3(_f: unsafe fn(), _a1: u64, _a2: u64, _a3: u64) -> u64 {
@@ -1030,13 +1005,9 @@ pub const InvalidOid: Oid = 0;
 /// TODO(pg-port): DatumGetTimestampTz
 #[inline] fn DatumGetTimestampTz(d: u64) -> TimestampTz { d as TimestampTz }
 /// TODO(pg-port): pg_lsn_in_internal lives in utils/adt/pg_lsn.c
-unsafe fn pg_lsn_in_internal(_s: *const c_char, _have_error: *mut bool) -> XLogRecPtr {
-    unimplemented!("TODO(pg-port): pg_lsn_in_internal")
-}
+unsafe fn pg_lsn_in_internal(_s: *const c_char, _have_error: *mut bool) -> XLogRecPtr { crate::utils::adt::pg_lsn::pg_lsn_in_internal(_s as _, _have_error as _) }
 /// TODO(pg-port): guc_malloc lives in utils/guc.c
-unsafe fn guc_malloc(_elevel: c_int, _size: Size) -> *mut c_void {
-    unimplemented!("TODO(pg-port): guc_malloc")
-}
+unsafe fn guc_malloc(_elevel: c_int, _size: Size) -> *mut c_void { crate::utils::misc::guc::guc_malloc(_elevel as _, _size as _) }
 /// TODO(pg-port): GUC_check_errcode etc - from utils/guc.h
 unsafe fn GUC_check_errcode(_sqlerrcode: c_int) {}
 unsafe fn GUC_check_errdetail(_fmt: *const c_char) {}
@@ -1056,22 +1027,22 @@ unsafe fn strtoul_wrapper(_s: *const c_char, _end: *mut *mut c_char, _base: c_in
 }
 /// TODO(pg-port): strlcpy lives in port/strlcpy.c
 unsafe fn strlcpy(_dst: *mut c_char, _src: *const c_char, _size: usize) -> usize {
-    unimplemented!("TODO(pg-port): strlcpy")
+    crate::port::strlcpy::strlcpy(_dst, _src, _size)
 }
 /// TODO(pg-port): strspn, strlen - libc
 unsafe fn c_strspn(_s: *const c_char, _accept: *const c_char) -> usize {
-    unimplemented!("TODO(pg-port): strspn")
+    libc::strspn(_s, _accept)
 }
 unsafe fn c_strlen(_s: *const c_char) -> usize {
-    unimplemented!("TODO(pg-port): strlen")
+    libc::strlen(_s)
 }
 /// TODO(pg-port): set_ps_display lives in utils/ps_status.c
 unsafe fn set_ps_display(_activity: *const c_char) {
-    unimplemented!("TODO(pg-port): set_ps_display")
+    crate::utils::misc::ps_status::set_ps_display(_activity)
 }
 /// TODO(pg-port): proc_exit lives in storage/ipc.c
 unsafe fn proc_exit(_code: c_int) -> ! {
-    unimplemented!("TODO(pg-port): proc_exit")
+    crate::storage::ipc::ipc::proc_exit(_code)
 }
 /// TODO(pg-port): pg_rusage_init, pg_rusage_show lives in utils/pg_rusage.c
 #[repr(C)] pub struct PGRUsage { _data: [u8; 128] }
@@ -1099,6 +1070,7 @@ unsafe fn ParseAbortRecord(_info: u8, _xlrec: *mut xl_xact_abort, _parsed: *mut 
     pub end_time: pg_time_t,
     pub ThisTimeLineID: TimeLineID,
     pub PrevTimeLineID: TimeLineID,
+    pub wal_level: c_int,
 }
 /// TODO(pg-port): xl_overwrite_contrecord lives in access/xlog.h
 #[repr(C)] pub struct xl_overwrite_contrecord {
@@ -1176,23 +1148,28 @@ unsafe fn set_errno(v: i32) { *libc_errno() = v; }
 extern "C" { fn __error() -> *mut c_int; }
 #[inline] unsafe fn libc_errno() -> *mut i32 { __error() as *mut i32 }
 /// TODO(pg-port): ferror, fgetc, fscanf, fclose - libc stdio
-unsafe fn c_ferror(_f: *mut c_void) -> c_int { unimplemented!() }
-unsafe fn c_fgetc(_f: *mut c_void) -> c_int { unimplemented!() }
+unsafe fn c_ferror(_f: *mut c_void) -> c_int { libc::ferror(_f as *mut libc::FILE) }
+unsafe fn c_fgetc(_f: *mut c_void) -> c_int { libc::fgetc(_f as *mut libc::FILE) }
 const EOF: c_int = -1;
 /// TODO(pg-port): snprintf/unlink - libc
 unsafe fn c_snprintf(_s: *mut c_char, _n: usize, _fmt: *const c_char) {}
-unsafe fn c_unlink(_path: *const c_char) -> c_int { unimplemented!() }
-unsafe fn c_symlink(_target: *const c_char, _linkpath: *const c_char) -> c_int { unimplemented!() }
-unsafe fn c_stat(_path: *const c_char, _buf: *mut StatBuf) -> c_int { unimplemented!() }
-unsafe fn c_close(_fd: c_int) -> c_int { unimplemented!() }
+unsafe fn c_unlink(_path: *const c_char) -> c_int { libc::unlink(_path) }
+unsafe fn c_symlink(_target: *const c_char, _linkpath: *const c_char) -> c_int { libc::symlink(_target, _linkpath) }
+unsafe fn c_stat(_path: *const c_char, _buf: *mut StatBuf) -> c_int {
+    let mut st: libc::stat = core::mem::zeroed();
+    let r = libc::stat(_path, &mut st);
+    if r == 0 { (*_buf).st_size = st.st_size as i64; }
+    r
+}
+unsafe fn c_close(_fd: c_int) -> c_int { libc::close(_fd) }
 /// TODO(pg-port): stat struct
 #[repr(C)] pub struct StatBuf { pub st_size: i64 }
 /// TODO(pg-port): errcontext, error_context_stack from elog.h
 #[repr(C)]
 pub struct ErrorContextCallback {
+    pub previous: *mut ErrorContextCallback,
     pub callback: unsafe fn(*mut c_void),
     pub arg: *mut c_void,
-    pub previous: *mut ErrorContextCallback,
 }
 pub static mut error_context_stack: *mut ErrorContextCallback = null_mut();
 /// TODO(pg-port): TransactionIdIsNormal, TransactionIdIsValid from access/transam.h
@@ -1203,8 +1180,8 @@ pub static mut error_context_stack: *mut ErrorContextCallback = null_mut();
 /// TODO(pg-port): U64FromFullTransactionId
 #[inline] fn U64FromFullTransactionId(x: FullTransactionId) -> u64 { x }
 /// TODO(pg-port): IsPromoteSignaled, ResetPromoteSignaled from postmaster/startup.c
-unsafe fn IsPromoteSignaled() -> bool { unimplemented!() }
-unsafe fn ResetPromoteSignaled() { unimplemented!() }
+unsafe fn IsPromoteSignaled() -> bool { crate::postmaster::startup::IsPromoteSignaled() }
+unsafe fn ResetPromoteSignaled() { crate::postmaster::startup::ResetPromoteSignaled() }
 /// TODO(pg-port): CheckPromoteSignal, RemovePromoteSignalFiles declared later
 /// TODO(pg-port): ereport_startup_progress
 unsafe fn ereport_startup_progress(_fmt: *const c_char) {}
@@ -1778,7 +1755,7 @@ pub unsafe fn InitWalRecovery(
 }
 
 // trampoline so we can take address of XLogPageRead with the right signature
-unsafe extern "C" fn XLogPageRead_trampoline(
+unsafe fn XLogPageRead_trampoline(
     xlogreader_arg: *mut XLogReaderState,
     targetPagePtr: XLogRecPtr,
     reqLen: c_int,
@@ -3699,9 +3676,7 @@ unsafe fn DecodeDateTime(
 }
 unsafe fn tm2timestamp(
     _tm: *mut pg_tm, _fsec: fsec_t, _tz: *mut c_int, _result: *mut TimestampTz,
-) -> c_int {
-    unimplemented!("TODO(pg-port): tm2timestamp")
-}
+) -> c_int { crate::utils::adt::timestamp::tm2timestamp(_tm as _, _fsec as _, _tz as _, _result as _) }
 
 /*
  * Read the XLOG page containing targetPagePtr into readBuf (if not read
@@ -5487,14 +5462,14 @@ unsafe fn libc_strcmp(s1: *const c_char, s2: *const c_char) -> c_int {
 
 /// TODO(pg-port): strtoul libc wrapper
 unsafe fn libc_strtoul(s: *const c_char, endptr: *mut *mut c_char, base: c_int) -> u64 {
-    unimplemented!("TODO(pg-port): strtoul")
+    libc::strtoul(s, endptr, base) as u64
 }
 
 /// TODO(pg-port): snprintf libc wrapper (one-arg form)
 unsafe fn libc_snprintf(_buf: *mut c_char, _size: usize, _fmt: *const c_char) -> c_int {
-    unimplemented!("TODO(pg-port): snprintf")
+    libc::snprintf(_buf, _size, _fmt)
 }
 /// TODO(pg-port): snprintf libc wrapper (two-arg form)
 unsafe fn libc_snprintf2(_buf: *mut c_char, _size: usize, _fmt: *const c_char, _arg: *const c_char) -> c_int {
-    unimplemented!("TODO(pg-port): snprintf2")
+    libc::snprintf(_buf, _size, _fmt, _arg)
 }

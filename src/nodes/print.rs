@@ -28,22 +28,22 @@ use crate::{appendStringInfo, Assert};
 
 // nodes/nodeFuncs.c
 unsafe fn nodeToStringWithLocations(_obj: *const c_void) -> *mut c_char {
-    unimplemented!()
+    crate::nodes::outfuncs::nodeToStringWithLocations(_obj)
 }
 
 // utils/cache/lsyscache.c
 unsafe fn getTypeOutputInfo(_type: Oid, _typOutput: *mut Oid, _typIsVarlena: *mut bool) {
-    unimplemented!()
+    crate::utils::cache::lsyscache::getTypeOutputInfo(_type, _typOutput, _typIsVarlena)
 }
 unsafe fn get_opname(_opno: Oid) -> *mut c_char {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_opname(_opno)
 }
 unsafe fn get_func_name(_funcid: Oid) -> *mut c_char {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_func_name(_funcid)
 }
 
 // optimizer/util/clauses.c (get_leftop/get_rightop from nodeFuncs.h)
-unsafe fn get_leftop(clause: *const Expr) -> *mut Node {
+pub unsafe fn get_leftop(clause: *const Expr) -> *mut Node {
     let op = clause as *const OpExpr;
     if !(*op).args.is_null() {
         lfirst(crate::nodes::pg_list::list_nth_cell((*op).args, 0)) as *mut Node
@@ -51,7 +51,7 @@ unsafe fn get_leftop(clause: *const Expr) -> *mut Node {
         null_mut()
     }
 }
-unsafe fn get_rightop(clause: *const Expr) -> *mut Node {
+pub unsafe fn get_rightop(clause: *const Expr) -> *mut Node {
     let op = clause as *const OpExpr;
     if list_length((*op).args) >= 2 {
         lfirst(crate::nodes::pg_list::list_nth_cell((*op).args, 1)) as *mut Node

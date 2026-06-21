@@ -953,17 +953,17 @@ unsafe fn _jumbleRangeTblEntry_eref(
 // ---------------------------------------------------------------------------
 
 unsafe fn scanner_isspace(_ch: c_char) -> bool {
-    unimplemented!() // TODO: src/backend/parser/scansup.c
+    crate::parser::scansup::scanner_isspace(_ch)
 }
 
 unsafe fn hash_any_extended(_k: *const std::ffi::c_uchar, _keylen: Size, _seed: u64) -> Datum {
-    unimplemented!() // TODO: src/common/hashfn.c
+    crate::common::hashfn::hash_any_extended(_k as _, _keylen as _, _seed)
 }
 
 unsafe fn check_stack_depth() {
-    unimplemented!() // TODO: src/backend/tcop/postgres.c
+    crate::utils::misc::stack_depth::check_stack_depth()
 }
 
 unsafe fn stack_is_too_deep() -> bool {
-    unimplemented!() // TODO: src/backend/tcop/postgres.c
+    crate::utils::misc::stack_depth::stack_is_too_deep()
 }

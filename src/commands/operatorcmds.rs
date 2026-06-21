@@ -73,7 +73,7 @@ const FirstGenbkiObjectId: Oid = 10000;
 const RowExclusiveLock: c_int = 3;
 const NoLock: c_int = 0;
 
-const OPEROID: c_int = 0; // syscache id
+const OPEROID: c_int = 40; // syscache id
 
 const Natts_pg_operator: usize = 14;
 const Anum_pg_operator_oprrest: c_int = 12;
@@ -93,9 +93,7 @@ unsafe fn QualifiedNameGetCreationNamespace(names: *mut List, objname_p: *mut *m
 unsafe fn object_aclcheck(classid: Oid, objectid: Oid, roleid: Oid, mode: u32) -> AclResult {
     unimplemented!() // TODO: catalog/aclchk.c
 }
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn aclcheck_error(aclerr: AclResult, objtype: c_int, objname: *const c_char) {
     unimplemented!() // TODO: catalog/aclchk.c
 }

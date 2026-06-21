@@ -74,8 +74,7 @@ extern "C" {
 struct PGPROC {
     wait_event_info: u32,
 }
-static mut MyProc: *mut PGPROC = null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 // TODO(pg-port): real connection-time counters live in
 // utils/activity/pgstat_database.c (pgstat_count_conn_active_time /
 // pgstat_count_conn_txn_idle_time). Stubbed as no-ops for now.

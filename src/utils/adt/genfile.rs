@@ -98,7 +98,7 @@ const ROLE_PG_READ_SERVER_FILES: Oid = 4569;
 
 // Tablespace OIDs / syscache id (catalog/pg_tablespace_d, utils/syscache)
 const DEFAULTTABLESPACE_OID: Oid = 1663;
-const TABLESPACEOID: c_int = 0; // TODO: utils/syscache cache id
+const TABLESPACEOID: c_int = 69; // TODO: utils/syscache cache id
 
 // WAL / dir path constants (access/xlog_internal, replication/slot, postmaster/syslogger)
 const XLOGDIR: &str = "pg_wal";
@@ -125,9 +125,7 @@ unsafe fn canonicalize_path(_path: *mut c_char) {
 unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool {
     unimplemented!() // TODO: utils/adt/acl.c
 }
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn is_absolute_path(_path: *const c_char) -> bool {
     unimplemented!() // TODO: port/path.c
 }

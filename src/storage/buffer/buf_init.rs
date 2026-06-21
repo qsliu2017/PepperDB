@@ -34,8 +34,7 @@ pub static mut BufferBlocks: *mut c_char = null_mut();
 /// shared memory of `size` bytes, setting `*foundPtr`.
 // TODO: not ported (shmem.c). Local stub.
 unsafe fn ShmemInitStruct(name: *const c_char, size: Size, foundPtr: *mut bool) -> *mut c_void {
-    let _ = (name, size, foundPtr);
-    unimplemented!()
+    crate::storage::ipc::shmem::ShmemInitStruct(name, size, foundPtr)
 }
 
 /// storage/shmem.h add_size(): overflow-checked addition of shared sizes.
@@ -74,22 +73,19 @@ unsafe fn pg_atomic_init_u32(ptr: *mut pg_atomic_uint32, val: uint32) {
 /// storage/aio.h pgaio_wref_clear(): mark an AIO wait reference as not in use.
 // TODO: not ported (aio.c). Local stub.
 unsafe fn pgaio_wref_clear(iow: *mut PgAioWaitRef) {
-    let _ = iow;
-    unimplemented!()
+    crate::storage::aio::aio::pgaio_wref_clear(iow as _)
 }
 
 /// storage/lwlock.h LWLockInitialize(): initialize an LWLock in a tranche.
 // TODO: not ported (lwlock.c). Local stub.
 unsafe fn LWLockInitialize(lock: *mut LWLock, tranche_id: c_int) {
-    let _ = (lock, tranche_id);
-    unimplemented!()
+    crate::storage::lmgr::lwlock::LWLockInitialize(lock as _, tranche_id)
 }
 
 /// storage/condition_variable.h ConditionVariableInit().
 // TODO: not ported (condition_variable.c). Local stub.
 unsafe fn ConditionVariableInit(cv: *mut ConditionVariable) {
-    let _ = cv;
-    unimplemented!()
+    crate::storage::lmgr::condition_variable::ConditionVariableInit(cv as _)
 }
 
 /// storage/procnumber.h INVALID_PROC_NUMBER.

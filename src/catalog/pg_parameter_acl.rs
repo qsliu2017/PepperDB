@@ -67,7 +67,7 @@ const Natts_pg_parameter_acl: usize = 3;
 const ParameterAclOidIndexId: Oid = 6247;
 
 // utils/syscache.h syscache id (PARAMETERACLNAME).  TODO(pg-port).
-const PARAMETERACLNAME: c_int = 110;
+const PARAMETERACLNAME: c_int = 43;
 
 const RowExclusiveLock: c_int = 3;
 const NoLock: c_int = 0;

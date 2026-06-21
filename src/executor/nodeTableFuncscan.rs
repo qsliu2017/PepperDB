@@ -662,7 +662,7 @@ unsafe fn ExecEvalExpr(
     _econtext: *mut ExprContext,
     _isNull: *mut bool,
 ) -> Datum {
-    unimplemented!() // TODO: executor/execExprInterp.c
+    crate::executor::executor::ExecEvalExpr(_state as _, _econtext as _, _isNull as _) as _
 }
 
 /* parse_type.c / lsyscache.c: getTypeInputInfo() */
@@ -676,7 +676,7 @@ unsafe fn tuplestore_begin_heap(
     _interXact: bool,
     _maxKBytes: c_int,
 ) -> *mut Tuplestorestate {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_begin_heap(_randomAccess as _, _interXact as _, _maxKBytes as _) as _
 }
 
 /* utils/sort/tuplestore.c: tuplestore_gettupleslot() */
@@ -686,7 +686,7 @@ unsafe fn tuplestore_gettupleslot(
     _copy: bool,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_gettupleslot(_state as _, _forward as _, _copy as _, _slot as _) as _
 }
 
 /* utils/sort/tuplestore.c: tuplestore_putvalues() */
@@ -696,17 +696,17 @@ unsafe fn tuplestore_putvalues(
     _values: *mut Datum,
     _isnull: *mut bool,
 ) {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_putvalues(_state as _, _tdesc as _, _values as _, _isnull as _)
 }
 
 /* utils/sort/tuplestore.c: tuplestore_end() */
 unsafe fn tuplestore_end(_state: *mut Tuplestorestate) {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_end(_state as _)
 }
 
 /* utils/sort/tuplestore.c: tuplestore_rescan() */
 unsafe fn tuplestore_rescan(_state: *mut Tuplestorestate) {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_rescan(_state as _)
 }
 
 /* helper: render a NUL-terminated C string for ereport formatting */

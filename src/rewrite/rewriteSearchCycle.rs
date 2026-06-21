@@ -810,19 +810,19 @@ unsafe fn rt_fetch(rangetable_index: c_int, rangetable: *mut List) -> *mut Range
 }
 
 unsafe fn list_nth_oid(list: *const List, n: c_int) -> Oid {
-    unimplemented!() // TODO: nodes/pg_list.c
+    crate::nodes::pg_list::list_nth_oid(list as _, n)
 }
 
 unsafe fn list_nth_int(list: *const List, n: c_int) -> c_int {
-    unimplemented!() // TODO: nodes/pg_list.c
+    crate::nodes::pg_list::list_nth_int(list as _, n)
 }
 
 unsafe fn lappend_oid(list: *mut List, datum: Oid) -> *mut List {
-    unimplemented!() // TODO: nodes/list.c
+    crate::nodes::list::lappend_oid(list as _, datum) as _
 }
 
 unsafe fn lappend_int(list: *mut List, datum: c_int) -> *mut List {
-    unimplemented!() // TODO: nodes/list.c
+    crate::nodes::list::lappend_int(list as _, datum) as _
 }
 
 unsafe fn makeVar(
@@ -833,7 +833,7 @@ unsafe fn makeVar(
     varcollid: Oid,
     varlevelsup: u32,
 ) -> *mut Var {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeVar(varno, varattno, vartype, vartypmod, varcollid, varlevelsup as _) as _
 }
 
 unsafe fn makeConst(
@@ -845,7 +845,7 @@ unsafe fn makeConst(
     constisnull: bool,
     constbyval: bool,
 ) -> *mut crate::nodes::primnodes::Const {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeConst(consttype, consttypmod, constcollid, constlen, constvalue, constisnull, constbyval) as _
 }
 
 unsafe fn makeTargetEntry(
@@ -854,7 +854,7 @@ unsafe fn makeTargetEntry(
     resname: *mut c_char,
     resjunk: bool,
 ) -> *mut TargetEntry {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeTargetEntry(expr as _, resno, resname as _, resjunk) as _
 }
 
 unsafe fn makeFuncExpr(
@@ -865,19 +865,19 @@ unsafe fn makeFuncExpr(
     inputcollid: Oid,
     fformat: crate::nodes::primnodes::CoercionForm,
 ) -> *mut FuncExpr {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeFuncExpr(funcid, rettype, args as _, funccollid, inputcollid, fformat) as _
 }
 
 unsafe fn makeAlias(aliasname: *const c_char, colnames: *mut List) -> *mut crate::nodes::primnodes::Alias {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeAlias(aliasname as _, colnames as _) as _
 }
 
 unsafe fn makeString(s: *mut c_char) -> *mut crate::nodes::value::String {
-    unimplemented!() // TODO: nodes/value.c
+    crate::nodes::value::makeString(s as _) as _
 }
 
 unsafe fn makeFromExpr(fromlist: *mut List, quals: *mut Node) -> *mut crate::nodes::primnodes::FromExpr {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeFromExpr(fromlist as _, quals as _) as _
 }
 
 unsafe fn make_opclause(
@@ -889,18 +889,18 @@ unsafe fn make_opclause(
     opcollid: Oid,
     inputcollid: Oid,
 ) -> *mut Expr {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::make_opclause(opno, opresulttype, opretset, leftop as _, rightop as _, opcollid, inputcollid) as _
 }
 
 unsafe fn makeSortGroupClauseForSetOp(
     rescoltype: Oid,
     require_hash: bool,
 ) -> *mut crate::nodes::parsenodes::SortGroupClause {
-    unimplemented!() // TODO: parser/analyze.c
+    crate::parser::analyze::makeSortGroupClauseForSetOp(rescoltype, require_hash) as _
 }
 
 unsafe fn IncrementVarSublevelsUp(node: *mut Node, delta_sublevels_up: c_int, min_sublevels_up: c_int) {
-    unimplemented!() // TODO: rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::IncrementVarSublevelsUp(node as _, delta_sublevels_up, min_sublevels_up)
 }
 
 unsafe fn copyObject<T>(node: *const T) -> *mut T {

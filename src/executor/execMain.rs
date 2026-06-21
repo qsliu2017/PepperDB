@@ -102,7 +102,6 @@ use crate::executor::executor::{
     ExecInitRangeTable, exec_rt_fetch, ExecGetRangeTableRelation,
     ExecGetResultType, ExecInitExtraTupleSlot,
     ExecInitJunkFilter, ExecFilterJunk,
-    ExecCloseResultRelations, ExecCloseRangeTableRelations,
     ExecOpenIndices, ExecCloseIndices,
     ExecGetInsertedCols, ExecGetUpdatedCols, ExecGetAllUpdatedCols,
     ExecPrepareExpr, ExecPrepareCheck,
@@ -146,7 +145,7 @@ use crate::catalog::catalog::IsInplaceUpdateRelation;
 
 /// TODO(pg-port): real sym lives in pgstat.h
 unsafe fn pgstat_report_query_id(_queryId: u64, _force: bool) {
-    // TODO(pg-port): stub
+    crate::utils::activity::backend_status::pgstat_report_query_id(_queryId as _, _force as _)
 }
 
 /// TODO(pg-port): real sym lives in pgstat.h (PgStat_Counter)
@@ -155,7 +154,7 @@ unsafe fn pgstat_update_parallel_workers_stats(
     _launched: PgStat_Counter,
     _launched2: PgStat_Counter,
 ) {
-    // TODO(pg-port): stub
+    crate::utils::activity::pgstat_database::pgstat_update_parallel_workers_stats(_launched as _, _launched2 as _)
 }
 
 /// TODO(pg-port): access/xact.h
@@ -168,7 +167,7 @@ unsafe fn IsInParallelMode() -> bool {
 
 /// TODO(pg-port): access/xact.h
 unsafe fn GetCurrentCommandId(_force: bool) -> u32 {
-    0 // TODO(pg-port): stub
+    crate::access::transam::xact::GetCurrentCommandId(_force as _) as _
 }
 
 /// TODO(pg-port): utils/snapmgr.h - Snapshot type
@@ -176,42 +175,42 @@ pub type Snapshot = *mut crate::nodes::execnodes::SnapshotData;
 
 /// TODO(pg-port): utils/snapmgr.h
 unsafe fn GetActiveSnapshot() -> Snapshot {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::utils::time::snapmgr::GetActiveSnapshot() as _
 }
 
 /// TODO(pg-port): utils/snapmgr.h
 unsafe fn RegisterSnapshot(_snap: Snapshot) -> Snapshot {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::utils::time::snapmgr::RegisterSnapshot(_snap as _) as _
 }
 
 /// TODO(pg-port): utils/snapmgr.h
 unsafe fn UnregisterSnapshot(_snap: Snapshot) {
-    // TODO(pg-port): stub
+    crate::utils::time::snapmgr::UnregisterSnapshot(_snap as _)
 }
 
 /// TODO(pg-port): commands/trigger.h
+#[no_mangle]
 unsafe fn AfterTriggerBeginQuery() {
     // TODO(pg-port): stub
 }
 
 /// TODO(pg-port): commands/trigger.h
+#[no_mangle]
 unsafe fn AfterTriggerEndQuery(_estate: *mut EState) {
     // TODO(pg-port): stub
 }
 
 /// TODO(pg-port): utils/acl.h
-unsafe fn GetUserId() -> Oid {
-    0 // TODO(pg-port): stub
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 
 /// TODO(pg-port): utils/acl.h / aclchk.c
 unsafe fn pg_class_aclmask(
-    _table_oid: Oid,
-    _roleid: Oid,
-    _mode: AclMode,
-    _how: crate::utils::adt::acl::AclMaskHow,
+    table_oid: Oid,
+    roleid: Oid,
+    mode: AclMode,
+    how: crate::utils::adt::acl::AclMaskHow,
 ) -> AclMode {
-    0 // TODO(pg-port): stub
+    crate::catalog::aclchk::pg_class_aclmask(table_oid, roleid, mode, how)
 }
 
 /// TODO(pg-port): utils/acl.h
@@ -221,7 +220,7 @@ unsafe fn pg_attribute_aclcheck(
     _roleid: Oid,
     _mode: AclMode,
 ) -> AclResult {
-    ACLCHECK_OK // TODO(pg-port): stub
+    crate::catalog::aclchk::pg_attribute_aclcheck(_table_oid as _, _attnum as _, _roleid as _, _mode as _)
 }
 
 /// TODO(pg-port): utils/acl.h
@@ -236,22 +235,22 @@ unsafe fn pg_attribute_aclcheck_all(
 
 /// TODO(pg-port): utils/acl.h
 unsafe fn pg_class_aclcheck(_table_oid: Oid, _roleid: Oid, _mode: AclMode) -> AclResult {
-    ACLCHECK_OK // TODO(pg-port): stub
+    crate::catalog::aclchk::pg_class_aclcheck(_table_oid as _, _roleid as _, _mode as _)
 }
 
 /// TODO(pg-port): utils/lsyscache.h
 unsafe fn get_rel_namespace(_relid: Oid) -> Oid {
-    0 // TODO(pg-port): stub
+    crate::utils::cache::lsyscache::get_rel_namespace(_relid as _) as _
 }
 
 /// TODO(pg-port): utils/lsyscache.h
 unsafe fn get_rel_name(_relid: Oid) -> *mut c_char {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::utils::cache::lsyscache::get_rel_name(_relid as _) as _
 }
 
 /// TODO(pg-port): utils/lsyscache.h
 unsafe fn get_rel_relkind(_relid: Oid) -> c_char {
-    0 // TODO(pg-port): stub
+    crate::utils::cache::lsyscache::get_rel_relkind(_relid as _) as _
 }
 
 /// TODO(pg-port): utils/acl.h
@@ -261,7 +260,7 @@ unsafe fn get_relkind_objtype(_relkind: c_char) -> crate::nodes::parsenodes::Obj
 
 /// TODO(pg-port): catalog/namespace.h
 unsafe fn isTempNamespace(_namespaceId: Oid) -> bool {
-    false // TODO(pg-port): stub
+    crate::catalog::namespace::isTempNamespace(_namespaceId as _) as _
 }
 
 /// TODO(pg-port): tcop/utility.h
@@ -271,17 +270,17 @@ unsafe fn CreateCommandName(_utilityStmt: *mut Node) -> *const c_char {
 
 /// TODO(pg-port): tcop/utility.h
 unsafe fn PreventCommandIfReadOnly(_cmdname: *const c_char) {
-    // TODO(pg-port): stub
+    crate::tcop::utility::PreventCommandIfReadOnly(_cmdname as _)
 }
 
 /// TODO(pg-port): tcop/utility.h
 unsafe fn PreventCommandIfParallelMode(_cmdname: *const c_char) {
-    // TODO(pg-port): stub
+    crate::tcop::utility::PreventCommandIfParallelMode(_cmdname as _)
 }
 
 /// TODO(pg-port): executor/execPartition.h
 unsafe fn ExecDoInitialPruning(_estate: *mut EState) {
-    // TODO(pg-port): stub
+    crate::executor::execPartition::ExecDoInitialPruning(_estate as _)
 }
 
 /// TODO(pg-port): catalog/partition.h
@@ -299,12 +298,12 @@ type FdwRoutine = core::ffi::c_void;
 
 /// TODO(pg-port): foreign/fdwapi.h
 unsafe fn GetFdwRoutineForRelation(_rel: Relation, _needInfo: bool) -> *mut FdwRoutine {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::foreign::foreign::GetFdwRoutineForRelation(_rel as _, _needInfo as _) as _
 }
 
 /// TODO(pg-port): executor/instrument.h
 unsafe fn InstrAlloc(_n: c_int, _instrument_options: c_int, _async_mode: bool) -> *mut core::ffi::c_void {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::executor::instrument::InstrAlloc(_n as _, _instrument_options as _, _async_mode as _) as _
 }
 
 /// TODO(pg-port): access/tableam.h
@@ -312,9 +311,8 @@ unsafe fn table_open(_relid: Oid, _lockmode: c_int) -> Relation {
     core::ptr::null_mut() // TODO(pg-port): stub
 }
 
-/// TODO(pg-port): access/tableam.h
-unsafe fn table_close(_relation: Relation, _lockmode: c_int) {
-    // TODO(pg-port): stub
+unsafe fn table_close(relation: Relation, lockmode: c_int) {
+    crate::access::table::table::table_close(relation, lockmode)
 }
 
 /// TODO(pg-port): access/tableam.h
@@ -322,7 +320,7 @@ unsafe fn table_slot_create(
     _relation: Relation,
     _tuple_table: *mut *mut List,
 ) -> *mut TupleTableSlot {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::access::table::tableam::table_slot_create(_relation as _, _tuple_table as _) as _
 }
 
 /// TODO(pg-port): access/tableam.h
@@ -358,7 +356,7 @@ unsafe fn error_view_not_updatable(
 
 /// TODO(pg-port): commands/matview.h
 unsafe fn MatViewIncrementalMaintenanceIsEnabled() -> bool {
-    false // TODO(pg-port): stub
+    crate::commands::matview::MatViewIncrementalMaintenanceIsEnabled() as _
 }
 
 /// TODO(pg-port): access/reloptions.h
@@ -371,7 +369,7 @@ unsafe fn RelationGetIndexAttrBitmap(
     _relation: Relation,
     _attrKind: c_int,
 ) -> *mut Bitmapset {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    unimplemented!()
 }
 pub const INDEX_ATTR_BITMAP_KEY: c_int = 1;
 
@@ -380,12 +378,12 @@ unsafe fn MakeTupleTableSlot(
     _tupdesc: TupleDesc,
     _tts_ops: *const crate::executor::tuptable::TupleTableSlotOps,
 ) -> *mut TupleTableSlot {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::executor::execTuples::MakeTupleTableSlot(_tupdesc as _, _tts_ops as _) as _
 }
 
 /// TODO(pg-port): executor/execUtils.h
 unsafe fn ExecStoreHeapTupleDatum(_datum: Datum, _slot: *mut TupleTableSlot) {
-    // TODO(pg-port): stub
+    crate::executor::execTuples::ExecStoreHeapTupleDatum(_datum as _, _slot as _)
 }
 
 /// TODO(pg-port): catalog/pg_constraint.h - ConstrCheck type
@@ -413,12 +411,12 @@ pub const IS_NOT_NULL: c_int = 1;
 
 /// TODO(pg-port): nodes/parsenodes.h - build_generation_expression
 unsafe fn build_generation_expression(_rel: Relation, _attnum: AttrNumber) -> *mut Node {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::rewrite::rewriteHandler::build_generation_expression(_rel as _, _attnum as _) as _
 }
 
 /// TODO(pg-port): parser/parse_relation.h - stringToNode
 unsafe fn stringToNode(_str: *mut c_char) -> *mut core::ffi::c_void {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::nodes::read::stringToNode(_str as _) as _
 }
 
 /// TODO(pg-port): catalog/partition.h - expand_generated_columns_in_expr
@@ -427,7 +425,7 @@ unsafe fn expand_generated_columns_in_expr(
     _rel: Relation,
     _varno: c_int,
 ) -> *mut Node {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::rewrite::rewriteHandler::expand_generated_columns_in_expr(_node as _, _rel as _, _varno as _) as _
 }
 
 /// TODO(pg-port): utils/lsyscache.h - getTypeOutputInfo
@@ -437,7 +435,7 @@ unsafe fn getTypeOutputInfo(_typid: Oid, _typoutput: *mut Oid, _typIsVarlena: *m
 
 /// TODO(pg-port): fmgr.h - OidOutputFunctionCall
 unsafe fn OidOutputFunctionCall(_functionId: Oid, _val: Datum) -> *mut c_char {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::utils::fmgr::OidOutputFunctionCall(_functionId as _, _val as _) as _
 }
 
 /// TODO(pg-port): mb/pg_wchar.h - pg_mbcliplen
@@ -456,7 +454,7 @@ unsafe fn getRTEPermissionInfo(
     _rteperminfos: *mut List,
     _rte: *const RangeTblEntry,
 ) -> *mut RTEPermissionInfo {
-    core::ptr::null_mut() // TODO(pg-port): stub
+    crate::parser::parse_relation::getRTEPermissionInfo(_rteperminfos as _, _rte as _) as _
 }
 
 /// TODO(pg-port): executor/execUtils.h - ExecBuildSlotValueDescription signature
@@ -505,12 +503,12 @@ unsafe fn snprintf_libc(
 
 /// TODO(pg-port): executor/execTuples.h
 unsafe fn slot_attisnull(_slot: *mut TupleTableSlot, _attnum: c_int) -> bool {
-    false // TODO(pg-port): stub
+    crate::executor::tuptable::slot_attisnull(_slot as _, _attnum as _) as _
 }
 
 /// TODO(pg-port): executor/tuptable.h
 unsafe fn slot_getallattrs(_slot: *mut TupleTableSlot) {
-    // TODO(pg-port): stub
+    crate::executor::tuptable::slot_getallattrs(_slot as _)
 }
 
 // ---------------------------------------------------------------------------
@@ -1049,6 +1047,7 @@ pub unsafe fn ExecCheckOneRelPerms(perminfo: *mut RTEPermissionInfo) -> bool {
      * First, remove any bits that are satisfied by relation permissions.
      */
     relPerms = pg_class_aclmask(relOid, userid, requiredPerms, ACLMASK_ALL);
+    if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_AUTH ExecCheckOneRelPerms pid={} relOid={} userid={} getuid={} req={} relPerms={} super={}", std::process::id(), relOid, userid, GetUserId(), requiredPerms, relPerms, crate::utils::misc::superuser::superuser_arg(userid)); }
     remainingPerms = requiredPerms & !relPerms;
     if remainingPerms != 0 {
         let mut col: c_int = -1;
@@ -2239,12 +2238,12 @@ unsafe fn ExecutePlan(
 
 /// TODO(pg-port): access/xact.h
 unsafe fn EnterParallelMode() {
-    // TODO(pg-port): stub
+    crate::access::transam::xact::EnterParallelMode()
 }
 
 /// TODO(pg-port): access/xact.h
 unsafe fn ExitParallelMode() {
-    // TODO(pg-port): stub
+    crate::access::transam::xact::ExitParallelMode()
 }
 
 /// TODO(pg-port): utils/sdir.h
@@ -2314,15 +2313,9 @@ pub struct FormData_pg_attribute {
 pub type Form_pg_attribute = *mut FormData_pg_attribute;
 pub const ATTRIBUTE_GENERATED_VIRTUAL: c_char = b'v' as c_char;
 
-/// TODO(pg-port): access/tupdesc.h - TupleDescAttr macro
 #[inline]
 unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: usize) -> Form_pg_attribute {
-    // TupleDesc->attrs is a flexible array member; we treat it as offset past header.
-    // Using same approach as Postgres: ((tupdesc)->attrs[i])
-    let attrs_ptr = (tupdesc as *mut u8)
-        .add(core::mem::size_of::<crate::access::common::tupdesc::TupleDescData>())
-        as *mut Form_pg_attribute;
-    *attrs_ptr.add(i)
+    crate::access::common::tupdesc::TupleDescAttr(tupdesc, i as c_int) as *mut FormData_pg_attribute
 }
 
 /// TODO(pg-port): catalog/pg_attribute.h - NameStr macro
@@ -2355,9 +2348,15 @@ pub const ERRCODE_INSUFFICIENT_PRIVILEGE: c_int = 0; // TODO(pg-port): real valu
 pub const ERRCODE_FEATURE_NOT_SUPPORTED_2: c_int = 0; // already defined elsewhere
 
 /// TODO(pg-port): utils/errcodes.h - errtable / errtableconstraint / errtablecol
-unsafe fn errtable(_rel: Relation) -> c_int { 0 }
-unsafe fn errtableconstraint(_rel: Relation, _constrname: *const c_char) -> c_int { 0 }
-unsafe fn errtablecol(_rel: Relation, _attnum: c_int) -> c_int { 0 }
+unsafe fn errtable(_rel: Relation) -> c_int {
+    crate::utils::cache::relcache::errtable(_rel as _) as _
+}
+unsafe fn errtableconstraint(_rel: Relation, _constrname: *const c_char) -> c_int {
+    crate::utils::cache::relcache::errtableconstraint(_rel as _, _constrname as _) as _
+}
+unsafe fn errtablecol(_rel: Relation, _attnum: c_int) -> c_int {
+    crate::utils::cache::relcache::errtablecol(_rel as _, _attnum as _) as _
+}
 
 /// TODO(pg-port): nodes/pg_list.h - NameData (already in pg_list?)
 // If NameData is not in pg_list, define here:

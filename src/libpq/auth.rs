@@ -107,42 +107,8 @@ pub type ConnType = c_int;
 pub const ctLocal: ConnType = 0;
 
 // ---------------------------------------------------------------------------
-// HbaLine (libpq/hba.h, not yet ported). Local definition holding the fields
-// auth.c accesses.  TODO(pg-port): dedup with hba.h HbaLine.
-// ---------------------------------------------------------------------------
-#[repr(C)]
-pub struct HbaLine {
-    pub sourcefile: *mut c_char,
-    pub linenumber: c_int,
-    pub rawline: *mut c_char,
-    pub conntype: ConnType,
-    pub auth_method: UserAuth,
-    pub usermap: *mut c_char,
-    pub include_realm: bool,
-    pub compat_realm: bool,
-    pub upn_username: bool,
-    pub krb_realm: *mut c_char,
-    pub clientcert: ClientCertMode,
-    pub clientcertname: ClientCertName,
-    pub pamservice: *mut c_char,
-    pub pam_use_hostname: bool,
-    pub ldapserver: *mut c_char,
-    pub ldapscheme: *mut c_char,
-    pub ldapport: c_int,
-    pub ldaptls: bool,
-    pub ldapbasedn: *mut c_char,
-    pub ldapbinddn: *mut c_char,
-    pub ldapbindpasswd: *mut c_char,
-    pub ldapsearchattribute: *mut c_char,
-    pub ldapsearchfilter: *mut c_char,
-    pub ldapscope: c_int,
-    pub ldapprefix: *mut c_char,
-    pub ldapsuffix: *mut c_char,
-    pub radiusservers: *mut List,
-    pub radiussecrets: *mut List,
-    pub radiusidentifiers: *mut List,
-    pub radiusports: *mut List,
-}
+// HbaLine: canonical def lives in libpq::hba (hba.h home). Was a partial local copy here.
+pub use crate::libpq::hba::{HbaLine, SockAddr};
 
 // ---------------------------------------------------------------------------
 // Kerberos and GSSAPI GUCs (defined here in C, kept as module statics).
@@ -178,48 +144,36 @@ const PGSQL_PAM_SERVICE: &CStr = c"postgresql";
 
 // libpq/hba.c
 unsafe fn hba_getauthmethod(_port: *mut Port) {
-    unimplemented!() // TODO(pg-port): libpq/hba.c
+    crate::libpq::hba::hba_getauthmethod(_port as _)
 }
-unsafe fn hba_authname(_auth_method: UserAuth) -> *const c_char {
-    unimplemented!() // TODO(pg-port): libpq/hba.c
-}
+unsafe fn hba_authname(auth_method: UserAuth) -> *const c_char { crate::libpq::hba::hba_authname(auth_method) }
 unsafe fn check_usermap(
-    _usermap_name: *const c_char,
-    _pg_user: *const c_char,
-    _system_user: *const c_char,
-    _case_insensitive: bool,
-) -> c_int {
-    unimplemented!() // TODO(pg-port): libpq/hba.c
-}
+    usermap_name: *const c_char,
+    pg_user: *const c_char,
+    system_user: *const c_char,
+    case_insensitive: bool,
+) -> c_int { crate::libpq::hba::check_usermap(usermap_name as _, pg_user as _, system_user as _, case_insensitive) }
 
 // common/ip.c
 unsafe fn pg_getnameinfo_all(
-    _addr: *const SockAddrStorage,
-    _salen: c_int,
-    _node: *mut c_char,
-    _nodelen: c_int,
-    _service: *mut c_char,
-    _servicelen: c_int,
-    _flags: c_int,
-) -> c_int {
-    unimplemented!() // TODO(pg-port): common/ip.c
-}
+    addr: *const SockAddrStorage,
+    salen: c_int,
+    node: *mut c_char,
+    nodelen: c_int,
+    service: *mut c_char,
+    servicelen: c_int,
+    flags: c_int,
+) -> c_int { crate::common::ip::pg_getnameinfo_all(addr as _, salen as _, node as _, nodelen as _, service as _, servicelen as _, flags as _) }
 unsafe fn pg_getaddrinfo_all(
-    _hostname: *const c_char,
-    _servname: *const c_char,
-    _hintp: *const addrinfo,
-    _result: *mut *mut addrinfo,
-) -> c_int {
-    unimplemented!() // TODO(pg-port): common/ip.c
-}
-unsafe fn pg_freeaddrinfo_all(_hint_ai_family: c_int, _ai: *mut addrinfo) {
-    unimplemented!() // TODO(pg-port): common/ip.c
-}
+    hostname: *const c_char,
+    servname: *const c_char,
+    hintp: *const addrinfo,
+    result: *mut *mut addrinfo,
+) -> c_int { crate::common::ip::pg_getaddrinfo_all(hostname as _, servname as _, hintp as _, result as _) }
+unsafe fn pg_freeaddrinfo_all(hint_ai_family: c_int, ai: *mut addrinfo) { crate::common::ip::pg_freeaddrinfo_all(hint_ai_family as _, ai as _) }
 
 // storage/ipc/ipc.c
-unsafe fn proc_exit(_code: c_int) -> ! {
-    unimplemented!() // TODO(pg-port): storage/ipc/ipc.c
-}
+unsafe fn proc_exit(code: c_int) -> ! { crate::storage::ipc::ipc::proc_exit(code as _) }
 
 // utils/mb / utils/error - miscadmin.h CHECK_FOR_INTERRUPTS.
 unsafe fn CHECK_FOR_INTERRUPTS() {
@@ -235,19 +189,15 @@ unsafe fn gettext_noop(s: *const c_char) -> *const c_char {
 }
 
 // utils/error - port/secure random.
-unsafe fn pg_strong_random(_buf: *mut c_void, _len: Size) -> bool {
-    unimplemented!() // TODO(pg-port): common/cryptohash / port/pg_strong_random.c
-}
+unsafe fn pg_strong_random(buf: *mut c_void, len: Size) -> bool { crate::port::pg_strong_random::pg_strong_random(buf as _, len as _) }
 
 // common/md5.c
 unsafe fn pg_md5_binary(
-    _buff: *const c_void,
-    _len: Size,
-    _hexsum: *mut c_void,
-    _errstr: *mut *const c_char,
-) -> bool {
-    unimplemented!() // TODO(pg-port): common/md5.c
-}
+    buff: *const c_void,
+    len: Size,
+    hexsum: *mut c_void,
+    errstr: *mut *const c_char,
+) -> bool { crate::common::md5_common::pg_md5_binary(buff as _, len, hexsum as _, errstr as _) }
 
 // libc / port routines used verbatim from the C source.
 extern "C" {
@@ -846,12 +796,9 @@ pub unsafe fn ClientAuthentication(port: *mut Port) {
     }
 }
 
-// Helper to read SockAddr.salen field (libpq-be.h SockAddr).
-unsafe fn salen_of(_sa: *const c_void) -> c_int {
-    // The libpq_be SockAddr is an opaque c_void in the port; the salen lives in
-    // SockAddrStorage. TODO(pg-port): dedup SockAddr (pqcomm.h) so .salen is
-    // directly accessible.
-    0
+// Helper to read SockAddr.salen field (pqcomm.h SockAddr).
+unsafe fn salen_of(sa: *const SockAddr) -> c_int {
+    (*sa).salen as c_int
 }
 
 // pg_gssinfo fields accessed by the GSS path (pg-gssapi.h, not ported).
@@ -1460,12 +1407,8 @@ unsafe fn gss_delete_sec_context(
 ) -> OM_uint32 {
     unimplemented!() // TODO(pg-port): MIT Kerberos GSSAPI
 }
-unsafe fn pg_GSS_error(_errmsg: *const c_char, _maj_stat: OM_uint32, _min_stat: OM_uint32) {
-    unimplemented!() // TODO(pg-port): libpq/be-gssapi-common.c
-}
-unsafe fn pg_store_delegated_credential(_cred: gss_cred_id_t) {
-    unimplemented!() // TODO(pg-port): libpq/be-gssapi-common.c
-}
+unsafe fn pg_GSS_error(errmsg: *const c_char, maj_stat: OM_uint32, min_stat: OM_uint32) { crate::libpq::be_gssapi_common::pg_GSS_error(errmsg as _, maj_stat as _, min_stat as _) }
+unsafe fn pg_store_delegated_credential(cred: gss_cred_id_t) { crate::libpq::be_gssapi_common::pg_store_delegated_credential(cred as _) }
 
 /*----------------------------------------------------------------
  * SSPI authentication system
@@ -2573,12 +2516,10 @@ unsafe fn pam_strerror(_pamh: *mut pam_handle_t, _errnum: c_int) -> *const c_cha
     unimplemented!() // TODO(pg-port): libpam pam_strerror
 }
 
-// TODO(pg-port): libc strdup/calloc/free/strlen for PAM-owned memory.
+// TODO(pg-port): libc strdup/calloc for PAM-owned memory. (free/strlen already declared above.)
 extern "C" {
     fn strdup(s: *const c_char) -> *mut c_char;
     fn calloc(nmemb: usize, size: usize) -> *mut c_void;
-    fn free(ptr: *mut c_void);
-    fn strlen(s: *const c_char) -> usize;
 }
 
 /*

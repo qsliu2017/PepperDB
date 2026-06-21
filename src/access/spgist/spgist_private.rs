@@ -394,79 +394,51 @@ pub fn GBUF_REQ_NULLS(flags: c_int) -> c_int {
 pub const SPGIST_MIN_FILLFACTOR: c_int = 10;
 pub const SPGIST_DEFAULT_FILLFACTOR: c_int = 80;
 
-pub unsafe fn spgGetCache(index: Relation) -> *mut SpGistCache {
-    unimplemented!()
-}
+pub unsafe fn spgGetCache(index: Relation) -> *mut SpGistCache { crate::access::spgist::spgutils::spgGetCache(index) }
 
-pub unsafe fn getSpGistTupleDesc(index: Relation, keyType: *mut SpGistTypeDesc) -> TupleDesc {
-    unimplemented!()
-}
+pub unsafe fn getSpGistTupleDesc(index: Relation, keyType: *mut SpGistTypeDesc) -> TupleDesc { crate::access::spgist::spgutils::getSpGistTupleDesc(index, keyType) }
 
-pub unsafe fn initSpGistState(state: *mut SpGistState, index: Relation) {
-    unimplemented!()
-}
+pub unsafe fn initSpGistState(state: *mut SpGistState, index: Relation) { crate::access::spgist::spgutils::initSpGistState(state, index) }
 
-pub unsafe fn SpGistNewBuffer(index: Relation) -> Buffer {
-    unimplemented!()
-}
+pub unsafe fn SpGistNewBuffer(index: Relation) -> Buffer { crate::access::spgist::spgutils::SpGistNewBuffer(index) }
 
-pub unsafe fn SpGistUpdateMetaPage(index: Relation) {
-    unimplemented!()
-}
+pub unsafe fn SpGistUpdateMetaPage(index: Relation) { crate::access::spgist::spgutils::SpGistUpdateMetaPage(index) }
 
 pub unsafe fn SpGistGetBuffer(
     index: Relation,
     flags: c_int,
     needSpace: c_int,
     isNew: *mut bool,
-) -> Buffer {
-    unimplemented!()
-}
+) -> Buffer { crate::access::spgist::spgutils::SpGistGetBuffer(index, flags, needSpace, isNew) }
 
-pub unsafe fn SpGistSetLastUsedPage(index: Relation, buffer: Buffer) {
-    unimplemented!()
-}
+pub unsafe fn SpGistSetLastUsedPage(index: Relation, buffer: Buffer) { crate::access::spgist::spgutils::SpGistSetLastUsedPage(index, buffer) }
 
-pub unsafe fn SpGistInitPage(page: Page, f: uint16) {
-    unimplemented!()
-}
+pub unsafe fn SpGistInitPage(page: Page, f: uint16) { crate::access::spgist::spgutils::SpGistInitPage(page, f) }
 
-pub unsafe fn SpGistInitBuffer(b: Buffer, f: uint16) {
-    unimplemented!()
-}
+pub unsafe fn SpGistInitBuffer(b: Buffer, f: uint16) { crate::access::spgist::spgutils::SpGistInitBuffer(b, f) }
 
-pub unsafe fn SpGistInitMetapage(page: Page) {
-    unimplemented!()
-}
+pub unsafe fn SpGistInitMetapage(page: Page) { crate::access::spgist::spgutils::SpGistInitMetapage(page) }
 
-pub unsafe fn SpGistGetInnerTypeSize(att: *mut SpGistTypeDesc, datum: Datum) -> c_uint {
-    unimplemented!()
-}
+pub unsafe fn SpGistGetInnerTypeSize(att: *mut SpGistTypeDesc, datum: Datum) -> c_uint { crate::access::spgist::spgutils::SpGistGetInnerTypeSize(att, datum) }
 
 pub unsafe fn SpGistGetLeafTupleSize(
     tupleDescriptor: TupleDesc,
     datums: *const Datum,
     isnulls: *const bool,
-) -> Size {
-    unimplemented!()
-}
+) -> Size { crate::access::spgist::spgutils::SpGistGetLeafTupleSize(tupleDescriptor, datums, isnulls) }
 
 pub unsafe fn spgFormLeafTuple(
     state: *mut SpGistState,
     heapPtr: ItemPointer,
     datums: *const Datum,
     isnulls: *const bool,
-) -> SpGistLeafTuple {
-    unimplemented!()
-}
+) -> SpGistLeafTuple { crate::access::spgist::spgutils::spgFormLeafTuple(state, heapPtr, datums, isnulls) }
 
 pub unsafe fn spgFormNodeTuple(
     state: *mut SpGistState,
     label: Datum,
     isnull: bool,
-) -> SpGistNodeTuple {
-    unimplemented!()
-}
+) -> SpGistNodeTuple { crate::access::spgist::spgutils::spgFormNodeTuple(state, label, isnull) }
 
 pub unsafe fn spgFormInnerTuple(
     state: *mut SpGistState,
@@ -474,18 +446,14 @@ pub unsafe fn spgFormInnerTuple(
     prefix: Datum,
     nNodes: c_int,
     nodes: *mut SpGistNodeTuple,
-) -> SpGistInnerTuple {
-    unimplemented!()
-}
+) -> SpGistInnerTuple { crate::access::spgist::spgutils::spgFormInnerTuple(state, hasPrefix, prefix, nNodes, nodes) }
 
 pub unsafe fn spgFormDeadTuple(
     state: *mut SpGistState,
     tupstate: c_int,
     blkno: BlockNumber,
     offnum: OffsetNumber,
-) -> SpGistDeadTuple {
-    unimplemented!()
-}
+) -> SpGistDeadTuple { crate::access::spgist::spgutils::spgFormDeadTuple(state, tupstate, blkno, offnum) }
 
 pub unsafe fn spgDeformLeafTuple(
     tup: SpGistLeafTuple,
@@ -493,16 +461,12 @@ pub unsafe fn spgDeformLeafTuple(
     datums: *mut Datum,
     isnulls: *mut bool,
     keyColumnIsNull: bool,
-) {
-    unimplemented!()
-}
+) { crate::access::spgist::spgutils::spgDeformLeafTuple(tup, tupleDescriptor, datums, isnulls, keyColumnIsNull) }
 
 pub unsafe fn spgExtractNodeLabels(
     state: *mut SpGistState,
     innerTuple: SpGistInnerTuple,
-) -> *mut Datum {
-    unimplemented!()
-}
+) -> *mut Datum { crate::access::spgist::spgutils::spgExtractNodeLabels(state, innerTuple) }
 
 pub unsafe fn SpGistPageAddNewItem(
     state: *mut SpGistState,
@@ -511,9 +475,7 @@ pub unsafe fn SpGistPageAddNewItem(
     size: Size,
     startOffset: *mut OffsetNumber,
     errorOK: bool,
-) -> OffsetNumber {
-    unimplemented!()
-}
+) -> OffsetNumber { crate::access::spgist::spgutils::SpGistPageAddNewItem(state, page, item, size, startOffset, errorOK) }
 
 pub unsafe fn spgproperty(
     index_oid: Oid,
@@ -522,9 +484,7 @@ pub unsafe fn spgproperty(
     propname: *const c_char,
     res: *mut bool,
     isnull: *mut bool,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { crate::access::spgist::spgutils::spgproperty(index_oid, attno, prop, propname, res, isnull) }
 
 /* spgdoinsert.c */
 pub unsafe fn spgUpdateNodeLink(
@@ -532,9 +492,7 @@ pub unsafe fn spgUpdateNodeLink(
     nodeN: c_int,
     blkno: BlockNumber,
     offset: OffsetNumber,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 pub unsafe fn spgPageIndexMultiDelete(
     state: *mut SpGistState,
@@ -545,9 +503,7 @@ pub unsafe fn spgPageIndexMultiDelete(
     reststate: c_int,
     blkno: BlockNumber,
     offnum: OffsetNumber,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 pub unsafe fn spgdoinsert(
     index: Relation,
@@ -555,9 +511,7 @@ pub unsafe fn spgdoinsert(
     heapPtr: ItemPointer,
     datums: *mut Datum,
     isnulls: *mut bool,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { unimplemented!() }
 
 /* spgproc.c */
 pub unsafe fn spg_key_orderbys_distances(
@@ -565,10 +519,6 @@ pub unsafe fn spg_key_orderbys_distances(
     isLeaf: bool,
     orderbys: ScanKey,
     norderbys: c_int,
-) -> *mut f64 {
-    unimplemented!()
-}
+) -> *mut f64 { crate::access::spgist::spgproc::spg_key_orderbys_distances(key, isLeaf, orderbys, norderbys) as _ }
 
-pub unsafe fn box_copy(orig: *mut BOX) -> *mut BOX {
-    unimplemented!()
-}
+pub unsafe fn box_copy(orig: *mut BOX) -> *mut BOX { crate::access::spgist::spgproc::box_copy(orig) }

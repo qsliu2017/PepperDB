@@ -245,7 +245,7 @@ pub unsafe fn restore_stack_base(_base: pg_stack_base_t) {
     unimplemented!()
 }
 pub unsafe fn check_stack_depth() {
-    unimplemented!()
+    crate::utils::misc::stack_depth::check_stack_depth()
 }
 pub unsafe fn stack_is_too_deep() -> bool {
     unimplemented!()
@@ -281,19 +281,28 @@ extern "C" {
 
 /* now in utils/init/miscinit.c */
 pub unsafe fn InitPostmasterChild() {
-    unimplemented!()
+    // utils/init/miscinit.c InitPostmasterChild. The win32/EXEC_BACKEND, setsid,
+    // and SIGQUIT-mask refinements are elided for bring-up (not needed for a child
+    // to run); the essential process-local state is set up below.
+    IsUnderPostmaster = true;
+    crate::postmaster::postmaster::InitProcessGlobals();
+    crate::storage::ipc::ipc::on_exit_reset();
+    crate::storage::ipc::waiteventset::InitializeWaitEventSupport();
+    InitProcessLocalLatch();
+    crate::storage::ipc::latch::InitializeLatchWaitSet();
+    crate::storage::ipc::pmsignal::PostmasterDeathSignalInit();
 }
 pub unsafe fn InitStandaloneProcess(_argv0: *const c_char) {
-    unimplemented!()
+    crate::utils::init::miscinit::InitStandaloneProcess(_argv0 as _)
 }
 pub unsafe fn InitProcessLocalLatch() {
-    unimplemented!()
+    crate::utils::init::miscinit::InitProcessLocalLatch()
 }
 pub unsafe fn SwitchToSharedLatch() {
-    unimplemented!()
+    crate::utils::init::miscinit::SwitchToSharedLatch()
 }
 pub unsafe fn SwitchBackToLocalLatch() {
-    unimplemented!()
+    crate::utils::init::miscinit::SwitchBackToLocalLatch()
 }
 
 /*
@@ -404,96 +413,97 @@ pub fn IsExternalConnectionBackend(backend_type: BackendType) -> bool {
 }
 
 pub unsafe fn GetBackendTypeDesc(_backendType: BackendType) -> *const c_char {
-    unimplemented!()
+    // TODO(pg-port): real per-BackendType description table; placeholder for log messages.
+    c"postmaster child".as_ptr()
 }
 
 pub unsafe fn SetDatabasePath(_path: *const c_char) {
-    unimplemented!()
+    crate::utils::init::miscinit::SetDatabasePath(_path as _)
 }
 pub unsafe fn checkDataDir() {
-    unimplemented!()
+    crate::utils::init::miscinit::checkDataDir()
 }
 pub unsafe fn SetDataDir(_dir: *const c_char) {
-    unimplemented!()
+    crate::utils::init::miscinit::SetDataDir(_dir as _)
 }
 pub unsafe fn ChangeToDataDir() {
-    unimplemented!()
+    crate::utils::init::miscinit::ChangeToDataDir()
 }
 
 pub unsafe fn GetUserNameFromId(_roleid: Oid, _noerr: bool) -> *mut c_char {
-    unimplemented!()
+    crate::utils::init::miscinit::GetUserNameFromId(_roleid as _, _noerr)
 }
 pub unsafe fn GetUserId() -> Oid {
-    unimplemented!()
+    crate::utils::init::miscinit::GetUserId()
 }
 pub unsafe fn GetOuterUserId() -> Oid {
-    unimplemented!()
+    crate::utils::init::miscinit::GetOuterUserId()
 }
 pub unsafe fn GetSessionUserId() -> Oid {
-    unimplemented!()
+    crate::utils::init::miscinit::GetSessionUserId()
 }
 pub unsafe fn GetSessionUserIsSuperuser() -> bool {
-    unimplemented!()
+    crate::utils::init::miscinit::GetSessionUserIsSuperuser()
 }
 pub unsafe fn GetAuthenticatedUserId() -> Oid {
-    unimplemented!()
+    crate::utils::init::miscinit::GetAuthenticatedUserId()
 }
 pub unsafe fn SetAuthenticatedUserId(_userid: Oid) {
-    unimplemented!()
+    crate::utils::init::miscinit::SetAuthenticatedUserId(_userid as _)
 }
 pub unsafe fn GetUserIdAndSecContext(_userid: *mut Oid, _sec_context: *mut c_int) {
-    unimplemented!()
+    crate::utils::init::miscinit::GetUserIdAndSecContext(_userid as _, _sec_context as _)
 }
 pub unsafe fn SetUserIdAndSecContext(_userid: Oid, _sec_context: c_int) {
-    unimplemented!()
+    crate::utils::init::miscinit::SetUserIdAndSecContext(_userid as _, _sec_context as _)
 }
 pub unsafe fn InLocalUserIdChange() -> bool {
-    unimplemented!()
+    crate::utils::init::miscinit::InLocalUserIdChange()
 }
 pub unsafe fn InSecurityRestrictedOperation() -> bool {
-    unimplemented!()
+    crate::utils::init::miscinit::InSecurityRestrictedOperation()
 }
 pub unsafe fn InNoForceRLSOperation() -> bool {
-    unimplemented!()
+    crate::utils::init::miscinit::InNoForceRLSOperation()
 }
 pub unsafe fn GetUserIdAndContext(_userid: *mut Oid, _sec_def_context: *mut bool) {
-    unimplemented!()
+    crate::utils::init::miscinit::GetUserIdAndContext(_userid as _, _sec_def_context)
 }
 pub unsafe fn SetUserIdAndContext(_userid: Oid, _sec_def_context: bool) {
-    unimplemented!()
+    crate::utils::init::miscinit::SetUserIdAndContext(_userid as _, _sec_def_context)
 }
 pub unsafe fn InitializeSessionUserId(
     _rolename: *const c_char,
     _roleid: Oid,
     _bypass_login_check: bool,
 ) {
-    unimplemented!()
+    crate::utils::init::miscinit::InitializeSessionUserId(_rolename as _, _roleid as _, _bypass_login_check)
 }
 pub unsafe fn InitializeSessionUserIdStandalone() {
-    unimplemented!()
+    crate::utils::init::miscinit::InitializeSessionUserIdStandalone()
 }
 pub unsafe fn SetSessionAuthorization(_userid: Oid, _is_superuser: bool) {
-    unimplemented!()
+    crate::utils::init::miscinit::SetSessionAuthorization(_userid as _, _is_superuser)
 }
 pub unsafe fn GetCurrentRoleId() -> Oid {
-    unimplemented!()
+    crate::utils::init::miscinit::GetCurrentRoleId()
 }
 pub unsafe fn SetCurrentRoleId(_roleid: Oid, _is_superuser: bool) {
-    unimplemented!()
+    crate::utils::init::miscinit::SetCurrentRoleId(_roleid as _, _is_superuser)
 }
 pub unsafe fn InitializeSystemUser(_authn_id: *const c_char, _auth_method: *const c_char) {
-    unimplemented!()
+    crate::utils::init::miscinit::InitializeSystemUser(_authn_id as _, _auth_method as _)
 }
 pub unsafe fn GetSystemUser() -> *const c_char {
-    unimplemented!()
+    crate::utils::init::miscinit::GetSystemUser()
 }
 
 /* in utils/misc/superuser.c */
 pub unsafe fn superuser() -> bool {
-    unimplemented!()
+    crate::utils::misc::superuser::superuser()
 }
 pub unsafe fn superuser_arg(_roleid: Oid) -> bool {
-    unimplemented!()
+    crate::utils::misc::superuser::superuser_arg(_roleid)
 }
 
 /*****************************************************************************
@@ -511,6 +521,7 @@ extern "C" {
 }
 
 #[inline]
+#[no_mangle]
 pub unsafe fn IsBootstrapProcessingMode() -> bool {
     Mode == BootstrapProcessing
 }
@@ -551,10 +562,10 @@ pub unsafe fn pg_split_opts(_argv: *mut *mut c_char, _argcp: *mut c_int, _optstr
     unimplemented!()
 }
 pub unsafe fn InitializeMaxBackends() {
-    unimplemented!()
+    crate::utils::init::postinit::InitializeMaxBackends()
 }
 pub unsafe fn InitializeFastPathLocks() {
-    unimplemented!()
+    crate::utils::init::postinit::InitializeFastPathLocks()
 }
 pub unsafe fn InitPostgres(
     _in_dbname: *const c_char,
@@ -567,7 +578,7 @@ pub unsafe fn InitPostgres(
     unimplemented!()
 }
 pub unsafe fn BaseInit() {
-    unimplemented!()
+    crate::utils::init::postinit::BaseInit()
 }
 
 /* in utils/init/miscinit.c */
@@ -581,42 +592,43 @@ extern "C" {
     pub static mut local_preload_libraries_string: *mut c_char;
 }
 
-pub unsafe fn CreateDataDirLockFile(_amPostmaster: bool) {
-    unimplemented!()
+pub unsafe fn CreateDataDirLockFile(amPostmaster: bool) {
+    crate::utils::init::miscinit::CreateDataDirLockFile(amPostmaster)
 }
 pub unsafe fn CreateSocketLockFile(
     _socketfile: *const c_char,
     _amPostmaster: bool,
     _socketDir: *const c_char,
 ) {
-    unimplemented!()
+    crate::utils::init::miscinit::CreateSocketLockFile(_socketfile as _, _amPostmaster, _socketDir as _)
 }
 pub unsafe fn TouchSocketLockFiles() {
-    unimplemented!()
+    crate::utils::init::miscinit::TouchSocketLockFiles()
 }
-pub unsafe fn AddToDataDirLockFile(_target_line: c_int, _str: *const c_char) {
-    unimplemented!()
+pub unsafe fn AddToDataDirLockFile(target_line: c_int, str_: *const c_char) {
+    crate::utils::init::miscinit::AddToDataDirLockFile(target_line, str_)
 }
 pub unsafe fn RecheckDataDirLockFile() -> bool {
-    unimplemented!()
+    crate::utils::init::miscinit::RecheckDataDirLockFile()
 }
 pub unsafe fn ValidatePgVersion(_path: *const c_char) {
-    unimplemented!()
+    crate::utils::init::miscinit::ValidatePgVersion(_path as _)
 }
 pub unsafe fn process_shared_preload_libraries() {
-    unimplemented!()
+    // bring-up: no shared_preload_libraries configured; nothing to load. TODO: real impl (miscinit).
+    crate::utils::init::miscinit::process_shared_preload_libraries_done = true;
 }
 pub unsafe fn process_session_preload_libraries() {
-    unimplemented!()
+    crate::utils::init::miscinit::process_session_preload_libraries()
 }
 pub unsafe fn process_shmem_requests() {
-    unimplemented!()
+    crate::utils::init::miscinit::process_shmem_requests()
 }
 pub unsafe fn pg_bindtextdomain(_domain: *const c_char) {
-    unimplemented!()
+    crate::utils::init::miscinit::pg_bindtextdomain(_domain as _)
 }
 pub unsafe fn has_rolreplication(_roleid: Oid) -> bool {
-    unimplemented!()
+    crate::utils::init::miscinit::has_rolreplication(_roleid as _)
 }
 
 pub type shmem_request_hook_type = Option<unsafe extern "C" fn()>;
@@ -625,16 +637,16 @@ extern "C" {
 }
 
 pub unsafe fn EstimateClientConnectionInfoSpace() -> Size {
-    unimplemented!()
+    crate::utils::init::miscinit::EstimateClientConnectionInfoSpace()
 }
 pub unsafe fn SerializeClientConnectionInfo(_maxsize: Size, _start_address: *mut c_char) {
-    unimplemented!()
+    crate::utils::init::miscinit::SerializeClientConnectionInfo(_maxsize as _, _start_address as _)
 }
 pub unsafe fn RestoreClientConnectionInfo(_conninfo: *mut c_char) {
-    unimplemented!()
+    crate::utils::init::miscinit::RestoreClientConnectionInfo(_conninfo as _)
 }
 
 /* in executor/nodeHash.c */
 pub unsafe fn get_hash_memory_limit() -> Size {
-    unimplemented!()
+    crate::executor::nodeHash::get_hash_memory_limit() as Size
 }

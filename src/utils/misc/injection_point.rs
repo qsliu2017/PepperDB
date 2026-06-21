@@ -719,7 +719,7 @@ pub enum LWLockMode {
     LW_SHARED,
 }
 
-pub static mut InjectionPointLock: *mut c_void = std::ptr::null_mut();
+use crate::backend_link_shims::InjectionPointLock;
 
 #[allow(non_upper_case_globals)]
 pub static IsUnderPostmaster: bool = false;
@@ -757,7 +757,7 @@ unsafe fn add_size(s1: Size, s2: Size) -> Size {
 }
 
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _foundPtr: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _foundPtr)
 }
 
 unsafe fn pg_atomic_init_u32(ptr: *mut pg_atomic_uint32, val: u32) {

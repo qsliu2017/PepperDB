@@ -124,7 +124,7 @@ unsafe fn ExecParallelCleanup(_pei: *mut ParallelExecutorInfo) {
 
 /* parallel.h (TODO: access/parallel.c) */
 unsafe fn LaunchParallelWorkers(_pcxt: *mut ParallelContext) {
-    unimplemented!() // TODO: access/parallel.c
+    crate::access::transam::parallel::LaunchParallelWorkers(_pcxt as _)
 }
 
 /*

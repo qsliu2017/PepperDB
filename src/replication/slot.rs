@@ -230,8 +230,7 @@ static SLOT_INVALIDATION_CAUSES: [SlotInvalidationCauseMap; 5] = [
 pub static mut MyReplicationSlot: *mut ReplicationSlot = core::ptr::null_mut();
 
 // Shared pointer to the control array (already in slotfuncs; mirror here)
-#[allow(non_upper_case_globals)]
-pub static mut ReplicationSlotAllocationLock: LWLock = core::ptr::null_mut();
+pub use crate::backend_link_shims::ReplicationSlotAllocationLock;
 
 // ------------------------------------------------------------------
 // Slot inline helper (from slot.h)
@@ -1029,6 +1028,7 @@ pub unsafe fn ReplicationSlotsComputeLogicalRestartLSN() -> XLogRecPtr {
 }
 
 /// Count slots that refer to the passed database oid.
+#[no_mangle]
 pub unsafe fn ReplicationSlotsCountDBSlots(
     dboid: Oid,
     nslots: *mut c_int,
@@ -1067,6 +1067,7 @@ pub unsafe fn ReplicationSlotsCountDBSlots(
 }
 
 /// Drop all db-specific slots for the passed database oid.
+#[no_mangle]
 pub unsafe fn ReplicationSlotsDropDBSlots(dboid: Oid) {
     if max_replication_slots <= 0 {
         return;
@@ -2282,24 +2283,32 @@ pub unsafe fn WaitForStandbyConfirmation(wait_for_lsn: XLogRecPtr) {
 // TODO stubs for unported symbols
 // ------------------------------------------------------------------
 
-// TODO(pg-port): real LWLockAcquire lives in storage/lmgr/lwlock.c
-unsafe fn LWLockAcquire(_lock: LWLock, _mode: LWLockMode) -> bool { unimplemented!() }
-// TODO(pg-port): real LWLockRelease lives in storage/lmgr/lwlock.c
-unsafe fn LWLockRelease(_lock: LWLock) { unimplemented!() }
-// TODO(pg-port): real LWLockInitialize lives in storage/lmgr/lwlock.c
-unsafe fn LWLockInitialize(_lock: *mut LWLock, _tranche_id: c_int) { unimplemented!() }
-// TODO(pg-port): real LWLockHeldByMeInMode lives in storage/lmgr/lwlock.c
-unsafe fn LWLockHeldByMeInMode(_lock: LWLock, _mode: LWLockMode) -> bool { unimplemented!() }
-// TODO(pg-port): real LWLockHeldByMe lives in storage/lmgr/lwlock.c
-unsafe fn LWLockHeldByMe(_lock: LWLock) -> bool { unimplemented!() }
+unsafe fn LWLockAcquire(_lock: LWLock, _mode: LWLockMode) -> bool {
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, core::mem::transmute(_mode))
+}
+unsafe fn LWLockRelease(_lock: LWLock) {
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
+}
+unsafe fn LWLockInitialize(_lock: *mut LWLock, _tranche_id: c_int) {
+    crate::storage::lmgr::lwlock::LWLockInitialize(_lock as _, _tranche_id)
+}
+unsafe fn LWLockHeldByMeInMode(_lock: LWLock, _mode: LWLockMode) -> bool {
+    crate::storage::lmgr::lwlock::LWLockHeldByMeInMode(_lock as _, core::mem::transmute(_mode))
+}
+unsafe fn LWLockHeldByMe(_lock: LWLock) -> bool {
+    crate::storage::lmgr::lwlock::LWLockHeldByMe(_lock as _)
+}
 
 const LWTRANCHE_REPLICATION_SLOT_IO: c_int = 0; // TODO(pg-port): real value lives in storage/lmgr/lwlock.h
 
-// TODO(pg-port): real before_shmem_exit lives in storage/ipc/ipc.c
-unsafe fn before_shmem_exit(_func: unsafe extern "C" fn(c_int, Datum), _arg: Datum) { unimplemented!() }
+unsafe fn before_shmem_exit(_func: unsafe extern "C" fn(c_int, Datum), _arg: Datum) {
+    crate::storage::ipc::ipc::before_shmem_exit(core::mem::transmute(_func), _arg)
+}
 
 // TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c
-unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) -> *mut c_void { unimplemented!() }
+unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) -> *mut c_void {
+    crate::storage::ipc::shmem::ShmemInitStruct(_name as *const c_char, _size as Size, _found)
+}
 // TODO(pg-port): real add_size lives in storage/ipc/shmem.c
 unsafe fn add_size(s1: Size, s2: Size) -> Size { s1.saturating_add(s2) }
 // TODO(pg-port): real mul_size lives in storage/ipc/shmem.c
@@ -2307,18 +2316,17 @@ unsafe fn mul_size(s1: Size, s2: Size) -> Size { s1.saturating_mul(s2) }
 
 // TODO(pg-port): real ProcArraySetReplicationSlotXmin lives in storage/ipc/procarray.c
 unsafe fn ProcArraySetReplicationSlotXmin(
-    _xmin: TransactionId,
-    _catalog_xmin: TransactionId,
-    _already_locked: bool,
-) { unimplemented!() }
+    xmin: TransactionId,
+    catalog_xmin: TransactionId,
+    already_locked: bool,
+) { crate::storage::ipc::procarray::ProcArraySetReplicationSlotXmin(xmin as _, catalog_xmin as _, already_locked) }
 // TODO(pg-port): real ProcArrayLock lives in storage/ipc/procarray.c
-static mut ProcArrayLock: LWLock = core::ptr::null_mut();
+use crate::backend_link_shims::ProcArrayLock;
 
 // TODO(pg-port): real MyProc lives in storage/lmgr/proc.c
-static mut MyProc: *mut PGPROC = core::ptr::null_mut();
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 // TODO(pg-port): real ProcGlobal lives in storage/lmgr/proc.c
-static mut ProcGlobal: *mut PROC_HDR = core::ptr::null_mut();
-
+extern "C" { pub static mut ProcGlobal: *mut PROC_HDR; }
 #[repr(C)]
 struct PGPROC {
     pub statusFlags: u8,
@@ -2332,25 +2340,25 @@ struct PROC_HDR {
 const PROC_IN_LOGICAL_DECODING: u8 = 0x10; // TODO(pg-port): real value lives in storage/lmgr/proc.h
 
 // TODO(pg-port): real XLogSetReplicationSlotMinimumLSN lives in access/transam/xlog.c
-unsafe fn XLogSetReplicationSlotMinimumLSN(_lsn: XLogRecPtr) { unimplemented!() }
+unsafe fn XLogSetReplicationSlotMinimumLSN(lsn: XLogRecPtr) { crate::access::transam::xlog::XLogSetReplicationSlotMinimumLSN(lsn as _) }
 // TODO(pg-port): real XLogGetLastRemovedSegno lives in access/transam/xlog.c
-unsafe fn XLogGetLastRemovedSegno() -> XLogSegNo { unimplemented!() }
+unsafe fn XLogGetLastRemovedSegno() -> XLogSegNo { crate::access::transam::xlog::XLogGetLastRemovedSegno() }
 // TODO(pg-port): real XLByteToSeg lives in access/transam/xlog_internal.h
-unsafe fn XLByteToSeg(_xlrp: XLogRecPtr, _segno: *mut XLogSegNo, _wal_segsz: c_int) { unimplemented!() }
+unsafe fn XLByteToSeg(xlrp: XLogRecPtr, segno: *mut XLogSegNo, wal_segsz: c_int) { unimplemented!() }
 // TODO(pg-port): real XLogSegNoOffsetToRecPtr lives in access/transam/xlog_internal.h
 unsafe fn XLogSegNoOffsetToRecPtr(_seg: XLogSegNo, _offset: u32, _sz: c_int, _lsn: *mut XLogRecPtr) { unimplemented!() }
 // TODO(pg-port): real LogStandbySnapshot lives in access/transam/standby.c
 unsafe fn LogStandbySnapshot() -> XLogRecPtr { unimplemented!() }
 // TODO(pg-port): real XLogFlush lives in access/transam/xlog.c
-unsafe fn XLogFlush(_lsn: XLogRecPtr) { unimplemented!() }
+unsafe fn XLogFlush(lsn: XLogRecPtr) { crate::access::transam::xlog::XLogFlush(lsn as _) }
 // TODO(pg-port): real GetRedoRecPtr lives in access/transam/xloginsert.c
 unsafe fn GetRedoRecPtr() -> XLogRecPtr { unimplemented!() }
 // TODO(pg-port): real GetXLogReplayRecPtr lives in access/transam/xlogrecovery.c
-unsafe fn GetXLogReplayRecPtr(_tli: *mut c_int) -> XLogRecPtr { unimplemented!() }
+unsafe fn GetXLogReplayRecPtr(tli: *mut c_int) -> XLogRecPtr { crate::access::transam::xlogrecovery::GetXLogReplayRecPtr(tli as _) }
 // TODO(pg-port): real GetXLogInsertRecPtr lives in access/transam/xloginsert.c
-unsafe fn GetXLogInsertRecPtr() -> XLogRecPtr { unimplemented!() }
+unsafe fn GetXLogInsertRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetXLogInsertRecPtr() }
 // TODO(pg-port): real RecoveryInProgress lives in access/transam/xlog.c
-unsafe fn RecoveryInProgress() -> bool { unimplemented!() }
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
 
 // TODO(pg-port): real wal_level lives in access/transam/xlog.c (GUC)
 static mut wal_level: c_int = 0;
@@ -2365,7 +2373,7 @@ static mut StandbyMode: bool = false;
 static mut EnableHotStandby: bool = false;
 
 // TODO(pg-port): real IsSyncingReplicationSlots lives in replication/slotsync.c
-unsafe fn IsSyncingReplicationSlots() -> bool { unimplemented!() }
+unsafe fn IsSyncingReplicationSlots() -> bool { crate::replication::logical::slotsync::IsSyncingReplicationSlots() }
 // TODO(pg-port): real IsBinaryUpgrade lives in miscadmin.h
 static mut IsBinaryUpgrade: bool = false;
 
@@ -2384,11 +2392,11 @@ static mut am_walsender: bool = false;
 static mut log_replication_commands: bool = false;
 
 // TODO(pg-port): real pgstat_create_replslot lives in utils/activity/pgstat_replslot.c
-unsafe fn pgstat_create_replslot(_slot: *mut ReplicationSlot) { unimplemented!() }
+unsafe fn pgstat_create_replslot(slot: *mut ReplicationSlot) { crate::utils::activity::pgstat_replslot::pgstat_create_replslot(slot as _) }
 // TODO(pg-port): real pgstat_acquire_replslot lives in utils/activity/pgstat_replslot.c
-unsafe fn pgstat_acquire_replslot(_slot: *mut ReplicationSlot) { unimplemented!() }
+unsafe fn pgstat_acquire_replslot(slot: *mut ReplicationSlot) { crate::utils::activity::pgstat_replslot::pgstat_acquire_replslot(slot as _) }
 // TODO(pg-port): real pgstat_drop_replslot lives in utils/activity/pgstat_replslot.c
-unsafe fn pgstat_drop_replslot(_slot: *mut ReplicationSlot) { unimplemented!() }
+unsafe fn pgstat_drop_replslot(slot: *mut ReplicationSlot) { crate::utils::activity::pgstat_replslot::pgstat_drop_replslot(slot as _) }
 // TODO(pg-port): real pgstat_report_wait_start lives in utils/activity/wait_event.c
 unsafe fn pgstat_report_wait_start(_info: uint32) {}
 // TODO(pg-port): real pgstat_report_wait_end lives in utils/activity/wait_event.c
@@ -2425,9 +2433,9 @@ unsafe fn GUC_check_errcode(_sqlerrcode: c_int) {}
 // TODO(pg-port): real GUC_check_errhint lives in utils/misc/guc.c
 unsafe fn GUC_check_errhint(_fmt: *const c_char) {}
 // TODO(pg-port): real guc_malloc lives in utils/misc/guc.c
-unsafe fn guc_malloc(_elevel: c_int, _size: usize) -> *mut c_void { unimplemented!() }
+unsafe fn guc_malloc(elevel: c_int, size: usize) -> *mut c_void { crate::utils::misc::guc::guc_malloc(elevel as _, size as _) }
 // TODO(pg-port): real SplitIdentifierString lives in utils/adt/varlena.c
-unsafe fn SplitIdentifierString(_rawstring: *mut c_char, _separator: c_char, _namelist: *mut *mut List) -> bool { unimplemented!() }
+unsafe fn SplitIdentifierString(rawstring: *mut c_char, separator: c_char, namelist: *mut *mut List) -> bool { crate::parser_link_shims::SplitIdentifierString(rawstring as _, separator as _, namelist as _) }
 
 // List helpers -- TODO(pg-port): real ones live in nodes/pg_list.c
 type List = c_void;
@@ -2440,30 +2448,40 @@ enum ListCell {}
 
 // File / OS helpers
 // TODO(pg-port): real OpenTransientFile lives in storage/file/fd.c
-unsafe fn OpenTransientFile(_path: *const c_char, _flags: c_int) -> c_int { unimplemented!() }
+unsafe fn OpenTransientFile(_path: *const c_char, _flags: c_int) -> c_int { crate::storage::file::fd::OpenTransientFile(_path as _, _flags as _) }
 // TODO(pg-port): real CloseTransientFile lives in storage/file/fd.c
-unsafe fn CloseTransientFile(_fd: c_int) -> c_int { unimplemented!() }
+unsafe fn CloseTransientFile(_fd: c_int) -> c_int { crate::storage::file::fd::CloseTransientFile(_fd as _) }
 // TODO(pg-port): real fsync_fname lives in storage/file/fd.c
-unsafe fn fsync_fname(_fname: *const c_char, _isdir: bool) { unimplemented!() }
+unsafe fn fsync_fname(_fname: *const c_char, _isdir: bool) { crate::storage::file::fd::fsync_fname(_fname as _, _isdir) }
 // TODO(pg-port): real MakePGDirectory lives in storage/file/fd.c
-unsafe fn MakePGDirectory(_directoryName: *const c_char) -> c_int { unimplemented!() }
+unsafe fn MakePGDirectory(_directoryName: *const c_char) -> c_int { crate::storage::file::fd::MakePGDirectory(_directoryName as _) }
 // TODO(pg-port): real AllocateDir lives in storage/file/fd.c
-unsafe fn AllocateDir(_path: *const c_char) -> *mut DIR { unimplemented!() }
+unsafe fn AllocateDir(_path: *const c_char) -> *mut DIR { crate::storage::file::fd::AllocateDir(_path as _) }
 // TODO(pg-port): real ReadDir lives in storage/file/fd.c
-unsafe fn ReadDir(_dir: *mut DIR, _path: *const c_char) -> *mut dirent { unimplemented!() }
+unsafe fn ReadDir(_dir: *mut DIR, _path: *const c_char) -> *mut dirent { crate::storage::file::fd::ReadDir(_dir as _, _path as _) }
 // TODO(pg-port): real FreeDir lives in storage/file/fd.c
-unsafe fn FreeDir(_dir: *mut DIR) { unimplemented!() }
+unsafe fn FreeDir(_dir: *mut DIR) { crate::storage::file::fd::FreeDir(_dir); }
 // TODO(pg-port): real pg_fsync lives in storage/file/fd.c
-unsafe fn pg_fsync(_fd: c_int) -> c_int { unimplemented!() }
+unsafe fn pg_fsync(_fd: c_int) -> c_int { crate::storage::file::fd::pg_fsync(_fd as _) }
 // TODO(pg-port): real rmtree lives in common/file_utils.c
-unsafe fn rmtree(_path: *const c_char, _rmtopdir: bool) -> bool { unimplemented!() }
-// TODO(pg-port): real get_dirent_type lives in common/file_utils.c
-unsafe fn get_dirent_type(_path: *const c_char, _de: *const dirent, _look_through_symlinks: bool, _elevel: c_int) -> PGFileType { unimplemented!() }
+unsafe fn rmtree(_path: *const c_char, _rmtopdir: bool) -> bool { crate::common::rmtree::rmtree(_path as _, _rmtopdir) }
+// get_dirent_type: classify by stat (the dirent arg is unused; stat the full path).
+unsafe fn get_dirent_type(_path: *const c_char, _de: *const dirent, _look_through_symlinks: bool, _elevel: c_int) -> PGFileType {
+    let mut st: libc::stat = core::mem::zeroed();
+    let r = if _look_through_symlinks { libc::stat(_path, &mut st) } else { libc::lstat(_path, &mut st) };
+    if r != 0 { return PGFILETYPE_ERROR; }
+    match st.st_mode as u32 & libc::S_IFMT as u32 {
+        x if x == libc::S_IFREG as u32 => PGFILETYPE_REG,
+        x if x == libc::S_IFDIR as u32 => PGFILETYPE_DIR,
+        x if x == libc::S_IFLNK as u32 => PGFILETYPE_LNK,
+        _ => PGFILETYPE_UNKNOWN,
+    }
+}
 // TODO(pg-port): real pg_str_endswith lives in common/string.c
-unsafe fn pg_str_endswith(_str: *const c_char, _end: *const c_char) -> bool { unimplemented!() }
-type PGFileType = c_int;
-const PGFILETYPE_ERROR: PGFileType = -1;
-const PGFILETYPE_DIR: PGFileType = 2;
+unsafe fn pg_str_endswith(_str: *const c_char, _end: *const c_char) -> bool { crate::common::string::pg_str_endswith(_str as _, _end as _) }
+use crate::common::file_utils::{
+    PGFileType, PGFILETYPE_ERROR, PGFILETYPE_UNKNOWN, PGFILETYPE_REG, PGFILETYPE_DIR, PGFILETYPE_LNK,
+};
 
 // C stdlib wrappers
 extern "C" {
@@ -2480,7 +2498,11 @@ extern "C" {
 // errno helpers (platform)
 unsafe fn errno() -> c_int { *libc_errno() }
 unsafe fn set_errno(e: c_int) { *libc_errno() = e; }
-extern "C" { fn __errno_location() -> *mut c_int; }
+extern "C" {
+    #[cfg_attr(any(target_os = "macos", target_os = "ios"), link_name = "__error")]
+    #[cfg_attr(target_os = "linux", link_name = "__errno_location")]
+    fn __errno_location() -> *mut c_int;
+}
 unsafe fn libc_errno() -> *mut c_int { __errno_location() }
 const ENOENT: c_int = 2;
 const ENOSPC: c_int = 28;
@@ -2491,12 +2513,8 @@ const O_RDWR: c_int = 2;
 const O_RDONLY: c_int = 0;
 unsafe fn strerror_r() -> &'static str { "" } // display only
 
-// Opaque C types
-enum DIR {}
-#[repr(C)]
-struct dirent {
-    pub d_name: [c_char; 256],
-}
+// Directory iteration types: use the canonical fd.rs definitions (correct layout).
+use crate::storage::file::fd::{DIR, dirent};
 #[repr(C)]
 struct libc_stat {
     pub st_mode: u32,

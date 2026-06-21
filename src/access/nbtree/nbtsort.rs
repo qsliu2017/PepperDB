@@ -78,15 +78,10 @@ pub struct IndexBuildResult {
     pub index_tuples: f64,
 }
 
-/// TODO(pg-port): IndexInfo (nodes/execnodes.h)
-#[repr(C)]
-pub struct IndexInfo {
-    pub ii_Unique: bool,
-    pub ii_NullsNotDistinct: bool,
-    pub ii_Concurrent: bool,
-    pub ii_ParallelWorkers: c_int,
-    pub ii_BrokenHotChain: bool,
-}
+/// Canonical IndexInfo (nodes/execnodes.h) - the local truncated stub put
+/// ii_Unique at offset 0, which aliased ii_NumIndexAttrs and falsely enforced
+/// uniqueness on non-unique index builds.
+pub use crate::nodes::execnodes::IndexInfo;
 
 /// TODO(pg-port): BulkWriteBuffer (storage/bulk_write.h)
 pub type BulkWriteBuffer = *mut c_void;
@@ -302,43 +297,45 @@ pub const SK_BT_DESC: c_int = 0x0020;
 
 /// TODO(pg-port): access/nbtree.h -- BTPageGetOpaque
 unsafe fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTPageGetOpaque(page as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- P_LEFTMOST
 unsafe fn P_LEFTMOST(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::P_LEFTMOST(opaque as _)
 }
-/// TODO(pg-port): access/nbtree.h -- BTGetTargetPageFreeSpace
+/// access/nbtree.h -- BTGetTargetPageFreeSpace = BLCKSZ * (100 - fillfactor) / 100
 unsafe fn BTGetTargetPageFreeSpace(index: Relation) -> Size {
-    unimplemented!() // TODO(pg-port)
+    const BTREE_DEFAULT_FILLFACTOR: c_int = 90;
+    let opts = (*index).rd_options as *mut crate::access::nbtree::nbtutils::BTOptions;
+    let fillfactor = if !opts.is_null() { (*opts).fillfactor } else { BTREE_DEFAULT_FILLFACTOR };
+    (crate::pg_config::BLCKSZ as usize) * (100 - fillfactor as usize) / 100
 }
-/// TODO(pg-port): access/nbtree.h -- BTGetDeduplicateItems
+/// access/nbtree.h -- BTGetDeduplicateItems (default true)
 unsafe fn BTGetDeduplicateItems(index: Relation) -> bool {
-    unimplemented!() // TODO(pg-port)
+    let opts = (*index).rd_options as *mut crate::access::nbtree::nbtutils::BTOptions;
+    if !opts.is_null() { (*opts).deduplicate_items } else { true }
 }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleGetNAtts
-unsafe fn BTreeTupleGetNAtts(itup: IndexTuple, index: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn BTreeTupleGetNAtts(itup: IndexTuple, index: Relation) -> c_int { crate::access::nbtree::nbtinsert::BTreeTupleGetNAtts(itup, index) }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleSetNAtts
 unsafe fn BTreeTupleSetNAtts(itup: IndexTuple, natts: c_int, has_heap_tid: bool) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTreeTupleSetNAtts(itup as _, natts, has_heap_tid)
 }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleSetDownLink
 unsafe fn BTreeTupleSetDownLink(itup: IndexTuple, blkno: BlockNumber) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTreeTupleSetDownLink(itup as _, blkno)
 }
 /// TODO(pg-port): access/nbtree.h -- BTreeTupleGetPostingOffset
 unsafe fn BTreeTupleGetPostingOffset(posting: IndexTuple) -> u32 {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::BTreeTupleGetPostingOffset(posting as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_mkscankey
 unsafe fn _bt_mkscankey(index: Relation, itup: IndexTuple) -> BTScanInsert {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtutils::_bt_mkscankey(index as _, itup as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_allequalimage
 unsafe fn _bt_allequalimage(index: Relation, is_build: bool) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtutils::_bt_allequalimage(index as _, is_build)
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_truncate
 unsafe fn _bt_truncate(
@@ -347,7 +344,7 @@ unsafe fn _bt_truncate(
     firstright: IndexTuple,
     itup_key: BTScanInsert,
 ) -> IndexTuple {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtutils::_bt_truncate(index as _, lastleft as _, firstright as _, itup_key as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_check_third_page
 unsafe fn _bt_check_third_page(
@@ -357,15 +354,15 @@ unsafe fn _bt_check_third_page(
     page: Page,
     itup: IndexTuple,
 ) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtutils::_bt_check_third_page(index as _, heap as _, is_leaf, page as _, itup as _)
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_pageinit
 unsafe fn _bt_pageinit(page: Page, size: Size) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_pageinit(page as _, size as _)
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_initmetapage
 unsafe fn _bt_initmetapage(page: Page, rootblkno: BlockNumber, rootlevel: u32, allequalimage: bool) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::_bt_initmetapage(page as _, rootblkno as _, rootlevel as _, allequalimage)
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_dedup_start_pending
 unsafe fn _bt_dedup_start_pending(
@@ -373,11 +370,11 @@ unsafe fn _bt_dedup_start_pending(
     base: IndexTuple,
     baseoff: OffsetNumber,
 ) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::_bt_dedup_start_pending(state as _, base as _, baseoff as _)
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_dedup_save_htid
 unsafe fn _bt_dedup_save_htid(state: BTDedupState, itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::_bt_dedup_save_htid(state as _, itup as _)
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_form_posting
 unsafe fn _bt_form_posting(
@@ -385,7 +382,7 @@ unsafe fn _bt_form_posting(
     htids: ItemPointer,
     nhtids: c_int,
 ) -> IndexTuple {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::_bt_form_posting(base as _, htids as _, nhtids as _) as _
 }
 /// TODO(pg-port): access/nbtree.h -- _bt_keep_natts_fast
 unsafe fn _bt_keep_natts_fast(
@@ -393,11 +390,11 @@ unsafe fn _bt_keep_natts_fast(
     lastleft: IndexTuple,
     firstright: IndexTuple,
 ) -> c_int {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtutils::_bt_keep_natts_fast(index as _, lastleft as _, firstright as _) as _
 }
 /// TODO(pg-port): access/genam.h -- IndexRelationGetNumberOfKeyAttributes
 unsafe fn IndexRelationGetNumberOfKeyAttributes(index: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtdedup::IndexRelationGetNumberOfKeyAttributes(index as _) as _
 }
 /// TODO(pg-port): access/genam.h -- index_getattr
 unsafe fn index_getattr(
@@ -406,15 +403,15 @@ unsafe fn index_getattr(
     tupleDesc: TupleDesc,
     isnull: *mut bool,
 ) -> Datum {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtsearch::index_getattr(tup as _, attnum as _, tupleDesc as _, isnull as _) as _
 }
 /// TODO(pg-port): utils/rel.h -- RelationGetNumberOfBlocks
 unsafe fn RelationGetNumberOfBlocks(rel: Relation) -> BlockNumber {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::RelationGetNumberOfBlocks(rel as _) as _
 }
 /// TODO(pg-port): utils/rel.h -- RelationGetRelationName
 unsafe fn RelationGetRelationName(rel: Relation) -> *const c_char {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtpage::RelationGetRelationName(rel as _) as _
 }
 /// TODO(pg-port): utils/rel.h -- RelationGetRelid
 unsafe fn RelationGetRelid(rel: Relation) -> Oid {
@@ -422,7 +419,7 @@ unsafe fn RelationGetRelid(rel: Relation) -> Oid {
 }
 /// TODO(pg-port): utils/rel.h -- RelationGetDescr
 unsafe fn RelationGetDescr(rel: Relation) -> TupleDesc {
-    unimplemented!() // TODO(pg-port)
+    crate::access::nbtree::nbtsearch::RelationGetDescr(rel as _) as _
 }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_begin_index_btree
 unsafe fn tuplesort_begin_index_btree(
@@ -434,24 +431,25 @@ unsafe fn tuplesort_begin_index_btree(
     coordinate: SortCoordinate,
     flags: c_int,
 ) -> *mut Tuplesortstate {
-    unimplemented!() // TODO(pg-port)
+    crate::utils::sort::tuplesortvariants::tuplesort_begin_index_btree(
+        heap as _, index as _, isunique, nulls_not_distinct, sortmem, coordinate as _, flags) as _
 }
-/// TODO(pg-port): utils/tuplesort.h -- tuplesort_performsort
+/// utils/tuplesort.h -- tuplesort_performsort
 unsafe fn tuplesort_performsort(state: *mut Tuplesortstate) {
-    unimplemented!() // TODO(pg-port)
+    crate::utils::sort::tuplesort::tuplesort_performsort(state as _)
 }
-/// TODO(pg-port): utils/tuplesort.h -- tuplesort_getindextuple
+/// utils/tuplesort.h -- tuplesort_getindextuple
 unsafe fn tuplesort_getindextuple(
     state: *mut Tuplesortstate,
     forward: bool,
 ) -> IndexTuple {
-    unimplemented!() // TODO(pg-port)
+    crate::utils::sort::tuplesortvariants::tuplesort_getindextuple(state as _, forward) as _
 }
-/// TODO(pg-port): utils/tuplesort.h -- tuplesort_end
+/// utils/tuplesort.h -- tuplesort_end
 unsafe fn tuplesort_end(state: *mut Tuplesortstate) {
-    unimplemented!() // TODO(pg-port)
+    crate::utils::sort::tuplesort::tuplesort_end(state as _)
 }
-/// TODO(pg-port): utils/tuplesort.h -- tuplesort_putindextuplevalues
+/// utils/tuplesort.h -- tuplesort_putindextuplevalues
 unsafe fn tuplesort_putindextuplevalues(
     state: *mut Tuplesortstate,
     index: Relation,
@@ -459,28 +457,21 @@ unsafe fn tuplesort_putindextuplevalues(
     values: *mut Datum,
     isnull: *mut bool,
 ) {
-    unimplemented!() // TODO(pg-port)
+    crate::utils::sort::tuplesortvariants::tuplesort_putindextuplevalues(
+        state as _, index as _, self_ as _, values as _, isnull)
 }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_estimate_shared
-unsafe fn tuplesort_estimate_shared(nworkers: c_int) -> Size {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn tuplesort_estimate_shared(nworkers: c_int) -> Size { crate::utils::sort::tuplesort::tuplesort_estimate_shared(nworkers) }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_initialize_shared
 unsafe fn tuplesort_initialize_shared(
     shared: *mut Sharedsort,
     nworkers: c_int,
     seg: *mut c_void,
-) {
-    unimplemented!() // TODO(pg-port)
-}
+) { unimplemented!() }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_attach_shared
-unsafe fn tuplesort_attach_shared(shared: *mut Sharedsort, seg: *mut c_void) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn tuplesort_attach_shared(shared: *mut Sharedsort, seg: *mut c_void) { unimplemented!() }
 /// TODO(pg-port): utils/sortsupport.h -- PrepareSortSupportFromIndexRel
-unsafe fn PrepareSortSupportFromIndexRel(index: Relation, reverse: bool, ssup: SortSupport) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn PrepareSortSupportFromIndexRel(index: Relation, reverse: bool, ssup: SortSupport) { unimplemented!() }
 /// TODO(pg-port): utils/sortsupport.h -- ApplySortComparator
 unsafe fn ApplySortComparator(
     datum1: Datum,
@@ -489,15 +480,17 @@ unsafe fn ApplySortComparator(
     is_null2: bool,
     ssup: SortSupport,
 ) -> i32 {
-    unimplemented!() // TODO(pg-port)
+    crate::utils::sort::sortsupport::ApplySortComparator(
+        datum1, is_null1, datum2, is_null2, ssup as _,
+    )
 }
 /// TODO(pg-port): storage/bulk_write.h -- smgr_bulk_start_rel
 unsafe fn smgr_bulk_start_rel(index: Relation, forknum: c_int) -> *mut BulkWriteState {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::smgr::bulk_write::smgr_bulk_start_rel(index as _, forknum as _) as _
 }
 /// TODO(pg-port): storage/bulk_write.h -- smgr_bulk_get_buf
 unsafe fn smgr_bulk_get_buf(state: *mut BulkWriteState) -> BulkWriteBuffer {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::smgr::bulk_write::smgr_bulk_get_buf(state as _) as _
 }
 /// TODO(pg-port): storage/bulk_write.h -- smgr_bulk_write
 unsafe fn smgr_bulk_write(
@@ -506,11 +499,11 @@ unsafe fn smgr_bulk_write(
     buf: BulkWriteBuffer,
     is_main_fork: bool,
 ) {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::smgr::bulk_write::smgr_bulk_write(state as _, blkno, buf as _, is_main_fork)
 }
 /// TODO(pg-port): storage/bulk_write.h -- smgr_bulk_finish
 unsafe fn smgr_bulk_finish(state: *mut BulkWriteState) {
-    unimplemented!() // TODO(pg-port)
+    crate::storage::smgr::bulk_write::smgr_bulk_finish(state as _)
 }
 /// TODO(pg-port): storage/bufpage.h -- PageHeader cast helper
 unsafe fn PageHeaderPdLower(page: Page) -> *mut u16 {
@@ -534,35 +527,42 @@ unsafe fn table_index_build_scan(
     callback_state: *mut c_void,
     scan: TableScanDesc,
 ) -> f64 {
-    unimplemented!() // TODO(pg-port)
+    let am = (*heap).rd_tableam as *const crate::access::table::tableam::TableAmRoutine;
+    ((*am).index_build_range_scan.unwrap())(
+        heap as _,
+        index as _,
+        index_info as _,
+        allow_sync,
+        false, /* anyvisible */
+        progress,
+        0,                 /* start_blockno */
+        !0u32,             /* InvalidBlockNumber */
+        Some(core::mem::transmute(callback)),
+        callback_state,
+        scan as _,
+    )
 }
 /// TODO(pg-port): access/table.h -- table_open
 unsafe fn table_open(relid: Oid, lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO(pg-port)
+    crate::access::table::table::table_open(relid, lockmode) as _
 }
 /// TODO(pg-port): access/table.h -- table_close
 unsafe fn table_close(rel: Relation, lockmode: LOCKMODE) {
-    unimplemented!() // TODO(pg-port)
+    crate::access::table::table::table_close(rel as _, lockmode)
 }
 /// TODO(pg-port): access/table.h -- table_parallelscan_estimate
-unsafe fn table_parallelscan_estimate(heap: Relation, snapshot: Snapshot) -> Size {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn table_parallelscan_estimate(heap: Relation, snapshot: Snapshot) -> Size { unimplemented!() }
 /// TODO(pg-port): access/table.h -- table_parallelscan_initialize
 unsafe fn table_parallelscan_initialize(
     heap: Relation,
     target: ParallelTableScanDesc,
     snapshot: Snapshot,
-) {
-    unimplemented!() // TODO(pg-port)
-}
+) { unimplemented!() }
 /// TODO(pg-port): access/table.h -- table_beginscan_parallel
 unsafe fn table_beginscan_parallel(
     heap: Relation,
     pscan: ParallelTableScanDesc,
-) -> TableScanDesc {
-    unimplemented!() // TODO(pg-port)
-}
+) -> TableScanDesc { unimplemented!() }
 /// TODO(pg-port): catalog/index.h -- index_open
 unsafe fn index_open(relid: Oid, lockmode: LOCKMODE) -> Relation {
     unimplemented!() // TODO(pg-port)
@@ -572,45 +572,27 @@ unsafe fn index_close(rel: Relation, lockmode: LOCKMODE) {
     unimplemented!() // TODO(pg-port)
 }
 /// TODO(pg-port): catalog/index.h -- BuildIndexInfo
-unsafe fn BuildIndexInfo(index: Relation) -> *mut IndexInfo {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn BuildIndexInfo(index: Relation) -> *mut IndexInfo { unimplemented!() }
 /// TODO(pg-port): access/parallel.h -- EnterParallelMode
-unsafe fn EnterParallelMode() {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn EnterParallelMode() { crate::access::transam::xact::EnterParallelMode() }
 /// TODO(pg-port): access/parallel.h -- ExitParallelMode
-unsafe fn ExitParallelMode() {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn ExitParallelMode() { crate::access::transam::xact::ExitParallelMode() }
 /// TODO(pg-port): access/parallel.h -- CreateParallelContext
 unsafe fn CreateParallelContext(
     library_name: *const c_char,
     function_name: *const c_char,
     nworkers: c_int,
-) -> *mut ParallelContext {
-    unimplemented!() // TODO(pg-port)
-}
+) -> *mut ParallelContext { unimplemented!() }
 /// TODO(pg-port): access/parallel.h -- InitializeParallelDSM
-unsafe fn InitializeParallelDSM(pcxt: *mut ParallelContext) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn InitializeParallelDSM(pcxt: *mut ParallelContext) { unimplemented!() }
 /// TODO(pg-port): access/parallel.h -- LaunchParallelWorkers
-unsafe fn LaunchParallelWorkers(pcxt: *mut ParallelContext) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn LaunchParallelWorkers(pcxt: *mut ParallelContext) { unimplemented!() }
 /// TODO(pg-port): access/parallel.h -- WaitForParallelWorkersToAttach
-unsafe fn WaitForParallelWorkersToAttach(pcxt: *mut ParallelContext) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn WaitForParallelWorkersToAttach(pcxt: *mut ParallelContext) { unimplemented!() }
 /// TODO(pg-port): access/parallel.h -- WaitForParallelWorkersToFinish
-unsafe fn WaitForParallelWorkersToFinish(pcxt: *mut ParallelContext) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn WaitForParallelWorkersToFinish(pcxt: *mut ParallelContext) { unimplemented!() }
 /// TODO(pg-port): access/parallel.h -- DestroyParallelContext
-unsafe fn DestroyParallelContext(pcxt: *mut ParallelContext) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn DestroyParallelContext(pcxt: *mut ParallelContext) { unimplemented!() }
 /// TODO(pg-port): storage/shm_toc.h -- shm_toc_estimate_chunk
 unsafe fn shm_toc_estimate_chunk(estimator: *mut shm_toc_estimator, size: Size) {
     unimplemented!() // TODO(pg-port)
@@ -620,21 +602,13 @@ unsafe fn shm_toc_estimate_keys(estimator: *mut shm_toc_estimator, n: c_int) {
     unimplemented!() // TODO(pg-port)
 }
 /// TODO(pg-port): storage/shm_toc.h -- shm_toc_allocate
-unsafe fn shm_toc_allocate(toc: *mut c_void, size: Size) -> *mut c_void {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn shm_toc_allocate(toc: *mut c_void, size: Size) -> *mut c_void { crate::storage::ipc::shm_toc::shm_toc_allocate(toc as _, size) }
 /// TODO(pg-port): storage/shm_toc.h -- shm_toc_insert
-unsafe fn shm_toc_insert(toc: *mut c_void, key: u64, address: *mut c_void) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn shm_toc_insert(toc: *mut c_void, key: u64, address: *mut c_void) { crate::storage::ipc::shm_toc::shm_toc_insert(toc as _, key as _, address) }
 /// TODO(pg-port): storage/shm_toc.h -- shm_toc_lookup
-unsafe fn shm_toc_lookup(toc: *mut c_void, key: u64, noError: bool) -> *mut c_void {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn shm_toc_lookup(toc: *mut c_void, key: u64, noError: bool) -> *mut c_void { crate::storage::ipc::shm_toc::shm_toc_lookup(toc as _, key as _, noError) }
 /// TODO(pg-port): access/xact.h -- GetTransactionSnapshot
-unsafe fn GetTransactionSnapshot() -> Snapshot {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn GetTransactionSnapshot() -> Snapshot { unimplemented!() }
 /// TODO(pg-port): utils/snapmgr.h -- RegisterSnapshot
 unsafe fn RegisterSnapshot(snapshot: Snapshot) -> Snapshot {
     unimplemented!() // TODO(pg-port)
@@ -650,75 +624,55 @@ unsafe fn IsMVCCSnapshot(snapshot: Snapshot) -> bool {
 /// TODO(pg-port): access/parallel.h -- SnapshotAny
 pub const SnapshotAny: Snapshot = core::ptr::null_mut();
 /// TODO(pg-port): storage/spin.h -- SpinLockInit
-unsafe fn SpinLockInit(lock: *mut slock_t) {
-    unimplemented!() // TODO(pg-port)
+pub unsafe fn SpinLockInit(lock: *mut slock_t) {
+    crate::storage::spin::SpinLockInit(lock as _)
 }
 /// TODO(pg-port): storage/spin.h -- SpinLockAcquire
-unsafe fn SpinLockAcquire(lock: *mut slock_t) {
-    unimplemented!() // TODO(pg-port)
+pub unsafe fn SpinLockAcquire(lock: *mut slock_t) {
+    crate::storage::spin::SpinLockAcquire(lock as _)
 }
 /// TODO(pg-port): storage/spin.h -- SpinLockRelease
-unsafe fn SpinLockRelease(lock: *mut slock_t) {
-    unimplemented!() // TODO(pg-port)
+pub unsafe fn SpinLockRelease(lock: *mut slock_t) {
+    crate::storage::spin::SpinLockRelease(lock as _)
 }
 /// TODO(pg-port): storage/condition_variable.h -- ConditionVariableInit
-unsafe fn ConditionVariableInit(cv: *mut ConditionVariable) {
-    unimplemented!() // TODO(pg-port)
+pub unsafe fn ConditionVariableInit(cv: *mut ConditionVariable) {
+    crate::storage::lmgr::condition_variable::ConditionVariableInit(cv as _)
 }
 /// TODO(pg-port): storage/condition_variable.h -- ConditionVariableSleep
-unsafe fn ConditionVariableSleep(cv: *mut ConditionVariable, wait_event: u32) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn ConditionVariableSleep(cv: *mut ConditionVariable, wait_event: u32) { unimplemented!() }
 /// TODO(pg-port): storage/condition_variable.h -- ConditionVariableCancelSleep
-unsafe fn ConditionVariableCancelSleep() {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn ConditionVariableCancelSleep() { unimplemented!() }
 /// TODO(pg-port): storage/condition_variable.h -- ConditionVariableSignal
-unsafe fn ConditionVariableSignal(cv: *mut ConditionVariable) {
-    unimplemented!() // TODO(pg-port)
-}
-/// TODO(pg-port): pgstat.h -- pgstat_progress_update_param
-unsafe fn pgstat_progress_update_param(index: c_int, val: i64) {
-    unimplemented!() // TODO(pg-port)
-}
-/// TODO(pg-port): pgstat.h -- pgstat_progress_update_multi_param
+unsafe fn ConditionVariableSignal(cv: *mut ConditionVariable) { unimplemented!() }
+/// pgstat.h -- pgstat_progress_update_param (progress reporting is cosmetic).
+unsafe fn pgstat_progress_update_param(_index: c_int, _val: i64) {}
+/// pgstat.h -- pgstat_progress_update_multi_param (progress reporting is cosmetic).
 unsafe fn pgstat_progress_update_multi_param(
-    n: c_int,
-    params: *const c_int,
-    vals: *const i64,
-) {
-    unimplemented!() // TODO(pg-port)
-}
+    _n: c_int,
+    _params: *const c_int,
+    _vals: *const i64,
+) {}
 /// TODO(pg-port): pgstat.h -- pgstat_get_my_query_id
-unsafe fn pgstat_get_my_query_id() -> i64 {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn pgstat_get_my_query_id() -> i64 { crate::utils::activity::backend_status::pgstat_get_my_query_id() as _ }
 /// TODO(pg-port): pgstat.h -- pgstat_report_activity
 unsafe fn pgstat_report_activity(state: c_int, cmd_str: *const c_char) {
     unimplemented!() // TODO(pg-port)
 }
 /// TODO(pg-port): pgstat.h -- pgstat_report_query_id
-unsafe fn pgstat_report_query_id(query_id: i64, set: bool) {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn pgstat_report_query_id(query_id: i64, set: bool) { crate::utils::activity::backend_status::pgstat_report_query_id(query_id as _, set) }
 /// TODO(pg-port): executor/instrument.h -- InstrStartParallelQuery
-unsafe fn InstrStartParallelQuery() {
-    unimplemented!() // TODO(pg-port)
-}
+unsafe fn InstrStartParallelQuery() { crate::executor::instrument::InstrStartParallelQuery() }
 /// TODO(pg-port): executor/instrument.h -- InstrEndParallelQuery
 unsafe fn InstrEndParallelQuery(
     bufusage: *mut BufferUsage,
     walusage: *mut WalUsage,
-) {
-    unimplemented!() // TODO(pg-port)
-}
+) { unimplemented!() }
 /// TODO(pg-port): executor/instrument.h -- InstrAccumParallelQuery
 unsafe fn InstrAccumParallelQuery(
     bufusage: *mut BufferUsage,
     walusage: *mut WalUsage,
-) {
-    unimplemented!() // TODO(pg-port)
-}
+) { unimplemented!() }
 /// TODO(pg-port): miscadmin.h -- maintenance_work_mem
 pub static mut maintenance_work_mem: c_int = 65536;
 /// TODO(pg-port): miscadmin.h -- work_mem
@@ -734,7 +688,7 @@ pub static mut debug_query_string: *const c_char = core::ptr::null();
 /// TODO(pg-port): utils/memutils.h -- CurrentMemoryContext
 pub static mut CurrentMemoryContext: MemoryContext = core::ptr::null_mut();
 /// TODO(pg-port): storage/proc.h -- MyProc
-pub static mut MyProc: *mut ProcStruct = core::ptr::null_mut();
+extern "C" { pub static mut MyProc: *mut ProcStruct; }
 /// TODO(pg-port): storage/proc.h -- ProcStruct (partial)
 #[repr(C)]
 pub struct ProcStruct {
@@ -753,17 +707,17 @@ macro_rules! BUFFERALIGN {
 }
 
 /// TODO(pg-port): utils/memutils.h -- add_size
-unsafe fn add_size(s1: Size, s2: Size) -> Size {
+pub unsafe fn add_size(s1: Size, s2: Size) -> Size {
     s1.saturating_add(s2)
 }
 /// TODO(pg-port): utils/memutils.h -- mul_size
-unsafe fn mul_size(s1: Size, s2: Size) -> Size {
+pub unsafe fn mul_size(s1: Size, s2: Size) -> Size {
     s1.saturating_mul(s2)
 }
 
 /// TODO(pg-port): ParallelTableScanFromBTShared -- macro
 /// c.f. shm_toc_allocate as to why BUFFERALIGN is used, rather than just MAXALIGN.
-unsafe fn ParallelTableScanFromBTShared(shared: *mut BTShared) -> ParallelTableScanDesc {
+pub unsafe fn ParallelTableScanFromBTShared(shared: *mut BTShared) -> ParallelTableScanDesc {
     (shared as *mut c_char).add(BUFFERALIGN!(size_of::<BTShared>())) as ParallelTableScanDesc
 }
 
@@ -947,6 +901,7 @@ pub struct BTWriteState {
 /*
  *  btbuild() -- build a new btree index.
  */
+#[no_mangle]
 pub unsafe fn btbuild(
     heap: Relation,
     index: Relation,
@@ -1024,7 +979,7 @@ pub unsafe fn btbuild(
  *
  * Returns the total number of heap tuples scanned.
  */
-unsafe fn _bt_spools_heapscan(
+pub unsafe fn _bt_spools_heapscan(
     heap: Relation,
     index: Relation,
     buildstate: *mut BTBuildState,
@@ -1033,6 +988,9 @@ unsafe fn _bt_spools_heapscan(
     let btspool: *mut BTSpool = palloc0(size_of::<BTSpool>()) as *mut BTSpool;
     let mut coordinate: SortCoordinate = null_mut();
     let mut reltuples: f64 = 0.0;
+
+    /* Parallel index build is not yet supported in this port; build serially. */
+    (*indexInfo).ii_ParallelWorkers = 0;
 
     /*
      * We size the sort area as maintenance_work_mem rather than work_mem to
@@ -1196,7 +1154,7 @@ unsafe fn _bt_spools_heapscan(
 /*
  * clean up a spool structure and its substructures.
  */
-unsafe fn _bt_spooldestroy(btspool: *mut BTSpool) {
+pub unsafe fn _bt_spooldestroy(btspool: *mut BTSpool) {
     tuplesort_end((*btspool).sortstate);
     pfree(btspool as *mut c_void);
 }
@@ -1204,7 +1162,7 @@ unsafe fn _bt_spooldestroy(btspool: *mut BTSpool) {
 /*
  * spool an index entry into the sort file.
  */
-unsafe fn _bt_spool(
+pub unsafe fn _bt_spool(
     btspool: *mut BTSpool,
     self_: ItemPointer,
     values: *mut Datum,
@@ -1217,7 +1175,7 @@ unsafe fn _bt_spool(
  * given a spool loaded by successive calls to _bt_spool,
  * create an entire btree.
  */
-unsafe fn _bt_leafbuild(btspool: *mut BTSpool, btspool2: *mut BTSpool) {
+pub unsafe fn _bt_leafbuild(btspool: *mut BTSpool, btspool2: *mut BTSpool) {
     let mut wstate: BTWriteState = core::mem::zeroed();
 
     // #ifdef BTREE_BUILD_STATS
@@ -1288,7 +1246,7 @@ unsafe extern "C" fn _bt_build_callback(
 /*
  * allocate workspace for a new, clean btree page, not linked to any siblings.
  */
-unsafe fn _bt_blnewpage(wstate: *mut BTWriteState, level: u32) -> BulkWriteBuffer {
+pub unsafe fn _bt_blnewpage(wstate: *mut BTWriteState, level: u32) -> BulkWriteBuffer {
     let buf: BulkWriteBuffer;
     let page: Page;
     let opaque: BTPageOpaque;
@@ -1323,7 +1281,7 @@ unsafe fn _bt_blnewpage(wstate: *mut BTWriteState, level: u32) -> BulkWriteBuffe
 }
 
 /// TODO(pg-port): PageHeader manipulation helper -- adjusts pd_lower in place.
-unsafe fn page_header_pd_lower_add(page: Page, delta: u16) {
+pub unsafe fn page_header_pd_lower_add(page: Page, delta: u16) {
     // PageHeaderData::pd_lower is at offset 12 (pg_config dependent).
     // This is a local stub; TODO(pg-port): use real bufpage types.
     let pd_lower_ptr = (page as *mut u8).add(12) as *mut u16;
@@ -1331,7 +1289,7 @@ unsafe fn page_header_pd_lower_add(page: Page, delta: u16) {
 }
 
 /// TODO(pg-port): PageHeader manipulation helper -- subtracts from pd_lower in place.
-unsafe fn page_header_pd_lower_sub(page: Page, delta: u16) {
+pub unsafe fn page_header_pd_lower_sub(page: Page, delta: u16) {
     let pd_lower_ptr = (page as *mut u8).add(12) as *mut u16;
     *pd_lower_ptr = (*pd_lower_ptr).wrapping_sub(delta);
 }
@@ -1339,7 +1297,7 @@ unsafe fn page_header_pd_lower_sub(page: Page, delta: u16) {
 /*
  * emit a completed btree page, and release the working storage.
  */
-unsafe fn _bt_blwritepage(
+pub unsafe fn _bt_blwritepage(
     wstate: *mut BTWriteState,
     buf: BulkWriteBuffer,
     blkno: BlockNumber,
@@ -1352,7 +1310,7 @@ unsafe fn _bt_blwritepage(
  * allocate and initialize a new BTPageState.  the returned structure
  * is suitable for immediate use by _bt_buildadd.
  */
-unsafe fn _bt_pagestate(wstate: *mut BTWriteState, level: u32) -> *mut BTPageState {
+pub unsafe fn _bt_pagestate(wstate: *mut BTWriteState, level: u32) -> *mut BTPageState {
     let state: *mut BTPageState = palloc0(size_of::<BTPageState>()) as *mut BTPageState;
 
     /* create initial page for level */
@@ -1389,7 +1347,7 @@ unsafe fn _bt_pagestate(wstate: *mut BTWriteState, level: u32) -> *mut BTPageSta
  * it's clear that this page is a rightmost page, remove the unneeded empty
  * P_HIKEY line pointer space.
  */
-unsafe fn _bt_slideleft(rightmostpage: Page) {
+pub unsafe fn _bt_slideleft(rightmostpage: Page) {
     let mut off: OffsetNumber;
     let maxoff: OffsetNumber;
     let previi: ItemId;
@@ -1423,7 +1381,7 @@ unsafe fn _bt_slideleft(rightmostpage: Page) {
  * caller.  Page that turns out to be the rightmost on its level is fixed by
  * calling _bt_slideleft().
  */
-unsafe fn _bt_sortaddtup(
+pub unsafe fn _bt_sortaddtup(
     page: Page,
     itemsize: Size,
     itup: IndexTuple,
@@ -1496,7 +1454,7 @@ unsafe fn _bt_sortaddtup(
  * limit.
  *----------
  */
-unsafe fn _bt_buildadd(
+pub unsafe fn _bt_buildadd(
     wstate: *mut BTWriteState,
     state: *mut BTPageState,
     itup: IndexTuple,
@@ -1760,7 +1718,7 @@ unsafe fn _bt_buildadd(
  * This is almost like _bt_dedup_finish_pending(), but it adds a new tuple
  * using _bt_buildadd().
  */
-unsafe fn _bt_sort_dedup_finish_pending(
+pub unsafe fn _bt_sort_dedup_finish_pending(
     wstate: *mut BTWriteState,
     state: *mut BTPageState,
     dstate: BTDedupState,
@@ -1791,7 +1749,7 @@ unsafe fn _bt_sort_dedup_finish_pending(
 /*
  * Finish writing out the completed btree.
  */
-unsafe fn _bt_uppershutdown(wstate: *mut BTWriteState, state: *mut BTPageState) {
+pub unsafe fn _bt_uppershutdown(wstate: *mut BTWriteState, state: *mut BTPageState) {
     let mut s: *mut BTPageState;
     let mut rootblkno: BlockNumber = P_NONE;
     let mut rootlevel: u32 = 0;
@@ -1863,7 +1821,7 @@ unsafe fn _bt_uppershutdown(wstate: *mut BTWriteState, state: *mut BTPageState) 
  * Read tuples in correct sort order from tuplesort, and load them into
  * btree leaves.
  */
-unsafe fn _bt_load(
+pub unsafe fn _bt_load(
     wstate: *mut BTWriteState,
     btspool: *mut BTSpool,
     btspool2: *mut BTSpool,
@@ -2113,7 +2071,7 @@ unsafe fn _bt_load(
  * build.  If not even a single worker process can be launched, this is
  * never set, and caller should proceed with a serial index build.
  */
-unsafe fn _bt_begin_parallel(
+pub unsafe fn _bt_begin_parallel(
     buildstate: *mut BTBuildState,
     isconcurrent: bool,
     request: c_int,
@@ -2343,7 +2301,7 @@ unsafe fn _bt_begin_parallel(
 /*
  * Shut down workers, destroy parallel context, and end parallel mode.
  */
-unsafe fn _bt_end_parallel(btleader: *mut BTLeader) {
+pub unsafe fn _bt_end_parallel(btleader: *mut BTLeader) {
     let i: c_int;
 
     /* Shutdown worker processes */
@@ -2374,7 +2332,7 @@ unsafe fn _bt_end_parallel(btleader: *mut BTLeader) {
  * Returns size of shared memory required to store state for a parallel
  * btree index build based on the snapshot its parallel scan will use.
  */
-unsafe fn _bt_parallel_estimate_shared(heap: Relation, snapshot: Snapshot) -> Size {
+pub unsafe fn _bt_parallel_estimate_shared(heap: Relation, snapshot: Snapshot) -> Size {
     /* c.f. shm_toc_allocate as to why BUFFERALIGN is used */
     add_size(
         BUFFERALIGN!(size_of::<BTShared>()),
@@ -2394,7 +2352,7 @@ unsafe fn _bt_parallel_estimate_shared(heap: Relation, snapshot: Snapshot) -> Si
  *
  * Returns the total number of heap tuples scanned.
  */
-unsafe fn _bt_parallel_heapscan(
+pub unsafe fn _bt_parallel_heapscan(
     buildstate: *mut BTBuildState,
     brokenhotchain: *mut bool,
 ) -> f64 {
@@ -2430,7 +2388,7 @@ unsafe fn _bt_parallel_heapscan(
 /*
  * Within leader, participate as a parallel worker.
  */
-unsafe fn _bt_leader_participate_as_worker(buildstate: *mut BTBuildState) {
+pub unsafe fn _bt_leader_participate_as_worker(buildstate: *mut BTBuildState) {
     let btleader: *mut BTLeader = (*buildstate).btleader;
     let leaderworker: *mut BTSpool;
     let mut leaderworker2: *mut BTSpool;
@@ -2618,7 +2576,7 @@ pub unsafe fn _bt_parallel_build_main(seg: *mut dsm_segment, toc: *mut shm_toc) 
  *
  * When this returns, workers are done, and need only release resources.
  */
-unsafe fn _bt_parallel_scan_and_sort(
+pub unsafe fn _bt_parallel_scan_and_sort(
     btspool: *mut BTSpool,
     btspool2: *mut BTSpool,
     btshared: *mut BTShared,

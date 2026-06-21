@@ -1214,9 +1214,7 @@ unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO: storage/bufmgr.h
 }
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.h
 }
@@ -1250,9 +1248,7 @@ unsafe fn PageIsNew(_page: Page) -> bool {
 unsafe fn PageIsEmpty(_page: Page) -> bool {
     unimplemented!() // TODO: storage/bufpage.h
 }
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO: storage/bufpage.h
-}
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(_page, _lsn) }
 unsafe fn PageIndexMultiDelete(_page: Page, _itemnos: *mut OffsetNumber, _nitems: c_int) {
     unimplemented!() // TODO: storage/bufpage.h
 }
@@ -1271,15 +1267,11 @@ unsafe fn SGITNODEPTR(_innerTuple: SpGistInnerTuple) -> SpGistNodeTuple {
 unsafe fn IndexTupleSize(_itup: SpGistNodeTuple) -> Size {
     unimplemented!() // TODO: access/itup.h
 }
-unsafe fn RelationNeedsWAL(_rel: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_rel: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_rel) }
 unsafe fn RelationGetRelationName(_rel: Relation) -> *const c_char {
     unimplemented!() // TODO: utils/rel.h
 }
-unsafe fn RelationGetNumberOfBlocks(_rel: Relation) -> BlockNumber {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn RelationGetNumberOfBlocks(_rel: Relation) -> BlockNumber { crate::access::nbtree::nbtpage::RelationGetNumberOfBlocks(_rel) }
 unsafe fn RelationIsAccessibleInLogicalDecoding(_rel: Relation) -> bool {
     unimplemented!() // TODO: utils/rel.h
 }
@@ -1292,27 +1284,13 @@ unsafe fn LockRelationForExtension(_rel: Relation, _lockmode: c_int) {
 unsafe fn UnlockRelationForExtension(_rel: Relation, _lockmode: c_int) {
     unimplemented!() // TODO: storage/lmgr.h
 }
-unsafe fn RecordFreeIndexPage(_rel: Relation, _freeBlock: BlockNumber) {
-    unimplemented!() // TODO: storage/indexfsm.h
-}
-unsafe fn IndexFreeSpaceMapVacuum(_rel: Relation) {
-    unimplemented!() // TODO: storage/indexfsm.h
-}
-unsafe fn vacuum_delay_point(_is_analyze: bool) {
-    unimplemented!() // TODO: commands/vacuum.h
-}
-unsafe fn GetActiveSnapshot() -> Snapshot {
-    unimplemented!() // TODO: utils/snapmgr.h
-}
-unsafe fn GlobalVisTestFor(_rel: Relation) -> *mut GlobalVisState {
-    unimplemented!() // TODO: utils/snapmgr.h
-}
-unsafe fn GlobalVisTestIsRemovableXid(_state: *mut GlobalVisState, _xid: TransactionId) -> bool {
-    unimplemented!() // TODO: utils/snapmgr.h
-}
-unsafe fn ItemPointerEquals(_pointer1: ItemPointer, _pointer2: ItemPointer) -> bool {
-    unimplemented!() // TODO: storage/itemptr.h
-}
+unsafe fn RecordFreeIndexPage(_rel: Relation, _freeBlock: BlockNumber) { crate::storage::freespace::indexfsm::RecordFreeIndexPage(_rel, _freeBlock) }
+unsafe fn IndexFreeSpaceMapVacuum(_rel: Relation) { crate::storage::freespace::indexfsm::IndexFreeSpaceMapVacuum(_rel) }
+unsafe fn vacuum_delay_point(_is_analyze: bool) { crate::commands::vacuum::vacuum_delay_point(_is_analyze) }
+unsafe fn GetActiveSnapshot() -> Snapshot { crate::utils::time::snapmgr::GetActiveSnapshot() }
+unsafe fn GlobalVisTestFor(_rel: Relation) -> *mut GlobalVisState { crate::storage::ipc::procarray::GlobalVisTestFor(_rel) }
+unsafe fn GlobalVisTestIsRemovableXid(_state: *mut GlobalVisState, _xid: TransactionId) -> bool { crate::storage::ipc::procarray::GlobalVisTestIsRemovableXid(_state, _xid) }
+unsafe fn ItemPointerEquals(_pointer1: ItemPointer, _pointer2: ItemPointer) -> bool { crate::storage::itemptr::ItemPointerEquals(_pointer1, _pointer2) }
 unsafe fn ItemPointerIsValid(_pointer: ItemPointer) -> bool {
     unimplemented!() // TODO: storage/itemptr.h
 }
@@ -1325,9 +1303,7 @@ unsafe fn ItemPointerGetBlockNumber(_pointer: ItemPointer) -> BlockNumber {
 unsafe fn ItemPointerGetOffsetNumber(_pointer: ItemPointer) -> OffsetNumber {
     unimplemented!() // TODO: storage/itemptr.h
 }
-unsafe fn TransactionIdIsValid(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO: access/transam.h
-}
+unsafe fn TransactionIdIsValid(_xid: TransactionId) -> bool { crate::access::transam::TransactionIdIsValid(_xid) }
 unsafe fn XLogBeginInsert() {
     unimplemented!() // TODO: access/xloginsert.h
 }
@@ -1354,19 +1330,11 @@ unsafe fn read_stream_begin_relation(
 unsafe fn read_stream_next_buffer(
     _stream: *mut ReadStream,
     _per_buffer_data: *mut c_void,
-) -> Buffer {
-    unimplemented!() // TODO: storage/read_stream.h
-}
-unsafe fn read_stream_reset(_stream: *mut ReadStream) {
-    unimplemented!() // TODO: storage/read_stream.h
-}
-unsafe fn read_stream_end(_stream: *mut ReadStream) {
-    unimplemented!() // TODO: storage/read_stream.h
-}
+) -> Buffer { crate::storage::aio::read_stream::read_stream_next_buffer(_stream, _per_buffer_data as _) }
+unsafe fn read_stream_reset(_stream: *mut ReadStream) { crate::storage::aio::read_stream::read_stream_reset(_stream) }
+unsafe fn read_stream_end(_stream: *mut ReadStream) { crate::storage::aio::read_stream::read_stream_end(_stream) }
 unsafe extern "C" fn block_range_read_stream_cb(
     _stream: *mut ReadStream,
     _callback_private_data: *mut c_void,
     _per_buffer_data: *mut c_void,
-) -> BlockNumber {
-    unimplemented!() // TODO: storage/read_stream.h
-}
+) -> BlockNumber { crate::storage::aio::read_stream::block_range_read_stream_cb(_stream, _callback_private_data, _per_buffer_data) }

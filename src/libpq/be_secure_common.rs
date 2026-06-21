@@ -116,19 +116,13 @@ const ERRCODE_CONFIG_FILE_ERROR: c_int = 0;
 // ----------------------------------------------------------------
 
 // TODO(pg-port): port src/backend/storage/file/fd.c OpenPipeStream/ClosePipeStream.
-unsafe fn OpenPipeStream(_command: *const c_char, _mode: *const c_char) -> *mut c_void {
-    unimplemented!()
-}
+unsafe fn OpenPipeStream(command: *const c_char, mode: *const c_char) -> *mut c_void { crate::storage::file::fd::OpenPipeStream(command as _, mode as _) as _ }
 
 // TODO(pg-port): port src/backend/storage/file/fd.c ClosePipeStream.
-unsafe fn ClosePipeStream(_file: *mut c_void) -> c_int {
-    unimplemented!()
-}
+unsafe fn ClosePipeStream(file: *mut c_void) -> c_int { crate::storage::file::fd::ClosePipeStream(file as _) }
 
 // TODO(pg-port): port errcode_for_file_access() from src/backend/utils/error/elog.c.
-fn errcode_for_file_access() -> c_int {
-    0
-}
+fn errcode_for_file_access() -> c_int { unimplemented!() }
 
 extern "C" {
     /// fgets(3): read a line from a FILE* stream into `buf`.

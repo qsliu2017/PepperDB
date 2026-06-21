@@ -386,15 +386,21 @@ use IOFuncSelector::*;
 /// STUB: get_type_io_data (utils/cache/lsyscache.c).
 /// TODO(pg-port): real fn lives in utils/cache/lsyscache.rs.
 unsafe fn get_type_io_data(
-    _typid: Oid,
-    _which_func: IOFuncSelector,
-    _typlen: *mut int16,
-    _typbyval: *mut bool,
-    _typalign: *mut c_char,
-    _typdelim: *mut c_char,
-    _typioparam: *mut Oid,
-    _func: *mut Oid,
+    typid: Oid,
+    which_func: IOFuncSelector,
+    typlen: *mut int16,
+    typbyval: *mut bool,
+    typalign: *mut c_char,
+    typdelim: *mut c_char,
+    typioparam: *mut Oid,
+    func: *mut Oid,
 ) {
+    crate::utils::cache::lsyscache::get_type_io_data(
+        typid, core::mem::transmute(which_func), typlen, typbyval,
+        typalign, typdelim, typioparam, func,
+    );
+    return;
+    #[allow(unreachable_code)]
     unimplemented!("get_type_io_data (lsyscache.c) not yet ported");
 }
 
@@ -405,21 +411,15 @@ unsafe fn get_typlenbyvalalign(
     _typlen: *mut int16,
     _typbyval: *mut bool,
     _typalign: *mut c_char,
-) {
-    unimplemented!("get_typlenbyvalalign (lsyscache.c) not yet ported");
-}
+) { crate::utils::cache::lsyscache::get_typlenbyvalalign(_typid as _, _typlen as _, _typbyval as _, _typalign as _) }
 
 /// STUB: get_element_type (utils/cache/lsyscache.c).
 /// TODO(pg-port): real fn lives in utils/cache/lsyscache.rs.
-unsafe fn get_element_type(_typid: Oid) -> Oid {
-    unimplemented!("get_element_type (lsyscache.c) not yet ported");
-}
+unsafe fn get_element_type(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_element_type(_typid as _) as _ }
 
 /// STUB: get_array_type (utils/cache/lsyscache.c).
 /// TODO(pg-port): real fn lives in utils/cache/lsyscache.rs.
-unsafe fn get_array_type(_typid: Oid) -> Oid {
-    unimplemented!("get_array_type (lsyscache.c) not yet ported");
-}
+unsafe fn get_array_type(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_array_type(_typid as _) as _ }
 
 /// STUB: InputFunctionCallSafe (fmgr.c).
 /// TODO(pg-port): use the real crate::utils::fmgr::InputFunctionCallSafe once its
@@ -431,15 +431,11 @@ unsafe fn InputFunctionCallSafe(
     _typmod: int32,
     _escontext: *mut Node,
     _result: *mut Datum,
-) -> bool {
-    unimplemented!("InputFunctionCallSafe (fmgr.c) not yet ported");
-}
+) -> bool { crate::utils::fmgr::InputFunctionCallSafe(_flinfo as _, _str as _, _typioparam as _, _typmod as _, _escontext as _, _result as _) }
 
 /// STUB: estimate_array_length (optimizer/util/clauses.c).
 /// TODO(pg-port): real fn lives in optimizer/util/clauses.rs.
-unsafe fn estimate_array_length(_root: *mut c_void, _arrayexpr: *mut Node) -> f64 {
-    unimplemented!("estimate_array_length (clauses.c) not yet ported");
-}
+unsafe fn estimate_array_length(_root: *mut c_void, _arrayexpr: *mut Node) -> f64 { crate::utils::adt::selfuncs::estimate_array_length(_root as _, _arrayexpr as _) as _ }
 
 /// STUB: is_funcclause (nodes/nodeFuncs.h).
 /// TODO(pg-port): real fn lives in nodes/nodeFuncs.rs.
@@ -4076,6 +4072,7 @@ pub unsafe fn construct_array(
  * Like construct_array(), where elmtype must be a built-in type, and
  * elmlen/elmbyval/elmalign is looked up from hardcoded data.
  */
+#[no_mangle]
 pub unsafe fn construct_array_builtin(elems: *mut Datum, nelems: c_int, elmtype: Oid) -> *mut ArrayType {
     use crate::catalog::pg_type::{TYPALIGN_CHAR, TYPALIGN_DOUBLE, TYPALIGN_INT, TYPALIGN_SHORT};
     let elmlen: c_int;
@@ -4163,6 +4160,7 @@ pub unsafe fn construct_array_builtin(elems: *mut Datum, nelems: c_int, elmtype:
  * construct_md_array	--- simple method for constructing an array object
  *							with arbitrary dimensions and possible NULLs
  */
+#[no_mangle]
 pub unsafe fn construct_md_array(
     elems: *mut Datum,
     nulls: *mut bool,
@@ -4369,6 +4367,7 @@ pub unsafe fn deconstruct_array(
  * Like deconstruct_array(), where elmtype must be a built-in type, and
  * elmlen/elmbyval/elmalign is looked up from hardcoded data.
  */
+#[no_mangle]
 pub unsafe fn deconstruct_array_builtin(
     array: *mut ArrayType,
     elmtype: Oid,
@@ -5322,6 +5321,7 @@ pub unsafe fn arraycontained(fcinfo: FunctionCallInfo) -> Datum {
  *
  * The passed-in array must remain valid for the lifetime of the iterator.
  */
+#[no_mangle]
 pub unsafe fn array_create_iterator(
     arr: *mut ArrayType,
     slice_ndim: c_int,
@@ -5404,6 +5404,7 @@ pub unsafe fn array_create_iterator(
  * As long as there is another element (or slice), return it into
  * *value / *isnull, and return true.  Return false when no more data.
  */
+#[no_mangle]
 pub unsafe fn array_iterate(iterator: ArrayIterator, value: *mut Datum, isnull: *mut bool) -> bool {
     /* Done if we have reached the end of the array */
     if (*iterator).current_item >= (*iterator).nitems {

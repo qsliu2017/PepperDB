@@ -202,91 +202,64 @@ pub struct LogicalRepStreamAbortData {
     pub abort_time: TimestampTz,
 }
 
-pub unsafe fn logicalrep_write_begin(out: StringInfo, txn: *mut ReorderBufferTXN) {
-    unimplemented!()
-}
-pub unsafe fn logicalrep_read_begin(in_: StringInfo, begin_data: *mut LogicalRepBeginData) {
-    unimplemented!()
-}
+pub unsafe fn logicalrep_write_begin(out: StringInfo, txn: *mut ReorderBufferTXN) { crate::replication::logical::proto::logicalrep_write_begin(out as _, txn as _) }
+pub unsafe fn logicalrep_read_begin(in_: StringInfo, begin_data: *mut LogicalRepBeginData) { crate::replication::logical::proto::logicalrep_read_begin(in_ as _, begin_data as _) }
 pub unsafe fn logicalrep_write_commit(
     out: StringInfo,
     txn: *mut ReorderBufferTXN,
     commit_lsn: XLogRecPtr,
-) {
-    unimplemented!()
-}
-pub unsafe fn logicalrep_read_commit(in_: StringInfo, commit_data: *mut LogicalRepCommitData) {
-    unimplemented!()
-}
-pub unsafe fn logicalrep_write_begin_prepare(out: StringInfo, txn: *mut ReorderBufferTXN) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_write_commit(out, txn as _, commit_lsn as _) }
+pub unsafe fn logicalrep_read_commit(in_: StringInfo, commit_data: *mut LogicalRepCommitData) { crate::replication::logical::proto::logicalrep_read_commit(in_ as _, commit_data as _) }
+pub unsafe fn logicalrep_write_begin_prepare(out: StringInfo, txn: *mut ReorderBufferTXN) { crate::replication::logical::proto::logicalrep_write_begin_prepare(out as _, txn as _) }
+#[no_mangle]
 pub unsafe fn logicalrep_read_begin_prepare(
     in_: StringInfo,
     begin_data: *mut LogicalRepPreparedTxnData,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_read_begin_prepare(in_, begin_data as _) }
 pub unsafe fn logicalrep_write_prepare(
     out: StringInfo,
     txn: *mut ReorderBufferTXN,
     prepare_lsn: XLogRecPtr,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_write_prepare(out, txn as _, prepare_lsn as _) }
+#[no_mangle]
 pub unsafe fn logicalrep_read_prepare(
     in_: StringInfo,
     prepare_data: *mut LogicalRepPreparedTxnData,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_read_prepare(in_, prepare_data as _) }
 pub unsafe fn logicalrep_write_commit_prepared(
     out: StringInfo,
     txn: *mut ReorderBufferTXN,
     commit_lsn: XLogRecPtr,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_write_commit_prepared(out, txn as _, commit_lsn as _) }
+#[no_mangle]
 pub unsafe fn logicalrep_read_commit_prepared(
     in_: StringInfo,
     prepare_data: *mut LogicalRepCommitPreparedTxnData,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_read_commit_prepared(in_, prepare_data as _) }
 pub unsafe fn logicalrep_write_rollback_prepared(
     out: StringInfo,
     txn: *mut ReorderBufferTXN,
     prepare_end_lsn: XLogRecPtr,
     prepare_time: TimestampTz,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_write_rollback_prepared(out, txn as _, prepare_end_lsn as _, prepare_time as _) }
+#[no_mangle]
 pub unsafe fn logicalrep_read_rollback_prepared(
     in_: StringInfo,
     rollback_data: *mut LogicalRepRollbackPreparedTxnData,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_read_rollback_prepared(in_, rollback_data as _) }
 pub unsafe fn logicalrep_write_stream_prepare(
     out: StringInfo,
     txn: *mut ReorderBufferTXN,
     prepare_lsn: XLogRecPtr,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_write_stream_prepare(out, txn as _, prepare_lsn as _) }
+#[no_mangle]
 pub unsafe fn logicalrep_read_stream_prepare(
     in_: StringInfo,
     prepare_data: *mut LogicalRepPreparedTxnData,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_read_stream_prepare(in_, prepare_data as _) }
 
-pub unsafe fn logicalrep_write_origin(out: StringInfo, origin: *const c_char, origin_lsn: XLogRecPtr) {
-    unimplemented!()
-}
-pub unsafe fn logicalrep_read_origin(in_: StringInfo, origin_lsn: *mut XLogRecPtr) -> *mut c_char {
-    unimplemented!()
-}
+pub unsafe fn logicalrep_write_origin(out: StringInfo, origin: *const c_char, origin_lsn: XLogRecPtr) { crate::replication::logical::proto::logicalrep_write_origin(out as _, origin as _, origin_lsn as _) }
+pub unsafe fn logicalrep_read_origin(in_: StringInfo, origin_lsn: *mut XLogRecPtr) -> *mut c_char { crate::replication::logical::proto::logicalrep_read_origin(in_ as _, origin_lsn as _) }
 pub unsafe fn logicalrep_write_insert(
     out: StringInfo,
     xid: TransactionId,
@@ -295,15 +268,12 @@ pub unsafe fn logicalrep_write_insert(
     binary: bool,
     columns: *mut Bitmapset,
     include_gencols_type: PublishGencolsType,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
+#[no_mangle]
 pub unsafe fn logicalrep_read_insert(
     in_: StringInfo,
     newtup: *mut LogicalRepTupleData,
-) -> LogicalRepRelId {
-    unimplemented!()
-}
+) -> LogicalRepRelId { crate::replication::logical::proto::logicalrep_read_insert(in_, newtup as _) }
 pub unsafe fn logicalrep_write_update(
     out: StringInfo,
     xid: TransactionId,
@@ -313,17 +283,14 @@ pub unsafe fn logicalrep_write_update(
     binary: bool,
     columns: *mut Bitmapset,
     include_gencols_type: PublishGencolsType,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
+#[no_mangle]
 pub unsafe fn logicalrep_read_update(
     in_: StringInfo,
     has_oldtuple: *mut bool,
     oldtup: *mut LogicalRepTupleData,
     newtup: *mut LogicalRepTupleData,
-) -> LogicalRepRelId {
-    unimplemented!()
-}
+) -> LogicalRepRelId { crate::replication::logical::proto::logicalrep_read_update(in_, has_oldtuple as _, oldtup as _, newtup as _) }
 pub unsafe fn logicalrep_write_delete(
     out: StringInfo,
     xid: TransactionId,
@@ -332,15 +299,12 @@ pub unsafe fn logicalrep_write_delete(
     binary: bool,
     columns: *mut Bitmapset,
     include_gencols_type: PublishGencolsType,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
+#[no_mangle]
 pub unsafe fn logicalrep_read_delete(
     in_: StringInfo,
     oldtup: *mut LogicalRepTupleData,
-) -> LogicalRepRelId {
-    unimplemented!()
-}
+) -> LogicalRepRelId { crate::replication::logical::proto::logicalrep_read_delete(in_, oldtup as _) }
 pub unsafe fn logicalrep_write_truncate(
     out: StringInfo,
     xid: TransactionId,
@@ -348,16 +312,13 @@ pub unsafe fn logicalrep_write_truncate(
     relids: *mut Oid,
     cascade: bool,
     restart_seqs: bool,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_write_truncate(out, xid as _, nrelids as _, relids as _, cascade, restart_seqs) }
+#[no_mangle]
 pub unsafe fn logicalrep_read_truncate(
     in_: StringInfo,
     cascade: *mut bool,
     restart_seqs: *mut bool,
-) -> *mut List {
-    unimplemented!()
-}
+) -> *mut List { crate::replication::logical::proto::logicalrep_read_truncate(in_, cascade as _, restart_seqs as _) }
 pub unsafe fn logicalrep_write_message(
     out: StringInfo,
     xid: TransactionId,
@@ -366,56 +327,38 @@ pub unsafe fn logicalrep_write_message(
     prefix: *const c_char,
     sz: Size,
     message: *const c_char,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_write_message(out, xid as _, lsn as _, transactional, prefix as _, sz, message as _) }
 pub unsafe fn logicalrep_write_rel(
     out: StringInfo,
     xid: TransactionId,
     rel: Relation,
     columns: *mut Bitmapset,
     include_gencols_type: PublishGencolsType,
-) {
-    unimplemented!()
-}
-pub unsafe fn logicalrep_read_rel(in_: StringInfo) -> *mut LogicalRepRelation {
-    unimplemented!()
-}
-pub unsafe fn logicalrep_write_typ(out: StringInfo, xid: TransactionId, typoid: Oid) {
-    unimplemented!()
-}
-pub unsafe fn logicalrep_read_typ(in_: StringInfo, ltyp: *mut LogicalRepTyp) {
-    unimplemented!()
-}
+) { unimplemented!() }
+pub unsafe fn logicalrep_read_rel(in_: StringInfo) -> *mut LogicalRepRelation { crate::replication::logical::proto::logicalrep_read_rel(in_ as _) }
+pub unsafe fn logicalrep_write_typ(out: StringInfo, xid: TransactionId, typoid: Oid) { crate::replication::logical::proto::logicalrep_write_typ(out as _, xid as _, typoid as _) }
+pub unsafe fn logicalrep_read_typ(in_: StringInfo, ltyp: *mut LogicalRepTyp) { crate::replication::logical::proto::logicalrep_read_typ(in_ as _, ltyp as _) }
 pub unsafe fn logicalrep_write_stream_start(
     out: StringInfo,
     xid: TransactionId,
     first_segment: bool,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_write_stream_start(out, xid as _, first_segment) }
+#[no_mangle]
 pub unsafe fn logicalrep_read_stream_start(
     in_: StringInfo,
     first_segment: *mut bool,
-) -> TransactionId {
-    unimplemented!()
-}
-pub unsafe fn logicalrep_write_stream_stop(out: StringInfo) {
-    unimplemented!()
-}
+) -> TransactionId { crate::replication::logical::proto::logicalrep_read_stream_start(in_, first_segment as _) }
+pub unsafe fn logicalrep_write_stream_stop(out: StringInfo) { crate::replication::logical::proto::logicalrep_write_stream_stop(out as _) }
 pub unsafe fn logicalrep_write_stream_commit(
     out: StringInfo,
     txn: *mut ReorderBufferTXN,
     commit_lsn: XLogRecPtr,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_write_stream_commit(out, txn as _, commit_lsn as _) }
+#[no_mangle]
 pub unsafe fn logicalrep_read_stream_commit(
     in_: StringInfo,
     commit_data: *mut LogicalRepCommitData,
-) -> TransactionId {
-    unimplemented!()
-}
+) -> TransactionId { crate::replication::logical::proto::logicalrep_read_stream_commit(in_, commit_data as _) }
 pub unsafe fn logicalrep_write_stream_abort(
     out: StringInfo,
     xid: TransactionId,
@@ -423,23 +366,16 @@ pub unsafe fn logicalrep_write_stream_abort(
     abort_lsn: XLogRecPtr,
     abort_time: TimestampTz,
     write_abort_info: bool,
-) {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_write_stream_abort(out, xid as _, subxid as _, abort_lsn as _, abort_time as _, write_abort_info) }
+#[no_mangle]
 pub unsafe fn logicalrep_read_stream_abort(
     in_: StringInfo,
     abort_data: *mut LogicalRepStreamAbortData,
     read_abort_info: bool,
-) {
-    unimplemented!()
-}
-pub unsafe fn logicalrep_message_type(action: LogicalRepMsgType) -> *const c_char {
-    unimplemented!()
-}
+) { crate::replication::logical::proto::logicalrep_read_stream_abort(in_, abort_data as _, read_abort_info) }
+pub unsafe fn logicalrep_message_type(action: LogicalRepMsgType) -> *const c_char { crate::replication::logical::proto::logicalrep_message_type(action) }
 pub unsafe fn logicalrep_should_publish_column(
     att: Form_pg_attribute,
     columns: *mut Bitmapset,
     include_gencols_type: PublishGencolsType,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { unimplemented!() }

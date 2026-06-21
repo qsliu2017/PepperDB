@@ -66,50 +66,42 @@ mod stubs {
 
     /// utils/lsyscache.c: get_typavgwidth(typid, typmod).
     /// TODO(pg-port): translate lsyscache.c.
-    pub unsafe fn get_typavgwidth(_typid: Oid, _typmod: int32) -> int32 {
-        unimplemented!("get_typavgwidth: lsyscache.c not yet ported")
+    pub unsafe fn get_typavgwidth(typid: Oid, typmod: int32) -> int32 {
+        crate::utils::cache::lsyscache::get_typavgwidth(typid, typmod)
     }
 
     /// optimizer/cost.c: cost_qual_eval_node(&cost, node, root).
     /// TODO(pg-port): translate cost.c.
     pub unsafe fn cost_qual_eval_node(
-        _cost: *mut QualCost,
-        _qual: *mut Node,
-        _root: *mut PlannerInfo,
+        cost: *mut QualCost,
+        qual: *mut Node,
+        root: *mut PlannerInfo,
     ) {
-        unimplemented!("cost_qual_eval_node: cost.c not yet ported")
+        crate::optimizer::path::costsize::cost_qual_eval_node(cost as _, qual as _, root as _)
     }
 
-    /// optimizer/cost.c: clamp_width_est(tuple_width).
-    /// TODO(pg-port): translate cost.c.
-    pub unsafe fn clamp_width_est(_tuple_width: int64) -> c_int {
-        unimplemented!("clamp_width_est: cost.c not yet ported")
+    pub unsafe fn clamp_width_est(tuple_width: int64) -> c_int {
+        crate::optimizer::optimizer::clamp_width_est(tuple_width)
     }
 
-    /// optimizer/pathnode.c: find_base_rel(root, relid).
-    /// TODO(pg-port): translate relnode.c/pathnode.c.
-    pub unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo {
-        unimplemented!("find_base_rel: relnode.c not yet ported")
+    pub unsafe fn find_base_rel(root: *mut PlannerInfo, relid: c_int) -> *mut RelOptInfo {
+        crate::optimizer::util::relnode::find_base_rel(root as _, relid) as _
     }
 
-    /// optimizer/planmain.c (initsplan.c): add_vars_to_targetlist.
-    /// TODO(pg-port): translate initsplan.c.
     pub unsafe fn add_vars_to_targetlist(
-        _root: *mut PlannerInfo,
-        _vars: *mut List,
-        _where_needed: Relids,
+        root: *mut PlannerInfo,
+        vars: *mut List,
+        where_needed: Relids,
     ) {
-        unimplemented!("add_vars_to_targetlist: initsplan.c not yet ported")
+        crate::optimizer::plan::initsplan::add_vars_to_targetlist(root as _, vars as _, where_needed as _)
     }
 
-    /// optimizer/planmain.c (initsplan.c): add_vars_to_attr_needed.
-    /// TODO(pg-port): translate initsplan.c.
     pub unsafe fn add_vars_to_attr_needed(
-        _root: *mut PlannerInfo,
-        _vars: *mut List,
-        _where_needed: Relids,
+        root: *mut PlannerInfo,
+        vars: *mut List,
+        where_needed: Relids,
     ) {
-        unimplemented!("add_vars_to_attr_needed: initsplan.c not yet ported")
+        crate::optimizer::plan::initsplan::add_vars_to_attr_needed(root as _, vars as _, where_needed as _)
     }
 }
 

@@ -35,22 +35,9 @@ use std::ffi::{c_int, c_void};
 /// dsa_pointer: an address relative to a dynamic shared memory area.
 pub type dsa_pointer = uint64;
 
-/// Opaque backing dynamic shared memory area.
-#[repr(C)]
-pub struct dsa_area {
-    pub _private: [u8; 0],
-}
-
-/// LWLock - stubbed type for lock partitions.
-#[repr(C)]
-pub struct LWLock {
-    pub _private: [u8; 0],
-}
-
-/// LWLockMode values.
-pub type LWLockMode = c_int;
-pub const LW_EXCLUSIVE: LWLockMode = 0;
-pub const LW_SHARED: LWLockMode = 1;
+pub use crate::utils::mmgr::dsa::dsa_area;
+pub use crate::storage::lmgr::lwlock::{LWLock, LWLockMode};
+pub use crate::storage::lmgr::lwlock::LWLockMode::{LW_EXCLUSIVE, LW_SHARED};
 
 /// DSA allocation flags.
 pub const DSA_ALLOC_NO_OOM: c_int = 0x02;
@@ -1244,51 +1231,51 @@ unsafe fn copy_key(hash_table: *mut dshash_table, dest: *mut c_void, src: *const
 // ----------------------------------------------------------------------------
 
 unsafe fn dsa_allocate(_area: *mut dsa_area, _size: Size) -> dsa_pointer {
-    unimplemented!() // TODO: utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_allocate_extended(_area, _size, 0)
 }
 
 unsafe fn dsa_allocate_extended(_area: *mut dsa_area, _size: Size, _flags: c_int) -> dsa_pointer {
-    unimplemented!() // TODO: utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_allocate_extended(_area, _size, _flags)
 }
 
 unsafe fn dsa_free(_area: *mut dsa_area, _dp: dsa_pointer) {
-    unimplemented!() // TODO: utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_free(_area, _dp)
 }
 
 unsafe fn dsa_get_address(_area: *mut dsa_area, _dp: dsa_pointer) -> *mut c_void {
-    unimplemented!() // TODO: utils/dsa.c
+    crate::utils::mmgr::dsa::dsa_get_address(_area, _dp)
 }
 
 unsafe fn LWLockInitialize(_lock: *mut LWLock, _tranche_id: c_int) {
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockInitialize(_lock as _, _tranche_id)
 }
 
 pub unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: LWLockMode) -> bool {
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, _mode)
 }
 
 pub unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 
 pub unsafe fn LWLockHeldByMe(_lock: *mut LWLock) -> bool {
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockHeldByMe(_lock as _)
 }
 
 pub unsafe fn LWLockHeldByMeInMode(_lock: *mut LWLock, _mode: LWLockMode) -> bool {
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockHeldByMeInMode(_lock as _, _mode)
 }
 
 unsafe fn LWLockAnyHeldByMe(_lock: *mut LWLock, _nlocks: c_int, _stride: Size) -> bool {
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAnyHeldByMe(_lock as _, _nlocks, _stride as _)
 }
 
 unsafe fn tag_hash(_key: *const c_void, _keysize: Size) -> uint32 {
-    unimplemented!() // TODO: common/hashfn.c
+    crate::common::hashfn::tag_hash(_key, _keysize)
 }
 
 unsafe fn string_hash(_key: *const c_char, _keysize: Size) -> uint32 {
-    unimplemented!() // TODO: common/hashfn.c
+    crate::common::hashfn::string_hash(_key as *const c_void, _keysize)
 }
 
 extern "C" {

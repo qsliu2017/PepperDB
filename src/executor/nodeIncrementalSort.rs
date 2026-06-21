@@ -160,19 +160,19 @@ pub struct shm_toc_estimator {
     _opaque: [u8; 0],
 }
 unsafe fn shm_toc_estimate_chunk(_e: *mut shm_toc_estimator, _sz: Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 unsafe fn shm_toc_estimate_keys(_e: *mut shm_toc_estimator, _cnt: Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _nbytes: Size) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 unsafe fn shm_toc_insert(_toc: *mut shm_toc, _key: uint64, _address: *mut c_void) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: uint64, _noError: bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }
 
 // common/shmem.c
@@ -195,19 +195,19 @@ unsafe fn tuplesort_begin_heap(
     _coordinate: *mut c_void,
     _sortopt: c_int,
 ) -> *mut Tuplesortstate {
-    unimplemented!() // TODO: utils/sort/tuplesortvariants.c
+    crate::utils::sort::tuplesortvariants::tuplesort_begin_heap(_tupDesc as _, _nkeys as _, _attNums as _, _sortOperators as _, _sortCollations as _, _nullsFirstFlags as _, _workMem as _, _coordinate as _, _sortopt as _) as _
 }
 unsafe fn tuplesort_set_bound(_state: *mut Tuplesortstate, _bound: int64) {
-    unimplemented!() // TODO: utils/sort/tuplesort.c
+    crate::utils::sort::tuplesort::tuplesort_set_bound(_state as _, _bound as _)
 }
 unsafe fn tuplesort_used_bound(_state: *mut Tuplesortstate) -> bool {
-    unimplemented!() // TODO: utils/sort/tuplesort.c
+    crate::utils::sort::tuplesort::tuplesort_used_bound(_state as _) as _
 }
 unsafe fn tuplesort_puttupleslot(_state: *mut Tuplesortstate, _slot: *mut TupleTableSlot) {
-    unimplemented!() // TODO: utils/sort/tuplesortvariants.c
+    crate::utils::sort::tuplesortvariants::tuplesort_puttupleslot(_state as _, _slot as _)
 }
 unsafe fn tuplesort_performsort(_state: *mut Tuplesortstate) {
-    unimplemented!() // TODO: utils/sort/tuplesort.c
+    crate::utils::sort::tuplesort::tuplesort_performsort(_state as _)
 }
 unsafe fn tuplesort_gettupleslot(
     _state: *mut Tuplesortstate,
@@ -216,16 +216,16 @@ unsafe fn tuplesort_gettupleslot(
     _slot: *mut TupleTableSlot,
     _abbrev: *mut Datum,
 ) -> bool {
-    unimplemented!() // TODO: utils/sort/tuplesortvariants.c
+    crate::utils::sort::tuplesortvariants::tuplesort_gettupleslot(_state as _, _forward as _, _copy as _, _slot as _, _abbrev as _) as _
 }
 unsafe fn tuplesort_end(_state: *mut Tuplesortstate) {
-    unimplemented!() // TODO: utils/sort/tuplesort.c
+    crate::utils::sort::tuplesort::tuplesort_end(_state as _)
 }
 unsafe fn tuplesort_reset(_state: *mut Tuplesortstate) {
-    unimplemented!() // TODO: utils/sort/tuplesort.c
+    crate::utils::sort::tuplesort::tuplesort_reset(_state as _)
 }
 unsafe fn tuplesort_get_stats(_state: *mut Tuplesortstate, _stats: *mut TuplesortInstrumentation) {
-    unimplemented!() // TODO: utils/sort/tuplesort.c
+    crate::utils::sort::tuplesort::tuplesort_get_stats(_state as _, _stats as _)
 }
 
 // access/parallel.h

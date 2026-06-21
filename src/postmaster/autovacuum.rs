@@ -160,8 +160,6 @@ extern "C" {
     fn LWLockAcquire(lock: *mut LWLock, mode: c_int) -> bool;
     fn LWLockRelease(lock: *mut LWLock);
     fn LWLockHeldByMe(lock: *mut LWLock) -> bool;
-    static mut AutovacuumLock: LWLock;
-    static mut AutovacuumScheduleLock: LWLock;
 
     // hash table
     fn hash_create(
@@ -372,6 +370,9 @@ extern "C" {
 
     static UnBlockSig: sigset_t;
 }
+
+use crate::backend_link_shims::AutovacuumLock;
+use crate::backend_link_shims::AutovacuumScheduleLock;
 
 // ---- type aliases / opaque stubs -------------------------------------------
 
@@ -1045,10 +1046,10 @@ pub unsafe extern "C" fn AutoVacLauncherMain(
 
             /* rebalance cost limits, if needed */
             if (*AutoVacuumShmem).av_signal[AutoVacuumSignal::AutoVacRebalance as usize] != 0 {
-                LWLockAcquire(&mut AutovacuumLock, 1 /* LW_EXCLUSIVE */);
+                LWLockAcquire(AutovacuumLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
                 (*AutoVacuumShmem).av_signal[AutoVacuumSignal::AutoVacRebalance as usize] = 0;
                 autovac_recalculate_workers_for_balance();
-                LWLockRelease(&mut AutovacuumLock);
+                LWLockRelease(AutovacuumLock as *mut LWLock);
             }
 
             if (*AutoVacuumShmem).av_signal[AutoVacuumSignal::AutoVacForkFailed as usize] != 0 {
@@ -1077,7 +1078,7 @@ pub unsafe extern "C" fn AutoVacLauncherMain(
          */
 
         current_time = GetCurrentTimestamp();
-        LWLockAcquire(&mut AutovacuumLock, 2 /* LW_SHARED */);
+        LWLockAcquire(AutovacuumLock as *mut LWLock, 2 /* LW_SHARED */);
 
         can_launch = av_worker_available();
 
@@ -1102,8 +1103,8 @@ pub unsafe extern "C" fn AutoVacLauncherMain(
              */
             waittime = (if autovacuum_naptime < 60 { autovacuum_naptime } else { 60 }) * 1000;
             if TimestampDifferenceExceeds((*worker).wi_launchtime, current_time, waittime) {
-                LWLockRelease(&mut AutovacuumLock);
-                LWLockAcquire(&mut AutovacuumLock, 1 /* LW_EXCLUSIVE */);
+                LWLockRelease(AutovacuumLock as *mut LWLock);
+                LWLockAcquire(AutovacuumLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
 
                 /*
                  * No other process can put a worker in starting mode, so if
@@ -1132,7 +1133,7 @@ pub unsafe extern "C" fn AutoVacLauncherMain(
                 can_launch = false;
             }
         }
-        LWLockRelease(&mut AutovacuumLock); /* either shared or exclusive */
+        LWLockRelease(AutovacuumLock as *mut LWLock); /* either shared or exclusive */
 
         /* if we can't do anything, just go back to sleep */
         if !can_launch {
@@ -1594,12 +1595,12 @@ unsafe fn do_start_worker() -> Oid {
     let mut retval: Oid = 0; /* InvalidOid */
 
     /* return quickly when there are no free workers */
-    LWLockAcquire(&mut AutovacuumLock, 2 /* LW_SHARED */);
+    LWLockAcquire(AutovacuumLock as *mut LWLock, 2 /* LW_SHARED */);
     if !av_worker_available() {
-        LWLockRelease(&mut AutovacuumLock);
+        LWLockRelease(AutovacuumLock as *mut LWLock);
         return 0; /* InvalidOid */
     }
-    LWLockRelease(&mut AutovacuumLock);
+    LWLockRelease(AutovacuumLock as *mut LWLock);
 
     /*
      * Create and switch to a temporary context to avoid leaking the memory
@@ -1757,7 +1758,7 @@ unsafe fn do_start_worker() -> Oid {
         let worker: WorkerInfo;
         let wptr: *mut dlist_node;
 
-        LWLockAcquire(&mut AutovacuumLock, 1 /* LW_EXCLUSIVE */);
+        LWLockAcquire(AutovacuumLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
 
         /*
          * Get a worker entry from the freelist.  We checked above, so there
@@ -1773,7 +1774,7 @@ unsafe fn do_start_worker() -> Oid {
 
         (*AutoVacuumShmem).av_startingWorker = worker;
 
-        LWLockRelease(&mut AutovacuumLock);
+        LWLockRelease(AutovacuumLock as *mut LWLock);
 
         SendPostmasterSignal(12 /* PMSIGNAL_START_AUTOVAC_WORKER */);
 
@@ -2005,7 +2006,7 @@ pub unsafe extern "C" fn AutoVacWorkerMain(
     /*
      * Get the info about the database we're going to work on.
      */
-    LWLockAcquire(&mut AutovacuumLock, 1 /* LW_EXCLUSIVE */);
+    LWLockAcquire(AutovacuumLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
 
     /*
      * beware of startingWorker being INVALID; this should normally not
@@ -2029,7 +2030,7 @@ pub unsafe extern "C" fn AutoVacWorkerMain(
          * a new worker if required
          */
         (*AutoVacuumShmem).av_startingWorker = std::ptr::null_mut();
-        LWLockRelease(&mut AutovacuumLock);
+        LWLockRelease(AutovacuumLock as *mut LWLock);
 
         on_shmem_exit(FreeWorkerInfo, 0);
 
@@ -2041,7 +2042,7 @@ pub unsafe extern "C" fn AutoVacWorkerMain(
         /* no worker entry for me, go away */
         elog!(19 /* WARNING */, "autovacuum worker started without a worker entry");
         dbid = 0; /* InvalidOid */
-        LWLockRelease(&mut AutovacuumLock);
+        LWLockRelease(AutovacuumLock as *mut LWLock);
     }
 
     if dbid != 0 /* OidIsValid */ {
@@ -2105,7 +2106,7 @@ pub unsafe extern "C" fn AutoVacWorkerMain(
  */
 unsafe extern "C" fn FreeWorkerInfo(code: c_int, arg: Datum) {
     if !MyWorkerInfo.is_null() {
-        LWLockAcquire(&mut AutovacuumLock, 1 /* LW_EXCLUSIVE */);
+        LWLockAcquire(AutovacuumLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
 
         /*
          * Wake the launcher up so that he can launch a new worker immediately
@@ -2140,7 +2141,7 @@ unsafe extern "C" fn FreeWorkerInfo(code: c_int, arg: Datum) {
          * workers
          */
         (*AutoVacuumShmem).av_signal[AutoVacuumSignal::AutoVacRebalance as usize] = 1;
-        LWLockRelease(&mut AutovacuumLock);
+        LWLockRelease(AutovacuumLock as *mut LWLock);
     }
 }
 
@@ -2192,10 +2193,10 @@ pub unsafe extern "C" fn VacuumUpdateCosts() {
 
         // Assert(!LWLockHeldByMe(AutovacuumLock));
 
-        LWLockAcquire(&mut AutovacuumLock, 2 /* LW_SHARED */);
+        LWLockAcquire(AutovacuumLock as *mut LWLock, 2 /* LW_SHARED */);
         dboid = (*MyWorkerInfo).wi_dboid;
         tableoid = (*MyWorkerInfo).wi_tableoid;
-        LWLockRelease(&mut AutovacuumLock);
+        LWLockRelease(AutovacuumLock as *mut LWLock);
 
         elog!(
             7, /* DEBUG2 */
@@ -2888,8 +2889,8 @@ unsafe fn do_autovacuum() {
              * also need the AutovacuumLock to walk the worker array, but that one
              * can just be a shared lock.
              */
-            LWLockAcquire(&mut AutovacuumScheduleLock, 1 /* LW_EXCLUSIVE */);
-            LWLockAcquire(&mut AutovacuumLock, 2 /* LW_SHARED */);
+            LWLockAcquire(AutovacuumScheduleLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
+            LWLockAcquire(AutovacuumLock as *mut LWLock, 2 /* LW_SHARED */);
 
             /*
              * Check whether the table is being vacuumed concurrently by another
@@ -2927,9 +2928,9 @@ unsafe fn do_autovacuum() {
                     iter_node = next;
                 }
             }
-            LWLockRelease(&mut AutovacuumLock);
+            LWLockRelease(AutovacuumLock as *mut LWLock);
             if skipit {
-                LWLockRelease(&mut AutovacuumScheduleLock);
+                LWLockRelease(AutovacuumScheduleLock as *mut LWLock);
                 continue;
             }
 
@@ -2941,7 +2942,7 @@ unsafe fn do_autovacuum() {
              */
             (*MyWorkerInfo).wi_tableoid = relid;
             (*MyWorkerInfo).wi_sharedrel = isshared;
-            LWLockRelease(&mut AutovacuumScheduleLock);
+            LWLockRelease(AutovacuumScheduleLock as *mut LWLock);
 
             /*
              * Check whether pgstat data still says we need to vacuum this table.
@@ -2954,10 +2955,10 @@ unsafe fn do_autovacuum() {
                                          effective_multixact_freeze_max_age);
             if tab.is_null() {
                 /* someone else vacuumed the table, or it went away */
-                LWLockAcquire(&mut AutovacuumScheduleLock, 1 /* LW_EXCLUSIVE */);
+                LWLockAcquire(AutovacuumScheduleLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
                 (*MyWorkerInfo).wi_tableoid = 0; /* InvalidOid */
                 (*MyWorkerInfo).wi_sharedrel = false;
-                LWLockRelease(&mut AutovacuumScheduleLock);
+                LWLockRelease(AutovacuumScheduleLock as *mut LWLock);
                 continue;
             }
 
@@ -2979,9 +2980,9 @@ unsafe fn do_autovacuum() {
                 pg_atomic_clear_flag(&mut (*MyWorkerInfo).wi_dobalance);
             }
 
-            LWLockAcquire(&mut AutovacuumLock, 2 /* LW_SHARED */);
+            LWLockAcquire(AutovacuumLock as *mut LWLock, 2 /* LW_SHARED */);
             autovac_recalculate_workers_for_balance();
-            LWLockRelease(&mut AutovacuumLock);
+            LWLockRelease(AutovacuumLock as *mut LWLock);
 
             /*
              * We wait until this point to update cost delay and cost limit
@@ -3055,10 +3056,10 @@ unsafe fn do_autovacuum() {
              * share of I/O as soon as possible to avoid thrashing the global
              * balance.
              */
-            LWLockAcquire(&mut AutovacuumScheduleLock, 1 /* LW_EXCLUSIVE */);
+            LWLockAcquire(AutovacuumScheduleLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
             (*MyWorkerInfo).wi_tableoid = 0; /* InvalidOid */
             (*MyWorkerInfo).wi_sharedrel = false;
-            LWLockRelease(&mut AutovacuumScheduleLock);
+            LWLockRelease(AutovacuumScheduleLock as *mut LWLock);
             pg_atomic_test_set_flag(&mut (*MyWorkerInfo).wi_dobalance);
         }
     }
@@ -3068,7 +3069,7 @@ unsafe fn do_autovacuum() {
     /*
      * Perform additional work items, as requested by backends.
      */
-    LWLockAcquire(&mut AutovacuumLock, 1 /* LW_EXCLUSIVE */);
+    LWLockAcquire(AutovacuumLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
     for i in 0..NUM_WORKITEMS {
         let workitem: *mut AutoVacuumWorkItem = &mut (*AutoVacuumShmem).av_workItems[i];
 
@@ -3084,7 +3085,7 @@ unsafe fn do_autovacuum() {
 
         /* claim this one, and release lock while performing it */
         (*workitem).avw_active = true;
-        LWLockRelease(&mut AutovacuumLock);
+        LWLockRelease(AutovacuumLock as *mut LWLock);
 
         PushActiveSnapshot(GetTransactionSnapshot());
         perform_work_item(workitem);
@@ -3102,13 +3103,13 @@ unsafe fn do_autovacuum() {
             VacuumUpdateCosts();
         }
 
-        LWLockAcquire(&mut AutovacuumLock, 1 /* LW_EXCLUSIVE */);
+        LWLockAcquire(AutovacuumLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
 
         /* and mark it done */
         (*workitem).avw_active = false;
         (*workitem).avw_used = false;
     }
-    LWLockRelease(&mut AutovacuumLock);
+    LWLockRelease(AutovacuumLock as *mut LWLock);
 
     /*
      * We leak table_toast_map here (among other things), but since we're
@@ -3899,7 +3900,7 @@ pub unsafe extern "C" fn AutoVacuumRequestWork(
 ) -> bool {
     let mut result: bool = false;
 
-    LWLockAcquire(&mut AutovacuumLock, 1 /* LW_EXCLUSIVE */);
+    LWLockAcquire(AutovacuumLock as *mut LWLock, 1 /* LW_EXCLUSIVE */);
 
     /*
      * Locate an unused work item and fill it with the given data.
@@ -3923,7 +3924,7 @@ pub unsafe extern "C" fn AutoVacuumRequestWork(
         break;
     }
 
-    LWLockRelease(&mut AutovacuumLock);
+    LWLockRelease(AutovacuumLock as *mut LWLock);
 
     result
 }
@@ -3973,7 +3974,6 @@ pub unsafe extern "C" fn AutoVacuumShmemSize() -> usize {
 #[no_mangle]
 pub unsafe extern "C" fn AutoVacuumShmemInit() {
     let mut found: bool = false;
-
     AutoVacuumShmem = ShmemInitStruct(
         b"AutoVacuum Data\0".as_ptr() as *const c_char,
         AutoVacuumShmemSize(),

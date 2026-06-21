@@ -72,7 +72,7 @@ unsafe fn table_beginscan(
     _nkeys: c_int,
     _key: *mut c_void,
 ) -> TableScanDesc {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_beginscan(_rel as _, _snapshot as _, _nkeys, _key as _) as _
 }
 
 unsafe fn table_scan_getnextslot(
@@ -80,23 +80,23 @@ unsafe fn table_scan_getnextslot(
     _direction: ScanDirection,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_scan_getnextslot(_sscan as _, _direction as _, _slot as _)
 }
 
 unsafe fn table_endscan(_scan: TableScanDesc) {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_endscan(_scan as _)
 }
 
 unsafe fn table_rescan(_scan: TableScanDesc, _key: *mut c_void) {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_rescan(_scan as _, _key as _)
 }
 
 unsafe fn table_slot_callbacks(_rel: *mut c_void) -> *const c_void {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_slot_callbacks(_rel as _) as _
 }
 
 unsafe fn table_parallelscan_estimate(_rel: *mut c_void, _snapshot: *mut c_void) -> crate::c::Size {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_parallelscan_estimate(_rel as _, _snapshot as _) as _
 }
 
 unsafe fn table_parallelscan_initialize(
@@ -104,18 +104,18 @@ unsafe fn table_parallelscan_initialize(
     _pscan: ParallelTableScanDesc,
     _snapshot: *mut c_void,
 ) {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_parallelscan_initialize(_rel as _, _pscan as _, _snapshot as _)
 }
 
 unsafe fn table_beginscan_parallel(
     _rel: *mut c_void,
     _pscan: ParallelTableScanDesc,
 ) -> TableScanDesc {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_beginscan_parallel(_rel as _, _pscan as _) as _
 }
 
 unsafe fn table_parallelscan_reinitialize(_rel: *mut c_void, _pscan: ParallelTableScanDesc) {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_parallelscan_reinitialize(_rel as _, _pscan as _)
 }
 
 unsafe fn ExecScanExtended(
@@ -126,7 +126,14 @@ unsafe fn ExecScanExtended(
     _qual: *mut c_void,
     _projinfo: *mut c_void,
 ) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/execScan.h
+    crate::executor::execScan::ExecScanExtended(
+        _node as _,
+        _access_mtd,
+        _recheck_mtd,
+        _epqstate as _,
+        _qual as _,
+        _projinfo as _,
+    ) as _
 }
 
 unsafe fn ExecScan(
@@ -134,15 +141,15 @@ unsafe fn ExecScan(
     _access_mtd: ExecScanAccessMtd,
     _recheck_mtd: ExecScanRecheckMtd,
 ) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/execScan.h
+    crate::executor::execScan::ExecScan(_node as _, _access_mtd, _recheck_mtd) as _
 }
 
 unsafe fn ExecScanReScan(_node: *mut ScanState) {
-    unimplemented!() // TODO: executor/execScan.c
+    crate::executor::execScan::ExecScanReScan(_node as _)
 }
 
-unsafe fn ExecAssignExprContext(_estate: *mut EState, _ps: *mut PlanState) {
-    unimplemented!() // TODO: executor/execUtils.c
+unsafe fn ExecAssignExprContext(estate: *mut EState, ps: *mut PlanState) {
+    crate::executor::execUtils::ExecAssignExprContext(estate, ps)
 }
 
 unsafe fn ExecOpenScanRelation(
@@ -150,7 +157,7 @@ unsafe fn ExecOpenScanRelation(
     _scanrelid: crate::c::Index,
     _eflags: c_int,
 ) -> *mut c_void {
-    unimplemented!() // TODO: executor/execUtils.c
+    crate::executor::execUtils::ExecOpenScanRelation(_estate as _, _scanrelid as _, _eflags) as _
 }
 
 unsafe fn ExecInitScanTupleSlot(
@@ -159,43 +166,43 @@ unsafe fn ExecInitScanTupleSlot(
     _tupdesc: *mut c_void,
     _tts_ops: *const c_void,
 ) {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecInitScanTupleSlot(_estate as _, _scanstate as _, _tupdesc as _, _tts_ops as _)
 }
 
 unsafe fn ExecInitResultTypeTL(_ps: *mut PlanState) {
-    unimplemented!() // TODO: executor/execTuples.c
+    crate::executor::execTuples::ExecInitResultTypeTL(_ps as _)
 }
 
 unsafe fn ExecAssignScanProjectionInfo(_node: *mut ScanState) {
-    unimplemented!() // TODO: executor/execScan.c
+    crate::executor::execScan::ExecAssignScanProjectionInfo(_node as _)
 }
 
 unsafe fn ExecInitQual(_qual: *mut c_void, _parent: *mut PlanState) -> *mut c_void {
-    unimplemented!() // TODO: executor/execExpr.c
+    crate::executor::execExpr::ExecInitQual(_qual as _, _parent as _) as _
 }
 
 unsafe fn RelationGetDescr(_rel: *mut c_void) -> *mut c_void {
-    unimplemented!() // TODO: utils/rel.h
+    crate::utils::rel::RelationGetDescr(_rel as _) as _
 }
 
 unsafe fn shm_toc_estimate_chunk(_estimator: *mut c_void, _size: crate::c::Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 
 unsafe fn shm_toc_estimate_keys(_estimator: *mut c_void, _cnt: crate::c::Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 
 unsafe fn shm_toc_allocate(_toc: *mut c_void, _nbytes: crate::c::Size) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 
 unsafe fn shm_toc_insert(_toc: *mut c_void, _key: u64, _address: *mut c_void) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 
 unsafe fn shm_toc_lookup(_toc: *mut c_void, _key: u64, _noError: bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }
 
 /* ----------------------------------------------------------------

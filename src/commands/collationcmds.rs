@@ -1101,10 +1101,10 @@ const CollationRelationId: Oid = 3456;
 const ACL_CREATE: u32 = 0;
 const OBJECT_SCHEMA: c_int = 0;
 const OBJECT_COLLATION: c_int = 0;
-const COLLOID: c_int = 0;
-const COLLNAMEENCNSP: c_int = 0;
-const DATABASEOID: c_int = 0;
-const NAMESPACEOID: c_int = 0;
+const COLLOID: c_int = 16;
+const COLLNAMEENCNSP: c_int = 15;
+const DATABASEOID: c_int = 21;
+const NAMESPACEOID: c_int = 38;
 const DEFAULT_COLLATION_OID: Oid = 100;
 const RowExclusiveLock: c_int = 3;
 const NoLock: c_int = 0;
@@ -1136,9 +1136,7 @@ unsafe fn QualifiedNameGetCreationNamespace(
 unsafe fn object_aclcheck(_classid: Oid, _objectid: Oid, _roleid: Oid, _mode: u32) -> AclResult {
     unimplemented!() // TODO: catalog/aclchk.c
 }
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn aclcheck_error(_aclerr: AclResult, _objtype: c_int, _objectname: *const c_char) {
     unimplemented!() // TODO: catalog/aclchk.c
 }

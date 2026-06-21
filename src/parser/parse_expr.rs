@@ -38,7 +38,7 @@ use crate::nodes::nodeFuncs::{
 // copyObjectImpl: copyfuncs module not yet enabled; stub below
 #[allow(dead_code)]
 unsafe fn copyObjectImpl(from: *const core::ffi::c_void) -> *mut core::ffi::c_void {
-    unimplemented!("copyObjectImpl not yet translated")
+    crate::nodes::copyfuncs::copyObjectImpl(from as _) as _
 }
 use crate::nodes::makefuncs::{
     makeConst, makeBoolConst, makeBoolExpr, makeRangeVar, makeTargetEntry,
@@ -119,137 +119,137 @@ use crate::miscadmin::check_stack_depth;
 /* TODO(pg-port): unported parser siblings - stubs */
 /* parse_agg.c */
 unsafe fn transformAggregateCall(
-    _pstate: *mut ParseState, _aggref: *mut Aggref,
-    _args: *mut List, _agg_order: *mut List, _expand_star: bool,
-) { todo!("transformAggregateCall") }
+    pstate: *mut ParseState, aggref: *mut Aggref,
+    args: *mut List, agg_order: *mut List, expand_star: bool,
+) { crate::parser::parse_agg::transformAggregateCall(pstate as _, aggref as _, args as _, agg_order as _, expand_star as _) }
 unsafe fn transformGroupingFunc(
-    _pstate: *mut ParseState, _gf: *mut GroupingFunc,
-) -> *mut Node { todo!("transformGroupingFunc") }
+    pstate: *mut ParseState, gf: *mut GroupingFunc,
+) -> *mut Node { crate::parser::parse_agg::transformGroupingFunc(pstate as _, gf as _) as _ }
 unsafe fn transformWindowFuncCall(
-    _pstate: *mut ParseState, _wfunc: *mut WindowFunc, _over: *mut c_void,
-) { todo!("transformWindowFuncCall") }
+    pstate: *mut ParseState, wfunc: *mut WindowFunc, over: *mut c_void,
+) { crate::parser::parse_agg::transformWindowFuncCall(pstate as _, wfunc as _, over as _) }
 /* parse_func.c */
 unsafe fn ParseFuncOrColumn(
     _pstate: *mut ParseState, _funcname: *mut List, _fargs: *mut List,
     _last_srf: *mut Node, _fn_: *mut FuncCall, _proc_call: bool,
     _location: c_int,
-) -> *mut Node { todo!("ParseFuncOrColumn") }
+) -> *mut Node { crate::parser::parse_func::ParseFuncOrColumn(_pstate, _funcname, _fargs, _last_srf, _fn_, _proc_call, _location) }
 /* parse_clause.c */
 unsafe fn transformWhereClause(
-    _pstate: *mut ParseState, _clause: *mut Node,
-    _exprKind: ParseExprKind, _constructName: *const c_char,
-) -> *mut Node { todo!("transformWhereClause") }
+    pstate: *mut ParseState, clause: *mut Node,
+    exprKind: ParseExprKind, constructName: *const c_char,
+) -> *mut Node { crate::parser::parse_clause::transformWhereClause(pstate as _, clause as _, exprKind as _, constructName as _) as _ }
 /* analyze.c */
 unsafe fn parse_sub_analyze(
-    _parseTree: *mut Node, _parentParseState: *mut ParseState,
-    _queryEnv: *mut c_void, _locked_from_parent: bool,
-    _resolve_unknowns: bool,
-) -> *mut Query { todo!("parse_sub_analyze") }
+    parseTree: *mut Node, parentParseState: *mut ParseState,
+    queryEnv: *mut c_void, locked_from_parent: bool,
+    resolve_unknowns: bool,
+) -> *mut Query { crate::parser::analyze::parse_sub_analyze(parseTree as _, parentParseState as _, queryEnv as _, locked_from_parent as _, resolve_unknowns as _) as _ }
 unsafe fn transformStmt(
-    _pstate: *mut ParseState, _parseTree: *mut Node,
-) -> *mut Query { todo!("transformStmt") }
+    pstate: *mut ParseState, parseTree: *mut Node,
+) -> *mut Query { crate::parser::analyze::transformStmt(pstate as _, parseTree as _) as _ }
 /* parse_relation.c */
 unsafe fn colNameToVar(
-    _pstate: *mut ParseState, _colname: *const c_char, _localonly: bool,
-    _location: c_int,
-) -> *mut Node { todo!("colNameToVar") }
+    pstate: *mut ParseState, colname: *const c_char, localonly: bool,
+    location: c_int,
+) -> *mut Node { crate::parser::parse_relation::colNameToVar(pstate as _, colname as _, localonly as _, location as _) as _ }
 unsafe fn scanNSItemForColumn(
-    _pstate: *mut ParseState, _nsitem: *mut ParseNamespaceItem,
-    _sublevels_up: c_int, _colname: *const c_char, _location: c_int,
-) -> *mut Node { todo!("scanNSItemForColumn") }
+    pstate: *mut ParseState, nsitem: *mut ParseNamespaceItem,
+    sublevels_up: c_int, colname: *const c_char, location: c_int,
+) -> *mut Node { crate::parser::parse_relation::scanNSItemForColumn(pstate as _, nsitem as _, sublevels_up as _, colname as _, location as _) as _ }
 unsafe fn refnameNamespaceItem(
-    _pstate: *mut ParseState, _schemaname: *const c_char,
-    _refname: *const c_char, _location: c_int, _levels_up: *mut c_int,
-) -> *mut ParseNamespaceItem { todo!("refnameNamespaceItem") }
+    pstate: *mut ParseState, schemaname: *const c_char,
+    refname: *const c_char, location: c_int, levels_up: *mut c_int,
+) -> *mut ParseNamespaceItem { crate::parser::parse_relation::refnameNamespaceItem(pstate as _, schemaname as _, refname as _, location as _, levels_up as _) as _ }
 unsafe fn GetRTEByRangeTablePosn(
-    _pstate: *mut ParseState, _varno: c_int, _sublevels_up: c_int,
-) -> *mut crate::nodes::parsenodes::RangeTblEntry { todo!("GetRTEByRangeTablePosn") }
+    pstate: *mut ParseState, varno: c_int, sublevels_up: c_int,
+) -> *mut crate::nodes::parsenodes::RangeTblEntry { crate::parser::parse_relation::GetRTEByRangeTablePosn(pstate as _, varno as _, sublevels_up as _) as _ }
 unsafe fn errorMissingColumn(
-    _pstate: *mut ParseState, _relname: *const c_char,
-    _colname: *const c_char, _location: c_int,
-) { todo!("errorMissingColumn") }
+    pstate: *mut ParseState, relname: *const c_char,
+    colname: *const c_char, location: c_int,
+) { crate::parser::parse_relation::errorMissingColumn(pstate as _, relname as _, colname as _, location as _) }
 unsafe fn errorMissingRTE(
-    _pstate: *mut ParseState, _relation: *mut crate::nodes::primnodes::RangeVar,
-) { todo!("errorMissingRTE") }
+    pstate: *mut ParseState, relation: *mut crate::nodes::primnodes::RangeVar,
+) { crate::parser::parse_relation::errorMissingRTE(pstate as _, relation as _) }
 unsafe fn expandRTE(
-    _rte: *mut crate::nodes::parsenodes::RangeTblEntry, _rtindex: c_int,
-    _sublevels_up: c_int, _returning_type: c_int, _location: c_int,
-    _include_dropped: bool, _colnames: *mut *mut List, _colvars: *mut *mut List,
-) { todo!("expandRTE") }
-unsafe fn markNullableIfNeeded(_pstate: *mut ParseState, _var: *mut Var) {
-    todo!("markNullableIfNeeded")
+    rte: *mut crate::nodes::parsenodes::RangeTblEntry, rtindex: c_int,
+    sublevels_up: c_int, returning_type: c_int, location: c_int,
+    include_dropped: bool, colnames: *mut *mut List, colvars: *mut *mut List,
+) { crate::parser::parse_relation::expandRTE(rte as _, rtindex as _, sublevels_up as _, core::mem::transmute(returning_type), location as _, include_dropped as _, colnames as _, colvars as _) }
+unsafe fn markNullableIfNeeded(pstate: *mut ParseState, var: *mut Var) {
+    crate::parser::parse_relation::markNullableIfNeeded(pstate as _, var as _)
 }
-unsafe fn markVarForSelectPriv(_pstate: *mut ParseState, _var: *mut Var) {
-    todo!("markVarForSelectPriv")
+unsafe fn markVarForSelectPriv(pstate: *mut ParseState, var: *mut Var) {
+    crate::parser::parse_relation::markVarForSelectPriv(pstate as _, var as _)
 }
 unsafe fn makeWholeRowVar(
-    _rte: *mut crate::nodes::parsenodes::RangeTblEntry, _rtindex: c_int,
-    _sublevels_up: c_int, _allowScalar: bool,
-) -> *mut Var { todo!("makeWholeRowVar") }
+    rte: *mut crate::nodes::parsenodes::RangeTblEntry, rtindex: c_int,
+    sublevels_up: c_int, allowScalar: bool,
+) -> *mut Var { crate::nodes::makefuncs::makeWholeRowVar(rte as _, rtindex as _, sublevels_up as _, allowScalar as _) as _ }
 /* parse_target.c */
-unsafe fn FigureColname(_node: *mut Node) -> *mut c_char { todo!("FigureColname") }
+unsafe fn FigureColname(node: *mut Node) -> *mut c_char { crate::parser::parse_target::FigureColname(node as _) as _ }
 unsafe fn transformExpressionList(
-    _pstate: *mut ParseState, _exprlist: *mut List,
-    _exprKind: ParseExprKind, _allowDefault: bool,
-) -> *mut List { todo!("transformExpressionList") }
+    pstate: *mut ParseState, exprlist: *mut List,
+    exprKind: ParseExprKind, allowDefault: bool,
+) -> *mut List { crate::parser::parse_target::transformExpressionList(pstate as _, exprlist as _, exprKind as _, allowDefault as _) as _ }
 /* parse_coerce.c */
 unsafe fn coerce_to_boolean(
-    _pstate: *mut ParseState, _node: *mut Node, _constructName: *const c_char,
-) -> *mut Node { todo!("coerce_to_boolean") }
+    pstate: *mut ParseState, node: *mut Node, constructName: *const c_char,
+) -> *mut Node { crate::parser::parse_coerce::coerce_to_boolean(pstate as _, node as _, constructName as _) as _ }
 unsafe fn coerce_to_common_type(
-    _pstate: *mut ParseState, _node: *mut Node,
-    _targetTypeId: Oid, _constructName: *const c_char,
-) -> *mut Node { todo!("coerce_to_common_type") }
+    pstate: *mut ParseState, node: *mut Node,
+    targetTypeId: Oid, constructName: *const c_char,
+) -> *mut Node { crate::parser::parse_coerce::coerce_to_common_type(pstate as _, node as _, targetTypeId as _, constructName as _) as _ }
 unsafe fn coerce_to_target_type(
-    _pstate: *mut ParseState, _expr: *mut Node, _exprtype: Oid,
-    _targettype: Oid, _targettypmod: int32,
-    _ccontext: c_int, _cformat: c_int, _location: c_int,
-) -> *mut Node { todo!("coerce_to_target_type") }
+    pstate: *mut ParseState, expr: *mut Node, exprtype: Oid,
+    targettype: Oid, targettypmod: int32,
+    ccontext: c_int, cformat: c_int, location: c_int,
+) -> *mut Node { crate::parser::parse_coerce::coerce_to_target_type(pstate as _, expr as _, exprtype as _, targettype as _, targettypmod as _, core::mem::transmute(ccontext), core::mem::transmute(cformat), location as _) as _ }
 unsafe fn coerce_to_specific_type(
-    _pstate: *mut ParseState, _node: *mut Node,
-    _targetTypeId: Oid, _constructName: *const c_char,
-) -> *mut Node { todo!("coerce_to_specific_type") }
+    pstate: *mut ParseState, node: *mut Node,
+    targetTypeId: Oid, constructName: *const c_char,
+) -> *mut Node { crate::parser::parse_coerce::coerce_to_specific_type(pstate as _, node as _, targetTypeId as _, constructName as _) as _ }
 unsafe fn select_common_type(
-    _pstate: *mut ParseState, _exprs: *mut List,
-    _context: *const c_char, _which_expr: *mut *mut Node,
-) -> Oid { todo!("select_common_type") }
-unsafe fn verify_common_type(_typid: Oid, _exprs: *mut List) -> bool {
-    todo!("verify_common_type")
+    pstate: *mut ParseState, exprs: *mut List,
+    context: *const c_char, which_expr: *mut *mut Node,
+) -> Oid { crate::parser::parse_coerce::select_common_type(pstate as _, exprs as _, context as _, which_expr as _) as _ }
+unsafe fn verify_common_type(typid: Oid, exprs: *mut List) -> bool {
+    crate::parser::parse_coerce::verify_common_type(typid as _, exprs as _) as _
 }
 unsafe fn parser_coercion_errposition(
-    _pstate: *mut ParseState, _coerce_location: c_int, _input_expr: *mut Node,
-) -> c_int { todo!("parser_coercion_errposition") }
+    pstate: *mut ParseState, coerce_location: c_int, input_expr: *mut Node,
+) -> c_int { crate::parser::parse_coerce::parser_coercion_errposition(pstate as _, coerce_location as _, input_expr as _) as _ }
 /* xml.c */
 unsafe fn map_sql_identifier_to_xml_name(
-    _ident: *mut c_char, _fully_escaped: bool, _escape_period: bool,
-) -> *mut c_char { todo!("map_sql_identifier_to_xml_name") }
+    ident: *mut c_char, fully_escaped: bool, escape_period: bool,
+) -> *mut c_char { crate::utils::adt::xml::map_sql_identifier_to_xml_name(ident as _, fully_escaped as _, escape_period as _) as _ }
 /* timestamp.c */
-unsafe fn anytime_typmod_check(_istz: bool, _typmod: int32) -> int32 {
-    todo!("anytime_typmod_check")
+unsafe fn anytime_typmod_check(istz: bool, typmod: int32) -> int32 {
+    crate::utils::adt::date::anytime_typmod_check(istz as _, typmod as _) as _
 }
-unsafe fn anytimestamp_typmod_check(_istz: bool, _typmod: int32) -> int32 {
-    todo!("anytimestamp_typmod_check")
+unsafe fn anytimestamp_typmod_check(istz: bool, typmod: int32) -> int32 {
+    crate::utils::adt::timestamp::anytimestamp_typmod_check(istz as _, typmod as _) as _
 }
 /* dbcommands.c */
-unsafe fn get_database_name(_dboid: Oid) -> *mut c_char {
-    todo!("get_database_name")
-}
+unsafe fn get_database_name(_dboid: Oid) -> *mut c_char { crate::commands::dbcommands::get_database_name(_dboid) }
 /* catalog/namespace.c */
-unsafe fn NameListToString(_names: *const List) -> *mut c_char {
-    todo!("NameListToString")
+unsafe fn NameListToString(names: *const List) -> *mut c_char {
+    crate::catalog::namespace::NameListToString(names as _) as _
 }
-/* jsonb_in -- utils/adt/jsonb.c (not yet ported) */
+/* jsonb_in -- utils/adt/jsonb.c */
 mod jsonb_stub {
     use crate::postgres::Datum;
     pub unsafe fn jsonb_in(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum {
-        todo!("jsonb_in not yet ported")
+        unimplemented!()
     }
 }
 
 /* make_const -- in parse_node.c */
 unsafe fn make_const(
     _pstate: *mut ParseState, _aconst: *mut A_Const,
-) -> *mut crate::nodes::primnodes::Const { todo!("make_const") }
+) -> *mut crate::nodes::primnodes::Const {
+    crate::parser::parse_node::make_const(_pstate, _aconst) as _
+}
 /* fmgroids */
 const F_CONVERT_FROM: Oid = 0; // TODO(pg-port): real OID
 const F_CONVERT_TO: Oid = 0;   // TODO(pg-port): real OID
@@ -279,7 +279,8 @@ use crate::catalog::pg_type_d::{
 /* coercion constants -- from nodes/primnodes.h */
 const COERCION_IMPLICIT: c_int = 0;
 const COERCION_ASSIGNMENT: c_int = 1;
-const COERCION_EXPLICIT: c_int = 2;
+// CoercionContext: IMPLICIT=0, ASSIGNMENT=1, PLPGSQL=2, EXPLICIT=3
+const COERCION_EXPLICIT: c_int = 3;
 const COERCE_IMPLICIT_CAST: c_int = 0;
 const COERCE_EXPLICIT_CAST: c_int = 1;
 const COERCE_EXPLICIT_CALL: c_int = 2;

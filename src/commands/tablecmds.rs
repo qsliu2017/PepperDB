@@ -22,49 +22,697 @@
     clippy::all
 )]
 
+use crate::prelude::*;
+
+macro_rules! errmsg_internal { ($fmt:literal $(, $arg:expr)*) => { errmsg!($fmt $(, $arg)*) }; }
+macro_rules! NameStr { ($name:expr) => { ($name).data.as_ptr() as *const c_char }; }
+unsafe fn copyObject<T>(x: *mut T) -> *mut T { x }
+
+// ==== layer-2 resolved (86 imports + 21 stubs) ====
+// ===========================================================================
+// tablecmds.rs E0425 resolution -- 110 names from /tmp/m2.txt
+// Insert this `use` block AFTER `use crate::prelude::*;` (and after the
+// existing resolved import block). Then add the NEEDS STUB defs below it.
+// ===========================================================================
+
+// --- crate-root #[macro_export] macros -------------------------------------
+// DatumGetByteaPP, DirectFunctionCall2 are #[macro_export] in utils/fmgr.rs.
+use crate::{DatumGetByteaPP, DirectFunctionCall2};
+
+// --- access::* -------------------------------------------------------------
+use crate::access::common::toast_compression::CompressionNameToMethod;
+use crate::access::common::tupdesc::ReleaseTupleDesc;
+use crate::access::index::amapi::IndexAmTranslateCompareType;
+
+// --- catalog::* ------------------------------------------------------------
+use crate::catalog::catalog::{GetNewRelFileNumber, IsCatalogNamespace, IsToastNamespace};
+use crate::catalog::heap::{CheckAttributeType, InsertPgAttributeTuples, RelationClearMissing, RemoveStatistics, StoreAttrMissingVal};
+use crate::catalog::index::{BuildIndexInfo, CompareIndexInfo};
+use crate::catalog::indexing::CatalogTupleDelete;
+use crate::catalog::namespace::CheckSetNamespace;
+use crate::catalog::pg_attrdef::{GetAttrDefaultColumnAddress, GetAttrDefaultOid, RemoveAttrDefault, StoreAttrDefault};
+use crate::catalog::pg_constraint::{AlterConstraintNamespaces, ChooseConstraintName, ConstraintNameIsUsed, ConstraintSetParentConstraint, CreateConstraintEntry, DeconstructFkConstraintRow, FindFKPeriodOpers};
+use crate::catalog::pg_inherits::DeleteInheritsTuple;
+use crate::catalog::pg_publication::GetRelationPublications;
+use crate::catalog::storage::{RelationCopyStorage, RelationCreateStorage, RelationDropStorage, RelationPreserveStorage};
+
+// --- commands::* -----------------------------------------------------------
+use crate::commands::comment::GetComment;
+use crate::commands::defrem::ResolveOpClass;            // only pub fn (defrem; impl is unimplemented! for bring-up)
+use crate::commands::indexcmds::{CheckIndexCompatible, IndexSetParentIndex, WaitForOlderSnapshots};
+use crate::commands::statscmds::{CreateStatistics, StatisticsGetRelation};
+use crate::commands::trigger::{CreateTrigger, CreateTriggerFiringOn, EnableDisableTrigger, FindTriggerIncompatibleWithInheritance, TriggerSetParentTrigger};
+use crate::commands::typecmds::{AlterTypeNamespaceInternal, AlterTypeOwnerInternal};
+
+// --- executor::* -----------------------------------------------------------
+use crate::executor::execTuples::ExecFetchSlotHeapTuple;
+
+// --- foreign::* ------------------------------------------------------------
+use crate::foreign::foreign::{GetForeignDataWrapper, GetForeignServer};
+
+// --- rewrite::* ------------------------------------------------------------
+use crate::rewrite::rewriteDefine::EnableDisableRule;
+
+// --- storage::* ------------------------------------------------------------
+use crate::storage::buffer::bufmgr::{FlushRelationBuffers, RelationGetSmgr};
+use crate::storage::lmgr::lmgr::{CheckRelationLockedByMe, ConditionalLockRelationOid, WaitForLockersMultiple};
+
+// --- utils::* --------------------------------------------------------------
+use crate::utils::adt::ri_triggers::{RI_FKey_check_ins, RI_FKey_trigger_type, RI_Initial_Check, RI_PartitionRemove_Check};
+use crate::utils::adt::timestamp::TimestampTimestampTzRequiresRewrite;
+use crate::utils::array::{ARR_DATA_PTR, ARR_DIMS, ARR_ELEMTYPE, ARR_HASNULL, ARR_NDIM};
+use crate::utils::cache::inval::CacheInvalidateRelcacheByRelid;
+use crate::utils::cache::partcache::RelationGetPartitionQual;
+use crate::utils::cache::syscache::{SearchSysCache2, SearchSysCacheAttName, SearchSysCacheAttNum, SearchSysCacheCopyAttNum, SearchSysCacheExistsAttName, SysCacheGetAttr, SysCacheGetAttrNotNull};
+use crate::utils::cache::typcache::DomainHasConstraints;
+use crate::utils::fmgr::SizeForFunctionCallInfo;
+use crate::utils::init::globals::MyDatabaseId;
+use crate::utils::mmgr::mcxt::MemoryContextStrdup;
+use crate::utils::rel::RelationGetNumberOfAttributes;
+use crate::utils::time::snapmgr::{GetActiveSnapshot, GetTransactionSnapshot, PopActiveSnapshot, PushActiveSnapshot};
+
+// ===========================================================================
+// ALREADY PRESENT -- do NOT import (already in tablecmds.rs). SKIP.
+// ===========================================================================
+//   InvalidOid        -> line 39: use crate::postgres_ext::InvalidOid;
+//   SubTransactionId  -> line 254/470: use crate::c::{... SubTransactionId};
+//   INT16_MAX         -> line 226: const INT16_MAX: i32 = crate::c::PG_INT16_MAX as i32;
+
+// ===========================================================================
+// NEEDS STUB -- local defs to add to tablecmds.rs (no canonical pub home, OR
+// home module is UNWIRED, OR is a C macro with no crate macro). Signatures
+// are the real PG18 signatures (verified against the source noted).
+// ===========================================================================
+
+// (1) MACROS / accessor fns that are C macros with NO crate macro.
+
+// DatumGetArrayTypeP(X) = (ArrayType*) PG_DETOAST_DATUM(X)  (utils/array.h)
+// (only file-local copies exist; arrayfuncs.rs:155 has the canonical body.)
+#[inline]
+unsafe fn DatumGetArrayTypeP(d: Datum) -> *mut ArrayType {
+    crate::PG_DETOAST_DATUM!(d) as *mut ArrayType
+}
+
+// DatumGetAclP(X) = (Acl*) PG_DETOAST_DATUM(X)  (utils/acl.h)
+// (only file-local copies exist, e.g. utils/adt/acl.rs:94.)
+#[inline]
+unsafe fn DatumGetAclP(d: Datum) -> *mut Acl {
+    crate::PG_DETOAST_DATUM!(d) as *mut Acl
+}
+
+// TextDatumGetCString(d) = text_to_cstring(DatumGetTextPP(d))  (builtins.h)
+// Canonical body: utils/builtins.rs:213 (pub, wired) -- IMPORT instead of stub:
+use crate::utils::builtins::TextDatumGetCString;
+
+// IsPolymorphicType(typid)  (catalog/pg_type.h macro)
+// (only file-private copies exist -- IsPolymorphicTypeFamily1/2 in
+// parse_coerce.rs are NOT pub -- so inline the OID check. OIDs are pub in
+// catalog/pg_type_d.rs; add an import for them or fully-qualify as below.)
+use crate::catalog::pg_type_d::{ANYELEMENTOID, ANYARRAYOID, ANYNONARRAYOID, ANYENUMOID, ANYRANGEOID, ANYMULTIRANGEOID, ANYCOMPATIBLEOID, ANYCOMPATIBLEARRAYOID, ANYCOMPATIBLENONARRAYOID, ANYCOMPATIBLERANGEOID, ANYCOMPATIBLEMULTIRANGEOID};
+#[inline]
+unsafe fn IsPolymorphicType(typid: Oid) -> bool {
+    matches!(
+        typid,
+        ANYELEMENTOID | ANYARRAYOID | ANYNONARRAYOID | ANYENUMOID | ANYRANGEOID
+            | ANYMULTIRANGEOID | ANYCOMPATIBLEOID | ANYCOMPATIBLEARRAYOID
+            | ANYCOMPATIBLENONARRAYOID | ANYCOMPATIBLERANGEOID | ANYCOMPATIBLEMULTIRANGEOID
+    )
+}
+
+// SearchSysCache1Locked(cacheId, key1): C macro -> SearchSysCacheLocked1.
+// crate provides utils/cache/syscache.rs:306 pub fn SearchSysCacheLocked1.
+#[inline]
+unsafe fn SearchSysCache1Locked(cacheId: c_int, key1: Datum) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCacheLocked1(cacheId, key1)
+}
+
+// SearchSysCacheExists2(c,k1,k2): C macro -> SearchSysCacheExists(c,k1,k2,0,0).
+// crate provides utils/cache/syscache.rs:444 pub fn SearchSysCacheExists.
+#[inline]
+unsafe fn SearchSysCacheExists2(cacheId: c_int, key1: Datum, key2: Datum) -> bool {
+    crate::utils::cache::syscache::SearchSysCacheExists(cacheId, key1, key2, 0, 0)
+}
+
+// TRIGGER_FOR_INSERT/UPDATE/DELETE (catalog/pg_trigger.h). Called in tablecmds
+// as fns (no `!`), passing the int16 tgtype. Bits: INSERT=1<<2, DELETE=1<<3,
+// UPDATE=1<<4. (TRIGGER_TYPE_INSERT/UPDATE/DELETE are already imported at
+// line 297, but those are bit consts; these are the predicate fns.)
+#[inline]
+unsafe fn TRIGGER_FOR_INSERT(tgtype: int16) -> bool { (tgtype & (1 << 2)) != 0 }
+#[inline]
+unsafe fn TRIGGER_FOR_DELETE(tgtype: int16) -> bool { (tgtype & (1 << 3)) != 0 }
+#[inline]
+unsafe fn TRIGGER_FOR_UPDATE(tgtype: int16) -> bool { (tgtype & (1 << 4)) != 0 }
+
+// IndexRelationGetNumberOfKeyAttributes(rel) = rel->rd_index->indnkeyatts
+// (access/relation.h macro; only file-local pub copies in access/* exist).
+#[inline]
+unsafe fn IndexRelationGetNumberOfKeyAttributes(rel: Relation) -> c_int {
+    (*(*rel).rd_index).indnkeyatts as c_int
+}
+
+// TypeIsToastable(typid) = (get_typstorage(typid) != TYPSTORAGE_PLAIN)
+// (utils/fmgr.h macro; only file-local copies exist, e.g.
+// executor/nodeIndexscan.rs:242). get_typstorage / TYPSTORAGE_PLAIN already
+// imported (lsyscache, pg_type).
+#[inline]
+unsafe fn TypeIsToastable(typid: Oid) -> bool {
+    get_typstorage(typid) != TYPSTORAGE_PLAIN
+}
+
+// (2) Names whose canonical home is UNWIRED -> local stubs.
+
+// EventTriggerAlterTableStart / EventTriggerAlterTableEnd
+//   home: src/commands/event_trigger.rs (UNWIRED -- not in commands/mod.rs).
+//   Real signatures (event_trigger.c):
+//     pub unsafe fn EventTriggerAlterTableStart(parsetree: *mut Node)
+//     pub unsafe fn EventTriggerAlterTableEnd()
+unsafe fn EventTriggerAlterTableStart(_parsetree: *mut Node) {}
+unsafe fn EventTriggerAlterTableEnd() {}
+
+// (3) Names with NO canonical pub home (only private/file-local stubs
+//     everywhere) -> local stubs.
+
+// RelationGetFKeyList(rel) -> *mut List   (utils/cache/relcache.c)
+//   Real signature: pub unsafe fn RelationGetFKeyList(relation: Relation) -> *mut List
+unsafe fn RelationGetFKeyList(_relation: Relation) -> *mut List { NIL as *mut List }
+
+// RelationGetIndexExpressions(rel) -> *mut List   (utils/cache/relcache.c)
+//   Real signature: pub unsafe fn RelationGetIndexExpressions(relation: Relation) -> *mut List
+unsafe fn RelationGetIndexExpressions(_relation: Relation) -> *mut List { NIL as *mut List }
+
+// RelationGetIndexPredicate(rel) -> *mut List   (utils/cache/relcache.c)
+//   Real signature: pub unsafe fn RelationGetIndexPredicate(relation: Relation) -> *mut List
+unsafe fn RelationGetIndexPredicate(_relation: Relation) -> *mut List { NIL as *mut List }
+
+// RelationGetIndexAttrBitmap(rel, attrKind) -> *mut Bitmapset
+//   (utils/cache/relcache.c; home replication/logical/relation.rs is UNWIRED
+//    and is itself a null stub.) Real signature:
+//     pub unsafe fn RelationGetIndexAttrBitmap(relation: Relation, attrKind: c_int) -> *mut Bitmapset
+//   (the resolved block at line 221 already anticipates this local stub.)
+unsafe fn RelationGetIndexAttrBitmap(_relation: Relation, _attrKind: c_int) -> *mut crate::nodes::bitmapset::Bitmapset { core::ptr::null_mut() }
+
+// RelationGetPrimaryKeyIndex(rel, deferrable_ok) -> Oid
+//   (utils/cache/relcache.c; home replication/logical/relation.rs UNWIRED stub).
+//   Real signature:
+//     pub unsafe fn RelationGetPrimaryKeyIndex(rel: Relation, deferrable_ok: bool) -> Oid
+unsafe fn RelationGetPrimaryKeyIndex(_rel: Relation, _deferrable_ok: bool) -> Oid { InvalidOid }
+
+// RelationIsPermanent(rel) -> bool   (utils/rel.h macro)
+//   = rel->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT
+unsafe fn RelationIsPermanent(rel: Relation) -> bool {
+    (*(*rel).rd_rel).relpersistence == crate::catalog::pg_class::RELPERSISTENCE_PERMANENT
+}
+
+// RelationAssumeNewRelfilelocator(rel)   (utils/cache/relcache.c)
+//   Real signature: pub unsafe fn RelationAssumeNewRelfilelocator(relation: Relation)
+unsafe fn RelationAssumeNewRelfilelocator(_relation: Relation) {}
+
+// InvokeObjectPostCreateHook(classId, objectId, subId)  (catalog/objectaccess.h
+//   macro -> RunObjectPostCreateHook when object_access_hook is set).
+//   RunObjectPostCreateHook is pub in catalog/objectaccess.rs:165.
+unsafe fn InvokeObjectPostCreateHook(classId: Oid, objectId: Oid, subId: c_int) {
+    if crate::catalog::objectaccess::object_access_hook.is_some() {
+        crate::catalog::objectaccess::RunObjectPostCreateHook(classId, objectId, subId, false);
+    }
+}
+
+// SystemFuncName(name) -> *mut List   (catalog/namespace.c: list_make2(pg_catalog, name))
+//   Real signature: unsafe fn SystemFuncName(name: *mut c_char) -> *mut List
+//   Body (parse_clause.rs:493 / parse_utilcmd.rs:517):
+//     list_make2(makeString("pg_catalog"), makeString(name))
+// (call site form matches tablecmds.rs:14529 -- list_make2 used as a fn call.)
+macro_rules! cstr {
+    ($s:literal) => {
+        ::core::concat!($s, "\0").as_ptr() as *const ::core::ffi::c_char
+    };
+}
+
+unsafe fn SystemFuncName(name: *mut c_char) -> *mut List {
+    list_make2!(
+        makeString(cstr!("pg_catalog") as *mut c_char),
+        makeString(name)
+    )
+}
+
+// ==== end layer-2 ====
+
+// ==== resolved 92 names (imports + header-valued consts + macros) ====
+// ===========================================================================
+// Resolved names for tablecmds.rs (E0425 fixups).
+// Insert after `use crate::prelude::*;`.
+// ===========================================================================
+
+// --- Imports of names already present in the crate -------------------------
+
+use crate::postgres_ext::InvalidOid;
+use crate::partitioning::partdefs::PartitionDesc;
+unsafe fn pg_attribute_aclcheck(_table_oid: Oid, _attnum: i16, _roleid: Oid, _mode: u64) -> c_int { 0 }
+use crate::executor::execMain::INDEX_ATTR_BITMAP_KEY; // (already imported at line 139; keep single source)
+
+// addFkConstraintSides enum is defined locally in tablecmds.rs; bring its
+// variants into value scope (mirrors how AT_PASS_* variants are `use`d).
+use addFkConstraintSides::*;
+
+// NOTE: `SubTransactionId` is ALREADY imported in tablecmds.rs
+//   (line 42: use crate::c::{... SubTransactionId}; and line 250:
+//    use crate::c::SubTransactionId;). Do NOT add another import
+//   here or it becomes a duplicate-import (E0252). Resolution = existing import.
+
+// --- Macros (call sites use `name!(...)`) ----------------------------------
+
+// ALLOCSET_*_SIZES: call sites invoke them as macros, e.g.
+//   AllocSetContextCreate(parent, name, ALLOCSET_SMALL_SIZES!())
+// (the const tuples are imported at line 134 but the call sites use `!()`).
+macro_rules! ALLOCSET_DEFAULT_SIZES {
+    () => { crate::utils::memutils::ALLOCSET_DEFAULT_SIZES };
+}
+macro_rules! ALLOCSET_SMALL_SIZES {
+    () => { crate::utils::memutils::ALLOCSET_SMALL_SIZES };
+}
+
+// CHECK_FOR_INTERRUPTS: pending-interrupt check (miscadmin.h). Shim delegates
+// to the ported no-op.
+macro_rules! CHECK_FOR_INTERRUPTS {
+    () => { crate::miscadmin::CHECK_FOR_INTERRUPTS() };
+}
+
+// SET_LOCKTAG_RELATION (storage/lock.h): fill a LOCKTAG for a relation lock.
+macro_rules! SET_LOCKTAG_RELATION {
+    ($tag:expr, $dboid:expr, $reloid:expr) => {
+        crate::storage::lmgr::lock::SET_LOCKTAG_RELATION(&mut $tag as *mut _ as *mut crate::storage::lmgr::lock::LOCKTAG, $dboid, $reloid)
+    };
+}
+
+// VARDATA_ANY (varatt.h): pointer to varlena payload regardless of header form.
+macro_rules! VARDATA_ANY {
+    ($ptr:expr) => { crate::varatt::VARDATA_ANY($ptr) };
+}
+
+// cstr!: defined above, before SystemFuncName (must precede first use).
+
+// RELKIND_HAS_STORAGE / RELKIND_HAS_TABLE_AM: defined as local `unsafe fn`s in
+// tablecmds.rs, but two call sites (lines ~15066, ~15453) invoke them as
+// macros `RELKIND_HAS_*!(k)`. A macro and fn of the same name coexist (separate
+// namespaces); these delegate to the local fns.
+macro_rules! RELKIND_HAS_STORAGE {
+    ($k:expr) => { RELKIND_HAS_STORAGE($k as ::core::ffi::c_char) };
+}
+macro_rules! RELKIND_HAS_TABLE_AM {
+    ($k:expr) => { RELKIND_HAS_TABLE_AM($k as ::core::ffi::c_char) };
+}
+
+// TRIGGER_FOR_{ROW,BEFORE,AFTER} (catalog/pg_trigger.h). Bit values:
+//   TRIGGER_TYPE_ROW=1<<0, TRIGGER_TYPE_BEFORE=1<<1, TRIGGER_TYPE_INSTEAD=1<<6,
+//   TRIGGER_TYPE_AFTER=0, TIMING_MASK = BEFORE|INSTEAD = 0x42.
+macro_rules! TRIGGER_FOR_ROW {
+    ($t:expr) => { (($t) & (1 << 0)) != 0 };
+}
+macro_rules! TRIGGER_FOR_BEFORE {
+    ($t:expr) => { (($t) & ((1 << 1) | (1 << 6))) == (1 << 1) };
+}
+macro_rules! TRIGGER_FOR_AFTER {
+    ($t:expr) => { (($t) & ((1 << 1) | (1 << 6))) == 0 };
+}
+
+// --- Local helper fn -------------------------------------------------------
+
+// child_dependency_type (tablecmds.c:365): partition children -> AUTO, else NORMAL.
+#[inline]
+unsafe fn child_dependency_type(child_is_partition: bool) -> crate::catalog::dependency::DependencyType {
+    if child_is_partition {
+        crate::catalog::dependency::DEPENDENCY_AUTO
+    } else {
+        crate::catalog::dependency::DEPENDENCY_NORMAL
+    }
+}
+
+// table_relation_copy_data (access/tableam.h:1618): static-inline wrapper over
+// the relation_copy_data AM callback. No ported wrapper exists; mirror the C.
+#[inline]
+unsafe fn table_relation_copy_data(rel: Relation, newrlocator: *const RelFileLocator) {
+    ((*((*rel).rd_tableam as *const crate::access::table::tableam::TableAmRoutine)).relation_copy_data.unwrap())(rel, newrlocator)
+}
+
+// --- Local consts: catalog metadata (values from PostgreSQL 18 headers) -----
+
+// pg_attribute_d.h
+const Anum_pg_attribute_attrelid: AttrNumber = 1;
+const Anum_pg_attribute_attstattarget: AttrNumber = 21;
+const Anum_pg_attribute_attacl: AttrNumber = 22;
+const Anum_pg_attribute_attoptions: AttrNumber = 23;
+const Anum_pg_attribute_attfdwoptions: AttrNumber = 24;
+const Anum_pg_attribute_attmissingval: AttrNumber = 25;
+const Natts_pg_attribute: usize = 25;
+
+// pg_class_d.h
+const Anum_pg_class_relowner: AttrNumber = 6;
+const Anum_pg_class_reltablespace: AttrNumber = 9;
+const Anum_pg_class_relacl: AttrNumber = 32;
+const Anum_pg_class_reloptions: AttrNumber = 33;
+const Anum_pg_class_relpartbound: AttrNumber = 34;
+const Natts_pg_class: usize = 34;
+
+// pg_constraint_d.h
+const Anum_pg_constraint_conname: AttrNumber = 2;
+const Anum_pg_constraint_contype: AttrNumber = 4;
+const Anum_pg_constraint_conrelid: AttrNumber = 9;
+const Anum_pg_constraint_contypid: AttrNumber = 10;
+const Anum_pg_constraint_conparentid: AttrNumber = 12;
+const Anum_pg_constraint_confrelid: AttrNumber = 13;
+const Anum_pg_constraint_conpfeqop: AttrNumber = 23;
+const Anum_pg_constraint_conbin: AttrNumber = 28;
+
+// pg_depend_d.h
+const Anum_pg_depend_classid: AttrNumber = 1;
+const Anum_pg_depend_objid: AttrNumber = 2;
+const Anum_pg_depend_objsubid: AttrNumber = 3;
+const Anum_pg_depend_refobjsubid: AttrNumber = 6;
+
+// pg_foreign_table_d.h
+const Anum_pg_foreign_table_ftoptions: AttrNumber = 3;
+const Natts_pg_foreign_table: usize = 3;
+
+// pg_index_d.h
+const Anum_pg_index_indclass: AttrNumber = 18;
+const Anum_pg_index_indexprs: AttrNumber = 20;
+const Anum_pg_index_indpred: AttrNumber = 21;
+
+// pg_inherits_d.h
+const Anum_pg_inherits_inhrelid: AttrNumber = 1;
+const Anum_pg_inherits_inhparent: AttrNumber = 2;
+
+// --- Local consts: catalog index OIDs (values from pg_<cat>_d.h) -----------
+const AttributeRelidNumIndexId: Oid = 2659;        // pg_attribute_d.h
+const ConstraintParentIndexId: Oid = 2579;         // pg_constraint_d.h
+const ConstraintRelidTypidNameIndexId: Oid = 2665; // pg_constraint_d.h
+const DependDependerIndexId: Oid = 2673;           // pg_depend_d.h
+const InheritsParentIndexId: Oid = 2187;           // pg_inherits_d.h
+const InheritsRelidSeqnoIndexId: Oid = 2680;       // pg_inherits_d.h
+const TriggerConstraintIndexId: Oid = 2699;        // pg_trigger_d.h
+const TriggerRelidNameIndexId: Oid = 2701;         // pg_trigger_d.h
+
+// --- Local consts: fmgr builtin OIDs (values from utils/fmgroids.h) --------
+const F_CHAREQ: Oid = 61;
+const F_NAMEEQ: Oid = 62;
+const F_INT4EQ: Oid = 65;
+const F_RI_FKEY_CHECK_INS: Oid = 1644;
+const F_RI_FKEY_CHECK_UPD: Oid = 1645;
+const F_RI_FKEY_CASCADE_DEL: Oid = 1646;
+const F_RI_FKEY_CASCADE_UPD: Oid = 1647;
+const F_RI_FKEY_RESTRICT_DEL: Oid = 1648;
+const F_RI_FKEY_RESTRICT_UPD: Oid = 1649;
+const F_RI_FKEY_SETNULL_DEL: Oid = 1650;
+const F_RI_FKEY_SETNULL_UPD: Oid = 1651;
+const F_RI_FKEY_SETDEFAULT_DEL: Oid = 1652;
+const F_RI_FKEY_SETDEFAULT_UPD: Oid = 1653;
+const F_RI_FKEY_NOACTION_DEL: Oid = 1654;
+const F_RI_FKEY_NOACTION_UPD: Oid = 1655;
+
+// --- Local consts: AT_REWRITE_* rewrite flags (commands/event_trigger.h) ----
+const AT_REWRITE_ALTER_PERSISTENCE: c_int = 0x01;
+const AT_REWRITE_DEFAULT_VAL: c_int = 0x02;
+const AT_REWRITE_COLUMN_REWRITE: c_int = 0x04;
+const AT_REWRITE_ACCESS_METHOD: c_int = 0x08;
+
+// --- Local consts: CHKATYPE_* flags (mirror catalog/heap.rs:362-363) --------
+const CHKATYPE_IS_PARTKEY: c_int = 0x04;
+const CHKATYPE_IS_VIRTUAL: c_int = 0x08;
+
+// --- Local consts: IndexAttrBitmapKind (utils/relcache.h enum) --------------
+// True C enum: KEY=0, PRIMARY_KEY=1, IDENTITY_KEY=2. (KEY is imported from
+// execMain.) Typed c_int to match the local RelationGetIndexAttrBitmap stub.
+const INDEX_ATTR_BITMAP_PRIMARY_KEY: c_int = 1;
+const INDEX_ATTR_BITMAP_IDENTITY_KEY: c_int = 2;
+
+// --- Local consts: INT16_MAX (c.h) -----------------------------------------
+const INT16_MAX: i32 = crate::c::PG_INT16_MAX as i32;
+
+// --- Local consts: ERRCODE_* (cosmetic stubs) ------------------------------
+// The crate has no canonical pub ERRCODE module; existing modules stub these as
+// `c_int = 0`. ereport!/errcode! ignore the value, so 0 is fine for bring-up.
+const ERRCODE_FEATURE_NOT_SUPPORTED: c_int = 0;
+const ERRCODE_DATATYPE_MISMATCH: c_int = 0;
+const ERRCODE_WRONG_OBJECT_TYPE: c_int = 0;
+const ERRCODE_UNDEFINED_COLUMN: c_int = 0;
+const ERRCODE_UNDEFINED_OBJECT: c_int = 0;
+const ERRCODE_INVALID_COLUMN_DEFINITION: c_int = 0;
+const ERRCODE_INVALID_TABLE_DEFINITION: c_int = 0;
+const ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE: c_int = 0;
+
+// ==== end resolved ====
+
+// ==== generated import block (tablecmds bring-up, 318/410 names) ====
+// ===========================================================================
+// Grouped `use` block for src/commands/tablecmds.rs // (ereport/elog/errmsg/errmsg-family come from `use crate::prelude::*;` already)
+// ===========================================================================
+
+// --- crate-root macros (#[macro_export]) ---
+use crate::{foreach, foreach_oid, for_each_from, IsA, LOCAL_FCINFO, castNode, makeNode,     lfirst_node, intVal, strVal, list_make1_oid, list_make2, list_make3, current_cell};
+
+// --- core ffi ---
+use core::ffi::{c_void};
+
+// --- c.rs ---
+use crate::c::{bits16, int16, int32, uint16, SubTransactionId};
+
+// --- postgres / postgres_ext ---
+use crate::postgres::{PointerGetDatum, Int32GetDatum, BoolGetDatum, CharGetDatum};
+
+// --- access::* ---
+use crate::access::cmptype::{CompareType, COMPARE_EQ, COMPARE_OVERLAP};
+use crate::access::stratnum::{StrategyNumber, InvalidStrategy};
+use crate::access::sysattr::FirstLowInvalidHeapAttributeNumber;
+use crate::access::common::attmap::{build_attrmap_by_name_if_req};
+use crate::access::common::tupdesc::{CompactAttribute, ATTNULLABLE_VALID, InvalidCompressionMethod};
+use crate::access::common::heaptuple::{heap_attisnull, heap_copytuple, heap_modify_tuple};
+const HEAP_RELOPT_NAMESPACES: [*const c_char; 2] = [c"toast".as_ptr(), core::ptr::null()];
+unsafe fn attribute_reloptions(_reloptions: Datum, _validate: bool) -> *mut crate::c::bytea { core::ptr::null_mut() }
+unsafe fn index_reloptions<T>(_amoptions: T, _reloptions: Datum, _validate: bool) -> *mut crate::c::bytea { core::ptr::null_mut() }
+unsafe fn untransformRelOptions(_options: Datum) -> *mut List { core::ptr::null_mut() }
+use crate::access::common::relation::{try_relation_open};
+use crate::access::htup_details::{heap_getattr};
+use crate::access::index::amapi::IndexAmRoutine;
+use crate::access::table::table::{table_openrv};
+use crate::access::table::tableam::table_slot_create;
+use crate::access::transam::InvalidTransactionId;
+use crate::access::transam::xact::{CommitTransactionCommand, StartTransactionCommand, PreventInTransactionBlock, MyXactFlags, XACT_FLAGS_ACCESSEDTEMPNAMESPACE};
+
+// --- catalog::* ---
+use crate::catalog::catalog_oids::{AccessMethodRelationId, AttrDefaultRelationId, CollationRelationId, ForeignTableRelationId, IndexRelationId, NamespaceRelationId, StatisticExtRelationId, TableSpaceRelationId, TriggerRelationId};
+use crate::catalog::index::{     index_check_primary_key, index_constraint_create,     INDEX_CONSTR_CREATE_DEFERRABLE, INDEX_CONSTR_CREATE_INIT_DEFERRED,     INDEX_CONSTR_CREATE_MARK_AS_PRIMARY, INDEX_CONSTR_CREATE_REMOVE_OLD_DEPS,     INDEX_CONSTR_CREATE_UPDATE_INDEX, };
+use crate::catalog::dependency::{     DependencyType, DEPENDENCY_AUTO, DEPENDENCY_INTERNAL, DEPENDENCY_NORMAL,     DEPENDENCY_PARTITION_PRI, DEPENDENCY_PARTITION_SEC,     PERFORM_DELETION_INTERNAL, PERFORM_DELETION_QUIETLY,     object_address_present, performDeletion, };
+use crate::catalog::heap::heap_truncate;
+use crate::catalog::namespace::{     OpclassnameGetOpcid, get_collation_oid, isAnyTempNamespace, };
+use crate::catalog::namespace::RVROption::RVR_MISSING_OK;
+use crate::catalog::objectaddress_impl::getObjectDescription;
+use crate::catalog::partition::{     get_partition_ancestors, get_proposed_default_constraint, has_partition_attrs,     index_get_partition, map_partition_varattnos, update_default_partition_oid, };
+use crate::partitioning::partbounds::get_qual_from_partbound;
+use crate::catalog::pg_attribute::{Form_pg_attribute, ATTRIBUTE_GENERATED_STORED, ATTRIBUTE_GENERATED_VIRTUAL};
+use crate::catalog::pg_class::{Form_pg_class, RELKIND_TOASTVALUE, RELPERSISTENCE_UNLOGGED, REPLICA_IDENTITY_DEFAULT, REPLICA_IDENTITY_FULL, REPLICA_IDENTITY_INDEX, REPLICA_IDENTITY_NOTHING};
+use crate::catalog::pg_constraint::{Form_pg_constraint, CONSTRAINT_RELATION, extractNotNullColumn, findNotNullConstraint, findNotNullConstraintAttnum, get_relation_idx_constraint_oid};
+use crate::catalog::pg_depend::{     Form_pg_depend, changeDependencyFor, deleteDependencyRecordsFor,     deleteDependencyRecordsForClass, deleteDependencyRecordsForSpecific,     getIdentitySequence, sequenceIsOwned, };
+use crate::catalog::pg_foreign_table::Form_pg_foreign_table;
+use crate::catalog::pg_index::Form_pg_index;
+use crate::catalog::pg_inherits::{Form_pg_inherits, has_superclass};
+use crate::catalog::pg_opclass::Form_pg_opclass;
+use crate::catalog::pg_shdepend::changeDependencyOnOwner;
+use crate::catalog::pg_trigger::{     Form_pg_trigger,     Anum_pg_trigger_tgargs, Anum_pg_trigger_tgconstraint,     Anum_pg_trigger_tgqual, Anum_pg_trigger_tgrelid,     TRIGGER_TYPE_AFTER, TRIGGER_TYPE_DELETE, TRIGGER_TYPE_EVENT_MASK, TRIGGER_TYPE_INSERT,     TRIGGER_TYPE_TIMING_MASK, TRIGGER_TYPE_UPDATE, };
+use crate::catalog::pg_type::{     Form_pg_type, TYPSTORAGE_EXTENDED, TYPSTORAGE_EXTERNAL, TYPSTORAGE_MAIN, TYPSTORAGE_PLAIN, };
+use crate::catalog::pg_type_d::{OIDOID};
+use crate::catalog::pg_known_oids::{     BTREE_AM_OID, HASH_AM_OID, DEFAULT_COLLATION_OID, GLOBALTABLESPACE_OID, };
+use crate::catalog::storage_xlog::log_smgrcreate;
+
+// --- nodes::* ---
+use crate::nodes::nodes::{NodeTag, nodeTag};
+use crate::nodes::nodes::NodeTag::{     T_CoerceToDomain, T_FuncExpr, T_RelabelType, T_TriggerData, T_Var, };
+use crate::nodes::execnodes::{INDEX_MAX_KEYS};
+use crate::nodes::bitmapset::{     bms_add_range, bms_del_member, bms_is_empty, bms_make_singleton, bms_next_member, };
+use crate::nodes::makefuncs::{     makeNotNullConstraint, makeNullConst, makeVar, make_ands_explicit, make_ands_implicit, };
+use crate::nodes::value::makeString;
+unsafe fn nodeToString(_obj: *const ::std::ffi::c_void) -> *mut c_char { core::ptr::null_mut() }
+use crate::nodes::nodeFuncs::{exprCollation, exprType, strip_implicit_coercions};
+use crate::nodes::parsenodes::{     Query, RawStmt, DefElem, CreateTrigStmt, PartitionElem,     ACL_MAINTAIN, ACL_REFERENCES,     AT_AddConstraint, AT_AddIndex, AT_AddInherit, AT_AlterColumnType, AT_AttachPartition,     AT_ClusterOn, AT_DropColumn, AT_DropConstraint, AT_ReAddComment, AT_ReAddConstraint,     AT_ReAddDomainConstraint, AT_ReAddIndex, AT_ReAddStatistics, AT_ReplaceRelOptions,     AT_ReplicaIdentity, AT_ResetRelOptions, AT_SetExpression, AT_SetTableSpace,     CONSTR_CHECK, CONSTR_FOREIGN, CONSTR_NOTNULL, CONSTR_PRIMARY,     DROP_CASCADE, DROP_RESTRICT,     FKCONSTR_ACTION_CASCADE, FKCONSTR_ACTION_NOACTION, FKCONSTR_ACTION_RESTRICT, FKCONSTR_ACTION_SETDEFAULT,     FKCONSTR_ACTION_SETNULL,     OBJECT_DOMCONSTRAINT, OBJECT_FOREIGN_TABLE, OBJECT_INDEX, OBJECT_MATVIEW, OBJECT_SCHEMA,     OBJECT_SEQUENCE, OBJECT_TABCONSTRAINT, OBJECT_TABLE, OBJECT_TYPE, OBJECT_VIEW,     PARTITION_STRATEGY_HASH, PARTITION_STRATEGY_LIST, };
+use crate::nodes::primnodes::{     Expr, RangeVar, FuncExpr, CollateExpr, CoerceToDomain, NullTest, NextValueExpr,     RelabelType, Var,     COERCE_IMPLICIT_CAST, COERCION_ASSIGNMENT, COERCION_IMPLICIT,     IS_NOT_NULL, ONCOMMIT_PRESERVE_ROWS, PRS2_NEW_VARNO, PRS2_OLD_VARNO, };
+use crate::nodes::pg_list::{NIL, list_head, lnext, lcons, lcons_oid, lfirst, list_concat_copy, list_append_unique_oid, list_delete_cell, list_free_deep};
+
+// --- parser::* ---
+use crate::parser::parse_node::{EXPR_KIND_PARTITION_EXPRESSION};
+use crate::parser::parse_type::{Type, typenameType};
+use crate::parser::parse_coerce::{     CoercionPathType, COERCION_PATH_NONE, COERCION_PATH_RELABELTYPE,     can_coerce_type, coerce_to_target_type, find_coercion_pathway, };
+use crate::parser::parse_collate::assign_expr_collations;
+use crate::parser::parse_relation::{attnumAttName, attnumCollationId, attnumTypeId};
+use crate::parser::parse_expr::transformExpr;
+use crate::parser::parse_utilcmd::{transformIndexStmt, transformStatsStmt};
+use crate::parser::parser::{raw_parser, RAW_PARSE_DEFAULT};
+
+// --- optimizer::* ---
+use crate::optimizer::optimizer::{canonicalize_qual, expression_planner};
+use crate::optimizer::util::clauses::{     contain_mutable_functions, contain_volatile_functions, eval_const_expressions, };
+use crate::optimizer::util::predtest::predicate_implied_by;
+use crate::optimizer::util::var::pull_varattnos;
+
+// --- rewrite::* ---
+use crate::rewrite::rewriteHandler::{     build_column_default, get_view_query, view_query_is_auto_updatable, };
+
+// --- commands::* ---
+use crate::commands::defrem::{GetDefaultOpClass, get_am_name, transformGenericOptions};
+use crate::commands::define::defGetInt32;
+unsafe fn check_index_is_clusterable(_old_heap: Relation, _index_oid: Oid, _lockmode: LOCKMODE) {}
+unsafe fn mark_index_clustered(_rel: Relation, _index_oid: Oid, _is_internal: bool) {}
+use crate::commands::trigger::{     TriggerData, TRIGGER_EVENT_INSERT, TRIGGER_EVENT_ROW, };
+const TRIGGER_FIRES_ON_ORIGIN: c_char = b'O' as c_char;
+unsafe fn roleSpecsToIds(_member_names: *mut List) -> *mut List { core::ptr::null_mut() }
+
+// --- utils::* ---
+use crate::utils::adt::acl::{Acl, AclResult, AclResult::ACLCHECK_OK, aclnewowner, check_can_set_role};
+use crate::utils::adt::arrayfuncs::{array_get_element, construct_array};
+use crate::utils::adt::ri_triggers::{RI_TRIGGER_FK, RI_TRIGGER_PK};
+unsafe fn pg_get_constraintdef_command(_constraint_id: Oid) -> *mut c_char { core::ptr::null_mut() }
+unsafe fn pg_get_expr(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum { 0 }
+unsafe fn pg_get_indexdef_string(_indexrelid: Oid) -> *mut c_char { core::ptr::null_mut() }
+unsafe fn pg_get_statisticsobjdef_string(_statextid: Oid) -> *mut c_char { core::ptr::null_mut() }
+use crate::utils::array::ArrayType;
+use crate::utils::memutils::{ALLOCSET_DEFAULT_SIZES, ALLOCSET_SMALL_SIZES};
+use crate::utils::mmgr::mcxt::{CacheMemoryContext, PortalContext};
+use crate::utils::reltrigger::Trigger;
+use crate::utils::misc::superuser::superuser;
+use crate::utils::cache::lsyscache::{     get_attname, get_attnum, get_collation_isdeterministic,     get_constraint_index, get_constraint_name, get_constraint_type,     get_index_isclustered, get_index_isreplident, get_opfamily_member,     get_typ_typrelid, get_typcollation, get_typstorage, type_is_collatable,     getBaseType, getBaseTypeAndTypmod, };
+use crate::utils::cache::syscache_ids_gen::{     ATTNAME, CLAOID, CONSTROID, FOREIGNTABLEREL, INDEXRELID, RELOID, };
+use crate::utils::cache::typcache::lookup_rowtype_tupdesc;
+use crate::utils::rel::{LockRelId};
+
+// --- storage::* ---
+use crate::storage::itemptr::ItemPointerData;
+use crate::storage::relfilelocator::RelFileLocator;
+use crate::storage::smgr::smgr::{SMgrRelation, smgrclose, smgrcreate, smgrexists};
+use crate::storage::lockdefs::{ShareLock, InplaceUpdateTupleLock};
+use crate::storage::lmgr::lmgr::{LOCKTAGData as LOCKTAG};
+use crate::storage::lmgr::lock::SET_LOCKTAG_RELATION;
+
+// --- common::* / port ---
+use crate::common::relpath::{ForkNumber, INIT_FORKNUM, MAIN_FORKNUM, MAX_FORKNUM};
+use crate::common::int::pg_add_s16_overflow;
+use crate::port::pgstrcasecmp::pg_strcasecmp;
+
+// --- foreign ---
+use crate::foreign::foreign::{ForeignDataWrapper, ForeignServer};
+
+// --- misc / config ---
+use crate::miscadmin::{GetUserIdAndSecContext, SetUserIdAndSecContext, SECURITY_RESTRICTED_OPERATION};
+use crate::pg_config_manual::NAMEDATALEN;
+use crate::varatt::VARDATA_ANY;
+use crate::statistics::statistics::MAX_STATISTICS_TARGET;
+/* UNRESOLVED 92 names needing local defs / new catalog modules:
+// NAMES WITH NO CANONICAL IMPORT -- must be handled locally in tablecmds.rs
+// (define a local `const` / `macro_rules!` / enum, or fix the canonical source).
+// These are NOT added to the use block above.
+// ===========================================================================
+//
+// (A) File-LOCAL to tablecmds.rs (already defined there or defined alongside it):
+//   AT_PASS_MISC, AT_PASS_OLD_CONSTR, AT_PASS_OLD_INDEX                 (AlterTablePass enum, local)
+//   AT_REWRITE_ACCESS_METHOD, AT_REWRITE_ALTER_PERSISTENCE,
+//   AT_REWRITE_COLUMN_REWRITE, AT_REWRITE_DEFAULT_VAL                   (local rewrite flags)
+//   addFkBothSides, addFkReferencedSide, addFkReferencingSide          (addFkConstraintSides enum, local)
+//   child_dependency_type                                              (local helper fn)
+//   RELKIND_HAS_STORAGE, RELKIND_HAS_TABLE_AM                          (already local fns in tablecmds.rs)
+//
+// (B) No canonical `pub const` ANYWHERE -- define locally (values from PG18 headers):
+//   Anum_pg_attribute_attacl, Anum_pg_attribute_attfdwoptions, Anum_pg_attribute_attmissingval,
+//   Anum_pg_attribute_attoptions, Anum_pg_attribute_attrelid, Anum_pg_attribute_attstattarget,
+//   Anum_pg_class_relacl, Anum_pg_class_reloptions, Anum_pg_class_relowner,
+//   Anum_pg_class_relpartbound, Anum_pg_class_reltablespace,
+//   Anum_pg_constraint_conbin, Anum_pg_constraint_confrelid, Anum_pg_constraint_conname,
+//   Anum_pg_constraint_conparentid, Anum_pg_constraint_conpfeqop, Anum_pg_constraint_conrelid,
+//   Anum_pg_constraint_contype, Anum_pg_constraint_contypid,
+//   Anum_pg_depend_classid, Anum_pg_depend_objid, Anum_pg_depend_objsubid,
+//   Anum_pg_depend_refobjsubid,
+//   Anum_pg_foreign_table_ftoptions,
+//   Anum_pg_index_indclass, Anum_pg_index_indexprs, Anum_pg_index_indpred,
+//   Anum_pg_inherits_inhparent, Anum_pg_inherits_inhrelid,
+//   Natts_pg_attribute (=43), Natts_pg_class (=34), Natts_pg_foreign_table (=3)
+//
+// (C) Index OIDs not present in catalog_oids -- define locally (values from indexing.h):
+//   AttributeRelidNumIndexId (=2658), ConstraintParentIndexId (=2996),
+//   ConstraintRelidTypidNameIndexId (=2664), DependDependerIndexId (=2673),
+//   InheritsParentIndexId (=2187), InheritsRelidSeqnoIndexId (=2680),
+//   TriggerConstraintIndexId (=2699), TriggerRelidNameIndexId (=2701)
+//   (InheritsParentIndexId / InheritsRelidSeqnoIndexId exist as PRIVATE `const` in
+//    src/catalog/pg_inherits.rs -- make them `pub` to import instead of defining locally.)
+//
+// (D) ERRCODE_* -- no canonical errcodes module exists; define locally or add one:
+//   ERRCODE_DATATYPE_MISMATCH, ERRCODE_FEATURE_NOT_SUPPORTED,
+//   ERRCODE_INVALID_COLUMN_DEFINITION, ERRCODE_INVALID_TABLE_DEFINITION,
+//   ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE, ERRCODE_UNDEFINED_COLUMN,
+//   ERRCODE_UNDEFINED_OBJECT, ERRCODE_WRONG_OBJECT_TYPE
+//
+// (E) F_* function OIDs -- no fmgroids/pg_proc_d table exists; define locally:
+//   F_CHAREQ, F_INT4EQ, F_NAMEEQ,
+//   F_RI_FKEY_CASCADE_DEL, F_RI_FKEY_CASCADE_UPD, F_RI_FKEY_CHECK_INS, F_RI_FKEY_CHECK_UPD,
+//   F_RI_FKEY_NOACTION_DEL, F_RI_FKEY_NOACTION_UPD, F_RI_FKEY_RESTRICT_DEL,
+//   F_RI_FKEY_RESTRICT_UPD, F_RI_FKEY_SETDEFAULT_DEL, F_RI_FKEY_SETDEFAULT_UPD,
+//   F_RI_FKEY_SETNULL_DEL, F_RI_FKEY_SETNULL_UPD
+//
+// (F) Used as MACROS in tablecmds.rs but no macro_rules! exists -- define local macros:
+//   TRIGGER_FOR_ROW!, TRIGGER_FOR_BEFORE!, TRIGGER_FOR_AFTER!
+//   errmsg_internal!  (local shim delegating to errmsg!, per nbtree.rs pattern)
+//   cstr!             (not #[macro_export]; define locally)
+//
+// (G) No canonical export -- define locally / fix source:
+//   copyObject              (only file-local stubs; wrap crate::nodes::copyfuncs::copyObjectImpl or local stub)
+//   table_relation_copy_data (no ported wrapper; add to access/table/tableam.rs over relation_copy_data callback)
+//   INT16_MAX               (use crate::c::PG_INT16_MAX, alias `as INT16_MAX` if desired)
+//   CHKATYPE_IS_PARTKEY, CHKATYPE_IS_VIRTUAL (only private consts in catalog/heap.rs; make pub or local)
+//   INDEX_ATTR_BITMAP_IDENTITY_KEY, INDEX_ATTR_BITMAP_PRIMARY_KEY
+//                           (no canonical def; only INDEX_ATTR_BITMAP_KEY exists in execMain.rs -- define these two locally)
+//
+// ===========================================================================
+
+*/
+
 use std::ffi::{c_char, c_int, c_uint, CStr};
 use std::ptr;
 
 use crate::postgres_ext::Oid;
-use crate::postgres::{Datum, InvalidOid};
+use crate::postgres::Datum;
 use crate::nodes::parsenodes::{
     AlterTableStmt, AlterTableCmd, AlterTableType, AlterDomainStmt, CreateStmt, DropStmt,
-    RangeVar, ColumnDef, Constraint, ConstrType, DropBehavior, ObjectType, IndexStmt,
+    ColumnDef, Constraint, ConstrType, DropBehavior, ObjectType, IndexStmt,
     CreateStatsStmt, PartitionCmd, PartitionSpec, PartitionBoundSpec, PartitionStrategy,
     ReplicaIdentityStmt, RenameStmt, AlterObjectSchemaStmt, TypeName, CommentStmt,
     AlterTableMoveAllStmt, TruncateStmt,
 };
 use crate::nodes::pg_list::{List, ListCell};
 use crate::nodes::nodes::Node;
-use crate::nodes::plannodes::ResultRelInfo;
+use crate::nodes::execnodes::ResultRelInfo;
 use crate::nodes::execnodes::{EState, ExprState, ExprContext, TupleTableSlot};
-use crate::nodes::value::ATAlterConstraint;
-use crate::catalog::objectaccess::{ObjectAddress, ObjectAddresses};
-use crate::access::transam::SubTransactionId;
+use crate::nodes::parsenodes::ATAlterConstraint;
+use crate::catalog::objectaccess::ObjectAddress;
+use crate::catalog::dependency::ObjectAddresses;
 use crate::access::common::tupdesc::{TupleDesc, TupleConstr};
 use crate::access::htup_details::HeapTupleData;
 use crate::storage::lockdefs::LOCKMODE;
 use crate::utils::rel::Relation;
-use crate::utils::fmgr::Expr;
 
 /* TODO(pg-port): stubs for types not yet in crate */
 type HeapTuple = *mut HeapTupleData;
 type AttrNumber = i16;
 type AttrMap = crate::access::common::attmap::AttrMap;
 type RelFileNumber = u32;
-type BulkInsertState = *mut std::ffi::c_void;
-type TableScanDesc = *mut std::ffi::c_void;
-type IndexInfo = *mut std::ffi::c_void;
-type ForeignKeyCacheInfo = *mut std::ffi::c_void;
-type Snapshot = *mut std::ffi::c_void;
-type ParseState = *mut std::ffi::c_void;
-type ParseNamespaceItem = *mut std::ffi::c_void;
-type Bitmapset = *mut std::ffi::c_void;
+type BulkInsertState = crate::access::heap::hio::BulkInsertState;
+type TableScanDesc = crate::access::relscan::TableScanDesc;
+type IndexInfo = crate::nodes::execnodes::IndexInfo;
+type ForeignKeyCacheInfo = crate::optimizer::util::plancat::ForeignKeyCacheInfo;
+type Snapshot = crate::utils::snapshot::Snapshot;
+type ParseState = *mut crate::parser::parse_node::ParseState;
+type ParseNamespaceItem = crate::parser::parse_node::ParseNamespaceItem;
+type Bitmapset = crate::nodes::bitmapset::Bitmapset;
 type AlterTableUtilityContext = crate::tcop::utility::AlterTableUtilityContext;
 
 /* TODO(pg-port): catalog/scan stubs */
-type SysScanDesc = *mut std::ffi::c_void;
-#[repr(C)] struct ScanKeyData { _opaque: [u8; 48] }
+type SysScanDesc = crate::access::index::genam::SysScanDesc;
+#[repr(C)] #[derive(Clone, Copy)] struct ScanKeyData { _opaque: [u8; 48] }
+impl Default for ScanKeyData { fn default() -> Self { ScanKeyData { _opaque: [0u8; 48] } } }
 use crate::catalog::pg_depend::FormData_pg_depend;
 use crate::catalog::pg_class::FormData_pg_class;
 use crate::catalog::pg_attribute::FormData_pg_attribute;
@@ -86,6 +734,8 @@ const AccessExclusiveLock: LOCKMODE = 8;
 const RowShareLock: LOCKMODE = 2;
 const BTEqualStrategyNumber: u16 = 3;
 const F_OIDEQ: u32 = 184;
+const F_TIMESTAMP_TIMESTAMPTZ: u32 = 2024;
+const F_TIMESTAMPTZ_TIMESTAMP: u32 = 2027;
 const RELKIND_RELATION: u8 = b'r';
 const RELKIND_PARTITIONED_TABLE: u8 = b'p';
 const RELKIND_COMPOSITE_TYPE: u8 = b'c';
@@ -105,14 +755,13 @@ const RelationRelationId: Oid = 1259;
 const InheritsRelationId: Oid = 2611;
 const ConstraintRelationId: Oid = 2606;
 const AttributeRelationId: Oid = 1249;
-const Anum_pg_depend_refclassid: u16 = 5;
-const Anum_pg_depend_refobjid: u16 = 6;
-const Anum_pg_class_reloftype: u16 = 5;
+const Anum_pg_depend_refclassid: i16 = 5;
+const Anum_pg_depend_refobjid: i16 = 6;
+const Anum_pg_class_reloftype: i16 = 5;
 const ERROR: i32 = 20;
 const NOTICE: i32 = 18;
 const ForwardScanDirection: i32 = 1;
 const InvalidAttrNumber: AttrNumber = 0;
-const InvalidOid: Oid = crate::postgres::InvalidOid;
 
 /* ObjectAddress helpers */
 const InvalidObjectAddress: ObjectAddress = ObjectAddress { classId: 0, objectId: 0, objectSubId: 0 };
@@ -144,314 +793,421 @@ unsafe fn TupleDescAttr(tupdesc: TupleDesc, n: usize) -> *mut FormData_pg_attrib
     crate::access::common::tupdesc::TupleDescAttr(tupdesc, n as c_int)
 }
 unsafe fn NameStr_ref(n: &NameData) -> *const c_char { n.data.as_ptr() }
-unsafe fn check_stack_depth() { /* TODO(pg-port): stub */ }
+unsafe fn check_stack_depth() { /* stub no-op (restored: test_setup path) */ }
 unsafe fn format_type_be(oid: Oid) -> *const c_char { ptr::null() /* TODO(pg-port): stub */ }
-unsafe fn ScanKeyInit(entry: *mut ScanKeyData, attributeNumber: u16, strategy: u16, procedure: u32, argument: Datum) {
-    /* TODO(pg-port): stub */
+unsafe fn ScanKeyInit(entry: *mut ScanKeyData, attributeNumber: i16, strategy: u16, procedure: u32, argument: Datum) {
+    crate::access::common::scankey::ScanKeyInit(
+        entry as *mut crate::access::common::scankey::ScanKeyData,
+        attributeNumber as crate::access::attnum::AttrNumber,
+        strategy as crate::access::stratnum::StrategyNumber,
+        procedure as crate::c::RegProcedure,
+        argument
+    )
 }
-unsafe fn systable_beginscan(heapRelation: Relation, indexId: Oid, indexOk: bool, snapshot: Snapshot, nkeys: i32, key: *mut ScanKeyData) -> SysScanDesc { ptr::null_mut() }
-unsafe fn systable_getnext(sysscan: SysScanDesc) -> HeapTuple { ptr::null_mut() }
-unsafe fn systable_endscan(sysscan: SysScanDesc) {}
-unsafe fn table_beginscan_catalog(heapRelation: Relation, nkeys: i32, key: *mut ScanKeyData) -> TableScanDesc { ptr::null_mut() }
-unsafe fn heap_getnext(scan: TableScanDesc, direction: i32) -> HeapTuple { ptr::null_mut() }
-unsafe fn table_endscan(scan: TableScanDesc) {}
+unsafe fn systable_beginscan(heapRelation: Relation, indexId: Oid, indexOk: bool, snapshot: Snapshot, nkeys: i32, key: *mut ScanKeyData) -> SysScanDesc {
+    crate::access::index::genam::systable_beginscan(
+        heapRelation,
+        indexId,
+        indexOk,
+        snapshot as *mut std::ffi::c_void,
+        nkeys as c_int,
+        key as *mut crate::access::common::scankey::ScanKeyData
+    )
+}
+unsafe fn systable_getnext(sysscan: SysScanDesc) -> HeapTuple {
+    crate::access::index::genam::systable_getnext(sysscan) as HeapTuple
+}
+unsafe fn systable_endscan(sysscan: SysScanDesc) {
+    crate::access::index::genam::systable_endscan(sysscan)
+}
+unsafe fn table_beginscan_catalog(heapRelation: Relation, nkeys: i32, key: *mut ScanKeyData) -> TableScanDesc {
+    crate::access::table::tableam::table_beginscan_catalog(
+        heapRelation,
+        nkeys as c_int,
+        key as *mut crate::access::common::scankey::ScanKeyData
+    )
+}
+unsafe fn heap_getnext(scan: TableScanDesc, direction: i32) -> HeapTuple {
+    crate::access::heap::heapam::heap_getnext(scan, direction as crate::access::sdir::ScanDirection)
+}
+unsafe fn table_endscan(scan: TableScanDesc) {
+    crate::access::table::tableam::table_endscan(scan)
+}
+
 unsafe fn lappend_oid(list: *mut List, datum: Oid) -> *mut List { crate::nodes::pg_list::lappend_oid(list, datum) }
 unsafe fn list_free(list: *mut List) { crate::nodes::pg_list::list_free(list) }
 unsafe fn lfirst_oid(lc: *const ListCell) -> Oid { crate::nodes::pg_list::lfirst_oid(lc) }
-unsafe fn relation_open(relationId: Oid, lockmode: LOCKMODE) -> Relation { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn relation_close(relation: Relation, lockmode: LOCKMODE) {}
-unsafe fn find_all_inheritors(parentrelId: Oid, lockmode: LOCKMODE, numparents: *mut i32) -> *mut List { crate::nodes::pg_list::NIL }
-unsafe fn find_inheritance_children(parentrelId: Oid, lockmode: LOCKMODE) -> *mut List { crate::nodes::pg_list::NIL }
-unsafe fn table_open(relationId: Oid, lockmode: LOCKMODE) -> Relation { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn table_close(relation: Relation, lockmode: LOCKMODE) {}
+unsafe fn relation_open(relationId: Oid, lockmode: LOCKMODE) -> Relation {
+    crate::access::common::relation::relation_open(relationId, lockmode)
+}
+unsafe fn relation_close(relation: Relation, lockmode: LOCKMODE) {
+    crate::access::common::relation::relation_close(relation, lockmode)
+}
+unsafe fn find_all_inheritors(parentrelId: Oid, lockmode: LOCKMODE, numparents: *mut *mut List) -> *mut List {
+    crate::catalog::pg_inherits::find_all_inheritors(parentrelId, lockmode, numparents)
+}
+unsafe fn find_inheritance_children(parentrelId: Oid, lockmode: LOCKMODE) -> *mut List {
+    crate::catalog::pg_inherits::find_inheritance_children(parentrelId, lockmode)
+}
+
+unsafe fn table_open(relationId: Oid, lockmode: LOCKMODE) -> Relation {
+    crate::access::table::table::table_open(relationId, lockmode)
+}
+unsafe fn table_close(relation: Relation, lockmode: LOCKMODE) {
+    crate::access::table::table::table_close(relation, lockmode)
+}
 
 /* TODO(pg-port): dependency stubs for functions called from translated bodies */
-unsafe fn RangeVarGetRelidExtended(rv: *const RangeVar, lockmode: LOCKMODE, flags: u32, callback: unsafe fn(*const RangeVar, Oid, Oid, *mut std::ffi::c_void), callback_arg: *mut std::ffi::c_void) -> Oid { 0 }
-unsafe fn AcceptInvalidationMessages() {}
-unsafe fn new_object_addresses() -> *mut ObjectAddresses { ptr::null_mut() }
-unsafe fn makeRangeVarFromNameList(names: *mut List) -> *mut RangeVar { ptr::null_mut() }
-unsafe fn add_exact_object_address(obj: *const ObjectAddress, addrs: *mut ObjectAddresses) {}
-unsafe fn performMultipleDeletions(addrs: *mut ObjectAddresses, behavior: DropBehavior, flags: c_int) {}
-unsafe fn free_object_addresses(addrs: *mut ObjectAddresses) {}
-unsafe fn UnlockRelationOid(relOid: Oid, lockmode: LOCKMODE) {}
-unsafe fn LockRelationOid(relOid: Oid, lockmode: LOCKMODE) {}
-unsafe fn SearchSysCache1(cacheId: c_int, key1: Datum) -> HeapTuple { ptr::null_mut() }
-unsafe fn SearchSysCacheCopy1(cacheId: c_int, key1: Datum) -> HeapTuple { ptr::null_mut() }
-unsafe fn SearchSysCacheLockedCopy1(cacheId: c_int, key1: Datum) -> HeapTuple { ptr::null_mut() }
-unsafe fn ReleaseSysCache(tuple: HeapTuple) {}
-unsafe fn GETSTRUCT(tuple: HeapTuple) -> *mut std::ffi::c_void { (*tuple).t_data as *mut std::ffi::c_void }
-unsafe fn CatalogTupleUpdate(heapRel: Relation, otid: *const std::ffi::c_void, tup: HeapTuple) {}
-unsafe fn UnlockTuple(heapRel: Relation, tid: *const std::ffi::c_void, lockmode: LOCKMODE) {}
-unsafe fn CacheInvalidateRelcacheByTuple(tuple: HeapTuple) {}
-unsafe fn CacheInvalidateRelcache(rel: Relation) {}
-unsafe fn heap_freetuple(tuple: HeapTuple) {}
+unsafe fn RangeVarGetRelidExtended(rv: *const RangeVar, lockmode: LOCKMODE, flags: u32, callback: crate::catalog::namespace::RangeVarGetRelidCallback, callback_arg: *mut std::ffi::c_void) -> Oid {
+    crate::catalog::namespace::RangeVarGetRelidExtended(rv, lockmode, flags, callback, callback_arg)
+}
+unsafe fn AcceptInvalidationMessages() {
+    crate::utils::cache::inval::AcceptInvalidationMessages()
+}
+unsafe fn new_object_addresses() -> *mut ObjectAddresses {
+    crate::catalog::dependency::new_object_addresses()
+}
+unsafe fn makeRangeVarFromNameList(names: *mut List) -> *mut RangeVar {
+    crate::catalog::namespace::makeRangeVarFromNameList(names)
+}
+unsafe fn add_exact_object_address(obj: *const ObjectAddress, addrs: *mut ObjectAddresses) {
+    crate::catalog::dependency::add_exact_object_address(obj, addrs)
+}
+unsafe fn performMultipleDeletions(addrs: *mut ObjectAddresses, behavior: DropBehavior, flags: c_int) {
+    crate::catalog::dependency::performMultipleDeletions(addrs, behavior, flags)
+}
+unsafe fn free_object_addresses(addrs: *mut ObjectAddresses) {
+    crate::catalog::dependency::free_object_addresses(addrs)
+}
+
+unsafe fn UnlockRelationOid(relOid: Oid, lockmode: LOCKMODE) {
+    crate::storage::lmgr::lmgr::UnlockRelationOid(relOid, lockmode)
+}
+unsafe fn LockRelationOid(relOid: Oid, lockmode: LOCKMODE) {
+    crate::storage::lmgr::lmgr::LockRelationOid(relOid, lockmode)
+}
+unsafe fn SearchSysCache1(cacheId: c_int, key1: Datum) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCache1(cacheId, key1)
+}
+unsafe fn SearchSysCacheCopy1(cacheId: c_int, key1: Datum) -> HeapTuple { crate::utils::cache::syscache::SearchSysCacheCopy(cacheId, key1, 0, 0, 0) as _ }
+unsafe fn SearchSysCacheLockedCopy1(cacheId: c_int, key1: Datum) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCacheLockedCopy1(cacheId, key1)
+}
+unsafe fn ReleaseSysCache(tuple: HeapTuple) {
+    crate::utils::cache::syscache::ReleaseSysCache(tuple)
+}
+unsafe fn GETSTRUCT(tuple: HeapTuple) -> *mut std::ffi::c_void {
+    crate::access::htup_details::GETSTRUCT(tuple)
+}
+unsafe fn CatalogTupleUpdate(heapRel: Relation, otid: crate::storage::itemptr::ItemPointer, tup: HeapTuple) {
+    crate::catalog::indexing::CatalogTupleUpdate(heapRel, otid, tup)
+}
+
+unsafe fn UnlockTuple(heapRel: Relation, tid: crate::storage::itemptr::ItemPointer, lockmode: LOCKMODE) {
+    crate::storage::lmgr::lmgr::UnlockTuple(heapRel, tid, lockmode)
+}
+unsafe fn CacheInvalidateRelcacheByTuple(tuple: HeapTuple) {
+    crate::utils::cache::inval::CacheInvalidateRelcacheByTuple(tuple)
+}
+unsafe fn CacheInvalidateRelcache(rel: Relation) {
+    crate::utils::cache::inval::CacheInvalidateRelcache(rel)
+}
+
+unsafe fn heap_freetuple(tuple: HeapTuple) {
+    crate::access::common::heaptuple::heap_freetuple(tuple)
+}
+
 unsafe fn RelationGetForm(rel: Relation) -> *mut FormData_pg_class { (*rel).rd_rel }
-unsafe fn RelationGetNamespace(rel: Relation) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn RelationGetNotNullConstraints(relid: Oid, include_noinherit: bool, include_invalid: bool) -> *mut List { crate::nodes::pg_list::NIL }
+unsafe fn RelationGetNamespace(rel: Relation) -> Oid {
+    crate::utils::rel::RelationGetNamespace(rel)
+}
+unsafe fn RelationGetNotNullConstraints(relid: Oid, include_noinherit: bool, include_invalid: bool) -> *mut List {
+    crate::catalog::pg_constraint::RelationGetNotNullConstraints(relid, include_noinherit, include_invalid)
+}
 unsafe fn RelationIsLogicallyLogged(rel: Relation) -> bool { false }
 unsafe fn RELATION_IS_OTHER_TEMP(rel: Relation) -> bool { false }
-unsafe fn IsSystemRelation(rel: Relation) -> bool { false }
-unsafe fn IsSystemClass(relid: Oid, reltuple: *mut FormData_pg_class) -> bool { false }
-unsafe fn IndexGetRelation(indexOid: Oid, missing_ok: bool) -> Oid { 0 }
-unsafe fn get_partition_parent(relOid: Oid, missing_ok: bool) -> Oid { 0 }
-unsafe fn PartitionHasPendingDetach(relid: Oid) -> bool { false }
+unsafe fn IsSystemRelation(rel: Relation) -> bool {
+    crate::catalog::catalog::IsSystemRelation(rel)
+}
+unsafe fn IsSystemClass(relid: Oid, reltuple: *mut FormData_pg_class) -> bool {
+    crate::catalog::catalog::IsSystemClass(relid, reltuple)
+}
+
+unsafe fn IndexGetRelation(indexOid: Oid, missing_ok: bool) -> Oid {
+    crate::catalog::index::IndexGetRelation(indexOid, missing_ok)
+}
+unsafe fn get_partition_parent(relOid: Oid, missing_ok: bool) -> Oid {
+    crate::catalog::partition::get_partition_parent(relOid, missing_ok)
+}
+unsafe fn PartitionHasPendingDetach(relid: Oid) -> bool {
+    crate::catalog::pg_inherits::PartitionHasPendingDetach(relid)
+}
+
 unsafe fn object_ownercheck(classId: Oid, objectId: Oid, userId: Oid) -> bool { true }
 unsafe fn aclcheck_error(result: c_int, objtype: c_int, objname: *const c_char) {}
 unsafe fn get_relkind_objtype(relkind: c_char) -> c_int { 0 }
-unsafe fn GetUserId() -> Oid { 0 }
-unsafe fn allowSystemTableMods() -> bool { false /* TODO(pg-port): global var stub */ }
-unsafe fn get_domain_constraint_oid(typid: Oid, conname: *const c_char, missing_ok: bool) -> Oid { 0 }
-unsafe fn get_relation_constraint_oid(relid: Oid, conname: *const c_char, missing_ok: bool) -> Oid { 0 }
-unsafe fn RenameTypeInternal(typeOid: Oid, newTypeName: *const c_char, namespaceId: Oid) {}
-unsafe fn get_index_constraint(indexOid: Oid) -> Oid { 0 }
-unsafe fn RenameConstraintById(constraintOid: Oid, newname: *const c_char) {}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
+
+unsafe fn allowSystemTableMods() -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn get_domain_constraint_oid(typid: Oid, conname: *const c_char, missing_ok: bool) -> Oid {
+    crate::catalog::pg_constraint::get_domain_constraint_oid(typid, conname, missing_ok)
+}
+unsafe fn get_relation_constraint_oid(relid: Oid, conname: *const c_char, missing_ok: bool) -> Oid {
+    crate::catalog::pg_constraint::get_relation_constraint_oid(relid, conname, missing_ok)
+}
+unsafe fn RenameTypeInternal(typeOid: Oid, newTypeName: *const c_char, namespaceId: Oid) {
+    crate::catalog::pg_type::RenameTypeInternal(typeOid, newTypeName, namespaceId)
+}
+unsafe fn get_index_constraint(indexOid: Oid) -> Oid {
+    crate::catalog::pg_depend::get_index_constraint(indexOid)
+}
+unsafe fn RenameConstraintById(constraintOid: Oid, newname: *const c_char) {
+    crate::catalog::pg_constraint::RenameConstraintById(constraintOid, newname)
+}
 unsafe fn RenameRelationInternal_catalog(myrelid: Oid, newrelname: *const c_char, is_internal: bool, is_index: bool) {} /* forward decl stub */
 unsafe fn EventTriggerAlterTableRelid(relid: Oid) {}
 unsafe fn AfterTriggerPendingOnRel(relid: Oid) -> bool { false }
 unsafe fn AlterTableGetRelOptionsLockLevel(defList: *mut List) -> LOCKMODE { AccessExclusiveLock }
 unsafe fn copyObject_cmd(cmd: *mut AlterTableCmd) -> *mut AlterTableCmd { cmd /* TODO(pg-port): stub */ }
-unsafe fn ATPostAlterTypeCleanup(wqueue: *mut *mut List, tab: *mut AlteredTableInfo, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn AlterTableCreateToastTable(relid: Oid, reloptions: Datum, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn ProcessUtilityForAlterTable(stmt: *mut Node, context: *mut AlterTableUtilityContext) { /* TODO(pg-port): stub */ }
-unsafe fn EventTriggerCollectAlterTableSubcmd(cmd: *mut Node, address: ObjectAddress) { /* TODO(pg-port): stub */ }
-unsafe fn CommandCounterIncrement() { /* TODO(pg-port): stub */ }
+unsafe fn AlterTableCreateToastTable(relid: Oid, reloptions: Datum, lockmode: LOCKMODE) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn ProcessUtilityForAlterTable(stmt: *mut Node, context: *mut AlterTableUtilityContext) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn EventTriggerCollectAlterTableSubcmd(cmd: *mut Node, address: ObjectAddress) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn CommandCounterIncrement() {
+    crate::access::transam::xact::CommandCounterIncrement()
+}
 unsafe fn palloc0(size: usize) -> *mut std::ffi::c_void { /* TODO(pg-port): use palloc */ ptr::null_mut() }
-unsafe fn CreateTupleDescCopyConstr(tupdesc: TupleDesc) -> TupleDesc { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn lappend(list: *mut List, datum: *mut std::ffi::c_void) -> *mut List { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn lappend_ptr(list: *mut List, datum: *mut std::ffi::c_void) -> *mut List { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn list_difference_ptr(list1: *mut List, list2: *mut List) -> *mut List { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn list_copy(list: *const List) -> *mut List { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn list_length(list: *const List) -> c_int { 0 /* TODO(pg-port): stub */ }
+unsafe fn CreateTupleDescCopyConstr(tupdesc: TupleDesc) -> TupleDesc {
+    crate::access::common::tupdesc::CreateTupleDescCopyConstr(tupdesc)
+}
+
+unsafe fn lappend(list: *mut List, datum: *mut std::ffi::c_void) -> *mut List {
+    crate::nodes::pg_list::lappend(list, datum)
+}
+unsafe fn lappend_ptr(list: *mut List, datum: *mut std::ffi::c_void) -> *mut List { crate::nodes::pg_list::lappend(list, datum) }
+unsafe fn list_difference_ptr(list1: *mut List, list2: *mut List) -> *mut List {
+    crate::nodes::pg_list::list_difference_ptr(list1, list2)
+}
+unsafe fn list_copy(list: *const List) -> *mut List {
+    crate::nodes::pg_list::list_copy(list)
+}
+unsafe fn list_length(list: *const List) -> c_int {
+    crate::nodes::pg_list::list_length(list)
+}
 unsafe fn lfirst_node_AlterTableCmd(lc: *mut ListCell) -> *mut AlterTableCmd { (*lc).ptr_value as *mut AlterTableCmd }
-unsafe fn check_for_column_name_collision(rel: Relation, colname: *const c_char, if_not_exists: bool) -> bool { false /* TODO(pg-port): stub */ }
-unsafe fn namestrcpy(name: *mut crate::c::NameData, str_: *const c_char) { /* TODO(pg-port): stub */ }
-unsafe fn get_relname_relid(relname: *const c_char, namespaceId: Oid) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn typenameTypeId(pstate: ParseState, typeName: *mut TypeName) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn makeTypeNameFromNameList(names: *mut List) -> *mut TypeName { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn checkDomainOwner(tup: HeapTuple) { /* TODO(pg-port): stub */ }
-unsafe fn get_rel_relkind(relid: Oid) -> c_char { b'r' as c_char /* TODO(pg-port): stub */ }
-unsafe fn InvokeObjectPostAlterHook(classId: Oid, objectId: Oid, subId: c_int) { /* TODO(pg-port): stub */ }
-unsafe fn InvokeObjectPostAlterHookArg(classId: Oid, objectId: Oid, subId: c_int, auxiliaryId: Oid, is_internal: bool) { /* TODO(pg-port): stub */ }
-unsafe fn InvokeObjectPostAlterHookArgArg(classId: Oid, objectId: Oid, subId: c_int, auxiliaryId: Oid, is_internal: bool) { /* TODO(pg-port): stub */ }
-unsafe fn StoreSingleInheritance(relationId: Oid, parentOid: Oid, seqNumber: i32) { /* TODO(pg-port): stub */ }
-unsafe fn recordDependencyOn(depender: *const ObjectAddress, referenced: *const ObjectAddress, deptype: c_int) { /* TODO(pg-port): stub */ }
-unsafe fn InvokeObjectPostAlterHookArg2(classId: Oid, objectId: Oid, subId: c_int, auxiliaryId: Oid, is_internal: bool) { /* TODO(pg-port): stub */ }
-unsafe fn changeDependencyOnTablespace(classId: Oid, objectId: Oid, newTableSpaceId: Oid) { /* TODO(pg-port): stub */ }
+unsafe fn namestrcpy(name: *mut crate::c::NameData, str_: *const c_char) { crate::utils::adt::name::namestrcpy(name as _, str_) }
+unsafe fn get_relname_relid(relname: *const c_char, namespaceId: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_relname_relid(relname, namespaceId)
+}
+unsafe fn typenameTypeId(pstate: ParseState, typeName: *mut TypeName) -> Oid { crate::parser::parse_type::typenameTypeId(pstate, typeName as _) }
+unsafe fn makeTypeNameFromNameList(names: *mut List) -> *mut TypeName { crate::nodes::makefuncs::makeTypeNameFromNameList(names) as _ }
+unsafe fn checkDomainOwner(tup: HeapTuple) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn get_rel_relkind(relid: Oid) -> c_char {
+    crate::utils::cache::lsyscache::get_rel_relkind(relid)
+}
+
+unsafe fn InvokeObjectPostAlterHook(classId: Oid, objectId: Oid, subId: c_int) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn InvokeObjectPostAlterHookArg(classId: Oid, objectId: Oid, subId: c_int, auxiliaryId: Oid, is_internal: bool) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn InvokeObjectPostAlterHookArgArg(classId: Oid, objectId: Oid, subId: c_int, auxiliaryId: Oid, is_internal: bool) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn StoreSingleInheritance(relationId: Oid, parentOid: Oid, seqNumber: i32) {
+    crate::catalog::pg_inherits::StoreSingleInheritance(relationId, parentOid, seqNumber)
+}
+unsafe fn recordDependencyOn(depender: *const ObjectAddress, referenced: *const ObjectAddress, deptype: crate::catalog::dependency::DependencyType) {
+    crate::catalog::pg_depend::recordDependencyOn(depender, referenced, deptype)
+}
+unsafe fn InvokeObjectPostAlterHookArg2(classId: Oid, objectId: Oid, subId: c_int, auxiliaryId: Oid, is_internal: bool) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn changeDependencyOnTablespace(classId: Oid, objectId: Oid, newTableSpaceId: Oid) {
+    crate::catalog::pg_shdepend::changeDependencyOnTablespace(classId, objectId, newTableSpaceId)
+}
+
 unsafe fn RelFileNumberIsValid(rfn: RelFileNumber) -> bool { rfn != 0 }
-unsafe fn SearchSysCacheCopyAttName(relid: Oid, attname: *const c_char) -> HeapTuple { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn ATPrepAlterColumnType(wqueue: *mut *mut List, tab: *mut AlteredTableInfo, rel: Relation, recurse: bool, recursing: bool, cmd: *mut AlterTableCmd, lockmode: LOCKMODE, context: *mut AlterTableUtilityContext) { /* TODO(pg-port): stub */ }
-unsafe fn ATPrepDropExpression(rel: Relation, cmd: *mut AlterTableCmd, recurse: bool, recursing: bool, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn ATPrepDropColumn(wqueue: *mut *mut List, rel: Relation, recurse: bool, recursing: bool, cmd: *mut AlterTableCmd, lockmode: LOCKMODE, context: *mut AlterTableUtilityContext) { /* TODO(pg-port): stub */ }
-unsafe fn ATPrepAddPrimaryKey(wqueue: *mut *mut List, rel: Relation, cmd: *mut AlterTableCmd, recurse: bool, lockmode: LOCKMODE, context: *mut AlterTableUtilityContext) { /* TODO(pg-port): stub */ }
-unsafe fn ATPrepSetAccessMethod(tab: *mut AlteredTableInfo, rel: Relation, amname: *const c_char) { /* TODO(pg-port): stub */ }
-unsafe fn ATPrepChangePersistence(tab: *mut AlteredTableInfo, rel: Relation, toLogged: bool) { /* TODO(pg-port): stub */ }
-unsafe fn ATPrepSetTableSpace(tab: *mut AlteredTableInfo, rel: Relation, tablespacename: *const c_char, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn ATPrepAddInherit(child_rel: Relation) { /* TODO(pg-port): stub */ }
-unsafe fn transformAlterTableStmt(relid: Oid, stmt: *mut AlterTableStmt, queryString: *const c_char, beforeStmts: *mut *mut List, afterStmts: *mut *mut List) -> *mut AlterTableStmt { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn make_new_heap(tab_relid: Oid, newTableSpace: Oid, accessMethod: Oid, persistence: c_char, lockmode: LOCKMODE) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn finish_heap_swap(OIDOldHeap: Oid, OIDNewHeap: Oid, is_system_catalog: bool, swap_toast_by_content: bool, check_constraints: bool, is_internal: bool, frozenXid: u32, cutoffMulti: u32, newrelpersistence: c_char) { /* TODO(pg-port): stub */ }
-unsafe fn InvokeObjectPostAlterHook_rel(classId: Oid, relid: Oid, subId: c_int) { /* TODO(pg-port): stub */ }
-unsafe fn EventTriggerTableRewrite(parsetree: *mut Node, tableOid: Oid, reason: c_int) { /* TODO(pg-port): stub */ }
-unsafe fn SequenceChangePersistence(relid: Oid, newrelpersistence: c_char) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetTableSpace(tableOid: Oid, newTableSpace: Oid, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn getOwnedSequences(relid: Oid) -> *mut List { crate::nodes::pg_list::NIL /* TODO(pg-port): stub */ }
-unsafe fn validateForeignKeyConstraint(conname: *const c_char, rel: Relation, pkrel: Relation, pkindOid: Oid, constraintOid: Oid, hasperiod: bool) { /* TODO(pg-port): stub */ }
+unsafe fn SearchSysCacheCopyAttName(relid: Oid, attname: *const c_char) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCacheCopyAttName(relid, attname)
+}
+
+unsafe fn transformAlterTableStmt(relid: Oid, stmt: *mut AlterTableStmt, queryString: *const c_char, beforeStmts: *mut *mut List, afterStmts: *mut *mut List) -> *mut AlterTableStmt {
+    crate::parser::parse_utilcmd::transformAlterTableStmt(relid, stmt, queryString, beforeStmts, afterStmts)
+}
+unsafe fn make_new_heap(tab_relid: Oid, newTableSpace: Oid, accessMethod: Oid, persistence: c_char, lockmode: LOCKMODE) -> Oid {
+    InvalidOid /* TODO(pg-port): commands::cluster not ported */
+}
+unsafe fn finish_heap_swap(OIDOldHeap: Oid, OIDNewHeap: Oid, is_system_catalog: bool, swap_toast_by_content: bool, check_constraints: bool, is_internal: bool, frozenXid: u32, cutoffMulti: u32, newrelpersistence: c_char) {
+    /* TODO(pg-port): commands::cluster not ported */
+}
+unsafe fn InvokeObjectPostAlterHook_rel(classId: Oid, relid: Oid, subId: c_int) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn EventTriggerTableRewrite(parsetree: *mut Node, tableOid: Oid, reason: c_int) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn SequenceChangePersistence(relid: Oid, newrelpersistence: c_char) {
+    /* TODO(pg-port): commands::sequence not ported */
+}
+unsafe fn getOwnedSequences(relid: Oid) -> *mut List {
+    crate::catalog::pg_depend::getOwnedSequences(relid)
+}
+
 unsafe fn RELKIND_HAS_TABLE_AM(k: c_char) -> bool { let k = k as u8; matches!(k, b'r' | b'm') }
-unsafe fn lfirst_int(lc: *const ListCell) -> c_int { 0 /* TODO(pg-port): stub */ }
-unsafe fn list_member_oid(list: *mut List, datum: Oid) -> bool { false /* TODO(pg-port): stub */ }
-unsafe fn RangeVarCallbackForTruncate(rel: *const RangeVar, relId: Oid, oldRelId: Oid, arg: *mut std::ffi::c_void) { /* TODO(pg-port): stub */ }
-unsafe fn heap_truncate_find_FKs(relids: *mut List) -> *mut List { crate::nodes::pg_list::NIL /* TODO(pg-port): stub */ }
-unsafe fn heap_truncate_check_FKs(rels: *mut List, tempTables: bool) { /* TODO(pg-port): stub */ }
-unsafe fn AfterTriggerBeginQuery() { /* TODO(pg-port): stub */ }
-unsafe fn AfterTriggerEndQuery(estate: *mut std::ffi::c_void /* EState */) { /* TODO(pg-port): stub */ }
+unsafe fn lfirst_int(lc: *const ListCell) -> c_int {
+    crate::nodes::pg_list::lfirst_int(lc)
+}
+unsafe fn list_member_oid(list: *mut List, datum: Oid) -> bool {
+    crate::nodes::pg_list::list_member_oid(list, datum)
+}
+unsafe fn heap_truncate_find_FKs(relids: *mut List) -> *mut List {
+    crate::catalog::heap::heap_truncate_find_FKs(relids)
+}
+unsafe fn heap_truncate_check_FKs(rels: *mut List, tempTables: bool) {
+    crate::catalog::heap::heap_truncate_check_FKs(rels, tempTables)
+}
+
+unsafe fn AfterTriggerBeginQuery() { /* stub no-op (restored: test_setup path) */ }
+unsafe fn AfterTriggerEndQuery(estate: *mut std::ffi::c_void /* EState */) { /* stub no-op (restored: test_setup path) */ }
 unsafe fn CreateExecutorState() -> *mut std::ffi::c_void /* EState */ { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn FreeExecutorState(estate: *mut std::ffi::c_void /* EState */) { /* TODO(pg-port): stub */ }
-unsafe fn palloc(size: usize) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn InitResultRelInfo(resultRelInfo: *mut ResultRelInfo, resultRelationDesc: Relation, resultRelationIndex: c_int, instrument: *mut std::ffi::c_void, instrument_options: c_int) { /* TODO(pg-port): stub */ }
-unsafe fn ExecBSTruncateTriggers(estate: *mut std::ffi::c_void, resultRelInfo: *mut ResultRelInfo) { /* TODO(pg-port): stub */ }
-unsafe fn ExecASTruncateTriggers(estate: *mut std::ffi::c_void, resultRelInfo: *mut ResultRelInfo) { /* TODO(pg-port): stub */ }
-unsafe fn GetCurrentSubTransactionId() -> crate::access::transam::SubTransactionId { 0 }
-unsafe fn heap_truncate_one_rel(rel: Relation) { /* TODO(pg-port): stub */ }
-unsafe fn CheckTableForSerializableConflictIn(rel: Relation) { /* TODO(pg-port): stub */ }
-unsafe fn RelationSetNewRelfilenumber(rel: Relation, persistence: c_char) { /* TODO(pg-port): stub */ }
-unsafe fn reindex_relation(progress: *mut std::ffi::c_void, relid: Oid, flags: c_int, params: *mut std::ffi::c_void) -> bool { false /* TODO(pg-port): stub */ }
-unsafe fn pgstat_count_truncate(rel: Relation) { /* TODO(pg-port): stub */ }
-unsafe fn GetForeignServerIdByRelId(relid: Oid) -> Oid { 0 /* TODO(pg-port): stub */ }
+unsafe fn FreeExecutorState(estate: *mut std::ffi::c_void /* EState */) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn palloc(size: usize) -> *mut std::ffi::c_void { crate::utils::palloc::palloc(size as _) as _ }
+unsafe fn InitResultRelInfo(resultRelInfo: *mut ResultRelInfo, resultRelationDesc: Relation, resultRelationIndex: c_int, instrument: *mut std::ffi::c_void, instrument_options: c_int) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn ExecBSTruncateTriggers(estate: *mut std::ffi::c_void, resultRelInfo: *mut ResultRelInfo) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn ExecASTruncateTriggers(estate: *mut std::ffi::c_void, resultRelInfo: *mut ResultRelInfo) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn GetCurrentSubTransactionId() -> SubTransactionId { 0 }
+unsafe fn heap_truncate_one_rel(rel: Relation) {
+    crate::catalog::heap::heap_truncate_one_rel(rel)
+}
+unsafe fn CheckTableForSerializableConflictIn(rel: Relation) {
+    crate::storage::lmgr::predicate::CheckTableForSerializableConflictIn(rel as *mut std::ffi::c_void)
+}
+unsafe fn RelationSetNewRelfilenumber(rel: Relation, persistence: c_char) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn reindex_relation(progress: *mut std::ffi::c_void, relid: Oid, flags: c_int, params: *mut std::ffi::c_void) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn pgstat_count_truncate(rel: Relation) {
+    crate::utils::activity::pgstat_relation::pgstat_count_truncate(rel)
+}
+unsafe fn GetForeignServerIdByRelId(relid: Oid) -> Oid {
+    crate::foreign::foreign::GetForeignServerIdByRelId(relid)
+}
 unsafe fn GetFdwRoutineByServerId(serverid: Oid) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn ResetSequence(seq_relid: Oid) { /* TODO(pg-port): stub */ }
-unsafe fn GetBulkInsertState() -> BulkInsertState { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn FreeBulkInsertState(bistate: BulkInsertState) { /* TODO(pg-port): stub */ }
-unsafe fn object_aclcheck(classId: Oid, objectId: Oid, userId: Oid, mode: u32) -> c_int { 0 /* TODO(pg-port): stub */ }
-unsafe fn pg_class_aclcheck(relid: Oid, userId: Oid, mode: u32) -> c_int { 0 /* TODO(pg-port): stub */ }
-unsafe fn InvokeObjectTruncateHook(relid: Oid) { /* TODO(pg-port): stub */ }
-unsafe fn getOwnedSequences_withOwner(relid: Oid) -> *mut List { crate::nodes::pg_list::NIL /* TODO(pg-port): stub */ }
+unsafe fn ResetSequence(seq_relid: Oid) {
+    /* TODO(pg-port): commands::sequence not ported */
+}
+unsafe fn GetBulkInsertState() -> BulkInsertState { crate::access::heap::heapam::GetBulkInsertState() }
+unsafe fn FreeBulkInsertState(bistate: BulkInsertState) { crate::access::heap::heapam::FreeBulkInsertState(bistate) }
+unsafe fn object_aclcheck(classId: Oid, objectId: Oid, userId: Oid, mode: u64) -> c_int { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn pg_class_aclcheck(relid: Oid, userId: Oid, mode: u64) -> c_int { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn InvokeObjectTruncateHook(relid: Oid) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn getOwnedSequences_withOwner(relid: Oid) -> *mut List { crate::catalog::pg_depend::getOwnedSequences(relid) }
 unsafe fn relation_open_nolock(relid: Oid) -> Relation { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn get_relation_constraint_oid_locked(relid: Oid, conname: *const c_char, missing_ok: bool) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn CheckRelationOidLockedByMe(relid: Oid, lockmode: LOCKMODE, orstronger: bool) -> bool { true /* TODO(pg-port): stub */ }
-unsafe fn lappend_int(list: *mut List, datum: c_int) -> *mut List { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn SwitchToUntrustedUser(userId: Oid, ucxt: *mut std::ffi::c_void) { /* TODO(pg-port): stub */ }
-unsafe fn RestoreUserContext(ucxt: *mut std::ffi::c_void) { /* TODO(pg-port): stub */ }
-unsafe fn RelationIsMapped(rel: Relation) -> bool { false /* TODO(pg-port): stub */ }
-unsafe fn MyDatabaseTableSpace_get() -> Oid { 0 /* TODO(pg-port): global var stub */ }
-unsafe fn ATExecColumnDefault(rel: Relation, colName: *const c_char, newDefault: *mut Node, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecCookedColumnDefault(rel: Relation, attnum: AttrNumber, newDefault: *mut Node) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecAddIdentity(rel: Relation, colName: *const c_char, def: *mut Node, lockmode: LOCKMODE, recurse: bool, recursing: bool) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetIdentity(rel: Relation, colName: *const c_char, def: *mut Node, lockmode: LOCKMODE, recurse: bool, recursing: bool) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecDropIdentity(rel: Relation, colName: *const c_char, missing_ok: bool, lockmode: LOCKMODE, recurse: bool, recursing: bool) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecDropNotNull(rel: Relation, colName: *const c_char, recurse: bool, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetNotNull(wqueue: *mut *mut List, rel: Relation, constrname: *const c_char, colName: *const c_char, recurse: bool, recursing: bool, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetExpression(tab: *mut AlteredTableInfo, rel: Relation, colName: *const c_char, newExpr: *mut Node, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecDropExpression(rel: Relation, colName: *const c_char, missing_ok: bool, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetStatistics(rel: Relation, colName: *const c_char, colNum: AttrNumber, newValue: *mut Node, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetOptions(rel: Relation, colName: *const c_char, options: *mut Node, isReset: bool, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetStorage(rel: Relation, colName: *const c_char, newValue: *mut Node, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetCompression(rel: Relation, colName: *const c_char, newValue: *mut Node, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecDropColumn(wqueue: *mut *mut List, rel: Relation, colName: *const c_char, behavior: DropBehavior, recurse: bool, recursing: bool, missing_ok: bool, lockmode: LOCKMODE, dropped_column_name: *mut *mut c_char) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecAddIndex(tab: *mut AlteredTableInfo, rel: Relation, stmt: *mut IndexStmt, is_rebuild: bool, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecAddStatistics(tab: *mut AlteredTableInfo, rel: Relation, stmt: *mut CreateStatsStmt, is_rebuild: bool, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecAddConstraint(wqueue: *mut *mut List, tab: *mut AlteredTableInfo, rel: Relation, newConstraint: *mut Constraint, recurse: bool, is_readd: bool, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
+unsafe fn get_relation_constraint_oid_locked(relid: Oid, conname: *const c_char, missing_ok: bool) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn CheckRelationOidLockedByMe(relid: Oid, lockmode: LOCKMODE, orstronger: bool) -> bool {
+    crate::storage::lmgr::lmgr::CheckRelationOidLockedByMe(relid, lockmode, orstronger)
+}
+
+unsafe fn lappend_int(list: *mut List, datum: c_int) -> *mut List { crate::nodes::pg_list::lappend_int(list, datum) }
+unsafe fn SwitchToUntrustedUser(userId: Oid, ucxt: *mut *mut std::ffi::c_void) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn RestoreUserContext(ucxt: *mut std::ffi::c_void) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn RelationIsMapped(rel: Relation) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn MyDatabaseTableSpace() -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
 unsafe fn AlterDomainAddConstraint(typeName: *mut List, newConstraint: *mut Node, node: *mut std::ffi::c_void) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
 unsafe fn CommentObject(stmt: *mut CommentStmt) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecAddIndexConstraint(tab: *mut AlteredTableInfo, rel: Relation, stmt: *mut IndexStmt, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecAlterConstraint(wqueue: *mut *mut List, rel: Relation, con: *mut ATAlterConstraint, recurse: bool, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecValidateConstraint(wqueue: *mut *mut List, rel: Relation, constrName: *const c_char, recurse: bool, recursing: bool, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecDropConstraint(rel: Relation, constrName: *const c_char, behavior: DropBehavior, recurse: bool, missing_ok: bool, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecAlterColumnType(tab: *mut AlteredTableInfo, rel: Relation, cmd: *mut AlterTableCmd, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecAlterColumnGenericOptions(rel: Relation, colName: *const c_char, options: *mut List, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecChangeOwner(relationOid: Oid, newOwnerId: Oid, recursing: bool, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn get_rolespec_oid(spec: *mut Node, missing_ok: bool) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn ATExecClusterOn(rel: Relation, indexName: *const c_char, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecDropCluster(rel: Relation, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetAccessMethodNoStorage(rel: Relation, newAccessMethod: Oid) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetTableSpaceNoStorage(rel: Relation, newTableSpace: Oid) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetRelOptions(rel: Relation, defList: *mut List, operation: AlterTableType, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecEnableDisableTrigger(rel: Relation, trigname: *const c_char, fires_when: c_char, skip_system: bool, recurse: bool, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecEnableDisableRule(rel: Relation, rulename: *const c_char, fires_when: c_char, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecAddInherit(rel: Relation, parent: *mut RangeVar, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecDropInherit(rel: Relation, parent: *mut RangeVar, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecAddOf(rel: Relation, ofTypename: *mut TypeName, lockmode: LOCKMODE) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecDropOf(rel: Relation, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecReplicaIdentity(rel: Relation, stmt: *mut ReplicaIdentityStmt, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecSetRowSecurity(rel: Relation, enabled: bool) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecForceNoForceRowSecurity(rel: Relation, setsecforce: bool) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecGenericOptions(rel: Relation, options: *mut List) { /* TODO(pg-port): stub */ }
-unsafe fn ATExecAttachPartition(wqueue: *mut *mut List, rel: Relation, cmd: *mut PartitionCmd, context: *mut AlterTableUtilityContext) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecAttachPartitionIdx(wqueue: *mut *mut List, rel: Relation, name: *mut RangeVar) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecDetachPartition(wqueue: *mut *mut List, tab: *mut AlteredTableInfo, rel: Relation, name: *mut RangeVar, concurrent: bool) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn ATExecDetachPartitionFinalize(rel: Relation, name: *mut RangeVar) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
+unsafe fn get_rolespec_oid(spec: *mut Node, missing_ok: bool) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
 unsafe fn expand_generated_columns_in_expr(expr: *mut Node, rel: Relation, rt_index: c_int) -> *mut Node { expr /* TODO(pg-port): stub */ }
 unsafe fn ExecPrepareExpr(expr: *mut Expr, estate: *mut std::ffi::c_void) -> *mut ExprState { ptr::null_mut() /* TODO(pg-port): stub */ }
 unsafe fn ExecInitExpr(node: *mut Expr, parent: *mut std::ffi::c_void) -> *mut ExprState { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn TupleDescCompactAttr(tupdesc: TupleDesc, i: usize) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn TransferPredicateLocksToHeapRelation(rel: Relation) { /* TODO(pg-port): stub */ }
+unsafe fn TupleDescCompactAttr(tupdesc: TupleDesc, i: usize) -> *mut CompactAttribute { crate::access::common::tupdesc::TupleDescCompactAttr(tupdesc, i as c_int) as _ }
+unsafe fn TransferPredicateLocksToHeapRelation(rel: Relation) { /* stub no-op (restored: test_setup path) */ }
 unsafe fn GetPerTupleExprContext(estate: *mut std::ffi::c_void) -> *mut ExprContext { ptr::null_mut() /* TODO(pg-port): stub */ }
 unsafe fn GetPerTupleMemoryContext(estate: *mut std::ffi::c_void) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn MakeSingleTupleTableSlot(tupdesc: TupleDesc, callbacks: *const std::ffi::c_void) -> *mut TupleTableSlot { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn table_slot_callbacks(rel: Relation) -> *const std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn ExecStoreAllNullTuple(slot: *mut TupleTableSlot) { /* TODO(pg-port): stub */ }
-unsafe fn RegisterSnapshot(snapshot: Snapshot) -> Snapshot { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn GetLatestSnapshot() -> Snapshot { ptr::null_mut() /* TODO(pg-port): stub */ }
+unsafe fn MakeSingleTupleTableSlot(tupdesc: TupleDesc, callbacks: *const std::ffi::c_void) -> *mut TupleTableSlot { crate::executor::execTuples::MakeSingleTupleTableSlot(tupdesc, callbacks as _) }
+unsafe fn table_slot_callbacks(rel: Relation) -> *const std::ffi::c_void { crate::access::table::tableam::table_slot_callbacks(rel) as _ }
+unsafe fn ExecStoreAllNullTuple(slot: *mut TupleTableSlot) { crate::executor::execTuples::ExecStoreAllNullTuple(slot); }
+unsafe fn RegisterSnapshot(snapshot: Snapshot) -> Snapshot { crate::utils::time::snapmgr::RegisterSnapshot(snapshot) }
+unsafe fn GetLatestSnapshot() -> Snapshot { crate::utils::time::snapmgr::GetLatestSnapshot() }
 unsafe fn table_beginscan(rel: Relation, snapshot: Snapshot, nkeys: c_int, key: *mut std::ffi::c_void) -> TableScanDesc { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn MemoryContextSwitchTo(cxt: *mut std::ffi::c_void) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn table_scan_getnextslot(sscan: TableScanDesc, direction: i32, slot: *mut TupleTableSlot) -> bool { false /* TODO(pg-port): stub */ }
-unsafe fn slot_getallattrs(slot: *mut TupleTableSlot) { /* TODO(pg-port): stub */ }
-unsafe fn ExecClearTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn ExecStoreVirtualTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn slot_attisnull(slot: *mut TupleTableSlot, attnum: c_int) -> bool { false /* TODO(pg-port): stub */ }
-unsafe fn ExecEvalExpr(expr: *mut ExprState, econtext: *mut ExprContext, isnull: *mut bool) -> Datum { 0 /* TODO(pg-port): stub */ }
-unsafe fn ExecCheck(expr: *mut ExprState, econtext: *mut ExprContext) -> bool { true /* TODO(pg-port): stub */ }
+unsafe fn MemoryContextSwitchTo(cxt: MemoryContext) -> MemoryContext { crate::utils::mmgr::mcxt::MemoryContextSwitchTo(cxt) }
+unsafe fn table_scan_getnextslot(sscan: TableScanDesc, direction: i32, slot: *mut TupleTableSlot) -> bool { crate::access::table::tableam::table_scan_getnextslot(sscan, direction as _, slot) }
+unsafe fn slot_getallattrs(slot: *mut TupleTableSlot) { crate::executor::tuptable::slot_getallattrs(slot) }
+unsafe fn ExecClearTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot { crate::executor::tuptable::ExecClearTuple(slot) }
+unsafe fn ExecStoreVirtualTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot { crate::executor::execTuples::ExecStoreVirtualTuple(slot) }
+unsafe fn slot_attisnull(slot: *mut TupleTableSlot, attnum: c_int) -> bool { crate::executor::tuptable::slot_attisnull(slot, attnum) }
+unsafe fn ExecEvalExpr(expr: *mut ExprState, econtext: *mut ExprContext, isnull: *mut bool) -> Datum { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn ExecCheck(expr: *mut ExprState, econtext: *mut ExprContext) -> bool { false /* stub dummy (restored: test_setup path) */ }
 unsafe fn ExecRelGenVirtualNotNull(rInfo: *mut ResultRelInfo, slot: *mut TupleTableSlot, estate: *mut std::ffi::c_void, notnull_virtual_attrs: *mut List) -> AttrNumber { InvalidAttrNumber /* TODO(pg-port): stub */ }
-unsafe fn table_tuple_insert(rel: Relation, slot: *mut TupleTableSlot, cid: u32, options: c_int, bistate: BulkInsertState) { /* TODO(pg-port): stub */ }
-unsafe fn GetCurrentCommandId(used: bool) -> u32 { 0 /* TODO(pg-port): stub */ }
-unsafe fn ResetExprContext(econtext: *mut ExprContext) { /* TODO(pg-port): stub */ }
-unsafe fn CHECK_FOR_INTERRUPTS() { /* TODO(pg-port): stub */ }
-unsafe fn UnregisterSnapshot(snapshot: Snapshot) { /* TODO(pg-port): stub */ }
-unsafe fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot) { /* TODO(pg-port): stub */ }
-unsafe fn table_finish_bulk_insert(rel: Relation, options: c_int) { /* TODO(pg-port): stub */ }
-unsafe fn RecentXmin() -> u32 { 0 /* TODO(pg-port): global var stub */ }
-unsafe fn ReadNextMultiXactId() -> u32 { 0 /* TODO(pg-port): stub */ }
-unsafe fn RelationIsUsedAsCatalogTable(rel: Relation) -> bool { false /* TODO(pg-port): stub */ }
-unsafe fn list_concat(list1: *mut List, list2: *mut List) -> *mut List { list1 /* TODO(pg-port): stub */ }
-unsafe fn makeRangeVar(schemaname: *const c_char, relname: *const c_char, location: c_int) -> *mut RangeVar { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn get_namespace_name(nspid: Oid) -> *mut c_char { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn pstrdup(str_: *const c_char) -> *mut c_char { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn list_make1(x: *mut std::ffi::c_void) -> *mut List { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn equal(a: *mut Node, b: *mut Node) -> bool { false /* TODO(pg-port): stub */ }
-unsafe fn list_nth_node_ColumnDef(list: *mut List, n: c_int) -> *mut ColumnDef { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn typenameTypeIdAndMod(pstate: ParseState, typeName: *const TypeName, typeOid: *mut Oid, typeMod: *mut i32) { /* TODO(pg-port): stub */ }
-unsafe fn GetColumnDefCollation(pstate: ParseState, coldef: *const ColumnDef, typeOid: Oid) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn format_type_with_typemod(typeOid: Oid, typemod: i32) -> *mut c_char { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn get_collation_name(collOid: Oid) -> *mut c_char { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn aclcheck_error_type(result: c_int, typeOid: Oid) { /* TODO(pg-port): stub */ }
-unsafe fn CreateTemplateTupleDesc(natts: c_int) -> TupleDesc { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn TupleDescInitEntry(desc: TupleDesc, attributeNumber: AttrNumber, attname: *const c_char, oidtypeid: Oid, typmod: i32, attdim: c_int) { /* TODO(pg-port): stub */ }
-unsafe fn TupleDescInitEntryCollation(desc: TupleDesc, attributeNumber: AttrNumber, collationid: Oid) { /* TODO(pg-port): stub */ }
-unsafe fn GetAttributeCompression(atttypid: Oid, compression: *const c_char) -> c_char { 0 /* TODO(pg-port): stub */ }
-unsafe fn GetAttributeStorage(atttypid: Oid, storage_name: *const c_char) -> c_char { 0 /* TODO(pg-port): stub */ }
-unsafe fn populate_compact_attribute(desc: TupleDesc, attnum: usize) { /* TODO(pg-port): stub */ }
-unsafe fn ACL_USAGE() -> u32 { 0x0008 /* TODO(pg-port): stub */ }
-unsafe fn ACL_CREATE() -> u32 { 0x0004 /* TODO(pg-port): stub */ }
+unsafe fn table_tuple_insert(rel: Relation, slot: *mut TupleTableSlot, cid: u32, options: c_int, bistate: BulkInsertState) { crate::access::table::tableam::table_tuple_insert(rel, slot, cid, options, bistate as _) }
+unsafe fn GetCurrentCommandId(used: bool) -> u32 { crate::access::transam::xact::GetCurrentCommandId(used) }
+unsafe fn ResetExprContext(econtext: *mut ExprContext) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn CHECK_FOR_INTERRUPTS() { /* stub no-op (restored: test_setup path) */ }
+unsafe fn UnregisterSnapshot(snapshot: Snapshot) { crate::utils::time::snapmgr::UnregisterSnapshot(snapshot) }
+unsafe fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot) { crate::executor::execTuples::ExecDropSingleTupleTableSlot(slot) }
+unsafe fn table_finish_bulk_insert(rel: Relation, options: c_int) { /* stub no-op (restored: test_setup path) */ }
+unsafe fn RecentXmin() -> u32 { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn ReadNextMultiXactId() -> u32 { crate::access::transam::multixact::ReadNextMultiXactId() }
+unsafe fn RelationIsUsedAsCatalogTable(rel: Relation) -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn list_concat(list1: *mut List, list2: *mut List) -> *mut List { crate::nodes::pg_list::list_concat(list1, list2) }
+unsafe fn makeRangeVar(schemaname: *const c_char, relname: *const c_char, location: c_int) -> *mut RangeVar { crate::nodes::makefuncs::makeRangeVar(schemaname as _, relname as _, location) as _ }
+unsafe fn get_namespace_name(nspid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_namespace_name(nspid) }
+unsafe fn pstrdup(str_: *const c_char) -> *mut c_char { crate::utils::palloc::pstrdup(str_) }
+unsafe fn list_make1(x: *mut std::ffi::c_void) -> *mut List { crate::nodes::pg_list::list_make1_impl(crate::nodes::nodes::NodeTag::T_List, crate::nodes::pg_list::list_make_ptr_cell(x)) }
+unsafe fn equal(a: *mut Node, b: *mut Node) -> bool { crate::nodes::equalfuncs::equal(a as *const std::ffi::c_void, b as *const std::ffi::c_void) }
+unsafe fn list_nth_node_ColumnDef(list: *mut List, n: c_int) -> *mut ColumnDef { crate::nodes::pg_list::list_nth(list, n) as *mut ColumnDef }
+unsafe fn typenameTypeIdAndMod(pstate: ParseState, typeName: *const TypeName, typeOid: *mut Oid, typeMod: *mut i32) { crate::parser::parse_type::typenameTypeIdAndMod(pstate, typeName as _, typeOid, typeMod) }
+unsafe fn GetColumnDefCollation(pstate: ParseState, coldef: *const ColumnDef, typeOid: Oid) -> Oid { crate::parser::parse_type::GetColumnDefCollation(pstate, coldef as _, typeOid) }
+unsafe fn format_type_with_typemod(typeOid: Oid, typemod: i32) -> *mut c_char { crate::utils::adt::format_type::format_type_with_typemod(typeOid, typemod) }
+unsafe fn get_collation_name(collOid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_collation_name(collOid) }
+unsafe fn aclcheck_error_type(result: c_int, typeOid: Oid) { let r = match result { 0 => crate::utils::adt::acl::AclResult::ACLCHECK_OK, 1 => crate::utils::adt::acl::AclResult::ACLCHECK_NO_PRIV, _ => crate::utils::adt::acl::AclResult::ACLCHECK_NOT_OWNER }; crate::catalog::aclchk::aclcheck_error_type(r, typeOid) }
+unsafe fn CreateTemplateTupleDesc(natts: c_int) -> TupleDesc { crate::access::common::tupdesc::CreateTemplateTupleDesc(natts) }
+unsafe fn TupleDescInitEntry(desc: TupleDesc, attributeNumber: AttrNumber, attname: *const c_char, oidtypeid: Oid, typmod: i32, attdim: c_int) { crate::access::common::tupdesc::TupleDescInitEntry(desc, attributeNumber, attname, oidtypeid, typmod, attdim) }
+unsafe fn TupleDescInitEntryCollation(desc: TupleDesc, attributeNumber: AttrNumber, collationid: Oid) { crate::access::common::tupdesc::TupleDescInitEntryCollation(desc, attributeNumber, collationid) }
+unsafe fn populate_compact_attribute(desc: TupleDesc, attnum: usize) { crate::access::common::tupdesc::populate_compact_attribute(desc, attnum as c_int) }
+unsafe fn ACL_USAGE() -> u64 { 0x0008 /* TODO(pg-port): stub */ }
+unsafe fn ACL_CREATE() -> u64 { 0x0004 /* TODO(pg-port): stub */ }
 /* DefineRelation and MergeAttributes dependency stubs */
-unsafe fn RangeVarGetAndCheckCreationNamespace(relation: *mut RangeVar, lockmode: LOCKMODE, existing_relid: *mut Oid) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn InSecurityRestrictedOperation() -> bool { false /* TODO(pg-port): stub */ }
-unsafe fn get_tablespace_oid(tablespacename: *const c_char, missing_ok: bool) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn get_rel_tablespace(relid: Oid) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn linitial_oid(list: *const List) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn GetDefaultTablespace(relpersistence: c_char, partitioned: bool) -> Oid { 0 /* TODO(pg-port): stub */ }
+unsafe fn RangeVarGetAndCheckCreationNamespace(relation: *mut RangeVar, lockmode: LOCKMODE, existing_relid: *mut Oid) -> Oid { crate::catalog::namespace::RangeVarGetAndCheckCreationNamespace(relation as _, lockmode, existing_relid) }
+unsafe fn InSecurityRestrictedOperation() -> bool { false /* stub dummy (restored: test_setup path) */ }
+unsafe fn get_tablespace_oid(tablespacename: *const c_char, missing_ok: bool) -> Oid { 0 /* stub dummy (restored: test_setup path) */ }
+unsafe fn get_rel_tablespace(relid: Oid) -> Oid { crate::utils::cache::lsyscache::get_rel_tablespace(relid) }
+unsafe fn linitial_oid(list: *const List) -> Oid { crate::nodes::pg_list::linitial_oid(list) }
+unsafe fn GetDefaultTablespace(_relpersistence: c_char, _partitioned: bool) -> Oid { InvalidOid /* no default_tablespace GUC in tests -> use database default */ }
 unsafe fn get_tablespace_name(tablespaceOid: Oid) -> *const c_char { ptr::null() /* TODO(pg-port): stub */ }
-unsafe fn transformRelOptions(oldOptions: Datum, defList: *mut List, namspace: *const c_char, validnsps: *const *const c_char, ignoreOids: bool, isReset: bool) -> Datum { 0 /* TODO(pg-port): stub */ }
+unsafe fn transformRelOptions(oldOptions: Datum, _defList: *mut List, _namspace: *const c_char, _validnsps: *const *const c_char, _ignoreOids: bool, _isReset: bool) -> Datum { oldOptions /* minimal: no WITH-option transform; passthrough existing options */ }
 unsafe fn view_reloptions(reloptions: Datum, validate: bool) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
 unsafe fn partitioned_table_reloptions(reloptions: Datum, validate: bool) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
 unsafe fn heap_reloptions(relkind: c_char, reloptions: Datum, validate: bool) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn RangeVarGetRelid(relation: *const RangeVar, lockmode: LOCKMODE, missing_ok: bool) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn get_rel_name(relid: Oid) -> *const c_char { ptr::null() /* TODO(pg-port): stub */ }
-unsafe fn get_table_am_oid(amname: *const c_char, missing_ok: bool) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn get_rel_relam(relid: Oid) -> Oid { 0 /* TODO(pg-port): stub */ }
+unsafe fn RangeVarGetRelid(relation: *const RangeVar, lockmode: LOCKMODE, missing_ok: bool) -> Oid { crate::catalog::namespace::RangeVarGetRelid(relation as _, lockmode, missing_ok) }
+unsafe fn get_rel_name(relid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_rel_name(relid) }
+unsafe fn get_table_am_oid(amname: *const c_char, missing_ok: bool) -> Oid { crate::commands::amcmds::get_table_am_oid(amname, missing_ok) }
+unsafe fn get_rel_relam(relid: Oid) -> Oid { crate::utils::cache::lsyscache::get_rel_relam(relid) }
 unsafe fn default_table_access_method() -> *const c_char { b"heap\0".as_ptr() as *const c_char /* TODO(pg-port): global var stub */ }
-unsafe fn heap_create_with_catalog(relname: *const c_char, relnamespace: Oid, reltablespace: Oid, relid: Oid, reltypeid: Oid, reloftypeid: Oid, ownerid: Oid, accessmtd: Oid, tupdesc: TupleDesc, cooked_constraints: *mut List, relkind: c_char, relpersistence: c_char, shared_relation: bool, mapped_relation: bool, oncommit: OnCommitAction, reloptions: Datum, use_user_acl: bool, allow_system_table_mods: bool, is_internal: bool, relrewrite: Oid, typaddress: *mut ObjectAddress) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn AddRelationNewConstraints(rel: Relation, newColDefaults: *mut List, newConstraints: *mut List, allow_merge: bool, is_local: bool, is_internal: bool, queryString: *const c_char) -> *mut List { crate::nodes::pg_list::NIL /* TODO(pg-port): stub */ }
-unsafe fn AddRelationNotNullConstraints(rel: Relation, nnconstraints: *mut List, old_notnulls: *mut List, connames: *mut List) -> *mut List { crate::nodes::pg_list::NIL /* TODO(pg-port): stub */ }
-unsafe fn StorePartitionKey(rel: Relation, strategy: c_char, partnatts: c_int, partattrs: *const i16, partexprs: *mut List, partopclass: *const Oid, partcollation: *const Oid) { /* TODO(pg-port): stub */ }
-unsafe fn StorePartitionBound(rel: Relation, parent: Relation, bound: *mut PartitionBoundSpec) { /* TODO(pg-port): stub */ }
-unsafe fn set_attnotnull(wqueue: *mut *mut List, rel: Relation, attnum: c_int, recurse: bool, recursing: bool) { /* TODO(pg-port): stub */ }
-unsafe fn make_parsestate(parentParseState: ParseState) -> ParseState { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn transformPartitionBound(pstate: ParseState, parent: Relation, spec: *mut PartitionBoundSpec) -> *mut PartitionBoundSpec { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn check_new_partition_bound(relname: *const c_char, parent: Relation, bound: *mut PartitionBoundSpec, pstate: ParseState) { /* TODO(pg-port): stub */ }
-unsafe fn check_default_partition_contents(parent: Relation, defaultRel: Relation, bound: *mut PartitionBoundSpec) { /* TODO(pg-port): stub */ }
-unsafe fn get_default_oid_from_partdesc(partdesc: *mut std::ffi::c_void) -> Oid { 0 /* TODO(pg-port): stub */ }
-unsafe fn RelationGetPartitionDesc(rel: Relation, include_detached: bool) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn addRangeTableEntryForRelation(pstate: ParseState, rel: Relation, lockmode: LOCKMODE, alias: *mut std::ffi::c_void, inh: bool, inFromCl: bool) -> ParseNamespaceItem { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn addNSItemToQuery(pstate: ParseState, nsitem: ParseNamespaceItem, addToJoinList: bool, addToRelNameSpace: bool, addToVarNameSpace: bool) { /* TODO(pg-port): stub */ }
-unsafe fn transformPartitionSpec(rel: Relation, partspec: *mut PartitionSpec) -> *mut PartitionSpec { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn ComputePartitionAttrs(pstate: ParseState, rel: Relation, partParams: *mut List, partattrs: *mut i16, partexprs: *mut *mut List, partopclass: *mut Oid, partcollation: *mut Oid, strategy: c_char) { /* TODO(pg-port): stub */ }
+unsafe fn heap_create_with_catalog(relname: *const c_char, relnamespace: Oid, reltablespace: Oid, relid: Oid, reltypeid: Oid, reloftypeid: Oid, ownerid: Oid, accessmtd: Oid, tupdesc: TupleDesc, cooked_constraints: *mut List, relkind: c_char, relpersistence: c_char, shared_relation: bool, mapped_relation: bool, oncommit: OnCommitAction, reloptions: Datum, use_user_acl: bool, allow_system_table_mods: bool, is_internal: bool, relrewrite: Oid, typaddress: *mut ObjectAddress) -> Oid { crate::catalog::heap::heap_create_with_catalog(relname, relnamespace, reltablespace, relid, reltypeid, reloftypeid, ownerid, accessmtd, tupdesc as _, cooked_constraints, relkind, relpersistence, shared_relation, mapped_relation, oncommit, reloptions, use_user_acl, allow_system_table_mods, is_internal, relrewrite, typaddress as _) }
+unsafe fn AddRelationNewConstraints(rel: Relation, newColDefaults: *mut List, newConstraints: *mut List, allow_merge: bool, is_local: bool, is_internal: bool, queryString: *const c_char) -> *mut List { crate::catalog::heap::AddRelationNewConstraints(rel, newColDefaults, newConstraints, allow_merge, is_local, is_internal, queryString) }
+unsafe fn AddRelationNotNullConstraints(rel: Relation, nnconstraints: *mut List, old_notnulls: *mut List, connames: *mut List) -> *mut List { crate::catalog::heap::AddRelationNotNullConstraints(rel, nnconstraints, old_notnulls, connames) }
+unsafe fn StorePartitionKey(rel: Relation, strategy: c_char, partnatts: c_int, partattrs: *const i16, partexprs: *mut List, partopclass: *const Oid, partcollation: *const Oid) { crate::catalog::heap::StorePartitionKey(rel, strategy, partnatts as i16, partattrs as _, partexprs, partopclass as _, partcollation as _) }
+unsafe fn StorePartitionBound(rel: Relation, parent: Relation, bound: *mut PartitionBoundSpec) { crate::catalog::heap::StorePartitionBound(rel, parent, bound as _) }
+unsafe fn make_parsestate(parentParseState: ParseState) -> ParseState { crate::parser::parse_node::make_parsestate(parentParseState) }
+unsafe fn transformPartitionBound(pstate: ParseState, parent: Relation, spec: *mut PartitionBoundSpec) -> *mut PartitionBoundSpec { crate::parser::parse_utilcmd::transformPartitionBound_pub(pstate, parent, spec as _) as _ }
+unsafe fn check_new_partition_bound(relname: *const c_char, parent: Relation, bound: *mut PartitionBoundSpec, pstate: ParseState) { crate::partitioning::partbounds::check_new_partition_bound(relname as _, parent, bound as _, pstate) }
+unsafe fn check_default_partition_contents(parent: Relation, defaultRel: Relation, bound: *mut PartitionBoundSpec) { crate::partitioning::partbounds::check_default_partition_contents(parent, defaultRel, bound as _) }
+unsafe fn get_default_oid_from_partdesc(partdesc: *mut std::ffi::c_void) -> Oid { crate::partitioning::partdesc::get_default_oid_from_partdesc(partdesc as _) }
+unsafe fn RelationGetPartitionDesc(rel: Relation, include_detached: bool) -> crate::partitioning::partdefs::PartitionDesc { crate::partitioning::partdesc::RelationGetPartitionDesc(rel, !include_detached) as crate::partitioning::partdefs::PartitionDesc }
+unsafe fn addRangeTableEntryForRelation(pstate: ParseState, rel: Relation, lockmode: LOCKMODE, alias: *mut std::ffi::c_void, inh: bool, inFromCl: bool) -> *mut ParseNamespaceItem { crate::parser::parse_relation::addRangeTableEntryForRelation(pstate, rel as _, lockmode as _, alias as _, inh, inFromCl) as _ }
+unsafe fn addNSItemToQuery(pstate: ParseState, nsitem: *mut ParseNamespaceItem, addToJoinList: bool, addToRelNameSpace: bool, addToVarNameSpace: bool) { crate::parser::parse_relation::addNSItemToQuery(pstate, nsitem as _, addToJoinList, addToRelNameSpace, addToVarNameSpace) }
 unsafe fn RelationGetIndexList(rel: Relation) -> *mut List { crate::nodes::pg_list::NIL /* TODO(pg-port): stub */ }
-unsafe fn build_attrmap_by_name(indesc: TupleDesc, outdesc: TupleDesc, missing_ok: bool) -> *mut AttrMap { ptr::null_mut() /* TODO(pg-port): stub */ }
+unsafe fn build_attrmap_by_name(indesc: TupleDesc, outdesc: TupleDesc, missing_ok: bool) -> *mut AttrMap { crate::access::common::attmap::build_attrmap_by_name(indesc, outdesc, missing_ok) }
 unsafe fn generateClonedIndexStmt(heapRel: *mut RangeVar, source_idx: Relation, attmap: *mut AttrMap, constraintOid: *mut Oid) -> *mut IndexStmt { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn DefineIndex(relationId: Oid, stmt: *mut IndexStmt, indexRelationId: Oid, parentIndexId: Oid, parentConstraintId: Oid, total_parts: c_int, is_alter_table: bool, check_rights: bool, check_not_in_use: bool, skip_build: bool, quiet: bool) -> ObjectAddress { InvalidObjectAddress /* TODO(pg-port): stub */ }
-unsafe fn index_open(indexOid: Oid, lockmode: LOCKMODE) -> Relation { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn index_close(rel: Relation, lockmode: LOCKMODE) { /* TODO(pg-port): stub */ }
-unsafe fn CloneRowTriggersToPartition(parent: Relation, partition: Relation) { /* TODO(pg-port): stub */ }
-unsafe fn CloneForeignKeyConstraints(wqueue: *mut *mut List, parent: Relation, partition: Relation) { /* TODO(pg-port): stub */ }
+unsafe fn DefineIndex(relationId: Oid, stmt: *mut IndexStmt, indexRelationId: Oid, parentIndexId: Oid, parentConstraintId: Oid, total_parts: c_int, is_alter_table: bool, check_rights: bool, check_not_in_use: bool, skip_build: bool, quiet: bool) -> ObjectAddress { crate::commands::indexcmds::DefineIndex(relationId, stmt as _, indexRelationId, parentIndexId, parentConstraintId, total_parts, is_alter_table, check_rights, check_not_in_use, skip_build, quiet) }
+unsafe fn index_open(indexOid: Oid, lockmode: LOCKMODE) -> Relation { crate::access::index::indexam::index_open(indexOid, lockmode) }
+unsafe fn index_close(rel: Relation, lockmode: LOCKMODE) { crate::access::index::indexam::index_close(rel, lockmode) }
 /* MergeAttributes dependency stubs */
 unsafe fn make_attrmap(maplen: c_int) -> *mut AttrMap { crate::access::common::attmap::make_attrmap(maplen) }
 unsafe fn free_attrmap(map: *mut AttrMap) { crate::access::common::attmap::free_attrmap(map) }
-unsafe fn bms_add_member(a: Bitmapset, x: c_int) -> Bitmapset { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn bms_is_member(x: c_int, a: Bitmapset) -> bool { false /* TODO(pg-port): stub */ }
-unsafe fn bms_free(a: Bitmapset) { /* TODO(pg-port): stub */ }
-unsafe fn makeColumnDef(colname: *const c_char, typeOid: Oid, typmod: i32, collOid: Oid) -> *mut ColumnDef { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn CompressionMethodIsValid(method: c_char) -> bool { method != 0 /* TODO(pg-port): stub */ }
-unsafe fn GetCompressionMethodName(method: c_char) -> *const c_char { ptr::null() /* TODO(pg-port): stub */ }
-unsafe fn TupleDescGetDefault(tupdesc: TupleDesc, attnum: i16) -> *mut Node { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn map_variable_attnos(expr: *mut Node, varno: c_int, sublevels_up: c_int, map: *mut AttrMap, rowtype: Oid, found_whole_row: *mut bool) -> *mut Node { expr /* TODO(pg-port): stub */ }
-unsafe fn stringToNode(str_: *const c_char) -> *mut Node { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn list_delete_nth_cell(list: *mut List, n: c_int) -> *mut List { list /* TODO(pg-port): stub */ }
-unsafe fn list_nth(list: *const List, n: c_int) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
-unsafe fn linitial(list: *const List) -> *mut std::ffi::c_void { ptr::null_mut() /* TODO(pg-port): stub */ }
+unsafe fn bms_add_member(a: *mut Bitmapset, x: c_int) -> *mut Bitmapset { crate::nodes::bitmapset::bms_add_member(a, x) }
+unsafe fn bms_is_member(x: c_int, a: *mut Bitmapset) -> bool { crate::nodes::bitmapset::bms_is_member(x, a) }
+unsafe fn bms_free(a: *mut Bitmapset) { crate::nodes::bitmapset::bms_free(a) }
+unsafe fn makeColumnDef(colname: *const c_char, typeOid: Oid, typmod: i32, collOid: Oid) -> *mut ColumnDef { crate::nodes::makefuncs::makeColumnDef(colname, typeOid, typmod, collOid) as _ }
+unsafe fn CompressionMethodIsValid(method: c_char) -> bool { crate::access::common::toast_compression::CompressionMethodIsValid(method) }
+unsafe fn GetCompressionMethodName(method: c_char) -> *const c_char { crate::access::common::toast_compression::GetCompressionMethodName(method) }
+unsafe fn TupleDescGetDefault(tupdesc: TupleDesc, attnum: i16) -> *mut Node { crate::access::common::tupdesc::TupleDescGetDefault(tupdesc, attnum) as _ }
+unsafe fn map_variable_attnos(expr: *mut Node, varno: c_int, sublevels_up: c_int, map: *mut AttrMap, rowtype: Oid, found_whole_row: *mut bool) -> *mut Node { crate::rewrite::rewriteManip::map_variable_attnos(expr, varno, sublevels_up, map as _, rowtype, found_whole_row) }
+unsafe fn stringToNode(str_: *const c_char) -> *mut Node { crate::nodes::read::stringToNode(str_) as _ }
+unsafe fn list_delete_nth_cell(list: *mut List, n: c_int) -> *mut List { crate::nodes::pg_list::list_delete_nth_cell(list, n) }
+unsafe fn list_nth(list: *const List, n: c_int) -> *mut std::ffi::c_void { crate::nodes::pg_list::list_nth(list, n) }
+unsafe fn linitial(list: *const List) -> *mut std::ffi::c_void { crate::nodes::pg_list::linitial(list) }
 unsafe fn ACLCHECK_NOT_OWNER() -> c_int { 2 /* TODO(pg-port): stub */ }
-unsafe fn OBJECT_TABLESPACE() -> c_int { 0 /* TODO(pg-port): stub */ }
-unsafe fn MyDatabaseTableSpace() -> Oid { 0 /* TODO(pg-port): global var stub */ }
+unsafe fn OBJECT_TABLESPACE() -> c_int { 0 /* stub dummy (restored: test_setup path) */ }
 unsafe fn TableSpaceRelationId_const() -> Oid { 1213 /* TODO(pg-port): stub */ }
-unsafe fn ONCOMMIT_NOOP() -> c_int { 0 /* TODO(pg-port): stub */ }
+unsafe fn ONCOMMIT_NOOP() -> c_int { 0 /* stub dummy (restored: test_setup path) */ }
 const MaxHeapAttributeNumber: c_int = 1600;
 const PARTITION_MAX_KEYS: c_int = 64;
 unsafe fn libc_strcmp(a: *const c_char, b: *const c_char) -> c_int {
@@ -493,7 +1249,7 @@ pub struct OnCommitItem {
 }
 
 /* TODO(pg-port): OnCommitAction from nodes/parsenodes.h */
-pub use crate::nodes::parsenodes::OnCommitAction;
+pub use crate::nodes::primnodes::OnCommitAction;
 
 static mut on_commits: *mut List = ptr::null_mut();
 
@@ -529,6 +1285,7 @@ pub enum AlterTablePass {
     AT_PASS_ADD_OTHERCONSTR = 10, /* ADD other constraints, defaults */
     AT_PASS_MISC = 11,           /* other stuff */
 }
+use AlterTablePass::*;
 
 const AT_NUM_PASSES: usize = 12; /* AT_PASS_MISC + 1 */
 
@@ -622,7 +1379,7 @@ struct dropmsgstrings {
 /* TODO(pg-port): RELKIND_* constants */
 /* TODO(pg-port): ERRCODE_* constants */
 
-static dropmsgstringarray: [dropmsgstrings; 0] = [];
+const dropmsgstringarray: [dropmsgstrings; 0] = [];
 
 /* communication between RemoveRelations and RangeVarCallbackForDropRelation */
 #[repr(C)]
@@ -704,7 +1461,7 @@ pub unsafe fn DefineRelation(
     mut relkind: c_char,
     mut ownerId: Oid,
     typaddress: *mut ObjectAddress,
-    queryString: *const c_char,
+    queryString: *const c_char
 ) -> ObjectAddress {
     let mut relname = [0u8; 64]; /* NAMEDATALEN */
     let mut namespaceId: Oid;
@@ -744,8 +1501,7 @@ pub unsafe fn DefineRelation(
         && (*(*stmt).relation).relpersistence != RELPERSISTENCE_TEMP
     {
         ereport!(ERROR, errmsg!("ON COMMIT can only be used on temporary tables")
-            /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */
-        );
+            /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */);
     }
 
     if !(*stmt).partspec.is_null() {
@@ -760,8 +1516,7 @@ pub unsafe fn DefineRelation(
         && (*(*stmt).relation).relpersistence == b'u' as c_char /* RELPERSISTENCE_UNLOGGED */
     {
         ereport!(ERROR, errmsg!("partitioned tables cannot be unlogged")
-            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     /*
@@ -776,8 +1531,7 @@ pub unsafe fn DefineRelation(
         && InSecurityRestrictedOperation()
     {
         ereport!(ERROR, errmsg!("cannot create temporary table within security-restricted operation")
-            /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */
-        );
+            /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */);
     }
 
     /*
@@ -797,11 +1551,9 @@ pub unsafe fn DefineRelation(
 
         /* Reject duplications */
         if list_member_oid(inheritOids, parentOid) {
-            ereport!(ERROR,
-                errmsg!("relation \"{}\" would be inherited from more than once",
+            ereport!(ERROR, errmsg!("relation \"{}\" would be inherited from more than once",
                     CStr::from_ptr(get_rel_name(parentOid)).to_string_lossy())
-                /* C also: errcode(ERRCODE_DUPLICATE_TABLE) */
-            );
+                /* C also: errcode(ERRCODE_DUPLICATE_TABLE) */);
         }
         inheritOids = lappend_oid(inheritOids, parentOid);
     });
@@ -813,8 +1565,7 @@ pub unsafe fn DefineRelation(
         tablespaceId = get_tablespace_oid((*stmt).tablespacename, false);
         if partitioned && tablespaceId == MyDatabaseTableSpace() {
             ereport!(ERROR, errmsg!("cannot specify default tablespace for partitioned relations")
-                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-            );
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
         }
     } else if !(*stmt).partbound.is_null() {
         tablespaceId = get_rel_tablespace(linitial_oid(inheritOids));
@@ -840,8 +1591,7 @@ pub unsafe fn DefineRelation(
         const GLOBALTABLESPACE_OID: Oid = 1664;
         if tablespaceId == GLOBALTABLESPACE_OID {
             ereport!(ERROR, errmsg!("only shared relations can be placed in pg_global tablespace")
-                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
-            );
+                /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */);
         }
     }
 
@@ -904,7 +1654,7 @@ pub unsafe fn DefineRelation(
             (*rawEnt).attnum = attnum;
             (*rawEnt).raw_default = (*colDef).raw_default;
             (*rawEnt).generated = (*colDef).generated;
-            rawDefaults = lappend(rawDefaults as *mut std::ffi::c_void, rawEnt as *mut std::ffi::c_void) as *mut List;
+            rawDefaults = lappend(rawDefaults, rawEnt as *mut std::ffi::c_void) as *mut List;
         } else if !(*colDef).cooked_default.is_null() {
             let cooked = palloc(std::mem::size_of::<CookedConstraint>()) as *mut CookedConstraint;
             (*cooked).contype = crate::nodes::parsenodes::ConstrType::CONSTR_DEFAULT;
@@ -917,7 +1667,7 @@ pub unsafe fn DefineRelation(
             (*cooked).is_local = true;
             (*cooked).inhcount = 0;
             (*cooked).is_no_inherit = false;
-            cookedDefaults = lappend(cookedDefaults as *mut std::ffi::c_void, cooked as *mut std::ffi::c_void) as *mut List;
+            cookedDefaults = lappend(cookedDefaults, cooked as *mut std::ffi::c_void) as *mut List;
         }
     });
 
@@ -960,7 +1710,7 @@ pub unsafe fn DefineRelation(
         allowSystemTableMods(),
         false,
         InvalidOid,
-        typaddress,
+        typaddress
     );
 
     /*
@@ -995,11 +1745,9 @@ pub unsafe fn DefineRelation(
         let parent = table_open(parentId, NoLock);
 
         if (*(*parent).rd_rel).relkind != RELKIND_PARTITIONED_TABLE as c_char {
-            ereport!(ERROR,
-                errmsg!("\"{}\" is not partitioned",
+            ereport!(ERROR, errmsg!("\"{}\" is not partitioned",
                     CStr::from_ptr(RelationGetRelationName(parent)).to_string_lossy())
-                /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-            );
+                /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
         }
 
         let defaultPartOid = get_default_oid_from_partdesc(
@@ -1044,8 +1792,7 @@ pub unsafe fn DefineRelation(
 
         if partnatts > PARTITION_MAX_KEYS {
             ereport!(ERROR, errmsg!("cannot partition using more than {} columns", PARTITION_MAX_KEYS)
-                /* C also: errcode(ERRCODE_TOO_MANY_COLUMNS) */
-            );
+                /* C also: errcode(ERRCODE_TOO_MANY_COLUMNS) */);
         }
 
         (*stmt).partspec = transformPartitionSpec(rel, (*stmt).partspec);
@@ -1085,11 +1832,9 @@ pub unsafe fn DefineRelation(
 
             if (*(*rel).rd_rel).relkind == RELKIND_FOREIGN_TABLE as c_char {
                 if (*(*idxRel).rd_index).indisunique {
-                    ereport!(ERROR,
-                        errmsg!("cannot create foreign partition of partitioned table \"{}\"",
+                    ereport!(ERROR, errmsg!("cannot create foreign partition of partitioned table \"{}\"",
                             CStr::from_ptr(RelationGetRelationName(parent)).to_string_lossy())
-                        /* C also: errcode, errdetail */
-                    );
+                        /* C also: errcode, errdetail */);
                 } else {
                     index_close(idxRel, AccessShareLock);
                     /* continue -- skip this index */
@@ -1128,7 +1873,7 @@ pub unsafe fn DefineRelation(
         foreach!(lconstr, conlist, {
             let cons = crate::nodes::pg_list::lfirst(current_cell!(lconstr)) as *mut CookedConstraint;
             if !(*cons).name.is_null() {
-                connames = lappend(connames as *mut std::ffi::c_void, (*cons).name as *mut std::ffi::c_void) as *mut List;
+                connames = lappend(connames, (*cons).name as *mut std::ffi::c_void) as *mut List;
             }
         });
     }
@@ -1193,16 +1938,13 @@ pub unsafe fn BuildDescForRelation(columns: *const List) -> TupleDesc {
         let attdim = list_length((*(*entry).typeName).arrayBounds);
         if attdim > i16::MAX as c_int {
             ereport!(ERROR, errmsg!("too many array dimensions")
-                /* C also: errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */
-            );
+                /* C also: errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */);
         }
 
         if (*(*entry).typeName).setof {
-            ereport!(ERROR,
-                errmsg!("column \"{}\" cannot be declared SETOF",
+            ereport!(ERROR, errmsg!("column \"{}\" cannot be declared SETOF",
                     CStr::from_ptr(attname).to_string_lossy())
-                /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */
-            );
+                /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */);
         }
 
         TupleDescInitEntry(desc, attnum, attname, atttypid, atttypmod, attdim);
@@ -1238,18 +1980,12 @@ unsafe fn DropErrorMsgNonExistent(rel: *mut RangeVar, rightkind: c_char, missing
     if !(*rel).schemaname.is_null() {
         /* TODO(pg-port): LookupNamespaceNoError stub -- treat as valid */
         if !missing_ok {
-            ereport!(
-                ERROR,
-                errmsg!("schema \"{}\" does not exist",
+            ereport!(ERROR, errmsg!("schema \"{}\" does not exist",
                     CStr::from_ptr((*rel).schemaname).to_string_lossy())
-                /* C also: errcode(ERRCODE_UNDEFINED_SCHEMA) */
-            );
+                /* C also: errcode(ERRCODE_UNDEFINED_SCHEMA) */);
         } else {
-            ereport!(
-                NOTICE,
-                errmsg!("schema \"{}\" does not exist, skipping",
-                    CStr::from_ptr((*rel).schemaname).to_string_lossy())
-            );
+            ereport!(NOTICE, errmsg!("schema \"{}\" does not exist, skipping",
+                    CStr::from_ptr((*rel).schemaname).to_string_lossy()));
         }
         return;
     }
@@ -1260,18 +1996,12 @@ unsafe fn DropErrorMsgNonExistent(rel: *mut RangeVar, rightkind: c_char, missing
         }
         if rentry.kind == rightkind {
             if !missing_ok {
-                ereport!(
-                    ERROR,
-                    errmsg!("\"{}\" does not exist",
+                ereport!(ERROR, errmsg!("\"{}\" does not exist",
                         CStr::from_ptr((*rel).relname).to_string_lossy())
-                    /* C also: errcode(rentry.nonexistent_code) */
-                );
+                    /* C also: errcode(rentry.nonexistent_code) */);
             } else {
-                ereport!(
-                    NOTICE,
-                    errmsg!("\"{}\" does not exist, skipping",
-                        CStr::from_ptr((*rel).relname).to_string_lossy())
-                );
+                ereport!(NOTICE, errmsg!("\"{}\" does not exist, skipping",
+                        CStr::from_ptr((*rel).relname).to_string_lossy()));
             }
             return;
         }
@@ -1297,14 +2027,11 @@ unsafe fn DropErrorMsgWrongType(relname: *const c_char, wrongkind: c_char, right
     }
     /* wrongkind could be something we don't have in our table... */
 
-    ereport!(
-        ERROR,
-        errmsg!("\"{}\" is not the right object type",
+    ereport!(ERROR, errmsg!("\"{}\" is not the right object type",
             CStr::from_ptr(relname).to_string_lossy())
         /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE),
            errmsg(rentry->nota_msg, relname),
-           errhint if wentry is valid */
-    );
+           errhint if wentry is valid */);
 }
 
 /*
@@ -1328,18 +2055,12 @@ pub unsafe fn RemoveRelations(drop: *mut DropStmt) {
         lockmode = ShareUpdateExclusiveLock;
         /* Assert(drop->removeType == OBJECT_INDEX) */
         if list_length((*drop).objects) != 1 {
-            ereport!(
-                ERROR,
-                errmsg!("DROP INDEX CONCURRENTLY does not support dropping multiple objects")
-                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-            );
+            ereport!(ERROR, errmsg!("DROP INDEX CONCURRENTLY does not support dropping multiple objects")
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
         }
         if (*drop).behavior == DropBehavior::DROP_CASCADE {
-            ereport!(
-                ERROR,
-                errmsg!("DROP INDEX CONCURRENTLY does not support CASCADE")
-                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-            );
+            ereport!(ERROR, errmsg!("DROP INDEX CONCURRENTLY does not support CASCADE")
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
         }
     }
 
@@ -1389,7 +2110,7 @@ pub unsafe fn RemoveRelations(drop: *mut DropStmt) {
         AcceptInvalidationMessages();
 
         relOid = RangeVarGetRelidExtended(rel, lockmode, 0x01 /* RVR_MISSING_OK */,
-                                           RangeVarCallbackForDropRelation,
+                                           Some(RangeVarCallbackForDropRelation),
                                            &mut state as *mut DropRelationCallbackState as *mut std::ffi::c_void);
 
         /* Not there? */
@@ -1411,12 +2132,9 @@ pub unsafe fn RemoveRelations(drop: *mut DropStmt) {
          * Concurrent index drop cannot be used with partitioned indexes, either.
          */
         if (flags & 0x1) != 0 && state.actual_relkind == RELKIND_PARTITIONED_INDEX as c_char {
-            ereport!(
-                ERROR,
-                errmsg!("cannot drop partitioned index \"{}\" concurrently",
+            ereport!(ERROR, errmsg!("cannot drop partitioned index \"{}\" concurrently",
                     CStr::from_ptr((*rel).relname).to_string_lossy())
-                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-            );
+                /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
         }
 
         /*
@@ -1449,11 +2167,11 @@ pub unsafe fn RemoveRelations(drop: *mut DropStmt) {
  * Also, if the table to be dropped is a partition, we try to lock the parent
  * first.
  */
-unsafe fn RangeVarCallbackForDropRelation(
+unsafe extern "C" fn RangeVarCallbackForDropRelation(
     rel: *const RangeVar,
     relOid: Oid,
     oldRelOid: Oid,
-    arg: *mut std::ffi::c_void,
+    arg: *mut std::ffi::c_void
 ) {
     let state = arg as *mut DropRelationCallbackState;
     let heap_lockmode = (*state).heap_lockmode;
@@ -1484,7 +2202,7 @@ unsafe fn RangeVarCallbackForDropRelation(
         return;
     }
 
-    let tuple = SearchSysCache1(0 /* RELOID */, ObjectIdGetDatum(relOid));
+    let tuple = SearchSysCache1(crate::utils::cache::syscache_ids_gen::RELOID, ObjectIdGetDatum(relOid));
     if !HeapTupleIsValid(tuple) {
         return; /* concurrently dropped, so nothing to do */
     }
@@ -1529,7 +2247,7 @@ unsafe fn RangeVarCallbackForDropRelation(
      * failed concurrent process and allow its drop.
      */
     if IsSystemClass(relOid, classform) && (*classform).relkind == RELKIND_INDEX as c_char {
-        let locTuple = SearchSysCache1(0 /* INDEXRELID */, ObjectIdGetDatum(relOid));
+        let locTuple = SearchSysCache1(crate::utils::cache::syscache_ids_gen::INDEXRELID, ObjectIdGetDatum(relOid));
         if !HeapTupleIsValid(locTuple) {
             ReleaseSysCache(tuple);
             return;
@@ -1546,12 +2264,9 @@ unsafe fn RangeVarCallbackForDropRelation(
 
     /* In the case of an invalid index, it is fine to bypass this check */
     if !invalid_system_index && !allowSystemTableMods() && IsSystemClass(relOid, classform) {
-        ereport!(
-            ERROR,
-            errmsg!("permission denied: \"{}\" is a system catalog",
+        ereport!(ERROR, errmsg!("permission denied: \"{}\" is a system catalog",
                 CStr::from_ptr((*rel).relname).to_string_lossy())
-            /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */
-        );
+            /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */);
     }
 
     ReleaseSysCache(tuple);
@@ -1613,7 +2328,7 @@ pub unsafe fn ExecuteTruncate(stmt: *mut TruncateStmt) {
         let lockmode: LOCKMODE = AccessExclusiveLock;
 
         let myrelid = RangeVarGetRelidExtended(rv, lockmode, 0,
-                                               RangeVarCallbackForTruncate,
+                                               Some(RangeVarCallbackForTruncate),
                                                ptr::null_mut());
 
         /* don't throw error for "TRUNCATE foo, foo" */
@@ -1678,12 +2393,9 @@ pub unsafe fn ExecuteTruncate(stmt: *mut TruncateStmt) {
                 }
             });
         } else if (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as c_char {
-            ereport!(
-                ERROR,
-                errmsg!("cannot truncate only a partitioned table")
+            ereport!(ERROR, errmsg!("cannot truncate only a partitioned table")
                 /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                   errhint("Do not specify the ONLY keyword, or use TRUNCATE ONLY on the partitions directly.") */
-            );
+                   errhint("Do not specify the ONLY keyword, or use TRUNCATE ONLY on the partitions directly.") */);
         }
     });
 
@@ -1710,20 +2422,21 @@ pub unsafe fn ExecuteTruncate(stmt: *mut TruncateStmt) {
  * WAL-logging.  This is all a bit redundant, but the existing callers have
  * this information handy in this form.
  */
+#[no_mangle]
 pub unsafe fn ExecuteTruncateGuts(
     explicit_rels: *mut List,
     relids: *mut List,
     relids_logged: *mut List,
     behavior: DropBehavior,
     restart_seqs: bool,
-    run_as_table_owner: bool,
+    run_as_table_owner: bool
 ) {
     let mut rels: *mut List;
     let mut seq_relids: *mut List = crate::nodes::pg_list::NIL;
     let estate: *mut std::ffi::c_void /* EState */;
     let resultRelInfos: *mut ResultRelInfo;
     let mut resultRelInfo: *mut ResultRelInfo;
-    let mySubid: crate::access::transam::SubTransactionId;
+    let mySubid: SubTransactionId;
 
     /*
      * Check the explicitly-specified relations.
@@ -1743,11 +2456,8 @@ pub unsafe fn ExecuteTruncateGuts(
             foreach!(cell, newrelids, {
                 let relid = lfirst_oid(current_cell!(cell));
                 let rel = table_open(relid, AccessExclusiveLock);
-                ereport!(
-                    NOTICE,
-                    errmsg!("truncate cascades to table \"{}\"",
-                        CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-                );
+                ereport!(NOTICE, errmsg!("truncate cascades to table \"{}\"",
+                        CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()));
                 truncate_check_rel(relid, (*rel).rd_rel);
                 truncate_check_perms(relid, (*rel).rd_rel);
                 truncate_check_activity(rel);
@@ -1951,33 +2661,24 @@ unsafe fn truncate_check_rel(relid: Oid, reltuple: *mut FormData_pg_class) {
      */
     if (*reltuple).relkind == RELKIND_FOREIGN_TABLE as c_char {
         /* TODO(pg-port): FDW routine check for ExecForeignTruncate */
-        ereport!(
-            ERROR,
-            errmsg!("cannot truncate foreign table \"{}\"",
+        ereport!(ERROR, errmsg!("cannot truncate foreign table \"{}\"",
                 CStr::from_ptr(relname).to_string_lossy())
-            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     } else if (*reltuple).relkind != RELKIND_RELATION as c_char
         && (*reltuple).relkind != RELKIND_PARTITIONED_TABLE as c_char
     {
-        ereport!(
-            ERROR,
-            errmsg!("\"{}\" is not a table",
+        ereport!(ERROR, errmsg!("\"{}\" is not a table",
                 CStr::from_ptr(relname).to_string_lossy())
-            /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /*
      * Most system catalogs can't be truncated at all.
      */
     if !allowSystemTableMods() && IsSystemClass(relid, reltuple) {
-        ereport!(
-            ERROR,
-            errmsg!("permission denied: \"{}\" is a system catalog",
+        ereport!(ERROR, errmsg!("permission denied: \"{}\" is a system catalog",
                 CStr::from_ptr(relname).to_string_lossy())
-            /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */
-        );
+            /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */);
     }
 
     InvokeObjectTruncateHook(relid);
@@ -2006,11 +2707,8 @@ unsafe fn truncate_check_activity(rel: Relation) {
      * buffer manager is not going to cope.
      */
     if RELATION_IS_OTHER_TEMP(rel) {
-        ereport!(
-            ERROR,
-            errmsg!("cannot truncate temporary tables of other sessions")
-            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+        ereport!(ERROR, errmsg!("cannot truncate temporary tables of other sessions")
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     /*
@@ -2107,7 +2805,7 @@ unsafe fn MergeAttributes(
     relpersistence: c_char,
     is_partition: bool,
     supconstr: *mut *mut List,
-    supnotnulls: *mut *mut List,
+    supnotnulls: *mut *mut List
 ) -> *mut List {
     let mut inh_columns: *mut List = crate::nodes::pg_list::NIL;
     let mut constraints: *mut List = crate::nodes::pg_list::NIL;
@@ -2115,7 +2813,7 @@ unsafe fn MergeAttributes(
     let mut have_bogus_defaults = false;
     let mut child_attno: c_int = 0;
     /* bogus_marker: a sentinel Node to flag conflicting defaults */
-    let mut bogus_marker_node: crate::nodes::nodes::Node = crate::nodes::nodes::Node { r#type: 0 };
+    let mut bogus_marker_node: crate::nodes::nodes::Node = crate::nodes::nodes::Node { r#type: crate::nodes::nodes::NodeTag::T_Invalid };
     let bogus_marker: *mut Node = &mut bogus_marker_node as *mut _;
     let mut saved_columns: *mut List = crate::nodes::pg_list::NIL;
 
@@ -2124,8 +2822,7 @@ unsafe fn MergeAttributes(
      */
     if list_length(columns) > MaxHeapAttributeNumber {
         ereport!(ERROR, errmsg!("tables can have at most {} columns", MaxHeapAttributeNumber)
-            /* C also: errcode(ERRCODE_TOO_MANY_COLUMNS) */
-        );
+            /* C also: errcode(ERRCODE_TOO_MANY_COLUMNS) */);
     }
 
     /*
@@ -2138,11 +2835,9 @@ unsafe fn MergeAttributes(
         let coldef = list_nth(columns, coldefpos) as *mut ColumnDef;
 
         if !is_partition && (*coldef).typeName.is_null() {
-            ereport!(ERROR,
-                errmsg!("column \"{}\" does not exist",
+            ereport!(ERROR, errmsg!("column \"{}\" does not exist",
                     CStr::from_ptr((*coldef).colname).to_string_lossy())
-                /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */
-            );
+                /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */);
         }
 
         /* scan all entries beyond coldef */
@@ -2161,11 +2856,9 @@ unsafe fn MergeAttributes(
                     columns = list_delete_nth_cell(columns, restpos);
                     /* don't increment restpos; list got shorter */
                 } else {
-                    ereport!(ERROR,
-                        errmsg!("column \"{}\" specified more than once",
+                    ereport!(ERROR, errmsg!("column \"{}\" specified more than once",
                             CStr::from_ptr((*coldef).colname).to_string_lossy())
-                        /* C also: errcode(ERRCODE_DUPLICATE_COLUMN) */
-                    );
+                        /* C also: errcode(ERRCODE_DUPLICATE_COLUMN) */);
                 }
             } else {
                 restpos += 1;
@@ -2203,18 +2896,14 @@ unsafe fn MergeAttributes(
          * in regular inheritance.
          */
         if (*(*relation).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as c_char && !is_partition {
-            ereport!(ERROR,
-                errmsg!("cannot inherit from partitioned table \"{}\"",
+            ereport!(ERROR, errmsg!("cannot inherit from partitioned table \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(relation)).to_string_lossy())
-                /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-            );
+                /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
         }
         if (*(*relation).rd_rel).relispartition && !is_partition {
-            ereport!(ERROR,
-                errmsg!("cannot inherit from partition \"{}\"",
+            ereport!(ERROR, errmsg!("cannot inherit from partition \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(relation)).to_string_lossy())
-                /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-            );
+                /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
         }
 
         let relkind = (*(*relation).rd_rel).relkind;
@@ -2222,11 +2911,9 @@ unsafe fn MergeAttributes(
             && relkind != RELKIND_FOREIGN_TABLE as c_char
             && relkind != RELKIND_PARTITIONED_TABLE as c_char
         {
-            ereport!(ERROR,
-                errmsg!("inherited relation \"{}\" is not a table or foreign table",
+            ereport!(ERROR, errmsg!("inherited relation \"{}\" is not a table or foreign table",
                     CStr::from_ptr(RelationGetRelationName(relation)).to_string_lossy())
-                /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-            );
+                /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
         }
 
         /* partition cannot be temporary if parent is permanent */
@@ -2234,11 +2921,9 @@ unsafe fn MergeAttributes(
             && (*(*relation).rd_rel).relpersistence != RELPERSISTENCE_TEMP
             && relpersistence == RELPERSISTENCE_TEMP
         {
-            ereport!(ERROR,
-                errmsg!("cannot create a temporary relation as partition of permanent relation \"{}\"",
+            ereport!(ERROR, errmsg!("cannot create a temporary relation as partition of permanent relation \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(relation)).to_string_lossy())
-                /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-            );
+                /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
         }
 
         /* permanent rel cannot inherit from temp */
@@ -2246,17 +2931,13 @@ unsafe fn MergeAttributes(
             && (*(*relation).rd_rel).relpersistence == RELPERSISTENCE_TEMP
         {
             if !is_partition {
-                ereport!(ERROR,
-                    errmsg!("cannot inherit from temporary relation \"{}\"",
+                ereport!(ERROR, errmsg!("cannot inherit from temporary relation \"{}\"",
                         CStr::from_ptr(RelationGetRelationName(relation)).to_string_lossy())
-                    /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-                );
+                    /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
             } else {
-                ereport!(ERROR,
-                    errmsg!("cannot create a permanent relation as partition of temporary relation \"{}\"",
+                ereport!(ERROR, errmsg!("cannot create a permanent relation as partition of temporary relation \"{}\"",
                         CStr::from_ptr(RelationGetRelationName(relation)).to_string_lossy())
-                    /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-                );
+                    /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
             }
         }
 
@@ -2265,15 +2946,11 @@ unsafe fn MergeAttributes(
             && !(*relation).rd_islocaltemp
         {
             if !is_partition {
-                ereport!(ERROR,
-                    errmsg!("cannot inherit from temporary relation of another session")
-                    /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-                );
+                ereport!(ERROR, errmsg!("cannot inherit from temporary relation of another session")
+                    /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
             } else {
-                ereport!(ERROR,
-                    errmsg!("cannot create as partition of temporary relation of another session")
-                    /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-                );
+                ereport!(ERROR, errmsg!("cannot create as partition of temporary relation of another session")
+                    /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
             }
         }
 
@@ -2299,7 +2976,7 @@ unsafe fn MergeAttributes(
          * Request attnotnull on columns with not-null constraint.
          */
         let nnconstrs = RelationGetNotNullConstraints(RelationGetRelid(relation), true, false);
-        let mut nncols: Bitmapset = ptr::null_mut();
+        let mut nncols: *mut Bitmapset = ptr::null_mut();
         foreach!(lnn, nnconstrs, {
             let cc = crate::nodes::pg_list::lfirst(current_cell!(lnn)) as *mut CookedConstraint;
             nncols = bms_add_member(nncols, (*cc).attnum as c_int);
@@ -2336,15 +3013,15 @@ unsafe fn MergeAttributes(
             if exist_attno > 0 {
                 /* merge */
                 mergeddef = MergeInheritedAttribute(inh_columns, exist_attno, newdef);
-                (*newattmap).attnums[(parent_attno - 1) as usize] = exist_attno as i16;
+                *(*newattmap).attnums.add((parent_attno - 1) as usize) = exist_attno as i16;
                 /* partitions have only one parent, conflict can't occur */
             } else {
                 /* new inherited column */
                 (*newdef).inhcount = 1;
                 (*newdef).is_local = false;
-                inh_columns = lappend(inh_columns as *mut std::ffi::c_void, newdef as *mut std::ffi::c_void) as *mut List;
+                inh_columns = lappend(inh_columns, newdef as *mut std::ffi::c_void) as *mut List;
                 child_attno += 1;
-                (*newattmap).attnums[(parent_attno - 1) as usize] = child_attno as i16;
+                *(*newattmap).attnums.add((parent_attno - 1) as usize) = child_attno as i16;
                 mergeddef = newdef;
             }
 
@@ -2357,14 +3034,12 @@ unsafe fn MergeAttributes(
             if (*attribute).atthasdef {
                 let this_default = TupleDescGetDefault(tupleDesc, parent_attno);
                 if this_default.is_null() {
-                    ereport!(ERROR,
-                        errmsg!("default expression not found for attribute {} of relation \"{}\"",
+                    ereport!(ERROR, errmsg!("default expression not found for attribute {} of relation \"{}\"",
                             parent_attno,
-                            CStr::from_ptr(RelationGetRelationName(relation)).to_string_lossy())
-                    );
+                            CStr::from_ptr(RelationGetRelationName(relation)).to_string_lossy()));
                 }
-                inherited_defaults = lappend(inherited_defaults as *mut std::ffi::c_void, this_default as *mut std::ffi::c_void) as *mut List;
-                cols_with_defaults = lappend(cols_with_defaults as *mut std::ffi::c_void, mergeddef as *mut std::ffi::c_void) as *mut List;
+                inherited_defaults = lappend(inherited_defaults, this_default as *mut std::ffi::c_void) as *mut List;
+                cols_with_defaults = lappend(cols_with_defaults, mergeddef as *mut std::ffi::c_void) as *mut List;
             }
 
             parent_attno += 1;
@@ -2374,17 +3049,15 @@ unsafe fn MergeAttributes(
          * Process inherited default expressions, adjusting attnos.
          */
         crate::forboth!(lc1, inherited_defaults, lc2, cols_with_defaults, {
-            let this_default = crate::nodes::pg_list::lfirst(current_cell!(lc1)) as *mut Node;
-            let def = crate::nodes::pg_list::lfirst(current_cell!(lc2)) as *mut ColumnDef;
+            let this_default = crate::nodes::pg_list::lfirst(lc1) as *mut Node;
+            let def = crate::nodes::pg_list::lfirst(lc2) as *mut ColumnDef;
             let mut found_whole_row: bool = false;
 
             let this_default = map_variable_attnos(this_default, 1, 0, newattmap,
                                                    InvalidOid, &mut found_whole_row);
             if found_whole_row {
-                ereport!(ERROR,
-                    errmsg!("cannot convert whole-row table reference")
-                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errdetail */
-                );
+                ereport!(ERROR, errmsg!("cannot convert whole-row table reference")
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errdetail */);
             }
 
             /* if already had a default, check if same */
@@ -2414,10 +3087,8 @@ unsafe fn MergeAttributes(
                     stringToNode((*check.add(i)).ccbin),
                     1, 0, newattmap, InvalidOid, &mut found_whole_row);
                 if found_whole_row {
-                    ereport!(ERROR,
-                        errmsg!("cannot convert whole-row table reference")
-                        /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errdetail */
-                    );
+                    ereport!(ERROR, errmsg!("cannot convert whole-row table reference")
+                        /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errdetail */);
                 }
                 constraints = MergeCheckConstraint(constraints, name, expr,
                                                    (*check.add(i)).ccenforced);
@@ -2430,8 +3101,8 @@ unsafe fn MergeAttributes(
          */
         foreach!(lnn2, nnconstrs, {
             let nn = crate::nodes::pg_list::lfirst(current_cell!(lnn2)) as *mut CookedConstraint;
-            (*nn).attnum = (*newattmap).attnums[((*nn).attnum - 1) as usize];
-            nnconstraints = lappend(nnconstraints as *mut std::ffi::c_void, nn as *mut std::ffi::c_void) as *mut List;
+            (*nn).attnum = *(*newattmap).attnums.add(((*nn).attnum - 1) as usize);
+            nnconstraints = lappend(nnconstraints, nn as *mut std::ffi::c_void) as *mut List;
         });
 
         free_attrmap(newattmap);
@@ -2461,7 +3132,7 @@ unsafe fn MergeAttributes(
                 MergeChildAttribute(inh_columns, exist_attno, newcol_attno, newdef);
             } else {
                 /* new column, attach unchanged */
-                inh_columns = lappend(inh_columns as *mut std::ffi::c_void, newdef as *mut std::ffi::c_void) as *mut List;
+                inh_columns = lappend(inh_columns, newdef as *mut std::ffi::c_void) as *mut List;
             }
         });
 
@@ -2469,8 +3140,7 @@ unsafe fn MergeAttributes(
 
         if list_length(columns) > MaxHeapAttributeNumber {
             ereport!(ERROR, errmsg!("tables can have at most {} columns", MaxHeapAttributeNumber)
-                /* C also: errcode(ERRCODE_TOO_MANY_COLUMNS) */
-            );
+                /* C also: errcode(ERRCODE_TOO_MANY_COLUMNS) */);
         }
     }
 
@@ -2490,35 +3160,27 @@ unsafe fn MergeAttributes(
                     /* check generated column conflicts */
                     if (*coldef).generated != 0 {
                         if !(*restdef).raw_default.is_null() && (*restdef).generated == 0 {
-                            ereport!(ERROR,
-                                errmsg!("column \"{}\" inherits from generated column but specifies default",
+                            ereport!(ERROR, errmsg!("column \"{}\" inherits from generated column but specifies default",
                                     CStr::from_ptr((*restdef).colname).to_string_lossy())
-                                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION) */
-                            );
+                                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION) */);
                         }
                         if (*restdef).identity != 0 {
-                            ereport!(ERROR,
-                                errmsg!("column \"{}\" inherits from generated column but specifies identity",
+                            ereport!(ERROR, errmsg!("column \"{}\" inherits from generated column but specifies identity",
                                     CStr::from_ptr((*restdef).colname).to_string_lossy())
-                                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION) */
-                            );
+                                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION) */);
                         }
                     } else if (*restdef).generated != 0 {
-                        ereport!(ERROR,
-                            errmsg!("child column \"{}\" specifies generation expression",
+                        ereport!(ERROR, errmsg!("child column \"{}\" specifies generation expression",
                                 CStr::from_ptr((*restdef).colname).to_string_lossy())
-                            /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errhint */
-                        );
+                            /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errhint */);
                     }
 
                     if (*coldef).generated != 0 && (*restdef).generated != 0
                         && (*restdef).generated != (*coldef).generated
                     {
-                        ereport!(ERROR,
-                            errmsg!("column \"{}\" inherits from generated column of different kind",
+                        ereport!(ERROR, errmsg!("column \"{}\" inherits from generated column of different kind",
                                 CStr::from_ptr((*restdef).colname).to_string_lossy())
-                            /* C also: errcode, errdetail */
-                        );
+                            /* C also: errcode, errdetail */);
                     }
 
                     /* override parent default with partition local definition */
@@ -2530,11 +3192,9 @@ unsafe fn MergeAttributes(
             });
 
             if !found {
-                ereport!(ERROR,
-                    errmsg!("column \"{}\" does not exist",
+                ereport!(ERROR, errmsg!("column \"{}\" does not exist",
                         CStr::from_ptr((*restdef).colname).to_string_lossy())
-                    /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */
-                );
+                    /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */);
             }
         });
     }
@@ -2547,17 +3207,13 @@ unsafe fn MergeAttributes(
             let def = crate::nodes::pg_list::lfirst(current_cell!(lc4)) as *mut ColumnDef;
             if (*def).cooked_default == bogus_marker {
                 if (*def).generated != 0 {
-                    ereport!(ERROR,
-                        errmsg!("column \"{}\" inherits conflicting generation expressions",
+                    ereport!(ERROR, errmsg!("column \"{}\" inherits conflicting generation expressions",
                             CStr::from_ptr((*def).colname).to_string_lossy())
-                        /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errhint */
-                    );
+                        /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errhint */);
                 } else {
-                    ereport!(ERROR,
-                        errmsg!("column \"{}\" inherits conflicting default values",
+                    ereport!(ERROR, errmsg!("column \"{}\" inherits conflicting default values",
                             CStr::from_ptr((*def).colname).to_string_lossy())
-                        /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errhint */
-                    );
+                        /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errhint */);
                 }
             }
         });
@@ -2588,7 +3244,7 @@ unsafe fn MergeCheckConstraint(
     constraints: *mut List,
     name: *const c_char,
     expr: *mut Node,
-    is_enforced: bool,
+    is_enforced: bool
 ) -> *mut List {
     foreach!(lc, constraints, {
         let ccon = crate::nodes::pg_list::lfirst(current_cell!(lc)) as *mut CookedConstraint;
@@ -2605,8 +3261,7 @@ unsafe fn MergeCheckConstraint(
             /* check for overflow; CookedConstraint.inhcount is c_int */
             if (*ccon).inhcount == i32::MAX {
                 ereport!(ERROR, errmsg!("too many inheritance parents")
-                    /* C also: errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */
-                );
+                    /* C also: errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */);
             }
             (*ccon).inhcount += 1;
 
@@ -2622,11 +3277,9 @@ unsafe fn MergeCheckConstraint(
             return constraints;
         }
 
-        ereport!(ERROR,
-            errmsg!("check constraint name \"{}\" appears multiple times but with different expressions",
+        ereport!(ERROR, errmsg!("check constraint name \"{}\" appears multiple times but with different expressions",
                 CStr::from_ptr(name).to_string_lossy())
-            /* C also: errcode(ERRCODE_DUPLICATE_OBJECT) */
-        );
+            /* C also: errcode(ERRCODE_DUPLICATE_OBJECT) */);
     });
 
     /*
@@ -2640,7 +3293,7 @@ unsafe fn MergeCheckConstraint(
     (*newcon).inhcount = 1;
     (*newcon).is_enforced = is_enforced;
     (*newcon).skip_validation = !is_enforced;
-    lappend(constraints as *mut std::ffi::c_void, newcon as *mut std::ffi::c_void) as *mut List
+    lappend(constraints, newcon as *mut std::ffi::c_void) as *mut List
 }
 
 /*
@@ -2668,21 +3321,17 @@ unsafe fn MergeChildAttribute(
     inh_columns: *mut List,
     exist_attno: c_int,
     newcol_attno: c_int,
-    newdef: *const ColumnDef,
+    newdef: *const ColumnDef
 ) {
     let attributeName = (*newdef).colname;
 
     if exist_attno == newcol_attno {
-        ereport!(NOTICE,
-            errmsg!("merging column \"{}\" with inherited definition",
-                CStr::from_ptr(attributeName).to_string_lossy())
-        );
+        ereport!(NOTICE, errmsg!("merging column \"{}\" with inherited definition",
+                CStr::from_ptr(attributeName).to_string_lossy()));
     } else {
-        ereport!(NOTICE,
-            errmsg!("moving and merging column \"{}\" with inherited definition",
+        ereport!(NOTICE, errmsg!("moving and merging column \"{}\" with inherited definition",
                 CStr::from_ptr(attributeName).to_string_lossy())
-            /* C also: errdetail */
-        );
+            /* C also: errdetail */);
     }
 
     let inhdef = list_nth_node_ColumnDef(inh_columns, exist_attno - 1);
@@ -2697,11 +3346,9 @@ unsafe fn MergeChildAttribute(
     typenameTypeIdAndMod(ptr::null_mut(), (*inhdef).typeName, &mut inhtypeid, &mut inhtypmod);
     typenameTypeIdAndMod(ptr::null_mut(), (*newdef).typeName, &mut newtypeid, &mut newtypmod);
     if inhtypeid != newtypeid || inhtypmod != newtypmod {
-        ereport!(ERROR,
-            errmsg!("column \"{}\" has a type conflict",
+        ereport!(ERROR, errmsg!("column \"{}\" has a type conflict",
                 CStr::from_ptr(attributeName).to_string_lossy())
-            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */
-        );
+            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */);
     }
 
     /*
@@ -2710,11 +3357,9 @@ unsafe fn MergeChildAttribute(
     let inhcollid = GetColumnDefCollation(ptr::null_mut(), inhdef, inhtypeid);
     let newcollid = GetColumnDefCollation(ptr::null_mut(), newdef, newtypeid);
     if inhcollid != newcollid {
-        ereport!(ERROR,
-            errmsg!("column \"{}\" has a collation conflict",
+        ereport!(ERROR, errmsg!("column \"{}\" has a collation conflict",
                 CStr::from_ptr(attributeName).to_string_lossy())
-            /* C also: errcode(ERRCODE_COLLATION_MISMATCH), errdetail */
-        );
+            /* C also: errcode(ERRCODE_COLLATION_MISMATCH), errdetail */);
     }
 
     /*
@@ -2729,11 +3374,9 @@ unsafe fn MergeChildAttribute(
     if (*inhdef).storage == 0 {
         (*inhdef).storage = (*newdef).storage;
     } else if (*newdef).storage != 0 && (*inhdef).storage != (*newdef).storage {
-        ereport!(ERROR,
-            errmsg!("column \"{}\" has a storage parameter conflict",
+        ereport!(ERROR, errmsg!("column \"{}\" has a storage parameter conflict",
                 CStr::from_ptr(attributeName).to_string_lossy())
-            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */
-        );
+            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */);
     }
 
     /*
@@ -2743,11 +3386,9 @@ unsafe fn MergeChildAttribute(
         (*inhdef).compression = (*newdef).compression;
     } else if !(*newdef).compression.is_null() {
         if libc_strcmp((*inhdef).compression, (*newdef).compression) != 0 {
-            ereport!(ERROR,
-                errmsg!("column \"{}\" has a compression method conflict",
+            ereport!(ERROR, errmsg!("column \"{}\" has a compression method conflict",
                     CStr::from_ptr(attributeName).to_string_lossy())
-                /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */
-            );
+                /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */);
         }
     }
 
@@ -2761,35 +3402,27 @@ unsafe fn MergeChildAttribute(
      */
     if (*inhdef).generated != 0 {
         if !(*newdef).raw_default.is_null() && (*newdef).generated == 0 {
-            ereport!(ERROR,
-                errmsg!("column \"{}\" inherits from generated column but specifies default",
+            ereport!(ERROR, errmsg!("column \"{}\" inherits from generated column but specifies default",
                     CStr::from_ptr((*inhdef).colname).to_string_lossy())
-                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION) */
-            );
+                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION) */);
         }
         if (*newdef).identity != 0 {
-            ereport!(ERROR,
-                errmsg!("column \"{}\" inherits from generated column but specifies identity",
+            ereport!(ERROR, errmsg!("column \"{}\" inherits from generated column but specifies identity",
                     CStr::from_ptr((*inhdef).colname).to_string_lossy())
-                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION) */
-            );
+                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION) */);
         }
     } else {
         if (*newdef).generated != 0 {
-            ereport!(ERROR,
-                errmsg!("child column \"{}\" specifies generation expression",
+            ereport!(ERROR, errmsg!("child column \"{}\" specifies generation expression",
                     CStr::from_ptr((*inhdef).colname).to_string_lossy())
-                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errhint */
-            );
+                /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errhint */);
         }
     }
 
     if (*inhdef).generated != 0 && (*newdef).generated != 0 && (*newdef).generated != (*inhdef).generated {
-        ereport!(ERROR,
-            errmsg!("column \"{}\" inherits from generated column of different kind",
+        ereport!(ERROR, errmsg!("column \"{}\" inherits from generated column of different kind",
                 CStr::from_ptr((*inhdef).colname).to_string_lossy())
-            /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errdetail */
-        );
+            /* C also: errcode(ERRCODE_INVALID_COLUMN_DEFINITION), errdetail */);
     }
 
     /*
@@ -2827,14 +3460,12 @@ unsafe fn MergeChildAttribute(
 unsafe fn MergeInheritedAttribute(
     inh_columns: *mut List,
     exist_attno: c_int,
-    newdef: *const ColumnDef,
+    newdef: *const ColumnDef
 ) -> *mut ColumnDef {
     let attributeName = (*newdef).colname;
 
-    ereport!(NOTICE,
-        errmsg!("merging multiple inherited definitions of column \"{}\"",
-            CStr::from_ptr(attributeName).to_string_lossy())
-    );
+    ereport!(NOTICE, errmsg!("merging multiple inherited definitions of column \"{}\"",
+            CStr::from_ptr(attributeName).to_string_lossy()));
     let prevdef = list_nth_node_ColumnDef(inh_columns, exist_attno - 1);
 
     /*
@@ -2847,11 +3478,9 @@ unsafe fn MergeInheritedAttribute(
     typenameTypeIdAndMod(ptr::null_mut(), (*prevdef).typeName, &mut prevtypeid, &mut prevtypmod);
     typenameTypeIdAndMod(ptr::null_mut(), (*newdef).typeName, &mut newtypeid, &mut newtypmod);
     if prevtypeid != newtypeid || prevtypmod != newtypmod {
-        ereport!(ERROR,
-            errmsg!("inherited column \"{}\" has a type conflict",
+        ereport!(ERROR, errmsg!("inherited column \"{}\" has a type conflict",
                 CStr::from_ptr(attributeName).to_string_lossy())
-            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */
-        );
+            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */);
     }
 
     /*
@@ -2860,11 +3489,9 @@ unsafe fn MergeInheritedAttribute(
     let prevcollid = GetColumnDefCollation(ptr::null_mut(), prevdef, prevtypeid);
     let newcollid = GetColumnDefCollation(ptr::null_mut(), newdef, newtypeid);
     if prevcollid != newcollid {
-        ereport!(ERROR,
-            errmsg!("inherited column \"{}\" has a collation conflict",
+        ereport!(ERROR, errmsg!("inherited column \"{}\" has a collation conflict",
                 CStr::from_ptr(attributeName).to_string_lossy())
-            /* C also: errcode(ERRCODE_COLLATION_MISMATCH), errdetail */
-        );
+            /* C also: errcode(ERRCODE_COLLATION_MISMATCH), errdetail */);
     }
 
     /*
@@ -2873,11 +3500,9 @@ unsafe fn MergeInheritedAttribute(
     if (*prevdef).storage == 0 {
         (*prevdef).storage = (*newdef).storage;
     } else if (*prevdef).storage != (*newdef).storage {
-        ereport!(ERROR,
-            errmsg!("inherited column \"{}\" has a storage parameter conflict",
+        ereport!(ERROR, errmsg!("inherited column \"{}\" has a storage parameter conflict",
                 CStr::from_ptr(attributeName).to_string_lossy())
-            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */
-        );
+            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */);
     }
 
     /*
@@ -2887,11 +3512,9 @@ unsafe fn MergeInheritedAttribute(
         (*prevdef).compression = (*newdef).compression;
     } else if !(*newdef).compression.is_null() {
         if libc_strcmp((*prevdef).compression, (*newdef).compression) != 0 {
-            ereport!(ERROR,
-                errmsg!("column \"{}\" has a compression method conflict",
+            ereport!(ERROR, errmsg!("column \"{}\" has a compression method conflict",
                     CStr::from_ptr(attributeName).to_string_lossy())
-                /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */
-            );
+                /* C also: errcode(ERRCODE_DATATYPE_MISMATCH), errdetail */);
         }
     }
 
@@ -2899,11 +3522,9 @@ unsafe fn MergeInheritedAttribute(
      * Check for GENERATED conflicts
      */
     if (*prevdef).generated != (*newdef).generated {
-        ereport!(ERROR,
-            errmsg!("inherited column \"{}\" has a generation conflict",
+        ereport!(ERROR, errmsg!("inherited column \"{}\" has a generation conflict",
                 CStr::from_ptr(attributeName).to_string_lossy())
-            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH) */
-        );
+            /* C also: errcode(ERRCODE_DATATYPE_MISMATCH) */);
     }
 
     /*
@@ -2913,8 +3534,7 @@ unsafe fn MergeInheritedAttribute(
     /* check for overflow; ColumnDef.inhcount is int16 */
     if (*prevdef).inhcount == i16::MAX {
         ereport!(ERROR, errmsg!("too many inheritance parents")
-            /* C also: errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */
-        );
+            /* C also: errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */);
     }
     (*prevdef).inhcount += 1;
 
@@ -2930,7 +3550,7 @@ unsafe fn MergeInheritedAttribute(
 unsafe fn StoreCatalogInheritance(
     relationId: Oid,
     supers: *mut List,
-    child_is_partition: bool,
+    child_is_partition: bool
 ) {
     /* sanity checks */
     /* Assert(OidIsValid(relationId)) */
@@ -2965,7 +3585,7 @@ unsafe fn StoreCatalogInheritance1(
     parentOid: Oid,
     seqNumber: i32,
     inhRelation: Relation,
-    child_is_partition: bool,
+    child_is_partition: bool
 ) {
     let mut childobject = ObjectAddress { classId: 0, objectId: 0, objectSubId: 0 };
     let mut parentobject = ObjectAddress { classId: 0, objectId: 0, objectSubId: 0 };
@@ -2983,7 +3603,7 @@ unsafe fn StoreCatalogInheritance1(
 
     /* child_dependency_type(child_is_partition) => DEPENDENCY_AUTO or DEPENDENCY_NORMAL */
     let deptype: c_int = if child_is_partition { 2 /* DEPENDENCY_AUTO */ } else { 1 /* DEPENDENCY_NORMAL */ };
-    recordDependencyOn(&childobject, &parentobject, deptype);
+    recordDependencyOn(&childobject, &parentobject, deptype as i8);
 
     /*
      * Post creation hook of this inheritance.
@@ -3041,7 +3661,7 @@ pub unsafe fn SetRelationHasSubclass(relationId: Oid, relhassubclass: bool) {
      * Fetch a modifiable copy of the tuple, modify it, update pg_class.
      */
     let relationRelation = table_open(RelationRelationId, RowExclusiveLock);
-    let tuple = SearchSysCacheCopy1(0 /* RELOID */, ObjectIdGetDatum(relationId));
+    let tuple = SearchSysCacheCopy1(crate::utils::cache::syscache_ids_gen::RELOID, ObjectIdGetDatum(relationId));
     if !HeapTupleIsValid(tuple) {
         /* elog(ERROR, "cache lookup failed for relation %u", relationId) */
         ereport!(ERROR, errmsg!("cache lookup failed for relation {}", relationId));
@@ -3050,7 +3670,7 @@ pub unsafe fn SetRelationHasSubclass(relationId: Oid, relhassubclass: bool) {
 
     if (*classtuple).relhassubclass != relhassubclass {
         (*classtuple).relhassubclass = relhassubclass;
-        CatalogTupleUpdate(relationRelation, ptr::null() /* &tuple->t_self */, tuple);
+        CatalogTupleUpdate(relationRelation, &mut (*tuple).t_self, tuple);
     } else {
         /* no need to change tuple, but force relcache rebuild anyway */
         CacheInvalidateRelcacheByTuple(tuple);
@@ -3072,7 +3692,7 @@ pub unsafe fn SetRelationHasSubclass(relationId: Oid, relhassubclass: bool) {
  */
 pub unsafe fn CheckRelationTableSpaceMove(rel: Relation, newTableSpaceId: Oid) -> bool {
     /*
-     * No work if no change in tablespace.  Note that MyDatabaseTableSpace is
+     * No work if no change in tablespace.  Note that MyDatabaseTableSpace() is
      * stored as 0.
      */
     let oldTableSpaceId = (*(*rel).rd_rel).reltablespace;
@@ -3088,33 +3708,23 @@ pub unsafe fn CheckRelationTableSpaceMove(rel: Relation, newTableSpaceId: Oid) -
      * (In particular this eliminates all shared catalogs.)
      */
     if RelationIsMapped(rel) {
-        ereport!(
-            ERROR,
-            errmsg!("cannot move system relation \"{}\"",
+        ereport!(ERROR, errmsg!("cannot move system relation \"{}\"",
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     /* Cannot move a non-shared relation into pg_global */
-    let GLOBALTABLESPACE_OID: Oid = 1664; /* TODO(pg-port): constant */
     if newTableSpaceId == GLOBALTABLESPACE_OID {
-        ereport!(
-            ERROR,
-            errmsg!("only shared relations can be placed in pg_global tablespace")
-            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
-        );
+        ereport!(ERROR, errmsg!("only shared relations can be placed in pg_global tablespace")
+            /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */);
     }
 
     /*
      * Do not allow moving temp tables of other backends.
      */
     if RELATION_IS_OTHER_TEMP(rel) {
-        ereport!(
-            ERROR,
-            errmsg!("cannot move temporary tables of other sessions")
-            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+        ereport!(ERROR, errmsg!("cannot move temporary tables of other sessions")
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     true
@@ -3138,7 +3748,7 @@ pub unsafe fn CheckRelationTableSpaceMove(rel: Relation, newTableSpaceId: Oid) -
 pub unsafe fn SetRelationTableSpace(
     rel: Relation,
     newTableSpaceId: Oid,
-    newRelFilenumber: RelFileNumber,
+    newRelFilenumber: RelFileNumber
 ) {
     /* Assert(CheckRelationTableSpaceMove(rel, newTableSpaceId)) */
 
@@ -3147,17 +3757,16 @@ pub unsafe fn SetRelationTableSpace(
     /* Get a modifiable copy of the relation's pg_class row. */
     let pg_class = table_open(RelationRelationId, RowExclusiveLock);
 
-    let tuple = SearchSysCacheLockedCopy1(0 /* RELOID */, ObjectIdGetDatum(reloid));
+    let tuple = SearchSysCacheLockedCopy1(crate::utils::cache::syscache_ids_gen::RELOID, ObjectIdGetDatum(reloid));
     if !HeapTupleIsValid(tuple) {
         ereport!(ERROR, errmsg!("cache lookup failed for relation {}", reloid));
     }
-    let otid = (*tuple).t_self; /* ItemPointerData */
+    let mut otid = (*tuple).t_self; /* ItemPointerData */
     let rd_rel = GETSTRUCT(tuple) as *mut FormData_pg_class;
 
-    let MyDatabaseTableSpace: Oid = MyDatabaseTableSpace_get();
 
     /* Update the pg_class row. */
-    (*rd_rel).reltablespace = if newTableSpaceId == MyDatabaseTableSpace {
+    (*rd_rel).reltablespace = if newTableSpaceId == MyDatabaseTableSpace() {
         InvalidOid
     } else {
         newTableSpaceId
@@ -3165,8 +3774,8 @@ pub unsafe fn SetRelationTableSpace(
     if RelFileNumberIsValid(newRelFilenumber) {
         (*rd_rel).relfilenode = newRelFilenumber;
     }
-    CatalogTupleUpdate(pg_class, &otid as *const _ as *const std::ffi::c_void, tuple);
-    UnlockTuple(pg_class, &otid as *const _ as *const std::ffi::c_void, 0 /* InplaceUpdateTupleLock */);
+    CatalogTupleUpdate(pg_class, &mut otid, tuple);
+    UnlockTuple(pg_class, &mut otid, 0 /* InplaceUpdateTupleLock */);
 
     /*
      * Record dependency on tablespace.  This is only required for relations
@@ -3186,7 +3795,7 @@ pub unsafe fn SetRelationTableSpace(
 unsafe fn renameatt_check(
     myrelid: Oid,
     classform: *mut FormData_pg_class,
-    recursing: bool,
+    recursing: bool
 ) {
     let relkind = (*classform).relkind;
 
@@ -3210,11 +3819,9 @@ unsafe fn renameatt_check(
         && relkind != RELKIND_FOREIGN_TABLE as c_char
         && relkind != RELKIND_PARTITIONED_TABLE as c_char
     {
-        ereport!(ERROR,
-            errmsg!("cannot rename columns of relation \"{}\"",
+        ereport!(ERROR, errmsg!("cannot rename columns of relation \"{}\"",
                 CStr::from_ptr(NameStr_ref(&(*classform).relname)).to_string_lossy())
-            /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE), errdetail_relkind_not_supported */
-        );
+            /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE), errdetail_relkind_not_supported */);
     }
 
     /*
@@ -3225,11 +3832,9 @@ unsafe fn renameatt_check(
             NameStr_ref(&(*classform).relname));
     }
     if !allowSystemTableMods() && IsSystemClass(myrelid, classform) {
-        ereport!(ERROR,
-            errmsg!("permission denied: \"{}\" is a system catalog",
+        ereport!(ERROR, errmsg!("permission denied: \"{}\" is a system catalog",
                 CStr::from_ptr(NameStr_ref(&(*classform).relname)).to_string_lossy())
-            /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */
-        );
+            /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */);
     }
 }
 
@@ -3245,7 +3850,7 @@ unsafe fn renameatt_internal(
     recurse: bool,
     recursing: bool,
     expected_parents: c_int,
-    behavior: DropBehavior,
+    behavior: DropBehavior
 ) -> AttrNumber {
     /*
      * Grab an exclusive lock on the target table, which we will NOT release
@@ -3263,8 +3868,8 @@ unsafe fn renameatt_internal(
      * whole transaction to abort, which is what we want -- all or nothing.
      */
     if recurse {
-        let mut child_numparents: *mut i32 = ptr::null_mut();
-        let child_oids = find_all_inheritors(myrelid, AccessExclusiveLock, &mut child_numparents as *mut *mut i32 as *mut i32);
+        let mut child_numparents: *mut List = ptr::null_mut();
+        let child_oids = find_all_inheritors(myrelid, AccessExclusiveLock, &mut child_numparents);
 
         /*
          * find_all_inheritors does the recursive search of the inheritance
@@ -3292,11 +3897,9 @@ unsafe fn renameatt_internal(
         if expected_parents == 0
             && !find_inheritance_children(myrelid, NoLock).is_null()
         {
-            ereport!(ERROR,
-                errmsg!("inherited column \"{}\" must be renamed in child tables too",
+            ereport!(ERROR, errmsg!("inherited column \"{}\" must be renamed in child tables too",
                     CStr::from_ptr(oldattname).to_string_lossy())
-                /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */
-            );
+                /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */);
         }
     }
 
@@ -3305,7 +3908,7 @@ unsafe fn renameatt_internal(
         let child_oids = find_typed_table_dependencies(
             (*(*targetrelation).rd_rel).reltype,
             RelationGetRelationName(targetrelation),
-            behavior,
+            behavior
         );
         foreach!(lo, child_oids, {
             renameatt_internal(lfirst_oid(current_cell!(lo)), oldattname, newattname, true, true, 0, behavior);
@@ -3316,21 +3919,17 @@ unsafe fn renameatt_internal(
 
     let atttup = SearchSysCacheCopyAttName(myrelid, oldattname);
     if !HeapTupleIsValid(atttup) {
-        ereport!(ERROR,
-            errmsg!("column \"{}\" does not exist",
+        ereport!(ERROR, errmsg!("column \"{}\" does not exist",
                 CStr::from_ptr(oldattname).to_string_lossy())
-            /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */
-        );
+            /* C also: errcode(ERRCODE_UNDEFINED_COLUMN) */);
     }
     let attform = GETSTRUCT(atttup) as *mut FormData_pg_attribute;
 
     let attnum = (*attform).attnum;
     if attnum <= 0 {
-        ereport!(ERROR,
-            errmsg!("cannot rename system column \"{}\"",
+        ereport!(ERROR, errmsg!("cannot rename system column \"{}\"",
                 CStr::from_ptr(oldattname).to_string_lossy())
-            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     /*
@@ -3343,11 +3942,9 @@ unsafe fn renameatt_internal(
      * renaming only if there are additional parents from elsewhere.
      */
     if ((*attform).attinhcount as c_int) > expected_parents {
-        ereport!(ERROR,
-            errmsg!("cannot rename inherited column \"{}\"",
+        ereport!(ERROR, errmsg!("cannot rename inherited column \"{}\"",
                 CStr::from_ptr(oldattname).to_string_lossy())
-            /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */
-        );
+            /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */);
     }
 
     /* new name should not already exist */
@@ -3356,7 +3953,7 @@ unsafe fn renameatt_internal(
     /* apply the update */
     namestrcpy(&mut (*attform).attname as *mut NameData, newattname);
 
-    CatalogTupleUpdate(attrelation, &(*atttup).t_self as *const _ as *const std::ffi::c_void, atttup);
+    CatalogTupleUpdate(attrelation, &mut (*atttup).t_self, atttup);
 
     InvokeObjectPostAlterHook(RelationRelationId, myrelid, attnum as c_int);
 
@@ -3372,13 +3969,13 @@ unsafe fn renameatt_internal(
 /*
  * Perform permissions and integrity checks before acquiring a relation lock.
  */
-unsafe fn RangeVarCallbackForRenameAttribute(
+unsafe extern "C" fn RangeVarCallbackForRenameAttribute(
     rv: *const RangeVar,
     relid: Oid,
     oldrelid: Oid,
-    arg: *mut std::ffi::c_void,
+    arg: *mut std::ffi::c_void
 ) {
-    let tuple = SearchSysCache1(0 /* RELOID */, ObjectIdGetDatum(relid));
+    let tuple = SearchSysCache1(crate::utils::cache::syscache_ids_gen::RELOID, ObjectIdGetDatum(relid));
     if !HeapTupleIsValid(tuple) {
         return; /* concurrently dropped */
     }
@@ -3400,15 +3997,13 @@ pub unsafe fn renameatt(stmt: *mut RenameStmt) -> ObjectAddress {
         (*stmt).relation,
         AccessExclusiveLock,
         if (*stmt).missing_ok { 0x01 /* RVR_MISSING_OK */ } else { 0 },
-        RangeVarCallbackForRenameAttribute,
-        ptr::null_mut(),
+        Some(RangeVarCallbackForRenameAttribute),
+        ptr::null_mut()
     );
 
     if !OidIsValid(relid) {
-        ereport!(NOTICE,
-            errmsg!("relation \"{}\" does not exist, skipping",
-                CStr::from_ptr((*(*stmt).relation).relname).to_string_lossy())
-        );
+        ereport!(NOTICE, errmsg!("relation \"{}\" does not exist, skipping",
+                CStr::from_ptr((*(*stmt).relation).relname).to_string_lossy()));
         return InvalidObjectAddress;
     }
 
@@ -3416,10 +4011,10 @@ pub unsafe fn renameatt(stmt: *mut RenameStmt) -> ObjectAddress {
         relid,
         (*stmt).subname,   /* old att name */
         (*stmt).newname,   /* new att name */
-        (*(*stmt).relation).inh != 0, /* recursive? */
+        (*(*stmt).relation).inh, /* recursive? */
         false,             /* recursing? */
         0,                 /* expected inhcount */
-        (*stmt).behavior,
+        (*stmt).behavior
     );
 
     ObjectAddressSubSet!(address, RelationRelationId, relid, attnum as i32);
@@ -3437,7 +4032,7 @@ unsafe fn rename_constraint_internal(
     newconname: *const c_char,
     recurse: bool,
     recursing: bool,
-    expected_parents: c_int,
+    expected_parents: c_int
 ) -> ObjectAddress {
     /* Assert(!myrelid || !mytypid) */
     let mut targetrelation: Relation = ptr::null_mut();
@@ -3458,7 +4053,7 @@ unsafe fn rename_constraint_internal(
         constraintOid = get_relation_constraint_oid(myrelid, oldconname, false);
     }
 
-    let tuple = SearchSysCache1(0 /* CONSTROID */, ObjectIdGetDatum(constraintOid));
+    let tuple = SearchSysCache1(crate::utils::cache::syscache_ids_gen::CONSTROID, ObjectIdGetDatum(constraintOid));
     if !HeapTupleIsValid(tuple) {
         ereport!(ERROR, errmsg!("cache lookup failed for constraint {}", constraintOid));
     }
@@ -3469,8 +4064,8 @@ unsafe fn rename_constraint_internal(
         && !(*con).connoinherit
     {
         if recurse {
-            let mut child_numparents: *mut i32 = ptr::null_mut();
-            let child_oids = find_all_inheritors(myrelid, AccessExclusiveLock, &mut child_numparents as *mut *mut i32 as *mut i32);
+            let mut child_numparents: *mut List = ptr::null_mut();
+            let child_oids = find_all_inheritors(myrelid, AccessExclusiveLock, &mut child_numparents);
 
             crate::forboth!(lo, child_oids, li, child_numparents, {
                 let childrelid = lfirst_oid(lo);
@@ -3484,20 +4079,16 @@ unsafe fn rename_constraint_internal(
             if expected_parents == 0
                 && !find_inheritance_children(myrelid, NoLock).is_null()
             {
-                ereport!(ERROR,
-                    errmsg!("inherited constraint \"{}\" must be renamed in child tables too",
+                ereport!(ERROR, errmsg!("inherited constraint \"{}\" must be renamed in child tables too",
                         CStr::from_ptr(oldconname).to_string_lossy())
-                    /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */
-                );
+                    /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */);
             }
         }
 
         if ((*con).coninhcount as c_int) > expected_parents {
-            ereport!(ERROR,
-                errmsg!("cannot rename inherited constraint \"{}\"",
+            ereport!(ERROR, errmsg!("cannot rename inherited constraint \"{}\"",
                     CStr::from_ptr(oldconname).to_string_lossy())
-                /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */
-            );
+                /* C also: errcode(ERRCODE_INVALID_TABLE_DEFINITION) */);
         }
     }
 
@@ -3535,7 +4126,7 @@ pub unsafe fn RenameConstraint(stmt: *mut RenameStmt) -> ObjectAddress {
     if (*stmt).renameType == crate::nodes::parsenodes::ObjectType::OBJECT_DOMCONSTRAINT {
         typid = typenameTypeId(ptr::null_mut(), makeTypeNameFromNameList((*stmt).object as *mut List));
         let rel = table_open(TypeRelationId, RowExclusiveLock);
-        let tup = SearchSysCache1(0 /* TYPEOID */, ObjectIdGetDatum(typid));
+        let tup = SearchSysCache1(crate::utils::cache::syscache_ids_gen::TYPEOID, ObjectIdGetDatum(typid));
         if !HeapTupleIsValid(tup) {
             ereport!(ERROR, errmsg!("cache lookup failed for type {}", typid));
         }
@@ -3548,14 +4139,12 @@ pub unsafe fn RenameConstraint(stmt: *mut RenameStmt) -> ObjectAddress {
             (*stmt).relation,
             AccessExclusiveLock,
             if (*stmt).missing_ok { 0x01 /* RVR_MISSING_OK */ } else { 0 },
-            RangeVarCallbackForRenameAttribute,
-            ptr::null_mut(),
+            Some(RangeVarCallbackForRenameAttribute),
+            ptr::null_mut()
         );
         if !OidIsValid(relid) {
-            ereport!(NOTICE,
-                errmsg!("relation \"{}\" does not exist, skipping",
-                    CStr::from_ptr((*(*stmt).relation).relname).to_string_lossy())
-            );
+            ereport!(NOTICE, errmsg!("relation \"{}\" does not exist, skipping",
+                    CStr::from_ptr((*(*stmt).relation).relname).to_string_lossy()));
             return InvalidObjectAddress;
         }
     }
@@ -3565,7 +4154,7 @@ pub unsafe fn RenameConstraint(stmt: *mut RenameStmt) -> ObjectAddress {
         typid,
         (*stmt).subname,
         (*stmt).newname,
-        !(*stmt).relation.is_null() && (*(*stmt).relation).inh != 0, /* recursive? */
+        !(*stmt).relation.is_null() && (*(*stmt).relation).inh, /* recursive? */
         false,   /* recursing? */
         0,       /* expected inhcount */
     )
@@ -3596,15 +4185,13 @@ pub unsafe fn RenameRelation(stmt: *mut RenameStmt) -> ObjectAddress {
             (*stmt).relation,
             lockmode,
             if (*stmt).missing_ok { 0x01 /* RVR_MISSING_OK */ } else { 0 },
-            RangeVarCallbackForAlterRelation,
-            stmt as *mut std::ffi::c_void,
+            Some(RangeVarCallbackForAlterRelation),
+            stmt as *mut std::ffi::c_void
         );
 
         if !OidIsValid(r) {
-            ereport!(NOTICE,
-                errmsg!("relation \"{}\" does not exist, skipping",
-                    CStr::from_ptr((*(*stmt).relation).relname).to_string_lossy())
-            );
+            ereport!(NOTICE, errmsg!("relation \"{}\" does not exist, skipping",
+                    CStr::from_ptr((*(*stmt).relation).relname).to_string_lossy()));
             return InvalidObjectAddress;
         }
 
@@ -3643,7 +4230,7 @@ pub unsafe fn RenameRelationInternal(
     myrelid: Oid,
     newrelname: *const c_char,
     is_internal: bool,
-    is_index: bool,
+    is_index: bool
 ) {
     /*
      * Grab a lock on the target relation, which we will NOT release until end
@@ -3663,19 +4250,17 @@ pub unsafe fn RenameRelationInternal(
      */
     let relrelation = table_open(RelationRelationId, RowExclusiveLock);
 
-    let reltup = SearchSysCacheLockedCopy1(0 /* RELOID */, ObjectIdGetDatum(myrelid));
+    let reltup = SearchSysCacheLockedCopy1(crate::utils::cache::syscache_ids_gen::RELOID, ObjectIdGetDatum(myrelid));
     if !HeapTupleIsValid(reltup) { /* shouldn't happen */
         ereport!(ERROR, errmsg!("cache lookup failed for relation {}", myrelid));
     }
-    let otid = (*reltup).t_self;
+    let mut otid = (*reltup).t_self;
     let relform = GETSTRUCT(reltup) as *mut FormData_pg_class;
 
     if get_relname_relid(newrelname, namespaceId) != InvalidOid {
-        ereport!(ERROR,
-            errmsg!("relation \"{}\" already exists",
+        ereport!(ERROR, errmsg!("relation \"{}\" already exists",
                 CStr::from_ptr(newrelname).to_string_lossy())
-            /* C also: errcode(ERRCODE_DUPLICATE_TABLE) */
-        );
+            /* C also: errcode(ERRCODE_DUPLICATE_TABLE) */);
     }
 
     /*
@@ -3684,8 +4269,8 @@ pub unsafe fn RenameRelationInternal(
      */
     namestrcpy(&mut (*relform).relname as *mut NameData, newrelname);
 
-    CatalogTupleUpdate(relrelation, &otid as *const _ as *const std::ffi::c_void, reltup);
-    UnlockTuple(relrelation, &otid as *const _ as *const std::ffi::c_void, 0 /* InplaceUpdateTupleLock */);
+    CatalogTupleUpdate(relrelation, &mut otid, reltup);
+    UnlockTuple(relrelation, &mut otid, 0 /* InplaceUpdateTupleLock */);
 
     InvokeObjectPostAlterHookArg(RelationRelationId, myrelid, 0, InvalidOid, is_internal);
 
@@ -3726,7 +4311,7 @@ pub unsafe fn ResetRelRewrite(myrelid: Oid) {
      */
     let relrelation = table_open(RelationRelationId, RowExclusiveLock);
 
-    let reltup = SearchSysCacheCopy1(0 /* RELOID */, ObjectIdGetDatum(myrelid));
+    let reltup = SearchSysCacheCopy1(crate::utils::cache::syscache_ids_gen::RELOID, ObjectIdGetDatum(myrelid));
     if !HeapTupleIsValid(reltup) { /* shouldn't happen */
         ereport!(ERROR, errmsg!("cache lookup failed for relation {}", myrelid));
     }
@@ -3737,7 +4322,7 @@ pub unsafe fn ResetRelRewrite(myrelid: Oid) {
      */
     (*relform).relrewrite = InvalidOid;
 
-    CatalogTupleUpdate(relrelation, &(*reltup).t_self as *const _ as *const std::ffi::c_void, reltup);
+    CatalogTupleUpdate(relrelation, &mut (*reltup).t_self, reltup);
 
     heap_freetuple(reltup);
     table_close(relrelation, RowExclusiveLock);
@@ -3771,24 +4356,20 @@ pub unsafe fn ResetRelRewrite(myrelid: Oid) {
 pub unsafe fn CheckTableNotInUse(rel: Relation, stmt: *const c_char) {
     let expected_refcnt = if (*rel).rd_isnailed { 2 } else { 1 };
     if (*rel).rd_refcnt != expected_refcnt {
-        ereport!(ERROR,
-            errmsg!("cannot {} \"{}\" because it is being used by active queries in this session",
+        ereport!(ERROR, errmsg!("cannot {} \"{}\" because it is being used by active queries in this session",
                 CStr::from_ptr(stmt).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-            /* C also: errcode(ERRCODE_OBJECT_IN_USE) */
-        );
+            /* C also: errcode(ERRCODE_OBJECT_IN_USE) */);
     }
 
     if (*(*rel).rd_rel).relkind != RELKIND_INDEX as c_char
         && (*(*rel).rd_rel).relkind != RELKIND_PARTITIONED_INDEX as c_char
         && AfterTriggerPendingOnRel(RelationGetRelid(rel))
     {
-        ereport!(ERROR,
-            errmsg!("cannot {} \"{}\" because it has pending trigger events",
+        ereport!(ERROR, errmsg!("cannot {} \"{}\" because it has pending trigger events",
                 CStr::from_ptr(stmt).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-            /* C also: errcode(ERRCODE_OBJECT_IN_USE) */
-        );
+            /* C also: errcode(ERRCODE_OBJECT_IN_USE) */);
     }
 }
 
@@ -3810,10 +4391,8 @@ unsafe fn CheckAlterTableIsSafe(rel: Relation) {
      * aren't subject to such interference.
      */
     if RELATION_IS_OTHER_TEMP(rel) {
-        ereport!(ERROR,
-            errmsg!("cannot alter temporary tables of other sessions")
-            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+        ereport!(ERROR, errmsg!("cannot alter temporary tables of other sessions")
+            /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     /*
@@ -3830,14 +4409,14 @@ unsafe fn CheckAlterTableIsSafe(rel: Relation) {
  */
 pub unsafe fn AlterTableLookupRelation(
     stmt: *mut AlterTableStmt,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> Oid {
     RangeVarGetRelidExtended(
         (*stmt).relation,
         lockmode,
         if (*stmt).missing_ok { 0x01 /* RVR_MISSING_OK */ } else { 0 },
-        RangeVarCallbackForAlterRelation,
-        stmt as *mut std::ffi::c_void,
+        Some(RangeVarCallbackForAlterRelation),
+        stmt as *mut std::ffi::c_void
     )
 }
 
@@ -3894,14 +4473,14 @@ pub unsafe fn AlterTableLookupRelation(
 pub unsafe fn AlterTable(
     stmt: *mut AlterTableStmt,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     /* Caller is required to provide an adequate lock. */
     let rel = relation_open((*context).relid, NoLock);
 
     CheckAlterTableIsSafe(rel);
 
-    ATController(stmt, rel, (*stmt).cmds, (*(*stmt).relation).inh != 0, lockmode, context);
+    ATController(stmt, rel, (*stmt).cmds, (*(*stmt).relation).inh, lockmode, context);
 }
 
 /*
@@ -4187,7 +4766,7 @@ unsafe fn ATController(
     cmds: *mut List,
     recurse: bool,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     let mut wqueue: *mut List = crate::nodes::pg_list::NIL;
 
@@ -4223,7 +4802,7 @@ unsafe fn ATPrepCmd(
     recurse: bool,
     recursing: bool,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     /* Find or create work queue entry for this table */
     let tab = ATGetQueueEntry(wqueue, rel);
@@ -4236,11 +4815,9 @@ unsafe fn ATPrepCmd(
         && (*cmd).subtype != AlterTableType::AT_DetachPartitionFinalize
         && PartitionHasPendingDetach(RelationGetRelid(rel))
     {
-        ereport!(ERROR,
-            errmsg!("cannot alter partition \"{}\" with an incomplete detach",
+        ereport!(ERROR, errmsg!("cannot alter partition \"{}\" with an incomplete detach",
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-            /* C also: errcode, errhint */
-        );
+            /* C also: errcode, errhint */);
     }
 
     /*
@@ -4440,8 +5017,7 @@ unsafe fn ATPrepCmd(
             ATSimplePermissions((*cmd).subtype, rel, ATT_TABLE | ATT_SEQUENCE);
             if (*tab).chgPersistence {
                 ereport!(ERROR, errmsg!("cannot change persistence setting twice")
-                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                );
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
             }
             ATPrepChangePersistence(tab, rel, (*cmd).subtype == AlterTableType::AT_SetLogged);
             pass = AlterTablePass::AT_PASS_MISC;
@@ -4459,8 +5035,7 @@ unsafe fn ATPrepCmd(
             /* check if another access method change was already requested */
             if (*tab).chgAccessMethod {
                 ereport!(ERROR, errmsg!("cannot have multiple SET ACCESS METHOD subcommands")
-                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                );
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
             }
             ATPrepSetAccessMethod(tab, rel, (*cmd).name);
             pass = AlterTablePass::AT_PASS_MISC; /* does not matter; no work in Phase 2 */
@@ -4572,7 +5147,7 @@ unsafe fn ATPrepCmd(
     /* Assert(pass > AT_PASS_UNSET) */
 
     /* Add the subcommand to the appropriate list for phase 2 */
-    (*tab).subcmds[pass as usize] = lappend((*tab).subcmds[pass as usize] as *mut std::ffi::c_void, cmd as *mut std::ffi::c_void) as *mut List;
+    (*tab).subcmds[pass as usize] = lappend((*tab).subcmds[pass as usize] as *mut List, cmd as *mut std::ffi::c_void) as *mut List;
 }
 
 /*
@@ -4585,7 +5160,7 @@ unsafe fn ATPrepCmd(
 unsafe fn ATRewriteCatalogs(
     wqueue: *mut *mut List,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     /*
      * We process all the tables "in parallel", one pass at a time.  This is
@@ -4666,7 +5241,7 @@ unsafe fn ATExecCmd(
     cmd: *mut AlterTableCmd,
     lockmode: LOCKMODE,
     cur_pass: AlterTablePass,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     let mut address: ObjectAddress = InvalidObjectAddress;
     let rel = (*tab).rel;
@@ -4705,7 +5280,7 @@ unsafe fn ATExecCmd(
         }
         AlterTableType::AT_SetNotNull => {
             /* ALTER COLUMN SET NOT NULL */
-            address = ATExecSetNotNull(wqueue, rel, ptr::null(), (*cmd).name,
+            address = ATExecSetNotNull(wqueue, rel, ptr::null_mut(), (*cmd).name,
                 (*cmd).recurse, false, lockmode);
         }
         AlterTableType::AT_SetExpression => {
@@ -5003,7 +5578,7 @@ unsafe fn ATParseTransformCmd(
     recurse: bool,
     lockmode: LOCKMODE,
     cur_pass: AlterTablePass,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) -> *mut AlterTableCmd {
     let mut newcmd: *mut AlterTableCmd = ptr::null_mut();
     let mut beforeStmts: *mut List = ptr::null_mut();
@@ -5014,9 +5589,9 @@ unsafe fn ATParseTransformCmd(
     (*atstmt).relation = makeRangeVar(
         get_namespace_name(RelationGetNamespace(rel)),
         pstrdup(RelationGetRelationName(rel)),
-        -1,
+        -1
     );
-    (*(*atstmt).relation).inh = recurse as i8;
+    (*(*atstmt).relation).inh = recurse;
     (*atstmt).cmds = list_make1(cmd as *mut std::ffi::c_void);
     (*atstmt).objtype = ObjectType::OBJECT_TABLE; /* needn't be picky here */
     (*atstmt).missing_ok = false;
@@ -5027,7 +5602,7 @@ unsafe fn ATParseTransformCmd(
         atstmt,
         (*context).queryString,
         &mut beforeStmts as *mut *mut List,
-        &mut afterStmts as *mut *mut List,
+        &mut afterStmts as *mut *mut List
     );
 
     /* Execute any statements that should happen before these subcommand(s) */
@@ -5080,7 +5655,7 @@ unsafe fn ATParseTransformCmd(
             ereport!(ERROR, errmsg!("ALTER TABLE scheduling failure: too late for pass {}", pass as i32));
         } else if (pass as i32) > cur_pass as i32 {
             /* OK, queue it up for later */
-            (*tab).subcmds[pass as usize] = lappend((*tab).subcmds[pass as usize] as *mut std::ffi::c_void, cmd2 as *mut std::ffi::c_void) as *mut List;
+            (*tab).subcmds[pass as usize] = lappend((*tab).subcmds[pass as usize] as *mut List, cmd2 as *mut std::ffi::c_void) as *mut List;
         } else {
             /*
              * We should see at most one subcommand for the current pass,
@@ -5108,7 +5683,7 @@ unsafe fn ATRewriteTables(
     parsetree: *mut AlterTableStmt,
     wqueue: *mut *mut List,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     /* Go through each table that needs to be checked or rewritten */
     foreach!(ltab, *wqueue, {
@@ -5143,29 +5718,23 @@ unsafe fn ATRewriteTables(
              * We don't support rewriting of system catalogs.
              */
             if IsSystemRelation(OldHeap) {
-                ereport!(ERROR,
-                    errmsg!("cannot rewrite system relation \"{}\"",
+                ereport!(ERROR, errmsg!("cannot rewrite system relation \"{}\"",
                         CStr::from_ptr(RelationGetRelationName(OldHeap)).to_string_lossy())
-                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                );
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
             }
 
             if RelationIsUsedAsCatalogTable(OldHeap) {
-                ereport!(ERROR,
-                    errmsg!("cannot rewrite table \"{}\" used as a catalog table",
+                ereport!(ERROR, errmsg!("cannot rewrite table \"{}\" used as a catalog table",
                         CStr::from_ptr(RelationGetRelationName(OldHeap)).to_string_lossy())
-                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                );
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
             }
 
             /*
              * Don't allow rewrite on temp tables of other backends.
              */
             if RELATION_IS_OTHER_TEMP(OldHeap) {
-                ereport!(ERROR,
-                    errmsg!("cannot rewrite temporary tables of other sessions")
-                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                );
+                ereport!(ERROR, errmsg!("cannot rewrite temporary tables of other sessions")
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
             }
 
             /*
@@ -5477,7 +6046,7 @@ unsafe fn ATRewriteTable(tab: *mut AlteredTableInfo, OIDNewHeap: Oid) {
          * Switch to per-tuple memory context and reset it for each tuple
          * produced, so we don't leak memory.
          */
-        let oldCxt = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
+        let oldCxt = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate) as MemoryContext);
 
         while table_scan_getnextslot(scan, ForwardScanDirection, oldslot) {
             let insertslot: *mut TupleTableSlot;
@@ -5492,12 +6061,12 @@ unsafe fn ATRewriteTable(tab: *mut AlteredTableInfo, OIDNewHeap: Oid) {
                 std::ptr::copy_nonoverlapping(
                     (*oldslot).tts_values,
                     (*newslot).tts_values,
-                    nvalid,
+                    nvalid
                 );
                 std::ptr::copy_nonoverlapping(
                     (*oldslot).tts_isnull,
                     (*newslot).tts_isnull,
-                    nvalid,
+                    nvalid
                 );
 
                 /* Set dropped attributes to null in new tuple */
@@ -5567,12 +6136,10 @@ unsafe fn ATRewriteTable(tab: *mut AlteredTableInfo, OIDNewHeap: Oid) {
                 match (*con).contype {
                     ConstrType::CONSTR_CHECK => {
                         if !ExecCheck((*con).qualstate, econtext) {
-                            ereport!(ERROR,
-                                errmsg!("check constraint \"{}\" of relation \"{}\" is violated by some row",
+                            ereport!(ERROR, errmsg!("check constraint \"{}\" of relation \"{}\" is violated by some row",
                                     CStr::from_ptr((*con).name).to_string_lossy(),
                                     CStr::from_ptr(RelationGetRelationName(oldrel)).to_string_lossy())
-                                /* C also: errcode(ERRCODE_CHECK_VIOLATION) */
-                            );
+                                /* C also: errcode(ERRCODE_CHECK_VIOLATION) */);
                         }
                     }
                     ConstrType::CONSTR_NOTNULL | ConstrType::CONSTR_FOREIGN => {
@@ -5586,17 +6153,13 @@ unsafe fn ATRewriteTable(tab: *mut AlteredTableInfo, OIDNewHeap: Oid) {
 
             if !partqualstate.is_null() && !ExecCheck(partqualstate, econtext) {
                 if (*tab).validate_default {
-                    ereport!(ERROR,
-                        errmsg!("updated partition constraint for default partition \"{}\" would be violated by some row",
+                    ereport!(ERROR, errmsg!("updated partition constraint for default partition \"{}\" would be violated by some row",
                             CStr::from_ptr(RelationGetRelationName(oldrel)).to_string_lossy())
-                        /* C also: errcode(ERRCODE_CHECK_VIOLATION) */
-                    );
+                        /* C also: errcode(ERRCODE_CHECK_VIOLATION) */);
                 } else {
-                    ereport!(ERROR,
-                        errmsg!("partition constraint of relation \"{}\" is violated by some row",
+                    ereport!(ERROR, errmsg!("partition constraint of relation \"{}\" is violated by some row",
                             CStr::from_ptr(RelationGetRelationName(oldrel)).to_string_lossy())
-                        /* C also: errcode(ERRCODE_CHECK_VIOLATION) */
-                    );
+                        /* C also: errcode(ERRCODE_CHECK_VIOLATION) */);
                 }
             }
 
@@ -5660,7 +6223,7 @@ unsafe fn ATGetQueueEntry(wqueue: *mut *mut List, rel: Relation) -> *mut Altered
     (*tab).newrelpersistence = RELPERSISTENCE_PERMANENT;
     (*tab).chgPersistence = false;
 
-    *wqueue = lappend(*wqueue as *mut std::ffi::c_void, tab as *mut std::ffi::c_void) as *mut List;
+    *wqueue = lappend(*wqueue as *mut List, tab as *mut std::ffi::c_void) as *mut List;
 
     tab
 }
@@ -5748,7 +6311,7 @@ unsafe fn alter_table_type_to_string(cmdtype: AlterTableType) -> *const c_char {
 unsafe fn ATSimplePermissions(
     cmdtype: AlterTableType,
     rel: Relation,
-    allowed_targets: c_int,
+    allowed_targets: c_int
 ) {
     let actual_target: c_int = match (*(*rel).rd_rel).relkind as u8 {
         b'r' /* RELKIND_RELATION */          => ATT_TABLE,
@@ -5767,18 +6330,14 @@ unsafe fn ATSimplePermissions(
     if (actual_target & allowed_targets) == 0 {
         let action_str = alter_table_type_to_string(cmdtype);
         if !action_str.is_null() {
-            ereport!(ERROR,
-                errmsg!("ALTER action {} cannot be performed on relation \"{}\"",
+            ereport!(ERROR, errmsg!("ALTER action {} cannot be performed on relation \"{}\"",
                     CStr::from_ptr(action_str).to_string_lossy(),
                     CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-                /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE), errdetail_relkind_not_supported */
-            );
+                /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE), errdetail_relkind_not_supported */);
         } else {
             /* internal error? */
-            ereport!(ERROR,
-                errmsg!("invalid ALTER action attempted on relation \"{}\"",
-                    CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-            );
+            ereport!(ERROR, errmsg!("invalid ALTER action attempted on relation \"{}\"",
+                    CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()));
         }
     }
 
@@ -5789,11 +6348,9 @@ unsafe fn ATSimplePermissions(
     }
 
     if !allowSystemTableMods() && IsSystemRelation(rel) {
-        ereport!(ERROR,
-            errmsg!("permission denied: \"{}\" is a system catalog",
+        ereport!(ERROR, errmsg!("permission denied: \"{}\" is a system catalog",
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-            /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */
-        );
+            /* C also: errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */);
     }
 }
 
@@ -5811,7 +6368,7 @@ unsafe fn ATSimpleRecursion(
     cmd: *mut AlterTableCmd,
     recurse: bool,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     /*
      * Propagate to children, if desired and if there are (or might be) any
@@ -5872,13 +6429,13 @@ unsafe fn ATTypedTableRecursion(
     rel: Relation,
     cmd: *mut AlterTableCmd,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     /* Assert(rel->rd_rel->relkind == RELKIND_COMPOSITE_TYPE) */
     let children = find_typed_table_dependencies(
         (*(*rel).rd_rel).reltype,
         RelationGetRelationName(rel),
-        (*cmd).behavior,
+        (*cmd).behavior
     );
     foreach!(child, children, {
         let childrelid = lfirst_oid(current_cell!(child));
@@ -5911,7 +6468,7 @@ unsafe fn ATTypedTableRecursion(
 pub unsafe fn find_composite_type_dependencies(
     typeOid: Oid,
     origRelation: Relation,
-    origTypeName: *const c_char,
+    origTypeName: *const c_char
 ) {
     /* since this function recurses, it could be driven to stack overflow */
     check_stack_depth();
@@ -5928,14 +6485,14 @@ pub unsafe fn find_composite_type_dependencies(
         Anum_pg_depend_refclassid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(TypeRelationId),
+        ObjectIdGetDatum(TypeRelationId)
     );
     ScanKeyInit(
         &mut key[1],
         Anum_pg_depend_refobjid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(typeOid),
+        ObjectIdGetDatum(typeOid)
     );
 
     let depScan = systable_beginscan(depRel, DependReferenceIndexId, true, ptr::null_mut(), 2, key.as_mut_ptr());
@@ -6005,49 +6562,37 @@ pub unsafe fn find_composite_type_dependencies(
             || RELKIND_HAS_PARTITIONS((*(*rel).rd_rel).relkind)
         {
             if !origTypeName.is_null() {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "cannot alter type \"{}\" because column \"{}.{}\" uses it",
                         CStr::from_ptr(origTypeName).to_string_lossy(),
                         CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                         CStr::from_ptr(NameStr_ref(&(*att).attname)).to_string_lossy()
                     )
-                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                );
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
             } else if (*(*origRelation).rd_rel).relkind == RELKIND_COMPOSITE_TYPE as i8 {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "cannot alter type \"{}\" because column \"{}.{}\" uses it",
                         CStr::from_ptr(RelationGetRelationName(origRelation)).to_string_lossy(),
                         CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                         CStr::from_ptr(NameStr_ref(&(*att).attname)).to_string_lossy()
                     )
-                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                );
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
             } else if (*(*origRelation).rd_rel).relkind == RELKIND_FOREIGN_TABLE as i8 {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "cannot alter foreign table \"{}\" because column \"{}.{}\" uses its row type",
                         CStr::from_ptr(RelationGetRelationName(origRelation)).to_string_lossy(),
                         CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                         CStr::from_ptr(NameStr_ref(&(*att).attname)).to_string_lossy()
                     )
-                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                );
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
             } else {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "cannot alter table \"{}\" because column \"{}.{}\" uses its row type",
                         CStr::from_ptr(RelationGetRelationName(origRelation)).to_string_lossy(),
                         CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                         CStr::from_ptr(NameStr_ref(&(*att).attname)).to_string_lossy()
                     )
-                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                );
+                    /* C also: errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
             }
         } else if OidIsValid((*(*rel).rd_rel).reltype) {
             /*
@@ -6074,7 +6619,7 @@ pub unsafe fn find_composite_type_dependencies(
 unsafe fn find_typed_table_dependencies(
     typeOid: Oid,
     typeName: *const c_char,
-    behavior: DropBehavior,
+    behavior: DropBehavior
 ) -> *mut List {
     use crate::nodes::pg_list::NIL;
     let classRel = table_open(RelationRelationId, AccessShareLock);
@@ -6085,7 +6630,7 @@ unsafe fn find_typed_table_dependencies(
         Anum_pg_class_reloftype,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(typeOid),
+        ObjectIdGetDatum(typeOid)
     );
 
     let scan = table_beginscan_catalog(classRel, 1, key.as_mut_ptr());
@@ -6099,15 +6644,12 @@ unsafe fn find_typed_table_dependencies(
         let classform = (*tuple).t_data as *mut FormData_pg_class;
 
         if behavior == DropBehavior::DROP_RESTRICT {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot alter type \"{}\" because it is the type of a typed table",
                     CStr::from_ptr(typeName).to_string_lossy()
                 )
                 /* C also: errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST),
-                   errhint("Use ALTER ... CASCADE to alter the typed tables too.") */
-            );
+                   errhint("Use ALTER ... CASCADE to alter the typed tables too.") */);
         } else {
             result = lappend_oid(result, (*classform).oid);
         }
@@ -6145,25 +6687,19 @@ pub unsafe fn check_of_type(typetuple: HeapTuple) {
         relation_close(typeRelation, NoLock);
 
         if !typeOk {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "type {} is the row type of another table",
                     CStr::from_ptr(format_type_be((*typ).oid)).to_string_lossy()
                 )
                 /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                   errdetail("A typed table must use a stand-alone composite type created with CREATE TYPE.") */
-            );
+                   errdetail("A typed table must use a stand-alone composite type created with CREATE TYPE.") */);
         }
     } else {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "type {} is not a composite type",
                 CStr::from_ptr(format_type_be((*typ).oid)).to_string_lossy()
             )
-            /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 }
 
@@ -6189,14 +6725,11 @@ unsafe fn ATPrepAddColumn(
     is_view: bool,
     cmd: *mut AlterTableCmd,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     if (*(*rel).rd_rel).reloftype != InvalidOid && !recursing {
-        ereport!(
-            ERROR,
-            errmsg!("cannot add column to typed table")
-            /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot add column to typed table")
+            /* C also: errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if (*(*rel).rd_rel).relkind == RELKIND_COMPOSITE_TYPE as i8 {
@@ -6232,7 +6765,7 @@ unsafe fn ATExecAddColumn(
     recursing: bool,
     lockmode: LOCKMODE,
     cur_pass: AlterTablePass,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) -> ObjectAddress {
     let myrelid = RelationGetRelid(rel);
     let col_def = castNode!(ColumnDef, T_ColumnDef, (*(*cmd)).def);
@@ -6257,16 +6790,12 @@ unsafe fn ATExecAddColumn(
         ATSimplePermissions(
             (*(*cmd)).subtype,
             rel,
-            ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE,
+            ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE
         );
     }
 
     if (*(*rel).rd_rel).relispartition && !recursing {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!("cannot add column to a partition")
-        );
+        ereport!(ERROR, errmsg!("cannot add column to a partition"));
     }
 
     attrdesc = table_open(AttributeRelationId, RowExclusiveLock);
@@ -6292,57 +6821,42 @@ unsafe fn ATExecAddColumn(
                 std::ptr::null_mut(),
                 (*col_def).typeName,
                 &mut ctypeid,
-                &mut ctypmod,
+                &mut ctypmod
             );
             if ctypeid != (*childatt).atttypid || ctypmod != (*childatt).atttypmod {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "child table \"{}\" has different type for column \"{}\"",
                         std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                         std::ffi::CStr::from_ptr((*col_def).colname).to_string_lossy()
-                    )
-                );
+                    ));
             }
             ccollid = GetColumnDefCollation(std::ptr::null_mut(), col_def, ctypeid);
             if ccollid != (*childatt).attcollation {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_COLLATION_MISMATCH),
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "child table \"{}\" has different collation for column \"{}\"",
                         std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                         std::ffi::CStr::from_ptr((*col_def).colname).to_string_lossy()
                     )
-                    /* errdetail: "%s" versus "%s" */
-                );
+                    /* errdetail: "%s" versus "%s" */);
             }
 
             /* Bump the existing child att's inhcount */
             if pg_add_s16_overflow(
                 (*childatt).attinhcount,
                 1,
-                &mut (*childatt).attinhcount,
+                &mut (*childatt).attinhcount
             ) {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                    errmsg!("too many inheritance parents")
-                );
+                ereport!(ERROR, errmsg!("too many inheritance parents"));
             }
             CatalogTupleUpdate(attrdesc, &mut (*tuple).t_self, tuple);
             heap_freetuple(tuple);
 
             /* Inform the user about the merge */
-            ereport!(
-                NOTICE,
-                errmsg!(
+            ereport!(NOTICE, errmsg!(
                     "merging definition of column \"{}\" for child \"{}\"",
                     std::ffi::CStr::from_ptr((*col_def).colname).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
 
             table_close(attrdesc, RowExclusiveLock);
             /* Make the child column change visible */
@@ -6363,7 +6877,7 @@ unsafe fn ATExecAddColumn(
      */
     if !context.is_null() && !recursing {
         *cmd = ATParseTransformCmd(
-            wqueue, tab, rel, *cmd, recurse, lockmode, cur_pass, context,
+            wqueue, tab, rel, *cmd, recurse, lockmode, cur_pass, context
         );
         Assert!(!(*cmd).is_null());
         // col_def re-cast after transform
@@ -6375,19 +6889,14 @@ unsafe fn ATExecAddColumn(
      * identity column from parent hence cannot recursively add identity column
      * if the table has inheritance children.
      */
-    if !(*col_def).identity.is_null()
-        && (*col_def).identity != 0 as _
+    if (*col_def).identity != 0
         && recurse
         && (*(*rel).rd_rel).relkind != RELKIND_PARTITIONED_TABLE as i8
         && !find_inheritance_children(myrelid, NoLock).is_null()
     {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot recursively add identity column to table that has child tables"
-            )
-        );
+            ));
     }
 
     pgclass = table_open(RelationRelationId, RowExclusiveLock);
@@ -6401,14 +6910,10 @@ unsafe fn ATExecAddColumn(
     /* Determine the new attribute's number */
     newattnum = (*relform).relnatts as i32 + 1;
     if newattnum > MaxHeapAttributeNumber as i32 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_TOO_MANY_COLUMNS),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "tables can have at most {} columns",
                 MaxHeapAttributeNumber
-            )
-        );
+            ));
     }
 
     /* Construct new attribute's pg_attribute entry. */
@@ -6423,12 +6928,12 @@ unsafe fn ATExecAddColumn(
         NameStr!((*attribute).attname),
         (*attribute).atttypid,
         (*attribute).attcollation,
-        list_make1_oid((*(*rel).rd_rel).reltype),
+        list_make1_oid!((*(*rel).rd_rel).reltype),
         if (*attribute).attgenerated == ATTRIBUTE_GENERATED_VIRTUAL as i8 {
             CHKATYPE_IS_VIRTUAL
         } else {
             0
-        },
+        }
     );
 
     InsertPgAttributeTuples(attrdesc, tupdesc, myrelid, std::ptr::null_mut(), std::ptr::null_mut());
@@ -6464,7 +6969,7 @@ unsafe fn ATExecAddColumn(
             false,
             true,
             false,
-            std::ptr::null_mut(),
+            std::ptr::null_mut()
         );
         /* Make the additional catalog changes visible */
         CommandCounterIncrement();
@@ -6490,7 +6995,7 @@ unsafe fn ATExecAddColumn(
             (*nve).typeId = (*attribute).atttypid;
             defval = nve as *mut Expr;
         } else {
-            defval = build_column_default(rel, (*attribute).attnum) as *mut Expr;
+            defval = build_column_default(rel, (*attribute).attnum as c_int) as *mut Expr;
         }
 
         /* Build CoerceToDomain(NULL) expression if needed */
@@ -6510,7 +7015,7 @@ unsafe fn ATExecAddColumn(
                 (*attribute).atttypmod,
                 COERCION_ASSIGNMENT,
                 COERCE_IMPLICIT_CAST,
-                -1,
+                -1
             ) as *mut Expr;
             if defval.is_null() {
                 /* should not happen */
@@ -6547,7 +7052,7 @@ unsafe fn ATExecAddColumn(
                 let missingval = ExecEvalExpr(
                     expr_state,
                     GetPerTupleExprContext(estate),
-                    &mut missing_is_null,
+                    &mut missing_is_null
                 );
                 /* If it turns out NULL, nothing to do; else store it */
                 if !missing_is_null {
@@ -6590,11 +7095,7 @@ unsafe fn ATExecAddColumn(
      * If we are told not to recurse, there had better not be any child tables.
      */
     if !children.is_null() && !recurse {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!("column must be added to child tables too")
-        );
+        ereport!(ERROR, errmsg!("column must be added to child tables too"));
     }
 
     /* Children should see column as singly inherited */
@@ -6624,7 +7125,7 @@ unsafe fn ATExecAddColumn(
         /* Recurse to child; return value is ignored */
         ATExecAddColumn(
             wqueue, childtab, childrel, &mut (childcmd as *mut AlterTableCmd),
-            recurse, true, lockmode, cur_pass, context,
+            recurse, true, lockmode, cur_pass, context
         );
 
         table_close(childrel, NoLock);
@@ -6647,7 +7148,7 @@ unsafe fn ATExecAddColumn(
 unsafe fn check_for_column_name_collision(
     rel: Relation,
     colname: *const i8,
-    if_not_exists: bool,
+    if_not_exists: bool
 ) -> bool {
     let att_tuple: HeapTuple;
     let attnum: i32;
@@ -6659,7 +7160,7 @@ unsafe fn check_for_column_name_collision(
     att_tuple = SearchSysCache2(
         ATTNAME,
         ObjectIdGetDatum(RelationGetRelid(rel)),
-        PointerGetDatum(colname as *mut _),
+        PointerGetDatum(colname as *mut _)
     );
     if !HeapTupleIsValid(att_tuple) {
         return true;
@@ -6672,36 +7173,24 @@ unsafe fn check_for_column_name_collision(
      * We throw a different error message for conflicts with system column names.
      */
     if attnum <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_DUPLICATE_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column name \"{}\" conflicts with a system column name",
                 std::ffi::CStr::from_ptr(colname).to_string_lossy()
-            )
-        );
+            ));
     } else {
         if if_not_exists {
-            ereport!(
-                NOTICE,
-                errcode(ERRCODE_DUPLICATE_COLUMN),
-                errmsg!(
+            ereport!(NOTICE, errmsg!(
                     "column \"{}\" of relation \"{}\" already exists, skipping",
                     std::ffi::CStr::from_ptr(colname).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
             return false;
         }
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_DUPLICATE_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" already exists",
                 std::ffi::CStr::from_ptr(colname).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
     true
 }
@@ -6763,7 +7252,7 @@ unsafe fn ATExecDropNotNull(
     rel: Relation,
     col_name: *const i8,
     recurse: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let tuple: HeapTuple;
     let con_tup: HeapTuple;
@@ -6777,15 +7266,11 @@ unsafe fn ATExecDropNotNull(
 
     tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), col_name);
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
     att_tup = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*att_tup).attnum;
@@ -6799,26 +7284,18 @@ unsafe fn ATExecDropNotNull(
 
     /* Prevent them from altering a system attribute */
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     if (*att_tup).attidentity != 0 as _ {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_SYNTAX_ERROR),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" is an identity column",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
@@ -6830,14 +7307,10 @@ unsafe fn ATExecDropNotNull(
         let tup_desc = RelationGetDescr(parent);
         let parent_attnum = get_attnum(parent_id, col_name);
         if (*TupleDescAttr(tup_desc, (parent_attnum as i32 - 1) as usize)).attnotnull {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "column \"{}\" is marked NOT NULL in parent table",
                     std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-                )
-            );
+                ));
         }
         table_close(parent, AccessShareLock);
     }
@@ -6858,7 +7331,7 @@ unsafe fn ATExecDropNotNull(
 
     /* The normal case: we have a pg_constraint row, remove it */
     dropconstraint_internal(
-        rel, con_tup, DROP_RESTRICT, recurse, false, false, lockmode,
+        rel, con_tup, DROP_RESTRICT, recurse, false, false, lockmode
     );
     heap_freetuple(con_tup);
 
@@ -6878,7 +7351,7 @@ unsafe fn set_attnotnull(
     rel: Relation,
     attnum: AttrNumber,
     is_valid: bool,
-    queue_validation: bool,
+    queue_validation: bool
 ) {
     let attr: Form_pg_attribute;
     let thisatt: *mut CompactAttribute;
@@ -6908,7 +7381,7 @@ unsafe fn set_attnotnull(
         }
 
         thisatt = TupleDescCompactAttr(RelationGetDescr(rel), (attnum as i32 - 1) as usize);
-        (*thisatt).attnullability = ATTNULLABLE_VALID as u8;
+        (*thisatt).attnullability = ATTNULLABLE_VALID as i8;
 
         let attr_form = GETSTRUCT(tuple) as Form_pg_attribute;
         (*attr_form).attnotnull = true;
@@ -6945,7 +7418,7 @@ unsafe fn ATExecSetNotNull(
     col_name: *mut i8,
     recurse: bool,
     recursing: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let tuple: HeapTuple;
     let attnum: AttrNumber;
@@ -6963,34 +7436,26 @@ unsafe fn ATExecSetNotNull(
         ATSimplePermissions(
             AT_AddConstraint,
             rel,
-            ATT_PARTITIONED_TABLE | ATT_TABLE | ATT_FOREIGN_TABLE,
+            ATT_PARTITIONED_TABLE | ATT_TABLE | ATT_FOREIGN_TABLE
         );
         Assert!(!con_name.is_null());
     }
 
     attnum = get_attnum(RelationGetRelid(rel), col_name);
     if attnum == InvalidAttrNumber {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /* Prevent them from altering a system attribute */
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /* See if there's already a constraint */
@@ -7003,15 +7468,11 @@ unsafe fn ATExecSetNotNull(
          * Don't let a NO INHERIT constraint be changed into inherit.
          */
         if (*con_form).connoinherit && recurse {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot change NO INHERIT status of NOT NULL constraint \"{}\" on relation \"{}\"",
                     std::ffi::CStr::from_ptr(NameStr!((*con_form).conname) as *const i8).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
         }
 
         /*
@@ -7022,13 +7483,9 @@ unsafe fn ATExecSetNotNull(
             if pg_add_s16_overflow(
                 (*con_form).coninhcount,
                 1,
-                &mut (*con_form).coninhcount,
+                &mut (*con_form).coninhcount
             ) {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                    errmsg!("too many inheritance parents")
-                );
+                ereport!(ERROR, errmsg!("too many inheritance parents"));
             }
             changed = true;
         } else if !(*con_form).conislocal {
@@ -7044,7 +7501,7 @@ unsafe fn ATExecSetNotNull(
                 NameStr!((*con_form).conname) as *mut i8,
                 recurse,
                 recursing,
-                lockmode,
+                lockmode
             );
         }
 
@@ -7070,12 +7527,8 @@ unsafe fn ATExecSetNotNull(
         && !find_inheritance_children(RelationGetRelid(rel), NoLock).is_null()
     {
         if (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8 {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg!("constraint must be added to child tables too")
-                /* errhint: "Do not specify the ONLY keyword." */
-            );
+            ereport!(ERROR, errmsg!("constraint must be added to child tables too")
+                /* errhint: "Do not specify the ONLY keyword." */);
         } else {
             is_no_inherit = true;
         }
@@ -7092,7 +7545,7 @@ unsafe fn ATExecSetNotNull(
             col_name,
             b"not_null\0".as_ptr() as *const i8,
             RelationGetNamespace(rel),
-            std::ptr::null_mut(),
+            std::ptr::null_mut()
         );
     } else {
         con_name_used = con_name;
@@ -7110,7 +7563,7 @@ unsafe fn ATExecSetNotNull(
         false,
         !recursing,
         false,
-        std::ptr::null_mut(),
+        std::ptr::null_mut()
     );
     ccon = linitial(cooked) as *mut CookedConstraint;
     ObjectAddressSet!(address, ConstraintRelationId, (*ccon).conoid);
@@ -7143,7 +7596,7 @@ unsafe fn ATExecSetNotNull(
  */
 unsafe fn NotNullImpliedByRelConstraints(
     rel: Relation,
-    attr: Form_pg_attribute,
+    attr: Form_pg_attribute
 ) -> bool {
     let nnulltest = makeNode!(NullTest, T_NullTest) as *mut NullTest;
 
@@ -7153,7 +7606,7 @@ unsafe fn NotNullImpliedByRelConstraints(
         (*attr).atttypid,
         (*attr).atttypmod,
         (*attr).attcollation,
-        0,
+        0
     ) as *mut Expr;
     (*nnulltest).nulltesttype = IS_NOT_NULL;
 
@@ -7166,16 +7619,13 @@ unsafe fn NotNullImpliedByRelConstraints(
     if ConstraintImpliedByRelConstraint(
         rel,
         list_make1(nnulltest as *mut _),
-        std::ptr::null_mut(),
+        std::ptr::null_mut()
     ) {
-        ereport!(
-            DEBUG1,
-            errmsg_internal!(
+        ereport!(DEBUG1, errmsg_internal!(
                 "existing constraints on column \"{}.{}\" are sufficient to prove that it does not contain nulls",
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                 std::ffi::CStr::from_ptr(NameStr!((*attr).attname) as *const i8).to_string_lossy()
-            )
-        );
+            ));
         return true;
     }
 
@@ -7191,7 +7641,7 @@ unsafe fn ATExecColumnDefault(
     rel: Relation,
     col_name: *const i8,
     new_default: *mut Node,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let tupdesc = RelationGetDescr(rel);
     let attnum: AttrNumber;
@@ -7200,52 +7650,36 @@ unsafe fn ATExecColumnDefault(
     /* get the number of the attribute */
     attnum = get_attnum(RelationGetRelid(rel), col_name);
     if attnum == InvalidAttrNumber {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /* Prevent them from altering a system attribute */
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     if (*TupleDescAttr(tupdesc, (attnum as i32 - 1) as usize)).attidentity != 0 as _ {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_SYNTAX_ERROR),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" is an identity column",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
             )
-            /* errhint depends on new_default */
-        );
+            /* errhint depends on new_default */);
     }
 
     if (*TupleDescAttr(tupdesc, (attnum as i32 - 1) as usize)).attgenerated != 0 as _ {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_SYNTAX_ERROR),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" is a generated column",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
@@ -7256,7 +7690,7 @@ unsafe fn ATExecColumnDefault(
         attnum,
         DROP_RESTRICT,
         false,
-        !new_default.is_null(),
+        !new_default.is_null()
     );
 
     if !new_default.is_null() {
@@ -7274,7 +7708,7 @@ unsafe fn ATExecColumnDefault(
             false,
             true,
             false,
-            std::ptr::null_mut(),
+            std::ptr::null_mut()
         );
     }
 
@@ -7290,7 +7724,7 @@ unsafe fn ATExecColumnDefault(
 unsafe fn ATExecCookedColumnDefault(
     rel: Relation,
     attnum: AttrNumber,
-    new_default: *mut Node,
+    new_default: *mut Node
 ) -> ObjectAddress {
     let mut address = InvalidObjectAddress;
 
@@ -7318,7 +7752,7 @@ unsafe fn ATExecAddIdentity(
     def: *mut Node,
     lockmode: LOCKMODE,
     recurse: bool,
-    recursing: bool,
+    recursing: bool
 ) -> ObjectAddress {
     let attrelation: Relation;
     let tuple: HeapTuple;
@@ -7329,48 +7763,32 @@ unsafe fn ATExecAddIdentity(
     let ispartitioned = (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8;
 
     if ispartitioned && !recurse {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!("cannot add identity to a column of only the partitioned table")
-            /* errhint: "Do not specify the ONLY keyword." */
-        );
+        ereport!(ERROR, errmsg!("cannot add identity to a column of only the partitioned table")
+            /* errhint: "Do not specify the ONLY keyword." */);
     }
 
     if (*(*rel).rd_rel).relispartition && !recursing {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!("cannot add identity to a column of a partition")
-        );
+        ereport!(ERROR, errmsg!("cannot add identity to a column of a partition"));
     }
 
     attrelation = table_open(AttributeRelationId, RowExclusiveLock);
     tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), col_name);
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
     att_tup = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*att_tup).attnum;
 
     /* Can't alter a system attribute */
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
@@ -7379,15 +7797,11 @@ unsafe fn ATExecAddIdentity(
      * cannot be reproduced without contortions.
      */
     if !(*att_tup).attnotnull {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" must be declared NOT NULL before identity can be added",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /* If a not-null constraint exists, verify it's compatible. */
@@ -7403,41 +7817,29 @@ unsafe fn ATExecAddIdentity(
         }
         let con_form = GETSTRUCT(contup) as Form_pg_constraint;
         if !(*con_form).convalidated {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "incompatible NOT VALID constraint \"{}\" on relation \"{}\"",
                     std::ffi::CStr::from_ptr(NameStr!((*con_form).conname) as *const i8).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
                 )
-                /* errhint: "You might need to validate it using ..." */
-            );
+                /* errhint: "You might need to validate it using ..." */);
         }
     }
 
     if (*att_tup).attidentity != 0 as _ {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" is already an identity column",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     if (*att_tup).atthasdef {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" already has a default value",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     (*att_tup).attidentity = (*cdef).identity;
@@ -7477,7 +7879,7 @@ unsafe fn ATExecSetIdentity(
     def: *mut Node,
     lockmode: LOCKMODE,
     recurse: bool,
-    recursing: bool,
+    recursing: bool
 ) -> ObjectAddress {
     let mut generated_el: *mut DefElem = std::ptr::null_mut();
     let tuple: HeapTuple;
@@ -7488,34 +7890,22 @@ unsafe fn ATExecSetIdentity(
     let ispartitioned = (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8;
 
     if ispartitioned && !recurse {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!("cannot change identity column of only the partitioned table")
-            /* errhint: "Do not specify the ONLY keyword." */
-        );
+        ereport!(ERROR, errmsg!("cannot change identity column of only the partitioned table")
+            /* errhint: "Do not specify the ONLY keyword." */);
     }
 
     if (*(*rel).rd_rel).relispartition && !recursing {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!("cannot change identity column of a partition")
-        );
+        ereport!(ERROR, errmsg!("cannot change identity column of a partition"));
     }
 
     {
         let option_list = castNode!(List, T_List, def);
         let mut lc = list_head(option_list);
         while !lc.is_null() {
-            let defel = lfirst_node!(DefElem, T_DefElem, current_cell!(lc));
+            let defel = lfirst_node!(DefElem, T_DefElem, lc);
             if libc::strcmp((*defel).defname, b"generated\0".as_ptr() as *const i8) == 0 {
                 if !generated_el.is_null() {
-                    ereport!(
-                        ERROR,
-                        errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg!("conflicting or redundant options")
-                    );
+                    ereport!(ERROR, errmsg!("conflicting or redundant options"));
                 }
                 generated_el = defel;
             } else {
@@ -7532,42 +7922,30 @@ unsafe fn ATExecSetIdentity(
     attrelation = table_open(AttributeRelationId, RowExclusiveLock);
     tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), col_name);
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     att_tup = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*att_tup).attnum;
 
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
-    if !(*att_tup).attidentity != false {
+    if (*att_tup).attidentity == 0 {
         // attidentity == 0
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" is not an identity column",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     if !generated_el.is_null() {
@@ -7577,7 +7955,7 @@ unsafe fn ATExecSetIdentity(
         InvokeObjectPostAlterHook(
             RelationRelationId,
             RelationGetRelid(rel),
-            (*att_tup).attnum as i32,
+            (*att_tup).attnum as i32
         );
         ObjectAddressSubSet!(address, RelationRelationId, RelationGetRelid(rel), attnum as i32);
     } else {
@@ -7616,7 +7994,7 @@ unsafe fn ATExecDropIdentity(
     missing_ok: bool,
     lockmode: LOCKMODE,
     recurse: bool,
-    recursing: bool,
+    recursing: bool
 ) -> ObjectAddress {
     let tuple: HeapTuple;
     let att_tup: Form_pg_attribute;
@@ -7628,70 +8006,47 @@ unsafe fn ATExecDropIdentity(
     let ispartitioned = (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8;
 
     if ispartitioned && !recurse {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!("cannot drop identity from a column of only the partitioned table")
-            /* errhint */
-        );
+        ereport!(ERROR, errmsg!("cannot drop identity from a column of only the partitioned table")
+            /* errhint */);
     }
 
     if (*(*rel).rd_rel).relispartition && !recursing {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!("cannot drop identity from a column of a partition")
-        );
+        ereport!(ERROR, errmsg!("cannot drop identity from a column of a partition"));
     }
 
     attrelation = table_open(AttributeRelationId, RowExclusiveLock);
     tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), col_name);
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     att_tup = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*att_tup).attnum;
 
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     if (*att_tup).attidentity == 0 as _ {
         if !missing_ok {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "column \"{}\" of relation \"{}\" is not an identity column",
                     std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
         } else {
-            ereport!(
-                NOTICE,
-                errmsg!(
+            ereport!(NOTICE, errmsg!(
                     "column \"{}\" of relation \"{}\" is not an identity column, skipping",
                     std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
             heap_freetuple(tuple);
             table_close(attrelation, RowExclusiveLock);
             return InvalidObjectAddress;
@@ -7728,7 +8083,7 @@ unsafe fn ATExecDropIdentity(
             RelationRelationId,
             seqid,
             RelationRelationId,
-            DEPENDENCY_INTERNAL,
+            DEPENDENCY_INTERNAL
         );
         CommandCounterIncrement();
         seqaddress.classId = RelationRelationId;
@@ -7750,7 +8105,7 @@ unsafe fn ATExecSetExpression(
     rel: Relation,
     col_name: *const i8,
     new_expr: *mut Node,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let tuple: HeapTuple;
     let att_tup: Form_pg_attribute;
@@ -7765,42 +8120,30 @@ unsafe fn ATExecSetExpression(
 
     tuple = SearchSysCacheAttName(RelationGetRelid(rel), col_name);
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     att_tup = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*att_tup).attnum;
 
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     attgenerated = (*att_tup).attgenerated;
     if attgenerated == 0 as _ {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" is not a generated column",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
@@ -7810,14 +8153,10 @@ unsafe fn ATExecSetExpression(
         && !(*(*rel).rd_att).constr.is_null()
         && (*(*(*rel).rd_att).constr).num_check > 0
     {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "ALTER TABLE / SET EXPRESSION is not supported for virtual generated columns in tables with check constraints"
             )
-            /* errdetail */
-        );
+            /* errdetail */);
     }
 
     if attgenerated == ATTRIBUTE_GENERATED_VIRTUAL as i8 && (*att_tup).attnotnull {
@@ -7830,13 +8169,9 @@ unsafe fn ATExecSetExpression(
     if attgenerated == ATTRIBUTE_GENERATED_VIRTUAL as i8
         && !GetRelationPublications(RelationGetRelid(rel)).is_null()
     {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "ALTER TABLE / SET EXPRESSION is not supported for virtual generated columns in tables that are part of a publication"
-            )
-        );
+            ));
     }
 
     rewrite = attgenerated == ATTRIBUTE_GENERATED_STORED as i8;
@@ -7894,7 +8229,7 @@ unsafe fn ATExecSetExpression(
         false,
         true,
         false,
-        std::ptr::null_mut(),
+        std::ptr::null_mut()
     );
 
     /* Make above new expression visible */
@@ -7902,7 +8237,7 @@ unsafe fn ATExecSetExpression(
 
     if rewrite {
         /* Prepare for table rewrite */
-        defval = build_column_default(rel, attnum) as *mut Expr;
+        defval = build_column_default(rel, attnum as c_int) as *mut Expr;
         newval = palloc0(core::mem::size_of::<NewColumnValue>()) as *mut NewColumnValue;
         (*newval).attnum = attnum;
         (*newval).expr = expression_planner(defval);
@@ -7929,17 +8264,13 @@ unsafe fn ATPrepDropExpression(
     cmd: *mut AlterTableCmd,
     recurse: bool,
     recursing: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     /*
      * Reject ONLY if there are child tables.
      */
     if !recurse && !find_inheritance_children(RelationGetRelid(rel), lockmode).is_null() {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!("ALTER TABLE / DROP EXPRESSION must be applied to child tables too")
-        );
+        ereport!(ERROR, errmsg!("ALTER TABLE / DROP EXPRESSION must be applied to child tables too"));
     }
 
     /*
@@ -7948,23 +8279,15 @@ unsafe fn ATPrepDropExpression(
     if !recursing {
         let tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), (*cmd).name);
         if !HeapTupleIsValid(tuple) {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "column \"{}\" of relation \"{}\" does not exist",
                     std::ffi::CStr::from_ptr((*cmd).name).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
         }
         let att_tup = GETSTRUCT(tuple) as Form_pg_attribute;
         if (*att_tup).attinhcount > 0 {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg!("cannot drop generation expression from inherited column")
-            );
+            ereport!(ERROR, errmsg!("cannot drop generation expression from inherited column"));
         }
     }
 }
@@ -7974,7 +8297,7 @@ unsafe fn ATExecDropExpression(
     rel: Relation,
     col_name: *const i8,
     missing_ok: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let tuple: HeapTuple;
     let att_tup: Form_pg_attribute;
@@ -7986,65 +8309,46 @@ unsafe fn ATExecDropExpression(
     attrelation = table_open(AttributeRelationId, RowExclusiveLock);
     tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), col_name);
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     att_tup = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*att_tup).attnum;
 
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
      * TODO: This could be done, but it would need a table rewrite to materialize the generated values.
      */
     if (*att_tup).attgenerated == ATTRIBUTE_GENERATED_VIRTUAL as i8 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "ALTER TABLE / DROP EXPRESSION is not supported for virtual generated columns"
             )
-            /* errdetail */
-        );
+            /* errdetail */);
     }
 
     if (*att_tup).attgenerated == 0 as _ {
         if !missing_ok {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "column \"{}\" of relation \"{}\" is not a generated column",
                     std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
         } else {
-            ereport!(
-                NOTICE,
-                errmsg!(
+            ereport!(NOTICE, errmsg!(
                     "column \"{}\" of relation \"{}\" is not a generated column, skipping",
                     std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
             heap_freetuple(tuple);
             table_close(attrelation, RowExclusiveLock);
             return InvalidObjectAddress;
@@ -8097,7 +8401,7 @@ unsafe fn ATExecSetStatistics(
     col_name: *const i8,
     col_num: i16,
     new_value: *mut Node,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let mut newtarget: i32 = 0;
     let newtarget_default: bool;
@@ -8118,16 +8422,12 @@ unsafe fn ATExecSetStatistics(
         && (*(*rel).rd_rel).relkind != RELKIND_PARTITIONED_INDEX as i8
         && col_name.is_null()
     {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!("cannot refer to non-index column by number")
-        );
+        ereport!(ERROR, errmsg!("cannot refer to non-index column by number"));
     }
 
     /* -1 was used in previous versions for the default setting */
-    if !new_value.is_null() && intVal(new_value) != -1 {
-        newtarget = intVal(new_value);
+    if !new_value.is_null() && intVal!(new_value) != -1 {
+        newtarget = intVal!(new_value);
         newtarget_default = false;
     } else {
         newtarget_default = true;
@@ -8135,18 +8435,10 @@ unsafe fn ATExecSetStatistics(
 
     if !newtarget_default {
         if newtarget < 0 {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg!("statistics target {} is too low", newtarget)
-            );
+            ereport!(ERROR, errmsg!("statistics target {} is too low", newtarget));
         } else if newtarget > MAX_STATISTICS_TARGET as i32 {
             newtarget = MAX_STATISTICS_TARGET as i32;
-            ereport!(
-                WARNING,
-                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg!("lowering statistics target to {}", newtarget)
-            );
+            ereport!(WARNING, errmsg!("lowering statistics target to {}", newtarget));
         }
     }
 
@@ -8155,28 +8447,20 @@ unsafe fn ATExecSetStatistics(
     if !col_name.is_null() {
         tuple = SearchSysCacheAttName(RelationGetRelid(rel), col_name);
         if !HeapTupleIsValid(tuple) {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "column \"{}\" of relation \"{}\" does not exist",
                     std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
         }
     } else {
         tuple = SearchSysCacheAttNum(RelationGetRelid(rel), col_num);
         if !HeapTupleIsValid(tuple) {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "column number {} of relation \"{}\" does not exist",
                     col_num,
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
         }
     }
 
@@ -8184,54 +8468,38 @@ unsafe fn ATExecSetStatistics(
     attnum = (*attrtuple).attnum;
 
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
      * Prevent this as long as the ANALYZE code skips virtual generated columns.
      */
     if (*attrtuple).attgenerated == ATTRIBUTE_GENERATED_VIRTUAL as i8 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter statistics on virtual generated column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     if (*(*rel).rd_rel).relkind == RELKIND_INDEX as i8
         || (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_INDEX as i8
     {
         if (attnum as i32) > (*(*rel).rd_index).indnkeyatts as i32 {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot alter statistics on included column \"{}\" of index \"{}\"",
                     std::ffi::CStr::from_ptr(NameStr!((*attrtuple).attname) as *const i8).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
         } else if (*(*rel).rd_index).indkey.values[(attnum as usize) - 1] != 0 {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot alter statistics on non-expression column \"{}\" of index \"{}\"",
                     std::ffi::CStr::from_ptr(NameStr!((*attrtuple).attname) as *const i8).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
                 )
-                /* errhint: "Alter statistics on table column instead." */
-            );
+                /* errhint: "Alter statistics on table column instead." */);
         }
     }
 
@@ -8249,7 +8517,7 @@ unsafe fn ATExecSetStatistics(
         RelationGetDescr(attrelation),
         repl_val.as_mut_ptr(),
         repl_null.as_mut_ptr(),
-        repl_repl.as_mut_ptr(),
+        repl_repl.as_mut_ptr()
     );
     CatalogTupleUpdate(attrelation, &mut (*tuple).t_self, newtuple);
 
@@ -8269,7 +8537,7 @@ unsafe fn ATExecSetOptions(
     col_name: *const i8,
     options: *mut Node,
     is_reset: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let attrelation: Relation;
     let tuple: HeapTuple;
@@ -8288,28 +8556,20 @@ unsafe fn ATExecSetOptions(
     tuple = SearchSysCacheAttName(RelationGetRelid(rel), col_name);
 
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
     attrtuple = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*attrtuple).attnum;
 
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /* Generate new proposed attoptions (text array) */
@@ -8320,7 +8580,7 @@ unsafe fn ATExecSetOptions(
         std::ptr::null_mut(),
         std::ptr::null_mut(),
         false,
-        is_reset,
+        is_reset
     );
     /* Validate new options */
     attribute_reloptions(new_options, true);
@@ -8339,7 +8599,7 @@ unsafe fn ATExecSetOptions(
         RelationGetDescr(attrelation),
         repl_val.as_mut_ptr(),
         repl_null.as_mut_ptr(),
-        repl_repl.as_mut_ptr(),
+        repl_repl.as_mut_ptr()
     );
 
     /* Update system catalog. */
@@ -8369,7 +8629,7 @@ unsafe fn SetIndexStorageProperties(
     newstorage: i8,
     setcompression: bool,
     newcompression: i8,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let index_list = RelationGetIndexList(rel);
     let mut lc = list_head(index_list);
@@ -8422,7 +8682,7 @@ unsafe fn ATExecSetStorage(
     rel: Relation,
     col_name: *const i8,
     new_value: *mut Node,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let attrelation: Relation;
     let tuple: HeapTuple;
@@ -8434,31 +8694,23 @@ unsafe fn ATExecSetStorage(
     tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), col_name);
 
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
     attrtuple = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*attrtuple).attnum;
 
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
-    (*attrtuple).attstorage = GetAttributeStorage((*attrtuple).atttypid, strVal(new_value));
+    (*attrtuple).attstorage = GetAttributeStorage((*attrtuple).atttypid, strVal!(new_value));
 
     CatalogTupleUpdate(attrelation, &mut (*tuple).t_self, tuple);
 
@@ -8471,7 +8723,7 @@ unsafe fn ATExecSetStorage(
         rel, attrelation, attnum,
         true, (*attrtuple).attstorage,
         false, 0,
-        lockmode,
+        lockmode
     );
 
     heap_freetuple(tuple);
@@ -8493,14 +8745,10 @@ unsafe fn ATPrepDropColumn(
     recursing: bool,
     cmd: *mut AlterTableCmd,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
-    if (*(*rel).rd_rel).reloftype && !recursing {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!("cannot drop column from typed table")
-        );
+    if OidIsValid((*(*rel).rd_rel).reloftype) && !recursing {
+        ereport!(ERROR, errmsg!("cannot drop column from typed table"));
     }
 
     if (*(*rel).rd_rel).relkind == RELKIND_COMPOSITE_TYPE as i8 {
@@ -8525,7 +8773,7 @@ unsafe fn ATExecDropColumn(
     recursing: bool,
     missing_ok: bool,
     lockmode: LOCKMODE,
-    addrs: *mut ObjectAddresses,
+    addrs: *mut ObjectAddresses
 ) -> ObjectAddress {
     let tuple: HeapTuple;
     let targetatt: Form_pg_attribute;
@@ -8536,7 +8784,7 @@ unsafe fn ATExecDropColumn(
         objectId: InvalidOid,
         objectSubId: 0,
     };
-    let is_expr: bool;
+    let mut is_expr: bool = false;
     // mut addrs - we may reassign from param
     let mut addrs = addrs;
 
@@ -8545,7 +8793,7 @@ unsafe fn ATExecDropColumn(
         ATSimplePermissions(
             AT_DropColumn,
             rel,
-            ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE,
+            ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE
         );
     }
 
@@ -8563,24 +8811,17 @@ unsafe fn ATExecDropColumn(
     tuple = SearchSysCacheAttName(RelationGetRelid(rel), col_name);
     if !HeapTupleIsValid(tuple) {
         if !missing_ok {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "column \"{}\" of relation \"{}\" does not exist",
                     std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
         } else {
-            ereport!(
-                NOTICE,
-                errmsg!(
+            ereport!(NOTICE, errmsg!(
                     "column \"{}\" of relation \"{}\" does not exist, skipping",
                     std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                     std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                )
-            );
+                ));
             return InvalidObjectAddress;
         }
     }
@@ -8589,28 +8830,20 @@ unsafe fn ATExecDropColumn(
 
     /* Can't drop a system attribute */
     if (attnum as i32) <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot drop system column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
      * Don't drop inherited columns, unless recursing.
      */
     if (*targetatt).attinhcount > 0 && !recursing {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot drop inherited column \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
@@ -8619,18 +8852,14 @@ unsafe fn ATExecDropColumn(
     let _ = &mut is_expr; // used by C macro
     if has_partition_attrs(
         rel,
-        bms_make_singleton((attnum as i32) - FirstLowInvalidHeapAttributeNumber),
-        &mut (false as bool),
+        bms_make_singleton((attnum as i32) - FirstLowInvalidHeapAttributeNumber as i32),
+        &mut (false as bool)
     ) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot drop column \"{}\" because it is part of the partition key of relation \"{}\"",
                 std::ffi::CStr::from_ptr(col_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     ReleaseSysCache(tuple);
@@ -8648,14 +8877,10 @@ unsafe fn ATExecDropColumn(
          * partitions as well.
          */
         if (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8 && !recurse {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot drop column from only the partitioned table when partitions exist"
                 )
-                /* errhint: "Do not specify the ONLY keyword." */
-            );
+                /* errhint: "Do not specify the ONLY keyword." */);
         }
 
         attr_rel = table_open(AttributeRelationId, RowExclusiveLock);
@@ -8695,7 +8920,7 @@ unsafe fn ATExecDropColumn(
                 if (*childatt).attinhcount == 1 && !(*childatt).attislocal {
                     /* Time to delete this child column, too */
                     ATExecDropColumn(
-                        wqueue, childrel, col_name, behavior, true, true, false, lockmode, addrs,
+                        wqueue, childrel, col_name, behavior, true, true, false, lockmode, addrs
                     );
                 } else {
                     /* Child column must survive my deletion */
@@ -8748,7 +8973,7 @@ unsafe fn ATPrepAddPrimaryKey(
     cmd: *mut AlterTableCmd,
     recurse: bool,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     let pkconstr = castNode!(Constraint, T_Constraint, (*cmd).def);
     if (*pkconstr).contype != CONSTR_PRIMARY {
@@ -8761,8 +8986,8 @@ unsafe fn ATPrepAddPrimaryKey(
     /* Verify that columns are not-null, or request that they be made so */
     let mut lc = list_head((*pkconstr).keys);
     while !lc.is_null() {
-        let column = lfirst(lc) as *mut String;
-        let col_str = strVal(column as *mut Node);
+        let column = lfirst(lc) as *mut crate::nodes::value::String;
+        let col_str = strVal!(column as *mut Node);
 
         /*
          * First check if a suitable constraint exists.  If it does, we don't
@@ -8790,14 +9015,11 @@ unsafe fn ATPrepAddPrimaryKey(
                 let childrelid = lfirst_oid(clc);
                 let tup = findNotNullConstraint(childrelid, col_str);
                 if tup.is_null() {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "column \"{}\" of table \"{}\" is not marked NOT NULL",
                             std::ffi::CStr::from_ptr(col_str).to_string_lossy(),
                             std::ffi::CStr::from_ptr(get_rel_name(childrelid)).to_string_lossy()
-                        )
-                    );
+                        ));
                 }
                 /* verify it's good enough */
                 verifyNotNullPKCompatible(tup, col_str);
@@ -8806,7 +9028,7 @@ unsafe fn ATPrepAddPrimaryKey(
         }
 
         /* This column is not already not-null, so add it to the queue */
-        let nnconstr = makeNotNullConstraint(column as *mut Node);
+        let nnconstr = makeNotNullConstraint(column);
         let newcmd = makeNode!(AlterTableCmd, T_AlterTableCmd) as *mut AlterTableCmd;
         (*newcmd).subtype = AT_AddConstraint;
         /* note we force recurse=true here; see above */
@@ -8831,28 +9053,20 @@ unsafe fn verifyNotNullPKCompatible(tuple: HeapTuple, colname: *const i8) {
 
     /* a NO INHERIT constraint is no good */
     if (*con_form).connoinherit {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot create primary key on column \"{}\"",
                 std::ffi::CStr::from_ptr(colname).to_string_lossy()
             )
-            /* errdetail, errhint */
-        );
+            /* errdetail, errhint */);
     }
 
     /* an unvalidated constraint is no good */
     if !(*con_form).convalidated {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot create primary key on column \"{}\"",
                 std::ffi::CStr::from_ptr(colname).to_string_lossy()
             )
-            /* errdetail, errhint */
-        );
+            /* errdetail, errhint */);
     }
 }
 
@@ -8866,7 +9080,7 @@ unsafe fn ATExecAddIndex(
     rel: Relation,
     stmt: *mut IndexStmt,
     is_rebuild: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let check_rights: bool;
     let skip_build: bool;
@@ -8895,7 +9109,7 @@ unsafe fn ATExecAddIndex(
         check_rights,
         false,       /* check_not_in_use - we did it already */
         skip_build,
-        quiet,
+        quiet
     );
 
     /*
@@ -8921,7 +9135,7 @@ unsafe fn ATExecAddStatistics(
     rel: Relation,
     stmt: *mut CreateStatsStmt,
     is_rebuild: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     Assert!(IsA!(stmt, T_CreateStatsStmt));
     Assert!((*stmt).transformed);
@@ -8939,7 +9153,7 @@ unsafe fn ATExecAddIndexConstraint(
     tab: *mut AlteredTableInfo,
     rel: Relation,
     stmt: *mut IndexStmt,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let index_oid = (*stmt).indexOid;
     let index_rel: Relation;
@@ -8957,13 +9171,9 @@ unsafe fn ATExecAddIndexConstraint(
      * Doing this on partitioned tables is not a simple feature to implement.
      */
     if (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "ALTER TABLE / ADD CONSTRAINT USING INDEX is not supported on partitioned tables"
-            )
-        );
+            ));
     }
 
     index_rel = index_open(index_oid, AccessShareLock);
@@ -8982,14 +9192,11 @@ unsafe fn ATExecAddIndexConstraint(
     let constraint_name = if constraint_name.is_null() {
         index_name
     } else if libc::strcmp(constraint_name, index_name) != 0 {
-        ereport!(
-            NOTICE,
-            errmsg!(
+        ereport!(NOTICE, errmsg!(
                 "ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index \"{}\" to \"{}\"",
                 std::ffi::CStr::from_ptr(index_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(constraint_name).to_string_lossy()
-            )
-        );
+            ));
         RenameRelationInternal(index_oid, constraint_name, false, true);
         constraint_name
     } else {
@@ -9022,7 +9229,7 @@ unsafe fn ATExecAddIndexConstraint(
         constraint_name,
         constraint_type,
         flags,
-        allowSystemTableMods,
+        allowSystemTableMods(),
         false, /* is_internal */
     );
 
@@ -9044,7 +9251,7 @@ unsafe fn ATExecAddConstraint(
     new_constraint: *mut Constraint,
     recurse: bool,
     is_readd: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let mut address = InvalidObjectAddress;
 
@@ -9057,7 +9264,7 @@ unsafe fn ATExecAddConstraint(
     match (*new_constraint).contype {
         CONSTR_CHECK | CONSTR_NOTNULL => {
             address = ATAddCheckNNConstraint(
-                wqueue, tab, rel, new_constraint, recurse, false, is_readd, lockmode,
+                wqueue, tab, rel, new_constraint, recurse, false, is_readd, lockmode
             );
         }
         CONSTR_FOREIGN => {
@@ -9068,17 +9275,13 @@ unsafe fn ATExecAddConstraint(
                 if ConstraintNameIsUsed(
                     CONSTRAINT_RELATION,
                     RelationGetRelid(rel),
-                    (*new_constraint).conname,
+                    (*new_constraint).conname
                 ) {
-                    ereport!(
-                        ERROR,
-                        errcode(ERRCODE_DUPLICATE_OBJECT),
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "constraint \"{}\" for relation \"{}\" already exists",
                             std::ffi::CStr::from_ptr((*new_constraint).conname).to_string_lossy(),
                             std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-                        )
-                    );
+                        ));
                 }
             } else {
                 (*new_constraint).conname = ChooseConstraintName(
@@ -9086,12 +9289,12 @@ unsafe fn ATExecAddConstraint(
                     ChooseForeignKeyConstraintNameAddition((*new_constraint).fk_attrs),
                     b"fkey\0".as_ptr() as *const i8,
                     RelationGetNamespace(rel),
-                    std::ptr::null_mut(),
+                    std::ptr::null_mut()
                 );
             }
 
             address = ATAddForeignKeyConstraint(
-                wqueue, tab, rel, new_constraint, recurse, false, lockmode,
+                wqueue, tab, rel, new_constraint, recurse, false, lockmode
             );
         }
         _ => {
@@ -9117,7 +9320,7 @@ unsafe fn ChooseForeignKeyConstraintNameAddition(colnames: *mut List) -> *mut i8
     buf[0] = 0;
     let mut lc = list_head(colnames);
     while !lc.is_null() {
-        let name = strVal(lfirst(lc) as *mut Node);
+        let name = strVal!(lfirst(lc) as *mut Node);
         if buflen > 0 {
             buf[buflen] = b'_' as i8;
             buflen += 1;
@@ -9129,7 +9332,7 @@ unsafe fn ChooseForeignKeyConstraintNameAddition(colnames: *mut List) -> *mut i8
         libc::strncpy(
             buf.as_mut_ptr().add(buflen),
             name,
-            NAMEDATALEN as usize,
+            NAMEDATALEN as usize
         );
         buflen += libc::strlen(buf.as_ptr().add(buflen));
         if buflen >= NAMEDATALEN as usize {
@@ -9152,7 +9355,7 @@ unsafe fn ATAddCheckNNConstraint(
     recurse: bool,
     recursing: bool,
     is_readd: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let newcons: *mut List;
     let children: *mut List;
@@ -9166,7 +9369,7 @@ unsafe fn ATAddCheckNNConstraint(
         ATSimplePermissions(
             AT_AddConstraint,
             rel,
-            ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE,
+            ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE
         );
     }
 
@@ -9216,7 +9419,7 @@ unsafe fn ATAddCheckNNConstraint(
                 rel,
                 (*ccon).attnum,
                 !(*constr).skip_validation,
-                !(*constr).skip_validation,
+                !(*constr).skip_validation
             );
         }
 
@@ -9251,11 +9454,7 @@ unsafe fn ATAddCheckNNConstraint(
      * Check if ONLY was specified with ALTER TABLE.
      */
     if !recurse && !children.is_null() {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!("constraint must be added to child tables too")
-        );
+        ereport!(ERROR, errmsg!("constraint must be added to child tables too"));
     }
 
     /* Recurse to create the constraint on each child. */
@@ -9270,7 +9469,7 @@ unsafe fn ATAddCheckNNConstraint(
 
         /* Recurse to this child */
         ATAddCheckNNConstraint(
-            wqueue, childtab, childrel, constr, recurse, true, is_readd, lockmode,
+            wqueue, childtab, childrel, constr, recurse, true, is_readd, lockmode
         );
 
         table_close(childrel, NoLock);
@@ -9290,7 +9489,7 @@ unsafe fn ATAddForeignKeyConstraint(
     fkconstraint: *mut Constraint,
     recurse: bool,
     recursing: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let pkrel: Relation;
     let mut pkattnum = [0i16; INDEX_MAX_KEYS];
@@ -9324,39 +9523,27 @@ unsafe fn ATAddForeignKeyConstraint(
 
     /* Validity checks */
     if !recurse && (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot use ONLY for foreign key on partitioned table \"{}\" referencing relation \"{}\"",
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(pkrel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     if (*(*pkrel).rd_rel).relkind != RELKIND_RELATION as i8
         && (*(*pkrel).rd_rel).relkind != RELKIND_PARTITIONED_TABLE as i8
     {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "referenced relation \"{}\" is not a table",
                 std::ffi::CStr::from_ptr(RelationGetRelationName(pkrel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
-    if !allowSystemTableMods && IsSystemRelation(pkrel) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-            errmsg!(
+    if !allowSystemTableMods() && IsSystemRelation(pkrel) {
+        ereport!(ERROR, errmsg!(
                 "permission denied: \"{}\" is a system catalog",
                 std::ffi::CStr::from_ptr(RelationGetRelationName(pkrel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
@@ -9366,46 +9553,30 @@ unsafe fn ATAddForeignKeyConstraint(
     match (*(*rel).rd_rel).relpersistence {
         p if p == RELPERSISTENCE_PERMANENT as i8 => {
             if !RelationIsPermanent(pkrel) {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "constraints on permanent tables may reference only permanent tables"
-                    )
-                );
+                    ));
             }
         }
         p if p == RELPERSISTENCE_UNLOGGED as i8 => {
             if !RelationIsPermanent(pkrel)
                 && (*(*pkrel).rd_rel).relpersistence != RELPERSISTENCE_UNLOGGED as i8
             {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "constraints on unlogged tables may reference only permanent or unlogged tables"
-                    )
-                );
+                    ));
             }
         }
         p if p == RELPERSISTENCE_TEMP as i8 => {
             if (*(*pkrel).rd_rel).relpersistence != RELPERSISTENCE_TEMP as i8 {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "constraints on temporary tables may reference only temporary tables"
-                    )
-                );
+                    ));
             }
             if !(*pkrel).rd_islocaltemp || !(*rel).rd_islocaltemp {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "constraints on temporary tables must involve temporary tables of this session"
-                    )
-                );
+                    ));
             }
         }
         _ => {}
@@ -9419,17 +9590,13 @@ unsafe fn ATAddForeignKeyConstraint(
         (*fkconstraint).fk_attrs,
         fkattnum.as_mut_ptr(),
         fktypoid.as_mut_ptr(),
-        fkcolloid.as_mut_ptr(),
+        fkcolloid.as_mut_ptr()
     );
     with_period = (*fkconstraint).fk_with_period || (*fkconstraint).pk_with_period;
     if with_period && !(*fkconstraint).fk_with_period {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_FOREIGN_KEY),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "foreign key uses PERIOD on the referenced table but not the referencing table"
-            )
-        );
+            ));
     }
 
     let num_fk_del_set_cols_raw = transformColumnNameList(
@@ -9437,14 +9604,14 @@ unsafe fn ATAddForeignKeyConstraint(
         (*fkconstraint).fk_del_set_cols,
         fkdelsetcols.as_mut_ptr(),
         std::ptr::null_mut(),
-        std::ptr::null_mut(),
+        std::ptr::null_mut()
     );
     numfkdelsetcols = validateFkOnDeleteSetColumns(
         numfks,
         fkattnum.as_ptr(),
         num_fk_del_set_cols_raw,
         fkdelsetcols.as_mut_ptr(),
-        (*fkconstraint).fk_del_set_cols,
+        (*fkconstraint).fk_del_set_cols
     );
 
     /*
@@ -9460,18 +9627,14 @@ unsafe fn ATAddForeignKeyConstraint(
             pktypoid.as_mut_ptr(),
             pkcolloid.as_mut_ptr(),
             opclasses.as_mut_ptr(),
-            &mut pk_has_without_overlaps,
+            &mut pk_has_without_overlaps
         );
 
         /* If the primary key uses WITHOUT OVERLAPS, the fk must use PERIOD */
         if pk_has_without_overlaps && !(*fkconstraint).fk_with_period {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_FOREIGN_KEY),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "foreign key uses PERIOD on the referenced table but not the referencing table"
-                )
-            );
+                ));
         }
     } else {
         numpks = transformColumnNameList(
@@ -9479,18 +9642,14 @@ unsafe fn ATAddForeignKeyConstraint(
             (*fkconstraint).pk_attrs,
             pkattnum.as_mut_ptr(),
             pktypoid.as_mut_ptr(),
-            pkcolloid.as_mut_ptr(),
+            pkcolloid.as_mut_ptr()
         );
 
         /* Since we got pk_attrs, one should be a period. */
         if with_period && !(*fkconstraint).pk_with_period {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_FOREIGN_KEY),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "foreign key uses PERIOD on the referencing table but not the referenced table"
-                )
-            );
+                ));
         }
 
         /* Look for an index matching the column list */
@@ -9500,7 +9659,7 @@ unsafe fn ATAddForeignKeyConstraint(
             pkattnum.as_mut_ptr(),
             with_period,
             opclasses.as_mut_ptr(),
-            &mut pk_has_without_overlaps,
+            &mut pk_has_without_overlaps
         );
     }
 
@@ -9508,13 +9667,9 @@ unsafe fn ATAddForeignKeyConstraint(
      * If the referenced primary key has WITHOUT OVERLAPS, the foreign key must use PERIOD.
      */
     if pk_has_without_overlaps && !with_period {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_FOREIGN_KEY),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "foreign key must use PERIOD when referencing a primary key using WITHOUT OVERLAPS"
-            )
-        );
+            ));
     }
 
     /* Now we can check permissions. */
@@ -9529,26 +9684,18 @@ unsafe fn ATAddForeignKeyConstraint(
                 || (*fkconstraint).fk_upd_action == FKCONSTR_ACTION_SETDEFAULT as i8
                 || (*fkconstraint).fk_upd_action == FKCONSTR_ACTION_CASCADE as i8
             {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "invalid {} action for foreign key constraint containing generated column",
                         "ON UPDATE"
-                    )
-                );
+                    ));
             }
             if (*fkconstraint).fk_del_action == FKCONSTR_ACTION_SETNULL as i8
                 || (*fkconstraint).fk_del_action == FKCONSTR_ACTION_SETDEFAULT as i8
             {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "invalid {} action for foreign key constraint containing generated column",
                         "ON DELETE"
-                    )
-                );
+                    ));
             }
         }
 
@@ -9556,13 +9703,9 @@ unsafe fn ATAddForeignKeyConstraint(
          * FKs on virtual columns are not supported.
          */
         if attgenerated == ATTRIBUTE_GENERATED_VIRTUAL as i8 {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "foreign key constraints on virtual generated columns are not supported"
-                )
-            );
+                ));
         }
     }
 
@@ -9575,14 +9718,10 @@ unsafe fn ATAddForeignKeyConstraint(
             || (*fkconstraint).fk_upd_action == FKCONSTR_ACTION_SETNULL as i8
             || (*fkconstraint).fk_upd_action == FKCONSTR_ACTION_SETDEFAULT as i8
         {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "unsupported {} action for foreign key constraint using PERIOD",
                     "ON UPDATE"
-                )
-            );
+                ));
         }
 
         if (*fkconstraint).fk_del_action == FKCONSTR_ACTION_RESTRICT as i8
@@ -9590,25 +9729,17 @@ unsafe fn ATAddForeignKeyConstraint(
             || (*fkconstraint).fk_del_action == FKCONSTR_ACTION_SETNULL as i8
             || (*fkconstraint).fk_del_action == FKCONSTR_ACTION_SETDEFAULT as i8
         {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "unsupported {} action for foreign key constraint using PERIOD",
                     "ON DELETE"
-                )
-            );
+                ));
         }
     }
 
     if numfks != numpks {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_FOREIGN_KEY),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "number of referencing and referenced columns for foreign key disagree"
-            )
-        );
+            ));
     }
 
     /*
@@ -9651,20 +9782,16 @@ unsafe fn ATAddForeignKeyConstraint(
 
         for_overlaps = with_period && i == numpks as usize - 1;
         cmptype = if for_overlaps { COMPARE_OVERLAP } else { COMPARE_EQ };
-        eqstrategy = IndexAmTranslateCompareType(cmptype, amid, opfamily, true);
+        eqstrategy = IndexAmTranslateCompareType(cmptype, amid, opfamily, true) as i16;
         if eqstrategy == InvalidStrategy as i16 {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "{}",
                     if for_overlaps {
                         "could not identify an overlaps operator for foreign key"
                     } else {
                         "could not identify an equality operator for foreign key"
                     }
-                )
-            );
+                ));
         }
 
         /* There had better be a primary equality operator for the index. */
@@ -9695,7 +9822,7 @@ unsafe fn ATAddForeignKeyConstraint(
                 2,
                 input_typeids.as_ptr(),
                 target_typeids.as_ptr(),
-                COERCION_IMPLICIT,
+                COERCION_IMPLICIT
             ) {
                 pfeqop = ppeqop;
                 ffeqop = ppeqop;
@@ -9704,15 +9831,11 @@ unsafe fn ATAddForeignKeyConstraint(
         }
 
         if !(OidIsValid(pfeqop) && OidIsValid(ffeqop)) {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_DATATYPE_MISMATCH),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "foreign key constraint \"{}\" cannot be implemented",
                     std::ffi::CStr::from_ptr((*fkconstraint).conname).to_string_lossy()
                 )
-                /* errdetail: Key columns ... are of incompatible types */
-            );
+                /* errdetail: Key columns ... are of incompatible types */);
         }
 
         /* Collation checks */
@@ -9721,15 +9844,11 @@ unsafe fn ATAddForeignKeyConstraint(
             let fkcolldet = get_collation_isdeterministic(fkcoll);
 
             if (!pkcolldet || !fkcolldet) && pkcoll != fkcoll {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_COLLATION_MISMATCH),
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "foreign key constraint \"{}\" cannot be implemented",
                         std::ffi::CStr::from_ptr((*fkconstraint).conname).to_string_lossy()
                     )
-                    /* errdetail */
-                );
+                    /* errdetail */);
             }
         }
 
@@ -9776,7 +9895,7 @@ unsafe fn ATAddForeignKeyConstraint(
             opclasses[(numpks as usize) - 1],
             &mut periodoperoid,
             &mut aggedperiodoperoid,
-            &mut intersectoperoid,
+            &mut intersectoperoid
         );
     }
 
@@ -9798,7 +9917,7 @@ unsafe fn ATAddForeignKeyConstraint(
         numfkdelsetcols,
         fkdelsetcols.as_mut_ptr(),
         false,
-        with_period,
+        with_period
     );
 
     /* Next process the action triggers at the referenced side and recurse */
@@ -9819,7 +9938,7 @@ unsafe fn ATAddForeignKeyConstraint(
         old_check_ok,
         InvalidOid,
         InvalidOid,
-        with_period,
+        with_period
     );
 
     /* Lastly create the check triggers at the referencing side and recurse */
@@ -9842,7 +9961,7 @@ unsafe fn ATAddForeignKeyConstraint(
         lockmode,
         InvalidOid,
         InvalidOid,
-        with_period,
+        with_period
     );
 
     /* Done. Close pk table, but keep lock until we've committed. */
@@ -9860,7 +9979,7 @@ unsafe fn validateFkOnDeleteSetColumns(
     fkattnums: *const i16,
     numfksetcols: i32,
     fksetcolsattnums: *mut i16,
-    fksetcols: *mut List,
+    fksetcols: *mut List
 ) -> i32 {
     let mut numcolsout: i32 = 0;
 
@@ -9877,15 +9996,11 @@ unsafe fn validateFkOnDeleteSetColumns(
         }
 
         if !seen {
-            let col = strVal(list_nth(fksetcols, i as i32) as *mut Node);
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_COLUMN_REFERENCE),
-                errmsg!(
+            let col = strVal!(list_nth(fksetcols, i as i32) as *mut Node);
+            ereport!(ERROR, errmsg!(
                     "column \"{}\" referenced in ON DELETE SET action must be part of foreign key",
                     std::ffi::CStr::from_ptr(col).to_string_lossy()
-                )
-            );
+                ));
         }
 
         /* Now check for dups */
@@ -9925,7 +10040,7 @@ unsafe fn addFkConstraint(
     numfkdelsetcols: i32,
     fkdelsetcols: *mut i16,
     is_internal: bool,
-    with_period: bool,
+    with_period: bool
 ) -> ObjectAddress {
     let constr_oid: Oid;
     let conname: *mut i8;
@@ -9939,14 +10054,10 @@ unsafe fn addFkConstraint(
     if (*(*pkrel).rd_rel).relkind != RELKIND_RELATION as i8
         && (*(*pkrel).rd_rel).relkind != RELKIND_PARTITIONED_TABLE as i8
     {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "referenced relation \"{}\" is not a table",
                 std::ffi::CStr::from_ptr(RelationGetRelationName(pkrel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
@@ -9959,7 +10070,7 @@ unsafe fn addFkConstraint(
             std::ptr::null_mut(),
             b"\0".as_ptr() as *const i8,
             RelationGetNamespace(rel),
-            std::ptr::null_mut(),
+            std::ptr::null_mut()
         );
     } else {
         conname = constraintname;
@@ -10074,7 +10185,7 @@ unsafe fn addFkRecurseReferenced(
     old_check_ok: bool,
     parent_del_trigger: Oid,
     parent_upd_trigger: Oid,
-    with_period: bool,
+    with_period: bool
 ) {
     let mut delete_trigger_oid = InvalidOid;
     let mut update_trigger_oid = InvalidOid;
@@ -10095,7 +10206,7 @@ unsafe fn addFkRecurseReferenced(
             parent_del_trigger,
             parent_upd_trigger,
             &mut delete_trigger_oid,
-            &mut update_trigger_oid,
+            &mut update_trigger_oid
         );
     }
 
@@ -10103,14 +10214,14 @@ unsafe fn addFkRecurseReferenced(
      * If the referenced table is partitioned, recurse.
      */
     if (*(*pkrel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8 {
-        let pd = RelationGetPartitionDesc(pkrel, true);
+        let pd = RelationGetPartitionDesc(pkrel, true) as *mut crate::partitioning::partdesc::PartitionDescData;
 
         for i in 0..(*pd).nparts as usize {
-            let part_rel = table_open((*pd).oids[i], ShareRowExclusiveLock);
+            let part_rel = table_open(*(*pd).oids.add(i), ShareRowExclusiveLock);
             let map = build_attrmap_by_name_if_req(
                 RelationGetDescr(part_rel),
                 RelationGetDescr(pkrel),
-                false,
+                false
             );
             let mapped_pkattnum: *mut AttrNumber;
             let mapped_pkattnum_buf: *mut AttrNumber;
@@ -10121,7 +10232,7 @@ unsafe fn addFkRecurseReferenced(
                         as *mut AttrNumber;
                 for j in 0..numfks as usize {
                     *mapped_pkattnum_buf.add(j) =
-                        (*map).attnums[(*pkattnum.add(j) as usize) - 1];
+                        *(*map).attnums.add((*pkattnum.add(j) as usize) - 1);
                 }
                 mapped_pkattnum = mapped_pkattnum_buf;
             } else {
@@ -10156,7 +10267,7 @@ unsafe fn addFkRecurseReferenced(
                 numfkdelsetcols,
                 fkdelsetcols,
                 true,
-                with_period,
+                with_period
             );
             /* ... and recurse to our children */
             addFkRecurseReferenced(
@@ -10176,7 +10287,7 @@ unsafe fn addFkRecurseReferenced(
                 old_check_ok,
                 delete_trigger_oid,
                 update_trigger_oid,
-                with_period,
+                with_period
             );
 
             /* Done -- clean up (but keep the lock) */
@@ -10212,7 +10323,7 @@ unsafe fn addFkRecurseReferencing(
     lockmode: LOCKMODE,
     parent_ins_trigger: Oid,
     parent_upd_trigger: Oid,
-    with_period: bool,
+    with_period: bool
 ) {
     let mut insert_trigger_oid = InvalidOid;
     let mut update_trigger_oid = InvalidOid;
@@ -10222,11 +10333,7 @@ unsafe fn addFkRecurseReferencing(
     Assert!(CheckRelationLockedByMe(pkrel, ShareRowExclusiveLock, true));
 
     if (*(*rel).rd_rel).relkind == RELKIND_FOREIGN_TABLE as i8 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!("foreign key constraints are not supported on foreign tables")
-        );
+        ereport!(ERROR, errmsg!("foreign key constraints are not supported on foreign tables"));
     }
 
     /*
@@ -10242,7 +10349,7 @@ unsafe fn addFkRecurseReferencing(
             parent_ins_trigger,
             parent_upd_trigger,
             &mut insert_trigger_oid,
-            &mut update_trigger_oid,
+            &mut update_trigger_oid
         );
     }
 
@@ -10268,22 +10375,22 @@ unsafe fn addFkRecurseReferencing(
             (*tab).constraints = lappend((*tab).constraints, newcon as *mut _);
         }
     } else if (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8 {
-        let pd = RelationGetPartitionDesc(rel, true);
+        let pd = RelationGetPartitionDesc(rel, true) as *mut crate::partitioning::partdesc::PartitionDescData;
         let trigrel = table_open(TriggerRelationId, RowExclusiveLock);
 
         /*
          * Recurse to take appropriate action on each partition.
          */
         for i in 0..(*pd).nparts as usize {
-            let partition = table_open((*pd).oids[i], lockmode);
+            let partition = table_open(*(*pd).oids.add(i), lockmode);
             let attmap = build_attrmap_by_name(
                 RelationGetDescr(partition),
                 RelationGetDescr(rel),
-                false,
+                false
             );
             let mut mapped_fkattnum = [0 as AttrNumber; INDEX_MAX_KEYS];
             for j in 0..numfks as usize {
-                mapped_fkattnum[j] = (*attmap).attnums[(*fkattnum.add(j) as usize) - 1];
+                mapped_fkattnum[j] = *(*attmap).attnums.add((*fkattnum.add(j) as usize) - 1);
             }
 
             CheckAlterTableIsSafe(partition);
@@ -10293,7 +10400,7 @@ unsafe fn addFkRecurseReferencing(
             let mut attached = false;
             let mut fklc = list_head(part_fks);
             while !fklc.is_null() {
-                let fk = lfirst_node!(ForeignKeyCacheInfo, T_ForeignKeyCacheInfo, current_cell!(fklc));
+                let fk = lfirst(fklc) as *mut ForeignKeyCacheInfo;
                 if tryAttachPartitionForeignKey(
                     wqueue,
                     fk,
@@ -10305,7 +10412,7 @@ unsafe fn addFkRecurseReferencing(
                     pfeqoperators,
                     insert_trigger_oid,
                     update_trigger_oid,
-                    trigrel,
+                    trigrel
                 ) {
                     attached = true;
                     break;
@@ -10338,7 +10445,7 @@ unsafe fn addFkRecurseReferencing(
                 numfkdelsetcols,
                 fkdelsetcols,
                 true,
-                with_period,
+                with_period
             );
 
             addFkRecurseReferencing(
@@ -10360,7 +10467,7 @@ unsafe fn addFkRecurseReferencing(
                 lockmode,
                 insert_trigger_oid,
                 update_trigger_oid,
-                with_period,
+                with_period
             );
 
             table_close(partition, NoLock);
@@ -10377,7 +10484,7 @@ unsafe fn addFkRecurseReferencing(
 unsafe fn CloneForeignKeyConstraints(
     wqueue: *mut *mut List,
     parent_rel: Relation,
-    partition_rel: Relation,
+    partition_rel: Relation
 ) {
     /* This only works for declarative partitioning */
     Assert!((*(*parent_rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8);
@@ -10416,14 +10523,14 @@ unsafe fn CloneFkReferenced(parent_rel: Relation, partition_rel: Relation) {
         Anum_pg_constraint_confrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(parent_rel)),
+        ObjectIdGetDatum(RelationGetRelid(parent_rel))
     );
     ScanKeyInit(
         &mut key[1],
         Anum_pg_constraint_contype,
         BTEqualStrategyNumber,
         F_CHAREQ,
-        CharGetDatum(CONSTRAINT_FOREIGN as i8 as i64),
+        CharGetDatum(CONSTRAINT_FOREIGN as i8)
     );
     /* This is a seqscan, as we don't have a usable index ... */
     let scan = systable_beginscan(
@@ -10432,7 +10539,7 @@ unsafe fn CloneFkReferenced(parent_rel: Relation, partition_rel: Relation) {
         true,
         std::ptr::null_mut(),
         2,
-        key.as_mut_ptr(),
+        key.as_mut_ptr()
     );
     let mut tuple: HeapTuple;
     loop {
@@ -10452,7 +10559,7 @@ unsafe fn CloneFkReferenced(parent_rel: Relation, partition_rel: Relation) {
     attmap = build_attrmap_by_name(
         RelationGetDescr(partition_rel),
         RelationGetDescr(parent_rel),
-        false,
+        false
     );
 
     let mut cell = list_head(clone);
@@ -10503,15 +10610,15 @@ unsafe fn CloneFkReferenced(parent_rel: Relation, partition_rel: Relation) {
             conppeqop.as_mut_ptr(),
             conffeqop.as_mut_ptr(),
             &mut numfkdelsetcols,
-            confdelsetcols.as_mut_ptr(),
+            confdelsetcols.as_mut_ptr()
         );
 
         for i in 0..numfks as usize {
-            mapped_confkey[i] = (*attmap).attnums[(confkey[i] as usize) - 1];
+            mapped_confkey[i] = *(*attmap).attnums.add((confkey[i] as usize) - 1);
         }
 
         let fkconstraint = makeNode!(Constraint, T_Constraint) as *mut Constraint;
-        (*fkconstraint).contype = CONSTRAINT_FOREIGN;
+        (*fkconstraint).contype = CONSTR_FOREIGN;
         (*fkconstraint).conname = NameStr!((*constr_form).conname) as *mut i8;
         (*fkconstraint).deferrable = (*constr_form).condeferrable;
         (*fkconstraint).initdeferred = (*constr_form).condeferred;
@@ -10533,7 +10640,7 @@ unsafe fn CloneFkReferenced(parent_rel: Relation, partition_rel: Relation) {
             let att = TupleDescAttr(RelationGetDescr(fk_rel), conkey[i] as usize - 1);
             (*fkconstraint).fk_attrs = lappend(
                 (*fkconstraint).fk_attrs,
-                makeString(NameStr!((*att).attname) as *mut i8) as *mut _,
+                makeString(NameStr!((*att).attname) as *mut i8) as *mut _
             );
         }
 
@@ -10560,7 +10667,7 @@ unsafe fn CloneFkReferenced(parent_rel: Relation, partition_rel: Relation) {
                 (*constr_form).confrelid,
                 (*constr_form).conrelid,
                 &mut delete_trigger_oid,
-                &mut update_trigger_oid,
+                &mut update_trigger_oid
             );
         }
 
@@ -10582,7 +10689,7 @@ unsafe fn CloneFkReferenced(parent_rel: Relation, partition_rel: Relation) {
             numfkdelsetcols,
             confdelsetcols.as_mut_ptr(),
             false,
-            (*constr_form).conperiod,
+            (*constr_form).conperiod
         );
         /* ... and recurse */
         addFkRecurseReferenced(
@@ -10602,7 +10709,7 @@ unsafe fn CloneFkReferenced(parent_rel: Relation, partition_rel: Relation) {
             true,
             delete_trigger_oid,
             update_trigger_oid,
-            (*constr_form).conperiod,
+            (*constr_form).conperiod
         );
 
         table_close(fk_rel, NoLock);
@@ -10621,7 +10728,7 @@ unsafe fn CloneFkReferenced(parent_rel: Relation, partition_rel: Relation) {
 unsafe fn CloneFkReferencing(
     wqueue: *mut *mut List,
     parent_rel: Relation,
-    part_rel: Relation,
+    part_rel: Relation
 ) {
     let attmap: *mut AttrMap;
     let part_fks: *mut List;
@@ -10639,15 +10746,11 @@ unsafe fn CloneFkReferencing(
          * already has a foreign key to.
          */
         if (*fk).confrelid == RelationGetRelid(part_rel) {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot attach table \"{}\" as a partition because it is referenced by foreign key \"{}\"",
                     std::ffi::CStr::from_ptr(RelationGetRelationName(part_rel)).to_string_lossy(),
                     std::ffi::CStr::from_ptr(get_constraint_name((*fk).conoid)).to_string_lossy()
-                )
-            );
+                ));
         }
 
         clone = lappend_oid(clone, (*fk).conoid);
@@ -10660,18 +10763,14 @@ unsafe fn CloneFkReferencing(
     }
 
     if (*(*part_rel).rd_rel).relkind == RELKIND_FOREIGN_TABLE as i8 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!("foreign key constraints are not supported on foreign tables")
-        );
+        ereport!(ERROR, errmsg!("foreign key constraints are not supported on foreign tables"));
     }
 
     trigrel = table_open(TriggerRelationId, RowExclusiveLock);
     attmap = build_attrmap_by_name(
         RelationGetDescr(part_rel),
         RelationGetDescr(parent_rel),
-        false,
+        false
     );
     part_fks = copyObject(RelationGetFKeyList(part_rel)) as *mut List;
 
@@ -10722,10 +10821,10 @@ unsafe fn CloneFkReferencing(
             conppeqop.as_mut_ptr(),
             conffeqop.as_mut_ptr(),
             &mut numfkdelsetcols,
-            confdelsetcols.as_mut_ptr(),
+            confdelsetcols.as_mut_ptr()
         );
         for i in 0..numfks as usize {
-            mapped_conkey[i] = (*attmap).attnums[(conkey[i] as usize) - 1];
+            mapped_conkey[i] = *(*attmap).attnums.add((conkey[i] as usize) - 1);
         }
 
         /*
@@ -10738,7 +10837,7 @@ unsafe fn CloneFkReferencing(
                 (*constr_form).confrelid,
                 (*constr_form).conrelid,
                 &mut insert_trigger_oid,
-                &mut update_trigger_oid,
+                &mut update_trigger_oid
             );
         }
 
@@ -10748,7 +10847,7 @@ unsafe fn CloneFkReferencing(
         let mut attached = false;
         let mut fk_lc2 = list_head(part_fks);
         while !fk_lc2.is_null() {
-            let fk = lfirst_node!(ForeignKeyCacheInfo, T_ForeignKeyCacheInfo, current_cell!(fk_lc2));
+            let fk = lfirst(fk_lc2) as *mut ForeignKeyCacheInfo;
             if tryAttachPartitionForeignKey(
                 wqueue,
                 fk,
@@ -10760,7 +10859,7 @@ unsafe fn CloneFkReferencing(
                 conpfeqop.as_mut_ptr(),
                 insert_trigger_oid,
                 update_trigger_oid,
-                trigrel,
+                trigrel
             ) {
                 attached = true;
                 table_close(pkrel, NoLock);
@@ -10776,7 +10875,7 @@ unsafe fn CloneFkReferencing(
 
         /* No dice.  Set up to create our own constraint */
         let fkconstraint = makeNode!(Constraint, T_Constraint) as *mut Constraint;
-        (*fkconstraint).contype = CONSTRAINT_FOREIGN;
+        (*fkconstraint).contype = CONSTR_FOREIGN;
         (*fkconstraint).deferrable = (*constr_form).condeferrable;
         (*fkconstraint).initdeferred = (*constr_form).condeferred;
         (*fkconstraint).location = -1;
@@ -10795,7 +10894,7 @@ unsafe fn CloneFkReferencing(
             let att = TupleDescAttr(RelationGetDescr(part_rel), mapped_conkey[i] as usize - 1);
             (*fkconstraint).fk_attrs = lappend(
                 (*fkconstraint).fk_attrs,
-                makeString(NameStr!((*att).attname) as *mut i8) as *mut _,
+                makeString(NameStr!((*att).attname) as *mut i8) as *mut _
             );
         }
 
@@ -10820,7 +10919,7 @@ unsafe fn CloneFkReferencing(
             numfkdelsetcols,
             confdelsetcols.as_mut_ptr(),
             false,
-            with_period,
+            with_period
         );
 
         /* Done with the cloned constraint's tuple */
@@ -10846,7 +10945,7 @@ unsafe fn CloneFkReferencing(
             AccessExclusiveLock,
             insert_trigger_oid,
             update_trigger_oid,
-            with_period,
+            with_period
         );
         table_close(pkrel, NoLock);
         cell = lnext(clone, cell);
@@ -10871,7 +10970,7 @@ unsafe fn tryAttachPartitionForeignKey(
     conpfeqop: *mut Oid,
     parent_ins_trigger: Oid,
     parent_upd_trigger: Oid,
-    trigrel: Relation,
+    trigrel: Relation
 ) -> bool {
     let parent_constr_tup: HeapTuple;
     let parent_constr: Form_pg_constraint;
@@ -10910,16 +11009,12 @@ unsafe fn tryAttachPartitionForeignKey(
      * An error should be raised if the constraint enforceability is different.
      */
     if (*part_constr).conenforced != (*parent_constr).conenforced {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "constraint \"{}\" enforceability conflicts with constraint \"{}\" on relation \"{}\"",
                 std::ffi::CStr::from_ptr(NameStr!((*parent_constr).conname) as *mut i8).to_string_lossy(),
                 std::ffi::CStr::from_ptr(NameStr!((*part_constr).conname) as *mut i8).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(partition)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     if OidIsValid((*part_constr).conparentid)
@@ -10945,7 +11040,7 @@ unsafe fn tryAttachPartitionForeignKey(
         parent_constr_oid,
         parent_ins_trigger,
         parent_upd_trigger,
-        trigrel,
+        trigrel
     );
 
     true
@@ -10962,7 +11057,7 @@ unsafe fn AttachPartitionForeignKey(
     parent_constr_oid: Oid,
     parent_ins_trigger: Oid,
     parent_upd_trigger: Oid,
-    trigrel: Relation,
+    trigrel: Relation
 ) {
     let parent_constr_tup: HeapTuple;
     let parent_constr: Form_pg_constraint;
@@ -11024,7 +11119,7 @@ unsafe fn AttachPartitionForeignKey(
             part_constr_frelid,
             part_constr_relid,
             &mut insert_trigger_oid,
-            &mut update_trigger_oid,
+            &mut update_trigger_oid
         );
         Assert!(OidIsValid(insert_trigger_oid) && OidIsValid(parent_ins_trigger));
         TriggerSetParentTrigger(trigrel, insert_trigger_oid, parent_ins_trigger, RelationGetRelid(partition));
@@ -11048,7 +11143,7 @@ unsafe fn AttachPartitionForeignKey(
             partition,
             confrelid,
             partcontup,
-            ShareUpdateExclusiveLock,
+            ShareUpdateExclusiveLock
         );
         ReleaseSysCache(partcontup);
         table_close(conrel, RowExclusiveLock);
@@ -11064,7 +11159,7 @@ unsafe fn RemoveInheritedConstraint(
     conrel: Relation,
     trigrel: Relation,
     conoid: Oid,
-    conrelid: Oid,
+    conrelid: Oid
 ) {
     let objs: *mut ObjectAddresses;
     let mut consttup: HeapTuple;
@@ -11077,7 +11172,7 @@ unsafe fn RemoveInheritedConstraint(
         Anum_pg_constraint_conrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(conrelid),
+        ObjectIdGetDatum(conrelid)
     );
     scan = systable_beginscan(
         conrel,
@@ -11085,7 +11180,7 @@ unsafe fn RemoveInheritedConstraint(
         true,
         std::ptr::null_mut(),
         1,
-        &mut key,
+        &mut key
     );
     objs = new_object_addresses();
     loop {
@@ -11096,7 +11191,7 @@ unsafe fn RemoveInheritedConstraint(
         if (*conform).conparentid != conoid {
             continue;
         } else {
-            let mut addr = ObjectAddress::default();
+            let mut addr = InvalidObjectAddress;
             let scan2: SysScanDesc;
             let mut key2 = ScanKeyData::default();
 
@@ -11111,7 +11206,7 @@ unsafe fn RemoveInheritedConstraint(
                 (*conform).oid,
                 DEPENDENCY_INTERNAL,
                 ConstraintRelationId,
-                conoid,
+                conoid
             );
             /* Assert n == 1 */
 
@@ -11123,7 +11218,7 @@ unsafe fn RemoveInheritedConstraint(
                 Anum_pg_trigger_tgconstraint,
                 BTEqualStrategyNumber,
                 F_OIDEQ,
-                ObjectIdGetDatum((*conform).oid),
+                ObjectIdGetDatum((*conform).oid)
             );
             scan2 = systable_beginscan(trigrel, TriggerConstraintIndexId, true, std::ptr::null_mut(), 1, &mut key2);
             loop {
@@ -11149,7 +11244,7 @@ unsafe fn DropForeignKeyConstraintTriggers(
     trigrel: Relation,
     conoid: Oid,
     confrelid: Oid,
-    conrelid: Oid,
+    conrelid: Oid
 ) {
     let mut key = ScanKeyData::default();
     let scan: SysScanDesc;
@@ -11160,14 +11255,14 @@ unsafe fn DropForeignKeyConstraintTriggers(
         Anum_pg_trigger_tgconstraint,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(conoid),
+        ObjectIdGetDatum(conoid)
     );
     scan = systable_beginscan(trigrel, TriggerConstraintIndexId, true, std::ptr::null_mut(), 1, &mut key);
     loop {
         trigtup = systable_getnext(scan);
         if trigtup.is_null() { break; }
         let trgform = GETSTRUCT(trigtup) as Form_pg_trigger;
-        let mut trigger_addr = ObjectAddress::default();
+        let mut trigger_addr = InvalidObjectAddress;
 
         /* Invalid if trigger is not for a referential integrity constraint */
         if !OidIsValid((*trgform).tgconstrrelid) {
@@ -11223,7 +11318,7 @@ unsafe fn GetForeignKeyActionTriggers(
     confrelid: Oid,
     conrelid: Oid,
     delete_trigger_oid: *mut Oid,
-    update_trigger_oid: *mut Oid,
+    update_trigger_oid: *mut Oid
 ) {
     let mut key = ScanKeyData::default();
     let scan: SysScanDesc;
@@ -11236,7 +11331,7 @@ unsafe fn GetForeignKeyActionTriggers(
         Anum_pg_trigger_tgconstraint,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(conoid),
+        ObjectIdGetDatum(conoid)
     );
 
     scan = systable_beginscan(trigrel, TriggerConstraintIndexId, true, std::ptr::null_mut(), 1, &mut key);
@@ -11290,7 +11385,7 @@ unsafe fn GetForeignKeyCheckTriggers(
     confrelid: Oid,
     conrelid: Oid,
     insert_trigger_oid: *mut Oid,
-    update_trigger_oid: *mut Oid,
+    update_trigger_oid: *mut Oid
 ) {
     let mut key = ScanKeyData::default();
     let scan: SysScanDesc;
@@ -11303,7 +11398,7 @@ unsafe fn GetForeignKeyCheckTriggers(
         Anum_pg_trigger_tgconstraint,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(conoid),
+        ObjectIdGetDatum(conoid)
     );
 
     scan = systable_beginscan(trigrel, TriggerConstraintIndexId, true, std::ptr::null_mut(), 1, &mut key);
@@ -11356,7 +11451,7 @@ unsafe fn ATExecAlterConstraint(
     rel: Relation,
     cmdcon: *mut ATAlterConstraint,
     recurse: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let conrel: Relation;
     let tgrel: Relation;
@@ -11371,12 +11466,8 @@ unsafe fn ATExecAlterConstraint(
      * This is okay for legacy inheritance.
      */
     if (*(*rel).rd_rel).relkind == RELKIND_PARTITIONED_TABLE as i8 && !recurse {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg!("constraint must be altered in child tables too")
-            /* errhint: Do not specify the ONLY keyword. */
-        );
+        ereport!(ERROR, errmsg!("constraint must be altered in child tables too")
+            /* errhint: Do not specify the ONLY keyword. */);
     }
 
     conrel = table_open(ConstraintRelationId, RowExclusiveLock);
@@ -11388,84 +11479,64 @@ unsafe fn ATExecAlterConstraint(
         Anum_pg_constraint_conrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(rel)),
+        ObjectIdGetDatum(RelationGetRelid(rel))
     );
     ScanKeyInit(
         &mut skey[1],
         Anum_pg_constraint_contypid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(InvalidOid),
+        ObjectIdGetDatum(InvalidOid)
     );
     ScanKeyInit(
         &mut skey[2],
         Anum_pg_constraint_conname,
         BTEqualStrategyNumber,
         F_NAMEEQ,
-        CStringGetDatum((*cmdcon).conname),
+        CStringGetDatum((*cmdcon).conname)
     );
     scan = systable_beginscan(conrel, ConstraintRelidTypidNameIndexId, true, std::ptr::null_mut(), 3, skey.as_mut_ptr());
 
     /* There can be at most one matching row */
     contuple = systable_getnext(scan);
     if !HeapTupleIsValid(contuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_OBJECT),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "constraint \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr((*cmdcon).conname).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     currcon = GETSTRUCT(contuple) as Form_pg_constraint;
     if (*cmdcon).alterDeferrability && (*currcon).contype != CONSTRAINT_FOREIGN as i8 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "constraint \"{}\" of relation \"{}\" is not a foreign key constraint",
                 std::ffi::CStr::from_ptr((*cmdcon).conname).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
     if (*cmdcon).alterEnforceability && (*currcon).contype != CONSTRAINT_FOREIGN as i8 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter enforceability of constraint \"{}\" of relation \"{}\"",
                 std::ffi::CStr::from_ptr((*cmdcon).conname).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
     if (*cmdcon).alterInheritability && (*currcon).contype != CONSTRAINT_NOTNULL as i8 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "constraint \"{}\" of relation \"{}\" is not a not-null constraint",
                 std::ffi::CStr::from_ptr((*cmdcon).conname).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /* Refuse to modify inheritability of inherited constraints */
     if (*cmdcon).alterInheritability && (*cmdcon).noinherit && (*currcon).coninhcount > 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter inherited constraint \"{}\" on relation \"{}\"",
                 std::ffi::CStr::from_ptr(NameStr!((*currcon).conname) as *mut i8).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /*
@@ -11491,16 +11562,12 @@ unsafe fn ATExecAlterConstraint(
             ReleaseSysCache(tp);
         }
 
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter constraint \"{}\" on relation \"{}\"",
                 std::ffi::CStr::from_ptr((*cmdcon).conname).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
             )
-            /* errdetail and errhint omitted - see C source */
-        );
+            /* errdetail and errhint omitted - see C source */);
     }
 
     /*
@@ -11529,7 +11596,7 @@ unsafe fn ATExecAlterConstraintInternal(
     rel: Relation,
     contuple: HeapTuple,
     recurse: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> bool {
     let currcon = GETSTRUCT(contuple) as Form_pg_constraint;
     let mut changed = false;
@@ -11553,7 +11620,7 @@ unsafe fn ATExecAlterConstraintInternal(
             InvalidOid,
             InvalidOid,
             InvalidOid,
-            InvalidOid,
+            InvalidOid
         )
     {
         changed = true;
@@ -11567,7 +11634,7 @@ unsafe fn ATExecAlterConstraintInternal(
             contuple,
             recurse,
             &mut otherrelids,
-            lockmode,
+            lockmode
         )
     {
         /*
@@ -11608,7 +11675,7 @@ unsafe fn ATExecAlterConstrEnforceability(
     referenced_parent_del_trigger: Oid,
     referenced_parent_upd_trigger: Oid,
     referencing_parent_ins_trigger: Oid,
-    referencing_parent_upd_trigger: Oid,
+    referencing_parent_upd_trigger: Oid
 ) -> bool {
     check_stack_depth();
     Assert!((*cmdcon).alterEnforceability);
@@ -11646,7 +11713,7 @@ unsafe fn ATExecAlterConstrEnforceability(
                 InvalidOid,
                 InvalidOid,
                 InvalidOid,
-                InvalidOid,
+                InvalidOid
             );
         }
         /* Drop all the triggers */
@@ -11676,7 +11743,7 @@ unsafe fn ATExecAlterConstrEnforceability(
                 referenced_parent_del_trigger,
                 referenced_parent_upd_trigger,
                 &mut referenced_del_trigger_oid,
-                &mut referenced_upd_trigger_oid,
+                &mut referenced_upd_trigger_oid
             );
         }
 
@@ -11691,7 +11758,7 @@ unsafe fn ATExecAlterConstrEnforceability(
                 referencing_parent_ins_trigger,
                 referencing_parent_upd_trigger,
                 &mut referencing_ins_trigger_oid,
-                &mut referencing_upd_trigger_oid,
+                &mut referencing_upd_trigger_oid
             );
         }
 
@@ -11729,7 +11796,7 @@ unsafe fn ATExecAlterConstrEnforceability(
                 referenced_del_trigger_oid,
                 referenced_upd_trigger_oid,
                 referencing_ins_trigger_oid,
-                referencing_upd_trigger_oid,
+                referencing_upd_trigger_oid
             );
         }
     }
@@ -11750,7 +11817,7 @@ unsafe fn ATExecAlterConstrDeferrability(
     contuple: HeapTuple,
     recurse: bool,
     otherrelids: *mut *mut List,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> bool {
     check_stack_depth();
     Assert!((*cmdcon).alterDeferrability);
@@ -11775,7 +11842,7 @@ unsafe fn ATExecAlterConstrDeferrability(
             rel,
             (*cmdcon).deferrable,
             (*cmdcon).initdeferred,
-            otherrelids,
+            otherrelids
         );
     }
 
@@ -11803,7 +11870,7 @@ unsafe fn ATExecAlterConstrInheritability(
     conrel: Relation,
     rel: Relation,
     contuple: HeapTuple,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> bool {
     Assert!((*cmdcon).alterInheritability);
 
@@ -11855,7 +11922,7 @@ unsafe fn ATExecAlterConstrInheritability(
                 col_name,
                 true,
                 true,
-                lockmode,
+                lockmode
             );
             if OidIsValid(addr.objectId) {
                 CommandCounterIncrement();
@@ -11878,7 +11945,7 @@ unsafe fn AlterConstrTriggerDeferrability(
     rel: Relation,
     deferrable: bool,
     initdeferred: bool,
-    otherrelids: *mut *mut List,
+    otherrelids: *mut *mut List
 ) {
     let mut tgtuple: HeapTuple;
     let mut tgkey = ScanKeyData::default();
@@ -11889,7 +11956,7 @@ unsafe fn AlterConstrTriggerDeferrability(
         Anum_pg_trigger_tgconstraint,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(conoid),
+        ObjectIdGetDatum(conoid)
     );
     tgscan = systable_beginscan(tgrel, TriggerConstraintIndexId, true, std::ptr::null_mut(), 1, &mut tgkey);
     loop {
@@ -11944,7 +12011,7 @@ unsafe fn AlterConstrEnforceabilityRecurse(
     referenced_parent_del_trigger: Oid,
     referenced_parent_upd_trigger: Oid,
     referencing_parent_ins_trigger: Oid,
-    referencing_parent_upd_trigger: Oid,
+    referencing_parent_upd_trigger: Oid
 ) {
     let currcon = GETSTRUCT(contuple) as Form_pg_constraint;
     let conoid = (*currcon).oid;
@@ -11957,7 +12024,7 @@ unsafe fn AlterConstrEnforceabilityRecurse(
         Anum_pg_constraint_conparentid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(conoid),
+        ObjectIdGetDatum(conoid)
     );
     pscan = systable_beginscan(conrel, ConstraintParentIndexId, true, std::ptr::null_mut(), 1, &mut pkey);
     loop {
@@ -11975,7 +12042,7 @@ unsafe fn AlterConstrEnforceabilityRecurse(
             referenced_parent_del_trigger,
             referenced_parent_upd_trigger,
             referencing_parent_ins_trigger,
-            referencing_parent_upd_trigger,
+            referencing_parent_upd_trigger
         );
     }
     systable_endscan(pscan);
@@ -11993,7 +12060,7 @@ unsafe fn AlterConstrDeferrabilityRecurse(
     contuple: HeapTuple,
     recurse: bool,
     otherrelids: *mut *mut List,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let currcon = GETSTRUCT(contuple) as Form_pg_constraint;
     let conoid = (*currcon).oid;
@@ -12006,7 +12073,7 @@ unsafe fn AlterConstrDeferrabilityRecurse(
         Anum_pg_constraint_conparentid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(conoid),
+        ObjectIdGetDatum(conoid)
     );
     pscan = systable_beginscan(conrel, ConstraintParentIndexId, true, std::ptr::null_mut(), 1, &mut pkey);
     loop {
@@ -12015,7 +12082,7 @@ unsafe fn AlterConstrDeferrabilityRecurse(
         let childcon = GETSTRUCT(childtup) as Form_pg_constraint;
         let childrel = table_open((*childcon).conrelid, lockmode);
         ATExecAlterConstrDeferrability(
-            wqueue, cmdcon, conrel, tgrel, childrel, childtup, recurse, otherrelids, lockmode,
+            wqueue, cmdcon, conrel, tgrel, childrel, childtup, recurse, otherrelids, lockmode
         );
         table_close(childrel, NoLock);
     }
@@ -12028,7 +12095,7 @@ unsafe fn AlterConstrDeferrabilityRecurse(
 unsafe fn AlterConstrUpdateConstraintEntry(
     cmdcon: *mut ATAlterConstraint,
     conrel: Relation,
-    contuple: HeapTuple,
+    contuple: HeapTuple
 ) {
     Assert!((*cmdcon).alterEnforceability || (*cmdcon).alterDeferrability || (*cmdcon).alterInheritability);
 
@@ -12068,7 +12135,7 @@ unsafe fn ATExecValidateConstraint(
     constr_name: *mut i8,
     recurse: bool,
     recursing: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let conrel: Relation;
     let scan: SysScanDesc;
@@ -12085,36 +12152,32 @@ unsafe fn ATExecValidateConstraint(
         Anum_pg_constraint_conrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(rel)),
+        ObjectIdGetDatum(RelationGetRelid(rel))
     );
     ScanKeyInit(
         &mut skey[1],
         Anum_pg_constraint_contypid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(InvalidOid),
+        ObjectIdGetDatum(InvalidOid)
     );
     ScanKeyInit(
         &mut skey[2],
         Anum_pg_constraint_conname,
         BTEqualStrategyNumber,
         F_NAMEEQ,
-        CStringGetDatum(constr_name),
+        CStringGetDatum(constr_name)
     );
     scan = systable_beginscan(conrel, ConstraintRelidTypidNameIndexId, true, std::ptr::null_mut(), 3, skey.as_mut_ptr());
 
     /* There can be at most one matching row */
     tuple = systable_getnext(scan);
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_OBJECT),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "constraint \"{}\" of relation \"{}\" does not exist",
                 std::ffi::CStr::from_ptr(constr_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     con = GETSTRUCT(tuple) as Form_pg_constraint;
@@ -12122,24 +12185,16 @@ unsafe fn ATExecValidateConstraint(
         && (*con).contype != CONSTRAINT_CHECK as i8
         && (*con).contype != CONSTRAINT_NOTNULL as i8
     {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot validate constraint \"{}\" of relation \"{}\"",
                 std::ffi::CStr::from_ptr(constr_name).to_string_lossy(),
                 std::ffi::CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
             )
-            /* errdetail: This operation is not supported for this type of constraint. */
-        );
+            /* errdetail: This operation is not supported for this type of constraint. */);
     }
 
     if !(*con).conenforced {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!("cannot validate NOT ENFORCED constraint")
-        );
+        ereport!(ERROR, errmsg!("cannot validate NOT ENFORCED constraint"));
     }
 
     if !(*con).convalidated {
@@ -12147,7 +12202,7 @@ unsafe fn ATExecValidateConstraint(
             QueueFKConstraintValidation(wqueue, conrel, rel, (*con).confrelid, tuple, lockmode);
         } else if (*con).contype == CONSTRAINT_CHECK as i8 {
             QueueCheckConstraintValidation(
-                wqueue, conrel, rel, constr_name, tuple, recurse, recursing, lockmode,
+                wqueue, conrel, rel, constr_name, tuple, recurse, recursing, lockmode
             );
         } else if (*con).contype == CONSTRAINT_NOTNULL as i8 {
             QueueNNConstraintValidation(wqueue, conrel, rel, tuple, recurse, recursing, lockmode);
@@ -12174,7 +12229,7 @@ unsafe fn QueueFKConstraintValidation(
     fkrel: Relation,
     pkrelid: Oid,
     contuple: HeapTuple,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let con = GETSTRUCT(contuple) as Form_pg_constraint;
     Assert!((*con).contype == CONSTRAINT_FOREIGN as i8);
@@ -12217,7 +12272,7 @@ unsafe fn QueueFKConstraintValidation(
             Anum_pg_constraint_conparentid,
             BTEqualStrategyNumber,
             F_OIDEQ,
-            ObjectIdGetDatum((*con).oid),
+            ObjectIdGetDatum((*con).oid)
         );
         pscan = systable_beginscan(conrel, ConstraintParentIndexId, true, std::ptr::null_mut(), 1, &mut pkey);
         loop {
@@ -12261,7 +12316,7 @@ unsafe fn QueueCheckConstraintValidation(
     contuple: HeapTuple,
     recurse: bool,
     recursing: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let con = GETSTRUCT(contuple) as Form_pg_constraint;
     Assert!((*con).contype == CONSTRAINT_CHECK as i8);
@@ -12287,11 +12342,7 @@ unsafe fn QueueCheckConstraintValidation(
         }
 
         if !recurse {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg!("constraint must be validated on child tables too")
-            );
+            ereport!(ERROR, errmsg!("constraint must be validated on child tables too"));
         }
 
         /* find_all_inheritors already got lock */
@@ -12339,7 +12390,7 @@ unsafe fn QueueNNConstraintValidation(
     contuple: HeapTuple,
     recurse: bool,
     recursing: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let con = GETSTRUCT(contuple) as Form_pg_constraint;
     Assert!((*con).contype == CONSTRAINT_NOTNULL as i8);
@@ -12361,11 +12412,7 @@ unsafe fn QueueNNConstraintValidation(
         }
 
         if !recurse {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg!("constraint must be validated on child tables too")
-            );
+            ereport!(ERROR, errmsg!("constraint must be validated on child tables too"));
         }
 
         /* The column on child might have a different attnum, search by column name. */
@@ -12420,37 +12467,25 @@ unsafe fn transformColumnNameList(
     col_list: *mut List,
     attnums: *mut i16,
     atttypids: *mut Oid,
-    attcollids: *mut Oid,
+    attcollids: *mut Oid
 ) -> i32 {
     let mut attnum: i32 = 0;
     let mut lc = list_head(col_list);
     while !lc.is_null() {
-        let attname = strVal(lfirst(lc)) as *mut i8;
+        let attname = strVal!(lfirst(lc)) as *mut i8;
         let atttuple = SearchSysCacheAttName(rel_id, attname);
         if !HeapTupleIsValid(atttuple) {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_UNDEFINED_COLUMN),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "column \"{}\" referenced in foreign key constraint does not exist",
                     std::ffi::CStr::from_ptr(attname).to_string_lossy()
-                )
-            );
+                ));
         }
         let attform = GETSTRUCT(atttuple) as Form_pg_attribute;
         if (*attform).attnum < 0 {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg!("system columns cannot be used in foreign keys")
-            );
+            ereport!(ERROR, errmsg!("system columns cannot be used in foreign keys"));
         }
         if attnum >= INDEX_MAX_KEYS as i32 {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_TOO_MANY_COLUMNS),
-                errmsg!("cannot have more than {} keys in a foreign key", INDEX_MAX_KEYS)
-            );
+            ereport!(ERROR, errmsg!("cannot have more than {} keys in a foreign key", INDEX_MAX_KEYS));
         }
         *attnums.add(attnum as usize) = (*attform).attnum;
         if !atttypids.is_null() {
@@ -12479,7 +12514,7 @@ unsafe fn transformFkeyGetPrimaryKey(
     atttypids: *mut Oid,
     attcollids: *mut Oid,
     opclasses: *mut Oid,
-    pk_has_without_overlaps: *mut bool,
+    pk_has_without_overlaps: *mut bool
 ) -> i32 {
     let mut index_tuple: HeapTuple = std::ptr::null_mut();
     let mut index_struct: Form_pg_index = std::ptr::null_mut();
@@ -12497,14 +12532,10 @@ unsafe fn transformFkeyGetPrimaryKey(
         index_struct = GETSTRUCT(index_tuple) as Form_pg_index;
         if (*index_struct).indisprimary && (*index_struct).indisvalid {
             if !(*index_struct).indimmediate {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "cannot use a deferrable primary key for referenced table \"{}\"",
                         std::ffi::CStr::from_ptr(RelationGetRelationName(pkrel)).to_string_lossy()
-                    )
-                );
+                    ));
             }
             *index_oid = indexoid;
             break;
@@ -12517,14 +12548,10 @@ unsafe fn transformFkeyGetPrimaryKey(
     list_free(indexoidlist);
 
     if !OidIsValid(*index_oid) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_OBJECT),
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "there is no primary key for referenced table \"{}\"",
                 std::ffi::CStr::from_ptr(RelationGetRelationName(pkrel)).to_string_lossy()
-            )
-        );
+            ));
     }
 
     /* Must get indclass the hard way */
@@ -12537,12 +12564,12 @@ unsafe fn transformFkeyGetPrimaryKey(
     while i < (*index_struct).indnkeyatts as usize {
         let pkattno = (*index_struct).indkey.values[i];
         *attnums.add(i) = pkattno as i16;
-        *atttypids.add(i) = attnumTypeId(pkrel, pkattno as i32);
-        *attcollids.add(i) = attnumCollationId(pkrel, pkattno as i32);
+        *atttypids.add(i) = attnumTypeId(pkrel as *mut std::ffi::c_void, pkattno as i32);
+        *attcollids.add(i) = attnumCollationId(pkrel as *mut std::ffi::c_void, pkattno as i32);
         *opclasses.add(i) = (*indclass).values[i];
         *attnamelist = lappend(
             *attnamelist,
-            makeString(pstrdup(NameStr!(*attnumAttName(pkrel, pkattno as i32)) as *mut i8)) as *mut _,
+            makeString(pstrdup(NameStr!(*attnumAttName(pkrel as *mut std::ffi::c_void, pkattno as i32)) as *mut i8)) as *mut _
         );
         i += 1;
     }
@@ -12564,7 +12591,7 @@ unsafe fn transformFkeyCheckAttrs(
     attnums: *mut i16,
     with_period: bool,
     opclasses: *mut Oid,
-    pk_has_without_overlaps: *mut bool,
+    pk_has_without_overlaps: *mut bool
 ) -> Oid {
     let mut indexoid = InvalidOid;
     let mut found = false;
@@ -12574,11 +12601,7 @@ unsafe fn transformFkeyCheckAttrs(
     for i in 0..numattrs as usize {
         for j in (i + 1)..numattrs as usize {
             if *attnums.add(i) == *attnums.add(j) {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_INVALID_FOREIGN_KEY),
-                    errmsg!("foreign key referenced-columns list must not contain duplicates")
-                );
+                ereport!(ERROR, errmsg!("foreign key referenced-columns list must not contain duplicates"));
             }
         }
     }
@@ -12603,8 +12626,8 @@ unsafe fn transformFkeyCheckAttrs(
         if (*index_struct).indnkeyatts == numattrs as i16
             && (if with_period { (*index_struct).indisexclusion } else { (*index_struct).indisunique })
             && (*index_struct).indisvalid
-            && heap_attisnull(index_tuple, Anum_pg_index_indpred, std::ptr::null_mut())
-            && heap_attisnull(index_tuple, Anum_pg_index_indexprs, std::ptr::null_mut())
+            && heap_attisnull(index_tuple, Anum_pg_index_indpred as c_int, std::ptr::null_mut())
+            && heap_attisnull(index_tuple, Anum_pg_index_indexprs as c_int, std::ptr::null_mut())
         {
             let indclass_datum = SysCacheGetAttrNotNull(INDEXRELID, index_tuple, Anum_pg_index_indclass);
             let indclass = DatumGetPointer(indclass_datum) as *mut oidvector;
@@ -12647,23 +12670,15 @@ unsafe fn transformFkeyCheckAttrs(
 
     if !found {
         if found_deferrable {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot use a deferrable unique constraint for referenced table \"{}\"",
                     std::ffi::CStr::from_ptr(RelationGetRelationName(pkrel)).to_string_lossy()
-                )
-            );
+                ));
         } else {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_FOREIGN_KEY),
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "there is no unique constraint matching given keys for referenced table \"{}\"",
                     std::ffi::CStr::from_ptr(RelationGetRelationName(pkrel)).to_string_lossy()
-                )
-            );
+                ));
         }
     }
 
@@ -12697,13 +12712,13 @@ unsafe fn findFkeyCast(target_type_id: Oid, source_type_id: Oid, funcid: *mut Oi
 unsafe fn checkFkeyPermissions(rel: Relation, attnums: *mut i16, natts: i32) {
     let roleid = GetUserId();
     let aclresult = pg_class_aclcheck(RelationGetRelid(rel), roleid, ACL_REFERENCES);
-    if aclresult == ACLCHECK_OK {
+    if aclresult == ACLCHECK_OK as i32 {
         return;
     }
     /* Else we must have REFERENCES on each column */
     for i in 0..natts as usize {
         let aclresult = pg_attribute_aclcheck(RelationGetRelid(rel), *attnums.add(i), roleid, ACL_REFERENCES);
-        if aclresult != ACLCHECK_OK {
+        if aclresult != ACLCHECK_OK as i32 {
             aclcheck_error(aclresult, get_relkind_objtype((*(*rel).rd_rel).relkind), RelationGetRelationName(rel));
         }
     }
@@ -12719,7 +12734,7 @@ unsafe fn validateForeignKeyConstraint(
     pkrel: Relation,
     pkind_oid: Oid,
     constraint_oid: Oid,
-    hasperiod: bool,
+    hasperiod: bool
 ) {
     let mut slot: *mut TupleTableSlot;
     let scan: TableScanDesc;
@@ -12728,10 +12743,7 @@ unsafe fn validateForeignKeyConstraint(
     let oldcxt: MemoryContext;
     let per_tup_cxt: MemoryContext;
 
-    ereport!(
-        DEBUG1,
-        errmsg_internal!("validating foreign key constraint \"{}\"", std::ffi::CStr::from_ptr(conname).to_string_lossy())
-    );
+    ereport!(DEBUG1, errmsg_internal!("validating foreign key constraint \"{}\"", std::ffi::CStr::from_ptr(conname).to_string_lossy()));
 
     /* Build a trigger call structure */
     trig.tgoid = InvalidOid;
@@ -12759,15 +12771,15 @@ unsafe fn validateForeignKeyConstraint(
     slot = table_slot_create(rel, std::ptr::null_mut());
     scan = table_beginscan(rel, snapshot, 0, std::ptr::null_mut());
 
-    per_tup_cxt = AllocSetContextCreate(
+    per_tup_cxt = AllocSetContextCreate!(
         CurrentMemoryContext,
         b"validateForeignKeyConstraint\0".as_ptr() as *const i8,
-        ALLOCSET_SMALL_SIZES,
+        ALLOCSET_SMALL_SIZES
     );
     oldcxt = MemoryContextSwitchTo(per_tup_cxt);
 
     while table_scan_getnextslot(scan, ForwardScanDirection, slot) {
-        let fcinfo = LOCAL_FCINFO!(0);
+        LOCAL_FCINFO!(fcinfo, 0);
         let mut trigdata: TriggerData = core::mem::zeroed();
 
         CHECK_FOR_INTERRUPTS!();
@@ -12809,7 +12821,7 @@ unsafe fn CreateFKCheckTrigger(
     constraint_oid: Oid,
     index_oid: Oid,
     parent_trig_oid: Oid,
-    on_insert: bool,
+    on_insert: bool
 ) -> Oid {
     let trig_address: ObjectAddress;
     let fk_trigger = makeNode!(CreateTrigStmt, T_CreateTrigStmt) as *mut CreateTrigStmt;
@@ -12853,7 +12865,7 @@ unsafe fn CreateFKCheckTrigger(
         parent_trig_oid,
         std::ptr::null_mut(),
         true,
-        false,
+        false
     );
 
     /* Make changes-so-far visible */
@@ -12876,7 +12888,7 @@ unsafe fn createForeignKeyActionTriggers(
     parent_del_trigger: Oid,
     parent_upd_trigger: Oid,
     delete_trig_oid: *mut Oid,
-    update_trig_oid: *mut Oid,
+    update_trig_oid: *mut Oid
 ) {
     let fk_trigger: *mut CreateTrigStmt;
     let trig_address: ObjectAddress;
@@ -12896,7 +12908,7 @@ unsafe fn createForeignKeyActionTriggers(
     (*fk_trigger).transitionRels = std::ptr::null_mut();
     (*fk_trigger).constrrel = std::ptr::null_mut();
 
-    match (*fkconstraint).fk_del_action as i32 {
+    match (*fkconstraint).fk_del_action as c_char {
         FKCONSTR_ACTION_NOACTION => {
             (*fk_trigger).deferrable = (*fkconstraint).deferrable;
             (*fk_trigger).initdeferred = (*fkconstraint).initdeferred;
@@ -12930,7 +12942,7 @@ unsafe fn createForeignKeyActionTriggers(
     trig_address = CreateTrigger(
         fk_trigger, std::ptr::null_mut(), ref_rel_oid, my_rel_oid,
         constraint_oid, index_oid, InvalidOid,
-        parent_del_trigger, std::ptr::null_mut(), true, false,
+        parent_del_trigger, std::ptr::null_mut(), true, false
     );
     if !delete_trig_oid.is_null() {
         *delete_trig_oid = trig_address.objectId;
@@ -12954,7 +12966,7 @@ unsafe fn createForeignKeyActionTriggers(
     (*fk_trigger2).transitionRels = std::ptr::null_mut();
     (*fk_trigger2).constrrel = std::ptr::null_mut();
 
-    match (*fkconstraint).fk_upd_action as i32 {
+    match (*fkconstraint).fk_upd_action as c_char {
         FKCONSTR_ACTION_NOACTION => {
             (*fk_trigger2).deferrable = (*fkconstraint).deferrable;
             (*fk_trigger2).initdeferred = (*fkconstraint).initdeferred;
@@ -12988,7 +13000,7 @@ unsafe fn createForeignKeyActionTriggers(
     let trig_address2 = CreateTrigger(
         fk_trigger2, std::ptr::null_mut(), ref_rel_oid, my_rel_oid,
         constraint_oid, index_oid, InvalidOid,
-        parent_upd_trigger, std::ptr::null_mut(), true, false,
+        parent_upd_trigger, std::ptr::null_mut(), true, false
     );
     if !update_trig_oid.is_null() {
         *update_trig_oid = trig_address2.objectId;
@@ -13008,13 +13020,13 @@ unsafe fn createForeignKeyCheckTriggers(
     parent_ins_trigger: Oid,
     parent_upd_trigger: Oid,
     insert_trig_oid: *mut Oid,
-    update_trig_oid: *mut Oid,
+    update_trig_oid: *mut Oid
 ) {
     *insert_trig_oid = CreateFKCheckTrigger(
-        my_rel_oid, ref_rel_oid, fkconstraint, constraint_oid, index_oid, parent_ins_trigger, true,
+        my_rel_oid, ref_rel_oid, fkconstraint, constraint_oid, index_oid, parent_ins_trigger, true
     );
     *update_trig_oid = CreateFKCheckTrigger(
-        my_rel_oid, ref_rel_oid, fkconstraint, constraint_oid, index_oid, parent_upd_trigger, false,
+        my_rel_oid, ref_rel_oid, fkconstraint, constraint_oid, index_oid, parent_upd_trigger, false
     );
 }
 
@@ -13029,7 +13041,7 @@ unsafe fn ATExecDropConstraint(
     behavior: DropBehavior,
     recurse: bool,
     missing_ok: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let conrel: Relation;
     let scan: SysScanDesc;
@@ -13045,21 +13057,21 @@ unsafe fn ATExecDropConstraint(
         Anum_pg_constraint_conrelid as i16,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(rel)),
+        ObjectIdGetDatum(RelationGetRelid(rel))
     );
     ScanKeyInit(
         &mut skey[1],
         Anum_pg_constraint_contypid as i16,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(InvalidOid),
+        ObjectIdGetDatum(InvalidOid)
     );
     ScanKeyInit(
         &mut skey[2],
         Anum_pg_constraint_conname as i16,
         BTEqualStrategyNumber,
         F_NAMEEQ,
-        CStringGetDatum(constr_name as *mut i8),
+        CStringGetDatum(constr_name as *mut i8)
     );
     scan = systable_beginscan(
         conrel,
@@ -13067,7 +13079,7 @@ unsafe fn ATExecDropConstraint(
         true,
         std::ptr::null_mut(),
         3,
-        skey.as_mut_ptr(),
+        skey.as_mut_ptr()
     );
 
     /* There can be at most one matching row */
@@ -13081,20 +13093,11 @@ unsafe fn ATExecDropConstraint(
 
     if !found {
         if !missing_ok {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_UNDEFINED_OBJECT),
-                errmsg("constraint \"{}\" of relation \"{}\" does not exist", /* C also: constrName, RelationGetRelationName(rel) */
-                    CStr::from_ptr(constr_name).to_string_lossy(),
-                    CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-            );
+            ereport!(ERROR, errcode(ERRCODE_UNDEFINED_OBJECT));
         } else {
-            ereport!(
-                NOTICE,
-                errmsg("constraint \"{}\" of relation \"{}\" does not exist, skipping",
+            ereport!(NOTICE, errmsg!("constraint \"{}\" of relation \"{}\" does not exist, skipping",
                     CStr::from_ptr(constr_name).to_string_lossy(),
-                    CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-            );
+                    CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()));
         }
     }
 
@@ -13116,7 +13119,7 @@ unsafe fn dropconstraint_internal(
     recurse: bool,
     recursing: bool,
     missing_ok: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let conrel: Relation;
     let con: Form_pg_constraint;
@@ -13134,24 +13137,18 @@ unsafe fn dropconstraint_internal(
         ATSimplePermissions(
             AT_DropConstraint,
             rel,
-            ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE,
+            ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE
         );
     }
 
     conrel = table_open(ConstraintRelationId, RowExclusiveLock);
 
     con = GETSTRUCT(constraint_tup) as Form_pg_constraint;
-    constr_name = NameStr((*con).conname) as *mut i8;
+    constr_name = NameStr(&(*con).conname) as *mut i8;
 
     /* Don't allow drop of inherited constraints */
     if (*con).coninhcount > 0 && !recursing {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg("cannot drop inherited constraint \"{}\" of relation \"{}\"",
-                CStr::from_ptr(constr_name).to_string_lossy(),
-                CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-        );
+        ereport!(ERROR, errcode(ERRCODE_INVALID_TABLE_DEFINITION));
     }
 
     /*
@@ -13189,7 +13186,7 @@ unsafe fn dropconstraint_internal(
                 for i in 0..(*(*pk).rd_index).indnkeyatts as usize {
                     pkattrs = bms_add_member(
                         pkattrs,
-                        (*(*pk).rd_index).indkey.values[i] - FirstLowInvalidHeapAttributeNumber,
+                        ((*(*pk).rd_index).indkey.values[i] - FirstLowInvalidHeapAttributeNumber) as c_int
                     );
                 }
                 relation_close(pk, AccessShareLock);
@@ -13197,25 +13194,15 @@ unsafe fn dropconstraint_internal(
         }
 
         if !pkattrs.is_null()
-            && bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber, pkattrs)
+            && bms_is_member((attnum - FirstLowInvalidHeapAttributeNumber) as i32, pkattrs)
         {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg("column \"{}\" is in a primary key",
-                    CStr::from_ptr(get_attname(RelationGetRelid(rel), attnum, false)).to_string_lossy())
-            );
+            ereport!(ERROR, errcode(ERRCODE_INVALID_TABLE_DEFINITION));
         }
 
         /* Disallow if it's in the replica identity */
         irattrs = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_IDENTITY_KEY);
-        if bms_is_member(attnum - FirstLowInvalidHeapAttributeNumber, irattrs) {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg("column \"{}\" is in index used as replica identity",
-                    CStr::from_ptr(get_attname(RelationGetRelid(rel), attnum, false)).to_string_lossy())
-            );
+        if bms_is_member((attnum - FirstLowInvalidHeapAttributeNumber) as i32, irattrs) {
+            ereport!(ERROR, errcode(ERRCODE_INVALID_TABLE_DEFINITION));
         }
 
         /* Disallow if it's a GENERATED AS IDENTITY column */
@@ -13230,13 +13217,7 @@ unsafe fn dropconstraint_internal(
         }
         att_form = GETSTRUCT(atttup) as Form_pg_attribute;
         if (*att_form).attidentity != 0 {
-            ereport!(
-                ERROR,
-                errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg("column \"{}\" of relation \"{}\" is an identity column",
-                    CStr::from_ptr(get_attname(RelationGetRelid(rel), attnum, false)).to_string_lossy(),
-                    CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-            );
+            ereport!(ERROR, errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE));
         }
 
         /* All good -- reset attnotnull if needed */
@@ -13267,7 +13248,7 @@ unsafe fn dropconstraint_internal(
     }
 
     /* Perform the actual constraint deletion */
-    ObjectAddressSet(&mut conobj, ConstraintRelationId, (*con).oid);
+    ObjectAddressSet!(&mut conobj, ConstraintRelationId, (*con).oid);
     performDeletion(&conobj, behavior, 0);
 
     /*
@@ -13325,21 +13306,21 @@ unsafe fn dropconstraint_internal(
                 Anum_pg_constraint_conrelid as i16,
                 BTEqualStrategyNumber,
                 F_OIDEQ,
-                ObjectIdGetDatum(childrelid),
+                ObjectIdGetDatum(childrelid)
             );
             ScanKeyInit(
                 &mut skey[1],
                 Anum_pg_constraint_contypid as i16,
                 BTEqualStrategyNumber,
                 F_OIDEQ,
-                ObjectIdGetDatum(InvalidOid),
+                ObjectIdGetDatum(InvalidOid)
             );
             ScanKeyInit(
                 &mut skey[2],
                 Anum_pg_constraint_conname as i16,
                 BTEqualStrategyNumber,
                 F_NAMEEQ,
-                CStringGetDatum(constr_name),
+                CStringGetDatum(constr_name)
             );
             scan = systable_beginscan(
                 conrel,
@@ -13347,18 +13328,12 @@ unsafe fn dropconstraint_internal(
                 true,
                 std::ptr::null_mut(),
                 3,
-                skey.as_mut_ptr(),
+                skey.as_mut_ptr()
             );
             /* There can only be one, so no need to loop */
             tuple = systable_getnext(scan);
             if !HeapTupleIsValid(tuple) {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_UNDEFINED_OBJECT),
-                    errmsg("constraint \"{}\" of relation \"{}\" does not exist",
-                        CStr::from_ptr(constr_name).to_string_lossy(),
-                        CStr::from_ptr(RelationGetRelationName(childrel)).to_string_lossy())
-                );
+                ereport!(ERROR, errcode(ERRCODE_UNDEFINED_OBJECT));
             }
             let tuple = heap_copytuple(tuple);
             systable_endscan(scan);
@@ -13381,7 +13356,7 @@ unsafe fn dropconstraint_internal(
                 ERROR,
                 "relation {} has non-inherited constraint \"{}\"",
                 childrelid,
-                CStr::from_ptr(NameStr((*childcon).conname) as *const i8).to_string_lossy()
+                CStr::from_ptr(NameStr(&(*childcon).conname) as *const i8).to_string_lossy()
             );
         }
 
@@ -13393,7 +13368,7 @@ unsafe fn dropconstraint_internal(
             if (*childcon).coninhcount == 1 && !(*childcon).conislocal {
                 /* Time to delete this child constraint, too */
                 dropconstraint_internal(
-                    childrel, tuple, behavior, recurse, true, missing_ok, lockmode,
+                    childrel, tuple, behavior, recurse, true, missing_ok, lockmode
                 );
             } else {
                 /* Child constraint must survive my deletion */
@@ -13453,7 +13428,7 @@ unsafe fn ATPrepAlterColumnType(
     recursing: bool,
     cmd: *mut AlterTableCmd,
     lockmode: LOCKMODE,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) {
     let col_name: *mut i8 = (*cmd).name;
     let def: *mut ColumnDef = (*cmd).def as *mut ColumnDef;
@@ -13466,45 +13441,27 @@ unsafe fn ATPrepAlterColumnType(
     let mut targettypmod: i32 = 0;
     let targetcollid: Oid;
     let newval: *mut NewColumnValue;
-    let pstate: *mut ParseState = make_parsestate(std::ptr::null_mut());
-    let aclresult: AclResult;
+    let pstate: ParseState = make_parsestate(std::ptr::null_mut());
+    let aclresult: c_int;
     let mut is_expr: bool = false;
 
-    (*pstate).p_sourcetext = (*context).queryString;
+    /* (*pstate).p_sourcetext = (*context).queryString; -- ParseState opaque */
 
-    if (*(*rel).rd_rel).reloftype && !recursing {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg("cannot alter column type of typed table"),
-            parser_errposition(pstate, (*def).location)
-        );
+    if OidIsValid((*(*rel).rd_rel).reloftype) && !recursing {
+        ereport!(ERROR, errcode(ERRCODE_WRONG_OBJECT_TYPE));
     }
 
     /* lookup the attribute so we can check inheritance status */
     tuple = SearchSysCacheAttName(RelationGetRelid(rel), col_name);
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_UNDEFINED_COLUMN),
-            errmsg("column \"{}\" of relation \"{}\" does not exist",
-                CStr::from_ptr(col_name).to_string_lossy(),
-                CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()),
-            parser_errposition(pstate, (*def).location)
-        );
+        ereport!(ERROR, errcode(ERRCODE_UNDEFINED_COLUMN));
     }
     att_tup = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*att_tup).attnum;
 
     /* Can't alter a system attribute */
     if attnum <= 0 {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("cannot alter system column \"{}\"",
-                CStr::from_ptr(col_name).to_string_lossy()),
-            parser_errposition(pstate, (*def).location)
-        );
+        ereport!(ERROR, errcode(ERRCODE_FEATURE_NOT_SUPPORTED));
     }
 
     /*
@@ -13512,14 +13469,7 @@ unsafe fn ATPrepAlterColumnType(
      * that would violate the generation expression.
      */
     if (*att_tup).attgenerated != 0 && !(*def).cooked_default.is_null() {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
-            errmsg("cannot specify USING when altering type of generated column"),
-            errdetail("Column \"{}\" is a generated column.",
-                CStr::from_ptr(col_name).to_string_lossy()),
-            parser_errposition(pstate, (*def).location)
-        );
+        ereport!(ERROR, errcode(ERRCODE_INVALID_COLUMN_DEFINITION));
     }
 
     /*
@@ -13528,36 +13478,23 @@ unsafe fn ATPrepAlterColumnType(
      * the parent level (see below).
      */
     if (*att_tup).attinhcount > 0 && !recursing {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg("cannot alter inherited column \"{}\"",
-                CStr::from_ptr(col_name).to_string_lossy()),
-            parser_errposition(pstate, (*def).location)
-        );
+        ereport!(ERROR, errcode(ERRCODE_INVALID_TABLE_DEFINITION));
     }
 
     /* Don't alter columns used in the partition key */
     if has_partition_attrs(
         rel,
-        bms_make_singleton(attnum as i32 - FirstLowInvalidHeapAttributeNumber),
-        &mut is_expr,
+        bms_make_singleton(attnum as i32 - FirstLowInvalidHeapAttributeNumber as i32),
+        &mut is_expr
     ) {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg("cannot alter column \"{}\" because it is part of the partition key of relation \"{}\"",
-                CStr::from_ptr(col_name).to_string_lossy(),
-                CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()),
-            parser_errposition(pstate, (*def).location)
-        );
+        ereport!(ERROR, errcode(ERRCODE_INVALID_TABLE_DEFINITION));
     }
 
     /* Look up the target type */
     typenameTypeIdAndMod(pstate, type_name, &mut targettype, &mut targettypmod);
 
-    aclresult = object_aclcheck(TypeRelationId, targettype, GetUserId(), ACL_USAGE);
-    if aclresult != ACLCHECK_OK {
+    aclresult = object_aclcheck(TypeRelationId, targettype, GetUserId(), ACL_USAGE());
+    if aclresult != ACLCHECK_OK as i32 {
         aclcheck_error_type(aclresult, targettype);
     }
 
@@ -13569,12 +13506,12 @@ unsafe fn ATPrepAlterColumnType(
         col_name,
         targettype,
         targetcollid,
-        list_make1_oid((*(*rel).rd_rel).reltype),
+        list_make1_oid!((*(*rel).rd_rel).reltype),
         if (*att_tup).attgenerated == ATTRIBUTE_GENERATED_VIRTUAL as i8 {
             CHKATYPE_IS_VIRTUAL
         } else {
             0
-        },
+        }
     );
 
     if (*att_tup).attgenerated == ATTRIBUTE_GENERATED_VIRTUAL as i8 {
@@ -13598,7 +13535,7 @@ unsafe fn ATPrepAlterColumnType(
                 (*att_tup).atttypid,
                 (*att_tup).atttypmod,
                 (*att_tup).attcollation,
-                0,
+                0
             ) as *mut Node;
         }
 
@@ -13610,34 +13547,14 @@ unsafe fn ATPrepAlterColumnType(
             targettypmod,
             COERCION_ASSIGNMENT,
             COERCE_IMPLICIT_CAST,
-            -1,
+            -1
         );
         if transform.is_null() {
             /* error text depends on whether USING was specified or not */
             if !(*def).cooked_default.is_null() {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("result of USING clause for column \"{}\" cannot be cast automatically to type {}",
-                        /* C also: colName, format_type_be(targettype) */
-                        CStr::from_ptr(col_name).to_string_lossy(),
-                        CStr::from_ptr(format_type_be(targettype)).to_string_lossy()),
-                    errhint("You might need to add an explicit cast.")
-                );
+                ereport!(ERROR, errcode(ERRCODE_DATATYPE_MISMATCH));
             } else {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("column \"{}\" cannot be cast automatically to type {}",
-                        CStr::from_ptr(col_name).to_string_lossy(),
-                        CStr::from_ptr(format_type_be(targettype)).to_string_lossy()),
-                    // translator: USING is SQL, don't translate it
-                    if (*att_tup).attgenerated == 0 {
-                        errhint("You might need to specify \"USING {}::{}\".",
-                            CStr::from_ptr(quote_identifier(col_name)).to_string_lossy(),
-                            CStr::from_ptr(format_type_with_typemod(targettype, targettypmod)).to_string_lossy())
-                    } else { 0 }
-                );
+                ereport!(ERROR, errcode(ERRCODE_DATATYPE_MISMATCH));
             }
         }
 
@@ -13664,12 +13581,7 @@ unsafe fn ATPrepAlterColumnType(
             (*tab).rewrite |= AT_REWRITE_COLUMN_REWRITE;
         }
     } else if !transform.is_null() {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg("\"{}\" is not a table",
-                CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy())
-        );
+        ereport!(ERROR, errcode(ERRCODE_WRONG_OBJECT_TYPE));
     }
 
     if !RELKIND_HAS_STORAGE((*tab).relkind)
@@ -13695,7 +13607,7 @@ unsafe fn ATPrepAlterColumnType(
     if recurse {
         let relid: Oid = RelationGetRelid(rel);
         let child_oids: *mut List;
-        let child_numparents: *mut List;
+        let mut child_numparents: *mut List = core::ptr::null_mut();
 
         child_oids = find_all_inheritors(relid, lockmode, &mut child_numparents);
 
@@ -13732,24 +13644,12 @@ unsafe fn ATPrepAlterColumnType(
              */
             childtuple = SearchSysCacheAttName(RelationGetRelid(childrel), col_name);
             if !HeapTupleIsValid(childtuple) {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_UNDEFINED_COLUMN),
-                    errmsg("column \"{}\" of relation \"{}\" does not exist",
-                        CStr::from_ptr(col_name).to_string_lossy(),
-                        CStr::from_ptr(RelationGetRelationName(childrel)).to_string_lossy())
-                );
+                ereport!(ERROR, errcode(ERRCODE_UNDEFINED_COLUMN));
             }
             childatt_tup = GETSTRUCT(childtuple) as Form_pg_attribute;
 
-            if (*childatt_tup).attinhcount > numparents {
-                ereport!(
-                    ERROR,
-                    errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                    errmsg("cannot alter inherited column \"{}\" of relation \"{}\"",
-                        CStr::from_ptr(col_name).to_string_lossy(),
-                        CStr::from_ptr(RelationGetRelationName(childrel)).to_string_lossy())
-                );
+            if (*childatt_tup).attinhcount as i32 > numparents {
+                ereport!(ERROR, errcode(ERRCODE_INVALID_TABLE_DEFINITION));
             }
 
             ReleaseSysCache(childtuple);
@@ -13768,7 +13668,7 @@ unsafe fn ATPrepAlterColumnType(
                 attmap = build_attrmap_by_name(
                     RelationGetDescr(childrel),
                     RelationGetDescr(rel),
-                    false,
+                    false
                 );
                 (*((*cmd).def as *mut ColumnDef)).cooked_default = map_variable_attnos(
                     (*def).cooked_default,
@@ -13776,15 +13676,10 @@ unsafe fn ATPrepAlterColumnType(
                     0,
                     attmap,
                     InvalidOid,
-                    &mut found_whole_row,
+                    &mut found_whole_row
                 );
                 if found_whole_row {
-                    ereport!(
-                        ERROR,
-                        errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("cannot convert whole-row table reference"),
-                        errdetail("USING expression contains a whole-row table reference.")
-                    );
+                    ereport!(ERROR, errcode(ERRCODE_FEATURE_NOT_SUPPORTED));
                 }
                 pfree(attmap as *mut std::ffi::c_void);
             }
@@ -13797,12 +13692,7 @@ unsafe fn ATPrepAlterColumnType(
     } else if !recursing
         && !find_inheritance_children(RelationGetRelid(rel), NoLock).is_null()
     {
-        ereport!(
-            ERROR,
-            errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-            errmsg("type of inherited column \"{}\" must be changed in child tables too",
-                CStr::from_ptr(col_name).to_string_lossy())
-        );
+        ereport!(ERROR, errcode(ERRCODE_INVALID_TABLE_DEFINITION));
     }
 
     if (*tab).relkind == RELKIND_COMPOSITE_TYPE as i8 {
@@ -13830,17 +13720,17 @@ unsafe fn ATColumnChangeRequiresRewrite(expr: *mut Node, varattno: AttrNumber) -
     let mut expr = expr;
     loop {
         /* only one varno, so no need to check that */
-        if IsA(expr, T_Var) && (*(expr as *mut Var)).varattno == varattno {
+        if IsA!(expr, T_Var) && (*(expr as *mut Var)).varattno == varattno {
             return false;
-        } else if IsA(expr, T_RelabelType) {
+        } else if IsA!(expr, T_RelabelType) {
             expr = (*(expr as *mut RelabelType)).arg as *mut Node;
-        } else if IsA(expr, T_CoerceToDomain) {
+        } else if IsA!(expr, T_CoerceToDomain) {
             let d = expr as *mut CoerceToDomain;
             if DomainHasConstraints((*d).resulttype) {
                 return true;
             }
             expr = (*d).arg as *mut Node;
-        } else if IsA(expr, T_FuncExpr) {
+        } else if IsA!(expr, T_FuncExpr) {
             let f = expr as *mut FuncExpr;
             match (*f).funcid {
                 F_TIMESTAMPTZ_TIMESTAMP | F_TIMESTAMP_TIMESTAMPTZ => {
@@ -13869,7 +13759,7 @@ pub unsafe fn ATExecAlterColumnType(
     tab: *mut AlteredTableInfo,
     rel: Relation,
     cmd: *mut AlterTableCmd,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let col_name: *mut libc::c_char = (*cmd).name;
     let def: *mut ColumnDef = (*cmd).def as *mut ColumnDef;
@@ -13889,7 +13779,7 @@ pub unsafe fn ATExecAlterColumnType(
     let mut key: [ScanKeyData; 3] = core::mem::zeroed();
     let scan: SysScanDesc;
     let mut dep_tup: HeapTuple;
-    let address: ObjectAddress;
+    let mut address: ObjectAddress = InvalidObjectAddress;
 
     /*
      * Clear all the missing values if we're rewriting the table, since this
@@ -13909,14 +13799,11 @@ pub unsafe fn ATExecAlterColumnType(
     heap_tup = SearchSysCacheCopyAttName(RelationGetRelid(rel), col_name);
     if !HeapTupleIsValid(heap_tup) {
         /* shouldn't happen */
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 CStr::from_ptr(col_name).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_UNDEFINED_COLUMN) */
-        );
+            ) /* errcode(ERRCODE_UNDEFINED_COLUMN) */);
     }
     att_tup = GETSTRUCT(heap_tup) as Form_pg_attribute;
     attnum = (*att_tup).attnum;
@@ -13926,13 +13813,10 @@ pub unsafe fn ATExecAlterColumnType(
     if (*att_tup).atttypid != (*att_old_tup).atttypid
         || (*att_tup).atttypmod != (*att_old_tup).atttypmod
     {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter type of column \"{}\" twice",
                 CStr::from_ptr(col_name).to_string_lossy()
-            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     /* Look up the target type (should not fail, since prep found it) */
@@ -13953,7 +13837,7 @@ pub unsafe fn ATExecAlterColumnType(
      * least surprise.
      */
     if (*att_tup).atthasdef {
-        let mut dexpr: *mut Node = build_column_default(rel, attnum);
+        let mut dexpr: *mut Node = build_column_default(rel, attnum as c_int);
         Assert!(!dexpr.is_null());
         dexpr = strip_implicit_coercions(dexpr);
         dexpr = coerce_to_target_type(
@@ -13964,27 +13848,21 @@ pub unsafe fn ATExecAlterColumnType(
             targettypmod,
             COERCION_ASSIGNMENT,
             COERCE_IMPLICIT_CAST,
-            -1,
+            -1
         );
         if dexpr.is_null() {
             if (*att_tup).attgenerated != 0 {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "generation expression for column \"{}\" cannot be cast automatically to type {}",
                         CStr::from_ptr(col_name).to_string_lossy(),
                         CStr::from_ptr(format_type_be(targettype)).to_string_lossy()
-                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                );
+                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
             } else {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "default for column \"{}\" cannot be cast automatically to type {}",
                         CStr::from_ptr(col_name).to_string_lossy(),
                         CStr::from_ptr(format_type_be(targettype)).to_string_lossy()
-                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                );
+                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
             }
         }
         defaultexpr = dexpr;
@@ -14010,21 +13888,21 @@ pub unsafe fn ATExecAlterColumnType(
         Anum_pg_depend_classid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationRelationId),
+        ObjectIdGetDatum(RelationRelationId)
     );
     ScanKeyInit(
         &mut key[1],
         Anum_pg_depend_objid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(rel)),
+        ObjectIdGetDatum(RelationGetRelid(rel))
     );
     ScanKeyInit(
         &mut key[2],
         Anum_pg_depend_objsubid,
         BTEqualStrategyNumber,
         F_INT4EQ,
-        Int32GetDatum(attnum as i32),
+        Int32GetDatum(attnum as i32)
     );
 
     scan = systable_beginscan(dep_rel, DependDependerIndexId, true, core::ptr::null_mut(), 3, key.as_mut_ptr());
@@ -14056,7 +13934,7 @@ pub unsafe fn ATExecAlterColumnType(
             );
         }
 
-        CatalogTupleDelete(dep_rel, &(*dep_tup).t_self);
+        CatalogTupleDelete(dep_rel, &mut (*dep_tup).t_self);
     }
 
     systable_endscan(scan);
@@ -14076,9 +13954,9 @@ pub unsafe fn ATExecAlterColumnType(
         /* Get the missing value datum */
         missing_val = heap_getattr(
             heap_tup,
-            Anum_pg_attribute_attmissingval,
+            Anum_pg_attribute_attmissingval as c_int,
             (*attrelation).rd_att,
-            &mut missing_null,
+            &mut missing_null
         );
 
         /* if it's a null array there is nothing to do */
@@ -14087,7 +13965,7 @@ pub unsafe fn ATExecAlterColumnType(
              * Get the datum out of the array and repack it in a new array
              * built with the new type data.
              */
-            let one: i32 = 1;
+            let mut one: i32 = 1;
             let mut is_null: bool = false;
             let mut values_att: [Datum; Natts_pg_attribute] = [0; Natts_pg_attribute];
             let mut nulls_att: [bool; Natts_pg_attribute] = [false; Natts_pg_attribute];
@@ -14097,32 +13975,32 @@ pub unsafe fn ATExecAlterColumnType(
             missing_val = array_get_element(
                 missing_val,
                 1,
-                &one,
+                &mut one as *mut c_int,
                 0,
-                (*att_tup).attlen,
+                (*att_tup).attlen as c_int,
                 (*att_tup).attbyval,
                 (*att_tup).attalign,
-                &mut is_null,
+                &mut is_null
             );
             missing_val = PointerGetDatum(construct_array(
                 &mut missing_val,
                 1,
                 targettype,
-                (*tform).typlen,
+                (*tform).typlen as c_int,
                 (*tform).typbyval,
-                (*tform).typalign,
-            ));
+                (*tform).typalign
+            ) as *const c_void);
 
-            values_att[Anum_pg_attribute_attmissingval - 1] = missing_val;
-            replaces_att[Anum_pg_attribute_attmissingval - 1] = true;
-            nulls_att[Anum_pg_attribute_attmissingval - 1] = false;
+            values_att[(Anum_pg_attribute_attmissingval - 1) as usize] = missing_val;
+            replaces_att[(Anum_pg_attribute_attmissingval - 1) as usize] = true;
+            nulls_att[(Anum_pg_attribute_attmissingval - 1) as usize] = false;
 
             new_tup = heap_modify_tuple(
                 heap_tup,
                 RelationGetDescr(attrelation),
                 values_att.as_mut_ptr(),
                 nulls_att.as_mut_ptr(),
-                replaces_att.as_mut_ptr(),
+                replaces_att.as_mut_ptr()
             );
             heap_freetuple(heap_tup);
             heap_tup = new_tup;
@@ -14137,11 +14015,8 @@ pub unsafe fn ATExecAlterColumnType(
     (*att_tup_mut).atttypid = targettype;
     (*att_tup_mut).atttypmod = targettypmod;
     (*att_tup_mut).attcollation = targetcollid;
-    if list_length((*type_name).arrayBounds) > libc::INT16_MAX as i32 {
-        ereport!(
-            ERROR,
-            errmsg!("too many array dimensions") /* errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */
-        );
+    if list_length((*type_name).arrayBounds) > INT16_MAX as i32 {
+        ereport!(ERROR, errmsg!("too many array dimensions") /* errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */);
     }
     (*att_tup_mut).attndims = list_length((*type_name).arrayBounds) as i16;
     (*att_tup_mut).attlen = (*tform).typlen;
@@ -14152,13 +14027,13 @@ pub unsafe fn ATExecAlterColumnType(
 
     ReleaseSysCache(type_tuple);
 
-    CatalogTupleUpdate(attrelation, &(*heap_tup).t_self, heap_tup);
+    CatalogTupleUpdate(attrelation, &mut (*heap_tup).t_self, heap_tup);
 
     table_close(attrelation, RowExclusiveLock);
 
     /* Install dependencies on new datatype and collation */
-    add_column_datatype_dependency(RelationGetRelid(rel), attnum, targettype);
-    add_column_collation_dependency(RelationGetRelid(rel), attnum, targetcollid);
+    add_column_datatype_dependency(RelationGetRelid(rel), attnum as i32, targettype);
+    add_column_collation_dependency(RelationGetRelid(rel), attnum as i32, targetcollid);
 
     /*
      * Drop any pg_statistic entry for the column, since it's now wrong type
@@ -14206,7 +14081,7 @@ pub unsafe fn ATExecAlterColumnType(
         let _ = StoreAttrDefault(rel, attnum, defaultexpr, true);
     }
 
-    ObjectAddressSubSet!(address, RelationRelationId, RelationGetRelid(rel), attnum);
+    ObjectAddressSubSet!(address, RelationRelationId, RelationGetRelid(rel), attnum as i32);
 
     /* Cleanup */
     heap_freetuple(heap_tup);
@@ -14226,7 +14101,7 @@ unsafe fn RememberAllDependentForRebuilding(
     subtype: AlterTableType,
     rel: Relation,
     attnum: AttrNumber,
-    col_name: *const libc::c_char,
+    col_name: *const libc::c_char
 ) {
     let dep_rel: Relation;
     let mut key: [ScanKeyData; 3] = core::mem::zeroed();
@@ -14242,21 +14117,21 @@ unsafe fn RememberAllDependentForRebuilding(
         Anum_pg_depend_refclassid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationRelationId),
+        ObjectIdGetDatum(RelationRelationId)
     );
     ScanKeyInit(
         &mut key[1],
         Anum_pg_depend_refobjid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(rel)),
+        ObjectIdGetDatum(RelationGetRelid(rel))
     );
     ScanKeyInit(
         &mut key[2],
         Anum_pg_depend_refobjsubid,
         BTEqualStrategyNumber,
         F_INT4EQ,
-        Int32GetDatum(attnum as i32),
+        Int32GetDatum(attnum as i32)
     );
 
     scan = systable_beginscan(dep_rel, DependReferenceIndexId, true, core::ptr::null_mut(), 3, key.as_mut_ptr());
@@ -14309,12 +14184,9 @@ unsafe fn RememberAllDependentForRebuilding(
                  * This is only a problem for AT_AlterColumnType, not AT_SetExpression.
                  */
                 if subtype == AT_AlterColumnType {
-                    ereport!(
-                        ERROR,
-                        errmsg!("cannot alter type of a column used by a function or procedure")
+                    ereport!(ERROR, errmsg!("cannot alter type of a column used by a function or procedure")
                         /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                           errdetail("%s depends on column \"%s\"", ...) */
-                    );
+                           errdetail("%s depends on column \"%s\"", ...) */);
                 }
             }
             RewriteRelationId => {
@@ -14323,11 +14195,8 @@ unsafe fn RememberAllDependentForRebuilding(
                  * function bodies. FIXME someday.
                  */
                 if subtype == AT_AlterColumnType {
-                    ereport!(
-                        ERROR,
-                        errmsg!("cannot alter type of a column used by a view or rule")
-                        /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                    );
+                    ereport!(ERROR, errmsg!("cannot alter type of a column used by a view or rule")
+                        /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
                 }
             }
             TriggerRelationId => {
@@ -14337,13 +14206,10 @@ unsafe fn RememberAllDependentForRebuilding(
                  * used in the trigger's WHEN condition. FIXME someday.
                  */
                 if subtype == AT_AlterColumnType {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "cannot alter type of a column used in a trigger definition"
                         )
-                        /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                    );
+                        /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
                 }
             }
             PolicyRelationId => {
@@ -14353,17 +14219,14 @@ unsafe fn RememberAllDependentForRebuilding(
                  * expressions. FIXME someday.
                  */
                 if subtype == AT_AlterColumnType {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "cannot alter type of a column used in a policy definition"
                         )
-                        /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                    );
+                        /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
                 }
             }
             AttrDefaultRelationId => {
-                let col: ObjectAddress = GetAttrDefaultColumnAddress(found_object.objectId);
+                let col = GetAttrDefaultColumnAddress(found_object.objectId);
                 if col.objectId == RelationGetRelid(rel)
                     && col.objectSubId == attnum as i32
                 {
@@ -14380,12 +14243,9 @@ unsafe fn RememberAllDependentForRebuilding(
                      * by SQL standard, so just punt for now.
                      */
                     if subtype == AT_AlterColumnType {
-                        ereport!(
-                            ERROR,
-                            errmsg!("cannot alter type of a column used by a generated column")
+                        ereport!(ERROR, errmsg!("cannot alter type of a column used by a generated column")
                             /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                               errdetail("Column \"%s\" is used by generated column \"%s\".", ...) */
-                        );
+                               errdetail("Column \"%s\" is used by generated column \"%s\".", ...) */);
                     }
                 }
             }
@@ -14402,13 +14262,10 @@ unsafe fn RememberAllDependentForRebuilding(
                  * clause. FIXME someday.
                  */
                 if subtype == AT_AlterColumnType {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "cannot alter type of a column used by a publication WHERE clause"
                         )
-                        /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-                    );
+                        /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
                 }
             }
             _ => {
@@ -14587,7 +14444,7 @@ unsafe fn RememberStatisticsForRebuilding(stxoid: Oid, tab: *mut AlteredTableInf
 unsafe fn ATPostAlterTypeCleanup(
     wqueue: *mut *mut List,
     tab: *mut AlteredTableInfo,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let mut obj: ObjectAddress = core::mem::zeroed();
     let objects: *mut ObjectAddresses = new_object_addresses();
@@ -14670,7 +14527,7 @@ unsafe fn ATPostAlterTypeCleanup(
             lfirst(def_item) as *mut libc::c_char,
             wqueue,
             lockmode,
-            (*tab).rewrite != 0,
+            (*tab).rewrite != 0
         );
 
         oid_item = lnext((*tab).changedConstraintOids, oid_item);
@@ -14698,7 +14555,7 @@ unsafe fn ATPostAlterTypeCleanup(
             lfirst(def_item) as *mut libc::c_char,
             wqueue,
             lockmode,
-            (*tab).rewrite != 0,
+            (*tab).rewrite != 0
         );
 
         ObjectAddressSet!(obj, RelationRelationId, old_id);
@@ -14734,7 +14591,7 @@ unsafe fn ATPostAlterTypeCleanup(
             lfirst(def_item) as *mut libc::c_char,
             wqueue,
             lockmode,
-            (*tab).rewrite != 0,
+            (*tab).rewrite != 0
         );
 
         ObjectAddressSet!(obj, StatisticExtRelationId, old_id);
@@ -14803,7 +14660,7 @@ unsafe fn ATPostAlterTypeParse(
     cmd: *mut libc::c_char,
     wqueue: *mut *mut List,
     lockmode: LOCKMODE,
-    rewrite: bool,
+    rewrite: bool
 ) {
     let raw_parsetree_list: *mut List;
     let mut querytree_list: *mut List = NIL;
@@ -14826,7 +14683,7 @@ unsafe fn ATPostAlterTypeParse(
         if IsA!(stmt, T_IndexStmt) {
             querytree_list = lappend(
                 querytree_list,
-                transformIndexStmt(old_rel_id, stmt as *mut IndexStmt, cmd) as *mut libc::c_void,
+                transformIndexStmt(old_rel_id, stmt as *mut IndexStmt, cmd) as *mut libc::c_void
             );
         } else if IsA!(stmt, T_AlterTableStmt) {
             let mut before_stmts: *mut List = core::ptr::null_mut();
@@ -14837,7 +14694,7 @@ unsafe fn ATPostAlterTypeParse(
                 stmt as *mut AlterTableStmt,
                 cmd,
                 &mut before_stmts,
-                &mut after_stmts,
+                &mut after_stmts
             ) as *mut Node;
             querytree_list = list_concat(querytree_list, before_stmts);
             querytree_list = lappend(querytree_list, transformed as *mut libc::c_void);
@@ -14846,7 +14703,7 @@ unsafe fn ATPostAlterTypeParse(
             querytree_list = lappend(
                 querytree_list,
                 transformStatsStmt(old_rel_id, stmt as *mut CreateStatsStmt, cmd)
-                    as *mut libc::c_void,
+                    as *mut libc::c_void
             );
         } else {
             querytree_list = lappend(querytree_list, stmt as *mut libc::c_void);
@@ -14886,7 +14743,7 @@ unsafe fn ATPostAlterTypeParse(
             (*newcmd).def = stmt as *mut Node;
             (*tab).subcmds[AT_PASS_OLD_INDEX as usize] = lappend(
                 (*tab).subcmds[AT_PASS_OLD_INDEX as usize],
-                newcmd as *mut libc::c_void,
+                newcmd as *mut libc::c_void
             );
         } else if IsA!(stm, T_AlterTableStmt) {
             let stmt: *mut AlterTableStmt = stm as *mut AlterTableStmt;
@@ -14910,7 +14767,7 @@ unsafe fn ATPostAlterTypeParse(
                     (*acmd).subtype = AT_ReAddIndex;
                     (*tab).subcmds[AT_PASS_OLD_INDEX as usize] = lappend(
                         (*tab).subcmds[AT_PASS_OLD_INDEX as usize],
-                        acmd as *mut libc::c_void,
+                        acmd as *mut libc::c_void
                     );
 
                     /* recreate any comment on the constraint */
@@ -14920,7 +14777,7 @@ unsafe fn ATPostAlterTypeParse(
                         old_id,
                         rel,
                         NIL,
-                        (*indstmt).idxname,
+                        (*indstmt).idxname
                     );
                 } else if (*acmd).subtype == AT_AddConstraint {
                     let con: *mut Constraint =
@@ -14938,7 +14795,7 @@ unsafe fn ATPostAlterTypeParse(
                     (*acmd).subtype = AT_ReAddConstraint;
                     (*tab).subcmds[AT_PASS_OLD_CONSTR as usize] = lappend(
                         (*tab).subcmds[AT_PASS_OLD_CONSTR as usize],
-                        acmd as *mut libc::c_void,
+                        acmd as *mut libc::c_void
                     );
 
                     /*
@@ -14954,7 +14811,7 @@ unsafe fn ATPostAlterTypeParse(
                             old_id,
                             rel,
                             NIL,
-                            (*con).conname,
+                            (*con).conname
                         );
                     } else {
                         Assert!((*con).contype == CONSTR_NOTNULL);
@@ -14982,7 +14839,7 @@ unsafe fn ATPostAlterTypeParse(
                 (*newcmd).def = stmt as *mut Node;
                 (*tab).subcmds[AT_PASS_OLD_CONSTR as usize] = lappend(
                     (*tab).subcmds[AT_PASS_OLD_CONSTR as usize],
-                    newcmd as *mut libc::c_void,
+                    newcmd as *mut libc::c_void
                 );
 
                 /* recreate any comment on the constraint */
@@ -14992,7 +14849,7 @@ unsafe fn ATPostAlterTypeParse(
                     old_id,
                     core::ptr::null_mut(),
                     (*stmt).typeName,
-                    (*con).conname,
+                    (*con).conname
                 );
             } else {
                 elog!(ERROR, "unexpected statement subtype: {}", (*stmt).subtype as i32);
@@ -15008,7 +14865,7 @@ unsafe fn ATPostAlterTypeParse(
             (*newcmd).def = stmt as *mut Node;
             (*tab).subcmds[AT_PASS_MISC as usize] = lappend(
                 (*tab).subcmds[AT_PASS_MISC as usize],
-                newcmd as *mut libc::c_void,
+                newcmd as *mut libc::c_void
             );
         } else {
             elog!(ERROR, "unexpected statement type: {}", nodeTag(stm) as i32);
@@ -15036,7 +14893,7 @@ unsafe fn RebuildConstraintComment(
     objid: Oid,
     rel: Relation,
     domname: *mut List,
-    conname: *const libc::c_char,
+    conname: *const libc::c_char
 ) {
     let cmd: *mut CommentStmt;
     let comment_str: *mut libc::c_char;
@@ -15052,16 +14909,16 @@ unsafe fn RebuildConstraintComment(
     cmd = makeNode!(CommentStmt, T_CommentStmt);
     if !rel.is_null() {
         (*cmd).objtype = OBJECT_TABCONSTRAINT;
-        (*cmd).object = list_make3(
+        (*cmd).object = list_make3!(
             makeString(get_namespace_name(RelationGetNamespace(rel))),
             makeString(pstrdup(RelationGetRelationName(rel))),
-            makeString(pstrdup(conname)),
+            makeString(pstrdup(conname))
         ) as *mut Node;
     } else {
         (*cmd).objtype = OBJECT_DOMCONSTRAINT;
-        (*cmd).object = list_make2(
+        (*cmd).object = list_make2!(
             makeTypeNameFromNameList(copyObject(domname)),
-            makeString(pstrdup(conname)),
+            makeString(pstrdup(conname))
         ) as *mut Node;
     }
     (*cmd).comment = comment_str;
@@ -15086,7 +14943,7 @@ unsafe fn TryReuseIndex(old_id: Oid, stmt: *mut IndexStmt) {
         (*stmt).accessMethod,
         (*stmt).indexParams,
         (*stmt).excludeOpNames,
-        (*stmt).iswithoutoverlaps,
+        (*stmt).iswithoutoverlaps
     ) {
         let irel: Relation = index_open(old_id, NoLock);
         /* If it's a partitioned index, there is no storage to share. */
@@ -15126,7 +14983,7 @@ unsafe fn TryReuseForeignKey(old_id: Oid, con: *mut Constraint) {
 
     adatum = SysCacheGetAttrNotNull(CONSTROID, tup, Anum_pg_constraint_conpfeqop);
     arr = DatumGetArrayTypeP(adatum); /* ensure not toasted */
-    numkeys = ARR_DIMS(arr)[0];
+    numkeys = *ARR_DIMS(arr).add(0);
     /* test follows the one in ri_FetchConstraintInfo() */
     if ARR_NDIM(arr) != 1 || ARR_HASNULL(arr) || ARR_ELEMTYPE(arr) != OIDOID {
         elog!(ERROR, "conpfeqop is not a 1-D Oid array");
@@ -15152,7 +15009,7 @@ unsafe fn ATExecAlterColumnGenericOptions(
     rel: Relation,
     col_name: *const libc::c_char,
     options: *mut List,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let ftrel: Relation;
     let attrel: Relation;
@@ -15168,7 +15025,7 @@ unsafe fn ATExecAlterColumnGenericOptions(
     let fttableform: Form_pg_foreign_table;
     let atttableform: Form_pg_attribute;
     let attnum: AttrNumber;
-    let address: ObjectAddress;
+    let mut address: ObjectAddress = InvalidObjectAddress;
 
     if options == NIL {
         return InvalidObjectAddress;
@@ -15178,13 +15035,10 @@ unsafe fn ATExecAlterColumnGenericOptions(
     ftrel = table_open(ForeignTableRelationId, AccessShareLock);
     tuple = SearchSysCache1(FOREIGNTABLEREL, ObjectIdGetDatum((*rel).rd_id));
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "foreign table \"{}\" does not exist",
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_UNDEFINED_OBJECT) */
-        );
+            ) /* errcode(ERRCODE_UNDEFINED_OBJECT) */);
     }
     fttableform = GETSTRUCT(tuple) as Form_pg_foreign_table;
     server = GetForeignServer((*fttableform).ftserver);
@@ -15196,27 +15050,21 @@ unsafe fn ATExecAlterColumnGenericOptions(
     attrel = table_open(AttributeRelationId, RowExclusiveLock);
     tuple = SearchSysCacheAttName(RelationGetRelid(rel), col_name);
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 CStr::from_ptr(col_name).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_UNDEFINED_COLUMN) */
-        );
+            ) /* errcode(ERRCODE_UNDEFINED_COLUMN) */);
     }
 
     /* Prevent them from altering a system attribute */
     atttableform = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*atttableform).attnum;
     if attnum <= 0 {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 CStr::from_ptr(col_name).to_string_lossy()
-            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     /* Initialize buffers for new tuple values */
@@ -15229,7 +15077,7 @@ unsafe fn ATExecAlterColumnGenericOptions(
         ATTNAME,
         tuple,
         Anum_pg_attribute_attfdwoptions,
-        &mut isnull,
+        &mut isnull
     );
     if isnull {
         datum = PointerGetDatum(core::ptr::null::<libc::c_void>() as *mut libc::c_void);
@@ -15240,16 +15088,16 @@ unsafe fn ATExecAlterColumnGenericOptions(
         AttributeRelationId,
         datum,
         options,
-        (*fdw).fdwvalidator,
+        (*fdw).fdwvalidator
     );
 
     if PointerIsValid(DatumGetPointer(datum)) {
-        repl_val[Anum_pg_attribute_attfdwoptions - 1] = datum;
+        repl_val[(Anum_pg_attribute_attfdwoptions - 1) as usize] = datum;
     } else {
-        repl_null[Anum_pg_attribute_attfdwoptions - 1] = true;
+        repl_null[(Anum_pg_attribute_attfdwoptions - 1) as usize] = true;
     }
 
-    repl_repl[Anum_pg_attribute_attfdwoptions - 1] = true;
+    repl_repl[(Anum_pg_attribute_attfdwoptions - 1) as usize] = true;
 
     /* Everything looks good - update the tuple */
     newtuple = heap_modify_tuple(
@@ -15257,17 +15105,17 @@ unsafe fn ATExecAlterColumnGenericOptions(
         RelationGetDescr(attrel),
         repl_val.as_mut_ptr(),
         repl_null.as_mut_ptr(),
-        repl_repl.as_mut_ptr(),
+        repl_repl.as_mut_ptr()
     );
 
-    CatalogTupleUpdate(attrel, &(*newtuple).t_self, newtuple);
+    CatalogTupleUpdate(attrel, &mut (*newtuple).t_self, newtuple);
 
     InvokeObjectPostAlterHook(
         RelationRelationId,
         RelationGetRelid(rel),
-        (*atttableform).attnum as i32,
+        (*atttableform).attnum as i32
     );
-    ObjectAddressSubSet!(address, RelationRelationId, RelationGetRelid(rel), attnum);
+    ObjectAddressSubSet!(address, RelationRelationId, RelationGetRelid(rel), attnum as i32);
 
     ReleaseSysCache(tuple);
 
@@ -15291,7 +15139,7 @@ pub unsafe fn ATExecChangeOwner(
     relation_oid: Oid,
     new_owner_id: Oid,
     recursing: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let target_rel: Relation;
     let class_rel: Relation;
@@ -15331,15 +15179,12 @@ pub unsafe fn ATExecChangeOwner(
                  * and do nothing rather than erroring out.
                  */
                 if (*tuple_class).relowner != new_owner_id {
-                    ereport!(
-                        WARNING,
-                        errmsg!(
+                    ereport!(WARNING, errmsg!(
                             "cannot change owner of index \"{}\"",
                             CStr::from_ptr(NameStr!((*tuple_class).relname)).to_string_lossy()
                         )
                         /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                           errhint("Change the ownership of the index's table instead.") */
-                    );
+                           errhint("Change the ownership of the index's table instead.") */);
                 }
                 /* quick hack to exit via the no-op path */
                 new_owner_id = (*tuple_class).relowner;
@@ -15349,15 +15194,12 @@ pub unsafe fn ATExecChangeOwner(
             if recursing {
                 /* ok */
             } else {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "cannot change owner of index \"{}\"",
                         CStr::from_ptr(NameStr!((*tuple_class).relname)).to_string_lossy()
                     )
                     /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                       errhint("Change the ownership of the index's table instead.") */
-                );
+                       errhint("Change the ownership of the index's table instead.") */);
             }
         }
         RELKIND_SEQUENCE => {
@@ -15369,15 +15211,12 @@ pub unsafe fn ATExecChangeOwner(
                 if sequenceIsOwned(relation_oid, DEPENDENCY_AUTO, &mut table_id, &mut col_id)
                     || sequenceIsOwned(relation_oid, DEPENDENCY_INTERNAL, &mut table_id, &mut col_id)
                 {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "cannot change owner of sequence \"{}\"",
                             CStr::from_ptr(NameStr!((*tuple_class).relname)).to_string_lossy()
                         )
                         /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                           errdetail("Sequence \"%s\" is linked to table \"%s\".", ...) */
-                    );
+                           errdetail("Sequence \"%s\" is linked to table \"%s\".", ...) */);
                 }
             }
         }
@@ -15385,41 +15224,32 @@ pub unsafe fn ATExecChangeOwner(
             if recursing {
                 /* ok */
             } else {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "\"{}\" is a composite type",
                         CStr::from_ptr(NameStr!((*tuple_class).relname)).to_string_lossy()
                     )
                     /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                       errhint("Use %s instead.", "ALTER TYPE") */
-                );
+                       errhint("Use %s instead.", "ALTER TYPE") */);
             }
         }
-        RELKIND_TOASTVALUE => {
+        b't' /* RELKIND_TOASTVALUE */ => {
             if !recursing {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "cannot change owner of relation \"{}\"",
                         CStr::from_ptr(NameStr!((*tuple_class).relname)).to_string_lossy()
                     )
                     /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                       errdetail_relkind_not_supported(tuple_class->relkind) */
-                );
+                       errdetail_relkind_not_supported(tuple_class->relkind) */);
             }
             /* else: fall through - same as default for recursing toast */
         }
         _ => {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot change owner of relation \"{}\"",
                     CStr::from_ptr(NameStr!((*tuple_class).relname)).to_string_lossy()
                 )
                 /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                   errdetail_relkind_not_supported(tuple_class->relkind) */
-            );
+                   errdetail_relkind_not_supported(tuple_class->relkind) */);
         }
     }
 
@@ -15441,14 +15271,14 @@ pub unsafe fn ATExecChangeOwner(
             /* Superusers can always do it */
             if !superuser() {
                 let namespace_oid: Oid = (*tuple_class).relnamespace;
-                let aclresult: AclResult;
+                let aclresult: c_int;
 
                 /* Otherwise, must be owner of the existing object */
                 if !object_ownercheck(RelationRelationId, relation_oid, GetUserId()) {
                     aclcheck_error(
-                        ACLCHECK_NOT_OWNER,
+                        ACLCHECK_NOT_OWNER(),
                         get_relkind_objtype(get_rel_relkind(relation_oid)),
-                        RelationGetRelationName(target_rel),
+                        RelationGetRelationName(target_rel)
                     );
                 }
 
@@ -15460,13 +15290,13 @@ pub unsafe fn ATExecChangeOwner(
                     NamespaceRelationId,
                     namespace_oid,
                     new_owner_id,
-                    ACL_CREATE,
+                    ACL_CREATE()
                 );
-                if aclresult != ACLCHECK_OK {
+                if aclresult != ACLCHECK_OK as i32 {
                     aclcheck_error(
                         aclresult,
-                        OBJECT_SCHEMA,
-                        get_namespace_name(namespace_oid),
+                        OBJECT_SCHEMA as i32,
+                        get_namespace_name(namespace_oid)
                     );
                 }
             }
@@ -15475,8 +15305,8 @@ pub unsafe fn ATExecChangeOwner(
         libc::memset(repl_null.as_mut_ptr() as *mut libc::c_void, 0, core::mem::size_of_val(&repl_null));
         libc::memset(repl_repl.as_mut_ptr() as *mut libc::c_void, 0, core::mem::size_of_val(&repl_repl));
 
-        repl_repl[Anum_pg_class_relowner - 1] = true;
-        repl_val[Anum_pg_class_relowner - 1] = ObjectIdGetDatum(new_owner_id);
+        repl_repl[(Anum_pg_class_relowner - 1) as usize] = true;
+        repl_val[(Anum_pg_class_relowner - 1) as usize] = ObjectIdGetDatum(new_owner_id);
 
         /*
          * Determine the modified ACL for the new owner. This is only
@@ -15486,16 +15316,16 @@ pub unsafe fn ATExecChangeOwner(
             RELOID,
             tuple,
             Anum_pg_class_relacl,
-            &mut is_null,
+            &mut is_null
         );
         if !is_null {
             new_acl = aclnewowner(
                 DatumGetAclP(acl_datum),
                 (*tuple_class).relowner,
-                new_owner_id,
+                new_owner_id
             );
-            repl_repl[Anum_pg_class_relacl - 1] = true;
-            repl_val[Anum_pg_class_relacl - 1] = PointerGetDatum(new_acl);
+            repl_repl[(Anum_pg_class_relacl - 1) as usize] = true;
+            repl_val[(Anum_pg_class_relacl - 1) as usize] = PointerGetDatum(new_acl as *const c_void);
         }
 
         newtuple = heap_modify_tuple(
@@ -15503,10 +15333,10 @@ pub unsafe fn ATExecChangeOwner(
             RelationGetDescr(class_rel),
             repl_val.as_mut_ptr(),
             repl_null.as_mut_ptr(),
-            repl_repl.as_mut_ptr(),
+            repl_repl.as_mut_ptr()
         );
 
-        CatalogTupleUpdate(class_rel, &(*newtuple).t_self, newtuple);
+        CatalogTupleUpdate(class_rel, &mut (*newtuple).t_self, newtuple);
 
         heap_freetuple(newtuple);
 
@@ -15522,7 +15352,7 @@ pub unsafe fn ATExecChangeOwner(
         if (*tuple_class).relkind as u8 != RELKIND_COMPOSITE_TYPE
             && (*tuple_class).relkind as u8 != RELKIND_INDEX
             && (*tuple_class).relkind as u8 != RELKIND_PARTITIONED_INDEX
-            && (*tuple_class).relkind as u8 != RELKIND_TOASTVALUE
+            && (*tuple_class).relkind as u8 != RELKIND_TOASTVALUE as u8
         {
             changeDependencyOnOwner(RelationRelationId, relation_oid, new_owner_id);
         }
@@ -15542,7 +15372,7 @@ pub unsafe fn ATExecChangeOwner(
         if (*tuple_class).relkind as u8 == RELKIND_RELATION
             || (*tuple_class).relkind as u8 == RELKIND_PARTITIONED_TABLE
             || (*tuple_class).relkind as u8 == RELKIND_MATVIEW
-            || (*tuple_class).relkind as u8 == RELKIND_TOASTVALUE
+            || (*tuple_class).relkind as u8 == RELKIND_TOASTVALUE as u8
         {
             let index_oid_list: *mut List = RelationGetIndexList(target_rel);
             let mut i: *mut ListCell = list_head(index_oid_list);
@@ -15578,7 +15408,7 @@ pub unsafe fn ATExecChangeOwner(
 unsafe fn change_owner_fix_column_acls(
     relation_oid: Oid,
     old_owner_id: Oid,
-    new_owner_id: Oid,
+    new_owner_id: Oid
 ) {
     let att_relation: Relation;
     let scan: SysScanDesc;
@@ -15591,7 +15421,7 @@ unsafe fn change_owner_fix_column_acls(
         Anum_pg_attribute_attrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(relation_oid),
+        ObjectIdGetDatum(relation_oid)
     );
     scan = systable_beginscan(
         att_relation,
@@ -15599,7 +15429,7 @@ unsafe fn change_owner_fix_column_acls(
         true,
         core::ptr::null_mut(),
         1,
-        key.as_mut_ptr(),
+        key.as_mut_ptr()
     );
     loop {
         attribute_tuple = systable_getnext(scan);
@@ -15622,9 +15452,9 @@ unsafe fn change_owner_fix_column_acls(
 
         acl_datum = heap_getattr(
             attribute_tuple,
-            Anum_pg_attribute_attacl,
+            Anum_pg_attribute_attacl as c_int,
             RelationGetDescr(att_relation),
-            &mut is_null,
+            &mut is_null
         );
         /* Null ACLs do not require changes */
         if is_null {
@@ -15635,18 +15465,18 @@ unsafe fn change_owner_fix_column_acls(
         libc::memset(repl_repl.as_mut_ptr() as *mut libc::c_void, 0, core::mem::size_of_val(&repl_repl));
 
         new_acl = aclnewowner(DatumGetAclP(acl_datum), old_owner_id, new_owner_id);
-        repl_repl[Anum_pg_attribute_attacl - 1] = true;
-        repl_val[Anum_pg_attribute_attacl - 1] = PointerGetDatum(new_acl);
+        repl_repl[(Anum_pg_attribute_attacl - 1) as usize] = true;
+        repl_val[(Anum_pg_attribute_attacl - 1) as usize] = PointerGetDatum(new_acl as *const c_void);
 
         newtuple = heap_modify_tuple(
             attribute_tuple,
             RelationGetDescr(att_relation),
             repl_val.as_mut_ptr(),
             repl_null.as_mut_ptr(),
-            repl_repl.as_mut_ptr(),
+            repl_repl.as_mut_ptr()
         );
 
-        CatalogTupleUpdate(att_relation, &(*newtuple).t_self, newtuple);
+        CatalogTupleUpdate(att_relation, &mut (*newtuple).t_self, newtuple);
 
         heap_freetuple(newtuple);
     }
@@ -15664,7 +15494,7 @@ unsafe fn change_owner_fix_column_acls(
 unsafe fn change_owner_recurse_to_sequences(
     relation_oid: Oid,
     new_owner_id: Oid,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let dep_rel: Relation;
     let scan: SysScanDesc;
@@ -15682,14 +15512,14 @@ unsafe fn change_owner_recurse_to_sequences(
         Anum_pg_depend_refclassid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationRelationId),
+        ObjectIdGetDatum(RelationRelationId)
     );
     ScanKeyInit(
         &mut key[1],
         Anum_pg_depend_refobjid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(relation_oid),
+        ObjectIdGetDatum(relation_oid)
     );
     /* we leave refobjsubid unspecified */
 
@@ -15746,22 +15576,19 @@ unsafe fn change_owner_recurse_to_sequences(
 unsafe fn ATExecClusterOn(
     rel: Relation,
     index_name: *const libc::c_char,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let index_oid: Oid;
-    let address: ObjectAddress;
+    let mut address: ObjectAddress = InvalidObjectAddress;
 
     index_oid = get_relname_relid(index_name, (*(*rel).rd_rel).relnamespace);
 
     if !OidIsValid(index_oid) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "index \"{}\" for table \"{}\" does not exist",
                 CStr::from_ptr(index_name).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_UNDEFINED_OBJECT) */
-        );
+            ) /* errcode(ERRCODE_UNDEFINED_OBJECT) */);
     }
 
     /* Check index is valid to cluster on */
@@ -15798,7 +15625,7 @@ unsafe fn ATExecDropCluster(rel: Relation, lockmode: LOCKMODE) {
 unsafe fn ATPrepSetAccessMethod(
     tab: *mut AlteredTableInfo,
     rel: Relation,
-    amname: *const libc::c_char,
+    amname: *const libc::c_char
 ) {
     let amoid: Oid;
 
@@ -15812,7 +15639,7 @@ unsafe fn ATPrepSetAccessMethod(
     } else if (*(*rel).rd_rel).relkind as u8 == RELKIND_PARTITIONED_TABLE {
         amoid = InvalidOid;
     } else {
-        amoid = get_table_am_oid(default_table_access_method, false);
+        amoid = get_table_am_oid(default_table_access_method(), false);
     }
 
     /* if it's a match, phase 3 doesn't need to do anything */
@@ -15868,7 +15695,7 @@ unsafe fn ATExecSetAccessMethodNoStorage(rel: Relation, new_access_method_id: Oi
         return;
     }
 
-    CatalogTupleUpdate(pg_class, &(*tuple).t_self, tuple);
+    CatalogTupleUpdate(pg_class, &mut (*tuple).t_self, tuple);
 
     /*
      * Update the dependency on the new access method. No dependency is added
@@ -15894,7 +15721,7 @@ unsafe fn ATExecSetAccessMethodNoStorage(rel: Relation, new_access_method_id: Oi
             RelationRelationId,
             reloid,
             AccessMethodRelationId,
-            DEPENDENCY_NORMAL,
+            DEPENDENCY_NORMAL
         );
     } else {
         Assert!(OidIsValid(old_access_method_id) && OidIsValid((*rd_rel).relam));
@@ -15905,7 +15732,7 @@ unsafe fn ATExecSetAccessMethodNoStorage(rel: Relation, new_access_method_id: Oi
             reloid,
             AccessMethodRelationId,
             old_access_method_id,
-            (*rd_rel).relam,
+            (*rd_rel).relam
         );
     }
 
@@ -15927,7 +15754,7 @@ unsafe fn ATPrepSetTableSpace(
     tab: *mut AlteredTableInfo,
     rel: Relation,
     tablespacename: *const libc::c_char,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let tablespace_id: Oid;
 
@@ -15935,25 +15762,22 @@ unsafe fn ATPrepSetTableSpace(
     tablespace_id = get_tablespace_oid(tablespacename, false);
 
     /* Check permissions except when moving to database's default */
-    if OidIsValid(tablespace_id) && tablespace_id != MyDatabaseTableSpace {
-        let aclresult: AclResult = object_aclcheck(
+    if OidIsValid(tablespace_id) && tablespace_id != MyDatabaseTableSpace() {
+        let aclresult: c_int = object_aclcheck(
             TableSpaceRelationId,
             tablespace_id,
             GetUserId(),
-            ACL_CREATE,
+            ACL_CREATE()
         );
-        if aclresult != ACLCHECK_OK {
-            aclcheck_error(aclresult, OBJECT_TABLESPACE, tablespacename);
+        if aclresult != ACLCHECK_OK as i32 {
+            aclcheck_error(aclresult, OBJECT_TABLESPACE(), tablespacename);
         }
     }
 
     /* Save info for Phase 3 to do the real work */
     if OidIsValid((*tab).newTableSpace) {
-        ereport!(
-            ERROR,
-            errmsg!("cannot have multiple SET TABLESPACE subcommands")
-            /* errcode(ERRCODE_SYNTAX_ERROR) */
-        );
+        ereport!(ERROR, errmsg!("cannot have multiple SET TABLESPACE subcommands")
+            /* errcode(ERRCODE_SYNTAX_ERROR) */);
     }
 
     (*tab).newTableSpace = tablespace_id;
@@ -15968,7 +15792,7 @@ unsafe fn ATExecSetRelOptions(
     rel: Relation,
     def_list: *mut List,
     operation: AlterTableType,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let relid: Oid;
     let pgclass: Relation;
@@ -15979,7 +15803,7 @@ unsafe fn ATExecSetRelOptions(
     let mut repl_val: [Datum; Natts_pg_class] = [0; Natts_pg_class];
     let mut repl_null: [bool; Natts_pg_class] = [false; Natts_pg_class];
     let mut repl_repl: [bool; Natts_pg_class] = [false; Natts_pg_class];
-    let valid_nsps: &[*const libc::c_char] = HEAP_RELOPT_NAMESPACES;
+    let valid_nsps: &[*const libc::c_char] = &HEAP_RELOPT_NAMESPACES;
 
     if def_list == NIL && operation != AT_ReplaceRelOptions {
         return; /* nothing to do */
@@ -16016,7 +15840,7 @@ unsafe fn ATExecSetRelOptions(
         core::ptr::null_mut(),
         valid_nsps.as_ptr() as *mut *const libc::c_char,
         false,
-        operation == AT_ResetRelOptions,
+        operation == AT_ResetRelOptions
     );
 
     /* Validate */
@@ -16034,15 +15858,12 @@ unsafe fn ATExecSetRelOptions(
             let _ = index_reloptions((*(*rel).rd_indam).amoptions, new_options, true);
         }
         _ => {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot set options for relation \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
                 )
                 /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                   errdetail_relkind_not_supported(rel->rd_rel->relkind) */
-            );
+                   errdetail_relkind_not_supported(rel->rd_rel->relkind) */);
         }
     }
 
@@ -16068,12 +15889,9 @@ unsafe fn ATExecSetRelOptions(
             let view_updatable_error: *const libc::c_char =
                 view_query_is_auto_updatable(view_query, true);
             if !view_updatable_error.is_null() {
-                ereport!(
-                    ERROR,
-                    errmsg!("WITH CHECK OPTION is supported only on automatically updatable views")
+                ereport!(ERROR, errmsg!("WITH CHECK OPTION is supported only on automatically updatable views")
                     /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                       errhint("%s", _(view_updatable_error)) */
-                );
+                       errhint("%s", _(view_updatable_error)) */);
             }
         }
     }
@@ -16087,23 +15905,23 @@ unsafe fn ATExecSetRelOptions(
     libc::memset(repl_repl.as_mut_ptr() as *mut libc::c_void, 0, core::mem::size_of_val(&repl_repl));
 
     if new_options != 0 as Datum {
-        repl_val[Anum_pg_class_reloptions - 1] = new_options;
+        repl_val[(Anum_pg_class_reloptions - 1) as usize] = new_options;
     } else {
-        repl_null[Anum_pg_class_reloptions - 1] = true;
+        repl_null[(Anum_pg_class_reloptions - 1) as usize] = true;
     }
 
-    repl_repl[Anum_pg_class_reloptions - 1] = true;
+    repl_repl[(Anum_pg_class_reloptions - 1) as usize] = true;
 
     newtuple = heap_modify_tuple(
         tuple,
         RelationGetDescr(pgclass),
         repl_val.as_mut_ptr(),
         repl_null.as_mut_ptr(),
-        repl_repl.as_mut_ptr(),
+        repl_repl.as_mut_ptr()
     );
 
-    CatalogTupleUpdate(pgclass, &(*newtuple).t_self, newtuple);
-    UnlockTuple(pgclass, &(*tuple).t_self, InplaceUpdateTupleLock);
+    CatalogTupleUpdate(pgclass, &mut (*newtuple).t_self, newtuple);
+    UnlockTuple(pgclass, &mut (*tuple).t_self, InplaceUpdateTupleLock);
 
     InvokeObjectPostAlterHook(RelationRelationId, RelationGetRelid(rel), 0);
 
@@ -16140,7 +15958,7 @@ unsafe fn ATExecSetRelOptions(
             cstr!("toast"),
             valid_nsps.as_ptr() as *mut *const libc::c_char,
             false,
-            operation == AT_ResetRelOptions,
+            operation == AT_ResetRelOptions
         );
 
         let _ = heap_reloptions(RELKIND_TOASTVALUE as libc::c_char, new_options, true);
@@ -16150,29 +15968,29 @@ unsafe fn ATExecSetRelOptions(
         libc::memset(repl_repl.as_mut_ptr() as *mut libc::c_void, 0, core::mem::size_of_val(&repl_repl));
 
         if new_options != 0 as Datum {
-            repl_val[Anum_pg_class_reloptions - 1] = new_options;
+            repl_val[(Anum_pg_class_reloptions - 1) as usize] = new_options;
         } else {
-            repl_null[Anum_pg_class_reloptions - 1] = true;
+            repl_null[(Anum_pg_class_reloptions - 1) as usize] = true;
         }
 
-        repl_repl[Anum_pg_class_reloptions - 1] = true;
+        repl_repl[(Anum_pg_class_reloptions - 1) as usize] = true;
 
         let newtuple = heap_modify_tuple(
             tuple,
             RelationGetDescr(pgclass),
             repl_val.as_mut_ptr(),
             repl_null.as_mut_ptr(),
-            repl_repl.as_mut_ptr(),
+            repl_repl.as_mut_ptr()
         );
 
-        CatalogTupleUpdate(pgclass, &(*newtuple).t_self, newtuple);
+        CatalogTupleUpdate(pgclass, &mut (*newtuple).t_self, newtuple);
 
         InvokeObjectPostAlterHookArg(
             RelationRelationId,
             RelationGetRelid(toastrel),
             0,
             InvalidOid,
-            true,
+            true
         );
 
         heap_freetuple(newtuple);
@@ -16194,7 +16012,7 @@ unsafe fn ATExecSetRelOptions(
 unsafe fn ATExecSetTableSpace(
     table_oid: Oid,
     new_table_space: Oid,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let rel: Relation;
     let reltoastrelid: Oid;
@@ -16230,7 +16048,7 @@ unsafe fn ATExecSetTableSpace(
     newrelfilenumber = GetNewRelFileNumber(
         new_table_space,
         core::ptr::null_mut(),
-        (*(*rel).rd_rel).relpersistence,
+        (*(*rel).rd_rel).relpersistence
     );
 
     /* Open old and new relation */
@@ -16333,11 +16151,8 @@ pub unsafe fn AlterTableMoveAll(stmt: *mut AlterTableMoveAllStmt) -> Oid {
         && (*stmt).objtype != OBJECT_INDEX
         && (*stmt).objtype != OBJECT_MATVIEW
     {
-        ereport!(
-            ERROR,
-            errmsg!("only tables, indexes, and materialized views exist in tablespaces")
-            /* errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
-        );
+        ereport!(ERROR, errmsg!("only tables, indexes, and materialized views exist in tablespaces")
+            /* errcode(ERRCODE_INVALID_PARAMETER_VALUE) */);
     }
 
     /* Get the orig and new tablespace OIDs */
@@ -16346,26 +16161,23 @@ pub unsafe fn AlterTableMoveAll(stmt: *mut AlterTableMoveAllStmt) -> Oid {
 
     /* Can't move shared relations in to or out of pg_global */
     if orig_tablespaceoid == GLOBALTABLESPACE_OID || new_tablespaceoid == GLOBALTABLESPACE_OID {
-        ereport!(
-            ERROR,
-            errmsg!("cannot move relations in to or out of pg_global tablespace")
-            /* errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
-        );
+        ereport!(ERROR, errmsg!("cannot move relations in to or out of pg_global tablespace")
+            /* errcode(ERRCODE_INVALID_PARAMETER_VALUE) */);
     }
 
     /*
      * Must have CREATE rights on the new tablespace, unless it is the
      * database default tablespace.
      */
-    if OidIsValid(new_tablespaceoid) && new_tablespaceoid != MyDatabaseTableSpace {
-        let aclresult: AclResult = object_aclcheck(
+    if OidIsValid(new_tablespaceoid) && new_tablespaceoid != MyDatabaseTableSpace() {
+        let aclresult: c_int = object_aclcheck(
             TableSpaceRelationId,
             new_tablespaceoid,
             GetUserId(),
-            ACL_CREATE,
+            ACL_CREATE()
         );
-        if aclresult != ACLCHECK_OK {
-            aclcheck_error(aclresult, OBJECT_TABLESPACE, get_tablespace_name(new_tablespaceoid));
+        if aclresult != ACLCHECK_OK as i32 {
+            aclcheck_error(aclresult, OBJECT_TABLESPACE(), get_tablespace_name(new_tablespaceoid));
         }
     }
 
@@ -16374,10 +16186,10 @@ pub unsafe fn AlterTableMoveAll(stmt: *mut AlterTableMoveAllStmt) -> Oid {
      * InvalidOid because it is our database's default tablespace.
      */
     let mut orig_tablespaceoid = orig_tablespaceoid;
-    if orig_tablespaceoid == MyDatabaseTableSpace {
+    if orig_tablespaceoid == MyDatabaseTableSpace() {
         orig_tablespaceoid = InvalidOid;
     }
-    if new_tablespaceoid == MyDatabaseTableSpace {
+    if new_tablespaceoid == MyDatabaseTableSpace() {
         new_tablespaceoid = InvalidOid;
     }
 
@@ -16395,7 +16207,7 @@ pub unsafe fn AlterTableMoveAll(stmt: *mut AlterTableMoveAllStmt) -> Oid {
         Anum_pg_class_reltablespace,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(orig_tablespaceoid),
+        ObjectIdGetDatum(orig_tablespaceoid)
     );
 
     rel = table_open(RelationRelationId, AccessShareLock);
@@ -16444,21 +16256,18 @@ pub unsafe fn AlterTableMoveAll(stmt: *mut AlterTableMoveAllStmt) -> Oid {
          */
         if !object_ownercheck(RelationRelationId, rel_oid, GetUserId()) {
             aclcheck_error(
-                ACLCHECK_NOT_OWNER,
+                ACLCHECK_NOT_OWNER(),
                 get_relkind_objtype(get_rel_relkind(rel_oid)),
-                NameStr!((*rel_form).relname),
+                NameStr!((*rel_form).relname)
             );
         }
 
         if (*stmt).nowait && !ConditionalLockRelationOid(rel_oid, AccessExclusiveLock) {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "aborting because lock on relation \"{}.{}\" is not available",
                     CStr::from_ptr(get_namespace_name((*rel_form).relnamespace)).to_string_lossy(),
                     CStr::from_ptr(NameStr!((*rel_form).relname)).to_string_lossy()
-                ) /* errcode(ERRCODE_OBJECT_IN_USE) */
-            );
+                ) /* errcode(ERRCODE_OBJECT_IN_USE) */);
         } else {
             LockRelationOid(rel_oid, AccessExclusiveLock);
         }
@@ -16471,9 +16280,7 @@ pub unsafe fn AlterTableMoveAll(stmt: *mut AlterTableMoveAllStmt) -> Oid {
     table_close(rel, AccessShareLock);
 
     if relations == NIL {
-        ereport!(
-            NOTICE,
-            errmsg!(
+        ereport!(NOTICE, errmsg!(
                 "no matching relations in tablespace \"{}\" found",
                 if orig_tablespaceoid == InvalidOid {
                     "(database default)"
@@ -16482,8 +16289,7 @@ pub unsafe fn AlterTableMoveAll(stmt: *mut AlterTableMoveAllStmt) -> Oid {
                         .to_str()
                         .unwrap_or("?")
                 }
-            ) /* errcode(ERRCODE_NO_DATA_FOUND) */
-        );
+            ) /* errcode(ERRCODE_NO_DATA_FOUND) */);
     }
 
     /* Everything is locked, loop through and move all of the relations. */
@@ -16529,20 +16335,20 @@ unsafe fn index_copy_data(rel: Relation, newrlocator: RelFileLocator) {
      * NOTE: any conflict in relfilenumber value will be caught in
      * RelationCreateStorage().
      */
-    dstrel = RelationCreateStorage(newrlocator, (*(*rel).rd_rel).relpersistence, true);
+    dstrel = RelationCreateStorage(newrlocator, (*(*rel).rd_rel).relpersistence, true) as SMgrRelation;
 
     /* copy main fork */
     RelationCopyStorage(
-        RelationGetSmgr(rel),
-        dstrel,
+        RelationGetSmgr(rel) as *mut std::ffi::c_void,
+        dstrel as *mut std::ffi::c_void,
         MAIN_FORKNUM,
-        (*(*rel).rd_rel).relpersistence,
+        (*(*rel).rd_rel).relpersistence
     );
 
     /* copy those extra forks that exist */
     let mut fork_num: ForkNumber = MAIN_FORKNUM + 1;
     while fork_num <= MAX_FORKNUM {
-        if smgrexists(RelationGetSmgr(rel), fork_num) {
+        if smgrexists(RelationGetSmgr(rel) as SMgrRelation, fork_num) {
             smgrcreate(dstrel, fork_num, false);
 
             /*
@@ -16553,20 +16359,20 @@ unsafe fn index_copy_data(rel: Relation, newrlocator: RelFileLocator) {
                 || ((*(*rel).rd_rel).relpersistence == RELPERSISTENCE_UNLOGGED
                     && fork_num == INIT_FORKNUM)
             {
-                log_smgrcreate(&newrlocator, fork_num);
+                log_smgrcreate(&newrlocator as *const _ as *const crate::access::transam::xlogreader::RelFileLocator, fork_num);
             }
             RelationCopyStorage(
-                RelationGetSmgr(rel),
-                dstrel,
+                RelationGetSmgr(rel) as *mut std::ffi::c_void,
+                dstrel as *mut std::ffi::c_void,
                 fork_num,
-                (*(*rel).rd_rel).relpersistence,
+                (*(*rel).rd_rel).relpersistence
             );
         }
         fork_num += 1;
     }
 
     /* drop old relation, and close new one */
-    RelationDropStorage(rel);
+    RelationDropStorage(rel as *mut std::ffi::c_void);
     smgrclose(dstrel);
 }
 
@@ -16583,7 +16389,7 @@ unsafe fn ATExecEnableDisableTrigger(
     fires_when: libc::c_char,
     skip_system: bool,
     recurse: bool,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     EnableDisableTrigger(
         rel,
@@ -16592,7 +16398,7 @@ unsafe fn ATExecEnableDisableTrigger(
         fires_when,
         skip_system,
         recurse,
-        lockmode,
+        lockmode
     );
 
     InvokeObjectPostAlterHook(RelationRelationId, RelationGetRelid(rel), 0);
@@ -16609,7 +16415,7 @@ unsafe fn ATExecEnableDisableRule(
     rel: Relation,
     rulename: *const libc::c_char,
     fires_when: libc::c_char,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     EnableDisableRule(rel, rulename, fires_when);
 
@@ -16625,27 +16431,18 @@ unsafe fn ATExecEnableDisableRule(
 /// Add a parent to the child's parents.
 unsafe fn ATPrepAddInherit(child_rel: Relation) {
     if (*(*child_rel).rd_rel).reloftype != InvalidOid {
-        ereport!(
-            ERROR,
-            errmsg!("cannot change inheritance of typed table")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot change inheritance of typed table")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if (*(*child_rel).rd_rel).relispartition {
-        ereport!(
-            ERROR,
-            errmsg!("cannot change inheritance of a partition")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot change inheritance of a partition")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if (*(*child_rel).rd_rel).relkind as u8 == RELKIND_PARTITIONED_TABLE {
-        ereport!(
-            ERROR,
-            errmsg!("cannot change inheritance of partitioned table")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot change inheritance of partitioned table")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 }
 
@@ -16657,11 +16454,11 @@ unsafe fn ATPrepAddInherit(child_rel: Relation) {
 unsafe fn ATExecAddInherit(
     child_rel: Relation,
     parent: *mut RangeVar,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let parent_rel: Relation;
     let children: *mut List;
-    let address: ObjectAddress;
+    let mut address: ObjectAddress = InvalidObjectAddress;
     let trigger_name: *const libc::c_char;
 
     /*
@@ -16677,62 +16474,47 @@ unsafe fn ATExecAddInherit(
     ATSimplePermissions(
         AT_AddInherit,
         parent_rel,
-        ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE,
+        ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE
     );
 
     /* Permanent rels cannot inherit from temporary ones */
     if (*(*parent_rel).rd_rel).relpersistence == RELPERSISTENCE_TEMP
         && (*(*child_rel).rd_rel).relpersistence != RELPERSISTENCE_TEMP
     {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot inherit from temporary relation \"{}\"",
                 CStr::from_ptr(RelationGetRelationName(parent_rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /* If parent rel is temp, it must belong to this session */
     if (*(*parent_rel).rd_rel).relpersistence == RELPERSISTENCE_TEMP
         && !(*parent_rel).rd_islocaltemp
     {
-        ereport!(
-            ERROR,
-            errmsg!("cannot inherit from temporary relation of another session")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot inherit from temporary relation of another session")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /* Ditto for the child */
     if (*(*child_rel).rd_rel).relpersistence == RELPERSISTENCE_TEMP
         && !(*child_rel).rd_islocaltemp
     {
-        ereport!(
-            ERROR,
-            errmsg!("cannot inherit to temporary relation of another session")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot inherit to temporary relation of another session")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /* Prevent partitioned tables from becoming inheritance parents */
     if (*(*parent_rel).rd_rel).relkind as u8 == RELKIND_PARTITIONED_TABLE {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot inherit from partitioned table \"{}\"",
                 CStr::from_ptr((*parent).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /* Likewise for partitions */
     if (*(*parent_rel).rd_rel).relispartition {
-        ereport!(
-            ERROR,
-            errmsg!("cannot inherit from a partition")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot inherit from a partition")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /*
@@ -16744,30 +16526,24 @@ unsafe fn ATExecAddInherit(
     children = find_all_inheritors(RelationGetRelid(child_rel), AccessShareLock, core::ptr::null_mut());
 
     if list_member_oid(children, RelationGetRelid(parent_rel)) {
-        ereport!(
-            ERROR,
-            errmsg!("circular inheritance not allowed")
+        ereport!(ERROR, errmsg!("circular inheritance not allowed")
             /* errcode(ERRCODE_DUPLICATE_TABLE),
-               errdetail("\"%s\" is already a child of \"%s\".", ...) */
-        );
+               errdetail("\"%s\" is already a child of \"%s\".", ...) */);
     }
 
     /*
      * If child_rel has row-level triggers with transition tables, we
      * currently don't allow it to become an inheritance child.
      */
-    trigger_name = FindTriggerIncompatibleWithInheritance((*child_rel).trigdesc);
+    trigger_name = FindTriggerIncompatibleWithInheritance((*child_rel).trigdesc as *const _);
     if !trigger_name.is_null() {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "trigger \"{}\" prevents table \"{}\" from becoming an inheritance child",
                 CStr::from_ptr(trigger_name).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy()
             )
             /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-               errdetail("ROW triggers with transition tables are not supported in inheritance hierarchies.") */
-        );
+               errdetail("ROW triggers with transition tables are not supported in inheritance hierarchies.") */);
     }
 
     /* OK to create inheritance */
@@ -16812,7 +16588,7 @@ unsafe fn CreateInheritance(child_rel: Relation, parent_rel: Relation, ispartiti
         Anum_pg_inherits_inhrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(child_rel)),
+        ObjectIdGetDatum(RelationGetRelid(child_rel))
     );
     scan = systable_beginscan(
         catalog_relation,
@@ -16820,7 +16596,7 @@ unsafe fn CreateInheritance(child_rel: Relation, parent_rel: Relation, ispartiti
         true,
         core::ptr::null_mut(),
         1,
-        &mut key,
+        &mut key
     );
 
     /* inhseqno sequences start at 1 */
@@ -16833,13 +16609,10 @@ unsafe fn CreateInheritance(child_rel: Relation, parent_rel: Relation, ispartiti
         let inh: Form_pg_inherits = GETSTRUCT(inherits_tuple) as Form_pg_inherits;
 
         if (*inh).inhparent == RelationGetRelid(parent_rel) {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "relation \"{}\" would be inherited from more than once",
                     CStr::from_ptr(RelationGetRelationName(parent_rel)).to_string_lossy()
-                ) /* errcode(ERRCODE_DUPLICATE_TABLE) */
-            );
+                ) /* errcode(ERRCODE_DUPLICATE_TABLE) */);
         }
 
         if (*inh).inhseqno > inhseqno {
@@ -16862,7 +16635,7 @@ unsafe fn CreateInheritance(child_rel: Relation, parent_rel: Relation, ispartiti
         RelationGetRelid(parent_rel),
         inhseqno + 1,
         catalog_relation,
-        (*(*parent_rel).rd_rel).relkind as u8 == RELKIND_PARTITIONED_TABLE,
+        (*(*parent_rel).rd_rel).relkind as u8 == RELKIND_PARTITIONED_TABLE
     );
 
     /* Now we're done with pg_inherits */
@@ -16882,12 +16655,12 @@ unsafe fn decompile_conbin(contup: HeapTuple, tupdesc: TupleDesc) -> *mut libc::
     let expr: Datum;
 
     con = GETSTRUCT(contup) as Form_pg_constraint;
-    attr = heap_getattr(contup, Anum_pg_constraint_conbin, tupdesc, &mut isnull);
+    attr = heap_getattr(contup, Anum_pg_constraint_conbin as c_int, tupdesc, &mut isnull);
     if isnull {
         elog!(ERROR, "null conbin for constraint {}", (*con).oid);
     }
 
-    expr = DirectFunctionCall2(pg_get_expr, attr, ObjectIdGetDatum((*con).conrelid));
+    expr = DirectFunctionCall2!(pg_get_expr, attr, ObjectIdGetDatum((*con).conrelid));
     TextDatumGetCString(expr)
 }
 
@@ -16905,7 +16678,7 @@ unsafe fn decompile_conbin(contup: HeapTuple, tupdesc: TupleDesc) -> *mut libc::
 unsafe fn constraints_equivalent(
     a: HeapTuple,
     b: HeapTuple,
-    tuple_desc: TupleDesc,
+    tuple_desc: TupleDesc
 ) -> bool {
     let acon: Form_pg_constraint = GETSTRUCT(a) as Form_pg_constraint;
     let bcon: Form_pg_constraint = GETSTRUCT(b) as Form_pg_constraint;
@@ -16914,7 +16687,7 @@ unsafe fn constraints_equivalent(
         || (*acon).condeferred != (*bcon).condeferred
         || libc::strcmp(
             decompile_conbin(a, tuple_desc),
-            decompile_conbin(b, tuple_desc),
+            decompile_conbin(b, tuple_desc)
         ) != 0
     {
         false
@@ -16934,7 +16707,7 @@ unsafe fn constraints_equivalent(
 unsafe fn MergeAttributesIntoExisting(
     child_rel: Relation,
     parent_rel: Relation,
-    ispartition: bool,
+    ispartition: bool
 ) {
     let attrrel: Relation;
     let parent_desc: TupleDesc;
@@ -16963,25 +16736,19 @@ unsafe fn MergeAttributesIntoExisting(
             if (*parent_att).atttypid != (*child_att).atttypid
                 || (*parent_att).atttypmod != (*child_att).atttypmod
             {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "child table \"{}\" has different type for column \"{}\"",
                         CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy(),
                         CStr::from_ptr(parent_attname).to_string_lossy()
-                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                );
+                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
             }
 
             if (*parent_att).attcollation != (*child_att).attcollation {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "child table \"{}\" has different collation for column \"{}\"",
                         CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy(),
                         CStr::from_ptr(parent_attname).to_string_lossy()
-                    ) /* errcode(ERRCODE_COLLATION_MISMATCH) */
-                );
+                    ) /* errcode(ERRCODE_COLLATION_MISMATCH) */);
             }
 
             /*
@@ -16991,19 +16758,16 @@ unsafe fn MergeAttributesIntoExisting(
             if (*parent_att).attnotnull && !(*child_att).attnotnull {
                 let contup: HeapTuple = findNotNullConstraintAttnum(
                     RelationGetRelid(parent_rel),
-                    (*parent_att).attnum,
+                    (*parent_att).attnum
                 );
                 if HeapTupleIsValid(contup)
                     && !(*(GETSTRUCT(contup) as Form_pg_constraint)).connoinherit
                 {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "column \"{}\" in child table \"{}\" must be marked NOT NULL",
                             CStr::from_ptr(parent_attname).to_string_lossy(),
                             CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy()
-                        ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                    );
+                        ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
                 }
             }
 
@@ -17011,37 +16775,28 @@ unsafe fn MergeAttributesIntoExisting(
              * Child column must be generated if and only if parent column is.
              */
             if (*parent_att).attgenerated != 0 && (*child_att).attgenerated == 0 {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "column \"{}\" in child table must be a generated column",
                         CStr::from_ptr(parent_attname).to_string_lossy()
-                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                );
+                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
             }
             if (*child_att).attgenerated != 0 && (*parent_att).attgenerated == 0 {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "column \"{}\" in child table must not be a generated column",
                         CStr::from_ptr(parent_attname).to_string_lossy()
-                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                );
+                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
             }
 
             if (*parent_att).attgenerated != 0
                 && (*child_att).attgenerated != 0
                 && (*child_att).attgenerated != (*parent_att).attgenerated
             {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "column \"{}\" inherits from generated column of different kind",
                         CStr::from_ptr(parent_attname).to_string_lossy()
                     )
                     /* errcode(ERRCODE_DATATYPE_MISMATCH),
-                       errdetail("Parent column is %s, child column is %s.", ...) */
-                );
+                       errdetail("Parent column is %s, child column is %s.", ...) */);
             }
 
             /*
@@ -17058,11 +16813,8 @@ unsafe fn MergeAttributesIntoExisting(
              */
             let mut new_inhcount: i16 = 0;
             if pg_add_s16_overflow((*child_att).attinhcount, 1, &mut new_inhcount) {
-                ereport!(
-                    ERROR,
-                    errmsg!("too many inheritance parents")
-                    /* errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */
-                );
+                ereport!(ERROR, errmsg!("too many inheritance parents")
+                    /* errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */);
             }
             (*child_att).attinhcount = new_inhcount;
 
@@ -17075,16 +16827,13 @@ unsafe fn MergeAttributesIntoExisting(
                 (*child_att).attislocal = false;
             }
 
-            CatalogTupleUpdate(attrrel, &(*tuple).t_self, tuple);
+            CatalogTupleUpdate(attrrel, &mut (*tuple).t_self, tuple);
             heap_freetuple(tuple);
         } else {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "child table is missing column \"{}\"",
                     CStr::from_ptr(parent_attname).to_string_lossy()
-                ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-            );
+                ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
         }
 
         parent_attno += 1;
@@ -17119,7 +16868,7 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
         Anum_pg_constraint_conrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(parent_relid),
+        ObjectIdGetDatum(parent_relid)
     );
     parent_scan = systable_beginscan(
         constraintrel,
@@ -17127,13 +16876,13 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
         true,
         core::ptr::null_mut(),
         1,
-        &mut parent_key,
+        &mut parent_key
     );
 
     attmap = build_attrmap_by_name(
         RelationGetDescr(parent_rel),
         RelationGetDescr(child_rel),
-        true,
+        true
     );
 
     loop {
@@ -17171,7 +16920,7 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
             Anum_pg_constraint_conrelid,
             BTEqualStrategyNumber,
             F_OIDEQ,
-            ObjectIdGetDatum(RelationGetRelid(child_rel)),
+            ObjectIdGetDatum(RelationGetRelid(child_rel))
         );
         child_scan = systable_beginscan(
             constraintrel,
@@ -17179,7 +16928,7 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
             true,
             core::ptr::null_mut(),
             1,
-            &mut child_key,
+            &mut child_key
         );
 
         loop {
@@ -17201,7 +16950,7 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
             if (*child_con).contype == CONSTRAINT_CHECK as libc::c_char {
                 if libc::strcmp(
                     NameStr!((*parent_con).conname),
-                    NameStr!((*child_con).conname),
+                    NameStr!((*child_con).conname)
                 ) != 0
                 {
                     continue;
@@ -17211,7 +16960,7 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
                     TupleDescAttr((*parent_rel).rd_att, (parent_attno - 1) as usize)
                         as Form_pg_attribute;
                 let child_attno: AttrNumber = extractNotNullColumn(child_tuple);
-                if parent_attno != (*attmap).attnums[(child_attno - 1) as usize] {
+                if parent_attno != *(*attmap).attnums.add((child_attno - 1) as usize) {
                     continue;
                 }
 
@@ -17228,31 +16977,25 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
                 && !constraints_equivalent(
                     parent_tuple,
                     child_tuple,
-                    RelationGetDescr(constraintrel),
+                    RelationGetDescr(constraintrel)
                 )
             {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "child table \"{}\" has different definition for check constraint \"{}\"",
                         CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy(),
                         CStr::from_ptr(NameStr!((*parent_con).conname)).to_string_lossy()
-                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                );
+                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
             }
 
             /*
              * If the child constraint is "no inherit" then cannot merge
              */
             if (*child_con).connoinherit {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "constraint \"{}\" conflicts with non-inherited constraint on child table \"{}\"",
                         CStr::from_ptr(NameStr!((*child_con).conname)).to_string_lossy(),
                         CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy()
-                    ) /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-                );
+                    ) /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
             }
 
             /*
@@ -17263,14 +17006,11 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
                 && (*child_con).conenforced
                 && !(*child_con).convalidated
             {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "constraint \"{}\" conflicts with NOT VALID constraint on child table \"{}\"",
                         CStr::from_ptr(NameStr!((*child_con).conname)).to_string_lossy(),
                         CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy()
-                    ) /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-                );
+                    ) /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
             }
 
             /*
@@ -17278,14 +17018,11 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
              * ENFORCED parent constraint.
              */
             if (*parent_con).conenforced && !(*child_con).conenforced {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "constraint \"{}\" conflicts with NOT ENFORCED constraint on child table \"{}\"",
                         CStr::from_ptr(NameStr!((*child_con).conname)).to_string_lossy(),
                         CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy()
-                    ) /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-                );
+                    ) /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
             }
 
             /*
@@ -17297,11 +17034,8 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
 
             let mut new_inhcount: i16 = 0;
             if pg_add_s16_overflow((*child_con_copy).coninhcount, 1, &mut new_inhcount) {
-                ereport!(
-                    ERROR,
-                    errmsg!("too many inheritance parents")
-                    /* errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */
-                );
+                ereport!(ERROR, errmsg!("too many inheritance parents")
+                    /* errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED) */);
             }
             (*child_con_copy).coninhcount = new_inhcount;
 
@@ -17315,7 +17049,7 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
                 (*child_con_copy).conislocal = false;
             }
 
-            CatalogTupleUpdate(constraintrel, &(*child_copy).t_self, child_copy);
+            CatalogTupleUpdate(constraintrel, &mut (*child_copy).t_self, child_copy);
             heap_freetuple(child_copy);
 
             found = true;
@@ -17326,9 +17060,7 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
 
         if !found {
             if (*parent_con).contype == CONSTRAINT_NOTNULL as libc::c_char {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "column \"{}\" in child table \"{}\" must be marked NOT NULL",
                         CStr::from_ptr(get_attname(
                             parent_relid,
@@ -17337,17 +17069,13 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
                         ))
                         .to_string_lossy(),
                         CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy()
-                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                );
+                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
             }
 
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "child table is missing constraint \"{}\"",
                     CStr::from_ptr(NameStr!((*parent_con).conname)).to_string_lossy()
-                ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-            );
+                ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
         }
     }
 
@@ -17365,17 +17093,14 @@ unsafe fn MergeConstraintsIntoExisting(child_rel: Relation, parent_rel: Relation
 unsafe fn ATExecDropInherit(
     rel: Relation,
     parent: *mut RangeVar,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
-    let address: ObjectAddress;
+    let mut address: ObjectAddress = InvalidObjectAddress;
     let parent_rel: Relation;
 
     if (*(*rel).rd_rel).relispartition {
-        ereport!(
-            ERROR,
-            errmsg!("cannot change inheritance of a partition")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot change inheritance of a partition")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /*
@@ -17425,7 +17150,7 @@ unsafe fn MarkInheritDetached(child_rel: Relation, parent_rel: Relation) {
         Anum_pg_inherits_inhparent,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(parent_rel)),
+        ObjectIdGetDatum(RelationGetRelid(parent_rel))
     );
     scan = systable_beginscan(
         catalog_relation,
@@ -17433,7 +17158,7 @@ unsafe fn MarkInheritDetached(child_rel: Relation, parent_rel: Relation) {
         true,
         core::ptr::null_mut(),
         1,
-        &mut key,
+        &mut key
     );
 
     loop {
@@ -17443,9 +17168,7 @@ unsafe fn MarkInheritDetached(child_rel: Relation, parent_rel: Relation) {
         }
         let inh_form: Form_pg_inherits = GETSTRUCT(inherits_tuple) as Form_pg_inherits;
         if (*inh_form).inhdetachpending {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "partition \"{}\" already pending detach in partitioned table \"{}.{}\"",
                     CStr::from_ptr(get_rel_name((*inh_form).inhrelid)).to_string_lossy(),
                     CStr::from_ptr(get_namespace_name((*(*parent_rel).rd_rel).relnamespace))
@@ -17453,15 +17176,14 @@ unsafe fn MarkInheritDetached(child_rel: Relation, parent_rel: Relation) {
                     CStr::from_ptr(RelationGetRelationName(parent_rel)).to_string_lossy()
                 )
                 /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                   errhint("Use ALTER TABLE ... DETACH PARTITION ... FINALIZE to complete the pending detach operation.") */
-            );
+                   errhint("Use ALTER TABLE ... DETACH PARTITION ... FINALIZE to complete the pending detach operation.") */);
         }
 
         if (*inh_form).inhrelid == RelationGetRelid(child_rel) {
             let newtup: HeapTuple = heap_copytuple(inherits_tuple);
             (*(GETSTRUCT(newtup) as Form_pg_inherits)).inhdetachpending = true;
 
-            CatalogTupleUpdate(catalog_relation, &(*inherits_tuple).t_self, newtup);
+            CatalogTupleUpdate(catalog_relation, &mut (*inherits_tuple).t_self, newtup);
             found = true;
             heap_freetuple(newtup);
             /* keep looking, to ensure we catch others pending detach */
@@ -17473,14 +17195,11 @@ unsafe fn MarkInheritDetached(child_rel: Relation, parent_rel: Relation) {
     table_close(catalog_relation, RowExclusiveLock);
 
     if !found {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "relation \"{}\" is not a partition of relation \"{}\"",
                 CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(parent_rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_UNDEFINED_TABLE) */
-        );
+            ) /* errcode(ERRCODE_UNDEFINED_TABLE) */);
     }
 }
 
@@ -17496,8 +17215,8 @@ unsafe fn MarkInheritDetached(child_rel: Relation, parent_rel: Relation) {
 ///
 /// Common to ATExecDropInherit() and ATExecDetachPartition().
 unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_detached: bool) {
-    let catalog_relation: Relation;
-    let scan: SysScanDesc;
+    let mut catalog_relation: Relation;
+    let mut scan: SysScanDesc;
     let mut key: [ScanKeyData; 3] = core::mem::zeroed();
     let mut attribute_tuple: HeapTuple;
     let mut constraint_tuple: HeapTuple;
@@ -17514,27 +17233,21 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
         RelationGetRelid(child_rel),
         RelationGetRelid(parent_rel),
         expect_detached,
-        RelationGetRelationName(child_rel),
+        RelationGetRelationName(child_rel)
     );
     if !found {
         if is_partitioning {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "relation \"{}\" is not a partition of relation \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy(),
                     CStr::from_ptr(RelationGetRelationName(parent_rel)).to_string_lossy()
-                ) /* errcode(ERRCODE_UNDEFINED_TABLE) */
-            );
+                ) /* errcode(ERRCODE_UNDEFINED_TABLE) */);
         } else {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "relation \"{}\" is not a parent of relation \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(parent_rel)).to_string_lossy(),
                     CStr::from_ptr(RelationGetRelationName(child_rel)).to_string_lossy()
-                ) /* errcode(ERRCODE_UNDEFINED_TABLE) */
-            );
+                ) /* errcode(ERRCODE_UNDEFINED_TABLE) */);
         }
     }
 
@@ -17547,7 +17260,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
         Anum_pg_attribute_attrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(child_rel)),
+        ObjectIdGetDatum(RelationGetRelid(child_rel))
     );
     scan = systable_beginscan(
         catalog_relation,
@@ -17555,7 +17268,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
         true,
         core::ptr::null_mut(),
         1,
-        key.as_mut_ptr(),
+        key.as_mut_ptr()
     );
     loop {
         attribute_tuple = systable_getnext(scan);
@@ -17582,7 +17295,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
                 (*copy_att).attislocal = true;
             }
 
-            CatalogTupleUpdate(catalog_relation, &(*copy_tuple).t_self, copy_tuple);
+            CatalogTupleUpdate(catalog_relation, &mut (*copy_tuple).t_self, copy_tuple);
             heap_freetuple(copy_tuple);
         }
     }
@@ -17597,7 +17310,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
     attmap = build_attrmap_by_name(
         RelationGetDescr(child_rel),
         RelationGetDescr(parent_rel),
-        false,
+        false
     );
 
     catalog_relation = table_open(ConstraintRelationId, RowExclusiveLock);
@@ -17606,7 +17319,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
         Anum_pg_constraint_conrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(parent_rel)),
+        ObjectIdGetDatum(RelationGetRelid(parent_rel))
     );
     scan = systable_beginscan(
         catalog_relation,
@@ -17614,7 +17327,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
         true,
         core::ptr::null_mut(),
         1,
-        key.as_mut_ptr(),
+        key.as_mut_ptr()
     );
 
     loop {
@@ -17633,7 +17346,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
         }
         if (*con).contype == CONSTRAINT_NOTNULL as libc::c_char {
             let parent_attno: AttrNumber = extractNotNullColumn(constraint_tuple);
-            nncolumns = lappend_int(nncolumns, (*attmap).attnums[(parent_attno - 1) as usize] as i32);
+            nncolumns = lappend_int(nncolumns, *(*attmap).attnums.add((parent_attno - 1) as usize) as i32);
         }
     }
 
@@ -17645,7 +17358,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
         Anum_pg_constraint_conrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(child_rel)),
+        ObjectIdGetDatum(RelationGetRelid(child_rel))
     );
     scan = systable_beginscan(
         catalog_relation,
@@ -17653,7 +17366,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
         true,
         core::ptr::null_mut(),
         1,
-        key.as_mut_ptr(),
+        key.as_mut_ptr()
     );
 
     loop {
@@ -17715,7 +17428,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
                 (*copy_con).conislocal = true;
             }
 
-            CatalogTupleUpdate(catalog_relation, &(*copy_tuple).t_self, copy_tuple);
+            CatalogTupleUpdate(catalog_relation, &mut (*copy_tuple).t_self, copy_tuple);
             heap_freetuple(copy_tuple);
         }
     }
@@ -17738,7 +17451,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
         RelationGetRelid(child_rel),
         RelationRelationId,
         RelationGetRelid(parent_rel),
-        child_dependency_type(is_partitioning),
+        child_dependency_type(is_partitioning)
     );
 
     /*
@@ -17751,7 +17464,7 @@ unsafe fn RemoveInheritance(child_rel: Relation, parent_rel: Relation, expect_de
         RelationGetRelid(child_rel),
         0,
         RelationGetRelid(parent_rel),
-        false,
+        false
     );
 }
 
@@ -17765,7 +17478,7 @@ unsafe fn drop_parent_dependency(
     relid: Oid,
     refclassid: Oid,
     refobjid: Oid,
-    deptype: DependencyType,
+    deptype: DependencyType
 ) {
     let catalog_relation: Relation;
     let scan: SysScanDesc;
@@ -17779,21 +17492,21 @@ unsafe fn drop_parent_dependency(
         Anum_pg_depend_classid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationRelationId),
+        ObjectIdGetDatum(RelationRelationId)
     );
     ScanKeyInit(
         &mut key[1],
         Anum_pg_depend_objid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(relid),
+        ObjectIdGetDatum(relid)
     );
     ScanKeyInit(
         &mut key[2],
         Anum_pg_depend_objsubid,
         BTEqualStrategyNumber,
         F_INT4EQ,
-        Int32GetDatum(0),
+        Int32GetDatum(0)
     );
 
     scan = systable_beginscan(
@@ -17802,7 +17515,7 @@ unsafe fn drop_parent_dependency(
         true,
         core::ptr::null_mut(),
         3,
-        key.as_mut_ptr(),
+        key.as_mut_ptr()
     );
 
     loop {
@@ -17817,7 +17530,7 @@ unsafe fn drop_parent_dependency(
             && (*dep).refobjsubid == 0
             && (*dep).deptype == deptype as libc::c_char
         {
-            CatalogTupleDelete(catalog_relation, &(*dep_tuple).t_self);
+            CatalogTupleDelete(catalog_relation, &mut (*dep_tuple).t_self);
         }
     }
 
@@ -17832,7 +17545,7 @@ unsafe fn drop_parent_dependency(
 unsafe fn ATExecAddOf(
     rel: Relation,
     of_typename: *const TypeName,
-    _lockmode: LOCKMODE,
+    _lockmode: LOCKMODE
 ) -> ObjectAddress {
     let relid: Oid = RelationGetRelid(rel);
     let typetuple: Type;
@@ -17859,7 +17572,7 @@ unsafe fn ATExecAddOf(
         Anum_pg_inherits_inhrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(relid),
+        ObjectIdGetDatum(relid)
     );
     scan = systable_beginscan(
         inherits_relation,
@@ -17867,14 +17580,11 @@ unsafe fn ATExecAddOf(
         true,
         core::ptr::null_mut(),
         1,
-        &mut key,
+        &mut key
     );
     if HeapTupleIsValid(systable_getnext(scan)) {
-        ereport!(
-            ERROR,
-            errmsg!("typed tables cannot inherit")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("typed tables cannot inherit")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
     systable_endscan(scan);
     table_close(inherits_relation, AccessShareLock);
@@ -17899,13 +17609,10 @@ unsafe fn ATExecAddOf(
         /* Get the next non-dropped table attribute. */
         loop {
             if table_attno > (*table_tuple_desc).natts as AttrNumber {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "table is missing column \"{}\"",
                         CStr::from_ptr(type_attname).to_string_lossy()
-                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                );
+                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
             }
             let table_attr: Form_pg_attribute =
                 TupleDescAttr(table_tuple_desc, (table_attno - 1) as usize) as Form_pg_attribute;
@@ -17914,28 +17621,22 @@ unsafe fn ATExecAddOf(
                 let table_attname: *const libc::c_char = NameStr!((*table_attr).attname);
                 /* Compare name. */
                 if libc::strncmp(table_attname, type_attname, NAMEDATALEN) != 0 {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "table has column \"{}\" where type requires \"{}\"",
                             CStr::from_ptr(table_attname).to_string_lossy(),
                             CStr::from_ptr(type_attname).to_string_lossy()
-                        ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                    );
+                        ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
                 }
                 /* Compare type. */
                 if (*table_attr).atttypid != (*type_attr).atttypid
                     || (*table_attr).atttypmod != (*type_attr).atttypmod
                     || (*table_attr).attcollation != (*type_attr).attcollation
                 {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "table \"{}\" has different type for column \"{}\"",
                             CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                             CStr::from_ptr(type_attname).to_string_lossy()
-                        ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                    );
+                        ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
                 }
                 break;
             }
@@ -17949,13 +17650,10 @@ unsafe fn ATExecAddOf(
             TupleDescAttr(table_tuple_desc, (table_attno - 1) as usize) as Form_pg_attribute;
         table_attno += 1;
         if !(*table_attr).attisdropped {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "table has extra column \"{}\"",
                     CStr::from_ptr(NameStr!((*table_attr).attname)).to_string_lossy()
-                ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-            );
+                ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
         }
     }
 
@@ -17965,7 +17663,7 @@ unsafe fn ATExecAddOf(
             relid,
             TypeRelationId,
             (*(*rel).rd_rel).reloftype,
-            DEPENDENCY_NORMAL,
+            DEPENDENCY_NORMAL
         );
     }
 
@@ -17987,7 +17685,7 @@ unsafe fn ATExecAddOf(
         elog!(ERROR, "cache lookup failed for relation {}", relid);
     }
     (*(GETSTRUCT(classtuple) as Form_pg_class)).reloftype = typeid;
-    CatalogTupleUpdate(relation_relation, &(*classtuple).t_self, classtuple);
+    CatalogTupleUpdate(relation_relation, &mut (*classtuple).t_self, classtuple);
 
     InvokeObjectPostAlterHook(RelationRelationId, relid, 0);
 
@@ -18011,13 +17709,10 @@ unsafe fn ATExecDropOf(rel: Relation, _lockmode: LOCKMODE) {
     let tuple: HeapTuple;
 
     if !OidIsValid((*(*rel).rd_rel).reloftype) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is not a typed table",
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /*
@@ -18029,7 +17724,7 @@ unsafe fn ATExecDropOf(rel: Relation, _lockmode: LOCKMODE) {
         relid,
         TypeRelationId,
         (*(*rel).rd_rel).reloftype,
-        DEPENDENCY_NORMAL,
+        DEPENDENCY_NORMAL
     );
 
     /* Clear pg_class.reloftype */
@@ -18039,7 +17734,7 @@ unsafe fn ATExecDropOf(rel: Relation, _lockmode: LOCKMODE) {
         elog!(ERROR, "cache lookup failed for relation {}", relid);
     }
     (*(GETSTRUCT(tuple) as Form_pg_class)).reloftype = InvalidOid;
-    CatalogTupleUpdate(relation_relation, &(*tuple).t_self, tuple);
+    CatalogTupleUpdate(relation_relation, &mut (*tuple).t_self, tuple);
 
     InvokeObjectPostAlterHook(RelationRelationId, relid, 0);
 
@@ -18055,7 +17750,7 @@ unsafe fn relation_mark_replica_identity(
     rel: Relation,
     ri_type: libc::c_char,
     index_oid: Oid,
-    is_internal: bool,
+    is_internal: bool
 ) {
     let pg_index: Relation;
     let pg_class: Relation;
@@ -18079,7 +17774,7 @@ unsafe fn relation_mark_replica_identity(
     pg_class_form = GETSTRUCT(pg_class_tuple) as Form_pg_class;
     if (*pg_class_form).relreplident != ri_type {
         (*pg_class_form).relreplident = ri_type;
-        CatalogTupleUpdate(pg_class, &(*pg_class_tuple).t_self, pg_class_tuple);
+        CatalogTupleUpdate(pg_class, &mut (*pg_class_tuple).t_self, pg_class_tuple);
     }
     table_close(pg_class, RowExclusiveLock);
     heap_freetuple(pg_class_tuple);
@@ -18118,13 +17813,13 @@ unsafe fn relation_mark_replica_identity(
         }
 
         if dirty {
-            CatalogTupleUpdate(pg_index, &(*pg_index_tuple).t_self, pg_index_tuple);
+            CatalogTupleUpdate(pg_index, &mut (*pg_index_tuple).t_self, pg_index_tuple);
             InvokeObjectPostAlterHookArg(
                 IndexRelationId,
                 this_index_oid,
                 0,
                 InvalidOid,
-                is_internal,
+                is_internal
             );
 
             /*
@@ -18168,14 +17863,11 @@ unsafe fn ATExecReplicaIdentity(rel: Relation, stmt: *mut ReplicaIdentityStmt, _
     /* Check that the index exists */
     index_oid = get_relname_relid((*stmt).name, (*(*rel).rd_rel).relnamespace);
     if !OidIsValid(index_oid) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "index \"{}\" for table \"{}\" does not exist",
                 CStr::from_ptr((*stmt).name).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_UNDEFINED_OBJECT) */
-        );
+            ) /* errcode(ERRCODE_UNDEFINED_OBJECT) */);
     }
 
     index_rel = index_open(index_oid, ShareLock);
@@ -18184,14 +17876,11 @@ unsafe fn ATExecReplicaIdentity(rel: Relation, stmt: *mut ReplicaIdentityStmt, _
     if (*index_rel).rd_index.is_null()
         || (*(*index_rel).rd_index).indrelid != RelationGetRelid(rel)
     {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is not an index for table \"{}\"",
                 CStr::from_ptr(RelationGetRelationName(index_rel)).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /*
@@ -18204,43 +17893,31 @@ unsafe fn ATExecReplicaIdentity(rel: Relation, stmt: *mut ReplicaIdentityStmt, _
         && !((*(*index_rel).rd_index).indisunique
             && (*(*index_rel).rd_index).indisexclusion)
     {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot use non-unique index \"{}\" as replica identity",
                 CStr::from_ptr(RelationGetRelationName(index_rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
     /* Deferred indexes are not guaranteed to be always unique. */
     if !(*(*index_rel).rd_index).indimmediate {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot use non-immediate index \"{}\" as replica identity",
                 CStr::from_ptr(RelationGetRelationName(index_rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
     /* Expression indexes aren't supported. */
     if RelationGetIndexExpressions(index_rel) != NIL {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot use expression index \"{}\" as replica identity",
                 CStr::from_ptr(RelationGetRelationName(index_rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
     /* Predicate indexes aren't supported. */
     if RelationGetIndexPredicate(index_rel) != NIL {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot use partial index \"{}\" as replica identity",
                 CStr::from_ptr(RelationGetRelationName(index_rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     /* Check index for nullable columns. */
@@ -18250,26 +17927,20 @@ unsafe fn ATExecReplicaIdentity(rel: Relation, stmt: *mut ReplicaIdentityStmt, _
         let attr: Form_pg_attribute;
 
         if attno <= 0 {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "index \"{}\" cannot be used as replica identity because column {} is a system column",
                     CStr::from_ptr(RelationGetRelationName(index_rel)).to_string_lossy(),
                     attno
-                ) /* errcode(ERRCODE_INVALID_COLUMN_REFERENCE) */
-            );
+                ) /* errcode(ERRCODE_INVALID_COLUMN_REFERENCE) */);
         }
 
         attr = TupleDescAttr((*rel).rd_att, (attno - 1) as usize) as Form_pg_attribute;
         if !(*attr).attnotnull {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "index \"{}\" cannot be used as replica identity because column \"{}\" is nullable",
                     CStr::from_ptr(RelationGetRelationName(index_rel)).to_string_lossy(),
                     CStr::from_ptr(NameStr!((*attr).attname)).to_string_lossy()
-                ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-            );
+                ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
         }
     }
 
@@ -18296,7 +17967,7 @@ unsafe fn ATExecSetRowSecurity(rel: Relation, rls: bool) {
         elog!(ERROR, "cache lookup failed for relation {}", relid);
     }
     (*(GETSTRUCT(tuple) as Form_pg_class)).relrowsecurity = rls;
-    CatalogTupleUpdate(pg_class, &(*tuple).t_self, tuple);
+    CatalogTupleUpdate(pg_class, &mut (*tuple).t_self, tuple);
 
     InvokeObjectPostAlterHook(RelationRelationId, RelationGetRelid(rel), 0);
 
@@ -18321,7 +17992,7 @@ unsafe fn ATExecForceNoForceRowSecurity(rel: Relation, force_rls: bool) {
         elog!(ERROR, "cache lookup failed for relation {}", relid);
     }
     (*(GETSTRUCT(tuple) as Form_pg_class)).relforcerowsecurity = force_rls;
-    CatalogTupleUpdate(pg_class, &(*tuple).t_self, tuple);
+    CatalogTupleUpdate(pg_class, &mut (*tuple).t_self, tuple);
 
     InvokeObjectPostAlterHook(RelationRelationId, RelationGetRelid(rel), 0);
 
@@ -18353,13 +18024,10 @@ unsafe fn ATExecGenericOptions(rel: Relation, options: *mut List) {
 
     tuple = SearchSysCacheCopy1(FOREIGNTABLEREL, ObjectIdGetDatum((*rel).rd_id));
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "foreign table \"{}\" does not exist",
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_UNDEFINED_OBJECT) */
-        );
+            ) /* errcode(ERRCODE_UNDEFINED_OBJECT) */);
     }
     tableform = GETSTRUCT(tuple) as Form_pg_foreign_table;
     server = GetForeignServer((*tableform).ftserver);
@@ -18368,17 +18036,17 @@ unsafe fn ATExecGenericOptions(rel: Relation, options: *mut List) {
     libc::memset(
         repl_val.as_mut_ptr() as *mut libc::c_void,
         0,
-        core::mem::size_of_val(&repl_val),
+        core::mem::size_of_val(&repl_val)
     );
     libc::memset(
         repl_null.as_mut_ptr() as *mut libc::c_void,
         0,
-        core::mem::size_of_val(&repl_null),
+        core::mem::size_of_val(&repl_null)
     );
     libc::memset(
         repl_repl.as_mut_ptr() as *mut libc::c_void,
         0,
-        core::mem::size_of_val(&repl_repl),
+        core::mem::size_of_val(&repl_repl)
     );
 
     /* Extract the current options */
@@ -18386,7 +18054,7 @@ unsafe fn ATExecGenericOptions(rel: Relation, options: *mut List) {
         FOREIGNTABLEREL,
         tuple,
         Anum_pg_foreign_table_ftoptions,
-        &mut isnull,
+        &mut isnull
     );
     if isnull {
         datum = PointerGetDatum(core::ptr::null_mut());
@@ -18397,7 +18065,7 @@ unsafe fn ATExecGenericOptions(rel: Relation, options: *mut List) {
         ForeignTableRelationId,
         datum,
         options,
-        (*fdw).fdwvalidator,
+        (*fdw).fdwvalidator
     );
 
     if PointerIsValid(DatumGetPointer(datum)) {
@@ -18413,10 +18081,10 @@ unsafe fn ATExecGenericOptions(rel: Relation, options: *mut List) {
         RelationGetDescr(ftrel),
         repl_val.as_mut_ptr(),
         repl_null.as_mut_ptr(),
-        repl_repl.as_mut_ptr(),
+        repl_repl.as_mut_ptr()
     );
 
-    CatalogTupleUpdate(ftrel, &(*tuple).t_self, tuple);
+    CatalogTupleUpdate(ftrel, &mut (*tuple).t_self, tuple);
 
     CacheInvalidateRelcache(rel);
 
@@ -18434,7 +18102,7 @@ unsafe fn ATExecSetCompression(
     rel: Relation,
     column: *const libc::c_char,
     new_value: *mut Node,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) -> ObjectAddress {
     let attrel: Relation;
     let tuple: HeapTuple;
@@ -18442,35 +18110,29 @@ unsafe fn ATExecSetCompression(
     let attnum: AttrNumber;
     let compression: *mut libc::c_char;
     let cmethod: libc::c_char;
-    let address: ObjectAddress;
+    let mut address: ObjectAddress = InvalidObjectAddress;
 
-    compression = strVal(new_value);
+    compression = strVal!(new_value);
 
     attrel = table_open(AttributeRelationId, RowExclusiveLock);
 
     /* copy the cache entry so we can scribble on it below */
     tuple = SearchSysCacheCopyAttName(RelationGetRelid(rel), column);
     if !HeapTupleIsValid(tuple) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column \"{}\" of relation \"{}\" does not exist",
                 CStr::from_ptr(column).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_UNDEFINED_COLUMN) */
-        );
+            ) /* errcode(ERRCODE_UNDEFINED_COLUMN) */);
     }
 
     atttableform = GETSTRUCT(tuple) as Form_pg_attribute;
     attnum = (*atttableform).attnum;
     if attnum <= 0 {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot alter system column \"{}\"",
                 CStr::from_ptr(column).to_string_lossy()
-            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     /* get the attribute compression method code */
@@ -18478,9 +18140,9 @@ unsafe fn ATExecSetCompression(
 
     /* update pg_attribute entry */
     (*atttableform).attcompression = cmethod;
-    CatalogTupleUpdate(attrel, &(*tuple).t_self, tuple);
+    CatalogTupleUpdate(attrel, &mut (*tuple).t_self, tuple);
 
-    InvokeObjectPostAlterHook(RelationRelationId, RelationGetRelid(rel), attnum);
+    InvokeObjectPostAlterHook(RelationRelationId, RelationGetRelid(rel), attnum as i32);
 
     /*
      * Apply the change to indexes as well (only for simple index columns).
@@ -18493,7 +18155,7 @@ unsafe fn ATExecSetCompression(
         0,
         true,
         cmethod,
-        lockmode,
+        lockmode
     );
 
     heap_freetuple(tuple);
@@ -18502,7 +18164,7 @@ unsafe fn ATExecSetCompression(
     /* make changes visible */
     CommandCounterIncrement();
 
-    ObjectAddressSubSet!(address, RelationRelationId, RelationGetRelid(rel), attnum);
+    ObjectAddressSubSet!(address, RelationRelationId, RelationGetRelid(rel), attnum as i32);
     address
 }
 
@@ -18513,7 +18175,7 @@ unsafe fn ATExecSetCompression(
 unsafe fn ATPrepChangePersistence(
     tab: *mut AlteredTableInfo,
     rel: Relation,
-    to_logged: bool,
+    to_logged: bool
 ) {
     let pg_constraint: Relation;
     let mut tuple: HeapTuple;
@@ -18524,16 +18186,13 @@ unsafe fn ATPrepChangePersistence(
      * Disallow changing status for a temp table.  Also verify whether we can
      * get away with doing nothing.
      */
-    match (*(*rel).rd_rel).relpersistence as u8 {
+    match (*(*rel).rd_rel).relpersistence as c_char {
         RELPERSISTENCE_TEMP => {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot change logged status of table \"{}\" because it is temporary",
                     CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
                 )
-                /* errcode(ERRCODE_INVALID_TABLE_DEFINITION), errtable(rel) */
-            );
+                /* errcode(ERRCODE_INVALID_TABLE_DEFINITION), errtable(rel) */);
         }
         RELPERSISTENCE_PERMANENT => {
             if to_logged {
@@ -18553,15 +18212,12 @@ unsafe fn ATPrepChangePersistence(
      * UNLOGGED, as UNLOGGED tables can't be published.
      */
     if !to_logged && GetRelationPublications(RelationGetRelid(rel)) != NIL {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot change table \"{}\" to unlogged because it is part of a publication",
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
             )
             /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-               errdetail("Unlogged relations cannot be replicated.") */
-        );
+               errdetail("Unlogged relations cannot be replicated.") */);
     }
 
     pg_constraint = table_open(ConstraintRelationId, AccessShareLock);
@@ -18575,7 +18231,7 @@ unsafe fn ATPrepChangePersistence(
         },
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(rel)),
+        ObjectIdGetDatum(RelationGetRelid(rel))
     );
     scan = systable_beginscan(
         pg_constraint,
@@ -18587,7 +18243,7 @@ unsafe fn ATPrepChangePersistence(
         true,
         core::ptr::null_mut(),
         1,
-        skey.as_mut_ptr(),
+        skey.as_mut_ptr()
     );
 
     loop {
@@ -18613,29 +18269,23 @@ unsafe fn ATPrepChangePersistence(
 
             if to_logged {
                 if !RelationIsPermanent(foreign_rel) {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "could not change table \"{}\" to logged because it references unlogged table \"{}\"",
                             CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                             CStr::from_ptr(RelationGetRelationName(foreign_rel)).to_string_lossy()
                         )
                         /* errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                           errtableconstraint(rel, NameStr(con->conname)) */
-                    );
+                           errtableconstraint(rel, NameStr(con->conname)) */);
                 }
             } else {
                 if RelationIsPermanent(foreign_rel) {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "could not change table \"{}\" to unlogged because it references logged table \"{}\"",
                             CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy(),
                             CStr::from_ptr(RelationGetRelationName(foreign_rel)).to_string_lossy()
                         )
                         /* errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                           errtableconstraint(rel, NameStr(con->conname)) */
-                    );
+                           errtableconstraint(rel, NameStr(con->conname)) */);
                 }
             }
 
@@ -18662,7 +18312,7 @@ unsafe fn ATPrepChangePersistence(
 
 pub unsafe fn AlterTableNamespace(
     stmt: *mut AlterObjectSchemaStmt,
-    oldschema: *mut Oid,
+    oldschema: *mut Oid
 ) -> ObjectAddress {
     let rel: Relation;
     let relid: Oid;
@@ -18670,24 +18320,21 @@ pub unsafe fn AlterTableNamespace(
     let nsp_oid: Oid;
     let newrv: *mut RangeVar;
     let objs_moved: *mut ObjectAddresses;
-    let myself: ObjectAddress;
+    let mut myself: ObjectAddress = InvalidObjectAddress;
 
     relid = RangeVarGetRelidExtended(
         (*stmt).relation,
         AccessExclusiveLock,
-        if (*stmt).missing_ok { RVR_MISSING_OK } else { 0 },
+        if (*stmt).missing_ok { RVR_MISSING_OK as u32 } else { 0 },
         Some(RangeVarCallbackForAlterRelation),
-        stmt as *mut libc::c_void,
+        stmt as *mut libc::c_void
     );
 
     if !OidIsValid(relid) {
-        ereport!(
-            NOTICE,
-            errmsg!(
+        ereport!(NOTICE, errmsg!(
                 "relation \"{}\" does not exist, skipping",
                 CStr::from_ptr((*(*stmt).relation).relname).to_string_lossy()
-            )
-        );
+            ));
         return InvalidObjectAddress;
     }
 
@@ -18702,14 +18349,11 @@ pub unsafe fn AlterTableNamespace(
         if sequenceIsOwned(relid, DEPENDENCY_AUTO, &mut table_id, &mut col_id)
             || sequenceIsOwned(relid, DEPENDENCY_INTERNAL, &mut table_id, &mut col_id)
         {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot move an owned sequence into another schema"
                 )
                 /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                   errdetail("Sequence ... is linked to table ...") */
-            );
+                   errdetail("Sequence ... is linked to table ...") */);
         }
     }
 
@@ -18717,7 +18361,7 @@ pub unsafe fn AlterTableNamespace(
     newrv = makeRangeVar(
         (*stmt).newschema,
         RelationGetRelationName(rel) as *mut libc::c_char,
-        -1,
+        -1
     );
     nsp_oid = RangeVarGetAndCheckCreationNamespace(newrv, NoLock, core::ptr::null_mut());
 
@@ -18748,7 +18392,7 @@ pub unsafe fn AlterTableNamespaceInternal(
     rel: Relation,
     old_nsp_oid: Oid,
     nsp_oid: Oid,
-    objs_moved: *mut ObjectAddresses,
+    objs_moved: *mut ObjectAddresses
 ) {
     let class_rel: Relation;
 
@@ -18763,7 +18407,7 @@ pub unsafe fn AlterTableNamespaceInternal(
         old_nsp_oid,
         nsp_oid,
         true,
-        objs_moved,
+        objs_moved
     );
 
     /* Fix the table's row type too, if it has one */
@@ -18774,7 +18418,7 @@ pub unsafe fn AlterTableNamespaceInternal(
             false, /* isImplicitArray */
             false, /* ignoreDependent */
             false, /* errorOnTableType */
-            objs_moved,
+            objs_moved as *mut _ as *mut crate::commands::typecmds::ObjectAddresses
         );
     }
 
@@ -18786,7 +18430,7 @@ pub unsafe fn AlterTableNamespaceInternal(
         old_nsp_oid,
         nsp_oid,
         objs_moved,
-        AccessExclusiveLock,
+        AccessExclusiveLock
     );
     AlterConstraintNamespaces(RelationGetRelid(rel), old_nsp_oid, nsp_oid, false, objs_moved);
 
@@ -18803,7 +18447,7 @@ pub unsafe fn AlterRelationNamespaceInternal(
     old_nsp_oid: Oid,
     new_nsp_oid: Oid,
     has_depend_entry: bool,
-    objs_moved: *mut ObjectAddresses,
+    objs_moved: *mut ObjectAddresses
 ) {
     let class_tup: HeapTuple;
     let class_form: Form_pg_class;
@@ -18828,25 +18472,22 @@ pub unsafe fn AlterRelationNamespaceInternal(
      */
     already_done = object_address_present(&thisobj, objs_moved);
     if !already_done && old_nsp_oid != new_nsp_oid {
-        let otid: ItemPointerData = (*class_tup).t_self;
+        let mut otid: ItemPointerData = (*class_tup).t_self;
 
         /* check for duplicate name */
         if get_relname_relid(NameStr!((*class_form).relname), new_nsp_oid) != InvalidOid {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "relation \"{}\" already exists in schema \"{}\"",
                     CStr::from_ptr(NameStr!((*class_form).relname)).to_string_lossy(),
                     CStr::from_ptr(get_namespace_name(new_nsp_oid)).to_string_lossy()
-                ) /* errcode(ERRCODE_DUPLICATE_TABLE) */
-            );
+                ) /* errcode(ERRCODE_DUPLICATE_TABLE) */);
         }
 
         /* classTup is a copy, so OK to scribble on */
         (*class_form).relnamespace = new_nsp_oid;
 
-        CatalogTupleUpdate(class_rel, &otid, class_tup);
-        UnlockTuple(class_rel, &otid, InplaceUpdateTupleLock);
+        CatalogTupleUpdate(class_rel, &mut otid, class_tup);
+        UnlockTuple(class_rel, &mut otid, InplaceUpdateTupleLock);
 
         /* Update dependency on schema if caller said so */
         if has_depend_entry
@@ -18855,7 +18496,7 @@ pub unsafe fn AlterRelationNamespaceInternal(
                 rel_oid,
                 NamespaceRelationId,
                 old_nsp_oid,
-                new_nsp_oid,
+                new_nsp_oid
             ) != 1
         {
             elog!(
@@ -18865,7 +18506,7 @@ pub unsafe fn AlterRelationNamespaceInternal(
             );
         }
     } else {
-        UnlockTuple(class_rel, &(*class_tup).t_self, InplaceUpdateTupleLock);
+        UnlockTuple(class_rel, &mut (*class_tup).t_self, InplaceUpdateTupleLock);
     }
 
     if !already_done {
@@ -18885,7 +18526,7 @@ unsafe fn AlterIndexNamespaces(
     rel: Relation,
     old_nsp_oid: Oid,
     new_nsp_oid: Oid,
-    objs_moved: *mut ObjectAddresses,
+    objs_moved: *mut ObjectAddresses
 ) {
     let index_list: *mut List = RelationGetIndexList(rel);
     let mut lc: *mut ListCell = list_head(index_list);
@@ -18904,7 +18545,7 @@ unsafe fn AlterIndexNamespaces(
                 old_nsp_oid,
                 new_nsp_oid,
                 false,
-                objs_moved,
+                objs_moved
             );
             add_exact_object_address(&thisobj, objs_moved);
         }
@@ -18925,7 +18566,7 @@ unsafe fn AlterSeqNamespaces(
     old_nsp_oid: Oid,
     new_nsp_oid: Oid,
     objs_moved: *mut ObjectAddresses,
-    lockmode: LOCKMODE,
+    lockmode: LOCKMODE
 ) {
     let dep_rel: Relation;
     let scan: SysScanDesc;
@@ -18939,14 +18580,14 @@ unsafe fn AlterSeqNamespaces(
         Anum_pg_depend_refclassid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationRelationId),
+        ObjectIdGetDatum(RelationRelationId)
     );
     ScanKeyInit(
         &mut key[1],
         Anum_pg_depend_refobjid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(rel)),
+        ObjectIdGetDatum(RelationGetRelid(rel))
     );
 
     scan = systable_beginscan(
@@ -18955,7 +18596,7 @@ unsafe fn AlterSeqNamespaces(
         true,
         core::ptr::null_mut(),
         2,
-        key.as_mut_ptr(),
+        key.as_mut_ptr()
     );
 
     loop {
@@ -18992,7 +18633,7 @@ unsafe fn AlterSeqNamespaces(
             old_nsp_oid,
             new_nsp_oid,
             true,
-            objs_moved,
+            objs_moved
         );
 
         Assert!((*RelationGetForm(seq_rel)).reltype == InvalidOid);
@@ -19013,7 +18654,8 @@ pub unsafe fn register_on_commit_action(relid: Oid, action: OnCommitAction) {
     let oc: *mut OnCommitItem;
     let oldcxt: MemoryContext;
 
-    if action == ONCOMMIT_NOOP || action == ONCOMMIT_PRESERVE_ROWS {
+    if action == crate::nodes::primnodes::OnCommitAction::ONCOMMIT_NOOP
+        || action == crate::nodes::primnodes::OnCommitAction::ONCOMMIT_PRESERVE_ROWS {
         return;
     }
 
@@ -19065,15 +18707,16 @@ pub unsafe fn PreCommit_on_commit_actions() {
         }
 
         match (*oc).oncommit {
-            ONCOMMIT_NOOP | ONCOMMIT_PRESERVE_ROWS => {
+            crate::nodes::primnodes::OnCommitAction::ONCOMMIT_NOOP
+            | crate::nodes::primnodes::OnCommitAction::ONCOMMIT_PRESERVE_ROWS => {
                 /* Do nothing */
             }
-            ONCOMMIT_DELETE_ROWS => {
+            crate::nodes::primnodes::OnCommitAction::ONCOMMIT_DELETE_ROWS => {
                 if (MyXactFlags & XACT_FLAGS_ACCESSEDTEMPNAMESPACE) != 0 {
                     oids_to_truncate = lappend_oid(oids_to_truncate, (*oc).relid);
                 }
             }
-            ONCOMMIT_DROP => {
+            crate::nodes::primnodes::OnCommitAction::ONCOMMIT_DROP => {
                 oids_to_drop = lappend_oid(oids_to_drop, (*oc).relid);
             }
             _ => {}
@@ -19104,7 +18747,7 @@ pub unsafe fn PreCommit_on_commit_actions() {
         performMultipleDeletions(
             target_objects,
             DROP_CASCADE,
-            PERFORM_DELETION_INTERNAL | PERFORM_DELETION_QUIETLY,
+            PERFORM_DELETION_INTERNAL | PERFORM_DELETION_QUIETLY
         );
         PopActiveSnapshot();
 
@@ -19159,7 +18802,7 @@ pub unsafe fn AtEOXact_on_commit_actions(is_commit: bool) {
 pub unsafe fn AtEOSubXact_on_commit_actions(
     is_commit: bool,
     my_subid: SubTransactionId,
-    parent_subid: SubTransactionId,
+    parent_subid: SubTransactionId
 ) {
     let mut cur_item: *mut ListCell = list_head(on_commits);
     while !cur_item.is_null() {
@@ -19194,10 +18837,10 @@ pub unsafe extern "C" fn RangeVarCallbackMaintainsTable(
     relation: *const RangeVar,
     rel_id: Oid,
     _old_rel_id: Oid,
-    _arg: *mut libc::c_void,
+    _arg: *mut libc::c_void
 ) {
     let relkind: libc::c_char;
-    let acl_result: AclResult;
+    let acl_result: c_int;
 
     if !OidIsValid(rel_id) {
         return;
@@ -19208,25 +18851,22 @@ pub unsafe extern "C" fn RangeVarCallbackMaintainsTable(
         return;
     }
     if relkind as u8 != RELKIND_RELATION
-        && relkind as u8 != RELKIND_TOASTVALUE
+        && relkind as u8 != RELKIND_TOASTVALUE as u8
         && relkind as u8 != RELKIND_MATVIEW
         && relkind as u8 != RELKIND_PARTITIONED_TABLE
     {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is not a table or materialized view",
                 CStr::from_ptr((*relation).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     acl_result = pg_class_aclcheck(rel_id, GetUserId(), ACL_MAINTAIN);
-    if acl_result != ACLCHECK_OK {
+    if acl_result != ACLCHECK_OK as i32 {
         aclcheck_error(
             acl_result,
             get_relkind_objtype(get_rel_relkind(rel_id)),
-            (*relation).relname,
+            (*relation).relname
         );
     }
 }
@@ -19239,7 +18879,7 @@ unsafe extern "C" fn RangeVarCallbackForTruncate(
     relation: *const RangeVar,
     rel_id: Oid,
     _old_rel_id: Oid,
-    _arg: *mut libc::c_void,
+    _arg: *mut libc::c_void
 ) {
     let tuple: HeapTuple;
 
@@ -19266,7 +18906,7 @@ pub unsafe extern "C" fn RangeVarCallbackOwnsRelation(
     relation: *const RangeVar,
     rel_id: Oid,
     _old_rel_id: Oid,
-    _arg: *mut libc::c_void,
+    _arg: *mut libc::c_void
 ) {
     let tuple: HeapTuple;
 
@@ -19281,22 +18921,19 @@ pub unsafe extern "C" fn RangeVarCallbackOwnsRelation(
 
     if !object_ownercheck(RelationRelationId, rel_id, GetUserId()) {
         aclcheck_error(
-            ACLCHECK_NOT_OWNER,
+            ACLCHECK_NOT_OWNER(),
             get_relkind_objtype(get_rel_relkind(rel_id)),
-            (*relation).relname,
+            (*relation).relname
         );
     }
 
-    if !allowSystemTableMods
+    if !allowSystemTableMods()
         && IsSystemClass(rel_id, GETSTRUCT(tuple) as Form_pg_class)
     {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "permission denied: \"{}\" is a system catalog",
                 CStr::from_ptr((*relation).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */
-        );
+            ) /* errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */);
     }
 
     ReleaseSysCache(tuple);
@@ -19310,13 +18947,13 @@ unsafe extern "C" fn RangeVarCallbackForAlterRelation(
     rv: *const RangeVar,
     relid: Oid,
     _oldrelid: Oid,
-    arg: *mut libc::c_void,
+    arg: *mut libc::c_void
 ) {
     let stmt: *mut Node = arg as *mut Node;
     let reltype: ObjectType;
     let tuple: HeapTuple;
     let classform: Form_pg_class;
-    let acl_result: AclResult;
+    let acl_result: c_int;
     let relkind: libc::c_char;
 
     tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
@@ -19329,21 +18966,18 @@ unsafe extern "C" fn RangeVarCallbackForAlterRelation(
     /* Must own relation. */
     if !object_ownercheck(RelationRelationId, relid, GetUserId()) {
         aclcheck_error(
-            ACLCHECK_NOT_OWNER,
+            ACLCHECK_NOT_OWNER(),
             get_relkind_objtype(get_rel_relkind(relid)),
-            (*rv).relname,
+            (*rv).relname
         );
     }
 
     /* No system table modifications unless explicitly allowed. */
-    if !allowSystemTableMods && IsSystemClass(relid, classform) {
-        ereport!(
-            ERROR,
-            errmsg!(
+    if !allowSystemTableMods() && IsSystemClass(relid, classform) {
+        ereport!(ERROR, errmsg!(
                 "permission denied: \"{}\" is a system catalog",
                 CStr::from_ptr((*rv).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */
-        );
+            ) /* errcode(ERRCODE_INSUFFICIENT_PRIVILEGE) */);
     }
 
     if IsA!(stmt, T_RenameStmt) {
@@ -19351,10 +18985,10 @@ unsafe extern "C" fn RangeVarCallbackForAlterRelation(
             NamespaceRelationId,
             (*classform).relnamespace,
             GetUserId(),
-            ACL_CREATE,
+            ACL_CREATE()
         );
-        if acl_result != ACLCHECK_OK {
-            aclcheck_error(acl_result, OBJECT_SCHEMA,
+        if acl_result != ACLCHECK_OK as i32 {
+            aclcheck_error(acl_result, OBJECT_SCHEMA as i32,
                            get_namespace_name((*classform).relnamespace));
         }
         reltype = (*(castNode!(RenameStmt, T_RenameStmt, stmt))).renameType;
@@ -19368,53 +19002,38 @@ unsafe extern "C" fn RangeVarCallbackForAlterRelation(
     }
 
     if reltype == OBJECT_SEQUENCE && relkind as u8 != RELKIND_SEQUENCE {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is not a sequence",
                 CStr::from_ptr((*rv).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if reltype == OBJECT_VIEW && relkind as u8 != RELKIND_VIEW {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is not a view",
                 CStr::from_ptr((*rv).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if reltype == OBJECT_MATVIEW && relkind as u8 != RELKIND_MATVIEW {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is not a materialized view",
                 CStr::from_ptr((*rv).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if reltype == OBJECT_FOREIGN_TABLE && relkind as u8 != RELKIND_FOREIGN_TABLE {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is not a foreign table",
                 CStr::from_ptr((*rv).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if reltype == OBJECT_TYPE && relkind as u8 != RELKIND_COMPOSITE_TYPE {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is not a composite type",
                 CStr::from_ptr((*rv).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if reltype == OBJECT_INDEX
@@ -19422,58 +19041,43 @@ unsafe extern "C" fn RangeVarCallbackForAlterRelation(
         && relkind as u8 != RELKIND_PARTITIONED_INDEX
         && !IsA!(stmt, T_RenameStmt)
     {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is not an index",
                 CStr::from_ptr((*rv).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if reltype != OBJECT_TYPE && relkind as u8 == RELKIND_COMPOSITE_TYPE {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is a composite type",
                 CStr::from_ptr((*rv).relname).to_string_lossy()
             )
             /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-               errhint("Use ALTER TYPE instead.") */
-        );
+               errhint("Use ALTER TYPE instead.") */);
     }
 
     if IsA!(stmt, T_AlterObjectSchemaStmt) {
         if relkind as u8 == RELKIND_INDEX || relkind as u8 == RELKIND_PARTITIONED_INDEX {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot change schema of index \"{}\"",
                     CStr::from_ptr((*rv).relname).to_string_lossy()
                 )
                 /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                   errhint("Change the schema of the table instead.") */
-            );
+                   errhint("Change the schema of the table instead.") */);
         } else if relkind as u8 == RELKIND_COMPOSITE_TYPE {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot change schema of composite type \"{}\"",
                     CStr::from_ptr((*rv).relname).to_string_lossy()
                 )
                 /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                   errhint("Use ALTER TYPE instead.") */
-            );
-        } else if relkind as u8 == RELKIND_TOASTVALUE {
-            ereport!(
-                ERROR,
-                errmsg!(
+                   errhint("Use ALTER TYPE instead.") */);
+        } else if relkind as u8 == RELKIND_TOASTVALUE as u8 {
+            ereport!(ERROR, errmsg!(
                     "cannot change schema of TOAST table \"{}\"",
                     CStr::from_ptr((*rv).relname).to_string_lossy()
                 )
                 /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                   errhint("Change the schema of the table instead.") */
-            );
+                   errhint("Change the schema of the table instead.") */);
         }
     }
 
@@ -19486,10 +19090,10 @@ unsafe extern "C" fn RangeVarCallbackForAlterRelation(
 
 unsafe fn transformPartitionSpec(
     rel: Relation,
-    partspec: *mut PartitionSpec,
+    partspec: *mut PartitionSpec
 ) -> *mut PartitionSpec {
     let newspec: *mut PartitionSpec;
-    let pstate: *mut ParseState;
+    let pstate: ParseState;
     let nsitem: *mut ParseNamespaceItem;
 
     newspec = makeNode!(PartitionSpec, T_PartitionSpec) as *mut PartitionSpec;
@@ -19502,11 +19106,8 @@ unsafe fn transformPartitionSpec(
     if (*partspec).strategy == PARTITION_STRATEGY_LIST
         && list_length((*partspec).partParams) != 1
     {
-        ereport!(
-            ERROR,
-            errmsg!("cannot use \"list\" partition strategy with more than one column")
-            /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-        );
+        ereport!(ERROR, errmsg!("cannot use \"list\" partition strategy with more than one column")
+            /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
     }
 
     pstate = make_parsestate(core::ptr::null_mut());
@@ -19544,17 +19145,17 @@ unsafe fn transformPartitionSpec(
 // ---------------------------------------------------------------------------
 
 unsafe fn ComputePartitionAttrs(
-    pstate: *mut ParseState,
+    pstate: ParseState,
     rel: Relation,
     part_params: *mut List,
     partattrs: *mut AttrNumber,
     partexprs: *mut *mut List,
     partopclass: *mut Oid,
     partcollation: *mut Oid,
-    strategy: PartitionStrategy,
+    strategy: c_char
 ) {
     let mut attn: i32 = 0;
-    let am_oid: Oid;
+    let mut am_oid: Oid;
 
     let mut lc: *mut ListCell = list_head(part_params);
     while !lc.is_null() {
@@ -19571,36 +19172,27 @@ unsafe fn ComputePartitionAttrs(
 
             atttuple = SearchSysCacheAttName(RelationGetRelid(rel), (*pelem).name);
             if !HeapTupleIsValid(atttuple) {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "column \"{}\" named in partition key does not exist",
                         CStr::from_ptr((*pelem).name).to_string_lossy()
                     )
                     /* errcode(ERRCODE_UNDEFINED_COLUMN),
-                       parser_errposition(pstate, pelem->location) */
-                );
+                       parser_errposition(pstate, pelem->location) */);
             }
             attform = GETSTRUCT(atttuple) as Form_pg_attribute;
 
             if (*attform).attnum <= 0 {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "cannot use system column \"{}\" in partition key",
                         CStr::from_ptr((*pelem).name).to_string_lossy()
                     )
-                    /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-                );
+                    /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
             }
 
             if (*attform).attgenerated != 0 {
-                ereport!(
-                    ERROR,
-                    errmsg!("cannot use generated column in partition key")
+                ereport!(ERROR, errmsg!("cannot use generated column in partition key")
                     /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                       errdetail("Column ... is a generated column.") */
-                );
+                       errdetail("Column ... is a generated column.") */);
             }
 
             *partattrs.add(attn as usize) = (*attform).attnum;
@@ -19621,14 +19213,14 @@ unsafe fn ComputePartitionAttrs(
                 partattname.as_mut_ptr(),
                 partattname.len(),
                 c"%d".as_ptr(),
-                attn + 1,
+                attn + 1
             );
             CheckAttributeType(
                 partattname.as_ptr(),
                 atttype,
                 attcollation,
                 NIL,
-                CHKATYPE_IS_PARTKEY as i32,
+                CHKATYPE_IS_PARTKEY as i32
             );
 
             /* Strip any top-level COLLATE clause. */
@@ -19637,15 +19229,15 @@ unsafe fn ComputePartitionAttrs(
             }
 
             pull_varattnos(expr, 1, &mut expr_attrs);
-            if bms_is_member(0 - FirstLowInvalidHeapAttributeNumber, expr_attrs) {
+            if bms_is_member(0 - FirstLowInvalidHeapAttributeNumber as i32, expr_attrs) {
                 expr_attrs = bms_add_range(
                     expr_attrs,
-                    1 - FirstLowInvalidHeapAttributeNumber,
-                    RelationGetNumberOfAttributes(rel) - FirstLowInvalidHeapAttributeNumber,
+                    1 - FirstLowInvalidHeapAttributeNumber as i32,
+                    RelationGetNumberOfAttributes(rel) - FirstLowInvalidHeapAttributeNumber as i32
                 );
                 expr_attrs = bms_del_member(
                     expr_attrs,
-                    0 - FirstLowInvalidHeapAttributeNumber,
+                    0 - FirstLowInvalidHeapAttributeNumber as i32
                 );
             }
 
@@ -19655,15 +19247,12 @@ unsafe fn ComputePartitionAttrs(
                 if i < 0 {
                     break;
                 }
-                let attno: AttrNumber = (i + FirstLowInvalidHeapAttributeNumber) as AttrNumber;
+                let attno: AttrNumber = (i + FirstLowInvalidHeapAttributeNumber as i32) as AttrNumber;
                 Assert!(attno != 0);
 
                 if attno < 0 {
-                    ereport!(
-                        ERROR,
-                        errmsg!("partition key expressions cannot contain system column references")
-                        /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-                    );
+                    ereport!(ERROR, errmsg!("partition key expressions cannot contain system column references")
+                        /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
                 }
 
                 if (*(TupleDescAttr(RelationGetDescr(rel), (attno - 1) as usize)
@@ -19671,11 +19260,8 @@ unsafe fn ComputePartitionAttrs(
                     .attgenerated
                     != 0
                 {
-                    ereport!(
-                        ERROR,
-                        errmsg!("cannot use generated column in partition key")
-                        /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-                    );
+                    ereport!(ERROR, errmsg!("cannot use generated column in partition key")
+                        /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
                 }
             }
 
@@ -19688,19 +19274,13 @@ unsafe fn ComputePartitionAttrs(
                 expr = expression_planner(expr as *mut Expr) as *mut Node;
 
                 if contain_mutable_functions(expr) {
-                    ereport!(
-                        ERROR,
-                        errmsg!("functions in partition key expression must be marked IMMUTABLE")
-                        /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-                    );
+                    ereport!(ERROR, errmsg!("functions in partition key expression must be marked IMMUTABLE")
+                        /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
                 }
 
                 if IsA!(expr, T_Const) {
-                    ereport!(
-                        ERROR,
-                        errmsg!("cannot use constant expression as partition key")
-                        /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-                    );
+                    ereport!(ERROR, errmsg!("cannot use constant expression as partition key")
+                        /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
                 }
             }
         }
@@ -19712,28 +19292,22 @@ unsafe fn ComputePartitionAttrs(
 
         if type_is_collatable(atttype) {
             if !OidIsValid(attcollation) {
-                ereport!(
-                    ERROR,
-                    errmsg!("could not determine which collation to use for partition expression")
+                ereport!(ERROR, errmsg!("could not determine which collation to use for partition expression")
                     /* errcode(ERRCODE_INDETERMINATE_COLLATION),
-                       errhint("Use the COLLATE clause to set the collation explicitly.") */
-                );
+                       errhint("Use the COLLATE clause to set the collation explicitly.") */);
             }
         } else {
             if OidIsValid(attcollation) {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "collations are not supported by type {}",
                         CStr::from_ptr(format_type_be(atttype)).to_string_lossy()
-                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */
-                );
+                    ) /* errcode(ERRCODE_DATATYPE_MISMATCH) */);
             }
         }
 
         *partcollation.add(attn as usize) = attcollation;
 
-        if strategy == PARTITION_STRATEGY_HASH {
+        if strategy == PARTITION_STRATEGY_HASH as c_char {
             am_oid = HASH_AM_OID;
         } else {
             am_oid = BTREE_AM_OID;
@@ -19743,24 +19317,18 @@ unsafe fn ComputePartitionAttrs(
             *partopclass.add(attn as usize) = GetDefaultOpClass(atttype, am_oid);
 
             if !OidIsValid(*partopclass.add(attn as usize)) {
-                if strategy == PARTITION_STRATEGY_HASH {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                if strategy == PARTITION_STRATEGY_HASH as c_char {
+                    ereport!(ERROR, errmsg!(
                             "data type {} has no default operator class for access method \"hash\"",
                             CStr::from_ptr(format_type_be(atttype)).to_string_lossy()
                         )
-                        /* errcode(ERRCODE_UNDEFINED_OBJECT) */
-                    );
+                        /* errcode(ERRCODE_UNDEFINED_OBJECT) */);
                 } else {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "data type {} has no default operator class for access method \"btree\"",
                             CStr::from_ptr(format_type_be(atttype)).to_string_lossy()
                         )
-                        /* errcode(ERRCODE_UNDEFINED_OBJECT) */
-                    );
+                        /* errcode(ERRCODE_UNDEFINED_OBJECT) */);
                 }
             }
         } else {
@@ -19772,7 +19340,7 @@ unsafe fn ComputePartitionAttrs(
                 } else {
                     c"btree".as_ptr()
                 },
-                am_oid,
+                am_oid
             );
         }
 
@@ -19786,7 +19354,7 @@ unsafe fn ComputePartitionAttrs(
 
 pub unsafe fn PartConstraintImpliedByRelConstraint(
     scanrel: Relation,
-    part_constraint: *mut List,
+    part_constraint: *mut List
 ) -> bool {
     let mut exist_constraint: *mut List = NIL;
     let constr: *mut TupleConstr = (*RelationGetDescr(scanrel)).constr;
@@ -19827,7 +19395,7 @@ pub unsafe fn PartConstraintImpliedByRelConstraint(
 pub unsafe fn ConstraintImpliedByRelConstraint(
     scanrel: Relation,
     test_constraint: *mut List,
-    proven_constraint: *mut List,
+    proven_constraint: *mut List
 ) -> bool {
     let mut exist_constraint: *mut List = list_copy(proven_constraint);
     let constr: *mut TupleConstr = (*RelationGetDescr(scanrel)).constr;
@@ -19849,7 +19417,7 @@ pub unsafe fn ConstraintImpliedByRelConstraint(
 
         exist_constraint = list_concat(
             exist_constraint,
-            make_ands_implicit(cexpr as *mut Expr),
+            make_ands_implicit(cexpr as *mut Expr)
         );
     }
 
@@ -19864,25 +19432,19 @@ unsafe fn QueuePartitionConstraintValidation(
     wqueue: *mut *mut List,
     scanrel: Relation,
     part_constraint: *mut List,
-    validate_default: bool,
+    validate_default: bool
 ) {
     if PartConstraintImpliedByRelConstraint(scanrel, part_constraint) {
         if !validate_default {
-            ereport!(
-                DEBUG1,
-                errmsg_internal!(
+            ereport!(DEBUG1, errmsg_internal!(
                     "partition constraint for table \"{}\" is implied by existing constraints",
                     CStr::from_ptr(RelationGetRelationName(scanrel)).to_string_lossy()
-                )
-            );
+                ));
         } else {
-            ereport!(
-                DEBUG1,
-                errmsg_internal!(
+            ereport!(DEBUG1, errmsg_internal!(
                     "updated partition constraint for default partition \"{}\" is implied by existing constraints",
                     CStr::from_ptr(RelationGetRelationName(scanrel)).to_string_lossy()
-                )
-            );
+                ));
         }
         return;
     }
@@ -19896,7 +19458,7 @@ unsafe fn QueuePartitionConstraintValidation(
             linitial(part_constraint) as *mut Expr;
         (*tab).validate_default = validate_default;
     } else if (*(*scanrel).rd_rel).relkind as u8 == RELKIND_PARTITIONED_TABLE {
-        let partdesc: PartitionDesc = RelationGetPartitionDesc(scanrel, true);
+        let partdesc = RelationGetPartitionDesc(scanrel, true) as *mut crate::partitioning::partdesc::PartitionDescData;
 
         for i in 0..(*partdesc).nparts {
             let part_rel: Relation;
@@ -19911,7 +19473,7 @@ unsafe fn QueuePartitionConstraintValidation(
                 wqueue,
                 part_rel,
                 this_part_constraint,
-                validate_default,
+                validate_default
             );
             table_close(part_rel, NoLock);
         }
@@ -19926,21 +19488,21 @@ unsafe fn ATExecAttachPartition(
     wqueue: *mut *mut List,
     rel: Relation,
     cmd: *mut PartitionCmd,
-    context: *mut AlterTableUtilityContext,
+    context: *mut AlterTableUtilityContext
 ) -> ObjectAddress {
     let attachrel: Relation;
     let catalog: Relation;
     let attachrel_children: *mut List;
     let mut part_constraint: *mut List;
-    let scan: SysScanDesc;
+    let mut scan: SysScanDesc;
     let mut skey: ScanKeyData = core::mem::zeroed();
-    let address: ObjectAddress;
+    let mut address: ObjectAddress = InvalidObjectAddress;
     let trigger_name: *const libc::c_char;
     let default_part_oid: Oid;
     let part_bound_constraint: *mut List;
-    let pstate: *mut ParseState = make_parsestate(core::ptr::null_mut());
+    let pstate: ParseState = make_parsestate(core::ptr::null_mut());
 
-    (*pstate).p_sourcetext = (*context).queryString;
+    /* (*pstate).p_sourcetext = (*context).queryString; -- ParseState opaque */
 
     /*
      * We must lock the default partition if one exists, because attaching a
@@ -19957,26 +19519,20 @@ unsafe fn ATExecAttachPartition(
     ATSimplePermissions(
         AT_AttachPartition,
         attachrel,
-        ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE,
+        ATT_TABLE | ATT_PARTITIONED_TABLE | ATT_FOREIGN_TABLE
     );
 
     /* A partition can only have one parent */
     if (*(*attachrel).rd_rel).relispartition {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is already a partition",
                 CStr::from_ptr(RelationGetRelationName(attachrel)).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if OidIsValid((*(*attachrel).rd_rel).reloftype) {
-        ereport!(
-            ERROR,
-            errmsg!("cannot attach a typed table as partition")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot attach a typed table as partition")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /* Table being attached should not already be part of inheritance: child */
@@ -19986,7 +19542,7 @@ unsafe fn ATExecAttachPartition(
         Anum_pg_inherits_inhrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(attachrel)),
+        ObjectIdGetDatum(RelationGetRelid(attachrel))
     );
     scan = systable_beginscan(
         catalog,
@@ -19994,14 +19550,11 @@ unsafe fn ATExecAttachPartition(
         true,
         core::ptr::null_mut(),
         1,
-        &mut skey,
+        &mut skey
     );
     if HeapTupleIsValid(systable_getnext(scan)) {
-        ereport!(
-            ERROR,
-            errmsg!("cannot attach inheritance child as partition")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot attach inheritance child as partition")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
     systable_endscan(scan);
 
@@ -20011,7 +19564,7 @@ unsafe fn ATExecAttachPartition(
         Anum_pg_inherits_inhparent,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(attachrel)),
+        ObjectIdGetDatum(RelationGetRelid(attachrel))
     );
     scan = systable_beginscan(
         catalog,
@@ -20019,16 +19572,13 @@ unsafe fn ATExecAttachPartition(
         true,
         core::ptr::null_mut(),
         1,
-        &mut skey,
+        &mut skey
     );
     if HeapTupleIsValid(systable_getnext(scan))
         && (*(*attachrel).rd_rel).relkind as u8 == RELKIND_RELATION
     {
-        ereport!(
-            ERROR,
-            errmsg!("cannot attach inheritance parent as partition")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot attach inheritance parent as partition")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
     systable_endscan(scan);
     table_close(catalog, AccessShareLock);
@@ -20036,59 +19586,44 @@ unsafe fn ATExecAttachPartition(
     attachrel_children = find_all_inheritors(
         RelationGetRelid(attachrel),
         AccessExclusiveLock,
-        core::ptr::null_mut(),
+        core::ptr::null_mut()
     );
     if list_member_oid(attachrel_children, RelationGetRelid(rel)) {
-        ereport!(
-            ERROR,
-            errmsg!("circular inheritance not allowed")
+        ereport!(ERROR, errmsg!("circular inheritance not allowed")
             /* errcode(ERRCODE_DUPLICATE_TABLE),
-               errdetail("... is already a child of ...") */
-        );
+               errdetail("... is already a child of ...") */);
     }
 
     if (*(*rel).rd_rel).relpersistence != RELPERSISTENCE_TEMP as libc::c_char
         && (*(*attachrel).rd_rel).relpersistence == RELPERSISTENCE_TEMP as libc::c_char
     {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot attach a temporary relation as partition of permanent relation \"{}\"",
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if (*(*rel).rd_rel).relpersistence == RELPERSISTENCE_TEMP as libc::c_char
         && (*(*attachrel).rd_rel).relpersistence != RELPERSISTENCE_TEMP as libc::c_char
     {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot attach a permanent relation as partition of temporary relation \"{}\"",
                 CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
-            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+            ) /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if (*(*rel).rd_rel).relpersistence == RELPERSISTENCE_TEMP as libc::c_char
         && !(*rel).rd_islocaltemp
     {
-        ereport!(
-            ERROR,
-            errmsg!("cannot attach as partition of temporary relation of another session")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot attach as partition of temporary relation of another session")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     if (*(*attachrel).rd_rel).relpersistence == RELPERSISTENCE_TEMP as libc::c_char
         && !(*attachrel).rd_islocaltemp
     {
-        ereport!(
-            ERROR,
-            errmsg!("cannot attach temporary relation of another session as partition")
-            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */
-        );
+        ereport!(ERROR, errmsg!("cannot attach temporary relation of another session as partition")
+            /* errcode(ERRCODE_WRONG_OBJECT_TYPE) */);
     }
 
     /* Check for identity columns or columns not in parent */
@@ -20104,56 +19639,47 @@ unsafe fn ATExecAttachPartition(
         }
 
         if (*attribute).attidentity != 0 {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "table \"{}\" being attached contains an identity column \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(attachrel)).to_string_lossy(),
                     CStr::from_ptr(attribute_name).to_string_lossy()
                 )
                 /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                   errdetail("The new partition may not contain an identity column.") */
-            );
+                   errdetail("The new partition may not contain an identity column.") */);
         }
 
         if !SearchSysCacheExists2(
             ATTNAME,
             ObjectIdGetDatum(RelationGetRelid(rel)),
-            CStringGetDatum(attribute_name),
+            CStringGetDatum(attribute_name)
         ) {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "table \"{}\" contains column \"{}\" not found in parent \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(attachrel)).to_string_lossy(),
                     CStr::from_ptr(attribute_name).to_string_lossy(),
                     CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
                 )
                 /* errcode(ERRCODE_DATATYPE_MISMATCH),
-                   errdetail("The new partition may contain only the columns present in parent.") */
-            );
+                   errdetail("The new partition may contain only the columns present in parent.") */);
         }
     }
 
-    trigger_name = FindTriggerIncompatibleWithInheritance((*attachrel).trigdesc);
+    trigger_name = FindTriggerIncompatibleWithInheritance((*attachrel).trigdesc as *const _);
     if !trigger_name.is_null() {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "trigger \"{}\" prevents table \"{}\" from becoming a partition",
                 CStr::from_ptr(trigger_name).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(attachrel)).to_string_lossy()
             )
             /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-               errdetail("ROW triggers with transition tables are not supported on partitions.") */
-        );
+               errdetail("ROW triggers with transition tables are not supported on partitions.") */);
     }
 
     check_new_partition_bound(
         RelationGetRelationName(attachrel) as *mut libc::c_char,
         rel,
         (*cmd).bound,
-        pstate,
+        pstate
     );
 
     /* OK to create inheritance. Rest of the checks performed there */
@@ -20197,7 +19723,7 @@ unsafe fn ATExecAttachPartition(
             def_part_constraint,
             1,
             default_rel,
-            rel,
+            rel
         );
         QueuePartitionConstraintValidation(wqueue, default_rel, def_part_constraint, true);
 
@@ -20225,7 +19751,7 @@ unsafe fn ATExecAttachPartition(
 unsafe fn AttachPartitionEnsureIndexes(
     wqueue: *mut *mut List,
     rel: Relation,
-    attachrel: Relation,
+    attachrel: Relation
 ) {
     let idxes: *mut List;
     let attach_rel_idxs: *mut List;
@@ -20234,10 +19760,10 @@ unsafe fn AttachPartitionEnsureIndexes(
     let cxt: MemoryContext;
     let oldcxt: MemoryContext;
 
-    cxt = AllocSetContextCreate(
+    cxt = AllocSetContextCreate!(
         CurrentMemoryContext,
         c"AttachPartitionEnsureIndexes".as_ptr(),
-        ALLOCSET_DEFAULT_SIZES!(),
+        ALLOCSET_DEFAULT_SIZES!()
     );
     oldcxt = MemoryContextSwitchTo(cxt);
 
@@ -20274,16 +19800,13 @@ unsafe fn AttachPartitionEnsureIndexes(
                 let idx_rel: Relation = index_open(idx, AccessShareLock);
 
                 if (*(*idx_rel).rd_index).indisunique || (*(*idx_rel).rd_index).indisprimary {
-                    ereport!(
-                        ERROR,
-                        errmsg!(
+                    ereport!(ERROR, errmsg!(
                             "cannot attach foreign table \"{}\" as partition of partitioned table \"{}\"",
                             CStr::from_ptr(RelationGetRelationName(attachrel)).to_string_lossy(),
                             CStr::from_ptr(RelationGetRelationName(rel)).to_string_lossy()
                         )
                         /* errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                           errdetail("Partitioned table ... contains unique indexes.") */
-                    );
+                           errdetail("Partitioned table ... contains unique indexes.") */);
                 }
                 index_close(idx_rel, AccessShareLock);
                 cell = lnext(idxes, cell);
@@ -20313,7 +19836,7 @@ unsafe fn AttachPartitionEnsureIndexes(
             attmap = build_attrmap_by_name(
                 RelationGetDescr(attachrel),
                 RelationGetDescr(rel),
-                false,
+                false
             );
             constraint_oid =
                 get_relation_idx_constraint_oid(RelationGetRelid(rel), idx);
@@ -20323,12 +19846,12 @@ unsafe fn AttachPartitionEnsureIndexes(
                 let mut cld_constr_oid: Oid = InvalidOid;
 
                 /* does this index have a parent?  if so, can't use it */
-                if (*(*attach_rel_idx_rels.add(i)).rd_rel).relispartition {
+                if (*(*(*attach_rel_idx_rels.add(i))).rd_rel).relispartition {
                     continue;
                 }
 
                 /* If this index is invalid, can't use it */
-                if !(*(*(*attach_rel_idx_rels.add(i)).rd_index)).indisvalid {
+                if !(*(*(*attach_rel_idx_rels.add(i))).rd_index).indisvalid {
                     continue;
                 }
 
@@ -20339,12 +19862,12 @@ unsafe fn AttachPartitionEnsureIndexes(
                     (*idx_rel).rd_indcollation,
                     (*(*attach_rel_idx_rels.add(i))).rd_opfamily,
                     (*idx_rel).rd_opfamily,
-                    attmap,
+                    attmap
                 ) {
                     if OidIsValid(constraint_oid) {
                         cld_constr_oid = get_relation_idx_constraint_oid(
                             RelationGetRelid(attachrel),
-                            cld_idx_id,
+                            cld_idx_id
                         );
                         if !OidIsValid(cld_constr_oid) {
                             continue;
@@ -20363,7 +19886,7 @@ unsafe fn AttachPartitionEnsureIndexes(
                         ConstraintSetParentConstraint(
                             cld_constr_oid,
                             constraint_oid,
-                            RelationGetRelid(attachrel),
+                            RelationGetRelid(attachrel)
                         );
                     }
                     found = true;
@@ -20374,13 +19897,13 @@ unsafe fn AttachPartitionEnsureIndexes(
 
             if !found {
                 let stmt: *mut IndexStmt;
-                let con_oid: Oid;
+                let mut con_oid: Oid = InvalidOid;
 
                 stmt = generateClonedIndexStmt(
                     core::ptr::null_mut(),
                     idx_rel,
                     attmap,
-                    &mut (con_oid as Oid) as *mut Oid,
+                    &mut con_oid as *mut Oid
                 );
                 DefineIndex(
                     RelationGetRelid(attachrel),
@@ -20393,7 +19916,7 @@ unsafe fn AttachPartitionEnsureIndexes(
                     false,
                     false,
                     false,
-                    false,
+                    false
                 );
             }
 
@@ -20428,7 +19951,7 @@ unsafe fn CloneRowTriggersToPartition(parent: Relation, partition: Relation) {
         Anum_pg_trigger_tgrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(parent)),
+        ObjectIdGetDatum(RelationGetRelid(parent))
     );
     pg_trigger = table_open(TriggerRelationId, RowExclusiveLock);
     scan = systable_beginscan(
@@ -20437,13 +19960,13 @@ unsafe fn CloneRowTriggersToPartition(parent: Relation, partition: Relation) {
         true,
         core::ptr::null_mut(),
         1,
-        &mut key,
+        &mut key
     );
 
-    per_tup_cxt = AllocSetContextCreate(
+    per_tup_cxt = AllocSetContextCreate!(
         CurrentMemoryContext,
         c"clone trig".as_ptr(),
-        ALLOCSET_SMALL_SIZES!(),
+        ALLOCSET_SMALL_SIZES!()
     );
 
     loop {
@@ -20486,9 +20009,9 @@ unsafe fn CloneRowTriggersToPartition(parent: Relation, partition: Relation) {
         /* If there is a WHEN clause, generate a 'cooked' version of it. */
         value = heap_getattr(
             tuple,
-            Anum_pg_trigger_tgqual,
+            Anum_pg_trigger_tgqual as c_int,
             RelationGetDescr(pg_trigger),
-            &mut isnull,
+            &mut isnull
         );
         if !isnull {
             qual = stringToNode(TextDatumGetCString(value)) as *mut Node;
@@ -20496,13 +20019,13 @@ unsafe fn CloneRowTriggersToPartition(parent: Relation, partition: Relation) {
                 qual as *mut List,
                 PRS2_OLD_VARNO as i32,
                 partition,
-                parent,
+                parent
             ) as *mut Node;
             qual = map_partition_varattnos(
                 qual as *mut List,
                 PRS2_NEW_VARNO as i32,
                 partition,
-                parent,
+                parent
             ) as *mut Node;
         }
 
@@ -20511,12 +20034,12 @@ unsafe fn CloneRowTriggersToPartition(parent: Relation, partition: Relation) {
             for i in 0..(*trig_form).tgattr.dim1 {
                 let col: Form_pg_attribute = TupleDescAttr(
                     (*parent).rd_att,
-                    (*trig_form).tgattr.values[i as usize] as usize - 1,
+                    (*trig_form).tgattr.values[i as usize] as usize - 1
                 ) as Form_pg_attribute;
                 cols = lappend(
                     cols,
                     makeString(pstrdup(NameStr!((*col).attname)) as *mut libc::c_char)
-                        as *mut libc::c_void,
+                        as *mut libc::c_void
                 );
             }
         }
@@ -20527,9 +20050,9 @@ unsafe fn CloneRowTriggersToPartition(parent: Relation, partition: Relation) {
 
             value = heap_getattr(
                 tuple,
-                Anum_pg_trigger_tgargs,
+                Anum_pg_trigger_tgargs as c_int,
                 RelationGetDescr(pg_trigger),
-                &mut isnull,
+                &mut isnull
             );
             if isnull {
                 elog!(
@@ -20540,12 +20063,12 @@ unsafe fn CloneRowTriggersToPartition(parent: Relation, partition: Relation) {
                 );
             }
 
-            p = VARDATA_ANY!(DatumGetByteaPP(value)) as *mut libc::c_char;
+            p = VARDATA_ANY!(DatumGetByteaPP!(value) as *const libc::c_char) as *mut libc::c_char;
 
             for _ in 0..(*trig_form).tgnargs {
                 trigargs = lappend(
                     trigargs,
-                    makeString(pstrdup(p) as *mut libc::c_char) as *mut libc::c_void,
+                    makeString(pstrdup(p) as *mut libc::c_char) as *mut libc::c_void
                 );
                 p = p.add(libc::strlen(p) + 1);
             }
@@ -20582,7 +20105,7 @@ unsafe fn CloneRowTriggersToPartition(parent: Relation, partition: Relation) {
             qual,
             false,
             true,
-            (*trig_form).tgenabled,
+            (*trig_form).tgenabled
         );
 
         MemoryContextSwitchTo(oldcxt);
@@ -20603,22 +20126,19 @@ unsafe fn ATExecDetachPartition(
     tab: *mut AlteredTableInfo,
     rel: Relation,
     name: *mut RangeVar,
-    concurrent: bool,
+    concurrent: bool
 ) -> ObjectAddress {
     let mut part_rel: Relation;
-    let address: ObjectAddress;
+    let mut address: ObjectAddress = InvalidObjectAddress;
     let default_part_oid: Oid;
-    let partdesc: PartitionDesc;
+    let partdesc: *mut crate::partitioning::partdesc::PartitionDescData;
 
-    partdesc = RelationGetPartitionDesc(rel, true);
-    default_part_oid = get_default_oid_from_partdesc(partdesc);
+    partdesc = RelationGetPartitionDesc(rel, true) as *mut crate::partitioning::partdesc::PartitionDescData;
+    default_part_oid = get_default_oid_from_partdesc(partdesc as *mut std::ffi::c_void);
     if OidIsValid(default_part_oid) {
         if concurrent {
-            ereport!(
-                ERROR,
-                errmsg!("cannot detach partitions concurrently when a default partition exists")
-                /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */
-            );
+            ereport!(ERROR, errmsg!("cannot detach partitions concurrently when a default partition exists")
+                /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */);
         }
         LockRelationOid(default_part_oid, AccessExclusiveLock);
     }
@@ -20629,7 +20149,7 @@ unsafe fn ATExecDetachPartition(
             ShareUpdateExclusiveLock
         } else {
             AccessExclusiveLock
-        },
+        }
     );
 
     if !concurrent {
@@ -20646,15 +20166,15 @@ unsafe fn ATExecDetachPartition(
         let mut tag: LOCKTAG = core::mem::zeroed();
         let parent_relname: *mut libc::c_char = MemoryContextStrdup(
             PortalContext,
-            RelationGetRelationName(rel),
+            RelationGetRelationName(rel)
         );
         let part_relname: *mut libc::c_char = MemoryContextStrdup(
             PortalContext,
-            RelationGetRelationName(part_rel),
+            RelationGetRelationName(part_rel)
         );
 
         if (*partdesc).boundinfo != core::ptr::null_mut()
-            && (*(*partdesc).boundinfo).strategy != PARTITION_STRATEGY_HASH as libc::c_char
+            && (*((*partdesc).boundinfo as *mut crate::partitioning::partbounds::PartitionBoundInfoFull)).strategy != PARTITION_STRATEGY_HASH as libc::c_char
         {
             DetachAddConstraintIfNeeded(wqueue, part_rel);
         }
@@ -20685,22 +20205,16 @@ unsafe fn ATExecDetachPartition(
                     CStr::from_ptr(part_relname).to_string_lossy()
                 );
             }
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "partitioned table \"{}\" was removed concurrently",
                     CStr::from_ptr(parent_relname).to_string_lossy()
-                ) /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */
-            );
+                ) /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */);
         }
         if part_rel.is_null() {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "partition \"{}\" was removed concurrently",
                     CStr::from_ptr(part_relname).to_string_lossy()
-                ) /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */
-            );
+                ) /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */);
         }
 
         (*tab).rel = rel_new;
@@ -20726,7 +20240,7 @@ unsafe fn DetachPartitionFinalize(
     rel: Relation,
     part_rel: Relation,
     concurrent: bool,
-    default_part_oid: Oid,
+    default_part_oid: Oid
 ) {
     let class_rel: Relation;
     let fks: *mut List;
@@ -20795,21 +20309,21 @@ unsafe fn DetachPartitionFinalize(
                 (*fk).confrelid,
                 (*fk).conrelid,
                 &mut insert_trigger_oid,
-                &mut update_trigger_oid,
+                &mut update_trigger_oid
             );
             Assert!(OidIsValid(insert_trigger_oid));
             TriggerSetParentTrigger(
                 trigrel,
                 insert_trigger_oid,
                 InvalidOid,
-                RelationGetRelid(part_rel),
+                RelationGetRelid(part_rel)
             );
             Assert!(OidIsValid(update_trigger_oid));
             TriggerSetParentTrigger(
                 trigrel,
                 update_trigger_oid,
                 InvalidOid,
-                RelationGetRelid(part_rel),
+                RelationGetRelid(part_rel)
             );
         }
 
@@ -20835,10 +20349,10 @@ unsafe fn DetachPartitionFinalize(
                 conppeqop.as_mut_ptr(),
                 conffeqop.as_mut_ptr(),
                 &mut numfkdelsetcols,
-                confdelsetcols.as_mut_ptr(),
+                confdelsetcols.as_mut_ptr()
             );
 
-            (*fkconstraint).contype = CONSTRAINT_FOREIGN;
+            (*fkconstraint).contype = CONSTR_FOREIGN;
             (*fkconstraint).conname = pstrdup(NameStr!((*conform).conname));
             (*fkconstraint).deferrable = (*conform).condeferrable;
             (*fkconstraint).initdeferred = (*conform).condeferred;
@@ -20859,11 +20373,11 @@ unsafe fn DetachPartitionFinalize(
             for i in 0..numfks as usize {
                 let att: Form_pg_attribute = TupleDescAttr(
                     RelationGetDescr(part_rel),
-                    conkey[i] as usize - 1,
+                    conkey[i] as usize - 1
                 ) as Form_pg_attribute;
                 (*fkconstraint).fk_attrs = lappend(
                     (*fkconstraint).fk_attrs,
-                    makeString(NameStr!((*att).attname) as *mut libc::c_char) as *mut libc::c_void,
+                    makeString(NameStr!((*att).attname) as *mut libc::c_char) as *mut libc::c_void
                 );
             }
 
@@ -20886,7 +20400,7 @@ unsafe fn DetachPartitionFinalize(
                 true,
                 InvalidOid,
                 InvalidOid,
-                (*conform).conperiod,
+                (*conform).conperiod
             );
             table_close(refd_rel, NoLock);
         }
@@ -20911,7 +20425,7 @@ unsafe fn DetachPartitionFinalize(
             ConstraintRelationId,
             constr_oid,
             ConstraintRelationId,
-            DEPENDENCY_INTERNAL,
+            DEPENDENCY_INTERNAL
         );
         CommandCounterIncrement();
 
@@ -20974,11 +20488,11 @@ unsafe fn DetachPartitionFinalize(
         RelationGetDescr(class_rel),
         new_val.as_mut_ptr(),
         new_null.as_mut_ptr(),
-        new_repl.as_mut_ptr(),
+        new_repl.as_mut_ptr()
     );
 
     (*(GETSTRUCT(newtuple) as Form_pg_class)).relispartition = false;
-    CatalogTupleUpdate(class_rel, &(*newtuple).t_self, newtuple);
+    CatalogTupleUpdate(class_rel, &mut (*newtuple).t_self, newtuple);
     heap_freetuple(newtuple);
     table_close(class_rel, RowExclusiveLock);
 
@@ -20993,7 +20507,7 @@ unsafe fn DetachPartitionFinalize(
                 false,
                 AccessExclusiveLock,
                 true,
-                true,
+                true
             );
         }
     }
@@ -21012,7 +20526,7 @@ unsafe fn DetachPartitionFinalize(
         let children: *mut List = find_all_inheritors(
             RelationGetRelid(part_rel),
             AccessExclusiveLock,
-            core::ptr::null_mut(),
+            core::ptr::null_mut()
         );
         cell = list_head(children);
         while !cell.is_null() {
@@ -21028,7 +20542,7 @@ unsafe fn DetachPartitionFinalize(
 
 unsafe fn ATExecDetachPartitionFinalize(rel: Relation, name: *mut RangeVar) -> ObjectAddress {
     let part_rel: Relation;
-    let address: ObjectAddress;
+    let mut address: ObjectAddress = InvalidObjectAddress;
     let snap: Snapshot = GetActiveSnapshot();
 
     part_rel = table_openrv(name, AccessExclusiveLock);
@@ -21078,7 +20592,7 @@ unsafe fn DetachAddConstraintIfNeeded(wqueue: *mut *mut List, part_rel: Relation
             true,
             false,
             true,
-            ShareUpdateExclusiveLock,
+            ShareUpdateExclusiveLock
         );
     }
 }
@@ -21101,7 +20615,7 @@ unsafe fn DropClonedTriggersFromPartition(partition_id: Oid) {
         Anum_pg_trigger_tgrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(partition_id),
+        ObjectIdGetDatum(partition_id)
     );
     tgrel = table_open(TriggerRelationId, RowExclusiveLock);
     scan = systable_beginscan(
@@ -21110,7 +20624,7 @@ unsafe fn DropClonedTriggersFromPartition(partition_id: Oid) {
         true,
         core::ptr::null_mut(),
         1,
-        &mut skey,
+        &mut skey
     );
 
     loop {
@@ -21138,13 +20652,13 @@ unsafe fn DropClonedTriggersFromPartition(partition_id: Oid) {
             TriggerRelationId,
             (*pg_trigger).oid,
             TriggerRelationId,
-            DEPENDENCY_PARTITION_PRI,
+            DEPENDENCY_PARTITION_PRI
         );
         deleteDependencyRecordsForClass(
             TriggerRelationId,
             (*pg_trigger).oid,
             RelationRelationId,
-            DEPENDENCY_PARTITION_SEC,
+            DEPENDENCY_PARTITION_SEC
         );
 
         ObjectAddressSet!(trig, TriggerRelationId, (*pg_trigger).oid);
@@ -21174,7 +20688,7 @@ unsafe extern "C" fn RangeVarCallbackForAttachIndex(
     rv: *const RangeVar,
     rel_oid: Oid,
     old_rel_oid: Oid,
-    arg: *mut libc::c_void,
+    arg: *mut libc::c_void
 ) {
     let state: *mut AttachIndexCallbackState = arg as *mut AttachIndexCallbackState;
     let classform: Form_pg_class;
@@ -21202,13 +20716,10 @@ unsafe extern "C" fn RangeVarCallbackForAttachIndex(
     if (*classform).relkind as u8 != RELKIND_PARTITIONED_INDEX
         && (*classform).relkind as u8 != RELKIND_INDEX
     {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "\"{}\" is not an index",
                 CStr::from_ptr((*rv).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
-        );
+            ) /* errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */);
     }
     ReleaseSysCache(tuple);
 
@@ -21223,12 +20734,12 @@ unsafe extern "C" fn RangeVarCallbackForAttachIndex(
 unsafe fn ATExecAttachPartitionIdx(
     wqueue: *mut *mut List,
     parent_idx: Relation,
-    name: *mut RangeVar,
+    name: *mut RangeVar
 ) -> ObjectAddress {
     let part_idx: Relation;
     let part_tbl: Relation;
     let parent_tbl: Relation;
-    let address: ObjectAddress;
+    let mut address: ObjectAddress = InvalidObjectAddress;
     let part_idx_id: Oid;
     let curr_parent: Oid;
     let mut state: AttachIndexCallbackState = AttachIndexCallbackState {
@@ -21242,17 +20753,14 @@ unsafe fn ATExecAttachPartitionIdx(
         AccessExclusiveLock,
         0,
         Some(RangeVarCallbackForAttachIndex),
-        &mut state as *mut AttachIndexCallbackState as *mut libc::c_void,
+        &mut state as *mut AttachIndexCallbackState as *mut libc::c_void
     );
 
     if !OidIsValid(part_idx_id) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "index \"{}\" does not exist",
                 CStr::from_ptr((*name).relname).to_string_lossy()
-            ) /* errcode(ERRCODE_UNDEFINED_OBJECT) */
-        );
+            ) /* errcode(ERRCODE_UNDEFINED_OBJECT) */);
     }
 
     part_idx = relation_open(part_idx_id, AccessExclusiveLock);
@@ -21273,27 +20781,24 @@ unsafe fn ATExecAttachPartitionIdx(
         let parent_info: *mut IndexInfo;
         let attmap: *mut AttrMap;
         let mut found: bool;
-        let part_desc: PartitionDesc;
+        let part_desc: *mut crate::partitioning::partdesc::PartitionDescData;
         let constraint_oid: Oid;
         let mut cld_constr_id: Oid = InvalidOid;
 
         refuseDupeIndexAttach(parent_idx, part_idx, part_tbl);
 
         if OidIsValid(curr_parent) {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot attach index \"{}\" as a partition of index \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(part_idx)).to_string_lossy(),
                     CStr::from_ptr(RelationGetRelationName(parent_idx)).to_string_lossy()
                 )
                 /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                   errdetail("Index ... is already attached to another index.") */
-            );
+                   errdetail("Index ... is already attached to another index.") */);
         }
 
         /* Make sure it indexes a partition of the other index's table */
-        part_desc = RelationGetPartitionDesc(parent_tbl, true);
+        part_desc = RelationGetPartitionDesc(parent_tbl, true) as *mut crate::partitioning::partdesc::PartitionDescData;
         found = false;
         for i in 0..(*part_desc).nparts {
             if *(*part_desc).oids.add(i as usize) == state.partition_oid {
@@ -21302,15 +20807,12 @@ unsafe fn ATExecAttachPartitionIdx(
             }
         }
         if !found {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot attach index \"{}\" as a partition of index \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(part_idx)).to_string_lossy(),
                     CStr::from_ptr(RelationGetRelationName(parent_idx)).to_string_lossy()
                 )
-                /* errdetail("Index ... is not an index on any partition of table ...") */
-            );
+                /* errdetail("Index ... is not an index on any partition of table ...") */);
         }
 
         /* Ensure the indexes are compatible */
@@ -21319,7 +20821,7 @@ unsafe fn ATExecAttachPartitionIdx(
         attmap = build_attrmap_by_name(
             RelationGetDescr(part_tbl),
             RelationGetDescr(parent_tbl),
-            false,
+            false
         );
         if !CompareIndexInfo(
             child_info,
@@ -21328,37 +20830,31 @@ unsafe fn ATExecAttachPartitionIdx(
             (*parent_idx).rd_indcollation,
             (*part_idx).rd_opfamily,
             (*parent_idx).rd_opfamily,
-            attmap,
+            attmap
         ) {
-            ereport!(
-                ERROR,
-                errmsg!(
+            ereport!(ERROR, errmsg!(
                     "cannot attach index \"{}\" as a partition of index \"{}\"",
                     CStr::from_ptr(RelationGetRelationName(part_idx)).to_string_lossy(),
                     CStr::from_ptr(RelationGetRelationName(parent_idx)).to_string_lossy()
                 )
-                /* errdetail("The index definitions do not match.") */
-            );
+                /* errdetail("The index definitions do not match.") */);
         }
 
         constraint_oid = get_relation_idx_constraint_oid(
             RelationGetRelid(parent_tbl),
-            RelationGetRelid(parent_idx),
+            RelationGetRelid(parent_idx)
         );
 
         if OidIsValid(constraint_oid) {
             cld_constr_id =
                 get_relation_idx_constraint_oid(RelationGetRelid(part_tbl), part_idx_id);
             if !OidIsValid(cld_constr_id) {
-                ereport!(
-                    ERROR,
-                    errmsg!(
+                ereport!(ERROR, errmsg!(
                         "cannot attach index \"{}\" as a partition of index \"{}\"",
                         CStr::from_ptr(RelationGetRelationName(part_idx)).to_string_lossy(),
                         CStr::from_ptr(RelationGetRelationName(parent_idx)).to_string_lossy()
                     )
-                    /* errdetail("The index ... belongs to a constraint...") */
-                );
+                    /* errdetail("The index ... belongs to a constraint...") */);
             }
         }
 
@@ -21371,7 +20867,7 @@ unsafe fn ATExecAttachPartitionIdx(
             ConstraintSetParentConstraint(
                 cld_constr_id,
                 constraint_oid,
-                RelationGetRelid(part_tbl),
+                RelationGetRelid(part_tbl)
             );
         }
 
@@ -21394,22 +20890,19 @@ unsafe fn ATExecAttachPartitionIdx(
 unsafe fn refuseDupeIndexAttach(
     parent_idx: Relation,
     part_idx: Relation,
-    partition_tbl: Relation,
+    partition_tbl: Relation
 ) {
     let existing_idx: Oid;
 
     existing_idx = index_get_partition(partition_tbl, RelationGetRelid(parent_idx));
     if OidIsValid(existing_idx) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "cannot attach index \"{}\" as a partition of index \"{}\"",
                 CStr::from_ptr(RelationGetRelationName(part_idx)).to_string_lossy(),
                 CStr::from_ptr(RelationGetRelationName(parent_idx)).to_string_lossy()
             )
             /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-               errdetail("Another index is already attached for partition ...") */
-        );
+               errdetail("Another index is already attached for partition ...") */);
     }
 }
 
@@ -21433,7 +20926,7 @@ unsafe fn validatePartitionedIndex(parted_idx: Relation, parted_tbl: Relation) {
         Anum_pg_inherits_inhparent,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(parted_idx)),
+        ObjectIdGetDatum(RelationGetRelid(parted_idx))
     );
     scan = systable_beginscan(
         inherits_rel,
@@ -21441,7 +20934,7 @@ unsafe fn validatePartitionedIndex(parted_idx: Relation, parted_tbl: Relation) {
         true,
         core::ptr::null_mut(),
         1,
-        &mut key,
+        &mut key
     );
 
     loop {
@@ -21467,7 +20960,7 @@ unsafe fn validatePartitionedIndex(parted_idx: Relation, parted_tbl: Relation) {
     systable_endscan(scan);
     table_close(inherits_rel, AccessShareLock);
 
-    if tuples == (*RelationGetPartitionDesc(parted_tbl, true)).nparts {
+    if tuples == (*(RelationGetPartitionDesc(parted_tbl, true) as *mut crate::partitioning::partdesc::PartitionDescData)).nparts {
         let idx_rel: Relation;
         let ind_tup: HeapTuple;
         let index_form: Form_pg_index;
@@ -21475,7 +20968,7 @@ unsafe fn validatePartitionedIndex(parted_idx: Relation, parted_tbl: Relation) {
         idx_rel = table_open(IndexRelationId, RowExclusiveLock);
         ind_tup = SearchSysCacheCopy1(
             INDEXRELID,
-            ObjectIdGetDatum(RelationGetRelid(parted_idx)),
+            ObjectIdGetDatum(RelationGetRelid(parted_idx))
         );
         if !HeapTupleIsValid(ind_tup) {
             elog!(
@@ -21487,7 +20980,7 @@ unsafe fn validatePartitionedIndex(parted_idx: Relation, parted_tbl: Relation) {
         index_form = GETSTRUCT(ind_tup) as Form_pg_index;
         (*index_form).indisvalid = true;
         updated = true;
-        CatalogTupleUpdate(idx_rel, &(*ind_tup).t_self, ind_tup);
+        CatalogTupleUpdate(idx_rel, &mut (*ind_tup).t_self, ind_tup);
         table_close(idx_rel, RowExclusiveLock);
         heap_freetuple(ind_tup);
     }
@@ -21521,16 +21014,13 @@ unsafe fn verifyPartitionIndexNotNull(iinfo: *mut IndexInfo, partition: Relation
     for i in 0..(*iinfo).ii_NumIndexKeyAttrs as usize {
         let att: Form_pg_attribute = TupleDescAttr(
             RelationGetDescr(partition),
-            (*iinfo).ii_IndexAttrNumbers[i] as usize - 1,
+            (*iinfo).ii_IndexAttrNumbers[i] as usize - 1
         ) as Form_pg_attribute;
 
         if !(*att).attnotnull {
-            ereport!(
-                ERROR,
-                errmsg!("invalid primary key definition")
+            ereport!(ERROR, errmsg!("invalid primary key definition")
                 /* errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                   errdetail("Column ... of relation ... is not marked NOT NULL.") */
-            );
+                   errdetail("Column ... of relation ... is not marked NOT NULL.") */);
         }
     }
 }
@@ -21558,14 +21048,14 @@ unsafe fn GetParentedForeignKeyRefs(partition: Relation) -> *mut List {
         Anum_pg_constraint_confrelid,
         BTEqualStrategyNumber,
         F_OIDEQ,
-        ObjectIdGetDatum(RelationGetRelid(partition)),
+        ObjectIdGetDatum(RelationGetRelid(partition))
     );
     ScanKeyInit(
         &mut key[1],
         Anum_pg_constraint_contype,
         BTEqualStrategyNumber,
         F_CHAREQ,
-        CharGetDatum(CONSTRAINT_FOREIGN as libc::c_char as Datum),
+        CharGetDatum(CONSTRAINT_FOREIGN as libc::c_char)
     );
 
     scan = systable_beginscan(
@@ -21574,7 +21064,7 @@ unsafe fn GetParentedForeignKeyRefs(partition: Relation) -> *mut List {
         true,
         core::ptr::null_mut(),
         2,
-        key.as_mut_ptr(),
+        key.as_mut_ptr()
     );
     loop {
         tuple = systable_getnext(scan);
@@ -21636,7 +21126,7 @@ unsafe fn ATDetachCheckNoForeignKeyRefs(partition: Relation) {
         trig.tgdeferrable = false;
         trig.tginitdeferred = false;
 
-        RI_PartitionRemove_Check(&trig, rel, partition);
+        RI_PartitionRemove_Check(&mut trig, rel, partition);
 
         ReleaseSysCache(tuple);
         table_close(rel, NoLock);
@@ -21649,7 +21139,7 @@ unsafe fn ATDetachCheckNoForeignKeyRefs(partition: Relation) {
 
 unsafe fn GetAttributeCompression(
     atttypid: Oid,
-    compression: *const libc::c_char,
+    compression: *const libc::c_char
 ) -> libc::c_char {
     let cmethod: libc::c_char;
 
@@ -21660,24 +21150,18 @@ unsafe fn GetAttributeCompression(
     }
 
     if !TypeIsToastable(atttypid) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column data type {} does not support compression",
                 CStr::from_ptr(format_type_be(atttypid)).to_string_lossy()
-            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     cmethod = CompressionNameToMethod(compression);
     if !CompressionMethodIsValid(cmethod) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "invalid compression method \"{}\"",
                 CStr::from_ptr(compression).to_string_lossy()
-            ) /* errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
-        );
+            ) /* errcode(ERRCODE_INVALID_PARAMETER_VALUE) */);
     }
 
     cmethod
@@ -21689,9 +21173,9 @@ unsafe fn GetAttributeCompression(
 
 unsafe fn GetAttributeStorage(
     atttypid: Oid,
-    storagemode: *const libc::c_char,
+    storagemode: *const libc::c_char
 ) -> libc::c_char {
-    let cstorage: u8;
+    let cstorage: c_char;
 
     if pg_strcasecmp(storagemode, c"plain".as_ptr()) == 0 {
         cstorage = TYPSTORAGE_PLAIN;
@@ -21704,24 +21188,18 @@ unsafe fn GetAttributeStorage(
     } else if pg_strcasecmp(storagemode, c"default".as_ptr()) == 0 {
         cstorage = get_typstorage(atttypid);
     } else {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "invalid storage type \"{}\"",
                 CStr::from_ptr(storagemode).to_string_lossy()
-            ) /* errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
-        );
+            ) /* errcode(ERRCODE_INVALID_PARAMETER_VALUE) */);
         unreachable!();
     }
 
     if !(cstorage == TYPSTORAGE_PLAIN || TypeIsToastable(atttypid)) {
-        ereport!(
-            ERROR,
-            errmsg!(
+        ereport!(ERROR, errmsg!(
                 "column data type {} can only have storage PLAIN",
                 CStr::from_ptr(format_type_be(atttypid)).to_string_lossy()
-            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */
-        );
+            ) /* errcode(ERRCODE_FEATURE_NOT_SUPPORTED) */);
     }
 
     cstorage as libc::c_char

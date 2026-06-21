@@ -272,7 +272,7 @@ unsafe fn ReleaseSysCache(tuple: HeapTuple) {
 
 // utils/cache/syscache.h SysCacheIdentifier value used directly here.
 /* TODO(pg-port): real SUBSCRIPTIONNAME enumerator lives in utils/cache/syscache.h */
-const SUBSCRIPTIONNAME: c_int = 0;
+const SUBSCRIPTIONNAME: c_int = 66;
 
 /* TODO(pg-port): real get_namespace_name lives in utils/cache/lsyscache.c */
 unsafe fn get_namespace_name(nspid: Oid) -> *mut c_char {

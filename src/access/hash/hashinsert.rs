@@ -141,35 +141,25 @@ unsafe fn _hash_getbuf(
     _blkno: BlockNumber,
     _access: c_int,
     _flags: c_int,
-) -> Buffer {
-    unimplemented!() // TODO: access/hashpage.c
-}
+) -> Buffer { unimplemented!() }
 
 unsafe fn _hash_getbucketbuf_from_hashkey(
     _rel: Relation,
     _hashkey: uint32,
     _access: c_int,
     _cachedmetap: *mut HashMetaPage,
-) -> Buffer {
-    unimplemented!() // TODO: access/hashpage.c
-}
+) -> Buffer { unimplemented!() }
 
-unsafe fn _hash_relbuf(_rel: Relation, _buf: Buffer) {
-    unimplemented!() // TODO: access/hashpage.c
-}
+unsafe fn _hash_relbuf(_rel: Relation, _buf: Buffer) { unimplemented!() }
 
-unsafe fn _hash_dropbuf(_rel: Relation, _buf: Buffer) {
-    unimplemented!() // TODO: access/hashpage.c
-}
+unsafe fn _hash_dropbuf(_rel: Relation, _buf: Buffer) { unimplemented!() }
 
 unsafe fn _hash_addovflpage(
     _rel: Relation,
     _metabuf: Buffer,
     _buf: Buffer,
     _retain_pin: bool,
-) -> Buffer {
-    unimplemented!() // TODO: access/hashovfl.c
-}
+) -> Buffer { crate::access::hash::hashovfl::_hash_addovflpage(_rel, _metabuf, _buf, _retain_pin) }
 
 unsafe fn _hash_finish_split(
     _rel: Relation,
@@ -179,21 +169,13 @@ unsafe fn _hash_finish_split(
     _maxbucket: uint32,
     _highmask: uint32,
     _lowmask: uint32,
-) {
-    unimplemented!() // TODO: access/hashpage.c
-}
+) { unimplemented!() }
 
-unsafe fn _hash_expandtable(_rel: Relation, _metabuf: Buffer) {
-    unimplemented!() // TODO: access/hashpage.c
-}
+unsafe fn _hash_expandtable(_rel: Relation, _metabuf: Buffer) { unimplemented!() }
 
-unsafe fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: c_int) {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: c_int) { crate::access::hash::hashutil::_hash_checkpage(_rel, _buf, _flags) }
 
-unsafe fn _hash_binsearch(_page: Page, _hash_value: uint32) -> OffsetNumber {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_binsearch(_page: Page, _hash_value: uint32) -> OffsetNumber { crate::access::hash::hashutil::_hash_binsearch(_page, _hash_value) }
 
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     unimplemented!() // TODO: storage/bufmgr.h
@@ -211,13 +193,9 @@ unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
     unimplemented!() // TODO: storage/bufmgr.c
 }
 
-unsafe fn IsBufferCleanupOK(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.c
-}
+unsafe fn IsBufferCleanupOK(_buffer: Buffer) -> bool { crate::storage::buffer::bufmgr::IsBufferCleanupOK(_buffer) }
 
-unsafe fn RelationNeedsWAL(_relation: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_relation) }
 
 unsafe fn RelationIsAccessibleInLogicalDecoding(_relation: Relation) -> bool {
     unimplemented!() // TODO: utils/rel.h
@@ -237,9 +215,7 @@ unsafe fn index_compute_xid_horizon_for_tuples(
     _ibuf: Buffer,
     _itemnos: *mut OffsetNumber,
     _nitems: c_int,
-) -> TransactionId {
-    unimplemented!() // TODO: access/genam.c
-}
+) -> TransactionId { crate::access::index::genam::index_compute_xid_horizon_for_tuples(_irel, _hrel, _ibuf, _itemnos, _nitems) }
 
 unsafe fn XLogBeginInsert() {
     unimplemented!() // TODO: access/xloginsert.c

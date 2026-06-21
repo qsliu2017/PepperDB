@@ -238,18 +238,12 @@ unsafe extern "C" {
     fn memset(dest: *mut c_void, c: c_int, n: usize) -> *mut c_void; // TODO(pg-port): libc memset
 }
 
-unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
-    unimplemented!() // TODO(pg-port): real BufferGetPage lives in storage/bufmgr.h
-}
-unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size {
-    unimplemented!() // TODO(pg-port): real BufferGetPageSize lives in storage/bufmgr.h
-}
+unsafe fn BufferGetPage(_buffer: Buffer) -> Page { crate::storage::buffer::bufmgr::BufferGetPage(_buffer) }
+unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size { crate::access::nbtree::nbtpage::BufferGetPageSize(_buffer) }
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO(pg-port): real BufferGetBlockNumber lives in storage/buffer/bufmgr.c
 }
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): real BufferIsValid lives in storage/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
     unimplemented!() // TODO(pg-port): real LockBuffer lives in storage/buffer/bufmgr.c
 }
@@ -265,9 +259,7 @@ unsafe fn UnlockReleaseBuffer(_buffer: Buffer) {
 unsafe fn PageGetHeapFreeSpace(_page: Page) -> Size {
     unimplemented!() // TODO(pg-port): real PageGetHeapFreeSpace lives in storage/bufpage.c
 }
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real PageSetLSN lives in storage/bufpage.h
-}
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(_page, _lsn) }
 unsafe fn PageSetPrunable(_page: Page, _xid: TransactionId) {
     unimplemented!() // TODO(pg-port): real PageSetPrunable lives in storage/bufpage.h
 }
@@ -278,52 +270,34 @@ unsafe fn XLogReadBufferForRedo(
     _record: *mut XLogReaderState,
     _block_id: uint8,
     _buf: *mut Buffer,
-) -> XLogRedoAction {
-    unimplemented!() // TODO(pg-port): real XLogReadBufferForRedo lives in access/transam/xlogutils.c
-}
+) -> XLogRedoAction { crate::access::transam::xlogutils::XLogReadBufferForRedo(_record, _block_id, _buf) }
 unsafe fn XLogReadBufferForRedoExtended(
     _record: *mut XLogReaderState,
     _block_id: uint8,
     _mode: c_int,
     _get_cleanup_lock: bool,
     _buf: *mut Buffer,
-) -> XLogRedoAction {
-    unimplemented!() // TODO(pg-port): real XLogReadBufferForRedoExtended lives in access/transam/xlogutils.c
-}
-unsafe fn XLogInitBufferForRedo(_record: *mut XLogReaderState, _block_id: uint8) -> Buffer {
-    unimplemented!() // TODO(pg-port): real XLogInitBufferForRedo lives in access/transam/xlogutils.c
-}
+) -> XLogRedoAction { crate::access::transam::xlogutils::XLogReadBufferForRedoExtended(_record, _block_id, _mode as _, _get_cleanup_lock, _buf) }
+unsafe fn XLogInitBufferForRedo(_record: *mut XLogReaderState, _block_id: uint8) -> Buffer { crate::access::transam::xlogutils::XLogInitBufferForRedo(_record, _block_id) }
 unsafe fn XLogRecordPageWithFreeSpace(
     _rlocator: RelFileLocator,
     _heapBlk: BlockNumber,
     _spaceAvail: Size,
-) {
-    unimplemented!() // TODO(pg-port): real XLogRecordPageWithFreeSpace lives in storage/freespace/freespace.c
-}
+) { crate::storage::freespace::freespace::XLogRecordPageWithFreeSpace(_rlocator, _heapBlk, _spaceAvail) }
 unsafe fn ResolveRecoveryConflictWithSnapshot(
     _snapshotConflictHorizon: TransactionId,
     _isCatalogRel: bool,
     _locator: RelFileLocator,
-) {
-    unimplemented!() // TODO(pg-port): real ResolveRecoveryConflictWithSnapshot lives in storage/ipc/standby.c
-}
-unsafe fn CreateFakeRelcacheEntry(_rlocator: RelFileLocator) -> Relation {
-    unimplemented!() // TODO(pg-port): real CreateFakeRelcacheEntry lives in access/transam/xlogutils.c
-}
-unsafe fn FreeFakeRelcacheEntry(_fakerel: Relation) {
-    unimplemented!() // TODO(pg-port): real FreeFakeRelcacheEntry lives in access/transam/xlogutils.c
-}
-unsafe fn visibilitymap_pin(_rel: Relation, _heapBlk: BlockNumber, _vmbuf: *mut Buffer) {
-    unimplemented!() // TODO(pg-port): real visibilitymap_pin lives in access/heap/visibilitymap.c
-}
+) { crate::storage::ipc::standby::ResolveRecoveryConflictWithSnapshot(_snapshotConflictHorizon, _isCatalogRel, _locator) }
+unsafe fn CreateFakeRelcacheEntry(_rlocator: RelFileLocator) -> Relation { crate::access::transam::xlogutils::CreateFakeRelcacheEntry(_rlocator) }
+unsafe fn FreeFakeRelcacheEntry(_fakerel: Relation) { crate::access::transam::xlogutils::FreeFakeRelcacheEntry(_fakerel) }
+unsafe fn visibilitymap_pin(_rel: Relation, _heapBlk: BlockNumber, _vmbuf: *mut Buffer) { crate::access::heap::visibilitymap::visibilitymap_pin(_rel, _heapBlk, _vmbuf) }
 unsafe fn visibilitymap_clear(
     _rel: Relation,
     _heapBlk: BlockNumber,
     _vmbuf: Buffer,
     _flags: uint8,
-) -> bool {
-    unimplemented!() // TODO(pg-port): real visibilitymap_clear lives in access/heap/visibilitymap.c
-}
+) -> bool { crate::access::heap::visibilitymap::visibilitymap_clear(_rel, _heapBlk, _vmbuf, _flags) }
 unsafe fn visibilitymap_set(
     _rel: Relation,
     _heapBlk: BlockNumber,
@@ -332,9 +306,7 @@ unsafe fn visibilitymap_set(
     _vmBuf: Buffer,
     _cutoff_xid: TransactionId,
     _flags: uint8,
-) -> uint8 {
-    unimplemented!() // TODO(pg-port): real visibilitymap_set lives in access/heap/visibilitymap.c
-}
+) -> uint8 { crate::access::heap::visibilitymap::visibilitymap_set(_rel, _heapBlk, _heapBuf, _recptr, _vmBuf, _cutoff_xid, _flags) }
 unsafe fn heap_execute_freeze_tuple(_tuple: HeapTupleHeader, _frz: *mut HeapTupleFreeze) {
     unimplemented!() // TODO(pg-port): real heap_execute_freeze_tuple lives in access/heap/heapam.c
 }
@@ -344,9 +316,7 @@ unsafe fn ProcessCommittedInvalidationMessages(
     _RelcacheInitFileInval: bool,
     _dbid: Oid,
     _tsid: Oid,
-) {
-    unimplemented!() // TODO(pg-port): real ProcessCommittedInvalidationMessages lives in utils/cache/inval.c
-}
+) { crate::utils::cache::inval::ProcessCommittedInvalidationMessages(_msgs, _nmsgs, _RelcacheInitFileInval, _dbid, _tsid) }
 
 // ----------------------------------------------------------------------------
 // Functions

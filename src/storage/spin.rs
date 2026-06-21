@@ -18,7 +18,7 @@ use crate::storage::lmgr::s_lock::slock_t;
 // `S_LOCK`, `S_UNLOCK`, and `S_LOCK_FREE` are platform-specific macros; on the
 // generic build they reduce to setting/clearing the `slock_t` and calling
 // `tas`.  We delegate to the ported s_lock primitives where they exist.
-use crate::storage::lmgr::s_lock::{s_unlock, tas};
+use crate::storage::lmgr::s_lock::{s_lock, s_unlock, tas};
 
 /// `#define SpinLockInit(lock) S_INIT_LOCK(lock)`
 ///
@@ -39,9 +39,7 @@ pub unsafe fn SpinLockAcquire(lock: *mut slock_t) {
     // S_LOCK does TAS_SPIN, falling back to the contended s_lock() backoff path.
     // The generic test-and-set returns 0 on success (lock acquired).
     if tas(lock) != 0 {
-        // TODO: dedup when the full S_LOCK contended-backoff path
-        // (storage/lmgr/s_lock.rs s_lock) is wired through here.
-        unimplemented!("S_LOCK contended path");
+        s_lock(lock, c"spin.rs".as_ptr(), line!() as core::ffi::c_int, c"SpinLockAcquire".as_ptr());
     }
 }
 

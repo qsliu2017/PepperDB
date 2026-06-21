@@ -48,7 +48,7 @@ use core::ffi::CStr;
 // ----------------------------------------------------------------------------
 
 /* syscache id for pg_class by OID (utils/syscache.h) */
-const RELOID: c_int = 0;
+use crate::utils::cache::syscache_ids_gen::RELOID;
 /* pg_class index id (catalog/indexing.h) */
 const ClassOidIndexId: Oid = 2662;
 /* pg_class.oid attribute number */
@@ -88,7 +88,12 @@ unsafe fn heap_create_with_catalog(
     _relrewrite: Oid,
     _typaddress: *mut ObjectAddress,
 ) -> Oid {
-    unimplemented!()
+    crate::catalog::heap::heap_create_with_catalog(
+        _relname, _relnamespace, _reltablespace, _relid, _reltypeid, _reloftypeid, _ownerid,
+        _accessmtd, _tupdesc as _, _cooked_constraints as _, _relkind, _relpersistence,
+        _shared_relation, _mapped_relation, _oncommit, _reloptions, _use_user_acl,
+        _allow_system_table_mods, _is_internal, _relrewrite, _typaddress as _,
+    )
 }
 
 // TODO: not ported - catalog/index.c
@@ -115,51 +120,52 @@ unsafe fn index_create(
     _is_internal: bool,
     _constraintId: *mut Oid,
 ) -> Oid {
-    unimplemented!()
+    crate::catalog::index::index_create(
+        _heapRelation as _, _indexRelationName, _indexRelationId, _parentIndexRelid,
+        _parentConstraintId, _relFileNumber, _indexInfo as _, _indexColNames as _,
+        _accessMethodId, _tableSpaceId, _collationIds as _, _opclassIds as _,
+        _opclassOptions as _, _coloptions as _, _stattargets as _, _reloptions, _flags, _constr_flags,
+        _allow_system_table_mods, _is_internal, _constraintId as _,
+    )
 }
 
-// TODO: not ported - access/transam/xact.c
 unsafe fn CommandCounterIncrement() {
-    unimplemented!()
+    crate::access::transam::xact::CommandCounterIncrement()
 }
 
-// TODO: not ported - utils/cache/syscache.c
 unsafe fn SearchSysCacheCopy1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!()
+    crate::catalog::objectaddress_impl::SearchSysCacheCopy1(_cacheId, _key1) as _
 }
 
-// TODO: not ported - catalog/pg_depend.c
 unsafe fn recordDependencyOn(
     _depender: *const ObjectAddress,
     _referenced: *const ObjectAddress,
     _behavior: c_char,
 ) {
-    unimplemented!()
+    crate::catalog::pg_depend::recordDependencyOn(_depender as _, _referenced as _, _behavior as _)
 }
 
-// TODO: not ported - catalog/namespace.c
 unsafe fn isTempOrTempToastNamespace(_namespaceId: Oid) -> bool {
-    unimplemented!()
+    crate::catalog::namespace::isTempOrTempToastNamespace(_namespaceId)
 }
 
-// TODO: not ported - catalog/namespace.c
 unsafe fn GetTempToastNamespace() -> Oid {
-    unimplemented!()
+    crate::catalog::namespace::GetTempToastNamespace()
 }
 
-// TODO: not ported - utils/cache/relcache.c (RelationIsMapped macro)
+// RelationIsMapped macro (utils/rel.h): relfilenode == 0
 unsafe fn RelationIsMapped(_relation: Relation) -> bool {
-    unimplemented!()
+    (*(*_relation).rd_rel).relfilenode == 0
 }
 
-// TODO: not ported - access/table/tableam.c
+// table_relation_needs_toast_table macro: rd_tableam->relation_needs_toast_table(rel)
 unsafe fn table_relation_needs_toast_table(_rel: Relation) -> bool {
-    unimplemented!()
+    ((*((*_rel).rd_tableam as *const crate::access::table::tableam::TableAmRoutine)).relation_needs_toast_table.unwrap())(_rel)
 }
 
-// TODO: not ported - access/table/tableam.c
+// table_relation_toast_am macro: rd_tableam->relation_toast_am(rel)
 unsafe fn table_relation_toast_am(_rel: Relation) -> Oid {
-    unimplemented!()
+    ((*((*_rel).rd_tableam as *const crate::access::table::tableam::TableAmRoutine)).relation_toast_am.unwrap())(_rel)
 }
 
 // TODO: not ported - access/index/genam.c (systable_inplace_update)
@@ -173,12 +179,13 @@ unsafe fn systable_inplace_update_begin(
     _oldtupcopy: *mut HeapTuple,
     _state: *mut *mut c_void,
 ) {
-    unimplemented!()
+    crate::access::index::genam::systable_inplace_update_begin(
+        _relation as _, _indexId, _indexOK, _snapshot as _, _nkeys, _key as _, _oldtupcopy as _, _state as _,
+    )
 }
 
-// TODO: not ported - access/index/genam.c (systable_inplace_update)
 unsafe fn systable_inplace_update_finish(_state: *mut c_void, _tuple: HeapTuple) {
-    unimplemented!()
+    crate::access::index::genam::systable_inplace_update_finish(_state as _, _tuple as _)
 }
 
 // ----------------------------------------------------------------------------

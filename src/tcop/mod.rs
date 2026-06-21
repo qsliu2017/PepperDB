@@ -12,4 +12,5 @@ pub mod fastpath;
 pub mod tcopprot;
 pub mod backend_startup;
 pub mod postgres;
+pub mod pquery;
 pub mod utility;

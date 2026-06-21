@@ -227,6 +227,7 @@ unsafe fn GetTransactionSnapshot() -> Snapshot {
 }
 
 /// IsMVCCSnapshot (utils/snapshot.h) -- TODO(pg-port).
+#[no_mangle]
 unsafe fn IsMVCCSnapshot(_snapshot: Snapshot) -> bool {
     false
 }
@@ -963,7 +964,7 @@ pub unsafe fn bringetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> int64 {
     bdesc = (*opaque).bo_bdesc;
     pgstat_count_index_scan(idxRel);
     if !(*scan).instrument.is_null() {
-        (*(*scan).instrument).nsearches += 1;
+        if !(*scan).instrument.is_null() { *((*scan).instrument as *mut u64) += 1; }
     }
 
     /*

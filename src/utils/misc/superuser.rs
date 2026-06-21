@@ -22,16 +22,16 @@ extern "C" {
 
 // utils/syscache.h - SysCacheIdentifier value for pg_authid lookup by Oid.
 // TODO: not ported - utils/syscache.h.
-const AUTHOID: c_int = 0;
+use crate::utils::cache::syscache_ids_gen::AUTHOID;
 
 // TODO: not ported - utils/syscache.h.
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!()
+    crate::utils::cache::syscache::SearchSysCache1(_cacheId, _key1) as _
 }
 
 // TODO: not ported - utils/syscache.h.
 unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!()
+    crate::utils::cache::syscache::ReleaseSysCache(_tuple as _)
 }
 
 // TODO: not ported - utils/inval.h. SyscacheCallbackFunction signature.
@@ -43,7 +43,7 @@ unsafe fn CacheRegisterSyscacheCallback(
     _func: SyscacheCallbackFunction,
     _arg: Datum,
 ) {
-    unimplemented!()
+    crate::utils::cache::inval::CacheRegisterSyscacheCallback(_cacheid, core::mem::transmute(_func), _arg)
 }
 
 /*

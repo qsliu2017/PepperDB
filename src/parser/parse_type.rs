@@ -67,7 +67,7 @@ pub struct ErrorContextCallback {
 // ----------------------------------------------------------------
 
 unsafe fn makeRangeVar_stub(_s: *mut c_char, _r: *mut c_char, _location: c_int) -> *mut RangeVar {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeRangeVar(_s as _, _r as _, _location) as _
 }
 
 extern "C" {
@@ -77,23 +77,23 @@ extern "C" {
 }
 
 unsafe fn NameListToString(_names: *mut List) -> *mut c_char {
-    unimplemented!() // TODO: catalog/namespace.c
+    crate::catalog::namespace::NameListToString(_names as _) as _
 }
 
 unsafe fn RangeVarGetRelid(_relation: *mut RangeVar, _lockmode: LOCKMODE, _missing_ok: bool) -> Oid {
-    unimplemented!() // TODO: catalog/namespace.c
+    crate::catalog::namespace::RangeVarGetRelid(_relation as _, _lockmode as _, _missing_ok)
 }
 
 unsafe fn get_attnum(_relid: Oid, _attname: *const c_char) -> AttrNumber {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_attnum(_relid, _attname)
 }
 
 unsafe fn get_atttype(_relid: Oid, _attnum: AttrNumber) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_atttype(_relid, _attnum)
 }
 
 unsafe fn format_type_be(_type_oid: Oid) -> *mut c_char {
-    unimplemented!() // TODO: utils/adt/format_type.c
+    crate::utils::adt::format_type::format_type_be(_type_oid)
 }
 
 unsafe fn DeconstructQualifiedName(
@@ -101,11 +101,11 @@ unsafe fn DeconstructQualifiedName(
     _nspname_p: *mut *mut c_char,
     _objname_p: *mut *mut c_char,
 ) {
-    unimplemented!() // TODO: catalog/namespace.c
+    crate::catalog::namespace::DeconstructQualifiedName(_names, _nspname_p, _objname_p)
 }
 
 unsafe fn LookupExplicitNamespace(_nspname: *const c_char, _missing_ok: bool) -> Oid {
-    unimplemented!() // TODO: catalog/namespace.c
+    crate::catalog::namespace::LookupExplicitNamespace(_nspname, _missing_ok)
 }
 
 unsafe fn GetSysCacheOid2(
@@ -114,47 +114,47 @@ unsafe fn GetSysCacheOid2(
     _key1: Datum,
     _key2: Datum,
 ) -> Oid {
-    unimplemented!() // TODO: utils/cache/syscache.c
+    crate::utils::cache::lsyscache::GetSysCacheOid2(_cache_id, _oid_col, _key1, _key2)
 }
 
 unsafe fn TypenameGetTypidExtended(_typname: *const c_char, _temp_ok: bool) -> Oid {
-    unimplemented!() // TODO: catalog/namespace.c
+    crate::catalog::namespace::TypenameGetTypidExtended(_typname, _temp_ok)
 }
 
 unsafe fn get_array_type(_typid: Oid) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_array_type(_typid)
 }
 
 unsafe fn SearchSysCache1(_cache_id: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!() // TODO: utils/cache/syscache.c
+    crate::utils::cache::syscache::SearchSysCache1(_cache_id, _key1)
 }
 
 unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!() // TODO: utils/cache/syscache.c
+    crate::utils::cache::syscache::ReleaseSysCache(_tuple)
 }
 
 unsafe fn construct_array_builtin(_elems: *mut Datum, _nelems: c_int, _elmtype: Oid) -> *mut ArrayType {
-    unimplemented!() // TODO: utils/adt/arrayfuncs.c
+    crate::utils::adt::arrayfuncs::construct_array_builtin(_elems, _nelems, _elmtype)
 }
 
 unsafe fn OidFunctionCall1(_functionId: Oid, _arg1: Datum) -> Datum {
-    unimplemented!() // TODO: utils/fmgr/fmgr.c
+    crate::utils::fmgr::OidFunctionCall1Coll(_functionId, InvalidOid, _arg1)
 }
 
 unsafe fn get_collation_oid(_collname: *mut List, _missing_ok: bool) -> Oid {
-    unimplemented!() // TODO: catalog/namespace.c
+    crate::catalog::namespace::get_collation_oid(_collname, _missing_ok)
 }
 
 unsafe fn get_typcollation(_typid: Oid) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_typcollation(_typid)
 }
 
 unsafe fn pstrdup(_str: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO: utils/mmgr/mcxt.c
+    crate::utils::palloc::pstrdup(_str)
 }
 
 unsafe fn getTypeIOParam(_typeTuple: HeapTuple) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::getTypeIOParam(_typeTuple)
 }
 
 unsafe fn OidInputFunctionCall(
@@ -163,53 +163,19 @@ unsafe fn OidInputFunctionCall(
     _typioparam: Oid,
     _typmod: int32,
 ) -> Datum {
-    unimplemented!() // TODO: utils/fmgr/fmgr.c
+    crate::utils::fmgr::OidInputFunctionCall(_functionId, _str, _typioparam, _typmod)
 }
 
 unsafe fn psprintf_long(_v: c_long) -> *mut c_char {
-    unimplemented!() // TODO: lib/psprintf.c (psprintf("%ld", ...))
+    crate::utils::palloc::pstrdup(format!("{}\0", _v).as_ptr() as *const c_char)
 }
 
-// StringInfo support (lib/stringinfo.h) - local stubs
-#[repr(C)]
-pub struct StringInfoData {
-    pub data: *mut c_char,
-    pub len: c_int,
-    pub maxlen: c_int,
-    pub cursor: c_int,
-}
-pub type StringInfo = *mut StringInfoData;
+pub use crate::lib::stringinfo::{StringInfoData, StringInfo, initStringInfo, appendStringInfoChar, appendStringInfoString};
 
-unsafe fn initStringInfo(_str: StringInfo) {
-    unimplemented!() // TODO: lib/stringinfo.c
-}
-unsafe fn appendStringInfoChar(_str: StringInfo, _ch: c_char) {
-    unimplemented!() // TODO: lib/stringinfo.c
-}
-unsafe fn appendStringInfoString(_str: StringInfo, _s: *const c_char) {
-    unimplemented!() // TODO: lib/stringinfo.c
-}
-
-// catalog/pg_type form access stubs
-#[repr(C)]
-pub struct FormData_pg_type {
-    pub oid: Oid,
-    pub typname: [c_char; 64],
-    pub typlen: int16,
-    pub typbyval: bool,
-    pub typtype: c_char,
-    pub typisdefined: bool,
-    pub typrelid: Oid,
-    pub typbasetype: Oid,
-    pub typmodin: Oid,
-    pub typinput: Oid,
-    pub typcollation: Oid,
-}
-pub type Form_pg_type = *mut FormData_pg_type;
+pub use crate::catalog::pg_type::{FormData_pg_type, Form_pg_type};
 
 unsafe fn GETSTRUCT(tup: HeapTuple) -> *mut c_void {
-    let _ = tup;
-    unimplemented!() // TODO: access/htup_details.h
+    crate::access::htup_details::GETSTRUCT(tup as *const _)
 }
 
 unsafe fn NameStr(name: *mut c_char) -> *mut c_char {
@@ -220,8 +186,8 @@ unsafe fn NameStr(name: *mut c_char) -> *mut c_char {
 const NoLock: LOCKMODE = 0;
 const TYPTYPE_DOMAIN: c_char = b'd' as c_char;
 
-const TYPENAMENSP: c_int = 0; // SysCacheIdentifier
-const TYPEOID: c_int = 0; // SysCacheIdentifier
+const TYPENAMENSP: c_int = 81; // SysCacheIdentifier
+const TYPEOID: c_int = 82; // SysCacheIdentifier
 const Anum_pg_type_oid: AttrNumber = 1;
 
 const CSTRINGOID: Oid = 2275;
@@ -516,6 +482,7 @@ pub unsafe fn typenameTypeId(pstate: *mut ParseState, typeName: *const TypeName)
  * This is equivalent to typenameType, but we only hand back the type OID
  * and typmod, not the syscache entry.
  */
+#[no_mangle]
 pub unsafe fn typenameTypeIdAndMod(
     pstate: *mut ParseState,
     typeName: *const TypeName,
@@ -808,7 +775,7 @@ pub unsafe fn typeTypeName(t: Type) -> *mut c_char {
 
     typ = GETSTRUCT(t) as Form_pg_type;
     /* pstrdup here because result may need to outlive the syscache entry */
-    return pstrdup(NameStr((*typ).typname.as_mut_ptr()));
+    return pstrdup(NameStr((*typ).typname.data.as_mut_ptr()));
 }
 
 /* given type (as type struct), return its 'typrelid' attribute */
@@ -911,6 +878,7 @@ unsafe extern "C" fn pts_error_callback(arg: *mut c_void) {
  * is mostly aspirational at present: errors detected by the main
  * grammar, rather than here, will still be thrown.
  */
+#[no_mangle]
 pub unsafe fn typeStringToTypeName(str: *const c_char, escontext: *mut Node) -> *mut TypeName {
     let raw_parsetree_list: *mut List;
     let typeName: *mut TypeName;

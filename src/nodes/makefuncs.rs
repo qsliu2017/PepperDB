@@ -81,7 +81,7 @@ pub const RELPERSISTENCE_PERMANENT: c_char = b'p' as c_char;
 #[inline]
 unsafe fn exprType(_expr: *const Node) -> Oid {
     // TODO(pg-port): nodes/nodeFuncs.c
-    unimplemented!("exprType: nodeFuncs not yet translated")
+    crate::nodes::nodeFuncs::exprType(_expr)
 }
 
 /// `exprTypmod(expr)` from nodes/nodeFuncs.c: get the typmod of an expression.
@@ -91,7 +91,7 @@ unsafe fn exprType(_expr: *const Node) -> Oid {
 #[inline]
 unsafe fn exprTypmod(_expr: *const Node) -> int32 {
     // TODO(pg-port): nodes/nodeFuncs.c
-    unimplemented!("exprTypmod: nodeFuncs not yet translated")
+    crate::nodes::nodeFuncs::exprTypmod(_expr)
 }
 
 /// `exprCollation(expr)` from nodes/nodeFuncs.c: get the collation OID.
@@ -101,35 +101,31 @@ unsafe fn exprTypmod(_expr: *const Node) -> int32 {
 #[inline]
 unsafe fn exprCollation(_expr: *const Node) -> Oid {
     // TODO(pg-port): nodes/nodeFuncs.c
-    unimplemented!("exprCollation: nodeFuncs not yet translated")
+    crate::nodes::nodeFuncs::exprCollation(_expr)
 }
 
 /// `get_rel_type_id(relid)` from utils/cache/lsyscache.c.
 #[inline]
 unsafe fn get_rel_type_id(_relid: Oid) -> Oid {
-    // TODO(pg-port): utils/cache/lsyscache.c
-    unimplemented!("get_rel_type_id: lsyscache not yet translated")
+    crate::utils::cache::lsyscache::get_rel_type_id(_relid)
 }
 
 /// `get_rel_name(relid)` from utils/cache/lsyscache.c.
 #[inline]
 unsafe fn get_rel_name(_relid: Oid) -> *mut c_char {
-    // TODO(pg-port): utils/cache/lsyscache.c
-    unimplemented!("get_rel_name: lsyscache not yet translated")
+    crate::utils::cache::lsyscache::get_rel_name(_relid)
 }
 
 /// `type_is_rowtype(typid)` from utils/cache/lsyscache.c.
 #[inline]
 unsafe fn type_is_rowtype(_typid: Oid) -> bool {
-    // TODO(pg-port): utils/cache/lsyscache.c
-    unimplemented!("type_is_rowtype: lsyscache not yet translated")
+    crate::utils::cache::lsyscache::type_is_rowtype(_typid)
 }
 
 /// `get_typlenbyval(typid, &typlen, &typbyval)` from utils/cache/lsyscache.c.
 #[inline]
 unsafe fn get_typlenbyval(_typid: Oid, _typlen: *mut int16, _typbyval: *mut bool) {
-    // TODO(pg-port): utils/cache/lsyscache.c
-    unimplemented!("get_typlenbyval: lsyscache not yet translated")
+    crate::utils::cache::lsyscache::get_typlenbyval(_typid, _typlen as _, _typbyval)
 }
 
 /// `is_andclause(clause)` (inline in nodes/nodeFuncs.h).  Inlined here verbatim

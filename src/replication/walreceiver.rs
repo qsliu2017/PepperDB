@@ -289,27 +289,19 @@ unsafe fn pg_atomic_write_u64(ptr: *mut pg_atomic_uint64, val: u64) {
 
 /// on_shmem_exit - register shmem-exit callback (storage/ipc.h)
 // TODO(pg-port): real on_shmem_exit lives in storage/ipc/ipc.c
-unsafe fn on_shmem_exit(_function: unsafe fn(c_int, Datum), _arg: Datum) {
-    unimplemented!() // TODO(pg-port): real on_shmem_exit lives in storage/ipc/ipc.c
-}
+unsafe fn on_shmem_exit(function: unsafe fn(c_int, Datum), arg: Datum) { unimplemented!() }
 
 /// proc_exit - terminate the process (storage/ipc.h)
 // TODO(pg-port): real proc_exit lives in storage/ipc/ipc.c
-unsafe fn proc_exit(_code: c_int) -> ! {
-    unimplemented!() // TODO(pg-port): real proc_exit lives in storage/ipc/ipc.c
-}
+unsafe fn proc_exit(code: c_int) -> ! { crate::storage::ipc::ipc::proc_exit(code as _) }
 
 /// AuxiliaryProcessMainCommon - common startup for aux processes (postmaster/auxprocess.h)
 // TODO(pg-port): real AuxiliaryProcessMainCommon lives in postmaster/auxprocess.c
-unsafe fn AuxiliaryProcessMainCommon() {
-    unimplemented!() // TODO(pg-port): real AuxiliaryProcessMainCommon lives in postmaster/auxprocess.c
-}
+unsafe fn AuxiliaryProcessMainCommon() { crate::postmaster::auxprocess::AuxiliaryProcessMainCommon() }
 
 /// load_file - dynamically load a shared library (utils/fmgr.h)
 // TODO(pg-port): real load_file lives in utils/fmgr/dfmgr.c
-unsafe fn load_file(_filename: *const c_char, _restricted: bool) {
-    unimplemented!() // TODO(pg-port): real load_file lives in utils/fmgr/dfmgr.c
-}
+unsafe fn load_file(filename: *const c_char, restricted: bool) { crate::utils::fmgr::dfmgr::load_file(filename as _, restricted) }
 
 /// sigset_t placeholder
 type sigset_t = u64;
@@ -320,9 +312,7 @@ static mut UnBlockSig: sigset_t = 0;
 
 /// pqsignal - set a signal handler, returning old handler (libpq/pqsignal.h)
 // TODO(pg-port): real pqsignal lives in libpq/pqsignal.c
-unsafe fn pqsignal(_signum: c_int, _handler: *const c_void) {
-    unimplemented!() // TODO(pg-port): real pqsignal lives in libpq/pqsignal.c
-}
+unsafe fn pqsignal(signum: c_int, handler: *const c_void) { unimplemented!() }
 
 /// sigprocmask (libc)
 unsafe fn sigprocmask(_how: c_int, _set: *const sigset_t, _oldset: *mut sigset_t) -> c_int {
@@ -363,9 +353,7 @@ static mut update_process_title: bool = false;
 
 /// set_ps_display - update process title (utils/ps_status.h)
 // TODO(pg-port): real set_ps_display lives in utils/misc/ps_status.c
-unsafe fn set_ps_display(_activity: *const c_char) {
-    unimplemented!() // TODO(pg-port): real set_ps_display lives in utils/misc/ps_status.c
-}
+unsafe fn set_ps_display(activity: *const c_char) { crate::utils::misc::ps_status::set_ps_display(activity as _) }
 
 /// ConfigReloadPending - flag set by SIGHUP handler (postmaster/interrupt.h)
 // TODO(pg-port): real ConfigReloadPending lives in postmaster/interrupt.c
@@ -376,27 +364,19 @@ const PGC_SIGHUP: c_int = 1;
 
 /// ProcessConfigFile - reload configuration (utils/guc.h)
 // TODO(pg-port): real ProcessConfigFile lives in utils/misc/guc.c
-unsafe fn ProcessConfigFile(_context: c_int) {
-    unimplemented!() // TODO(pg-port): real ProcessConfigFile lives in utils/misc/guc.c
-}
+unsafe fn ProcessConfigFile(context: c_int) { unimplemented!() }
 
 /// RecoveryInProgress - is recovery in progress? (access/xlogrecovery.h)
 // TODO(pg-port): real RecoveryInProgress lives in access/transam/xlogrecovery.c
-unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO(pg-port): real RecoveryInProgress lives in access/transam/xlogrecovery.c
-}
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
 
 /// GetXLogReplayRecPtr - get current replay position (access/xlogrecovery.h)
 // TODO(pg-port): real GetXLogReplayRecPtr lives in access/transam/xlogrecovery.c
-unsafe fn GetXLogReplayRecPtr(_replayTLI: *mut TimeLineID) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real GetXLogReplayRecPtr lives in access/transam/xlogrecovery.c
-}
+unsafe fn GetXLogReplayRecPtr(replayTLI: *mut TimeLineID) -> XLogRecPtr { crate::access::transam::xlogrecovery::GetXLogReplayRecPtr(replayTLI as _) }
 
 /// WakeupRecovery - wake the startup process (postmaster/startup.h)
 // TODO(pg-port): real WakeupRecovery lives in postmaster/startup.c
-unsafe fn WakeupRecovery() {
-    unimplemented!() // TODO(pg-port): real WakeupRecovery lives in postmaster/startup.c
-}
+unsafe fn WakeupRecovery() { crate::access::transam::xlogrecovery::WakeupRecovery() }
 
 /// AllowCascadeReplication - can we send WAL to cascaded standbys? (replication/walsender.h)
 // TODO(pg-port): real AllowCascadeReplication lives in replication/walsender.c
@@ -406,27 +386,19 @@ unsafe fn AllowCascadeReplication() -> bool {
 
 /// WalSndWakeup - wake walsenders (replication/walsender.h)
 // TODO(pg-port): real WalSndWakeup lives in replication/walsender.c
-unsafe fn WalSndWakeup(_physical: bool, _logical: bool) {
-    unimplemented!() // TODO(pg-port): real WalSndWakeup lives in replication/walsender.c
-}
+unsafe fn WalSndWakeup(physical: bool, logical: bool) { crate::replication::walsender::WalSndWakeup(physical, logical) }
 
 /// GetSystemIdentifier - get this system's identifier (access/xlog.h)
 // TODO(pg-port): real GetSystemIdentifier lives in access/transam/xlog.c
-pub unsafe fn GetSystemIdentifier() -> u64 {
-    unimplemented!() // TODO(pg-port): real GetSystemIdentifier lives in access/transam/xlog.c
-}
+pub unsafe fn GetSystemIdentifier() -> u64 { crate::access::transam::xlog::GetSystemIdentifier() as _ }
 
 /// HotStandbyActive - is hot standby accepting connections? (access/xlogrecovery.h)
 // TODO(pg-port): real HotStandbyActive lives in access/transam/xlogrecovery.c
-unsafe fn HotStandbyActive() -> bool {
-    unimplemented!() // TODO(pg-port): real HotStandbyActive lives in access/transam/xlogrecovery.c
-}
+unsafe fn HotStandbyActive() -> bool { crate::access::transam::xlogrecovery::HotStandbyActive() }
 
 /// GetReplicationHorizons - get xmin/catalog_xmin for hot standby feedback (storage/procarray.h)
 // TODO(pg-port): real GetReplicationHorizons lives in storage/ipc/procarray.c
-unsafe fn GetReplicationHorizons(_xmin: *mut TransactionId, _catalog_xmin: *mut TransactionId) {
-    unimplemented!() // TODO(pg-port): real GetReplicationHorizons lives in storage/ipc/procarray.c
-}
+unsafe fn GetReplicationHorizons(xmin: *mut TransactionId, catalog_xmin: *mut TransactionId) { crate::storage::ipc::procarray::GetReplicationHorizons(xmin as _, catalog_xmin as _) }
 
 /// timestamptz_to_str - format a timestamp (utils/adt/timestamp.c)
 // TODO(pg-port): real timestamptz_to_str lives in utils/adt/timestamp.c
@@ -436,27 +408,19 @@ unsafe fn timestamptz_to_str(_dt: TimestampTz) -> *const c_char {
 
 /// pgstat_report_wal - report WAL stats (pgstat.h)
 // TODO(pg-port): real pgstat_report_wal lives in backend/utils/activity/pgstat_wal.c
-unsafe fn pgstat_report_wal(_force: bool) {
-    unimplemented!() // TODO(pg-port): real pgstat_report_wal lives in backend/utils/activity/pgstat_wal.c
-}
+unsafe fn pgstat_report_wal(force: bool) { crate::utils::activity::pgstat_wal::pgstat_report_wal(force) }
 
 /// issue_xlog_fsync - fsync a WAL segment file (access/xlog.h)
 // TODO(pg-port): real issue_xlog_fsync lives in access/transam/xlog.c
-unsafe fn issue_xlog_fsync(_fd: c_int, _segno: XLogSegNo, _tli: TimeLineID) {
-    unimplemented!() // TODO(pg-port): real issue_xlog_fsync lives in access/transam/xlog.c
-}
+unsafe fn issue_xlog_fsync(fd: c_int, segno: XLogSegNo, tli: TimeLineID) { crate::access::transam::xlog::issue_xlog_fsync(fd as _, segno as _, tli as _) }
 
 /// XLogFileInit - create/open a new WAL segment file (access/xlog.h)
 // TODO(pg-port): real XLogFileInit lives in access/transam/xlog.c
-unsafe fn XLogFileInit(_segno: XLogSegNo, _tli: TimeLineID) -> c_int {
-    unimplemented!() // TODO(pg-port): real XLogFileInit lives in access/transam/xlog.c
-}
+unsafe fn XLogFileInit(segno: XLogSegNo, tli: TimeLineID) -> c_int { crate::access::transam::xlog::XLogFileInit(segno as _, tli as _) }
 
 /// pg_pwrite - pwrite(2) wrapper (port.h)
 // TODO(pg-port): real pg_pwrite lives in port/pg_pwrite.c
-unsafe fn pg_pwrite(_fd: c_int, _buf: *const c_void, _count: usize, _offset: off_t) -> isize {
-    unimplemented!() // TODO(pg-port): real pg_pwrite lives in port/pg_pwrite.c
-}
+unsafe fn pg_pwrite(fd: c_int, buf: *const c_void, count: usize, offset: off_t) -> isize { crate::port::port_api::pg_pwrite(fd as _, buf as _, count as _, offset) }
 
 /// errno - C errno
 unsafe fn get_errno() -> c_int {
@@ -516,19 +480,16 @@ unsafe fn pg_memory_barrier() {
 
 /* pgstat I/O timing helpers - stubs */
 // TODO(pg-port): real pgstat_prepare_io_time lives in backend/utils/activity/pgstat_io.c
-unsafe fn pgstat_prepare_io_time(_track: bool) -> instr_time {
-    0
-}
+unsafe fn pgstat_prepare_io_time(track: bool) -> instr_time { unimplemented!() }
 // TODO(pg-port): real pgstat_count_io_op_time lives in backend/utils/activity/pgstat_io.c
 unsafe fn pgstat_count_io_op_time(
-    _obj: c_int,
-    _ctx: c_int,
-    _op: c_int,
-    _start: instr_time,
-    _cnt: c_int,
-    _bytes: isize,
-) {
-}
+    obj: c_int,
+    ctx: c_int,
+    op: c_int,
+    start: instr_time,
+    cnt: c_int,
+    bytes: isize,
+) { unimplemented!() }
 // TODO(pg-port): real pgstat_report_wait_start lives in backend/utils/activity/pgstat_io.c
 unsafe fn pgstat_report_wait_start(_wait_event_info: u32) {}
 // TODO(pg-port): real pgstat_report_wait_end lives in backend/utils/activity/pgstat_io.c
@@ -589,9 +550,7 @@ unsafe fn CStringGetTextDatum(_s: *const c_char) -> Datum {
     unimplemented!() // TODO(pg-port): real CStringGetTextDatum lives in utils/adt/varlena.c
 }
 
-unsafe fn LSNGetDatum(_lsn: XLogRecPtr) -> Datum {
-    unimplemented!() // TODO(pg-port): real LSNGetDatum lives in utils/adt/pg_lsn.c
-}
+unsafe fn LSNGetDatum(lsn: XLogRecPtr) -> Datum { crate::utils::adt::pg_lsn::LSNGetDatum(lsn as _) }
 
 unsafe fn TimestampTzGetDatum(_tz: TimestampTz) -> Datum {
     unimplemented!() // TODO(pg-port): real TimestampTzGetDatum lives in utils/adt/timestamp.c
@@ -600,11 +559,9 @@ unsafe fn TimestampTzGetDatum(_tz: TimestampTz) -> Datum {
 /// has_privs_of_role (utils/acl.h)
 // TODO(pg-port): real has_privs_of_role lives in utils/acle/acl.c
 unsafe fn has_privs_of_role(
-    _member: crate::postgres_ext::Oid,
-    _role: crate::postgres_ext::Oid,
-) -> bool {
-    unimplemented!() // TODO(pg-port): real has_privs_of_role lives in utils/acl/acl.c
-}
+    member: crate::postgres_ext::Oid,
+    role: crate::postgres_ext::Oid,
+) -> bool { crate::utils::adt::acl::has_privs_of_role(member, role) }
 
 /// GetUserId
 use crate::miscadmin::GetUserId;
@@ -615,9 +572,7 @@ const ROLE_PG_READ_ALL_STATS: crate::postgres_ext::Oid = 0;
 
 /// message_level_is_interesting (utils/elog.h)
 // TODO(pg-port): real message_level_is_interesting lives in utils/error/elog.c
-unsafe fn message_level_is_interesting(_elevel: c_int) -> bool {
-    false
-}
+unsafe fn message_level_is_interesting(elevel: c_int) -> bool { crate::utils::error::elog_impl::message_level_is_interesting(elevel as _) }
 
 /// GetReplicationApplyDelay (replication/walreceiverfuncs.h)
 use crate::replication::walreceiverfuncs::GetReplicationApplyDelay;
@@ -634,6 +589,7 @@ fn LSN_FORMAT_ARGS(lsn: XLogRecPtr) -> (u32, u32) {
 
 /* walrcv_* macro wrappers - dispatch through WalReceiverFunctions vtable */
 
+#[no_mangle]
 pub unsafe fn walrcv_connect(
     conninfo: *const c_char,
     replication: bool,
@@ -664,6 +620,7 @@ unsafe fn walrcv_get_senderinfo(
     ((*WalReceiverFunctions).walrcv_get_senderinfo)(conn, sender_host, sender_port)
 }
 
+#[no_mangle]
 unsafe fn walrcv_identify_system(
     conn: *mut WalReceiverConn,
     primary_tli: *mut TimeLineID,
@@ -695,6 +652,7 @@ pub unsafe fn walrcv_create_slot(
     )
 }
 
+#[no_mangle]
 pub unsafe fn walrcv_startstreaming(
     conn: *mut WalReceiverConn,
     options: *const WalRcvStreamOptions,
@@ -702,10 +660,12 @@ pub unsafe fn walrcv_startstreaming(
     ((*WalReceiverFunctions).walrcv_startstreaming)(conn, options)
 }
 
+#[no_mangle]
 pub unsafe fn walrcv_endstreaming(conn: *mut WalReceiverConn, next_tli: *mut TimeLineID) {
     ((*WalReceiverFunctions).walrcv_endstreaming)(conn, next_tli)
 }
 
+#[no_mangle]
 pub unsafe fn walrcv_receive(
     conn: *mut WalReceiverConn,
     buffer: *mut *mut c_char,
@@ -714,6 +674,7 @@ pub unsafe fn walrcv_receive(
     ((*WalReceiverFunctions).walrcv_receive)(conn, buffer, wait_fd)
 }
 
+#[no_mangle]
 unsafe fn walrcv_send(conn: *mut WalReceiverConn, buffer: *const c_char, nbytes: c_int) {
     ((*WalReceiverFunctions).walrcv_send)(conn, buffer, nbytes)
 }

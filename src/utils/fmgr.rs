@@ -92,11 +92,11 @@ use crate::utils::hash::dynahash::{
 };
 
 // catalog OIDs / attribute numbers (generated *_d.h headers, not yet ported)
-const PROCOID: c_int = 12; /* PROCOID syscache id */
-const LANGOID: c_int = 10; /* LANGOID syscache id */
-const Anum_pg_proc_prosrc: AttrNumber = 29;
-const Anum_pg_proc_probin: AttrNumber = 30;
-const Anum_pg_proc_proconfig: AttrNumber = 34;
+const PROCOID: c_int = 47; /* PROCOID syscache id */
+const LANGOID: c_int = 36; /* LANGOID syscache id */
+const Anum_pg_proc_prosrc: AttrNumber = 26;
+const Anum_pg_proc_probin: AttrNumber = 27;
+const Anum_pg_proc_proconfig: AttrNumber = 29;
 
 // list iteration + helpers
 use crate::nodes::pg_list::{lappend, lfirst, ListCell, NIL};
@@ -1011,6 +1011,7 @@ unsafe fn fmgr_lookupByName(name: *const c_char) -> *const FmgrBuiltin {
  * in freshly-palloc'd space.  However, if one intends to store an info
  * struct in a long-lived table, it's better to use fmgr_info_cxt.
  */
+#[no_mangle]
 pub unsafe fn fmgr_info(functionId: Oid, finfo: *mut FmgrInfo) {
     fmgr_info_cxt_security(functionId, finfo, CurrentMemoryContext, false);
 }
@@ -1019,6 +1020,7 @@ pub unsafe fn fmgr_info(functionId: Oid, finfo: *mut FmgrInfo) {
  * Fill a FmgrInfo struct, specifying a memory context in which its
  * subsidiary data should go.
  */
+#[no_mangle]
 pub unsafe fn fmgr_info_cxt(functionId: Oid, finfo: *mut FmgrInfo, mcxt: MemoryContext) {
     fmgr_info_cxt_security(functionId, finfo, mcxt, false);
 }
@@ -1696,6 +1698,7 @@ pub unsafe fn fmgr_security_definer(fcinfo: FunctionCallInfo) -> Datum {
  * are allowed to be NULL.  Also, the function cannot be one that needs to
  * look at FmgrInfo, since there won't be any.
  */
+#[no_mangle]
 pub unsafe fn DirectFunctionCall1Coll(func: PGFunction, collation: Oid, arg1: Datum) -> Datum {
     LOCAL_FCINFO!(fcinfo, 1);
     let result: Datum;
@@ -1715,6 +1718,7 @@ pub unsafe fn DirectFunctionCall1Coll(func: PGFunction, collation: Oid, arg1: Da
     result
 }
 
+#[no_mangle]
 pub unsafe fn DirectFunctionCall2Coll(func: PGFunction, collation: Oid, arg1: Datum, arg2: Datum) -> Datum {
     LOCAL_FCINFO!(fcinfo, 2);
     let result: Datum;
@@ -2404,6 +2408,7 @@ pub unsafe fn OidFunctionCall0Coll(functionId: Oid, collation: Oid) -> Datum {
     FunctionCall0Coll(&mut flinfo, collation)
 }
 
+#[no_mangle]
 pub unsafe fn OidFunctionCall1Coll(functionId: Oid, collation: Oid, arg1: Datum) -> Datum {
     let mut flinfo: FmgrInfo = core::mem::zeroed();
 
@@ -2412,6 +2417,7 @@ pub unsafe fn OidFunctionCall1Coll(functionId: Oid, collation: Oid, arg1: Datum)
     FunctionCall1Coll(&mut flinfo, collation, arg1)
 }
 
+#[no_mangle]
 pub unsafe fn OidFunctionCall2Coll(functionId: Oid, collation: Oid, arg1: Datum, arg2: Datum) -> Datum {
     let mut flinfo: FmgrInfo = core::mem::zeroed();
 
@@ -2434,6 +2440,7 @@ pub unsafe fn OidFunctionCall3Coll(
     FunctionCall3Coll(&mut flinfo, collation, arg1, arg2, arg3)
 }
 
+#[no_mangle]
 pub unsafe fn OidFunctionCall4Coll(
     functionId: Oid,
     collation: Oid,
@@ -2449,6 +2456,7 @@ pub unsafe fn OidFunctionCall4Coll(
     FunctionCall4Coll(&mut flinfo, collation, arg1, arg2, arg3, arg4)
 }
 
+#[no_mangle]
 pub unsafe fn OidFunctionCall5Coll(
     functionId: Oid,
     collation: Oid,
@@ -2825,6 +2833,7 @@ pub unsafe fn OidInputFunctionCall(functionId: Oid, str: *mut c_char, typioparam
     InputFunctionCall(&mut flinfo, str, typioparam, typmod)
 }
 
+#[no_mangle]
 pub unsafe fn OidOutputFunctionCall(functionId: Oid, val: Datum) -> *mut c_char {
     let mut flinfo: FmgrInfo = core::mem::zeroed();
 
@@ -2832,6 +2841,7 @@ pub unsafe fn OidOutputFunctionCall(functionId: Oid, val: Datum) -> *mut c_char 
     OutputFunctionCall(&mut flinfo, val)
 }
 
+#[no_mangle]
 pub unsafe fn OidReceiveFunctionCall(
     functionId: Oid,
     buf: StringInfo,
@@ -2891,6 +2901,7 @@ pub unsafe fn OidSendFunctionCall(functionId: Oid, val: Datum) -> *mut bytea {
  *
  * Returns InvalidOid if information is not available
  */
+#[no_mangle]
 pub unsafe fn get_fn_expr_rettype(flinfo: *mut FmgrInfo) -> Oid {
     /*
      * can't return anything useful if we have no FmgrInfo or if its fn_expr
@@ -2928,6 +2939,7 @@ pub unsafe fn get_fn_expr_argtype(flinfo: *mut FmgrInfo, argnum: c_int) -> Oid {
  *
  * Returns InvalidOid if information is not available
  */
+#[no_mangle]
 pub unsafe fn get_call_expr_argtype(expr: *mut Node, argnum: c_int) -> Oid {
     let args: *mut List;
     let mut argtype: Oid;
@@ -3142,6 +3154,7 @@ pub unsafe fn get_fn_opclass_options(flinfo: *mut FmgrInfo) -> *mut bytea {
  * TODO(pg-port): CheckFunctionValidatorAccess needs the syscache (pg_proc,
  * pg_language) and the ACL machinery (object_aclcheck / aclcheck_error).
  */
+#[no_mangle]
 pub unsafe fn CheckFunctionValidatorAccess(validatorOid: Oid, functionOid: Oid) -> bool {
     let mut aclresult: AclResult;
 
@@ -3249,12 +3262,10 @@ const ERRCODE_INSUFFICIENT_PRIVILEGE: c_int = 0;
 /* nodes/miscnodes.h */
 #[inline]
 unsafe fn SOFT_ERROR_OCCURRED(escontext: fmNodePtr) -> bool {
-    // C: ((escontext) != NULL && IsA(escontext, ErrorSaveContext) &&
-    //     ((ErrorSaveContext *) escontext)->error_occurred)
-    // TODO(pg-port): ErrorSaveContext lives in nodes/miscnodes.h (not yet
-    // translated). Conservatively report "no soft error".
-    let _ = escontext;
-    false
+    const T_ErrorSaveContext: c_int = 447;
+    !escontext.is_null()
+        && *(escontext as *const c_int) == T_ErrorSaveContext
+        && (*(escontext as *const crate::nodes::miscnodes::ErrorSaveContext)).error_occurred
 }
 
 /* lib/stringinfo.h: StringInfo (= *mut StringInfoData) is imported at the top. */
@@ -3372,3 +3383,5 @@ macro_rules! FmgrHookIsNeeded {
 }
 
 pub mod dfmgr;
+
+pub mod funcapi;

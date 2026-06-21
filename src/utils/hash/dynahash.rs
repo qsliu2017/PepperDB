@@ -229,9 +229,7 @@ unsafe fn ShmemAlloc(_size: Size) -> *mut c_void {
     unimplemented!("TODO(pg-port): shared memory")
 }
 #[allow(dead_code)]
-unsafe fn ShmemAllocNoError(_size: Size) -> *mut c_void {
-    unimplemented!("TODO(pg-port): shared memory")
-}
+unsafe fn ShmemAllocNoError(_size: Size) -> *mut c_void { crate::storage::ipc::shmem::ShmemAllocNoError(_size) }
 
 // TODO(pg-port): access/xact.h -- transaction nest level.  The seq-scan tracking
 // records the current subtransaction nest level so AtEOSubXact_HashTables can
@@ -579,6 +577,7 @@ unsafe extern "C" fn string_compare(key1: *const c_void, key2: *const c_void, ke
  * on the small side and let the table grow if it's exceeded.  An overly
  * large nelem will penalize hash_seq_search speed without buying much.
  */
+#[no_mangle]
 pub unsafe fn hash_create(
     tabname: *const c_char,
     nelem: c_long,
@@ -617,7 +616,7 @@ pub unsafe fn hash_create(
             CurrentDynaHashCxt = TopMemoryContext;
         }
         CurrentDynaHashCxt =
-            AllocSetContextCreate!(CurrentDynaHashCxt, "dynahash", ALLOCSET_DEFAULT_SIZES);
+            AllocSetContextCreate!(CurrentDynaHashCxt, c"dynahash".as_ptr(), ALLOCSET_DEFAULT_SIZES);
     }
 
     /* Initialize the hash header, plus a copy of the table name */
@@ -1164,6 +1163,7 @@ unsafe fn calc_bucket(hctl: *mut HASHHDR, hash_val: uint32) -> uint32 {
  * For hash_search_with_hash_value, the hashvalue parameter must have been
  * calculated with get_hash_value().
  */
+#[no_mangle]
 pub unsafe fn hash_search(
     hashp: *mut HTAB,
     keyPtr: *const c_void,
@@ -2025,6 +2025,7 @@ fn hash_corrupted(hashp: *mut HTAB) -> ! {
 }
 
 /* calculate ceil(log base 2) of num */
+#[no_mangle]
 pub fn my_log2(num: c_long) -> c_int {
     let mut num = num;
     /*

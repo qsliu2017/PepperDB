@@ -25,13 +25,11 @@ const ERRCODE_PROTOCOL_VIOLATION: c_int = 0;
 // sendAuthRequest() lives in auth.c, which is not yet ported. Stub locally.
 // TODO: import from libpq::auth once auth.c is ported.
 unsafe fn sendAuthRequest(
-    _port: *mut Port,
-    _areq: c_int,
-    _extradata: *const c_char,
-    _extralen: c_int,
-) {
-    unimplemented!()
-}
+    port: *mut Port,
+    areq: c_int,
+    extradata: *const c_char,
+    extralen: c_int,
+) { crate::libpq::auth::sendAuthRequest(port as _, areq as _, extradata as _, extralen as _) }
 
 /*
  * Perform a SASL exchange with a libpq client, using a specific mechanism

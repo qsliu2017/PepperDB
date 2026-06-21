@@ -19,8 +19,8 @@ use crate::prelude::*;
 use crate::miscadmin::check_stack_depth;
 use crate::list_make1;
 type Relids = *mut Bitmapset;
-unsafe fn errcode(_c: c_int) -> c_int { 0 }
-unsafe fn errdetail_relkind_not_supported(_relkind: c_char) -> c_int { 0 }
+unsafe fn errcode(_c: c_int) -> c_int { crate::parser_link_shims::errcode(_c) }
+unsafe fn errdetail_relkind_not_supported(_relkind: c_char) -> c_int { crate::catalog::pg_class::errdetail_relkind_not_supported(_relkind) }
 
 use crate::{
     foreach, forboth, current_cell, IsA, makeNode, castNode, lfirst_node,
@@ -178,21 +178,19 @@ use crate::nodes::nodeFuncs::{exprType, exprCollation};
 // --- nodes/makefuncs.h ---
 use crate::nodes::makefuncs::{makeVar, makeTargetEntry, make_ands_explicit};
 // TODO(pg-port): real makeBoolConst lives in nodes/makefuncs.c
-unsafe fn makeBoolConst(value: bool, isnull: bool) -> *mut Node {
-    unimplemented!()
-}
+unsafe fn makeBoolConst(value: bool, isnull: bool) -> *mut Node { crate::nodes::makefuncs::makeBoolConst(value, isnull) as _ }
 
 // --- optimizer/clauses.h ---
 // TODO(pg-port): real make_orclause lives in optimizer/util/clauses.c
-unsafe fn make_orclause(orclauses: *mut List) -> *mut Expr { unimplemented!() }
+unsafe fn make_orclause(orclauses: *mut List) -> *mut Expr { crate::nodes::makefuncs::make_orclause(orclauses as _) as _ }
 // TODO(pg-port): real contain_mutable_functions lives in optimizer/util/clauses.c
-unsafe fn contain_mutable_functions(clause: *mut Node) -> bool { unimplemented!() }
+unsafe fn contain_mutable_functions(clause: *mut Node) -> bool { crate::optimizer::util::clauses::contain_mutable_functions(clause as _) }
 // TODO(pg-port): real is_parallel_safe lives in optimizer/util/clauses.c
-unsafe fn is_parallel_safe(root: *mut PlannerInfo, node: *mut Node) -> bool { unimplemented!() }
+unsafe fn is_parallel_safe(root: *mut PlannerInfo, node: *mut Node) -> bool { crate::optimizer::util::clauses::is_parallel_safe(root as _, node as _) }
 // TODO(pg-port): real is_opclause lives in nodes/nodeFuncs.h
-unsafe fn is_opclause(clause: *const c_void) -> bool { unimplemented!() }
+unsafe fn is_opclause(clause: *const c_void) -> bool { crate::optimizer::util::clauses::is_opclause(clause as _) }
 // TODO(pg-port): real CommuteOpExpr lives in optimizer/util/clauses.c
-unsafe fn CommuteOpExpr(clause: *mut OpExpr) { unimplemented!() }
+unsafe fn CommuteOpExpr(clause: *mut OpExpr) { crate::optimizer::util::clauses::CommuteOpExpr(clause as _) }
 
 // --- optimizer/cost.h ---
 use crate::optimizer::cost::{cost_qual_eval_node};
@@ -201,7 +199,7 @@ unsafe fn cost_sort(
     path: *mut Path, root: *mut PlannerInfo, pathkeys: *mut List,
     disabled_nodes: c_int, input_cost: Cost, tuples: f64, width: c_int,
     comparison_cost: Cost, sort_mem: c_int, limit_tuples: f64,
-) { unimplemented!() }
+) { crate::optimizer::path::costsize::cost_sort(path as _, root as _, pathkeys as _, disabled_nodes, input_cost, tuples, width, comparison_cost, sort_mem, limit_tuples) }
 // TODO(pg-port): real cost_incremental_sort lives in optimizer/path/costsize.c
 unsafe fn cost_incremental_sort(
     path: *mut Path, root: *mut PlannerInfo, pathkeys: *mut List,
@@ -209,18 +207,18 @@ unsafe fn cost_incremental_sort(
     input_startup_cost: Cost, input_total_cost: Cost,
     input_tuples: f64, width: c_int, comparison_cost: Cost,
     sort_mem: c_int, limit_tuples: f64,
-) { unimplemented!() }
+) { crate::optimizer::path::costsize::cost_incremental_sort(path as _, root as _, pathkeys as _, presorted_keys, disabled_nodes, input_startup_cost, input_total_cost, input_tuples, width, comparison_cost, sort_mem, limit_tuples) }
 // TODO(pg-port): real cost_material lives in optimizer/path/costsize.c
 unsafe fn cost_material(
     path: *mut Path, disabled_nodes: c_int, input_startup_cost: Cost,
     input_total_cost: Cost, tuples: f64, width: c_int,
-) { unimplemented!() }
+) { crate::optimizer::path::costsize::cost_material(path as _, disabled_nodes, input_startup_cost, input_total_cost, tuples, width) }
 
 // --- optimizer/optimizer.h ---
 // TODO(pg-port): real clamp_row_est lives in optimizer/path/costsize.c
-unsafe fn clamp_row_est(nrows: f64) -> f64 { unimplemented!() }
+unsafe fn clamp_row_est(nrows: f64) -> f64 { crate::optimizer::path::costsize::clamp_row_est(nrows) }
 // TODO(pg-port): real clamp_cardinality_to_long lives in optimizer/path/costsize.c
-unsafe fn clamp_cardinality_to_long(nrows: f64) -> c_long { unimplemented!() }
+unsafe fn clamp_cardinality_to_long(nrows: f64) -> c_long { crate::optimizer::path::costsize::clamp_cardinality_to_long(nrows) }
 
 // --- QualCost (nodes/pathnodes.h) ---
 #[repr(C)]
@@ -231,56 +229,56 @@ pub struct QualCost {
 
 // --- optimizer/paramassign.h ---
 // TODO(pg-port): real symbols live in optimizer/util/paramassign.rs
-unsafe fn replace_nestloop_param_var(root: *mut PlannerInfo, var: *mut Var) -> *mut crate::nodes::primnodes::Param { unimplemented!() }
-unsafe fn replace_nestloop_param_placeholdervar(root: *mut PlannerInfo, phv: *mut PlaceHolderVar) -> *mut crate::nodes::primnodes::Param { unimplemented!() }
-unsafe fn process_subquery_nestloop_params(root: *mut PlannerInfo, subplan_params: *mut List) { unimplemented!() }
-unsafe fn identify_current_nestloop_params(root: *mut PlannerInfo, leftrelids: Relids, outerrelids: Relids) -> *mut List { unimplemented!() }
-unsafe fn assign_special_exec_param(root: *mut PlannerInfo) -> c_int { unimplemented!() }
+unsafe fn replace_nestloop_param_var(root: *mut PlannerInfo, var: *mut Var) -> *mut crate::nodes::primnodes::Param { crate::optimizer::util::paramassign::replace_nestloop_param_var(root as _, var as _) as _ }
+unsafe fn replace_nestloop_param_placeholdervar(root: *mut PlannerInfo, phv: *mut PlaceHolderVar) -> *mut crate::nodes::primnodes::Param { crate::optimizer::util::paramassign::replace_nestloop_param_placeholdervar(root as _, phv as _) as _ }
+unsafe fn process_subquery_nestloop_params(root: *mut PlannerInfo, subplan_params: *mut List) { crate::optimizer::util::paramassign::process_subquery_nestloop_params(root as _, subplan_params as _) }
+unsafe fn identify_current_nestloop_params(root: *mut PlannerInfo, leftrelids: Relids, outerrelids: Relids) -> *mut List { crate::optimizer::util::paramassign::identify_current_nestloop_params(root as _, leftrelids, outerrelids) as _ }
+unsafe fn assign_special_exec_param(root: *mut PlannerInfo) -> c_int { crate::optimizer::util::paramassign::assign_special_exec_param(root as _) }
 
 // --- optimizer/pathnode.h ---
 // TODO(pg-port): real reparameterize_path_by_child lives in optimizer/util/pathnode.c
-unsafe fn reparameterize_path_by_child(root: *mut PlannerInfo, path: *mut Path, child_rel: *mut RelOptInfo) -> *mut Path { unimplemented!() }
+unsafe fn reparameterize_path_by_child(root: *mut PlannerInfo, path: *mut Path, child_rel: *mut RelOptInfo) -> *mut Path { crate::optimizer::util::pathnode::reparameterize_path_by_child(root as _, path as _, child_rel as _) as _ }
 
 // --- optimizer/paths.h ---
 // TODO(pg-port): real pathkeys_contained_in lives in optimizer/path/pathkeys.c
-unsafe fn pathkeys_contained_in(keys1: *mut List, keys2: *mut List) -> bool { unimplemented!() }
+unsafe fn pathkeys_contained_in(keys1: *mut List, keys2: *mut List) -> bool { crate::optimizer::path::costsize::pathkeys_contained_in(keys1 as _, keys2 as _) }
 // TODO(pg-port): real find_ec_member_matching_expr lives in optimizer/path/equivclass.c
-unsafe fn find_ec_member_matching_expr(ec: *mut EquivalenceClass, expr: *mut Expr, relids: Relids) -> *mut EquivalenceMember { unimplemented!() }
+unsafe fn find_ec_member_matching_expr(ec: *mut EquivalenceClass, expr: *mut Expr, relids: Relids) -> *mut EquivalenceMember { crate::optimizer::path::equivclass::find_ec_member_matching_expr(ec as _, expr as _, relids) as _ }
 // TODO(pg-port): real find_computable_ec_member lives in optimizer/path/equivclass.c
-unsafe fn find_computable_ec_member(root: *mut PlannerInfo, ec: *mut EquivalenceClass, exprs: *mut List, relids: Relids, require_parallel_safe: bool) -> *mut EquivalenceMember { unimplemented!() }
+unsafe fn find_computable_ec_member(root: *mut PlannerInfo, ec: *mut EquivalenceClass, exprs: *mut List, relids: Relids, require_parallel_safe: bool) -> *mut EquivalenceMember { crate::optimizer::path::equivclass::find_computable_ec_member(root as _, ec as _, exprs as _, relids, require_parallel_safe) as _ }
 
 // --- optimizer/placeholder.h ---
 // TODO(pg-port): real find_placeholder_info lives in optimizer/util/placeholder.c
-unsafe fn find_placeholder_info(root: *mut PlannerInfo, phv: *mut PlaceHolderVar) -> *mut PlaceHolderInfo { unimplemented!() }
+unsafe fn find_placeholder_info(root: *mut PlannerInfo, phv: *mut PlaceHolderVar) -> *mut PlaceHolderInfo { crate::optimizer::util::placeholder::find_placeholder_info(root as _, phv as _) as _ }
 
 // --- optimizer/plancat.h ---
 // TODO(pg-port): real build_physical_tlist lives in optimizer/util/plancat.c
-unsafe fn build_physical_tlist(root: *mut PlannerInfo, rel: *mut RelOptInfo) -> *mut List { unimplemented!() }
+unsafe fn build_physical_tlist(root: *mut PlannerInfo, rel: *mut RelOptInfo) -> *mut List { crate::optimizer::util::plancat::build_physical_tlist(root as _, rel as _) as _ }
 // TODO(pg-port): real infer_arbiter_indexes lives in optimizer/util/plancat.c
-unsafe fn infer_arbiter_indexes(root: *mut PlannerInfo) -> *mut List { unimplemented!() }
+unsafe fn infer_arbiter_indexes(root: *mut PlannerInfo) -> *mut List { crate::optimizer::util::plancat::infer_arbiter_indexes(root as _) as _ }
 // TODO(pg-port): real has_row_triggers lives in optimizer/util/plancat.c
-unsafe fn has_row_triggers(root: *mut PlannerInfo, rti: Index, event: CmdType) -> bool { unimplemented!() }
+unsafe fn has_row_triggers(root: *mut PlannerInfo, rti: Index, event: CmdType) -> bool { crate::optimizer::util::plancat::has_row_triggers(root as _, rti, event) }
 // TODO(pg-port): real has_stored_generated_columns lives in optimizer/util/plancat.c
-unsafe fn has_stored_generated_columns(root: *mut PlannerInfo, rti: Index) -> bool { unimplemented!() }
+unsafe fn has_stored_generated_columns(root: *mut PlannerInfo, rti: Index) -> bool { crate::optimizer::util::plancat::has_stored_generated_columns(root as _, rti) }
 
 // --- optimizer/prep.h ---
 // TODO(pg-port): real make_partition_pruneinfo lives in partitioning/partprune.c
-unsafe fn make_partition_pruneinfo(root: *mut PlannerInfo, parentrel: *mut RelOptInfo, subpaths: *mut List, prunequal: *mut List) -> c_int { unimplemented!() }
+unsafe fn make_partition_pruneinfo(root: *mut PlannerInfo, parentrel: *mut RelOptInfo, subpaths: *mut List, prunequal: *mut List) -> c_int { crate::partitioning::partprune::make_partition_pruneinfo(root as _, parentrel as _, subpaths as _, prunequal as _) }
 
 // --- optimizer/restrictinfo.h ---
 use crate::optimizer::util::restrictinfo::{extract_actual_clauses, extract_actual_join_clauses, get_actual_clauses};
 // TODO(pg-port): real is_redundant_with_indexclauses lives in optimizer/util/restrictinfo.c
-unsafe fn is_redundant_with_indexclauses(rinfo: *mut RestrictInfo, indexclauses: *mut List) -> bool { unimplemented!() }
+unsafe fn is_redundant_with_indexclauses(rinfo: *mut RestrictInfo, indexclauses: *mut List) -> bool { crate::optimizer::path::costsize::is_redundant_with_indexclauses(rinfo as _, indexclauses as _) }
 // TODO(pg-port): real is_redundant_derived_clause lives in optimizer/util/restrictinfo.c
-unsafe fn is_redundant_derived_clause(rinfo: *mut RestrictInfo, clauselist: *mut List) -> bool { unimplemented!() }
+unsafe fn is_redundant_derived_clause(rinfo: *mut RestrictInfo, clauselist: *mut List) -> bool { crate::optimizer::path::equivclass::is_redundant_derived_clause(rinfo as _, clauselist as _) }
 
 // --- optimizer/subselect.h ---
 // TODO(pg-port): real symbols live in optimizer/plan/subselect.c
-unsafe fn SS_attach_initplans(root: *mut PlannerInfo, plan: *mut Plan) { unimplemented!() }
-unsafe fn SS_make_initplan_from_plan(root: *mut PlannerInfo, subroot: *mut PlannerInfo, plan: *mut Plan, prm: *mut crate::nodes::primnodes::Param) { unimplemented!() }
-unsafe fn SS_compute_initplan_cost(init_plans: *mut List, initplan_cost_p: *mut Cost, unsafe_initplans_p: *mut bool) { unimplemented!() }
+unsafe fn SS_attach_initplans(root: *mut PlannerInfo, plan: *mut Plan) { crate::optimizer::plan::subselect::SS_attach_initplans(root as _, plan as _) }
+unsafe fn SS_make_initplan_from_plan(root: *mut PlannerInfo, subroot: *mut PlannerInfo, plan: *mut Plan, prm: *mut crate::nodes::primnodes::Param) { crate::optimizer::plan::subselect::SS_make_initplan_from_plan(root as _, subroot as _, plan as _, prm as _) }
+unsafe fn SS_compute_initplan_cost(init_plans: *mut List, initplan_cost_p: *mut Cost, unsafe_initplans_p: *mut bool) { crate::optimizer::plan::subselect::SS_compute_initplan_cost(init_plans as _, initplan_cost_p as _, unsafe_initplans_p as _) }
 // TODO(pg-port): real pull_paramids lives in optimizer/plan/subselect.c
-unsafe fn pull_paramids(expr: *mut Expr) -> *mut Bitmapset { unimplemented!() }
+unsafe fn pull_paramids(expr: *mut Expr) -> *mut Bitmapset { crate::optimizer::util::clauses::pull_paramids(expr as _) as _ }
 
 // --- optimizer/tlist.h ---
 use crate::optimizer::util::tlist::{
@@ -288,18 +286,18 @@ use crate::optimizer::util::tlist::{
     make_tlist_from_pathtarget,
 };
 // TODO(pg-port): real symbols live in optimizer/util/tlist.c
-unsafe fn tlist_same_exprs(tlist1: *mut List, tlist2: *mut List) -> bool { unimplemented!() }
-unsafe fn get_sortgroupclause_tle(sgClause: *mut SortGroupClause, targetList: *mut List) -> *mut TargetEntry { unimplemented!() }
-unsafe fn get_sortgroupref_tle(sortref: Index, targetList: *mut List) -> *mut TargetEntry { unimplemented!() }
-unsafe fn get_tle_by_resno(tlist: *mut List, resno: AttrNumber) -> *mut TargetEntry { unimplemented!() }
-unsafe fn extract_grouping_cols(groupClause: *mut List, tlist: *mut List) -> *mut AttrNumber { unimplemented!() }
-unsafe fn extract_grouping_ops(groupClause: *mut List) -> *mut Oid { unimplemented!() }
-unsafe fn extract_grouping_collations(groupClause: *mut List, tlist: *mut List) -> *mut Oid { unimplemented!() }
-unsafe fn extract_update_targetlist_colnos(tlist: *mut List) -> *mut List { unimplemented!() }
+unsafe fn tlist_same_exprs(tlist1: *mut List, tlist2: *mut List) -> bool { crate::optimizer::util::tlist::tlist_same_exprs(tlist1 as _, tlist2 as _) }
+unsafe fn get_sortgroupclause_tle(sgClause: *mut SortGroupClause, targetList: *mut List) -> *mut TargetEntry { crate::optimizer::util::tlist::get_sortgroupclause_tle(sgClause as _, targetList as _) as _ }
+unsafe fn get_sortgroupref_tle(sortref: Index, targetList: *mut List) -> *mut TargetEntry { crate::optimizer::util::tlist::get_sortgroupref_tle(sortref, targetList as _) as _ }
+unsafe fn get_tle_by_resno(tlist: *mut List, resno: AttrNumber) -> *mut TargetEntry { crate::parser::parse_relation::get_tle_by_resno(tlist as _, resno) as _ }
+unsafe fn extract_grouping_cols(groupClause: *mut List, tlist: *mut List) -> *mut AttrNumber { crate::optimizer::util::tlist::extract_grouping_cols(groupClause as _, tlist as _) as _ }
+unsafe fn extract_grouping_ops(groupClause: *mut List) -> *mut Oid { crate::optimizer::util::tlist::extract_grouping_ops(groupClause as _) as _ }
+unsafe fn extract_grouping_collations(groupClause: *mut List, tlist: *mut List) -> *mut Oid { crate::optimizer::util::tlist::extract_grouping_collations(groupClause as _, tlist as _) as _ }
+unsafe fn extract_update_targetlist_colnos(tlist: *mut List) -> *mut List { crate::optimizer::prep::preptlist::extract_update_targetlist_colnos(tlist as _) as _ }
 
 // --- parser/parse_clause.h ---
 // TODO(pg-port): real assignSortGroupRef lives in parser/parse_clause.c
-unsafe fn assignSortGroupRef(tle: *mut TargetEntry, tlist: *mut List) -> Index { unimplemented!() }
+unsafe fn assignSortGroupRef(tle: *mut TargetEntry, tlist: *mut List) -> Index { crate::optimizer::util::pathnode::assignSortGroupRef(tle as _, tlist as _) }
 
 // --- nodes/nodeFuncs.h ---
 // TODO(pg-port): real expression_tree_mutator lives in nodes/nodeFuncs.c
@@ -307,40 +305,40 @@ unsafe fn expression_tree_mutator(
     node: *mut Node,
     mutator: unsafe fn(*mut Node, *mut PlannerInfo) -> *mut Node,
     context: *mut PlannerInfo,
-) -> *mut Node { unimplemented!() }
+) -> *mut Node { crate::nodes::nodeFuncs::expression_tree_mutator(node as _, core::mem::transmute(mutator), context as _) as _ }
 
 // --- optimizer/var.h ---
 // TODO(pg-port): real pull_varattnos lives in optimizer/util/var.c
-unsafe fn pull_varattnos(node: *mut Node, varno: Index, varattnos: *mut *mut Bitmapset) { unimplemented!() }
+unsafe fn pull_varattnos(node: *mut Node, varno: Index, varattnos: *mut *mut Bitmapset) { crate::optimizer::util::var::pull_varattnos(node as _, varno, varattnos as _) }
 
 // --- partitioning / placeholder ---
 // TODO(pg-port): real strip_phvs_in_index_operand lives in optimizer/util/placeholder.c
-unsafe fn strip_phvs_in_index_operand(node: *mut Node) -> *mut Node { unimplemented!() }
+unsafe fn strip_phvs_in_index_operand(node: *mut Node) -> *mut Node { crate::optimizer::path::indxpath::strip_phvs_in_index_operand(node as _) as _ }
 
 // --- utils/lsyscache.h ---
 // TODO(pg-port): real symbols live in utils/cache/lsyscache.c
-unsafe fn get_compatible_hash_operators(opno: Oid, lhs_opno: *mut Oid, rhs_opno: *mut Oid) -> bool { unimplemented!() }
-unsafe fn get_ordering_op_for_equality_op(opno: Oid, use_lhs_type: bool) -> Oid { unimplemented!() }
-unsafe fn get_equality_op_for_ordering_op(opno: Oid, reverse: *mut bool) -> Oid { unimplemented!() }
-unsafe fn get_opfamily_member_for_cmptype(opfamily: Oid, lefttype: Oid, righttype: Oid, cmptype: c_int) -> Oid { unimplemented!() }
-unsafe fn get_rel_name(relid: Oid) -> *mut c_char { unimplemented!() }
+unsafe fn get_compatible_hash_operators(opno: Oid, lhs_opno: *mut Oid, rhs_opno: *mut Oid) -> bool { crate::utils::cache::lsyscache::get_compatible_hash_operators(opno, lhs_opno as _, rhs_opno as _) }
+unsafe fn get_ordering_op_for_equality_op(opno: Oid, use_lhs_type: bool) -> Oid { crate::optimizer::util::pathnode::get_ordering_op_for_equality_op(opno, use_lhs_type) }
+unsafe fn get_equality_op_for_ordering_op(opno: Oid, reverse: *mut bool) -> Oid { crate::optimizer::util::pathnode::get_equality_op_for_ordering_op(opno, reverse as _) }
+unsafe fn get_opfamily_member_for_cmptype(opfamily: Oid, lefttype: Oid, righttype: Oid, cmptype: c_int) -> Oid { crate::optimizer::path::allpaths::get_opfamily_member_for_cmptype(opfamily, lefttype, righttype, cmptype) }
+unsafe fn get_rel_name(relid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_rel_name(relid) as _ }
 
 // --- foreign/fdwapi.h ---
 // TODO(pg-port): real GetFdwRoutineByRelId lives in foreign/foreign.c
-unsafe fn GetFdwRoutineByRelId(relid: Oid) -> *mut c_void { unimplemented!() }
+unsafe fn GetFdwRoutineByRelId(relid: Oid) -> *mut c_void { crate::foreign::foreign::GetFdwRoutineByRelId(relid) as _ }
 
 // --- rewrite/rewriteHandler.h / rewriteManip.h ---
 // TODO(pg-port): real symbols live in rewrite/rewriteManip.c
-unsafe fn contain_vars_returning_old_or_new(node: *mut Node) -> bool { unimplemented!() }
-unsafe fn has_transition_tables(root: *mut PlannerInfo, rti: Index, event: CmdType) -> bool { unimplemented!() }
+unsafe fn contain_vars_returning_old_or_new(node: *mut Node) -> bool { crate::optimizer::util::var::contain_vars_returning_old_or_new(node as _) }
+unsafe fn has_transition_tables(root: *mut PlannerInfo, rti: Index, event: CmdType) -> bool { crate::optimizer::util::plancat::has_transition_tables(root as _, rti, event) }
 
 // --- optimizer/subselect.h (subquery scan trivial check) ---
 // TODO(pg-port): real trivial_subqueryscan lives in optimizer/plan/setrefs.c
-unsafe fn trivial_subqueryscan(plan: *mut SubqueryScan) -> bool { unimplemented!() }
+unsafe fn trivial_subqueryscan(plan: *mut SubqueryScan) -> bool { crate::optimizer::plan::setrefs::trivial_subqueryscan(plan as _) }
 
 // --- predicate prover ---
 // TODO(pg-port): real predicate_implied_by lives in optimizer/util/predtest.c
-unsafe fn predicate_implied_by(predicate_list: *mut List, clause_list: *mut List, weak: bool) -> bool { unimplemented!() }
+unsafe fn predicate_implied_by(predicate_list: *mut List, clause_list: *mut List, weak: bool) -> bool { crate::optimizer::util::predtest::predicate_implied_by(predicate_list as _, clause_list as _, weak) }
 
 // ---------------------------------------------------------------------------
 // Helper macros translated from C macros in pathnodes.h / parsetree.h
@@ -3633,6 +3631,10 @@ unsafe fn fix_indexqual_operand(mut node: *mut Node, index: *mut IndexOptInfo, i
             let result = copyObject(node) as *mut Var;
             (*result).varno = INDEX_VAR;
             (*result).varattno = (indexcol + 1) as AttrNumber;
+            if std::env::var("PDB_IS").is_ok() {
+                eprintln!("[fix_indexqual_operand] result={:p} varno={} varattno={} vartype={} sizeof(Var)={}",
+                    result, (*result).varno, (*result).varattno, (*result).vartype, core::mem::size_of::<Var>());
+            }
             return result as *mut Node;
         } else {
             elog!(ERROR, "index key does not match expected index column");

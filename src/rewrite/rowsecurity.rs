@@ -1061,31 +1061,31 @@ unsafe fn getRTEPermissionInfo(
     rteperminfos: *mut List,
     rte: *mut RangeTblEntry,
 ) -> *mut RTEPermissionInfo {
-    unimplemented!() // TODO: parser/parse_relation.c
+    crate::parser::parse_relation::getRTEPermissionInfo(rteperminfos as _, rte as _) as _
 }
 
 unsafe fn check_enable_rls(relid: Oid, checkAsUser: Oid, noError: bool) -> c_int {
-    unimplemented!() // TODO: utils/misc/rls.c
+    crate::utils::misc::rls::check_enable_rls(relid, checkAsUser, noError)
 }
 
 unsafe fn table_open(relationId: Oid, lockmode: c_int) -> Relation {
-    unimplemented!() // TODO: access/table/table.c
+    crate::access::table::table::table_open(relationId, lockmode as _)
 }
 
 unsafe fn table_close(relation: Relation, lockmode: c_int) {
-    unimplemented!() // TODO: access/table/table.c
+    crate::access::table::table::table_close(relation, lockmode as _)
 }
 
 unsafe fn setRuleCheckAsUser(node: *mut Node, userid: Oid) {
-    unimplemented!() // TODO: rewrite/rewriteManip.c
+    crate::rewrite::rewriteDefine::setRuleCheckAsUser(node as _, userid)
 }
 
 unsafe fn ChangeVarNodes(node: *mut Node, rt_index: c_int, new_index: c_int, sublevels_up: c_int) {
-    unimplemented!() // TODO: rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::ChangeVarNodes(node as _, rt_index, new_index, sublevels_up)
 }
 
 unsafe fn makeBoolExpr(boolop: BoolExprType, args: *mut List, location: c_int) -> *mut Expr {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeBoolExpr(boolop, args as _, location) as _
 }
 
 unsafe fn makeConst(
@@ -1097,7 +1097,7 @@ unsafe fn makeConst(
     constisnull: bool,
     constbyval: bool,
 ) -> *mut Const {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeConst(consttype, consttypmod, constcollid, constlen, constvalue, constisnull, constbyval) as _
 }
 
 unsafe fn copyObject(from: *const std::ffi::c_void) -> *mut std::ffi::c_void {
@@ -1112,15 +1112,15 @@ unsafe fn list_sort(
 }
 
 unsafe fn list_append_unique(list: *mut List, datum: *mut std::ffi::c_void) -> *mut List {
-    unimplemented!() // TODO: nodes/list.c
+    crate::nodes::list::list_append_unique(list as _, datum as _) as _
 }
 
 unsafe fn has_privs_of_role(member: Oid, role: Oid) -> bool {
-    unimplemented!() // TODO: utils/adt/acl.c
+    crate::utils::adt::acl::has_privs_of_role(member, role)
 }
 
 unsafe fn RelationGetRelationName(relation: Relation) -> *const c_char {
-    unimplemented!() // TODO: utils/rel.h
+    crate::utils::rel::RelationGetRelationName(relation as _) as _
 }
 
 extern "C" {

@@ -244,11 +244,7 @@ pub unsafe fn VARDATA_ANY(ptr: *const c_char) -> *mut c_char {
  * `datum` points to a valid varlena.
  */
 pub unsafe fn pg_detoast_datum_packed(datum: *mut c_void) -> *mut c_void {
-    if VARATT_IS_COMPRESSED(datum as *const c_char) || VARATT_IS_EXTERNAL(datum as *const c_char) {
-        // TODO(pg-port): detoast_attr / toast_decompress_datum (access/common/detoast.c).
-        unimplemented!("pg_detoast_datum_packed: TOAST fetch/decompress (detoast.c) not yet translated")
-    }
-    datum
+    crate::access::common::detoast::pg_detoast_datum_packed(datum as _) as _
 }
 
 #[cfg(test)]

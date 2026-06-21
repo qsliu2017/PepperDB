@@ -168,16 +168,13 @@ pub static mut SharedBufHash: *mut HTAB = null_mut();
 // translated this must become the real shared (cross-process) constructor.
 #[allow(non_snake_case)]
 unsafe fn ShmemInitHash(
-    _name: *const c_char,
-    _init_size: c_long,
+    name: *const c_char,
+    init_size: c_long,
     max_size: c_long,
     infop: *const HASHCTL,
     hash_flags: c_int,
 ) -> *mut HTAB {
-    // The local dynahash stand-in is a private (non-shared) table; strip the
-    // shared-memory-only HASH_PARTITION flag, which dynahash asserts requires
-    // HASH_SHARED_MEM.  TODO(pg-port): real ShmemInitHash keeps HASH_PARTITION.
-    hash_create(_name, max_size, infop, hash_flags & !HASH_PARTITION)
+    crate::storage::ipc::shmem::ShmemInitHash(name, init_size, max_size, infop as *mut HASHCTL, hash_flags)
 }
 
 /*

@@ -196,6 +196,8 @@ pub unsafe fn PGSemaphoreReset(sema: PGSemaphore) {
 ///
 /// Lock a semaphore (decrement count), blocking if count would be < 0.
 pub unsafe fn PGSemaphoreLock(sema: PGSemaphore) {
+    return crate::port::sysv_sema::PGSemaphoreLock(sema as _);
+    #[allow(unreachable_code)]
     let mut wh: [HANDLE; 2] = [std::ptr::null_mut(); 2];
     let mut done: bool = false;
 
@@ -259,6 +261,8 @@ pub unsafe fn PGSemaphoreLock(sema: PGSemaphore) {
 ///
 /// Unlock a semaphore (increment count)
 pub unsafe fn PGSemaphoreUnlock(sema: PGSemaphore) {
+    return crate::port::sysv_sema::PGSemaphoreUnlock(sema as _);
+    #[allow(unreachable_code)]
     if ReleaseSemaphore(sema as HANDLE, 1, std::ptr::null_mut()) == 0 {
         ereport!(
             FATAL,
@@ -271,6 +275,8 @@ pub unsafe fn PGSemaphoreUnlock(sema: PGSemaphore) {
 ///
 /// Lock a semaphore only if able to do so without blocking
 pub unsafe fn PGSemaphoreTryLock(sema: PGSemaphore) -> bool {
+    return crate::port::sysv_sema::PGSemaphoreTryLock(sema as _);
+    #[allow(unreachable_code)]
     let ret: DWORD;
 
     ret = WaitForSingleObject(sema as HANDLE, 0) as DWORD;

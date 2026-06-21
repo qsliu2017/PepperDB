@@ -46,9 +46,7 @@ unsafe fn tuplesort_begin_index_hash(
 
 // utils/tuplesort.h - tuplesort_end
 // TODO: dep not ported
-unsafe fn tuplesort_end(_state: *mut Tuplesortstate) {
-    unimplemented!()
-}
+unsafe fn tuplesort_end(_state: *mut Tuplesortstate) { unimplemented!() }
 
 // utils/tuplesort.h - tuplesort_putindextuplevalues
 // TODO: dep not ported
@@ -58,27 +56,19 @@ unsafe fn tuplesort_putindextuplevalues(
     _self: ItemPointer,
     _values: *const Datum,
     _isnull: *const bool,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 // utils/tuplesort.h - tuplesort_performsort
 // TODO: dep not ported
-unsafe fn tuplesort_performsort(_state: *mut Tuplesortstate) {
-    unimplemented!()
-}
+unsafe fn tuplesort_performsort(_state: *mut Tuplesortstate) { unimplemented!() }
 
 // utils/tuplesort.h - tuplesort_getindextuple
 // TODO: dep not ported
-unsafe fn tuplesort_getindextuple(_state: *mut Tuplesortstate, _forward: bool) -> IndexTuple {
-    unimplemented!()
-}
+unsafe fn tuplesort_getindextuple(_state: *mut Tuplesortstate, _forward: bool) -> IndexTuple { unimplemented!() }
 
 // access/hash.h - _hash_doinsert
 // TODO: dep not ported (access/hash/hashinsert.c)
-unsafe fn _hash_doinsert(_rel: Relation, _itup: IndexTuple, _heapRel: Relation, _sorted: bool) {
-    unimplemented!()
-}
+unsafe fn _hash_doinsert(_rel: Relation, _itup: IndexTuple, _heapRel: Relation, _sorted: bool) { crate::access::hash::hashinsert::_hash_doinsert(_rel, _itup, _heapRel, _sorted) }
 
 // The following are only referenced inside USE_ASSERT_CHECKING blocks, which we
 // gate behind debug_assertions below.  Stubbed for completeness.
@@ -91,16 +81,12 @@ unsafe fn _hash_hashkey2bucket(
     _maxbucket: uint32,
     _highmask: uint32,
     _lowmask: uint32,
-) -> uint32 {
-    unimplemented!()
-}
+) -> uint32 { crate::access::hash::hashutil::_hash_hashkey2bucket(_hashkey, _maxbucket, _highmask, _lowmask) as _ }
 
 // access/hash.h - _hash_get_indextuple_hashkey
 // TODO: dep not ported
 #[cfg(debug_assertions)]
-unsafe fn _hash_get_indextuple_hashkey(_itup: IndexTuple) -> uint32 {
-    unimplemented!()
-}
+unsafe fn _hash_get_indextuple_hashkey(_itup: IndexTuple) -> uint32 { crate::access::hash::hashutil::_hash_get_indextuple_hashkey(_itup) }
 
 // ---------------------------------------------------------------------------
 // HSpool

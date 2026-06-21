@@ -103,7 +103,7 @@ const CollationOidIndexId: Oid = 3085;
 const NamespaceRelationId: Oid = 2615;
 
 /* syscache id (utils/syscache.h) */
-const COLLNAMEENCNSP: c_int = 206;
+const COLLNAMEENCNSP: c_int = 15;
 
 /* attribute numbers / count (catalog/pg_collation_d.h) */
 const Natts_pg_collation: usize = 12;
@@ -419,9 +419,7 @@ unsafe fn ObjectAddressSet(addr: *mut ObjectAddress, class_id: Oid, object_id: O
     (*addr).objectSubId = 0;
 }
 
-unsafe fn checkMembershipInCurrentExtension(_object: *const ObjectAddress) {
-    unimplemented!() // TODO(pg-port): catalog/pg_depend.c
-}
+unsafe fn checkMembershipInCurrentExtension(_object: *const ObjectAddress) { crate::catalog::pg_depend::checkMembershipInCurrentExtension(_object as _) }
 
 unsafe fn table_open(_relationId: Oid, _lockmode: LOCKMODE) -> Relation {
     unimplemented!() // TODO(pg-port): access/table/table.c
@@ -451,9 +449,7 @@ unsafe fn heap_form_tuple(
     _tupleDescriptor: TupleDesc,
     _values: *mut Datum,
     _isnull: *mut bool,
-) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): access/common/heaptuple.c
-}
+) -> HeapTuple { unimplemented!() }
 
 unsafe fn CatalogTupleInsert(_heapRel: Relation, _tup: HeapTuple) {
     unimplemented!() // TODO(pg-port): catalog/indexing.c
@@ -463,9 +459,7 @@ unsafe fn recordDependencyOn(
     _depender: *const ObjectAddress,
     _referenced: *const ObjectAddress,
     _behavior: c_char,
-) {
-    unimplemented!() // TODO(pg-port): catalog/pg_depend.c
-}
+) { crate::catalog::pg_depend::recordDependencyOn(_depender as _, _referenced as _, _behavior as _) }
 
 unsafe fn recordDependencyOnOwner(_classId: Oid, _objectId: Oid, _owner: Oid) {
     unimplemented!() // TODO(pg-port): catalog/pg_shdepend.c
@@ -479,9 +473,7 @@ unsafe fn InvokeObjectPostCreateHook(_classId: Oid, _objectId: Oid, _subId: c_in
     // TODO(pg-port): catalog/objectaccess.h (no-op unless hook installed)
 }
 
-unsafe fn heap_freetuple(_htup: HeapTuple) {
-    unimplemented!() // TODO(pg-port): access/common/heaptuple.c
-}
+unsafe fn heap_freetuple(_htup: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(_htup as _) }
 
 #[allow(unused_imports)]
 use crate::{ereport, errmsg};

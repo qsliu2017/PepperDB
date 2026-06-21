@@ -218,9 +218,9 @@ const Anum_pg_ts_config_map_mapseqno: c_int = 3;
 const Anum_pg_ts_config_map_mapdict: c_int = 4;
 
 // syscache id constants  TODO(pg-port)
-const TSTEMPLATEOID: c_int = 0;
-const TSDICTOID: c_int = 1;
-const TSCONFIGOID: c_int = 2;
+const TSTEMPLATEOID: c_int = 80;
+const TSDICTOID: c_int = 76;
+const TSCONFIGOID: c_int = 74;
 
 // catalog multi-insert batch size  TODO(pg-port)
 const MAX_CATALOG_MULTI_INSERT_BYTES: usize = 65535;
@@ -314,8 +314,8 @@ unsafe fn get_ts_config_oid(_names: *mut List, _missing_ok: bool) -> Oid { unimp
 
 // ----- fmgr / object access stubs -----
 unsafe fn OidFunctionCall1(_functionId: Oid, _arg1: Datum) -> Datum { unimplemented!() /* TODO(pg-port) */ }
-unsafe fn InvokeObjectPostCreateHook(_classId: Oid, _objectId: Oid, _subId: c_int) { /* no-op unless object access hooks installed  TODO(pg-port) */ }
-unsafe fn InvokeObjectPostAlterHook(_classId: Oid, _objectId: Oid, _subId: c_int) { /* no-op unless object access hooks installed  TODO(pg-port) */ }
+unsafe fn InvokeObjectPostCreateHook(_classId: Oid, _objectId: Oid, _subId: c_int) { unimplemented!("STUB InvokeObjectPostCreateHook") }
+unsafe fn InvokeObjectPostAlterHook(_classId: Oid, _objectId: Oid, _subId: c_int) { unimplemented!("STUB InvokeObjectPostAlterHook") }
 
 // ----- node / catalog helpers -----
 unsafe fn copyObjectImpl(_from: *const c_void) -> *mut c_void { unimplemented!() /* TODO(pg-port) */ }

@@ -200,9 +200,7 @@ extern "C" {
     fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void;
 }
 
-unsafe fn RelationGetIndexScan(rel: Relation, nkeys: c_int, norderbys: c_int) -> IndexScanDesc {
-    unimplemented!() // TODO: access/index/genam.c
-}
+unsafe fn RelationGetIndexScan(rel: Relation, nkeys: c_int, norderbys: c_int) -> IndexScanDesc { crate::access::index::genam::RelationGetIndexScan(rel, nkeys, norderbys) }
 
 unsafe fn AllocSetContextCreateInternal(
     parent: MemoryContext,
@@ -210,13 +208,9 @@ unsafe fn AllocSetContextCreateInternal(
     minContextSize: Size,
     initBlockSize: Size,
     maxBlockSize: Size,
-) -> MemoryContext {
-    unimplemented!() // TODO: utils/mmgr/aset.c
-}
+) -> MemoryContext { crate::utils::mmgr::aset::AllocSetContextCreateInternal(parent, name, minContextSize, initBlockSize, maxBlockSize) }
 
-unsafe fn initGinState(state: *mut GinState, index: Relation) {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
+unsafe fn initGinState(state: *mut GinState, index: Relation) { crate::access::gin::ginutil::initGinState(state, index) }
 
 unsafe fn ginCompareEntries(
     ginstate: *mut GinState,
@@ -225,29 +219,19 @@ unsafe fn ginCompareEntries(
     categorya: GinNullCategory,
     b: Datum,
     categoryb: GinNullCategory,
-) -> c_int {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
+) -> c_int { crate::access::gin::ginutil::ginCompareEntries(ginstate, attnum, a, categorya, b, categoryb) }
 
-unsafe fn ginInitConsistentFunction(ginstate: *mut GinState, key: GinScanKey) {
-    unimplemented!() // TODO: access/gin/ginlogic.c
-}
+unsafe fn ginInitConsistentFunction(ginstate: *mut GinState, key: GinScanKey) { crate::access::gin::ginlogic::ginInitConsistentFunction(ginstate, key) }
 
-unsafe fn ginGetStats(index: Relation, stats: *mut GinStatsData) {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
+unsafe fn ginGetStats(index: Relation, stats: *mut GinStatsData) { crate::access::gin::ginutil::ginGetStats(index, stats) }
 
 unsafe fn ReleaseBuffer(buffer: Buffer) {
     unimplemented!() // TODO: storage/buffer/bufmgr.c
 }
 
-unsafe fn tbm_end_private_iterate(iterator: *mut TBMPrivateIterator) {
-    unimplemented!() // TODO: nodes/tidbitmap.c
-}
+unsafe fn tbm_end_private_iterate(iterator: *mut TBMPrivateIterator) { crate::nodes::tidbitmap::tbm_end_private_iterate(iterator) }
 
-unsafe fn tbm_free(tbm: *mut TIDBitmap) {
-    unimplemented!() // TODO: nodes/tidbitmap.c
-}
+unsafe fn tbm_free(tbm: *mut TIDBitmap) { crate::nodes::tidbitmap::tbm_free(tbm) }
 
 unsafe fn pgstat_count_index_scan(rel: Relation) {
     unimplemented!() // TODO: pgstat.h
@@ -263,9 +247,7 @@ unsafe fn FunctionCall7Coll(
     arg5: Datum,
     arg6: Datum,
     arg7: Datum,
-) -> Datum {
-    unimplemented!() // TODO: utils/fmgr/fmgr.c
-}
+) -> Datum { crate::utils::fmgr::FunctionCall7Coll(flinfo, collation, arg1, arg2, arg3, arg4, arg5, arg6, arg7) }
 
 unsafe fn RelationGetRelationName(relation: Relation) -> *const c_char {
     unimplemented!() // TODO: utils/rel.h

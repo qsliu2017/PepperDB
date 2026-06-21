@@ -165,6 +165,7 @@ unsafe fn SET_VARTAG_EXTERNAL(ptr: *mut c_char, tag: u8) {
 ///
 /// This is a bit tedious since the pointer may not be properly aligned; compare
 /// VARATT_EXTERNAL_GET_POINTER().
+#[no_mangle]
 pub unsafe fn DatumGetEOHP(d: Datum) -> *mut ExpandedObjectHeader {
     let datum = DatumGetPointer(d) as *mut varattrib_1b_e;
     let mut ptr = varatt_expanded { eohptr: null_mut() };
@@ -215,10 +216,12 @@ pub unsafe fn EOH_init_header(
 /// EOH_get_flat_size / EOH_flatten_into
 ///
 /// Convenience functions for invoking the "methods" of an expanded object.
+#[no_mangle]
 pub unsafe fn EOH_get_flat_size(eohptr: *mut ExpandedObjectHeader) -> Size {
     ((*(*eohptr).eoh_methods).get_flat_size)(eohptr)
 }
 
+#[no_mangle]
 pub unsafe fn EOH_flatten_into(
     eohptr: *mut ExpandedObjectHeader,
     result: *mut c_void,
@@ -232,6 +235,7 @@ pub unsafe fn EOH_flatten_into(
 ///
 /// Caller must ensure that the datum is a non-null varlena value. Typically this
 /// is invoked via MakeExpandedObjectReadOnly(), which checks that.
+#[no_mangle]
 pub unsafe fn MakeExpandedObjectReadOnlyInternal(d: Datum) -> Datum {
     /* Nothing to do if not a read-write expanded-object pointer */
     if !VARATT_IS_EXTERNAL_EXPANDED_RW(DatumGetPointer(d) as *const c_char) {
@@ -250,6 +254,7 @@ pub unsafe fn MakeExpandedObjectReadOnlyInternal(d: Datum) -> Datum {
 /// its "standard" R/W pointer, which is certain to have the same lifespan as the
 /// object itself. (The passed-in pointer might not, and in any case wouldn't
 /// provide a unique identifier if it's not that one.)
+#[no_mangle]
 pub unsafe fn TransferExpandedObject(d: Datum, new_parent: MemoryContext) -> Datum {
     let eohptr = DatumGetEOHP(d);
 
@@ -264,6 +269,7 @@ pub unsafe fn TransferExpandedObject(d: Datum, new_parent: MemoryContext) -> Dat
 }
 
 /// Delete an expanded object (must be referenced by a R/W pointer).
+#[no_mangle]
 pub unsafe fn DeleteExpandedObject(d: Datum) {
     let eohptr = DatumGetEOHP(d);
 

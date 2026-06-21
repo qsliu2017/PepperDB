@@ -1087,8 +1087,7 @@ pub unsafe fn HeapTupleGetUpdateXid(_tup: *const HeapTupleHeaderData) -> Transac
  * Stub: never returns.
  */
 pub unsafe fn HeapTupleHeaderGetCmin(_tup: *const HeapTupleHeaderData) -> CommandId {
-    // TODO(pg-port): utils/time/combocid.c HeapTupleHeaderGetCmin.
-    unimplemented!("HeapTupleHeaderGetCmin: utils/time/combocid.c not yet translated")
+    crate::utils::time::combocid::HeapTupleHeaderGetCmin(_tup as _)
 }
 
 /*
@@ -1098,8 +1097,7 @@ pub unsafe fn HeapTupleHeaderGetCmin(_tup: *const HeapTupleHeaderData) -> Comman
  * Stub: never returns.
  */
 pub unsafe fn HeapTupleHeaderGetCmax(_tup: *const HeapTupleHeaderData) -> CommandId {
-    // TODO(pg-port): utils/time/combocid.c HeapTupleHeaderGetCmax.
-    unimplemented!("HeapTupleHeaderGetCmax: utils/time/combocid.c not yet translated")
+    crate::utils::time::combocid::HeapTupleHeaderGetCmax(_tup as _)
 }
 
 /*
@@ -1110,12 +1108,11 @@ pub unsafe fn HeapTupleHeaderGetCmax(_tup: *const HeapTupleHeaderData) -> Comman
  * Stub: never returns.
  */
 pub unsafe fn HeapTupleHeaderAdjustCmax(
-    _tup: *const HeapTupleHeaderData,
-    _cmax: *mut CommandId,
-    _iscombo: *mut bool,
+    tup: *const HeapTupleHeaderData,
+    cmax: *mut CommandId,
+    iscombo: *mut bool,
 ) {
-    // TODO(pg-port): utils/time/combocid.c HeapTupleHeaderAdjustCmax.
-    unimplemented!("HeapTupleHeaderAdjustCmax: utils/time/combocid.c not yet translated")
+    crate::utils::time::combocid::HeapTupleHeaderAdjustCmax(tup as _, cmax, iscombo)
 }
 
 // ============================================================================
@@ -1184,6 +1181,7 @@ pub unsafe fn fastgetattr(
  * `tup` is a valid HeapTuple, `tupleDesc` matches it, `isnull` is writable.
  */
 #[inline]
+#[no_mangle]
 pub unsafe fn heap_getattr(
     tup: HeapTuple,
     attnum: c_int,

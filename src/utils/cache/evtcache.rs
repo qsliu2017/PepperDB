@@ -68,7 +68,7 @@ const EventTriggerNameIndexId: Oid = 3467;
 const Anum_pg_event_trigger_evttags: c_int = 7;
 
 // utils/syscache.h - EVENTTRIGGEROID cache id (STUB: syscache not yet ported).
-const EVENTTRIGGEROID: c_int = 0;
+const EVENTTRIGGEROID: c_int = 26;
 
 // access/relscan.h - SysScanDesc opaque handle (STUB: genam not yet ported).
 type SysScanDesc = *mut c_void;
@@ -225,7 +225,7 @@ unsafe fn BuildEventTriggerCache() {
         }
         EventTriggerCacheContext = AllocSetContextCreate!(
             CacheMemoryContext,
-            "EventTriggerCache",
+            c"EventTriggerCache".as_ptr(),
             ALLOCSET_DEFAULT_SIZES
         ) as *mut _;
         CacheRegisterSyscacheCallback(EVENTTRIGGEROID, InvalidateEventCacheCallback, 0 as Datum);

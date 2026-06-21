@@ -693,19 +693,19 @@ unsafe fn get_expr_result_type(
     _resultTypeId: *mut Oid,
     _resultTupleDesc: *mut TupleDesc,
 ) -> TypeFuncClass {
-    unimplemented!() // TODO: utils/fmgr/funcapi.c
+    crate::utils::fmgr::funcapi::get_expr_result_type(_expr as _, _resultTypeId as _, _resultTupleDesc as _) as _
 }
 
 unsafe fn BlessTupleDesc(_tupdesc: TupleDesc) -> TupleDesc {
-    unimplemented!() // TODO: utils/fmgr/funcapi.c
+    crate::executor::execTuples::BlessTupleDesc(_tupdesc as _) as _
 }
 
 unsafe fn exprCollation(_expr: *const Node) -> Oid {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::exprCollation(_expr as _) as _
 }
 
 unsafe fn tuplestore_rescan(_state: *mut Tuplestorestate) {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_rescan(_state as _)
 }
 
 unsafe fn tuplestore_gettupleslot(
@@ -714,9 +714,9 @@ unsafe fn tuplestore_gettupleslot(
     _copy: bool,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_gettupleslot(_state as _, _forward as _, _copy as _, _slot as _) as _
 }
 
 unsafe fn tuplestore_end(_state: *mut Tuplestorestate) {
-    unimplemented!() // TODO: utils/sort/tuplestore.c
+    crate::utils::sort::tuplestore::tuplestore_end(_state as _)
 }

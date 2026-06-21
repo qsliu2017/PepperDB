@@ -365,6 +365,9 @@ pub unsafe fn heap_compute_data_size(
             data_length = att_nominal_alignby(data_length, (*atti).attalignby);
             data_length += EOH_get_flat_size(DatumGetEOHP(val));
         } else {
+            if std::env::var("PDB_BT").is_ok() && (*atti).attlen < 0 {
+                eprintln!("PDB_BT heap_compute_data_size i={} natts={} attlen={} val={:p} isnull={}", i, numberOfAttributes, (*atti).attlen, DatumGetPointer(val), *isnull.add(i as usize));
+            }
             data_length = att_datum_alignby(
                 data_length,
                 (*atti).attalignby,
@@ -1390,6 +1393,7 @@ pub unsafe fn heap_form_tuple(
  * # Safety
  * `tuple`/`tupleDesc` are live; the three arrays have natts elements.
  */
+#[no_mangle]
 pub unsafe fn heap_modify_tuple(
     tuple: HeapTuple,
     tupleDesc: TupleDesc,
@@ -1505,6 +1509,7 @@ pub unsafe fn heap_modify_tuple_by_cols(
  * # Safety
  * `tuple`/`tupleDesc` are live; `values`/`isnull` point to tdesc_natts elements.
  */
+#[no_mangle]
 pub unsafe fn heap_deform_tuple(
     tuple: HeapTuple,
     tupleDesc: TupleDesc,
@@ -1606,6 +1611,7 @@ pub unsafe fn heap_deform_tuple(
  * # Safety
  * `htup` was allocated as a single palloc block (heap_copytuple/heap_form_tuple).
  */
+#[no_mangle]
 pub unsafe fn heap_freetuple(htup: HeapTuple) {
     pfree(htup as *mut c_void);
 }

@@ -254,7 +254,7 @@ unsafe fn preprocess_aggref(aggref: *mut Aggref, root: *mut PlannerInfo) {
             (*transinfo).deserialfn_oid = aggdeserialfn;
             (*transinfo).aggtranstype = aggtranstype;
             (*transinfo).aggtranstypmod = aggtranstypmod;
-            (*transinfo).transtypeLen = transtypeLen;
+            (*transinfo).transtypeLen = transtypeLen as c_int;
             (*transinfo).transtypeByVal = transtypeByVal;
             (*transinfo).aggtransspace = aggtransspace;
             (*transinfo).initValue = initValue;
@@ -651,7 +651,7 @@ pub unsafe fn get_agg_clause_costs(
 
             avgwidth = MAXALIGN(avgwidth as usize) as int32;
             (*costs).transitionSpace +=
-                avgwidth + 2 * std::mem::size_of::<*mut std::ffi::c_void>() as int32;
+                (avgwidth as usize) + 2 * std::mem::size_of::<*mut std::ffi::c_void>();
         } else if (*transinfo).aggtranstype == INTERNALOID {
             /*
              * INTERNAL transition type is a special case: although INTERNAL
@@ -663,9 +663,9 @@ pub unsafe fn get_agg_clause_costs(
              * array_agg() for instance.
              */
             if (*transinfo).aggtransspace > 0 {
-                (*costs).transitionSpace += (*transinfo).aggtransspace;
+                (*costs).transitionSpace += (*transinfo).aggtransspace as usize;
             } else {
-                (*costs).transitionSpace += ALLOCSET_DEFAULT_INITSIZE as int32;
+                (*costs).transitionSpace += ALLOCSET_DEFAULT_INITSIZE;
             }
         }
     });
@@ -708,207 +708,141 @@ pub type HeapTuple = *mut std::ffi::c_void;
 #[allow(non_camel_case_types)]
 pub type Form_pg_aggregate = *mut crate::catalog::pg_aggregate::FormData_pg_aggregate;
 
-pub struct PlannerInfo {
-    pub agginfos: *mut List,
-    pub aggtransinfos: *mut List,
-    pub numOrderedAggs: c_int,
-    pub hasNonPartialAggs: bool,
-    pub hasNonSerialAggs: bool,
-}
-
-pub struct Aggref {
-    pub agglevelsup: crate::c::Index,
-    pub aggfnoid: Oid,
-    pub aggtranstype: Oid,
-    pub aggtype: Oid,
-    pub aggcollid: Oid,
-    pub inputcollid: Oid,
-    pub args: *mut List,
-    pub aggorder: *mut List,
-    pub aggdistinct: *mut List,
-    pub aggfilter: *mut std::ffi::c_void,
-    pub aggdirectargs: *mut List,
-    pub aggstar: bool,
-    pub aggvariadic: bool,
-    pub aggkind: c_char,
-    pub aggno: c_int,
-    pub aggtransno: c_int,
-}
-
-pub struct AggInfo {
-    pub aggrefs: *mut List,
-    pub finalfn_oid: Oid,
-    pub shareable: bool,
-    pub transno: c_int,
-}
-
-pub struct AggTransInfo {
-    pub args: *mut List,
-    pub aggfilter: *mut std::ffi::c_void,
-    pub transfn_oid: Oid,
-    pub combinefn_oid: Oid,
-    pub serialfn_oid: Oid,
-    pub deserialfn_oid: Oid,
-    pub aggtranstype: Oid,
-    pub aggtranstypmod: int32,
-    pub transtypeLen: int16,
-    pub transtypeByVal: bool,
-    pub aggtransspace: int32,
-    pub initValue: Datum,
-    pub initValueIsNull: bool,
-}
-
-pub struct TargetEntry {
-    pub expr: *mut std::ffi::c_void,
-}
-
-#[derive(Clone, Copy)]
-pub struct Cost(pub f64);
-
-#[derive(Clone, Copy)]
-pub struct QualCost {
-    pub startup: f64,
-    pub per_tuple: f64,
-}
-
-pub struct AggClauseCosts {
-    pub transCost: QualCost,
-    pub finalCost: QualCost,
-    pub transitionSpace: int32,
-}
+pub use crate::nodes::pathnodes::{PlannerInfo, AggInfo, AggTransInfo, QualCost, AggClauseCosts};
+pub use crate::nodes::primnodes::{Aggref, TargetEntry};
 
 #[allow(non_camel_case_types)]
 pub type AggSplit = c_int;
 
 pub const FUNC_MAX_ARGS: usize = 100;
 pub const NIL: *mut List = std::ptr::null_mut();
-pub const AGGFNOID: c_int = 0;
-pub const Anum_pg_aggregate_agginitval: c_int = 0;
-pub const AGGMODIFY_READ_WRITE: c_char = b'w' as c_char;
-pub const INTERNALOID: Oid = InvalidOid;
-pub const F_ARRAY_AGG_SERIALIZE: Oid = InvalidOid;
-pub const F_ARRAY_AGG_DESERIALIZE: Oid = InvalidOid;
-pub const F_ARRAY_APPEND: Oid = InvalidOid;
+pub const AGGFNOID: c_int = crate::utils::cache::syscache_ids_gen::AGGFNOID;
+pub const Anum_pg_aggregate_agginitval: c_int = 21;
+pub const AGGMODIFY_READ_WRITE: c_char = crate::catalog::pg_aggregate::AGGMODIFY_READ_WRITE;
+pub const INTERNALOID: Oid = crate::catalog::pg_type_d::INTERNALOID;
+pub const F_ARRAY_AGG_SERIALIZE: Oid = 6294;
+pub const F_ARRAY_AGG_DESERIALIZE: Oid = 6295;
+pub const F_ARRAY_APPEND: Oid = 378;
 pub const ALLOCSET_SMALL_INITSIZE: usize = 1024;
 pub const ALLOCSET_DEFAULT_INITSIZE: usize = 8 * 1024;
 
-unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!() // TODO: utils/cache/syscache.c
+unsafe fn SearchSysCache1(cacheId: c_int, key1: Datum) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCache1(cacheId, key1) as _
 }
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool {
     !tuple.is_null()
 }
-unsafe fn GETSTRUCT(_tuple: HeapTuple) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: access/htup_details.h
+unsafe fn GETSTRUCT(tuple: HeapTuple) -> *mut std::ffi::c_void {
+    crate::access::htup_details::GETSTRUCT(tuple as _) as _
 }
-unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!() // TODO: utils/cache/syscache.c
+unsafe fn ReleaseSysCache(tuple: HeapTuple) {
+    crate::utils::cache::syscache::ReleaseSysCache(tuple as _)
 }
 unsafe fn SysCacheGetAttr(
-    _cacheId: c_int,
-    _tup: HeapTuple,
-    _attributeNumber: c_int,
-    _isNull: *mut bool,
+    cacheId: c_int,
+    tup: HeapTuple,
+    attributeNumber: c_int,
+    isNull: *mut bool,
 ) -> Datum {
-    unimplemented!() // TODO: utils/cache/syscache.c
+    crate::utils::cache::syscache::SysCacheGetAttr(cacheId, tup as _, attributeNumber as _, isNull)
 }
-unsafe fn get_aggregate_argtypes(_aggref: *mut Aggref, _inputTypes: *mut Oid) -> c_int {
-    unimplemented!() // TODO: parser/parse_agg.c
+unsafe fn get_aggregate_argtypes(aggref: *mut Aggref, inputTypes: *mut Oid) -> c_int {
+    crate::parser::parse_agg::get_aggregate_argtypes(aggref as _, inputTypes)
 }
 pub unsafe fn resolve_aggregate_transtype(
-    _aggfuncid: Oid,
-    _aggtranstype: Oid,
-    _inputTypes: *mut Oid,
-    _numArguments: c_int,
+    aggfuncid: Oid,
+    aggtranstype: Oid,
+    inputTypes: *mut Oid,
+    numArguments: c_int,
 ) -> Oid {
-    unimplemented!() // TODO: parser/parse_agg.c
+    crate::parser::parse_agg::resolve_aggregate_transtype(aggfuncid, aggtranstype, inputTypes, numArguments)
 }
-unsafe fn agg_args_support_sendreceive(_aggref: *mut Aggref) -> bool {
-    unimplemented!() // TODO: parser/parse_agg.c
+unsafe fn agg_args_support_sendreceive(aggref: *mut Aggref) -> bool {
+    crate::parser::parse_agg::agg_args_support_sendreceive(aggref as _)
 }
-unsafe fn get_typlenbyval(_typid: Oid, _typlen: *mut int16, _typbyval: *mut bool) {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+unsafe fn get_typlenbyval(typid: Oid, typlen: *mut int16, typbyval: *mut bool) {
+    crate::utils::cache::lsyscache::get_typlenbyval(typid, typlen, typbyval)
 }
-unsafe fn get_typavgwidth(_typid: Oid, _typmod: int32) -> int32 {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+unsafe fn get_typavgwidth(typid: Oid, typmod: int32) -> int32 {
+    crate::utils::cache::lsyscache::get_typavgwidth(typid, typmod)
 }
-unsafe fn getTypeInputInfo(_type: Oid, _typInput: *mut Oid, _typIOParam: *mut Oid) {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+unsafe fn getTypeInputInfo(type_: Oid, typInput: *mut Oid, typIOParam: *mut Oid) {
+    crate::utils::cache::lsyscache::getTypeInputInfo(type_, typInput, typIOParam)
 }
-unsafe fn exprType(_expr: *mut Node) -> Oid {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+unsafe fn exprType(expr: *mut Node) -> Oid {
+    crate::nodes::nodeFuncs::exprType(expr as _)
 }
-unsafe fn exprTypmod(_expr: *mut Node) -> int32 {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+unsafe fn exprTypmod(expr: *mut Node) -> int32 {
+    crate::nodes::nodeFuncs::exprTypmod(expr as _)
 }
 unsafe fn expression_tree_walker(
-    _node: *mut Node,
-    _walker: *mut std::ffi::c_void,
-    _context: *mut std::ffi::c_void,
+    node: *mut Node,
+    walker: *mut std::ffi::c_void,
+    context: *mut std::ffi::c_void,
 ) -> bool {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::expression_tree_walker(node as _, core::mem::transmute(walker), context) as _
 }
-unsafe fn contain_volatile_functions(_clause: *mut Node) -> bool {
-    unimplemented!() // TODO: optimizer/util/clauses.c
+unsafe fn contain_volatile_functions(clause: *mut Node) -> bool {
+    crate::optimizer::util::clauses::contain_volatile_functions(clause as _)
 }
-unsafe fn cost_qual_eval_node(_cost: *mut QualCost, _qual: *mut Node, _root: *mut PlannerInfo) {
-    unimplemented!() // TODO: optimizer/path/costsize.c
+unsafe fn cost_qual_eval_node(cost: *mut QualCost, qual: *mut Node, root: *mut PlannerInfo) {
+    crate::optimizer::path::costsize::cost_qual_eval_node(cost as _, qual as _, root as _)
 }
 unsafe fn add_function_cost(
-    _root: *mut PlannerInfo,
-    _funcid: Oid,
-    _node: *mut Node,
-    _cost: *mut QualCost,
+    root: *mut PlannerInfo,
+    funcid: Oid,
+    node: *mut Node,
+    cost: *mut QualCost,
 ) {
-    unimplemented!() // TODO: optimizer/path/costsize.c
+    crate::optimizer::path::costsize::add_function_cost(root as _, funcid, node as _, cost as _)
 }
-unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char {
-    unimplemented!() // TODO: utils/builtins.h
+unsafe fn TextDatumGetCString(d: Datum) -> *mut c_char {
+    crate::utils::builtins::TextDatumGetCString(d)
 }
 unsafe fn OidInputFunctionCall(
-    _functionId: Oid,
-    _str: *mut c_char,
-    _typioparam: Oid,
-    _typmod: int32,
+    functionId: Oid,
+    str: *mut c_char,
+    typioparam: Oid,
+    typmod: int32,
 ) -> Datum {
-    unimplemented!() // TODO: utils/fmgr.c
+    crate::utils::fmgr::OidInputFunctionCall(functionId, str, typioparam, typmod)
 }
-unsafe fn datumIsEqual(_value1: Datum, _value2: Datum, _typByVal: bool, _typLen: isize) -> bool {
-    unimplemented!() // TODO: utils/adt/datum.c
+unsafe fn datumIsEqual(value1: Datum, value2: Datum, typByVal: bool, typLen: isize) -> bool {
+    crate::utils::adt::datum::datumIsEqual(value1, value2, typByVal, typLen as c_int)
 }
-unsafe fn equal(_a: *const std::ffi::c_void, _b: *const std::ffi::c_void) -> bool {
-    unimplemented!() // TODO: nodes/equalfuncs.c
+unsafe fn equal(a: *const std::ffi::c_void, b: *const std::ffi::c_void) -> bool {
+    crate::nodes::equalfuncs::equal(a, b)
 }
-unsafe fn linitial(_l: *mut List) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: nodes/pg_list.h
+unsafe fn linitial(l: *mut List) -> *mut std::ffi::c_void {
+    crate::nodes::pg_list::linitial(l)
 }
-unsafe fn lappend(_list: *mut List, _datum: *mut std::ffi::c_void) -> *mut List {
-    unimplemented!() // TODO: nodes/list.c
+unsafe fn lappend(list: *mut List, datum: *mut std::ffi::c_void) -> *mut List {
+    crate::nodes::list::lappend(list, datum)
 }
-unsafe fn lappend_int(_list: *mut List, _datum: c_int) -> *mut List {
-    unimplemented!() // TODO: nodes/list.c
+unsafe fn lappend_int(list: *mut List, datum: c_int) -> *mut List {
+    crate::nodes::list::lappend_int(list, datum)
 }
-unsafe fn list_make1(_datum: *mut std::ffi::c_void) -> *mut List {
-    unimplemented!() // TODO: nodes/pg_list.h
+unsafe fn list_make1(datum: *mut std::ffi::c_void) -> *mut List {
+    crate::list_make1!(datum)
 }
-unsafe fn list_length(_list: *mut List) -> c_int {
-    unimplemented!() // TODO: nodes/pg_list.h
+unsafe fn list_length(list: *mut List) -> c_int {
+    crate::nodes::pg_list::list_length(list)
 }
-unsafe fn list_free(_list: *mut List) {
-    unimplemented!() // TODO: nodes/list.c
+unsafe fn list_free(list: *mut List) {
+    crate::nodes::list::list_free(list)
 }
-unsafe fn lfirst_int(_lc: *mut ListCell) -> c_int {
-    unimplemented!() // TODO: nodes/pg_list.h
+unsafe fn lfirst_int(lc: *mut ListCell) -> c_int {
+    crate::nodes::pg_list::lfirst_int(lc)
 }
-unsafe fn DO_AGGSPLIT_COMBINE(_aggsplit: AggSplit) -> bool {
-    unimplemented!() // TODO: nodes/primnodes.h
+unsafe fn DO_AGGSPLIT_COMBINE(aggsplit: AggSplit) -> bool {
+    crate::nodes::nodes::DO_AGGSPLIT_COMBINE(core::mem::transmute(aggsplit))
 }
-unsafe fn DO_AGGSPLIT_SERIALIZE(_aggsplit: AggSplit) -> bool {
-    unimplemented!() // TODO: nodes/primnodes.h
+unsafe fn DO_AGGSPLIT_SERIALIZE(aggsplit: AggSplit) -> bool {
+    crate::nodes::nodes::DO_AGGSPLIT_SERIALIZE(core::mem::transmute(aggsplit))
 }
-unsafe fn DO_AGGSPLIT_DESERIALIZE(_aggsplit: AggSplit) -> bool {
-    unimplemented!() // TODO: nodes/primnodes.h
+unsafe fn DO_AGGSPLIT_DESERIALIZE(aggsplit: AggSplit) -> bool {
+    crate::nodes::nodes::DO_AGGSPLIT_DESERIALIZE(core::mem::transmute(aggsplit))
 }
-unsafe fn DO_AGGSPLIT_SKIPFINAL(_aggsplit: AggSplit) -> bool {
-    unimplemented!() // TODO: nodes/primnodes.h
+unsafe fn DO_AGGSPLIT_SKIPFINAL(aggsplit: AggSplit) -> bool {
+    crate::nodes::nodes::DO_AGGSPLIT_SKIPFINAL(core::mem::transmute(aggsplit))
 }

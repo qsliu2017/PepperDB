@@ -68,6 +68,4 @@ pub unsafe fn GinTupleGetFirst(tup: *mut GinTuple) -> ItemPointer {
 /// ```c
 /// extern int _gin_compare_tuples(GinTuple *a, GinTuple *b, SortSupport ssup);
 /// ```
-pub unsafe fn _gin_compare_tuples(a: *mut GinTuple, b: *mut GinTuple, ssup: SortSupport) -> c_int {
-    unimplemented!()
-}
+pub unsafe fn _gin_compare_tuples(a: *mut GinTuple, b: *mut GinTuple, ssup: SortSupport) -> c_int { unimplemented!() }

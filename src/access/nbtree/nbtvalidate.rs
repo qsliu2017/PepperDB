@@ -538,7 +538,7 @@ pub unsafe fn btadjustmembers(
 /// `i` must be `< (*list).n_members`, and each member pointer must reference a
 /// valid CatCTup.
 #[inline]
-unsafe fn catclist_member_tuple(
+pub unsafe fn catclist_member_tuple(
     list: *const CatCList,
     i: usize,
 ) -> *const crate::access::htup_details::HeapTupleData {
@@ -552,7 +552,7 @@ unsafe fn catclist_member_tuple(
 ///
 /// # Safety
 /// `name` must point at a valid NameData.
-unsafe fn name_str(name: *const NameData) -> String {
+pub unsafe fn name_str(name: *const NameData) -> String {
     let p = NameStr(&*name);
     let cs = core::ffi::CStr::from_ptr(p);
     cs.to_string_lossy().into_owned()

@@ -336,17 +336,16 @@ pub unsafe fn FindPostmasterChildByPid(pid: c_int) -> *mut PMChild {
 // Local stubs for not-yet-ported callees.
 // ----------------------------------------------------------------------------
 
-/// STUB: pmsignal.c MarkPostmasterChildSlotAssigned (not yet ported). // TODO
-unsafe fn MarkPostmasterChildSlotAssigned(_slot: c_int) {
-    unimplemented!()
+unsafe fn MarkPostmasterChildSlotAssigned(slot: c_int) {
+    crate::storage::ipc::pmsignal::MarkPostmasterChildSlotAssigned(slot)
 }
 
-/// STUB: pmsignal.c MarkPostmasterChildSlotUnassigned (not yet ported). // TODO
-unsafe fn MarkPostmasterChildSlotUnassigned(_slot: c_int) -> bool {
-    unimplemented!()
+unsafe fn MarkPostmasterChildSlotUnassigned(slot: c_int) -> bool {
+    crate::storage::ipc::pmsignal::MarkPostmasterChildSlotUnassigned(slot)
 }
 
-/// STUB: launch_backend.c PostmasterChildName (not yet ported). // TODO
+/// launch_backend.c PostmasterChildName: backend-type description for log messages.
+/// TODO(pg-port): real GetBackendTypeDesc switch; a placeholder suffices for bring-up logs.
 unsafe fn PostmasterChildName(_child_type: BackendType) -> *const c_char {
-    unimplemented!()
+    c"postmaster child".as_ptr()
 }

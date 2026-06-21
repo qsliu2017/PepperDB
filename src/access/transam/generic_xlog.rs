@@ -616,45 +616,31 @@ extern "C" {
     fn memset(s: *mut c_void, c: c_int, n: usize) -> *mut c_void;
 }
 
-unsafe fn RelationNeedsWAL(_relation: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_relation as _) }
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     unimplemented!() // TODO: storage/bufmgr.h
 }
-unsafe fn BufferIsInvalid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/buf.h
-}
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn BufferIsInvalid(_buffer: Buffer) -> bool { crate::storage::buf::BufferIsInvalid(_buffer as _) }
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer as _) }
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.h
 }
 unsafe fn UnlockReleaseBuffer(_buffer: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.h
 }
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO: storage/bufpage.h
-}
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(_page as _, _lsn as _) }
 unsafe fn XLogBeginInsert() {
     unimplemented!() // TODO: access/xloginsert.h
 }
-unsafe fn XLogRegisterBuffer(_block_id: u8, _buffer: Buffer, _flags: u8) {
-    unimplemented!() // TODO: access/xloginsert.h
-}
-unsafe fn XLogRegisterBufData(_block_id: u8, _data: *const c_char, _len: usize) {
-    unimplemented!() // TODO: access/xloginsert.h
-}
+unsafe fn XLogRegisterBuffer(_block_id: u8, _buffer: Buffer, _flags: u8) { crate::access::transam::xloginsert::XLogRegisterBuffer(_block_id as _, _buffer as _, _flags as _) }
+unsafe fn XLogRegisterBufData(_block_id: u8, _data: *const c_char, _len: usize) { crate::access::transam::xloginsert::XLogRegisterBufData(_block_id as _, _data as _, _len as _) }
 unsafe fn XLogInsert(_rmid: RmgrId, _info: u8) -> XLogRecPtr {
     unimplemented!() // TODO: access/xloginsert.h
 }
 unsafe fn XLogRecMaxBlockId(_record: *mut XLogReaderState) -> u8 {
     unimplemented!() // TODO: access/xlogreader.h
 }
-unsafe fn XLogRecHasBlockRef(_record: *mut XLogReaderState, _block_id: u8) -> bool {
-    unimplemented!() // TODO: access/xlogreader.h
-}
+unsafe fn XLogRecHasBlockRef(_record: *mut XLogReaderState, _block_id: u8) -> bool { crate::access::transam::xlogreader::XLogRecHasBlockRef(_record as _, _block_id as _) }
 unsafe fn XLogReadBufferForRedo(
     _record: *mut XLogReaderState,
     _block_id: u8,
@@ -669,12 +655,8 @@ unsafe fn XLogRecGetBlockData(
 ) -> *mut c_char {
     unimplemented!() // TODO: access/xlogreader.h
 }
-unsafe fn mask_page_lsn_and_checksum(_page: *mut c_char) {
-    unimplemented!() // TODO: access/bufmask.h
-}
-unsafe fn mask_unused_space(_page: *mut c_char) {
-    unimplemented!() // TODO: access/bufmask.h
-}
+unsafe fn mask_page_lsn_and_checksum(_page: *mut c_char) { crate::access::common::bufmask::mask_page_lsn_and_checksum(_page as _) }
+unsafe fn mask_unused_space(_page: *mut c_char) { crate::access::common::bufmask::mask_unused_space(_page as _) }
 
 // Stub types for unported dependencies.
 pub type Relation = *mut c_void; // TODO: utils/rel.h

@@ -58,6 +58,7 @@ pub struct FormData_pg_index {
     pub indislive: bool,
     /* is this index the identity for replication? */
     pub indisreplident: bool,
+    pub indkey: crate::c::int2vector,
 }
 
 /*

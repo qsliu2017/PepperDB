@@ -96,24 +96,12 @@ pub struct GinState {
 }
 
 /* ginutil.c */
-pub unsafe fn ginoptions(reloptions: Datum, validate: bool) -> *mut bytea {
-    unimplemented!()
-}
-pub unsafe fn initGinState(state: *mut GinState, index: Relation) {
-    unimplemented!()
-}
-pub unsafe fn GinNewBuffer(index: Relation) -> Buffer {
-    unimplemented!()
-}
-pub unsafe fn GinInitBuffer(b: Buffer, f: uint32) {
-    unimplemented!()
-}
-pub unsafe fn GinInitPage(page: Page, f: uint32, pageSize: Size) {
-    unimplemented!()
-}
-pub unsafe fn GinInitMetabuffer(b: Buffer) {
-    unimplemented!()
-}
+pub unsafe fn ginoptions(reloptions: Datum, validate: bool) -> *mut bytea { unimplemented!() }
+pub unsafe fn initGinState(state: *mut GinState, index: Relation) { unimplemented!() }
+pub unsafe fn GinNewBuffer(index: Relation) -> Buffer { unimplemented!() }
+pub unsafe fn GinInitBuffer(b: Buffer, f: uint32) { unimplemented!() }
+pub unsafe fn GinInitPage(page: Page, f: uint32, pageSize: Size) { unimplemented!() }
+pub unsafe fn GinInitMetabuffer(b: Buffer) { unimplemented!() }
 pub unsafe fn ginCompareEntries(
     ginstate: *mut GinState,
     attnum: OffsetNumber,
@@ -121,9 +109,7 @@ pub unsafe fn ginCompareEntries(
     categorya: GinNullCategory,
     b: Datum,
     categoryb: GinNullCategory,
-) -> c_int {
-    unimplemented!()
-}
+) -> c_int { unimplemented!() }
 pub unsafe fn ginCompareAttEntries(
     ginstate: *mut GinState,
     attnuma: OffsetNumber,
@@ -132,9 +118,7 @@ pub unsafe fn ginCompareAttEntries(
     attnumb: OffsetNumber,
     b: Datum,
     categoryb: GinNullCategory,
-) -> c_int {
-    unimplemented!()
-}
+) -> c_int { unimplemented!() }
 pub unsafe fn ginExtractEntries(
     ginstate: *mut GinState,
     attnum: OffsetNumber,
@@ -142,35 +126,23 @@ pub unsafe fn ginExtractEntries(
     isNull: bool,
     nentries: *mut int32,
     categories: *mut *mut GinNullCategory,
-) -> *mut Datum {
-    unimplemented!()
-}
+) -> *mut Datum { unimplemented!() }
 
-pub unsafe fn gintuple_get_attrnum(ginstate: *mut GinState, tuple: IndexTuple) -> OffsetNumber {
-    unimplemented!()
-}
+pub unsafe fn gintuple_get_attrnum(ginstate: *mut GinState, tuple: IndexTuple) -> OffsetNumber { unimplemented!() }
 pub unsafe fn gintuple_get_key(
     ginstate: *mut GinState,
     tuple: IndexTuple,
     category: *mut GinNullCategory,
-) -> Datum {
-    unimplemented!()
-}
-pub unsafe fn ginbuildphasename(phasenum: int64) -> *mut c_char {
-    unimplemented!()
-}
+) -> Datum { unimplemented!() }
+pub unsafe fn ginbuildphasename(phasenum: int64) -> *mut c_char { unimplemented!() }
 
 /* gininsert.c */
 pub unsafe fn ginbuild(
     heap: Relation,
     index: Relation,
     indexInfo: *mut IndexInfo,
-) -> *mut IndexBuildResult {
-    unimplemented!()
-}
-pub unsafe fn ginbuildempty(index: Relation) {
-    unimplemented!()
-}
+) -> *mut IndexBuildResult { unimplemented!() }
+pub unsafe fn ginbuildempty(index: Relation) { unimplemented!() }
 pub unsafe fn gininsert(
     index: Relation,
     values: *mut Datum,
@@ -180,9 +152,7 @@ pub unsafe fn gininsert(
     checkUnique: IndexUniqueCheck,
     indexUnchanged: bool,
     indexInfo: *mut IndexInfo,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { unimplemented!() }
 pub unsafe fn ginEntryInsert(
     ginstate: *mut GinState,
     attnum: OffsetNumber,
@@ -191,9 +161,7 @@ pub unsafe fn ginEntryInsert(
     items: *mut ItemPointerData,
     nitem: uint32,
     buildStats: *mut GinStatsData,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 /* ginbtree.c */
 
@@ -297,23 +265,15 @@ pub unsafe fn ginFindLeafPage(
     btree: GinBtree,
     searchMode: bool,
     rootConflictCheck: bool,
-) -> *mut GinBtreeStack {
-    unimplemented!()
-}
-pub unsafe fn ginStepRight(buffer: Buffer, index: Relation, lockmode: c_int) -> Buffer {
-    unimplemented!()
-}
-pub unsafe fn freeGinBtreeStack(stack: *mut GinBtreeStack) {
-    unimplemented!()
-}
+) -> *mut GinBtreeStack { unimplemented!() }
+pub unsafe fn ginStepRight(buffer: Buffer, index: Relation, lockmode: c_int) -> Buffer { unimplemented!() }
+pub unsafe fn freeGinBtreeStack(stack: *mut GinBtreeStack) { unimplemented!() }
 pub unsafe fn ginInsertValue(
     btree: GinBtree,
     stack: *mut GinBtreeStack,
     insertdata: *mut c_void,
     buildStats: *mut GinStatsData,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 /* ginentrypage.c */
 pub unsafe fn GinFormTuple(
@@ -325,18 +285,14 @@ pub unsafe fn GinFormTuple(
     dataSize: Size,
     nipd: c_int,
     errorTooBig: bool,
-) -> IndexTuple {
-    unimplemented!()
-}
+) -> IndexTuple { crate::access::gin::ginentrypage::GinFormTuple(ginstate, attnum, key, category, data, dataSize, nipd, errorTooBig) }
 pub unsafe fn ginPrepareEntryScan(
     btree: GinBtree,
     attnum: OffsetNumber,
     key: Datum,
     category: GinNullCategory,
     ginstate: *mut GinState,
-) {
-    unimplemented!()
-}
+) { crate::access::gin::ginentrypage::ginPrepareEntryScan(btree, attnum, key, category, ginstate) }
 pub unsafe fn ginEntryFillRoot(
     btree: GinBtree,
     root: Page,
@@ -344,60 +300,42 @@ pub unsafe fn ginEntryFillRoot(
     lpage: Page,
     rblkno: BlockNumber,
     rpage: Page,
-) {
-    unimplemented!()
-}
+) { crate::access::gin::ginentrypage::ginEntryFillRoot(btree, root, lblkno, lpage, rblkno, rpage) }
 pub unsafe fn ginReadTuple(
     ginstate: *mut GinState,
     attnum: OffsetNumber,
     itup: IndexTuple,
     nitems: *mut c_int,
-) -> ItemPointer {
-    unimplemented!()
-}
+) -> ItemPointer { crate::access::gin::ginentrypage::ginReadTuple(ginstate, attnum, itup, nitems) }
 
 /* gindatapage.c */
 pub unsafe fn GinDataLeafPageGetItems(
     page: Page,
     nitems: *mut c_int,
     advancePast: ItemPointerData,
-) -> ItemPointer {
-    unimplemented!()
-}
-pub unsafe fn GinDataLeafPageGetItemsToTbm(page: Page, tbm: *mut TIDBitmap) -> c_int {
-    unimplemented!()
-}
+) -> ItemPointer { unimplemented!() }
+pub unsafe fn GinDataLeafPageGetItemsToTbm(page: Page, tbm: *mut TIDBitmap) -> c_int { unimplemented!() }
 pub unsafe fn createPostingTree(
     index: Relation,
     items: *mut ItemPointerData,
     nitems: uint32,
     buildStats: *mut GinStatsData,
     entrybuffer: Buffer,
-) -> BlockNumber {
-    unimplemented!()
-}
-pub unsafe fn GinDataPageAddPostingItem(page: Page, data: *mut PostingItem, offset: OffsetNumber) {
-    unimplemented!()
-}
-pub unsafe fn GinPageDeletePostingItem(page: Page, offset: OffsetNumber) {
-    unimplemented!()
-}
+) -> BlockNumber { unimplemented!() }
+pub unsafe fn GinDataPageAddPostingItem(page: Page, data: *mut PostingItem, offset: OffsetNumber) { unimplemented!() }
+pub unsafe fn GinPageDeletePostingItem(page: Page, offset: OffsetNumber) { unimplemented!() }
 pub unsafe fn ginInsertItemPointers(
     index: Relation,
     rootBlkno: BlockNumber,
     items: *mut ItemPointerData,
     nitem: uint32,
     buildStats: *mut GinStatsData,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 pub unsafe fn ginScanBeginPostingTree(
     btree: GinBtree,
     index: Relation,
     rootBlkno: BlockNumber,
-) -> *mut GinBtreeStack {
-    unimplemented!()
-}
+) -> *mut GinBtreeStack { unimplemented!() }
 pub unsafe fn ginDataFillRoot(
     btree: GinBtree,
     root: Page,
@@ -405,9 +343,7 @@ pub unsafe fn ginDataFillRoot(
     lpage: Page,
     rblkno: BlockNumber,
     rpage: Page,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 /*
  * This is declared in ginvacuum.c, but is passed between ginVacuumItemPointers
@@ -420,9 +356,7 @@ pub unsafe fn ginVacuumPostingTreeLeaf(
     indexrel: Relation,
     buffer: Buffer,
     gvs: *mut GinVacuumState,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 /* ginscan.c */
 
@@ -540,37 +474,23 @@ pub struct GinScanOpaqueData {
 
 pub type GinScanOpaque = *mut GinScanOpaqueData;
 
-pub unsafe fn ginbeginscan(rel: Relation, nkeys: c_int, norderbys: c_int) -> IndexScanDesc {
-    unimplemented!()
-}
-pub unsafe fn ginendscan(scan: IndexScanDesc) {
-    unimplemented!()
-}
+pub unsafe fn ginbeginscan(rel: Relation, nkeys: c_int, norderbys: c_int) -> IndexScanDesc { unimplemented!() }
+pub unsafe fn ginendscan(scan: IndexScanDesc) { unimplemented!() }
 pub unsafe fn ginrescan(
     scan: IndexScanDesc,
     scankey: ScanKey,
     nscankeys: c_int,
     orderbys: ScanKey,
     norderbys: c_int,
-) {
-    unimplemented!()
-}
-pub unsafe fn ginNewScanKey(scan: IndexScanDesc) {
-    unimplemented!()
-}
-pub unsafe fn ginFreeScanKeys(so: GinScanOpaque) {
-    unimplemented!()
-}
+) { unimplemented!() }
+pub unsafe fn ginNewScanKey(scan: IndexScanDesc) { unimplemented!() }
+pub unsafe fn ginFreeScanKeys(so: GinScanOpaque) { unimplemented!() }
 
 /* ginget.c */
-pub unsafe fn gingetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> int64 {
-    unimplemented!()
-}
+pub unsafe fn gingetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> int64 { unimplemented!() }
 
 /* ginlogic.c */
-pub unsafe fn ginInitConsistentFunction(ginstate: *mut GinState, key: GinScanKey) {
-    unimplemented!()
-}
+pub unsafe fn ginInitConsistentFunction(ginstate: *mut GinState, key: GinScanKey) { unimplemented!() }
 
 /* ginvacuum.c */
 pub unsafe fn ginbulkdelete(
@@ -578,36 +498,26 @@ pub unsafe fn ginbulkdelete(
     stats: *mut IndexBulkDeleteResult,
     callback: IndexBulkDeleteCallback,
     callback_state: *mut c_void,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!()
-}
+) -> *mut IndexBulkDeleteResult { unimplemented!() }
 pub unsafe fn ginvacuumcleanup(
     info: *mut IndexVacuumInfo,
     stats: *mut IndexBulkDeleteResult,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!()
-}
+) -> *mut IndexBulkDeleteResult { unimplemented!() }
 pub unsafe fn ginVacuumItemPointers(
     gvs: *mut GinVacuumState,
     items: *mut ItemPointerData,
     nitem: c_int,
     nremaining: *mut c_int,
-) -> ItemPointer {
-    unimplemented!()
-}
+) -> ItemPointer { unimplemented!() }
 
 /* ginvalidate.c */
-pub unsafe fn ginvalidate(opclassoid: Oid) -> bool {
-    unimplemented!()
-}
+pub unsafe fn ginvalidate(opclassoid: Oid) -> bool { crate::access::gin::ginvalidate::ginvalidate(opclassoid) }
 pub unsafe fn ginadjustmembers(
     opfamilyoid: Oid,
     opclassoid: Oid,
     operators: *mut List,
     functions: *mut List,
-) {
-    unimplemented!()
-}
+) { crate::access::gin::ginvalidate::ginadjustmembers(opfamilyoid, opclassoid, operators, functions) }
 
 /* ginbulk.c */
 #[repr(C)]
@@ -632,9 +542,7 @@ pub struct BuildAccumulator {
     pub tree_walk: RBTreeIterator,
 }
 
-pub unsafe fn ginInitBA(accum: *mut BuildAccumulator) {
-    unimplemented!()
-}
+pub unsafe fn ginInitBA(accum: *mut BuildAccumulator) { unimplemented!() }
 pub unsafe fn ginInsertBAEntries(
     accum: *mut BuildAccumulator,
     heapptr: ItemPointer,
@@ -642,21 +550,15 @@ pub unsafe fn ginInsertBAEntries(
     entries: *mut Datum,
     categories: *mut GinNullCategory,
     nentries: int32,
-) {
-    unimplemented!()
-}
-pub unsafe fn ginBeginBAScan(accum: *mut BuildAccumulator) {
-    unimplemented!()
-}
+) { unimplemented!() }
+pub unsafe fn ginBeginBAScan(accum: *mut BuildAccumulator) { unimplemented!() }
 pub unsafe fn ginGetBAEntry(
     accum: *mut BuildAccumulator,
     attnum: *mut OffsetNumber,
     key: *mut Datum,
     category: *mut GinNullCategory,
     n: *mut uint32,
-) -> *mut ItemPointerData {
-    unimplemented!()
-}
+) -> *mut ItemPointerData { unimplemented!() }
 
 /* ginfast.c */
 
@@ -668,9 +570,7 @@ pub struct GinTupleCollector {
     pub sumsize: uint32,
 }
 
-pub unsafe fn ginHeapTupleFastInsert(ginstate: *mut GinState, collector: *mut GinTupleCollector) {
-    unimplemented!()
-}
+pub unsafe fn ginHeapTupleFastInsert(ginstate: *mut GinState, collector: *mut GinTupleCollector) { unimplemented!() }
 pub unsafe fn ginHeapTupleFastCollect(
     ginstate: *mut GinState,
     collector: *mut GinTupleCollector,
@@ -678,18 +578,14 @@ pub unsafe fn ginHeapTupleFastCollect(
     value: Datum,
     isNull: bool,
     ht_ctid: ItemPointer,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 pub unsafe fn ginInsertCleanup(
     ginstate: *mut GinState,
     full_clean: bool,
     fill_fsm: bool,
     forceCleanup: bool,
     stats: *mut IndexBulkDeleteResult,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 /* ginpostinglist.c */
 
@@ -698,39 +594,29 @@ pub unsafe fn ginCompressPostingList(
     nipd: c_int,
     maxsize: c_int,
     nwritten: *mut c_int,
-) -> *mut GinPostingList {
-    unimplemented!()
-}
+) -> *mut GinPostingList { unimplemented!() }
 pub unsafe fn ginPostingListDecodeAllSegmentsToTbm(
     ptr: *mut GinPostingList,
     len: c_int,
     tbm: *mut TIDBitmap,
-) -> c_int {
-    unimplemented!()
-}
+) -> c_int { unimplemented!() }
 
 pub unsafe fn ginPostingListDecodeAllSegments(
     segment: *mut GinPostingList,
     len: c_int,
     ndecoded_out: *mut c_int,
-) -> ItemPointer {
-    unimplemented!()
-}
+) -> ItemPointer { unimplemented!() }
 pub unsafe fn ginPostingListDecode(
     plist: *mut GinPostingList,
     ndecoded_out: *mut c_int,
-) -> ItemPointer {
-    unimplemented!()
-}
+) -> ItemPointer { unimplemented!() }
 pub unsafe fn ginMergeItemPointers(
     a: *mut ItemPointerData,
     na: uint32,
     b: *mut ItemPointerData,
     nb: uint32,
     nmerged: *mut c_int,
-) -> ItemPointer {
-    unimplemented!()
-}
+) -> ItemPointer { crate::access::gin::ginpostinglist::ginMergeItemPointers(a, na, b, nb, nmerged) }
 
 /*
  * Merging the results of several gin scans compares item pointers a lot,
@@ -747,6 +633,4 @@ pub unsafe fn ginCompareItemPointers(a: ItemPointer, b: ItemPointer) -> c_int {
     pg_cmp_u64(ia, ib)
 }
 
-pub unsafe fn ginTraverseLock(buffer: Buffer, searchMode: bool) -> c_int {
-    unimplemented!()
-}
+pub unsafe fn ginTraverseLock(buffer: Buffer, searchMode: bool) -> c_int { crate::access::gin::ginbtree::ginTraverseLock(buffer, searchMode) }

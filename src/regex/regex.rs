@@ -134,7 +134,7 @@ pub unsafe fn pg_regcomp(
     flags: c_int,
     collation: Oid,
 ) -> c_int {
-    unimplemented!()
+    crate::regex::regcomp::pg_regcomp(re, string as _, len as _, flags, collation)
 }
 
 pub unsafe fn pg_regexec(
@@ -147,7 +147,16 @@ pub unsafe fn pg_regexec(
     pmatch: *mut regmatch_t,
     flags: c_int,
 ) -> c_int {
-    unimplemented!()
+    crate::regex::regexec::pg_regexec(
+        re,
+        string as _,
+        len as _,
+        search_start as _,
+        details as _,
+        nmatch as _,
+        pmatch as _,
+        flags,
+    )
 }
 
 pub unsafe fn pg_regprefix(
@@ -155,11 +164,11 @@ pub unsafe fn pg_regprefix(
     string: *mut *mut pg_wchar,
     slength: *mut Size,
 ) -> c_int {
-    unimplemented!()
+    crate::regex::regprefix::pg_regprefix(re, string as _, slength as _)
 }
 
 pub unsafe fn pg_regfree(re: *mut regex_t) {
-    unimplemented!()
+    crate::regex::regfree::pg_regfree(re)
 }
 
 pub unsafe fn pg_regerror(
@@ -168,7 +177,7 @@ pub unsafe fn pg_regerror(
     errbuf: *mut c_char,
     errbuf_size: Size,
 ) -> Size {
-    unimplemented!()
+    crate::regex::regerror::pg_regerror(errcode, preg as _, errbuf, errbuf_size)
 }
 
 /* regexp.c */
@@ -177,7 +186,7 @@ pub unsafe fn RE_compile_and_cache(
     cflags: c_int,
     collation: Oid,
 ) -> *mut regex_t {
-    unimplemented!()
+    crate::utils::adt::regexp::RE_compile_and_cache(text_re, cflags, collation)
 }
 
 pub unsafe fn RE_compile_and_execute(
@@ -189,5 +198,7 @@ pub unsafe fn RE_compile_and_execute(
     nmatch: c_int,
     pmatch: *mut regmatch_t,
 ) -> bool {
-    unimplemented!()
+    crate::utils::adt::regexp::RE_compile_and_execute(
+        text_re, dat, dat_len, cflags, collation, nmatch, pmatch as _,
+    )
 }

@@ -59,12 +59,21 @@ pub struct pg_be_sasl_mech {
     pub max_message_length: c_int,
 }
 
+// OAuth SASL mechanism (auth-oauth.c) is unported; export a stub so the backend
+// links. OAuth is not exercised by the regression suite. (The real SCRAM mech
+// is defined in auth_scram.rs.)
+#[no_mangle]
+pub static pg_be_oauth_mech: pg_be_sasl_mech = pg_be_sasl_mech {
+    get_mechanisms: None,
+    init: None,
+    exchange: None,
+    max_message_length: 0,
+};
+
 /* Common implementation for auth.c */
 pub unsafe fn CheckSASLAuth(
     mech: *const pg_be_sasl_mech,
     port: *mut Port,
     shadow_pass: *mut c_char,
     logdetail: *mut *const c_char,
-) -> c_int {
-    unimplemented!()
-}
+) -> c_int { crate::libpq::auth_sasl::CheckSASLAuth(mech as _, port as _, shadow_pass as _, logdetail as _) }

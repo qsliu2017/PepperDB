@@ -136,8 +136,8 @@ const SubscriptionObjectIndexId: Oid = 6102;
 const DatabaseRelationId: Oid        = 1262;
 
 /* syscache IDs  TODO(pg-port) */
-const SUBSCRIPTIONNAME: c_int = 310;
-const SUBSCRIPTIONOID:  c_int = 311;
+const SUBSCRIPTIONNAME: c_int = 66;
+const SUBSCRIPTIONOID:  c_int = 67;
 
 /* lock modes  TODO(pg-port) */
 const NoLock:             c_int = 0;

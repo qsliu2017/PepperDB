@@ -71,8 +71,8 @@ unsafe fn copyObject<T>(_node: *const T) -> *mut T {
 /// a PathTarget's cost and width fields.
 ///
 /// TODO(pg-port): optimizer/path/costsize.c not yet translated.
-unsafe fn set_pathtarget_cost_width(_root: *mut PlannerInfo, _target: *mut PathTarget) {
-    unimplemented!("set_pathtarget_cost_width: costsize.c not yet translated")
+unsafe fn set_pathtarget_cost_width(root: *mut PlannerInfo, target: *mut PathTarget) {
+    crate::optimizer::path::costsize::set_pathtarget_cost_width(root, target);
 }
 
 /// `remove_nulling_relids(node, removable_relids, except_relids)`
@@ -80,11 +80,11 @@ unsafe fn set_pathtarget_cost_width(_root: *mut PlannerInfo, _target: *mut PathT
 ///
 /// TODO(pg-port): rewrite/rewriteManip.c not yet translated.
 unsafe fn remove_nulling_relids(
-    _node: *mut Node,
-    _removable_relids: *mut Bitmapset,
-    _except_relids: *mut Bitmapset,
+    node: *mut Node,
+    removable_relids: *mut Bitmapset,
+    except_relids: *mut Bitmapset,
 ) -> *mut Node {
-    unimplemented!("remove_nulling_relids: rewriteManip.c not yet translated")
+    crate::rewrite::rewriteManip::remove_nulling_relids(node, removable_relids as _, except_relids as _)
 }
 
 // ----------------------------------------------------------------------------
@@ -538,6 +538,14 @@ pub unsafe fn grouping_is_hashable(groupClause: *mut List) -> bool {
 //*****************************************************************************
 //      PathTarget manipulation functions
 //*****************************************************************************
+
+/// create_pathtarget
+///   Build a PathTarget from a targetlist, with cost/width computed.
+pub unsafe fn create_pathtarget(root: *mut PlannerInfo, tlist: *mut List) -> *mut PathTarget {
+    let target = make_pathtarget_from_tlist(tlist);
+    crate::optimizer::path::costsize::set_pathtarget_cost_width(root, target);
+    target
+}
 
 /// make_pathtarget_from_tlist
 ///   Construct a PathTarget equivalent to the given targetlist.

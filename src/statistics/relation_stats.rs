@@ -32,7 +32,7 @@ const INT4OID: Oid = 23;
 const FLOAT4OID: Oid = 700;
 
 /* Syscache id for pg_class by relid. */
-const RELOID: c_int = 0; // TODO: real RELOID once syscache.h ported
+const RELOID: c_int = 57; // TODO: real RELOID once syscache.h ported
 
 /* Attribute numbers from pg_class.h */
 const Anum_pg_class_relpages: c_int = 28;

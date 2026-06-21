@@ -45,17 +45,17 @@ pub type LOCKMODE = c_int;
 
 /// STUB: `relation_open` (access/relation.c not ported).
 unsafe fn relation_open(_relation_id: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!("TODO(pg-port): relation_open (access/relation.c not ported)")
+    crate::access::common::relation::relation_open(_relation_id, _lockmode)
 }
 
 /// STUB: `try_relation_open` (access/relation.c not ported).
 unsafe fn try_relation_open(_relation_id: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!("TODO(pg-port): try_relation_open (access/relation.c not ported)")
+    crate::access::common::relation::try_relation_open(_relation_id, _lockmode)
 }
 
 /// STUB: `relation_openrv` (access/relation.c not ported).
 unsafe fn relation_openrv(_relation: *const RangeVar, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!("TODO(pg-port): relation_openrv (access/relation.c not ported)")
+    crate::access::common::relation::relation_openrv(_relation as _, _lockmode)
 }
 
 /// STUB: `relation_openrv_extended` (access/relation.c not ported).
@@ -64,12 +64,12 @@ unsafe fn relation_openrv_extended(
     _lockmode: LOCKMODE,
     _missing_ok: bool,
 ) -> Relation {
-    unimplemented!("TODO(pg-port): relation_openrv_extended (access/relation.c not ported)")
+    crate::access::common::relation::relation_openrv_extended(_relation as _, _lockmode, _missing_ok)
 }
 
 /// STUB: `relation_close` (access/relation.c not ported).
 unsafe fn relation_close(_relation: Relation, _lockmode: LOCKMODE) {
-    unimplemented!("TODO(pg-port): relation_close (access/relation.c not ported)")
+    crate::access::common::relation::relation_close(_relation, _lockmode)
 }
 
 /// `validate_relation_kind` -- check the relation's kind.

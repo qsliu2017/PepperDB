@@ -58,157 +58,35 @@ pub type RegProcedure = Oid;
 pub type Selectivity = f64;
 pub type LOCKMODE = c_int;
 
-#[repr(C)]
-pub struct RelationData {
-    pub rd_rel: *mut FormData_pg_class,
-    pub rd_att: *mut TupleDescData,
-    pub rd_index: *mut FormData_pg_index,
-    pub rd_indextuple: *mut HeapTupleData,
-    pub rd_tableam: *mut TableAmRoutine,
-    pub rd_indam: *mut IndexAmRoutine,
-    pub rd_opfamily: *mut Oid,
-    pub rd_opcintype: *mut Oid,
-    pub rd_indcollation: *mut Oid,
-    pub rd_indoption: *mut i16,
-    pub trigdesc: *mut TriggerDesc,
-}
+pub use crate::utils::rel::RelationData;
 
-#[repr(C)]
-pub struct HeapTupleData {
-    pub t_data: *mut HeapTupleHeaderData,
-}
+pub use crate::access::htup_details::{HeapTupleData, HeapTupleHeaderData};
 pub type HeapTuple = *mut HeapTupleData;
 
-#[repr(C)]
-pub struct HeapTupleHeaderData {
-    _priv: [u8; 0],
-}
+pub use crate::catalog::pg_class::FormData_pg_class;
 
-#[repr(C)]
-pub struct FormData_pg_class {
-    pub relkind: i8,
-    pub relhasindex: bool,
-    pub reltablespace: Oid,
-    pub relpages: i32,
-    pub reltuples: f32,
-    pub relallvisible: i32,
-    pub relispartition: bool,
-    pub relam: Oid,
-}
-
-#[repr(C)]
-pub struct FormData_pg_index {
-    pub indexrelid: Oid,
-    pub indnatts: i16,
-    pub indnkeyatts: i16,
-    pub indisvalid: bool,
-    pub indcheckxmin: bool,
-    pub indisunique: bool,
-    pub indnullsnotdistinct: bool,
-    pub indimmediate: bool,
-    pub indisexclusion: bool,
-    pub indkey: IntArray,
-}
+pub use crate::catalog::pg_index::FormData_pg_index;
 pub type Form_pg_index = *mut FormData_pg_index;
 
-#[repr(C)]
-pub struct IntArray {
-    pub values: [i16; 32],
-}
+pub use crate::access::common::tupdesc::{
+    AttrDefault, CompactAttribute, ConstrCheck, TupleConstr, TupleDescData,
+};
 
-#[repr(C)]
-pub struct TupleDescData {
-    pub natts: c_int,
-    pub constr: *mut TupleConstr,
-}
-
-#[repr(C)]
-pub struct TupleConstr {
-    pub check: *mut ConstrCheck,
-    pub defval: *mut AttrDefault,
-    pub num_check: u16,
-    pub num_defval: u16,
-    pub has_not_null: bool,
-    pub has_generated_stored: bool,
-}
-
-#[repr(C)]
-pub struct ConstrCheck {
-    pub ccname: *mut c_char,
-    pub ccbin: *mut c_char,
-    pub ccvalid: bool,
-    pub ccenforced: bool,
-    pub ccnoinherit: bool,
-}
-
-#[repr(C)]
-pub struct AttrDefault {
-    pub adnum: AttrNumber,
-    pub adbin: *mut c_char,
-}
-
-#[repr(C)]
-pub struct FormData_pg_attribute {
-    pub atttypid: Oid,
-    pub atttypmod: i32,
-    pub attcollation: Oid,
-    pub attisdropped: bool,
-    pub atthasmissing: bool,
-    pub attnotnull: bool,
-    pub attgenerated: i8,
-    pub attnum: AttrNumber,
-}
+pub use crate::catalog::pg_attribute::FormData_pg_attribute;
 pub type Form_pg_attribute = *mut FormData_pg_attribute;
 
-#[repr(C)]
-pub struct CompactAttribute {
-    pub attnullability: u8,
-    pub attisdropped: bool,
-}
-
 /* attnullability values */
-pub const ATTNULLABLE_VALID: u8 = 2;
-pub const ATTNULLABLE_UNKNOWN: u8 = 0;
+pub use crate::access::common::tupdesc::{ATTNULLABLE_UNKNOWN, ATTNULLABLE_VALID};
 
-#[repr(C)]
-pub struct TableAmRoutine {
-    pub scan_bitmap_next_tuple: Option<unsafe extern "C" fn()>,
-    pub scan_set_tidrange: Option<unsafe extern "C" fn()>,
-    pub scan_getnextslot_tidrange: Option<unsafe extern "C" fn()>,
-}
+pub use crate::access::table::tableam::TableAmRoutine;
 
-#[repr(C)]
-pub struct IndexAmRoutine {
-    pub amcanorderbyop: bool,
-    pub amoptionalkey: bool,
-    pub amsearcharray: bool,
-    pub amsearchnulls: bool,
-    pub amcanparallel: bool,
-    pub amcanorder: bool,
-    pub amgettuple: Option<unsafe extern "C" fn()>,
-    pub amgetbitmap: Option<unsafe extern "C" fn()>,
-    pub ammarkpos: Option<unsafe extern "C" fn()>,
-    pub amrestrpos: Option<unsafe extern "C" fn()>,
-    pub amcostestimate: Option<unsafe extern "C" fn()>,
-    pub amgettreeheight: Option<unsafe extern "C" fn(*mut RelationData) -> c_int>,
-}
+pub use crate::access::index::amapi::IndexAmRoutine;
 
-#[repr(C)]
-pub struct TriggerDesc {
-    pub trig_insert_before_row: bool,
-    pub trig_insert_after_row: bool,
-    pub trig_insert_new_table: bool,
-    pub trig_update_before_row: bool,
-    pub trig_update_after_row: bool,
-    pub trig_update_old_table: bool,
-    pub trig_update_new_table: bool,
-    pub trig_delete_before_row: bool,
-    pub trig_delete_after_row: bool,
-    pub trig_delete_old_table: bool,
-}
+pub use crate::utils::reltrigger::TriggerDesc;
 
 #[repr(C)]
 pub struct ForeignKeyCacheInfo {
+    pub conoid: Oid,
     pub conrelid: Oid,
     pub confrelid: Oid,
     pub nkeys: c_int,
@@ -218,72 +96,37 @@ pub struct ForeignKeyCacheInfo {
     pub conenforced: bool,
 }
 
-#[repr(C)]
-pub struct QualCost {
-    pub startup: f64,
-    pub per_tuple: f64,
-}
+pub use crate::nodes::pathnodes::QualCost;
 
-#[repr(C)]
-pub struct SupportRequestSelectivity {
-    pub r#type: NodeTag,
-    pub root: *mut PlannerInfo,
-    pub funcid: Oid,
-    pub args: *mut List,
-    pub inputcollid: Oid,
-    pub is_join: bool,
-    pub varRelid: c_int,
-    pub jointype: c_int,
-    pub sjinfo: *mut SpecialJoinInfo,
-    pub selectivity: f64,
-}
-
-#[repr(C)]
-pub struct SupportRequestCost {
-    pub r#type: NodeTag,
-    pub root: *mut PlannerInfo,
-    pub funcid: Oid,
-    pub node: *mut Node,
-    pub startup: f64,
-    pub per_tuple: f64,
-}
-
-#[repr(C)]
-pub struct SupportRequestRows {
-    pub r#type: NodeTag,
-    pub root: *mut PlannerInfo,
-    pub funcid: Oid,
-    pub node: *mut Node,
-    pub rows: f64,
-}
+pub use crate::nodes::supportnodes::{
+    SupportRequestCost, SupportRequestRows, SupportRequestSelectivity,
+};
 
 pub type SpecialJoinInfo = crate::nodes::pathnodes::SpecialJoinInfo;
 
-#[repr(C)]
-pub struct FormData_pg_proc {
-    pub procost: f64,
-    pub prorows: f64,
-    pub proretset: bool,
-    pub prosupport: Oid,
-}
+pub use crate::catalog::pg_proc::FormData_pg_proc;
 pub type Form_pg_proc = *mut FormData_pg_proc;
 
-#[repr(C)]
-pub struct FormData_pg_statistic_ext_data {
-    pub stxdinherit: bool,
-}
+pub use crate::catalog::pg_statistic_ext_data::FormData_pg_statistic_ext_data;
 pub type Form_pg_statistic_ext_data = *mut FormData_pg_statistic_ext_data;
 
-#[repr(C)]
-pub struct FormData_pg_statistic_ext {
-    pub stxkeys: StxKeysArr,
-}
+pub use crate::catalog::pg_statistic_ext::FormData_pg_statistic_ext;
 pub type Form_pg_statistic_ext = *mut FormData_pg_statistic_ext;
 
+/*
+ * Canonical FormData_pg_statistic_ext omits the inline int2vector `stxkeys`
+ * (a variable-length field). This helper mirrors the on-disk fixed layout up
+ * to and including stxkeys so the column array can be read; used only for the
+ * stxkeys access below.
+ */
 #[repr(C)]
-pub struct StxKeysArr {
-    pub dim1: c_int,
-    pub values: *mut i16,
+struct PgStatisticExtFixed {
+    oid: Oid,
+    stxrelid: Oid,
+    stxname: crate::c::NameData,
+    stxnamespace: Oid,
+    stxowner: Oid,
+    stxkeys: crate::c::int2vector,
 }
 
 /* PartitionKey / PartitionDesc / PartitionScheme stubs */
@@ -292,46 +135,13 @@ pub type PartitionDesc = *mut PartitionDescData;
 pub type PartitionScheme = *mut PartitionSchemeData;
 pub type PartitionDirectory = *mut c_void;
 
-#[repr(C)]
-pub struct PartitionKeyData {
-    pub strategy: i8,
-    pub partnatts: i16,
-    pub partattrs: *mut AttrNumber,
-    pub partexprs: *mut List,
-    pub partopfamily: *mut Oid,
-    pub partopcintype: *mut Oid,
-    pub partcollation: *mut Oid,
-    pub parttypid: *mut Oid,
-    pub parttypmod: *mut i32,
-    pub parttypcoll: *mut Oid,
-    pub parttyplen: *mut i16,
-    pub parttypbyval: *mut bool,
-    pub partsupfunc: *mut FmgrInfo,
-}
+pub use crate::utils::cache::partcache::PartitionKeyData;
 
-#[repr(C)]
-pub struct PartitionDescData {
-    pub nparts: c_int,
-    pub boundinfo: *mut c_void,
-}
+pub use crate::partitioning::partdesc::PartitionDescData;
 
-#[repr(C)]
-pub struct PartitionSchemeData {
-    pub strategy: i8,
-    pub partnatts: i16,
-    pub partopfamily: *mut Oid,
-    pub partopcintype: *mut Oid,
-    pub partcollation: *mut Oid,
-    pub parttyplen: *mut i16,
-    pub parttypbyval: *mut bool,
-    pub partsupfunc: *mut FmgrInfo,
-}
+pub use crate::nodes::pathnodes::PartitionSchemeData;
 
-#[repr(C)]
-pub struct FmgrInfo {
-    pub fn_oid: Oid,
-    _pad: [u8; 48],
-}
+pub use crate::utils::fmgr::FmgrInfo;
 
 pub type CompareType = c_int;
 pub const COMPARE_LT: CompareType = 1;
@@ -365,9 +175,7 @@ pub const STATS_EXT_MCV: u8 = b'm';
 pub const STATS_EXT_EXPRESSIONS: u8 = b'e';
 
 /* syscache IDs used here */
-pub const STATEXTOID: c_int = 256;
-pub const STATEXTDATASTXOID: c_int = 257;
-pub const PROCOID: c_int = 258;
+pub use crate::utils::cache::syscache::{PROCOID, STATEXTDATASTXOID, STATEXTOID};
 
 /* pg_statistic_ext attribute number */
 pub const Anum_pg_statistic_ext_stxexprs: c_int = 10;
@@ -568,9 +376,8 @@ extern "C" {
     fn IS_SIMPLE_REL(rel: *const RelOptInfo) -> bool;
     fn RELKIND_HAS_TABLE_AM(relkind: i8) -> bool;
 
-    fn cpu_operator_cost() -> f64;
+    static cpu_operator_cost: f64;
     fn CurrentMemoryContext() -> *mut c_void;
-    fn IgnoreSystemIndexes() -> bool;
     fn restrict_nonsystem_relation_kind() -> u32;
     fn FirstNormalObjectId() -> Oid;
     fn TransactionXmin() -> u32;
@@ -748,7 +555,7 @@ pub unsafe fn get_relation_info(
      */
     let hasindex: bool;
     if (inhparent && (*(*relation).rd_rel).relkind != RELKIND_PARTITIONED_TABLE)
-        || (IgnoreSystemIndexes() && IsSystemRelation(relation))
+        || (crate::utils::init::miscinit::IgnoreSystemIndexes && IsSystemRelation(relation))
     {
         hasindex = false;
     } else {
@@ -798,7 +605,9 @@ pub unsafe fn get_relation_info(
              */
             if (*index).indcheckxmin
                 && !TransactionIdPrecedes(
-                    HeapTupleHeaderGetXmin((*(*indexRelation).rd_indextuple).t_data),
+                    HeapTupleHeaderGetXmin(
+                        (*((*indexRelation).rd_indextuple as *mut HeapTupleData)).t_data,
+                    ),
                     TransactionXmin(),
                 )
             {
@@ -831,7 +640,7 @@ pub unsafe fn get_relation_info(
 
             for i in 0..ncolumns {
                 *(*info).indexkeys.add(i as usize) =
-                    (*index).indkey.values[i as usize] as c_int;
+                    *(*index).indkey.values.as_ptr().add(i as usize) as c_int;
                 *(*info).canreturn.add(i as usize) =
                     index_can_return(indexRelation, i + 1);
             }
@@ -861,7 +670,7 @@ pub unsafe fn get_relation_info(
                 (*info).amcanparallel = (*amroutine).amcanparallel;
                 (*info).amhasgettuple = (*amroutine).amgettuple.is_some();
                 (*info).amhasgetbitmap = (*amroutine).amgetbitmap.is_some()
-                    && (*(*relation).rd_tableam)
+                    && (*((*relation).rd_tableam as *const TableAmRoutine))
                         .scan_bitmap_next_tuple
                         .is_some();
                 (*info).amcanmarkpos = (*amroutine).ammarkpos.is_some()
@@ -1094,8 +903,12 @@ pub unsafe fn get_relation_info(
 
     /* Collect info about functions implemented by the rel's table AM. */
     if !(*relation).rd_tableam.is_null()
-        && (*(*relation).rd_tableam).scan_set_tidrange.is_some()
-        && (*(*relation).rd_tableam).scan_getnextslot_tidrange.is_some()
+        && (*((*relation).rd_tableam as *const TableAmRoutine))
+            .scan_set_tidrange
+            .is_some()
+        && (*((*relation).rd_tableam as *const TableAmRoutine))
+            .scan_getnextslot_tidrange
+            .is_some()
     {
         (*rel).amflags |= AMFLAG_HAS_TID_RANGE;
     }
@@ -2089,8 +1902,9 @@ unsafe fn get_relation_statistics(rel: *mut RelOptInfo, relation: Relation) -> *
          * wasted if no stats within the object have actually been built, but
          * it doesn't seem worth troubling over that case.
          */
-        for i in 0..(*staForm).stxkeys.dim1 {
-            keys = bms_add_member(keys, *(*staForm).stxkeys.values.add(i as usize) as c_int);
+        let stxkeys = &(*(staForm as *const PgStatisticExtFixed)).stxkeys;
+        for i in 0..stxkeys.dim1 {
+            keys = bms_add_member(keys, *stxkeys.values.as_ptr().add(i as usize) as c_int);
         }
 
         /*
@@ -2578,6 +2392,7 @@ unsafe fn build_index_tlist(
  *
  * See clause_selectivity() for the meaning of the additional parameters.
  */
+#[no_mangle]
 pub unsafe fn restriction_selectivity(
     root: *mut PlannerInfo,
     operatorid: Oid,
@@ -2585,7 +2400,9 @@ pub unsafe fn restriction_selectivity(
     inputcollid: Oid,
     varRelid: c_int,
 ) -> Selectivity {
+    if std::env::var_os("PDB_RX").is_some() { eprintln!("PDB_RX restriction_selectivity opid={}", operatorid); }
     let oprrest: RegProcedure = get_oprrest(operatorid);
+    if std::env::var_os("PDB_RX").is_some() { eprintln!("PDB_RX got oprrest={}", oprrest); }
 
     /*
      * if the oprrest procedure is missing for whatever reason, use a
@@ -2624,6 +2441,7 @@ pub unsafe fn restriction_selectivity(
  *
  * See clause_selectivity() for the meaning of the additional parameters.
  */
+#[no_mangle]
 pub unsafe fn join_selectivity(
     root: *mut PlannerInfo,
     operatorid: Oid,
@@ -2696,14 +2514,14 @@ pub unsafe fn function_selectivity(
     }
 
     let mut req = SupportRequestSelectivity {
-        r#type: T_SupportRequestSelectivity,
+        type_: T_SupportRequestSelectivity,
         root,
         funcid,
         args,
         inputcollid,
         is_join,
         varRelid,
-        jointype: jointype as c_int,
+        jointype,
         sjinfo,
         selectivity: -1.0, /* to catch failure to set the value */
     };
@@ -2758,9 +2576,10 @@ pub unsafe fn add_function_cost(
     }
     let procform = GETSTRUCT(proctup) as Form_pg_proc;
 
+    if std::env::var_os("PDB_RX").is_some() { eprintln!("PDB_RX add_function_cost funcid={} prosupport={}", funcid, (*procform).prosupport); }
     if OidIsValid((*procform).prosupport) {
         let mut req = SupportRequestCost {
-            r#type: T_SupportRequestCost,
+            type_: T_SupportRequestCost,
             root,
             funcid,
             node,
@@ -2782,8 +2601,9 @@ pub unsafe fn add_function_cost(
         }
     }
 
+    if std::env::var_os("PDB_RX").is_some() { eprintln!("PDB_RX add_function_cost fallback-to-procost"); }
     /* No support function, or it failed, so rely on procost */
-    (*cost).per_tuple += (*procform).procost * cpu_operator_cost();
+    (*cost).per_tuple += (*procform).procost as f64 * cpu_operator_cost;
 
     ReleaseSysCache(proctup);
 }
@@ -2818,7 +2638,7 @@ pub unsafe fn get_function_rows(root: *mut PlannerInfo, funcid: Oid, node: *mut 
 
     if OidIsValid((*procform).prosupport) {
         let mut req = SupportRequestRows {
-            r#type: T_SupportRequestRows,
+            type_: T_SupportRequestRows,
             root,
             funcid,
             node,
@@ -2838,7 +2658,7 @@ pub unsafe fn get_function_rows(root: *mut PlannerInfo, funcid: Oid, node: *mut 
     }
 
     /* No support function, or it failed, so rely on prorows */
-    let result = (*procform).prorows;
+    let result = (*procform).prorows as f64;
 
     ReleaseSysCache(proctup);
 
@@ -2895,7 +2715,7 @@ pub unsafe fn has_row_triggers(root: *mut PlannerInfo, rti: Index, event: CmdTyp
 
     /* Assume we already have adequate lock */
     let relation = table_open((*rte).relid, NoLock);
-    let trigDesc: *mut TriggerDesc = (*relation).trigdesc;
+    let trigDesc: *mut TriggerDesc = (*relation).trigdesc as *mut TriggerDesc;
 
     match event {
         CmdType::CMD_INSERT => {
@@ -2954,7 +2774,7 @@ pub unsafe fn has_transition_tables(root: *mut PlannerInfo, rti: Index, event: C
 
     /* Assume we already have adequate lock */
     let relation = table_open((*rte).relid, NoLock);
-    let trigDesc: *mut TriggerDesc = (*relation).trigdesc;
+    let trigDesc: *mut TriggerDesc = (*relation).trigdesc as *mut TriggerDesc;
 
     match event {
         CmdType::CMD_INSERT => {
@@ -3106,7 +2926,7 @@ unsafe fn find_partition_scheme(root: *mut PlannerInfo, relation: Relation) -> P
         let part_scheme: PartitionScheme = lfirst(lc) as PartitionScheme;
 
         /* Match partitioning strategy and number of keys. */
-        if (*partkey).strategy != (*part_scheme).strategy
+        if (*partkey).strategy as c_char != (*part_scheme).strategy
             || (*partkey).partnatts != (*part_scheme).partnatts
         {
             lc = lnext((*root).part_schemes, lc);
@@ -3168,7 +2988,7 @@ unsafe fn find_partition_scheme(root: *mut PlannerInfo, relation: Relation) -> P
      */
     let part_scheme: PartitionScheme =
         palloc0(core::mem::size_of::<PartitionSchemeData>()) as PartitionScheme;
-    (*part_scheme).strategy = (*partkey).strategy;
+    (*part_scheme).strategy = (*partkey).strategy as c_char;
     (*part_scheme).partnatts = (*partkey).partnatts;
 
     (*part_scheme).partopfamily =

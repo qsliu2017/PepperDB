@@ -150,42 +150,24 @@ unsafe fn ReleaseAndReadBuffer(_buffer: Buffer, _reln: Relation, _blockNum: Bloc
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO: storage/buf/bufmgr.c
 }
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/buf/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
     unimplemented!() // TODO: storage/buf/bufmgr.c
 }
-unsafe fn GinPageIsLeaf(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin/gindatapage.c (GinPageIsLeaf macro)
-}
-unsafe fn GinPageIsData(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin_private.h (GinPageIsData macro)
-}
-unsafe fn GinPageIsIncompleteSplit(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin_private.h
-}
-unsafe fn GinPageRightMost(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin_private.h
-}
+unsafe fn GinPageIsLeaf(_page: Page) -> bool { crate::access::gin::ginblock::GinPageIsLeaf(_page) }
+unsafe fn GinPageIsData(_page: Page) -> bool { crate::access::gin::ginblock::GinPageIsData(_page) }
+unsafe fn GinPageIsIncompleteSplit(_page: Page) -> bool { crate::access::gin::ginblock::GinPageIsIncompleteSplit(_page) }
+unsafe fn GinPageRightMost(_page: Page) -> bool { crate::access::gin::ginblock::GinPageRightMost(_page) }
 unsafe fn GinPageGetOpaque(_page: Page) -> *mut GinPageOpaqueData {
     unimplemented!() // TODO: access/gin_private.h
 }
-unsafe fn GinNewBuffer(_index: Relation) -> Buffer {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
-unsafe fn GinInitPage(_page: Page, _flags: uint16, _size: Size) {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
+unsafe fn GinNewBuffer(_index: Relation) -> Buffer { unimplemented!() }
+unsafe fn GinInitPage(_page: Page, _flags: uint16, _size: Size) { unimplemented!() }
 unsafe fn PageGetTempPage(_page: Page) -> Page {
     unimplemented!() // TODO: storage/page/bufpage.c
 }
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO: storage/page/bufpage.h
-}
-unsafe fn RelationNeedsWAL(_index: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(_page, _lsn) }
+unsafe fn RelationNeedsWAL(_index: Relation) -> bool { unimplemented!() }
 unsafe fn RelationGetRelationName(_index: Relation) -> *const c_char {
     unimplemented!() // TODO: utils/rel.h
 }
@@ -196,18 +178,14 @@ unsafe fn CheckForSerializableConflictIn(
 ) {
     unimplemented!() // TODO: storage/lmgr/predicate.c
 }
-unsafe fn PredicateLockPageSplit(_relation: Relation, _oldblkno: BlockNumber, _newblkno: BlockNumber) {
-    unimplemented!() // TODO: storage/lmgr/predicate.c
-}
+unsafe fn PredicateLockPageSplit(_relation: Relation, _oldblkno: BlockNumber, _newblkno: BlockNumber) { crate::storage::lmgr::predicate::PredicateLockPageSplit(_relation, _oldblkno, _newblkno) }
 unsafe fn AllocSetContextCreateInternal(
     _parent: MemoryContext,
     _name: *const c_char,
     _minContextSize: Size,
     _initBlockSize: Size,
     _maxBlockSize: Size,
-) -> MemoryContext {
-    unimplemented!() // TODO: utils/mmgr/aset.c
-}
+) -> MemoryContext { crate::utils::mmgr::aset::AllocSetContextCreateInternal(_parent, _name, _minContextSize, _initBlockSize, _maxBlockSize) }
 unsafe fn XLogBeginInsert() {
     unimplemented!() // TODO: access/transam/xloginsert.c
 }
@@ -220,9 +198,7 @@ unsafe fn XLogRegisterBuffer(_block_id: u8, _buffer: Buffer, _flags: u8) {
 unsafe fn XLogInsert(_rmid: u8, _info: u8) -> XLogRecPtr {
     unimplemented!() // TODO: access/transam/xloginsert.c
 }
-unsafe fn BlockIdSet(_blockId: *mut BlockIdData, _blockNumber: BlockNumber) {
-    unimplemented!() // TODO: storage/block.h
-}
+unsafe fn BlockIdSet(_blockId: *mut BlockIdData, _blockNumber: BlockNumber) { unimplemented!() }
 
 #[repr(C)]
 struct GinPageOpaqueData {

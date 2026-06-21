@@ -1061,39 +1061,40 @@ const MAXFNAMELEN: usize = 64;
 const XLOGDIR: &std::ffi::CStr = c"pg_wal";
 
 unsafe fn errno() -> c_int {
-    unimplemented!() // TODO: port errno access
+    *libc::__error()
 }
 const ENOENT: c_int = 2;
 
-unsafe fn add_size(_s1: Size, _s2: Size) -> Size {
-    unimplemented!() // TODO: shmem.c
+unsafe fn add_size(s1: Size, s2: Size) -> Size {
+    crate::storage::ipc::shmem::add_size(s1, s2)
 }
-unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO: shmem.c
+unsafe fn ShmemInitStruct(name: *const c_char, size: Size, found: *mut bool) -> *mut c_void {
+    crate::storage::ipc::shmem::ShmemInitStruct(name, size, found)
 }
-unsafe fn pg_atomic_init_u32(_ptr: *mut pg_atomic_uint32, _val: crate::c::uint32) {
-    unimplemented!() // TODO: atomics.h
+unsafe fn pg_atomic_init_u32(ptr: *mut pg_atomic_uint32, val: crate::c::uint32) {
+    crate::port::atomics::pg_atomic_init_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        val,
+    )
 }
-unsafe fn pg_atomic_exchange_u32(_ptr: *mut pg_atomic_uint32, _newval: crate::c::uint32) -> crate::c::uint32 {
-    unimplemented!() // TODO: atomics.h
+unsafe fn pg_atomic_exchange_u32(ptr: *mut pg_atomic_uint32, newval: crate::c::uint32) -> crate::c::uint32 {
+    crate::port::atomics::generic::pg_atomic_exchange_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        newval,
+    )
 }
-unsafe fn pg_atomic_write_membarrier_u32(_ptr: *mut pg_atomic_uint32, _val: crate::c::uint32) {
-    unimplemented!() // TODO: atomics.h
+unsafe fn pg_atomic_write_membarrier_u32(ptr: *mut pg_atomic_uint32, val: crate::c::uint32) {
+    crate::port::atomics::generic::pg_atomic_write_membarrier_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        val,
+    )
 }
-unsafe fn AuxiliaryProcessMainCommon() {
-    unimplemented!() // TODO: auxprocess.c
-}
-unsafe fn pqsignal(_signo: c_int, _func: usize) {
-    unimplemented!() // TODO: pqsignal.c
-}
-unsafe extern "C" fn SignalHandlerForConfigReload(_sig: c_int) {
-    unimplemented!() // TODO: interrupt.c
-}
-unsafe extern "C" fn SignalHandlerForShutdownRequest(_sig: c_int) {
-    unimplemented!() // TODO: interrupt.c
-}
-unsafe extern "C" fn procsignal_sigusr1_handler(_sig: c_int) {
-    unimplemented!() // TODO: procsignal.c
+unsafe fn AuxiliaryProcessMainCommon() { crate::postmaster::auxprocess::AuxiliaryProcessMainCommon() }
+unsafe fn pqsignal(signo: c_int, func: usize) { unimplemented!() }
+unsafe extern "C" fn SignalHandlerForConfigReload(sig: c_int) { crate::postmaster::interrupt::SignalHandlerForConfigReload(sig as _) }
+unsafe extern "C" fn SignalHandlerForShutdownRequest(sig: c_int) { crate::postmaster::interrupt::SignalHandlerForShutdownRequest(sig as _) }
+unsafe extern "C" fn procsignal_sigusr1_handler(sig: c_int) {
+    crate::storage::ipc::procsignal::procsignal_sigusr1_handler(sig)
 }
 unsafe fn sigprocmask(_how: c_int, _set: *const c_void, _oldset: *mut c_void) -> c_int {
     unimplemented!() // TODO: signal.h
@@ -1101,52 +1102,56 @@ unsafe fn sigprocmask(_how: c_int, _set: *const c_void, _oldset: *mut c_void) ->
 unsafe fn XLogArchivingActive() -> bool {
     unimplemented!() // TODO: xlog.h
 }
-unsafe fn on_shmem_exit(_function: unsafe extern "C" fn(c_int, Datum), _arg: Datum) {
-    unimplemented!() // TODO: ipc.c
+unsafe fn on_shmem_exit(function: unsafe extern "C" fn(c_int, Datum), arg: Datum) {
+    crate::storage::ipc::ipc::on_shmem_exit(function, arg)
 }
-unsafe fn before_shmem_exit(_function: unsafe extern "C" fn(c_int, Datum), _arg: Datum) {
-    unimplemented!() // TODO: ipc.c
+unsafe fn before_shmem_exit(function: unsafe extern "C" fn(c_int, Datum), arg: Datum) {
+    crate::storage::ipc::ipc::before_shmem_exit(function, arg)
 }
 unsafe fn binaryheap_allocate(
-    _capacity: c_int,
-    _compare: unsafe extern "C" fn(Datum, Datum, *mut c_void) -> c_int,
-    _arg: *mut c_void,
+    capacity: c_int,
+    compare: unsafe extern "C" fn(Datum, Datum, *mut c_void) -> c_int,
+    arg: *mut c_void,
 ) -> *mut binaryheap {
-    unimplemented!() // TODO: binaryheap.c
+    crate::lib::binaryheap::binaryheap_allocate(
+        capacity,
+        std::mem::transmute::<_, crate::lib::binaryheap::binaryheap_comparator>(compare),
+        arg,
+    ) as *mut binaryheap
 }
-unsafe fn binaryheap_reset(_heap: *mut binaryheap) {
-    unimplemented!() // TODO: binaryheap.c
+unsafe fn binaryheap_reset(heap: *mut binaryheap) {
+    crate::lib::binaryheap::binaryheap_reset(heap as *mut _)
 }
-unsafe fn binaryheap_build(_heap: *mut binaryheap) {
-    unimplemented!() // TODO: binaryheap.c
+unsafe fn binaryheap_build(heap: *mut binaryheap) {
+    crate::lib::binaryheap::binaryheap_build(heap as *mut _)
 }
-unsafe fn binaryheap_add_unordered(_heap: *mut binaryheap, _d: Datum) {
-    unimplemented!() // TODO: binaryheap.c
+unsafe fn binaryheap_add_unordered(heap: *mut binaryheap, d: Datum) {
+    crate::lib::binaryheap::binaryheap_add_unordered(heap as *mut _, d)
 }
-unsafe fn binaryheap_add(_heap: *mut binaryheap, _d: Datum) {
-    unimplemented!() // TODO: binaryheap.c
+unsafe fn binaryheap_add(heap: *mut binaryheap, d: Datum) {
+    crate::lib::binaryheap::binaryheap_add(heap as *mut _, d)
 }
-unsafe fn binaryheap_first(_heap: *mut binaryheap) -> Datum {
-    unimplemented!() // TODO: binaryheap.c
+unsafe fn binaryheap_first(heap: *mut binaryheap) -> Datum {
+    crate::lib::binaryheap::binaryheap_first(heap as *mut _)
 }
-unsafe fn binaryheap_remove_first(_heap: *mut binaryheap) -> Datum {
-    unimplemented!() // TODO: binaryheap.c
+unsafe fn binaryheap_remove_first(heap: *mut binaryheap) -> Datum {
+    crate::lib::binaryheap::binaryheap_remove_first(heap as *mut _)
 }
 const ALLOCSET_DEFAULT_MINSIZE: Size = 0;
 const ALLOCSET_DEFAULT_INITSIZE: Size = 8 * 1024;
 const ALLOCSET_DEFAULT_MAXSIZE: Size = 8 * 1024 * 1024;
 
-unsafe fn proc_exit(_code: c_int) {
-    unimplemented!() // TODO: ipc.c
+unsafe fn proc_exit(code: c_int) {
+    crate::storage::ipc::ipc::proc_exit(code)
 }
-unsafe fn SetLatch(_latch: *mut c_void) {
-    unimplemented!() // TODO: latch.c
+unsafe fn SetLatch(latch: *mut c_void) {
+    crate::storage::ipc::latch::SetLatch(latch as *mut _)
 }
-unsafe fn ResetLatch(_latch: *mut c_void) {
-    unimplemented!() // TODO: latch.c
+unsafe fn ResetLatch(latch: *mut c_void) {
+    crate::storage::ipc::latch::ResetLatch(latch as *mut _)
 }
-unsafe fn WaitLatch(_latch: *mut c_void, _wakeEvents: c_int, _timeout: i64, _wait_event_info: u32) -> c_int {
-    unimplemented!() // TODO: latch.c
+unsafe fn WaitLatch(latch: *mut c_void, wakeEvents: c_int, timeout: i64, wait_event_info: u32) -> c_int {
+    crate::storage::ipc::latch::WaitLatch(latch as *mut _, wakeEvents, timeout as _, wait_event_info)
 }
 const WL_LATCH_SET: c_int = 1 << 0;
 const WL_TIMEOUT: c_int = 1 << 3;
@@ -1154,93 +1159,81 @@ const WL_POSTMASTER_DEATH: c_int = 1 << 4;
 const WAIT_EVENT_ARCHIVER_MAIN: u32 = 0;
 
 unsafe fn PostmasterIsAlive() -> bool {
-    unimplemented!() // TODO: pmsignal.c
+    crate::storage::ipc::pmsignal::PostmasterIsAliveInternal()
 }
 unsafe fn StatusFilePath(_path: *mut c_char, _xlog: *const c_char, _suffix: *const c_char) {
     unimplemented!() // TODO: xlog_internal.h
 }
-unsafe fn pg_usleep(_microsec: i64) {
-    unimplemented!() // TODO: pgsleep.c
+unsafe fn pg_usleep(microsec: i64) {
+    crate::port::pgsleep::pg_usleep(microsec as _)
 }
-unsafe fn pgstat_report_archiver(_xlog: *const c_char, _failed: bool) {
-    unimplemented!() // TODO: pgstat_archiver.c
+unsafe fn pgstat_report_archiver(xlog: *const c_char, failed: bool) {
+    crate::utils::activity::pgstat_archiver::pgstat_report_archiver(xlog, failed)
 }
-unsafe fn set_ps_display(_activity: *const c_char) {
-    unimplemented!() // TODO: ps_status.c
-}
+unsafe fn set_ps_display(activity: *const c_char) { crate::utils::misc::ps_status::set_ps_display(activity as _) }
 unsafe fn sigsetjmp(_env: *mut sigjmp_buf, _savemask: c_int) -> c_int {
     unimplemented!() // TODO: setjmp.h
 }
-unsafe fn HOLD_INTERRUPTS() {
-    unimplemented!() // TODO: miscadmin.h
-}
-unsafe fn RESUME_INTERRUPTS() {
-    unimplemented!() // TODO: miscadmin.h
-}
-unsafe fn EmitErrorReport() {
-    unimplemented!() // TODO: elog.c
-}
-unsafe fn disable_all_timeouts(_keep_indicators: bool) {
-    unimplemented!() // TODO: timeout.c
+unsafe fn HOLD_INTERRUPTS() { crate::miscadmin::HOLD_INTERRUPTS() }
+unsafe fn RESUME_INTERRUPTS() { crate::miscadmin::RESUME_INTERRUPTS() }
+unsafe fn EmitErrorReport() { crate::utils::error::elog_impl::EmitErrorReport() }
+unsafe fn disable_all_timeouts(keep_indicators: bool) {
+    crate::utils::misc::timeout::disable_all_timeouts(keep_indicators)
 }
 unsafe fn LWLockReleaseAll() {
-    unimplemented!() // TODO: lwlock.c
+    crate::storage::lmgr::lwlock::LWLockReleaseAll()
 }
 unsafe fn ConditionVariableCancelSleep() {
-    unimplemented!() // TODO: condition_variable.c
+    crate::storage::lmgr::condition_variable::ConditionVariableCancelSleep();
 }
-unsafe fn pgstat_report_wait_end() {
-    unimplemented!() // TODO: wait_event.c
-}
+unsafe fn pgstat_report_wait_end() { crate::parser_link_shims::pgstat_report_wait_end() }
 unsafe fn pgaio_error_cleanup() {
-    unimplemented!() // TODO: aio.c
+    crate::storage::aio::aio::pgaio_error_cleanup()
 }
-unsafe fn ReleaseAuxProcessResources(_isCommit: bool) {
-    unimplemented!() // TODO: resowner.c
+unsafe fn ReleaseAuxProcessResources(isCommit: bool) {
+    crate::utils::resowner::resowner::ReleaseAuxProcessResources(isCommit)
 }
-unsafe fn AtEOXact_Files(_isCommit: bool) {
-    unimplemented!() // TODO: fd.c
+unsafe fn AtEOXact_Files(isCommit: bool) {
+    crate::storage::file::fd::AtEOXact_Files(isCommit)
 }
-unsafe fn AtEOXact_HashTables(_isCommit: bool) {
-    unimplemented!() // TODO: dynahash.c
+unsafe fn AtEOXact_HashTables(isCommit: bool) {
+    crate::utils::hash::dynahash::AtEOXact_HashTables(isCommit)
 }
-unsafe fn FlushErrorState() {
-    unimplemented!() // TODO: elog.c
-}
+unsafe fn FlushErrorState() { crate::utils::error::elog_impl::FlushErrorState() }
 unsafe fn IsTLHistoryFileName(_fname: *const c_char) -> bool {
     unimplemented!() // TODO: xlog_internal.h
 }
-unsafe fn AllocateDir(_dirname: *const c_char) -> *mut DIR {
-    unimplemented!() // TODO: fd.c
+unsafe fn AllocateDir(dirname: *const c_char) -> *mut DIR {
+    crate::storage::file::fd::AllocateDir(dirname) as *mut DIR
 }
-unsafe fn ReadDir(_dir: *mut DIR, _dirname: *const c_char) -> *mut dirent {
-    unimplemented!() // TODO: fd.c
+unsafe fn ReadDir(dir: *mut DIR, dirname: *const c_char) -> *mut dirent {
+    crate::storage::file::fd::ReadDir(dir as *mut _, dirname) as *mut dirent
 }
-unsafe fn FreeDir(_dir: *mut DIR) -> c_int {
-    unimplemented!() // TODO: fd.c
+unsafe fn FreeDir(dir: *mut DIR) -> c_int {
+    crate::storage::file::fd::FreeDir(dir as *mut _)
 }
 unsafe fn ProcessProcSignalBarrier() {
-    unimplemented!() // TODO: procsignal.c
+    crate::storage::ipc::procsignal::ProcessProcSignalBarrier()
 }
 unsafe fn ProcessLogMemoryContextInterrupt() {
-    unimplemented!() // TODO: mcxt.c
+    crate::utils::mmgr::mcxt::ProcessLogMemoryContextInterrupt()
 }
-unsafe fn ProcessConfigFile(_context: c_int) {
-    unimplemented!() // TODO: guc.c
+unsafe fn ProcessConfigFile(context: c_int) {
+    let ctx = match context {
+        PGC_SIGHUP => crate::utils::misc::guc::GucContext::PGC_SIGHUP,
+        _ => crate::utils::misc::guc::GucContext::PGC_SIGHUP,
+    };
+    crate::utils::misc::guc::ProcessConfigFile(ctx)
 }
 const PGC_SIGHUP: c_int = 1;
 
-unsafe extern "C" fn shell_archive_init() -> *const ArchiveModuleCallbacks {
-    unimplemented!() // TODO: shell_archive.c
-}
+unsafe extern "C" fn shell_archive_init() -> *const ArchiveModuleCallbacks { unimplemented!() }
 unsafe fn load_external_function(
-    _filename: *const c_char,
-    _funcname: *const c_char,
-    _signalNotFound: bool,
-    _filehandle: *mut *mut c_void,
-) -> *mut c_void {
-    unimplemented!() // TODO: dfmgr.c
-}
+    filename: *const c_char,
+    funcname: *const c_char,
+    signalNotFound: bool,
+    filehandle: *mut *mut c_void,
+) -> *mut c_void { crate::utils::fmgr::dfmgr::load_external_function(filename as _, funcname as _, signalNotFound, filehandle as _) }
 
 // Externs / globals referenced from other (unported) modules.
 const INVALID_PROC_NUMBER: c_int = -1;
@@ -1258,10 +1251,10 @@ const SIGUSR2: c_int = 31;
 const SIGCHLD: c_int = 20;
 
 static mut MyBackendType: c_int = 0;
-static mut MyProcNumber: c_int = 0;
+extern "C" { pub static mut MyProcNumber: c_int; }
 static mut MyLatch: *mut c_void = std::ptr::null_mut();
 static mut UnBlockSig: [u8; 128] = [0; 128]; // sigset_t stub
-static mut ProcGlobal: *mut PROC_HDR = std::ptr::null_mut();
+extern "C" { pub static mut ProcGlobal: *mut PROC_HDR; }
 static mut ShutdownRequestPending: bool = false;
 static mut ConfigReloadPending: bool = false;
 static mut ProcSignalBarrierPending: bool = false;

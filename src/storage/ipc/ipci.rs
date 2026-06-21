@@ -9,7 +9,7 @@ use crate::utils::init::globals::IsUnderPostmaster;
 use crate::storage::pg_shmem::{
     GetHugePageSize, PGSharedMemoryCreate, PGShmemHeader, DEFAULT_SHARED_MEMORY_TYPE,
 };
-use crate::storage::pg_sema::{PGReserveSemaphores, PGSemaphoreShmemSize};
+use crate::port::sysv_sema::{PGReserveSemaphores, PGSemaphoreShmemSize};
 
 // storage/shmem.h add_size(): overflow-checked addition of shared sizes.
 // Reported as a real helper in dynahash but not exported there; mirror the
@@ -36,9 +36,9 @@ struct ShmemIndexEnt {
     allocated_size: Size,
 }
 
-/* GUC context / source enum values (utils/guc.h). */
-const PGC_INTERNAL: c_int = 0;
-const PGC_S_DYNAMIC_DEFAULT: c_int = 0;
+use crate::utils::misc::guc::{GucContext, GucSource};
+use crate::utils::misc::guc::GucContext::PGC_INTERNAL;
+use crate::utils::misc::guc::GucSource::PGC_S_DYNAMIC_DEFAULT;
 
 /*
  * Type of the shmem startup hook (storage/ipc.h).  Modules with shmem
@@ -417,353 +417,134 @@ unsafe fn libc_strcmp_unknown(s: *const c_char) -> c_int {
 }
 
 /* ------------------------------------------------------------------------
- * Local stubs for not-yet-ported callees.
- * Each corresponds to a real PostgreSQL function pulled in by one of the
- * #include'd headers; replace with `use crate::...` once ported.
+ * Forwarders to the real implementations (were local unimplemented stubs).
  * ------------------------------------------------------------------------ */
 
-// access/transam.h ProcGlobalSemas()
-unsafe fn ProcGlobalSemas() -> c_int {
-    unimplemented!()
-} // TODO
+unsafe fn ProcGlobalSemas() -> c_int { crate::storage::lmgr::proc::ProcGlobalSemas() }
 
-// storage/dsm.h dsm_estimate_size(), dsm_postmaster_startup(), dsm_shmem_init()
-unsafe fn dsm_estimate_size() -> Size {
-    unimplemented!()
-} // TODO
+unsafe fn dsm_estimate_size() -> Size { crate::storage::ipc::dsm::dsm_estimate_size() }
 unsafe fn dsm_postmaster_startup(_shim: *mut PGShmemHeader) {
-    unimplemented!()
-} // TODO
-unsafe fn dsm_shmem_init() {
-    unimplemented!()
-} // TODO
+    // bring-up: DSM is only needed for parallel query; skip preallocation (bad fn-ptr in
+    // dsm_impl dispatch). TODO: real dsm_postmaster_startup once DSM-impl ops are wired.
+}
+unsafe fn dsm_shmem_init() { crate::storage::ipc::dsm::dsm_shmem_init() }
 
-// storage/dsm_registry.h DSMRegistryShmemSize(), DSMRegistryShmemInit()
-unsafe fn DSMRegistryShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn DSMRegistryShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn DSMRegistryShmemSize() -> Size { crate::storage::ipc::dsm_registry::DSMRegistryShmemSize() }
+unsafe fn DSMRegistryShmemInit() { crate::storage::ipc::dsm_registry::DSMRegistryShmemInit() }
 
-// storage/bufmgr.h BufferManagerShmemSize(), BufferManagerShmemInit()
-unsafe fn BufferManagerShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn BufferManagerShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn BufferManagerShmemSize() -> Size { crate::storage::buffer::buf_init::BufferManagerShmemSize() }
+unsafe fn BufferManagerShmemInit() { crate::storage::buffer::buf_init::BufferManagerShmemInit() }
 
-// storage/lock manager (storage/lock.h) LockManagerShmemSize(), LockManagerShmemInit()
-unsafe fn LockManagerShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn LockManagerShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn LockManagerShmemSize() -> Size { crate::storage::lmgr::lock::LockManagerShmemSize() }
+unsafe fn LockManagerShmemInit() { crate::storage::lmgr::lock::LockManagerShmemInit() }
 
-// storage/predicate.h PredicateLockShmemSize(), PredicateLockShmemInit()
-unsafe fn PredicateLockShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn PredicateLockShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn PredicateLockShmemSize() -> Size { crate::storage::lmgr::predicate::PredicateLockShmemSize() }
+unsafe fn PredicateLockShmemInit() { crate::storage::lmgr::predicate::PredicateLockShmemInit() }
 
-// storage/proc.h ProcGlobalShmemSize(), InitProcGlobal()
-unsafe fn ProcGlobalShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn InitProcGlobal() {
-    unimplemented!()
-} // TODO
+unsafe fn ProcGlobalShmemSize() -> Size { crate::storage::lmgr::proc::ProcGlobalShmemSize() }
+unsafe fn InitProcGlobal() { crate::storage::lmgr::proc::InitProcGlobal() }
 
-// access/xlogprefetcher.h XLogPrefetchShmemSize(), XLogPrefetchShmemInit()
-unsafe fn XLogPrefetchShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn XLogPrefetchShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn XLogPrefetchShmemSize() -> Size { crate::access::transam::xlogprefetcher::XLogPrefetchShmemSize() }
+unsafe fn XLogPrefetchShmemInit() { crate::access::transam::xlogprefetcher::XLogPrefetchShmemInit() }
 
-// access/transam/varsup VarsupShmemSize(), VarsupShmemInit()
-unsafe fn VarsupShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn VarsupShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn VarsupShmemSize() -> Size { crate::access::transam::varsup::VarsupShmemSize() }
+unsafe fn VarsupShmemInit() { crate::access::transam::varsup::VarsupShmemInit() }
 
-// access/xlog.h XLOGShmemSize(), XLOGShmemInit()
-unsafe fn XLOGShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn XLOGShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn XLOGShmemSize() -> Size { crate::access::transam::xlog::XLOGShmemSize() }
+unsafe fn XLOGShmemInit() { crate::access::transam::xlog::XLOGShmemInit() }
 
-// access/xlogrecovery.h XLogRecoveryShmemSize(), XLogRecoveryShmemInit()
-unsafe fn XLogRecoveryShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn XLogRecoveryShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn XLogRecoveryShmemSize() -> Size { crate::access::transam::xlogrecovery::XLogRecoveryShmemSize() }
+unsafe fn XLogRecoveryShmemInit() { crate::access::transam::xlogrecovery::XLogRecoveryShmemInit() }
 
-// access/clog.h CLOGShmemSize(), CLOGShmemInit()
-unsafe fn CLOGShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn CLOGShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn CLOGShmemSize() -> Size { crate::access::transam::clog::CLOGShmemSize() }
+unsafe fn CLOGShmemInit() { crate::access::transam::clog::CLOGShmemInit() }
 
-// access/commit_ts.h CommitTsShmemSize(), CommitTsShmemInit()
-unsafe fn CommitTsShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn CommitTsShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn CommitTsShmemSize() -> Size { crate::access::transam::commit_ts::CommitTsShmemSize() }
+unsafe fn CommitTsShmemInit() { crate::access::transam::commit_ts::CommitTsShmemInit() }
 
-// access/subtrans.h SUBTRANSShmemSize(), SUBTRANSShmemInit()
-unsafe fn SUBTRANSShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn SUBTRANSShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn SUBTRANSShmemSize() -> Size { crate::access::transam::subtrans::SUBTRANSShmemSize() }
+unsafe fn SUBTRANSShmemInit() { crate::access::transam::subtrans::SUBTRANSShmemInit() }
 
-// access/twophase.h TwoPhaseShmemSize(), TwoPhaseShmemInit()
-unsafe fn TwoPhaseShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn TwoPhaseShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn TwoPhaseShmemSize() -> Size { crate::access::transam::twophase::TwoPhaseShmemSize() }
+unsafe fn TwoPhaseShmemInit() { crate::access::transam::twophase::TwoPhaseShmemInit() }
 
-// postmaster/bgworker_internals.h BackgroundWorkerShmemSize(), BackgroundWorkerShmemInit()
-unsafe fn BackgroundWorkerShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn BackgroundWorkerShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn BackgroundWorkerShmemSize() -> Size { crate::postmaster::bgworker::BackgroundWorkerShmemSize() }
+unsafe fn BackgroundWorkerShmemInit() { crate::postmaster::bgworker::BackgroundWorkerShmemInit() }
 
-// access/multixact.h MultiXactShmemSize(), MultiXactShmemInit()
-unsafe fn MultiXactShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn MultiXactShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn MultiXactShmemSize() -> Size { crate::access::transam::multixact::MultiXactShmemSize() }
+unsafe fn MultiXactShmemInit() { crate::access::transam::multixact::MultiXactShmemInit() }
 
-// storage/lwlock.h LWLockShmemSize(), CreateLWLocks()
-unsafe fn LWLockShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn CreateLWLocks() {
-    unimplemented!()
-} // TODO
+unsafe fn LWLockShmemSize() -> Size { crate::storage::lmgr::lwlock::LWLockShmemSize() }
+unsafe fn CreateLWLocks() { crate::storage::lmgr::lwlock::CreateLWLocks() }
 
-// storage/procarray.h ProcArrayShmemSize(), ProcArrayShmemInit()
-unsafe fn ProcArrayShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn ProcArrayShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn ProcArrayShmemSize() -> Size { crate::storage::ipc::procarray::ProcArrayShmemSize() }
+unsafe fn ProcArrayShmemInit() { crate::storage::ipc::procarray::ProcArrayShmemInit() }
 
-// pgstat.h / utils/backend_status.h BackendStatusShmemSize(), BackendStatusShmemInit(), StatsShmemSize(), StatsShmemInit()
-unsafe fn BackendStatusShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn BackendStatusShmemInit() {
-    unimplemented!()
-} // TODO
-unsafe fn StatsShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn StatsShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn BackendStatusShmemSize() -> Size { crate::utils::activity::backend_status::BackendStatusShmemSize() }
+unsafe fn BackendStatusShmemInit() { crate::utils::activity::backend_status::BackendStatusShmemInit() }
+unsafe fn StatsShmemSize() -> Size { crate::utils::activity::pgstat_shmem::StatsShmemSize() }
+unsafe fn StatsShmemInit() { crate::utils::activity::pgstat_shmem::StatsShmemInit() }
 
-// storage/sinvaladt.h SharedInvalShmemSize(), SharedInvalShmemInit()
-unsafe fn SharedInvalShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn SharedInvalShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn SharedInvalShmemSize() -> Size { crate::storage::ipc::sinvaladt::SharedInvalShmemSize() }
+unsafe fn SharedInvalShmemInit() { crate::storage::ipc::sinvaladt::SharedInvalShmemInit() }
 
-// storage/pmsignal.h PMSignalShmemSize(), PMSignalShmemInit()
-unsafe fn PMSignalShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn PMSignalShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn PMSignalShmemSize() -> Size { crate::storage::ipc::pmsignal::PMSignalShmemSize() }
+unsafe fn PMSignalShmemInit() { crate::storage::ipc::pmsignal::PMSignalShmemInit() }
 
-// storage/procsignal.h ProcSignalShmemSize(), ProcSignalShmemInit()
-unsafe fn ProcSignalShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn ProcSignalShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn ProcSignalShmemSize() -> Size { crate::storage::ipc::procsignal::ProcSignalShmemSize() }
+unsafe fn ProcSignalShmemInit() { crate::storage::ipc::procsignal::ProcSignalShmemInit() }
 
-// postmaster/bgwriter.h CheckpointerShmemSize(), CheckpointerShmemInit()
-unsafe fn CheckpointerShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn CheckpointerShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn CheckpointerShmemSize() -> Size { crate::postmaster::checkpointer::CheckpointerShmemSize() }
+unsafe fn CheckpointerShmemInit() { crate::postmaster::checkpointer::CheckpointerShmemInit() }
 
-// postmaster/autovacuum.h AutoVacuumShmemSize(), AutoVacuumShmemInit()
-unsafe fn AutoVacuumShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn AutoVacuumShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn AutoVacuumShmemSize() -> Size { crate::postmaster::autovacuum::AutoVacuumShmemSize() }
+unsafe fn AutoVacuumShmemInit() { crate::postmaster::autovacuum::AutoVacuumShmemInit() }
 
-// replication/slot.h ReplicationSlotsShmemSize(), ReplicationSlotsShmemInit()
-unsafe fn ReplicationSlotsShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn ReplicationSlotsShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn ReplicationSlotsShmemSize() -> Size { crate::replication::slot::ReplicationSlotsShmemSize() }
+unsafe fn ReplicationSlotsShmemInit() { crate::replication::slot::ReplicationSlotsShmemInit() }
 
-// replication/origin.h ReplicationOriginShmemSize(), ReplicationOriginShmemInit()
-unsafe fn ReplicationOriginShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn ReplicationOriginShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn ReplicationOriginShmemSize() -> Size { crate::replication::logical::origin::ReplicationOriginShmemSize() }
+unsafe fn ReplicationOriginShmemInit() { crate::replication::logical::origin::ReplicationOriginShmemInit() }
 
-// replication/walsender.h WalSndShmemSize(), WalSndShmemInit()
-unsafe fn WalSndShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn WalSndShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn WalSndShmemSize() -> Size { crate::replication::walsender::WalSndShmemSize() }
+unsafe fn WalSndShmemInit() { crate::replication::walsender::WalSndShmemInit() }
 
-// replication/walreceiver.h WalRcvShmemSize(), WalRcvShmemInit()
-unsafe fn WalRcvShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn WalRcvShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn WalRcvShmemSize() -> Size { crate::replication::walreceiverfuncs::WalRcvShmemSize() }
+unsafe fn WalRcvShmemInit() { crate::replication::walreceiverfuncs::WalRcvShmemInit() }
 
-// postmaster/walsummarizer.h WalSummarizerShmemSize(), WalSummarizerShmemInit()
-unsafe fn WalSummarizerShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn WalSummarizerShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn WalSummarizerShmemSize() -> Size { crate::postmaster::walsummarizer::WalSummarizerShmemSize() }
+unsafe fn WalSummarizerShmemInit() { crate::postmaster::walsummarizer::WalSummarizerShmemInit() }
 
-// postmaster/pgarch.h PgArchShmemSize(), PgArchShmemInit()
-unsafe fn PgArchShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn PgArchShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn PgArchShmemSize() -> Size { crate::postmaster::pgarch::PgArchShmemSize() }
+unsafe fn PgArchShmemInit() { crate::postmaster::pgarch::PgArchShmemInit() }
 
-// replication/logicallauncher.h ApplyLauncherShmemSize(), ApplyLauncherShmemInit()
-unsafe fn ApplyLauncherShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn ApplyLauncherShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn ApplyLauncherShmemSize() -> Size { crate::replication::logical::launcher::ApplyLauncherShmemSize() }
+unsafe fn ApplyLauncherShmemInit() { crate::replication::logical::launcher::ApplyLauncherShmemInit() }
 
-// replication/slotsync.h SlotSyncShmemSize(), SlotSyncShmemInit()
-unsafe fn SlotSyncShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn SlotSyncShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn SlotSyncShmemSize() -> Size { crate::replication::logical::slotsync::SlotSyncShmemSize() }
+unsafe fn SlotSyncShmemInit() { crate::replication::logical::slotsync::SlotSyncShmemInit() }
 
-// access/nbtree.h BTreeShmemSize(), BTreeShmemInit()
-unsafe fn BTreeShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn BTreeShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn BTreeShmemSize() -> Size { crate::access::nbtree::nbtutils::BTreeShmemSize() }
+unsafe fn BTreeShmemInit() { crate::access::nbtree::nbtutils::BTreeShmemInit() }
 
-// access/syncscan.h SyncScanShmemSize(), SyncScanShmemInit()
-unsafe fn SyncScanShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn SyncScanShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn SyncScanShmemSize() -> Size { crate::access::common::syncscan::SyncScanShmemSize() }
+unsafe fn SyncScanShmemInit() { crate::access::common::syncscan::SyncScanShmemInit() }
 
-// commands/async.h AsyncShmemSize(), AsyncShmemInit()
-unsafe fn AsyncShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn AsyncShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn AsyncShmemSize() -> Size { crate::commands::r#async::AsyncShmemSize() }
+unsafe fn AsyncShmemInit() { crate::commands::r#async::AsyncShmemInit() }
 
-// utils/wait_event.h WaitEventCustomShmemSize(), WaitEventCustomShmemInit()
-unsafe fn WaitEventCustomShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn WaitEventCustomShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn WaitEventCustomShmemSize() -> Size { crate::utils::activity::wait_event::WaitEventCustomShmemSize() }
+unsafe fn WaitEventCustomShmemInit() { crate::utils::activity::wait_event::WaitEventCustomShmemInit() }
 
-// utils/injection_point.h InjectionPointShmemSize(), InjectionPointShmemInit()
-unsafe fn InjectionPointShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn InjectionPointShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn InjectionPointShmemSize() -> Size { crate::utils::misc::injection_point::InjectionPointShmemSize() }
+unsafe fn InjectionPointShmemInit() { crate::utils::misc::injection_point::InjectionPointShmemInit() }
 
-// storage/aio_subsys.h AioShmemSize(), AioShmemInit()
-unsafe fn AioShmemSize() -> Size {
-    unimplemented!()
-} // TODO
-unsafe fn AioShmemInit() {
-    unimplemented!()
-} // TODO
+unsafe fn AioShmemSize() -> Size { crate::storage::aio::aio_init::AioShmemSize() }
+unsafe fn AioShmemInit() { crate::storage::aio::aio_init::AioShmemInit() }
 
-// storage/shmem.h InitShmemAccess(), InitShmemAllocation(), InitShmemIndex()
-unsafe fn InitShmemAccess(_seghdr: *mut c_void) {
-    unimplemented!()
-} // TODO
-unsafe fn InitShmemAllocation() {
-    unimplemented!()
-} // TODO
-unsafe fn InitShmemIndex() {
-    unimplemented!()
-} // TODO
+unsafe fn InitShmemAccess(seghdr: *mut c_void) { crate::storage::ipc::shmem::InitShmemAccess(seghdr as *mut crate::storage::ipc::shmem::PGShmemHeader) }
+unsafe fn InitShmemAllocation() { crate::storage::ipc::shmem::InitShmemAllocation() }
+unsafe fn InitShmemIndex() { crate::storage::ipc::shmem::InitShmemIndex() }
 
-// utils/guc.h GetConfigOption(), SetConfigOption()
-unsafe fn GetConfigOption(
-    _name: *const c_char,
-    _missing_ok: bool,
-    _restrict_privileged: bool,
-) -> *const c_char {
-    unimplemented!()
-} // TODO
-unsafe fn SetConfigOption(
-    _name: *const c_char,
-    _value: *const c_char,
-    _context: c_int,
-    _source: c_int,
-) {
-    unimplemented!()
-} // TODO
+unsafe fn GetConfigOption(name: *const c_char, missing_ok: bool, restrict_privileged: bool) -> *const c_char { crate::utils::misc::guc::GetConfigOption(name, missing_ok, restrict_privileged) }
+unsafe fn SetConfigOption(name: *const c_char, value: *const c_char, context: GucContext, source: GucSource) { crate::utils::misc::guc::SetConfigOption(name, value, context, source) }

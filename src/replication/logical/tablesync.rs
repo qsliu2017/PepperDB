@@ -260,7 +260,7 @@ const LW_SHARED: c_int = 1;
 const LW_EXCLUSIVE: c_int = 2;
 
 // Syscache IDs - TODO(pg-port): utils/syscache.h.
-const SUBSCRIPTIONOID: c_int = 108;
+const SUBSCRIPTIONOID: c_int = 67;
 
 // int2 oid, text oid, etc. - TODO(pg-port): catalog/pg_type.h.
 const OIDOID: Oid = 26;
@@ -277,10 +277,10 @@ static mut wal_retrieve_retry_interval: c_int = 5000;
 // MyProc - storage/proc.h.
 // TODO(pg-port): declared in storage/proc.c.
 // (plain Rust statics - extern FFI not needed for stubs; real homes: proc.c, globals.c, mcxt.c)
-static mut MyProc: *mut c_void = std::ptr::null_mut();
+extern "C" { pub static mut MyProc: *mut c_void; }
 static mut MyLatch: *mut c_void = std::ptr::null_mut();
 static mut CacheMemoryContext: MemoryContext = std::ptr::null_mut();
-static mut LogicalRepWorkerLock: u8 = 0; // LWLockPadded stub
+use crate::backend_link_shims::LogicalRepWorkerLock; // canonical runtime-assigned global
 
 // ---------------------------------------------------------------------------
 // Local stub: HTAB hash table.  Re-uses the xlogutils pattern.
@@ -316,25 +316,19 @@ unsafe fn BeginCopyFrom(
     unimplemented!() // TODO(pg-port): BeginCopyFrom not yet ported
 }
 
-unsafe fn CopyFrom(_cstate: CopyFromState) -> u64 {
-    unimplemented!() // TODO(pg-port): CopyFrom not yet ported
-}
+unsafe fn CopyFrom(cstate: CopyFromState) -> u64 { unimplemented!() }
 
 // parser/parse_relation.h - TODO(pg-port).
 unsafe fn addRangeTableEntryForRelation(
-    _pstate: *mut ParseState,
-    _rel: Relation,
-    _lockmode: c_int,
-    _alias: *mut c_void,
-    _inh: bool,
-    _inFromCl: bool,
-) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): addRangeTableEntryForRelation not yet ported
-}
+    pstate: *mut ParseState,
+    rel: Relation,
+    lockmode: c_int,
+    alias: *mut c_void,
+    inh: bool,
+    inFromCl: bool,
+) -> *mut c_void { unimplemented!() }
 
-unsafe fn make_parsestate(_parent: *mut ParseState) -> *mut ParseState {
-    unimplemented!() // TODO(pg-port): make_parsestate not yet ported
-}
+unsafe fn make_parsestate(parent: *mut ParseState) -> *mut ParseState { unimplemented!() }
 
 // nodes/makefuncs.h - TODO(pg-port).
 unsafe fn makeString(_str: *mut c_char) -> *mut c_void {
@@ -350,22 +344,14 @@ unsafe fn makeDefElem(
 }
 
 // utils/lsyscache.h - TODO(pg-port).
-unsafe fn get_rel_name(_relid: Oid) -> *const c_char {
-    unimplemented!() // TODO(pg-port): get_rel_name not yet ported
-}
+unsafe fn get_rel_name(relid: Oid) -> *const c_char { crate::utils::cache::lsyscache::get_rel_name(relid as _) as _ }
 
-unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): get_namespace_name not yet ported
-}
+unsafe fn get_namespace_name(nspid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_namespace_name(nspid as _) }
 
 // utils/acl.h - TODO(pg-port).
-unsafe fn pg_class_aclcheck(_reloid: Oid, _roleid: Oid, _mode: c_int) -> AclResult {
-    unimplemented!() // TODO(pg-port): pg_class_aclcheck not yet ported
-}
+unsafe fn pg_class_aclcheck(reloid: Oid, roleid: Oid, mode: c_int) -> AclResult { unimplemented!() }
 
-unsafe fn aclcheck_error(_result: AclResult, _objtype: c_int, _objectname: *const c_char) {
-    unimplemented!() // TODO(pg-port): aclcheck_error not yet ported
-}
+unsafe fn aclcheck_error(result: AclResult, objtype: c_int, objectname: *const c_char) { unimplemented!() }
 
 unsafe fn get_relkind_objtype(_relkind: c_char) -> c_int {
     unimplemented!() // TODO(pg-port): get_relkind_objtype not yet ported
@@ -374,31 +360,21 @@ unsafe fn get_relkind_objtype(_relkind: c_char) -> c_int {
 // utils/rls.h - TODO(pg-port).
 const RLS_ENABLED: c_int = 2;
 
-unsafe fn check_enable_rls(_reloid: Oid, _checkAsUserId: Oid, _noError: bool) -> c_int {
-    unimplemented!() // TODO(pg-port): check_enable_rls not yet ported
-}
+unsafe fn check_enable_rls(reloid: Oid, checkAsUserId: Oid, noError: bool) -> c_int { crate::utils::misc::rls::check_enable_rls(reloid as _, checkAsUserId as _, noError) }
 
 // utils/snapmgr.h - TODO(pg-port).
-unsafe fn PushActiveSnapshot(_snap: *mut c_void) {
-    unimplemented!() // TODO(pg-port): PushActiveSnapshot not yet ported
-}
+unsafe fn PushActiveSnapshot(snap: *mut c_void) { crate::utils::time::snapmgr::PushActiveSnapshot(snap as _) }
 
-unsafe fn PopActiveSnapshot() {
-    unimplemented!() // TODO(pg-port): PopActiveSnapshot not yet ported
-}
+unsafe fn PopActiveSnapshot() { crate::utils::time::snapmgr::PopActiveSnapshot() }
 
 unsafe fn GetTransactionSnapshot() -> *mut c_void {
     unimplemented!() // TODO(pg-port): GetTransactionSnapshot not yet ported
 }
 
 // utils/usercontext.h - TODO(pg-port).
-unsafe fn SwitchToUntrustedUser(_roleid: Oid, _ucxt: *mut UserContext) {
-    unimplemented!() // TODO(pg-port): SwitchToUntrustedUser not yet ported
-}
+unsafe fn SwitchToUntrustedUser(roleid: Oid, ucxt: *mut UserContext) { crate::utils::init::usercontext::SwitchToUntrustedUser(roleid as _, ucxt as _) }
 
-unsafe fn RestoreUserContext(_ucxt: *mut UserContext) {
-    unimplemented!() // TODO(pg-port): RestoreUserContext not yet ported
-}
+unsafe fn RestoreUserContext(ucxt: *mut UserContext) { crate::utils::init::usercontext::RestoreUserContext(ucxt as _) }
 
 // utils/memutils.h - TODO(pg-port).
 unsafe fn MemoryContextSwitchTo(_cxt: MemoryContext) -> MemoryContext {
@@ -414,26 +390,18 @@ unsafe fn IsTransactionState() -> bool {
     unimplemented!() // TODO(pg-port): IsTransactionState not yet ported
 }
 
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO(pg-port): GetUserId not yet ported
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 
 unsafe fn GetUserNameFromId(_roleid: Oid, _noerr: bool) -> *const c_char {
     unimplemented!() // TODO(pg-port): GetUserNameFromId not yet ported
 }
 
 // access/xact.h - TODO(pg-port).
-unsafe fn CommitTransactionCommand() {
-    unimplemented!() // TODO(pg-port): CommitTransactionCommand not yet ported
-}
+unsafe fn CommitTransactionCommand() { crate::access::transam::xact::CommitTransactionCommand() }
 
-unsafe fn StartTransactionCommand() {
-    unimplemented!() // TODO(pg-port): StartTransactionCommand not yet ported
-}
+unsafe fn StartTransactionCommand() { crate::access::transam::xact::StartTransactionCommand() }
 
-unsafe fn AbortOutOfAnyTransaction() {
-    unimplemented!() // TODO(pg-port): AbortOutOfAnyTransaction not yet ported
-}
+unsafe fn AbortOutOfAnyTransaction() { crate::access::transam::xact::AbortOutOfAnyTransaction() }
 
 unsafe fn CommandCounterIncrement() {
     unimplemented!() // TODO(pg-port): CommandCounterIncrement not yet ported
@@ -485,36 +453,24 @@ unsafe fn SpinLockRelease(_lock: *mut c_void) {
 }
 
 // access/xlog.h - TODO(pg-port).
-unsafe fn XLogFlush(_lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): XLogFlush not yet ported
-}
+unsafe fn XLogFlush(lsn: XLogRecPtr) { crate::access::transam::xlog::XLogFlush(lsn as _) }
 
-unsafe fn GetXLogWriteRecPtr() -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): GetXLogWriteRecPtr not yet ported
-}
+unsafe fn GetXLogWriteRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetXLogWriteRecPtr() }
 
 // pgstat.h - TODO(pg-port).
-unsafe fn pgstat_report_stat(_force: bool) {
-    unimplemented!() // TODO(pg-port): pgstat_report_stat not yet ported
-}
+unsafe fn pgstat_report_stat(force: bool) { crate::utils::activity::pgstat::pgstat_report_stat(force); }
 
-unsafe fn pgstat_report_subscription_error(_suboid: Oid, _isexit: bool) {
-    unimplemented!() // TODO(pg-port): pgstat_report_subscription_error not yet ported
-}
+unsafe fn pgstat_report_subscription_error(suboid: Oid, isexit: bool) { crate::utils::activity::pgstat_subscription::pgstat_report_subscription_error(suboid as _, isexit) }
 
 // catalog/indexing.h - TODO(pg-port).
 unsafe fn CatalogTupleUpdate(
-    _heapRel: Relation,
-    _otid: *mut c_void,
-    _tup: HeapTuple,
-) {
-    unimplemented!() // TODO(pg-port): CatalogTupleUpdate not yet ported
-}
+    heapRel: Relation,
+    otid: *mut c_void,
+    tup: HeapTuple,
+) { unimplemented!() }
 
 // utils/syscache.h - TODO(pg-port).
-unsafe fn SearchSysCacheCopy1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): SearchSysCacheCopy1 not yet ported
-}
+unsafe fn SearchSysCacheCopy1(cacheId: c_int, key1: Datum) -> HeapTuple { unimplemented!() }
 
 // utils/rel.h - TODO(pg-port).
 unsafe fn RelationGetRelid(_rel: Relation) -> Oid {
@@ -558,9 +514,7 @@ unsafe fn ARR_DIMS(_arr: *mut ArrayType) -> *mut c_int {
     unimplemented!() // TODO(pg-port): ARR_DIMS not yet ported
 }
 
-unsafe fn ARR_DATA_PTR(_arr: *mut ArrayType) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): ARR_DATA_PTR not yet ported
-}
+unsafe fn ARR_DATA_PTR(arr: *mut ArrayType) -> *mut c_void { crate::utils::array::ARR_DATA_PTR(arr as _) as _ }
 
 // nodes/bitmapset.h - TODO(pg-port).
 unsafe fn bms_add_member(_a: *mut Bitmapset, _x: c_int) -> *mut Bitmapset {
@@ -581,40 +535,30 @@ unsafe fn GetSubscriptionRelState(
 }
 
 unsafe fn UpdateSubscriptionRelState(
-    _subid: Oid,
-    _relid: Oid,
-    _state: c_char,
-    _sublsn: XLogRecPtr,
-    _acquire_lock: bool,
-) {
-    unimplemented!() // TODO(pg-port): UpdateSubscriptionRelState not yet ported
-}
+    subid: Oid,
+    relid: Oid,
+    state: c_char,
+    sublsn: XLogRecPtr,
+    acquire_lock: bool,
+) { crate::catalog::pg_subscription::UpdateSubscriptionRelState(subid as _, relid as _, state as _, sublsn as _, acquire_lock) }
 
-unsafe fn GetSubscriptionRelations(_subid: Oid, _not_ready: bool) -> *mut List {
-    unimplemented!() // TODO(pg-port): GetSubscriptionRelations not yet ported
-}
+unsafe fn GetSubscriptionRelations(subid: Oid, not_ready: bool) -> *mut List { crate::catalog::pg_subscription::GetSubscriptionRelations(subid as _, not_ready) }
 
-unsafe fn HasSubscriptionRelations(_subid: Oid) -> bool {
-    unimplemented!() // TODO(pg-port): HasSubscriptionRelations not yet ported
-}
+unsafe fn HasSubscriptionRelations(subid: Oid) -> bool { crate::catalog::pg_subscription::HasSubscriptionRelations(subid as _) }
 
 // catalog/pg_publication.h - TODO(pg-port).
 unsafe fn GetPublicationsStr(
-    _publications: *mut List,
-    _buf: *mut crate::lib::stringinfo::StringInfoData,
-    _is_where: bool,
-) {
-    unimplemented!() // TODO(pg-port): GetPublicationsStr not yet ported
-}
+    publications: *mut List,
+    buf: *mut crate::lib::stringinfo::StringInfoData,
+    is_where: bool,
+) { crate::catalog::pg_subscription::GetPublicationsStr(publications as _, buf as _, is_where) }
 
 // Replication slot drop at publisher node - replication/slot.h - TODO(pg-port).
 unsafe fn ReplicationSlotDropAtPubNode(
-    _conn: *mut c_void,
-    _slotname: *const c_char,
-    _missing_ok: bool,
-) {
-    unimplemented!() // TODO(pg-port): ReplicationSlotDropAtPubNode not yet ported
-}
+    conn: *mut c_void,
+    slotname: *const c_char,
+    missing_ok: bool,
+) { unimplemented!() }
 
 // walrcv_exec / walrcv_clear_result - vtable wrappers.
 // TODO(pg-port): real implementations live in walreceiver.c via WalReceiverFunctions vtable.
@@ -631,6 +575,7 @@ unsafe fn walrcv_clear_result(_walres: *mut WalRcvExecResult) {
     unimplemented!() // TODO(pg-port): walrcv_clear_result not yet ported
 }
 
+#[no_mangle]
 unsafe fn walrcv_server_version(_conn: *mut c_void) -> c_int {
     unimplemented!() // TODO(pg-port): walrcv_server_version not yet ported
 }
@@ -643,13 +588,9 @@ unsafe fn MakeSingleTupleTableSlot(
     unimplemented!() // TODO(pg-port): MakeSingleTupleTableSlot not yet ported
 }
 
-unsafe fn ExecDropSingleTupleTableSlot(_slot: *mut TupleTableSlot) {
-    unimplemented!() // TODO(pg-port): ExecDropSingleTupleTableSlot not yet ported
-}
+unsafe fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot) { crate::executor::execTuples::ExecDropSingleTupleTableSlot(slot as _) }
 
-unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!() // TODO(pg-port): ExecClearTuple not yet ported
-}
+unsafe fn ExecClearTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot { unimplemented!() }
 
 unsafe fn slot_getattr(
     _slot: *mut TupleTableSlot,
@@ -660,34 +601,24 @@ unsafe fn slot_getattr(
 }
 
 unsafe fn tuplestore_gettupleslot(
-    _state: *mut c_void,
-    _forward: bool,
-    _copy: bool,
-    _slot: *mut TupleTableSlot,
-) -> bool {
-    unimplemented!() // TODO(pg-port): tuplestore_gettupleslot not yet ported
-}
+    state: *mut c_void,
+    forward: bool,
+    copy: bool,
+    slot: *mut TupleTableSlot,
+) -> bool { crate::utils::sort::tuplestore::tuplestore_gettupleslot(state as _, forward, copy, slot as _) }
 
-unsafe fn tuplestore_tuple_count(_state: *mut c_void) -> i64 {
-    unimplemented!() // TODO(pg-port): tuplestore_tuple_count not yet ported
-}
+unsafe fn tuplestore_tuple_count(state: *mut c_void) -> i64 { crate::utils::sort::tuplestore::tuplestore_tuple_count(state as _) as _ }
 
 // Datum getters - TODO(pg-port): postgres.h / fmgr.h.
 unsafe fn DatumGetObjectId(_d: Datum) -> Oid {
     unimplemented!() // TODO(pg-port): DatumGetObjectId not yet ported
 }
 
-unsafe fn DatumGetChar(_d: Datum) -> c_char {
-    unimplemented!() // TODO(pg-port): DatumGetChar not yet ported
-}
+unsafe fn DatumGetChar(d: Datum) -> c_char { crate::postgres::DatumGetChar(d as _) }
 
-unsafe fn DatumGetInt16(_d: Datum) -> i16 {
-    unimplemented!() // TODO(pg-port): DatumGetInt16 not yet ported
-}
+unsafe fn DatumGetInt16(d: Datum) -> i16 { crate::postgres::DatumGetInt16(d as _) as _ }
 
-unsafe fn DatumGetBool(_d: Datum) -> bool {
-    unimplemented!() // TODO(pg-port): DatumGetBool not yet ported
-}
+unsafe fn DatumGetBool(d: Datum) -> bool { crate::postgres::DatumGetBool(d as _) }
 
 unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char {
     unimplemented!() // TODO(pg-port): TextDatumGetCString not yet ported
@@ -750,9 +681,7 @@ unsafe fn initStringInfo(_buf: *mut StringInfoData) {
     unimplemented!() // TODO(pg-port): initStringInfo not yet ported
 }
 
-unsafe fn resetStringInfo(_buf: *mut StringInfoData) {
-    unimplemented!() // TODO(pg-port): resetStringInfo not yet ported
-}
+unsafe fn resetStringInfo(buf: *mut StringInfoData) { crate::lib::stringinfo::resetStringInfo(buf as _) }
 
 unsafe fn appendStringInfo(_buf: *mut StringInfoData, _fmt: *const c_char) {
     unimplemented!() // TODO(pg-port): appendStringInfo not yet ported
@@ -766,37 +695,27 @@ unsafe fn appendStringInfoChar(_buf: *mut StringInfoData, _ch: c_char) {
     unimplemented!() // TODO(pg-port): appendStringInfoChar not yet ported
 }
 
-unsafe fn makeStringInfo() -> *mut StringInfoData {
-    unimplemented!() // TODO(pg-port): makeStringInfo not yet ported
-}
+unsafe fn makeStringInfo() -> *mut StringInfoData { crate::lib::stringinfo::makeStringInfo() as _ }
 
-unsafe fn destroyStringInfo(_buf: *mut StringInfoData) {
-    unimplemented!() // TODO(pg-port): destroyStringInfo not yet ported
-}
+unsafe fn destroyStringInfo(buf: *mut StringInfoData) { crate::lib::stringinfo::destroyStringInfo(buf as _) }
 
 // heap_modify_tuple / heap_freetuple - access/htup_details.h - TODO(pg-port).
 unsafe fn heap_modify_tuple(
-    _tuple: HeapTuple,
-    _tupleDesc: *mut TupleDesc,
-    _replValues: *mut Datum,
-    _replIsnull: *mut bool,
-    _doReplace: *mut bool,
-) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): heap_modify_tuple not yet ported
-}
+    tuple: HeapTuple,
+    tupleDesc: *mut TupleDesc,
+    replValues: *mut Datum,
+    replIsnull: *mut bool,
+    doReplace: *mut bool,
+) -> HeapTuple { unimplemented!() }
 
-unsafe fn heap_freetuple(_htup: HeapTuple) {
-    unimplemented!() // TODO(pg-port): heap_freetuple not yet ported
-}
+unsafe fn heap_freetuple(htup: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(htup as _) }
 
 unsafe fn HeapTupleIsValid(_htup: HeapTuple) -> bool {
     unimplemented!() // TODO(pg-port): HeapTupleIsValid not yet ported
 }
 
 // proc_exit - storage/ipc.h - TODO(pg-port).
-unsafe fn proc_exit(_code: c_int) -> ! {
-    unimplemented!() // TODO(pg-port): proc_exit not yet ported
-}
+unsafe fn proc_exit(code: c_int) -> ! { crate::storage::ipc::ipc::proc_exit(code as _) }
 
 // CHECK_FOR_INTERRUPTS - miscadmin.h.
 // In PostgreSQL this is a macro that checks for pending interrupts.
@@ -815,42 +734,32 @@ const InvalidXLogRecPtr: XLogRecPtr = 0;
 
 // hash table helpers - utils/dynahash.h - TODO(pg-port).
 unsafe fn hash_create(
-    _tabname: *const c_char,
-    _nelem: c_int,
-    _info: *const HASHCTL,
-    _flags: c_int,
-) -> *mut HTAB {
-    unimplemented!() // TODO(pg-port): hash_create not yet ported
-}
+    tabname: *const c_char,
+    nelem: c_int,
+    info: *const HASHCTL,
+    flags: c_int,
+) -> *mut HTAB { unimplemented!() }
 
 unsafe fn hash_search(
-    _hashp: *mut HTAB,
-    _keyPtr: *const c_void,
-    _action: c_int,
-    _foundPtr: *mut bool,
-) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): hash_search not yet ported
-}
+    hashp: *mut HTAB,
+    keyPtr: *const c_void,
+    action: c_int,
+    foundPtr: *mut bool,
+) -> *mut c_void { todo!("TODO(pg-port): hash_search") }
 
-unsafe fn hash_destroy(_hashp: *mut HTAB) {
-    unimplemented!() // TODO(pg-port): hash_destroy not yet ported
-}
+unsafe fn hash_destroy(hashp: *mut HTAB) { crate::utils::hash::dynahash::hash_destroy(hashp as _) }
 
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!() // TODO(pg-port): GetCurrentTimestamp not yet ported
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 
 unsafe fn TimestampDifferenceExceeds(
-    _start_time: TimestampTz,
-    _stop_time: TimestampTz,
-    _msec: c_int,
-) -> bool {
-    unimplemented!() // TODO(pg-port): TimestampDifferenceExceeds not yet ported
-}
+    start_time: TimestampTz,
+    stop_time: TimestampTz,
+    msec: c_int,
+) -> bool { crate::utils::adt::timestamp::TimestampDifferenceExceeds(start_time as _, stop_time as _, msec as _) }
 
-unsafe fn InvalidateCatalogSnapshot() {
-    unimplemented!() // TODO(pg-port): InvalidateCatalogSnapshot not yet ported
-}
+unsafe fn InvalidateCatalogSnapshot() { crate::utils::time::snapmgr::InvalidateCatalogSnapshot() }
 
 // ---------------------------------------------------------------------------
 // Module state
@@ -945,13 +854,13 @@ unsafe fn wait_for_relation_state_change(relid: Oid, expected_state: c_char) -> 
         }
 
         /* Check if the sync worker is still running and bail if not. */
-        LWLockAcquire(&raw mut LogicalRepWorkerLock as *mut c_void, LW_SHARED);
+        LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
         worker = logicalrep_worker_find(
             (*MyLogicalRepWorker).subid,
             relid,
             false,
         );
-        LWLockRelease(&raw mut LogicalRepWorkerLock as *mut c_void);
+        LWLockRelease(LogicalRepWorkerLock);
         if worker.is_null() {
             break;
         }
@@ -1001,7 +910,7 @@ unsafe fn wait_for_worker_state_change(expected_state: c_char) -> bool {
          * Bail out if the apply worker has died, else signal it we're
          * waiting.
          */
-        LWLockAcquire(&raw mut LogicalRepWorkerLock as *mut c_void, LW_SHARED);
+        LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
         worker = logicalrep_worker_find(
             (*MyLogicalRepWorker).subid,
             0, /* InvalidOid */
@@ -1010,7 +919,7 @@ unsafe fn wait_for_worker_state_change(expected_state: c_char) -> bool {
         if !worker.is_null() && !(*worker).proc.is_null() {
             logicalrep_worker_wakeup_ptr(worker);
         }
-        LWLockRelease(&raw mut LogicalRepWorkerLock as *mut c_void);
+        LWLockRelease(LogicalRepWorkerLock);
         if worker.is_null() {
             break;
         }
@@ -1041,6 +950,7 @@ unsafe fn wait_for_worker_state_change(expected_state: c_char) -> bool {
 /*
  * Callback from syscache invalidation.
  */
+#[no_mangle]
 pub unsafe fn invalidate_syncing_table_states(
     _arg: Datum,
     _cacheid: c_int,
@@ -1339,7 +1249,7 @@ unsafe fn process_syncing_tables_for_apply(current_lsn: XLogRecPtr) {
             /*
              * Look for a sync worker for this relation.
              */
-            LWLockAcquire(&raw mut LogicalRepWorkerLock as *mut c_void, LW_SHARED);
+            LWLockAcquire(LogicalRepWorkerLock, LW_SHARED);
 
             syncworker = logicalrep_worker_find(
                 (*MyLogicalRepWorker).subid,
@@ -1375,7 +1285,7 @@ unsafe fn process_syncing_tables_for_apply(current_lsn: XLogRecPtr) {
                     }
 
                     /* Now safe to release the LWLock */
-                    LWLockRelease(&raw mut LogicalRepWorkerLock as *mut c_void);
+                    LWLockRelease(LogicalRepWorkerLock);
 
                     if started_tx {
                         /*
@@ -1407,7 +1317,7 @@ unsafe fn process_syncing_tables_for_apply(current_lsn: XLogRecPtr) {
                         SUBREL_STATE_SYNCDONE,
                     );
                 } else {
-                    LWLockRelease(&raw mut LogicalRepWorkerLock as *mut c_void);
+                    LWLockRelease(LogicalRepWorkerLock);
                 }
             } else {
                 /*
@@ -1419,7 +1329,7 @@ unsafe fn process_syncing_tables_for_apply(current_lsn: XLogRecPtr) {
                     logicalrep_sync_worker_count((*MyLogicalRepWorker).subid);
 
                 /* Now safe to release the LWLock */
-                LWLockRelease(&raw mut LogicalRepWorkerLock as *mut c_void);
+                LWLockRelease(LogicalRepWorkerLock);
 
                 /*
                  * If there are free sync worker slot(s), start a new sync
@@ -1518,6 +1428,7 @@ unsafe fn process_syncing_tables_for_apply(current_lsn: XLogRecPtr) {
 /*
  * Process possible state change(s) of tables that are being synchronized.
  */
+#[no_mangle]
 pub unsafe fn process_syncing_tables(current_lsn: XLogRecPtr) {
     match (*MyLogicalRepWorker).type_ {
         WORKERTYPE_PARALLEL_APPLY => {
@@ -2787,6 +2698,7 @@ pub unsafe fn TablesyncWorkerMain(main_arg: crate::postgres::Datum) {
  * Note: This function is not suitable to be called from outside of apply or
  * tablesync workers because MySubscription needs to be already initialized.
  */
+#[no_mangle]
 pub unsafe fn AllTablesyncsReady() -> bool {
     let mut started_tx: bool = false;
     let has_subrels: bool;
@@ -2813,6 +2725,7 @@ pub unsafe fn AllTablesyncsReady() -> bool {
 /*
  * Update the two_phase state of the specified subscription in pg_subscription.
  */
+#[no_mangle]
 pub unsafe fn UpdateTwoPhaseState(suboid: Oid, new_state: c_char) {
     let rel: Relation;
     let mut tup: HeapTuple;

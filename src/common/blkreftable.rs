@@ -50,13 +50,7 @@ pub const BLOCKREFTABLE_MAGIC: uint32 = 0x652b137b;
  * storage/relfilelocator.h (STUB: not yet ported as its own module).
  * RelFileNumber comes from common/relpath.
  */
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct RelFileLocator {
-    pub spcOid: Oid,
-    pub dbOid: Oid,
-    pub relNumber: RelFileNumber,
-}
+pub use crate::storage::relfilelocator::RelFileLocator;
 
 /*
  * The return value of io_callback_fn should be the number of bytes read or

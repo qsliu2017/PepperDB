@@ -199,11 +199,12 @@ extern "C" {
 
 // pull_var_clause flags (nodes/nodeFuncs.h)
 const PVC_INCLUDE_AGGREGATES: i32 = 0x0001;
-const PVC_INCLUDE_WINDOWFUNCS: i32 = 0x0002;
-const PVC_INCLUDE_PLACEHOLDERS: i32 = 0x0004;
-const PVC_INCLUDE_CONVERTROWTYPES: i32 = 0x0008;
-const PVC_RECURSE_AGGREGATES: i32 = 0x0010;
-const PVC_RECURSE_WINDOWFUNCS: i32 = 0x0020;
+const PVC_RECURSE_AGGREGATES: i32 = 0x0002;
+const PVC_INCLUDE_WINDOWFUNCS: i32 = 0x0004;
+const PVC_RECURSE_WINDOWFUNCS: i32 = 0x0008;
+const PVC_INCLUDE_PLACEHOLDERS: i32 = 0x0010;
+const PVC_RECURSE_PLACEHOLDERS: i32 = 0x0020;
+const PVC_INCLUDE_CONVERTROWTYPES: i32 = 0x0040;
 
 // ---------------------------------------------------------------------------
 // optimizer/pathnode.h / paths.h stubs

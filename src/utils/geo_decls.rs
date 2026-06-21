@@ -342,6 +342,30 @@ macro_rules! PG_RETURN_CIRCLE_P {
 // in geo_ops.c
 // ---------------------------------------------------------------------
 
-pub unsafe fn pg_hypot(x: float8, y: float8) -> float8 {
-    unimplemented!()
+pub unsafe fn pg_hypot(mut x: float8, mut y: float8) -> float8 {
+    if x.is_infinite() || y.is_infinite() {
+        return crate::utils::adt::float::get_float8_infinity();
+    }
+    if x.is_nan() || y.is_nan() {
+        return crate::utils::adt::float::get_float8_nan();
+    }
+    x = x.abs();
+    y = y.abs();
+    if x < y {
+        let temp = x;
+        x = y;
+        y = temp;
+    }
+    if y == 0.0 {
+        return x;
+    }
+    let yx = y / x;
+    let result = x * (1.0 + (yx * yx)).sqrt();
+    if result.is_infinite() {
+        crate::utils::adt::float::float_overflow_error();
+    }
+    if result == 0.0 {
+        crate::utils::adt::float::float_underflow_error();
+    }
+    result
 }

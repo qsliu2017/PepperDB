@@ -1,5 +1,6 @@
 //! access/heap module
 pub mod heapam;
+pub mod heapam_handler;
 pub mod heapam_visibility;
 pub mod pruneheap;
 pub mod hio;

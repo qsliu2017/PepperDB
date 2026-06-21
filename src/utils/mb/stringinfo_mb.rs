@@ -27,6 +27,7 @@ extern "C" {
 /// # Safety
 /// `str` must be a writable StringInfo; `s` must be a valid NUL-terminated C
 /// string that is valid in the current database encoding.
+#[no_mangle]
 pub unsafe fn appendStringInfoStringQuoted(str: StringInfo, s: *const c_char, maxlen: c_int) {
     let copy: *mut c_char;
     let mut chunk_search_start: *const c_char;

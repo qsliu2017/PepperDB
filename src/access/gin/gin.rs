@@ -96,18 +96,12 @@ pub static mut GinFuzzySearchLimit: c_int = 0;
 pub static mut gin_pending_list_limit: c_int = 0;
 
 /* ginutil.c */
-pub unsafe fn ginGetStats(index: Relation, stats: *mut GinStatsData) {
-    unimplemented!()
-}
+pub unsafe fn ginGetStats(index: Relation, stats: *mut GinStatsData) { unimplemented!() }
 
 pub unsafe fn ginUpdateStats(
     index: Relation,
     stats: *const GinStatsData,
     is_build: bool,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
-pub unsafe fn _gin_parallel_build_main(seg: *mut dsm_segment, toc: *mut shm_toc) {
-    unimplemented!()
-}
+pub unsafe fn _gin_parallel_build_main(seg: *mut dsm_segment, toc: *mut shm_toc) { unimplemented!() }

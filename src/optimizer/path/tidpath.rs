@@ -126,7 +126,7 @@ unsafe fn create_tidscan_path(
     _tidquals: *mut List,
     _required_outer: Relids,
 ) -> *mut Path {
-    unimplemented!()
+    crate::optimizer::util::pathnode::create_tidscan_path(_root as _, _rel as _, _tidquals as _, _required_outer as _) as _
 }
 
 // TODO(pg-port): real create_tidrangescan_path lives in optimizer/util/pathnode.rs
@@ -136,12 +136,12 @@ unsafe fn create_tidrangescan_path(
     _tidrangequals: *mut List,
     _required_outer: Relids,
 ) -> *mut Path {
-    unimplemented!()
+    crate::optimizer::util::pathnode::create_tidrangescan_path(_root as _, _rel as _, _tidrangequals as _, _required_outer as _) as _
 }
 
 // TODO(pg-port): real add_path lives in optimizer/util/pathnode.rs
 unsafe fn add_path(_parent_rel: *mut RelOptInfo, _new_path: *mut Path) {
-    unimplemented!()
+    crate::optimizer::util::pathnode::add_path(_parent_rel as _, _new_path as _)
 }
 
 /*

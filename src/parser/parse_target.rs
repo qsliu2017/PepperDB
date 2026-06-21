@@ -130,7 +130,7 @@ use crate::parser::parse_relation::expandRTE;
 
 // TODO(pg-port): commands/dbcommands.c get_database_name
 unsafe fn get_database_name(_dbid: Oid) -> *mut c_char {
-    b"template1\0".as_ptr() as *mut c_char
+    crate::commands::dbcommands::get_database_name(_dbid)
 }
 
 // TODO(pg-port): miscadmin.h MyDatabaseId
@@ -138,27 +138,20 @@ static mut MyDatabaseId: Oid = 0;
 
 // TODO(pg-port): nodes/nodeFuncs.c get_expr_result_tupdesc
 unsafe fn get_expr_result_tupdesc(expr: *mut Node, noerror: bool) -> TupleDesc {
-    core::ptr::null_mut()
+    crate::utils::fmgr::funcapi::get_expr_result_tupdesc(expr as _, noerror) as _
 }
 
 // TODO(pg-port): catalog/namespace.c NameListToString
 unsafe fn NameListToString(names: *mut List) -> *mut c_char {
-    b"<namelist>\0".as_ptr() as *mut c_char
+    crate::catalog::namespace::NameListToString(names as _)
 }
 
-// TODO(pg-port): nodes/parsenodes.h TupleDescAttr macro
 unsafe fn TupleDescAttr(tupdesc: TupleDesc, attnum: c_int) -> *mut FormData_pg_attribute {
-    core::ptr::null_mut()
+    crate::access::common::tupdesc::TupleDescAttr(tupdesc as _, attnum) as _
 }
 
-// Form_pg_attribute stub
-struct FormData_pg_attribute {
-    attisdropped: bool,
-    atttypid: Oid,
-    atttypmod: int32,
-    attcollation: Oid,
-    attname: NameData,
-}
+// Use the canonical pg_attribute layout so field offsets match the relcache tupdesc.
+use crate::catalog::pg_attribute::FormData_pg_attribute;
 type Form_pg_attribute = *mut FormData_pg_attribute;
 
 // TODO(pg-port): access/rel.h ACL_SELECT
@@ -1038,6 +1031,12 @@ pub unsafe fn checkInsertTargets(
         use crate::utils::rel::RelationGetNumberOfAttributes;
         use crate::utils::rel::RelationData;
         let numcol: c_int = RelationGetNumberOfAttributes((*pstate).p_target_relation as *mut RelationData);
+        if std::env::var("PDB_BT").is_ok() {
+            let r = (*pstate).p_target_relation as *mut RelationData;
+            let a0 = TupleDescAttr((*r).rd_att, 0);
+            eprintln!("PDB_BT checkInsertTargets numcol={} relnatts={} rd_att_natts={} a0_attnum={} a0_attisdropped={}",
+                numcol, (*(*r).rd_rel).relnatts, (*(*r).rd_att).natts, (*a0).attnum, (*a0).attisdropped);
+        }
         let mut i: c_int;
 
         i = 0;

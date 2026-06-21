@@ -245,9 +245,7 @@ const PGC_SIGHUP: c_int = 1;
 // folded into ereport "C also:" comments below.
 
 // TODO(pg-port): shm_toc_initialize_estimator (storage/shm_toc.h)
-unsafe fn shm_toc_initialize_estimator(_e: *mut shm_toc_estimator) {
-    unimplemented!()
-}
+unsafe fn shm_toc_initialize_estimator(e: *mut shm_toc_estimator) { crate::storage::ipc::shm_toc::shm_toc_initialize_estimator(e as _) }
 
 // TODO(pg-port): shm_toc_estimate_chunk (storage/shm_toc.h)
 unsafe fn shm_toc_estimate_chunk(_e: *mut shm_toc_estimator, _sz: Size) {
@@ -260,19 +258,13 @@ unsafe fn shm_toc_estimate_keys(_e: *mut shm_toc_estimator, _cnt: Size) {
 }
 
 // TODO(pg-port): shm_toc_estimate (storage/shm_toc.h)
-unsafe fn shm_toc_estimate(_e: *mut shm_toc_estimator) -> Size {
-    unimplemented!()
-}
+unsafe fn shm_toc_estimate(e: *mut shm_toc_estimator) -> Size { crate::storage::ipc::shm_toc::shm_toc_estimate(e as _) }
 
 // TODO(pg-port): shm_toc_create (storage/shm_toc.h)
-unsafe fn shm_toc_create(_magic: uint64, _address: *mut c_void, _nbytes: Size) -> *mut shm_toc {
-    unimplemented!()
-}
+unsafe fn shm_toc_create(magic: uint64, address: *mut c_void, nbytes: Size) -> *mut shm_toc { crate::storage::ipc::shm_toc::shm_toc_create(magic as _, address as _, nbytes as _) }
 
 // TODO(pg-port): shm_toc_attach (storage/shm_toc.h)
-unsafe fn shm_toc_attach(_magic: uint64, _address: *mut c_void) -> *mut shm_toc {
-    unimplemented!()
-}
+unsafe fn shm_toc_attach(magic: uint64, address: *mut c_void) -> *mut shm_toc { crate::storage::ipc::shm_toc::shm_toc_attach(magic as _, address as _) }
 
 // TODO(pg-port): shm_toc_allocate (storage/shm_toc.h)
 unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _nbytes: Size) -> *mut c_void {
@@ -290,99 +282,73 @@ unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: uint64, _noError: bool) -> *m
 }
 
 // TODO(pg-port): dsm_create (storage/dsm.h)
-unsafe fn dsm_create(_size: Size, _flags: c_int) -> *mut dsm_segment {
-    unimplemented!()
-}
+unsafe fn dsm_create(size: Size, flags: c_int) -> *mut dsm_segment { crate::storage::ipc::dsm::dsm_create(size as _, flags as _) }
 
 // TODO(pg-port): dsm_attach (storage/dsm.h)
-unsafe fn dsm_attach(_h: dsm_handle) -> *mut dsm_segment {
-    unimplemented!()
-}
+unsafe fn dsm_attach(h: dsm_handle) -> *mut dsm_segment { crate::storage::ipc::dsm::dsm_attach(h) }
 
 // TODO(pg-port): dsm_detach (storage/dsm.h)
-unsafe fn dsm_detach(_seg: *mut dsm_segment) {
-    unimplemented!()
-}
+unsafe fn dsm_detach(seg: *mut dsm_segment) { crate::storage::ipc::dsm::dsm_detach(seg as _) }
 
 // TODO(pg-port): dsm_segment_address (storage/dsm.h)
-unsafe fn dsm_segment_address(_seg: *mut dsm_segment) -> *mut c_void {
-    unimplemented!()
-}
+unsafe fn dsm_segment_address(seg: *mut dsm_segment) -> *mut c_void { crate::storage::ipc::dsm::dsm_segment_address(seg as _) }
 
 // TODO(pg-port): dsm_segment_handle (storage/dsm.h)
-unsafe fn dsm_segment_handle(_seg: *mut dsm_segment) -> dsm_handle {
-    unimplemented!()
-}
+unsafe fn dsm_segment_handle(seg: *mut dsm_segment) -> dsm_handle { crate::storage::ipc::dsm::dsm_segment_handle(seg as _) }
 
 // TODO(pg-port): shm_mq_create (storage/shm_mq.h)
-unsafe fn shm_mq_create(_address: *mut c_void, _size: Size) -> *mut shm_mq {
-    unimplemented!()
-}
+unsafe fn shm_mq_create(address: *mut c_void, size: Size) -> *mut shm_mq { crate::storage::ipc::shm_mq::shm_mq_create(address as _, size as _) }
 
 // TODO(pg-port): shm_mq_set_sender (storage/shm_mq.h)
-unsafe fn shm_mq_set_sender(_mq: *mut shm_mq, _proc: *mut PGPROC) {
-    unimplemented!()
-}
+unsafe fn shm_mq_set_sender(mq: *mut shm_mq, proc: *mut PGPROC) { crate::storage::ipc::shm_mq::shm_mq_set_sender(mq as _, proc as _) }
 
 // TODO(pg-port): shm_mq_set_receiver (storage/shm_mq.h)
-unsafe fn shm_mq_set_receiver(_mq: *mut shm_mq, _proc: *mut PGPROC) {
-    unimplemented!()
-}
+unsafe fn shm_mq_set_receiver(mq: *mut shm_mq, proc: *mut PGPROC) { crate::storage::ipc::shm_mq::shm_mq_set_receiver(mq as _, proc as _) }
 
 // TODO(pg-port): shm_mq_attach (storage/shm_mq.h)
 unsafe fn shm_mq_attach(
-    _mq: *mut shm_mq,
-    _seg: *mut dsm_segment,
-    _handle: *mut c_void,
-) -> *mut shm_mq_handle {
-    unimplemented!()
-}
+    mq: *mut shm_mq,
+    seg: *mut dsm_segment,
+    handle: *mut c_void,
+) -> *mut shm_mq_handle { crate::storage::ipc::shm_mq::shm_mq_attach(mq as _, seg as _, handle as _) }
 
 // TODO(pg-port): shm_mq_detach (storage/shm_mq.h)
-unsafe fn shm_mq_detach(_mqh: *mut shm_mq_handle) {
-    unimplemented!()
-}
+unsafe fn shm_mq_detach(mqh: *mut shm_mq_handle) { crate::storage::ipc::shm_mq::shm_mq_detach(mqh as _) }
 
 // TODO(pg-port): shm_mq_send (storage/shm_mq.h)
 unsafe fn shm_mq_send(
-    _mqh: *mut shm_mq_handle,
-    _nbytes: Size,
-    _data: *const c_void,
-    _nowait: bool,
-    _force_flush: bool,
-) -> shm_mq_result {
-    unimplemented!()
-}
+    mqh: *mut shm_mq_handle,
+    nbytes: Size,
+    data: *const c_void,
+    nowait: bool,
+    force_flush: bool,
+) -> shm_mq_result { crate::storage::ipc::shm_mq::shm_mq_send(mqh as _, nbytes, data as _, nowait, force_flush) }
 
 // TODO(pg-port): shm_mq_receive (storage/shm_mq.h)
 unsafe fn shm_mq_receive(
-    _mqh: *mut shm_mq_handle,
-    _nbytesp: *mut Size,
-    _datap: *mut *mut c_void,
-    _nowait: bool,
-) -> shm_mq_result {
-    unimplemented!()
-}
+    mqh: *mut shm_mq_handle,
+    nbytesp: *mut Size,
+    datap: *mut *mut c_void,
+    nowait: bool,
+) -> shm_mq_result { crate::storage::ipc::shm_mq::shm_mq_receive(mqh as _, nbytesp as _, datap as _, nowait) }
 
 // TODO(pg-port): SpinLockInit (storage/spin.h)
 unsafe fn SpinLockInit(_lock: *mut slock_t) {
-    unimplemented!()
+    crate::storage::spin::SpinLockInit(_lock as _)
 }
 
 // TODO(pg-port): SpinLockAcquire (storage/spin.h)
 unsafe fn SpinLockAcquire(_lock: *mut slock_t) {
-    unimplemented!()
+    crate::storage::spin::SpinLockAcquire(_lock as _)
 }
 
 // TODO(pg-port): SpinLockRelease (storage/spin.h)
 unsafe fn SpinLockRelease(_lock: *mut slock_t) {
-    unimplemented!()
+    crate::storage::spin::SpinLockRelease(_lock as _)
 }
 
 // TODO(pg-port): pg_atomic_init_u32 (port/atomics.h)
-unsafe fn pg_atomic_init_u32(_ptr: *mut pg_atomic_uint32, _val: uint32) {
-    unimplemented!()
-}
+unsafe fn pg_atomic_init_u32(ptr: *mut pg_atomic_uint32, val: uint32) { crate::backend_link_shims::pg_atomic_init_u32(ptr as _, val as _) }
 
 // TODO(pg-port): pg_atomic_read_u32 (port/atomics.h)
 unsafe fn pg_atomic_read_u32(_ptr: *mut pg_atomic_uint32) -> uint32 {
@@ -396,57 +362,45 @@ unsafe fn pg_atomic_sub_fetch_u32(_ptr: *mut pg_atomic_uint32, _sub: uint32) -> 
 
 // TODO(pg-port): WaitLatch (storage/latch.h)
 unsafe fn WaitLatch(
-    _latch: *mut c_void,
-    _wakeEvents: c_int,
-    _timeout: c_long,
-    _wait_event_info: uint32,
-) -> c_int {
-    unimplemented!()
-}
+    latch: *mut c_void,
+    wakeEvents: c_int,
+    timeout: c_long,
+    wait_event_info: uint32,
+) -> c_int { crate::storage::ipc::latch::WaitLatch(latch as _, wakeEvents as _, timeout as _, wait_event_info as _) }
 
 // TODO(pg-port): ResetLatch (storage/latch.h)
-unsafe fn ResetLatch(_latch: *mut c_void) {
-    unimplemented!()
-}
+unsafe fn ResetLatch(latch: *mut c_void) { crate::storage::ipc::latch::ResetLatch(latch as _) }
 
 // TODO(pg-port): SetLatch (storage/latch.h)
-unsafe fn SetLatch(_latch: *mut c_void) {
-    unimplemented!()
-}
+unsafe fn SetLatch(latch: *mut c_void) { crate::storage::ipc::latch::SetLatch(latch as _) }
 
 // TODO(pg-port): hash_create (utils/hsearch.h)
 unsafe fn hash_create(
-    _tabname: *const c_char,
-    _nelem: c_long,
-    _info: *mut HASHCTL,
-    _flags: c_int,
-) -> *mut HTAB {
-    unimplemented!()
-}
+    tabname: *const c_char,
+    nelem: c_long,
+    info: *mut HASHCTL,
+    flags: c_int,
+) -> *mut HTAB { crate::utils::hash::dynahash::hash_create(tabname as _, nelem as _, info as _, flags as _) }
 
 // TODO(pg-port): hash_search (utils/hsearch.h)
 unsafe fn hash_search(
-    _hashp: *mut HTAB,
-    _keyPtr: *const c_void,
-    _action: HASHACTION,
-    _foundPtr: *mut bool,
-) -> *mut c_void {
-    unimplemented!()
-}
+    hashp: *mut HTAB,
+    keyPtr: *const c_void,
+    action: HASHACTION,
+    foundPtr: *mut bool,
+) -> *mut c_void { todo!("TODO(pg-port): hash_search") }
 
 // TODO(pg-port): GetCurrentTimestamp (utils/timestamp)
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!()
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 
 // TODO(pg-port): TimestampDifferenceExceeds (utils/timestamp)
 unsafe fn TimestampDifferenceExceeds(
-    _start_time: TimestampTz,
-    _stop_time: TimestampTz,
-    _msec: c_int,
-) -> bool {
-    unimplemented!()
-}
+    start_time: TimestampTz,
+    stop_time: TimestampTz,
+    msec: c_int,
+) -> bool { crate::utils::adt::timestamp::TimestampDifferenceExceeds(start_time as _, stop_time as _, msec as _) }
 
 // TODO(pg-port): IsTransactionState (access/xact.h)
 unsafe fn IsTransactionState() -> bool {
@@ -454,44 +408,28 @@ unsafe fn IsTransactionState() -> bool {
 }
 
 // TODO(pg-port): IsTransactionBlock (access/xact.h)
-unsafe fn IsTransactionBlock() -> bool {
-    unimplemented!()
-}
+unsafe fn IsTransactionBlock() -> bool { crate::access::transam::xact::IsTransactionBlock() }
 
 // TODO(pg-port): StartTransactionCommand (access/xact.h)
-unsafe fn StartTransactionCommand() {
-    unimplemented!()
-}
+unsafe fn StartTransactionCommand() { crate::access::transam::xact::StartTransactionCommand() }
 
 // TODO(pg-port): CommitTransactionCommand (access/xact.h)
-unsafe fn CommitTransactionCommand() {
-    unimplemented!()
-}
+unsafe fn CommitTransactionCommand() { crate::access::transam::xact::CommitTransactionCommand() }
 
 // TODO(pg-port): AbortCurrentTransaction (access/xact.h)
-unsafe fn AbortCurrentTransaction() {
-    unimplemented!()
-}
+unsafe fn AbortCurrentTransaction() { crate::access::transam::xact::AbortCurrentTransaction() }
 
 // TODO(pg-port): BeginTransactionBlock (access/xact.h)
-unsafe fn BeginTransactionBlock() -> bool {
-    unimplemented!()
-}
+unsafe fn BeginTransactionBlock() -> bool { todo!("TODO(pg-port): BeginTransactionBlock") }
 
 // TODO(pg-port): EndTransactionBlock (access/xact.h)
-unsafe fn EndTransactionBlock(_chain: bool) -> bool {
-    unimplemented!()
-}
+unsafe fn EndTransactionBlock(chain: bool) -> bool { crate::access::transam::xact::EndTransactionBlock(chain) }
 
 // TODO(pg-port): DefineSavepoint (access/xact.h)
-unsafe fn DefineSavepoint(_name: *const c_char) {
-    unimplemented!()
-}
+unsafe fn DefineSavepoint(name: *const c_char) { crate::access::transam::xact::DefineSavepoint(name as _) }
 
 // TODO(pg-port): RollbackToSavepoint (access/xact.h)
-unsafe fn RollbackToSavepoint(_name: *const c_char) {
-    unimplemented!()
-}
+unsafe fn RollbackToSavepoint(name: *const c_char) { crate::access::transam::xact::RollbackToSavepoint(name as _) }
 
 // TODO(pg-port): TopTransactionContext (utils/memutils.h)
 extern "C" {
@@ -499,9 +437,7 @@ extern "C" {
 }
 
 // TODO(pg-port): pqsignal (libpq/pqsignal.h)
-unsafe fn pqsignal(_signo: c_int, _func: extern "C" fn(c_int)) {
-    unimplemented!()
-}
+unsafe fn pqsignal(signo: c_int, func: extern "C" fn(c_int)) { todo!("TODO(pg-port): pqsignal") }
 
 // TODO(pg-port): signal handlers (postmaster/interrupt.h, tcop/tcopprot.h)
 extern "C" {
@@ -515,9 +451,7 @@ const SIGTERM: c_int = 15;
 const SIGUSR2: c_int = 31;
 
 // TODO(pg-port): BackgroundWorkerUnblockSignals (postmaster/bgworker.h)
-unsafe fn BackgroundWorkerUnblockSignals() {
-    unimplemented!()
-}
+unsafe fn BackgroundWorkerUnblockSignals() { crate::postmaster::bgworker::BackgroundWorkerUnblockSignals() }
 
 // TODO(pg-port): CHECK_FOR_INTERRUPTS (miscadmin.h)
 unsafe fn CHECK_FOR_INTERRUPTS() {
@@ -525,66 +459,42 @@ unsafe fn CHECK_FOR_INTERRUPTS() {
 }
 
 // TODO(pg-port): HOLD_INTERRUPTS / RESUME_INTERRUPTS (miscadmin.h)
-unsafe fn HOLD_INTERRUPTS() {
-    unimplemented!()
-}
+unsafe fn HOLD_INTERRUPTS() { crate::miscadmin::HOLD_INTERRUPTS() }
 
-unsafe fn RESUME_INTERRUPTS() {
-    unimplemented!()
-}
+unsafe fn RESUME_INTERRUPTS() { crate::miscadmin::RESUME_INTERRUPTS() }
 
 // TODO(pg-port): proc_exit (storage/ipc.h)
-unsafe fn proc_exit(_code: c_int) {
-    unimplemented!()
-}
+unsafe fn proc_exit(code: c_int) { crate::storage::ipc::ipc::proc_exit(code as _) }
 
 // TODO(pg-port): before_shmem_exit (storage/ipc.h)
-unsafe fn before_shmem_exit(_function: unsafe extern "C" fn(c_int, Datum), _arg: Datum) {
-    unimplemented!()
-}
+unsafe fn before_shmem_exit(function: unsafe extern "C" fn(c_int, Datum), arg: Datum) { crate::storage::ipc::ipc::before_shmem_exit(function, arg as _) }
 
 // TODO(pg-port): ProcessConfigFile (utils/guc.h)
-unsafe fn ProcessConfigFile(_context: c_int) {
-    unimplemented!()
-}
+unsafe fn ProcessConfigFile(context: c_int) { crate::utils::misc::guc::ProcessConfigFile(context as _) }
 
 // TODO(pg-port): SendProcSignal (storage/procsignal.h)
-unsafe fn SendProcSignal(_pid: pid_t, _reason: c_int, _procNumber: c_int) {
-    unimplemented!()
-}
+unsafe fn SendProcSignal(pid: pid_t, reason: c_int, procNumber: c_int) { crate::storage::ipc::procsignal::SendProcSignal(pid, reason as _, procNumber as _); }
 
 type pid_t = c_int;
 
 // TODO(pg-port): pq_getmsgbyte / pq_parse_errornotice (libpq/pqformat.h)
-unsafe fn pq_getmsgbyte(_msg: StringInfo) -> c_int {
-    unimplemented!()
-}
+unsafe fn pq_getmsgbyte(msg: StringInfo) -> c_int { crate::libpq::pqformat::pq_getmsgbyte(msg as _) }
 
-unsafe fn pq_parse_errornotice(_msg: StringInfo, _edata: *mut ErrorData) {
-    unimplemented!()
-}
+unsafe fn pq_parse_errornotice(msg: StringInfo, edata: *mut ErrorData) { crate::libpq::pqmq::pq_parse_errornotice(msg as _, edata as _) }
 
 // TODO(pg-port): pq_redirect_to_shm_mq / pq_set_parallel_leader (libpq/pqmq.h)
-unsafe fn pq_redirect_to_shm_mq(_seg: *mut dsm_segment, _mqh: *mut shm_mq_handle) {
-    unimplemented!()
-}
+unsafe fn pq_redirect_to_shm_mq(seg: *mut dsm_segment, mqh: *mut shm_mq_handle) { crate::libpq::pqmq::pq_redirect_to_shm_mq(seg as _, mqh as _) }
 
-unsafe fn pq_set_parallel_leader(_pid: pid_t, _procNumber: c_int) {
-    unimplemented!()
-}
+unsafe fn pq_set_parallel_leader(pid: pid_t, procNumber: c_int) { crate::libpq::pqmq::pq_set_parallel_leader(pid, procNumber as _) }
 
 // TODO(pg-port): initReadOnlyStringInfo / initStringInfo / appendBinaryStringInfo (lib/stringinfo.h)
-unsafe fn initReadOnlyStringInfo(_str: *mut StringInfoData, _data: *mut c_char, _len: c_int) {
-    unimplemented!()
-}
+unsafe fn initReadOnlyStringInfo(str: *mut StringInfoData, data: *mut c_char, len: c_int) { crate::lib::stringinfo::initReadOnlyStringInfo(str as _, data as _, len as _) }
 
 unsafe fn initStringInfo(_str: *mut StringInfoData) {
     unimplemented!()
 }
 
-unsafe fn appendBinaryStringInfo(_str: *mut StringInfoData, _data: *const c_void, _datalen: c_int) {
-    unimplemented!()
-}
+unsafe fn appendBinaryStringInfo(str: *mut StringInfoData, data: *const c_void, datalen: c_int) { crate::lib::stringinfo::appendBinaryStringInfo(str as _, data as _, datalen as _) }
 
 // TODO(pg-port): psprintf / pstrdup wrappers (utils/builtins.h, utils/palloc.h)
 unsafe fn psprintf_2(_fmt: *const c_char, _a: *const c_char, _b: *const c_char) -> *mut c_char {
@@ -597,43 +507,33 @@ unsafe fn pgstat_report_activity(_state: c_int, _cmd_str: *const c_char) {
 }
 
 // TODO(pg-port): replorigin_by_name / replorigin_session_setup (replication/origin.h)
-unsafe fn replorigin_by_name(_roname: *const c_char, _missing_ok: bool) -> RepOriginId {
-    unimplemented!()
-}
+unsafe fn replorigin_by_name(roname: *const c_char, missing_ok: bool) -> RepOriginId { crate::replication::logical::origin::replorigin_by_name(roname as _, missing_ok) }
 
-unsafe fn replorigin_session_setup(_node: RepOriginId, _acquired_by: c_int) {
-    unimplemented!()
-}
+unsafe fn replorigin_session_setup(node: RepOriginId, acquired_by: c_int) { crate::replication::logical::origin::replorigin_session_setup(node as _, acquired_by as _) }
 
 // TODO(pg-port): CacheRegisterSyscacheCallback (utils/inval.h)
 unsafe fn CacheRegisterSyscacheCallback(
-    _cacheid: c_int,
-    _func: unsafe extern "C" fn(Datum, c_int, uint32),
-    _arg: Datum,
-) {
-    unimplemented!()
-}
+    cacheid: c_int,
+    func: unsafe extern "C" fn(Datum, c_int, uint32),
+    arg: Datum,
+) { crate::utils::cache::inval::CacheRegisterSyscacheCallback(cacheid as _, func, arg as _) }
 
-const SUBSCRIPTIONRELMAP: c_int = 0;
+const SUBSCRIPTIONRELMAP: c_int = 68;
 
 // TODO(pg-port): LockApplyTransactionForSession / UnlockApplyTransactionForSession (storage/lmgr.h)
 unsafe fn LockApplyTransactionForSession(
-    _suboid: Oid,
-    _xid: TransactionId,
-    _objid: uint16,
-    _lockmode: LOCKMODE,
-) {
-    unimplemented!()
-}
+    suboid: Oid,
+    xid: TransactionId,
+    objid: uint16,
+    lockmode: LOCKMODE,
+) { crate::storage::lmgr::lmgr::LockApplyTransactionForSession(suboid as _, xid as _, objid as _, lockmode as _) }
 
 unsafe fn UnlockApplyTransactionForSession(
-    _suboid: Oid,
-    _xid: TransactionId,
-    _objid: uint16,
-    _lockmode: LOCKMODE,
-) {
-    unimplemented!()
-}
+    suboid: Oid,
+    xid: TransactionId,
+    objid: uint16,
+    lockmode: LOCKMODE,
+) { crate::storage::lmgr::lmgr::UnlockApplyTransactionForSession(suboid as _, xid as _, objid as _, lockmode as _) }
 
 // TODO(pg-port): MemSet (c.h)
 unsafe fn MemSet(ptr: *mut c_void, val: c_int, len: usize) {

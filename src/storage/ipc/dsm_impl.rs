@@ -102,6 +102,7 @@ pub struct config_enum_entry {
 
 unsafe impl Sync for config_enum_entry {}
 
+#[no_mangle]
 pub static dynamic_shared_memory_options: [config_enum_entry; 4] = [
     config_enum_entry {
         name: c"posix".as_ptr(),

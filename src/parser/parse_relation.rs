@@ -70,10 +70,9 @@ use crate::nodes::primnodes::{
     VarReturningType::*,
 };
 use crate::nodes::value::{makeString, String as PgString};
-// copyObjectImpl: copyfuncs module not yet enabled; stub below
 #[allow(dead_code)]
 unsafe fn copyObjectImpl(from: *const core::ffi::c_void) -> *mut core::ffi::c_void {
-    unimplemented!("copyObjectImpl not yet translated")
+    crate::nodes::copyfuncs::copyObjectImpl(from)
 }
 
 use crate::parser::parse_enr::{get_visible_ENR, name_matches_visible_ENR};
@@ -127,33 +126,31 @@ unsafe fn isLockedRefname_lmgr(_pstate: *mut ParseState, _refname: *const c_char
 
 // TODO(pg-port): storage/lmgr/lmgr.c - CheckRelationLockedByMe
 unsafe fn CheckRelationLockedByMe(_rel: Relation, _lockmode: LOCKMODE, _orstronger: bool) -> bool {
-    true
+    crate::storage::lmgr::lmgr::CheckRelationLockedByMe(_rel as _, _lockmode as _, _orstronger)
 }
 
 // TODO(pg-port): catalog/namespace.c - RangeVarGetRelid
 unsafe fn RangeVarGetRelid(relation: *const RangeVar, lockmode: LOCKMODE, missing_ok: bool) -> Oid {
-    InvalidOid
+    crate::catalog::namespace::RangeVarGetRelid(relation as _, lockmode as _, missing_ok)
 }
 
 // TODO(pg-port): funcapi.c - get_expr_result_type
 pub type TypeFuncClass = c_int;
-pub const TYPEFUNC_SCALAR: TypeFuncClass = 1;
-pub const TYPEFUNC_COMPOSITE: TypeFuncClass = 2;
-pub const TYPEFUNC_COMPOSITE_DOMAIN: TypeFuncClass = 3;
-pub const TYPEFUNC_RECORD: TypeFuncClass = 4;
+pub const TYPEFUNC_SCALAR: TypeFuncClass = 0;
+pub const TYPEFUNC_COMPOSITE: TypeFuncClass = 1;
+pub const TYPEFUNC_COMPOSITE_DOMAIN: TypeFuncClass = 2;
+pub const TYPEFUNC_RECORD: TypeFuncClass = 3;
 
 unsafe fn get_expr_result_type(
     expr: *mut Node,
     funcrettype: *mut Oid,
     tupdesc: *mut TupleDesc,
 ) -> TypeFuncClass {
-    let _ = (expr, funcrettype, tupdesc);
-    TYPEFUNC_SCALAR
+    core::mem::transmute(crate::utils::fmgr::funcapi::get_expr_result_type(expr as _, funcrettype as _, tupdesc as _))
 }
 
 unsafe fn get_expr_result_tupdesc(expr: *mut Node, noerror: bool) -> TupleDesc {
-    let _ = (expr, noerror);
-    core::ptr::null_mut()
+    crate::utils::fmgr::funcapi::get_expr_result_tupdesc(expr as _, noerror) as _
 }
 
 // TODO(pg-port): utils/cache/lsyscache.c - get_func_result_name
@@ -200,8 +197,7 @@ const RECORDARRAYOID: Oid = 2287;
 // TODO(pg-port): catalog/namespace.c - LookupNamespaceNoError
 // (real impl in crate::catalog::namespace if ported, else this local stub)
 
-// TODO(pg-port): utils/syscache - ATTNUM cache id
-const ATTNUM: c_int = 0; // TODO: catalog/syscache_ids.h
+use crate::utils::cache::syscache_ids_gen::ATTNUM;
 
 // TODO(pg-port): utils/acl.h - ACL_SELECT
 type AclMode = uint64;
@@ -2120,6 +2116,11 @@ pub unsafe fn addRangeTableEntryForFunction(
          */
         tupdesc = core::ptr::null_mut();
         let functypclass = get_expr_result_type(funcexpr, &mut funcrettype, &mut tupdesc);
+        /* build_function_result_tupdesc may return a tupdesc in a transient
+         * context; copy it into the current (parse) context so it stays valid. */
+        if !tupdesc.is_null() {
+            tupdesc = crate::access::common::tupdesc::CreateTupleDescCopy(tupdesc);
+        }
 
         /*
          * A coldeflist is required if the function returns RECORD and hasn't
@@ -4371,6 +4372,7 @@ unsafe fn isQueryUsingTempRelation_walker(node: *mut Node, context: *mut c_void)
  *
  * Returns the RTEPermissionInfo and sets rte->perminfoindex.
  */
+#[no_mangle]
 pub unsafe fn addRTEPermissionInfo(
     rteperminfos: *mut *mut List,
     rte: *mut RangeTblEntry,

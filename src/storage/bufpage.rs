@@ -122,6 +122,7 @@ pub unsafe fn PageIsEmpty(page: *const c_char) -> bool {
     (*hdr(page)).pd_lower as usize <= SizeOfPageHeaderData
 }
 #[inline]
+#[no_mangle]
 pub unsafe fn PageIsNew(page: *const c_char) -> bool {
     (*hdr(page)).pd_upper == 0
 }

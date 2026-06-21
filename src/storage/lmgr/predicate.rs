@@ -121,23 +121,8 @@ pub type SyncRequestHandler = c_int;
 pub const SYNC_HANDLER_NONE: SyncRequestHandler = 0;
 
 // TODO(pg-port): storage/shmem.h
-#[repr(C)]
-pub struct HTAB {
-    _opaque: [u8; 0],
-}
-#[repr(C)]
-pub struct HASHCTL {
-    pub keysize: Size,
-    pub entrysize: Size,
-    pub hash: Option<unsafe extern "C" fn(*const c_void, Size) -> uint32>,
-    pub num_partitions: c_int,
-}
+pub use crate::utils::hash::dynahash::{HTAB, HASHCTL, HASH_ELEM, HASH_BLOBS, HASH_FUNCTION, HASH_PARTITION, HASH_FIXED_SIZE};
 pub type HASH_SEQ_STATUS = c_void;
-pub const HASH_ELEM: c_int = 0x01;
-pub const HASH_BLOBS: c_int = 0x02;
-pub const HASH_FUNCTION: c_int = 0x04;
-pub const HASH_PARTITION: c_int = 0x08;
-pub const HASH_FIXED_SIZE: c_int = 0x10;
 pub const HASH_ENTER: c_int = 1;
 pub const HASH_ENTER_NULL: c_int = 2;
 pub const HASH_FIND: c_int = 3;
@@ -292,7 +277,8 @@ unsafe fn check_slru_buffers(name: &str, newval: *mut c_int) -> bool {
 }
 #[inline]
 unsafe fn ShmemInitStruct(name: &str, size: Size, found: *mut bool) -> *mut c_void {
-    /* TODO(pg-port): storage/shmem.h */ ptr::null_mut()
+    let cname = std::ffi::CString::new(name).unwrap();
+    crate::storage::ipc::shmem::ShmemInitStruct(cname.as_ptr(), size, found)
 }
 #[inline]
 unsafe fn ShmemInitHash(
@@ -302,7 +288,8 @@ unsafe fn ShmemInitHash(
     infoptr: *const HASHCTL,
     hash_flags: c_int,
 ) -> *mut HTAB {
-    /* TODO(pg-port) */ ptr::null_mut()
+    let cname = std::ffi::CString::new(name).unwrap();
+    crate::storage::ipc::shmem::ShmemInitHash(cname.as_ptr(), init_size as c_long, max_size as c_long, infoptr as _, hash_flags) as *mut HTAB
 }
 #[inline]
 unsafe fn ShmemAddrIsValid(addr: *const c_void) -> bool {
@@ -429,8 +416,7 @@ unsafe fn IsolationIsSerializable() -> bool {
 static mut XactReadOnly: bool = false;
 static mut XactDeferrable: bool = false;
 static mut MyProcPid: c_int = 0;
-static mut MyProcNumber: c_int = 0;
-
+extern "C" { pub static mut MyProcNumber: c_int; }
 // miscadmin.h - FirstUnpinnedObjectId
 pub const FirstUnpinnedObjectId: Oid = 12000; // placeholder
 
@@ -442,8 +428,7 @@ pub const INVALID_PROC_NUMBER: c_int = -1;
 pub struct PGPROC {
     pub pid: c_int,
 }
-static mut MyProc: *mut PGPROC = ptr::null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 macro_rules! GET_VXID_FROM_PGPROC {
     ($vxid:ident, $proc:expr) => {
         /* TODO(pg-port): storage/proc.h GET_VXID_FROM_PGPROC */
@@ -469,11 +454,8 @@ unsafe fn GetTopTransactionIdIfAny() -> TransactionId {
 }
 
 // access/transam.h - TransamVariables
-#[repr(C)]
-pub struct VariableCacheData {
-    pub nextXid: u64, // FullTransactionId
-}
-static mut TransamVariables: *mut VariableCacheData = ptr::null_mut();
+pub use crate::access::transam::varsup::TransamVariablesData as VariableCacheData;
+pub use crate::access::transam::varsup::TransamVariables;
 #[inline]
 unsafe fn XidFromFullTransactionId(fxid: u64) -> TransactionId {
     fxid as TransactionId
@@ -653,19 +635,19 @@ static mut SavedSerializableXact: *mut SERIALIZABLEXACT = ptr::null_mut();
 /* Predicate lock locks (LWLock stubs) - TODO(pg-port): lwlock.h */
 #[inline]
 unsafe fn SerializableFinishedListLock() -> *mut LWLock {
-    /* TODO(pg-port) */ ptr::null_mut()
+    crate::backend_link_shims::SerializableFinishedListLock as *mut LWLock
 }
 #[inline]
 unsafe fn SerializablePredicateListLock() -> *mut LWLock {
-    /* TODO(pg-port) */ ptr::null_mut()
+    crate::backend_link_shims::SerializablePredicateListLock as *mut LWLock
 }
 #[inline]
 unsafe fn SerializableXactHashLock() -> *mut LWLock {
-    /* TODO(pg-port) */ ptr::null_mut()
+    crate::backend_link_shims::SerializableXactHashLock as *mut LWLock
 }
 #[inline]
 unsafe fn SerialControlLock() -> *mut LWLock {
-    /* TODO(pg-port) */ ptr::null_mut()
+    crate::backend_link_shims::SerialControlLock as *mut LWLock
 }
 
 /*
@@ -1369,12 +1351,7 @@ pub unsafe fn CheckPointPredicate() {
  * PredicateLockShmemInit -- Initialize the predicate locking data structures.
  */
 pub unsafe fn PredicateLockShmemInit() {
-    let mut info: HASHCTL = HASHCTL {
-        keysize: 0,
-        entrysize: 0,
-        hash: None,
-        num_partitions: 0,
-    };
+    let mut info: HASHCTL = core::mem::zeroed();
     let mut max_table_size: i64;
     let mut requestSize: Size;
     let mut found: bool = false;
@@ -1393,7 +1370,7 @@ pub unsafe fn PredicateLockShmemInit() {
      */
     info.keysize = size_of::<PREDICATELOCKTARGETTAG>() as Size;
     info.entrysize = size_of::<PREDICATELOCKTARGET>() as Size;
-    info.num_partitions = NUM_PREDICATELOCK_PARTITIONS;
+    info.num_partitions = NUM_PREDICATELOCK_PARTITIONS as c_long;
 
     PredicateLockTargetHash = ShmemInitHash(
         "PREDICATELOCKTARGET hash",
@@ -1426,7 +1403,7 @@ pub unsafe fn PredicateLockShmemInit() {
     info.keysize = size_of::<PREDICATELOCKTAG>() as Size;
     info.entrysize = size_of::<PREDICATELOCK>() as Size;
     info.hash = Some(predicatelock_hash);
-    info.num_partitions = NUM_PREDICATELOCK_PARTITIONS;
+    info.num_partitions = NUM_PREDICATELOCK_PARTITIONS as c_long;
 
     /* Assume an average of 2 xacts per target */
     max_table_size *= 2;
@@ -2116,12 +2093,7 @@ unsafe fn GetSerializableTransactionSnapshotInt(
 }
 
 unsafe fn CreateLocalPredicateLockHash() {
-    let mut hash_ctl: HASHCTL = HASHCTL {
-        keysize: 0,
-        entrysize: 0,
-        hash: None,
-        num_partitions: 0,
-    };
+    let mut hash_ctl: HASHCTL = core::mem::zeroed();
 
     /* Initialize the backend-local hash table of parent locks */
     Assert!(LocalPredicateLockHash.is_null());
@@ -3473,7 +3445,7 @@ pub unsafe fn ReleasePredicateLocks(mut isCommit: bool, isReadOnlySafe: bool) {
      * atomic!
      */
     (*MySerializableXact).finishedBefore =
-        XidFromFullTransactionId((*TransamVariables).nextXid);
+        XidFromFullTransactionId((*TransamVariables).nextXid.value);
 
     /*
      * If it's not a commit it's either a rollback or a read-only transaction

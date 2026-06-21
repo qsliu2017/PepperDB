@@ -39,8 +39,8 @@ use crate::utils::palloc::{MemoryContext, MemoryContextAlloc}; // utils/palloc.h
 use core::ffi::{c_char, c_int, c_void};
 
 /* errcodes.h classification (errcode() shim ignores the value) */
-// TODO(pg-port): ERRCODE_INVALID_TEXT_REPRESENTATION from utils/errcodes.h.
-const ERRCODE_INVALID_TEXT_REPRESENTATION: c_int = 0;
+// ERRCODE_INVALID_TEXT_REPRESENTATION from utils/errcodes.h: MAKE_SQLSTATE 22P02.
+const ERRCODE_INVALID_TEXT_REPRESENTATION: c_int = 33685634;
 
 // ----------------------------------------------------------------
 //   <ctype.h> binding
@@ -190,12 +190,31 @@ pub unsafe fn boolin(fcinfo: FunctionCallInfo) -> Datum {
         PG_RETURN_BOOL!(result);
     }
 
-    /*
-     * C uses ereturn(fcinfo->context, (Datum) 0, ...); the elog shim has no
-     * soft-error return path, so this reports a hard ERROR (which panics at
-     * runtime). The trailing `(Datum) 0` mirrors ereturn's return value and
-     * satisfies the Rust return type, since emit_log() statically returns ().
-     */
+    /* ereturn(fcinfo->context, (Datum) 0, ...): soft error if escontext is a sink. */
+    let escontext = (*fcinfo).context;
+    const T_ErrorSaveContext: c_int = 447;
+    if !escontext.is_null() && *(escontext as *const c_int) == T_ErrorSaveContext {
+        let esc = escontext as *mut crate::nodes::miscnodes::ErrorSaveContext;
+        (*esc).error_occurred = true;
+        if (*esc).details_wanted {
+            let s = format!(
+                "invalid input syntax for type {}: \"{}\"",
+                "boolean",
+                cstring_display(in_str)
+            );
+            let m = palloc(s.len() + 1) as *mut c_char;
+            core::ptr::copy_nonoverlapping(s.as_ptr() as *const c_char, m, s.len());
+            *m.add(s.len()) = 0;
+            let ed = crate::utils::mmgr::mcxt::palloc0(
+                core::mem::size_of::<crate::utils::error::elog_impl::ErrorData>(),
+            ) as *mut crate::utils::error::elog_impl::ErrorData;
+            (*ed).sqlerrcode = ERRCODE_INVALID_TEXT_REPRESENTATION;
+            (*ed).message = m;
+            (*esc).error_data = ed as *mut _;
+        }
+        return 0 as Datum;
+    }
+
     let _ = errcode(ERRCODE_INVALID_TEXT_REPRESENTATION);
     ereport!(
         ERROR,
@@ -384,9 +403,7 @@ unsafe fn makeBoolAggState(fcinfo: FunctionCallInfo) -> *mut BoolAggState {
 unsafe fn AggCheckCallContext(
     _fcinfo: FunctionCallInfo,
     _aggcontext: *mut MemoryContext,
-) -> bool {
-    unimplemented!("bool: AggCheckCallContext (executor/nodeAgg.c) not yet translated")
-}
+) -> bool { crate::executor::nodeAgg::AggCheckCallContext(_fcinfo as _, _aggcontext as _) != 0 }
 
 pub unsafe fn bool_accum(fcinfo: FunctionCallInfo) -> Datum {
     let mut state: *mut BoolAggState;

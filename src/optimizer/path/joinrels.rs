@@ -53,64 +53,64 @@ use crate::optimizer::util::pathnode::{
 // STUBs for dependencies defined in other backend files not yet ported.
 // ---------------------------------------------------------------------------
 
-/// TODO(pg-port): optimizer/util/relnode.c - build_join_rel
 unsafe fn build_join_rel(
-    _root: *mut PlannerInfo,
-    _joinrelids: Relids,
-    _rel1: *mut RelOptInfo,
-    _rel2: *mut RelOptInfo,
-    _sjinfo: *mut SpecialJoinInfo,
-    _pushed_down_joins: *mut List,
-    _restrictlist_ptr: *mut *mut List,
+    root: *mut PlannerInfo,
+    joinrelids: Relids,
+    rel1: *mut RelOptInfo,
+    rel2: *mut RelOptInfo,
+    sjinfo: *mut SpecialJoinInfo,
+    pushed_down_joins: *mut List,
+    restrictlist_ptr: *mut *mut List,
 ) -> *mut RelOptInfo {
-    unimplemented!() // TODO(pg-port): relnode.c
+    crate::optimizer::util::relnode::build_join_rel(
+        root, joinrelids, rel1, rel2, sjinfo, pushed_down_joins, restrictlist_ptr,
+    )
 }
 
-/// TODO(pg-port): optimizer/util/relnode.c - build_child_join_rel
 unsafe fn build_child_join_rel(
-    _root: *mut PlannerInfo,
-    _outer_rel: *mut RelOptInfo,
-    _inner_rel: *mut RelOptInfo,
-    _parent_joinrel: *mut RelOptInfo,
-    _restrictlist: *mut List,
-    _sjinfo: *mut SpecialJoinInfo,
-    _nappinfos: c_int,
-    _appinfos: *mut *mut AppendRelInfo,
+    root: *mut PlannerInfo,
+    outer_rel: *mut RelOptInfo,
+    inner_rel: *mut RelOptInfo,
+    parent_joinrel: *mut RelOptInfo,
+    restrictlist: *mut List,
+    sjinfo: *mut SpecialJoinInfo,
+    nappinfos: c_int,
+    appinfos: *mut *mut AppendRelInfo,
 ) -> *mut RelOptInfo {
-    unimplemented!() // TODO(pg-port): relnode.c
+    crate::optimizer::util::relnode::build_child_join_rel(
+        root, outer_rel, inner_rel, parent_joinrel, restrictlist, sjinfo, nappinfos, appinfos,
+    )
 }
 
-/// TODO(pg-port): optimizer/util/relnode.c - find_base_rel
-unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo {
-    unimplemented!() // TODO(pg-port): relnode.c
+unsafe fn find_base_rel(root: *mut PlannerInfo, relid: c_int) -> *mut RelOptInfo {
+    crate::optimizer::util::relnode::find_base_rel(root, relid)
 }
 
-/// TODO(pg-port): optimizer/util/relnode.c - find_join_rel
-unsafe fn find_join_rel(_root: *mut PlannerInfo, _relids: Relids) -> *mut RelOptInfo {
-    unimplemented!() // TODO(pg-port): relnode.c
+unsafe fn find_join_rel(root: *mut PlannerInfo, relids: Relids) -> *mut RelOptInfo {
+    crate::optimizer::util::relnode::find_join_rel(root, relids)
 }
 
-/// TODO(pg-port): optimizer/util/planmain.c - min_join_parameterization
 unsafe fn min_join_parameterization(
-    _root: *mut PlannerInfo,
-    _joinrelids: Relids,
-    _rel1: *mut RelOptInfo,
-    _rel2: *mut RelOptInfo,
+    root: *mut PlannerInfo,
+    joinrelids: Relids,
+    rel1: *mut RelOptInfo,
+    rel2: *mut RelOptInfo,
 ) -> Relids {
-    unimplemented!() // TODO(pg-port): planmain.c
+    crate::optimizer::util::relnode::min_join_parameterization(root, joinrelids, rel1, rel2)
 }
 
-/// TODO(pg-port): optimizer/path/joinpath.c - add_paths_to_joinrel
 unsafe fn add_paths_to_joinrel(
-    _root: *mut PlannerInfo,
-    _joinrel: *mut RelOptInfo,
-    _outerrel: *mut RelOptInfo,
-    _innerrel: *mut RelOptInfo,
-    _jointype: crate::nodes::nodes::JoinType,
-    _sjinfo: *mut SpecialJoinInfo,
-    _restrictlist: *mut List,
+    root: *mut PlannerInfo,
+    joinrel: *mut RelOptInfo,
+    outerrel: *mut RelOptInfo,
+    innerrel: *mut RelOptInfo,
+    jointype: crate::nodes::nodes::JoinType,
+    sjinfo: *mut SpecialJoinInfo,
+    restrictlist: *mut List,
 ) {
-    unimplemented!() // TODO(pg-port): joinpath.c
+    crate::optimizer::path::joinpath::add_paths_to_joinrel(
+        root, joinrel, outerrel, innerrel, jointype, sjinfo, restrictlist,
+    )
 }
 
 /// TODO(pg-port): partitioning/partbounds.c - partition_bounds_equal
@@ -121,7 +121,7 @@ unsafe fn partition_bounds_equal(
     _b1: *mut core::ffi::c_void,
     _b2: *mut core::ffi::c_void,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): partbounds.c
+    crate::partitioning::partbounds::partition_bounds_equal(_partnatts as _, _parttyplen as _, _parttypbyval as _, _b1 as _, _b2 as _)
 }
 
 /// TODO(pg-port): partitioning/partbounds.c - partition_bounds_merge
@@ -135,7 +135,7 @@ unsafe fn partition_bounds_merge(
     _outer_parts: *mut *mut List,
     _inner_parts: *mut *mut List,
 ) -> *mut core::ffi::c_void {
-    unimplemented!() // TODO(pg-port): partbounds.c
+    crate::partitioning::partbounds::partition_bounds_merge(_partnatts as _, _partsupfunc as _, _partcollation as _, _outer_rel as _, _inner_rel as _, _jointype, _outer_parts as _, _inner_parts as _) as _
 }
 
 /// RINFO_IS_PUSHED_DOWN(rinfo, joinrelids)  (macro in pathnodes.h)
@@ -165,10 +165,6 @@ unsafe fn IS_PARTITIONED_REL(rel: *mut RelOptInfo) -> bool {
 #[inline]
 unsafe fn IS_DUMMY_REL(rel: *mut RelOptInfo) -> bool {
     is_dummy_rel(rel)
-}
-
-extern "C" {
-    fn is_dummy_rel(rel: *mut RelOptInfo) -> bool;
 }
 
 use crate::nodes::nodes::NodeTag::T_AppendPath;
@@ -1396,6 +1392,11 @@ unsafe fn has_legal_joinclause(root: *mut PlannerInfo, rel: *mut RelOptInfo) -> 
     false
 }
 
+
+#[no_mangle]
+pub unsafe extern "C" fn is_dummy_rel(rel: *mut RelOptInfo) -> bool {
+    is_dummy_rel_impl(rel)
+}
 
 /*
  * is_dummy_rel --- has relation been proven empty?

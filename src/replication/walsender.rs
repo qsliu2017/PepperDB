@@ -326,13 +326,13 @@ static mut lag_tracker: *mut LagTracker = std::ptr::null_mut();
 // TODO(pg-port): replace each with a real import when the module lands
 // ---------------------------------------------------------------------------
 
-unsafe fn RecoveryInProgress() -> bool { unimplemented!() }
-unsafe fn GetFlushRecPtr(tli: *mut TimeLineID) -> XLogRecPtr { unimplemented!() }
-unsafe fn GetXLogReplayRecPtr(tli: *mut TimeLineID) -> XLogRecPtr { unimplemented!() }
-unsafe fn GetWALInsertionTimeLine() -> TimeLineID { unimplemented!() }
-unsafe fn GetXLogInsertRecPtr() -> XLogRecPtr { unimplemented!() }
-unsafe fn XLogFlush(lsn: XLogRecPtr) { unimplemented!() }
-unsafe fn GetSystemIdentifier() -> u64 { unimplemented!() }
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
+unsafe fn GetFlushRecPtr(tli: *mut TimeLineID) -> XLogRecPtr { crate::access::transam::xlog::GetFlushRecPtr(tli as _) }
+unsafe fn GetXLogReplayRecPtr(tli: *mut TimeLineID) -> XLogRecPtr { crate::access::transam::xlogrecovery::GetXLogReplayRecPtr(tli as _) }
+unsafe fn GetWALInsertionTimeLine() -> TimeLineID { crate::access::transam::xlog::GetWALInsertionTimeLine() }
+unsafe fn GetXLogInsertRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetXLogInsertRecPtr() }
+unsafe fn XLogFlush(lsn: XLogRecPtr) { crate::access::transam::xlog::XLogFlush(lsn as _) }
+unsafe fn GetSystemIdentifier() -> u64 { crate::access::transam::xlog::GetSystemIdentifier() as _ }
 unsafe fn GetCurrentTimestamp() -> TimestampTz { unimplemented!() }
 unsafe fn TimestampTzPlusMilliseconds(t: TimestampTz, ms: i64) -> TimestampTz { unimplemented!() }
 unsafe fn TimestampDifferenceMilliseconds(t1: TimestampTz, t2: TimestampTz) -> i64 { unimplemented!() }
@@ -345,87 +345,87 @@ unsafe fn palloc(size: usize) -> *mut c_void { unimplemented!() }
 /// TODO(pg-port): MemoryContextAllocZero lives in utils/palloc.h
 unsafe fn MemoryContextAllocZero(ctx: MemoryContext, size: usize) -> *mut c_void { unimplemented!() }
 unsafe fn MemoryContextDelete(ctx: MemoryContext) { unimplemented!() }
-unsafe fn MemoryContextSetParent(ctx: MemoryContext, parent: MemoryContext) { unimplemented!() }
+unsafe fn MemoryContextSetParent(ctx: MemoryContext, parent: MemoryContext) { crate::utils::mmgr::mcxt::MemoryContextSetParent(ctx as _, parent as _) }
 unsafe fn MemoryContextReset(ctx: MemoryContext) { unimplemented!() }
 unsafe fn MemoryContextStrdup(ctx: MemoryContext, s: *const c_char) -> *mut c_char { unimplemented!() }
 unsafe fn AllocSetContextCreate(parent: MemoryContext, name: *const c_char, sizes: usize) -> MemoryContext { unimplemented!() }
 unsafe fn MemoryContextSwitchTo(ctx: MemoryContext) -> MemoryContext { unimplemented!() }
 
 /// TODO(pg-port): proc_exit lives in storage/ipc.h
-unsafe fn proc_exit(code: c_int) -> ! { unimplemented!() }
-unsafe fn kill(pid: pid_t, sig: c_int) { unimplemented!() }
+unsafe fn proc_exit(code: c_int) -> ! { crate::storage::ipc::ipc::proc_exit(code as _) }
+unsafe fn kill(pid: pid_t, sig: c_int) { todo!("TODO(pg-port): kill") }
 
 /// TODO(pg-port): pg_usleep lives in port.h
 unsafe fn pg_usleep(usec: u64) { unimplemented!() }
 
 /// TODO(pg-port): latch functions live in storage/latch.h
-unsafe fn ResetLatch(latch: *mut c_void) { unimplemented!() }
-unsafe fn SetLatch(latch: *mut c_void) { unimplemented!() }
+unsafe fn ResetLatch(latch: *mut c_void) { crate::storage::ipc::latch::ResetLatch(latch as _) }
+unsafe fn SetLatch(latch: *mut c_void) { crate::storage::ipc::latch::SetLatch(latch as _) }
 static mut MyLatch: *mut c_void = std::ptr::null_mut();
 
 /// TODO(pg-port): spinlock macros live in storage/spin.h
-unsafe fn SpinLockAcquire(lock: *mut slock_t) { unimplemented!() }
-unsafe fn SpinLockRelease(lock: *mut slock_t) { unimplemented!() }
-unsafe fn SpinLockInit(lock: *mut slock_t) { unimplemented!() }
+unsafe fn SpinLockAcquire(lock: *mut slock_t) { crate::storage::spin::SpinLockAcquire(lock as _) }
+unsafe fn SpinLockRelease(lock: *mut slock_t) { crate::storage::spin::SpinLockRelease(lock as _) }
+unsafe fn SpinLockInit(lock: *mut slock_t) { crate::storage::spin::SpinLockInit(lock as _) }
 
 /// TODO(pg-port): LWLock functions live in storage/lwlock.h
 unsafe fn LWLockAcquire(lock: usize, mode: c_int) -> bool { unimplemented!() }
 unsafe fn LWLockRelease(lock: usize) { unimplemented!() }
-unsafe fn LWLockReleaseAll() { unimplemented!() }
+unsafe fn LWLockReleaseAll() { crate::storage::lmgr::lwlock::LWLockReleaseAll() }
 
 /// TODO(pg-port): condition variable functions live in storage/condition_variable.h
-unsafe fn ConditionVariableBroadcast(cv: *mut c_void) { unimplemented!() }
-unsafe fn ConditionVariablePrepareToSleep(cv: *mut c_void) { unimplemented!() }
-unsafe fn ConditionVariableCancelSleep() { unimplemented!() }
-unsafe fn ConditionVariableInit(cv: *mut c_void) { unimplemented!() }
+unsafe fn ConditionVariableBroadcast(cv: *mut c_void) { crate::storage::lmgr::condition_variable::ConditionVariableBroadcast(cv as _) }
+unsafe fn ConditionVariablePrepareToSleep(cv: *mut c_void) { crate::storage::lmgr::condition_variable::ConditionVariablePrepareToSleep(cv as _) }
+unsafe fn ConditionVariableCancelSleep() { crate::storage::lmgr::condition_variable::ConditionVariableCancelSleep(); }
+unsafe fn ConditionVariableInit(cv: *mut c_void) { crate::storage::lmgr::condition_variable::ConditionVariableInit(cv as _) }
 
 /// TODO(pg-port): pq* functions live in libpq/pqformat.h + libpq/libpq.h
-unsafe fn pq_beginmessage(buf: *mut StringInfoData, msgtype: u8) { unimplemented!() }
+unsafe fn pq_beginmessage(buf: *mut StringInfoData, msgtype: u8) { crate::libpq::pqformat::pq_beginmessage(buf as _, msgtype as _) }
 unsafe fn pq_sendbyte(buf: *mut StringInfoData, b: u8) { unimplemented!() }
-unsafe fn pq_sendint16(buf: *mut StringInfoData, v: i16) { unimplemented!() }
-unsafe fn pq_sendint32(buf: *mut StringInfoData, v: i32) { unimplemented!() }
-unsafe fn pq_sendint64(buf: *mut StringInfoData, v: i64) { unimplemented!() }
-unsafe fn pq_sendint(buf: *mut StringInfoData, v: c_uint, b: c_int) -> c_uint { unimplemented!() }
-unsafe fn pq_sendbytes(buf: *mut StringInfoData, data: *const c_char, n: usize) { unimplemented!() }
-unsafe fn pq_endmessage(buf: *mut StringInfoData) { unimplemented!() }
-unsafe fn pq_endmessage_reuse(buf: *mut StringInfoData) { unimplemented!() }
-unsafe fn pq_flush() { unimplemented!() }
-unsafe fn pq_flush_if_writable() -> c_int { unimplemented!() }
-unsafe fn pq_is_send_pending() -> bool { unimplemented!() }
-unsafe fn pq_putmessage_noblock(msgtype: c_char, data: *const c_char, len: usize) { unimplemented!() }
+unsafe fn pq_sendint16(buf: *mut StringInfoData, v: i16) { crate::libpq::pqformat::pq_sendint16(buf as _, v as _) }
+unsafe fn pq_sendint32(buf: *mut StringInfoData, v: i32) { crate::libpq::pqformat::pq_sendint32(buf as _, v as _) }
+unsafe fn pq_sendint64(buf: *mut StringInfoData, v: i64) { crate::libpq::pqformat::pq_sendint64(buf as _, v as _) }
+unsafe fn pq_sendint(buf: *mut StringInfoData, v: c_uint, b: c_int) -> c_uint { todo!("TODO(pg-port): pq_sendint") }
+unsafe fn pq_sendbytes(buf: *mut StringInfoData, data: *const c_char, n: usize) { crate::libpq::pqformat::pq_sendbytes(buf as _, data as _, n as _) }
+unsafe fn pq_endmessage(buf: *mut StringInfoData) { crate::libpq::pqformat::pq_endmessage(buf as _) }
+unsafe fn pq_endmessage_reuse(buf: *mut StringInfoData) { crate::libpq::pqformat::pq_endmessage_reuse(buf as _) }
+unsafe fn pq_flush() { crate::libpq::libpq::pq_flush(); }
+unsafe fn pq_flush_if_writable() -> c_int { crate::libpq::libpq::pq_flush_if_writable() }
+unsafe fn pq_is_send_pending() -> bool { crate::libpq::libpq::pq_is_send_pending() }
+unsafe fn pq_putmessage_noblock(msgtype: c_char, data: *const c_char, len: usize) { crate::libpq::libpq::pq_putmessage_noblock(msgtype as _, data as _, len as _) }
 unsafe fn pq_startmsgread() { unimplemented!() }
 unsafe fn pq_endmsgread() { unimplemented!() }
 unsafe fn pq_getbyte() -> c_int { unimplemented!() }
 unsafe fn pq_getbyte_if_available(b: *mut u8) -> c_int { unimplemented!() }
 unsafe fn pq_getmessage(buf: *mut StringInfoData, maxlen: c_int) -> c_int { unimplemented!() }
-unsafe fn pq_getmsgbyte(buf: *mut StringInfoData) -> c_char { unimplemented!() }
-unsafe fn pq_getmsgint64(buf: *mut StringInfoData) -> i64 { unimplemented!() }
-unsafe fn pq_getmsgstring(buf: *mut StringInfoData) -> *const c_char { unimplemented!() }
+unsafe fn pq_getmsgbyte(buf: *mut StringInfoData) -> c_char { crate::libpq::pqformat::pq_getmsgbyte(buf as _) as _ }
+unsafe fn pq_getmsgint64(buf: *mut StringInfoData) -> i64 { crate::libpq::pqformat::pq_getmsgint64(buf as _) as _ }
+unsafe fn pq_getmsgstring(buf: *mut StringInfoData) -> *const c_char { crate::libpq::pqformat::pq_getmsgstring(buf as _) }
 
 /// TODO(pg-port): StringInfo functions live in lib/stringinfo.h
 unsafe fn initStringInfo(buf: *mut StringInfoData) { unimplemented!() }
-unsafe fn resetStringInfo(buf: *mut StringInfoData) { unimplemented!() }
-unsafe fn enlargeStringInfo(buf: *mut StringInfoData, needed: usize) { unimplemented!() }
+unsafe fn resetStringInfo(buf: *mut StringInfoData) { crate::lib::stringinfo::resetStringInfo(buf as _) }
+unsafe fn enlargeStringInfo(buf: *mut StringInfoData, needed: usize) { crate::lib::stringinfo::enlargeStringInfo(buf as _, needed as _) }
 
 /// TODO(pg-port): XLogReaderAllocate / XLogReadRecord live in access/xlogreader.h
 unsafe fn XLogReaderAllocate(segsize: u32, wal_segment_directory: *const c_char, routine: usize, private_data: *mut c_void) -> *mut XLogReaderState { unimplemented!() }
 unsafe fn XLogReadRecord(state: *mut XLogReaderState, errm: *mut *const c_char) -> *mut XLogRecord { unimplemented!() }
-unsafe fn XLogBeginRead(state: *mut XLogReaderState, recptr: XLogRecPtr) { unimplemented!() }
+unsafe fn XLogBeginRead(state: *mut XLogReaderState, recptr: XLogRecPtr) { crate::access::transam::xlogreader::XLogBeginRead(state as _, recptr as _) }
 unsafe fn XLogReadDetermineTimeline(state: *mut XLogReaderState, ptr: XLogRecPtr, reqlen: c_int, tli: TimeLineID) { unimplemented!() }
 
 /// TODO(pg-port): WALRead / WALReadFromBuffers live in access/xlogutils.h
 unsafe fn WALRead(state: *mut XLogReaderState, buf: *mut c_char, ptr: XLogRecPtr, count: usize, tli: TimeLineID, errinfo: *mut WALReadError) -> bool { unimplemented!() }
 unsafe fn WALReadFromBuffers(buf: *mut c_char, ptr: XLogRecPtr, count: usize, tli: TimeLineID) -> usize { unimplemented!() }
-unsafe fn WALReadRaiseError(errinfo: *mut WALReadError) { unimplemented!() }
+unsafe fn WALReadRaiseError(errinfo: *mut WALReadError) { crate::access::transam::xlogutils::WALReadRaiseError(errinfo as _) }
 
 /// TODO(pg-port): wal_segment_close / BasicOpenFile live in access/xlogutils.h / storage/fd.h
-unsafe fn wal_segment_close(state: *mut XLogReaderState) { unimplemented!() }
-unsafe fn BasicOpenFile(path: *const c_char, flags: c_int) -> c_int { unimplemented!() }
+unsafe fn wal_segment_close(state: *mut XLogReaderState) { crate::access::transam::xlogutils::wal_segment_close(state as _) }
+unsafe fn BasicOpenFile(path: *const c_char, flags: c_int) -> c_int { crate::storage::file::fd::BasicOpenFile(path as _, flags as _) }
 unsafe fn OpenTransientFile(path: *const c_char, flags: c_int) -> c_int { unimplemented!() }
 unsafe fn CloseTransientFile(fd: c_int) -> c_int { unimplemented!() }
 
 /// TODO(pg-port): CheckXLogRemoved lives in access/xlog.c
-unsafe fn CheckXLogRemoved(segno: XLogSegNo, tli: TimeLineID) { unimplemented!() }
+unsafe fn CheckXLogRemoved(segno: XLogSegNo, tli: TimeLineID) { crate::access::transam::xlog::CheckXLogRemoved(segno as _, tli as _) }
 
 /// TODO(pg-port): XLByteToSeg / XLogFilePath / XLogFileName / TLHistoryFileName/FilePath macros live in access/xlog_internal.h
 unsafe fn XLByteToSeg_fn(ptr: XLogRecPtr, segno: &mut XLogSegNo, segsize: u32) { unimplemented!() }
@@ -437,7 +437,7 @@ unsafe fn TLHistoryFilePath_fn(path: *mut c_char, tli: TimeLineID) { unimplement
 /// TODO(pg-port): timeline history functions live in access/timeline.h
 unsafe fn readTimeLineHistory(tli: TimeLineID) -> *mut List { unimplemented!() }
 unsafe fn tliSwitchPoint(tli: TimeLineID, history: *mut List, nextTli: *mut TimeLineID) -> XLogRecPtr { unimplemented!() }
-unsafe fn tliOfPointInHistory(lsn: XLogRecPtr, history: *mut List) -> TimeLineID { unimplemented!() }
+unsafe fn tliOfPointInHistory(lsn: XLogRecPtr, history: *mut List) -> TimeLineID { crate::access::transam::timeline::tliOfPointInHistory(lsn as _, history as _) }
 unsafe fn list_free_deep(list: *mut List) { unimplemented!() }
 
 /// TODO(pg-port): GUC variable wal_segment_size lives in access/xlog.h
@@ -445,45 +445,45 @@ static wal_segment_size: u32 = 16 * 1024 * 1024;
 
 /// TODO(pg-port): replication slot functions live in replication/slot.h
 unsafe fn ReplicationSlotAcquire(name: *const c_char, nowait: bool, release_on_error: bool) { unimplemented!() }
-unsafe fn ReplicationSlotRelease() { unimplemented!() }
-unsafe fn ReplicationSlotCleanup(flush: bool) { unimplemented!() }
+unsafe fn ReplicationSlotRelease() { crate::replication::slot::ReplicationSlotRelease() }
+unsafe fn ReplicationSlotCleanup(flush: bool) { crate::replication::slot::ReplicationSlotCleanup(flush) }
 unsafe fn ReplicationSlotCreate(name: *const c_char, logical: bool, persistence: c_int, two_phase: bool, failover: bool, failover_given: bool) { unimplemented!() }
-unsafe fn ReplicationSlotReserveWal() { unimplemented!() }
-unsafe fn ReplicationSlotMarkDirty() { unimplemented!() }
-unsafe fn ReplicationSlotSave() { unimplemented!() }
-unsafe fn ReplicationSlotPersist() { unimplemented!() }
-unsafe fn ReplicationSlotDrop(name: *const c_char, nowait: bool) { unimplemented!() }
+unsafe fn ReplicationSlotReserveWal() { crate::replication::slot::ReplicationSlotReserveWal() }
+unsafe fn ReplicationSlotMarkDirty() { crate::replication::slot::ReplicationSlotMarkDirty() }
+unsafe fn ReplicationSlotSave() { crate::replication::slot::ReplicationSlotSave() }
+unsafe fn ReplicationSlotPersist() { crate::replication::slot::ReplicationSlotPersist() }
+unsafe fn ReplicationSlotDrop(name: *const c_char, nowait: bool) { crate::replication::slot::ReplicationSlotDrop(name as _, nowait) }
 unsafe fn ReplicationSlotAlter(name: *const c_char, failover: *const bool, two_phase: *const bool) { unimplemented!() }
-unsafe fn ReplicationSlotsComputeRequiredLSN() { unimplemented!() }
-unsafe fn ReplicationSlotsComputeRequiredXmin(startup: bool) { unimplemented!() }
+unsafe fn ReplicationSlotsComputeRequiredLSN() { crate::replication::slot::ReplicationSlotsComputeRequiredLSN() }
+unsafe fn ReplicationSlotsComputeRequiredXmin(startup: bool) { crate::replication::slot::ReplicationSlotsComputeRequiredXmin(startup) }
 unsafe fn SearchNamedReplicationSlot(name: *const c_char, use_lock: bool) -> *mut ReplicationSlot { unimplemented!() }
-unsafe fn SlotIsLogical(slot: *const ReplicationSlot) -> bool { unimplemented!() }
-unsafe fn SlotIsPhysical(slot: *const ReplicationSlot) -> bool { unimplemented!() }
-unsafe fn SlotExistsInSyncStandbySlots(name: *const c_char) -> bool { unimplemented!() }
-unsafe fn StandbySlotsHaveCaughtup(lsn: XLogRecPtr, elevel: c_int) -> bool { unimplemented!() }
+unsafe fn SlotIsLogical(slot: *const ReplicationSlot) -> bool { crate::replication::slot::SlotIsLogical(slot as _) }
+unsafe fn SlotIsPhysical(slot: *const ReplicationSlot) -> bool { crate::replication::slot::SlotIsPhysical(slot as _) }
+unsafe fn SlotExistsInSyncStandbySlots(name: *const c_char) -> bool { crate::replication::slot::SlotExistsInSyncStandbySlots(name as _) }
+unsafe fn StandbySlotsHaveCaughtup(lsn: XLogRecPtr, elevel: c_int) -> bool { crate::replication::slot::StandbySlotsHaveCaughtup(lsn as _, elevel as _) }
 static mut MyReplicationSlot: *mut ReplicationSlot = std::ptr::null_mut();
 static ReplicationSlotControlLock: usize = 0;
 
 /// TODO(pg-port): logical decoding functions live in replication/logical.h / replication/decode.h
 unsafe fn CreateDecodingContext(startpoint: XLogRecPtr, options: *mut List, fast_forward: bool, routine: usize, prepare_write: usize, write: usize, update_progress: usize) -> *mut LogicalDecodingContext { unimplemented!() }
 unsafe fn CreateInitDecodingContext(plugin: *const c_char, options: *mut List, need_full_snapshot: bool, startpoint: XLogRecPtr, routine: usize, prepare_write: usize, write: usize, update_progress: usize) -> *mut LogicalDecodingContext { unimplemented!() }
-unsafe fn FreeDecodingContext(ctx: *mut LogicalDecodingContext) { unimplemented!() }
-unsafe fn DecodingContextFindStartpoint(ctx: *mut LogicalDecodingContext) { unimplemented!() }
-unsafe fn LogicalDecodingProcessRecord(ctx: *mut LogicalDecodingContext, reader: *mut XLogReaderState) { unimplemented!() }
-unsafe fn LogicalConfirmReceivedLocation(lsn: XLogRecPtr) { unimplemented!() }
-unsafe fn CheckLogicalDecodingRequirements() { unimplemented!() }
+unsafe fn FreeDecodingContext(ctx: *mut LogicalDecodingContext) { crate::replication::logical::logical::FreeDecodingContext(ctx as _) }
+unsafe fn DecodingContextFindStartpoint(ctx: *mut LogicalDecodingContext) { crate::replication::logical::logical::DecodingContextFindStartpoint(ctx as _) }
+unsafe fn LogicalDecodingProcessRecord(ctx: *mut LogicalDecodingContext, reader: *mut XLogReaderState) { crate::replication::logical::decode::LogicalDecodingProcessRecord(ctx as _, reader as _) }
+unsafe fn LogicalConfirmReceivedLocation(lsn: XLogRecPtr) { crate::replication::logical::logical::LogicalConfirmReceivedLocation(lsn as _) }
+unsafe fn CheckLogicalDecodingRequirements() { crate::replication::logical::logical::CheckLogicalDecodingRequirements() }
 
 /// TODO(pg-port): snapbuild functions live in replication/snapbuild.h
-unsafe fn SnapBuildExportSnapshot(snapbuild: *mut c_void) -> *const c_char { unimplemented!() }
+unsafe fn SnapBuildExportSnapshot(snapbuild: *mut c_void) -> *const c_char { crate::replication::logical::snapbuild::SnapBuildExportSnapshot(snapbuild as _) }
 unsafe fn SnapBuildInitialSnapshot(snapbuild: *mut c_void) -> Snapshot { unimplemented!() }
-unsafe fn SnapBuildClearExportedSnapshot() { unimplemented!() }
-unsafe fn RestoreTransactionSnapshot(snap: Snapshot, proc_: *mut PGPROC) { unimplemented!() }
+unsafe fn SnapBuildClearExportedSnapshot() { crate::replication::logical::snapbuild::SnapBuildClearExportedSnapshot() }
+unsafe fn RestoreTransactionSnapshot(snap: Snapshot, proc_: *mut PGPROC) { crate::utils::time::snapmgr::RestoreTransactionSnapshot(snap as _, proc_ as _) }
 
 /// TODO(pg-port): syncrep functions live in replication/syncrep.h
-unsafe fn SyncRepInitConfig() { unimplemented!() }
-unsafe fn SyncRepReleaseWaiters() { unimplemented!() }
-unsafe fn SyncRepRequested() -> bool { unimplemented!() }
-unsafe fn SyncRepGetCandidateStandbys(standbys: *mut *mut SyncRepStandbyData) -> c_int { unimplemented!() }
+unsafe fn SyncRepInitConfig() { crate::replication::syncrep::SyncRepInitConfig() }
+unsafe fn SyncRepReleaseWaiters() { crate::replication::syncrep::SyncRepReleaseWaiters() }
+unsafe fn SyncRepRequested() -> bool { crate::replication::syncrep::SyncRepRequested() }
+unsafe fn SyncRepGetCandidateStandbys(standbys: *mut *mut SyncRepStandbyData) -> c_int { crate::replication::syncrep::SyncRepGetCandidateStandbys(standbys as _) }
 /// STUB: SyncRepConfig is a global pointer in replication/syncrep.h
 const SyncRepConfig: *const c_void = std::ptr::null();
 const SYNC_REP_PRIORITY: c_int = 0;
@@ -491,23 +491,23 @@ const SYNC_REP_PRIORITY: c_int = 0;
 /// TODO(pg-port): incremental backup functions live in backup/basebackup_incremental.h
 unsafe fn CreateIncrementalBackupInfo(ctx: MemoryContext) -> *mut IncrementalBackupInfo { unimplemented!() }
 unsafe fn AppendIncrementalManifestData(ib: *mut IncrementalBackupInfo, data: *const c_char, len: c_int) { unimplemented!() }
-unsafe fn FinalizeIncrementalManifest(ib: *mut IncrementalBackupInfo) { unimplemented!() }
+unsafe fn FinalizeIncrementalManifest(ib: *mut IncrementalBackupInfo) { crate::backup::basebackup_incremental::FinalizeIncrementalManifest(ib as _) }
 unsafe fn SendBaseBackup(cmd: *mut BaseBackupCmd, manifest: *mut IncrementalBackupInfo) { unimplemented!() }
 
 /// TODO(pg-port): miscadmin functions
-unsafe fn CreateAuxProcessResourceOwner() { unimplemented!() }
-unsafe fn ReleaseAuxProcessResources(isCommit: bool) { unimplemented!() }
-unsafe fn MarkPostmasterChildWalSender() { unimplemented!() }
-unsafe fn IsTransactionOrTransactionBlock() -> bool { unimplemented!() }
-unsafe fn IsTransactionBlock() -> bool { unimplemented!() }
-unsafe fn IsSubTransaction() -> bool { unimplemented!() }
-unsafe fn IsAbortedTransactionBlockState() -> bool { unimplemented!() }
-unsafe fn StartTransactionCommand() { unimplemented!() }
-unsafe fn CommitTransactionCommand() { unimplemented!() }
-unsafe fn PreventInTransactionBlock(isTopLevel: bool, stmtType: *const c_char) { unimplemented!() }
+unsafe fn CreateAuxProcessResourceOwner() { crate::utils::resowner::resowner::CreateAuxProcessResourceOwner() }
+unsafe fn ReleaseAuxProcessResources(isCommit: bool) { crate::utils::resowner::resowner::ReleaseAuxProcessResources(isCommit) }
+unsafe fn MarkPostmasterChildWalSender() { crate::storage::ipc::pmsignal::MarkPostmasterChildWalSender() }
+unsafe fn IsTransactionOrTransactionBlock() -> bool { crate::access::transam::xact::IsTransactionOrTransactionBlock() }
+unsafe fn IsTransactionBlock() -> bool { crate::access::transam::xact::IsTransactionBlock() }
+unsafe fn IsSubTransaction() -> bool { crate::access::transam::xact::IsSubTransaction() }
+unsafe fn IsAbortedTransactionBlockState() -> bool { crate::access::transam::xact::IsAbortedTransactionBlockState() }
+unsafe fn StartTransactionCommand() { crate::access::transam::xact::StartTransactionCommand() }
+unsafe fn CommitTransactionCommand() { crate::access::transam::xact::CommitTransactionCommand() }
+unsafe fn PreventInTransactionBlock(isTopLevel: bool, stmtType: *const c_char) { crate::access::transam::xact::PreventInTransactionBlock(isTopLevel, stmtType as _) }
 unsafe fn get_database_name(dboid: Oid) -> *mut c_char { unimplemented!() }
-unsafe fn GetUserId() -> Oid { unimplemented!() }
-unsafe fn has_privs_of_role(roleid: Oid, priv_roleid: Oid) -> bool { unimplemented!() }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
+unsafe fn has_privs_of_role(roleid: Oid, priv_roleid: Oid) -> bool { crate::utils::adt::acl::has_privs_of_role(roleid as _, priv_roleid as _) }
 const ROLE_PG_READ_ALL_STATS: Oid = 0;
 
 /// TODO(pg-port): proc signal functions live in storage/procsignal.h
@@ -516,7 +516,7 @@ const PROCSIG_WALSND_INIT_STOPPING: c_int = 0;
 const INVALID_PROC_NUMBER: c_int = -1;
 
 /// TODO(pg-port): postmaster signal lives in postmaster/pmsignal.h
-unsafe fn SendPostmasterSignal(sig: c_int) { unimplemented!() }
+unsafe fn SendPostmasterSignal(sig: c_int) { crate::storage::ipc::pmsignal::SendPostmasterSignal(sig as _) }
 const PMSIGNAL_ADVANCE_STATE_MACHINE: c_int = 0;
 
 /// TODO(pg-port): ProcArrayLock / LW_EXCLUSIVE etc live in storage/proc.h / storage/lwlock.h
@@ -525,11 +525,11 @@ const LW_EXCLUSIVE: c_int = 0;
 const LW_SHARED: c_int = 1;
 
 /// TODO(pg-port): PGPROC globals live in storage/proc.h
-static mut MyProc: *mut PGPROC = std::ptr::null_mut();
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 unsafe fn InvalidTransactionId_val() -> TransactionId { 0 }
 unsafe fn TransactionIdIsNormal(xid: TransactionId) -> bool { xid >= 3 }
 unsafe fn TransactionIdPrecedes(a: TransactionId, b: TransactionId) -> bool { unimplemented!() }
-unsafe fn TransactionIdPrecedesOrEquals(a: TransactionId, b: TransactionId) -> bool { unimplemented!() }
+unsafe fn TransactionIdPrecedesOrEquals(a: TransactionId, b: TransactionId) -> bool { crate::access::transam::transam::TransactionIdPrecedesOrEquals(a as _, b as _) }
 unsafe fn ReadNextFullTransactionId() -> FullTransactionId { unimplemented!() }
 unsafe fn XidFromFullTransactionId(fxid: FullTransactionId) -> TransactionId { (fxid.value & 0xFFFFFFFF) as u32 }
 unsafe fn EpochFromFullTransactionId(fxid: FullTransactionId) -> u32 { (fxid.value >> 32) as u32 }
@@ -537,8 +537,8 @@ unsafe fn EpochFromFullTransactionId(fxid: FullTransactionId) -> u32 { (fxid.val
 /// TODO(pg-port): WaitEventSet lives in storage/waiteventset.h
 static mut FeBeWaitSet: *mut c_void = std::ptr::null_mut();
 const FeBeWaitSetSocketPos: usize = 0;
-unsafe fn WaitEventSetWait(set: *mut c_void, timeout: i64, event: *mut WaitEvent, nevents: c_int, wait_event: u32) -> c_int { unimplemented!() }
-unsafe fn ModifyWaitEvent(set: *mut c_void, pos: usize, events: u32, latch: *mut c_void) { unimplemented!() }
+unsafe fn WaitEventSetWait(set: *mut c_void, timeout: i64, event: *mut WaitEvent, nevents: c_int, wait_event: u32) -> c_int { crate::backend_link_shims::WaitEventSetWait(set as _, timeout as _, event as _, nevents as _, wait_event as _) }
+unsafe fn ModifyWaitEvent(set: *mut c_void, pos: usize, events: u32, latch: *mut c_void) { crate::storage::ipc::waiteventset::ModifyWaitEvent(set as _, pos as _, events as _, latch as _) }
 
 /// TODO(pg-port): pgstat functions live in utils/pgstat_internal.h
 unsafe fn pgstat_report_wait_start(event: u32) { }
@@ -553,30 +553,30 @@ const PGSTAT_BACKEND_FLUSH_IO: u32 = 0;
 unsafe fn pgaio_error_cleanup() { }
 
 /// TODO(pg-port): tuple output functions live in tcop/dest.h / access/printtup.h
-unsafe fn CreateDestReceiver(dest: c_int) -> *mut DestReceiver { unimplemented!() }
+unsafe fn CreateDestReceiver(dest: c_int) -> *mut DestReceiver { todo!("TODO(pg-port): CreateDestReceiver") }
 unsafe fn CreateTemplateTupleDesc(natts: c_int) -> TupleDesc { unimplemented!() }
 unsafe fn TupleDescInitBuiltinEntry(desc: TupleDesc, attnum: AttrNumber, name: *const c_char, typid: Oid, typmod: i32, attdim: c_int) { unimplemented!() }
 unsafe fn begin_tup_output_tupdesc(dest: *mut DestReceiver, tupdesc: TupleDesc, ops: *const c_void) -> *mut TupOutputState { unimplemented!() }
 unsafe fn do_tup_output(tstate: *mut TupOutputState, values: *const Datum, nulls: *const bool) { unimplemented!() }
 unsafe fn end_tup_output(tstate: *mut TupOutputState) { unimplemented!() }
-unsafe fn InitMaterializedSRF(fcinfo: FunctionCallInfo, flags: c_int) { unimplemented!() }
+unsafe fn InitMaterializedSRF(fcinfo: FunctionCallInfo, flags: c_int) { crate::utils::fmgr::funcapi::InitMaterializedSRF(fcinfo as _, flags as _) }
 unsafe fn tuplestore_putvalues(store: *mut c_void, desc: TupleDesc, values: *const Datum, nulls: *const bool) { unimplemented!() }
 
 /// Datum construction helpers
 unsafe fn CStringGetTextDatum(s: *const c_char) -> Datum { unimplemented!() }
-unsafe fn Int64GetDatum(v: i64) -> Datum { unimplemented!() }
+unsafe fn Int64GetDatum(v: i64) -> Datum { crate::postgres::Int64GetDatum(v as _) }
 unsafe fn Int32GetDatum(v: i32) -> Datum { unimplemented!() }
-unsafe fn LSNGetDatum(lsn: XLogRecPtr) -> Datum { unimplemented!() }
+unsafe fn LSNGetDatum(lsn: XLogRecPtr) -> Datum { crate::utils::adt::pg_lsn::LSNGetDatum(lsn as _) }
 unsafe fn TimestampTzGetDatum(t: TimestampTz) -> Datum { unimplemented!() }
 unsafe fn IntervalPGetDatum(iv: *const Interval) -> Datum { unimplemented!() }
 
 /// TODO(pg-port): signal handling stubs live in tcop/postgres.h / postmaster/interrupt.h
-unsafe fn SignalHandlerForConfigReload(sig: c_int) { unimplemented!() }
+unsafe fn SignalHandlerForConfigReload(sig: c_int) { crate::postmaster::interrupt::SignalHandlerForConfigReload(sig as _) }
 unsafe fn StatementCancelHandler(sig: c_int) { unimplemented!() }
 unsafe fn die(sig: c_int) { unimplemented!() }
-unsafe fn procsignal_sigusr1_handler(sig: c_int) { unimplemented!() }
-unsafe fn pqsignal(signum: c_int, handler: unsafe fn(c_int)) { unimplemented!() }
-unsafe fn InitializeTimeouts() { unimplemented!() }
+unsafe fn procsignal_sigusr1_handler(sig: c_int) { crate::storage::ipc::procsignal::procsignal_sigusr1_handler(sig as _) }
+unsafe fn pqsignal(signum: c_int, handler: unsafe fn(c_int)) { todo!("TODO(pg-port): pqsignal") }
+unsafe fn InitializeTimeouts() { crate::utils::misc::timeout::InitializeTimeouts() }
 static mut ConfigReloadPending: bool = false;
 unsafe fn ProcessConfigFile(context: c_int) { unimplemented!() }
 const PGC_SIGHUP: c_int = 0;
@@ -593,13 +593,13 @@ static mut MyProcPid: pid_t = 0;
 
 /// TODO(pg-port): walreceiver helper lives in replication/walreceiverfuncs.h
 unsafe fn GetWalRcvFlushRecPtr(recptr: *mut XLogRecPtr, tli: *mut TimeLineID) -> XLogRecPtr { unimplemented!() }
-unsafe fn IsSyncingReplicationSlots() -> bool { unimplemented!() }
+unsafe fn IsSyncingReplicationSlots() -> bool { crate::replication::logical::slotsync::IsSyncingReplicationSlots() }
 
 /// TODO(pg-port): replication command helpers
-unsafe fn EndReplicationCommand(cmdtag: *const c_char) { unimplemented!() }
+unsafe fn EndReplicationCommand(cmdtag: *const c_char) { crate::tcop::dest::EndReplicationCommand(cmdtag as _) }
 unsafe fn EndCommand(qc: *mut QueryCompletion, dest: c_int, force_undecorated: bool) { unimplemented!() }
 unsafe fn SetQueryCompletion(qc: *mut QueryCompletion, cmdtag: c_int, nprocessed: u64) { unimplemented!() }
-unsafe fn GetPGVariable(name: *const c_char, dest: *mut DestReceiver) { unimplemented!() }
+unsafe fn GetPGVariable(name: *const c_char, dest: *mut DestReceiver) { crate::utils::misc::guc_funcs::GetPGVariable(name as _, dest as _) }
 unsafe fn debug_query_string_set(s: *const c_char) { }
 
 /// TODO(pg-port): macros from access/xlog_internal.h
@@ -684,9 +684,11 @@ static mut AuxProcessResourceOwner: *mut c_void = std::ptr::null_mut();
 static mut CurrentResourceOwner: *mut c_void = std::ptr::null_mut();
 
 /// TODO(pg-port): ShmemInitStruct / MemSet / dlist_init / add_size / mul_size / offsetof_fn live in storage/shmem.h / nodes/ilist.h
-unsafe fn ShmemInitStruct(name: *const c_char, size: usize, found: *mut bool) -> *mut c_void { unimplemented!() }
-unsafe fn MemSet(ptr: *mut c_void, val: c_int, n: usize) { unimplemented!() }
-unsafe fn dlist_init(head: *mut c_void) { unimplemented!() }
+unsafe fn ShmemInitStruct(name: *const c_char, size: usize, found: *mut bool) -> *mut c_void {
+    crate::storage::ipc::shmem::ShmemInitStruct(name as *const c_char, size as Size, found)
+}
+unsafe fn MemSet(ptr: *mut c_void, val: c_int, n: usize) { libc::memset(ptr, val, n); }
+unsafe fn dlist_init(head: *mut c_void) { crate::lib::ilist::dlist_init(head as _) }
 unsafe fn add_size(a: usize, b: usize) -> usize { a + b }
 unsafe fn mul_size(a: usize, b: usize) -> usize { a * b }
 
@@ -2262,7 +2264,7 @@ unsafe fn InitWalSenderSlot() {
 
     // Find a free walsender slot and reserve it.
     'outer: for i in 0..(max_wal_senders as usize) {
-        let walsnd = &mut (*ctl).walsnds[i] as *mut WalSnd;
+        let walsnd = (*ctl).walsnds.as_mut_ptr().add(i);
 
         SpinLockAcquire(&mut (*walsnd).mutex);
 
@@ -2705,7 +2707,7 @@ pub unsafe fn WalSndShmemInit() {
         }
 
         for i in 0..(max_wal_senders as usize) {
-            let walsnd = &mut (*ctl).walsnds[i] as *mut WalSnd;
+            let walsnd = (*ctl).walsnds.as_mut_ptr().add(i);
             SpinLockInit(&mut (*walsnd).mutex);
         }
 

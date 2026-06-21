@@ -827,7 +827,7 @@ unsafe fn AbsorbSyncRequests() {
 
 // TODO(pg-port): real ForwardSyncRequest lives in postmaster/checkpointer.c.
 unsafe fn ForwardSyncRequest(_ftag: *const FileTag, _type: SyncRequestType) -> bool {
-    unimplemented!("ForwardSyncRequest not yet ported (postmaster/checkpointer.c)")
+    crate::postmaster::checkpointer::ForwardSyncRequest(_ftag as _, core::mem::transmute(_type))
 }
 
 // TODO(pg-port): real md sync handlers live in storage/smgr/md.c.

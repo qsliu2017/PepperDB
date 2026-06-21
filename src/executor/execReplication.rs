@@ -158,77 +158,171 @@ const REPLICA_IDENTITY_FULL: c_char = b'f' as c_char;
 // ---------------------------------------------------------------------------
 
 unsafe fn SysCacheGetAttrNotNull(_cacheId: c_int, _tup: *mut core::ffi::c_void, _attno: c_int) -> Datum { unimplemented!() /* TODO: utils/syscache.c */ }
-unsafe fn IndexRelationGetNumberOfKeyAttributes(_rel: Relation) -> c_int { unimplemented!() /* TODO: utils/rel.h */ }
-unsafe fn get_opclass_input_type(_opclass: Oid) -> Oid { unimplemented!() /* TODO: utils/lsyscache.c */ }
-unsafe fn get_opclass_family(_opclass: Oid) -> Oid { unimplemented!() /* TODO: utils/lsyscache.c */ }
+unsafe fn IndexRelationGetNumberOfKeyAttributes(_rel: Relation) -> c_int {
+    crate::access::nbtree::nbtdedup::IndexRelationGetNumberOfKeyAttributes(_rel as _) as _
+}
+unsafe fn get_opclass_input_type(_opclass: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_opclass_input_type(_opclass as _) as _
+}
+unsafe fn get_opclass_family(_opclass: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_opclass_family(_opclass as _) as _
+}
 unsafe fn IndexAmTranslateCompareType(_cmptype: c_int, _amoid: Oid, _opfamily: Oid, _missing_ok: bool) -> StrategyNumber { unimplemented!() /* TODO: access/amapi.c */ }
 unsafe fn get_opfamily_member(_opfamily: Oid, _lefttype: Oid, _righttype: Oid, _strategy: StrategyNumber) -> Oid { unimplemented!() /* TODO: utils/lsyscache.c */ }
 unsafe fn get_opcode(_opno: Oid) -> RegProcedure { unimplemented!() /* TODO: utils/lsyscache.c */ }
 unsafe fn ScanKeyInit(_entry: *mut ScanKeyData, _attno: c_int, _strategy: StrategyNumber, _procedure: RegProcedure, _argument: Datum) { unimplemented!() /* TODO: access/common/scankey.c */ }
 unsafe fn ItemPointerIndicatesMovedPartitions(_pointer: *const ItemPointerData) -> bool { unimplemented!() /* TODO: storage/itemptr.h */ }
-unsafe fn index_open(_relationId: Oid, _lockmode: c_int) -> Relation { unimplemented!() /* TODO: access/index/indexam.c */ }
-unsafe fn index_close(_relation: Relation, _lockmode: c_int) { unimplemented!() /* TODO: access/index/indexam.c */ }
+unsafe fn index_open(_relationId: Oid, _lockmode: c_int) -> Relation {
+    crate::access::index::indexam::index_open(_relationId as _, _lockmode as _) as _
+}
+unsafe fn index_close(_relation: Relation, _lockmode: c_int) {
+    crate::access::index::indexam::index_close(_relation as _, _lockmode as _)
+}
 unsafe fn GetRelationIdentityOrPK(_rel: Relation) -> Oid { unimplemented!() /* TODO: replication/logicalrelation.c */ }
-unsafe fn index_beginscan(_heapRelation: Relation, _indexRelation: Relation, _snapshot: *mut SnapshotData, _instrument: *mut core::ffi::c_void, _nkeys: c_int, _norderbys: c_int) -> IndexScanDesc { unimplemented!() /* TODO: access/index/indexam.c */ }
+unsafe fn index_beginscan(_heapRelation: Relation, _indexRelation: Relation, _snapshot: *mut SnapshotData, _instrument: *mut core::ffi::c_void, _nkeys: c_int, _norderbys: c_int) -> IndexScanDesc {
+    crate::access::index::indexam::index_beginscan(_heapRelation as _, _indexRelation as _, _snapshot as _, _instrument as _, _nkeys as _, _norderbys as _) as _
+}
 unsafe fn index_rescan(_scan: IndexScanDesc, _keys: ScanKey, _nkeys: c_int, _orderbys: ScanKey, _norderbys: c_int) { unimplemented!() /* TODO: access/index/indexam.c */ }
-unsafe fn index_getnext_slot(_scan: IndexScanDesc, _direction: c_int, _slot: *mut TupleTableSlot) -> bool { unimplemented!() /* TODO: access/index/indexam.c */ }
-unsafe fn index_endscan(_scan: IndexScanDesc) { unimplemented!() /* TODO: access/index/indexam.c */ }
-unsafe fn ExecMaterializeSlot(_slot: *mut TupleTableSlot) { unimplemented!() /* TODO: executor/execTuples.c */ }
-unsafe fn TransactionIdIsValid(_xid: TransactionId) -> bool { unimplemented!() /* TODO: access/transam.h */ }
-unsafe fn XactLockTableWait(_xid: TransactionId, _rel: Relation, _ctid: *mut ItemPointerData, _oper: c_int) { unimplemented!() /* TODO: storage/lmgr.c */ }
-unsafe fn PushActiveSnapshot(_snap: *mut SnapshotData) { unimplemented!() /* TODO: utils/snapmgr.c */ }
-unsafe fn PopActiveSnapshot() { unimplemented!() /* TODO: utils/snapmgr.c */ }
-unsafe fn GetLatestSnapshot() -> *mut SnapshotData { unimplemented!() /* TODO: utils/snapmgr.c */ }
-unsafe fn GetActiveSnapshot() -> *mut SnapshotData { unimplemented!() /* TODO: utils/snapmgr.c */ }
-unsafe fn GetCurrentCommandId(_used: bool) -> c_int { unimplemented!() /* TODO: access/transam/xact.c */ }
+unsafe fn index_getnext_slot(_scan: IndexScanDesc, _direction: c_int, _slot: *mut TupleTableSlot) -> bool {
+    crate::access::index::indexam::index_getnext_slot(_scan as _, _direction as _, _slot as _) as _
+}
+unsafe fn index_endscan(_scan: IndexScanDesc) {
+    crate::access::index::indexam::index_endscan(_scan as _)
+}
+unsafe fn ExecMaterializeSlot(_slot: *mut TupleTableSlot) {
+    crate::executor::tuptable::ExecMaterializeSlot(_slot as _)
+}
+unsafe fn TransactionIdIsValid(_xid: TransactionId) -> bool {
+    crate::access::transam::TransactionIdIsValid(_xid as _) as _
+}
+unsafe fn XactLockTableWait(_xid: TransactionId, _rel: Relation, _ctid: *mut ItemPointerData, _oper: c_int) {
+    crate::storage::lmgr::lmgr::XactLockTableWait(_xid as _, _rel as _, _ctid as _, _oper as _)
+}
+unsafe fn PushActiveSnapshot(_snap: *mut SnapshotData) {
+    crate::utils::time::snapmgr::PushActiveSnapshot(_snap as _)
+}
+unsafe fn PopActiveSnapshot() {
+    crate::utils::time::snapmgr::PopActiveSnapshot()
+}
+unsafe fn GetLatestSnapshot() -> *mut SnapshotData {
+    crate::utils::time::snapmgr::GetLatestSnapshot() as _
+}
+unsafe fn GetActiveSnapshot() -> *mut SnapshotData {
+    crate::utils::time::snapmgr::GetActiveSnapshot() as _
+}
+unsafe fn GetCurrentCommandId(_used: bool) -> c_int {
+    crate::access::transam::xact::GetCurrentCommandId(_used as _) as _
+}
 unsafe fn table_tuple_lock(_rel: Relation, _tid: *mut ItemPointerData, _snapshot: *mut SnapshotData, _slot: *mut TupleTableSlot, _cid: c_int, _mode: LockTupleMode, _wait_policy: c_int, _flags: c_int, _tmfd: *mut TM_FailureData) -> TM_Result { unimplemented!() /* TODO: access/tableam.h */ }
-unsafe fn slot_getallattrs(_slot: *mut TupleTableSlot) { unimplemented!() /* TODO: executor/execTuples.c */ }
-unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> Form_pg_attribute { unimplemented!() /* TODO: access/tupdesc.h */ }
+unsafe fn slot_getallattrs(_slot: *mut TupleTableSlot) {
+    crate::executor::tuptable::slot_getallattrs(_slot as _)
+}
+unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> Form_pg_attribute {
+    crate::access::common::tupdesc::TupleDescAttr(_tupdesc as _, _i as _) as _
+}
 unsafe fn lookup_type_cache(_type_id: Oid, _flags: c_int) -> *mut TypeCacheEntry { unimplemented!() /* TODO: utils/cache/typcache.c */ }
 unsafe fn format_type_be(_type_oid: Oid) -> *mut c_char { unimplemented!() /* TODO: utils/adt/format_type.c */ }
-unsafe fn FunctionCall2Coll(_flinfo: *mut core::ffi::c_void, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Datum { unimplemented!() /* TODO: utils/fmgr.c */ }
+unsafe fn FunctionCall2Coll(_flinfo: *mut core::ffi::c_void, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Datum {
+    crate::utils::fmgr::FunctionCall2Coll(_flinfo as _, _collation as _, _arg1 as _, _arg2 as _) as _
+}
 unsafe fn RelationGetDescr(_rel: Relation) -> TupleDesc { unimplemented!() /* TODO: utils/rel.h */ }
-unsafe fn equalTupleDescs(_a: TupleDesc, _b: TupleDesc) -> bool { unimplemented!() /* TODO: access/common/tupdesc.c */ }
+unsafe fn equalTupleDescs(_a: TupleDesc, _b: TupleDesc) -> bool {
+    crate::access::common::tupdesc::equalTupleDescs(_a as _, _b as _) as _
+}
 unsafe fn table_beginscan(_rel: Relation, _snapshot: *mut SnapshotData, _nkeys: c_int, _key: ScanKey) -> TableScanDesc { unimplemented!() /* TODO: access/tableam.h */ }
-unsafe fn table_slot_create(_rel: Relation, _reglist: *mut *mut List) -> *mut TupleTableSlot { unimplemented!() /* TODO: access/tableam.c */ }
+unsafe fn table_slot_create(_rel: Relation, _reglist: *mut *mut List) -> *mut TupleTableSlot {
+    crate::access::table::tableam::table_slot_create(_rel as _, _reglist as _) as _
+}
 unsafe fn table_rescan(_scan: TableScanDesc, _key: ScanKey) { unimplemented!() /* TODO: access/tableam.h */ }
-unsafe fn table_scan_getnextslot(_scan: TableScanDesc, _direction: c_int, _slot: *mut TupleTableSlot) -> bool { unimplemented!() /* TODO: access/tableam.h */ }
-unsafe fn table_endscan(_scan: TableScanDesc) { unimplemented!() /* TODO: access/tableam.h */ }
-unsafe fn ExecCopySlot(_dstslot: *mut TupleTableSlot, _srcslot: *mut TupleTableSlot) -> *mut TupleTableSlot { unimplemented!() /* TODO: executor/execTuples.c */ }
-unsafe fn ExecDropSingleTupleTableSlot(_slot: *mut TupleTableSlot) { unimplemented!() /* TODO: executor/execTuples.c */ }
+unsafe fn table_scan_getnextslot(_scan: TableScanDesc, _direction: c_int, _slot: *mut TupleTableSlot) -> bool {
+    crate::access::table::tableam::table_scan_getnextslot(_scan as _, _direction as _, _slot as _) as _
+}
+unsafe fn table_endscan(_scan: TableScanDesc) {
+    crate::access::table::tableam::table_endscan(_scan as _)
+}
+unsafe fn ExecCopySlot(_dstslot: *mut TupleTableSlot, _srcslot: *mut TupleTableSlot) -> *mut TupleTableSlot {
+    crate::executor::tuptable::ExecCopySlot(_dstslot as _, _srcslot as _) as _
+}
+unsafe fn ExecDropSingleTupleTableSlot(_slot: *mut TupleTableSlot) {
+    crate::executor::execTuples::ExecDropSingleTupleTableSlot(_slot as _)
+}
 unsafe fn RelationGetRelid(_rel: Relation) -> Oid { unimplemented!() /* TODO: utils/rel.h */ }
-unsafe fn BuildSpeculativeIndexInfo(_index: Relation, _ii: *mut IndexInfo) { unimplemented!() /* TODO: catalog/index.c */ }
-unsafe fn ExecCheckIndexConstraints(_resultRelInfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot, _estate: *mut EState, _conflictTid: *mut ItemPointerData, _tupleid: *mut ItemPointerData, _arbiterIndexes: *mut List) -> bool { unimplemented!() /* TODO: executor/nodeModifyTable.c */ }
-unsafe fn list_make1_oid(_x: Oid) -> *mut List { unimplemented!() /* TODO: nodes/list.c */ }
+unsafe fn BuildSpeculativeIndexInfo(_index: Relation, _ii: *mut IndexInfo) {
+    crate::catalog::index::BuildSpeculativeIndexInfo(_index as _, _ii as _)
+}
+unsafe fn ExecCheckIndexConstraints(_resultRelInfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot, _estate: *mut EState, _conflictTid: *mut ItemPointerData, _tupleid: *mut ItemPointerData, _arbiterIndexes: *mut List) -> bool {
+    crate::executor::execIndexing::ExecCheckIndexConstraints(_resultRelInfo as _, _slot as _, _estate as _, _conflictTid as _, _tupleid as _, _arbiterIndexes as _) as _
+}
+unsafe fn list_make1_oid(_x: Oid) -> *mut List {
+    crate::nodes::pg_list::list_make1_oid(_x as _) as _
+}
 unsafe fn list_member_oid(_list: *mut List, _datum: Oid) -> bool { unimplemented!() /* TODO: nodes/list.c */ }
-unsafe fn GetTupleTransactionInfo(_slot: *mut TupleTableSlot, _xmin: *mut TransactionId, _origin: *mut crate::c::uint32, _ts: *mut TimestampTz) { unimplemented!() /* TODO: replication/conflict.c */ }
+unsafe fn GetTupleTransactionInfo(_slot: *mut TupleTableSlot, _xmin: *mut TransactionId, _origin: *mut crate::c::uint32, _ts: *mut TimestampTz) {
+    unimplemented!()
+}
 unsafe fn lappend(_list: *mut List, _datum: *mut core::ffi::c_void) -> *mut List { unimplemented!() /* TODO: nodes/list.c */ }
-unsafe fn list_length(_list: *mut List) -> c_int { unimplemented!() /* TODO: nodes/list.h */ }
+unsafe fn list_length(_list: *mut List) -> c_int {
+    crate::nodes::pg_list::list_length(_list as _) as _
+}
 unsafe fn ReportApplyConflict(_estate: *mut EState, _resultRelInfo: *mut ResultRelInfo, _elevel: c_int, _type: ConflictType, _searchslot: *mut TupleTableSlot, _remoteslot: *mut TupleTableSlot, _conflicttuples: *mut List) { unimplemented!() /* TODO: replication/conflict.c */ }
-unsafe fn ExecBRInsertTriggers(_estate: *mut EState, _relinfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot) -> bool { unimplemented!() /* TODO: commands/trigger.c */ }
+unsafe fn ExecBRInsertTriggers(_estate: *mut EState, _relinfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot) -> bool {
+    crate::commands::trigger::ExecBRInsertTriggers(_estate as _, _relinfo as _, _slot as _) as _
+}
 unsafe fn ExecComputeStoredGenerated(_resultRelInfo: *mut ResultRelInfo, _estate: *mut EState, _slot: *mut TupleTableSlot, _cmdtype: CmdType) { unimplemented!() /* TODO: executor/nodeModifyTable.c */ }
-unsafe fn ExecConstraints(_resultRelInfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot, _estate: *mut EState) { unimplemented!() /* TODO: executor/execMain.c */ }
-unsafe fn ExecPartitionCheck(_resultRelInfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot, _estate: *mut EState, _emitError: bool) -> bool { unimplemented!() /* TODO: executor/execMain.c */ }
-unsafe fn simple_table_tuple_insert(_rel: Relation, _slot: *mut TupleTableSlot) { unimplemented!() /* TODO: access/tableam.c */ }
-unsafe fn ExecInsertIndexTuples(_resultRelInfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot, _estate: *mut EState, _update: bool, _noDupErr: bool, _specConflict: *mut bool, _arbiterIndexes: *mut List, _onlySummarizing: bool) -> *mut List { unimplemented!() /* TODO: executor/execIndexing.c */ }
-unsafe fn ExecARInsertTriggers(_estate: *mut EState, _relinfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot, _recheckIndexes: *mut List, _transition_capture: *mut core::ffi::c_void) { unimplemented!() /* TODO: commands/trigger.c */ }
+unsafe fn ExecConstraints(_resultRelInfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot, _estate: *mut EState) {
+    crate::executor::execMain::ExecConstraints(_resultRelInfo as _, _slot as _, _estate as _)
+}
+unsafe fn ExecPartitionCheck(_resultRelInfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot, _estate: *mut EState, _emitError: bool) -> bool {
+    crate::executor::execMain::ExecPartitionCheck(_resultRelInfo as _, _slot as _, _estate as _, _emitError as _) as _
+}
+unsafe fn simple_table_tuple_insert(_rel: Relation, _slot: *mut TupleTableSlot) {
+    crate::access::table::tableam::simple_table_tuple_insert(_rel as _, _slot as _)
+}
+unsafe fn ExecInsertIndexTuples(_resultRelInfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot, _estate: *mut EState, _update: bool, _noDupErr: bool, _specConflict: *mut bool, _arbiterIndexes: *mut List, _onlySummarizing: bool) -> *mut List {
+    crate::executor::execIndexing::ExecInsertIndexTuples(_resultRelInfo as _, _slot as _, _estate as _, _update as _, _noDupErr as _, _specConflict as _, _arbiterIndexes as _, _onlySummarizing as _) as _
+}
+unsafe fn ExecARInsertTriggers(_estate: *mut EState, _relinfo: *mut ResultRelInfo, _slot: *mut TupleTableSlot, _recheckIndexes: *mut List, _transition_capture: *mut core::ffi::c_void) {
+    crate::commands::trigger::ExecARInsertTriggers(_estate as _, _relinfo as _, _slot as _, _recheckIndexes as _, _transition_capture as _)
+}
 unsafe fn list_free(_list: *mut List) { unimplemented!() /* TODO: nodes/list.c */ }
-unsafe fn IsCatalogRelation(_relation: Relation) -> bool { unimplemented!() /* TODO: catalog/catalog.c */ }
-unsafe fn ExecBRUpdateTriggers(_estate: *mut EState, _epqstate: *mut EPQState, _relinfo: *mut ResultRelInfo, _tupleid: ItemPointer, _fdw_trigtuple: *mut core::ffi::c_void, _newslot: *mut TupleTableSlot, _lockedSlot: *mut TupleTableSlot, _tmfd: *mut TM_FailureData, _is_merge_update: bool) -> bool { unimplemented!() /* TODO: commands/trigger.c */ }
-unsafe fn simple_table_tuple_update(_rel: Relation, _otid: ItemPointer, _slot: *mut TupleTableSlot, _snapshot: *mut SnapshotData, _update_indexes: *mut TU_UpdateIndexes) { unimplemented!() /* TODO: access/tableam.c */ }
-unsafe fn ExecARUpdateTriggers(_estate: *mut EState, _relinfo: *mut ResultRelInfo, _src_partinfo: *mut core::ffi::c_void, _dst_partinfo: *mut core::ffi::c_void, _tupleid: ItemPointer, _fdw_trigtuple: *mut core::ffi::c_void, _newslot: *mut TupleTableSlot, _recheckIndexes: *mut List, _transition_capture: *mut core::ffi::c_void, _is_crosspart_update: bool) { unimplemented!() /* TODO: commands/trigger.c */ }
-unsafe fn ExecBRDeleteTriggers(_estate: *mut EState, _epqstate: *mut EPQState, _relinfo: *mut ResultRelInfo, _tupleid: ItemPointer, _fdw_trigtuple: *mut core::ffi::c_void, _epqslot: *mut *mut TupleTableSlot, _tmresult: *mut TM_Result, _tmfd: *mut TM_FailureData, _is_merge_delete: bool) -> bool { unimplemented!() /* TODO: commands/trigger.c */ }
-unsafe fn simple_table_tuple_delete(_rel: Relation, _tid: ItemPointer, _snapshot: *mut SnapshotData) { unimplemented!() /* TODO: access/tableam.c */ }
-unsafe fn ExecARDeleteTriggers(_estate: *mut EState, _relinfo: *mut ResultRelInfo, _tupleid: ItemPointer, _fdw_trigtuple: *mut core::ffi::c_void, _ar_delete_trig_tcs: *mut core::ffi::c_void, _is_crosspart_update: bool) { unimplemented!() /* TODO: commands/trigger.c */ }
-unsafe fn RelationBuildPublicationDesc(_relation: Relation, _pubdesc: *mut PublicationDesc) { unimplemented!() /* TODO: utils/cache/relcache.c */ }
-unsafe fn RelationGetReplicaIndex(_relation: Relation) -> Oid { unimplemented!() /* TODO: utils/cache/relcache.c */ }
+unsafe fn IsCatalogRelation(_relation: Relation) -> bool {
+    crate::catalog::catalog::IsCatalogRelation(_relation as _) as _
+}
+unsafe fn ExecBRUpdateTriggers(_estate: *mut EState, _epqstate: *mut EPQState, _relinfo: *mut ResultRelInfo, _tupleid: ItemPointer, _fdw_trigtuple: *mut core::ffi::c_void, _newslot: *mut TupleTableSlot, _lockedSlot: *mut TupleTableSlot, _tmfd: *mut TM_FailureData, _is_merge_update: bool) -> bool {
+    crate::commands::trigger::ExecBRUpdateTriggers(_estate as _, _epqstate as _, _relinfo as _, _tupleid as _, _fdw_trigtuple as _, _newslot as _, _lockedSlot as _, _tmfd as _, _is_merge_update as _) as _
+}
+unsafe fn simple_table_tuple_update(_rel: Relation, _otid: ItemPointer, _slot: *mut TupleTableSlot, _snapshot: *mut SnapshotData, _update_indexes: *mut TU_UpdateIndexes) {
+    crate::access::table::tableam::simple_table_tuple_update(_rel as _, _otid as _, _slot as _, _snapshot as _, _update_indexes as _)
+}
+unsafe fn ExecARUpdateTriggers(_estate: *mut EState, _relinfo: *mut ResultRelInfo, _src_partinfo: *mut core::ffi::c_void, _dst_partinfo: *mut core::ffi::c_void, _tupleid: ItemPointer, _fdw_trigtuple: *mut core::ffi::c_void, _newslot: *mut TupleTableSlot, _recheckIndexes: *mut List, _transition_capture: *mut core::ffi::c_void, _is_crosspart_update: bool) {
+    crate::commands::trigger::ExecARUpdateTriggers(_estate as _, _relinfo as _, _src_partinfo as _, _dst_partinfo as _, _tupleid as _, _fdw_trigtuple as _, _newslot as _, _recheckIndexes as _, _transition_capture as _, _is_crosspart_update as _)
+}
+unsafe fn ExecBRDeleteTriggers(_estate: *mut EState, _epqstate: *mut EPQState, _relinfo: *mut ResultRelInfo, _tupleid: ItemPointer, _fdw_trigtuple: *mut core::ffi::c_void, _epqslot: *mut *mut TupleTableSlot, _tmresult: *mut TM_Result, _tmfd: *mut TM_FailureData, _is_merge_delete: bool) -> bool {
+    crate::commands::trigger::ExecBRDeleteTriggers(_estate as _, _epqstate as _, _relinfo as _, _tupleid as _, _fdw_trigtuple as _, _epqslot as _, _tmresult as _, _tmfd as _, _is_merge_delete as _) as _
+}
+unsafe fn simple_table_tuple_delete(_rel: Relation, _tid: ItemPointer, _snapshot: *mut SnapshotData) {
+    crate::access::table::tableam::simple_table_tuple_delete(_rel as _, _tid as _, _snapshot as _)
+}
+unsafe fn ExecARDeleteTriggers(_estate: *mut EState, _relinfo: *mut ResultRelInfo, _tupleid: ItemPointer, _fdw_trigtuple: *mut core::ffi::c_void, _ar_delete_trig_tcs: *mut core::ffi::c_void, _is_crosspart_update: bool) {
+    crate::commands::trigger::ExecARDeleteTriggers(_estate as _, _relinfo as _, _tupleid as _, _fdw_trigtuple as _, _ar_delete_trig_tcs as _, _is_crosspart_update as _)
+}
+unsafe fn RelationBuildPublicationDesc(_relation: Relation, _pubdesc: *mut PublicationDesc) {
+    crate::utils::cache::relcache::RelationBuildPublicationDesc(_relation as _, _pubdesc as _)
+}
+unsafe fn RelationGetReplicaIndex(_relation: Relation) -> Oid {
+    crate::utils::cache::relcache::RelationGetReplicaIndex(_relation as _) as _
+}
 unsafe fn RelationGetRelationName(_relation: Relation) -> *const c_char { unimplemented!() /* TODO: utils/rel.h */ }
-unsafe fn errdetail_relkind_not_supported(_relkind: c_char) -> c_int { unimplemented!() /* TODO: utils/adt/misc.c */ }
+unsafe fn errdetail_relkind_not_supported(_relkind: c_char) -> c_int {
+    crate::catalog::pg_class::errdetail_relkind_not_supported(_relkind as _) as _
+}
 unsafe fn InitDirtySnapshot(_snapshot: &mut SnapshotData) { unimplemented!() /* TODO: utils/snapmgr.h */ }
 
 unsafe fn AttributeNumberIsValid(attno: c_int) -> bool { attno != 0 }
 unsafe fn OidIsValid(oid: Oid) -> bool { oid != crate::postgres_ext::InvalidOid }
-unsafe fn ItemPointerIsValid(_p: *const ItemPointerData) -> bool { unimplemented!() /* TODO: storage/itemptr.h */ }
+unsafe fn ItemPointerIsValid(_p: *const ItemPointerData) -> bool {
+    crate::storage::itemptr::ItemPointerIsValid(_p as _) as _
+}
 
 unsafe fn palloc0_object_ConflictTupleInfo() -> *mut ConflictTupleInfo {
     palloc0(core::mem::size_of::<ConflictTupleInfo>()) as *mut ConflictTupleInfo
@@ -378,6 +472,7 @@ unsafe fn should_refetch_tuple(res: TM_Result, tmfd: *mut TM_FailureData) -> boo
 // If a matching tuple is found, lock it with lockmode, fill the slot with its
 // contents, and return true.  Return false otherwise.
 // ---------------------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn RelationFindReplTupleByIndex(
     rel: Relation,
     idxoid: Oid,
@@ -581,6 +676,7 @@ unsafe fn tuples_equal(
 //
 // This can obviously be quite slow on tables that have more than few rows.
 // ---------------------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn RelationFindReplTupleSeq(
     rel: Relation,
     lockmode: LockTupleMode,
@@ -844,6 +940,7 @@ unsafe fn CheckAndReportConflict(
 //
 // Caller is responsible for opening the indexes.
 // ---------------------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn ExecSimpleRelationInsert(
     resultRelInfo: *mut ResultRelInfo,
     estate: *mut EState,
@@ -951,6 +1048,7 @@ pub unsafe fn ExecSimpleRelationInsert(
 //
 // Caller is responsible for opening the indexes.
 // ---------------------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn ExecSimpleRelationUpdate(
     resultRelInfo: *mut ResultRelInfo,
     estate: *mut EState,
@@ -1070,6 +1168,7 @@ pub unsafe fn ExecSimpleRelationUpdate(
 //
 // Caller is responsible for opening the indexes.
 // ---------------------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn ExecSimpleRelationDelete(
     resultRelInfo: *mut ResultRelInfo,
     estate: *mut EState,
@@ -1213,6 +1312,7 @@ pub unsafe fn CheckCmdReplicaIdentity(rel: Relation, cmd: CmdType) {
 //
 // The nspname and relname are only needed for error reporting.
 // ---------------------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn CheckSubscriptionRelkind(
     relkind: c_char,
     _nspname: *const c_char,

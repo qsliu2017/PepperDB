@@ -63,8 +63,7 @@ pub struct Latch {
 
 // utils/init/globals.c: MyProc - this backend's PGPROC entry.  TODO: import
 // from storage/proc.rs once ported.
-static mut MyProc: *mut PGPROC = null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 // storage/latch.h flags.  TODO: import from ported latch.c.
 const WL_LATCH_SET: c_int = 1 << 0;
 const WL_TIMEOUT: c_int = 1 << 2;
@@ -162,6 +161,7 @@ pub unsafe fn ConditionVariablePrepareToSleep(cv: *mut ConditionVariable) {
  * defined in pgstat.h.  This controls the contents of pg_stat_activity's
  * wait_event_type and wait_event columns while waiting.
  */
+#[no_mangle]
 pub unsafe fn ConditionVariableSleep(cv: *mut ConditionVariable, wait_event_info: uint32) {
     let _ = ConditionVariableTimedSleep(cv, -1 /* no timeout */, wait_event_info);
 }
@@ -292,6 +292,7 @@ pub unsafe fn ConditionVariableTimedSleep(
  *
  * Return true if we've been signaled.
  */
+#[no_mangle]
 pub unsafe fn ConditionVariableCancelSleep() -> bool {
     let cv: *mut ConditionVariable = cv_sleep_target;
     let mut signaled = false;
@@ -321,6 +322,7 @@ pub unsafe fn ConditionVariableCancelSleep() -> bool {
  * sentinel.  Hence, think twice before proposing that this should return
  * a flag telling whether it woke somebody.
  */
+#[no_mangle]
 pub unsafe fn ConditionVariableSignal(cv: *mut ConditionVariable) {
     let mut proc: *mut PGPROC = null_mut();
 
@@ -344,6 +346,7 @@ pub unsafe fn ConditionVariableSignal(cv: *mut ConditionVariable) {
  * at time of call, but processes that add themselves to the list mid-call
  * will typically not get awakened.
  */
+#[no_mangle]
 pub unsafe fn ConditionVariableBroadcast(cv: *mut ConditionVariable) {
     let pgprocno: c_int = MyProcNumber;
     let mut proc: *mut PGPROC = null_mut();

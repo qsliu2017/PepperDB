@@ -169,14 +169,14 @@ use crate::utils::cache::syscache::{
 };
 // lsyscache helpers.
 use crate::utils::cache::lsyscache::{
-    datumCopy, func_parallel, func_strict, func_volatile, get_array_type, get_commutator,
+    func_parallel, func_strict, func_volatile, get_array_type, get_commutator,
     get_func_leakproof, get_negator, get_op_hash_functions, get_opcode, get_typlenbyval,
     get_typlenbyvalalign, lookup_type_cache, DatumGetArrayTypePCopy, TYPECACHE_CMP_PROC,
 };
 // typcache helpers.
 use crate::utils::cache::typcache::{DomainHasConstraints, lookup_rowtype_tupdesc_domain, TypeCacheEntry};
 // Datum copy.
-use crate::utils::adt::datum::datumCopy as datum_copy;
+use crate::utils::adt::datum::datumCopy;
 // Array helpers.
 use crate::utils::array::{ARR_DATA_PTR, ARR_DIMS, ARR_ELEMTYPE, ARR_HASNULL, ARR_NDIM, ArrayType};
 use crate::utils::adt::arrayutils::ArrayGetNItems;
@@ -252,7 +252,7 @@ use crate::{Assert, IsA, castNode, foreach, forthree, lfirst_node, linitial_node
 
 /// PROCOID -- pg_proc catcache id.
 // TODO(pg-port): utils/syscache.h
-const PROCOID: c_int = 21;
+const PROCOID: c_int = 47;
 
 /// F_NEXTVAL -- OID of nextval(regclass) (pg_proc).
 // TODO(pg-port): catalog/pg_proc_fn.h / fmgroids.h
@@ -264,19 +264,19 @@ const Anum_pg_proc_proallargtypes: c_int = 21;
 
 /// Anum_pg_proc_proargdefaults
 // TODO(pg-port): catalog/pg_proc_d.h
-const Anum_pg_proc_proargdefaults: c_int = 20;
+const Anum_pg_proc_proargdefaults: c_int = 24;
 
 /// Anum_pg_proc_prosrc
 // TODO(pg-port): catalog/pg_proc_d.h
-const Anum_pg_proc_prosrc: c_int = 29;
+const Anum_pg_proc_prosrc: c_int = 26;
 
 /// Anum_pg_proc_prosqlbody
 // TODO(pg-port): catalog/pg_proc_d.h
-const Anum_pg_proc_prosqlbody: c_int = 35;
+const Anum_pg_proc_prosqlbody: c_int = 28;
 
 /// Anum_pg_proc_proconfig
 // TODO(pg-port): catalog/pg_proc_d.h
-const Anum_pg_proc_proconfig: c_int = 34;
+const Anum_pg_proc_proconfig: c_int = 29;
 
 // ---------------------------------------------------------------------------
 //  Type aliases mirroring C usage.
@@ -355,22 +355,22 @@ unsafe fn to_jsonb_is_immutable(_typid: Oid) -> bool {
 /// geterrposition -- elog.c (not yet ported).
 // TODO(pg-port): utils/error/elog.c
 #[inline]
-unsafe fn geterrposition() -> c_int { 0 }
+unsafe fn geterrposition() -> c_int { crate::utils::error::elog_impl::geterrposition() }
 
 /// errposition -- elog.c (not yet ported).
 // TODO(pg-port): utils/error/elog.c
 #[inline]
-unsafe fn errposition(_pos: c_int) -> c_int { 0 }
+unsafe fn errposition(pos: c_int) -> c_int { crate::utils::error::elog_impl::errposition(pos) }
 
 /// internalerrposition -- elog.c (not yet ported).
 // TODO(pg-port): utils/error/elog.c
 #[inline]
-unsafe fn internalerrposition(_pos: c_int) -> c_int { 0 }
+unsafe fn internalerrposition(pos: c_int) -> c_int { crate::utils::error::elog_impl::internalerrposition(pos) }
 
 /// internalerrquery -- elog.c (not yet ported).
 // TODO(pg-port): utils/error/elog.c
 #[inline]
-unsafe fn internalerrquery(_query: *const c_char) -> c_int { 0 }
+unsafe fn internalerrquery(query: *const c_char) -> c_int { crate::utils::error::elog_impl::internalerrquery(query) }
 
 /// errcontext_msg -- elog.c (not yet ported).
 // TODO(pg-port): utils/error/elog.c
@@ -390,7 +390,7 @@ unsafe fn get_expr_result_type(
     _resultTypeId: *mut Oid,
     _resultTupleDesc: *mut *mut TupleDescData,
 ) -> c_int {
-    unimplemented!("get_expr_result_type -- funcapi.c not yet ported")
+    crate::utils::fmgr::funcapi::get_expr_result_type(_expr as _, _resultTypeId as _, _resultTupleDesc as _) as _
 }
 
 /// check_sql_fn_retval -- executor/functions.c (not yet ported).
@@ -403,7 +403,7 @@ unsafe fn check_sql_fn_retval(
     _prokind: c_char,
     _insertDefaultTypeCoercions: bool,
 ) -> bool {
-    unimplemented!("check_sql_fn_retval -- executor/functions.c not yet ported")
+    crate::executor::functions::check_sql_fn_retval(_queryTreeLists as _, _rettype as _, _rettupdesc as _, _prokind as _, _insertDefaultTypeCoercions as _) as _
 }
 
 /// prepare_sql_fn_parse_info -- executor/functions.c (not yet ported).
@@ -415,14 +415,16 @@ unsafe fn prepare_sql_fn_parse_info(
     _call_expr: *mut Node,
     _input_collid: Oid,
 ) -> SQLFunctionParseInfoPtr {
-    unimplemented!("prepare_sql_fn_parse_info -- executor/functions.c not yet ported")
+    crate::executor::functions::prepare_sql_fn_parse_info(_func_tuple as _, _call_expr as _, _input_collid as _) as _
 }
 
 /// sql_fn_parser_setup -- executor/functions.c (not yet ported).
 // TODO(pg-port): executor/functions.h
 pub type ParserSetupHook = Option<unsafe extern "C" fn(*mut ParseState, *mut c_void)>;
 #[inline]
-unsafe fn sql_fn_parser_setup(_pstate: *mut ParseState, _pinfo: SQLFunctionParseInfoPtr) {}
+unsafe fn sql_fn_parser_setup(pstate: *mut ParseState, pinfo: SQLFunctionParseInfoPtr) {
+    crate::executor::functions::sql_fn_parser_setup(pstate as _, pinfo as _)
+}
 
 /// Trampoline so sql_fn_parser_setup can be used as a crate::nodes::params::ParserSetupHook
 /// (which is `unsafe fn`, not `extern "C" fn`).
@@ -435,12 +437,11 @@ unsafe fn sql_fn_parser_setup_trampoline(pstate: *mut crate::nodes::params::Pars
 // TODO(pg-port): utils/mmgr/aset.h -- just use palloc0 bucket for now.
 #[inline]
 unsafe fn AllocSetContextCreate(
-    _parent: MemoryContext,
-    _name: *const c_char,
-    _sizes: (Size, Size, Size),
+    parent: MemoryContext,
+    name: *const c_char,
+    sizes: (Size, Size, Size),
 ) -> MemoryContext {
-    // Stub: return the current memory context unchanged.
-    CurrentMemoryContext
+    crate::utils::mmgr::aset::AllocSetContextCreate(parent as _, name, sizes) as _
 }
 
 /// DatumGetArrayTypeP -- detoast an array datum.
@@ -460,7 +461,9 @@ const TYPEFUNC_RECORD: TypeFuncClass = 3;
 /// AcquireRewriteLocks -- rewrite/rewriteHandler.h (not yet ported).
 // TODO(pg-port): rewrite/rewriteHandler.h
 #[inline]
-unsafe fn AcquireRewriteLocks(_parsetree: *mut Query, _forExecute: bool, _forUpdatePushedDown: bool) {}
+unsafe fn AcquireRewriteLocks(parsetree: *mut Query, forExecute: bool, forUpdatePushedDown: bool) {
+    crate::rewrite::rewriteHandler::AcquireRewriteLocks(parsetree as _, forExecute, forUpdatePushedDown)
+}
 
 /// is_orclause -- check whether node is an OR BoolExpr.
 // TODO(pg-port): nodes/makefuncs.h (nodeFuncs.h inline)
@@ -720,6 +723,7 @@ unsafe fn contain_subplans_walker(node: *mut Node, context: *mut c_void) -> bool
  * We will recursively look into Query nodes (i.e., SubLink sub-selects)
  * but not into SubPlans.  See comments for contain_volatile_functions().
  */
+#[no_mangle]
 pub unsafe fn contain_mutable_functions(clause: *mut Node) -> bool {
     contain_mutable_functions_walker(clause, null_mut())
 }
@@ -1867,6 +1871,7 @@ unsafe fn contain_leaked_vars_walker(
  * We don't use expression_tree_walker here because we don't want to descend
  * through very many kinds of nodes; only the ones we can be sure are strict.
  */
+#[no_mangle]
 pub unsafe fn find_nonnullable_rels(clause: *mut Node) -> Relids {
     find_nonnullable_rels_walker(clause, true)
 }
@@ -2110,6 +2115,7 @@ unsafe fn find_nonnullable_rels_walker(
  * We don't use expression_tree_walker here because we don't want to descend
  * through very many kinds of nodes; only the ones we can be sure are strict.
  */
+#[no_mangle]
 pub unsafe fn find_nonnullable_vars(clause: *mut Node) -> *mut List {
     find_nonnullable_vars_walker(clause, true)
 }
@@ -2301,6 +2307,7 @@ unsafe fn find_nonnullable_vars_walker(
  * As with find_nonnullable_vars, we return the varattnos of the identified
  * Vars in a multibitmapset.
  */
+#[no_mangle]
 pub unsafe fn find_forced_null_vars(node: *mut Node) -> *mut List {
     let mut result: *mut List = NIL;
 
@@ -4589,10 +4596,7 @@ pub unsafe fn expand_function_arguments(
     func_tuple: HeapTuple,
 ) -> *mut List {
     let funcform = GETSTRUCT(func_tuple) as Form_pg_proc;
-    // TODO(pg-port): proargtypes (oidvector) is a CATALOG_VARLEN field omitted from
-    // FormData_pg_proc; use null as sentinel -- recheck_cast_function_args handles
-    // null proargtypes safely since enforce_generic_type_consistency only reads pronargs entries.
-    let mut proargtypes: *mut Oid = core::ptr::null_mut();
+    let mut proargtypes: *mut Oid = (*funcform).proargtypes.values.as_mut_ptr();
     let mut pronargs: c_int = (*funcform).pronargs as c_int;
     let mut has_named_args = false;
 

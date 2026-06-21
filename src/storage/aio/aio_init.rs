@@ -20,7 +20,7 @@ use std::ffi::c_char;
 // storage/shmem.h - allocate (or attach to) a named chunk of shared memory.
 // TODO: import from a real shmem.c port once it exists.
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _foundPtr: *mut bool) -> *mut c_void {
-    unimplemented!()
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _foundPtr)
 }
 
 // storage/shmem.h add_size(): overflow-checked addition of shared sizes.
@@ -38,7 +38,7 @@ unsafe fn mul_size(s1: Size, s2: Size) -> Size {
 // storage/condition_variable.h ConditionVariableInit().
 // TODO: import from a real condition_variable.c port once it exists.
 unsafe fn ConditionVariableInit(_cv: *mut ConditionVariable) {
-    unimplemented!()
+    crate::storage::lmgr::condition_variable::ConditionVariableInit(_cv as _)
 }
 
 // utils/guc.h SetConfigOption().
@@ -49,26 +49,28 @@ unsafe fn SetConfigOption(
     _context: c_int,
     _source: c_int,
 ) {
-    unimplemented!()
+    // bring-up: SetConfigOption shim doesn't propagate GUC writes; no-op (keeps default).
 }
 
 // storage/ipc.h before_shmem_exit().
 // TODO: import from a real ipc.c port once it exists.
 unsafe fn before_shmem_exit(_function: pg_on_exit_callback, _arg: Datum) {
-    unimplemented!()
+    crate::storage::ipc::ipc::before_shmem_exit(core::mem::transmute(_function), _arg)
 }
 
 // miscadmin.h MyProc (PGPROC*). Only ever compared against NULL here.
 // TODO: import from a real proc.c port once it exists.
-const MyProc: *mut c_void = null_mut();
+extern "C" { static mut MyProc: *mut c_void; }
 
 /* GUC context / source enum values (utils/guc.h). */
 const PGC_POSTMASTER: c_int = 0;
 const PGC_S_DYNAMIC_DEFAULT: c_int = 0;
 const PGC_S_OVERRIDE: c_int = 0;
 
-/* miscadmin.h - number of auxiliary processes. */
-const NUM_AUXILIARY_PROCS: c_int = 6;
+/* miscadmin.h - number of auxiliary processes. Must match the proc-array sizing
+ * (storage/lmgr/proc.rs NUM_AUXILIARY_PROCS = 6 + MAX_IO_WORKERS), or aux procs
+ * get a MyProcNumber past AioProcs() and the AIO per-proc arrays under-size. */
+const NUM_AUXILIARY_PROCS: c_int = crate::storage::lmgr::proc::NUM_AUXILIARY_PROCS as c_int;
 
 /* storage/proc.h on-exit callback signature. */
 type pg_on_exit_callback = unsafe fn(code: c_int, arg: Datum);
@@ -168,13 +170,8 @@ pub unsafe fn AioShmemSize() -> Size {
      * we must force the matter with PGC_S_OVERRIDE.
      */
     if io_max_concurrency == -1 {
-        let buf = std::ffi::CString::new(format!("{}", AioChooseMaxConcurrency())).unwrap();
-        let name = b"io_max_concurrency\0".as_ptr() as *const c_char;
-        SetConfigOption(name, buf.as_ptr(), PGC_POSTMASTER, PGC_S_DYNAMIC_DEFAULT);
-        if io_max_concurrency == -1 {
-            /* failed to apply it? */
-            SetConfigOption(name, buf.as_ptr(), PGC_POSTMASTER, PGC_S_OVERRIDE);
-        }
+        // bring-up: SetConfigOption shim doesn't write back the GUC; set directly.
+        io_max_concurrency = AioChooseMaxConcurrency();
     }
 
     sz = add_size(sz, AioCtlShmemSize());

@@ -88,12 +88,12 @@ const Anum_pg_publication_namespace_pnpubid: AttrNumber = 2;
 const Anum_pg_publication_namespace_pnnspid: AttrNumber = 3;
 
 /* syscache IDs  TODO(pg-port): real values from syscache.h */
-const PUBLICATIONNAME: c_int    = 212;
-const PUBLICATIONOID: c_int     = 26;
-const PUBLICATIONREL: c_int     = 102;
-const PUBLICATIONNAMESPACE: c_int = 103;
-const PUBLICATIONRELMAP: c_int  = 104;
-const PUBLICATIONNAMESPACEMAP: c_int = 105;
+const PUBLICATIONNAME: c_int    = 48;
+const PUBLICATIONOID: c_int     = 51;
+const PUBLICATIONREL: c_int     = 52;
+const PUBLICATIONNAMESPACE: c_int = 49;
+const PUBLICATIONRELMAP: c_int  = 53;
+const PUBLICATIONNAMESPACEMAP: c_int = 50;
 
 /* catalog index OID for pg_publication */
 const PublicationObjectIndexId: Oid = 6110;
@@ -2664,6 +2664,6 @@ const NamespaceRelationId: Oid = 2615;
 const RelationRelationId: Oid = 1259;
 
 /* NAMESPACEOID syscache  TODO(pg-port) */
-const NAMESPACEOID: c_int = 86;
+const NAMESPACEOID: c_int = 38;
 
 /* ereport!/elog!/errmsg! come from crate::prelude::* (real shim macros) */

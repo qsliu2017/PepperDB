@@ -204,6 +204,7 @@ pub unsafe fn pg_qsort(
  * # Safety
  * As pg_qsort; `arg` is passed opaquely to every `cmp` call.
  */
+#[no_mangle]
 pub unsafe fn qsort_arg(
     base: *mut c_void,
     n: usize,

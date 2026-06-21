@@ -127,13 +127,13 @@ type RegProcedure = Oid;
  * the established convention (see parser/parse_type.rs).
  * TODO(pg-port): catalog/syscache_ids.h (generated).
  */
-const PROCOID: c_int = 0;
-const OPEROID: c_int = 0;
-const RELOID: c_int = 0;
-const COLLOID: c_int = 0;
-const TYPEOID: c_int = 0;
-const TSCONFIGOID: c_int = 0;
-const TSDICTOID: c_int = 0;
+const PROCOID: c_int = 47;
+const OPEROID: c_int = 40;
+const RELOID: c_int = 57;
+const COLLOID: c_int = 16;
+const TYPEOID: c_int = 82;
+const TSCONFIGOID: c_int = 74;
+const TSDICTOID: c_int = 76;
 
 /* T_ErrorSaveContext node tag (nodes/nodes.h). */
 const T_ErrorSaveContext: NodeTag = NodeTag::T_ErrorSaveContext;
@@ -179,60 +179,40 @@ unsafe fn FuncnameGetCandidates(
     _expand_defaults: bool,
     _include_out_arguments: bool,
     _missing_ok: bool,
-) -> FuncCandidateList {
-    unimplemented!("FuncnameGetCandidates: catalog/namespace.c not yet translated")
-}
+) -> FuncCandidateList { crate::catalog::namespace::FuncnameGetCandidates(_names as _, _nargs as _, _argnames as _, _expand_variadic, _expand_defaults, _include_out_arguments, _missing_ok) as _ }
 // TODO(pg-port): OpernameGetCandidates lives in catalog/namespace.c
 unsafe fn OpernameGetCandidates(
     _names: *mut List,
     _oprkind: c_char,
     _missing_schema_ok: bool,
-) -> FuncCandidateList {
-    unimplemented!("OpernameGetCandidates: catalog/namespace.c not yet translated")
-}
+) -> FuncCandidateList { crate::catalog::namespace::OpernameGetCandidates(_names as _, _oprkind as _, _missing_schema_ok) as _ }
 // TODO(pg-port): OpernameGetOprid lives in catalog/namespace.c
-unsafe fn OpernameGetOprid(_names: *mut List, _oprleft: Oid, _oprright: Oid) -> Oid {
-    unimplemented!("OpernameGetOprid: catalog/namespace.c not yet translated")
-}
+unsafe fn OpernameGetOprid(_names: *mut List, _oprleft: Oid, _oprright: Oid) -> Oid { crate::catalog::namespace::OpernameGetOprid(_names as _, _oprleft as _, _oprright as _) as _ }
 // TODO(pg-port): makeRangeVarFromNameList lives in catalog/namespace.c
 unsafe fn makeRangeVarFromNameList(_names: *mut List) -> *mut RangeVar {
-    unimplemented!("makeRangeVarFromNameList: catalog/namespace.c not yet translated")
+    crate::catalog::namespace::makeRangeVarFromNameList(_names as _) as _
 }
 // TODO(pg-port): RangeVarGetRelid is RangeVarGetRelidExtended(...) in catalog/namespace.c
 unsafe fn RangeVarGetRelid(_relation: *mut RangeVar, _lockmode: c_int, _missing_ok: bool) -> Oid {
-    unimplemented!("RangeVarGetRelid: catalog/namespace.c not yet translated")
+    crate::catalog::namespace::RangeVarGetRelid(_relation as _, _lockmode as _, _missing_ok)
 }
 // TODO(pg-port): NameListToString lives in catalog/namespace.c
 unsafe fn NameListToString(_names: *mut List) -> *mut c_char {
     unimplemented!("NameListToString: catalog/namespace.c not yet translated")
 }
 // TODO(pg-port): get_namespace_name lives in utils/lsyscache.c
-unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char {
-    unimplemented!("get_namespace_name: utils/lsyscache.c not yet translated")
-}
+unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_namespace_name(_nspid as _) as _ }
 // TODO(pg-port): get_namespace_name_or_temp lives in catalog/namespace.c
 unsafe fn get_namespace_name_or_temp(_nspid: Oid) -> *mut c_char {
     unimplemented!("get_namespace_name_or_temp: catalog/namespace.c not yet translated")
 }
 // TODO(pg-port): *IsVisible lives in catalog/namespace.c
-unsafe fn FunctionIsVisible(_funcid: Oid) -> bool {
-    unimplemented!("FunctionIsVisible: catalog/namespace.c not yet translated")
-}
-unsafe fn OperatorIsVisible(_oprid: Oid) -> bool {
-    unimplemented!("OperatorIsVisible: catalog/namespace.c not yet translated")
-}
-unsafe fn RelationIsVisible(_relid: Oid) -> bool {
-    unimplemented!("RelationIsVisible: catalog/namespace.c not yet translated")
-}
-unsafe fn CollationIsVisible(_collid: Oid) -> bool {
-    unimplemented!("CollationIsVisible: catalog/namespace.c not yet translated")
-}
-unsafe fn TSConfigIsVisible(_cfgid: Oid) -> bool {
-    unimplemented!("TSConfigIsVisible: catalog/namespace.c not yet translated")
-}
-unsafe fn TSDictionaryIsVisible(_dictid: Oid) -> bool {
-    unimplemented!("TSDictionaryIsVisible: catalog/namespace.c not yet translated")
-}
+unsafe fn FunctionIsVisible(_funcid: Oid) -> bool { crate::catalog::namespace::FunctionIsVisible(_funcid as _) }
+unsafe fn OperatorIsVisible(_oprid: Oid) -> bool { crate::catalog::namespace::OperatorIsVisible(_oprid as _) }
+unsafe fn RelationIsVisible(_relid: Oid) -> bool { crate::catalog::namespace::RelationIsVisible(_relid as _) }
+unsafe fn CollationIsVisible(_collid: Oid) -> bool { crate::catalog::namespace::CollationIsVisible(_collid as _) }
+unsafe fn TSConfigIsVisible(_cfgid: Oid) -> bool { crate::catalog::namespace::TSConfigIsVisible(_cfgid as _) }
+unsafe fn TSDictionaryIsVisible(_dictid: Oid) -> bool { crate::catalog::namespace::TSDictionaryIsVisible(_dictid as _) }
 
 /* utils/lsyscache.c */
 // TODO(pg-port): get_collation_oid lives in catalog/namespace.c (declared in lsyscache.h area)
@@ -270,17 +250,13 @@ unsafe fn SplitIdentifierString(
     _rawstring: *mut c_char,
     _separator: c_char,
     _namelist: *mut *mut List,
-) -> bool {
-    unimplemented!("SplitIdentifierString: utils/adt/varlena.c not yet translated")
-}
+) -> bool { crate::utils::adt::varlena::SplitIdentifierString(_rawstring as _, _separator as _, _namelist as _) }
 // TODO(pg-port): text_to_cstring lives in utils/adt/varlena.c
 unsafe fn text_to_cstring(_t: *const crate::c::text) -> *mut c_char {
     unimplemented!("text_to_cstring: utils/adt/varlena.c not yet translated")
 }
 // TODO(pg-port): textToQualifiedNameList lives in utils/adt/varlena.c
-unsafe fn textToQualifiedNameList(_textval: *const crate::c::text) -> *mut List {
-    unimplemented!("textToQualifiedNameList: utils/adt/varlena.c not yet translated")
-}
+unsafe fn textToQualifiedNameList(_textval: *const crate::c::text) -> *mut List { crate::utils::adt::varlena::textToQualifiedNameList(_textval as _) as _ }
 
 /*
  * pg_proc.proargtypes is an oidvector that lives beyond the CATALOG_VARLEN
@@ -581,6 +557,7 @@ pub unsafe fn to_regprocedure(fcinfo: FunctionCallInfo) -> Datum {
  * This exports the useful functionality of regprocedureout for use
  * in other backend modules.  The result is a palloc'd string.
  */
+#[no_mangle]
 pub unsafe fn format_procedure(procedure_oid: Oid) -> *mut c_char {
     format_procedure_extended(procedure_oid, 0)
 }

@@ -35,7 +35,11 @@ use std::ffi::{c_char, c_int, c_void, CStr};
 // ---------------------------------------------------------------------------
 
 // TODO(pg-port): real DLSUFFIX lives in (generated) pg_config.h; mirrored in
-// utils/misc/injection_point.rs.
+// utils/misc/injection_point.rs. On macOS PostgreSQL builds loadable modules
+// with the .dylib suffix (matches .pgref and our in-tree plpgsql.dylib).
+#[cfg(target_os = "macos")]
+const DLSUFFIX: &CStr = c".dylib";
+#[cfg(not(target_os = "macos"))]
 const DLSUFFIX: &CStr = c".so";
 
 // TODO(pg-port): real pkglib_path lives in utils/init/globals.rs.
@@ -190,6 +194,7 @@ pub unsafe fn load_external_function(
  * When 'restricted' is true, only libraries in the presumed-secure
  * directory $libdir/plugins may be referenced.
  */
+#[no_mangle]
 pub unsafe fn load_file(filename: *const c_char, restricted: bool) {
     let fullname: *mut c_char;
 
@@ -784,6 +789,7 @@ pub unsafe fn find_in_path(
  * to find each other and share information: they just need to agree
  * on the variable name and the data it will point to.
  */
+#[no_mangle]
 pub unsafe fn find_rendezvous_variable(varName: *const c_char) -> *mut *mut c_void {
     static mut rendezvousHash: *mut HTAB = std::ptr::null_mut();
 
@@ -870,16 +876,26 @@ pub unsafe fn RestoreLibraryState(mut start_address: *mut c_char) {
 // File-local helpers mirroring C standard-library calls.
 // ---------------------------------------------------------------------------
 
-/* ABI values that module needs to match to be accepted */
-// TODO(pg-port): real PG_MODULE_ABI_DATA macro lives in fmgr.h; populate from
-// FUNC_MAX_ARGS / INDEX_MAX_KEYS / NAMEDATALEN / FLOAT8PASSBYVAL / FUNC_MAX_ARGS.
+/* ABI values that module needs to match to be accepted (PG_MODULE_ABI_DATA) */
 static magic_data: Pg_abi_values = Pg_abi_values {
     version: 1800, /* PG_VERSION_NUM / 100 baseline (PostgreSQL 18) */
     funcmaxargs: 100,
     indexmaxkeys: 32,
     namedatalen: NAMEDATALEN as c_int,
     float8byval: 1,
-    abi_extra: [0; 32],
+    abi_extra: FMGR_ABI_EXTRA,
+};
+
+/* FMGR_ABI_EXTRA = "PostgreSQL", NUL-padded to 32 bytes (pg_config_manual.h) */
+const FMGR_ABI_EXTRA: [c_char; 32] = {
+    let mut a = [0 as c_char; 32];
+    let s = b"PostgreSQL";
+    let mut i = 0;
+    while i < s.len() {
+        a[i] = s[i] as c_char;
+        i += 1;
+    }
+    a
 };
 
 /* PG_MAGIC_FUNCTION_NAME_STRING as a NUL-terminated C symbol name */

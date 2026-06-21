@@ -9,6 +9,7 @@
 //!   Eventually, the index information should go through here, too.
 
 use crate::prelude::*;
+use crate::utils::cache::syscache_ids_gen::{AMOPOPID, AMOPSTRATEGY, AMPROCNUM, ATTNAME, ATTNUM, CASTSOURCETARGET, CLAOID, COLLOID, CONSTROID, INDEXRELID, LANGOID, NAMESPACEOID, OPEROID, OPFAMILYOID, PROCOID, PUBLICATIONNAME, PUBLICATIONOID, RANGETYPE, RANGEMULTIRANGE, RELOID, RELNAMENSP, STATRELATTINH, SUBSCRIPTIONNAME, SUBSCRIPTIONOID, TRFTYPELANG, TYPEOID};
 
 use crate::access::attnum::AttrNumber;
 use crate::access::htup_details::{HeapTuple, HeapTupleIsValid, GETSTRUCT};
@@ -50,39 +51,9 @@ pub static mut get_attavgwidth_hook: get_attavgwidth_hook_type = None;
 
 /* ---------- Syscache ID stubs (catalog/syscache_ids.h, generated) ---------- */
 /* TODO(pg-port): replace with generated constants once syscache_ids.h is ported */
-const AMOPOPID: c_int = 0;
-const AMOPSTRATEGY: c_int = 0;
-const AMPROCNUM: c_int = 0;
-const ATTNAME: c_int = 0;
-const ATTNUM: c_int = 0;
-const CASTSOURCETARGET: c_int = 0;
-const CLAOID: c_int = 0;
-const COLLOID: c_int = 0;
-const CONSTROID: c_int = 0;
-const INDEXRELID: c_int = 0;
-const LANGOID: c_int = 0;
-const NAMESPACEOID: c_int = 0;
-const OPEROID: c_int = 0;
-const OPFAMILYOID: c_int = 0;
-const PROCOID: c_int = 0;
-const PUBLICATIONNAME: c_int = 0;
-const PUBLICATIONOID: c_int = 0;
-const RANGETYPE: c_int = 0;
-const RANGEMULTIRANGE: c_int = 0;
-const RELOID: c_int = 0;
-const RELNAMENSP: c_int = 0;
-const STATRELATTINH: c_int = 0;
-const SUBSCRIPTIONNAME: c_int = 0;
-const SUBSCRIPTIONOID: c_int = 0;
-const TRFTYPELANG: c_int = 0;
-const TYPEOID: c_int = 0;
 
 /* ---------- catcache list type stub ---------- */
-/* TODO(pg-port): real CatCList from utils/cache/catcache.h */
-#[repr(C)]
-pub struct CatCList {
-    _private: [u8; 0],
-}
+pub use crate::utils::cache::catcache::CatCList;
 
 /* ---------- local stubs ---------- */
 
@@ -106,13 +77,13 @@ pub unsafe fn SearchSysCacheList1(cache_id: c_int, key1: Datum) -> *mut CatCList
 
 /// TODO(pg-port): ReleaseSysCacheList -- ReleaseCatCacheList in utils/cache/catcache.h
 #[inline]
-pub unsafe fn ReleaseSysCacheList(_list: *mut CatCList) {
-    /* TODO(pg-port): call ReleaseCatCacheList */
+pub unsafe fn ReleaseSysCacheList(list: *mut CatCList) {
+    crate::utils::cache::catcache::ReleaseCatCacheList(list as _)
 }
 
 /// TODO(pg-port): GetSysCacheOid1 -- see utils/cache/syscache.h
-#[inline]
-pub unsafe fn GetSysCacheOid1(
+#[no_mangle]
+pub unsafe extern "C" fn GetSysCacheOid1(
     cache_id: c_int,
     oid_col: AttrNumber,
     key1: Datum,
@@ -151,15 +122,16 @@ pub unsafe fn GetSysCacheOid2(
 /// Returns the number of members in a CatCList.
 /// TODO(pg-port): read from real catclist.n_members field.
 #[inline]
-unsafe fn catclist_n_members(_list: *mut CatCList) -> c_int {
-    0
+unsafe fn catclist_n_members(list: *mut CatCList) -> c_int {
+    (*list).n_members
 }
 
 /// Returns the i-th member tuple of a CatCList.
 /// TODO(pg-port): index into real catclist.members[] array.
 #[inline]
-unsafe fn catclist_member(_list: *mut CatCList, _i: c_int) -> HeapTuple {
-    core::ptr::null_mut()
+unsafe fn catclist_member(list: *mut CatCList, i: c_int) -> HeapTuple {
+    let ct = *(*list).members.as_ptr().add(i as usize);
+    &mut (*ct).tuple as *mut _ as HeapTuple
 }
 
 /* ---------- stubs for functions called from this file ---------- */
@@ -184,28 +156,30 @@ pub struct IndexAmRoutine {
 pub type CompareType = c_int;
 pub const COMPARE_INVALID: CompareType = 0;
 pub const COMPARE_LT: CompareType = 1;
-pub const COMPARE_GT: CompareType = 2;
+pub const COMPARE_LE: CompareType = 2;
 pub const COMPARE_EQ: CompareType = 3;
-pub const COMPARE_NE: CompareType = 4;
+pub const COMPARE_GE: CompareType = 4;
+pub const COMPARE_GT: CompareType = 5;
+pub const COMPARE_NE: CompareType = 6;
 
 /// TODO(pg-port): IndexAmTranslateStrategy (access/amapi.h / nbtree)
 pub unsafe fn IndexAmTranslateStrategy(
-    _strategy: i16,
-    _amoid: Oid,
-    _opfamily: Oid,
-    _missing_ok: bool,
+    strategy: i16,
+    amoid: Oid,
+    opfamily: Oid,
+    missing_ok: bool,
 ) -> CompareType {
-    COMPARE_INVALID
+    crate::access::index::amapi::IndexAmTranslateStrategy(strategy as _, amoid, opfamily, missing_ok)
 }
 
 /// TODO(pg-port): IndexAmTranslateCompareType (access/amapi.h)
 pub unsafe fn IndexAmTranslateCompareType(
-    _cmptype: CompareType,
-    _amoid: Oid,
-    _opfamily: Oid,
-    _missing_ok: bool,
+    cmptype: CompareType,
+    amoid: Oid,
+    opfamily: Oid,
+    missing_ok: bool,
 ) -> i16 {
-    0
+    crate::access::index::amapi::IndexAmTranslateCompareType(cmptype as _, amoid, opfamily, missing_ok) as i16
 }
 
 /// AM OID constants.  TODO(pg-port): catalog/pg_am_d.h (generated)
@@ -237,14 +211,12 @@ pub const NIL: *mut List = core::ptr::null_mut();
 
 /// lappend_oid stub.  TODO(pg-port): nodes/pg_list.h
 pub unsafe fn lappend_oid(list: *mut List, datum: Oid) -> *mut List {
-    let _ = datum;
-    list
+    crate::nodes::list::lappend_oid(list as _, datum) as _
 }
 
 /// lappend stub.  TODO(pg-port): nodes/pg_list.h
 pub unsafe fn lappend(list: *mut List, datum: *mut c_void) -> *mut List {
-    let _ = datum;
-    list
+    crate::nodes::list::lappend(list as _, datum) as _
 }
 
 /// list_member_oid stub.  TODO(pg-port): nodes/pg_list.h
@@ -252,37 +224,17 @@ pub unsafe fn list_member_oid(_list: *const List, _oid: Oid) -> bool {
     false
 }
 
-/// palloc stub.  TODO(pg-port): utils/palloc.h
 pub unsafe fn palloc(size: usize) -> *mut c_void {
-    libc_malloc(size)
+    crate::utils::mmgr::mcxt::palloc(size)
 }
 
-unsafe fn libc_malloc(size: usize) -> *mut c_void {
-    extern "C" {
-        fn malloc(size: usize) -> *mut c_void;
-    }
-    malloc(size)
-}
-
-/// pfree stub.  TODO(pg-port): utils/palloc.h
 pub unsafe fn pfree(ptr: *mut c_void) {
-    extern "C" {
-        fn free(ptr: *mut c_void);
-    }
-    free(ptr);
+    crate::utils::mmgr::mcxt::pfree(ptr)
 }
 
 /// pstrdup stub.  TODO(pg-port): utils/palloc.h
 pub unsafe fn pstrdup(s: *const c_char) -> *mut c_char {
-    extern "C" {
-        fn strlen(s: *const c_char) -> usize;
-        fn malloc(n: usize) -> *mut c_void;
-        fn memcpy(d: *mut c_void, s: *const c_void, n: usize) -> *mut c_void;
-    }
-    let n = strlen(s) + 1;
-    let d = malloc(n) as *mut c_char;
-    memcpy(d as *mut c_void, s as *const c_void, n);
-    d
+    crate::utils::palloc::pstrdup(s)
 }
 
 /// IOFuncSelector.  TODO(pg-port): utils/lsyscache.h
@@ -316,8 +268,8 @@ pub const Anum_pg_class_oid: AttrNumber = 1;
 pub const Anum_pg_publication_oid: AttrNumber = 1;
 pub const Anum_pg_subscription_oid: AttrNumber = 1;
 pub const Anum_pg_attribute_attoptions: AttrNumber = 1;
-pub const Anum_pg_type_typdefaultbin: AttrNumber = 1;
-pub const Anum_pg_type_typdefault: AttrNumber = 2;
+pub const Anum_pg_type_typdefaultbin: AttrNumber = 30;
+pub const Anum_pg_type_typdefault: AttrNumber = 31;
 pub const Anum_pg_statistic_stavalues1: AttrNumber = 1;
 pub const Anum_pg_statistic_stanumbers1: AttrNumber = 1;
 pub const Anum_pg_index_indclass: AttrNumber = 1;
@@ -386,8 +338,8 @@ pub struct oidvector {
 /* Misc stubs */
 
 /// TODO(pg-port): utils/builtins.h
-pub unsafe fn format_type_be(_typid: Oid) -> *const c_char {
-    b"?\0".as_ptr() as *const c_char
+pub unsafe fn format_type_be(typid: Oid) -> *const c_char {
+    crate::utils::adt::format_type::format_type_be(typid) as *const c_char
 }
 
 /// TODO(pg-port): utils/builtins.h
@@ -395,9 +347,8 @@ pub unsafe fn stringToNode(_str: *const c_char) -> *mut Node {
     core::ptr::null_mut()
 }
 
-/// TODO(pg-port): utils/builtins.h
-pub unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char {
-    core::ptr::null_mut()
+pub unsafe fn TextDatumGetCString(d: Datum) -> *mut c_char {
+    crate::utils::builtins::TextDatumGetCString(d)
 }
 
 /// TODO(pg-port): utils/array.h
@@ -449,6 +400,7 @@ pub unsafe fn datumCopy(_val: Datum, _typbyval: bool, _typlen: i32) -> Datum {
 }
 
 /// TODO(pg-port): utils/fmgrprotos.h
+#[no_mangle]
 pub unsafe fn OidInputFunctionCall(
     _func: Oid,
     _str: *mut c_char,
@@ -477,8 +429,8 @@ pub unsafe fn type_maximum_size(_typid: Oid, _typmod: i32) -> i32 {
 }
 
 /// TODO(pg-port): utils/typcache.h
-pub unsafe fn lookup_type_cache(_typid: Oid, _flags: c_int) -> *mut crate::utils::cache::typcache::TypeCacheEntry {
-    core::ptr::null_mut()
+pub unsafe fn lookup_type_cache(typid: Oid, flags: c_int) -> *mut crate::utils::cache::typcache::TypeCacheEntry {
+    crate::utils::cache::typcache::lookup_type_cache(typid, flags)
 }
 
 pub const TYPECACHE_CMP_PROC: c_int = 0x0010;
@@ -498,8 +450,9 @@ pub const TYPSTORAGE_PLAIN: c_char = b'p' as c_char;
 pub const TYPALIGN_INT: c_char = b'i' as c_char;
 
 /// TODO(pg-port): catalog/pg_type.h
-pub unsafe fn IsTrueArrayType(_typ: *const FormData_pg_type) -> bool {
-    false
+pub unsafe fn IsTrueArrayType(typ: *const FormData_pg_type) -> bool {
+    const F_ARRAY_SUBSCRIPT_HANDLER: Oid = 6204;
+    OidIsValid((*typ).typelem) && (*typ).typsubscript as Oid == F_ARRAY_SUBSCRIPT_HANDLER
 }
 
 /// TODO(pg-port): catalog/pg_known_oids.h / pg_type_d.h
@@ -681,6 +634,7 @@ pub unsafe fn get_op_opfamily_properties(
  *
  * Returns InvalidOid if there is no pg_amop entry for the given keys.
  */
+#[no_mangle]
 pub unsafe fn get_opfamily_member(
     opfamily: Oid,
     lefttype: Oid,
@@ -762,7 +716,8 @@ unsafe fn get_opmethod_canorder(amoid: Oid) -> bool {
  *
  * Returns true if successful, false if no matching pg_amop entry exists.
  */
-pub unsafe fn get_ordering_op_properties(
+#[no_mangle]
+pub unsafe extern "C" fn get_ordering_op_properties(
     opno: Oid,
     opfamily: *mut Oid,
     opcintype: *mut Oid,
@@ -850,7 +805,6 @@ pub unsafe fn get_equality_op_for_ordering_op(opno: Oid, reverse: *mut bool) -> 
             *reverse = cmptype == COMPARE_GT;
         }
     }
-
     result
 }
 
@@ -1380,6 +1334,7 @@ pub unsafe fn comparison_ops_are_compatible(opno1: Oid, opno2: Oid) -> bool {
  *
  * Returns InvalidOid if there is no pg_amproc entry for the given keys.
  */
+#[no_mangle]
 pub unsafe fn get_opfamily_proc(
     opfamily: Oid,
     lefttype: Oid,
@@ -2148,6 +2103,7 @@ pub unsafe fn get_negator(opno: Oid) -> Oid {
  *
  *      Returns procedure id for computing selectivity of an operator.
  */
+#[no_mangle]
 pub unsafe fn get_oprrest(opno: Oid) -> Oid {
     let tp: HeapTuple;
 
@@ -2169,6 +2125,7 @@ pub unsafe fn get_oprrest(opno: Oid) -> Oid {
  *
  *      Returns procedure id for computing selectivity of a join.
  */
+#[no_mangle]
 pub unsafe fn get_oprjoin(opno: Oid) -> Oid {
     let tp: HeapTuple;
 
@@ -2495,6 +2452,7 @@ pub unsafe fn get_relnatts(relid: Oid) -> c_int {
  * NOTE: since relation name is not unique, be wary of code that uses this
  * for anything except preparing error messages.
  */
+#[no_mangle]
 pub unsafe fn get_rel_name(relid: Oid) -> *mut c_char {
     let tp: HeapTuple;
 
@@ -2540,6 +2498,7 @@ pub unsafe fn get_rel_namespace(relid: Oid) -> Oid {
  * Note: not all pg_class entries have associated pg_type OIDs; so be
  * careful to check for InvalidOid result.
  */
+#[no_mangle]
 pub unsafe fn get_rel_type_id(relid: Oid) -> Oid {
     let tp: HeapTuple;
 
@@ -2791,6 +2750,7 @@ pub unsafe fn get_typbyval(typid: Oid) -> bool {
  *      instead of two.  Also, this routine raises an error instead of
  *      returning a bogus value when given a bad type OID.
  */
+#[no_mangle]
 pub unsafe fn get_typlenbyval(typid: Oid, typlen: *mut i16, typbyval: *mut bool) {
     let tp: HeapTuple;
     let typtup: Form_pg_type;
@@ -2810,6 +2770,7 @@ pub unsafe fn get_typlenbyval(typid: Oid, typlen: *mut i16, typbyval: *mut bool)
  *
  *      A three-fer: given the type OID, return typlen, typbyval, typalign.
  */
+#[no_mangle]
 pub unsafe fn get_typlenbyvalalign(
     typid: Oid,
     typlen: *mut i16,
@@ -3149,6 +3110,7 @@ pub unsafe fn get_typavgwidth(typid: Oid, typmod: i32) -> i32 {
  *      Given the type OID, find if it is a basic type, a complex type, etc.
  *      It returns the null char if the cache lookup fails...
  */
+#[no_mangle]
 pub unsafe fn get_typtype(typid: Oid) -> c_char {
     let tp: HeapTuple;
 
@@ -3172,6 +3134,7 @@ pub unsafe fn get_typtype(typid: Oid) -> c_char {
  *      a "rowtype" type --- either RECORD or a named composite type
  *      (including a domain over a named composite type).
  */
+#[no_mangle]
 pub unsafe fn type_is_rowtype(typid: Oid) -> bool {
     if typid == RECORDOID {
         return true; /* easy case */
@@ -3265,6 +3228,7 @@ pub unsafe fn get_typ_typrelid(typid: Oid) -> Oid {
  * NB: this only succeeds for "true" arrays having array_subscript_handler
  * as typsubscript.
  */
+#[no_mangle]
 pub unsafe fn get_element_type(typid: Oid) -> Oid {
     let tp: HeapTuple;
 
@@ -3291,6 +3255,7 @@ pub unsafe fn get_element_type(typid: Oid) -> Oid {
  *      Given the type OID, get the corresponding "true" array type.
  *      Returns InvalidOid if no array type can be found.
  */
+#[no_mangle]
 pub unsafe fn get_array_type(typid: Oid) -> Oid {
     let tp: HeapTuple;
     let mut result: Oid = InvalidOid;
@@ -3332,6 +3297,7 @@ pub unsafe fn get_promoted_array_type(typid: Oid) -> Oid {
  * This is equivalent to get_element_type(getBaseType(typid)), but avoids
  * an extra cache lookup.
  */
+#[no_mangle]
 pub unsafe fn get_base_element_type(mut typid: Oid) -> Oid {
     /*
      * We loop to find the bottom base type in a stack of domains.
@@ -3403,6 +3369,7 @@ pub unsafe fn getTypeInputInfo(type_: Oid, typ_input: *mut Oid, typ_io_param: *m
  *
  *      Get info needed for printing values of a type
  */
+#[no_mangle]
 pub unsafe fn getTypeOutputInfo(type_: Oid, typ_output: *mut Oid, typ_is_varlena: *mut bool) {
     let type_tuple: HeapTuple;
     let pt: Form_pg_type;
@@ -3434,6 +3401,7 @@ pub unsafe fn getTypeOutputInfo(type_: Oid, typ_output: *mut Oid, typ_is_varlena
  *
  *      Get info needed for binary input of values of a type
  */
+#[no_mangle]
 pub unsafe fn getTypeBinaryInputInfo(
     type_: Oid,
     typ_receive: *mut Oid,
@@ -3543,6 +3511,7 @@ pub unsafe fn get_typmodout(typid: Oid) -> Oid {
  *
  *      Given the type OID, return the type's typcollation attribute.
  */
+#[no_mangle]
 pub unsafe fn get_typcollation(typid: Oid) -> Oid {
     let tp: HeapTuple;
 
@@ -3578,6 +3547,7 @@ pub unsafe fn type_is_collatable(typid: Oid) -> bool {
  *
  * If typelemp isn't NULL, we also store the type's typelem value there.
  */
+#[no_mangle]
 pub unsafe fn get_typsubscript(typid: Oid, typelemp: *mut Oid) -> Oid {
     let tp: HeapTuple;
 
@@ -3844,6 +3814,7 @@ pub unsafe fn free_attstatsslot(sslot: *mut AttStatsSlot) {
  *
  * Returns a palloc'd copy of the string, or NULL if no such namespace.
  */
+#[no_mangle]
 pub unsafe fn get_namespace_name(nspid: Oid) -> *mut c_char {
     let tp: HeapTuple;
 
@@ -3948,6 +3919,7 @@ pub unsafe fn get_range_multirange(range_oid: Oid) -> Oid {
  *
  * Returns InvalidOid if the type is not a multirange.
  */
+#[no_mangle]
 pub unsafe fn get_multirange_range(multirange_oid: Oid) -> Oid {
     let tp: HeapTuple;
 

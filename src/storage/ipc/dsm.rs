@@ -1469,14 +1469,13 @@ type LWLock = c_void;
 const LW_EXCLUSIVE: c_int = 0;
 const LW_SHARED: c_int = 1;
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, if _mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE })
 }
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 
-// TODO(pg-port): real DynamicSharedMemoryControlLock lives in storage/lmgr/lwlocklist.h
-static mut DynamicSharedMemoryControlLock: *mut LWLock = std::ptr::null_mut();
+use crate::backend_link_shims::DynamicSharedMemoryControlLock;
 
 // TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c
 unsafe fn ShmemInitStruct(
@@ -1484,7 +1483,7 @@ unsafe fn ShmemInitStruct(
     _size: Size,
     _foundPtr: *mut bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _foundPtr)
 }
 
 // TODO(pg-port): real FreePageManager / FPM_PAGE_SIZE live in utils/freepage.c

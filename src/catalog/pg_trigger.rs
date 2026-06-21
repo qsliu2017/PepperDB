@@ -65,6 +65,7 @@ pub struct FormData_pg_trigger {
     pub tginitdeferred: bool,
     /* # of extra arguments in tgargs */
     pub tgnargs: int16,
+    pub tgattr: crate::c::int2vector,
 }
 
 /*

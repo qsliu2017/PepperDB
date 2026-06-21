@@ -210,7 +210,6 @@ unsafe fn IsSubTransaction() -> bool {
  * Parallel-worker state (access/parallel.h)
  * ---------------------------------------------------------------- */
 // TODO(pg-port): these really live in access/parallel.rs.
-#[no_mangle]
 pub static mut InitializingParallelWorker: bool = false;
 
 unsafe fn IsParallelWorker() -> bool {

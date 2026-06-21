@@ -16,17 +16,17 @@ use crate::nodes::nodes::{nodeTag, NodeTag};
 
 // TODO: from executor/nodeForeignscan.h
 unsafe fn ExecAsyncForeignScanRequest(_areq: *mut AsyncRequest) {
-    unimplemented!()
+    crate::executor::nodeForeignscan::ExecAsyncForeignScanRequest(_areq as _)
 }
 
 // TODO: from executor/nodeForeignscan.h
 unsafe fn ExecAsyncForeignScanConfigureWait(_areq: *mut AsyncRequest) {
-    unimplemented!()
+    crate::executor::nodeForeignscan::ExecAsyncForeignScanConfigureWait(_areq as _)
 }
 
 // TODO: from executor/nodeForeignscan.h
 unsafe fn ExecAsyncForeignScanNotify(_areq: *mut AsyncRequest) {
-    unimplemented!()
+    crate::executor::nodeForeignscan::ExecAsyncForeignScanNotify(_areq as _)
 }
 
 // TODO: from executor/nodeAppend.h

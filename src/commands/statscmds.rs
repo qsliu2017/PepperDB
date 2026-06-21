@@ -1155,9 +1155,9 @@ const ACLCHECK_OK: AclResult = 0;
 const ACLCHECK_NOT_OWNER: AclResult = 1;
 
 // utils/syscache.h cache identifiers are not ported yet.
-const STATEXTNAMENSP: c_int = 0;
-const STATEXTOID: c_int = 0;
-const STATEXTDATASTXOID: c_int = 0;
+const STATEXTNAMENSP: c_int = 63;
+const STATEXTOID: c_int = 64;
+const STATEXTDATASTXOID: c_int = 62;
 
 // utils/typcache.h flag (lookup_type_cache).
 const TYPECACHE_LT_OPR: c_int = 0x0001;

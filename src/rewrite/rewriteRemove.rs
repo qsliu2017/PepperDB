@@ -20,8 +20,8 @@ use crate::utils::rel::{Relation, RelationGetRelationName};
 use crate::utils::snapshot::SnapshotData;
 
 /* TODO(pg-port): utils/inval.h - shared cache invalidation not ported yet. */
-unsafe fn CacheInvalidateRelcache(_relation: Relation) {
-    unimplemented!()
+unsafe fn CacheInvalidateRelcache(relation: Relation) {
+    crate::utils::cache::inval::CacheInvalidateRelcache(relation)
 }
 
 /*
@@ -45,27 +45,27 @@ const F_OIDEQ: RegProcedure = 184;
 type SysScanDesc = *mut SysScanDescData;
 
 unsafe fn systable_beginscan(
-    _heapRelation: Relation,
-    _indexId: Oid,
-    _indexOK: bool,
-    _snapshot: *mut SnapshotData,
-    _nkeys: c_int,
-    _key: ScanKey,
+    heapRelation: Relation,
+    indexId: Oid,
+    indexOK: bool,
+    snapshot: *mut SnapshotData,
+    nkeys: c_int,
+    key: ScanKey,
 ) -> SysScanDesc {
     unimplemented!()
 }
 
-unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple {
+unsafe fn systable_getnext(sysscan: SysScanDesc) -> HeapTuple {
     unimplemented!()
 }
 
-unsafe fn systable_endscan(_sysscan: SysScanDesc) {
+unsafe fn systable_endscan(sysscan: SysScanDesc) {
     unimplemented!()
 }
 
 /* TODO(pg-port): catalog/indexing.h - heap+index delete helper not ported yet. */
-unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: *mut ItemPointerData) {
-    unimplemented!()
+unsafe fn CatalogTupleDelete(heapRel: Relation, tid: *mut ItemPointerData) {
+    crate::catalog::indexing::CatalogTupleDelete(heapRel, tid as _)
 }
 
 /*

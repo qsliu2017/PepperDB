@@ -273,7 +273,7 @@ const PVC_RECURSE_AGGREGATES: c_int = 0x0002;
 const PVC_INCLUDE_AGGREGATES: c_int = 0x0001;
 const PVC_RECURSE_WINDOWFUNCS: c_int = 0x0008;
 const PVC_INCLUDE_WINDOWFUNCS: c_int = 0x0004;
-const PVC_INCLUDE_PLACEHOLDERS: c_int = 0x0020;
+const PVC_INCLUDE_PLACEHOLDERS: c_int = 0x0010;
 
 // --- error codes ---
 const ERRCODE_FEATURE_NOT_SUPPORTED: c_int = 0;
@@ -291,8 +291,8 @@ unsafe fn DO_AGGSPLIT_SERIALIZE(aggsplit: AggSplit) -> bool {
     todo_aggsplit_serialize(aggsplit)
 }
 // TODO(pg-port): real AGGSPLIT bit-test macros live in nodes/nodes.rs.
-unsafe fn todo_aggsplit_skipfinal(_aggsplit: AggSplit) -> bool { false }
-unsafe fn todo_aggsplit_serialize(_aggsplit: AggSplit) -> bool { false }
+unsafe fn todo_aggsplit_skipfinal(_aggsplit: AggSplit) -> bool { crate::nodes::nodes::DO_AGGSPLIT_SKIPFINAL(_aggsplit) }
+unsafe fn todo_aggsplit_serialize(_aggsplit: AggSplit) -> bool { crate::nodes::nodes::DO_AGGSPLIT_SERIALIZE(_aggsplit) }
 
 const FLOAT8PASSBYVAL: bool = true;
 
@@ -335,111 +335,111 @@ pub struct SupportRequestOptimizeWindowClause {
 // ---- leaf-callee stubs (genuinely-unported; replace as files land) ----
 
 unsafe fn IsParallelWorker() -> bool { false } // TODO(pg-port): access/parallel.h
-unsafe fn max_parallel_hazard(_parse: *mut Query) -> c_char { PROPARALLEL_UNSAFE } // TODO(pg-port): optimizer/clauses.c
-unsafe fn pgstat_report_plan_id(_id: u64, _force: bool) {} // TODO(pg-port): utils/backend_status.c
+unsafe fn max_parallel_hazard(_parse: *mut Query) -> c_char { crate::optimizer::util::clauses::max_parallel_hazard(_parse) } // TODO(pg-port): optimizer/clauses.c
+unsafe fn pgstat_report_plan_id(_id: u64, _force: bool) { crate::utils::activity::backend_status::pgstat_report_plan_id(_id as _, _force) } // TODO(pg-port): utils/backend_status.c
 
-unsafe fn fetch_upper_rel(_root: *mut PlannerInfo, _kind: UpperRelationKind, _relids: *mut Bitmapset) -> *mut RelOptInfo { unimplemented!() } // TODO(pg-port): optimizer/util/relnode.c
-unsafe fn get_cheapest_fractional_path_local(_rel: *mut RelOptInfo, _tf: f64) -> *mut Path { unimplemented!() }
-unsafe fn create_plan(_root: *mut PlannerInfo, _best_path: *mut Path) -> *mut Plan { unimplemented!() } // TODO(pg-port): optimizer/plan/createplan.c
-unsafe fn ExecSupportsBackwardScan(_plan: *mut Plan) -> bool { unimplemented!() } // TODO(pg-port): executor/execAmi.c
-unsafe fn materialize_finished_plan(_plan: *mut Plan) -> *mut Plan { unimplemented!() }
-unsafe fn SS_compute_initplan_cost(_initplan: *mut List, _cost: *mut Cost, _unsafe_initplans: *mut bool) {} // TODO(pg-port): optimizer/plan/subselect.c
-unsafe fn SS_finalize_plan(_root: *mut PlannerInfo, _plan: *mut Plan) {}
-unsafe fn SS_process_ctes(_root: *mut PlannerInfo) {}
-unsafe fn SS_identify_outer_params(_root: *mut PlannerInfo) {}
-unsafe fn SS_charge_for_initplans(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {}
-unsafe fn SS_process_sublinks(_root: *mut PlannerInfo, expr: *mut Node, _isQual: bool) -> *mut Node { expr }
-unsafe fn SS_replace_correlation_vars(_root: *mut PlannerInfo, expr: *mut Node) -> *mut Node { expr }
-unsafe fn assign_special_exec_param(_root: *mut PlannerInfo) -> c_int { -1 }
-unsafe fn set_plan_references(_root: *mut PlannerInfo, plan: *mut Plan) -> *mut Plan { plan } // TODO(pg-port): optimizer/plan/setrefs.rs
-unsafe fn DestroyPartitionDirectory(_dir: *mut c_void) {} // TODO(pg-port): partitioning/partdesc.c
+unsafe fn fetch_upper_rel(_root: *mut PlannerInfo, _kind: UpperRelationKind, _relids: *mut Bitmapset) -> *mut RelOptInfo { crate::optimizer::util::relnode::fetch_upper_rel(_root, _kind, _relids) } // TODO(pg-port): optimizer/util/relnode.c
+unsafe fn get_cheapest_fractional_path_local(_rel: *mut RelOptInfo, _tf: f64) -> *mut Path { crate::optimizer::plan::planner::get_cheapest_fractional_path(_rel, _tf) }
+unsafe fn create_plan(_root: *mut PlannerInfo, _best_path: *mut Path) -> *mut Plan { crate::optimizer::plan::createplan::create_plan(_root, _best_path) } // TODO(pg-port): optimizer/plan/createplan.c
+unsafe fn ExecSupportsBackwardScan(_plan: *mut Plan) -> bool { crate::executor::execAmi::ExecSupportsBackwardScan(_plan as _) } // TODO(pg-port): executor/execAmi.c
+unsafe fn materialize_finished_plan(_plan: *mut Plan) -> *mut Plan { crate::optimizer::plan::createplan::materialize_finished_plan(_plan) }
+unsafe fn SS_compute_initplan_cost(_initplan: *mut List, _cost: *mut Cost, _unsafe_initplans: *mut bool) { crate::optimizer::plan::subselect::SS_compute_initplan_cost(_initplan, _cost, _unsafe_initplans) } // TODO(pg-port): optimizer/plan/subselect.c
+unsafe fn SS_finalize_plan(_root: *mut PlannerInfo, _plan: *mut Plan) { crate::optimizer::plan::subselect::SS_finalize_plan(_root, _plan) }
+unsafe fn SS_process_ctes(_root: *mut PlannerInfo) { crate::optimizer::plan::subselect::SS_process_ctes(_root) }
+unsafe fn SS_identify_outer_params(_root: *mut PlannerInfo) { crate::optimizer::plan::subselect::SS_identify_outer_params(_root) }
+unsafe fn SS_charge_for_initplans(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) { crate::optimizer::plan::subselect::SS_charge_for_initplans(_root, _rel) }
+unsafe fn SS_process_sublinks(_root: *mut PlannerInfo, expr: *mut Node, _isQual: bool) -> *mut Node { crate::optimizer::plan::subselect::SS_process_sublinks(_root, expr, _isQual) }
+unsafe fn SS_replace_correlation_vars(_root: *mut PlannerInfo, expr: *mut Node) -> *mut Node { crate::optimizer::plan::subselect::SS_replace_correlation_vars(_root, expr) }
+unsafe fn assign_special_exec_param(_root: *mut PlannerInfo) -> c_int { crate::optimizer::util::paramassign::assign_special_exec_param(_root) }
+unsafe fn set_plan_references(_root: *mut PlannerInfo, plan: *mut Plan) -> *mut Plan { crate::optimizer::plan::setrefs::set_plan_references(_root, plan) } // TODO(pg-port): optimizer/plan/setrefs.rs
+unsafe fn DestroyPartitionDirectory(_dir: *mut c_void) { crate::partitioning::partdesc::DestroyPartitionDirectory(_dir as _) } // TODO(pg-port): partitioning/partdesc.c
 
-unsafe fn transform_MERGE_to_join(_parse: *mut Query) {} // TODO(pg-port): parser/parse_merge.c
-unsafe fn replace_empty_jointree(_parse: *mut Query) {} // TODO(pg-port): optimizer/prep/prepjointree.c
-unsafe fn pull_up_sublinks(_root: *mut PlannerInfo) {}
-unsafe fn preprocess_function_rtes(_root: *mut PlannerInfo) {}
-unsafe fn expand_virtual_generated_columns(root: *mut PlannerInfo) -> *mut Query { (*root).parse }
-unsafe fn pull_up_subqueries(_root: *mut PlannerInfo) {}
-unsafe fn flatten_simple_union_all(_root: *mut PlannerInfo) {}
-unsafe fn has_subclass(_relid: Oid) -> bool { false } // TODO(pg-port): catalog/pg_inherits.c
-unsafe fn getRTEPermissionInfo(_perminfos: *mut List, _rte: *mut RangeTblEntry) -> *mut RTEPermissionInfo { ptr::null_mut() }
-unsafe fn ExecCheckOneRelPerms(_perminfo: *mut RTEPermissionInfo) -> bool { true }
+unsafe fn transform_MERGE_to_join(_parse: *mut Query) { crate::optimizer::prep::prepjointree::transform_MERGE_to_join(_parse) } // TODO(pg-port): parser/parse_merge.c
+unsafe fn replace_empty_jointree(_parse: *mut Query) { crate::optimizer::prep::prepjointree::replace_empty_jointree(_parse) } // TODO(pg-port): optimizer/prep/prepjointree.c
+unsafe fn pull_up_sublinks(_root: *mut PlannerInfo) { crate::optimizer::prep::prepjointree::pull_up_sublinks(_root) }
+unsafe fn preprocess_function_rtes(_root: *mut PlannerInfo) { crate::optimizer::prep::prepjointree::preprocess_function_rtes(_root) }
+unsafe fn expand_virtual_generated_columns(root: *mut PlannerInfo) -> *mut Query { crate::optimizer::prep::prepjointree::expand_virtual_generated_columns(root) }
+unsafe fn pull_up_subqueries(_root: *mut PlannerInfo) { crate::optimizer::prep::prepjointree::pull_up_subqueries(_root) }
+unsafe fn flatten_simple_union_all(_root: *mut PlannerInfo) { crate::optimizer::prep::prepjointree::flatten_simple_union_all(_root) }
+unsafe fn has_subclass(_relid: Oid) -> bool { crate::catalog::pg_inherits::has_subclass(_relid) } // TODO(pg-port): catalog/pg_inherits.c
+unsafe fn getRTEPermissionInfo(_perminfos: *mut List, _rte: *mut RangeTblEntry) -> *mut RTEPermissionInfo { crate::parser::parse_relation::getRTEPermissionInfo(_perminfos, _rte) }
+unsafe fn ExecCheckOneRelPerms(_perminfo: *mut RTEPermissionInfo) -> bool { crate::executor::execMain::ExecCheckOneRelPerms(_perminfo) }
 unsafe fn aclcheck_error(_code: c_int, _objtype: c_int, _name: *const c_char) {}
-unsafe fn get_rel_name(_relid: Oid) -> *const c_char { ptr::null() }
-unsafe fn flatten_join_alias_vars(_root: *mut PlannerInfo, _query: *mut Query, expr: *mut Node) -> *mut Node { expr }
-unsafe fn flatten_group_exprs(_root: *mut PlannerInfo, _query: *mut Query, expr: *mut Node) -> *mut Node { expr }
-unsafe fn expression_returns_set(_node: *mut Node) -> bool { false }
-unsafe fn expand_grouping_sets(gsets: *mut List, _gd: bool, _limit: c_int) -> *mut List { gsets }
-unsafe fn contain_agg_clause(_node: *mut Node) -> bool { false }
-unsafe fn contain_volatile_functions(_node: *mut Node) -> bool { false }
-unsafe fn contain_subplans(_node: *mut Node) -> bool { false }
-unsafe fn pull_varnos(_root: *mut PlannerInfo, _node: *mut Node) -> *mut Bitmapset { ptr::null_mut() }
-unsafe fn reduce_outer_joins(_root: *mut PlannerInfo) {}
-unsafe fn remove_useless_result_rtes(_root: *mut PlannerInfo) {}
-unsafe fn eval_const_expressions(_root: *mut PlannerInfo, expr: *mut Node) -> *mut Node { expr }
-unsafe fn canonicalize_qual(expr: *mut Expr, _is_check: bool) -> *mut Expr { expr }
-unsafe fn convert_saop_to_hashed_saop(_node: *mut Node) {}
-unsafe fn make_ands_implicit(expr: *mut Expr) -> *mut List { expr as *mut List }
-unsafe fn fix_opfuncids(_node: *mut Node) {}
-unsafe fn extract_query_dependencies_walker(_node: *mut Node, _root: *mut PlannerInfo) -> bool { false }
+unsafe fn get_rel_name(_relid: Oid) -> *const c_char { crate::utils::cache::lsyscache::get_rel_name(_relid) }
+unsafe fn flatten_join_alias_vars(_root: *mut PlannerInfo, _query: *mut Query, expr: *mut Node) -> *mut Node { crate::optimizer::util::var::flatten_join_alias_vars(_root, _query, expr) }
+unsafe fn flatten_group_exprs(_root: *mut PlannerInfo, _query: *mut Query, expr: *mut Node) -> *mut Node { crate::optimizer::util::var::flatten_group_exprs(_root, _query, expr) }
+unsafe fn expression_returns_set(_node: *mut Node) -> bool { crate::nodes::nodeFuncs::expression_returns_set(_node) }
+unsafe fn expand_grouping_sets(gsets: *mut List, _gd: bool, _limit: c_int) -> *mut List { crate::parser::parse_agg::expand_grouping_sets(gsets, _gd, _limit) }
+unsafe fn contain_agg_clause(_node: *mut Node) -> bool { crate::optimizer::util::clauses::contain_agg_clause(_node) }
+unsafe fn contain_volatile_functions(_node: *mut Node) -> bool { crate::optimizer::util::clauses::contain_volatile_functions(_node) }
+unsafe fn contain_subplans(_node: *mut Node) -> bool { crate::optimizer::util::clauses::contain_subplans(_node) }
+unsafe fn pull_varnos(_root: *mut PlannerInfo, _node: *mut Node) -> *mut Bitmapset { crate::optimizer::util::var::pull_varnos(_root, _node) }
+unsafe fn reduce_outer_joins(_root: *mut PlannerInfo) { crate::optimizer::prep::prepjointree::reduce_outer_joins(_root) }
+unsafe fn remove_useless_result_rtes(_root: *mut PlannerInfo) { crate::optimizer::prep::prepjointree::remove_useless_result_rtes(_root) }
+unsafe fn eval_const_expressions(_root: *mut PlannerInfo, expr: *mut Node) -> *mut Node { crate::optimizer::util::clauses::eval_const_expressions(_root, expr) }
+unsafe fn canonicalize_qual(expr: *mut Expr, _is_check: bool) -> *mut Expr { crate::optimizer::prep::prepqual::canonicalize_qual(expr, _is_check) }
+unsafe fn convert_saop_to_hashed_saop(_node: *mut Node) { crate::optimizer::util::clauses::convert_saop_to_hashed_saop(_node) }
+unsafe fn make_ands_implicit(expr: *mut Expr) -> *mut List { crate::nodes::makefuncs::make_ands_implicit(expr) }
+unsafe fn fix_opfuncids(_node: *mut Node) { crate::nodes::nodeFuncs::fix_opfuncids(_node) }
+unsafe fn extract_query_dependencies_walker(_node: *mut Node, _root: *mut PlannerInfo) -> bool { crate::optimizer::plan::setrefs::extract_query_dependencies_walker(_node, _root as *mut c_void) }
 
-unsafe fn plan_set_operations(_root: *mut PlannerInfo) -> *mut RelOptInfo { unimplemented!() } // TODO(pg-port): optimizer/prep/prepunion.c
-unsafe fn is_parallel_safe(_root: *mut PlannerInfo, _node: *mut Node) -> bool { false } // TODO(pg-port): optimizer/util/clauses.c
-unsafe fn make_pathkeys_for_sortclauses(_root: *mut PlannerInfo, _sortclauses: *mut List, _tlist: *mut List) -> *mut List { NIL } // TODO(pg-port): optimizer/path/pathkeys.c
+unsafe fn plan_set_operations(_root: *mut PlannerInfo) -> *mut RelOptInfo { crate::optimizer::prep::prepunion::plan_set_operations(_root) } // TODO(pg-port): optimizer/prep/prepunion.c
+unsafe fn is_parallel_safe(_root: *mut PlannerInfo, _node: *mut Node) -> bool { crate::optimizer::util::clauses::is_parallel_safe(_root, _node) } // TODO(pg-port): optimizer/util/clauses.c
+unsafe fn make_pathkeys_for_sortclauses(_root: *mut PlannerInfo, _sortclauses: *mut List, _tlist: *mut List) -> *mut List { crate::optimizer::path::pathkeys::make_pathkeys_for_sortclauses(_root, _sortclauses, _tlist) } // TODO(pg-port): optimizer/path/pathkeys.c
 unsafe fn make_pathkeys_for_sortclauses_extended(
     _root: *mut PlannerInfo, _sortclauses: *mut *mut List, _tlist: *mut List,
     _remove_redundant: bool, _remove_group_rtindex: bool,
     sortable: *mut bool, _set_ec_sortref: bool,
-) -> *mut List { if !sortable.is_null() { *sortable = true; } NIL }
-unsafe fn query_planner(_root: *mut PlannerInfo, _qp_callback: query_pathkeys_callback, _qp_extra: *mut c_void) -> *mut RelOptInfo { unimplemented!() } // TODO(pg-port): optimizer/plan/planmain.rs
-unsafe fn preprocess_targetlist(_root: *mut PlannerInfo) {} // TODO(pg-port): optimizer/prep/preptlist.c
-unsafe fn preprocess_aggrefs(_root: *mut PlannerInfo, _clause: *mut Node) {}
-unsafe fn preprocess_minmax_aggregates(_root: *mut PlannerInfo) {} // TODO(pg-port): optimizer/plan/planagg.rs
-unsafe fn find_window_functions(_clause: *mut Node, _maxWinRef: c_int) -> *mut WindowFuncLists { unimplemented!() }
-unsafe fn create_pathtarget(_root: *mut PlannerInfo, _tlist: *mut List) -> *mut PathTarget { unimplemented!() }
-unsafe fn create_empty_pathtarget() -> *mut PathTarget { unimplemented!() }
-unsafe fn copy_pathtarget(_t: *mut PathTarget) -> *mut PathTarget { unimplemented!() }
-unsafe fn set_pathtarget_cost_width(_root: *mut PlannerInfo, t: *mut PathTarget) -> *mut PathTarget { t }
-unsafe fn get_pathtarget_sortgroupref(_t: *mut PathTarget, _i: c_int) -> Index { 0 }
-unsafe fn add_column_to_pathtarget(_t: *mut PathTarget, _expr: *mut Expr, _sgref: Index) {}
-unsafe fn add_new_columns_to_pathtarget(_t: *mut PathTarget, _exprs: *mut List) {}
+) -> *mut List { crate::optimizer::path::pathkeys::make_pathkeys_for_sortclauses_extended(_root, _sortclauses, _tlist, _remove_redundant, _remove_group_rtindex, sortable, _set_ec_sortref) }
+unsafe fn query_planner(_root: *mut PlannerInfo, _qp_callback: query_pathkeys_callback, _qp_extra: *mut c_void) -> *mut RelOptInfo { crate::optimizer::plan::planmain::query_planner(_root, core::mem::transmute(_qp_callback), _qp_extra) } // TODO(pg-port): optimizer/plan/planmain.rs
+unsafe fn preprocess_targetlist(_root: *mut PlannerInfo) { crate::optimizer::prep::preptlist::preprocess_targetlist(_root as _) } // TODO(pg-port): optimizer/prep/preptlist.c
+unsafe fn preprocess_aggrefs(_root: *mut PlannerInfo, _clause: *mut Node) { crate::optimizer::prep::prepagg::preprocess_aggrefs(_root as _, _clause as _) }
+unsafe fn preprocess_minmax_aggregates(_root: *mut PlannerInfo) { crate::optimizer::plan::planagg::preprocess_minmax_aggregates(_root) } // TODO(pg-port): optimizer/plan/planagg.rs
+unsafe fn find_window_functions(_clause: *mut Node, _maxWinRef: c_int) -> *mut WindowFuncLists { crate::optimizer::util::clauses::find_window_functions(_clause, _maxWinRef as Index) }
+unsafe fn create_pathtarget(_root: *mut PlannerInfo, _tlist: *mut List) -> *mut PathTarget { crate::optimizer::util::tlist::create_pathtarget(_root, _tlist) }
+unsafe fn create_empty_pathtarget() -> *mut PathTarget { crate::optimizer::util::tlist::create_empty_pathtarget() }
+unsafe fn copy_pathtarget(_t: *mut PathTarget) -> *mut PathTarget { crate::optimizer::util::tlist::copy_pathtarget(_t) }
+unsafe fn set_pathtarget_cost_width(_root: *mut PlannerInfo, t: *mut PathTarget) -> *mut PathTarget { crate::optimizer::path::costsize::set_pathtarget_cost_width(_root, t) }
+unsafe fn get_pathtarget_sortgroupref(_t: *mut PathTarget, _i: c_int) -> Index { crate::nodes::pathnodes::get_pathtarget_sortgroupref(_t, _i) }
+unsafe fn add_column_to_pathtarget(_t: *mut PathTarget, _expr: *mut Expr, _sgref: Index) { crate::optimizer::util::tlist::add_column_to_pathtarget(_t, _expr, _sgref) }
+unsafe fn add_new_columns_to_pathtarget(_t: *mut PathTarget, _exprs: *mut List) { crate::optimizer::util::tlist::add_new_columns_to_pathtarget(_t, _exprs) }
 unsafe fn clamp_width_est(t: int64) -> c_int { t as c_int }
-unsafe fn split_pathtarget_at_srfs(_root: *mut PlannerInfo, _t: *mut PathTarget, _input: *mut PathTarget, _targets: *mut *mut List, _contain: *mut *mut List) {}
-unsafe fn split_pathtarget_at_srfs_grouping(_root: *mut PlannerInfo, _t: *mut PathTarget, _input: *mut PathTarget, _targets: *mut *mut List, _contain: *mut *mut List) {}
+unsafe fn split_pathtarget_at_srfs(_root: *mut PlannerInfo, _t: *mut PathTarget, _input: *mut PathTarget, _targets: *mut *mut List, _contain: *mut *mut List) { crate::optimizer::util::tlist::split_pathtarget_at_srfs(_root, _t, _input, _targets, _contain) }
+unsafe fn split_pathtarget_at_srfs_grouping(_root: *mut PlannerInfo, _t: *mut PathTarget, _input: *mut PathTarget, _targets: *mut *mut List, _contain: *mut *mut List) { crate::optimizer::util::tlist::split_pathtarget_at_srfs_grouping(_root, _t, _input, _targets, _contain) }
 
-unsafe fn estimate_expression_value(_root: *mut PlannerInfo, node: *mut Node) -> *mut Node { node }
-unsafe fn estimate_num_groups(_root: *mut PlannerInfo, _groupExprs: *mut List, _rows: f64, _pgset: *mut *mut List, _hentry: *mut c_void) -> f64 { 1.0 }
-unsafe fn estimate_hashagg_tablesize(_root: *mut PlannerInfo, _path: *mut Path, _agg_costs: *const AggClauseCosts, _dNumGroups: f64) -> f64 { 0.0 }
-unsafe fn get_hash_memory_limit() -> Size { 0 }
-unsafe fn get_agg_clause_costs(_root: *mut PlannerInfo, _aggsplit: AggSplit, _costs: *mut AggClauseCosts) {}
-unsafe fn get_sortgrouplist_exprs(_clause: *mut List, _tlist: *mut List) -> *mut List { NIL }
-unsafe fn get_sortgroupref_clause(_ref: Index, _clauses: *mut List) -> *mut SortGroupClause { ptr::null_mut() }
-unsafe fn get_sortgroupref_clause_noerr(_ref: Index, _clauses: *mut List) -> *mut SortGroupClause { ptr::null_mut() }
-unsafe fn grouping_is_sortable(_clause: *mut List) -> bool { true }
-unsafe fn grouping_is_hashable(_clause: *mut List) -> bool { true }
-unsafe fn get_relids_in_jointree(_jtnode: *mut Node, _include_joins: bool, _include_inner_sides: bool) -> *mut Bitmapset { ptr::null_mut() }
-unsafe fn CheckSelectLocking(_parse: *mut Query, _strength: LockClauseStrength) {}
-unsafe fn GetFdwRoutineByRelId(_relid: Oid) -> *mut FdwRoutine { ptr::null_mut() }
+unsafe fn estimate_expression_value(_root: *mut PlannerInfo, node: *mut Node) -> *mut Node { crate::optimizer::util::clauses::estimate_expression_value(_root, node) }
+unsafe fn estimate_num_groups(_root: *mut PlannerInfo, _groupExprs: *mut List, _rows: f64, _pgset: *mut *mut List, _hentry: *mut c_void) -> f64 { crate::utils::adt::selfuncs::estimate_num_groups(_root as _, _groupExprs as _, _rows, _pgset as _, _hentry as _) }
+unsafe fn estimate_hashagg_tablesize(_root: *mut PlannerInfo, _path: *mut Path, _agg_costs: *const AggClauseCosts, _dNumGroups: f64) -> f64 { crate::utils::adt::selfuncs::estimate_hashagg_tablesize(_root as _, _path as _, _agg_costs as _, _dNumGroups) }
+unsafe fn get_hash_memory_limit() -> Size { crate::executor::nodeHash::get_hash_memory_limit() }
+unsafe fn get_agg_clause_costs(_root: *mut PlannerInfo, _aggsplit: AggSplit, _costs: *mut AggClauseCosts) { crate::optimizer::prep::prepagg::get_agg_clause_costs(_root as _, core::mem::transmute(_aggsplit), _costs as _) }
+unsafe fn get_sortgrouplist_exprs(_clause: *mut List, _tlist: *mut List) -> *mut List { crate::optimizer::util::tlist::get_sortgrouplist_exprs(_clause, _tlist) }
+unsafe fn get_sortgroupref_clause(_ref: Index, _clauses: *mut List) -> *mut SortGroupClause { crate::optimizer::util::tlist::get_sortgroupref_clause(_ref, _clauses) }
+unsafe fn get_sortgroupref_clause_noerr(_ref: Index, _clauses: *mut List) -> *mut SortGroupClause { crate::optimizer::util::tlist::get_sortgroupref_clause_noerr(_ref, _clauses) }
+unsafe fn grouping_is_sortable(_clause: *mut List) -> bool { crate::optimizer::util::tlist::grouping_is_sortable(_clause) }
+unsafe fn grouping_is_hashable(_clause: *mut List) -> bool { crate::optimizer::util::tlist::grouping_is_hashable(_clause) }
+unsafe fn get_relids_in_jointree(_jtnode: *mut Node, _include_joins: bool, _include_inner_sides: bool) -> *mut Bitmapset { crate::optimizer::prep::prepjointree::get_relids_in_jointree(_jtnode, _include_joins, _include_inner_sides) as _ }
+unsafe fn CheckSelectLocking(_parse: *mut Query, _strength: LockClauseStrength) { crate::parser::analyze::CheckSelectLocking(_parse, _strength) }
+unsafe fn GetFdwRoutineByRelId(_relid: Oid) -> *mut FdwRoutine { crate::foreign::foreign::GetFdwRoutineByRelId(_relid) as _ }
 
-unsafe fn pull_var_clause(_node: *mut Node, _flags: c_int) -> *mut List { NIL }
-unsafe fn remove_nulling_relids(node: *mut Node, _removable: *mut Bitmapset, _except: *mut Bitmapset) -> *mut Node { node }
+unsafe fn pull_var_clause(_node: *mut Node, _flags: c_int) -> *mut List { crate::optimizer::util::var::pull_var_clause(_node, _flags) }
+unsafe fn remove_nulling_relids(node: *mut Node, _removable: *mut Bitmapset, _except: *mut Bitmapset) -> *mut Node { crate::rewrite::rewriteManip::remove_nulling_relids(node, _removable, _except) }
 
-unsafe fn set_cheapest(_rel: *mut RelOptInfo) {}
-unsafe fn add_path(_rel: *mut RelOptInfo, _path: *mut Path) {}
-unsafe fn add_partial_path(_rel: *mut RelOptInfo, _path: *mut Path) {}
-unsafe fn generate_useful_gather_paths(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _override_rows: bool) {}
-unsafe fn compute_gather_rows(_path: *mut Path) -> f64 { 0.0 }
+unsafe fn set_cheapest(_rel: *mut RelOptInfo) { crate::optimizer::util::pathnode::set_cheapest(_rel) }
+unsafe fn add_path(_rel: *mut RelOptInfo, _path: *mut Path) { crate::optimizer::util::pathnode::add_path(_rel, _path) }
+unsafe fn add_partial_path(_rel: *mut RelOptInfo, _path: *mut Path) { crate::optimizer::util::pathnode::add_partial_path(_rel, _path) }
+unsafe fn generate_useful_gather_paths(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _override_rows: bool) { crate::optimizer::path::allpaths::generate_useful_gather_paths(_root, _rel, _override_rows) }
+unsafe fn compute_gather_rows(_path: *mut Path) -> f64 { crate::optimizer::path::costsize::compute_gather_rows(_path) }
 
-unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo { ptr::null_mut() }
-unsafe fn adjust_inherited_attnums_multilevel(_root: *mut PlannerInfo, colnos: *mut List, _childrelid: c_int, _toprelid: c_int) -> *mut List { colnos }
+unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo { crate::optimizer::util::relnode::find_base_rel(_root, _relid) }
+unsafe fn adjust_inherited_attnums_multilevel(_root: *mut PlannerInfo, colnos: *mut List, _childrelid: c_int, _toprelid: c_int) -> *mut List { crate::optimizer::util::appendinfo::adjust_inherited_attnums_multilevel(_root, colnos, _childrelid as Index, _toprelid as Index) }
 unsafe fn adjust_appendrel_attrs_multilevel(_root: *mut PlannerInfo, node: *mut Node, _child: *mut RelOptInfo, _top: *mut RelOptInfo) -> *mut Node { node }
-unsafe fn adjust_appendrel_attrs(_root: *mut PlannerInfo, node: *mut Node, _nappinfos: c_int, _appinfos: *mut *mut c_void) -> *mut Node { node }
+unsafe fn adjust_appendrel_attrs(_root: *mut PlannerInfo, node: *mut Node, _nappinfos: c_int, _appinfos: *mut *mut c_void) -> *mut Node { crate::optimizer::util::appendinfo::adjust_appendrel_attrs(_root, node, _nappinfos, _appinfos as *mut *mut crate::nodes::pathnodes::AppendRelInfo) }
 unsafe fn find_appinfos_by_relids(_root: *mut PlannerInfo, _relids: *mut Bitmapset, nappinfos: *mut c_int) -> *mut *mut c_void { *nappinfos = 0; ptr::null_mut() }
 unsafe fn add_paths_to_append_rel(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _live_children: *mut List) {}
 
 // path constructors (optimizer/util/pathnode.c)
-unsafe fn create_lockrows_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _rowMarks: *mut List, _epqParam: c_int) -> *mut Path { unimplemented!() }
-unsafe fn create_limit_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _limitOffset: *mut Node, _limitCount: *mut Node, _limitOption: LimitOption, _offset_est: int64, _count_est: int64) -> *mut Path { unimplemented!() }
+unsafe fn create_lockrows_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _rowMarks: *mut List, _epqParam: c_int) -> *mut Path { crate::optimizer::util::pathnode::create_lockrows_path(_root, _rel, _subpath, _rowMarks, _epqParam) as *mut Path }
+unsafe fn create_limit_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _limitOffset: *mut Node, _limitCount: *mut Node, _limitOption: LimitOption, _offset_est: int64, _count_est: int64) -> *mut Path { crate::optimizer::util::pathnode::create_limit_path(_root, _rel, _subpath, _limitOffset, _limitCount, _limitOption, _offset_est, _count_est) as *mut Path }
 unsafe fn create_modifytable_path(
     _root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path,
     _operation: c_int, _canSetTag: bool, _nominalRelation: Index, _rootRelation: Index,
@@ -447,63 +447,69 @@ unsafe fn create_modifytable_path(
     _withCheckOptionLists: *mut List, _returningLists: *mut List, _rowMarks: *mut List,
     _onconflict: *mut OnConflictExpr, _mergeActionLists: *mut List, _mergeJoinConditions: *mut List,
     _epqParam: c_int,
-) -> *mut Path { unimplemented!() }
-unsafe fn create_group_result_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _target: *mut PathTarget, _havingqual: *mut List) -> *mut Path { unimplemented!() }
-unsafe fn create_append_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpaths: *mut List, _partial_subpaths: *mut List, _pathkeys: *mut List, _required_outer: *mut Bitmapset, _parallel_workers: c_int, _parallel_aware: bool, _rows: f64) -> *mut Path { unimplemented!() }
-unsafe fn create_groupingsets_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _having_qual: *mut List, _aggstrategy: AggStrategy, _rollups: *mut List, _agg_costs: *const AggClauseCosts) -> *mut Path { unimplemented!() }
-unsafe fn create_sort_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _pathkeys: *mut List, _limit_tuples: f64) -> *mut Path { unimplemented!() }
-unsafe fn create_incremental_sort_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _pathkeys: *mut List, _presorted_keys: c_int, _limit_tuples: f64) -> *mut Path { unimplemented!() }
-unsafe fn create_windowagg_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _target: *mut PathTarget, _windowFuncs: *mut List, _runCondition: *mut List, _winclause: *mut WindowClause, _qual: *mut List, _topwindow: bool) -> *mut Path { unimplemented!() }
-unsafe fn create_upper_unique_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _numCols: c_int, _numGroups: f64) -> *mut Path { unimplemented!() }
-unsafe fn create_agg_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _target: *mut PathTarget, _aggstrategy: AggStrategy, _aggsplit: AggSplit, _groupClause: *mut List, _qual: *mut List, _aggcosts: *const AggClauseCosts, _numGroups: f64) -> *mut Path { unimplemented!() }
-unsafe fn create_group_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _groupClause: *mut List, _qual: *mut List, _numGroups: f64) -> *mut Path { unimplemented!() }
-unsafe fn create_gather_merge_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _target: *mut PathTarget, _pathkeys: *mut List, _required_outer: *mut Bitmapset, _rows: *mut f64) -> *mut Path { unimplemented!() }
-unsafe fn create_set_projection_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _target: *mut PathTarget) -> *mut Path { unimplemented!() }
-unsafe fn create_projection_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _target: *mut PathTarget) -> *mut Path { unimplemented!() }
-unsafe fn apply_projection_to_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, subpath: *mut Path, _target: *mut PathTarget) -> *mut Path { subpath }
-unsafe fn create_seqscan_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _required_outer: *mut Bitmapset, _parallel_workers: c_int) -> *mut Path { unimplemented!() }
-unsafe fn create_index_path(_root: *mut PlannerInfo, _index: *mut IndexOptInfo, _indexclauses: *mut List, _indexorderbys: *mut List, _indexorderbycols: *mut List, _pathkeys: *mut List, _indexscandir: c_int, _indexonly: bool, _required_outer: *mut Bitmapset, _loop_count: f64, _partial_path: bool) -> *mut IndexPath { unimplemented!() }
+) -> *mut Path {
+    crate::optimizer::util::pathnode::create_modifytable_path(
+        _root as _, _rel as _, _subpath as _, core::mem::transmute(_operation), _canSetTag, _nominalRelation, _rootRelation,
+        _partColsUpdated, _resultRelations as _, _updateColnosLists as _, _withCheckOptionLists as _,
+        _returningLists as _, _rowMarks as _, _onconflict as _, _mergeActionLists as _, _mergeJoinConditions as _, _epqParam,
+    ) as *mut Path
+}
+unsafe fn create_group_result_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _target: *mut PathTarget, _havingqual: *mut List) -> *mut Path { crate::optimizer::util::pathnode::create_group_result_path(_root, _rel, _target, _havingqual) as *mut Path }
+unsafe fn create_append_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpaths: *mut List, _partial_subpaths: *mut List, _pathkeys: *mut List, _required_outer: *mut Bitmapset, _parallel_workers: c_int, _parallel_aware: bool, _rows: f64) -> *mut Path { crate::optimizer::util::pathnode::create_append_path(_root, _rel, _subpaths, _partial_subpaths, _pathkeys, _required_outer, _parallel_workers, _parallel_aware, _rows) as *mut Path }
+unsafe fn create_groupingsets_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _having_qual: *mut List, _aggstrategy: AggStrategy, _rollups: *mut List, _agg_costs: *const AggClauseCosts) -> *mut Path { crate::optimizer::util::pathnode::create_groupingsets_path(_root, _rel, _subpath, _having_qual, _aggstrategy, _rollups, _agg_costs) as *mut Path }
+unsafe fn create_sort_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _pathkeys: *mut List, _limit_tuples: f64) -> *mut Path { crate::optimizer::util::pathnode::create_sort_path(_root, _rel, _subpath, _pathkeys, _limit_tuples) as *mut Path }
+unsafe fn create_incremental_sort_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _pathkeys: *mut List, _presorted_keys: c_int, _limit_tuples: f64) -> *mut Path { crate::optimizer::util::pathnode::create_incremental_sort_path(_root, _rel, _subpath, _pathkeys, _presorted_keys, _limit_tuples) as *mut Path }
+unsafe fn create_windowagg_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _target: *mut PathTarget, _windowFuncs: *mut List, _runCondition: *mut List, _winclause: *mut WindowClause, _qual: *mut List, _topwindow: bool) -> *mut Path { crate::optimizer::util::pathnode::create_windowagg_path(_root, _rel, _subpath, _target, _windowFuncs, _runCondition, _winclause, _qual, _topwindow) as *mut Path }
+unsafe fn create_upper_unique_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _numCols: c_int, _numGroups: f64) -> *mut Path { crate::optimizer::util::pathnode::create_upper_unique_path(_root, _rel, _subpath, _numCols, _numGroups) as *mut Path }
+unsafe fn create_agg_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _target: *mut PathTarget, _aggstrategy: AggStrategy, _aggsplit: AggSplit, _groupClause: *mut List, _qual: *mut List, _aggcosts: *const AggClauseCosts, _numGroups: f64) -> *mut Path { crate::optimizer::util::pathnode::create_agg_path(_root, _rel, _subpath, _target, _aggstrategy, _aggsplit, _groupClause, _qual, _aggcosts, _numGroups) as *mut Path }
+unsafe fn create_group_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _groupClause: *mut List, _qual: *mut List, _numGroups: f64) -> *mut Path { crate::optimizer::util::pathnode::create_group_path(_root, _rel, _subpath, _groupClause, _qual, _numGroups) as *mut Path }
+unsafe fn create_gather_merge_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _target: *mut PathTarget, _pathkeys: *mut List, _required_outer: *mut Bitmapset, _rows: *mut f64) -> *mut Path { crate::optimizer::util::pathnode::create_gather_merge_path(_root, _rel, _subpath, _target, _pathkeys, _required_outer, _rows) as *mut Path }
+unsafe fn create_set_projection_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _target: *mut PathTarget) -> *mut Path { crate::optimizer::util::pathnode::create_set_projection_path(_root, _rel, _subpath, _target) as *mut Path }
+unsafe fn create_projection_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _subpath: *mut Path, _target: *mut PathTarget) -> *mut Path { crate::optimizer::util::pathnode::create_projection_path(_root, _rel, _subpath, _target) as *mut Path }
+unsafe fn apply_projection_to_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, subpath: *mut Path, _target: *mut PathTarget) -> *mut Path { crate::optimizer::util::pathnode::apply_projection_to_path(_root, _rel, subpath, _target) }
+unsafe fn create_seqscan_path(_root: *mut PlannerInfo, _rel: *mut RelOptInfo, _required_outer: *mut Bitmapset, _parallel_workers: c_int) -> *mut Path { crate::optimizer::util::pathnode::create_seqscan_path(_root, _rel, _required_outer, _parallel_workers) }
+unsafe fn create_index_path(_root: *mut PlannerInfo, _index: *mut IndexOptInfo, _indexclauses: *mut List, _indexorderbys: *mut List, _indexorderbycols: *mut List, _pathkeys: *mut List, _indexscandir: c_int, _indexonly: bool, _required_outer: *mut Bitmapset, _loop_count: f64, _partial_path: bool) -> *mut IndexPath { crate::optimizer::util::pathnode::create_index_path(_root, _index, _indexclauses, _indexorderbys, _indexorderbycols, _pathkeys, _indexscandir, _indexonly, _required_outer, _loop_count, _partial_path) }
 
 // pathkey comparison helpers (optimizer/path/pathkeys.c)
-unsafe fn pathkeys_contained_in(_keys1: *mut List, _keys2: *mut List) -> bool { false }
-unsafe fn pathkeys_count_contained_in(_keys1: *mut List, _keys2: *mut List, n_common: *mut c_int) -> bool { *n_common = 0; false }
-unsafe fn compare_pathkeys(_keys1: *mut List, _keys2: *mut List) -> PathKeysComparison { PATHKEYS_DIFFERENT }
-unsafe fn append_pathkeys(target: *mut List, _source: *mut List) -> *mut List { target }
-unsafe fn get_useful_group_keys_orderings(_root: *mut PlannerInfo, _path: *mut Path) -> *mut List { NIL }
-unsafe fn compare_fractional_path_costs(_path1: *mut Path, _path2: *mut Path, _fraction: f64) -> c_int { 0 }
+unsafe fn pathkeys_contained_in(_keys1: *mut List, _keys2: *mut List) -> bool { crate::optimizer::path::pathkeys::pathkeys_contained_in(_keys1, _keys2) }
+unsafe fn pathkeys_count_contained_in(_keys1: *mut List, _keys2: *mut List, n_common: *mut c_int) -> bool { crate::optimizer::path::pathkeys::pathkeys_count_contained_in(_keys1, _keys2, n_common) }
+unsafe fn compare_pathkeys(_keys1: *mut List, _keys2: *mut List) -> PathKeysComparison { crate::optimizer::path::pathkeys::compare_pathkeys(_keys1, _keys2) }
+unsafe fn append_pathkeys(target: *mut List, _source: *mut List) -> *mut List { crate::optimizer::path::pathkeys::append_pathkeys(target, _source) }
+unsafe fn get_useful_group_keys_orderings(_root: *mut PlannerInfo, _path: *mut Path) -> *mut List { crate::optimizer::path::pathkeys::get_useful_group_keys_orderings(_root, _path) }
+unsafe fn compare_fractional_path_costs(_path1: *mut Path, _path2: *mut Path, _fraction: f64) -> c_int { crate::optimizer::util::pathnode::compare_fractional_path_costs(_path1, _path2, _fraction) }
 
 // catalog/cost helpers
-unsafe fn get_func_support(_funcid: Oid) -> Oid { InvalidOid }
-unsafe fn get_typavgwidth(_typid: Oid, _typmod: i32) -> c_int { 0 }
-unsafe fn cost_qual_eval(cost: *mut QualCost, _quals: *mut List, _root: *mut PlannerInfo) { /* fills out-param */ ptr::write_bytes(cost, 0, 1); }
-unsafe fn cost_qual_eval_node(cost: *mut QualCost, _node: *mut Node, _root: *mut PlannerInfo) { ptr::write_bytes(cost, 0, 1); }
-unsafe fn cost_sort(_path: *mut Path, _root: *mut PlannerInfo, _pathkeys: *mut List, _disabled_nodes: c_int, _input_cost: Cost, _tuples: f64, _width: c_int, _comparison_cost: Cost, _sort_mem: c_int, _limit_tuples: f64) {}
-unsafe fn get_relation_data_width(_relid: Oid, _attr_widths: *mut i32) -> c_int { 0 }
+unsafe fn get_func_support(_funcid: Oid) -> Oid { crate::utils::cache::lsyscache::get_func_support(_funcid) }
+unsafe fn get_typavgwidth(_typid: Oid, _typmod: i32) -> c_int { crate::utils::cache::lsyscache::get_typavgwidth(_typid, _typmod) }
+unsafe fn cost_qual_eval(cost: *mut QualCost, _quals: *mut List, _root: *mut PlannerInfo) { crate::optimizer::path::costsize::cost_qual_eval(cost, _quals, _root) }
+unsafe fn cost_qual_eval_node(cost: *mut QualCost, _node: *mut Node, _root: *mut PlannerInfo) { crate::optimizer::path::costsize::cost_qual_eval_node(cost, _node, _root) }
+unsafe fn cost_sort(_path: *mut Path, _root: *mut PlannerInfo, _pathkeys: *mut List, _disabled_nodes: c_int, _input_cost: Cost, _tuples: f64, _width: c_int, _comparison_cost: Cost, _sort_mem: c_int, _limit_tuples: f64) { crate::optimizer::path::costsize::cost_sort(_path, _root, _pathkeys, _disabled_nodes, _input_cost, _tuples, _width, _comparison_cost, _sort_mem, _limit_tuples) }
+unsafe fn get_relation_data_width(_relid: Oid, _attr_widths: *mut i32) -> c_int { crate::optimizer::util::plancat::get_relation_data_width(_relid, _attr_widths) }
 unsafe fn estimate_rel_size(_rel: Relation, _attr_widths: *mut i32, _pages: *mut BlockNumber, _tuples: *mut f64, _allvisfrac: *mut f64) {}
-unsafe fn compute_parallel_worker(_rel: *mut RelOptInfo, _heap_pages: f64, _index_pages: f64, _max_workers: c_int) -> c_int { 0 }
-unsafe fn setup_simple_rel_arrays(_root: *mut PlannerInfo) {}
-unsafe fn build_simple_rel(_root: *mut PlannerInfo, _relid: c_int, _parent: *mut RelOptInfo) -> *mut RelOptInfo { ptr::null_mut() }
+unsafe fn compute_parallel_worker(_rel: *mut RelOptInfo, _heap_pages: f64, _index_pages: f64, _max_workers: c_int) -> c_int { crate::optimizer::path::allpaths::compute_parallel_worker(_rel, _heap_pages, _index_pages, _max_workers) }
+unsafe fn setup_simple_rel_arrays(_root: *mut PlannerInfo) { crate::optimizer::util::relnode::setup_simple_rel_arrays(_root) }
+unsafe fn build_simple_rel(_root: *mut PlannerInfo, _relid: c_int, _parent: *mut RelOptInfo) -> *mut RelOptInfo { crate::optimizer::util::relnode::build_simple_rel(_root, _relid, _parent) }
 
 // catalog open/close + relation helpers
-unsafe fn table_open(_relid: Oid, _lockmode: c_int) -> Relation { ptr::null_mut() }
-unsafe fn table_close(_rel: Relation, _lockmode: c_int) {}
-unsafe fn index_open(_relid: Oid, _lockmode: c_int) -> Relation { ptr::null_mut() }
-unsafe fn index_close(_rel: Relation, _lockmode: c_int) {}
+unsafe fn table_open(_relid: Oid, _lockmode: c_int) -> Relation { crate::access::table::table::table_open(_relid, _lockmode) as _ }
+unsafe fn table_close(_rel: Relation, _lockmode: c_int) { crate::access::table::table::table_close(_rel as _, _lockmode) }
+unsafe fn index_open(_relid: Oid, _lockmode: c_int) -> Relation { crate::access::index::indexam::index_open(_relid, _lockmode) as _ }
+unsafe fn index_close(_rel: Relation, _lockmode: c_int) { crate::access::index::indexam::index_close(_rel as _, _lockmode) }
 unsafe fn RelationGetIndexExpressions(_index: Relation) -> *mut List { NIL }
 unsafe fn RelationGetIndexPredicate(_index: Relation) -> *mut List { NIL }
 unsafe fn rt_fetch(rti: Index, rtable: *mut List) -> *mut RangeTblEntry {
     list_nth(rtable, (rti - 1) as c_int) as *mut RangeTblEntry
 }
-unsafe fn addRTEPermissionInfo(_rteperminfos: *mut *mut List, _rte: *mut RangeTblEntry) -> *mut RTEPermissionInfo { ptr::null_mut() }
-unsafe fn list_cell_number(_list: *mut List, _cell: *mut ListCell) -> c_int { 0 }
+unsafe fn addRTEPermissionInfo(_rteperminfos: *mut *mut List, _rte: *mut RangeTblEntry) -> *mut RTEPermissionInfo { crate::parser::parse_relation::addRTEPermissionInfo(_rteperminfos, _rte) }
+unsafe fn list_cell_number(_list: *mut List, _cell: *mut ListCell) -> c_int { crate::nodes::pg_list::list_cell_number(_list, _cell) }
 
 // makefuncs / nodeFuncs
-unsafe fn makeConst(_consttype: Oid, _consttypmod: i32, _constcollid: Oid, _constlen: c_int, _constvalue: Datum, _constisnull: bool, _constbyval: bool) -> *mut Const { unimplemented!() }
-unsafe fn make_opclause(_opno: Oid, _opresulttype: Oid, _opretset: bool, _leftop: *mut Expr, _rightop: *mut Expr, _opcollid: Oid, _inputcollid: Oid) -> *mut Expr { unimplemented!() }
-unsafe fn exprType(_node: *mut Node) -> Oid { InvalidOid }
-unsafe fn exprCollation(_node: *mut Node) -> Oid { InvalidOid }
-unsafe fn assignSortGroupRef(_tle: *mut TargetEntry, _tlist: *mut List) -> Index { 0 }
-unsafe fn LCS_asString(_strength: LockClauseStrength) -> *const c_char { ptr::null() }
+unsafe fn makeConst(_consttype: Oid, _consttypmod: i32, _constcollid: Oid, _constlen: c_int, _constvalue: Datum, _constisnull: bool, _constbyval: bool) -> *mut Const { crate::nodes::makefuncs::makeConst(_consttype, _consttypmod, _constcollid, _constlen, _constvalue, _constisnull, _constbyval) }
+unsafe fn make_opclause(_opno: Oid, _opresulttype: Oid, _opretset: bool, _leftop: *mut Expr, _rightop: *mut Expr, _opcollid: Oid, _inputcollid: Oid) -> *mut Expr { crate::nodes::makefuncs::make_opclause(_opno, _opresulttype, _opretset, _leftop, _rightop, _opcollid, _inputcollid) }
+unsafe fn exprType(_node: *mut Node) -> Oid { crate::nodes::nodeFuncs::exprType(_node) }
+unsafe fn exprCollation(_node: *mut Node) -> Oid { crate::nodes::nodeFuncs::exprCollation(_node) }
+unsafe fn assignSortGroupRef(_tle: *mut TargetEntry, _tlist: *mut List) -> Index { crate::parser::parse_clause::assignSortGroupRef(_tle, _tlist) }
+unsafe fn LCS_asString(_strength: LockClauseStrength) -> *const c_char { crate::parser::analyze::LCS_asString(_strength) }
 
 // knapsack / bipartite (lib/knapsack.c, lib/bipartite_match.c)
 #[repr(C)]
@@ -511,9 +517,9 @@ pub struct BipartiteMatchState {
     pub pair_uv: *mut c_int,
     pub pair_vu: *mut c_int,
 }
-unsafe fn BipartiteMatch(_u: c_int, _v: c_int, _adjacency: *mut *mut i16) -> *mut BipartiteMatchState { unimplemented!() }
-unsafe fn BipartiteMatchFree(_state: *mut BipartiteMatchState) {}
-unsafe fn DiscreteKnapsack(_max_weight: c_int, _num_items: c_int, _item_weights: *mut c_int, _item_values: *mut f64) -> *mut Bitmapset { ptr::null_mut() }
+unsafe fn BipartiteMatch(_u: c_int, _v: c_int, _adjacency: *mut *mut i16) -> *mut BipartiteMatchState { crate::lib::bipartite_match::BipartiteMatch(_u, _v, _adjacency) as _ }
+unsafe fn BipartiteMatchFree(_state: *mut BipartiteMatchState) { crate::lib::bipartite_match::BipartiteMatchFree(_state as _) }
+unsafe fn DiscreteKnapsack(_max_weight: c_int, _num_items: c_int, _item_weights: *mut c_int, _item_values: *mut f64) -> *mut Bitmapset { crate::lib::knapsack::DiscreteKnapsack(_max_weight, _num_items, _item_weights, _item_values) }
 
 // Datum helpers
 unsafe fn DatumGetInt64(d: Datum) -> int64 { d as int64 }
@@ -535,10 +541,10 @@ unsafe fn for_each_cell_iter(list: *mut List, start: *mut ListCell) -> Vec<*mut 
 }
 
 unsafe fn check_stack_depth() {}
-unsafe fn IS_OTHER_REL(_rel: *mut RelOptInfo) -> bool { false }
-unsafe fn IS_PARTITIONED_REL(_rel: *mut RelOptInfo) -> bool { false }
+unsafe fn IS_OTHER_REL(_rel: *mut RelOptInfo) -> bool { crate::nodes::pathnodes::IS_OTHER_REL(_rel as _) }
+unsafe fn IS_PARTITIONED_REL(_rel: *mut RelOptInfo) -> bool { crate::nodes::pathnodes::IS_PARTITIONED_REL(_rel as _) }
 unsafe fn IS_DUMMY_REL(_rel: *mut RelOptInfo) -> bool { false }
-unsafe fn IS_OUTER_JOIN(_jointype: JoinType) -> bool { false }
+unsafe fn IS_OUTER_JOIN(_jointype: JoinType) -> bool { crate::nodes::nodes::IS_OUTER_JOIN(_jointype) }
 
 // snprintf / string helpers
 unsafe fn pstrdup(_s: *const c_char) -> *mut c_char { ptr::null_mut() }
@@ -2138,7 +2144,7 @@ unsafe fn linitial_node_pathtarget(list: *mut List) -> *mut PathTarget {
 }
 
 // TODO(pg-port): real equal() lives in nodes/equalfuncs.rs (deferred).
-unsafe fn equal(_a: *mut c_void, _b: *mut c_void) -> bool { false }
+unsafe fn equal(_a: *mut c_void, _b: *mut c_void) -> bool { crate::nodes::equalfuncs::equal(_a as _, _b as _) }
 
 // FDW routine helpers (foreign/fdwapi.h). TODO(pg-port): real FdwRoutine struct.
 unsafe fn fdw_has_GetForeignUpperPaths(_fdwroutine: *mut FdwRoutine) -> bool { false }

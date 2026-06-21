@@ -26,7 +26,7 @@ use crate::prelude::*;
 
 use core::ffi::CStr;
 
-use crate::access::subtrans::SubTransGetTopmostTransaction;
+use crate::access::transam::subtrans::SubTransGetTopmostTransaction;
 use crate::access::transam::{
     FirstNormalTransactionId, InvalidTransactionId, TransactionIdIsNormal, TransactionIdIsValid,
 };
@@ -286,6 +286,7 @@ pub struct SerializedSnapshotData {
  * RegisterSnapshot or PushActiveSnapshot on the returned snap before doing
  * any other non-trivial work that could invalidate it.
  */
+#[no_mangle]
 pub unsafe fn GetTransactionSnapshot() -> Snapshot {
     /*
      * Return historic snapshot if doing logical decoding.
@@ -334,7 +335,7 @@ pub unsafe fn GetTransactionSnapshot() -> Snapshot {
             /* First, create the snapshot in CurrentSnapshotData */
             if IsolationIsSerializable() {
                 CurrentSnapshot =
-                    GetSerializableTransactionSnapshot(&raw mut CurrentSnapshotData);
+                    GetSerializableTransactionSnapshot(&raw mut CurrentSnapshotData as *mut _) as _;
             } else {
                 CurrentSnapshot = GetSnapshotData(&raw mut CurrentSnapshotData);
             }
@@ -588,7 +589,7 @@ unsafe fn SetTransactionSnapshot(
      * especially since it's not clear that predicate.c *must* do this.
      */
     if !sourceproc.is_null() {
-        if !ProcArrayInstallRestoredXmin((*CurrentSnapshot).xmin, sourceproc) {
+        if !ProcArrayInstallRestoredXmin((*CurrentSnapshot).xmin, sourceproc as _) {
             ereport!(
                 ERROR,
                 errmsg!("could not import the requested snapshot")
@@ -596,7 +597,7 @@ unsafe fn SetTransactionSnapshot(
             // C also: errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
             //         errdetail("The source transaction is not running anymore.")
         }
-    } else if !ProcArrayInstallImportedXmin((*CurrentSnapshot).xmin, sourcevxid) {
+    } else if !ProcArrayInstallImportedXmin((*CurrentSnapshot).xmin, sourcevxid as _) {
         ereport!(
             ERROR,
             errmsg!(
@@ -615,7 +616,7 @@ unsafe fn SetTransactionSnapshot(
      */
     if IsolationUsesXactSnapshot() {
         if IsolationIsSerializable() {
-            SetSerializableTransactionSnapshot(CurrentSnapshot, sourcevxid, sourcepid);
+            SetSerializableTransactionSnapshot(CurrentSnapshot as _, sourcevxid as _, sourcepid);
         }
         /* Make a saved copy */
         CurrentSnapshot = CopySnapshot(CurrentSnapshot);
@@ -714,6 +715,7 @@ unsafe fn FreeSnapshot(snapshot: Snapshot) {
  * subject to a future command counter update, create a new long-lived copy
  * with active refcount=1.  Otherwise, only increment the refcount.
  */
+#[no_mangle]
 pub unsafe fn PushActiveSnapshot(snapshot: Snapshot) {
     PushActiveSnapshotWithLevel(snapshot, GetCurrentTransactionNestLevel());
 }
@@ -806,6 +808,7 @@ pub unsafe fn UpdateActiveSnapshotCommandId() {
  * Remove the topmost snapshot from the active snapshot stack, decrementing the
  * reference count, and free it if this was the last reference.
  */
+#[no_mangle]
 pub unsafe fn PopActiveSnapshot() {
     let newstack: *mut ActiveSnapshotElt;
 
@@ -831,6 +834,7 @@ pub unsafe fn PopActiveSnapshot() {
  * GetActiveSnapshot
  *		Return the topmost snapshot in the Active stack.
  */
+#[no_mangle]
 pub unsafe fn GetActiveSnapshot() -> Snapshot {
     Assert!(!ActiveSnapshot.is_null());
 
@@ -1619,7 +1623,7 @@ pub unsafe fn ImportSnapshot(idstr: *const c_char) {
          * If file is missing while identifier has a correct format, avoid
          * system errors.
          */
-        if errno() == ENOENT {
+        if errno() == libc::ENOENT {
             ereport!(
                 ERROR,
                 errmsg!("snapshot \"{}\" does not exist", cstr_to_string(idstr))

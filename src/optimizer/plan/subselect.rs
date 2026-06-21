@@ -124,109 +124,121 @@ struct inline_cte_walker_context {
 // ---------------------------------------------------------------------------
 
 /// TODO(pg-port): optimizer/cost.h
-unsafe fn cost_subplan(_root: *mut PlannerInfo, _splan: *mut SubPlan, _plan: *mut Plan) {
-    unimplemented!()
+unsafe fn cost_subplan(root: *mut PlannerInfo, splan: *mut SubPlan, plan: *mut Plan) {
+    crate::optimizer::path::costsize::cost_subplan(root as _, splan as _, plan as _)
 }
 
 /// TODO(pg-port): optimizer/planner.h -- subquery_planner
 unsafe fn subquery_planner(
-    _glob: *mut PlannerGlobal,
-    _subquery: *mut Query,
-    _parent_root: *mut PlannerInfo,
-    _hasRecursion: bool,
-    _tuple_fraction: f64,
-    _result_hook: *mut c_void,
+    glob: *mut PlannerGlobal,
+    subquery: *mut Query,
+    parent_root: *mut PlannerInfo,
+    hasRecursion: bool,
+    tuple_fraction: f64,
+    result_hook: *mut c_void,
 ) -> *mut PlannerInfo {
-    unimplemented!()
+    crate::optimizer::plan::planner::subquery_planner(
+        glob as _,
+        subquery as _,
+        parent_root as _,
+        hasRecursion as _,
+        tuple_fraction as _,
+        result_hook as _,
+    ) as _
 }
 
 /// TODO(pg-port): optimizer/planner.h -- fetch_upper_rel
 unsafe fn fetch_upper_rel(
-    _root: *mut PlannerInfo,
-    _kind: crate::nodes::pathnodes::UpperRelationKind,
-    _relids: *mut Bitmapset,
+    root: *mut PlannerInfo,
+    kind: crate::nodes::pathnodes::UpperRelationKind,
+    relids: *mut Bitmapset,
 ) -> *mut RelOptInfo {
-    unimplemented!()
+    crate::optimizer::util::relnode::fetch_upper_rel(root as _, kind as _, relids as _) as _
 }
 
 /// TODO(pg-port): optimizer/planner.h -- get_cheapest_fractional_path
 unsafe fn get_cheapest_fractional_path(
-    _rel: *mut RelOptInfo,
-    _tuple_fraction: f64,
+    rel: *mut RelOptInfo,
+    tuple_fraction: f64,
 ) -> *mut Path {
-    unimplemented!()
+    crate::optimizer::plan::planner::get_cheapest_fractional_path(rel as _, tuple_fraction as _) as _
 }
 
 /// TODO(pg-port): optimizer/planmain.h -- create_plan
-unsafe fn create_plan(_root: *mut PlannerInfo, _best_path: *mut Path) -> *mut Plan {
-    unimplemented!()
+unsafe fn create_plan(root: *mut PlannerInfo, best_path: *mut Path) -> *mut Plan {
+    crate::optimizer::plan::createplan::create_plan(root as _, best_path as _) as _
 }
 
 /// TODO(pg-port): executor/executor.h -- ExecMaterializesOutput
-unsafe fn ExecMaterializesOutput(_nodeTag: NodeTag) -> bool {
-    unimplemented!()
+unsafe fn ExecMaterializesOutput(nodeTag: NodeTag) -> bool {
+    crate::executor::execAmi::ExecMaterializesOutput(nodeTag as _) as _
 }
 
 /// TODO(pg-port): optimizer/planmain.h -- materialize_finished_plan
-unsafe fn materialize_finished_plan(_plan: *mut Plan) -> *mut Plan {
-    unimplemented!()
+unsafe fn materialize_finished_plan(plan: *mut Plan) -> *mut Plan {
+    crate::optimizer::plan::createplan::materialize_finished_plan(plan as _) as _
 }
 
 /// TODO(pg-port): optimizer/paramassign.h -- generate_new_exec_param
 unsafe fn generate_new_exec_param(
-    _root: *mut PlannerInfo,
-    _paramtype: Oid,
-    _paramtypmod: i32,
-    _paramcollation: Oid,
+    root: *mut PlannerInfo,
+    paramtype: Oid,
+    paramtypmod: i32,
+    paramcollation: Oid,
 ) -> *mut Param {
-    unimplemented!()
+    crate::optimizer::util::paramassign::generate_new_exec_param(
+        root as _,
+        paramtype as _,
+        paramtypmod as _,
+        paramcollation as _,
+    ) as _
 }
 
 /// TODO(pg-port): optimizer/paramassign.h -- assign_special_exec_param
-unsafe fn assign_special_exec_param(_root: *mut PlannerInfo) -> c_int {
-    unimplemented!()
+unsafe fn assign_special_exec_param(root: *mut PlannerInfo) -> c_int {
+    crate::optimizer::util::paramassign::assign_special_exec_param(root as _) as _
 }
 
 /// TODO(pg-port): optimizer/paramassign.h -- replace_outer_var
-unsafe fn replace_outer_var(_root: *mut PlannerInfo, _var: *mut Var) -> *mut Param {
-    unimplemented!()
+unsafe fn replace_outer_var(root: *mut PlannerInfo, var: *mut Var) -> *mut Param {
+    crate::optimizer::util::paramassign::replace_outer_var(root as _, var as _) as _
 }
 
 /// TODO(pg-port): optimizer/paramassign.h -- replace_outer_placeholdervar
 unsafe fn replace_outer_placeholdervar(
-    _root: *mut PlannerInfo,
-    _phv: *mut PlaceHolderVar,
+    root: *mut PlannerInfo,
+    phv: *mut PlaceHolderVar,
 ) -> *mut Param {
-    unimplemented!()
+    crate::optimizer::util::paramassign::replace_outer_placeholdervar(root as _, phv as _) as _
 }
 
 /// TODO(pg-port): optimizer/paramassign.h -- replace_outer_agg
-unsafe fn replace_outer_agg(_root: *mut PlannerInfo, _agg: *mut Aggref) -> *mut Param {
-    unimplemented!()
+unsafe fn replace_outer_agg(root: *mut PlannerInfo, agg: *mut Aggref) -> *mut Param {
+    crate::optimizer::util::paramassign::replace_outer_agg(root as _, agg as _) as _
 }
 
 /// TODO(pg-port): optimizer/paramassign.h -- replace_outer_grouping
 unsafe fn replace_outer_grouping(
-    _root: *mut PlannerInfo,
-    _grp: *mut GroupingFunc,
+    root: *mut PlannerInfo,
+    grp: *mut GroupingFunc,
 ) -> *mut Param {
-    unimplemented!()
+    crate::optimizer::util::paramassign::replace_outer_grouping(root as _, grp as _) as _
 }
 
 /// TODO(pg-port): optimizer/paramassign.h -- replace_outer_merge_support
 unsafe fn replace_outer_merge_support(
-    _root: *mut PlannerInfo,
-    _msf: *mut MergeSupportFunc,
+    root: *mut PlannerInfo,
+    msf: *mut MergeSupportFunc,
 ) -> *mut Param {
-    unimplemented!()
+    crate::optimizer::util::paramassign::replace_outer_merge_support(root as _, msf as _) as _
 }
 
 /// TODO(pg-port): optimizer/paramassign.h -- replace_outer_returning
 unsafe fn replace_outer_returning(
-    _root: *mut PlannerInfo,
-    _re: *mut ReturningExpr,
+    root: *mut PlannerInfo,
+    re: *mut ReturningExpr,
 ) -> *mut Param {
-    unimplemented!()
+    crate::optimizer::util::paramassign::replace_outer_returning(root as _, re as _) as _
 }
 
 /// TODO(pg-port): optimizer/paramassign.h -- planner_subplan_get_plan
@@ -239,45 +251,45 @@ unsafe fn planner_subplan_get_plan(
 
 /// TODO(pg-port): optimizer/paramassign.h -- find_minmax_agg_replacement_param
 unsafe fn find_minmax_agg_replacement_param(
-    _root: *mut PlannerInfo,
-    _aggref: *mut Aggref,
+    root: *mut PlannerInfo,
+    aggref: *mut Aggref,
 ) -> *mut Param {
-    unimplemented!()
+    crate::optimizer::plan::setrefs::find_minmax_agg_replacement_param(root as _, aggref as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- contain_volatile_functions
-unsafe fn contain_volatile_functions(_node: *mut Node) -> bool {
-    unimplemented!()
+unsafe fn contain_volatile_functions(node: *mut Node) -> bool {
+    crate::optimizer::util::clauses::contain_volatile_functions(node as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- contain_var_clause
-unsafe fn contain_var_clause(_node: *mut Node) -> bool {
-    unimplemented!()
+unsafe fn contain_var_clause(node: *mut Node) -> bool {
+    crate::optimizer::util::var::contain_var_clause(node as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- contain_vars_of_level
-unsafe fn contain_vars_of_level(_node: *mut Node, _levelsup: c_int) -> bool {
-    unimplemented!()
+unsafe fn contain_vars_of_level(node: *mut Node, levelsup: c_int) -> bool {
+    crate::optimizer::util::var::contain_vars_of_level(node as _, levelsup as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- contain_subplans
-unsafe fn contain_subplans(_node: *mut Node) -> bool {
-    unimplemented!()
+unsafe fn contain_subplans(node: *mut Node) -> bool {
+    crate::optimizer::util::clauses::contain_subplans(node as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- contain_exec_param
-unsafe fn contain_exec_param(_node: *mut Node, _param_ids: *mut List) -> bool {
-    unimplemented!()
+unsafe fn contain_exec_param(node: *mut Node, param_ids: *mut List) -> bool {
+    crate::optimizer::util::clauses::contain_exec_param(node as _, param_ids as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- contain_aggs_of_level
-unsafe fn contain_aggs_of_level(_node: *mut Node, _levelsup: c_int) -> bool {
-    unimplemented!()
+unsafe fn contain_aggs_of_level(node: *mut Node, levelsup: c_int) -> bool {
+    crate::rewrite::rewriteManip::contain_aggs_of_level(node as _, levelsup as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- eval_const_expressions
-unsafe fn eval_const_expressions(_root: *mut PlannerInfo, _node: *mut Node) -> *mut Node {
-    unimplemented!()
+unsafe fn eval_const_expressions(root: *mut PlannerInfo, node: *mut Node) -> *mut Node {
+    crate::optimizer::util::clauses::eval_const_expressions(root as _, node as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- is_andclause
@@ -291,216 +303,238 @@ unsafe fn is_orclause(_node: *mut Node) -> bool {
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- make_andclause
-unsafe fn make_andclause(_args: *mut List) -> *mut BoolExpr {
-    unimplemented!()
+unsafe fn make_andclause(args: *mut List) -> *mut BoolExpr {
+    crate::nodes::makefuncs::make_andclause(args as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- make_orclause
-unsafe fn make_orclause(_args: *mut List) -> *mut BoolExpr {
-    unimplemented!()
+unsafe fn make_orclause(args: *mut List) -> *mut BoolExpr {
+    crate::nodes::makefuncs::make_orclause(args as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- make_ands_explicit
-unsafe fn make_ands_explicit(_andclauses: *mut List) -> *mut Expr {
-    unimplemented!()
+unsafe fn make_ands_explicit(andclauses: *mut List) -> *mut Expr {
+    crate::nodes::makefuncs::make_ands_explicit(andclauses as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- make_ands_implicit
-unsafe fn make_ands_implicit(_clause: *mut Expr) -> *mut List {
-    unimplemented!()
+unsafe fn make_ands_implicit(clause: *mut Expr) -> *mut List {
+    crate::nodes::makefuncs::make_ands_implicit(clause as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- canonicalize_qual
-unsafe fn canonicalize_qual(_qual: *mut Expr, _is_check: bool) -> *mut Expr {
-    unimplemented!()
+unsafe fn canonicalize_qual(qual: *mut Expr, is_check: bool) -> *mut Expr {
+    crate::optimizer::prep::prepqual::canonicalize_qual(qual as _, is_check as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.h -- get_hash_memory_limit
 unsafe fn get_hash_memory_limit() -> f64 {
-    unimplemented!()
+    crate::executor::nodeHash::get_hash_memory_limit() as _
 }
 
 /// TODO(pg-port): optimizer/util/var.h -- pull_varnos
-unsafe fn pull_varnos(_root: *mut PlannerInfo, _node: *mut Node) -> *mut Bitmapset {
-    unimplemented!()
+unsafe fn pull_varnos(root: *mut PlannerInfo, node: *mut Node) -> *mut Bitmapset {
+    crate::optimizer::util::var::pull_varnos(root as _, node as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/var.h -- pull_varnos_of_level
 unsafe fn pull_varnos_of_level(
-    _root: *mut PlannerInfo,
-    _node: *mut Node,
-    _levelsup: c_int,
+    root: *mut PlannerInfo,
+    node: *mut Node,
+    levelsup: c_int,
 ) -> *mut Bitmapset {
-    unimplemented!()
+    crate::optimizer::util::var::pull_varnos_of_level(root as _, node as _, levelsup as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/var.h -- find_base_rel
-unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo {
-    unimplemented!()
+unsafe fn find_base_rel(root: *mut PlannerInfo, relid: c_int) -> *mut RelOptInfo {
+    crate::optimizer::util::relnode::find_base_rel(root as _, relid as _) as _
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.h -- exprType
-unsafe fn exprType(_expr: *mut Node) -> Oid {
-    unimplemented!()
+unsafe fn exprType(expr: *mut Node) -> Oid {
+    crate::nodes::nodeFuncs::exprType(expr as _) as _
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.h -- exprTypmod
-unsafe fn exprTypmod(_expr: *mut Node) -> i32 {
-    unimplemented!()
+unsafe fn exprTypmod(expr: *mut Node) -> i32 {
+    crate::nodes::nodeFuncs::exprTypmod(expr as _) as _
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.h -- exprCollation
-unsafe fn exprCollation(_expr: *mut Node) -> Oid {
-    unimplemented!()
+unsafe fn exprCollation(expr: *mut Node) -> Oid {
+    crate::nodes::nodeFuncs::exprCollation(expr as _) as _
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.h -- expression_tree_mutator
 unsafe fn expression_tree_mutator(
-    _node: *mut Node,
-    _mutator: unsafe fn(*mut Node, *mut c_void) -> *mut Node,
-    _context: *mut c_void,
+    node: *mut Node,
+    mutator: unsafe fn(*mut Node, *mut c_void) -> *mut Node,
+    context: *mut c_void,
 ) -> *mut Node {
-    unimplemented!()
+    crate::nodes::nodeFuncs::expression_tree_mutator(node as _, core::mem::transmute(mutator), context as _) as _
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.h -- expression_tree_walker
 unsafe fn expression_tree_walker(
-    _node: *mut Node,
-    _walker: unsafe fn(*mut Node, *mut c_void) -> bool,
-    _context: *mut c_void,
+    node: *mut Node,
+    walker: unsafe fn(*mut Node, *mut c_void) -> bool,
+    context: *mut c_void,
 ) -> bool {
-    unimplemented!()
+    crate::nodes::nodeFuncs::expression_tree_walker(node as _, core::mem::transmute(walker), context as _) as _
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.h -- query_tree_walker
 unsafe fn query_tree_walker(
-    _query: *mut Query,
-    _walker: unsafe fn(*mut Node, *mut c_void) -> bool,
-    _context: *mut c_void,
-    _flags: c_int,
+    query: *mut Query,
+    walker: unsafe fn(*mut Node, *mut c_void) -> bool,
+    context: *mut c_void,
+    flags: c_int,
 ) -> bool {
-    unimplemented!()
+    crate::nodes::nodeFuncs::query_tree_walker(query as _, core::mem::transmute(walker), context as _, flags as _) as _
 }
 
 /// TODO(pg-port): rewrite/rewriteManip.h -- OffsetVarNodes
-unsafe fn OffsetVarNodes(_node: *mut Node, _offset: c_int, _sublevels_up: c_int) {
-    unimplemented!()
+unsafe fn OffsetVarNodes(node: *mut Node, offset: c_int, sublevels_up: c_int) {
+    crate::rewrite::rewriteManip::OffsetVarNodes(node as _, offset as _, sublevels_up as _)
 }
 
 /// TODO(pg-port): rewrite/rewriteManip.h -- IncrementVarSublevelsUp
 unsafe fn IncrementVarSublevelsUp(
-    _node: *mut Node,
-    _delta_sublevels_up: c_int,
-    _min_sublevels_up: c_int,
+    node: *mut Node,
+    delta_sublevels_up: c_int,
+    min_sublevels_up: c_int,
 ) {
-    unimplemented!()
+    crate::rewrite::rewriteManip::IncrementVarSublevelsUp(node as _, delta_sublevels_up as _, min_sublevels_up as _)
 }
 
 /// TODO(pg-port): parser/parse_relation.h -- make_parsestate
-unsafe fn make_parsestate(_parent_pstate: *mut c_void) -> *mut c_void {
-    unimplemented!()
+unsafe fn make_parsestate(parent_pstate: *mut c_void) -> *mut c_void {
+    crate::parser::parse_node::make_parsestate(parent_pstate as _) as _
 }
 
 /// TODO(pg-port): parser/parse_relation.h -- addRangeTableEntryForSubquery
 unsafe fn addRangeTableEntryForSubquery(
-    _pstate: *mut c_void,
-    _subquery: *mut Query,
-    _alias: *mut c_void,
-    _lateral: bool,
-    _inFromCl: bool,
+    pstate: *mut c_void,
+    subquery: *mut Query,
+    alias: *mut c_void,
+    lateral: bool,
+    inFromCl: bool,
 ) -> *mut c_void {
-    unimplemented!()
+    crate::parser::parse_relation::addRangeTableEntryForSubquery(
+        pstate as _,
+        subquery as _,
+        alias as _,
+        lateral as _,
+        inFromCl as _,
+    ) as _
 }
 
 /// TODO(pg-port): nodes/makefuncs.h -- makeAlias
-unsafe fn makeAlias(_aliasname: *const c_char, _colnames: *mut List) -> *mut c_void {
-    unimplemented!()
+unsafe fn makeAlias(aliasname: *const c_char, colnames: *mut List) -> *mut c_void {
+    crate::nodes::makefuncs::makeAlias(aliasname as _, colnames as _) as _
 }
 
 /// TODO(pg-port): nodes/makefuncs.h -- makeVarFromTargetEntry
-unsafe fn makeVarFromTargetEntry(_varno: Index, _tle: *mut TargetEntry) -> *mut Var {
-    unimplemented!()
+unsafe fn makeVarFromTargetEntry(varno: Index, tle: *mut TargetEntry) -> *mut Var {
+    crate::nodes::makefuncs::makeVarFromTargetEntry(varno as _, tle as _) as _
 }
 
 /// TODO(pg-port): nodes/makefuncs.h -- makeTargetEntry
 unsafe fn makeTargetEntry(
-    _expr: *mut Expr,
-    _resno: i16,
-    _resname: *mut c_char,
-    _resjunk: bool,
+    expr: *mut Expr,
+    resno: i16,
+    resname: *mut c_char,
+    resjunk: bool,
 ) -> *mut TargetEntry {
-    unimplemented!()
+    crate::nodes::makefuncs::makeTargetEntry(expr as _, resno as _, resname as _, resjunk as _) as _
 }
 
 /// TODO(pg-port): nodes/makefuncs.h -- makeNullConst
-unsafe fn makeNullConst(_consttype: Oid, _consttypmod: i32, _constcollid: Oid) -> *mut Const {
-    unimplemented!()
+unsafe fn makeNullConst(consttype: Oid, consttypmod: i32, constcollid: Oid) -> *mut Const {
+    crate::nodes::makefuncs::makeNullConst(consttype as _, consttypmod as _, constcollid as _) as _
 }
 
 /// TODO(pg-port): nodes/makefuncs.h -- make_opclause
 unsafe fn make_opclause(
-    _opno: Oid,
-    _opresulttype: Oid,
-    _opretset: bool,
-    _leftop: *mut Expr,
-    _rightop: *mut Expr,
-    _opcollid: Oid,
-    _inputcollid: Oid,
+    opno: Oid,
+    opresulttype: Oid,
+    opretset: bool,
+    leftop: *mut Expr,
+    rightop: *mut Expr,
+    opcollid: Oid,
+    inputcollid: Oid,
 ) -> *mut Expr {
-    unimplemented!()
+    crate::nodes::makefuncs::make_opclause(
+        opno as _,
+        opresulttype as _,
+        opretset as _,
+        leftop as _,
+        rightop as _,
+        opcollid as _,
+        inputcollid as _,
+    ) as _
 }
 
 /// TODO(pg-port): nodes/makefuncs.h -- make_SAOP_expr
 unsafe fn make_SAOP_expr(
-    _opno: Oid,
-    _leftop: *mut Node,
-    _righttype: Oid,
-    _rightcollid: Oid,
-    _inputcollid: Oid,
-    _exprs: *mut List,
-    _useOr: bool,
+    opno: Oid,
+    leftop: *mut Node,
+    righttype: Oid,
+    rightcollid: Oid,
+    inputcollid: Oid,
+    exprs: *mut List,
+    useOr: bool,
 ) -> *mut ScalarArrayOpExpr {
-    unimplemented!()
+    crate::optimizer::util::clauses::make_SAOP_expr(
+        opno as _,
+        leftop as _,
+        righttype as _,
+        rightcollid as _,
+        inputcollid as _,
+        exprs as _,
+        useOr as _,
+    ) as _
 }
 
 /// TODO(pg-port): utils/lsyscache.h -- get_promoted_array_type
-unsafe fn get_promoted_array_type(_typid: Oid) -> Oid {
-    unimplemented!()
+unsafe fn get_promoted_array_type(typid: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_promoted_array_type(typid as _) as _
 }
 
 /// TODO(pg-port): utils/lsyscache.h -- op_hashjoinable
-unsafe fn op_hashjoinable(_opno: Oid, _inputtype: Oid) -> bool {
-    unimplemented!()
+unsafe fn op_hashjoinable(opno: Oid, inputtype: Oid) -> bool {
+    crate::utils::cache::lsyscache::op_hashjoinable(opno as _, inputtype as _) as _
 }
 
 /// TODO(pg-port): utils/lsyscache.h -- get_commutator
-unsafe fn get_commutator(_opno: Oid) -> Oid {
-    unimplemented!()
+unsafe fn get_commutator(opno: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_commutator(opno as _) as _
 }
 
 /// TODO(pg-port): utils/lsyscache.h -- func_strict
-unsafe fn func_strict(_funcid: Oid) -> bool {
-    unimplemented!()
+unsafe fn func_strict(funcid: Oid) -> bool {
+    crate::utils::cache::lsyscache::func_strict(funcid as _) as _
 }
 
 /// TODO(pg-port): utils/syscache.h -- SearchSysCache1
-unsafe fn SearchSysCache1(_cacheId: c_int, _key1: u64) -> *mut crate::access::htup_details::HeapTupleData {
-    unimplemented!()
+unsafe fn SearchSysCache1(cacheId: c_int, key1: u64) -> *mut crate::access::htup_details::HeapTupleData {
+    crate::utils::cache::syscache::SearchSysCache1(cacheId as _, key1 as _) as _
 }
 
 /// TODO(pg-port): utils/syscache.h -- ReleaseSysCache
-unsafe fn ReleaseSysCache(_tup: *mut crate::access::htup_details::HeapTupleData) {
-    unimplemented!()
+unsafe fn ReleaseSysCache(tup: *mut crate::access::htup_details::HeapTupleData) {
+    crate::utils::cache::syscache::ReleaseSysCache(tup as _)
 }
 
 /// TODO(pg-port): utils/syscache.h -- HeapTupleIsValid
-unsafe fn HeapTupleIsValid(_tup: *mut crate::access::htup_details::HeapTupleData) -> bool {
-    unimplemented!()
+unsafe fn HeapTupleIsValid(tup: *mut crate::access::htup_details::HeapTupleData) -> bool {
+    crate::access::htup_details::HeapTupleIsValid(tup as _) as _
 }
 
 /// TODO(pg-port): utils/builtins.h -- format_type_be
-unsafe fn format_type_be(_typid: Oid) -> *mut c_char {
-    unimplemented!()
+unsafe fn format_type_be(typid: Oid) -> *mut c_char {
+    crate::utils::adt::format_type::format_type_be(typid as _) as _
 }
 
 /// TODO(pg-port): utils/builtins.h -- psprintf
@@ -520,8 +554,8 @@ fn OidIsValid(oid: Oid) -> bool {
 }
 
 /// TODO(pg-port): access/htup_details.h -- GETSTRUCT
-unsafe fn GETSTRUCT(_tup: *mut crate::access::htup_details::HeapTupleData) -> *mut Form_pg_operator {
-    unimplemented!()
+unsafe fn GETSTRUCT(tup: *mut crate::access::htup_details::HeapTupleData) -> *mut Form_pg_operator {
+    crate::access::htup_details::GETSTRUCT(tup as _) as _
 }
 
 /// TODO(pg-port): pg_operator.h form
@@ -534,8 +568,8 @@ pub struct FormData_pg_operator {
 pub type Form_pg_operator = *mut FormData_pg_operator;
 
 /// TODO(pg-port): nodes/pg_list.h -- list_make2
-unsafe fn list_make2(_x1: *mut c_void, _x2: *mut c_void) -> *mut List {
-    unimplemented!()
+unsafe fn list_make2(x1: *mut c_void, x2: *mut c_void) -> *mut List {
+    crate::list_make2!(x1, x2) as _
 }
 
 /// TODO(pg-port): access/attnum.h
@@ -573,7 +607,7 @@ fn ObjectIdGetDatum(oid: Oid) -> u64 {
 }
 
 /// TODO(pg-port): utils/syscache.h -- OPEROID cache id
-const OPEROID: c_int = 44;
+const OPEROID: c_int = 40;
 
 /// TODO(pg-port): nodes/parsenodes.h QTW flags
 const QTW_EXAMINE_RTES_BEFORE: c_int = 0x0010;
@@ -583,17 +617,22 @@ const QTW_EXAMINE_RTES_AFTER: c_int = 0x0020;
 
 /// TODO(pg-port): parser/parse_relation.h -- CombineRangeTables
 unsafe fn CombineRangeTables(
-    _dst_rtable: *mut *mut List,
-    _dst_rteperminfos: *mut *mut List,
-    _src_rtable: *mut List,
-    _src_rteperminfos: *mut List,
+    dst_rtable: *mut *mut List,
+    dst_rteperminfos: *mut *mut List,
+    src_rtable: *mut List,
+    src_rteperminfos: *mut List,
 ) {
-    unimplemented!()
+    crate::rewrite::rewriteManip::CombineRangeTables(
+        dst_rtable as _,
+        dst_rteperminfos as _,
+        src_rtable as _,
+        src_rteperminfos as _,
+    )
 }
 
 /// TODO(pg-port): optimizer/prep.h -- replace_empty_jointree
-unsafe fn replace_empty_jointree(_subselect: *mut Query) {
-    unimplemented!()
+unsafe fn replace_empty_jointree(subselect: *mut Query) {
+    crate::optimizer::prep::prepjointree::replace_empty_jointree(subselect as _)
 }
 
 /// TODO(pg-port): nodes/primnodes.h JoinExpr

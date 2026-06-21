@@ -105,19 +105,19 @@ pub struct Path {
 }
 
 pub unsafe fn ExecReScan(_node: *mut PlanState) {
-    unimplemented!()
+    crate::executor::execAmi::ExecReScan(_node as _)
 }
 pub unsafe fn ExecMarkPos(_node: *mut PlanState) {
-    unimplemented!()
+    crate::executor::execAmi::ExecMarkPos(_node as _)
 }
 pub unsafe fn ExecRestrPos(_node: *mut PlanState) {
-    unimplemented!()
+    crate::executor::execAmi::ExecRestrPos(_node as _)
 }
 pub unsafe fn ExecSupportsMarkRestore(_pathnode: *mut Path) -> bool {
     unimplemented!()
 }
 pub unsafe fn ExecSupportsBackwardScan(_node: *mut Plan) -> bool {
-    unimplemented!()
+    crate::executor::execAmi::ExecSupportsBackwardScan(_node as _) as _
 }
 pub unsafe fn ExecMaterializesOutput(_plantype: NodeTag) -> bool {
     unimplemented!()
@@ -132,7 +132,7 @@ pub unsafe fn execCurrentOf(
     _table_oid: Oid,
     _current_tid: ItemPointer,
 ) -> bool {
-    unimplemented!()
+    crate::executor::execCurrent::execCurrentOf(_cexpr as _, _econtext as _, _table_oid as _, _current_tid as _) as _
 }
 
 /*
@@ -146,7 +146,7 @@ pub unsafe fn execTuplesMatchPrepare(
     _collations: *const Oid,
     _parent: *mut PlanState,
 ) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execGrouping::execTuplesMatchPrepare(_desc as _, _numCols as _, _keyColIdx as _, _eqOperators as _, _collations as _, _parent as _) as _
 }
 pub unsafe fn execTuplesHashPrepare(
     _numCols: c_int,
@@ -154,7 +154,7 @@ pub unsafe fn execTuplesHashPrepare(
     _eqFuncOids: *mut *mut Oid,
     _hashFunctions: *mut *mut FmgrInfo,
 ) {
-    unimplemented!()
+    crate::executor::execGrouping::execTuplesHashPrepare(_numCols as _, _eqOperators as _, _eqFuncOids as _, _hashFunctions as _)
 }
 pub unsafe fn BuildTupleHashTable(
     _parent: *mut PlanState,
@@ -172,7 +172,7 @@ pub unsafe fn BuildTupleHashTable(
     _tempcxt: MemoryContext,
     _use_variable_hash_iv: bool,
 ) -> TupleHashTable {
-    unimplemented!()
+    crate::executor::execGrouping::BuildTupleHashTable(_parent as _, _inputDesc as _, _inputOps as _, _numCols as _, _keyColIdx as _, _eqfuncoids as _, _hashfunctions as _, _collations as _, _nbuckets as _, _additionalsize as _, _metacxt as _, _tablecxt as _, _tempcxt as _, _use_variable_hash_iv as _)
 }
 pub unsafe fn LookupTupleHashEntry(
     _hashtable: TupleHashTable,
@@ -248,32 +248,32 @@ pub unsafe fn ExecInitJunkFilter(
     _targetList: *mut List,
     _slot: *mut TupleTableSlot,
 ) -> *mut JunkFilter {
-    unimplemented!()
+    crate::executor::execJunk::ExecInitJunkFilter(_targetList as _, _slot as _) as _
 }
 pub unsafe fn ExecInitJunkFilterConversion(
     _targetList: *mut List,
     _cleanTupType: TupleDesc,
     _slot: *mut TupleTableSlot,
 ) -> *mut JunkFilter {
-    unimplemented!()
+    crate::executor::execJunk::ExecInitJunkFilterConversion(_targetList as _, _cleanTupType as _, _slot as _) as _
 }
 pub unsafe fn ExecFindJunkAttribute(
     _junkfilter: *mut JunkFilter,
     _attrName: *const c_char,
 ) -> AttrNumber {
-    unimplemented!()
+    crate::executor::execJunk::ExecFindJunkAttribute(_junkfilter as _, _attrName as _) as _
 }
 pub unsafe fn ExecFindJunkAttributeInTlist(
     _targetlist: *mut List,
     _attrName: *const c_char,
 ) -> AttrNumber {
-    unimplemented!()
+    crate::executor::execJunk::ExecFindJunkAttributeInTlist(_targetlist as _, _attrName as _) as _
 }
 pub unsafe fn ExecFilterJunk(
     _junkfilter: *mut JunkFilter,
     _slot: *mut TupleTableSlot,
 ) -> *mut TupleTableSlot {
-    unimplemented!()
+    crate::executor::execJunk::ExecFilterJunk(_junkfilter as _, _slot as _) as _
 }
 
 /*
@@ -297,58 +297,59 @@ pub unsafe fn ExecGetJunkAttribute(
  * prototypes from functions in execMain.c
  */
 pub unsafe fn ExecutorStart(_queryDesc: *mut QueryDesc, _eflags: c_int) {
-    unimplemented!()
+    crate::executor::execMain::ExecutorStart(_queryDesc as _, _eflags as _)
 }
 pub unsafe fn standard_ExecutorStart(_queryDesc: *mut QueryDesc, _eflags: c_int) {
-    unimplemented!()
+    crate::executor::execMain::standard_ExecutorStart(_queryDesc as _, _eflags as _)
 }
 pub unsafe fn ExecutorRun(
-    _queryDesc: *mut QueryDesc,
-    _direction: ScanDirection,
-    _count: uint64,
+    queryDesc: *mut QueryDesc,
+    direction: ScanDirection,
+    count: uint64,
 ) {
-    unimplemented!()
+    crate::executor::execMain::ExecutorRun(queryDesc as _, direction as _, count as _)
 }
 pub unsafe fn standard_ExecutorRun(
-    _queryDesc: *mut QueryDesc,
-    _direction: ScanDirection,
-    _count: uint64,
+    queryDesc: *mut QueryDesc,
+    direction: ScanDirection,
+    count: uint64,
 ) {
-    unimplemented!()
+    crate::executor::execMain::standard_ExecutorRun(queryDesc as _, direction as _, count as _)
 }
 pub unsafe fn ExecutorFinish(_queryDesc: *mut QueryDesc) {
-    unimplemented!()
+    crate::executor::execMain::ExecutorFinish(_queryDesc as _)
 }
 pub unsafe fn standard_ExecutorFinish(_queryDesc: *mut QueryDesc) {
-    unimplemented!()
+    crate::executor::execMain::standard_ExecutorFinish(_queryDesc as _)
 }
 pub unsafe fn ExecutorEnd(_queryDesc: *mut QueryDesc) {
-    unimplemented!()
+    crate::executor::execMain::ExecutorEnd(_queryDesc as _)
 }
 pub unsafe fn standard_ExecutorEnd(_queryDesc: *mut QueryDesc) {
-    unimplemented!()
+    crate::executor::execMain::standard_ExecutorEnd(_queryDesc as _)
 }
 pub unsafe fn ExecutorRewind(_queryDesc: *mut QueryDesc) {
-    unimplemented!()
+    crate::executor::execMain::ExecutorRewind(_queryDesc as _)
 }
 pub unsafe fn ExecCheckPermissions(
     _rangeTable: *mut List,
     _rteperminfos: *mut List,
     _ereport_on_violation: bool,
 ) -> bool {
-    unimplemented!()
+    crate::executor::execMain::ExecCheckPermissions(_rangeTable as _, _rteperminfos as _, _ereport_on_violation as _) as _
 }
 pub unsafe fn ExecCheckOneRelPerms(_perminfo: *mut RTEPermissionInfo) -> bool {
-    unimplemented!()
+    crate::executor::execMain::ExecCheckOneRelPerms(_perminfo as _) as _
 }
 pub unsafe fn CheckValidResultRel(
-    _resultRelInfo: *mut ResultRelInfo,
-    _operation: CmdType,
-    _onConflictAction: OnConflictAction,
-    _mergeActions: *mut List,
+    resultRelInfo: *mut ResultRelInfo,
+    operation: CmdType,
+    onConflictAction: OnConflictAction,
+    mergeActions: *mut List,
 ) {
-    unimplemented!()
+    crate::executor::execMain::CheckValidResultRel(resultRelInfo as _, operation as _, onConflictAction as _, mergeActions as _)
 }
+#[no_mangle]
 pub unsafe fn InitResultRelInfo(
     _resultRelInfo: *mut ResultRelInfo,
     _resultRelationDesc: Relation,
@@ -356,27 +357,27 @@ pub unsafe fn InitResultRelInfo(
     _partition_root_rri: *mut ResultRelInfo,
     _instrument_options: c_int,
 ) {
-    unimplemented!()
+    crate::executor::execMain::InitResultRelInfo(_resultRelInfo as _, _resultRelationDesc as _, _resultRelationIndex as _, _partition_root_rri as _, _instrument_options as _)
 }
 pub unsafe fn ExecGetTriggerResultRel(
     _estate: *mut EState,
     _relid: Oid,
     _rootRelInfo: *mut ResultRelInfo,
 ) -> *mut ResultRelInfo {
-    unimplemented!()
+    crate::executor::execMain::ExecGetTriggerResultRel(_estate as _, _relid as _, _rootRelInfo as _) as _
 }
 pub unsafe fn ExecGetAncestorResultRels(
     _estate: *mut EState,
     _resultRelInfo: *mut ResultRelInfo,
 ) -> *mut List {
-    unimplemented!()
+    crate::executor::execMain::ExecGetAncestorResultRels(_estate as _, _resultRelInfo as _) as _
 }
 pub unsafe fn ExecConstraints(
     _resultRelInfo: *mut ResultRelInfo,
     _slot: *mut TupleTableSlot,
     _estate: *mut EState,
 ) {
-    unimplemented!()
+    crate::executor::execMain::ExecConstraints(_resultRelInfo as _, _slot as _, _estate as _)
 }
 pub unsafe fn ExecRelGenVirtualNotNull(
     _resultRelInfo: *mut ResultRelInfo,
@@ -384,22 +385,23 @@ pub unsafe fn ExecRelGenVirtualNotNull(
     _estate: *mut EState,
     _notnull_virtual_attrs: *mut List,
 ) -> AttrNumber {
-    unimplemented!()
+    crate::executor::execMain::ExecRelGenVirtualNotNull(_resultRelInfo as _, _slot as _, _estate as _, _notnull_virtual_attrs as _) as _
 }
+#[no_mangle]
 pub unsafe fn ExecPartitionCheck(
     _resultRelInfo: *mut ResultRelInfo,
     _slot: *mut TupleTableSlot,
     _estate: *mut EState,
     _emitError: bool,
 ) -> bool {
-    unimplemented!()
+    crate::executor::execMain::ExecPartitionCheck(_resultRelInfo as _, _slot as _, _estate as _, _emitError as _) as _
 }
 pub unsafe fn ExecPartitionCheckEmitError(
     _resultRelInfo: *mut ResultRelInfo,
     _slot: *mut TupleTableSlot,
     _estate: *mut EState,
 ) {
-    unimplemented!()
+    crate::executor::execMain::ExecPartitionCheckEmitError(_resultRelInfo as _, _slot as _, _estate as _)
 }
 pub unsafe fn ExecWithCheckOptions(
     _kind: WCOKind,
@@ -416,7 +418,7 @@ pub unsafe fn ExecBuildSlotValueDescription(
     _modifiedCols: *mut Bitmapset,
     _maxfieldlen: c_int,
 ) -> *mut c_char {
-    unimplemented!()
+    crate::executor::execMain::ExecBuildSlotValueDescription(_reloid as _, _slot as _, _tupdesc as _, _modifiedCols as _, _maxfieldlen as _) as _
 }
 pub unsafe fn ExecUpdateLockMode(
     _estate: *mut EState,
@@ -429,13 +431,13 @@ pub unsafe fn ExecFindRowMark(
     _rti: Index,
     _missing_ok: bool,
 ) -> *mut ExecRowMark {
-    unimplemented!()
+    crate::executor::execMain::ExecFindRowMark(_estate as _, _rti as _, _missing_ok as _) as _
 }
 pub unsafe fn ExecBuildAuxRowMark(
     _erm: *mut ExecRowMark,
     _targetlist: *mut List,
 ) -> *mut ExecAuxRowMark {
-    unimplemented!()
+    crate::executor::execMain::ExecBuildAuxRowMark(_erm as _, _targetlist as _) as _
 }
 pub unsafe fn EvalPlanQual(
     _epqstate: *mut EPQState,
@@ -443,8 +445,9 @@ pub unsafe fn EvalPlanQual(
     _rti: Index,
     _inputslot: *mut TupleTableSlot,
 ) -> *mut TupleTableSlot {
-    unimplemented!()
+    crate::executor::execMain::EvalPlanQual(_epqstate as _, _relation as _, _rti as _, _inputslot as _) as _
 }
+#[no_mangle]
 pub unsafe fn EvalPlanQualInit(
     _epqstate: *mut EPQState,
     _parentestate: *mut EState,
@@ -453,25 +456,26 @@ pub unsafe fn EvalPlanQualInit(
     _epqParam: c_int,
     _resultRelations: *mut List,
 ) {
-    unimplemented!()
+    crate::executor::execMain::EvalPlanQualInit(_epqstate as _, _parentestate as _, _subplan as _, _auxrowmarks as _, _epqParam as _, _resultRelations as _)
 }
 pub unsafe fn EvalPlanQualSetPlan(
     _epqstate: *mut EPQState,
     _subplan: *mut Plan,
     _auxrowmarks: *mut List,
 ) {
-    unimplemented!()
+    crate::executor::execMain::EvalPlanQualSetPlan(_epqstate as _, _subplan as _, _auxrowmarks as _)
 }
 pub unsafe fn EvalPlanQualSlot(
     _epqstate: *mut EPQState,
     _relation: Relation,
     _rti: Index,
 ) -> *mut TupleTableSlot {
-    unimplemented!()
+    crate::executor::execMain::EvalPlanQualSlot(_epqstate as _, _relation as _, _rti as _) as _
 }
 
 /* #define EvalPlanQualSetSlot(epqstate, slot) ((epqstate)->origslot = (slot)) */
 #[inline]
+#[no_mangle]
 pub unsafe fn EvalPlanQualSetSlot(epqstate: *mut EPQState, slot: *mut TupleTableSlot) {
     (*epqstate).origslot = slot;
 }
@@ -481,16 +485,17 @@ pub unsafe fn EvalPlanQualFetchRowMark(
     _rti: Index,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!()
+    crate::executor::execMain::EvalPlanQualFetchRowMark(_epqstate as _, _rti as _, _slot as _) as _
 }
 pub unsafe fn EvalPlanQualNext(_epqstate: *mut EPQState) -> *mut TupleTableSlot {
-    unimplemented!()
+    crate::executor::execMain::EvalPlanQualNext(_epqstate as _) as _
 }
 pub unsafe fn EvalPlanQualBegin(_epqstate: *mut EPQState) {
-    unimplemented!()
+    crate::executor::execMain::EvalPlanQualBegin(_epqstate as _)
 }
+#[no_mangle]
 pub unsafe fn EvalPlanQualEnd(_epqstate: *mut EPQState) {
-    unimplemented!()
+    crate::executor::execMain::EvalPlanQualEnd(_epqstate as _)
 }
 
 /*
@@ -501,22 +506,22 @@ pub unsafe fn ExecInitNode(
     _estate: *mut EState,
     _eflags: c_int,
 ) -> *mut PlanState {
-    unimplemented!()
+    crate::executor::execProcnode::ExecInitNode(_node as _, _estate as _, _eflags as _) as _
 }
 pub unsafe fn ExecSetExecProcNode(_node: *mut PlanState, _function: ExecProcNodeMtd) {
     unimplemented!()
 }
 pub unsafe fn MultiExecProcNode(_node: *mut PlanState) -> *mut Node {
-    unimplemented!()
+    crate::executor::execProcnode::MultiExecProcNode(_node as _) as _
 }
 pub unsafe fn ExecEndNode(_node: *mut PlanState) {
-    unimplemented!()
+    crate::executor::execProcnode::ExecEndNode(_node as _)
 }
 pub unsafe fn ExecShutdownNode(_node: *mut PlanState) {
-    unimplemented!()
+    crate::executor::execProcnode::ExecShutdownNode(_node as _)
 }
 pub unsafe fn ExecSetTupleBound(_tuples_needed: int64, _child_node: *mut PlanState) {
-    unimplemented!()
+    crate::executor::execProcnode::ExecSetTupleBound(_tuples_needed as _, _child_node as _)
 }
 
 /* ----------------------------------------------------------------
@@ -538,23 +543,24 @@ pub unsafe fn ExecProcNode(node: *mut PlanState) -> *mut TupleTableSlot {
 /*
  * prototypes from functions in execExpr.c
  */
+#[no_mangle]
 pub unsafe fn ExecInitExpr(_node: *mut Expr, _parent: *mut PlanState) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecInitExpr(_node as _, _parent as _) as _
 }
 pub unsafe fn ExecInitExprWithParams(
     _node: *mut Expr,
     _ext_params: ParamListInfo,
 ) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecInitExprWithParams(_node as _, _ext_params as _) as _
 }
 pub unsafe fn ExecInitQual(_qual: *mut List, _parent: *mut PlanState) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecInitQual(_qual as _, _parent as _) as _
 }
 pub unsafe fn ExecInitCheck(_qual: *mut List, _parent: *mut PlanState) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecInitCheck(_qual as _, _parent as _) as _
 }
 pub unsafe fn ExecInitExprList(_nodes: *mut List, _parent: *mut PlanState) -> *mut List {
-    unimplemented!()
+    crate::executor::execExpr::ExecInitExprList(_nodes as _, _parent as _) as _
 }
 pub unsafe fn ExecBuildAggTrans(
     _aggstate: *mut AggState,
@@ -563,7 +569,7 @@ pub unsafe fn ExecBuildAggTrans(
     _doHash: bool,
     _nullcheck: bool,
 ) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecBuildAggTrans(_aggstate as _, _phase as _, _doSort as _, _doHash as _, _nullcheck as _) as _
 }
 pub unsafe fn ExecBuildHash32FromAttrs(
     _desc: TupleDesc,
@@ -575,7 +581,7 @@ pub unsafe fn ExecBuildHash32FromAttrs(
     _parent: *mut PlanState,
     _init_value: uint32,
 ) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecBuildHash32FromAttrs(_desc as _, _ops as _, _hashfunctions as _, _collations as _, _numCols as _, _keyColIdx as _, _parent as _, _init_value as _) as _
 }
 pub unsafe fn ExecBuildHash32Expr(
     _desc: TupleDesc,
@@ -588,7 +594,7 @@ pub unsafe fn ExecBuildHash32Expr(
     _init_value: uint32,
     _keep_nulls: bool,
 ) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecBuildHash32Expr(_desc as _, _ops as _, _hashfunc_oids as _, _collations as _, _hash_exprs as _, _opstrict as _, _parent as _, _init_value as _, _keep_nulls as _) as _
 }
 pub unsafe fn ExecBuildGroupingEqual(
     _ldesc: TupleDesc,
@@ -601,7 +607,7 @@ pub unsafe fn ExecBuildGroupingEqual(
     _collations: *const Oid,
     _parent: *mut PlanState,
 ) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecBuildGroupingEqual(_ldesc as _, _rdesc as _, _lops as _, _rops as _, _numCols as _, _keyColIdx as _, _eqfunctions as _, _collations as _, _parent as _) as _
 }
 pub unsafe fn ExecBuildParamSetEqual(
     _desc: TupleDesc,
@@ -612,7 +618,7 @@ pub unsafe fn ExecBuildParamSetEqual(
     _param_exprs: *const List,
     _parent: *mut PlanState,
 ) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecBuildParamSetEqual(_desc as _, _lops as _, _rops as _, _eqfunctions as _, _collations as _, _param_exprs as _, _parent as _) as _
 }
 pub unsafe fn ExecBuildProjectionInfo(
     _targetList: *mut List,
@@ -621,7 +627,7 @@ pub unsafe fn ExecBuildProjectionInfo(
     _parent: *mut PlanState,
     _inputDesc: TupleDesc,
 ) -> *mut ProjectionInfo {
-    unimplemented!()
+    crate::executor::execExpr::ExecBuildProjectionInfo(_targetList as _, _econtext as _, _slot as _, _parent as _, _inputDesc as _) as _
 }
 pub unsafe fn ExecBuildUpdateProjection(
     _targetList: *mut List,
@@ -632,19 +638,19 @@ pub unsafe fn ExecBuildUpdateProjection(
     _slot: *mut TupleTableSlot,
     _parent: *mut PlanState,
 ) -> *mut ProjectionInfo {
-    unimplemented!()
+    crate::executor::execExpr::ExecBuildUpdateProjection(_targetList as _, _evalTargetList as _, _targetColnos as _, _relDesc as _, _econtext as _, _slot as _, _parent as _) as _
 }
 pub unsafe fn ExecPrepareExpr(_node: *mut Expr, _estate: *mut EState) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecPrepareExpr(_node as _, _estate as _) as _
 }
 pub unsafe fn ExecPrepareQual(_qual: *mut List, _estate: *mut EState) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecPrepareQual(_qual as _, _estate as _) as _
 }
 pub unsafe fn ExecPrepareCheck(_qual: *mut List, _estate: *mut EState) -> *mut ExprState {
-    unimplemented!()
+    crate::executor::execExpr::ExecPrepareCheck(_qual as _, _estate as _) as _
 }
 pub unsafe fn ExecPrepareExprList(_nodes: *mut List, _estate: *mut EState) -> *mut List {
-    unimplemented!()
+    crate::executor::execExpr::ExecPrepareExprList(_nodes as _, _estate as _) as _
 }
 
 /*
@@ -654,6 +660,7 @@ pub unsafe fn ExecPrepareExprList(_nodes: *mut List, _estate: *mut EState) -> *m
  * "econtext".
  */
 #[inline]
+#[no_mangle]
 pub unsafe fn ExecEvalExpr(
     state: *mut ExprState,
     econtext: *mut ExprContext,
@@ -785,7 +792,7 @@ pub unsafe fn ExecQualAndReset(state: *mut ExprState, econtext: *mut ExprContext
 }
 
 pub unsafe fn ExecCheck(_state: *mut ExprState, _econtext: *mut ExprContext) -> bool {
-    unimplemented!()
+    crate::executor::execExpr::ExecCheck(_state as _, _econtext as _) as _
 }
 
 /*
@@ -796,7 +803,7 @@ pub unsafe fn ExecInitTableFunctionResult(
     _econtext: *mut ExprContext,
     _parent: *mut PlanState,
 ) -> *mut SetExprState {
-    unimplemented!()
+    crate::executor::execSRF::ExecInitTableFunctionResult(_expr as _, _econtext as _, _parent as _) as _
 }
 pub unsafe fn ExecMakeTableFunctionResult(
     _setexpr: *mut SetExprState,
@@ -805,14 +812,14 @@ pub unsafe fn ExecMakeTableFunctionResult(
     _expectedDesc: TupleDesc,
     _randomAccess: bool,
 ) -> *mut Tuplestorestate {
-    unimplemented!()
+    crate::executor::execSRF::ExecMakeTableFunctionResult(_setexpr as _, _econtext as _, _argContext as _, _expectedDesc as _, _randomAccess as _) as _
 }
 pub unsafe fn ExecInitFunctionResultSet(
     _expr: *mut Expr,
     _econtext: *mut ExprContext,
     _parent: *mut PlanState,
 ) -> *mut SetExprState {
-    unimplemented!()
+    crate::executor::execSRF::ExecInitFunctionResultSet(_expr as _, _econtext as _, _parent as _) as _
 }
 pub unsafe fn ExecMakeFunctionResultSet(
     _fcache: *mut SetExprState,
@@ -821,7 +828,7 @@ pub unsafe fn ExecMakeFunctionResultSet(
     _isNull: *mut bool,
     _isDone: *mut ExprDoneCond,
 ) -> Datum {
-    unimplemented!()
+    crate::executor::execSRF::ExecMakeFunctionResultSet(_fcache as _, _econtext as _, _argContext as _, _isNull as _, _isDone as _) as _
 }
 
 /*
@@ -833,39 +840,43 @@ pub type ExecScanRecheckMtd =
     Option<unsafe fn(node: *mut ScanState, slot: *mut TupleTableSlot) -> bool>;
 
 pub unsafe fn ExecScan(
-    _node: *mut ScanState,
-    _accessMtd: ExecScanAccessMtd,
-    _recheckMtd: ExecScanRecheckMtd,
+    node: *mut ScanState,
+    accessMtd: ExecScanAccessMtd,
+    recheckMtd: ExecScanRecheckMtd,
 ) -> *mut TupleTableSlot {
-    unimplemented!()
+    crate::executor::execScan::ExecScan(
+        node as _,
+        core::mem::transmute(accessMtd),
+        core::mem::transmute(recheckMtd),
+    )
 }
 pub unsafe fn ExecAssignScanProjectionInfo(_node: *mut ScanState) {
-    unimplemented!()
+    crate::executor::execScan::ExecAssignScanProjectionInfo(_node as _)
 }
 pub unsafe fn ExecAssignScanProjectionInfoWithVarno(_node: *mut ScanState, _varno: c_int) {
-    unimplemented!()
+    crate::executor::execScan::ExecAssignScanProjectionInfoWithVarno(_node as _, _varno as _)
 }
 pub unsafe fn ExecScanReScan(_node: *mut ScanState) {
-    unimplemented!()
+    crate::executor::execScan::ExecScanReScan(_node as _)
 }
 
 /*
  * prototypes from functions in execTuples.c
  */
 pub unsafe fn ExecInitResultTypeTL(_planstate: *mut PlanState) {
-    unimplemented!()
+    crate::executor::execTuples::ExecInitResultTypeTL(_planstate as _)
 }
 pub unsafe fn ExecInitResultSlot(
     _planstate: *mut PlanState,
     _tts_ops: *const TupleTableSlotOps,
 ) {
-    unimplemented!()
+    crate::executor::execTuples::ExecInitResultSlot(_planstate as _, _tts_ops as _)
 }
 pub unsafe fn ExecInitResultTupleSlotTL(
     _planstate: *mut PlanState,
     _tts_ops: *const TupleTableSlotOps,
 ) {
-    unimplemented!()
+    crate::executor::execTuples::ExecInitResultTupleSlotTL(_planstate as _, _tts_ops as _)
 }
 pub unsafe fn ExecInitScanTupleSlot(
     _estate: *mut EState,
@@ -873,33 +884,34 @@ pub unsafe fn ExecInitScanTupleSlot(
     _tupledesc: TupleDesc,
     _tts_ops: *const TupleTableSlotOps,
 ) {
-    unimplemented!()
+    crate::executor::execTuples::ExecInitScanTupleSlot(_estate as _, _scanstate as _, _tupledesc as _, _tts_ops as _)
 }
+#[no_mangle]
 pub unsafe fn ExecInitExtraTupleSlot(
     _estate: *mut EState,
     _tupledesc: TupleDesc,
     _tts_ops: *const TupleTableSlotOps,
 ) -> *mut TupleTableSlot {
-    unimplemented!()
+    crate::executor::execTuples::ExecInitExtraTupleSlot(_estate as _, _tupledesc as _, _tts_ops as _) as _
 }
 pub unsafe fn ExecInitNullTupleSlot(
     _estate: *mut EState,
     _tupType: TupleDesc,
     _tts_ops: *const TupleTableSlotOps,
 ) -> *mut TupleTableSlot {
-    unimplemented!()
+    crate::executor::execTuples::ExecInitNullTupleSlot(_estate as _, _tupType as _, _tts_ops as _) as _
 }
 pub unsafe fn ExecTypeFromTL(_targetList: *mut List) -> TupleDesc {
-    unimplemented!()
+    crate::executor::execTuples::ExecTypeFromTL(_targetList as _) as _
 }
 pub unsafe fn ExecCleanTypeFromTL(_targetList: *mut List) -> TupleDesc {
-    unimplemented!()
+    crate::executor::execTuples::ExecCleanTypeFromTL(_targetList as _) as _
 }
 pub unsafe fn ExecTypeFromExprList(_exprList: *mut List) -> TupleDesc {
-    unimplemented!()
+    crate::executor::execTuples::ExecTypeFromExprList(_exprList as _) as _
 }
 pub unsafe fn ExecTypeSetColNames(_typeInfo: TupleDesc, _namesList: *mut List) {
-    unimplemented!()
+    crate::executor::execTuples::ExecTypeSetColNames(_typeInfo as _, _namesList as _)
 }
 pub unsafe fn UpdateChangedParamSet(_node: *mut PlanState, _newchg: *mut Bitmapset) {
     unimplemented!()
@@ -916,20 +928,20 @@ pub unsafe fn begin_tup_output_tupdesc(
     _tupdesc: TupleDesc,
     _tts_ops: *const TupleTableSlotOps,
 ) -> *mut TupOutputState {
-    unimplemented!()
+    crate::executor::execTuples::begin_tup_output_tupdesc(_dest as _, _tupdesc as _, _tts_ops as _) as _
 }
 pub unsafe fn do_tup_output(
     _tstate: *mut TupOutputState,
     _values: *const Datum,
     _isnull: *const bool,
 ) {
-    unimplemented!()
+    crate::executor::execTuples::do_tup_output(_tstate as _, _values as _, _isnull as _)
 }
 pub unsafe fn do_text_output_multiline(_tstate: *mut TupOutputState, _txt: *const c_char) {
-    unimplemented!()
+    crate::executor::execTuples::do_text_output_multiline(_tstate as _, _txt as _)
 }
 pub unsafe fn end_tup_output(_tstate: *mut TupOutputState) {
-    unimplemented!()
+    crate::executor::execTuples::end_tup_output(_tstate as _)
 }
 
 /*
@@ -951,25 +963,25 @@ pub unsafe fn do_text_output_oneline(tstate: *mut TupOutputState, str_to_emit: *
  * prototypes from functions in execUtils.c
  */
 pub unsafe fn CreateExecutorState() -> *mut EState {
-    unimplemented!()
+    crate::executor::execUtils::CreateExecutorState() as _
 }
 pub unsafe fn FreeExecutorState(_estate: *mut EState) {
-    unimplemented!()
+    crate::executor::execUtils::FreeExecutorState(_estate as _)
 }
 pub unsafe fn CreateExprContext(_estate: *mut EState) -> *mut ExprContext {
-    unimplemented!()
+    crate::executor::execUtils::CreateExprContext(_estate as _) as _
 }
 pub unsafe fn CreateWorkExprContext(_estate: *mut EState) -> *mut ExprContext {
-    unimplemented!()
+    crate::executor::execUtils::CreateWorkExprContext(_estate as _) as _
 }
 pub unsafe fn CreateStandaloneExprContext() -> *mut ExprContext {
-    unimplemented!()
+    crate::executor::execUtils::CreateStandaloneExprContext() as _
 }
 pub unsafe fn FreeExprContext(_econtext: *mut ExprContext, _isCommit: bool) {
-    unimplemented!()
+    crate::executor::execUtils::FreeExprContext(_econtext as _, _isCommit as _)
 }
 pub unsafe fn ReScanExprContext(_econtext: *mut ExprContext) {
-    unimplemented!()
+    crate::executor::execUtils::ReScanExprContext(_econtext as _)
 }
 
 /* #define ResetExprContext(econtext)
@@ -980,7 +992,7 @@ pub unsafe fn ResetExprContext(econtext: *mut ExprContext) {
 }
 
 pub unsafe fn MakePerTupleExprContext(_estate: *mut EState) -> *mut ExprContext {
-    unimplemented!()
+    crate::executor::execUtils::MakePerTupleExprContext(_estate as _) as _
 }
 
 /* Get an EState's per-output-tuple exprcontext, making it if first use */
@@ -1006,50 +1018,50 @@ pub unsafe fn ResetPerTupleExprContext(estate: *mut EState) {
     }
 }
 
-pub unsafe fn ExecAssignExprContext(_estate: *mut EState, _planstate: *mut PlanState) {
-    unimplemented!()
+pub unsafe fn ExecAssignExprContext(estate: *mut EState, planstate: *mut PlanState) {
+    crate::executor::execUtils::ExecAssignExprContext(estate, planstate)
 }
-pub unsafe fn ExecGetResultType(_planstate: *mut PlanState) -> TupleDesc {
-    unimplemented!()
+pub unsafe fn ExecGetResultType(planstate: *mut PlanState) -> TupleDesc {
+    crate::executor::execUtils::ExecGetResultType(planstate)
 }
 pub unsafe fn ExecGetResultSlotOps(
-    _planstate: *mut PlanState,
-    _isfixed: *mut bool,
+    planstate: *mut PlanState,
+    isfixed: *mut bool,
 ) -> *const TupleTableSlotOps {
-    unimplemented!()
+    crate::executor::execUtils::ExecGetResultSlotOps(planstate as _, isfixed) as _
 }
 pub unsafe fn ExecGetCommonSlotOps(
-    _planstates: *mut *mut PlanState,
-    _nplans: c_int,
+    planstates: *mut *mut PlanState,
+    nplans: c_int,
 ) -> *const TupleTableSlotOps {
-    unimplemented!()
+    crate::executor::execUtils::ExecGetCommonSlotOps(planstates as _, nplans) as _
 }
-pub unsafe fn ExecGetCommonChildSlotOps(_ps: *mut PlanState) -> *const TupleTableSlotOps {
-    unimplemented!()
+pub unsafe fn ExecGetCommonChildSlotOps(ps: *mut PlanState) -> *const TupleTableSlotOps {
+    crate::executor::execUtils::ExecGetCommonChildSlotOps(ps as _) as _
 }
-pub unsafe fn ExecAssignProjectionInfo(_planstate: *mut PlanState, _inputDesc: TupleDesc) {
-    unimplemented!()
+pub unsafe fn ExecAssignProjectionInfo(planstate: *mut PlanState, inputDesc: TupleDesc) {
+    crate::executor::execUtils::ExecAssignProjectionInfo(planstate, inputDesc)
 }
 pub unsafe fn ExecConditionalAssignProjectionInfo(
-    _planstate: *mut PlanState,
-    _inputDesc: TupleDesc,
-    _varno: c_int,
+    planstate: *mut PlanState,
+    inputDesc: TupleDesc,
+    varno: c_int,
 ) {
-    unimplemented!()
+    crate::executor::execUtils::ExecConditionalAssignProjectionInfo(planstate, inputDesc, varno)
 }
-pub unsafe fn ExecAssignScanType(_scanstate: *mut ScanState, _tupDesc: TupleDesc) {
-    unimplemented!()
+pub unsafe fn ExecAssignScanType(scanstate: *mut ScanState, tupDesc: TupleDesc) {
+    crate::executor::execUtils::ExecAssignScanType(scanstate as _, tupDesc)
 }
 pub unsafe fn ExecCreateScanSlotFromOuterPlan(
-    _estate: *mut EState,
-    _scanstate: *mut ScanState,
-    _tts_ops: *const TupleTableSlotOps,
+    estate: *mut EState,
+    scanstate: *mut ScanState,
+    tts_ops: *const TupleTableSlotOps,
 ) {
-    unimplemented!()
+    crate::executor::execUtils::ExecCreateScanSlotFromOuterPlan(estate as _, scanstate as _, tts_ops as _)
 }
 
 pub unsafe fn ExecRelationIsTargetRelation(_estate: *mut EState, _scanrelid: Index) -> bool {
-    unimplemented!()
+    crate::executor::execUtils::ExecRelationIsTargetRelation(_estate as _, _scanrelid as _)
 }
 
 pub unsafe fn ExecOpenScanRelation(
@@ -1057,7 +1069,8 @@ pub unsafe fn ExecOpenScanRelation(
     _scanrelid: Index,
     _eflags: c_int,
 ) -> Relation {
-    unimplemented!()
+    crate::executor::execUtils::ExecOpenScanRelation(_estate as _, _scanrelid as _, _eflags as _)
+        as _
 }
 
 pub unsafe fn ExecInitRangeTable(
@@ -1066,13 +1079,18 @@ pub unsafe fn ExecInitRangeTable(
     _permInfos: *mut List,
     _unpruned_relids: *mut Bitmapset,
 ) {
-    unimplemented!()
+    crate::executor::execUtils::ExecInitRangeTable(
+        _estate as _,
+        _rangeTable as _,
+        _permInfos as _,
+        _unpruned_relids as _,
+    )
 }
 pub unsafe fn ExecCloseRangeTableRelations(_estate: *mut EState) {
-    unimplemented!()
+    crate::executor::execMain::ExecCloseRangeTableRelations(_estate as _)
 }
 pub unsafe fn ExecCloseResultRelations(_estate: *mut EState) {
-    unimplemented!()
+    crate::executor::execMain::ExecCloseResultRelations(_estate as _)
 }
 
 #[inline]
@@ -1085,18 +1103,23 @@ pub unsafe fn ExecGetRangeTableRelation(
     _rti: Index,
     _isResultRel: bool,
 ) -> Relation {
-    unimplemented!()
+    crate::executor::execUtils::ExecGetRangeTableRelation(_estate as _, _rti as _, _isResultRel)
+        as _
 }
 pub unsafe fn ExecInitResultRelation(
     _estate: *mut EState,
     _resultRelInfo: *mut ResultRelInfo,
     _rti: Index,
 ) {
-    unimplemented!()
+    crate::executor::execUtils::ExecInitResultRelation(
+        _estate as _,
+        _resultRelInfo as _,
+        _rti as _,
+    )
 }
 
 pub unsafe fn executor_errposition(_estate: *mut EState, _location: c_int) -> c_int {
-    unimplemented!()
+    crate::executor::execUtils::executor_errposition(_estate as _, _location as _) as _
 }
 
 pub unsafe fn RegisterExprContextCallback(
@@ -1114,6 +1137,7 @@ pub unsafe fn UnregisterExprContextCallback(
     unimplemented!()
 }
 
+#[no_mangle]
 pub unsafe fn GetAttributeByName(
     _tuple: HeapTupleHeader,
     _attname: *const c_char,
@@ -1130,7 +1154,7 @@ pub unsafe fn GetAttributeByNum(
 }
 
 pub unsafe fn ExecTargetListLength(_targetlist: *mut List) -> c_int {
-    unimplemented!()
+    crate::executor::execUtils::ExecTargetListLength(_targetlist as _) as _
 }
 pub unsafe fn ExecCleanTargetListLength(_targetlist: *mut List) -> c_int {
     unimplemented!()
@@ -1206,11 +1230,13 @@ pub unsafe fn ExecGetAllUpdatedCols(
 /*
  * prototypes from functions in execIndexing.c
  */
+#[no_mangle]
 pub unsafe fn ExecOpenIndices(_resultRelInfo: *mut ResultRelInfo, _speculative: bool) {
-    unimplemented!()
+    crate::executor::execIndexing::ExecOpenIndices(_resultRelInfo as _, _speculative as _)
 }
+#[no_mangle]
 pub unsafe fn ExecCloseIndices(_resultRelInfo: *mut ResultRelInfo) {
-    unimplemented!()
+    crate::executor::execIndexing::ExecCloseIndices(_resultRelInfo as _)
 }
 pub unsafe fn ExecInsertIndexTuples(
     _resultRelInfo: *mut ResultRelInfo,
@@ -1222,7 +1248,7 @@ pub unsafe fn ExecInsertIndexTuples(
     _arbiterIndexes: *mut List,
     _onlySummarizing: bool,
 ) -> *mut List {
-    unimplemented!()
+    crate::executor::execIndexing::ExecInsertIndexTuples(_resultRelInfo as _, _slot as _, _estate as _, _update as _, _noDupErr as _, _specConflict as _, _arbiterIndexes as _, _onlySummarizing as _) as _
 }
 pub unsafe fn ExecCheckIndexConstraints(
     _resultRelInfo: *mut ResultRelInfo,
@@ -1232,7 +1258,7 @@ pub unsafe fn ExecCheckIndexConstraints(
     _tupleid: ItemPointer,
     _arbiterIndexes: *mut List,
 ) -> bool {
-    unimplemented!()
+    crate::executor::execIndexing::ExecCheckIndexConstraints(_resultRelInfo as _, _slot as _, _estate as _, _conflictTid as _, _tupleid as _, _arbiterIndexes as _) as _
 }
 pub unsafe fn check_exclusion_constraint(
     _heap: Relation,
@@ -1244,7 +1270,7 @@ pub unsafe fn check_exclusion_constraint(
     _estate: *mut EState,
     _newIndex: bool,
 ) {
-    unimplemented!()
+    crate::executor::execIndexing::check_exclusion_constraint(_heap as _, _index as _, _indexInfo as _, _tupleid as _, _values as _, _isnull as _, _estate as _, _newIndex as _)
 }
 
 /*
@@ -1273,7 +1299,7 @@ pub unsafe fn ExecSimpleRelationInsert(
     _estate: *mut EState,
     _slot: *mut TupleTableSlot,
 ) {
-    unimplemented!()
+    crate::executor::execReplication::ExecSimpleRelationInsert(_resultRelInfo as _, _estate as _, _slot as _)
 }
 pub unsafe fn ExecSimpleRelationUpdate(
     _resultRelInfo: *mut ResultRelInfo,
@@ -1282,7 +1308,7 @@ pub unsafe fn ExecSimpleRelationUpdate(
     _searchslot: *mut TupleTableSlot,
     _slot: *mut TupleTableSlot,
 ) {
-    unimplemented!()
+    crate::executor::execReplication::ExecSimpleRelationUpdate(_resultRelInfo as _, _estate as _, _epqstate as _, _searchslot as _, _slot as _)
 }
 pub unsafe fn ExecSimpleRelationDelete(
     _resultRelInfo: *mut ResultRelInfo,
@@ -1290,7 +1316,7 @@ pub unsafe fn ExecSimpleRelationDelete(
     _epqstate: *mut EPQState,
     _searchslot: *mut TupleTableSlot,
 ) {
-    unimplemented!()
+    crate::executor::execReplication::ExecSimpleRelationDelete(_resultRelInfo as _, _estate as _, _epqstate as _, _searchslot as _)
 }
 pub unsafe fn CheckCmdReplicaIdentity(_rel: Relation, _cmd: CmdType) {
     unimplemented!()
@@ -1301,7 +1327,7 @@ pub unsafe fn CheckSubscriptionRelkind(
     _nspname: *const c_char,
     _relname: *const c_char,
 ) {
-    unimplemented!()
+    crate::executor::execReplication::CheckSubscriptionRelkind(_relkind as _, _nspname as _, _relname as _)
 }
 
 /*

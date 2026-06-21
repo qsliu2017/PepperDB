@@ -28,7 +28,29 @@ macro_rules! PG_RETURN_JSONB_P {
 // extra local shims for jsonfuncs
 use crate::IsA;
 macro_rules! ereturn {
-    ($escontext:expr, $dummy:expr, $($arg:tt)*) => {{ let _ = &$escontext; $crate::ereport!(ERROR, $($arg)*); return $dummy; }};
+    ($escontext:expr, $dummy:expr, $($arg:tt)*) => {{
+        let __ctx = $escontext as *mut core::ffi::c_void;
+        if SOFT_ERROR_FLAG(__ctx) {
+            return $dummy;
+        }
+        $crate::ereport!(ERROR, $($arg)*);
+        #[allow(unreachable_code)]
+        return $dummy;
+    }};
+}
+
+/*
+ * SOFT_ERROR_FLAG: if `escontext` is a real ErrorSaveContext, record that a soft
+ * error occurred and return true; otherwise return false.
+ */
+#[inline]
+unsafe fn SOFT_ERROR_FLAG(escontext: *mut core::ffi::c_void) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    if !escontext.is_null() && *(escontext as *const c_int) == T_ErrorSaveContext {
+        (*(escontext as *mut crate::nodes::miscnodes::ErrorSaveContext)).error_occurred = true;
+        return true;
+    }
+    false
 }
 macro_rules! errcontext {
     ($($arg:tt)*) => {{ let _ = format!($($arg)*); }};
@@ -37,7 +59,12 @@ macro_rules! errcontext {
 const RECORDARRAYOID: Oid = 2287;
 // errsave(escontext, ...): soft-error shim -> ereport!(ERROR, ...) (the elog shim ignores escontext).
 macro_rules! errsave {
-    ($escontext:expr, $($arg:tt)*) => {{ let _ = &$escontext; $crate::ereport!(ERROR, $($arg)*); }};
+    ($escontext:expr, $($arg:tt)*) => {{
+        let __ctx = $escontext as *mut core::ffi::c_void;
+        if !SOFT_ERROR_FLAG(__ctx) {
+            $crate::ereport!(ERROR, $($arg)*);
+        }
+    }};
 }
 
 use std::ffi::{c_char, c_int, c_void};
@@ -203,9 +230,7 @@ unsafe fn SRF_RETURN_NEXT(_funcctx: *mut FuncCallContext, _result: Datum) -> Dat
 unsafe fn SRF_RETURN_DONE(_funcctx: *mut FuncCallContext) -> Datum {
     unimplemented!("SRF_RETURN_DONE (funcapi.h) not yet ported")
 }
-unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) {
-    unimplemented!("InitMaterializedSRF (funcapi.h) not yet ported")
-}
+unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) { crate::utils::fmgr::funcapi::InitMaterializedSRF(_fcinfo as _, _flags as _) }
 
 /* ---- generic helpers used throughout (TODO(pg-port): real homes vary) ---- */
 
@@ -246,9 +271,7 @@ unsafe fn AllocSetContextCreate(_parent: MemoryContext, _name: *const c_char, _f
     unimplemented!("AllocSetContextCreate not yet ported")
 }
 unsafe fn check_stack_depth() {}
-fn CurrentMemoryContext() -> MemoryContext {
-    unimplemented!("CurrentMemoryContext not yet ported")
-}
+fn CurrentMemoryContext() -> MemoryContext { unimplemented!() }
 const ALLOCSET_DEFAULT_SIZES: c_int = 0;
 fn work_mem() -> c_int {
     unimplemented!("work_mem (GUC) not yet ported")
@@ -265,9 +288,7 @@ pub struct StringInfoData {
 unsafe fn initStringInfo(_str: *mut StringInfoData) {
     unimplemented!("initStringInfo not yet ported")
 }
-unsafe fn makeStringInfo() -> *mut StringInfoData {
-    unimplemented!("makeStringInfo not yet ported")
-}
+unsafe fn makeStringInfo() -> *mut StringInfoData { crate::lib::stringinfo::makeStringInfo() as _ }
 unsafe fn appendStringInfoString(_str: *mut StringInfoData, _s: *const c_char) {
     unimplemented!("appendStringInfoString not yet ported")
 }
@@ -279,36 +300,26 @@ unsafe fn appendStringInfoChar(_str: *mut StringInfoData, _ch: c_char) {
 unsafe fn hash_create(_name: *const c_char, _nelem: c_long, _ctl: *mut HASHCTL, _flags: c_int) -> *mut HTAB {
     unimplemented!("hash_create not yet ported")
 }
-unsafe fn hash_destroy(_tab: *mut HTAB) {
-    unimplemented!("hash_destroy not yet ported")
-}
+unsafe fn hash_destroy(_tab: *mut HTAB) { crate::utils::hash::dynahash::hash_destroy(_tab as _) }
 unsafe fn hash_search(_tab: *mut HTAB, _key: *const c_void, _action: c_int, _found: *mut bool) -> *mut c_void {
     unimplemented!("hash_search not yet ported")
 }
-unsafe fn hash_get_num_entries(_tab: *mut HTAB) -> c_long {
-    unimplemented!("hash_get_num_entries not yet ported")
-}
+unsafe fn hash_get_num_entries(_tab: *mut HTAB) -> c_long { crate::utils::hash::dynahash::hash_get_num_entries(_tab as _) as _ }
 type c_long = i64;
 
 /* tuple / array / type helpers - TODO(pg-port): assorted homes */
-unsafe fn heap_form_tuple(_tupdesc: TupleDesc, _values: *mut Datum, _isnull: *mut bool) -> HeapTuple {
-    unimplemented!("heap_form_tuple not yet ported")
-}
+unsafe fn heap_form_tuple(_tupdesc: TupleDesc, _values: *mut Datum, _isnull: *mut bool) -> HeapTuple { crate::parser_link_shims::heap_form_tuple(_tupdesc as _, _values as _, _isnull as _) as _ }
 unsafe fn heap_deform_tuple(_tuple: *mut HeapTupleData, _tupdesc: TupleDesc, _values: *mut Datum, _isnull: *mut bool) {
     unimplemented!("heap_deform_tuple not yet ported")
 }
 unsafe fn tuplestore_putvalues(_state: *mut Tuplestorestate, _tdesc: TupleDesc, _values: *mut Datum, _isnull: *mut bool) {
     unimplemented!("tuplestore_putvalues not yet ported")
 }
-unsafe fn tuplestore_puttuple(_state: *mut Tuplestorestate, _tuple: *mut HeapTupleData) {
-    unimplemented!("tuplestore_puttuple not yet ported")
-}
+unsafe fn tuplestore_puttuple(_state: *mut Tuplestorestate, _tuple: *mut HeapTupleData) { crate::utils::sort::tuplestore::tuplestore_puttuple(_state as _, _tuple as _) }
 unsafe fn tuplestore_begin_heap(_randomAccess: bool, _interXact: bool, _maxKBytes: c_int) -> *mut Tuplestorestate {
     unimplemented!("tuplestore_begin_heap not yet ported")
 }
-unsafe fn array_contains_nulls(_array: *mut ArrayType) -> bool {
-    unimplemented!("array_contains_nulls not yet ported")
-}
+unsafe fn array_contains_nulls(_array: *mut ArrayType) -> bool { crate::utils::adt::arrayfuncs::array_contains_nulls(_array as _) }
 unsafe fn deconstruct_array_builtin(_array: *mut ArrayType, _elmtype: Oid, _elemsp: *mut *mut Datum, _nullsp: *mut *mut bool, _nelemsp: *mut c_int) {
     unimplemented!("deconstruct_array_builtin not yet ported")
 }
@@ -323,52 +334,28 @@ unsafe fn makeMdArrayResult(_astate: ArrayBuildState, _ndims: c_int, _dims: *mut
 }
 
 /* type cache / syscache - TODO(pg-port): utils/cache homes */
-unsafe fn lookup_rowtype_tupdesc(_type_id: Oid, _typmod: int32) -> TupleDesc {
-    unimplemented!("lookup_rowtype_tupdesc not yet ported")
-}
-unsafe fn CreateTupleDescCopy(_tupdesc: TupleDesc) -> TupleDesc {
-    unimplemented!("CreateTupleDescCopy not yet ported")
-}
-unsafe fn FreeTupleDesc(_tupdesc: TupleDesc) {
-    unimplemented!("FreeTupleDesc not yet ported")
-}
-unsafe fn ReleaseTupleDesc(_tupdesc: TupleDesc) {
-    unimplemented!("ReleaseTupleDesc not yet ported")
-}
+unsafe fn lookup_rowtype_tupdesc(_type_id: Oid, _typmod: int32) -> TupleDesc { crate::utils::cache::typcache::lookup_rowtype_tupdesc(_type_id as _, _typmod as _) as _ }
+unsafe fn CreateTupleDescCopy(_tupdesc: TupleDesc) -> TupleDesc { crate::access::common::tupdesc::CreateTupleDescCopy(_tupdesc as _) as _ }
+unsafe fn FreeTupleDesc(_tupdesc: TupleDesc) { crate::access::common::tupdesc::FreeTupleDesc(_tupdesc as _) }
+unsafe fn ReleaseTupleDesc(_tupdesc: TupleDesc) { crate::access::common::tupdesc::ReleaseTupleDesc(_tupdesc as _) }
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
     unimplemented!("SearchSysCache1 not yet ported")
 }
 unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
     unimplemented!("ReleaseSysCache not yet ported")
 }
-const TYPEOID: c_int = 0;
-unsafe fn getBaseType(_typid: Oid) -> Oid {
-    unimplemented!("getBaseType not yet ported")
-}
-unsafe fn getBaseTypeAndTypmod(_typid: Oid, _typmod: *mut int32) -> Oid {
-    unimplemented!("getBaseTypeAndTypmod not yet ported")
-}
-unsafe fn get_typtype(_typid: Oid) -> c_char {
-    unimplemented!("get_typtype not yet ported")
-}
-unsafe fn get_element_type(_typid: Oid) -> Oid {
-    unimplemented!("get_element_type not yet ported")
-}
-unsafe fn type_is_rowtype(_typid: Oid) -> bool {
-    unimplemented!("type_is_rowtype not yet ported")
-}
-unsafe fn getTypeInputInfo(_type: Oid, _typInput: *mut Oid, _typIOParam: *mut Oid) {
-    unimplemented!("getTypeInputInfo not yet ported")
-}
-unsafe fn getTypeOutputInfo(_type: Oid, _typOutput: *mut Oid, _typIsVarlena: *mut bool) {
-    unimplemented!("getTypeOutputInfo not yet ported")
-}
+const TYPEOID: c_int = 82;
+unsafe fn getBaseType(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::getBaseType(_typid as _) as _ }
+unsafe fn getBaseTypeAndTypmod(_typid: Oid, _typmod: *mut int32) -> Oid { crate::utils::cache::lsyscache::getBaseTypeAndTypmod(_typid as _, _typmod as _) as _ }
+unsafe fn get_typtype(_typid: Oid) -> c_char { crate::utils::cache::lsyscache::get_typtype(_typid as _) as _ }
+unsafe fn get_element_type(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_element_type(_typid as _) as _ }
+unsafe fn type_is_rowtype(_typid: Oid) -> bool { crate::utils::cache::lsyscache::type_is_rowtype(_typid as _) }
+unsafe fn getTypeInputInfo(_type: Oid, _typInput: *mut Oid, _typIOParam: *mut Oid) { crate::utils::cache::lsyscache::getTypeInputInfo(_type as _, _typInput as _, _typIOParam as _) }
+unsafe fn getTypeOutputInfo(_type: Oid, _typOutput: *mut Oid, _typIsVarlena: *mut bool) { crate::utils::cache::lsyscache::getTypeOutputInfo(_type as _, _typOutput as _, _typIsVarlena as _) }
 unsafe fn find_coercion_pathway(_targetTypeId: Oid, _sourceTypeId: Oid, _ccontext: c_int, _funcid: *mut Oid) -> CoercionPathType {
     unimplemented!("find_coercion_pathway not yet ported")
 }
-unsafe fn fmgr_info_cxt(_functionId: Oid, _finfo: *mut FmgrInfo, _mcxt: MemoryContext) {
-    unimplemented!("fmgr_info_cxt not yet ported")
-}
+unsafe fn fmgr_info_cxt(_functionId: Oid, _finfo: *mut FmgrInfo, _mcxt: MemoryContext) { crate::utils::fmgr::fmgr_info_cxt(_functionId as _, _finfo as _, _mcxt as _) }
 unsafe fn InputFunctionCallSafe(_flinfo: *mut FmgrInfo, _str: *mut c_char, _typioparam: Oid, _typmod: int32, _escontext: Node, _result: *mut Datum) -> bool {
     unimplemented!("InputFunctionCallSafe not yet ported")
 }
@@ -387,9 +374,7 @@ unsafe fn JsonbToCString(_out: *mut StringInfoData, _in: *mut JsonbContainer, _e
 unsafe fn JsonbToCStringIndent(_out: *mut StringInfoData, _in: *mut JsonbContainer, _estimated_len: c_int) -> *mut c_char {
     unimplemented!("JsonbToCStringIndent not yet ported")
 }
-unsafe fn JsonbUnquote(_jb: *mut Jsonb) -> *mut c_char {
-    unimplemented!("JsonbUnquote not yet ported")
-}
+unsafe fn JsonbUnquote(_jb: *mut Jsonb) -> *mut c_char { unimplemented!() }
 
 /* misc */
 unsafe fn GetDatabaseEncoding() -> c_int {
@@ -401,18 +386,10 @@ unsafe fn pg_mblen_range(_start: *const c_char, _end: *const c_char) -> c_int {
 unsafe fn pg_detoast_datum_packed(_datum: *mut c_void) -> *mut c_void {
     unimplemented!("pg_detoast_datum_packed not yet ported")
 }
-unsafe fn strtoint(_str: *const c_char, _endptr: *mut *mut c_char, _base: c_int) -> c_int {
-    unimplemented!("strtoint not yet ported")
-}
-unsafe fn pg_strncasecmp(_s1: *const c_char, _s2: *const c_char, _n: usize) -> c_int {
-    unimplemented!("pg_strncasecmp not yet ported")
-}
-unsafe fn pg_abs_s32(_a: int32) -> uint32 {
-    unimplemented!("pg_abs_s32 not yet ported")
-}
-unsafe fn get_fn_expr_argtype(_flinfo: *mut FmgrInfo, _argnum: c_int) -> Oid {
-    unimplemented!("get_fn_expr_argtype not yet ported")
-}
+unsafe fn strtoint(_str: *const c_char, _endptr: *mut *mut c_char, _base: c_int) -> c_int { crate::common::string::strtoint(_str as _, _endptr as _, _base as _) as _ }
+unsafe fn pg_strncasecmp(_s1: *const c_char, _s2: *const c_char, _n: usize) -> c_int { crate::port::pgstrcasecmp::pg_strncasecmp(_s1 as _, _s2 as _, _n as _) as _ }
+unsafe fn pg_abs_s32(_a: int32) -> uint32 { crate::common::int::pg_abs_s32(_a as _) as _ }
+unsafe fn get_fn_expr_argtype(_flinfo: *mut FmgrInfo, _argnum: c_int) -> Oid { crate::utils::fmgr::get_fn_expr_argtype(_flinfo as _, _argnum as _) as _ }
 unsafe fn get_call_result_type(_fcinfo: FunctionCallInfo, _resultTypeId: *mut Oid, _resultTupleDesc: *mut TupleDesc) -> TypeFuncClass {
     unimplemented!("get_call_result_type not yet ported")
 }
@@ -451,15 +428,9 @@ unsafe fn PG_NARGS(_fcinfo: FunctionCallInfo) -> c_int {
 }
 
 /* VARDATA_ANY / VARSIZE_ANY_EXHDR / VARSIZE - TODO(pg-port): postgres.h varlena */
-unsafe fn VARDATA_ANY(_ptr: *mut c_void) -> *mut c_char {
-    unimplemented!("VARDATA_ANY not yet ported")
-}
-unsafe fn VARSIZE_ANY_EXHDR(_ptr: *mut c_void) -> c_int {
-    unimplemented!("VARSIZE_ANY_EXHDR not yet ported")
-}
-unsafe fn VARSIZE(_ptr: *mut c_void) -> c_int {
-    unimplemented!("VARSIZE not yet ported")
-}
+unsafe fn VARDATA_ANY(_ptr: *mut c_void) -> *mut c_char { crate::varatt::VARDATA_ANY(_ptr as _) as _ }
+unsafe fn VARSIZE_ANY_EXHDR(_ptr: *mut c_void) -> c_int { crate::varatt::VARSIZE_ANY_EXHDR(_ptr as _) as _ }
+unsafe fn VARSIZE(_ptr: *mut c_void) -> c_int { crate::varatt::VARSIZE(_ptr as _) as _ }
 
 /* Datum conversion macros - TODO(pg-port): postgres.h */
 unsafe fn PointerGetDatum(_p: *const c_void) -> Datum {
@@ -474,9 +445,7 @@ unsafe fn CStringGetTextDatum(_s: *const c_char) -> Datum {
 unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char {
     unimplemented!("TextDatumGetCString not yet ported")
 }
-unsafe fn DatumGetCString(_d: Datum) -> *mut c_char {
-    unimplemented!("DatumGetCString not yet ported")
-}
+unsafe fn DatumGetCString(_d: Datum) -> *mut c_char { crate::postgres::DatumGetCString(_d as _) as _ }
 unsafe fn CStringGetDatum(_s: *const c_char) -> Datum {
     unimplemented!("CStringGetDatum not yet ported")
 }
@@ -495,9 +464,7 @@ unsafe fn ObjectIdGetDatum(_oid: Oid) -> Datum {
 unsafe fn BoolGetDatum(_b: bool) -> Datum {
     unimplemented!("BoolGetDatum not yet ported")
 }
-unsafe fn HeapTupleHeaderGetDatum(_tuple: HeapTupleHeader) -> Datum {
-    unimplemented!("HeapTupleHeaderGetDatum not yet ported")
-}
+unsafe fn HeapTupleHeaderGetDatum(_tuple: HeapTupleHeader) -> Datum { crate::executor::execTuples::HeapTupleHeaderGetDatum(_tuple as _) as _ }
 unsafe fn DatumGetHeapTupleHeader(_d: Datum) -> HeapTupleHeader {
     unimplemented!("DatumGetHeapTupleHeader not yet ported")
 }
@@ -841,8 +808,11 @@ unsafe fn JB_ROOT_IS_ARRAY(jbp: *mut Jsonb) -> bool {
 unsafe fn pg_parse_json_or_ereport(_lex: *mut JsonLexContext, _sem: *mut JsonSemAction) {
     unimplemented!("pg_parse_json_or_ereport (common/jsonapi.c) not yet ported")
 }
-unsafe fn SOFT_ERROR_OCCURRED(_escontext: Node) -> bool {
-    unimplemented!("SOFT_ERROR_OCCURRED (nodes/miscnodes.h) not yet ported")
+unsafe fn SOFT_ERROR_OCCURRED(escontext: Node) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    !escontext.is_null()
+        && *(escontext as *const c_int) == T_ErrorSaveContext
+        && (*(escontext as *const crate::nodes::miscnodes::ErrorSaveContext)).error_occurred
 }
 
 /*
@@ -3543,9 +3513,7 @@ unsafe fn pgtype_typtype(_type: Form_pg_type) -> c_char {
 unsafe fn pgtype_typelem(_type: Form_pg_type) -> Oid {
     unimplemented!("Form_pg_type.typelem not yet ported")
 }
-unsafe fn IsTrueArrayType(_type: Form_pg_type) -> bool {
-    unimplemented!("IsTrueArrayType not yet ported")
-}
+unsafe fn IsTrueArrayType(_type: Form_pg_type) -> bool { crate::utils::cache::lsyscache::IsTrueArrayType(_type as _) }
 
 /*
  * Populate and return the value of specified type from a given json/jsonb value.
@@ -3882,12 +3850,8 @@ pub struct HeapTupleData_local {
 pub struct ItemPointerData {
     pub _opaque: [u8; 6],
 }
-unsafe fn HeapTupleHeaderGetDatumLength(_tuple: HeapTupleHeader) -> uint32 {
-    unimplemented!("HeapTupleHeaderGetDatumLength not yet ported")
-}
-unsafe fn ItemPointerSetInvalid(_pointer: *mut ItemPointerData) {
-    unimplemented!("ItemPointerSetInvalid not yet ported")
-}
+unsafe fn HeapTupleHeaderGetDatumLength(_tuple: HeapTupleHeader) -> uint32 { crate::access::htup_details::HeapTupleHeaderGetDatumLength(_tuple as _) as _ }
+unsafe fn ItemPointerSetInvalid(_pointer: *mut ItemPointerData) { crate::storage::itemptr::ItemPointerSetInvalid(_pointer as _) }
 unsafe fn htup_t_data(_tuple: HeapTuple) -> HeapTupleHeader {
     unimplemented!("HeapTuple.t_data not yet ported")
 }
@@ -4086,12 +4050,8 @@ unsafe fn flinfo_fn_extra(_flinfo: *mut FmgrInfo) -> *mut c_void {
 unsafe fn set_flinfo_fn_extra(_flinfo: *mut FmgrInfo, _v: *mut c_void) {
     unimplemented!("FmgrInfo.fn_extra (set) not yet ported")
 }
-unsafe fn HeapTupleHeaderGetTypeId(_tup: HeapTupleHeader) -> Oid {
-    unimplemented!("HeapTupleHeaderGetTypeId not yet ported")
-}
-unsafe fn HeapTupleHeaderGetTypMod(_tup: HeapTupleHeader) -> int32 {
-    unimplemented!("HeapTupleHeaderGetTypMod not yet ported")
-}
+unsafe fn HeapTupleHeaderGetTypeId(_tup: HeapTupleHeader) -> Oid { crate::access::htup_details::HeapTupleHeaderGetTypeId(_tup as _) as _ }
+unsafe fn HeapTupleHeaderGetTypMod(_tup: HeapTupleHeader) -> int32 { crate::access::htup_details::HeapTupleHeaderGetTypMod(_tup as _) as _ }
 
 /*
  * get_json_object_as_hash
@@ -5096,9 +5056,7 @@ pub unsafe fn jsonb_delete_array(fcinfo: FunctionCallInfo) -> Datum {
     PG_RETURN_JSONB_P!(JsonbValueToJsonb(res))
 }
 
-unsafe fn ARR_NDIM(_a: *mut ArrayType) -> c_int {
-    unimplemented!("ARR_NDIM not yet ported")
-}
+unsafe fn ARR_NDIM(_a: *mut ArrayType) -> c_int { crate::utils::array::ARR_NDIM(_a as _) as _ }
 
 /*
  * SQL function jsonb_delete (jsonb, int)

@@ -442,20 +442,12 @@ unsafe fn ERR_GET_REASON(ecode: c_ulong) -> c_int {
 // ------------------------------------------------------------
 
 // TODO(pg-port): port src/backend/storage/file/fd.c AllocateFile/FreeFile.
-unsafe fn AllocateFile(_name: *const c_char, _mode: *const c_char) -> *mut c_void {
-    unimplemented!()
-}
-unsafe fn FreeFile(_file: *mut c_void) -> c_int {
-    unimplemented!()
-}
+unsafe fn AllocateFile(name: *const c_char, mode: *const c_char) -> *mut c_void { crate::storage::file::fd::AllocateFile(name as _, mode as _) as _ }
+unsafe fn FreeFile(file: *mut c_void) -> c_int { crate::storage::file::fd::FreeFile(file as _) }
 
 // TODO(pg-port): port errcode_for_file_access()/errcode_for_socket_access() from elog.c.
-fn errcode_for_file_access() -> c_int {
-    0
-}
-fn errcode_for_socket_access() -> c_int {
-    0
-}
+fn errcode_for_file_access() -> c_int { crate::utils::error::elog_impl::errcode_for_file_access() }
+fn errcode_for_socket_access() -> c_int { crate::utils::error::elog_impl::errcode_for_socket_access() }
 
 // errcode classification helpers (shimmed: classification is ignored by ereport).
 const ERRCODE_CONFIG_FILE_ERROR: c_int = 0;
@@ -465,12 +457,10 @@ const ERRCODE_INVALID_PARAMETER_VALUE: c_int = 0;
 
 // TODO(pg-port): port GetConfigOption() from src/backend/utils/misc/guc.c.
 unsafe fn GetConfigOption(
-    _name: *const c_char,
-    _missing_ok: bool,
-    _restrict_privileged: bool,
-) -> *const c_char {
-    unimplemented!()
-}
+    name: *const c_char,
+    missing_ok: bool,
+    restrict_privileged: bool,
+) -> *const c_char { crate::utils::misc::guc::GetConfigOption(name as _, missing_ok, restrict_privileged) }
 
 // gettext no-op marker: C `_()` / `errmsg_internal` text passthrough.
 #[inline]

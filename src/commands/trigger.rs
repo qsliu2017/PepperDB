@@ -2077,6 +2077,134 @@ unsafe fn AfterTriggerExecute(
     unimplemented!() // TODO(pg-port): commands/trigger.c AfterTriggerExecute
 }
 
+/*
+ * MakeTransitionCaptureState
+ *
+ * Make a TransitionCaptureState object for the given TriggerDesc, target
+ * relation, and operation type.  Returns NULL if no relevant transition
+ * tables are requested by 'trigdesc'.
+ */
+pub unsafe fn MakeTransitionCaptureState(
+    trigdesc: *mut TriggerDesc,
+    relid: Oid,
+    cmdType: CmdType,
+) -> *mut TransitionCaptureState {
+    let state: *mut TransitionCaptureState;
+    let need_old_upd: bool;
+    let need_new_upd: bool;
+    let need_old_del: bool;
+    let need_new_ins: bool;
+    let ins_table: *mut AfterTriggersTableData;
+    let upd_table: *mut AfterTriggersTableData;
+    let del_table: *mut AfterTriggersTableData;
+    let oldcxt: MemoryContext;
+    let saveResourceOwner: ResourceOwner;
+
+    if trigdesc.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    /* Detect which table(s) we need. */
+    match cmdType {
+        CmdType::CMD_INSERT => {
+            need_old_upd = false;
+            need_old_del = false;
+            need_new_upd = false;
+            need_new_ins = (*trigdesc).trig_insert_new_table;
+        }
+        CmdType::CMD_UPDATE => {
+            need_old_upd = (*trigdesc).trig_update_old_table;
+            need_new_upd = (*trigdesc).trig_update_new_table;
+            need_old_del = false;
+            need_new_ins = false;
+        }
+        CmdType::CMD_DELETE => {
+            need_old_del = (*trigdesc).trig_delete_old_table;
+            need_old_upd = false;
+            need_new_upd = false;
+            need_new_ins = false;
+        }
+        CmdType::CMD_MERGE => {
+            need_old_upd = (*trigdesc).trig_update_old_table;
+            need_new_upd = (*trigdesc).trig_update_new_table;
+            need_old_del = (*trigdesc).trig_delete_old_table;
+            need_new_ins = (*trigdesc).trig_insert_new_table;
+        }
+        _ => {
+            elog!(ERROR, "unexpected CmdType: {}", cmdType as c_int);
+            /* keep compiler quiet */
+            need_old_upd = false;
+            need_new_upd = false;
+            need_old_del = false;
+            need_new_ins = false;
+        }
+    }
+    if !need_old_upd && !need_new_upd && !need_new_ins && !need_old_del {
+        return core::ptr::null_mut();
+    }
+
+    /* Check state, like AfterTriggerSaveEvent. */
+    if afterTriggers.query_depth < 0 {
+        elog!(ERROR, "MakeTransitionCaptureState() called outside of query");
+    }
+
+    /* Be sure we have enough space to record events at this query depth. */
+    if afterTriggers.query_depth >= afterTriggers.maxquerydepth {
+        AfterTriggerEnlargeQueryState();
+    }
+
+    if need_new_ins {
+        ins_table = GetAfterTriggersTableData(relid, CmdType::CMD_INSERT);
+    } else {
+        ins_table = core::ptr::null_mut();
+    }
+
+    if need_old_upd || need_new_upd {
+        upd_table = GetAfterTriggersTableData(relid, CmdType::CMD_UPDATE);
+    } else {
+        upd_table = core::ptr::null_mut();
+    }
+
+    if need_old_del {
+        del_table = GetAfterTriggersTableData(relid, CmdType::CMD_DELETE);
+    } else {
+        del_table = core::ptr::null_mut();
+    }
+
+    /* Now create required tuplestore(s), if we don't have them already. */
+    oldcxt = MemoryContextSwitchTo(CurTransactionContext);
+    saveResourceOwner = CurrentResourceOwner;
+    CurrentResourceOwner = CurTransactionResourceOwner;
+
+    if need_old_upd && (*upd_table).old_tuplestore.is_null() {
+        (*upd_table).old_tuplestore = tuplestore_begin_heap(false, false, work_mem);
+    }
+    if need_new_upd && (*upd_table).new_tuplestore.is_null() {
+        (*upd_table).new_tuplestore = tuplestore_begin_heap(false, false, work_mem);
+    }
+    if need_old_del && (*del_table).old_tuplestore.is_null() {
+        (*del_table).old_tuplestore = tuplestore_begin_heap(false, false, work_mem);
+    }
+    if need_new_ins && (*ins_table).new_tuplestore.is_null() {
+        (*ins_table).new_tuplestore = tuplestore_begin_heap(false, false, work_mem);
+    }
+
+    CurrentResourceOwner = saveResourceOwner;
+    MemoryContextSwitchTo(oldcxt);
+
+    /* Now build the TransitionCaptureState struct, in caller's context */
+    state = palloc0(core::mem::size_of::<TransitionCaptureState>()) as *mut TransitionCaptureState;
+    (*state).tcs_delete_old_table = need_old_del;
+    (*state).tcs_update_old_table = need_old_upd;
+    (*state).tcs_update_new_table = need_new_upd;
+    (*state).tcs_insert_new_table = need_new_ins;
+    (*state).tcs_insert_private = ins_table as *mut c_void;
+    (*state).tcs_update_private = upd_table as *mut c_void;
+    (*state).tcs_delete_private = del_table as *mut c_void;
+
+    state
+}
+
 unsafe fn GetAfterTriggersTableData(relid: Oid, cmdType: CmdType) -> *mut AfterTriggersTableData {
     let mut table: *mut AfterTriggersTableData;
     let qs: *mut AfterTriggersQueryData;

@@ -146,6 +146,7 @@ pub type VarChar = varlena;
 
 /// int2vector: a 1-D array of int16 laid out like ArrayType (header must match).
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct int2vector {
     pub vl_len_: int32,
     pub ndim: c_int,
@@ -213,12 +214,14 @@ pub fn PointerIsAligned<P, Ty>(pointer: *const P) -> bool {
 /// # Safety
 /// `base + offset` must remain within the same allocation.
 #[inline(always)]
+#[no_mangle]
 pub unsafe fn OffsetToPointer(base: *mut c_void, offset: usize) -> *mut c_void {
     (base as *mut c_char).add(offset) as *mut c_void
 }
 
 /// `OidIsValid(objectId)`: an Oid is valid iff it isn't InvalidOid.
 #[inline(always)]
+#[no_mangle]
 pub fn OidIsValid(objectId: Oid) -> bool {
     objectId != crate::postgres_ext::InvalidOid
 }

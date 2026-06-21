@@ -109,34 +109,32 @@ unsafe fn copyObject<T>(node: *const T) -> *mut T {
  * lsyscache.h STUBs (utils/cache/lsyscache.c not yet ported).
  * ------------------------------------------------------------------------- */
 
-// TODO(pg-port): real get_opfamily_member_for_cmptype lives in utils/cache/lsyscache.rs
 unsafe fn get_opfamily_member_for_cmptype(
-    _opfamily: Oid,
-    _lefttype: Oid,
-    _righttype: Oid,
-    _cmptype: CompareType,
+    opfamily: Oid,
+    lefttype: Oid,
+    righttype: Oid,
+    cmptype: CompareType,
 ) -> Oid {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_opfamily_member_for_cmptype(opfamily, lefttype, righttype, cmptype as _)
 }
 
-// TODO(pg-port): real get_mergejoin_opfamilies lives in utils/cache/lsyscache.rs
-unsafe fn get_mergejoin_opfamilies(_opno: Oid) -> *mut List {
-    unimplemented!()
+unsafe fn get_mergejoin_opfamilies(opno: Oid) -> *mut List {
+    crate::utils::cache::lsyscache::get_mergejoin_opfamilies(opno) as _
 }
 
-// TODO(pg-port): real get_ordering_op_properties lives in utils/cache/lsyscache.rs
+// utils/cache/lsyscache.rs
 unsafe fn get_ordering_op_properties(
-    _opno: Oid,
-    _opfamily: *mut Oid,
-    _opcintype: *mut Oid,
-    _cmptype: *mut CompareType,
+    opno: Oid,
+    opfamily: *mut Oid,
+    opcintype: *mut Oid,
+    cmptype: *mut CompareType,
 ) -> bool {
-    unimplemented!()
+    crate::utils::cache::lsyscache::get_ordering_op_properties(opno, opfamily, opcintype, cmptype as _)
 }
 
-// TODO(pg-port): real op_input_types lives in utils/cache/lsyscache.rs
-unsafe fn op_input_types(_opno: Oid, _lefttype: *mut Oid, _righttype: *mut Oid) {
-    unimplemented!()
+// utils/cache/lsyscache.rs
+unsafe fn op_input_types(opno: Oid, lefttype: *mut Oid, righttype: *mut Oid) {
+    crate::utils::cache::lsyscache::op_input_types(opno, lefttype, righttype)
 }
 
 // TODO(pg-port): real IsBuiltinBooleanOpfamily lives in catalog/pg_opfamily.rs (pg_opfamily.h)
@@ -146,12 +144,12 @@ unsafe fn IsBuiltinBooleanOpfamily(_opfamily: Oid) -> bool {
 
 // TODO(pg-port): real partitions_are_ordered lives in partitioning/partbounds.rs
 unsafe fn partitions_are_ordered(_boundinfo: *mut c_void, _live_parts: *mut Bitmapset) -> bool {
-    unimplemented!()
+    crate::partitioning::partbounds::partitions_are_ordered(_boundinfo as _, _live_parts as _)
 }
 
 // TODO(pg-port): real compare_path_costs lives in optimizer/path/costsize.rs (cost.h)
 unsafe fn compare_path_costs(_path1: *mut Path, _path2: *mut Path, _criterion: CostSelector) -> c_int {
-    unimplemented!()
+    crate::optimizer::util::pathnode::compare_path_costs(_path1 as _, _path2 as _, _criterion)
 }
 
 // TODO(pg-port): real compare_fractional_path_costs lives in optimizer/path/costsize.rs (cost.h)
@@ -160,7 +158,7 @@ unsafe fn compare_fractional_path_costs(
     _path2: *mut Path,
     _fraction: f64,
 ) -> c_int {
-    unimplemented!()
+    crate::optimizer::util::pathnode::compare_fractional_path_costs(_path1 as _, _path2 as _, _fraction as _)
 }
 
 /* Consider reordering of GROUP BY keys? */

@@ -246,6 +246,15 @@ pub struct ErrorContextCallback {
     pub arg: *mut c_void,
 }
 
+impl ErrorContextCallback {
+    /// A valid zero-equivalent: `callback` is a non-nullable fn pointer so
+    /// `mem::zeroed()` is UB; callers overwrite `callback` before use.
+    pub fn none() -> Self {
+        unsafe extern "C" fn noop(_arg: *mut c_void) {}
+        ErrorContextCallback { previous: core::ptr::null_mut(), callback: noop, arg: core::ptr::null_mut() }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // emit_log_hook_type
 // ---------------------------------------------------------------------------
@@ -256,12 +265,32 @@ pub type emit_log_hook_type = unsafe extern "C" fn(edata: *mut ErrorData);
 // ---------------------------------------------------------------------------
 
 /// Linked list of ErrorContextCallback nodes (elog.h: error_context_stack)
+/// #[no_mangle]: shared as a single C-ABI symbol with the linked C parser
+/// (scan.c/parser.c push scanner-errposition callbacks onto this same stack).
+#[no_mangle]
 pub static mut error_context_stack: *mut ErrorContextCallback = null_mut();
 
-/// Current setjmp target for PG_TRY/PG_CATCH (elog.h: PG_exception_stack)
-/// In Rust we use panic/catch_unwind, so this remains a null-initialized stub.
-/// TODO(pg-port): wire up to actual panic handler or sigjmp_buf equivalent.
+/// Current setjmp target for PG_TRY/PG_CATCH (elog.h: PG_exception_stack).
+/// Points at the active backend's `PgSigjmpBuf`; pg_re_throw siglongjmps to it.
+#[no_mangle]
 pub static mut PG_exception_stack: *mut c_void = null_mut();
+
+/// Opaque storage for a `sigjmp_buf`.  macOS arm64's sigjmp_buf is ~196 bytes;
+/// 384 bytes (48 u64, 16-aligned) is a safe over-allocation.
+#[repr(C, align(16))]
+pub struct PgSigjmpBuf {
+    pub _data: [u64; 48],
+}
+impl PgSigjmpBuf {
+    pub const fn new() -> Self { PgSigjmpBuf { _data: [0; 48] } }
+}
+
+extern "C" {
+    /// setjmp.h: int sigsetjmp(sigjmp_buf, int savemask)
+    pub fn sigsetjmp(env: *mut PgSigjmpBuf, savemask: c_int) -> c_int;
+    /// setjmp.h: void siglongjmp(sigjmp_buf, int val) -- never returns
+    pub fn siglongjmp(env: *mut PgSigjmpBuf, val: c_int) -> !;
+}
 
 /// Hook for intercepting messages before they are sent to the server log.
 pub static mut emit_log_hook: Option<emit_log_hook_type> = None;
@@ -452,7 +481,7 @@ macro_rules! CHECK_STACK_DEPTH {
 // PGUNSIXBIT(val) -- decode one character of SQLSTATE
 #[inline]
 fn PGUNSIXBIT(val: c_int) -> u8 {
-    ((val & 0x3F) + b'A' as c_int) as u8
+    ((val & 0x3F) + b'0' as c_int) as u8
 }
 
 // err_gettext -- no NLS support in this port; just return the string as-is
@@ -1418,6 +1447,7 @@ pub unsafe fn errcontext_msg_c(text: *const c_char) -> c_int {
 /*
  * set_errcontext_domain --- set message domain to be used by errcontext()
  */
+#[no_mangle]
 pub unsafe fn set_errcontext_domain(domain: *const c_char) -> c_int {
     let edata: *mut ErrorData = &mut errordata[errordata_stack_depth as usize];
     /* we don't bother incrementing recursion_depth */
@@ -1457,6 +1487,11 @@ pub unsafe fn errhidecontext(hide_ctx: bool) -> c_int {
  * errposition --- add cursor position to the current error
  */
 pub unsafe fn errposition(cursorpos: c_int) -> c_int {
+    /* Called outside an active error build: nothing to annotate (no-op). PG
+     * would elog here, but a hard panic kills the backend and cascades. */
+    if errordata_stack_depth < 0 {
+        return 0;
+    }
     let edata: *mut ErrorData = &mut errordata[errordata_stack_depth as usize];
     CHECK_STACK_DEPTH!();
     (*edata).cursorpos = cursorpos;
@@ -1466,6 +1501,7 @@ pub unsafe fn errposition(cursorpos: c_int) -> c_int {
 /*
  * internalerrposition --- add internal cursor position to the current error
  */
+#[no_mangle]
 pub unsafe fn internalerrposition(cursorpos: c_int) -> c_int {
     let edata: *mut ErrorData = &mut errordata[errordata_stack_depth as usize];
     CHECK_STACK_DEPTH!();
@@ -1476,6 +1512,7 @@ pub unsafe fn internalerrposition(cursorpos: c_int) -> c_int {
 /*
  * internalerrquery --- add internal query text to the current error
  */
+#[no_mangle]
 pub unsafe fn internalerrquery(query: *const c_char) -> c_int {
     let edata: *mut ErrorData = &mut errordata[errordata_stack_depth as usize];
     CHECK_STACK_DEPTH!();
@@ -1496,6 +1533,7 @@ pub unsafe fn internalerrquery(query: *const c_char) -> c_int {
  * err_generic_string -- used to set individual ErrorData string fields
  * identified by PG_DIAG_xxx codes.
  */
+#[no_mangle]
 pub unsafe fn err_generic_string(field: c_int, str: *const c_char) -> c_int {
     let edata: *mut ErrorData = &mut errordata[errordata_stack_depth as usize];
     CHECK_STACK_DEPTH!();
@@ -1535,6 +1573,7 @@ pub unsafe fn geterrcode() -> c_int {
 /*
  * geterrposition --- return the currently set error position (0 if none)
  */
+#[no_mangle]
 pub unsafe fn geterrposition() -> c_int {
     let edata: *mut ErrorData = &mut errordata[errordata_stack_depth as usize];
     CHECK_STACK_DEPTH!();
@@ -1544,6 +1583,7 @@ pub unsafe fn geterrposition() -> c_int {
 /*
  * getinternalerrposition --- same for internal error position
  */
+#[no_mangle]
 pub unsafe fn getinternalerrposition() -> c_int {
     let edata: *mut ErrorData = &mut errordata[errordata_stack_depth as usize];
     CHECK_STACK_DEPTH!();
@@ -1560,6 +1600,7 @@ static mut save_format_domain: *const c_char = null();
 /*
  * pre_format_elog_string -- save errno and domain for format_elog_string()
  */
+#[no_mangle]
 pub unsafe fn pre_format_elog_string(errnumber: c_int, domain: *const c_char) {
     /* Save errno before evaluation of argument functions can change it */
     save_format_errnumber = errnumber;
@@ -1607,6 +1648,11 @@ pub unsafe fn format_elog_string_c(text: *const c_char) -> *mut c_char {
  * is called by errfinish.
  */
 pub unsafe fn EmitErrorReport() {
+    // A raw (non-ereport) Rust panic can reach the recovery handler with an empty
+    // error stack; there is nothing to report in that case.
+    if errordata_stack_depth < 0 {
+        return;
+    }
     let edata: *mut ErrorData = &mut errordata[errordata_stack_depth as usize];
     let oldcontext: MemoryContext;
 
@@ -1648,6 +1694,7 @@ pub unsafe fn EmitErrorReport() {
  *
  * This is only for use in error handler code.
  */
+#[no_mangle]
 pub unsafe fn CopyErrorData() -> *mut ErrorData {
     let edata: *mut ErrorData = &mut errordata[errordata_stack_depth as usize];
     let newedata: *mut ErrorData;
@@ -1782,6 +1829,7 @@ pub unsafe fn FreeErrorDataContents(edata: *mut ErrorData) {
 /*
  * FlushErrorState --- flush the error state after error recovery
  */
+#[no_mangle]
 pub unsafe fn FlushErrorState() {
     /*
      * Reset stack to empty.
@@ -1867,6 +1915,7 @@ pub unsafe fn ThrowErrorData(edata: *mut ErrorData) {
  * subsystem, then do some processing, and finally ReThrowError to re-throw
  * the original error.
  */
+#[no_mangle]
 pub unsafe fn ReThrowError(edata: *mut ErrorData) {
     let newedata: *mut ErrorData;
 
@@ -1927,12 +1976,24 @@ pub unsafe fn ReThrowError(edata: *mut ErrorData) {
 /*
  * pg_re_throw --- out-of-line implementation of PG_RE_THROW() macro
  */
+#[no_mangle]
 pub unsafe fn pg_re_throw() -> ! {
     /* If possible, throw the error to the next outer setjmp handler */
     if !PG_exception_stack.is_null() {
-        // TODO(pg-port): when sigjmp_buf support is added, call siglongjmp here.
-        // For now, panic unwinds through catch_unwind barriers.
-        panic!("pg_re_throw: ERROR propagation");
+        if std::env::var_os("PDB_BT").is_some() && errordata_stack_depth >= 0 {
+            let m = errordata[errordata_stack_depth as usize].message;
+            if !m.is_null() {
+                let msg = std::ffi::CStr::from_ptr(m).to_string_lossy();
+                eprintln!("PDB_BT pg_re_throw ERROR msg={}", msg);
+                if msg.contains("variable not found in subplan target list") {
+                    eprintln!("PDB_BT BT:\n{}", std::backtrace::Backtrace::force_capture());
+                }
+            }
+        }
+        // Transfer control to the nearest setjmp handler (PostgresMain's
+        // sigsetjmp). siglongjmp unwinds C-ABI frames correctly, which a Rust
+        // panic cannot (it aborts at any extern "C" boundary).
+        siglongjmp(PG_exception_stack as *mut PgSigjmpBuf, 1);
     } else {
         /*
          * If we get here, elog(ERROR) was thrown inside a PG_TRY block, which
@@ -1977,6 +2038,7 @@ pub unsafe fn pg_re_throw() -> ! {
  *
  * Returns a pstrdup'd string in the caller's context.
  */
+#[no_mangle]
 pub unsafe fn GetErrorContextStack() -> *mut c_char {
     let edata: *mut ErrorData;
     let mut econtext: *mut ErrorContextCallback;
@@ -3064,6 +3126,7 @@ pub unsafe fn log_status_format(
  * unpack_sql_state -- Unpack MAKE_SQLSTATE code.
  * Note that this returns a pointer to a static buffer.
  */
+#[no_mangle]
 pub unsafe fn unpack_sql_state(mut sql_state: c_int) -> *const c_char {
     static mut buf: [u8; 12] = [0; 12];
     let mut i = 0usize;

@@ -120,17 +120,17 @@ unsafe fn mul_size(s1: Size, s2: Size) -> Size {
 
 // storage/shmem.h - ShmemInitStruct.
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found_ptr: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO: not ported
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _found_ptr)
 }
 
 // storage/ipc.h - on_shmem_exit.
-unsafe fn on_shmem_exit(_function: Option<unsafe extern "C" fn(c_int, Datum)>, _arg: Datum) {
-    // TODO: not ported
+unsafe fn on_shmem_exit(function: Option<unsafe extern "C" fn(c_int, Datum)>, arg: Datum) {
+    crate::storage::ipc::ipc::on_shmem_exit(function.unwrap(), arg)
 }
 
 // postmaster/pmchild.c - MaxLivePostmasterChildren.
 unsafe fn MaxLivePostmasterChildren() -> c_int {
-    unimplemented!() // TODO: not ported
+    crate::postmaster::pmchild::MaxLivePostmasterChildren()
 }
 
 // replication/walsender.h - am_walsender flag.
@@ -270,6 +270,10 @@ pub unsafe fn MarkPostmasterChildSlotUnassigned(slot: c_int) -> bool {
      * crashes.  So we don't try to Assert anything about the state.
      */
     result = *PMChildFlags_ptr(slot) == PM_CHILD_ASSIGNED;
+    if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT MarkPostmasterChildSlotUnassigned slot={} state={} result={}",
+            slot + 1, *PMChildFlags_ptr(slot), result);
+    }
     *PMChildFlags_ptr(slot) = PM_CHILD_UNUSED;
     result
 }
@@ -327,6 +331,9 @@ pub unsafe fn MarkPostmasterChildWalSender() {
  */
 unsafe extern "C" fn MarkPostmasterChildInactive(_code: c_int, _arg: Datum) {
     let slot = MyPMChildSlot;
+    if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT MarkPostmasterChildInactive CALLED slot={}", slot);
+    }
 
     Assert!(slot > 0 && slot <= (*PMSignalState).num_child_flags);
     let slot = slot - 1;

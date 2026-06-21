@@ -491,6 +491,7 @@ pub fn InitializeQueryCompletion(qc: &mut QueryCompletion) {
 }
 
 /// GetCommandTagName (cmdtag.c). Returns the C string for the tag name.
+#[no_mangle]
 pub fn GetCommandTagName(commandTag: CommandTag) -> *const c_char {
     TAG_BEHAVIOR[tag_index(commandTag)].name.as_ptr() as *const c_char
 }

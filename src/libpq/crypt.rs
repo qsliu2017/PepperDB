@@ -56,7 +56,7 @@ pub use PasswordType::*;
 // utils/syscache.h - SysCacheIdentifier value (AUTHNAME) and helpers.
 // TODO(pg-port): real syscache infrastructure (utils/cache/syscache.c).
 #[allow(non_upper_case_globals)]
-const AUTHNAME: c_int = 0;
+const AUTHNAME: c_int = 10;
 
 // catalog/pg_authid.h attribute numbers.
 // TODO(pg-port): generated from pg_authid catalog.

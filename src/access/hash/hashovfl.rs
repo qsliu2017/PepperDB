@@ -235,17 +235,11 @@ struct PageHeaderShim {
 // Stubbed callees from other (not-yet-ported) translation units.
 // ---------------------------------------------------------------------------
 
-unsafe fn _hash_get_totalbuckets(_splitpoint_phase: uint32) -> uint32 {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_get_totalbuckets(_splitpoint_phase: uint32) -> uint32 { crate::access::hash::hashutil::_hash_get_totalbuckets(_splitpoint_phase) }
 
-unsafe fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: c_int) {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: c_int) { crate::access::hash::hashutil::_hash_checkpage(_rel, _buf, _flags) }
 
-unsafe fn _hash_pageinit(_page: Page, _size: Size) {
-    unimplemented!() // TODO: access/hashpage.c
-}
+unsafe fn _hash_pageinit(_page: Page, _size: Size) { unimplemented!() }
 
 unsafe fn _hash_pgaddmultitup(
     _rel: Relation,
@@ -253,18 +247,14 @@ unsafe fn _hash_pgaddmultitup(
     _itups: *mut IndexTuple,
     _itup_offsets: *mut OffsetNumber,
     _nitups: uint16,
-) {
-    unimplemented!() // TODO: access/hashinsert.c
-}
+) { crate::access::hash::hashinsert::_hash_pgaddmultitup(_rel, _buf, _itups, _itup_offsets, _nitups) }
 
 unsafe fn _hash_getbuf(
     _rel: Relation,
     _blkno: BlockNumber,
     _access: c_int,
     _flags: c_int,
-) -> Buffer {
-    unimplemented!() // TODO: access/hashpage.c
-}
+) -> Buffer { unimplemented!() }
 
 unsafe fn _hash_getbuf_with_strategy(
     _rel: Relation,
@@ -272,13 +262,9 @@ unsafe fn _hash_getbuf_with_strategy(
     _access: c_int,
     _flags: c_int,
     _bstrategy: BufferAccessStrategy,
-) -> Buffer {
-    unimplemented!() // TODO: access/hashpage.c
-}
+) -> Buffer { unimplemented!() }
 
-unsafe fn _hash_getinitbuf(_rel: Relation, _blkno: BlockNumber) -> Buffer {
-    unimplemented!() // TODO: access/hashpage.c
-}
+unsafe fn _hash_getinitbuf(_rel: Relation, _blkno: BlockNumber) -> Buffer { unimplemented!() }
 
 unsafe fn _hash_getnewbuf(
     _rel: Relation,
@@ -288,25 +274,19 @@ unsafe fn _hash_getnewbuf(
     unimplemented!() // TODO: access/hashpage.c
 }
 
-unsafe fn _hash_relbuf(_rel: Relation, _buf: Buffer) {
-    unimplemented!() // TODO: access/hashpage.c
-}
+unsafe fn _hash_relbuf(_rel: Relation, _buf: Buffer) { unimplemented!() }
 
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     unimplemented!() // TODO: storage/bufmgr.h
 }
 
-unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size { crate::access::nbtree::nbtpage::BufferGetPageSize(_buffer) }
 
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO: storage/bufmgr.c
 }
 
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.c
@@ -316,9 +296,7 @@ unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
     unimplemented!() // TODO: storage/bufmgr.c
 }
 
-unsafe fn RelationNeedsWAL(_relation: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_relation) }
 
 // ---------------------------------------------------------------------------
 // XLog insertion helpers (access/xloginsert.h). Local stubs mirror siblings.
@@ -344,9 +322,7 @@ unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
     unimplemented!() // TODO: access/xloginsert.c
 }
 
-unsafe fn XLogEnsureRecordSpace(_max_block_id: c_int, _ndatas: c_int) {
-    unimplemented!() // TODO: access/xloginsert.c
-}
+unsafe fn XLogEnsureRecordSpace(_max_block_id: c_int, _ndatas: c_int) { crate::access::transam::xloginsert::XLogEnsureRecordSpace(_max_block_id, _ndatas) }
 
 // ---------------------------------------------------------------------------
 

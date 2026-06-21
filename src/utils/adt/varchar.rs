@@ -72,7 +72,7 @@ extern "C" {
 
 /* errcodes.h classification (the errcode() shim ignores the value). */
 const ERRCODE_INVALID_PARAMETER_VALUE: c_int = 0;
-const ERRCODE_STRING_DATA_RIGHT_TRUNCATION: c_int = 0;
+const ERRCODE_STRING_DATA_RIGHT_TRUNCATION: c_int = 16777346; /* MAKE_SQLSTATE 22001 */
 const ERRCODE_INDETERMINATE_COLLATION: c_int = 0;
 
 /* access/htup_details.h: MaxAttrSize, the maximum length of a tuple attribute. */
@@ -141,8 +141,7 @@ fn pg_database_encoding_max_length() -> c_int {
 /// # Safety
 /// `ta` points to an ArrayType datum; `n` is writable.
 unsafe fn ArrayGetIntegerTypmods(ta: *mut c_void, n: *mut c_int) -> *mut int32 {
-    let _ = (ta, n);
-    unimplemented!("ArrayGetIntegerTypmods: utils/array.h not yet translated")
+    crate::utils::adt::arrayutils::ArrayGetIntegerTypmods(ta as _, n)
 }
 
 // ----------------------------------------------------------------
@@ -162,8 +161,7 @@ unsafe fn varstr_cmp(
     len2: c_int,
     collid: Oid,
 ) -> c_int {
-    let _ = (arg1, len1, arg2, len2, collid);
-    unimplemented!("varstr_cmp: utils/adt/varlena.c not yet translated")
+    crate::utils::adt::varlena::varstr_cmp(arg1, len1, arg2, len2, collid)
 }
 
 /// varstr_sortsupport: install generic string SortSupport (utils/adt/varlena.c).
@@ -171,8 +169,7 @@ unsafe fn varstr_cmp(
 /// # Safety
 /// `ssup` points to a SortSupport node.
 unsafe fn varstr_sortsupport(ssup: SortSupport, typid: Oid, collid: Oid) {
-    let _ = (ssup, typid, collid);
-    unimplemented!("varstr_sortsupport: utils/adt/varlena.c not yet translated")
+    crate::utils::adt::varlena::varstr_sortsupport(ssup, typid, collid)
 }
 
 // ----------------------------------------------------------------
@@ -182,22 +179,12 @@ unsafe fn varstr_sortsupport(ssup: SortSupport, typid: Oid, collid: Oid) {
 //   modelled here, which is all bpchar comparison/hashing reads.
 // ----------------------------------------------------------------
 
-#[repr(C)]
-pub struct pg_locale_struct {
-    pub deterministic: bool,
-}
-pub type pg_locale_t = *mut pg_locale_struct;
+pub use crate::utils::adt::pg_locale::{pg_locale_struct, pg_locale_t};
 
-/// pg_newlocale_from_collation (utils/pg_locale.h).  Not yet wired.
 unsafe fn pg_newlocale_from_collation(collid: Oid) -> pg_locale_t {
-    let _ = collid;
-    unimplemented!("pg_newlocale_from_collation: utils/adt/pg_locale.rs not yet wired")
+    crate::utils::adt::pg_locale::pg_newlocale_from_collation(collid)
 }
 
-/// pg_strnxfrm (utils/pg_locale.h).  Not yet wired.
-///
-/// # Safety
-/// `src` is readable for `srclen` bytes; `dest` is writable for `destsize` bytes.
 unsafe fn pg_strnxfrm(
     dest: *mut c_char,
     destsize: usize,
@@ -205,8 +192,7 @@ unsafe fn pg_strnxfrm(
     srclen: isize,
     locale: pg_locale_t,
 ) -> usize {
-    let _ = (dest, destsize, src, srclen, locale);
-    unimplemented!("pg_strnxfrm: utils/adt/pg_locale.rs not yet wired")
+    crate::utils::adt::pg_locale::pg_strnxfrm(dest, destsize, src, srclen, locale)
 }
 
 /* common code for bpchartypmodin and varchartypmodin */
@@ -306,8 +292,33 @@ unsafe fn anychar_typmodout(typmod: int32) -> *mut c_char {
  * # Safety
  * `s` is readable for `len` bytes.
  */
+/// If `escontext` is an ErrorSaveContext (soft-error sink), record a soft error
+/// and return true so the caller can bail without throwing (mirrors numutils.rs).
+unsafe fn vc_soft_error(escontext: *mut Node, sqlerrcode: c_int, msg: *mut c_char) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    if escontext.is_null() || *(escontext as *const c_int) != T_ErrorSaveContext {
+        return false;
+    }
+    let esc = escontext as *mut crate::nodes::miscnodes::ErrorSaveContext;
+    (*esc).error_occurred = true;
+    if (*esc).details_wanted {
+        let ed = crate::utils::mmgr::mcxt::palloc0(
+            core::mem::size_of::<crate::utils::error::elog_impl::ErrorData>(),
+        ) as *mut crate::utils::error::elog_impl::ErrorData;
+        (*ed).sqlerrcode = sqlerrcode;
+        (*ed).message = msg;
+        (*esc).error_data = ed as *mut _;
+    }
+    true
+}
+unsafe fn vc_palloc_cstr(s: &str) -> *mut c_char {
+    let buf = crate::utils::mmgr::mcxt::palloc(s.len() + 1) as *mut c_char;
+    core::ptr::copy_nonoverlapping(s.as_ptr() as *const c_char, buf, s.len());
+    *buf.add(s.len()) = 0;
+    buf
+}
+
 unsafe fn bpchar_input(s: *const c_char, mut len: usize, atttypmod: int32, escontext: *mut Node) -> *mut BpChar {
-    let _ = escontext; // TODO(pg-port): ErrorSaveContext soft errors (ereturn -> hard ERROR).
     let result: *mut BpChar;
     let r: *mut c_char;
     let mut maxlen: usize;
@@ -334,6 +345,10 @@ unsafe fn bpchar_input(s: *const c_char, mut len: usize, atttypmod: int32, escon
             while j < len {
                 if *s.add(j) != b' ' as c_char {
                     let _ = errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION);
+                    let m = vc_palloc_cstr(&format!("value too long for type character({})", maxlen as c_int));
+                    if vc_soft_error(escontext, ERRCODE_STRING_DATA_RIGHT_TRUNCATION, m) {
+                        return core::ptr::null_mut();
+                    }
                     ereport!(
                         ERROR,
                         errmsg!("value too long for type character({})", maxlen as c_int)
@@ -620,6 +635,10 @@ unsafe fn varchar_input(s: *const c_char, mut len: usize, atttypmod: int32, esco
         while j < len {
             if *s.add(j) != b' ' as c_char {
                 let _ = errcode(ERRCODE_STRING_DATA_RIGHT_TRUNCATION);
+                let m = vc_palloc_cstr(&format!("value too long for type character varying({})", maxlen as c_int));
+                if vc_soft_error(escontext, ERRCODE_STRING_DATA_RIGHT_TRUNCATION, m) {
+                    return core::ptr::null_mut();
+                }
                 ereport!(
                     ERROR,
                     errmsg!("value too long for type character varying({})", maxlen as c_int)

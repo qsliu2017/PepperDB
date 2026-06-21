@@ -224,9 +224,9 @@ pub const fn MinSizeOfInvalidations() -> usize {
 // ----------------------------------------------------------------------------
 
 // TODO(pg-port): MyProc lives in storage/proc.h
-pub static mut MyProc: *mut PGPROC = null_mut();
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 // TODO(pg-port): MyProcNumber lives in storage/procnumber.h
-pub static mut MyProcNumber: ProcNumber = 0;
+extern "C" { pub static mut MyProcNumber: ProcNumber; }
 // TODO(pg-port): standbyState lives in access/xlogutils.c
 pub static mut standbyState: c_int = STANDBY_DISABLED;
 // TODO(pg-port): InRecovery lives in access/xlog.c
@@ -270,11 +270,10 @@ unsafe fn TimestampTzPlusMilliseconds(tz: TimestampTz, ms: c_int) -> TimestampTz
 }
 // TODO(pg-port): TimestampDifference lives in utils/adt/timestamp.c
 unsafe fn TimestampDifference(_start: TimestampTz, _stop: TimestampTz, secs: *mut c_long, microsecs: *mut c_int) {
-    *secs = 0;
-    *microsecs = 0;
+    crate::utils::adt::timestamp::TimestampDifference(_start as _, _stop as _, secs as _, microsecs)
 }
 // TODO(pg-port): TimestampDifferenceExceeds lives in utils/adt/timestamp.c
-unsafe fn TimestampDifferenceExceeds(_start: TimestampTz, _stop: TimestampTz, _msec: c_int) -> bool { false }
+unsafe fn TimestampDifferenceExceeds(_start: TimestampTz, _stop: TimestampTz, _msec: c_int) -> bool { crate::utils::adt::timestamp::TimestampDifferenceExceeds(_start as _, _stop as _, _msec) }
 // TODO(pg-port): CHECK_FOR_INTERRUPTS lives in miscadmin.h
 unsafe fn CHECK_FOR_INTERRUPTS() { /* TODO(pg-port) */ }
 // TODO(pg-port): pg_usleep lives in port/pgsleep.c
@@ -286,7 +285,7 @@ unsafe fn pgstat_report_wait_end() { /* TODO(pg-port) */ }
 // TODO(pg-port): pgstat_report_stat lives in utils/activity/pgstat.c
 unsafe fn pgstat_report_stat(_force: bool) { /* TODO(pg-port) */ }
 // TODO(pg-port): ProcNumberGetProc lives in storage/lmgr/proc.c
-unsafe fn ProcNumberGetProc(_procNumber: ProcNumber) -> *mut PGPROC { null_mut() }
+unsafe fn ProcNumberGetProc(_procNumber: ProcNumber) -> *mut PGPROC { crate::storage::ipc::procarray::ProcNumberGetProc(_procNumber as _) as _ }
 // TODO(pg-port): initStringInfo lives in lib/stringinfo.c
 unsafe fn initStringInfo(_str: *mut StringInfoData) { /* TODO(pg-port) */ }
 // TODO(pg-port): get_recovery_conflict_desc forward (defined below)
@@ -297,13 +296,13 @@ unsafe fn CancelVirtualTransaction(_vxid: VirtualTransactionId, _sigmode: ProcSi
 // TODO(pg-port): SignalVirtualTransaction lives in storage/ipc/procarray.c
 unsafe fn SignalVirtualTransaction(_vxid: VirtualTransactionId, _sigmode: ProcSignalReason, _conflictPending: bool) -> c_int { 0 }
 // TODO(pg-port): set_ps_display_suffix lives in utils/misc/ps_status.c
-unsafe fn set_ps_display_suffix(_suffix: *const c_char) { /* TODO(pg-port) */ }
+unsafe fn set_ps_display_suffix(_suffix: *const c_char) { crate::utils::misc::ps_status::set_ps_display_suffix(_suffix) }
 // TODO(pg-port): set_ps_display_remove_suffix lives in utils/misc/ps_status.c
-unsafe fn set_ps_display_remove_suffix() { /* TODO(pg-port) */ }
+unsafe fn set_ps_display_remove_suffix() { crate::utils::misc::ps_status::set_ps_display_remove_suffix() }
 // TODO(pg-port): GetConflictingVirtualXIDs lives in storage/ipc/procarray.c
-unsafe fn GetConflictingVirtualXIDs(_limitXmin: TransactionId, _dbOid: Oid) -> *mut VirtualTransactionId { null_mut() }
+unsafe fn GetConflictingVirtualXIDs(_limitXmin: TransactionId, _dbOid: Oid) -> *mut VirtualTransactionId { crate::storage::ipc::procarray::GetConflictingVirtualXIDs(_limitXmin, _dbOid) as _ }
 // TODO(pg-port): InvalidateObsoleteReplicationSlots lives in replication/slot.c
-unsafe fn InvalidateObsoleteReplicationSlots(_cause: c_int, _segno: u64, _dboid: Oid, _snapshotConflictHorizon: TransactionId) { /* TODO(pg-port) */ }
+unsafe fn InvalidateObsoleteReplicationSlots(_cause: c_int, _segno: u64, _dboid: Oid, _snapshotConflictHorizon: TransactionId) { crate::replication::slot::InvalidateObsoleteReplicationSlots(_cause as _, _segno as _, _dboid, _snapshotConflictHorizon); }
 // TODO(pg-port): ReadNextFullTransactionId lives in access/transam/varsup.c
 unsafe fn ReadNextFullTransactionId() -> FullTransactionId { FullTransactionId { value: 0 } }
 // TODO(pg-port): U64FromFullTransactionId lives in access/transam.h
@@ -311,32 +310,32 @@ unsafe fn U64FromFullTransactionId(x: FullTransactionId) -> uint64 { x.value }
 // TODO(pg-port): XidFromFullTransactionId lives in access/transam.h
 unsafe fn XidFromFullTransactionId(x: FullTransactionId) -> TransactionId { x.value as TransactionId }
 // TODO(pg-port): CountDBBackends lives in storage/ipc/procarray.c
-unsafe fn CountDBBackends(_databaseid: Oid) -> c_int { 0 }
+unsafe fn CountDBBackends(_databaseid: Oid) -> c_int { crate::storage::ipc::procarray::CountDBBackends(_databaseid) }
 // TODO(pg-port): CancelDBBackends lives in storage/ipc/procarray.c
-unsafe fn CancelDBBackends(_databaseid: Oid, _sigmode: ProcSignalReason, _conflictPending: bool) { /* TODO(pg-port) */ }
+unsafe fn CancelDBBackends(_databaseid: Oid, _sigmode: ProcSignalReason, _conflictPending: bool) { crate::storage::ipc::procarray::CancelDBBackends(_databaseid, _sigmode, _conflictPending) }
 // TODO(pg-port): GetLockConflicts lives in storage/lmgr/lock.c
-unsafe fn GetLockConflicts(_locktag: *const LOCKTAG, _lockmode: c_int, _countp: *mut c_int) -> *mut VirtualTransactionId { null_mut() }
+unsafe fn GetLockConflicts(_locktag: *const LOCKTAG, _lockmode: c_int, _countp: *mut c_int) -> *mut VirtualTransactionId { crate::storage::lmgr::lock::GetLockConflicts(_locktag as _, _lockmode as _, _countp) as _ }
 // TODO(pg-port): pg_atomic_read_u64 lives in port/atomics.h
 unsafe fn pg_atomic_read_u64(ptr: *mut pg_atomic_uint64) -> uint64 { (*ptr).value }
 // TODO(pg-port): pg_atomic_write_u64 lives in port/atomics.h
 unsafe fn pg_atomic_write_u64(ptr: *mut pg_atomic_uint64, val: uint64) { (*ptr).value = val; }
 // TODO(pg-port): enable_timeouts lives in utils/misc/timeout.c
-unsafe fn enable_timeouts(_timeouts: *const EnableTimeoutParams, _count: c_int) { /* TODO(pg-port) */ }
+unsafe fn enable_timeouts(_timeouts: *const EnableTimeoutParams, _count: c_int) { crate::utils::misc::timeout::enable_timeouts(_timeouts as _, _count) }
 // TODO(pg-port): disable_all_timeouts lives in utils/misc/timeout.c
-unsafe fn disable_all_timeouts(_keep_indicators: bool) { /* TODO(pg-port) */ }
+unsafe fn disable_all_timeouts(_keep_indicators: bool) { crate::utils::misc::timeout::disable_all_timeouts(_keep_indicators) }
 // TODO(pg-port): ProcWaitForSignal lives in storage/lmgr/proc.c
-unsafe fn ProcWaitForSignal(_wait_event_info: uint32) { /* TODO(pg-port) */ }
+unsafe fn ProcWaitForSignal(_wait_event_info: uint32) { crate::storage::lmgr::proc::ProcWaitForSignal(_wait_event_info) }
 // TODO(pg-port): SendRecoveryConflictWithBufferPin is defined below.
 // TODO(pg-port): HoldingBufferPinThatDelaysRecovery lives in storage/buffer/bufmgr.c
-unsafe fn HoldingBufferPinThatDelaysRecovery() -> bool { false }
+unsafe fn HoldingBufferPinThatDelaysRecovery() -> bool { crate::storage::buffer::bufmgr::HoldingBufferPinThatDelaysRecovery() }
 // TODO(pg-port): TransactionIdIsValid lives in access/transam.h
 unsafe fn TransactionIdIsValid(xid: TransactionId) -> bool { xid != 0 }
 // TODO(pg-port): TransactionIdIsNormal lives in access/transam.h
 unsafe fn TransactionIdIsNormal(xid: TransactionId) -> bool { xid >= 3 }
 // TODO(pg-port): TransactionIdDidCommit lives in access/transam/transam.c
-unsafe fn TransactionIdDidCommit(_xid: TransactionId) -> bool { false }
+unsafe fn TransactionIdDidCommit(_xid: TransactionId) -> bool { crate::access::transam::transam::TransactionIdDidCommit(_xid) }
 // TODO(pg-port): TransactionIdDidAbort lives in access/transam/transam.c
-unsafe fn TransactionIdDidAbort(_xid: TransactionId) -> bool { false }
+unsafe fn TransactionIdDidAbort(_xid: TransactionId) -> bool { crate::access::transam::transam::TransactionIdDidAbort(_xid) }
 // TODO(pg-port): TransactionIdPrecedes lives in access/transam/transam.c
 unsafe fn TransactionIdPrecedes(id1: TransactionId, id2: TransactionId) -> bool {
     let diff = id1.wrapping_sub(id2) as i32;
@@ -345,46 +344,46 @@ unsafe fn TransactionIdPrecedes(id1: TransactionId, id2: TransactionId) -> bool 
 // TODO(pg-port): OidIsValid lives in c.h
 unsafe fn OidIsValid(oid: Oid) -> bool { oid != 0 }
 // TODO(pg-port): LockAcquire lives in storage/lmgr/lock.c
-unsafe fn LockAcquire(_locktag: *const LOCKTAG, _lockmode: c_int, _sessionLock: bool, _dontWait: bool) -> c_int { 0 }
+unsafe fn LockAcquire(_locktag: *const LOCKTAG, _lockmode: c_int, _sessionLock: bool, _dontWait: bool) -> c_int { crate::storage::lmgr::lock::LockAcquire(_locktag as _, _lockmode as _, _sessionLock, _dontWait) as _ }
 // TODO(pg-port): LockRelease lives in storage/lmgr/lock.c
-unsafe fn LockRelease(_locktag: *const LOCKTAG, _lockmode: c_int, _sessionLock: bool) -> bool { true }
+unsafe fn LockRelease(_locktag: *const LOCKTAG, _lockmode: c_int, _sessionLock: bool) -> bool { crate::storage::lmgr::lock::LockRelease(_locktag as _, _lockmode as _, _sessionLock) }
 // TODO(pg-port): GetCurrentTransactionId lives in access/transam/xact.c
-unsafe fn GetCurrentTransactionId() -> TransactionId { 0 }
+unsafe fn GetCurrentTransactionId() -> TransactionId { crate::access::transam::xact::GetCurrentTransactionId() }
 // TODO(pg-port): StandbyTransactionIdIsPrepared lives in access/transam/twophase.c
-unsafe fn StandbyTransactionIdIsPrepared(_xid: TransactionId) -> bool { false }
+unsafe fn StandbyTransactionIdIsPrepared(_xid: TransactionId) -> bool { crate::access::transam::twophase::StandbyTransactionIdIsPrepared(_xid) }
 // TODO(pg-port): ProcArrayApplyRecoveryInfo lives in storage/ipc/procarray.c
-unsafe fn ProcArrayApplyRecoveryInfo(_running: *mut RunningTransactionsData) { /* TODO(pg-port) */ }
+unsafe fn ProcArrayApplyRecoveryInfo(_running: *mut RunningTransactionsData) { crate::storage::ipc::procarray::ProcArrayApplyRecoveryInfo(_running as _) }
 // TODO(pg-port): ProcessCommittedInvalidationMessages lives in storage/ipc/inval.c
-unsafe fn ProcessCommittedInvalidationMessages(_msgs: *mut SharedInvalidationMessage, _nmsgs: c_int, _relcacheInitFileInval: bool, _dbid: Oid, _tsid: Oid) { /* TODO(pg-port) */ }
+unsafe fn ProcessCommittedInvalidationMessages(_msgs: *mut SharedInvalidationMessage, _nmsgs: c_int, _relcacheInitFileInval: bool, _dbid: Oid, _tsid: Oid) { crate::utils::cache::inval::ProcessCommittedInvalidationMessages(_msgs as _, _nmsgs, _relcacheInitFileInval, _dbid, _tsid) }
 // TODO(pg-port): GetRunningTransactionLocks lives in storage/lmgr/lock.c
-unsafe fn GetRunningTransactionLocks(nlocks: *mut c_int) -> *mut xl_standby_lock { *nlocks = 0; null_mut() }
+unsafe fn GetRunningTransactionLocks(nlocks: *mut c_int) -> *mut xl_standby_lock { crate::storage::lmgr::lock::GetRunningTransactionLocks(nlocks) as _ }
 // TODO(pg-port): GetRunningTransactionData lives in storage/ipc/procarray.c
-unsafe fn GetRunningTransactionData() -> RunningTransactions { null_mut() }
+unsafe fn GetRunningTransactionData() -> RunningTransactions { crate::storage::ipc::procarray::GetRunningTransactionData() as _ }
 // TODO(pg-port): GetInsertRecPtr lives in access/transam/xlog.c
-unsafe fn GetInsertRecPtr() -> XLogRecPtr { 0 }
+unsafe fn GetInsertRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetInsertRecPtr() }
 // TODO(pg-port): LWLockRelease lives in storage/lmgr/lwlock.c
 unsafe fn LWLockRelease(_lock: *mut c_void) { /* TODO(pg-port) */ }
 // TODO(pg-port): ProcArrayLock / XidGenLock live in storage/lmgr/lwlock.c
-static mut ProcArrayLock: *mut c_void = null_mut();
-static mut XidGenLock: *mut c_void = null_mut();
+use crate::backend_link_shims::ProcArrayLock;
+use crate::backend_link_shims::XidGenLock;
 // TODO(pg-port): XLogStandbyInfoActive lives in access/xlog.h
 unsafe fn XLogStandbyInfoActive() -> bool { false }
 // TODO(pg-port): XLogBeginInsert lives in access/transam/xloginsert.c
-unsafe fn XLogBeginInsert() { /* TODO(pg-port) */ }
+unsafe fn XLogBeginInsert() { crate::access::transam::xloginsert::XLogBeginInsert() }
 // TODO(pg-port): XLogSetRecordFlags lives in access/transam/xloginsert.c
-unsafe fn XLogSetRecordFlags(_flags: uint8) { /* TODO(pg-port) */ }
+unsafe fn XLogSetRecordFlags(_flags: uint8) { crate::access::transam::xloginsert::XLogSetRecordFlags(_flags as _) }
 // TODO(pg-port): XLogRegisterData lives in access/transam/xloginsert.c
-unsafe fn XLogRegisterData(_data: *const c_void, _len: c_int) { /* TODO(pg-port) */ }
+unsafe fn XLogRegisterData(_data: *const c_void, _len: c_int) { crate::access::transam::xloginsert::XLogRegisterData(_data as _, _len as _) }
 // TODO(pg-port): XLogInsert lives in access/transam/xloginsert.c
-unsafe fn XLogInsert(_rmid: uint8, _info: uint8) -> XLogRecPtr { 0 }
+unsafe fn XLogInsert(_rmid: uint8, _info: uint8) -> XLogRecPtr { crate::access::transam::xloginsert::XLogInsert(_rmid as _, _info as _) }
 // TODO(pg-port): XLogSetAsyncXactLSN lives in access/transam/xlog.c
-unsafe fn XLogSetAsyncXactLSN(_asyncXactLSN: XLogRecPtr) { /* TODO(pg-port) */ }
+unsafe fn XLogSetAsyncXactLSN(_asyncXactLSN: XLogRecPtr) { crate::access::transam::xlog::XLogSetAsyncXactLSN(_asyncXactLSN) }
 // TODO(pg-port): XLogRecGetInfo lives in access/xlogreader.h
-unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 { 0 }
+unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 { crate::access::transam::xlogreader::XLogRecGetInfo(_record as _) }
 // TODO(pg-port): XLogRecGetData lives in access/xlogreader.h
-unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char { null_mut() }
+unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char { crate::access::transam::xlogreader::XLogRecGetData(_record as _) }
 // TODO(pg-port): XLogRecHasAnyBlockRefs lives in access/xlogreader.h
-unsafe fn XLogRecHasAnyBlockRefs(_record: *mut XLogReaderState) -> bool { false }
+unsafe fn XLogRecHasAnyBlockRefs(_record: *mut XLogReaderState) -> bool { crate::access::transam::xlogreader::XLogRecHasAnyBlockRefs(_record as _) }
 // TODO(pg-port): IS_INJECTION_POINT_ATTACHED lives in utils/injection_point.h
 unsafe fn IS_INJECTION_POINT_ATTACHED(_name: *const c_char) -> bool { false }
 // TODO(pg-port): gettext marker _() lives in c.h

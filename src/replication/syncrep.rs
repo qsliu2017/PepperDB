@@ -140,23 +140,24 @@ pub const LW_EXCLUSIVE: c_int = 0; // TODO(pg-port): storage/lwlock.h
 pub const LW_SHARED: c_int = 1;    // TODO(pg-port): storage/lwlock.h
 
 extern "C" {
-    /// STUB: SyncRepLock from storage/lwlock.h / storage/lwlocklist.h.
-    /// TODO(pg-port): real SyncRepLock lives in storage/lwlock.h
-    pub static mut SyncRepLock: *mut LWLock;
 }
+
+/// STUB: SyncRepLock from storage/lwlock.h / storage/lwlocklist.h.
+/// TODO(pg-port): real SyncRepLock lives in storage/lwlock.h
+use crate::backend_link_shims::SyncRepLock;
 
 /// STUB: LWLockAcquire.
 /// TODO(pg-port): real LWLockAcquire lives in storage/lwlock.h
 #[inline]
 unsafe fn LWLockAcquire(lock: *mut LWLock, mode: c_int) -> bool {
-    unimplemented!("LWLockAcquire: storage/lwlock.h")
+    crate::storage::lmgr::lwlock::LWLockAcquire(lock as _, if mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE })
 }
 
 /// STUB: LWLockRelease.
 /// TODO(pg-port): real LWLockRelease lives in storage/lwlock.h
 #[inline]
 unsafe fn LWLockRelease(lock: *mut LWLock) {
-    unimplemented!("LWLockRelease: storage/lwlock.h")
+    crate::storage::lmgr::lwlock::LWLockRelease(lock as _)
 }
 
 /// STUB: LWLockHeldByMeInMode.
@@ -230,9 +231,7 @@ unsafe fn pg_write_barrier() {
 /// STUB: guc_malloc - GUC-context allocator.
 /// TODO(pg-port): real guc_malloc lives in utils/guc.c
 #[inline]
-unsafe fn guc_malloc(elevel: c_int, size: Size) -> *mut c_void {
-    unimplemented!("guc_malloc: utils/guc.c")
-}
+unsafe fn guc_malloc(elevel: c_int, size: Size) -> *mut c_void { crate::utils::misc::guc::guc_malloc(elevel as _, size as _) }
 
 /// STUB: GUC_check_errcode macro shim.
 /// TODO(pg-port): real GUC_check_errcode lives in utils/guc.h
@@ -464,7 +463,7 @@ pub unsafe fn SyncRepWaitForLSN(lsn: XLogRecPtr, commit: bool) {
     Assert!(dlist_node_is_detached(&(*MyProc).syncRepLinks));
     Assert!(!WalSndCtl.is_null());
 
-    LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
+    LWLockAcquire(SyncRepLock as *mut LWLock, LW_EXCLUSIVE);
     Assert!((*MyProc).syncRepState == SYNC_REP_NOT_WAITING);
 
     /*
@@ -483,7 +482,7 @@ pub unsafe fn SyncRepWaitForLSN(lsn: XLogRecPtr, commit: bool) {
         if ((*WalSndCtl).sync_standbys_status & SYNC_STANDBY_DEFINED) == 0
             || lsn <= (*WalSndCtl).lsn[mode as usize]
         {
-            LWLockRelease(SyncRepLock);
+            LWLockRelease(SyncRepLock as *mut LWLock);
             return;
         }
     } else if lsn <= (*WalSndCtl).lsn[mode as usize] {
@@ -493,7 +492,7 @@ pub unsafe fn SyncRepWaitForLSN(lsn: XLogRecPtr, commit: bool) {
          * because we know that there is no point in doing so based on the
          * LSN.
          */
-        LWLockRelease(SyncRepLock);
+        LWLockRelease(SyncRepLock as *mut LWLock);
         return;
     } else if !SyncStandbysDefined() {
         /*
@@ -509,7 +508,7 @@ pub unsafe fn SyncRepWaitForLSN(lsn: XLogRecPtr, commit: bool) {
          * cluster, where we should never wait, and no sync standbys is the
          * default behavior.
          */
-        LWLockRelease(SyncRepLock);
+        LWLockRelease(SyncRepLock as *mut LWLock);
         return;
     }
 
@@ -521,7 +520,7 @@ pub unsafe fn SyncRepWaitForLSN(lsn: XLogRecPtr, commit: bool) {
     (*MyProc).syncRepState = SYNC_REP_WAITING;
     SyncRepQueueInsert(mode);
     Assert!(SyncRepQueueIsOrderedByLSN(mode));
-    LWLockRelease(SyncRepLock);
+    LWLockRelease(SyncRepLock as *mut LWLock);
 
     /* Alter ps display to show waiting for sync rep. */
     if update_process_title {
@@ -658,12 +657,12 @@ unsafe fn SyncRepQueueInsert(mode: c_int) {
 
 /// Acquire SyncRepLock and cancel any wait currently in progress.
 unsafe fn SyncRepCancelWait() {
-    LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
+    LWLockAcquire(SyncRepLock as *mut LWLock, LW_EXCLUSIVE);
     if !dlist_node_is_detached(&(*MyProc).syncRepLinks) {
         dlist_delete_thoroughly(&mut (*MyProc).syncRepLinks);
     }
     (*MyProc).syncRepState = SYNC_REP_NOT_WAITING;
-    LWLockRelease(SyncRepLock);
+    LWLockRelease(SyncRepLock as *mut LWLock);
 }
 
 pub unsafe fn SyncRepCleanupAtProcExit() {
@@ -672,14 +671,14 @@ pub unsafe fn SyncRepCleanupAtProcExit() {
      * slow down backend exit.
      */
     if !dlist_node_is_detached(&(*MyProc).syncRepLinks) {
-        LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
+        LWLockAcquire(SyncRepLock as *mut LWLock, LW_EXCLUSIVE);
 
         /* maybe we have just been removed, so recheck */
         if !dlist_node_is_detached(&(*MyProc).syncRepLinks) {
             dlist_delete_thoroughly(&mut (*MyProc).syncRepLinks);
         }
 
-        LWLockRelease(SyncRepLock);
+        LWLockRelease(SyncRepLock as *mut LWLock);
     }
 }
 
@@ -744,7 +743,7 @@ pub unsafe fn SyncRepReleaseWaiters() {
      * We're a potential sync standby. Release waiters if there are enough
      * sync standbys and we are considered as sync.
      */
-    LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
+    LWLockAcquire(SyncRepLock as *mut LWLock, LW_EXCLUSIVE);
 
     /*
      * Check whether we are a sync standby or not, and calculate the synced
@@ -778,7 +777,7 @@ pub unsafe fn SyncRepReleaseWaiters() {
      * managing a sync standby then just leave.
      */
     if !got_recptr || !am_sync {
-        LWLockRelease(SyncRepLock);
+        LWLockRelease(SyncRepLock as *mut LWLock);
         announce_next_takeover = !am_sync;
         return;
     }
@@ -800,7 +799,7 @@ pub unsafe fn SyncRepReleaseWaiters() {
         numapply = SyncRepWakeQueue(false, SYNC_REP_WAIT_APPLY);
     }
 
-    LWLockRelease(SyncRepLock);
+    LWLockRelease(SyncRepLock as *mut LWLock);
 
     let (whi, wlo) = LSN_FORMAT_ARGS(writePtr);
     let (fhi, flo) = LSN_FORMAT_ARGS(flushPtr);
@@ -1162,7 +1161,7 @@ unsafe fn SyncRepWakeQueue(all: bool, mode: c_int) -> c_int {
 
     Assert!(mode >= 0 && mode < NUM_SYNC_REP_WAIT_MODE as c_int);
     #[cfg(debug_assertions)]
-    Assert!(LWLockHeldByMeInMode(SyncRepLock, LW_EXCLUSIVE));
+    Assert!(LWLockHeldByMeInMode(SyncRepLock as *mut LWLock, LW_EXCLUSIVE));
     Assert!(SyncRepQueueIsOrderedByLSN(mode));
 
     dlist_foreach_modify!(iter, &mut (*WalSndCtl).SyncRepQueue[mode as usize], {
@@ -1215,7 +1214,7 @@ pub unsafe fn SyncRepUpdateSyncStandbysDefined() {
     if sync_standbys_defined
         != (((*WalSndCtl).sync_standbys_status & SYNC_STANDBY_DEFINED) != 0)
     {
-        LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
+        LWLockAcquire(SyncRepLock as *mut LWLock, LW_EXCLUSIVE);
 
         /*
          * If synchronous_standby_names has been reset to empty, it's futile
@@ -1240,9 +1239,9 @@ pub unsafe fn SyncRepUpdateSyncStandbysDefined() {
         (*WalSndCtl).sync_standbys_status = SYNC_STANDBY_INIT
             | (if sync_standbys_defined { SYNC_STANDBY_DEFINED } else { 0 });
 
-        LWLockRelease(SyncRepLock);
+        LWLockRelease(SyncRepLock as *mut LWLock);
     } else if ((*WalSndCtl).sync_standbys_status & SYNC_STANDBY_INIT) == 0 {
-        LWLockAcquire(SyncRepLock, LW_EXCLUSIVE);
+        LWLockAcquire(SyncRepLock as *mut LWLock, LW_EXCLUSIVE);
 
         /*
          * Note that there is no need to wake up the queues here.  We would
@@ -1260,7 +1259,7 @@ pub unsafe fn SyncRepUpdateSyncStandbysDefined() {
          */
         (*WalSndCtl).sync_standbys_status |= SYNC_STANDBY_INIT;
 
-        LWLockRelease(SyncRepLock);
+        LWLockRelease(SyncRepLock as *mut LWLock);
     }
 }
 

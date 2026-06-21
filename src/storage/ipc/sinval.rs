@@ -190,39 +190,39 @@ pub unsafe fn ProcessCatchupInterrupt() {
 // storage/sinvaladt.h - SI message queue access (sinvaladt.c not yet ported).
 // TODO: replace with crate::storage::sinvaladt when it lands.
 unsafe fn SIInsertDataEntries(_msgs: *const SharedInvalidationMessage, _n: c_int) {
-    unimplemented!()
+    crate::storage::ipc::sinvaladt::SIInsertDataEntries(_msgs as _, _n)
 }
 // TODO: replace with crate::storage::sinvaladt when it lands.
 unsafe fn SIGetDataEntries(_data: *mut SharedInvalidationMessage, _datasize: c_int) -> c_int {
-    unimplemented!()
+    crate::storage::ipc::sinvaladt::SIGetDataEntries(_data as _, _datasize)
 }
 // TODO: replace with crate::storage::sinvaladt when it lands.
 unsafe fn SICleanupQueue(_callerHasWriteLock: bool, _minFree: c_int) {
-    unimplemented!()
+    crate::storage::ipc::sinvaladt::SICleanupQueue(_callerHasWriteLock, _minFree)
 }
 
 // storage/latch.h - SetLatch (latch.c not yet ported).
 // TODO: replace with crate::storage::latch::SetLatch when it lands.
 unsafe fn SetLatch(_latch: *mut Latch) {
-    unimplemented!()
+    crate::storage::ipc::latch::SetLatch(_latch as _)
 }
 
 // utils/inval.h - AcceptInvalidationMessages (inval.c not yet ported).
 // TODO: replace with crate::utils::cache::inval::AcceptInvalidationMessages when it lands.
 unsafe fn AcceptInvalidationMessages() {
-    unimplemented!()
+    crate::utils::cache::inval::AcceptInvalidationMessages()
 }
 
 // access/xact.h - transaction control (xact.c not yet ported).
 // TODO: replace with crate::access::transam::xact when it lands.
 unsafe fn IsTransactionOrTransactionBlock() -> bool {
-    unimplemented!()
+    crate::access::transam::xact::IsTransactionOrTransactionBlock()
 }
 // TODO: replace with crate::access::transam::xact when it lands.
 unsafe fn StartTransactionCommand() {
-    unimplemented!()
+    crate::access::transam::xact::StartTransactionCommand()
 }
 // TODO: replace with crate::access::transam::xact when it lands.
 unsafe fn CommitTransactionCommand() {
-    unimplemented!()
+    crate::access::transam::xact::CommitTransactionCommand()
 }

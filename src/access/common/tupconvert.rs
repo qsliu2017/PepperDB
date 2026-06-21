@@ -88,6 +88,7 @@ pub struct TupleConversionMap {
  * # Safety
  * `indesc` and `outdesc` must be live TupleDescs that outlive the returned map.
  */
+#[no_mangle]
 pub unsafe fn convert_tuples_by_position(
     indesc: TupleDesc,
     outdesc: TupleDesc,
@@ -133,6 +134,7 @@ pub unsafe fn convert_tuples_by_position(
  * # Safety
  * `indesc` and `outdesc` must be live TupleDescs that outlive the returned map.
  */
+#[no_mangle]
 pub unsafe fn convert_tuples_by_name(
     indesc: TupleDesc,
     outdesc: TupleDesc,
@@ -191,6 +193,7 @@ pub unsafe fn convert_tuples_by_name_attrmap(
  * # Safety
  * `tuple` must be a live HeapTuple matching `map->indesc`; `map` a live map.
  */
+#[no_mangle]
 pub unsafe fn execute_attr_map_tuple(
     tuple: HeapTuple,
     map: *mut TupleConversionMap,
@@ -237,6 +240,7 @@ pub unsafe fn execute_attr_map_tuple(
  * # Safety
  * `in_slot`/`out_slot` must be live TupleTableSlots; `attrMap` a live AttrMap.
  */
+#[no_mangle]
 pub unsafe fn execute_attr_map_slot(
     attrMap: *mut AttrMap,
     in_slot: *mut TupleTableSlot,

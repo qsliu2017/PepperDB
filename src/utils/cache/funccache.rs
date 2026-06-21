@@ -471,6 +471,7 @@ unsafe fn compute_function_hashkey(
  * 3. In validation mode, we have no inputs to look at, so assume that
  *    polymorphic arguments are integer, integer-array or integer-range.
  */
+#[no_mangle]
 pub unsafe fn cfunc_resolve_polymorphic_argtypes(
     numargs: c_int,
     argtypes: *mut Oid,
@@ -601,6 +602,7 @@ unsafe fn delete_function(func: *mut CachedFunction) {
  * is expected to increment the use_count and decrement it when done with
  * the cache entry.
  */
+#[no_mangle]
 pub unsafe fn cached_function_compile(
     fcinfo: FunctionCallInfo,
     mut function: *mut CachedFunction,
@@ -776,19 +778,19 @@ unsafe fn CStr_to_str<'a>(_s: *const c_char) -> &'a str {
 }
 
 unsafe fn hash_any(_k: *const u8, _keylen: c_int) -> Datum {
-    unimplemented!() // TODO: src/common/hashfn.c
+    crate::common::hashfn::hash_any(_k as _, _keylen as _) as _
 }
 
 unsafe fn hash_combine(_a: uint32, _b: uint32) -> uint32 {
-    unimplemented!() // TODO: src/include/common/hashfn.h
+    crate::common::hashfn::hash_combine(_a as _, _b as _) as _
 }
 
 unsafe fn hashRowType(_desc: TupleDesc) -> uint32 {
-    unimplemented!() // TODO: src/backend/utils/cache/typcache.c
+    crate::access::common::tupdesc::hashRowType(_desc as _) as _
 }
 
 unsafe fn equalRowTypes(_tupdesc1: TupleDesc, _tupdesc2: TupleDesc) -> bool {
-    unimplemented!() // TODO: src/backend/access/common/tupdesc.c
+    crate::access::common::tupdesc::equalRowTypes(_tupdesc1 as _, _tupdesc2 as _)
 }
 
 unsafe fn hash_create(
@@ -797,7 +799,7 @@ unsafe fn hash_create(
     _info: *mut HASHCTL,
     _flags: c_int,
 ) -> *mut HTAB {
-    unimplemented!() // TODO: src/backend/utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_create(_tabname as _, _nelem as _, _info as _, _flags as _) as _
 }
 
 unsafe fn hash_search(
@@ -806,19 +808,19 @@ unsafe fn hash_search(
     _action: HASHACTION,
     _found: *mut bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO: src/backend/utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_search(_hashp as _, _key_ptr as _, core::mem::transmute(_action), _found as _) as _
 }
 
 unsafe fn CreateTupleDescCopy(_tupdesc: TupleDesc) -> TupleDesc {
-    unimplemented!() // TODO: src/backend/access/common/tupdesc.c
+    crate::access::common::tupdesc::CreateTupleDescCopy(_tupdesc as _) as _
 }
 
 unsafe fn FreeTupleDesc(_tupdesc: TupleDesc) {
-    unimplemented!() // TODO: src/backend/access/common/tupdesc.c
+    crate::access::common::tupdesc::FreeTupleDesc(_tupdesc as _)
 }
 
 unsafe fn CALLED_AS_TRIGGER(_fcinfo: FunctionCallInfo) -> bool {
-    unimplemented!() // TODO: src/include/commands/trigger.h
+    crate::commands::trigger::CALLED_AS_TRIGGER(_fcinfo as _)
 }
 
 unsafe fn CALLED_AS_EVENT_TRIGGER(_fcinfo: FunctionCallInfo) -> bool {
@@ -830,7 +832,7 @@ unsafe fn get_call_result_type(
     _resultTypeId: *mut Oid,
     _resultTupleDesc: *mut TupleDesc,
 ) -> TypeFuncClass {
-    unimplemented!() // TODO: src/backend/utils/fmgr/funcapi.c
+    crate::utils::fmgr::funcapi::get_call_result_type(_fcinfo as _, _resultTypeId as _, _resultTupleDesc as _) as _
 }
 
 unsafe fn resolve_polymorphic_argtypes(
@@ -839,47 +841,47 @@ unsafe fn resolve_polymorphic_argtypes(
     _argmodes: *mut c_char,
     _call_expr: *mut Node,
 ) -> bool {
-    unimplemented!() // TODO: src/backend/utils/fmgr/funcapi.c
+    crate::utils::fmgr::funcapi::resolve_polymorphic_argtypes(_numargs as _, _argtypes as _, _argmodes as _, _call_expr as _)
 }
 
 unsafe fn get_call_expr_argtype(_expr: *mut Node, _argnum: c_int) -> Oid {
-    unimplemented!() // TODO: src/backend/utils/fmgr/funcapi.c
+    crate::utils::fmgr::get_call_expr_argtype(_expr as _, _argnum as _) as _
 }
 
 unsafe fn HeapTupleHeaderGetRawXmin(_tup: HeapTupleHeader) -> TransactionId {
-    unimplemented!() // TODO: src/include/access/htup_details.h
+    crate::access::htup_details::HeapTupleHeaderGetRawXmin(_tup as _) as _
 }
 
 unsafe fn ItemPointerEquals(_pointer1: ItemPointer, _pointer2: ItemPointer) -> bool {
-    unimplemented!() // TODO: src/backend/storage/page/itemptr.c
+    crate::storage::itemptr::ItemPointerEquals(_pointer1 as _, _pointer2 as _)
 }
 
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!() // TODO: src/backend/utils/cache/syscache.c
+    crate::utils::cache::syscache::SearchSysCache1(_cacheId as _, _key1 as _) as _
 }
 
 unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!() // TODO: src/backend/utils/cache/syscache.c
+    crate::utils::cache::syscache::ReleaseSysCache(_tuple as _)
 }
 
 unsafe fn HeapTupleIsValid(_tuple: HeapTuple) -> bool {
-    unimplemented!() // TODO: src/include/access/htup.h
+    crate::access::htup_details::HeapTupleIsValid(_tuple as _)
 }
 
 unsafe fn GETSTRUCT(_tuple: HeapTuple) -> *mut c_void {
-    unimplemented!() // TODO: src/include/access/htup_details.h
+    crate::access::htup_details::GETSTRUCT(_tuple as _) as _
 }
 
 unsafe fn memset(_s: *mut c_void, _c: c_int, _n: usize) -> *mut c_void {
-    unimplemented!() // TODO: libc memset
+    libc::memset(_s as _, _c as _, _n as _) as _
 }
 
 unsafe fn memcpy(_dst: *mut c_void, _src: *const c_void, _n: usize) -> *mut c_void {
-    unimplemented!() // TODO: libc memcpy
+    libc::memcpy(_dst as _, _src as _, _n as _) as _
 }
 
 unsafe fn memcmp(_s1: *const c_void, _s2: *const c_void, _n: usize) -> c_int {
-    unimplemented!() // TODO: libc memcmp
+    libc::memcmp(_s1 as _, _s2 as _, _n as _) as _
 }
 
 macro_rules! PG_TRY {
@@ -904,7 +906,7 @@ const PROARGMODE_IN: c_char = b'i' as c_char; // TODO: src/include/catalog/pg_pr
 const PROARGMODE_OUT: c_char = b'o' as c_char;
 const PROARGMODE_TABLE: c_char = b't' as c_char;
 
-const PROCOID: c_int = 0; // TODO: src/include/catalog/pg_proc_d.h (SysCache id)
+const PROCOID: c_int = 47; // TODO: src/include/catalog/pg_proc_d.h (SysCache id)
 
 const HASH_ELEM: c_int = 0x0008; // TODO: src/include/utils/hsearch.h
 const HASH_FUNCTION: c_int = 0x0010;

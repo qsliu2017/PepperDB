@@ -336,7 +336,7 @@ unsafe extern "C" fn pgaio_worker_error_callback(arg: *mut c_void) {
 pub unsafe extern "C" fn IoWorkerMain(startup_data: *const c_void, startup_data_len: Size) {
     let mut local_sigjmp_buf: sigjmp_buf = std::mem::zeroed();
     let mut error_ioh: *mut PgAioHandle = std::ptr::null_mut();
-    let mut errcallback: ErrorContextCallback = std::mem::zeroed();
+    let mut errcallback: ErrorContextCallback = core::mem::zeroed();
     let mut error_errno: c_int = 0;
     let mut cmd: [c_char; 128] = [0; 128];
 
@@ -605,11 +605,11 @@ pub const WAIT_EVENT_IO_WORKER_MAIN: uint32 = 0;
 
 pub const ENOENT: c_int = 2;
 
-pub static mut AioWorkerSubmissionQueueLock: *mut c_void = std::ptr::null_mut();
+use crate::backend_link_shims::AioWorkerSubmissionQueueLock;
 pub static mut MyLatch: *mut Latch = std::ptr::null_mut();
 pub static mut IsUnderPostmaster: bool = false;
 pub static mut MyBackendType: c_int = 0;
-pub static mut MyProcNumber: ProcNumber = 0;
+extern "C" { pub static mut MyProcNumber: ProcNumber; }
 pub static mut error_context_stack: *mut ErrorContextCallback = std::ptr::null_mut();
 pub static mut PG_exception_stack: *mut sigjmp_buf = std::ptr::null_mut();
 pub static mut ShutdownRequestPending: bool = false;
@@ -696,7 +696,7 @@ unsafe fn add_size(s1: Size, s2: Size) -> Size {
 }
 
 unsafe fn ShmemInitStruct(name: *const c_char, size: Size, found_ptr: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/shmem.h
+    crate::storage::ipc::shmem::ShmemInitStruct(name, size, found_ptr)
 }
 
 unsafe fn pgaio_io_get_id(ioh: *mut PgAioHandle) -> c_int {
@@ -736,11 +736,11 @@ unsafe fn LWLockReleaseAll() {
 }
 
 unsafe fn SetLatch(latch: *mut Latch) {
-    unimplemented!() // TODO: storage/latch.h
+    crate::storage::ipc::latch::SetLatch(latch as _)
 }
 
 unsafe fn ResetLatch(latch: *mut Latch) {
-    unimplemented!() // TODO: storage/latch.h
+    crate::storage::ipc::latch::ResetLatch(latch as _)
 }
 
 unsafe fn WaitLatch(latch: *mut Latch, wakeEvents: c_int, timeout: i64, wait_event_info: uint32) -> c_int {

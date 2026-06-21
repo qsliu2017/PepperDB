@@ -15,6 +15,9 @@
 
 use crate::prelude::*;
 
+// crate-root #[macro_export] macros used in this file.
+use crate::{foreach, PG_RETURN_DATUM, PG_RETURN_NULL};
+
 // ---------------------------------------------------------------------------
 // REAL imports from ported modules
 // ---------------------------------------------------------------------------
@@ -35,10 +38,15 @@ use crate::miscadmin::{
     B_WAL_RECEIVER, B_WAL_SENDER, B_WAL_SUMMARIZER, B_WAL_WRITER, InitProcessing,
     SECURITY_LOCAL_USERID_CHANGE, SECURITY_NOFORCE_RLS, SECURITY_RESTRICTED_OPERATION,
 };
+use crate::miscadmin::IsBootstrapProcessingMode;
 use crate::nodes::pg_list::{lcons, lfirst, list_free_deep, List, NIL};
+use crate::port::strlcat::strlcat;
 use crate::storage::file::fd::{pg_fsync, AllocateFile, FreeFile};
+use crate::storage::ipc::shmem::add_size;
+use crate::storage::pg_shmem::{PGShmemHeader, PGShmemMagic};
 use crate::storage::ipc::ipc::{on_exit_reset, on_proc_exit};
-use crate::storage::ipc::latch::{InitLatch, InitializeLatchWaitSet, ModifyWaitEvent, SetLatch};
+use crate::storage::ipc::latch::{InitLatch, InitializeLatchWaitSet, Latch as LatchStruct, SetLatch};
+use crate::storage::ipc::waiteventset::ModifyWaitEvent;
 use crate::storage::ipc::pmsignal::PostmasterDeathSignalInit;
 use crate::storage::lmgr::proc::{MyProc, PGPROC};
 use crate::utils::cache::syscache::{ReleaseSysCache, SearchSysCache1};
@@ -102,16 +110,16 @@ unsafe fn AcceptInvalidationMessages() {
 
 // utils/misc/guc.c
 const PGC_INTERNAL: c_int = 0;
-const PGC_BACKEND: c_int = 6;
-const PGC_S_DYNAMIC_DEFAULT: c_int = 5;
-const PGC_S_OVERRIDE: c_int = 17;
+const PGC_BACKEND: c_int = 4;
+const PGC_S_DYNAMIC_DEFAULT: c_int = 1;
+const PGC_S_OVERRIDE: c_int = 10;
 unsafe fn SetConfigOption(
-    _name: *const c_char,
-    _value: *const c_char,
-    _context: c_int,
-    _source: c_int,
+    name: *const c_char,
+    value: *const c_char,
+    context: c_int,
+    source: c_int,
 ) {
-    // TODO(pg-port): translate utils/misc/guc.c SetConfigOption
+    crate::utils::misc::guc::SetConfigOption(name, value, core::mem::transmute(context), core::mem::transmute(source))
 }
 
 // utils/misc/superuser.c
@@ -121,8 +129,7 @@ unsafe fn superuser_arg(_roleid: Oid) -> bool {
 }
 
 // utils/cache/syscache.h cache ids
-const AUTHOID: c_int = 12;
-const AUTHNAME: c_int = 11;
+use crate::utils::cache::syscache_ids_gen::{AUTHOID, AUTHNAME};
 
 // catalog/pg_authid.h
 const BOOTSTRAP_SUPERUSERID: Oid = 10;
@@ -175,19 +182,9 @@ const WAIT_EVENT_LOCK_FILE_RECHECKDATADIR_READ: u32 = 0;
 //
 // The point of this exercise is to detect the case where a prior postmaster
 // crashed, but it left child backends that are still running.
-unsafe fn PGSharedMemoryIsInUse(_id1: c_ulong, _id2: c_ulong) -> bool {
-    let szShareMem: *mut c_char = GetSharedMemName();
-
-    let hmap: crate::port::win32_port::HANDLE = OpenFileMapping(FILE_MAP_READ, FALSE, szShareMem);
-
-    libc::free(szShareMem as *mut c_void);
-
-    if hmap.is_null() {
-        return false;
-    }
-
-    CloseHandle(hmap);
-    true
+unsafe fn PGSharedMemoryIsInUse(id1: c_ulong, id2: c_ulong) -> bool {
+    // bring-up: use the real sysv impl (this file shadowed it with the win32_shmem version).
+    crate::port::sysv_shmem::PGSharedMemoryIsInUse(id1, id2)
 }
 
 // utils/varlena.c
@@ -207,8 +204,8 @@ unsafe fn first_dir_separator(filename: *const c_char) -> *mut c_char {
 unsafe fn make_absolute_path(path: *const c_char) -> *mut c_char {
     crate::port::path::make_absolute_path(path)
 }
-unsafe fn get_pkglib_path(my_exec_path: *const c_char, ret_path: *mut c_char) {
-    crate::port::path::get_pkglib_path(my_exec_path, ret_path)
+unsafe fn get_pkglib_path(my_exec_path0: *const c_char, ret_path: *mut c_char) {
+    crate::port::path::get_pkglib_path(my_exec_path0, ret_path)
 }
 unsafe fn find_my_exec(argv0: *const c_char, retpath: *mut c_char) -> c_int {
     crate::port::port_api::find_my_exec(argv0, retpath)
@@ -277,7 +274,10 @@ pub static mut MyBackendType: BackendType = B_INVALID;
 /* List of lock files to be removed at proc exit */
 static mut lock_files: *mut List = NIL;
 
-static mut LocalLatchData: LatchData = LatchData { _opaque: [0; 1] };
+// Must be a full Latch (InitLatch writes the whole struct); a [u8;1] placeholder overflowed
+// into adjacent globals (ASan: global-buffer-overflow latch.rs InitLatch).
+static mut LocalLatchData: LatchStruct =
+    LatchStruct { is_set: 0, maybe_sleeping: 0, is_shared: false, owner_pid: 0 };
 
 // Concrete storage backing the process-local latch. In C, struct Latch.
 #[repr(C)]
@@ -430,7 +430,26 @@ pub unsafe extern "C" fn InitStandaloneProcess(argv0: *const c_char) {
     }
 
     if *pkglib_path.as_ptr() == 0 {
-        get_pkglib_path(my_exec_path.as_ptr(), pkglib_path.as_mut_ptr());
+        // Allow PG_LIBDIR to override the exec-relative package library path.
+        // The dev harness builds loadable modules (plpgsql, regress) into a
+        // scratch dir and points PG_LIBDIR at it; without this, $libdir resolves
+        // relative to the binary and "could not access file plpgsql" results.
+        let mut set_from_env = false;
+        if let Some(dir) = std::env::var_os("PG_LIBDIR") {
+            let bytes = dir.as_encoded_bytes();
+            if !bytes.is_empty() && bytes.len() < MAXPGPATH - 1 {
+                core::ptr::copy_nonoverlapping(
+                    bytes.as_ptr() as *const c_char,
+                    pkglib_path.as_mut_ptr(),
+                    bytes.len(),
+                );
+                *pkglib_path.as_mut_ptr().add(bytes.len()) = 0;
+                set_from_env = true;
+            }
+        }
+        if !set_from_env {
+            get_pkglib_path(my_exec_path.as_ptr(), pkglib_path.as_mut_ptr());
+        }
     }
 }
 
@@ -443,10 +462,10 @@ pub unsafe extern "C" fn SwitchToSharedLatch() {
 
     if !FeBeWaitSet.is_null() {
         ModifyWaitEvent(
-            FeBeWaitSet,
+            FeBeWaitSet as *mut crate::storage::ipc::waiteventset::WaitEventSet,
             FeBeWaitSetLatchPos,
             WL_LATCH_SET,
-            MyLatch,
+            MyLatch as *mut LatchStruct,
         );
     }
 
@@ -455,13 +474,13 @@ pub unsafe extern "C" fn SwitchToSharedLatch() {
      * shouldn't normally be necessary as code is supposed to check the
      * condition before waiting for the latch, but a bit care can't hurt.
      */
-    SetLatch(MyLatch);
+    SetLatch(MyLatch as *mut LatchStruct);
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn InitProcessLocalLatch() {
     MyLatch = core::ptr::addr_of_mut!(LocalLatchData) as *mut Latch;
-    InitLatch(MyLatch);
+    InitLatch(MyLatch as *mut LatchStruct);
 }
 
 #[no_mangle]
@@ -473,14 +492,14 @@ pub unsafe extern "C" fn SwitchBackToLocalLatch() {
 
     if !FeBeWaitSet.is_null() {
         ModifyWaitEvent(
-            FeBeWaitSet,
+            FeBeWaitSet as *mut crate::storage::ipc::waiteventset::WaitEventSet,
             FeBeWaitSetLatchPos,
             WL_LATCH_SET,
-            MyLatch,
+            MyLatch as *mut LatchStruct,
         );
     }
 
-    SetLatch(MyLatch);
+    SetLatch(MyLatch as *mut LatchStruct);
 }
 
 // storage/latch.h WL_LATCH_SET
@@ -740,6 +759,7 @@ pub unsafe extern "C" fn GetOuterUserId() -> Oid {
 }
 
 unsafe fn SetOuterUserId(userid: Oid, is_superuser: bool) {
+    if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_AUTH SetOuterUserId pid={} userid={}", std::process::id(), userid); }
     Assert!(SecurityRestrictionContext == 0);
     Assert!(OidIsValid(userid));
     OuterUserId = userid;
@@ -827,6 +847,7 @@ pub unsafe extern "C" fn GetUserIdAndSecContext(userid: *mut Oid, sec_context: *
 
 #[no_mangle]
 pub unsafe extern "C" fn SetUserIdAndSecContext(userid: Oid, sec_context: c_int) {
+    if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_AUTH SetUserIdAndSecContext pid={} userid={}", std::process::id(), userid); }
     CurrentUserId = userid;
     SecurityRestrictionContext = sec_context;
 }
@@ -949,7 +970,7 @@ pub unsafe extern "C" fn InitializeSessionUserId(
      */
     if !rolename.is_null() {
         roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(rolename as *const c_void));
-        if !HeapTupleIsValid(roleTup) {
+        if roleTup.is_null() {
             // C also: errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION)
             ereport!(
                 FATAL,
@@ -1102,13 +1123,13 @@ pub unsafe extern "C" fn InitializeSystemUser(authn_id: *const c_char, auth_meth
  * SQL-function SYSTEM_USER
  */
 #[no_mangle]
-pub unsafe extern "C" fn system_user(_fcinfo: FunctionCallInfo) -> Datum {
+pub unsafe extern "C" fn system_user(fcinfo: FunctionCallInfo) -> Datum {
     let sysuser: *const c_char = GetSystemUser();
 
     if !sysuser.is_null() {
         PG_RETURN_DATUM!(CStringGetTextDatum(sysuser))
     } else {
-        PG_RETURN_NULL!()
+        PG_RETURN_NULL!(fcinfo)
     }
 }
 
@@ -1370,7 +1391,7 @@ unsafe fn CreateLockFile(
     let mut ntries: c_int;
     let mut len: isize;
     let mut encoded_pid: c_int;
-    let other_pid: pid_t;
+    let mut other_pid: pid_t;
     let my_pid: pid_t;
     let my_p_pid: pid_t;
     let my_gp_pid: pid_t;
@@ -2382,8 +2403,6 @@ static mut UsedShmemSegAddr: *mut c_void = std::ptr::null_mut();
 static mut UsedShmemSegSize: Size = 0;
 
 const WIN32_STACK_RLIMIT: usize = 4194304;
-// PROTECTIVE_REGION_SIZE: at least one thread stack; see win32_shmem.c comment.
-const PROTECTIVE_REGION_SIZE: usize = 10 * WIN32_STACK_RLIMIT;
 const MEM_RESERVE: u32 = 0x2000;
 const MEM_RELEASE: u32 = 0x8000;
 const PAGE_NOACCESS: u32 = 0x01;
@@ -2404,9 +2423,6 @@ const ERROR_NO_SYSTEM_RESOURCES: u32 = 1450;
 const FALSE: crate::port::win32_port::BOOL = 0;
 const TRUE: crate::port::win32_port::BOOL = 1;
 const SE_LOCK_MEMORY_NAME: &CStr = c"SeLockMemoryPrivilege";
-
-const PGC_INTERNAL: c_int = 3;
-const PGC_S_DYNAMIC_DEFAULT: c_int = 1;
 
 use crate::port::win32_port::GetLastError;
 
@@ -2564,12 +2580,12 @@ unsafe fn EnableLockPagesPrivilege(elevel: c_int) -> bool {
 unsafe fn PGSharedMemoryCreate(size: Size, shim: *mut *mut PGShmemHeader) -> *mut PGShmemHeader {
     let memAddress: *mut c_void;
     let hdr: *mut PGShmemHeader;
-    let mut hmap: crate::port::win32_port::HANDLE;
+    let mut hmap: crate::port::win32_port::HANDLE = std::ptr::null_mut();
     let mut hmap2: crate::port::win32_port::HANDLE = std::ptr::null_mut();
     let szShareMem: *mut c_char;
     let mut i: c_int;
-    let size_high: DWORD;
-    let size_low: DWORD;
+    let mut size_high: DWORD;
+    let mut size_low: DWORD;
     let mut largePageSize: usize = 0;
     let orig_size: Size = size;
     let mut size: Size = size;
@@ -3145,7 +3161,8 @@ unsafe fn AdjustTokenPrivileges(
 }
 
 unsafe fn dsm_set_control_handle(h: crate::storage::pg_shmem::dsm_handle) {
-    crate::storage::ipc::dsm::dsm_set_control_handle(h)
+    // EXEC_BACKEND-only in C (dsm_set_control_handle is #[cfg(EXEC_BACKEND)]); no-op here.
+    let _ = h;
 }
 
 unsafe fn on_shmem_exit(function: crate::storage::ipc::ipc::pg_on_exit_callback, arg: Datum) {
@@ -3165,6 +3182,15 @@ macro_rules! errmsg_internal {
     ($($arg:tt)*) => { format!($($arg)*) };
 }
 use errmsg_internal;
+
+// TODO(pg-port): real GUC_check_errdetail - no-op shim until guc.c is ported.
+macro_rules! GUC_check_errdetail {
+    ($($arg:tt)*) => {{
+        let _detail: String = format!($($arg)*);
+        let _ = _detail;
+    }};
+}
+use GUC_check_errdetail;
 
 // utils/misc/guc_tables.c
 const HUGE_PAGES_ON: c_int = 1;

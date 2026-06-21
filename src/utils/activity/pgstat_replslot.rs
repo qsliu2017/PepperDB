@@ -75,9 +75,7 @@ pub type ReplicationSlot = c_void;
 /// ReplicationSlotCtl array. Used as the per-slot stats object id.
 /// TODO: needs the ReplicationSlotCtl array; returns 0.
 #[inline]
-pub unsafe fn ReplicationSlotIndex(_slot: *mut ReplicationSlot) -> c_int {
-    0
-}
+pub unsafe fn ReplicationSlotIndex(_slot: *mut ReplicationSlot) -> c_int { unimplemented!() }
 
 /// STUB: SlotIsLogical(slot) -- true for logical slots, which are the only ones
 /// we collect stats for. TODO: needs ReplicationSlot internals; returns true.
@@ -92,17 +90,13 @@ pub unsafe fn SlotIsLogical(_slot: *mut ReplicationSlot) -> bool {
 pub unsafe fn SearchNamedReplicationSlot(
     _name: *const c_char,
     _need_lock: bool,
-) -> *mut ReplicationSlot {
-    null_mut()
-}
+) -> *mut ReplicationSlot { unimplemented!() }
 
 /// STUB: ReplicationSlotName(index, name) -- writes the slot name at `index`
 /// into `*name`, returning false if no such slot. TODO: needs the slot array;
 /// returns false.
 #[inline]
-pub unsafe fn ReplicationSlotName(_index: u64, _name: *mut NameData) -> bool {
-    false
-}
+pub unsafe fn ReplicationSlotName(_index: u64, _name: *mut NameData) -> bool { unimplemented!() }
 
 // ---------------------------------------------------------------------------
 // pgstat.rs-subset shims for primitives not exposed by the subset.

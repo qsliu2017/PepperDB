@@ -138,9 +138,7 @@ const ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION: c_int = 0;
 
 // TODO(pg-port): real GetMockAuthenticationNonce lives in access/xlog.c
 //   (declared in src/include/access/xlog.h).
-unsafe fn GetMockAuthenticationNonce() -> *mut c_char {
-    unimplemented!("TODO(pg-port): GetMockAuthenticationNonce lives in access/xlog.c")
-}
+unsafe fn GetMockAuthenticationNonce() -> *mut c_char { crate::access::transam::xlog::GetMockAuthenticationNonce() }
 
 // ---------------------------------------------------------------------------
 // Minimal libc-style helpers (mirrors pattern in scram_common.rs / base64.rs)

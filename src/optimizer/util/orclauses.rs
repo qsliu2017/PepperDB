@@ -97,9 +97,8 @@ unsafe fn is_orclause(clause: *const c_void) -> bool {
 /// Conservatively reports "no volatile functions" so the safety check below
 /// never rejects on volatility grounds.  TODO: port clauses.c.
 #[inline]
-unsafe fn contain_volatile_functions(_clause: *mut Node) -> bool {
-    // TODO(stub): real volatility walk lives in optimizer/clauses.c.
-    false
+unsafe fn contain_volatile_functions(clause: *mut Node) -> bool {
+    crate::optimizer::util::clauses::contain_volatile_functions(clause)
 }
 
 /*

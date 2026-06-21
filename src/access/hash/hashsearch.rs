@@ -190,62 +190,36 @@ unsafe fn _hash_getbuf(
     _blkno: BlockNumber,
     _access: c_int,
     _flags: c_int,
-) -> Buffer {
-    unimplemented!() // TODO: access/hashpage.c
-}
+) -> Buffer { unimplemented!() }
 
 unsafe fn _hash_getbucketbuf_from_hashkey(
     _rel: Relation,
     _hashkey: uint32,
     _access: c_int,
     _cachedmetap: *mut c_void,
-) -> Buffer {
-    unimplemented!() // TODO: access/hashpage.c
-}
+) -> Buffer { unimplemented!() }
 
-unsafe fn _hash_relbuf(_rel: Relation, _buf: Buffer) {
-    unimplemented!() // TODO: access/hashpage.c
-}
+unsafe fn _hash_relbuf(_rel: Relation, _buf: Buffer) { unimplemented!() }
 
-unsafe fn _hash_dropbuf(_rel: Relation, _buf: Buffer) {
-    unimplemented!() // TODO: access/hashpage.c
-}
+unsafe fn _hash_dropbuf(_rel: Relation, _buf: Buffer) { unimplemented!() }
 
-unsafe fn _hash_dropscanbuf(_rel: Relation, _so: HashScanOpaque) {
-    unimplemented!() // TODO: access/hashpage.c
-}
+unsafe fn _hash_dropscanbuf(_rel: Relation, _so: HashScanOpaque) { unimplemented!() }
 
-unsafe fn _hash_get_oldblock_from_newbucket(_rel: Relation, _new_bucket: Bucket) -> BlockNumber {
-    unimplemented!() // TODO: access/hashpage.c
-}
+unsafe fn _hash_get_oldblock_from_newbucket(_rel: Relation, _new_bucket: Bucket) -> BlockNumber { crate::access::hash::hashutil::_hash_get_oldblock_from_newbucket(_rel, _new_bucket) }
 
-unsafe fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: c_int) {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: c_int) { crate::access::hash::hashutil::_hash_checkpage(_rel, _buf, _flags) }
 
-unsafe fn _hash_binsearch(_page: Page, _hash_value: uint32) -> OffsetNumber {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_binsearch(_page: Page, _hash_value: uint32) -> OffsetNumber { crate::access::hash::hashutil::_hash_binsearch(_page, _hash_value) }
 
-unsafe fn _hash_binsearch_last(_page: Page, _hash_value: uint32) -> OffsetNumber {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_binsearch_last(_page: Page, _hash_value: uint32) -> OffsetNumber { crate::access::hash::hashutil::_hash_binsearch_last(_page, _hash_value) }
 
-unsafe fn _hash_kill_items(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_kill_items(_scan: IndexScanDesc) { crate::access::hash::hashutil::_hash_kill_items(_scan) }
 
-unsafe fn _hash_checkqual(_scan: IndexScanDesc, _itup: IndexTuple) -> bool {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_checkqual(_scan: IndexScanDesc, _itup: IndexTuple) -> bool { crate::access::hash::hashutil::_hash_checkqual(_scan, _itup) }
 
-unsafe fn _hash_datum2hashkey(_rel: Relation, _key: Datum) -> uint32 {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_datum2hashkey(_rel: Relation, _key: Datum) -> uint32 { crate::access::hash::hashutil::_hash_datum2hashkey(_rel, _key) }
 
-unsafe fn _hash_datum2hashkey_type(_rel: Relation, _key: Datum, _keytype: Oid) -> uint32 {
-    unimplemented!() // TODO: access/hashutil.c
-}
+unsafe fn _hash_datum2hashkey_type(_rel: Relation, _key: Datum, _keytype: Oid) -> uint32 { crate::access::hash::hashutil::_hash_datum2hashkey_type(_rel, _key, _keytype) }
 
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
     unimplemented!() // TODO: storage/bufmgr.h
@@ -255,13 +229,9 @@ unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO: storage/bufmgr.c
 }
 
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 
-unsafe fn BufferIsInvalid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn BufferIsInvalid(_buffer: Buffer) -> bool { crate::storage::buf::BufferIsInvalid(_buffer) }
 
 unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
     unimplemented!() // TODO: storage/bufmgr.c

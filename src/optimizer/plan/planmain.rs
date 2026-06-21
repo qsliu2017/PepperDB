@@ -31,85 +31,51 @@ pub type query_pathkeys_callback =
 // Stubs for not-yet-ported callees.  TODO: replace with real translations.
 // ---------------------------------------------------------------------------
 
-unsafe fn setup_simple_rel_arrays(_root: *mut PlannerInfo) {
-    unimplemented!()
-}
+unsafe fn setup_simple_rel_arrays(_root: *mut PlannerInfo) { crate::optimizer::util::relnode::setup_simple_rel_arrays(_root) }
 
 unsafe fn build_simple_rel(
     _root: *mut PlannerInfo,
     _relid: c_int,
     _parent: *mut RelOptInfo,
-) -> *mut RelOptInfo {
-    unimplemented!()
-}
+) -> *mut RelOptInfo { crate::optimizer::util::relnode::build_simple_rel(_root, _relid, _parent) }
 
-unsafe fn is_parallel_safe(_root: *mut PlannerInfo, _node: *mut Node) -> bool {
-    unimplemented!()
-}
+unsafe fn is_parallel_safe(_root: *mut PlannerInfo, _node: *mut Node) -> bool { crate::optimizer::util::clauses::is_parallel_safe(_root, _node) }
 
 unsafe fn create_group_result_path(
     _root: *mut PlannerInfo,
     _rel: *mut RelOptInfo,
     _target: *mut PathTarget,
     _havingqual: *mut List,
-) -> *mut Path {
-    unimplemented!()
-}
+) -> *mut Path { crate::optimizer::util::pathnode::create_group_result_path(_root, _rel, _target, _havingqual) as *mut Path }
 
-unsafe fn add_path(_parent_rel: *mut RelOptInfo, _new_path: *mut Path) {
-    unimplemented!()
-}
+unsafe fn add_path(_parent_rel: *mut RelOptInfo, _new_path: *mut Path) { crate::optimizer::util::pathnode::add_path(_parent_rel, _new_path) }
 
-unsafe fn set_cheapest(_parent_rel: *mut RelOptInfo) {
-    unimplemented!()
-}
+unsafe fn set_cheapest(_parent_rel: *mut RelOptInfo) { crate::optimizer::util::pathnode::set_cheapest(_parent_rel) }
 
-unsafe fn add_base_rels_to_query(_root: *mut PlannerInfo, _jtnode: *mut Node) {
-    unimplemented!()
-}
+unsafe fn add_base_rels_to_query(_root: *mut PlannerInfo, _jtnode: *mut Node) { crate::optimizer::plan::initsplan::add_base_rels_to_query(_root, _jtnode) }
 
-unsafe fn remove_useless_groupby_columns(_root: *mut PlannerInfo) {
-    unimplemented!()
-}
+unsafe fn remove_useless_groupby_columns(_root: *mut PlannerInfo) { crate::optimizer::plan::initsplan::remove_useless_groupby_columns(_root) }
 
-unsafe fn build_base_rel_tlists(_root: *mut PlannerInfo, _final_tlist: *mut List) {
-    unimplemented!()
-}
+unsafe fn build_base_rel_tlists(_root: *mut PlannerInfo, _final_tlist: *mut List) { crate::optimizer::plan::initsplan::build_base_rel_tlists(_root, _final_tlist) }
 
-unsafe fn find_lateral_references(_root: *mut PlannerInfo) {
-    unimplemented!()
-}
+unsafe fn find_lateral_references(_root: *mut PlannerInfo) { crate::optimizer::plan::initsplan::find_lateral_references(_root) }
 
-unsafe fn deconstruct_jointree(_root: *mut PlannerInfo) -> *mut List {
-    unimplemented!()
-}
+unsafe fn deconstruct_jointree(_root: *mut PlannerInfo) -> *mut List { crate::optimizer::plan::initsplan::deconstruct_jointree(_root) }
 
-unsafe fn remove_useless_joins(_root: *mut PlannerInfo, _joinlist: *mut List) -> *mut List {
-    unimplemented!()
-}
+unsafe fn remove_useless_joins(_root: *mut PlannerInfo, _joinlist: *mut List) -> *mut List { crate::optimizer::plan::analyzejoins::remove_useless_joins(_root, _joinlist) }
 
-unsafe fn reduce_unique_semijoins(_root: *mut PlannerInfo) {
-    unimplemented!()
-}
+unsafe fn reduce_unique_semijoins(_root: *mut PlannerInfo) { crate::optimizer::plan::analyzejoins::reduce_unique_semijoins(_root) }
 
 unsafe fn remove_useless_self_joins(
     _root: *mut PlannerInfo,
     _joinlist: *mut List,
-) -> *mut List {
-    unimplemented!()
-}
+) -> *mut List { crate::optimizer::plan::analyzejoins::remove_useless_self_joins(_root, _joinlist) }
 
-unsafe fn create_lateral_join_info(_root: *mut PlannerInfo) {
-    unimplemented!()
-}
+unsafe fn create_lateral_join_info(_root: *mut PlannerInfo) { crate::optimizer::plan::initsplan::create_lateral_join_info(_root) }
 
-unsafe fn match_foreign_keys_to_quals(_root: *mut PlannerInfo) {
-    unimplemented!()
-}
+unsafe fn match_foreign_keys_to_quals(_root: *mut PlannerInfo) { crate::optimizer::plan::initsplan::match_foreign_keys_to_quals(_root) }
 
-unsafe fn add_other_rels_to_query(_root: *mut PlannerInfo) {
-    unimplemented!()
-}
+unsafe fn add_other_rels_to_query(_root: *mut PlannerInfo) { crate::optimizer::plan::initsplan::add_other_rels_to_query(_root) }
 
 // ---------------------------------------------------------------------------
 // query_planner

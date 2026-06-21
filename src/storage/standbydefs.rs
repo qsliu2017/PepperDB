@@ -19,7 +19,7 @@ pub unsafe fn standby_redo(record: *mut XLogReaderState) {
 }
 
 pub unsafe fn standby_desc(buf: StringInfo, record: *mut XLogReaderState) {
-    unimplemented!()
+    crate::access::rmgrdesc::standbydesc::standby_desc(buf, record)
 }
 
 pub unsafe fn standby_identify(info: uint8) -> *const std::ffi::c_char {
@@ -34,7 +34,7 @@ pub unsafe fn standby_desc_invalidations(
     tsId: Oid,
     relcacheInitFileInval: bool,
 ) {
-    unimplemented!()
+    crate::access::rmgrdesc::standbydesc::standby_desc_invalidations(buf, nmsgs, msgs as _, dbId, tsId, relcacheInitFileInval)
 }
 
 /*

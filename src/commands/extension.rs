@@ -318,9 +318,9 @@ static mut ext_sibling_list: *mut ExtensionSiblingCache = null_mut();
 /// TODO(pg-port): utils/error/elog.h ErrorContextCallback
 #[repr(C)]
 pub struct ErrorContextCallback {
+    pub previous: *mut ErrorContextCallback,
     pub callback: unsafe fn(*mut c_void),
     pub arg: *mut c_void,
-    pub previous: *mut ErrorContextCallback,
 }
 
 // ---------------------------------------------------------------------------
@@ -608,9 +608,7 @@ unsafe fn object_aclcheck(classid: Oid, objectid: Oid, roleid: Oid, mode: AclMod
 unsafe fn superuser() -> bool {
     unimplemented!("TODO(pg-port): superuser")
 }
-unsafe fn GetUserId() -> Oid {
-    unimplemented!("TODO(pg-port): GetUserId")
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn GetUserIdAndSecContext(userid: *mut Oid, sec_context: *mut c_int) {
     let _ = (userid, sec_context);
     unimplemented!("TODO(pg-port): GetUserIdAndSecContext")

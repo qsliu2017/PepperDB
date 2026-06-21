@@ -278,9 +278,7 @@ pub struct pg_wchar_tbl {
     pub maxmblen: c_int,                                /* max bytes for a char in this encoding */
 }
 
-extern "C" {
-    pub static pg_wchar_table: [pg_wchar_tbl; 0];
-}
+pub use crate::mb::wchar::pg_wchar_table;
 
 /*
  * Radix tree for character conversion.
@@ -463,239 +461,249 @@ pub fn unicode_utf8len(c: pg_wchar) -> c_int {
 /*
  * These functions are considered part of libpq's exported API.
  */
-pub unsafe fn pg_char_to_encoding(_name: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_char_to_encoding(name: *const c_char) -> c_int {
+    crate::common::encnames::pg_char_to_encoding(name)
 }
-pub unsafe fn pg_encoding_to_char(_encoding: c_int) -> *const c_char {
-    unimplemented!()
+pub unsafe fn pg_encoding_to_char(encoding: c_int) -> *const c_char {
+    crate::common::encnames::pg_encoding_to_char(encoding)
 }
-pub unsafe fn pg_valid_server_encoding_id(_encoding: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_valid_server_encoding_id(encoding: c_int) -> c_int {
+    crate::common::encnames::pg_valid_server_encoding_id(encoding)
 }
 
 /*
  * These functions are available to frontend code that links with libpgcommon.
  */
-pub unsafe fn pg_encoding_set_invalid(_encoding: c_int, _dst: *mut c_char) {
-    unimplemented!()
+pub unsafe fn pg_encoding_set_invalid(encoding: c_int, dst: *mut c_char) {
+    crate::mb::wchar::pg_encoding_set_invalid(encoding, dst)
 }
-pub unsafe fn pg_encoding_mblen(_encoding: c_int, _mbstr: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_encoding_mblen(encoding: c_int, mbstr: *const c_char) -> c_int {
+    crate::mb::wchar::pg_encoding_mblen(encoding, mbstr)
 }
 pub unsafe fn pg_encoding_mblen_or_incomplete(
-    _encoding: c_int,
-    _mbstr: *const c_char,
-    _remaining: Size,
+    encoding: c_int,
+    mbstr: *const c_char,
+    remaining: Size,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::wchar::pg_encoding_mblen_or_incomplete(encoding, mbstr, remaining as _)
 }
-pub unsafe fn pg_encoding_mblen_bounded(_encoding: c_int, _mbstr: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_encoding_mblen_bounded(encoding: c_int, mbstr: *const c_char) -> c_int {
+    crate::mb::wchar::pg_encoding_mblen_bounded(encoding, mbstr)
 }
-pub unsafe fn pg_encoding_dsplen(_encoding: c_int, _mbstr: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_encoding_dsplen(encoding: c_int, mbstr: *const c_char) -> c_int {
+    crate::mb::wchar::pg_encoding_dsplen(encoding, mbstr)
 }
-pub unsafe fn pg_encoding_verifymbchar(_encoding: c_int, _mbstr: *const c_char, _len: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_encoding_verifymbchar(encoding: c_int, mbstr: *const c_char, len: c_int) -> c_int {
+    crate::mb::wchar::pg_encoding_verifymbchar(encoding, mbstr, len)
 }
-pub unsafe fn pg_encoding_verifymbstr(_encoding: c_int, _mbstr: *const c_char, _len: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_encoding_verifymbstr(encoding: c_int, mbstr: *const c_char, len: c_int) -> c_int {
+    crate::mb::wchar::pg_encoding_verifymbstr(encoding, mbstr, len)
 }
-pub unsafe fn pg_encoding_max_length(_encoding: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_encoding_max_length(encoding: c_int) -> c_int {
+    crate::mb::wchar::pg_encoding_max_length(encoding)
 }
-pub unsafe fn pg_valid_client_encoding(_name: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_valid_client_encoding(name: *const c_char) -> c_int {
+    crate::common::encnames::pg_valid_client_encoding(name)
 }
-pub unsafe fn pg_valid_server_encoding(_name: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_valid_server_encoding(name: *const c_char) -> c_int {
+    crate::common::encnames::pg_valid_server_encoding(name)
 }
-pub unsafe fn is_encoding_supported_by_icu(_encoding: c_int) -> bool {
-    unimplemented!()
+pub unsafe fn is_encoding_supported_by_icu(encoding: c_int) -> bool {
+    crate::common::encnames::is_encoding_supported_by_icu(encoding)
 }
-pub unsafe fn get_encoding_name_for_icu(_encoding: c_int) -> *const c_char {
-    unimplemented!()
+pub unsafe fn get_encoding_name_for_icu(encoding: c_int) -> *const c_char {
+    crate::common::encnames::get_encoding_name_for_icu(encoding)
 }
 
-pub unsafe fn pg_utf8_islegal(_source: *const u8, _length: c_int) -> bool {
-    unimplemented!()
+pub unsafe fn pg_utf8_islegal(source: *const u8, length: c_int) -> bool {
+    crate::mb::wchar::pg_utf8_islegal(source as _, length)
 }
-pub unsafe fn pg_utf_mblen(_s: *const u8) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_utf_mblen(s: *const u8) -> c_int {
+    crate::mb::wchar::pg_utf_mblen(s as _)
 }
-pub unsafe fn pg_mule_mblen(_s: *const u8) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mule_mblen(s: *const u8) -> c_int {
+    crate::mb::wchar::pg_mule_mblen(s as _)
 }
 
 /*
  * The remaining functions are backend-only.
  */
-pub unsafe fn pg_mb2wchar(_from: *const c_char, _to: *mut pg_wchar) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mb2wchar(from: *const c_char, to: *mut pg_wchar) -> c_int {
+    crate::mb::mbutils::pg_mb2wchar(from, to as _)
 }
-pub unsafe fn pg_mb2wchar_with_len(_from: *const c_char, _to: *mut pg_wchar, _len: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mb2wchar_with_len(from: *const c_char, to: *mut pg_wchar, len: c_int) -> c_int {
+    crate::mb::mbutils::pg_mb2wchar_with_len(from, to as _, len)
 }
 pub unsafe fn pg_encoding_mb2wchar_with_len(
-    _encoding: c_int,
-    _from: *const c_char,
-    _to: *mut pg_wchar,
-    _len: c_int,
+    encoding: c_int,
+    from: *const c_char,
+    to: *mut pg_wchar,
+    len: c_int,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::mbutils::pg_encoding_mb2wchar_with_len(encoding, from, to as _, len)
 }
-pub unsafe fn pg_wchar2mb(_from: *const pg_wchar, _to: *mut c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_wchar2mb(from: *const pg_wchar, to: *mut c_char) -> c_int {
+    crate::mb::mbutils::pg_wchar2mb(from as _, to)
 }
-pub unsafe fn pg_wchar2mb_with_len(_from: *const pg_wchar, _to: *mut c_char, _len: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_wchar2mb_with_len(from: *const pg_wchar, to: *mut c_char, len: c_int) -> c_int {
+    crate::mb::mbutils::pg_wchar2mb_with_len(from as _, to, len)
 }
 pub unsafe fn pg_encoding_wchar2mb_with_len(
-    _encoding: c_int,
-    _from: *const pg_wchar,
-    _to: *mut c_char,
-    _len: c_int,
+    encoding: c_int,
+    from: *const pg_wchar,
+    to: *mut c_char,
+    len: c_int,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::mbutils::pg_encoding_wchar2mb_with_len(encoding, from as _, to, len)
 }
-pub unsafe fn pg_char_and_wchar_strcmp(_s1: *const c_char, _s2: *const pg_wchar) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_char_and_wchar_strcmp(s1: *const c_char, s2: *const pg_wchar) -> c_int {
+    crate::utils::mb::wstrcmp::pg_char_and_wchar_strcmp(s1, s2 as _)
 }
-pub unsafe fn pg_wchar_strncmp(_s1: *const pg_wchar, _s2: *const pg_wchar, _n: Size) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_wchar_strncmp(s1: *const pg_wchar, s2: *const pg_wchar, n: Size) -> c_int {
+    crate::utils::mb::wstrncmp::pg_wchar_strncmp(s1 as _, s2 as _, n as _)
 }
 pub unsafe fn pg_char_and_wchar_strncmp(
-    _s1: *const c_char,
-    _s2: *const pg_wchar,
-    _n: Size,
+    s1: *const c_char,
+    s2: *const pg_wchar,
+    n: Size,
 ) -> c_int {
-    unimplemented!()
+    crate::utils::mb::wstrncmp::pg_char_and_wchar_strncmp(s1, s2 as _, n as _)
 }
-pub unsafe fn pg_wchar_strlen(_str: *const pg_wchar) -> Size {
-    unimplemented!()
+pub unsafe fn pg_wchar_strlen(str: *const pg_wchar) -> Size {
+    crate::utils::mb::wstrncmp::pg_wchar_strlen(str as _) as _
 }
-pub unsafe fn pg_mblen_cstr(_mbstr: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mblen_cstr(mbstr: *const c_char) -> c_int {
+    crate::mb::mbutils::pg_mblen_cstr(mbstr)
 }
-pub unsafe fn pg_mblen_range(_mbstr: *const c_char, _end: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mblen_range(mbstr: *const c_char, end: *const c_char) -> c_int {
+    crate::mb::mbutils::pg_mblen_range(mbstr, end)
 }
-pub unsafe fn pg_mblen_with_len(_mbstr: *const c_char, _limit: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mblen_with_len(mbstr: *const c_char, limit: c_int) -> c_int {
+    crate::mb::mbutils::pg_mblen_with_len(mbstr, limit)
 }
-pub unsafe fn pg_mblen_unbounded(_mbstr: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mblen_unbounded(mbstr: *const c_char) -> c_int {
+    crate::mb::mbutils::pg_mblen_unbounded(mbstr)
 }
 
 /* deprecated */
-pub unsafe fn pg_mblen(_mbstr: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mblen(mbstr: *const c_char) -> c_int {
+    crate::mb::mbutils::pg_mblen(mbstr)
 }
 
-pub unsafe fn pg_dsplen(_mbstr: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_dsplen(mbstr: *const c_char) -> c_int {
+    crate::mb::mbutils::pg_dsplen(mbstr)
 }
-pub unsafe fn pg_mbstrlen(_mbstr: *const c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mbstrlen(mbstr: *const c_char) -> c_int {
+    crate::mb::mbutils::pg_mbstrlen(mbstr)
 }
-pub unsafe fn pg_mbstrlen_with_len(_mbstr: *const c_char, _limit: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mbstrlen_with_len(mbstr: *const c_char, limit: c_int) -> c_int {
+    crate::mb::mbutils::pg_mbstrlen_with_len(mbstr, limit)
 }
-pub unsafe fn pg_mbcliplen(_mbstr: *const c_char, _len: c_int, _limit: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mbcliplen(mbstr: *const c_char, len: c_int, limit: c_int) -> c_int {
+    crate::mb::mbutils::pg_mbcliplen(mbstr, len, limit)
 }
 pub unsafe fn pg_encoding_mbcliplen(
-    _encoding: c_int,
-    _mbstr: *const c_char,
-    _len: c_int,
-    _limit: c_int,
+    encoding: c_int,
+    mbstr: *const c_char,
+    len: c_int,
+    limit: c_int,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::mbutils::pg_encoding_mbcliplen(encoding, mbstr, len, limit)
 }
-pub unsafe fn pg_mbcharcliplen(_mbstr: *const c_char, _len: c_int, _limit: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn pg_mbcharcliplen(mbstr: *const c_char, len: c_int, limit: c_int) -> c_int {
+    crate::mb::mbutils::pg_mbcharcliplen(mbstr, len, limit)
 }
 pub unsafe fn pg_database_encoding_max_length() -> c_int {
-    unimplemented!()
+    crate::mb::mbutils::pg_database_encoding_max_length()
 }
 pub unsafe fn pg_database_encoding_character_incrementer() -> mbcharacter_incrementer {
-    unimplemented!()
+    crate::mb::mbutils::pg_database_encoding_character_incrementer() as _
 }
 
-pub unsafe fn PrepareClientEncoding(_encoding: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn PrepareClientEncoding(encoding: c_int) -> c_int {
+    crate::mb::mbutils::PrepareClientEncoding(encoding)
 }
-pub unsafe fn SetClientEncoding(_encoding: c_int) -> c_int {
-    unimplemented!()
+pub unsafe fn SetClientEncoding(encoding: c_int) -> c_int {
+    crate::mb::mbutils::SetClientEncoding(encoding)
 }
 pub unsafe fn InitializeClientEncoding() {
-    unimplemented!()
+    crate::mb::mbutils::InitializeClientEncoding()
 }
 pub unsafe fn pg_get_client_encoding() -> c_int {
-    unimplemented!()
+    crate::mb::mbutils::pg_get_client_encoding()
 }
 pub unsafe fn pg_get_client_encoding_name() -> *const c_char {
-    unimplemented!()
+    crate::mb::mbutils::pg_get_client_encoding_name()
 }
 
-pub unsafe fn SetDatabaseEncoding(_encoding: c_int) {
-    unimplemented!()
+pub unsafe fn SetDatabaseEncoding(encoding: c_int) {
+    crate::mb::mbutils::SetDatabaseEncoding(encoding)
 }
 pub unsafe fn GetDatabaseEncoding() -> c_int {
-    unimplemented!()
+    crate::mb::mbutils::GetDatabaseEncoding()
 }
 pub unsafe fn GetDatabaseEncodingName() -> *const c_char {
-    unimplemented!()
+    crate::mb::mbutils::GetDatabaseEncodingName()
 }
-pub unsafe fn SetMessageEncoding(_encoding: c_int) {
-    unimplemented!()
+pub unsafe fn SetMessageEncoding(encoding: c_int) {
+    crate::mb::mbutils::SetMessageEncoding(encoding)
 }
 pub unsafe fn GetMessageEncoding() -> c_int {
-    unimplemented!()
+    crate::mb::mbutils::GetMessageEncoding()
 }
 
 pub unsafe fn pg_do_encoding_conversion(
-    _src: *mut u8,
-    _len: c_int,
-    _src_encoding: c_int,
-    _dest_encoding: c_int,
+    src: *mut u8,
+    len: c_int,
+    src_encoding: c_int,
+    dest_encoding: c_int,
 ) -> *mut u8 {
-    unimplemented!()
+    crate::mb::mbutils::pg_do_encoding_conversion(src as _, len, src_encoding, dest_encoding) as _
 }
 pub unsafe fn pg_do_encoding_conversion_buf(
-    _proc: Oid,
-    _src_encoding: c_int,
-    _dest_encoding: c_int,
-    _src: *mut u8,
-    _srclen: c_int,
-    _dest: *mut u8,
-    _destlen: c_int,
-    _noError: bool,
+    proc: Oid,
+    src_encoding: c_int,
+    dest_encoding: c_int,
+    src: *mut u8,
+    srclen: c_int,
+    dest: *mut u8,
+    destlen: c_int,
+    noError: bool,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::mbutils::pg_do_encoding_conversion_buf(
+        proc,
+        src_encoding,
+        dest_encoding,
+        src as _,
+        srclen,
+        dest as _,
+        destlen,
+        noError,
+    )
 }
 
-pub unsafe fn pg_client_to_server(_s: *const c_char, _len: c_int) -> *mut c_char {
-    unimplemented!()
+pub unsafe fn pg_client_to_server(s: *const c_char, len: c_int) -> *mut c_char {
+    crate::mb::mbutils::pg_client_to_server(s, len)
 }
-pub unsafe fn pg_server_to_client(_s: *const c_char, _len: c_int) -> *mut c_char {
-    unimplemented!()
+pub unsafe fn pg_server_to_client(s: *const c_char, len: c_int) -> *mut c_char {
+    crate::mb::mbutils::pg_server_to_client(s, len)
 }
-pub unsafe fn pg_any_to_server(_s: *const c_char, _len: c_int, _encoding: c_int) -> *mut c_char {
-    unimplemented!()
+pub unsafe fn pg_any_to_server(s: *const c_char, len: c_int, encoding: c_int) -> *mut c_char {
+    crate::mb::mbutils::pg_any_to_server(s, len, encoding)
 }
-pub unsafe fn pg_server_to_any(_s: *const c_char, _len: c_int, _encoding: c_int) -> *mut c_char {
-    unimplemented!()
+pub unsafe fn pg_server_to_any(s: *const c_char, len: c_int, encoding: c_int) -> *mut c_char {
+    crate::mb::mbutils::pg_server_to_any(s, len, encoding)
 }
 
-pub unsafe fn pg_unicode_to_server(_c: pg_wchar, _s: *mut u8) {
-    unimplemented!()
+pub unsafe fn pg_unicode_to_server(c: pg_wchar, s: *mut u8) {
+    crate::mb::mbutils::pg_unicode_to_server(c as _, s as _)
 }
-pub unsafe fn pg_unicode_to_server_noerror(_c: pg_wchar, _s: *mut u8) -> bool {
-    unimplemented!()
+pub unsafe fn pg_unicode_to_server_noerror(c: pg_wchar, s: *mut u8) -> bool {
+    crate::mb::mbutils::pg_unicode_to_server_noerror(c as _, s as _)
 }
 
 pub unsafe fn BIG5toCNS(_big5: u16, _lc: *mut u8) -> u16 {
+    // Real impl in src/utils/mb/conversion_procs/euc_tw_and_big5/big5.rs (module not yet wired).
     unimplemented!()
 }
 pub unsafe fn CNStoBIG5(_cns: u16, _lc: u8) -> u16 {
@@ -703,124 +711,150 @@ pub unsafe fn CNStoBIG5(_cns: u16, _lc: u8) -> u16 {
 }
 
 pub unsafe fn UtfToLocal(
-    _utf: *const u8,
-    _len: c_int,
-    _iso: *mut u8,
-    _map: *const pg_mb_radix_tree,
-    _cmap: *const pg_utf_to_local_combined,
-    _cmapsize: c_int,
-    _conv_func: utf_local_conversion_func,
-    _encoding: c_int,
-    _noError: bool,
+    utf: *const u8,
+    len: c_int,
+    iso: *mut u8,
+    map: *const pg_mb_radix_tree,
+    cmap: *const pg_utf_to_local_combined,
+    cmapsize: c_int,
+    conv_func: utf_local_conversion_func,
+    encoding: c_int,
+    noError: bool,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::conv::UtfToLocal(
+        utf as _,
+        len,
+        iso as _,
+        map as _,
+        cmap as _,
+        cmapsize,
+        conv_func,
+        encoding,
+        noError,
+    )
 }
 pub unsafe fn LocalToUtf(
-    _iso: *const u8,
-    _len: c_int,
-    _utf: *mut u8,
-    _map: *const pg_mb_radix_tree,
-    _cmap: *const pg_local_to_utf_combined,
-    _cmapsize: c_int,
-    _conv_func: utf_local_conversion_func,
-    _encoding: c_int,
-    _noError: bool,
+    iso: *const u8,
+    len: c_int,
+    utf: *mut u8,
+    map: *const pg_mb_radix_tree,
+    cmap: *const pg_local_to_utf_combined,
+    cmapsize: c_int,
+    conv_func: utf_local_conversion_func,
+    encoding: c_int,
+    noError: bool,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::conv::LocalToUtf(
+        iso as _,
+        len,
+        utf as _,
+        map as _,
+        cmap as _,
+        cmapsize,
+        conv_func,
+        encoding,
+        noError,
+    )
 }
 
-pub unsafe fn pg_verifymbstr(_mbstr: *const c_char, _len: c_int, _noError: bool) -> bool {
-    unimplemented!()
+pub unsafe fn pg_verifymbstr(mbstr: *const c_char, len: c_int, noError: bool) -> bool {
+    crate::mb::mbutils::pg_verifymbstr(mbstr, len, noError)
 }
 pub unsafe fn pg_verify_mbstr(
-    _encoding: c_int,
-    _mbstr: *const c_char,
-    _len: c_int,
-    _noError: bool,
+    encoding: c_int,
+    mbstr: *const c_char,
+    len: c_int,
+    noError: bool,
 ) -> bool {
-    unimplemented!()
+    crate::mb::mbutils::pg_verify_mbstr(encoding, mbstr, len, noError)
 }
 pub unsafe fn pg_verify_mbstr_len(
-    _encoding: c_int,
-    _mbstr: *const c_char,
-    _len: c_int,
-    _noError: bool,
+    encoding: c_int,
+    mbstr: *const c_char,
+    len: c_int,
+    noError: bool,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::mbutils::pg_verify_mbstr_len(encoding, mbstr, len, noError)
 }
 
 pub unsafe fn check_encoding_conversion_args(
-    _src_encoding: c_int,
-    _dest_encoding: c_int,
-    _len: c_int,
-    _expected_src_encoding: c_int,
-    _expected_dest_encoding: c_int,
+    src_encoding: c_int,
+    dest_encoding: c_int,
+    len: c_int,
+    expected_src_encoding: c_int,
+    expected_dest_encoding: c_int,
 ) {
-    unimplemented!()
+    crate::mb::mbutils::check_encoding_conversion_args(
+        src_encoding,
+        dest_encoding,
+        len,
+        expected_src_encoding,
+        expected_dest_encoding,
+    )
 }
 
-pub unsafe fn report_invalid_encoding(_encoding: c_int, _mbstr: *const c_char, _len: c_int) -> ! {
-    unimplemented!()
+pub unsafe fn report_invalid_encoding(encoding: c_int, mbstr: *const c_char, len: c_int) -> ! {
+    crate::mb::mbutils::report_invalid_encoding(encoding, mbstr, len)
 }
 pub unsafe fn report_untranslatable_char(
-    _src_encoding: c_int,
-    _dest_encoding: c_int,
-    _mbstr: *const c_char,
-    _len: c_int,
+    src_encoding: c_int,
+    dest_encoding: c_int,
+    mbstr: *const c_char,
+    len: c_int,
 ) -> ! {
-    unimplemented!()
+    crate::mb::mbutils::report_untranslatable_char(src_encoding, dest_encoding, mbstr, len)
 }
 
 pub unsafe fn local2local(
-    _l: *const u8,
-    _p: *mut u8,
-    _len: c_int,
-    _src_encoding: c_int,
-    _dest_encoding: c_int,
-    _tab: *const u8,
-    _noError: bool,
+    l: *const u8,
+    p: *mut u8,
+    len: c_int,
+    src_encoding: c_int,
+    dest_encoding: c_int,
+    tab: *const u8,
+    noError: bool,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::conv::local2local(l as _, p as _, len, src_encoding, dest_encoding, tab as _, noError)
 }
 pub unsafe fn latin2mic(
-    _l: *const u8,
-    _p: *mut u8,
-    _len: c_int,
-    _lc: c_int,
-    _encoding: c_int,
-    _noError: bool,
+    l: *const u8,
+    p: *mut u8,
+    len: c_int,
+    lc: c_int,
+    encoding: c_int,
+    noError: bool,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::conv::latin2mic(l as _, p as _, len, lc, encoding, noError)
 }
 pub unsafe fn mic2latin(
-    _mic: *const u8,
-    _p: *mut u8,
-    _len: c_int,
-    _lc: c_int,
-    _encoding: c_int,
-    _noError: bool,
+    mic: *const u8,
+    p: *mut u8,
+    len: c_int,
+    lc: c_int,
+    encoding: c_int,
+    noError: bool,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::conv::mic2latin(mic as _, p as _, len, lc, encoding, noError)
 }
 pub unsafe fn latin2mic_with_table(
-    _l: *const u8,
-    _p: *mut u8,
-    _len: c_int,
-    _lc: c_int,
-    _encoding: c_int,
-    _tab: *const u8,
-    _noError: bool,
+    l: *const u8,
+    p: *mut u8,
+    len: c_int,
+    lc: c_int,
+    encoding: c_int,
+    tab: *const u8,
+    noError: bool,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::conv::latin2mic_with_table(l as _, p as _, len, lc, encoding, tab as _, noError)
 }
 pub unsafe fn mic2latin_with_table(
-    _mic: *const u8,
-    _p: *mut u8,
-    _len: c_int,
-    _lc: c_int,
-    _encoding: c_int,
-    _tab: *const u8,
-    _noError: bool,
+    mic: *const u8,
+    p: *mut u8,
+    len: c_int,
+    lc: c_int,
+    encoding: c_int,
+    tab: *const u8,
+    noError: bool,
 ) -> c_int {
-    unimplemented!()
+    crate::mb::conv::mic2latin_with_table(mic as _, p as _, len, lc, encoding, tab as _, noError)
 }

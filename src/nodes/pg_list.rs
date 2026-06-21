@@ -798,6 +798,7 @@ pub unsafe fn list_last_cell(list: *const List) -> *mut ListCell {
 /// # Safety
 /// `list` must be a non-NIL pointer List with `n` in range.
 #[inline]
+#[no_mangle]
 pub unsafe fn list_nth(list: *const List, n: c_int) -> *mut c_void {
     Assert!(IsA!(list, T_List));
     lfirst(list_nth_cell(list, n))
@@ -892,13 +893,13 @@ macro_rules! foreach {
     ($cell:ident, $lst:expr, $body:block) => {{
         #[allow(unused_mut, unused_variables)]
         let mut $cell: $crate::nodes::pg_list::ForEachState =
-            $crate::nodes::pg_list::ForEachState { l: $lst, i: 0 };
+            $crate::nodes::pg_list::ForEachState { l: $lst, i: -1 };
         loop {
+            $cell.i += 1;
             if !(!$cell.l.is_null() && $cell.i < (*$cell.l).length) {
                 break;
             }
             $body
-            $cell.i += 1;
         }
     }};
 }
@@ -1043,8 +1044,9 @@ macro_rules! foreach_ptr {
         let mut $var: *mut $ty = core::ptr::null_mut();
         #[allow(unused_mut, unused_variables)]
         let mut __pg_foreach_state: $crate::nodes::pg_list::ForEachState =
-            $crate::nodes::pg_list::ForEachState { l: $lst, i: 0 };
+            $crate::nodes::pg_list::ForEachState { l: $lst, i: -1 };
         loop {
+            __pg_foreach_state.i += 1;
             if !(!__pg_foreach_state.l.is_null()
                 && __pg_foreach_state.i < (*__pg_foreach_state.l).length)
             {
@@ -1054,7 +1056,6 @@ macro_rules! foreach_ptr {
                 (*__pg_foreach_state.l).elements.add(__pg_foreach_state.i as usize),
             ) as *mut $ty;
             $body
-            __pg_foreach_state.i += 1;
         }
         let _ = &$var;
     }};
@@ -1066,8 +1067,9 @@ macro_rules! foreach_int {
         let mut $var: core::ffi::c_int = 0;
         #[allow(unused_mut, unused_variables)]
         let mut __pg_foreach_state: $crate::nodes::pg_list::ForEachState =
-            $crate::nodes::pg_list::ForEachState { l: $lst, i: 0 };
+            $crate::nodes::pg_list::ForEachState { l: $lst, i: -1 };
         loop {
+            __pg_foreach_state.i += 1;
             if !(!__pg_foreach_state.l.is_null()
                 && __pg_foreach_state.i < (*__pg_foreach_state.l).length)
             {
@@ -1077,7 +1079,6 @@ macro_rules! foreach_int {
                 (*__pg_foreach_state.l).elements.add(__pg_foreach_state.i as usize),
             );
             $body
-            __pg_foreach_state.i += 1;
         }
         let _ = &$var;
     }};
@@ -1089,8 +1090,9 @@ macro_rules! foreach_oid {
         let mut $var: $crate::Oid = 0;
         #[allow(unused_mut, unused_variables)]
         let mut __pg_foreach_state: $crate::nodes::pg_list::ForEachState =
-            $crate::nodes::pg_list::ForEachState { l: $lst, i: 0 };
+            $crate::nodes::pg_list::ForEachState { l: $lst, i: -1 };
         loop {
+            __pg_foreach_state.i += 1;
             if !(!__pg_foreach_state.l.is_null()
                 && __pg_foreach_state.i < (*__pg_foreach_state.l).length)
             {
@@ -1100,7 +1102,6 @@ macro_rules! foreach_oid {
                 (*__pg_foreach_state.l).elements.add(__pg_foreach_state.i as usize),
             );
             $body
-            __pg_foreach_state.i += 1;
         }
         let _ = &$var;
     }};
@@ -1112,8 +1113,9 @@ macro_rules! foreach_xid {
         let mut $var: $crate::TransactionId = 0;
         #[allow(unused_mut, unused_variables)]
         let mut __pg_foreach_state: $crate::nodes::pg_list::ForEachState =
-            $crate::nodes::pg_list::ForEachState { l: $lst, i: 0 };
+            $crate::nodes::pg_list::ForEachState { l: $lst, i: -1 };
         loop {
+            __pg_foreach_state.i += 1;
             if !(!__pg_foreach_state.l.is_null()
                 && __pg_foreach_state.i < (*__pg_foreach_state.l).length)
             {
@@ -1123,7 +1125,6 @@ macro_rules! foreach_xid {
                 (*__pg_foreach_state.l).elements.add(__pg_foreach_state.i as usize),
             );
             $body
-            __pg_foreach_state.i += 1;
         }
         let _ = &$var;
     }};
@@ -1135,8 +1136,9 @@ macro_rules! foreach_node {
         let mut $var: *mut $ty = core::ptr::null_mut();
         #[allow(unused_mut, unused_variables)]
         let mut __pg_foreach_state: $crate::nodes::pg_list::ForEachState =
-            $crate::nodes::pg_list::ForEachState { l: $lst, i: 0 };
+            $crate::nodes::pg_list::ForEachState { l: $lst, i: -1 };
         loop {
+            __pg_foreach_state.i += 1;
             if !(!__pg_foreach_state.l.is_null()
                 && __pg_foreach_state.i < (*__pg_foreach_state.l).length)
             {
@@ -1148,7 +1150,6 @@ macro_rules! foreach_node {
                 (*__pg_foreach_state.l).elements.add(__pg_foreach_state.i as usize)
             );
             $body
-            __pg_foreach_state.i += 1;
         }
         let _ = &$var;
     }};
@@ -2336,6 +2337,7 @@ pub unsafe fn list_delete_first(list: *mut List) -> *mut List {
  */
 /// # Safety
 /// `list` must be NIL or a valid List.
+#[no_mangle]
 pub unsafe fn list_delete_last(list: *mut List) -> *mut List {
     check_list_invariants(list);
 
@@ -3100,7 +3102,7 @@ unsafe fn copyObjectImpl(from: *const c_void) -> *mut c_void {
         return core::ptr::null_mut();
     }
     let _ = from as *const Node;
-    unimplemented!("copyObjectImpl(): deep node copy not yet translated (copyfuncs.c)");
+    return crate::nodes::copyfuncs::copyObjectImpl(from);
 }
 
 /// A faithful `qsort()` over a raw ListCell array driving a C-style comparator.
@@ -3123,4 +3125,9 @@ unsafe fn pg_qsort_listcells(base: *mut ListCell, n: usize, cmp: list_sort_compa
         let r = cmp(a as *const ListCell, b as *const ListCell);
         r.cmp(&0)
     });
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn list_make1_oid(x: Oid) -> *mut List {
+    lappend_oid(core::ptr::null_mut(), x)
 }

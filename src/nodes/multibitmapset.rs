@@ -69,6 +69,7 @@ pub unsafe fn mbms_add_member(mut a: *mut List, listidx: c_int, bitidx: c_int) -
 ///
 /// # Safety
 /// `a` and `b` must be NIL or valid pointer Lists of Bitmapset pointers.
+#[no_mangle]
 pub unsafe fn mbms_add_members(mut a: *mut List, b: *const List) -> *mut List {
     // Add empty elements to a, as needed
     while list_length(a) < list_length(b) {
@@ -136,6 +137,7 @@ pub unsafe fn mbms_is_member(listidx: c_int, bitidx: c_int, a: *const List) -> b
 ///
 /// # Safety
 /// `a` and `b` must be NIL or valid pointer Lists of Bitmapset pointers.
+#[no_mangle]
 pub unsafe fn mbms_overlap_sets(a: *const List, b: *const List) -> *mut Bitmapset {
     let mut result: *mut Bitmapset = null_mut();
 

@@ -124,48 +124,98 @@ unsafe fn RelationGetForm(relation: Relation) -> *mut crate::catalog::pg_class::
 unsafe fn RelationGetRelid(relation: Relation) -> Oid { unimplemented!() /* TODO(pg-port): real RelationGetRelid lives in utils/rel.h */ }
 unsafe fn RelationGetRelationName(relation: Relation) -> *mut c_char { unimplemented!() /* TODO(pg-port): real RelationGetRelationName lives in utils/rel.h */ }
 unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc { unimplemented!() /* TODO(pg-port): real RelationGetDescr lives in utils/rel.h */ }
-unsafe fn RelationGetIndexList(relation: Relation) -> *mut List { unimplemented!() /* TODO(pg-port): real RelationGetIndexList lives in utils/cache/relcache.c */ }
-unsafe fn RelationGetIndexExpressions(relation: Relation) -> *mut List { unimplemented!() /* TODO(pg-port): real RelationGetIndexExpressions lives in utils/cache/relcache.c */ }
-unsafe fn IndexRelationGetNumberOfKeyAttributes(relation: Relation) -> c_int { unimplemented!() /* TODO(pg-port): real IndexRelationGetNumberOfKeyAttributes lives in utils/rel.h */ }
+unsafe fn RelationGetIndexList(relation: Relation) -> *mut List {
+    crate::utils::cache::relcache::RelationGetIndexList(relation as _) as _
+}
+unsafe fn RelationGetIndexExpressions(relation: Relation) -> *mut List {
+    crate::utils::cache::relcache::RelationGetIndexExpressions(relation as _) as _
+}
+unsafe fn IndexRelationGetNumberOfKeyAttributes(relation: Relation) -> c_int {
+    crate::access::nbtree::nbtdedup::IndexRelationGetNumberOfKeyAttributes(relation as _) as _
+}
 
-unsafe fn index_open(relationId: Oid, lockmode: c_int) -> Relation { unimplemented!() /* TODO(pg-port): real index_open lives in access/index/indexam.c */ }
-unsafe fn index_close(relation: Relation, lockmode: c_int) { unimplemented!() /* TODO(pg-port): real index_close lives in access/index/indexam.c */ }
-unsafe fn index_insert(indexRelation: Relation, values: *mut Datum, isnull: *mut bool, heap_t_ctid: ItemPointer, heapRelation: Relation, checkUnique: IndexUniqueCheck, indexUnchanged: bool, indexInfo: *mut IndexInfo) -> bool { unimplemented!() /* TODO(pg-port): real index_insert lives in access/index/indexam.c */ }
-unsafe fn index_insert_cleanup(indexRelation: Relation, indexInfo: *mut IndexInfo) { unimplemented!() /* TODO(pg-port): real index_insert_cleanup lives in access/index/indexam.c */ }
-unsafe fn index_beginscan(heapRelation: Relation, indexRelation: Relation, snapshot: *mut SnapshotData, instrument: *mut c_void, nkeys: c_int, norderbys: c_int) -> IndexScanDesc { unimplemented!() /* TODO(pg-port): real index_beginscan lives in access/index/indexam.c */ }
-unsafe fn index_rescan(scan: IndexScanDesc, keys: *mut ScanKeyData, nkeys: c_int, orderbys: *mut ScanKeyData, norderbys: c_int) { unimplemented!() /* TODO(pg-port): real index_rescan lives in access/index/indexam.c */ }
+unsafe fn index_open(relationId: Oid, lockmode: c_int) -> Relation {
+    crate::access::index::indexam::index_open(relationId as _, lockmode as _) as _
+}
+unsafe fn index_close(relation: Relation, lockmode: c_int) {
+    crate::access::index::indexam::index_close(relation as _, lockmode as _)
+}
+unsafe fn index_insert(indexRelation: Relation, values: *mut Datum, isnull: *mut bool, heap_t_ctid: ItemPointer, heapRelation: Relation, checkUnique: IndexUniqueCheck, indexUnchanged: bool, indexInfo: *mut IndexInfo) -> bool { crate::access::index::indexam::index_insert(indexRelation, values, isnull, heap_t_ctid, heapRelation, checkUnique as _, indexUnchanged, indexInfo as _) }
+unsafe fn index_insert_cleanup(indexRelation: Relation, indexInfo: *mut IndexInfo) {
+    crate::access::index::indexam::index_insert_cleanup(indexRelation as _, indexInfo as _)
+}
+unsafe fn index_beginscan(heapRelation: Relation, indexRelation: Relation, snapshot: *mut SnapshotData, instrument: *mut c_void, nkeys: c_int, norderbys: c_int) -> IndexScanDesc {
+    crate::access::index::indexam::index_beginscan(heapRelation as _, indexRelation as _, snapshot as _, instrument as _, nkeys as _, norderbys as _) as _
+}
+unsafe fn index_rescan(scan: IndexScanDesc, keys: *mut ScanKeyData, nkeys: c_int, orderbys: *mut ScanKeyData, norderbys: c_int) {
+    crate::access::index::indexam::index_rescan(scan as _, keys as _, nkeys as _, orderbys as _, norderbys as _)
+}
 unsafe fn index_getnext_slot(scan: IndexScanDesc, direction: ScanDirection, slot: *mut TupleTableSlot) -> bool { unimplemented!() /* TODO(pg-port): real index_getnext_slot lives in access/index/indexam.c */ }
-unsafe fn index_endscan(scan: IndexScanDesc) { unimplemented!() /* TODO(pg-port): real index_endscan lives in access/index/indexam.c */ }
+unsafe fn index_endscan(scan: IndexScanDesc) {
+    crate::access::index::indexam::index_endscan(scan as _)
+}
 
-unsafe fn BuildIndexInfo(index: Relation) -> *mut IndexInfo { unimplemented!() /* TODO(pg-port): real BuildIndexInfo lives in catalog/index.c */ }
-unsafe fn BuildSpeculativeIndexInfo(index: Relation, ii: *mut IndexInfo) { unimplemented!() /* TODO(pg-port): real BuildSpeculativeIndexInfo lives in catalog/index.c */ }
-unsafe fn BuildIndexValueDescription(indexRelation: Relation, values: *const Datum, isnull: *const bool) -> *mut c_char { unimplemented!() /* TODO(pg-port): real BuildIndexValueDescription lives in access/index/genam.c */ }
+unsafe fn BuildIndexInfo(index: Relation) -> *mut IndexInfo {
+    crate::catalog::index::BuildIndexInfo(index as _) as _
+}
+unsafe fn BuildSpeculativeIndexInfo(index: Relation, ii: *mut IndexInfo) {
+    crate::catalog::index::BuildSpeculativeIndexInfo(index as _, ii as _)
+}
+unsafe fn BuildIndexValueDescription(indexRelation: Relation, values: *const Datum, isnull: *const bool) -> *mut c_char {
+    crate::access::index::genam::BuildIndexValueDescription(indexRelation as _, values as _, isnull as _) as _
+}
 
-unsafe fn FormIndexDatum(indexInfo: *mut IndexInfo, slot: *mut TupleTableSlot, estate: *mut EState, values: *mut Datum, isnull: *mut bool) { unimplemented!() /* TODO(pg-port): real FormIndexDatum lives in executor/execIndexing.c (FormIndexDatum in index.c) */ }
-unsafe fn ExecPrepareQual(qual: *mut List, estate: *mut EState) -> *mut ExprState { unimplemented!() /* TODO(pg-port): real ExecPrepareQual lives in executor/execExpr.c */ }
-unsafe fn ExecQual(state: *mut ExprState, econtext: *mut ExprContext) -> bool { unimplemented!() /* TODO(pg-port): real ExecQual lives in executor/executor.h */ }
-unsafe fn GetPerTupleExprContext(estate: *mut EState) -> *mut ExprContext { unimplemented!() /* TODO(pg-port): real GetPerTupleExprContext lives in executor/executor.h */ }
+unsafe fn FormIndexDatum(indexInfo: *mut IndexInfo, slot: *mut TupleTableSlot, estate: *mut EState, values: *mut Datum, isnull: *mut bool) {
+    crate::catalog::index::FormIndexDatum(indexInfo as _, slot as _, estate as _, values as _, isnull as _)
+}
+unsafe fn ExecPrepareQual(qual: *mut List, estate: *mut EState) -> *mut ExprState {
+    crate::executor::execExpr::ExecPrepareQual(qual as _, estate as _) as _
+}
+unsafe fn ExecQual(state: *mut ExprState, econtext: *mut ExprContext) -> bool {
+    crate::executor::executor::ExecQual(state as _, econtext as _) as _
+}
+unsafe fn GetPerTupleExprContext(estate: *mut EState) -> *mut ExprContext { crate::executor::execUtils::GetPerTupleExprContext(estate) }
 unsafe fn ExecGetUpdatedCols(relinfo: *mut ResultRelInfo, estate: *mut EState) -> *mut Bitmapset { unimplemented!() /* TODO(pg-port): real ExecGetUpdatedCols lives in executor/execUtils.c */ }
 unsafe fn ExecGetExtraUpdatedCols(relinfo: *mut ResultRelInfo, estate: *mut EState) -> *mut Bitmapset { unimplemented!() /* TODO(pg-port): real ExecGetExtraUpdatedCols lives in executor/execUtils.c */ }
 
-unsafe fn table_slot_create(relation: Relation, reglist: *mut *mut List) -> *mut TupleTableSlot { unimplemented!() /* TODO(pg-port): real table_slot_create lives in access/table/tableamapi.c */ }
-unsafe fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot) { unimplemented!() /* TODO(pg-port): real ExecDropSingleTupleTableSlot lives in executor/execTuples.c */ }
+unsafe fn table_slot_create(relation: Relation, reglist: *mut *mut List) -> *mut TupleTableSlot {
+    crate::access::table::tableam::table_slot_create(relation as _, reglist as _) as _
+}
+unsafe fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot) {
+    crate::executor::execTuples::ExecDropSingleTupleTableSlot(slot as _)
+}
 
-unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: c_int) -> Form_pg_attribute { unimplemented!() /* TODO(pg-port): real TupleDescAttr lives in access/tupdesc.h */ }
+unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: c_int) -> Form_pg_attribute {
+    crate::access::common::tupdesc::TupleDescAttr(tupdesc as _, i as _) as _
+}
 unsafe fn lookup_type_cache(type_id: Oid, flags: c_int) -> *mut TypeCacheEntry { unimplemented!() /* TODO(pg-port): real lookup_type_cache lives in utils/cache/typcache.c */ }
 
-unsafe fn TransactionIdIsValid(xid: TransactionId) -> bool { unimplemented!() /* TODO(pg-port): real TransactionIdIsValid lives in access/transam.h */ }
-unsafe fn TransactionIdPrecedes(id1: TransactionId, id2: TransactionId) -> bool { unimplemented!() /* TODO(pg-port): real TransactionIdPrecedes lives in access/transam/transam.c */ }
-unsafe fn GetCurrentTransactionId() -> TransactionId { unimplemented!() /* TODO(pg-port): real GetCurrentTransactionId lives in access/transam/xact.c */ }
+unsafe fn TransactionIdIsValid(xid: TransactionId) -> bool {
+    crate::access::transam::TransactionIdIsValid(xid as _) as _
+}
+unsafe fn TransactionIdPrecedes(id1: TransactionId, id2: TransactionId) -> bool {
+    crate::access::transam::transam::TransactionIdPrecedes(id1 as _, id2 as _) as _
+}
+unsafe fn GetCurrentTransactionId() -> TransactionId {
+    crate::access::transam::xact::GetCurrentTransactionId() as _
+}
 unsafe fn XactLockTableWait(xid: TransactionId, rel: Relation, ctid: ItemPointer, oper: XLTW_Oper) { unimplemented!() /* TODO(pg-port): real XactLockTableWait lives in storage/lmgr/lmgr.c */ }
-unsafe fn SpeculativeInsertionWait(xid: TransactionId, token: u32) { unimplemented!() /* TODO(pg-port): real SpeculativeInsertionWait lives in storage/lmgr/lmgr.c */ }
+unsafe fn SpeculativeInsertionWait(xid: TransactionId, token: u32) {
+    crate::storage::lmgr::lmgr::SpeculativeInsertionWait(xid as _, token as _)
+}
 
 unsafe fn InitDirtySnapshot(snapshot: &mut SnapshotData) { unimplemented!() /* TODO(pg-port): real InitDirtySnapshot lives in utils/snapmgr.h */ }
 
-unsafe fn OidFunctionCall2Coll(functionId: Oid, collation: Oid, arg1: Datum, arg2: Datum) -> Datum { unimplemented!() /* TODO(pg-port): real OidFunctionCall2Coll lives in utils/fmgr/fmgr.c */ }
+unsafe fn OidFunctionCall2Coll(functionId: Oid, collation: Oid, arg1: Datum, arg2: Datum) -> Datum {
+    crate::utils::fmgr::OidFunctionCall2Coll(functionId as _, collation as _, arg1 as _, arg2 as _) as _
+}
 
-unsafe fn DatumGetRangeTypeP(d: Datum) -> *mut RangeType { unimplemented!() /* TODO(pg-port): real DatumGetRangeTypeP lives in utils/rangetypes.h */ }
-unsafe fn RangeIsEmpty(r: *mut RangeType) -> bool { unimplemented!() /* TODO(pg-port): real RangeIsEmpty lives in utils/adt/rangetypes.c */ }
+unsafe fn DatumGetRangeTypeP(d: Datum) -> *mut RangeType {
+    crate::utils::adt::rangetypes::DatumGetRangeTypeP(d as _) as _
+}
+unsafe fn RangeIsEmpty(r: *mut RangeType) -> bool {
+    crate::utils::adt::rangetypes::RangeIsEmpty(r as _) as _
+}
 unsafe fn DatumGetMultirangeTypeP(d: Datum) -> *mut MultirangeType { unimplemented!() /* TODO(pg-port): real DatumGetMultirangeTypeP lives in utils/multirangetypes.h */ }
 unsafe fn MultirangeIsEmpty(mr: *mut MultirangeType) -> bool { unimplemented!() /* TODO(pg-port): real MultirangeIsEmpty lives in utils/adt/multirangetypes.c */ }
 

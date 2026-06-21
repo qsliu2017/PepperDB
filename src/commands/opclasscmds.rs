@@ -65,10 +65,8 @@ type Form_pg_am = *mut FormData_pg_am;
 type Form_pg_opfamily = *mut FormData_pg_opfamily;
 #[repr(C)] pub struct FormData_pg_opclass { _opaque: [u8; 0] }
 type Form_pg_opclass = *mut FormData_pg_opclass;
-#[repr(C)] pub struct FormData_pg_operator { _opaque: [u8; 0] }
-type Form_pg_operator = *mut FormData_pg_operator;
-#[repr(C)] pub struct FormData_pg_proc { _opaque: [u8; 0] }
-type Form_pg_proc = *mut FormData_pg_proc;
+use crate::catalog::pg_operator::{FormData_pg_operator, Form_pg_operator};
+use crate::catalog::pg_proc::{FormData_pg_proc, Form_pg_proc};
 
 // NameData  TODO(pg-port)
 #[repr(C)] pub struct NameData { pub data: [c_char; 64] }
@@ -104,16 +102,16 @@ const ERRCODE_SYNTAX_ERROR: c_int = 0;
 const SHRT_MAX: c_int = 32767;
 
 // syscache ids  TODO(pg-port): utils/syscache.h
-const OPFAMILYAMNAMENSP: c_int = 0;
-const OPFAMILYOID: c_int = 0;
-const CLAAMNAMENSP: c_int = 0;
-const CLAOID: c_int = 0;
-const AMOID: c_int = 0;
-const AMNAME: c_int = 0;
-const OPEROID: c_int = 0;
-const PROCOID: c_int = 0;
-const AMOPSTRATEGY: c_int = 0;
-const AMPROCNUM: c_int = 0;
+const OPFAMILYAMNAMENSP: c_int = 41;
+const OPFAMILYOID: c_int = 42;
+const CLAAMNAMENSP: c_int = 13;
+const CLAOID: c_int = 14;
+const AMOID: c_int = 2;
+const AMNAME: c_int = 1;
+const OPEROID: c_int = 40;
+const PROCOID: c_int = 47;
+const AMOPSTRATEGY: c_int = 4;
+const AMPROCNUM: c_int = 5;
 
 // catalog relation OIDs  TODO(pg-port): catalog/pg_*_d.h
 const OperatorFamilyRelationId: Oid = 2753;
@@ -127,7 +125,7 @@ const AccessMethodOperatorRelationId: Oid = 2602;
 const AccessMethodProcedureRelationId: Oid = 2603;
 
 // catalog index OIDs  TODO(pg-port)
-const OpfamilyOidIndexId: Oid = 2754;
+const OpfamilyOidIndexId: Oid = 2755;
 const OpclassOidIndexId: Oid = 2687;
 const OpclassAmNameNspIndexId: Oid = 2686;
 const AccessMethodOperatorOidIndexId: Oid = 2756;
@@ -219,21 +217,21 @@ const InvalidObjectAddress: ObjectAddress = ObjectAddress {
  * Function stubs for dependencies defined in other .c files  TODO(pg-port)
  * -------------------------------------------------------------------------- */
 
-unsafe fn DeconstructQualifiedName(names: *mut List, nspname_p: *mut *mut c_char, objname_p: *mut *mut c_char) { /* TODO(pg-port): catalog/namespace.c */ }
-unsafe fn LookupExplicitNamespace(nspname: *const c_char, missing_ok: bool) -> Oid { /* TODO(pg-port): catalog/namespace.c */ InvalidOid }
-unsafe fn OpfamilynameGetOpfid(amid: Oid, opfname: *const c_char) -> Oid { /* TODO(pg-port): catalog/namespace.c */ InvalidOid }
-unsafe fn OpclassnameGetOpcid(amid: Oid, opcname: *const c_char) -> Oid { /* TODO(pg-port): catalog/namespace.c */ InvalidOid }
-unsafe fn QualifiedNameGetCreationNamespace(names: *mut List, objname_p: *mut *mut c_char) -> Oid { /* TODO(pg-port): catalog/namespace.c */ InvalidOid }
-unsafe fn NameListToString(names: *mut List) -> *mut c_char { /* TODO(pg-port): nodes/makefuncs.c */ core::ptr::null_mut() }
-unsafe fn get_namespace_name(nspid: Oid) -> *mut c_char { /* TODO(pg-port): utils/cache/lsyscache.c */ core::ptr::null_mut() }
-unsafe fn get_am_name(amOid: Oid) -> *mut c_char { /* TODO(pg-port): utils/cache/lsyscache.c */ core::ptr::null_mut() }
+unsafe fn DeconstructQualifiedName(names: *mut List, nspname_p: *mut *mut c_char, objname_p: *mut *mut c_char) { crate::catalog::namespace::DeconstructQualifiedName(names as _, nspname_p, objname_p) }
+unsafe fn LookupExplicitNamespace(nspname: *const c_char, missing_ok: bool) -> Oid { crate::catalog::namespace::LookupExplicitNamespace(nspname, missing_ok) }
+unsafe fn OpfamilynameGetOpfid(amid: Oid, opfname: *const c_char) -> Oid { crate::catalog::namespace::OpfamilynameGetOpfid(amid, opfname) }
+unsafe fn OpclassnameGetOpcid(amid: Oid, opcname: *const c_char) -> Oid { crate::catalog::namespace::OpclassnameGetOpcid(amid, opcname) }
+unsafe fn QualifiedNameGetCreationNamespace(names: *mut List, objname_p: *mut *mut c_char) -> Oid { crate::catalog::namespace::QualifiedNameGetCreationNamespace(names as _, objname_p) }
+unsafe fn NameListToString(names: *mut List) -> *mut c_char { crate::catalog::namespace::NameListToString(names as _) }
+unsafe fn get_namespace_name(nspid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_namespace_name(nspid) }
+unsafe fn get_am_name(amOid: Oid) -> *mut c_char { crate::commands::amcmds::get_am_name(amOid) }
 
-unsafe fn SearchSysCache1(cacheId: c_int, key1: Datum) -> HeapTuple { /* TODO(pg-port): utils/cache/syscache.c */ core::ptr::null_mut() }
-unsafe fn SearchSysCache3(cacheId: c_int, key1: Datum, key2: Datum, key3: Datum) -> HeapTuple { /* TODO(pg-port): utils/cache/syscache.c */ core::ptr::null_mut() }
-unsafe fn SearchSysCacheExists3(cacheId: c_int, key1: Datum, key2: Datum, key3: Datum) -> bool { /* TODO(pg-port): utils/cache/syscache.c */ false }
-unsafe fn SearchSysCacheExists4(cacheId: c_int, key1: Datum, key2: Datum, key3: Datum, key4: Datum) -> bool { /* TODO(pg-port): utils/cache/syscache.c */ false }
-unsafe fn GetSysCacheOid4(cacheId: c_int, oidcol: c_int, key1: Datum, key2: Datum, key3: Datum, key4: Datum) -> Oid { /* TODO(pg-port): utils/cache/syscache.c */ InvalidOid }
-unsafe fn ReleaseSysCache(tuple: HeapTuple) { /* TODO(pg-port): utils/cache/syscache.c */ }
+unsafe fn SearchSysCache1(cacheId: c_int, key1: Datum) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache1(cacheId, key1) as _ }
+unsafe fn SearchSysCache3(cacheId: c_int, key1: Datum, key2: Datum, key3: Datum) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache3(cacheId, key1, key2, key3) as _ }
+unsafe fn SearchSysCacheExists3(cacheId: c_int, key1: Datum, key2: Datum, key3: Datum) -> bool { crate::utils::cache::syscache::SearchSysCacheExists3(cacheId, key1, key2, key3) }
+unsafe fn SearchSysCacheExists4(cacheId: c_int, key1: Datum, key2: Datum, key3: Datum, key4: Datum) -> bool { crate::utils::cache::syscache::SearchSysCacheExists(cacheId, key1, key2, key3, key4) }
+unsafe fn GetSysCacheOid4(cacheId: c_int, oidcol: c_int, key1: Datum, key2: Datum, key3: Datum, key4: Datum) -> Oid { crate::utils::cache::syscache::GetSysCacheOid(cacheId, oidcol as _, key1, key2, key3, key4) }
+unsafe fn ReleaseSysCache(tuple: HeapTuple) { crate::utils::cache::syscache::ReleaseSysCache(tuple as _) }
 
 unsafe fn cstr_display(s: *const c_char) -> std::borrow::Cow<'static, str> {
     if s.is_null() { std::borrow::Cow::Borrowed("(null)") }
@@ -242,52 +240,52 @@ unsafe fn cstr_display(s: *const c_char) -> std::borrow::Cow<'static, str> {
 
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool { !tuple.is_null() }
 unsafe fn OidIsValid(objectId: Oid) -> bool { objectId != InvalidOid }
-unsafe fn GETSTRUCT(tup: HeapTuple) -> *mut c_void { /* TODO(pg-port): access/htup_details.h */ core::ptr::null_mut() }
+unsafe fn GETSTRUCT(tup: HeapTuple) -> *mut c_void { crate::access::htup_details::GETSTRUCT(tup as _) as _ }
 unsafe fn NameStr(name: *const NameData) -> *const c_char { /* TODO(pg-port): c.h */ (*name).data.as_ptr() }
 unsafe fn NameGetDatum(name: *const NameData) -> Datum { /* postgres.h: CStringGetDatum(NameStr(*X)) */ CStringGetDatum(NameStr(name)) }
 
-unsafe fn table_open(relationId: Oid, lockmode: LOCKMODE) -> Relation { /* TODO(pg-port): access/table/table.c */ core::ptr::null_mut() }
-unsafe fn table_close(relation: Relation, lockmode: LOCKMODE) { /* TODO(pg-port): access/table/table.c */ }
-unsafe fn GetNewOidWithIndex(relation: Relation, indexId: Oid, oidcolumn: c_int) -> Oid { /* TODO(pg-port): catalog/catalog.c */ InvalidOid }
-unsafe fn heap_form_tuple(tupleDescriptor: crate::access::common::tupdesc::TupleDesc, values: *mut Datum, isnull: *mut bool) -> HeapTuple { /* TODO(pg-port): access/common/heaptuple.c */ core::ptr::null_mut() }
-unsafe fn heap_freetuple(htup: HeapTuple) { /* TODO(pg-port): access/common/heaptuple.c */ }
-unsafe fn CatalogTupleInsert(heapRel: Relation, tup: HeapTuple) -> Oid { /* TODO(pg-port): catalog/indexing.c */ InvalidOid }
+unsafe fn table_open(relationId: Oid, lockmode: LOCKMODE) -> Relation { crate::access::table::table::table_open(relationId, lockmode as _) as _ }
+unsafe fn table_close(relation: Relation, lockmode: LOCKMODE) { crate::access::table::table::table_close(relation as _, lockmode as _) }
+unsafe fn GetNewOidWithIndex(relation: Relation, indexId: Oid, oidcolumn: c_int) -> Oid { crate::catalog::catalog::GetNewOidWithIndex(relation as _, indexId, oidcolumn as _) }
+unsafe fn heap_form_tuple(tupleDescriptor: crate::access::common::tupdesc::TupleDesc, values: *mut Datum, isnull: *mut bool) -> HeapTuple { crate::access::common::heaptuple::heap_form_tuple(tupleDescriptor as _, values, isnull) as _ }
+unsafe fn heap_freetuple(htup: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(htup as _) }
+unsafe fn CatalogTupleInsert(heapRel: Relation, tup: HeapTuple) -> Oid { crate::catalog::indexing::CatalogTupleInsert(heapRel as _, tup as _); InvalidOid }
 
-unsafe fn namestrcpy(name: *mut NameData, str_: *const c_char) -> c_int { /* TODO(pg-port): common/string.c */ 0 }
-unsafe fn GetUserId() -> Oid { /* TODO(pg-port): utils/init/miscinit.c */ InvalidOid }
-unsafe fn superuser() -> bool { /* TODO(pg-port): utils/misc/superuser.c */ false }
+unsafe fn namestrcpy(name: *mut NameData, str_: *const c_char) -> c_int { crate::utils::adt::name::namestrcpy(name as _, str_); 0 }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
+unsafe fn superuser() -> bool { crate::utils::misc::superuser::superuser() }
 
-unsafe fn object_aclcheck(classid: Oid, objectid: Oid, roleid: Oid, mode: u64) -> AclResult { /* TODO(pg-port): catalog/aclchk.c */ ACLCHECK_OK }
-unsafe fn aclcheck_error(aclerr: AclResult, objtype: ObjectType, objectname: *const c_char) { /* TODO(pg-port): catalog/aclchk.c */ }
+unsafe fn object_aclcheck(classid: Oid, objectid: Oid, roleid: Oid, mode: u64) -> AclResult { core::mem::transmute::<crate::utils::adt::acl::AclResult, AclResult>(crate::catalog::aclchk::object_aclcheck(classid, objectid, roleid, mode as _)) }
+unsafe fn aclcheck_error(aclerr: AclResult, objtype: ObjectType, objectname: *const c_char) { crate::catalog::aclchk::aclcheck_error(core::mem::transmute::<AclResult, crate::utils::adt::acl::AclResult>(aclerr), objtype, objectname) }
 
-unsafe fn recordDependencyOn(depender: *const ObjectAddress, referenced: *const ObjectAddress, behavior: c_char) { /* TODO(pg-port): catalog/pg_depend.c */ }
-unsafe fn recordDependencyOnOwner(classId: Oid, objectId: Oid, owner: Oid) { /* TODO(pg-port): catalog/pg_shdepend.c */ }
-unsafe fn recordDependencyOnCurrentExtension(object: *const ObjectAddress, isReplace: bool) { /* TODO(pg-port): catalog/pg_depend.c */ }
-unsafe fn performDeletion(object: *const ObjectAddress, behavior: DropBehavior, flags: c_int) { /* TODO(pg-port): catalog/dependency.c */ }
-unsafe fn IsPinnedObject(classId: Oid, objectId: Oid) -> bool { /* TODO(pg-port): catalog/dependency.c */ false }
+unsafe fn recordDependencyOn(depender: *const ObjectAddress, referenced: *const ObjectAddress, behavior: c_char) { crate::catalog::pg_depend::recordDependencyOn(depender as _, referenced as _, behavior as _) }
+unsafe fn recordDependencyOnOwner(classId: Oid, objectId: Oid, owner: Oid) { crate::catalog::pg_shdepend::recordDependencyOnOwner(classId, objectId, owner) }
+unsafe fn recordDependencyOnCurrentExtension(object: *const ObjectAddress, isReplace: bool) { crate::catalog::pg_depend::recordDependencyOnCurrentExtension(object as _, isReplace) }
+unsafe fn performDeletion(object: *const ObjectAddress, behavior: DropBehavior, flags: c_int) { crate::catalog::dependency::performDeletion(object as _, core::mem::transmute::<i32, crate::nodes::parsenodes::DropBehavior>(behavior), flags) }
+unsafe fn IsPinnedObject(classId: Oid, objectId: Oid) -> bool { crate::catalog::catalog::IsPinnedObject(classId, objectId) }
 
-unsafe fn EventTriggerCollectSimpleCommand(address: ObjectAddress, secondaryObject: ObjectAddress, parsetree: *mut Node) { /* TODO(pg-port): commands/event_trigger.c */ }
-unsafe fn EventTriggerCollectCreateOpClass(stmt: *mut CreateOpClassStmt, opcoid: Oid, operators: *mut List, procedures: *mut List) { /* TODO(pg-port): commands/event_trigger.c */ }
-unsafe fn EventTriggerCollectAlterOpFam(stmt: *mut AlterOpFamilyStmt, opfamoid: Oid, operators: *mut List, procedures: *mut List) { /* TODO(pg-port): commands/event_trigger.c */ }
-unsafe fn InvokeObjectPostCreateHook(classId: Oid, objectId: Oid, subId: c_int) { /* TODO(pg-port): catalog/objectaccess.h */ }
+unsafe fn EventTriggerCollectSimpleCommand(address: ObjectAddress, secondaryObject: ObjectAddress, parsetree: *mut Node) { /* DDL no-op (no event triggers in bring-up) */ }
+unsafe fn EventTriggerCollectCreateOpClass(stmt: *mut CreateOpClassStmt, opcoid: Oid, operators: *mut List, procedures: *mut List) { /* DDL no-op (no event triggers in bring-up) */ }
+unsafe fn EventTriggerCollectAlterOpFam(stmt: *mut AlterOpFamilyStmt, opfamoid: Oid, operators: *mut List, procedures: *mut List) { /* DDL no-op (no event triggers in bring-up) */ }
+unsafe fn InvokeObjectPostCreateHook(classId: Oid, objectId: Oid, subId: c_int) { crate::parser_link_shims::InvokeObjectPostCreateHook(classId, objectId, subId) }
 
-unsafe fn GetIndexAmRoutineByAmId(amoid: Oid, noerror: bool) -> *mut IndexAmRoutine { /* TODO(pg-port): access/index/amapi.c */ core::ptr::null_mut() }
-unsafe fn get_index_am_oid(amname: *const c_char, missing_ok: bool) -> Oid { /* TODO(pg-port): commands/amcmds.c */ InvalidOid }
+unsafe fn GetIndexAmRoutineByAmId(amoid: Oid, noerror: bool) -> *mut IndexAmRoutine { crate::access::index::amapi::GetIndexAmRoutineByAmId(amoid, noerror) }
+unsafe fn get_index_am_oid(amname: *const c_char, missing_ok: bool) -> Oid { crate::commands::amcmds::get_index_am_oid(amname, missing_ok) }
 
-unsafe fn typenameTypeId(pstate: *mut c_void, typeName: *mut TypeName) -> Oid { /* TODO(pg-port): parser/parse_type.c */ InvalidOid }
-unsafe fn TypeNameToString(typeName: *mut TypeName) -> *mut c_char { /* TODO(pg-port): parser/parse_type.c */ core::ptr::null_mut() }
-unsafe fn LookupOperWithArgs(oper: *mut ObjectWithArgs, noError: bool) -> Oid { /* TODO(pg-port): parser/parse_oper.c */ InvalidOid }
-unsafe fn LookupOperName(pstate: *mut c_void, opername: *mut List, oprleft: Oid, oprright: Oid, noError: bool, location: c_int) -> Oid { /* TODO(pg-port): parser/parse_oper.c */ InvalidOid }
-unsafe fn LookupFuncWithArgs(objtype: ObjectType, func: *mut ObjectWithArgs, noError: bool) -> Oid { /* TODO(pg-port): parser/parse_func.c */ InvalidOid }
+unsafe fn typenameTypeId(pstate: *mut c_void, typeName: *mut TypeName) -> Oid { crate::parser::parse_type::typenameTypeId(pstate as _, typeName as _) }
+unsafe fn TypeNameToString(typeName: *mut TypeName) -> *mut c_char { crate::parser::parse_type::TypeNameToString(typeName as _) }
+unsafe fn LookupOperWithArgs(oper: *mut ObjectWithArgs, noError: bool) -> Oid { crate::parser::parse_oper::LookupOperWithArgs(oper as _, noError) }
+unsafe fn LookupOperName(pstate: *mut c_void, opername: *mut List, oprleft: Oid, oprright: Oid, noError: bool, location: c_int) -> Oid { crate::parser::parse_oper::LookupOperName(pstate as _, opername as _, oprleft, oprright, noError, location) }
+unsafe fn LookupFuncWithArgs(objtype: ObjectType, func: *mut ObjectWithArgs, noError: bool) -> Oid { crate::parser::parse_func::LookupFuncWithArgs(objtype, func as _, noError) }
 
-unsafe fn format_type_be(type_oid: Oid) -> *mut c_char { /* TODO(pg-port): utils/adt/format_type.c */ core::ptr::null_mut() }
-unsafe fn get_func_signature(funcid: Oid, argtypes: *mut *mut Oid, nargs: *mut c_int) -> *mut c_char { /* TODO(pg-port): utils/cache/lsyscache.c */ core::ptr::null_mut() }
-unsafe fn op_input_types(opno: Oid, lefttype: *mut Oid, righttype: *mut Oid) { /* TODO(pg-port): utils/cache/lsyscache.c */ }
+unsafe fn format_type_be(type_oid: Oid) -> *mut c_char { crate::utils::adt::format_type::format_type_be(type_oid) }
+unsafe fn get_func_signature(funcid: Oid, argtypes: *mut *mut Oid, nargs: *mut c_int) -> *mut c_char { unimplemented!("STUB get_func_signature") }
+unsafe fn op_input_types(opno: Oid, lefttype: *mut Oid, righttype: *mut Oid) { crate::utils::cache::lsyscache::op_input_types(opno, lefttype, righttype) }
 
-unsafe fn ScanKeyInit(entry: *mut ScanKeyData, attributeNumber: c_int, strategy: c_int, procedure: Oid, argument: Datum) { /* TODO(pg-port): access/common/scankey.c */ }
-unsafe fn systable_beginscan(heapRelation: Relation, indexId: Oid, indexOK: bool, snapshot: *mut c_void, nkeys: c_int, key: *mut ScanKeyData) -> SysScanDesc { /* TODO(pg-port): access/index/genam.c */ core::ptr::null_mut() }
-unsafe fn systable_getnext(sysscan: SysScanDesc) -> HeapTuple { /* TODO(pg-port): access/index/genam.c */ core::ptr::null_mut() }
-unsafe fn systable_endscan(sysscan: SysScanDesc) { /* TODO(pg-port): access/index/genam.c */ }
+unsafe fn ScanKeyInit(entry: *mut ScanKeyData, attributeNumber: c_int, strategy: c_int, procedure: Oid, argument: Datum) { crate::access::common::scankey::ScanKeyInit(entry as _, attributeNumber as _, strategy as _, procedure, argument) }
+unsafe fn systable_beginscan(heapRelation: Relation, indexId: Oid, indexOK: bool, snapshot: *mut c_void, nkeys: c_int, key: *mut ScanKeyData) -> SysScanDesc { crate::access::index::genam::systable_beginscan(heapRelation as _, indexId, indexOK, snapshot as _, nkeys, key as _) as _ }
+unsafe fn systable_getnext(sysscan: SysScanDesc) -> HeapTuple { crate::access::index::genam::systable_getnext(sysscan as _) as _ }
+unsafe fn systable_endscan(sysscan: SysScanDesc) { crate::access::index::genam::systable_endscan(sysscan as _) }
 
 /* The following helpers convert the typed Form_* GETSTRUCT pointers. */
 unsafe fn GETSTRUCT_pg_am(tup: HeapTuple) -> Form_pg_am { GETSTRUCT(tup) as Form_pg_am }
@@ -312,18 +310,6 @@ unsafe fn GETSTRUCT_pg_proc(tup: HeapTuple) -> Form_pg_proc { GETSTRUCT(tup) as 
     pub opcintype: Oid,
     pub opcdefault: bool,
     pub opckeytype: Oid,
-}
-#[repr(C)] pub struct oidvector_fields { pub values: [Oid; 1] }
-#[repr(C)] pub struct FormData_pg_operator_fields {
-    pub oprkind: c_char,
-    pub oprresult: Oid,
-    pub oprleft: Oid,
-    pub oprright: Oid,
-}
-#[repr(C)] pub struct FormData_pg_proc_fields {
-    pub prorettype: Oid,
-    pub pronargs: i16,
-    pub proargtypes: oidvector_fields,
 }
 
 /*
@@ -611,7 +597,9 @@ pub unsafe fn DefineOpClass(stmt: *mut CreateOpClassStmt) -> ObjectAddress {
     }
 
     /* Get necessary info about access method */
+    if std::env::var_os("PDB_AM").is_some() { eprintln!("PDB_AM amname={:?} AMNAME_id={}", cstr_display((*stmt).amname), AMNAME); }
     tup = SearchSysCache1(AMNAME, CStringGetDatum((*stmt).amname));
+    if std::env::var_os("PDB_AM").is_some() { eprintln!("PDB_AM SearchSysCache1(AMNAME) valid={}", HeapTupleIsValid(tup)); }
     if !HeapTupleIsValid(tup) {
         ereport!(ERROR,
                  errmsg!("access method \"{}\" does not exist",
@@ -1039,7 +1027,9 @@ pub unsafe fn AlterOpFamily(stmt: *mut AlterOpFamilyStmt) -> Oid {
     let amroutine: *mut IndexAmRoutine;
 
     /* Get necessary info about access method */
+    if std::env::var_os("PDB_AM").is_some() { eprintln!("PDB_AM amname={:?} AMNAME_id={}", cstr_display((*stmt).amname), AMNAME); }
     tup = SearchSysCache1(AMNAME, CStringGetDatum((*stmt).amname));
+    if std::env::var_os("PDB_AM").is_some() { eprintln!("PDB_AM SearchSysCache1(AMNAME) valid={}", HeapTupleIsValid(tup)); }
     if !HeapTupleIsValid(tup) {
         ereport!(ERROR,
                  errmsg!("access method \"{}\" does not exist",
@@ -1336,12 +1326,11 @@ unsafe fn assignOperTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid)
         elog!(ERROR, "cache lookup failed for operator {}", (*member).object);
     }
     opform = GETSTRUCT_pg_operator(optup);
-    let opformf = opform as *mut FormData_pg_operator_fields;
 
     /*
      * Opfamily operators must be binary.
      */
-    if (*opformf).oprkind != b'b' as c_char {
+    if (*opform).oprkind != b'b' as c_char {
         ereport!(ERROR,
                  errmsg!("index operators must be binary"));
         /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
@@ -1370,7 +1359,7 @@ unsafe fn assignOperTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid)
         /*
          * Search operators must return boolean.
          */
-        if (*opformf).oprresult != BOOLOID {
+        if (*opform).oprresult != BOOLOID {
             ereport!(ERROR,
                      errmsg!("index search operators must return boolean"));
             /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
@@ -1381,10 +1370,10 @@ unsafe fn assignOperTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid)
      * If lefttype/righttype isn't specified, use the operator's input types
      */
     if !OidIsValid((*member).lefttype) {
-        (*member).lefttype = (*opformf).oprleft;
+        (*member).lefttype = (*opform).oprleft;
     }
     if !OidIsValid((*member).righttype) {
-        (*member).righttype = (*opformf).oprright;
+        (*member).righttype = (*opform).oprright;
     }
 
     ReleaseSysCache(optup);
@@ -1405,7 +1394,6 @@ unsafe fn assignProcTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid,
         elog!(ERROR, "cache lookup failed for function {}", (*member).object);
     }
     procform = GETSTRUCT_pg_proc(proctup);
-    let procformf = procform as *mut FormData_pg_proc_fields;
 
     /* Check the signature of the opclass options parsing function */
     if (*member).number == opclassOptsProcNum {
@@ -1424,9 +1412,9 @@ unsafe fn assignProcTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid,
             }
         }
 
-        if (*procformf).prorettype != VOIDOID ||
-           (*procformf).pronargs != 1 ||
-           (*procformf).proargtypes.values[0] != INTERNALOID {
+        if (*procform).prorettype != VOIDOID ||
+           (*procform).pronargs != 1 ||
+           *(*procform).proargtypes.values.as_ptr() != INTERNALOID {
             ereport!(ERROR,
                      errmsg!("invalid operator class options parsing function"));
             /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
@@ -1443,12 +1431,12 @@ unsafe fn assignProcTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid,
      */
     else if (*GetIndexAmRoutineByAmId(amoid, false)).amcanorder {
         if (*member).number == BTORDER_PROC {
-            if (*procformf).pronargs != 2 {
+            if (*procform).pronargs != 2 {
                 ereport!(ERROR,
                          errmsg!("ordering comparison functions must have two arguments"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
             }
-            if (*procformf).prorettype != INT4OID {
+            if (*procform).prorettype != INT4OID {
                 ereport!(ERROR,
                          errmsg!("ordering comparison functions must return integer"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
@@ -1459,19 +1447,19 @@ unsafe fn assignProcTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid,
              * types
              */
             if !OidIsValid((*member).lefttype) {
-                (*member).lefttype = (*procformf).proargtypes.values[0];
+                (*member).lefttype = *(*procform).proargtypes.values.as_ptr();
             }
             if !OidIsValid((*member).righttype) {
-                (*member).righttype = *(*procformf).proargtypes.values.as_ptr().add(1);
+                (*member).righttype = *(*procform).proargtypes.values.as_ptr().add(1);
             }
         } else if (*member).number == BTSORTSUPPORT_PROC {
-            if (*procformf).pronargs != 1 ||
-               (*procformf).proargtypes.values[0] != INTERNALOID {
+            if (*procform).pronargs != 1 ||
+               *(*procform).proargtypes.values.as_ptr() != INTERNALOID {
                 ereport!(ERROR,
                          errmsg!("ordering sort support functions must accept type \"internal\""));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
             }
-            if (*procformf).prorettype != VOIDOID {
+            if (*procform).prorettype != VOIDOID {
                 ereport!(ERROR,
                          errmsg!("ordering sort support functions must return void"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
@@ -1481,12 +1469,12 @@ unsafe fn assignProcTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid,
              * Can't infer lefttype/righttype from proc, so use default rule
              */
         } else if (*member).number == BTINRANGE_PROC {
-            if (*procformf).pronargs != 5 {
+            if (*procform).pronargs != 5 {
                 ereport!(ERROR,
                          errmsg!("ordering in_range functions must have five arguments"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
             }
-            if (*procformf).prorettype != BOOLOID {
+            if (*procform).prorettype != BOOLOID {
                 ereport!(ERROR,
                          errmsg!("ordering in_range functions must return boolean"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
@@ -1497,18 +1485,18 @@ unsafe fn assignProcTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid,
              * types (we look at the test-value and offset arguments)
              */
             if !OidIsValid((*member).lefttype) {
-                (*member).lefttype = (*procformf).proargtypes.values[0];
+                (*member).lefttype = *(*procform).proargtypes.values.as_ptr();
             }
             if !OidIsValid((*member).righttype) {
-                (*member).righttype = *(*procformf).proargtypes.values.as_ptr().add(2);
+                (*member).righttype = *(*procform).proargtypes.values.as_ptr().add(2);
             }
         } else if (*member).number == BTEQUALIMAGE_PROC {
-            if (*procformf).pronargs != 1 {
+            if (*procform).pronargs != 1 {
                 ereport!(ERROR,
                          errmsg!("ordering equal image functions must have one argument"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
             }
-            if (*procformf).prorettype != BOOLOID {
+            if (*procform).prorettype != BOOLOID {
                 ereport!(ERROR,
                          errmsg!("ordering equal image functions must return boolean"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
@@ -1528,13 +1516,13 @@ unsafe fn assignProcTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid,
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
             }
         } else if (*member).number == BTSKIPSUPPORT_PROC {
-            if (*procformf).pronargs != 1 ||
-               (*procformf).proargtypes.values[0] != INTERNALOID {
+            if (*procform).pronargs != 1 ||
+               *(*procform).proargtypes.values.as_ptr() != INTERNALOID {
                 ereport!(ERROR,
                          errmsg!("btree skip support functions must accept type \"internal\""));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
             }
-            if (*procformf).prorettype != VOIDOID {
+            if (*procform).prorettype != VOIDOID {
                 ereport!(ERROR,
                          errmsg!("btree skip support functions must return void"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
@@ -1556,23 +1544,23 @@ unsafe fn assignProcTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid,
         }
     } else if (*GetIndexAmRoutineByAmId(amoid, false)).amcanhash {
         if (*member).number == HASHSTANDARD_PROC {
-            if (*procformf).pronargs != 1 {
+            if (*procform).pronargs != 1 {
                 ereport!(ERROR,
                          errmsg!("hash function 1 must have one argument"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
             }
-            if (*procformf).prorettype != INT4OID {
+            if (*procform).prorettype != INT4OID {
                 ereport!(ERROR,
                          errmsg!("hash function 1 must return integer"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
             }
         } else if (*member).number == HASHEXTENDED_PROC {
-            if (*procformf).pronargs != 2 {
+            if (*procform).pronargs != 2 {
                 ereport!(ERROR,
                          errmsg!("hash function 2 must have two arguments"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
             }
-            if (*procformf).prorettype != INT8OID {
+            if (*procform).prorettype != INT8OID {
                 ereport!(ERROR,
                          errmsg!("hash function 2 must return bigint"));
                 /* C also: errcode(ERRCODE_INVALID_OBJECT_DEFINITION) */
@@ -1583,10 +1571,10 @@ unsafe fn assignProcTypes(member: *mut OpFamilyMember, amoid: Oid, typeoid: Oid,
          * If lefttype/righttype isn't specified, use the proc's input type
          */
         if !OidIsValid((*member).lefttype) {
-            (*member).lefttype = (*procformf).proargtypes.values[0];
+            (*member).lefttype = *(*procform).proargtypes.values.as_ptr();
         }
         if !OidIsValid((*member).righttype) {
-            (*member).righttype = (*procformf).proargtypes.values[0];
+            (*member).righttype = *(*procform).proargtypes.values.as_ptr();
         }
     }
 

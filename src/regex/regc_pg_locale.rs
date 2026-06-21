@@ -60,38 +60,9 @@ const PG_UTF8: c_int = crate::mb::wchar::pg_enc::PG_UTF8 as c_int;
 // Dependencies translated in OTHER .c files; stubbed with TODO(pg-port).
 // ---------------------------------------------------------------------------
 
-/// utils/pg_locale.h: opaque locale handle (pointer to pg_locale_struct).
-/// TODO(pg-port): replace with the real pg_locale_struct from utils/pg_locale.rs.
-#[repr(C)]
-pub struct pg_locale_struct {
-    pub deterministic: bool,
-    pub ctype_is_c: bool,
-    pub is_default: bool,
-    pub provider: c_char,
-    pub info: pg_locale_info,
-}
+pub use crate::utils::adt::pg_locale::{pg_locale_struct, pg_locale_t};
 
-#[repr(C)]
-pub union pg_locale_info {
-    pub lt: *mut c_void, // locale_t
-    pub builtin: pg_locale_builtin,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct pg_locale_builtin {
-    pub locale: *const c_char,
-    pub casemap_full: bool,
-}
-
-pub type pg_locale_t = *mut pg_locale_struct;
-
-/// utils/pg_locale.h: pg_newlocale_from_collation().
-/// TODO(pg-port): real implementation lives in utils/adt/pg_locale.c.
-pub unsafe fn pg_newlocale_from_collation(_collid: Oid) -> pg_locale_t {
-    /* TODO(pg-port) */
-    core::ptr::null_mut()
-}
+pub use crate::utils::adt::pg_locale::pg_newlocale_from_collation;
 
 /// mb/pg_wchar.h: GetDatabaseEncoding().
 /// TODO(pg-port): real implementation lives in mb/mbutils.c.
@@ -296,7 +267,7 @@ pub unsafe fn pg_set_regex_collation(collation: Oid) {
     pg_regex_locale = locale;
 }
 
-unsafe fn pg_wc_isdigit(c: pg_wchar) -> c_int {
+pub unsafe fn pg_wc_isdigit(c: pg_wchar) -> c_int {
     match pg_regex_strategy {
         PG_REGEX_STRATEGY_C => {
             (c <= 127 && (pg_char_properties[c as usize] & PG_ISDIGIT) != 0) as c_int
@@ -321,7 +292,7 @@ unsafe fn pg_wc_isdigit(c: pg_wchar) -> c_int {
     }
 }
 
-unsafe fn pg_wc_isalpha(c: pg_wchar) -> c_int {
+pub unsafe fn pg_wc_isalpha(c: pg_wchar) -> c_int {
     match pg_regex_strategy {
         PG_REGEX_STRATEGY_C => {
             (c <= 127 && (pg_char_properties[c as usize] & PG_ISALPHA) != 0) as c_int
@@ -344,7 +315,7 @@ unsafe fn pg_wc_isalpha(c: pg_wchar) -> c_int {
     }
 }
 
-unsafe fn pg_wc_isalnum(c: pg_wchar) -> c_int {
+pub unsafe fn pg_wc_isalnum(c: pg_wchar) -> c_int {
     match pg_regex_strategy {
         PG_REGEX_STRATEGY_C => {
             (c <= 127 && (pg_char_properties[c as usize] & PG_ISALNUM) != 0) as c_int
@@ -494,7 +465,7 @@ unsafe fn pg_wc_ispunct(c: pg_wchar) -> c_int {
     }
 }
 
-unsafe fn pg_wc_isspace(c: pg_wchar) -> c_int {
+pub unsafe fn pg_wc_isspace(c: pg_wchar) -> c_int {
     match pg_regex_strategy {
         PG_REGEX_STRATEGY_C => {
             (c <= 127 && (pg_char_properties[c as usize] & PG_ISSPACE) != 0) as c_int

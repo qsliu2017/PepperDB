@@ -28,7 +28,7 @@ use crate::utils::misc::queryenvironment::{
 
 // TODO: tuplestore.c not yet ported.
 unsafe fn tuplestore_select_read_pointer(_state: *mut Tuplestorestate, _ptr: c_int) {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_select_read_pointer(_state as _, _ptr as _)
 }
 
 // TODO: tuplestore.c not yet ported.
@@ -38,17 +38,17 @@ unsafe fn tuplestore_gettupleslot(
     _copy: bool,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_gettupleslot(_state as _, _forward as _, _copy as _, _slot as _) as _
 }
 
 // TODO: tuplestore.c not yet ported.
 unsafe fn tuplestore_alloc_read_pointer(_state: *mut Tuplestorestate, _eflags: c_int) -> c_int {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_alloc_read_pointer(_state as _, _eflags as _) as _
 }
 
 // TODO: tuplestore.c not yet ported.
 unsafe fn tuplestore_rescan(_state: *mut Tuplestorestate) {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_rescan(_state as _)
 }
 
 /* ----------------------------------------------------------------

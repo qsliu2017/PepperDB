@@ -266,8 +266,8 @@ const REPLICATION_STATE_MAGIC: uint32 = 0x1257DADE;
 // MAKE_SYSCACHE macros; exact integer values come from the generated
 // syscache_ids.h, which has not been ported yet).
 // TODO(pg-port): replace with crate::utils::cache::syscache::{REPLORIGIDENT,REPLORIGNAME}
-const REPLORIGIDENT: c_int = 0; // TODO(pg-port): real REPLORIGIDENT lives in utils/syscache.h (generated)
-const REPLORIGNAME: c_int = 0;  // TODO(pg-port): real REPLORIGNAME lives in utils/syscache.h (generated)
+const REPLORIGIDENT: c_int = 58; // TODO(pg-port): real REPLORIGIDENT lives in utils/syscache.h (generated)
+const REPLORIGNAME: c_int = 59;  // TODO(pg-port): real REPLORIGNAME lives in utils/syscache.h (generated)
 
 // Catalog index OID for pg_replication_origin_roiident_index
 // (value 6001 from pg_replication_origin.h DECLARE_UNIQUE_INDEX_PKEY).
@@ -310,16 +310,16 @@ const LW_SHARED: c_int = 1;    // TODO(pg-port): real value lives in storage/lwl
 const LWTRANCHE_REPLICATION_ORIGIN_STATE: c_int = 0; // TODO(pg-port): real value lives in storage/lwlock.h
 
 unsafe fn ReplicationOriginLock() -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): real ReplicationOriginLock lives in storage/lwlock.c (named LWLock, index 40)
+    crate::backend_link_shims::ReplicationOriginLock as *mut LWLock
 }
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real LWLockAcquire lives in storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, if _mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE })
 }
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO(pg-port): real LWLockRelease lives in storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 unsafe fn LWLockInitialize(_lock: *mut LWLock, _tranche_id: c_int) {
-    unimplemented!() // TODO(pg-port): real LWLockInitialize lives in storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockInitialize(_lock as _, _tranche_id)
 }
 
 // Shared memory init -- TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c
@@ -328,7 +328,7 @@ unsafe fn ShmemInitStruct(
     _size: Size,
     _found: *mut bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _found)
 }
 
 // Size helpers -- TODO(pg-port): real add_size/mul_size live in storage/ipc/shmem.c
@@ -346,18 +346,16 @@ unsafe fn MemSet(start: *mut c_void, val: c_int, len: Size) {
 }
 
 // XLogFlush -- TODO(pg-port): real XLogFlush lives in access/xlog.c
-unsafe fn XLogFlush(_lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real XLogFlush lives in access/xlog.c
-}
+unsafe fn XLogFlush(lsn: XLogRecPtr) { crate::access::transam::xlog::XLogFlush(lsn as _) }
 
 // RecoveryInProgress -- TODO(pg-port): real RecoveryInProgress lives in access/xlog.c
 unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO(pg-port): real RecoveryInProgress lives in access/xlog.c
+    crate::access::transam::xlog::RecoveryInProgress()
 }
 
 // IsTransactionState -- TODO(pg-port): real IsTransactionState lives in access/xact.c
 unsafe fn IsTransactionState() -> bool {
-    unimplemented!() // TODO(pg-port): real IsTransactionState lives in access/xact.c
+    crate::access::transam::xact::IsTransactionState()
 }
 
 // pg_strcasecmp -- real impl lives in port/pgstrcasecmp.rs; imported below.
@@ -389,10 +387,10 @@ unsafe fn InitDirtySnapshot(_snap: *mut SnapshotData) {
 
 // OpenTransientFile / CloseTransientFile -- TODO(pg-port): real defs in storage/file/fd.c
 unsafe fn OpenTransientFile(_path: *const c_char, _flags: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): real OpenTransientFile lives in storage/file/fd.c
+    crate::storage::file::fd::OpenTransientFile(_path, _flags)
 }
 unsafe fn CloseTransientFile(_fd: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): real CloseTransientFile lives in storage/file/fd.c
+    crate::storage::file::fd::CloseTransientFile(_fd)
 }
 
 // durable_rename -- real impl lives in common/file_utils.rs
@@ -466,26 +464,20 @@ macro_rules! PG_GETARG_LSN {
 }
 
 // LSNGetDatum -- TODO(pg-port): real LSNGetDatum lives in utils/adt/pg_lsn.c
-unsafe fn LSNGetDatum(_lsn: XLogRecPtr) -> Datum {
-    unimplemented!() // TODO(pg-port): real LSNGetDatum lives in utils/adt/pg_lsn.c
-}
+unsafe fn LSNGetDatum(lsn: XLogRecPtr) -> Datum { crate::utils::adt::pg_lsn::LSNGetDatum(lsn as _) }
 
 // text type alias
 type text = c_void;
 
 // InitMaterializedSRF -- TODO(pg-port): real InitMaterializedSRF lives in utils/fmgr/funcapi.c
-unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) {
-    unimplemented!() // TODO(pg-port): real InitMaterializedSRF lives in utils/fmgr/funcapi.c
-}
+unsafe fn InitMaterializedSRF(fcinfo: FunctionCallInfo, flags: c_int) { crate::utils::fmgr::funcapi::InitMaterializedSRF(fcinfo as _, flags as _) }
 // tuplestore_putvalues -- TODO(pg-port): real tuplestore_putvalues lives in utils/sort/tuplestore.c
 unsafe fn tuplestore_putvalues(
-    _state: *mut Tuplestorestate,
-    _tdesc: *mut c_void,
-    _values: *mut Datum,
-    _nulls: *mut bool,
-) {
-    unimplemented!() // TODO(pg-port): real tuplestore_putvalues lives in utils/sort/tuplestore.c
-}
+    state: *mut Tuplestorestate,
+    tdesc: *mut c_void,
+    values: *mut Datum,
+    nulls: *mut bool,
+) { crate::utils::sort::tuplestore::tuplestore_putvalues(state as _, tdesc as _, values as _, nulls as _) }
 
 // TupleDesc alias
 use crate::access::common::tupdesc::TupleDesc;
@@ -546,6 +538,7 @@ unsafe fn IsReservedOriginName(name: *const c_char) -> bool {
  *
  * Returns InvalidOid if the node isn't known yet and missing_ok is true.
  */
+#[no_mangle]
 pub unsafe fn replorigin_by_name(roname: *const c_char, missing_ok: bool) -> RepOriginId {
     let mut roident: Oid = InvalidOid;
 
@@ -571,6 +564,7 @@ pub unsafe fn replorigin_by_name(roname: *const c_char, missing_ok: bool) -> Rep
  *
  * Needs to be called in a transaction.
  */
+#[no_mangle]
 pub unsafe fn replorigin_create(roname: *const c_char) -> RepOriginId {
     let mut roident: Oid;
     let mut tuple: HeapTuple = core::ptr::null_mut();
@@ -1591,6 +1585,7 @@ unsafe extern "C" fn ReplicationOriginExitCleanup(code: c_int, arg: Datum) {
  * 0, and then the other processes sharing that same origin can pass
  * acquired_by = PID of the first process.
  */
+#[no_mangle]
 pub unsafe fn replorigin_session_setup(node: RepOriginId, acquired_by: c_int) {
     static mut registered_cleanup: bool = false;
     let mut i: c_int;
@@ -1738,6 +1733,7 @@ pub unsafe fn replorigin_session_advance(remote_commit: XLogRecPtr, local_commit
  * Ask the machinery about the point up to which we successfully replayed
  * changes from an already setup replication origin.
  */
+#[no_mangle]
 pub unsafe fn replorigin_session_get_progress(flush: bool) -> XLogRecPtr {
     let remote_lsn: XLogRecPtr;
     let local_lsn: XLogRecPtr;

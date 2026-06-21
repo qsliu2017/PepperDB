@@ -25,8 +25,8 @@ use crate::{PG_RETURN_NULL, PG_RETURN_BOOL, PG_RETURN_DATUM};
 // ===================================================================
 
 // utils/syscache.h - cache ids (STUB: syscache.c not yet ported).
-const RELOID: c_int = 0;
-const INDEXRELID: c_int = 0;
+const RELOID: c_int = 57;
+const INDEXRELID: c_int = 34;
 
 // catalog/pg_index - attribute number (STUB: catalog header not fully ported).
 const Anum_pg_index_indoption: c_int = 13;

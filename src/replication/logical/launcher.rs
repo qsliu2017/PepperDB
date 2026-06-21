@@ -136,11 +136,9 @@ use crate::lib::dshash::{LWLock, LWLockAcquire, LWLockRelease,
     LWLockHeldByMe, LWLockHeldByMeInMode, LW_EXCLUSIVE, LW_SHARED};
 
 /// LogicalRepWorkerLock - shared LWLock protecting LogicalRepCtx->workers.
-// TODO(pg-port): real LogicalRepWorkerLock lives in storage/lmgr/lwlock.c
-static mut LogicalRepWorkerLock_storage: LWLock = LWLock { _private: [] };
 #[inline]
 unsafe fn LogicalRepWorkerLock() -> *mut LWLock {
-    &mut LogicalRepWorkerLock_storage as *mut LWLock
+    crate::backend_link_shims::LogicalRepWorkerLock as *mut LWLock
 }
 
 // TODO(pg-port): real tranche IDs live in storage/lmgr/lwlock.h
@@ -156,18 +154,10 @@ const LWTRANCHE_LAUNCHER_DSA: c_int = 0;
 unsafe fn dsa_create(_tranche_id: c_int) -> *mut dsa_area {
     unimplemented!() // TODO(pg-port): real dsa_create lives in utils/mmgr/dsa.c
 }
-unsafe fn dsa_attach(_handle: dsa_handle_t) -> *mut dsa_area {
-    unimplemented!() // TODO(pg-port): real dsa_attach lives in utils/mmgr/dsa.c
-}
-unsafe fn dsa_pin(_area: *mut dsa_area) {
-    unimplemented!() // TODO(pg-port): real dsa_pin lives in utils/mmgr/dsa.c
-}
-unsafe fn dsa_pin_mapping(_area: *mut dsa_area) {
-    unimplemented!() // TODO(pg-port): real dsa_pin_mapping lives in utils/mmgr/dsa.c
-}
-unsafe fn dsa_get_handle(_area: *mut dsa_area) -> dsa_handle_t {
-    unimplemented!() // TODO(pg-port): real dsa_get_handle lives in utils/mmgr/dsa.c
-}
+unsafe fn dsa_attach(handle: dsa_handle_t) -> *mut dsa_area { crate::utils::mmgr::dsa::dsa_attach(handle) }
+unsafe fn dsa_pin(area: *mut dsa_area) { crate::utils::mmgr::dsa::dsa_pin(area as _) }
+unsafe fn dsa_pin_mapping(area: *mut dsa_area) { crate::utils::mmgr::dsa::dsa_pin_mapping(area as _) }
+unsafe fn dsa_get_handle(area: *mut dsa_area) -> dsa_handle_t { crate::utils::mmgr::dsa::dsa_get_handle(area as _) as _ }
 
 // --------------------------------------------------------------------------
 // WaitLatch / SetLatch / ResetLatch stubs
@@ -193,9 +183,7 @@ use crate::libpq::pqsignal::{pqsignal, SigHandler, SIGHUP, SIGUSR1, SIGUSR2, SIG
 use crate::tcop::tcopprot::die;
 
 // TODO(pg-port): real kill() lives in libc / port/port_api.c
-unsafe fn kill(pid: pid_t, sig: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): real kill lives in libc
-}
+unsafe fn kill(pid: pid_t, sig: c_int) -> c_int { todo!("TODO(pg-port): kill") }
 
 // --------------------------------------------------------------------------
 // Background worker registration stubs
@@ -234,8 +222,7 @@ static mut wal_retrieve_retry_interval: c_int = 5000;
 /* MyProc - storage/lmgr/proc.h */
 // TODO(pg-port): real MyProc lives in storage/lmgr/proc.c
 use crate::replication::worker_internal::PGPROC;
-static mut MyProc: *mut PGPROC = null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 /*
  * A BackgroundWorker descriptor - mirrors the C struct exactly enough for
  * RegisterDynamicBackgroundWorker.
@@ -256,30 +243,25 @@ pub struct BackgroundWorker {
 
 // TODO(pg-port): real RegisterBackgroundWorker lives in postmaster/bgworker.c
 unsafe fn RegisterBackgroundWorker(_worker: *mut BackgroundWorker) {
-    unimplemented!() // TODO(pg-port): real RegisterBackgroundWorker lives in postmaster/bgworker.c
+    // bring-up: skip registering the logical-rep launcher bgworker (not needed for basic queries;
+    // launcher::BackgroundWorker and bgworker::BackgroundWorker differ in size -> forwarding overruns). TODO: unify.
 }
 
 // TODO(pg-port): real RegisterDynamicBackgroundWorker lives in postmaster/bgworker.c
 unsafe fn RegisterDynamicBackgroundWorker(
-    _worker: *mut BackgroundWorker,
-    _handle: *mut *mut BackgroundWorkerHandle,
-) -> bool {
-    unimplemented!() // TODO(pg-port): real RegisterDynamicBackgroundWorker lives in postmaster/bgworker.c
-}
+    worker: *mut BackgroundWorker,
+    handle: *mut *mut BackgroundWorkerHandle,
+) -> bool { crate::postmaster::bgworker::RegisterDynamicBackgroundWorker(worker as _, handle as _) }
 
 // TODO(pg-port): real BackgroundWorkerUnblockSignals lives in postmaster/bgworker.c
-unsafe fn BackgroundWorkerUnblockSignals() {
-    unimplemented!() // TODO(pg-port): real BackgroundWorkerUnblockSignals lives in postmaster/bgworker.c
-}
+unsafe fn BackgroundWorkerUnblockSignals() { crate::postmaster::bgworker::BackgroundWorkerUnblockSignals() }
 
 // TODO(pg-port): real BackgroundWorkerInitializeConnection lives in postmaster/bgworker.c
 unsafe fn BackgroundWorkerInitializeConnection(
-    _dbname: *const c_char,
-    _username: *const c_char,
-    _flags: uint32,
-) {
-    unimplemented!() // TODO(pg-port): real BackgroundWorkerInitializeConnection lives in postmaster/bgworker.c
-}
+    dbname: *const c_char,
+    username: *const c_char,
+    flags: uint32,
+) { crate::postmaster::bgworker::BackgroundWorkerInitializeConnection(dbname as _, username as _, flags as _) }
 
 // --------------------------------------------------------------------------
 // Transaction command stubs
@@ -287,13 +269,9 @@ unsafe fn BackgroundWorkerInitializeConnection(
 // TODO(pg-port): real CommitTransactionCommand lives in access/transam/xact.c
 // --------------------------------------------------------------------------
 
-unsafe fn StartTransactionCommand() {
-    unimplemented!() // TODO(pg-port): real StartTransactionCommand lives in access/transam/xact.c
-}
+unsafe fn StartTransactionCommand() { crate::access::transam::xact::StartTransactionCommand() }
 
-unsafe fn CommitTransactionCommand() {
-    unimplemented!() // TODO(pg-port): real CommitTransactionCommand lives in access/transam/xact.c
-}
+unsafe fn CommitTransactionCommand() { crate::access::transam::xact::CommitTransactionCommand() }
 
 // --------------------------------------------------------------------------
 // Lock management stubs
@@ -305,9 +283,7 @@ unsafe fn CommitTransactionCommand() {
 const DEFAULT_LOCKMETHOD: c_int = 1;
 
 // TODO(pg-port): real LockReleaseAll lives in storage/lmgr/lock.c
-unsafe fn LockReleaseAll(_lock_method: c_int, _all_levels: bool) {
-    unimplemented!() // TODO(pg-port): real LockReleaseAll lives in storage/lmgr/lock.c
-}
+unsafe fn LockReleaseAll(lock_method: c_int, all_levels: bool) { crate::storage::lmgr::lock::LockReleaseAll(lock_method as _, all_levels) }
 
 // --------------------------------------------------------------------------
 // Process-array stubs
@@ -315,9 +291,7 @@ unsafe fn LockReleaseAll(_lock_method: c_int, _all_levels: bool) {
 // --------------------------------------------------------------------------
 
 // TODO(pg-port): real IsBackendPid lives in storage/lmgr/procarray.c
-unsafe fn IsBackendPid(_pid: pid_t) -> bool {
-    unimplemented!() // TODO(pg-port): real IsBackendPid lives in storage/lmgr/procarray.c
-}
+unsafe fn IsBackendPid(pid: pid_t) -> bool { crate::storage::ipc::procarray::IsBackendPid(pid) }
 
 // --------------------------------------------------------------------------
 // pgstat stub
@@ -344,9 +318,7 @@ use crate::storage::file::fileset::FileSetDeleteAll;
 use crate::utils::misc::guc_funcs::PGC_SIGHUP;
 
 // TODO(pg-port): real ProcessConfigFile lives in utils/misc/guc.c
-unsafe fn ProcessConfigFile(_context: c_int) {
-    unimplemented!() // TODO(pg-port): real ProcessConfigFile lives in utils/misc/guc.c
-}
+unsafe fn ProcessConfigFile(context: c_int) { unimplemented!() }
 
 // --------------------------------------------------------------------------
 // pg_stat_get_subscription helper types
@@ -361,19 +333,15 @@ use crate::access::common::tupdesc::TupleDesc;
 pub type Tuplestorestate = core::ffi::c_void;
 
 // TODO(pg-port): real InitMaterializedSRF lives in funcapi.c
-unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) {
-    unimplemented!() // TODO(pg-port): real InitMaterializedSRF lives in funcapi.c
-}
+unsafe fn InitMaterializedSRF(fcinfo: FunctionCallInfo, flags: c_int) { crate::utils::fmgr::funcapi::InitMaterializedSRF(fcinfo as _, flags as _) }
 
 // TODO(pg-port): real tuplestore_putvalues lives in utils/sort/tuplestore.c
 unsafe fn tuplestore_putvalues(
-    _state: *mut Tuplestorestate,
-    _tupdesc: TupleDesc,
-    _values: *mut Datum,
-    _isnull: *mut bool,
-) {
-    unimplemented!() // TODO(pg-port): real tuplestore_putvalues lives in utils/sort/tuplestore.c
-}
+    state: *mut Tuplestorestate,
+    tupdesc: TupleDesc,
+    values: *mut Datum,
+    isnull: *mut bool,
+) { crate::utils::sort::tuplestore::tuplestore_putvalues(state as _, tupdesc, values as _, isnull as _) }
 
 // TODO(pg-port): real TimestampTzGetDatum lives in utils/adt/timestamp.c
 unsafe fn TimestampTzGetDatum(_ts: TimestampTz) -> Datum {
@@ -1139,6 +1107,7 @@ pub unsafe fn logicalrep_pa_worker_stop(winfo: *mut ParallelApplyWorkerInfo) {
 /*
  * Wake up (using latch) any logical replication worker for specified sub/rel.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_worker_wakeup(subid: Oid, relid: Oid) {
     let worker: *mut LogicalRepWorker;
 
@@ -1182,6 +1151,7 @@ struct ProcLatch {
 /*
  * Attach to a slot.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_worker_attach(slot: c_int) {
     /* Block concurrent access. */
     LWLockAcquire(LogicalRepWorkerLock(), LW_EXCLUSIVE);
@@ -1604,6 +1574,7 @@ unsafe fn ApplyLauncherGetWorkerStartTime(subid: Oid) -> TimestampTz {
  * and to allow immediate restart of an apply worker that has exited
  * due to subscription parameter changes.
  */
+#[no_mangle]
 pub unsafe fn ApplyLauncherForgetWorkerStartTime(subid: Oid) {
     logicalrep_launcher_attach_dshmem();
 

@@ -52,91 +52,37 @@ pub unsafe fn pg_set_block(_sock: pgsocket) -> bool {
 // ---------------------------------------------------------------------------
 // Portable path handling for Unix/Win32 (in path.c)
 // ---------------------------------------------------------------------------
-pub unsafe fn has_drive_prefix(_path: *const c_char) -> bool {
-    unimplemented!()
-}
-pub unsafe fn first_dir_separator(_filename: *const c_char) -> *mut c_char {
-    unimplemented!()
-}
-pub unsafe fn last_dir_separator(_filename: *const c_char) -> *mut c_char {
-    unimplemented!()
-}
-pub unsafe fn first_path_var_separator(_pathlist: *const c_char) -> *mut c_char {
-    unimplemented!()
-}
+pub unsafe fn has_drive_prefix(_path: *const c_char) -> bool { crate::port::path::has_drive_prefix(_path) }
+pub unsafe fn first_dir_separator(_filename: *const c_char) -> *mut c_char { crate::port::path::first_dir_separator(_filename) }
+pub unsafe fn last_dir_separator(_filename: *const c_char) -> *mut c_char { crate::port::path::last_dir_separator(_filename) }
+pub unsafe fn first_path_var_separator(_pathlist: *const c_char) -> *mut c_char { crate::port::path::first_path_var_separator(_pathlist) }
 pub unsafe fn join_path_components(
     _ret_path: *mut c_char,
     _head: *const c_char,
     _tail: *const c_char,
-) {
-    unimplemented!()
-}
-pub unsafe fn canonicalize_path(_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn canonicalize_path_enc(_path: *mut c_char, _encoding: c_int) {
-    unimplemented!()
-}
-pub unsafe fn make_native_path(_filename: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn cleanup_path(_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn path_contains_parent_reference(_path: *const c_char) -> bool {
-    unimplemented!()
-}
-pub unsafe fn path_is_relative_and_below_cwd(_path: *const c_char) -> bool {
-    unimplemented!()
-}
-pub unsafe fn path_is_prefix_of_path(_path1: *const c_char, _path2: *const c_char) -> bool {
-    unimplemented!()
-}
-pub unsafe fn make_absolute_path(_path: *const c_char) -> *mut c_char {
-    unimplemented!()
-}
-pub unsafe fn get_progname(_argv0: *const c_char) -> *const c_char {
-    unimplemented!()
-}
-pub unsafe fn get_share_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_etc_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_include_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_pkginclude_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_includeserver_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_lib_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_pkglib_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_locale_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_doc_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_html_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_man_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) {
-    unimplemented!()
-}
-pub unsafe fn get_home_path(_ret_path: *mut c_char) -> bool {
-    unimplemented!()
-}
-pub unsafe fn get_parent_directory(_path: *mut c_char) {
-    unimplemented!()
-}
+) { crate::port::path::join_path_components(_ret_path, _head, _tail) }
+pub unsafe fn canonicalize_path(_path: *mut c_char) { crate::port::path::canonicalize_path(_path) }
+pub unsafe fn canonicalize_path_enc(_path: *mut c_char, _encoding: c_int) { crate::port::path::canonicalize_path_enc(_path, _encoding) }
+pub unsafe fn make_native_path(_filename: *mut c_char) { crate::port::path::make_native_path(_filename) }
+pub unsafe fn cleanup_path(_path: *mut c_char) { crate::port::path::cleanup_path(_path) }
+pub unsafe fn path_contains_parent_reference(_path: *const c_char) -> bool { crate::port::path::path_contains_parent_reference(_path) }
+pub unsafe fn path_is_relative_and_below_cwd(_path: *const c_char) -> bool { crate::port::path::path_is_relative_and_below_cwd(_path) }
+pub unsafe fn path_is_prefix_of_path(_path1: *const c_char, _path2: *const c_char) -> bool { crate::port::path::path_is_prefix_of_path(_path1, _path2) }
+pub unsafe fn make_absolute_path(_path: *const c_char) -> *mut c_char { crate::port::path::make_absolute_path(_path) }
+pub unsafe fn get_progname(_argv0: *const c_char) -> *const c_char { crate::port::path::get_progname(_argv0) }
+pub unsafe fn get_share_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_share_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_etc_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_etc_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_include_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_include_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_pkginclude_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_pkginclude_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_includeserver_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_includeserver_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_lib_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_lib_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_pkglib_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_pkglib_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_locale_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_locale_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_doc_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_doc_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_html_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_html_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_man_path(_my_exec_path: *const c_char, _ret_path: *mut c_char) { crate::port::path::get_man_path(_my_exec_path, _ret_path) }
+pub unsafe fn get_home_path(_ret_path: *mut c_char) -> bool { crate::port::path::get_home_path(_ret_path) }
+pub unsafe fn get_parent_directory(_path: *mut c_char) { crate::port::path::get_parent_directory(_path) }
 
 // ---------------------------------------------------------------------------
 // common/pgfnames.c
@@ -210,8 +156,20 @@ pub unsafe fn set_pglocale_pgservice(_argv0: *const c_char, _app: *const c_char)
 pub unsafe fn validate_exec(_path: *const c_char) -> c_int {
     unimplemented!()
 }
-pub unsafe fn find_my_exec(_argv0: *const c_char, _retpath: *mut c_char) -> c_int {
-    unimplemented!()
+pub unsafe fn find_my_exec(_argv0: *const c_char, retpath: *mut c_char) -> c_int {
+    // macOS: resolve our actual executable path (exec.c find_my_exec equivalent).
+    extern "C" {
+        fn _NSGetExecutablePath(buf: *mut c_char, bufsize: *mut u32) -> c_int;
+    }
+    let mut raw = [0 as c_char; 4096];
+    let mut sz: u32 = 4096;
+    if _NSGetExecutablePath(raw.as_mut_ptr(), &mut sz) != 0 {
+        return -1;
+    }
+    if libc::realpath(raw.as_ptr(), retpath).is_null() {
+        libc::strcpy(retpath, raw.as_ptr());
+    }
+    0
 }
 pub unsafe fn find_other_exec(
     _argv0: *const c_char,
@@ -243,8 +201,8 @@ pub const DEVNULL: &str = "/dev/null";
 // ---------------------------------------------------------------------------
 // Portable delay handling
 // ---------------------------------------------------------------------------
-pub unsafe fn pg_usleep(_microsec: c_long) {
-    unimplemented!()
+pub unsafe fn pg_usleep(microsec: c_long) {
+    crate::port::pgsleep::pg_usleep(microsec)
 }
 
 // Portable SQL-like case-independent comparisons and conversions
@@ -283,6 +241,7 @@ pub unsafe fn pg_vsnprintf(
 ) -> c_int {
     unimplemented!()
 }
+#[no_mangle]
 pub unsafe fn pg_snprintf(_str: *mut c_char, _count: Size, _fmt: *const c_char) -> c_int {
     // C variadic: int pg_snprintf(char *str, size_t count, const char *fmt, ...)
     unimplemented!()
@@ -313,20 +272,25 @@ pub unsafe fn pg_printf(_fmt: *const c_char) -> c_int {
 // (pg_ prefix warns Windows impls change file position). Aliased to system
 // pread/pwrite on Unix; declared as prototypes here.
 pub unsafe fn pg_pread(_fd: c_int, _buf: *mut c_void, _nbyte: Size, _offset: off_t) -> isize {
-    unimplemented!()
+    libc::pread(_fd, _buf, _nbyte, _offset)
 }
 pub unsafe fn pg_pwrite(_fd: c_int, _buf: *const c_void, _nbyte: Size, _offset: off_t) -> isize {
-    unimplemented!()
+    libc::pwrite(_fd, _buf, _nbyte, _offset)
 }
 
-// This is also provided by snprintf.c
+// This is also provided by snprintf.c: format `value` with `precision`
+// significant digits in %g style (the non-shortest float output path, used
+// when extra_float_digits <= 0).
 pub unsafe fn pg_strfromd(
-    _str: *mut c_char,
-    _count: Size,
-    _precision: c_int,
-    _value: c_double,
+    str: *mut c_char,
+    count: Size,
+    precision: c_int,
+    value: c_double,
 ) -> c_int {
-    unimplemented!()
+    extern "C" {
+        fn snprintf(s: *mut c_char, n: usize, fmt: *const c_char, ...) -> c_int;
+    }
+    snprintf(str, count as usize, c"%.*g".as_ptr(), precision, value)
 }
 
 // Replace strerror() with our own, somewhat more robust wrapper.
@@ -417,20 +381,79 @@ pub unsafe fn inet_aton(_cp: *const c_char, _addr: *mut in_addr) -> c_int {
 }
 
 // #if !HAVE_DECL_STRLCAT
-pub unsafe fn strlcat(_dst: *mut c_char, _src: *const c_char, _siz: Size) -> Size {
-    unimplemented!()
+pub unsafe fn strlcat(dst: *mut c_char, src: *const c_char, siz: Size) -> Size {
+    let mut dstlen: Size = 0;
+    while dstlen < siz && *dst.add(dstlen) != 0 {
+        dstlen += 1;
+    }
+    let mut srclen: Size = 0;
+    while *src.add(srclen) != 0 {
+        srclen += 1;
+    }
+    if dstlen == siz {
+        return siz + srclen;
+    }
+    let mut i: Size = 0;
+    while i < srclen && dstlen + i + 1 < siz {
+        *dst.add(dstlen + i) = *src.add(i);
+        i += 1;
+    }
+    *dst.add(dstlen + i) = 0;
+    dstlen + srclen
 }
 // #if !HAVE_DECL_STRLCPY
-pub unsafe fn strlcpy(_dst: *mut c_char, _src: *const c_char, _siz: Size) -> Size {
-    unimplemented!()
+pub unsafe fn strlcpy(dst: *mut c_char, src: *const c_char, siz: Size) -> Size {
+    let mut srclen: Size = 0;
+    while *src.add(srclen) != 0 {
+        srclen += 1;
+    }
+    if siz != 0 {
+        let copylen = if srclen < siz - 1 { srclen } else { siz - 1 };
+        let mut i: Size = 0;
+        while i < copylen {
+            *dst.add(i) = *src.add(i);
+            i += 1;
+        }
+        *dst.add(copylen) = 0;
+    }
+    srclen
 }
 // #if !HAVE_DECL_STRNLEN
-pub unsafe fn strnlen(_str: *const c_char, _maxlen: Size) -> Size {
-    unimplemented!()
+pub unsafe fn strnlen(str: *const c_char, maxlen: Size) -> Size {
+    let mut n: Size = 0;
+    while n < maxlen && *str.add(n) != 0 {
+        n += 1;
+    }
+    n
 }
 // #if !HAVE_DECL_STRSEP
-pub unsafe fn strsep(_stringp: *mut *mut c_char, _delim: *const c_char) -> *mut c_char {
-    unimplemented!()
+pub unsafe fn strsep(stringp: *mut *mut c_char, delim: *const c_char) -> *mut c_char {
+    let s = *stringp;
+    if s.is_null() {
+        return core::ptr::null_mut();
+    }
+    let mut tok = s;
+    loop {
+        let c = *tok;
+        tok = tok.add(1);
+        let mut d = delim;
+        loop {
+            let sc = *d;
+            d = d.add(1);
+            if sc == c {
+                if c == 0 {
+                    *stringp = core::ptr::null_mut();
+                } else {
+                    *tok.sub(1) = 0;
+                    *stringp = tok;
+                }
+                return s;
+            }
+            if sc == 0 {
+                break;
+            }
+        }
+    }
 }
 // #if !HAVE_DECL_TIMINGSAFE_BCMP
 pub unsafe fn timingsafe_bcmp(_b1: *const c_void, _b2: *const c_void, _len: Size) -> c_int {
@@ -500,6 +523,8 @@ pub unsafe fn pg_localeconv_free(_lconv: *mut lconv) {
 
 // port/chklocale.c
 pub unsafe fn pg_get_encoding_from_locale(_ctype: *const c_char, _write_message: bool) -> c_int {
+    return -1; /* encoding undeterminable; callers treat -1 as "matches any" */
+    #[allow(unreachable_code)]
     unimplemented!()
 }
 

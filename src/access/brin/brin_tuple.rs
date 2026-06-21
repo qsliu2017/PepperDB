@@ -964,9 +964,7 @@ extern "C" {
     fn memcmp(a: *const std::ffi::c_void, b: *const std::ffi::c_void, n: usize) -> c_int;
 }
 
-unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc {
-    unimplemented!() // TODO: access/common/tupdesc.c
-}
+unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc { crate::access::common::tupdesc::CreateTemplateTupleDesc(_natts) }
 
 unsafe fn TupleDescInitEntry(
     _desc: TupleDesc,
@@ -975,9 +973,7 @@ unsafe fn TupleDescInitEntry(
     _oidtypeid: Oid,
     _typmod: i32,
     _attdim: c_int,
-) {
-    unimplemented!() // TODO: access/common/tupdesc.c
-}
+) { crate::access::common::tupdesc::TupleDescInitEntry(_desc, _attno, _attname, _oidtypeid, _typmod as _, _attdim) }
 
 unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: usize) -> Form_pg_attribute {
     unimplemented!() // TODO: access/common/tupdesc.h
@@ -991,9 +987,7 @@ unsafe fn heap_compute_data_size(
     _tupdesc: TupleDesc,
     _values: *mut Datum,
     _isnull: *mut bool,
-) -> Size {
-    unimplemented!() // TODO: access/common/heaptuple.c
-}
+) -> Size { crate::access::common::heaptuple::heap_compute_data_size(_tupdesc, _values as _, _isnull as _) }
 
 unsafe fn heap_fill_tuple(
     _tupleDesc: TupleDesc,
@@ -1003,37 +997,27 @@ unsafe fn heap_fill_tuple(
     _data_size: Size,
     _infomask: *mut uint16,
     _bit: *mut bits8,
-) {
-    unimplemented!() // TODO: access/common/heaptuple.c
-}
+) { crate::access::common::heaptuple::heap_fill_tuple(_tupleDesc, _values as _, _isnull as _, _data, _data_size, _infomask, _bit) }
 
-unsafe fn att_isnull(_ATT: c_int, _BITS: *const bits8) -> bool {
-    unimplemented!() // TODO: access/tupmacs.h
-}
+unsafe fn att_isnull(_ATT: c_int, _BITS: *const bits8) -> bool { crate::access::tupmacs::att_isnull(_ATT, _BITS) }
 
 unsafe fn att_pointer_alignby(
     _cur_offset: std::ffi::c_long,
     _attalignby: u8,
     _attlen: c_int,
     _attptr: *const c_char,
-) -> std::ffi::c_long {
-    unimplemented!() // TODO: access/tupmacs.h
-}
+) -> std::ffi::c_long { crate::access::tupmacs::att_pointer_alignby(_cur_offset as _, _attalignby, _attlen, _attptr) as _ }
 
 unsafe fn att_nominal_alignby(
     _cur_offset: std::ffi::c_long,
     _attalignby: u8,
-) -> std::ffi::c_long {
-    unimplemented!() // TODO: access/tupmacs.h
-}
+) -> std::ffi::c_long { crate::access::tupmacs::att_nominal_alignby(_cur_offset as _, _attalignby) as _ }
 
 unsafe fn att_addlength_pointer(
     _cur_offset: std::ffi::c_long,
     _attlen: i16,
     _attptr: *const c_char,
-) -> std::ffi::c_long {
-    unimplemented!() // TODO: access/tupmacs.h
-}
+) -> std::ffi::c_long { crate::access::tupmacs::att_addlength_pointer(_cur_offset as _, _attlen as _, _attptr) as _ }
 
 unsafe fn fetchatt(_A: *const CompactAttribute, _T: *const c_char) -> Datum {
     unimplemented!() // TODO: access/tupmacs.h
@@ -1043,13 +1027,9 @@ unsafe fn datumCopy(_value: Datum, _typByVal: bool, _typLen: i16) -> Datum {
     unimplemented!() // TODO: utils/adt/datum.c
 }
 
-unsafe fn detoast_external_attr(_attr: *mut varlena) -> *mut varlena {
-    unimplemented!() // TODO: access/common/detoast.c
-}
+unsafe fn detoast_external_attr(_attr: *mut varlena) -> *mut varlena { unimplemented!() }
 
-unsafe fn toast_compress_datum(_value: Datum, _cmethod: c_char) -> Datum {
-    unimplemented!() // TODO: access/common/toast_compression.c
-}
+unsafe fn toast_compress_datum(_value: Datum, _cmethod: c_char) -> Datum { crate::access::common::toast_internals::toast_compress_datum(_value, _cmethod) }
 
 unsafe fn VARATT_IS_EXTERNAL(_PTR: *mut varlena) -> bool {
     unimplemented!() // TODO: c.h / postgres.h

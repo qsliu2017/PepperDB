@@ -98,22 +98,14 @@ pub fn BRIN_elog() {
 }
 
 /* brin.c */
-pub unsafe fn brin_build_desc(rel: Relation) -> *mut BrinDesc {
-    unimplemented!()
-}
-pub unsafe fn brin_free_desc(bdesc: *mut BrinDesc) {
-    unimplemented!()
-}
+pub unsafe fn brin_build_desc(rel: Relation) -> *mut BrinDesc { crate::access::brin::brin::brin_build_desc(rel) }
+pub unsafe fn brin_free_desc(bdesc: *mut BrinDesc) { crate::access::brin::brin::brin_free_desc(bdesc) }
 pub unsafe fn brinbuild(
     heap: Relation,
     index: Relation,
     indexInfo: *mut IndexInfo,
-) -> *mut IndexBuildResult {
-    unimplemented!()
-}
-pub unsafe fn brinbuildempty(index: Relation) {
-    unimplemented!()
-}
+) -> *mut IndexBuildResult { unimplemented!() }
+pub unsafe fn brinbuildempty(index: Relation) { crate::access::brin::brin::brinbuildempty(index) }
 pub unsafe fn brininsert(
     idxRel: Relation,
     values: *mut Datum,
@@ -123,49 +115,29 @@ pub unsafe fn brininsert(
     checkUnique: IndexUniqueCheck,
     indexUnchanged: bool,
     indexInfo: *mut IndexInfo,
-) -> bool {
-    unimplemented!()
-}
-pub unsafe fn brininsertcleanup(index: Relation, indexInfo: *mut IndexInfo) {
-    unimplemented!()
-}
-pub unsafe fn brinbeginscan(r: Relation, nkeys: c_int, norderbys: c_int) -> IndexScanDesc {
-    unimplemented!()
-}
-pub unsafe fn bringetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> int64 {
-    unimplemented!()
-}
+) -> bool { unimplemented!() }
+pub unsafe fn brininsertcleanup(index: Relation, indexInfo: *mut IndexInfo) { crate::access::brin::brin::brininsertcleanup(index, indexInfo) }
+pub unsafe fn brinbeginscan(r: Relation, nkeys: c_int, norderbys: c_int) -> IndexScanDesc { unimplemented!() }
+pub unsafe fn bringetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> int64 { unimplemented!() }
 pub unsafe fn brinrescan(
     scan: IndexScanDesc,
     scankey: ScanKey,
     nscankeys: c_int,
     orderbys: ScanKey,
     norderbys: c_int,
-) {
-    unimplemented!()
-}
-pub unsafe fn brinendscan(scan: IndexScanDesc) {
-    unimplemented!()
-}
+) { unimplemented!() }
+pub unsafe fn brinendscan(scan: IndexScanDesc) { unimplemented!() }
 pub unsafe fn brinbulkdelete(
     info: *mut IndexVacuumInfo,
     stats: *mut IndexBulkDeleteResult,
     callback: IndexBulkDeleteCallback,
     callback_state: *mut c_void,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!()
-}
+) -> *mut IndexBulkDeleteResult { unimplemented!() }
 pub unsafe fn brinvacuumcleanup(
     info: *mut IndexVacuumInfo,
     stats: *mut IndexBulkDeleteResult,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!()
-}
-pub unsafe fn brinoptions(reloptions: Datum, validate: bool) -> *mut bytea {
-    unimplemented!()
-}
+) -> *mut IndexBulkDeleteResult { unimplemented!() }
+pub unsafe fn brinoptions(reloptions: Datum, validate: bool) -> *mut bytea { crate::access::brin::brin::brinoptions(reloptions, validate) }
 
 /* brin_validate.c */
-pub unsafe fn brinvalidate(opclassoid: Oid) -> bool {
-    unimplemented!()
-}
+pub unsafe fn brinvalidate(opclassoid: Oid) -> bool { crate::access::brin::brin_validate::brinvalidate(opclassoid) }

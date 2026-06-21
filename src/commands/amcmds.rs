@@ -37,8 +37,8 @@ const Anum_pg_am_amtype: AttrNumber = 4;
 const AmOidIndexId: Oid = 2756; // pg_am_oid_index
 
 // utils/syscache.h syscache ids (values not load-bearing for the stubs below)
-const AMNAME: c_int = 0;
-const AMOID: c_int = 1;
+const AMNAME: c_int = 1;
+const AMOID: c_int = 2;
 
 // catalog/dependency.h: DependencyType.DEPENDENCY_NORMAL
 const DEPENDENCY_NORMAL: c_char = b'n' as c_char;
@@ -49,17 +49,11 @@ const DEPENDENCY_NORMAL: c_char = b'n' as c_char;
 // ----------------------------------------------------------------------------
 
 // utils/syscache.h
-unsafe fn GetSysCacheOid1(_cache_id: c_int, _oid_col: AttrNumber, _key1: Datum) -> Oid {
-    unimplemented!() // TODO
-}
+unsafe fn GetSysCacheOid1(cache_id: c_int, oid_col: AttrNumber, key1: Datum) -> Oid { crate::utils::cache::lsyscache::GetSysCacheOid1(cache_id, oid_col, key1) }
 
-unsafe fn SearchSysCache1(_cache_id: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!() // TODO
-}
+unsafe fn SearchSysCache1(cache_id: c_int, key1: Datum) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache1(cache_id, key1) }
 
-unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!() // TODO
-}
+unsafe fn ReleaseSysCache(tuple: HeapTuple) { crate::utils::cache::syscache::ReleaseSysCache(tuple) }
 
 // access/genam.h / catalog/indexing.h
 unsafe fn CatalogTupleInsert(_heap_rel: Relation, _tup: HeapTuple) {

@@ -182,10 +182,10 @@ const PUBLICATION_PART_ALL: PublicationPartOpt = 1;
 const PUBLICATION_PART_LEAF: PublicationPartOpt = 2;
 
 /* syscache IDs  TODO(pg-port): real values from utils/syscache.h */
-const RELOID: c_int = 51;
-const PUBLICATIONOID: c_int = 26;
-const PUBLICATIONRELMAP: c_int = 104;
-const PUBLICATIONNAMESPACEMAP: c_int = 105;
+const RELOID: c_int = 57;
+const PUBLICATIONOID: c_int = 51;
+const PUBLICATIONRELMAP: c_int = 53;
+const PUBLICATIONNAMESPACEMAP: c_int = 50;
 
 /* lock modes  TODO(pg-port): storage/lockdefs.h */
 const NoLock: c_int = 0;
@@ -344,28 +344,13 @@ unsafe fn RelationGetDescr(_rel: Relation) -> TupleDesc {
     /* TODO(pg-port): utils/rel.h */
     core::ptr::null_mut()
 }
-unsafe fn IsCatalogRelation(_rel: Relation) -> bool {
-    /* TODO(pg-port): catalog/catalog.c */
-    false
-}
-unsafe fn IsCatalogRelationOid(_relid: Oid) -> bool {
-    /* TODO(pg-port): catalog/catalog.c */
-    false
-}
-unsafe fn IsCatalogNamespace(_nspid: Oid) -> bool {
-    false
-}
-unsafe fn IsToastNamespace(_nspid: Oid) -> bool {
-    false
-}
-unsafe fn isAnyTempNamespace(_nspid: Oid) -> bool {
-    false
-}
-unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char {
-    /* TODO(pg-port): catalog/namespace.c */
-    core::ptr::null_mut()
-}
-fn errdetail_relkind_not_supported(_relkind: c_char) {}
+unsafe fn IsCatalogRelation(_rel: Relation) -> bool { crate::catalog::catalog::IsCatalogRelation(_rel as _) }
+unsafe fn IsCatalogRelationOid(_relid: Oid) -> bool { crate::catalog::catalog::IsCatalogRelationOid(_relid as _) }
+unsafe fn IsCatalogNamespace(_nspid: Oid) -> bool { crate::catalog::catalog::IsCatalogNamespace(_nspid as _) }
+unsafe fn IsToastNamespace(_nspid: Oid) -> bool { crate::catalog::catalog::IsToastNamespace(_nspid as _) }
+unsafe fn isAnyTempNamespace(_nspid: Oid) -> bool { crate::catalog::namespace::isAnyTempNamespace(_nspid as _) }
+unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_namespace_name(_nspid as _) }
+fn errdetail_relkind_not_supported(_relkind: c_char) { unimplemented!() }
 
 /* syscache  TODO(pg-port): utils/syscache.h */
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
@@ -377,9 +362,7 @@ unsafe fn SearchSysCache2(_cacheId: c_int, _key1: Datum, _key2: Datum) -> HeapTu
 unsafe fn SearchSysCacheCopy2(_cacheId: c_int, _key1: Datum, _key2: Datum) -> HeapTuple {
     core::ptr::null_mut()
 }
-unsafe fn SearchSysCacheExists2(_cacheId: c_int, _key1: Datum, _key2: Datum) -> bool {
-    false
-}
+unsafe fn SearchSysCacheExists2(_cacheId: c_int, _key1: Datum, _key2: Datum) -> bool { crate::utils::cache::syscache::SearchSysCacheExists2(_cacheId as _, _key1 as _, _key2 as _) }
 unsafe fn SearchSysCacheList1(_cacheId: c_int, _key1: Datum) -> *mut CatCList {
     core::ptr::null_mut()
 }
@@ -423,9 +406,7 @@ unsafe fn TextDatumGetCString(_d: Datum) -> *mut c_char {
 unsafe fn PG_GETARG_ARRAYTYPE_P(_n: c_int) -> *mut ArrayType {
     core::ptr::null_mut()
 }
-unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType {
-    core::ptr::null_mut()
-}
+unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType { unimplemented!() }
 unsafe fn HeapTupleGetDatum(_tuple: HeapTuple) -> Datum {
     0
 }
@@ -439,9 +420,7 @@ unsafe fn table_beginscan_catalog(
     _relation: Relation,
     _nkeys: c_int,
     _key: *mut ScanKeyData,
-) -> TableScanDesc {
-    core::ptr::null_mut()
-}
+) -> TableScanDesc { unimplemented!() }
 unsafe fn table_endscan(_scan: TableScanDesc) {}
 unsafe fn heap_getnext(_scan: TableScanDesc, _direction: c_int) -> HeapTuple {
     core::ptr::null_mut()
@@ -450,10 +429,8 @@ unsafe fn heap_form_tuple(
     _tupleDescriptor: TupleDesc,
     _values: *mut Datum,
     _isnull: *mut bool,
-) -> HeapTuple {
-    core::ptr::null_mut()
-}
-unsafe fn heap_freetuple(_htup: HeapTuple) {}
+) -> HeapTuple { unimplemented!() }
+unsafe fn heap_freetuple(_htup: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(_htup as _) }
 
 /* genam  TODO(pg-port): access/genam.h */
 unsafe fn ScanKeyInit(
@@ -462,8 +439,7 @@ unsafe fn ScanKeyInit(
     _strategy: c_int,
     _procedure: Oid,
     _argument: Datum,
-) {
-}
+) { crate::access::common::scankey::ScanKeyInit(_entry as _, _attributeNumber as _, _strategy as _, _procedure as _, _argument as _) }
 unsafe fn systable_beginscan(
     _heapRelation: Relation,
     _indexId: Oid,
@@ -471,9 +447,7 @@ unsafe fn systable_beginscan(
     _snapshot: *mut c_void,
     _nkeys: c_int,
     _key: *mut ScanKeyData,
-) -> SysScanDesc {
-    core::ptr::null_mut()
-}
+) -> SysScanDesc { unimplemented!() }
 unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple {
     core::ptr::null_mut()
 }
@@ -490,8 +464,7 @@ unsafe fn recordDependencyOn(
     _depender: *const ObjectAddress,
     _referenced: *const ObjectAddress,
     _behavior: c_char,
-) {
-}
+) { crate::catalog::pg_depend::recordDependencyOn(_depender as _, _referenced as _, _behavior as _) }
 unsafe fn recordDependencyOnSingleRelExpr(
     _depender: *const ObjectAddress,
     _expr: *mut Node,
@@ -499,34 +472,25 @@ unsafe fn recordDependencyOnSingleRelExpr(
     _behavior: c_char,
     _self_behavior: c_char,
     _reverse_self: bool,
-) {
-}
+) { crate::catalog::dependency::recordDependencyOnSingleRelExpr(_depender as _, _expr as _, _relId as _, _behavior as _, _self_behavior as _, _reverse_self as _) }
 
 /* lsyscache / partition / inherits  TODO(pg-port): utils/lsyscache.h, catalog/partition.h, catalog/pg_inherits.h */
 unsafe fn get_rel_relkind(_relid: Oid) -> c_char {
     0
 }
-unsafe fn get_rel_relispartition(_relid: Oid) -> bool {
-    false
-}
-unsafe fn get_rel_namespace(_relid: Oid) -> Oid {
-    InvalidOid
-}
+unsafe fn get_rel_relispartition(_relid: Oid) -> bool { crate::utils::cache::lsyscache::get_rel_relispartition(_relid as _) }
+unsafe fn get_rel_namespace(_relid: Oid) -> Oid { crate::utils::cache::lsyscache::get_rel_namespace(_relid as _) }
 unsafe fn get_attnum(_relid: Oid, _attname: *const c_char) -> AttrNumber {
     InvalidAttrNumber
 }
-unsafe fn get_partition_ancestors(_relid: Oid) -> *mut List {
-    NIL
-}
+unsafe fn get_partition_ancestors(_relid: Oid) -> *mut List { crate::catalog::partition::get_partition_ancestors(_relid as _) }
 unsafe fn find_all_inheritors(_parentrelId: Oid, _lockmode: c_int, _numparents: *mut c_int) -> *mut List {
     NIL
 }
 
 /* publication helpers ported elsewhere  TODO(pg-port): commands/publicationcmds.c */
-unsafe fn InvalidatePublicationRels(_relids: *mut List) {}
-unsafe fn get_publication_oid(_pubname: *const c_char, _missing_ok: bool) -> Oid {
-    InvalidOid
-}
+unsafe fn InvalidatePublicationRels(_relids: *mut List) { unimplemented!() }
+unsafe fn get_publication_oid(_pubname: *const c_char, _missing_ok: bool) -> Oid { crate::utils::cache::lsyscache::get_publication_oid(_pubname as _, _missing_ok as _) }
 
 /* memory contexts  TODO(pg-port): utils/palloc.h, utils/memutils.h */
 unsafe fn palloc(_size: usize) -> *mut c_void {
@@ -546,11 +510,8 @@ unsafe fn deconstruct_array_builtin(
     _elemsp: *mut *mut Datum,
     _nullsp: *mut *mut bool,
     _nelemsp: *mut c_int,
-) {
-}
-unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc {
-    core::ptr::null_mut()
-}
+) { crate::utils::adt::arrayfuncs::deconstruct_array_builtin(_array as _, _elmtype as _, _elemsp as _, _nullsp as _, _nelemsp as _) }
+unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc { unimplemented!() }
 unsafe fn TupleDescInitEntry(
     _desc: TupleDesc,
     _attributeNumber: AttrNumber,
@@ -558,8 +519,7 @@ unsafe fn TupleDescInitEntry(
     _oidtypeid: Oid,
     _typmod: i32,
     _attdim: c_int,
-) {
-}
+) { crate::access::common::tupdesc::TupleDescInitEntry(_desc as _, _attributeNumber as _, _attributeName as _, _oidtypeid as _, _typmod as _, _attdim as _) }
 unsafe fn BlessTupleDesc(tupdesc: TupleDesc) -> TupleDesc {
     tupdesc
 }
@@ -990,13 +950,9 @@ unsafe fn ObjectAddressSubSet(addr: &mut ObjectAddress, classId: Oid, objectId: 
     addr.objectSubId = subId;
 }
 /* nodeToString  TODO(pg-port): nodes/outfuncs.c */
-unsafe fn nodeToString(_obj: *const Node) -> *mut c_char {
-    core::ptr::null_mut()
-}
+unsafe fn nodeToString(_obj: *const Node) -> *mut c_char { crate::nodes::outfuncs::nodeToString(_obj as _) }
 /* strVal  TODO(pg-port): nodes/value.h */
-unsafe fn strVal(_v: *mut c_void) -> *mut c_char {
-    core::ptr::null_mut()
-}
+unsafe fn strVal(_v: *mut c_void) -> *mut c_char { crate::parser_link_shims::strVal(_v as _) }
 fn AttrNumberIsForUserDefinedAttr(attnum: AttrNumber) -> bool {
     attnum > 0
 }
@@ -1004,9 +960,7 @@ fn AttrNumberIsForUserDefinedAttr(attnum: AttrNumber) -> bool {
 unsafe fn ARR_DIMS(_arr: *mut ArrayType) -> *mut c_int {
     core::ptr::null_mut()
 }
-unsafe fn ARR_DATA_PTR(_arr: *mut ArrayType) -> *mut c_char {
-    core::ptr::null_mut()
-}
+unsafe fn ARR_DATA_PTR(_arr: *mut ArrayType) -> *mut c_char { crate::utils::array::ARR_DATA_PTR(_arr as _) }
 
 /*
  * Insert new publication / relation mapping.

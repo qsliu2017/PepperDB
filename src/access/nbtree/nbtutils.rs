@@ -134,69 +134,34 @@ pub struct BTSkipArraySupport {
 }
 
 /// TODO(pg-port): BTScanPosItem lives in access/nbtree.h.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct BTScanPosItem {
-    pub heapTid:     ItemPointerData,
-    pub indexOffset: OffsetNumber,
-}
+pub use crate::access::nbtree::nbtsearch::{BTScanPosItem};
+
 
 /// TODO(pg-port): BTScanPosData / BTScanPos lives in access/nbtree.h.
-#[repr(C)]
-pub struct BTScanPosData {
-    pub buf:       Buffer,
-    pub currPage:  BlockNumber,
-    pub nextPage:  BlockNumber,
-    pub lsn:       u64,   /* XLogRecPtr */
-    pub dir:       ScanDirection,
-    pub nextTupleOffset: c_int,
-    pub moreLeft:  bool,
-    pub moreRight: bool,
-    pub firstItem: c_int,
-    pub lastItem:  c_int,
-    pub itemIndex: c_int,
-    pub items:     *mut BTScanPosItem,
-}
+pub use crate::access::nbtree::nbtsearch::{BTScanPosData};
+
 pub type BTScanPos = *mut BTScanPosData;
 
 /// TODO(pg-port): BTScanOpaqueData / BTScanOpaque live in access/nbtree.h.
-#[repr(C)]
-pub struct BTScanOpaqueData {
-    pub currPos:       BTScanPosData,
-    pub markPos:       BTScanPosData,
-    pub arrayKeys:     *mut BTArrayKeyInfo,
-    pub numArrayKeys:  c_int,
-    pub arrayContext:  MemoryContext,
-    pub orderProcs:    *mut FmgrInfo,
-    pub keyData:       ScanKey,
-    pub numberOfKeys:  c_int,
-    pub qual_ok:       bool,
-    pub needPrimScan:  bool,
-    pub scanBehind:    bool,
-    pub oppositeDirCheck: bool,
-    pub skipScan:      bool,
-    pub killedItems:   *mut c_int,
-    pub numKilled:     c_int,
-    pub dropPin:       bool,
-}
-pub type BTScanOpaque = *mut BTScanOpaqueData;
+pub use crate::access::nbtree::nbtree::{BTScanOpaqueData, BTScanOpaque};
+
 
 /// TODO(pg-port): BTReadPageState lives in access/nbtree.h.
 #[repr(C)]
 pub struct BTReadPageState {
-    pub page:            Page,
-    pub offnum:          OffsetNumber,
-    pub minoff:          OffsetNumber,
-    pub maxoff:          OffsetNumber,
-    pub startikey:       c_int,
+    pub minoff:           OffsetNumber,
+    pub maxoff:           OffsetNumber,
+    pub finaltup:         IndexTuple,
+    pub page:             Page,
+    pub firstpage:        bool,
     pub forcenonrequired: bool,
-    pub continuescan:    bool,
-    pub finaltup:        IndexTuple,
-    pub firstpage:       bool,
-    pub rechecks:        c_int,
-    pub targetdistance:  c_int,
-    pub skip:            OffsetNumber,
-    pub nskipadvances:   c_int,
+    pub startikey:        c_int,
+    pub offnum:           OffsetNumber,
+    pub skip:             OffsetNumber,
+    pub continuescan:     bool,
+    pub rechecks:         c_int,
+    pub targetdistance:   c_int,
+    pub nskipadvances:    c_int,
 }
 
 /// TODO(pg-port): BTPageOpaqueData / BTPageOpaque live in access/nbtree.h.
@@ -281,16 +246,8 @@ pub const NoMovementScanDirection: ScanDirection = 0;
 pub const BackwardScanDirection:  ScanDirection = -1;
 
 /// TODO(pg-port): IndexScanDesc / IndexScanDescData live in access/relscan.h.
-#[repr(C)]
-pub struct IndexScanDescData {
-    pub indexRelation: Relation,
-    pub heapRelation:  Relation,
-    pub numberOfKeys:  c_int,
-    pub keyData:       ScanKey,
-    pub opaque:        *mut c_void,
-    pub parallel_scan: *mut c_void,
-}
-pub type IndexScanDesc = *mut IndexScanDescData;
+pub use crate::access::relscan::{IndexScanDescData, IndexScanDesc};
+
 
 /// TODO(pg-port): BTCycleId type from access/nbtree.h.
 pub type BTCycleId = uint16;
@@ -370,8 +327,8 @@ extern "C" {
     fn RelationNeedsWAL(rel: Relation) -> bool;
 
     // shmem / locking stubs
-    fn LWLockAcquire(lock: c_int, mode: c_int) -> bool;
-    fn LWLockRelease(lock: c_int);
+    fn LWLockAcquire(lock: *mut core::ffi::c_void, mode: c_int) -> bool;
+    fn LWLockRelease(lock: *mut core::ffi::c_void);
 
     // error/logging stubs (already in prelude but keep explicit for clarity)
     fn errcode(sqlerrcode: c_int) -> c_int;
@@ -383,87 +340,83 @@ extern "C" {
 
 /// TODO(pg-port): access/nbtree.h inline helpers.
 unsafe fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTPageGetOpaque(page as _) as _
 }
 unsafe fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::P_FIRSTDATAKEY(opaque as _) as _
 }
 unsafe fn P_ISLEAF(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtpage::P_ISLEAF(opaque as _)
 }
 unsafe fn P_RIGHTMOST(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::P_RIGHTMOST(opaque as _)
 }
 unsafe fn P_LEFTMOST(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtpage::P_LEFTMOST(opaque as _)
 }
 unsafe fn P_IGNORE(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtinsert::P_IGNORE(opaque as _)
 }
 unsafe fn BTreeTupleGetNAtts(itup: IndexTuple, rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtinsert::BTreeTupleGetNAtts(itup as _, rel as _)
 }
 unsafe fn BTreeTupleIsPivot(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleIsPivot(itup as _)
 }
 unsafe fn BTreeTupleIsPosting(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleIsPosting(itup as _)
 }
 unsafe fn BTreeTupleGetNPosting(itup: IndexTuple) -> c_int {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetNPosting(itup as _) as _
 }
 unsafe fn BTreeTupleGetPostingN(itup: IndexTuple, n: c_int) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetPostingN(itup as _, n as _) as _
 }
 unsafe fn BTreeTupleGetPostingOffset(itup: IndexTuple) -> Size {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetPostingOffset(itup as _) as _
 }
 unsafe fn BTreeTupleGetHeapTID(itup: IndexTuple) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetHeapTID(itup as _) as _
 }
 unsafe fn BTreeTupleGetMaxHeapTID(itup: IndexTuple) -> ItemPointer {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetMaxHeapTID(itup as _) as _
 }
 unsafe fn BTreeTupleSetNAtts(itup: IndexTuple, natts: c_int, heaptid: bool) {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleSetNAtts(itup as _, natts, heaptid)
 }
 unsafe fn BTScanPosIsValid(pos: BTScanPosData) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtsearch::BTScanPosIsValid(&pos)
 }
 unsafe fn BTScanPosIsPinned(pos: BTScanPosData) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtsearch::BTScanPosIsPinned(&pos)
 }
 unsafe fn _bt_metaversion(rel: Relation, heapkeyspace: *mut bool, allequalimage: *mut bool) {
-    unimplemented!() // TODO(pg-port): nbtree.h / nbtpage.c
+    crate::access::nbtree::nbtpage::_bt_metaversion(rel as _, heapkeyspace as _, allequalimage as _)
 }
 pub unsafe fn TupleDescCompactAttr(tupdesc: TupleDesc, attnum: c_int) -> *mut CompactAttribute {
-    unimplemented!() // TODO(pg-port): access/tupdesc.h
+    crate::access::common::tupdesc::TupleDescCompactAttr(tupdesc as _, attnum as _) as _
 }
 
-/// TODO(pg-port): CompactAttribute from access/tupdesc.h.
-#[repr(C)]
-pub struct CompactAttribute {
-    pub attbyval: bool,
-    pub attlen:   c_int,
-}
+pub use crate::access::common::tupdesc::CompactAttribute;
 
 // LW lock constants -- TODO(pg-port): storage/lwlock.h.
-pub const BtreeVacuumLock: c_int = 100; // placeholder
+// Real builtin LWLock, populated at LWLock init (see lwlock.rs assign! macro).
+use crate::backend_link_shims::BtreeVacuumLock;
 pub const LW_SHARED:    c_int = 1;
 pub const LW_EXCLUSIVE: c_int = 2;
 pub const BT_READ:      c_int = 1;
 
 // Inline helpers.
 #[inline]
-unsafe fn ScanDirectionIsForward(dir: ScanDirection) -> bool {
+pub unsafe fn ScanDirectionIsForward(dir: ScanDirection) -> bool {
     dir > 0
 }
 #[inline]
-unsafe fn ScanDirectionIsBackward(dir: ScanDirection) -> bool {
+pub unsafe fn ScanDirectionIsBackward(dir: ScanDirection) -> bool {
     dir < 0
 }
 #[inline]
-unsafe fn ScanDirectionIsNoMovement(dir: ScanDirection) -> bool {
+pub unsafe fn ScanDirectionIsNoMovement(dir: ScanDirection) -> bool {
     dir == 0
 }
 /// INVERT_COMPARE_RESULT macro.
@@ -604,7 +557,7 @@ pub unsafe fn _bt_freestack(mut stack: BTStack) {
  *			>0 if tupdatum > arrdatum.
  */
 #[inline]
-unsafe fn _bt_compare_array_skey(
+pub unsafe fn _bt_compare_array_skey(
     orderproc: *mut FmgrInfo,
     tupdatum: Datum,
     tupnull: bool,
@@ -787,7 +740,7 @@ pub unsafe fn _bt_binsrch_array_skey(
  * Does not return an index into the array, since skip arrays don't really
  * contain elements (they generate their array elements procedurally instead).
  */
-unsafe fn _bt_binsrch_skiparray_skey(
+pub unsafe fn _bt_binsrch_skiparray_skey(
     cur_elem_trig: bool,
     dir: ScanDirection,
     tupdatum: Datum,
@@ -906,7 +859,7 @@ unsafe fn _bt_binsrch_skiparray_skey(
 /*
  * _bt_skiparray_set_element() -- Set skip array scan key's sk_argument
  */
-unsafe fn _bt_skiparray_set_element(
+pub unsafe fn _bt_skiparray_set_element(
     rel: Relation,
     skey: ScanKey,
     array: *mut BTArrayKeyInfo,
@@ -945,7 +898,7 @@ unsafe fn _bt_skiparray_set_element(
 /*
  * _bt_skiparray_set_isnull() -- set skip array scan key to NULL
  */
-unsafe fn _bt_skiparray_set_isnull(
+pub unsafe fn _bt_skiparray_set_isnull(
     rel: Relation,
     skey: ScanKey,
     array: *mut BTArrayKeyInfo,
@@ -992,7 +945,7 @@ pub unsafe fn _bt_start_array_keys(scan: IndexScanDesc, dir: ScanDirection) {
 /*
  * _bt_array_set_low_or_high() -- Set array scan key to lowest/highest element
  */
-unsafe fn _bt_array_set_low_or_high(
+pub unsafe fn _bt_array_set_low_or_high(
     rel: Relation,
     skey: ScanKey,
     array: *mut BTArrayKeyInfo,
@@ -1059,7 +1012,7 @@ unsafe fn _bt_array_set_low_or_high(
 /*
  * _bt_array_decrement() -- decrement array scan key's sk_argument
  */
-unsafe fn _bt_array_decrement(
+pub unsafe fn _bt_array_decrement(
     rel: Relation,
     skey: ScanKey,
     array: *mut BTArrayKeyInfo,
@@ -1189,7 +1142,7 @@ unsafe fn _bt_array_decrement(
 /*
  * _bt_array_increment() -- increment array scan key's sk_argument
  */
-unsafe fn _bt_array_increment(
+pub unsafe fn _bt_array_increment(
     rel: Relation,
     skey: ScanKey,
     array: *mut BTArrayKeyInfo,
@@ -1321,7 +1274,7 @@ unsafe fn _bt_array_increment(
  *
  * Advances the array keys by a single increment in the current scan direction.
  */
-unsafe fn _bt_advance_array_keys_increment(
+pub unsafe fn _bt_advance_array_keys_increment(
     scan: IndexScanDesc,
     dir: ScanDirection,
     skip_array_set: *mut bool,
@@ -1379,7 +1332,7 @@ unsafe fn _bt_advance_array_keys_increment(
 /*
  * _bt_tuple_before_array_skeys() -- too early to advance required arrays?
  */
-unsafe fn _bt_tuple_before_array_skeys(
+pub unsafe fn _bt_tuple_before_array_skeys(
     scan: IndexScanDesc,
     dir: ScanDirection,
     tuple: IndexTuple,
@@ -1601,7 +1554,7 @@ pub unsafe fn _bt_start_prim_scan(scan: IndexScanDesc, dir: ScanDirection) -> bo
  *   BTReadPageState.nskipadvances, .firstpage, .skip) rely on structs not yet
  *   fully ported; body is a faithful translation but stubs will panic.
  */
-unsafe fn _bt_advance_array_keys(
+pub unsafe fn _bt_advance_array_keys(
     scan: IndexScanDesc,
     pstate: *mut BTReadPageState,
     tuple: IndexTuple,
@@ -2040,7 +1993,7 @@ unsafe fn _bt_advance_array_keys(
 }
 
 /// Helper extracted from _bt_advance_array_keys goto new_prim_scan.
-unsafe fn _bt_advance_array_keys_new_prim_scan(
+pub unsafe fn _bt_advance_array_keys_new_prim_scan(
     scan: IndexScanDesc,
     pstate: *mut BTReadPageState,
     so: BTScanOpaque,
@@ -2087,7 +2040,7 @@ unsafe fn _bt_advance_array_keys_new_prim_scan(
 /*
  * _bt_verify_keys_with_arraykeys() -- verify scan keys agree with array state
  */
-unsafe fn _bt_verify_keys_with_arraykeys(scan: IndexScanDesc) -> bool {
+pub unsafe fn _bt_verify_keys_with_arraykeys(scan: IndexScanDesc) -> bool {
     let so: BTScanOpaque = (*scan).opaque as BTScanOpaque;
     let mut last_sk_attno: AttrNumber = InvalidAttrNumber;
     let mut arrayidx: c_int = 0;
@@ -2280,7 +2233,7 @@ pub unsafe fn _bt_scanbehind_checkkeys(
  * Test whether an indextuple fails to satisfy an inequality required in the
  * opposite direction only.
  */
-unsafe fn _bt_oppodir_checkkeys(
+pub unsafe fn _bt_oppodir_checkkeys(
     scan: IndexScanDesc,
     dir: ScanDirection,
     finaltup: IndexTuple,
@@ -2331,6 +2284,14 @@ pub unsafe fn _bt_set_startikey(scan: IndexScanDesc, pstate: *mut BTReadPageStat
     let mut arrayidx: c_int = 0;
     let mut firstchangingattnum: c_int;
     let mut start_past_saop_eq: bool = false;
+
+    // Conservative: skip the startikey optimization, leaving startikey=0 so
+    // _bt_readpage compares all scan keys from the start (correct, unoptimized).
+    // TODO(pg-port): re-enable once _bt_keep_natts_fast/CompactAttr path verified.
+    let _ = (so, rel, tupdesc, startikey, arrayidx, start_past_saop_eq);
+    if true {
+        return;
+    }
 
     Assert!(!(*so).scanBehind);
     Assert!((*pstate).minoff < (*pstate).maxoff);
@@ -2592,7 +2553,7 @@ pub unsafe fn _bt_set_startikey(scan: IndexScanDesc, pstate: *mut BTReadPageStat
  * Return true if so, false if not.  If not, also sets *continuescan to false
  * when it's also not possible for any later tuples to pass.
  */
-unsafe fn _bt_check_compare(
+pub unsafe fn _bt_check_compare(
     scan: IndexScanDesc,
     dir: ScanDirection,
     tuple: IndexTuple,
@@ -2784,7 +2745,7 @@ unsafe fn _bt_check_compare(
 /*
  * Test whether an indextuple satisfies a row-comparison scan condition.
  */
-unsafe fn _bt_check_rowcompare(
+pub unsafe fn _bt_check_rowcompare(
     header: ScanKey,
     tuple: IndexTuple,
     tupnatts: c_int,
@@ -2957,7 +2918,7 @@ unsafe fn _bt_check_rowcompare(
  * Subroutine for _bt_checkkeys.  Called when _bt_readpage's linear search
  * process has already scanned an excessive number of tuples.
  */
-unsafe fn _bt_checkkeys_look_ahead(
+pub unsafe fn _bt_checkkeys_look_ahead(
     scan: IndexScanDesc,
     pstate: *mut BTReadPageState,
     tupnatts: c_int,
@@ -3089,7 +3050,7 @@ pub unsafe fn _bt_killitems(scan: IndexScanDesc) {
     let mut i: c_int = 0;
     while i < numKilled {
         let itemIndex: c_int = *(*so).killedItems.add(i as usize);
-        let mut kitem: *mut BTScanPosItem = (*so).currPos.items.add(itemIndex as usize);
+        let mut kitem: *mut BTScanPosItem = (*so).currPos.items.as_mut_ptr().add(itemIndex as usize);
         let mut offnum: OffsetNumber = (*kitem).indexOffset;
 
         Assert!(
@@ -3133,7 +3094,7 @@ pub unsafe fn _bt_killitems(scan: IndexScanDesc) {
                      * Read-ahead to later kitems here.
                      */
                     if pi < numKilled {
-                        kitem = (*so).currPos.items.add(*(*so).killedItems.add(pi as usize) as usize);
+                        kitem = (*so).currPos.items.as_mut_ptr().add(*(*so).killedItems.add(pi as usize) as usize);
                         pi += 1;
                     }
                     j += 1;
@@ -3213,6 +3174,14 @@ extern "C" {
 pub unsafe fn _bt_vacuum_cycleid(rel: Relation) -> BTCycleId {
     let mut result: BTCycleId = 0;
     let mut i: c_int;
+
+    /*
+     * If the btree-vacuum shared state was never set up, no btree VACUUM can be
+     * in progress, so the active cycle id is 0.
+     */
+    if btvacinfo.is_null() {
+        return 0;
+    }
 
     /* Share lock is enough since this is a read-only operation */
     LWLockAcquire(BtreeVacuumLock, LW_SHARED);
@@ -3369,7 +3338,7 @@ pub unsafe fn BTreeShmemInit() {
 }
 
 /// TODO(pg-port): libc time() -- use as seed for cycle_ctr.
-unsafe fn libc_time() -> i64 {
+pub unsafe fn libc_time() -> i64 {
     extern "C" {
         fn time(t: *mut i64) -> i64;
     }
@@ -3557,7 +3526,7 @@ pub unsafe fn _bt_truncate(
 /*
  * _bt_keep_natts - how many key attributes to keep when truncating.
  */
-unsafe fn _bt_keep_natts(
+pub unsafe fn _bt_keep_natts(
     rel: Relation,
     lastleft: IndexTuple,
     firstright: IndexTuple,
@@ -3651,7 +3620,7 @@ pub unsafe fn _bt_keep_natts_fast(
             break;
         }
 
-        if !isNull1 && !datum_image_eq(datum1, datum2, (*att).attbyval, (*att).attlen) {
+        if !isNull1 && !datum_image_eq(datum1, datum2, (*att).attbyval, (*att).attlen as _) {
             break;
         }
 

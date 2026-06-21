@@ -576,164 +576,164 @@ unsafe fn root_parse(root: *mut PlannerInfo) -> *mut Query {
     (*root).parse
 }
 
-unsafe fn list_length(_l: *mut List) -> std::os::raw::c_int {
-    unimplemented!() // TODO: src/backend/nodes/list.c
+unsafe fn list_length(l: *mut List) -> std::os::raw::c_int {
+    crate::nodes::pg_list::list_length(l)
 }
-unsafe fn linitial(_l: *mut List) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: src/include/nodes/pg_list.h
+unsafe fn linitial(l: *mut List) -> *mut std::ffi::c_void {
+    crate::nodes::pg_list::linitial(l)
 }
-unsafe fn lappend(_l: *mut List, _d: *mut std::ffi::c_void) -> *mut List {
-    unimplemented!() // TODO: src/backend/nodes/list.c
+unsafe fn lappend(l: *mut List, d: *mut std::ffi::c_void) -> *mut List {
+    crate::nodes::list::lappend(l, d)
 }
-unsafe fn lcons(_d: *mut std::ffi::c_void, _l: *mut List) -> *mut List {
-    unimplemented!() // TODO: src/backend/nodes/list.c
+unsafe fn lcons(d: *mut std::ffi::c_void, l: *mut List) -> *mut List {
+    crate::nodes::list::lcons(d, l)
 }
-unsafe fn list_make1(_d: *mut std::ffi::c_void) -> *mut List {
-    unimplemented!() // TODO: src/include/nodes/pg_list.h
+unsafe fn list_make1(d: *mut std::ffi::c_void) -> *mut List {
+    crate::list_make1!(d)
 }
-unsafe fn list_member(_l: *mut List, _d: *mut std::ffi::c_void) -> bool {
-    unimplemented!() // TODO: src/backend/nodes/list.c
+unsafe fn list_member(l: *mut List, d: *mut std::ffi::c_void) -> bool {
+    crate::nodes::list::list_member(l, d)
 }
-unsafe fn lfirst(_cell: *mut ListCell) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: src/include/nodes/pg_list.h
+unsafe fn lfirst(cell: *mut ListCell) -> *mut std::ffi::c_void {
+    crate::nodes::pg_list::lfirst(cell)
 }
 unsafe fn NIL() -> *mut List {
     ptr::null_mut()
 }
-unsafe fn OidIsValid(_oid: Oid) -> bool {
-    unimplemented!() // TODO: src/include/c.h
+unsafe fn OidIsValid(oid: Oid) -> bool {
+    crate::c::OidIsValid(oid)
 }
-unsafe fn planner_rt_fetch(_rti: std::os::raw::c_int, _root: *mut PlannerInfo) -> *mut RangeTblEntry {
-    unimplemented!() // TODO: src/include/parser/parsetree.h
+unsafe fn planner_rt_fetch(rti: std::os::raw::c_int, root: *mut PlannerInfo) -> *mut RangeTblEntry {
+    crate::optimizer::util::pathnode::planner_rt_fetch(rti as _, root) as _
 }
-unsafe fn get_equality_op_for_ordering_op(_opno: Oid, _reverse: *mut bool) -> Oid {
-    unimplemented!() // TODO: src/backend/utils/cache/lsyscache.c
+unsafe fn get_equality_op_for_ordering_op(opno: Oid, reverse: *mut bool) -> Oid {
+    crate::utils::cache::lsyscache::get_equality_op_for_ordering_op(opno, reverse)
 }
 unsafe fn SS_make_initplan_output_param(
-    _root: *mut PlannerInfo,
-    _resulttype: Oid,
-    _resulttypmod: std::os::raw::c_int,
-    _resultcollation: Oid,
+    root: *mut PlannerInfo,
+    resulttype: Oid,
+    resulttypmod: std::os::raw::c_int,
+    resultcollation: Oid,
 ) -> *mut crate::nodes::primnodes::Param {
-    unimplemented!() // TODO: src/backend/optimizer/plan/subselect.c
+    crate::optimizer::plan::subselect::SS_make_initplan_output_param(root, resulttype, resulttypmod, resultcollation)
 }
-unsafe fn exprType(_expr: *mut Node) -> Oid {
-    unimplemented!() // TODO: src/backend/nodes/nodeFuncs.c
+unsafe fn exprType(expr: *mut Node) -> Oid {
+    crate::nodes::nodeFuncs::exprType(expr as _)
 }
-unsafe fn exprCollation(_expr: *mut Node) -> Oid {
-    unimplemented!() // TODO: src/backend/nodes/nodeFuncs.c
+unsafe fn exprCollation(expr: *mut Node) -> Oid {
+    crate::nodes::nodeFuncs::exprCollation(expr as _)
 }
 unsafe fn fetch_upper_rel(
-    _root: *mut PlannerInfo,
-    _kind: crate::nodes::pathnodes::UpperRelationKind,
-    _relids: *mut std::ffi::c_void,
+    root: *mut PlannerInfo,
+    kind: crate::nodes::pathnodes::UpperRelationKind,
+    relids: *mut std::ffi::c_void,
 ) -> *mut RelOptInfo {
-    unimplemented!() // TODO: src/backend/optimizer/util/relnode.c
+    crate::optimizer::util::relnode::fetch_upper_rel(root, kind, relids as _)
 }
-unsafe fn add_path(_parent_rel: *mut RelOptInfo, _new_path: *mut Path) {
-    unimplemented!() // TODO: src/backend/optimizer/util/pathnode.c
+unsafe fn add_path(parent_rel: *mut RelOptInfo, new_path: *mut Path) {
+    crate::optimizer::util::pathnode::add_path(parent_rel, new_path)
 }
 unsafe fn create_minmaxagg_path(
-    _root: *mut PlannerInfo,
-    _rel: *mut RelOptInfo,
-    _target: *mut crate::nodes::pathnodes::PathTarget,
-    _mmaggregates: *mut List,
-    _quals: *mut List,
+    root: *mut PlannerInfo,
+    rel: *mut RelOptInfo,
+    target: *mut crate::nodes::pathnodes::PathTarget,
+    mmaggregates: *mut List,
+    quals: *mut List,
 ) -> *mut crate::nodes::pathnodes::MinMaxAggPath {
-    unimplemented!() // TODO: src/backend/optimizer/util/pathnode.c
+    crate::optimizer::util::pathnode::create_minmaxagg_path(root, rel, target, mmaggregates, quals as _)
 }
 unsafe fn create_pathtarget(
-    _root: *mut PlannerInfo,
-    _tlist: *mut List,
+    root: *mut PlannerInfo,
+    tlist: *mut List,
 ) -> *mut crate::nodes::pathnodes::PathTarget {
-    unimplemented!() // TODO: src/backend/optimizer/util/tlist.c
+    crate::optimizer::util::tlist::create_pathtarget(root, tlist)
 }
 unsafe fn linitial_node_AggInfo() {}
-unsafe fn contain_mutable_functions(_clause: *mut Node) -> bool {
-    unimplemented!() // TODO: src/backend/optimizer/util/clauses.c
+unsafe fn contain_mutable_functions(clause: *mut Node) -> bool {
+    crate::optimizer::util::clauses::contain_mutable_functions(clause as _)
 }
-unsafe fn type_is_rowtype(_typid: Oid) -> bool {
-    unimplemented!() // TODO: src/backend/utils/cache/lsyscache.c
+unsafe fn type_is_rowtype(typid: Oid) -> bool {
+    crate::utils::cache::lsyscache::type_is_rowtype(typid)
 }
-unsafe fn copyObject(_from: *mut Node) -> *mut Node {
-    unimplemented!() // TODO: src/backend/nodes/copyfuncs.c
+unsafe fn copyObject(from: *mut Node) -> *mut Node {
+    crate::nodes::copyfuncs::copyObjectImpl(from as _) as _
 }
 unsafe fn IncrementVarSublevelsUp(
-    _node: *mut Node,
-    _delta_sublevels_up: std::os::raw::c_int,
-    _min_sublevels_up: std::os::raw::c_int,
+    node: *mut Node,
+    delta_sublevels_up: std::os::raw::c_int,
+    min_sublevels_up: std::os::raw::c_int,
 ) {
-    unimplemented!() // TODO: src/backend/rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::IncrementVarSublevelsUp(node as _, delta_sublevels_up, min_sublevels_up)
 }
 unsafe fn makeTargetEntry(
-    _expr: *mut crate::nodes::primnodes::Expr,
-    _resno: AttrNumber,
-    _resname: *mut std::ffi::c_char,
-    _resjunk: bool,
+    expr: *mut crate::nodes::primnodes::Expr,
+    resno: AttrNumber,
+    resname: *mut std::ffi::c_char,
+    resjunk: bool,
 ) -> *mut TargetEntry {
-    unimplemented!() // TODO: src/backend/nodes/makefuncs.c
+    crate::nodes::makefuncs::makeTargetEntry(expr, resno, resname, resjunk)
 }
-unsafe fn assignSortGroupRef(_tle: *mut TargetEntry, _tlist: *mut List) -> crate::c::Index {
-    unimplemented!() // TODO: src/backend/parser/parse_clause.c
+unsafe fn assignSortGroupRef(tle: *mut TargetEntry, tlist: *mut List) -> crate::c::Index {
+    crate::parser::parse_clause::assignSortGroupRef(tle, tlist)
 }
 unsafe fn makeConst(
-    _consttype: Oid,
-    _consttypmod: std::os::raw::c_int,
-    _constcollid: Oid,
-    _constlen: std::os::raw::c_int,
-    _constvalue: Datum,
-    _constisnull: bool,
-    _constbyval: bool,
+    consttype: Oid,
+    consttypmod: std::os::raw::c_int,
+    constcollid: Oid,
+    constlen: std::os::raw::c_int,
+    constvalue: Datum,
+    constisnull: bool,
+    constbyval: bool,
 ) -> *mut crate::nodes::primnodes::Const {
-    unimplemented!() // TODO: src/backend/nodes/makefuncs.c
+    crate::nodes::makefuncs::makeConst(consttype, consttypmod, constcollid, constlen, constvalue, constisnull, constbyval)
 }
 unsafe fn query_planner(
-    _root: *mut PlannerInfo,
-    _qp_callback: Option<unsafe extern "C" fn(*mut PlannerInfo, *mut std::ffi::c_void)>,
-    _qp_extra: *mut std::ffi::c_void,
+    root: *mut PlannerInfo,
+    qp_callback: Option<unsafe extern "C" fn(*mut PlannerInfo, *mut std::ffi::c_void)>,
+    qp_extra: *mut std::ffi::c_void,
 ) -> *mut RelOptInfo {
-    unimplemented!() // TODO: src/backend/optimizer/plan/planmain.c
+    crate::optimizer::plan::planmain::query_planner(root, core::mem::transmute(qp_callback), qp_extra)
 }
-unsafe fn SS_identify_outer_params(_root: *mut PlannerInfo) {
-    unimplemented!() // TODO: src/backend/optimizer/plan/subselect.c
+unsafe fn SS_identify_outer_params(root: *mut PlannerInfo) {
+    crate::optimizer::plan::subselect::SS_identify_outer_params(root)
 }
-unsafe fn SS_charge_for_initplans(_root: *mut PlannerInfo, _final_rel: *mut RelOptInfo) {
-    unimplemented!() // TODO: src/backend/optimizer/plan/subselect.c
+unsafe fn SS_charge_for_initplans(root: *mut PlannerInfo, final_rel: *mut RelOptInfo) {
+    crate::optimizer::plan::subselect::SS_charge_for_initplans(root, final_rel)
 }
 unsafe fn get_cheapest_fractional_path_for_pathkeys(
-    _paths: *mut List,
-    _pathkeys: *mut List,
-    _required_outer: *mut std::ffi::c_void,
-    _fraction: std::os::raw::c_double,
+    paths: *mut List,
+    pathkeys: *mut List,
+    required_outer: *mut std::ffi::c_void,
+    fraction: std::os::raw::c_double,
 ) -> *mut Path {
-    unimplemented!() // TODO: src/backend/optimizer/util/pathkeys.c
+    crate::optimizer::path::pathkeys::get_cheapest_fractional_path_for_pathkeys(paths, pathkeys, required_outer as _, fraction)
 }
 unsafe fn apply_projection_to_path(
-    _root: *mut PlannerInfo,
-    _rel: *mut RelOptInfo,
-    _path: *mut Path,
-    _target: *mut crate::nodes::pathnodes::PathTarget,
+    root: *mut PlannerInfo,
+    rel: *mut RelOptInfo,
+    path: *mut Path,
+    target: *mut crate::nodes::pathnodes::PathTarget,
 ) -> *mut Path {
-    unimplemented!() // TODO: src/backend/optimizer/util/pathnode.c
+    crate::optimizer::util::pathnode::apply_projection_to_path(root, rel, path, target)
 }
 unsafe fn make_pathkeys_for_sortclauses(
-    _root: *mut PlannerInfo,
-    _sortclauses: *mut List,
-    _tlist: *mut List,
+    root: *mut PlannerInfo,
+    sortclauses: *mut List,
+    tlist: *mut List,
 ) -> *mut List {
-    unimplemented!() // TODO: src/backend/optimizer/path/pathkeys.c
+    crate::optimizer::path::pathkeys::make_pathkeys_for_sortclauses(root, sortclauses, tlist)
 }
-unsafe fn SearchSysCache1(_cacheId: std::os::raw::c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!() // TODO: src/backend/utils/cache/syscache.c
+unsafe fn SearchSysCache1(cacheId: std::os::raw::c_int, key1: Datum) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCache1(cacheId, key1) as _
 }
-unsafe fn HeapTupleIsValid(_tuple: HeapTuple) -> bool {
-    unimplemented!() // TODO: src/include/access/htup.h
+unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool {
+    !tuple.is_null()
 }
-unsafe fn GETSTRUCT(_tuple: HeapTuple) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: src/include/access/htup_details.h
+unsafe fn GETSTRUCT(tuple: HeapTuple) -> *mut std::ffi::c_void {
+    crate::access::htup_details::GETSTRUCT(tuple as _) as _
 }
-unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!() // TODO: src/backend/utils/cache/syscache.c
+unsafe fn ReleaseSysCache(tuple: HeapTuple) {
+    crate::utils::cache::syscache::ReleaseSysCache(tuple as _)
 }
 
 // Constants used above (stubbed)

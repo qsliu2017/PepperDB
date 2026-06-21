@@ -230,6 +230,7 @@ pub unsafe fn WaitLatch(
  *
  * NB: These days this is just a wrapper around the WaitEventSet API.
  */
+#[no_mangle]
 pub unsafe fn WaitLatchOrSocket(
     latch: *mut Latch,
     wakeEvents: c_int,
@@ -348,6 +349,7 @@ pub unsafe fn SetLatch(latch: *mut Latch) {
  * Clear the latch. Calling WaitLatch after this will sleep, unless
  * the latch is set again before the WaitLatch call.
  */
+#[no_mangle]
 pub unsafe fn ResetLatch(latch: *mut Latch) {
     /* Only the owner should reset the latch */
     Assert!((*latch).owner_pid == MyProcPid);
@@ -373,11 +375,11 @@ type pid_t = c_int;
 // ---------------------------------------------------------------------------
 
 unsafe fn CreateWaitEventSet(_resowner: ResourceOwner, _nevents: c_int) -> *mut WaitEventSet {
-    unimplemented!()
+    crate::storage::ipc::waiteventset::CreateWaitEventSet(_resowner as _, _nevents) as _
 }
 
 unsafe fn FreeWaitEventSet(_set: *mut WaitEventSet) {
-    unimplemented!()
+    crate::storage::ipc::waiteventset::FreeWaitEventSet(_set as _)
 }
 
 unsafe fn AddWaitEventToSet(
@@ -387,7 +389,7 @@ unsafe fn AddWaitEventToSet(
     _latch: *mut Latch,
     _user_data: *mut std::ffi::c_void,
 ) -> c_int {
-    unimplemented!()
+    crate::storage::ipc::waiteventset::AddWaitEventToSet(_set as _, _events, _fd as _, _latch as _, _user_data)
 }
 
 unsafe fn ModifyWaitEvent(
@@ -396,7 +398,7 @@ unsafe fn ModifyWaitEvent(
     _events: uint32,
     _latch: *mut Latch,
 ) {
-    unimplemented!()
+    crate::storage::ipc::waiteventset::ModifyWaitEvent(_set as _, _pos, _events, _latch as _)
 }
 
 unsafe fn WaitEventSetWait(
@@ -406,13 +408,13 @@ unsafe fn WaitEventSetWait(
     _nevents: c_int,
     _wait_event_info: uint32,
 ) -> c_int {
-    unimplemented!()
+    crate::storage::ipc::waiteventset::WaitEventSetWait(_set as _, _timeout, _occurred_events as _, _nevents, _wait_event_info)
 }
 
 unsafe fn WakeupMyProc() {
-    unimplemented!()
+    crate::storage::ipc::waiteventset::WakeupMyProc()
 }
 
 unsafe fn WakeupOtherProc(_pid: c_int) {
-    unimplemented!()
+    crate::storage::ipc::waiteventset::WakeupOtherProc(_pid)
 }

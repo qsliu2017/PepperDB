@@ -911,38 +911,26 @@ unsafe fn XLogReadBufferForRedo(
     _record: *mut XLogReaderState,
     _block_id: uint8,
     _buf: *mut Buffer,
-) -> XLogRedoAction {
-    unimplemented!() // TODO: access/xlogutils.c
-}
+) -> XLogRedoAction { unimplemented!() }
 
 #[allow(non_snake_case)]
-unsafe fn XLogInitBufferForRedo(_record: *mut XLogReaderState, _block_id: uint8) -> Buffer {
-    unimplemented!() // TODO: access/xlogutils.c
-}
+unsafe fn XLogInitBufferForRedo(_record: *mut XLogReaderState, _block_id: uint8) -> Buffer { unimplemented!() }
 
 #[allow(non_snake_case)]
-unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char {
-    unimplemented!() // TODO: access/xlogreader.c
-}
+unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char { unimplemented!() }
 
 #[allow(non_snake_case)]
 unsafe fn XLogRecGetBlockData(
     _record: *mut XLogReaderState,
     _block_id: uint8,
     _len: *mut Size,
-) -> *mut c_char {
-    unimplemented!() // TODO: access/xlogreader.c
-}
+) -> *mut c_char { unimplemented!() }
 
 #[allow(non_snake_case)]
-unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 {
-    unimplemented!() // TODO: access/xlogreader.h
-}
+unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 { unimplemented!() }
 
 #[allow(non_snake_case)]
-unsafe fn XLogRecHasBlockRef(_record: *mut XLogReaderState, _block_id: uint8) -> bool {
-    unimplemented!() // TODO: access/xlogreader.h
-}
+unsafe fn XLogRecHasBlockRef(_record: *mut XLogReaderState, _block_id: uint8) -> bool { unimplemented!() }
 
 #[allow(non_snake_case)]
 unsafe fn XLogRecGetBlockTag(
@@ -951,9 +939,7 @@ unsafe fn XLogRecGetBlockTag(
     _rlocator: *mut RelFileLocator,
     _forknum: *mut c_void,
     _blknum: *mut BlockNumber,
-) {
-    unimplemented!() // TODO: access/xlogreader.c
-}
+) { unimplemented!() }
 
 #[allow(non_snake_case)]
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
@@ -961,9 +947,7 @@ unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
 }
 
 #[allow(non_snake_case)]
-unsafe fn BufferIsValid(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
+unsafe fn BufferIsValid(_buffer: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buffer) }
 
 #[allow(non_snake_case)]
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
@@ -976,9 +960,7 @@ unsafe fn UnlockReleaseBuffer(_buffer: Buffer) {
 }
 
 #[allow(non_snake_case)]
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO: storage/bufpage.h
-}
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(_page, _lsn) }
 
 #[allow(non_snake_case)]
 unsafe fn PageIsEmpty(_page: Page) -> bool {
@@ -998,9 +980,7 @@ unsafe fn PageAddItem(
     _offnum: OffsetNumber,
     _overwrite: bool,
     _is_heap: bool,
-) -> OffsetNumber {
-    unimplemented!() // TODO: storage/bufpage.h
-}
+) -> OffsetNumber { crate::storage::bufpage::PageAddItem(_page, _item, _size, _offnum, _overwrite, _is_heap) }
 
 #[allow(non_snake_case)]
 unsafe fn PageIndexTupleOverwrite(
@@ -1023,9 +1003,7 @@ unsafe fn PageIndexTupleDelete(_page: Page, _offnum: OffsetNumber) {
 }
 
 #[allow(non_snake_case)]
-unsafe fn OffsetNumberNext(_offnum: OffsetNumber) -> OffsetNumber {
-    unimplemented!() // TODO: storage/off.h
-}
+unsafe fn OffsetNumberNext(_offnum: OffsetNumber) -> OffsetNumber { crate::storage::off::OffsetNumberNext(_offnum) }
 
 #[allow(non_snake_case)]
 unsafe fn IndexTupleSize(_itup: IndexTuple) -> Size {
@@ -1078,9 +1056,7 @@ struct GISTPageOpaqueData {
 }
 
 #[allow(non_snake_case)]
-unsafe fn GISTInitBuffer(_buffer: Buffer, _flags: c_int) {
-    unimplemented!() // TODO: access/gist.c
-}
+unsafe fn GISTInitBuffer(_buffer: Buffer, _flags: c_int) { crate::access::gist::gistutil::GISTInitBuffer(_buffer, _flags as _) }
 
 #[allow(non_snake_case)]
 unsafe fn gistfillbuffer(
@@ -1088,32 +1064,24 @@ unsafe fn gistfillbuffer(
     _itup: *mut IndexTuple,
     _len: c_int,
     _off: OffsetNumber,
-) {
-    unimplemented!() // TODO: access/gist.c
-}
+) { unimplemented!() }
 
 #[allow(non_snake_case)]
-unsafe fn createTempGistContext() -> MemoryContext {
-    unimplemented!() // TODO: access/gist.c
-}
+unsafe fn createTempGistContext() -> MemoryContext { unimplemented!() }
 
 #[allow(non_snake_case)]
 unsafe fn ResolveRecoveryConflictWithSnapshot(
     _snapshotConflictHorizon: TransactionId,
     _isCatalogRel: bool,
     _locator: RelFileLocator,
-) {
-    unimplemented!() // TODO: storage/standby.c
-}
+) { unimplemented!() }
 
 #[allow(non_snake_case)]
 unsafe fn ResolveRecoveryConflictWithSnapshotFullXid(
     _snapshotConflictHorizon: FullTransactionId,
     _isCatalogRel: bool,
     _locator: RelFileLocator,
-) {
-    unimplemented!() // TODO: storage/standby.c
-}
+) { unimplemented!() }
 
 #[allow(non_snake_case)]
 unsafe fn RelationIsAccessibleInLogicalDecoding(_rel: Relation) -> bool {
@@ -1141,9 +1109,7 @@ unsafe fn XLogRegisterBufData(_block_id: uint8, _data: *mut c_char, _len: Size) 
 }
 
 #[allow(non_snake_case)]
-unsafe fn XLogSetRecordFlags(_flags: uint8) {
-    unimplemented!() // TODO: access/xloginsert.c
-}
+unsafe fn XLogSetRecordFlags(_flags: uint8) { crate::access::transam::xloginsert::XLogSetRecordFlags(_flags as _) }
 
 #[allow(non_snake_case)]
 unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
@@ -1151,21 +1117,13 @@ unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
 }
 
 #[allow(non_snake_case)]
-unsafe fn mask_page_lsn_and_checksum(_page: Page) {
-    unimplemented!() // TODO: access/bufmask.c
-}
+unsafe fn mask_page_lsn_and_checksum(_page: Page) { crate::access::common::bufmask::mask_page_lsn_and_checksum(_page) }
 
 #[allow(non_snake_case)]
-unsafe fn mask_page_hint_bits(_page: Page) {
-    unimplemented!() // TODO: access/bufmask.c
-}
+unsafe fn mask_page_hint_bits(_page: Page) { crate::access::common::bufmask::mask_page_hint_bits(_page) }
 
 #[allow(non_snake_case)]
-unsafe fn mask_unused_space(_page: Page) {
-    unimplemented!() // TODO: access/bufmask.c
-}
+unsafe fn mask_unused_space(_page: Page) { crate::access::common::bufmask::mask_unused_space(_page) }
 
 #[allow(non_snake_case)]
-unsafe fn mask_lp_flags(_page: Page) {
-    unimplemented!() // TODO: access/bufmask.c
-}
+unsafe fn mask_lp_flags(_page: Page) { crate::access::common::bufmask::mask_lp_flags(_page) }

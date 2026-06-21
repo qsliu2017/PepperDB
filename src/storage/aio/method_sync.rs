@@ -16,24 +16,10 @@ use crate::prelude::*;
 
 use crate::c::{uint16, Size};
 
-pub type PgAioHandle = c_void;
-
-#[repr(C)]
-pub struct IoMethodOps {
-    pub shmem_size: Option<unsafe extern "C" fn() -> Size>,
-    pub shmem_init: Option<unsafe extern "C" fn(bool)>,
-    pub needs_synchronous_execution: Option<unsafe extern "C" fn(*mut PgAioHandle) -> bool>,
-    pub submit: Option<unsafe extern "C" fn(uint16, *mut *mut PgAioHandle) -> c_int>,
-}
-
-impl IoMethodOps {
-    pub const DEFAULT: IoMethodOps = IoMethodOps {
-        shmem_size: None,
-        shmem_init: None,
-        needs_synchronous_execution: None,
-        submit: None,
-    };
-}
+// Canonical IoMethodOps/PgAioHandle (aio_internal). The local stubs here had a
+// DIFFERENT IoMethodOps layout, so aio.rs reading via the canonical layout landed
+// on the wrong fields (init_backend read the `submit` slot = pgaio_sync_submit).
+pub use crate::storage::aio_internal::{IoMethodOps, PgAioHandle};
 
 pub const pgaio_sync_ops: IoMethodOps = IoMethodOps {
     needs_synchronous_execution: Some(pgaio_sync_needs_synchronous_execution),

@@ -78,7 +78,7 @@ pub const COERCION_METHOD_INOUT: c_char = b'i' as c_char; /* use input/output fu
  */
 use core::ffi::c_int;
 use crate::postgres::{Datum, ObjectIdGetDatum, CharGetDatum};
-use crate::utils::error::elog::ERROR;
+use crate::utils::elog::ERROR;
 use crate::access::htup_details::HeapTuple;
 use crate::access::common::heaptuple::{heap_form_tuple, heap_freetuple};
 use crate::access::table::table::{table_open, table_close, LOCKMODE};
@@ -107,7 +107,7 @@ const ProcedureRelationId: Oid = 1255;
 const RowExclusiveLock: LOCKMODE = 4;
 
 /* syscache id (utils/syscache.h) */
-const CASTSOURCETARGET: c_int = 0;
+const CASTSOURCETARGET: c_int = 12;
 
 /* pg_cast column attribute numbers and total count (catalog/pg_cast.h) */
 const Anum_pg_cast_oid: usize = 1;

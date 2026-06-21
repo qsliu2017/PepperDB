@@ -50,8 +50,8 @@ const ERANGE: c_int = 34; // <errno.h>, 34 on Linux and macOS
 
 /* errcodes.h classification (the errcode() shim ignores the value). */
 // TODO(pg-port): real codes from utils/errcodes.h.
-const ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE: c_int = 0;
-const ERRCODE_INVALID_TEXT_REPRESENTATION: c_int = 0;
+const ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE: c_int = 50331778; /* MAKE_SQLSTATE 22003 */
+const ERRCODE_INVALID_TEXT_REPRESENTATION: c_int = 33685634; /* MAKE_SQLSTATE 22P02 */
 
 /*
  * A table of all two-digit numbers. This is used to speed up decimal digit
@@ -111,14 +111,50 @@ const HEXLOOKUP: [i8; 128] = [
 // Soft errors are not yet supported, so these always raise a hard ERROR.  Each
 // returns () (ereport! diverges at runtime under the elog shim); callers add the
 // `(Datum) 0`-equivalent return value to satisfy the type, mirroring ereturn's 0.
-unsafe fn report_out_of_range(s: *const c_char, typname: &str) {
+/// If `escontext` is an ErrorSaveContext (soft-error sink), record that a soft
+/// error occurred (and, if details are wanted, a minimal ErrorData with msg +
+/// sqlstate) and return true so the caller can bail without throwing.
+unsafe fn soft_error(escontext: *mut Node, sqlerrcode: c_int, msg: *mut c_char) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    if escontext.is_null() || *(escontext as *const c_int) != T_ErrorSaveContext {
+        return false;
+    }
+    let esc = escontext as *mut crate::nodes::miscnodes::ErrorSaveContext;
+    (*esc).error_occurred = true;
+    if (*esc).details_wanted {
+        let ed = crate::utils::mmgr::mcxt::palloc0(
+            core::mem::size_of::<crate::utils::error::elog_impl::ErrorData>(),
+        ) as *mut crate::utils::error::elog_impl::ErrorData;
+        (*ed).sqlerrcode = sqlerrcode;
+        (*ed).message = msg;
+        (*esc).error_data = ed as *mut _;
+    }
+    true
+}
+
+unsafe fn rs_to_palloc_cstr(s: &str) -> *mut c_char {
+    let buf = crate::utils::mmgr::mcxt::palloc(s.len() + 1) as *mut c_char;
+    core::ptr::copy_nonoverlapping(s.as_ptr() as *const c_char, buf, s.len());
+    *buf.add(s.len()) = 0;
+    buf
+}
+
+unsafe fn report_out_of_range(s: *const c_char, typname: &str, escontext: *mut Node) {
+    let m = rs_to_palloc_cstr(&format!("value \"{}\" is out of range for type {}", cstr(s), typname));
+    if soft_error(escontext, ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE, m) {
+        return;
+    }
     let _ = errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE);
     ereport!(
         ERROR,
         errmsg!("value \"{}\" is out of range for type {}", cstr(s), typname)
     );
 }
-unsafe fn report_invalid_syntax(s: *const c_char, typname: &str) {
+unsafe fn report_invalid_syntax(s: *const c_char, typname: &str, escontext: *mut Node) {
+    let m = rs_to_palloc_cstr(&format!("invalid input syntax for type {}: \"{}\"", typname, cstr(s)));
+    if soft_error(escontext, ERRCODE_INVALID_TEXT_REPRESENTATION, m) {
+        return;
+    }
     let _ = errcode(ERRCODE_INVALID_TEXT_REPRESENTATION);
     ereport!(
         ERROR,
@@ -147,7 +183,6 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
     let mut neg = false;
     let mut digit: u8;
     let mut result: int16 = 0;
-    let _ = escontext; // TODO(pg-port): ErrorSaveContext soft errors
 
     'slow: {
         // ---- fast path: base-10, no underscores ----
@@ -169,7 +204,7 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
             }
             ptr = ptr.add(1);
             if tmp > (-(PG_INT16_MIN as i32 / 10)) as uint16 {
-                report_out_of_range(s, "smallint");
+                report_out_of_range(s, "smallint", escontext);
                 return 0;
             }
             tmp = tmp * 10 + digit as uint16;
@@ -179,13 +214,13 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
         }
         if neg {
             if pg_neg_u16_overflow(tmp, &mut result) {
-                report_out_of_range(s, "smallint");
+                report_out_of_range(s, "smallint", escontext);
                 return 0;
             }
             return result;
         }
         if tmp > PG_INT16_MAX as uint16 {
-            report_out_of_range(s, "smallint");
+            report_out_of_range(s, "smallint", escontext);
             return 0;
         }
         return tmp as int16;
@@ -212,7 +247,7 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
         loop {
             if isxdigit(*ptr as u8 as c_int) != 0 {
                 if tmp > (-(PG_INT16_MIN as i32 / 16)) as uint16 {
-                    report_out_of_range(s, "smallint");
+                    report_out_of_range(s, "smallint", escontext);
                     return 0;
                 }
                 tmp = tmp * 16 + HEXLOOKUP[*ptr as u8 as usize] as uint16;
@@ -220,7 +255,7 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
             } else if *ptr as u8 == b'_' {
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || isxdigit(*ptr as u8 as c_int) == 0 {
-                    report_invalid_syntax(s, "smallint");
+                    report_invalid_syntax(s, "smallint", escontext);
                     return 0;
                 }
             } else {
@@ -233,7 +268,7 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
         loop {
             if (*ptr as u8) >= b'0' && (*ptr as u8) <= b'7' {
                 if tmp > (-(PG_INT16_MIN as i32 / 8)) as uint16 {
-                    report_out_of_range(s, "smallint");
+                    report_out_of_range(s, "smallint", escontext);
                     return 0;
                 }
                 tmp = tmp * 8 + (*ptr as u8 - b'0') as uint16;
@@ -241,7 +276,7 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
             } else if *ptr as u8 == b'_' {
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || (*ptr as u8) < b'0' || (*ptr as u8) > b'7' {
-                    report_invalid_syntax(s, "smallint");
+                    report_invalid_syntax(s, "smallint", escontext);
                     return 0;
                 }
             } else {
@@ -254,7 +289,7 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
         loop {
             if (*ptr as u8) >= b'0' && (*ptr as u8) <= b'1' {
                 if tmp > (-(PG_INT16_MIN as i32 / 2)) as uint16 {
-                    report_out_of_range(s, "smallint");
+                    report_out_of_range(s, "smallint", escontext);
                     return 0;
                 }
                 tmp = tmp * 2 + (*ptr as u8 - b'0') as uint16;
@@ -262,7 +297,7 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
             } else if *ptr as u8 == b'_' {
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || (*ptr as u8) < b'0' || (*ptr as u8) > b'1' {
-                    report_invalid_syntax(s, "smallint");
+                    report_invalid_syntax(s, "smallint", escontext);
                     return 0;
                 }
             } else {
@@ -274,19 +309,19 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
         loop {
             if (*ptr as u8) >= b'0' && (*ptr as u8) <= b'9' {
                 if tmp > (-(PG_INT16_MIN as i32 / 10)) as uint16 {
-                    report_out_of_range(s, "smallint");
+                    report_out_of_range(s, "smallint", escontext);
                     return 0;
                 }
                 tmp = tmp * 10 + (*ptr as u8 - b'0') as uint16;
                 ptr = ptr.add(1);
             } else if *ptr as u8 == b'_' {
                 if ptr == firstdigit {
-                    report_invalid_syntax(s, "smallint");
+                    report_invalid_syntax(s, "smallint", escontext);
                     return 0;
                 }
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || isdigit(*ptr as u8 as c_int) == 0 {
-                    report_invalid_syntax(s, "smallint");
+                    report_invalid_syntax(s, "smallint", escontext);
                     return 0;
                 }
             } else {
@@ -296,25 +331,25 @@ pub unsafe fn pg_strtoint16_safe(s: *const c_char, escontext: *mut Node) -> int1
     }
 
     if ptr == firstdigit {
-        report_invalid_syntax(s, "smallint");
+        report_invalid_syntax(s, "smallint", escontext);
         return 0;
     }
     while isspace(*ptr as u8 as c_int) != 0 {
         ptr = ptr.add(1);
     }
     if *ptr as u8 != b'\0' {
-        report_invalid_syntax(s, "smallint");
+        report_invalid_syntax(s, "smallint", escontext);
         return 0;
     }
     if neg {
         if pg_neg_u16_overflow(tmp, &mut result) {
-            report_out_of_range(s, "smallint");
+            report_out_of_range(s, "smallint", escontext);
             return 0;
         }
         return result;
     }
     if tmp > PG_INT16_MAX as uint16 {
-        report_out_of_range(s, "smallint");
+        report_out_of_range(s, "smallint", escontext);
         return 0;
     }
     tmp as int16
@@ -338,7 +373,6 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
     let mut neg = false;
     let mut digit: u8;
     let mut result: int32 = 0;
-    let _ = escontext;
 
     'slow: {
         if *ptr as u8 == b'-' {
@@ -359,7 +393,7 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
             }
             ptr = ptr.add(1);
             if tmp > (-(PG_INT32_MIN as i64 / 10)) as uint32 {
-                report_out_of_range(s, "integer");
+                report_out_of_range(s, "integer", escontext);
                 return 0;
             }
             tmp = tmp * 10 + digit as uint32;
@@ -369,13 +403,13 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
         }
         if neg {
             if pg_neg_u32_overflow(tmp, &mut result) {
-                report_out_of_range(s, "integer");
+                report_out_of_range(s, "integer", escontext);
                 return 0;
             }
             return result;
         }
         if tmp > PG_INT32_MAX as uint32 {
-            report_out_of_range(s, "integer");
+            report_out_of_range(s, "integer", escontext);
             return 0;
         }
         return tmp as int32;
@@ -399,7 +433,7 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
         loop {
             if isxdigit(*ptr as u8 as c_int) != 0 {
                 if tmp > (-(PG_INT32_MIN as i64 / 16)) as uint32 {
-                    report_out_of_range(s, "integer");
+                    report_out_of_range(s, "integer", escontext);
                     return 0;
                 }
                 tmp = tmp * 16 + HEXLOOKUP[*ptr as u8 as usize] as uint32;
@@ -407,7 +441,7 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
             } else if *ptr as u8 == b'_' {
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || isxdigit(*ptr as u8 as c_int) == 0 {
-                    report_invalid_syntax(s, "integer");
+                    report_invalid_syntax(s, "integer", escontext);
                     return 0;
                 }
             } else {
@@ -420,7 +454,7 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
         loop {
             if (*ptr as u8) >= b'0' && (*ptr as u8) <= b'7' {
                 if tmp > (-(PG_INT32_MIN as i64 / 8)) as uint32 {
-                    report_out_of_range(s, "integer");
+                    report_out_of_range(s, "integer", escontext);
                     return 0;
                 }
                 tmp = tmp * 8 + (*ptr as u8 - b'0') as uint32;
@@ -428,7 +462,7 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
             } else if *ptr as u8 == b'_' {
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || (*ptr as u8) < b'0' || (*ptr as u8) > b'7' {
-                    report_invalid_syntax(s, "integer");
+                    report_invalid_syntax(s, "integer", escontext);
                     return 0;
                 }
             } else {
@@ -441,7 +475,7 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
         loop {
             if (*ptr as u8) >= b'0' && (*ptr as u8) <= b'1' {
                 if tmp > (-(PG_INT32_MIN as i64 / 2)) as uint32 {
-                    report_out_of_range(s, "integer");
+                    report_out_of_range(s, "integer", escontext);
                     return 0;
                 }
                 tmp = tmp * 2 + (*ptr as u8 - b'0') as uint32;
@@ -449,7 +483,7 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
             } else if *ptr as u8 == b'_' {
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || (*ptr as u8) < b'0' || (*ptr as u8) > b'1' {
-                    report_invalid_syntax(s, "integer");
+                    report_invalid_syntax(s, "integer", escontext);
                     return 0;
                 }
             } else {
@@ -461,19 +495,19 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
         loop {
             if (*ptr as u8) >= b'0' && (*ptr as u8) <= b'9' {
                 if tmp > (-(PG_INT32_MIN as i64 / 10)) as uint32 {
-                    report_out_of_range(s, "integer");
+                    report_out_of_range(s, "integer", escontext);
                     return 0;
                 }
                 tmp = tmp * 10 + (*ptr as u8 - b'0') as uint32;
                 ptr = ptr.add(1);
             } else if *ptr as u8 == b'_' {
                 if ptr == firstdigit {
-                    report_invalid_syntax(s, "integer");
+                    report_invalid_syntax(s, "integer", escontext);
                     return 0;
                 }
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || isdigit(*ptr as u8 as c_int) == 0 {
-                    report_invalid_syntax(s, "integer");
+                    report_invalid_syntax(s, "integer", escontext);
                     return 0;
                 }
             } else {
@@ -483,25 +517,25 @@ pub unsafe fn pg_strtoint32_safe(s: *const c_char, escontext: *mut Node) -> int3
     }
 
     if ptr == firstdigit {
-        report_invalid_syntax(s, "integer");
+        report_invalid_syntax(s, "integer", escontext);
         return 0;
     }
     while isspace(*ptr as u8 as c_int) != 0 {
         ptr = ptr.add(1);
     }
     if *ptr as u8 != b'\0' {
-        report_invalid_syntax(s, "integer");
+        report_invalid_syntax(s, "integer", escontext);
         return 0;
     }
     if neg {
         if pg_neg_u32_overflow(tmp, &mut result) {
-            report_out_of_range(s, "integer");
+            report_out_of_range(s, "integer", escontext);
             return 0;
         }
         return result;
     }
     if tmp > PG_INT32_MAX as uint32 {
-        report_out_of_range(s, "integer");
+        report_out_of_range(s, "integer", escontext);
         return 0;
     }
     tmp as int32
@@ -525,7 +559,6 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
     let mut neg = false;
     let mut digit: u8;
     let mut result: int64 = 0;
-    let _ = escontext;
 
     'slow: {
         if *ptr as u8 == b'-' {
@@ -546,7 +579,7 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
             }
             ptr = ptr.add(1);
             if tmp > (-(PG_INT64_MIN / 10)) as uint64 {
-                report_out_of_range(s, "bigint");
+                report_out_of_range(s, "bigint", escontext);
                 return 0;
             }
             tmp = tmp * 10 + digit as uint64;
@@ -556,13 +589,13 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
         }
         if neg {
             if pg_neg_u64_overflow(tmp, &mut result) {
-                report_out_of_range(s, "bigint");
+                report_out_of_range(s, "bigint", escontext);
                 return 0;
             }
             return result;
         }
         if tmp > PG_INT64_MAX as uint64 {
-            report_out_of_range(s, "bigint");
+            report_out_of_range(s, "bigint", escontext);
             return 0;
         }
         return tmp as int64;
@@ -586,7 +619,7 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
         loop {
             if isxdigit(*ptr as u8 as c_int) != 0 {
                 if tmp > (-(PG_INT64_MIN / 16)) as uint64 {
-                    report_out_of_range(s, "bigint");
+                    report_out_of_range(s, "bigint", escontext);
                     return 0;
                 }
                 tmp = tmp * 16 + HEXLOOKUP[*ptr as u8 as usize] as uint64;
@@ -594,7 +627,7 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
             } else if *ptr as u8 == b'_' {
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || isxdigit(*ptr as u8 as c_int) == 0 {
-                    report_invalid_syntax(s, "bigint");
+                    report_invalid_syntax(s, "bigint", escontext);
                     return 0;
                 }
             } else {
@@ -607,7 +640,7 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
         loop {
             if (*ptr as u8) >= b'0' && (*ptr as u8) <= b'7' {
                 if tmp > (-(PG_INT64_MIN / 8)) as uint64 {
-                    report_out_of_range(s, "bigint");
+                    report_out_of_range(s, "bigint", escontext);
                     return 0;
                 }
                 tmp = tmp * 8 + (*ptr as u8 - b'0') as uint64;
@@ -615,7 +648,7 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
             } else if *ptr as u8 == b'_' {
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || (*ptr as u8) < b'0' || (*ptr as u8) > b'7' {
-                    report_invalid_syntax(s, "bigint");
+                    report_invalid_syntax(s, "bigint", escontext);
                     return 0;
                 }
             } else {
@@ -628,7 +661,7 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
         loop {
             if (*ptr as u8) >= b'0' && (*ptr as u8) <= b'1' {
                 if tmp > (-(PG_INT64_MIN / 2)) as uint64 {
-                    report_out_of_range(s, "bigint");
+                    report_out_of_range(s, "bigint", escontext);
                     return 0;
                 }
                 tmp = tmp * 2 + (*ptr as u8 - b'0') as uint64;
@@ -636,7 +669,7 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
             } else if *ptr as u8 == b'_' {
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || (*ptr as u8) < b'0' || (*ptr as u8) > b'1' {
-                    report_invalid_syntax(s, "bigint");
+                    report_invalid_syntax(s, "bigint", escontext);
                     return 0;
                 }
             } else {
@@ -648,19 +681,19 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
         loop {
             if (*ptr as u8) >= b'0' && (*ptr as u8) <= b'9' {
                 if tmp > (-(PG_INT64_MIN / 10)) as uint64 {
-                    report_out_of_range(s, "bigint");
+                    report_out_of_range(s, "bigint", escontext);
                     return 0;
                 }
                 tmp = tmp * 10 + (*ptr as u8 - b'0') as uint64;
                 ptr = ptr.add(1);
             } else if *ptr as u8 == b'_' {
                 if ptr == firstdigit {
-                    report_invalid_syntax(s, "bigint");
+                    report_invalid_syntax(s, "bigint", escontext);
                     return 0;
                 }
                 ptr = ptr.add(1);
                 if *ptr as u8 == b'\0' || isdigit(*ptr as u8 as c_int) == 0 {
-                    report_invalid_syntax(s, "bigint");
+                    report_invalid_syntax(s, "bigint", escontext);
                     return 0;
                 }
             } else {
@@ -670,25 +703,25 @@ pub unsafe fn pg_strtoint64_safe(s: *const c_char, escontext: *mut Node) -> int6
     }
 
     if ptr == firstdigit {
-        report_invalid_syntax(s, "bigint");
+        report_invalid_syntax(s, "bigint", escontext);
         return 0;
     }
     while isspace(*ptr as u8 as c_int) != 0 {
         ptr = ptr.add(1);
     }
     if *ptr as u8 != b'\0' {
-        report_invalid_syntax(s, "bigint");
+        report_invalid_syntax(s, "bigint", escontext);
         return 0;
     }
     if neg {
         if pg_neg_u64_overflow(tmp, &mut result) {
-            report_out_of_range(s, "bigint");
+            report_out_of_range(s, "bigint", escontext);
             return 0;
         }
         return result;
     }
     if tmp > PG_INT64_MAX as uint64 {
-        report_out_of_range(s, "bigint");
+        report_out_of_range(s, "bigint", escontext);
         return 0;
     }
     tmp as int64
@@ -711,17 +744,16 @@ pub unsafe fn uint32in_subr(
     let result: uint32;
     let cvt: c_ulong;
     let mut endptr: *mut c_char = null_mut();
-    let _ = escontext;
 
     *errno_location() = 0;
     cvt = strtoul(s, &mut endptr, 0);
 
     if (*errno_location() != 0 && *errno_location() != ERANGE) || endptr == s as *mut c_char {
-        report_invalid_syntax(s, &cstr(typname));
+        report_invalid_syntax(s, &cstr(typname), escontext);
         return 0;
     }
     if *errno_location() == ERANGE {
-        report_out_of_range(s, &cstr(typname));
+        report_out_of_range(s, &cstr(typname), escontext);
         return 0;
     }
 
@@ -733,7 +765,7 @@ pub unsafe fn uint32in_subr(
             e = e.add(1);
         }
         if *e != 0 {
-            report_invalid_syntax(s, &cstr(typname));
+            report_invalid_syntax(s, &cstr(typname), escontext);
             return 0;
         }
     }
@@ -745,7 +777,7 @@ pub unsafe fn uint32in_subr(
      * LP64).  Accept inputs that match after signed or unsigned extension.
      */
     if cvt != result as c_ulong && cvt != (result as c_int) as c_ulong {
-        report_out_of_range(s, &cstr(typname));
+        report_out_of_range(s, &cstr(typname), escontext);
         return 0;
     }
 
@@ -766,17 +798,16 @@ pub unsafe fn uint64in_subr(
 ) -> uint64 {
     let result: uint64;
     let mut endptr: *mut c_char = null_mut();
-    let _ = escontext;
 
     *errno_location() = 0;
     result = strtoull(s, &mut endptr, 0) as uint64;
 
     if (*errno_location() != 0 && *errno_location() != ERANGE) || endptr == s as *mut c_char {
-        report_invalid_syntax(s, &cstr(typname));
+        report_invalid_syntax(s, &cstr(typname), escontext);
         return 0;
     }
     if *errno_location() == ERANGE {
-        report_out_of_range(s, &cstr(typname));
+        report_out_of_range(s, &cstr(typname), escontext);
         return 0;
     }
 
@@ -788,7 +819,7 @@ pub unsafe fn uint64in_subr(
             e = e.add(1);
         }
         if *e != 0 {
-            report_invalid_syntax(s, &cstr(typname));
+            report_invalid_syntax(s, &cstr(typname), escontext);
             return 0;
         }
     }

@@ -81,7 +81,7 @@ unsafe fn byteasend(_fcinfo: FunctionCallInfo) -> Datum {
 
 // utils/cache/syscache.h: STATEXTDATASTXOID syscache id.
 // TODO(pg-port): replace with the real constant once syscache.h is ported.
-const STATEXTDATASTXOID: c_int = 0;
+const STATEXTDATASTXOID: c_int = 62;
 
 // catalog/pg_statistic_ext_data.h: column number of stxdmcv.
 // TODO(pg-port): replace once pg_statistic_ext_data.h is ported.

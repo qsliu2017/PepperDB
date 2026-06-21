@@ -65,7 +65,7 @@ const F_OIDEQ: Oid = 184;
 const F_INT4EQ: Oid = 65;
 
 // utils/syscache.h - SysCacheIdentifier AUTHOID.
-const AUTHOID: c_int = 7;
+const AUTHOID: c_int = 11;
 
 // utils/errcodes.h.
 const ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST: c_int = 0;
@@ -139,86 +139,101 @@ pub struct HeapTupleData {
     pub t_data: *mut c_void,
 }
 
-#[repr(C)]
-pub struct ScanKeyData {
-    _private: [u8; 64],
-}
+pub use crate::access::common::scankey::ScanKeyData;
 
 /* access/genam.h, access/table.h, access/htup.h, catalog/indexing.h */
-unsafe fn table_open(_relationId: Oid, _lockmode: c_int) -> Relation {
-    unimplemented!()
+unsafe fn table_open(relationId: Oid, lockmode: c_int) -> Relation {
+    crate::access::table::table::table_open(relationId as _, lockmode as _) as _
 }
-unsafe fn table_close(_relation: Relation, _lockmode: c_int) {
-    unimplemented!()
+unsafe fn table_close(relation: Relation, lockmode: c_int) {
+    crate::access::table::table::table_close(relation as _, lockmode as _)
 }
 unsafe fn ScanKeyInit(
-    _entry: *mut ScanKeyData,
-    _attributeNumber: c_int,
-    _strategy: c_int,
-    _procedure: Oid,
-    _argument: Datum,
+    entry: *mut ScanKeyData,
+    attributeNumber: c_int,
+    strategy: c_int,
+    procedure: Oid,
+    argument: Datum,
 ) {
-    unimplemented!()
+    crate::access::common::scankey::ScanKeyInit(
+        entry as _,
+        attributeNumber as _,
+        strategy as _,
+        procedure as _,
+        argument as _,
+    )
 }
 unsafe fn systable_beginscan(
-    _heapRelation: Relation,
-    _indexId: Oid,
-    _indexOK: bool,
-    _snapshot: *mut SnapshotData,
-    _nkeys: c_int,
-    _key: *mut ScanKeyData,
+    heapRelation: Relation,
+    indexId: Oid,
+    indexOK: bool,
+    snapshot: *mut SnapshotData,
+    nkeys: c_int,
+    key: *mut ScanKeyData,
 ) -> SysScanDesc {
-    unimplemented!()
+    crate::access::index::genam::systable_beginscan(
+        heapRelation as _,
+        indexId as _,
+        indexOK,
+        snapshot as _,
+        nkeys as _,
+        key as _,
+    ) as _
 }
-unsafe fn systable_getnext(_sysscan: SysScanDesc) -> HeapTuple {
-    unimplemented!()
+unsafe fn systable_getnext(sysscan: SysScanDesc) -> HeapTuple {
+    crate::access::index::genam::systable_getnext(sysscan as _) as _
 }
-unsafe fn systable_endscan(_sysscan: SysScanDesc) {
-    unimplemented!()
+unsafe fn systable_endscan(sysscan: SysScanDesc) {
+    crate::access::index::genam::systable_endscan(sysscan as _)
 }
-unsafe fn systable_recheck_tuple(_sysscan: SysScanDesc, _tup: HeapTuple) -> bool {
-    unimplemented!()
+unsafe fn systable_recheck_tuple(sysscan: SysScanDesc, tup: HeapTuple) -> bool {
+    crate::access::index::genam::systable_recheck_tuple(sysscan as _, tup as _)
 }
-unsafe fn GETSTRUCT(_tuple: HeapTuple) -> *mut c_void {
-    unimplemented!()
+unsafe fn GETSTRUCT(tuple: HeapTuple) -> *mut c_void {
+    crate::access::htup_details::GETSTRUCT(tuple as _) as _
 }
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool {
     !tuple.is_null()
 }
-unsafe fn heap_form_tuple(_tupleDescriptor: TupleDesc, _values: *mut Datum, _isnull: *mut bool) -> HeapTuple {
-    unimplemented!()
+unsafe fn heap_form_tuple(tupleDescriptor: TupleDesc, values: *mut Datum, isnull: *mut bool) -> HeapTuple {
+    crate::access::common::heaptuple::heap_form_tuple(tupleDescriptor as _, values as _, isnull as _) as _
 }
-unsafe fn heap_copytuple(_tuple: HeapTuple) -> HeapTuple {
-    unimplemented!()
+unsafe fn heap_copytuple(tuple: HeapTuple) -> HeapTuple {
+    crate::access::common::heaptuple::heap_copytuple(tuple as _) as _
 }
-unsafe fn heap_freetuple(_htup: HeapTuple) {
-    unimplemented!()
+unsafe fn heap_freetuple(htup: HeapTuple) {
+    crate::access::common::heaptuple::heap_freetuple(htup as _)
 }
-unsafe fn RelationGetDescr(_relation: Relation) -> TupleDesc {
-    unimplemented!()
+unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc {
+    crate::utils::rel::RelationGetDescr(relation as _) as _
 }
-unsafe fn CatalogTupleInsert(_heapRel: Relation, _tup: HeapTuple) {
-    unimplemented!()
+unsafe fn CatalogTupleInsert(heapRel: Relation, tup: HeapTuple) {
+    crate::catalog::indexing::CatalogTupleInsert(heapRel as _, tup as _)
 }
-unsafe fn CatalogTupleUpdate(_heapRel: Relation, _otid: *mut ItemPointerData, _tup: HeapTuple) {
-    unimplemented!()
+unsafe fn CatalogTupleUpdate(heapRel: Relation, otid: *mut ItemPointerData, tup: HeapTuple) {
+    crate::catalog::indexing::CatalogTupleUpdate(heapRel as _, otid as _, tup as _)
 }
-unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: *mut ItemPointerData) {
-    unimplemented!()
+unsafe fn CatalogTupleDelete(heapRel: Relation, tid: *mut ItemPointerData) {
+    crate::catalog::indexing::CatalogTupleDelete(heapRel as _, tid as _)
 }
-unsafe fn CatalogOpenIndexes(_heapRel: Relation) -> CatalogIndexState {
-    unimplemented!()
+unsafe fn CatalogOpenIndexes(heapRel: Relation) -> CatalogIndexState {
+    crate::catalog::indexing::CatalogOpenIndexes(heapRel as _) as _
 }
-unsafe fn CatalogCloseIndexes(_indstate: CatalogIndexState) {
-    unimplemented!()
+unsafe fn CatalogCloseIndexes(indstate: CatalogIndexState) {
+    crate::catalog::indexing::CatalogCloseIndexes(indstate as _)
 }
 unsafe fn CatalogTuplesMultiInsertWithInfo(
-    _heapRel: Relation,
-    _slot: *mut *mut TupleTableSlot,
-    _ntuples: c_int,
-    _indstate: CatalogIndexState,
+    heapRel: Relation,
+    slot: *mut *mut TupleTableSlot,
+    ntuples: c_int,
+    indstate: CatalogIndexState,
 ) {
-    unimplemented!()
+    crate::catalog::indexing::CatalogTuplesMultiInsertWithInfo(
+        heapRel as _,
+        slot as _,
+        ntuples as _,
+        indstate as _,
+    )
 }
 
 /* Datum conversion helpers (postgres.h). */
@@ -237,135 +252,127 @@ unsafe fn CharGetDatum(v: c_char) -> Datum {
 }
 
 /* executor/tuptable.h - slot helpers (executor/execTuples.c). */
-unsafe fn MakeSingleTupleTableSlot(_tupleDesc: TupleDesc, _tts_ops: *const c_void) -> *mut TupleTableSlot {
-    unimplemented!()
+unsafe fn MakeSingleTupleTableSlot(tupleDesc: TupleDesc, tts_ops: *const c_void) -> *mut TupleTableSlot {
+    crate::executor::execTuples::MakeSingleTupleTableSlot(tupleDesc as _, tts_ops as _) as _
 }
-unsafe fn ExecClearTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!()
+unsafe fn ExecClearTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
+    crate::executor::tuptable::ExecClearTuple(slot as _) as _
 }
-unsafe fn ExecStoreVirtualTuple(_slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!()
+unsafe fn ExecStoreVirtualTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
+    crate::executor::execTuples::ExecStoreVirtualTuple(slot as _) as _
 }
-unsafe fn ExecDropSingleTupleTableSlot(_slot: *mut TupleTableSlot) {
-    unimplemented!()
+unsafe fn ExecDropSingleTupleTableSlot(slot: *mut TupleTableSlot) {
+    crate::executor::execTuples::ExecDropSingleTupleTableSlot(slot as _)
 }
 static TTSOpsHeapTuple: c_int = 0;
 
 /* utils/palloc.h */
-unsafe fn palloc(_size: usize) -> *mut c_void {
-    unimplemented!()
+unsafe fn palloc(size: usize) -> *mut c_void {
+    crate::utils::palloc::palloc(size as _) as _
 }
-unsafe fn repalloc(_pointer: *mut c_void, _size: usize) -> *mut c_void {
-    unimplemented!()
+unsafe fn repalloc(pointer: *mut c_void, size: usize) -> *mut c_void {
+    crate::utils::palloc::repalloc(pointer as _, size as _) as _
 }
-unsafe fn pfree(_pointer: *mut c_void) {
-    unimplemented!()
+unsafe fn pfree(pointer: *mut c_void) {
+    crate::utils::palloc::pfree(pointer as _)
 }
 
 /* utils/memutils.h */
-unsafe fn AllocSetContextCreate(_parent: MemoryContext, _name: *const c_char, _flags: c_int) -> MemoryContext {
-    unimplemented!()
+unsafe fn AllocSetContextCreate(parent: MemoryContext, name: *const c_char, _flags: c_int) -> MemoryContext {
+    crate::utils::mmgr::aset::AllocSetContextCreate(
+        parent as _,
+        name as _,
+        crate::utils::memutils::ALLOCSET_DEFAULT_SIZES,
+    ) as _
 }
-unsafe fn MemoryContextSwitchTo(_context: MemoryContext) -> MemoryContext {
-    unimplemented!()
+unsafe fn MemoryContextSwitchTo(context: MemoryContext) -> MemoryContext {
+    crate::utils::mmgr::mcxt::MemoryContextSwitchTo(context as _) as _
 }
-unsafe fn MemoryContextDelete(_context: MemoryContext) {
-    unimplemented!()
+unsafe fn MemoryContextDelete(context: MemoryContext) {
+    crate::utils::mmgr::mcxt::MemoryContextDelete(context as _)
 }
 static mut CurrentMemoryContext: MemoryContext = ptr::null_mut();
 
 /* access/xact.h */
 unsafe fn CommandCounterIncrement() {
-    unimplemented!()
+    crate::access::transam::xact::CommandCounterIncrement()
 }
 
 /* storage/lmgr.h */
-unsafe fn LockSharedObject(_classId: Oid, _objectId: Oid, _objsubid: u16, _lockmode: c_int) {
-    unimplemented!()
+unsafe fn LockSharedObject(classId: Oid, objectId: Oid, objsubid: u16, lockmode: c_int) {
+    crate::storage::lmgr::lmgr::LockSharedObject(classId as _, objectId as _, objsubid as _, lockmode as _)
 }
 
 /* utils/syscache.h */
-unsafe fn SearchSysCacheExists1(_cacheId: c_int, _key1: Datum) -> bool {
-    unimplemented!()
+unsafe fn SearchSysCacheExists1(cacheId: c_int, key1: Datum) -> bool {
+    crate::utils::cache::syscache::SearchSysCacheExists(cacheId as _, key1 as _, 0, 0, 0)
 }
 
 /* commands/tablespace.h, commands/dbcommands.h */
-unsafe fn get_tablespace_name(_spc_oid: Oid) -> *mut c_char {
-    unimplemented!()
-}
-unsafe fn get_database_name(_dbid: Oid) -> *mut c_char {
-    unimplemented!()
+unsafe fn get_tablespace_name(_spc_oid: Oid) -> *mut c_char { crate::commands::tablespace::get_tablespace_name(_spc_oid as _) }
+unsafe fn get_database_name(dbid: Oid) -> *mut c_char {
+    crate::commands::dbcommands::get_database_name(dbid as _) as _
 }
 
 /* catalog/objectaddress.c */
-unsafe fn getObjectDescription(_object: *const ObjectAddress, _missing_ok: bool) -> *mut c_char {
-    unimplemented!()
+unsafe fn getObjectDescription(object: *const ObjectAddress, missing_ok: bool) -> *mut c_char {
+    crate::catalog::objectaddress_impl::getObjectDescription(object as _, missing_ok) as _
 }
 unsafe fn new_object_addresses() -> *mut ObjectAddresses {
-    unimplemented!()
+    crate::catalog::dependency::new_object_addresses() as _
 }
-unsafe fn add_exact_object_address(_object: *const ObjectAddress, _addrs: *mut ObjectAddresses) {
-    unimplemented!()
+unsafe fn add_exact_object_address(object: *const ObjectAddress, addrs: *mut ObjectAddresses) {
+    crate::catalog::dependency::add_exact_object_address(object as _, addrs as _)
 }
-unsafe fn sort_object_addresses(_addrs: *mut ObjectAddresses) {
-    unimplemented!()
+unsafe fn sort_object_addresses(addrs: *mut ObjectAddresses) {
+    crate::catalog::dependency::sort_object_addresses(addrs as _)
 }
-unsafe fn free_object_addresses(_addrs: *mut ObjectAddresses) {
-    unimplemented!()
+unsafe fn free_object_addresses(addrs: *mut ObjectAddresses) {
+    crate::catalog::dependency::free_object_addresses(addrs as _)
 }
 
 /* catalog/dependency.c */
-unsafe fn AcquireDeletionLock(_object: *const ObjectAddress, _flags: c_int) {
-    unimplemented!()
+unsafe fn AcquireDeletionLock(object: *const ObjectAddress, flags: c_int) {
+    crate::catalog::dependency::AcquireDeletionLock(object as _, flags as _)
 }
-unsafe fn ReleaseDeletionLock(_object: *const ObjectAddress) {
-    unimplemented!()
+unsafe fn ReleaseDeletionLock(object: *const ObjectAddress) {
+    crate::catalog::dependency::ReleaseDeletionLock(object as _)
 }
-unsafe fn performMultipleDeletions(_objects: *const ObjectAddresses, _behavior: DropBehavior, _flags: c_int) {
-    unimplemented!()
+unsafe fn performMultipleDeletions(objects: *const ObjectAddresses, behavior: DropBehavior, flags: c_int) {
+    crate::catalog::dependency::performMultipleDeletions(objects as _, core::mem::transmute(behavior), flags as _)
 }
 
 /* commands/policy.h, catalog/aclchk.c, catalog/pg_init_privs.c */
-unsafe fn RemoveRoleFromObjectPolicy(_roleid: Oid, _classid: Oid, _objid: Oid) -> bool {
-    unimplemented!()
+unsafe fn RemoveRoleFromObjectPolicy(roleid: Oid, classid: Oid, objid: Oid) -> bool {
+    crate::commands::policy::RemoveRoleFromObjectPolicy(roleid as _, classid as _, objid as _)
 }
-unsafe fn RemoveRoleFromObjectACL(_roleid: Oid, _classid: Oid, _objid: Oid) {
-    unimplemented!()
+unsafe fn RemoveRoleFromObjectACL(roleid: Oid, classid: Oid, objid: Oid) {
+    crate::catalog::aclchk::RemoveRoleFromObjectACL(roleid as _, classid as _, objid as _)
 }
-unsafe fn RemoveRoleFromInitPriv(_roleid: Oid, _classid: Oid, _objid: Oid, _objsubid: int32) {
-    unimplemented!()
+unsafe fn RemoveRoleFromInitPriv(roleid: Oid, classid: Oid, objid: Oid, objsubid: int32) {
+    crate::catalog::aclchk::RemoveRoleFromInitPriv(roleid as _, classid as _, objid as _, objsubid as _)
 }
-unsafe fn ReplaceRoleInInitPriv(_oldroleid: Oid, _newroleid: Oid, _classid: Oid, _objid: Oid, _objsubid: int32) {
-    unimplemented!()
+unsafe fn ReplaceRoleInInitPriv(oldroleid: Oid, newroleid: Oid, classid: Oid, objid: Oid, objsubid: int32) {
+    crate::catalog::aclchk::ReplaceRoleInInitPriv(oldroleid as _, newroleid as _, classid as _, objid as _, objsubid as _)
 }
 
 /* ALTER OWNER routines (commands/<x>.c). */
-unsafe fn AlterTypeOwner_oid(_oid: Oid, _newOwnerId: Oid, _hasDependEntry: bool) {
-    unimplemented!()
+unsafe fn AlterTypeOwner_oid(oid: Oid, newOwnerId: Oid, hasDependEntry: bool) {
+    crate::commands::typecmds::AlterTypeOwner_oid(oid as _, newOwnerId as _, hasDependEntry)
 }
-unsafe fn AlterSchemaOwner_oid(_oid: Oid, _newOwnerId: Oid) {
-    unimplemented!()
+unsafe fn AlterSchemaOwner_oid(oid: Oid, newOwnerId: Oid) {
+    crate::commands::schemacmds::AlterSchemaOwner_oid(oid as _, newOwnerId as _)
 }
-unsafe fn ATExecChangeOwner(_relationOid: Oid, _newOwnerId: Oid, _recursing: bool, _lockmode: c_int) {
-    unimplemented!()
+unsafe fn ATExecChangeOwner(relationOid: Oid, newOwnerId: Oid, recursing: bool, lockmode: c_int) {
+    crate::commands::tablecmds::ATExecChangeOwner(relationOid as _, newOwnerId as _, recursing, lockmode as _)
 }
-unsafe fn AlterForeignServerOwner_oid(_oid: Oid, _newOwnerId: Oid) {
-    unimplemented!()
-}
-unsafe fn AlterForeignDataWrapperOwner_oid(_oid: Oid, _newOwnerId: Oid) {
-    unimplemented!()
-}
-unsafe fn AlterEventTriggerOwner_oid(_oid: Oid, _newOwnerId: Oid) {
-    unimplemented!()
-}
-unsafe fn AlterPublicationOwner_oid(_oid: Oid, _newOwnerId: Oid) {
-    unimplemented!()
-}
-unsafe fn AlterSubscriptionOwner_oid(_oid: Oid, _newOwnerId: Oid) {
-    unimplemented!()
-}
-unsafe fn AlterObjectOwner_internal(_classId: Oid, _objectId: Oid, _new_ownerId: Oid) {
-    unimplemented!()
+unsafe fn AlterForeignServerOwner_oid(_oid: Oid, _newOwnerId: Oid) { unimplemented!() }
+unsafe fn AlterForeignDataWrapperOwner_oid(_oid: Oid, _newOwnerId: Oid) { unimplemented!() }
+unsafe fn AlterEventTriggerOwner_oid(_oid: Oid, _newOwnerId: Oid) { unimplemented!() }
+unsafe fn AlterPublicationOwner_oid(_oid: Oid, _newOwnerId: Oid) { unimplemented!() }
+unsafe fn AlterSubscriptionOwner_oid(_oid: Oid, _newOwnerId: Oid) { unimplemented!() }
+unsafe fn AlterObjectOwner_internal(classId: Oid, objectId: Oid, new_ownerId: Oid) {
+    crate::commands::alter::AlterObjectOwner_internal(classId as _, objectId as _, new_ownerId as _)
 }
 
 // ---------------------------------------------------------------------------
@@ -381,16 +388,16 @@ pub struct StringInfoData {
 }
 pub type StringInfo = *mut StringInfoData;
 
-unsafe fn initStringInfo(_str: *mut StringInfoData) {
-    unimplemented!()
+unsafe fn initStringInfo(str: *mut StringInfoData) {
+    crate::lib::stringinfo::initStringInfo(str as _)
 }
-unsafe fn appendStringInfoChar(_str: *mut StringInfoData, _ch: c_char) {
-    unimplemented!()
+unsafe fn appendStringInfoChar(str: *mut StringInfoData, ch: c_char) {
+    crate::lib::stringinfo::appendStringInfoChar(str as _, ch as _)
 }
 // appendStringInfo with a format string is rendered via this helper in C; here
 // the message strings are formatted by the caller and appended as-is.
-unsafe fn appendStringInfoString(_str: *mut StringInfoData, _s: *const c_char) {
-    unimplemented!()
+unsafe fn appendStringInfoString(str: *mut StringInfoData, s: *const c_char) {
+    crate::lib::stringinfo::appendStringInfoString(str as _, s as _)
 }
 unsafe extern "C" {
     /* lib/stringinfo.h - the C variadic formatting append. */
@@ -609,10 +616,10 @@ unsafe fn shdepChangeDep(
     let mut oldtup: HeapTuple = ptr::null_mut();
     let mut scantup: HeapTuple;
     let mut key: [ScanKeyData; 4] = [
-        ScanKeyData { _private: [0; 64] },
-        ScanKeyData { _private: [0; 64] },
-        ScanKeyData { _private: [0; 64] },
-        ScanKeyData { _private: [0; 64] },
+        core::mem::zeroed(),
+        core::mem::zeroed(),
+        core::mem::zeroed(),
+        core::mem::zeroed(),
     ];
     let scan: SysScanDesc;
 
@@ -1052,6 +1059,7 @@ unsafe extern "C" fn shared_dependency_comparator(a: *const c_void, b: *const c_
  * In addition, return a string containing a newline-separated list of object
  * descriptions that depend on the shared object, or NULL if none is found.
  */
+#[no_mangle]
 pub unsafe fn checkSharedDependencies(
     classId: Oid,
     objectId: Oid,
@@ -1059,7 +1067,7 @@ pub unsafe fn checkSharedDependencies(
     detail_log_msg: *mut *mut c_char,
 ) -> bool {
     let sdepRel: Relation;
-    let mut key: [ScanKeyData; 2] = [ScanKeyData { _private: [0; 64] }, ScanKeyData { _private: [0; 64] }];
+    let mut key: [ScanKeyData; 2] = [core::mem::zeroed(), core::mem::zeroed()];
     let scan: SysScanDesc;
     let mut tup: HeapTuple;
     let mut numReportedDeps: c_int = 0;
@@ -1273,12 +1281,12 @@ pub unsafe fn checkSharedDependencies(
 pub unsafe fn copyTemplateDependencies(templateDbId: Oid, newDbId: Oid) {
     let sdepRel: Relation;
     let sdepDesc: TupleDesc;
-    let mut key: [ScanKeyData; 1] = [ScanKeyData { _private: [0; 64] }];
+    let mut key: [ScanKeyData; 1] = [core::mem::zeroed()];
     let scan: SysScanDesc;
     let mut tup: HeapTuple;
     let indstate: CatalogIndexState;
     let slot: *mut *mut TupleTableSlot;
-    let max_slots: c_int;
+    let mut max_slots: c_int;
     let mut slot_init_count: c_int;
     let mut slot_stored_count: c_int;
 
@@ -1375,9 +1383,10 @@ pub unsafe fn copyTemplateDependencies(templateDbId: Oid, newDbId: Oid) {
  * Delete pg_shdepend entries corresponding to a database that's being
  * dropped.
  */
+#[no_mangle]
 pub unsafe fn dropDatabaseDependencies(databaseId: Oid) {
     let sdepRel: Relation;
-    let mut key: [ScanKeyData; 1] = [ScanKeyData { _private: [0; 64] }];
+    let mut key: [ScanKeyData; 1] = [core::mem::zeroed()];
     let scan: SysScanDesc;
     let mut tup: HeapTuple;
 
@@ -1418,6 +1427,7 @@ pub unsafe fn dropDatabaseDependencies(databaseId: Oid) {
  * If objectSubId is zero, we are deleting a whole object, so get rid of
  * pg_shdepend entries for subobjects as well.
  */
+#[no_mangle]
 pub unsafe fn deleteSharedDependencyRecordsFor(classId: Oid, objectId: Oid, objectSubId: int32) {
     let sdepRel: Relation;
 
@@ -1511,10 +1521,10 @@ unsafe fn shdepDropDependency(
     deptype: SharedDependencyType,
 ) {
     let mut key: [ScanKeyData; 4] = [
-        ScanKeyData { _private: [0; 64] },
-        ScanKeyData { _private: [0; 64] },
-        ScanKeyData { _private: [0; 64] },
-        ScanKeyData { _private: [0; 64] },
+        core::mem::zeroed(),
+        core::mem::zeroed(),
+        core::mem::zeroed(),
+        core::mem::zeroed(),
     ];
     let nkeys: c_int;
     let scan: SysScanDesc;
@@ -1708,7 +1718,7 @@ pub unsafe fn shdepDropOwned(roleids: *mut List, behavior: DropBehavior) {
      */
     foreach!(cell, roleids, {
         let roleid: Oid = lfirst_oid(current_cell!(cell));
-        let mut key: [ScanKeyData; 2] = [ScanKeyData { _private: [0; 64] }, ScanKeyData { _private: [0; 64] }];
+        let mut key: [ScanKeyData; 2] = [core::mem::zeroed(), core::mem::zeroed()];
         let scan: SysScanDesc;
         let mut tuple: HeapTuple;
 
@@ -1876,7 +1886,7 @@ pub unsafe fn shdepReassignOwned(roleids: *mut List, newrole: Oid) {
 
     foreach!(cell, roleids, {
         let scan: SysScanDesc;
-        let mut key: [ScanKeyData; 2] = [ScanKeyData { _private: [0; 64] }, ScanKeyData { _private: [0; 64] }];
+        let mut key: [ScanKeyData; 2] = [core::mem::zeroed(), core::mem::zeroed()];
         let mut tuple: HeapTuple;
         let roleid: Oid = lfirst_oid(current_cell!(cell));
 

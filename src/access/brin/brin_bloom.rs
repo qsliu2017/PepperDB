@@ -946,9 +946,7 @@ unsafe fn SizeOfBrinTuple() -> Size {
     unimplemented!() // TODO: access/brin_tuple.h
 }
 #[inline]
-unsafe fn SizeofBrinOpcInfo(_ncols: c_int) -> usize {
-    unimplemented!() // TODO: access/brin_internal.h
-}
+unsafe fn SizeofBrinOpcInfo(_ncols: c_int) -> usize { crate::access::brin::brin_internal::SizeofBrinOpcInfo(_ncols as _) }
 #[inline]
 unsafe fn BrinGetPagesPerRange(_index: Relation) -> BlockNumber {
     unimplemented!() // TODO: access/brin.h
@@ -961,28 +959,20 @@ fn BlockNumberIsValid(_blockNumber: BlockNumber) -> bool {
 fn RegProcedureIsValid(_p: RegProcedure) -> bool {
     unimplemented!() // TODO: c.h
 }
-unsafe fn hash_bytes_uint32_extended(_k: uint32, _seed: uint64) -> uint64 {
-    unimplemented!() // TODO: common/hashfn.h
-}
+unsafe fn hash_bytes_uint32_extended(_k: uint32, _seed: uint64) -> uint64 { crate::common::hashfn::hash_bytes_uint32_extended(_k, _seed) }
 unsafe fn lookup_type_cache(_type_id: Oid, _flags: c_int) -> *mut TypeCacheEntry {
     unimplemented!() // TODO: utils/typcache.h
 }
-unsafe fn index_getprocid(_irel: Relation, _attnum: AttrNumber, _procnum: uint16) -> RegProcedure {
-    unimplemented!() // TODO: access/genam.h
-}
+unsafe fn index_getprocid(_irel: Relation, _attnum: AttrNumber, _procnum: uint16) -> RegProcedure { unimplemented!() }
 unsafe fn index_getprocinfo(
     _irel: Relation,
     _attnum: AttrNumber,
     _procnum: uint16,
-) -> *mut FmgrInfo {
-    unimplemented!() // TODO: access/genam.h
-}
+) -> *mut FmgrInfo { unimplemented!() }
 unsafe fn fmgr_info_copy(_dstinfo: *mut FmgrInfo, _srcinfo: *mut FmgrInfo, _destcxt: MemoryContext) {
     unimplemented!() // TODO: utils/fmgr.h
 }
-unsafe fn init_local_reloptions(_relopts: *mut local_relopts, _relopt_struct_size: Size) {
-    unimplemented!() // TODO: access/reloptions.h
-}
+unsafe fn init_local_reloptions(_relopts: *mut local_relopts, _relopt_struct_size: Size) { unimplemented!() }
 unsafe fn add_local_real_reloption(
     _relopts: *mut local_relopts,
     _name: *const c_char,
@@ -991,15 +981,9 @@ unsafe fn add_local_real_reloption(
     _min_val: f64,
     _max_val: f64,
     _offset: c_int,
-) {
-    unimplemented!() // TODO: access/reloptions.h
-}
-unsafe fn pg_popcount(_buf: *const c_char, _bytes: Size) -> uint64 {
-    unimplemented!() // TODO: port/pg_bitutils.h
-}
-unsafe fn byteasend(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!() // TODO: utils/varlena.h
-}
+) { unimplemented!() }
+unsafe fn pg_popcount(_buf: *const c_char, _bytes: Size) -> uint64 { crate::port::pg_bitutils::pg_popcount(_buf, _bytes as _) }
+unsafe fn byteasend(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::varlena::byteasend(_fcinfo) }
 unsafe fn initStringInfo(_str: *mut StringInfoData) {
     unimplemented!() // TODO: lib/stringinfo.h
 }

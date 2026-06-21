@@ -46,7 +46,7 @@ pub type Tuplestorestate = c_void;
 
 /// STUB: tuplestore_puttupleslot (utils/tuplestore.c not ported).
 unsafe fn tuplestore_puttupleslot(_state: *mut Tuplestorestate, _slot: *mut TupleTableSlot) {
-    // TODO(pg-port): wire to utils/sort/tuplestore.rs once ported.
+    crate::utils::sort::tuplestore::tuplestore_puttupleslot(_state as _, _slot as _)
 }
 
 /// STUB: tuplestore_putvalues (utils/tuplestore.c not ported).
@@ -56,7 +56,7 @@ unsafe fn tuplestore_putvalues(
     _values: *mut Datum,
     _isnull: *mut bool,
 ) {
-    // TODO(pg-port): wire to utils/sort/tuplestore.rs once ported.
+    crate::utils::sort::tuplestore::tuplestore_putvalues(_state as _, _tdesc as _, _values as _, _isnull as _)
 }
 
 // -----------------------------------------------------------------------------
@@ -294,6 +294,7 @@ pub unsafe fn CreateTuplestoreDestReceiver() -> *mut DestReceiver {
 ///
 /// We don't currently support both detoast and target_tupdesc at the same
 /// time, just because no existing caller needs that combination.
+#[no_mangle]
 pub unsafe fn SetTuplestoreDestReceiverParams(
     self_: *mut DestReceiver,
     tStore: *mut Tuplestorestate,

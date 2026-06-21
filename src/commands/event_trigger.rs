@@ -261,9 +261,9 @@ pub const EVENT_TRIGGEROID: Oid = 3838;
 pub const TEXTOID: Oid = 25;
 
 // sys cache IDs  TODO(pg-port)
-pub const EVENTTRIGGERNAME: c_int = 38;
-pub const EVENTTRIGGEROID: c_int  = 39;
-pub const DATABASEOID: c_int      = 18;
+pub const EVENTTRIGGERNAME: c_int = 25;
+pub const EVENTTRIGGEROID: c_int  = 26;
+pub const DATABASEOID: c_int      = 21;
 
 // BTEqualStrategyNumber  TODO(pg-port)
 pub const BTEqualStrategyNumber: crate::access::stratnum::StrategyNumber = 3;
@@ -295,9 +295,7 @@ unsafe fn RelationGetDescr(
 }
 
 // utils/acl.h  TODO(pg-port)
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO(pg-port): utils/adt/acl.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn superuser() -> bool {
     unimplemented!() // TODO(pg-port): utils/adt/acl.c
 }
@@ -3148,7 +3146,8 @@ unsafe fn stringify_grant_objtype(objtype: ObjectType) -> *const c_char {
         | ObjectType::OBJECT_TSTEMPLATE
         | ObjectType::OBJECT_USER_MAPPING
         | ObjectType::OBJECT_VIEW => {
-            elog!(ERROR, "unsupported object type: {}", objtype as c_int);
+            if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_BT unsupported_objtype site bt:
+{}", std::backtrace::Backtrace::force_capture()); } elog!(ERROR, "unsupported object type: {}", objtype as c_int);
         }
         #[allow(unreachable_patterns)]
         _ => {}
@@ -3217,7 +3216,8 @@ unsafe fn stringify_adefprivs_objtype(objtype: ObjectType) -> *const c_char {
         | ObjectType::OBJECT_TSTEMPLATE
         | ObjectType::OBJECT_USER_MAPPING
         | ObjectType::OBJECT_VIEW => {
-            elog!(ERROR, "unsupported object type: {}", objtype as c_int);
+            if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_BT unsupported_objtype site bt:
+{}", std::backtrace::Backtrace::force_capture()); } elog!(ERROR, "unsupported object type: {}", objtype as c_int);
         }
         #[allow(unreachable_patterns)]
         _ => {}

@@ -250,37 +250,21 @@ unsafe fn spgdoinsert(
     _heapPtr: ItemPointer,
     _datums: *mut Datum,
     _isnulls: *mut bool,
-) -> bool {
-    unimplemented!() // TODO: spgdoinsert.c
-}
+) -> bool { unimplemented!() }
 
-unsafe fn initSpGistState(_state: *mut SpGistState, _index: Relation) {
-    unimplemented!() // TODO: spgutils.c
-}
+unsafe fn initSpGistState(_state: *mut SpGistState, _index: Relation) { crate::access::spgist::spgutils::initSpGistState(_state, _index) }
 
-unsafe fn SpGistNewBuffer(_index: Relation) -> Buffer {
-    unimplemented!() // TODO: spgutils.c
-}
+unsafe fn SpGistNewBuffer(_index: Relation) -> Buffer { crate::access::spgist::spgutils::SpGistNewBuffer(_index) }
 
-unsafe fn SpGistUpdateMetaPage(_index: Relation) {
-    unimplemented!() // TODO: spgutils.c
-}
+unsafe fn SpGistUpdateMetaPage(_index: Relation) { crate::access::spgist::spgutils::SpGistUpdateMetaPage(_index) }
 
-unsafe fn SpGistInitPage(_page: Page, _f: uint16) {
-    unimplemented!() // TODO: spgutils.c
-}
+unsafe fn SpGistInitPage(_page: Page, _f: uint16) { crate::access::spgist::spgutils::SpGistInitPage(_page, _f) }
 
-unsafe fn SpGistInitBuffer(_b: Buffer, _f: uint16) {
-    unimplemented!() // TODO: spgutils.c
-}
+unsafe fn SpGistInitBuffer(_b: Buffer, _f: uint16) { crate::access::spgist::spgutils::SpGistInitBuffer(_b, _f) }
 
-unsafe fn SpGistInitMetapage(_page: Page) {
-    unimplemented!() // TODO: spgutils.c
-}
+unsafe fn SpGistInitMetapage(_page: Page) { crate::access::spgist::spgutils::SpGistInitMetapage(_page) }
 
-unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber {
-    unimplemented!() // TODO: storage/bufmgr.h (RelationGetNumberOfBlocksInFork)
-}
+unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber { crate::access::nbtree::nbtpage::RelationGetNumberOfBlocks(_relation) }
 
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO: storage/bufmgr.c
@@ -298,9 +282,7 @@ unsafe fn UnlockReleaseBuffer(_buffer: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.c
 }
 
-unsafe fn RelationNeedsWAL(_relation: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_relation) }
 
 unsafe fn log_newpage_range(
     _rel: Relation,
@@ -308,9 +290,7 @@ unsafe fn log_newpage_range(
     _startblk: BlockNumber,
     _endblk: BlockNumber,
     _page_std: bool,
-) {
-    unimplemented!() // TODO: access/xloginsert.c
-}
+) { unimplemented!() }
 
 unsafe fn table_index_build_scan(
     _heapRelation: Relation,
@@ -325,23 +305,15 @@ unsafe fn table_index_build_scan(
     unimplemented!() // TODO: access/tableam.h
 }
 
-unsafe fn smgr_bulk_start_rel(_rel: Relation, _forknum: ForkNumber) -> *mut BulkWriteState {
-    unimplemented!() // TODO: storage/bulk_write.c
-}
+unsafe fn smgr_bulk_start_rel(_rel: Relation, _forknum: ForkNumber) -> *mut BulkWriteState { unimplemented!() }
 
-unsafe fn smgr_bulk_get_buf(_bulkstate: *mut BulkWriteState) -> BulkWriteBuffer {
-    unimplemented!() // TODO: storage/bulk_write.c
-}
+unsafe fn smgr_bulk_get_buf(_bulkstate: *mut BulkWriteState) -> BulkWriteBuffer { unimplemented!() }
 
 unsafe fn smgr_bulk_write(
     _bulkstate: *mut BulkWriteState,
     _blocknum: BlockNumber,
     _buf: BulkWriteBuffer,
     _page_std: bool,
-) {
-    unimplemented!() // TODO: storage/bulk_write.c
-}
+) { unimplemented!() }
 
-unsafe fn smgr_bulk_finish(_bulkstate: *mut BulkWriteState) {
-    unimplemented!() // TODO: storage/bulk_write.c
-}
+unsafe fn smgr_bulk_finish(_bulkstate: *mut BulkWriteState) { unimplemented!() }

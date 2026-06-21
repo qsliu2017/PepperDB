@@ -36,9 +36,10 @@ use std::ptr;
 use crate::access::htup_details::{HeapTupleData, HeapTupleHeader};
 use crate::access::htup_details::HeapTuple;
 use crate::access::table::table::{table_open, table_close};
-use crate::access::transam::{TransactionId, InvalidTransactionId};
+use crate::c::TransactionId;
+use crate::access::transam::InvalidTransactionId;
 use crate::catalog::objectaccess::ObjectAddress;
-use crate::nodes::pg_list::{List, ListCell};
+use crate::nodes::pg_list::{List, ListCell, list_nth};
 use crate::nodes::parsenodes::{
     AlterDatabaseRefreshCollStmt, AlterDatabaseSetStmt, AlterDatabaseStmt,
     CreatedbStmt, DefElem, DropdbStmt, ObjectType,
@@ -68,8 +69,8 @@ type SysScanDesc = *mut SysScanDescData;
 #[repr(C)] pub struct ScanKeyDataStruct { _opaque: [u8; 64] }
 type ScanKeyData = ScanKeyDataStruct;
 
-// Form_pg_database  TODO(pg-port)
-#[repr(C)] pub struct FormData_pg_database { _opaque: [u8; 0] }
+// Form_pg_database
+pub use crate::catalog::pg_database::FormData_pg_database;
 type Form_pg_database = *mut FormData_pg_database;
 
 // Form_pg_tablespace  TODO(pg-port)
@@ -80,8 +81,8 @@ type Form_pg_tablespace = *mut FormData_pg_tablespace;
 #[repr(C)] pub struct FormData_pg_authid { _opaque: [u8; 0] }
 type Form_pg_authid = *mut FormData_pg_authid;
 
-// Form_pg_class  TODO(pg-port)
-#[repr(C)] pub struct FormData_pg_class { _opaque: [u8; 0] }
+// Form_pg_class
+pub use crate::catalog::pg_class::FormData_pg_class;
 type Form_pg_class = *mut FormData_pg_class;
 
 // TableScanDesc  TODO(pg-port)
@@ -247,8 +248,8 @@ const ACL_CREATE: c_int = 0x0004;
 // BTEqualStrategyNumber  TODO(pg-port)
 const BTEqualStrategyNumber: c_int = 3;
 
-// F_NAMEEQ  TODO(pg-port)
-const F_NAMEEQ: Oid = 0;
+// F_NAMEEQ -- nameeq(name, name)
+const F_NAMEEQ: Oid = 62;
 
 // FATAL / PANIC  TODO(pg-port)
 const FATAL: c_int = 23;
@@ -267,9 +268,9 @@ const DEBUG1: c_int = 15;
 const ForwardScanDirection: c_int = 1;
 
 // DATABASEOID syscache id  TODO(pg-port)
-const DATABASEOID: c_int = 9;
+const DATABASEOID: c_int = 21;
 // AUTHOID syscache id  TODO(pg-port)
-const AUTHOID: c_int = 3;
+const AUTHOID: c_int = 11;
 
 /* -------------------------------------------------------------------------
  * External function stubs  TODO(pg-port)
@@ -479,10 +480,10 @@ extern "C" {
 fn S_ISDIR(mode: u32) -> bool { (mode & 0o170000) == 0o040000 }
 
 // OFile flags  TODO(pg-port)
-const O_WRONLY: c_int = 1;
-const O_CREAT: c_int = 64;
-const O_EXCL: c_int = 128;
-const O_TRUNC: c_int = 512;
+const O_WRONLY: c_int = libc::O_WRONLY;
+const O_CREAT: c_int = libc::O_CREAT;
+const O_EXCL: c_int = libc::O_EXCL;
+const O_TRUNC: c_int = libc::O_TRUNC;
 const PG_BINARY: c_int = 0;
 
 // LC_* constants  TODO(pg-port)
@@ -574,10 +575,10 @@ unsafe fn CreateDatabaseUsingWalLog(src_dboid: Oid, dst_dboid: Oid,
     dstrelid.dbId = dst_dboid;
 
     /* Loop over our list of relfilelocators and copy each one. */
-    let mut cell = if rlocatorlist.is_null() { ptr::null_mut() }
-                   else { (*rlocatorlist).head };
-    while !cell.is_null() {
-        let relinfo = (*cell).data as *mut CreateDBRelInfo;
+    let __rlocator_len = if rlocatorlist.is_null() { 0 } else { (*rlocatorlist).length };
+    let mut __rlocator_i: c_int = 0;
+    while __rlocator_i < __rlocator_len {
+        let relinfo = list_nth(rlocatorlist, __rlocator_i) as *mut CreateDBRelInfo;
         srcrlocator = (*relinfo).rlocator;
 
         /*
@@ -616,8 +617,15 @@ unsafe fn CreateDatabaseUsingWalLog(src_dboid: Oid, dst_dboid: Oid,
         UnlockRelationId(&mut srcrelid, AccessShareLock);
         UnlockRelationId(&mut dstrelid, AccessShareLock);
 
-        cell = (*cell).next;
+        __rlocator_i += 1;
     }
+
+    /*
+     * Write the copied pages out to the destination files so that the new
+     * database's relations have correct on-disk sizes for backends that open
+     * it fresh (the block copy above only dirtied shared buffers).
+     */
+    crate::storage::buffer::bufmgr::FlushDatabaseBuffers(dst_dboid);
 
     pfree(srcpath as *mut c_void);
     pfree(dstpath as *mut c_void);
@@ -848,12 +856,19 @@ pub unsafe fn ScanSourceDatabasePgClassTuple(tuple: *mut HeapTupleData, tbid: Oi
     relinfo
 }
 
-/* Stubs for opaque Form_pg_class field access  TODO(pg-port) */
-unsafe fn pg_class_should_skip(_classForm: Form_pg_class) -> bool { false }
-unsafe fn pg_class_relfilenode(_classForm: Form_pg_class) -> RelFileNumber { 0 }
-unsafe fn pg_class_oid(_classForm: Form_pg_class) -> Oid { 0 }
-unsafe fn pg_class_reltablespace(_classForm: Form_pg_class) -> Oid { 0 }
-unsafe fn pg_class_relpersistence(_classForm: Form_pg_class) -> c_char { RELPERSISTENCE_PERMANENT }
+/* Form_pg_class field accessors */
+unsafe fn pg_class_should_skip(classForm: Form_pg_class) -> bool {
+    let relkind = (*classForm).relkind as u8;
+    /* RELKIND_HAS_STORAGE: r,i,S,t,m have physical storage */
+    let has_storage = matches!(relkind, b'r' | b'i' | b'S' | b't' | b'm');
+    (*classForm).reltablespace == GLOBALTABLESPACE_OID
+        || !has_storage
+        || (*classForm).relpersistence == RELPERSISTENCE_TEMP
+}
+unsafe fn pg_class_relfilenode(classForm: Form_pg_class) -> RelFileNumber { (*classForm).relfilenode as _ }
+unsafe fn pg_class_oid(classForm: Form_pg_class) -> Oid { (*classForm).oid }
+unsafe fn pg_class_reltablespace(classForm: Form_pg_class) -> Oid { (*classForm).reltablespace }
+unsafe fn pg_class_relpersistence(classForm: Form_pg_class) -> c_char { (*classForm).relpersistence }
 
 fn RelFileNumberIsValid(n: RelFileNumber) -> bool { n != InvalidRelFileNumber }
 
@@ -911,7 +926,7 @@ unsafe fn CreateDirAndVersionFile(dbpath: *mut c_char, dbid: Oid, tsid: Oid, isR
     }
 
     if fd < 0 {
-        ereport!(ERROR, /* C also: errcode_for_file_access() */ errmsg!("could not create file \"{}\": %m", versionfile.as_ptr()));
+        ereport!(ERROR, /* C also: errcode_for_file_access() */ errmsg!("could not create file \"{}\": %m", CStr::from_ptr(versionfile.as_ptr()).to_string_lossy()));
     }
 
     /* Write PG_MAJORVERSION in the PG_VERSION file. */
@@ -922,13 +937,13 @@ unsafe fn CreateDirAndVersionFile(dbpath: *mut c_char, dbid: Oid, tsid: Oid, isR
         if *libc_errno() == 0 {
             *libc_errno() = 28; /* ENOSPC */
         }
-        ereport!(ERROR, /* C also: errcode_for_file_access() */ errmsg!("could not write to file \"{}\": %m", versionfile.as_ptr()));
+        ereport!(ERROR, /* C also: errcode_for_file_access() */ errmsg!("could not write to file \"{}\": %m", CStr::from_ptr(versionfile.as_ptr()).to_string_lossy()));
     }
     pgstat_report_wait_end();
 
     pgstat_report_wait_start(WAIT_EVENT_VERSION_FILE_SYNC);
     if pg_fsync(fd) != 0 {
-        ereport!(data_sync_elevel(ERROR), /* C also: errcode_for_file_access() */ errmsg!("could not fsync file \"{}\": %m", versionfile.as_ptr()));
+        ereport!(data_sync_elevel(ERROR), /* C also: errcode_for_file_access() */ errmsg!("could not fsync file \"{}\": %m", CStr::from_ptr(versionfile.as_ptr()).to_string_lossy()));
     }
     fsync_fname(dbpath, true);
     pgstat_report_wait_end();
@@ -955,10 +970,9 @@ unsafe fn CreateDirAndVersionFile(dbpath: *mut c_char, dbid: Oid, tsid: Oid, isR
     }
 }
 
-/* Helper to build versionfile path  TODO(pg-port) */
+/* Helper to build versionfile path: dst = "dir/file" */
 unsafe fn snprintf_path(dst: &mut [c_char; 1024], dir: *const c_char, file: *const c_char) {
-    // Simple unsafe path concat
-    unimplemented!()
+    libc::snprintf(dst.as_mut_ptr(), 1024, b"%s/%s\0".as_ptr() as *const c_char, dir, file);
 }
 
 /* libc errno accessor  TODO(pg-port) */
@@ -1176,10 +1190,10 @@ pub unsafe fn createdb(pstate: *mut ParseState, stmt: *const CreatedbStmt) -> Oi
     };
 
     /* Extract options from the statement node tree */
-    let mut option_cell = if (*stmt).options.is_null() { ptr::null_mut() }
-                          else { (*(*stmt).options).head };
-    while !option_cell.is_null() {
-        let defel = (*option_cell).data as *mut DefElem;
+    let __options_len = if (*stmt).options.is_null() { 0 } else { (*(*stmt).options).length };
+    let mut __option_i: c_int = 0;
+    while __option_i < __options_len {
+        let defel = list_nth((*stmt).options, __option_i) as *mut DefElem;
 
         if strcmp_rs((*defel).defname, "tablespace") {
             if !tablespacenameEl.is_null() { errorConflictingDefElem(defel, pstate); }
@@ -1256,7 +1270,7 @@ pub unsafe fn createdb(pstate: *mut ParseState, stmt: *const CreatedbStmt) -> Oi
             ereport!(ERROR, /* C also: errcode(ERRCODE_SYNTAX_ERROR); parser_errposition(pstate, (*defel).location) */ errmsg!("option \"{}\" not recognized", CStr::from_ptr((*defel).defname).to_string_lossy()));
         }
 
-        option_cell = (*option_cell).next;
+        __option_i += 1;
     }
 
     if !ownerEl.is_null() && !(*ownerEl).arg.is_null() {
@@ -1267,7 +1281,7 @@ pub unsafe fn createdb(pstate: *mut ParseState, stmt: *const CreatedbStmt) -> Oi
     }
     if !encodingEl.is_null() && !(*encodingEl).arg.is_null() {
         // if (IsA(encodingEl->arg, Integer))
-        if pg_node_is_integer((*encodingEl).arg) {
+        if pg_node_is_integer((*encodingEl).arg as *mut c_void) {
             encoding = defGetInt32(encodingEl);
             let encoding_name = pg_encoding_to_char(encoding);
             if *encoding_name == 0
@@ -1399,7 +1413,7 @@ pub unsafe fn createdb(pstate: *mut ParseState, stmt: *const CreatedbStmt) -> Oi
         } else if pg_strcasecmp(strategy, b"file_copy\0".as_ptr() as *const c_char) == 0 {
             dbstrategy = CREATEDB_FILE_COPY;
         } else {
-            ereport!(ERROR, /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE); errhint(b"Valid strategies are \"wal_log\" and \"file_copy\".\0".as_ptr() as *const c_char) */ errmsg!("invalid create database strategy \"{}\"", strategy));
+            ereport!(ERROR, /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE); errhint(b"Valid strategies are \"wal_log\" and \"file_copy\".\0".as_ptr() as *const c_char) */ errmsg!("invalid create database strategy \"{}\"", CStr::from_ptr(strategy).to_string_lossy()));
         }
     }
 
@@ -1489,7 +1503,7 @@ pub unsafe fn createdb(pstate: *mut ParseState, stmt: *const CreatedbStmt) -> Oi
         if !IsBinaryUpgrade && dblocale != src_locale {
             let langtag = icu_language_tag(dblocale, icu_validation_level);
             if !langtag.is_null() && strcmp_ptr(dblocale, langtag) != 0 {
-                ereport!(NOTICE, errmsg!("using standard form \"{}\" for ICU locale \"{}\"", langtag, CStr::from_ptr(dblocale).to_string_lossy()));
+                ereport!(NOTICE, errmsg!("using standard form \"{}\" for ICU locale \"{}\"", CStr::from_ptr(langtag).to_string_lossy(), CStr::from_ptr(dblocale).to_string_lossy()));
                 dblocale = langtag;
             }
         }
@@ -1692,7 +1706,7 @@ pub unsafe fn createdb(pstate: *mut ParseState, stmt: *const CreatedbStmt) -> Oi
     if OidIsValid(dboid) {
         let existing_dbname = get_database_name(dboid);
         if !existing_dbname.is_null() {
-            ereport!(ERROR, /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */ errmsg!("database OID {} is already in use by database \"{}\"", dboid, existing_dbname));
+            ereport!(ERROR, /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */ errmsg!("database OID {} is already in use by database \"{}\"", dboid, CStr::from_ptr(existing_dbname).to_string_lossy()));
         }
         if check_db_file_conflict(dboid) {
             ereport!(ERROR, /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE) */ errmsg!("data directory with the specified OID {} already exists", dboid));
@@ -1835,18 +1849,21 @@ pub unsafe fn createdb(pstate: *mut ParseState, stmt: *const CreatedbStmt) -> Oi
     dboid
 }
 
-/* strcmp helper for *const c_char vs literal  TODO(pg-port) */
+/* strcmp helper for *const c_char vs literal */
 unsafe fn strcmp_rs(s: *const c_char, lit: &str) -> bool {
-    unimplemented!()
+    if s.is_null() { return false; }
+    core::ffi::CStr::from_ptr(s).to_bytes() == lit.as_bytes()
 }
 
 /* strcmp for two *const c_char pointers */
 unsafe fn strcmp_ptr(a: *const c_char, b: *const c_char) -> c_int {
-    unimplemented!()
+    libc::strcmp(a, b)
 }
 
-/* IsA check for Integer node  TODO(pg-port) */
-unsafe fn pg_node_is_integer(node: *mut c_void) -> bool { unimplemented!() }
+/* IsA check for Integer node */
+unsafe fn pg_node_is_integer(node: *mut c_void) -> bool {
+    !node.is_null() && *(node as *const c_int) == crate::nodes::nodes::NodeTag::T_Integer as c_int
+}
 
 // errcode constants referenced above  TODO(pg-port)
 const ERRCODE_FEATURE_NOT_SUPPORTED: c_int = 0;
@@ -1872,21 +1889,21 @@ const ERRCODE_DUPLICATE_OBJECT: c_int = 11;
 /*
  * Form_pg_database field accessors (opaque struct)  TODO(pg-port)
  */
-unsafe fn pg_database_oid(_form: Form_pg_database) -> Oid { unimplemented!() }
-unsafe fn pg_database_datdba(_form: Form_pg_database) -> Oid { unimplemented!() }
-unsafe fn pg_database_encoding(_form: Form_pg_database) -> c_int { unimplemented!() }
-unsafe fn pg_database_datistemplate(_form: Form_pg_database) -> bool { unimplemented!() }
-unsafe fn pg_database_dathasloginevt(_form: Form_pg_database) -> bool { unimplemented!() }
-unsafe fn pg_database_datallowconn(_form: Form_pg_database) -> bool { unimplemented!() }
-unsafe fn pg_database_datfrozenxid(_form: Form_pg_database) -> TransactionId { unimplemented!() }
-unsafe fn pg_database_datminmxid(_form: Form_pg_database) -> MultiXactId { unimplemented!() }
-unsafe fn pg_database_dattablespace(_form: Form_pg_database) -> Oid { unimplemented!() }
-unsafe fn pg_database_datlocprovider(_form: Form_pg_database) -> c_char { unimplemented!() }
-unsafe fn pg_database_datname_ptr(_form: Form_pg_database) -> *const c_void { unimplemented!() }
-unsafe fn pg_database_datconnlimit(_form: Form_pg_database) -> c_int { unimplemented!() }
-/* Mutators for in-place / GETSTRUCT manipulation  TODO(pg-port) */
-unsafe fn pg_database_set_datconnlimit(_form: Form_pg_database, _val: c_int) { unimplemented!() }
-unsafe fn pg_database_datname_mut(_form: Form_pg_database) -> *mut c_void { unimplemented!() }
+unsafe fn pg_database_oid(form: Form_pg_database) -> Oid { (*form).oid }
+unsafe fn pg_database_datdba(form: Form_pg_database) -> Oid { (*form).datdba }
+unsafe fn pg_database_encoding(form: Form_pg_database) -> c_int { (*form).encoding }
+unsafe fn pg_database_datistemplate(form: Form_pg_database) -> bool { (*form).datistemplate }
+unsafe fn pg_database_dathasloginevt(form: Form_pg_database) -> bool { (*form).dathasloginevt }
+unsafe fn pg_database_datallowconn(form: Form_pg_database) -> bool { (*form).datallowconn }
+unsafe fn pg_database_datfrozenxid(form: Form_pg_database) -> TransactionId { (*form).datfrozenxid as _ }
+unsafe fn pg_database_datminmxid(form: Form_pg_database) -> MultiXactId { (*form).datminmxid as _ }
+unsafe fn pg_database_dattablespace(form: Form_pg_database) -> Oid { (*form).dattablespace }
+unsafe fn pg_database_datlocprovider(form: Form_pg_database) -> c_char { (*form).datlocprovider }
+unsafe fn pg_database_datname_ptr(form: Form_pg_database) -> *const c_void { &(*form).datname as *const _ as *const c_void }
+unsafe fn pg_database_datconnlimit(form: Form_pg_database) -> c_int { (*form).datconnlimit }
+/* Mutators for in-place / GETSTRUCT manipulation */
+unsafe fn pg_database_set_datconnlimit(form: Form_pg_database, val: c_int) { (*form).datconnlimit = val; }
+unsafe fn pg_database_datname_mut(form: Form_pg_database) -> *mut c_void { &mut (*form).datname as *mut _ as *mut c_void }
 
 /*
  * Form_pg_authid field accessor (opaque struct)  TODO(pg-port)
@@ -1912,14 +1929,14 @@ pub unsafe fn check_encoding_locale_matches(encoding: c_int, collate: *const c_c
          ctype_encoding == PG_SQL_ASCII ||
          ctype_encoding == -1 ||
          (encoding == PG_SQL_ASCII && superuser())) {
-        ereport!(ERROR, /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE); errdetail(b"The chosen LC_CTYPE setting requires encoding \"%s\".\0".as_ptr() as *const c_char, pg_encoding_to_char(ctype_encoding)) */ errmsg!("encoding \"{}\" does not match locale \"{}\"", CStr::from_ptr(pg_encoding_to_char(encoding)).to_string_lossy(), ctype));
+        ereport!(ERROR, /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE); errdetail(b"The chosen LC_CTYPE setting requires encoding \"%s\".\0".as_ptr() as *const c_char, pg_encoding_to_char(ctype_encoding)) */ errmsg!("encoding \"{}\" does not match locale \"{}\"", CStr::from_ptr(pg_encoding_to_char(encoding)).to_string_lossy(), CStr::from_ptr(ctype).to_string_lossy()));
     }
 
     if !(collate_encoding == encoding ||
          collate_encoding == PG_SQL_ASCII ||
          collate_encoding == -1 ||
          (encoding == PG_SQL_ASCII && superuser())) {
-        ereport!(ERROR, /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE); errdetail(b"The chosen LC_COLLATE setting requires encoding \"%s\".\0".as_ptr() as *const c_char, pg_encoding_to_char(collate_encoding)) */ errmsg!("encoding \"{}\" does not match locale \"{}\"", CStr::from_ptr(pg_encoding_to_char(encoding)).to_string_lossy(), collate));
+        ereport!(ERROR, /* C also: errcode(ERRCODE_INVALID_PARAMETER_VALUE); errdetail(b"The chosen LC_COLLATE setting requires encoding \"%s\".\0".as_ptr() as *const c_char, pg_encoding_to_char(collate_encoding)) */ errmsg!("encoding \"{}\" does not match locale \"{}\"", CStr::from_ptr(pg_encoding_to_char(encoding)).to_string_lossy(), CStr::from_ptr(collate).to_string_lossy()));
     }
 }
 
@@ -2418,7 +2435,7 @@ unsafe fn movedb(dbname: *const c_char, tblspcname: *const c_char) {
                 continue;
             }
 
-            ereport!(ERROR, /* C also: errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE); errhint(b"You must move them back to the database's default tablespace before using this command.\0".as_ptr() as *const c_char) */ errmsg!("some relations of database \"{}\" are already in tablespace \"{}\"", CStr::from_ptr(dbname).to_string_lossy(), tblspcname));
+            ereport!(ERROR, /* C also: errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE); errhint(b"You must move them back to the database's default tablespace before using this command.\0".as_ptr() as *const c_char) */ errmsg!("some relations of database \"{}\" are already in tablespace \"{}\"", CStr::from_ptr(dbname).to_string_lossy(), CStr::from_ptr(tblspcname).to_string_lossy()));
         }
 
         FreeDir(dstdir);
@@ -2546,7 +2563,7 @@ unsafe fn movedb(dbname: *const c_char, tblspcname: *const c_char) {
      * Remove files from the old tablespace
      */
     if !rmtree(src_dbpath, true) {
-        ereport!(WARNING, errmsg!("some useless files may be left behind in old database directory \"{}\"", src_dbpath));
+        ereport!(WARNING, errmsg!("some useless files may be left behind in old database directory \"{}\"", CStr::from_ptr(src_dbpath).to_string_lossy()));
     }
 
     /*
@@ -2602,7 +2619,7 @@ pub unsafe fn DropDatabase(pstate: *mut ParseState, stmt: *mut DropdbStmt) {
         if strcmp_rs((*opt).defname, "force") {
             force = true;
         } else {
-            ereport!(ERROR, /* C also: errcode(ERRCODE_SYNTAX_ERROR); parser_errposition(pstate, (*opt).location) */ errmsg!("unrecognized {} option \"{}\"", b"DROP DATABASE\0".as_ptr() as *const c_char, CStr::from_ptr((*opt).defname).to_string_lossy()));
+            ereport!(ERROR, /* C also: errcode(ERRCODE_SYNTAX_ERROR); parser_errposition(pstate, (*opt).location) */ errmsg!("unrecognized {} option \"{}\"", CStr::from_ptr(b"DROP DATABASE\0".as_ptr() as *const c_char).to_string_lossy(), CStr::from_ptr((*opt).defname).to_string_lossy()));
         }
     });
 
@@ -2702,7 +2719,7 @@ pub unsafe fn AlterDatabase(pstate: *mut ParseState, stmt: *mut AlterDatabaseStm
                               ptr::null_mut(), 1, &mut scankey);
     tuple = systable_getnext(scan);
     if !HeapTupleIsValid(tuple) {
-        ereport!(ERROR, /* C also: errcode(ERRCODE_UNDEFINED_DATABASE) */ errmsg!("database \"{}\" does not exist", (*stmt).dbname));
+        ereport!(ERROR, /* C also: errcode(ERRCODE_UNDEFINED_DATABASE) */ errmsg!("database \"{}\" does not exist", CStr::from_ptr((*stmt).dbname).to_string_lossy()));
     }
     LockTuple(rel, &mut (*tuple).t_self, InplaceUpdateTupleLock);
 
@@ -2710,7 +2727,7 @@ pub unsafe fn AlterDatabase(pstate: *mut ParseState, stmt: *mut AlterDatabaseStm
     dboid = pg_database_oid(datform);
 
     if database_is_invalid_form(datform) {
-        ereport!(FATAL, /* C also: errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE); errhint(b"Use DROP DATABASE to drop invalid databases.\0".as_ptr() as *const c_char) */ errmsg!("cannot alter invalid database \"{}\"", (*stmt).dbname));
+        ereport!(FATAL, /* C also: errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE); errhint(b"Use DROP DATABASE to drop invalid databases.\0".as_ptr() as *const c_char) */ errmsg!("cannot alter invalid database \"{}\"", CStr::from_ptr((*stmt).dbname).to_string_lossy()));
     }
 
     if !object_ownercheck(DatabaseRelationId, dboid, GetUserId()) {
@@ -2783,7 +2800,7 @@ pub unsafe fn AlterDatabaseRefreshColl(stmt: *mut AlterDatabaseRefreshCollStmt) 
                               ptr::null_mut(), 1, &mut scankey);
     tuple = systable_getnext(scan);
     if !HeapTupleIsValid(tuple) {
-        ereport!(ERROR, /* C also: errcode(ERRCODE_UNDEFINED_DATABASE) */ errmsg!("database \"{}\" does not exist", (*stmt).dbname));
+        ereport!(ERROR, /* C also: errcode(ERRCODE_UNDEFINED_DATABASE) */ errmsg!("database \"{}\" does not exist", CStr::from_ptr((*stmt).dbname).to_string_lossy()));
     }
 
     datForm = GETSTRUCT(tuple) as Form_pg_database;
@@ -2821,7 +2838,7 @@ pub unsafe fn AlterDatabaseRefreshColl(stmt: *mut AlterDatabaseRefreshCollStmt) 
         let mut values: [Datum; Natts_pg_database] = [0; Natts_pg_database];
         let newtuple: HeapTuple;
 
-        ereport!(NOTICE, errmsg!("changing version from {} to {}", oldversion, newversion));
+        ereport!(NOTICE, errmsg!("changing version from {} to {}", CStr::from_ptr(oldversion).to_string_lossy(), CStr::from_ptr(newversion).to_string_lossy()));
 
         values[Anum_pg_database_datcollversion - 1] = CStringGetTextDatum(newversion);
         replaces[Anum_pg_database_datcollversion - 1] = true;
@@ -3259,7 +3276,7 @@ unsafe fn remove_dbtablespaces(db_id: Oid) {
         }
 
         if !rmtree(dstpath, true) {
-            ereport!(WARNING, errmsg!("some useless files may be left behind in old database directory \"{}\"", dstpath));
+            ereport!(WARNING, errmsg!("some useless files may be left behind in old database directory \"{}\"", CStr::from_ptr(dstpath).to_string_lossy()));
         }
 
         ltblspc = lappend_oid(ltblspc, dsttablespace);
@@ -3539,7 +3556,7 @@ pub unsafe fn dbase_redo(record: *mut XLogReaderState) {
         if stat(dst_path, &mut st) == 0 && S_ISDIR(libc_stat_mode(&st)) {
             if !rmtree(dst_path, true) {
                 /* If this failed, copydir() below is going to error. */
-                ereport!(WARNING, errmsg!("some useless files may be left behind in old database directory \"{}\"", dst_path));
+                ereport!(WARNING, errmsg!("some useless files may be left behind in old database directory \"{}\"", CStr::from_ptr(dst_path).to_string_lossy()));
             }
         }
 
@@ -3551,7 +3568,7 @@ pub unsafe fn dbase_redo(record: *mut XLogReaderState) {
         get_parent_directory(parent_path);
         if stat(parent_path, &mut st) < 0 {
             if *libc_errno() != ENOENT {
-                ereport!(FATAL, errmsg!("could not stat directory \"{}\": %m", dst_path));
+                ereport!(FATAL, errmsg!("could not stat directory \"{}\": %m", CStr::from_ptr(dst_path).to_string_lossy()));
             }
 
             /* create the parent directory if needed and valid */
@@ -3645,7 +3662,7 @@ pub unsafe fn dbase_redo(record: *mut XLogReaderState) {
 
             /* And remove the physical files */
             if !rmtree(dst_path, true) {
-                ereport!(WARNING, errmsg!("some useless files may be left behind in old database directory \"{}\"", dst_path));
+                ereport!(WARNING, errmsg!("some useless files may be left behind in old database directory \"{}\"", CStr::from_ptr(dst_path).to_string_lossy()));
             }
             pfree(dst_path as *mut c_void);
             i += 1;

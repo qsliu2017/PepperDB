@@ -864,20 +864,29 @@ macro_rules! SRF_RETURN_DONE {
     };
 }
 
-unsafe fn srf_is_firstcall(_fcinfo: FunctionCallInfo) -> bool {
-    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+unsafe fn srf_is_firstcall(fcinfo: FunctionCallInfo) -> bool {
+    (*(*fcinfo).flinfo).fn_extra.is_null()
 }
-unsafe fn srf_firstcall_init(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
-    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+unsafe fn srf_firstcall_init(fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    crate::utils::fmgr::funcapi::init_MultiFuncCall(fcinfo) as *mut FuncCallContext
 }
-unsafe fn srf_percall_setup(_fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
-    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+unsafe fn srf_percall_setup(fcinfo: FunctionCallInfo) -> *mut FuncCallContext {
+    crate::utils::fmgr::funcapi::per_MultiFuncCall(fcinfo) as *mut FuncCallContext
 }
-unsafe fn srf_return_next(_fcinfo: FunctionCallInfo, _result: Datum) -> Datum {
-    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+unsafe fn srf_return_next(fcinfo: FunctionCallInfo, result: Datum) -> Datum {
+    let funcctx = (*(*fcinfo).flinfo).fn_extra as *mut FuncCallContext;
+    (*funcctx).call_cntr += 1;
+    let rsi = (*fcinfo).resultinfo as *mut crate::nodes::execnodes::ReturnSetInfo;
+    (*rsi).isDone = crate::nodes::execnodes::ExprDoneCond::ExprMultipleResult;
+    result
 }
-unsafe fn srf_return_done(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!() // TODO(pg-port): utils/fmgr/funcapi.c
+unsafe fn srf_return_done(fcinfo: FunctionCallInfo) -> Datum {
+    let funcctx = (*(*fcinfo).flinfo).fn_extra as *mut FuncCallContext;
+    crate::utils::fmgr::funcapi::end_MultiFuncCall(fcinfo, funcctx as _);
+    let rsi = (*fcinfo).resultinfo as *mut crate::nodes::execnodes::ReturnSetInfo;
+    (*rsi).isDone = crate::nodes::execnodes::ExprDoneCond::ExprEndResult;
+    (*fcinfo).isnull = true;
+    0
 }
 
 /* is_funcclause - nodes/nodeFuncs.h.  Local copy (not exported), per sibling precedent. */

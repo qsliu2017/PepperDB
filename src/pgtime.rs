@@ -115,13 +115,19 @@ pub unsafe fn pg_strftime(
 
 /* these functions and variables are in pgtz.c */
 
-extern "C" {
-    pub static mut session_timezone: *mut pg_tz;
-    pub static mut log_timezone: *mut pg_tz;
-}
+// Real definitions (export the C symbols too) - the tz subsystem owns these in C (pgtz.c).
+#[no_mangle]
+pub static mut session_timezone: *mut pg_tz = core::ptr::null_mut();
+#[no_mangle]
+pub static mut log_timezone: *mut pg_tz = core::ptr::null_mut();
 
-pub unsafe fn pg_timezone_initialize() {
-    unimplemented!()
+#[no_mangle]
+pub unsafe extern "C" fn pg_timezone_initialize() {
+    // TODO(pg-port): real tz-database load (src/timezone/pgtz.c not ported). Placeholder so
+    // session_timezone/log_timezone are non-null and boot proceeds (real impl: pg_tzset("GMT")).
+    static mut GMT_PLACEHOLDER: u8 = 0;
+    session_timezone = core::ptr::addr_of_mut!(GMT_PLACEHOLDER) as *mut pg_tz;
+    log_timezone = session_timezone;
 }
 
 pub unsafe fn pg_tzset(tzname: *const c_char) -> *mut pg_tz {

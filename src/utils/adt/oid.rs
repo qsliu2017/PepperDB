@@ -180,10 +180,7 @@ pub unsafe fn buildoidvector(oids: *const Oid, n: c_int) -> *mut oidvector {
      * Attach standard array header.  For historical reasons, we set the index
      * lower bound to 0 not 1.
      */
-    // C: SET_VARSIZE(result, OidVectorSize(n)).  The oidvector header field
-    // vl_len_ is an int32 (4B varlena length, never toasted), so a direct store
-    // is the exact SET_VARSIZE_4B for our little-endian, non-toasted layout.
-    (*result).vl_len_ = OidVectorSize(n) as int32;
+    crate::varatt::SET_VARSIZE(result as *mut c_char, OidVectorSize(n) as int32);
     (*result).ndim = 1;
     (*result).dataoffset = 0; /* never any nulls */
     (*result).elemtype = OIDOID;
@@ -257,7 +254,7 @@ pub unsafe fn oidvectorin(fcinfo: FunctionCallInfo) -> Datum {
         n += 1;
     }
 
-    (*result).vl_len_ = OidVectorSize(n) as int32; /* SET_VARSIZE */
+    crate::varatt::SET_VARSIZE(result as *mut c_char, OidVectorSize(n) as int32);
     (*result).ndim = 1;
     (*result).dataoffset = 0; /* never any nulls */
     (*result).elemtype = OIDOID;
@@ -277,8 +274,10 @@ pub unsafe fn oidvectorin(fcinfo: FunctionCallInfo) -> Datum {
  */
 #[inline]
 unsafe fn soft_error_occurred(escontext: *mut Node) -> bool {
-    let _ = escontext;
-    false
+    const T_ErrorSaveContext: c_int = 447;
+    !escontext.is_null()
+        && *(escontext as *const c_int) == T_ErrorSaveContext
+        && (*(escontext as *const crate::nodes::miscnodes::ErrorSaveContext)).error_occurred
 }
 
 /*
@@ -492,8 +491,23 @@ pub unsafe fn oidvectorgt(fcinfo: FunctionCallInfo) -> Datum {
  * TODO(pg-port): btoidvectorcmp (utils/adt/arrayfuncs.c) not yet translated.
  */
 unsafe fn btoidvectorcmp(fcinfo: FunctionCallInfo) -> Datum {
-    let _ = fcinfo;
-    unimplemented!("btoidvectorcmp: utils/adt/arrayfuncs.c not yet translated")
+    let a: *mut oidvector = PG_GETARG_POINTER!(fcinfo, 0) as *mut oidvector;
+    let b: *mut oidvector = PG_GETARG_POINTER!(fcinfo, 1) as *mut oidvector;
+
+    /* We arbitrarily choose to sort first by vector length */
+    if (*a).dim1 != (*b).dim1 {
+        return crate::postgres::Int32GetDatum((*a).dim1 - (*b).dim1);
+    }
+    let mut i = 0;
+    while i < (*a).dim1 {
+        let av = *(*a).values.as_ptr().add(i as usize);
+        let bv = *(*b).values.as_ptr().add(i as usize);
+        if av != bv {
+            return crate::postgres::Int32GetDatum(if av < bv { -1 } else { 1 });
+        }
+        i += 1;
+    }
+    crate::postgres::Int32GetDatum(0)
 }
 
 #[cfg(test)]

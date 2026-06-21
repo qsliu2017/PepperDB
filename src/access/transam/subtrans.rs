@@ -1,6 +1,8 @@
 //! subtrans.c - PostgreSQL subtransaction-log manager.
 
 use crate::prelude::*;
+use crate::access::transam::slru::check_slru_buffers;
+use crate::access::transam::varsup::TransamVariables;
 
 use crate::access::transam::{
     FirstNormalTransactionId, FullTransactionId, InvalidTransactionId, MaxTransactionId,
@@ -24,13 +26,14 @@ const BLCKSZ: usize = 8192;
 pub type LWLock = c_void;
 const LW_EXCLUSIVE: c_int = 1;
 
-unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    // TODO: port storage/lwlock.c
-    unimplemented!()
+unsafe fn LWLockAcquire(lock: *mut LWLock, _mode: c_int) -> bool {
+    crate::storage::lmgr::lwlock::LWLockAcquire(
+        lock as _,
+        crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE,
+    )
 }
-unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    // TODO: port storage/lwlock.c
-    unimplemented!()
+unsafe fn LWLockRelease(lock: *mut LWLock) {
+    crate::storage::lmgr::lwlock::LWLockRelease(lock as _)
 }
 
 // SLRU control structures from access/slru.h (not ported yet).
@@ -43,14 +46,7 @@ pub struct SlruSharedData {
 #[allow(non_camel_case_types)]
 pub type SlruShared = *mut SlruSharedData;
 
-#[allow(non_snake_case)]
-#[repr(C)]
-pub struct SlruCtlData {
-    pub shared: SlruShared,
-    pub PagePrecedes: Option<unsafe fn(i64, i64) -> bool>,
-}
-#[allow(non_camel_case_types)]
-pub type SlruCtl = *mut SlruCtlData;
+pub use crate::access::transam::slru::{SlruCtlData, SlruCtl};
 
 // Tranche ids from lwlock.h / lwlocknames.
 const LWTRANCHE_SUBTRANS_BUFFER: c_int = 0;
@@ -62,64 +58,63 @@ const SYNC_HANDLER_NONE: c_int = -1;
 // Maximum allowed SLRU buffers, from slru.h.
 const SLRU_MAX_ALLOWED_BUFFERS: c_int = 131072;
 
-unsafe fn SimpleLruGetBankLock(_ctl: SlruCtl, _pageno: i64) -> *mut LWLock {
-    // TODO: port access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruGetBankLock(ctl: SlruCtl, pageno: i64) -> *mut LWLock {
+    crate::access::transam::slru::SimpleLruGetBankLock(ctl as _, pageno) as *mut LWLock
 }
 unsafe fn SimpleLruReadPage(
-    _ctl: SlruCtl,
-    _pageno: i64,
-    _write_ok: bool,
-    _xid: TransactionId,
+    ctl: SlruCtl,
+    pageno: i64,
+    write_ok: bool,
+    xid: TransactionId,
 ) -> c_int {
-    // TODO: port access/slru.c
-    unimplemented!()
+    crate::access::transam::slru::SimpleLruReadPage(ctl as _, pageno, write_ok, xid)
 }
-unsafe fn SimpleLruReadPage_ReadOnly(_ctl: SlruCtl, _pageno: i64, _xid: TransactionId) -> c_int {
-    // TODO: port access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruReadPage_ReadOnly(ctl: SlruCtl, pageno: i64, xid: TransactionId) -> c_int {
+    crate::access::transam::slru::SimpleLruReadPage_ReadOnly(ctl as _, pageno, xid)
 }
-unsafe fn SimpleLruZeroPage(_ctl: SlruCtl, _pageno: i64) -> c_int {
-    // TODO: port access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruZeroPage(ctl: SlruCtl, pageno: i64) -> c_int {
+    crate::access::transam::slru::SimpleLruZeroPage(ctl as _, pageno)
 }
-unsafe fn SimpleLruWritePage(_ctl: SlruCtl, _slotno: c_int) {
-    // TODO: port access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruWritePage(ctl: SlruCtl, slotno: c_int) {
+    crate::access::transam::slru::SimpleLruWritePage(ctl as _, slotno)
 }
-unsafe fn SimpleLruWriteAll(_ctl: SlruCtl, _allow_redirtied: bool) {
-    // TODO: port access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruWriteAll(ctl: SlruCtl, allow_redirtied: bool) {
+    crate::access::transam::slru::SimpleLruWriteAll(ctl as _, allow_redirtied)
 }
-unsafe fn SimpleLruTruncate(_ctl: SlruCtl, _cutoffPage: i64) {
-    // TODO: port access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruTruncate(ctl: SlruCtl, cutoffPage: i64) {
+    crate::access::transam::slru::SimpleLruTruncate(ctl as _, cutoffPage)
 }
 unsafe fn SimpleLruInit(
-    _ctl: SlruCtl,
-    _name: *const c_char,
-    _nslots: c_int,
-    _nlsns: c_int,
-    _subdir: *const c_char,
-    _buffer_tranche_id: c_int,
-    _bank_tranche_id: c_int,
-    _sync_handler: c_int,
-    _long_segment_names: bool,
+    ctl: SlruCtl,
+    name: *const c_char,
+    nslots: c_int,
+    nlsns: c_int,
+    subdir: *const c_char,
+    buffer_tranche_id: c_int,
+    bank_tranche_id: c_int,
+    sync_handler: c_int,
+    long_segment_names: bool,
 ) {
-    // TODO: port access/slru.c
-    unimplemented!()
+    crate::access::transam::slru::SimpleLruInit(
+        ctl as _,
+        name,
+        nslots,
+        nlsns,
+        subdir,
+        buffer_tranche_id,
+        bank_tranche_id,
+        sync_handler as _,
+        long_segment_names,
+    )
 }
-unsafe fn SimpleLruShmemSize(_nslots: c_int, _nlsns: c_int) -> Size {
-    // TODO: port access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruShmemSize(nslots: c_int, nlsns: c_int) -> Size {
+    crate::access::transam::slru::SimpleLruShmemSize(nslots, nlsns)
 }
-unsafe fn SimpleLruAutotuneBuffers(_divisor: c_int, _max: c_int) -> c_int {
-    // TODO: port access/slru.c
-    unimplemented!()
+unsafe fn SimpleLruAutotuneBuffers(divisor: c_int, max: c_int) -> c_int {
+    crate::access::transam::slru::SimpleLruAutotuneBuffers(divisor, max)
 }
-unsafe fn SlruPagePrecedesUnitTests(_ctl: SlruCtl, _per_page: c_int) {
-    // TODO: port access/slru.c
-    unimplemented!()
+unsafe fn SlruPagePrecedesUnitTests(ctl: SlruCtl, per_page: c_int) {
+    #[cfg(debug_assertions)] crate::access::transam::slru::SlruPagePrecedesUnitTests(ctl as _, per_page);
 }
 
 // GUC machinery from utils/guc.c (not ported yet).
@@ -131,27 +126,23 @@ const PGC_S_DYNAMIC_DEFAULT: c_int = 1;
 const PGC_S_OVERRIDE: c_int = 17;
 
 unsafe fn SetConfigOption(
-    _name: *const c_char,
-    _value: *const c_char,
-    _context: c_int,
-    _source: c_int,
+    name: *const c_char,
+    value: *const c_char,
+    context: c_int,
+    source: c_int,
 ) {
-    // TODO: port utils/misc/guc.c
-    unimplemented!()
+    use crate::utils::misc::guc::{GucContext, GucSource};
+    let ctx = match context {
+        PGC_POSTMASTER => GucContext::PGC_POSTMASTER,
+        _ => GucContext::PGC_INTERNAL,
+    };
+    let src = match source {
+        PGC_S_DYNAMIC_DEFAULT => GucSource::PGC_S_DYNAMIC_DEFAULT,
+        PGC_S_OVERRIDE => GucSource::PGC_S_OVERRIDE,
+        _ => GucSource::PGC_S_DEFAULT,
+    };
+    crate::utils::misc::guc::SetConfigOption(name, value, ctx, src);
 }
-unsafe fn check_slru_buffers(_name: *const c_char, _newval: *mut c_int) -> bool {
-    // TODO: port access/slru.c
-    unimplemented!()
-}
-
-// TransamVariables->nextXid from access/transam/varsup.c (not ported yet).
-#[allow(non_snake_case)]
-#[repr(C)]
-pub struct TransamVariablesData {
-    pub nextXid: FullTransactionId,
-}
-#[allow(non_upper_case_globals)]
-static mut TransamVariables: *mut TransamVariablesData = null_mut();
 
 // TransactionXmin lives in utils/time/snapmgr.c (not ported yet).
 #[allow(non_upper_case_globals)]
@@ -185,10 +176,7 @@ fn TransactionIdToEntry(xid: TransactionId) -> TransactionId {
 
 // Link to shared-memory data structures for SUBTRANS control.
 #[allow(non_upper_case_globals)]
-static mut SubTransCtlData: SlruCtlData = SlruCtlData {
-    shared: null_mut(),
-    PagePrecedes: None,
-};
+static mut SubTransCtlData: SlruCtlData = unsafe { core::mem::zeroed() };
 
 #[inline]
 #[allow(non_snake_case)]
@@ -573,7 +561,7 @@ pub unsafe fn TruncateSUBTRANS(oldestXact: TransactionId) {
  * Analogous to CLOGPagePrecedes().
  */
 #[allow(non_snake_case)]
-fn SubTransPagePrecedes(page1: i64, page2: i64) -> bool {
+unsafe extern "C" fn SubTransPagePrecedes(page1: i64, page2: i64) -> bool {
     let mut xid1: TransactionId;
     let mut xid2: TransactionId;
 
@@ -608,8 +596,10 @@ mod tests {
     #[test]
     fn test_subtrans_page_precedes() {
         // A lower page precedes a higher one (no wraparound).
-        assert!(SubTransPagePrecedes(1, 2));
-        assert!(!SubTransPagePrecedes(2, 1));
-        assert!(!SubTransPagePrecedes(5, 5));
+        unsafe {
+            assert!(SubTransPagePrecedes(1, 2));
+            assert!(!SubTransPagePrecedes(2, 1));
+            assert!(!SubTransPagePrecedes(5, 5));
+        }
     }
 }

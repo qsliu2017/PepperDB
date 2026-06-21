@@ -50,32 +50,32 @@ unsafe fn pgaio_io_release_resowner(_ioh_node: *mut dlist_node, _on_error: bool)
 
 /// STUB: storage/proc.h. Release all locks at top-of-recursion for a top xact.
 /// TODO(pg-port): wire to the real lock manager.
-unsafe fn ProcReleaseLocks(_is_commit: bool) {
-    unimplemented!("storage/proc.h ProcReleaseLocks not ported");
+unsafe fn ProcReleaseLocks(is_commit: bool) {
+    crate::storage::lmgr::proc::ProcReleaseLocks(is_commit)
 }
 
 /// STUB: storage/predicate.h ReleasePredicateLocks.
 /// TODO(pg-port): wire to the real predicate lock manager.
 unsafe fn ReleasePredicateLocks(_is_commit: bool, _is_read_only_safe: bool) {
-    unimplemented!("storage/predicate.h ReleasePredicateLocks not ported");
+    crate::storage::lmgr::predicate::ReleasePredicateLocks(_is_commit, _is_read_only_safe)
 }
 
 /// STUB: storage/lock.h LockReassignCurrentOwner. Subxact-commit lock transfer.
 /// TODO(pg-port): wire to the real lock manager.
 unsafe fn LockReassignCurrentOwner(_locks: *mut *mut LOCALLOCK, _nlocks: c_int) {
-    unimplemented!("storage/lock.h LockReassignCurrentOwner not ported");
+    crate::storage::lmgr::lock::LockReassignCurrentOwner(_locks as _, _nlocks)
 }
 
 /// STUB: storage/lock.h LockReleaseCurrentOwner. Subxact-abort lock release.
 /// TODO(pg-port): wire to the real lock manager.
 unsafe fn LockReleaseCurrentOwner(_locks: *mut *mut LOCALLOCK, _nlocks: c_int) {
-    unimplemented!("storage/lock.h LockReleaseCurrentOwner not ported");
+    crate::storage::lmgr::lock::LockReleaseCurrentOwner(_locks as _, _nlocks)
 }
 
 /// STUB: storage/ipc.h on_shmem_exit. Register a shmem-exit callback.
 /// TODO(pg-port): wire to the real ipc shutdown callback registry.
 unsafe fn on_shmem_exit(_function: unsafe fn(c_int, Datum), _arg: Datum) {
-    unimplemented!("storage/ipc.h on_shmem_exit not ported");
+    crate::storage::ipc::ipc::on_shmem_exit(core::mem::transmute(_function), _arg)
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +144,10 @@ pub struct ResourceOwnerDesc {
     /// which case a generic "[resource name]: [ptr]" format is used.
     pub DebugPrint: Option<unsafe fn(res: Datum) -> *mut c_char>,
 }
+
+// ResourceOwnerDesc instances are immutable static descriptors; the `name`
+// raw pointer points at a static string literal, so sharing is safe.
+unsafe impl Sync for ResourceOwnerDesc {}
 
 /// Dynamically loaded modules can get control during ResourceOwnerRelease by
 /// providing a callback of this form.
@@ -251,6 +255,7 @@ pub struct ResourceOwnerData {
 
 /// Globally known ResourceOwners. `CurrentResourceOwner` points at the owner
 /// currently being released so release callbacks know who they belong to.
+#[no_mangle]
 pub static mut CurrentResourceOwner: ResourceOwner = null_mut();
 pub static mut CurTransactionResourceOwner: ResourceOwner = null_mut();
 pub static mut TopTransactionResourceOwner: ResourceOwner = null_mut();
@@ -447,6 +452,7 @@ unsafe fn ResourceOwnerReleaseAll(
 ///
 /// All ResourceOwner objects are kept in TopMemoryContext, since they should
 /// only be freed explicitly.
+#[no_mangle]
 pub unsafe fn ResourceOwnerCreate(parent: ResourceOwner, name: *const c_char) -> ResourceOwner {
     let owner = MemoryContextAllocZero(
         TopMemoryContext,
@@ -606,10 +612,10 @@ pub unsafe fn ResourceOwnerForget(
     // %p in the C source: print the underlying pointer (a programmer error).
     elog!(
         ERROR,
-        "{:?} {:?} is not owned by resource owner {:?}",
-        (*kind).name,
+        "{} {:?} is not owned by resource owner {}",
+        core::ffi::CStr::from_ptr((*kind).name).to_string_lossy(),
         DatumGetPointer(value),
-        (*owner).name
+        core::ffi::CStr::from_ptr((*owner).name).to_string_lossy()
     );
 }
 
@@ -679,8 +685,10 @@ unsafe fn ResourceOwnerReleaseInternal(
     } else if phase == RESOURCE_RELEASE_LOCKS {
         if isTopLevel {
             // For a top-level xact we release all (non-session) locks with a
-            // single lmgr call at the top of recursion.
-            if owner == TopTransactionResourceOwner {
+            // single lmgr call at the top of recursion.  TopTransactionResourceOwner
+            // is owned/set by xact.c; use that canonical value, not the stale
+            // module-local copy.
+            if owner as *const () == crate::access::transam::xact::TopTransactionResourceOwner as *const () {
                 ProcReleaseLocks(isCommit);
                 ReleasePredicateLocks(isCommit, false);
             }
@@ -697,7 +705,10 @@ unsafe fn ResourceOwnerReleaseInternal(
                     ((*owner).locks.as_mut_ptr(), (*owner).nlocks as c_int)
                 };
 
-            if isCommit {
+            // Reassign to parent only if there is one; an orphaned owner (e.g. a
+            // portal resowner whose parent was destroyed by VACUUM's internal
+            // transaction commits) must release its locks instead of crashing.
+            if isCommit && !(*owner).parent.is_null() {
                 LockReassignCurrentOwner(locks, nlocks);
             } else {
                 LockReleaseCurrentOwner(locks, nlocks);
@@ -774,6 +785,7 @@ pub unsafe fn ResourceOwnerReleaseAllOfKind(
 /// ResourceOwnerDelete: delete an owner object and its descendants.
 ///
 /// The caller must have already released all resources in the object tree.
+#[no_mangle]
 pub unsafe fn ResourceOwnerDelete(owner: ResourceOwner) {
     // We had better not be deleting CurrentResourceOwner ...
     Assert!(owner != CurrentResourceOwner);

@@ -166,7 +166,7 @@ unsafe fn pg_mbcliplen(_mbstr: *const c_char, len: c_int, limit: c_int) -> c_int
 
 /* TODO(pg-port): real bmsToString lives in nodes/outfuncs.c */
 unsafe fn bmsToString(bms: *const Bitmapset) -> *mut c_char {
-    unimplemented!("TODO(pg-port): bmsToString - nodes/outfuncs.c")
+    crate::nodes::outfuncs::bmsToString(bms as _) as _
 }
 
 /* TODO(pg-port): get_matching_partitions from partitioning/partprune.c */
@@ -174,7 +174,7 @@ unsafe fn get_matching_partitions(
     context: *mut PartitionPruneContext,
     pruning_steps: *mut List,
 ) -> *mut Bitmapset {
-    unimplemented!("TODO(pg-port): get_matching_partitions - partitioning/partprune.c")
+    crate::partitioning::partprune::get_matching_partitions(context as _, pruning_steps as _) as _
 }
 
 /* TODO(pg-port): check_stack_depth from port/misc.c */
@@ -194,7 +194,7 @@ unsafe fn copyObject<T>(obj: *mut T) -> *mut T {
 
 /* TODO(pg-port): RelationGetIndexList from utils/cache/relcache.c */
 unsafe fn RelationGetIndexList(_relation: Relation) -> *mut List {
-    unimplemented!("TODO(pg-port): RelationGetIndexList - utils/cache/relcache.c")
+    crate::utils::cache::relcache::RelationGetIndexList(_relation as _) as _
 }
 
 /* TODO(pg-port): list_nth_node helper */
@@ -417,6 +417,7 @@ const PARTITION_CACHED_FIND_THRESHOLD: c_int = 16;
  * subsidiary structs that will be allocated from it later on.  Typically
  * it should be estate->es_query_cxt.
  */
+#[no_mangle]
 pub unsafe fn ExecSetupPartitionTupleRouting(
     estate: *mut EState,
     rel: Relation,
@@ -465,6 +466,7 @@ pub unsafe fn ExecSetupPartitionTupleRouting(
  * error message.  An error may also be raised if the found target partition
  * is not a valid target for an INSERT.
  */
+#[no_mangle]
 pub unsafe fn ExecFindPartition(
     mtstate: *mut ModifyTableState,
     rootResultRelInfo: *mut ResultRelInfo,
@@ -1463,6 +1465,7 @@ unsafe fn ExecInitPartitionDispatchInfo(
  *
  * Close all the partitioned tables, leaf partitions, and their indices.
  */
+#[no_mangle]
 pub unsafe fn ExecCleanupTupleRouting(
     mtstate: *mut ModifyTableState,
     proute: *mut PartitionTupleRouting,

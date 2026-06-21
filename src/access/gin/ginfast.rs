@@ -1387,33 +1387,21 @@ pub unsafe extern "C" fn gin_clean_pending_list(fcinfo: FunctionCallInfo) -> Dat
 
 // ===== Local stubs for unported helpers =====
 
-unsafe fn GinInitBuffer(_buffer: Buffer, _flags: u32) {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
+unsafe fn GinInitBuffer(_buffer: Buffer, _flags: u32) { unimplemented!() }
 
-unsafe fn GinPageSetFullRow(_page: Page) {
-    unimplemented!() // TODO: access/gin/gin_private.h
-}
+unsafe fn GinPageSetFullRow(_page: Page) { crate::access::gin::ginblock::GinPageSetFullRow(_page) }
 
 unsafe fn GinPageGetOpaque(_page: Page) -> *mut GinPageOpaqueData {
     unimplemented!() // TODO: access/gin/gin_private.h
 }
 
-unsafe fn GinPageGetMeta(_page: Page) -> *mut GinMetaPageData {
-    unimplemented!() // TODO: access/gin/gin_private.h
-}
+unsafe fn GinPageGetMeta(_page: Page) -> *mut GinMetaPageData { unimplemented!() }
 
-unsafe fn GinPageIsDeleted(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin/gin_private.h
-}
+unsafe fn GinPageIsDeleted(_page: Page) -> bool { crate::access::gin::ginblock::GinPageIsDeleted(_page) }
 
-unsafe fn GinPageHasFullRow(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gin/gin_private.h
-}
+unsafe fn GinPageHasFullRow(_page: Page) -> bool { crate::access::gin::ginblock::GinPageHasFullRow(_page) }
 
-unsafe fn GinNewBuffer(_index: Relation) -> Buffer {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
+unsafe fn GinNewBuffer(_index: Relation) -> Buffer { unimplemented!() }
 
 unsafe fn GinGetPendingListCleanupSize(_index: Relation) -> c_int {
     unimplemented!() // TODO: access/gin/gin_private.h
@@ -1426,9 +1414,7 @@ unsafe fn ginExtractEntries(
     _isNull: bool,
     _nentries: *mut int32,
     _categories: *mut *mut GinNullCategory,
-) -> *mut Datum {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
+) -> *mut Datum { unimplemented!() }
 
 unsafe fn GinFormTuple(
     _ginstate: *mut GinState,
@@ -1443,21 +1429,15 @@ unsafe fn GinFormTuple(
     unimplemented!() // TODO: access/gin/ginentrypage.c
 }
 
-unsafe fn gintuple_get_attrnum(_ginstate: *mut GinState, _tuple: IndexTuple) -> OffsetNumber {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
+unsafe fn gintuple_get_attrnum(_ginstate: *mut GinState, _tuple: IndexTuple) -> OffsetNumber { unimplemented!() }
 
 unsafe fn gintuple_get_key(
     _ginstate: *mut GinState,
     _tuple: IndexTuple,
     _category: *mut GinNullCategory,
-) -> Datum {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
+) -> Datum { unimplemented!() }
 
-unsafe fn ginInitBA(_accum: *mut BuildAccumulator) {
-    unimplemented!() // TODO: access/gin/ginbulk.c
-}
+unsafe fn ginInitBA(_accum: *mut BuildAccumulator) { unimplemented!() }
 
 unsafe fn ginInsertBAEntries(
     _accum: *mut BuildAccumulator,
@@ -1470,9 +1450,7 @@ unsafe fn ginInsertBAEntries(
     unimplemented!() // TODO: access/gin/ginbulk.c
 }
 
-unsafe fn ginBeginBAScan(_accum: *mut BuildAccumulator) {
-    unimplemented!() // TODO: access/gin/ginbulk.c
-}
+unsafe fn ginBeginBAScan(_accum: *mut BuildAccumulator) { unimplemented!() }
 
 unsafe fn ginGetBAEntry(
     _accum: *mut BuildAccumulator,
@@ -1480,9 +1458,7 @@ unsafe fn ginGetBAEntry(
     _key: *mut Datum,
     _category: *mut GinNullCategory,
     _n: *mut uint32,
-) -> *mut ItemPointerData {
-    unimplemented!() // TODO: access/gin/ginbulk.c
-}
+) -> *mut ItemPointerData { unimplemented!() }
 
 unsafe fn ginEntryInsert(
     _ginstate: *mut GinState,
@@ -1492,29 +1468,17 @@ unsafe fn ginEntryInsert(
     _items: *mut ItemPointerData,
     _nitem: uint32,
     _buildStats: *mut GinStatsData,
-) {
-    unimplemented!() // TODO: access/gin/gininsert.c
-}
+) { unimplemented!() }
 
-unsafe fn initGinState(_state: *mut GinState, _index: Relation) {
-    unimplemented!() // TODO: access/gin/ginutil.c
-}
+unsafe fn initGinState(_state: *mut GinState, _index: Relation) { unimplemented!() }
 
-unsafe fn RecordFreeIndexPage(_rel: Relation, _freeBlock: BlockNumber) {
-    unimplemented!() // TODO: storage/freespace/indexfsm.c
-}
+unsafe fn RecordFreeIndexPage(_rel: Relation, _freeBlock: BlockNumber) { crate::storage::freespace::indexfsm::RecordFreeIndexPage(_rel, _freeBlock) }
 
-unsafe fn IndexFreeSpaceMapVacuum(_rel: Relation) {
-    unimplemented!() // TODO: storage/freespace/indexfsm.c
-}
+unsafe fn IndexFreeSpaceMapVacuum(_rel: Relation) { crate::storage::freespace::indexfsm::IndexFreeSpaceMapVacuum(_rel) }
 
-unsafe fn vacuum_delay_point(_is_analyze: bool) {
-    unimplemented!() // TODO: commands/vacuum.c
-}
+unsafe fn vacuum_delay_point(_is_analyze: bool) { crate::commands::vacuum::vacuum_delay_point(_is_analyze) }
 
-unsafe fn AmAutoVacuumWorkerProcess() -> bool {
-    unimplemented!() // TODO: miscadmin.h
-}
+unsafe fn AmAutoVacuumWorkerProcess() -> bool { crate::miscadmin::AmAutoVacuumWorkerProcess() }
 
 unsafe fn LockPage(_relation: Relation, _blkno: BlockNumber, _lockmode: c_int) {
     unimplemented!() // TODO: storage/lmgr/lmgr.c
@@ -1532,9 +1496,7 @@ unsafe fn CheckForSerializableConflictIn(
     _relation: Relation,
     _tuple: ItemPointer,
     _blkno: BlockNumber,
-) {
-    unimplemented!() // TODO: storage/lmgr/predicate.c
-}
+) { unimplemented!() }
 
 unsafe fn object_ownercheck(_classid: Oid, _objectid: Oid, _roleid: Oid) -> bool {
     unimplemented!() // TODO: catalog/aclchk.c
@@ -1544,13 +1506,9 @@ unsafe fn aclcheck_error(_aclerr: AclResult, _objtype: ObjectType, _objectname: 
     unimplemented!() // TODO: catalog/aclchk.c
 }
 
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 
-unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO: access/transam/xlog.c
-}
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
 
 unsafe fn index_open(_relationId: Oid, _lockmode: c_int) -> Relation {
     unimplemented!() // TODO: access/index/indexam.c
@@ -1568,13 +1526,9 @@ unsafe fn AllocSetContextCreate(
     _parent: MemoryContext,
     _name: *const c_char,
     _sizes: (Size, Size, Size),
-) -> MemoryContext {
-    unimplemented!() // TODO: utils/mmgr/aset.c
-}
+) -> MemoryContext { crate::utils::mmgr::aset::AllocSetContextCreate(_parent, _name, _sizes) }
 
-unsafe fn XLogEnsureRecordSpace(_max_block_id: c_int, _ndatas: c_int) {
-    unimplemented!() // TODO: access/transam/xloginsert.c
-}
+unsafe fn XLogEnsureRecordSpace(_max_block_id: c_int, _ndatas: c_int) { crate::access::transam::xloginsert::XLogEnsureRecordSpace(_max_block_id, _ndatas) }
 
 unsafe fn XLogRegisterBufData(_block_id: u8, _data: *mut c_char, _len: c_int) {
     unimplemented!() // TODO: access/transam/xloginsert.c
@@ -1610,9 +1564,7 @@ unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
     unimplemented!() // TODO: storage/bufmgr.c
 }
 
-unsafe fn RelationNeedsWAL(_relation: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_relation) }
 
 // ----- WAL insertion (access/transam/xloginsert.c) -----
 

@@ -87,7 +87,7 @@ use crate::lib::pairingheap::{
 // Local stub types for not-yet-ported dependencies.
 // ----------------------------------------------------------------
 
-type IndexScanDesc = *mut c_void;
+type IndexScanDesc = crate::access::relscan::IndexScanDesc;
 type ParallelContext = c_void;
 type ParallelWorkerContext = c_void;
 type ParallelIndexScanDesc = *mut c_void;
@@ -111,11 +111,11 @@ struct ReorderTuple {
 // ----------------------------------------------------------------
 
 unsafe fn index_open(_relationId: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_open(_relationId as _, _lockmode as _) as _
 }
 
 unsafe fn index_close(_relation: Relation, _lockmode: LOCKMODE) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_close(_relation as _, _lockmode as _)
 }
 
 unsafe fn index_beginscan(
@@ -126,7 +126,7 @@ unsafe fn index_beginscan(
     _nkeys: c_int,
     _norderbys: c_int,
 ) -> IndexScanDesc {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_beginscan(_heapRelation as _, _indexRelation as _, _snapshot as _, _instrument as _, _nkeys as _, _norderbys as _) as _
 }
 
 unsafe fn index_beginscan_parallel(
@@ -137,7 +137,7 @@ unsafe fn index_beginscan_parallel(
     _norderbys: c_int,
     _pscan: ParallelIndexScanDesc,
 ) -> IndexScanDesc {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_beginscan_parallel(_heaprel as _, _indexrel as _, _instrument as _, _nkeys as _, _norderbys as _, _pscan as _) as _
 }
 
 unsafe fn index_rescan(
@@ -147,27 +147,27 @@ unsafe fn index_rescan(
     _orderbys: *mut ScanKeyData,
     _norderbys: c_int,
 ) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_rescan(_scan as _, _keys as _, _nkeys as _, _orderbys as _, _norderbys as _)
 }
 
 unsafe fn index_endscan(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_endscan(_scan as _)
 }
 
 unsafe fn index_markpos(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_markpos(_scan as _)
 }
 
 unsafe fn index_restrpos(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_restrpos(_scan as _)
 }
 
 unsafe fn index_getnext_slot(
-    _scan: IndexScanDesc,
-    _direction: ScanDirection,
-    _slot: *mut TupleTableSlot,
+    scan: IndexScanDesc,
+    direction: ScanDirection,
+    slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_getnext_slot(scan as _, direction as _, slot as _)
 }
 
 unsafe fn index_parallelscan_estimate(
@@ -179,7 +179,7 @@ unsafe fn index_parallelscan_estimate(
     _parallel_aware: bool,
     _nworkers: c_int,
 ) -> Size {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_parallelscan_estimate(_indexRelation as _, _nkeys as _, _norderbys as _, _snapshot as _, _instrument as _, _parallel_aware as _, _nworkers as _) as _
 }
 
 unsafe fn index_parallelscan_initialize(
@@ -192,50 +192,50 @@ unsafe fn index_parallelscan_initialize(
     _sharedInfo: *mut *mut SharedIndexScanInstrumentation,
     _target: ParallelIndexScanDesc,
 ) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_parallelscan_initialize(_heapRelation as _, _indexRelation as _, _snapshot as _, _instrument as _, _parallel_aware as _, _nworkers as _, _sharedInfo as _, _target as _)
 }
 
 unsafe fn index_parallelrescan(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_parallelrescan(_scan as _)
 }
 
-unsafe fn RelationGetDescr(_relation: Relation) -> TupleDesc {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationGetDescr(relation: Relation) -> TupleDesc {
+    crate::utils::rel::RelationGetDescr(relation as _) as _
 }
 
 unsafe fn table_slot_callbacks(
     _relation: Relation,
 ) -> *const crate::executor::tuptable::TupleTableSlotOps {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_slot_callbacks(_relation as _) as _
 }
 
 unsafe fn IsParallelWorker() -> bool {
-    unimplemented!() // TODO: miscadmin.h
+    crate::access::transam::parallel::ParallelWorkerNumber >= 0
 }
 
 unsafe fn shm_toc_estimate_chunk(_estimator: *mut c_void, _size: Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 
 unsafe fn shm_toc_estimate_keys(_estimator: *mut c_void, _nkeys: Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 
 unsafe fn shm_toc_allocate(_toc: *mut c_void, _nbytes: Size) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 
 unsafe fn shm_toc_insert(_toc: *mut c_void, _key: u64, _address: *mut c_void) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 
 unsafe fn shm_toc_lookup(_toc: *mut c_void, _key: u64, _noError: bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }
 
 // utils/memutils.h: OffsetToPointer().
 unsafe fn OffsetToPointer(_base: *mut c_void, _offset: usize) -> *mut c_void {
-    unimplemented!() // TODO: utils/memutils.h
+    crate::c::OffsetToPointer(_base as _, _offset as _) as _
 }
 
 // utils/fmgr.h: TypeIsToastable() macro.
@@ -267,7 +267,7 @@ unsafe fn deconstruct_array(
     _nullsp: *mut *mut bool,
     _nelemsp: *mut c_int,
 ) {
-    unimplemented!() // TODO: utils/arrayfuncs.c
+    crate::utils::adt::arrayfuncs::deconstruct_array(_array as _, _elmtype as _, _elmlen as _, _elmbyval as _, _elmalign as _, _elemsp as _, _nullsp as _, _nelemsp as _)
 }
 
 // executor/instrument.h: InstrCountFiltered2() macro.
@@ -278,28 +278,28 @@ unsafe fn InstrCountFiltered2(_node: *mut IndexScanState, _delta: u64) {
 // access/skey.h: ScanKeyData field accessors (the IndexScanState ScanKeyData is
 // presently an opaque stub; these stand in for the direct struct member
 // references until access/skey.h's struct is unified here).
-unsafe fn skey_sk_flags(_sk: *mut ScanKeyData) -> c_int {
-    unimplemented!() // TODO: access/skey.h (sk->sk_flags)
+unsafe fn skey_sk_flags(sk: *mut ScanKeyData) -> c_int {
+    (*sk).sk_flags
 }
 
-unsafe fn skey_set_sk_flags(_sk: *mut ScanKeyData, _v: c_int) {
-    unimplemented!() // TODO: access/skey.h (sk->sk_flags)
+unsafe fn skey_set_sk_flags(sk: *mut ScanKeyData, v: c_int) {
+    (*sk).sk_flags = v;
 }
 
-unsafe fn skey_sk_attno(_sk: *mut ScanKeyData) -> AttrNumber {
-    unimplemented!() // TODO: access/skey.h (sk->sk_attno)
+unsafe fn skey_sk_attno(sk: *mut ScanKeyData) -> AttrNumber {
+    (*sk).sk_attno
 }
 
-unsafe fn skey_set_sk_attno(_sk: *mut ScanKeyData, _v: AttrNumber) {
-    unimplemented!() // TODO: access/skey.h (sk->sk_attno)
+unsafe fn skey_set_sk_attno(sk: *mut ScanKeyData, v: AttrNumber) {
+    (*sk).sk_attno = v;
 }
 
-unsafe fn skey_set_sk_strategy(_sk: *mut ScanKeyData, _v: StrategyNumber) {
-    unimplemented!() // TODO: access/skey.h (sk->sk_strategy)
+unsafe fn skey_set_sk_strategy(sk: *mut ScanKeyData, v: StrategyNumber) {
+    (*sk).sk_strategy = v;
 }
 
-unsafe fn skey_set_sk_argument(_sk: *mut ScanKeyData, _v: Datum) {
-    unimplemented!() // TODO: access/skey.h (sk->sk_argument)
+unsafe fn skey_set_sk_argument(sk: *mut ScanKeyData, v: Datum) {
+    (*sk).sk_argument = v;
 }
 
 unsafe fn ScanKeyEntryInitialize_op(
@@ -327,41 +327,41 @@ unsafe fn ScanKeyEntryInitialize_op(
 }
 
 // access/relscan.h: IndexScanDescData field accessors.
-unsafe fn idxsd_xs_recheck(_scan: IndexScanDesc) -> bool {
-    unimplemented!() // TODO: access/relscan.h (scan->xs_recheck)
+unsafe fn idxsd_xs_recheck(scan: IndexScanDesc) -> bool {
+    (*scan).xs_recheck
 }
 
-unsafe fn idxsd_xs_recheckorderby(_scan: IndexScanDesc) -> bool {
-    unimplemented!() // TODO: access/relscan.h (scan->xs_recheckorderby)
+unsafe fn idxsd_xs_recheckorderby(scan: IndexScanDesc) -> bool {
+    (*scan).xs_recheckorderby
 }
 
-unsafe fn idxsd_xs_orderbyvals(_scan: IndexScanDesc) -> *mut Datum {
-    unimplemented!() // TODO: access/relscan.h (scan->xs_orderbyvals)
+unsafe fn idxsd_xs_orderbyvals(scan: IndexScanDesc) -> *mut Datum {
+    (*scan).xs_orderbyvals
 }
 
-unsafe fn idxsd_xs_orderbynulls(_scan: IndexScanDesc) -> *mut bool {
-    unimplemented!() // TODO: access/relscan.h (scan->xs_orderbynulls)
+unsafe fn idxsd_xs_orderbynulls(scan: IndexScanDesc) -> *mut bool {
+    (*scan).xs_orderbynulls
 }
 
-unsafe fn idxsd_numberOfOrderBys(_scan: IndexScanDesc) -> c_int {
-    unimplemented!() // TODO: access/relscan.h (scan->numberOfOrderBys)
+unsafe fn idxsd_numberOfOrderBys(scan: IndexScanDesc) -> c_int {
+    (*scan).numberOfOrderBys
 }
 
 // utils/rel.h: index Relation accessors.
 unsafe fn IndexRelationGetNumberOfKeyAttributes(_relation: Relation) -> c_int {
-    unimplemented!() // TODO: utils/rel.h (relation->rd_index->indnkeyatts)
+    crate::access::nbtree::nbtdedup::IndexRelationGetNumberOfKeyAttributes(_relation as _) as _
 }
 
-unsafe fn rel_opfamily(_index: Relation, _attnum: c_int) -> Oid {
-    unimplemented!() // TODO: utils/rel.h (index->rd_opfamily[attnum])
+unsafe fn rel_opfamily(index: Relation, attnum: c_int) -> Oid {
+    *(*(index as *mut crate::utils::rel::RelationData)).rd_opfamily.add(attnum as usize)
 }
 
-unsafe fn rel_amcanorder(_index: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h (index->rd_indam->amcanorder)
+unsafe fn rel_amcanorder(index: Relation) -> bool {
+    (*(*(index as *mut crate::utils::rel::RelationData)).rd_indam).amcanorder
 }
 
-unsafe fn rel_amsearcharray(_index: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h (index->rd_indam->amsearcharray)
+unsafe fn rel_amsearcharray(index: Relation) -> bool {
+    (*(*(index as *mut crate::utils::rel::RelationData)).rd_indam).amsearcharray
 }
 
 // access/nbtree.h: BTORDER_PROC support function number.
@@ -454,6 +454,7 @@ unsafe fn IndexNext(node: *mut ScanState) -> *mut TupleTableSlot {
      * extract necessary information from index scan node
      */
     estate = (*node).ss.ps.state;
+    if std::env::var("PDB_IS").is_ok() { eprintln!("[IndexNext] called NumScanKeys={} NumRuntimeKeys={}", (*node).iss_NumScanKeys, (*node).iss_NumRuntimeKeys); }
 
     /*
      * Determine which direction to scan the index in based on the plan's scan
@@ -1661,6 +1662,11 @@ pub unsafe fn ExecIndexBuildScanKeys(
             }
 
             varattno = (*(leftop as *mut Var)).varattno;
+            if std::env::var("PDB_IS").is_ok() {
+                let v = leftop as *mut Var;
+                eprintln!("[ExecIndexBuildScanKeys] leftop={:p} varno={} varattno={} vartype={} indnkeyatts={} opno={} sizeof(Var)={}",
+                    v, (*v).varno, (*v).varattno, (*v).vartype, indnkeyatts, opno, core::mem::size_of::<Var>());
+            }
             if varattno < 1 || varattno as c_int > indnkeyatts {
                 elog!(ERROR, "bogus index qualification");
             }
@@ -1930,6 +1936,11 @@ pub unsafe fn ExecIndexBuildScanKeys(
             }
 
             varattno = (*(leftop as *mut Var)).varattno;
+            if std::env::var("PDB_IS").is_ok() {
+                let v = leftop as *mut Var;
+                eprintln!("[ExecIndexBuildScanKeys] leftop={:p} varno={} varattno={} vartype={} indnkeyatts={} opno={} sizeof(Var)={}",
+                    v, (*v).varno, (*v).varattno, (*v).vartype, indnkeyatts, opno, core::mem::size_of::<Var>());
+            }
             if varattno < 1 || varattno as c_int > indnkeyatts {
                 elog!(ERROR, "bogus index qualification");
             }

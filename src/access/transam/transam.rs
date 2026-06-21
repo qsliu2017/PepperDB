@@ -30,11 +30,9 @@ pub const TRANSACTION_STATUS_SUB_COMMITTED: XidStatus = 0x03;
  * External functions not ported yet (access/clog.c, access/subtrans.c,
  * utils/time/snapmgr.c).  Stub locally so call sites translate 1:1.
  */
-// TODO: import from crate::access::clog once ported.
 unsafe fn TransactionIdGetStatus(_xid: TransactionId, _lsn: *mut XLogRecPtr) -> XidStatus {
-    unimplemented!()
+    crate::access::transam::clog::TransactionIdGetStatus(_xid, _lsn as _)
 }
-// TODO: import from crate::access::clog once ported.
 unsafe fn TransactionIdSetTreeStatus(
     _xid: TransactionId,
     _nsubxids: c_int,
@@ -42,11 +40,10 @@ unsafe fn TransactionIdSetTreeStatus(
     _status: XidStatus,
     _lsn: XLogRecPtr,
 ) {
-    unimplemented!()
+    crate::access::transam::clog::TransactionIdSetTreeStatus(_xid, _nsubxids, _subxids, _status, _lsn as _)
 }
-// TODO: import from crate::access::subtrans once ported.
 unsafe fn SubTransGetParent(_xid: TransactionId) -> TransactionId {
-    unimplemented!()
+    crate::access::transam::subtrans::SubTransGetParent(_xid)
 }
 
 /*
@@ -157,6 +154,9 @@ pub unsafe fn TransactionIdDidCommit(transactionId: TransactionId) -> bool {
     let xidstatus: XidStatus;
 
     xidstatus = TransactionLogFetch(transactionId);
+    if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT TransactionIdDidCommit xid={} status={}", transactionId, xidstatus);
+    }
 
     /*
      * If it's marked committed, it's committed.

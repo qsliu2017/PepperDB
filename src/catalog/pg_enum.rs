@@ -64,7 +64,7 @@ const BTEqualStrategyNumber: c_int = 3;
 const F_OIDEQ: Oid = 184;
 
 // utils/syscache.h - SysCacheIdentifier ENUMTYPOIDNAME.
-const ENUMTYPOIDNAME: c_int = 0;
+const ENUMTYPOIDNAME: c_int = crate::utils::cache::syscache_ids_gen::ENUMTYPOIDNAME;
 
 // utils/errcodes.h.
 const ERRCODE_INVALID_NAME: c_int = 0;
@@ -92,39 +92,22 @@ const HASH_FIND: c_int = 0;
 const HASH_ENTER: c_int = 1;
 
 // utils/memutils.h - top-of-transaction memory context.
-// TODO(pg-port): import crate::utils::mmgr::mcxt::TopTransactionContext.
-extern "C" {
-    static mut TopTransactionContext: MemoryContext;
+#[inline]
+unsafe fn TopTransactionContext() -> MemoryContext {
+    crate::utils::mmgr::mcxt::TopTransactionContext as MemoryContext
 }
 
-#[repr(C)]
-struct HASHCTL {
-    keysize: Size,
-    entrysize: Size,
-    hcxt: MemoryContext,
-}
+use crate::utils::hash::dynahash::HASHCTL;
 
-#[repr(C)]
-struct HASH_SEQ_STATUS {
-    _private: [u8; 16],
-}
+use crate::utils::hash::dynahash::HASH_SEQ_STATUS;
 
-/* executor/tuptable.h - minimal mirror of the fields used here. */
-#[repr(C)]
-struct TupleTableSlot {
-    tts_values: *mut Datum,
-    tts_isnull: *mut bool,
-    tts_tupleDescriptor: *mut TupleDescData,
-}
-#[repr(C)]
-struct TupleDescData {
-    natts: c_int,
-}
+/* Use the canonical slot/tupdesc structs: a local truncated mirror put
+ * tts_values/tts_isnull at the wrong offsets (the leading type/flags/nvalid/ops
+ * fields were omitted), causing wild writes and garbage natts. */
+use crate::executor::tuptable::TupleTableSlot;
+use crate::access::common::tupdesc::TupleDescData;
 
-#[repr(C)]
-struct ScanKeyData {
-    _private: [u8; 64],
-}
+use crate::access::common::scankey::ScanKeyData;
 
 /* utils/catcache.h - CatCList / CatCTup minimal mirror. */
 #[repr(C)]
@@ -137,12 +120,9 @@ struct CatCTup {
     tuple: HeapTupleData,
 }
 
-// executor/tuptable.h slot ops marker; only its address is used here.
-#[repr(C)]
-struct TupleTableSlotOps {
-    _private: [u8; 0],
-}
-static TTSOpsHeapTuple: TupleTableSlotOps = TupleTableSlotOps { _private: [] };
+// executor/tuptable.h slot ops: use the canonical TTSOpsHeapTuple (its
+// base_slot_size field is read by MakeTupleTableSlot to size the allocation).
+use crate::executor::execTuples::TTSOpsHeapTuple;
 
 /*
  * FormData_pg_enum - a pg_enum row.
@@ -407,7 +387,7 @@ unsafe fn init_uncommitted_enum_types() {
 
     hash_ctl.keysize = core::mem::size_of::<Oid>();
     hash_ctl.entrysize = core::mem::size_of::<Oid>();
-    hash_ctl.hcxt = TopTransactionContext;
+    hash_ctl.hcxt = TopTransactionContext() as _;
     uncommitted_enum_types = hash_create(c"Uncommitted enum types".as_ptr(),
                                          32,
                                          &mut hash_ctl,
@@ -422,7 +402,7 @@ unsafe fn init_uncommitted_enum_values() {
 
     hash_ctl.keysize = core::mem::size_of::<Oid>();
     hash_ctl.entrysize = core::mem::size_of::<Oid>();
-    hash_ctl.hcxt = TopTransactionContext;
+    hash_ctl.hcxt = TopTransactionContext() as _;
     uncommitted_enum_values = hash_create(c"Uncommitted enum values".as_ptr(),
                                           32,
                                           &mut hash_ctl,
@@ -979,66 +959,138 @@ fn Min(a: c_int, b: c_int) -> c_int {
     if a < b { a } else { b }
 }
 
-unsafe fn palloc(_size: usize) -> *mut c_void { unimplemented!() }
-unsafe fn palloc0(_size: usize) -> *mut c_void { unimplemented!() }
-unsafe fn pfree(_p: *mut c_void) { unimplemented!() }
-unsafe fn memset(_s: *mut c_void, _c: c_int, _n: usize) -> *mut c_void { unimplemented!() }
-unsafe fn strlen(_s: *const c_char) -> usize { unimplemented!() }
-unsafe fn strcmp(_a: *const c_char, _b: *const c_char) -> c_int { unimplemented!() }
-unsafe fn qsort(_base: *mut c_void, _nmemb: usize, _size: usize,
-                _cmp: unsafe fn(*const c_void, *const c_void) -> c_int) { unimplemented!() }
-unsafe fn strVal(_v: *mut c_void) -> *mut c_char { unimplemented!() }
+unsafe fn palloc(size: usize) -> *mut c_void { crate::utils::palloc::palloc(size as _) as _ }
+unsafe fn palloc0(size: usize) -> *mut c_void { crate::utils::palloc::palloc0(size as _) as _ }
+unsafe fn pfree(p: *mut c_void) { crate::utils::palloc::pfree(p as _) }
+unsafe fn memset(s: *mut c_void, c: c_int, n: usize) -> *mut c_void { libc::memset(s, c, n) }
+unsafe fn strlen(s: *const c_char) -> usize { libc::strlen(s) }
+unsafe fn strcmp(a: *const c_char, b: *const c_char) -> c_int { libc::strcmp(a, b) }
+unsafe fn qsort(base: *mut c_void, nmemb: usize, size: usize,
+                cmp: unsafe fn(*const c_void, *const c_void) -> c_int) {
+    crate::port::qsort::pg_qsort(base, nmemb, size, cmp)
+}
+unsafe fn strVal(v: *mut c_void) -> *mut c_char {
+    crate::strVal!(v as *mut crate::nodes::value::String) as _
+}
 
-unsafe fn table_open(_relationId: Oid, _lockmode: c_int) -> Relation { unimplemented!() }
-unsafe fn table_close(_relation: Relation, _lockmode: c_int) { unimplemented!() }
-unsafe fn GetNewOidWithIndex(_rel: Relation, _indexId: Oid, _oidcolumn: c_int) -> Oid { unimplemented!() }
-unsafe fn CatalogOpenIndexes(_rel: Relation) -> CatalogIndexState { unimplemented!() }
-unsafe fn CatalogCloseIndexes(_indstate: CatalogIndexState) { unimplemented!() }
-unsafe fn CatalogTuplesMultiInsertWithInfo(_rel: Relation, _slot: *mut *mut TupleTableSlot,
-                                           _ntuples: c_int, _indstate: CatalogIndexState) { unimplemented!() }
-unsafe fn CatalogTupleInsert(_rel: Relation, _tup: HeapTuple) { unimplemented!() }
-unsafe fn CatalogTupleUpdate(_rel: Relation, _otid: *mut ItemPointerData, _tup: HeapTuple) { unimplemented!() }
-unsafe fn CatalogTupleDelete(_rel: Relation, _tid: *mut ItemPointerData) { unimplemented!() }
-unsafe fn RelationGetDescr(_rel: Relation) -> TupleDesc { unimplemented!() }
-unsafe fn MakeSingleTupleTableSlot(_desc: TupleDesc, _ops: *const c_void) -> *mut TupleTableSlot { unimplemented!() }
-unsafe fn ExecClearTuple(_slot: *mut c_void) { unimplemented!() }
-unsafe fn ExecStoreVirtualTuple(_slot: *mut c_void) { unimplemented!() }
-unsafe fn ExecDropSingleTupleTableSlot(_slot: *mut c_void) { unimplemented!() }
-unsafe fn ScanKeyInit(_entry: *mut ScanKeyData, _attno: c_int, _strategy: c_int,
-                      _procedure: Oid, _argument: Datum) { unimplemented!() }
-unsafe fn systable_beginscan(_rel: Relation, _indexId: Oid, _indexOK: bool,
-                             _snapshot: *mut SnapshotData, _nkeys: c_int,
-                             _key: *mut ScanKeyData) -> SysScanDesc { unimplemented!() }
-unsafe fn systable_getnext(_scan: SysScanDesc) -> HeapTuple { unimplemented!() }
-unsafe fn systable_endscan(_scan: SysScanDesc) { unimplemented!() }
-unsafe fn heap_form_tuple(_desc: TupleDesc, _values: *mut Datum, _isnull: *mut bool) -> HeapTuple { unimplemented!() }
-unsafe fn heap_copytuple(_tup: HeapTuple) -> HeapTuple { unimplemented!() }
-unsafe fn heap_freetuple(_tup: HeapTuple) { unimplemented!() }
+unsafe fn table_open(relationId: Oid, lockmode: c_int) -> Relation {
+    crate::access::table::table::table_open(relationId, lockmode as _) as _
+}
+unsafe fn table_close(relation: Relation, lockmode: c_int) {
+    crate::access::table::table::table_close(relation as _, lockmode as _)
+}
+unsafe fn GetNewOidWithIndex(rel: Relation, indexId: Oid, oidcolumn: c_int) -> Oid {
+    crate::catalog::catalog::GetNewOidWithIndex(rel as _, indexId, oidcolumn as _)
+}
+unsafe fn CatalogOpenIndexes(rel: Relation) -> CatalogIndexState {
+    crate::catalog::indexing::CatalogOpenIndexes(rel as _) as _
+}
+unsafe fn CatalogCloseIndexes(indstate: CatalogIndexState) {
+    crate::catalog::indexing::CatalogCloseIndexes(indstate as _)
+}
+unsafe fn CatalogTuplesMultiInsertWithInfo(rel: Relation, slot: *mut *mut TupleTableSlot,
+                                           ntuples: c_int, indstate: CatalogIndexState) {
+    crate::catalog::indexing::CatalogTuplesMultiInsertWithInfo(rel as _, slot as _, ntuples, indstate as _)
+}
+unsafe fn CatalogTupleInsert(rel: Relation, tup: HeapTuple) {
+    crate::catalog::indexing::CatalogTupleInsert(rel as _, tup as _)
+}
+unsafe fn CatalogTupleUpdate(rel: Relation, otid: *mut ItemPointerData, tup: HeapTuple) {
+    crate::catalog::indexing::CatalogTupleUpdate(rel as _, otid as _, tup as _)
+}
+unsafe fn CatalogTupleDelete(rel: Relation, tid: *mut ItemPointerData) {
+    crate::catalog::indexing::CatalogTupleDelete(rel as _, tid as _)
+}
+unsafe fn RelationGetDescr(rel: Relation) -> TupleDesc {
+    crate::utils::rel::RelationGetDescr(rel as _) as _
+}
+unsafe fn MakeSingleTupleTableSlot(desc: TupleDesc, ops: *const c_void) -> *mut TupleTableSlot {
+    crate::executor::execTuples::MakeSingleTupleTableSlot(desc as _, ops as _) as _
+}
+unsafe fn ExecClearTuple(slot: *mut c_void) { crate::executor::tuptable::ExecClearTuple(slot as _); }
+unsafe fn ExecStoreVirtualTuple(slot: *mut c_void) { crate::executor::execTuples::ExecStoreVirtualTuple(slot as _); }
+unsafe fn ExecDropSingleTupleTableSlot(slot: *mut c_void) {
+    crate::executor::execTuples::ExecDropSingleTupleTableSlot(slot as _)
+}
+unsafe fn ScanKeyInit(entry: *mut ScanKeyData, attno: c_int, strategy: c_int,
+                      procedure: Oid, argument: Datum) {
+    crate::access::common::scankey::ScanKeyInit(entry as _, attno as _, strategy as _, procedure, argument as _)
+}
+unsafe fn systable_beginscan(rel: Relation, indexId: Oid, indexOK: bool,
+                             snapshot: *mut SnapshotData, nkeys: c_int,
+                             key: *mut ScanKeyData) -> SysScanDesc {
+    crate::access::index::genam::systable_beginscan(rel as _, indexId, indexOK, snapshot as _, nkeys, key as _) as _
+}
+unsafe fn systable_getnext(scan: SysScanDesc) -> HeapTuple {
+    crate::access::index::genam::systable_getnext(scan as _) as _
+}
+unsafe fn systable_endscan(scan: SysScanDesc) { crate::access::index::genam::systable_endscan(scan as _) }
+unsafe fn heap_form_tuple(desc: TupleDesc, values: *mut Datum, isnull: *mut bool) -> HeapTuple {
+    crate::access::common::heaptuple::heap_form_tuple(desc as _, values as _, isnull) as _
+}
+unsafe fn heap_copytuple(tup: HeapTuple) -> HeapTuple {
+    crate::access::common::heaptuple::heap_copytuple(tup as _) as _
+}
+unsafe fn heap_freetuple(tup: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(tup as _) }
 unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool { !tuple.is_null() }
-unsafe fn namestrcpy(_name: Name, _src: *const c_char) -> c_int { unimplemented!() }
+unsafe fn namestrcpy(name: Name, src: *const c_char) -> c_int {
+    crate::utils::adt::name::namestrcpy(name as _, src);
+    0
+}
 
-unsafe fn LockDatabaseObject(_classid: Oid, _objid: Oid, _objsubid: u16, _lockmode: c_int) { unimplemented!() }
-unsafe fn SearchSysCache2(_cacheId: c_int, _key1: Datum, _key2: Datum) -> HeapTuple { unimplemented!() }
-unsafe fn ReleaseSysCache(_tuple: HeapTuple) { unimplemented!() }
-unsafe fn SearchSysCacheList1(_cacheId: c_int, _key1: Datum) -> *mut CatCList { unimplemented!() }
-unsafe fn ReleaseCatCacheList(_list: *mut CatCList) { unimplemented!() }
+unsafe fn LockDatabaseObject(classid: Oid, objid: Oid, objsubid: u16, lockmode: c_int) {
+    crate::storage::lmgr::lmgr::LockDatabaseObject(classid, objid, objsubid as _, lockmode as _)
+}
+unsafe fn SearchSysCache2(cacheId: c_int, key1: Datum, key2: Datum) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCache2(cacheId, key1 as _, key2 as _) as _
+}
+unsafe fn ReleaseSysCache(tuple: HeapTuple) {
+    crate::utils::cache::syscache::ReleaseSysCache(tuple as _)
+}
+unsafe fn SearchSysCacheList1(cacheId: c_int, key1: Datum) -> *mut CatCList {
+    crate::utils::cache::lsyscache::SearchSysCacheList1(cacheId, key1 as _) as _
+}
+unsafe fn ReleaseCatCacheList(list: *mut CatCList) {
+    crate::utils::cache::catcache::ReleaseCatCacheList(list as _)
+}
 
-unsafe fn GetCurrentTransactionNestLevel() -> c_int { unimplemented!() }
-unsafe fn CommandCounterIncrement() { unimplemented!() }
+unsafe fn GetCurrentTransactionNestLevel() -> c_int {
+    crate::access::transam::xact::GetCurrentTransactionNestLevel()
+}
+unsafe fn CommandCounterIncrement() { crate::access::transam::xact::CommandCounterIncrement() }
 
-unsafe fn hash_create(_tabname: *const c_char, _nelem: c_long,
-                      _info: *mut HASHCTL, _flags: c_int) -> *mut HTAB { unimplemented!() }
-unsafe fn hash_search(_hashp: *mut HTAB, _keyPtr: *mut c_void, _action: c_int,
-                      _foundPtr: *mut bool) -> *mut c_void { unimplemented!() }
-unsafe fn hash_seq_init(_status: *mut HASH_SEQ_STATUS, _hashp: *mut HTAB) { unimplemented!() }
-unsafe fn hash_seq_search(_status: *mut HASH_SEQ_STATUS) -> *mut c_void { unimplemented!() }
-unsafe fn hash_get_num_entries(_hashp: *mut HTAB) -> c_long { unimplemented!() }
+unsafe fn hash_create(tabname: *const c_char, nelem: c_long,
+                      info: *mut HASHCTL, flags: c_int) -> *mut HTAB {
+    crate::utils::hash::dynahash::hash_create(tabname, nelem as _, info as _, flags) as _
+}
+unsafe fn hash_search(hashp: *mut HTAB, keyPtr: *mut c_void, action: c_int,
+                      foundPtr: *mut bool) -> *mut c_void {
+    let act = if action == HASH_FIND {
+        crate::utils::hash::dynahash::HASHACTION::HASH_FIND
+    } else {
+        crate::utils::hash::dynahash::HASHACTION::HASH_ENTER
+    };
+    crate::utils::hash::dynahash::hash_search(hashp as _, keyPtr, act, foundPtr) as _
+}
+unsafe fn hash_seq_init(status: *mut HASH_SEQ_STATUS, hashp: *mut HTAB) {
+    crate::utils::hash::dynahash::hash_seq_init(status as _, hashp as _)
+}
+unsafe fn hash_seq_search(status: *mut HASH_SEQ_STATUS) -> *mut c_void {
+    crate::utils::hash::dynahash::hash_seq_search(status as _) as _
+}
+unsafe fn hash_get_num_entries(hashp: *mut HTAB) -> c_long {
+    crate::utils::hash::dynahash::hash_get_num_entries(hashp as _) as _
+}
 
 fn ObjectIdGetDatum(o: Oid) -> Datum { o as Datum }
 fn Float4GetDatum(v: float4) -> Datum { v.to_bits() as Datum }
 unsafe fn NameGetDatum(name: *const NameData) -> Datum { name as Datum }
 unsafe fn CStringGetDatum(s: *const c_char) -> Datum { s as Datum }
-unsafe fn oid_cmp(_p1: *const c_void, _p2: *const c_void) -> c_int { unimplemented!() }
+unsafe fn oid_cmp(p1: *const c_void, p2: *const c_void) -> c_int {
+    let a = *(p1 as *const Oid);
+    let b = *(p2 as *const Oid);
+    if a < b { -1 } else if a > b { 1 } else { 0 }
+}
 
 // miscadmin.h - binary upgrade mode flag.
 const IsBinaryUpgrade: bool = false;

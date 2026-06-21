@@ -43,13 +43,10 @@ const FREENEXT_NOT_IN_LIST: c_int = -2;
 const InvalidBuffer: Buffer = 0;
 const NUM_BUFFER_PARTITIONS: c_int = 128;
 
-// BufferDesc stub (storage/buf_internals.h)
-#[repr(C)]
-pub struct BufferDesc {
-    pub buf_id: c_int,
-    pub freeNext: c_int,
-    // ... other fields omitted
-}
+// BufferDesc (storage/buf_internals.h) -- use the canonical layout. A local
+// stub here had buf_id/freeNext at the wrong offsets, so freelist writes to
+// freeNext clobbered the real descriptor's tag.dbOid (offset 4).
+use crate::storage::buf_internals::BufferDesc;
 
 // BufferAccessStrategy is a pointer to BufferAccessStrategyData
 type BufferAccessStrategy = *mut BufferAccessStrategyData;
@@ -923,94 +920,114 @@ pub struct Latch {
     _opaque: [u8; 0],
 }
 
-unsafe fn SetLatch(_latch: *mut Latch) {
-    unimplemented!() // TODO: storage/latch.c
+unsafe fn SetLatch(latch: *mut Latch) {
+    crate::storage::ipc::latch::SetLatch(latch as *mut crate::storage::ipc::latch::Latch)
 }
 
-unsafe fn GetBufferDescriptor(_id: c_int) -> *mut BufferDesc {
-    unimplemented!() // TODO: storage/buffer/buf_init.c (buf_internals.h)
+unsafe fn GetBufferDescriptor(id: c_int) -> *mut BufferDesc {
+    crate::storage::buf_internals::GetBufferDescriptor(id as u32) as *mut BufferDesc
 }
 
-unsafe fn BufferDescriptorGetBuffer(_bdesc: *mut BufferDesc) -> Buffer {
-    unimplemented!() // TODO: storage/buf_internals.h
+unsafe fn BufferDescriptorGetBuffer(bdesc: *mut BufferDesc) -> Buffer {
+    crate::storage::buf_internals::BufferDescriptorGetBuffer(
+        bdesc as *const crate::storage::buf_internals::BufferDesc,
+    )
 }
 
-unsafe fn LockBufHdr(_desc: *mut BufferDesc) -> u32 {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+unsafe fn LockBufHdr(desc: *mut BufferDesc) -> u32 {
+    crate::storage::buf_internals::LockBufHdr(
+        desc as *mut crate::storage::buf_internals::BufferDesc,
+    )
 }
 
-unsafe fn UnlockBufHdr(_desc: *mut BufferDesc, _buf_state: u32) {
-    unimplemented!() // TODO: storage/buf_internals.h
+unsafe fn UnlockBufHdr(desc: *mut BufferDesc, buf_state: u32) {
+    crate::storage::buf_internals::UnlockBufHdr(
+        desc as *mut crate::storage::buf_internals::BufferDesc,
+        buf_state,
+    )
 }
 
-unsafe fn BUF_STATE_GET_REFCOUNT(_state: u32) -> u32 {
-    unimplemented!() // TODO: storage/buf_internals.h
+unsafe fn BUF_STATE_GET_REFCOUNT(state: u32) -> u32 {
+    crate::storage::buf_internals::BUF_STATE_GET_REFCOUNT(state)
 }
 
-unsafe fn BUF_STATE_GET_USAGECOUNT(_state: u32) -> u32 {
-    unimplemented!() // TODO: storage/buf_internals.h
+unsafe fn BUF_STATE_GET_USAGECOUNT(state: u32) -> u32 {
+    crate::storage::buf_internals::BUF_STATE_GET_USAGECOUNT(state)
 }
 
-unsafe fn BufTableShmemSize(_size: c_int) -> Size {
-    unimplemented!() // TODO: storage/buffer/buf_table.c
+unsafe fn BufTableShmemSize(size: c_int) -> Size {
+    crate::storage::buffer::buf_table::BufTableShmemSize(size)
 }
 
-unsafe fn InitBufTable(_size: c_int) {
-    unimplemented!() // TODO: storage/buffer/buf_table.c
+unsafe fn InitBufTable(size: c_int) {
+    crate::storage::buffer::buf_table::InitBufTable(size)
 }
 
-unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found_ptr: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shmem.c
+unsafe fn ShmemInitStruct(name: *const c_char, size: Size, found_ptr: *mut bool) -> *mut c_void {
+    crate::storage::ipc::shmem::ShmemInitStruct(name, size, found_ptr)
 }
 
 unsafe fn GetPinLimit() -> c_int {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::GetPinLimit() as c_int
 }
 
-unsafe fn pg_unreachable() {
-    unimplemented!() // TODO: c.h
-}
+unsafe fn pg_unreachable() {}
 
-unsafe fn add_size(_s1: Size, _s2: Size) -> Size {
-    unimplemented!() // TODO: storage/ipc/shmem.c
+unsafe fn add_size(s1: Size, s2: Size) -> Size {
+    crate::storage::ipc::shmem::add_size(s1, s2)
 }
 
 // spinlock primitives (storage/spin.h / s_lock.h)
-unsafe fn SpinLockInit(_lock: *mut slock_t) {
-    unimplemented!() // TODO: storage/spin.h
+unsafe fn SpinLockInit(lock: *mut slock_t) {
+    crate::storage::spin::SpinLockInit(lock)
 }
 
-unsafe fn SpinLockAcquire(_lock: *mut slock_t) {
-    unimplemented!() // TODO: storage/spin.h
+unsafe fn SpinLockAcquire(lock: *mut slock_t) {
+    crate::storage::spin::SpinLockAcquire(lock)
 }
 
-unsafe fn SpinLockRelease(_lock: *mut slock_t) {
-    unimplemented!() // TODO: storage/spin.h
+unsafe fn SpinLockRelease(lock: *mut slock_t) {
+    crate::storage::spin::SpinLockRelease(lock)
 }
 
 // atomics (port/atomics.h)
-unsafe fn pg_atomic_init_u32(_ptr: *mut pg_atomic_uint32, _val: u32) {
-    unimplemented!() // TODO: port/atomics.h
+unsafe fn pg_atomic_init_u32(ptr: *mut pg_atomic_uint32, val: u32) {
+    crate::port::atomics::pg_atomic_init_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        val,
+    )
 }
 
-unsafe fn pg_atomic_read_u32(_ptr: *mut pg_atomic_uint32) -> u32 {
-    unimplemented!() // TODO: port/atomics.h
+unsafe fn pg_atomic_read_u32(ptr: *mut pg_atomic_uint32) -> u32 {
+    crate::port::atomics::pg_atomic_read_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+    )
 }
 
-unsafe fn pg_atomic_fetch_add_u32(_ptr: *mut pg_atomic_uint32, _add: u32) -> u32 {
-    unimplemented!() // TODO: port/atomics.h
+unsafe fn pg_atomic_fetch_add_u32(ptr: *mut pg_atomic_uint32, add: u32) -> u32 {
+    crate::port::atomics::pg_atomic_fetch_add_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        add as i32,
+    )
 }
 
-unsafe fn pg_atomic_exchange_u32(_ptr: *mut pg_atomic_uint32, _newval: u32) -> u32 {
-    unimplemented!() // TODO: port/atomics.h
+unsafe fn pg_atomic_exchange_u32(ptr: *mut pg_atomic_uint32, newval: u32) -> u32 {
+    crate::port::atomics::generic::pg_atomic_exchange_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        newval,
+    )
 }
 
 unsafe fn pg_atomic_compare_exchange_u32(
-    _ptr: *mut pg_atomic_uint32,
-    _expected: *mut u32,
-    _newval: u32,
+    ptr: *mut pg_atomic_uint32,
+    expected: *mut u32,
+    newval: u32,
 ) -> bool {
-    unimplemented!() // TODO: port/atomics.h
+    crate::port::atomics::pg_atomic_compare_exchange_u32_impl(
+        &*(ptr as *const crate::port::atomics::pg_atomic_uint32),
+        &mut *expected,
+        newval,
+    )
 }
 
 // Max/Min come from c.h (crate::c, re-exported by the prelude).

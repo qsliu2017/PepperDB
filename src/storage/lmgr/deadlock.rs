@@ -91,8 +91,7 @@ type LockMethod = *mut LockMethodData; // storage/lock.h
 type DeadLockState = c_int; // storage/lock.h
 
 // MyProc -- this backend's PGPROC (storage/proc.h, set during InitProcess).
-static mut MyProc: *mut PGPROC = ptr::null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 // DeadLockState values (storage/lock.h)
 const DS_NO_DEADLOCK: DeadLockState = 0;
 const DS_SOFT_DEADLOCK: DeadLockState = 1;

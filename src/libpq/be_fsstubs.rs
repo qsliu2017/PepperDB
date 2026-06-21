@@ -94,9 +94,7 @@ static mut fscxt: MemoryContext = null_mut();
 
 // utils/elog.h: errcode_for_file_access().  TODO(pg-port): real one lives in
 // utils/error/elog.c.
-unsafe fn errcode_for_file_access() -> c_int {
-    0
-}
+unsafe fn errcode_for_file_access() -> c_int { crate::utils::error::elog_impl::errcode_for_file_access() }
 
 // access/xact.h: GetCurrentSubTransactionId().
 // TODO(pg-port): real GetCurrentSubTransactionId lives in access/transam/xact.c.
@@ -106,13 +104,9 @@ unsafe fn GetCurrentSubTransactionId() -> SubTransactionId {
 
 // utils/snapmgr.h: snapshot resource-owner registration.
 // TODO(pg-port): real RegisterSnapshotOnOwner lives in utils/time/snapmgr.c.
-unsafe fn RegisterSnapshotOnOwner(_snapshot: Snapshot, _owner: ResourceOwner) -> Snapshot {
-    unimplemented!()
-}
+unsafe fn RegisterSnapshotOnOwner(snapshot: Snapshot, owner: ResourceOwner) -> Snapshot { unimplemented!() }
 // TODO(pg-port): real UnregisterSnapshotFromOwner lives in utils/time/snapmgr.c.
-unsafe fn UnregisterSnapshotFromOwner(_snapshot: Snapshot, _owner: ResourceOwner) {
-    unimplemented!()
-}
+unsafe fn UnregisterSnapshotFromOwner(snapshot: Snapshot, owner: ResourceOwner) { crate::utils::time::snapmgr::UnregisterSnapshotFromOwner(snapshot as _, owner as _) }
 
 // utils/resowner.h: ResourceOwner + TopTransactionResourceOwner.
 // TODO(pg-port): real ResourceOwner lives in utils/resowner/resowner.c.
@@ -128,9 +122,7 @@ unsafe fn LargeObjectExists(_loid: Oid) -> bool {
 
 // utils/acl.h: object_ownercheck().
 // TODO(pg-port): real object_ownercheck lives in catalog/aclchk.c.
-unsafe fn object_ownercheck(_classid: Oid, _objectid: Oid, _roleid: Oid) -> bool {
-    unimplemented!()
-}
+unsafe fn object_ownercheck(classid: Oid, objectid: Oid, roleid: Oid) -> bool { crate::catalog::aclchk::object_ownercheck(classid as _, objectid as _, roleid as _) }
 
 // utils/builtins.h: text_to_cstring_buffer().
 // TODO(pg-port): real text_to_cstring_buffer lives in utils/adt/varlena.c (a
@@ -146,12 +138,10 @@ unsafe fn OpenTransientFile(_fileName: *const c_char, _fileFlags: c_int) -> c_in
 }
 // TODO(pg-port): real OpenTransientFilePerm lives in storage/file/fd.c.
 unsafe fn OpenTransientFilePerm(
-    _fileName: *const c_char,
-    _fileFlags: c_int,
-    _fileMode: mode_t,
-) -> c_int {
-    unimplemented!()
-}
+    fileName: *const c_char,
+    fileFlags: c_int,
+    fileMode: mode_t,
+) -> c_int { unimplemented!() }
 // TODO(pg-port): real CloseTransientFile lives in storage/file/fd.c.
 unsafe fn CloseTransientFile(_fd: c_int) -> c_int {
     unimplemented!()
@@ -883,7 +873,7 @@ unsafe fn newLOfd() -> c_int {
     if fscxt.is_null() {
         fscxt = AllocSetContextCreate!(
             TopMemoryContext,
-            "Filesystem",
+            c"Filesystem".as_ptr(),
             ALLOCSET_DEFAULT_SIZES
         );
     }

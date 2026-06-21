@@ -431,7 +431,7 @@ pub fn pgstat_get_io_object_name(io_object: IOObject) -> *const c_char {
 /// single-changecount wrapper, there are no per-row locks to initialize; the
 /// embedded `lock` field of `PgStatShared_IO` is zero-initialized in shmem and
 /// left inert (the LWLock stub treats it as a no-op).
-pub unsafe fn pgstat_io_init_shmem_cb(stats: *mut c_void) {
+pub unsafe extern "C" fn pgstat_io_init_shmem_cb(stats: *mut c_void) {
     let stat_shmem = stats as *mut PgStatShared_IO;
     // No per-BackendType lock array in this port; nothing to initialize.
     let _ = stat_shmem;

@@ -70,7 +70,7 @@ const INDEX_ATTR_BITMAP_PRIMARY_KEY: c_int = 0;
 const INDEX_ATTR_BITMAP_IDENTITY_KEY: c_int = 4;
 
 // utils/syscache.h: SysCacheIdentifier for pg_index by index relid.
-const INDEXRELID: c_int = 26;
+const INDEXRELID: c_int = 34;
 
 // catalog/pg_index.h: 1-based attribute numbers.
 const Anum_pg_index_indpred: AttrNumber = 21;
@@ -78,8 +78,7 @@ const Anum_pg_index_indclass: AttrNumber = 18;
 
 // TODO(pg-port): real lives in utils/cache/relcache.c
 pub unsafe fn RelationGetIndexList(relation: Relation) -> *mut crate::nodes::pg_list::List {
-    let _ = relation;
-    core::ptr::null_mut()
+    crate::utils::cache::relcache::RelationGetIndexList(relation as _) as _
 }
 
 // TODO(pg-port): real lives in utils/cache/relcache.c
@@ -221,7 +220,7 @@ unsafe fn logicalrep_relmap_init() {
     if LogicalRepRelMapContext.is_null() {
         LogicalRepRelMapContext = AllocSetContextCreate!(
             CacheMemoryContext,
-            "LogicalRepRelMapContext",
+            c"LogicalRepRelMapContext".as_ptr(),
             ALLOCSET_DEFAULT_SIZES
         );
     }
@@ -275,6 +274,7 @@ unsafe fn logicalrep_relmap_free_entry(entry: *mut LogicalRepRelMapEntry) {
  * Called when new relation mapping is sent by the publisher to update
  * our expected view of incoming data from said publisher.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_relmap_update(remoterel: *mut LogicalRepRelation) {
     let oldctx: MemoryContext;
     let entry: *mut LogicalRepRelMapEntry;
@@ -502,6 +502,7 @@ unsafe fn logicalrep_rel_mark_updatable(entry: *mut LogicalRepRelMapEntry) {
  *
  * Rebuilds the Relcache mapping if it was invalidated by local DDL.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_rel_open(
     remoteid: LogicalRepRelId,
     lockmode: LOCKMODE,
@@ -671,6 +672,7 @@ pub unsafe fn logicalrep_rel_open(
 /*
  * Close the previously opened logical relation.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_rel_close(rel: *mut LogicalRepRelMapEntry, lockmode: LOCKMODE) {
     table_close((*rel).localrel, lockmode);
     (*rel).localrel = core::ptr::null_mut();
@@ -740,6 +742,7 @@ unsafe extern "C" fn logicalrep_partmap_invalidate_cb(arg: Datum, reloid: Oid) {
  * we will update the information in logicalrep_partition_open to avoid
  * unnecessary work.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_partmap_reset_relmap(remoterel: *mut LogicalRepRelation) {
     let mut status: HASH_SEQ_STATUS = core::mem::zeroed();
     let mut part_entry: *mut LogicalRepPartMapEntry;
@@ -776,7 +779,7 @@ unsafe fn logicalrep_partmap_init() {
     if LogicalRepPartMapContext.is_null() {
         LogicalRepPartMapContext = AllocSetContextCreate!(
             CacheMemoryContext,
-            "LogicalRepPartMapContext",
+            c"LogicalRepPartMapContext".as_ptr(),
             ALLOCSET_DEFAULT_SIZES
         );
     }
@@ -808,6 +811,7 @@ unsafe fn logicalrep_partmap_init() {
  * Note there's no logicalrep_partition_close, because the caller closes the
  * component relation.
  */
+#[no_mangle]
 pub unsafe fn logicalrep_partition_open(
     root: *mut LogicalRepRelMapEntry,
     partrel: Relation,
@@ -1117,6 +1121,7 @@ unsafe fn indkey_values(rd_index: *mut FormData_pg_index) -> *const AttrNumber {
  * the OID of the PK if one exists and is not deferrable;
  * otherwise, InvalidOid.
  */
+#[no_mangle]
 pub unsafe fn GetRelationIdentityOrPK(rel: Relation) -> Oid {
     let mut idxoid: Oid;
 

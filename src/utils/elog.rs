@@ -32,10 +32,52 @@ pub const PANIC: c_int = 23;
 /// current operation by panicking (the unwinding analogue of `longjmp`); lower
 /// levels write to stderr.
 pub fn emit_log(level: c_int, message: &str, file: &str, line: u32) {
-    if level >= ERROR {
-        panic!("ERROR ({}:{}, level {}): {}", file, line, level, message);
-    } else {
-        eprintln!("{}:{}: level {}: {}", file, line, level, message);
+    emit_log_with(level, message, file, line, || {})
+}
+
+/// Set the DETAIL field on the in-flight ErrorData. Call only from within an
+/// `ereport!` field-setter (i.e. inside emit_log_with, after errstart).
+pub fn errdetail_field(s: &str) {
+    if let Ok(c) = std::ffi::CString::new(s) {
+        unsafe { crate::utils::error::elog_impl::errdetail_c(c.as_ptr()); }
+    }
+}
+
+/// Set the HINT field on the in-flight ErrorData. See [`errdetail_field`].
+pub fn errhint_field(s: &str) {
+    if let Ok(c) = std::ffi::CString::new(s) {
+        unsafe { crate::utils::error::elog_impl::errhint_c(c.as_ptr()); }
+    }
+}
+
+/// As `emit_log`, but runs `fields` (errcode/errdetail/parser_errposition setters)
+/// AFTER `errstart` has opened the in-flight ErrorData, matching C's ereport()
+/// where those calls mutate the current edata. Used by the multi-field `ereport!`.
+pub fn emit_log_with(level: c_int, message: &str, file: &str, line: u32, fields: impl FnOnce()) {
+    // Route every level through the real elog.c machinery (errstart/errmsg/errfinish)
+    // so the ErrorData stack is populated and the message is reported to client/log.
+    // For ERROR+, errfinish transfers control (pg_re_throw panics to the PostgresMain
+    // catch, or proc_exit for FATAL); for NOTICE/WARNING/etc. it returns normally.
+    unsafe {
+        if crate::utils::error::elog_impl::errstart(level, core::ptr::null()) {
+            // message is already formatted; errmsg_internal_c stores it verbatim.
+            if let Ok(cmsg) = std::ffi::CString::new(message) {
+                crate::utils::error::elog_impl::errmsg_internal_c(cmsg.as_ptr());
+            }
+            // Field-setters (parser_errposition -> errposition, errcode, errdetail)
+            // mutate the now-current edata.
+            fields();
+            let cfile = std::ffi::CString::new(file).unwrap_or_default();
+            crate::utils::error::elog_impl::errfinish(
+                cfile.as_ptr(),
+                line as c_int,
+                core::ptr::null(),
+            );
+        }
+        // errfinish never returns for ERROR+ (panics via pg_re_throw, or proc_exits for FATAL).
+        if level >= ERROR {
+            unreachable!("errfinish returned for an ERROR-level report");
+        }
     }
 }
 
@@ -69,4 +111,12 @@ macro_rules! ereport {
     ($level:expr, $msg:expr $(,)?) => {
         $crate::utils::elog::emit_log($level, &$msg, file!(), line!())
     };
+    // Rich form: message plus field-setters (errcode/errdetail!/parser_errposition).
+    // The setters run AFTER errstart (inside emit_log_with) so they mutate the
+    // in-flight ErrorData, matching C's ereport().
+    ($level:expr, $msg:expr, $($field:expr),+ $(,)?) => {{
+        let __pdb_msg = $msg;
+        $crate::utils::elog::emit_log_with($level, &__pdb_msg, file!(), line!(),
+            || { $( let _ = $field; )+ })
+    }};
 }

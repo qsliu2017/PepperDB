@@ -240,6 +240,7 @@ const AccessShareLock: c_int = 1;
  * # Safety
  * `attr` points to a valid varlena.
  */
+#[no_mangle]
 pub unsafe fn detoast_external_attr(mut attr: *mut varlena) -> *mut varlena {
     let result: *mut varlena;
 
@@ -937,6 +938,7 @@ pub unsafe fn toast_datum_size(value: Datum) -> Size {
  * # Safety
  * `datum` points to a valid varlena.
  */
+#[no_mangle]
 pub unsafe fn pg_detoast_datum(datum: *mut varlena) -> *mut varlena {
     if VARATT_IS_EXTENDED(datum as *const c_char) {
         detoast_attr(datum)
@@ -952,6 +954,7 @@ pub unsafe fn pg_detoast_datum(datum: *mut varlena) -> *mut varlena {
  * # Safety
  * `datum` points to a valid varlena.
  */
+#[no_mangle]
 pub unsafe fn pg_detoast_datum_copy(datum: *mut varlena) -> *mut varlena {
     if VARATT_IS_EXTENDED(datum as *const c_char) {
         detoast_attr(datum)
@@ -972,6 +975,7 @@ pub unsafe fn pg_detoast_datum_copy(datum: *mut varlena) -> *mut varlena {
  * # Safety
  * `datum` points to a valid varlena.
  */
+#[no_mangle]
 pub unsafe fn pg_detoast_datum_packed(datum: *mut varlena) -> *mut varlena {
     if VARATT_IS_COMPRESSED(datum as *const c_char) || VARATT_IS_EXTERNAL(datum as *const c_char) {
         detoast_attr(datum)

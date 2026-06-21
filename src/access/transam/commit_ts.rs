@@ -795,7 +795,7 @@ unsafe fn ActivateCommitTs() {
      * Re-Initialize our idea of the latest page number.
      */
     pg_atomic_write_u64(
-        &mut (*(*CommitTsCtl()).shared).latest_page_number,
+        &raw mut (*(*CommitTsCtl()).shared).latest_page_number as *mut _,
         pageno as u64,
     );
 
@@ -1116,7 +1116,7 @@ pub unsafe fn commit_ts_redo(record: *mut XLogReaderState) {
          * suitable value to bypass the sanity test in SimpleLruTruncate.
          */
         pg_atomic_write_u64(
-            &mut (*(*CommitTsCtl()).shared).latest_page_number,
+            &raw mut (*(*CommitTsCtl()).shared).latest_page_number as *mut _,
             (*trunc).pageno as u64,
         );
 
@@ -1148,9 +1148,9 @@ pub type RepOriginId = u16; // replication/origin.h
 pub const InvalidRepOriginId: RepOriginId = 0;
 
 pub type GucSource = c_int; // utils/guc.h
-pub const PGC_S_DYNAMIC_DEFAULT: GucSource = 0; // TODO: utils/guc.h
-pub const PGC_S_OVERRIDE: GucSource = 0; // TODO: utils/guc.h
-pub const PGC_POSTMASTER: c_int = 0; // TODO: utils/guc.h
+pub const PGC_S_DYNAMIC_DEFAULT: GucSource = 1; // utils/guc.h: GucSource::PGC_S_DYNAMIC_DEFAULT
+pub const PGC_S_OVERRIDE: GucSource = 10; // utils/guc.h: GucSource::PGC_S_OVERRIDE
+pub const PGC_POSTMASTER: c_int = 1; // utils/guc.h: GucContext::PGC_POSTMASTER
 
 #[repr(C)]
 pub struct SlruSharedData {
@@ -1163,13 +1163,7 @@ pub type SlruShared = *mut SlruSharedData;
 
 pub type SlruPagePrecedesFunction = unsafe extern "C" fn(int64, int64) -> bool;
 
-#[repr(C)]
-pub struct SlruCtlData {
-    pub shared: SlruShared,
-    pub PagePrecedes: Option<SlruPagePrecedesFunction>,
-    // ... TODO: access/slru.h
-}
-pub type SlruCtl = *mut SlruCtlData;
+pub use crate::access::transam::slru::{SlruCtlData, SlruCtl};
 
 #[repr(C)]
 pub struct pg_atomic_uint64 {
@@ -1213,39 +1207,44 @@ pub static mut InRecovery: bool = false; // TODO: access/xlogutils.h
 
 #[inline]
 unsafe fn CommitTsLock() -> *mut LWLock {
-    unimplemented!() // TODO: storage/lwlocknames.h
+    crate::backend_link_shims::CommitTsLock as *mut LWLock
 }
 
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO: storage/lwlock.c
+    let mode = if _mode == LW_EXCLUSIVE {
+        crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE
+    } else {
+        crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED
+    };
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as *mut crate::storage::lmgr::lwlock::LWLock, mode)
 }
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO: storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as *mut crate::storage::lmgr::lwlock::LWLock)
 }
 
 unsafe fn SimpleLruGetBankLock(_ctl: SlruCtl, _pageno: int64) -> *mut LWLock {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruGetBankLock(_ctl as crate::access::transam::slru::SlruCtl, _pageno) as *mut LWLock
 }
 unsafe fn SimpleLruReadPage(_ctl: SlruCtl, _pageno: int64, _write_ok: bool, _xid: TransactionId) -> c_int {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruReadPage(_ctl as crate::access::transam::slru::SlruCtl, _pageno, _write_ok, _xid)
 }
 unsafe fn SimpleLruReadPage_ReadOnly(_ctl: SlruCtl, _pageno: int64, _xid: TransactionId) -> c_int {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruReadPage_ReadOnly(_ctl as crate::access::transam::slru::SlruCtl, _pageno, _xid)
 }
 unsafe fn SimpleLruZeroPage(_ctl: SlruCtl, _pageno: int64) -> c_int {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruZeroPage(_ctl as crate::access::transam::slru::SlruCtl, _pageno)
 }
 unsafe fn SimpleLruWritePage(_ctl: SlruCtl, _slotno: c_int) {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruWritePage(_ctl as crate::access::transam::slru::SlruCtl, _slotno)
 }
 unsafe fn SimpleLruWriteAll(_ctl: SlruCtl, _allow_redirtied: bool) {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruWriteAll(_ctl as crate::access::transam::slru::SlruCtl, _allow_redirtied)
 }
 unsafe fn SimpleLruTruncate(_ctl: SlruCtl, _cutoffPage: int64) {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruTruncate(_ctl as crate::access::transam::slru::SlruCtl, _cutoffPage)
 }
 unsafe fn SimpleLruDoesPhysicalPageExist(_ctl: SlruCtl, _pageno: int64) -> bool {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruDoesPhysicalPageExist(_ctl as crate::access::transam::slru::SlruCtl, _pageno)
 }
 unsafe fn SimpleLruInit(
     _ctl: SlruCtl,
@@ -1258,26 +1257,45 @@ unsafe fn SimpleLruInit(
     _sync_handler: c_int,
     _long_segment_names: bool,
 ) {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruInit(
+        _ctl as crate::access::transam::slru::SlruCtl,
+        _name,
+        _nslots,
+        _nlsns,
+        _subdir,
+        _buffer_tranche_id,
+        _bank_tranche_id,
+        _sync_handler,
+        _long_segment_names,
+    )
 }
 unsafe fn SimpleLruShmemSize(_nslots: c_int, _nlsns: c_int) -> Size {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruShmemSize(_nslots, _nlsns)
 }
 unsafe fn SimpleLruAutotuneBuffers(_divisor: c_int, _max: c_int) -> c_int {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SimpleLruAutotuneBuffers(_divisor, _max)
 }
 unsafe fn SlruPagePrecedesUnitTests(_ctl: SlruCtl, _per_page: c_int) {
-    unimplemented!() // TODO: access/slru.c
+    #[cfg(debug_assertions)]
+    #[cfg(debug_assertions)] crate::access::transam::slru::SlruPagePrecedesUnitTests(_ctl as crate::access::transam::slru::SlruCtl, _per_page);
 }
 unsafe fn SlruScanDirectory(
     _ctl: SlruCtl,
     _callback: SlruScanCallback,
     _data: *mut c_void,
 ) -> bool {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SlruScanDirectory(
+        _ctl as crate::access::transam::slru::SlruCtl,
+        core::mem::transmute::<SlruScanCallback, crate::access::transam::slru::SlruScanCallback>(_callback),
+        _data,
+    )
 }
 unsafe fn SlruSyncFileTag(_ctl: SlruCtl, _ftag: *const FileTag, _path: *mut c_char) -> c_int {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SlruSyncFileTag(
+        _ctl as crate::access::transam::slru::SlruCtl,
+        _ftag as *const crate::access::transam::slru::FileTag,
+        _path,
+    )
 }
 
 pub type SlruScanCallback =
@@ -1289,7 +1307,12 @@ unsafe extern "C" fn SlruScanDirCbDeleteAll(
     _segpage: int64,
     _data: *mut c_void,
 ) -> bool {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SlruScanDirCbDeleteAll(
+        _ctl as crate::access::transam::slru::SlruCtl,
+        _filename,
+        _segpage,
+        _data,
+    )
 }
 unsafe extern "C" fn SlruScanDirCbReportPresence(
     _ctl: SlruCtl,
@@ -1297,11 +1320,16 @@ unsafe extern "C" fn SlruScanDirCbReportPresence(
     _segpage: int64,
     _data: *mut c_void,
 ) -> bool {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::SlruScanDirCbReportPresence(
+        _ctl as crate::access::transam::slru::SlruCtl,
+        _filename,
+        _segpage,
+        _data,
+    )
 }
 
 unsafe fn check_slru_buffers(_name: *const c_char, _newval: *mut c_int) -> bool {
-    unimplemented!() // TODO: access/slru.c
+    crate::access::transam::slru::check_slru_buffers(_name, _newval)
 }
 
 unsafe fn SetConfigOption(
@@ -1310,81 +1338,78 @@ unsafe fn SetConfigOption(
     _context: c_int,
     _source: GucSource,
 ) {
-    unimplemented!() // TODO: utils/misc/guc.c
+    crate::utils::misc::guc::SetConfigOption(
+        _name,
+        _value,
+        core::mem::transmute::<c_int, crate::utils::misc::guc::GucContext>(_context),
+        core::mem::transmute::<c_int, crate::utils::misc::guc::GucSource>(_source),
+    )
 }
 
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _found)
 }
 
 unsafe fn pg_atomic_write_u64(_ptr: *mut pg_atomic_uint64, _val: u64) {
-    unimplemented!() // TODO: port/atomics.h
+    crate::port::atomics::generic::pg_atomic_write_u64_impl(
+        &*(_ptr as *const crate::port::atomics::pg_atomic_uint64),
+        _val,
+    )
 }
 
 unsafe fn XLogBeginInsert() {
-    unimplemented!() // TODO: access/xloginsert.c
+    crate::access::transam::xloginsert::XLogBeginInsert()
 }
 unsafe fn XLogRegisterData(_data: *mut c_char, _len: usize) {
-    unimplemented!() // TODO: access/xloginsert.c
+    crate::access::transam::xloginsert::XLogRegisterData(_data as *const c_void, _len as u32)
 }
 unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
-    unimplemented!() // TODO: access/xloginsert.c
+    crate::access::transam::xloginsert::XLogInsert(_rmid, _info)
 }
 unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 {
-    unimplemented!() // TODO: access/xlogreader.h
+    crate::access::transam::xlogreader::XLogRecGetInfo(_record as *mut crate::access::transam::xlogreader::XLogReaderState)
 }
 unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char {
-    unimplemented!() // TODO: access/xlogreader.h
+    crate::access::transam::xlogreader::XLogRecGetData(_record as *mut crate::access::transam::xlogreader::XLogReaderState)
 }
 unsafe fn XLogRecHasAnyBlockRefs(_record: *mut XLogReaderState) -> bool {
-    unimplemented!() // TODO: access/xlogreader.h
+    crate::access::transam::xlogreader::XLogRecHasAnyBlockRefs(_record as *mut crate::access::transam::xlogreader::XLogReaderState)
 }
 
 unsafe fn IsBootstrapProcessingMode() -> bool {
-    unimplemented!() // TODO: miscadmin.h
+    crate::miscadmin::IsBootstrapProcessingMode()
 }
 unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO: access/xlog.c
+    crate::access::transam::xlog::RecoveryInProgress()
 }
 
-unsafe fn XidFromFullTransactionId(_fxid: FullTransactionId) -> TransactionId {
-    unimplemented!() // TODO: access/transam.h
+unsafe fn XidFromFullTransactionId(_fxid: crate::access::transam::FullTransactionId) -> TransactionId {
+    crate::access::transam::XidFromFullTransactionId(_fxid)
 }
 unsafe fn ReadNextTransactionId() -> TransactionId {
     unimplemented!() // TODO: access/transam.h
 }
 unsafe fn TransactionIdPrecedes(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!() // TODO: access/transam.c
+    crate::access::transam::transam::TransactionIdPrecedes(_id1, _id2)
 }
 unsafe fn TransactionIdIsValid(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO: access/transam.h
+    crate::access::transam::TransactionIdIsValid(_xid)
 }
 unsafe fn TransactionIdIsNormal(_xid: TransactionId) -> bool {
-    unimplemented!() // TODO: access/transam.h
+    crate::access::transam::TransactionIdIsNormal(_xid)
 }
 unsafe fn TransactionIdEquals(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!() // TODO: access/transam.h
+    crate::access::transam::TransactionIdEquals(_id1, _id2)
 }
 
 pub const InvalidTransactionId: TransactionId = 0; // TODO: access/transam.h
 pub const FirstNormalTransactionId: TransactionId = 3; // TODO: access/transam.h
 
-#[repr(C)]
-pub struct FullTransactionId {
-    pub value: u64,
-}
-
-#[repr(C)]
-pub struct TransamVariablesData {
-    pub nextXid: FullTransactionId,
-    pub oldestCommitTsXid: TransactionId,
-    pub newestCommitTsXid: TransactionId,
-    // ... TODO: access/transam.h
-}
-pub static mut TransamVariables: *mut TransamVariablesData = core::ptr::null_mut(); // TODO: access/transam/varsup.c
+pub use crate::access::transam::varsup::TransamVariablesData;
+pub use crate::access::transam::varsup::TransamVariables;
 
 unsafe fn TIMESTAMP_NOBEGIN(_t: *mut TimestampTz) {
-    unimplemented!() // TODO: datatype/timestamp.h
+    *_t = TimestampTz::MIN; // DT_NOBEGIN
 }
 
 // fmgr / type helpers

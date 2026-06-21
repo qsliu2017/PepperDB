@@ -160,7 +160,7 @@ pub const CONSTRAINT_RELATION: ConstraintCategory = 0;
 pub const CONSTRAINT_DOMAIN: ConstraintCategory = 1;
 
 /* syscache ids (syscache.h) */
-const RELOID: c_int = 56;
+const RELOID: c_int = 57;
 
 /* type OIDs referenced by FindFKPeriodOpers (pg_type.h) */
 const ANYRANGEOID: Oid = 3831;
@@ -229,7 +229,7 @@ const F_OIDEQ: RegProcedure = 184;
 const F_NAMEEQ: RegProcedure = 60;
 
 /* syscache id for pg_constraint by OID (syscache.h) */
-const CONSTROID: c_int = 25;
+const CONSTROID: c_int = 19;
 
 /*
  * Given a pg_constraint tuple for a not-null constraint, return the column
@@ -2229,9 +2229,7 @@ pub unsafe fn FindFKPeriodOpers(
  */
 
 /// TODO(pg-port): utils/adt/arrayfuncs.c DatumGetArrayTypeP (detoast wrapper)
-unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType {
-    null_mut()
-}
+unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType { unimplemented!() }
 
 /// TODO(pg-port): utils/adt/format_type.c format_type_be
 unsafe fn format_type_be(type_oid: Oid) -> *mut c_char {
@@ -2290,28 +2288,26 @@ unsafe fn strlcpy(dst: *mut c_char, src: *const c_char, size: usize) -> usize {
 }
 
 /// TODO(pg-port): utils/adt/arrayfuncs.c construct_array_builtin
-unsafe fn construct_array_builtin(_elems: *mut Datum, _nelems: c_int, _elmtype: Oid) -> *mut ArrayType {
-    null_mut()
+unsafe fn construct_array_builtin(_elems: *mut Datum, _nelems: c_int, _elmtype: Oid) -> *mut ArrayType { crate::utils::adt::arrayfuncs::construct_array_builtin(_elems as _, _nelems as _, _elmtype as _) }
+
+unsafe fn GetNewOidWithIndex(relation: Relation, indexId: Oid, oidcolumn: AttrNumber) -> Oid {
+    crate::catalog::catalog::GetNewOidWithIndex(relation as _, indexId as _, oidcolumn as _) as _
 }
 
-/// TODO(pg-port): catalog/catalog.c GetNewOidWithIndex
-unsafe fn GetNewOidWithIndex(_relation: Relation, _indexId: Oid, _oidcolumn: AttrNumber) -> Oid {
-    InvalidOid
+unsafe fn CatalogTupleInsert(heapRel: Relation, tup: HeapTuple) {
+    crate::catalog::indexing::CatalogTupleInsert(heapRel as _, tup as _)
 }
 
-/// TODO(pg-port): catalog/indexing.c CatalogTupleInsert
-unsafe fn CatalogTupleInsert(_heapRel: Relation, _tup: HeapTuple) {}
-
-/// TODO(pg-port): catalog/indexing.c CatalogTupleUpdate
 unsafe fn CatalogTupleUpdate(
-    _heapRel: Relation,
-    _otid: *mut crate::storage::itemptr::ItemPointerData,
-    _tup: HeapTuple,
+    heapRel: Relation,
+    otid: *mut crate::storage::itemptr::ItemPointerData,
+    tup: HeapTuple,
 ) {
+    crate::catalog::indexing::CatalogTupleUpdate(heapRel as _, otid as _, tup as _)
 }
 
 /// TODO(pg-port): catalog/indexing.c CatalogTupleDelete
-unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData) {}
+unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData) { crate::catalog::indexing::CatalogTupleDelete(_heapRel as _, _tid as _) }
 
 /// TODO(pg-port): commands/dbcommands.c namestrcpy
 unsafe fn namestrcpy(name: *mut NameData, s: *const c_char) -> c_int {
@@ -2334,9 +2330,7 @@ unsafe fn CStringGetTextDatum(_s: *const c_char) -> Datum {
 }
 
 /// TODO(pg-port): catalog/dependency.c new_object_addresses
-unsafe fn new_object_addresses() -> *mut ObjectAddresses {
-    null_mut()
-}
+unsafe fn new_object_addresses() -> *mut ObjectAddresses { crate::catalog::dependency::new_object_addresses() }
 
 /// TODO(pg-port): catalog/dependency.c add_exact_object_address
 unsafe fn add_exact_object_address(_object: *const ObjectAddress, _addrs: *mut ObjectAddresses) {}
@@ -2346,11 +2340,10 @@ unsafe fn record_object_address_dependencies(
     _depender: *const ObjectAddress,
     _referenced: *mut ObjectAddresses,
     _behavior: c_char,
-) {
-}
+) { crate::catalog::dependency::record_object_address_dependencies(_depender as _, _referenced as _, _behavior as _) }
 
 /// TODO(pg-port): catalog/dependency.c free_object_addresses
-unsafe fn free_object_addresses(_addrs: *mut ObjectAddresses) {}
+unsafe fn free_object_addresses(_addrs: *mut ObjectAddresses) { crate::catalog::dependency::free_object_addresses(_addrs as _) }
 
 /// TODO(pg-port): catalog/dependency.c recordDependencyOnSingleRelExpr
 unsafe fn recordDependencyOnSingleRelExpr(
@@ -2360,16 +2353,14 @@ unsafe fn recordDependencyOnSingleRelExpr(
     _behavior: c_char,
     _self_behavior: c_char,
     _reverse_self: bool,
-) {
-}
+) { crate::catalog::dependency::recordDependencyOnSingleRelExpr(_depender as _, _expr as _, _relId as _, _behavior as _, _self_behavior as _, _reverse_self as _) }
 
 /// TODO(pg-port): catalog/pg_depend.c recordDependencyOn
 unsafe fn recordDependencyOn(
     _depender: *const ObjectAddress,
     _referenced: *const ObjectAddress,
     _behavior: c_char,
-) {
-}
+) { crate::catalog::pg_depend::recordDependencyOn(_depender as _, _referenced as _, _behavior as _) }
 
 /// TODO(pg-port): catalog/pg_depend.c deleteDependencyRecordsForClass
 unsafe fn deleteDependencyRecordsForClass(
@@ -2377,9 +2368,7 @@ unsafe fn deleteDependencyRecordsForClass(
     _objectId: Oid,
     _refclassId: Oid,
     _deptype: c_char,
-) -> c_long {
-    0
-}
+) -> c_long { crate::catalog::pg_depend::deleteDependencyRecordsForClass(_classId as _, _objectId as _, _refclassId as _, _deptype as _) }
 
 /// TODO(pg-port): catalog/objectaccess.c InvokeObjectPostCreateHookArg
 unsafe fn InvokeObjectPostCreateHookArg(
@@ -2398,9 +2387,7 @@ unsafe fn makeObjectName(
     _name1: *const c_char,
     _name2: *const c_char,
     _label: *const c_char,
-) -> *mut c_char {
-    null_mut()
-}
+) -> *mut c_char { crate::commands::indexcmds::makeObjectName(_name1 as _, _name2 as _, _label as _) }
 
 /// TODO(pg-port): utils/cache/syscache.c SearchSysCache1
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
@@ -2441,9 +2428,7 @@ unsafe fn get_opclass_opfamily_and_input_type(
     _opclass: Oid,
     _opfamily: *mut Oid,
     _opcintype: *mut Oid,
-) -> bool {
-    false
-}
+) -> bool { crate::utils::cache::lsyscache::get_opclass_opfamily_and_input_type(_opclass as _, _opfamily as _, _opcintype as _) }
 
 #[cfg(test)]
 mod tests {

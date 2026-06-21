@@ -74,8 +74,8 @@ use crate::prelude::*;
 // TODO(pg-port): real homes utils/snapmgr.h + utils/mmgr.
 unsafe fn GetPerTupleMemoryContext(_estate: *mut EState) -> MemoryContext { std::ptr::null_mut() }
 unsafe fn MemoryContextSwitchTo(ctx: MemoryContext) -> MemoryContext { crate::utils::palloc::MemoryContextSwitchTo(ctx as crate::utils::palloc::MemoryContext) as MemoryContext }
-unsafe fn MemoryContextReset(ctx: MemoryContext) { crate::utils::memutils::MemoryContextReset(ctx as crate::utils::palloc::MemoryContext) }
-unsafe fn MemoryContextStrdup(ctx: MemoryContext, str_: *const c_char) -> *mut c_char { crate::utils::mmgr::mcxt::MemoryContextStrdup(ctx as crate::utils::mmgr::memnodes::MemoryContext, str_) }
+unsafe fn MemoryContextReset(ctx: MemoryContext) { crate::utils::memutils::MemoryContextReset(ctx as _) }
+unsafe fn MemoryContextStrdup(ctx: MemoryContext, str_: *const c_char) -> *mut c_char { crate::utils::mmgr::mcxt::MemoryContextStrdup(ctx as _, str_ as _) }
 unsafe fn AllocSetContextCreate(_parent: MemoryContext, _name: *const c_char, _min: Size, _init: Size, _max: Size) -> MemoryContext { std::ptr::null_mut() }
 // Rust-ABI stubs pulled out of extern blocks (improper_ctypes).
 unsafe fn TopTransactionContext() -> MemoryContext { std::ptr::null_mut() }
@@ -334,9 +334,9 @@ const CT_DELETE_MISSING: c_int = 4;
 const SubscriptionRelationId: Oid = 6100;
 
 // SUBSCRIPTIONOID, SUBSCRIPTIONRELMAP, AUTHOID -- utils/syscache.h
-const SUBSCRIPTIONOID: c_int = 50;
-const SUBSCRIPTIONRELMAP: c_int = 51;
-const AUTHOID: c_int = 9;
+const SUBSCRIPTIONOID: c_int = 67;
+const SUBSCRIPTIONRELMAP: c_int = 68;
+const AUTHOID: c_int = 11;
 
 // GUC context
 const PGC_SUSET: c_int = 4;
@@ -495,6 +495,7 @@ pub static mut ApplyContext: MemoryContext = null_mut();
 /* per stream context for streaming transactions */
 static mut LogicalStreamingContext: MemoryContext = null_mut();
 
+#[no_mangle]
 pub static mut LogRepWorkerWalRcvConn: *mut WalReceiverConn = null_mut();
 
 pub static mut MySubscription: *mut Subscription = null_mut();
@@ -516,6 +517,7 @@ static mut stream_xid: TransactionId = InvalidTransactionId;
 static mut parallel_stream_nchanges: uint32 = 0;
 
 /* Are we initializing an apply worker? */
+#[no_mangle]
 pub static mut InitializingApplyWorker: bool = false;
 
 /*
@@ -1000,12 +1002,12 @@ extern "C" {
     /* TupleDescAttr */
     fn TupleDescAttr(desc: *mut c_void, attnum: c_int) -> *mut c_void;
 
-    /* LWLock for logical rep worker */
-    fn LogicalRepWorkerLock_ptr() -> *mut c_void;
-
     fn apply_error_callback(arg: *mut c_void);
     fn set_apply_error_context_origin_c(originname: *mut c_char);
 }
+
+// LWLock for logical rep worker: read the canonical runtime-assigned global.
+unsafe fn LogicalRepWorkerLock_ptr() -> *mut c_void { crate::backend_link_shims::LogicalRepWorkerLock }
 
 // ---------------------------------------------------------------------------
 // Helper macros (as inline unsafe fns)

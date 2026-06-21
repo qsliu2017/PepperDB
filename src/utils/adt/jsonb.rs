@@ -193,44 +193,24 @@ unsafe fn JB_ROOT_IS_SCALAR(jbp: *const Jsonb) -> bool {
 // ===========================================================================
 
 /* numeric.c output/input/cast functions, used via DirectFunctionCall*. */
-unsafe fn numeric_in(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb: numeric_in (utils/adt/numeric.c) not yet translated")
-}
-unsafe fn numeric_out(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb: numeric_out (utils/adt/numeric.c) not yet translated")
-}
-unsafe fn numeric_int2(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb: numeric_int2 (utils/adt/numeric.c) not yet translated")
-}
-unsafe fn numeric_int4(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb: numeric_int4 (utils/adt/numeric.c) not yet translated")
-}
-unsafe fn numeric_int8(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb: numeric_int8 (utils/adt/numeric.c) not yet translated")
-}
-unsafe fn numeric_float4(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb: numeric_float4 (utils/adt/numeric.c) not yet translated")
-}
-unsafe fn numeric_float8(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb: numeric_float8 (utils/adt/numeric.c) not yet translated")
-}
-unsafe fn numeric_uplus(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb: numeric_uplus (utils/adt/numeric.c) not yet translated")
-}
+unsafe fn numeric_in(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_in(_fcinfo as _) as _ }
+unsafe fn numeric_out(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_out(_fcinfo as _) as _ }
+unsafe fn numeric_int2(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_int2(_fcinfo as _) as _ }
+unsafe fn numeric_int4(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_int4(_fcinfo as _) as _ }
+unsafe fn numeric_int8(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_int8(_fcinfo as _) as _ }
+unsafe fn numeric_float4(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_float4(_fcinfo as _) as _ }
+unsafe fn numeric_float8(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_float8(_fcinfo as _) as _ }
+unsafe fn numeric_uplus(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_uplus(_fcinfo as _) as _ }
 
 /* lsyscache.c: function volatility, type physical properties. */
 const PROVOLATILE_IMMUTABLE: c_char = b'i' as c_char;
-unsafe fn func_volatile(_funcid: Oid) -> c_char {
-    unimplemented!("jsonb: func_volatile (utils/cache/lsyscache.c) not yet translated")
-}
+unsafe fn func_volatile(_funcid: Oid) -> c_char { crate::utils::cache::lsyscache::func_volatile(_funcid as _) as _ }
 unsafe fn get_typlenbyvalalign(
     _typid: Oid,
     _typlen: *mut int16,
     _typbyval: *mut bool,
     _typalign: *mut c_char,
-) {
-    unimplemented!("jsonb: get_typlenbyvalalign (utils/cache/lsyscache.c) not yet translated")
-}
+) { crate::utils::cache::lsyscache::get_typlenbyvalalign(_typid as _, _typlen as _, _typbyval as _, _typalign as _) }
 
 /* json.c: classify a SQL type for JSON conversion. */
 unsafe fn json_categorize_type(
@@ -238,9 +218,7 @@ unsafe fn json_categorize_type(
     _is_jsonb: bool,
     _tcategory: *mut JsonTypeCategory,
     _outfuncoid: *mut Oid,
-) {
-    unimplemented!("jsonb: json_categorize_type (utils/adt/json.c) not yet translated")
-}
+) { crate::utils::adt::jsonfuncs::json_categorize_type(_typoid as _, _is_jsonb, _tcategory as _, _outfuncoid as _) }
 
 /* common/jsonapi.h: parse error type, lexer context, semantic-action hooks. */
 type JsonParseErrorType = c_int;
@@ -292,16 +270,12 @@ unsafe fn makeJsonLexContext(
     _lex: *mut JsonLexContext,
     _json: *mut text,
     _need_escapes: bool,
-) -> *mut JsonLexContext {
-    unimplemented!("jsonb: makeJsonLexContext (utils/adt/jsonfuncs.c) not yet translated")
-}
+) -> *mut JsonLexContext { crate::utils::adt::jsonfuncs::makeJsonLexContext(_lex as _, _json as _, _need_escapes) as _ }
 unsafe fn pg_parse_json_or_errsave(
     _lex: *mut JsonLexContext,
     _sem: *mut JsonSemAction,
     _escontext: *mut Node,
-) -> bool {
-    unimplemented!("jsonb: pg_parse_json_or_errsave (common/jsonapi.c) not yet translated")
-}
+) -> bool { crate::utils::adt::jsonfuncs::pg_parse_json_or_errsave(_lex as _, _sem as _, _escontext as _) }
 unsafe fn pg_parse_json_or_ereport(_lex: *mut JsonLexContext, _sem: *mut JsonSemAction) {
     unimplemented!("jsonb: pg_parse_json_or_ereport (utils/adt/jsonfuncs.c) not yet translated")
 }
@@ -313,9 +287,7 @@ unsafe fn freeJsonLexContext(_lex: *mut JsonLexContext) {
 unsafe fn AggCheckCallContext(
     _fcinfo: FunctionCallInfo,
     _aggcontext: *mut MemoryContext,
-) -> bool {
-    unimplemented!("jsonb: AggCheckCallContext (executor/nodeAgg.c) not yet translated")
-}
+) -> bool { crate::executor::nodeAgg::AggCheckCallContext(_fcinfo as _, _aggcontext as _) != 0 }
 unsafe fn extract_variadic_args(
     _fcinfo: FunctionCallInfo,
     _variadic_start: c_int,
@@ -323,30 +295,22 @@ unsafe fn extract_variadic_args(
     _args: *mut *mut Datum,
     _types: *mut *mut Oid,
     _nulls: *mut *mut bool,
-) -> c_int {
-    unimplemented!("jsonb: extract_variadic_args (utils/fmgr/funcapi.c) not yet translated")
-}
+) -> c_int { crate::utils::fmgr::funcapi::extract_variadic_args(_fcinfo as _, _variadic_start as _, _convert_unknown, _args as _, _types as _, _nulls as _) as _ }
 
 /* utils/array.h, arrayfuncs.c: array deconstruction. */
 #[repr(C)]
 struct ArrayType {
     _opaque: [u8; 0],
 }
-unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType {
-    unimplemented!("jsonb: DatumGetArrayTypeP (utils/adt/arrayfuncs.c) not yet translated")
-}
+unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType { crate::access::nbtree::nbtpreprocesskeys::DatumGetArrayTypeP(_d as _) as _ }
 unsafe fn ARR_ELEMTYPE(_a: *mut ArrayType) -> Oid {
     unimplemented!("jsonb: ARR_ELEMTYPE (utils/array.h) not yet translated")
 }
-unsafe fn ARR_NDIM(_a: *mut ArrayType) -> c_int {
-    unimplemented!("jsonb: ARR_NDIM (utils/array.h) not yet translated")
-}
+unsafe fn ARR_NDIM(_a: *mut ArrayType) -> c_int { crate::utils::array::ARR_NDIM(_a as _) as _ }
 unsafe fn ARR_DIMS(_a: *mut ArrayType) -> *mut c_int {
     unimplemented!("jsonb: ARR_DIMS (utils/array.h) not yet translated")
 }
-unsafe fn ArrayGetNItems(_ndim: c_int, _dims: *const c_int) -> c_int {
-    unimplemented!("jsonb: ArrayGetNItems (utils/adt/arrayutils.c) not yet translated")
-}
+unsafe fn ArrayGetNItems(_ndim: c_int, _dims: *const c_int) -> c_int { crate::utils::adt::arrayutils::ArrayGetNItems(_ndim as _, _dims as _) as _ }
 unsafe fn deconstruct_array(
     _array: *mut ArrayType,
     _elmtype: Oid,
@@ -356,9 +320,7 @@ unsafe fn deconstruct_array(
     _elemsp: *mut *mut Datum,
     _nullsp: *mut *mut bool,
     _nelemsp: *mut c_int,
-) {
-    unimplemented!("jsonb: deconstruct_array (utils/adt/arrayfuncs.c) not yet translated")
-}
+) { crate::utils::adt::arrayfuncs::deconstruct_array(_array as _, _elmtype as _, _elmlen as _, _elmbyval, _elmalign as _, _elemsp as _, _nullsp as _, _nelemsp as _) }
 unsafe fn deconstruct_array_builtin(
     _array: *mut ArrayType,
     _elmtype: Oid,
@@ -394,21 +356,11 @@ struct FormData_pg_attribute {
 unsafe fn DatumGetHeapTupleHeader(_d: Datum) -> HeapTupleHeader {
     unimplemented!("jsonb: DatumGetHeapTupleHeader (fmgr.h) not yet translated")
 }
-unsafe fn HeapTupleHeaderGetTypeId(_td: HeapTupleHeader) -> Oid {
-    unimplemented!("jsonb: HeapTupleHeaderGetTypeId (access/htup_details.h) not yet translated")
-}
-unsafe fn HeapTupleHeaderGetTypMod(_td: HeapTupleHeader) -> int32 {
-    unimplemented!("jsonb: HeapTupleHeaderGetTypMod (access/htup_details.h) not yet translated")
-}
-unsafe fn HeapTupleHeaderGetDatumLength(_td: HeapTupleHeader) -> u32 {
-    unimplemented!("jsonb: HeapTupleHeaderGetDatumLength (access/htup_details.h) not yet translated")
-}
-unsafe fn lookup_rowtype_tupdesc(_type_id: Oid, _typmod: int32) -> TupleDesc {
-    unimplemented!("jsonb: lookup_rowtype_tupdesc (utils/cache/typcache.c) not yet translated")
-}
-unsafe fn ReleaseTupleDesc(_tupdesc: TupleDesc) {
-    unimplemented!("jsonb: ReleaseTupleDesc (utils/cache/typcache.c) not yet translated")
-}
+unsafe fn HeapTupleHeaderGetTypeId(_td: HeapTupleHeader) -> Oid { crate::access::htup_details::HeapTupleHeaderGetTypeId(_td as _) as _ }
+unsafe fn HeapTupleHeaderGetTypMod(_td: HeapTupleHeader) -> int32 { crate::access::htup_details::HeapTupleHeaderGetTypMod(_td as _) as _ }
+unsafe fn HeapTupleHeaderGetDatumLength(_td: HeapTupleHeader) -> u32 { crate::access::htup_details::HeapTupleHeaderGetDatumLength(_td as _) as _ }
+unsafe fn lookup_rowtype_tupdesc(_type_id: Oid, _typmod: int32) -> TupleDesc { crate::utils::cache::typcache::lookup_rowtype_tupdesc(_type_id as _, _typmod as _) as _ }
+unsafe fn ReleaseTupleDesc(_tupdesc: TupleDesc) { crate::access::common::tupdesc::ReleaseTupleDesc(_tupdesc as _) }
 unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> Form_pg_attribute {
     unimplemented!("jsonb: TupleDescAttr (access/tupdesc.h) not yet translated")
 }

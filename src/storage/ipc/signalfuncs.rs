@@ -68,22 +68,22 @@ pub struct PGPROC {
 // storage/procarray.h - BackendPidGetProc: PGPROC for a given backend pid,
 // or NULL if no such backend exists.
 unsafe fn BackendPidGetProc(_pid: c_int) -> *mut PGPROC {
-    unimplemented!()
+    crate::storage::ipc::procarray::BackendPidGetProc(_pid) as _
 }
 
 // storage/proc.h - GetNumberFromPGProc(proc): the ProcNumber of a PGPROC.
 unsafe fn GetNumberFromPGProc(_proc: *mut PGPROC) -> ProcNumber {
-    unimplemented!()
+    crate::storage::lmgr::proc::GetNumberFromPGProc(_proc as _) as _
 }
 
 // pgstat.h - pgstat_get_backend_type_by_proc_number.
 unsafe fn pgstat_get_backend_type_by_proc_number(_proc_number: ProcNumber) -> BackendType {
-    unimplemented!()
+    crate::utils::activity::backend_status::pgstat_get_backend_type_by_proc_number(_proc_number as _) as _
 }
 
 // utils/acl.h - has_privs_of_role(member, role).
 unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool {
-    unimplemented!()
+    crate::utils::adt::acl::has_privs_of_role(_member, _role)
 }
 
 // storage/pmsignal.h - SendPostmasterSignal.
@@ -99,7 +99,7 @@ unsafe fn WaitLatch(
     _timeout_ms: c_long,
     _wait_event_info: uint32,
 ) -> c_int {
-    unimplemented!()
+    crate::storage::ipc::latch::WaitLatch(_latch as _, _wakeEvents, _timeout_ms, _wait_event_info)
 }
 
 // storage/latch.h - ResetLatch: clears a latch's set flag.

@@ -159,8 +159,11 @@ fn min_i32(a: c_int, b: c_int) -> c_int {
 pub type Node = c_void;
 
 #[inline]
-unsafe fn SOFT_ERROR_OCCURRED(_escontext: *mut Node) -> bool {
-    false
+unsafe fn SOFT_ERROR_OCCURRED(escontext: *mut Node) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    !escontext.is_null()
+        && *(escontext as *const c_int) == T_ErrorSaveContext
+        && (*(escontext as *const crate::nodes::miscnodes::ErrorSaveContext)).error_occurred
 }
 
 // --- parser/scansup.h -------------------------------------------------------
@@ -185,43 +188,43 @@ unsafe fn NumericGetDatum(n: Numeric) -> Datum {
 
 // numeric_in/out/out_sci/power/mul/round/int4_opt_error: real homes in numeric.c.
 unsafe fn numeric_in(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("numeric_in: numeric.c not yet ported")
+    crate::utils::adt::numeric::numeric_in(_fcinfo as _) as _
 }
 unsafe fn numeric_out(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("numeric_out: numeric.c not yet ported")
+    crate::utils::adt::numeric::numeric_out(_fcinfo as _) as _
 }
 unsafe fn numeric_power(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("numeric_power: numeric.c not yet ported")
+    crate::utils::adt::numeric::numeric_power(_fcinfo as _) as _
 }
 unsafe fn numeric_mul(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("numeric_mul: numeric.c not yet ported")
+    crate::utils::adt::numeric::numeric_mul(_fcinfo as _) as _
 }
 unsafe fn numeric_round(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("numeric_round: numeric.c not yet ported")
+    crate::utils::adt::numeric::numeric_round(_fcinfo as _) as _
 }
 unsafe fn numeric_out_sci(_value: Numeric, _scale: c_int) -> *mut c_char {
-    unimplemented!("numeric_out_sci: numeric.c not yet ported")
+    crate::utils::adt::numeric::numeric_out_sci(_value as _, _scale as _) as _
 }
 unsafe fn numeric_int4_opt_error(_value: Numeric, _have_error: *mut bool) -> int32 {
-    unimplemented!("numeric_int4_opt_error: numeric.c not yet ported")
+    crate::utils::adt::numeric::numeric_int4_opt_error(_value as _, _have_error as _) as _
 }
 unsafe fn int64_to_numeric(_val: int64) -> Numeric {
-    unimplemented!("int64_to_numeric: numeric.c not yet ported")
+    crate::utils::adt::numeric::int64_to_numeric(_val as _) as _
 }
 
 // --- utils/builtins.h int/float output + dtoi8 (int.c/int8.c/float.c) -------
 // TODO(pg-port): real int4out/int8out/int8mul/dtoi8 live in crate::utils::adt::{int,int8,float}.
 unsafe fn int4out(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("int4out: int.c not yet ported")
+    crate::utils::adt::int::int4out(_fcinfo as _) as _
 }
 unsafe fn int8out(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("int8out: int8.c not yet ported")
+    crate::utils::adt::int8::int8out(_fcinfo as _) as _
 }
 unsafe fn int8mul(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("int8mul: int8.c not yet ported")
+    crate::utils::adt::int8::int8mul(_fcinfo as _) as _
 }
 unsafe fn dtoi8(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!("dtoi8: int8.c not yet ported")
+    crate::utils::adt::int8::dtoi8(_fcinfo as _) as _
 }
 
 // --- psprintf (utils/mb/stringinfo / common) --------------------------------
@@ -285,7 +288,7 @@ pub struct pg_locale_struct {
 pub type pg_locale_t = *mut pg_locale_struct;
 
 unsafe fn pg_newlocale_from_collation(_collid: Oid) -> pg_locale_t {
-    unimplemented!("pg_newlocale_from_collation: pg_locale.c not yet ported")
+    crate::utils::adt::pg_locale::pg_newlocale_from_collation(_collid as _) as _
 }
 unsafe fn pg_strlower(
     _dst: *mut c_char,
@@ -294,7 +297,7 @@ unsafe fn pg_strlower(
     _srclen: usize,
     _locale: pg_locale_t,
 ) -> usize {
-    unimplemented!("pg_strlower: pg_locale.c not yet ported")
+    crate::utils::adt::pg_locale::pg_strlower(_dst as _, _dstsize as _, _src as _, _srclen as _, _locale as _) as _
 }
 unsafe fn pg_strupper(
     _dst: *mut c_char,
@@ -303,7 +306,7 @@ unsafe fn pg_strupper(
     _srclen: usize,
     _locale: pg_locale_t,
 ) -> usize {
-    unimplemented!("pg_strupper: pg_locale.c not yet ported")
+    crate::utils::adt::pg_locale::pg_strupper(_dst as _, _dstsize as _, _src as _, _srclen as _, _locale as _) as _
 }
 unsafe fn pg_strtitle(
     _dst: *mut c_char,
@@ -312,7 +315,7 @@ unsafe fn pg_strtitle(
     _srclen: usize,
     _locale: pg_locale_t,
 ) -> usize {
-    unimplemented!("pg_strtitle: pg_locale.c not yet ported")
+    crate::utils::adt::pg_locale::pg_strtitle(_dst as _, _dstsize as _, _src as _, _srclen as _, _locale as _) as _
 }
 unsafe fn pg_strfold(
     _dst: *mut c_char,
@@ -321,19 +324,12 @@ unsafe fn pg_strfold(
     _srclen: usize,
     _locale: pg_locale_t,
 ) -> usize {
-    unimplemented!("pg_strfold: pg_locale.c not yet ported")
+    crate::utils::adt::pg_locale::pg_strfold(_dst as _, _dstsize as _, _src as _, _srclen as _, _locale as _) as _
 }
 
-#[repr(C)]
-pub struct lconv {
-    pub decimal_point: *const c_char,
-    pub thousands_sep: *const c_char,
-    pub currency_symbol: *const c_char,
-    pub positive_sign: *const c_char,
-    pub negative_sign: *const c_char,
-}
+pub use crate::utils::adt::pg_locale::lconv;
 unsafe fn PGLC_localeconv() -> *mut lconv {
-    unimplemented!("PGLC_localeconv: pg_locale.c not yet ported")
+    crate::utils::adt::pg_locale::PGLC_localeconv() as _
 }
 
 // cache_locale_time + localized day/month caches (pg_locale.c).
@@ -350,25 +346,25 @@ static mut localized_abbrev_months: [*mut c_char; 13] = [null_mut(); 13];
 // --- utils/datetime.h + timestamp.c date/time helpers (not fully ported) ----
 // TODO(pg-port): real homes are crate::utils::adt::{datetime, timestamp, date}.
 unsafe fn date2j(_y: c_int, _m: c_int, _d: c_int) -> c_int {
-    unimplemented!("date2j: datetime.c helper not yet ported")
+    crate::utils::adt::datetime::date2j(_y as _, _m as _, _d as _) as _
 }
 unsafe fn j2date(_jd: c_int, _year: *mut c_int, _month: *mut c_int, _day: *mut c_int) {
-    unimplemented!("j2date: datetime.c helper not yet ported")
+    crate::utils::adt::datetime::j2date(_jd as _, _year as _, _month as _, _day as _)
 }
 unsafe fn date2isoyear(_year: c_int, _mon: c_int, _mday: c_int) -> c_int {
-    unimplemented!("date2isoyear: timestamp.c helper not yet ported")
+    crate::utils::adt::timestamp::date2isoyear(_year as _, _mon as _, _mday as _) as _
 }
 unsafe fn date2isoweek(_year: c_int, _mon: c_int, _mday: c_int) -> c_int {
-    unimplemented!("date2isoweek: timestamp.c helper not yet ported")
+    crate::utils::adt::timestamp::date2isoweek(_year as _, _mon as _, _mday as _) as _
 }
 unsafe fn date2isoyearday(_year: c_int, _mon: c_int, _mday: c_int) -> c_int {
-    unimplemented!("date2isoyearday: timestamp.c helper not yet ported")
+    crate::utils::adt::timestamp::date2isoyearday(_year as _, _mon as _, _mday as _) as _
 }
 unsafe fn isoweek2date(_woy: c_int, _year: *mut c_int, _mon: *mut c_int, _mday: *mut c_int) {
-    unimplemented!("isoweek2date: timestamp.c helper not yet ported")
+    crate::utils::adt::timestamp::isoweek2date(_woy as _, _year as _, _mon as _, _mday as _)
 }
 unsafe fn isoweek2j(_year: c_int, _week: c_int) -> c_int {
-    unimplemented!("isoweek2j: timestamp.c helper not yet ported")
+    crate::utils::adt::timestamp::isoweek2j(_year as _, _week as _) as _
 }
 unsafe fn isoweekdate2date(
     _isoweek: c_int,
@@ -377,7 +373,7 @@ unsafe fn isoweekdate2date(
     _mon: *mut c_int,
     _mday: *mut c_int,
 ) {
-    unimplemented!("isoweekdate2date: timestamp.c helper not yet ported")
+    crate::utils::adt::timestamp::isoweekdate2date(_isoweek as _, _wday as _, _year as _, _mon as _, _mday as _)
 }
 unsafe fn ValidateDate(
     _fmask: c_int,
@@ -386,7 +382,7 @@ unsafe fn ValidateDate(
     _bc: bool,
     _tm: *mut pg_tm,
 ) -> c_int {
-    unimplemented!("ValidateDate: datetime.c helper not yet ported")
+    crate::utils::adt::datetime::ValidateDate(_fmask as _, _isjulian as _, _is2digits as _, _bc as _, _tm as _) as _
 }
 unsafe fn DateTimeParseError(
     _dterr: c_int,
@@ -395,24 +391,24 @@ unsafe fn DateTimeParseError(
     _datatype: *const c_char,
     _escontext: *mut Node,
 ) {
-    unimplemented!("DateTimeParseError: datetime.c helper not yet ported")
+    crate::utils::adt::datetime::DateTimeParseError(_dterr as _, _extra as _, _str as _, _datatype as _, _escontext as _)
 }
 unsafe fn DecodeTimezoneAbbrevPrefix(
     _str: *const c_char,
     _offset: *mut c_int,
     _tz: *mut *mut pg_tz,
 ) -> c_int {
-    unimplemented!("DecodeTimezoneAbbrevPrefix: datetime.c helper not yet ported")
+    crate::utils::adt::datetime::DecodeTimezoneAbbrevPrefix(_str as _, _offset as _, _tz as _) as _
 }
 unsafe fn DetermineTimeZoneOffset(_tm: *mut pg_tm, _tzp: *mut pg_tz) -> c_int {
-    unimplemented!("DetermineTimeZoneOffset: datetime.c helper not yet ported")
+    crate::utils::adt::datetime::DetermineTimeZoneOffset(_tm as _, _tzp as _) as _
 }
 unsafe fn DetermineTimeZoneAbbrevOffset(
     _tm: *mut pg_tm,
     _abbr: *const c_char,
     _tzp: *mut pg_tz,
 ) -> c_int {
-    unimplemented!("DetermineTimeZoneAbbrevOffset: datetime.c helper not yet ported")
+    crate::utils::adt::datetime::DetermineTimeZoneAbbrevOffset(_tm as _, _abbr as _, _tzp as _) as _
 }
 
 // timestamp.c: pg_itm (interval broken-down time) + interval helpers.
@@ -427,7 +423,7 @@ pub struct pg_itm {
     pub tm_year: c_int,
 }
 unsafe fn interval2itm(_span: Interval, _itm: *mut pg_itm) {
-    unimplemented!("interval2itm: timestamp.c helper not yet ported")
+    crate::utils::adt::timestamp::interval2itm(_span as _, _itm as _)
 }
 unsafe fn timestamp2tm(
     _dt: Timestamp,
@@ -437,7 +433,7 @@ unsafe fn timestamp2tm(
     _tzn: *mut *const c_char,
     _attimezone: *mut pg_tz,
 ) -> c_int {
-    unimplemented!("timestamp2tm: timestamp.c helper not yet ported")
+    crate::utils::adt::timestamp::timestamp2tm(_dt as _, _tzp as _, _tm as _, _fsec as _, _tzn as _, _attimezone as _) as _
 }
 unsafe fn tm2timestamp(
     _tm: *mut pg_tm,
@@ -445,19 +441,19 @@ unsafe fn tm2timestamp(
     _tzp: *mut c_int,
     _result: *mut Timestamp,
 ) -> c_int {
-    unimplemented!("tm2timestamp: timestamp.c helper not yet ported")
+    crate::utils::adt::timestamp::tm2timestamp(_tm as _, _fsec as _, _tzp as _, _result as _) as _
 }
 unsafe fn tm2time(_tm: *mut pg_tm, _fsec: fsec_t, _result: *mut TimeADT) -> c_int {
-    unimplemented!("tm2time: date.c helper not yet ported")
+    crate::utils::adt::date::tm2time(_tm as _, _fsec as _, _result as _) as _
 }
 unsafe fn tm2timetz(_tm: *mut pg_tm, _fsec: fsec_t, _tz: c_int, _result: *mut TimeTzADT) -> c_int {
-    unimplemented!("tm2timetz: date.c helper not yet ported")
+    crate::utils::adt::date::tm2timetz(_tm as _, _fsec as _, _tz as _, _result as _) as _
 }
 unsafe fn AdjustTimestampForTypmod(_time: *mut Timestamp, _typmod: int32, _escontext: *mut Node) {
-    unimplemented!("AdjustTimestampForTypmod: timestamp.c helper not yet ported")
+    crate::utils::adt::timestamp::AdjustTimestampForTypmod(_time as _, _typmod as _, _escontext as _);
 }
 unsafe fn AdjustTimeForTypmod(_time: *mut TimeADT, _typmod: int32) {
-    unimplemented!("AdjustTimeForTypmod: date.c helper not yet ported")
+    crate::utils::adt::date::AdjustTimeForTypmod(_time as _, _typmod as _)
 }
 
 /* TIMESTAMP_NOT_FINITE / INTERVAL_NOT_FINITE (timestamp.h) */
@@ -1560,13 +1556,18 @@ static DCH_index: [c_int; KeyWord_INDEX_SIZE] = [
 ];
 
 /* KeyWords index for NUMBER version */
-static NUM_index: [c_int; 92] = [
+static NUM_index: [c_int; KeyWord_INDEX_SIZE] = [
     /*---- first 0..31 chars are skipped ----*/
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, NUM_COMMA, -1, NUM_DEC, -1, NUM_0, -1, -1, -1,
-    -1, -1, -1, -1, -1, NUM_9, -1, -1, -1, -1, -1, -1, -1, -1, NUM_B, NUM_C, NUM_D, NUM_E, NUM_FM,
-    NUM_G, -1, -1, -1, -1, NUM_L, NUM_MI, -1, -1, NUM_PL, -1, NUM_RN, NUM_SG, NUM_TH, -1, NUM_V, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, NUM_b, NUM_c, NUM_d, NUM_e, NUM_fm, NUM_g, -1, -1, -1, -1,
-    NUM_l, NUM_mi, -1, -1, NUM_pl, -1, NUM_rn, NUM_sg, NUM_th, -1, NUM_v, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, NUM_COMMA, -1, NUM_DEC, -1, NUM_0, -1, -1, -1,
+    -1, -1, -1, -1, -1, NUM_9, -1, -1, -1, -1,
+    -1, -1, -1, -1, NUM_B, NUM_C, NUM_D, NUM_E, NUM_FM, NUM_G,
+    -1, -1, -1, -1, NUM_L, NUM_MI, -1, -1, NUM_PL, -1,
+    NUM_RN, NUM_SG, NUM_TH, -1, NUM_V, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, NUM_b, NUM_c, NUM_d, NUM_e,
+    NUM_fm, NUM_g, -1, -1, -1, -1, NUM_l, NUM_mi, -1, -1,
+    NUM_pl, -1, NUM_rn, NUM_sg, NUM_th, -1, NUM_v, -1, -1, -1,
+    -1, -1, -1, -1,
     /*---- chars over 126 are skipped ----*/
 ];
 

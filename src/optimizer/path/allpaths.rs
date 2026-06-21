@@ -66,10 +66,13 @@ use crate::port::pg_bitutils::pg_leftmost_one_pos32;
 // ---------------------------------------------------------------------------
 
 /// TODO(pg-port): optimizer/path/indxpath.c
-pub unsafe fn create_index_paths(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {}
+pub unsafe fn create_index_paths(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {
+    crate::optimizer::path::indxpath::create_index_paths(_root as _, _rel as _)
+}
 
-/// TODO(pg-port): optimizer/path/joinrels.c
-pub unsafe fn join_search_one_level(_root: *mut PlannerInfo, _level: c_int) {}
+pub unsafe fn join_search_one_level(root: *mut PlannerInfo, level: c_int) {
+    crate::optimizer::path::joinrels::join_search_one_level(root, level)
+}
 
 /// TODO(pg-port): optimizer/path/joinrels.c
 pub unsafe fn make_rels_by_clause_joins(
@@ -82,10 +85,14 @@ pub unsafe fn make_rels_by_clause_joins(
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
-pub unsafe fn add_path(_rel: *mut RelOptInfo, _path: *mut Path) {}
+pub unsafe fn add_path(_rel: *mut RelOptInfo, _path: *mut Path) {
+    crate::optimizer::util::pathnode::add_path(_rel as _, _path as _)
+}
 
 /// TODO(pg-port): optimizer/util/pathnode.c
-pub unsafe fn add_partial_path(_rel: *mut RelOptInfo, _path: *mut Path) {}
+pub unsafe fn add_partial_path(_rel: *mut RelOptInfo, _path: *mut Path) {
+    crate::optimizer::util::pathnode::add_partial_path(_rel as _, _path as _)
+}
 
 /// TODO(pg-port): optimizer/util/pathnode.c
 pub unsafe fn create_seqscan_path(
@@ -94,7 +101,7 @@ pub unsafe fn create_seqscan_path(
     _required_outer: Relids,
     _parallel_workers: c_int,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_seqscan_path(_root as _, _rel as _, _required_outer as _, _parallel_workers) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -103,7 +110,7 @@ pub unsafe fn create_samplescan_path(
     _rel: *mut RelOptInfo,
     _required_outer: Relids,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_samplescan_path(_root as _, _rel as _, _required_outer as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -111,7 +118,7 @@ pub unsafe fn create_material_path(
     _rel: *mut RelOptInfo,
     _subpath: *mut Path,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_material_path(_rel as _, _subpath as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -127,7 +134,9 @@ pub unsafe fn create_append_path(
     _parallel_aware: bool,
     _rows: f64,
 ) -> *mut AppendPath {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_append_path(
+        _root as _, _rel as _, _subpaths as _, _partial_subpaths as _, _pathkeys as _,
+        _required_outer as _, _parallel_workers, _parallel_aware, _rows) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -138,7 +147,8 @@ pub unsafe fn create_merge_append_path(
     _pathkeys: *mut List,
     _required_outer: Relids,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_merge_append_path(
+        _root as _, _rel as _, _subpaths as _, _pathkeys as _, _required_outer as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -148,7 +158,8 @@ pub unsafe fn create_functionscan_path(
     _pathkeys: *mut List,
     _required_outer: Relids,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_functionscan_path(
+        _root as _, _rel as _, _pathkeys as _, _required_outer as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -157,7 +168,7 @@ pub unsafe fn create_valuesscan_path(
     _rel: *mut RelOptInfo,
     _required_outer: Relids,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_valuesscan_path(_root as _, _rel as _, _required_outer as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -166,7 +177,7 @@ pub unsafe fn create_tablefuncscan_path(
     _rel: *mut RelOptInfo,
     _required_outer: Relids,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_tablefuncscan_path(_root as _, _rel as _, _required_outer as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -176,7 +187,8 @@ pub unsafe fn create_ctescan_path(
     _pathkeys: *mut List,
     _required_outer: Relids,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_ctescan_path(
+        _root as _, _rel as _, _pathkeys as _, _required_outer as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -185,7 +197,7 @@ pub unsafe fn create_namedtuplestorescan_path(
     _rel: *mut RelOptInfo,
     _required_outer: Relids,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_namedtuplestorescan_path(_root as _, _rel as _, _required_outer as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -194,7 +206,7 @@ pub unsafe fn create_resultscan_path(
     _rel: *mut RelOptInfo,
     _required_outer: Relids,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_resultscan_path(_root as _, _rel as _, _required_outer as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -203,7 +215,7 @@ pub unsafe fn create_worktablescan_path(
     _rel: *mut RelOptInfo,
     _required_outer: Relids,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_worktablescan_path(_root as _, _rel as _, _required_outer as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -215,7 +227,8 @@ pub unsafe fn create_subqueryscan_path(
     _pathkeys: *mut List,
     _required_outer: Relids,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_subqueryscan_path(
+        _root as _, _rel as _, _subpath as _, _trivial_pathtarget, _pathkeys as _, _required_outer as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -227,7 +240,8 @@ pub unsafe fn create_bitmap_heap_path(
     _loop_count: f64,
     _parallel_workers: c_int,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_bitmap_heap_path(
+        _root as _, _rel as _, _bitmapqual as _, _required_outer as _, _loop_count, _parallel_workers) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -239,7 +253,8 @@ pub unsafe fn create_gather_path(
     _required_outer: Relids,
     _rows: *mut f64,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_gather_path(
+        _root as _, _rel as _, _subpath as _, _target as _, _required_outer as _, _rows) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -252,7 +267,8 @@ pub unsafe fn create_gather_merge_path(
     _required_outer: Relids,
     _rows: *mut f64,
 ) -> *mut GatherMergePath {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_gather_merge_path(
+        _root as _, _rel as _, _subpath as _, _target as _, _pathkeys as _, _required_outer as _, _rows) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -263,7 +279,8 @@ pub unsafe fn create_sort_path(
     _pathkeys: *mut List,
     _limit_tuples: f64,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_sort_path(
+        _root as _, _rel as _, _subpath as _, _pathkeys as _, _limit_tuples) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -275,7 +292,8 @@ pub unsafe fn create_incremental_sort_path(
     _presorted_keys: c_int,
     _limit_tuples: f64,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::create_incremental_sort_path(
+        _root as _, _rel as _, _subpath as _, _pathkeys as _, _presorted_keys, _limit_tuples) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -285,18 +303,21 @@ pub unsafe fn reparameterize_path(
     _required_outer: Relids,
     _loop_count: f64,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::util::pathnode::reparameterize_path(
+        _root as _, _path as _, _required_outer as _, _loop_count) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
-pub unsafe fn set_cheapest(_rel: *mut RelOptInfo) {}
+pub unsafe fn set_cheapest(_rel: *mut RelOptInfo) {
+    crate::optimizer::util::pathnode::set_cheapest(_rel as _)
+}
 
 /// TODO(pg-port): optimizer/util/pathnode.c
 pub unsafe fn get_cheapest_fractional_path(
     _rel: *mut RelOptInfo,
     _tuple_fraction: f64,
 ) -> *mut Path {
-    core::ptr::null_mut()
+    crate::optimizer::plan::planner::get_cheapest_fractional_path(_rel as _, _tuple_fraction) as _
 }
 
 /// TODO(pg-port): optimizer/util/pathnode.c
@@ -305,45 +326,65 @@ pub unsafe fn compare_path_costs(
     _path2: *mut Path,
     _criterion: crate::nodes::pathnodes::CostSelector,
 ) -> c_int {
-    0
+    crate::optimizer::util::pathnode::compare_path_costs(_path1 as _, _path2 as _, _criterion)
 }
 
 /// TODO(pg-port): optimizer/plancat.c
-pub unsafe fn check_index_predicates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {}
+pub unsafe fn check_index_predicates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {
+    crate::optimizer::path::indxpath::check_index_predicates(_root as _, _rel as _)
+}
 
 /// TODO(pg-port): optimizer/plancat.c
-pub unsafe fn set_baserel_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {}
+pub unsafe fn set_baserel_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {
+    crate::optimizer::path::costsize::set_baserel_size_estimates(_root as _, _rel as _)
+}
 
 /// TODO(pg-port): optimizer/plancat.c
-pub unsafe fn set_foreign_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {}
+pub unsafe fn set_foreign_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {
+    crate::optimizer::path::costsize::set_foreign_size_estimates(_root as _, _rel as _)
+}
 
 /// TODO(pg-port): optimizer/plancat.c
-pub unsafe fn set_function_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {}
+pub unsafe fn set_function_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {
+    crate::optimizer::path::costsize::set_function_size_estimates(_root as _, _rel as _)
+}
 
 /// TODO(pg-port): optimizer/plancat.c
-pub unsafe fn set_tablefunc_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {}
+pub unsafe fn set_tablefunc_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {
+    crate::optimizer::path::costsize::set_tablefunc_size_estimates(_root as _, _rel as _)
+}
 
 /// TODO(pg-port): optimizer/plancat.c
-pub unsafe fn set_values_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {}
+pub unsafe fn set_values_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {
+    crate::optimizer::path::costsize::set_values_size_estimates(_root as _, _rel as _)
+}
 
 /// TODO(pg-port): optimizer/plancat.c
 pub unsafe fn set_cte_size_estimates(
     _root: *mut PlannerInfo,
     _rel: *mut RelOptInfo,
     _cte_rows: f64,
-) {}
+) {
+    crate::optimizer::path::costsize::set_cte_size_estimates(_root as _, _rel as _, _cte_rows as _)
+}
 
 /// TODO(pg-port): optimizer/plancat.c
 pub unsafe fn set_namedtuplestore_size_estimates(
     _root: *mut PlannerInfo,
     _rel: *mut RelOptInfo,
-) {}
+) {
+    crate::optimizer::path::costsize::set_namedtuplestore_size_estimates(_root as _, _rel as _)
+}
 
 /// TODO(pg-port): optimizer/plancat.c
-pub unsafe fn set_result_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {}
+pub unsafe fn set_result_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {
+    crate::optimizer::path::costsize::set_result_size_estimates(_root as _, _rel as _)
+}
 
 /// TODO(pg-port): optimizer/plancat.c
-pub unsafe fn set_subquery_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {}
+pub unsafe fn set_subquery_size_estimates(_root: *mut PlannerInfo, _rel: *mut RelOptInfo) {
+    crate::optimizer::path::costsize::set_subquery_size_estimates(_root as _, _rel as _)
+}
 
 /// TODO(pg-port): optimizer/plancat.c
 pub unsafe fn relation_excluded_by_constraints(
@@ -351,7 +392,7 @@ pub unsafe fn relation_excluded_by_constraints(
     _rel: *mut RelOptInfo,
     _rte: *mut RangeTblEntry,
 ) -> bool {
-    false
+    crate::optimizer::util::plancat::relation_excluded_by_constraints(_root as _, _rel as _, _rte as _)
 }
 
 /// TODO(pg-port): optimizer/plancat.c
@@ -363,7 +404,7 @@ pub unsafe fn compute_bitmap_pages(
     _cost_p: *mut f64,
     _tuples_p: *mut f64,
 ) -> f64 {
-    0.0
+    crate::optimizer::path::costsize::compute_bitmap_pages(_root as _, _rel as _, _bitmapqual as _, _loop_count as _, _cost_p as _, _tuples_p as _)
 }
 
 /// TODO(pg-port): optimizer/util/inherit.c
@@ -372,7 +413,9 @@ pub unsafe fn add_child_rel_equivalences(
     _appinfo: *mut crate::nodes::pathnodes::AppendRelInfo,
     _parentrel: *mut RelOptInfo,
     _childrel: *mut RelOptInfo,
-) {}
+) {
+    crate::optimizer::path::equivclass::add_child_rel_equivalences(_root as _, _appinfo as _, _parentrel as _, _childrel as _)
+}
 
 /// TODO(pg-port): optimizer/util/appendinfo.c
 pub unsafe fn adjust_appendrel_attrs(
@@ -381,7 +424,7 @@ pub unsafe fn adjust_appendrel_attrs(
     _nappinfos: c_int,
     _appinfos: *mut *mut crate::nodes::pathnodes::AppendRelInfo,
 ) -> *mut Node {
-    core::ptr::null_mut()
+    crate::optimizer::util::appendinfo::adjust_appendrel_attrs(_root as _, _node as _, _nappinfos as _, _appinfos as _) as _
 }
 
 /// TODO(pg-port): optimizer/plan/planmain.c
@@ -393,12 +436,12 @@ pub unsafe fn subquery_planner(
     _tuple_fraction: f64,
     _setops: *mut c_void,
 ) -> *mut PlannerInfo {
-    core::ptr::null_mut()
+    crate::optimizer::plan::planner::subquery_planner(_glob as _, _parse as _, _parent_root as _, _hasRecursion, _tuple_fraction as _, _setops as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/relnode.c
 pub unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo {
-    core::ptr::null_mut()
+    crate::optimizer::util::relnode::find_base_rel(_root as _, _relid) as _
 }
 
 /// TODO(pg-port): optimizer/util/relnode.c
@@ -407,7 +450,7 @@ pub unsafe fn fetch_upper_rel(
     _kind: crate::nodes::pathnodes::UpperRelationKind,
     _relids: Relids,
 ) -> *mut RelOptInfo {
-    core::ptr::null_mut()
+    crate::optimizer::util::relnode::fetch_upper_rel(_root as _, _kind, _relids as _) as _
 }
 
 /// TODO(pg-port): optimizer/plan/planner.c
@@ -417,14 +460,16 @@ pub unsafe fn generate_partitionwise_join_paths(
 ) {}
 
 /// TODO(pg-port): optimizer/plan/planner.c
-pub unsafe fn mark_dummy_rel(_rel: *mut RelOptInfo) {}
+pub unsafe fn mark_dummy_rel(_rel: *mut RelOptInfo) {
+    crate::optimizer::path::joinrels::mark_dummy_rel(_rel as _)
+}
 
 /// TODO(pg-port): partitioning/partbounds.c
 pub unsafe fn partitions_are_ordered(
     _boundinfo: *mut c_void,
     _live_parts: *mut Bitmapset,
 ) -> bool {
-    false
+    crate::partitioning::partbounds::partitions_are_ordered(_boundinfo as _, _live_parts as _)
 }
 
 /// TODO(pg-port): optimizer/plan/planner.c
@@ -434,12 +479,12 @@ pub unsafe fn relation_can_be_sorted_early(
     _ec: *mut EquivalenceClass,
     _require_parallel_safe: bool,
 ) -> bool {
-    false
+    crate::optimizer::path::equivclass::relation_can_be_sorted_early(_root as _, _rel as _, _ec as _, _require_parallel_safe)
 }
 
 /// TODO(pg-port): optimizer/plan/planner.c
 pub unsafe fn compute_gather_rows(_path: *mut Path) -> f64 {
-    0.0
+    crate::optimizer::path::costsize::compute_gather_rows(_path as _)
 }
 
 /// TODO(pg-port): access/tsmapi.h
@@ -449,72 +494,75 @@ pub unsafe fn GetTsmRoutine(_tsmhandler: Oid) -> *mut TsmRoutine {
 
 /// TODO(pg-port): utils/lsyscache.c
 pub unsafe fn func_parallel(_funcid: Oid) -> c_char {
-    PROPARALLEL_SAFE
+    crate::utils::cache::lsyscache::func_parallel(_funcid as _) as _
 }
 
 /// TODO(pg-port): utils/lsyscache.c
 pub unsafe fn get_rel_persistence(_relid: Oid) -> c_char {
-    b'p' as c_char
+    crate::utils::cache::lsyscache::get_rel_persistence(_relid as _) as _
 }
 
 /// TODO(pg-port): utils/lsyscache.c
 pub unsafe fn get_typavgwidth(_typid: Oid, _typmod: i32) -> i32 {
-    0
+    crate::utils::cache::lsyscache::get_typavgwidth(_typid as _, _typmod as _)
 }
 
 /// TODO(pg-port): utils/lsyscache.c
+#[no_mangle]
 pub unsafe fn get_func_support(_funcid: Oid) -> Oid {
-    InvalidOid
+    crate::utils::cache::lsyscache::get_func_support(_funcid as _)
 }
 
 /// TODO(pg-port): utils/lsyscache.c
 pub unsafe fn func_strict(_funcid: Oid) -> bool {
-    false
+    crate::utils::cache::lsyscache::func_strict(_funcid as _)
 }
 
 /// TODO(pg-port): utils/lsyscache.c
 pub unsafe fn get_op_index_interpretation(_opno: Oid) -> *mut List {
-    NIL
+    crate::utils::cache::lsyscache::get_op_index_interpretation(_opno as _) as _
 }
 
 /// TODO(pg-port): utils/lsyscache.c
 pub unsafe fn get_opfamily_member_for_cmptype(
-    _opfamily: Oid,
-    _lefttype: Oid,
-    _righttype: Oid,
-    _cmptype: CompareType,
+    opfamily: Oid,
+    lefttype: Oid,
+    righttype: Oid,
+    cmptype: CompareType,
 ) -> Oid {
-    InvalidOid
+    crate::utils::cache::lsyscache::get_opfamily_member_for_cmptype(
+        opfamily, lefttype, righttype, cmptype as _,
+    )
 }
 
 /// TODO(pg-port): optimizer/optimizer.c
 pub unsafe fn is_parallel_safe(_root: *mut PlannerInfo, _node: *mut Node) -> bool {
-    false
+    crate::optimizer::util::clauses::is_parallel_safe(_root as _, _node as _)
 }
 
 /// TODO(pg-port): optimizer/optimizer.c
 pub unsafe fn contain_subplans(_node: *mut Node) -> bool {
-    false
+    crate::optimizer::util::clauses::contain_subplans(_node as _)
 }
 
 /// TODO(pg-port): optimizer/optimizer.c
 pub unsafe fn contain_volatile_functions(_node: *mut Node) -> bool {
-    false
+    crate::optimizer::util::clauses::contain_volatile_functions(_node as _)
 }
 
 /// TODO(pg-port): optimizer/optimizer.c
 pub unsafe fn contain_leaked_vars(_node: *mut Node) -> bool {
-    false
+    crate::optimizer::util::clauses::contain_leaked_vars(_node as _)
 }
 
 /// TODO(pg-port): optimizer/optimizer.c
 pub unsafe fn limit_needed(_query: *mut Query) -> bool {
-    false
+    crate::optimizer::plan::planner::limit_needed(_query as _)
 }
 
 /// TODO(pg-port): optimizer/util/clauses.c
 pub unsafe fn pull_var_clause(_node: *mut Node, _flags: c_int) -> *mut List {
-    NIL
+    crate::optimizer::util::var::pull_var_clause(_node as _, _flags as _) as _
 }
 
 /// TODO(pg-port): optimizer/util/clauses.c
@@ -522,16 +570,18 @@ pub unsafe fn pull_varattnos(
     _node: *mut Node,
     _varno: Index,
     _varattnos: *mut *mut Bitmapset,
-) {}
+) {
+    crate::optimizer::util::var::pull_varattnos(_node as _, _varno as _, _varattnos as _)
+}
 
 /// TODO(pg-port): optimizer/util/clauses.c
 pub unsafe fn expression_returns_set(_clause: *mut Node) -> bool {
-    false
+    crate::nodes::nodeFuncs::expression_returns_set(_clause as _)
 }
 
 /// TODO(pg-port): optimizer/util/clauses.c
 pub unsafe fn is_pseudo_constant_clause(_clause: *mut Node) -> bool {
-    false
+    crate::optimizer::util::clauses::is_pseudo_constant_clause(_clause as _)
 }
 
 /// TODO(pg-port): optimizer/util/clauses.c
@@ -540,41 +590,43 @@ pub unsafe fn flatten_group_exprs(
     _query: *mut Query,
     _node: *mut Node,
 ) -> *mut Node {
-    core::ptr::null_mut()
+    crate::optimizer::util::var::flatten_group_exprs(_root as _, _query as _, _node as _) as _
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.c
 pub unsafe fn exprType(_expr: *const Node) -> Oid {
-    InvalidOid
+    crate::nodes::nodeFuncs::exprType(_expr as _)
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.c
 pub unsafe fn exprTypmod(_expr: *const Node) -> i32 {
-    -1
+    crate::nodes::nodeFuncs::exprTypmod(_expr as _)
 }
 
 /// TODO(pg-port): nodes/nodeFuncs.c
 pub unsafe fn exprCollation(_expr: *const Node) -> Oid {
-    InvalidOid
+    crate::nodes::nodeFuncs::exprCollation(_expr as _)
 }
 
 /// TODO(pg-port): nodes/makefuncs.c
 pub unsafe fn makeNullConst(_typid: Oid, _typmod: i32, _collation: Oid) -> *mut Node {
-    core::ptr::null_mut()
+    crate::nodes::makefuncs::makeNullConst(_typid as _, _typmod as _, _collation as _) as _
 }
 
 /// TODO(pg-port): nodes/makefuncs.c
 pub unsafe fn make_and_qual(_qual1: *mut Node, _qual2: *mut Node) -> *mut Node {
-    core::ptr::null_mut()
+    crate::nodes::makefuncs::make_and_qual(_qual1 as _, _qual2 as _) as _
 }
 
 /// TODO(pg-port): nodes/makefuncs.c
 pub unsafe fn make_tlist_from_pathtarget(_target: *mut PathTarget) -> *mut List {
-    NIL
+    crate::optimizer::util::tlist::make_tlist_from_pathtarget(_target as _) as _
 }
 
 /// TODO(pg-port): utils/adt/selfuncs.c
-pub unsafe fn set_opfuncid(_opexpr: *mut OpExpr) {}
+pub unsafe fn set_opfuncid(_opexpr: *mut OpExpr) {
+    crate::nodes::nodeFuncs::set_opfuncid(_opexpr as _)
+}
 
 /// TODO(pg-port): nodes/copyfuncs.c
 pub unsafe fn copyObject<T>(_obj: *mut T) -> *mut T {
@@ -593,12 +645,12 @@ pub unsafe fn ReplaceVarsFromTargetList(
     _nomatch_varno: c_int,
     _outer_hasSubLinks: *mut bool,
 ) -> *mut Node {
-    core::ptr::null_mut()
+    crate::rewrite::rewriteManip::ReplaceVarsFromTargetList(_expr as _, _target_varno as _, _sublevels_up as _, _target_rte as _, _targetlist as _, _result_relation as _, _nomatch_option as _, _nomatch_varno as _, _outer_hasSubLinks as _) as _
 }
 
 /// TODO(pg-port): parser/parsetree.c
-pub unsafe fn rt_fetch(_rtindex: Index, _rtable: *mut List) -> *mut RangeTblEntry {
-    core::ptr::null_mut()
+pub unsafe fn rt_fetch(rtindex: Index, rtable: *mut List) -> *mut RangeTblEntry {
+    list_nth(rtable, (rtindex - 1) as c_int) as *mut RangeTblEntry
 }
 
 /// TODO(pg-port): parser/parse_clause.c
@@ -607,15 +659,17 @@ pub unsafe fn targetIsInSortList(
     _sortop: Oid,
     _sortlist: *mut List,
 ) -> bool {
-    false
+    crate::parser::parse_clause::targetIsInSortList(_tle as _, _sortop as _, _sortlist as _)
 }
 
 /// TODO(pg-port): utils/fmgr.c
+#[no_mangle]
 pub unsafe fn OidFunctionCall1(_functionId: Oid, _arg1: Datum) -> Datum {
     0
 }
 
 /// TODO(pg-port): utils/fmgr.c
+#[no_mangle]
 pub unsafe fn DatumGetPointer(datum: Datum) -> *mut c_void {
     datum as *mut c_void
 }
@@ -1079,6 +1133,10 @@ unsafe fn set_rel_pathlist(
     rti: Index,
     rte: *mut RangeTblEntry,
 ) {
+    if std::env::var("PDB_BT").is_ok() {
+        eprintln!("PDB_BT set_rel_pathlist relid={} dummy={} inh={} rtekind={} relkind={}",
+            (*rte).relid, IS_DUMMY_REL(rel), (*rte).inh, (*rel).rtekind as i32, (*rte).relkind as i32);
+    }
     if IS_DUMMY_REL(rel) {
         /* We already proved the relation empty, so nothing more to do */
     } else if (*rte).inh {
@@ -1160,6 +1218,12 @@ unsafe fn set_rel_pathlist(
 
     /* Now find the cheapest of the paths for this rel */
     set_cheapest(rel);
+    if std::env::var("PDB_BT").is_ok() {
+        let ct = (*rel).cheapest_total_path;
+        eprintln!("PDB_BT set_rel_pathlist DONE rtekind={} npaths={} cheapest_total={:p} param_info={:p} lateral_relids={:p}",
+            (*rel).rtekind as i32, list_length((*rel).pathlist), ct,
+            if ct.is_null() { core::ptr::null_mut() } else { (*ct).param_info }, (*rel).lateral_relids);
+    }
 
     /* (OPTIMIZER_DEBUG: pprint(rel) omitted -- debug only) */
 }
@@ -1394,6 +1458,10 @@ unsafe fn set_plain_rel_pathlist(
      * its tlist.
      */
     required_outer = (*rel).lateral_relids;
+
+    if std::env::var("PDB_BT").is_ok() {
+        eprintln!("PDB_BT set_plain_rel_pathlist ENTER relid={}", (*rte).relid);
+    }
 
     /*
      * Consider TID scans.
@@ -4249,7 +4317,15 @@ unsafe fn make_rel_from_joinlist(root: *mut PlannerInfo, joinlist: *mut List) ->
         /*
          * Single joinlist node, so we're done.
          */
-        return linitial(initial_rels) as *mut RelOptInfo;
+        let r = linitial(initial_rels) as *mut RelOptInfo;
+        if std::env::var("PDB_BT").is_ok() {
+            let jl0 = lfirst(list_head(joinlist)) as *mut Node;
+            let vno = if IsA!(jl0, T_RangeTblRef) { (*(jl0 as *mut RangeTblRef)).rtindex } else { -1 };
+            eprintln!("PDB_BT make_rel_from_joinlist levels=1 varno={} ret_rel={:p} ret_cheapest={:p} ret_rtekind={}",
+                vno, r, if r.is_null() {core::ptr::null_mut()} else {(*r).cheapest_total_path},
+                if r.is_null() {-1} else {(*r).rtekind as i32});
+        }
+        return r;
     } else {
         /*
          * Consider the different orders in which we could join the rels,

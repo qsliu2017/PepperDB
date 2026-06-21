@@ -194,7 +194,7 @@ use crate::catalog::pg_proc::{
     Form_pg_proc,
 };
 /* TODO(pg-port): syscache.h PROCOID id */
-const PROCOID: c_int = 0;
+const PROCOID: c_int = 47;
 /* TODO(pg-port): pg_proc.h Anum_pg_proc_proargmodes */
 const Anum_pg_proc_proargmodes: crate::access::attnum::AttrNumber = 20;
 use crate::catalog::pg_type_d::{CHAROID, INT4OID, RECORDOID as pg_RECORDOID, _RECORDOID as RECORDARRAYOID, UNKNOWNOID};
@@ -220,11 +220,11 @@ use crate::parser::parse_relation::getRTEPermissionInfo;
 /* TODO(pg-port): utils/adt/arrayfuncs.c array helpers not yet ported */
 #[repr(C)] pub struct ArrayType { _opaque: u8 }
 unsafe fn DatumGetArrayTypeP(d: Datum) -> *mut ArrayType { d as *mut ArrayType }
-unsafe fn ARR_NDIM(a: *mut ArrayType) -> c_int { unimplemented!("ARR_NDIM") }
-unsafe fn ARR_DIMS(a: *mut ArrayType) -> *mut c_int { unimplemented!("ARR_DIMS") }
-unsafe fn ARR_HASNULL(_a: *mut ArrayType) -> bool { false }
-unsafe fn ARR_ELEMTYPE(_a: *mut ArrayType) -> Oid { 0 }
-unsafe fn ARR_DATA_PTR(a: *mut ArrayType) -> *mut u8 { unimplemented!("ARR_DATA_PTR") }
+unsafe fn ARR_NDIM(a: *mut ArrayType) -> c_int { crate::utils::array::ARR_NDIM(a as _) }
+unsafe fn ARR_DIMS(a: *mut ArrayType) -> *mut c_int { crate::utils::array::ARR_DIMS(a as _) as _ }
+unsafe fn ARR_HASNULL(_a: *mut ArrayType) -> bool { crate::utils::array::ARR_HASNULL(_a as _) }
+unsafe fn ARR_ELEMTYPE(_a: *mut ArrayType) -> Oid { crate::utils::array::ARR_ELEMTYPE(_a as _) }
+unsafe fn ARR_DATA_PTR(a: *mut ArrayType) -> *mut u8 { crate::utils::array::ARR_DATA_PTR(a as _) as _ }
 use crate::optimizer::optimizer::expand_function_arguments;
 
 use crate::nodes::queryjumble::{JumbleState, JumbleQuery};
@@ -789,11 +789,14 @@ unsafe fn transformInsertStmt(pstate: *mut ParseState, stmt: *mut InsertStmt) ->
     if isOnConflictUpdate {
         targetPerms |= ACL_UPDATE;
     }
+    if std::env::var("PDB_BT").is_ok() { eprintln!("PDB_BT transformInsertStmt: before setTargetTable"); }
     (*qry).resultRelation =
         setTargetTable(pstate, (*stmt).relation, false, false, targetPerms);
+    if std::env::var("PDB_BT").is_ok() { eprintln!("PDB_BT transformInsertStmt: after setTargetTable resultRelation={}", (*qry).resultRelation); }
 
     /* Validate stmt->cols list, or build default list if no list given */
     icolumns = checkInsertTargets(pstate, (*stmt).cols, &mut attrnos);
+    if std::env::var("PDB_BT").is_ok() { eprintln!("PDB_BT transformInsertStmt: after checkInsertTargets ncols={}", list_length(icolumns)); }
     debug_assert!(list_length(icolumns) == list_length(attrnos));
 
     /*
@@ -1743,8 +1746,8 @@ unsafe fn transformValuesClause(pstate: *mut ParseState, stmt: *mut SelectStmt) 
                 coltype,
                 b"VALUES\0".as_ptr() as *const c_char,
             );
-            /* lfirst(lc) = col -- mutate via ListCell pointer */
-            *((*current_cell!(lc)).ptr_value as *mut *mut c_void) = col as *mut c_void;
+            /* lfirst(lc) = col -- store the coerced expr back into the cell */
+            (*current_cell!(lc)).ptr_value = col as *mut c_void;
         });
 
         coltypmod = select_common_typmod(pstate, *colexprs.offset(i as isize), coltype);
@@ -1769,7 +1772,7 @@ unsafe fn transformValuesClause(pstate: *mut ParseState, stmt: *mut SelectStmt) 
             let mut sublist: *mut List = lfirst(lc2) as *mut List;
             sublist = lappend(sublist, col as *mut c_void);
             /* lfirst(lc2) = sublist */
-            *((*lc2).ptr_value as *mut *mut c_void) = sublist as *mut c_void;
+            (*lc2).ptr_value = sublist as *mut c_void;
             lc = lnext(*colexprs.offset(i as isize), lc);
             lc2 = lnext(exprsLists, lc2);
         }

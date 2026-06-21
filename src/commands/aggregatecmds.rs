@@ -592,9 +592,7 @@ unsafe fn object_aclcheck(_classid: Oid, _objectid: Oid, _roleid: Oid, _mode: u3
     unimplemented!() // TODO: utils/adt/acl.c
 }
 
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 
 unsafe fn aclcheck_error(_aclerr: AclResult, _objtype: c_int, _objectname: *const c_char) {
     unimplemented!() // TODO: utils/adt/acl.c

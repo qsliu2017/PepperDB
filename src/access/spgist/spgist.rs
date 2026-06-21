@@ -206,21 +206,15 @@ pub struct spgLeafConsistentOut {
 }
 
 /* spgutils.c */
-pub unsafe fn spgoptions(reloptions: Datum, validate: bool) -> *mut bytea {
-    unimplemented!()
-}
+pub unsafe fn spgoptions(reloptions: Datum, validate: bool) -> *mut bytea { unimplemented!() }
 
 /* spginsert.c */
 pub unsafe fn spgbuild(
     heap: Relation,
     index: Relation,
     indexInfo: *mut IndexInfo,
-) -> *mut IndexBuildResult {
-    unimplemented!()
-}
-pub unsafe fn spgbuildempty(index: Relation) {
-    unimplemented!()
-}
+) -> *mut IndexBuildResult { crate::access::spgist::spginsert::spgbuild(heap, index, indexInfo) }
+pub unsafe fn spgbuildempty(index: Relation) { crate::access::spgist::spginsert::spgbuildempty(index) }
 pub unsafe fn spginsert(
     index: Relation,
     values: *mut Datum,
@@ -230,35 +224,21 @@ pub unsafe fn spginsert(
     checkUnique: IndexUniqueCheck,
     indexUnchanged: bool,
     indexInfo: *mut IndexInfo,
-) -> bool {
-    unimplemented!()
-}
+) -> bool { crate::access::spgist::spginsert::spginsert(index, values, isnull, ht_ctid, heapRel, checkUnique, indexUnchanged, indexInfo) }
 
 /* spgscan.c */
-pub unsafe fn spgbeginscan(rel: Relation, keysz: c_int, orderbysz: c_int) -> IndexScanDesc {
-    unimplemented!()
-}
-pub unsafe fn spgendscan(scan: IndexScanDesc) {
-    unimplemented!()
-}
+pub unsafe fn spgbeginscan(rel: Relation, keysz: c_int, orderbysz: c_int) -> IndexScanDesc { unimplemented!() }
+pub unsafe fn spgendscan(scan: IndexScanDesc) { unimplemented!() }
 pub unsafe fn spgrescan(
     scan: IndexScanDesc,
     scankey: ScanKey,
     nscankeys: c_int,
     orderbys: ScanKey,
     norderbys: c_int,
-) {
-    unimplemented!()
-}
-pub unsafe fn spggetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> i64 {
-    unimplemented!()
-}
-pub unsafe fn spggettuple(scan: IndexScanDesc, dir: ScanDirection) -> bool {
-    unimplemented!()
-}
-pub unsafe fn spgcanreturn(index: Relation, attno: c_int) -> bool {
-    unimplemented!()
-}
+) { unimplemented!() }
+pub unsafe fn spggetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -> i64 { unimplemented!() }
+pub unsafe fn spggettuple(scan: IndexScanDesc, dir: ScanDirection) -> bool { unimplemented!() }
+pub unsafe fn spgcanreturn(index: Relation, attno: c_int) -> bool { crate::access::spgist::spgscan::spgcanreturn(index, attno) }
 
 /* spgvacuum.c */
 pub unsafe fn spgbulkdelete(
@@ -266,25 +246,17 @@ pub unsafe fn spgbulkdelete(
     stats: *mut IndexBulkDeleteResult,
     callback: IndexBulkDeleteCallback,
     callback_state: *mut c_void,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!()
-}
+) -> *mut IndexBulkDeleteResult { unimplemented!() }
 pub unsafe fn spgvacuumcleanup(
     info: *mut IndexVacuumInfo,
     stats: *mut IndexBulkDeleteResult,
-) -> *mut IndexBulkDeleteResult {
-    unimplemented!()
-}
+) -> *mut IndexBulkDeleteResult { unimplemented!() }
 
 /* spgvalidate.c */
-pub unsafe fn spgvalidate(opclassoid: Oid) -> bool {
-    unimplemented!()
-}
+pub unsafe fn spgvalidate(opclassoid: Oid) -> bool { crate::access::spgist::spgvalidate::spgvalidate(opclassoid) }
 pub unsafe fn spgadjustmembers(
     opfamilyoid: Oid,
     opclassoid: Oid,
     operators: *mut List,
     functions: *mut List,
-) {
-    unimplemented!()
-}
+) { crate::access::spgist::spgvalidate::spgadjustmembers(opfamilyoid, opclassoid, operators, functions) }

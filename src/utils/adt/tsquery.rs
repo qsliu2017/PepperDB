@@ -65,7 +65,10 @@ const ERRCODE_PROGRAM_LIMIT_EXCEEDED: c_int = 0;
  */
 macro_rules! ereturn {
     ($escontext:expr, $dummy:expr, $($arg:tt)*) => {{
-        let _ = &$escontext;
+        let __ctx = $escontext as *mut Node;
+        if SOFT_ERROR_FLAG(__ctx) {
+            return $dummy;
+        }
         ereport!(ERROR, $($arg)*);
         #[allow(unreachable_code)]
         return $dummy;
@@ -73,14 +76,30 @@ macro_rules! ereturn {
 }
 
 /*
- * errsave(escontext, ...): soft-error shim -> ereport!(ERROR, ...) (the elog
- * shim ignores escontext).
+ * errsave(escontext, ...): record a soft error into a real ErrorSaveContext and
+ * continue; otherwise raise a hard ERROR.
  */
 macro_rules! errsave {
     ($escontext:expr, $($arg:tt)*) => {{
-        let _ = &$escontext;
-        ereport!(ERROR, $($arg)*);
+        let __ctx = $escontext as *mut Node;
+        if !SOFT_ERROR_FLAG(__ctx) {
+            ereport!(ERROR, $($arg)*);
+        }
     }};
+}
+
+/*
+ * SOFT_ERROR_FLAG: if `escontext` is a real ErrorSaveContext, record that a soft
+ * error occurred and return true; otherwise return false.
+ */
+#[inline]
+unsafe fn SOFT_ERROR_FLAG(escontext: *mut Node) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    if !escontext.is_null() && *(escontext as *const c_int) == T_ErrorSaveContext {
+        (*(escontext as *mut crate::nodes::miscnodes::ErrorSaveContext)).error_occurred = true;
+        return true;
+    }
+    false
 }
 
 /*

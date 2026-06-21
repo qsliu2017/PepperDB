@@ -69,31 +69,31 @@ unsafe fn CHECK_FOR_INTERRUPTS() {
 }
 
 unsafe fn outerPlanState(node: *mut PlanState) -> *mut PlanState {
-    unimplemented!() // TODO: nodes/execnodes.h
+    crate::nodes::execnodes::outerPlanState(node as _) as _
 }
 
 unsafe fn ExecProcNode(node: *mut PlanState) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/executor.h
+    crate::executor::executor::ExecProcNode(node as _) as _
 }
 
 unsafe fn TupIsNull(slot: *mut TupleTableSlot) -> bool {
-    unimplemented!() // TODO: executor/tuptable.h
+    crate::executor::tuptable::TupIsNull(slot as _) as _
 }
 
 unsafe fn EvalPlanQualEnd(epqstate: *mut core::ffi::c_void) {
-    unimplemented!() // TODO: executor/executor.h
+    crate::executor::execMain::EvalPlanQualEnd(epqstate as _)
 }
 
 unsafe fn EvalPlanQualBegin(epqstate: *mut core::ffi::c_void) {
-    unimplemented!() // TODO: executor/execMain.c
+    crate::executor::execMain::EvalPlanQualBegin(epqstate as _)
 }
 
 unsafe fn EvalPlanQualSetSlot(epqstate: *mut core::ffi::c_void, slot: *mut TupleTableSlot) {
-    unimplemented!() // TODO: executor/execMain.c
+    crate::executor::executor::EvalPlanQualSetSlot(epqstate as _, slot as _)
 }
 
 unsafe fn EvalPlanQualNext(epqstate: *mut core::ffi::c_void) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/execMain.c
+    crate::executor::execMain::EvalPlanQualNext(epqstate as _) as _
 }
 
 unsafe fn EvalPlanQualSlot(
@@ -101,7 +101,7 @@ unsafe fn EvalPlanQualSlot(
     relation: *mut core::ffi::c_void,
     rti: Index,
 ) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/execMain.c
+    crate::executor::execMain::EvalPlanQualSlot(epqstate as _, relation as _, rti as _) as _
 }
 
 unsafe fn EvalPlanQualInit(
@@ -112,11 +112,11 @@ unsafe fn EvalPlanQualInit(
     epqParam: c_int,
     resultRelations: *mut List,
 ) {
-    unimplemented!() // TODO: executor/execMain.c
+    crate::executor::execMain::EvalPlanQualInit(epqstate as _, estate as _, plan as _, arowmarks as _, epqParam as _, resultRelations as _)
 }
 
 unsafe fn ExecClearTuple(slot: *mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!() // TODO: executor/tuptable.h
+    crate::executor::tuptable::ExecClearTuple(slot as _) as _
 }
 
 unsafe fn ExecGetJunkAttribute(
@@ -131,7 +131,7 @@ unsafe fn GetFdwRoutineForRelation(
     relation: *mut core::ffi::c_void,
     makecopy: bool,
 ) -> *mut FdwRoutine {
-    unimplemented!() // TODO: foreign/fdwapi.h
+    crate::foreign::foreign::GetFdwRoutineForRelation(relation as _, makecopy as _) as _
 }
 
 unsafe fn IsolationUsesXactSnapshot() -> bool {
@@ -153,7 +153,7 @@ unsafe fn table_tuple_lock(
 }
 
 unsafe fn ExecInitResultTypeTL(planstate: *mut PlanState) {
-    unimplemented!() // TODO: executor/execUtils.c
+    crate::executor::execTuples::ExecInitResultTypeTL(planstate as _)
 }
 
 unsafe fn ExecInitNode(
@@ -161,7 +161,7 @@ unsafe fn ExecInitNode(
     estate: *mut EState,
     eflags: c_int,
 ) -> *mut PlanState {
-    unimplemented!() // TODO: executor/execProcnode.c
+    crate::executor::execProcnode::ExecInitNode(node as _, estate as _, eflags as _) as _
 }
 
 unsafe fn ExecGetResultSlotOps(
@@ -172,26 +172,26 @@ unsafe fn ExecGetResultSlotOps(
 }
 
 unsafe fn ExecEndNode(node: *mut PlanState) {
-    unimplemented!() // TODO: executor/execProcnode.c
+    crate::executor::execProcnode::ExecEndNode(node as _)
 }
 
 unsafe fn ExecReScan(node: *mut PlanState) {
-    unimplemented!() // TODO: executor/execAmi.c
+    crate::executor::execAmi::ExecReScan(node as _)
 }
 
 unsafe fn exec_rt_fetch(rti: Index, estate: *mut EState) -> *mut RangeTblEntry {
-    unimplemented!() // TODO: executor/execUtils.c
+    crate::executor::executor::exec_rt_fetch(rti as _, estate as _) as _
 }
 
 unsafe fn ExecFindRowMark(estate: *mut EState, rti: Index, missing_ok: bool) -> *mut ExecRowMark {
-    unimplemented!() // TODO: executor/execMain.c
+    crate::executor::execMain::ExecFindRowMark(estate as _, rti as _, missing_ok as _) as _
 }
 
 unsafe fn ExecBuildAuxRowMark(
     erm: *mut ExecRowMark,
     targetlist: *mut List,
 ) -> *mut ExecAuxRowMark {
-    unimplemented!() // TODO: executor/execMain.c
+    crate::executor::execMain::ExecBuildAuxRowMark(erm as _, targetlist as _) as _
 }
 
 unsafe fn RowMarkRequiresRowShareLock(marktype: RowMarkType) -> bool {
@@ -203,11 +203,11 @@ unsafe fn lappend(list: *mut List, datum: *mut core::ffi::c_void) -> *mut List {
 }
 
 unsafe fn bms_is_member(x: c_int, a: *mut core::ffi::c_void) -> bool {
-    unimplemented!() // TODO: nodes/bitmapset.h
+    crate::nodes::bitmapset::bms_is_member(x as _, a as _) as _
 }
 
 unsafe fn lfirst(lc: *mut ListCell) -> *mut core::ffi::c_void {
-    unimplemented!() // TODO: nodes/pg_list.h
+    crate::nodes::pg_list::lfirst(lc as _) as _
 }
 
 unsafe fn lfirst_node_PlanRowMark(lc: *mut ListCell) -> *mut PlanRowMark {
@@ -223,7 +223,7 @@ unsafe fn DatumGetPointer(d: Datum) -> *mut core::ffi::c_void {
 }
 
 unsafe fn ItemPointerSetInvalid(p: *mut ItemPointerData) {
-    unimplemented!() // TODO: storage/itemptr.h
+    crate::storage::itemptr::ItemPointerSetInvalid(p as _)
 }
 
 unsafe fn OidIsValid(oid: Oid) -> bool {

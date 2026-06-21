@@ -23,47 +23,47 @@ use crate::elog;
 // TODO: dep not ported - utils/cache/syscache.c
 // ---------------------------------------------------------------------------
 #[allow(non_upper_case_globals)]
-const RULERELNAME: c_int = 0; // syscache id placeholder
+const RULERELNAME: c_int = 60; // syscache id placeholder
 #[allow(non_upper_case_globals)]
-const RELOID: c_int = 1; // syscache id placeholder
+const RELOID: c_int = 57; // syscache id placeholder
 
 // TODO: dep not ported - utils/cache/syscache.c
-unsafe fn SearchSysCacheExists2(_cacheId: c_int, _key1: Datum, _key2: Datum) -> bool {
-    unimplemented!()
+unsafe fn SearchSysCacheExists2(cacheId: c_int, key1: Datum, key2: Datum) -> bool {
+    crate::utils::cache::syscache::SearchSysCacheExists2(cacheId, key1, key2)
 }
 
 // TODO: dep not ported - utils/cache/syscache.c
-unsafe fn SearchSysCacheCopy1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
-    unimplemented!()
+unsafe fn SearchSysCacheCopy1(cacheId: c_int, key1: Datum) -> HeapTuple {
+    crate::catalog::objectaddress_impl::SearchSysCacheCopy1(cacheId, key1)
 }
 
 // TODO: dep not ported - utils/cache/syscache.c
-unsafe fn SearchSysCache2(_cacheId: c_int, _key1: Datum, _key2: Datum) -> HeapTuple {
-    unimplemented!()
+unsafe fn SearchSysCache2(cacheId: c_int, key1: Datum, key2: Datum) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCache2(cacheId, key1, key2)
 }
 
 // TODO: dep not ported - utils/cache/syscache.c
-unsafe fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!()
+unsafe fn ReleaseSysCache(tuple: HeapTuple) {
+    crate::utils::cache::syscache::ReleaseSysCache(tuple)
 }
 
 // TODO: dep not ported - catalog/indexing.c
 unsafe fn CatalogTupleUpdate(
-    _heapRel: Relation,
-    _otid: *mut crate::storage::itemptr::ItemPointerData,
-    _tup: HeapTuple,
+    heapRel: Relation,
+    otid: *mut crate::storage::itemptr::ItemPointerData,
+    tup: HeapTuple,
 ) {
-    unimplemented!()
+    crate::catalog::indexing::CatalogTupleUpdate(heapRel, otid as _, tup)
 }
 
 // TODO: dep not ported - utils/cache/inval.c
-unsafe fn CacheInvalidateRelcacheByTuple(_classTuple: HeapTuple) {
-    unimplemented!()
+unsafe fn CacheInvalidateRelcacheByTuple(classTuple: HeapTuple) {
+    crate::utils::cache::inval::CacheInvalidateRelcacheByTuple(classTuple)
 }
 
 // TODO: dep not ported - utils/cache/lsyscache.c
-unsafe fn get_rel_name(_relid: Oid) -> *mut c_char {
-    unimplemented!()
+unsafe fn get_rel_name(relid: Oid) -> *mut c_char {
+    crate::utils::cache::lsyscache::get_rel_name(relid)
 }
 
 /*

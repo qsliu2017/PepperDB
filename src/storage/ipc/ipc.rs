@@ -42,15 +42,15 @@ static mut error_context_stack: *mut c_void = null_mut();
 
 // LWLockReleaseAll (storage/lmgr/lwlock.c).
 unsafe fn LWLockReleaseAll() {
-    unimplemented!()
+    crate::storage::lmgr::lwlock::LWLockReleaseAll()
 }
 
 // dsm_backend_shutdown / reset_on_dsm_detach (storage/ipc/dsm.c).
 unsafe fn dsm_backend_shutdown() {
-    unimplemented!()
+    crate::storage::ipc::dsm::dsm_backend_shutdown()
 }
 unsafe fn reset_on_dsm_detach() {
-    unimplemented!()
+    crate::storage::ipc::dsm::reset_on_dsm_detach()
 }
 
 // AmAutoVacuumWorkerProcess (miscadmin.rs) - referenced only under
@@ -126,7 +126,12 @@ static mut before_shmem_exit_index: c_int = 0;
 //		this is the preferred way out of the system, we also register
 //		an atexit callback that will make sure cleanup happens.
 // ----------------------------------------------------------------
+#[no_mangle]
 pub unsafe fn proc_exit(code: c_int) -> ! {
+    if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT proc_exit code={} on_shmem_exit_index={} pid={}",
+            code, on_shmem_exit_index, MyProcPid);
+    }
     /* not safe if forked by system(), etc. */
     if MyProcPid != process::id() as c_int {
         elog!(PANIC, "proc_exit() called in child process");
@@ -325,6 +330,7 @@ pub unsafe fn on_proc_exit(function: pg_on_exit_callback, arg: Datum) {
 ///		Register early callback to perform user-level cleanup,
 ///		e.g. transaction abort, before we begin shutting down
 ///		low-level subsystems.
+#[no_mangle]
 pub unsafe fn before_shmem_exit(function: pg_on_exit_callback, arg: Datum) {
     if before_shmem_exit_index >= MAX_ON_EXITS as c_int {
         ereport!(FATAL, "out of before_shmem_exit slots");

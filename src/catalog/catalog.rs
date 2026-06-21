@@ -35,8 +35,10 @@ use crate::catalog::catalog_oids::{
     AuthIdRelationId, AuthMemRelationId, DatabaseRelationId, DbRoleSettingRelationId,
     LargeObjectRelationId, NamespaceRelationId, ParameterAclRelationId, RelationRelationId,
     ReplicationOriginRelationId, SharedDependRelationId, SharedDescriptionRelationId,
-    SharedSecLabelRelationId, SubscriptionRelationId, TableSpaceRelationId,
+    SharedSecLabelRelationId, SubscriptionRelationId, TableSpaceRelationId, TypeRelationId,
 };
+use crate::access::htup_details::HeapTuple;
+use crate::{PG_GETARG_NAME, PG_GETARG_OID, PG_RETURN_OID, PG_RETURN_VOID};
 use crate::catalog::pg_class::Form_pg_class;
 use crate::catalog::pg_known_oids::{PG_CATALOG_NAMESPACE, PG_PUBLIC_NAMESPACE, PG_TOAST_NAMESPACE};
 
@@ -66,7 +68,14 @@ use crate::access::htup_details::HeapTupleIsValid;
 use crate::access::stratnum::BTEqualStrategyNumber;
 use crate::access::transam::varsup::{GetNewObjectId, StopGeneratingPinnedObjectIds};
 use crate::miscadmin::{superuser, IsBootstrapProcessingMode};
-use crate::utils::time::snapmgr::SnapshotAnyData;
+// utils/time/snapmgr.h: extern SnapshotData SnapshotAnyData; (only its address is
+// taken, then cast to the genam Snapshot = *mut c_void).
+// TODO(pg-port): wire utils/time/snapmgr
+#[repr(C)]
+struct SnapshotAnyDataStub {
+    _opaque: [u8; 0],
+}
+static mut SnapshotAnyData: SnapshotAnyDataStub = SnapshotAnyDataStub { _opaque: [] };
 
 // RelationData accessors (utils/rel.h macros).
 unsafe fn RelationGetRelid(relation: Relation) -> Oid {
@@ -301,6 +310,7 @@ pub fn IsCatalogRelationOid(relid: Oid) -> bool {
  *		The relcache must not use these indexes.  See the C source for the full
  *		rationale (self-deadlock avoidance via a hard-coded list).
  */
+#[no_mangle]
 pub fn IsCatalogTextUniqueIndexOid(relid: Oid) -> bool {
     relid == ParameterAclParnameIndexId
         || relid == ReplicationOriginNameIndex
@@ -382,9 +392,7 @@ pub fn IsToastNamespace(namespaceId: Oid) -> bool {
 // ported. Returns false so the PG_TOAST_NAMESPACE arm of IsToastNamespace stays
 // correct; only the per-backend temp-toast case is unimplemented.
 // TODO(pg-port): real isTempToastNamespace in catalog/namespace.c.
-fn isTempToastNamespace(_namespaceId: Oid) -> bool {
-    false
-}
+fn isTempToastNamespace(namespaceId: Oid) -> bool { unsafe { crate::catalog::namespace::isTempToastNamespace(namespaceId) } }
 
 /*
  * IsReservedName
@@ -476,6 +484,7 @@ pub fn IsSharedRelation(relationId: Oid) -> bool {
  * We used to represent this explicitly in pg_depend, but that proved to be
  * an undesirable amount of overhead, so now we rely on an OID range test.
  */
+#[no_mangle]
 pub fn IsPinnedObject(classId: Oid, objectId: Oid) -> bool {
     /*
      * Objects with OIDs above FirstUnpinnedObjectId are never pinned.  Since
@@ -578,7 +587,7 @@ pub unsafe fn GetNewOidWithIndex(relation: Relation, indexId: Oid, oidcolumn: At
             &mut key,
         );
 
-        collides = HeapTupleIsValid(systable_getnext(scan));
+        collides = HeapTupleIsValid(systable_getnext(scan) as HeapTuple);
 
         systable_endscan(scan);
 
@@ -659,7 +668,7 @@ pub unsafe fn GetNewRelFileNumber(
      */
     Assert!(!IsBinaryUpgrade);
 
-    match relpersistence as u8 {
+    match relpersistence {
         RELPERSISTENCE_TEMP => {
             procNumber = ProcNumberForTempRelations();
         }
@@ -761,7 +770,7 @@ unsafe fn IndexRelationGetKeyAttno(relation: Relation, i: usize) -> AttrNumber {
  *
  * Function is intentionally not documented in the user facing docs.
  */
-pub unsafe fn pg_nextoid(fcinfo: *mut c_void) -> Datum {
+pub unsafe fn pg_nextoid(fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum {
     let reloid: Oid = PG_GETARG_OID!(fcinfo, 0);
     let attname: Name = PG_GETARG_NAME!(fcinfo, 1);
     let idxoid: Oid = PG_GETARG_OID!(fcinfo, 2);

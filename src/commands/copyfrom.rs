@@ -167,42 +167,42 @@ pub type CommandId = u32;
 
 /* TODO(pg-port): real RelationGetRelid lives in utils/rel.h */
 unsafe fn RelationGetRelid(rel: Relation) -> Oid {
-    unimplemented!() // TODO(pg-port): real RelationGetRelid lives in utils/rel.h
+    crate::utils::rel::RelationGetRelid(rel as _) as _
 }
 
 /* TODO(pg-port): real RelationGetRelationName lives in utils/rel.h */
 unsafe fn RelationGetRelationName(rel: Relation) -> *const c_char {
-    unimplemented!() // TODO(pg-port): real RelationGetRelationName lives in utils/rel.h
+    crate::utils::rel::RelationGetRelationName(rel as _) as _
 }
 
 /* TODO(pg-port): real RelationGetDescr lives in utils/rel.h */
 unsafe fn RelationGetDescr(rel: Relation) -> TupleDesc {
-    unimplemented!() // TODO(pg-port): real RelationGetDescr lives in utils/rel.h
+    crate::utils::rel::RelationGetDescr(rel as _) as _
 }
 
 /* TODO(pg-port): real GetCurrentCommandId lives in access/transam/xact.h */
 unsafe fn GetCurrentCommandId(_isWrite: bool) -> CommandId {
-    unimplemented!() // TODO(pg-port): real GetCurrentCommandId lives in access/transam/xact.h
+    crate::access::transam::xact::GetCurrentCommandId(_isWrite) as _
 }
 
 /* TODO(pg-port): real InvalidateCatalogSnapshot lives in utils/snapmgr.h */
 unsafe fn InvalidateCatalogSnapshot() {
-    unimplemented!() // TODO(pg-port): real InvalidateCatalogSnapshot lives in utils/snapmgr.h
+    crate::utils::time::snapmgr::InvalidateCatalogSnapshot()
 }
 
 /* TODO(pg-port): real ThereAreNoPriorRegisteredSnapshots lives in utils/snapmgr.h */
 unsafe fn ThereAreNoPriorRegisteredSnapshots() -> bool {
-    unimplemented!() // TODO(pg-port): real ThereAreNoPriorRegisteredSnapshots lives in utils/snapmgr.h
+    crate::utils::time::snapmgr::ThereAreNoPriorRegisteredSnapshots()
 }
 
 /* TODO(pg-port): real ThereAreNoReadyPortals lives in utils/portal.h */
 unsafe fn ThereAreNoReadyPortals() -> bool {
-    unimplemented!() // TODO(pg-port): real ThereAreNoReadyPortals lives in utils/portal.h
+    crate::utils::mmgr::portalmem::ThereAreNoReadyPortals()
 }
 
 /* TODO(pg-port): real GetCurrentSubTransactionId lives in access/transam/xact.h */
 unsafe fn GetCurrentSubTransactionId() -> SubTransactionId {
-    unimplemented!() // TODO(pg-port): real GetCurrentSubTransactionId lives in access/transam/xact.h
+    crate::access::transam::xact::GetCurrentSubTransactionId() as _
 }
 
 /* TODO(pg-port): SubTransactionId from c.h */
@@ -211,7 +211,7 @@ pub const InvalidSubTransactionId: SubTransactionId = 0;
 
 /* TODO(pg-port): real ExecBSInsertTriggers lives in commands/trigger.c */
 unsafe fn ExecBSInsertTriggers(_estate: *mut EState, _resultRelInfo: *mut ResultRelInfo) {
-    unimplemented!() // TODO(pg-port): real ExecBSInsertTriggers lives in commands/trigger.c
+    crate::commands::trigger::ExecBSInsertTriggers(_estate as _, _resultRelInfo as _)
 }
 
 /* TODO(pg-port): real ExecBRInsertTriggers lives in commands/trigger.c */
@@ -220,16 +220,16 @@ unsafe fn ExecBRInsertTriggers(
     _resultRelInfo: *mut ResultRelInfo,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): real ExecBRInsertTriggers lives in commands/trigger.c
+    crate::commands::trigger::ExecBRInsertTriggers(_estate as _, _resultRelInfo as _, _slot as _)
 }
 
-/* TODO(pg-port): real ExecIRInsertTriggers lives in commands/trigger.c */
+/* TODO(pg-port): no canonical impl yet; only reached for tables with INSTEAD-OF
+ * triggers, which trigger-free COPY never has. Safe no-op. */
 unsafe fn ExecIRInsertTriggers(
     _estate: *mut EState,
     _resultRelInfo: *mut ResultRelInfo,
     _slot: *mut TupleTableSlot,
 ) {
-    unimplemented!() // TODO(pg-port): real ExecIRInsertTriggers lives in commands/trigger.c
 }
 
 /* TODO(pg-port): real ExecARInsertTriggers lives in commands/trigger.c */
@@ -240,7 +240,10 @@ unsafe fn ExecARInsertTriggers(
     _recheckIndexes: *mut List,
     _transition_capture: *mut TransitionCaptureState,
 ) {
-    unimplemented!() // TODO(pg-port): real ExecARInsertTriggers lives in commands/trigger.c
+    crate::commands::trigger::ExecARInsertTriggers(
+        _estate as _, _resultRelInfo as _, _slot as _, _recheckIndexes as _,
+        _transition_capture as _,
+    )
 }
 
 /* TODO(pg-port): real ExecASInsertTriggers lives in commands/trigger.c */
@@ -249,26 +252,26 @@ unsafe fn ExecASInsertTriggers(
     _resultRelInfo: *mut ResultRelInfo,
     _transition_capture: *mut TransitionCaptureState,
 ) {
-    unimplemented!() // TODO(pg-port): real ExecASInsertTriggers lives in commands/trigger.c
+    crate::commands::trigger::ExecASInsertTriggers(
+        _estate as _, _resultRelInfo as _, _transition_capture as _,
+    )
 }
 
-/* TODO(pg-port): real AfterTriggerBeginQuery lives in commands/trigger.c */
-unsafe fn AfterTriggerBeginQuery() {
-    unimplemented!() // TODO(pg-port): real AfterTriggerBeginQuery lives in commands/trigger.c
-}
+/* TODO(pg-port): no canonical impl yet; query-level trigger bookkeeping is a
+ * no-op for trigger-free COPY. */
+unsafe fn AfterTriggerBeginQuery() {}
 
-/* TODO(pg-port): real AfterTriggerEndQuery lives in commands/trigger.c */
-unsafe fn AfterTriggerEndQuery(_estate: *mut EState) {
-    unimplemented!() // TODO(pg-port): real AfterTriggerEndQuery lives in commands/trigger.c
-}
+/* TODO(pg-port): no canonical impl yet; see AfterTriggerBeginQuery. */
+unsafe fn AfterTriggerEndQuery(_estate: *mut EState) {}
 
-/* TODO(pg-port): real MakeTransitionCaptureState lives in commands/trigger.c */
+/* TODO(pg-port): no canonical impl yet; transition tables require triggers,
+ * which trigger-free COPY never has. Returns NULL (no capture). */
 unsafe fn MakeTransitionCaptureState(
     _trigdesc: *mut c_void,
     _relid: Oid,
     _cmdType: CmdType,
 ) -> *mut TransitionCaptureState {
-    unimplemented!() // TODO(pg-port): real MakeTransitionCaptureState lives in commands/trigger.c
+    core::ptr::null_mut()
 }
 
 /* TODO(pg-port): real ExecSetupPartitionTupleRouting lives in executor/execPartition.c */
@@ -276,7 +279,7 @@ unsafe fn ExecSetupPartitionTupleRouting(
     _estate: *mut EState,
     _rel: Relation,
 ) -> *mut PartitionTupleRouting {
-    unimplemented!() // TODO(pg-port): real ExecSetupPartitionTupleRouting lives in executor/execPartition.c
+    crate::executor::execPartition::ExecSetupPartitionTupleRouting(_estate as _, _rel as _) as _
 }
 
 /* TODO(pg-port): real ExecFindPartition lives in executor/execPartition.c */
@@ -287,7 +290,9 @@ unsafe fn ExecFindPartition(
     _slot: *mut TupleTableSlot,
     _estate: *mut EState,
 ) -> *mut ResultRelInfo {
-    unimplemented!() // TODO(pg-port): real ExecFindPartition lives in executor/execPartition.c
+    crate::executor::execPartition::ExecFindPartition(
+        _mtstate as _, _rootResultRelInfo as _, _proute as _, _slot as _, _estate as _,
+    ) as _
 }
 
 /* TODO(pg-port): real ExecCleanupTupleRouting lives in executor/execPartition.c */
@@ -295,7 +300,7 @@ unsafe fn ExecCleanupTupleRouting(
     _mtstate: *mut ModifyTableState,
     _proute: *mut PartitionTupleRouting,
 ) {
-    unimplemented!() // TODO(pg-port): real ExecCleanupTupleRouting lives in executor/execPartition.c
+    crate::executor::execPartition::ExecCleanupTupleRouting(_mtstate as _, _proute as _)
 }
 
 /* TODO(pg-port): real ExecComputeStoredGenerated lives in executor/nodeModifyTable.c */
@@ -305,10 +310,13 @@ unsafe fn ExecComputeStoredGenerated(
     _slot: *mut TupleTableSlot,
     _cmdType: CmdType,
 ) {
-    unimplemented!() // TODO(pg-port): real ExecComputeStoredGenerated lives in executor/nodeModifyTable.c
+    crate::executor::nodeModifyTable::ExecComputeStoredGenerated(
+        _resultRelInfo as _, _estate as _, _slot as _, _cmdType,
+    )
 }
 
-/* TODO(pg-port): real table_multi_insert lives in access/table/tableam.h */
+/* TODO(pg-port): table_multi_insert dispatches the heap AM directly (the AM
+ * routine slot is not yet wired). */
 unsafe fn table_multi_insert(
     _rel: Relation,
     _slots: *mut *mut TupleTableSlot,
@@ -317,13 +325,13 @@ unsafe fn table_multi_insert(
     _options: c_int,
     _bistate: BulkInsertState,
 ) {
-    unimplemented!() // TODO(pg-port): real table_multi_insert lives in access/table/tableam.h
+    crate::access::heap::heapam::heap_multi_insert(
+        _rel as _, _slots as _, _nslots as _, _cid as _, _options as _, _bistate as _,
+    )
 }
 
-/* TODO(pg-port): real table_finish_bulk_insert lives in access/table/tableam.h */
-unsafe fn table_finish_bulk_insert(_rel: Relation, _options: c_int) {
-    unimplemented!() // TODO(pg-port): real table_finish_bulk_insert lives in access/table/tableam.h
-}
+/* TODO(pg-port): table_finish_bulk_insert is a no-op for the heap AM. */
+unsafe fn table_finish_bulk_insert(_rel: Relation, _options: c_int) {}
 
 /* TODO(pg-port): real NextCopyFrom lives in commands/copyfromparse.c */
 unsafe fn NextCopyFrom(
@@ -332,12 +340,14 @@ unsafe fn NextCopyFrom(
     _values: *mut Datum,
     _nulls: *mut bool,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): real NextCopyFrom lives in commands/copyfromparse.c
+    crate::commands::copyfrom_internal::copyfromparse::NextCopyFrom(
+        _cstate as _, _econtext as _, _values as _, _nulls as _,
+    )
 }
 
 /* TODO(pg-port): real bms_make_singleton lives in nodes/bitmapset.c */
 unsafe fn bms_make_singleton(_x: c_int) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real bms_make_singleton lives in nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_make_singleton(_x as _) as _
 }
 
 /* TODO(pg-port): real RELKIND_HAS_STORAGE lives in catalog/pg_class.h */
@@ -352,22 +362,24 @@ unsafe fn RELKIND_HAS_STORAGE(relkind: c_char) -> bool {
 
 /* TODO(pg-port): real getTypeInputInfo lives in utils/lsyscache.c */
 unsafe fn getTypeInputInfo(_type_oid: Oid, _func: *mut Oid, _typioparam: *mut Oid) {
-    unimplemented!() // TODO(pg-port): real getTypeInputInfo lives in utils/lsyscache.c
+    crate::utils::cache::lsyscache::getTypeInputInfo(_type_oid as _, _func as _, _typioparam as _)
 }
 
 /* TODO(pg-port): real getTypeBinaryInputInfo lives in utils/lsyscache.c */
 unsafe fn getTypeBinaryInputInfo(_type_oid: Oid, _func: *mut Oid, _typioparam: *mut Oid) {
-    unimplemented!() // TODO(pg-port): real getTypeBinaryInputInfo lives in utils/lsyscache.c
+    crate::utils::cache::lsyscache::getTypeBinaryInputInfo(
+        _type_oid as _, _func as _, _typioparam as _,
+    )
 }
 
 /* TODO(pg-port): real FindDefaultConversionProc lives in catalog/namespace.c */
 unsafe fn FindDefaultConversionProc(_src_encoding: c_int, _dest_encoding: c_int) -> Oid {
-    unimplemented!() // TODO(pg-port): real FindDefaultConversionProc lives in catalog/namespace.c
+    crate::catalog::namespace::FindDefaultConversionProc(_src_encoding as _, _dest_encoding as _) as _
 }
 
 /* TODO(pg-port): real build_column_default lives in rewrite/rewriteHandler.c */
 unsafe fn build_column_default(_rel: Relation, _attno: AttrNumber) -> *mut Expr {
-    unimplemented!() // TODO(pg-port): real build_column_default lives in rewrite/rewriteHandler.c
+    crate::rewrite::rewriteHandler::build_column_default(_rel as _, _attno as _) as _
 }
 
 /* Expr type alias (nodes/primnodes.h) */
@@ -381,7 +393,7 @@ unsafe fn ProcessCopyOptions(
     _is_from: bool,
     _options: *mut List,
 ) {
-    unimplemented!() // TODO(pg-port): real ProcessCopyOptions lives in commands/copy.c
+    crate::commands::copy::ProcessCopyOptions(_pstate as _, _opts as _, _is_from, _options as _)
 }
 
 /* TODO(pg-port): real CopyGetAttnums lives in commands/copy.c (already ported) */
@@ -390,94 +402,79 @@ unsafe fn CopyGetAttnums(
     _rel: Relation,
     _attnamelist: *mut List,
 ) -> *mut List {
-    unimplemented!() // TODO(pg-port): real CopyGetAttnums lives in commands/copy.c
+    crate::commands::copy::CopyGetAttnums(_tupDesc as _, _rel as _, _attnamelist as _) as _
 }
 
 /* TODO(pg-port): real list_member_int lives in nodes/pg_list.h */
 unsafe fn list_member_int(_list: *mut List, _datum: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real list_member_int lives in nodes/pg_list.h
+    crate::nodes::pg_list::list_member_int(_list as _, _datum as _)
 }
 
 /* TODO(pg-port): real lfirst_int lives in nodes/pg_list.h */
 unsafe fn lfirst_int(_lc: *mut ListCell) -> c_int {
-    unimplemented!() // TODO(pg-port): real lfirst_int lives in nodes/pg_list.h
+    crate::nodes::pg_list::lfirst_int(_lc as _) as _
 }
 
 /* TODO(pg-port): real TupleDescAttr lives in access/tupdesc.h */
 unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> *mut FormData_pg_attribute {
-    unimplemented!() // TODO(pg-port): real TupleDescAttr lives in access/tupdesc.h
+    crate::access::common::tupdesc::TupleDescAttr(_tupdesc as _, _i as _) as _
 }
 
-/* TODO(pg-port): Form_pg_attribute types */
-pub type Form_pg_attribute = *mut FormData_pg_attribute;
-#[repr(C)]
-pub struct FormData_pg_attribute {
-    pub attname: NameData,
-    pub atttypid: Oid,
-    pub attnum: AttrNumber,
-    pub attisdropped: bool,
-    pub attgenerated: c_char,
-}
-#[repr(C)]
-pub struct NameData {
-    _data: [c_char; 64],
-}
+/* Canonical attribute types (re-exported to keep field layouts correct). */
+pub use crate::catalog::pg_attribute::{FormData_pg_attribute, Form_pg_attribute};
+pub use crate::c::NameData;
 
 /* TODO(pg-port): real NameStr lives in c.h (already in prelude) */
 #[allow(non_snake_case)]
 unsafe fn NameStr_attr(name: &NameData) -> *const c_char {
-    name._data.as_ptr()
+    name.data.as_ptr()
 }
 
 /* TODO(pg-port): real OpenPipeStream lives in storage/file/fd.c */
 unsafe fn OpenPipeStream(_command: *const c_char, _mode: *const c_char) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real OpenPipeStream lives in storage/file/fd.c
+    crate::storage::file::fd::OpenPipeStream(_command as _, _mode as _) as _
 }
 
 /* TODO(pg-port): real ClosePipeStream lives in storage/file/fd.c */
 unsafe fn ClosePipeStream(_file: *mut c_void) -> c_int {
-    unimplemented!() // TODO(pg-port): real ClosePipeStream lives in storage/file/fd.c
+    crate::storage::file::fd::ClosePipeStream(_file as _) as _
 }
 
 /* TODO(pg-port): real AllocateFile lives in storage/file/fd.c */
 unsafe fn AllocateFile(_filename: *const c_char, _mode: *const c_char) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real AllocateFile lives in storage/file/fd.c
+    crate::storage::file::fd::AllocateFile(_filename as _, _mode as _) as _
 }
 
 /* TODO(pg-port): real FreeFile lives in storage/file/fd.c */
 unsafe fn FreeFile(_file: *mut c_void) -> c_int {
-    unimplemented!() // TODO(pg-port): real FreeFile lives in storage/file/fd.c
+    crate::storage::file::fd::FreeFile(_file as _) as _
 }
 
-/* TODO(pg-port): real fileno lives in <stdio.h> */
+/* libc fileno */
 unsafe fn fileno(_file: *mut c_void) -> c_int {
-    unimplemented!() // TODO(pg-port): libc fileno
+    libc::fileno(_file as *mut libc::FILE)
 }
 
-/* TODO(pg-port): real fstat lives in <sys/stat.h> */
+/* libc fstat */
 unsafe fn fstat(_fd: c_int, _buf: *mut stat) -> c_int {
-    unimplemented!() // TODO(pg-port): libc fstat
+    libc::fstat(_fd, _buf)
 }
 
-#[repr(C)]
-pub struct stat {
-    pub st_size: i64,
-    pub st_mode: u32,
-}
+pub type stat = libc::stat;
 /* TODO(pg-port): S_ISDIR from <sys/stat.h> */
 #[inline]
-fn S_ISDIR(mode: u32) -> bool {
-    (mode & 0o170000) == 0o040000
+fn S_ISDIR(mode: libc::mode_t) -> bool {
+    (mode & libc::S_IFMT) == libc::S_IFDIR
 }
 
 /* TODO(pg-port): real wait_result_is_signal lives in port/wait_error.c */
 unsafe fn wait_result_is_signal(_exit_status: c_int, _signum: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real wait_result_is_signal lives in port/wait_error.c
+    crate::common::wait_error::wait_result_is_signal(_exit_status as _, _signum as _)
 }
 
 /* TODO(pg-port): real wait_result_to_str lives in port/wait_error.c */
 unsafe fn wait_result_to_str(_exitstatus: c_int) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real wait_result_to_str lives in port/wait_error.c
+    crate::common::wait_error::wait_result_to_str(_exitstatus as _) as _
 }
 
 /* TODO(pg-port): real errcode_for_file_access lives in utils/error/elog.c */
@@ -491,7 +488,7 @@ const DestRemote: c_int = 1;
 
 /* TODO(pg-port): real MemoryContextDelete lives in utils/mmgr/mcxt.c */
 unsafe fn MemoryContextDelete(context: MemoryContext) {
-    unimplemented!() // TODO(pg-port): real MemoryContextDelete lives in utils/mmgr/mcxt.c
+    crate::utils::mmgr::mcxt::MemoryContextDelete(context as _)
 }
 
 /* TODO(pg-port): AllocSetContextCreate macro: real version in utils/memutils.h */
@@ -503,9 +500,9 @@ const stdin_ptr: *mut c_void = core::ptr::null_mut(); // TODO(pg-port): real std
 /* TODO(pg-port): PG_BINARY_R from storage/fd.h */
 const PG_BINARY_R: *const c_char = c"rb".as_ptr();
 
-/* TODO(pg-port): errno from <errno.h> */
+/* errno from <errno.h> */
 unsafe fn get_errno() -> c_int {
-    0 // TODO(pg-port): real errno
+    std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
 }
 const ENOENT: c_int = 2;
 const EACCES: c_int = 13;

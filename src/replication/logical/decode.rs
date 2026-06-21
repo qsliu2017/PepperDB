@@ -147,14 +147,10 @@ pub struct XLogRecordBuffer {
 // they remain unimplemented stubs.
 unsafe fn filter_prepare_cb_wrapper(ctx: *mut LogicalDecodingContext,
                                      xid: TransactionId,
-                                     gid: *const c_char) -> bool {
-    unimplemented!() // TODO(pg-port): real filter_prepare_cb_wrapper lives in replication/logical/logical.c
-}
+                                     gid: *const c_char) -> bool { crate::replication::logical::logical::filter_prepare_cb_wrapper(ctx as _, xid as _, gid as _) }
 
 unsafe fn filter_by_origin_cb_wrapper(ctx: *mut LogicalDecodingContext,
-                                       origin_id: RepOriginId) -> bool {
-    unimplemented!() // TODO(pg-port): real filter_by_origin_cb_wrapper lives in replication/logical/logical.c
-}
+                                       origin_id: RepOriginId) -> bool { crate::replication::logical::logical::filter_by_origin_cb_wrapper(ctx as _, origin_id as _) }
 
 /// Full LogicalDecodingContext layout (replication/logical.h).
 #[repr(C)]
@@ -254,80 +250,54 @@ pub const SNAPBUILD_CONSISTENT: SnapBuildState = 2;
 // (real homes: replication/logical/snapbuild.c + replication/reorderbuffer.c)
 // ---------------------------------------------------------------------------
 
-unsafe fn SnapBuildCurrentState(builder: *mut SnapBuild) -> SnapBuildState {
-    unimplemented!() // TODO(pg-port): real SnapBuildCurrentState lives in replication/logical/snapbuild.c
-}
+unsafe fn SnapBuildCurrentState(builder: *mut SnapBuild) -> SnapBuildState { crate::replication::logical::snapbuild::SnapBuildCurrentState(builder as _) }
 
 unsafe fn SnapBuildProcessChange(builder: *mut SnapBuild,
                                   xid: TransactionId,
-                                  lsn: XLogRecPtr) -> bool {
-    unimplemented!() // TODO(pg-port): real SnapBuildProcessChange lives in replication/logical/snapbuild.c
-}
+                                  lsn: XLogRecPtr) -> bool { crate::replication::logical::snapbuild::SnapBuildProcessChange(builder as _, xid as _, lsn as _) }
 
 unsafe fn SnapBuildCommitTxn(builder: *mut SnapBuild,
                                lsn: XLogRecPtr,
                                xid: TransactionId,
                                nsubxacts: i32,
                                subxacts: *mut TransactionId,
-                               xinfo: u32) {
-    unimplemented!() // TODO(pg-port): real SnapBuildCommitTxn lives in replication/logical/snapbuild.c
-}
+                               xinfo: u32) { crate::replication::logical::snapbuild::SnapBuildCommitTxn(builder as _, lsn as _, xid as _, nsubxacts as _, subxacts as _, xinfo as _) }
 
 unsafe fn SnapBuildProcessRunningXacts(builder: *mut SnapBuild,
                                         lsn: XLogRecPtr,
-                                        running: *mut xl_running_xacts) {
-    unimplemented!() // TODO(pg-port): real SnapBuildProcessRunningXacts lives in replication/logical/snapbuild.c
-}
+                                        running: *mut xl_running_xacts) { crate::replication::logical::snapbuild::SnapBuildProcessRunningXacts(builder as _, lsn as _, running as _) }
 
 unsafe fn SnapBuildProcessNewCid(builder: *mut SnapBuild,
                                   xid: TransactionId,
                                   lsn: XLogRecPtr,
-                                  xlrec: *mut xl_heap_new_cid) {
-    unimplemented!() // TODO(pg-port): real SnapBuildProcessNewCid lives in replication/logical/snapbuild.c
-}
+                                  xlrec: *mut xl_heap_new_cid) { crate::replication::logical::snapbuild::SnapBuildProcessNewCid(builder as _, xid as _, lsn as _, xlrec as _) }
 
-unsafe fn SnapBuildSerializationPoint(builder: *mut SnapBuild, lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real SnapBuildSerializationPoint lives in replication/logical/snapbuild.c
-}
+unsafe fn SnapBuildSerializationPoint(builder: *mut SnapBuild, lsn: XLogRecPtr) { crate::replication::logical::snapbuild::SnapBuildSerializationPoint(builder as _, lsn as _) }
 
-unsafe fn SnapBuildGetOrBuildSnapshot(builder: *mut SnapBuild) -> *mut c_void /* Snapshot */ {
-    unimplemented!() // TODO(pg-port): real SnapBuildGetOrBuildSnapshot lives in replication/logical/snapbuild.c
-}
+unsafe fn SnapBuildGetOrBuildSnapshot(builder: *mut SnapBuild) -> *mut c_void /* Snapshot */ { crate::replication::logical::snapbuild::SnapBuildGetOrBuildSnapshot(builder as _) as _ }
 
-unsafe fn SnapBuildGetTwoPhaseAt(builder: *mut SnapBuild) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real SnapBuildGetTwoPhaseAt lives in replication/logical/snapbuild.c
-}
+unsafe fn SnapBuildGetTwoPhaseAt(builder: *mut SnapBuild) -> XLogRecPtr { crate::replication::logical::snapbuild::SnapBuildGetTwoPhaseAt(builder as _) }
 
-unsafe fn SnapBuildXactNeedsSkip(builder: *mut SnapBuild, lsn: XLogRecPtr) -> bool {
-    unimplemented!() // TODO(pg-port): real SnapBuildXactNeedsSkip lives in replication/logical/snapbuild.c
-}
+unsafe fn SnapBuildXactNeedsSkip(builder: *mut SnapBuild, lsn: XLogRecPtr) -> bool { crate::replication::logical::snapbuild::SnapBuildXactNeedsSkip(builder as _, lsn as _) }
 
 unsafe fn ReorderBufferProcessXid(reorder: *mut ReorderBuffer,
                                     xid: TransactionId,
-                                    lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferProcessXid lives in replication/reorderbuffer.c
-}
+                                    lsn: XLogRecPtr) { crate::replication::logical::reorderbuffer::ReorderBufferProcessXid(reorder as _, xid as _, lsn as _) }
 
 unsafe fn ReorderBufferAssignChild(reorder: *mut ReorderBuffer,
                                     toplevel: TransactionId,
                                     xid: TransactionId,
-                                    lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAssignChild lives in replication/reorderbuffer.c
-}
+                                    lsn: XLogRecPtr) { crate::replication::logical::reorderbuffer::ReorderBufferAssignChild(reorder as _, toplevel as _, xid as _, lsn as _) }
 
 unsafe fn ReorderBufferForget(reorder: *mut ReorderBuffer,
                                xid: TransactionId,
-                               lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferForget lives in replication/reorderbuffer.c
-}
+                               lsn: XLogRecPtr) { crate::replication::logical::reorderbuffer::ReorderBufferForget(reorder as _, xid as _, lsn as _) }
 
 unsafe fn ReorderBufferCommitChild(reorder: *mut ReorderBuffer,
                                     xid: TransactionId,
                                     subxid: TransactionId,
                                     origptr: XLogRecPtr,
-                                    endptr: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferCommitChild lives in replication/reorderbuffer.c
-}
+                                    endptr: XLogRecPtr) { crate::replication::logical::reorderbuffer::ReorderBufferCommitChild(reorder as _, xid as _, subxid as _, origptr as _, endptr as _) }
 
 unsafe fn ReorderBufferCommit(reorder: *mut ReorderBuffer,
                                xid: TransactionId,
@@ -335,9 +305,7 @@ unsafe fn ReorderBufferCommit(reorder: *mut ReorderBuffer,
                                endptr: XLogRecPtr,
                                commit_time: TimestampTz,
                                origin_id: RepOriginId,
-                               origin_lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferCommit lives in replication/reorderbuffer.c
-}
+                               origin_lsn: XLogRecPtr) { crate::replication::logical::reorderbuffer::ReorderBufferCommit(reorder as _, xid as _, origptr as _, endptr as _, commit_time as _, origin_id as _, origin_lsn as _) }
 
 unsafe fn ReorderBufferFinishPrepared(reorder: *mut ReorderBuffer,
                                        xid: TransactionId,
@@ -348,31 +316,21 @@ unsafe fn ReorderBufferFinishPrepared(reorder: *mut ReorderBuffer,
                                        origin_id: RepOriginId,
                                        origin_lsn: XLogRecPtr,
                                        gid: *const c_char,
-                                       is_commit: bool) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferFinishPrepared lives in replication/reorderbuffer.c
-}
+                                       is_commit: bool) { crate::replication::logical::reorderbuffer::ReorderBufferFinishPrepared(reorder as _, xid as _, origptr as _, endptr as _, two_phase_at as _, prepare_time as _, origin_id as _, origin_lsn as _, gid as _, is_commit) }
 
 unsafe fn ReorderBufferPrepare(reorder: *mut ReorderBuffer,
                                 xid: TransactionId,
-                                gid: *const c_char) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferPrepare lives in replication/reorderbuffer.c
-}
+                                gid: *const c_char) { crate::replication::logical::reorderbuffer::ReorderBufferPrepare(reorder as _, xid as _, gid as _) }
 
 unsafe fn ReorderBufferAbort(reorder: *mut ReorderBuffer,
                               xid: TransactionId,
                               lsn: XLogRecPtr,
-                              abort_time: TimestampTz) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAbort lives in replication/reorderbuffer.c
-}
+                              abort_time: TimestampTz) { crate::replication::logical::reorderbuffer::ReorderBufferAbort(reorder as _, xid as _, lsn as _, abort_time as _) }
 
 unsafe fn ReorderBufferAbortOld(reorder: *mut ReorderBuffer,
-                                 oldest_running_xid: TransactionId) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAbortOld lives in replication/reorderbuffer.c
-}
+                                 oldest_running_xid: TransactionId) { crate::replication::logical::reorderbuffer::ReorderBufferAbortOld(reorder as _, oldest_running_xid as _) }
 
-unsafe fn ReorderBufferSkipPrepare(reorder: *mut ReorderBuffer, xid: TransactionId) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferSkipPrepare lives in replication/reorderbuffer.c
-}
+unsafe fn ReorderBufferSkipPrepare(reorder: *mut ReorderBuffer, xid: TransactionId) { crate::replication::logical::reorderbuffer::ReorderBufferSkipPrepare(reorder as _, xid as _) }
 
 unsafe fn ReorderBufferRememberPrepareInfo(reorder: *mut ReorderBuffer,
                                             xid: TransactionId,
@@ -380,57 +338,39 @@ unsafe fn ReorderBufferRememberPrepareInfo(reorder: *mut ReorderBuffer,
                                             endptr: XLogRecPtr,
                                             prepare_time: TimestampTz,
                                             origin_id: RepOriginId,
-                                            origin_lsn: XLogRecPtr) -> bool {
-    unimplemented!() // TODO(pg-port): real ReorderBufferRememberPrepareInfo lives in replication/reorderbuffer.c
-}
+                                            origin_lsn: XLogRecPtr) -> bool { crate::replication::logical::reorderbuffer::ReorderBufferRememberPrepareInfo(reorder as _, xid as _, origptr as _, endptr as _, prepare_time as _, origin_id as _, origin_lsn as _) }
 
 unsafe fn ReorderBufferInvalidate(reorder: *mut ReorderBuffer,
                                    xid: TransactionId,
-                                   lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferInvalidate lives in replication/reorderbuffer.c
-}
+                                   lsn: XLogRecPtr) { crate::replication::logical::reorderbuffer::ReorderBufferInvalidate(reorder as _, xid as _, lsn as _) }
 
 unsafe fn ReorderBufferAddInvalidations(reorder: *mut ReorderBuffer,
                                          xid: TransactionId,
                                          lsn: XLogRecPtr,
                                          nmsgs: i32,
-                                         msgs: *mut c_void) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAddInvalidations lives in replication/reorderbuffer.c
-}
+                                         msgs: *mut c_void) { crate::replication::logical::reorderbuffer::ReorderBufferAddInvalidations(reorder as _, xid as _, lsn as _, nmsgs as _, msgs as _) }
 
 unsafe fn ReorderBufferXidSetCatalogChanges(reorder: *mut ReorderBuffer,
                                              xid: TransactionId,
-                                             lsn: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferXidSetCatalogChanges lives in replication/reorderbuffer.c
-}
+                                             lsn: XLogRecPtr) { crate::replication::logical::reorderbuffer::ReorderBufferXidSetCatalogChanges(reorder as _, xid as _, lsn as _) }
 
 unsafe fn ReorderBufferImmediateInvalidation(reorder: *mut ReorderBuffer,
                                               nmsgs: i32,
-                                              msgs: *mut c_void) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferImmediateInvalidation lives in replication/reorderbuffer.c
-}
+                                              msgs: *mut c_void) { crate::replication::logical::reorderbuffer::ReorderBufferImmediateInvalidation(reorder as _, nmsgs as _, msgs as _) }
 
-unsafe fn ReorderBufferAllocChange(reorder: *mut ReorderBuffer) -> *mut ReorderBufferChange {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAllocChange lives in replication/reorderbuffer.c
-}
+unsafe fn ReorderBufferAllocChange(reorder: *mut ReorderBuffer) -> *mut ReorderBufferChange { unimplemented!() }
 
 unsafe fn ReorderBufferAllocTupleBuf(reorder: *mut ReorderBuffer,
-                                      tuple_len: Size) -> *mut HeapTupleData {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAllocTupleBuf lives in replication/reorderbuffer.c
-}
+                                      tuple_len: Size) -> *mut HeapTupleData { crate::replication::logical::reorderbuffer::ReorderBufferAllocTupleBuf(reorder as _, tuple_len) }
 
 unsafe fn ReorderBufferAllocRelids(reorder: *mut ReorderBuffer,
-                                    nrelids: u32) -> *mut Oid {
-    unimplemented!() // TODO(pg-port): real ReorderBufferAllocRelids lives in replication/reorderbuffer.c
-}
+                                    nrelids: u32) -> *mut Oid { crate::replication::logical::reorderbuffer::ReorderBufferAllocRelids(reorder as _, nrelids as _) }
 
 unsafe fn ReorderBufferQueueChange(reorder: *mut ReorderBuffer,
                                     xid: TransactionId,
                                     lsn: XLogRecPtr,
                                     change: *mut ReorderBufferChange,
-                                    toast_relation: bool) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferQueueChange lives in replication/reorderbuffer.c
-}
+                                    toast_relation: bool) { crate::replication::logical::reorderbuffer::ReorderBufferQueueChange(reorder as _, xid as _, lsn as _, change as _, toast_relation) }
 
 unsafe fn ReorderBufferQueueMessage(reorder: *mut ReorderBuffer,
                                      xid: TransactionId,
@@ -439,17 +379,11 @@ unsafe fn ReorderBufferQueueMessage(reorder: *mut ReorderBuffer,
                                      transactional: bool,
                                      message: *const c_char,
                                      message_size: Size,
-                                     message_body: *const c_char) {
-    unimplemented!() // TODO(pg-port): real ReorderBufferQueueMessage lives in replication/reorderbuffer.c
-}
+                                     message_body: *const c_char) { crate::replication::logical::reorderbuffer::ReorderBufferQueueMessage(reorder as _, xid as _, snapshot as _, end_lsn as _, transactional, message as _, message_size, message_body as _) }
 
-unsafe fn UpdateDecodingStats(ctx: *mut LogicalDecodingContext) {
-    unimplemented!() // TODO(pg-port): real UpdateDecodingStats lives in replication/logical/logical.c
-}
+unsafe fn UpdateDecodingStats(ctx: *mut LogicalDecodingContext) { crate::replication::logical::logical::UpdateDecodingStats(ctx as _) }
 
-unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO(pg-port): real RecoveryInProgress lives in access/transam/xlog.c
-}
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
 
 // ReorderBufferChange field accessors -- since ReorderBufferChange is an
 // opaque type we keep all field access in stubs below.  When reorderbuffer.c
@@ -507,9 +441,7 @@ unsafe fn rb_change_set_truncate(change: *mut ReorderBufferChange,
 }
 
 /// ItemPointerSetInvalid for HeapTupleData.t_self.
-unsafe fn ItemPointerSetInvalid(ptr: *mut crate::storage::itemptr::ItemPointerData) {
-    unimplemented!() // TODO(pg-port): real ItemPointerSetInvalid from storage/itemptr.h
-}
+unsafe fn ItemPointerSetInvalid(ptr: *mut crate::storage::itemptr::ItemPointerData) { crate::storage::itemptr::ItemPointerSetInvalid(ptr as _) }
 
 // ---------------------------------------------------------------------------
 // Public interface (from decode.h)

@@ -132,8 +132,8 @@ const ProcedureRelationId: Oid = 1255;
 const OperatorOidIndexId: Oid = 2688;
 
 /* syscache ids */
-const OPERNAMENSP: c_int = 203;
-const OPEROID: c_int = 18;
+const OPERNAMENSP: c_int = 39;
+const OPEROID: c_int = 40;
 
 /* error codes */
 const ERRCODE_INVALID_NAME: c_int = 0;
@@ -187,9 +187,7 @@ unsafe fn deleteDependencyRecordsFor(_classId: Oid, _objectId: Oid, _skipExtensi
 }
 
 /* deleteSharedDependencyRecordsFor: catalog/pg_shdepend.c (TODO(pg-port)) */
-unsafe fn deleteSharedDependencyRecordsFor(_classId: Oid, _objectId: Oid, _objectSubId: int32) {
-    /* TODO(pg-port): catalog/pg_shdepend.c */
-}
+unsafe fn deleteSharedDependencyRecordsFor(_classId: Oid, _objectId: Oid, _objectSubId: int32) { crate::catalog::pg_shdepend::deleteSharedDependencyRecordsFor(_classId as _, _objectId as _, _objectSubId as _) }
 
 /* recordDependencyOnOwner: catalog/pg_shdepend.c (TODO(pg-port)) */
 unsafe fn recordDependencyOnOwner(_classId: Oid, _objectId: Oid, _owner: Oid) {

@@ -792,36 +792,18 @@ pub type OffsetNumber = u16;
 pub type Relation = *mut c_void;
 pub type FullTransactionId = u64;
 
-unsafe fn RelationNeedsWAL(_rel: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_rel: Relation) -> bool { unimplemented!() }
 unsafe fn RELATION_IS_LOCAL(_rel: Relation) -> bool {
     unimplemented!() // TODO: access/gist_private.h
 }
-unsafe fn GetInsertRecPtr() -> XLogRecPtr {
-    unimplemented!() // TODO: access/xlog.h
-}
-unsafe fn gistGetFakeLSN(_rel: Relation) -> XLogRecPtr {
-    unimplemented!() // TODO: access/gist_private.h
-}
-unsafe fn intset_create() -> *mut IntegerSet {
-    unimplemented!() // TODO: lib/integerset.h
-}
-unsafe fn intset_add_member(_s: *mut IntegerSet, _x: u64) {
-    unimplemented!() // TODO: lib/integerset.h
-}
-unsafe fn intset_num_entries(_s: *mut IntegerSet) -> u64 {
-    unimplemented!() // TODO: lib/integerset.h
-}
-unsafe fn intset_begin_iterate(_s: *mut IntegerSet) {
-    unimplemented!() // TODO: lib/integerset.h
-}
-unsafe fn intset_iterate_next(_s: *mut IntegerSet, _next: *mut u64) -> bool {
-    unimplemented!() // TODO: lib/integerset.h
-}
-unsafe fn intset_is_member(_s: *mut IntegerSet, _x: u64) -> bool {
-    unimplemented!() // TODO: lib/integerset.h
-}
+unsafe fn GetInsertRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetInsertRecPtr() }
+unsafe fn gistGetFakeLSN(_rel: Relation) -> XLogRecPtr { unimplemented!() }
+unsafe fn intset_create() -> *mut IntegerSet { unimplemented!() }
+unsafe fn intset_add_member(_s: *mut IntegerSet, _x: u64) { unimplemented!() }
+unsafe fn intset_num_entries(_s: *mut IntegerSet) -> u64 { unimplemented!() }
+unsafe fn intset_begin_iterate(_s: *mut IntegerSet) { unimplemented!() }
+unsafe fn intset_iterate_next(_s: *mut IntegerSet, _next: *mut u64) -> bool { unimplemented!() }
+unsafe fn intset_is_member(_s: *mut IntegerSet, _x: u64) -> bool { unimplemented!() }
 unsafe fn GenerationContextCreate(
     _parent: MemoryContext,
     _name: *const c_char,
@@ -842,15 +824,9 @@ unsafe fn read_stream_begin_relation(
 ) -> *mut ReadStream {
     unimplemented!() // TODO: storage/read_stream.h
 }
-unsafe fn read_stream_next_buffer(_stream: *mut ReadStream, _per_buffer_data: *mut *mut c_void) -> Buffer {
-    unimplemented!() // TODO: storage/read_stream.h
-}
-unsafe fn read_stream_reset(_stream: *mut ReadStream) {
-    unimplemented!() // TODO: storage/read_stream.h
-}
-unsafe fn read_stream_end(_stream: *mut ReadStream) {
-    unimplemented!() // TODO: storage/read_stream.h
-}
+unsafe fn read_stream_next_buffer(_stream: *mut ReadStream, _per_buffer_data: *mut *mut c_void) -> Buffer { unimplemented!() }
+unsafe fn read_stream_reset(_stream: *mut ReadStream) { unimplemented!() }
+unsafe fn read_stream_end(_stream: *mut ReadStream) { unimplemented!() }
 type ReadStreamBlockNumberCB = Option<
     unsafe extern "C" fn(
         stream: *mut ReadStream,
@@ -862,27 +838,17 @@ unsafe extern "C" fn block_range_read_stream_cb(
     _stream: *mut ReadStream,
     _callback_private_data: *mut c_void,
     _per_buffer_data: *mut c_void,
-) -> BlockNumber {
-    unimplemented!() // TODO: storage/read_stream.h
-}
+) -> BlockNumber { unimplemented!() }
 unsafe fn LockRelationForExtension(_rel: Relation, _lockmode: c_int) {
     unimplemented!() // TODO: storage/lmgr.h
 }
 unsafe fn UnlockRelationForExtension(_rel: Relation, _lockmode: c_int) {
     unimplemented!() // TODO: storage/lmgr.h
 }
-unsafe fn RelationGetNumberOfBlocks(_rel: Relation) -> BlockNumber {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
-unsafe fn vacuum_delay_point(_is_analyze: bool) {
-    unimplemented!() // TODO: commands/vacuum.h
-}
-unsafe fn BufferIsValid(_buf: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
-unsafe fn IndexFreeSpaceMapVacuum(_rel: Relation) {
-    unimplemented!() // TODO: storage/indexfsm.h
-}
+unsafe fn RelationGetNumberOfBlocks(_rel: Relation) -> BlockNumber { unimplemented!() }
+unsafe fn vacuum_delay_point(_is_analyze: bool) { crate::commands::vacuum::vacuum_delay_point(_is_analyze) }
+unsafe fn BufferIsValid(_buf: Buffer) -> bool { crate::access::nbtree::nbtpage::BufferIsValid(_buf) }
+unsafe fn IndexFreeSpaceMapVacuum(_rel: Relation) { unimplemented!() }
 unsafe fn BufferGetBlockNumber(_buf: Buffer) -> BlockNumber {
     unimplemented!() // TODO: storage/bufmgr.h
 }
@@ -892,12 +858,8 @@ unsafe fn LockBuffer(_buf: Buffer, _mode: c_int) {
 unsafe fn BufferGetPage(_buf: Buffer) -> *mut c_void {
     unimplemented!() // TODO: storage/bufmgr.h
 }
-unsafe fn gistPageRecyclable(_page: Page) -> bool {
-    unimplemented!() // TODO: access/gist_private.h
-}
-unsafe fn RecordFreeIndexPage(_rel: Relation, _blkno: BlockNumber) {
-    unimplemented!() // TODO: storage/indexfsm.h
-}
+unsafe fn gistPageRecyclable(_page: Page) -> bool { crate::access::gist::gist_private::gistPageRecyclable(_page) }
+unsafe fn RecordFreeIndexPage(_rel: Relation, _blkno: BlockNumber) { unimplemented!() }
 unsafe fn GistPageIsDeleted(_page: Page) -> bool {
     unimplemented!() // TODO: access/gist.h
 }
@@ -941,15 +903,9 @@ unsafe fn gistXLogUpdate(
     _itup: *mut IndexTuple,
     _ituplen: c_int,
     _leftchildbuf: Buffer,
-) -> XLogRecPtr {
-    unimplemented!() // TODO: access/gistxlog.h
-}
-unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) {
-    unimplemented!() // TODO: storage/bufpage.h
-}
-unsafe fn GistTupleIsInvalid(_itup: IndexTuple) -> bool {
-    unimplemented!() // TODO: access/gist_private.h
-}
+) -> XLogRecPtr { unimplemented!() }
+unsafe fn PageSetLSN(_page: Page, _lsn: XLogRecPtr) { crate::storage::bufpage::PageSetLSN(_page, _lsn) }
+unsafe fn GistTupleIsInvalid(_itup: IndexTuple) -> bool { unimplemented!() }
 unsafe fn UnlockReleaseBuffer(_buf: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.h
 }
@@ -968,9 +924,7 @@ unsafe fn PageIsNew(_page: Page) -> bool {
 unsafe fn ItemPointerGetBlockNumber(_pointer: *mut ItemPointerData) -> BlockNumber {
     unimplemented!() // TODO: storage/itemptr.h
 }
-unsafe fn gistcheckpage(_rel: Relation, _buf: Buffer) {
-    unimplemented!() // TODO: access/gist_private.h
-}
+unsafe fn gistcheckpage(_rel: Relation, _buf: Buffer) { unimplemented!() }
 unsafe fn ReleaseBuffer(_buf: Buffer) {
     unimplemented!() // TODO: storage/bufmgr.h
 }
@@ -985,12 +939,8 @@ unsafe fn gistXLogPageDelete(
     _xid: FullTransactionId,
     _parentBuffer: Buffer,
     _downlinkOffset: OffsetNumber,
-) -> XLogRecPtr {
-    unimplemented!() // TODO: access/gistxlog.h
-}
-unsafe fn ReadNextFullTransactionId() -> FullTransactionId {
-    unimplemented!() // TODO: access/transam.h
-}
+) -> XLogRecPtr { crate::access::gist::gistxlog::gistXLogPageDelete(_buffer, _xid, _parentBuffer, _downlinkOffset) }
+unsafe fn ReadNextFullTransactionId() -> FullTransactionId { unimplemented!() }
 unsafe fn START_CRIT_SECTION() {
     unimplemented!() // TODO: miscadmin.h
 }

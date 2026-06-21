@@ -118,8 +118,11 @@ use crate::{foreach, current_cell, lfirst_node, linitial_node, IsA};
  * interference between different SPI callers, we save and restore them
  * when entering/exiting a SPI nesting level.
  */
+#[no_mangle]
 pub static mut SPI_processed: u64 = 0;
+#[no_mangle]
 pub static mut SPI_tuptable: *mut SPITupleTable = null_mut();
+#[no_mangle]
 pub static mut SPI_result: c_int = 0;
 
 static mut _SPI_stack: *mut _SPI_connection = null_mut();
@@ -270,7 +273,7 @@ unsafe fn heap_copytuple(_tuple: HeapTuple) -> HeapTuple {
 }
 
 unsafe fn heap_freetuple(_tuple: HeapTuple) {
-    /* TODO(pg-port): access/common/heaptuple.c */
+    crate::access::common::heaptuple::heap_freetuple(_tuple as _)
 }
 
 unsafe fn heap_deform_tuple(
@@ -279,8 +282,7 @@ unsafe fn heap_deform_tuple(
     _values: *mut Datum,
     _isnull: *mut bool,
 ) {
-    /* TODO(pg-port): access/common/heaptuple.c */
-    unimplemented!("heap_deform_tuple")
+    crate::access::common::heaptuple::heap_deform_tuple(_tuple as _, _tupleDesc as _, _values as _, _isnull as _)
 }
 
 unsafe fn heap_form_tuple(
@@ -303,8 +305,7 @@ unsafe fn heap_getattr(
 }
 
 unsafe fn heap_copy_tuple_as_datum(_tuple: HeapTuple, _tupdesc: TupleDesc) -> Datum {
-    /* TODO(pg-port): access/common/heaptuple.c */
-    unimplemented!("heap_copy_tuple_as_datum")
+    crate::access::common::heaptuple::heap_copy_tuple_as_datum(_tuple as _, _tupdesc as _) as _
 }
 
 unsafe fn DatumGetHeapTupleHeader(_datum: Datum) -> HeapTupleHeader {
@@ -313,8 +314,7 @@ unsafe fn DatumGetHeapTupleHeader(_datum: Datum) -> HeapTupleHeader {
 }
 
 unsafe fn assign_record_type_typmod(_tupdesc: TupleDesc) {
-    /* TODO(pg-port): utils/cache/typcache.c */
-    unimplemented!("assign_record_type_typmod")
+    crate::utils::cache::typcache::assign_record_type_typmod(_tupdesc as _)
 }
 
 unsafe fn namestrcmp(_name: *const c_void, _str: *const c_char) -> c_int {
@@ -323,18 +323,15 @@ unsafe fn namestrcmp(_name: *const c_void, _str: *const c_char) -> c_int {
 }
 
 unsafe fn SystemAttributeByName(_attname: *const c_char) -> *const c_void {
-    /* TODO(pg-port): access/common/sysattr.c */
-    null()
+    crate::catalog::heap::SystemAttributeByName(_attname as _) as _
 }
 
 unsafe fn SystemAttributeDefinition(_attnum: c_int) -> *const c_void {
-    /* TODO(pg-port): access/common/sysattr.c */
-    null()
+    crate::catalog::heap::SystemAttributeDefinition(_attnum as _) as _
 }
 
 unsafe fn NameStr(_name: *const c_void) -> *const c_char {
-    /* TODO(pg-port): c.h macro -> real NameData.data */
-    unimplemented!("NameStr")
+    unimplemented!()
 }
 
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
@@ -352,8 +349,7 @@ unsafe fn HeapTupleIsValid(tuple: HeapTuple) -> bool {
 }
 
 unsafe fn GETSTRUCT(_tuple: HeapTuple) -> *mut c_void {
-    /* TODO(pg-port): access/htup.h macro */
-    unimplemented!("GETSTRUCT")
+    crate::access::htup_details::GETSTRUCT(_tuple as _) as _
 }
 
 unsafe fn ObjectIdGetDatum(_objectId: Oid) -> Datum {
@@ -371,13 +367,11 @@ unsafe fn getTypeOutputInfo(
 }
 
 unsafe fn OidOutputFunctionCall(_functionId: Oid, _val: Datum) -> *mut c_char {
-    /* TODO(pg-port): utils/fmgr.c */
-    unimplemented!("OidOutputFunctionCall")
+    crate::utils::fmgr::OidOutputFunctionCall(_functionId as _, _val as _) as _
 }
 
 unsafe fn get_namespace_name(_nspid: Oid) -> *mut c_char {
-    /* TODO(pg-port): utils/cache/lsyscache.c */
-    unimplemented!("get_namespace_name")
+    crate::utils::cache::lsyscache::get_namespace_name(_nspid as _) as _
 }
 
 unsafe fn RelationGetRelationName(_rel: Relation) -> *const c_char {
@@ -391,28 +385,23 @@ unsafe fn RelationGetNamespace(_rel: Relation) -> Oid {
 }
 
 unsafe fn datumTransfer(_value: Datum, _typByVal: bool, _typLen: c_int) -> Datum {
-    /* TODO(pg-port): utils/adt/datum.c */
-    unimplemented!("datumTransfer")
+    crate::utils::adt::datum::datumTransfer(_value as _, _typByVal as _, _typLen as _) as _
 }
 
 unsafe fn ExecCopySlotHeapTuple(_slot: *mut c_void) -> HeapTuple {
-    /* TODO(pg-port): executor/execTuples.c */
-    unimplemented!("ExecCopySlotHeapTuple")
+    crate::executor::tuptable::ExecCopySlotHeapTuple(_slot as _) as _
 }
 
 unsafe fn CreateTupleDescCopy(_tupdesc: TupleDesc) -> TupleDesc {
-    /* TODO(pg-port): access/common/tupdesc.c */
-    unimplemented!("CreateTupleDescCopy")
+    crate::access::common::tupdesc::CreateTupleDescCopy(_tupdesc as _) as _
 }
 
 unsafe fn MemoryContextStrdup(_context: MemoryContext, _s: *const c_char) -> *mut c_char {
-    /* TODO(pg-port): utils/mmgr/mcxt.c */
-    unimplemented!("MemoryContextStrdup")
+    crate::utils::mmgr::mcxt::MemoryContextStrdup(_context as _, _s as _) as _
 }
 
 unsafe fn MemoryContextSetParent(_context: MemoryContext, _new_parent: MemoryContext) {
-    /* TODO(pg-port): utils/mmgr/mcxt.c */
-    unimplemented!("MemoryContextSetParent")
+    crate::utils::mmgr::mcxt::MemoryContextSetParent(_context as _, _new_parent as _)
 }
 
 unsafe fn CacheMemoryContext() -> MemoryContext {
@@ -464,8 +453,7 @@ unsafe fn CreateCachedPlan(
     _query_string: *const c_char,
     _commandTag: CommandTag,
 ) -> *mut CachedPlanSource {
-    /* TODO(pg-port): utils/cache/plancache.c */
-    unimplemented!("CreateCachedPlan")
+    crate::utils::cache::plancache::CreateCachedPlan(_raw_parse_tree as _, _query_string as _, _commandTag as _) as _
 }
 
 unsafe fn CreateOneShotCachedPlan(
@@ -473,8 +461,7 @@ unsafe fn CreateOneShotCachedPlan(
     _query_string: *const c_char,
     _commandTag: CommandTag,
 ) -> *mut CachedPlanSource {
-    /* TODO(pg-port): utils/cache/plancache.c */
-    unimplemented!("CreateOneShotCachedPlan")
+    crate::utils::cache::plancache::CreateOneShotCachedPlan(_raw_parse_tree as _, _query_string as _, _commandTag as _) as _
 }
 
 unsafe fn CompleteCachedPlan(
@@ -508,31 +495,26 @@ unsafe fn ReleaseCachedPlan(_cplan: *mut CachedPlan, _owner: ResourceOwner) {
 }
 
 unsafe fn SaveCachedPlan(_plansource: *mut CachedPlanSource) {
-    /* TODO(pg-port): utils/cache/plancache.c */
-    unimplemented!("SaveCachedPlan")
+    crate::utils::cache::plancache::SaveCachedPlan(_plansource as _)
 }
 
 unsafe fn DropCachedPlan(_plansource: *mut CachedPlanSource) {
-    /* TODO(pg-port): utils/cache/plancache.c */
-    unimplemented!("DropCachedPlan")
+    crate::utils::cache::plancache::DropCachedPlan(_plansource as _)
 }
 
 unsafe fn CopyCachedPlan(_plansource: *mut CachedPlanSource) -> *mut CachedPlanSource {
-    /* TODO(pg-port): utils/cache/plancache.c */
-    unimplemented!("CopyCachedPlan")
+    crate::utils::cache::plancache::CopyCachedPlan(_plansource as _) as _
 }
 
 unsafe fn CachedPlanIsValid(_plansource: *mut CachedPlanSource) -> bool {
-    /* TODO(pg-port): utils/cache/plancache.c */
-    unimplemented!("CachedPlanIsValid")
+    crate::utils::cache::plancache::CachedPlanIsValid(_plansource as _) as _
 }
 
 unsafe fn CachedPlanSetParentContext(
     _plansource: *mut CachedPlanSource,
     _newcxt: MemoryContext,
 ) {
-    /* TODO(pg-port): utils/cache/plancache.c */
-    unimplemented!("CachedPlanSetParentContext")
+    crate::utils::cache::plancache::CachedPlanSetParentContext(_plansource as _, _newcxt as _)
 }
 
 unsafe fn CreateCommandTag(_parsetree: *mut c_void) -> CommandTag {
@@ -559,18 +541,15 @@ unsafe fn copyObject(_from: *mut c_void) -> *mut c_void {
 }
 
 unsafe fn copyParamList(_from: ParamListInfo) -> ParamListInfo {
-    /* TODO(pg-port): nodes/params.c */
-    unimplemented!("copyParamList")
+    crate::nodes::params::copyParamList(_from as _) as _
 }
 
 unsafe fn makeParamList(_numParams: c_int) -> ParamListInfo {
-    /* TODO(pg-port): nodes/params.c */
-    unimplemented!("makeParamList")
+    crate::nodes::params::makeParamList(_numParams as _) as _
 }
 
 unsafe fn PlannedStmtRequiresSnapshot(_pstmt: *mut PlannedStmt) -> bool {
-    /* TODO(pg-port): executor/execMain.c */
-    unimplemented!("PlannedStmtRequiresSnapshot")
+    crate::tcop::pquery::PlannedStmtRequiresSnapshot(_pstmt as _) as _
 }
 
 unsafe fn CommandIsReadOnly(_pstmt: *mut PlannedStmt) -> bool {
@@ -584,28 +563,23 @@ unsafe fn CreateCommandName(_node: *mut c_void) -> *const c_char {
 }
 
 unsafe fn ExecSupportsBackwardScan(_node: *mut c_void) -> bool {
-    /* TODO(pg-port): executor/execAmi.c */
-    unimplemented!("ExecSupportsBackwardScan")
+    crate::executor::execAmi::ExecSupportsBackwardScan(_node as _) as _
 }
 
 unsafe fn ExecutorStart(_queryDesc: *mut QueryDesc, _eflags: c_int) {
-    /* TODO(pg-port): executor/execMain.c */
-    unimplemented!("ExecutorStart")
+    crate::executor::execMain::ExecutorStart(_queryDesc as _, _eflags as _)
 }
 
 unsafe fn ExecutorRun(_queryDesc: *mut QueryDesc, _direction: i32, _count: u64) {
-    /* TODO(pg-port): executor/execMain.c */
-    unimplemented!("ExecutorRun")
+    crate::executor::execMain::ExecutorRun(_queryDesc as _, _direction as _, _count as _)
 }
 
 unsafe fn ExecutorFinish(_queryDesc: *mut QueryDesc) {
-    /* TODO(pg-port): executor/execMain.c */
-    unimplemented!("ExecutorFinish")
+    crate::executor::execMain::ExecutorFinish(_queryDesc as _)
 }
 
 unsafe fn ExecutorEnd(_queryDesc: *mut QueryDesc) {
-    /* TODO(pg-port): executor/execMain.c */
-    unimplemented!("ExecutorEnd")
+    crate::executor::execMain::ExecutorEnd(_queryDesc as _)
 }
 
 unsafe fn CreateQueryDesc(
@@ -618,13 +592,11 @@ unsafe fn CreateQueryDesc(
     _queryEnv: *mut QueryEnvironment,
     _instrument_options: c_int,
 ) -> *mut QueryDesc {
-    /* TODO(pg-port): executor/execdesc.c */
-    unimplemented!("CreateQueryDesc")
+    crate::tcop::pquery::CreateQueryDesc(_plannedstmt as _, _sourceText as _, _snapshot as _, _crosscheck_snapshot as _, _dest as _, _params as _, _queryEnv as _, _instrument_options as _) as _
 }
 
 unsafe fn FreeQueryDesc(_qdesc: *mut QueryDesc) {
-    /* TODO(pg-port): executor/execdesc.c */
-    unimplemented!("FreeQueryDesc")
+    crate::tcop::pquery::FreeQueryDesc(_qdesc as _)
 }
 
 unsafe fn ProcessUtility(
@@ -647,58 +619,47 @@ pub const PROCESS_UTILITY_QUERY: ProcessUtilityContext = 0;
 pub const PROCESS_UTILITY_QUERY_NONATOMIC: ProcessUtilityContext = 1;
 
 unsafe fn PushActiveSnapshot(_snap: Snapshot) {
-    /* TODO(pg-port): utils/snapmgr.c */
-    unimplemented!("PushActiveSnapshot")
+    crate::utils::time::snapmgr::PushActiveSnapshot(_snap as _)
 }
 
 unsafe fn PushCopiedSnapshot(_snap: Snapshot) {
-    /* TODO(pg-port): utils/snapmgr.c */
-    unimplemented!("PushCopiedSnapshot")
+    crate::utils::time::snapmgr::PushCopiedSnapshot(_snap as _)
 }
 
 unsafe fn PopActiveSnapshot() {
-    /* TODO(pg-port): utils/snapmgr.c */
-    unimplemented!("PopActiveSnapshot")
+    crate::utils::time::snapmgr::PopActiveSnapshot()
 }
 
 unsafe fn GetActiveSnapshot() -> Snapshot {
-    /* TODO(pg-port): utils/snapmgr.c */
-    unimplemented!("GetActiveSnapshot")
+    crate::utils::time::snapmgr::GetActiveSnapshot() as _
 }
 
 unsafe fn GetTransactionSnapshot() -> Snapshot {
-    /* TODO(pg-port): utils/snapmgr.c */
-    unimplemented!("GetTransactionSnapshot")
+    crate::utils::time::snapmgr::GetTransactionSnapshot() as _
 }
 
 unsafe fn ActiveSnapshotSet() -> bool {
-    /* TODO(pg-port): utils/snapmgr.c */
-    unimplemented!("ActiveSnapshotSet")
+    crate::utils::time::snapmgr::ActiveSnapshotSet() as _
 }
 
 unsafe fn EnsurePortalSnapshotExists() {
-    /* TODO(pg-port): utils/snapmgr.c */
-    unimplemented!("EnsurePortalSnapshotExists")
+    crate::tcop::pquery::EnsurePortalSnapshotExists()
 }
 
 unsafe fn UpdateActiveSnapshotCommandId() {
-    /* TODO(pg-port): utils/snapmgr.c */
-    unimplemented!("UpdateActiveSnapshotCommandId")
+    crate::utils::time::snapmgr::UpdateActiveSnapshotCommandId()
 }
 
 unsafe fn CommandCounterIncrement() {
-    /* TODO(pg-port): access/transam/xact.c */
-    unimplemented!("CommandCounterIncrement")
+    crate::access::transam::xact::CommandCounterIncrement()
 }
 
 unsafe fn HoldPinnedPortals() {
-    /* TODO(pg-port): utils/mmgr/portalmem.c */
-    unimplemented!("HoldPinnedPortals")
+    crate::utils::mmgr::portalmem::HoldPinnedPortals()
 }
 
 unsafe fn ForgetPortalSnapshots() {
-    /* TODO(pg-port): utils/snapmgr.c */
-    unimplemented!("ForgetPortalSnapshots")
+    crate::utils::mmgr::portalmem::ForgetPortalSnapshots()
 }
 
 unsafe fn PortalStart(
@@ -707,8 +668,7 @@ unsafe fn PortalStart(
     _eflags: c_int,
     _snapshot: Snapshot,
 ) {
-    /* TODO(pg-port): utils/mmgr/portalmem.c */
-    unimplemented!("PortalStart")
+    crate::tcop::pquery::PortalStart(_portal as _, _params as _, _eflags as _, _snapshot as _)
 }
 
 unsafe fn PortalRunFetch(
@@ -722,38 +682,31 @@ unsafe fn PortalRunFetch(
 }
 
 unsafe fn CopyErrorData() -> *mut ErrorData {
-    /* TODO(pg-port): utils/elog.c */
-    unimplemented!("CopyErrorData")
+    crate::utils::error::elog_impl::CopyErrorData() as _
 }
 
 unsafe fn FlushErrorState() {
-    /* TODO(pg-port): utils/elog.c */
-    unimplemented!("FlushErrorState")
+    crate::utils::error::elog_impl::FlushErrorState()
 }
 
 unsafe fn ReThrowError(_edata: *mut ErrorData) {
-    /* TODO(pg-port): utils/elog.c */
-    unimplemented!("ReThrowError")
+    crate::utils::error::elog_impl::ReThrowError(_edata as _)
 }
 
 unsafe fn geterrposition() -> c_int {
-    /* TODO(pg-port): utils/elog.c */
-    0
+    crate::utils::error::elog_impl::geterrposition() as _
 }
 
 unsafe fn errposition(_cursorpos: c_int) -> c_int {
-    /* TODO(pg-port): utils/elog.c */
-    0
+    crate::utils::error::elog_impl::errposition(_cursorpos as _) as _
 }
 
 unsafe fn internalerrposition(_cursorpos: c_int) -> c_int {
-    /* TODO(pg-port): utils/elog.c */
-    0
+    crate::utils::error::elog_impl::internalerrposition(_cursorpos as _) as _
 }
 
 unsafe fn internalerrquery(_query: *const c_char) -> c_int {
-    /* TODO(pg-port): utils/elog.c */
-    0
+    crate::utils::error::elog_impl::internalerrquery(_query as _) as _
 }
 
 unsafe fn errcontext_msg(_fmt: *const c_char) -> c_int {
@@ -762,28 +715,23 @@ unsafe fn errcontext_msg(_fmt: *const c_char) -> c_int {
 }
 
 unsafe fn create_queryEnv() -> *mut QueryEnvironment {
-    /* TODO(pg-port): utils/misc/queryenvironment.c */
-    unimplemented!("create_queryEnv")
+    crate::utils::misc::queryenvironment::create_queryEnv() as _
 }
 
 unsafe fn get_ENR(_env: *mut QueryEnvironment, _name: *const c_char) -> EphemeralNamedRelation {
-    /* TODO(pg-port): utils/misc/queryenvironment.c */
-    unimplemented!("get_ENR")
+    crate::utils::misc::queryenvironment::get_ENR(_env as _, _name as _) as _
 }
 
 unsafe fn register_ENR(_env: *mut QueryEnvironment, _rel: EphemeralNamedRelation) {
-    /* TODO(pg-port): utils/misc/queryenvironment.c */
-    unimplemented!("register_ENR")
+    crate::utils::misc::queryenvironment::register_ENR(_env as _, _rel as _)
 }
 
 unsafe fn unregister_ENR(_env: *mut QueryEnvironment, _name: *const c_char) {
-    /* TODO(pg-port): utils/misc/queryenvironment.c */
-    unimplemented!("unregister_ENR")
+    crate::utils::misc::queryenvironment::unregister_ENR(_env as _, _name as _)
 }
 
 unsafe fn tuplestore_tuple_count(_state: *mut c_void) -> i64 {
-    /* TODO(pg-port): utils/sort/tuplestore.c */
-    0
+    crate::utils::sort::tuplestore::tuplestore_tuple_count(_state as _) as _
 }
 
 unsafe fn TYPEOID() -> c_int { 1 } /* TODO(pg-port): utils/cache/syscache.h */
@@ -792,10 +740,13 @@ unsafe fn EXEC_FLAG_SKIP_TRIGGERS() -> c_int { 0x0004 } /* TODO(pg-port): execut
 
 /* =================== interface functions =================== */
 
+
+#[no_mangle]
 pub unsafe fn SPI_connect() -> c_int {
     SPI_connect_ext(0)
 }
 
+#[no_mangle]
 pub unsafe fn SPI_connect_ext(options: c_int) -> c_int {
     let mut newdepth: c_int;
 
@@ -888,6 +839,7 @@ pub unsafe fn SPI_connect_ext(options: c_int) -> c_int {
     SPI_OK_CONNECT
 }
 
+#[no_mangle]
 pub unsafe fn SPI_finish() -> c_int {
     let mut res: c_int;
 
@@ -995,10 +947,12 @@ unsafe fn _SPI_commit(chain: bool) {
     /* NOTE: PG_CATCH block omitted - TODO(pg-port): wire up setjmp/longjmp error handling */
 }
 
+#[no_mangle]
 pub unsafe fn SPI_commit() {
     _SPI_commit(false);
 }
 
+#[no_mangle]
 pub unsafe fn SPI_commit_and_chain() {
     _SPI_commit(true);
 }
@@ -1053,10 +1007,12 @@ unsafe fn _SPI_rollback(chain: bool) {
     /* NOTE: PG_CATCH block omitted - TODO(pg-port): wire up setjmp/longjmp error handling */
 }
 
+#[no_mangle]
 pub unsafe fn SPI_rollback() {
     _SPI_rollback(false);
 }
 
+#[no_mangle]
 pub unsafe fn SPI_rollback_and_chain() {
     _SPI_rollback(true);
 }
@@ -1256,6 +1212,7 @@ pub unsafe fn SPI_exec(src: *const c_char, tcount: c_long) -> c_int {
 }
 
 /* Parse, plan, and execute a query string, with extensible options */
+#[no_mangle]
 pub unsafe fn SPI_execute_extended(
     src: *const c_char,
     options: *const SPIExecuteOptions,
@@ -1338,6 +1295,7 @@ pub unsafe fn SPI_execp(
 }
 
 /* Execute a previously prepared plan */
+#[no_mangle]
 pub unsafe fn SPI_execute_plan_extended(
     plan: SPIPlanPtr,
     options: *const SPIExecuteOptions,
@@ -1362,6 +1320,7 @@ pub unsafe fn SPI_execute_plan_extended(
 }
 
 /* Execute a previously prepared plan */
+#[no_mangle]
 pub unsafe fn SPI_execute_plan_with_paramlist(
     plan: SPIPlanPtr,
     params: ParamListInfo,
@@ -1542,6 +1501,7 @@ pub unsafe fn SPI_prepare_cursor(
     result
 }
 
+#[no_mangle]
 pub unsafe fn SPI_prepare_extended(
     src: *const c_char,
     options: *const SPIPrepareOptions,
@@ -1614,6 +1574,7 @@ pub unsafe fn SPI_prepare_params(
     result
 }
 
+#[no_mangle]
 pub unsafe fn SPI_keepplan(plan: SPIPlanPtr) -> c_int {
     let mut lc: *mut ListCell;
 
@@ -1661,6 +1622,7 @@ pub unsafe fn SPI_saveplan(plan: SPIPlanPtr) -> SPIPlanPtr {
     newplan
 }
 
+#[no_mangle]
 pub unsafe fn SPI_freeplan(plan: SPIPlanPtr) -> c_int {
     let mut lc: *mut ListCell;
 
@@ -1680,6 +1642,7 @@ pub unsafe fn SPI_freeplan(plan: SPIPlanPtr) -> c_int {
     0
 }
 
+#[no_mangle]
 pub unsafe fn SPI_copytuple(tuple: HeapTuple) -> HeapTuple {
     let mut oldcxt: MemoryContext;
     let ctuple: HeapTuple;
@@ -1703,6 +1666,7 @@ pub unsafe fn SPI_copytuple(tuple: HeapTuple) -> HeapTuple {
     ctuple
 }
 
+#[no_mangle]
 pub unsafe fn SPI_returntuple(
     tuple: HeapTuple,
     tupdesc: TupleDesc,
@@ -1911,6 +1875,7 @@ struct FormData_pg_attribute_stub_typid {
     pub atttypid: Oid,
 }
 
+#[no_mangle]
 pub unsafe fn SPI_getbinval(
     tuple: HeapTuple,
     tupdesc: TupleDesc,
@@ -1996,6 +1961,7 @@ pub unsafe fn SPI_getnspname(rel: Relation) -> *mut c_char {
     get_namespace_name(RelationGetNamespace(rel))
 }
 
+#[no_mangle]
 pub unsafe fn SPI_palloc(size: Size) -> *mut c_void {
     if _SPI_current.is_null() {
         elog!(ERROR, "SPI_palloc called while not connected to SPI");
@@ -2014,6 +1980,7 @@ pub unsafe fn SPI_pfree(pointer: *mut c_void) {
     pfree(pointer);
 }
 
+#[no_mangle]
 pub unsafe fn SPI_datumTransfer(value: Datum, typByVal: bool, typLen: c_int) -> Datum {
     let mut oldcxt: MemoryContext;
     let result: Datum;
@@ -2036,6 +2003,7 @@ pub unsafe fn SPI_freetuple(tuple: HeapTuple) {
     heap_freetuple(tuple);
 }
 
+#[no_mangle]
 pub unsafe fn SPI_freetuptable(tuptable: *mut SPITupleTable) {
     let mut found: bool = false;
 
@@ -2180,6 +2148,7 @@ pub unsafe fn SPI_cursor_open_with_args(
  *  Same as SPI_cursor_open except that parameters (if any) are passed
  *  as a ParamListInfo, which supports dynamic parameter set determination
  */
+#[no_mangle]
 pub unsafe fn SPI_cursor_open_with_paramlist(
     name: *const c_char,
     plan: SPIPlanPtr,
@@ -2190,6 +2159,7 @@ pub unsafe fn SPI_cursor_open_with_paramlist(
 }
 
 /* Parse a query and open it as a cursor */
+#[no_mangle]
 pub unsafe fn SPI_cursor_parse_open(
     name: *const c_char,
     src: *const c_char,
@@ -2452,6 +2422,7 @@ unsafe fn _SPI_error_callback_trampoline(arg: *mut c_void) {
  *
  *  Find the portal of an existing open cursor
  */
+#[no_mangle]
 pub unsafe fn SPI_cursor_find(name: *const c_char) -> Portal {
     GetPortalByName(name)
 }
@@ -2462,6 +2433,7 @@ pub unsafe fn SPI_cursor_find(name: *const c_char) -> Portal {
  *
  *  Fetch rows in a cursor
  */
+#[no_mangle]
 pub unsafe fn SPI_cursor_fetch(portal: Portal, forward: bool, count: c_long) {
     _SPI_cursor_operation(
         portal,
@@ -2493,6 +2465,7 @@ pub unsafe fn SPI_cursor_move(portal: Portal, forward: bool, count: c_long) {
  *
  *  Fetch rows in a scrollable cursor
  */
+#[no_mangle]
 pub unsafe fn SPI_scroll_cursor_fetch(
     portal: Portal,
     direction: FetchDirection,
@@ -2510,6 +2483,8 @@ pub unsafe fn SPI_scroll_cursor_fetch(
  *
  *  Move in a scrollable cursor
  */
+#[no_mangle]
+#[no_mangle]
 pub unsafe fn SPI_scroll_cursor_move(
     portal: Portal,
     direction: FetchDirection,
@@ -2524,6 +2499,7 @@ pub unsafe fn SPI_scroll_cursor_move(
  *
  *  Close a cursor
  */
+#[no_mangle]
 pub unsafe fn SPI_cursor_close(portal: Portal) {
     if !PortalIsValid(portal) {
         elog!(ERROR, "invalid portal in SPI cursor operation");
@@ -2607,6 +2583,7 @@ pub unsafe fn SPI_is_cursor_plan(plan: SPIPlanPtr) -> bool {
 pub unsafe fn SPI_plan_is_valid(plan: SPIPlanPtr) -> bool {
     let mut lc: *mut ListCell;
 
+
     Assert!((*plan).magic == _SPI_PLAN_MAGIC);
 
     foreach!(lc, (*plan).plancache_list, {
@@ -2626,6 +2603,7 @@ pub unsafe fn SPI_plan_is_valid(plan: SPIPlanPtr) -> bool {
  * only pass negative (error-case) codes, but for generality we recognize
  * the success codes too.
  */
+#[no_mangle]
 pub unsafe fn SPI_result_code_string(code: c_int) -> *const c_char {
     static mut buf: [c_char; 64] = [0; 64];
 
@@ -2678,6 +2656,7 @@ pub unsafe fn SPI_result_code_string(code: c_int) -> *const c_char {
  * look directly into the SPIPlan for itself).  It's not documented in
  * spi.sgml because we'd just as soon not have too many places using this.
  */
+#[no_mangle]
 pub unsafe fn SPI_plan_get_plan_sources(plan: SPIPlanPtr) -> *mut List {
     Assert!((*plan).magic == _SPI_PLAN_MAGIC);
     (*plan).plancache_list
@@ -2695,6 +2674,7 @@ pub unsafe fn SPI_plan_get_plan_sources(plan: SPIPlanPtr) -> *mut List {
  * look directly into the SPIPlan for itself).  It's not documented in
  * spi.sgml because we'd just as soon not have too many places using this.
  */
+#[no_mangle]
 pub unsafe fn SPI_plan_get_cached_plan(plan: SPIPlanPtr) -> *mut CachedPlan {
     let plansource: *mut CachedPlanSource;
     let cplan: *mut CachedPlan;
@@ -3979,6 +3959,7 @@ pub unsafe fn SPI_unregister_relation(name: *const c_char) -> c_int {
  * connecting, in order to make transition tables visible to any queries run
  * in this connection.
  */
+#[no_mangle]
 pub unsafe fn SPI_register_trigger_data(tdata: *mut TriggerData) -> c_int {
     /* TODO(pg-port): Trigger struct is opaque; minimal layout stub for tgnewtable/tgoldtable */
     #[repr(C)]

@@ -143,19 +143,13 @@ unsafe fn get_attstatsslot(
     reqkind: int16,
     reqop: Oid,
     flags: c_int,
-) -> bool {
-    unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_attstatsslot")
-}
+) -> bool { crate::utils::cache::lsyscache::get_attstatsslot(sslot as _, statstuple as _, reqkind as _, reqop as _, flags as _) }
 // TODO(pg-port): real free_attstatsslot lives in utils/cache/lsyscache.rs
-unsafe fn free_attstatsslot(sslot: *mut AttStatsSlot) {
-    unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs free_attstatsslot")
-}
+unsafe fn free_attstatsslot(sslot: *mut AttStatsSlot) { crate::utils::cache::lsyscache::free_attstatsslot(sslot as _) }
 
 /* get_commutator (lsyscache.h). */
 // TODO(pg-port): real get_commutator lives in utils/cache/lsyscache.rs
-unsafe fn get_commutator(opno: Oid) -> Oid {
-    unimplemented!("TODO(pg-port): utils/cache/lsyscache.rs get_commutator")
-}
+unsafe fn get_commutator(opno: Oid) -> Oid { crate::utils::cache::lsyscache::get_commutator(opno as _) as _ }
 
 /*
  * ReleaseVariableStats: free vardata.statsTuple if valid.  (selfuncs.h; the

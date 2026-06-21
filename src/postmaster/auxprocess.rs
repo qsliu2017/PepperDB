@@ -22,49 +22,35 @@ use crate::utils::resowner::resowner::CreateAuxProcessResourceOwner;
 
 // ---- Local stubs for not-yet-ported dependencies ----
 
-// utils/ps_status.h
-unsafe fn init_ps_display(_fixed_part: *const c_char) {
-    unimplemented!() // TODO: dep not ported (utils/ps_status.c)
-}
+// utils/ps_status.h: process-title display (cosmetic); ps_status.c unported -> no-op.
+unsafe fn init_ps_display(_fixed_part: *const c_char) {}
 
-// storage/proc.h
 unsafe fn InitAuxiliaryProcess() {
-    unimplemented!() // TODO: dep not ported (storage/lmgr/proc.c)
+    crate::storage::lmgr::proc::InitAuxiliaryProcess()
 }
 
-// storage/procsignal.h
 unsafe fn ProcSignalInit(_cancel_key: *mut u8, _cancel_key_len: c_int) {
-    unimplemented!() // TODO: dep not ported (storage/ipc/procsignal.c)
+    crate::storage::ipc::procsignal::ProcSignalInit(_cancel_key as *const u8, _cancel_key_len)
 }
 
-// pgstat.h
-unsafe fn pgstat_beinit() {
-    unimplemented!() // TODO: dep not ported (utils/activity/pgstat.c)
-}
-unsafe fn pgstat_bestart_initial() {
-    unimplemented!() // TODO: dep not ported (utils/activity/backend_status.c)
-}
-unsafe fn pgstat_bestart_final() {
-    unimplemented!() // TODO: dep not ported (utils/activity/backend_status.c)
-}
-unsafe fn pgstat_report_wait_end() {
-    // TODO: dep not ported (utils/activity/wait_event.c / pgstat header inline)
-}
+// pgstat backend-status reporting (pg_stat_activity); not needed for recovery/bring-up -> no-op.
+unsafe fn pgstat_beinit() {}
+unsafe fn pgstat_bestart_initial() {}
+unsafe fn pgstat_bestart_final() {}
+unsafe fn pgstat_report_wait_end() {}
 
 // storage/ipc.h: typedef void (*pg_on_exit_callback)(int code, Datum arg);
 type pg_on_exit_callback = unsafe fn(code: c_int, arg: Datum);
 unsafe fn before_shmem_exit(_function: pg_on_exit_callback, _arg: Datum) {
-    unimplemented!() // TODO: dep not ported (storage/ipc/ipc.c)
+    crate::storage::ipc::ipc::before_shmem_exit(core::mem::transmute(_function), _arg)
 }
 
-// storage/lwlock.h
 unsafe fn LWLockReleaseAll() {
-    unimplemented!() // TODO: dep not ported (storage/lmgr/lwlock.c)
+    crate::storage::lmgr::lwlock::LWLockReleaseAll()
 }
 
-// storage/condition_variable.h
 unsafe fn ConditionVariableCancelSleep() -> bool {
-    unimplemented!() // TODO: dep not ported (storage/lmgr/condition_variable.c)
+    crate::storage::lmgr::condition_variable::ConditionVariableCancelSleep()
 }
 
 /// AuxiliaryProcessMainCommon

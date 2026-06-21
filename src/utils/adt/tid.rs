@@ -445,9 +445,7 @@ unsafe fn table_endscan(_scan: TableScanDesc) {
 
 /* C macro RELKIND_HAS_STORAGE (catalog/pg_class.h); no macro_export home yet. */
 #[allow(non_snake_case)]
-unsafe fn RELKIND_HAS_STORAGE(_relkind: c_char) -> bool {
-    unimplemented!("RELKIND_HAS_STORAGE: catalog/pg_class.h macro not yet ported")
-}
+unsafe fn RELKIND_HAS_STORAGE(_relkind: c_char) -> bool { crate::utils::cache::relcache::RELKIND_HAS_STORAGE(_relkind as _) }
 
 extern "C" {
     #[link_name = "strcmp"]

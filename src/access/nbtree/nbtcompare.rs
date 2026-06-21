@@ -196,7 +196,7 @@ pub unsafe fn btint2cmp(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 /// Fast inline comparator wired into SortSupport by btint2sortsupport.
-unsafe fn btint2fastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
+pub unsafe fn btint2fastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
     let a: int16 = DatumGetInt16(x);
     let b: int16 = DatumGetInt16(y);
 
@@ -238,7 +238,7 @@ pub unsafe fn btint4cmp(fcinfo: FunctionCallInfo) -> Datum {
 
 /// Authoritative int32 comparator wired into SortSupport by btint4sortsupport.
 /// (C uses ssup_datum_int32_cmp from sortsupport.h; equivalent to pg_cmp_s32.)
-unsafe fn btint4fastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
+pub unsafe fn btint4fastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
     let a: int32 = DatumGetInt32(x);
     let b: int32 = DatumGetInt32(y);
 
@@ -281,7 +281,7 @@ pub unsafe fn btint8cmp(fcinfo: FunctionCallInfo) -> Datum {
 /// Authoritative int64 comparator wired into SortSupport by btint8sortsupport.
 /// On a 64-bit Datum platform C uses ssup_datum_signed_cmp; on 32-bit it uses
 /// btint8fastcmp.  Both are a signed 64-bit 3-way compare == pg_cmp_s64.
-unsafe fn btint8fastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
+pub unsafe fn btint8fastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
     let a: int64 = DatumGetInt64(x);
     let b: int64 = DatumGetInt64(y);
 
@@ -404,7 +404,7 @@ pub unsafe fn btoidcmp(fcinfo: FunctionCallInfo) -> Datum {
 }
 
 /// Fast inline comparator wired into SortSupport by btoidsortsupport.
-unsafe fn btoidfastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
+pub unsafe fn btoidfastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
     let a: Oid = DatumGetObjectId(x);
     let b: Oid = DatumGetObjectId(y);
 
@@ -475,7 +475,7 @@ pub unsafe fn btcharcmp(fcinfo: FunctionCallInfo) -> Datum {
 
 /// Fast inline comparator wired into SortSupport by btcharsortsupport.
 /// btcharcmp compares chars as unsigned, so the comparator must too.
-unsafe fn btcharfastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
+pub unsafe fn btcharfastcmp(x: Datum, y: Datum, _ssup: SortSupport) -> c_int {
     let a: uint8 = DatumGetChar(x) as uint8;
     let b: uint8 = DatumGetChar(y) as uint8;
 
@@ -507,7 +507,7 @@ mod tests {
     use core::ptr::null_mut;
 
     /// Call a btree cmp via the fmgr V1 path, with int32 args, return the int32.
-    unsafe fn call_int4cmp(a: int32, b: int32) -> int32 {
+    pub unsafe fn call_int4cmp(a: int32, b: int32) -> int32 {
         DatumGetInt32(DirectFunctionCall2!(
             btint4cmp,
             Int32GetDatum(a),

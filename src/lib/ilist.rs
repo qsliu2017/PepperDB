@@ -561,14 +561,15 @@ macro_rules! dlist_tail_element {
 macro_rules! dlist_foreach {
     ($iter:expr, $lhead:expr, $body:block) => {{
         $iter.end = &mut (*$lhead).head;
-        $iter.cur = if !$iter.end.is_null() && !(*$iter.end).next.is_null() {
+        let mut __dl_cur = if !$iter.end.is_null() && !(*$iter.end).next.is_null() {
             (*$iter.end).next
         } else {
             $iter.end
         };
-        while $iter.cur != $iter.end {
+        while __dl_cur != $iter.end {
+            $iter.cur = __dl_cur;
+            __dl_cur = (*__dl_cur).next; // advance before body so `continue` is safe
             $body
-            $iter.cur = (*$iter.cur).next;
         }
     }};
 }
@@ -586,16 +587,16 @@ macro_rules! dlist_foreach {
 macro_rules! dlist_foreach_modify {
     ($iter:expr, $lhead:expr, $body:block) => {{
         $iter.end = &mut (*$lhead).head;
-        $iter.cur = if !$iter.end.is_null() && !(*$iter.end).next.is_null() {
+        let mut __dl_cur = if !$iter.end.is_null() && !(*$iter.end).next.is_null() {
             (*$iter.end).next
         } else {
             $iter.end
         };
-        $iter.next = (*$iter.cur).next;
-        while $iter.cur != $iter.end {
+        while __dl_cur != $iter.end {
+            $iter.cur = __dl_cur;
+            $iter.next = (*__dl_cur).next;
+            __dl_cur = $iter.next; // advance before body so `continue` is safe
             $body
-            $iter.cur = $iter.next;
-            $iter.next = (*$iter.cur).next;
         }
     }};
 }
@@ -609,14 +610,15 @@ macro_rules! dlist_foreach_modify {
 macro_rules! dlist_reverse_foreach {
     ($iter:expr, $lhead:expr, $body:block) => {{
         $iter.end = &mut (*$lhead).head;
-        $iter.cur = if !$iter.end.is_null() && !(*$iter.end).prev.is_null() {
+        let mut __dl_cur = if !$iter.end.is_null() && !(*$iter.end).prev.is_null() {
             (*$iter.end).prev
         } else {
             $iter.end
         };
-        while $iter.cur != $iter.end {
+        while __dl_cur != $iter.end {
+            $iter.cur = __dl_cur;
+            __dl_cur = (*__dl_cur).prev; // advance before body so `continue` is safe
             $body
-            $iter.cur = (*$iter.cur).prev;
         }
     }};
 }
@@ -1101,10 +1103,11 @@ macro_rules! slist_head_element {
 #[macro_export]
 macro_rules! slist_foreach {
     ($iter:expr, $lhead:expr, $body:block) => {{
-        $iter.cur = (*$lhead).head.next;
-        while !$iter.cur.is_null() {
+        let mut __cur = (*$lhead).head.next;
+        while !__cur.is_null() {
+            $iter.cur = __cur;
+            __cur = (*__cur).next; // prefetch so `continue` still advances (C for-loop semantics)
             $body
-            $iter.cur = (*$iter.cur).next;
         }
     }};
 }

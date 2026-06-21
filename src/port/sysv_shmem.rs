@@ -718,6 +718,9 @@ pub unsafe fn PGSharedMemoryCreate(
     /* Room for a header? */
     Assert!(size > crate::c::MAXALIGN(core::mem::size_of::<PGShmemHeader>()) as Size);
 
+    // bring-up: shared_memory_type enum GUC isn't applied (no-op hooks), leaving it != MMAP;
+    // macOS SHMMAX is tiny so the big segment MUST be mmap. Force it. TODO: real GUC enum assign.
+    shared_memory_type = SHMEM_TYPE_MMAP;
     if shared_memory_type == SHMEM_TYPE_MMAP {
         AnonymousShmem = CreateAnonymousSegment(&raw mut size);
         AnonymousShmemSize = size;

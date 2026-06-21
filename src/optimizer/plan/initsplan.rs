@@ -133,14 +133,8 @@ pub struct JoinTreeItem {
 // ---------------------------------------------------------------------------
 
 /// copyObject() (nodes/copyfuncs.c): deep copy of a node tree.
-/// TODO(pg-port): replace with real recursive copyObject once copyfuncs.c is translated.
 unsafe fn copyObject<T>(node: *const T) -> *mut T {
-    if node.is_null() {
-        return ptr::null_mut();
-    }
-    let p = palloc(core::mem::size_of::<T>()) as *mut T;
-    ptr::copy_nonoverlapping(node, p, 1);
-    p
+    crate::nodes::copyfuncs::copyObjectImpl(node as *const core::ffi::c_void) as *mut T
 }
 
 /// palloc0_object: allocate zero-initialized memory for a single object.
@@ -155,10 +149,7 @@ unsafe fn build_simple_rel(
     _root: *mut PlannerInfo,
     _varno: c_int,
     _parent: *mut RelOptInfo,
-) -> *mut RelOptInfo {
-    // TODO(pg-port): real build_simple_rel in optimizer/util/relnode.c
-    unimplemented!()
-}
+) -> *mut RelOptInfo { crate::optimizer::util::relnode::build_simple_rel(_root as _, _varno, _parent as _) as _ }
 
 /// expand_inherited_rtentry() (optimizer/prep/prepunion.c or inherit.c)
 /// TODO(pg-port): real symbol lives in optimizer/inherit.rs
@@ -167,65 +158,44 @@ unsafe fn expand_inherited_rtentry(
     _rel: *mut RelOptInfo,
     _rte: *mut RangeTblEntry,
     _rti: Index,
-) {
-    // TODO(pg-port): real expand_inherited_rtentry in optimizer/inherit.c
-    unimplemented!()
-}
+) { crate::optimizer::util::inherit::expand_inherited_rtentry(_root as _, _rel as _, _rte as _, _rti) }
 
 /// pull_var_clause() (optimizer/util/var.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/var.rs
-pub const PVC_RECURSE_AGGREGATES: c_int = 0x001;
-pub const PVC_RECURSE_WINDOWFUNCS: c_int = 0x002;
-pub const PVC_INCLUDE_PLACEHOLDERS: c_int = 0x004;
+pub const PVC_RECURSE_AGGREGATES: c_int = 0x0002;
+pub const PVC_RECURSE_WINDOWFUNCS: c_int = 0x0008;
+pub const PVC_INCLUDE_PLACEHOLDERS: c_int = 0x0010;
 
-unsafe fn pull_var_clause(_node: *mut Node, _flags: c_int) -> *mut List {
-    // TODO(pg-port): real pull_var_clause in optimizer/util/var.c
-    unimplemented!()
-}
+unsafe fn pull_var_clause(_node: *mut Node, _flags: c_int) -> *mut List { crate::optimizer::util::var::pull_var_clause(_node as _, _flags) as _ }
 
 /// pull_vars_of_level() (optimizer/util/var.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/var.rs
-unsafe fn pull_vars_of_level(_node: *mut Node, _levelsup: c_int) -> *mut List {
-    // TODO(pg-port): real pull_vars_of_level in optimizer/util/var.c
-    unimplemented!()
-}
+unsafe fn pull_vars_of_level(_node: *mut Node, _levelsup: c_int) -> *mut List { crate::optimizer::util::var::pull_vars_of_level(_node as _, _levelsup) as _ }
 
 /// find_base_rel() (optimizer/util/relnode.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/relnode.rs
-unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo {
-    // TODO(pg-port): real find_base_rel in optimizer/util/relnode.c
-    unimplemented!()
-}
+unsafe fn find_base_rel(_root: *mut PlannerInfo, _relid: c_int) -> *mut RelOptInfo { crate::optimizer::util::relnode::find_base_rel(_root as _, _relid) as _ }
 
 /// find_base_rel_ignore_join() (optimizer/util/relnode.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/relnode.rs
 unsafe fn find_base_rel_ignore_join(
     _root: *mut PlannerInfo,
     _relid: c_int,
-) -> *mut RelOptInfo {
-    // TODO(pg-port): real find_base_rel_ignore_join in optimizer/util/relnode.c
-    unimplemented!()
-}
+) -> *mut RelOptInfo { crate::optimizer::util::relnode::find_base_rel_ignore_join(_root as _, _relid) as _ }
 
 /// find_placeholder_info() (optimizer/util/placeholder.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/placeholder.rs
 unsafe fn find_placeholder_info(
     _root: *mut PlannerInfo,
     _phv: *mut PlaceHolderVar,
-) -> *mut PlaceHolderInfo {
-    // TODO(pg-port): real find_placeholder_info in optimizer/util/placeholder.c
-    unimplemented!()
-}
+) -> *mut PlaceHolderInfo { crate::optimizer::util::placeholder::find_placeholder_info(_root as _, _phv as _) as _ }
 
 /// get_sortgroupclause_tle() (optimizer/util/tlist.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/tlist.rs
 unsafe fn get_sortgroupclause_tle(
     _sgc: *mut SortGroupClause,
     _targetlist: *mut List,
-) -> *mut TargetEntry {
-    // TODO(pg-port): real get_sortgroupclause_tle in optimizer/util/tlist.c
-    unimplemented!()
-}
+) -> *mut TargetEntry { crate::optimizer::util::tlist::get_sortgroupclause_tle(_sgc as _, _targetlist as _) as _ }
 
 /// IncrementVarSublevelsUp() (nodes/nodeFuncs.c)
 /// TODO(pg-port): real symbol lives in nodes/nodeFuncs.rs
@@ -233,34 +203,22 @@ unsafe fn IncrementVarSublevelsUp(
     _node: *mut Node,
     _delta_sublevels_up: c_int,
     _min_sublevels_up: c_int,
-) {
-    // TODO(pg-port): real IncrementVarSublevelsUp in nodes/nodeFuncs.c
-    unimplemented!()
-}
+) { crate::rewrite::rewriteManip::IncrementVarSublevelsUp(_node as _, _delta_sublevels_up, _min_sublevels_up) }
 
 /// preprocess_phv_expression() (optimizer/plan/planner.c)
 /// TODO(pg-port): real symbol lives in optimizer/plan/planner.rs
 unsafe fn preprocess_phv_expression(
     _root: *mut PlannerInfo,
     _expr: *mut Expr,
-) -> *mut Expr {
-    // TODO(pg-port): real preprocess_phv_expression in optimizer/plan/planner.c
-    unimplemented!()
-}
+) -> *mut Expr { crate::optimizer::plan::planner::preprocess_phv_expression(_root as _, _expr as _) as _ }
 
 /// pull_varnos() (optimizer/util/var.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/var.rs
-unsafe fn pull_varnos(_root: *mut PlannerInfo, _node: *mut Node) -> Relids {
-    // TODO(pg-port): real pull_varnos in optimizer/util/var.c
-    unimplemented!()
-}
+unsafe fn pull_varnos(_root: *mut PlannerInfo, _node: *mut Node) -> Relids { crate::optimizer::util::var::pull_varnos(_root as _, _node as _) }
 
 /// find_nonnullable_rels() (optimizer/util/clauses.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/clauses.rs
-unsafe fn find_nonnullable_rels(_clause: *mut Node) -> Relids {
-    // TODO(pg-port): real find_nonnullable_rels in optimizer/util/clauses.c
-    unimplemented!()
-}
+unsafe fn find_nonnullable_rels(_clause: *mut Node) -> Relids { crate::optimizer::util::clauses::find_nonnullable_rels(_clause as _) }
 
 /// contain_placeholder_references_to() (optimizer/util/placeholder.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/placeholder.rs
@@ -268,17 +226,11 @@ unsafe fn contain_placeholder_references_to(
     _root: *mut PlannerInfo,
     _clause: *mut Node,
     _ojrelid: Index,
-) -> bool {
-    // TODO(pg-port): real contain_placeholder_references_to in optimizer/util/placeholder.c
-    unimplemented!()
-}
+) -> bool { crate::optimizer::util::placeholder::contain_placeholder_references_to(_root as _, _clause as _, _ojrelid as _) }
 
 /// contain_volatile_functions() (optimizer/util/clauses.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/clauses.rs
-unsafe fn contain_volatile_functions(_clause: *mut Node) -> bool {
-    // TODO(pg-port): real contain_volatile_functions in optimizer/util/clauses.c
-    unimplemented!()
-}
+unsafe fn contain_volatile_functions(_clause: *mut Node) -> bool { crate::optimizer::util::clauses::contain_volatile_functions(_clause as _) }
 
 /// make_restrictinfo() (optimizer/util/restrictinfo.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/restrictinfo.rs
@@ -293,10 +245,7 @@ unsafe fn make_restrictinfo(
     _required_relids: Relids,
     _incompatible_relids: Relids,
     _outer_relids: Relids,
-) -> *mut RestrictInfo {
-    // TODO(pg-port): real make_restrictinfo in optimizer/util/restrictinfo.c
-    unimplemented!()
-}
+) -> *mut RestrictInfo { crate::optimizer::util::restrictinfo::make_restrictinfo(_root as _, _clause as _, _is_pushed_down, _has_clone, _is_clone, _pseudoconstant, _security_level, _required_relids, _incompatible_relids, _outer_relids) as _ }
 
 /// process_equivalence() (optimizer/path/equivclass.c)
 /// TODO(pg-port): real symbol lives in optimizer/path/equivclass.rs
@@ -304,20 +253,14 @@ unsafe fn process_equivalence(
     _root: *mut PlannerInfo,
     _restrictinfo_p: *mut *mut RestrictInfo,
     _jdomain: *mut JoinDomain,
-) -> bool {
-    // TODO(pg-port): real process_equivalence in optimizer/path/equivclass.c
-    unimplemented!()
-}
+) -> bool { crate::optimizer::path::equivclass::process_equivalence(_root as _, _restrictinfo_p as _, _jdomain as _) }
 
 /// initialize_mergeclause_eclasses() (optimizer/path/equivclass.c)
 /// TODO(pg-port): real symbol lives in optimizer/path/equivclass.rs
 unsafe fn initialize_mergeclause_eclasses(
     _root: *mut PlannerInfo,
     _restrictinfo: *mut RestrictInfo,
-) {
-    // TODO(pg-port): real initialize_mergeclause_eclasses in optimizer/path/equivclass.c
-    unimplemented!()
-}
+) { crate::optimizer::path::pathkeys::initialize_mergeclause_eclasses(_root as _, _restrictinfo as _) }
 
 /// distribute_restrictinfo_to_rels() -- forward declared; defined below.
 /// (also called from equivclass.c so it's pub)
@@ -328,17 +271,11 @@ unsafe fn add_join_clause_to_rels(
     _root: *mut PlannerInfo,
     _restrictinfo: *mut RestrictInfo,
     _join_relids: Relids,
-) {
-    // TODO(pg-port): real add_join_clause_to_rels in optimizer/util/joininfo.c
-    unimplemented!()
-}
+) { crate::optimizer::util::joininfo::add_join_clause_to_rels(_root as _, _restrictinfo as _, _join_relids) }
 
 /// restriction_is_or_clause() (optimizer/util/restrictinfo.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/restrictinfo.rs
-unsafe fn restriction_is_or_clause(_rinfo: *mut RestrictInfo) -> bool {
-    // TODO(pg-port): real restriction_is_or_clause in optimizer/util/restrictinfo.c
-    unimplemented!()
-}
+unsafe fn restriction_is_or_clause(_rinfo: *mut RestrictInfo) -> bool { crate::optimizer::util::restrictinfo::restriction_is_or_clause(_rinfo as _) }
 
 /// is_orclause() (nodes/makefuncs.c or clauses.c)
 /// TODO(pg-port): real symbol lives in nodes/makefuncs.rs or optimizer/util/clauses.rs
@@ -349,46 +286,25 @@ unsafe fn is_orclause(_clause: *mut Node) -> bool {
 
 /// is_opclause() (nodes/nodeFuncs.c)
 /// TODO(pg-port): real symbol lives in nodes/nodeFuncs.rs
-unsafe fn is_opclause(_clause: *mut Expr) -> bool {
-    // TODO(pg-port): real is_opclause in nodes/nodeFuncs.c
-    unimplemented!()
-}
+unsafe fn is_opclause(_clause: *mut Expr) -> bool { crate::optimizer::util::clauses::is_opclause(_clause as _) }
 
 /// get_leftop() / get_rightop() (nodes/nodeFuncs.c)
 /// TODO(pg-port): real symbols live in nodes/nodeFuncs.rs
-unsafe fn get_leftop(_expr: *mut Expr) -> *mut Node {
-    // TODO(pg-port): real get_leftop in nodes/nodeFuncs.c
-    unimplemented!()
-}
-unsafe fn get_rightop(_expr: *mut Expr) -> *mut Node {
-    // TODO(pg-port): real get_rightop in nodes/nodeFuncs.c
-    unimplemented!()
-}
+unsafe fn get_leftop(_expr: *mut Expr) -> *mut Node { crate::optimizer::path::costsize::get_leftop(_expr as _) as _ }
+unsafe fn get_rightop(_expr: *mut Expr) -> *mut Node { crate::optimizer::path::costsize::get_rightop(_expr as _) as _ }
 
 /// op_mergejoinable() / op_hashjoinable() (utils/cache/lsyscache.c)
 /// TODO(pg-port): real symbols live in utils/cache/lsyscache.rs
-unsafe fn op_mergejoinable(_opno: Oid, _inputtype: Oid) -> bool {
-    // TODO(pg-port): real op_mergejoinable in utils/cache/lsyscache.c
-    unimplemented!()
-}
-unsafe fn op_hashjoinable(_opno: Oid, _inputtype: Oid) -> bool {
-    // TODO(pg-port): real op_hashjoinable in utils/cache/lsyscache.c
-    unimplemented!()
-}
+unsafe fn op_mergejoinable(_opno: Oid, _inputtype: Oid) -> bool { crate::utils::cache::lsyscache::op_mergejoinable(_opno, _inputtype) }
+unsafe fn op_hashjoinable(_opno: Oid, _inputtype: Oid) -> bool { crate::utils::cache::lsyscache::op_hashjoinable(_opno, _inputtype) }
 
 /// get_mergejoin_opfamilies() (utils/cache/lsyscache.c)
 /// TODO(pg-port): real symbol lives in utils/cache/lsyscache.rs
-unsafe fn get_mergejoin_opfamilies(_opno: Oid) -> *mut List {
-    // TODO(pg-port): real get_mergejoin_opfamilies in utils/cache/lsyscache.c
-    unimplemented!()
-}
+unsafe fn get_mergejoin_opfamilies(_opno: Oid) -> *mut List { crate::utils::cache::lsyscache::get_mergejoin_opfamilies(_opno) as _ }
 
 /// get_commutator() (utils/cache/lsyscache.c)
 /// TODO(pg-port): real symbol lives in utils/cache/lsyscache.rs
-unsafe fn get_commutator(_opno: Oid) -> Oid {
-    // TODO(pg-port): real get_commutator in utils/cache/lsyscache.c
-    unimplemented!()
-}
+unsafe fn get_commutator(_opno: Oid) -> Oid { crate::utils::cache::lsyscache::get_commutator(_opno) }
 
 /// OidIsValid macro equivalent
 #[inline]
@@ -404,10 +320,7 @@ const BOOLOID: Oid = 16;
 
 /// exprType() (nodes/nodeFuncs.c)
 /// TODO(pg-port): real symbol lives in nodes/nodeFuncs.rs
-unsafe fn exprType(_expr: *const Node) -> Oid {
-    // TODO(pg-port): real exprType in nodes/nodeFuncs.c
-    unimplemented!()
-}
+unsafe fn exprType(_expr: *const Node) -> Oid { crate::nodes::nodeFuncs::exprType(_expr as _) }
 
 /// make_opclause() (nodes/makefuncs.c)
 /// TODO(pg-port): real symbol lives in nodes/makefuncs.rs
@@ -419,27 +332,18 @@ unsafe fn make_opclause(
     _rightop: *mut Expr,
     _opcollid: Oid,
     _inputcollid: Oid,
-) -> *mut Expr {
-    // TODO(pg-port): real make_opclause in nodes/makefuncs.c
-    unimplemented!()
-}
+) -> *mut Expr { crate::nodes::makefuncs::make_opclause(_opno, _opresulttype, _opretset, _leftop as _, _rightop as _, _opcollid, _inputcollid) as _ }
 
 /// makeBoolConst() (nodes/makefuncs.c)
 /// TODO(pg-port): real symbol lives in nodes/makefuncs.rs
-unsafe fn makeBoolConst(_value: bool, _isnull: bool) -> *mut Node {
-    // TODO(pg-port): real makeBoolConst in nodes/makefuncs.c
-    unimplemented!()
-}
+unsafe fn makeBoolConst(_value: bool, _isnull: bool) -> *mut Node { crate::nodes::makefuncs::makeBoolConst(_value, _isnull) as _ }
 
 /// eval_const_expressions() (optimizer/util/clauses.c)
 /// TODO(pg-port): real symbol lives in optimizer/util/clauses.rs
 unsafe fn eval_const_expressions(
     _root: *mut PlannerInfo,
     _node: *mut Node,
-) -> *mut Node {
-    // TODO(pg-port): real eval_const_expressions in optimizer/util/clauses.c
-    unimplemented!()
-}
+) -> *mut Node { crate::optimizer::util::clauses::eval_const_expressions(_root as _, _node as _) as _ }
 
 /// DatumGetBool
 #[inline]
@@ -449,10 +353,7 @@ unsafe fn DatumGetBool(d: Datum) -> bool {
 
 /// find_forced_null_var() (optimizer/util/clauses.c or similar)
 /// TODO(pg-port): real symbol lives in optimizer/util/clauses.rs
-unsafe fn find_forced_null_var(_clause: *mut Node) -> *mut Var {
-    // TODO(pg-port): real find_forced_null_var in optimizer/util/clauses.c
-    unimplemented!()
-}
+unsafe fn find_forced_null_var(_clause: *mut Node) -> *mut Var { crate::optimizer::util::clauses::find_forced_null_var(_clause as _) as _ }
 
 /// add_nulling_relids() (rewrite/rewriteManip.c)
 /// TODO(pg-port): real symbol lives in rewrite/rewriteManip.rs
@@ -460,10 +361,7 @@ unsafe fn add_nulling_relids(
     _node: *mut Node,
     _target_rels: Relids,
     _added_relids: Relids,
-) -> *mut Node {
-    // TODO(pg-port): real add_nulling_relids in rewrite/rewriteManip.c
-    unimplemented!()
-}
+) -> *mut Node { crate::rewrite::rewriteManip::add_nulling_relids(_node as _, _target_rels, _added_relids) as _ }
 
 /// remove_nulling_relids() (rewrite/rewriteManip.c)
 /// TODO(pg-port): real symbol lives in rewrite/rewriteManip.rs
@@ -471,17 +369,11 @@ unsafe fn remove_nulling_relids(
     _node: *mut Node,
     _removable_relids: Relids,
     _except_relids: Relids,
-) -> *mut Node {
-    // TODO(pg-port): real remove_nulling_relids in rewrite/rewriteManip.c
-    unimplemented!()
-}
+) -> *mut Node { crate::rewrite::rewriteManip::remove_nulling_relids(_node as _, _removable_relids, _except_relids) as _ }
 
 /// LCS_asString() (nodes/lockoptions.c or similar)
 /// TODO(pg-port): real symbol lives in nodes/lockoptions.rs
-unsafe fn LCS_asString(_strength: c_int) -> *const c_char {
-    // TODO(pg-port): real LCS_asString
-    unimplemented!()
-}
+unsafe fn LCS_asString(_strength: c_int) -> *const c_char { crate::parser::analyze::LCS_asString(core::mem::transmute(_strength)) as _ }
 
 /// errcode() etc. -- assumed available from prelude
 /// ereport macro uses these; stubs so the file compiles independently.
@@ -509,10 +401,7 @@ unsafe fn match_eclasses_to_foreign_key_col(
     _root: *mut PlannerInfo,
     _fkinfo: *mut ForeignKeyOptInfo,
     _colno: c_int,
-) -> *mut EquivalenceClass {
-    // TODO(pg-port): real match_eclasses_to_foreign_key_col in optimizer/path/equivclass.c
-    unimplemented!()
-}
+) -> *mut EquivalenceClass { crate::optimizer::path::equivclass::match_eclasses_to_foreign_key_col(_root as _, _fkinfo as _, _colno) as _ }
 
 /// lookup_type_cache() (utils/cache/typcache.c)
 /// TODO(pg-port): real symbol lives in utils/cache/typcache.rs
@@ -527,10 +416,7 @@ pub struct TypeCacheEntry {
     // ... other fields omitted
 }
 
-unsafe fn lookup_type_cache(_typeid: Oid, _flags: c_int) -> *mut TypeCacheEntry {
-    // TODO(pg-port): real lookup_type_cache in utils/cache/typcache.c
-    unimplemented!()
-}
+unsafe fn lookup_type_cache(_typeid: Oid, _flags: c_int) -> *mut TypeCacheEntry { crate::utils::cache::lsyscache::lookup_type_cache(_typeid, _flags) as _ }
 
 /// restriction_is_always_true / restriction_is_always_false -- forward decl
 /// (both are pub and defined later in this file)
@@ -1655,7 +1541,7 @@ unsafe fn deconstruct_recurse(
                 jtitem,
                 item_list,
             );
-            sub_item = lfirst(llast(*item_list) as *const ListCell) as *mut JoinTreeItem;
+            sub_item = llast(*item_list) as *mut JoinTreeItem;
             (*jtitem).qualscope =
                 bms_add_members((*jtitem).qualscope, (*sub_item).qualscope);
             (*jtitem).inner_join_rels = (*sub_item).inner_join_rels;
@@ -1697,9 +1583,9 @@ unsafe fn deconstruct_recurse(
                 (*jtitem).jdomain = parent_domain;
                 // Recurse
                 let ljl = deconstruct_recurse(root, (*j).larg, parent_domain, jtitem, item_list);
-                let li = lfirst(llast(*item_list) as *const ListCell) as *mut JoinTreeItem;
+                let li = llast(*item_list) as *mut JoinTreeItem;
                 let rjl = deconstruct_recurse(root, (*j).rarg, parent_domain, jtitem, item_list);
-                let ri = lfirst(llast(*item_list) as *const ListCell) as *mut JoinTreeItem;
+                let ri = llast(*item_list) as *mut JoinTreeItem;
                 // Compute qualscope etc
                 (*jtitem).qualscope = bms_union((*li).qualscope, (*ri).qualscope);
                 (*jtitem).inner_join_rels = (*jtitem).qualscope;
@@ -1721,9 +1607,9 @@ unsafe fn deconstruct_recurse(
                 (*jtitem).jdomain = cd;
                 // Recurse
                 let ljl = deconstruct_recurse(root, (*j).larg, parent_domain, jtitem, item_list);
-                let li = lfirst(llast(*item_list) as *const ListCell) as *mut JoinTreeItem;
+                let li = llast(*item_list) as *mut JoinTreeItem;
                 let rjl = deconstruct_recurse(root, (*j).rarg, cd, jtitem, item_list);
-                let ri = lfirst(llast(*item_list) as *const ListCell) as *mut JoinTreeItem;
+                let ri = llast(*item_list) as *mut JoinTreeItem;
                 // Compute join domain contents, qualscope etc
                 (*parent_domain).jd_relids =
                     bms_add_members((*parent_domain).jd_relids, (*cd).jd_relids);
@@ -1754,9 +1640,9 @@ unsafe fn deconstruct_recurse(
                 (*jtitem).jdomain = parent_domain;
                 // Recurse
                 let ljl = deconstruct_recurse(root, (*j).larg, parent_domain, jtitem, item_list);
-                let li = lfirst(llast(*item_list) as *const ListCell) as *mut JoinTreeItem;
+                let li = llast(*item_list) as *mut JoinTreeItem;
                 let rjl = deconstruct_recurse(root, (*j).rarg, parent_domain, jtitem, item_list);
-                let ri = lfirst(llast(*item_list) as *const ListCell) as *mut JoinTreeItem;
+                let ri = llast(*item_list) as *mut JoinTreeItem;
                 // Compute qualscope etc
                 (*jtitem).qualscope =
                     bms_union((*li).qualscope, (*ri).qualscope);
@@ -1783,13 +1669,13 @@ unsafe fn deconstruct_recurse(
                 (*lcd).jd_relids = ptr::null_mut(); // filled by recursion
                 (*root).join_domains = lappend((*root).join_domains, lcd as *mut _);
                 let ljl = deconstruct_recurse(root, (*j).larg, lcd, jtitem, item_list);
-                let li = lfirst(llast(*item_list) as *const ListCell) as *mut JoinTreeItem;
+                let li = llast(*item_list) as *mut JoinTreeItem;
                 (*fjd).jd_relids = bms_copy((*lcd).jd_relids);
                 let rcd = makeNode!(JoinDomain, T_JoinDomain) as *mut JoinDomain;
                 (*rcd).jd_relids = ptr::null_mut(); // filled by recursion
                 (*root).join_domains = lappend((*root).join_domains, rcd as *mut _);
                 let rjl = deconstruct_recurse(root, (*j).rarg, rcd, jtitem, item_list);
-                let ri = lfirst(llast(*item_list) as *const ListCell) as *mut JoinTreeItem;
+                let ri = llast(*item_list) as *mut JoinTreeItem;
                 // Compute qualscope etc
                 (*fjd).jd_relids =
                     bms_add_members((*fjd).jd_relids, (*rcd).jd_relids);

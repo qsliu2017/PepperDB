@@ -69,7 +69,7 @@ static mut MyXactFlags: c_int = 0;
 
 // utils/syscache.h: syscache id for pg_class indexed by OID.
 // TODO(pg-port): replace with the real RELOID constant once syscache.h is ported.
-const RELOID: c_int = 0;
+const RELOID: c_int = 57;
 
 // catalog/namespace.h: RangeVarGetRelidExtended option flag bits.
 const RVR_NOWAIT: c_int = 1 << 1;

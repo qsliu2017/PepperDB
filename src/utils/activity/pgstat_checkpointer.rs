@@ -117,7 +117,7 @@ pub unsafe fn pgstat_fetch_stat_checkpointer() -> *mut PgStat_CheckpointerStats 
 }
 
 /// init_shmem callback: initialize the per-kind LWLock.
-pub unsafe fn pgstat_checkpointer_init_shmem_cb(stats: *mut c_void) {
+pub unsafe extern "C" fn pgstat_checkpointer_init_shmem_cb(stats: *mut c_void) {
     let stats_shmem = stats as *mut PgStatShared_Checkpointer;
 
     LWLockInitialize(&raw mut (*stats_shmem).lock, LWTRANCHE_PGSTATS_DATA);

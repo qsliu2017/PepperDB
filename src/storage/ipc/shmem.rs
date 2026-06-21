@@ -826,37 +826,9 @@ pub unsafe fn pg_numa_available(_fcinfo: FunctionCallInfo) -> Datum {
 // Local stubs for unported dependencies
 // ----------------------------------------------------------------
 
-#[repr(C)]
-pub struct PGShmemHeader {
-    pub totalsize: Size,
-    pub freeoffset: Size,
-    pub index: *mut c_void,
-}
+pub use crate::storage::pg_shmem::PGShmemHeader;
 
-#[repr(C)]
-pub struct HTAB {
-    _private: [u8; 0],
-}
-
-#[repr(C)]
-pub struct HASHHDR {
-    _private: [u8; 0],
-}
-
-#[repr(C)]
-pub struct HASHCTL {
-    pub keysize: Size,
-    pub entrysize: Size,
-    pub dsize: c_long,
-    pub max_dsize: c_long,
-    pub alloc: Option<unsafe extern "C" fn(Size) -> *mut c_void>,
-    pub hctl: *mut HASHHDR,
-}
-
-#[repr(C)]
-pub struct HASH_SEQ_STATUS {
-    _private: [u8; 0],
-}
+pub use crate::utils::hash::dynahash::{HTAB, HASHHDR, HASHCTL, HASH_SEQ_STATUS};
 
 #[repr(C)]
 pub struct ReturnSetInfo {
@@ -872,13 +844,8 @@ pub struct FunctionCallInfoBaseData {
     pub resultinfo: *mut c_void,
 }
 
-/* hash_create flags */
-pub const HASH_ELEM: c_int = 0x0008;
-pub const HASH_STRINGS: c_int = 0x0040;
-pub const HASH_SHARED_MEM: c_int = 0x0800;
-pub const HASH_ALLOC: c_int = 0x0200;
-pub const HASH_DIRSIZE: c_int = 0x0002;
-pub const HASH_ATTACH: c_int = 0x1000;
+/* hash_create flags (canonical, from dynahash) */
+pub use crate::utils::hash::dynahash::{HASH_ELEM, HASH_STRINGS, HASH_SHARED_MEM, HASH_ALLOC, HASH_DIRSIZE, HASH_ATTACH};
 
 /* hash_search action */
 pub const HASH_ENTER_NULL: c_int = 3;
@@ -912,40 +879,53 @@ unsafe fn SpinLockRelease(_lock: *mut slock_t) {
     // TODO: storage/spin.h
 }
 
-unsafe fn LWLockAcquire(_lock: *mut c_void, _mode: c_int) -> bool {
-    unimplemented!() // TODO: storage/lwlock.c
+unsafe fn LWLockAcquire(lock: *mut c_void, mode: c_int) -> bool {
+    use crate::storage::lmgr::lwlock::LWLockMode;
+    let m = if mode == LW_SHARED {
+        LWLockMode::LW_SHARED
+    } else {
+        LWLockMode::LW_EXCLUSIVE
+    };
+    crate::storage::lmgr::lwlock::LWLockAcquire(lock as _, m)
 }
-unsafe fn LWLockRelease(_lock: *mut c_void) {
-    unimplemented!() // TODO: storage/lwlock.c
+unsafe fn LWLockRelease(lock: *mut c_void) {
+    crate::storage::lmgr::lwlock::LWLockRelease(lock as _)
 }
 
-unsafe fn hash_select_dirsize(_ntuples: c_long) -> c_long {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+unsafe fn hash_select_dirsize(ntuples: c_long) -> c_long {
+    crate::utils::hash::dynahash::hash_select_dirsize(ntuples)
 }
-unsafe fn hash_get_shared_size(_info: *mut HASHCTL, _flags: c_int) -> Size {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+unsafe fn hash_get_shared_size(info: *mut HASHCTL, flags: c_int) -> Size {
+    crate::utils::hash::dynahash::hash_get_shared_size(info as _, flags)
 }
 unsafe fn hash_create(
-    _tabname: *const c_char,
-    _nelem: c_long,
-    _info: *mut HASHCTL,
-    _flags: c_int,
+    tabname: *const c_char,
+    nelem: c_long,
+    info: *mut HASHCTL,
+    flags: c_int,
 ) -> *mut HTAB {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_create(tabname, nelem, info as _, flags) as *mut HTAB
 }
 unsafe fn hash_search(
-    _hashp: *mut HTAB,
-    _keyPtr: *const c_void,
-    _action: c_int,
-    _foundPtr: *mut bool,
+    hashp: *mut HTAB,
+    keyPtr: *const c_void,
+    action: c_int,
+    foundPtr: *mut bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+    use crate::utils::hash::dynahash::HASHACTION;
+    let a = match action {
+        0 => HASHACTION::HASH_FIND,
+        1 => HASHACTION::HASH_ENTER,
+        2 => HASHACTION::HASH_REMOVE,
+        _ => HASHACTION::HASH_ENTER_NULL,
+    };
+    crate::utils::hash::dynahash::hash_search(hashp as _, keyPtr, a, foundPtr)
 }
-unsafe fn hash_seq_init(_status: *mut HASH_SEQ_STATUS, _hashp: *mut HTAB) {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+unsafe fn hash_seq_init(status: *mut HASH_SEQ_STATUS, hashp: *mut HTAB) {
+    crate::utils::hash::dynahash::hash_seq_init(status as _, hashp as _)
 }
-unsafe fn hash_seq_search(_status: *mut HASH_SEQ_STATUS) -> *mut c_void {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+unsafe fn hash_seq_search(status: *mut HASH_SEQ_STATUS) -> *mut c_void {
+    crate::utils::hash::dynahash::hash_seq_search(status as _)
 }
 
 unsafe fn InitMaterializedSRF(_fcinfo: FunctionCallInfo, _flags: c_int) {

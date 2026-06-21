@@ -70,10 +70,10 @@ const WL_EXIT_ON_PM_DEATH: c_int = 1 << 5;
 const WAIT_EVENT_EXECUTE_GATHER: u32 = 0;
 
 unsafe fn WaitLatch(_latch: *mut Latch, _wakeEvents: c_int, _timeout: i64, _wait_event_info: u32) -> c_int {
-    unimplemented!() // TODO: utils/latch.c
+    crate::storage::ipc::latch::WaitLatch(_latch as _, _wakeEvents as _, _timeout as _, _wait_event_info as _) as _
 }
 unsafe fn ResetLatch(_latch: *mut Latch) {
-    unimplemented!() // TODO: utils/latch.c
+    crate::storage::ipc::latch::ResetLatch(_latch as _)
 }
 
 /* executor/execParallel.h (TODO: backend/executor/execParallel.c) */
@@ -105,7 +105,7 @@ unsafe fn ExecParallelCleanup(_pei: *mut ParallelExecutorInfo) {
 
 /* parallel.h (TODO: access/parallel.c) */
 unsafe fn LaunchParallelWorkers(_pcxt: *mut ParallelContext) {
-    unimplemented!() // TODO: access/parallel.c
+    crate::access::transam::parallel::LaunchParallelWorkers(_pcxt as _)
 }
 
 /*

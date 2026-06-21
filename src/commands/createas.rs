@@ -685,229 +685,240 @@ unsafe fn HEAP_RELOPT_NAMESPACES() -> [*const c_char; 2] {
 }
 
 unsafe fn DefineRelation(
-    _stmt: *mut CreateStmt,
-    _relkind: c_char,
-    _ownerId: Oid,
-    _typaddress: *mut ObjectAddress,
-    _queryString: *const c_char,
+    stmt: *mut CreateStmt,
+    relkind: c_char,
+    ownerId: Oid,
+    typaddress: *mut ObjectAddress,
+    queryString: *const c_char,
 ) -> ObjectAddress {
-    unimplemented!() // TODO: commands/tablecmds.c
+    crate::commands::tablecmds::DefineRelation(stmt as _, relkind, ownerId, typaddress as _, queryString) as _
 }
 
 unsafe fn CommandCounterIncrement() {
-    unimplemented!() // TODO: access/transam/xact.c
+    crate::access::transam::xact::CommandCounterIncrement()
 }
 
 unsafe fn transformRelOptions(
-    _oldOptions: Datum,
-    _defList: *mut List,
-    _namspace: *const c_char,
-    _validnsps: *const *const c_char,
-    _acceptOidsOff: bool,
-    _isReset: bool,
+    oldOptions: Datum,
+    defList: *mut List,
+    namspace: *const c_char,
+    validnsps: *const *const c_char,
+    acceptOidsOff: bool,
+    isReset: bool,
 ) -> Datum {
-    unimplemented!() // TODO: access/common/reloptions.c
+    crate::access::common::reloptions::transformRelOptions(
+        oldOptions as _, defList as _, namspace, validnsps as _, acceptOidsOff, isReset,
+    ) as _
 }
 
-unsafe fn heap_reloptions(_relkind: c_char, _reloptions: Datum, _validate: bool) -> *mut crate::c::bytea {
-    unimplemented!() // TODO: access/common/reloptions.c
+unsafe fn heap_reloptions(relkind: c_char, reloptions: Datum, validate: bool) -> *mut crate::c::bytea {
+    crate::access::common::reloptions::heap_reloptions(relkind, reloptions as _, validate) as _
 }
 
-unsafe fn NewRelationCreateToastTable(_relOid: Oid, _reloptions: Datum) {
-    unimplemented!() // TODO: catalog/toasting.c
+unsafe fn NewRelationCreateToastTable(relOid: Oid, reloptions: Datum) {
+    crate::catalog::toasting::NewRelationCreateToastTable(relOid, reloptions as _)
 }
 
-unsafe fn StoreViewQuery(_viewOid: Oid, _viewParse: *mut Query, _replace: bool) {
-    unimplemented!() // TODO: commands/view.c
+unsafe fn StoreViewQuery(viewOid: Oid, viewParse: *mut Query, replace: bool) {
+    crate::commands::view::StoreViewQuery(viewOid, viewParse as _, replace)
 }
 
 unsafe fn makeColumnDef(
-    _colname: *const c_char,
-    _typeOid: Oid,
-    _typmod: i32,
-    _collOid: Oid,
+    colname: *const c_char,
+    typeOid: Oid,
+    typmod: i32,
+    collOid: Oid,
 ) -> *mut ColumnDef {
-    unimplemented!() // TODO: nodes/makefuncs.c
+    crate::nodes::makefuncs::makeColumnDef(colname, typeOid, typmod, collOid) as _
 }
 
-unsafe fn exprType(_expr: *const Node) -> Oid {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+unsafe fn exprType(expr: *const Node) -> Oid {
+    crate::nodes::nodeFuncs::exprType(expr as _)
 }
 
-unsafe fn exprTypmod(_expr: *const Node) -> i32 {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+unsafe fn exprTypmod(expr: *const Node) -> i32 {
+    crate::nodes::nodeFuncs::exprTypmod(expr as _)
 }
 
-unsafe fn exprCollation(_expr: *const Node) -> Oid {
-    unimplemented!() // TODO: nodes/nodeFuncs.c
+unsafe fn exprCollation(expr: *const Node) -> Oid {
+    crate::nodes::nodeFuncs::exprCollation(expr as _)
 }
 
-unsafe fn type_is_collatable(_typid: Oid) -> bool {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+unsafe fn type_is_collatable(typid: Oid) -> bool {
+    crate::utils::cache::lsyscache::type_is_collatable(typid)
 }
 
 unsafe fn IsQueryIdEnabled() -> bool {
-    unimplemented!() // TODO: nodes/queryjumble.c
+    crate::nodes::queryjumble::IsQueryIdEnabled()
 }
 
-unsafe fn JumbleQuery(_query: *mut Query) -> *mut JumbleState {
-    unimplemented!() // TODO: nodes/queryjumble.c
+unsafe fn JumbleQuery(query: *mut Query) -> *mut JumbleState {
+    crate::nodes::queryjumble::JumbleQuery(query as _) as _
 }
 
 unsafe fn ExecuteQuery(
-    _pstate: *mut ParseState,
-    _stmt: *mut ExecuteStmt,
-    _intoClause: *mut IntoClause,
-    _params: ParamListInfo,
-    _dest: *mut DestReceiver,
-    _qc: *mut QueryCompletion,
+    pstate: *mut ParseState,
+    stmt: *mut ExecuteStmt,
+    intoClause: *mut IntoClause,
+    params: ParamListInfo,
+    dest: *mut DestReceiver,
+    qc: *mut QueryCompletion,
 ) {
-    unimplemented!() // TODO: commands/prepare.c
+    crate::commands::prepare::ExecuteQuery(pstate as _, stmt as _, intoClause as _, params as _, dest as _, qc as _)
 }
 
 unsafe fn RefreshMatViewByOid(
-    _matviewOid: Oid,
-    _is_create: bool,
-    _skipData: bool,
-    _concurrent: bool,
-    _queryString: *const c_char,
-    _qc: *mut QueryCompletion,
+    matviewOid: Oid,
+    is_create: bool,
+    skipData: bool,
+    concurrent: bool,
+    queryString: *const c_char,
+    qc: *mut QueryCompletion,
 ) -> ObjectAddress {
-    unimplemented!() // TODO: commands/matview.c
+    crate::commands::matview::RefreshMatViewByOid(matviewOid, is_create, skipData, concurrent, queryString, qc as _) as _
 }
 
-unsafe fn QueryRewrite(_parsetree: *mut Query) -> *mut List {
-    unimplemented!() // TODO: rewrite/rewriteHandler.c
+unsafe fn QueryRewrite(parsetree: *mut Query) -> *mut List {
+    crate::rewrite::rewriteHandler::QueryRewrite(parsetree as _) as _
 }
 
 unsafe fn pg_plan_query(
-    _querytree: *mut Query,
-    _query_string: *const c_char,
-    _cursorOptions: c_int,
-    _boundParams: ParamListInfo,
+    querytree: *mut Query,
+    query_string: *const c_char,
+    cursorOptions: c_int,
+    boundParams: ParamListInfo,
 ) -> *mut PlannedStmt {
-    unimplemented!() // TODO: tcop/postgres.c
+    crate::tcop::postgres::pg_plan_query(querytree as _, query_string, cursorOptions, boundParams as _) as _
 }
 
-unsafe fn PushCopiedSnapshot(_snapshot: crate::utils::snapshot::Snapshot) {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+unsafe fn PushCopiedSnapshot(snapshot: crate::utils::snapshot::Snapshot) {
+    crate::utils::time::snapmgr::PushCopiedSnapshot(snapshot as _)
 }
 
 unsafe fn UpdateActiveSnapshotCommandId() {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::UpdateActiveSnapshotCommandId()
 }
 
 unsafe fn GetActiveSnapshot() -> crate::utils::snapshot::Snapshot {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::GetActiveSnapshot() as _
 }
 
 unsafe fn CreateQueryDesc(
-    _plannedstmt: *mut PlannedStmt,
-    _sourceText: *const c_char,
-    _snapshot: crate::utils::snapshot::Snapshot,
-    _crosscheck_snapshot: crate::utils::snapshot::Snapshot,
-    _dest: *mut DestReceiver,
-    _params: ParamListInfo,
-    _queryEnv: *mut QueryEnvironment,
-    _instrument_options: c_int,
+    plannedstmt: *mut PlannedStmt,
+    sourceText: *const c_char,
+    snapshot: crate::utils::snapshot::Snapshot,
+    crosscheck_snapshot: crate::utils::snapshot::Snapshot,
+    dest: *mut DestReceiver,
+    params: ParamListInfo,
+    queryEnv: *mut QueryEnvironment,
+    instrument_options: c_int,
 ) -> *mut QueryDesc {
-    unimplemented!() // TODO: executor/execUtils.c
+    crate::tcop::pquery::CreateQueryDesc(
+        plannedstmt as _, sourceText, snapshot as _, crosscheck_snapshot as _,
+        dest as _, params as _, queryEnv as _, instrument_options,
+    ) as _
 }
 
-unsafe fn ExecutorStart(_queryDesc: *mut QueryDesc, _eflags: c_int) -> bool {
-    unimplemented!() // TODO: executor/execMain.c
+unsafe fn ExecutorStart(queryDesc: *mut QueryDesc, eflags: c_int) -> bool {
+    crate::executor::execMain::ExecutorStart(queryDesc as _, eflags);
+    true
 }
 
 unsafe fn ExecutorRun(
-    _queryDesc: *mut QueryDesc,
-    _direction: crate::access::sdir::ScanDirection,
-    _count: u64,
+    queryDesc: *mut QueryDesc,
+    direction: crate::access::sdir::ScanDirection,
+    count: u64,
 ) {
-    unimplemented!() // TODO: executor/execMain.c
+    crate::executor::execMain::ExecutorRun(queryDesc as _, direction as _, count as _)
 }
 
-unsafe fn SetQueryCompletion(_qc: *mut QueryCompletion, _commandTag: c_int, _nprocessed: u64) {
-    unimplemented!() // TODO: tcop/cmdtag.c
+unsafe fn SetQueryCompletion(qc: *mut QueryCompletion, commandTag: c_int, nprocessed: u64) {
+    let tag: crate::tcop::cmdtag::CommandTag = std::mem::transmute(commandTag);
+    crate::tcop::cmdtag::SetQueryCompletion(&mut *qc, tag, nprocessed as _)
 }
 
-unsafe fn ExecutorFinish(_queryDesc: *mut QueryDesc) {
-    unimplemented!() // TODO: executor/execMain.c
+unsafe fn ExecutorFinish(queryDesc: *mut QueryDesc) {
+    crate::executor::execMain::ExecutorFinish(queryDesc as _)
 }
 
-unsafe fn ExecutorEnd(_queryDesc: *mut QueryDesc) {
-    unimplemented!() // TODO: executor/execMain.c
+unsafe fn ExecutorEnd(queryDesc: *mut QueryDesc) {
+    crate::executor::execMain::ExecutorEnd(queryDesc as _)
 }
 
-unsafe fn FreeQueryDesc(_qdesc: *mut QueryDesc) {
-    unimplemented!() // TODO: executor/execUtils.c
+unsafe fn FreeQueryDesc(qdesc: *mut QueryDesc) {
+    crate::tcop::pquery::FreeQueryDesc(qdesc as _)
 }
 
 unsafe fn PopActiveSnapshot() {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    crate::utils::time::snapmgr::PopActiveSnapshot()
 }
 
-unsafe fn RangeVarGetCreationNamespace(_newRelation: *mut crate::nodes::primnodes::RangeVar) -> Oid {
-    unimplemented!() // TODO: catalog/namespace.c
+unsafe fn RangeVarGetCreationNamespace(newRelation: *mut crate::nodes::primnodes::RangeVar) -> Oid {
+    crate::catalog::namespace::RangeVarGetCreationNamespace(newRelation as _)
 }
 
-unsafe fn get_relname_relid(_relname: *const c_char, _relnamespace: Oid) -> Oid {
-    unimplemented!() // TODO: utils/cache/lsyscache.c
+unsafe fn get_relname_relid(relname: *const c_char, relnamespace: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_relname_relid(relname, relnamespace)
 }
 
-unsafe fn checkMembershipInCurrentExtension(_object: *const ObjectAddress) {
-    unimplemented!() // TODO: catalog/pg_depend.c
+unsafe fn checkMembershipInCurrentExtension(object: *const ObjectAddress) {
+    crate::catalog::pg_depend::checkMembershipInCurrentExtension(object as _)
 }
 
-unsafe fn table_open(_relationId: Oid, _lockmode: c_int) -> Relation {
-    unimplemented!() // TODO: access/table/table.c
+unsafe fn table_open(relationId: Oid, lockmode: c_int) -> Relation {
+    crate::access::table::table::table_open(relationId, lockmode as _) as _
 }
 
-unsafe fn check_enable_rls(_relid: Oid, _checkAsUser: Oid, _noError: bool) -> c_int {
-    unimplemented!() // TODO: utils/misc/rls.c
+unsafe fn check_enable_rls(relid: Oid, checkAsUser: Oid, noError: bool) -> c_int {
+    crate::utils::misc::rls::check_enable_rls(relid, checkAsUser, noError)
 }
 
-unsafe fn SetMatViewPopulatedState(_relation: Relation, _newstate: bool) {
-    unimplemented!() // TODO: commands/matview.c
+unsafe fn SetMatViewPopulatedState(relation: Relation, newstate: bool) {
+    crate::commands::matview::SetMatViewPopulatedState(relation as _, newstate)
 }
 
-unsafe fn GetCurrentCommandId(_used: bool) -> CommandId {
-    unimplemented!() // TODO: access/transam/xact.c
+unsafe fn GetCurrentCommandId(used: bool) -> CommandId {
+    crate::access::transam::xact::GetCurrentCommandId(used) as _
 }
 
 unsafe fn GetBulkInsertState() -> BulkInsertState {
-    unimplemented!() // TODO: access/heap/heapam.c
+    crate::access::heap::heapam::GetBulkInsertState() as _
 }
 
-unsafe fn RelationGetTargetBlock(_relation: Relation) -> crate::storage::block::BlockNumber {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationGetTargetBlock(relation: Relation) -> crate::storage::block::BlockNumber {
+    let smgr = (*relation).rd_smgr;
+    if smgr.is_null() {
+        InvalidBlockNumber
+    } else {
+        (*(smgr as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_targblock
+    }
 }
 
 unsafe fn table_tuple_insert(
-    _rel: Relation,
-    _slot: *mut TupleTableSlot,
-    _cid: CommandId,
-    _options: c_int,
-    _bistate: BulkInsertState,
+    rel: Relation,
+    slot: *mut TupleTableSlot,
+    cid: CommandId,
+    options: c_int,
+    bistate: BulkInsertState,
 ) {
-    unimplemented!() // TODO: access/table/tableam.h
+    crate::access::table::tableam::table_tuple_insert(rel as _, slot as _, cid as _, options, bistate as _)
 }
 
-unsafe fn FreeBulkInsertState(_bistate: BulkInsertState) {
-    unimplemented!() // TODO: access/heap/heapam.c
+unsafe fn FreeBulkInsertState(bistate: BulkInsertState) {
+    crate::access::heap::heapam::FreeBulkInsertState(bistate as _)
 }
 
-unsafe fn table_finish_bulk_insert(_rel: Relation, _options: c_int) {
-    unimplemented!() // TODO: access/table/tableam.h
+// table_finish_bulk_insert is a no-op for the heap AM.
+unsafe fn table_finish_bulk_insert(_rel: Relation, _options: c_int) {}
+
+unsafe fn table_close(relation: Relation, lockmode: c_int) {
+    crate::access::table::table::table_close(relation as _, lockmode as _)
 }
 
-unsafe fn table_close(_relation: Relation, _lockmode: c_int) {
-    unimplemented!() // TODO: access/table/table.c
+unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: c_int) -> Form_pg_attribute {
+    crate::access::common::tupdesc::TupleDescAttr(tupdesc as _, i) as _
 }
 
-unsafe fn TupleDescAttr(_tupdesc: TupleDesc, _i: c_int) -> Form_pg_attribute {
-    unimplemented!() // TODO: access/common/tupdesc.h
-}
-
-unsafe fn copyObject(_from: *const std::ffi::c_void) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: nodes/copyfuncs.c
+unsafe fn copyObject(from: *const std::ffi::c_void) -> *mut std::ffi::c_void {
+    crate::nodes::copyfuncs::copyObjectImpl(from as _) as _
 }

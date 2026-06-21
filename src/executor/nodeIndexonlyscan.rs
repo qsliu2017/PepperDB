@@ -83,11 +83,11 @@ const NAMEOID: Oid = 19;
 // ----------------------------------------------------------------
 
 unsafe fn index_open(_relationId: Oid, _lockmode: LOCKMODE) -> Relation {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_open(_relationId as _, _lockmode as _) as _
 }
 
 unsafe fn index_close(_relation: Relation, _lockmode: LOCKMODE) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_close(_relation as _, _lockmode as _)
 }
 
 unsafe fn index_beginscan(
@@ -98,7 +98,7 @@ unsafe fn index_beginscan(
     _nkeys: c_int,
     _norderbys: c_int,
 ) -> IndexScanDesc {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_beginscan(_heapRelation as _, _indexRelation as _, _snapshot as _, _instrument as _, _nkeys as _, _norderbys as _) as _
 }
 
 unsafe fn index_beginscan_parallel(
@@ -109,7 +109,7 @@ unsafe fn index_beginscan_parallel(
     _norderbys: c_int,
     _pscan: ParallelIndexScanDesc,
 ) -> IndexScanDesc {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_beginscan_parallel(_heaprel as _, _indexrel as _, _instrument as _, _nkeys as _, _norderbys as _, _pscan as _) as _
 }
 
 unsafe fn index_rescan(
@@ -119,19 +119,19 @@ unsafe fn index_rescan(
     _orderbys: *mut ScanKeyData,
     _norderbys: c_int,
 ) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_rescan(_scan as _, _keys as _, _nkeys as _, _orderbys as _, _norderbys as _)
 }
 
 unsafe fn index_endscan(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_endscan(_scan as _)
 }
 
 unsafe fn index_markpos(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_markpos(_scan as _)
 }
 
 unsafe fn index_restrpos(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_restrpos(_scan as _)
 }
 
 unsafe fn index_getnext_tid(_scan: IndexScanDesc, _direction: ScanDirection) -> ItemPointer {
@@ -139,7 +139,7 @@ unsafe fn index_getnext_tid(_scan: IndexScanDesc, _direction: ScanDirection) -> 
 }
 
 unsafe fn index_fetch_heap(_scan: IndexScanDesc, _slot: *mut TupleTableSlot) -> bool {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_fetch_heap(_scan as _, _slot as _) as _
 }
 
 unsafe fn index_deform_tuple(
@@ -148,7 +148,7 @@ unsafe fn index_deform_tuple(
     _values: *mut Datum,
     _isnull: *mut bool,
 ) {
-    unimplemented!() // TODO: access/itup.h (indextuple.c)
+    crate::access::common::indextuple::index_deform_tuple(_tup as _, _tupleDescriptor as _, _values as _, _isnull as _)
 }
 
 unsafe fn index_parallelscan_estimate(
@@ -160,7 +160,7 @@ unsafe fn index_parallelscan_estimate(
     _parallel_aware: bool,
     _nworkers: c_int,
 ) -> Size {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_parallelscan_estimate(_indexRelation as _, _nkeys as _, _norderbys as _, _snapshot as _, _instrument as _, _parallel_aware as _, _nworkers as _) as _
 }
 
 unsafe fn index_parallelscan_initialize(
@@ -173,11 +173,11 @@ unsafe fn index_parallelscan_initialize(
     _sharedInfo: *mut *mut SharedIndexScanInstrumentation,
     _target: ParallelIndexScanDesc,
 ) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_parallelscan_initialize(_heapRelation as _, _indexRelation as _, _snapshot as _, _instrument as _, _parallel_aware as _, _nworkers as _, _sharedInfo as _, _target as _)
 }
 
 unsafe fn index_parallelrescan(_scan: IndexScanDesc) {
-    unimplemented!() // TODO: access/genam.h (indexam.c)
+    crate::access::index::indexam::index_parallelrescan(_scan as _)
 }
 
 unsafe fn ExecIndexBuildScanKeys(
@@ -192,7 +192,7 @@ unsafe fn ExecIndexBuildScanKeys(
     _arrayKeys: *mut *mut IndexArrayKeyInfo,
     _numArrayKeys: *mut c_int,
 ) {
-    unimplemented!() // TODO: executor/nodeIndexscan.c
+    crate::executor::nodeIndexscan::ExecIndexBuildScanKeys(_planstate as _, _index as _, _quals as _, _isorderby as _, _scanKeys as _, _numScanKeys as _, _runtimeKeys as _, _numRuntimeKeys as _, _arrayKeys as _, _numArrayKeys as _)
 }
 
 unsafe fn ExecIndexEvalRuntimeKeys(
@@ -200,7 +200,7 @@ unsafe fn ExecIndexEvalRuntimeKeys(
     _runtimeKeys: *mut IndexRuntimeKeyInfo,
     _numRuntimeKeys: c_int,
 ) {
-    unimplemented!() // TODO: executor/nodeIndexscan.c
+    crate::executor::nodeIndexscan::ExecIndexEvalRuntimeKeys(_econtext as _, _runtimeKeys as _, _numRuntimeKeys as _)
 }
 
 unsafe fn RelationGetDescr(_relation: Relation) -> TupleDesc {
@@ -208,7 +208,7 @@ unsafe fn RelationGetDescr(_relation: Relation) -> TupleDesc {
 }
 
 unsafe fn table_slot_callbacks(_relation: Relation) -> *const crate::executor::tuptable::TupleTableSlotOps {
-    unimplemented!() // TODO: access/tableam.h
+    crate::access::table::tableam::table_slot_callbacks(_relation as _) as _
 }
 
 unsafe fn ReleaseBuffer(_buffer: Buffer) {
@@ -224,23 +224,23 @@ unsafe fn IsParallelWorker() -> bool {
 }
 
 unsafe fn shm_toc_estimate_chunk(_estimator: *mut c_void, _size: Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 
 unsafe fn shm_toc_estimate_keys(_estimator: *mut c_void, _nkeys: Size) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    unimplemented!()
 }
 
 unsafe fn shm_toc_allocate(_toc: *mut c_void, _nbytes: Size) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_allocate(_toc as _, _nbytes as _) as _
 }
 
 unsafe fn shm_toc_insert(_toc: *mut c_void, _key: u64, _address: *mut c_void) {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_insert(_toc as _, _key as _, _address as _)
 }
 
 unsafe fn shm_toc_lookup(_toc: *mut c_void, _key: u64, _noError: bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/shm_toc.h
+    crate::storage::ipc::shm_toc::shm_toc_lookup(_toc as _, _key as _, _noError as _) as _
 }
 
 // access/visibilitymap.h: VM_ALL_VISIBLE() macro.
@@ -259,12 +259,12 @@ unsafe fn InstrCountFiltered2(_node: *mut IndexOnlyScanState, _delta: u64) {
 
 // postgres.h: NameGetDatum() macro.
 unsafe fn NameGetDatum(_X: Name) -> Datum {
-    unimplemented!() // TODO: postgres.h (c.rs)
+    crate::postgres::NameGetDatum(_X as _) as _
 }
 
 // utils/memutils.h: OffsetToPointer().
 unsafe fn OffsetToPointer(_base: *mut c_void, _offset: usize) -> *mut c_void {
-    unimplemented!() // TODO: utils/memutils.h
+    crate::c::OffsetToPointer(_base as _, _offset as _) as _
 }
 
 // ----------------------------------------------------------------

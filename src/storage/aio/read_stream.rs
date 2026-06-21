@@ -1254,59 +1254,59 @@ static MyDatabaseId: Oid = 0; // TODO: miscadmin.h
 // Stubs for functions not yet ported.
 // ---------------------------------------------------------------------------
 unsafe fn smgr_rlocator_spcOid(_smgr: SMgrRelation) -> Oid {
-    unimplemented!() // TODO: storage/smgr.h (smgr->smgr_rlocator.locator.spcOid)
+    (*(_smgr as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_rlocator.locator.spcOid
 }
 
 unsafe fn smgr_rlocator_relNumber(_smgr: SMgrRelation) -> Oid {
-    unimplemented!() // TODO: storage/smgr.h (smgr->smgr_rlocator.locator.relNumber)
+    (*(_smgr as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_rlocator.locator.relNumber
 }
 
 unsafe fn rel_relpersistence(_rel: Relation) -> c_char {
-    unimplemented!() // TODO: utils/rel.h (rel->rd_rel->relpersistence)
+    (*(*(_rel as crate::utils::rel::Relation)).rd_rel).relpersistence
 }
 
 unsafe fn IsCatalogRelation(_rel: Relation) -> bool {
-    unimplemented!() // TODO: catalog/catalog.h
+    crate::catalog::catalog::IsCatalogRelation(_rel as _)
 }
 
 unsafe fn IsCatalogRelationOid(_relid: Oid) -> bool {
-    unimplemented!() // TODO: catalog/catalog.h
+    crate::catalog::catalog::IsCatalogRelationOid(_relid)
 }
 
 unsafe fn get_tablespace_maintenance_io_concurrency(_spcid: Oid) -> c_int {
-    unimplemented!() // TODO: utils/spccache.h
+    crate::utils::cache::spccache::get_tablespace_maintenance_io_concurrency(_spcid)
 }
 
 unsafe fn get_tablespace_io_concurrency(_spcid: Oid) -> c_int {
-    unimplemented!() // TODO: utils/spccache.h
+    crate::utils::cache::spccache::get_tablespace_io_concurrency(_spcid)
 }
 
 unsafe fn GetAccessStrategyPinLimit(_strategy: BufferAccessStrategy) -> c_int {
-    unimplemented!() // TODO: storage/bufmgr.h
+    crate::storage::buffer::freelist::GetAccessStrategyPinLimit(_strategy as _)
 }
 
 unsafe fn SmgrIsTemp(_smgr: SMgrRelation) -> bool {
-    unimplemented!() // TODO: storage/smgr.h
+    crate::storage::smgr::smgr::SmgrIsTemp(_smgr as _)
 }
 
 unsafe fn GetLocalPinLimit() -> uint32 {
-    unimplemented!() // TODO: storage/bufmgr.h
+    crate::storage::buffer::localbuf::GetLocalPinLimit()
 }
 
 unsafe fn GetPinLimit() -> uint32 {
-    unimplemented!() // TODO: storage/bufmgr.h
+    crate::storage::buffer::bufmgr::GetPinLimit()
 }
 
 unsafe fn GetAdditionalLocalPinLimit() -> uint32 {
-    unimplemented!() // TODO: storage/bufmgr.h
+    crate::storage::buffer::localbuf::GetAdditionalLocalPinLimit()
 }
 
 unsafe fn GetAdditionalPinLimit() -> uint32 {
-    unimplemented!() // TODO: storage/bufmgr.h
+    crate::storage::buffer::bufmgr::GetAdditionalPinLimit()
 }
 
 unsafe fn RelationGetSmgr(_rel: Relation) -> SMgrRelation {
-    unimplemented!() // TODO: utils/rel.h
+    crate::storage::buffer::bufmgr::RelationGetSmgr(_rel as _) as _
 }
 
 unsafe fn StartReadBuffers(
@@ -1316,7 +1316,7 @@ unsafe fn StartReadBuffers(
     _nblocks: *mut c_int,
     _flags: c_int,
 ) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
+    crate::storage::buffer::bufmgr::StartReadBuffers(_operation, _buffers, _blocknum, _nblocks, _flags)
 }
 
 unsafe fn StartReadBuffer(
@@ -1325,21 +1325,21 @@ unsafe fn StartReadBuffer(
     _blocknum: BlockNumber,
     _flags: c_int,
 ) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
+    crate::storage::buffer::bufmgr::StartReadBuffer(_operation, _buffer, _blocknum, _flags)
 }
 
 unsafe fn WaitReadBuffers(_operation: *mut ReadBuffersOperation) {
-    unimplemented!() // TODO: storage/bufmgr.h
+    crate::storage::buffer::bufmgr::WaitReadBuffers(_operation)
 }
 
 unsafe fn ReleaseBuffer(_buffer: Buffer) {
-    unimplemented!() // TODO: storage/bufmgr.h
+    crate::storage::buffer::bufmgr::ReleaseBuffer(_buffer)
 }
 
 unsafe fn pgaio_enter_batchmode() {
-    unimplemented!() // TODO: storage/aio.h
+    crate::storage::aio::aio::pgaio_enter_batchmode()
 }
 
 unsafe fn pgaio_exit_batchmode() {
-    unimplemented!() // TODO: storage/aio.h
+    crate::storage::aio::aio::pgaio_exit_batchmode()
 }

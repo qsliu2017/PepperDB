@@ -105,3 +105,4 @@ pub unsafe fn plan_set_operations(root: *mut PlannerInfo) -> *mut RelOptInfo {
 pub mod prepagg;
 pub mod prepjointree;
 pub mod prepunion;
+pub mod preptlist;

@@ -57,54 +57,13 @@ use core::mem::{offset_of, size_of};
 // "utils/tuplesort.h" / tuplesort.c -- the generalized sort facility.
 // TODO(pg-port): replace these stubs with imports from tuplesort.rs once ported.
 
-/// Opaque tuplesort state.  Real definition lives in tuplesort.c.
-pub enum Tuplesortstate {}
-
-/// `SortTuple` from tuplesort.c -- one entry being sorted.
-#[repr(C)]
-pub struct SortTuple {
-    pub tuple: *mut c_void, // the tuple proper
-    pub datum1: Datum,      // value of first key column
-    pub isnull1: bool,      // is first key column NULL?
-    pub srctape: c_int,     // source tape number
-}
+pub use crate::utils::sort::tuplesort::{Tuplesortstate, SortTuple, SortTupleComparator};
 
 /// `SortCoordinate` (tuplesort.h) -- parallel sort coordination handle.
 pub type SortCoordinate = *mut c_void;
 
-/// `TuplesortMethods` callbacks live in TuplesortPublic.
-pub type SortTupleComparator =
-    Option<unsafe fn(a: *const SortTuple, b: *const SortTuple, state: *mut Tuplesortstate) -> c_int>;
-
-/// `TuplesortPublic` (tuplesort.h) -- the public part of Tuplesortstate.
-#[repr(C)]
-pub struct TuplesortPublic {
-    pub nKeys: c_int,
-    pub sortopt: c_int,
-    pub tuples: bool,
-    pub haveDatum1: bool,
-    pub maincontext: MemoryContext,
-    pub sortcontext: MemoryContext,
-    pub tuplecontext: MemoryContext,
-    pub removeabbrev:
-        Option<unsafe fn(state: *mut Tuplesortstate, stups: *mut SortTuple, count: c_int)>,
-    pub comparetup: SortTupleComparator,
-    pub comparetup_tiebreak: SortTupleComparator,
-    pub writetup:
-        Option<unsafe fn(state: *mut Tuplesortstate, tape: *mut LogicalTape, stup: *mut SortTuple)>,
-    pub readtup: Option<
-        unsafe fn(
-            state: *mut Tuplesortstate,
-            stup: *mut SortTuple,
-            tape: *mut LogicalTape,
-            len: c_uint,
-        ),
-    >,
-    pub freestate: Option<unsafe fn(state: *mut Tuplesortstate)>,
-    pub arg: *mut c_void,
-    pub sortKeys: SortSupport,
-    pub onlyKey: SortSupport,
-}
+/// `TuplesortPublic` (tuplesort.h) -- canonical layout lives in tuplesort.rs.
+pub use crate::utils::sort::tuplesort::TuplesortPublic;
 
 /// TUPLESORT_RANDOMACCESS option flag (tuplesort.h).
 pub const TUPLESORT_RANDOMACCESS: c_int = 1 << 0;
@@ -113,7 +72,7 @@ pub const TUPLESORT_RANDOMACCESS: c_int = 1 << 0;
 // TODO(pg-port): real macro reaches the embedded TuplesortPublic in tuplesort.c.
 #[allow(unused_variables)]
 pub unsafe fn TuplesortstateGetPublic(state: *mut Tuplesortstate) -> *mut TuplesortPublic {
-    unimplemented!("TuplesortstateGetPublic: tuplesort.c not yet ported")
+    crate::utils::sort::tuplesort::TuplesortstateGetPublic(state as _) as _
 }
 
 /// `tuplesort_begin_common` (tuplesort.c). STUB.
@@ -123,7 +82,7 @@ pub unsafe fn tuplesort_begin_common(
     coordinate: SortCoordinate,
     sortopt: c_int,
 ) -> *mut Tuplesortstate {
-    unimplemented!("tuplesort_begin_common: tuplesort.c not yet ported")
+    crate::utils::sort::tuplesort::tuplesort_begin_common(workMem, coordinate as _, sortopt) as _
 }
 
 /// `tuplesort_puttuple_common` (tuplesort.c). STUB.
@@ -134,7 +93,7 @@ pub unsafe fn tuplesort_puttuple_common(
     useAbbrev: bool,
     tuplen: Size,
 ) {
-    unimplemented!("tuplesort_puttuple_common: tuplesort.c not yet ported")
+    crate::utils::sort::tuplesort::tuplesort_puttuple_common(state as _, tuple as _, useAbbrev, tuplen)
 }
 
 /// `tuplesort_gettuple_common` (tuplesort.c). STUB.
@@ -144,25 +103,31 @@ pub unsafe fn tuplesort_gettuple_common(
     forward: bool,
     stup: *mut SortTuple,
 ) -> bool {
-    unimplemented!("tuplesort_gettuple_common: tuplesort.c not yet ported")
+    crate::utils::sort::tuplesort::tuplesort_gettuple_common(state as _, forward, stup as _)
 }
 
 /// `tuplesort_readtup_alloc` (tuplesort.c). STUB.
 #[allow(unused_variables)]
 pub unsafe fn tuplesort_readtup_alloc(state: *mut Tuplesortstate, tuplen: Size) -> *mut c_void {
-    unimplemented!("tuplesort_readtup_alloc: tuplesort.c not yet ported")
+    crate::utils::sort::tuplesort::tuplesort_readtup_alloc(state as _, tuplen) as _
 }
 
 /// `TupleSortUseBumpTupleCxt` (tuplesort.h). STUB.
 #[allow(unused_variables)]
 pub fn TupleSortUseBumpTupleCxt(opt: c_int) -> bool {
-    unimplemented!("TupleSortUseBumpTupleCxt: tuplesort.c not yet ported")
+    crate::utils::sort::tuplesort::TupleSortUseBumpTupleCxt(opt)
 }
 
-/// `PARALLEL_SORT` (tuplesort.c). STUB.
-#[allow(unused_variables)]
+/// `PARALLEL_SORT` (tuplesort.c): 0 = serial, 1 = parallel leader, 2 = parallel worker.
 pub unsafe fn PARALLEL_SORT(coordinate: SortCoordinate) -> c_int {
-    unimplemented!("PARALLEL_SORT: tuplesort.c not yet ported")
+    let c = coordinate as *mut crate::utils::sort::tuplesort::SortCoordinateData;
+    if c.is_null() || (*c).sharedsort.is_null() {
+        0
+    } else if (*c).isWorker {
+        2
+    } else {
+        1
+    }
 }
 
 // "access/brin_tuple.h"
@@ -188,21 +153,8 @@ unsafe fn _hash_hashkey2bucket(
 // "access/nbtree.h" -- insertion scankey construction.
 // TODO(pg-port): import from crate::access::nbtree once nbtutils is wired here.
 
-/// `ScanKeyData` (access/skey.h) -- only the fields used here.
-#[repr(C)]
-pub struct ScanKeyData {
-    pub sk_flags: c_int,
-    pub sk_attno: AttrNumber,
-    pub sk_collation: Oid,
-}
-
-/// `BTScanInsertData` (access/nbtree.h) -- only scankeys[] flexible array used.
-#[repr(C)]
-pub struct BTScanInsertData {
-    pub scankeys: [ScanKeyData; 0],
-}
-
-pub type BTScanInsert = *mut BTScanInsertData;
+pub use crate::access::common::scankey::ScanKeyData;
+pub use crate::access::nbtree::nbtutils::{BTScanInsertData, BTScanInsert};
 
 pub const SK_BT_DESC: c_int = 0x00010000; // access/nbtree.h
 pub const SK_BT_NULLS_FIRST: c_int = 0x00020000; // access/nbtree.h
@@ -210,7 +162,7 @@ pub const BTREE_AM_OID: Oid = 403; // catalog/pg_am.dat
 
 #[allow(unused_variables)]
 unsafe fn _bt_mkscankey(rel: Relation, itup: IndexTuple) -> BTScanInsert {
-    unimplemented!("_bt_mkscankey: access/nbtree not yet wired")
+    crate::access::nbtree::nbtutils::_bt_mkscankey(rel as _, itup as _) as _
 }
 
 // "catalog/index.h"
@@ -282,9 +234,7 @@ use crate::access::common::heaptuple::{heap_copy_minimal_tuple, heap_copytuple};
 /// `errtableconstraint` (utils/elog.h family). STUB -- returns a no-op tag.
 // TODO(pg-port): port the error-context table-constraint helper.
 #[allow(unused_variables)]
-unsafe fn errtableconstraint(rel: Relation, conname: *const c_char) -> c_int {
-    0
-}
+unsafe fn errtableconstraint(rel: Relation, conname: *const c_char) -> c_int { crate::utils::cache::relcache::errtableconstraint(rel, conname) }
 
 /// GUC `trace_sort` (utils/misc/guc_tables.c). Lives on the tuplesort facility.
 use crate::utils::sort::tuplesort::trace_sort;
@@ -402,8 +352,8 @@ pub unsafe fn tuplesort_begin_heap(
     let _ = (HEAP_SORT, PARALLEL_SORT(coordinate));
 
     (*base).removeabbrev = Some(removeabbrev_heap);
-    (*base).comparetup = Some(comparetup_heap);
-    (*base).comparetup_tiebreak = Some(comparetup_heap_tiebreak);
+    (*base).comparetup = comparetup_heap;
+    (*base).comparetup_tiebreak = comparetup_heap_tiebreak;
     (*base).writetup = Some(writetup_heap);
     (*base).readtup = Some(readtup_heap);
     (*base).haveDatum1 = true;
@@ -484,8 +434,8 @@ pub unsafe fn tuplesort_begin_cluster(
     let _ = (CLUSTER_SORT, PARALLEL_SORT(coordinate));
 
     (*base).removeabbrev = Some(removeabbrev_cluster);
-    (*base).comparetup = Some(comparetup_cluster);
-    (*base).comparetup_tiebreak = Some(comparetup_cluster_tiebreak);
+    (*base).comparetup = comparetup_cluster;
+    (*base).comparetup_tiebreak = comparetup_cluster_tiebreak;
     (*base).writetup = Some(writetup_cluster);
     (*base).readtup = Some(readtup_cluster);
     (*base).freestate = Some(freestate_cluster);
@@ -594,8 +544,8 @@ pub unsafe fn tuplesort_begin_index_btree(
     let _ = (INDEX_SORT, PARALLEL_SORT(coordinate));
 
     (*base).removeabbrev = Some(removeabbrev_index);
-    (*base).comparetup = Some(comparetup_index_btree);
-    (*base).comparetup_tiebreak = Some(comparetup_index_btree_tiebreak);
+    (*base).comparetup = comparetup_index_btree;
+    (*base).comparetup_tiebreak = comparetup_index_btree_tiebreak;
     (*base).writetup = Some(writetup_index);
     (*base).readtup = Some(readtup_index);
     (*base).haveDatum1 = true;
@@ -675,8 +625,8 @@ pub unsafe fn tuplesort_begin_index_hash(
     (*base).nKeys = 1; // Only one sort column, the hash code
 
     (*base).removeabbrev = Some(removeabbrev_index);
-    (*base).comparetup = Some(comparetup_index_hash);
-    (*base).comparetup_tiebreak = Some(comparetup_index_hash_tiebreak);
+    (*base).comparetup = comparetup_index_hash;
+    (*base).comparetup_tiebreak = comparetup_index_hash_tiebreak;
     (*base).writetup = Some(writetup_index);
     (*base).readtup = Some(readtup_index);
     (*base).haveDatum1 = true;
@@ -722,8 +672,8 @@ pub unsafe fn tuplesort_begin_index_gist(
     (*base).nKeys = IndexRelationGetNumberOfKeyAttributes(indexRel);
 
     (*base).removeabbrev = Some(removeabbrev_index);
-    (*base).comparetup = Some(comparetup_index_btree);
-    (*base).comparetup_tiebreak = Some(comparetup_index_btree_tiebreak);
+    (*base).comparetup = comparetup_index_btree;
+    (*base).comparetup_tiebreak = comparetup_index_btree_tiebreak;
     (*base).writetup = Some(writetup_index);
     (*base).readtup = Some(readtup_index);
     (*base).haveDatum1 = true;
@@ -782,7 +732,7 @@ pub unsafe fn tuplesort_begin_index_brin(
     (*base).nKeys = 1; // Only one sort column, the block number
 
     (*base).removeabbrev = Some(removeabbrev_index_brin);
-    (*base).comparetup = Some(comparetup_index_brin);
+    (*base).comparetup = comparetup_index_brin;
     (*base).writetup = Some(writetup_index_brin);
     (*base).readtup = Some(readtup_index_brin);
     (*base).haveDatum1 = true;
@@ -877,7 +827,7 @@ pub unsafe fn tuplesort_begin_index_gin(
     }
 
     (*base).removeabbrev = Some(removeabbrev_index_gin);
-    (*base).comparetup = Some(comparetup_index_gin);
+    (*base).comparetup = comparetup_index_gin;
     (*base).writetup = Some(writetup_index_gin);
     (*base).readtup = Some(readtup_index_gin);
     (*base).haveDatum1 = false;
@@ -924,8 +874,8 @@ pub unsafe fn tuplesort_begin_datum(
     let _ = (DATUM_SORT, PARALLEL_SORT(coordinate));
 
     (*base).removeabbrev = Some(removeabbrev_datum);
-    (*base).comparetup = Some(comparetup_datum);
-    (*base).comparetup_tiebreak = Some(comparetup_datum_tiebreak);
+    (*base).comparetup = comparetup_datum;
+    (*base).comparetup_tiebreak = comparetup_datum_tiebreak;
     (*base).writetup = Some(writetup_datum);
     (*base).readtup = Some(readtup_datum);
     (*base).haveDatum1 = true;

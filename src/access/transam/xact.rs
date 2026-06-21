@@ -585,7 +585,7 @@ unsafe fn AssignTransactionId(s: TransactionState) {
 
 /* placeholder for external calls - real stubs below */
 unsafe fn GetNewTransactionId(_is_sub_xact: bool) -> FullTransactionId {
-    /* TODO(pg-port) */ FullTransactionId { value: 0 }
+    core::mem::transmute(crate::access::transam::varsup::GetNewTransactionId(_is_sub_xact))
 }
 unsafe fn SubTransSetParent(_xid: TransactionId, _parent: TransactionId) { /* TODO(pg-port) */ }
 unsafe fn RegisterPredicateLockingXid(_xid: TransactionId) { /* TODO(pg-port) */ }
@@ -609,19 +609,19 @@ unsafe fn ParallelContextActive() -> bool { /* TODO(pg-port) */ false }
 unsafe fn RecoveryInProgress() -> bool { /* TODO(pg-port) */ false }
 unsafe fn AcceptInvalidationMessages() { /* TODO(pg-port) */ }
 unsafe fn AtCCI_RelationMap() { /* TODO(pg-port) */ }
-unsafe fn CommandEndInvalidationMessages() { /* TODO(pg-port) */ }
-unsafe fn SnapshotSetCommandId(_cid: CommandId) { /* TODO(pg-port) */ }
+unsafe fn CommandEndInvalidationMessages() { crate::utils::cache::inval::CommandEndInvalidationMessages() }
+unsafe fn SnapshotSetCommandId(_cid: CommandId) { crate::utils::time::snapmgr::SnapshotSetCommandId(_cid as _) }
 unsafe fn AtStart_GUC() { /* TODO(pg-port) */ }
 unsafe fn AtEOXact_GUC(_is_commit: bool, _nestlevel: i32) { /* TODO(pg-port) */ }
 unsafe fn NewGUCNestLevel() -> i32 { /* TODO(pg-port) */ 0 }
-unsafe fn AtAbort_Portals() { /* TODO(pg-port) */ }
-unsafe fn AtCleanup_Portals() { /* TODO(pg-port) */ }
+unsafe fn AtAbort_Portals() { crate::utils::mmgr::portalmem::AtAbort_Portals() }
+unsafe fn AtCleanup_Portals() { crate::utils::mmgr::portalmem::AtCleanup_Portals() }
 unsafe fn AtSubAbort_Portals(_s: SubTransactionId, _p: SubTransactionId,
                               _o: ResourceOwner, _po: ResourceOwner) { /* TODO(pg-port) */ }
 unsafe fn AtSubCleanup_Portals(_s: SubTransactionId) { /* TODO(pg-port) */ }
 unsafe fn AtSubCommit_Portals(_s: SubTransactionId, _p: SubTransactionId,
                                _nl: i32, _owner: ResourceOwner) { /* TODO(pg-port) */ }
-unsafe fn PreCommit_Portals(_hold: bool) -> bool { /* TODO(pg-port) */ false }
+unsafe fn PreCommit_Portals(_hold: bool) -> bool { crate::utils::mmgr::portalmem::PreCommit_Portals(_hold) }
 unsafe fn AfterTriggerBeginXact() { /* TODO(pg-port) */ }
 unsafe fn AfterTriggerEndXact(_is_commit: bool) { /* TODO(pg-port) */ }
 unsafe fn AfterTriggerFireDeferred() { /* TODO(pg-port) */ }
@@ -696,17 +696,31 @@ unsafe fn MarkAsPreparing(_xid: TransactionId, _gid: *const std::os::raw::c_char
                            _ts: TimestampTz, _owner: Oid, _db: Oid) -> GlobalTransaction {
     /* TODO(pg-port) */ ptr::null_mut()
 }
-unsafe fn ProcArrayEndTransaction(_proc: *mut PGProcStub, _xid: TransactionId) { /* TODO(pg-port) */ }
-unsafe fn ProcArrayClearTransaction(_proc: *mut PGProcStub) { /* TODO(pg-port) */ }
+unsafe fn ProcArrayEndTransaction(proc_: *mut PGProcStub, xid: TransactionId) {
+    crate::storage::ipc::procarray::ProcArrayEndTransaction(proc_ as *mut _, xid)
+}
+unsafe fn ProcArrayClearTransaction(proc_: *mut PGProcStub) {
+    crate::storage::ipc::procarray::ProcArrayClearTransaction(proc_ as *mut _)
+}
 unsafe fn ProcArrayApplyXidAssignment(_xtop: TransactionId, _n: i32, _xids: *mut TransactionId) { /* TODO(pg-port) */ }
 unsafe fn ParallelWorkerReportLastRecEnd(_lsn: XLogRecPtr) { /* TODO(pg-port) */ }
 unsafe fn XidCacheRemoveRunningXids(_xid: TransactionId, _n: i32, _xids: *mut TransactionId, _max: TransactionId) { /* TODO(pg-port) */ }
-unsafe fn TransactionIdCommitTree(_xid: TransactionId, _n: i32, _xids: *mut TransactionId) { /* TODO(pg-port) */ }
-unsafe fn TransactionIdAsyncCommitTree(_xid: TransactionId, _n: i32, _xids: *mut TransactionId, _lsn: XLogRecPtr) { /* TODO(pg-port) */ }
-unsafe fn TransactionIdAbortTree(_xid: TransactionId, _n: i32, _xids: *mut TransactionId) { /* TODO(pg-port) */ }
-unsafe fn TransactionIdDidCommit(_xid: TransactionId) -> bool { /* TODO(pg-port) */ false }
-unsafe fn TransactionTreeSetCommitTsData(_xid: TransactionId, _n: i32, _xids: *mut TransactionId,
-                                         _ts: TimestampTz, _origin: RepOriginId) { /* TODO(pg-port) */ }
+unsafe fn TransactionIdCommitTree(xid: TransactionId, n: i32, xids: *mut TransactionId) {
+    crate::access::transam::transam::TransactionIdCommitTree(xid, n, xids)
+}
+unsafe fn TransactionIdAsyncCommitTree(xid: TransactionId, n: i32, xids: *mut TransactionId, lsn: XLogRecPtr) {
+    crate::access::transam::transam::TransactionIdAsyncCommitTree(xid, n, xids, lsn)
+}
+unsafe fn TransactionIdAbortTree(xid: TransactionId, n: i32, xids: *mut TransactionId) {
+    crate::access::transam::transam::TransactionIdAbortTree(xid, n, xids)
+}
+unsafe fn TransactionIdDidCommit(xid: TransactionId) -> bool {
+    crate::access::transam::transam::TransactionIdDidCommit(xid)
+}
+unsafe fn TransactionTreeSetCommitTsData(xid: TransactionId, n: i32, xids: *mut TransactionId,
+                                         ts: TimestampTz, origin: RepOriginId) {
+    crate::access::transam::commit_ts::TransactionTreeSetCommitTsData(xid, n, xids, ts, origin)
+}
 unsafe fn SyncRepWaitForLSN(_lsn: XLogRecPtr, _flag: bool) { /* TODO(pg-port) */ }
 unsafe fn LogStandbyInvalidations(_n: i32, _msgs: *mut SharedInvalidationMessage, _file: bool) { /* TODO(pg-port) */ }
 unsafe fn LogLogicalInvalidations() { /* TODO(pg-port) */ }
@@ -737,43 +751,56 @@ unsafe fn enable_timeout_after(_id: i32, _ms: i64) { /* TODO(pg-port) */ }
 unsafe fn disable_timeout(_id: i32, _flag: bool) { /* TODO(pg-port) */ }
 pub static mut TransactionTimeout: i64 = 0;
 unsafe fn ResourceOwnerCreate(_parent: ResourceOwner, _name: *const std::os::raw::c_char) -> ResourceOwner {
-    /* TODO(pg-port) */ ptr::null_mut()
+    crate::utils::resowner::resowner::ResourceOwnerCreate(_parent as _, _name) as _
 }
-unsafe fn ResourceOwnerRelease(_owner: ResourceOwner, _phase: i32, _is_commit: bool, _is_top: bool) { /* TODO(pg-port) */ }
-unsafe fn ResourceOwnerDelete(_owner: ResourceOwner) { /* TODO(pg-port) */ }
+unsafe fn ResourceOwnerRelease(owner: ResourceOwner, phase: i32, is_commit: bool, is_top: bool) {
+    crate::utils::resowner::resowner::ResourceOwnerRelease(owner as _, core::mem::transmute(phase), is_commit, is_top)
+}
+unsafe fn ResourceOwnerDelete(owner: ResourceOwner) {
+    crate::utils::resowner::resowner::ResourceOwnerDelete(owner as _)
+}
 unsafe fn GetUserIdAndSecContext(uid: *mut Oid, ctx: *mut i32) {
     /* TODO(pg-port) */
     if !uid.is_null() { unsafe { *uid = 0; } }
     if !ctx.is_null() { unsafe { *ctx = 0; } }
 }
 unsafe fn SetUserIdAndSecContext(_uid: Oid, _ctx: i32) { /* TODO(pg-port) */ }
-unsafe fn GetUserId() -> Oid { /* TODO(pg-port) */ 0 }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn GetCurrentTimestamp() -> TimestampTz { /* TODO(pg-port) */ 0 }
 unsafe fn ReadNextTransactionId() -> TransactionId { /* TODO(pg-port) */ 0 }
-unsafe fn AllocSetContextCreate(_parent: MemoryContext, _name: *const std::os::raw::c_char,
-                                 _init: usize, _min: usize, _max: usize) -> MemoryContext {
-    /* TODO(pg-port) */ ptr::null_mut()
+unsafe fn AllocSetContextCreate(parent: MemoryContext, name: *const std::os::raw::c_char,
+                                 min: usize, init: usize, max: usize) -> MemoryContext {
+    crate::utils::mmgr::aset::AllocSetContextCreateInternal(parent as _, name, min, init, max) as _
 }
-unsafe fn MemoryContextReset(_ctx: MemoryContext) { /* TODO(pg-port) */ }
-unsafe fn MemoryContextDelete(_ctx: MemoryContext) { /* TODO(pg-port) */ }
-unsafe fn MemoryContextIsEmpty(_ctx: MemoryContext) -> bool { /* TODO(pg-port) */ true }
-unsafe fn MemoryContextAlloc(_ctx: MemoryContext, _size: usize) -> *mut std::ffi::c_void {
-    /* TODO(pg-port) */ ptr::null_mut()
+unsafe fn MemoryContextReset(ctx: MemoryContext) {
+    crate::utils::mmgr::mcxt::MemoryContextReset(ctx as _)
 }
-unsafe fn MemoryContextAllocZero(_ctx: MemoryContext, _size: usize) -> *mut std::ffi::c_void {
-    /* TODO(pg-port) */ ptr::null_mut()
+unsafe fn MemoryContextDelete(ctx: MemoryContext) {
+    crate::utils::mmgr::mcxt::MemoryContextDelete(ctx as _)
 }
-unsafe fn MemoryContextStrdup(_ctx: MemoryContext, _s: *const std::os::raw::c_char) -> *mut std::os::raw::c_char {
-    /* TODO(pg-port) */ ptr::null_mut()
+unsafe fn MemoryContextIsEmpty(ctx: MemoryContext) -> bool {
+    crate::utils::mmgr::mcxt::MemoryContextIsEmpty(ctx as _)
 }
-unsafe fn MemoryContextSwitchTo(_ctx: MemoryContext) -> MemoryContext { /* TODO(pg-port) */ ptr::null_mut() }
-pub static mut CurrentMemoryContext: MemoryContext = ptr::null_mut();
-pub static mut TopMemoryContext: MemoryContext = ptr::null_mut();
-pub static mut TopTransactionContext: MemoryContext = ptr::null_mut();
+unsafe fn MemoryContextAlloc(ctx: MemoryContext, size: usize) -> *mut std::ffi::c_void {
+    crate::utils::mmgr::mcxt::MemoryContextAlloc(ctx as _, size)
+}
+unsafe fn MemoryContextAllocZero(ctx: MemoryContext, size: usize) -> *mut std::ffi::c_void {
+    crate::utils::mmgr::mcxt::MemoryContextAllocZero(ctx as _, size)
+}
+unsafe fn MemoryContextStrdup(ctx: MemoryContext, s: *const std::os::raw::c_char) -> *mut std::os::raw::c_char {
+    crate::utils::mmgr::mcxt::MemoryContextStrdup(ctx as _, s)
+}
+unsafe fn MemoryContextSwitchTo(ctx: MemoryContext) -> MemoryContext {
+    crate::utils::mmgr::mcxt::MemoryContextSwitchTo(ctx as _) as _
+}
+pub use crate::utils::mmgr::mcxt::CurrentMemoryContext;
+pub use crate::utils::mmgr::mcxt::TopMemoryContext;
+pub use crate::utils::mmgr::mcxt::TopTransactionContext;
 pub static mut CurTransactionContext: MemoryContext = ptr::null_mut();
+#[no_mangle]
 pub static mut TopTransactionResourceOwner: ResourceOwner = ptr::null_mut();
 pub static mut CurTransactionResourceOwner: ResourceOwner = ptr::null_mut();
-pub static mut CurrentResourceOwner: ResourceOwner = ptr::null_mut();
+extern "C" { pub static mut CurrentResourceOwner: ResourceOwner; }
 pub static mut MyDatabaseId: Oid = 0;
 pub static mut MyDatabaseTableSpace: Oid = 0;
 pub static mut CritSectionCount: i32 = 0;
@@ -793,9 +820,8 @@ pub struct VxidData {
     pub procNumber: ProcNumber,
     pub lxid: LocalTransactionId,
 }
-pub static mut MyProc: *mut PGProcStub = ptr::null_mut();
-pub static mut MyProcNumber: ProcNumber = 0;
-
+extern "C" { pub static mut MyProc: *mut PGProcStub; }
+extern "C" { pub static mut MyProcNumber: ProcNumber; }
 unsafe fn GetNextLocalTransactionId() -> LocalTransactionId { /* TODO(pg-port) */ 0 }
 unsafe fn VirtualXactLockTableInsert(_vxid: VirtualTransactionId) { /* TODO(pg-port) */ }
 unsafe fn TRACE_POSTGRESQL_TRANSACTION_START(_lxid: LocalTransactionId) { /* TODO(pg-port) */ }
@@ -850,7 +876,7 @@ unsafe fn PrepareRedoAdd(_data: *mut std::ffi::c_void, _start: XLogRecPtr, _end:
 unsafe fn PrepareRedoRemove(_xid: TransactionId, _sent_to_standby: bool) { /* TODO(pg-port) */ }
 unsafe fn AbortOutOfAnyTransaction_portals_cleanup() { /* TODO(pg-port) */ }
 /* TODO(pg-port): TwoPhaseStateLock */
-pub static mut TwoPhaseStateLock: *mut std::ffi::c_void = ptr::null_mut();
+use crate::backend_link_shims::TwoPhaseStateLock;
 pub const LW_EXCLUSIVE: i32 = 1;
 unsafe fn AtAbort_Twophase() { /* TODO(pg-port) */ }
 unsafe fn pg_prng_double(_state: *mut std::ffi::c_void) -> f64 { /* TODO(pg-port) */ 0.0 }
@@ -1297,6 +1323,7 @@ pub unsafe fn SubTransactionIsActive(subxid: SubTransactionId) -> bool {
  * "used" must be true if the caller intends to use the command ID to mark
  * inserted/updated/deleted tuples.
  */
+#[no_mangle]
 pub unsafe fn GetCurrentCommandId(used: bool) -> CommandId {
     /* this is global to a transaction, not subtransaction-local */
     if used {
@@ -1363,6 +1390,7 @@ pub unsafe fn GetCurrentTransactionStopTimestamp() -> TimestampTz {
 /*
  *    SetCurrentStatementStartTimestamp
  */
+#[no_mangle]
 pub unsafe fn SetCurrentStatementStartTimestamp() {
     if !IsParallelWorker() {
         stmtStartTimestamp = GetCurrentTimestamp();
@@ -1543,6 +1571,13 @@ pub unsafe fn CommandCounterIncrement() {
          * in the local syscache.
          */
         AtCCI_LocalCache();
+
+        /*
+         * Drop the cached catalog snapshot so the next catalog access re-reads
+         * it with the new command id, making this command's own catalog changes
+         * (e.g. a just-inserted pg_index row) visible within the same xact.
+         */
+        crate::utils::time::snapmgr::InvalidateCatalogSnapshot();
     }
 }
 
@@ -1575,7 +1610,7 @@ unsafe fn AtStart_Memory() {
     /*
      * Remember the memory context that was active prior to transaction start.
      */
-    (*s).priorContext = CurrentMemoryContext;
+    (*s).priorContext = CurrentMemoryContext as _;
 
     /*
      * If this is the first time through, create a private context for
@@ -1583,7 +1618,7 @@ unsafe fn AtStart_Memory() {
      */
     if TransactionAbortContext.is_null() {
         TransactionAbortContext =
-            AllocSetContextCreate(TopMemoryContext,
+            AllocSetContextCreate(TopMemoryContext as _,
                                   b"TransactionAbortContext\0".as_ptr() as *const _,
                                   32 * 1024, 32 * 1024, 32 * 1024);
     }
@@ -1594,16 +1629,16 @@ unsafe fn AtStart_Memory() {
      */
     if TopTransactionContext.is_null() {
         TopTransactionContext =
-            AllocSetContextCreateWrapper(TopMemoryContext,
+            AllocSetContextCreateWrapper(TopMemoryContext as _,
                                          b"TopTransactionContext\0".as_ptr() as *const _,
-                                         ALLOCSET_DEFAULT_SIZES);
+                                         ALLOCSET_DEFAULT_SIZES) as _;
     }
 
     /*
      * In a top-level transaction, CurTransactionContext is the same as
      * TopTransactionContext.
      */
-    CurTransactionContext = TopTransactionContext;
+    CurTransactionContext = TopTransactionContext as _;
     (*s).curTransactionContext = CurTransactionContext;
 
     /* Make the CurTransactionContext active. */
@@ -1647,7 +1682,7 @@ unsafe fn AtSubStart_Memory() {
     /*
      * Remember the context that was active prior to subtransaction start.
      */
-    (*s).priorContext = CurrentMemoryContext;
+    (*s).priorContext = CurrentMemoryContext as _;
 
     /*
      * Create a CurTransactionContext, which will be used to hold data that
@@ -1901,7 +1936,7 @@ unsafe fn AtCommit_Memory() {
      * Release all transaction-local memory.
      */
     Assert!(!TopTransactionContext.is_null());
-    MemoryContextReset(TopTransactionContext);
+    MemoryContextReset(TopTransactionContext as _);
 
     /*
      * Clear these pointers as a pro-forma matter.
@@ -1978,7 +2013,7 @@ unsafe fn AtSubCommit_childXids() {
          */
         if (*(*s).parent).childXids.is_null() {
             new_child_xids = MemoryContextAlloc(
-                TopTransactionContext,
+                TopTransactionContext as _,
                 new_max_child_xids as usize * core::mem::size_of::<TransactionId>())
                 as *mut TransactionId;
         } else {
@@ -2148,7 +2183,7 @@ unsafe fn AtAbort_Memory() {
     if !TransactionAbortContext.is_null() {
         MemoryContextSwitchTo(TransactionAbortContext);
     } else {
-        MemoryContextSwitchTo(TopMemoryContext);
+        MemoryContextSwitchTo(TopMemoryContext as _);
     }
 }
 
@@ -2237,7 +2272,7 @@ unsafe fn AtCleanup_Memory() {
      * creating TopTransactionContext.
      */
     if !TopTransactionContext.is_null() {
-        MemoryContextReset(TopTransactionContext);
+        MemoryContextReset(TopTransactionContext as _);
     }
 
     /*
@@ -3115,6 +3150,7 @@ unsafe fn CleanupTransaction() {
 /*
  *    StartTransactionCommand
  */
+#[no_mangle]
 pub unsafe fn StartTransactionCommand() {
     let s: TransactionState = CurrentTransactionState;
 
@@ -3190,6 +3226,7 @@ pub unsafe fn RestoreTransactionCharacteristics(s: *const SavedTransactionCharac
 /*
  *    CommitTransactionCommand
  */
+#[no_mangle]
 pub unsafe fn CommitTransactionCommand() {
     /*
      * Repeatedly call CommitTransactionCommandInternal() until all the work
@@ -3580,6 +3617,7 @@ unsafe fn AbortCurrentTransactionInternal() -> bool {
 /*
  *    PreventInTransactionBlock
  */
+#[no_mangle]
 pub unsafe fn PreventInTransactionBlock(is_top_level: bool, stmt_type: *const std::os::raw::c_char) {
     /*
      * xact block already started?
@@ -3685,9 +3723,10 @@ pub unsafe fn IsInTransactionBlock(is_top_level: bool) -> bool {
  * Register or deregister callback functions for start- and end-of-xact
  * operations.
  */
+#[no_mangle]
 pub unsafe fn RegisterXactCallback(callback: XactCallback, arg: *mut std::ffi::c_void) {
     let item: *mut XactCallbackItem =
-        MemoryContextAlloc(TopMemoryContext,
+        MemoryContextAlloc(TopMemoryContext as _,
                            core::mem::size_of::<XactCallbackItem>())
         as *mut XactCallbackItem;
     (*item).callback = callback;
@@ -3733,9 +3772,10 @@ unsafe fn CallXactCallbacks(event: XactEvent) {
  *
  * Pretty much same as above, but for subtransaction events.
  */
+#[no_mangle]
 pub unsafe fn RegisterSubXactCallback(callback: SubXactCallback, arg: *mut std::ffi::c_void) {
     let item: *mut SubXactCallbackItem =
-        MemoryContextAlloc(TopMemoryContext,
+        MemoryContextAlloc(TopMemoryContext as _,
                            core::mem::size_of::<SubXactCallbackItem>())
         as *mut SubXactCallbackItem;
     (*item).callback = callback;
@@ -3785,6 +3825,7 @@ unsafe fn CallSubXactCallbacks(event: SubXactEvent,
  *    BeginTransactionBlock
  *        This executes a BEGIN command.
  */
+#[no_mangle]
 pub unsafe fn BeginTransactionBlock() {
     let s: TransactionState = CurrentTransactionState;
 
@@ -3840,6 +3881,7 @@ pub unsafe fn BeginTransactionBlock() {
  *    PrepareTransactionBlock
  *        This executes a PREPARE command.
  */
+#[no_mangle]
 pub unsafe fn PrepareTransactionBlock(gid: *const std::os::raw::c_char) -> bool {
     let s: TransactionState;
     let mut result: bool;
@@ -3858,7 +3900,7 @@ pub unsafe fn PrepareTransactionBlock(gid: *const std::os::raw::c_char) -> bool 
 
         if (*sp).blockState == TBLOCK_END {
             /* Save GID where PrepareTransaction can find it again */
-            prepareGID = MemoryContextStrdup(TopTransactionContext, gid);
+            prepareGID = MemoryContextStrdup(TopTransactionContext as _, gid);
 
             (*sp).blockState = TBLOCK_PREPARE;
         } else {
@@ -3883,6 +3925,7 @@ pub unsafe fn PrepareTransactionBlock(gid: *const std::os::raw::c_char) -> bool 
  * Since COMMIT may actually do a ROLLBACK, the result indicates what
  * happened: true for COMMIT, false for ROLLBACK.
  */
+#[no_mangle]
 pub unsafe fn EndTransactionBlock(chain: bool) -> bool {
     let mut s: TransactionState = CurrentTransactionState;
     let mut result: bool = false;
@@ -4185,7 +4228,7 @@ pub unsafe fn DefineSavepoint(name: *const std::os::raw::c_char) {
              * in TopTransactionContext.
              */
             if !name.is_null() {
-                (*s).name = MemoryContextStrdup(TopTransactionContext, name);
+                (*s).name = MemoryContextStrdup(TopTransactionContext as _, name);
             }
         }
 
@@ -4458,6 +4501,7 @@ pub unsafe fn RollbackToSavepoint(name: *const std::os::raw::c_char) {
  *    This is the same as DefineSavepoint except it allows more states,
  *    and automatically does CommitTransactionCommand/StartTransactionCommand.
  */
+#[no_mangle]
 pub unsafe fn BeginInternalSubTransaction(name: *const std::os::raw::c_char) {
     let mut s: TransactionState = CurrentTransactionState;
     let save_ExitOnAnyError: bool = ExitOnAnyError;
@@ -4491,7 +4535,7 @@ pub unsafe fn BeginInternalSubTransaction(name: *const std::os::raw::c_char) {
              * in TopTransactionContext.
              */
             if !name.is_null() {
-                (*s).name = MemoryContextStrdup(TopTransactionContext, name);
+                (*s).name = MemoryContextStrdup(TopTransactionContext as _, name);
             }
         }
 
@@ -4526,6 +4570,7 @@ pub unsafe fn BeginInternalSubTransaction(name: *const std::os::raw::c_char) {
  * RELEASE (ie, commit) the innermost subtransaction, regardless of its
  * savepoint name (if any).
  */
+#[no_mangle]
 pub unsafe fn ReleaseCurrentSubTransaction() {
     let s: TransactionState = CurrentTransactionState;
 
@@ -4549,6 +4594,7 @@ pub unsafe fn ReleaseCurrentSubTransaction() {
  *
  * ROLLBACK and RELEASE (ie, abort) the innermost subtransaction.
  */
+#[no_mangle]
 pub unsafe fn RollbackAndReleaseCurrentSubTransaction() {
     let s: TransactionState = CurrentTransactionState;
 
@@ -4706,12 +4752,13 @@ pub unsafe fn AbortOutOfAnyTransaction() {
      * Revert to TopMemoryContext, to ensure we exit in a well-defined state
      * whether there were any transactions to close or not.
      */
-    MemoryContextSwitchTo(TopMemoryContext);
+    MemoryContextSwitchTo(TopMemoryContext as _);
 }
 
 /*
  * IsTransactionBlock --- are we within a transaction block?
  */
+#[no_mangle]
 pub unsafe fn IsTransactionBlock() -> bool {
     let s: TransactionState = CurrentTransactionState;
 
@@ -4727,6 +4774,7 @@ pub unsafe fn IsTransactionBlock() -> bool {
  * or a transaction block?  (The backend is only really "idle" when this
  * returns false.)
  */
+#[no_mangle]
 pub unsafe fn IsTransactionOrTransactionBlock() -> bool {
     let s: TransactionState = CurrentTransactionState;
 
@@ -5133,7 +5181,7 @@ unsafe fn PushTransaction() {
      * We keep subtransaction state nodes in TopTransactionContext.
      */
     let s: TransactionState =
-        MemoryContextAllocZero(TopTransactionContext,
+        MemoryContextAllocZero(TopTransactionContext as _,
                                core::mem::size_of::<TransactionStateData>())
         as TransactionState;
 

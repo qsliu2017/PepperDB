@@ -12,7 +12,6 @@
 use crate::prelude::*; // postgres.h: c types, Datum, palloc, elog!/ereport!/errmsg!/Assert!, Max/Min
 
 use std::ffi::c_int;
-use std::ffi::c_void;
 
 use crate::c::uint32;
 use crate::c::Size;
@@ -417,6 +416,16 @@ unsafe fn RelationAddBlocks(
          */
         extend_by_pages = Min(extend_by_pages, MAX_BUFFERS_TO_EXTEND_BY as uint32);
     }
+
+    /*
+     * bufmgr's ExtendBufferedRelBy only allocates/returns the first new buffer
+     * (the multi-buffer array contract is not ported), so the victim_buffers[]
+     * entries past index 0 stay uninitialized and would be released as buffer 0.
+     * Until that's restored, extend a single page at a time. Correct, just not
+     * the bulk-extension optimization.
+     * TODO(pg-port): fill buffers[] in ExtendBufferedRelBy, then remove this.
+     */
+    extend_by_pages = 1;
 
     /*
      * How many of the extended pages should be entered into the FSM?
@@ -1033,17 +1042,18 @@ const RBM_ZERO_AND_LOCK: ReadBufferMode = 1; // TODO(pg-port): real RBM_ZERO_AND
 const RBM_ZERO_AND_CLEANUP_LOCK: ReadBufferMode = 2; // TODO(pg-port): real RBM_ZERO_AND_CLEANUP_LOCK lives in storage/bufmgr.rs
 
 // storage/bufmgr.h - ExtendBufferedFlags
-const EB_LOCK_FIRST: uint32 = 1 << 4; // TODO(pg-port): real EB_LOCK_FIRST lives in storage/bufmgr.rs
+use crate::storage::buffer::bufmgr::EB_LOCK_FIRST;
 
 // common/relpath.h
 const MAIN_FORKNUM: c_int = 0; // TODO(pg-port): real MAIN_FORKNUM lives in common/relpath.rs
 
 // storage/buf.h
-type BufferAccessStrategy = *mut c_void; // TODO(pg-port): real BufferAccessStrategy lives in storage/buf.rs
+use crate::storage::buf::BufferAccessStrategy;
 
 // access/heapam.h - heap_insert options bitmask
 const HEAP_INSERT_SKIP_FSM: c_int = 0x0002; // TODO(pg-port): real HEAP_INSERT_SKIP_FSM lives in access/heapam.rs
 const HEAP_INSERT_FROZEN: c_int = 0x0004; // TODO(pg-port): real HEAP_INSERT_FROZEN lives in access/heapam.rs
+pub const HEAP_INSERT_SPECULATIVE: c_int = 0x0010; // access/heapam.h
 
 // utils/rel.h - fillfactor default for heaps
 const HEAP_DEFAULT_FILLFACTOR: c_int = 100; // TODO(pg-port): real HEAP_DEFAULT_FILLFACTOR lives in utils/rel.rs
@@ -1054,81 +1064,93 @@ fn unlikely(x: bool) -> bool {
     x // TODO(pg-port): real unlikely() lives in c.rs
 }
 
+// utils/rel.h RelationGetTargetBlock/SetTargetBlock cache the rd_smgr target block;
+// RelationData has no rd_targblock field yet, so these are benign no-ops:
+// the getter forces fresh placement (InvalidBlockNumber) and the setter discards.
 unsafe fn RelationGetTargetBlock(_relation: Relation) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real RelationGetTargetBlock lives in utils/rel.rs
+    InvalidBlockNumber
 }
-unsafe fn RelationSetTargetBlock(_relation: Relation, _targblock: BlockNumber) {
-    unimplemented!() // TODO(pg-port): real RelationSetTargetBlock lives in utils/rel.rs
-}
+unsafe fn RelationSetTargetBlock(_relation: Relation, _targblock: BlockNumber) {}
+// No fillfactor reserve yet; 0 is safe (just packs pages fuller).
 unsafe fn RelationGetTargetPageFreeSpace(_relation: Relation, _defaultff: c_int) -> Size {
-    unimplemented!() // TODO(pg-port): real RelationGetTargetPageFreeSpace lives in utils/rel.rs
+    0
 }
-unsafe fn RelationGetNumberOfBlocks(_relation: Relation) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real RelationGetNumberOfBlocks lives in utils/rel.rs (storage/bufmgr.h)
+unsafe fn RelationGetNumberOfBlocks(relation: Relation) -> BlockNumber {
+    crate::storage::buffer::bufmgr::RelationGetNumberOfBlocksInFork(relation, MAIN_FORKNUM as _)
 }
+// utils/rel.h RELATION_IS_LOCAL has no canonical fn yet; false is conservative
+// (it just takes the shared-relation extension-lock path).
 unsafe fn RELATION_IS_LOCAL(_relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real RELATION_IS_LOCAL lives in utils/rel.rs
+    false
 }
-unsafe fn RelationExtensionLockWaiterCount(_relation: Relation) -> uint32 {
-    unimplemented!() // TODO(pg-port): real RelationExtensionLockWaiterCount lives in storage/lmgr/lmgr.c
+unsafe fn RelationExtensionLockWaiterCount(relation: Relation) -> uint32 {
+    crate::storage::lmgr::lmgr::RelationExtensionLockWaiterCount(relation) as uint32
 }
 
-unsafe fn ReadBuffer(_reln: Relation, _blockNum: BlockNumber) -> Buffer {
-    unimplemented!() // TODO(pg-port): real ReadBuffer lives in storage/buffer/bufmgr.c
+unsafe fn ReadBuffer(reln: Relation, blockNum: BlockNumber) -> Buffer {
+    crate::storage::buffer::bufmgr::ReadBuffer(reln, blockNum)
 }
 unsafe fn ReadBufferExtended(
-    _reln: Relation,
-    _forkNum: c_int,
-    _blockNum: BlockNumber,
-    _mode: ReadBufferMode,
-    _strategy: BufferAccessStrategy,
+    reln: Relation,
+    forkNum: c_int,
+    blockNum: BlockNumber,
+    mode: ReadBufferMode,
+    strategy: BufferAccessStrategy,
 ) -> Buffer {
-    unimplemented!() // TODO(pg-port): real ReadBufferExtended lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::ReadBufferExtended(reln, forkNum as _, blockNum, mode, strategy as _)
 }
-unsafe fn ReleaseBuffer(_buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): real ReleaseBuffer lives in storage/buffer/bufmgr.c
+unsafe fn ReleaseBuffer(buffer: Buffer) {
+    crate::storage::buffer::bufmgr::ReleaseBuffer(buffer)
 }
-unsafe fn UnlockReleaseBuffer(_buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): real UnlockReleaseBuffer lives in storage/buffer/bufmgr.c
+unsafe fn UnlockReleaseBuffer(buffer: Buffer) {
+    crate::storage::buffer::bufmgr::UnlockReleaseBuffer(buffer)
 }
-unsafe fn IncrBufferRefCount(_buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): real IncrBufferRefCount lives in storage/buffer/bufmgr.c
+unsafe fn IncrBufferRefCount(buffer: Buffer) {
+    crate::storage::buffer::bufmgr::IncrBufferRefCount(buffer)
 }
-unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
-    unimplemented!() // TODO(pg-port): real LockBuffer lives in storage/buffer/bufmgr.c
+unsafe fn LockBuffer(buffer: Buffer, mode: c_int) {
+    crate::storage::buffer::bufmgr::LockBuffer(buffer, mode)
 }
-unsafe fn ConditionalLockBuffer(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): real ConditionalLockBuffer lives in storage/buffer/bufmgr.c
+unsafe fn ConditionalLockBuffer(buffer: Buffer) -> bool {
+    crate::storage::buffer::bufmgr::ConditionalLockBuffer(buffer)
 }
-unsafe fn MarkBufferDirty(_buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): real MarkBufferDirty lives in storage/buffer/bufmgr.c
+unsafe fn MarkBufferDirty(buffer: Buffer) {
+    crate::storage::buffer::bufmgr::MarkBufferDirty(buffer)
 }
-unsafe fn BufferIsValid(_bufnum: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): real BufferIsValid lives in storage/bufmgr.h
+unsafe fn BufferIsValid(bufnum: Buffer) -> bool {
+    !crate::storage::buf::BufferIsInvalid(bufnum)
 }
-unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real BufferGetBlockNumber lives in storage/buffer/bufmgr.c
+unsafe fn BufferGetBlockNumber(buffer: Buffer) -> BlockNumber {
+    crate::storage::buffer::bufmgr::BufferGetBlockNumber(buffer)
 }
-unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
-    unimplemented!() // TODO(pg-port): real BufferGetPage lives in storage/bufmgr.h
+unsafe fn BufferGetPage(buffer: Buffer) -> Page {
+    crate::storage::buffer::bufmgr::BufferGetPage(buffer)
 }
+// storage/bufmgr.h: BufferGetPageSize is always (Size) BLCKSZ.
 unsafe fn BufferGetPageSize(_buffer: Buffer) -> Size {
-    unimplemented!() // TODO(pg-port): real BufferGetPageSize lives in storage/bufmgr.h
+    crate::pg_config::BLCKSZ as Size
 }
 unsafe fn ExtendBufferedRelBy(
-    _bmr: BufferManagerRelation,
-    _fork: c_int,
-    _strategy: BufferAccessStrategy,
-    _flags: uint32,
-    _extend_by: uint32,
-    _buffers: *mut Buffer,
-    _extended_by: *mut uint32,
+    bmr: BufferManagerRelation,
+    fork: c_int,
+    strategy: BufferAccessStrategy,
+    flags: uint32,
+    extend_by: uint32,
+    buffers: *mut Buffer,
+    extended_by: *mut uint32,
 ) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real ExtendBufferedRelBy lives in storage/buffer/bufmgr.c
+    // bufmgr's ExtendBufferedRelBy returns the Buffer and writes the first block
+    // number to its out-param; translate to C semantics (return block, fill buffers[]).
+    let mut first_block: BlockNumber = 0;
+    let buf = crate::storage::buffer::bufmgr::ExtendBufferedRelBy(
+        bmr, fork as _, strategy as _, flags, extend_by, &mut first_block, extended_by as _,
+    );
+    *buffers = buf;
+    first_block
 }
-unsafe fn BMR_REL(_p_rel: Relation) -> BufferManagerRelation {
-    unimplemented!() // TODO(pg-port): real BMR_REL macro lives in storage/bufmgr.h
+unsafe fn BMR_REL(p_rel: Relation) -> BufferManagerRelation {
+    crate::storage::buffer::bufmgr::BMR_REL(p_rel)
 }
 
 // storage/bufmgr.h
-type BufferManagerRelation = *mut c_void; // TODO(pg-port): real BufferManagerRelation lives in storage/bufmgr.rs
+use crate::storage::buffer::bufmgr::BufferManagerRelation;

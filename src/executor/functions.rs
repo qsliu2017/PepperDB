@@ -124,46 +124,57 @@ use crate::access::attnum::AttrNumber;
 use crate::pg_config_manual::FUNC_MAX_ARGS;
 
 // catalog/pg_proc.h attribute numbers (not yet pub in catalog::pg_proc).
-pub const Anum_pg_proc_proargmodes: AttrNumber = 20;
-pub const Anum_pg_proc_proargnames: AttrNumber = 22;
-pub const Anum_pg_proc_prosrc: AttrNumber = 29;
-pub const Anum_pg_proc_prosqlbody: AttrNumber = 35;
+pub const Anum_pg_proc_proargmodes: AttrNumber = 22;
+pub const Anum_pg_proc_proargnames: AttrNumber = 23;
+pub const Anum_pg_proc_prosrc: AttrNumber = 26;
+pub const Anum_pg_proc_prosqlbody: AttrNumber = 28;
 
 // utils/cache/lsyscache.h: get_func_input_arg_names / IsPolymorphicType,
 // and fmgr.h get_call_result_type -- not yet pub in their canonical homes.
 unsafe fn get_func_input_arg_names(
-    _proargnames: Datum,
-    _proargmodes: Datum,
-    _arg_names: *mut *mut *mut c_char,
+    proargnames: Datum,
+    proargmodes: Datum,
+    arg_names: *mut *mut *mut c_char,
 ) -> c_int {
-    todo!("TODO(pg-port): get_func_input_arg_names")
+    crate::utils::fmgr::funcapi::get_func_input_arg_names(proargnames, proargmodes, arg_names)
 }
-unsafe fn IsPolymorphicType(_typid: Oid) -> bool {
-    todo!("TODO(pg-port): IsPolymorphicType")
+unsafe fn IsPolymorphicType(typid: Oid) -> bool {
+    use crate::catalog::pg_type_d::*;
+    typid == ANYELEMENTOID
+        || typid == ANYARRAYOID
+        || typid == ANYNONARRAYOID
+        || typid == ANYENUMOID
+        || typid == ANYRANGEOID
+        || typid == ANYMULTIRANGEOID
+        || typid == ANYCOMPATIBLEOID
+        || typid == ANYCOMPATIBLEARRAYOID
+        || typid == ANYCOMPATIBLENONARRAYOID
+        || typid == ANYCOMPATIBLERANGEOID
+        || typid == ANYCOMPATIBLEMULTIRANGEOID
 }
 unsafe fn get_call_result_type(
     _fcinfo: FunctionCallInfo,
     _resultTypeId: *mut Oid,
     _resultTupleDesc: *mut TupleDesc,
 ) -> c_int {
-    todo!("TODO(pg-port): get_call_result_type")
+    crate::catalog::objectaddress_impl::get_call_result_type(_fcinfo as _, _resultTypeId as _, _resultTupleDesc as _) as _
 }
 
 // utils/time/snapmgr.h -- no snapmgr.rs yet; minimal local stubs.
 unsafe fn GetTransactionSnapshot() -> Snapshot {
-    todo!("TODO(pg-port): GetTransactionSnapshot")
+    crate::utils::time::snapmgr::GetTransactionSnapshot() as _
 }
 unsafe fn PushActiveSnapshot(_snapshot: Snapshot) {
-    todo!("TODO(pg-port): PushActiveSnapshot")
+    crate::utils::time::snapmgr::PushActiveSnapshot(_snapshot as _)
 }
 unsafe fn PopActiveSnapshot() {
-    todo!("TODO(pg-port): PopActiveSnapshot")
+    crate::utils::time::snapmgr::PopActiveSnapshot()
 }
 unsafe fn UpdateActiveSnapshotCommandId() {
-    todo!("TODO(pg-port): UpdateActiveSnapshotCommandId")
+    crate::utils::time::snapmgr::UpdateActiveSnapshotCommandId()
 }
 unsafe fn ActiveSnapshotSet() -> bool {
-    todo!("TODO(pg-port): ActiveSnapshotSet")
+    crate::utils::time::snapmgr::ActiveSnapshotSet() as _
 }
 
 // utils/expandeddatum.h MakeExpandedObjectReadOnly() macro.
@@ -197,14 +208,14 @@ pub unsafe fn CreateCachedPlan(
     _query_string: *const c_char,
     _commandTag: *mut c_void,
 ) -> *mut CachedPlanSource {
-    todo!("TODO(pg-port): CreateCachedPlan")
+    unimplemented!()
 }
 pub unsafe fn CreateCachedPlanForQuery(
     _parsetree: *mut Query,
     _query_string: *const c_char,
     _commandTag: *mut c_void,
 ) -> *mut CachedPlanSource {
-    todo!("TODO(pg-port): CreateCachedPlanForQuery")
+    unimplemented!()
 }
 pub unsafe fn CompleteCachedPlan(
     _plansource: *mut CachedPlanSource,
@@ -220,10 +231,10 @@ pub unsafe fn CompleteCachedPlan(
     todo!("TODO(pg-port): CompleteCachedPlan")
 }
 pub unsafe fn SaveCachedPlan(_plansource: *mut CachedPlanSource) {
-    todo!("TODO(pg-port): SaveCachedPlan")
+    crate::utils::cache::plancache::SaveCachedPlan(_plansource as _)
 }
 pub unsafe fn DropCachedPlan(_plansource: *mut CachedPlanSource) {
-    todo!("TODO(pg-port): DropCachedPlan")
+    crate::utils::cache::plancache::DropCachedPlan(_plansource as _)
 }
 pub unsafe fn SetPostRewriteHook(
     _plansource: *mut CachedPlanSource,
@@ -235,12 +246,12 @@ pub unsafe fn SetPostRewriteHook(
 
 // TODO(pg-port): utils/snapmgr.h
 pub unsafe fn GetActiveSnapshot() -> Snapshot {
-    todo!("TODO(pg-port): GetActiveSnapshot")
+    crate::utils::time::snapmgr::GetActiveSnapshot() as _
 }
 
 // TODO(pg-port): catalog/pg_proc.h GETSTRUCT
 pub unsafe fn GETSTRUCT(_tup: HeapTuple) -> *mut c_void {
-    todo!("TODO(pg-port): GETSTRUCT")
+    crate::access::htup_details::GETSTRUCT(_tup as _) as _
 }
 
 // TODO(pg-port): nodes/makefuncs.h
@@ -248,13 +259,13 @@ pub unsafe fn copyObject<T>(_obj: *mut T) -> *mut T {
     todo!("TODO(pg-port): copyObject")
 }
 pub unsafe fn stringToNode(_str: *mut c_char) -> *mut Node {
-    todo!("TODO(pg-port): stringToNode")
+    crate::nodes::read::stringToNode(_str as _) as _
 }
 pub unsafe fn pg_parse_query(_query_string: *const c_char) -> *mut List {
     todo!("TODO(pg-port): pg_parse_query")
 }
 pub unsafe fn CreateCommandTag(_node: *mut Node) -> *mut c_void {
-    todo!("TODO(pg-port): CreateCommandTag")
+    unimplemented!()
 }
 pub unsafe fn CreateCommandName(_node: *mut c_void) -> *const c_char {
     todo!("TODO(pg-port): CreateCommandName")
@@ -263,20 +274,20 @@ pub unsafe fn CommandIsReadOnly(_stmt: *mut PlannedStmt) -> bool {
     todo!("TODO(pg-port): CommandIsReadOnly")
 }
 pub unsafe fn BlessTupleDesc(_tupdesc: TupleDesc) {
-    todo!("TODO(pg-port): BlessTupleDesc")
+    unimplemented!()
 }
 pub unsafe fn slot_getattr(
     _slot: *mut TupleTableSlot,
     _attnum: c_int,
     _isnull: *mut bool,
 ) -> Datum {
-    todo!("TODO(pg-port): slot_getattr")
+    crate::executor::tuptable::slot_getattr(_slot as _, _attnum as _, _isnull as _) as _
 }
 pub unsafe fn MakeSingleTupleTableSlot(
     _tupdesc: TupleDesc,
     _ops: *const c_void,
 ) -> *mut TupleTableSlot {
-    todo!("TODO(pg-port): MakeSingleTupleTableSlot")
+    crate::executor::execTuples::MakeSingleTupleTableSlot(_tupdesc as _, _ops as _) as _
 }
 pub static TTSOpsMinimalTuple: c_int = 0;
 pub unsafe fn tuplestore_begin_heap(
@@ -284,16 +295,16 @@ pub unsafe fn tuplestore_begin_heap(
     _interXact: bool,
     _maxKBytes: c_int,
 ) -> *mut Tuplestorestate {
-    todo!("TODO(pg-port): tuplestore_begin_heap")
+    crate::utils::sort::tuplestore::tuplestore_begin_heap(_randomAccess as _, _interXact as _, _maxKBytes as _) as _
 }
 pub unsafe fn tuplestore_puttupleslot(
     _state: *mut Tuplestorestate,
     _slot: *mut TupleTableSlot,
 ) {
-    todo!("TODO(pg-port): tuplestore_puttupleslot")
+    crate::utils::sort::tuplestore::tuplestore_puttupleslot(_state as _, _slot as _)
 }
 pub unsafe fn tuplestore_end(_state: *mut Tuplestorestate) {
-    todo!("TODO(pg-port): tuplestore_end")
+    crate::utils::sort::tuplestore::tuplestore_end(_state as _)
 }
 pub unsafe fn RegisterExprContextCallback(
     _econtext: *mut ExprContext,
@@ -315,10 +326,18 @@ pub unsafe fn DatumGetPointer(_d: Datum) -> *mut c_void {
 pub unsafe fn PointerGetDatum(_p: *mut c_void) -> Datum {
     _p as Datum
 }
-pub unsafe fn geterrposition() -> c_int { 0 }
-pub unsafe fn errposition(_pos: c_int) {}
-pub unsafe fn internalerrposition(_pos: c_int) {}
-pub unsafe fn internalerrquery(_query: *const c_char) {}
+pub unsafe fn geterrposition() -> c_int {
+    crate::utils::error::elog_impl::geterrposition() as _
+}
+pub unsafe fn errposition(_pos: c_int) {
+    unimplemented!()
+}
+pub unsafe fn internalerrposition(_pos: c_int) {
+    unimplemented!()
+}
+pub unsafe fn internalerrquery(_query: *const c_char) {
+    unimplemented!()
+}
 pub unsafe fn repalloc_array<T>(_ptr: *mut T, _n: usize) -> *mut T {
     todo!("TODO(pg-port): repalloc_array")
 }
@@ -341,8 +360,8 @@ pub struct ErrorContextCallback {
 }
 
 // catalog IDs (TODO: generate from syscache_ids.h)
-const PROCNAMEARGSNSP: c_int = 47; // placeholder
-const PROCOID: c_int = 28;        // placeholder
+const PROCNAMEARGSNSP: c_int = 46;
+const PROCOID: c_int = 47;
 
 // list_nth_node helper (casts list_nth result)
 unsafe fn list_nth_node_Query(list: *mut List, n: c_int) -> *mut Query {
@@ -354,16 +373,16 @@ unsafe fn list_nth_node_RawStmt(list: *mut List, n: c_int) -> *mut RawStmt {
 
 // llast helpers
 unsafe fn llast_node_List(list: *mut List) -> *mut List {
-    todo!("TODO(pg-port): llast_node_List")
+    crate::nodes::pg_list::llast(list as _) as *mut List
 }
 unsafe fn llast(list: *mut List) -> *mut c_void {
-    todo!("TODO(pg-port): llast")
+    crate::nodes::pg_list::llast(list as _) as _
 }
 unsafe fn lsecond(list: *mut List) -> *mut c_void {
-    todo!("TODO(pg-port): lsecond")
+    crate::nodes::pg_list::lsecond(list as _) as _
 }
 unsafe fn lthird(list: *mut List) -> *mut c_void {
-    todo!("TODO(pg-port): lthird")
+    crate::nodes::pg_list::lthird(list as _) as _
 }
 unsafe fn IsA_List(n: *mut Node) -> bool {
     todo!("TODO(pg-port): IsA_List")
@@ -378,7 +397,7 @@ unsafe fn linitial_node_Query(list: *mut List) -> *mut Query {
     todo!("TODO(pg-port): linitial_node_Query")
 }
 unsafe fn linitial(list: *mut List) -> *mut c_void {
-    todo!("TODO(pg-port): linitial")
+    crate::nodes::pg_list::linitial(list as _) as _
 }
 unsafe fn lfirst_node_List(lc: *mut ListCell) -> *mut List {
     todo!("TODO(pg-port): lfirst_node_List")
@@ -399,22 +418,17 @@ unsafe fn foreach_current_index(_lc: *mut ListCell) -> usize {
     todo!("TODO(pg-port): foreach_current_index")
 }
 
-// ParseState hook fields (TODO: real ParseState from parser/parse_node.h)
-#[repr(C)]
-pub struct FullParseState {
-    pub p_pre_columnref_hook: Option<unsafe fn(*mut FullParseState, *mut ColumnRef) -> *mut Node>,
-    pub p_post_columnref_hook: Option<unsafe fn(*mut FullParseState, *mut ColumnRef, *mut Node) -> *mut Node>,
-    pub p_paramref_hook: Option<unsafe fn(*mut FullParseState, *mut ParamRef) -> *mut Node>,
-    pub p_ref_hook_state: *mut c_void,
-    pub p_last_srf: *mut Node,
-}
+// SQL-function parser hooks run against the real ParseState; using the
+// canonical struct keeps hook-field offsets correct.
+pub use crate::parser::parse_node::ParseState as FullParseState;
 
 pub unsafe fn makeNode_Param() -> *mut Param {
-    todo!("TODO(pg-port): makeNode_Param")
+    crate::makeNode!(Param, T_Param)
 }
 pub unsafe fn makeNode_Query() -> *mut Query {
     todo!("TODO(pg-port): makeNode_Query")
 }
+#[no_mangle]
 pub unsafe fn makeNode_RangeTblEntry() -> *mut RangeTblEntry {
     todo!("TODO(pg-port): makeNode_RangeTblEntry")
 }
@@ -734,9 +748,10 @@ pub unsafe fn sql_fn_parser_setup(
  */
 unsafe fn sql_fn_post_column_ref(
     pstate: *mut FullParseState,
-    cref: *mut ColumnRef,
+    cref: *mut c_void,
     var: *mut Node,
 ) -> *mut Node {
+    let cref = cref as *mut ColumnRef;
     let pinfo = (*pstate).p_ref_hook_state as SQLFunctionParseInfoPtr;
     let mut nnames: c_int;
     let field1: *mut Node;
@@ -849,8 +864,9 @@ unsafe fn sql_fn_post_column_ref(
  */
 unsafe fn sql_fn_param_ref(
     pstate: *mut FullParseState,
-    pref: *mut ParamRef,
+    pref: *mut c_void,
 ) -> *mut Node {
+    let pref = pref as *mut ParamRef;
     let pinfo = (*pstate).p_ref_hook_state as SQLFunctionParseInfoPtr;
     let paramno = (*pref).number;
 
@@ -927,31 +943,13 @@ unsafe fn strcmp(a: *const c_char, b: *const c_char) -> c_int {
 
 // TODO(pg-port): nodes/value.h strVal
 unsafe fn strVal(node: *mut Node) -> *const c_char {
-    todo!("TODO(pg-port): strVal")
+    crate::catalog::objectaddress_impl::strVal(node as _) as _
 }
-// TODO(pg-port): IsA check for A_Star
 unsafe fn IsA_AStar(node: *mut Node) -> bool {
-    todo!("TODO(pg-port): IsA_AStar")
+    crate::IsA!(node, T_A_Star)
 }
 
-// TODO(pg-port): catalog/pg_proc.h FormData_pg_proc
-#[repr(C)]
-pub struct FormData_pg_proc {
-    pub proname: NameData,
-    pub pronargs: int16,
-    pub proargtypes: OidVector,
-    pub proretset: bool,
-    pub provolatile: c_char,
-    pub prokind: c_char,
-}
-#[repr(C)]
-pub struct NameData {
-    pub data: [c_char; 64],
-}
-#[repr(C)]
-pub struct OidVector {
-    pub values: [Oid; FUNC_MAX_ARGS as usize],
-}
+pub use crate::catalog::pg_proc::FormData_pg_proc;
 unsafe fn NameStr_pg_proc(proc_: *mut FormData_pg_proc) -> *const c_char {
     (*proc_).proname.data.as_ptr()
 }

@@ -57,41 +57,9 @@ pub const CANTMATCH: c_int = b'x' as c_int;
 // it via cm->v; mirror the faithful layout here.  regguts::vars is an opaque
 // c_void, so callers cast.
 // TODO(pg-port): unify with regcomp.c's struct vars once that file is ported.
-#[repr(C)]
-struct vars {
-    re: *mut regex_t,
-    now: *const chr,
-    stop: *const chr,
-    err: c_int,
-    cflags: c_int,
-    lasttype: c_int,
-    nexttype: c_int,
-    nextvalue: chr,
-    lexcon: c_int,
-    nsubexp: c_int,
-    subs: *mut *mut subre,
-    nsubs: Size,
-    sub10: [*mut subre; 10],
-    nfa: *mut nfa,
-    cm: *mut colormap,
-    nlcolor: color,
-    wordchrs: *mut state,
-    tree: *mut subre,
-    treechain: *mut subre,
-    treefree: *mut subre,
-    ntree: c_int,
-    cv: *mut c_void,
-    cv2: *mut c_void,
-    lacons: *mut subre,
-    nlacons: c_int,
-    spaceused: Size,
-}
+use crate::regex::regcomp::vars;
 
-// regc_pg_locale.c (not yet ported): column index for a cclass-bearing chr.
-unsafe fn cclass_column_index(_cm: *mut colormap, _c: chr) -> c_int {
-    /* TODO(pg-port) */
-    unimplemented!()
-}
+use crate::regex::regc_locale::cclass_column_index;
 
 // #define CISERR()	VISERR(cm->v)  ;  VISERR(vv) is ((vv)->err != 0)
 #[inline]

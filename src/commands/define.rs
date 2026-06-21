@@ -40,7 +40,7 @@ use crate::nodes::pg_list::{lfirst, List, NIL};
 use crate::nodes::makefuncs::makeTypeNameFromNameList;
 use crate::port::pgstrcasecmp::pg_strcasecmp;
 
-use crate::{boolVal, castNode, current_cell, foreach, intVal, list_make1, strVal, IsA};
+use crate::{boolVal, castNode, current_cell, floatVal, foreach, intVal, list_make1, strVal, IsA};
 
 // TODO(pg-port): ERRCODE_SYNTAX_ERROR lives in the generated utils/errcodes.h,
 // which is not yet ported.  The errcode() shim ignores its argument, so a

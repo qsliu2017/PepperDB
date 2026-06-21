@@ -148,6 +148,7 @@ const EMPTY_SIGSET: sigset_t = sigset_t::zeroed();
 
 pub static mut UnBlockSig: sigset_t = EMPTY_SIGSET;
 pub static mut BlockSig: sigset_t = EMPTY_SIGSET;
+#[no_mangle]
 pub static mut StartupBlockSig: sigset_t = EMPTY_SIGSET;
 
 // ---------------------------------------------------------------------------
@@ -209,6 +210,7 @@ pub unsafe fn pqinitmask() {
 // SA_NOCLDSTOP, matching the C original.
 // ---------------------------------------------------------------------------
 
+#[no_mangle]
 pub unsafe fn pqsignal(signo: c_int, func: SigHandler) {
     Assert!(signo > 0);
 

@@ -77,9 +77,7 @@ unsafe fn get_opfamily_proc(
     _lefttype: Oid,
     _righttype: Oid,
     _procnum: u16,
-) -> Oid {
-    InvalidOid
-}
+) -> Oid { crate::utils::cache::lsyscache::get_opfamily_proc(_opfamily as _, _lefttype as _, _righttype as _, _procnum as _) as _ }
 
 /// `reverse_skip_support` - factored-out helper implementing the DESC/reverse
 /// transform from PrepareSkipSupportFromOpclass.
@@ -111,7 +109,8 @@ unsafe fn reverse_skip_support(sksup: SkipSupport) {
 /// Performs catalog lookups and invokes the opclass-provided support function
 /// via OidFunctionCall1; safe to call only in a backend with the relevant
 /// catalogs available.
-pub unsafe fn PrepareSkipSupportFromOpclass(
+#[no_mangle]
+pub unsafe extern "C" fn PrepareSkipSupportFromOpclass(
     opfamily: Oid,
     opcintype: Oid,
     reverse: bool,

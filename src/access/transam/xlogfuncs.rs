@@ -793,9 +793,7 @@ pub unsafe extern "C" fn pg_promote(fcinfo: FunctionCallInfo) -> Datum {
 
 const ALLOCSET_START_SMALL_SIZES: c_int = 0;
 
-unsafe fn get_backup_status() -> SessionBackupState {
-    unimplemented!() // TODO: access/xlogbackup
-}
+unsafe fn get_backup_status() -> SessionBackupState { crate::access::transam::xlog::get_backup_status() }
 unsafe fn text_to_cstring(_t: *mut c_void) -> *mut c_char {
     unimplemented!() // TODO: utils/adt/varlena
 }
@@ -806,21 +804,13 @@ unsafe fn AllocSetContextCreate(
 ) -> MemoryContextStub {
     unimplemented!() // TODO: utils/mmgr/aset
 }
-unsafe fn MemoryContextReset(_ctx: MemoryContextStub) {
-    unimplemented!() // TODO: utils/mmgr/mcxt
-}
-unsafe fn MemoryContextDelete(_ctx: MemoryContextStub) {
-    unimplemented!() // TODO: utils/mmgr/mcxt
-}
-unsafe fn makeStringInfo() -> StringInfo {
-    unimplemented!() // TODO: lib/stringinfo
-}
+unsafe fn MemoryContextReset(_ctx: MemoryContextStub) { crate::utils::mmgr::mcxt::MemoryContextReset(_ctx as _) }
+unsafe fn MemoryContextDelete(_ctx: MemoryContextStub) { crate::utils::mmgr::mcxt::MemoryContextDelete(_ctx as _) }
+unsafe fn makeStringInfo() -> StringInfo { crate::lib::stringinfo::makeStringInfo() }
 unsafe fn stringinfo_data(_si: StringInfo) -> *const c_char {
     unimplemented!() // TODO: lib/stringinfo (->data)
 }
-unsafe fn register_persistent_abort_backup_handler() {
-    unimplemented!() // TODO: access/xlog
-}
+unsafe fn register_persistent_abort_backup_handler() { crate::access::transam::xlog::register_persistent_abort_backup_handler() }
 unsafe fn do_pg_backup_start(
     _backupidstr: *mut c_char,
     _fast: bool,
@@ -833,9 +823,7 @@ unsafe fn do_pg_backup_start(
 unsafe fn do_pg_backup_stop(_state: *mut BackupState, _waitforarchive: bool) {
     unimplemented!() // TODO: access/xlog
 }
-unsafe fn build_backup_content(_state: *mut BackupState, _ishistoryfile: bool) -> *mut c_char {
-    unimplemented!() // TODO: access/xlogbackup
-}
+unsafe fn build_backup_content(_state: *mut BackupState, _ishistoryfile: bool) -> *mut c_char { crate::access::transam::xlogbackup::build_backup_content(_state as _, _ishistoryfile as _) }
 unsafe fn backup_state_startpoint(_state: *mut BackupState) -> XLogRecPtr {
     unimplemented!() // TODO: access/xlogbackup (->startpoint)
 }
@@ -849,9 +837,7 @@ unsafe fn get_call_result_type(
 ) -> c_int {
     unimplemented!() // TODO: utils/fmgr/funcapi
 }
-unsafe fn LSNGetDatum(_lsn: XLogRecPtr) -> Datum {
-    unimplemented!() // TODO: utils/adt/pg_lsn
-}
+unsafe fn LSNGetDatum(_lsn: XLogRecPtr) -> Datum { crate::utils::adt::pg_lsn::LSNGetDatum(_lsn as _) }
 unsafe fn CStringGetTextDatum(_s: *const c_char) -> Datum {
     unimplemented!() // TODO: utils/adt/varlena
 }
@@ -865,39 +851,25 @@ unsafe fn heap_form_tuple(
 ) -> HeapTuple {
     unimplemented!() // TODO: access/common/heaptuple
 }
-unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO: access/xlog
-}
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
 unsafe fn RequestXLogSwitch(_mark_unimportant: bool) -> XLogRecPtr {
     unimplemented!() // TODO: access/xlog
 }
 unsafe fn XLogStandbyInfoActive() -> bool {
     unimplemented!() // TODO: access/xlog
 }
-unsafe fn LogStandbySnapshot() -> XLogRecPtr {
-    unimplemented!() // TODO: storage/ipc/standby
-}
+unsafe fn LogStandbySnapshot() -> XLogRecPtr { crate::storage::ipc::standby::LogStandbySnapshot() }
 unsafe fn XLogIsNeeded() -> bool {
     unimplemented!() // TODO: access/xlog
 }
-unsafe fn XLogRestorePoint(_rpname: *const c_char) -> XLogRecPtr {
-    unimplemented!() // TODO: access/xlog
-}
-unsafe fn GetXLogWriteRecPtr() -> XLogRecPtr {
-    unimplemented!() // TODO: access/xlog
-}
-unsafe fn GetXLogInsertRecPtr() -> XLogRecPtr {
-    unimplemented!() // TODO: access/xlog
-}
-unsafe fn GetFlushRecPtr(_insertTLI: *mut TimeLineID) -> XLogRecPtr {
-    unimplemented!() // TODO: access/xlog
-}
+unsafe fn XLogRestorePoint(_rpname: *const c_char) -> XLogRecPtr { crate::access::transam::xlog::XLogRestorePoint(_rpname as _) }
+unsafe fn GetXLogWriteRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetXLogWriteRecPtr() }
+unsafe fn GetXLogInsertRecPtr() -> XLogRecPtr { crate::access::transam::xlog::GetXLogInsertRecPtr() }
+unsafe fn GetFlushRecPtr(_insertTLI: *mut TimeLineID) -> XLogRecPtr { crate::access::transam::xlog::GetFlushRecPtr(_insertTLI as _) }
 unsafe fn GetWalRcvFlushRecPtr(_latestChunkStart: *mut XLogRecPtr, _receiveTLI: *mut TimeLineID) -> XLogRecPtr {
     unimplemented!() // TODO: replication/walreceiver
 }
-unsafe fn GetXLogReplayRecPtr(_replayTLI: *mut TimeLineID) -> XLogRecPtr {
-    unimplemented!() // TODO: access/xlogrecovery
-}
+unsafe fn GetXLogReplayRecPtr(_replayTLI: *mut TimeLineID) -> XLogRecPtr { crate::access::transam::xlogrecovery::GetXLogReplayRecPtr(_replayTLI as _) }
 unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDescStub {
     unimplemented!() // TODO: access/common/tupdesc
 }
@@ -928,12 +900,8 @@ unsafe fn XLogFileName(
 ) {
     unimplemented!() // TODO: access/xlog_internal
 }
-unsafe fn GetWALInsertionTimeLine() -> TimeLineID {
-    unimplemented!() // TODO: access/xlog
-}
-unsafe fn UInt32GetDatum(_X: uint32) -> Datum {
-    unimplemented!() // TODO: postgres.h
-}
+unsafe fn GetWALInsertionTimeLine() -> TimeLineID { crate::access::transam::xlog::GetWALInsertionTimeLine() }
+unsafe fn UInt32GetDatum(_X: uint32) -> Datum { crate::postgres::UInt32GetDatum(_X as _) }
 unsafe fn XLogSegmentOffset(_xlogptr: XLogRecPtr, _wal_segsz_bytes: c_int) -> uint32 {
     unimplemented!() // TODO: access/xlog_internal
 }
@@ -946,9 +914,7 @@ unsafe fn pstrdup(_in: *const c_char) -> *mut c_char {
 unsafe fn pg_toupper(_ch: u8) -> u8 {
     unimplemented!() // TODO: port/pgstrcasecmp
 }
-unsafe fn IsXLogFileName(_fname: *const c_char) -> bool {
-    unimplemented!() // TODO: access/xlog_internal
-}
+unsafe fn IsXLogFileName(_fname: *const c_char) -> bool { crate::access::transam::xlog_internal::IsXLogFileName(_fname as _) }
 unsafe fn XLogFromFileName(
     _fname: *const c_char,
     _tli: *mut TimeLineID,
@@ -975,9 +941,7 @@ unsafe fn DirectFunctionCall2(
 unsafe extern "C" fn numeric_in(_fcinfo: FunctionCallInfo) -> Datum {
     unimplemented!() // TODO: utils/adt/numeric
 }
-unsafe extern "C" fn pg_lsn_mi(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!() // TODO: utils/adt/pg_lsn
-}
+unsafe extern "C" fn pg_lsn_mi(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::pg_lsn::pg_lsn_mi(_fcinfo as _) }
 unsafe fn CStringGetDatum(_s: *const c_char) -> Datum {
     unimplemented!() // TODO: postgres.h
 }
@@ -987,33 +951,17 @@ unsafe fn ObjectIdGetDatum(_X: Oid) -> Datum {
 unsafe fn Int32GetDatum(_X: i32) -> Datum {
     unimplemented!() // TODO: postgres.h
 }
-unsafe fn Int64GetDatum(_X: i64) -> Datum {
-    unimplemented!() // TODO: postgres.h
-}
-unsafe fn PromoteIsTriggered() -> bool {
-    unimplemented!() // TODO: access/xlogrecovery
-}
-unsafe fn SetRecoveryPause(_recoveryPause: bool) {
-    unimplemented!() // TODO: access/xlogrecovery
-}
-unsafe fn WakeupRecovery() {
-    unimplemented!() // TODO: access/xlog
-}
+unsafe fn Int64GetDatum(_X: i64) -> Datum { crate::postgres::Int64GetDatum(_X as _) }
+unsafe fn PromoteIsTriggered() -> bool { crate::access::transam::xlogrecovery::PromoteIsTriggered() }
+unsafe fn SetRecoveryPause(_recoveryPause: bool) { crate::access::transam::xlogrecovery::SetRecoveryPause(_recoveryPause as _) }
+unsafe fn WakeupRecovery() { crate::access::transam::xlogrecovery::WakeupRecovery() }
 unsafe fn GetRecoveryPauseState() -> c_int {
     unimplemented!() // TODO: access/xlogrecovery
 }
-unsafe fn GetLatestXTime() -> TimestampTz {
-    unimplemented!() // TODO: access/xlogrecovery
-}
-unsafe fn AllocateFile(_name: *const c_char, _mode: *const c_char) -> *mut c_void {
-    unimplemented!() // TODO: storage/file/fd
-}
-unsafe fn FreeFile(_file: *mut c_void) -> c_int {
-    unimplemented!() // TODO: storage/file/fd
-}
-unsafe fn ResetLatch(_latch: *mut c_void) {
-    unimplemented!() // TODO: storage/ipc/latch
-}
+unsafe fn GetLatestXTime() -> TimestampTz { crate::access::transam::xlogrecovery::GetLatestXTime() }
+unsafe fn AllocateFile(_name: *const c_char, _mode: *const c_char) -> *mut c_void { crate::storage::file::fd::AllocateFile(_name as _, _mode as _) }
+unsafe fn FreeFile(_file: *mut c_void) -> c_int { crate::storage::file::fd::FreeFile(_file as _) }
+unsafe fn ResetLatch(_latch: *mut c_void) { crate::storage::ipc::latch::ResetLatch(_latch as _) }
 unsafe fn WaitLatch(
     _latch: *mut c_void,
     _wakeEvents: c_int,

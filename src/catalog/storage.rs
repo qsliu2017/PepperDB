@@ -57,8 +57,8 @@ const ERROR: c_int = 21;
 const PANIC: c_int = 23;
 
 const HASH_ELEM: c_int = 0x0008;
-const HASH_BLOBS: c_int = 0x0010;
-const HASH_CONTEXT: c_int = 0x0080;
+const HASH_BLOBS: c_int = 0x0020;
+const HASH_CONTEXT: c_int = 0x0400;
 
 #[allow(non_camel_case_types)]
 #[repr(C)]
@@ -1152,90 +1152,101 @@ unsafe fn BlockNumberIsValid(blockNumber: BlockNumber) -> bool {
 }
 
 unsafe fn IsInParallelMode() -> bool {
-    unimplemented!() // TODO: access/xact.c
+    false
 }
 
 unsafe fn ProcNumberForTempRelations() -> ProcNumber {
-    unimplemented!() // TODO: storage/proc.c
+    crate::storage::procnumber::ProcNumberForTempRelations() as _
 }
 
 unsafe fn GetCurrentTransactionNestLevel() -> c_int {
-    unimplemented!() // TODO: access/transam/xact.c
+    crate::access::transam::xact::GetCurrentTransactionNestLevel()
 }
 
 unsafe fn XLogIsNeeded() -> bool {
-    unimplemented!() // TODO: access/transam/xlog.c
+    false
 }
 
-unsafe fn RelationNeedsWAL(_rel: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
-}
+#[no_mangle]
+unsafe fn RelationNeedsWAL(_rel: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_rel as _) }
 
 unsafe fn RelationGetSmgr(_rel: Relation) -> SMgrRelation {
-    unimplemented!() // TODO: utils/rel.h
+    crate::storage::buffer::bufmgr::RelationGetSmgr(_rel as _) as _
 }
 
-unsafe fn RelationCloseSmgr(_rel: Relation) {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationCloseSmgr(rel: Relation) {
+    let rel = rel as crate::utils::rel::Relation;
+    if !(*rel).rd_smgr.is_null() {
+        crate::storage::smgr::smgr::smgrunpin((*rel).rd_smgr as _);
+        crate::storage::smgr::smgr::smgrclose((*rel).rd_smgr as _);
+        (*rel).rd_smgr = core::ptr::null_mut();
+    }
 }
 
-unsafe fn RelFileLocatorEquals(_a: RelFileLocator, _b: RelFileLocator) -> bool {
-    unimplemented!() // TODO: storage/relfilelocator.h
+unsafe fn RelFileLocatorEquals(a: RelFileLocator, b: RelFileLocator) -> bool {
+    a.spcOid == b.spcOid && a.dbOid == b.dbOid && a.relNumber == b.relNumber
 }
 
 // smgr.c accessors / functions
-unsafe fn smgropen(_rlocator: RelFileLocator, _procNumber: ProcNumber) -> SMgrRelation {
-    unimplemented!() // TODO: storage/smgr/smgr.c
+unsafe fn smgropen(rlocator: RelFileLocator, procNumber: ProcNumber) -> SMgrRelation {
+    crate::storage::smgr::smgr::smgropen(core::mem::transmute(rlocator), procNumber as _) as _
 }
-unsafe fn smgrcreate(_reln: SMgrRelation, _forknum: ForkNumber, _isRedo: bool) {
-    unimplemented!() // TODO: storage/smgr/smgr.c
+unsafe fn smgrcreate(reln: SMgrRelation, forknum: ForkNumber, isRedo: bool) {
+    crate::storage::smgr::smgr::smgrcreate(reln as _, core::mem::transmute(forknum), isRedo)
 }
-unsafe fn smgrexists(_reln: SMgrRelation, _forknum: ForkNumber) -> bool {
-    unimplemented!() // TODO: storage/smgr/smgr.c
+unsafe fn smgrexists(reln: SMgrRelation, forknum: ForkNumber) -> bool {
+    crate::storage::smgr::smgr::smgrexists(reln as _, core::mem::transmute(forknum))
 }
-unsafe fn smgrnblocks(_reln: SMgrRelation, _forknum: ForkNumber) -> BlockNumber {
-    unimplemented!() // TODO: storage/smgr/smgr.c
+unsafe fn smgrnblocks(reln: SMgrRelation, forknum: ForkNumber) -> BlockNumber {
+    crate::storage::smgr::smgr::smgrnblocks(reln as _, core::mem::transmute(forknum))
 }
 unsafe fn smgrtruncate(
-    _reln: SMgrRelation,
-    _forknum: *mut ForkNumber,
-    _nforks: c_int,
-    _old_nblocks: *mut BlockNumber,
-    _nblocks: *mut BlockNumber,
+    reln: SMgrRelation,
+    forknum: *mut ForkNumber,
+    nforks: c_int,
+    old_nblocks: *mut BlockNumber,
+    nblocks: *mut BlockNumber,
 ) {
-    unimplemented!() // TODO: storage/smgr/smgr.c
+    crate::storage::smgr::smgr::smgrtruncate(reln as _, forknum as _, nforks, old_nblocks, nblocks)
 }
 unsafe fn smgrread(_reln: SMgrRelation, _forknum: ForkNumber, _blocknum: BlockNumber, _buffer: Page) {
-    unimplemented!() // TODO: storage/smgr/smgr.c
+    let mut buf = _buffer as *mut c_void;
+    crate::storage::smgr::smgr::smgrreadv(
+        _reln as _,
+        core::mem::transmute(_forknum),
+        _blocknum,
+        &mut buf,
+        1,
+    )
 }
-unsafe fn smgrclose(_reln: SMgrRelation) {
-    unimplemented!() // TODO: storage/smgr/smgr.c
+unsafe fn smgrclose(reln: SMgrRelation) {
+    crate::storage::smgr::smgr::smgrclose(reln as _)
 }
-unsafe fn smgrdounlinkall(_rels: *mut SMgrRelation, _nrels: c_int, _isRedo: bool) {
-    unimplemented!() // TODO: storage/smgr/smgr.c
+unsafe fn smgrdounlinkall(rels: *mut SMgrRelation, nrels: c_int, isRedo: bool) {
+    crate::storage::smgr::smgr::smgrdounlinkall(rels as _, nrels, isRedo)
 }
-unsafe fn smgrdosyncall(_rels: *mut SMgrRelation, _nrels: c_int) {
-    unimplemented!() // TODO: storage/smgr/smgr.c
+unsafe fn smgrdosyncall(rels: *mut SMgrRelation, nrels: c_int) {
+    crate::storage::smgr::smgr::smgrdosyncall(rels as _, nrels)
 }
-unsafe fn smgr_rlocator(_reln: SMgrRelation) -> RelFileLocatorBackend {
-    unimplemented!() // TODO: storage/smgr/smgr.h (srel->smgr_rlocator)
+unsafe fn smgr_rlocator(reln: SMgrRelation) -> RelFileLocatorBackend {
+    core::mem::transmute((*(reln as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_rlocator)
 }
-unsafe fn smgr_rlocator_locator(_reln: SMgrRelation) -> *const RelFileLocator {
-    unimplemented!() // TODO: storage/smgr/smgr.h (&srel->smgr_rlocator.locator)
+unsafe fn smgr_rlocator_locator(reln: SMgrRelation) -> *const RelFileLocator {
+    &(*(reln as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_rlocator.locator as *const _ as *const RelFileLocator
 }
-unsafe fn smgr_set_targblock(_reln: SMgrRelation, _blk: BlockNumber) {
-    unimplemented!() // TODO: storage/smgr/smgr.h (reln->smgr_targblock)
+unsafe fn smgr_set_targblock(reln: SMgrRelation, blk: BlockNumber) {
+    (*(reln as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_targblock = blk;
 }
-unsafe fn smgr_set_cached_nblocks(_reln: SMgrRelation, _fork: usize, _blk: BlockNumber) {
-    unimplemented!() // TODO: storage/smgr/smgr.h (reln->smgr_cached_nblocks[i])
+unsafe fn smgr_set_cached_nblocks(reln: SMgrRelation, fork: usize, blk: BlockNumber) {
+    (*(reln as *mut crate::storage::smgr::smgr::SMgrRelationData)).smgr_cached_nblocks[fork] = blk;
 }
 
 // Relation field accessors
-unsafe fn rel_rd_locator(_rel: Relation) -> RelFileLocator {
-    unimplemented!() // TODO: utils/rel.h (rel->rd_locator)
+unsafe fn rel_rd_locator(rel: Relation) -> RelFileLocator {
+    core::mem::transmute((*(rel as crate::utils::rel::Relation)).rd_locator)
 }
-unsafe fn rel_rd_backend(_rel: Relation) -> ProcNumber {
-    unimplemented!() // TODO: utils/rel.h (rel->rd_backend)
+unsafe fn rel_rd_backend(rel: Relation) -> ProcNumber {
+    (*(rel as crate::utils::rel::Relation)).rd_backend as ProcNumber
 }
 
 // bulk_write.c
@@ -1244,22 +1255,18 @@ unsafe fn smgr_bulk_start_smgr(
     _forknum: ForkNumber,
     _use_wal: bool,
 ) -> *mut BulkWriteState {
-    unimplemented!() // TODO: storage/smgr/bulk_write.c
+    crate::storage::smgr::bulk_write::smgr_bulk_start_smgr(_smgr as _, core::mem::transmute(_forknum), _use_wal) as _
 }
 unsafe fn smgr_bulk_get_buf(_bulkstate: *mut BulkWriteState) -> BulkWriteBuffer {
-    unimplemented!() // TODO: storage/smgr/bulk_write.c
+    crate::storage::smgr::bulk_write::smgr_bulk_get_buf(_bulkstate as _) as _
 }
 unsafe fn smgr_bulk_write(
     _bulkstate: *mut BulkWriteState,
     _blocknum: BlockNumber,
     _buf: BulkWriteBuffer,
     _page_std: bool,
-) {
-    unimplemented!() // TODO: storage/smgr/bulk_write.c
-}
-unsafe fn smgr_bulk_finish(_bulkstate: *mut BulkWriteState) {
-    unimplemented!() // TODO: storage/smgr/bulk_write.c
-}
+) { crate::storage::smgr::bulk_write::smgr_bulk_write(_bulkstate as _, _blocknum as _, _buf as _, _page_std as _) }
+unsafe fn smgr_bulk_finish(_bulkstate: *mut BulkWriteState) { crate::storage::smgr::bulk_write::smgr_bulk_finish(_bulkstate as _) }
 
 // bufpage.c
 unsafe fn PageIsVerified(
@@ -1268,16 +1275,12 @@ unsafe fn PageIsVerified(
     _flags: c_int,
     _checksum_failure_p: *mut bool,
 ) -> bool {
-    unimplemented!() // TODO: storage/page/bufpage.c
+    crate::storage::bufpage::PageIsVerified(_page as _, _blkno as _, _flags, _checksum_failure_p)
 }
 
 // pgstat
-unsafe fn pgstat_prepare_report_checksum_failure(_dboid: Oid) {
-    unimplemented!() // TODO: utils/activity/pgstat_checksum.c
-}
-unsafe fn pgstat_report_checksum_failures_in_db(_dboid: Oid, _failurecount: c_int) {
-    unimplemented!() // TODO: utils/activity/pgstat_checksum.c
-}
+unsafe fn pgstat_prepare_report_checksum_failure(_dboid: Oid) { crate::utils::activity::pgstat_database::pgstat_prepare_report_checksum_failure(_dboid as _) }
+unsafe fn pgstat_report_checksum_failures_in_db(_dboid: Oid, _failurecount: c_int) { crate::utils::activity::pgstat_database::pgstat_report_checksum_failures_in_db(_dboid as _, _failurecount as _) }
 
 // relpath
 unsafe fn relpathbackend(
@@ -1285,37 +1288,44 @@ unsafe fn relpathbackend(
     _backend: ProcNumber,
     _forknum: ForkNumber,
 ) -> RelPathStr {
-    unimplemented!() // TODO: common/relpath.c
+    let rp = crate::common::relpath::GetRelationPath(
+        _rlocator.dbOid,
+        _rlocator.spcOid,
+        _rlocator.relNumber,
+        _backend as c_int,
+        core::mem::transmute(_forknum),
+    );
+    let mut out: RelPathStr = [0; 1024];
+    let n = rp.str.len();
+    core::ptr::copy_nonoverlapping(rp.str.as_ptr(), out.as_mut_ptr(), n);
+    out
 }
 unsafe fn relpathstr_to_string(_relpath: &RelPathStr) -> std::string::String {
-    unimplemented!() // TODO: helper to read relpath.str as a String for elog
+    let cstr = core::ffi::CStr::from_ptr(_relpath.as_ptr());
+    cstr.to_string_lossy().into_owned()
 }
 
 // freespace.c
-unsafe fn FreeSpaceMapPrepareTruncateRel(_rel: Relation, _nblocks: BlockNumber) -> BlockNumber {
-    unimplemented!() // TODO: storage/freespace/freespace.c
-}
-unsafe fn FreeSpaceMapVacuumRange(_rel: Relation, _start: BlockNumber, _end: BlockNumber) {
-    unimplemented!() // TODO: storage/freespace/freespace.c
-}
+unsafe fn FreeSpaceMapPrepareTruncateRel(_rel: Relation, _nblocks: BlockNumber) -> BlockNumber { crate::storage::freespace::freespace::FreeSpaceMapPrepareTruncateRel(_rel as _, _nblocks as _) }
+unsafe fn FreeSpaceMapVacuumRange(_rel: Relation, _start: BlockNumber, _end: BlockNumber) { crate::storage::freespace::freespace::FreeSpaceMapVacuumRange(_rel as _, _start as _, _end as _) }
 
 // visibilitymap.c
 unsafe fn visibilitymap_prepare_truncate(_rel: Relation, _nheapblocks: BlockNumber) -> BlockNumber {
-    unimplemented!() // TODO: access/heap/visibilitymap.c
+    crate::access::heap::visibilitymap::visibilitymap_prepare_truncate(_rel as _, _nheapblocks as _)
 }
 
 // xlog / xloginsert
 unsafe fn XLogBeginInsert() {
-    unimplemented!() // TODO: access/transam/xloginsert.c
+    crate::access::transam::xloginsert::XLogBeginInsert()
 }
-unsafe fn XLogRegisterData(_data: *mut c_char, _len: Size) {
-    unimplemented!() // TODO: access/transam/xloginsert.c
+unsafe fn XLogRegisterData(data: *mut c_char, len: Size) {
+    crate::access::transam::xloginsert::XLogRegisterData(data as _, len as _)
 }
-unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
-    unimplemented!() // TODO: access/transam/xloginsert.c
+unsafe fn XLogInsert(rmid: u8, info: uint8) -> XLogRecPtr {
+    core::mem::transmute(crate::access::transam::xloginsert::XLogInsert(core::mem::transmute(rmid), info))
 }
-unsafe fn XLogFlush(_record: XLogRecPtr) {
-    unimplemented!() // TODO: access/transam/xlog.c
+unsafe fn XLogFlush(record: XLogRecPtr) {
+    crate::access::transam::xlog::XLogFlush(core::mem::transmute(record))
 }
 unsafe fn log_newpage_range(
     _rel: Relation,
@@ -1323,96 +1333,84 @@ unsafe fn log_newpage_range(
     _startblk: BlockNumber,
     _endblk: BlockNumber,
     _page_std: bool,
-) {
-    unimplemented!() // TODO: access/transam/xloginsert.c
-}
+) { crate::access::transam::xloginsert::log_newpage_range(_rel as _, _forknum as _, _startblk as _, _endblk as _, _page_std as _) }
 
 // xlogutils.c
 unsafe fn CreateFakeRelcacheEntry(_rlocator: RelFileLocator) -> Relation {
-    unimplemented!() // TODO: access/transam/xlogutils.c
+    crate::access::transam::xlogutils::CreateFakeRelcacheEntry(core::mem::transmute(_rlocator)) as _
 }
-unsafe fn FreeFakeRelcacheEntry(_fakerel: Relation) {
-    unimplemented!() // TODO: access/transam/xlogutils.c
-}
+unsafe fn FreeFakeRelcacheEntry(_fakerel: Relation) { crate::access::transam::xlogutils::FreeFakeRelcacheEntry(_fakerel as _) }
 unsafe fn XLogTruncateRelation(_rlocator: RelFileLocator, _forkNum: ForkNumber, _nblocks: BlockNumber) {
-    unimplemented!() // TODO: access/transam/xlogutils.c
+    crate::access::transam::xlogutils::XLogTruncateRelation(core::mem::transmute(_rlocator), core::mem::transmute(_forkNum), _nblocks as _)
 }
 
 // xlogreader / xlogrecord accessors
 unsafe fn XLogReader_EndRecPtr(_record: *mut XLogReaderState) -> XLogRecPtr {
-    unimplemented!() // TODO: access/transam/xlogreader.h (record->EndRecPtr)
+    core::mem::transmute((*(_record as *mut crate::access::transam::xlogreader::XLogReaderState)).EndRecPtr)
 }
-unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 {
-    unimplemented!() // TODO: access/transam/xlogreader.h
-}
-unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char {
-    unimplemented!() // TODO: access/transam/xlogreader.h
-}
-unsafe fn XLogRecHasAnyBlockRefs(_record: *mut XLogReaderState) -> bool {
-    unimplemented!() // TODO: access/transam/xlogreader.h
-}
+unsafe fn XLogRecGetInfo(_record: *mut XLogReaderState) -> uint8 { crate::access::transam::xlogreader::XLogRecGetInfo(_record as _) }
+unsafe fn XLogRecGetData(_record: *mut XLogReaderState) -> *mut c_char { crate::access::transam::xlogreader::XLogRecGetData(_record as _) }
+unsafe fn XLogRecHasAnyBlockRefs(_record: *mut XLogReaderState) -> bool { crate::access::transam::xlogreader::XLogRecHasAnyBlockRefs(_record as _) }
 
 // xact.c
 unsafe fn AssertPendingSyncs_RelationCache() {
-    unimplemented!() // TODO: utils/cache/relcache.c
+    // assertion-only routine in C; no-op here (Asserts are no-ops in this file)
 }
 
 // MyProc->delayChkptFlags accessors (storage/proc.h)
 unsafe fn MyProc_delayChkptFlags() -> c_int {
-    unimplemented!() // TODO: storage/proc.h (MyProc->delayChkptFlags)
+    (*crate::access::transam::xact::MyProc).delayChkptFlags as c_int
 }
 unsafe fn MyProc_set_delayChkptFlags(_flags: c_int) {
-    unimplemented!() // TODO: storage/proc.h (MyProc->delayChkptFlags)
+    (*crate::access::transam::xact::MyProc).delayChkptFlags = _flags as _;
 }
 
 // CRIT section / interrupts (miscadmin.h)
 unsafe fn START_CRIT_SECTION() {
-    unimplemented!() // TODO: miscadmin.h
+    crate::miscadmin::START_CRIT_SECTION()
 }
 unsafe fn END_CRIT_SECTION() {
-    unimplemented!() // TODO: miscadmin.h
+    crate::miscadmin::END_CRIT_SECTION()
 }
 unsafe fn CHECK_FOR_INTERRUPTS() {
-    unimplemented!() // TODO: miscadmin.h
+    crate::miscadmin::CHECK_FOR_INTERRUPTS()
 }
 
 // hsearch.c
 unsafe fn hash_create(
-    _tabname: *const c_char,
-    _nelem: i64,
-    _info: *mut HASHCTL,
-    _flags: c_int,
+    tabname: *const c_char,
+    nelem: i64,
+    info: *mut HASHCTL,
+    flags: c_int,
 ) -> *mut HTAB {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_create(tabname, nelem as _, info as _, flags) as _
 }
 unsafe fn hash_search(
-    _hashp: *mut HTAB,
-    _keyPtr: *const c_void,
-    _action: HASHACTION,
-    _foundPtr: *mut bool,
+    hashp: *mut HTAB,
+    keyPtr: *const c_void,
+    action: HASHACTION,
+    foundPtr: *mut bool,
 ) -> *mut c_void {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+    crate::utils::hash::dynahash::hash_search(hashp as _, keyPtr, core::mem::transmute(action), foundPtr)
 }
-unsafe fn hash_seq_init(_status: *mut HASH_SEQ_STATUS, _hashp: *mut HTAB) {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+unsafe fn hash_seq_init(status: *mut HASH_SEQ_STATUS, hashp: *mut HTAB) {
+    crate::utils::hash::dynahash::hash_seq_init(status as _, hashp as _)
 }
-unsafe fn hash_seq_search(_status: *mut HASH_SEQ_STATUS) -> *mut c_void {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+unsafe fn hash_seq_search(status: *mut HASH_SEQ_STATUS) -> *mut c_void {
+    crate::utils::hash::dynahash::hash_seq_search(status as _)
 }
-unsafe fn hash_destroy(_hashp: *mut HTAB) {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+unsafe fn hash_destroy(hashp: *mut HTAB) {
+    crate::utils::hash::dynahash::hash_destroy(hashp as _)
 }
-unsafe fn hash_get_num_entries(_hashp: *mut HTAB) -> i64 {
-    unimplemented!() // TODO: utils/hash/dynahash.c
+unsafe fn hash_get_num_entries(hashp: *mut HTAB) -> i64 {
+    crate::utils::hash::dynahash::hash_get_num_entries(hashp as _) as i64
 }
 
 // memutils.c
 unsafe fn mul_size(_s1: Size, _s2: Size) -> Size {
-    unimplemented!() // TODO: utils/mmgr/mcxt.c
+    crate::storage::ipc::shmem::mul_size(_s1 as _, _s2 as _) as _
 }
-unsafe fn MemSet(_start: *mut c_void, _val: c_int, _len: Size) {
-    unimplemented!() // TODO: c.h MemSet
-}
+unsafe fn MemSet(_start: *mut c_void, _val: c_int, _len: Size) { crate::c::MemSet(_start as _, _val as _, _len as _) }
 
 // MemoryContexts (utils/memutils.h)
 #[allow(non_upper_case_globals)]

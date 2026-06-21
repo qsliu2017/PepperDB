@@ -6,3 +6,4 @@ pub mod sharedtuplestore;
 pub mod logtape;
 pub mod tuplesort;
 pub mod tuplesortvariants;
+pub mod tuplestore;

@@ -98,13 +98,13 @@ use crate::access::nbtree::nbtxlog::{BTREE_METAPAGE, BTP_SPLIT_END, P_NONE};
 // Re-use nbtutils types.
 use crate::access::nbtree::nbtutils::{
     BTArrayKeyInfo, BTCycleId,
-    BTScanPosData, BTScanPosItem,
     SK_BT_SKIP, SK_BT_MINVAL, SK_BT_MAXVAL,
     ScanDirection, ForwardScanDirection,
     _bt_allequalimage, _bt_start_vacuum, _bt_end_vacuum, _bt_end_vacuum_callback,
     _bt_killitems, _bt_start_prim_scan, _bt_start_array_keys,
     btoptions, btproperty, btbuildphasename,
 };
+use crate::access::nbtree::nbtsearch::{BTScanPosData, BTScanPosItem};
 use crate::utils::fmgr::{FmgrInfo, FunctionCallInfo};
 use crate::access::nbtree::nbtvalidate::{
     BTOPTIONS_PROC, BTMaxStrategyNumber,
@@ -339,19 +339,19 @@ extern "C" {
     fn _bt_upgradelockbufcleanup(rel: Relation, buf: Buffer);
     fn _bt_vacuum_needs_cleanup(rel: Relation) -> bool;
     fn _bt_set_cleanup_info(rel: Relation, num_delpages: BlockNumber);
-    fn BTPageGetOpaque(page: Page) -> BTPageOpaque;
+    pub fn BTPageGetOpaque(page: Page) -> BTPageOpaque;
     fn BTPageIsRecyclable(page: Page, heaprel: Relation) -> bool;
     fn P_ISLEAF(opaque: BTPageOpaque) -> bool;
-    fn P_ISDELETED(opaque: BTPageOpaque) -> bool;
+    pub fn P_ISDELETED(opaque: BTPageOpaque) -> bool;
     fn P_ISHALFDEAD(opaque: BTPageOpaque) -> bool;
-    fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber;
-    fn BTScanPosIsValid(pos: BTScanPosData) -> bool;
-    fn BTScanPosIsPinned(pos: BTScanPosData) -> bool;
-    fn BTScanPosUnpinIfPinned(pos: *mut BTScanPosData);
-    fn BTScanPosInvalidate(pos: *mut BTScanPosData);
-    fn BTreeTupleIsPivot(itup: IndexTuple) -> bool;
-    fn BTreeTupleIsPosting(itup: IndexTuple) -> bool;
-    fn BTreeTupleGetNPosting(itup: IndexTuple) -> c_int;
+    pub fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber;
+    pub fn BTScanPosIsValid(pos: BTScanPosData) -> bool;
+    pub fn BTScanPosIsPinned(pos: BTScanPosData) -> bool;
+    pub fn BTScanPosUnpinIfPinned(pos: *mut BTScanPosData);
+    pub fn BTScanPosInvalidate(pos: *mut BTScanPosData);
+    pub fn BTreeTupleIsPivot(itup: IndexTuple) -> bool;
+    pub fn BTreeTupleIsPosting(itup: IndexTuple) -> bool;
+    pub fn BTreeTupleGetNPosting(itup: IndexTuple) -> c_int;
     fn BTreeTupleGetPosting(itup: IndexTuple) -> *mut ItemPointerData;
     fn BufferGetPage(buf: Buffer) -> Page;
     fn BufferGetBlockNumber(buf: Buffer) -> BlockNumber;
@@ -568,6 +568,12 @@ pub unsafe extern "C" fn btinsert(
 
     result = _bt_doinsert(rel, itup, checkUnique, indexUnchanged, heapRel);
 
+    if std::env::var("PDB_BT").is_ok() && (*(*rel).rd_rel).oid == 2663 {
+        let d = crate::utils::rel::RelationGetDescr(rel as _);
+        let a0 = crate::access::common::tupdesc::TupleDescAttr(d as _, 0);
+        eprintln!("PDB_BT btinsert idx=2663 attr0_attlen={} result={}", (*a0).attlen, result);
+    }
+
     pfree(itup as *mut c_void);
 
     result
@@ -576,9 +582,10 @@ pub unsafe extern "C" fn btinsert(
 /*
  *	btgettuple() -- Get the next tuple in the scan.
  */
-pub unsafe extern "C" fn btgettuple(scan: IndexScanDesc, dir: ScanDirection) -> bool {
+pub unsafe extern "C" fn btgettuple(scan: IndexScanDesc, dir: ScanDirection) -> bool  {
     let so: BTScanOpaque = (*scan).opaque as BTScanOpaque;
     let mut res: bool;
+    if std::env::var("PDB_IS").is_ok() { eprintln!("[btgettuple] called numberOfKeys={}", (*scan).numberOfKeys); }
 
     Assert!((*scan).heapRelation != std::ptr::null_mut());
 
@@ -671,7 +678,7 @@ pub unsafe extern "C" fn btgetbitmap(scan: IndexScanDesc, tbm: *mut TIDBitmap) -
                 }
 
                 /* Save tuple ID, and continue scanning */
-                heapTid = &mut (*(*so).currPos.items.add((*so).currPos.itemIndex as usize)).heapTid
+                heapTid = &mut (*(*so).currPos.items.as_mut_ptr().add((*so).currPos.itemIndex as usize)).heapTid
                     as *mut _ as ItemPointer;
                 tbm_add_tuples(tbm, heapTid, 1, false);
                 ntids += 1;
@@ -939,8 +946,8 @@ pub unsafe extern "C" fn btrestrpos(scan: IndexScanDesc) {
             );
             /* copy items up to lastItem */
             memcpy(
-                (*so).currPos.items as *mut c_void,
-                (*so).markPos.items as *const c_void,
+                (*so).currPos.items.as_mut_ptr() as *mut c_void,
+                (*so).markPos.items.as_ptr() as *const c_void,
                 ((*so).markPos.lastItem as usize + 1) * size_of::<BTScanPosItem>(),
             );
             if !(*so).currTuples.is_null() {
@@ -1041,7 +1048,7 @@ pub unsafe extern "C" fn btestimateparallelscan(
  *
  * Caller must have exclusively locked btscan->btps_lock when called.
  */
-unsafe fn _bt_parallel_serialize_arrays(
+pub unsafe fn _bt_parallel_serialize_arrays(
     rel: Relation,
     btscan: BTParallelScanDesc,
     so: BTScanOpaque,
@@ -1097,7 +1104,7 @@ unsafe fn _bt_parallel_serialize_arrays(
  *
  * Caller must have exclusively locked btscan->btps_lock when called.
  */
-unsafe fn _bt_parallel_restore_arrays(
+pub unsafe fn _bt_parallel_restore_arrays(
     rel: Relation,
     btscan: BTParallelScanDesc,
     so: BTScanOpaque,
@@ -1376,6 +1383,7 @@ pub unsafe fn _bt_parallel_release(
  * notify other workers.  Otherwise, they might wait forever for the scan to
  * advance to the next page.
  */
+#[no_mangle]
 pub unsafe fn _bt_parallel_done(scan: IndexScanDesc) {
     let so: BTScanOpaque = (*scan).opaque as BTScanOpaque;
     let parallel_scan: *mut ParallelIndexScanDescData = (*scan).parallel_scan;
@@ -1428,6 +1436,7 @@ pub unsafe fn _bt_parallel_done(scan: IndexScanDesc) {
  * if the shared parallel state hasn't been seized since caller's backend last
  * advanced the scan.
  */
+#[no_mangle]
 pub unsafe fn _bt_parallel_primscan_schedule(
     scan: IndexScanDesc,
     curr_page: BlockNumber,
@@ -1593,7 +1602,7 @@ pub unsafe extern "C" fn btvacuumcleanup(
  * The caller is responsible for initially allocating/zeroing a stats struct
  * and for obtaining a vacuum cycle ID if necessary.
  */
-unsafe fn btvacuumscan(
+pub unsafe fn btvacuumscan(
     info: *mut IndexVacuumInfo,
     stats: *mut IndexBulkDeleteResult,
     callback: IndexBulkDeleteCallback,
@@ -1637,7 +1646,7 @@ unsafe fn btvacuumscan(
     /* Create a temporary memory context to run _bt_pagedel in */
     vstate.pagedelcontext = AllocSetContextCreate!(
         CurrentMemoryContext,
-        "_bt_pagedel",
+        c"_bt_pagedel".as_ptr(),
         ALLOCSET_DEFAULT_SIZES
     );
 
@@ -1776,7 +1785,7 @@ unsafe fn btvacuumscan(
  *
  * Returns BlockNumber of a scanned page (not backtracked).
  */
-unsafe fn btvacuumpage(vstate: *mut BTVacState, mut buf: Buffer) -> BlockNumber {
+pub unsafe fn btvacuumpage(vstate: *mut BTVacState, mut buf: Buffer) -> BlockNumber {
     let info: *mut IndexVacuumInfo = (*vstate).info;
     let stats: *mut IndexBulkDeleteResult = (*vstate).stats;
     let callback: IndexBulkDeleteCallback = (*vstate).callback;
@@ -2118,7 +2127,7 @@ unsafe fn btvacuumpage(vstate: *mut BTVacState, mut buf: Buffer) -> BlockNumber 
  * The number of TIDs that should remain in the posting list tuple is set for
  * caller in *nremaining.
  */
-unsafe fn btreevacuumposting(
+pub unsafe fn btreevacuumposting(
     vstate: *mut BTVacState,
     posting: IndexTuple,
     updatedoffset: OffsetNumber,

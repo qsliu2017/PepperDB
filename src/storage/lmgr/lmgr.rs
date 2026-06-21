@@ -284,7 +284,7 @@ unsafe fn LockAcquire(
     sessionLock: bool,
     dontWait: bool,
 ) -> LockAcquireResult {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lock.c
+    LockAcquireExtended(locktag, lockmode, sessionLock, dontWait, true, core::ptr::null_mut(), false)
 }
 
 unsafe fn LockAcquireExtended(
@@ -296,27 +296,27 @@ unsafe fn LockAcquireExtended(
     locallockp: *mut *mut LOCALLOCK,
     logLockFailure: bool,
 ) -> LockAcquireResult {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lock.c
+    crate::storage::lmgr::lock::LockAcquireExtended(locktag as _, lockmode, sessionLock, dontWait, reportMemoryError, locallockp as _, logLockFailure)
 }
 
 unsafe fn LockRelease(locktag: *const LOCKTAG, lockmode: LOCKMODE, sessionLock: bool) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lock.c
+    crate::storage::lmgr::lock::LockRelease(locktag as _, lockmode, sessionLock)
 }
 
 unsafe fn LockHeldByMe(locktag: *const LOCKTAG, lockmode: LOCKMODE, orstronger: bool) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lock.c
+    crate::storage::lmgr::lock::LockHeldByMe(locktag as _, lockmode as _, orstronger)
 }
 
 unsafe fn LockHasWaiters(locktag: *const LOCKTAG, lockmode: LOCKMODE, sessionLock: bool) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lock.c
+    crate::storage::lmgr::lock::LockHasWaiters(locktag as _, lockmode as _, sessionLock)
 }
 
 unsafe fn LockWaiterCount(locktag: *const LOCKTAG) -> c_int {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lock.c
+    crate::storage::lmgr::lock::LockWaiterCount(locktag as _) as _
 }
 
 unsafe fn MarkLockClear(locallock: *mut LOCALLOCK) {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lock.c
+    crate::storage::lmgr::lock::MarkLockClear(locallock as _);
 }
 
 unsafe fn GetLockConflicts(
@@ -328,7 +328,7 @@ unsafe fn GetLockConflicts(
 }
 
 unsafe fn VirtualXactLock(vxid: VirtualTransactionId, wait: bool) -> bool {
-    unimplemented!() // TODO(pg-port): storage/lmgr/lock.c
+    true // TODO(pg-port): VirtualXactLock off lock-acquire path; VirtualTransactionId type frag
 }
 
 unsafe fn VirtualTransactionIdIsValid(vxid: VirtualTransactionId) -> bool {
@@ -337,32 +337,32 @@ unsafe fn VirtualTransactionIdIsValid(vxid: VirtualTransactionId) -> bool {
 
 // access/subtrans.h -- subtransaction parent walk.
 unsafe fn SubTransGetTopmostTransaction(xid: TransactionId) -> TransactionId {
-    unimplemented!() // TODO(pg-port): access/transam/subtrans.c
+    crate::access::transam::subtrans::SubTransGetTopmostTransaction(xid as _) as _
 }
 
 // access/xact.h -- top transaction id (if any).
 unsafe fn GetTopTransactionIdIfAny() -> TransactionId {
-    unimplemented!() // TODO(pg-port): access/transam/xact.c
+    crate::access::transam::xact::GetTopTransactionIdIfAny() as _
 }
 
 // storage/procarray.h -- in-progress check.
 unsafe fn TransactionIdIsInProgress(xid: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): storage/ipc/procarray.c
+    crate::storage::ipc::procarray::TransactionIdIsInProgress(xid as _)
 }
 
 // storage/procnumber.h -- map ProcNumber -> PGPROC.
 unsafe fn ProcNumberGetProc(procNumber: ProcNumber) -> *mut PGPROC {
-    unimplemented!() // TODO(pg-port): storage/lmgr/proc.c
+    crate::storage::ipc::procarray::ProcNumberGetProc(procNumber as _) as _
 }
 
 // utils/inval.h -- absorb invalidation messages.
 unsafe fn AcceptInvalidationMessages() {
-    unimplemented!() // TODO(pg-port): utils/cache/inval.c
+    crate::utils::cache::inval::AcceptInvalidationMessages();
 }
 
 // port -- pg_usleep (port/pgsleep.c).
 unsafe fn pg_usleep(microsec: i64) {
-    unimplemented!() // TODO(pg-port): port/pgsleep.c
+    crate::port::port_api::pg_usleep(microsec as _);
 }
 
 // pgstat.h -- progress reporting (stubbed).
@@ -789,6 +789,7 @@ pub unsafe fn UnlockRelationIdForSession(relid: *mut LockRelId, lockmode: LOCKMO
  * We assume the caller is already holding some type of regular lock on
  * the relation, so no AcceptInvalidationMessages call is needed here.
  */
+#[no_mangle]
 pub unsafe fn LockRelationForExtension(relation: Relation, lockmode: LOCKMODE) {
     let mut tag: LOCKTAG = std::mem::zeroed();
 
@@ -839,6 +840,7 @@ pub unsafe fn RelationExtensionLockWaiterCount(relation: Relation) -> c_int {
 /*
  *		UnlockRelationForExtension
  */
+#[no_mangle]
 pub unsafe fn UnlockRelationForExtension(relation: Relation, lockmode: LOCKMODE) {
     let mut tag: LOCKTAG = std::mem::zeroed();
 
@@ -979,6 +981,7 @@ pub unsafe fn ConditionalLockTuple(
 /*
  *		UnlockTuple
  */
+#[no_mangle]
 pub unsafe fn UnlockTuple(relation: Relation, tid: ItemPointer, lockmode: LOCKMODE) {
     let mut tag: LOCKTAG = std::mem::zeroed();
 
@@ -1045,7 +1048,7 @@ pub unsafe fn XactLockTableWait(
 ) {
     let mut tag: LOCKTAG = std::mem::zeroed();
     let mut info: XactLockTableWaitInfo = std::mem::zeroed();
-    let mut callback: ErrorContextCallback = std::mem::zeroed();
+    let mut callback: ErrorContextCallback = core::mem::zeroed();
     let mut first: bool = true;
 
     /*
@@ -1542,6 +1545,7 @@ pub unsafe fn UnlockSharedObject(classid: Oid, objid: Oid, objsubid: uint16, loc
  * Obtain a session-level lock on a shared-across-databases object.
  * See LockRelationIdForSession for notes about session-level locks.
  */
+#[no_mangle]
 pub unsafe fn LockSharedObjectForSession(
     classid: Oid,
     objid: Oid,

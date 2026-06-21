@@ -94,9 +94,7 @@ unsafe fn SetUserIdAndSecContext(userid: Oid, sec_context: c_int) {
     let _ = (userid, sec_context);
     unimplemented!()
 }
-unsafe fn GetUserId() -> Oid {
-    unimplemented!()
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn check_can_set_role(member: Oid, role: Oid) {
     let _ = (member, role);
     unimplemented!()

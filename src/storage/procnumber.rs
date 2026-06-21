@@ -31,8 +31,7 @@ pub const MAX_BACKENDS: uint32 = (1u32 << MAX_BACKENDS_BITS) - 1;
  * Proc number of this backend (same as GetNumberFromPGProc(MyProc))
  */
 // extern PGDLLIMPORT ProcNumber MyProcNumber;
-pub static mut MyProcNumber: ProcNumber = INVALID_PROC_NUMBER;
-
+extern "C" { pub static mut MyProcNumber: ProcNumber; }
 /* proc number of our parallel session leader, or INVALID_PROC_NUMBER if none */
 // extern PGDLLIMPORT ProcNumber ParallelLeaderProcNumber;
 pub static mut ParallelLeaderProcNumber: ProcNumber = INVALID_PROC_NUMBER;

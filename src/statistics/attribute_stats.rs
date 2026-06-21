@@ -79,8 +79,8 @@ const TYPECACHE_EQ_OPR: c_int = 0x0001;
 const TYPECACHE_LT_OPR: c_int = 0x0002;
 
 /* syscache ids (utils/syscache.h, not yet ported) */
-const ATTNUM: c_int = 0;
-const STATRELATTINH: c_int = 0;
+const ATTNUM: c_int = 7;
+const STATRELATTINH: c_int = 65;
 
 /*
  * Attribute numbers and Natts for pg_statistic (catalog/pg_statistic.h, not

@@ -76,8 +76,8 @@ const ERROR: c_int = 21;
 const InvalidOid: Oid = 0;
 
 /* syscache ids  TODO(pg-port): utils/syscache.h */
-const CONNAMENSP: c_int = 10;
-const CONDEFAULT: c_int = 9;
+const CONNAMENSP: c_int = 18;
+const CONDEFAULT: c_int = 17;
 
 /* Natts / Anum for pg_conversion  TODO(pg-port): catalog/pg_conversion.h */
 const Natts_pg_conversion: usize = 8;
@@ -152,9 +152,7 @@ unsafe fn NameGetDatum(name: *const NameData) -> Datum {
 }
 
 /* syscache  TODO(pg-port): utils/syscache.h */
-unsafe fn SearchSysCacheExists2(_cacheId: c_int, _key1: Datum, _key2: Datum) -> bool {
-    false
-}
+unsafe fn SearchSysCacheExists2(_cacheId: c_int, _key1: Datum, _key2: Datum) -> bool { crate::utils::cache::syscache::SearchSysCacheExists2(_cacheId as _, _key1 as _, _key2 as _) }
 unsafe fn SearchSysCacheList3(
     _cacheId: c_int,
     _key1: Datum,
@@ -179,10 +177,8 @@ unsafe fn heap_form_tuple(
     _tupleDescriptor: TupleDesc,
     _values: *mut Datum,
     _isnull: *mut bool,
-) -> HeapTuple {
-    core::ptr::null_mut()
-}
-unsafe fn heap_freetuple(_htup: HeapTuple) {}
+) -> HeapTuple { unimplemented!() }
+unsafe fn heap_freetuple(_htup: HeapTuple) { crate::access::common::heaptuple::heap_freetuple(_htup as _) }
 
 /* catalog/indexing.h, catalog/catalog.h  TODO(pg-port) */
 unsafe fn CatalogTupleInsert(_heapRel: Relation, _tup: HeapTuple) {}
@@ -204,8 +200,7 @@ unsafe fn recordDependencyOn(
     _depender: *const ObjectAddress,
     _referenced: *const ObjectAddress,
     _behavior: c_int,
-) {
-}
+) { crate::catalog::pg_depend::recordDependencyOn(_depender as _, _referenced as _, _behavior as _) }
 unsafe fn recordDependencyOnOwner(_classId: Oid, _objectId: Oid, _owner: Oid) {}
 unsafe fn recordDependencyOnCurrentExtension(_object: *const ObjectAddress, _isReplace: bool) {}
 

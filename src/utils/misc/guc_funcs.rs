@@ -172,6 +172,7 @@ pub const VAR_RESET_ALL: VariableSetKind = 5;
 
 #[repr(C)]
 pub struct VariableSetStmt {
+    pub r#type: c_int, // NodeTag (must be present so kind/name/args land at the right offsets)
     pub kind: VariableSetKind,
     pub name: *mut c_char,
     pub args: *mut List,
@@ -197,7 +198,11 @@ pub struct TypeCast {
 
 #[repr(C)]
 pub struct A_Const {
+    pub r#type: c_int, // NodeTag
+    pub _pad: c_int,   // ValUnion is 8-aligned in C; pad so `val` lands at offset 8
     pub val: Node,
+    pub isnull: bool,
+    pub location: c_int,
 }
 
 // Float node from value.rs
@@ -231,32 +236,43 @@ pub const NUM_PG_FILE_SETTINGS_ATTS: usize = 7;
 // ---- local stubs for unported helpers ----
 
 unsafe fn IsInParallelMode() -> bool {
-    unimplemented!() // TODO: access/xact.c
+    crate::access::transam::xact::IsInParallelMode_real()
 }
-unsafe fn WarnNoTransactionBlock(_isTopLevel: bool, _stmtType: *const c_char) {
-    unimplemented!() // TODO: access/xact.c
+unsafe fn WarnNoTransactionBlock(isTopLevel: bool, stmtType: *const c_char) {
+    crate::access::transam::xact::WarnNoTransactionBlock(isTopLevel, stmtType)
 }
 unsafe fn set_config_option(
-    _name: *const c_char,
-    _value: *const c_char,
-    _context: GucContext,
-    _source: GucSource,
-    _action: GucAction,
-    _changeVal: bool,
-    _elevel: c_int,
-    _is_reload: bool,
+    name: *const c_char,
+    value: *const c_char,
+    context: GucContext,
+    source: GucSource,
+    action: GucAction,
+    changeVal: bool,
+    elevel: c_int,
+    is_reload: bool,
 ) -> c_int {
-    unimplemented!() // TODO: utils/misc/guc.c
+    crate::utils::misc::guc::set_config_option(
+        name,
+        value,
+        std::mem::transmute(context),
+        std::mem::transmute(source),
+        std::mem::transmute(action),
+        changeVal,
+        elevel,
+        is_reload,
+    )
 }
 unsafe fn superuser() -> bool {
-    unimplemented!() // TODO: utils/misc/superuser.c
+    crate::utils::misc::superuser::superuser()
 }
 unsafe fn ExtractSetVariableArgs_stub() {}
 unsafe fn ImportSnapshot(_idstr: *const c_char) {
-    unimplemented!() // TODO: utils/time/snapmgr.c
+    unimplemented!() // TODO: utils/time/snapmgr.c (real impl exists but pulls in a
+                     // broken `fstat$INODE64` link-name in snapmgr.rs that fails to
+                     // link on modern macOS; forward once that is fixed)
 }
 unsafe fn ResetAllOptions() {
-    unimplemented!() // TODO: utils/misc/guc.c
+    crate::utils::misc::guc::ResetAllOptions()
 }
 unsafe fn InvokeObjectPostAlterHookArgStr(
     _classId: Oid,
@@ -265,48 +281,71 @@ unsafe fn InvokeObjectPostAlterHookArgStr(
     _auxiliaryId: c_int,
     _is_internal: bool,
 ) {
-    unimplemented!() // TODO: catalog/objectaccess.c
+    // object_access_hook is null unless an extension (e.g. sepgsql) registers it;
+    // a no-op is the correct default behavior.
 }
 unsafe fn GetConfigOptionByName(
-    _name: *const c_char,
-    _varname: *mut *const c_char,
-    _missing_ok: bool,
+    name: *const c_char,
+    varname: *mut *const c_char,
+    missing_ok: bool,
 ) -> *mut c_char {
-    unimplemented!() // TODO: utils/misc/guc.c
+    crate::utils::misc::guc::GetConfigOptionByName(name, varname, missing_ok)
 }
 unsafe fn find_option(
-    _name: *const c_char,
-    _create_placeholders: bool,
-    _skip_errors: bool,
-    _elevel: c_int,
+    name: *const c_char,
+    create_placeholders: bool,
+    skip_errors: bool,
+    elevel: c_int,
 ) -> *mut config_generic {
-    unimplemented!() // TODO: utils/misc/guc.c
+    crate::utils::misc::guc::find_option(name, create_placeholders, skip_errors, elevel) as _
 }
-unsafe fn initStringInfo(_str: *mut StringInfoData) {
-    unimplemented!() // TODO: lib/stringinfo.c
+unsafe fn initStringInfo(str: *mut StringInfoData) {
+    crate::lib::stringinfo::initStringInfo(str as _)
 }
-unsafe fn appendStringInfoString(_str: *mut StringInfoData, _s: *const c_char) {
-    unimplemented!() // TODO: lib/stringinfo.c
+unsafe fn appendStringInfoString(str: *mut StringInfoData, s: *const c_char) {
+    crate::lib::stringinfo::appendStringInfoString(str as _, s)
 }
-unsafe fn quote_identifier(_ident: *const c_char) -> *const c_char {
-    unimplemented!() // TODO: utils/adt/ruleutils.c
+unsafe fn quote_identifier(ident: *const c_char) -> *const c_char {
+    // Minimal port of ruleutils.c quote_identifier: return as-is if it's a safe
+    // bare identifier ([a-z_][a-z0-9_]*), else return a double-quoted palloc'd copy.
+    // (Keyword check is omitted; GUC names that reach here are safe lowercase.)
+    let bytes = std::ffi::CStr::from_ptr(ident).to_bytes();
+    let safe = !bytes.is_empty()
+        && (bytes[0].is_ascii_lowercase() || bytes[0] == b'_')
+        && bytes.iter().all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_');
+    if safe {
+        return ident;
+    }
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len() + 4);
+    out.push(b'"');
+    for &c in bytes {
+        if c == b'"' {
+            out.push(b'"');
+        }
+        out.push(c);
+    }
+    out.push(b'"');
+    out.push(0);
+    let p = crate::utils::palloc::palloc(out.len()) as *mut c_char;
+    core::ptr::copy_nonoverlapping(out.as_ptr(), p as *mut u8, out.len());
+    p
 }
 unsafe fn typenameTypeIdAndMod(
-    _pstate: *mut c_void,
-    _typeName: *mut TypeName,
-    _typeid_p: *mut Oid,
-    _typmod_p: *mut int32,
+    pstate: *mut c_void,
+    typeName: *mut TypeName,
+    typeid_p: *mut Oid,
+    typmod_p: *mut int32,
 ) {
-    unimplemented!() // TODO: parser/parse_type.c
+    crate::parser::parse_type::typenameTypeIdAndMod(pstate as _, typeName as _, typeid_p, typmod_p)
 }
-unsafe fn interval_in(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!() // TODO: utils/adt/timestamp.c
+unsafe fn interval_in(fcinfo: FunctionCallInfo) -> Datum {
+    crate::utils::adt::timestamp::interval_in(fcinfo)
 }
-unsafe fn interval_out(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!() // TODO: utils/adt/timestamp.c
+unsafe fn interval_out(fcinfo: FunctionCallInfo) -> Datum {
+    crate::utils::adt::timestamp::interval_out(fcinfo)
 }
-unsafe fn guc_name_compare(_namea: *const c_char, _nameb: *const c_char) -> c_int {
-    unimplemented!() // TODO: utils/misc/guc.c
+unsafe fn guc_name_compare(namea: *const c_char, nameb: *const c_char) -> c_int {
+    crate::utils::misc::guc::guc_name_compare_c(namea, nameb)
 }
 unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc {
     unimplemented!() // TODO: access/common/tupdesc.c
@@ -362,9 +401,7 @@ unsafe fn construct_array_builtin(_elems: *mut Datum, _nelems: c_int, _elmtype: 
 unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool {
     unimplemented!() // TODO: utils/adt/acl.c
 }
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn get_config_unit_name(_flags: c_int) -> *const c_char {
     unimplemented!() // TODO: utils/misc/guc.c
 }
@@ -456,6 +493,10 @@ pub unsafe extern "C" fn ExecSetVariableStmt(stmt: *mut VariableSetStmt, isTopLe
         ereport!(ERROR, "cannot set parameters during a parallel operation");
     }
 
+    if std::env::var_os("PDB_BT").is_some() {
+        let nm = if (*stmt).name.is_null() { "<null>".to_string() } else { std::ffi::CStr::from_ptr((*stmt).name).to_string_lossy().into_owned() };
+        eprintln!("PDB_BT ExecSetVariableStmt kind={} name={}", (*stmt).kind as i32, nm);
+    }
     match (*stmt).kind {
         VAR_SET_VALUE | VAR_SET_CURRENT => {
             if (*stmt).is_local {
@@ -679,6 +720,10 @@ unsafe fn flatten_set_variable_args(name: *const c_char, args: *mut List) -> *mu
             typeName = (*tc).typeName;
         }
 
+        if std::env::var_os("PDB_BT").is_some() {
+            eprintln!("PDB_BT ExtractSetVar arg_tag={} isA_AConst={} T_A_Const={}",
+                nodeTag(arg) as c_int, IsA!(arg, T_A_Const), NodeTag::T_A_Const as c_int);
+        }
         if !IsA!(arg, T_A_Const) {
             elog!(ERROR, "unrecognized node type: {}", nodeTag(arg) as c_int);
         }

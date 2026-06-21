@@ -34,37 +34,23 @@ pub struct LogicalRepRelMapEntry {
     pub statelsn: XLogRecPtr,
 }
 
-pub unsafe fn logicalrep_relmap_update(remoterel: *mut LogicalRepRelation) {
-    unimplemented!()
-}
+pub unsafe fn logicalrep_relmap_update(remoterel: *mut LogicalRepRelation) { unimplemented!() }
 
-pub unsafe fn logicalrep_partmap_reset_relmap(remoterel: *mut LogicalRepRelation) {
-    unimplemented!()
-}
+pub unsafe fn logicalrep_partmap_reset_relmap(remoterel: *mut LogicalRepRelation) { unimplemented!() }
 
 pub unsafe fn logicalrep_rel_open(
     remoteid: LogicalRepRelId,
     lockmode: LOCKMODE,
-) -> *mut LogicalRepRelMapEntry {
-    unimplemented!()
-}
+) -> *mut LogicalRepRelMapEntry { unimplemented!() }
 
 pub unsafe fn logicalrep_partition_open(
     root: *mut LogicalRepRelMapEntry,
     partrel: Relation,
     map: *mut AttrMap,
-) -> *mut LogicalRepRelMapEntry {
-    unimplemented!()
-}
+) -> *mut LogicalRepRelMapEntry { unimplemented!() }
 
-pub unsafe fn logicalrep_rel_close(rel: *mut LogicalRepRelMapEntry, lockmode: LOCKMODE) {
-    unimplemented!()
-}
+pub unsafe fn logicalrep_rel_close(rel: *mut LogicalRepRelMapEntry, lockmode: LOCKMODE) { unimplemented!() }
 
-pub unsafe fn IsIndexUsableForReplicaIdentityFull(idxrel: Relation, attrmap: *mut AttrMap) -> bool {
-    unimplemented!()
-}
+pub unsafe fn IsIndexUsableForReplicaIdentityFull(idxrel: Relation, attrmap: *mut AttrMap) -> bool { unimplemented!() }
 
-pub unsafe fn GetRelationIdentityOrPK(rel: Relation) -> Oid {
-    unimplemented!()
-}
+pub unsafe fn GetRelationIdentityOrPK(rel: Relation) -> Oid { unimplemented!() }

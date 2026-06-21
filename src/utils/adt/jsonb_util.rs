@@ -354,21 +354,13 @@ unsafe fn NumericGetDatum(X: Numeric) -> Datum {
 /* TODO(pg-port): real numeric_eq lives in utils/adt/numeric.c (not yet ported).
  * Declared with the PGFunction signature so it can be handed to
  * DirectFunctionCall*. */
-unsafe fn numeric_eq(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb_util: numeric_eq (utils/adt/numeric.c) not yet translated")
-}
+unsafe fn numeric_eq(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_eq(_fcinfo) as _ }
 /* TODO(pg-port): real numeric_cmp lives in utils/adt/numeric.c (not yet ported). */
-unsafe fn numeric_cmp(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb_util: numeric_cmp (utils/adt/numeric.c) not yet translated")
-}
+unsafe fn numeric_cmp(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum { crate::utils::adt::numeric::numeric_cmp(_fcinfo) as _ }
 /* TODO(pg-port): real hash_numeric lives in utils/adt/numeric.c (not yet ported). */
-unsafe fn hash_numeric(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb_util: hash_numeric (utils/adt/numeric.c) not yet translated")
-}
+unsafe fn hash_numeric(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum { crate::utils::adt::numeric::hash_numeric(_fcinfo) as _ }
 /* TODO(pg-port): real hash_numeric_extended lives in utils/adt/numeric.c. */
-unsafe fn hash_numeric_extended(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum {
-    unimplemented!("jsonb_util: hash_numeric_extended (utils/adt/numeric.c) not yet translated")
-}
+unsafe fn hash_numeric_extended(_fcinfo: crate::utils::fmgr::FunctionCallInfo) -> Datum { crate::utils::adt::numeric::hash_numeric_extended(_fcinfo) as _ }
 
 /* TODO(pg-port): real varstr_cmp lives in utils/adt/varlena.c (not yet ported). */
 unsafe fn varstr_cmp(
@@ -377,9 +369,7 @@ unsafe fn varstr_cmp(
     _arg2: *const c_char,
     _len2: c_int,
     _collid: Oid,
-) -> c_int {
-    unimplemented!("jsonb_util: varstr_cmp (utils/adt/varlena.c) not yet translated")
-}
+) -> c_int { crate::utils::adt::varlena::varstr_cmp(_arg1 as _, _len1 as _, _arg2 as _, _len2 as _, _collid as _) as _ }
 
 /* hashcharextended is ported in access/hash/hashfunc.rs */
 use crate::access::hash::hashfunc::hashcharextended;

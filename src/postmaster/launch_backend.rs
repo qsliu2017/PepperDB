@@ -41,8 +41,10 @@ use crate::miscadmin::{
 // Stub types and externs for as-yet-unported dependencies.
 // ----------------------------------------------------------------------------
 
-/* libpq/libpq-be.h */
-pub type ClientSocket = c_void;
+/* libpq/libpq-be.h: real struct so size_of (used for the MyClientSocket
+ * palloc+memcpy below) covers the full {sock, raddr}; a c_void alias made it
+ * zero-size, so the accepted socket fd/addr were never copied to the child. */
+pub use crate::libpq::libpq_be::ClientSocket;
 
 /* The pid_t type. */
 #[allow(non_camel_case_types)]
@@ -75,70 +77,76 @@ pub struct ConnTiming {
 
 type MainFn = unsafe extern "C" fn(startup_data: *const c_void, startup_data_len: Size);
 
-unsafe extern "C" fn BackendMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: tcop/backend_startup.c
+unsafe extern "C" fn BackendMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::tcop::backend_startup::BackendMain(startup_data, startup_data_len)
 }
 unsafe extern "C" fn AutoVacLauncherMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: postmaster/autovacuum.c
+    // bring-up: autovacuum subsystem not yet linked; idle so the postmaster does
+    // not treat us as a crashed child (which would terminate all backends).
+    loop {
+        let ts = libc::timespec { tv_sec: 60, tv_nsec: 0 };
+        libc::nanosleep(&ts, core::ptr::null_mut());
+    }
 }
 unsafe extern "C" fn AutoVacWorkerMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: postmaster/autovacuum.c
+    loop {
+        let ts = libc::timespec { tv_sec: 60, tv_nsec: 0 };
+        libc::nanosleep(&ts, core::ptr::null_mut());
+    }
 }
-unsafe extern "C" fn BackgroundWorkerMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: postmaster/bgworker.c
+unsafe extern "C" fn BackgroundWorkerMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::postmaster::bgworker::BackgroundWorkerMain(startup_data, startup_data_len)
 }
-unsafe extern "C" fn ReplSlotSyncWorkerMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: replication/logical/slotsync.c
+unsafe extern "C" fn ReplSlotSyncWorkerMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::replication::logical::slotsync::ReplSlotSyncWorkerMain(startup_data, startup_data_len)
 }
-unsafe extern "C" fn PgArchiverMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: postmaster/pgarch.c
+unsafe extern "C" fn PgArchiverMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::postmaster::pgarch::PgArchiverMain(startup_data, startup_data_len)
 }
-unsafe extern "C" fn BackgroundWriterMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: postmaster/bgwriter.c
+unsafe extern "C" fn BackgroundWriterMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::postmaster::bgwriter::BackgroundWriterMain(startup_data, startup_data_len)
 }
-unsafe extern "C" fn CheckpointerMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: postmaster/checkpointer.c
+unsafe extern "C" fn CheckpointerMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::postmaster::checkpointer::CheckpointerMain(startup_data, startup_data_len)
 }
-unsafe extern "C" fn IoWorkerMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: storage/aio/method_worker.c
+unsafe extern "C" fn IoWorkerMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::storage::io_worker::IoWorkerMain(startup_data, startup_data_len)
 }
-unsafe extern "C" fn StartupProcessMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: postmaster/startup.c
+unsafe extern "C" fn StartupProcessMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::postmaster::startup::StartupProcessMain(startup_data, startup_data_len)
 }
-unsafe extern "C" fn WalReceiverMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: replication/walreceiver.c
+unsafe extern "C" fn WalReceiverMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::replication::walreceiver::WalReceiverMain(startup_data, startup_data_len)
 }
-unsafe extern "C" fn WalSummarizerMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: postmaster/walsummarizer.c
+unsafe extern "C" fn WalSummarizerMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::postmaster::walsummarizer::WalSummarizerMain(startup_data, startup_data_len)
 }
-unsafe extern "C" fn WalWriterMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: postmaster/walwriter.c
+unsafe extern "C" fn WalWriterMain(startup_data: *const c_void, startup_data_len: Size) {
+    crate::postmaster::walwriter::WalWriterMain(startup_data, startup_data_len)
 }
-unsafe extern "C" fn SysLoggerMain(_startup_data: *const c_void, _startup_data_len: Size) {
-    unimplemented!() // TODO: postmaster/syslogger.c
-}
+unsafe extern "C" fn SysLoggerMain(startup_data: *const c_void, startup_data_len: Size) { unimplemented!() }
 
 // ----------------------------------------------------------------------------
 // Helper functions owned by other modules (local stubs).
 // ----------------------------------------------------------------------------
 
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!() // TODO: utils/adt/timestamp.c
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 unsafe fn fork_process() -> pid_t {
-    unimplemented!() // TODO: postmaster/fork_process.c
+    crate::postmaster::fork_process::fork_process()
 }
-unsafe fn ClosePostmasterPorts(_am_syslogger: bool) {
-    unimplemented!() // TODO: postmaster/postmaster.c
+unsafe fn ClosePostmasterPorts(am_syslogger: bool) {
+    crate::postmaster::postmaster::ClosePostmasterPorts(am_syslogger)
 }
 unsafe fn InitPostmasterChild() {
-    unimplemented!() // TODO: utils/init/miscinit.c
+    crate::miscadmin::InitPostmasterChild()
 }
 unsafe fn dsm_detach_all() {
-    unimplemented!() // TODO: storage/ipc/dsm.c
+    crate::storage::ipc::dsm::dsm_detach_all()
 }
 unsafe fn PGSharedMemoryDetach() {
-    unimplemented!() // TODO: port/sysv_shmem.c
+    crate::port::sysv_shmem::PGSharedMemoryDetach()
 }
 
 /*

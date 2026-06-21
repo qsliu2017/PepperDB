@@ -87,10 +87,28 @@ extern "C" {
  */
 macro_rules! ereturn {
     ($escontext:expr, $dummy:expr, $($arg:tt)*) => {{
-        let _ = &$escontext;
+        let __ctx = $escontext as *mut Node;
+        if SOFT_ERROR_FLAG(__ctx) {
+            return $dummy;
+        }
         crate::utils::elog::emit_log(ERROR, &$($arg)*, file!(), line!());
         return $dummy;
     }};
+}
+
+/*
+ * SOFT_ERROR_FLAG: if `escontext` is a real ErrorSaveContext, record that a soft
+ * error occurred and return true (caller returns its dummy without raising);
+ * otherwise return false so the caller raises a hard ERROR.
+ */
+#[inline]
+unsafe fn SOFT_ERROR_FLAG(escontext: *mut Node) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    if !escontext.is_null() && *(escontext as *const c_int) == T_ErrorSaveContext {
+        (*(escontext as *mut crate::nodes::miscnodes::ErrorSaveContext)).error_occurred = true;
+        return true;
+    }
+    false
 }
 
 /* utils/errcodes.h: error classification codes.  The elog shim ignores these. */
@@ -142,19 +160,13 @@ unsafe fn lookup_type_cache(_type_id: Oid, _flags: c_int) -> *mut TypeCacheEntry
 }
 
 // TODO(pg-port): real lookup_rowtype_tupdesc lives in utils/cache/typcache.rs
-unsafe fn lookup_rowtype_tupdesc(_type_id: Oid, _typmod: int32) -> TupleDesc {
-    unimplemented!("lookup_rowtype_tupdesc: utils/cache/typcache.c not yet translated")
-}
+unsafe fn lookup_rowtype_tupdesc(_type_id: Oid, _typmod: int32) -> TupleDesc { crate::utils::cache::typcache::lookup_rowtype_tupdesc(_type_id as _, _typmod as _) as _ }
 
 // TODO(pg-port): real getTypeInputInfo lives in utils/cache/lsyscache.rs
-unsafe fn getTypeInputInfo(_typ: Oid, _typinput: *mut Oid, _typioparam: *mut Oid) {
-    unimplemented!("getTypeInputInfo: utils/cache/lsyscache.c not yet translated")
-}
+unsafe fn getTypeInputInfo(_typ: Oid, _typinput: *mut Oid, _typioparam: *mut Oid) { crate::utils::cache::lsyscache::getTypeInputInfo(_typ as _, _typinput as _, _typioparam as _) }
 
 // TODO(pg-port): real getTypeOutputInfo lives in utils/cache/lsyscache.rs
-unsafe fn getTypeOutputInfo(_typ: Oid, _typoutput: *mut Oid, _typisvarlena: *mut bool) {
-    unimplemented!("getTypeOutputInfo: utils/cache/lsyscache.c not yet translated")
-}
+unsafe fn getTypeOutputInfo(_typ: Oid, _typoutput: *mut Oid, _typisvarlena: *mut bool) { crate::utils::cache::lsyscache::getTypeOutputInfo(_typ as _, _typoutput as _, _typisvarlena as _) }
 
 // TODO(pg-port): real getTypeBinaryInputInfo lives in utils/cache/lsyscache.rs
 unsafe fn getTypeBinaryInputInfo(_typ: Oid, _typreceive: *mut Oid, _typioparam: *mut Oid) {
@@ -2358,6 +2370,8 @@ unsafe fn return_null(fcinfo: FunctionCallInfo) -> Datum {
  * convention only the errmsg text survives (errcode/errdetail dropped).
  */
 unsafe fn errsave_emit(escontext: *mut Node, msg: &str) {
-    let _ = escontext;
+    if SOFT_ERROR_FLAG(escontext) {
+        return;
+    }
     crate::utils::elog::emit_log(ERROR, msg, file!(), line!());
 }

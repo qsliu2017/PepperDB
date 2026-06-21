@@ -72,31 +72,31 @@ unsafe fn dirent_d_name(de: *const dirent) -> *const c_char {
 
 // storage/fd.h: AllocateDir/ReadDir/FreeDir.  TODO: port storage/file/fd.c.
 unsafe fn AllocateDir(_dirname: *const c_char) -> *mut DIR {
-    unimplemented!()
+    crate::storage::file::fd::AllocateDir(_dirname) as _
 }
 unsafe fn ReadDir(_dir: *mut DIR, _dirname: *const c_char) -> *mut dirent {
-    unimplemented!()
+    crate::storage::file::fd::ReadDir(_dir as _, _dirname) as _
 }
 unsafe fn FreeDir(_dir: *mut DIR) -> c_int {
-    unimplemented!()
+    crate::storage::file::fd::FreeDir(_dir as _)
 }
 
 // storage/fd.h: MakePGDirectory.  TODO: port storage/file/fd.c.
 unsafe fn MakePGDirectory(_directoryName: *const c_char) -> c_int {
-    unimplemented!()
+    crate::storage::file::fd::MakePGDirectory(_directoryName)
 }
 
 // storage/fd.h: OpenTransientFile/CloseTransientFile.  TODO: port storage/file/fd.c.
 unsafe fn OpenTransientFile(_fileName: *const c_char, _fileFlags: c_int) -> c_int {
-    unimplemented!()
+    crate::storage::file::fd::OpenTransientFile(_fileName, _fileFlags)
 }
 unsafe fn CloseTransientFile(_fd: c_int) -> c_int {
-    unimplemented!()
+    crate::storage::file::fd::CloseTransientFile(_fd)
 }
 
 // storage/fd.h: pg_flush_data.  TODO: port storage/file/fd.c.
 unsafe fn pg_flush_data(_fd: c_int, _offset: off_t, _nbytes: off_t) {
-    unimplemented!()
+    crate::storage::file::fd::pg_flush_data(_fd, _offset as _, _nbytes as _)
 }
 
 // utils/elog.h: errcode_for_file_access().  TODO: port from elog.c.

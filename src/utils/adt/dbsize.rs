@@ -1200,9 +1200,9 @@ const OBJECT_TABLESPACE: c_int = 0;
 const DatabaseRelationId: Oid = 1262;
 const TableSpaceRelationId: Oid = 1213;
 const ROLE_PG_READ_ALL_STATS: Oid = 3375;
-const DATABASEOID: c_int = 0;
-const TABLESPACEOID: c_int = 0;
-const RELOID: c_int = 0;
+const DATABASEOID: c_int = 21;
+const TABLESPACEOID: c_int = 69;
+const RELOID: c_int = 57;
 const DEFAULTTABLESPACE_OID: Oid = 1663;
 const GLOBALTABLESPACE_OID: Oid = 1664;
 const InvalidOid: Oid = 0;
@@ -1252,9 +1252,7 @@ unsafe fn has_privs_of_role(_member: Oid, _role: Oid) -> bool {
 unsafe fn aclcheck_error(_aclerr: AclResult, _objtype: c_int, _objectname: *const c_char) {
     unimplemented!() // TODO: catalog/aclchk.c
 }
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO: utils/init/miscinit.c
-}
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn get_database_name(_dbid: Oid) -> *const c_char {
     unimplemented!() // TODO: commands/dbcommands.c
 }
@@ -1286,7 +1284,7 @@ unsafe fn relation_close(_relation: Relation, _lockmode: c_int) {
     unimplemented!() // TODO: access/common/relation.c
 }
 unsafe fn RelationGetIndexList(_relation: Relation) -> *mut List {
-    unimplemented!() // TODO: utils/cache/relcache.c
+    crate::utils::cache::relcache::RelationGetIndexList(_relation as _) as _
 }
 unsafe fn relpathbackend(_rlocator: RelFileLocator, _backend: ProcNumber, _forknumber: ForkNumber) -> RelPathStr {
     unimplemented!() // TODO: common/relpath.c

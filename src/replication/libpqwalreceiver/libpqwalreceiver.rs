@@ -253,35 +253,25 @@ unsafe fn tuplestore_begin_heap(
     unimplemented!() // TODO(pg-port): real tuplestore_begin_heap lives in utils/sort/tuplestore.c
 }
 
-unsafe fn tuplestore_puttuple(_state: *mut Tuplestorestate, _tuple: HeapTuple) {
-    unimplemented!() // TODO(pg-port): real tuplestore_puttuple lives in utils/sort/tuplestore.c
-}
+unsafe fn tuplestore_puttuple(state: *mut Tuplestorestate, tuple: HeapTuple) { crate::utils::sort::tuplestore::tuplestore_puttuple(state as _, tuple as _) }
 
-unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc {
-    unimplemented!() // TODO(pg-port): real CreateTemplateTupleDesc lives in access/common/tupdesc.c
-}
+unsafe fn CreateTemplateTupleDesc(natts: c_int) -> TupleDesc { unimplemented!() }
 
 unsafe fn TupleDescInitEntry(
-    _desc: TupleDesc,
-    _attributeNumber: AttrNumber,
-    _attributeName: *const c_char,
-    _oidtypeid: Oid,
-    _typmod: i32,
-    _attdim: c_int,
-) {
-    unimplemented!() // TODO(pg-port): real TupleDescInitEntry lives in access/common/tupdesc.c
-}
+    desc: TupleDesc,
+    attributeNumber: AttrNumber,
+    attributeName: *const c_char,
+    oidtypeid: Oid,
+    typmod: i32,
+    attdim: c_int,
+) { unimplemented!() }
 
-unsafe fn TupleDescGetAttInMetadata(_tupdesc: TupleDesc) -> *mut AttInMetadata {
-    unimplemented!() // TODO(pg-port): real TupleDescGetAttInMetadata lives in utils/fmgr/funcapi.c
-}
+unsafe fn TupleDescGetAttInMetadata(tupdesc: TupleDesc) -> *mut AttInMetadata { unimplemented!() }
 
 unsafe fn BuildTupleFromCStrings(
-    _attinmeta: *mut AttInMetadata,
-    _values: *mut *mut c_char,
-) -> HeapTuple {
-    unimplemented!() // TODO(pg-port): real BuildTupleFromCStrings lives in utils/fmgr/funcapi.c
-}
+    attinmeta: *mut AttInMetadata,
+    values: *mut *mut c_char,
+) -> HeapTuple { unimplemented!() }
 
 /// MaxTupleAttributeNumber - access/htup_details.h
 const MaxTupleAttributeNumber: usize = 1664;
@@ -291,9 +281,7 @@ const MaxTupleAttributeNumber: usize = 1664;
 // ---------------------------------------------------------------------------
 // TODO(pg-port): real DatumGetLSN lives in utils/adt/pg_lsn.c / pg_lsn.h.
 #[inline]
-unsafe fn DatumGetLSN(d: Datum) -> XLogRecPtr {
-    unimplemented!() // TODO(pg-port): real DatumGetLSN lives in utils/adt/pg_lsn.h
-}
+unsafe fn DatumGetLSN(d: Datum) -> XLogRecPtr { crate::utils::adt::pg_lsn::DatumGetLSN(d as _) }
 
 // TODO(pg-port): real DirectFunctionCall1Coll lives in utils/fmgr/fmgr.c.
 #[inline]
@@ -307,10 +295,8 @@ unsafe fn DirectFunctionCall1Coll(
 
 // TODO(pg-port): real pg_lsn_in lives in utils/adt/pg_lsn.c.
 unsafe extern "C" fn pg_lsn_in(
-    _fcinfo: crate::utils::fmgr::FunctionCallInfo,
-) -> Datum {
-    unimplemented!() // TODO(pg-port): real pg_lsn_in lives in utils/adt/pg_lsn.c
-}
+    fcinfo: crate::utils::fmgr::FunctionCallInfo,
+) -> Datum { crate::utils::adt::pg_lsn::pg_lsn_in(fcinfo) }
 
 // TODO(pg-port): real CStringGetDatum lives in utils/adt/datum.c / fmgr.h.
 #[inline]

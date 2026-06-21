@@ -202,8 +202,8 @@ pub const AccessShareLock: c_int = 1;
 pub const NoLock: c_int = 0;
 
 /* RELOID / TYPEOID syscache identifiers */
-pub const RELOID: c_int = 43;
-pub const TYPEOID: c_int = 44;
+pub const RELOID: c_int = 57;
+pub const TYPEOID: c_int = 82;
 
 /// Macro: NO_XML_SUPPORT -- raises feature-not-supported when USE_LIBXML is off.
 macro_rules! NO_XML_SUPPORT {
@@ -250,17 +250,17 @@ pub unsafe fn SPI_connect() -> c_int { 0 }
 /// TODO(pg-port): SPI_finish -- executor/spi.h
 pub unsafe fn SPI_finish() -> c_int { 0 }
 /// TODO(pg-port): SPI_execute -- executor/spi.h
-pub unsafe fn SPI_execute(_query: *const c_char, _read_only: bool, _count: i64) -> c_int { 0 }
+pub unsafe fn SPI_execute(_query: *const c_char, _read_only: bool, _count: i64) -> c_int { crate::executor::spi::SPI_execute(_query as _, _read_only, _count as _) as _ }
 /// TODO(pg-port): SPI_prepare -- executor/spi.h
-pub unsafe fn SPI_prepare(_query: *const c_char, _nargs: c_int, _argtypes: *mut Oid) -> SPIPlanPtr { core::ptr::null_mut() }
+pub unsafe fn SPI_prepare(_query: *const c_char, _nargs: c_int, _argtypes: *mut Oid) -> SPIPlanPtr { crate::executor::spi::SPI_prepare(_query as _, _nargs as _, _argtypes as _) as _ }
 /// TODO(pg-port): SPI_cursor_open -- executor/spi.h
 pub unsafe fn SPI_cursor_open(_name: *const c_char, _plan: SPIPlanPtr, _values: *mut Datum, _nulls: *mut c_char, _read_only: bool) -> Portal { core::ptr::null_mut() }
 /// TODO(pg-port): SPI_cursor_find -- executor/spi.h
-pub unsafe fn SPI_cursor_find(_name: *const c_char) -> Portal { core::ptr::null_mut() }
+pub unsafe fn SPI_cursor_find(_name: *const c_char) -> Portal { crate::executor::spi::SPI_cursor_find(_name as _) as _ }
 /// TODO(pg-port): SPI_cursor_fetch -- executor/spi.h
-pub unsafe fn SPI_cursor_fetch(_portal: Portal, _forward: bool, _count: i64) {}
+pub unsafe fn SPI_cursor_fetch(_portal: Portal, _forward: bool, _count: i64) { crate::executor::spi::SPI_cursor_fetch(_portal as _, _forward, _count as _) }
 /// TODO(pg-port): SPI_cursor_close -- executor/spi.h
-pub unsafe fn SPI_cursor_close(_portal: Portal) {}
+pub unsafe fn SPI_cursor_close(_portal: Portal) { crate::executor::spi::SPI_cursor_close(_portal as _) }
 /// TODO(pg-port): SPI_processed -- executor/spi.h
 pub static mut SPI_processed: u64 = 0;
 /// TODO(pg-port): SPI_tuptable -- executor/spi.h
@@ -272,9 +272,9 @@ pub unsafe fn SPI_palloc(size: usize) -> *mut c_void { palloc(size) }
 /// TODO(pg-port): SPI_getbinval -- executor/spi.h
 pub unsafe fn SPI_getbinval(_tup: *mut c_void, _tupdesc: TupleDesc, _fnumber: c_int, _isnull: *mut bool) -> Datum { 0 }
 /// TODO(pg-port): SPI_fname -- executor/spi.h
-pub unsafe fn SPI_fname(_tupdesc: TupleDesc, _fnumber: c_int) -> *mut c_char { core::ptr::null_mut() }
+pub unsafe fn SPI_fname(_tupdesc: TupleDesc, _fnumber: c_int) -> *mut c_char { crate::executor::spi::SPI_fname(_tupdesc as _, _fnumber as _) as _ }
 /// TODO(pg-port): SPI_gettypeid -- executor/spi.h
-pub unsafe fn SPI_gettypeid(_tupdesc: TupleDesc, _fnumber: c_int) -> Oid { 0 }
+pub unsafe fn SPI_gettypeid(_tupdesc: TupleDesc, _fnumber: c_int) -> Oid { crate::executor::spi::SPI_gettypeid(_tupdesc as _, _fnumber as _) as _ }
 /// TODO(pg-port): SPITupleTable
 pub struct SPITupleTable {
     pub tupdesc: TupleDesc,
@@ -292,10 +292,11 @@ pub unsafe fn ReleaseSysCache(_tuple: HeapTuple) {}
 /// TODO(pg-port): type_is_array_domain -- utils/lsyscache.h
 pub unsafe fn type_is_array_domain(_typid: Oid) -> bool { false }
 /// TODO(pg-port): getTypeOutputInfo -- utils/lsyscache.h (full version)
-pub unsafe fn getTypeOutputInfo(_typid: Oid, _typOutput: *mut Oid, _typIsVarlena: *mut bool) {}
+pub unsafe fn getTypeOutputInfo(_typid: Oid, _typOutput: *mut Oid, _typIsVarlena: *mut bool) { crate::utils::cache::lsyscache::getTypeOutputInfo(_typid as _, _typOutput as _, _typIsVarlena as _) }
 /// TODO(pg-port): DatumGetArrayTypeP -- utils/array.h
-pub unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType { core::ptr::null_mut() }
+pub unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType { crate::access::nbtree::nbtpreprocesskeys::DatumGetArrayTypeP(_d as _) as _ }
 /// TODO(pg-port): deconstruct_array -- utils/array.h
+#[no_mangle]
 pub unsafe fn deconstruct_array(_array: *mut ArrayType, _elmtype: Oid, _elmlen: int16, _elmbyval: bool, _elmalign: c_char, _elemsp: *mut *mut Datum, _nullsp: *mut *mut bool, _nelemsp: *mut c_int) {}
 /// TODO(pg-port): deconstruct_array_builtin -- utils/array.h
 pub unsafe fn deconstruct_array_builtin(_array: *mut ArrayType, _elmtype: Oid, _elemsp: *mut *mut Datum, _nullsp: *mut *mut bool, _nelemsp: *mut c_int) {}
@@ -304,7 +305,7 @@ pub unsafe fn initArrayResult(_element_type: Oid, _rcontext: *mut c_void, _subco
 /// TODO(pg-port): accumArrayResult -- utils/array.h
 pub unsafe fn accumArrayResult(_astate: ArrayBuildState, _dvalue: Datum, _disnull: bool, _element_type: Oid, _rcontext: *mut c_void) -> ArrayBuildState { core::ptr::null_mut() }
 /// TODO(pg-port): makeArrayResult -- utils/array.h
-pub unsafe fn makeArrayResult(_astate: ArrayBuildState, _rcontext: *mut c_void) -> Datum { 0 }
+pub unsafe fn makeArrayResult(_astate: ArrayBuildState, _rcontext: *mut c_void) -> Datum { unimplemented!() }
 /// TODO(pg-port): CurrentMemoryContext -- utils/palloc.h
 pub unsafe fn CurrentMemoryContext() -> *mut c_void { core::ptr::null_mut() }
 /// TODO(pg-port): list_make1 -- nodes/pg_list.h
@@ -324,9 +325,9 @@ pub unsafe fn lfirst(_lc: *mut c_void) -> *mut c_void { core::ptr::null_mut() }
 /// TODO(pg-port): DatumGetTimestamp -- utils/timestamp.h
 pub unsafe fn DatumGetTimestamp(d: Datum) -> Timestamp { d as Timestamp }
 /// TODO(pg-port): j2date -- utils/datetime.h
-pub unsafe fn j2date(_jd: c_int, _year: *mut c_int, _month: *mut c_int, _day: *mut c_int) {}
+pub unsafe fn j2date(_jd: c_int, _year: *mut c_int, _month: *mut c_int, _day: *mut c_int) { crate::utils::adt::datetime::j2date(_jd as _, _year as _, _month as _, _day as _) }
 /// TODO(pg-port): EncodeDateOnly -- utils/datetime.h
-pub unsafe fn EncodeDateOnly(_tm: *mut pg_tm, _style: c_int, _str: *mut c_char) {}
+pub unsafe fn EncodeDateOnly(_tm: *mut pg_tm, _style: c_int, _str: *mut c_char) { crate::utils::adt::datetime::EncodeDateOnly(_tm as _, _style as _, _str as _) }
 /// TODO(pg-port): EncodeDateTime -- utils/datetime.h
 pub unsafe fn EncodeDateTime(_tm: *mut pg_tm, _fsec: fsec_t, _print_tz: bool, _tz: c_int, _tzn: *const c_char, _style: c_int, _str: *mut c_char) {}
 /// TODO(pg-port): timestamp2tm -- utils/timestamp.h
@@ -334,9 +335,9 @@ pub unsafe fn timestamp2tm(_dt: Timestamp, _tzp: *mut c_int, _tm: *mut pg_tm, _f
 /// TODO(pg-port): DatumGetByteaPP -- utils/builtins.h
 pub unsafe fn DatumGetByteaPP(d: Datum) -> *mut crate::c::bytea { d as *mut crate::c::bytea }
 /// TODO(pg-port): regclassout -- utils/adt/regproc.c
-pub unsafe fn regclassout(_fcinfo: FunctionCallInfo) -> Datum { 0 }
+pub unsafe fn regclassout(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::regproc::regclassout(_fcinfo as _) as _ }
 /// TODO(pg-port): DirectFunctionCall1 -- fmgr.h
-pub unsafe fn DirectFunctionCall1(_func: unsafe fn(FunctionCallInfo) -> Datum, _arg1: Datum) -> Datum { 0 }
+pub unsafe fn DirectFunctionCall1(_func: unsafe fn(FunctionCallInfo) -> Datum, _arg1: Datum) -> Datum { unimplemented!("DirectFunctionCall1 -- fmgr.h") }
 /// TODO(pg-port): errsave -- utils/elog.h
 pub unsafe fn errsave(_escontext: *mut Node, _code: c_int, _msg: *const c_char) {}
 /// TODO(pg-port): pg_encoding_mb2wchar_with_len -- mb/pg_wchar.h

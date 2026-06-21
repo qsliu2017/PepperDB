@@ -2520,34 +2520,32 @@ static mut pgWalUsage: WalUsage = WalUsage {
 }; // TODO(pg-port): real pgWalUsage lives in executor/instrument.c
 
 unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO(pg-port): real RecoveryInProgress lives in access/transam/xlog.c
+    crate::access::transam::xlog::RecoveryInProgress()
 }
 
 unsafe fn GlobalVisTestFor(_rel: Relation) -> *mut GlobalVisState {
-    unimplemented!() // TODO(pg-port): real GlobalVisTestFor lives in utils/time/snapmgr.c
+    crate::storage::ipc::procarray::GlobalVisTestFor(_rel as _) as _
 }
 
 unsafe fn GlobalVisTestIsRemovableXid(
     _state: *mut GlobalVisState,
     _xid: TransactionId,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): real GlobalVisTestIsRemovableXid lives in utils/time/snapmgr.c
+    crate::storage::ipc::procarray::GlobalVisTestIsRemovableXid(_state as _, _xid)
 }
 
 unsafe fn RelationGetTargetPageFreeSpace(_relation: Relation, _defaultff: c_int) -> Size {
     unimplemented!() // TODO(pg-port): real RelationGetTargetPageFreeSpace lives in utils/rel.h
 }
 
-unsafe fn RelationNeedsWAL(_relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real RelationNeedsWAL lives in utils/rel.h
-}
+unsafe fn RelationNeedsWAL(_relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(_relation) }
 
 unsafe fn RelationIsAccessibleInLogicalDecoding(_relation: Relation) -> bool {
-    unimplemented!() // TODO(pg-port): real RelationIsAccessibleInLogicalDecoding lives in utils/rel.h
+    crate::utils::cache::relcache::RelationIsAccessibleInLogicalDecoding(_relation as _)
 }
 
 unsafe fn PageGetHeapFreeSpace(_page: Page) -> Size {
-    unimplemented!() // TODO(pg-port): real PageGetHeapFreeSpace lives in storage/bufpage.c
+    crate::storage::bufpage::PageGetHeapFreeSpace(_page as _)
 }
 
 unsafe fn PageRepairFragmentation(_page: Page) {
@@ -2559,32 +2557,30 @@ unsafe fn PageTruncateLinePointerArray(_page: Page) {
 }
 
 unsafe fn ConditionalLockBufferForCleanup(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): real ConditionalLockBufferForCleanup lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::ConditionalLockBufferForCleanup(_buffer)
 }
 
 unsafe fn LockBuffer(_buffer: Buffer, _mode: c_int) {
-    unimplemented!() // TODO(pg-port): real LockBuffer lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::LockBuffer(_buffer, _mode)
 }
 
 unsafe fn MarkBufferDirty(_buffer: Buffer) {
-    unimplemented!() // TODO(pg-port): real MarkBufferDirty lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::MarkBufferDirty(_buffer)
 }
 
 unsafe fn MarkBufferDirtyHint(_buffer: Buffer, _buffer_std: bool) {
-    unimplemented!() // TODO(pg-port): real MarkBufferDirtyHint lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::MarkBufferDirtyHint(_buffer, _buffer_std)
 }
 
 unsafe fn BufferGetPage(_buffer: Buffer) -> Page {
-    unimplemented!() // TODO(pg-port): real BufferGetPage lives in storage/bufmgr.h
+    crate::storage::buffer::bufmgr::BufferGetPage(_buffer) as _
 }
 
 unsafe fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
-    unimplemented!() // TODO(pg-port): real BufferGetBlockNumber lives in storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::BufferGetBlockNumber(_buffer)
 }
 
-unsafe fn XLogCheckBufferNeedsBackup(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO(pg-port): real XLogCheckBufferNeedsBackup lives in access/transam/xloginsert.c
-}
+unsafe fn XLogCheckBufferNeedsBackup(_buffer: Buffer) -> bool { crate::access::transam::xloginsert::XLogCheckBufferNeedsBackup(_buffer) }
 
 unsafe fn XLogHintBitIsNeeded() -> bool {
     unimplemented!() // TODO(pg-port): real XLogHintBitIsNeeded lives in access/xlog.h
@@ -2610,24 +2606,18 @@ unsafe fn XLogInsert(_rmid: c_int, _info: uint8) -> XLogRecPtr {
     unimplemented!() // TODO(pg-port): real XLogInsert lives in access/transam/xloginsert.c
 }
 
-unsafe fn pgstat_update_heap_dead_tuples(_rel: Relation, _delta: c_int) {
-    unimplemented!() // TODO(pg-port): real pgstat_update_heap_dead_tuples lives in utils/activity/pgstat_relation.c
-}
+unsafe fn pgstat_update_heap_dead_tuples(_rel: Relation, _delta: c_int) { crate::utils::activity::pgstat_relation::pgstat_update_heap_dead_tuples(_rel, _delta) }
 
 unsafe fn HeapTupleSatisfiesVacuumHorizon(
     _htup: HeapTuple,
     _buffer: Buffer,
     _dead_after: *mut TransactionId,
-) -> HTSV_Result {
-    unimplemented!() // TODO(pg-port): real HeapTupleSatisfiesVacuumHorizon lives in access/heap/heapam_visibility.c
-}
+) -> HTSV_Result { crate::access::heap::heapam_visibility::HeapTupleSatisfiesVacuumHorizon(_htup, _buffer, _dead_after) }
 
 unsafe fn HeapTupleHeaderAdvanceConflictHorizon(
     _tuple: HeapTupleHeader,
     _snapshotConflictHorizon: *mut TransactionId,
-) {
-    unimplemented!() // TODO(pg-port): real HeapTupleHeaderAdvanceConflictHorizon lives in access/heap/heapam.c
-}
+) { crate::access::heap::heapam::HeapTupleHeaderAdvanceConflictHorizon(_tuple, _snapshotConflictHorizon) }
 
 unsafe fn heap_prepare_freeze_tuple(
     _tuple: HeapTupleHeader,
@@ -2635,21 +2625,15 @@ unsafe fn heap_prepare_freeze_tuple(
     _pagefrz: *mut HeapPageFreeze,
     _frz: *mut HeapTupleFreeze,
     _totally_frozen: *mut bool,
-) -> bool {
-    unimplemented!() // TODO(pg-port): real heap_prepare_freeze_tuple lives in access/heap/heapam.c
-}
+) -> bool { unimplemented!() }
 
-unsafe fn heap_pre_freeze_checks(_buffer: Buffer, _tuples: *mut HeapTupleFreeze, _ntuples: c_int) {
-    unimplemented!() // TODO(pg-port): real heap_pre_freeze_checks lives in access/heap/heapam.c
-}
+unsafe fn heap_pre_freeze_checks(_buffer: Buffer, _tuples: *mut HeapTupleFreeze, _ntuples: c_int) { unimplemented!() }
 
 unsafe fn heap_freeze_prepared_tuples(
     _buffer: Buffer,
     _tuples: *mut HeapTupleFreeze,
     _ntuples: c_int,
-) {
-    unimplemented!() // TODO(pg-port): real heap_freeze_prepared_tuples lives in access/heap/heapam.c
-}
+) { unimplemented!() }
 
 unsafe fn NormalTransactionIdPrecedes(id1: TransactionId, id2: TransactionId) -> bool {
     // TODO(pg-port): real NormalTransactionIdPrecedes lives in access/transam.h

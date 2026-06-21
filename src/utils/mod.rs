@@ -17,6 +17,7 @@ pub mod error;
 pub mod xid8;
 pub mod fmgr;
 pub mod fmgrtab;
+pub mod fmgrtab_gen;
 pub mod geo_decls;
 pub mod guc_hooks;
 pub mod hash;

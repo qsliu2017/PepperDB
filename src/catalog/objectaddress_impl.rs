@@ -14,6 +14,7 @@
  */
 
 use crate::prelude::*;
+use crate::utils::cache::syscache_ids_gen::{AMNAME, AMOID, AMOPSTRATEGY, AMPROCNUM, ATTNUM, AUTHNAME, AUTHOID, CLAAMNAMENSP, CLAOID, COLLNAMEENCNSP, COLLOID, CONNAMENSP, CONSTROID, CONVOID, DATABASEOID, DEFACLROLENSPOBJ, EVENTTRIGGERNAME, EVENTTRIGGEROID, FOREIGNDATAWRAPPERNAME, FOREIGNDATAWRAPPEROID, FOREIGNSERVERNAME, FOREIGNSERVEROID, LANGNAME, LANGOID, NAMESPACENAME, NAMESPACEOID, OPERNAMENSP, OPEROID, OPFAMILYAMNAMENSP, OPFAMILYOID, PARAMETERACLOID, PROCNAMEARGSNSP, PROCOID, PUBLICATIONNAME, PUBLICATIONNAMESPACE, PUBLICATIONNAMESPACEMAP, PUBLICATIONOID, PUBLICATIONREL, PUBLICATIONRELMAP, RELNAMENSP, RELOID, STATEXTNAMENSP, STATEXTOID, SUBSCRIPTIONNAME, SUBSCRIPTIONOID, TABLESPACEOID, TRFOID, TSCONFIGNAMENSP, TSCONFIGOID, TSDICTNAMENSP, TSDICTOID, TSPARSERNAMENSP, TSPARSEROID, TSTEMPLATENAMENSP, TSTEMPLATEOID, TYPENAMENSP, TYPEOID, USERMAPPINGOID, USERMAPPINGUSERSERVER};
 use crate::postgres_ext::Oid;
 
 // ObjectAddress -- already defined in catalog::objectaccess; import it.
@@ -101,46 +102,20 @@ use crate::appendStringInfo; // #[macro_export] macro lives at crate root
  * ----------------------------------------------------------------------- */
 
 /* --- syscache identifiers (SysCacheIdentifier enum values) --- */
-const AMNAME: c_int           = 0;  // pg_am by amname
-const AMOID: c_int            = 1;  // pg_am by oid
-const AUTHNAME: c_int         = 6;  // pg_authid by rolname
-const AUTHOID: c_int          = 7;  // pg_authid by oid
-const CLAOID: c_int           = 5;  // pg_opclass by oid
-const COLLOID: c_int          = 8;  // pg_collation by oid
 // CONNAMENSP defined later as pub const
-const CONSTROID: c_int        = 14; // pg_constraint by oid
-const CONVOID: c_int          = 9;  // pg_conversion by oid
-const DATABASEOID: c_int      = 11; // pg_database by oid
 // EVENTTRIGGERNAME/EVENTTRIGGEROID defined later as pub const
 // FOREIGNDATAWRAPPER*/FOREIGNSERVER* defined later as pub const
-const LANGNAME: c_int         = 19; // pg_language by name
-const LANGOID: c_int          = 20; // pg_language by oid
-const NAMESPACENAME: c_int    = 17; // pg_namespace by name
-const NAMESPACEOID: c_int     = 16; // pg_namespace by oid
-const OPEROID: c_int          = 18; // pg_operator by oid
-const OPFAMILYOID: c_int      = 22; // pg_opfamily by oid
 // OPFAMILYAMNAMENSP defined later as pub const
 // PARAMETERACLOID defined later as pub const
-const PROCOID: c_int          = 21; // pg_proc by oid
 // PUBLICATIONNAME defined later as pub const
-const PUBLICATIONOID: c_int   = 26;
-const RELOID: c_int           = 27; // pg_class by oid
 // RELNAMENSP defined later as pub const
 // STATEXTNAMENSP defined later as pub const
-const STATEXTOID: c_int       = 30;
 // SUBSCRIPTIONNAME/SUBSCRIPTIONOID defined later as pub const
-const TABLESPACEOID: c_int    = 33;
 // TRFOID defined later as pub const
 // TSCONFIGNAMENSP defined later as pub const
-const TSCONFIGOID: c_int      = 36;
 // TSDICTNAMENSP defined later as pub const
-const TSDICTOID: c_int        = 38;
 // TSPARSERNAMENSP defined later as pub const
-const TSPARSEROID: c_int      = 40;
 // TSTEMPLATENAMENSP defined later as pub const
-const TSTEMPLATEOID: c_int    = 42;
-const TYPENAMENSP: c_int      = 43;
-const TYPEOID: c_int          = 44;
 // USERMAPPINGOID/USERMAPPINGUSERSERVER defined later as pub const
 
 /* --- index OIDs (from DECLARE_UNIQUE_INDEX_PKEY / DECLARE_UNIQUE_INDEX) --- */
@@ -982,6 +957,7 @@ pub const INVALID_OBJECT_ADDRESS: ObjectAddress = ObjectAddress {
 
 /// Set an ObjectAddress in one step (C macro ObjectAddressSet).
 #[inline]
+#[no_mangle]
 pub unsafe fn ObjectAddressSet(
     addr: &mut ObjectAddress,
     class_id: Oid,
@@ -998,7 +974,7 @@ unsafe fn SharedInvalidMessageCounter() -> u64 { 0 }
 
 /// TODO(pg-port): IsSharedRelation
 #[inline]
-pub unsafe fn IsSharedRelation(_class_id: Oid) -> bool { false }
+pub unsafe fn IsSharedRelation(_class_id: Oid) -> bool { crate::catalog::catalog::IsSharedRelation(_class_id as _) }
 
 /// TODO(pg-port): LockSharedObject
 #[inline]
@@ -1034,15 +1010,11 @@ pub unsafe fn relation_openrv_extended(
     _rv: *mut RangeVar,
     _lockmode: LOCKMODE,
     _missing_ok: bool,
-) -> Relation {
-    core::ptr::null_mut()
-}
+) -> Relation { crate::access::common::relation::relation_openrv_extended(_rv as _, _lockmode as _, _missing_ok as _) }
 
 /// TODO(pg-port): relation_openrv
 #[inline]
-pub unsafe fn relation_openrv(_rv: *mut RangeVar, _lockmode: LOCKMODE) -> Relation {
-    core::ptr::null_mut()
-}
+pub unsafe fn relation_openrv(_rv: *mut RangeVar, _lockmode: LOCKMODE) -> Relation { crate::access::common::relation::relation_openrv(_rv as _, _lockmode as _) }
 
 /// TODO(pg-port): relation_close
 #[inline]
@@ -1054,23 +1026,21 @@ pub unsafe fn table_openrv_extended(
     _rv: *mut RangeVar,
     _lockmode: LOCKMODE,
     _missing_ok: bool,
-) -> Relation {
-    core::ptr::null_mut()
+) -> Relation { crate::access::table::table::table_openrv_extended(_rv as _, _lockmode as _, _missing_ok as _) }
+
+#[inline]
+pub unsafe fn table_open(relid: Oid, lockmode: LOCKMODE) -> Relation {
+    crate::access::table::table::table_open(relid, lockmode) as _
 }
 
-/// TODO(pg-port): table_open
 #[inline]
-pub unsafe fn table_open(_relid: Oid, _lockmode: LOCKMODE) -> Relation {
-    core::ptr::null_mut()
+pub unsafe fn table_close(rel: Relation, lockmode: LOCKMODE) {
+    crate::access::table::table::table_close(rel as _, lockmode)
 }
-
-/// TODO(pg-port): table_close
-#[inline]
-pub unsafe fn table_close(_rel: Relation, _lockmode: LOCKMODE) {}
 
 /// TODO(pg-port): RelationGetRelid
 #[inline]
-pub unsafe fn RelationGetRelid(_rel: Relation) -> Oid { InvalidOid }
+pub unsafe fn RelationGetRelid(rel: Relation) -> Oid { crate::utils::rel::RelationGetRelid(rel as _) }
 
 /// TODO(pg-port): RelationGetRelationName
 #[inline]
@@ -1084,9 +1054,7 @@ pub unsafe fn RelationGetDescr(_rel: Relation) -> *mut c_void { core::ptr::null_
 
 /// TODO(pg-port): makeRangeVarFromNameList
 #[inline]
-pub unsafe fn makeRangeVarFromNameList(_names: *mut List) -> *mut RangeVar {
-    core::ptr::null_mut()
-}
+pub unsafe fn makeRangeVarFromNameList(_names: *mut List) -> *mut RangeVar { crate::catalog::namespace::makeRangeVarFromNameList(_names as _) }
 
 /// TODO(pg-port): makeString
 #[inline]
@@ -1105,7 +1073,7 @@ macro_rules! makeNode {
 
 /// TODO(pg-port): strVal -- extract C string from a String node Value
 #[inline]
-pub unsafe fn strVal(_node: *mut c_void) -> *mut c_char { core::ptr::null_mut() }
+pub unsafe fn strVal(_node: *mut c_void) -> *mut c_char { crate::parser_link_shims::strVal(_node as _) }
 
 /// TODO(pg-port): linitial
 #[inline]
@@ -1121,7 +1089,7 @@ pub unsafe fn lthird(_list: *mut List) -> *mut c_void { core::ptr::null_mut() }
 
 /// TODO(pg-port): llast
 #[inline]
-pub unsafe fn llast(_list: *mut List) -> *mut c_void { core::ptr::null_mut() }
+pub unsafe fn llast(_list: *mut List) -> *mut c_void { crate::nodes::pg_list::llast(_list as _) }
 
 /// TODO(pg-port): list_length
 #[inline]
@@ -1153,6 +1121,7 @@ pub unsafe fn lappend(_list: *mut List, _datum: *mut c_void) -> *mut List {
 
 /// TODO(pg-port): list_make1 / list_make2 / list_make3
 #[inline]
+#[no_mangle]
 pub unsafe fn list_make1(_a: *mut c_void) -> *mut List { core::ptr::null_mut() }
 #[inline]
 pub unsafe fn list_make2(_a: *mut c_void, _b: *mut c_void) -> *mut List { core::ptr::null_mut() }
@@ -1169,7 +1138,7 @@ pub unsafe fn oidparse(_node: *mut Node) -> Oid { InvalidOid }
 
 /// TODO(pg-port): LargeObjectExists
 #[inline]
-pub unsafe fn LargeObjectExists(_loid: Oid) -> bool { false }
+pub unsafe fn LargeObjectExists(_loid: Oid) -> bool { crate::catalog::pg_largeobject::LargeObjectExists(_loid as _) }
 
 /// TODO(pg-port): NameListToString
 #[inline]
@@ -1187,13 +1156,11 @@ pub unsafe fn get_attnum(_relid: Oid, _attname: *const c_char) -> AttrNumber {
 #[inline]
 pub unsafe fn get_attname(
     _relid: Oid, _attnum: AttrNumber, _missing_ok: bool,
-) -> *mut c_char {
-    core::ptr::null_mut()
-}
+) -> *mut c_char { crate::utils::cache::lsyscache::get_attname(_relid as _, _attnum as _, _missing_ok as _) }
 
 /// TODO(pg-port): GetAttrDefaultOid
 #[inline]
-pub unsafe fn GetAttrDefaultOid(_relid: Oid, _attnum: AttrNumber) -> Oid { InvalidOid }
+pub unsafe fn GetAttrDefaultOid(_relid: Oid, _attnum: AttrNumber) -> Oid { crate::catalog::pg_attrdef::GetAttrDefaultOid(_relid as _, _attnum as _) }
 
 /// TODO(pg-port): GetAttrDefaultColumnAddress
 #[inline]
@@ -1207,9 +1174,7 @@ pub unsafe fn LookupFuncWithArgs(
     _objtype: ObjectType,
     _func: *mut ObjectWithArgs,
     _missing_ok: bool,
-) -> Oid {
-    InvalidOid
-}
+) -> Oid { crate::parser::parse_func::LookupFuncWithArgs(_objtype as _, _func as _, _missing_ok as _) }
 
 /// TODO(pg-port): LookupOperWithArgs
 #[inline]
@@ -1222,11 +1187,11 @@ pub unsafe fn LookupOperWithArgs(
 
 /// TODO(pg-port): get_collation_oid
 #[inline]
-pub unsafe fn get_collation_oid(_names: *mut List, _missing_ok: bool) -> Oid { InvalidOid }
+pub unsafe fn get_collation_oid(_names: *mut List, _missing_ok: bool) -> Oid { crate::catalog::namespace::get_collation_oid(_names as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_conversion_oid
 #[inline]
-pub unsafe fn get_conversion_oid(_names: *mut List, _missing_ok: bool) -> Oid { InvalidOid }
+pub unsafe fn get_conversion_oid(_names: *mut List, _missing_ok: bool) -> Oid { crate::catalog::namespace::get_conversion_oid(_names as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_opclass_oid
 #[inline]
@@ -1244,7 +1209,7 @@ pub unsafe fn get_opfamily_oid(
 #[inline]
 pub unsafe fn get_cast_oid(
     _sourcetypeid: Oid, _targettypeid: Oid, _missing_ok: bool,
-) -> Oid { InvalidOid }
+) -> Oid { crate::utils::cache::lsyscache::get_cast_oid(_sourcetypeid as _, _targettypeid as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_transform_oid
 #[inline]
@@ -1254,55 +1219,57 @@ pub unsafe fn get_transform_oid(
 
 /// TODO(pg-port): get_language_oid
 #[inline]
-pub unsafe fn get_language_oid(_name: *const c_char, _missing_ok: bool) -> Oid { InvalidOid }
+#[no_mangle]
+pub unsafe fn get_language_oid(_name: *const c_char, _missing_ok: bool) -> Oid { crate::commands::proclang::get_language_oid(_name as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_ts_parser_oid
 #[inline]
-pub unsafe fn get_ts_parser_oid(_names: *mut List, _missing_ok: bool) -> Oid { InvalidOid }
+pub unsafe fn get_ts_parser_oid(_names: *mut List, _missing_ok: bool) -> Oid { crate::catalog::namespace::get_ts_parser_oid(_names as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_ts_dict_oid
 #[inline]
-pub unsafe fn get_ts_dict_oid(_names: *mut List, _missing_ok: bool) -> Oid { InvalidOid }
+pub unsafe fn get_ts_dict_oid(_names: *mut List, _missing_ok: bool) -> Oid { crate::catalog::namespace::get_ts_dict_oid(_names as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_ts_template_oid
 #[inline]
-pub unsafe fn get_ts_template_oid(_names: *mut List, _missing_ok: bool) -> Oid { InvalidOid }
+pub unsafe fn get_ts_template_oid(_names: *mut List, _missing_ok: bool) -> Oid { crate::catalog::namespace::get_ts_template_oid(_names as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_ts_config_oid
 #[inline]
-pub unsafe fn get_ts_config_oid(_names: *mut List, _missing_ok: bool) -> Oid { InvalidOid }
+pub unsafe fn get_ts_config_oid(_names: *mut List, _missing_ok: bool) -> Oid { crate::catalog::namespace::get_ts_config_oid(_names as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_am_oid
 #[inline]
-pub unsafe fn get_am_oid(_name: *const c_char, _missing_ok: bool) -> Oid { InvalidOid }
+pub unsafe fn get_am_oid(_name: *const c_char, _missing_ok: bool) -> Oid { crate::commands::amcmds::get_am_oid(_name as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_am_name
 #[inline]
-pub unsafe fn get_am_name(_amoid: Oid) -> *mut c_char { core::ptr::null_mut() }
+pub unsafe fn get_am_name(_amoid: Oid) -> *mut c_char { crate::commands::amcmds::get_am_name(_amoid as _) }
 
 /// TODO(pg-port): get_database_oid
 #[inline]
-pub unsafe fn get_database_oid(_name: *const c_char, _missing_ok: bool) -> Oid { InvalidOid }
+#[no_mangle]
+pub unsafe fn get_database_oid(_name: *const c_char, _missing_ok: bool) -> Oid { crate::commands::dbcommands::get_database_oid(_name as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_database_name
 #[inline]
-pub unsafe fn get_database_name(_dboid: Oid) -> *mut c_char { core::ptr::null_mut() }
+pub unsafe fn get_database_name(_dboid: Oid) -> *mut c_char { crate::commands::dbcommands::get_database_name(_dboid as _) }
 
 /// TODO(pg-port): get_extension_oid
 #[inline]
-pub unsafe fn get_extension_oid(_name: *const c_char, _missing_ok: bool) -> Oid { InvalidOid }
+pub unsafe fn get_extension_oid(_name: *const c_char, _missing_ok: bool) -> Oid { crate::commands::extension::get_extension_oid(_name as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_extension_name
 #[inline]
-pub unsafe fn get_extension_name(_extoid: Oid) -> *mut c_char { core::ptr::null_mut() }
+pub unsafe fn get_extension_name(_extoid: Oid) -> *mut c_char { crate::commands::extension::get_extension_name(_extoid as _) }
 
 /// TODO(pg-port): get_tablespace_oid
 #[inline]
-pub unsafe fn get_tablespace_oid(_name: *const c_char, _missing_ok: bool) -> Oid { InvalidOid }
+pub unsafe fn get_tablespace_oid(_name: *const c_char, _missing_ok: bool) -> Oid { crate::commands::tablespace::get_tablespace_oid(_name as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_tablespace_name
 #[inline]
-pub unsafe fn get_tablespace_name(_spcoid: Oid) -> *mut c_char { core::ptr::null_mut() }
+pub unsafe fn get_tablespace_name(_spcoid: Oid) -> *mut c_char { crate::commands::tablespace::get_tablespace_name(_spcoid as _) }
 
 /// TODO(pg-port): get_role_oid
 #[inline]
@@ -1310,16 +1277,18 @@ pub unsafe fn get_role_oid(_name: *const c_char, _missing_ok: bool) -> Oid { Inv
 
 /// TODO(pg-port): get_namespace_oid
 #[inline]
-pub unsafe fn get_namespace_oid(_name: *const c_char, _missing_ok: bool) -> Oid { InvalidOid }
+pub unsafe fn get_namespace_oid(_name: *const c_char, _missing_ok: bool) -> Oid { crate::catalog::namespace::get_namespace_oid(_name as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_foreign_data_wrapper_oid
 #[inline]
+#[no_mangle]
 pub unsafe fn get_foreign_data_wrapper_oid(
     _name: *const c_char, _missing_ok: bool,
 ) -> Oid { InvalidOid }
 
 /// TODO(pg-port): get_foreign_server_oid
 #[inline]
+#[no_mangle]
 pub unsafe fn get_foreign_server_oid(
     _name: *const c_char, _missing_ok: bool,
 ) -> Oid { InvalidOid }
@@ -1370,19 +1339,19 @@ pub unsafe fn get_trigger_oid(
 #[inline]
 pub unsafe fn get_relation_constraint_oid(
     _relid: Oid, _conname: *const c_char, _missing_ok: bool,
-) -> Oid { InvalidOid }
+) -> Oid { crate::catalog::pg_constraint::get_relation_constraint_oid(_relid as _, _conname as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_relation_policy_oid
 #[inline]
 pub unsafe fn get_relation_policy_oid(
     _relid: Oid, _polname: *const c_char, _missing_ok: bool,
-) -> Oid { InvalidOid }
+) -> Oid { crate::commands::policy::get_relation_policy_oid(_relid as _, _polname as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_domain_constraint_oid
 #[inline]
 pub unsafe fn get_domain_constraint_oid(
     _typid: Oid, _conname: *const c_char, _missing_ok: bool,
-) -> Oid { InvalidOid }
+) -> Oid { crate::catalog::pg_constraint::get_domain_constraint_oid(_typid as _, _conname as _, _missing_ok as _) }
 
 /// TODO(pg-port): get_index_am_oid
 #[inline]
@@ -1397,11 +1366,11 @@ pub unsafe fn LookupTypeName(
     _typename: *mut TypeName,
     _typmod_p: *mut int32,
     _missing_ok: bool,
-) -> HeapTuple { core::ptr::null_mut() }
+) -> HeapTuple { crate::parser::parse_type::LookupTypeName(_pstate as _, _typename as _, _typmod_p as _, _missing_ok as _) as _ }
 
 /// TODO(pg-port): typeTypeId
 #[inline]
-pub unsafe fn typeTypeId(_tup: HeapTuple) -> Oid { InvalidOid }
+pub unsafe fn typeTypeId(_tup: HeapTuple) -> Oid { crate::parser::parse_type::typeTypeId(_tup as _) }
 
 /// TODO(pg-port): LookupTypeNameOid
 #[inline]
@@ -1409,7 +1378,7 @@ pub unsafe fn LookupTypeNameOid(
     _pstate: *mut c_void,
     _typename: *mut TypeName,
     _missing_ok: bool,
-) -> Oid { InvalidOid }
+) -> Oid { crate::parser::parse_type::LookupTypeNameOid(_pstate as _, _typename as _, _missing_ok as _) }
 
 /// TODO(pg-port): typenameTypeId
 #[inline]
@@ -1433,33 +1402,42 @@ pub unsafe fn typeStringToTypeName(
 
 /// TODO(pg-port): SearchSysCache1
 #[inline]
-pub unsafe fn SearchSysCache1(_cacheid: c_int, _key1: Datum) -> HeapTuple {
-    core::ptr::null_mut()
+pub unsafe fn SearchSysCache1(cacheid: c_int, key1: Datum) -> HeapTuple {
+    crate::utils::cache::syscache::SearchSysCache1(cacheid, key1) as _
 }
 
 /// TODO(pg-port): SearchSysCache2
 #[inline]
 pub unsafe fn SearchSysCache2(
-    _cacheid: c_int, _key1: Datum, _key2: Datum,
-) -> HeapTuple { core::ptr::null_mut() }
+    cacheid: c_int, key1: Datum, key2: Datum,
+) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache2(cacheid, key1, key2) as _ }
 
 /// TODO(pg-port): SearchSysCache3
 #[inline]
 pub unsafe fn SearchSysCache3(
-    _cacheid: c_int, _key1: Datum, _key2: Datum, _key3: Datum,
-) -> HeapTuple { core::ptr::null_mut() }
+    cacheid: c_int, key1: Datum, key2: Datum, key3: Datum,
+) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache3(cacheid, key1, key2, key3) as _ }
 
 /// TODO(pg-port): SearchSysCache4
 #[inline]
 pub unsafe fn SearchSysCache4(
-    _cacheid: c_int, _key1: Datum, _key2: Datum, _key3: Datum, _key4: Datum,
-) -> HeapTuple { core::ptr::null_mut() }
+    cacheid: c_int, key1: Datum, key2: Datum, key3: Datum, key4: Datum,
+) -> HeapTuple { crate::utils::cache::syscache::SearchSysCache4(cacheid, key1, key2, key3, key4) as _ }
 
 /// TODO(pg-port): SearchSysCacheCopy1
 #[inline]
+#[no_mangle]
 pub unsafe fn SearchSysCacheCopy1(
-    _cacheid: c_int, _key1: Datum,
-) -> HeapTuple { core::ptr::null_mut() }
+    cacheid: c_int, key1: Datum,
+) -> HeapTuple {
+    let tup = SearchSysCache1(cacheid, key1);
+    if tup.is_null() {
+        return tup;
+    }
+    let newtup = crate::access::common::heaptuple::heap_copytuple(tup as _) as HeapTuple;
+    ReleaseSysCache(tup);
+    newtup
+}
 
 /// TODO(pg-port): SearchSysCacheLockedCopy1
 #[inline]
@@ -1475,30 +1453,32 @@ pub unsafe fn SearchSysCacheCopyAttNum(
 
 /// TODO(pg-port): ReleaseSysCache
 #[inline]
-pub unsafe fn ReleaseSysCache(_tup: HeapTuple) {}
+pub unsafe fn ReleaseSysCache(tup: HeapTuple) {
+    crate::utils::cache::syscache::ReleaseSysCache(tup as _)
+}
 
 /// TODO(pg-port): GetSysCacheOid2
 #[inline]
 pub unsafe fn GetSysCacheOid2(
     _cacheid: c_int, _anum: AttrNumber, _key1: Datum, _key2: Datum,
-) -> Oid { InvalidOid }
+) -> Oid { crate::utils::cache::lsyscache::GetSysCacheOid2(_cacheid as _, _anum as _, _key1 as _, _key2 as _) }
 
 /// TODO(pg-port): SysCacheGetAttr
 #[inline]
 pub unsafe fn SysCacheGetAttr(
-    _cacheid: c_int,
-    _tup: HeapTuple,
-    _attnum: AttrNumber,
-    _isnull: *mut bool,
-) -> Datum { 0 }
+    cacheid: c_int,
+    tup: HeapTuple,
+    attnum: AttrNumber,
+    isnull: *mut bool,
+) -> Datum { crate::utils::cache::syscache::SysCacheGetAttr(cacheid, tup as _, attnum as _, isnull) as _ }
 
 /// TODO(pg-port): SysCacheGetAttrNotNull
 #[inline]
 pub unsafe fn SysCacheGetAttrNotNull(
-    _cacheid: c_int,
-    _tup: HeapTuple,
-    _attnum: AttrNumber,
-) -> Datum { 0 }
+    cacheid: c_int,
+    tup: HeapTuple,
+    attnum: AttrNumber,
+) -> Datum { crate::utils::cache::syscache::SysCacheGetAttrNotNull(cacheid, tup as _, attnum as _) as _ }
 
 /// TODO(pg-port): heap_getattr
 #[inline]
@@ -1507,7 +1487,7 @@ pub unsafe fn heap_getattr(
     _attnum: AttrNumber,
     _tupdesc: *mut c_void,
     _isnull: *mut bool,
-) -> Datum { 0 }
+) -> Datum { crate::access::htup_details::heap_getattr(_tup as _, _attnum as _, _tupdesc as _, _isnull as _) }
 
 /// TODO(pg-port): DatumGetObjectId
 #[inline]
@@ -1519,6 +1499,7 @@ pub fn ObjectIdGetDatum(oid: Oid) -> Datum { oid as Datum }
 
 /// TODO(pg-port): Int16GetDatum
 #[inline]
+#[no_mangle]
 pub fn Int16GetDatum(v: int16) -> Datum { v as Datum }
 
 /// TODO(pg-port): Int32GetDatum
@@ -1531,7 +1512,7 @@ pub fn CStringGetDatum(s: *const c_char) -> Datum { s as Datum }
 
 /// TODO(pg-port): DatumGetName
 #[inline]
-pub unsafe fn DatumGetName(_d: Datum) -> *mut NameData { core::ptr::null_mut() }
+pub unsafe fn DatumGetName(_d: Datum) -> *mut NameData { crate::postgres::DatumGetName(_d as _) as _ }
 
 /// TODO(pg-port): ScanKeyInit
 #[inline]
@@ -1541,7 +1522,7 @@ pub unsafe fn ScanKeyInit(
     _strategy: StrategyNumber,
     _procedure: RegProcedure,
     _argument: Datum,
-) {}
+) { crate::access::common::scankey::ScanKeyInit(_entry as _, _attnum as _, _strategy as _, _procedure as _, _argument as _) }
 
 /// TODO(pg-port): systable_beginscan
 #[inline]
@@ -1552,7 +1533,7 @@ pub unsafe fn systable_beginscan(
     _snapshot: *mut c_void,
     _nkeys: c_int,
     _key: *mut ScanKeyData,
-) -> *mut SysScanDescData { core::ptr::null_mut() }
+) -> *mut SysScanDescData { crate::access::index::genam::systable_beginscan(_heapRel as _, _indexId as _, _indexOK as _, _snapshot as _, _nkeys as _, _key as _) as _ }
 
 /// TODO(pg-port): systable_getnext
 #[inline]
@@ -1566,6 +1547,7 @@ pub unsafe fn systable_endscan(_scan: *mut SysScanDescData) {}
 
 /// TODO(pg-port): LockTuple
 #[inline]
+#[no_mangle]
 pub unsafe fn LockTuple(
     _rel: Relation,
     _tid: *mut c_void,
@@ -1574,7 +1556,7 @@ pub unsafe fn LockTuple(
 
 /// TODO(pg-port): heap_copytuple
 #[inline]
-pub unsafe fn heap_copytuple(_tup: HeapTuple) -> HeapTuple { core::ptr::null_mut() }
+pub unsafe fn heap_copytuple(_tup: HeapTuple) -> HeapTuple { crate::access::common::heaptuple::heap_copytuple(_tup as _) }
 
 /// TODO(pg-port): heap_form_tuple
 #[inline]
@@ -1582,7 +1564,7 @@ pub unsafe fn heap_form_tuple(
     _tupdesc: *mut c_void,
     _values: *mut Datum,
     _nulls: *mut bool,
-) -> HeapTuple { core::ptr::null_mut() }
+) -> HeapTuple { crate::access::common::heaptuple::heap_form_tuple(_tupdesc as _, _values as _, _nulls as _) }
 
 /// TODO(pg-port): HeapTupleGetDatum
 #[inline]
@@ -1617,11 +1599,11 @@ pub unsafe fn deconstruct_array_builtin(
     _elems: *mut *mut Datum,
     _nulls: *mut *mut bool,
     _nelems: *mut c_int,
-) {}
+) { crate::utils::adt::arrayfuncs::deconstruct_array_builtin(_arr as _, _elmtype as _, _elems as _, _nulls as _, _nelems as _) }
 
 /// TODO(pg-port): construct_empty_array
 #[inline]
-pub unsafe fn construct_empty_array(_elmtype: Oid) -> *mut c_void { core::ptr::null_mut() }
+pub unsafe fn construct_empty_array(_elmtype: Oid) -> *mut c_void { crate::utils::adt::arrayfuncs::construct_empty_array(_elmtype as _) as _ }
 
 /// TODO(pg-port): construct_md_array
 #[inline]
@@ -1635,12 +1617,11 @@ pub unsafe fn construct_md_array(
     _elmlen: c_int,
     _elmbyval: bool,
     _elmalign: c_char,
-) -> *mut c_void { core::ptr::null_mut() }
+) -> *mut c_void { crate::utils::adt::arrayfuncs::construct_md_array(_datums as _, _nulls as _, _ndims as _, _dims as _, _lb as _, _elmtype as _, _elmlen as _, _elmbyval as _, _elmalign as _) as _ }
 
 /// TODO(pg-port): strlist_to_textarray (declared public below)
 
 /* --- syscache id + attnum for pg_attribute (used by pg_get_acl) --- */
-const ATTNUM: c_int = 4;                                /* pg_attribute by (attrelid,attnum) */
 const Anum_pg_attribute_attacl: AttrNumber = 22;
 
 /* TYPALIGN_INT -- attribute alignment char (used by strlist_to_textarray) */
@@ -1681,12 +1662,12 @@ pub unsafe fn format_procedure_parts(
     _objname: *mut *mut List,
     _objargs: *mut *mut List,
     _missing_ok: bool,
-) {}
+) { crate::utils::adt::regproc::format_procedure_parts(_proc_oid as _, _objname as _, _objargs as _, _missing_ok as _) }
 
 /// TODO(pg-port): format_type_be
 #[inline]
-pub unsafe fn format_type_be(_type_oid: Oid) -> *mut c_char {
-    b"<type>\0".as_ptr() as _
+pub unsafe fn format_type_be(type_oid: Oid) -> *mut c_char {
+    crate::utils::adt::format_type::format_type_be(type_oid)
 }
 
 /// TODO(pg-port): format_type_be_qualified
@@ -1699,7 +1680,7 @@ pub unsafe fn format_type_be_qualified(_type_oid: Oid) -> *mut c_char {
 #[inline]
 pub unsafe fn format_type_extended(
     _type_oid: Oid, _typemod: int32, _flags: uint16,
-) -> *mut c_char { core::ptr::null_mut() }
+) -> *mut c_char { crate::utils::adt::format_type::format_type_extended(_type_oid as _, _typemod as _, _flags as _) }
 
 /// TODO(pg-port): format_operator_extended
 #[inline]
@@ -1720,7 +1701,7 @@ pub unsafe fn format_operator_parts(
     _objname: *mut *mut List,
     _objargs: *mut *mut List,
     _missing_ok: bool,
-) {}
+) { crate::utils::adt::regproc::format_operator_parts(_opr_oid as _, _objname as _, _objargs as _, _missing_ok as _) }
 
 /// TODO(pg-port): format_procedure
 #[inline]
@@ -1785,9 +1766,7 @@ pub unsafe fn get_subscription_name(
 
 /// TODO(pg-port): get_namespace_name_or_temp
 #[inline]
-pub unsafe fn get_namespace_name_or_temp(_nspoid: Oid) -> *mut c_char {
-    core::ptr::null_mut()
-}
+pub unsafe fn get_namespace_name_or_temp(_nspoid: Oid) -> *mut c_char { crate::utils::cache::lsyscache::get_namespace_name_or_temp(_nspoid as _) }
 
 /* Visibility predicates -- TODO(pg-port) */
 #[inline] pub unsafe fn RelationIsVisible(_oid: Oid) -> bool { false }
@@ -1823,23 +1802,15 @@ pub struct ForeignServer    { pub servername: *mut c_char, pub serverid: Oid }
 pub struct Publication      { pub oid: Oid }
 
 #[inline]
-pub unsafe fn GetForeignDataWrapperExtended(_oid: Oid, _missing_ok: bool) -> *mut ForeignDataWrapper {
-    core::ptr::null_mut()
-}
+pub unsafe fn GetForeignDataWrapperExtended(_oid: Oid, _missing_ok: bool) -> *mut ForeignDataWrapper { unimplemented!() }
 #[inline]
-pub unsafe fn GetForeignServerExtended(_oid: Oid, _missing_ok: bool) -> *mut ForeignServer {
-    core::ptr::null_mut()
-}
+pub unsafe fn GetForeignServerExtended(_oid: Oid, _missing_ok: bool) -> *mut ForeignServer { unimplemented!() }
 #[inline]
-pub unsafe fn GetForeignServer(_oid: Oid) -> *mut ForeignServer { core::ptr::null_mut() }
+pub unsafe fn GetForeignServer(_oid: Oid) -> *mut ForeignServer { unimplemented!() }
 #[inline]
-pub unsafe fn GetForeignServerByName(_name: *const c_char, _missing_ok: bool) -> *mut ForeignServer {
-    core::ptr::null_mut()
-}
+pub unsafe fn GetForeignServerByName(_name: *const c_char, _missing_ok: bool) -> *mut ForeignServer { unimplemented!() }
 #[inline]
-pub unsafe fn GetPublicationByName(_name: *const c_char, _missing_ok: bool) -> *mut Publication {
-    core::ptr::null_mut()
-}
+pub unsafe fn GetPublicationByName(_name: *const c_char, _missing_ok: bool) -> *mut Publication { unimplemented!() }
 
 /// TODO(pg-port): get_rel_relkind
 #[inline]
@@ -3633,10 +3604,12 @@ pub unsafe fn check_object_ownership(
         OBJECT_PUBLICATION_REL |
         OBJECT_USER_MAPPING => {
             /* These are currently not supported or don't make sense here. */
-            elog!(ERROR, "unsupported object type: {}", objtype as c_int);
+            if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_BT unsupported_objtype site bt:
+{}", std::backtrace::Backtrace::force_capture()); } elog!(ERROR, "unsupported object type: {}", objtype as c_int);
         }
         _ => {
-            elog!(ERROR, "unsupported object type: {}", objtype as c_int);
+            if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_BT unsupported_objtype site bt:
+{}", std::backtrace::Backtrace::force_capture()); } elog!(ERROR, "unsupported object type: {}", objtype as c_int);
         }
     }
 }
@@ -3700,6 +3673,7 @@ pub unsafe fn read_objtype_from_string(objtype: *const c_char) -> c_int {
 /*
  * Interfaces to reference fields of ObjectPropertyType
  */
+#[no_mangle]
 pub unsafe fn get_object_class_descr(class_id: Oid) -> *const c_char {
     let prop = get_object_property_data(class_id);
     (*prop).class_descr
@@ -3709,6 +3683,8 @@ pub unsafe fn get_object_oid_index(class_id: Oid) -> Oid {
     let prop = get_object_property_data(class_id);
     (*prop).oid_index_oid
 }
+
+#[no_mangle]
 
 pub unsafe fn get_object_catcache_oid(class_id: Oid) -> c_int {
     let prop = get_object_property_data(class_id);
@@ -3735,10 +3711,14 @@ pub unsafe fn get_object_attnum_namespace(class_id: Oid) -> AttrNumber {
     (*prop).attnum_namespace
 }
 
+#[no_mangle]
+
 pub unsafe fn get_object_attnum_owner(class_id: Oid) -> AttrNumber {
     let prop = get_object_property_data(class_id);
     (*prop).attnum_owner
 }
+
+#[no_mangle]
 
 pub unsafe fn get_object_attnum_acl(class_id: Oid) -> AttrNumber {
     let prop = get_object_property_data(class_id);
@@ -3750,6 +3730,7 @@ pub unsafe fn get_object_attnum_acl(class_id: Oid) -> AttrNumber {
  *
  * Return the object type associated with a given object.
  */
+#[no_mangle]
 pub unsafe fn get_object_type(class_id: Oid, object_id: Oid) -> ObjectType {
     let prop = get_object_property_data(class_id);
 
@@ -5797,42 +5778,10 @@ pub unsafe fn get_relkind_objtype(relkind: c_char) -> ObjectType {
 // TODO(pg-port): the constants below should be imported from their
 // respective pg_*.rs modules once those are available.
 
-pub const AMOPSTRATEGY: c_int   = 100; // TODO(pg-port): real catcache id
-pub const AMPROCNUM: c_int      = 101; // TODO(pg-port)
-pub const PUBLICATIONREL: c_int = 102; // TODO(pg-port)
-pub const PUBLICATIONNAMESPACE: c_int = 103; // TODO(pg-port)
-pub const PUBLICATIONRELMAP: c_int    = 104; // TODO(pg-port)
-pub const PUBLICATIONNAMESPACEMAP: c_int = 105; // TODO(pg-port)
-pub const USERMAPPINGOID: c_int = 106; // TODO(pg-port)
-pub const USERMAPPINGUSERSERVER: c_int = 107; // TODO(pg-port)
-pub const DEFACLROLENSPOBJ: c_int = 108; // TODO(pg-port)
-pub const PARAMETERACLOID: c_int = 109; // TODO(pg-port)
-pub const TRFOID: c_int = 110; // TODO(pg-port)
 
 // Anum_ stubs for tables not yet referencing a real import
 pub const Anum_pg_parameter_acl_parname: AttrNumber = 2;
 
-pub const RELNAMENSP: c_int     = 200; // TODO(pg-port)
-pub const CONNAMENSP: c_int     = 201; // TODO(pg-port)
-pub const CLAAMNAMENSP: c_int   = 202; // TODO(pg-port)
-pub const OPERNAMENSP: c_int    = 203; // TODO(pg-port)
-pub const OPFAMILYAMNAMENSP: c_int = 204; // TODO(pg-port)
-pub const PROCNAMEARGSNSP: c_int = 205; // TODO(pg-port)
-pub const COLLNAMEENCNSP: c_int = 206; // TODO(pg-port)
-pub const TSCONFIGNAMENSP: c_int = 207; // TODO(pg-port)
-pub const TSDICTNAMENSP: c_int  = 208; // TODO(pg-port)
-pub const TSPARSERNAMENSP: c_int = 209; // TODO(pg-port)
-pub const TSTEMPLATENAMENSP: c_int = 210; // TODO(pg-port)
-pub const STATEXTNAMENSP: c_int = 211; // TODO(pg-port)
-pub const PUBLICATIONNAME: c_int = 212; // TODO(pg-port)
-pub const SUBSCRIPTIONNAME: c_int = 213; // TODO(pg-port)
-pub const SUBSCRIPTIONOID: c_int = 214; // TODO(pg-port)
-pub const EVENTTRIGGERNAME: c_int = 215; // TODO(pg-port)
-pub const EVENTTRIGGEROID: c_int = 216; // TODO(pg-port)
-pub const FOREIGNDATAWRAPPEROID: c_int = 217; // TODO(pg-port)
-pub const FOREIGNDATAWRAPPERNAME: c_int = 218; // TODO(pg-port)
-pub const FOREIGNSERVEROID: c_int = 219; // TODO(pg-port)
-pub const FOREIGNSERVERNAME: c_int = 220; // TODO(pg-port)
 
 /// appendStringInfo! macro wrapping lib::stringinfo::appendStringInfo.
 ///

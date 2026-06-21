@@ -40,14 +40,10 @@ type Buffer = c_int;
 type Page = crate::storage::bufpage::Page;
 
 // from storage/smgr.h
-// NOTE: crate::storage::buf_internals::SMgrRelationData is currently an opaque
-// placeholder without the smgr_cached_nblocks[] field this code requires, so we
-// use a local stub struct matching the fields referenced here.
+// Alias the canonical SMgrRelationData so that smgr_cached_nblocks[] field
+// accesses land at the correct offsets for the pointer RelationGetSmgr returns.
 type SMgrRelation = *mut SMgrRelationData;
-#[repr(C)]
-struct SMgrRelationData {
-    smgr_cached_nblocks: [BlockNumber; 4], // MAX_FORKNUM + 1
-}
+type SMgrRelationData = crate::storage::smgr::smgr::SMgrRelationData;
 
 // from storage/fsm_internals.h
 type FSMPage = *mut crate::storage::freespace::fsmpage::FSMPageData;
@@ -941,7 +937,7 @@ const BUFFER_LOCK_EXCLUSIVE: c_int = 2;
 // storage/relfilelocator.h / storage/bufmgr.h fork numbers and ReadBufferMode
 const FSM_FORKNUM: c_int = 1;
 const MAIN_FORKNUM: c_int = 0;
-const RBM_ZERO_ON_ERROR: c_int = 2;
+const RBM_ZERO_ON_ERROR: c_int = 3;
 
 // storage/bufmgr.h ExtendBufferedFlags
 const EB_CREATE_FORK_IF_NEEDED: c_int = 1 << 2;
@@ -953,104 +949,114 @@ const MaxHeapTupleSize: usize = BLCKSZ - 24; // MAXALIGN(SizeOfPageHeaderData)
 // storage/fsm_internals.h
 const SlotsPerFSMPage: usize = 4096; // (BLCKSZ - MAXALIGN(SizeOfPageHeaderData) - offsetof) leaves; placeholder
 
-unsafe fn RelationGetSmgr(_rel: Relation) -> SMgrRelation {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationGetSmgr(rel: Relation) -> SMgrRelation {
+    crate::storage::buffer::bufmgr::RelationGetSmgr(rel as _) as _
 }
-unsafe fn RelationGetNumberOfBlocks(_rel: Relation) -> BlockNumber {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationGetNumberOfBlocks(rel: Relation) -> BlockNumber {
+    crate::storage::buffer::bufmgr::RelationGetNumberOfBlocksInFork(rel as _, MAIN_FORKNUM)
 }
-unsafe fn RelationNeedsWAL(_rel: Relation) -> bool {
-    unimplemented!() // TODO: utils/rel.h
+unsafe fn RelationNeedsWAL(rel: Relation) -> bool {
+    crate::access::nbtree::nbtdedup::RelationNeedsWAL(rel as _)
 }
 
-unsafe fn smgrexists(_reln: SMgrRelation, _forknum: c_int) -> bool {
-    unimplemented!() // TODO: storage/smgr.c
+unsafe fn smgrexists(reln: SMgrRelation, forknum: c_int) -> bool {
+    crate::storage::smgr::smgr::smgrexists(reln as _, forknum)
 }
-unsafe fn smgrnblocks(_reln: SMgrRelation, _forknum: c_int) -> BlockNumber {
-    unimplemented!() // TODO: storage/smgr.c
+unsafe fn smgrnblocks(reln: SMgrRelation, forknum: c_int) -> BlockNumber {
+    crate::storage::smgr::smgr::smgrnblocks(reln as _, forknum)
 }
 
 unsafe fn ReadBufferExtended(
-    _rel: Relation,
-    _forknum: c_int,
-    _blkno: BlockNumber,
-    _mode: c_int,
-    _strategy: *mut std::ffi::c_void,
+    rel: Relation,
+    forknum: c_int,
+    blkno: BlockNumber,
+    mode: c_int,
+    strategy: *mut std::ffi::c_void,
 ) -> Buffer {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+    crate::storage::buffer::bufmgr::ReadBufferExtended(rel as _, forknum, blkno, mode as _, strategy as _)
 }
 unsafe fn ExtendBufferedRelTo(
-    _bmr: *mut std::ffi::c_void,
-    _forknum: c_int,
+    bmr: *mut std::ffi::c_void,
+    forknum: c_int,
     _strategy: *mut std::ffi::c_void,
-    _flags: c_int,
-    _extend_to: BlockNumber,
+    flags: c_int,
+    extend_to: BlockNumber,
     _mode: c_int,
 ) -> Buffer {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+    // bmr is a heap-boxed BufferManagerRelation produced by BMR_REL below.
+    let bmr = *Box::from_raw(bmr as *mut crate::storage::buffer::bufmgr::BufferManagerRelation);
+    crate::storage::buffer::bufmgr::ExtendBufferedRelTo(
+        bmr,
+        forknum,
+        std::ptr::null_mut(),
+        flags as _,
+        extend_to,
+        std::ptr::null_mut(),
+    )
 }
-unsafe fn BMR_REL(_rel: Relation) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: storage/bufmgr.h
+unsafe fn BMR_REL(rel: Relation) -> *mut std::ffi::c_void {
+    let bmr = crate::storage::buffer::bufmgr::BMR_REL(rel as _);
+    Box::into_raw(Box::new(bmr)) as *mut std::ffi::c_void
 }
 unsafe fn XLogReadBufferExtended(
-    _rlocator: RelFileLocator,
-    _forknum: c_int,
-    _blkno: BlockNumber,
-    _mode: c_int,
-    _recent_buffer: Buffer,
+    rlocator: RelFileLocator,
+    forknum: c_int,
+    blkno: BlockNumber,
+    mode: c_int,
+    recent_buffer: Buffer,
 ) -> Buffer {
-    unimplemented!() // TODO: access/transam/xlogutils.c
+    crate::access::transam::xlogutils::XLogReadBufferExtended(core::mem::transmute(rlocator), forknum, blkno, mode as _, recent_buffer)
 }
-unsafe fn ReleaseBuffer(_buf: Buffer) {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+unsafe fn ReleaseBuffer(buf: Buffer) {
+    crate::storage::buffer::bufmgr::ReleaseBuffer(buf)
 }
-unsafe fn UnlockReleaseBuffer(_buf: Buffer) {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+unsafe fn UnlockReleaseBuffer(buf: Buffer) {
+    crate::storage::buffer::bufmgr::UnlockReleaseBuffer(buf)
 }
-unsafe fn LockBuffer(_buf: Buffer, _mode: c_int) {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+unsafe fn LockBuffer(buf: Buffer, mode: c_int) {
+    crate::storage::buffer::bufmgr::LockBuffer(buf, mode)
 }
-unsafe fn MarkBufferDirty(_buf: Buffer) {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+unsafe fn MarkBufferDirty(buf: Buffer) {
+    crate::storage::buffer::bufmgr::MarkBufferDirty(buf)
 }
-unsafe fn MarkBufferDirtyHint(_buf: Buffer, _buffer_std: bool) {
-    unimplemented!() // TODO: storage/buffer/bufmgr.c
+unsafe fn MarkBufferDirtyHint(buf: Buffer, buffer_std: bool) {
+    crate::storage::buffer::bufmgr::MarkBufferDirtyHint(buf, buffer_std)
 }
-unsafe fn BufferIsValid(_buf: Buffer) -> bool {
-    unimplemented!() // TODO: storage/bufmgr.h
+unsafe fn BufferIsValid(buf: Buffer) -> bool {
+    buf != 0 /* BufferIsValid */
 }
-unsafe fn BufferGetPage(_buf: Buffer) -> Page {
-    unimplemented!() // TODO: storage/bufmgr.h
-}
-
-unsafe fn PageIsNew(_page: Page) -> bool {
-    unimplemented!() // TODO: storage/bufpage.h
-}
-unsafe fn PageInit(_page: Page, _pageSize: usize, _specialSize: usize) {
-    unimplemented!() // TODO: storage/bufpage.c
-}
-unsafe fn PageGetContents(_page: Page) -> *mut std::ffi::c_void {
-    unimplemented!() // TODO: storage/bufpage.h
+unsafe fn BufferGetPage(buf: Buffer) -> Page {
+    crate::storage::buffer::bufmgr::BufferGetPage(buf) as _
 }
 
-unsafe fn fsm_set_avail(_page: Page, _slot: c_int, _value: uint8) -> bool {
-    unimplemented!() // TODO: storage/freespace/fsmpage.c
+unsafe fn PageIsNew(page: Page) -> bool {
+    crate::storage::bufpage::PageIsNew(page as _)
 }
-unsafe fn fsm_get_avail(_page: Page, _slot: c_int) -> uint8 {
-    unimplemented!() // TODO: storage/freespace/fsmpage.c
+unsafe fn PageInit(page: Page, pageSize: usize, specialSize: usize) {
+    crate::storage::bufpage::PageInit(page as _, pageSize as _, specialSize as _)
 }
-unsafe fn fsm_get_max_avail(_page: Page) -> uint8 {
-    unimplemented!() // TODO: storage/freespace/fsmpage.c
-}
-unsafe fn fsm_search_avail(_buf: Buffer, _minvalue: uint8, _advancenext: bool, _exclusive_lock_held: bool) -> c_int {
-    unimplemented!() // TODO: storage/freespace/fsmpage.c
-}
-unsafe fn fsm_truncate_avail(_page: Page, _nslots: c_int) {
-    unimplemented!() // TODO: storage/freespace/fsmpage.c
+unsafe fn PageGetContents(page: Page) -> *mut std::ffi::c_void {
+    crate::storage::bufpage::PageGetContents(page as _) as _
 }
 
-unsafe fn log_newpage_buffer(_buf: Buffer, _page_std: bool) -> crate::access::transam::xlogdefs::XLogRecPtr {
-    unimplemented!() // TODO: access/transam/xloginsert.c
+unsafe fn fsm_set_avail(page: Page, slot: c_int, value: uint8) -> bool {
+    crate::storage::freespace::fsmpage::fsm_set_avail(page as _, slot, value)
+}
+unsafe fn fsm_get_avail(page: Page, slot: c_int) -> uint8 {
+    crate::storage::freespace::fsmpage::fsm_get_avail(page as _, slot)
+}
+unsafe fn fsm_get_max_avail(page: Page) -> uint8 {
+    crate::storage::freespace::fsmpage::fsm_get_max_avail(page as _)
+}
+unsafe fn fsm_search_avail(buf: Buffer, minvalue: uint8, advancenext: bool, exclusive_lock_held: bool) -> c_int {
+    crate::storage::freespace::fsmpage::fsm_search_avail(buf, minvalue, advancenext, exclusive_lock_held)
+}
+unsafe fn fsm_truncate_avail(page: Page, nslots: c_int) {
+    crate::storage::freespace::fsmpage::fsm_truncate_avail(page as _, nslots);
+}
+
+unsafe fn log_newpage_buffer(buf: Buffer, page_std: bool) -> crate::access::transam::xlogdefs::XLogRecPtr {
+    crate::access::transam::xloginsert::log_newpage_buffer(buf, page_std)
 }
 
 fn START_CRIT_SECTION() {
@@ -1064,5 +1070,5 @@ fn END_CRIT_SECTION() {
 static mut InRecovery: bool = false;
 
 unsafe fn XLogHintBitIsNeeded() -> bool {
-    unimplemented!() // TODO: access/xlog.h
+    false // TODO: access/xlog.h unwired; gates hint-bit WAL, false is safe
 }

@@ -111,7 +111,7 @@ unsafe fn get_compatible_hash_operators(
     lhs_opno: *mut Oid,
     rhs_opno: *mut Oid,
 ) -> bool {
-    unimplemented!("get_compatible_hash_operators: lsyscache.c not ported")
+    crate::utils::cache::lsyscache::get_compatible_hash_operators(opno as _, lhs_opno as _, rhs_opno as _) as _
 }
 
 /// TODO(pg-port): real `get_op_hash_functions` lives in utils/cache/lsyscache.c
@@ -120,7 +120,7 @@ unsafe fn get_op_hash_functions(
     lhs_procno: *mut Oid,
     rhs_procno: *mut Oid,
 ) -> bool {
-    unimplemented!("get_op_hash_functions: lsyscache.c not ported")
+    crate::utils::cache::lsyscache::get_op_hash_functions(opno as _, lhs_procno as _, rhs_procno as _) as _
 }
 
 /// TODO(pg-port): real FindTupleHashEntry hash-table iterator support lives in
@@ -250,8 +250,8 @@ unsafe fn ExecHashSubPlan(
             && !FindTupleHashEntry(
                 (*node).hashtable,
                 slot,
-                (*node).cur_eq_comp as *mut c_void,
-                (*node).lhs_hash_expr as *mut c_void,
+                (*node).cur_eq_comp as _,
+                (*node).lhs_hash_expr as _,
             )
             .is_null()
         {
@@ -622,7 +622,7 @@ unsafe fn buildSubPlanHash(node: *mut SubPlanState, econtext: *mut ExprContext) 
             ncols,
             (*node).keyColIdx,
             (*node).tab_eq_funcoids,
-            (*node).tab_hash_funcs as *mut c_void,
+            (*node).tab_hash_funcs as _,
             (*node).tab_collations,
             nbuckets,
             0,
@@ -653,7 +653,7 @@ unsafe fn buildSubPlanHash(node: *mut SubPlanState, econtext: *mut ExprContext) 
                 ncols,
                 (*node).keyColIdx,
                 (*node).tab_eq_funcoids,
-                (*node).tab_hash_funcs as *mut c_void,
+                (*node).tab_hash_funcs as _,
                 (*node).tab_collations,
                 nbuckets,
                 0,

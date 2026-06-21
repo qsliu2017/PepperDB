@@ -107,7 +107,7 @@ pub unsafe fn SlabContextCreate(
     _chunk_size: Size,
 ) -> MemoryContext {
     // fall back to a plain AllocSet context until slab is ported
-    AllocSetContextCreate!(parent, _name, ALLOCSET_DEFAULT_SIZES)
+    AllocSetContextCreate!(parent, c"Slab context".as_ptr(), ALLOCSET_DEFAULT_SIZES)
 }
 
 /// TODO(pg-port): real GenerationContextCreate lives in utils/mmgr/generation.c
@@ -119,7 +119,7 @@ pub unsafe fn GenerationContextCreate(
     _init_block: Size,
     _max_block: Size,
 ) -> MemoryContext {
-    AllocSetContextCreate!(parent, _name, ALLOCSET_DEFAULT_SIZES)
+    AllocSetContextCreate!(parent, c"Generation context".as_ptr(), ALLOCSET_DEFAULT_SIZES)
 }
 
 /// TODO(pg-port): real HASH_ELEM | HASH_BLOBS | HASH_CONTEXT lives in utils/hash
@@ -146,16 +146,12 @@ pub struct HASHCTL {
 /// TODO(pg-port): real hash_create/hash_search/hash_destroy live in utils/hsearch.c
 #[allow(non_snake_case)]
 pub unsafe fn hash_create(
-    _name: &str, _nelem: c_long, _info: *mut HASHCTL, _flags: c_int,
-) -> *mut HTAB {
-    null_mut()
-}
+    name: &str, nelem: c_long, info: *mut HASHCTL, flags: c_int,
+) -> *mut HTAB { unimplemented!() }
 #[allow(non_snake_case)]
 pub unsafe fn hash_search(
-    _hashp: *mut HTAB, _keyPtr: *const c_void, _action: c_int, _foundPtr: *mut bool,
-) -> *mut c_void {
-    null_mut()
-}
+    hashp: *mut HTAB, keyPtr: *const c_void, action: c_int, foundPtr: *mut bool,
+) -> *mut c_void { todo!("TODO(pg-port): hash_search") }
 #[allow(non_snake_case)]
 pub unsafe fn hash_destroy(_hashp: *mut HTAB) {}
 
@@ -239,6 +235,7 @@ pub type Relation = *mut RelationData;
 #[allow(non_snake_case)]
 pub unsafe fn RelationIsValid(r: Relation) -> bool { !r.is_null() }
 #[allow(non_snake_case)]
+#[no_mangle]
 pub unsafe fn RelationIsLogicallyLogged(_r: Relation) -> bool { false }
 #[allow(non_snake_case)]
 pub unsafe fn RelationIdGetRelation(_reloid: Oid) -> Relation { null_mut() }
@@ -404,6 +401,7 @@ pub unsafe fn fastgetattr(_tup: HeapTuple, _attnum: c_int, _desc: TupleDesc, _is
 #[allow(non_snake_case)]
 pub unsafe fn DatumGetObjectId(d: Datum) -> Oid { d as Oid }
 #[allow(non_snake_case)]
+#[no_mangle]
 pub unsafe fn DatumGetInt32(d: Datum) -> int32 { d as int32 }
 #[allow(non_snake_case)]
 pub unsafe fn DatumGetPointer(d: Datum) -> *mut c_void { d as *mut c_void }
@@ -1080,7 +1078,7 @@ pub unsafe fn ReorderBufferAllocate() -> *mut ReorderBuffer {
     /* allocate memory in own context, to have better accountability */
     let new_ctx = AllocSetContextCreate!(
         CurrentMemoryContext,
-        "ReorderBuffer",
+        c"ReorderBuffer".as_ptr(),
         ALLOCSET_DEFAULT_SIZES
     );
 

@@ -40,7 +40,7 @@ use std::ffi::c_int;
 use crate::nodes::nodes::{CmdType, NodeTag, Node};
 use crate::nodes::nodes::CmdType::*;
 use crate::nodes::primnodes::{
-    Expr, MergeAction, MergeMatchKind, NUM_MERGE_MATCH_KINDS,
+    Const, Expr, MergeAction, MergeMatchKind, NUM_MERGE_MATCH_KINDS, TargetEntry,
 };
 use crate::nodes::primnodes::MergeMatchKind::*;
 use crate::nodes::parsenodes::{WithCheckOption, RangeTblEntry};
@@ -90,7 +90,7 @@ use crate::utils::palloc::{palloc, palloc0, pfree, MemoryContextSwitchTo};
 use crate::utils::mmgr::mcxt::CurrentMemoryContext;
 use crate::nodes::nodeFuncs::exprType;
 use crate::nodes::bitmapset::{bms_is_member, bms_add_member, bms_overlap};
-use crate::{makeNode, castNode};
+use crate::{makeNode, castNode, current_cell, foreach, IsA};
 use crate::optimizer::util::var::pull_varattnos;
 use crate::rewrite::rewriteManip::map_variable_attnos;
 use crate::executor::execIndexing::{ExecInsertIndexTuples, ExecOpenIndices, ExecCheckIndexConstraints};
@@ -203,7 +203,7 @@ unsafe fn ExecBRInsertTriggers(
     _resultRelInfo: *mut ResultRelInfo,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!("TODO(pg-port): ExecBRInsertTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecBRInsertTriggers(_estate as _, _resultRelInfo as _, _slot as _) as _
 }
 
 /* TODO(pg-port): real ExecIRInsertTriggers lives in commands/trigger.c */
@@ -223,12 +223,12 @@ unsafe fn ExecARInsertTriggers(
     _recheckIndexes: *mut List,
     _transition_capture: *mut TransitionCaptureState,
 ) {
-    unimplemented!("TODO(pg-port): ExecARInsertTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecARInsertTriggers(_estate as _, _resultRelInfo as _, _slot as _, _recheckIndexes as _, _transition_capture as _)
 }
 
 /* TODO(pg-port): real ExecBSInsertTriggers lives in commands/trigger.c */
 unsafe fn ExecBSInsertTriggers(_estate: *mut EState, _resultRelInfo: *mut ResultRelInfo) {
-    unimplemented!("TODO(pg-port): ExecBSInsertTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecBSInsertTriggers(_estate as _, _resultRelInfo as _)
 }
 
 /* TODO(pg-port): real ExecASInsertTriggers lives in commands/trigger.c */
@@ -237,7 +237,7 @@ unsafe fn ExecASInsertTriggers(
     _resultRelInfo: *mut ResultRelInfo,
     _transition_capture: *mut TransitionCaptureState,
 ) {
-    unimplemented!("TODO(pg-port): ExecASInsertTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecASInsertTriggers(_estate as _, _resultRelInfo as _, _transition_capture as _)
 }
 
 /* TODO(pg-port): real ExecBRDeleteTriggers lives in commands/trigger.c */
@@ -252,7 +252,7 @@ unsafe fn ExecBRDeleteTriggers(
     _tmfd: *mut TM_FailureData,
     _is_merge: bool,
 ) -> bool {
-    unimplemented!("TODO(pg-port): ExecBRDeleteTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecBRDeleteTriggers(_estate as _, _epqstate as _, _resultRelInfo as _, _tupleid as _, _oldtuple as _, _epqreturnslot as _, _result as _, _tmfd as _, _is_merge as _) as _
 }
 
 /* TODO(pg-port): real ExecIRDeleteTriggers lives in commands/trigger.c */
@@ -273,12 +273,12 @@ unsafe fn ExecARDeleteTriggers(
     _transition_capture: *mut TransitionCaptureState,
     _changingPart: bool,
 ) {
-    unimplemented!("TODO(pg-port): ExecARDeleteTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecARDeleteTriggers(_estate as _, _resultRelInfo as _, _tupleid as _, _oldtuple as _, _transition_capture as _, _changingPart as _)
 }
 
 /* TODO(pg-port): real ExecBSDeleteTriggers lives in commands/trigger.c */
 unsafe fn ExecBSDeleteTriggers(_estate: *mut EState, _resultRelInfo: *mut ResultRelInfo) {
-    unimplemented!("TODO(pg-port): ExecBSDeleteTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecBSDeleteTriggers(_estate as _, _resultRelInfo as _)
 }
 
 /* TODO(pg-port): real ExecASDeleteTriggers lives in commands/trigger.c */
@@ -287,7 +287,7 @@ unsafe fn ExecASDeleteTriggers(
     _resultRelInfo: *mut ResultRelInfo,
     _transition_capture: *mut TransitionCaptureState,
 ) {
-    unimplemented!("TODO(pg-port): ExecASDeleteTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecASDeleteTriggers(_estate as _, _resultRelInfo as _, _transition_capture as _)
 }
 
 /* TODO(pg-port): real ExecBRUpdateTriggers lives in commands/trigger.c */
@@ -302,7 +302,7 @@ unsafe fn ExecBRUpdateTriggers(
     _tmfd: *mut TM_FailureData,
     _is_merge: bool,
 ) -> bool {
-    unimplemented!("TODO(pg-port): ExecBRUpdateTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecBRUpdateTriggers(_estate as _, _epqstate as _, _resultRelInfo as _, _tupleid as _, _oldtuple as _, _slot as _, _result as _, _tmfd as _, _is_merge as _) as _
 }
 
 /* TODO(pg-port): real ExecIRUpdateTriggers lives in commands/trigger.c */
@@ -328,12 +328,12 @@ unsafe fn ExecARUpdateTriggers(
     _transition_capture: *mut TransitionCaptureState,
     _is_crosspart: bool,
 ) {
-    unimplemented!("TODO(pg-port): ExecARUpdateTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecARUpdateTriggers(_estate as _, _resultRelInfo as _, _src_partinfo as _, _dst_partinfo as _, _tupleid as _, _oldtuple as _, _slot as _, _recheckIndexes as _, _transition_capture as _, _is_crosspart as _)
 }
 
 /* TODO(pg-port): real ExecBSUpdateTriggers lives in commands/trigger.c */
 unsafe fn ExecBSUpdateTriggers(_estate: *mut EState, _resultRelInfo: *mut ResultRelInfo) {
-    unimplemented!("TODO(pg-port): ExecBSUpdateTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecBSUpdateTriggers(_estate as _, _resultRelInfo as _)
 }
 
 /* TODO(pg-port): real ExecASUpdateTriggers lives in commands/trigger.c */
@@ -342,7 +342,7 @@ unsafe fn ExecASUpdateTriggers(
     _resultRelInfo: *mut ResultRelInfo,
     _transition_capture: *mut TransitionCaptureState,
 ) {
-    unimplemented!("TODO(pg-port): ExecASUpdateTriggers - commands/trigger.c")
+    crate::commands::trigger::ExecASUpdateTriggers(_estate as _, _resultRelInfo as _, _transition_capture as _)
 }
 
 /* TODO(pg-port): real MakeTransitionCaptureState lives in commands/trigger.c */
@@ -351,7 +351,7 @@ unsafe fn MakeTransitionCaptureState(
     _relid: Oid,
     _cmdtype: CmdType,
 ) -> *mut TransitionCaptureState {
-    unimplemented!("TODO(pg-port): MakeTransitionCaptureState - commands/trigger.c")
+    crate::commands::trigger::MakeTransitionCaptureState(_trigdesc as _, _relid, _cmdtype) as _
 }
 
 /* TODO(pg-port): real ExecSetupPartitionTupleRouting lives in executor/execPartition.c */
@@ -359,7 +359,7 @@ unsafe fn ExecSetupPartitionTupleRouting(
     _estate: *mut EState,
     _rel: Relation,
 ) -> *mut PartitionTupleRouting {
-    unimplemented!("TODO(pg-port): ExecSetupPartitionTupleRouting - executor/execPartition.c")
+    crate::executor::execPartition::ExecSetupPartitionTupleRouting(_estate as _, _rel as _) as _
 }
 
 /* TODO(pg-port): real ExecFindPartition lives in executor/execPartition.c */
@@ -370,7 +370,7 @@ unsafe fn ExecFindPartition(
     _slot: *mut TupleTableSlot,
     _estate: *mut EState,
 ) -> *mut ResultRelInfo {
-    unimplemented!("TODO(pg-port): ExecFindPartition - executor/execPartition.c")
+    crate::executor::execPartition::ExecFindPartition(_mtstate as _, _targetRelInfo as _, _proute as _, _slot as _, _estate as _) as _
 }
 
 /* TODO(pg-port): real ExecCleanupTupleRouting lives in executor/execPartition.c */
@@ -378,7 +378,7 @@ unsafe fn ExecCleanupTupleRouting(
     _mtstate: *mut ModifyTableState,
     _proute: *mut PartitionTupleRouting,
 ) {
-    unimplemented!("TODO(pg-port): ExecCleanupTupleRouting - executor/execPartition.c")
+    crate::executor::execPartition::ExecCleanupTupleRouting(_mtstate as _, _proute as _)
 }
 
 /* TODO(pg-port): real ExecInitPartitionInfo lives in executor/execPartition.c */
@@ -394,12 +394,12 @@ unsafe fn ExecGetAncestorResultRels(
     _estate: *mut EState,
     _resultRelInfo: *mut ResultRelInfo,
 ) -> *mut List {
-    unimplemented!("TODO(pg-port): ExecGetAncestorResultRels - executor/execUtils.c")
+    crate::executor::execMain::ExecGetAncestorResultRels(_estate as _, _resultRelInfo as _) as _
 }
 
 /* TODO(pg-port): real build_column_default lives in catalog/catalog.c */
 unsafe fn build_column_default(_rel: Relation, _attrno: c_int) -> *mut Node {
-    unimplemented!("TODO(pg-port): build_column_default - catalog/catalog.c")
+    crate::rewrite::rewriteHandler::build_column_default(_rel as _, _attrno as _) as _
 }
 
 /* TODO(pg-port): real IsolationUsesXactSnapshot lives in access/transam/xact.c */
@@ -409,12 +409,12 @@ unsafe fn IsolationUsesXactSnapshot() -> bool {
 
 /* TODO(pg-port): real GetCurrentTransactionId lives in access/transam/xact.c */
 unsafe fn GetCurrentTransactionId() -> TransactionId {
-    unimplemented!("TODO(pg-port): GetCurrentTransactionId - access/transam/xact.c")
+    crate::access::transam::xact::GetCurrentTransactionId() as _
 }
 
 /* TODO(pg-port): real TransactionIdIsCurrentTransactionId lives in access/transam/xact.c */
 unsafe fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool {
-    unimplemented!("TODO(pg-port): TransactionIdIsCurrentTransactionId - access/transam/xact.c")
+    crate::access::transam::xact::TransactionIdIsCurrentTransactionId(_xid as _) as _
 }
 
 /* TODO(pg-port): real table_tuple_lock lives in access/table/tableam.c */
@@ -434,12 +434,14 @@ unsafe fn table_tuple_lock(
 
 /* TODO(pg-port): real table_tuple_fetch_row_version lives in access/table/tableam.c */
 unsafe fn table_tuple_fetch_row_version(
-    _rel: Relation,
-    _tid: *mut ItemPointerData,
-    _snapshot: crate::nodes::execnodes::Snapshot,
-    _slot: *mut TupleTableSlot,
+    rel: Relation,
+    tid: *mut ItemPointerData,
+    snapshot: crate::nodes::execnodes::Snapshot,
+    slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!("TODO(pg-port): table_tuple_fetch_row_version - access/table/tableam.c")
+    ((*((*rel).rd_tableam as *const crate::access::table::tableam::TableAmRoutine))
+        .tuple_fetch_row_version
+        .unwrap())(rel as _, tid as _, snapshot as _, slot as _)
 }
 
 /* TODO(pg-port): real table_tuple_satisfies_snapshot lives in access/table/tableam.c */
@@ -448,7 +450,7 @@ unsafe fn table_tuple_satisfies_snapshot(
     _slot: *mut TupleTableSlot,
     _snapshot: crate::nodes::execnodes::Snapshot,
 ) -> bool {
-    unimplemented!("TODO(pg-port): table_tuple_satisfies_snapshot - access/table/tableam.c")
+    crate::access::table::tableam::table_tuple_satisfies_snapshot(_rel as _, _slot as _, _snapshot as _) as _
 }
 
 /* TODO(pg-port): real table_tuple_insert_speculative lives in access/table/tableam.c */
@@ -475,7 +477,7 @@ unsafe fn table_tuple_complete_speculative(
 
 /* TODO(pg-port): real SnapshotAny is a global Snapshot in utils/snapmgr.c */
 unsafe fn SnapshotAny_ptr() -> crate::nodes::execnodes::Snapshot {
-    unimplemented!("TODO(pg-port): SnapshotAny - utils/snapmgr.c")
+    &raw mut crate::utils::time::snapmgr::SnapshotAnyData as crate::nodes::execnodes::Snapshot
 }
 
 /* TODO(pg-port): real DatumGetHeapTupleHeader lives in include/access/htup.h */
@@ -490,7 +492,7 @@ unsafe fn ItemPointerIndicatesMovedPartitions(_ptr: *const ItemPointerData) -> b
 
 /* TODO(pg-port): list helpers used in this file; real versions in nodes/list.c */
 unsafe fn list_nth(list: *mut List, n: c_int) -> *mut c_void {
-    unimplemented!("TODO(pg-port): list_nth - nodes/list.c")
+    crate::nodes::pg_list::list_nth(list as _, n as _) as _
 }
 
 unsafe fn list_nth_node_list(list: *mut List, n: c_int) -> *mut List {
@@ -498,43 +500,43 @@ unsafe fn list_nth_node_list(list: *mut List, n: c_int) -> *mut List {
 }
 
 unsafe fn linitial(list: *mut List) -> *mut c_void {
-    unimplemented!("TODO(pg-port): linitial - nodes/list.c")
+    crate::nodes::pg_list::linitial(list as _) as _
 }
 
 unsafe fn linitial_int(list: *mut List) -> c_int {
-    unimplemented!("TODO(pg-port): linitial_int - nodes/list.c")
+    crate::nodes::pg_list::linitial_int(list as _) as _
 }
 
 unsafe fn lappend(list: *mut List, datum: *mut c_void) -> *mut List {
-    unimplemented!("TODO(pg-port): lappend - nodes/list.c")
+    crate::nodes::pg_list::lappend(list as _, datum as _) as _
 }
 
 unsafe fn lappend_int(list: *mut List, datum: c_int) -> *mut List {
-    unimplemented!("TODO(pg-port): lappend_int - nodes/list.c")
+    crate::nodes::pg_list::lappend_int(list as _, datum as _) as _
 }
 
 unsafe fn lcons(datum: *mut c_void, list: *mut List) -> *mut List {
-    unimplemented!("TODO(pg-port): lcons - nodes/list.c")
+    crate::nodes::pg_list::lcons(datum as _, list as _) as _
 }
 
 unsafe fn list_free(list: *mut List) {
-    unimplemented!("TODO(pg-port): list_free - nodes/list.c")
+    crate::nodes::pg_list::list_free(list as _)
 }
 
 unsafe fn list_length(list: *mut List) -> c_int {
-    unimplemented!("TODO(pg-port): list_length - nodes/list.c")
+    crate::nodes::pg_list::list_length(list as _) as _
 }
 
 unsafe fn list_member_ptr(list: *mut List, datum: *mut c_void) -> bool {
-    unimplemented!("TODO(pg-port): list_member_ptr - nodes/list.c")
+    crate::nodes::pg_list::list_member_ptr(list as _, datum as _)
 }
 
 unsafe fn lfirst(lc: *mut crate::nodes::pg_list::ListCell) -> *mut c_void {
-    unimplemented!("TODO(pg-port): lfirst - nodes/list.c")
+    crate::nodes::pg_list::lfirst(lc as _) as _
 }
 
 unsafe fn lfirst_int(lc: *mut crate::nodes::pg_list::ListCell) -> c_int {
-    unimplemented!("TODO(pg-port): lfirst_int - nodes/list.c")
+    crate::nodes::pg_list::lfirst_int(lc as _) as _
 }
 
 unsafe fn lfirst_node_WithCheckOption(
@@ -604,39 +606,36 @@ unsafe fn outerPlan(node: *mut Plan) -> *mut Plan {
 unsafe fn ExecCheckPlanOutput(resultRel: Relation, targetList: *mut List) {
     let resultDesc: TupleDesc = RelationGetDescr(resultRel);
     let mut attno: c_int = 0;
-    // TODO(pg-port): foreach(lc, targetList) - nodes/list.c
-    // Stub: iterate over targetList entries
-    let natts: c_int = (*resultDesc).natts;
-    // We check attno != natts at end; full iteration needs list infrastructure.
-    // For now, implement the structure faithfully and unimpl the loop body.
-    #[allow(unreachable_code)]
-    {
-        // foreach(lc, targetList)
-        unimplemented!("TODO(pg-port): ExecCheckPlanOutput - needs list iteration (nodes/list.c)");
-        // TargetEntry iteration would go here; body below is translated faithfully:
-        /*
-        let tle = lfirst(lc) as *mut TargetEntry;
-        assert!(!(*tle).resjunk);
-        if attno >= natts {
-            ereport!(ERROR, errmsg!("table row type and query-specified row type do not match")) /* C also: errdetail */;
+
+    foreach!(lc, targetList, {
+        let tle: *mut TargetEntry = lfirst(current_cell!(lc)) as *mut TargetEntry;
+
+        debug_assert!(!(*tle).resjunk); /* caller removed junk items already */
+
+        if attno >= (*resultDesc).natts {
+            ereport!(ERROR, errmsg!("table row type and query-specified row type do not match")) /* C also: errdetail "Query has too many columns." */;
         }
         let attr = TupleDescAttr(resultDesc, attno);
         attno += 1;
+
+        /* Special cases here should match planner's expand_insert_targetlist. */
         if (*attr).attisdropped {
-            if !IsA!((*tle).expr, Const) || !(*((*tle).expr as *mut Const)).constisnull {
-                ereport!(ERROR, ...);
+            if !IsA!((*tle).expr, T_Const) || !(*((*tle).expr as *mut Const)).constisnull {
+                ereport!(ERROR, errmsg!("table row type and query-specified row type do not match")) /* C also: errdetail dropped-column */;
             }
         } else if (*attr).attgenerated != 0 {
-            ...
+            if !IsA!((*tle).expr, T_Const) || !(*((*tle).expr as *mut Const)).constisnull {
+                ereport!(ERROR, errmsg!("table row type and query-specified row type do not match")) /* C also: errdetail generated-column */;
+            }
         } else {
+            /* Normal case: demand type match */
             if exprType((*tle).expr as *const Node) != (*attr).atttypid {
-                ereport!(ERROR, ...);
+                ereport!(ERROR, errmsg!("table row type and query-specified row type do not match")) /* C also: errdetail type-mismatch */;
             }
         }
-        */
-    }
-    if attno != natts {
-        ereport!(ERROR, errmsg!("table row type and query-specified row type do not match")) /* C also: errdetail */;
+    });
+    if attno != (*resultDesc).natts {
+        ereport!(ERROR, errmsg!("table row type and query-specified row type do not match")) /* C also: errdetail "Query has too few columns." */;
     }
 }
 
@@ -1052,12 +1051,15 @@ unsafe fn ExecInitInsertProjection(
     let mut insertTargetList: *mut List = NIL;
     let mut need_projection: bool = false;
     /* Extract non-junk columns of the subplan's result tlist. */
-    /* TODO(pg-port): foreach(l, subplan->targetlist) - needs list iteration */
-    // The full body relies on list iteration; stub the structure here.
-    #[allow(unreachable_code)]
-    {
-        unimplemented!("TODO(pg-port): ExecInitInsertProjection - needs list iteration (nodes/list.c)");
-    }
+    foreach!(l, (*subplan).targetlist, {
+        let tle: *mut TargetEntry = lfirst(current_cell!(l)) as *mut TargetEntry;
+
+        if !(*tle).resjunk {
+            insertTargetList = lappend(insertTargetList, tle as *mut c_void);
+        } else {
+            need_projection = true;
+        }
+    });
 
     /*
      * The junk-free list must produce a tuple suitable for the result
@@ -4080,7 +4082,6 @@ pub unsafe extern "C" fn ExecModifyTable(pstate: *mut PlanState) -> *mut TupleTa
                     (*resultRelInfo).ri_RowIdAttNo,
                     &mut isNull,
                 );
-
                 if isNull {
                     if operation == CMD_MERGE {
                         EvalPlanQualSetSlot(&mut (*node).mt_epqstate, context.planSlot);
@@ -4354,11 +4355,49 @@ pub unsafe fn ExecInitModifyTable(
      * Only consider unpruned relations for initializing their ResultRelInfo
      * struct and other fields such as withCheckOptions, etc.
      *
-     * TODO(pg-port): foreach iteration - needs list iteration (nodes/list.c)
+     * Note: We must avoid pruning every result relation.  We just keep the
+     * first one, if all others have been pruned.  See also,
+     * ExecDoInitialPruning().
      */
-    unimplemented!("TODO(pg-port): ExecInitModifyTable foreach(l, node->resultRelations) - needs list iteration (nodes/list.c)");
+    i = 0;
+    foreach!(l, (*node).resultRelations, {
+        let mut rti: crate::c::Index = lfirst_int(current_cell!(l)) as crate::c::Index;
+        let mut keep_rel: bool;
 
-    #[allow(unreachable_code)]
+        keep_rel = bms_is_member(rti as c_int, (*estate).es_unpruned_relids);
+        if !keep_rel && i == total_nrels - 1 && resultRelations.is_null() {
+            /* all result relations pruned; keep the first one */
+            keep_rel = true;
+            rti = linitial_int((*node).resultRelations) as crate::c::Index;
+            i = 0;
+        }
+
+        if keep_rel {
+            resultRelations = lappend_int(resultRelations, rti as c_int);
+            if !(*node).withCheckOptionLists.is_null() {
+                let withCheckOptions: *mut List = list_nth((*node).withCheckOptionLists, i) as *mut List;
+                withCheckOptionLists = lappend(withCheckOptionLists, withCheckOptions as *mut c_void);
+            }
+            if !(*node).returningLists.is_null() {
+                let returningList: *mut List = list_nth((*node).returningLists, i) as *mut List;
+                returningLists = lappend(returningLists, returningList as *mut c_void);
+            }
+            if !(*node).updateColnosLists.is_null() {
+                let updateColnosList: *mut c_void = list_nth((*node).updateColnosLists, i);
+                updateColnosLists = lappend(updateColnosLists, updateColnosList);
+            }
+            if !(*node).mergeActionLists.is_null() {
+                let mergeActionList: *mut c_void = list_nth((*node).mergeActionLists, i);
+                mergeActionLists = lappend(mergeActionLists, mergeActionList);
+            }
+            if !(*node).mergeJoinConditions.is_null() {
+                let mergeJoinCondition: *mut c_void = list_nth((*node).mergeJoinConditions, i);
+                mergeJoinConditions = lappend(mergeJoinConditions, mergeJoinCondition);
+            }
+        }
+        i += 1;
+    });
+
     {
         nrels = list_length(resultRelations);
         debug_assert!(nrels > 0);
@@ -4441,6 +4480,41 @@ pub unsafe fn ExecInitModifyTable(
         }
 
         EvalPlanQualSetPlan(&mut (*mtstate).mt_epqstate, subplan, arowmarks);
+
+        /*
+         * For UPDATE/DELETE/MERGE, find the junk row-identity attribute in the
+         * subplan's targetlist (a "ctid" TID for heap/matview/partitioned rels,
+         * else a "wholerow" attr) and record it in ri_RowIdAttNo.  Without this
+         * the executor reads ri_RowIdAttNo=0 and dereferences a NULL ctid.
+         */
+        if (*mtstate).operation == CMD_UPDATE
+            || (*mtstate).operation == CMD_DELETE
+            || (*mtstate).operation == CMD_MERGE
+        {
+            let tlist: *mut List = (*subplan).targetlist;
+            for idx in 0..nrels as usize {
+                let rri: *mut ResultRelInfo = (*mtstate).resultRelInfo.add(idx);
+                let relkind: c_char = (*(*(*rri).ri_RelationDesc).rd_rel).relkind;
+                if relkind == RELKIND_RELATION as c_char
+                    || relkind == RELKIND_MATVIEW as c_char
+                    || relkind == RELKIND_PARTITIONED_TABLE as c_char
+                {
+                    (*rri).ri_RowIdAttNo =
+                        ExecFindJunkAttributeInTlist(tlist, c"ctid".as_ptr());
+                    if !AttributeNumberIsValid((*rri).ri_RowIdAttNo) {
+                        elog!(ERROR, "could not find junk ctid column");
+                    }
+                } else if relkind == RELKIND_FOREIGN_TABLE as c_char {
+                    /* FDW supplies its own row identity handling */
+                } else {
+                    (*rri).ri_RowIdAttNo =
+                        ExecFindJunkAttributeInTlist(tlist, c"wholerow".as_ptr());
+                    if !AttributeNumberIsValid((*rri).ri_RowIdAttNo) {
+                        elog!(ERROR, "could not find junk wholerow column");
+                    }
+                }
+            }
+        }
 
         /* Use hash table for result-rel lookup if many rels */
         #[cfg(debug_assertions)]

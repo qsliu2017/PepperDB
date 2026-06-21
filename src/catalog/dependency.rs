@@ -187,9 +187,7 @@ pub struct find_expr_references_context {
 // ----------------------------------------------------------------
 
 /// TODO(pg-port): catalog/catalog.c IsPinnedObject
-unsafe fn IsPinnedObject(_classId: Oid, _objectId: Oid) -> bool {
-    false
-}
+unsafe fn IsPinnedObject(_classId: Oid, _objectId: Oid) -> bool { crate::catalog::catalog::IsPinnedObject(_classId as _, _objectId as _) }
 
 /// TODO(pg-port): catalog/objectaddress.c getObjectDescription
 unsafe fn getObjectDescription(_object: *const ObjectAddress, _missing_ok: bool) -> *mut c_char {
@@ -213,39 +211,34 @@ unsafe fn get_object_class_descr(_class_id: Oid) -> *const c_char {
     c"".as_ptr()
 }
 
-/// TODO(pg-port): commands/event_trigger.c trackDroppedObjectsNeeded
-unsafe fn trackDroppedObjectsNeeded() -> bool {
-    false
-}
-/// TODO(pg-port): commands/event_trigger.c EventTriggerSupportsObject
-unsafe fn EventTriggerSupportsObject(_object: *const ObjectAddress) -> bool {
-    false
-}
+/// commands/event_trigger.c trackDroppedObjectsNeeded. Event triggers are not
+/// ported; with none registered this is always false.
+unsafe fn trackDroppedObjectsNeeded() -> bool { false }
+/// commands/event_trigger.c EventTriggerSupportsObject. No event-trigger support.
+unsafe fn EventTriggerSupportsObject(_object: *const ObjectAddress) -> bool { false }
 /// TODO(pg-port): commands/event_trigger.c EventTriggerSQLDropAddObject
 unsafe fn EventTriggerSQLDropAddObject(_object: *const ObjectAddress, _original: bool, _normal: bool) {}
 
 /// TODO(pg-port): catalog/pg_shdepend.c deleteSharedDependencyRecordsFor
-unsafe fn deleteSharedDependencyRecordsFor(_classId: Oid, _objectId: Oid, _objectSubId: int32) {}
+unsafe fn deleteSharedDependencyRecordsFor(_classId: Oid, _objectId: Oid, _objectSubId: int32) { crate::catalog::pg_shdepend::deleteSharedDependencyRecordsFor(_classId as _, _objectId as _, _objectSubId as _) }
 
 /// TODO(pg-port): commands/comment.c DeleteComments
-unsafe fn DeleteComments(_objectId: Oid, _classId: Oid, _objectSubId: int32) {}
+unsafe fn DeleteComments(_objectId: Oid, _classId: Oid, _objectSubId: int32) { crate::commands::comment::DeleteComments(_objectId as _, _classId as _, _objectSubId as _) }
 /// TODO(pg-port): commands/seclabel.c DeleteSecurityLabel
-unsafe fn DeleteSecurityLabel(_object: *const ObjectAddress) {}
+unsafe fn DeleteSecurityLabel(_object: *const ObjectAddress) { crate::commands::seclabel::DeleteSecurityLabel(_object as _) }
 
 /// TODO(pg-port): access/transam/xact.c CommandCounterIncrement
 unsafe fn CommandCounterIncrement() {}
 
 /// TODO(pg-port): catalog/indexing.c CatalogTupleDelete
-unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData) {}
+unsafe fn CatalogTupleDelete(_heapRel: Relation, _tid: *mut crate::storage::itemptr::ItemPointerData) { crate::catalog::indexing::CatalogTupleDelete(_heapRel as _, _tid as _) }
 
 /// TODO(pg-port): utils/cache/syscache.c
 unsafe fn SearchSysCache1(_cacheId: c_int, _key1: Datum) -> HeapTuple {
     null_mut()
 }
 unsafe fn ReleaseSysCache(_tuple: HeapTuple) {}
-unsafe fn SearchSysCacheExists1(_cacheId: c_int, _key1: Datum) -> bool {
-    false
-}
+unsafe fn SearchSysCacheExists1(_cacheId: c_int, _key1: Datum) -> bool { crate::utils::cache::syscache::SearchSysCacheExists1(_cacheId as _, _key1 as _) }
 
 /// TODO(pg-port): catalog/pg_depend.c recordMultipleDependencies
 unsafe fn recordMultipleDependencies(
@@ -253,15 +246,13 @@ unsafe fn recordMultipleDependencies(
     _referenced: *const ObjectAddress,
     _nreferenced: c_int,
     _behavior: DependencyType,
-) {
-}
+) { crate::catalog::pg_depend::recordMultipleDependencies(_depender as _, _referenced as _, _nreferenced as _, _behavior as _) }
 /// TODO(pg-port): catalog/pg_depend.c recordDependencyOn
 unsafe fn recordDependencyOn(
     _depender: *const ObjectAddress,
     _referenced: *const ObjectAddress,
     _behavior: DependencyType,
-) {
-}
+) { crate::catalog::pg_depend::recordDependencyOn(_depender as _, _referenced as _, _behavior as _) }
 
 /// TODO(pg-port): storage/lmgr/lmgr.c lock helpers
 unsafe fn LockRelationOid(_relid: Oid, _lockmode: c_int) {}
@@ -274,65 +265,59 @@ unsafe fn UnlockDatabaseObject(_classId: Oid, _objectId: Oid, _objsubId: u16, _l
 unsafe fn check_stack_depth() {}
 
 /// TODO(pg-port): utils/error message-level test
-unsafe fn message_level_is_interesting(_elevel: c_int) -> bool {
-    true
-}
+unsafe fn message_level_is_interesting(_elevel: c_int) -> bool { crate::utils::error::elog_impl::message_level_is_interesting(_elevel as _) }
 
 /// TODO(pg-port): catalog/objectaccess.h InvokeObjectDropHookArg
+#[no_mangle]
 unsafe fn InvokeObjectDropHookArg(_classId: Oid, _objectId: Oid, _objectSubId: int32, _dropflags: c_int) {}
 
 // --- object deletion subroutines that live in other .c files ---
 /// TODO(pg-port): catalog/index.c index_drop
-unsafe fn index_drop(_indexId: Oid, _concurrent: bool, _concurrent_lock_mode: bool) {}
+unsafe fn index_drop(_indexId: Oid, _concurrent: bool, _concurrent_lock_mode: bool) { crate::catalog::index::index_drop(_indexId as _, _concurrent as _, _concurrent_lock_mode as _) }
 /// TODO(pg-port): catalog/heap.c RemoveAttributeById
-unsafe fn RemoveAttributeById(_relid: Oid, _attnum: AttrNumber) {}
+unsafe fn RemoveAttributeById(_relid: Oid, _attnum: AttrNumber) { crate::catalog::heap::RemoveAttributeById(_relid as _, _attnum as _) }
 /// TODO(pg-port): catalog/heap.c heap_drop_with_catalog
-unsafe fn heap_drop_with_catalog(_relid: Oid) {}
+unsafe fn heap_drop_with_catalog(_relid: Oid) { crate::catalog::heap::heap_drop_with_catalog(_relid as _) }
 /// TODO(pg-port): commands/sequence.c DeleteSequenceTuple
-unsafe fn DeleteSequenceTuple(_seqid: Oid) {}
+unsafe fn DeleteSequenceTuple(_seqid: Oid) { unimplemented!() }
 /// TODO(pg-port): commands/functioncmds.c RemoveFunctionById
-unsafe fn RemoveFunctionById(_funcOid: Oid) {}
+unsafe fn RemoveFunctionById(_funcOid: Oid) { crate::commands::functioncmds::RemoveFunctionById(_funcOid as _) }
 /// TODO(pg-port): commands/typecmds.c RemoveTypeById
-unsafe fn RemoveTypeById(_typeOid: Oid) {}
+unsafe fn RemoveTypeById(_typeOid: Oid) { crate::commands::typecmds::RemoveTypeById(_typeOid as _) }
 /// TODO(pg-port): catalog/pg_constraint.c RemoveConstraintById
-unsafe fn RemoveConstraintById(_conId: Oid) {}
+unsafe fn RemoveConstraintById(_conId: Oid) { crate::catalog::pg_constraint::RemoveConstraintById(_conId as _) }
 /// TODO(pg-port): catalog/heap.c RemoveAttrDefaultById
-unsafe fn RemoveAttrDefaultById(_attrdefId: Oid) {}
+unsafe fn RemoveAttrDefaultById(_attrdefId: Oid) { crate::catalog::pg_attrdef::RemoveAttrDefaultById(_attrdefId as _) }
 /// TODO(pg-port): catalog/pg_largeobject.c LargeObjectDrop
-unsafe fn LargeObjectDrop(_loid: Oid) {}
+unsafe fn LargeObjectDrop(_loid: Oid) { crate::catalog::pg_largeobject::LargeObjectDrop(_loid as _) }
 /// TODO(pg-port): commands/operatorcmds.c RemoveOperatorById
-unsafe fn RemoveOperatorById(_operOid: Oid) {}
+unsafe fn RemoveOperatorById(_operOid: Oid) { crate::commands::operatorcmds::RemoveOperatorById(_operOid as _) }
 /// TODO(pg-port): rewrite/rewriteRemove.c RemoveRewriteRuleById
-unsafe fn RemoveRewriteRuleById(_ruleOid: Oid) {}
+unsafe fn RemoveRewriteRuleById(_ruleOid: Oid) { crate::rewrite::rewriteRemove::RemoveRewriteRuleById(_ruleOid as _) }
 /// TODO(pg-port): commands/trigger.c RemoveTriggerById
 unsafe fn RemoveTriggerById(_trigOid: Oid) {}
 /// TODO(pg-port): statistics/statscmds.c RemoveStatisticsById
-unsafe fn RemoveStatisticsById(_statsOid: Oid) {}
+unsafe fn RemoveStatisticsById(_statsOid: Oid) { crate::commands::statscmds::RemoveStatisticsById(_statsOid as _) }
 /// TODO(pg-port): commands/tsearchcmds.c RemoveTSConfigurationById
-unsafe fn RemoveTSConfigurationById(_cfgId: Oid) {}
+unsafe fn RemoveTSConfigurationById(_cfgId: Oid) { unimplemented!() }
 /// TODO(pg-port): commands/extension.c RemoveExtensionById
-unsafe fn RemoveExtensionById(_extId: Oid) {}
+unsafe fn RemoveExtensionById(_extId: Oid) { crate::commands::extension::RemoveExtensionById(_extId as _) }
 /// TODO(pg-port): commands/policy.c RemovePolicyById
-unsafe fn RemovePolicyById(_policy_id: Oid) {}
+unsafe fn RemovePolicyById(_policy_id: Oid) { crate::commands::policy::RemovePolicyById(_policy_id as _) }
 /// TODO(pg-port): commands/publicationcmds.c RemovePublicationSchemaById
-unsafe fn RemovePublicationSchemaById(_psoid: Oid) {}
+unsafe fn RemovePublicationSchemaById(_psoid: Oid) { unimplemented!() }
 /// TODO(pg-port): commands/publicationcmds.c RemovePublicationRelById
-unsafe fn RemovePublicationRelById(_proid: Oid) {}
+unsafe fn RemovePublicationRelById(_proid: Oid) { unimplemented!() }
 /// TODO(pg-port): commands/publicationcmds.c RemovePublicationById
-unsafe fn RemovePublicationById(_pubid: Oid) {}
+unsafe fn RemovePublicationById(_pubid: Oid) { unimplemented!() }
 
-/// TODO(pg-port): utils/cache/lsyscache.c get_rel_relkind
-unsafe fn get_rel_relkind(_relid: Oid) -> c_char {
-    0
+unsafe fn get_rel_relkind(relid: Oid) -> c_char {
+    crate::utils::cache::lsyscache::get_rel_relkind(relid)
 }
 /// TODO(pg-port): utils/cache/lsyscache.c get_typ_typrelid
-unsafe fn get_typ_typrelid(_typid: Oid) -> Oid {
-    InvalidOid
-}
+unsafe fn get_typ_typrelid(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_typ_typrelid(_typid as _) }
 /// TODO(pg-port): utils/cache/lsyscache.c getBaseType
-unsafe fn getBaseType(_typid: Oid) -> Oid {
-    InvalidOid
-}
+unsafe fn getBaseType(_typid: Oid) -> Oid { crate::utils::cache::lsyscache::getBaseType(_typid as _) }
 /// TODO(pg-port): nodes/nodeFuncs.c exprType
 unsafe fn exprType(_expr: *const Node) -> Oid {
     InvalidOid
@@ -366,14 +351,14 @@ const QTW_IGNORE_JOINALIASES: c_int = 0x04;
 const QTW_EXAMINE_SORTGROUP: c_int = 0x40;
 
 // --- syscache identifiers used by the Const walker ---
-const PROCOID: c_int = 0;
-const OPEROID: c_int = 0;
-const RELOID: c_int = 0;
-const TYPEOID: c_int = 0;
-const COLLOID: c_int = 0;
-const TSCONFIGOID: c_int = 0;
-const TSDICTOID: c_int = 0;
-const NAMESPACEOID: c_int = 0;
+const PROCOID: c_int = 47;
+const OPEROID: c_int = 40;
+const RELOID: c_int = 57;
+const TYPEOID: c_int = 82;
+const COLLOID: c_int = 16;
+const TSCONFIGOID: c_int = 74;
+const TSDICTOID: c_int = 76;
+const NAMESPACEOID: c_int = 38;
 
 const MAX_REPORTED_DEPS: c_int = 100;
 
@@ -578,7 +563,7 @@ pub unsafe fn performMultipleDeletions(
 const DependDependerIndexId: Oid = 2673;
 const DependReferenceIndexId: Oid = 2674;
 // pg_init_privs index OID.  TODO(pg-port): catalog/pg_init_privs.h
-const InitPrivsObjIndexId: Oid = 3396;
+const InitPrivsObjIndexId: Oid = 3395;
 
 /// TODO(pg-port): commands/extension.c globals controlling extension creation.
 static mut creating_extension: bool = false;

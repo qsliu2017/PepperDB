@@ -30,9 +30,7 @@ unsafe fn UINT32_ACCESS_ONCE(var: *const uint32) -> uint32 {
 // ---------------------------------------------------------------------------
 
 // storage/proc.h - BackendPidGetProc
-unsafe fn BackendPidGetProc(_pid: c_int) -> *mut PGPROC {
-    unimplemented!()
-}
+unsafe fn BackendPidGetProc(_pid: c_int) -> *mut PGPROC { crate::storage::ipc::procarray::BackendPidGetProc(_pid as _) as _ }
 
 // Accessor for proc->wait_event_info; PGPROC layout not yet ported.
 // TODO: replace with real field access once storage/proc.h PGPROC is ported.
@@ -41,25 +39,17 @@ unsafe fn proc_wait_event_info(_proc: *mut PGPROC) -> *const uint32 {
 }
 
 // utils/wait_event.h - pgstat_get_wait_event_type
-unsafe fn pgstat_get_wait_event_type(_wait_event_info: uint32) -> *const c_char {
-    unimplemented!()
-}
+unsafe fn pgstat_get_wait_event_type(_wait_event_info: uint32) -> *const c_char { crate::utils::activity::wait_event::pgstat_get_wait_event_type(_wait_event_info as _) as _ }
 
 // utils/array.h - array_contains_nulls
-unsafe fn array_contains_nulls(_array: *mut ArrayType) -> bool {
-    unimplemented!()
-}
+unsafe fn array_contains_nulls(_array: *mut ArrayType) -> bool { crate::utils::adt::arrayfuncs::array_contains_nulls(_array as _) }
 
 // utils/array.h - DatumGetArrayTypeP (detoasts as needed)
-unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType {
-    unimplemented!()
-}
+unsafe fn DatumGetArrayTypeP(_d: Datum) -> *mut ArrayType { crate::access::nbtree::nbtpreprocesskeys::DatumGetArrayTypeP(_d as _) as _ }
 
 // storage/procarray.h fmgr function - pg_blocking_pids
 // Used via DirectFunctionCall1, so it must have the fmgr V1 signature.
-unsafe fn pg_blocking_pids(_fcinfo: FunctionCallInfo) -> Datum {
-    unimplemented!()
-}
+unsafe fn pg_blocking_pids(_fcinfo: FunctionCallInfo) -> Datum { crate::utils::adt::lockfuncs::pg_blocking_pids(_fcinfo as _) as _ }
 
 /*
  * pg_isolation_test_session_is_blocked - support function for isolationtester

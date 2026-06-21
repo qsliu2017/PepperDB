@@ -23,10 +23,12 @@ use crate::utils::palloc::{palloc, pfree, MemoryContextAllocZero};
 use crate::utils::activity::pgstat::{
     pgstat_create_transactional, pgstat_drop_transactional, pgstat_fetch_entry,
     pgstat_get_entry_ref, pgstat_lock_entry, pgstat_prep_pending_entry, pgstat_unlock_entry,
-    PgStatShared_Relation, PgStat_Counter, PgStat_EntryRef, PgStat_StatDBEntry,
+    PgStatShared_Relation, PgStat_Counter, PgStat_EntryRef, PgStat_Kind, PgStat_StatDBEntry,
     PgStat_StatTabEntry, PgStat_TableCounts, PgStat_TableStatus, PGSTAT_KIND_RELATION,
 };
 use crate::utils::activity::pgstat_internal::PgStat_SubXactStatus;
+
+pub type TimestampTz = crate::c::int64;
 
 extern "C" {
     fn memset(s: *mut c_void, c: c_int, n: usize) -> *mut c_void;
@@ -152,24 +154,18 @@ unsafe fn pgstat_fetch_pending_entry(kind: PgStat_Kind, dboid: Oid, objoid: Oid)
 
 /// TODO(pg-port): real `pgstat_get_xact_stack_level` lives in pgstat_xact.c.
 /// The xact subxact stack is unported here; return null.
-unsafe fn pgstat_get_xact_stack_level(_nest_level: c_int) -> *mut PgStat_SubXactStatus {
-    null_mut()
-}
+unsafe fn pgstat_get_xact_stack_level(_nest_level: c_int) -> *mut PgStat_SubXactStatus { crate::utils::activity::pgstat_xact::pgstat_get_xact_stack_level(_nest_level) }
 
 /// TODO(pg-port): real `pgstat_prep_database_pending` lives in pgstat_database.c
 /// and returns the `pgstat.rs` `PgStat_StatDBEntry`. Database pending wiring is
 /// not connected in this subset; return null.
-unsafe fn pgstat_prep_database_pending(_dboid: Oid) -> *mut PgStat_StatDBEntry {
-    null_mut()
-}
+unsafe fn pgstat_prep_database_pending(_dboid: Oid) -> *mut PgStat_StatDBEntry { crate::utils::activity::pgstat_database::pgstat_prep_database_pending(_dboid) }
 
 /// TODO(pg-port): real `pgstat_flush_io` lives in pgstat_io.c.
 unsafe fn pgstat_flush_io(_nowait: bool) {}
 
 /// TODO(pg-port): real `pgstat_flush_backend` lives in pgstat_backend.c.
-unsafe fn pgstat_flush_backend(_nowait: bool, _flags: bits32) -> bool {
-    false
-}
+unsafe fn pgstat_flush_backend(_nowait: bool, _flags: bits32) -> bool { crate::utils::activity::pgstat_backend::pgstat_flush_backend(_nowait, _flags) }
 
 /// TODO(pg-port): real `GetCurrentTimestamp` lives in utils/adt/timestamp.c.
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
@@ -1180,8 +1176,10 @@ unsafe fn add_tabstat_xact_level(pgstat_info: *mut PgStat_TableStatus, nest_leve
     xact_state = pgstat_get_xact_stack_level(nest_level);
 
     /* Now make a per-table stack entry */
-    trans = MemoryContextAllocZero(TopTransactionContext, size_of::<PgStat_TableXactStatus>())
-        as *mut PgStat_TableXactStatus;
+    trans = MemoryContextAllocZero(
+        TopTransactionContext as crate::utils::palloc::MemoryContext,
+        size_of::<PgStat_TableXactStatus>(),
+    ) as *mut PgStat_TableXactStatus;
     (*trans).nest_level = nest_level;
     (*trans).upper = tabstat_trans(pgstat_info);
     (*trans).parent = pgstat_info;

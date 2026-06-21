@@ -28,37 +28,21 @@ use MemoryContextData as _MemoryContextData;
 
 /* These functions implement the MemoryContext API for AllocSet context. */
 // TODO(pg-port): body in aset.c.
-pub unsafe fn AllocSetAlloc(_context: MemoryContext, _size: Size, _flags: c_int) -> *mut c_void {
-    unimplemented!()
-}
+pub unsafe fn AllocSetAlloc(_context: MemoryContext, _size: Size, _flags: c_int) -> *mut c_void { crate::utils::mmgr::aset::AllocSetAlloc(_context, _size, _flags) }
 // TODO(pg-port): body in aset.c.
-pub unsafe fn AllocSetFree(_pointer: *mut c_void) {
-    unimplemented!()
-}
+pub unsafe fn AllocSetFree(_pointer: *mut c_void) { crate::utils::mmgr::aset::AllocSetFree(_pointer) }
 // TODO(pg-port): body in aset.c.
-pub unsafe fn AllocSetRealloc(_pointer: *mut c_void, _size: Size, _flags: c_int) -> *mut c_void {
-    unimplemented!()
-}
+pub unsafe fn AllocSetRealloc(_pointer: *mut c_void, _size: Size, _flags: c_int) -> *mut c_void { crate::utils::mmgr::aset::AllocSetRealloc(_pointer, _size, _flags) }
 // TODO(pg-port): body in aset.c.
-pub unsafe fn AllocSetReset(_context: MemoryContext) {
-    unimplemented!()
-}
+pub unsafe fn AllocSetReset(_context: MemoryContext) { crate::utils::mmgr::aset::AllocSetReset(_context) }
 // TODO(pg-port): body in aset.c.
-pub unsafe fn AllocSetDelete(_context: MemoryContext) {
-    unimplemented!()
-}
+pub unsafe fn AllocSetDelete(_context: MemoryContext) { crate::utils::mmgr::aset::AllocSetDelete(_context) }
 // TODO(pg-port): body in aset.c.
-pub unsafe fn AllocSetGetChunkContext(_pointer: *mut c_void) -> MemoryContext {
-    unimplemented!()
-}
+pub unsafe fn AllocSetGetChunkContext(_pointer: *mut c_void) -> MemoryContext { crate::utils::mmgr::aset::AllocSetGetChunkContext(_pointer) }
 // TODO(pg-port): body in aset.c.
-pub unsafe fn AllocSetGetChunkSpace(_pointer: *mut c_void) -> Size {
-    unimplemented!()
-}
+pub unsafe fn AllocSetGetChunkSpace(_pointer: *mut c_void) -> Size { crate::utils::mmgr::aset::AllocSetGetChunkSpace(_pointer) }
 // TODO(pg-port): body in aset.c.
-pub unsafe fn AllocSetIsEmpty(_context: MemoryContext) -> bool {
-    unimplemented!()
-}
+pub unsafe fn AllocSetIsEmpty(_context: MemoryContext) -> bool { crate::utils::mmgr::aset::AllocSetIsEmpty(_context) }
 // TODO(pg-port): body in aset.c.
 pub unsafe fn AllocSetStats(
     _context: MemoryContext,
@@ -66,46 +50,28 @@ pub unsafe fn AllocSetStats(
     _passthru: *mut c_void,
     _totals: *mut MemoryContextCounters,
     _print_to_stderr: bool,
-) {
-    unimplemented!()
-}
+) { crate::utils::mmgr::aset::AllocSetStats(_context, _printfunc, _passthru, _totals, _print_to_stderr) }
 // #ifdef MEMORY_CONTEXT_CHECKING
 // extern void AllocSetCheck(MemoryContext context);
 // TODO(pg-port): AllocSetCheck under a cfg when MEMORY_CONTEXT_CHECKING is modeled.
 
 /* These functions implement the MemoryContext API for Generation context. */
 // TODO(pg-port): body in generation.c.
-pub unsafe fn GenerationAlloc(_context: MemoryContext, _size: Size, _flags: c_int) -> *mut c_void {
-    unimplemented!()
-}
+pub unsafe fn GenerationAlloc(_context: MemoryContext, _size: Size, _flags: c_int) -> *mut c_void { crate::utils::mmgr::generation::GenerationAlloc(_context, _size, _flags) }
 // TODO(pg-port): body in generation.c.
-pub unsafe fn GenerationFree(_pointer: *mut c_void) {
-    unimplemented!()
-}
+pub unsafe fn GenerationFree(_pointer: *mut c_void) { crate::utils::mmgr::generation::GenerationFree(_pointer) }
 // TODO(pg-port): body in generation.c.
-pub unsafe fn GenerationRealloc(_pointer: *mut c_void, _size: Size, _flags: c_int) -> *mut c_void {
-    unimplemented!()
-}
+pub unsafe fn GenerationRealloc(_pointer: *mut c_void, _size: Size, _flags: c_int) -> *mut c_void { crate::utils::mmgr::generation::GenerationRealloc(_pointer, _size, _flags) }
 // TODO(pg-port): body in generation.c.
-pub unsafe fn GenerationReset(_context: MemoryContext) {
-    unimplemented!()
-}
+pub unsafe fn GenerationReset(_context: MemoryContext) { crate::utils::mmgr::generation::GenerationReset(_context) }
 // TODO(pg-port): body in generation.c.
-pub unsafe fn GenerationDelete(_context: MemoryContext) {
-    unimplemented!()
-}
+pub unsafe fn GenerationDelete(_context: MemoryContext) { crate::utils::mmgr::generation::GenerationDelete(_context) }
 // TODO(pg-port): body in generation.c.
-pub unsafe fn GenerationGetChunkContext(_pointer: *mut c_void) -> MemoryContext {
-    unimplemented!()
-}
+pub unsafe fn GenerationGetChunkContext(_pointer: *mut c_void) -> MemoryContext { crate::utils::mmgr::generation::GenerationGetChunkContext(_pointer) }
 // TODO(pg-port): body in generation.c.
-pub unsafe fn GenerationGetChunkSpace(_pointer: *mut c_void) -> Size {
-    unimplemented!()
-}
+pub unsafe fn GenerationGetChunkSpace(_pointer: *mut c_void) -> Size { crate::utils::mmgr::generation::GenerationGetChunkSpace(_pointer) }
 // TODO(pg-port): body in generation.c.
-pub unsafe fn GenerationIsEmpty(_context: MemoryContext) -> bool {
-    unimplemented!()
-}
+pub unsafe fn GenerationIsEmpty(_context: MemoryContext) -> bool { crate::utils::mmgr::generation::GenerationIsEmpty(_context) }
 // TODO(pg-port): body in generation.c.
 pub unsafe fn GenerationStats(
     _context: MemoryContext,
@@ -113,46 +79,28 @@ pub unsafe fn GenerationStats(
     _passthru: *mut c_void,
     _totals: *mut MemoryContextCounters,
     _print_to_stderr: bool,
-) {
-    unimplemented!()
-}
+) { crate::utils::mmgr::generation::GenerationStats(_context, _printfunc, _passthru, _totals, _print_to_stderr) }
 // #ifdef MEMORY_CONTEXT_CHECKING
 // extern void GenerationCheck(MemoryContext context);
 // TODO(pg-port): GenerationCheck under a cfg when MEMORY_CONTEXT_CHECKING is modeled.
 
 /* These functions implement the MemoryContext API for Slab context. */
 // TODO(pg-port): body in slab.c.
-pub unsafe fn SlabAlloc(_context: MemoryContext, _size: Size, _flags: c_int) -> *mut c_void {
-    unimplemented!()
-}
+pub unsafe fn SlabAlloc(_context: MemoryContext, _size: Size, _flags: c_int) -> *mut c_void { crate::utils::mmgr::slab::SlabAlloc(_context, _size, _flags) }
 // TODO(pg-port): body in slab.c.
-pub unsafe fn SlabFree(_pointer: *mut c_void) {
-    unimplemented!()
-}
+pub unsafe fn SlabFree(_pointer: *mut c_void) { crate::utils::mmgr::slab::SlabFree(_pointer) }
 // TODO(pg-port): body in slab.c.
-pub unsafe fn SlabRealloc(_pointer: *mut c_void, _size: Size, _flags: c_int) -> *mut c_void {
-    unimplemented!()
-}
+pub unsafe fn SlabRealloc(_pointer: *mut c_void, _size: Size, _flags: c_int) -> *mut c_void { crate::utils::mmgr::slab::SlabRealloc(_pointer, _size, _flags) }
 // TODO(pg-port): body in slab.c.
-pub unsafe fn SlabReset(_context: MemoryContext) {
-    unimplemented!()
-}
+pub unsafe fn SlabReset(_context: MemoryContext) { crate::utils::mmgr::slab::SlabReset(_context) }
 // TODO(pg-port): body in slab.c.
-pub unsafe fn SlabDelete(_context: MemoryContext) {
-    unimplemented!()
-}
+pub unsafe fn SlabDelete(_context: MemoryContext) { crate::utils::mmgr::slab::SlabDelete(_context) }
 // TODO(pg-port): body in slab.c.
-pub unsafe fn SlabGetChunkContext(_pointer: *mut c_void) -> MemoryContext {
-    unimplemented!()
-}
+pub unsafe fn SlabGetChunkContext(_pointer: *mut c_void) -> MemoryContext { crate::utils::mmgr::slab::SlabGetChunkContext(_pointer) }
 // TODO(pg-port): body in slab.c.
-pub unsafe fn SlabGetChunkSpace(_pointer: *mut c_void) -> Size {
-    unimplemented!()
-}
+pub unsafe fn SlabGetChunkSpace(_pointer: *mut c_void) -> Size { crate::utils::mmgr::slab::SlabGetChunkSpace(_pointer) }
 // TODO(pg-port): body in slab.c.
-pub unsafe fn SlabIsEmpty(_context: MemoryContext) -> bool {
-    unimplemented!()
-}
+pub unsafe fn SlabIsEmpty(_context: MemoryContext) -> bool { crate::utils::mmgr::slab::SlabIsEmpty(_context) }
 // TODO(pg-port): body in slab.c.
 pub unsafe fn SlabStats(
     _context: MemoryContext,
@@ -160,9 +108,7 @@ pub unsafe fn SlabStats(
     _passthru: *mut c_void,
     _totals: *mut MemoryContextCounters,
     _print_to_stderr: bool,
-) {
-    unimplemented!()
-}
+) { crate::utils::mmgr::slab::SlabStats(_context, _printfunc, _passthru, _totals, _print_to_stderr) }
 // #ifdef MEMORY_CONTEXT_CHECKING
 // extern void SlabCheck(MemoryContext context);
 // TODO(pg-port): SlabCheck under a cfg when MEMORY_CONTEXT_CHECKING is modeled.
@@ -171,56 +117,95 @@ pub unsafe fn SlabStats(
  * These functions support the implementation of palloc_aligned() and are not
  * part of a fully-fledged MemoryContext type.
  */
-// TODO(pg-port): body in alignedalloc.c.
-pub unsafe fn AlignedAllocFree(_pointer: *mut c_void) {
-    unimplemented!()
+// utils/mmgr/alignedalloc.c -- AlignedAllocFree
+pub unsafe fn AlignedAllocFree(pointer: *mut c_void) {
+    use crate::utils::mmgr::memutils_memorychunk::{
+        MemoryChunkGetBlock, MemoryChunkIsExternal, PointerGetMemoryChunk,
+    };
+    let chunk = PointerGetMemoryChunk(pointer);
+    let unaligned: *mut c_void;
+
+    Assert!(!MemoryChunkIsExternal(chunk));
+
+    /* obtain the original (unaligned) allocated pointer */
+    unaligned = MemoryChunkGetBlock(chunk);
+
+    crate::utils::mmgr::mcxt::pfree(unaligned);
 }
-// TODO(pg-port): body in alignedalloc.c.
-pub unsafe fn AlignedAllocRealloc(_pointer: *mut c_void, _size: Size, _flags: c_int) -> *mut c_void {
-    unimplemented!()
+// utils/mmgr/alignedalloc.c -- AlignedAllocRealloc
+pub unsafe fn AlignedAllocRealloc(pointer: *mut c_void, size: Size, flags: c_int) -> *mut c_void {
+    use crate::utils::mmgr::memutils_memorychunk::{
+        MemoryChunkGetBlock, MemoryChunkGetValue, MemoryChunkIsExternal, PointerGetMemoryChunk,
+    };
+    let alignto: Size;
+    let unaligned: *mut c_void;
+    let ctx: MemoryContext;
+    let old_size: Size;
+    let newptr: *mut c_void;
+
+    let redirchunk = PointerGetMemoryChunk(pointer);
+    Assert!(!MemoryChunkIsExternal(redirchunk));
+
+    alignto = MemoryChunkGetValue(redirchunk);
+    unaligned = MemoryChunkGetBlock(redirchunk);
+
+    /* sanity check this is an aligned chunk */
+    Assert!((alignto & (alignto.wrapping_sub(1))) == 0);
+
+    ctx = crate::utils::mmgr::mcxt::GetMemoryChunkContext(unaligned);
+
+    /*
+     * Determine the size of the original allocation, so we know how many bytes
+     * to copy.  Use the space of the unaligned chunk minus the redirection
+     * overhead as an upper bound for the copy.
+     */
+    old_size = crate::utils::mmgr::mcxt::GetMemoryChunkSpace(unaligned)
+        - ((pointer as usize) - (unaligned as usize));
+
+    newptr = crate::utils::mmgr::mcxt::MemoryContextAllocAligned(ctx, size, alignto, flags);
+    if !newptr.is_null() {
+        let copy = if size < old_size { size } else { old_size };
+        core::ptr::copy_nonoverlapping(pointer as *const u8, newptr as *mut u8, copy);
+        crate::utils::mmgr::mcxt::pfree(unaligned);
+    }
+    newptr
 }
-// TODO(pg-port): body in alignedalloc.c.
-pub unsafe fn AlignedAllocGetChunkContext(_pointer: *mut c_void) -> MemoryContext {
-    unimplemented!()
+// utils/mmgr/alignedalloc.c -- AlignedAllocGetChunkContext
+pub unsafe fn AlignedAllocGetChunkContext(pointer: *mut c_void) -> MemoryContext {
+    use crate::utils::mmgr::memutils_memorychunk::{
+        MemoryChunkGetBlock, MemoryChunkIsExternal, PointerGetMemoryChunk,
+    };
+    let chunk = PointerGetMemoryChunk(pointer);
+    Assert!(!MemoryChunkIsExternal(chunk));
+    crate::utils::mmgr::mcxt::GetMemoryChunkContext(MemoryChunkGetBlock(chunk))
 }
-// TODO(pg-port): body in alignedalloc.c.
-pub unsafe fn AlignedAllocGetChunkSpace(_pointer: *mut c_void) -> Size {
-    unimplemented!()
+// utils/mmgr/alignedalloc.c -- AlignedAllocGetChunkSpace
+pub unsafe fn AlignedAllocGetChunkSpace(pointer: *mut c_void) -> Size {
+    use crate::utils::mmgr::memutils_memorychunk::{
+        MemoryChunkGetBlock, MemoryChunkIsExternal, PointerGetMemoryChunk,
+    };
+    let chunk = PointerGetMemoryChunk(pointer);
+    Assert!(!MemoryChunkIsExternal(chunk));
+    crate::utils::mmgr::mcxt::GetMemoryChunkSpace(MemoryChunkGetBlock(chunk))
 }
 
 /* These functions implement the MemoryContext API for the Bump context. */
 // TODO(pg-port): body in bump.c.
-pub unsafe fn BumpAlloc(_context: MemoryContext, _size: Size, _flags: c_int) -> *mut c_void {
-    unimplemented!()
-}
+pub unsafe fn BumpAlloc(_context: MemoryContext, _size: Size, _flags: c_int) -> *mut c_void { crate::utils::mmgr::bump::BumpAlloc(_context, _size, _flags) }
 // TODO(pg-port): body in bump.c.
-pub unsafe fn BumpFree(_pointer: *mut c_void) {
-    unimplemented!()
-}
+pub unsafe fn BumpFree(_pointer: *mut c_void) { crate::utils::mmgr::bump::BumpFree(_pointer) }
 // TODO(pg-port): body in bump.c.
-pub unsafe fn BumpRealloc(_pointer: *mut c_void, _size: Size, _flags: c_int) -> *mut c_void {
-    unimplemented!()
-}
+pub unsafe fn BumpRealloc(_pointer: *mut c_void, _size: Size, _flags: c_int) -> *mut c_void { crate::utils::mmgr::bump::BumpRealloc(_pointer, _size, _flags) }
 // TODO(pg-port): body in bump.c.
-pub unsafe fn BumpReset(_context: MemoryContext) {
-    unimplemented!()
-}
+pub unsafe fn BumpReset(_context: MemoryContext) { crate::utils::mmgr::bump::BumpReset(_context) }
 // TODO(pg-port): body in bump.c.
-pub unsafe fn BumpDelete(_context: MemoryContext) {
-    unimplemented!()
-}
+pub unsafe fn BumpDelete(_context: MemoryContext) { crate::utils::mmgr::bump::BumpDelete(_context) }
 // TODO(pg-port): body in bump.c.
-pub unsafe fn BumpGetChunkContext(_pointer: *mut c_void) -> MemoryContext {
-    unimplemented!()
-}
+pub unsafe fn BumpGetChunkContext(_pointer: *mut c_void) -> MemoryContext { crate::utils::mmgr::bump::BumpGetChunkContext(_pointer) }
 // TODO(pg-port): body in bump.c.
-pub unsafe fn BumpGetChunkSpace(_pointer: *mut c_void) -> Size {
-    unimplemented!()
-}
+pub unsafe fn BumpGetChunkSpace(_pointer: *mut c_void) -> Size { crate::utils::mmgr::bump::BumpGetChunkSpace(_pointer) }
 // TODO(pg-port): body in bump.c.
-pub unsafe fn BumpIsEmpty(_context: MemoryContext) -> bool {
-    unimplemented!()
-}
+pub unsafe fn BumpIsEmpty(_context: MemoryContext) -> bool { crate::utils::mmgr::bump::BumpIsEmpty(_context) }
 // TODO(pg-port): body in bump.c.
 pub unsafe fn BumpStats(
     _context: MemoryContext,
@@ -228,9 +213,7 @@ pub unsafe fn BumpStats(
     _passthru: *mut c_void,
     _totals: *mut MemoryContextCounters,
     _print_to_stderr: bool,
-) {
-    unimplemented!()
-}
+) { crate::utils::mmgr::bump::BumpStats(_context, _printfunc, _passthru, _totals, _print_to_stderr) }
 // #ifdef MEMORY_CONTEXT_CHECKING
 // extern void BumpCheck(MemoryContext context);
 // TODO(pg-port): BumpCheck under a cfg when MEMORY_CONTEXT_CHECKING is modeled.
@@ -308,24 +291,18 @@ pub unsafe fn MemoryContextCreate(
     _method_id: MemoryContextMethodID,
     _parent: MemoryContext,
     _name: *const c_char,
-) {
-    unimplemented!()
-}
+) { crate::utils::mmgr::mcxt::MemoryContextCreate(_node, _tag, _method_id, _parent, _name) }
 
 // TODO(pg-port): body in mcxt.c.
 pub unsafe fn MemoryContextAllocationFailure(
     _context: MemoryContext,
     _size: Size,
     _flags: c_int,
-) -> *mut c_void {
-    unimplemented!()
-}
+) -> *mut c_void { crate::utils::mmgr::mcxt::MemoryContextAllocationFailure(_context, _size, _flags) }
 
 // pg_noreturn: this function never returns (it raises an error). Modeled as `-> !`.
 // TODO(pg-port): body in mcxt.c.
-pub unsafe fn MemoryContextSizeFailure(_context: MemoryContext, _size: Size, _flags: c_int) -> ! {
-    unimplemented!()
-}
+pub unsafe fn MemoryContextSizeFailure(_context: MemoryContext, _size: Size, _flags: c_int) -> ! { crate::utils::mmgr::mcxt::MemoryContextSizeFailure(_context, _size, _flags) }
 
 #[inline]
 pub unsafe fn MemoryContextCheckSize(context: MemoryContext, size: Size, flags: c_int) {

@@ -51,9 +51,9 @@ use crate::castNode;
 /* ==================================================================== */
 
 // utils/syscache.h - cache ids (STUB: syscache.c not yet ported).
-const PARTRELID: c_int = 0;
-const RELOID: c_int = 0;
-const CLAOID: c_int = 0;
+const PARTRELID: c_int = 45;
+const RELOID: c_int = 57;
+const CLAOID: c_int = 14;
 
 // catalog/pg_partitioned_table - attribute numbers (STUB: catalog header not
 // fully ported).
@@ -124,9 +124,7 @@ unsafe fn get_rel_relispartition(_relid: Oid) -> bool {
 
 // partitioning/partbounds.h - get_qual_from_partbound (STUB: partbounds.c not
 // yet ported).
-unsafe fn get_qual_from_partbound(_parent: Relation, _spec: *mut c_void) -> *mut List {
-    unimplemented!("get_qual_from_partbound: partbounds.c not yet ported")
-}
+unsafe fn get_qual_from_partbound(_parent: Relation, _spec: *mut c_void) -> *mut List { crate::partitioning::partbounds::get_qual_from_partbound(_parent, _spec as _) }
 
 // nodes/copyfuncs.c - copyObject() deep copy (STUB: copyfuncs.c not yet wired
 // into the module tree).
@@ -238,7 +236,7 @@ unsafe fn RelationBuildPartitionKey(relation: Relation) {
 
     partkeycxt = AllocSetContextCreate!(
         CurTransactionContext,
-        "partition key",
+        c"partition key".as_ptr(),
         ALLOCSET_SMALL_SIZES
     ) as *mut _;
     MemoryContextCopyAndSetIdentifier(partkeycxt, RelationGetRelationName(relation));
@@ -602,7 +600,7 @@ unsafe fn generate_partition_qual(rel: Relation) -> *mut List {
     if result != NIL {
         (*rel).rd_partcheckcxt = AllocSetContextCreate!(
             CacheMemoryContext,
-            "partition constraint",
+            c"partition constraint".as_ptr(),
             ALLOCSET_SMALL_SIZES
         ) as *mut c_void;
         MemoryContextCopyAndSetIdentifier(

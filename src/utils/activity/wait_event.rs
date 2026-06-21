@@ -541,9 +541,7 @@ type LWLockMode = c_int;
 const LW_EXCLUSIVE: LWLockMode = 0;
 const LW_SHARED: LWLockMode = 1;
 
-// Named LWLock pointer for custom wait events (storage/lwlock.h, lwlocklist).
-// TODO: storage/lmgr/lwlock.c - real WaitEventCustomLock pointer.
-const WaitEventCustomLock: *mut c_void = null_mut();
+use crate::backend_link_shims::WaitEventCustomLock;
 
 // TODO: storage/lmgr/lwlock.c
 unsafe fn LWLockAcquire(_lock: *mut c_void, _mode: LWLockMode) -> bool {
@@ -567,7 +565,7 @@ unsafe fn GetLockNameFromTagType(_locktag_type: uint16) -> *const c_char {
 
 // TODO: storage/ipc/shmem.c
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _foundPtr: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO: storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _foundPtr)
 }
 
 // TODO: storage/ipc/shmem.c
@@ -578,7 +576,7 @@ unsafe fn ShmemInitHash(
     _infoP: *mut HASHCTL,
     _hash_flags: c_int,
 ) -> *mut HTAB {
-    unimplemented!() // TODO: storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitHash(_name, _init_size, _max_size, _infoP, _hash_flags)
 }
 
 // TODO: common/shmem.h (add_size)

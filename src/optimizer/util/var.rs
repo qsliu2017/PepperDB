@@ -62,14 +62,18 @@ use crate::nodes::nodeFuncs::expression_returns_set;
 use crate::makeNode;
 use crate::IsA;
 
+unsafe fn copyObjectImpl(from: *const c_void) -> *mut c_void {
+    crate::nodes::copyfuncs::copyObjectImpl(from)
+}
+
 /// Recursive deep copy (copyfuncs.c copyObject).  Returns NULL for NULL input.
 unsafe fn copyObject<T>(node: *const T) -> *mut T {
-    crate::nodes::copyfuncs::copyObjectImpl(node as *const c_void) as *mut T
+    copyObjectImpl(node as *const c_void) as *mut T
 }
 
 /// TODO(pg-port): rewrite/rewriteManip.c checkExprHasSubLink - not yet ported.
-unsafe fn checkExprHasSubLink(_node: *mut Node) -> bool {
-    false
+unsafe fn checkExprHasSubLink(node: *mut Node) -> bool {
+    crate::rewrite::rewriteManip::checkExprHasSubLink(node)
 }
 
 // ----------------------------------------------------------------------------

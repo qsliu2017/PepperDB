@@ -156,8 +156,7 @@ pub struct ProcStruct {
 }
 
 /// TODO(pg-port): storage/proc.h -- MyProc
-pub static mut MyProc: *mut ProcStruct = core::ptr::null_mut();
-
+extern "C" { pub static mut MyProc: *mut ProcStruct; }
 /// TODO(pg-port): access/parallel.h -- ParallelWorkerNumber
 pub static mut ParallelWorkerNumber: c_int = 0;
 
@@ -257,20 +256,14 @@ pub unsafe fn BMR_REL(rel: Relation) -> Relation {
     rel
 }
 /// TODO(pg-port): utils/rel.h -- RelationGetNumberOfBlocks
-pub unsafe fn RelationGetNumberOfBlocks(relation: Relation) -> BlockNumber {
-    // TODO(pg-port): storage/bufmgr.h -- RelationGetNumberOfBlocksInFork
-    unimplemented!()
-}
+#[no_mangle]
+pub unsafe fn RelationGetNumberOfBlocks(relation: Relation) -> BlockNumber { crate::access::nbtree::nbtpage::RelationGetNumberOfBlocks(relation) }
 /// TODO(pg-port): utils/rel.h -- RelationNeedsWAL
-pub unsafe fn RelationNeedsWAL(relation: Relation) -> bool {
-    // TODO(pg-port): utils/rel.h
-    unimplemented!()
-}
+#[no_mangle]
+pub unsafe fn RelationNeedsWAL(relation: Relation) -> bool { crate::access::nbtree::nbtdedup::RelationNeedsWAL(relation) }
 /// TODO(pg-port): access/relation.h -- IndexRelationGetNumberOfKeyAttributes
-pub unsafe fn IndexRelationGetNumberOfKeyAttributes(relation: Relation) -> c_int {
-    // TODO(pg-port): utils/rel.h
-    unimplemented!()
-}
+#[no_mangle]
+pub unsafe fn IndexRelationGetNumberOfKeyAttributes(relation: Relation) -> c_int { crate::access::nbtree::nbtdedup::IndexRelationGetNumberOfKeyAttributes(relation) }
 /// TODO(pg-port): utils/rel.h -- rd_indcollation accessor
 pub unsafe fn RelationGetIndcollation(relation: Relation, i: c_int) -> Oid {
     // TODO(pg-port): utils/rel.h -- index->rd_indcollation[i]
@@ -288,53 +281,29 @@ pub unsafe fn tuplesort_begin_index_gin(
     workMem: c_int,
     coordinate: SortCoordinate,
     sortopt: c_int,
-) -> *mut Tuplesortstate {
-    // TODO(pg-port): utils/tuplesort.h
-    unimplemented!()
-}
+) -> *mut Tuplesortstate { crate::utils::sort::tuplesortvariants::tuplesort_begin_index_gin(heapRel, indexRel, workMem, coordinate, sortopt) }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_performsort
-pub unsafe fn tuplesort_performsort(state: *mut Tuplesortstate) {
-    // TODO(pg-port): utils/tuplesort.h
-    unimplemented!()
-}
+pub unsafe fn tuplesort_performsort(state: *mut Tuplesortstate) { crate::utils::sort::tuplesort::tuplesort_performsort(state) }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_end
-pub unsafe fn tuplesort_end(state: *mut Tuplesortstate) {
-    // TODO(pg-port): utils/tuplesort.h
-    unimplemented!()
-}
+pub unsafe fn tuplesort_end(state: *mut Tuplesortstate) { crate::utils::sort::tuplesort::tuplesort_end(state) }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_putgintuple
-pub unsafe fn tuplesort_putgintuple(state: *mut Tuplesortstate, tuple: *mut GinTuple, size: Size) {
-    // TODO(pg-port): utils/tuplesort.h
-    unimplemented!()
-}
+pub unsafe fn tuplesort_putgintuple(state: *mut Tuplesortstate, tuple: *mut GinTuple, size: Size) { crate::utils::sort::tuplesortvariants::tuplesort_putgintuple(state, tuple, size) }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_getgintuple
 pub unsafe fn tuplesort_getgintuple(
     state: *mut Tuplesortstate,
     len: *mut Size,
     forward: bool,
-) -> *mut GinTuple {
-    // TODO(pg-port): utils/tuplesort.h
-    unimplemented!()
-}
+) -> *mut GinTuple { crate::utils::sort::tuplesortvariants::tuplesort_getgintuple(state, len, forward) }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_estimate_shared
-pub unsafe fn tuplesort_estimate_shared(nworkers: c_int) -> Size {
-    // TODO(pg-port): utils/tuplesort.h
-    unimplemented!()
-}
+pub unsafe fn tuplesort_estimate_shared(nworkers: c_int) -> Size { crate::utils::sort::tuplesort::tuplesort_estimate_shared(nworkers) }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_initialize_shared
 pub unsafe fn tuplesort_initialize_shared(
     shared: *mut Sharedsort,
     nWorkers: c_int,
     seg: *mut dsm_segment,
-) {
-    // TODO(pg-port): utils/tuplesort.h
-    unimplemented!()
-}
+) { crate::utils::sort::tuplesort::tuplesort_initialize_shared(shared, nWorkers, seg) }
 /// TODO(pg-port): utils/tuplesort.h -- tuplesort_attach_shared
-pub unsafe fn tuplesort_attach_shared(shared: *mut Sharedsort, seg: *mut dsm_segment) {
-    // TODO(pg-port): utils/tuplesort.h
-    unimplemented!()
-}
+pub unsafe fn tuplesort_attach_shared(shared: *mut Sharedsort, seg: *mut dsm_segment) { crate::utils::sort::tuplesort::tuplesort_attach_shared(shared, seg) }
 
 // --- table.h / tableam.h ---
 /// TODO(pg-port): access/tableam.h -- table_index_build_scan
@@ -361,73 +330,40 @@ pub type IndexBuildCallback = unsafe extern "C" fn(
     state: *mut c_void,
 );
 /// TODO(pg-port): access/tableam.h -- table_parallelscan_estimate
-pub unsafe fn table_parallelscan_estimate(rel: Relation, snapshot: Snapshot) -> Size {
-    // TODO(pg-port): access/tableam.h
-    unimplemented!()
-}
+pub unsafe fn table_parallelscan_estimate(rel: Relation, snapshot: Snapshot) -> Size { crate::access::table::tableam::table_parallelscan_estimate(rel, snapshot) }
 /// TODO(pg-port): access/tableam.h -- table_parallelscan_initialize
 pub unsafe fn table_parallelscan_initialize(
     rel: Relation,
     pscan: ParallelTableScanDesc,
     snapshot: Snapshot,
-) {
-    // TODO(pg-port): access/tableam.h
-    unimplemented!()
-}
+) { crate::access::table::tableam::table_parallelscan_initialize(rel, pscan, snapshot) }
 /// TODO(pg-port): access/tableam.h -- table_beginscan_parallel
 pub unsafe fn table_beginscan_parallel(
     relation: Relation,
     pscan: ParallelTableScanDesc,
-) -> TableScanDesc {
-    // TODO(pg-port): access/tableam.h
-    unimplemented!()
-}
+) -> TableScanDesc { crate::access::table::tableam::table_beginscan_parallel(relation, pscan) }
 
 // --- parallel.h ---
 /// TODO(pg-port): access/parallel.h -- EnterParallelMode
-pub unsafe fn EnterParallelMode() {
-    // TODO(pg-port): access/parallel.h
-    unimplemented!()
-}
+pub unsafe fn EnterParallelMode() { crate::access::transam::xact::EnterParallelMode() }
 /// TODO(pg-port): access/parallel.h -- ExitParallelMode
-pub unsafe fn ExitParallelMode() {
-    // TODO(pg-port): access/parallel.h
-    unimplemented!()
-}
+pub unsafe fn ExitParallelMode() { crate::access::transam::xact::ExitParallelMode() }
 /// TODO(pg-port): access/parallel.h -- CreateParallelContext
 pub unsafe fn CreateParallelContext(
     library_name: *const c_char,
     function_name: *const c_char,
     nworkers: c_int,
-) -> *mut ParallelContext {
-    // TODO(pg-port): access/parallel.h
-    unimplemented!()
-}
+) -> *mut ParallelContext { crate::access::transam::parallel::CreateParallelContext(library_name, function_name, nworkers) }
 /// TODO(pg-port): access/parallel.h -- InitializeParallelDSM
-pub unsafe fn InitializeParallelDSM(pcxt: *mut ParallelContext) {
-    // TODO(pg-port): access/parallel.h
-    unimplemented!()
-}
+pub unsafe fn InitializeParallelDSM(pcxt: *mut ParallelContext) { crate::access::transam::parallel::InitializeParallelDSM(pcxt) }
 /// TODO(pg-port): access/parallel.h -- LaunchParallelWorkers
-pub unsafe fn LaunchParallelWorkers(pcxt: *mut ParallelContext) {
-    // TODO(pg-port): access/parallel.h
-    unimplemented!()
-}
+pub unsafe fn LaunchParallelWorkers(pcxt: *mut ParallelContext) { crate::access::transam::parallel::LaunchParallelWorkers(pcxt) }
 /// TODO(pg-port): access/parallel.h -- WaitForParallelWorkersToAttach
-pub unsafe fn WaitForParallelWorkersToAttach(pcxt: *mut ParallelContext) {
-    // TODO(pg-port): access/parallel.h
-    unimplemented!()
-}
+pub unsafe fn WaitForParallelWorkersToAttach(pcxt: *mut ParallelContext) { crate::access::transam::parallel::WaitForParallelWorkersToAttach(pcxt) }
 /// TODO(pg-port): access/parallel.h -- WaitForParallelWorkersToFinish
-pub unsafe fn WaitForParallelWorkersToFinish(pcxt: *mut ParallelContext) {
-    // TODO(pg-port): access/parallel.h
-    unimplemented!()
-}
+pub unsafe fn WaitForParallelWorkersToFinish(pcxt: *mut ParallelContext) { crate::access::transam::parallel::WaitForParallelWorkersToFinish(pcxt) }
 /// TODO(pg-port): access/parallel.h -- DestroyParallelContext
-pub unsafe fn DestroyParallelContext(pcxt: *mut ParallelContext) {
-    // TODO(pg-port): access/parallel.h
-    unimplemented!()
-}
+pub unsafe fn DestroyParallelContext(pcxt: *mut ParallelContext) { crate::access::transam::parallel::DestroyParallelContext(pcxt) }
 
 // --- shm_toc.h ---
 /// TODO(pg-port): storage/shm_toc.h -- shm_toc_estimate_chunk
@@ -441,29 +377,17 @@ pub unsafe fn shm_toc_estimate_keys(e: *mut shm_toc_estimator, cnt: Size) {
     unimplemented!()
 }
 /// TODO(pg-port): storage/shm_toc.h -- shm_toc_allocate
-pub unsafe fn shm_toc_allocate(toc: *mut c_void, nbytes: Size) -> *mut c_void {
-    // TODO(pg-port): storage/shm_toc.h
-    unimplemented!()
-}
+pub unsafe fn shm_toc_allocate(toc: *mut c_void, nbytes: Size) -> *mut c_void { crate::storage::ipc::shm_toc::shm_toc_allocate(toc as _, nbytes) }
 /// TODO(pg-port): storage/shm_toc.h -- shm_toc_insert
-pub unsafe fn shm_toc_insert(toc: *mut c_void, key: u64, address: *mut c_void) {
-    // TODO(pg-port): storage/shm_toc.h
-    unimplemented!()
-}
+pub unsafe fn shm_toc_insert(toc: *mut c_void, key: u64, address: *mut c_void) { crate::storage::ipc::shm_toc::shm_toc_insert(toc as _, key as _, address) }
 /// TODO(pg-port): storage/shm_toc.h -- shm_toc_lookup
-pub unsafe fn shm_toc_lookup(toc: *mut shm_toc, key: u64, noError: bool) -> *mut c_void {
-    // TODO(pg-port): storage/shm_toc.h
-    unimplemented!()
-}
+pub unsafe fn shm_toc_lookup(toc: *mut shm_toc, key: u64, noError: bool) -> *mut c_void { crate::storage::ipc::shm_toc::shm_toc_lookup(toc, key as _, noError) }
 
 // --- snapshot ---
 /// TODO(pg-port): access/parallel.h -- SnapshotAny
 pub static mut SnapshotAny: Snapshot = core::ptr::null_mut();
 /// TODO(pg-port): utils/snapmgr.h -- GetTransactionSnapshot
-pub unsafe fn GetTransactionSnapshot() -> Snapshot {
-    // TODO(pg-port): utils/snapmgr.h
-    unimplemented!()
-}
+pub unsafe fn GetTransactionSnapshot() -> Snapshot { crate::utils::time::snapmgr::GetTransactionSnapshot() }
 /// TODO(pg-port): utils/snapmgr.h -- RegisterSnapshot
 pub unsafe fn RegisterSnapshot(snapshot: Snapshot) -> Snapshot {
     // TODO(pg-port): utils/snapmgr.h
@@ -475,6 +399,7 @@ pub unsafe fn UnregisterSnapshot(snapshot: Snapshot) {
     unimplemented!()
 }
 /// TODO(pg-port): utils/snapshot.h -- IsMVCCSnapshot
+#[no_mangle]
 pub unsafe fn IsMVCCSnapshot(snapshot: Snapshot) -> bool {
     // TODO(pg-port): utils/snapshot.h
     unimplemented!()
@@ -499,28 +424,21 @@ pub unsafe fn SpinLockRelease(lock: *mut slock_t) {
 
 // --- condition_variable.h ---
 /// TODO(pg-port): storage/condition_variable.h -- ConditionVariableInit
+#[no_mangle]
 pub unsafe fn ConditionVariableInit(cv: *mut ConditionVariable) {
     // TODO(pg-port): storage/condition_variable.h
     unimplemented!()
 }
 /// TODO(pg-port): storage/condition_variable.h -- ConditionVariableSleep
-pub unsafe fn ConditionVariableSleep(cv: *mut ConditionVariable, wait_event_info: u32) {
-    // TODO(pg-port): storage/condition_variable.h
-    unimplemented!()
-}
+pub unsafe fn ConditionVariableSleep(cv: *mut ConditionVariable, wait_event_info: u32) { crate::storage::lmgr::condition_variable::ConditionVariableSleep(cv, wait_event_info as _) }
 /// TODO(pg-port): storage/condition_variable.h -- ConditionVariableCancelSleep
-pub unsafe fn ConditionVariableCancelSleep() -> bool {
-    // TODO(pg-port): storage/condition_variable.h
-    unimplemented!()
-}
+pub unsafe fn ConditionVariableCancelSleep() -> bool { crate::storage::lmgr::condition_variable::ConditionVariableCancelSleep() }
 /// TODO(pg-port): storage/condition_variable.h -- ConditionVariableSignal
-pub unsafe fn ConditionVariableSignal(cv: *mut ConditionVariable) {
-    // TODO(pg-port): storage/condition_variable.h
-    unimplemented!()
-}
+pub unsafe fn ConditionVariableSignal(cv: *mut ConditionVariable) { crate::storage::lmgr::condition_variable::ConditionVariableSignal(cv) }
 
 // --- pgstat.h ---
 /// TODO(pg-port): pgstat.h -- pgstat_progress_update_param
+#[no_mangle]
 pub unsafe fn pgstat_progress_update_param(index: c_int, val: i64) {
     // TODO(pg-port): pgstat.h
     unimplemented!()
@@ -530,11 +448,9 @@ pub unsafe fn pgstat_progress_update_multi_param(
     nparam: c_int,
     index: *const c_int,
     val: *const i64,
-) {
-    // TODO(pg-port): pgstat.h
-    unimplemented!()
-}
+) { crate::utils::activity::backend_progress::pgstat_progress_update_multi_param(nparam, index, val as _) }
 /// TODO(pg-port): pgstat.h -- pgstat_report_activity
+#[no_mangle]
 pub unsafe fn pgstat_report_activity(state: c_int, cmd_str: *const c_char) {
     // TODO(pg-port): pgstat.h
     unimplemented!()
@@ -542,20 +458,11 @@ pub unsafe fn pgstat_report_activity(state: c_int, cmd_str: *const c_char) {
 
 // --- instrument.h ---
 /// TODO(pg-port): executor/instrument.h -- InstrStartParallelQuery
-pub unsafe fn InstrStartParallelQuery() {
-    // TODO(pg-port): executor/instrument.h
-    unimplemented!()
-}
+pub unsafe fn InstrStartParallelQuery() { crate::executor::instrument::InstrStartParallelQuery() }
 /// TODO(pg-port): executor/instrument.h -- InstrEndParallelQuery
-pub unsafe fn InstrEndParallelQuery(bufusage: *mut BufferUsage, walusage: *mut WalUsage) {
-    // TODO(pg-port): executor/instrument.h
-    unimplemented!()
-}
+pub unsafe fn InstrEndParallelQuery(bufusage: *mut BufferUsage, walusage: *mut WalUsage) { crate::executor::instrument::InstrEndParallelQuery(bufusage, walusage) }
 /// TODO(pg-port): executor/instrument.h -- InstrAccumParallelQuery
-pub unsafe fn InstrAccumParallelQuery(bufusage: *mut BufferUsage, walusage: *mut WalUsage) {
-    // TODO(pg-port): executor/instrument.h
-    unimplemented!()
-}
+pub unsafe fn InstrAccumParallelQuery(bufusage: *mut BufferUsage, walusage: *mut WalUsage) { crate::executor::instrument::InstrAccumParallelQuery(bufusage, walusage) }
 
 // --- c.h size helpers ---
 /// TODO(pg-port): c.h -- add_size
@@ -2702,7 +2609,7 @@ pub unsafe fn _gin_parallel_build_main(seg: *mut dsm_segment, toc: *mut shm_toc)
      * dumped out to the index
      */
     buildstate.tmpCtx = AllocSetContextCreate!(CurrentMemoryContext,
-                                               "Gin build temporary context",
+                                               c"Gin build temporary context".as_ptr(),
                                                ALLOCSET_DEFAULT_SIZES);
 
     /*
@@ -2710,7 +2617,7 @@ pub unsafe fn _gin_parallel_build_main(seg: *mut dsm_segment, toc: *mut shm_toc)
      * ginExtractEntries(), and can be reset after each tuple
      */
     buildstate.funcCtx = AllocSetContextCreate!(CurrentMemoryContext,
-                                                "Gin build temporary context for user-defined function",
+                                                c"Gin build temporary context for user-defined function".as_ptr(),
                                                 ALLOCSET_DEFAULT_SIZES);
 
     buildstate.accum.ginstate = &mut buildstate.ginstate;

@@ -682,13 +682,9 @@ const WAIT_EVENT_TIMELINE_HISTORY_SYNC: u32 = 0;
 const WAIT_EVENT_TIMELINE_HISTORY_FILE_WRITE: u32 = 0;
 const WAIT_EVENT_TIMELINE_HISTORY_FILE_SYNC: u32 = 0;
 
-unsafe fn TLHistoryFileName(_fname: *mut c_char, _tli: TimeLineID) {
-    unimplemented!() // TODO: access/xlog_internal.h
-}
+unsafe fn TLHistoryFileName(_fname: *mut c_char, _tli: TimeLineID) { crate::access::transam::xlog_internal::TLHistoryFileName(_fname as _, _tli as _) }
 
-unsafe fn TLHistoryFilePath(_path: *mut c_char, _tli: TimeLineID) {
-    unimplemented!() // TODO: access/xlog_internal.h
-}
+unsafe fn TLHistoryFilePath(_path: *mut c_char, _tli: TimeLineID) { crate::access::transam::xlog_internal::TLHistoryFilePath(_path as _, _tli as _) }
 
 unsafe fn RestoreArchivedFile(
     _path: *mut c_char,
@@ -700,25 +696,15 @@ unsafe fn RestoreArchivedFile(
     unimplemented!() // TODO: access/xlogarchive.h
 }
 
-unsafe fn KeepFileRestoredFromArchive(_path: *const c_char, _xlogfname: *const c_char) {
-    unimplemented!() // TODO: access/xlogarchive.h
-}
+unsafe fn KeepFileRestoredFromArchive(_path: *const c_char, _xlogfname: *const c_char) { crate::access::transam::xlogarchive::KeepFileRestoredFromArchive(_path as _, _xlogfname as _) }
 
-unsafe fn XLogArchiveNotify(_xlog: *const c_char) {
-    unimplemented!() // TODO: access/xlogarchive.h
-}
+unsafe fn XLogArchiveNotify(_xlog: *const c_char) { crate::access::transam::xlogarchive::XLogArchiveNotify(_xlog as _) }
 
-unsafe fn XLogArchivingActive() -> bool {
-    unimplemented!() // TODO: access/xlog.h
-}
+unsafe fn XLogArchivingActive() -> bool { crate::access::transam::xlogarchive::XLogArchivingActive() }
 
-unsafe fn AllocateFile(_name: *const c_char, _mode: *const c_char) -> *mut c_void {
-    unimplemented!() // TODO: storage/fd.h
-}
+unsafe fn AllocateFile(_name: *const c_char, _mode: *const c_char) -> *mut c_void { crate::storage::file::fd::AllocateFile(_name as _, _mode as _) }
 
-unsafe fn FreeFile(_file: *mut c_void) -> c_int {
-    unimplemented!() // TODO: storage/fd.h
-}
+unsafe fn FreeFile(_file: *mut c_void) -> c_int { crate::storage::file::fd::FreeFile(_file as _) }
 
 unsafe fn OpenTransientFile(_fileName: *const c_char, _fileFlags: c_int) -> c_int {
     unimplemented!() // TODO: storage/fd.h
@@ -740,22 +726,18 @@ unsafe fn data_sync_elevel(_elevel: c_int) -> c_int {
     unimplemented!() // TODO: storage/fd.h
 }
 
-unsafe fn pgstat_report_wait_start(_wait_event_info: u32) {
-    unimplemented!() // TODO: utils/wait_event.h
-}
+unsafe fn pgstat_report_wait_start(_wait_event_info: u32) { crate::parser_link_shims::pgstat_report_wait_start(_wait_event_info as _) }
 
 unsafe fn pgstat_report_wait_end() {
-    unimplemented!() // TODO: utils/wait_event.h
+    // wait-event telemetry; no-op for bring-up
 }
 
 unsafe fn list_make1(datum: *mut c_void) -> *mut List {
-    let _ = datum;
-    unimplemented!() // TODO: nodes/pg_list.h
+    crate::nodes::list::lcons(datum, core::ptr::null_mut())
 }
 
 unsafe fn lcons(datum: *mut c_void, list: *mut List) -> *mut List {
-    let _ = (datum, list);
-    unimplemented!() // TODO: nodes/pg_list.h
+    crate::nodes::list::lcons(datum, list)
 }
 
 unsafe fn NIL() -> *mut List {
@@ -763,5 +745,5 @@ unsafe fn NIL() -> *mut List {
 }
 
 unsafe fn lfirst(_cell: *mut ListCell) -> *mut c_void {
-    unimplemented!() // TODO: nodes/pg_list.h
+    crate::nodes::pg_list::lfirst(_cell)
 }

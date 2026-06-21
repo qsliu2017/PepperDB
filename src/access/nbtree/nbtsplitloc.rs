@@ -74,19 +74,19 @@ pub const BTREE_SINGLEVAL_FILLFACTOR: c_int = 96;
 
 /// TODO(pg-port): BTPageGetOpaque() (access/nbtree.h).
 unsafe fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTPageGetOpaque(page as _) as _
 }
 /// TODO(pg-port): P_RIGHTMOST() (access/nbtree.h).
 unsafe fn P_RIGHTMOST(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::P_RIGHTMOST(opaque as _)
 }
 /// TODO(pg-port): P_ISLEAF() (access/nbtree.h).
 unsafe fn P_ISLEAF(opaque: BTPageOpaque) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtpage::P_ISLEAF(opaque as _)
 }
 /// TODO(pg-port): P_FIRSTDATAKEY() (access/nbtree.h).
 unsafe fn P_FIRSTDATAKEY(opaque: BTPageOpaque) -> OffsetNumber {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::P_FIRSTDATAKEY(opaque as _) as _
 }
 /// TODO(pg-port): P_HIKEY (access/nbtree.h).
 const P_HIKEY: OffsetNumber = 1;
@@ -95,23 +95,29 @@ const P_FIRSTKEY: OffsetNumber = 2;
 
 /// TODO(pg-port): BTGetFillFactor() (access/nbtree.h / utils/rel.h).
 unsafe fn BTGetFillFactor(rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    const BTREE_DEFAULT_FILLFACTOR: c_int = 90;
+    let opts = (*rel).rd_options as *mut crate::access::nbtree::nbtutils::BTOptions;
+    if !opts.is_null() {
+        (*opts).fillfactor
+    } else {
+        BTREE_DEFAULT_FILLFACTOR
+    }
 }
 /// TODO(pg-port): IndexRelationGetNumberOfKeyAttributes() (access/relscan.h via rel.h).
 unsafe fn IndexRelationGetNumberOfKeyAttributes(rel: Relation) -> c_int {
-    unimplemented!() // TODO(pg-port): utils/rel.h
+    crate::access::nbtree::nbtdedup::IndexRelationGetNumberOfKeyAttributes(rel as _) as _
 }
 /// TODO(pg-port): _bt_keep_natts_fast() (nbtutils.c / access/nbtree.h).
 unsafe fn _bt_keep_natts_fast(rel: Relation, lastleft: IndexTuple, firstright: IndexTuple) -> c_int {
-    unimplemented!() // TODO(pg-port): access/nbtree.h (nbtutils.c)
+    crate::access::nbtree::nbtutils::_bt_keep_natts_fast(rel as _, lastleft as _, firstright as _) as _
 }
 /// TODO(pg-port): BTreeTupleIsPosting() (access/nbtree.h).
 unsafe fn BTreeTupleIsPosting(itup: IndexTuple) -> bool {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleIsPosting(itup as _)
 }
 /// TODO(pg-port): BTreeTupleGetPostingOffset() (access/nbtree.h).
 unsafe fn BTreeTupleGetPostingOffset(posting: IndexTuple) -> uint32 {
-    unimplemented!() // TODO(pg-port): access/nbtree.h
+    crate::access::nbtree::nbtdedup::BTreeTupleGetPostingOffset(posting as _) as _
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -507,7 +513,7 @@ pub unsafe fn _bt_findsplitloc(
  * split point that is recorded here when legal.  Should not include
  * newitemsz, since that is handled here.
  */
-unsafe fn _bt_recsplitloc(
+pub unsafe fn _bt_recsplitloc(
     state: *mut FindSplitData,
     firstrightoff: OffsetNumber,
     newitemonleft: bool,
@@ -622,7 +628,7 @@ unsafe fn _bt_recsplitloc(
  * Subroutine to assign space deltas to materialized array of candidate split
  * points based on current fillfactor, and to sort array using that fillfactor
  */
-unsafe fn _bt_deltasortsplits(state: *mut FindSplitData, fillfactormult: f64, usemult: bool) {
+pub unsafe fn _bt_deltasortsplits(state: *mut FindSplitData, fillfactormult: f64, usemult: bool) {
     let mut i = 0;
     while i < (*state).nsplits {
         let split: *mut SplitPoint = (*state).splits.add(i as usize);
@@ -689,7 +695,7 @@ unsafe extern "C" fn _bt_splitcmp(arg1: *const c_void, arg2: *const c_void) -> c
  * locating the legal split point that makes the new tuple the lastleft tuple
  * for the split.
  */
-unsafe fn _bt_afternewitemoff(
+pub unsafe fn _bt_afternewitemoff(
     state: *mut FindSplitData,
     maxoff: OffsetNumber,
     leaffillfactor: c_int,
@@ -814,7 +820,7 @@ unsafe fn _bt_afternewitemoff(
  * heap relation immediately after the low TID, probably during the current
  * transaction.
  */
-unsafe fn _bt_adjacenthtid(lowhtid: ItemPointer, highhtid: ItemPointer) -> bool {
+pub unsafe fn _bt_adjacenthtid(lowhtid: ItemPointer, highhtid: ItemPointer) -> bool {
     let lowblk: BlockNumber;
     let highblk: BlockNumber;
 
@@ -852,7 +858,7 @@ unsafe fn _bt_adjacenthtid(lowhtid: ItemPointer, highhtid: ItemPointer) -> bool 
  * We return the index of the first existing tuple that should go on the right
  * page, plus a boolean indicating if new item is on left of split point.
  */
-unsafe fn _bt_bestsplitloc(
+pub unsafe fn _bt_bestsplitloc(
     state: *mut FindSplitData,
     perfectpenalty: c_int,
     newitemonleft: *mut bool,
@@ -945,7 +951,7 @@ const INTERNAL_SPLIT_DISTANCE: f64 = 0.075;
  * attribute/datum for data types like text, which is more or less how it is
  * assumed to work in the paper.)
  */
-unsafe fn _bt_defaultinterval(state: *mut FindSplitData) -> c_int {
+pub unsafe fn _bt_defaultinterval(state: *mut FindSplitData) -> c_int {
     let spaceoptimal: *mut SplitPoint;
     let tolerance: int16;
     let lowleftfree: int16;
@@ -1007,7 +1013,7 @@ unsafe fn _bt_defaultinterval(state: *mut FindSplitData) -> c_int {
  * willing to go to avoid appending a heap TID when using the many duplicates
  * strategy (it also saves _bt_bestsplitloc() useless cycles).
  */
-unsafe fn _bt_strategy(
+pub unsafe fn _bt_strategy(
     state: *mut FindSplitData,
     leftpage: *mut SplitPoint,
     rightpage: *mut SplitPoint,
@@ -1124,7 +1130,7 @@ unsafe fn _bt_strategy(
  * split interval.  Note that it will be the same split iff there is only one
  * split in interval.
  */
-unsafe fn _bt_interval_edges(
+pub unsafe fn _bt_interval_edges(
     state: *mut FindSplitData,
     leftinterval: *mut *mut SplitPoint,
     rightinterval: *mut *mut SplitPoint,
@@ -1204,7 +1210,7 @@ unsafe fn _bt_interval_edges(
  * new high key for the left page.
  */
 #[inline]
-unsafe fn _bt_split_penalty(state: *mut FindSplitData, split: *mut SplitPoint) -> c_int {
+pub unsafe fn _bt_split_penalty(state: *mut FindSplitData, split: *mut SplitPoint) -> c_int {
     let lastleft: IndexTuple;
     let firstright: IndexTuple;
 
@@ -1230,7 +1236,7 @@ unsafe fn _bt_split_penalty(state: *mut FindSplitData, split: *mut SplitPoint) -
  * Subroutine to get a lastleft IndexTuple for a split point
  */
 #[inline]
-unsafe fn _bt_split_lastleft(state: *mut FindSplitData, split: *mut SplitPoint) -> IndexTuple {
+pub unsafe fn _bt_split_lastleft(state: *mut FindSplitData, split: *mut SplitPoint) -> IndexTuple {
     let itemid: ItemId;
 
     if (*split).newitemonleft && (*split).firstrightoff == (*state).newitemoff {
@@ -1245,7 +1251,7 @@ unsafe fn _bt_split_lastleft(state: *mut FindSplitData, split: *mut SplitPoint) 
  * Subroutine to get a firstright IndexTuple for a split point
  */
 #[inline]
-unsafe fn _bt_split_firstright(state: *mut FindSplitData, split: *mut SplitPoint) -> IndexTuple {
+pub unsafe fn _bt_split_firstright(state: *mut FindSplitData, split: *mut SplitPoint) -> IndexTuple {
     let itemid: ItemId;
 
     if !(*split).newitemonleft && (*split).firstrightoff == (*state).newitemoff {

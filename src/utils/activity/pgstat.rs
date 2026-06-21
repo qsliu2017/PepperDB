@@ -93,6 +93,7 @@ pub struct LWLock {
 
 pub const LWTRANCHE_PGSTATS_DATA: c_int = 0;
 pub const LW_EXCLUSIVE: c_int = 0;
+pub const LW_SHARED: c_int = 1;
 
 #[inline]
 pub unsafe fn LWLockInitialize(_lock: *mut LWLock, _tranche_id: c_int) {}
@@ -1404,10 +1405,11 @@ static mut pgstat_is_shutdown: bool = false;
 // currently-incompatible types.)
 // ---------------------------------------------------------------------------
 
-/// TODO(pg-port): the per-kind KindInfo table lives in `pgstat_internal`; the
-/// subset has no compatible table, so this returns null.
-unsafe fn pgstat_get_kind_info(_kind: PgStat_Kind) -> *const c_void {
-    null()
+/// Forwards to the canonical KindInfo table in `pgstat_internal`.
+unsafe fn pgstat_get_kind_info(
+    kind: PgStat_Kind,
+) -> *const crate::utils::activity::pgstat_internal::PgStat_KindInfo {
+    crate::utils::activity::pgstat_internal::pgstat_get_kind_info(kind)
 }
 
 /// TODO(pg-port): real home `pgstat_internal::pgstat_drop_all_entries`
@@ -1476,6 +1478,12 @@ unsafe fn TimestampDifferenceExceeds(
 ///
 /// Should only be called by the startup process or in single user mode.
 pub unsafe fn pgstat_restore_stats() {
+    // Restoring reads on-disk entries into the shared stats dshash. When that
+    // hash is not attached (process-local pgstat shmem model), there is nothing
+    // to restore into; start with empty stats, matching the missing-file path.
+    if crate::utils::activity::pgstat_internal::pgStatLocal.shared_hash.is_null() {
+        return;
+    }
     pgstat_read_statsfile();
 }
 
@@ -1616,6 +1624,7 @@ pub unsafe fn pgstat_initialize() {
 
 /// Flush pending statistics updates to shared memory.  See upstream pgstat.c
 /// for the detailed force / interval / nowait contract.
+#[no_mangle]
 pub unsafe fn pgstat_report_stat(mut force: bool) -> c_long {
     static mut pending_since: TimestampTz = 0;
     static mut last_flush: TimestampTz = 0;

@@ -62,6 +62,7 @@ unsafe fn makeStringInfoInternal(initsize: c_int) -> StringInfo {
 ///
 /// # Safety
 /// Returns a palloc'd pointer the caller must release with [`destroyStringInfo`].
+#[no_mangle]
 pub unsafe fn makeStringInfo() -> StringInfo {
     makeStringInfoInternal(STRINGINFO_DEFAULT_SIZE)
 }
@@ -96,6 +97,7 @@ pub unsafe fn initStringInfoExt(str: StringInfo, initsize: c_int) {
 ///
 /// # Safety
 /// `data` must remain valid for at least `len` bytes for the StringInfo's lifetime.
+#[no_mangle]
 pub unsafe fn initReadOnlyStringInfo(str: StringInfo, data: *mut c_char, len: c_int) {
     (*str).data = data;
     (*str).len = len;
@@ -122,6 +124,7 @@ pub unsafe fn initStringInfoFromString(str: StringInfo, data: *mut c_char, len: 
 ///
 /// # Safety
 /// `str` must be a writable StringInfo.
+#[no_mangle]
 pub unsafe fn resetStringInfo(str: StringInfo) {
     // don't allow resets of read-only StringInfos
     Assert!((*str).maxlen != 0);
@@ -159,6 +162,7 @@ pub unsafe fn appendStringInfoChar(str: StringInfo, ch: c_char) {
 ///
 /// # Safety
 /// `str` must be writable.
+#[no_mangle]
 pub unsafe fn appendStringInfoSpaces(str: StringInfo, count: c_int) {
     if count > 0 {
         // Make more room if needed
@@ -179,6 +183,7 @@ pub unsafe fn appendStringInfoSpaces(str: StringInfo, count: c_int) {
 ///
 /// # Safety
 /// `data` must be valid for `datalen` bytes; `str` must be writable.
+#[no_mangle]
 pub unsafe fn appendBinaryStringInfo(str: StringInfo, data: *const c_void, datalen: c_int) {
     Assert!(!str.is_null());
 

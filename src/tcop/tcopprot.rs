@@ -54,139 +54,177 @@ extern "C" {
     pub static mut restrict_nonsystem_relation_kind: c_int;
 }
 
-pub unsafe fn pg_parse_query(_query_string: *const c_char) -> *mut List {
-    unimplemented!()
+pub unsafe fn pg_parse_query(query_string: *const c_char) -> *mut List {
+    crate::tcop::postgres::pg_parse_query(query_string as _) as _
 }
 
-pub unsafe fn pg_rewrite_query(_query: *mut Query) -> *mut List {
-    unimplemented!()
+pub unsafe fn pg_rewrite_query(query: *mut Query) -> *mut List {
+    crate::tcop::postgres::pg_rewrite_query(query as _) as _
 }
 
 pub unsafe fn pg_analyze_and_rewrite_fixedparams(
-    _parsetree: *mut RawStmt,
-    _query_string: *const c_char,
-    _paramTypes: *const Oid,
-    _numParams: c_int,
-    _queryEnv: *mut QueryEnvironment,
+    parsetree: *mut RawStmt,
+    query_string: *const c_char,
+    paramTypes: *const Oid,
+    numParams: c_int,
+    queryEnv: *mut QueryEnvironment,
 ) -> *mut List {
-    unimplemented!()
+    crate::tcop::postgres::pg_analyze_and_rewrite_fixedparams(
+        parsetree as _,
+        query_string as _,
+        paramTypes as _,
+        numParams as _,
+        queryEnv as _,
+    ) as _
 }
 
 pub unsafe fn pg_analyze_and_rewrite_varparams(
-    _parsetree: *mut RawStmt,
-    _query_string: *const c_char,
-    _paramTypes: *mut *mut Oid,
-    _numParams: *mut c_int,
-    _queryEnv: *mut QueryEnvironment,
+    parsetree: *mut RawStmt,
+    query_string: *const c_char,
+    paramTypes: *mut *mut Oid,
+    numParams: *mut c_int,
+    queryEnv: *mut QueryEnvironment,
 ) -> *mut List {
-    unimplemented!()
+    crate::tcop::postgres::pg_analyze_and_rewrite_varparams(
+        parsetree as _,
+        query_string as _,
+        paramTypes as _,
+        numParams as _,
+        queryEnv as _,
+    ) as _
 }
 
 pub unsafe fn pg_analyze_and_rewrite_withcb(
-    _parsetree: *mut RawStmt,
-    _query_string: *const c_char,
-    _parserSetup: ParserSetupHook,
-    _parserSetupArg: *mut c_void,
-    _queryEnv: *mut QueryEnvironment,
+    parsetree: *mut RawStmt,
+    query_string: *const c_char,
+    parserSetup: ParserSetupHook,
+    parserSetupArg: *mut c_void,
+    queryEnv: *mut QueryEnvironment,
 ) -> *mut List {
-    unimplemented!()
+    crate::tcop::postgres::pg_analyze_and_rewrite_withcb(
+        parsetree as _,
+        query_string as _,
+        core::mem::transmute(parserSetup),
+        parserSetupArg as _,
+        queryEnv as _,
+    ) as _
 }
 
 pub unsafe fn pg_plan_query(
-    _querytree: *mut Query,
-    _query_string: *const c_char,
-    _cursorOptions: c_int,
-    _boundParams: ParamListInfo,
+    querytree: *mut Query,
+    query_string: *const c_char,
+    cursorOptions: c_int,
+    boundParams: ParamListInfo,
 ) -> *mut PlannedStmt {
-    unimplemented!()
+    crate::tcop::postgres::pg_plan_query(
+        querytree as _,
+        query_string as _,
+        cursorOptions as _,
+        boundParams as _,
+    ) as _
 }
 
 pub unsafe fn pg_plan_queries(
-    _querytrees: *mut List,
-    _query_string: *const c_char,
-    _cursorOptions: c_int,
-    _boundParams: ParamListInfo,
+    querytrees: *mut List,
+    query_string: *const c_char,
+    cursorOptions: c_int,
+    boundParams: ParamListInfo,
 ) -> *mut List {
-    unimplemented!()
+    crate::tcop::postgres::pg_plan_queries(
+        querytrees as _,
+        query_string as _,
+        cursorOptions as _,
+        boundParams as _,
+    ) as _
 }
 
-pub unsafe extern "C" fn die(_postgres_signal_arg: c_int) {
-    unimplemented!()
-}
-
-/// pg_noreturn in C; modeled with `-> !`.
-pub unsafe extern "C" fn quickdie(_postgres_signal_arg: c_int) -> ! {
-    unimplemented!()
-}
-
-pub unsafe extern "C" fn StatementCancelHandler(_postgres_signal_arg: c_int) {
-    unimplemented!()
+#[no_mangle]
+pub unsafe extern "C" fn die(postgres_signal_arg: c_int) {
+    crate::tcop::postgres::die(postgres_signal_arg as _)
 }
 
 /// pg_noreturn in C; modeled with `-> !`.
-pub unsafe extern "C" fn FloatExceptionHandler(_postgres_signal_arg: c_int) -> ! {
-    unimplemented!()
+pub unsafe extern "C" fn quickdie(postgres_signal_arg: c_int) -> ! {
+    crate::tcop::postgres::quickdie(postgres_signal_arg as _);
+    unreachable!()
 }
 
-pub unsafe fn HandleRecoveryConflictInterrupt(_reason: ProcSignalReason) {
-    unimplemented!()
+pub unsafe extern "C" fn StatementCancelHandler(postgres_signal_arg: c_int) {
+    crate::tcop::postgres::StatementCancelHandler(postgres_signal_arg as _)
 }
 
-pub unsafe fn ProcessClientReadInterrupt(_blocked: bool) {
-    unimplemented!()
+/// pg_noreturn in C; modeled with `-> !`.
+pub unsafe extern "C" fn FloatExceptionHandler(postgres_signal_arg: c_int) -> ! {
+    crate::tcop::postgres::FloatExceptionHandler(postgres_signal_arg as _);
+    unreachable!()
 }
 
-pub unsafe fn ProcessClientWriteInterrupt(_blocked: bool) {
-    unimplemented!()
+pub unsafe fn HandleRecoveryConflictInterrupt(reason: ProcSignalReason) {
+    crate::tcop::postgres::HandleRecoveryConflictInterrupt(reason as _)
+}
+
+pub unsafe fn ProcessClientReadInterrupt(blocked: bool) {
+    crate::tcop::postgres::ProcessClientReadInterrupt(blocked as _)
+}
+
+pub unsafe fn ProcessClientWriteInterrupt(blocked: bool) {
+    crate::tcop::postgres::ProcessClientWriteInterrupt(blocked as _)
 }
 
 pub unsafe fn process_postgres_switches(
-    _argc: c_int,
-    _argv: *mut *mut c_char,
-    _ctx: GucContext,
-    _dbname: *mut *const c_char,
+    argc: c_int,
+    argv: *mut *mut c_char,
+    ctx: GucContext,
+    dbname: *mut *const c_char,
 ) {
-    unimplemented!()
+    crate::tcop::postgres::process_postgres_switches(
+        argc as _,
+        argv as _,
+        ctx as _,
+        dbname as _,
+    )
 }
 
 /// pg_noreturn in C; modeled with `-> !`.
 pub unsafe fn PostgresSingleUserMain(
-    _argc: c_int,
-    _argv: *mut *mut c_char,
-    _username: *const c_char,
+    argc: c_int,
+    argv: *mut *mut c_char,
+    username: *const c_char,
 ) -> ! {
-    unimplemented!()
+    crate::tcop::postgres::PostgresSingleUserMain(argc as _, argv as _, username as _);
+    unreachable!()
 }
 
 /// pg_noreturn in C; modeled with `-> !`.
-pub unsafe fn PostgresMain(_dbname: *const c_char, _username: *const c_char) -> ! {
-    unimplemented!()
+pub unsafe fn PostgresMain(dbname: *const c_char, username: *const c_char) -> ! {
+    crate::tcop::postgres::PostgresMain(dbname as _, username as _);
+    unreachable!()
 }
 
 pub unsafe fn ResetUsage() {
-    unimplemented!()
+    crate::tcop::postgres::ResetUsage()
 }
 
-pub unsafe fn ShowUsage(_title: *const c_char) {
-    unimplemented!()
+pub unsafe fn ShowUsage(title: *const c_char) {
+    crate::tcop::postgres::ShowUsage(title as _)
 }
 
-pub unsafe fn check_log_duration(_msec_str: *mut c_char, _was_logged: bool) -> c_int {
-    unimplemented!()
+pub unsafe fn check_log_duration(msec_str: *mut c_char, was_logged: bool) -> c_int {
+    crate::tcop::postgres::check_log_duration(msec_str as _, was_logged as _) as _
 }
 
-pub unsafe fn set_debug_options(_debug_flag: c_int, _context: GucContext, _source: GucSource) {
-    unimplemented!()
+pub unsafe fn set_debug_options(debug_flag: c_int, context: GucContext, source: GucSource) {
+    crate::tcop::postgres::set_debug_options(debug_flag as _, context as _, source as _)
 }
 
 pub unsafe fn set_plan_disabling_options(
-    _arg: *const c_char,
-    _context: GucContext,
-    _source: GucSource,
+    arg: *const c_char,
+    context: GucContext,
+    source: GucSource,
 ) -> bool {
-    unimplemented!()
+    crate::tcop::postgres::set_plan_disabling_options(arg as _, context as _, source as _) as _
 }
 
-pub unsafe fn get_stats_option_name(_arg: *const c_char) -> *const c_char {
-    unimplemented!()
+pub unsafe fn get_stats_option_name(arg: *const c_char) -> *const c_char {
+    crate::tcop::postgres::get_stats_option_name(arg as _) as _
 }

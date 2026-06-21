@@ -48,6 +48,8 @@
 )]
 
 use core::ffi::{c_char, c_int, c_void};
+use core::ops::DerefMut;
+use core::ops::Deref;
 use core::ptr;
 use core::sync::atomic::Ordering;
 
@@ -61,6 +63,11 @@ use crate::port::atomics::generic::{
     pg_memory_barrier_impl as pg_memory_barrier,
     pg_read_barrier_impl as pg_read_barrier,
     pg_write_barrier_impl as pg_write_barrier,
+    pg_atomic_write_membarrier_u64_impl as pg_atomic_write_membarrier_u64,
+};
+use crate::port::atomics::{
+    pg_atomic_init_u64_impl_native as pg_atomic_init_u64,
+    pg_atomic_fetch_add_u64_impl_native as pg_atomic_fetch_add_u64,
 };
 
 /* pg_atomic_write_u64 -- store without barrier (maps to Relaxed store) */
@@ -84,11 +91,11 @@ use crate::access::transam::xlog_internal::{
     XLByteInPrevSeg, MAXFNAMELEN,
 };
 use crate::access::transam::xlogrecord::{
-    XLogRecord, XLogRecData, SizeOfXLogRecord, XLR_INFO_MASK,
-    XLOG_MARK_UNIMPORTANT,
+    XLogRecord, SizeOfXLogRecord, XLR_INFO_MASK,
 };
-use crate::access::transam::xloginsert::{
-    XLogInsertAllowed,
+use crate::access::transam::xlog_internal::XLogRecData;
+use crate::access::transam::xloginsert::XLOG_MARK_UNIMPORTANT;
+use crate::access::transam::xact::{
     MarkCurrentTransactionIdLoggedIfAny, MarkSubxactTopXidLogged,
 };
 use crate::access::transam::xlogarchive::{
@@ -96,26 +103,211 @@ use crate::access::transam::xlogarchive::{
     XLogArchiveCleanup, XLogArchiveIsReady,
 };
 use crate::access::transam::xlogrecovery::{
-    RecoveryInProgress, GetCurrentReplayRecPtr, GetWALInsertionTimeLine,
+    GetCurrentReplayRecPtr,
     InRecovery,
 };
-use crate::access::transam::xlogutils::issue_xlog_fsync;
 use crate::catalog::pg_control::{
     ControlFileData, DB_SHUTDOWNED,
     PG_CONTROL_VERSION, PG_CONTROL_FILE_SIZE,
-    XLOG_CONTROL_FILE, FirstNormalUnloggedLSN,
 };
+use crate::access::transam::xlog_internal::XLOG_CONTROL_FILE;
+use crate::access::transam::xlogdefs::FirstNormalUnloggedLSN;
 use crate::storage::lmgr::s_lock::slock_t;
-// LWLock stubs (TODO: replace with real lwlock when ported)
-// TODO(pg-port): LWLock lives in storage/lwlock.h
-pub type LWLock = c_void;
-use crate::storage::proc::{MyProc, MyProcNumber, ProcGlobal, PROC_HDR, INVALID_PROC_NUMBER, GetPGProcByNumber, SetLatch};
-use crate::storage::fd::{BasicOpenFile, OpenTransientFile, CloseTransientFile};
-use crate::utils::elog::{elog, ereport, errmsg, errcode, errdetail, errhint, errcode_for_file_access, errmsg_internal, errmsg_plural, data_sync_elevel, DEBUG1, DEBUG2, LOG, WARNING, ERROR, FATAL, PANIC};
+pub use crate::storage::lmgr::lwlock::LWLock;
+use crate::storage::lmgr::proc::{MyProc, MyProcNumber, ProcGlobal, PROC_HDR, GetPGProcByNumber};
+use crate::storage::procnumber::INVALID_PROC_NUMBER;
+use crate::storage::file::fd::{BasicOpenFile, OpenTransientFile, CloseTransientFile};
+use crate::utils::elog::{errcode, DEBUG1, DEBUG2, LOG, WARNING, ERROR, FATAL, PANIC};
+use crate::storage::file::fd::data_sync_elevel;
 use crate::miscadmin::{DataDir, IsUnderPostmaster, CritSectionCount};
 use crate::access::transam::xact::{TransactionId, FullTransactionId};
 use crate::pgtime::pg_time_t;
 use crate::common::controldata_utils::update_controlfile;
+
+// ---- wired imports (added to compile xlog.rs) ----
+use crate::prelude::*;
+
+// access/transam
+use crate::access::transam::{
+    FirstNormalTransactionId, TransactionIdIsNormal, TransactionIdIsValid,
+    TransactionIdRetreat, XidFromFullTransactionId, FullTransactionIdPrecedes,
+    FullTransactionIdRetreat, FullTransactionIdFromEpochAndXid,
+};
+use crate::access::transam::transam::TransactionIdPrecedes;
+use crate::access::transam::xact::InvalidTransactionId;
+use crate::access::transam::xlogdefs::XLogRecPtrIsValid;
+use crate::access::transam::clog::{BootStrapCLOG, StartupCLOG, TrimCLOG, CheckPointCLOG};
+use crate::access::transam::commit_ts::{
+    BootStrapCommitTs, StartupCommitTs, CompleteCommitTsInitialization,
+    CommitTsParameterChange, CheckPointCommitTs, SetCommitTsLimit,
+};
+use crate::access::transam::subtrans::{
+    BootStrapSUBTRANS, StartupSUBTRANS, CheckPointSUBTRANS, TruncateSUBTRANS,
+};
+use crate::access::transam::multixact::{
+    BootStrapMultiXact, StartupMultiXact, TrimMultiXact, CheckPointMultiXact,
+    MultiXactGetCheckptMulti, MultiXactSetNextMXact, MultiXactAdvanceNextMXact,
+    MultiXactAdvanceOldest, SetMultiXactIdLimit, FirstMultiXactId,
+};
+use crate::access::transam::varsup::{AdvanceOldestClogXid, SetTransactionIdLimit, TransamVariables};
+use crate::access::transam::xact::VirtualTransactionId;
+use crate::access::transam::xlogstats::RM_MAX_ID;
+use crate::pg_config::PG_IO_ALIGN_SIZE;
+use crate::port::pgstrcasecmp::pg_strcasecmp;
+use crate::port::strlcpy::strlcpy;
+use crate::common::file_utils::{PGFileType, PGFILETYPE_DIR, PGFILETYPE_LNK};
+use crate::miscadmin::IsPostmasterEnvironment;
+use crate::access::transam::xlog_internal::{
+    GetRmgr, RmgrIdExists, BackupHistoryFileName, BackupHistoryFilePath,
+    xl_parameter_change,
+};
+use crate::access::transam::xloginsert::{
+    XLogBeginInsert, XLogInsert, XLogRegisterData, XLogSetRecordFlags,
+    UnlockReleaseBuffer,
+};
+use crate::access::transam::xlogreader::{
+    XLogReaderState, XLogRecGetData, XLogRecGetInfo, XLogRecHasAnyBlockRefs,
+    XLogRecHasBlockImage, XLogRecMaxBlockId, XRecOffIsValid, XLR_BLOCK_ID_DATA_SHORT,
+    XLP_FIRST_IS_OVERWRITE_CONTRECORD, SizeOfXLogRecordDataHeaderShort,
+};
+use crate::access::transam::xlogutils::{
+    Buffer, InvalidBuffer, InHotStandby, XLogHaveInvalidPages, XLogReadBufferForRedo,
+    BLK_RESTORED,
+};
+use crate::access::transam::xlogarchive::{
+    XLogArchiveNotify, XLogArchiveIsBusy, XLogArchiveIsReadyOrDone,
+    ExecuteRecoveryCommand,
+};
+use crate::access::transam::xlogrecovery::{
+    ArchiveRecoveryRequested, InArchiveRecovery, InitWalRecovery, PerformWalRecovery,
+    FinishWalRecovery, ShutdownWalRecovery, EndOfWalRecoveryInfo, GetLatestXTime,
+    GetXLogReplayRecPtr, PromoteIsTriggered, RecoveryRequiresIntParameter,
+    recoveryEndCommand, recoveryTargetTLI, standbyState, archiveCleanupCommand,
+    tablespaceinfo, xl_restore_point, xl_end_of_recovery, xl_overwrite_contrecord,
+    BACKUP_LABEL_FILE, TABLESPACE_MAP, TABLESPACE_MAP_OLD, RECOVERY_SIGNAL_FILE,
+    STANDBY_SIGNAL_FILE, PG_TBLSPC_DIR,
+};
+use crate::access::transam::timeline::{
+    findNewestTimeLine, writeTimeLineHistory, restoreTimeLineHistoryFiles,
+};
+use crate::access::transam::twophase::{
+    CheckPointTwoPhase, PrescanPreparedTransactions, StandbyRecoverPreparedTransactions,
+    RecoverPreparedTransactions, restoreTwoPhaseData,
+};
+use crate::access::rmgrdesc::xlogdesc::{
+    WAL_LEVEL_MINIMAL, WAL_LEVEL_LOGICAL,
+    XLOG_CHECKPOINT_SHUTDOWN, XLOG_CHECKPOINT_ONLINE, XLOG_NOOP, XLOG_NEXTOID,
+    XLOG_RESTORE_POINT, XLOG_BACKUP_END, XLOG_PARAMETER_CHANGE, XLOG_END_OF_RECOVERY,
+    XLOG_FPI_FOR_HINT, XLOG_FPI, XLOG_OVERWRITE_CONTRECORD,
+};
+// TODO(pg-port): access/heap/rewriteheap module not yet wired into the tree
+unsafe fn CheckPointLogicalRewriteHeap() { /* TODO(pg-port) */ }
+
+// catalog
+use crate::catalog::pg_control::{
+    DB_SHUTDOWNING, DB_SHUTDOWNED_IN_RECOVERY, DB_IN_ARCHIVE_RECOVERY, DB_IN_PRODUCTION,
+};
+use crate::catalog::catalog::FirstGenbkiObjectId;
+use crate::catalog::pg_known_oids::Template1DbOid;
+
+// nodes
+use crate::nodes::pg_list::{List, lappend, list_free};
+
+// storage
+use crate::storage::ipc::shmem::{ShmemInitStruct, add_size, mul_size};
+use crate::storage::ipc::ipc::before_shmem_exit;
+use crate::storage::ipc::latch::{
+    WaitLatch, ResetLatch, SetLatch, WL_LATCH_SET, WL_TIMEOUT, WL_EXIT_ON_PM_DEATH,
+};
+// TODO(pg-port): storage/ipc/standby module not yet wired into the tree
+unsafe fn InitRecoveryTransactionEnvironment() { unimplemented!() }
+unsafe fn ShutdownRecoveryTransactionEnvironment() { unimplemented!() }
+unsafe fn LogStandbySnapshot() -> XLogRecPtr { unimplemented!() }
+const STANDBY_DISABLED: c_int = 0;
+const STANDBY_INITIALIZED: c_int = 1;
+use crate::storage::ipc::procarray::{
+    ProcArrayInitRecovery, ProcArrayApplyRecoveryInfo, GetOldestActiveTransactionId,
+    GetOldestTransactionIdConsideredRunning, GetVirtualXIDsDelayingChkpt,
+    HaveVirtualXIDsDelayingChkpt, RunningTransactionsData, SUBXIDS_IN_SUBTRANS,
+};
+use crate::storage::lmgr::proc::{DELAY_CHKPT_START, DELAY_CHKPT_COMPLETE, ProcArrayLock};
+use crate::storage::lmgr::lwlock::LWLockInitialize;
+use crate::storage::lmgr::lwlock::BuiltinTrancheIds::LWTRANCHE_WAL_INSERT;
+use crate::storage::spin::SpinLockInit;
+use crate::storage::buffer::bufmgr::CheckPointBuffers;
+use crate::storage::lmgr::predicate::CheckPointPredicate;
+use crate::storage::sync::sync::{ProcessSyncRequests, SyncPreCheckpoint, SyncPostCheckpoint};
+use crate::storage::smgr::smgr::smgrdestroyall;
+use crate::storage::file::fd::{
+    AllocateFile, FreeFile, pg_fdatasync, pg_fsync_no_writethrough,
+    pg_fsync_writethrough, SyncDataDirectory,
+};
+use crate::storage::file::reinit::{
+    ResetUnloggedRelations, UNLOGGED_RELATION_INIT, UNLOGGED_RELATION_CLEANUP,
+};
+
+// utils
+use crate::utils::resowner::resowner::{CurrentResourceOwner, AuxProcessResourceOwner};
+// TODO(pg-port): utils/time/snapmgr module not yet wired into the tree
+unsafe fn DeleteAllExportedSnapshotFiles() { /* TODO(pg-port) */ }
+use crate::utils::cache::relmapper::CheckPointRelationMap;
+use crate::utils::adt::timestamp::TimestampDifferenceMilliseconds;
+use crate::utils::adt::varlena::SplitIdentifierString;
+use crate::utils::misc::timeout::{RegisterTimeout, STARTUP_PROGRESS_TIMEOUT};
+use crate::utils::misc::ps_status::set_ps_display;
+use crate::utils::misc::guc::{find_option, guc_malloc, set_config_option_ext};
+use crate::utils::misc::guc_funcs::GUC_ACTION_SET;
+use crate::utils::activity::pgstat::{pgstat_discard_stats, pgstat_restore_stats};
+use crate::utils::activity::pgstat_checkpointer::PendingCheckpointerStats;
+
+// lib (stringinfo)
+use crate::lib::stringinfo::{StringInfoData, initStringInfo, appendStringInfoChar};
+use crate::appendStringInfo;
+
+// replication
+use crate::replication::slot::{
+    CheckPointReplicationSlots, StartupReplicationSlots, InvalidateObsoleteReplicationSlots,
+    RS_INVAL_IDLE_TIMEOUT,
+};
+use crate::replication::slotfuncs::{
+    WALAvailability, WALAVAIL_INVALID_LSN, WALAVAIL_RESERVED, WALAVAIL_EXTENDED,
+    WALAVAIL_UNRESERVED, WALAVAIL_REMOVED, RS_INVAL_WAL_REMOVED, RS_INVAL_WAL_LEVEL,
+};
+use crate::replication::logical::origin::{
+    CheckPointReplicationOrigin, StartupReplicationOrigin,
+};
+use crate::replication::logical::reorderbuffer::StartupReorderBuffer;
+use crate::replication::logical::snapbuild::CheckPointSnapBuild;
+use crate::replication::walsender::{WalSndWakeup, WalSndInitStopping, WalSndWaitStopping};
+use crate::replication::walreceiverfuncs::{ShutdownWalRcv, GetWalRcvFlushRecPtr};
+
+// postmaster
+use crate::postmaster::checkpointer::{
+    AbsorbSyncRequests, CHECKPOINT_IS_SHUTDOWN, CHECKPOINT_END_OF_RECOVERY,
+    CHECKPOINT_IMMEDIATE, CHECKPOINT_FORCE, CHECKPOINT_WAIT,
+    CHECKPOINT_CAUSE_TIME, CHECKPOINT_FLUSH_ALL,
+};
+use crate::postmaster::startup::startup_progress_timeout_handler;
+use crate::postmaster::walsummarizer::{
+    GetOldestUnsummarizedLSN, WaitForWalSummarization, WakeupWalSummarizer, summarize_wal,
+};
+
+// backup
+use crate::access::transam::xlogbackup::{BackupState, build_backup_content};
+
+// link shims (only pub definition available)
+use crate::backend_link_shims::XLogArchivingAlways;
+
+// libc::FILE (matches the convention in tcop/postgres.rs, init/miscinit.rs)
+type FILE = libc::FILE;
+
+// miscadmin
+use crate::miscadmin::{
+    AmWalReceiverProcess, IsBinaryUpgrade, IsBootstrapProcessingMode, MyBackendType,
+    NBuffers, MyLatch, B_CHECKPOINTER, process_shared_preload_libraries_done,
+};
+
+// ---- end wired imports ----
 
 // TODO(pg-port): pg_control.h types / constants not yet in catalog/pg_control stub
 pub type pg_crc32c = uint32;
@@ -123,7 +315,7 @@ pub type pg_crc32c = uint32;
 macro_rules! INIT_CRC32C { ($c:expr) => { $c = 0xFFFFFFFF_u32; } }
 macro_rules! COMP_CRC32C {
     ($c:expr, $data:expr, $len:expr) => {
-        { let _ = ($data, $len); /* TODO(pg-port): real CRC32C */ }
+        { $c = crate::port::pg_crc32c::COMP_CRC32C($c, $data as *const c_void, $len as Size); }
     }
 }
 macro_rules! FIN_CRC32C { ($c:expr) => { $c ^= 0xFFFFFFFF_u32; } }
@@ -133,6 +325,13 @@ macro_rules! EQ_CRC32C { ($c1:expr, $c2:expr) => { $c1 == $c2 } }
 macro_rules! START_CRIT_SECTION { () => { unsafe { crate::miscadmin::CritSectionCount += 1; } } }
 macro_rules! END_CRIT_SECTION   { () => { unsafe { crate::miscadmin::CritSectionCount -= 1; } } }
 
+// Local macro stubs (not #[macro_export]; kept local per the port convention).
+macro_rules! CHECK_FOR_INTERRUPTS { () => { crate::miscadmin::CHECK_FOR_INTERRUPTS() }; }
+macro_rules! IS_DIR_SEP { ($ch:expr) => { ($ch) == b'/' }; }
+// TODO(pg-port): PG_ENSURE_ERROR_CLEANUP / PG_END_ENSURE_ERROR_CLEANUP (utils/ipc.h)
+macro_rules! PG_ENSURE_ERROR_CLEANUP { ($cleanup:expr, $arg:expr) => { () }; }
+macro_rules! PG_END_ENSURE_ERROR_CLEANUP { ($cleanup:expr, $arg:expr) => { () }; }
+
 // TODO(pg-port): spinlock stubs
 unsafe fn SpinLockAcquire(_lock: *mut slock_t) { /* TODO(pg-port) */ }
 unsafe fn SpinLockRelease(_lock: *mut slock_t) { /* TODO(pg-port) */ }
@@ -140,20 +339,26 @@ unsafe fn SpinLockRelease(_lock: *mut slock_t) { /* TODO(pg-port) */ }
 // TODO(pg-port): LWLock stubs
 const LW_EXCLUSIVE: c_int = 2;
 const LW_SHARED:    c_int = 1;
-unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool { todo!("TODO(pg-port): LWLockAcquire") }
-unsafe fn LWLockRelease(_lock: *mut LWLock) { todo!("TODO(pg-port): LWLockRelease") }
-unsafe fn LWLockAcquireOrWait(_lock: *mut LWLock, _mode: c_int) -> bool { todo!("TODO(pg-port): LWLockAcquireOrWait") }
-unsafe fn LWLockConditionalAcquire(_lock: *mut LWLock, _mode: c_int) -> bool { todo!("TODO(pg-port): LWLockConditionalAcquire") }
-unsafe fn LWLockUpdateVar(_lock: *mut LWLock, _val: *mut uint64, _new: uint64) { todo!("TODO(pg-port): LWLockUpdateVar") }
-unsafe fn LWLockWaitForVar(_lock: *mut LWLock, _val: *mut uint64, _old: uint64, _new: *mut uint64) -> bool { todo!("TODO(pg-port): LWLockWaitForVar") }
-unsafe fn LWLockReleaseClearVar(_lock: *mut LWLock, _val: *mut uint64, _new: uint64) { todo!("TODO(pg-port): LWLockReleaseClearVar") }
-// Named LWLock slots TODO(pg-port)
-unsafe fn WALBufMappingLock_ptr() -> *mut LWLock { ptr::null_mut() }
-unsafe fn WALWriteLock_ptr() -> *mut LWLock { ptr::null_mut() }
-unsafe fn ControlFileLock_ptr() -> *mut LWLock { ptr::null_mut() }
+unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool { crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, core::mem::transmute(_mode)) }
+unsafe fn LWLockRelease(_lock: *mut LWLock) { crate::storage::lmgr::lwlock::LWLockRelease(_lock as _) }
+unsafe fn LWLockAcquireOrWait(_lock: *mut LWLock, _mode: c_int) -> bool { crate::storage::lmgr::lwlock::LWLockAcquireOrWait(_lock as _, core::mem::transmute(_mode)) }
+unsafe fn LWLockConditionalAcquire(_lock: *mut LWLock, _mode: c_int) -> bool { crate::storage::lmgr::lwlock::LWLockConditionalAcquire(_lock as _, core::mem::transmute(_mode)) }
+unsafe fn LWLockUpdateVar(_lock: *mut LWLock, _val: *mut uint64, _new: uint64) { crate::storage::lmgr::lwlock::LWLockUpdateVar(_lock as _, _val as _, _new) }
+unsafe fn LWLockWaitForVar(_lock: *mut LWLock, _val: *mut uint64, _old: uint64, _new: *mut uint64) -> bool { crate::storage::lmgr::lwlock::LWLockWaitForVar(_lock as _, _val as _, _old, _new) }
+unsafe fn LWLockReleaseClearVar(_lock: *mut LWLock, _val: *mut uint64, _new: uint64) { crate::storage::lmgr::lwlock::LWLockReleaseClearVar(_lock as _, _val as _, _new) }
+// Named LWLock slots: forward to the canonical runtime-assigned globals.
+unsafe fn WALBufMappingLock_ptr() -> *mut LWLock { crate::backend_link_shims::WALBufMappingLock as *mut LWLock }
+unsafe fn WALWriteLock_ptr() -> *mut LWLock { crate::backend_link_shims::WALWriteLock as *mut LWLock }
+unsafe fn ControlFileLock_ptr() -> *mut LWLock { crate::backend_link_shims::ControlFileLock as *mut LWLock }
+unsafe fn XidGenLock_ptr() -> *mut LWLock { crate::backend_link_shims::XidGenLock as *mut LWLock }
+unsafe fn OidGenLock_ptr() -> *mut LWLock { crate::backend_link_shims::OidGenLock as *mut LWLock }
+unsafe fn CommitTsLock_ptr() -> *mut LWLock { crate::backend_link_shims::CommitTsLock as *mut LWLock }
 macro_rules! WALBufMappingLock { () => { WALBufMappingLock_ptr() } }
 macro_rules! WALWriteLock { () => { WALWriteLock_ptr() } }
 macro_rules! ControlFileLock { () => { ControlFileLock_ptr() } }
+macro_rules! XidGenLock { () => { XidGenLock_ptr() } }
+macro_rules! OidGenLock { () => { OidGenLock_ptr() } }
+macro_rules! CommitTsLock { () => { CommitTsLock_ptr() } }
 
 // TODO(pg-port): MAXALIGN / MAXALIGN64
 #[inline] fn MAXALIGN(x: usize) -> usize { (x + 7) & !7 }
@@ -161,31 +366,52 @@ macro_rules! ControlFileLock { () => { ControlFileLock_ptr() } }
 // TODO(pg-port): MemSet
 unsafe fn MemSet(p: *mut c_void, v: c_int, n: usize) { ptr::write_bytes(p as *mut u8, v as u8, n); }
 // TODO(pg-port): palloc / pfree stubs
-unsafe fn palloc(size: usize) -> *mut c_void { todo!("TODO(pg-port): palloc") }
-unsafe fn pfree(_p: *mut c_void) { /* TODO(pg-port) */ }
+unsafe fn palloc(size: usize) -> *mut c_void { crate::utils::palloc::palloc(size) }
+unsafe fn pfree(_p: *mut c_void) { crate::utils::palloc::pfree(_p) }
 // TODO(pg-port): pg_strong_random
-unsafe fn pg_strong_random(buf: *mut c_void, len: usize) -> bool { todo!("TODO(pg-port): pg_strong_random") }
+unsafe fn pg_strong_random(buf: *mut c_void, len: usize) -> bool { crate::port::pg_strong_random::pg_strong_random(buf, len) }
 // TODO(pg-port): pg_usleep
 unsafe fn pg_usleep(usec: i64) { /* TODO(pg-port) */ }
 // TODO(pg-port): pg_fsync / pg_pwrite / pg_pwrite_zeros / pg_pread / pread/write/close/unlink/stat/access/rename
 use libc::{close, read, write, stat, unlink, rename, access, open};
-unsafe fn pg_fsync(fd: c_int) -> c_int { todo!("TODO(pg-port): pg_fsync") }
-unsafe fn pg_pwrite(fd: c_int, buf: *const c_void, nbytes: usize, offset: i64) -> isize { todo!("TODO(pg-port): pg_pwrite") }
-unsafe fn pg_pwrite_zeros(fd: c_int, nbytes: usize, offset: i64) -> isize { todo!("TODO(pg-port): pg_pwrite_zeros") }
+unsafe fn pg_fsync(fd: c_int) -> c_int { crate::storage::file::fd::pg_fsync(fd) }
+unsafe fn pg_pwrite(fd: c_int, buf: *const c_void, nbytes: usize, offset: i64) -> isize { libc::pwrite(fd, buf, nbytes, offset) }
+unsafe fn pg_pwrite_zeros(fd: c_int, nbytes: usize, offset: i64) -> isize { crate::common::file_utils::pg_pwrite_zeros(fd, nbytes, offset) }
 // TODO(pg-port): durable_unlink / durable_rename
-unsafe fn durable_unlink(path: *const c_char, elevel: c_int) -> c_int { todo!("TODO(pg-port): durable_unlink") }
-unsafe fn durable_rename(oldpath: *const c_char, newpath: *const c_char, elevel: c_int) -> c_int { todo!("TODO(pg-port): durable_rename") }
+unsafe fn durable_unlink(path: *const c_char, elevel: c_int) -> c_int { crate::storage::file::fd::durable_unlink(path, elevel) }
+unsafe fn durable_rename(oldpath: *const c_char, newpath: *const c_char, elevel: c_int) -> c_int { crate::storage::file::fd::durable_rename(oldpath, newpath, elevel) }
 // TODO(pg-port): MakePGDirectory
-unsafe fn MakePGDirectory(path: *const c_char) -> c_int { todo!("TODO(pg-port): MakePGDirectory") }
+unsafe fn MakePGDirectory(path: *const c_char) -> c_int { crate::storage::file::fd::MakePGDirectory(path) }
 // TODO(pg-port): AllocateDir / ReadDir / FreeDir
 pub type DIR = c_void;
 pub type dirent = libc::dirent;
-unsafe fn AllocateDir(path: *const c_char) -> *mut DIR { todo!("TODO(pg-port): AllocateDir") }
-unsafe fn ReadDir(dir: *mut DIR, path: *const c_char) -> *mut dirent { todo!("TODO(pg-port): ReadDir") }
-unsafe fn FreeDir(dir: *mut DIR) { todo!("TODO(pg-port): FreeDir") }
+unsafe fn AllocateDir(path: *const c_char) -> *mut DIR { crate::storage::file::fd::AllocateDir(path) as *mut DIR }
+unsafe fn ReadDir(dir: *mut DIR, path: *const c_char) -> *mut dirent { crate::storage::file::fd::ReadDir(dir as _, path) as *mut dirent }
+unsafe fn FreeDir(dir: *mut DIR) { crate::storage::file::fd::FreeDir(dir as _); }
 // TODO(pg-port): get_dirent_type / PGFILETYPE_REG
 const PGFILETYPE_REG: c_int = 1;
 unsafe fn get_dirent_type(_path: *const c_char, _de: *const dirent, _follow: bool, _elevel: c_int) -> c_int { todo!("TODO(pg-port)") }
+// TODO(pg-port): rmgr / wal_level types (access/rmgr.h, access/xlog.h)
+type BuiltinRmgrId = crate::access::transam::xlogreader::RmgrId;
+type WalLevel = c_int;
+// TODO(pg-port): GUC context/source constants (utils/guc.h)
+const PGC_POSTMASTER: c_int = 0;
+const PGC_S_OVERRIDE: c_int = 0;
+// TODO(pg-port): backup label old path (xlog_internal.h)
+const BACKUP_LABEL_OLD: &str = "backup_label.old\0";
+// TODO(pg-port): XLogStandbyInfoActive (access/xlog.h)
+unsafe fn XLogStandbyInfoActive() -> bool { false }
+// TODO(pg-port): RelationCacheInitFileRemove (utils/cache/relcache.c)
+unsafe fn RelationCacheInitFileRemove() { /* TODO(pg-port) */ }
+// TODO(pg-port): XLogRecord_crc_offset (access/xlogrecord.h offsetof helper)
+unsafe fn XLogRecord_crc_offset() -> usize { 0 }
+// TODO(pg-port): strerror_r display shim (port/strerror.c)
+unsafe fn strerror_r() -> &'static str { "" }
+// TODO(pg-port): cstr_to_str display shim
+unsafe fn cstr_to_str<'a>(p: *const c_char) -> &'a str {
+    if p.is_null() { return ""; }
+    core::ffi::CStr::from_ptr(p).to_str().unwrap_or("")
+}
 // TODO(pg-port): timing / timestamp stubs
 pub type TimestampTz = int64;
 pub type instr_time = int64;
@@ -202,6 +428,15 @@ const WAIT_EVENT_WAL_COPY_SYNC: u32 = 0;
 const WAIT_EVENT_CONTROL_FILE_WRITE: u32 = 0;
 const WAIT_EVENT_CONTROL_FILE_SYNC: u32 = 0;
 const WAIT_EVENT_CONTROL_FILE_READ: u32 = 0;
+const WAIT_EVENT_WAL_BOOTSTRAP_WRITE: u32 = 0;
+const WAIT_EVENT_WAL_BOOTSTRAP_SYNC: u32 = 0;
+const WAIT_EVENT_RECOVERY_END_COMMAND: u32 = 0;
+const WAIT_EVENT_CHECKPOINT_DELAY_START: u32 = 0;
+const WAIT_EVENT_CHECKPOINT_DELAY_COMPLETE: u32 = 0;
+const WAIT_EVENT_ARCHIVE_CLEANUP_COMMAND: u32 = 0;
+const WAIT_EVENT_BACKUP_WAIT_WAL_ARCHIVE: u32 = 0;
+const WAIT_EVENT_WAL_SYNC_METHOD_ASSIGN: u32 = 0;
+const WAIT_EVENT_WAL_SYNC: u32 = 0;
 const IOOBJECT_WAL: c_int = 0;
 const IOCONTEXT_NORMAL: c_int = 0;
 const IOCONTEXT_INIT: c_int = 1;
@@ -219,9 +454,7 @@ unsafe fn RequestCheckpoint(_flags: c_int) {}
 const CHECKPOINT_CAUSE_XLOG: c_int = 0x10;
 unsafe fn WalSndWakeupRequest() {}
 unsafe fn WalSndWakeupProcessRequests(_a: bool, _b: bool) {}
-unsafe fn GetRedoRecPtr() -> XLogRecPtr { 0 }
 unsafe fn XLogIsNeeded() -> bool { false }
-unsafe fn DataChecksumsEnabled() -> bool { false }
 unsafe fn IsValidWalSegSize(s: c_int) -> bool { s.count_ones() == 1 && s >= 1024*1024 && s <= 1024*1024*1024 }
 unsafe fn SetConfigOption(_name: *const c_char, _val: *const c_char, _ctx: c_int, _src: c_int) {}
 const PGC_INTERNAL: c_int = 0;
@@ -289,7 +522,7 @@ pub const O_CLOEXEC: c_int = libc::O_CLOEXEC;
 pub const PG_O_DIRECT: c_int = 0; /* platform-specific; Darwin has F_NOCACHE instead */
 const XLOGDIR: &str = "pg_wal";
 // TODO(pg-port): CATALOG_VERSION_NO
-const CATALOG_VERSION_NO: uint32 = 202501061;
+const CATALOG_VERSION_NO: uint32 = crate::catalog::catversion::CATALOG_VERSION_NO as uint32;
 const PG_CONTROL_VERSION_CONST: uint32 = 1400;
 const MAXPGPATH: usize = 1024;
 const DEFAULT_XLOG_SEG_SIZE: c_int = 16 * 1024 * 1024;
@@ -301,27 +534,7 @@ const XLOG_SWITCH: uint8 = 0x40;
 const XLOG_CHECKPOINT_REDO: uint8 = 0x00; /* TODO(pg-port): check real value */
 const XLOG_FPW_CHANGE: uint8 = 0x20;
 
-// TODO(pg-port): CheckPoint type
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct CheckPoint {
-    pub redo: XLogRecPtr,
-    pub ThisTimeLineID: TimeLineID,
-    pub PrevTimeLineID: TimeLineID,
-    pub fullPageWrites: bool,
-    pub nextXid: FullTransactionId,
-    pub nextOid: uint32,
-    pub nextMulti: uint32,
-    pub nextMultiOffset: uint32,
-    pub oldestXid: uint32,
-    pub oldestXidDB: uint32,
-    pub oldestMulti: uint32,
-    pub oldestMultiDB: uint32,
-    pub time: pg_time_t,
-    pub oldestCommitTsXid: uint32,
-    pub newestCommitTsXid: uint32,
-    pub oldestActiveXid: uint32,
-}
+use crate::catalog::pg_control::CheckPoint;
 
 // TODO(pg-port): SessionBackupState (backup/basebackup.h)
 #[repr(C)]
@@ -341,6 +554,7 @@ pub enum RecoveryState {
     RECOVERY_STATE_ARCHIVE,
     RECOVERY_STATE_DONE,
 }
+use RecoveryState::*;
 
 // TODO(pg-port): PGAlignedXLogBlock
 #[repr(C, align(512))]
@@ -403,9 +617,18 @@ static mut PrevCheckPointDistance: f64 = 0.0;
 static mut check_wal_consistency_checking_deferred: bool = false;
 
 // GUC option tables (TODO(pg-port): config_enum_entry arrays)
+#[no_mangle]
 pub static wal_sync_method_options: [config_enum_entry; 1] = [
     config_enum_entry { name: ptr::null(), val: 0, hidden: false },
 ];
+#[no_mangle]
+pub static wal_level_options: [config_enum_entry; 4] = [
+    config_enum_entry { name: b"minimal\0".as_ptr() as *const c_char, val: 0, hidden: false },
+    config_enum_entry { name: b"replica\0".as_ptr() as *const c_char, val: 1, hidden: false },
+    config_enum_entry { name: b"logical\0".as_ptr() as *const c_char, val: 2, hidden: false },
+    config_enum_entry { name: ptr::null(), val: 0, hidden: false },
+];
+#[no_mangle]
 pub static archive_mode_options: [config_enum_entry; 1] = [
     config_enum_entry { name: ptr::null(), val: 0, hidden: false },
 ];
@@ -422,6 +645,7 @@ pub struct CheckpointStatsData {
     pub ckpt_sync_end_t:  TimestampTz,
     pub ckpt_end_t:       TimestampTz,
     pub ckpt_bufs_written: c_int,
+    pub ckpt_slru_written: u64,
     pub ckpt_segs_added:   c_int,
     pub ckpt_segs_removed: c_int,
     pub ckpt_segs_recycled: c_int,
@@ -432,7 +656,7 @@ pub struct CheckpointStatsData {
 
 pub static mut CheckpointStats: CheckpointStatsData = CheckpointStatsData {
     ckpt_start_t: 0, ckpt_write_t: 0, ckpt_sync_t: 0, ckpt_sync_end_t: 0,
-    ckpt_end_t: 0, ckpt_bufs_written: 0, ckpt_segs_added: 0,
+    ckpt_end_t: 0, ckpt_bufs_written: 0, ckpt_slru_written: 0, ckpt_segs_added: 0,
     ckpt_segs_removed: 0, ckpt_segs_recycled: 0, ckpt_sync_rels: 0,
     ckpt_longest_sync: 0, ckpt_agg_sync_time: 0,
 };
@@ -596,7 +820,7 @@ pub struct XLogCtlData {
 /*
  * Classification of XLogInsertRecord operations.
  */
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum WalInsertClass {
     WALINSERT_NORMAL,
     WALINSERT_SPECIAL_SWITCH,
@@ -696,7 +920,7 @@ static mut holdingAllLocks: bool = false;
 
 // TODO(pg-port): forward declarations of functions in later files (xloginsert.c etc.)
 // referenced here. These are provided as stubs.
-unsafe fn DecodeXLogRecordRequiredSpace(_tot_len: uint32) -> usize { todo!("TODO(pg-port)") }
+unsafe fn DecodeXLogRecordRequiredSpace(_tot_len: uint32) -> usize { crate::access::transam::xlogreader::DecodeXLogRecordRequiredSpace(_tot_len as usize) }
 // TODO(pg-port): XLogReaderState / DecodeXLogRecord etc -- WAL_DEBUG path only
 // TODO(pg-port): MaxConnections, max_worker_processes, max_wal_senders, etc.
 static mut MaxConnections: c_int = 100;
@@ -707,8 +931,9 @@ static mut max_locks_per_xact: c_int = 64;
 static mut track_commit_timestamp: bool = false;
 // TODO(pg-port): GucSource
 type GucSource = c_int;
-// TODO(pg-port): GUC_check_errdetail macro
-macro_rules! GUC_check_errdetail { ($msg:literal $(, $arg:expr)*) => { /* TODO(pg-port) */ } }
+// TODO(pg-port): GUC_check_errdetail / GUC_check_errdetail_fmt macros
+macro_rules! GUC_check_errdetail { ($($arg:tt)*) => { () /* TODO(pg-port) */ } }
+macro_rules! GUC_check_errdetail_fmt { ($($arg:tt)*) => { () /* TODO(pg-port) */ } }
 
 // ---------------------------------------------------------------------------
 // XLogInsertRecord
@@ -754,7 +979,7 @@ pub unsafe fn XLogInsertRecord(
     }
 
     /* we assume that all of the record header is in the first chunk */
-    debug_assert!((*rdata).len >= SizeOfXLogRecord as u32);
+    debug_assert!((*rdata).len >= SizeOfXLogRecord() as u32);
 
     /* cross-check on whether we should be here or not */
     if !XLogInsertAllowed() {
@@ -862,7 +1087,7 @@ pub unsafe fn XLogInsertRecord(
          */
         if (flags & XLOG_MARK_UNIMPORTANT) == 0 {
             let lockno = if holdingAllLocks { 0 } else { MyLockNo };
-            (*WALInsertLocks.add(lockno as usize)).l.lastImportantAt = StartPos;
+            core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(lockno as usize)).l).lastImportantAt = StartPos;
         }
     }
     /* else: xlog-switch record but position was already at segment start */
@@ -908,10 +1133,10 @@ pub unsafe fn XLogInsertRecord(
          * Return a pointer to just the end of the xlog-switch record.
          */
         if inserted {
-            let mut ep = StartPos + SizeOfXLogRecord as u64;
+            let mut ep = StartPos + SizeOfXLogRecord() as u64;
             if StartPos / XLOG_BLCKSZ as u64 != ep / XLOG_BLCKSZ as u64 {
-                let offset = XLogSegmentOffset(ep, wal_segment_size as uint32);
-                if offset == (ep % XLOG_BLCKSZ as u64) as uint32 {
+                let offset = XLogSegmentOffset(ep, wal_segment_size);
+                if offset == (ep % XLOG_BLCKSZ as u64) as u64 {
                     ep += SizeOfXLogLongPHD as u64;
                 } else {
                     ep += SizeOfXLogShortPHD as u64;
@@ -959,7 +1184,7 @@ unsafe fn ReserveXLogInsertLocation(
     let size = MAXALIGN(size as usize);
 
     /* All (non xlog-switch) records should contain data. */
-    debug_assert!(size > SizeOfXLogRecord);
+    debug_assert!(size > SizeOfXLogRecord());
 
     SpinLockAcquire(&mut Insert.insertpos_lck);
 
@@ -994,14 +1219,14 @@ unsafe fn ReserveXLogSwitch(
     PrevPtr: *mut XLogRecPtr,
 ) -> bool {
     let Insert = &mut (*XLogCtl).Insert;
-    let size = MAXALIGN(SizeOfXLogRecord) as uint64;
+    let size = MAXALIGN(SizeOfXLogRecord()) as uint64;
 
     SpinLockAcquire(&mut Insert.insertpos_lck);
 
     let startbytepos = Insert.CurrBytePos;
 
     let ptr = XLogBytePosToEndRecPtr(startbytepos);
-    if XLogSegmentOffset(ptr, wal_segment_size as uint32) == 0 {
+    if XLogSegmentOffset(ptr, wal_segment_size) == 0 {
         SpinLockRelease(&mut Insert.insertpos_lck);
         *EndPos = ptr;
         *StartPos = ptr;
@@ -1015,7 +1240,7 @@ unsafe fn ReserveXLogSwitch(
     *EndPos   = XLogBytePosToEndRecPtr(endbytepos);
 
     let segleft = wal_segment_size as uint64
-        - XLogSegmentOffset(*EndPos, wal_segment_size as uint32) as uint64;
+        - XLogSegmentOffset(*EndPos, wal_segment_size) as uint64;
     if segleft != wal_segment_size as uint64 {
         /* consume the rest of the segment */
         *EndPos = *EndPos + segleft;
@@ -1028,7 +1253,7 @@ unsafe fn ReserveXLogSwitch(
 
     *PrevPtr = XLogBytePosToRecPtr(prevbytepos);
 
-    debug_assert_eq!(XLogSegmentOffset(*EndPos, wal_segment_size as uint32), 0);
+    debug_assert_eq!(XLogSegmentOffset(*EndPos, wal_segment_size), 0);
     debug_assert_eq!(XLogRecPtrToBytePos(*EndPos),   endbytepos);
     debug_assert_eq!(XLogRecPtrToBytePos(*StartPos), startbytepos);
     debug_assert_eq!(XLogRecPtrToBytePos(*PrevPtr),  prevbytepos);
@@ -1072,7 +1297,7 @@ unsafe fn CopyXLogRecordToWAL(
             debug_assert!(
                 CurrPos as usize % XLOG_BLCKSZ >= SizeOfXLogShortPHD || freespace == 0
             );
-            ptr::copy_nonoverlapping(rdata_data, currpos, freespace);
+            ptr::copy_nonoverlapping(rdata_data, currpos as *mut c_void, freespace);
             rdata_data = rdata_data.add(freespace);
             rdata_len -= freespace;
             written += freespace;
@@ -1088,7 +1313,7 @@ unsafe fn CopyXLogRecordToWAL(
             (*pagehdr).xlp_info |= XLP_FIRST_IS_CONTRECORD;
 
             /* skip over the page header */
-            if XLogSegmentOffset(CurrPos, wal_segment_size as uint32) == 0 {
+            if XLogSegmentOffset(CurrPos, wal_segment_size) == 0 {
                 CurrPos += SizeOfXLogLongPHD as uint64;
                 currpos = currpos.add(SizeOfXLogLongPHD);
             } else {
@@ -1101,7 +1326,7 @@ unsafe fn CopyXLogRecordToWAL(
         debug_assert!(
             CurrPos as usize % XLOG_BLCKSZ >= SizeOfXLogShortPHD || rdata_len == 0
         );
-        ptr::copy_nonoverlapping(rdata_data, currpos, rdata_len);
+        ptr::copy_nonoverlapping(rdata_data, currpos as *mut c_void, rdata_len);
         currpos = currpos.add(rdata_len);
         CurrPos += rdata_len as uint64;
         freespace -= rdata_len;
@@ -1115,11 +1340,11 @@ unsafe fn CopyXLogRecordToWAL(
      * If this was an xlog-switch, consume all the remaining space in the
      * WAL segment.
      */
-    if isLogSwitch && XLogSegmentOffset(CurrPos, wal_segment_size as uint32) != 0 {
+    if isLogSwitch && XLogSegmentOffset(CurrPos, wal_segment_size) != 0 {
         /* An xlog-switch record doesn't contain any data besides the header */
-        debug_assert_eq!(write_len as usize, SizeOfXLogRecord);
+        debug_assert_eq!(write_len as usize, SizeOfXLogRecord());
         /* Assert that we did reserve the right amount of space */
-        debug_assert_eq!(XLogSegmentOffset(EndPos, wal_segment_size as uint32), 0);
+        debug_assert_eq!(XLogSegmentOffset(EndPos, wal_segment_size), 0);
 
         /* Use up all the remaining space on the current page */
         CurrPos += freespace as uint64;
@@ -1158,7 +1383,7 @@ unsafe fn WALInsertLockAcquire() {
     MyLockNo = lockToTry;
 
     let immed = LWLockAcquire(
-        &mut (*WALInsertLocks.add(MyLockNo as usize)).l.lock,
+        &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(MyLockNo as usize)).l).lock,
         LW_EXCLUSIVE,
     );
     if !immed {
@@ -1175,16 +1400,16 @@ unsafe fn WALInsertLockAcquire() {
  */
 unsafe fn WALInsertLockAcquireExclusive() {
     for i in 0..(NUM_XLOGINSERT_LOCKS - 1) {
-        LWLockAcquire(&mut (*WALInsertLocks.add(i)).l.lock, LW_EXCLUSIVE);
+        LWLockAcquire(&mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i)).l).lock, LW_EXCLUSIVE);
         LWLockUpdateVar(
-            &mut (*WALInsertLocks.add(i)).l.lock,
-            &mut (*WALInsertLocks.add(i)).l.insertingAt.value as *mut _ as *mut uint64,
+            &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i)).l).lock,
+            &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i)).l).insertingAt.value as *mut _ as *mut uint64,
             PG_UINT64_MAX,
         );
     }
     /* Variable value reset to 0 at release */
     LWLockAcquire(
-        &mut (*WALInsertLocks.add(NUM_XLOGINSERT_LOCKS - 1)).l.lock,
+        &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(NUM_XLOGINSERT_LOCKS - 1)).l).lock,
         LW_EXCLUSIVE,
     );
 
@@ -1198,16 +1423,16 @@ unsafe fn WALInsertLockRelease() {
     if holdingAllLocks {
         for i in 0..NUM_XLOGINSERT_LOCKS {
             LWLockReleaseClearVar(
-                &mut (*WALInsertLocks.add(i)).l.lock,
-                &mut (*WALInsertLocks.add(i)).l.insertingAt.value as *mut _ as *mut uint64,
+                &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i)).l).lock,
+                &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i)).l).insertingAt.value as *mut _ as *mut uint64,
                 0,
             );
         }
         holdingAllLocks = false;
     } else {
         LWLockReleaseClearVar(
-            &mut (*WALInsertLocks.add(MyLockNo as usize)).l.lock,
-            &mut (*WALInsertLocks.add(MyLockNo as usize)).l.insertingAt.value as *mut _ as *mut uint64,
+            &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(MyLockNo as usize)).l).lock,
+            &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(MyLockNo as usize)).l).insertingAt.value as *mut _ as *mut uint64,
             0,
         );
     }
@@ -1223,16 +1448,16 @@ unsafe fn WALInsertLockUpdateInsertingAt(insertingAt: XLogRecPtr) {
          * We use the last lock to mark our actual position.
          */
         LWLockUpdateVar(
-            &mut (*WALInsertLocks.add(NUM_XLOGINSERT_LOCKS - 1)).l.lock,
-            &mut (*WALInsertLocks.add(NUM_XLOGINSERT_LOCKS - 1))
-                .l.insertingAt.value as *mut _ as *mut uint64,
+            &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(NUM_XLOGINSERT_LOCKS - 1)).l).lock,
+            &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(NUM_XLOGINSERT_LOCKS - 1)).l)
+                .insertingAt.value as *mut _ as *mut uint64,
             insertingAt,
         );
     } else {
         LWLockUpdateVar(
-            &mut (*WALInsertLocks.add(MyLockNo as usize)).l.lock,
-            &mut (*WALInsertLocks.add(MyLockNo as usize))
-                .l.insertingAt.value as *mut _ as *mut uint64,
+            &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(MyLockNo as usize)).l).lock,
+            &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(MyLockNo as usize)).l)
+                .insertingAt.value as *mut _ as *mut uint64,
             insertingAt,
         );
     }
@@ -1297,8 +1522,8 @@ unsafe fn WaitXLogInsertionsToFinish(upto: XLogRecPtr) -> XLogRecPtr {
              * See if this insertion is in progress.
              */
             if LWLockWaitForVar(
-                &mut (*WALInsertLocks.add(i)).l.lock,
-                &mut (*WALInsertLocks.add(i)).l.insertingAt.value as *mut _ as *mut uint64,
+                &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i)).l).lock,
+                &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i)).l).insertingAt.value as *mut _ as *mut uint64,
                 insertingat,
                 &mut insertingat,
             ) {
@@ -1384,11 +1609,11 @@ unsafe fn GetXLogBuffer(ptr: XLogRecPtr, tli: TimeLineID) -> *mut c_char {
          * know how far we're finished with inserting the record.
          */
         if ptr % XLOG_BLCKSZ as u64 == SizeOfXLogShortPHD as u64
-            && XLogSegmentOffset(ptr, wal_segment_size as uint32) as usize > XLOG_BLCKSZ
+            && XLogSegmentOffset(ptr, wal_segment_size) as usize > XLOG_BLCKSZ
         {
             initializedUpto = ptr - SizeOfXLogShortPHD as u64;
         } else if ptr % XLOG_BLCKSZ as u64 == SizeOfXLogLongPHD as u64
-            && (XLogSegmentOffset(ptr, wal_segment_size as uint32) as usize) < XLOG_BLCKSZ
+            && (XLogSegmentOffset(ptr, wal_segment_size) as usize) < XLOG_BLCKSZ
         {
             initializedUpto = ptr - SizeOfXLogLongPHD as u64;
         } else {
@@ -1540,7 +1765,7 @@ unsafe fn XLogBytePosToRecPtr(bytepos: uint64) -> XLogRecPtr {
     }
 
     let mut result: XLogRecPtr = 0;
-    XLogSegNoOffsetToRecPtr(fullsegs, seg_offset, wal_segment_size as uint32, &mut result);
+    XLogSegNoOffsetToRecPtr(fullsegs, seg_offset, wal_segment_size, &mut result);
     result
 }
 
@@ -1577,7 +1802,7 @@ unsafe fn XLogBytePosToEndRecPtr(bytepos: uint64) -> XLogRecPtr {
     }
 
     let mut result: XLogRecPtr = 0;
-    XLogSegNoOffsetToRecPtr(fullsegs, seg_offset, wal_segment_size as uint32, &mut result);
+    XLogSegNoOffsetToRecPtr(fullsegs, seg_offset, wal_segment_size, &mut result);
     result
 }
 
@@ -1586,9 +1811,9 @@ unsafe fn XLogBytePosToEndRecPtr(bytepos: uint64) -> XLogRecPtr {
  */
 unsafe fn XLogRecPtrToBytePos(ptr: XLogRecPtr) -> uint64 {
     let mut fullsegs: XLogSegNo = 0;
-    XLByteToSeg(ptr, &mut fullsegs, wal_segment_size as uint32);
+    XLByteToSeg(ptr, &mut fullsegs, wal_segment_size);
 
-    let fullpages = (XLogSegmentOffset(ptr, wal_segment_size as uint32) as usize) / XLOG_BLCKSZ;
+    let fullpages = (XLogSegmentOffset(ptr, wal_segment_size) as usize) / XLOG_BLCKSZ;
     let offset = (ptr % XLOG_BLCKSZ as u64) as uint32;
 
     let result: uint64;
@@ -1733,7 +1958,7 @@ unsafe fn AdvanceXLInsertBuffer(upto: XLogRecPtr, tli: TimeLineID, opportunistic
         /*
          * If first page of an XLOG segment file, make it a long header.
          */
-        if XLogSegmentOffset((*NewPage).xlp_pageaddr, wal_segment_size as uint32) == 0 {
+        if XLogSegmentOffset((*NewPage).xlp_pageaddr, wal_segment_size) == 0 {
             let NewLongPage = NewPage as *mut XLogLongPageHeaderData;
             (*NewLongPage).xlp_sysid = (*ControlFile).system_identifier;
             (*NewLongPage).xlp_seg_size = wal_segment_size as uint32;
@@ -1842,7 +2067,7 @@ unsafe fn XLOGfileslop(lastredoptr: XLogRecPtr) -> XLogSegNo {
  */
 pub unsafe fn XLogCheckpointNeeded(new_segno: XLogSegNo) -> bool {
     let mut old_segno: XLogSegNo = 0;
-    XLByteToSeg(RedoRecPtr, &mut old_segno, wal_segment_size as uint32);
+    XLByteToSeg(RedoRecPtr, &mut old_segno, wal_segment_size);
 
     new_segno >= old_segno + CheckPointSegments as u64 - 1
 }
@@ -1897,7 +2122,7 @@ unsafe fn XLogWrite(WriteRqst: XLogwrtRqst, tli: TimeLineID, flexible: bool) {
         LogwrtResult.Write = EndPtr;
         ispartialpage = WriteRqst.Write < LogwrtResult.Write;
 
-        if !XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo, wal_segment_size as uint32) {
+        if !XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo, wal_segment_size) {
             /*
              * Switch to new logfile segment.
              */
@@ -1905,7 +2130,7 @@ unsafe fn XLogWrite(WriteRqst: XLogwrtRqst, tli: TimeLineID, flexible: bool) {
             if openLogFile >= 0 {
                 XLogFileClose();
             }
-            XLByteToPrevSeg(LogwrtResult.Write, &mut openLogSegNo, wal_segment_size as uint32);
+            XLByteToPrevSeg(LogwrtResult.Write, &mut openLogSegNo, wal_segment_size);
             openLogTLI = tli;
 
             /* create/use new log file */
@@ -1915,7 +2140,7 @@ unsafe fn XLogWrite(WriteRqst: XLogwrtRqst, tli: TimeLineID, flexible: bool) {
 
         /* Make sure we have the current logfile open */
         if openLogFile < 0 {
-            XLByteToPrevSeg(LogwrtResult.Write, &mut openLogSegNo, wal_segment_size as uint32);
+            XLByteToPrevSeg(LogwrtResult.Write, &mut openLogSegNo, wal_segment_size);
             openLogTLI = tli;
             openLogFile = XLogFileOpen(openLogSegNo, tli);
             ReserveExternalFD();
@@ -1926,8 +2151,8 @@ unsafe fn XLogWrite(WriteRqst: XLogwrtRqst, tli: TimeLineID, flexible: bool) {
             startidx = curridx;
             startoffset = XLogSegmentOffset(
                 LogwrtResult.Write - XLOG_BLCKSZ as u64,
-                wal_segment_size as uint32,
-            );
+                wal_segment_size,
+            ) as uint32;
         }
         npages += 1;
 
@@ -1968,7 +2193,7 @@ unsafe fn XLogWrite(WriteRqst: XLogwrtRqst, tli: TimeLineID, flexible: bool) {
                         xlogfname.as_mut_ptr() as *mut c_char,
                         tli,
                         openLogSegNo,
-                        wal_segment_size as uint32,
+                        wal_segment_size,
                     );
                     ereport!(
                         PANIC,
@@ -1980,7 +2205,7 @@ unsafe fn XLogWrite(WriteRqst: XLogwrtRqst, tli: TimeLineID, flexible: bool) {
                 }
                 nleft -= written as usize;
                 cur_from = cur_from.add(written as usize);
-                cur_offset += written;
+                cur_offset += written as i64;
                 if nleft == 0 {
                     break;
                 }
@@ -2043,12 +2268,12 @@ unsafe fn XLogWrite(WriteRqst: XLogwrtRqst, tli: TimeLineID, flexible: bool) {
             && wal_sync_method != WAL_SYNC_METHOD_OPEN_DSYNC
         {
             if openLogFile >= 0
-                && !XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo, wal_segment_size as uint32)
+                && !XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo, wal_segment_size)
             {
                 XLogFileClose();
             }
             if openLogFile < 0 {
-                XLByteToPrevSeg(LogwrtResult.Write, &mut openLogSegNo, wal_segment_size as uint32);
+                XLByteToPrevSeg(LogwrtResult.Write, &mut openLogSegNo, wal_segment_size);
                 openLogTLI = tli;
                 openLogFile = XLogFileOpen(openLogSegNo, tli);
                 ReserveExternalFD();
@@ -2229,6 +2454,7 @@ unsafe fn UpdateMinRecoveryPoint(lsn: XLogRecPtr, force: bool) {
 /*
  * Ensure that all XLOG data through the given position is flushed to disk.
  */
+#[no_mangle]
 pub unsafe fn XLogFlush(record: XLogRecPtr) {
     let mut WriteRqstPtr: XLogRecPtr;
     let mut WriteRqst: XLogwrtRqst;
@@ -2373,7 +2599,7 @@ pub unsafe fn XLogBackgroundFlush() -> bool {
      */
     if WriteRqst.Write <= LogwrtResult.Flush {
         if openLogFile >= 0 {
-            if !XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo, wal_segment_size as uint32) {
+            if !XLByteInPrevSeg(LogwrtResult.Write, openLogSegNo, wal_segment_size) {
                 XLogFileClose();
             }
         }
@@ -2501,7 +2727,7 @@ unsafe fn XLogFileInitInternal(
 
     debug_assert_ne!(logtli, 0);
 
-    XLogFilePath(path, logtli, logsegno, wal_segment_size as uint32);
+    XLogFilePath(path, logtli, logsegno, wal_segment_size);
 
     /*
      * Try to use existent file.
@@ -2655,7 +2881,7 @@ unsafe fn XLogFileCopy(
     let mut nbytes: c_int;
 
     /* Open the source file */
-    XLogFilePath(path.as_mut_ptr() as *mut c_char, srcTLI, srcsegno, wal_segment_size as uint32);
+    XLogFilePath(path.as_mut_ptr() as *mut c_char, srcTLI, srcsegno, wal_segment_size);
     srcfd = OpenTransientFile(path.as_mut_ptr() as *mut c_char, libc::O_RDONLY | PG_BINARY);
     if srcfd < 0 {
         ereport!(ERROR, errmsg!("could not open file: errno {}", *libc::__error()));
@@ -2755,7 +2981,7 @@ unsafe fn InstallXLogFileSegment(
 
     debug_assert_ne!(tli, 0);
 
-    XLogFilePath(path.as_mut_ptr() as *mut c_char, tli, *segno, wal_segment_size as uint32);
+    XLogFilePath(path.as_mut_ptr() as *mut c_char, tli, *segno, wal_segment_size);
 
     LWLockAcquire(ControlFileLock!(), LW_EXCLUSIVE);
     if !(*XLogCtl).InstallXLogFileSegmentActive {
@@ -2775,7 +3001,7 @@ unsafe fn InstallXLogFileSegment(
                 return false;
             }
             *segno += 1;
-            XLogFilePath(path.as_mut_ptr() as *mut c_char, tli, *segno, wal_segment_size as uint32);
+            XLogFilePath(path.as_mut_ptr() as *mut c_char, tli, *segno, wal_segment_size);
         }
     }
 
@@ -2795,7 +3021,7 @@ unsafe fn InstallXLogFileSegment(
 pub unsafe fn XLogFileOpen(segno: XLogSegNo, tli: TimeLineID) -> c_int {
     let mut path = [0u8; MAXPGPATH];
 
-    XLogFilePath(path.as_mut_ptr() as *mut c_char, tli, segno, wal_segment_size as uint32);
+    XLogFilePath(path.as_mut_ptr() as *mut c_char, tli, segno, wal_segment_size);
 
     let fd = BasicOpenFile(
         path.as_mut_ptr() as *mut c_char,
@@ -2823,7 +3049,7 @@ unsafe fn XLogFileClose() {
     if close(openLogFile) != 0 {
         let mut xlogfname = [0u8; MAXFNAMELEN];
         let save_errno = *libc::__error();
-        XLogFileName(xlogfname.as_mut_ptr() as *mut c_char, openLogTLI, openLogSegNo, wal_segment_size as uint32);
+        XLogFileName(xlogfname.as_mut_ptr() as *mut c_char, openLogTLI, openLogSegNo, wal_segment_size);
         ereport!(PANIC, errmsg!("could not close file: errno {}", save_errno));
     }
 
@@ -2845,8 +3071,8 @@ unsafe fn PreallocXlogFiles(endptr: XLogRecPtr, tli: TimeLineID) {
         return; /* unlocked check says no */
     }
 
-    XLByteToPrevSeg(endptr, &mut _logSegNo, wal_segment_size as uint32);
-    offset = XLogSegmentOffset(endptr - 1, wal_segment_size as uint32) as uint64;
+    XLByteToPrevSeg(endptr, &mut _logSegNo, wal_segment_size);
+    offset = XLogSegmentOffset(endptr - 1, wal_segment_size) as uint64;
     if offset >= (0.75 * wal_segment_size as f64) as uint64 {
         _logSegNo += 1;
         let lf = XLogFileInitInternal(_logSegNo, tli, &mut added, path.as_mut_ptr() as *mut c_char);
@@ -2877,7 +3103,7 @@ pub unsafe fn CheckXLogRemoved(segno: XLogSegNo, tli: TimeLineID) {
 
     if segno <= lastRemovedSegNo {
         let mut filename = [0u8; MAXFNAMELEN];
-        XLogFileName(filename.as_mut_ptr() as *mut c_char, tli, segno, wal_segment_size as uint32);
+        XLogFileName(filename.as_mut_ptr() as *mut c_char, tli, segno, wal_segment_size);
         *libc::__error() = save_errno;
         ereport!(ERROR, errmsg!("requested WAL segment has already been removed"));
     }
@@ -2920,7 +3146,7 @@ pub unsafe fn XLogGetOldestSegno(tli: TimeLineID) -> XLogSegNo {
 
         let mut file_tli: TimeLineID = 0;
         let mut file_segno: XLogSegNo = 0;
-        XLogFromFileName(d_name, &mut file_tli, &mut file_segno, wal_segment_size as uint32);
+        XLogFromFileName(d_name, &mut file_tli, &mut file_segno, wal_segment_size);
 
         /* Ignore anything that's not from the TLI of interest. */
         if tli != file_tli {
@@ -2943,7 +3169,7 @@ unsafe fn UpdateLastRemovedPtr(filename: *const c_char) {
     let mut tli: uint32 = 0;
     let mut segno: XLogSegNo = 0;
 
-    XLogFromFileName(filename, &mut tli, &mut segno, wal_segment_size as uint32);
+    XLogFromFileName(filename, &mut tli, &mut segno, wal_segment_size);
 
     SpinLockAcquire(&mut (*XLogCtl).info_lck);
     if segno > (*XLogCtl).lastRemovedSegNo {
@@ -2998,10 +3224,10 @@ unsafe fn RemoveOldXlogFiles(
     let recycleSegNo: XLogSegNo;
     let mut lastoff = [0u8; MAXFNAMELEN];
 
-    XLByteToSeg(endptr, &mut endlogSegNo, wal_segment_size as uint32);
+    XLByteToSeg(endptr, &mut endlogSegNo, wal_segment_size);
     recycleSegNo = XLOGfileslop(lastredoptr);
 
-    XLogFileName(lastoff.as_mut_ptr() as *mut c_char, 0, segno, wal_segment_size as uint32);
+    XLogFileName(lastoff.as_mut_ptr() as *mut c_char, 0, segno, wal_segment_size);
 
     let xldir = AllocateDir(b"pg_wal\0".as_ptr() as *const c_char);
 
@@ -3041,11 +3267,11 @@ pub unsafe fn RemoveNonParentXlogFiles(switchpoint: XLogRecPtr, newTLI: TimeLine
     let mut switchLogSegNo: XLogSegNo = 0;
     let recycleSegNo: XLogSegNo;
 
-    XLByteToPrevSeg(switchpoint, &mut switchLogSegNo, wal_segment_size as uint32);
-    XLByteToSeg(switchpoint, &mut endLogSegNo, wal_segment_size as uint32);
+    XLByteToPrevSeg(switchpoint, &mut switchLogSegNo, wal_segment_size);
+    XLByteToSeg(switchpoint, &mut endLogSegNo, wal_segment_size);
     recycleSegNo = endLogSegNo + 10;
 
-    XLogFileName(switchseg.as_mut_ptr() as *mut c_char, newTLI, switchLogSegNo, wal_segment_size as uint32);
+    XLogFileName(switchseg.as_mut_ptr() as *mut c_char, newTLI, switchLogSegNo, wal_segment_size);
 
     let xldir = AllocateDir(b"pg_wal\0".as_ptr() as *const c_char);
 
@@ -3248,7 +3474,7 @@ unsafe fn WriteControlFile() {
     let mut buffer = [0u8; PG_CONTROL_FILE_SIZE];
 
     /* Initialize version and compatibility-check fields */
-    (*ControlFile).pg_control_version = PG_CONTROL_VERSION;
+    (*ControlFile).pg_control_version = PG_CONTROL_VERSION as uint32;
     (*ControlFile).catalog_version_no = CATALOG_VERSION_NO;
 
     (*ControlFile).maxAlign = MAXIMUM_ALIGNOF as uint32;
@@ -3293,7 +3519,7 @@ unsafe fn WriteControlFile() {
     );
 
     let fd = BasicOpenFile(
-        XLOG_CONTROL_FILE.as_ptr() as *mut c_char,
+        c"global/pg_control".as_ptr() as *mut c_char, // XLOG_CONTROL_FILE, NUL-terminated
         libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | PG_BINARY,
     );
     if fd < 0 {
@@ -3329,7 +3555,7 @@ unsafe fn ReadControlFile() {
     let mut wal_segsz_str = [0u8; 20];
 
     fd = BasicOpenFile(
-        XLOG_CONTROL_FILE.as_ptr() as *mut c_char,
+        c"global/pg_control".as_ptr() as *mut c_char, // XLOG_CONTROL_FILE, NUL-terminated
         libc::O_RDWR | PG_BINARY,
     );
     if fd < 0 {
@@ -3353,22 +3579,20 @@ unsafe fn ReadControlFile() {
     /*
      * Check for expected pg_control format version.
      */
-    if (*ControlFile).pg_control_version != PG_CONTROL_VERSION
+    if (*ControlFile).pg_control_version != PG_CONTROL_VERSION as uint32
         && (*ControlFile).pg_control_version % 65536 == 0
         && (*ControlFile).pg_control_version / 65536 != 0
     {
         ereport!(
             FATAL,
             errmsg!("database files are incompatible with server")
-            /* errdetail: byte ordering mismatch */
         );
     }
 
-    if (*ControlFile).pg_control_version != PG_CONTROL_VERSION {
+    if (*ControlFile).pg_control_version != PG_CONTROL_VERSION as uint32 {
         ereport!(
             FATAL,
             errmsg!("database files are incompatible with server")
-            /* errdetail: PG_CONTROL_VERSION mismatch */
         );
     }
 
@@ -3461,7 +3685,7 @@ unsafe fn ReadControlFile() {
  * UpdateControlFile -- utility wrapper to update the control file.
  */
 unsafe fn UpdateControlFile() {
-    update_controlfile(DataDir, ControlFile, true);
+    update_controlfile(DataDir, ControlFile as *mut c_void, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -3477,66 +3701,7 @@ pub unsafe fn GetSystemIdentifier() -> uint64 {
     (*ControlFile).system_identifier
 }
 
-/*
- * Returns the random nonce from control file.
- */
-pub unsafe fn GetMockAuthenticationNonce() -> *mut c_char {
-    debug_assert!(!ControlFile.is_null());
-    (*ControlFile).mock_authentication_nonce.as_mut_ptr()
-}
 
-/*
- * Are checksums enabled for data pages?
- */
-pub unsafe fn DataChecksumsEnabled() -> bool {
-    debug_assert!(!ControlFile.is_null());
-    (*ControlFile).data_checksum_version != 0
-}
-
-// ---------------------------------------------------------------------------
-// get_sync_bit -- translate wal_sync_method to open() flags
-// (Full body at C line 8654, outside our range; stub here for call sites above.)
-// ---------------------------------------------------------------------------
-
-/*
- * get_sync_bit -- translate a WAL sync method to a file-open flag.
- * TODO(pg-port): full body is at C line 8654 (beyond translated range).
- */
-unsafe fn get_sync_bit(method: c_int) -> c_int {
-    /* On Darwin: O_DSYNC is defined; O_SYNC is also available.
-     * fdatasync / fsync paths don't use an open-time flag (flag = 0).
-     * open_sync uses O_SYNC, open_datasync uses O_DSYNC.
-     * We replicate the basic logic here. */
-    match method {
-        WAL_SYNC_METHOD_FDATASYNC | WAL_SYNC_METHOD_FSYNC | WAL_SYNC_METHOD_FSYNC_WRITETHROUGH => 0,
-        WAL_SYNC_METHOD_OPEN => libc::O_SYNC,
-        WAL_SYNC_METHOD_OPEN_DSYNC => libc::O_DSYNC,
-        _ => 0,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// KeepLogSeg / CheckPointGuts stubs
-// (Bodies reference functions outside our range -- stubbed per playbook.)
-// ---------------------------------------------------------------------------
-
-/*
- * KeepLogSeg -- compute which WAL segment we want to keep because of
- * replication slots and wal_keep_size.
- * TODO(pg-port): full body references replication slot internals.
- */
-unsafe fn KeepLogSeg(recptr: XLogRecPtr, logSegNo: *mut XLogSegNo) {
-    // TODO(pg-port): slot-aware logic lives outside translated range
-}
-
-/*
- * CheckPointGuts -- perform checkpoint operations except writing the
- * checkpoint record itself.
- * TODO(pg-port): calls many subsystems outside translated range.
- */
-unsafe fn CheckPointGuts(checkPointRedo: XLogRecPtr, flags: c_int) {
-    // TODO(pg-port): CheckPointGuts calls clog, multixact, etc.
-}
 
 // ---------------------------------------------------------------------------
 // str_time helper (used in XLogReportParameters and similar)
@@ -3544,19 +3709,9 @@ unsafe fn CheckPointGuts(checkPointRedo: XLogRecPtr, flags: c_int) {
 
 // TODO(pg-port): pg_strftime / log_timezone
 unsafe fn pg_strftime(buf: *mut c_char, buflen: usize, fmt: *const c_char, tm: *const c_void) {}
-static log_timezone: *const c_void = ptr::null();
+static mut log_timezone: *const c_void = ptr::null();
 unsafe fn pg_localtime(t: *const pg_time_t, tz: *const c_void) -> *const c_void { ptr::null() }
 
-unsafe fn str_time(tnow: pg_time_t) -> *mut c_char {
-    let buf = palloc(128) as *mut c_char;
-    pg_strftime(
-        buf,
-        128,
-        b"%Y-%m-%d %H:%M:%S %Z\0".as_ptr() as *const c_char,
-        pg_localtime(&tnow, log_timezone),
-    );
-    buf
-}
 
 // ---------------------------------------------------------------------------
 // NOTE: Translation ends here (C line ~4600, just before DataChecksumsEnabled
@@ -3681,22 +3836,22 @@ pub unsafe fn check_wal_consistency_checking(
     let mut elemlist: *mut List = ptr::null_mut();
     if !SplitIdentifierString(rawstring, b',' as c_char, &mut elemlist) {
         /* syntax error in list */
-        GUC_check_errdetail(b"List syntax is invalid.\0".as_ptr() as *const c_char);
+        GUC_check_errdetail!(b"List syntax is invalid.\0".as_ptr() as *const c_char);
         pfree(rawstring as *mut c_void);
         list_free(elemlist);
         return false;
     }
 
-    let mut lc = (*elemlist).head;
-    while !lc.is_null() {
-        let tok = (*lc).ptr_value as *mut c_char;
-        lc = (*lc).next;
+    let mut __i = 0;
+    while __i < (*elemlist).length {
+        let tok = (*(*elemlist).elements.add(__i as usize)).ptr_value as *mut c_char;
+        __i += 1;
 
         /* Check for 'all'. */
         if pg_strcasecmp(tok, b"all\0".as_ptr() as *const c_char) == 0 {
             for rmid in 0..=RM_MAX_ID as usize {
                 if RmgrIdExists(rmid as BuiltinRmgrId)
-                    && !GetRmgr(rmid as BuiltinRmgrId).rm_mask.is_null()
+                    && !GetRmgr(rmid as BuiltinRmgrId).rm_mask.is_none()
                 {
                     newwalconsistency[rmid] = true;
                 }
@@ -3706,7 +3861,7 @@ pub unsafe fn check_wal_consistency_checking(
             let mut found = false;
             for rmid in 0..=RM_MAX_ID as usize {
                 if RmgrIdExists(rmid as BuiltinRmgrId)
-                    && !GetRmgr(rmid as BuiltinRmgrId).rm_mask.is_null()
+                    && !GetRmgr(rmid as BuiltinRmgrId).rm_mask.is_none()
                     && pg_strcasecmp(tok, GetRmgr(rmid as BuiltinRmgrId).rm_name) == 0
                 {
                     newwalconsistency[rmid] = true;
@@ -3723,7 +3878,7 @@ pub unsafe fn check_wal_consistency_checking(
                 if !process_shared_preload_libraries_done {
                     check_wal_consistency_checking_deferred = true;
                 } else {
-                    GUC_check_errdetail_fmt(
+                    GUC_check_errdetail_fmt!(
                         b"Unrecognized key word: \"%s\".\0".as_ptr() as *const c_char,
                         tok,
                     );
@@ -3798,7 +3953,7 @@ pub unsafe fn InitializeWalConsistencyChecking() {
             (*guc).scontext,
             (*guc).source,
             (*guc).srole,
-            GUC_ACTION_SET,
+            crate::utils::misc::guc::GucAction::GUC_ACTION_SET,
             true,
             ERROR,
             false,
@@ -3902,6 +4057,11 @@ pub unsafe fn XLOGShmemSize() -> Size {
                 PGC_S_OVERRIDE,
             );
         }
+    }
+    // bring-up: SetConfigOption is a benign shim that doesn't write back the GUC var yet,
+    // so apply the auto-computed value directly. TODO: real GUC assign-hook propagation.
+    if XLOGbuffers <= 0 {
+        XLOGbuffers = XLOGChooseNumBuffers();
     }
     assert!(XLOGbuffers > 0);
 
@@ -4030,16 +4190,16 @@ pub unsafe fn XLOGShmemInit() {
     allocptr = allocptr.add(core::mem::size_of::<WALInsertLockPadded>() * NUM_XLOGINSERT_LOCKS as usize);
 
     i = 0;
-    while i < NUM_XLOGINSERT_LOCKS {
+    while i < NUM_XLOGINSERT_LOCKS as c_int {
         LWLockInitialize(
-            &mut (*WALInsertLocks.add(i as usize)).l.lock,
-            LWTRANCHE_WAL_INSERT,
+            &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i as usize)).l).lock as *mut _ as *mut crate::storage::lmgr::lwlock::LWLock,
+            LWTRANCHE_WAL_INSERT as c_int,
         );
         pg_atomic_init_u64(
-            &mut (*WALInsertLocks.add(i as usize)).l.insertingAt,
+            &mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i as usize)).l).insertingAt,
             InvalidXLogRecPtr,
         );
-        (*WALInsertLocks.add(i as usize)).l.lastImportantAt = InvalidXLogRecPtr;
+        core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i as usize)).l).lastImportantAt = InvalidXLogRecPtr;
         i += 1;
     }
 
@@ -4164,12 +4324,12 @@ pub unsafe fn BootStrapXLOG(data_checksum_version: uint32) {
     record = recptr as *mut XLogRecord;
     (*record).xl_prev = 0;
     (*record).xl_xid = InvalidTransactionId;
-    (*record).xl_tot_len = (SizeOfXLogRecord
+    (*record).xl_tot_len = (SizeOfXLogRecord()
         + SizeOfXLogRecordDataHeaderShort
         + core::mem::size_of::<CheckPoint>()) as uint32;
     (*record).xl_info = XLOG_CHECKPOINT_SHUTDOWN;
     (*record).xl_rmid = RM_XLOG_ID;
-    recptr = recptr.add(SizeOfXLogRecord);
+    recptr = recptr.add(SizeOfXLogRecord());
     /* fill the XLogRecordDataHeaderShort struct */
     *recptr = XLR_BLOCK_ID_DATA_SHORT as c_char;
     recptr = recptr.add(1);
@@ -4189,8 +4349,8 @@ pub unsafe fn BootStrapXLOG(data_checksum_version: uint32) {
     INIT_CRC32C!(crc);
     COMP_CRC32C!(
         crc,
-        (record as *const c_char).add(SizeOfXLogRecord),
-        (*record).xl_tot_len as usize - SizeOfXLogRecord
+        (record as *const c_char).add(SizeOfXLogRecord()),
+        (*record).xl_tot_len as usize - SizeOfXLogRecord()
     );
     COMP_CRC32C!(crc, record as *const c_char, XLogRecord_crc_offset());
     FIN_CRC32C!(crc);
@@ -4288,8 +4448,8 @@ unsafe fn XLogInitNewTimeline(endTLI: TimeLineID, endOfLog: XLogRecPtr, newTLI: 
      * they are the same, but if the switch happens exactly at a segment
      * boundary, startLogSegNo will be endLogSegNo + 1.
      */
-    XLByteToPrevSeg(endOfLog, &mut endLogSegNo, wal_segment_size as uint32);
-    XLByteToSeg(endOfLog, &mut startLogSegNo, wal_segment_size as uint32);
+    XLByteToPrevSeg(endOfLog, &mut endLogSegNo, wal_segment_size);
+    XLByteToSeg(endOfLog, &mut startLogSegNo, wal_segment_size);
 
     /*
      * Initialize the starting WAL segment for the new timeline. If the switch
@@ -4310,7 +4470,7 @@ unsafe fn XLogInitNewTimeline(endTLI: TimeLineID, endOfLog: XLogRecPtr, newTLI: 
             endLogSegNo,
             endTLI,
             endLogSegNo,
-            XLogSegmentOffset(endOfLog, wal_segment_size as uint32),
+            XLogSegmentOffset(endOfLog, wal_segment_size) as c_int,
         );
     } else {
         /*
@@ -4325,7 +4485,7 @@ unsafe fn XLogInitNewTimeline(endTLI: TimeLineID, endOfLog: XLogRecPtr, newTLI: 
                 xlogfname.as_mut_ptr(),
                 newTLI,
                 startLogSegNo,
-                wal_segment_size as uint32,
+                wal_segment_size,
             );
             *libc::__error() = save_errno;
             ereport!(
@@ -4348,7 +4508,7 @@ unsafe fn XLogInitNewTimeline(endTLI: TimeLineID, endOfLog: XLogRecPtr, newTLI: 
         xlogfname.as_mut_ptr(),
         newTLI,
         startLogSegNo,
-        wal_segment_size as uint32,
+        wal_segment_size,
     );
     XLogArchiveCleanup(xlogfname.as_ptr());
 }
@@ -4391,18 +4551,18 @@ unsafe fn CleanupAfterArchiveRecovery(
      * As a compromise, we rename the last segment with the .partial suffix,
      * and archive it.
      */
-    if XLogSegmentOffset(EndOfLog, wal_segment_size as uint32) != 0
+    if XLogSegmentOffset(EndOfLog, wal_segment_size) != 0
         && XLogArchivingActive()
     {
         let mut origfname: [c_char; MAXFNAMELEN] = [0; MAXFNAMELEN];
         let mut endLogSegNo: XLogSegNo = 0;
 
-        XLByteToPrevSeg(EndOfLog, &mut endLogSegNo, wal_segment_size as uint32);
+        XLByteToPrevSeg(EndOfLog, &mut endLogSegNo, wal_segment_size);
         XLogFileName(
             origfname.as_mut_ptr(),
             EndOfLogTLI,
             endLogSegNo,
-            wal_segment_size as uint32,
+            wal_segment_size,
         );
 
         if !XLogArchiveIsReadyOrDone(origfname.as_ptr()) {
@@ -4422,7 +4582,7 @@ unsafe fn CleanupAfterArchiveRecovery(
                 origpath.as_mut_ptr(),
                 EndOfLogTLI,
                 endLogSegNo,
-                wal_segment_size as uint32,
+                wal_segment_size,
             );
             libc::snprintf(
                 partialfname.as_mut_ptr(),
@@ -4462,8 +4622,6 @@ unsafe fn CheckRequiredParameterValues() {
         ereport!(
             FATAL,
             errmsg!("WAL was generated with \"wal_level=minimal\", cannot continue recovering")
-            /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-               errdetail + errhint also present in C */
         );
     }
 
@@ -4566,14 +4724,12 @@ pub unsafe fn StartupXLOG() {
             ereport!(
                 LOG,
                 errmsg!("database system was interrupted while in recovery at {}", cstr_to_str(str_time((*ControlFile).time)))
-                /* errhint also in C */
             );
         }
         DB_IN_ARCHIVE_RECOVERY => {
             ereport!(
                 LOG,
                 errmsg!("database system was interrupted while in recovery at log time {}", cstr_to_str(str_time((*ControlFile).checkPointCopy.time)))
-                /* errhint also in C */
             );
         }
         DB_IN_PRODUCTION => {
@@ -4621,7 +4777,7 @@ pub unsafe fn StartupXLOG() {
      * Prepare for WAL recovery if needed.
      */
     InitWalRecovery(
-        ControlFile,
+        ControlFile as *mut _ as *mut crate::access::transam::xlogrecovery::ControlFileData,
         &mut wasShutdown,
         &mut haveBackupLabel,
         &mut haveTblspcMap,
@@ -4637,7 +4793,7 @@ pub unsafe fn StartupXLOG() {
     SetTransactionIdLimit(checkPoint.oldestXid, checkPoint.oldestXidDB);
     SetMultiXactIdLimit(checkPoint.oldestMulti, checkPoint.oldestMultiDB, true);
     SetCommitTsLimit(checkPoint.oldestCommitTsXid, checkPoint.newestCommitTsXid);
-    (*XLogCtl).ckptFullXid = checkPoint.nextXid;
+    (*XLogCtl).ckptFullXid = core::mem::transmute(checkPoint.nextXid);
 
     /*
      * Clear out any old relcache cache files.
@@ -4738,7 +4894,7 @@ pub unsafe fn StartupXLOG() {
         if haveBackupLabel {
             libc::unlink(BACKUP_LABEL_OLD.as_ptr() as *const c_char);
             durable_rename(
-                BACKUP_LABEL_FILE.as_ptr() as *const c_char,
+                BACKUP_LABEL_FILE as *const c_char,
                 BACKUP_LABEL_OLD.as_ptr() as *const c_char,
                 FATAL,
             );
@@ -4748,10 +4904,10 @@ pub unsafe fn StartupXLOG() {
          * If there was a tablespace_map file, it's done its job.
          */
         if haveTblspcMap {
-            libc::unlink(TABLESPACE_MAP_OLD.as_ptr() as *const c_char);
+            libc::unlink(TABLESPACE_MAP_OLD as *const c_char);
             durable_rename(
-                TABLESPACE_MAP.as_ptr() as *const c_char,
-                TABLESPACE_MAP_OLD.as_ptr() as *const c_char,
+                TABLESPACE_MAP as *const c_char,
+                TABLESPACE_MAP_OLD as *const c_char,
                 FATAL,
             );
         }
@@ -4912,10 +5068,10 @@ pub unsafe fn StartupXLOG() {
          * Remove the signal files out of the way.
          */
         if (*endOfRecoveryInfo).standby_signal_file_found {
-            durable_unlink(STANDBY_SIGNAL_FILE.as_ptr() as *const c_char, FATAL);
+            durable_unlink(STANDBY_SIGNAL_FILE as *const c_char, FATAL);
         }
         if (*endOfRecoveryInfo).recovery_signal_file_found {
-            durable_unlink(RECOVERY_SIGNAL_FILE.as_ptr() as *const c_char, FATAL);
+            durable_unlink(RECOVERY_SIGNAL_FILE as *const c_char, FATAL);
         }
 
         /*
@@ -5076,7 +5232,7 @@ pub unsafe fn StartupXLOG() {
     /*
      * All done with end-of-recovery actions.
      */
-    LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+    LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
     (*ControlFile).state = DB_IN_PRODUCTION;
 
     SpinLockAcquire(&mut (*XLogCtl).info_lck);
@@ -5084,7 +5240,7 @@ pub unsafe fn StartupXLOG() {
     SpinLockRelease(&mut (*XLogCtl).info_lck);
 
     UpdateControlFile();
-    LWLockRelease(ControlFileLock as *mut LWLock);
+    LWLockRelease(ControlFileLock!() as *mut LWLock);
 
     /*
      * Shutdown the recovery environment.
@@ -5113,7 +5269,7 @@ pub unsafe fn StartupXLOG() {
  */
 pub unsafe fn SwitchIntoArchiveRecovery(EndRecPtr: XLogRecPtr, replayTLI: TimeLineID) {
     /* initialize minRecoveryPoint to this record */
-    LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+    LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
     (*ControlFile).state = DB_IN_ARCHIVE_RECOVERY;
     if (*ControlFile).minRecoveryPoint < EndRecPtr {
         (*ControlFile).minRecoveryPoint = EndRecPtr;
@@ -5139,14 +5295,14 @@ pub unsafe fn SwitchIntoArchiveRecovery(EndRecPtr: XLogRecPtr, replayTLI: TimeLi
     (*XLogCtl).SharedRecoveryState = RECOVERY_STATE_ARCHIVE;
     SpinLockRelease(&mut (*XLogCtl).info_lck);
 
-    LWLockRelease(ControlFileLock as *mut LWLock);
+    LWLockRelease(ControlFileLock!() as *mut LWLock);
 }
 
 /*
  * Callback from PerformWalRecovery(), called when we reach the end of backup.
  */
 pub unsafe fn ReachedEndOfBackup(EndRecPtr: XLogRecPtr, tli: TimeLineID) {
-    LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+    LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
 
     if (*ControlFile).minRecoveryPoint < EndRecPtr {
         (*ControlFile).minRecoveryPoint = EndRecPtr;
@@ -5158,7 +5314,7 @@ pub unsafe fn ReachedEndOfBackup(EndRecPtr: XLogRecPtr, tli: TimeLineID) {
     (*ControlFile).backupEndRequired = false;
     UpdateControlFile();
 
-    LWLockRelease(ControlFileLock as *mut LWLock);
+    LWLockRelease(ControlFileLock!() as *mut LWLock);
 }
 
 /*
@@ -5189,6 +5345,7 @@ unsafe fn PerformRecoveryXLogAction() -> bool {
 /*
  * Is the system still in recovery?
  */
+#[no_mangle]
 pub unsafe fn RecoveryInProgress() -> bool {
     if !LocalRecoveryInProgress {
         return false;
@@ -5198,7 +5355,7 @@ pub unsafe fn RecoveryInProgress() -> bool {
      * use volatile pointer to make sure we make a fresh read of the
      * shared variable.
      */
-    let xlogctl = XLogCtl as *volatile XLogCtlData;
+    let xlogctl = XLogCtl as *mut XLogCtlData;
     LocalRecoveryInProgress =
         (*xlogctl).SharedRecoveryState != RECOVERY_STATE_DONE;
 
@@ -5296,10 +5453,11 @@ pub unsafe fn GetInsertRecPtr() -> XLogRecPtr {
 /*
  * GetFlushRecPtr -- Returns the current flush position.
  */
+#[no_mangle]
 pub unsafe fn GetFlushRecPtr(insertTLI: *mut TimeLineID) -> XLogRecPtr {
     assert!((*XLogCtl).SharedRecoveryState == RECOVERY_STATE_DONE);
 
-    RefreshXLogWriteResult(&mut LogwrtResult);
+    RefreshXLogWriteResult!(&mut LogwrtResult);
 
     /*
      * If we're writing and flushing WAL, the time line can't be changing, so
@@ -5345,9 +5503,9 @@ pub unsafe fn GetLastImportantRecPtr() -> XLogRecPtr {
         /*
          * Need to take a lock to prevent torn reads of the LSN.
          */
-        LWLockAcquire(&mut (*WALInsertLocks.add(i)).l.lock, LW_EXCLUSIVE);
-        let last_important = (*WALInsertLocks.add(i)).l.lastImportantAt;
-        LWLockRelease(&mut (*WALInsertLocks.add(i)).l.lock);
+        LWLockAcquire(&mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i)).l).lock, LW_EXCLUSIVE);
+        let last_important = core::mem::ManuallyDrop::deref(&(*WALInsertLocks.add(i)).l).lastImportantAt;
+        LWLockRelease(&mut core::mem::ManuallyDrop::deref_mut(&mut (*WALInsertLocks.add(i)).l).lock);
 
         if res < last_important {
             res = last_important;
@@ -5364,10 +5522,10 @@ pub unsafe fn GetLastSegSwitchData(lastSwitchLSN: *mut XLogRecPtr) -> pg_time_t 
     let result: pg_time_t;
 
     /* Need WALWriteLock, but shared lock is sufficient */
-    LWLockAcquire(WALWriteLock as *mut LWLock, LW_SHARED);
+    LWLockAcquire(WALWriteLock!() as *mut LWLock, LW_SHARED);
     result = (*XLogCtl).lastSegSwitchTime;
     *lastSwitchLSN = (*XLogCtl).lastSegSwitchLSN;
-    LWLockRelease(WALWriteLock as *mut LWLock);
+    LWLockRelease(WALWriteLock!() as *mut LWLock);
 
     result
 }
@@ -5495,7 +5653,7 @@ unsafe fn LogCheckpointEnd(restartpoint: bool) {
      * Timing values returned from CheckpointStats are in microseconds.
      * Convert to milliseconds for consistent printing.
      */
-    longest_msecs = (CheckpointStats.ckpt_longest_sync + 999) / 1000;
+    longest_msecs = ((CheckpointStats.ckpt_longest_sync + 999) / 1000) as i64;
 
     average_sync_time = 0;
     let mut average_sync_time_inner = 0u64;
@@ -5639,7 +5797,7 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
     let mut freespace: uint32;
     let mut PriorRedoPtr: XLogRecPtr;
     let last_important_lsn: XLogRecPtr;
-    let mut vxids: *mut VirtualTransactionId;
+    let mut vxids: *mut crate::storage::ipc::procarray::VirtualTransactionId;
     let mut nvxids: c_int = 0;
     let mut oldXLogAllowed: c_int = 0;
 
@@ -5674,10 +5832,10 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
     START_CRIT_SECTION!();
 
     if shutdown {
-        LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+        LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
         (*ControlFile).state = DB_SHUTDOWNING;
         UpdateControlFile();
-        LWLockRelease(ControlFileLock as *mut LWLock);
+        LWLockRelease(ControlFileLock!() as *mut LWLock);
     }
 
     /* Begin filling in the checkpoint WAL record */
@@ -5743,9 +5901,9 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
         /*
          * Compute new REDO record ptr = location of next XLOG record.
          */
-        freespace = INSERT_FREESPACE(curInsert);
+        freespace = INSERT_FREESPACE(curInsert) as uint32;
         if freespace == 0 {
-            if XLogSegmentOffset(curInsert, wal_segment_size as uint32) == 0 {
+            if XLogSegmentOffset(curInsert, wal_segment_size) == 0 {
                 let new = curInsert + SizeOfXLogLongPHD as XLogRecPtr;
                 checkPoint.redo = new;
             } else {
@@ -5776,7 +5934,7 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
     if !shutdown {
         /* Include WAL level in record for WAL summarizer's benefit. */
         XLogBeginInsert();
-        XLogRegisterData(&mut wal_level as *mut c_int as *mut c_char, core::mem::size_of::<c_int>());
+        XLogRegisterData(&mut wal_level as *mut c_int as *const c_void, core::mem::size_of::<c_int>() as u32);
         let _ = XLogInsert(RM_XLOG_ID, XLOG_CHECKPOINT_REDO);
 
         checkPoint.redo = RedoRecPtr;
@@ -5802,23 +5960,23 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
     /*
      * Get the other info we need for the checkpoint record.
      */
-    LWLockAcquire(XidGenLock as *mut LWLock, LW_SHARED);
+    LWLockAcquire(XidGenLock!() as *mut LWLock, LW_SHARED);
     checkPoint.nextXid = (*TransamVariables).nextXid;
     checkPoint.oldestXid = (*TransamVariables).oldestXid;
     checkPoint.oldestXidDB = (*TransamVariables).oldestXidDB;
-    LWLockRelease(XidGenLock as *mut LWLock);
+    LWLockRelease(XidGenLock!() as *mut LWLock);
 
-    LWLockAcquire(CommitTsLock as *mut LWLock, LW_SHARED);
+    LWLockAcquire(CommitTsLock!() as *mut LWLock, LW_SHARED);
     checkPoint.oldestCommitTsXid = (*TransamVariables).oldestCommitTsXid;
     checkPoint.newestCommitTsXid = (*TransamVariables).newestCommitTsXid;
-    LWLockRelease(CommitTsLock as *mut LWLock);
+    LWLockRelease(CommitTsLock!() as *mut LWLock);
 
-    LWLockAcquire(OidGenLock as *mut LWLock, LW_SHARED);
+    LWLockAcquire(OidGenLock!() as *mut LWLock, LW_SHARED);
     checkPoint.nextOid = (*TransamVariables).nextOid;
     if !shutdown {
         checkPoint.nextOid += (*TransamVariables).oidCount;
     }
-    LWLockRelease(OidGenLock as *mut LWLock);
+    LWLockRelease(OidGenLock!() as *mut LWLock);
 
     MultiXactGetCheckptMulti(
         shutdown,
@@ -5847,7 +6005,7 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
             pgstat_report_wait_start(WAIT_EVENT_CHECKPOINT_DELAY_START);
             pg_usleep(10000);
             pgstat_report_wait_end();
-            if !HaveVirtualXIDsDelayingChkpt(vxids, nvxids, DELAY_CHKPT_START) {
+            if !HaveVirtualXIDsDelayingChkpt(vxids as *const _, nvxids, DELAY_CHKPT_START) {
                 break;
             }
         }
@@ -5863,7 +6021,7 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
             pgstat_report_wait_start(WAIT_EVENT_CHECKPOINT_DELAY_COMPLETE);
             pg_usleep(10000);
             pgstat_report_wait_end();
-            if !HaveVirtualXIDsDelayingChkpt(vxids, nvxids, DELAY_CHKPT_COMPLETE) {
+            if !HaveVirtualXIDsDelayingChkpt(vxids as *const _, nvxids, DELAY_CHKPT_COMPLETE) {
                 break;
             }
         }
@@ -5884,8 +6042,8 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
      */
     XLogBeginInsert();
     XLogRegisterData(
-        &mut checkPoint as *mut CheckPoint as *mut c_char,
-        core::mem::size_of::<CheckPoint>(),
+        &mut checkPoint as *mut CheckPoint as *const c_void,
+        core::mem::size_of::<CheckPoint>() as u32,
     );
     recptr = XLogInsert(
         RM_XLOG_ID,
@@ -5920,7 +6078,7 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
     /*
      * Update the control file.
      */
-    LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+    LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
     if shutdown {
         (*ControlFile).state = DB_SHUTDOWNED;
     }
@@ -5937,11 +6095,11 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
         pg_atomic_read_membarrier_u64(&mut (*XLogCtl).unloggedLSN);
 
     UpdateControlFile();
-    LWLockRelease(ControlFileLock as *mut LWLock);
+    LWLockRelease(ControlFileLock!() as *mut LWLock);
 
     /* Update shared-memory copy of checkpoint XID/epoch */
     SpinLockAcquire(&mut (*XLogCtl).info_lck);
-    (*XLogCtl).ckptFullXid = checkPoint.nextXid;
+    (*XLogCtl).ckptFullXid = core::mem::transmute(checkPoint.nextXid);
     SpinLockRelease(&mut (*XLogCtl).info_lck);
 
     /*
@@ -5972,10 +6130,10 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
     /*
      * Delete old log files.
      */
-    XLByteToSeg(RedoRecPtr, &mut _logSegNo, wal_segment_size as uint32);
+    XLByteToSeg(RedoRecPtr, &mut _logSegNo, wal_segment_size);
     KeepLogSeg(recptr, &mut _logSegNo);
     if InvalidateObsoleteReplicationSlots(
-        RS_INVAL_WAL_REMOVED | RS_INVAL_IDLE_TIMEOUT,
+        (RS_INVAL_WAL_REMOVED | RS_INVAL_IDLE_TIMEOUT) as u32,
         _logSegNo,
         InvalidOid,
         InvalidTransactionId,
@@ -5983,7 +6141,7 @@ pub unsafe fn CreateCheckPoint(flags: c_int) -> bool {
         /*
          * Some slots have been invalidated; recalculate the old-segment horizon.
          */
-        XLByteToSeg(RedoRecPtr, &mut _logSegNo, wal_segment_size as uint32);
+        XLByteToSeg(RedoRecPtr, &mut _logSegNo, wal_segment_size);
         KeepLogSeg(recptr, &mut _logSegNo);
     }
     _logSegNo -= 1;
@@ -6038,8 +6196,8 @@ unsafe fn CreateEndOfRecoveryRecord() {
 
     XLogBeginInsert();
     XLogRegisterData(
-        &mut xlrec as *mut xl_end_of_recovery as *mut c_char,
-        core::mem::size_of::<xl_end_of_recovery>(),
+        &mut xlrec as *mut xl_end_of_recovery as *const c_void,
+        core::mem::size_of::<xl_end_of_recovery>() as u32,
     );
     let recptr_val = XLogInsert(RM_XLOG_ID, XLOG_END_OF_RECOVERY);
 
@@ -6049,11 +6207,11 @@ unsafe fn CreateEndOfRecoveryRecord() {
      * Update the control file so that crash recovery can follow the timeline
      * changes to this point.
      */
-    LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+    LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
     (*ControlFile).minRecoveryPoint = recptr_val;
     (*ControlFile).minRecoveryPointTLI = xlrec.ThisTimeLineID;
     UpdateControlFile();
-    LWLockRelease(ControlFileLock as *mut LWLock);
+    LWLockRelease(ControlFileLock!() as *mut LWLock);
 
     END_CRIT_SECTION!();
 }
@@ -6082,7 +6240,7 @@ unsafe fn CreateOverwriteContrecordRecord(
 
     /* The current WAL insert position should be right after the page header */
     startPos = pagePtr;
-    let startPos = if XLogSegmentOffset(startPos, wal_segment_size as uint32) == 0 {
+    let startPos = if XLogSegmentOffset(startPos, wal_segment_size) == 0 {
         startPos + SizeOfXLogLongPHD as u64
     } else {
         startPos + SizeOfXLogShortPHD as u64
@@ -6115,8 +6273,8 @@ unsafe fn CreateOverwriteContrecordRecord(
     xlrec.overwritten_lsn = aborted_lsn;
     xlrec.overwrite_time = GetCurrentTimestamp();
     XLogRegisterData(
-        &mut xlrec as *mut xl_overwrite_contrecord as *mut c_char,
-        core::mem::size_of::<xl_overwrite_contrecord>(),
+        &mut xlrec as *mut xl_overwrite_contrecord as *const c_void,
+        core::mem::size_of::<xl_overwrite_contrecord>() as u32,
     );
     let recptr_val = XLogInsert(RM_XLOG_ID, XLOG_OVERWRITE_CONTRECORD);
 
@@ -6247,10 +6405,10 @@ pub unsafe fn CreateRestartPoint(flags: c_int) -> bool {
 
         UpdateMinRecoveryPoint(InvalidXLogRecPtr, true);
         if flags & CHECKPOINT_IS_SHUTDOWN != 0 {
-            LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+            LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
             (*ControlFile).state = DB_SHUTDOWNED_IN_RECOVERY;
             UpdateControlFile();
-            LWLockRelease(ControlFileLock as *mut LWLock);
+            LWLockRelease(ControlFileLock!() as *mut LWLock);
         }
         return false;
     }
@@ -6297,7 +6455,7 @@ pub unsafe fn CreateRestartPoint(flags: c_int) -> bool {
     /*
      * Update pg_control, using current time.
      */
-    LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+    LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
     if (*ControlFile).checkPointCopy.redo < lastCheckPoint.redo {
         /*
          * Update the checkpoint information.
@@ -6323,7 +6481,7 @@ pub unsafe fn CreateRestartPoint(flags: c_int) -> bool {
         }
         UpdateControlFile();
     }
-    LWLockRelease(ControlFileLock as *mut LWLock);
+    LWLockRelease(ControlFileLock!() as *mut LWLock);
 
     /*
      * Update the average distance between checkpoints/restartpoints.
@@ -6335,7 +6493,7 @@ pub unsafe fn CreateRestartPoint(flags: c_int) -> bool {
     /*
      * Delete old log files.
      */
-    XLByteToSeg(RedoRecPtr, &mut _logSegNo, wal_segment_size as uint32);
+    XLByteToSeg(RedoRecPtr, &mut _logSegNo, wal_segment_size);
 
     /*
      * Retreat _logSegNo using the current end of xlog replayed or received,
@@ -6349,7 +6507,7 @@ pub unsafe fn CreateRestartPoint(flags: c_int) -> bool {
     // INJECTION_POINT("restartpoint-before-slot-invalidation", NULL)
 
     if InvalidateObsoleteReplicationSlots(
-        RS_INVAL_WAL_REMOVED | RS_INVAL_IDLE_TIMEOUT,
+        (RS_INVAL_WAL_REMOVED | RS_INVAL_IDLE_TIMEOUT) as u32,
         _logSegNo,
         InvalidOid,
         InvalidTransactionId,
@@ -6357,7 +6515,7 @@ pub unsafe fn CreateRestartPoint(flags: c_int) -> bool {
         /*
          * Some slots have been invalidated; recalculate the old-segment horizon.
          */
-        XLByteToSeg(RedoRecPtr, &mut _logSegNo, wal_segment_size as uint32);
+        XLByteToSeg(RedoRecPtr, &mut _logSegNo, wal_segment_size);
         KeepLogSeg(endptr, &mut _logSegNo);
     }
     _logSegNo -= 1;
@@ -6394,7 +6552,6 @@ pub unsafe fn CreateRestartPoint(flags: c_int) -> bool {
     ereport!(
         if log_checkpoints { LOG } else { DEBUG2 },
         errmsg!("recovery restart point at {}/{}", hi, lo)
-        /* xtime ? errdetail(...) : 0 -- omitted as errdetail is conditional */
     );
 
     /*
@@ -6437,7 +6594,7 @@ pub unsafe fn GetWALAvailability(targetLSN: XLogRecPtr) -> WALAvailability {
      * Calculate the oldest segment currently reserved by all slots.
      */
     currpos = GetXLogWriteRecPtr();
-    XLByteToSeg(currpos, &mut oldestSlotSeg, wal_segment_size as uint32);
+    XLByteToSeg(currpos, &mut oldestSlotSeg, wal_segment_size);
     KeepLogSeg(currpos, &mut oldestSlotSeg);
 
     /*
@@ -6446,7 +6603,7 @@ pub unsafe fn GetWALAvailability(targetLSN: XLogRecPtr) -> WALAvailability {
     oldestSeg = XLogGetLastRemovedSegno() + 1;
 
     /* calculate oldest segment by max_wal_size */
-    XLByteToSeg(currpos, &mut currSeg, wal_segment_size as uint32);
+    XLByteToSeg(currpos, &mut currSeg, wal_segment_size);
     keepSegs = ConvertToXSegs(max_wal_size_mb, wal_segment_size) + 1;
 
     if currSeg > keepSegs {
@@ -6456,7 +6613,7 @@ pub unsafe fn GetWALAvailability(targetLSN: XLogRecPtr) -> WALAvailability {
     }
 
     /* the segment we care about */
-    XLByteToSeg(targetLSN, &mut targetSeg, wal_segment_size as uint32);
+    XLByteToSeg(targetLSN, &mut targetSeg, wal_segment_size);
 
     /*
      * No point in returning reserved or extended status values if the
@@ -6488,13 +6645,13 @@ unsafe fn KeepLogSeg(recptr: XLogRecPtr, logSegNo: *mut XLogSegNo) {
     let mut segno: XLogSegNo;
     let mut keep: XLogRecPtr;
 
-    XLByteToSeg(recptr, &mut currSegNo, wal_segment_size as uint32);
+    XLByteToSeg(recptr, &mut currSegNo, wal_segment_size);
     segno = currSegNo;
 
     /* Calculate how many segments are kept by slots. */
     keep = XLogGetReplicationSlotMinimumLSN();
     if keep != InvalidXLogRecPtr && keep < recptr {
-        XLByteToSeg(keep, &mut segno, wal_segment_size as uint32);
+        XLByteToSeg(keep, &mut segno, wal_segment_size);
 
         /*
          * Account for max_slot_wal_keep_size to avoid keeping more than
@@ -6515,7 +6672,7 @@ unsafe fn KeepLogSeg(recptr: XLogRecPtr, logSegNo: *mut XLogSegNo) {
     keep = GetOldestUnsummarizedLSN(ptr::null_mut(), ptr::null_mut());
     if keep != InvalidXLogRecPtr {
         let mut unsummarized_segno: XLogSegNo = 0;
-        XLByteToSeg(keep, &mut unsummarized_segno, wal_segment_size as uint32);
+        XLByteToSeg(keep, &mut unsummarized_segno, wal_segment_size);
         if unsummarized_segno < segno {
             segno = unsummarized_segno;
         }
@@ -6545,7 +6702,7 @@ unsafe fn KeepLogSeg(recptr: XLogRecPtr, logSegNo: *mut XLogSegNo) {
  */
 pub unsafe fn XLogPutNextOid(nextOid: Oid) {
     XLogBeginInsert();
-    XLogRegisterData(&nextOid as *const Oid as *mut c_char, core::mem::size_of::<Oid>());
+    XLogRegisterData(&nextOid as *const Oid as *const c_void, core::mem::size_of::<Oid>() as u32);
     let _ = XLogInsert(RM_XLOG_ID, XLOG_NEXTOID);
 
     /*
@@ -6577,12 +6734,12 @@ pub unsafe fn XLogRestorePoint(rpName: *const c_char) -> XLogRecPtr {
     let mut xlrec: xl_restore_point = core::mem::zeroed();
 
     xlrec.rp_time = GetCurrentTimestamp();
-    libc::strlcpy(xlrec.rp_name.as_mut_ptr(), rpName, MAXFNAMELEN);
+    strlcpy(xlrec.rp_name.as_mut_ptr(), rpName, MAXFNAMELEN);
 
     XLogBeginInsert();
     XLogRegisterData(
-        &mut xlrec as *mut xl_restore_point as *mut c_char,
-        core::mem::size_of::<xl_restore_point>(),
+        &mut xlrec as *mut xl_restore_point as *const c_void,
+        core::mem::size_of::<xl_restore_point>() as u32,
     );
 
     let RecPtr = XLogInsert(RM_XLOG_ID, XLOG_RESTORE_POINT);
@@ -6633,15 +6790,15 @@ unsafe fn XLogReportParameters() {
 
             XLogBeginInsert();
             XLogRegisterData(
-                &mut xlrec as *mut xl_parameter_change as *mut c_char,
-                core::mem::size_of::<xl_parameter_change>(),
+                &mut xlrec as *mut xl_parameter_change as *const c_void,
+                core::mem::size_of::<xl_parameter_change>() as u32,
             );
 
             let recptr = XLogInsert(RM_XLOG_ID, XLOG_PARAMETER_CHANGE);
             XLogFlush(recptr);
         }
 
-        LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+        LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
 
         (*ControlFile).MaxConnections = MaxConnections;
         (*ControlFile).max_worker_processes = max_worker_processes;
@@ -6653,7 +6810,7 @@ unsafe fn XLogReportParameters() {
         (*ControlFile).track_commit_timestamp = track_commit_timestamp;
         UpdateControlFile();
 
-        LWLockRelease(ControlFileLock as *mut LWLock);
+        LWLockRelease(ControlFileLock!() as *mut LWLock);
     }
 }
 
@@ -6694,7 +6851,7 @@ pub unsafe fn UpdateFullPageWrites() {
      */
     if XLogStandbyInfoActive() && !recoveryInProgress {
         XLogBeginInsert();
-        XLogRegisterData(&mut fullPageWrites as *mut bool as *mut c_char, core::mem::size_of::<bool>());
+        XLogRegisterData(&mut fullPageWrites as *mut bool as *const c_void, core::mem::size_of::<bool>() as u32);
         XLogInsert(RM_XLOG_ID, XLOG_FPW_CHANGE);
     }
 
@@ -6733,10 +6890,10 @@ pub unsafe fn xlog_redo(record: *mut XLogReaderState) {
             &mut nextOid as *mut Oid as *mut u8,
             core::mem::size_of::<Oid>(),
         );
-        LWLockAcquire(OidGenLock as *mut LWLock, LW_EXCLUSIVE);
+        LWLockAcquire(OidGenLock!() as *mut LWLock, LW_EXCLUSIVE);
         (*TransamVariables).nextOid = nextOid;
         (*TransamVariables).oidCount = 0;
-        LWLockRelease(OidGenLock as *mut LWLock);
+        LWLockRelease(OidGenLock!() as *mut LWLock);
     } else if info == XLOG_CHECKPOINT_SHUTDOWN {
         let mut checkPoint: CheckPoint = core::mem::zeroed();
         let replayTLI: TimeLineID;
@@ -6747,13 +6904,13 @@ pub unsafe fn xlog_redo(record: *mut XLogReaderState) {
             core::mem::size_of::<CheckPoint>(),
         );
         /* In a SHUTDOWN checkpoint, believe the counters exactly */
-        LWLockAcquire(XidGenLock as *mut LWLock, LW_EXCLUSIVE);
+        LWLockAcquire(XidGenLock!() as *mut LWLock, LW_EXCLUSIVE);
         (*TransamVariables).nextXid = checkPoint.nextXid;
-        LWLockRelease(XidGenLock as *mut LWLock);
-        LWLockAcquire(OidGenLock as *mut LWLock, LW_EXCLUSIVE);
+        LWLockRelease(XidGenLock!() as *mut LWLock);
+        LWLockAcquire(OidGenLock!() as *mut LWLock, LW_EXCLUSIVE);
         (*TransamVariables).nextOid = checkPoint.nextOid;
         (*TransamVariables).oidCount = 0;
-        LWLockRelease(OidGenLock as *mut LWLock);
+        LWLockRelease(OidGenLock!() as *mut LWLock);
         MultiXactSetNextMXact(checkPoint.nextMulti, checkPoint.nextMultiOffset);
         MultiXactAdvanceOldest(checkPoint.oldestMulti, checkPoint.oldestMultiDB);
 
@@ -6804,13 +6961,13 @@ pub unsafe fn xlog_redo(record: *mut XLogReaderState) {
         }
 
         /* ControlFile->checkPointCopy always tracks the latest ckpt XID */
-        LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+        LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
         (*ControlFile).checkPointCopy.nextXid = checkPoint.nextXid;
-        LWLockRelease(ControlFileLock as *mut LWLock);
+        LWLockRelease(ControlFileLock!() as *mut LWLock);
 
         /* Update shared-memory copy of checkpoint XID/epoch */
         SpinLockAcquire(&mut (*XLogCtl).info_lck);
-        (*XLogCtl).ckptFullXid = checkPoint.nextXid;
+        (*XLogCtl).ckptFullXid = core::mem::transmute(checkPoint.nextXid);
         SpinLockRelease(&mut (*XLogCtl).info_lck);
 
         /*
@@ -6843,11 +7000,11 @@ pub unsafe fn xlog_redo(record: *mut XLogReaderState) {
             core::mem::size_of::<CheckPoint>(),
         );
         /* In an ONLINE checkpoint, treat the XID counter as a minimum */
-        LWLockAcquire(XidGenLock as *mut LWLock, LW_EXCLUSIVE);
+        LWLockAcquire(XidGenLock!() as *mut LWLock, LW_EXCLUSIVE);
         if FullTransactionIdPrecedes((*TransamVariables).nextXid, checkPoint.nextXid) {
             (*TransamVariables).nextXid = checkPoint.nextXid;
         }
-        LWLockRelease(XidGenLock as *mut LWLock);
+        LWLockRelease(XidGenLock!() as *mut LWLock);
 
         /*
          * We ignore the nextOid counter in an ONLINE checkpoint.
@@ -6864,13 +7021,13 @@ pub unsafe fn xlog_redo(record: *mut XLogReaderState) {
             SetTransactionIdLimit(checkPoint.oldestXid, checkPoint.oldestXidDB);
         }
         /* ControlFile->checkPointCopy always tracks the latest ckpt XID */
-        LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+        LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
         (*ControlFile).checkPointCopy.nextXid = checkPoint.nextXid;
-        LWLockRelease(ControlFileLock as *mut LWLock);
+        LWLockRelease(ControlFileLock!() as *mut LWLock);
 
         /* Update shared-memory copy of checkpoint XID/epoch */
         SpinLockAcquire(&mut (*XLogCtl).info_lck);
-        (*XLogCtl).ckptFullXid = checkPoint.nextXid;
+        (*XLogCtl).ckptFullXid = core::mem::transmute(checkPoint.nextXid);
         SpinLockRelease(&mut (*XLogCtl).info_lck);
 
         /* TLI should not change in an on-line checkpoint */
@@ -6940,7 +7097,7 @@ pub unsafe fn xlog_redo(record: *mut XLogReaderState) {
          * No recovery conflicts are generated by these generic records.
          */
         let mut block_id: uint8 = 0;
-        while block_id <= XLogRecMaxBlockId(record) {
+        while block_id as i32 <= XLogRecMaxBlockId(record) {
             let mut buffer: Buffer = InvalidBuffer;
 
             if !XLogRecHasBlockImage(record, block_id) {
@@ -6951,7 +7108,7 @@ pub unsafe fn xlog_redo(record: *mut XLogReaderState) {
                 continue;
             }
 
-            if XLogReadBufferForRedo(record, block_id, &mut buffer) != BLK_RESTORED {
+            if XLogReadBufferForRedo(record as *mut c_void, block_id, &mut buffer) != BLK_RESTORED {
                 elog!(ERROR, "unexpected XLogReadBufferForRedo result when restoring backup block");
             }
             UnlockReleaseBuffer(buffer);
@@ -6974,19 +7131,19 @@ pub unsafe fn xlog_redo(record: *mut XLogReaderState) {
          * does not have a WAL level sufficient for logical decoding.
          */
         if InRecovery
-            && InHotStandby
+            && InHotStandby()
             && xlrec.wal_level < WAL_LEVEL_LOGICAL
             && wal_level >= WAL_LEVEL_LOGICAL
         {
             InvalidateObsoleteReplicationSlots(
-                RS_INVAL_WAL_LEVEL,
+                RS_INVAL_WAL_LEVEL as u32,
                 0,
                 InvalidOid,
                 InvalidTransactionId,
             );
         }
 
-        LWLockAcquire(ControlFileLock as *mut LWLock, LW_EXCLUSIVE);
+        LWLockAcquire(ControlFileLock!() as *mut LWLock, LW_EXCLUSIVE);
         (*ControlFile).MaxConnections = xlrec.MaxConnections;
         (*ControlFile).max_worker_processes = xlrec.max_worker_processes;
         (*ControlFile).max_wal_senders = xlrec.max_wal_senders;
@@ -7017,7 +7174,7 @@ pub unsafe fn xlog_redo(record: *mut XLogReaderState) {
         (*ControlFile).track_commit_timestamp = xlrec.track_commit_timestamp;
 
         UpdateControlFile();
-        LWLockRelease(ControlFileLock as *mut LWLock);
+        LWLockRelease(ControlFileLock!() as *mut LWLock);
 
         /* Check to see if any parameter change gives a problem on recovery */
         CheckRequiredParameterValues();
@@ -7114,7 +7271,7 @@ pub unsafe fn assign_wal_sync_method(new_wal_sync_method: c_int, _extra: *mut c_
                     xlogfname.as_mut_ptr(),
                     openLogTLI,
                     openLogSegNo,
-                    wal_segment_size as uint32,
+                    wal_segment_size,
                 );
                 *libc::__error() = save_errno;
                 ereport!(
@@ -7188,7 +7345,6 @@ pub unsafe fn issue_xlog_fsync(fd: c_int, segno: XLogSegNo, tli: TimeLineID) {
             ereport!(
                 PANIC,
                 errmsg!("unrecognized \"wal_sync_method\": {}", wal_sync_method)
-                /* errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
             );
         }
     }
@@ -7197,7 +7353,7 @@ pub unsafe fn issue_xlog_fsync(fd: c_int, segno: XLogSegNo, tli: TimeLineID) {
     if !msg.is_null() {
         let mut xlogfname: [c_char; MAXFNAMELEN] = [0; MAXFNAMELEN];
         let save_errno = *libc::__error();
-        XLogFileName(xlogfname.as_mut_ptr(), tli, segno, wal_segment_size as uint32);
+        XLogFileName(xlogfname.as_mut_ptr(), tli, segno, wal_segment_size);
         *libc::__error() = save_errno;
         ereport!(
             PANIC,
@@ -7206,7 +7362,6 @@ pub unsafe fn issue_xlog_fsync(fd: c_int, segno: XLogSegNo, tli: TimeLineID) {
                 core::ffi::CStr::from_ptr(msg).to_string_lossy(),
                 core::ffi::CStr::from_ptr(xlogfname.as_ptr()).to_string_lossy()
             )
-            /* errcode_for_file_access */
         );
     }
 
@@ -7262,23 +7417,18 @@ pub unsafe fn do_pg_backup_start(
     if !backup_started_in_recovery && !XLogIsNeeded() {
         ereport!(
             ERROR,
-            errcode!(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!("WAL level not sufficient for making an online backup"),
-            errhint!("\"wal_level\" must be set to \"replica\" or \"logical\" at server start.")
-            /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */
+            errmsg!("WAL level not sufficient for making an online backup")
         );
     }
 
     if libc::strlen(backupidstr) > MAXPGPATH {
         ereport!(
             ERROR,
-            errcode!(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg!("backup label too long (max {} bytes)", MAXPGPATH)
-            /* errcode(ERRCODE_INVALID_PARAMETER_VALUE) */
         );
     }
 
-    libc::strlcpy(
+    strlcpy(
         (*state).name.as_mut_ptr(),
         backupidstr,
         core::mem::size_of_val(&(*state).name),
@@ -7380,12 +7530,12 @@ pub unsafe fn do_pg_backup_start(
              * to restore starting from the checkpoint is precisely the REDO
              * pointer.
              */
-            LWLockAcquire(ControlFileLock, LW_SHARED);
+            LWLockAcquire(ControlFileLock!(), LW_SHARED);
             (*state).checkpointloc = (*ControlFile).checkPoint;
             (*state).startpoint = (*ControlFile).checkPointCopy.redo;
             (*state).starttli = (*ControlFile).checkPointCopy.ThisTimeLineID;
             checkpointfpw = (*ControlFile).checkPointCopy.fullPageWrites;
-            LWLockRelease(ControlFileLock);
+            LWLockRelease(ControlFileLock!());
 
             if backup_started_in_recovery {
                 let mut recptr: XLogRecPtr;
@@ -7402,10 +7552,7 @@ pub unsafe fn do_pg_backup_start(
                 if !checkpointfpw || (*state).startpoint <= recptr {
                     ereport!(
                         ERROR,
-                        errcode!(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                        errmsg!("WAL generated with \"full_page_writes=off\" was replayed since last restartpoint"),
-                        errhint!("This means that the backup being taken on the standby is corrupt and should not be used. Enable \"full_page_writes\" and run CHECKPOINT on the primary, and then try an online backup again.")
-                        /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */
+                        errmsg!("WAL generated with \"full_page_writes=off\" was replayed since last restartpoint")
                     );
                 }
 
@@ -7448,18 +7595,18 @@ pub unsafe fn do_pg_backup_start(
         datadirpathlen = libc::strlen(DataDir);
 
         /* Collect information about all tablespaces */
-        tblspcdir = AllocateDir(PG_TBLSPC_DIR.as_ptr() as *const c_char);
+        tblspcdir = AllocateDir(PG_TBLSPC_DIR as *const c_char);
         loop {
-            de = ReadDir(tblspcdir, PG_TBLSPC_DIR.as_ptr() as *const c_char);
+            de = ReadDir(tblspcdir, PG_TBLSPC_DIR as *const c_char);
             if de.is_null() {
                 break;
             }
-            let mut fullpath: [c_char; MAXPGPATH + PG_TBLSPC_DIR.len()] =
-                [0; MAXPGPATH + PG_TBLSPC_DIR.len()];
+            let mut fullpath: [c_char; MAXPGPATH + 10] =
+                [0; MAXPGPATH + 10];
             let mut linkpath: [c_char; MAXPGPATH] = [0; MAXPGPATH];
             let mut relpath: *mut c_char = ptr::null_mut();
             let mut de_type: PGFileType;
-            let mut badp: *mut c_char;
+            let mut badp: *mut c_char = core::ptr::null_mut();
             let mut tsoid: Oid;
 
             /*
@@ -7483,7 +7630,7 @@ pub unsafe fn do_pg_backup_start(
                 fullpath.as_mut_ptr(),
                 fullpath.len(),
                 b"%s/%s\0".as_ptr() as *const c_char,
-                PG_TBLSPC_DIR.as_ptr(),
+                PG_TBLSPC_DIR,
                 (*de).d_name.as_ptr(),
             );
 
@@ -7506,7 +7653,6 @@ pub unsafe fn do_pg_backup_start(
                             core::ffi::CStr::from_ptr(fullpath.as_ptr()).to_string_lossy(),
                             core::ffi::CStr::from_ptr(libc::strerror(*libc::__error())).to_string_lossy()
                         )
-                        /* errmsg("could not read symbolic link \"%s\": %m", fullpath) */
                     );
                     continue;
                 } else if rllen >= linkpath.len() as c_int {
@@ -7515,7 +7661,6 @@ pub unsafe fn do_pg_backup_start(
                         errmsg!("symbolic link \"{}\" target is too long",
                             core::ffi::CStr::from_ptr(fullpath.as_ptr()).to_string_lossy()
                         )
-                        /* errmsg("symbolic link \"%s\" target is too long", fullpath) */
                     );
                     continue;
                 }
@@ -7546,11 +7691,11 @@ pub unsafe fn do_pg_backup_start(
                     appendStringInfoChar(&mut escapedpath, *s);
                     s = s.add(1);
                 }
-                appendStringInfo(
+                appendStringInfo!(
                     tblspcmapfile,
-                    b"%s %s\n\0".as_ptr() as *const c_char,
-                    (*de).d_name.as_ptr(),
-                    escapedpath.data,
+                    "{} {}\n",
+                    core::ffi::CStr::from_ptr((*de).d_name.as_ptr() as *const c_char).to_string_lossy(),
+                    core::ffi::CStr::from_ptr(escapedpath.data as *const c_char).to_string_lossy()
                 );
                 pfree(escapedpath.data as *mut c_void);
             } else if de_type == PGFILETYPE_DIR {
@@ -7566,7 +7711,7 @@ pub unsafe fn do_pg_backup_start(
                     linkpath.as_mut_ptr(),
                     linkpath.len(),
                     b"%s/%s\0".as_ptr() as *const c_char,
-                    PG_TBLSPC_DIR.as_ptr(),
+                    PG_TBLSPC_DIR,
                     (*de).d_name.as_ptr(),
                 );
                 relpath = pstrdup(linkpath.as_ptr());
@@ -7641,10 +7786,7 @@ pub unsafe fn do_pg_backup_stop(state: *mut BackupState, waitforarchive: bool) {
     if !backup_stopped_in_recovery && !XLogIsNeeded() {
         ereport!(
             ERROR,
-            errcode!(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!("WAL level not sufficient for making an online backup"),
-            errhint!("\"wal_level\" must be set to \"replica\" or \"logical\" at server start.")
-            /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */
+            errmsg!("WAL level not sufficient for making an online backup")
         );
     }
 
@@ -7684,10 +7826,7 @@ pub unsafe fn do_pg_backup_stop(state: *mut BackupState, waitforarchive: bool) {
     if (*state).started_in_recovery && !backup_stopped_in_recovery {
         ereport!(
             ERROR,
-            errcode!(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-            errmsg!("the standby was promoted during online backup"),
-            errhint!("This means that the backup being taken is corrupt and should not be used. Try taking another online backup.")
-            /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */
+            errmsg!("the standby was promoted during online backup")
         );
     }
 
@@ -7733,17 +7872,14 @@ pub unsafe fn do_pg_backup_stop(state: *mut BackupState, waitforarchive: bool) {
         if (*state).startpoint <= recptr {
             ereport!(
                 ERROR,
-                errcode!(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                errmsg!("WAL generated with \"full_page_writes=off\" was replayed during online backup"),
-                errhint!("This means that the backup being taken on the standby is corrupt and should not be used. Enable \"full_page_writes\" and run CHECKPOINT on the primary, and then try an online backup again.")
-                /* errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) */
+                errmsg!("WAL generated with \"full_page_writes=off\" was replayed during online backup")
             );
         }
 
-        LWLockAcquire(ControlFileLock, LW_SHARED);
+        LWLockAcquire(ControlFileLock!(), LW_SHARED);
         (*state).stoppoint = (*ControlFile).minRecoveryPoint;
         (*state).stoptli = (*ControlFile).minRecoveryPointTLI;
-        LWLockRelease(ControlFileLock);
+        LWLockRelease(ControlFileLock!());
     } else {
         let mut history_file: *mut c_char;
 
@@ -7752,8 +7888,8 @@ pub unsafe fn do_pg_backup_stop(state: *mut BackupState, waitforarchive: bool) {
          */
         XLogBeginInsert();
         XLogRegisterData(
-            &mut (*state).startpoint as *mut XLogRecPtr as *const c_char,
-            core::mem::size_of::<XLogRecPtr>() as c_int,
+            &mut (*state).startpoint as *mut XLogRecPtr as *const c_void,
+            core::mem::size_of::<XLogRecPtr>() as u32,
         );
         (*state).stoppoint = XLogInsert(RM_XLOG_ID, XLOG_BACKUP_END);
 
@@ -7774,18 +7910,18 @@ pub unsafe fn do_pg_backup_stop(state: *mut BackupState, waitforarchive: bool) {
         /*
          * Write the backup history file
          */
-        XLByteToSeg!((*state).startpoint, _logSegNo, wal_segment_size as XLogSegNo);
+        XLByteToSeg((*state).startpoint, &mut _logSegNo, wal_segment_size);
         BackupHistoryFilePath(
             histfilepath.as_mut_ptr(),
             (*state).stoptli,
             _logSegNo,
             (*state).startpoint,
-            wal_segment_size as uint32,
+            wal_segment_size,
         );
         fp = AllocateFile(
             histfilepath.as_ptr(),
             b"w\0".as_ptr() as *const c_char,
-        );
+        ) as *mut libc::FILE;
         if fp.is_null() {
             ereport!(
                 ERROR,
@@ -7793,8 +7929,6 @@ pub unsafe fn do_pg_backup_stop(state: *mut BackupState, waitforarchive: bool) {
                     core::ffi::CStr::from_ptr(histfilepath.as_ptr()).to_string_lossy(),
                     core::ffi::CStr::from_ptr(libc::strerror(*libc::__error())).to_string_lossy()
                 )
-                /* errcode_for_file_access,
-                   errmsg("could not create file \"%s\": %m", histfilepath) */
             );
         }
 
@@ -7803,14 +7937,12 @@ pub unsafe fn do_pg_backup_stop(state: *mut BackupState, waitforarchive: bool) {
         libc::fprintf(fp, b"%s\0".as_ptr() as *const c_char, history_file);
         pfree(history_file as *mut c_void);
 
-        if libc::fflush(fp) != 0 || libc::ferror(fp) != 0 || FreeFile(fp) != 0 {
+        if libc::fflush(fp) != 0 || libc::ferror(fp) != 0 || FreeFile(fp as *mut c_void) != 0 {
             ereport!(
                 ERROR,
                 errmsg!("could not write file \"{}\"",
                     core::ffi::CStr::from_ptr(histfilepath.as_ptr()).to_string_lossy()
                 )
-                /* errcode_for_file_access,
-                   errmsg("could not write file \"%s\": %m", histfilepath) */
             );
         }
 
@@ -7848,28 +7980,28 @@ pub unsafe fn do_pg_backup_stop(state: *mut BackupState, waitforarchive: bool) {
         && ((!backup_stopped_in_recovery && XLogArchivingActive())
             || (backup_stopped_in_recovery && XLogArchivingAlways()))
     {
-        XLByteToPrevSeg!((*state).stoppoint, _logSegNo, wal_segment_size as XLogSegNo);
+        XLByteToPrevSeg((*state).stoppoint, &mut _logSegNo, wal_segment_size);
         XLogFileName(
             lastxlogfilename.as_mut_ptr(),
             (*state).stoptli,
             _logSegNo,
-            wal_segment_size as uint32,
+            wal_segment_size,
         );
 
-        XLByteToSeg!((*state).startpoint, _logSegNo, wal_segment_size as XLogSegNo);
+        XLByteToSeg((*state).startpoint, &mut _logSegNo, wal_segment_size);
         BackupHistoryFileName(
             histfilename.as_mut_ptr(),
             (*state).stoptli,
             _logSegNo,
             (*state).startpoint,
-            wal_segment_size as uint32,
+            wal_segment_size,
         );
 
         seconds_before_warning = 60;
         waits = 0;
 
-        while XLogArchiveIsBusy(lastxlogfilename.as_ptr()) != 0
-            || XLogArchiveIsBusy(histfilename.as_ptr()) != 0
+        while XLogArchiveIsBusy(lastxlogfilename.as_ptr())
+            || XLogArchiveIsBusy(histfilename.as_ptr())
         {
             CHECK_FOR_INTERRUPTS!();
 
@@ -7877,18 +8009,17 @@ pub unsafe fn do_pg_backup_stop(state: *mut BackupState, waitforarchive: bool) {
                 ereport!(
                     NOTICE,
                     errmsg!("base backup done, waiting for required WAL segments to be archived")
-                    /* errmsg("base backup done, waiting for required WAL segments to be archived") */
                 );
                 reported_waiting = true;
             }
 
             let _ = WaitLatch(
-                MyLatch,
+                MyLatch as *mut crate::storage::ipc::latch::Latch,
                 WL_LATCH_SET | WL_TIMEOUT | WL_EXIT_ON_PM_DEATH,
                 1000,
                 WAIT_EVENT_BACKUP_WAIT_WAL_ARCHIVE,
             );
-            ResetLatch(MyLatch);
+            ResetLatch(MyLatch as *mut crate::storage::ipc::latch::Latch);
 
             waits += 1;
             if waits >= seconds_before_warning {
@@ -7897,9 +8028,7 @@ pub unsafe fn do_pg_backup_stop(state: *mut BackupState, waitforarchive: bool) {
                     WARNING,
                     errmsg!("still waiting for all required WAL segments to be archived ({} seconds elapsed)",
                         waits
-                    ),
-                    errhint!("Check that your \"archive_command\" is executing properly.  You can safely cancel this backup, but the database backup will not be usable without all the WAL segments.")
-                    /* errmsg(...), errhint(...) */
+                    )
                 );
             }
         }
@@ -7965,7 +8094,7 @@ pub unsafe fn register_persistent_abort_backup_handler() {
     if already_done {
         return;
     }
-    before_shmem_exit(do_pg_abort_backup, DatumGetBool(false));
+    before_shmem_exit(do_pg_abort_backup, crate::postgres::BoolGetDatum(false));
     already_done = true;
 }
 
@@ -7997,10 +8126,10 @@ pub unsafe fn GetXLogWriteRecPtr() -> XLogRecPtr {
  * the oldest point in WAL that we still need, if we have to restart recovery.
  */
 pub unsafe fn GetOldestRestartPoint(oldrecptr: *mut XLogRecPtr, oldtli: *mut TimeLineID) {
-    LWLockAcquire(ControlFileLock, LW_SHARED);
+    LWLockAcquire(ControlFileLock!(), LW_SHARED);
     *oldrecptr = (*ControlFile).checkPointCopy.redo;
     *oldtli = (*ControlFile).checkPointCopy.ThisTimeLineID;
-    LWLockRelease(ControlFileLock);
+    LWLockRelease(ControlFileLock!());
 }
 
 /* Thin wrapper around ShutdownWalRcv(). */
@@ -8011,24 +8140,24 @@ pub unsafe fn XLogShutdownWalRcv() {
 
 /* Enable WAL file recycling and preallocation. */
 pub unsafe fn SetInstallXLogFileSegmentActive() {
-    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+    LWLockAcquire(ControlFileLock!(), LW_EXCLUSIVE);
     (*XLogCtl).InstallXLogFileSegmentActive = true;
-    LWLockRelease(ControlFileLock);
+    LWLockRelease(ControlFileLock!());
 }
 
 /* Disable WAL file recycling and preallocation. */
 pub unsafe fn ResetInstallXLogFileSegmentActive() {
-    LWLockAcquire(ControlFileLock, LW_EXCLUSIVE);
+    LWLockAcquire(ControlFileLock!(), LW_EXCLUSIVE);
     (*XLogCtl).InstallXLogFileSegmentActive = false;
-    LWLockRelease(ControlFileLock);
+    LWLockRelease(ControlFileLock!());
 }
 
 pub unsafe fn IsInstallXLogFileSegmentActive() -> bool {
     let mut result: bool;
 
-    LWLockAcquire(ControlFileLock, LW_SHARED);
+    LWLockAcquire(ControlFileLock!(), LW_SHARED);
     result = (*XLogCtl).InstallXLogFileSegmentActive;
-    LWLockRelease(ControlFileLock);
+    LWLockRelease(ControlFileLock!());
 
     result
 }

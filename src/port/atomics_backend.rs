@@ -40,15 +40,15 @@ pub struct pg_atomic_flag {
 type slock_t = c_int;
 
 unsafe fn SpinLockInit(_lock: *mut slock_t) {
-    unimplemented!() // TODO: storage/spin.h
+    crate::storage::spin::SpinLockInit(_lock as _)
 }
 
 unsafe fn SpinLockAcquire(_lock: *mut slock_t) {
-    unimplemented!() // TODO: storage/spin.h
+    crate::storage::spin::SpinLockAcquire(_lock as _)
 }
 
 unsafe fn SpinLockRelease(_lock: *mut slock_t) {
-    unimplemented!() // TODO: storage/spin.h
+    crate::storage::spin::SpinLockRelease(_lock as _)
 }
 
 /*

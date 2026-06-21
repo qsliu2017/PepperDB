@@ -12,6 +12,7 @@ pub mod heaptuple;
 pub mod indextuple;
 pub mod printsimple;
 pub mod printtup;
+pub mod reloptions;
 pub mod scankey;
 pub mod syncscan;
 pub mod toast_compression;

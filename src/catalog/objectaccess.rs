@@ -153,6 +153,7 @@ pub type object_access_hook_type_str = unsafe extern "C" fn(
  * and logging plugins.  Plugin sets these variables to a suitable hook
  * function.
  */
+#[no_mangle]
 pub static mut object_access_hook: Option<object_access_hook_type> = None;
 pub static mut object_access_hook_str: Option<object_access_hook_type_str> = None;
 

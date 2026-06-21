@@ -146,13 +146,11 @@ unsafe fn time(_t: *mut pg_time_t) -> pg_time_t {
 }
 
 /* C library kill() (signal.h). */
-unsafe fn kill(_pid: pid_t, _sig: c_int) -> c_int {
-    unimplemented!()
-}
+unsafe fn kill(pid: pid_t, sig: c_int) -> c_int { todo!("TODO(pg-port): kill") }
 
 /* storage/shmem.h: ShmemInitStruct. */
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _foundPtr: *mut bool) -> *mut c_void {
-    unimplemented!()
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _foundPtr)
 }
 
 /* storage/shmem.h: add_size. */
@@ -175,24 +173,18 @@ pub unsafe fn GetPGProcByNumber(_procno: ProcNumber) -> *mut PGPROC {
 }
 
 /* access/xlogrecovery.h: GetXLogReplayRecPtr. */
-unsafe fn GetXLogReplayRecPtr(_replayTLI: *mut TimeLineID) -> XLogRecPtr {
-    unimplemented!()
-}
+unsafe fn GetXLogReplayRecPtr(replayTLI: *mut TimeLineID) -> XLogRecPtr { crate::access::transam::xlogrecovery::GetXLogReplayRecPtr(replayTLI as _) }
 
 /* access/xlogrecovery.h: GetCurrentChunkReplayStartTime. */
-unsafe fn GetCurrentChunkReplayStartTime() -> TimestampTz {
-    unimplemented!()
-}
+unsafe fn GetCurrentChunkReplayStartTime() -> TimestampTz { crate::access::transam::xlogrecovery::GetCurrentChunkReplayStartTime() }
 
 /* utils/timestamp.h: GetCurrentTimestamp. */
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!()
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 
 /* utils/timestamp.h: TimestampDifferenceMilliseconds. */
-unsafe fn TimestampDifferenceMilliseconds(_start_time: TimestampTz, _stop_time: TimestampTz) -> c_long {
-    unimplemented!()
-}
+unsafe fn TimestampDifferenceMilliseconds(start_time: TimestampTz, stop_time: TimestampTz) -> c_long { crate::utils::adt::timestamp::TimestampDifferenceMilliseconds(start_time as _, stop_time as _) }
 
 /*
  * wal_segment_size is a process-global initialized from the control file; it is

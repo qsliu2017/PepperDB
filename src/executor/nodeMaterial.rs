@@ -378,12 +378,12 @@ unsafe fn tuplestore_begin_heap(
     _interXact: bool,
     _maxKBytes: c_int,
 ) -> *mut Tuplestorestate {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_begin_heap(_randomAccess as _, _interXact as _, _maxKBytes as _) as _
 }
 
 // TODO: not ported - tuplestore_set_eflags
 unsafe fn tuplestore_set_eflags(_state: *mut Tuplestorestate, _eflags: c_int) {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_set_eflags(_state as _, _eflags as _)
 }
 
 // TODO: not ported - tuplestore_alloc_read_pointer
@@ -391,12 +391,12 @@ unsafe fn tuplestore_alloc_read_pointer(
     _state: *mut Tuplestorestate,
     _eflags: c_int,
 ) -> c_int {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_alloc_read_pointer(_state as _, _eflags as _) as _
 }
 
 // TODO: not ported - tuplestore_ateof
 unsafe fn tuplestore_ateof(_state: *mut Tuplestorestate) -> bool {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_ateof(_state as _) as _
 }
 
 // TODO: not ported - tuplestore_advance
@@ -404,7 +404,7 @@ unsafe fn tuplestore_advance(
     _state: *mut Tuplestorestate,
     _forward: bool,
 ) -> bool {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_advance(_state as _, _forward as _) as _
 }
 
 // TODO: not ported - tuplestore_gettupleslot
@@ -414,7 +414,7 @@ unsafe fn tuplestore_gettupleslot(
     _copy: bool,
     _slot: *mut TupleTableSlot,
 ) -> bool {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_gettupleslot(_state as _, _forward as _, _copy as _, _slot as _) as _
 }
 
 // TODO: not ported - tuplestore_puttupleslot
@@ -422,12 +422,12 @@ unsafe fn tuplestore_puttupleslot(
     _state: *mut Tuplestorestate,
     _slot: *mut TupleTableSlot,
 ) {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_puttupleslot(_state as _, _slot as _)
 }
 
 // TODO: not ported - tuplestore_end
 unsafe fn tuplestore_end(_state: *mut Tuplestorestate) {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_end(_state as _)
 }
 
 // TODO: not ported - tuplestore_copy_read_pointer
@@ -436,15 +436,15 @@ unsafe fn tuplestore_copy_read_pointer(
     _srcptr: c_int,
     _destptr: c_int,
 ) {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_copy_read_pointer(_state as _, _srcptr as _, _destptr as _)
 }
 
 // TODO: not ported - tuplestore_trim
 unsafe fn tuplestore_trim(_state: *mut Tuplestorestate) {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_trim(_state as _)
 }
 
 // TODO: not ported - tuplestore_rescan
 unsafe fn tuplestore_rescan(_state: *mut Tuplestorestate) {
-    unimplemented!()
+    crate::utils::sort::tuplestore::tuplestore_rescan(_state as _)
 }

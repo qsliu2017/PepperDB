@@ -50,8 +50,9 @@ use crate::catalog::pg_type_d::TSQUERYOID;
 use crate::executor::spi::{
     SPIPlanPtr, SPI_connect, SPI_cursor_close, SPI_cursor_fetch, SPI_cursor_open, SPI_finish,
     SPI_freeplan, SPI_freetuptable, SPI_getbinval, SPI_gettypeid, SPI_prepare, SPI_processed,
-    SPI_tuptable, Portal,
+    SPI_tuptable,
 };
+use crate::utils::portal::Portal;
 use crate::utils::adt::ts_type::DatumGetTSQuery;
 use crate::utils::adt::varlena::text_to_cstring;
 

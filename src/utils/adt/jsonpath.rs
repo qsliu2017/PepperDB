@@ -186,17 +186,37 @@ pub struct JsonPathParseResult {
 // ---------------------------------------------------------------------------
 macro_rules! ereturn {
     ($escontext:expr, $dummy:expr, $($arg:tt)*) => {{
-        let _ = &$escontext;
+        let __ctx = $escontext as *mut Node;
+        if SOFT_ERROR_FLAG(__ctx) {
+            return $dummy;
+        }
         $crate::ereport!(ERROR, $($arg)*);
+        #[allow(unreachable_code)]
         return $dummy;
     }};
 }
 macro_rules! SOFT_ERROR_OCCURRED {
     ($escontext:expr) => {{
-        // TODO(pg-port): real SOFT_ERROR_OCCURRED checks ErrorSaveContext->error_occurred.
-        let _ = &$escontext;
-        false
+        let escontext = $escontext as *mut $crate::nodes::miscnodes::ErrorSaveContext;
+        const T_ErrorSaveContext: c_int = 447;
+        !escontext.is_null()
+            && *(escontext as *const c_int) == T_ErrorSaveContext
+            && (*escontext).error_occurred
     }};
+}
+
+/*
+ * SOFT_ERROR_FLAG: if `escontext` is a real ErrorSaveContext, record that a soft
+ * error occurred and return true; otherwise return false.
+ */
+#[inline]
+unsafe fn SOFT_ERROR_FLAG(escontext: *mut Node) -> bool {
+    const T_ErrorSaveContext: c_int = 447;
+    if !escontext.is_null() && *(escontext as *const c_int) == T_ErrorSaveContext {
+        (*(escontext as *mut crate::nodes::miscnodes::ErrorSaveContext)).error_occurred = true;
+        return true;
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------

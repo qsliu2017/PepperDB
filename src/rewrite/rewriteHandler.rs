@@ -137,19 +137,19 @@ struct fireRIRonSubLink_context {
 // ---------------------------------------------------------------------------
 
 unsafe fn table_open(relationId: Oid, lockmode: c_int) -> Relation {
-    unimplemented!() // TODO(pg-port): access/table/table.c
+    crate::access::table::table::table_open(relationId, lockmode as _) as _
 }
 unsafe fn table_close(relation: Relation, lockmode: c_int) {
-    unimplemented!() // TODO(pg-port): access/table/table.c
+    crate::access::table::table::table_close(relation as _, lockmode as _)
 }
 unsafe fn relation_open(relationId: Oid, lockmode: c_int) -> Relation {
-    unimplemented!() // TODO(pg-port): access/common/relation.c
+    crate::access::common::relation::relation_open(relationId, lockmode as _) as _
 }
 unsafe fn relation_close(relation: Relation, lockmode: c_int) {
-    unimplemented!() // TODO(pg-port): access/common/relation.c
+    crate::access::common::relation::relation_close(relation as _, lockmode as _)
 }
 unsafe fn try_relation_open(relationId: Oid, lockmode: c_int) -> Relation {
-    unimplemented!() // TODO(pg-port): access/common/relation.c
+    crate::access::common::relation::try_relation_open(relationId, lockmode as _) as _
 }
 unsafe fn RelationGetRelid(relation: Relation) -> Oid {
     (*relation).rd_id
@@ -182,26 +182,26 @@ unsafe fn TupleDescAttr(tupdesc: TupleDesc, i: c_int) -> Form_pg_attribute {
     crate::access::common::tupdesc::TupleDescAttr(tupdesc, i)
 }
 unsafe fn copyObject<T>(obj: *mut T) -> *mut T {
-    unimplemented!() // TODO(pg-port): nodes/copyfuncs.c
+    crate::nodes::copyfuncs::copyObjectImpl(obj as *const _ as _) as *mut T
 }
 unsafe fn equal(a: *const Node, b: *const Node) -> bool {
-    unimplemented!() // TODO(pg-port): nodes/equalfuncs.c
+    crate::nodes::equalfuncs::equal(a as _, b as _)
 }
 unsafe fn exprType(expr: *const Node) -> Oid {
-    unimplemented!() // TODO(pg-port): nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::exprType(expr as _)
 }
 unsafe fn exprTypmod(expr: *const Node) -> i32 {
-    unimplemented!() // TODO(pg-port): nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::exprTypmod(expr as _) as _
 }
 unsafe fn exprCollation(expr: *const Node) -> Oid {
-    unimplemented!() // TODO(pg-port): nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::exprCollation(expr as _)
 }
 unsafe fn expression_tree_walker(
     node: *mut Node,
     walker: unsafe fn(*mut Node, *mut c_void) -> bool,
     context: *mut c_void,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::expression_tree_walker(node as _, Some(walker), context)
 }
 unsafe fn query_tree_walker(
     query: *mut Query,
@@ -209,40 +209,40 @@ unsafe fn query_tree_walker(
     context: *mut c_void,
     flags: c_int,
 ) -> bool {
-    unimplemented!() // TODO(pg-port): nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::query_tree_walker(query as _, Some(walker), context, flags)
 }
 unsafe fn nodeTag(node: *const Node) -> u32 {
-    unimplemented!() // TODO(pg-port): nodes/nodes.h
+    crate::nodes::nodes::nodeTag(node) as _
 }
 unsafe fn pstrdup(s: *const c_char) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): utils/mmgr/mcxt.c
+    crate::utils::palloc::pstrdup(s)
 }
 unsafe fn palloc0(size: usize) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/mmgr/mcxt.c
+    crate::utils::palloc::palloc0(size as _)
 }
 unsafe fn pfree(ptr: *mut c_void) {
-    unimplemented!() // TODO(pg-port): utils/mmgr/mcxt.c
+    crate::utils::palloc::pfree(ptr)
 }
 unsafe fn palloc(size: usize) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): utils/mmgr/mcxt.c
+    crate::utils::palloc::palloc(size as _)
 }
 unsafe fn format_type_be(type_oid: Oid) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): utils/adt/format_type.c
+    crate::utils::adt::format_type::format_type_be(type_oid)
 }
 unsafe fn check_stack_depth() {
-    unimplemented!() // TODO(pg-port): utils/guc.c
+    crate::miscadmin::check_stack_depth()
 }
 unsafe fn get_rte_attribute_is_dropped(rte: *mut RangeTblEntry, attno: AttrNumber) -> bool {
-    unimplemented!() // TODO(pg-port): parser/parsetree.c
+    crate::parser::parsetree::get_rte_attribute_is_dropped(rte as _, attno)
 }
 unsafe fn rt_fetch(rt_index: c_int, rtable: *mut List) -> *mut RangeTblEntry {
-    unimplemented!() // TODO(pg-port): parser/parsetree.h
+    crate::parser::parsetree::rt_fetch(rt_index as _, rtable as _) as _
 }
 unsafe fn get_parse_rowmark(
     qry: *mut Query,
     rt_index: c_int,
 ) -> *mut crate::nodes::parsenodes::RowMarkClause {
-    unimplemented!() // TODO(pg-port): parser/parsetree.c
+    crate::parser::parse_relation::get_parse_rowmark(qry as _, rt_index as _) as _
 }
 unsafe fn applyLockingClause(
     qry: *mut Query,
@@ -251,19 +251,19 @@ unsafe fn applyLockingClause(
     waitPolicy: LockWaitPolicy,
     pushedDown: bool,
 ) {
-    unimplemented!() // TODO(pg-port): parser/parse_clause.c
+    crate::parser::analyze::applyLockingClause(qry as _, rte_index as _, strength as _, waitPolicy as _, pushedDown)
 }
 unsafe fn getRTEPermissionInfo(
     rteperminfos: *mut List,
     rte: *mut RangeTblEntry,
 ) -> *mut RTEPermissionInfo {
-    unimplemented!() // TODO(pg-port): parser/parse_relation.c
+    crate::parser::parse_relation::getRTEPermissionInfo(rteperminfos as _, rte as _) as _
 }
 unsafe fn addRTEPermissionInfo(
     rteperminfos: *mut *mut List,
     rte: *mut RangeTblEntry,
 ) -> *mut RTEPermissionInfo {
-    unimplemented!() // TODO(pg-port): parser/parse_relation.c
+    crate::parser::parse_relation::addRTEPermissionInfo(rteperminfos as _, rte as _) as _
 }
 unsafe fn addRangeTableEntryForRelation(
     pstate: *mut c_void,
@@ -273,16 +273,16 @@ unsafe fn addRangeTableEntryForRelation(
     inh: bool,
     lateral: bool,
 ) -> *mut crate::parser::parse_node::ParseNamespaceItem {
-    unimplemented!() // TODO(pg-port): parser/parse_relation.c
+    crate::parser::parse_relation::addRangeTableEntryForRelation(pstate as _, rel as _, lockmode as _, alias as _, inh, lateral) as _
 }
 unsafe fn make_parsestate(parent: *mut c_void) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): parser/parse_node.c
+    crate::parser::parse_node::make_parsestate(parent as _) as _
 }
 unsafe fn makeAlias(
     aliasname: *const c_char,
     colnames: *mut List,
 ) -> *mut crate::nodes::primnodes::Alias {
-    unimplemented!() // TODO(pg-port): nodes/makefuncs.c
+    crate::nodes::makefuncs::makeAlias(aliasname, colnames as _) as _
 }
 unsafe fn makeTargetEntry(
     expr: *mut crate::nodes::primnodes::Expr,
@@ -290,7 +290,7 @@ unsafe fn makeTargetEntry(
     resname: *mut c_char,
     resjunk: bool,
 ) -> *mut TargetEntry {
-    unimplemented!() // TODO(pg-port): nodes/makefuncs.c
+    crate::nodes::makefuncs::makeTargetEntry(expr as _, resno, resname, resjunk) as _
 }
 unsafe fn makeWholeRowVar(
     rte: *mut RangeTblEntry,
@@ -298,34 +298,34 @@ unsafe fn makeWholeRowVar(
     varlevelsup: c_int,
     sublevels_up: bool,
 ) -> *mut crate::nodes::primnodes::Var {
-    unimplemented!() // TODO(pg-port): nodes/makefuncs.c
+    crate::nodes::makefuncs::makeWholeRowVar(rte as _, varno as _, varlevelsup as _, sublevels_up) as _
 }
 unsafe fn makeString(str: *mut c_char) -> *mut Node {
-    unimplemented!() // TODO(pg-port): nodes/makefuncs.c
+    crate::nodes::value::makeString(str) as _
 }
 unsafe fn makeNullConst(consttype: Oid, consttypmod: i32, constcollid: Oid) -> *mut Node {
-    unimplemented!() // TODO(pg-port): nodes/makefuncs.c
+    crate::nodes::makefuncs::makeNullConst(consttype, consttypmod as _, constcollid) as _
 }
 unsafe fn flatCopyTargetEntry(src_tle: *mut TargetEntry) -> *mut TargetEntry {
-    unimplemented!() // TODO(pg-port): nodes/makefuncs.c
+    crate::nodes::makefuncs::flatCopyTargetEntry(src_tle as _) as _
 }
 unsafe fn get_tle_by_resno(tlist: *mut List, resno: AttrNumber) -> *mut TargetEntry {
-    unimplemented!() // TODO(pg-port): nodes/makefuncs.c
+    crate::parser::parse_relation::get_tle_by_resno(tlist as _, resno) as _
 }
 unsafe fn ExecCleanTargetListLength(targetList: *mut List) -> c_int {
-    unimplemented!() // TODO(pg-port): executor/execUtils.c
+    crate::executor::execUtils::ExecCleanTargetListLength(targetList as _)
 }
 unsafe fn BuildOnConflictExcludedTargetlist(
     relation: Relation,
     exclRelIndex: c_int,
 ) -> *mut List {
-    unimplemented!() // TODO(pg-port): parser/parse_clause.c
+    crate::parser::analyze::BuildOnConflictExcludedTargetlist(relation as _, exclRelIndex as _) as _
 }
 unsafe fn rangeTableEntry_used(node: *const Node, rt_index: c_int, sublevels_up: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::rangeTableEntry_used(node as _, rt_index, sublevels_up)
 }
 unsafe fn OffsetVarNodes(node: *mut Node, offset: c_int, sublevels_up: c_int) {
-    unimplemented!() // TODO(pg-port): rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::OffsetVarNodes(node as _, offset, sublevels_up)
 }
 unsafe fn ChangeVarNodes(
     node: *mut Node,
@@ -333,16 +333,16 @@ unsafe fn ChangeVarNodes(
     new_index: c_int,
     sublevels_up: c_int,
 ) {
-    unimplemented!() // TODO(pg-port): rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::ChangeVarNodes(node as _, rt_index, new_index, sublevels_up)
 }
 unsafe fn contain_vars_of_level(node: *mut Node, levelsup: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): optimizer/prep/prepjointree.c
+    crate::optimizer::util::var::contain_vars_of_level(node as _, levelsup)
 }
 unsafe fn AddQual(qry: *mut Query, qual: *mut Node) {
-    unimplemented!() // TODO(pg-port): rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::AddQual(qry as _, qual as _)
 }
 unsafe fn AddInvertedQual(qry: *mut Query, qual: *mut Node) {
-    unimplemented!() // TODO(pg-port): rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::AddInvertedQual(qry as _, qual as _)
 }
 unsafe fn ReplaceVarsFromTargetList(
     node: *mut Node,
@@ -355,13 +355,23 @@ unsafe fn ReplaceVarsFromTargetList(
     nomatch_varno: c_int,
     outer_hasSubLinks: *mut bool,
 ) -> *mut Node {
-    unimplemented!() // TODO(pg-port): rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::ReplaceVarsFromTargetList(
+        node as _,
+        result_relation,
+        sublevels_up,
+        target_rte as _,
+        targetList as _,
+        new_rt_index,
+        nomatch_option as _,
+        nomatch_varno,
+        outer_hasSubLinks,
+    ) as _
 }
 unsafe fn getInsertSelectQuery(
     parsetree: *mut Query,
     subquery_ptr: *mut *mut *mut Query,
 ) -> *mut Query {
-    unimplemented!() // TODO(pg-port): rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::getInsertSelectQuery(parsetree as _, subquery_ptr as _) as _
 }
 unsafe fn CombineRangeTables(
     dst_rtable: *mut *mut List,
@@ -369,13 +379,13 @@ unsafe fn CombineRangeTables(
     src_rtable: *mut List,
     src_perminfos: *mut List,
 ) {
-    unimplemented!() // TODO(pg-port): rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::CombineRangeTables(dst_rtable as _, dst_perminfos as _, src_rtable as _, src_perminfos as _)
 }
 unsafe fn checkExprHasSubLink(node: *mut Node) -> bool {
-    unimplemented!() // TODO(pg-port): rewrite/rewriteManip.c
+    crate::rewrite::rewriteManip::checkExprHasSubLink(node as _)
 }
 unsafe fn strip_implicit_coercions(node: *mut Node) -> *mut Node {
-    unimplemented!() // TODO(pg-port): nodes/nodeFuncs.c
+    crate::nodes::nodeFuncs::strip_implicit_coercions(node as _) as _
 }
 unsafe fn get_row_security_policies(
     root: *mut Query,
@@ -386,10 +396,18 @@ unsafe fn get_row_security_policies(
     hasRowSecurity: *mut bool,
     hasSubLinks: *mut bool,
 ) {
-    unimplemented!() // TODO(pg-port): rewrite/rowsecurity.c
+    crate::rewrite::rowsecurity::get_row_security_policies(
+        root as _,
+        rte as _,
+        rt_index as _,
+        securityQuals as _,
+        withCheckOptions as _,
+        hasRowSecurity,
+        hasSubLinks,
+    )
 }
 unsafe fn rewriteSearchAndCycle(cte: *mut CommonTableExpr) -> *mut CommonTableExpr {
-    unimplemented!() // TODO(pg-port): rewrite/rewriteSearchCycle.c
+    crate::rewrite::rewriteSearchCycle::rewriteSearchAndCycle(cte as _) as _
 }
 unsafe fn coerce_to_target_type(
     pstate: *mut c_void,
@@ -401,7 +419,26 @@ unsafe fn coerce_to_target_type(
     cformat: c_int,
     location: c_int,
 ) -> *mut Node {
-    unimplemented!() // TODO(pg-port): parser/parse_coerce.c
+    let ccontext_enum = if ccontext == COERCION_ASSIGNMENT {
+        crate::nodes::primnodes::CoercionContext::COERCION_ASSIGNMENT
+    } else {
+        crate::nodes::primnodes::CoercionContext::COERCION_IMPLICIT
+    };
+    let cformat_enum = if cformat == COERCE_IMPLICIT_CAST {
+        crate::nodes::primnodes::CoercionForm::COERCE_IMPLICIT_CAST
+    } else {
+        crate::nodes::primnodes::CoercionForm::COERCE_EXPLICIT_CALL
+    };
+    crate::parser::parse_coerce::coerce_to_target_type(
+        pstate as _,
+        expr as _,
+        exprtype,
+        atttype,
+        atttypmod as _,
+        ccontext_enum,
+        cformat_enum,
+        location,
+    ) as _
 }
 unsafe fn coerce_null_to_domain(
     atttype: Oid,
@@ -410,43 +447,43 @@ unsafe fn coerce_null_to_domain(
     attlen: i16,
     attbyval: bool,
 ) -> *mut Node {
-    unimplemented!() // TODO(pg-port): parser/parse_coerce.c
+    crate::parser::parse_coerce::coerce_null_to_domain(atttype, atttypmod as _, attcollation, attlen as _, attbyval) as _
 }
 unsafe fn get_typdefault(typid: Oid) -> *mut Node {
-    unimplemented!() // TODO(pg-port): utils/cache/lsyscache.c
+    crate::utils::cache::lsyscache::get_typdefault(typid) as _
 }
 unsafe fn getIdentitySequence(rel: Relation, attrno: c_int, missing_ok: bool) -> Oid {
-    unimplemented!() // TODO(pg-port): catalog/catalog.c
+    crate::catalog::pg_depend::getIdentitySequence(rel as _, attrno as _, missing_ok)
 }
 unsafe fn TupleDescGetDefault(tupdesc: TupleDesc, attrno: c_int) -> *mut Node {
-    unimplemented!() // TODO(pg-port): access/common/tupdesc.c
+    crate::access::common::tupdesc::TupleDescGetDefault(tupdesc as _, attrno as _) as _
 }
 unsafe fn bms_add_member(a: *mut Bitmapset, x: c_int) -> *mut Bitmapset {
-    unimplemented!() // TODO(pg-port): nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_add_member(a as _, x) as _
 }
 unsafe fn bms_del_member(a: *mut Bitmapset, x: c_int) -> *mut Bitmapset {
-    unimplemented!() // TODO(pg-port): nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_del_member(a as _, x) as _
 }
 unsafe fn bms_is_member(x: c_int, a: *const Bitmapset) -> bool {
-    unimplemented!() // TODO(pg-port): nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_is_member(x, a as _)
 }
 unsafe fn bms_is_empty(a: *const Bitmapset) -> bool {
-    unimplemented!() // TODO(pg-port): nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_is_empty(a as _)
 }
 unsafe fn bms_union(a: *const Bitmapset, b: *const Bitmapset) -> *mut Bitmapset {
-    unimplemented!() // TODO(pg-port): nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_union(a as _, b as _) as _
 }
 unsafe fn bms_int_members(a: *mut Bitmapset, b: *const Bitmapset) -> *mut Bitmapset {
-    unimplemented!() // TODO(pg-port): nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_int_members(a as _, b as _) as _
 }
 unsafe fn bms_next_member(a: *const Bitmapset, prevbit: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_next_member(a as _, prevbit)
 }
 unsafe fn GetFdwRoutineForRelation(
     rel: Relation,
     asDMLonly: bool,
 ) -> *mut crate::foreign::fdwapi::FdwRoutine {
-    unimplemented!() // TODO(pg-port): foreign/fdwapi.c
+    crate::foreign::foreign::GetFdwRoutineForRelation(rel as _, asDMLonly) as _
 }
 
 // gettext_noop: returns the string literal as *const c_char unchanged at runtime
@@ -1497,6 +1534,7 @@ unsafe fn get_assignment_input(node: *mut Node) -> *mut Node {
  *
  * If there is no default, return a NULL instead.
  */
+#[no_mangle]
 pub unsafe fn build_column_default(rel: Relation, attrno: c_int) -> *mut Node {
     build_column_default_fn(rel, attrno)
 }
@@ -4580,6 +4618,7 @@ unsafe fn expand_generated_columns_internal(
  * expression that is not part of a query (e.g., a default expression or index
  * predicate). The rt_index is usually 1.
  */
+#[no_mangle]
 pub unsafe fn expand_generated_columns_in_expr(
     node: *mut Node,
     rel: Relation,

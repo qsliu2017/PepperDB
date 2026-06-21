@@ -247,16 +247,34 @@ unsafe fn string_to_uuid(source: *const c_char, uuid: *mut pg_uuid_t, escontext:
     }
 }
 
-// the `goto syntax_error` target of string_to_uuid (ereturn -> hard ERROR for now)
-unsafe fn string_to_uuid_syntax_error(source: *const c_char, _escontext: *mut Node) {
+// the `goto syntax_error` target of string_to_uuid: route through the real errsave
+// mechanism so pg_input_is_valid / pg_input_error_info see a populated
+// ErrorSaveContext; for a null/non-ErrorSaveContext this raises a hard ERROR.
+unsafe fn string_to_uuid_syntax_error(source: *const c_char, escontext: *mut Node) {
+    const T_ErrorSaveContext: c_int = 447;
+    const ERRCODE_INVALID_TEXT_REPRESENTATION_REAL: c_int = 33685634; /* 22P02 */
+    /* Genuine soft-error context: record through the real errsave mechanism. */
+    if !escontext.is_null() && *(escontext as *const c_int) == T_ErrorSaveContext {
+        let msg = format!(
+            "invalid input syntax for type uuid: \"{}\"",
+            std::ffi::CStr::from_ptr(source).to_string_lossy()
+        );
+        if crate::utils::error::elog_impl::errsave_start(escontext, core::ptr::null()) {
+            crate::utils::error::elog_impl::errcode_impl(ERRCODE_INVALID_TEXT_REPRESENTATION_REAL);
+            if let Ok(c) = std::ffi::CString::new(msg) {
+                crate::utils::error::elog_impl::errmsg_c(c.as_ptr());
+            }
+            crate::utils::error::elog_impl::errsave_finish(
+                escontext, c"uuid.rs".as_ptr(), 0, c"string_to_uuid".as_ptr(),
+            );
+        }
+        return;
+    }
+    /* Hard error path (normal input): raise through the backend's error path. */
     let _ = errcode(ERRCODE_INVALID_TEXT_REPRESENTATION);
     ereport!(
         ERROR,
-        errmsg!(
-            "invalid input syntax for type {}: \"{}\"",
-            "uuid",
-            cstr(source)
-        )
+        errmsg!("invalid input syntax for type {}: \"{}\"", "uuid", cstr(source))
     );
 }
 

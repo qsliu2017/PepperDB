@@ -1377,6 +1377,7 @@ pub unsafe fn StandbyTransactionIdIsPrepared(xid: TransactionId) -> bool {
 /*
  * FinishPreparedTransaction: execute COMMIT PREPARED or ROLLBACK PREPARED
  */
+#[no_mangle]
 pub unsafe fn FinishPreparedTransaction(gid: *const c_char, isCommit: bool) {
     let gxact: GlobalTransaction;
     let proc: *mut PGPROC;
@@ -2513,6 +2514,7 @@ pub unsafe fn PrepareRedoRemove(xid: TransactionId, giveWarning: bool) {
  * origin_timestamp of prepared xact to avoid the possibility of a match of
  * prepared xact from two different nodes.
  */
+#[no_mangle]
 pub unsafe fn LookupGXact(
     gid: *const c_char,
     prepare_end_lsn: XLogRecPtr,
@@ -2573,6 +2575,7 @@ pub unsafe fn LookupGXact(
  *
  * Return the GID in the supplied buffer.
  */
+#[no_mangle]
 pub unsafe fn TwoPhaseTransactionGid(
     subid: Oid,
     xid: TransactionId,
@@ -2708,6 +2711,7 @@ extern "C" {
     fn access(path: *const c_char, mode: c_int) -> c_int;
     fn snprintf(s: *mut c_char, n: usize, fmt: *const c_char, ...) -> c_int;
     fn sscanf(s: *const c_char, fmt: *const c_char, ...) -> c_int;
+    #[link_name = "strtoull"]
     fn strtou64(s: *const c_char, endptr: *mut *mut c_char, base: c_int) -> uint64;
     fn strerror(errnum: c_int) -> *mut c_char;
 }
@@ -2791,20 +2795,14 @@ pub static mut reachedConsistency: bool = false; // TODO(pg-port): access/xlogre
 pub static mut log_checkpoints: bool = false; // TODO(pg-port): access/xlog.c (GUC)
 pub static mut MyXactFlags: c_int = 0; // TODO(pg-port): access/xact.h
 pub const XACT_FLAGS_ACQUIREDACCESSEXCLUSIVELOCK: c_int = 1 << 1; // TODO(pg-port): access/xact.h
-unsafe fn AmStartupProcess() -> bool {
-    unimplemented!() // TODO(pg-port): real AmStartupProcess lives in miscadmin.h
-}
-unsafe fn GetUserId() -> Oid {
-    unimplemented!() // TODO(pg-port): real GetUserId lives in utils/init/miscinit.c
-}
+unsafe fn AmStartupProcess() -> bool { crate::miscadmin::AmStartupProcess() }
+unsafe fn GetUserId() -> Oid { crate::utils::init::miscinit::GetUserId() }
 unsafe fn superuser_arg(_roleid: Oid) -> bool {
     unimplemented!() // TODO(pg-port): real superuser_arg lives in utils/misc/superuser.c
 }
 
 // before_shmem_exit --- TODO(pg-port): real one lives in storage/ipc/ipc.c
-unsafe fn before_shmem_exit(_function: unsafe fn(c_int, Datum), _arg: Datum) {
-    unimplemented!() // TODO(pg-port): real before_shmem_exit lives in storage/ipc/ipc.c
-}
+unsafe fn before_shmem_exit(_function: unsafe fn(c_int, Datum), _arg: Datum) { unimplemented!() }
 
 // Critical section / interrupt macros --- TODO(pg-port): real defs in miscadmin.h
 #[inline]
@@ -2818,7 +2816,7 @@ unsafe fn RESUME_INTERRUPTS() {}
 
 // Shared memory --- TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) -> *mut c_void {
-    unimplemented!() // TODO(pg-port): real ShmemInitStruct lives in storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _found)
 }
 
 // LWLock --- TODO(pg-port): real definitions live in storage/lwlock.h
@@ -2829,13 +2827,13 @@ pub struct LWLock {
 pub const LW_EXCLUSIVE: c_int = 0; // TODO(pg-port): storage/lwlock.h
 pub const LW_SHARED: c_int = 1; // TODO(pg-port): storage/lwlock.h
 unsafe fn TwoPhaseStateLock() -> *mut LWLock {
-    unimplemented!() // TODO(pg-port): real TwoPhaseStateLock lives in storage/lwlock.c (named LWLock)
+    crate::backend_link_shims::TwoPhaseStateLock as *mut LWLock
 }
 unsafe fn LWLockAcquire(_lock: *mut LWLock, _mode: c_int) -> bool {
-    unimplemented!() // TODO(pg-port): real LWLockAcquire lives in storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, if _mode == 1 { crate::storage::lmgr::lwlock::LWLockMode::LW_SHARED } else { crate::storage::lmgr::lwlock::LWLockMode::LW_EXCLUSIVE })
 }
 unsafe fn LWLockRelease(_lock: *mut LWLock) {
-    unimplemented!() // TODO(pg-port): real LWLockRelease lives in storage/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 unsafe fn LWLockHeldByMe(_lock: *mut LWLock) -> bool {
     unimplemented!() // TODO(pg-port): real LWLockHeldByMe lives in storage/lwlock.c
@@ -2908,9 +2906,7 @@ unsafe fn GetPGProcByNumber(_n: c_int) -> *mut PGPROC {
 unsafe fn GetNumberFromPGProc(_proc: *mut PGPROC) -> c_int {
     unimplemented!() // TODO(pg-port): real GetNumberFromPGProc lives in storage/proc.h
 }
-unsafe fn dlist_node_init(_node: *mut dlist_node_p) {
-    unimplemented!() // TODO(pg-port): real dlist_node_init lives in lib/ilist.h
-}
+unsafe fn dlist_node_init(_node: *mut dlist_node_p) { crate::lib::ilist::dlist_node_init(_node as _) }
 unsafe fn dlist_init(_head: *mut dlist_node_p) {
     unimplemented!() // TODO(pg-port): real dlist_init lives in lib/ilist.h
 }
@@ -2925,15 +2921,9 @@ pub struct VirtualTransactionId {
     pub procNumber: ProcNumber,
     pub localTransactionId: TransactionId,
 }
-unsafe fn VirtualTransactionIdIsValid(_vxid: VirtualTransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real VirtualTransactionIdIsValid lives in storage/lock.h
-}
-unsafe fn VirtualTransactionIdEquals(_a: VirtualTransactionId, _b: VirtualTransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real VirtualTransactionIdEquals lives in storage/lock.h
-}
-unsafe fn GET_VXID_FROM_PGPROC(_vxid: *mut VirtualTransactionId, _proc: &PGPROC) {
-    unimplemented!() // TODO(pg-port): real GET_VXID_FROM_PGPROC lives in storage/proc.h
-}
+unsafe fn VirtualTransactionIdIsValid(_vxid: VirtualTransactionId) -> bool { unimplemented!() }
+unsafe fn VirtualTransactionIdEquals(_a: VirtualTransactionId, _b: VirtualTransactionId) -> bool { unimplemented!() }
+unsafe fn GET_VXID_FROM_PGPROC(_vxid: *mut VirtualTransactionId, _proc: &PGPROC) { unimplemented!() }
 unsafe fn LocalTransactionIdIsValid(_lxid: TransactionId) -> bool {
     unimplemented!() // TODO(pg-port): real LocalTransactionIdIsValid lives in storage/lock.h
 }
@@ -2955,7 +2945,7 @@ pub type SharedInvalidationMessage = c_void; // TODO(pg-port): storage/sinval.h 
 // TimestampTz --- TODO(pg-port): real type lives in datatype/timestamp.h
 pub type TimestampTz = int64;
 unsafe fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!() // TODO(pg-port): real GetCurrentTimestamp lives in utils/adt/timestamp.c
+    crate::utils::adt::timestamp::GetCurrentTimestamp()
 }
 
 // AttrNumber + Datum getters/SRF --- TODO(pg-port): real defs live in fmgr/funcapi
@@ -3002,9 +2992,7 @@ use SRF_RETURN_DONE;
 unsafe fn SRF_RETURN_DONE_impl(_funcctx: *mut FuncCallContext) -> Datum {
     unimplemented!() // TODO(pg-port): real SRF_RETURN_DONE lives in funcapi.h
 }
-unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc {
-    unimplemented!() // TODO(pg-port): real CreateTemplateTupleDesc lives in access/common/tupdesc.c
-}
+unsafe fn CreateTemplateTupleDesc(_natts: c_int) -> TupleDesc { unimplemented!() }
 unsafe fn TupleDescInitEntry(
     _desc: TupleDesc,
     _attributeNumber: AttrNumber,
@@ -3041,47 +3029,24 @@ unsafe fn ObjectIdGetDatum(_oid: Oid) -> Datum {
 unsafe fn TransactionIdPrecedes(_id1: TransactionId, _id2: TransactionId) -> bool {
     unimplemented!() // TODO(pg-port): real TransactionIdPrecedes lives in access/transam/transam.c
 }
-unsafe fn TransactionIdFollows(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdFollows lives in access/transam/transam.c
-}
-unsafe fn TransactionIdFollowsOrEquals(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdFollowsOrEquals lives in access/transam/transam.c
-}
+unsafe fn TransactionIdFollows(_id1: TransactionId, _id2: TransactionId) -> bool { crate::access::transam::transam::TransactionIdFollows(_id1 as _, _id2 as _) }
+unsafe fn TransactionIdFollowsOrEquals(_id1: TransactionId, _id2: TransactionId) -> bool { crate::access::transam::transam::TransactionIdFollowsOrEquals(_id1 as _, _id2 as _) }
 unsafe fn TransactionIdLatest(_mainxid: TransactionId, _nxids: c_int, _xids: *const TransactionId) -> TransactionId {
     unimplemented!() // TODO(pg-port): real TransactionIdLatest lives in access/transam/transam.c
 }
-unsafe fn TransactionIdDidCommit(_transactionId: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdDidCommit lives in access/transam/transam.c
-}
-unsafe fn TransactionIdDidAbort(_transactionId: TransactionId) -> bool {
-    unimplemented!() // TODO(pg-port): real TransactionIdDidAbort lives in access/transam/transam.c
-}
-unsafe fn TransactionIdCommitTree(_xid: TransactionId, _nxids: c_int, _xids: *mut TransactionId) {
-    unimplemented!() // TODO(pg-port): real TransactionIdCommitTree lives in access/transam/transam.c
-}
-unsafe fn TransactionIdAbortTree(_xid: TransactionId, _nxids: c_int, _xids: *mut TransactionId) {
-    unimplemented!() // TODO(pg-port): real TransactionIdAbortTree lives in access/transam/transam.c
-}
-unsafe fn SubTransSetParent(_xid: TransactionId, _parent: TransactionId) {
-    unimplemented!() // TODO(pg-port): real SubTransSetParent lives in access/transam/subtrans.c
-}
+unsafe fn TransactionIdDidCommit(_transactionId: TransactionId) -> bool { crate::access::transam::transam::TransactionIdDidCommit(_transactionId as _) }
+unsafe fn TransactionIdDidAbort(_transactionId: TransactionId) -> bool { crate::access::transam::transam::TransactionIdDidAbort(_transactionId as _) }
+unsafe fn TransactionIdCommitTree(_xid: TransactionId, _nxids: c_int, _xids: *mut TransactionId) { crate::access::transam::transam::TransactionIdCommitTree(_xid as _, _nxids as _, _xids as _) }
+unsafe fn TransactionIdAbortTree(_xid: TransactionId, _nxids: c_int, _xids: *mut TransactionId) { crate::access::transam::transam::TransactionIdAbortTree(_xid as _, _nxids as _, _xids as _) }
+unsafe fn SubTransSetParent(_xid: TransactionId, _parent: TransactionId) { crate::access::transam::subtrans::SubTransSetParent(_xid as _, _parent as _) }
 
-// nextXid machinery --- TODO(pg-port): real defs live in access/transam/varsup.c
-#[repr(C)]
-pub struct VariableCacheData {
-    pub nextXid: FullTransactionId,
-    // ... TODO(pg-port): access/transam.h
-}
-pub static mut TransamVariables: *mut VariableCacheData = core::ptr::null_mut(); // TODO(pg-port): varsup.c
-unsafe fn ReadNextFullTransactionId() -> FullTransactionId {
-    unimplemented!() // TODO(pg-port): real ReadNextFullTransactionId lives in access/transam/varsup.c
-}
+pub use crate::access::transam::varsup::TransamVariablesData as VariableCacheData;
+pub use crate::access::transam::varsup::TransamVariables;
+unsafe fn ReadNextFullTransactionId() -> FullTransactionId { crate::access::transam::varsup::ReadNextFullTransactionId() }
 unsafe fn FullTransactionIdFromAllowableAt(_nextFullXid: FullTransactionId, _xid: TransactionId) -> FullTransactionId {
     unimplemented!() // TODO(pg-port): real FullTransactionIdFromAllowableAt lives in access/transam.h
 }
-unsafe fn AdvanceNextFullTransactionIdPastXid(_xid: TransactionId) {
-    unimplemented!() // TODO(pg-port): real AdvanceNextFullTransactionIdPastXid lives in access/transam/varsup.c
-}
+unsafe fn AdvanceNextFullTransactionIdPastXid(_xid: TransactionId) { crate::access::transam::varsup::AdvanceNextFullTransactionIdPastXid(_xid as _) }
 
 // XLOG --- TODO(pg-port): real definitions live in access/xlog*.h
 pub const RM_XACT_ID: u8 = 1; // TODO(pg-port): access/rmgrlist.h
@@ -3108,12 +3073,8 @@ unsafe fn XLogRegisterData(_data: *mut c_char, _len: usize) {
 unsafe fn XLogInsert(_rmid: u8, _info: uint8) -> XLogRecPtr {
     unimplemented!() // TODO(pg-port): real XLogInsert lives in access/transam/xloginsert.c
 }
-unsafe fn XLogSetRecordFlags(_flags: uint8) {
-    unimplemented!() // TODO(pg-port): real XLogSetRecordFlags lives in access/transam/xloginsert.c
-}
-unsafe fn XLogEnsureRecordSpace(_max_block_id: c_int, _ndatas: c_int) {
-    unimplemented!() // TODO(pg-port): real XLogEnsureRecordSpace lives in access/transam/xloginsert.c
-}
+unsafe fn XLogSetRecordFlags(_flags: uint8) { crate::access::transam::xloginsert::XLogSetRecordFlags(_flags as _) }
+unsafe fn XLogEnsureRecordSpace(_max_block_id: c_int, _ndatas: c_int) { crate::access::transam::xloginsert::XLogEnsureRecordSpace(_max_block_id as _, _ndatas as _) }
 unsafe fn XLogFlush(_record: XLogRecPtr) {
     unimplemented!() // TODO(pg-port): real XLogFlush lives in access/transam/xlog.c
 }
@@ -3125,27 +3086,17 @@ unsafe fn XLogReaderAllocate(
 ) -> *mut XLogReaderState {
     unimplemented!() // TODO(pg-port): real XLogReaderAllocate lives in access/transam/xlogreader.c
 }
-unsafe fn XLogReaderFree(_state: *mut XLogReaderState) {
-    unimplemented!() // TODO(pg-port): real XLogReaderFree lives in access/transam/xlogreader.c
-}
-unsafe fn XLogBeginRead(_state: *mut XLogReaderState, _RecPtr: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real XLogBeginRead lives in access/transam/xlogreader.c
-}
+unsafe fn XLogReaderFree(_state: *mut XLogReaderState) { crate::access::transam::xlogreader::XLogReaderFree(_state as _) }
+unsafe fn XLogBeginRead(_state: *mut XLogReaderState, _RecPtr: XLogRecPtr) { crate::access::transam::xlogreader::XLogBeginRead(_state as _, _RecPtr as _) }
 unsafe fn XLogReadRecord(_state: *mut XLogReaderState, _errormsg: *mut *mut c_char) -> *mut XLogRecord {
     unimplemented!() // TODO(pg-port): real XLogReadRecord lives in access/transam/xlogreader.c
 }
 unsafe fn XLogRecGetRmid(_decoder: *mut XLogReaderState) -> u8 {
     unimplemented!() // TODO(pg-port): real XLogRecGetRmid lives in access/xlogreader.h
 }
-unsafe fn XLogRecGetInfo(_decoder: *mut XLogReaderState) -> uint8 {
-    unimplemented!() // TODO(pg-port): real XLogRecGetInfo lives in access/xlogreader.h
-}
-unsafe fn XLogRecGetData(_decoder: *mut XLogReaderState) -> *mut c_char {
-    unimplemented!() // TODO(pg-port): real XLogRecGetData lives in access/xlogreader.h
-}
-unsafe fn XLogRecGetDataLen(_decoder: *mut XLogReaderState) -> uint32 {
-    unimplemented!() // TODO(pg-port): real XLogRecGetDataLen lives in access/xlogreader.h
-}
+unsafe fn XLogRecGetInfo(_decoder: *mut XLogReaderState) -> uint8 { crate::access::transam::xlogreader::XLogRecGetInfo(_decoder as _) }
+unsafe fn XLogRecGetData(_decoder: *mut XLogReaderState) -> *mut c_char { crate::access::transam::xlogreader::XLogRecGetData(_decoder as _) }
+unsafe fn XLogRecGetDataLen(_decoder: *mut XLogReaderState) -> uint32 { crate::access::transam::xlogreader::XLogRecGetDataLen(_decoder as _) }
 unsafe fn XL_ROUTINE_two_phase() -> *mut c_void {
     unimplemented!() // TODO(pg-port): real XL_ROUTINE macro lives in access/xlogreader.h
 }
@@ -3159,9 +3110,7 @@ fn LSN_FORMAT_ARGS(lsn: XLogRecPtr) -> String {
 }
 
 // Recovery state --- TODO(pg-port): real defs live in access/xlog*.h
-unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO(pg-port): real RecoveryInProgress lives in access/transam/xlog.c
-}
+unsafe fn RecoveryInProgress() -> bool { crate::access::transam::xlog::RecoveryInProgress() }
 
 // XACT log records --- TODO(pg-port): real defs live in access/transam/xact.c
 unsafe fn XactLogCommitRecord(
@@ -3195,9 +3144,7 @@ unsafe fn XactLogAbortRecord(
 ) -> XLogRecPtr {
     unimplemented!() // TODO(pg-port): real XactLogAbortRecord lives in access/transam/xact.c
 }
-unsafe fn xactGetCommittedChildren(_ptr: *mut *mut TransactionId) -> c_int {
-    unimplemented!() // TODO(pg-port): real xactGetCommittedChildren lives in access/transam/xact.c
-}
+unsafe fn xactGetCommittedChildren(_ptr: *mut *mut TransactionId) -> c_int { crate::access::transam::xact::xactGetCommittedChildren(_ptr as _) }
 unsafe fn xactGetCommittedInvalidationMessages(
     _msgs: *mut *mut SharedInvalidationMessage,
     _RelcacheInitFileInval: *mut bool,
@@ -3221,9 +3168,7 @@ pub const DoNotReplicateId: RepOriginId = 0xFFFF; // TODO(pg-port): replication/
 pub static mut replorigin_session_origin: RepOriginId = InvalidRepOriginId; // TODO(pg-port): origin.c
 pub static mut replorigin_session_origin_lsn: XLogRecPtr = 0; // TODO(pg-port): origin.c
 pub static mut replorigin_session_origin_timestamp: TimestampTz = 0; // TODO(pg-port): origin.c
-unsafe fn replorigin_session_advance(_remote_commit: XLogRecPtr, _local_commit: XLogRecPtr) {
-    unimplemented!() // TODO(pg-port): real replorigin_session_advance lives in replication/logical/origin.c
-}
+unsafe fn replorigin_session_advance(_remote_commit: XLogRecPtr, _local_commit: XLogRecPtr) { crate::replication::logical::origin::replorigin_session_advance(_remote_commit as _, _local_commit as _) }
 unsafe fn replorigin_advance(
     _node: RepOriginId,
     _remote_commit: XLogRecPtr,
@@ -3243,81 +3188,55 @@ unsafe fn SyncRepWaitForLSN(_lsn: XLogRecPtr, _commit: bool) {
 unsafe fn smgrGetPendingDeletes(_forCommit: bool, _ptr: *mut *mut RelFileLocator) -> c_int {
     unimplemented!() // TODO(pg-port): real smgrGetPendingDeletes lives in catalog/storage.c
 }
-unsafe fn DropRelationFiles(_delrels: *mut RelFileLocator, _ndelrels: c_int, _isRedo: bool) {
-    unimplemented!() // TODO(pg-port): real DropRelationFiles lives in storage/smgr/md.c
-}
+unsafe fn DropRelationFiles(_delrels: *mut RelFileLocator, _ndelrels: c_int, _isRedo: bool) { crate::storage::smgr::md::DropRelationFiles(_delrels as _, _ndelrels as _, _isRedo as _) }
 
 // pgstat --- TODO(pg-port): real defs live in utils/activity/pgstat*.c
 pub const WAIT_EVENT_TWOPHASE_FILE_READ: uint32 = 0; // TODO(pg-port): utils/activity/wait_event_names
 pub const WAIT_EVENT_TWOPHASE_FILE_WRITE: uint32 = 0; // TODO(pg-port): utils/activity/wait_event_names
 pub const WAIT_EVENT_TWOPHASE_FILE_SYNC: uint32 = 0; // TODO(pg-port): utils/activity/wait_event_names
-unsafe fn pgstat_report_wait_start(_wait_event_info: uint32) {
-    unimplemented!() // TODO(pg-port): real pgstat_report_wait_start lives in utils/activity/wait_event.c
-}
-unsafe fn pgstat_report_wait_end() {
-    unimplemented!() // TODO(pg-port): real pgstat_report_wait_end lives in utils/activity/wait_event.c
-}
+unsafe fn pgstat_report_wait_start(_wait_event_info: uint32) { crate::parser_link_shims::pgstat_report_wait_start(_wait_event_info as _) }
+unsafe fn pgstat_report_wait_end() { crate::parser_link_shims::pgstat_report_wait_end() }
 unsafe fn pgstat_get_transactional_drops(_isCommit: bool, _ptr: *mut *mut xl_xact_stats_item) -> c_int {
     unimplemented!() // TODO(pg-port): real pgstat_get_transactional_drops lives in utils/activity/pgstat_xact.c
 }
 unsafe fn pgstat_execute_transactional_drops(_ndrops: c_int, _drops: *mut xl_xact_stats_item, _is_redo: bool) {
     unimplemented!() // TODO(pg-port): real pgstat_execute_transactional_drops lives in utils/activity/pgstat_xact.c
 }
-unsafe fn AtEOXact_PgStat(_isCommit: bool, _parallel: bool) {
-    unimplemented!() // TODO(pg-port): real AtEOXact_PgStat lives in utils/activity/pgstat_xact.c
-}
+unsafe fn AtEOXact_PgStat(_isCommit: bool, _parallel: bool) { crate::utils::activity::pgstat_xact::AtEOXact_PgStat(_isCommit as _, _parallel as _) }
 
 // Cache invalidation --- TODO(pg-port): real defs live in utils/cache/inval.c
-unsafe fn SendSharedInvalidMessages(_msgs: *const SharedInvalidationMessage, _n: c_int) {
-    unimplemented!() // TODO(pg-port): real SendSharedInvalidMessages lives in storage/ipc/sinval.c
-}
-unsafe fn RelationCacheInitFilePreInvalidate() {
-    unimplemented!() // TODO(pg-port): real RelationCacheInitFilePreInvalidate lives in utils/cache/relcache.c
-}
-unsafe fn RelationCacheInitFilePostInvalidate() {
-    unimplemented!() // TODO(pg-port): real RelationCacheInitFilePostInvalidate lives in utils/cache/relcache.c
-}
+unsafe fn SendSharedInvalidMessages(_msgs: *const SharedInvalidationMessage, _n: c_int) { crate::storage::ipc::sinval::SendSharedInvalidMessages(_msgs as _, _n as _) }
+unsafe fn RelationCacheInitFilePreInvalidate() { crate::utils::cache::relcache::RelationCacheInitFilePreInvalidate() }
+unsafe fn RelationCacheInitFilePostInvalidate() { crate::utils::cache::relcache::RelationCacheInitFilePostInvalidate() }
 
 // Predicate locking --- TODO(pg-port): real defs live in storage/lmgr/predicate.c
-unsafe fn PredicateLockTwoPhaseFinish(_xid: TransactionId, _isCommit: bool) {
-    unimplemented!() // TODO(pg-port): real PredicateLockTwoPhaseFinish lives in storage/lmgr/predicate.c
-}
+unsafe fn PredicateLockTwoPhaseFinish(_xid: TransactionId, _isCommit: bool) { crate::storage::lmgr::predicate::PredicateLockTwoPhaseFinish(_xid as _, _isCommit as _) }
 
 // Standby locks --- TODO(pg-port): real defs live in storage/ipc/standby.c
-unsafe fn StandbyReleaseLockTree(_xid: TransactionId, _nsubxids: c_int, _subxids: *mut TransactionId) {
-    unimplemented!() // TODO(pg-port): real StandbyReleaseLockTree lives in storage/ipc/standby.c
-}
+unsafe fn StandbyReleaseLockTree(_xid: TransactionId, _nsubxids: c_int, _subxids: *mut TransactionId) { unimplemented!() }
 
-// fd / dir helpers --- TODO(pg-port): real defs live in storage/file/fd.c
-#[repr(C)]
-pub struct DIR {
-    _private: [u8; 0],
-}
-#[repr(C)]
-pub struct dirent {
-    pub d_name: [c_char; 256],
-    // ... TODO(pg-port): <dirent.h>
-}
+// fd / dir helpers: use canonical storage/file/fd definitions.
+use crate::storage::file::fd::{DIR, dirent};
 unsafe fn OpenTransientFile(_fileName: *const c_char, _fileFlags: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): real OpenTransientFile lives in storage/file/fd.c
+    crate::storage::file::fd::OpenTransientFile(_fileName, _fileFlags)
 }
 unsafe fn CloseTransientFile(_fd: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): real CloseTransientFile lives in storage/file/fd.c
+    crate::storage::file::fd::CloseTransientFile(_fd)
 }
 unsafe fn AllocateDir(_dirname: *const c_char) -> *mut DIR {
-    unimplemented!() // TODO(pg-port): real AllocateDir lives in storage/file/fd.c
+    crate::storage::file::fd::AllocateDir(_dirname)
 }
 unsafe fn ReadDir(_dir: *mut DIR, _dirname: *const c_char) -> *mut dirent {
-    unimplemented!() // TODO(pg-port): real ReadDir lives in storage/file/fd.c
+    crate::storage::file::fd::ReadDir(_dir, _dirname)
 }
 unsafe fn FreeDir(_dir: *mut DIR) -> c_int {
-    unimplemented!() // TODO(pg-port): real FreeDir lives in storage/file/fd.c
+    crate::storage::file::fd::FreeDir(_dir)
 }
 unsafe fn pg_fsync(_fd: c_int) -> c_int {
-    unimplemented!() // TODO(pg-port): real pg_fsync lives in storage/file/fd.c
+    crate::storage::file::fd::pg_fsync(_fd)
 }
 unsafe fn fsync_fname(_fname: *const c_char, _isdir: bool) {
-    unimplemented!() // TODO(pg-port): real fsync_fname lives in storage/file/fd.c
+    crate::storage::file::fd::fsync_fname(_fname, _isdir)
 }
 
 // Tracepoints --- TODO(pg-port): real defs live in pg_trace.h (DTrace)

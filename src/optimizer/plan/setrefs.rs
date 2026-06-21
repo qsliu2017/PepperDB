@@ -135,28 +135,25 @@ unsafe fn SS_compute_initplan_cost(
 /// `getRTEPermissionInfo()` (parser/parse_relation.c).
 /// TODO(pg-port): real symbol lives in parser/parse_relation.rs.
 unsafe fn getRTEPermissionInfo(
-    _rteperminfos: *mut List,
-    _rte: *mut RangeTblEntry,
+    rteperminfos: *mut List,
+    rte: *mut RangeTblEntry,
 ) -> *mut RTEPermissionInfo {
-    // TODO(pg-port): real getRTEPermissionInfo lives in parser/parse_relation.c
-    unimplemented!()
+    crate::parser::parse_relation::getRTEPermissionInfo(rteperminfos as _, rte as _) as _
 }
 
 /// `addRTEPermissionInfo()` (parser/parse_relation.c).
 /// TODO(pg-port): real symbol lives in parser/parse_relation.rs.
 unsafe fn addRTEPermissionInfo(
-    _rteperminfos: *mut *mut List,
-    _rte: *mut RangeTblEntry,
+    rteperminfos: *mut *mut List,
+    rte: *mut RangeTblEntry,
 ) -> *mut RTEPermissionInfo {
-    // TODO(pg-port): real addRTEPermissionInfo lives in parser/parse_relation.c
-    unimplemented!()
+    crate::parser::parse_relation::addRTEPermissionInfo(rteperminfos as _, rte as _) as _
 }
 
 /// `GetSysCacheHashValue1()` (utils/cache/syscache.c).
 /// TODO(pg-port): real symbol lives in utils/cache/syscache.rs.
 unsafe fn GetSysCacheHashValue1(_cache_id: c_int, _key1: Datum) -> u32 {
-    // TODO(pg-port): real GetSysCacheHashValue1 lives in utils/cache/syscache.c
-    unimplemented!()
+    crate::utils::cache::syscache::GetSysCacheHashValue1(_cache_id as _, _key1 as _) as _
 }
 
 /// `UtilityContainsQuery()` (tcop/utility.c).
@@ -168,11 +165,11 @@ unsafe fn UtilityContainsQuery(_parsetree: *mut Node) -> *mut Query {
 
 /// PROCOID syscache id (utils/cache/syscache.h).
 /// TODO(pg-port): real constant lives in utils/cache/syscache.rs.
-const PROCOID: c_int = 0; // TODO(pg-port): real PROCOID in syscache.h
+const PROCOID: c_int = 47; // TODO(pg-port): real PROCOID in syscache.h
 
 /// TYPEOID syscache id (utils/cache/syscache.h).
 /// TODO(pg-port): real constant lives in utils/cache/syscache.rs.
-const TYPEOID: c_int = 0; // TODO(pg-port): real TYPEOID in syscache.h
+const TYPEOID: c_int = 82; // TODO(pg-port): real TYPEOID in syscache.h
 
 /// `UPPERREL_FINAL` (nodes/pathnodes.h UpperRelationKind).
 /// TODO(pg-port): real constant lives in nodes/pathnodes.rs.

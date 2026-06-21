@@ -20,7 +20,7 @@ use std::alloc::{self, Layout};
 /// `palloc`. The canonical `MemoryContextData` lives in `utils::mmgr::memnodes`
 /// (the home of the C `nodes/memnodes.h` struct); palloc.h declares the
 /// allocation *functions*. Re-export so the whole tree shares one type identity.
-pub use crate::utils::mmgr::memnodes::{MemoryContext, MemoryContextData};
+pub use crate::utils::mmgr::memnodes::{MemoryContext, MemoryContextData, MemoryContextMethods};
 
 use crate::nodes::nodes::NodeTag;
 
@@ -33,7 +33,7 @@ static mut bootstrap_context: MemoryContextData = MemoryContextData {
     isReset: true,
     allowInCritSection: false,
     mem_allocated: 0,
-    methods: core::ptr::null(),
+    methods: &BOOTSTRAP_METHODS as *const MemoryContextMethods,
     parent: core::ptr::null_mut(),
     firstchild: core::ptr::null_mut(),
     prevchild: core::ptr::null_mut(),
@@ -41,6 +41,44 @@ static mut bootstrap_context: MemoryContextData = MemoryContextData {
     name: core::ptr::null(),
     ident: core::ptr::null(),
     reset_cbs: core::ptr::null_mut(),
+};
+
+// Methods table for the bootstrap context, so MemoryContextAlloc/-Free/-Realloc
+// (which dispatch through context->methods) route to the bootstrap allocator just
+// like bare palloc/pfree.  Every context in this build IS the bootstrap context
+// (AllocSetContextCreate is a stub returning its parent), so this one table serves
+// all of them.  TODO(pg-port): real per-context methods with utils/mmgr/aset.c.
+pub unsafe fn bootstrap_alloc(_c: MemoryContext, size: Size, flags: i32) -> *mut c_void {
+    palloc_extended(size, flags)
+}
+pub unsafe fn bootstrap_free(p: *mut c_void) {
+    pfree(p)
+}
+pub unsafe fn bootstrap_realloc(p: *mut c_void, size: Size, _flags: i32) -> *mut c_void {
+    repalloc(p, size)
+}
+pub unsafe fn bootstrap_reset(_c: MemoryContext) {}
+pub unsafe fn bootstrap_delete(_c: MemoryContext) {}
+pub unsafe fn bootstrap_get_chunk_context(_p: *mut c_void) -> MemoryContext {
+    &raw mut bootstrap_context
+}
+pub unsafe fn bootstrap_get_chunk_space(p: *mut c_void) -> Size {
+    HEADER + unpack_size(*(chunk_base(p) as *mut usize))
+}
+pub unsafe fn bootstrap_is_empty(_c: MemoryContext) -> bool {
+    false
+}
+
+static BOOTSTRAP_METHODS: MemoryContextMethods = MemoryContextMethods {
+    alloc: Some(bootstrap_alloc),
+    free_p: Some(bootstrap_free),
+    realloc: Some(bootstrap_realloc),
+    reset: Some(bootstrap_reset),
+    delete_context: Some(bootstrap_delete),
+    get_chunk_context: Some(bootstrap_get_chunk_context),
+    get_chunk_space: Some(bootstrap_get_chunk_space),
+    is_empty: Some(bootstrap_is_empty),
+    stats: None,
 };
 
 /// `CurrentMemoryContext`: the default allocation context for `palloc`. The
@@ -52,6 +90,7 @@ pub static mut CurrentMemoryContext: MemoryContext = &raw mut bootstrap_context;
 
 /// `TopMemoryContext`: the permanent top-level context. Points at the same
 /// bootstrap sentinel until the real MemoryContext system lands.
+#[no_mangle]
 pub static mut TopMemoryContext: MemoryContext = &raw mut bootstrap_context;
 
 /// `MemoryContextSwitchTo(context)`: install `context` as current, returning the
@@ -60,6 +99,7 @@ pub static mut TopMemoryContext: MemoryContext = &raw mut bootstrap_context;
 /// # Safety
 /// Accesses the `CurrentMemoryContext` global.
 #[inline]
+#[no_mangle]
 pub unsafe fn MemoryContextSwitchTo(context: MemoryContext) -> MemoryContext {
     let old = CurrentMemoryContext;
     CurrentMemoryContext = context;
@@ -85,6 +125,17 @@ pub const MCXT_ALLOC_ZERO: i32 = 0x04;
 const HEADER: usize = MAXALIGN(core::mem::size_of::<usize>());
 const ALIGN: usize = crate::pg_config::MAXIMUM_ALIGNOF;
 
+/// MemoryContextMethodID slot used to make bootstrap-allocator chunks recognizable
+/// to mcxt.c's header-based dispatch (GetMemoryChunkSpace/Context, pfree, repalloc).
+/// Must equal the index registered in mcxt::mcxt_methods (MCTX_8_UNUSED_ID = 8).
+const SIMPLE_METHODID: usize = 8;
+const METHODID_BITS: usize = 4;
+
+#[inline]
+fn pack_hdr(size: usize) -> usize { (size << METHODID_BITS) | SIMPLE_METHODID }
+#[inline]
+fn unpack_size(hdr: usize) -> usize { hdr >> METHODID_BITS }
+
 #[inline]
 fn layout_for(total: usize) -> Layout {
     Layout::from_size_align(total, ALIGN).expect("invalid palloc layout")
@@ -109,7 +160,7 @@ pub unsafe fn palloc(size: Size) -> *mut c_void {
     if base.is_null() {
         alloc::handle_alloc_error(layout_for(total));
     }
-    *(base as *mut usize) = size;
+    *(base as *mut usize) = pack_hdr(size);
     base.add(HEADER) as *mut c_void
 }
 
@@ -143,7 +194,7 @@ unsafe fn chunk_base(pointer: *mut c_void) -> *mut u8 {
 
 #[inline]
 unsafe fn chunk_size(pointer: *mut c_void) -> usize {
-    *(chunk_base(pointer) as *mut usize)
+    unpack_size(*(chunk_base(pointer) as *mut usize))
 }
 
 /// `pfree(pointer)`: release a chunk obtained from `palloc`/`repalloc`.
@@ -152,7 +203,7 @@ unsafe fn chunk_size(pointer: *mut c_void) -> usize {
 /// `pointer` must have come from this allocator and not been freed already.
 pub unsafe fn pfree(pointer: *mut c_void) {
     let base = chunk_base(pointer);
-    let size = *(base as *mut usize);
+    let size = unpack_size(*(base as *mut usize));
     alloc::dealloc(base, layout_for(HEADER + size));
 }
 
@@ -170,13 +221,13 @@ pub unsafe fn repalloc(pointer: *mut c_void, size: Size) -> *mut c_void {
         );
     }
     let base = chunk_base(pointer);
-    let oldsize = *(base as *mut usize);
+    let oldsize = unpack_size(*(base as *mut usize));
     let new_total = HEADER + size;
     let newbase = alloc::realloc(base, layout_for(HEADER + oldsize), new_total);
     if newbase.is_null() {
         alloc::handle_alloc_error(layout_for(new_total));
     }
-    *(newbase as *mut usize) = size;
+    *(newbase as *mut usize) = pack_hdr(size);
     newbase.add(HEADER) as *mut c_void
 }
 
@@ -245,8 +296,9 @@ pub unsafe fn MemoryContextSetIdentifier(_context: MemoryContext, _id: *const c_
 /// # Safety
 /// `pointer` must be a chunk from this allocator (unused here, but matches the API).
 pub unsafe fn GetMemoryChunkContext(_pointer: *mut c_void) -> MemoryContext {
-    // TODO(pg-port): real MemoryContext bookkeeping (utils/mmgr).
-    core::ptr::null_mut()
+    // TODO(pg-port): real MemoryContext bookkeeping (utils/mmgr).  Every chunk in
+    // this build belongs to the single bootstrap context.
+    &raw mut bootstrap_context
 }
 
 /// `pstrdup(in)`: duplicate a NUL-terminated C string into palloc'd memory.

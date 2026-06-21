@@ -73,7 +73,7 @@ unsafe fn pgstat_report_wait_end() {
 // storage/aio.h - whether the handle has had a target associated with it.
 // TODO: import from the ported aio target module once available.
 unsafe fn pgaio_io_has_target(_ioh: *mut PgAioHandle) -> bool {
-    unimplemented!()
+    crate::storage::aio::aio_target::pgaio_io_has_target(_ioh)
 }
 
 // Per-thread C errno location (errno.h). macOS/BSD expose it as __error();

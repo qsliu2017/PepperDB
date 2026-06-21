@@ -236,59 +236,37 @@ const DSM_CREATE_NULL_IF_MAXSEGMENTS: c_int = 0x0001;
 const LWTRANCHE_PER_SESSION_DSA: c_int = 0;
 
 // TODO: storage/dsm.c
-unsafe fn dsm_create(_size: Size, _flags: c_int) -> *mut dsm_segment {
-    unimplemented!()
-}
+unsafe fn dsm_create(_size: Size, _flags: c_int) -> *mut dsm_segment { unimplemented!() }
 
 // TODO: storage/dsm.c
-unsafe fn dsm_attach(_h: dsm_handle) -> *mut dsm_segment {
-    unimplemented!()
-}
+unsafe fn dsm_attach(_h: dsm_handle) -> *mut dsm_segment { unimplemented!() }
 
 // TODO: storage/dsm.c
-unsafe fn dsm_segment_handle(_seg: *mut dsm_segment) -> dsm_handle {
-    unimplemented!()
-}
+unsafe fn dsm_segment_handle(_seg: *mut dsm_segment) -> dsm_handle { unimplemented!() }
 
 // TODO: storage/dsm.c
-unsafe fn dsm_segment_address(_seg: *mut dsm_segment) -> *mut c_void {
-    unimplemented!()
-}
+unsafe fn dsm_segment_address(_seg: *mut dsm_segment) -> *mut c_void { unimplemented!() }
 
 // TODO: storage/dsm.c
-unsafe fn dsm_detach(_seg: *mut dsm_segment) {
-    unimplemented!()
-}
+unsafe fn dsm_detach(_seg: *mut dsm_segment) { unimplemented!() }
 
 // TODO: storage/dsm.c
-unsafe fn dsm_pin_mapping(_seg: *mut dsm_segment) {
-    unimplemented!()
-}
+unsafe fn dsm_pin_mapping(_seg: *mut dsm_segment) { unimplemented!() }
 
 // TODO: storage/ipc/shm_toc.c (not yet ported alongside the estimator helpers)
-unsafe fn shm_toc_create(_magic: uint64, _address: *mut c_void, _nbytes: Size) -> *mut shm_toc {
-    unimplemented!()
-}
+unsafe fn shm_toc_create(_magic: uint64, _address: *mut c_void, _nbytes: Size) -> *mut shm_toc { crate::storage::ipc::shm_toc::shm_toc_create(_magic, _address, _nbytes) }
 
 // TODO: storage/ipc/shm_toc.c
-unsafe fn shm_toc_attach(_magic: uint64, _address: *mut c_void) -> *mut shm_toc {
-    unimplemented!()
-}
+unsafe fn shm_toc_attach(_magic: uint64, _address: *mut c_void) -> *mut shm_toc { crate::storage::ipc::shm_toc::shm_toc_attach(_magic, _address) }
 
 // TODO: storage/ipc/shm_toc.c
-unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _nbytes: Size) -> *mut c_void {
-    unimplemented!()
-}
+unsafe fn shm_toc_allocate(_toc: *mut shm_toc, _nbytes: Size) -> *mut c_void { crate::storage::ipc::shm_toc::shm_toc_allocate(_toc, _nbytes) }
 
 // TODO: storage/ipc/shm_toc.c
-unsafe fn shm_toc_insert(_toc: *mut shm_toc, _key: uint64, _address: *mut c_void) {
-    unimplemented!()
-}
+unsafe fn shm_toc_insert(_toc: *mut shm_toc, _key: uint64, _address: *mut c_void) { crate::storage::ipc::shm_toc::shm_toc_insert(_toc, _key, _address) }
 
 // TODO: storage/ipc/shm_toc.c
-unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: uint64, _noError: bool) -> *mut c_void {
-    unimplemented!()
-}
+unsafe fn shm_toc_lookup(_toc: *mut shm_toc, _key: uint64, _noError: bool) -> *mut c_void { crate::storage::ipc::shm_toc::shm_toc_lookup(_toc, _key, _noError) }
 
 // TODO: utils/dsa.c
 unsafe fn dsa_create_in_place(
@@ -301,35 +279,23 @@ unsafe fn dsa_create_in_place(
 }
 
 // TODO: utils/dsa.c
-unsafe fn dsa_attach_in_place(_place: *mut c_void, _segment: *mut dsm_segment) -> *mut dsa_area {
-    unimplemented!()
-}
+unsafe fn dsa_attach_in_place(_place: *mut c_void, _segment: *mut dsm_segment) -> *mut dsa_area { unimplemented!() }
 
 // TODO: utils/dsa.c
-unsafe fn dsa_pin_mapping(_area: *mut dsa_area) {
-    unimplemented!()
-}
+unsafe fn dsa_pin_mapping(_area: *mut dsa_area) { unimplemented!() }
 
 // TODO: utils/dsa.c
-unsafe fn dsa_detach(_area: *mut dsa_area) {
-    unimplemented!()
-}
+unsafe fn dsa_detach(_area: *mut dsa_area) { unimplemented!() }
 
 // TODO: utils/cache/typcache.c
-unsafe fn SharedRecordTypmodRegistryEstimate() -> usize {
-    unimplemented!()
-}
+unsafe fn SharedRecordTypmodRegistryEstimate() -> usize { crate::utils::cache::typcache::SharedRecordTypmodRegistryEstimate() }
 
 // TODO: utils/cache/typcache.c
 unsafe fn SharedRecordTypmodRegistryInit(
     _registry: *mut SharedRecordTypmodRegistry,
     _segment: *mut dsm_segment,
     _area: *mut dsa_area,
-) {
-    unimplemented!()
-}
+) { unimplemented!() }
 
 // TODO: utils/cache/typcache.c
-unsafe fn SharedRecordTypmodRegistryAttach(_registry: *mut SharedRecordTypmodRegistry) {
-    unimplemented!()
-}
+unsafe fn SharedRecordTypmodRegistryAttach(_registry: *mut SharedRecordTypmodRegistry) { unimplemented!() }

@@ -57,6 +57,7 @@ use crate::prelude::*;
 use crate::{foreach, current_cell, IsA, castNode, lfirst_node, linitial_node, dlist_foreach, dlist_container};
 
 use std::ffi::{c_char, c_int, c_void};
+use libc::memcpy;
 
 use crate::c::{uint32, int64, TransactionId};
 use crate::postgres_ext::{Oid, InvalidOid};
@@ -217,13 +218,13 @@ pub type RelcacheCallbackFunction = unsafe fn(arg: Datum, relid: Oid);
 pub type SyscacheCallbackFunction = unsafe fn(arg: Datum, cacheid: c_int, hashvalue: uint32);
 
 /* Syscache IDs (catalog/pg_*; from syscache.h). */
-const PROCOID: c_int = 0;
-const TYPEOID: c_int = 0;
-const NAMESPACEOID: c_int = 0;
-const OPEROID: c_int = 0;
-const AMOPOPID: c_int = 0;
-const FOREIGNSERVEROID: c_int = 0;
-const FOREIGNDATAWRAPPEROID: c_int = 0;
+const PROCOID: c_int = 47;
+const TYPEOID: c_int = 82;
+const NAMESPACEOID: c_int = 38;
+const OPEROID: c_int = 40;
+const AMOPOPID: c_int = 3;
+const FOREIGNSERVEROID: c_int = 32;
+const FOREIGNDATAWRAPPEROID: c_int = 30;
 
 /* memutils.h: ALLOCSET_START_SMALL_SIZES handled by AllocSetContextCreate macro. */
 
@@ -500,7 +501,7 @@ pub unsafe fn CreateCachedPlan(
      */
     source_context = AllocSetContextCreate!(
         CurrentMemoryContext,
-        "CachedPlanSource",
+        c"CachedPlanSource".as_ptr(),
         ALLOCSET_START_SMALL_SIZES
     );
 
@@ -671,7 +672,7 @@ pub unsafe fn CompleteCachedPlan(
         /* Again, it's a good bet the querytree_context can be small */
         querytree_context = AllocSetContextCreate!(
             source_context,
-            "CachedPlanQuery",
+            c"CachedPlanQuery".as_ptr(),
             ALLOCSET_START_SMALL_SIZES
         );
         MemoryContextSwitchTo(querytree_context);
@@ -1084,7 +1085,7 @@ unsafe fn RevalidateCachedQuery(
      */
     querytree_context = AllocSetContextCreate!(
         CurrentMemoryContext,
-        "CachedPlanQuery",
+        c"CachedPlanQuery".as_ptr(),
         ALLOCSET_START_SMALL_SIZES
     );
     oldcxt = MemoryContextSwitchTo(querytree_context);
@@ -1296,7 +1297,7 @@ unsafe fn BuildCachedPlan(
     if !(*plansource).is_oneshot {
         plan_context = AllocSetContextCreate!(
             CurrentMemoryContext,
-            "CachedPlan",
+            c"CachedPlan".as_ptr(),
             ALLOCSET_START_SMALL_SIZES
         );
         MemoryContextCopyAndSetIdentifier(plan_context, (*plansource).query_string);
@@ -1613,6 +1614,7 @@ pub unsafe fn GetCachedPlan(
  * persistent data structures, such as the parent CachedPlanSource or a
  * Portal.  Transient references should be protected by a resource owner.
  */
+#[no_mangle]
 pub unsafe fn ReleaseCachedPlan(plan: *mut CachedPlan, owner: ResourceOwner) {
     debug_assert!((*plan).magic == CACHEDPLAN_MAGIC);
     if !owner.is_null() {
@@ -1655,6 +1657,7 @@ pub unsafe fn ReleaseCachedPlan(plan: *mut CachedPlan, owner: ResourceOwner) {
  * check is much cheaper than the full revalidation done by GetCachedPlan.
  * Nonetheless, no required checks are omitted.
  */
+#[no_mangle]
 pub unsafe fn CachedPlanAllowsSimpleValidityCheck(
     plansource: *mut CachedPlanSource,
     plan: *mut CachedPlan,
@@ -1777,6 +1780,7 @@ pub unsafe fn CachedPlanAllowsSimpleValidityCheck(
  * can't happen; but with a plansource shared across multiple uses, it'd be
  * advisable to also save plan->generation and verify that that still matches.
  */
+#[no_mangle]
 pub unsafe fn CachedPlanIsSimplyValid(
     plansource: *mut CachedPlanSource,
     plan: *mut CachedPlan,
@@ -1886,7 +1890,7 @@ pub unsafe fn CopyCachedPlan(plansource: *mut CachedPlanSource) -> *mut CachedPl
 
     source_context = AllocSetContextCreate!(
         CurrentMemoryContext,
-        "CachedPlanSource",
+        c"CachedPlanSource".as_ptr(),
         ALLOCSET_START_SMALL_SIZES
     );
 
@@ -1926,7 +1930,7 @@ pub unsafe fn CopyCachedPlan(plansource: *mut CachedPlanSource) -> *mut CachedPl
 
     querytree_context = AllocSetContextCreate!(
         source_context,
-        "CachedPlanQuery",
+        c"CachedPlanQuery".as_ptr(),
         ALLOCSET_START_SMALL_SIZES
     );
     MemoryContextSwitchTo(querytree_context);
@@ -2017,6 +2021,7 @@ pub unsafe fn CachedPlanGetTargetList(
  * (Note that this might leak a good deal of memory in the caller's
  * context before that.)  The passed-in expr tree is not modified.
  */
+#[no_mangle]
 pub unsafe fn GetCachedExpression(mut expr: *mut Node) -> *mut CachedExpression {
     let cexpr: *mut CachedExpression;
     let mut relationOids: *mut List = null_mut();
@@ -2042,7 +2047,7 @@ pub unsafe fn GetCachedExpression(mut expr: *mut Node) -> *mut CachedExpression 
      */
     cexpr_context = AllocSetContextCreate!(
         CurrentMemoryContext,
-        "CachedExpression",
+        c"CachedExpression".as_ptr(),
         ALLOCSET_SMALL_SIZES
     );
 
@@ -2076,6 +2081,7 @@ pub unsafe fn GetCachedExpression(mut expr: *mut Node) -> *mut CachedExpression 
  * FreeCachedExpression
  *		Delete a CachedExpression.
  */
+#[no_mangle]
 pub unsafe fn FreeCachedExpression(cexpr: *mut CachedExpression) {
     /* Sanity check */
     debug_assert!((*cexpr).magic == CACHEDEXPR_MAGIC);
@@ -2571,6 +2577,7 @@ pub unsafe fn ResetPlanCache() {
 /*
  * Release all CachedPlans remembered by 'owner'
  */
+#[no_mangle]
 pub unsafe fn ReleaseAllPlanCacheRefsInOwner(owner: ResourceOwner) {
     ResourceOwnerReleaseAllOfKind(owner, &planref_resowner_desc);
 }

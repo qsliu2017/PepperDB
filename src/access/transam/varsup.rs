@@ -32,8 +32,11 @@ pub struct TransamVariablesData {
     pub xidStopLimit: TransactionId,
     pub xidWrapLimit: TransactionId,
     pub oldestXidDB: Oid,
+    pub oldestCommitTsXid: TransactionId,
+    pub newestCommitTsXid: TransactionId,
     pub oldestClogXid: TransactionId,
     pub latestCompletedXid: FullTransactionId,
+    pub xactCompletionCount: uint64,
 }
 
 /* Number of OIDs to prefetch (preallocate) per XLOG write */
@@ -114,6 +117,10 @@ pub unsafe extern "C" fn GetNewTransactionId(isSubXact: bool) -> FullTransaction
 
     full_xid = (*TransamVariables).nextXid;
     xid = XidFromFullTransactionId(full_xid);
+    if std::env::var_os("PDB_BT").is_some() {
+        eprintln!("PDB_BT GetNewTransactionId pid={} assigns xid={} (TransamVariables={:p})",
+            std::process::id(), xid, TransamVariables);
+    }
 
     /*----------
      * Check to see if it's safe to assign another XID.  This protects against
@@ -699,21 +706,18 @@ pub unsafe extern "C" fn AssertTransactionIdInAllowableRange(xid: TransactionId)
 // ---------------------------------------------------------------------------
 
 // Shared/global externs (stubs)
-#[allow(non_upper_case_globals)]
-static mut XidGenLock: *mut core::ffi::c_void = std::ptr::null_mut();
-#[allow(non_upper_case_globals)]
-static mut OidGenLock: *mut core::ffi::c_void = std::ptr::null_mut();
-#[allow(non_upper_case_globals)]
-static mut XactTruncationLock: *mut core::ffi::c_void = std::ptr::null_mut();
+use crate::backend_link_shims::XidGenLock;
+use crate::backend_link_shims::OidGenLock;
+use crate::backend_link_shims::XactTruncationLock;
 
 const LW_EXCLUSIVE: c_int = 0;
 const LW_SHARED: c_int = 1;
 
-const PMSIGNAL_START_AUTOVAC_LAUNCHER: c_int = 0;
+const PMSIGNAL_START_AUTOVAC_LAUNCHER: c_int = 4;
 
 const PGPROC_MAX_CACHED_SUBXIDS: c_int = 64;
 
-const DATABASEOID: c_int = 0;
+const DATABASEOID: c_int = 21;
 
 // Special transaction ids (access/transam.h)
 const BootstrapTransactionId: TransactionId = 1;
@@ -760,53 +764,52 @@ pub struct PROC_HDR {
 }
 
 #[allow(non_upper_case_globals)]
-static mut MyProc: *mut PGPROC = std::ptr::null_mut();
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 #[allow(non_upper_case_globals)]
-static mut ProcGlobal: *mut PROC_HDR = std::ptr::null_mut();
-
+extern "C" { pub static mut ProcGlobal: *mut PROC_HDR; }
 #[inline]
 unsafe fn ShmemInitStruct(_name: *const c_char, _size: Size, _found: *mut bool) -> *mut core::ffi::c_void {
-    unimplemented!() // TODO: storage/ipc/shmem.c
+    crate::storage::ipc::shmem::ShmemInitStruct(_name, _size, _found)
 }
 
 #[inline]
 unsafe fn LWLockAcquire(_lock: *mut core::ffi::c_void, _mode: c_int) -> bool {
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockAcquire(_lock as _, core::mem::transmute(_mode))
 }
 
 #[inline]
 unsafe fn LWLockRelease(_lock: *mut core::ffi::c_void) {
-    unimplemented!() // TODO: storage/lmgr/lwlock.c
+    crate::storage::lmgr::lwlock::LWLockRelease(_lock as _)
 }
 
 #[inline]
 unsafe fn IsInParallelMode() -> bool {
-    unimplemented!() // TODO: access/transam/xact.c
+    crate::access::transam::xact::IsInParallelMode_real()
 }
 
 #[inline]
 unsafe fn IsBootstrapProcessingMode() -> bool {
-    unimplemented!() // TODO: utils/init/miscinit.c
+    crate::miscadmin::IsBootstrapProcessingMode()
 }
 
 #[inline]
 unsafe fn RecoveryInProgress() -> bool {
-    unimplemented!() // TODO: access/transam/xlog.c
+    crate::access::transam::xlog::RecoveryInProgress()
 }
 
 #[inline]
 unsafe fn IsTransactionState() -> bool {
-    unimplemented!() // TODO: access/transam/xact.c
+    crate::access::transam::xact::IsTransactionState()
 }
 
 #[inline]
 unsafe fn AmStartupProcess() -> bool {
-    unimplemented!() // TODO: storage/ipc/standby.c / miscadmin.h
+    crate::miscadmin::AmStartupProcess()
 }
 
 #[inline]
 unsafe fn SendPostmasterSignal(_reason: c_int) {
-    unimplemented!() // TODO: storage/ipc/pmsignal.c
+    crate::storage::ipc::pmsignal::SendPostmasterSignal(_reason)
 }
 
 #[inline]
@@ -816,28 +819,26 @@ unsafe fn get_database_name(_dbid: Oid) -> *mut c_char {
 
 #[inline]
 unsafe fn ExtendCLOG(_newestXact: TransactionId) {
-    unimplemented!() // TODO: access/transam/clog.c
+    crate::access::transam::clog::ExtendCLOG(_newestXact)
 }
 
 #[inline]
 unsafe fn ExtendCommitTs(_newestXact: TransactionId) {
-    unimplemented!() // TODO: access/transam/commit_ts.c
+    crate::access::transam::commit_ts::ExtendCommitTs(_newestXact)
 }
 
 #[inline]
 unsafe fn ExtendSUBTRANS(_newestXact: TransactionId) {
-    unimplemented!() // TODO: access/transam/subtrans.c
+    crate::access::transam::subtrans::ExtendSUBTRANS(_newestXact)
 }
 
 #[inline]
 unsafe fn XLogPutNextOid(_nextOid: Oid) {
-    unimplemented!() // TODO: access/transam/xlog.c
+    crate::access::transam::xlog::XLogPutNextOid(_nextOid)
 }
 
 #[inline]
-unsafe fn SearchSysCacheExists1(_cacheId: c_int, _key1: Datum) -> bool {
-    unimplemented!() // TODO: utils/cache/syscache.c
-}
+unsafe fn SearchSysCacheExists1(_cacheId: c_int, _key1: Datum) -> bool { crate::utils::cache::syscache::SearchSysCacheExists1(_cacheId as _, _key1 as _) }
 
 #[inline]
 unsafe fn pg_write_barrier() {

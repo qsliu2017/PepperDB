@@ -132,7 +132,7 @@ unsafe fn heap_form_tuple(
     _tupleDescriptor: TupleDesc,
     _values: *mut Datum,
     _isnull: *mut bool,
-) -> HeapTuple { core::ptr::null_mut() /* TODO(pg-port) */ }
+) -> HeapTuple { crate::access::common::heaptuple::heap_form_tuple(_tupleDescriptor as _, _values as _, _isnull as _) }
 #[inline]
 unsafe fn heap_modify_tuple(
     _tuple: HeapTuple,
@@ -140,7 +140,7 @@ unsafe fn heap_modify_tuple(
     _replValues: *mut Datum,
     _replIsnull: *mut bool,
     _doReplace: *mut bool,
-) -> HeapTuple { core::ptr::null_mut() /* TODO(pg-port) */ }
+) -> HeapTuple { crate::access::common::heaptuple::heap_modify_tuple(_tuple as _, _tupleDesc as _, _replValues as _, _replIsnull as _, _doReplace as _) }
 // RelationGetDescr from utils::rel is already wired
 use crate::utils::rel::RelationGetDescr;
 use crate::access::htup_details::HeapTupleData;
@@ -234,7 +234,6 @@ extern "C" {
     // utils/cache/lsyscache.c
     fn get_attnum(relid: Oid, attname: *const c_char) -> AttrNumber;
     fn get_rel_name(relid: Oid) -> *mut c_char;
-    fn get_element_type(typid: Oid) -> Oid;
     fn get_multirange_range(multirangeOid: Oid) -> Oid;
     fn IsTrueArrayType(form: Form_pg_type) -> bool;
     fn has_privs_of_role(member: Oid, role: Oid) -> bool;
@@ -286,8 +285,6 @@ extern "C" {
     fn convert_GUC_name_for_parameter_acl(name: *const c_char) -> *mut c_char;
     // access/xact.c
     fn CommandCounterIncrement();
-    // utils/adt/format_type.c
-    fn format_type_be(type_oid: Oid) -> *mut c_char;
     // utils/adt/varlena.c
     fn cstring_to_text(s: *const c_char) -> *mut crate::c::text;
     fn TextDatumGetCString(d: Datum) -> *mut c_char;
@@ -309,6 +306,9 @@ extern "C" {
     fn snprintf(buf: *mut c_char, size: usize, fmt: *const c_char, ...) -> c_int;
 }
 
+unsafe fn get_element_type(typid: Oid) -> Oid { crate::utils::cache::lsyscache::get_element_type(typid as _) as _ }
+unsafe fn format_type_be(type_oid: Oid) -> *mut c_char { crate::utils::adt::format_type::format_type_be(type_oid as _) as _ }
+
 // Palloc helpers: the C uses palloc0_array(T, n) -- produce *mut T via palloc0.
 #[inline]
 unsafe fn palloc0_datums(n: usize) -> *mut Datum {
@@ -322,14 +322,14 @@ unsafe fn palloc0_bools(n: usize) -> *mut bool {
 // --------------------------------
 // Catalog index / syscache constants (genbki-generated in C)
 // --------------------------------
-const RELOID: c_int          = 27;
-const ATTNUM: c_int          = 4;
+const RELOID: c_int          = 57;
+const ATTNUM: c_int          = 7;
 const AUTHOID: c_int         = 11;
-const NAMESPACEOID: c_int    = 16;
-const TYPEOID: c_int         = 44;
-const DEFACLROLENSPOBJ: c_int = 108;   // TODO(pg-port)
-const PARAMETERACLOID: c_int  = 109;   // TODO(pg-port)
-const PARAMETERACLNAME: c_int = 110;   // TODO(pg-port)
+const NAMESPACEOID: c_int    = 38;
+const TYPEOID: c_int         = 82;
+const DEFACLROLENSPOBJ: c_int = crate::utils::cache::syscache_ids_gen::DEFACLROLENSPOBJ;
+const PARAMETERACLOID: c_int  = 44;   // TODO(pg-port)
+const PARAMETERACLNAME: c_int = 43;   // TODO(pg-port)
 
 const DefaultAclOidIndexId: Oid              = 828;
 const LargeObjectMetadataOidIndexId: Oid     = 2996;
@@ -2752,7 +2752,8 @@ pub unsafe fn aclcheck_error(aclerr: AclResult, objtype: ObjectType, objectname:
                 | OBJECT_ROLE | OBJECT_RULE | OBJECT_TABCONSTRAINT
                 | OBJECT_TRANSFORM | OBJECT_TRIGGER | OBJECT_TSPARSER
                 | OBJECT_TSTEMPLATE | OBJECT_USER_MAPPING => {
-                    elog!(ERROR, "unsupported object type: {}", objtype as c_int);
+                    if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_BT unsupported_objtype site bt:
+{}", std::backtrace::Backtrace::force_capture()); } elog!(ERROR, "unsupported object type: {}", objtype as c_int);
                     core::ptr::null()
                 }
                 _ => b"???\0".as_ptr() as *const c_char,
@@ -2805,7 +2806,8 @@ pub unsafe fn aclcheck_error(aclerr: AclResult, objtype: ObjectType, objectname:
                 | OBJECT_PARAMETER_ACL | OBJECT_PUBLICATION_NAMESPACE | OBJECT_PUBLICATION_REL
                 | OBJECT_ROLE | OBJECT_TRANSFORM | OBJECT_TSPARSER
                 | OBJECT_TSTEMPLATE | OBJECT_USER_MAPPING => {
-                    elog!(ERROR, "unsupported object type: {}", objtype as c_int);
+                    if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_BT unsupported_objtype site bt:
+{}", std::backtrace::Backtrace::force_capture()); } elog!(ERROR, "unsupported object type: {}", objtype as c_int);
                     core::ptr::null()
                 }
                 _ => b"???\0".as_ptr() as *const c_char,
@@ -3189,6 +3191,7 @@ unsafe fn pg_class_aclmask_ext(
     /*
      * Otherwise, superusers bypass all permission-checking.
      */
+    if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_AUTH aclmask_ext roleid={} mask={} mask_mut={} super={}", roleid, mask, mask_mut, superuser_arg(roleid)); }
     if superuser_arg(roleid) {
         ReleaseSysCache(tuple);
         return mask_mut;

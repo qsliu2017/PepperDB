@@ -47,19 +47,17 @@ use crate::nodes::primnodes::AttrNumber;
 /// Carried opaque here so TupleHashTableData layout is honest without pulling
 /// in execExpr.c.  The ExprStates that would live here are built by
 /// ExecBuildHash32FromAttrs / ExecBuildGroupingEqual.
-pub type ExprState = c_void;
+pub use crate::nodes::execnodes::ExprState;
 
-/// TODO(pg-port): real def `typedef struct ExprContext` (nodes/execnodes.h).
 /// The standalone ExprContext created by CreateStandaloneExprContext().
-pub type ExprContext = c_void;
+pub use crate::nodes::execnodes::ExprContext;
 
 /// TODO(pg-port): real def `typedef struct PlanState` (nodes/execnodes.h).
 /// Only used as the optional JIT-owning parent passed through to the
 /// (unported) expression builders.
 pub type PlanState = c_void;
 
-/// TODO(pg-port): real def `typedef struct FmgrInfo` (utils/fmgr.h).
-pub type FmgrInfo = c_void;
+pub use crate::utils::fmgr::FmgrInfo;
 
 /// TODO(pg-port): real def in access/tupdesc.h.  Tuple descriptor of input
 /// rows; only passed through to the expression/slot builders here.
@@ -75,15 +73,12 @@ static ParallelWorkerNumber: i32 = 0;
 
 /// TODO(pg-port): miscadmin.h / nodeHash.c.  Bytes available for hash tables.
 unsafe fn get_hash_memory_limit() -> Size {
-    // TODO(pg-port): real value derives from the hash_mem_multiplier and work_mem
-    // GUCs.  Until those are ported, return a large constant so the nbuckets cap
-    // in BuildTupleHashTable is effectively inert (matches PG's "don't shrink").
-    unimplemented!("get_hash_memory_limit: needs work_mem/hash_mem_multiplier GUCs")
+    crate::miscadmin::get_hash_memory_limit() as Size
 }
 
 /// TODO(pg-port): utils/lsyscache.c get_opcode (pg_operator.oprcode lookup).
-unsafe fn get_opcode(_opno: Oid) -> Oid {
-    unimplemented!("get_opcode: needs syscache (pg_operator)")
+unsafe fn get_opcode(opno: Oid) -> Oid {
+    crate::utils::cache::lsyscache::get_opcode(opno)
 }
 
 /// TODO(pg-port): utils/lsyscache.c get_op_hash_functions.
@@ -92,12 +87,12 @@ unsafe fn get_op_hash_functions(
     _lhs_procno: *mut Oid,
     _rhs_procno: *mut Oid,
 ) -> bool {
-    unimplemented!("get_op_hash_functions: needs syscache (pg_amop/pg_amproc)")
+    crate::utils::cache::lsyscache::get_op_hash_functions(_opno as _, _lhs_procno as _, _rhs_procno as _) as _
 }
 
 /// TODO(pg-port): utils/fmgr.c fmgr_info.
 unsafe fn fmgr_info(_functionId: Oid, _finfo: *mut FmgrInfo) {
-    unimplemented!("fmgr_info: needs syscache (pg_proc)")
+    crate::utils::fmgr::fmgr_info(_functionId as _, _finfo as _)
 }
 
 /// TODO(pg-port): execTuples.c MakeSingleTupleTableSlot.
@@ -105,17 +100,17 @@ unsafe fn MakeSingleTupleTableSlot(
     _tupdesc: TupleDesc,
     _tts_ops: *const TupleTableSlotOps,
 ) -> *mut TupleTableSlot {
-    unimplemented!("MakeSingleTupleTableSlot")
+    crate::executor::execTuples::MakeSingleTupleTableSlot(_tupdesc as _, _tts_ops as _) as _
 }
 
 /// TODO(pg-port): access/common/tupdesc.c CreateTupleDescCopy.
 unsafe fn CreateTupleDescCopy(_tupdesc: TupleDesc) -> TupleDesc {
-    unimplemented!("CreateTupleDescCopy")
+    crate::access::common::tupdesc::CreateTupleDescCopy(_tupdesc as _) as _
 }
 
 /// TODO(pg-port): execUtils.c CreateStandaloneExprContext.
 unsafe fn CreateStandaloneExprContext() -> *mut ExprContext {
-    unimplemented!("CreateStandaloneExprContext")
+    crate::executor::execUtils::CreateStandaloneExprContext() as _
 }
 
 /// TODO(pg-port): execExpr.c ExecBuildHash32FromAttrs.
@@ -129,7 +124,7 @@ unsafe fn ExecBuildHash32FromAttrs(
     _parent: *mut PlanState,
     _init_value: uint32,
 ) -> *mut ExprState {
-    unimplemented!("ExecBuildHash32FromAttrs: needs execExpr.c")
+    crate::executor::execExpr::ExecBuildHash32FromAttrs(_desc as _, _ops as _, _hashfunctions as _, _collations as _, _numCols as _, _keyColIdx as _, _parent as _, _init_value as _) as _
 }
 
 /// TODO(pg-port): execExpr.c ExecBuildGroupingEqual.
@@ -144,11 +139,12 @@ unsafe fn ExecBuildGroupingEqual(
     _collations: *const Oid,
     _parent: *mut PlanState,
 ) -> *mut ExprState {
-    unimplemented!("ExecBuildGroupingEqual: needs execExpr.c")
+    crate::executor::execExpr::ExecBuildGroupingEqual(_ldesc as _, _rdesc as _, _lops as _, _rops as _, _numCols as _, _keyColIdx as _, _eqfunctions as _, _collations as _, _parent as _) as _
 }
 
 // TTSOpsMinimalTuple slot ops (defined in execTuples.rs).
 use crate::executor::execTuples::TTSOpsMinimalTuple;
+use crate::executor::execTuples::ExecStoreMinimalTuple;
 
 // ----------------------------------------------------------------------------
 // TupleHashEntryData / TupleHashTableData (executor.h + execnodes.h).
@@ -255,6 +251,20 @@ pub unsafe fn TupleHashEntryGetAdditional(
 
 pub struct TupleHashTableOps;
 
+// The SimpleHash callbacks (hash_key/keys_equal) are stateless associated fns,
+// but the C SH_HASH_KEY/SH_EQUAL reach the owning table via tb->private_data.
+// We thread the current table through a thread-local, set by the lookup/find
+// helpers around the simplehash insert/lookup calls (single backend, no reentry).
+thread_local! {
+    static CURRENT_TUPLE_HASHTABLE: core::cell::Cell<*mut TupleHashTableData> =
+        const { core::cell::Cell::new(core::ptr::null_mut()) };
+}
+
+#[inline]
+unsafe fn current_tuple_hashtable() -> TupleHashTable {
+    CURRENT_TUPLE_HASHTABLE.with(|c| c.get())
+}
+
 impl SimpleHashOps for TupleHashTableOps {
     type Elem = TupleHashEntryData;
     type Key = MinimalTuple;
@@ -281,10 +291,8 @@ impl SimpleHashOps for TupleHashTableOps {
     /// TODO(pg-port): the per-row hash evaluates `in_hash_expr` over the input
     /// slot via ExecEvalExpr; needs execExpr.c.  See
     /// TupleHashTableHash_internal below.
-    fn hash_key(_key: MinimalTuple) -> u32 {
-        unimplemented!(
-            "TupleHashTableHash_internal: ExprState hashing needs execExpr.c (ExecEvalExpr)"
-        )
+    fn hash_key(key: MinimalTuple) -> u32 {
+        unsafe { TupleHashTableHash_internal(current_tuple_hashtable(), key) }
     }
 
     /// SH_GET_HASH(tb, a) -> a->hash (SH_STORE_HASH).  The cached hash is read
@@ -306,10 +314,8 @@ impl SimpleHashOps for TupleHashTableOps {
     ///
     /// TODO(pg-port): per-row equality evaluates `cur_eq_func` via
     /// ExecQualAndReset; needs execExpr.c.  See TupleHashTableMatch below.
-    fn keys_equal(_e: &TupleHashEntryData, _key: MinimalTuple) -> bool {
-        unimplemented!(
-            "TupleHashTableMatch: ExprState equality needs execExpr.c (ExecQualAndReset)"
-        )
+    fn keys_equal(e: &TupleHashEntryData, key: MinimalTuple) -> bool {
+        unsafe { TupleHashTableMatch(current_tuple_hashtable(), e.firstTuple, key) == 0 }
     }
 }
 
@@ -384,9 +390,7 @@ pub unsafe fn execTuplesHashPrepare(
         /* We're not supporting cross-type cases here */
         Assert!(left_hash_function == right_hash_function);
         *(*eqFuncOids).offset(i) = eq_function;
-        // FmgrInfo is sizeof-zero opaque; offset math degenerates but matches
-        // the C call shape once the real struct is ported.
-        fmgr_info(right_hash_function, *hashFunctions);
+        fmgr_info(right_hash_function, (*hashFunctions).offset(i));
     }
 }
 
@@ -555,6 +559,25 @@ pub unsafe fn LookupTupleHashEntry(
     entry
 }
 
+/// ResetTupleHashIterator / InitTupleHashIterator -- begin a scan of all entries.
+pub unsafe fn ResetTupleHashIterator(
+    hashtable: TupleHashTable,
+    iter: *mut crate::nodes::execnodes::tuplehash_iterator,
+) {
+    (*iter).inner = (*(*hashtable).hashtab).start_iterate();
+}
+
+/// ScanTupleHashTable -- return the next entry, or NULL when exhausted.
+pub unsafe fn ScanTupleHashTable(
+    hashtable: TupleHashTable,
+    iter: *mut crate::nodes::execnodes::tuplehash_iterator,
+) -> TupleHashEntry {
+    match (*(*hashtable).hashtab).iterate(&mut (*iter).inner) {
+        Some(idx) => (*(*hashtable).hashtab).entry_mut(idx) as *mut TupleHashEntryData,
+        None => null_mut(),
+    }
+}
+
 /// Compute the hash value for a tuple.
 ///
 /// TODO(pg-port): evaluates `tab_hash_expr` via ExecEvalExpr; blocked on
@@ -567,8 +590,9 @@ pub unsafe fn TupleHashTableHash(
     (*hashtable).in_hash_expr = (*hashtable).tab_hash_expr;
 
     let oldContext = MemoryContextSwitchTo((*hashtable).tempcxt);
-    let _ = oldContext;
-    unimplemented!("TupleHashTableHash: TupleHashTableHash_internal needs execExpr.c")
+    let hash = TupleHashTableHash_internal(hashtable, null_mut());
+    MemoryContextSwitchTo(oldContext);
+    hash
 }
 
 /// A variant of LookupTupleHashEntry for callers that already computed `hash`.
@@ -615,8 +639,11 @@ pub unsafe fn FindTupleHashEntry(
     (*hashtable).in_hash_expr = hashexpr;
     (*hashtable).cur_eq_func = eqcomp;
 
-    let _ = oldContext;
-    unimplemented!("FindTupleHashEntry: tuplehash_lookup drives ExprState ops (execExpr.c)")
+    let hash = TupleHashTableHash_internal(hashtable, null_mut());
+    let entry = LookupTupleHashEntry_internal(hashtable, slot, null_mut(), hash);
+
+    MemoryContextSwitchTo(oldContext);
+    entry
 }
 
 /// Does the work of LookupTupleHashEntry and LookupTupleHashEntryHash.  Useful
@@ -635,6 +662,7 @@ unsafe fn LookupTupleHashEntry_internal(
     let entry: *mut TupleHashEntryData;
     let key: MinimalTuple = null_mut(); /* flag to reference inputslot */
 
+    CURRENT_TUPLE_HASHTABLE.with(|c| c.set(hashtable));
     let tb = &mut *(*hashtable).hashtab;
 
     if !isnew.is_null() {
@@ -690,10 +718,23 @@ unsafe fn LookupTupleHashEntry_internal(
 /// TODO(pg-port): needs ExecEvalExpr(in_hash_expr/tab_hash_expr, exprcontext)
 /// plus ExecStoreMinimalTuple; blocked on execExpr.c / execTuples slot ops.
 pub unsafe fn TupleHashTableHash_internal(
-    _hashtable: TupleHashTable,
-    _tuple: MinimalTuple,
+    hashtable: TupleHashTable,
+    tuple: MinimalTuple,
 ) -> uint32 {
-    unimplemented!("TupleHashTableHash_internal: ExecEvalExpr/ExecStoreMinimalTuple (execExpr.c)")
+    let slot: *mut TupleTableSlot;
+    if tuple.is_null() {
+        slot = (*hashtable).inputslot;
+    } else {
+        slot = (*hashtable).tableslot;
+        ExecStoreMinimalTuple(tuple, slot, false);
+    }
+    (*(*hashtable).exprcontext).ecxt_innertuple = slot;
+    let mut isnull = false;
+    crate::postgres::DatumGetUInt32(crate::executor::executor::ExecEvalExpr(
+        (*hashtable).in_hash_expr,
+        (*hashtable).exprcontext,
+        &mut isnull,
+    ))
 }
 
 /// See whether two tuples (presumably of the same hash) match.  SH_EQUAL
@@ -702,11 +743,23 @@ pub unsafe fn TupleHashTableHash_internal(
 /// TODO(pg-port): needs ExecQualAndReset(cur_eq_func, econtext) +
 /// ExecStoreMinimalTuple; blocked on execExpr.c.
 pub unsafe fn TupleHashTableMatch(
-    _hashtable: TupleHashTable,
-    _tuple1: MinimalTuple,
+    hashtable: TupleHashTable,
+    tuple1: MinimalTuple,
     _tuple2: MinimalTuple,
 ) -> c_int {
-    unimplemented!("TupleHashTableMatch: ExecQualAndReset/ExecStoreMinimalTuple (execExpr.c)")
+    /* tuple1 is an in-table entry; tuple2 is NULL meaning use inputslot */
+    let slot1 = (*hashtable).tableslot;
+    ExecStoreMinimalTuple(tuple1, slot1, false);
+    let slot2 = (*hashtable).inputslot;
+
+    let econtext = (*hashtable).exprcontext;
+    (*econtext).ecxt_innertuple = slot2;
+    (*econtext).ecxt_outertuple = slot1;
+    if crate::executor::executor::ExecQualAndReset((*hashtable).cur_eq_func, econtext) {
+        0
+    } else {
+        1
+    }
 }
 
 // ----------------------------------------------------------------------------

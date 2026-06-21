@@ -54,9 +54,7 @@ const PGSTAT_BACKEND_FLUSH_IO: u32 = 1 << 1;
 // STUB: flushes backend-local stats of the given kinds into shmem. Unported;
 // returns false (no lock contention). TODO: port pgstat_backend.c.
 #[inline]
-unsafe fn pgstat_flush_backend(_nowait: bool, _flags: u32) -> bool {
-    false
-}
+unsafe fn pgstat_flush_backend(_nowait: bool, _flags: u32) -> bool { crate::utils::activity::pgstat_backend::pgstat_flush_backend(_nowait, _flags) }
 
 // STUB: flushes pending IO stats into shmem. Unported. TODO: port pgstat_io.c.
 #[inline]
@@ -179,7 +177,7 @@ pub unsafe fn pgstat_wal_init_backend_cb() {
     prevWalUsage = pgWalUsage;
 }
 
-pub unsafe fn pgstat_wal_init_shmem_cb(stats: *mut c_void) {
+pub unsafe extern "C" fn pgstat_wal_init_shmem_cb(stats: *mut c_void) {
     let stats_shmem = stats as *mut PgStatShared_Wal;
 
     LWLockInitialize(&mut (*stats_shmem).lock, LWTRANCHE_PGSTATS_DATA);

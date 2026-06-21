@@ -165,10 +165,10 @@ pub const PUBLISH_GENCOLS_NONE: PublishGencolsType = b'n' as c_char;
 pub const PUBLISH_GENCOLS_STORED: PublishGencolsType = b's' as c_char;
 
 // Syscache IDs -- TODO(pg-port): real values in utils/syscache.h
-const PUBLICATIONOID: c_int = 0;
-const PUBLICATIONNAMESPACEMAP: c_int = 0;
-const PUBLICATIONRELMAP: c_int = 0;
-const NAMESPACEOID: c_int = 0;
+const PUBLICATIONOID: c_int = 51;
+const PUBLICATIONNAMESPACEMAP: c_int = 50;
+const PUBLICATIONRELMAP: c_int = 53;
+const NAMESPACEOID: c_int = 38;
 
 // Attribute number for pg_publication_rel.prqual
 // TODO(pg-port): catalog/pg_publication_rel.h

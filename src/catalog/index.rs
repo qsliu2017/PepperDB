@@ -95,7 +95,7 @@ use crate::catalog::pg_index::{
     INDOPTION_DESC, INDOPTION_NULLS_FIRST,
 };
 // Anum_pg_index_* constants (the fixed + variable columns)
-const INDEXRELID: c_int          = 26; // SysCacheIdentifier
+const INDEXRELID: c_int          = 34; // SysCacheIdentifier
 const Anum_pg_index_indexrelid: AttrNumber    = 1;
 const Anum_pg_index_indrelid: AttrNumber      = 2;
 const Anum_pg_index_indnatts: AttrNumber      = 3;
@@ -141,11 +141,11 @@ const TriggerRelationId: Oid        = 2620; // pg_trigger
 const DescriptionObjIndexId: Oid    = 2675; // pg_description_o_c_o_index
 const TriggerConstraintIndexId: Oid = 2699; // pg_trigger_tgconstraint_index
 const ClassOidIndexId: Oid          = 2662; // pg_class_oid_index
-const RELOID: c_int                 = 52;   // SysCacheIdentifier
-const CONSTROID: c_int              = 12;   // SysCacheIdentifier
-const ATTNUM: c_int                 = 4;    // SysCacheIdentifier
-const TYPEOID: c_int                = 76;   // SysCacheIdentifier
-const CLAOID: c_int                 = 10;   // SysCacheIdentifier
+const RELOID: c_int                 = 57;   // SysCacheIdentifier
+const CONSTROID: c_int              = 19;   // SysCacheIdentifier
+const ATTNUM: c_int                 = 7;    // SysCacheIdentifier
+const TYPEOID: c_int                = 82;   // SysCacheIdentifier
+const CLAOID: c_int                 = 14;   // SysCacheIdentifier
 const TEXT_BTREE_PATTERN_OPS_OID: Oid    = 2774;
 const VARCHAR_BTREE_PATTERN_OPS_OID: Oid = 2775;
 const BPCHAR_BTREE_PATTERN_OPS_OID: Oid  = 2180;
@@ -234,14 +234,10 @@ use crate::utils::cache::lsyscache::{
 };
 /// get_index_constraint -- stub for catalog/index.c usage
 #[inline]
-unsafe fn get_index_constraint(indexId: Oid) -> Oid {
-    InvalidOid /* TODO(pg-port) */
-}
+unsafe fn get_index_constraint(indexId: Oid) -> Oid { crate::catalog::pg_depend::get_index_constraint(indexId as _) }
 /// get_index_ref_constraints -- stub for catalog/index.c usage
 #[inline]
-unsafe fn get_index_ref_constraints(indexId: Oid) -> *mut crate::nodes::pg_list::List {
-    NIL
-}
+unsafe fn get_index_ref_constraints(indexId: Oid) -> *mut crate::nodes::pg_list::List { crate::catalog::pg_depend::get_index_ref_constraints(indexId as _) as _ }
 
 // -- relcache helpers --------------------------------------------------------
 use crate::utils::cache::relcache::{
@@ -318,9 +314,9 @@ macro_rules! SET_LOCKTAG_RELATION {
 // -- inval --------------------------------------------------------------------
 // utils/inval module not yet wired; provide stubs.
 #[inline]
-unsafe fn CacheInvalidateRelcache(_rel: Relation) { /* TODO(pg-port) */ }
+unsafe fn CacheInvalidateRelcache(_rel: Relation) { crate::utils::cache::inval::CacheInvalidateRelcache(_rel as _) }
 #[inline]
-unsafe fn CacheInvalidateRelcacheByTuple(_tup: *mut HeapTupleData) { /* TODO(pg-port) */ }
+unsafe fn CacheInvalidateRelcacheByTuple(_tup: *mut HeapTupleData) { crate::utils::cache::inval::CacheInvalidateRelcacheByTuple(_tup as _) }
 
 // -- binary_upgrade -----------------------------------------------------------
 // binary_upgrade globals re-imported below at the usage site (PART 2)
@@ -329,9 +325,7 @@ unsafe fn CacheInvalidateRelcacheByTuple(_tup: *mut HeapTupleData) { /* TODO(pg-
 use crate::catalog::partition::get_partition_ancestors;
 /// StoreSingleInheritance stub (catalog/pg_inherits.c)
 #[inline]
-unsafe fn StoreSingleInheritance(_inhrelid: Oid, _inhparent: Oid, _inhseqno: i32) {
-    /* TODO(pg-port) */
-}
+unsafe fn StoreSingleInheritance(_inhrelid: Oid, _inhparent: Oid, _inhseqno: i32) { crate::catalog::pg_inherits::StoreSingleInheritance(_inhrelid as _, _inhparent as _, _inhseqno as _) }
 /// DeleteInheritsTuple stub
 #[inline]
 unsafe fn DeleteInheritsTuple(
@@ -339,14 +333,10 @@ unsafe fn DeleteInheritsTuple(
     _inhparent: Oid,
     _expect_detached: bool,
     _childname: *const c_char,
-) {
-    /* TODO(pg-port) */
-}
+) { unimplemented!() }
 /// SetRelationHasSubclass stub
 #[inline]
-unsafe fn SetRelationHasSubclass(_relid: Oid, _relhassubclass: bool) {
-    /* TODO(pg-port) */
-}
+unsafe fn SetRelationHasSubclass(_relid: Oid, _relhassubclass: bool) { crate::commands::tablecmds::SetRelationHasSubclass(_relid as _, _relhassubclass as _) }
 
 // -- dependency ---------------------------------------------------------------
 // catalog/pg_depend.c not yet ported; all stubs here.
@@ -361,13 +351,13 @@ unsafe fn recordDependencyOn(
     _depender: *const ObjectAddress,
     _referenced: *const ObjectAddress,
     _deptype: c_char,
-) { /* TODO(pg-port) */ }
+) { crate::catalog::pg_depend::recordDependencyOn(_depender as _, _referenced as _, _deptype as _) }
 #[inline]
 unsafe fn record_object_address_dependencies(
     _depender: *const ObjectAddress,
     _referenced: *mut ObjectAddresses,
     _deptype: c_char,
-) { /* TODO(pg-port) */ }
+) { crate::catalog::dependency::record_object_address_dependencies(_depender as _, _referenced as _, _deptype as _) }
 #[inline]
 unsafe fn recordDependencyOnSingleRelExpr(
     _depender: *const ObjectAddress,
@@ -376,24 +366,24 @@ unsafe fn recordDependencyOnSingleRelExpr(
     _selfref_behavior: c_char,
     _default_behavior: c_char,
     _reverse_self: bool,
-) { /* TODO(pg-port) */ }
+) { crate::catalog::dependency::recordDependencyOnSingleRelExpr(_depender as _, _expr as _, _relId as _, _selfref_behavior as _, _default_behavior as _, _reverse_self as _) }
 #[inline]
 unsafe fn deleteDependencyRecordsForClass(
     _classId: Oid,
     _objectId: Oid,
     _refclassId: Oid,
     _deptype: c_char,
-) -> i64 { 0 /* TODO(pg-port) */ }
+) -> i64 { crate::catalog::pg_depend::deleteDependencyRecordsForClass(_classId as _, _objectId as _, _refclassId as _, _deptype as _) as _ }
 #[inline]
 unsafe fn changeDependenciesOf(_classId: Oid, _oldObjectId: Oid, _newObjectId: Oid) -> i64 { 0 }
 #[inline]
 unsafe fn changeDependenciesOn(_classId: Oid, _objectId: Oid, _newRefObjectId: Oid) -> i64 { 0 }
 #[inline]
-unsafe fn new_object_addresses() -> *mut ObjectAddresses { core::ptr::null_mut() }
+unsafe fn new_object_addresses() -> *mut ObjectAddresses { crate::catalog::dependency::new_object_addresses() as _ }
 #[inline]
 unsafe fn add_exact_object_address(_object: *const ObjectAddress, _addrs: *mut ObjectAddresses) {}
 #[inline]
-unsafe fn free_object_addresses(_addrs: *mut ObjectAddresses) {}
+unsafe fn free_object_addresses(_addrs: *mut ObjectAddresses) { crate::catalog::dependency::free_object_addresses(_addrs as _) }
 
 // -- pg_constraint helpers ----------------------------------------------------
 // CONSTRAINT_PRIMARY/UNIQUE/EXCLUSION defined locally below at file top level;
@@ -443,9 +433,7 @@ unsafe fn ConstraintNameIsUsed(
     _cctype: c_char,
     _relid: Oid,
     _name: *const c_char,
-) -> bool {
-    false /* TODO(pg-port) */
-}
+) -> bool { crate::catalog::pg_constraint::ConstraintNameIsUsed(_cctype as _, _relid as _, _name as _) }
 
 // -- pg_statistics helpers ----------------------------------------------------
 use crate::catalog::heap::{RemoveStatistics, CopyStatistics};
@@ -456,6 +444,7 @@ unsafe fn InvokeObjectPostCreateHookArg(
     _classId: Oid, _objectId: Oid, _subId: c_int, _is_internal: bool,
 ) { /* TODO(pg-port) */ }
 #[inline]
+#[no_mangle]
 unsafe fn InvokeObjectPostAlterHookArg(
     _classId: Oid, _objectId: Oid, _subId: c_int, _auxiliaryId: Oid, _is_internal: bool,
 ) { /* TODO(pg-port) */ }
@@ -467,7 +456,7 @@ unsafe fn EventTriggerCollectSimpleCommand(
     _address: ObjectAddress,
     _secondaryObject: ObjectAddress,
     _parsetree: *mut crate::nodes::nodes::Node,
-) { /* TODO(pg-port) */ }
+) { unimplemented!() }
 use crate::catalog::objectaddress_impl::INVALID_OBJECT_ADDRESS as InvalidObjectAddress;
 
 // -- nodes / optimizer / parser -----------------------------------------------
@@ -488,9 +477,7 @@ unsafe fn map_variable_attnos(
     _attmap: *const crate::access::common::attmap::AttrMap,
     _rowtype_domain: Oid,
     _found_whole_row: *mut bool,
-) -> *mut crate::nodes::nodes::Node {
-    core::ptr::null_mut() /* TODO(pg-port) */
-}
+) -> *mut crate::nodes::nodes::Node { crate::rewrite::rewriteManip::map_variable_attnos(_node as _, _varno as _, _sublevels_up as _, _attmap as _, _rowtype_domain as _, _found_whole_row as _) as _ }
 use crate::access::common::attmap::AttrMap;
 
 // -- executor -----------------------------------------------------------------
@@ -500,28 +487,20 @@ use crate::executor::tuptable::TupleTableSlot;
 unsafe fn ExecPrepareExprList(
     _nodes: *mut crate::nodes::pg_list::List,
     _estate: *mut EState,
-) -> *mut crate::nodes::pg_list::List {
-    core::ptr::null_mut() /* TODO(pg-port) */
-}
+) -> *mut crate::nodes::pg_list::List { crate::executor::execExpr::ExecPrepareExprList(_nodes as _, _estate as _) as _ }
 #[inline]
 unsafe fn ExecPrepareQual(
     _qual: *mut crate::nodes::pg_list::List,
     _estate: *mut EState,
-) -> *mut ExprState {
-    core::ptr::null_mut() /* TODO(pg-port) */
-}
+) -> *mut ExprState { crate::executor::execExpr::ExecPrepareQual(_qual as _, _estate as _) }
 #[inline]
-unsafe fn ExecQual(_state: *mut ExprState, _econtext: *mut crate::nodes::execnodes::ExprContext) -> bool {
-    true /* TODO(pg-port) */
-}
+unsafe fn ExecQual(_state: *mut ExprState, _econtext: *mut crate::nodes::execnodes::ExprContext) -> bool { crate::executor::executor::ExecQual(_state as _, _econtext as _) }
 #[inline]
 unsafe fn ExecEvalExprSwitchContext(
     _state: *mut ExprState,
     _econtext: *mut crate::nodes::execnodes::ExprContext,
     _isNull: *mut bool,
-) -> Datum {
-    0 /* TODO(pg-port) */
-}
+) -> Datum { crate::executor::executor::ExecEvalExprSwitchContext(_state as _, _econtext as _, _isNull as _) }
 #[inline]
 unsafe fn GetPerTupleExprContext(
     estate: *mut EState,
@@ -543,21 +522,17 @@ unsafe fn table_beginscan_strat(
     _key: *mut ScanKeyData,
     _allow_strat: bool,
     _allow_sync: bool,
-) -> TableScanDesc {
-    core::ptr::null_mut() /* TODO(pg-port) */
-}
+) -> TableScanDesc { unimplemented!() }
 /// table_endscan stub
 #[inline]
-unsafe fn table_endscan(_scan: TableScanDesc) { /* TODO(pg-port) */ }
+unsafe fn table_endscan(_scan: TableScanDesc) { /* stub no-op (restored: test_setup path) */ }
 /// table_scan_getnextslot stub
 #[inline]
 unsafe fn table_scan_getnextslot(
     _scan: TableScanDesc,
     _direction: c_int,
     _slot: *mut crate::executor::tuptable::TupleTableSlot,
-) -> bool {
-    false /* TODO(pg-port) */
-}
+) -> bool { crate::access::table::tableam::table_scan_getnextslot(_scan as _, _direction as _, _slot as _) }
 /// table_index_validate_scan stub
 #[inline]
 unsafe fn table_index_validate_scan(
@@ -595,7 +570,9 @@ unsafe fn slot_getattr(
     _slot: *mut crate::executor::tuptable::TupleTableSlot,
     _attnum: c_int,
     _isnull: *mut bool,
-) -> Datum { 0 }
+) -> Datum {
+    crate::executor::tuptable::slot_getattr(_slot as _, _attnum, _isnull)
+}
 
 // -- index AM operations ------------------------------------------------------
 use crate::access::index::indexam::{
@@ -612,24 +589,25 @@ unsafe fn makeIndexInfo(
     _ready: bool, _concurrent: bool,
     _summarizing: bool, _withoutOverlaps: bool,
 ) -> *mut crate::nodes::execnodes::IndexInfo {
-    core::ptr::null_mut() /* TODO(pg-port) */
+    crate::nodes::makefuncs::makeIndexInfo(
+        _numAttrs, _numKeyAttrs, _amoid, _expressions as _, _predicate as _,
+        _unique, _nullsNotDistinct, _ready, _concurrent, _summarizing, _withoutOverlaps,
+    ) as _
 }
 #[inline]
-unsafe fn RelationInitIndexAccessInfo(_indexRelation: Relation) { /* TODO(pg-port) */ }
-#[inline]
-unsafe fn index_register(_heapOid: Oid, _indexOid: Oid, _indexInfo: *mut crate::nodes::execnodes::IndexInfo) {
-    /* TODO(pg-port) */
+unsafe fn RelationInitIndexAccessInfo(indexRelation: Relation) {
+    crate::utils::cache::relcache::RelationInitIndexAccessInfo(indexRelation as _)
 }
 #[inline]
-unsafe fn get_attoptions(_indexId: Oid, _attno: c_int) -> Datum { 0 /* TODO(pg-port) */ }
+unsafe fn index_register(_heapOid: Oid, _indexOid: Oid, _indexInfo: *mut crate::nodes::execnodes::IndexInfo) { crate::bootstrap::bootstrap::index_register(_heapOid as _, _indexOid as _, _indexInfo as _) }
+#[inline]
+unsafe fn get_attoptions(_indexId: Oid, _attno: c_int) -> Datum { crate::utils::cache::lsyscache::get_attoptions(_indexId as _, _attno as _) }
 #[inline]
 unsafe fn RelationGetIndexExpressions(_indexRelation: Relation) -> *mut crate::nodes::pg_list::List {
     NIL /* TODO(pg-port) */
 }
 #[inline]
-unsafe fn RelationGetDummyIndexExpressions(_indexRelation: Relation) -> *mut crate::nodes::pg_list::List {
-    NIL /* TODO(pg-port) */
-}
+unsafe fn RelationGetDummyIndexExpressions(_indexRelation: Relation) -> *mut crate::nodes::pg_list::List { crate::utils::cache::relcache::RelationGetDummyIndexExpressions(_indexRelation as _) as _ }
 #[inline]
 unsafe fn RelationGetIndexPredicate(_indexRelation: Relation) -> *mut crate::nodes::pg_list::List {
     NIL /* TODO(pg-port) */
@@ -640,10 +618,11 @@ unsafe fn RelationGetExclusionInfo(
     _operators: *mut *mut Oid,
     _procs: *mut *mut Oid,
     _strats: *mut *mut u16,
-) { /* TODO(pg-port) */ }
+) { crate::utils::cache::relcache::RelationGetExclusionInfo(_indexRelation as _, _operators as _, _procs as _, _strats as _) }
 #[inline]
+#[no_mangle]
 unsafe fn IndexRelationGetNumberOfKeyAttributes(_indexRelation: Relation) -> c_int {
-    0 /* TODO(pg-port) */
+    (*(*_indexRelation).rd_index).indnkeyatts as c_int
 }
 type IndexStateFlagsAction = c_int;
 const INDEX_CREATE_SET_READY: IndexStateFlagsAction = 0;
@@ -728,9 +707,7 @@ use crate::storage::smgr::smgr::{
 type SMgrRelation = *mut crate::storage::smgr::smgr::SMgrRelationData;
 /// RelationGetSmgr stub -- real impl in utils/cache/relcache.c
 #[inline]
-unsafe fn RelationGetSmgr(_rel: Relation) -> SMgrRelation {
-    core::ptr::null_mut() /* TODO(pg-port) */
-}
+unsafe fn RelationGetSmgr(rel: Relation) -> SMgrRelation { crate::storage::buffer::bufmgr::RelationGetSmgr(rel as _) as _ }
 use crate::catalog::pg_class::{RELPERSISTENCE_UNLOGGED, RELPERSISTENCE_PERMANENT};
 use crate::common::relpath::INIT_FORKNUM;
 
@@ -744,36 +721,36 @@ unsafe fn UnregisterSnapshot(_snap: *mut c_void) {}
 #[inline]
 unsafe fn GetLatestSnapshot() -> *mut c_void { core::ptr::null_mut() }
 #[inline]
-unsafe fn GetTransactionSnapshot() -> *mut c_void { core::ptr::null_mut() }
+unsafe fn GetTransactionSnapshot() -> *mut c_void { crate::utils::time::snapmgr::GetTransactionSnapshot() as _ }
 #[inline]
-unsafe fn PushActiveSnapshot(_snap: *mut c_void) {}
+unsafe fn PushActiveSnapshot(_snap: *mut c_void) { crate::utils::time::snapmgr::PushActiveSnapshot(_snap as _) }
 #[inline]
-unsafe fn PopActiveSnapshot() {}
+unsafe fn PopActiveSnapshot() { crate::utils::time::snapmgr::PopActiveSnapshot() }
 // access/transam/xact not yet wired; stubs.
 #[inline]
-unsafe fn CommandCounterIncrement() { /* TODO(pg-port) */ }
+unsafe fn CommandCounterIncrement() { crate::access::transam::xact::CommandCounterIncrement() }
 #[inline]
 unsafe fn GetTopTransactionIdIfAny() -> TransactionId { InvalidTransactionId }
 #[inline]
-unsafe fn CommitTransactionCommand() {}
+unsafe fn CommitTransactionCommand() { crate::access::transam::xact::CommitTransactionCommand() }
 #[inline]
-unsafe fn StartTransactionCommand() {}
+unsafe fn StartTransactionCommand() { crate::access::transam::xact::StartTransactionCommand() }
 #[inline]
-unsafe fn GetCurrentTransactionNestLevel() -> c_int { 0 }
+unsafe fn GetCurrentTransactionNestLevel() -> c_int { crate::access::transam::xact::GetCurrentTransactionNestLevel() as _ }
 // access/transam/predicate not yet wired; stub.
 #[inline]
-unsafe fn TransferPredicateLocksToHeapRelation(_indexRel: Relation) { /* TODO(pg-port) */ }
+unsafe fn TransferPredicateLocksToHeapRelation(_indexRel: Relation) { crate::storage::lmgr::predicate::TransferPredicateLocksToHeapRelation(_indexRel as _) }
 
 // -- GUC / security -----------------------------------------------------------
 // utils/guc not yet wired; stubs.
 #[inline]
-unsafe fn NewGUCNestLevel() -> c_int { 0 }
+unsafe fn NewGUCNestLevel() -> c_int { crate::utils::misc::guc::NewGUCNestLevel() }
 #[inline]
-unsafe fn AtEOXact_GUC(_isCommit: bool, _nestLevel: c_int) {}
+unsafe fn AtEOXact_GUC(_isCommit: bool, _nestLevel: c_int) { crate::utils::misc::guc::AtEOXact_GUC(_isCommit as _, _nestLevel as _) }
 #[inline]
-unsafe fn RestrictSearchPath() {}
+unsafe fn RestrictSearchPath() { crate::utils::misc::guc::RestrictSearchPath() }
 #[inline]
-unsafe fn AutoVacuumingActive() -> bool { false }
+unsafe fn AutoVacuumingActive() -> bool { crate::postmaster::autovacuum::AutoVacuumingActive() }
 /// StdRdOptions -- minimal subset used here
 #[repr(C)]
 struct StdRdOptions {
@@ -813,31 +790,32 @@ const PROGRESS_CREATEIDX_SUBPHASE_INITIALIZE: c_int = 1; // access/gin/ginutil d
 const PROGRESS_CLUSTER_INDEX_REBUILD_COUNT: c_int = 7;
 /// pgstat_copy_relation_stats stub
 #[inline]
-unsafe fn pgstat_copy_relation_stats(_dst: Relation, _src: Relation) { /* TODO(pg-port) */ }
+unsafe fn pgstat_copy_relation_stats(_dst: Relation, _src: Relation) { crate::utils::activity::pgstat_relation::pgstat_copy_relation_stats(_dst as _, _src as _) }
 
 // -- commands/tablecmds helpers -----------------------------------------------
 // commands/tablecmds not yet wired; stubs.
 type BlockNumber = u32;
 #[inline]
-unsafe fn CheckTableNotInUse(_rel: Relation, _stmt: *const c_char) { /* TODO(pg-port) */ }
+unsafe fn CheckTableNotInUse(_rel: Relation, _stmt: *const c_char) { crate::commands::tablecmds::CheckTableNotInUse(_rel as _, _stmt as _) }
 #[inline]
 unsafe fn IsInParallelMode() -> bool { false }
 #[inline]
-fn RELATION_IS_OTHER_TEMP(_rel: Relation) -> bool { false }
+fn RELATION_IS_OTHER_TEMP(rel: Relation) -> bool { unsafe { (*(*rel).rd_rel).relpersistence == RELPERSISTENCE_TEMP as c_char && !(*rel).rd_islocaltemp } }
 #[inline]
-unsafe fn CheckRelationTableSpaceMove(_rel: Relation, _tablespaceOid: Oid) -> bool { false }
+unsafe fn CheckRelationTableSpaceMove(_rel: Relation, _tablespaceOid: Oid) -> bool { crate::commands::tablecmds::CheckRelationTableSpaceMove(_rel as _, _tablespaceOid as _) }
 #[inline]
-unsafe fn SetRelationTableSpace(_rel: Relation, _tablespaceOid: Oid, _newrelfilenode: Oid) {}
+unsafe fn SetRelationTableSpace(_rel: Relation, _tablespaceOid: Oid, _newrelfilenode: Oid) { crate::commands::tablecmds::SetRelationTableSpace(_rel as _, _tablespaceOid as _, _newrelfilenode as _) }
 #[inline]
-unsafe fn RelationSetNewRelfilenumber(_rel: Relation, _persistence: c_char) {}
+unsafe fn RelationSetNewRelfilenumber(_rel: Relation, _persistence: c_char) { crate::utils::cache::relcache::RelationSetNewRelfilenumber(_rel as _, _persistence as _) }
 #[inline]
-unsafe fn RelationAssumeNewRelfilelocator(_rel: Relation) {}
+unsafe fn RelationAssumeNewRelfilelocator(_rel: Relation) { crate::utils::cache::relcache::RelationAssumeNewRelfilelocator(_rel as _) }
 // RelationDropStorage is imported above from catalog::storage
 #[inline]
-unsafe fn RelationGetNumberOfBlocks(_rel: Relation) -> BlockNumber { 0 }
+#[no_mangle]
+unsafe fn RelationGetNumberOfBlocks(_rel: Relation) -> BlockNumber { crate::access::nbtree::nbtpage::RelationGetNumberOfBlocks(_rel as _) }
 #[inline]
 unsafe fn visibilitymap_count(_rel: Relation, _all_visible: *mut BlockNumber, _all_frozen: *mut BlockNumber) {}
-/// systable_inplace_update -- not yet ported; stubs.
+/// systable_inplace_update -- forward to the real impls in access/index/genam.rs.
 #[inline]
 unsafe fn systable_inplace_update_begin(
     _relation: Relation,
@@ -848,11 +826,20 @@ unsafe fn systable_inplace_update_begin(
     _key: *mut ScanKeyData,
     _oldtup: *mut *mut HeapTupleData,
     _state: *mut *mut c_void,
-) { /* TODO(pg-port) */ }
+) {
+    crate::access::index::genam::systable_inplace_update_begin(
+        _relation as _, _indexId, _indexOK, _snapshot as _, _nkeys, _key as _,
+        _oldtup as _, _state,
+    )
+}
 #[inline]
-unsafe fn systable_inplace_update_finish(_state: *mut c_void, _tup: *mut HeapTupleData) { /* TODO(pg-port) */ }
+unsafe fn systable_inplace_update_finish(_state: *mut c_void, _tup: *mut HeapTupleData) {
+    crate::access::index::genam::systable_inplace_update_finish(_state, _tup as _)
+}
 #[inline]
-unsafe fn systable_inplace_update_cancel(_state: *mut c_void) { /* TODO(pg-port) */ }
+unsafe fn systable_inplace_update_cancel(_state: *mut c_void) {
+    crate::access::index::genam::systable_inplace_update_cancel(_state)
+}
 /// maintenance_work_mem -- GUC variable
 static maintenance_work_mem: c_int = 1024; // 1 MB stub
 
@@ -863,15 +850,13 @@ const TUPLESORT_NONE: c_int = 0;
 unsafe fn tuplesort_begin_datum(
     _dtype: Oid, _sortOperator: Oid, _sortCollation: Oid,
     _nullsFirstFlag: bool, _workMem: c_int, _coordinate: *mut c_void, _flags: c_int,
-) -> *mut c_void {
-    core::ptr::null_mut() /* TODO(pg-port) */
-}
+) -> *mut c_void { crate::utils::sort::tuplesortvariants::tuplesort_begin_datum(_dtype as _, _sortOperator as _, _sortCollation as _, _nullsFirstFlag as _, _workMem as _, _coordinate as _, _flags as _) as _ }
 #[inline]
-unsafe fn tuplesort_performsort(_state: *mut c_void) {}
+unsafe fn tuplesort_performsort(_state: *mut c_void) { crate::utils::sort::tuplesort::tuplesort_performsort(_state as _) }
 #[inline]
-unsafe fn tuplesort_end(_state: *mut c_void) {}
+unsafe fn tuplesort_end(_state: *mut c_void) { crate::utils::sort::tuplesort::tuplesort_end(_state as _) }
 #[inline]
-unsafe fn tuplesort_putdatum(_state: *mut c_void, _val: Datum, _isNull: bool) {}
+unsafe fn tuplesort_putdatum(_state: *mut c_void, _val: Datum, _isNull: bool) { crate::utils::sort::tuplesortvariants::tuplesort_putdatum(_state as _, _val as _, _isNull as _) }
 use crate::catalog::pg_known_oids::Int8LessOperator;
 use crate::catalog::pg_type_d::INT8OID;
 use crate::postgres::Int64GetDatum;
@@ -931,20 +916,16 @@ struct PGRUsage {
     tv: [i64; 4],
 }
 #[inline]
-unsafe fn pg_rusage_init(_ru0: *mut PGRUsage) {}
+unsafe fn pg_rusage_init(_ru0: *mut PGRUsage) { crate::utils::misc::pg_rusage::pg_rusage_init(_ru0 as _) }
 #[inline]
 unsafe fn pg_rusage_show(_ru0: *const PGRUsage) -> *const c_char {
     b"\0".as_ptr() as *const c_char
 }
 
 // -- nodeToString stub --------------------------------------------------------
-unsafe fn nodeToString(obj: *mut c_void) -> *mut c_char {
-    core::ptr::null_mut() /* TODO(pg-port) */
-}
+unsafe fn nodeToString(obj: *mut c_void) -> *mut c_char { crate::nodes::outfuncs::nodeToString(obj as _) }
 // -- populate_compact_attribute stub ------------------------------------------
-unsafe fn populate_compact_attribute(_tupdesc: TupleDesc, _attno: c_int) {
-    // TODO(pg-port)
-}
+unsafe fn populate_compact_attribute(_tupdesc: TupleDesc, _attno: c_int) { crate::access::common::tupdesc::populate_compact_attribute(_tupdesc as _, _attno as _) }
 // -- palloc0_array macro (must come before first use) -------------------------
 macro_rules! palloc0_array {
     ($ty:ty, $n:expr) => {{
@@ -1338,6 +1319,7 @@ unsafe fn ConstructTupleDescriptor(
                 );
             }
             opclassTup = GETSTRUCT(tuple) as *mut FormData_pg_opclass;
+            let _kt = (*opclassTup).opckeytype;
             if OidIsValid((*opclassTup).opckeytype) {
                 keyType = (*opclassTup).opckeytype;
             }
@@ -1489,7 +1471,8 @@ unsafe fn UpdateIndexRelation(
     let indkey: *mut int2vector =
         buildint2vector(core::ptr::null(), (*indexInfo).ii_NumIndexAttrs) as *mut int2vector;
     for i in 0..(*indexInfo).ii_NumIndexAttrs {
-        (*indkey).values[i as usize] = (*indexInfo).ii_IndexAttrNumbers[i as usize];
+        *(*indkey).values.as_mut_ptr().add(i as usize) =
+            (*indexInfo).ii_IndexAttrNumbers[i as usize];
     }
     let indcollation: *mut oidvector =
         buildoidvector(collationOids, (*indexInfo).ii_NumIndexKeyAttrs);
@@ -2164,6 +2147,11 @@ pub unsafe fn index_create(
         RelationInitIndexAccessInfo(indexRelation);
     } else {
         Assert!(!(*indexRelation).rd_indexcxt.is_null());
+    }
+
+    /* If the relcache rebuild during CCI didn't populate rd_index, do it now. */
+    if (*indexRelation).rd_index.is_null() {
+        RelationInitIndexAccessInfo(indexRelation);
     }
 
     (*(*indexRelation).rd_index).indnkeyatts = (*indexInfo).ii_NumIndexKeyAttrs as i16;
@@ -3375,7 +3363,7 @@ pub unsafe fn index_drop(indexId: Oid, concurrent: bool, concurrent_lock_mode: b
 }
 
 /* stubs used above */
-unsafe fn ActiveSnapshotSet() -> bool { true /* TODO(pg-port) */ }
+unsafe fn ActiveSnapshotSet() -> bool { crate::utils::time::snapmgr::ActiveSnapshotSet() }
 const RELPERSISTENCE_TEMP: c_char = b't' as c_char;
 
 // ============================================================================
@@ -3434,8 +3422,7 @@ pub unsafe fn BuildIndexInfo(index: Relation) -> *mut IndexInfo {
     /* fill in attribute numbers */
     for i in 0..numAtts {
         (*ii).ii_IndexAttrNumbers[i as usize] =
-            /* indkey is a CATALOG_VARLEN field; read via index_getattr in a full port */
-            0 as AttrNumber /* TODO(pg-port) */;
+            *(*indexStruct).indkey.values.as_ptr().add(i as usize);
     }
 
     /* fetch exclusion constraint info if any */
@@ -3500,8 +3487,7 @@ pub unsafe fn BuildDummyIndexInfo(index: Relation) -> *mut IndexInfo {
     /* fill in attribute numbers */
     for i in 0..numAtts {
         (*ii).ii_IndexAttrNumbers[i as usize] =
-            /* indkey is a CATALOG_VARLEN field; read via index_getattr in a full port */
-            0 as AttrNumber /* TODO(pg-port) */;
+            *(*indexStruct).indkey.values.as_ptr().add(i as usize);
     }
 
     /* We ignore the exclusion constraint if any */
@@ -4245,7 +4231,8 @@ fn RelationIsValid(rel: Relation) -> bool { !rel.is_null() }
 fn PointerIsValid(p: *const c_void) -> bool { !p.is_null() }
 
 /* opcode / opfamily stubs -- TODO(pg-port) */
-unsafe fn get_opcode(opno: Oid) -> Oid { 0 /* TODO(pg-port) */ }
+#[no_mangle]
+unsafe fn get_opcode(opno: Oid) -> Oid { crate::utils::cache::lsyscache::get_opcode(opno as _) }
 unsafe fn get_opfamily_member(opfamily: Oid, lefttype: Oid, righttype: Oid, strategy: uint16) -> Oid {
     InvalidOid /* TODO(pg-port) */
 }
@@ -4255,7 +4242,7 @@ unsafe fn IndexAmTranslateCompareType(
 ) -> uint16 {
     1 /* TODO(pg-port) */
 }
-unsafe fn MemoryContextReset(_ctxt: MemoryContext) { /* TODO(pg-port) */ }
+unsafe fn MemoryContextReset(_ctxt: MemoryContext) { crate::utils::mmgr::mcxt::MemoryContextReset(_ctxt as _) }
 
 // ============================================================================
 // PART 6: validate_index, index_set_state_flags (re-exported), IndexGetRelation,

@@ -256,6 +256,7 @@ pub unsafe fn predicate_implied_by(
  *	  Recursively checks whether the clauses in clause_list refute the given
  *	  predicate (that is, prove it false).
  */
+#[no_mangle]
 pub unsafe fn predicate_refuted_by(
     predicate_list: *mut List,
     clause_list: *mut List,
@@ -1751,7 +1752,7 @@ struct OprProofCacheEntry {
 static mut OprProofCacheHash: *mut HTAB = core::ptr::null_mut();
 
 /* syscache id for pg_amop-by-opid; see catalog/pg_amop syscache. */
-const AMOPOPID: c_int = 0;
+const AMOPOPID: c_int = 3;
 
 /*
  * TODO(pg-port): import crate::utils::cache::inval::CacheRegisterSyscacheCallback

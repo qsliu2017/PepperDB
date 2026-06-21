@@ -910,7 +910,7 @@ unsafe fn check_stack_depth() {
 }
 
 unsafe fn ExecReScan(_node: *mut PlanState) {
-    unimplemented!() // TODO: src/backend/executor/execAmi.c
+    crate::executor::execAmi::ExecReScan(_node as _)
 }
 
 unsafe fn outerPlanState(node: *mut PlanState) -> *mut PlanState {
@@ -919,350 +919,353 @@ unsafe fn outerPlanState(node: *mut PlanState) -> *mut PlanState {
 }
 
 unsafe fn InstrAlloc(_n: c_int, _instrument_options: c_int, _async_mode: bool) -> *mut Instrumentation {
-    unimplemented!() // TODO: src/backend/executor/instrument.c
+    crate::executor::instrument::InstrAlloc(_n as _, _instrument_options as _, _async_mode as _) as _
 }
 
 unsafe fn InstrStartNode(_instr: *mut Instrumentation) {
-    unimplemented!() // TODO: src/backend/executor/instrument.c
+    crate::executor::instrument::InstrStartNode(_instr as _)
 }
 
 unsafe fn InstrStopNode(_instr: *mut Instrumentation, _nTuples: f64) {
-    unimplemented!() // TODO: src/backend/executor/instrument.c
+    crate::executor::instrument::InstrStopNode(_instr as _, _nTuples as _)
 }
 
 unsafe fn TupIsNull(_slot: *mut TupleTableSlot) -> bool {
-    unimplemented!() // TODO: src/include/executor/tuptable.h
+    crate::executor::tuptable::TupIsNull(_slot as _) as _
 }
 
 unsafe fn bms_free(_a: *mut Bitmapset) {
-    unimplemented!() // TODO: src/backend/nodes/bitmapset.c
+    crate::nodes::bitmapset::bms_free(_a as _)
 }
 
 unsafe fn planstate_tree_walker(
-    _planstate: *mut PlanState,
-    _walker: Option<unsafe extern "C" fn(*mut PlanState, *mut std::ffi::c_void) -> bool>,
-    _context: *mut std::ffi::c_void,
+    planstate: *mut PlanState,
+    walker: Option<unsafe extern "C" fn(*mut PlanState, *mut std::ffi::c_void) -> bool>,
+    context: *mut std::ffi::c_void,
 ) -> bool {
-    unimplemented!() // TODO: src/backend/nodes/nodeFuncs.c
+    // The canonical callback is Rust-ABI; the C and Rust ABIs match for this signature.
+    let walker: crate::nodes::nodeFuncs::planstate_tree_walker_callback =
+        core::mem::transmute(walker);
+    crate::nodes::nodeFuncs::planstate_tree_walker(planstate as _, walker, context as _)
 }
 
 unsafe fn ExecInitSubPlan(_subplan: *mut SubPlan, _parent: *mut PlanState) -> *mut SubPlanState {
-    unimplemented!() // TODO: src/backend/executor/nodeSubplan.c
+    crate::executor::nodeSubplan::ExecInitSubPlan(_subplan as _, _parent as _) as _
 }
 
 /* per-node init/end/multiexec/shutdown dispatch targets */
 
 unsafe fn ExecInitResult(_node: *mut Result, _estate: *mut EState, _eflags: c_int) -> *mut ResultState {
-    unimplemented!() // TODO: src/backend/executor/nodeResult.c
+    crate::executor::nodeResult::ExecInitResult(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndResult(_node: *mut ResultState) {
-    unimplemented!() // TODO: src/backend/executor/nodeResult.c
+    crate::executor::nodeResult::ExecEndResult(_node as _)
 }
 
 unsafe fn ExecInitProjectSet(_node: *mut ProjectSet, _estate: *mut EState, _eflags: c_int) -> *mut ProjectSetState {
-    unimplemented!() // TODO: src/backend/executor/nodeProjectSet.c
+    crate::executor::nodeProjectSet::ExecInitProjectSet(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndProjectSet(_node: *mut ProjectSetState) {
-    unimplemented!() // TODO: src/backend/executor/nodeProjectSet.c
+    crate::executor::nodeProjectSet::ExecEndProjectSet(_node as _)
 }
 
 unsafe fn ExecInitModifyTable(_node: *mut ModifyTable, _estate: *mut EState, _eflags: c_int) -> *mut ModifyTableState {
-    unimplemented!() // TODO: src/backend/executor/nodeModifyTable.c
+    crate::executor::nodeModifyTable::ExecInitModifyTable(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndModifyTable(_node: *mut ModifyTableState) {
-    unimplemented!() // TODO: src/backend/executor/nodeModifyTable.c
+    crate::executor::nodeModifyTable::ExecEndModifyTable(_node as _)
 }
 
 unsafe fn ExecInitAppend(_node: *mut Append, _estate: *mut EState, _eflags: c_int) -> *mut AppendState {
-    unimplemented!() // TODO: src/backend/executor/nodeAppend.c
+    unimplemented!() // TODO: src/backend/executor/nodeAppend.c (needs partition-prune + parallel)
 }
 unsafe fn ExecEndAppend(_node: *mut AppendState) {
     unimplemented!() // TODO: src/backend/executor/nodeAppend.c
 }
 
 unsafe fn ExecInitMergeAppend(_node: *mut MergeAppend, _estate: *mut EState, _eflags: c_int) -> *mut MergeAppendState {
-    unimplemented!() // TODO: src/backend/executor/nodeMergeAppend.c
+    crate::executor::nodeMergeAppend::ExecInitMergeAppend(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndMergeAppend(_node: *mut MergeAppendState) {
-    unimplemented!() // TODO: src/backend/executor/nodeMergeAppend.c
+    crate::executor::nodeMergeAppend::ExecEndMergeAppend(_node as _)
 }
 
 unsafe fn ExecInitRecursiveUnion(_node: *mut RecursiveUnion, _estate: *mut EState, _eflags: c_int) -> *mut RecursiveUnionState {
-    unimplemented!() // TODO: src/backend/executor/nodeRecursiveunion.c
+    crate::executor::nodeRecursiveunion::ExecInitRecursiveUnion(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndRecursiveUnion(_node: *mut RecursiveUnionState) {
-    unimplemented!() // TODO: src/backend/executor/nodeRecursiveunion.c
+    crate::executor::nodeRecursiveunion::ExecEndRecursiveUnion(_node as _)
 }
 
 unsafe fn ExecInitBitmapAnd(_node: *mut BitmapAnd, _estate: *mut EState, _eflags: c_int) -> *mut BitmapAndState {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapAnd.c
+    crate::executor::nodeBitmapAnd::ExecInitBitmapAnd(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndBitmapAnd(_node: *mut BitmapAndState) {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapAnd.c
+    crate::executor::nodeBitmapAnd::ExecEndBitmapAnd(_node as _)
 }
 unsafe fn MultiExecBitmapAnd(_node: *mut BitmapAndState) -> *mut Node {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapAnd.c
+    crate::executor::nodeBitmapAnd::MultiExecBitmapAnd(_node as _) as _
 }
 
 unsafe fn ExecInitBitmapOr(_node: *mut BitmapOr, _estate: *mut EState, _eflags: c_int) -> *mut BitmapOrState {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapOr.c
+    crate::executor::nodeBitmapOr::ExecInitBitmapOr(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndBitmapOr(_node: *mut BitmapOrState) {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapOr.c
+    crate::executor::nodeBitmapOr::ExecEndBitmapOr(_node as _)
 }
 unsafe fn MultiExecBitmapOr(_node: *mut BitmapOrState) -> *mut Node {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapOr.c
+    crate::executor::nodeBitmapOr::MultiExecBitmapOr(_node as _) as _
 }
 
 unsafe fn ExecInitSeqScan(_node: *mut SeqScan, _estate: *mut EState, _eflags: c_int) -> *mut SeqScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeSeqscan.c
+    crate::executor::nodeSeqscan::ExecInitSeqScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndSeqScan(_node: *mut SeqScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeSeqscan.c
+    crate::executor::nodeSeqscan::ExecEndSeqScan(_node as _)
 }
 
 unsafe fn ExecInitSampleScan(_node: *mut SampleScan, _estate: *mut EState, _eflags: c_int) -> *mut SampleScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeSamplescan.c
+    crate::executor::nodeSamplescan::ExecInitSampleScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndSampleScan(_node: *mut SampleScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeSamplescan.c
+    crate::executor::nodeSamplescan::ExecEndSampleScan(_node as _)
 }
 
 unsafe fn ExecInitIndexScan(_node: *mut IndexScan, _estate: *mut EState, _eflags: c_int) -> *mut IndexScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeIndexscan.c
+    crate::executor::nodeIndexscan::ExecInitIndexScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndIndexScan(_node: *mut IndexScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeIndexscan.c
+    crate::executor::nodeIndexscan::ExecEndIndexScan(_node as _)
 }
 
 unsafe fn ExecInitIndexOnlyScan(_node: *mut IndexOnlyScan, _estate: *mut EState, _eflags: c_int) -> *mut IndexOnlyScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeIndexonlyscan.c
+    crate::executor::nodeIndexonlyscan::ExecInitIndexOnlyScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndIndexOnlyScan(_node: *mut IndexOnlyScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeIndexonlyscan.c
+    crate::executor::nodeIndexonlyscan::ExecEndIndexOnlyScan(_node as _)
 }
 
 unsafe fn ExecInitBitmapIndexScan(_node: *mut BitmapIndexScan, _estate: *mut EState, _eflags: c_int) -> *mut BitmapIndexScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapIndexscan.c
+    crate::executor::nodeBitmapIndexscan::ExecInitBitmapIndexScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndBitmapIndexScan(_node: *mut BitmapIndexScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapIndexscan.c
+    crate::executor::nodeBitmapIndexscan::ExecEndBitmapIndexScan(_node as _)
 }
 unsafe fn MultiExecBitmapIndexScan(_node: *mut BitmapIndexScanState) -> *mut Node {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapIndexscan.c
+    crate::executor::nodeBitmapIndexscan::MultiExecBitmapIndexScan(_node as _) as _
 }
 
 unsafe fn ExecInitBitmapHeapScan(_node: *mut BitmapHeapScan, _estate: *mut EState, _eflags: c_int) -> *mut BitmapHeapScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapHeapscan.c
+    crate::executor::nodeBitmapHeapscan::ExecInitBitmapHeapScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndBitmapHeapScan(_node: *mut BitmapHeapScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeBitmapHeapscan.c
+    crate::executor::nodeBitmapHeapscan::ExecEndBitmapHeapScan(_node as _)
 }
 
 unsafe fn ExecInitTidScan(_node: *mut TidScan, _estate: *mut EState, _eflags: c_int) -> *mut TidScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeTidscan.c
+    crate::executor::nodeTidscan::ExecInitTidScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndTidScan(_node: *mut TidScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeTidscan.c
+    crate::executor::nodeTidscan::ExecEndTidScan(_node as _)
 }
 
 unsafe fn ExecInitTidRangeScan(_node: *mut TidRangeScan, _estate: *mut EState, _eflags: c_int) -> *mut TidRangeScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeTidrangescan.c
+    crate::executor::nodeTidrangescan::ExecInitTidRangeScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndTidRangeScan(_node: *mut TidRangeScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeTidrangescan.c
+    crate::executor::nodeTidrangescan::ExecEndTidRangeScan(_node as _)
 }
 
 unsafe fn ExecInitSubqueryScan(_node: *mut SubqueryScan, _estate: *mut EState, _eflags: c_int) -> *mut SubqueryScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeSubqueryscan.c
+    crate::executor::nodeSubqueryscan::ExecInitSubqueryScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndSubqueryScan(_node: *mut SubqueryScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeSubqueryscan.c
+    crate::executor::nodeSubqueryscan::ExecEndSubqueryScan(_node as _)
 }
 
 unsafe fn ExecInitFunctionScan(_node: *mut FunctionScan, _estate: *mut EState, _eflags: c_int) -> *mut FunctionScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeFunctionscan.c
+    crate::executor::nodeFunctionscan::ExecInitFunctionScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndFunctionScan(_node: *mut FunctionScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeFunctionscan.c
+    crate::executor::nodeFunctionscan::ExecEndFunctionScan(_node as _)
 }
 
 unsafe fn ExecInitTableFuncScan(_node: *mut TableFuncScan, _estate: *mut EState, _eflags: c_int) -> *mut TableFuncScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeTableFuncscan.c
+    crate::executor::nodeTableFuncscan::ExecInitTableFuncScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndTableFuncScan(_node: *mut TableFuncScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeTableFuncscan.c
+    crate::executor::nodeTableFuncscan::ExecEndTableFuncScan(_node as _)
 }
 
 unsafe fn ExecInitValuesScan(_node: *mut ValuesScan, _estate: *mut EState, _eflags: c_int) -> *mut ValuesScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeValuesscan.c
+    crate::executor::nodeValuesscan::ExecInitValuesScan(_node as _, _estate as _, _eflags as _) as _
 }
 
 unsafe fn ExecInitCteScan(_node: *mut CteScan, _estate: *mut EState, _eflags: c_int) -> *mut CteScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeCtescan.c
+    crate::executor::nodeCtescan::ExecInitCteScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndCteScan(_node: *mut CteScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeCtescan.c
+    crate::executor::nodeCtescan::ExecEndCteScan(_node as _)
 }
 
 unsafe fn ExecInitNamedTuplestoreScan(_node: *mut NamedTuplestoreScan, _estate: *mut EState, _eflags: c_int) -> *mut NamedTuplestoreScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeNamedtuplestorescan.c
+    crate::executor::nodeNamedtuplestorescan::ExecInitNamedTuplestoreScan(_node as _, _estate as _, _eflags as _) as _
 }
 
 unsafe fn ExecInitWorkTableScan(_node: *mut WorkTableScan, _estate: *mut EState, _eflags: c_int) -> *mut WorkTableScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeWorktablescan.c
+    crate::executor::nodeWorktablescan::ExecInitWorkTableScan(_node as _, _estate as _, _eflags as _) as _
 }
 
 unsafe fn ExecInitForeignScan(_node: *mut ForeignScan, _estate: *mut EState, _eflags: c_int) -> *mut ForeignScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeForeignscan.c
+    crate::executor::nodeForeignscan::ExecInitForeignScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndForeignScan(_node: *mut ForeignScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeForeignscan.c
+    crate::executor::nodeForeignscan::ExecEndForeignScan(_node as _)
 }
 unsafe fn ExecShutdownForeignScan(_node: *mut ForeignScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeForeignscan.c
+    crate::executor::nodeForeignscan::ExecShutdownForeignScan(_node as _)
 }
 
 unsafe fn ExecInitCustomScan(_node: *mut CustomScan, _estate: *mut EState, _eflags: c_int) -> *mut CustomScanState {
-    unimplemented!() // TODO: src/backend/executor/nodeCustom.c
+    crate::executor::nodeCustom::ExecInitCustomScan(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndCustomScan(_node: *mut CustomScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeCustom.c
+    crate::executor::nodeCustom::ExecEndCustomScan(_node as _)
 }
 unsafe fn ExecShutdownCustomScan(_node: *mut CustomScanState) {
-    unimplemented!() // TODO: src/backend/executor/nodeCustom.c
+    crate::executor::nodeCustom::ExecShutdownCustomScan(_node as _)
 }
 
 unsafe fn ExecInitNestLoop(_node: *mut NestLoop, _estate: *mut EState, _eflags: c_int) -> *mut NestLoopState {
-    unimplemented!() // TODO: src/backend/executor/nodeNestloop.c
+    crate::executor::nodeNestloop::ExecInitNestLoop(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndNestLoop(_node: *mut NestLoopState) {
-    unimplemented!() // TODO: src/backend/executor/nodeNestloop.c
+    crate::executor::nodeNestloop::ExecEndNestLoop(_node as _)
 }
 
 unsafe fn ExecInitMergeJoin(_node: *mut MergeJoin, _estate: *mut EState, _eflags: c_int) -> *mut MergeJoinState {
-    unimplemented!() // TODO: src/backend/executor/nodeMergejoin.c
+    crate::executor::nodeMergejoin::ExecInitMergeJoin(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndMergeJoin(_node: *mut MergeJoinState) {
-    unimplemented!() // TODO: src/backend/executor/nodeMergejoin.c
+    crate::executor::nodeMergejoin::ExecEndMergeJoin(_node as _)
 }
 
 unsafe fn ExecInitHashJoin(_node: *mut HashJoin, _estate: *mut EState, _eflags: c_int) -> *mut HashJoinState {
-    unimplemented!() // TODO: src/backend/executor/nodeHashjoin.c
+    crate::executor::nodeHashjoin::ExecInitHashJoin(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndHashJoin(_node: *mut HashJoinState) {
-    unimplemented!() // TODO: src/backend/executor/nodeHashjoin.c
+    crate::executor::nodeHashjoin::ExecEndHashJoin(_node as _)
 }
 unsafe fn ExecShutdownHashJoin(_node: *mut HashJoinState) {
-    unimplemented!() // TODO: src/backend/executor/nodeHashjoin.c
+    crate::executor::nodeHashjoin::ExecShutdownHashJoin(_node as _)
 }
 
 unsafe fn ExecInitMaterial(_node: *mut Material, _estate: *mut EState, _eflags: c_int) -> *mut MaterialState {
-    unimplemented!() // TODO: src/backend/executor/nodeMaterial.c
+    crate::executor::nodeMaterial::ExecInitMaterial(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndMaterial(_node: *mut MaterialState) {
-    unimplemented!() // TODO: src/backend/executor/nodeMaterial.c
+    crate::executor::nodeMaterial::ExecEndMaterial(_node as _)
 }
 
 unsafe fn ExecInitSort(_node: *mut Sort, _estate: *mut EState, _eflags: c_int) -> *mut SortState {
-    unimplemented!() // TODO: src/backend/executor/nodeSort.c
+    crate::executor::nodeSort::ExecInitSort(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndSort(_node: *mut SortState) {
-    unimplemented!() // TODO: src/backend/executor/nodeSort.c
+    crate::executor::nodeSort::ExecEndSort(_node as _)
 }
 
 unsafe fn ExecInitIncrementalSort(_node: *mut IncrementalSort, _estate: *mut EState, _eflags: c_int) -> *mut IncrementalSortState {
-    unimplemented!() // TODO: src/backend/executor/nodeIncrementalSort.c
+    crate::executor::nodeIncrementalSort::ExecInitIncrementalSort(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndIncrementalSort(_node: *mut IncrementalSortState) {
-    unimplemented!() // TODO: src/backend/executor/nodeIncrementalSort.c
+    crate::executor::nodeIncrementalSort::ExecEndIncrementalSort(_node as _)
 }
 
 unsafe fn ExecInitMemoize(_node: *mut Memoize, _estate: *mut EState, _eflags: c_int) -> *mut MemoizeState {
-    unimplemented!() // TODO: src/backend/executor/nodeMemoize.c
+    crate::executor::nodeMemoize::ExecInitMemoize(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndMemoize(_node: *mut MemoizeState) {
-    unimplemented!() // TODO: src/backend/executor/nodeMemoize.c
+    crate::executor::nodeMemoize::ExecEndMemoize(_node as _)
 }
 
 unsafe fn ExecInitGroup(_node: *mut Group, _estate: *mut EState, _eflags: c_int) -> *mut GroupState {
-    unimplemented!() // TODO: src/backend/executor/nodeGroup.c
+    crate::executor::nodeGroup::ExecInitGroup(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndGroup(_node: *mut GroupState) {
-    unimplemented!() // TODO: src/backend/executor/nodeGroup.c
+    crate::executor::nodeGroup::ExecEndGroup(_node as _)
 }
 
 unsafe fn ExecInitAgg(_node: *mut Agg, _estate: *mut EState, _eflags: c_int) -> *mut AggState {
-    unimplemented!() // TODO: src/backend/executor/nodeAgg.c
+    crate::executor::nodeAgg::ExecInitAgg(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndAgg(_node: *mut AggState) {
-    unimplemented!() // TODO: src/backend/executor/nodeAgg.c
+    crate::executor::nodeAgg::ExecEndAgg(_node as _)
 }
 
 unsafe fn ExecInitWindowAgg(_node: *mut WindowAgg, _estate: *mut EState, _eflags: c_int) -> *mut WindowAggState {
-    unimplemented!() // TODO: src/backend/executor/nodeWindowAgg.c
+    crate::executor::nodeWindowAgg::ExecInitWindowAgg(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndWindowAgg(_node: *mut WindowAggState) {
-    unimplemented!() // TODO: src/backend/executor/nodeWindowAgg.c
+    crate::executor::nodeWindowAgg::ExecEndWindowAgg(_node as _)
 }
 
 unsafe fn ExecInitUnique(_node: *mut Unique, _estate: *mut EState, _eflags: c_int) -> *mut UniqueState {
-    unimplemented!() // TODO: src/backend/executor/nodeUnique.c
+    crate::executor::nodeUnique::ExecInitUnique(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndUnique(_node: *mut UniqueState) {
-    unimplemented!() // TODO: src/backend/executor/nodeUnique.c
+    crate::executor::nodeUnique::ExecEndUnique(_node as _)
 }
 
 unsafe fn ExecInitGather(_node: *mut Gather, _estate: *mut EState, _eflags: c_int) -> *mut GatherState {
-    unimplemented!() // TODO: src/backend/executor/nodeGather.c
+    crate::executor::nodeGather::ExecInitGather(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndGather(_node: *mut GatherState) {
-    unimplemented!() // TODO: src/backend/executor/nodeGather.c
+    crate::executor::nodeGather::ExecEndGather(_node as _)
 }
 unsafe fn ExecShutdownGather(_node: *mut GatherState) {
-    unimplemented!() // TODO: src/backend/executor/nodeGather.c
+    crate::executor::nodeGather::ExecShutdownGather(_node as _)
 }
 
 unsafe fn ExecInitGatherMerge(_node: *mut GatherMerge, _estate: *mut EState, _eflags: c_int) -> *mut GatherMergeState {
-    unimplemented!() // TODO: src/backend/executor/nodeGatherMerge.c
+    crate::executor::nodeGatherMerge::ExecInitGatherMerge(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndGatherMerge(_node: *mut GatherMergeState) {
-    unimplemented!() // TODO: src/backend/executor/nodeGatherMerge.c
+    crate::executor::nodeGatherMerge::ExecEndGatherMerge(_node as _)
 }
 unsafe fn ExecShutdownGatherMerge(_node: *mut GatherMergeState) {
-    unimplemented!() // TODO: src/backend/executor/nodeGatherMerge.c
+    crate::executor::nodeGatherMerge::ExecShutdownGatherMerge(_node as _)
 }
 
 unsafe fn ExecInitHash(_node: *mut Hash, _estate: *mut EState, _eflags: c_int) -> *mut HashState {
-    unimplemented!() // TODO: src/backend/executor/nodeHash.c
+    crate::executor::nodeHash::ExecInitHash(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndHash(_node: *mut HashState) {
-    unimplemented!() // TODO: src/backend/executor/nodeHash.c
+    crate::executor::nodeHash::ExecEndHash(_node as _)
 }
 unsafe fn MultiExecHash(_node: *mut HashState) -> *mut Node {
-    unimplemented!() // TODO: src/backend/executor/nodeHash.c
+    crate::executor::nodeHash::MultiExecHash(_node as _) as _
 }
 unsafe fn ExecShutdownHash(_node: *mut HashState) {
-    unimplemented!() // TODO: src/backend/executor/nodeHash.c
+    crate::executor::nodeHash::ExecShutdownHash(_node as _)
 }
 
 unsafe fn ExecInitSetOp(_node: *mut SetOp, _estate: *mut EState, _eflags: c_int) -> *mut SetOpState {
-    unimplemented!() // TODO: src/backend/executor/nodeSetOp.c
+    crate::executor::nodeSetOp::ExecInitSetOp(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndSetOp(_node: *mut SetOpState) {
-    unimplemented!() // TODO: src/backend/executor/nodeSetOp.c
+    crate::executor::nodeSetOp::ExecEndSetOp(_node as _)
 }
 
 unsafe fn ExecInitLockRows(_node: *mut LockRows, _estate: *mut EState, _eflags: c_int) -> *mut LockRowsState {
-    unimplemented!() // TODO: src/backend/executor/nodeLockRows.c
+    crate::executor::nodeLockRows::ExecInitLockRows(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndLockRows(_node: *mut LockRowsState) {
-    unimplemented!() // TODO: src/backend/executor/nodeLockRows.c
+    crate::executor::nodeLockRows::ExecEndLockRows(_node as _)
 }
 
 unsafe fn ExecInitLimit(_node: *mut Limit, _estate: *mut EState, _eflags: c_int) -> *mut LimitState {
-    unimplemented!() // TODO: src/backend/executor/nodeLimit.c
+    crate::executor::nodeLimit::ExecInitLimit(_node as _, _estate as _, _eflags as _) as _
 }
 unsafe fn ExecEndLimit(_node: *mut LimitState) {
-    unimplemented!() // TODO: src/backend/executor/nodeLimit.c
+    crate::executor::nodeLimit::ExecEndLimit(_node as _)
 }

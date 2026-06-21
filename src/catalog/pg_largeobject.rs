@@ -236,6 +236,7 @@ pub unsafe fn LargeObjectExists(loid: Oid) -> bool {
 /*
  * Same as LargeObjectExists(), except snapshot to read with can be specified.
  */
+#[no_mangle]
 pub unsafe fn LargeObjectExistsWithSnapshot(loid: Oid, snapshot: Snapshot) -> bool {
     let pg_lo_meta: Relation;
     let mut skey: [ScanKeyData; 1] = std::mem::zeroed();

@@ -53,10 +53,12 @@ use crate::prelude::*;
  */
 // #ifndef HAVE_INT_OPTERR
 
-pub static mut opterr: c_int = 1; /* if error message should be printed */
-pub static mut optind: c_int = 1; /* index into parent argv vector */
-pub static mut optopt: c_int = 0; /* character checked for validity */
-pub static mut optarg: *mut c_char = null_mut(); /* argument associated with option */
+// #[no_mangle]: this getopt() overrides libc; its globals must export the C symbols too so
+// extern-"C" readers (postmaster etc.) see what getopt() sets (else they read libc's unset ones).
+#[no_mangle] pub static mut opterr: c_int = 1; /* if error message should be printed */
+#[no_mangle] pub static mut optind: c_int = 1; /* index into parent argv vector */
+#[no_mangle] pub static mut optopt: c_int = 0; /* character checked for validity */
+#[no_mangle] pub static mut optarg: *mut c_char = null_mut(); /* argument associated with option */
 
 // #endif
 

@@ -654,7 +654,8 @@ unsafe fn does_not_exist_skipping(objtype: ObjectType, object: *mut Node) {
              * These are handled elsewhere, so if someone gets here the code
              * is probably wrong or should be revisited.
              */
-            elog!(ERROR, "unsupported object type: {}", objtype as c_int);
+            if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_BT unsupported_objtype site bt:
+{}", std::backtrace::Backtrace::force_capture()); } elog!(ERROR, "unsupported object type: {}", objtype as c_int);
         }
 
         ObjectType::OBJECT_AMOP
@@ -670,7 +671,8 @@ unsafe fn does_not_exist_skipping(objtype: ObjectType, object: *mut Node) {
         | ObjectType::OBJECT_TABCONSTRAINT
         | ObjectType::OBJECT_USER_MAPPING => {
             /* These are currently not used or needed. */
-            elog!(ERROR, "unsupported object type: {}", objtype as c_int);
+            if std::env::var_os("PDB_AUTH").is_some() { eprintln!("PDB_BT unsupported_objtype site bt:
+{}", std::backtrace::Backtrace::force_capture()); } elog!(ERROR, "unsupported object type: {}", objtype as c_int);
         }
         /* no default, to let compiler warn about missing case */
     }

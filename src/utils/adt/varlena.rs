@@ -47,7 +47,6 @@ use crate::utils::adt::arrayfuncs::{
     ArrayBuildState, accumArrayResult, makeArrayResult, construct_empty_array,
 };
 use crate::utils::adt::arrayutils::ArrayGetNItems;
-use crate::utils::sort::tuplestore::tuplestore_putvalues;
 use crate::nodes::execnodes::{ReturnSetInfo, Tuplestorestate};
 use crate::utils::cache::lsyscache::{
     get_type_io_data, IOFunc_output, getTypeOutputInfo, get_base_element_type,
@@ -130,6 +129,14 @@ use crate::mb::wchar::pg_utf_mblen;
 use crate::port::pgstrcasecmp::pg_strcasecmp;
 use crate::foreign::foreign::ClosestMatchState;
 use crate::{PG_RETURN_POINTER, PG_RETURN_OID, appendStringInfoCharMacro};
+use crate::{foreach, current_cell};
+
+unsafe fn tuplestore_putvalues(
+    _state: *mut Tuplestorestate,
+    _tdesc: TupleDesc,
+    _values: *mut Datum,
+    _isnull: *mut bool,
+) { crate::utils::sort::tuplestore::tuplestore_putvalues(_state as _, _tdesc as _, _values as _, _isnull as _) }
 
 /*
  * varstr_levenshtein_less_equal and MAX_LEVENSHTEIN_STRLEN come from
@@ -299,6 +306,7 @@ unsafe fn strlen(s: *const c_char) -> usize {
  * # Safety
  * `s` is a valid NUL-terminated C string.
  */
+#[no_mangle]
 pub unsafe fn cstring_to_text(s: *const c_char) -> *mut text {
     cstring_to_text_with_len(s, strlen(s) as c_int)
 }
@@ -330,6 +338,7 @@ pub unsafe fn cstring_to_text_with_len(s: *const c_char, len: c_int) -> *mut tex
  * # Safety
  * `t` points to a valid text datum.
  */
+#[no_mangle]
 pub unsafe fn text_to_cstring(t: *const text) -> *mut c_char {
     /* must cast away the const, unfortunately */
     let tunpacked: *mut text = pg_detoast_datum_packed(t as *mut c_void) as *mut text;
@@ -503,7 +512,7 @@ pub unsafe fn byteaout(fcinfo: FunctionCallInfo) -> Datum {
 
         len = 1; /* empty string has 1 char */
         vp = VARDATA_ANY(vlena as *const c_char);
-        i = VARSIZE_ANY_EXHDR(vlena as *const c_char);
+        i = VARSIZE_ANY_EXHDR(vlena as *const c_char) as i32;
         while i != 0 {
             if *vp == b'\\' as c_char {
                 len += 2;
@@ -532,7 +541,7 @@ pub unsafe fn byteaout(fcinfo: FunctionCallInfo) -> Datum {
         rp = result;
 
         vp = VARDATA_ANY(vlena as *const c_char);
-        i = VARSIZE_ANY_EXHDR(vlena as *const c_char);
+        i = VARSIZE_ANY_EXHDR(vlena as *const c_char) as i32;
         while i != 0 {
             if *vp == b'\\' as c_char {
                 *rp = b'\\' as c_char;
@@ -616,7 +625,7 @@ pub unsafe fn textsend(fcinfo: FunctionCallInfo) -> Datum {
     pq_sendtext(
         &mut buf,
         VARDATA_ANY(t as *const c_char),
-        VARSIZE_ANY_EXHDR(t as *const c_char),
+        VARSIZE_ANY_EXHDR(t as *const c_char) as i32,
     );
     PointerGetDatum(pq_endtypsend(&mut buf) as *const c_void) // PG_RETURN_BYTEA_P
 }
@@ -826,7 +835,7 @@ pub unsafe fn bytea_string_agg_transfn(fcinfo: FunctionCallInfo) -> Datum {
             appendBinaryStringInfo(
                 state,
                 VARDATA_ANY(delim as *const c_char) as *const c_void,
-                VARSIZE_ANY_EXHDR(delim as *const c_char),
+                VARSIZE_ANY_EXHDR(delim as *const c_char) as i32,
             );
             if isfirst {
                 (*state).cursor = VARSIZE_ANY_EXHDR(delim as *const c_char) as c_int;
@@ -836,7 +845,7 @@ pub unsafe fn bytea_string_agg_transfn(fcinfo: FunctionCallInfo) -> Datum {
         appendBinaryStringInfo(
             state,
             VARDATA_ANY(value as *const c_char) as *const c_void,
-            VARSIZE_ANY_EXHDR(value as *const c_char),
+            VARSIZE_ANY_EXHDR(value as *const c_char) as i32,
         );
     }
 
@@ -958,7 +967,7 @@ unsafe fn text_length(str: Datum) -> int32 {
 
         pg_mbstrlen_with_len(
             VARDATA_ANY(t as *const c_char),
-            VARSIZE_ANY_EXHDR(t as *const c_char),
+            VARSIZE_ANY_EXHDR(t as *const c_char) as i32,
         ) // PG_RETURN_INT32
     }
 }
@@ -1002,8 +1011,8 @@ unsafe fn text_catenate(t1: *mut text, t2: *mut text) -> *mut text {
     let len: c_int;
     let ptr: *mut c_char;
 
-    len1 = VARSIZE_ANY_EXHDR(t1 as *const c_char);
-    len2 = VARSIZE_ANY_EXHDR(t2 as *const c_char);
+    len1 = VARSIZE_ANY_EXHDR(t1 as *const c_char) as i32;
+    len2 = VARSIZE_ANY_EXHDR(t2 as *const c_char) as i32;
 
     /* paranoia ... probably should throw error instead? */
     if len1 < 0 {
@@ -1235,7 +1244,7 @@ unsafe fn text_substring(
         }
 
         /* see if we got back an empty string */
-        slice_len = VARSIZE_ANY_EXHDR(slice as *const c_char);
+        slice_len = VARSIZE_ANY_EXHDR(slice as *const c_char) as i32;
         if slice_len == 0 {
             if slice != DatumGetPointer(str) as *mut text {
                 pfree(slice as *mut c_void);
@@ -1459,8 +1468,8 @@ unsafe fn text_position_setup(
     collid: Oid,
     state: *mut TextPositionState,
 ) {
-    let len1: c_int = VARSIZE_ANY_EXHDR(t1 as *const c_char);
-    let len2: c_int = VARSIZE_ANY_EXHDR(t2 as *const c_char);
+    let len1: c_int = VARSIZE_ANY_EXHDR(t1 as *const c_char) as i32;
+    let len2: c_int = VARSIZE_ANY_EXHDR(t2 as *const c_char) as i32;
 
     check_collation_set(collid);
 
@@ -1559,7 +1568,7 @@ unsafe fn text_position_setup(
 unsafe fn text_position_next(state: *mut TextPositionState) -> bool {
     let needle_len: c_int = (*state).len2;
     let mut start_ptr: *mut c_char;
-    let matchptr: *mut c_char;
+    let mut matchptr: *mut c_char;
 
     if needle_len <= 0 {
         return false; /* result for empty pattern */
@@ -1783,7 +1792,7 @@ unsafe fn text_position_cleanup(_state: *mut TextPositionState) {
 //  already translated above; not repeated here.)
 // ===========================================================================
 
-use crate::catalog::pg_type_d::{BPCHAROID, NAMEOID, TEXTOID};
+use crate::catalog::pg_type_d::{BPCHAROID, NAMEOID};
 use crate::utils::sort::sortsupport::{SortSupport, SortSupportData};
 use crate::utils::sort::tuplesort::ssup_datum_unsigned_cmp;
 use crate::utils::adt::pg_locale::{
@@ -1874,6 +1883,7 @@ struct VarStringSortSupport {
  * appropriate locale. Returns an integer less than, equal to, or greater than
  * zero, indicating whether arg1 is less than, equal to, or greater than arg2.
  */
+#[no_mangle]
 pub unsafe fn varstr_cmp(
     arg1: *const c_char,
     len1: c_int,
@@ -2969,8 +2979,8 @@ unsafe fn bytea_catenate(t1: *mut bytea, t2: *mut bytea) -> *mut bytea {
     let len: c_int;
     let ptr: *mut c_char;
 
-    len1 = VARSIZE_ANY_EXHDR(t1 as *const c_char);
-    len2 = VARSIZE_ANY_EXHDR(t2 as *const c_char);
+    len1 = VARSIZE_ANY_EXHDR(t1 as *const c_char) as i32;
+    len2 = VARSIZE_ANY_EXHDR(t2 as *const c_char) as i32;
 
     /* paranoia ... probably should throw error instead? */
     if len1 < 0 {
@@ -3008,7 +3018,7 @@ unsafe fn bytea_catenate(t1: *mut bytea, t2: *mut bytea) -> *mut bytea {
  */
 macro_rules! PG_STR_GET_BYTEA {
     ($str:expr) => {
-        DatumGetByteaPP!(DirectFunctionCall1(byteain, CStringGetDatum($str))) as *mut bytea
+        DatumGetByteaPP!(DirectFunctionCall1!(byteain, CStringGetDatum($str))) as *mut bytea
     };
 }
 
@@ -3112,7 +3122,7 @@ pub unsafe fn byteaoverlay_no_len(fcinfo: FunctionCallInfo) -> Datum {
     let sp: c_int = PG_GETARG_INT32!(fcinfo, 2); /* substring start position */
     let sl: c_int;
 
-    sl = VARSIZE_ANY_EXHDR(t2 as *const c_char); /* defaults to length(t2) */
+    sl = VARSIZE_ANY_EXHDR(t2 as *const c_char) as i32; /* defaults to length(t2) */
     PG_RETURN_BYTEA_P!(bytea_overlay(t1, t2, sp, sl));
 }
 
@@ -4888,7 +4898,7 @@ unsafe fn build_concat_foutcache(fcinfo: FunctionCallInfo, argidx: c_int) -> *mu
     ) as *mut FmgrInfo;
 
     i = argidx;
-    while i < PG_NARGS!(fcinfo) {
+    while i < PG_NARGS!(fcinfo) as c_int {
         let valtype: Oid;
         let mut typ_output: Oid = 0;
         let mut typ_is_varlena: bool = false;
@@ -4930,7 +4940,7 @@ unsafe fn concat_internal(
         let arr: *mut ArrayType;
 
         /* Should have just the one argument */
-        assert!(argidx == PG_NARGS!(fcinfo) - 1);
+        assert!(argidx == PG_NARGS!(fcinfo) as i32 - 1);
 
         /* concat(VARIADIC NULL) is defined as NULL */
         if PG_ARGISNULL!(fcinfo, argidx) {
@@ -4961,7 +4971,7 @@ unsafe fn concat_internal(
     }
 
     i = argidx;
-    while i < PG_NARGS!(fcinfo) {
+    while i < PG_NARGS!(fcinfo) as c_int {
         if !PG_ARGISNULL!(fcinfo, i) {
             let value: Datum = PG_GETARG_DATUM!(fcinfo, i);
 
@@ -5101,6 +5111,7 @@ pub unsafe fn text_reverse(fcinfo: FunctionCallInfo) -> Datum {
  * textToQualifiedNameList / Split* (translated from varlena.c)
  * =================================================================== */
 
+#[no_mangle]
 pub unsafe fn textToQualifiedNameList(textval: *mut text) -> *mut List {
     let rawname: *mut c_char;
     let mut result: *mut List = NIL;

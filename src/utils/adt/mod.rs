@@ -1,6 +1,7 @@
 //! SQL data type support functions (postgres/src/backend/utils/adt).
 
 pub mod jsonb_gin;
+// ruleutils deferred: ~1759 errors when compiled (deparse, large); wire in a later milestone.
 pub mod pg_locale_icu;
 pub mod multirangetypes_selfuncs;
 pub mod tsquery;
@@ -34,6 +35,7 @@ pub mod char;
 pub mod cryptohashfuncs;
 pub mod datum;
 pub mod expandeddatum;
+pub mod expandedrecord;
 pub mod geo_selfuncs;
 pub mod geo_spgist;
 pub mod int;

@@ -296,6 +296,7 @@ pub static mut ParallelWorkerNumber: c_int = -1;
 pub static mut ParallelMessagePending: sig_atomic_t = 0; /* false */
 
 /* Are we initializing a parallel worker? */
+#[no_mangle]
 pub static mut InitializingParallelWorker: bool = false;
 
 /* Pointer to our fixed parallel state. */
@@ -663,14 +664,12 @@ pub unsafe fn InitializeParallelDSM(pcxt: *mut ParallelContext) {
 // ---------------------------------------------------------------------------
 
 /// TODO(pg-port): MyProc (storage/proc.h)
-static mut MyProc: *mut PGPROC = null_mut();
-
+extern "C" { pub static mut MyProc: *mut PGPROC; }
 /// TODO(pg-port): MyProcPid (miscadmin.h)
 static mut MyProcPid: c_int = 0;
 
 /// TODO(pg-port): MyProcNumber (storage/procnumber.h)
-static mut MyProcNumber: ProcNumber = 0;
-
+extern "C" { pub static mut MyProcNumber: ProcNumber; }
 /// TODO(pg-port): MyDatabaseId (miscadmin.h)
 static mut MyDatabaseId: Oid = 0;
 

@@ -135,14 +135,10 @@ unsafe fn search_amprocnum_list(_opfamilyoid: Oid) -> *const CatCList {
 }
 
 /// STUB for `get_opfamily_name(opfamilyoid, missing_ok)` (utils/lsyscache.c).
-fn get_opfamily_name(_opfamilyoid: Oid, _missing_ok: bool) -> *mut c_char {
-    unimplemented!("STUB: get_opfamily_name (utils/lsyscache.c not ported)")
-}
+fn get_opfamily_name(_opfamilyoid: Oid, _missing_ok: bool) -> *mut c_char { unimplemented!() }
 
 /// STUB for `get_op_rettype(opno)` (utils/lsyscache.c).
-fn get_op_rettype(_opno: Oid) -> Oid {
-    unimplemented!("STUB: get_op_rettype (utils/lsyscache.c not ported)")
-}
+fn get_op_rettype(_opno: Oid) -> Oid { unimplemented!() }
 
 /// STUB for `format_procedure(procoid)` (utils/regproc.c) - message text only.
 fn format_procedure(_procoid: Oid) -> *mut c_char {
