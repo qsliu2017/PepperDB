@@ -1,0 +1,3 @@
+commands/vacuum.h
+tcop/utility.h
+replication/walreceiver.h
