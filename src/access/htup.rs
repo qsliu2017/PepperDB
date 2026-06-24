@@ -32,6 +32,9 @@ pub struct HeapTupleData {
     pub t_data: *mut HeapTupleHeaderData, // -> tuple header and data; TODO(ptr)
 }
 
+/// C: `typedef HeapTupleData *HeapTuple` -- a pointer-to-tuple handle.
+pub type HeapTuple = *mut HeapTupleData; // TODO(ptr)
+
 pub const FIELDNO_HEAPTUPLEDATA_DATA: usize = 3;
 
 /// MAXALIGN(sizeof(HeapTupleData)). MAXALIGN is 8 on the target platforms.
