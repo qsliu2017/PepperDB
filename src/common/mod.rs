@@ -1,0 +1,57 @@
+//! Directory module: src/include/common
+
+// === scaffold: child modules (Phase 0) ===
+pub mod archive;
+pub mod base64;
+pub mod blkreftable;
+pub mod checksum_helper;
+pub mod compression;
+pub mod config_info;
+pub mod connect;
+pub mod controldata_utils;
+pub mod cryptohash;
+pub mod fe_memutils;
+pub mod file_perm;
+pub mod file_utils;
+pub mod hashfn;
+pub mod hashfn_unstable;
+pub mod hmac;
+pub mod int;
+pub mod int128;
+pub mod ip;
+pub mod jsonapi;
+pub mod keywords;
+pub mod kwlookup;
+#[path = "link-canary.rs"]
+pub mod link_canary;
+pub mod logging;
+pub mod md5;
+#[path = "oauth-common.rs"]
+pub mod oauth_common;
+pub mod openssl;
+pub mod parse_manifest;
+pub mod percentrepl;
+pub mod pg_lzcompress;
+pub mod pg_prng;
+pub mod relpath;
+pub mod restricted_token;
+pub mod saslprep;
+#[path = "scram-common.rs"]
+pub mod scram_common;
+pub mod sha1;
+pub mod sha2;
+pub mod shortest_dec;
+pub mod string;
+pub mod unicode_case;
+pub mod unicode_case_table;
+pub mod unicode_category;
+pub mod unicode_category_table;
+pub mod unicode_east_asian_fw_table;
+pub mod unicode_nonspacing_table;
+pub mod unicode_norm;
+pub mod unicode_norm_hashfunc;
+pub mod unicode_norm_table;
+pub mod unicode_normprops_table;
+pub mod unicode_version;
+pub mod username;
+// === end scaffold ===
