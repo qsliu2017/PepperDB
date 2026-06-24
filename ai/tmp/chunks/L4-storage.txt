@@ -1,0 +1,7 @@
+storage/aio_types.h
+storage/buffile.h
+storage/checksum_impl.h
+storage/fsm_internals.h
+storage/large_object.h
+storage/sharedfileset.h
+storage/sync.h

@@ -1,0 +1,14 @@
+backup/basebackup_sink.h
+backup/walsummary.h
+commands/explain_format.h
+common/blkreftable.h
+common/controldata_utils.h
+common/parse_manifest.h
+lib/dshash.h
+lib/knapsack.h
+libpq/hba.h
+libpq/libpq-be-fe-helpers.h
+pch/c_pch.h
+replication/conflict.h
+replication/pgoutput.h
+rewrite/prs2lock.h

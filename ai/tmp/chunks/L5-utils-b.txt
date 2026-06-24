@@ -1,0 +1,6 @@
+utils/memutils_internal.h
+utils/queryenvironment.h
+utils/relcache.h
+utils/sharedtuplestore.h
+utils/syscache.h
+utils/typcache.h

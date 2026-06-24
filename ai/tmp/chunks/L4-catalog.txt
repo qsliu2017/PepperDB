@@ -1,0 +1,4 @@
+catalog/pg_enum.h
+catalog/pg_largeobject.h
+catalog/pg_subscription.h
+catalog/pg_subscription_rel.h

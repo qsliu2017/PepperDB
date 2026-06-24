@@ -1,0 +1,5 @@
+utils/expandedrecord.h
+utils/jsonfuncs.h
+utils/jsonpath.h
+utils/logtape.h
+utils/lsyscache.h

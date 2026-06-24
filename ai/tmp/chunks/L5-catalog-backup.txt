@@ -1,0 +1,6 @@
+backup/backup_manifest.h
+backup/basebackup.h
+backup/basebackup_target.h
+catalog/namespace.h
+catalog/pg_inherits.h
+catalog/toasting.h
