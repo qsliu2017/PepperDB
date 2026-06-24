@@ -1,0 +1,7 @@
+optimizer/geqo_copy.h
+optimizer/geqo_mutation.h
+optimizer/geqo_pool.h
+optimizer/geqo_random.h
+optimizer/geqo_recombination.h
+optimizer/geqo_selection.h
+replication/snapbuild_internal.h

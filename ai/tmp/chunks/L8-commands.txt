@@ -1,0 +1,9 @@
+commands/alter.h
+commands/createas.h
+commands/defrem.h
+commands/event_trigger.h
+commands/explain_dr.h
+commands/matview.h
+commands/prepare.h
+commands/tablecmds.h
+commands/typecmds.h

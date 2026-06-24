@@ -1,0 +1,6 @@
+access/bufmask.h
+access/printsimple.h
+access/xlogutils.h
+catalog/pg_cast.h
+catalog/pg_constraint.h
+catalog/pg_namespace.h

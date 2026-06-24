@@ -27,7 +27,7 @@ pub const PG_TBLSPC_DIR_SLASH: &str = "pg_tblspc/";
 pub const OIDCHARS: usize = 10;
 
 /// The physical storage of a relation consists of one or more forks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum ForkNumber {
     InvalidForkNumber = -1,
