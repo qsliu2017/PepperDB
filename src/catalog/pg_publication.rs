@@ -1,1 +1,209 @@
 //! Translated from PostgreSQL src/include/catalog/pg_publication.h
+
+use crate::c::NameData;
+use crate::postgres::Datum;
+use crate::postgres_ext::Oid;
+
+pub const PublicationRelationId: Oid = Oid(6104);
+
+#[repr(C)]
+pub struct FormData_pg_publication {
+    pub oid: Oid,
+    pub pubname: NameData,
+    pub pubowner: Oid, // BKI_LOOKUP(pg_authid)
+    pub puballtables: bool,
+    pub pubinsert: bool,
+    pub pubupdate: bool,
+    pub pubdelete: bool,
+    pub pubtruncate: bool,
+    pub pubviaroot: bool,
+    pub pubgencols: i8, // 'n' none / 's' stored
+}
+
+pub type Form_pg_publication = *mut FormData_pg_publication; // TODO(ptr)
+
+// DECLARE_UNIQUE_INDEX_PKEY(pg_publication_oid_index, 6110, PublicationObjectIndexId, ...)
+// DECLARE_UNIQUE_INDEX(pg_publication_pubname_index, 6111, PublicationNameIndexId, ...)
+// MAKE_SYSCACHE(PUBLICATIONOID, pg_publication_oid_index, 8)
+// MAKE_SYSCACHE(PUBLICATIONNAME, pg_publication_pubname_index, 8)
+
+// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
+pub const Anum_pg_publication_oid: i32 = 1;
+pub const Anum_pg_publication_pubname: i32 = 2;
+pub const Anum_pg_publication_pubowner: i32 = 3;
+pub const Anum_pg_publication_puballtables: i32 = 4;
+pub const Anum_pg_publication_pubinsert: i32 = 5;
+pub const Anum_pg_publication_pubupdate: i32 = 6;
+pub const Anum_pg_publication_pubdelete: i32 = 7;
+pub const Anum_pg_publication_pubtruncate: i32 = 8;
+pub const Anum_pg_publication_pubviaroot: i32 = 9;
+pub const Anum_pg_publication_pubgencols: i32 = 10;
+pub const Natts_pg_publication: i32 = 10;
+
+// In-memory structs (not on-disk).
+pub struct PublicationActions {
+    pub pubinsert: bool,
+    pub pubupdate: bool,
+    pub pubdelete: bool,
+    pub pubtruncate: bool,
+}
+
+pub struct PublicationDesc {
+    pub pubactions: PublicationActions,
+    pub rf_valid_for_update: bool,
+    pub rf_valid_for_delete: bool,
+    pub cols_valid_for_update: bool,
+    pub cols_valid_for_delete: bool,
+    pub gencols_valid_for_update: bool,
+    pub gencols_valid_for_delete: bool,
+}
+
+// char-valued enum (EXPOSE_TO_CLIENT_CODE)
+#[repr(i8)]
+pub enum PublishGencolsType {
+    None = b'n' as i8,
+    Stored = b's' as i8,
+}
+
+pub struct Publication {
+    pub oid: Oid,
+    pub name: String,
+    pub alltables: bool,
+    pub pubviaroot: bool,
+    pub pubgencols_type: PublishGencolsType,
+    pub pubactions: PublicationActions,
+}
+
+// Forward refs; repointed in Phase 2.
+#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]
+pub struct Relation; // TODO(struct-forward)
+#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::primnodes::Node in Phase 2")]
+pub struct Node; // TODO(struct-forward)
+#[deprecated(note = "TODO(struct-forward): repoint to Vec<T> (pg_list List) in Phase 2")]
+pub struct List; // TODO(struct-forward)
+#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::bitmapset::Bitmapset in Phase 2")]
+pub struct Bitmapset; // TODO(struct-forward)
+#[deprecated(note = "TODO(struct-forward): repoint to MemoryContext (arena/Box) in Phase 2")]
+pub struct MemoryContext; // TODO(struct-forward)
+#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
+pub struct ObjectAddress; // TODO(struct-forward)
+
+#[allow(deprecated)]
+pub struct PublicationRelInfo {
+    pub relation: Relation,
+    pub where_clause: Node, // whereClause
+    pub columns: List,
+}
+
+// ROOT/LEAF/ALL selector for GetRelationPublications()
+pub enum PublicationPartOpt {
+    Root,
+    Leaf,
+    All,
+}
+
+#[allow(deprecated)]
+pub fn GetPublication(_pubid: Oid) -> Publication {
+    unimplemented!()
+}
+
+// missing_ok -> Option
+#[allow(deprecated)]
+pub fn GetPublicationByName(_pubname: &str, _missing_ok: bool) -> Option<Publication> {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn GetRelationPublications(_relid: Oid) -> List {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn GetPublicationRelations(_pubid: Oid, _pub_partopt: PublicationPartOpt) -> List {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn GetAllTablesPublications() -> List {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn GetAllTablesPublicationRelations(_pubviaroot: bool) -> List {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn GetPublicationSchemas(_pubid: Oid) -> List {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn GetSchemaPublications(_schemaid: Oid) -> List {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn GetSchemaPublicationRelations(_schemaid: Oid, _pub_partopt: PublicationPartOpt) -> List {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn GetAllSchemaPublicationRelations(_pubid: Oid, _pub_partopt: PublicationPartOpt) -> List {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn GetPubPartitionOptionRelations(
+    _result: List,
+    _pub_partopt: PublicationPartOpt,
+    _relid: Oid,
+) -> List {
+    unimplemented!()
+}
+
+// returns top ancestor + ancestor_level out-param
+#[allow(deprecated)]
+pub fn GetTopMostAncestorInPublication(_puboid: Oid, _ancestors: &List) -> (Oid, i32) {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn is_publishable_relation(_rel: &Relation) -> bool {
+    unimplemented!()
+}
+
+pub fn is_schema_publication(_pubid: Oid) -> bool {
+    unimplemented!()
+}
+
+// returns bool + cols out-param -> Option<Bitmapset>
+#[allow(deprecated)]
+pub fn check_and_fetch_column_list(_pub: &Publication, _relid: Oid, _mcxt: &MemoryContext) -> Option<Bitmapset> {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn publication_add_relation(_pubid: Oid, _pri: &PublicationRelInfo, _if_not_exists: bool) -> ObjectAddress {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn pub_collist_validate(_targetrel: &Relation, _columns: &List) -> Bitmapset {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn publication_add_schema(_pubid: Oid, _schemaid: Oid, _if_not_exists: bool) -> ObjectAddress {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn pub_collist_to_bitmapset(_columns: &Bitmapset, _pubcols: Datum, _mcxt: &MemoryContext) -> Bitmapset {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn pub_form_cols_map(_relation: &Relation, _include_gencols_type: PublishGencolsType) -> Bitmapset {
+    unimplemented!()
+}

@@ -1,0 +1,11 @@
+libpq/oauth.h
+libpq/scram.h
+nodes/print.h
+partitioning/partbounds.h
+replication/output_plugin.h
+replication/snapbuild.h
+rewrite/rewriteDefine.h
+rewrite/rewriteManip.h
+storage/standby.h
+tcop/deparse_utility.h
+tcop/dest.h

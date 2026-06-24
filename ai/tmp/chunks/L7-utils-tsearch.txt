@@ -1,0 +1,8 @@
+tsearch/dicts/spell.h
+tsearch/ts_utils.h
+utils/acl.h
+utils/multirangetypes.h
+utils/pgstat_internal.h
+utils/selfuncs.h
+utils/tuplestore.h
+utils/varlena.h

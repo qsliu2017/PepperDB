@@ -1,0 +1,7 @@
+commands/cluster.h
+commands/collationcmds.h
+commands/comment.h
+commands/conversioncmds.h
+commands/dbcommands.h
+commands/explain_state.h
+commands/extension.h

@@ -9,6 +9,7 @@ use crate::postgres_ext::Oid;
 ///
 /// `all_privs`/`privileges` are object-level only; column-level privileges are
 /// in `col_privs` (untransformed AccessPriv nodes; valid only for OBJECT_TABLE).
+#[derive(Debug, Clone, PartialEq)]
 pub struct InternalGrant {
     pub is_grant: bool,
     pub objtype: ObjectType,

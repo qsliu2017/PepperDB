@@ -9,6 +9,11 @@ use crate::postgres_ext::Oid;
 
 pub type Index = usize;
 
+/// C `Expr` is the abstract supertype of all expression nodes; in this port the
+/// universal `Node` enum subsumes it. Alias kept so `Expr`-typed signatures
+/// translate directly (an `Expr *` field is `Option<Box<Node>>`).
+pub type Expr = Node;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverridingKind {
     OVERRIDING_NOT_SET = 0,

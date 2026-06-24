@@ -1,1 +1,103 @@
 //! Translated from PostgreSQL src/include/parser/parse_target.h
+
+use crate::access::tupdesc::TupleDesc;
+use crate::nodes::nodes::Node;
+use crate::nodes::primnodes::{CoercionContext, TargetEntry, Var};
+use crate::parser::parse_node::{ParseExprKind, ParseState};
+use crate::postgres_ext::Oid;
+
+pub fn transformTargetList(
+    _pstate: &mut ParseState,
+    _targetlist: Vec<Box<Node>>,
+    _expr_kind: ParseExprKind,
+) -> Vec<Box<Node>> {
+    unimplemented!()
+}
+
+pub fn transformExpressionList(
+    _pstate: &mut ParseState,
+    _exprlist: Vec<Box<Node>>,
+    _expr_kind: ParseExprKind,
+    _allow_default: bool,
+) -> Vec<Box<Node>> {
+    unimplemented!()
+}
+
+pub fn resolveTargetListUnknowns(_pstate: &mut ParseState, _targetlist: &mut [Box<Node>]) {
+    unimplemented!()
+}
+
+pub fn markTargetListOrigins(_pstate: &mut ParseState, _targetlist: &mut [Box<Node>]) {
+    unimplemented!()
+}
+
+pub fn transformTargetEntry(
+    _pstate: &mut ParseState,
+    _node: Box<Node>,
+    _expr: Option<Box<Node>>,
+    _expr_kind: ParseExprKind,
+    _colname: Option<String>,
+    _resjunk: bool,
+) -> Box<TargetEntry> {
+    unimplemented!()
+}
+
+pub fn transformAssignedExpr(
+    _pstate: &mut ParseState,
+    _expr: Box<Node>,
+    _expr_kind: ParseExprKind,
+    _colname: &str,
+    _attrno: i32,
+    _indirection: Vec<Box<Node>>,
+    _location: i32,
+) -> Box<Node> {
+    unimplemented!()
+}
+
+pub fn updateTargetListEntry(
+    _pstate: &mut ParseState,
+    _tle: &mut TargetEntry,
+    _colname: Option<String>,
+    _attrno: i32,
+    _indirection: Vec<Box<Node>>,
+    _location: i32,
+) {
+    unimplemented!()
+}
+
+pub fn transformAssignmentIndirection(
+    _pstate: &mut ParseState,
+    _basenode: Option<Box<Node>>,
+    _target_name: &str,
+    _target_is_subscripting: bool,
+    _target_type_id: Oid,
+    _target_typmod: i32,
+    _target_collation: Oid,
+    _indirection: Vec<Box<Node>>,
+    _indirection_cell: usize,
+    _rhs: Box<Node>,
+    _ccontext: CoercionContext,
+    _location: i32,
+) -> Box<Node> {
+    unimplemented!()
+}
+
+/// `attrnos` out-param folded into the return tuple.
+pub fn checkInsertTargets(
+    _pstate: &mut ParseState,
+    _cols: Vec<Box<Node>>,
+) -> (Vec<Box<Node>>, Vec<i32>) {
+    unimplemented!()
+}
+
+pub fn expandRecordVariable(_pstate: &mut ParseState, _var: &Var, _levelsup: i32) -> TupleDesc {
+    unimplemented!()
+}
+
+pub fn FigureColname(_node: &Node) -> String {
+    unimplemented!()
+}
+
+pub fn FigureIndexColname(_node: &Node) -> String {
+    unimplemented!()
+}

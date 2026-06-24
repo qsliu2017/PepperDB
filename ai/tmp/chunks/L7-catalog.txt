@@ -1,0 +1,8 @@
+catalog/dependency.h
+catalog/pg_aggregate.h
+catalog/pg_attrdef.h
+catalog/pg_conversion.h
+catalog/pg_operator.h
+catalog/pg_proc.h
+catalog/pg_publication.h
+catalog/pg_type.h

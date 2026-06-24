@@ -1,0 +1,9 @@
+commands/policy.h
+commands/proclang.h
+commands/publicationcmds.h
+commands/schemacmds.h
+commands/seclabel.h
+commands/sequence.h
+commands/subscriptioncmds.h
+commands/tablespace.h
+commands/view.h
