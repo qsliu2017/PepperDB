@@ -419,6 +419,10 @@ pub enum Node {
         Box<crate::nodes::supportnodes::SupportRequestOptimizeWindowClause>,
     ),
     SupportRequestModifyInPlace(Box<crate::nodes::supportnodes::SupportRequestModifyInPlace>),
+    // NOTE: executor-state nodes (nodes/execnodes.rs) are runtime state that PG's
+    // copyObject/equal/outNode never touch; they cannot derive Clone/PartialEq
+    // (closures/opaque handles), so they are NOT Node variants. They live as plain
+    // structs in execnodes.rs and are referenced by concrete type.
 }
 
 // nodes/{outfuncs.c,print.c}
