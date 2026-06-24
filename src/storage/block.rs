@@ -8,7 +8,7 @@ pub const MAX_BLOCK_NUMBER: BlockNumber = 0xFFFFFFFE;
 
 /// On-disk storage type for a BlockNumber, split into two SHORTALIGN'd halves
 /// so it (and structs containing it, e.g. ItemPointerData) can be 2-byte aligned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(C)]
 pub struct BlockIdData {
     pub bi_hi: u16,

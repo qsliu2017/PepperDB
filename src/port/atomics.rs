@@ -1,4 +1,10 @@
-//! Translated from PostgreSQL src/include/port/atomics.h
+//! Tombstone: src/include/port/atomics.h
+//!
+//! PG's atomic abstraction (pg_atomic_uint32/uint64/flag and the pg_atomic_*
+//! operations) is replaced wholesale by `core::sync::atomic` (AtomicU32/AtomicU64/
+//! AtomicBool with Ordering). Callers use the std types directly. The child
+//! arch/generic modules below are themselves tombstones (kept only so the module
+//! tree resolves).
 
 // === scaffold: child modules (Phase 0) ===
 #[path = "atomics/arch-arm.rs"]

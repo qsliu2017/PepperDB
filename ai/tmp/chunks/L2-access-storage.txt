@@ -1,0 +1,11 @@
+access/rmgr.h
+access/skey.h
+access/transam.h
+access/tupmacs.h
+access/xlogarchive.h
+access/xlogbackup.h
+storage/checksum.h
+storage/fd.h
+storage/off.h
+storage/proclist_types.h
+storage/waiteventset.h

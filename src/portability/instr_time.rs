@@ -12,7 +12,7 @@ pub const NS_PER_MS: i64 = 1_000_000;
 pub const NS_PER_US: i64 = 1_000;
 
 /// Opaque interval/absolute time, in nanosecond ticks.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InstrTime {
     pub ticks: i64,
 }

@@ -1,0 +1,12 @@
+common/hmac.h
+common/keywords.h
+common/relpath.h
+common/scram-common.h
+common/unicode_case.h
+common/unicode_category.h
+common/unicode_norm.h
+libpq/be-gssapi-common.h
+libpq/crypt.h
+libpq/pqcomm.h
+libpq/pqformat.h
+mb/stringinfo_mb.h

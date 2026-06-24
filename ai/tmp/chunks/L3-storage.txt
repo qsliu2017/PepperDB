@@ -1,0 +1,6 @@
+storage/bufpage.h
+storage/condition_variable.h
+storage/fileset.h
+storage/itemptr.h
+storage/reinit.h
+storage/relfilelocator.h

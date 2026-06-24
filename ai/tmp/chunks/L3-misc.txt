@@ -1,0 +1,11 @@
+backup/basebackup_incremental.h
+catalog/binary_upgrade.h
+catalog/pg_control.h
+common/checksum_helper.h
+common/ip.h
+jit/jit.h
+libpq/ifaddr.h
+parser/scanner.h
+postmaster/postmaster.h
+regex/regexport.h
+tcop/backend_startup.h
