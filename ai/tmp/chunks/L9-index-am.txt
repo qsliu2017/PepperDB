@@ -1,0 +1,6 @@
+access/brin_internal.h
+access/gist_private.h
+access/gistscan.h
+access/hash.h
+access/spgist.h
+access/generic_xlog.h

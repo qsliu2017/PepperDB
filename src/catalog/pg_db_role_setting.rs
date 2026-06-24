@@ -1,1 +1,56 @@
 //! Translated from PostgreSQL src/include/catalog/pg_db_role_setting.h
+
+use crate::c::text;
+use crate::postgres_ext::Oid;
+
+pub const DbRoleSettingRelationId: Oid = Oid(2964);
+
+// CATALOG(pg_db_role_setting,2964,DbRoleSettingRelationId) BKI_SHARED_RELATION
+#[repr(C)]
+pub struct FormData_pg_db_role_setting {
+    pub setdatabase: Oid, // BKI_LOOKUP_OPT(pg_database); database, or 0 for role-specific
+    pub setrole: Oid,     // BKI_LOOKUP_OPT(pg_authid); role, or 0 for database-specific
+    // CATALOG_VARLEN (not in fixed part):
+    pub setconfig: text, // GUC settings to apply at login (text[])
+}
+
+pub type Form_pg_db_role_setting = *mut FormData_pg_db_role_setting; // TODO(ptr)
+
+// DECLARE_TOAST_WITH_MACRO(pg_db_role_setting, 2966, 2967, PgDbRoleSettingToastTable, PgDbRoleSettingToastIndex)
+// DECLARE_UNIQUE_INDEX_PKEY(pg_db_role_setting_databaseid_rol_index, 2965, DbRoleSettingDatidRolidIndexId, ...)
+
+// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
+pub const Anum_pg_db_role_setting_setdatabase: i32 = 1;
+pub const Anum_pg_db_role_setting_setrole: i32 = 2;
+pub const Anum_pg_db_role_setting_setconfig: i32 = 3;
+pub const Natts_pg_db_role_setting: i32 = 3;
+
+// Forward refs for the function stubs; repointed in Phase 2.
+#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::parsenodes::VariableSetStmt in Phase 2")]
+pub struct VariableSetStmt; // TODO(struct-forward)
+#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::snapshot::Snapshot in Phase 2")]
+pub struct Snapshot; // TODO(struct-forward)
+#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]
+pub struct Relation; // TODO(struct-forward)
+#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::guc GucSource in Phase 2")]
+pub struct GucSource; // TODO(struct-forward)
+
+#[allow(deprecated)]
+pub fn AlterSetting(_databaseid: Oid, _roleid: Oid, _setstmt: &VariableSetStmt) {
+    unimplemented!()
+}
+
+pub fn DropSetting(_databaseid: Oid, _roleid: Oid) {
+    unimplemented!()
+}
+
+#[allow(deprecated)]
+pub fn ApplySetting(
+    _snapshot: &Snapshot,
+    _databaseid: Oid,
+    _roleid: Oid,
+    _relsetting: &Relation,
+    _source: GucSource,
+) {
+    unimplemented!()
+}

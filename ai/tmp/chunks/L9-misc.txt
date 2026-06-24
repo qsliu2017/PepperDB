@@ -1,0 +1,9 @@
+catalog/pg_db_role_setting.h
+commands/user.h
+executor/tqueue.h
+libpq/pqmq.h
+optimizer/geqo_misc.h
+replication/logicalproto.h
+storage/bulk_write.h
+tcop/tcopprot.h
+access/parallel.h
