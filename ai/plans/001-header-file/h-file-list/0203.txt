@@ -1,0 +1,3 @@
+# foundation-rewrite: elog
+# Keep elog(ERROR) as a panic contained by catch_unwind at task spawn; mark #[deprecated] + // TODO(panic). End goal: Result + ?.
+utils/elog.h

@@ -1,0 +1,3 @@
+# deleted/replaced: dsm-dsa
+# DSM/DSA/shm_mq/shm_toc -> Arc + tokio channels (parallel query). Tombstone .rs.
+storage/dsm.h

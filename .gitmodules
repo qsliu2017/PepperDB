@@ -1,0 +1,3 @@
+[submodule "ref/postgres"]
+	path = ref/postgres
+	url = https://github.com/postgres/postgres.git

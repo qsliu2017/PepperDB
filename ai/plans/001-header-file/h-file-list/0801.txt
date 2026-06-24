@@ -1,0 +1,3 @@
+# foundation-rewrite: buffer-manager
+# Stub public API (bufmgr.h) in skeleton; implement in a later implementation pass. buf_internals.h is internal - defer.
+storage/buf_internals.h

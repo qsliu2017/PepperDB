@@ -1,0 +1,3 @@
+# deleted/replaced: latch
+# Latch -> tokio::sync::Notify. Tombstone .rs.
+storage/latch.h

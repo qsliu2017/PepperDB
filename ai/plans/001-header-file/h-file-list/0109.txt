@@ -1,0 +1,3 @@
+# generated: wait-event-generated
+# build.rs from wait_event_names.txt -> enum + names module; set up before dependents. Merge with wait_event.h.
+utils/wait_event_types.h

@@ -1,0 +1,9 @@
+access/gin_private.h
+catalog/heap.h
+commands/copyapi.h
+commands/copyfrom_internal.h
+executor/execExpr.h
+executor/execPartition.h
+executor/executor.h
+replication/logicalrelation.h
+utils/portal.h

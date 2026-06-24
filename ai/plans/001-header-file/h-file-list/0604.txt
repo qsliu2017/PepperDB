@@ -1,0 +1,4 @@
+# foundation-rewrite: wal
+# Stub WAL insert/flush API in skeleton; implement in a later implementation pass. (xlogrecord.h/xlogdefs.h are on-disk and stay mechanical.)
+access/xlog_internal.h
+access/xloginsert.h

@@ -1,0 +1,3 @@
+# foundation-rewrite: memory
+# MemoryContext dropped; use Rust ownership. Keep work_mem accounting at operators. Stub palloc/memutils minimally; remove as callers migrate.
+utils/memutils.h

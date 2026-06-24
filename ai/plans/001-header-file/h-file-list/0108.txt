@@ -1,0 +1,9 @@
+# generated: unicode-generated
+# build.rs from Unicode data -> lookup tables; set up before dependents.
+common/unicode_case_table.h
+common/unicode_category_table.h
+common/unicode_east_asian_fw_table.h
+common/unicode_nonspacing_table.h
+common/unicode_norm_hashfunc.h
+common/unicode_norm_table.h
+common/unicode_normprops_table.h

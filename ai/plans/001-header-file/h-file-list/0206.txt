@@ -1,0 +1,3 @@
+# deleted/replaced: spinlock
+# Spinlocks -> std/parking_lot. Tombstone .rs; callers use Rust locks.
+storage/spin.h

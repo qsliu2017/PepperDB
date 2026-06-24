@@ -1,0 +1,3 @@
+# foundation-rewrite: invalidation
+# Stub sinval/inval API; implement as a shared queue with per-task wakeups in a later implementation pass.
+utils/inval.h

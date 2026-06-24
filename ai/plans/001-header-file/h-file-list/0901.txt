@@ -1,0 +1,3 @@
+# foundation-rewrite: lock-manager
+# Stub lock/proc API in skeleton; implement (sharded tables, per-task proc, async waits, deadlock detector) in a later implementation pass.
+storage/lmgr.h

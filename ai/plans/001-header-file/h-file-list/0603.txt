@@ -1,0 +1,3 @@
+# foundation-rewrite: smgr
+# Stub smgr/md API in skeleton; implement over the async I/O backend in a later implementation pass.
+storage/md.h

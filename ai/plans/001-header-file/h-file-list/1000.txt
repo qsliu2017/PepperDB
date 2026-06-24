@@ -1,0 +1,7 @@
+access/brin_tuple.h
+access/heapam.h
+access/nbtree.h
+access/spgist_private.h
+commands/vacuum.h
+replication/walreceiver.h
+tcop/utility.h

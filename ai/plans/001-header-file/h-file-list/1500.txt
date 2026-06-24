@@ -1,0 +1,9 @@
+access/printtup.h
+commands/explain.h
+commands/portalcmds.h
+executor/execScan.h
+executor/execdebug.h
+executor/spi.h
+funcapi.h
+replication/worker_internal.h
+tcop/pquery.h

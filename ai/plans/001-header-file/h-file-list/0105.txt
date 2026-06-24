@@ -1,0 +1,3 @@
+# deleted/replaced: shmem-ipc
+# Shared-memory segment + ipc setup -> Arc-shared heap state. Tombstone .rs.
+storage/ipc.h

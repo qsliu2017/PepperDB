@@ -1,0 +1,3 @@
+# foundation-rewrite: procsignal
+# Stub procsignal API; implement as typed inter-task channels in a later implementation pass.
+storage/procsignal.h

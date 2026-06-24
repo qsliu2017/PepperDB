@@ -1,0 +1,3 @@
+# generated: lwlocknames-generated
+# build.rs from lwlocklist.h -> lock-name constants; set up before dependents.
+storage/lwlocknames.h
