@@ -1,0 +1,12 @@
+utils/aclchk_internal.h
+utils/catcache.h
+utils/funccache.h
+utils/memutils_memorychunk.h
+utils/partcache.h
+utils/plancache.h
+utils/rangetypes.h
+utils/relmapper.h
+utils/ruleutils.h
+utils/skipsupport.h
+utils/snapmgr.h
+utils/sortsupport.h

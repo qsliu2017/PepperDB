@@ -1,0 +1,5 @@
+nodes/nodeFuncs.h
+nodes/pathnodes.h
+nodes/queryjumble.h
+nodes/supportnodes.h
+nodes/tidbitmap.h

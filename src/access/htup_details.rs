@@ -1,10 +1,10 @@
 //! Translated from PostgreSQL src/include/access/htup_details.h
 //! POSTGRES heap tuple header definitions.
 
-// TupleDesc is a forward-decl (deprecated) used across many signatures here.
 #![allow(deprecated)]
 
 use crate::access::htup::HeapTupleData;
+use crate::access::tupdesc::TupleDesc;
 use crate::c::{
     bits8, CommandId, FrozenTransactionId, InvalidTransactionId, TransactionId,
 };
@@ -638,11 +638,4 @@ pub fn heap_getattr(
     _tuple_desc: &TupleDesc,
 ) -> (Datum, bool) {
     unimplemented!()
-}
-
-// TupleDesc is defined in access/tupdesc.h (level 4+); forward-declared locally.
-// TODO(struct-forward): repoint to crate::access::tupdesc::TupleDesc in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access::tupdesc::TupleDesc in Phase 2")]
-pub struct TupleDesc {
-    _opaque: [u8; 0],
 }

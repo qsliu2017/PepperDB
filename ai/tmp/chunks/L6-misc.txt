@@ -1,0 +1,10 @@
+executor/tuptable.h
+foreign/foreign.h
+jit/llvmjit_emit.h
+libpq/auth.h
+libpq/libpq.h
+libpq/sasl.h
+pgstat.h
+postmaster/bgwriter.h
+regex/regguts.h
+tsearch/ts_public.h

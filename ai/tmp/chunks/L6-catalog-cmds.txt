@@ -1,0 +1,8 @@
+catalog/catalog.h
+catalog/objectaddress.h
+catalog/partition.h
+catalog/storage.h
+catalog/storage_xlog.h
+commands/dbcommands_xlog.h
+commands/discard.h
+commands/lockcmds.h

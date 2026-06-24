@@ -1,0 +1,9 @@
+optimizer/optimizer.h
+parser/parse_node.h
+parser/parser.h
+parser/parsetree.h
+partitioning/partdesc.h
+rewrite/rewriteHandler.h
+rewrite/rewriteRemove.h
+rewrite/rewriteSearchCycle.h
+rewrite/rowsecurity.h
