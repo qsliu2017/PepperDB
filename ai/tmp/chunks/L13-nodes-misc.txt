@@ -1,0 +1,5 @@
+nodes/extensible.h
+nodes/makefuncs.h
+partitioning/partprune.h
+replication/decode.h
+utils/xml.h

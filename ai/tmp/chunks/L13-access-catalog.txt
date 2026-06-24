@@ -1,0 +1,6 @@
+access/brin.h
+access/gin.h
+access/tsmapi.h
+bootstrap/bootstrap.h
+catalog/index.h
+catalog/indexing.h

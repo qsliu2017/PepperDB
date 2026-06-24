@@ -1,0 +1,3 @@
+commands/copy.h
+commands/trigger.h
+foreign/fdwapi.h
