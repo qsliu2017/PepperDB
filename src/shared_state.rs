@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use crate::backend::storage::file::fd::FdManager;
 use crate::backend::storage::ipc::procsignal::ProcSignal;
+use crate::backend::utils::init::globals::ProcessConfig;
 use crate::storage::io_backend::{self, IoBackend};
 
 /// Construction parameters for [`SharedState`]. Sizing knobs for the I/O leaf.
@@ -49,6 +50,10 @@ impl Default for SharedStateConfig {
 /// Fields are added by later steps at the position dictated by ipci.c order
 /// (see `SharedState::new`).
 pub struct SharedState {
+    /// Process-wide startup config (PG globals.c config half: DataDir, sizing
+    /// GUCs). No ipci.c line -- it is process config, not a shmem struct.
+    pub config: Arc<ProcessConfig>,
+
     /// VFD pool over the async I/O leaf. Holds the `IoBackend` internally;
     /// reach the raw leaf via [`SharedState::io`] for WAL/smgr append paths.
     pub fd: Arc<FdManager>,
@@ -79,6 +84,13 @@ impl SharedState {
         // so it is constructed first.
         let io = IoBackend::new(config.fd_budget);
         let fd = FdManager::new(io, config.max_open_files);
+
+        // Process-wide startup config (DataDir, sizing GUCs). Not a shmem
+        // struct; constructed with compiled-in defaults, populated from GUC at
+        // startup (TODO(guc)). DataDir is settable early via `config.set_data_dir`.
+        let process_config = Arc::new(ProcessConfig::new());
+        // Publish for the deprecated miscadmin `DataDir` shims (one per process).
+        crate::backend::utils::init::globals::set_process_config(process_config.clone());
 
         // --- CreateOrAttachShmemStructs roster (ipci.c order) -----------------
         // CreateLWLocks / InitShmemIndex / dsm_shmem_init / DSMRegistryShmemInit:
@@ -125,7 +137,12 @@ impl SharedState {
         //   (WaitEventCustomShmemInit / InjectionPointShmemInit -- deferred)
         //   (AioShmemInit -- deferred: tokio I/O leaf replaces the aio subsys)
 
-        Arc::new(SharedState { fd, proc_signal })
+        Arc::new(SharedState { config: process_config, fd, proc_signal })
+    }
+
+    /// Process-wide startup config (PG globals.c config half).
+    pub fn config(&self) -> &Arc<ProcessConfig> {
+        &self.config
     }
 
     /// The raw async I/O leaf, for WAL/smgr append paths that need positional

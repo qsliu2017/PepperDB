@@ -49,6 +49,7 @@ pub mod postmaster;
 pub mod regex;
 pub mod replication;
 pub mod rewrite;
+pub mod session;
 pub mod shared_state;
 pub mod snowball;
 pub mod statistics;

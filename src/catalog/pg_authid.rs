@@ -8,6 +8,9 @@ use crate::postgres_ext::Oid;
 pub const AuthIdRelationId: Oid = Oid(1260);
 pub const AuthIdRelation_Rowtype_Id: Oid = Oid(2842);
 
+// oid_symbol from pg_authid.dat: the bootstrap superuser role.
+pub const BOOTSTRAP_SUPERUSERID: Oid = Oid(10);
+
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_authid {
