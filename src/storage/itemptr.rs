@@ -91,12 +91,19 @@ impl ItemPointerData {
 
 // `ItemPointerCopy` is a plain assignment in C; use Rust assignment / Copy.
 
-pub fn ItemPointerEquals(_pointer1: &ItemPointerData, _pointer2: &ItemPointerData) -> bool {
-    unimplemented!()
+// itemptr.c's two non-inline functions are idiomatic methods in the backend
+// module; keep C-named deprecated shims delegating to them (cross-reference).
+
+#[deprecated(note = "use `pointer1.equals(pointer2)`")]
+#[inline]
+pub fn ItemPointerEquals(pointer1: &ItemPointerData, pointer2: &ItemPointerData) -> bool {
+    pointer1.equals(pointer2)
 }
 
-pub fn ItemPointerCompare(_arg1: &ItemPointerData, _arg2: &ItemPointerData) -> i32 {
-    unimplemented!()
+#[deprecated(note = "use `arg1.compare(arg2)`")]
+#[inline]
+pub fn ItemPointerCompare(arg1: &ItemPointerData, arg2: &ItemPointerData) -> i32 {
+    arg1.compare(arg2)
 }
 
 pub fn ItemPointerInc(_pointer: &mut ItemPointerData) {

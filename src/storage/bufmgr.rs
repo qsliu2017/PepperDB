@@ -25,9 +25,9 @@ use crate::access::xlogdefs::XLogRecPtr;
 
 use bitflags::bitflags;
 
-/// C: `typedef void *Block`. A reference to a disk page image; modeled as a page
-/// byte slice rather than a raw pointer.
-pub type Block<'a> = Page<'a>;
+/// C: `typedef void *Block`. A reference to a disk page image; modeled as a
+/// reference to the page newtype rather than a raw pointer.
+pub type Block<'a> = &'a Page;
 
 /// Possible arguments for GetAccessStrategy(). Sequential ordinal -> enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -550,6 +550,6 @@ pub fn BufferGetPageSize(buffer: Buffer) -> usize {
 }
 
 /// Returns the page associated with a buffer.
-pub fn BufferGetPage<'a>(buffer: Buffer) -> Page<'a> {
+pub fn BufferGetPage<'a>(buffer: Buffer) -> &'a Page {
     BufferGetBlock(buffer)
 }

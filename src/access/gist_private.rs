@@ -19,7 +19,7 @@ use crate::storage::block::BlockNumber;
 use crate::storage::buf::Buffer;
 use crate::storage::buffile::BufFile;
 use crate::storage::bufmgr::{BUFFER_LOCK_EXCLUSIVE, BUFFER_LOCK_SHARE, BUFFER_LOCK_UNLOCK};
-use crate::storage::bufpage::{Page, PageMut};
+use crate::storage::bufpage::Page;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
 use crate::utils::hsearch::HTAB;
@@ -183,7 +183,7 @@ pub struct SplitPageLayout {
     /// union key for page
     pub itup: IndexTuple,
     /// page to operate on
-    pub page: PageMut<'static>, // TODO(ptr): Page is a borrowed slice
+    pub page: &'static mut Page, // TODO(ptr): Page is a borrowed slice
     /// buffer to write after all proceed
     pub buffer: Buffer,
     pub next: Option<Box<SplitPageLayout>>,
@@ -194,7 +194,7 @@ pub struct GISTInsertStack {
     /// current page
     pub blkno: BlockNumber,
     pub buffer: Buffer,
-    pub page: PageMut<'static>, // TODO(ptr)
+    pub page: &'static mut Page, // TODO(ptr)
     /// page LSN, to recognize page update/split vs nsn
     pub lsn: GistNSN,
     /// set if we split the page during descent; need to retry from parent
@@ -381,7 +381,7 @@ pub fn gistplacetopage(
 
 pub fn gistSplit(
     _r: Relation,
-    _page: Page,
+    _page: &Page,
     _itup: &mut [IndexTuple],
     _len: i32,
     _giststate: &mut GISTSTATE,
@@ -485,7 +485,7 @@ pub fn gistfitpage(_itvec: &[IndexTuple], _len: i32) -> bool {
     unimplemented!()
 }
 pub fn gistnospace(
-    _page: Page,
+    _page: &Page,
     _itvec: &[IndexTuple],
     _len: i32,
     _todelete: OffsetNumber,
@@ -499,13 +499,13 @@ pub fn gistcheckpage(_rel: Relation, _buf: Buffer) {
 pub fn gist_new_buffer(_r: Relation, _heaprel: Relation) -> Buffer {
     unimplemented!()
 }
-pub fn gist_page_recyclable(_page: Page) -> bool {
+pub fn gist_page_recyclable(_page: &Page) -> bool {
     unimplemented!()
 }
-pub fn gistfillbuffer(_page: PageMut, _itup: &[IndexTuple], _len: i32, _off: OffsetNumber) {
+pub fn gistfillbuffer(_page: &mut Page, _itup: &[IndexTuple], _len: i32, _off: OffsetNumber) {
     unimplemented!()
 }
-pub fn gistextractpage(_page: Page) -> Vec<IndexTuple> {
+pub fn gistextractpage(_page: &Page) -> Vec<IndexTuple> {
     // C: returns array + *len out-param -> Vec.
     unimplemented!()
 }
@@ -560,7 +560,7 @@ pub fn gist_compress_values(
 
 pub fn gistchoose(
     _r: Relation,
-    _p: Page,
+    _p: &Page,
     _it: IndexTuple,
     _giststate: &mut GISTSTATE,
 ) -> OffsetNumber {
@@ -570,7 +570,7 @@ pub fn gistchoose(
 pub fn gist_init_buffer(_b: Buffer, _f: u32) {
     unimplemented!()
 }
-pub fn gistinitpage(_page: PageMut, _f: u32) {
+pub fn gistinitpage(_page: &mut Page, _f: u32) {
     unimplemented!()
 }
 #[allow(clippy::too_many_arguments)]
@@ -580,7 +580,7 @@ pub fn gistdentryinit(
     _e: &mut GISTENTRY,
     _k: Datum,
     _r: Relation,
-    _pg: Page,
+    _pg: &Page,
     _o: OffsetNumber,
     _l: bool,
     _is_null: bool,
@@ -615,7 +615,7 @@ pub fn gist_decompress_att(
     _giststate: &mut GISTSTATE,
     _r: Relation,
     _tuple: IndexTuple,
-    _p: Page,
+    _p: &Page,
     _o: OffsetNumber,
     _attdata: &mut GISTENTRY,
     _isnull: &mut [bool],
@@ -662,7 +662,7 @@ pub fn gistvacuumcleanup(
 /* gistsplit.c */
 pub fn gist_split_by_key(
     _r: Relation,
-    _page: Page,
+    _page: &Page,
     _itup: &mut [IndexTuple],
     _len: i32,
     _giststate: &mut GISTSTATE,

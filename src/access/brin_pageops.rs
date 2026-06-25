@@ -5,7 +5,7 @@ use crate::access::brin_revmap::BrinRevmap;
 use crate::access::brin_tuple::BrinTuple;
 use crate::storage::block::BlockNumber;
 use crate::storage::buf::Buffer;
-use crate::storage::bufpage::PageMut;
+use crate::storage::bufpage::Page;
 use crate::storage::off::OffsetNumber;
 use crate::utils::rel::Relation;
 
@@ -46,12 +46,12 @@ pub fn brin_doinsert(
 }
 
 /// Initialize a new BRIN regular page with the given type.
-pub fn brin_page_init(_page: PageMut, _type: u16) {
+pub fn brin_page_init(_page: &mut Page, _type: u16) {
     unimplemented!()
 }
 
 /// Initialize a new BRIN metapage.
-pub fn brin_metapage_init(_page: PageMut, _pages_per_range: BlockNumber, _version: u16) {
+pub fn brin_metapage_init(_page: &mut Page, _pages_per_range: BlockNumber, _version: u16) {
     unimplemented!()
 }
 

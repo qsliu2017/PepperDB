@@ -76,7 +76,7 @@ pub fn log_newpage(
     _rlocator: &RelFileLocator,
     _forknum: ForkNumber,
     _blkno: BlockNumber,
-    _page: Page,
+    _page: &Page,
     _page_std: bool,
 ) -> XLogRecPtr {
     unimplemented!() // TODO(wal)
@@ -85,7 +85,7 @@ pub fn log_newpages(
     _rlocator: &RelFileLocator,
     _forknum: ForkNumber,
     _blknos: &[BlockNumber],
-    _pages: &[Page],
+    _pages: &[&Page],
     _page_std: bool,
 ) {
     unimplemented!() // TODO(wal)

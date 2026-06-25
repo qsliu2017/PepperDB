@@ -97,11 +97,11 @@ pub struct GISTDeletedPageContents {
     pub deleteXid: FullTransactionId,
 }
 
-pub fn GistPageSetDeleted(_page: Page, _deletexid: FullTransactionId) {
+pub fn GistPageSetDeleted(_page: &mut Page, _deletexid: FullTransactionId) {
     unimplemented!()
 }
 
-pub fn GistPageGetDeleteXid(_page: Page) -> FullTransactionId {
+pub fn GistPageGetDeleteXid(_page: &Page) -> FullTransactionId {
     // Fallback when the deleteXid field isn't present.
     let _ = full_transaction_id_from_epoch_and_xid(0, FIRST_NORMAL_TRANSACTION_ID);
     unimplemented!()

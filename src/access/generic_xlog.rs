@@ -8,7 +8,7 @@ use crate::access::xlogreader::XLogReaderState;
 use crate::lib::stringinfo::StringInfo;
 use crate::storage::block::BlockNumber;
 use crate::storage::buf::Buffer;
-use crate::storage::bufpage::PageMut;
+use crate::storage::bufpage::Page;
 use crate::utils::rel::Relation;
 
 pub const MAX_GENERIC_XLOG_PAGES: i32 = XLR_NORMAL_MAX_BLOCK_ID;
@@ -35,7 +35,7 @@ pub fn generic_xlog_register_buffer<'a>(
     _state: &mut GenericXLogState,
     _buffer: Buffer,
     _flags: GenericXLogFlags,
-) -> PageMut<'a> {
+) -> &'a mut Page {
     unimplemented!()
 }
 pub fn generic_xlog_finish(_state: &mut GenericXLogState) -> XLogRecPtr {

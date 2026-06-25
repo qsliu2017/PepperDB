@@ -43,16 +43,16 @@ impl ItemIdData {
         ((self.0 >> LEN_SHIFT) & LEN_MASK) as u16
     }
 
-    const fn set_off(&mut self, off: u16) {
+    pub(crate) const fn set_off(&mut self, off: u16) {
         self.0 = (self.0 & !OFF_MASK) | ((off as u32) & OFF_MASK);
     }
 
-    const fn set_flags(&mut self, flags: u8) {
+    pub(crate) const fn set_flags(&mut self, flags: u8) {
         self.0 = (self.0 & !(FLAGS_MASK << FLAGS_SHIFT))
             | (((flags as u32) & FLAGS_MASK) << FLAGS_SHIFT);
     }
 
-    const fn set_len(&mut self, len: u16) {
+    pub(crate) const fn set_len(&mut self, len: u16) {
         self.0 = (self.0 & !(LEN_MASK << LEN_SHIFT)) | (((len as u32) & LEN_MASK) << LEN_SHIFT);
     }
 

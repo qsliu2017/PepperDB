@@ -14,7 +14,7 @@ use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::storage::block::BlockNumber;
 use crate::storage::buf::Buffer;
-use crate::storage::bufpage::{Page, PageMut, SizeOfPageHeaderData};
+use crate::storage::bufpage::{Page, SizeOfPageHeaderData};
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
 use crate::utils::geo_decls::BOX;
@@ -499,7 +499,7 @@ pub const SPGIST_PAGE_CAPACITY: usize = MAXALIGN_DOWN(
 );
 
 /// C: `SpGistPageGetFreeSpace(p, n)` - free space, recycling up to n placeholders.
-pub fn SpGistPageGetFreeSpace(_p: Page, _n: i32) -> usize {
+pub fn SpGistPageGetFreeSpace(_p: &Page, _n: i32) -> usize {
     unimplemented!()
 }
 
@@ -569,7 +569,7 @@ pub fn SpGistSetLastUsedPage(_index: Relation, _buffer: Buffer) {
     unimplemented!()
 }
 
-pub fn SpGistInitPage(_page: PageMut, _f: u16) {
+pub fn SpGistInitPage(_page: &mut Page, _f: u16) {
     unimplemented!()
 }
 
@@ -577,7 +577,7 @@ pub fn SpGistInitBuffer(_b: Buffer, _f: u16) {
     unimplemented!()
 }
 
-pub fn SpGistInitMetapage(_page: PageMut) {
+pub fn SpGistInitMetapage(_page: &mut Page) {
     unimplemented!()
 }
 
@@ -642,7 +642,7 @@ pub fn spgExtractNodeLabels(_state: &mut SpGistState, _inner_tuple: SpGistInnerT
 /// Returns the offset where the item was placed; `*startOffset` is in/out.
 pub fn SpGistPageAddNewItem(
     _state: &mut SpGistState,
-    _page: PageMut,
+    _page: &mut Page,
     _item: *mut u8,
     _size: usize,
     _start_offset: &mut OffsetNumber,
@@ -674,7 +674,7 @@ pub fn spgUpdateNodeLink(
 
 pub fn spgPageIndexMultiDelete(
     _state: &mut SpGistState,
-    _page: PageMut,
+    _page: &mut Page,
     _itemnos: &[OffsetNumber],
     _nitems: i32,
     _firststate: i32,

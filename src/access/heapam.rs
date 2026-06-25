@@ -497,7 +497,7 @@ pub fn heap_page_prune_execute(
 }
 
 /// Fills `root_offsets` (MaxHeapTuplesPerPage entries) in place.
-pub fn heap_get_root_tuples(_page: Page, _root_offsets: &mut [OffsetNumber]) {
+pub fn heap_get_root_tuples(_page: &Page, _root_offsets: &mut [OffsetNumber]) {
     unimplemented!()
 }
 

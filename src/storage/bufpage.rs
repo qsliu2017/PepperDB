@@ -14,17 +14,73 @@ use crate::storage::off::OffsetNumber;
 // GUC variable (process global; to become session/global state later).
 pub static mut ignore_checksum_failure: bool = false;
 
-// A postgres disk page is a byte buffer laid out as a slotted page:
-//   [ PageHeaderData | linp1..linpN -> lower ... upper <- tupleN..tuple1 | special ]
-// C models `Page` as `char *` (PageData = char). We model it as a byte slice.
+/// A postgres disk page laid out as a slotted page:
+///   [ PageHeaderData | linp1..linpN -> lower ... upper <- tupleN..tuple1 | special ]
+///
+/// C models `Page` as `char *` (PageData = char). We model it as a concrete
+/// 8192-byte block. `align(8)` (= MAXIMUM_ALIGNOF) makes the in-place overlay
+/// casts to `PageHeaderData` / `ItemIdData` sound by construction.
+#[repr(C, align(8))]
+pub struct Page([u8; BLCKSZ as usize]);
+
 pub type PageData = u8;
-pub type Page<'a> = &'a [u8];
-pub type PageMut<'a> = &'a mut [u8];
 
 /// Byte offset within a page. Limited to 2^15 (lp_off/lp_len are 15 bits).
 pub type LocationIndex = u16;
 
-const fn maxalign(n: usize) -> usize {
+const _: () = assert!(core::mem::size_of::<Page>() == BLCKSZ as usize);
+const _: () = assert!(core::mem::align_of::<Page>() >= core::mem::align_of::<PageHeaderData>());
+const _: () = assert!(core::mem::align_of::<Page>() >= core::mem::align_of::<ItemIdData>());
+
+impl Page {
+    /// An all-zero page block (an uninitialized / new page).
+    pub const fn zeroed() -> Self {
+        Page([0u8; BLCKSZ as usize])
+    }
+
+    /// An all-zero page block on the heap (avoids an 8KB stack move).
+    pub fn boxed_zeroed() -> Box<Self> {
+        // SAFETY: Page is a plain byte array; all-zero is a valid bit pattern and
+        // the alloc is sized/aligned for Page via Layout::new.
+        unsafe {
+            let layout = core::alloc::Layout::new::<Page>();
+            let ptr = std::alloc::alloc_zeroed(layout) as *mut Page;
+            if ptr.is_null() {
+                std::alloc::handle_alloc_error(layout);
+            }
+            Box::from_raw(ptr)
+        }
+    }
+
+    /// Byte view of the page (for the smgr / IoBackend layer).
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    /// Mutable byte view of the page (for reading a page off disk).
+    #[inline]
+    pub fn as_mut_bytes(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
+}
+
+impl core::ops::Deref for Page {
+    type Target = [u8];
+    #[inline]
+    fn deref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for Page {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
+}
+
+pub(crate) const fn maxalign(n: usize) -> usize {
     (n + (MAXIMUM_ALIGNOF - 1)) & !(MAXIMUM_ALIGNOF - 1)
 }
 
@@ -113,233 +169,460 @@ bitflags! {
     }
 }
 
-// === page support functions (the static-inline header accessors) ===
+// === in-place header overlay accessors (crate-internal) ===
 //
-// These read/write the fixed header by reinterpreting the leading bytes of the
-// page buffer. SAFETY in each: `page` is a real page buffer >= SizeOfPageHeaderData.
+// Read/write the fixed header by reinterpreting the leading bytes of the page.
+// SOUND: Page is `#[repr(C, align(8))]`, so its base pointer is suitably aligned
+// for PageHeaderData (asserted above). The page is always >= SizeOfPageHeaderData.
 
-#[inline]
-fn header(page: &[u8]) -> &PageHeaderData {
-    unsafe { &*(page.as_ptr() as *const PageHeaderData) }
-}
+impl Page {
+    #[inline]
+    pub(crate) fn header(&self) -> &PageHeaderData {
+        unsafe { &*(self.0.as_ptr() as *const PageHeaderData) }
+    }
 
-#[inline]
-fn header_mut(page: &mut [u8]) -> &mut PageHeaderData {
-    unsafe { &mut *(page.as_mut_ptr() as *mut PageHeaderData) }
-}
+    #[inline]
+    pub(crate) fn header_mut(&mut self) -> &mut PageHeaderData {
+        unsafe { &mut *(self.0.as_mut_ptr() as *mut PageHeaderData) }
+    }
 
-/// True iff no itemid has been allocated on the page.
-pub fn PageIsEmpty(page: Page) -> bool {
-    (header(page).lower as usize) <= SizeOfPageHeaderData
-}
+    /// True iff no itemid has been allocated on the page.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        (self.header().lower as usize) <= SizeOfPageHeaderData
+    }
 
-/// True iff page has not been initialized (by PageInit).
-pub fn PageIsNew(page: Page) -> bool {
-    header(page).upper == 0
-}
+    /// True iff page has not been initialized (by init).
+    #[inline]
+    pub fn is_new(&self) -> bool {
+        self.header().upper == 0
+    }
 
-/// Returns the requested item identifier (line pointer). 1-based offset number.
-pub fn PageGetItemId(page: Page, offset_number: OffsetNumber) -> ItemIdData {
-    let linp = page_linp(page);
-    linp[(offset_number - 1) as usize]
-}
+    /// Returns the requested item identifier (line pointer). 1-based offset.
+    #[inline]
+    pub fn get_item_id(&self, offset_number: OffsetNumber) -> ItemIdData {
+        let idx = (offset_number - 1) as usize;
+        let base = unsafe { self.0.as_ptr().add(SizeOfPageHeaderData) as *const ItemIdData };
+        unsafe { *base.add(idx) }
+    }
 
-/// The line-pointer array as a typed slice (MAXALIGN guarantees alignment at
-/// SizeOfPageHeaderData). Length is bounded by lower.
-pub fn page_linp(page: Page) -> &[ItemIdData] {
-    let n = PageGetMaxOffsetNumber(page) as usize;
-    let base = unsafe { page.as_ptr().add(SizeOfPageHeaderData) as *const ItemIdData };
-    unsafe { core::slice::from_raw_parts(base, n) }
-}
+    /// Contents start, for pages with no line pointers. MAXALIGN'd.
+    #[inline]
+    pub fn get_contents(&self) -> &[u8] {
+        &self.0[maxalign(SizeOfPageHeaderData)..]
+    }
 
-/// Mutable line-pointer array view.
-pub fn page_linp_mut(page: PageMut) -> &mut [ItemIdData] {
-    let n = PageGetMaxOffsetNumber(page) as usize;
-    let base = unsafe { page.as_mut_ptr().add(SizeOfPageHeaderData) as *mut ItemIdData };
-    unsafe { core::slice::from_raw_parts_mut(base, n) }
-}
+    /// Page size, from a formatted page (high 8 bits of pagesize_version).
+    #[inline]
+    pub fn get_page_size(&self) -> usize {
+        (self.header().pagesize_version & 0xFF00) as usize
+    }
 
-/// Contents start, for pages with no line pointers. MAXALIGN'd.
-pub fn PageGetContents(page: Page) -> &[u8] {
-    &page[maxalign(SizeOfPageHeaderData)..]
-}
+    /// Page layout version (low 8 bits of pagesize_version).
+    #[inline]
+    pub fn get_page_layout_version(&self) -> u8 {
+        (self.header().pagesize_version & 0x00FF) as u8
+    }
 
-/// Page size, from a formatted page (high 8 bits of pagesize_version).
-pub fn PageGetPageSize(page: Page) -> usize {
-    (header(page).pagesize_version & 0xFF00) as usize
-}
+    /// Set page size and layout version together.
+    #[inline]
+    pub fn set_page_size_and_version(&mut self, size: usize, version: u8) {
+        debug_assert!((size & 0xFF00) == size);
+        self.header_mut().pagesize_version = (size as u16) | version as u16;
+    }
 
-/// Page layout version (low 8 bits of pagesize_version).
-pub fn PageGetPageLayoutVersion(page: Page) -> u8 {
-    (header(page).pagesize_version & 0x00FF) as u8
-}
+    /// Size of special space on a page.
+    #[inline]
+    pub fn get_special_size(&self) -> u16 {
+        (self.get_page_size() - self.header().special as usize) as u16
+    }
 
-/// Set page size and layout version together.
-pub fn PageSetPageSizeAndVersion(page: PageMut, size: usize, version: u8) {
-    debug_assert!((size & 0xFF00) == size);
-    header_mut(page).pagesize_version = (size as u16) | version as u16;
-}
+    /// Validate the special pointer (catches use before initialization).
+    #[inline]
+    pub fn validate_special_pointer(&self) {
+        debug_assert!((self.header().special as u32) <= BLCKSZ);
+        debug_assert!((self.header().special as usize) >= SizeOfPageHeaderData);
+    }
 
-/// Size of special space on a page.
-pub fn PageGetSpecialSize(page: Page) -> u16 {
-    (PageGetPageSize(page) - header(page).special as usize) as u16
-}
+    /// Special space as a byte slice (page + special).
+    #[inline]
+    pub fn get_special_pointer(&self) -> &[u8] {
+        self.validate_special_pointer();
+        &self.0[self.header().special as usize..]
+    }
 
-/// Validate the special pointer (catches use before initialization).
-pub fn PageValidateSpecialPointer(page: Page) {
-    debug_assert!((header(page).special as u32) <= BLCKSZ);
-    debug_assert!((header(page).special as usize) >= SizeOfPageHeaderData);
-}
+    /// Retrieve an item on the page given its line pointer.
+    #[inline]
+    pub fn get_item(&self, item_id: &ItemIdData) -> Item<'_> {
+        debug_assert!(item_id.has_storage());
+        let off = item_id.lp_off() as usize;
+        let len = item_id.lp_len() as usize;
+        &self.0[off..off + len]
+    }
 
-/// Special space as a byte slice (page + special).
-pub fn PageGetSpecialPointer(page: Page) -> &[u8] {
-    PageValidateSpecialPointer(page);
-    &page[header(page).special as usize..]
-}
+    /// Maximum offset number used (= number of items). 0 if uninitialized.
+    #[inline]
+    pub fn get_max_offset_number(&self) -> OffsetNumber {
+        let lower = self.header().lower as usize;
+        if lower <= SizeOfPageHeaderData {
+            0
+        } else {
+            ((lower - SizeOfPageHeaderData) / core::mem::size_of::<ItemIdData>()) as OffsetNumber
+        }
+    }
 
-/// Retrieve an item on the page given its line pointer.
-pub fn PageGetItem<'a>(page: Page<'a>, item_id: &ItemIdData) -> Item<'a> {
-    debug_assert!(item_id.has_storage());
-    let off = item_id.lp_off() as usize;
-    let len = item_id.lp_len() as usize;
-    &page[off..off + len]
-}
+    /// Reassemble the page LSN.
+    #[inline]
+    pub fn get_lsn(&self) -> XLogRecPtr {
+        self.header().lsn.get()
+    }
 
-/// Maximum offset number used (= number of items). 0 if uninitialized.
-pub fn PageGetMaxOffsetNumber(page: Page) -> OffsetNumber {
-    let lower = header(page).lower as usize;
-    if lower <= SizeOfPageHeaderData {
-        0
-    } else {
-        ((lower - SizeOfPageHeaderData) / core::mem::size_of::<ItemIdData>()) as OffsetNumber
+    /// Store the page LSN.
+    #[inline]
+    pub fn set_lsn(&mut self, lsn: XLogRecPtr) {
+        self.header_mut().lsn.set(lsn);
+    }
+
+    #[inline]
+    pub fn has_free_line_pointers(&self) -> bool {
+        PageFlags::from_bits_truncate(self.header().flags).contains(PageFlags::HAS_FREE_LINES)
+    }
+    #[inline]
+    pub fn set_has_free_line_pointers(&mut self) {
+        self.header_mut().flags |= PageFlags::HAS_FREE_LINES.bits();
+    }
+    #[inline]
+    pub fn clear_has_free_line_pointers(&mut self) {
+        self.header_mut().flags &= !PageFlags::HAS_FREE_LINES.bits();
+    }
+
+    #[inline]
+    pub fn is_full(&self) -> bool {
+        PageFlags::from_bits_truncate(self.header().flags).contains(PageFlags::PAGE_FULL)
+    }
+    #[inline]
+    pub fn set_full(&mut self) {
+        self.header_mut().flags |= PageFlags::PAGE_FULL.bits();
+    }
+    #[inline]
+    pub fn clear_full(&mut self) {
+        self.header_mut().flags &= !PageFlags::PAGE_FULL.bits();
+    }
+
+    #[inline]
+    pub fn is_all_visible(&self) -> bool {
+        PageFlags::from_bits_truncate(self.header().flags).contains(PageFlags::ALL_VISIBLE)
+    }
+    #[inline]
+    pub fn set_all_visible(&mut self) {
+        self.header_mut().flags |= PageFlags::ALL_VISIBLE.bits();
+    }
+    #[inline]
+    pub fn clear_all_visible(&mut self) {
+        self.header_mut().flags &= !PageFlags::ALL_VISIBLE.bits();
+    }
+
+    /// Lower prune_xid toward `xid` (C `PageSetPrunable`).
+    #[inline]
+    pub fn set_prunable(&mut self, xid: TransactionId) {
+        let h = self.header_mut();
+        // TransactionIdIsValid == nonzero; precedes == <, modulo-32 elsewhere.
+        if h.prune_xid.0 == 0 || xid < h.prune_xid {
+            h.prune_xid = xid;
+        }
+    }
+
+    #[inline]
+    pub fn clear_prunable(&mut self) {
+        self.header_mut().prune_xid = TransactionId(0); // InvalidTransactionId
     }
 }
 
-/// Reassemble the page LSN.
-pub fn PageGetLSN(page: Page) -> XLogRecPtr {
-    header(page).lsn.get()
+// === deprecated C-named shims ===
+//
+// Every former header inline accessor and the .c functions keep a thin C-named
+// shim delegating to the `impl Page` method. New code should use the method.
+// These must NOT be called internally (no deprecation warnings).
+
+#[deprecated(note = "use `page.is_empty()`")]
+#[inline]
+pub fn PageIsEmpty(page: &Page) -> bool {
+    page.is_empty()
 }
 
-/// Store the page LSN.
-pub fn PageSetLSN(page: PageMut, lsn: XLogRecPtr) {
-    header_mut(page).lsn.set(lsn);
+#[deprecated(note = "use `page.is_new()`")]
+#[inline]
+pub fn PageIsNew(page: &Page) -> bool {
+    page.is_new()
 }
 
-pub fn PageHasFreeLinePointers(page: Page) -> bool {
-    PageFlags::from_bits_truncate(header(page).flags).contains(PageFlags::HAS_FREE_LINES)
-}
-pub fn PageSetHasFreeLinePointers(page: PageMut) {
-    header_mut(page).flags |= PageFlags::HAS_FREE_LINES.bits();
-}
-pub fn PageClearHasFreeLinePointers(page: PageMut) {
-    header_mut(page).flags &= !PageFlags::HAS_FREE_LINES.bits();
+#[deprecated(note = "use `page.get_item_id(off)`")]
+#[inline]
+pub fn PageGetItemId(page: &Page, offset_number: OffsetNumber) -> ItemIdData {
+    page.get_item_id(offset_number)
 }
 
-pub fn PageIsFull(page: Page) -> bool {
-    PageFlags::from_bits_truncate(header(page).flags).contains(PageFlags::PAGE_FULL)
-}
-pub fn PageSetFull(page: PageMut) {
-    header_mut(page).flags |= PageFlags::PAGE_FULL.bits();
-}
-pub fn PageClearFull(page: PageMut) {
-    header_mut(page).flags &= !PageFlags::PAGE_FULL.bits();
+#[deprecated(note = "use `page.get_contents()`")]
+#[inline]
+pub fn PageGetContents(page: &Page) -> &[u8] {
+    page.get_contents()
 }
 
-pub fn PageIsAllVisible(page: Page) -> bool {
-    PageFlags::from_bits_truncate(header(page).flags).contains(PageFlags::ALL_VISIBLE)
-}
-pub fn PageSetAllVisible(page: PageMut) {
-    header_mut(page).flags |= PageFlags::ALL_VISIBLE.bits();
-}
-pub fn PageClearAllVisible(page: PageMut) {
-    header_mut(page).flags &= !PageFlags::ALL_VISIBLE.bits();
+#[deprecated(note = "use `page.get_page_size()`")]
+#[inline]
+pub fn PageGetPageSize(page: &Page) -> usize {
+    page.get_page_size()
 }
 
-/// Lower prune_xid toward `xid` (C `PageSetPrunable`; needs transam, kept as fn).
-pub fn PageSetPrunable(page: PageMut, xid: TransactionId) {
-    let h = header_mut(page);
-    // TransactionIdIsValid == nonzero; precedes == <, modulo-32 elsewhere.
-    if h.prune_xid.0 == 0 || xid < h.prune_xid {
-        h.prune_xid = xid;
-    }
+#[deprecated(note = "use `page.get_page_layout_version()`")]
+#[inline]
+pub fn PageGetPageLayoutVersion(page: &Page) -> u8 {
+    page.get_page_layout_version()
 }
 
-pub fn PageClearPrunable(page: PageMut) {
-    header_mut(page).prune_xid = TransactionId(0); // InvalidTransactionId
+#[deprecated(note = "use `page.set_page_size_and_version(size, version)`")]
+#[inline]
+pub fn PageSetPageSizeAndVersion(page: &mut Page, size: usize, version: u8) {
+    page.set_page_size_and_version(size, version)
 }
 
-// === extern declarations ===
-
-pub fn PageInit(_page: PageMut, _page_size: usize, _special_size: usize) {
-    unimplemented!()
+#[deprecated(note = "use `page.get_special_size()`")]
+#[inline]
+pub fn PageGetSpecialSize(page: &Page) -> u16 {
+    page.get_special_size()
 }
 
-/// Returns (verified, checksum_failure).
-pub fn PageIsVerified(_page: PageMut, _blkno: BlockNumber, _flags: PageIsVerifiedFlags) -> (bool, bool) {
-    unimplemented!()
+#[deprecated(note = "use `page.validate_special_pointer()`")]
+#[inline]
+pub fn PageValidateSpecialPointer(page: &Page) {
+    page.validate_special_pointer()
 }
 
-/// Returns the offset number where the item was placed (InvalidOffsetNumber on failure).
+#[deprecated(note = "use `page.get_special_pointer()`")]
+#[inline]
+pub fn PageGetSpecialPointer(page: &Page) -> &[u8] {
+    page.get_special_pointer()
+}
+
+#[deprecated(note = "use `page.get_item(item_id)`")]
+#[inline]
+pub fn PageGetItem<'a>(page: &'a Page, item_id: &ItemIdData) -> Item<'a> {
+    page.get_item(item_id)
+}
+
+#[deprecated(note = "use `page.get_max_offset_number()`")]
+#[inline]
+pub fn PageGetMaxOffsetNumber(page: &Page) -> OffsetNumber {
+    page.get_max_offset_number()
+}
+
+#[deprecated(note = "use `page.get_lsn()`")]
+#[inline]
+pub fn PageGetLSN(page: &Page) -> XLogRecPtr {
+    page.get_lsn()
+}
+
+#[deprecated(note = "use `page.set_lsn(lsn)`")]
+#[inline]
+pub fn PageSetLSN(page: &mut Page, lsn: XLogRecPtr) {
+    page.set_lsn(lsn)
+}
+
+#[deprecated(note = "use `page.has_free_line_pointers()`")]
+#[inline]
+pub fn PageHasFreeLinePointers(page: &Page) -> bool {
+    page.has_free_line_pointers()
+}
+#[deprecated(note = "use `page.set_has_free_line_pointers()`")]
+#[inline]
+pub fn PageSetHasFreeLinePointers(page: &mut Page) {
+    page.set_has_free_line_pointers()
+}
+#[deprecated(note = "use `page.clear_has_free_line_pointers()`")]
+#[inline]
+pub fn PageClearHasFreeLinePointers(page: &mut Page) {
+    page.clear_has_free_line_pointers()
+}
+
+#[deprecated(note = "use `page.is_full()`")]
+#[inline]
+pub fn PageIsFull(page: &Page) -> bool {
+    page.is_full()
+}
+#[deprecated(note = "use `page.set_full()`")]
+#[inline]
+pub fn PageSetFull(page: &mut Page) {
+    page.set_full()
+}
+#[deprecated(note = "use `page.clear_full()`")]
+#[inline]
+pub fn PageClearFull(page: &mut Page) {
+    page.clear_full()
+}
+
+#[deprecated(note = "use `page.is_all_visible()`")]
+#[inline]
+pub fn PageIsAllVisible(page: &Page) -> bool {
+    page.is_all_visible()
+}
+#[deprecated(note = "use `page.set_all_visible()`")]
+#[inline]
+pub fn PageSetAllVisible(page: &mut Page) {
+    page.set_all_visible()
+}
+#[deprecated(note = "use `page.clear_all_visible()`")]
+#[inline]
+pub fn PageClearAllVisible(page: &mut Page) {
+    page.clear_all_visible()
+}
+
+#[deprecated(note = "use `page.set_prunable(xid)`")]
+#[inline]
+pub fn PageSetPrunable(page: &mut Page, xid: TransactionId) {
+    page.set_prunable(xid)
+}
+#[deprecated(note = "use `page.clear_prunable()`")]
+#[inline]
+pub fn PageClearPrunable(page: &mut Page) {
+    page.clear_prunable()
+}
+
+// === .c function shims (bodies are `impl Page` methods in the backend module) ===
+
+#[deprecated(note = "use `page.init(page_size, special_size)`")]
+#[inline]
+pub fn PageInit(page: &mut Page, page_size: usize, special_size: usize) {
+    page.init(page_size, special_size)
+}
+
+#[deprecated(note = "use `page.is_verified(blkno, flags)`")]
+#[inline]
+pub fn PageIsVerified(page: &Page, blkno: BlockNumber, flags: PageIsVerifiedFlags) -> (bool, bool) {
+    page.is_verified(blkno, flags)
+}
+
+#[deprecated(note = "use `page.add_item_extended(...)`")]
+#[inline]
 pub fn PageAddItemExtended(
-    _page: PageMut,
-    _item: Item,
-    _size: usize,
-    _offset_number: OffsetNumber,
-    _flags: PageAddItemFlags,
+    page: &mut Page,
+    item: Item,
+    size: usize,
+    offset_number: OffsetNumber,
+    flags: PageAddItemFlags,
 ) -> OffsetNumber {
-    unimplemented!()
+    page.add_item_extended(item, size, offset_number, flags)
 }
 
-pub fn PageGetTempPage(_page: Page) -> Vec<u8> {
-    unimplemented!()
+#[deprecated(note = "use `page.add_item(...)`")]
+#[inline]
+pub fn PageAddItem(
+    page: &mut Page,
+    item: Item,
+    size: usize,
+    offset_number: OffsetNumber,
+    overwrite: bool,
+    is_heap: bool,
+) -> OffsetNumber {
+    page.add_item(item, size, offset_number, overwrite, is_heap)
 }
-pub fn PageGetTempPageCopy(_page: Page) -> Vec<u8> {
-    unimplemented!()
+
+#[deprecated(note = "use `page.get_temp_page()`")]
+#[inline]
+pub fn PageGetTempPage(page: &Page) -> Box<Page> {
+    page.get_temp_page()
 }
-pub fn PageGetTempPageCopySpecial(_page: Page) -> Vec<u8> {
-    unimplemented!()
+
+#[deprecated(note = "use `page.get_temp_page_copy()`")]
+#[inline]
+pub fn PageGetTempPageCopy(page: &Page) -> Box<Page> {
+    page.get_temp_page_copy()
 }
-pub fn PageRestoreTempPage(_temp_page: PageMut, _old_page: PageMut) {
-    unimplemented!()
+
+#[deprecated(note = "use `page.get_temp_page_copy_special()`")]
+#[inline]
+pub fn PageGetTempPageCopySpecial(page: &Page) -> Box<Page> {
+    page.get_temp_page_copy_special()
 }
-pub fn PageRepairFragmentation(_page: PageMut) {
-    unimplemented!()
+
+#[deprecated(note = "use `old_page.restore_temp_page(temp_page)`")]
+#[inline]
+pub fn PageRestoreTempPage(temp_page: &Page, old_page: &mut Page) {
+    old_page.restore_temp_page(temp_page)
 }
-pub fn PageTruncateLinePointerArray(_page: PageMut) {
-    unimplemented!()
+
+#[deprecated(note = "use `page.repair_fragmentation()`")]
+#[inline]
+pub fn PageRepairFragmentation(page: &mut Page) {
+    page.repair_fragmentation()
 }
-pub fn PageGetFreeSpace(_page: Page) -> usize {
-    unimplemented!()
+
+#[deprecated(note = "use `page.truncate_line_pointer_array()`")]
+#[inline]
+pub fn PageTruncateLinePointerArray(page: &mut Page) {
+    page.truncate_line_pointer_array()
 }
-pub fn PageGetFreeSpaceForMultipleTuples(_page: Page, _ntups: i32) -> usize {
-    unimplemented!()
+
+#[deprecated(note = "use `page.get_free_space()`")]
+#[inline]
+pub fn PageGetFreeSpace(page: &Page) -> usize {
+    page.get_free_space()
 }
-pub fn PageGetExactFreeSpace(_page: Page) -> usize {
-    unimplemented!()
+
+#[deprecated(note = "use `page.get_free_space_for_multiple_tuples(ntups)`")]
+#[inline]
+pub fn PageGetFreeSpaceForMultipleTuples(page: &Page, ntups: i32) -> usize {
+    page.get_free_space_for_multiple_tuples(ntups)
 }
-pub fn PageGetHeapFreeSpace(_page: Page) -> usize {
-    unimplemented!()
+
+#[deprecated(note = "use `page.get_exact_free_space()`")]
+#[inline]
+pub fn PageGetExactFreeSpace(page: &Page) -> usize {
+    page.get_exact_free_space()
 }
-pub fn PageIndexTupleDelete(_page: PageMut, _offnum: OffsetNumber) {
-    unimplemented!()
+
+#[deprecated(note = "use `page.get_heap_free_space()`")]
+#[inline]
+pub fn PageGetHeapFreeSpace(page: &Page) -> usize {
+    page.get_heap_free_space()
 }
-pub fn PageIndexMultiDelete(_page: PageMut, _itemnos: &[OffsetNumber]) {
-    unimplemented!()
+
+#[deprecated(note = "use `page.index_tuple_delete(offnum)`")]
+#[inline]
+pub fn PageIndexTupleDelete(page: &mut Page, offnum: OffsetNumber) {
+    page.index_tuple_delete(offnum)
 }
-pub fn PageIndexTupleDeleteNoCompact(_page: PageMut, _offnum: OffsetNumber) {
-    unimplemented!()
+
+#[deprecated(note = "use `page.index_multi_delete(itemnos)`")]
+#[inline]
+pub fn PageIndexMultiDelete(page: &mut Page, itemnos: &[OffsetNumber]) {
+    page.index_multi_delete(itemnos)
 }
+
+#[deprecated(note = "use `page.index_tuple_delete_no_compact(offnum)`")]
+#[inline]
+pub fn PageIndexTupleDeleteNoCompact(page: &mut Page, offnum: OffsetNumber) {
+    page.index_tuple_delete_no_compact(offnum)
+}
+
+#[deprecated(note = "use `page.index_tuple_overwrite(offnum, newtup, newsize)`")]
+#[inline]
 pub fn PageIndexTupleOverwrite(
-    _page: PageMut,
-    _offnum: OffsetNumber,
-    _newtup: Item,
-    _newsize: usize,
+    page: &mut Page,
+    offnum: OffsetNumber,
+    newtup: Item,
+    newsize: usize,
 ) -> bool {
-    unimplemented!()
+    page.index_tuple_overwrite(offnum, newtup, newsize)
 }
-pub fn PageSetChecksumCopy(_page: PageMut, _blkno: BlockNumber) -> Vec<u8> {
-    unimplemented!()
+
+#[deprecated(note = "use `page.set_checksum_copy(blkno)`")]
+#[inline]
+pub fn PageSetChecksumCopy(page: &Page, blkno: BlockNumber) -> Box<Page> {
+    page.set_checksum_copy(blkno)
 }
-pub fn PageSetChecksumInplace(_page: PageMut, _blkno: BlockNumber) {
-    unimplemented!()
+
+#[deprecated(note = "use `page.set_checksum_inplace(blkno)`")]
+#[inline]
+pub fn PageSetChecksumInplace(page: &mut Page, blkno: BlockNumber) {
+    page.set_checksum_inplace(blkno)
 }

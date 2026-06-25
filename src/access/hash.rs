@@ -20,7 +20,7 @@ use crate::postgres_ext::Oid;
 use crate::storage::block::BlockNumber;
 use crate::storage::buf::{Buffer, BufferAccessStrategy};
 use crate::storage::bufmgr::{BUFFER_LOCK_EXCLUSIVE, BUFFER_LOCK_SHARE};
-use crate::storage::bufpage::{Page, PageMut};
+use crate::storage::bufpage::Page;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
 use crate::utils::rel::Relation;
@@ -245,7 +245,7 @@ pub fn hash_get_fill_factor(_relation: Relation) -> i32 {
 pub fn hash_get_target_page_usage(_relation: Relation) -> i32 {
     unimplemented!()
 }
-pub fn hash_max_item_size(_page: Page) -> usize {
+pub fn hash_max_item_size(_page: &Page) -> usize {
     unimplemented!()
 }
 
@@ -276,13 +276,13 @@ pub const fn bmpg_mask(metap: &HashMetaPageData) -> u32 {
 }
 
 // HashPageGetBitmap / HashGetMaxBitmapSize / HashPageGetMeta read page contents.
-pub fn hash_page_get_bitmap(_page: PageMut) -> *mut u32 {
+pub fn hash_page_get_bitmap(_page: &mut Page) -> *mut u32 {
     unimplemented!()
 }
-pub fn hash_get_max_bitmap_size(_page: Page) -> usize {
+pub fn hash_get_max_bitmap_size(_page: &Page) -> usize {
     unimplemented!()
 }
-pub fn hash_page_get_meta(_page: PageMut) -> HashMetaPage {
+pub fn hash_page_get_meta(_page: &mut Page) -> HashMetaPage {
     unimplemented!()
 }
 
@@ -521,7 +521,7 @@ pub fn _hash_init_metabuffer(
 ) {
     unimplemented!()
 }
-pub fn _hash_pageinit(_page: PageMut, _size: usize) {
+pub fn _hash_pageinit(_page: &mut Page, _size: usize) {
     unimplemented!()
 }
 pub fn _hash_expandtable(_rel: Relation, _metabuf: Buffer) {
@@ -600,10 +600,10 @@ pub fn _hash_convert_tuple(
 ) -> bool {
     unimplemented!()
 }
-pub fn _hash_binsearch(_page: Page, _hash_value: u32) -> OffsetNumber {
+pub fn _hash_binsearch(_page: &Page, _hash_value: u32) -> OffsetNumber {
     unimplemented!()
 }
-pub fn _hash_binsearch_last(_page: Page, _hash_value: u32) -> OffsetNumber {
+pub fn _hash_binsearch_last(_page: &Page, _hash_value: u32) -> OffsetNumber {
     unimplemented!()
 }
 pub fn _hash_get_oldblock_from_newbucket(_rel: Relation, _new_bucket: Bucket) -> BlockNumber {

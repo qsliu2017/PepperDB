@@ -5,7 +5,7 @@
 use crate::c::MAXALIGN;
 use crate::pg_config::BLCKSZ;
 use crate::storage::buf::Buffer;
-use crate::storage::bufpage::{Page, PageMut, SizeOfPageHeaderData};
+use crate::storage::bufpage::{Page, SizeOfPageHeaderData};
 
 /// Structure of an FSM page (on-disk). `fp_nodes` is a trailing flexible array
 /// (the binary tree stored as an array); only the fixed header is a field here.
@@ -40,18 +40,18 @@ pub fn fsm_search_avail(
 ) -> Option<i32> {
     unimplemented!()
 }
-pub fn fsm_get_avail(_page: Page, _slot: i32) -> u8 {
+pub fn fsm_get_avail(_page: &Page, _slot: i32) -> u8 {
     unimplemented!()
 }
-pub fn fsm_get_max_avail(_page: Page) -> u8 {
+pub fn fsm_get_max_avail(_page: &Page) -> u8 {
     unimplemented!()
 }
-pub fn fsm_set_avail(_page: PageMut, _slot: i32, _value: u8) -> bool {
+pub fn fsm_set_avail(_page: &mut Page, _slot: i32, _value: u8) -> bool {
     unimplemented!()
 }
-pub fn fsm_truncate_avail(_page: PageMut, _nslots: i32) -> bool {
+pub fn fsm_truncate_avail(_page: &mut Page, _nslots: i32) -> bool {
     unimplemented!()
 }
-pub fn fsm_rebuild_page(_page: PageMut) -> bool {
+pub fn fsm_rebuild_page(_page: &mut Page) -> bool {
     unimplemented!()
 }

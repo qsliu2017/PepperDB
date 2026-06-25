@@ -39,9 +39,7 @@ use crate::postgres_ext::Oid;
 use crate::storage::block::{BlockNumber, INVALID_BLOCK_NUMBER};
 use crate::storage::buf::Buffer;
 use crate::storage::bufmgr::{BUFFER_LOCK_EXCLUSIVE, BUFFER_LOCK_SHARE};
-use crate::storage::bufpage::{
-    LocationIndex, Page, PageGetContents, PageGetSpecialPointer, SizeOfPageHeaderData,
-};
+use crate::storage::bufpage::{LocationIndex, Page, SizeOfPageHeaderData};
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
 use crate::utils::relcache::Relation;
@@ -74,8 +72,8 @@ const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, flags) == 12);
 const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, cycleid) == 14);
 
 /// BTPageGetOpaque - the page's btree opaque area (special pointer).
-pub fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
-    PageGetSpecialPointer(page).as_ptr() as BTPageOpaque
+pub fn BTPageGetOpaque(page: &Page) -> BTPageOpaque {
+    page.get_special_pointer().as_ptr() as BTPageOpaque
 }
 
 bitflags! {
@@ -125,8 +123,8 @@ pub struct BTMetaPageData {
 }
 
 /// BTPageGetMeta - the meta page contents.
-pub fn BTPageGetMeta(p: Page) -> *mut BTMetaPageData {
-    PageGetContents(p).as_ptr() as *mut BTMetaPageData
+pub fn BTPageGetMeta(p: &Page) -> *mut BTMetaPageData {
+    p.get_contents().as_ptr() as *mut BTMetaPageData
 }
 
 pub const BTREE_METAPAGE: BlockNumber = 0; // first page is meta
@@ -215,7 +213,7 @@ pub struct BTDeletedPageData {
 const _: () = assert!(core::mem::size_of::<BTDeletedPageData>() == 8);
 
 /// Mark a page deleted, storing safexid in the page's tuple area (static inline).
-pub fn BTPageSetDeleted(_page: Page, _safexid: FullTransactionId) {
+pub fn BTPageSetDeleted(_page: &mut Page, _safexid: FullTransactionId) {
     // Mutates BTPageOpaque flags + PageHeader lower/upper + writes
     // BTDeletedPageData into PageGetContents; needs mutable Page + PageHeader
     // access not yet wired in the skeleton.
@@ -224,17 +222,17 @@ pub fn BTPageSetDeleted(_page: Page, _safexid: FullTransactionId) {
 
 /// Get a deleted page's safexid (static inline). pg_upgrade'd pages without a
 /// full xid are always safe to recycle (return FirstNormalFullTransactionId).
-pub fn BTPageGetDeleteXid(page: Page) -> FullTransactionId {
+pub fn BTPageGetDeleteXid(page: &Page) -> FullTransactionId {
     let opaque = unsafe { &*BTPageGetOpaque(page) };
     if !P_HAS_FULLXID(opaque) {
         return FIRST_NORMAL_FULL_TRANSACTION_ID;
     }
-    let contents = PageGetContents(page).as_ptr() as *const BTDeletedPageData;
+    let contents = page.get_contents().as_ptr() as *const BTDeletedPageData;
     unsafe { (*contents).safexid }
 }
 
 /// Is an existing page recyclable? (static inline)
-pub fn BTPageIsRecyclable(page: Page, heaprel: Relation) -> bool {
+pub fn BTPageIsRecyclable(page: &Page, heaprel: Relation) -> bool {
     let opaque = unsafe { &*BTPageGetOpaque(page) };
     if P_ISDELETED(opaque) {
         let safexid = BTPageGetDeleteXid(page);
@@ -878,7 +876,7 @@ pub fn _bt_dedup_save_htid(_state: BTDedupState, _itup: *mut IndexTupleData) -> 
     unimplemented!()
 }
 
-pub fn _bt_dedup_finish_pending(_newpage: Page, _state: BTDedupState) -> usize {
+pub fn _bt_dedup_finish_pending(_newpage: &mut Page, _state: BTDedupState) -> usize {
     unimplemented!()
 }
 
@@ -932,7 +930,7 @@ pub fn _bt_getstackbuf(
 /// Returns (split_offset, newitemonleft). C `*newitemonleft` out-param folded in.
 pub fn _bt_findsplitloc(
     _rel: Relation,
-    _origpage: Page,
+    _origpage: &Page,
     _newitemoff: OffsetNumber,
     _newitemsz: usize,
     _newitem: *mut IndexTupleData,
@@ -943,7 +941,7 @@ pub fn _bt_findsplitloc(
 // === prototypes for functions in nbtpage.c (stubs) ===
 
 pub fn _bt_initmetapage(
-    _page: Page,
+    _page: &mut Page,
     _rootbknum: BlockNumber,
     _level: u32,
     _allequalimage: bool,
@@ -959,7 +957,7 @@ pub fn _bt_set_cleanup_info(_rel: Relation, _num_delpages: BlockNumber) {
     unimplemented!()
 }
 
-pub fn _bt_upgrademetapage(_page: Page) {
+pub fn _bt_upgrademetapage(_page: &mut Page) {
     unimplemented!()
 }
 
@@ -1016,7 +1014,7 @@ pub fn _bt_upgradelockbufcleanup(_rel: Relation, _buf: Buffer) {
     unimplemented!()
 }
 
-pub fn _bt_pageinit(_page: Page, _size: usize) {
+pub fn _bt_pageinit(_page: &mut Page, _size: usize) {
     unimplemented!()
 }
 
@@ -1075,7 +1073,7 @@ pub fn _bt_binsrch_insert(_rel: Relation, _insertstate: BTInsertState) -> Offset
 pub fn _bt_compare(
     _rel: Relation,
     _key: BTScanInsert,
-    _page: Page,
+    _page: &Page,
     _offnum: OffsetNumber,
 ) -> i32 {
     unimplemented!()
@@ -1212,7 +1210,7 @@ pub fn _bt_keep_natts_fast(
 pub fn _bt_check_natts(
     _rel: Relation,
     _heapkeyspace: bool,
-    _page: Page,
+    _page: &Page,
     _offnum: OffsetNumber,
 ) -> bool {
     unimplemented!()
@@ -1222,7 +1220,7 @@ pub fn _bt_check_third_page(
     _rel: Relation,
     _heap: Relation,
     _needheaptidspace: bool,
-    _page: Page,
+    _page: &Page,
     _newtup: *mut IndexTupleData,
 ) {
     unimplemented!()
