@@ -4,5 +4,9 @@ version = "0.0.0"
 edition = "2024"
 license = "MIT"
 
+[workspace]
+members = ["crates/pepperdb-derive"]
+
 [dependencies]
 bitflags = "2"
+pepperdb-derive = { path = "crates/pepperdb-derive" }

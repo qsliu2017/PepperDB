@@ -1,4 +1,9 @@
 //! Translated from PostgreSQL src/include/utils/fmgroids.h
+//!
+//! `F_*` builtin-function OID constants. In C these are emitted by
+//! `Gen_fmgrtab.pl` from `pg_proc.dat`; here `build.rs` reads the same `.dat`
+//! (kept verbatim in the `ref/postgres` submodule) and emits them into OUT_DIR.
 
-// TODO(generated): produced by build.rs from ref/postgres/src/include/catalog/pg_proc.dat.
-// The full F_* function-OID table is data-driven; not hand-translated.
+use crate::postgres_ext::Oid;
+
+include!(concat!(env!("OUT_DIR"), "/fmgroids_generated.rs"));
