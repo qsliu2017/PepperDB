@@ -1,0 +1,11 @@
+# Step 11 -- F1 smgr + md + sync (storage manager)
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: smgr dispatch + handle cache; md 1GB-segment backend with the real async
+# read/write/extend/fsync leaves; sync.c pending-fsync queue as a SharedState field drained by
+# the checkpointer.
+storage/smgr/smgr.c       # full -- dispatch + SMgrRelation handle cache (smgr pin/unpin GC tombstoned in body)
+storage/smgr/md.c         # full -- async read/write/extend/fsync over IoBackend; MdfdVec as owned Vec<SegmentFd>
+storage/sync/sync.c       # full -- pending-fsync HashMap + unlink list as a SharedState field
+storage/smgr/bulk_write.c # full -- write + registersync path; WAL-logging calls xloginsert (implemented in step 13)

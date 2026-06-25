@@ -1,0 +1,11 @@
+# Step 15 -- F2 Lock manager + proc + deadlock detector
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: sharded LOCK/PROCLOCK tables (per-shard lock, never held across .await); PGPROC
+# lifecycle in the generational slab; ProcSleep grant-wait via oneshot/Notify in a select! with
+# deadlock + lock-timeout timer arms; sync waits-for-graph cycle detection.
+storage/lmgr/lock.c     # full -- sharded LOCK/PROCLOCK tables incl. fast-path + lock-group code (lock groups single-member until F4)
+storage/lmgr/proc.c     # full -- PGPROC lifecycle in the generational slab; ProcSleep grant-wait
+storage/lmgr/deadlock.c # full -- waits-for-graph cycle detection (sync, over a lock-table snapshot)
+storage/lmgr/lmgr.c     # full -- relation/object lock wrappers

@@ -1,0 +1,17 @@
+# Step 09 -- F0 Runtime skeleton: supervisor + accept loop + per-conn backend task
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: tokio runtime + arg dispatch; supervisor owning listeners + a select! accept loop
+# + a shutdown state machine over a JoinSet; per-conn backend spawned with catch_unwind; child
+# registry (Identity->{type,JoinHandle,cancel-sender}); type->async-entry dispatch. The whole
+# backend command loop (PostgresMain) + ProcessInterrupts are translated here; parser/planner/
+# executor/portal calls land on existing stubs (the connection path works; queries hit stubs).
+main/main.c                  # full -- binary entry + arg routing (startup_hacks/locale/check_root)
+postmaster/postmaster.c      # full -- supervisor task, select! accept loop, shutdown state machine, child registry, spawn aux
+postmaster/launch_backend.c  # tombstone -- type->async-entry dispatch table (no fork/exec; EXEC_BACKEND/WIN32 deleted)
+postmaster/pmchild.c         # tombstone -- folded into generational Identity + supervisor child registry
+postmaster/fork_process.c    # tombstone -- tokio::spawn
+tcop/backend_startup.c       # full -- startup-packet read + cancel-request + handoff to PostgresMain; SSL/GSS/auth call existing stubs
+postmaster/auxprocess.c      # full -- aux-task setup helper (proc identity + interrupt wiring + RAII cleanup)
+tcop/postgres.c              # full -- PostgresMain command loop + ProcessInterrupts/CHECK_FOR_INTERRUPTS service routine; parser/planner/executor/portal calls land on existing stubs

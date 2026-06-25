@@ -1,0 +1,8 @@
+# Step 05 -- F0 IoBackend + VFD/fd layer
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: src/storage/io_backend.rs (NEW, no C source) -- async positional read/write,
+# fsync/fdatasync (fsync-failure -> critical-section abort), open/truncate/fallocate, FD-budget
+# semaphore. fd.c rewritten over it as the universal async I/O leaf.
+storage/file/fd.c          # full -- VFD pool over IoBackend; tokio file handles in a generational slab (Drop closes); AllocateDesc/shmem-exit cleanup -> RAII

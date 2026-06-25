@@ -1,0 +1,9 @@
+# Step 10 -- F1 Page format (bufpage/itemptr/checksum)
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: PageInit/PageAddItemExtended/PageRepairFragmentation/PageIndexTupleDelete +
+# checksum + ItemPointer compare. Pure sync value logic; the caller holds the buffer lock.
+storage/page/bufpage.c   # full
+storage/page/itemptr.c   # full
+storage/page/checksum.c  # full

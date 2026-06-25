@@ -1,0 +1,14 @@
+# Step 13 -- F1 WAL write pipeline + rmgr table
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: reserve -> copy-to-ring -> write -> fsync -> publish flushed-LSN (monotonic, only
+# after fsync) via tokio::watch<XLogRecPtr>; XLogCtl as an Arc SharedState field; group commit.
+# xlog.c is translated whole (incl. CreateCheckPoint + backup-state functions, which call
+# existing stubs where they reach deferred subsystems). The separate recovery files
+# (xlogrecovery.c, xlogprefetcher.c, timeline.c, xlogarchive.c) are NOT in this stage's list.
+access/transam/xlog.c       # full -- entire xlog.c; recovery-driver entry points (StartupXLOG lives in deferred xlogrecovery.c) call stubs
+access/transam/xloginsert.c # full -- record assembly + log_newpage FPI helpers
+access/transam/xlogreader.c # full -- WAL read/decode state machine (self-contained; page-read via caller-supplied callback)
+access/transam/rmgr.c       # full -- resource-manager dispatch table
+access/transam/xlogstats.c  # full

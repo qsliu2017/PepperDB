@@ -1,0 +1,16 @@
+# Step 17 -- F3 Aux tasks + sequenced shutdown drain
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: long-lived tokio tasks sharing the select!(timer, notify, shutdown) shape;
+# checkpointer drains the SharedState fsync queue + runs BufferSync; supervisor encodes the
+# sequenced shutdown drain order. Each file is translated whole: startup.c calls StartupXLOG
+# (in deferred xlogrecovery.c) via its stub; autovacuum's do_autovacuum calls vacuum/catalog
+# stubs. (syslogger.c / walsummarizer.c are separate files, not in this stage's list.)
+postmaster/checkpointer.c # full -- task loop + drain fsync-request queue + BufferSync + CreateCheckPoint
+postmaster/bgwriter.c     # full -- BgBufferSync loop
+postmaster/walwriter.c    # full -- XLogBackgroundFlush loop
+postmaster/startup.c      # full -- startup task; StartupXLOG recovery body is a deferred-file stub
+postmaster/pgarch.c       # full -- archiver task
+postmaster/autovacuum.c   # full -- launcher + worker; do_autovacuum calls vacuum/catalog stubs
+postmaster/bgworker.c     # full -- spawn-and-handle; dynamic-library workers reach deleted dfmgr (tombstone) path

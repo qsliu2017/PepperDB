@@ -1,0 +1,13 @@
+# Step 04 -- F0 Interrupts / signals / cancellation
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: the interrupt PRIMITIVES -- per-task interrupt flags (cross-task settable in the
+# slab), ProcSignal registry + cancel-key map, OS signals via tokio::signal feeding the flags.
+# NOTE: the ProcessInterrupts/CHECK_FOR_INTERRUPTS service routine lives in tcop/postgres.c,
+# which is translated whole in step 09 (it is the backend command loop). Step 04 builds and
+# tests the flag/registry mechanism; the cancel-panic behavior is exercised at step 09.
+postmaster/interrupt.c     # full -- per-task AtomicBool flags + tokio::signal handlers
+storage/ipc/procsignal.c   # full -- generational-slab registry of per-task flag-sets + Notify + cancel-key map
+storage/ipc/pmsignal.c     # tombstone -- supervisor typed channels
+storage/ipc/ipc.c          # tombstone -- proc_exit/on_shmem_exit callbacks -> RAII Drop

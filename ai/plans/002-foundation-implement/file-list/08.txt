@@ -1,0 +1,11 @@
+# Step 08 -- F0 Session/global state + backend-task init skeleton
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: globals split into SharedState config vs per-task Session; backend_task_init
+# (identity/io/sequencing); datadir/lock files over IoBackend. The connect-to-database and
+# authentication paths in postinit are translated against existing catalog/auth stubs.
+utils/init/globals.c     # full -- ex-globals split into SharedState config vs per-task Session
+utils/init/postinit.c    # full -- InitPostgres whole; connect-to-database + auth call existing stubs
+utils/init/miscinit.c    # full -- identity, datadir checks, lock files (postmaster.pid) over IoBackend
+utils/init/usercontext.c # full -- user-context save/restore

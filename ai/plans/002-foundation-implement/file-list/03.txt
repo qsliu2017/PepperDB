@@ -1,0 +1,11 @@
+# Step 03 -- F0 Latch/wait primitives + lock conventions
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: Latch->tokio Notify (stored-permit), WaitEventSet->select! helper, WaitGuard
+# (dequeue-on-Drop), ConditionVariable over Notify; lock primitives tombstoned to std/parking_lot.
+storage/ipc/latch.c                # full -- tokio Notify, stored-permit (SetLatch-before-wait not lost)
+storage/ipc/waiteventset.c         # full -- tokio::select! helper returning a WL_* bitmask
+storage/lmgr/condition_variable.c  # full -- over Notify + WaitGuard
+storage/lmgr/lwlock.c              # tombstone -- parking_lot/std RwLock
+storage/lmgr/s_lock.c              # tombstone -- spinlocks gone (core::sync::atomic)

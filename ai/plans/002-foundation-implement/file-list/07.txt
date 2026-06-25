@@ -1,0 +1,11 @@
+# Step 07 -- F0 SharedState container + supervisor SharedState::new()
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: typed SharedState of Arc fields following the CreateOrAttachShmemStructs roster
+# AND ordering (the C order encodes real init dependencies); built once, Arc-cloned into tasks.
+storage/ipc/ipci.c          # full -- SharedState::new() roster + ordering (CreateOrAttachShmemStructs)
+storage/ipc/shmem.c         # tombstone -- Arc-shared heap state (no shared-memory segment)
+storage/ipc/dsm.c           # tombstone -- no cross-process dynamic shared memory
+storage/ipc/dsm_impl.c      # tombstone
+storage/ipc/dsm_registry.c  # tombstone

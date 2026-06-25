@@ -1,0 +1,7 @@
+# Step 02 -- F0 Identity (generational slab)
+# NEW Rust module (src/storage/procnumber.rs + slab home in src/storage/proc.rs).
+# No 1:1 C source file: the generational-slab key is a synthesized abstraction.
+# Concept drawn from:
+#   storage/lmgr/proc.c     -- ProcNumber/pgprocno indexing (file fully rewritten in step 15)
+#   postmaster/pmchild.c    -- fixed-slot allocator (file tombstoned in step 09)
+# No C source is rewritten here; this step produces the slab that steps 04/09/15/16 key into.

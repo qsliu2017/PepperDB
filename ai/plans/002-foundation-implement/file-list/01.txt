@@ -1,0 +1,10 @@
+# Step 01 -- F0 Error model + assertion
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: ereport!/elog! macros, ErrorData carried in the panic payload, errstart/
+# errfinish, severity gating, ExceptionalCondition->panic. The frontend message send and
+# log_line_prefix/GUC hooks are translated against existing stubs (libpq be-side + GUC).
+# (csvlog.c / jsonlog.c are separate files, not in this stage's list.)
+utils/error/elog.c    # full -- entire elog.c; send_message_to_frontend + log_line_prefix call existing stubs
+utils/error/assert.c  # full

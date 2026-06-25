@@ -1,0 +1,10 @@
+# Step 16 -- F2 Invalidation transport (sinval)
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: Arc<SInvalQueue> circular buffer (keep MAXNUMMESSAGES + overflow->per-task reset,
+# never block writers), per-task cursors each with a Notify. inval.c is translated whole; the
+# cache-callback dispatch (LocalExecuteInvalidationMessage) calls catcache/relcache stubs.
+storage/ipc/sinvaladt.c # full -- shared ring + per-task cursors in a generational slab + Notify wakeups
+storage/ipc/sinval.c    # full -- send/receive wrappers
+utils/cache/inval.c     # full -- entire inval.c; cache-callback dispatch + transactional pending lists (cache bodies are stubs)

@@ -1,0 +1,19 @@
+# Step 14 -- F2 Transaction/MVCC spine (SLRU/clog/procarray/snapmgr/xact)
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: XID/OID generator; SLRU page cache (async leaf) with bank locks + WaitGuard; clog
+# set/get; GetSnapshotData/IsInProgress/horizons (sync under ProcArrayLock, no .await held);
+# xact commit/abort enforcing flush-WAL-before-clearing-clog. Each file is translated whole:
+# procarray incl. KnownAssignedXids/hot-standby (exercised only under recovery later); xact incl.
+# prepare/savepoint (calling twophase stubs); multixact/commit_ts/twophase remain separate
+# deferred files (not in this list) and are reached via their existing stubs.
+access/transam/varsup.c   # full -- XID/OID generator
+access/transam/transam.c  # full -- low-level xid-status helpers
+access/transam/slru.c     # full -- LRU page cache, bank locks, SimpleLruWaitIO (the async leaf)
+access/transam/clog.c     # full -- commit-status set/get (+ async-commit/group-update)
+access/transam/subtrans.c # full
+storage/ipc/procarray.c   # full -- entire procarray (snapshots/horizons + KnownAssignedXids/hot-standby; standby paths call stubs)
+utils/time/snapmgr.c      # full -- snapshot lifecycle incl. historic/exported snapshots
+utils/time/combocid.c     # full -- per-task combo CID map
+access/transam/xact.c     # full -- start/commit/abort + prepare/savepoint; prepare path calls twophase stubs

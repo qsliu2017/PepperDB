@@ -1,0 +1,16 @@
+# Step 12 -- F1 Buffer manager + FSM
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: AtomicU32 buf_state with CAS header lock, content_lock RwLock, per-buffer IO-wait
+# Notify via WaitGuard, pin guard, clock-sweep, sharded buffer table; FSM for the insert path.
+# bufmgr.c is rewritten to the new design: the PG18 two-phase AIO read is collapsed to a direct
+# async read (pgaio/read_stream are out of this stage; bufmgr does not call them).
+storage/buffer/bufmgr.c       # full -- core read/pin/dirty/flush + GetVictimBuffer clock-sweep; direct async read (no pgaio)
+storage/buffer/buf_init.c     # full -- buffer pool allocation
+storage/buffer/buf_table.c    # full -- sharded concurrent map (was shmem hash)
+storage/buffer/freelist.c     # full -- clock-sweep victim selection
+storage/buffer/localbuf.c     # full -- temp-relation local buffers
+storage/freespace/freespace.c # full -- FSM RecordPageWithFreeSpace/GetPageWithFreeSpace
+storage/freespace/fsmpage.c   # full
+storage/freespace/indexfsm.c  # full

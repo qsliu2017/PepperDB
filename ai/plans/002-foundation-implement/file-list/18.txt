@@ -1,0 +1,12 @@
+# Step 18 -- F4 Parallel-query chassis
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: ParallelContext as a plain struct holding Arc-cloned shared state + worker
+# JoinHandles + tokio mpsc tuple/error channels. parallel.c is rewritten to the in-process
+# design: cross-process state serialization (GUC/snapshot/xact/library) is tombstoned in the
+# body (sharing is by Arc); ParallelQueryMain dispatches to executor stubs.
+access/transam/parallel.c # full -- ParallelContext (Arc) + worker tasks + mpsc exchange; state-serialization tombstoned in body; ParallelQueryMain calls executor stubs
+storage/ipc/shm_mq.c      # tombstone -- tokio mpsc channel
+storage/ipc/shm_toc.c     # tombstone -- Arc fields
+storage/ipc/barrier.c     # tombstone -- tokio Barrier/Notify

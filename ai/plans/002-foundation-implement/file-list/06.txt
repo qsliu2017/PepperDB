@@ -1,0 +1,9 @@
+# Step 06 -- F0 Resource-cleanup convention
+# C sources relative to ref/postgres/src/backend/.
+# Disposition: full = translate the ENTIRE .c file now (calls into deferred subsystems land on
+# existing stubs); tombstone = deleted/replaced by tokio/std/Arc.
+# Deliverable: typed RAII guards (Pin/Wait/lock/file/snapshot) + explicit phased transaction-
+# abort release order (BEFORE_LOCKS -> LOCKS -> AFTER_LOCKS). resowner.c is rewritten to the
+# RAII design: the generic Datum-hash resource registry is replaced by typed guards, the phased
+# release ordering is preserved.
+utils/resowner/resowner.c  # full -- rewritten to typed RAII guards + phased release order (generic Datum-hash registry replaced)
