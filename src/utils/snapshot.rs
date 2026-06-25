@@ -21,8 +21,7 @@ pub enum SnapshotType {
     NonVacuumable,
 }
 
-// TODO(struct-forward): GlobalVisState lives in access/heapam (procarray.c).
-#[deprecated(note = "TODO(struct-forward): repoint to crate::storage's GlobalVisState in Phase 2")]
+/// Opaque; GlobalVisState body is procarray.c-private and not ported.
 pub struct GlobalVisState;
 
 /// In-memory snapshot. xip/subxip C arrays -> Vec; pairingheap link dropped
@@ -44,7 +43,6 @@ pub struct SnapshotData {
 
     pub speculative_token: u32, // extra return value for SatisfiesDirty
 
-    #[allow(deprecated)]
     pub vistest: Option<Box<GlobalVisState>>, // for NON_VACUUMABLE; TODO(ptr)
 
     pub active_count: u32, // refcount on ActiveSnapshot stack

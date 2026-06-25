@@ -7,6 +7,8 @@
 
 use bitflags::bitflags;
 
+use crate::nodes::memnodes::MemoryContextData;
+
 bitflags! {
     /// Flags for MemoryContextAllocExtended (MCXT_ALLOC_*).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,12 +19,8 @@ bitflags! {
     }
 }
 
-// MemoryContext is an opaque handle in C (struct MemoryContextData *). Under Rust
-// ownership it has no real representation; kept as an opaque marker type.
-// TODO(struct-forward): real definition in nodes/memnodes.h (MemoryContextData).
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::memnodes in Phase 2")]
-pub struct MemoryContextData;
-#[allow(deprecated)]
+// MemoryContext is an opaque handle in C (struct MemoryContextData *). The palloc
+// stub API uses the raw-pointer handle form; the data struct lives in memnodes.
 pub type MemoryContext = *mut MemoryContextData;
 
 // A memory-context reset/delete callback. The C form threads a `void *arg`; in Rust

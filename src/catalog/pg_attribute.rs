@@ -3,6 +3,7 @@
 use crate::c::{text, NameData};
 use crate::postgres::NullableDatum;
 use crate::postgres_ext::Oid;
+use crate::utils::acl::AclItem;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(75,AttributeRelation_Rowtype_Id) BKI_SCHEMA_MACRO
 pub const AttributeRelationId: Oid = Oid(1249);
@@ -33,23 +34,14 @@ pub struct FormData_pg_attribute {
     pub attcollation: Oid, // BKI_LOOKUP_OPT(pg_collation)
     // CATALOG_VARLEN (not in fixed part) -- variable-length/nullable fields:
     pub attstattarget: i16, // BKI_FORCE_NULL
-    pub attacl: [Aclitem; 1], // aclitem[1]; TODO(struct-forward): repoint to pg_type aclitem
+    pub attacl: [AclItem; 1], // aclitem[1]
     pub attoptions: [text; 1],
     pub attfdwoptions: [text; 1],
-    pub attmissingval: Anyarray, // anyarray; TODO(struct-forward)
-}
-
-// aclitem placeholder (catalog ACL element); real def lives in utils/acl.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::acl::AclItem in Phase 2")]
-#[repr(C)]
-pub struct Aclitem {
-    pub ai_grantee: Oid,
-    pub ai_grantor: Oid,
-    pub ai_privs: u64,
+    pub attmissingval: Anyarray, // anyarray
 }
 
 // anyarray pseudo-type tail = varlena array; modeled as text (varlena) for now.
-pub type Anyarray = text; // TODO(struct-forward)
+pub type Anyarray = text;
 
 // ATTRIBUTE_FIXED_PART_SIZE = offsetof(attcollation) + sizeof(Oid)
 pub const ATTRIBUTE_FIXED_PART_SIZE: usize =

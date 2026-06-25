@@ -3,21 +3,13 @@
 
 use crate::access::tupdesc::TupleDesc;
 use crate::c::SubTransactionId;
+use crate::catalog::pg_publication::PublicationDesc;
 use crate::common::relpath::RelFileNumber;
 use crate::nodes::bitmapset::Bitmapset;
 use crate::postgres_ext::Oid;
-
-// RelationData's full (large, in-memory) definition lives in utils/rel.h (a later
-// level). Rule 7: opaque local placeholder, repointed in Phase 2. `Relation` is a
-// handle to it; modeled as a raw pointer (ownership is the relcache's, not the
-// caller's). TODO(ptr): becomes a borrow/Arc once rel.rs lands.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::RelationData in Phase 2")]
-pub struct RelationData {
-    _private: [u8; 0],
-}
+pub use crate::utils::rel::RelationData;
 
 /// C: `typedef struct RelationData *Relation;` -- a relcache entry handle.
-#[allow(deprecated)]
 pub type Relation = *mut RelationData; // TODO(ptr)
 
 /// C: `typedef Relation *RelationPtr;` -- array of relations (executor index scans).
@@ -41,7 +33,7 @@ pub fn RelationClose(_relation: Relation) {
 // Routines to compute/retrieve additional cached information.
 // C `List *` returns map to `Vec<T>` per the container table; element types per use.
 
-/// List of ForeignKeyCacheInfo. TODO(struct-forward): element type once defined.
+/// List of ForeignKeyCacheInfo.
 pub fn RelationGetFKeyList(_relation: Relation) -> Vec<Oid> {
     unimplemented!()
 }
@@ -116,14 +108,6 @@ pub fn RelationInitIndexAccessInfo(_relation: Relation) {
     unimplemented!()
 }
 
-// PublicationDesc's definition lives in catalog/pg_publication.h (later level).
-// Rule 7: opaque local placeholder, repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::pg_publication::PublicationDesc in Phase 2")]
-pub struct PublicationDesc {
-    _private: [u8; 0],
-}
-
-#[allow(deprecated)]
 pub fn RelationBuildPublicationDesc(_relation: Relation, _pubdesc: &mut PublicationDesc) {
     unimplemented!()
 }

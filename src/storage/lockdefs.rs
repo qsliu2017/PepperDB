@@ -1,13 +1,10 @@
 //! Translated from PostgreSQL src/include/storage/lockdefs.h
 
+use crate::c::TransactionId;
 use crate::postgres_ext::Oid;
 
 /// Bit mask of held/requested lock types (bit 1<<mode per mode).
 pub type LOCKMASK = i32;
-
-// TODO(struct-forward): TransactionId lives in c.h; repoint to crate::c in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::c::TransactionId in Phase 2")]
-pub type TransactionId = u32;
 
 /// Lock type, an integer (1..N). `NoLock` (0) is not a lock mode, but a flag
 /// value meaning "don't get a lock".
@@ -37,7 +34,6 @@ pub const MAX_LOCK_MODE: i32 = 8;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct xl_standby_lock {
-    #[allow(deprecated)]
     pub xid: TransactionId, // xid of holder of AccessExclusiveLock
     pub db_oid: Oid,        // DB containing table
     pub rel_oid: Oid,       // OID of table

@@ -5,7 +5,9 @@
 // Release happens in three ordered phases (an enum) at integer priorities (consts).
 // Per-kind behavior (ResourceOwnerDesc) is a small callback table.
 
+use crate::lib::ilist::dlist_node;
 use crate::postgres::Datum;
+use crate::storage::lock::LOCALLOCK;
 
 /// Opaque resource-owner handle (`struct ResourceOwnerData *`). TODO(memory):
 /// becomes an owned/RAII type under single-process model.
@@ -115,30 +117,18 @@ pub fn ReleaseAuxProcessResources(_is_commit: bool) {
 
 // === special support: local lock management ===
 
-// TODO(struct-forward): real LOCALLOCK in storage/lock.h (lock/lock.h).
-#[deprecated(note = "TODO(struct-forward): repoint to crate::storage::lock::LOCALLOCK in Phase 2")]
-pub enum LOCALLOCK {}
-
-#[allow(deprecated)]
 pub fn ResourceOwnerRememberLock(_owner: ResourceOwner, _locallock: *mut LOCALLOCK) {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn ResourceOwnerForgetLock(_owner: ResourceOwner, _locallock: *mut LOCALLOCK) {
     unimplemented!()
 }
 
 // === special support: AIO ===
 
-// TODO(struct-forward): real dlist_node in lib/ilist.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::lib::ilist::dlist_node in Phase 2")]
-pub struct dlist_node;
-
-#[allow(deprecated)]
 pub fn ResourceOwnerRememberAioHandle(_owner: ResourceOwner, _ioh_node: *mut dlist_node) {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn ResourceOwnerForgetAioHandle(_owner: ResourceOwner, _ioh_node: *mut dlist_node) {
     unimplemented!()
 }

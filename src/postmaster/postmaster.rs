@@ -5,15 +5,9 @@
 // branches are dropped (non-target).
 
 use crate::lib::ilist::{dlist_head, dlist_node};
+use crate::libpq::libpq_be::ClientSocket;
 use crate::miscadmin::BackendType;
 use crate::postmaster::bgworker_internals::RegisteredBgWorker;
-
-// ClientSocket forward reference: real definition in libpq/libpq-be.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::libpq::libpq_be::ClientSocket in Phase 2")]
-// TODO(struct-forward)
-pub struct ClientSocket {
-    _opaque: (),
-}
 
 /// An active postmaster child process. Used to track children and signal them.
 pub struct PMChild {

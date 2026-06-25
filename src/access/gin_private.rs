@@ -319,11 +319,9 @@ pub fn ginDataFillRoot(_btree: GinBtree, _root: Page, _lblkno: BlockNumber, _lpa
     unimplemented!()
 }
 
-// ginvacuum.c opaque state, declared in ginvacuum.c. rule-7 forward decl.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access::ginvacuum in Phase 2")]
-pub struct GinVacuumState; // TODO(struct-forward)
+/// Opaque; private vacuum state defined in ginvacuum.c, not ported.
+pub struct GinVacuumState;
 
-#[allow(deprecated)]
 pub fn ginVacuumPostingTreeLeaf(_indexrel: Relation, _buffer: Buffer, _gvs: &mut GinVacuumState) {
     unimplemented!()
 }
@@ -477,7 +475,6 @@ pub fn ginvacuumcleanup(_info: &IndexVacuumInfo, _stats: Option<IndexBulkDeleteR
 }
 
 /// Remaining items (was int* nremaining out-param).
-#[allow(deprecated)]
 pub fn ginVacuumItemPointers(_gvs: &mut GinVacuumState, _items: &mut [ItemPointerData],
                              _nitem: i32) -> Vec<ItemPointerData> {
     unimplemented!()
@@ -497,17 +494,11 @@ pub fn ginadjustmembers(_opfamilyoid: Oid, _opclassoid: Oid,
 
 // ginbulk.c
 
-// RBTNode / RBTree / RBTreeIterator: lib/rbtree.h is tombstoned (-> BTreeMap).
-// These accumulator structs embed the intrusive rbtree node; forward-declare the
-// node types per rule 7 until the bulk accumulator is reworked onto BTreeMap.
-#[deprecated(note = "TODO(struct-forward): rbtree.h tombstoned; rework onto BTreeMap in Phase 2")]
-pub struct RBTNode; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): rbtree.h tombstoned; rework onto BTreeMap in Phase 2")]
-pub struct RBTree; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): rbtree.h tombstoned; rework onto BTreeMap in Phase 2")]
-pub struct RBTreeIterator; // TODO(struct-forward)
+// Opaque; lib/rbtree.h is tombstoned (-> BTreeMap), accumulator not yet reworked.
+pub struct RBTNode;
+pub struct RBTree;
+pub struct RBTreeIterator;
 
-#[allow(deprecated)]
 pub struct GinEntryAccumulator {
     pub rbtnode: RBTNode,
     pub key: Datum,
@@ -519,7 +510,6 @@ pub struct GinEntryAccumulator {
     pub count: u32,    // current number of list[] entries
 }
 
-#[allow(deprecated)]
 pub struct BuildAccumulator {
     pub ginstate: *mut GinState, // TODO(ptr)
     pub allocated_memory: Size,

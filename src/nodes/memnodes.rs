@@ -1,5 +1,6 @@
 //! Translated from PostgreSQL src/include/nodes/memnodes.h
 
+use crate::utils::palloc::MemoryContextCallback;
 
 /// Summarization state for `MemoryContextStats` collection.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -8,16 +9,6 @@ pub struct MemoryContextCounters {
     pub freechunks: usize,
     pub totalspace: usize,
     pub freespace: usize,
-}
-
-/// Callback to run at memory context reset/delete.
-///
-/// C threads caller state via `void *arg`; in Rust the closure captures it,
-/// so the `arg` field disappears (function-mapping section 6.3).
-// TODO(struct-forward): real definition lives in utils/palloc.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::palloc in Phase 2")]
-pub struct MemoryContextCallback {
-    pub func: Box<dyn FnOnce()>,
 }
 
 /// The built-in memory-context implementations. C dispatches through a vtable of
@@ -84,7 +75,6 @@ pub struct MemoryContextData {
     pub nextchild: Option<MemoryContext>,
     pub name: Option<String>,
     pub ident: Option<String>,
-    #[allow(deprecated)]
     pub reset_cbs: Vec<MemoryContextCallback>,
 }
 
@@ -94,8 +84,6 @@ pub type MemoryContext = Box<MemoryContextData>;
 
 /// C: `MemoryContextIsValid(context)` -- a real, recognized context type.
 pub fn MemoryContextIsValid(context: &MemoryContextData) -> bool {
-    // TODO(struct-forward): once NodeTag carries the context-type tags, test
-    // AllocSetContext/SlabContext/GenerationContext/BumpContext.
     let _ = context;
     true
 }

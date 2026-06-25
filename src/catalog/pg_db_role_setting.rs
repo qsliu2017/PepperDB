@@ -1,7 +1,11 @@
 //! Translated from PostgreSQL src/include/catalog/pg_db_role_setting.h
 
 use crate::c::text;
+use crate::nodes::parsenodes::VariableSetStmt;
 use crate::postgres_ext::Oid;
+use crate::utils::guc::GucSource;
+use crate::utils::rel::Relation;
+use crate::utils::snapshot::Snapshot;
 
 pub const DbRoleSettingRelationId: Oid = Oid(2964);
 
@@ -20,17 +24,6 @@ pub type Form_pg_db_role_setting = *mut FormData_pg_db_role_setting; // TODO(ptr
 // DECLARE_TOAST_WITH_MACRO(pg_db_role_setting, 2966, 2967, PgDbRoleSettingToastTable, PgDbRoleSettingToastIndex)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_db_role_setting_databaseid_rol_index, 2965, DbRoleSettingDatidRolidIndexId, ...)
 
-// Forward refs for the function stubs; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::parsenodes::VariableSetStmt in Phase 2")]
-pub struct VariableSetStmt; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::snapshot::Snapshot in Phase 2")]
-pub struct Snapshot; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]
-pub struct Relation; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::guc GucSource in Phase 2")]
-pub struct GucSource; // TODO(struct-forward)
-
-#[allow(deprecated)]
 pub fn AlterSetting(_databaseid: Oid, _roleid: Oid, _setstmt: &VariableSetStmt) {
     unimplemented!()
 }
@@ -39,7 +32,6 @@ pub fn DropSetting(_databaseid: Oid, _roleid: Oid) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ApplySetting(
     _snapshot: &Snapshot,
     _databaseid: Oid,

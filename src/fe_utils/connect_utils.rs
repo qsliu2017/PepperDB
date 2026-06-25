@@ -1,8 +1,6 @@
 //! Translated from PostgreSQL src/include/fe_utils/connect_utils.h
 
-// PGconn is the libpq client connection (interfaces/libpq/libpq-fe.h).
-// TODO(struct-forward): repoint to crate::interfaces::libpq::PGconn in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::interfaces::libpq::PGconn in Phase 2")]
+/// Opaque frontend libpq handle; client lib not ported.
 pub struct PGconn {
     _private: (),
 }
@@ -25,7 +23,6 @@ pub struct ConnParams {
     pub override_dbname: Option<String>,
 }
 
-#[allow(deprecated)]
 pub fn connect_database(
     _cparams: &ConnParams,
     _progname: &str,
@@ -36,7 +33,6 @@ pub fn connect_database(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn connect_maintenance_database(
     _cparams: &ConnParams,
     _progname: &str,
@@ -45,7 +41,6 @@ pub fn connect_maintenance_database(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn disconnect_database(_conn: &PGconn) {
     unimplemented!()
 }

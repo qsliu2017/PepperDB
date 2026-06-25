@@ -10,6 +10,7 @@ use crate::access::skey::{ScanKey, ScanKeyData};
 use crate::c::{RegProcedure, TransactionId};
 use crate::access::attnum::AttrNumber;
 use crate::fmgr::FmgrInfo;
+pub use crate::nodes::execnodes::IndexInfo;
 use crate::nodes::tidbitmap::TIDBitmap;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
@@ -22,11 +23,6 @@ use crate::utils::snapshot::Snapshot;
 
 // TupleTableSlot is forward-declared in the C header; reference the real type.
 use crate::executor::tuptable::TupleTableSlot;
-
-// TODO(struct-forward): genam.h forward-declares `struct IndexInfo` (it avoids
-// depending on execnodes.h). The real definition lives in execnodes.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes::IndexInfo in Phase 2")]
-pub struct IndexInfo;
 
 /// Statistics maintained by amgettuple and amgetbitmap.
 pub struct IndexScanInstrumentation {

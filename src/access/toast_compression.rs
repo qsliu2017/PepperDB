@@ -1,5 +1,7 @@
 //! Translated from PostgreSQL src/include/access/toast_compression.h
 
+use crate::c::varlena;
+
 /// GUC: default_toast_compression (stores one of the char values below).
 pub static mut DEFAULT_TOAST_COMPRESSION: i32 = 0;
 
@@ -21,19 +23,11 @@ pub const fn compression_method_is_valid(cm: u8) -> bool {
     cm != INVALID_COMPRESSION_METHOD
 }
 
-// TODO(struct-forward): varlena lives in c.h; repoint to crate::c in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::c::varlena in Phase 2")]
-pub struct varlena {
-    _opaque: [u8; 0],
-}
-
 /// pglz compression/decompression routines.
-#[allow(deprecated)]
 pub fn pglz_compress_datum(_value: &varlena) -> &varlena {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn pglz_decompress_datum(_value: &varlena) -> &varlena {
     unimplemented!()
 }

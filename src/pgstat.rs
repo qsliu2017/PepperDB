@@ -3,6 +3,7 @@
 // Cumulative statistics system. Counter structs are in-memory (idiomatic Rust, no
 // #[repr(C)]); enums are sequential ordinals; the API fns are stubbed.
 
+use crate::access::xact::xl_xact_stats_item;
 use crate::c::TransactionId;
 use crate::datatype::timestamp::TimestampTz;
 use crate::miscadmin::{BackendType, BACKEND_NUM_TYPES};
@@ -11,24 +12,10 @@ use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::postmaster::pgarch::MAX_XFN_CHARS;
 use crate::replication::conflict::{ConflictType, CONFLICT_NUM_TYPES};
+use crate::replication::slot::ReplicationSlot;
 use crate::storage::procnumber::ProcNumber;
 use crate::utils::pgstat_kind::PgStat_Kind;
 use crate::utils::relcache::Relation;
-
-// Forward references not provided by the include graph at this level (Rule 7):
-// translated locally and marked for Phase-2 repointing.
-
-// struct ReplicationSlot; (replication/slot.h) -- opaque here.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::replication::slot::ReplicationSlot in Phase 2")]
-pub struct ReplicationSlot {
-    _opaque: (),
-}
-
-// struct xl_xact_stats_item (access/xact.h) -- a dropped-stats-entry WAL item.
-#[deprecated(note = "TODO(struct-forward): repoint to xl_xact_stats_item in Phase 2")]
-pub struct xl_xact_stats_item {
-    _opaque: (),
-}
 
 // Paths for the statistics files (relative to $PGDATA).
 pub const PGSTAT_STAT_PERMANENT_DIRECTORY: &str = "pg_stat";

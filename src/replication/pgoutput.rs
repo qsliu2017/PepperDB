@@ -1,14 +1,9 @@
 //! Translated from PostgreSQL src/include/replication/pgoutput.h
 //! Logical replication output plugin data.
 
+use crate::catalog::pg_publication::Publication;
 use crate::nodes::memnodes::MemoryContext;
 
-// TODO(struct-forward): Publication is defined in catalog/pg_publication.h;
-// repoint to crate::catalog::pg_publication in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::pg_publication::Publication in Phase 2")]
-pub struct Publication;
-
-#[allow(deprecated)]
 pub struct PGOutputData {
     pub context: MemoryContext,  // private context for transient allocations
     pub cachectx: MemoryContext, // private context for cache data

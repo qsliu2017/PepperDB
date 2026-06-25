@@ -1,12 +1,16 @@
 //! Translated from PostgreSQL src/include/catalog/pg_attrdef.h
 
 use crate::c::text;
+use crate::catalog::objectaddress::ObjectAddress;
+use crate::nodes::nodes::Node;
+use crate::nodes::parsenodes::DropBehavior;
 use crate::postgres_ext::Oid;
+use crate::utils::rel::Relation;
 
 pub const AttrDefaultRelationId: Oid = Oid(2604);
 
 // pg_node_tree catalog field = varlena (serialized node tree); modeled as text.
-pub type PgNodeTree = text; // TODO(struct-forward)
+pub type PgNodeTree = text;
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -25,23 +29,12 @@ pub type Form_pg_attrdef = *mut FormData_pg_attrdef; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_attrdef_oid_index, 2657, AttrDefaultOidIndexId, ...)
 // DECLARE_FOREIGN_KEY((adrelid, adnum), pg_attribute, (attrelid, attnum))
 
-// Forward refs for the function stubs; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]
-pub struct Relation; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::primnodes::Node in Phase 2")]
-pub struct Node; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes DropBehavior in Phase 2")]
-pub struct DropBehavior; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
-pub struct ObjectAddress; // TODO(struct-forward)
 pub type AttrNumber = i16;
 
-#[allow(deprecated)]
 pub fn StoreAttrDefault(_rel: &Relation, _attnum: AttrNumber, _expr: &Node, _is_internal: bool) -> Oid {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn RemoveAttrDefault(
     _relid: Oid,
     _attnum: AttrNumber,
@@ -60,7 +53,6 @@ pub fn GetAttrDefaultOid(_relid: Oid, _attnum: AttrNumber) -> Oid {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GetAttrDefaultColumnAddress(_attrdefoid: Oid) -> ObjectAddress {
     unimplemented!()
 }

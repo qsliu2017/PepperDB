@@ -9,24 +9,13 @@ use crate::nodes::bitmapset::Bitmapset;
 use crate::nodes::nodes::{Cardinality, JoinType, Node, Selectivity};
 use crate::nodes::params::ParamListInfoData;
 use crate::nodes::parsenodes::{Query, SortGroupClause};
+use crate::nodes::pathnodes::{IndexOptInfo, PlannerInfo, SpecialJoinInfo};
 use crate::nodes::plannodes::PlannedStmt;
 use crate::nodes::primnodes::{ScalarArrayOpExpr, TargetEntry};
 use crate::postgres_ext::Oid;
 
-// Non-planner code treats these as opaque typedefs; their real bodies live in
-// nodes/pathnodes.h (a later level). Forward-declared here per rule 7.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::pathnodes::PlannerInfo in Phase 2")]
-pub struct PlannerInfo;
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::pathnodes::IndexOptInfo in Phase 2")]
-pub struct IndexOptInfo;
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::pathnodes::SpecialJoinInfo in Phase 2")]
-pub struct SpecialJoinInfo;
-
-#[allow(deprecated)]
 type PlannerInfoRef<'a> = &'a mut PlannerInfo;
-#[allow(deprecated)]
 type SpecialJoinInfoRef<'a> = &'a SpecialJoinInfo;
-#[allow(deprecated)]
 type IndexOptInfoRef<'a> = &'a IndexOptInfo;
 
 // in path/clausesel.c:

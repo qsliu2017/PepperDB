@@ -57,7 +57,6 @@ pub struct ForeignTable {
 }
 
 /// MappingUserName(userid): username for a user mapping, "public" if invalid.
-#[allow(deprecated)]
 pub fn MappingUserName(userid: Oid) -> String {
     if userid != Oid(0) {
         GetUserNameFromId(userid, false)
@@ -116,9 +115,8 @@ pub fn get_foreign_server_oid(_servername: &str) -> Option<Oid> {
     unimplemented!()
 }
 
-// GetUserNameFromId lives in miscadmin.h (level not yet provided here).
-// TODO(struct-forward): repoint to crate::miscadmin::GetUserNameFromId in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::miscadmin::GetUserNameFromId in Phase 2")]
+// Local stand-in for miscadmin's GetUserNameFromId (canonical returns Option<String>;
+// kept local to preserve MappingUserName's -> String body).
 fn GetUserNameFromId(_userid: Oid, _noerr: bool) -> String {
     unimplemented!()
 }

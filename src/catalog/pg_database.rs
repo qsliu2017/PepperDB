@@ -2,6 +2,7 @@
 
 use crate::c::{text, NameData, TransactionId};
 use crate::postgres_ext::Oid;
+use crate::utils::acl::AclItem;
 
 // BKI_SHARED_RELATION BKI_ROWTYPE_OID(1248,DatabaseRelation_Rowtype_Id) BKI_SCHEMA_MACRO
 pub const DatabaseRelationId: Oid = Oid(1262);
@@ -28,16 +29,7 @@ pub struct FormData_pg_database {
     pub datlocale: text,
     pub daticurules: text,
     pub datcollversion: text,
-    pub datacl: [Aclitem; 1], // aclitem[1]; TODO(struct-forward)
-}
-
-// aclitem placeholder; real def lives in utils/acl.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::acl::AclItem in Phase 2")]
-#[repr(C)]
-pub struct Aclitem {
-    pub ai_grantee: Oid,
-    pub ai_grantor: Oid,
-    pub ai_privs: u64,
+    pub datacl: [AclItem; 1], // aclitem[1]
 }
 
 pub type Form_pg_database = *mut FormData_pg_database; // TODO(ptr)

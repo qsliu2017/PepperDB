@@ -1,6 +1,7 @@
 //! Translated from PostgreSQL src/include/commands/copy.h
 
 use crate::access::tupdesc::TupleDesc;
+use crate::commands::copyfrom_internal::CopyFromStateData;
 use crate::executor::tuptable::TupleTableSlot;
 use crate::nodes::execnodes::ExprContext;
 use crate::nodes::nodes::Node;
@@ -81,9 +82,8 @@ pub struct CopyFormatOptions {
     pub convert_select: Vec<Box<Node>>,
 }
 
-// private in commands/copy[from|to].c -> opaque
-pub struct CopyFromStateData; // TODO(struct-forward): opaque, defined in copyfrom.c
-pub struct CopyToStateData; // TODO(struct-forward): opaque, defined in copyto.c
+/// Opaque; private state defined in copyto.c, not ported.
+pub struct CopyToStateData;
 pub type CopyFromState = *mut CopyFromStateData; // TODO(ptr)
 pub type CopyToState = *mut CopyToStateData; // TODO(ptr)
 

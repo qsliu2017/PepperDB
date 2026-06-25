@@ -43,8 +43,8 @@ pub struct TriggerData {
     pub tg_updatedcols: *const Bitmapset, // TODO(ptr)
 }
 
-// private in trigger.c
-pub struct AfterTriggersTableData; // TODO(struct-forward): opaque, defined in trigger.c
+/// Opaque; private state defined in trigger.c, not ported.
+pub struct AfterTriggersTableData;
 
 /// State for capturing old/new tuples into transition tables for one operation.
 pub struct TransitionCaptureState {

@@ -1,14 +1,10 @@
 //! Translated from PostgreSQL src/include/executor/nodeHashjoin.h
 
 use crate::access::parallel::{ParallelContext, ParallelWorkerContext};
+use crate::executor::hashjoin::HashJoinTable;
 use crate::nodes::execnodes::{EState, HashJoinState, MinimalTuple};
 use crate::nodes::plannodes::HashJoin;
 use crate::storage::buffile::BufFile;
-
-// HashJoinTable is defined in executor/hashjoin.h (not in this batch).
-// TODO(struct-forward): repoint to crate::executor::hashjoin::HashJoinTable in Phase 2
-#[deprecated(note = "TODO(struct-forward): repoint to crate::executor::hashjoin in Phase 2")]
-pub type HashJoinTable = usize;
 
 // TODO(ptr)
 pub fn ExecInitHashJoin(_node: &HashJoin, _estate: &mut EState, _eflags: i32) -> *mut HashJoinState {

@@ -5,10 +5,7 @@
 
 use crate::postgres_ext::Oid;
 
-// PGresult is the libpq client result (libpq-fe.h). FILE* output sinks are
-// modeled as a forward-declared handle until the I/O layer is ported.
-// TODO(struct-forward): repoint to crate::interfaces::libpq::PGresult in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::interfaces::libpq::PGresult in Phase 2")]
+/// Opaque frontend libpq handle; client lib not ported.
 pub struct PGresult {
     _private: (),
 }
@@ -211,7 +208,6 @@ pub fn print_table(_cont: &PrintTableContent, _fout: &mut CFile, _is_pager: bool
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn print_query(
     _result: &PGresult,
     _opt: &PrintQueryOpt,

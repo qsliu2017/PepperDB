@@ -1,5 +1,7 @@
 //! Translated from PostgreSQL src/include/catalog/pg_cast.h
 
+use crate::catalog::dependency::DependencyType;
+use crate::catalog::objectaddress::ObjectAddress;
 use crate::postgres_ext::Oid;
 
 pub const CastRelationId: Oid = Oid(2605);
@@ -39,13 +41,6 @@ pub enum CoercionMethod {
     COERCION_METHOD_INOUT = b'i' as i8,    // use input/output functions
 }
 
-// Forward refs for the function stub; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
-pub struct ObjectAddress; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::dependency::DependencyType in Phase 2")]
-pub struct DependencyType; // TODO(struct-forward)
-
-#[allow(deprecated)]
 pub fn CastCreate(
     _sourcetypeid: Oid,
     _targettypeid: Oid,

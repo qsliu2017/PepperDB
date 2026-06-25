@@ -5,28 +5,22 @@
 
 use crate::fe_utils::connect_utils::ConnParams;
 
-// libpq-fe.h is not in the tree; forward-declare the client handles locally.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::interfaces::libpq::PGconn in Phase 2")]
-// TODO(struct-forward)
+/// Opaque frontend libpq handle; client lib not ported.
 pub struct PGconn;
-#[deprecated(note = "TODO(struct-forward): repoint to crate::interfaces::libpq::PGresult in Phase 2")]
-// TODO(struct-forward)
+/// Opaque frontend libpq handle; client lib not ported.
 pub struct PGresult;
 
 /// C: `typedef bool (*ParallelSlotResultHandler)(PGresult*, PGconn*, void*)`.
 /// The `void *context` is captured by the closure.
-#[allow(deprecated)]
 pub type ParallelSlotResultHandler = Box<dyn FnMut(&PGresult, &mut PGconn) -> bool>;
 
 /// C: `ParallelSlot`. In-memory.
-#[allow(deprecated)]
 pub struct ParallelSlot {
     pub connection: Option<Box<PGconn>>, // one connection (NULL if none) TODO(ptr)
     pub in_use: bool,
     pub handler: Option<ParallelSlotResultHandler>,
 }
 
-#[allow(deprecated)]
 impl ParallelSlot {
     /// C: `ParallelSlotSetHandler(slot, handler, context)`.
     pub fn set_handler(&mut self, handler: ParallelSlotResultHandler) {
@@ -65,7 +59,6 @@ pub fn ParallelSlotsSetup<'a>(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ParallelSlotsAdoptConn(sa: &mut ParallelSlotArray<'_>, conn: Box<PGconn>) {
     unimplemented!()
 }
@@ -78,7 +71,6 @@ pub fn ParallelSlotsWaitCompletion(sa: &mut ParallelSlotArray<'_>) -> bool {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn TableCommandResultHandler(res: &PGresult, conn: &mut PGconn) -> bool {
     unimplemented!()
 }

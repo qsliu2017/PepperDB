@@ -1,6 +1,7 @@
 //! Translated from PostgreSQL src/include/catalog/pg_init_privs.h
 
 use crate::postgres_ext::Oid;
+use crate::utils::acl::AclItem;
 
 pub const InitPrivsRelationId: Oid = Oid(3394);
 
@@ -12,16 +13,7 @@ pub struct FormData_pg_init_privs {
     pub objsubid: i32,
     pub privtype: i8,
     // CATALOG_VARLEN (not in fixed part):
-    pub initprivs: [Aclitem; 1], // aclitem[1]; TODO(struct-forward)
-}
-
-// aclitem placeholder; real def lives in utils/acl.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::acl::AclItem in Phase 2")]
-#[repr(C)]
-pub struct Aclitem {
-    pub ai_grantee: Oid,
-    pub ai_grantor: Oid,
-    pub ai_privs: u64,
+    pub initprivs: [AclItem; 1], // aclitem[1]
 }
 
 pub type Form_pg_init_privs = *mut FormData_pg_init_privs; // TODO(ptr)

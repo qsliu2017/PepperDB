@@ -1,44 +1,23 @@
 //! Translated from PostgreSQL src/include/fmgr.h
 //! Function manager and function-call interface.
 
+use crate::c::{bytea, varlena};
+use crate::lib::stringinfo::StringInfo;
+use crate::nodes::nodes::Node;
+use crate::nodes::primnodes::Aggref;
 use crate::postgres::{Datum, NullableDatum};
 use crate::postgres_ext::{InvalidOid, Oid};
-
-// MemoryContext is a forward reference (real def utils/memnodes.h / nodes/memnodes.h).
-// TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::memnodes::MemoryContext in Phase 2")]
-pub type MemoryContext = usize;
-
-// varlena is a forward reference (real def c.h / postgres.h struct varlena).
-// TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::c::varlena in Phase 2")]
-pub struct varlena;
-
-// bytea aliases varlena. TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::c::bytea in Phase 2")]
-pub type bytea = varlena;
+pub use crate::utils::palloc::MemoryContext;
 
 // Rule-7 forward decls: "We don't want to include primnodes.h here".
 // C: `typedef struct Node *fmNodePtr;` (real def nodes/nodes.h)
-// TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::nodes::Node in Phase 2")]
-pub struct fmNode;
-#[allow(deprecated)]
-pub type fmNodePtr = *mut fmNode; // TODO(ptr)
+pub type fmNodePtr = *mut Node; // TODO(ptr)
 
 // C: `typedef struct Aggref *fmAggrefPtr;` (real def nodes/primnodes.h)
-// TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::primnodes::Aggref in Phase 2")]
-pub struct fmAggref;
-#[allow(deprecated)]
-pub type fmAggrefPtr = *mut fmAggref; // TODO(ptr)
+pub type fmAggrefPtr = *mut Aggref; // TODO(ptr)
 
 // C: `typedef struct StringInfoData *fmStringInfo;` (real def lib/stringinfo.h)
-// TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::lib::stringinfo::StringInfo in Phase 2")]
-pub struct fmStringInfoData;
-#[allow(deprecated)]
-pub type fmStringInfo = *mut fmStringInfoData; // TODO(ptr)
+pub type fmStringInfo = *mut StringInfo; // TODO(ptr)
 
 /// C: `typedef void (*fmExprContextCallbackFunction) (Datum arg);` (avoid execnodes.h)
 pub type fmExprContextCallbackFunction = fn(arg: Datum);

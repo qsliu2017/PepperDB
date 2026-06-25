@@ -13,6 +13,8 @@ use crate::access::xlogreader::XLogReaderState;
 use crate::c::MAXALIGN;
 use crate::datatype::timestamp::TimestampTz;
 use crate::pgtime::pg_time_t;
+use crate::replication::decode::XLogRecordBuffer;
+use crate::replication::logical::LogicalDecodingContext;
 use crate::storage::block::BlockNumber;
 
 /// XLOG page magic; can be used as a WAL version indicator.
@@ -255,18 +257,8 @@ pub trait Rmgr {
 
     // Optional: mask out non-deterministic bits for wal_consistency_checking.
     fn mask(_pagedata: &mut [u8], _blkno: BlockNumber) {}
-    // Optional: logical decoding. ctx/buf opaque here. TODO(struct-forward)
+    // Optional: logical decoding callback.
     fn decode(_ctx: &mut LogicalDecodingContext, _buf: &mut XLogRecordBuffer) {}
-}
-
-// Forward refs the include graph doesn't provide (opaque in this header).
-#[deprecated(note = "TODO(struct-forward): repoint to crate::replication::logical::LogicalDecodingContext in Phase 2")]
-pub struct LogicalDecodingContext {
-    _opaque: [u8; 0], // TODO(struct-forward)
-}
-#[deprecated(note = "TODO(struct-forward): repoint to crate::replication::decode::XLogRecordBuffer in Phase 2")]
-pub struct XLogRecordBuffer {
-    _opaque: [u8; 0], // TODO(struct-forward)
 }
 
 // RmgrTable[] global + the dispatch helpers -> deferred to a closed enum of the

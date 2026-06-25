@@ -16,9 +16,7 @@ pub const fn buffer_is_local(buffer: Buffer) -> bool {
     buffer < 0
 }
 
-// TODO(struct-forward): BufferAccessStrategyData is private to freelist.c;
-// repoint to crate::storage::freelist in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::storage::freelist::BufferAccessStrategy in Phase 2")]
+/// Opaque; BufferAccessStrategyData is private to freelist.c (not ported).
 pub struct BufferAccessStrategy {
     _opaque: [u8; 0],
 }

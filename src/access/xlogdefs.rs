@@ -1,5 +1,7 @@
 //! Translated from PostgreSQL src/include/access/xlogdefs.h
 
+use crate::access::xlog::WalSyncMethod;
+
 /// Pointer to a location in the XLOG (64 bits wide). Zero means invalid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[repr(transparent)]
@@ -40,19 +42,5 @@ pub struct TimeLineID(pub u32);
 #[repr(transparent)]
 pub struct RepOriginId(pub u16);
 
-// TODO(struct-forward): WalSyncMethod is defined in access/xlog.h; repoint to
-// crate::access::xlog in Phase 2. The header only references it to pick a default.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access::xlog::WalSyncMethod in Phase 2")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(i32)]
-pub enum WalSyncMethod {
-    Fsync = 0,
-    FsyncWriteThrough = 1,
-    Fdatasync = 2,
-    OpenSync = 3,
-    OpenDsync = 4,
-}
-
 /// On Linux/macOS O_DSYNC is available and distinct from O_SYNC.
-#[allow(deprecated)]
 pub const DEFAULT_WAL_SYNC_METHOD: WalSyncMethod = WalSyncMethod::OpenDsync;

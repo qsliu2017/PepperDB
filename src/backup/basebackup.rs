@@ -1,5 +1,6 @@
 //! Translated from PostgreSQL src/include/backup/basebackup.h
 
+use crate::backup::basebackup_incremental::IncrementalBackupInfo;
 use crate::nodes::replnodes::BaseBackupCmd;
 use crate::postgres_ext::Oid;
 
@@ -19,13 +20,6 @@ pub struct TablespaceInfo {
     pub size: i64,
 }
 
-// TODO(struct-forward): repoint to crate::backup::basebackup_incremental in Phase 2
-#[deprecated(note = "TODO(struct-forward): repoint to crate::backup::basebackup_incremental in Phase 2")]
-pub struct IncrementalBackupInfo {
-    _private: (),
-}
-
-#[allow(deprecated)]
 pub fn SendBaseBackup(_cmd: &BaseBackupCmd, _ib: Option<&IncrementalBackupInfo>) {
     unimplemented!()
 }

@@ -20,8 +20,7 @@ pub struct EventTriggerData<'a> {
     pub tag: CommandTag,
 }
 
-// PGDLLIMPORT bool event_triggers -- process-global GUC.
-// TODO(struct-forward): move to Session/task-local state in Phase 2.
+// PGDLLIMPORT bool event_triggers -- process-global GUC; task-local later.
 pub static event_triggers: bool = false;
 
 bitflags! {

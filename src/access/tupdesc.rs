@@ -2,16 +2,10 @@
 //! POSTGRES tuple descriptor definitions. In-memory (no layout contract).
 
 use crate::access::attnum::AttrNumber;
+use crate::access::tupdesc_details::AttrMissing;
 use crate::catalog::pg_attribute::{Form_pg_attribute, FormData_pg_attribute};
 use crate::nodes::nodes::Node;
 use crate::postgres_ext::Oid;
-
-// AttrMissing's full definition lives in access/tupdesc_details.h (level 5).
-// Rule 7: opaque local placeholder, repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access::tupdesc_details::AttrMissing in Phase 2")]
-pub struct AttrMissing {
-    _private: (),
-}
 
 pub struct AttrDefault {
     pub adnum: AttrNumber,
@@ -27,7 +21,6 @@ pub struct ConstrCheck {
 }
 
 /// Constraints of a tuple.
-#[allow(deprecated)]
 pub struct TupleConstr {
     pub defval: Vec<AttrDefault>,
     pub check: Vec<ConstrCheck>,

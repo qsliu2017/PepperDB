@@ -2,11 +2,9 @@
 
 use crate::c::NameData;
 use crate::postgres_ext::Oid;
+use crate::utils::acl::AclItem;
 
 pub const NamespaceRelationId: Oid = Oid(2615);
-
-// aclitem catalog field is varlena; modeled here.
-pub type Aclitem = crate::c::text; // TODO(struct-forward)
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -15,7 +13,7 @@ pub struct FormData_pg_namespace {
     pub nspname: NameData,
     pub nspowner: Oid, // BKI_DEFAULT(POSTGRES) BKI_LOOKUP(pg_authid)
     // CATALOG_VARLEN (not in fixed part):
-    pub nspacl: [Aclitem; 1], // aclitem[]
+    pub nspacl: [AclItem; 1], // aclitem[]
 }
 
 pub type Form_pg_namespace = *mut FormData_pg_namespace; // TODO(ptr)

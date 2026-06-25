@@ -5,15 +5,13 @@
 // dsm_segment drops out; these are leader/worker plumbing stubs.
 
 use crate::storage::procnumber::ProcNumber;
+use crate::utils::elog::ErrorData;
 
-#[deprecated(note = "TODO(shm_mq): replace dsm_segment with owned Arc-shared state in Phase 2")]
-pub struct dsm_segment; // TODO(struct-forward): tombstoned dsm
-#[deprecated(note = "TODO(shm_mq): replace shm_mq_handle with a tokio channel endpoint in Phase 2")]
-pub struct shm_mq_handle; // TODO(struct-forward): tombstoned shm_mq
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::elog::ErrorData in Phase 2")]
-pub struct ErrorData; // TODO(struct-forward)
+/// Opaque; dynamic shared memory subsystem not ported (single-process).
+pub struct dsm_segment;
+/// Opaque; shm_mq subsystem not ported (single-process).
+pub struct shm_mq_handle;
 
-#[allow(deprecated)]
 pub fn pq_redirect_to_shm_mq(_seg: &dsm_segment, _mqh: &shm_mq_handle) {
     unimplemented!()
 }
@@ -23,7 +21,6 @@ pub fn pq_set_parallel_leader(_pid: i32, _proc_number: ProcNumber) {
 }
 
 // StringInfo tombstoned -> &mut Vec<u8> message buffer.
-#[allow(deprecated)]
 pub fn pq_parse_errornotice(_msg: &mut Vec<u8>, _edata: &mut ErrorData) {
     unimplemented!()
 }

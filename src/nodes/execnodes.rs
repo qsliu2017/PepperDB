@@ -9,7 +9,7 @@
 //! Node pointers map to `Option<Box<Node>>` / `Box<Node>`; `List*` of nodes ->
 //! `Vec<Box<Node>>`; fn-ptr exec callbacks -> Rust fn pointers; `void *arg` ->
 //! closures. Many fields reference types from modules not yet translated; those
-//! are opaque aliases below, each marked TODO(struct-forward) for Phase 2.
+//! are opaque aliases below.
 
 use crate::access::attnum::AttrNumber;
 use crate::nodes::bitmapset::Bitmapset;
@@ -21,23 +21,19 @@ use crate::postgres_ext::Oid;
 use bitflags::bitflags;
 
 // ---------------------------------------------------------------------------
-// Opaque / forward-declared types referenced here but defined elsewhere.
-// Placeholders for the header skeleton; Phase 2 repoints them at the real
-// translated modules.
+// Opaque forward-declared types referenced here but owned by other modules.
+// Kept as local opaque placeholders for the header skeleton.
 // ---------------------------------------------------------------------------
 
 macro_rules! opaque_forward {
     ($($name:ident),* $(,)?) => {
         $(
-            #[deprecated(note = "TODO(struct-forward): repoint to the real type in Phase 2")]
-            // TODO(struct-forward)
             #[derive(Debug, Clone, PartialEq, Default)]
             pub struct $name;
         )*
     };
 }
 
-#[allow(deprecated)]
 mod fwd {
     opaque_forward! {
         TupleTableSlot, TupleDesc, TupleTableSlotOps, Relation, RelationPtr,
@@ -54,27 +50,20 @@ mod fwd {
     }
 }
 
-#[allow(deprecated)]
 pub use fwd::*;
 
 /// Opaque private/foreign struct only referenced via pointer in the header.
-#[deprecated(note = "TODO(struct-forward): private executor type defined in its .c file")]
-// TODO(struct-forward)
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Opaque;
 
 /// C `void *` handle whose concrete type lives in a private .c file (hash join
 /// table, tuplesort state, FDW/AM state, parallel coordination, etc).
-#[allow(deprecated)]
 pub type OpaqueState = Option<Box<Opaque>>;
 
-/// simplehash-generated tuple hash table (`tuplehash_hash`).
-#[deprecated(note = "TODO(struct-forward): simplehash table, map to HashMap in Phase 2")]
-// TODO(struct-forward)
+/// simplehash-generated tuple hash table (`tuplehash_hash`); maps to HashMap.
 #[derive(Debug, Default)]
 pub struct TuplehashHash;
 
-#[allow(deprecated)]
 pub type TupleHashIterator = usize;
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 
 use crate::access::xlogdefs::XLogRecPtr;
 use crate::c::TransactionId;
+pub use crate::replication::snapbuild_internal::SnapBuild;
 use crate::utils::snapshot::Snapshot;
 
 /// SnapBuildState. Keep `get_snapbuild_state_desc()` (pg_logicalinspect) in sync.
@@ -20,15 +21,6 @@ pub enum SnapBuildState {
     SNAPBUILD_CONSISTENT = 2,
 }
 
-/// SnapBuild: opaque snapshot builder (real body in snapbuild_internal.h).
-// TODO(struct-forward): repoint to crate::replication::snapbuild_internal::SnapBuild in Phase 2.
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::replication::snapbuild_internal::SnapBuild in Phase 2"
-)]
-pub struct SnapBuild {
-    _opaque: [u8; 0],
-}
-
 // ReorderBuffer / xl_heap_new_cid / xl_running_xacts are referenced only via the
 // canonical modules; imported at use sites in Phase 2.
 
@@ -36,7 +28,6 @@ pub fn check_point_snap_build() {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn allocate_snapshot_builder(
     _reorder: &mut crate::replication::reorderbuffer::ReorderBuffer,
     _xmin_horizon: TransactionId,
@@ -48,7 +39,6 @@ pub fn allocate_snapshot_builder(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn free_snapshot_builder(_builder: Box<SnapBuild>) {
     unimplemented!()
 }
@@ -57,11 +47,9 @@ pub fn snap_build_snap_dec_refcount(_snap: Snapshot) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn snap_build_initial_snapshot(_builder: &mut SnapBuild) -> Snapshot<'static> {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn snap_build_export_snapshot(_builder: &mut SnapBuild) -> String {
     unimplemented!()
 }
@@ -72,29 +60,23 @@ pub fn snap_build_reset_exported_snapshot_state() {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn snap_build_current_state(_builder: &mut SnapBuild) -> SnapBuildState {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn snap_build_get_or_build_snapshot(_builder: &mut SnapBuild) -> Snapshot<'static> {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn snap_build_xact_needs_skip(_builder: &mut SnapBuild, _ptr: XLogRecPtr) -> bool {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn snap_build_get_two_phase_at(_builder: &mut SnapBuild) -> XLogRecPtr {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn snap_build_set_two_phase_at(_builder: &mut SnapBuild, _ptr: XLogRecPtr) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn snap_build_commit_txn(
     _builder: &mut SnapBuild,
     _lsn: XLogRecPtr,
@@ -104,11 +86,9 @@ pub fn snap_build_commit_txn(
 ) {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn snap_build_process_change(_builder: &mut SnapBuild, _xid: TransactionId, _lsn: XLogRecPtr) -> bool {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn snap_build_process_new_cid(
     _builder: &mut SnapBuild,
     _xid: TransactionId,
@@ -117,7 +97,6 @@ pub fn snap_build_process_new_cid(
 ) {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn snap_build_process_running_xacts(
     _builder: &mut SnapBuild,
     _lsn: XLogRecPtr,
@@ -125,7 +104,6 @@ pub fn snap_build_process_running_xacts(
 ) {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn snap_build_serialization_point(_builder: &mut SnapBuild, _lsn: XLogRecPtr) {
     unimplemented!()
 }

@@ -8,8 +8,11 @@ use crate::access::xlogdefs::XLogRecPtr;
 use crate::c::TransactionId;
 use crate::catalog::pg_publication::PublishGencolsType;
 use crate::datatype::timestamp::TimestampTz;
+use crate::executor::tuptable::TupleTableSlot;
 use crate::nodes::bitmapset::Bitmapset;
 use crate::postgres_ext::Oid;
+use crate::replication::reorderbuffer::ReorderBufferTXN;
+use crate::utils::rel::Relation;
 
 // GIDSIZE for two-phase commit identifiers (from access/xact.h).
 use crate::access::xact::GIDSIZE;
@@ -130,18 +133,9 @@ pub struct LogicalRepStreamAbortData {
     pub abort_time: TimestampTz,
 }
 
-// Forward refs for the function stubs; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::replication::reorderbuffer::ReorderBufferTXN in Phase 2")]
-pub struct ReorderBufferTXN; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]
-pub struct Relation; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::executor::tuptable::TupleTableSlot in Phase 2")]
-pub struct TupleTableSlot; // TODO(struct-forward)
-
 // read fns return their parsed value/out-struct; the StringInfo cursor advances
 // internally. write fns append to `out: &mut Vec<u8>`.
 
-#[allow(deprecated)]
 pub fn logicalrep_write_begin(_out: &mut Vec<u8>, _txn: &ReorderBufferTXN) {
     unimplemented!()
 }
@@ -150,7 +144,6 @@ pub fn logicalrep_read_begin(_input: &[u8]) -> LogicalRepBeginData {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_commit(_out: &mut Vec<u8>, _txn: &ReorderBufferTXN, _commit_lsn: XLogRecPtr) {
     unimplemented!()
 }
@@ -159,7 +152,6 @@ pub fn logicalrep_read_commit(_input: &[u8]) -> LogicalRepCommitData {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_begin_prepare(_out: &mut Vec<u8>, _txn: &ReorderBufferTXN) {
     unimplemented!()
 }
@@ -168,7 +160,6 @@ pub fn logicalrep_read_begin_prepare(_input: &[u8]) -> LogicalRepPreparedTxnData
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_prepare(_out: &mut Vec<u8>, _txn: &ReorderBufferTXN, _prepare_lsn: XLogRecPtr) {
     unimplemented!()
 }
@@ -177,7 +168,6 @@ pub fn logicalrep_read_prepare(_input: &[u8]) -> LogicalRepPreparedTxnData {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_commit_prepared(
     _out: &mut Vec<u8>,
     _txn: &ReorderBufferTXN,
@@ -190,7 +180,6 @@ pub fn logicalrep_read_commit_prepared(_input: &[u8]) -> LogicalRepCommitPrepare
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_rollback_prepared(
     _out: &mut Vec<u8>,
     _txn: &ReorderBufferTXN,
@@ -204,7 +193,6 @@ pub fn logicalrep_read_rollback_prepared(_input: &[u8]) -> LogicalRepRollbackPre
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_stream_prepare(
     _out: &mut Vec<u8>,
     _txn: &ReorderBufferTXN,
@@ -226,7 +214,6 @@ pub fn logicalrep_read_origin(_input: &[u8]) -> (String, XLogRecPtr) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_insert(
     _out: &mut Vec<u8>,
     _xid: TransactionId,
@@ -243,7 +230,6 @@ pub fn logicalrep_read_insert(_input: &[u8], _newtup: &mut LogicalRepTupleData) 
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_update(
     _out: &mut Vec<u8>,
     _xid: TransactionId,
@@ -266,7 +252,6 @@ pub fn logicalrep_read_update(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_delete(
     _out: &mut Vec<u8>,
     _xid: TransactionId,
@@ -309,7 +294,6 @@ pub fn logicalrep_write_message(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_rel(
     _out: &mut Vec<u8>,
     _xid: TransactionId,
@@ -345,7 +329,6 @@ pub fn logicalrep_write_stream_stop(_out: &mut Vec<u8>) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn logicalrep_write_stream_commit(
     _out: &mut Vec<u8>,
     _txn: &ReorderBufferTXN,

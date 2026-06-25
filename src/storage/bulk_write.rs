@@ -2,28 +2,25 @@
 
 use crate::common::relpath::ForkNumber;
 use crate::storage::block::BlockNumber;
+use crate::utils::rel::Relation;
 
 // Bulk writer state, contents private to bulk_write.c.
 pub struct BulkWriteState {
     _private: (),
 }
 
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]
-pub struct Relation; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::storage::smgr::SMgrRelationData in Phase 2")]
-pub struct SMgrRelationData; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::c::PGIOAlignedBlock in Phase 2")]
-pub struct PGIOAlignedBlock; // TODO(struct-forward)
+/// Opaque; smgr relation cache not ported yet.
+pub struct SMgrRelationData;
+/// Opaque; page-aligned IO buffer union not ported yet.
+pub struct PGIOAlignedBlock;
 
 // Temporary page-sized buffer reserved via smgr_bulk_get_buf.
 pub type BulkWriteBuffer = *mut PGIOAlignedBlock; // TODO(ptr)
 
-#[allow(deprecated)]
 pub fn smgr_bulk_start_rel(_rel: &Relation, _forknum: ForkNumber) -> BulkWriteState {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn smgr_bulk_start_smgr(
     _smgr: &SMgrRelationData,
     _forknum: ForkNumber,

@@ -6,6 +6,7 @@ use bitflags::bitflags;
 
 use crate::c::SubTransactionId;
 use crate::postgres_ext::Oid;
+use crate::storage::aio_internal::PgAioHandle;
 
 /// A virtual file descriptor (index into fd.c's VFD table).
 pub type File = i32;
@@ -54,13 +55,6 @@ pub const PG_O_DIRECT: i32 = 0o40000;
 #[cfg(target_os = "macos")]
 pub const PG_O_DIRECT: i32 = 0x80000000u32 as i32;
 
-// struct PgAioHandle; -- forward decl; real definition in storage/aio_types.h.
-// TODO(struct-forward): repoint to crate::storage::aio_types::PgAioHandle in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::storage::aio_types::PgAioHandle in Phase 2")]
-pub struct PgAioHandle {
-    _private: (),
-}
-
 // Operations on virtual Files --- equivalent to Unix kernel file ops.
 pub fn PathNameOpenFile(_file_name: &str, _file_flags: i32) -> File {
     unimplemented!()
@@ -95,7 +89,6 @@ pub fn FileWriteV(_file: File, _iov: &[IoSlice], _offset: i64, _wait_event_info:
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn FileStartReadV(
     _ioh: &mut PgAioHandle,
     _file: File,

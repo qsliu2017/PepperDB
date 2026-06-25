@@ -4,11 +4,7 @@ use crate::common::relpath::ForkNumber;
 use crate::storage::block::BlockNumber;
 use crate::storage::relfilelocator::RelFileLocator;
 
-/// Opaque AIO handle. Resolves the level-2 forward-decl
-/// `crate::storage::aio_types::PgAioHandle`.
-// TODO(struct-forward): real definition lives in storage/aio_internal.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::storage::aio_internal::PgAioHandle in Phase 2")]
-pub struct PgAioHandle;
+pub use crate::storage::aio_internal::PgAioHandle;
 
 /// A reference to an IO that can be used to wait for the IO to complete.
 /// These can be passed across process boundaries.

@@ -3,6 +3,7 @@
 
 use crate::access::tupdesc::TupleDesc;
 use crate::c::TransactionId;
+use crate::catalog::namespace::SearchPathMatcher;
 use crate::lib::ilist::dlist_node;
 use crate::nodes::nodes::Node;
 use crate::nodes::params::{ParamListInfo, ParserSetupHook};
@@ -32,10 +33,6 @@ pub type PostRewriteHook = fn(querytree_list: &mut [Query]);
 pub const CACHEDPLANSOURCE_MAGIC: i32 = 195726186;
 pub const CACHEDPLAN_MAGIC: i32 = 953717834;
 pub const CACHEDEXPR_MAGIC: i32 = 838275847;
-
-// SearchPathMatcher lives in catalog/namespace.h (a later level). Rule 7.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::namespace::SearchPathMatcher in Phase 2")]
-pub struct SearchPathMatcher; // TODO(struct-forward)
 
 /// A cached SQL query: source text, source parse tree, analyzed-and-rewritten
 /// query tree, and adjunct data. Only one of raw/analyzed parse tree is set.
@@ -78,7 +75,6 @@ pub struct CachedPlanSource {
     /// other dependencies, as PlanInvalItems
     pub invalItems: Vec<Node>,
     /// search_path used for parsing and planning. TODO(ptr).
-    #[allow(deprecated)]
     pub search_path: Option<*mut SearchPathMatcher>,
     /// context holding the above, or None
     pub query_context: MemoryContext,

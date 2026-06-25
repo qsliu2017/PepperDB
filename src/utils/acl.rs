@@ -9,6 +9,7 @@ use crate::nodes::parsenodes::{
 };
 use crate::parser::parse_node::ParseState;
 use crate::postgres_ext::Oid;
+use crate::utils::array::ArrayType;
 use crate::utils::snapshot::Snapshot;
 
 /// placeholder for id in a PUBLIC acl item
@@ -87,25 +88,7 @@ pub const ACLITEM_ALL_GOPTION_BITS: AclMode = AclMode::from_bits_retain(0xFFFFFF
 
 /// Acl - a one-dimensional array of AclItem (a standard PG varlena array type,
 /// `ArrayType`). ON-DISK; toastable. Kept as a typedef over `ArrayType`.
-// TODO(struct-forward): repoint to crate::utils::array::ArrayType in Phase 2
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::array::ArrayType in Phase 2")]
 pub type Acl = ArrayType;
-
-/// Placeholder for the PG varlena array header (`ArrayType`); the real
-/// definition lives in utils/array.h.
-// TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::array::ArrayType in Phase 2")]
-#[repr(C)]
-pub struct ArrayType {
-    /// varlena header (do not touch directly)
-    pub vl_len_: i32,
-    /// number of dimensions
-    pub ndim: i32,
-    /// offset to data, or 0 if no bitmap
-    pub dataoffset: i32,
-    /// element type OID
-    pub elemtype: Oid,
-}
 
 /// ACL modification opcodes for aclupdate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,68 +159,55 @@ pub enum AclResult {
     NotOwner,
 }
 
-#[allow(deprecated)]
 pub fn acldefault(_objtype: ObjectType, _owner_id: Oid) -> *mut Acl {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn get_user_default_acl(_objtype: ObjectType, _owner_id: Oid, _nsp_oid: Oid) -> *mut Acl {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn record_dependency_on_new_acl(_class_id: Oid, _object_id: Oid, _objsub_id: i32, _owner_id: Oid, _acl: &Acl) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn aclupdate(_old_acl: &Acl, _mod_aip: &AclItem, _modechg: AclModeChg, _owner_id: Oid, _behavior: DropBehavior) -> *mut Acl {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn aclnewowner(_old_acl: &Acl, _old_owner_id: Oid, _new_owner_id: Oid) -> *mut Acl {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn make_empty_acl() -> *mut Acl {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn aclcopy(_orig_acl: &Acl) -> *mut Acl {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn aclconcat(_left_acl: &Acl, _right_acl: &Acl) -> *mut Acl {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn aclmerge(_left_acl: &Acl, _right_acl: &Acl, _owner_id: Oid) -> *mut Acl {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn aclitemsort(_acl: &mut Acl) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn aclequal(_left_acl: &Acl, _right_acl: &Acl) -> bool {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn aclmask(_acl: &Acl, _roleid: Oid, _owner_id: Oid, _mask: AclMode, _how: AclMaskHow) -> AclMode {
     unimplemented!()
 }
 
 /// `aclmembers` - C returned count + `Oid **roleids` out-param; map to the Vec.
-#[allow(deprecated)]
 pub fn aclmembers(_acl: &Acl) -> Vec<Oid> {
     unimplemented!()
 }
@@ -298,7 +268,6 @@ pub fn get_rolespec_name(_role: &RoleSpec) -> String {
 }
 
 /// `select_best_grantor` - two out-params `grantorId`/`grantOptions` -> tuple.
-#[allow(deprecated)]
 pub fn select_best_grantor(_role_id: Oid, _privileges: AclMode, _acl: &Acl, _owner_id: Oid) -> (Oid, AclMode) {
     unimplemented!()
 }

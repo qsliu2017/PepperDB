@@ -32,6 +32,7 @@ use crate::storage::itemptr::ItemPointerData;
 
 /// C `ItemPointer` is `ItemPointerData *`; itemptr.rs only exports the value type.
 pub type ItemPointer = *mut ItemPointerData; // TODO(ptr)
+use crate::commands::vacuum::VacuumCutoffs;
 use crate::storage::off::OffsetNumber;
 use crate::storage::read_stream::ReadStream;
 use crate::utils::relcache::Relation;
@@ -55,18 +56,10 @@ bitflags! {
 }
 
 // Type-forwarded slot/cutoffs structs (`struct TupleTableSlot;`, `struct
-// VacuumCutoffs;` forward-decls in the C header). TupleTableSlot is imported from
-// executor::tuptable. VacuumCutoffs lives in commands/vacuum.h.
-// TODO(struct-forward): repoint to crate::commands::vacuum::VacuumCutoffs in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::commands::vacuum::VacuumCutoffs in Phase 2")]
-pub struct VacuumCutoffs {
-    _private: [u8; 0],
-}
+// VacuumCutoffs;` forward-decls in the C header). TupleTableSlot and VacuumCutoffs
+// are imported above from executor::tuptable and commands::vacuum.
 
-// GlobalVisState forward-decl (pruneheap.c / heapam_visibility.c use it). The real
-// type currently lives behind utils::snapshot as a Phase-2 placeholder.
-// TODO(struct-forward): repoint to crate::utils::snapshot::GlobalVisState in Phase 2.
-#[allow(deprecated)]
+// GlobalVisState forward-decl (pruneheap.c / heapam_visibility.c use it).
 pub use crate::utils::snapshot::GlobalVisState;
 
 /// MaxLockTupleMode == LockTupleExclusive (the strongest tuple lock mode).

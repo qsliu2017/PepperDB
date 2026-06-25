@@ -6,6 +6,7 @@ use crate::access::attnum::AttrNumber;
 use crate::access::htup::HeapTupleData;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
+use crate::utils::catcache::CatCList;
 
 // HeapTuple-family pointer alias (htup.h does not export it yet). An invalid
 // (NULL) HeapTuple is the "not found" sentinel, modeled as Option<HeapTuple>::None.
@@ -255,15 +256,7 @@ pub fn GetSysCacheHashValue(
     unimplemented!()
 }
 
-// catclist's definition lives in utils/catcache.h (intentionally not included
-// here). Rule 7: opaque local placeholder, repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::catcache::CatCList in Phase 2")]
-pub struct CatCList {
-    _private: [u8; 0],
-}
-
 /// List-search interface. Callers must also use catcache.h.
-#[allow(deprecated)]
 pub fn SearchSysCacheList(
     _cache_id: SysCacheIdentifier,
     _nkeys: i32,
@@ -418,12 +411,10 @@ pub fn GetSysCacheHashValue4(
 }
 
 // SearchSysCacheListN -> SearchSysCacheList stubs (require catcache.h too).
-#[allow(deprecated)]
 pub fn SearchSysCacheList1(cache_id: SysCacheIdentifier, key1: Datum) -> *mut CatCList {
     SearchSysCacheList(cache_id, 1, key1, Datum(0), Datum(0))
 }
 
-#[allow(deprecated)]
 pub fn SearchSysCacheList2(
     cache_id: SysCacheIdentifier,
     key1: Datum,
@@ -432,7 +423,6 @@ pub fn SearchSysCacheList2(
     SearchSysCacheList(cache_id, 2, key1, key2, Datum(0))
 }
 
-#[allow(deprecated)]
 pub fn SearchSysCacheList3(
     cache_id: SysCacheIdentifier,
     key1: Datum,

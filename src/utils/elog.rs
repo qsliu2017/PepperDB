@@ -294,7 +294,6 @@ pub fn errfinish(mut edata: ErrorData, filename: &str, lineno: i32, funcname: &s
 
 // errsave / ereturn soft-error path. `context` is a *Node (ErrorSaveContext) or
 // NULL; modeled as Option. With None it behaves like ereport(ERROR).
-// TODO(struct-forward): repoint context to crate::nodes::* ErrorSaveContext.
 pub fn errsave_start(context: Option<&mut ()>, domain: Option<&str>) -> Option<ErrorData> {
     let _ = context;
     errstart(ERROR, domain)

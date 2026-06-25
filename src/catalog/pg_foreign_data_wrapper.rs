@@ -2,6 +2,7 @@
 
 use crate::c::{text, NameData};
 use crate::postgres_ext::Oid;
+use crate::utils::acl::AclItem;
 
 pub const ForeignDataWrapperRelationId: Oid = Oid(2328);
 
@@ -14,17 +15,8 @@ pub struct FormData_pg_foreign_data_wrapper {
     pub fdwhandler: Oid,   // BKI_LOOKUP_OPT(pg_proc)
     pub fdwvalidator: Oid, // BKI_LOOKUP_OPT(pg_proc)
     // CATALOG_VARLEN (not in fixed part):
-    pub fdwacl: [Aclitem; 1], // aclitem[1]; TODO(struct-forward)
+    pub fdwacl: [AclItem; 1], // aclitem[1]
     pub fdwoptions: [text; 1],
-}
-
-// aclitem placeholder; real def lives in utils/acl.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::acl::AclItem in Phase 2")]
-#[repr(C)]
-pub struct Aclitem {
-    pub ai_grantee: Oid,
-    pub ai_grantor: Oid,
-    pub ai_privs: u64,
 }
 
 pub type Form_pg_foreign_data_wrapper = *mut FormData_pg_foreign_data_wrapper; // TODO(ptr)

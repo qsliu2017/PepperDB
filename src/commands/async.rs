@@ -2,10 +2,7 @@
 //
 // Asynchronous notification: NOTIFY, LISTEN, UNLISTEN.
 
-// TransactionId comes from access/transam (not in this batch).
-// TODO(struct-forward): repoint to crate::access::transam::TransactionId in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access::transam::TransactionId in Phase 2")]
-pub type TransactionId = u32;
+use crate::c::TransactionId;
 
 // GUCs.
 pub static mut TRACE_NOTIFY: bool = false;
@@ -77,7 +74,6 @@ pub fn process_notify_interrupt(_flush: bool) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn async_notify_freeze_xids(_new_frozen_xid: TransactionId) {
     unimplemented!()
 }

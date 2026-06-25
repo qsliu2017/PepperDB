@@ -2,9 +2,13 @@
 
 use bitflags::bitflags;
 
+use crate::access::parallel::ParallelContext;
+use crate::commands::explain_state::ExplainState;
+use crate::executor::tuptable::TupleTableSlot;
 use crate::lib::stringinfo::StringInfo;
+use crate::nodes::execnodes::{CustomScanState, EState};
 use crate::nodes::nodes::Node;
-use crate::nodes::pathnodes::{PlannerInfo, RelOptInfo};
+use crate::nodes::pathnodes::{CustomPath, PlannerInfo, RelOptInfo};
 use crate::nodes::plannodes::{CustomScan, Plan};
 
 /// maximum length of an extensible node identifier
@@ -162,41 +166,6 @@ pub fn GetCustomScanMethods(
     unimplemented!()
 }
 
-// TODO(struct-forward): repoint to crate::nodes::pathnodes::CustomPath in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::pathnodes::CustomPath in Phase 2")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct CustomPath {
-    pub flags: u32,
-    pub custom_paths: Vec<Box<Node>>,
-    pub custom_private: Vec<Box<Node>>,
-}
-
-// TODO(struct-forward): repoint to crate::nodes::execnodes::CustomScanState in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes::CustomScanState in Phase 2")]
-#[derive(Debug)]
-pub struct CustomScanState;
-
-// TODO(struct-forward): repoint to crate::nodes::execnodes::EState in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes::EState in Phase 2")]
-#[derive(Debug)]
-pub struct EState;
-
-// TODO(struct-forward): repoint to crate::executor::tuptable::TupleTableSlot in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::executor::tuptable::TupleTableSlot in Phase 2")]
-#[derive(Debug)]
-pub struct TupleTableSlot;
-
-// TODO(struct-forward): repoint to crate::access::parallel::ParallelContext in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access::parallel::ParallelContext in Phase 2")]
-#[derive(Debug)]
-pub struct ParallelContext;
-
-// TODO(struct-forward): repoint to the shm_toc shared-memory replacement in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to the shm_toc replacement in Phase 2")]
+/// Opaque; shm_toc shared-memory table-of-contents not ported (single-process).
 #[derive(Debug)]
 pub struct ShmToc;
-
-// TODO(struct-forward): repoint to crate::commands::explain_state::ExplainState in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::commands::explain_state::ExplainState in Phase 2")]
-#[derive(Debug)]
-pub struct ExplainState;

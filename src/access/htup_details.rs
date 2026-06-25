@@ -224,8 +224,7 @@ impl HeapTupleHeaderData {
     }
 
     /// Xmax that updated the tuple, resolving a MultiXactId when necessary
-    /// (may incur multixact I/O). TODO(struct-forward): HeapTupleGetUpdateXid
-    /// (in htup) takes the opaque forward-decl header; repoint in Phase 2.
+    /// (may incur multixact I/O).
     pub fn get_update_xid(&self) -> TransactionId {
         if (self.t_infomask & HEAP_XMAX_INVALID) == 0
             && (self.t_infomask & HEAP_XMAX_IS_MULTI) != 0
@@ -432,10 +431,8 @@ impl MinimalTupleData {
 }
 
 // === HeapTuple (in-memory wrapper) accessor functions ===
-// These delegate to HeapTupleHeaderData methods via tuple.t_data. The field is
-// typed *mut crate::access::htup::HeapTupleHeaderData (still the opaque
-// forward-decl); bodies are stubbed until Phase 2 repoints t_data to the
-// HeapTupleHeaderData defined here. TODO(struct-forward).
+// These delegate to HeapTupleHeaderData methods via tuple.t_data, typed
+// *mut crate::access::htup::HeapTupleHeaderData; bodies are stubbed.
 
 /// Address of the user data following the header. TODO(ptr).
 pub fn GETSTRUCT(_tuple: &HeapTupleData) -> *mut u8 {

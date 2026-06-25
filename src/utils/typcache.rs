@@ -3,6 +3,7 @@
 
 use crate::access::tupdesc::TupleDesc;
 use crate::fmgr::FmgrInfo;
+use crate::nodes::execnodes::DomainConstraintState;
 use crate::postgres_ext::Oid;
 use crate::utils::palloc::{MemoryContext, MemoryContextCallback};
 use bitflags::bitflags;
@@ -14,13 +15,6 @@ pub struct DomainConstraintCache {
 
 // TypeCacheEnumData is opaque (known only within typcache.c). Local placeholder.
 pub struct TypeCacheEnumData {
-    _private: [u8; 0],
-}
-
-// DomainConstraintState lives in nodes/execnodes.h (later level). Rule 7: opaque
-// local placeholder, repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes::DomainConstraintState in Phase 2")]
-pub struct DomainConstraintState {
     _private: [u8; 0],
 }
 

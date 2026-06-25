@@ -26,10 +26,8 @@ pub static mut wal_receiver_status_interval: i32 = 0;
 pub static mut wal_receiver_timeout: i32 = 0;
 pub static mut hot_standby_feedback: bool = false;
 
-// EnableHotStandby is owned by access/xlog.h, not yet translated there.
-// Rule 7: define locally, repoint in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access::xlog::EnableHotStandby in Phase 2")]
-pub static mut EnableHotStandby: bool = false; // TODO(struct-forward)
+// EnableHotStandby is owned by access/xlog.h (GUC); not yet defined there, kept local.
+pub static mut EnableHotStandby: bool = false;
 
 /// Maximum size of a connection string.
 pub const MAXCONNINFO: usize = 1024;

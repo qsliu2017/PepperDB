@@ -47,7 +47,6 @@ pub struct TBMIterateResult {
 
 // dsa_area / dsa_pointer (utils/dsa.h) are tombstoned under single-process; the
 // shared-memory params collapse to owned state. usize placeholders for now.
-// TODO(struct-forward): repoint to single-process owned state in Phase 2.
 
 pub fn tbm_create(maxbytes: usize) -> Box<TIDBitmap> {
     unimplemented!()

@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use crate::access::htup::HeapTupleData;
 use crate::access::xlogdefs::{RepOriginId, XLogRecPtr};
 use crate::c::{CommandId, TransactionId};
 use crate::datatype::timestamp::TimestampTz;
@@ -192,11 +193,6 @@ pub struct ReorderBufferTupleCidEnt {
     pub cmax: CommandId,
     pub combocid: CommandId,
 }
-
-/// Forward decl: HeapTuple's owned tuple data. Real definition in access/htup.h.
-// TODO(struct-forward): repoint to crate::access::htup::HeapTupleData in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access::htup::HeapTupleData in Phase 2")]
-pub struct HeapTupleData;
 
 /* --- Callback signatures (the ReorderBuffer holds these as a vtable). --- */
 

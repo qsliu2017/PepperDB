@@ -5,7 +5,10 @@
 //! GUC-ish globals, and the insert/flush/checkpoint signatures as stubs.
 // TODO(wal): implement insert/flush over async I/O later
 
+use crate::access::xlogbackup::BackupState;
+use crate::access::xlog_internal::XLogRecData;
 use crate::access::xlogdefs::{TimeLineID, XLogRecPtr, XLogSegNo};
+use crate::access::xlogreader::XLogReaderState;
 use crate::datatype::timestamp::TimestampTz;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
@@ -133,27 +136,6 @@ pub enum SessionBackupState {
     Running,
 }
 
-/// XLogRecData is the chained record-fragment list passed to insert.
-// TODO(struct-forward): repoint to crate::access::xloginsert::XLogRecData in Phase 2.
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::access::xloginsert::XLogRecData in Phase 2"
-)]
-pub struct XLogRecData;
-
-/// XLogReaderState drives WAL replay (xlogreader.h).
-// TODO(struct-forward): repoint to crate::access::xlogreader::XLogReaderState in Phase 2.
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::access::xlogreader::XLogReaderState in Phase 2"
-)]
-pub struct XLogReaderState;
-
-/// BackupState / tablespace info for base backups (xlogbackup.h).
-// TODO(struct-forward): repoint to crate::access::xlogbackup::BackupState in Phase 2.
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::access::xlogbackup::BackupState in Phase 2"
-)]
-pub struct BackupState;
-
 /// File path names (all relative to $PGDATA).
 pub const RECOVERY_SIGNAL_FILE: &str = "recovery.signal";
 pub const STANDBY_SIGNAL_FILE: &str = "standby.signal";
@@ -165,9 +147,8 @@ pub const PROMOTE_SIGNAL_FILE: &str = "promote";
 
 // --- WAL insert/flush API (stub bodies) ---
 
-#[allow(deprecated)]
 pub fn xlog_insert_record(
-    _rdata: &mut XLogRecData,
+    _rdata: &mut XLogRecData<'_>,
     _fpw_lsn: XLogRecPtr,
     _flags: u8,
     _num_fpi: i32,
@@ -208,7 +189,6 @@ pub fn xlog_set_replication_slot_minimum_lsn(_lsn: XLogRecPtr) {
 pub fn xlog_get_replication_slot_minimum_lsn() -> XLogRecPtr {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn xlog_redo(_record: &mut XLogReaderState) {
     unimplemented!()
 }
@@ -352,7 +332,6 @@ pub fn xlog_shutdown_wal_rcv() {
 }
 
 // Base-backup start/stop/status.
-#[allow(deprecated)]
 pub fn do_pg_backup_start(
     _backupidstr: &str,
     _fast: bool,
@@ -360,7 +339,6 @@ pub fn do_pg_backup_start(
 ) -> Vec<()> {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn do_pg_backup_stop(_state: &mut BackupState, _waitforarchive: bool) {
     unimplemented!()
 }

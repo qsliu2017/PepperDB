@@ -16,18 +16,14 @@ use crate::executor::tuptable::TupleTableSlot;
 
 // See execPartition.c for the definitions; these are opaque private types.
 
-/// Opaque: `PartitionDispatchData` is defined in execPartition.c.
-#[deprecated(note = "TODO(struct-forward): private executor type defined in execPartition.c")]
-// TODO(struct-forward)
+/// Opaque; private executor state defined in execPartition.c, not ported.
 #[derive(Debug, Default)]
 pub struct PartitionDispatchData;
 
 /// `typedef struct PartitionDispatchData *PartitionDispatch;`
 pub type PartitionDispatch = Option<Box<PartitionDispatchData>>;
 
-/// Opaque: `PartitionTupleRouting` is defined in execPartition.c.
-#[deprecated(note = "TODO(struct-forward): private executor type defined in execPartition.c")]
-// TODO(struct-forward)
+/// Opaque; private executor state defined in execPartition.c, not ported.
 #[derive(Debug, Default)]
 pub struct PartitionTupleRouting;
 

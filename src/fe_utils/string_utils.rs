@@ -2,9 +2,7 @@
 //
 // String-processing utilities for frontend code.
 
-// PGconn (libpq-fe.h) and PQExpBuffer (pqexpbuffer.h) are libpq client types.
-// TODO(struct-forward): repoint to crate::interfaces::libpq::{PGconn,PQExpBuffer} in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::interfaces::libpq::PGconn in Phase 2")]
+/// Opaque frontend libpq handle; client lib not ported.
 pub struct PGconn {
     _private: (),
 }
@@ -44,7 +42,6 @@ pub fn append_string_literal(_buf: &mut PQExpBuffer, _str: &str, _encoding: i32,
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn append_string_literal_conn(_buf: &mut PQExpBuffer, _str: &str, _conn: &PGconn) {
     unimplemented!()
 }
@@ -95,7 +92,7 @@ pub fn append_reloptions_array(
 
 /// C: `bool processSQLNamePattern(..., int *dotcnt)`. Returns the success flag
 /// paired with the dot count out-param.
-#[allow(deprecated, clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub fn process_sql_name_pattern(
     _conn: &PGconn,
     _buf: &mut PQExpBuffer,

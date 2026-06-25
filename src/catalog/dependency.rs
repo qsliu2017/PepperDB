@@ -2,19 +2,15 @@
 
 use bitflags::bitflags;
 
+use crate::catalog::objectaddress::ObjectAddress;
+use crate::nodes::nodes::Node;
+use crate::nodes::parsenodes::DropBehavior;
 use crate::postgres_ext::Oid;
+use crate::utils::rel::Relation;
 
-// Forward references to types defined elsewhere; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
-pub struct ObjectAddress; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes DropBehavior in Phase 2")]
-pub struct DropBehavior; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::primnodes::Node in Phase 2")]
-pub struct Node; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to Vec<T> (pg_list List) in Phase 2")]
-pub struct List; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]
-pub struct Relation; // TODO(struct-forward)
+// pg_list is tombstoned; List maps to Vec. Element type unknown at this stub
+// level, so default to Vec<()>.
+pub type List<T = ()> = Vec<T>;
 pub type AttrNumber = i16; // c.h AttrNumber
 
 // Stored in a "char" field in pg_depend, so values are ASCII codes.
@@ -57,27 +53,22 @@ bitflags! {
 }
 
 // in dependency.c
-#[allow(deprecated)]
 pub fn AcquireDeletionLock(_object: &ObjectAddress, _flags: i32) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ReleaseDeletionLock(_object: &ObjectAddress) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn performDeletion(_object: &ObjectAddress, _behavior: DropBehavior, _flags: i32) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn performMultipleDeletions(_objects: &ObjectAddresses, _behavior: DropBehavior, _flags: i32) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn recordDependencyOnExpr(
     _depender: &ObjectAddress,
     _expr: &Node,
@@ -87,7 +78,6 @@ pub fn recordDependencyOnExpr(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn recordDependencyOnSingleRelExpr(
     _depender: &ObjectAddress,
     _expr: &Node,
@@ -103,17 +93,14 @@ pub fn new_object_addresses() -> ObjectAddresses {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn add_exact_object_address(_object: &ObjectAddress, _addrs: &mut ObjectAddresses) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn object_address_present(_object: &ObjectAddress, _addrs: &ObjectAddresses) -> bool {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn record_object_address_dependencies(
     _depender: &ObjectAddress,
     _referenced: &mut ObjectAddresses,
@@ -131,7 +118,6 @@ pub fn free_object_addresses(_addrs: ObjectAddresses) {
 }
 
 // in pg_depend.c
-#[allow(deprecated)]
 pub fn recordDependencyOn(
     _depender: &ObjectAddress,
     _referenced: &ObjectAddress,
@@ -140,7 +126,6 @@ pub fn recordDependencyOn(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn recordMultipleDependencies(
     _depender: &ObjectAddress,
     _referenced: &[ObjectAddress],
@@ -149,12 +134,10 @@ pub fn recordMultipleDependencies(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn recordDependencyOnCurrentExtension(_object: &ObjectAddress, _is_replace: bool) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn checkMembershipInCurrentExtension(_object: &ObjectAddress) {
     unimplemented!()
 }
@@ -205,7 +188,6 @@ pub fn getExtensionOfObject(_class_id: Oid, _object_id: Oid) -> Option<Oid> {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn getAutoExtensionsOfObject(_class_id: Oid, _object_id: Oid) -> List {
     unimplemented!()
 }
@@ -219,12 +201,10 @@ pub fn sequenceIsOwned(_seq_id: Oid, _deptype: i8) -> Option<(Oid, i32)> {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn getOwnedSequences(_relid: Oid) -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn getIdentitySequence(_rel: &Relation, _attnum: AttrNumber, _missing_ok: bool) -> Option<Oid> {
     unimplemented!()
 }
@@ -233,13 +213,11 @@ pub fn get_index_constraint(_index_id: Oid) -> Option<Oid> {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn get_index_ref_constraints(_index_id: Oid) -> List {
     unimplemented!()
 }
 
 // in pg_shdepend.c
-#[allow(deprecated)]
 pub fn recordSharedDependencyOn(
     _depender: &ObjectAddress,
     _referenced: &ObjectAddress,
@@ -306,12 +284,10 @@ pub fn dropDatabaseDependencies(_database_id: Oid) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn shdepDropOwned(_roleids: &List, _behavior: DropBehavior) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn shdepReassignOwned(_roleids: &List, _newrole: Oid) {
     unimplemented!()
 }

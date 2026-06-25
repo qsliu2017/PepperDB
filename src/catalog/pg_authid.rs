@@ -1,14 +1,12 @@
 //! Translated from PostgreSQL src/include/catalog/pg_authid.h
 
 use crate::c::{text, NameData};
+use crate::datatype::timestamp::TimestampTz;
 use crate::postgres_ext::Oid;
 
 // BKI_SHARED_RELATION BKI_ROWTYPE_OID(2842,AuthIdRelation_Rowtype_Id) BKI_SCHEMA_MACRO
 pub const AuthIdRelationId: Oid = Oid(1260);
 pub const AuthIdRelation_Rowtype_Id: Oid = Oid(2842);
-
-// timestamptz catalog field = TimestampTz (i64 usec since 2000-01-01); real def in datatype/timestamp.
-pub type TimestampTz = i64; // TODO(struct-forward): repoint to crate::datatype::timestamp::TimestampTz
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

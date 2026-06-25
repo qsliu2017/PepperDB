@@ -14,11 +14,8 @@ use crate::nodes::parsenodes::{
 use crate::nodes::primnodes::{OnCommitAction, RangeVar};
 use crate::postgres_ext::Oid;
 use crate::storage::lock::LOCKMODE;
+use crate::tcop::utility::AlterTableUtilityContext;
 use crate::utils::relcache::Relation;
-
-// TODO(struct-forward): real definition is in tcop/utility.h (not yet translated).
-#[deprecated(note = "TODO(struct-forward): repoint to crate::tcop::utility::AlterTableUtilityContext in Phase 2")]
-pub struct AlterTableUtilityContext;
 
 // out-param typaddress folded into the returned tuple.
 pub fn DefineRelation(
@@ -42,7 +39,6 @@ pub fn AlterTableLookupRelation(_stmt: &AlterTableStmt, _lockmode: LOCKMODE) -> 
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn AlterTable(
     _stmt: &AlterTableStmt,
     _lockmode: LOCKMODE,

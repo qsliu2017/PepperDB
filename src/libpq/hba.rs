@@ -2,6 +2,7 @@
 //! Interface to hba.c (pg_hba.conf / pg_ident.conf parsing). In-memory config
 //! types: idiomatic Rust (no on-disk layout).
 
+use crate::libpq::libpq_be::Port;
 use crate::regex::regex::pg_regex_t;
 
 /// Authentication methods supported by PostgreSQL.
@@ -136,13 +137,7 @@ pub struct TokenizedAuthLine {
     pub err_msg: Option<String>,
 }
 
-// TODO(struct-forward): Port is defined in libpq/libpq-be.h (the kluged hbaPort
-// typedef); repoint to crate::libpq::libpq_be in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::libpq::libpq_be::Port in Phase 2")]
-pub struct Port;
-
 /// `hbaPort` alias.
-#[allow(deprecated)]
 pub type HbaPort = Port;
 
 /// Returns bool success in C -> Result later; skeleton keeps bool.
@@ -158,7 +153,6 @@ pub fn hba_authname(_auth_method: UserAuth) -> &'static str {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn hba_getauthmethod(_port: &mut HbaPort) {
     unimplemented!()
 }

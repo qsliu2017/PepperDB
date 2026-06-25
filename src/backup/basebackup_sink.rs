@@ -6,6 +6,7 @@
 //! all callbacks are required, the forwarding sink calls into `bbs_next`.
 
 use crate::access::xlogdefs::{TimeLineID, XLogRecPtr};
+use crate::backup::basebackup::TablespaceInfo;
 use crate::common::compression::PgCompressSpecification;
 
 /// Overall backup state shared by all bbsink objects for a backup.
@@ -18,11 +19,6 @@ pub struct BbsinkState {
     pub startptr: XLogRecPtr,
     pub starttli: TimeLineID,
 }
-
-// TODO(struct-forward): tablespaceinfo is defined in backup/basebackup.h; repoint
-// to crate::backup::basebackup in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::backup::basebackup::TablespaceInfo in Phase 2")]
-pub struct TablespaceInfo;
 
 /// Common data for any type of basebackup sink. The C `bbs_ops` vtable field is
 /// replaced by the `BbsinkOps` trait impl; `bbs_next` is the forwarded-to sink.

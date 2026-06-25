@@ -15,15 +15,10 @@ use crate::access::htup::HeapTuple;
 use crate::access::tupdesc::TupleDesc;
 use crate::c::{bits32, varlena};
 use crate::postgres::Datum;
-
-// LOCKMODE is `typedef int LOCKMODE` (storage/lock.h); not yet translated.
-// TODO(struct-forward): repoint to crate::storage::lock::LOCKMODE in Phase 2.
-pub type LOCKMODE = i32;
+use crate::storage::lock::LOCKMODE;
 
 // `amoptions_function` is a typedef in access/amapi.h that was not emitted there
-// (amapi.rs mapped the callback to a trait method). reloptions.h still references
-// it for index reloptions parsing; model it as a closure type here.
-// TODO(struct-forward): repoint to crate::access::amapi in Phase 2.
+// (amapi.rs mapped the callback to a trait method); kept local as a closure type.
 pub type AmoptionsFunction<'a> = dyn Fn(Datum, bool) -> *mut varlena + 'a;
 
 /// Types supported by reloptions.

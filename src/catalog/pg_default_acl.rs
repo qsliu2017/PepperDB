@@ -1,6 +1,7 @@
 //! Translated from PostgreSQL src/include/catalog/pg_default_acl.h
 
 use crate::postgres_ext::Oid;
+use crate::utils::acl::AclItem;
 
 pub const DefaultAclRelationId: Oid = Oid(826);
 
@@ -12,16 +13,7 @@ pub struct FormData_pg_default_acl {
     pub defaclnamespace: Oid, // BKI_LOOKUP_OPT(pg_namespace)
     pub defaclobjtype: i8,
     // CATALOG_VARLEN (not in fixed part):
-    pub defaclacl: [Aclitem; 1], // aclitem[1]; TODO(struct-forward)
-}
-
-// aclitem placeholder; real def lives in utils/acl.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::acl::AclItem in Phase 2")]
-#[repr(C)]
-pub struct Aclitem {
-    pub ai_grantee: Oid,
-    pub ai_grantor: Oid,
-    pub ai_privs: u64,
+    pub defaclacl: [AclItem; 1], // aclitem[1]
 }
 
 pub type Form_pg_default_acl = *mut FormData_pg_default_acl; // TODO(ptr)

@@ -5,6 +5,7 @@ use crate::catalog::catversion::CATALOG_VERSION_NO;
 use crate::pg_config::PG_MAJORVERSION;
 use crate::postgres_ext::{InvalidOid, Oid};
 use crate::storage::procnumber::{ProcNumber, INVALID_PROC_NUMBER};
+use crate::storage::relfilelocator::{RelFileLocator, RelFileLocatorBackend};
 
 /// RelFileNumber identifies the specific relation file name.
 pub type RelFileNumber = Oid;
@@ -103,26 +104,7 @@ pub fn get_relation_path(
     unimplemented!()
 }
 
-// TODO(struct-forward): repoint to crate::storage::relfilelocator in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::storage::relfilelocator in Phase 2")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RelFileLocator {
-    pub spcOid: Oid,
-    pub dbOid: Oid,
-    pub relNumber: RelFileNumber,
-}
-
-// TODO(struct-forward): repoint to crate::storage::relfilelocator in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::storage::relfilelocator in Phase 2")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RelFileLocatorBackend {
-    #[allow(deprecated)]
-    pub locator: RelFileLocator,
-    pub backend: ProcNumber,
-}
-
 /// Wrapper for GetRelationPath; first argument is a RelFileLocator.
-#[allow(deprecated)]
 pub fn relpathbackend(
     rlocator: RelFileLocator,
     backend: ProcNumber,
@@ -132,13 +114,11 @@ pub fn relpathbackend(
 }
 
 /// Wrapper for GetRelationPath for a permanent (shared) relation.
-#[allow(deprecated)]
 pub fn relpathperm(rlocator: RelFileLocator, forknum: ForkNumber) -> RelPathStr {
     relpathbackend(rlocator, INVALID_PROC_NUMBER, forknum)
 }
 
 /// Wrapper for GetRelationPath; first argument is a RelFileLocatorBackend.
-#[allow(deprecated)]
 pub fn relpath(rlocator: RelFileLocatorBackend, forknum: ForkNumber) -> RelPathStr {
     relpathbackend(rlocator.locator, rlocator.backend, forknum)
 }

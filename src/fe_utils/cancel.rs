@@ -1,9 +1,6 @@
 //! Translated from PostgreSQL src/include/fe_utils/cancel.h
 
-// PGconn is the libpq client connection handle (interfaces/libpq/libpq-fe.h),
-// not part of this batch.
-// TODO(struct-forward): repoint to crate::interfaces::libpq::PGconn in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::interfaces::libpq::PGconn in Phase 2")]
+/// Opaque frontend libpq handle; client lib not ported.
 pub struct PGconn {
     _private: (),
 }
@@ -12,7 +9,6 @@ pub struct PGconn {
 pub static CANCEL_REQUESTED: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
 
-#[allow(deprecated)]
 pub fn set_cancel_conn(_conn: &PGconn) {
     unimplemented!()
 }

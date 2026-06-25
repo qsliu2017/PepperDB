@@ -53,7 +53,6 @@ pub trait DestReceiver {
 
 // `None_Receiver` is the permanent receiver for DestNone. The global instance is
 // installed at startup; modeled as task/session state in the single-process port.
-// TODO(struct-forward): install the DestNone singleton in Phase 2.
 
 /// CreateDestReceiver: return a receiver appropriate to the destination.
 // TODO(ptr): the concrete receiver type is chosen at runtime; revisit ownership.

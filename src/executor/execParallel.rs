@@ -2,20 +2,16 @@
 
 use crate::access::parallel::{dsm_segment, shm_mq_handle, shm_toc, ParallelContext};
 use crate::executor::instrument::{BufferUsage, WalUsage};
+use crate::executor::tqueue::TupleQueueReader;
 use crate::jit::jit::SharedJitInstrumentation;
 use crate::nodes::bitmapset::Bitmapset;
 use crate::nodes::execnodes::{EState, PlanState};
 
-// SharedExecutorInstrumentation (execParallel.c) and TupleQueueReader (tqueue.c)
-// are defined in .c files; forward-declared here.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::executor::execParallel in Phase 2")]
-pub struct SharedExecutorInstrumentation; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::executor::tqueue in Phase 2")]
-pub struct TupleQueueReader; // TODO(struct-forward)
+/// Opaque; SharedExecutorInstrumentation is private to execParallel.c.
+pub struct SharedExecutorInstrumentation;
 
 /// State for running a plan subtree in parallel. In-memory; DSM/DSA fields
 /// collapse to owned heap state under the single-process model.
-#[allow(deprecated)]
 pub struct ParallelExecutorInfo {
     pub planstate: Option<Box<PlanState>>,
     pub pcxt: Option<Box<ParallelContext>>,
@@ -31,7 +27,6 @@ pub struct ParallelExecutorInfo {
     pub reader: Vec<Box<TupleQueueReader>>,
 }
 
-#[allow(deprecated)]
 pub fn ExecInitParallelPlan(
     _planstate: &mut PlanState,
     _estate: &mut EState,

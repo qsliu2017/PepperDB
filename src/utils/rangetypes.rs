@@ -87,8 +87,7 @@ pub fn RangeTypePGetDatum(_x: &RangeType) -> Datum {
 }
 
 // Operator strategy numbers for GiST/SP-GiST range opclasses. These alias
-// RT*StrategyNumber from access/stratnum.h (a later level). TODO(struct-forward):
-// repoint to crate::access::stratnum once translated. Values per stratnum.h.
+// RT*StrategyNumber from access/stratnum.h. Values per stratnum.h.
 pub const RANGESTRAT_BEFORE: u16 = 1; // RTLeftStrategyNumber
 pub const RANGESTRAT_OVERLEFT: u16 = 2; // RTOverLeftStrategyNumber
 pub const RANGESTRAT_OVERLAPS: u16 = 3; // RTOverlapStrategyNumber

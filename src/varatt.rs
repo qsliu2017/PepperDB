@@ -8,6 +8,7 @@
 //! keep `#[repr(C)]` with layout asserts.
 
 use crate::postgres_ext::Oid;
+use crate::utils::expandeddatum::ExpandedObjectHeader;
 
 /// Traditional out-of-line TOAST pointer. No padding (compared via memcmp).
 #[repr(C, packed)]
@@ -31,18 +32,9 @@ pub struct varatt_indirect {
     pub pointer: *mut varlena, // pointer to in-memory varlena
 }
 
-/// Forward reference: real definition in utils/expandeddatum.h.
-// TODO(struct-forward): repoint to crate::utils::expandeddatum::ExpandedObjectHeader in Phase 2
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::expandeddatum in Phase 2")]
-#[repr(C)]
-pub struct ExpandedObjectHeader {
-    _private: [u8; 0],
-}
-
 /// Expanded ("in-memory, type-specific format") TOAST pointer.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-#[allow(deprecated)]
 pub struct varatt_expanded {
     pub eohptr: *mut ExpandedObjectHeader,
 }

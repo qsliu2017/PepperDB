@@ -2,13 +2,10 @@
 
 use crate::utils::relptr::RelPtr;
 
-// Opaque types defined in freepage.c; only used here as relptr targets.
-// TODO(struct-forward): repoint to crate::utils::freepage internals in Phase 2.
-#[deprecated(note = "TODO(struct-forward): defined in freepage.c, model in Phase 2")]
+// Opaque; private types defined in freepage.c, only used here as relptr targets.
 pub struct FreePageSpanLeader {
     _private: [u8; 0],
 }
-#[deprecated(note = "TODO(struct-forward): defined in freepage.c, model in Phase 2")]
 pub struct FreePageBtree {
     _private: [u8; 0],
 }
@@ -21,7 +18,6 @@ pub const FPM_NUM_FREELISTS: usize = 129;
 
 /// Everything needed to manage free pages (see freepage.c). Lives at the start of
 /// the managed region; uses relative pointers for self-relocatability.
-#[allow(deprecated)]
 pub struct FreePageManager {
     pub self_: RelPtr<FreePageManager>,
     pub btree_root: RelPtr<FreePageBtree>,

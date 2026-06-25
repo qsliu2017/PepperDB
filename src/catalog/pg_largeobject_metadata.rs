@@ -1,6 +1,7 @@
 //! Translated from PostgreSQL src/include/catalog/pg_largeobject_metadata.h
 
 use crate::postgres_ext::Oid;
+use crate::utils::acl::AclItem;
 
 pub const LargeObjectMetadataRelationId: Oid = Oid(2995);
 
@@ -10,16 +11,7 @@ pub struct FormData_pg_largeobject_metadata {
     pub oid: Oid,
     pub lomowner: Oid, // BKI_LOOKUP(pg_authid)
     // CATALOG_VARLEN (not in fixed part):
-    pub lomacl: [Aclitem; 1], // aclitem[1]; TODO(struct-forward)
-}
-
-// aclitem placeholder; real def lives in utils/acl.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::acl::AclItem in Phase 2")]
-#[repr(C)]
-pub struct Aclitem {
-    pub ai_grantee: Oid,
-    pub ai_grantor: Oid,
-    pub ai_privs: u64,
+    pub lomacl: [AclItem; 1], // aclitem[1]
 }
 
 pub type Form_pg_largeobject_metadata = *mut FormData_pg_largeobject_metadata; // TODO(ptr)

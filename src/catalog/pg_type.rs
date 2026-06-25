@@ -5,6 +5,7 @@ use crate::c::{regproc, text, NameData};
 use crate::catalog::objectaddress::ObjectAddress;
 use crate::nodes::nodes::Node;
 use crate::postgres_ext::Oid;
+use crate::utils::acl::AclItem;
 use crate::utils::rel::Relation;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(71,TypeRelation_Rowtype_Id) BKI_SCHEMA_MACRO
@@ -13,7 +14,6 @@ pub const TypeRelation_Rowtype_Id: Oid = Oid(71);
 
 // pg_node_tree catalog field is varlena (text); aclitem is the fixed acl struct.
 pub type PgNodeTree = text;
-pub type Aclitem = crate::utils::acl::AclItem;
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -50,7 +50,7 @@ pub struct FormData_pg_type {
     // CATALOG_VARLEN (not in fixed part):
     pub typdefaultbin: PgNodeTree, // default expr (domains)
     pub typdefault: text,          // human-readable default
-    pub typacl: [Aclitem; 1],      // aclitem[]
+    pub typacl: [AclItem; 1],      // aclitem[]
 }
 
 pub type Form_pg_type = *mut FormData_pg_type; // TODO(ptr)

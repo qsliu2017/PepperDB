@@ -3,13 +3,18 @@
 use crate::access::attnum::AttrNumber;
 use crate::access::htup::HeapTuple;
 use crate::c::{text, NameData};
+use crate::catalog::dependency::ObjectAddresses;
 use crate::nodes::bitmapset::Bitmapset;
+use crate::nodes::nodes::Node;
 use crate::postgres_ext::Oid;
 
 pub const ConstraintRelationId: Oid = Oid(2606);
 
 // pg_node_tree catalog field = varlena (serialized node tree); modeled as text.
-pub type PgNodeTree = text; // TODO(struct-forward)
+pub type PgNodeTree = text;
+
+// C pg_list; element type is heterogeneous across these stubs, aliased to Vec<Node>.
+pub type List = Vec<Node>;
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -74,14 +79,6 @@ pub enum ConstraintCategory {
     CONSTRAINT_ASSERTION, // for future expansion
 }
 
-// Forward refs for the function stubs; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::primnodes::Node in Phase 2")]
-pub struct Node; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::pg_list::List in Phase 2")]
-pub struct List; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddresses in Phase 2")]
-pub struct ObjectAddresses; // TODO(struct-forward)
-
 /// Outputs of DeconstructFkConstraintRow (C used 8 out-params).
 pub struct FkConstraintRow {
     pub numfks: i32,
@@ -101,7 +98,6 @@ pub struct FkPeriodOpers {
     pub intersectoperoid: Oid,
 }
 
-#[allow(deprecated)]
 pub fn CreateConstraintEntry(
     _constraint_name: &str,
     _constraint_namespace: Oid,
@@ -182,7 +178,6 @@ pub fn AdjustNotNullInheritance(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn RelationGetNotNullConstraints(_relid: Oid, _cooked: bool, _include_noinh: bool) -> List {
     unimplemented!()
 }
@@ -195,7 +190,6 @@ pub fn RenameConstraintById(_con_id: Oid, _newname: &str) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn AlterConstraintNamespaces(
     _owner_id: Oid,
     _old_nsp_id: Oid,
@@ -242,7 +236,6 @@ pub fn FindFKPeriodOpers(_opclass: Oid) -> FkPeriodOpers {
 }
 
 /// C threaded constraint deps back through `List **constraintDeps`; returned here.
-#[allow(deprecated)]
 pub fn check_functional_grouping(
     _relid: Oid,
     _varno: usize,

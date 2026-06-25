@@ -1,37 +1,8 @@
 //! Translated from PostgreSQL src/include/nodes/subscripting.h
 
+use crate::executor::execExpr::SubscriptingRefState;
 use crate::nodes::primnodes::SubscriptingRef;
-
-// Forward references (parser/executor state) kept abstract here.
-// TODO(struct-forward): repoint to the real ParseState/SubscriptingRefState/
-// SubscriptExecSteps once those modules are translated.
-
-/// Opaque parse state; real type lives in the parser.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::parser parse state in Phase 2")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParseState;
-
-/// Per-SubscriptingRef execution workspace (executor/execExpr.h).
-/// `workspace` is a type-specific blob; modeled here as an opaque owned buffer.
-// TODO(struct-forward): repoint to crate::executor::execExpr::SubscriptingRefState in Phase 2
-#[deprecated(note = "TODO(struct-forward): repoint to crate::executor::execExpr in Phase 2")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct SubscriptingRefState {
-    pub isassignment: bool,
-    pub workspace: Option<Vec<u8>>,
-    pub numupper: i32,
-    pub upperprovided: Vec<bool>,
-    pub upperindex: Vec<crate::postgres::Datum>,
-    pub upperindexnull: Vec<bool>,
-    pub numlower: i32,
-    pub lowerprovided: Vec<bool>,
-    pub lowerindex: Vec<crate::postgres::Datum>,
-    pub lowerindexnull: Vec<bool>,
-    pub replacevalue: crate::postgres::Datum,
-    pub replacenull: bool,
-    pub prevvalue: crate::postgres::Datum,
-    pub prevnull: bool,
-}
+use crate::parser::parse_node::ParseState;
 
 /// The execution-step callbacks a subscripting impl installs (the vtable filled
 /// by `exec_setup`). Per routine-struct.md, the optional assignment-only

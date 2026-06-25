@@ -1,23 +1,8 @@
 //! Translated from PostgreSQL src/include/commands/explain_format.h
 //! Prototypes for explain_format.c (output formatting for EXPLAIN).
 
-// TODO(struct-forward): ExplainFormat is defined in commands/explain_state.h;
-// repoint to crate::commands::explain_state in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::commands::explain_state::ExplainFormat in Phase 2")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(i32)]
-pub enum ExplainFormat {
-    Text,
-    Xml,
-    Json,
-    Yaml,
-}
-
-// TODO(struct-forward): ExplainState is defined in commands/explain_state.h;
-// repoint to crate::commands::explain_state in Phase 2. The state's StringInfo
-// output buffer maps to a `&mut String`.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::commands::explain_state::ExplainState in Phase 2")]
-pub struct ExplainState;
+use crate::commands::explain_state::ExplainState;
+pub use crate::commands::explain_state::ExplainFormat;
 
 pub fn explain_property_list(_qlabel: &str, _data: &[String], _es: &mut ExplainState) {
     unimplemented!()

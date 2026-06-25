@@ -8,9 +8,8 @@
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 
-// TableFuncScanState is an executor node defined in nodes/execnodes.h (not in
-// this batch); the builder threads its private state through `self`.
-// TODO(struct-forward): repoint state to crate::nodes::execnodes::TableFuncScanState in Phase 2.
+// TableFuncScanState (nodes/execnodes.h) is the C private context; the builder
+// threads its private state through `self` here, so no local type is needed.
 
 /// Function pointers used to generate content of table-producer functions such
 /// as XMLTABLE. Implemented as a Rust trait; the table builder owns its state.

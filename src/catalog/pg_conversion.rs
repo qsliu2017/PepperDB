@@ -1,6 +1,7 @@
 //! Translated from PostgreSQL src/include/catalog/pg_conversion.h
 
 use crate::c::{regproc, NameData};
+use crate::catalog::objectaddress::ObjectAddress;
 use crate::postgres_ext::Oid;
 
 pub const ConversionRelationId: Oid = Oid(2607);
@@ -27,10 +28,6 @@ pub type Form_pg_conversion = *mut FormData_pg_conversion; // TODO(ptr)
 // MAKE_SYSCACHE(CONNAMENSP, pg_conversion_name_nsp_index, 8)
 // MAKE_SYSCACHE(CONVOID, pg_conversion_oid_index, 8)
 
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
-pub struct ObjectAddress; // TODO(struct-forward)
-
-#[allow(deprecated)]
 pub fn ConversionCreate(
     _conname: &str,
     _connamespace: Oid,

@@ -8,17 +8,9 @@
 use crate::access::xlogdefs::{RepOriginId, XLogRecPtr};
 use crate::c::TransactionId;
 use crate::datatype::timestamp::TimestampTz;
+use crate::replication::logical::LogicalDecodingContext;
 use crate::replication::reorderbuffer::{ReorderBufferChange, ReorderBufferTXN};
 use crate::utils::relcache::Relation;
-
-// LogicalDecodingContext is private to logical.c; named opaquely here.
-// TODO(struct-forward): repoint to crate::replication::logical::LogicalDecodingContext in Phase 2.
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::replication::logical::LogicalDecodingContext in Phase 2"
-)]
-pub struct LogicalDecodingContext {
-    _opaque: [u8; 0],
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputPluginOutputType {
@@ -36,7 +28,6 @@ pub struct OutputPluginOptions {
 /// Output plugin callbacks. Required callbacks are methods; the optional ones
 /// (`filter_prepare_cb`, the two-phase and streaming groups) are provided
 /// default methods, matching C's `if (cb != NULL)` runtime checks.
-#[allow(deprecated)]
 pub trait OutputPluginCallbacks {
     // --- required ---
     fn startup_cb(&self, ctx: &mut LogicalDecodingContext, options: &mut OutputPluginOptions, is_init: bool);
@@ -125,22 +116,17 @@ pub trait OutputPluginCallbacks {
 /// Symbol type for `_PG_output_plugin_init`: a shared-library entry that fills in
 /// the callback table. In Rust this is the plugin's registration of its
 /// `OutputPluginCallbacks` impl.
-// TODO(struct-forward): model plugin registration in Phase 2.
-#[allow(deprecated)]
 pub fn pg_output_plugin_init() -> Box<dyn OutputPluginCallbacks> {
     unimplemented!()
 }
 
 // Functions in replication/logical/logical.c
-#[allow(deprecated)]
 pub fn output_plugin_prepare_write(_ctx: &mut LogicalDecodingContext, _last_write: bool) {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn output_plugin_write(_ctx: &mut LogicalDecodingContext, _last_write: bool) {
     unimplemented!()
 }
-#[allow(deprecated)]
 pub fn output_plugin_update_progress(_ctx: &mut LogicalDecodingContext, _skipped_xact: bool) {
     unimplemented!()
 }

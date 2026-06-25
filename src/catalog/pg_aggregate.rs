@@ -1,8 +1,14 @@
 //! Translated from PostgreSQL src/include/catalog/pg_aggregate.h
 
 use crate::c::{regproc, text};
+use crate::catalog::objectaddress::ObjectAddress;
+use crate::catalog::pg_index::Oidvector;
+use crate::nodes::nodes::Node;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
+
+// pg_list tombstoned; these `List *` args are node/name lists.
+type List = Vec<Box<Node>>;
 
 pub const AggregateRelationId: Oid = Oid(2600);
 
@@ -55,15 +61,6 @@ pub const AGGMODIFY_READ_ONLY: i8 = b'r' as i8;
 pub const AGGMODIFY_SHAREABLE: i8 = b's' as i8;
 pub const AGGMODIFY_READ_WRITE: i8 = b'w' as i8;
 
-// Forward refs; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
-pub struct ObjectAddress; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to oidvector type in Phase 2")]
-pub struct Oidvector; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to Vec<T> (pg_list List) in Phase 2")]
-pub struct List; // TODO(struct-forward)
-
-#[allow(deprecated)]
 pub fn AggregateCreate(
     _agg_name: &str,
     _agg_namespace: Oid,

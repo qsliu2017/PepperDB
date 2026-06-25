@@ -29,10 +29,7 @@ pub const BGW_NEVER_RESTART: i32 = -1;
 pub const BGW_MAXLEN: usize = 96;
 pub const BGW_EXTRALEN: usize = 128;
 
-// MAXPGPATH comes from pg_config_manual.h (not in this batch).
-// TODO(struct-forward): repoint to crate::pg_config_manual::MAXPGPATH in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::pg_config_manual::MAXPGPATH in Phase 2")]
-pub const MAXPGPATH: usize = 1024;
+pub use crate::pg_config_manual::MAXPGPATH;
 
 /// C: `void (*bgworker_main_type)(Datum main_arg)`.
 pub type BgworkerMainType = fn(main_arg: Datum);

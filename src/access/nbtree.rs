@@ -32,6 +32,7 @@ use crate::access::xlogdefs::XLogRecPtr;
 use crate::c::{bytea, float8};
 use crate::catalog::pg_index::IndOption;
 use crate::fmgr::{FmgrInfo, MemoryContext};
+use crate::nodes::execnodes::IndexInfo;
 use crate::nodes::tidbitmap::TIDBitmap;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
@@ -1254,14 +1255,6 @@ pub fn btbuild(_heap: Relation, _index: Relation, _index_info: &mut IndexInfo) -
 
 pub fn _bt_parallel_build_main(_seg: &mut dsm_segment, _toc: &mut shm_toc) {
     unimplemented!()
-}
-
-// IndexInfo and IndexRelationGetNumberOfAttributes are forward references the
-// nbtree include graph pulls from execnodes.h / rel.h respectively.
-// TODO(struct-forward): repoint IndexInfo to crate::nodes::execnodes::IndexInfo in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes::IndexInfo in Phase 2")]
-pub struct IndexInfo {
-    _private: [u8; 0],
 }
 
 /// IndexRelationGetNumberOfAttributes(rel) -- rel->rd_index->indnatts. Reaches

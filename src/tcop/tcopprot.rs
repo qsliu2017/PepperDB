@@ -1,7 +1,17 @@
 //! Translated from PostgreSQL src/include/tcop/tcopprot.h
 
+use crate::nodes::nodes::Node;
+use crate::nodes::params::{ParamListInfo, ParserSetupHook};
+use crate::nodes::parsenodes::{Query, RawStmt};
+use crate::nodes::plannodes::PlannedStmt;
 use crate::postgres_ext::Oid;
+use crate::storage::procsignal::ProcSignalReason;
+use crate::utils::guc::{GucContext, GucSource};
+use crate::utils::queryenvironment::QueryEnvironment;
 use bitflags::bitflags;
+
+/// C `List *` of parse/plan tree nodes; pg_list is tombstoned -> Vec of nodes.
+pub type List = Vec<Box<Node>>;
 
 // Process-global backend state (-> session/task-local later).
 pub static mut whereToSendOutput: i32 = 0; // CommandDest
@@ -32,39 +42,14 @@ bitflags! {
 
 pub static mut restrict_nonsystem_relation_kind: i32 = 0;
 
-// Forward refs for the function stubs; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::pg_list as Vec<T> in Phase 2")]
-pub struct List; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::parsenodes::Query in Phase 2")]
-pub struct Query; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::parsenodes::RawStmt in Phase 2")]
-pub struct RawStmt; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::plannodes::PlannedStmt in Phase 2")]
-pub struct PlannedStmt; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::params::ParamListInfo in Phase 2")]
-pub struct ParamListInfo; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::queryenvironment::QueryEnvironment in Phase 2")]
-pub struct QueryEnvironment; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::params::ParserSetupHook in Phase 2")]
-pub struct ParserSetupHook; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::storage::procsignal::ProcSignalReason in Phase 2")]
-pub struct ProcSignalReason; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::guc GucContext in Phase 2")]
-pub struct GucContext; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::guc GucSource in Phase 2")]
-pub struct GucSource; // TODO(struct-forward)
-
-#[allow(deprecated)]
 pub fn pg_parse_query(_query_string: &str) -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn pg_rewrite_query(_query: &Query) -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn pg_analyze_and_rewrite_fixedparams(
     _parsetree: &RawStmt,
     _query_string: &str,
@@ -74,7 +59,6 @@ pub fn pg_analyze_and_rewrite_fixedparams(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn pg_analyze_and_rewrite_varparams(
     _parsetree: &RawStmt,
     _query_string: &str,
@@ -84,7 +68,6 @@ pub fn pg_analyze_and_rewrite_varparams(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn pg_analyze_and_rewrite_withcb(
     _parsetree: &RawStmt,
     _query_string: &str,
@@ -94,7 +77,6 @@ pub fn pg_analyze_and_rewrite_withcb(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn pg_plan_query(
     _querytree: &Query,
     _query_string: &str,
@@ -104,7 +86,6 @@ pub fn pg_plan_query(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn pg_plan_queries(
     _querytrees: &List,
     _query_string: &str,
@@ -131,7 +112,6 @@ pub fn FloatExceptionHandler(_signo: i32) -> ! {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn HandleRecoveryConflictInterrupt(_reason: ProcSignalReason) {
     unimplemented!()
 }
@@ -144,7 +124,6 @@ pub fn ProcessClientWriteInterrupt(_blocked: bool) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn process_postgres_switches(_argv: &[String], _ctx: GucContext) -> Option<String> {
     unimplemented!()
 }
@@ -171,12 +150,10 @@ pub fn check_log_duration(_was_logged: bool) -> (bool, String) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn set_debug_options(_debug_flag: i32, _context: GucContext, _source: GucSource) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn set_plan_disabling_options(_arg: &str, _context: GucContext, _source: GucSource) -> bool {
     unimplemented!()
 }

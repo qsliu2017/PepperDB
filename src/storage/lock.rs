@@ -11,25 +11,14 @@
 use crate::c::{LocalTransactionId, TransactionId};
 use crate::datatype::timestamp::TimestampTz;
 use crate::storage::lockdefs::{xl_standby_lock, LOCKMASK};
+pub use crate::storage::proc::PGPROC;
 use crate::storage::procnumber::{ProcNumber, INVALID_PROC_NUMBER};
+use crate::utils::resowner::ResourceOwnerData;
 
 /// `LOCKMODE` is `typedef int` in C: an integer 1..N (0 = `NoLock`). Kept as a
 /// plain int here because lock.h indexes arrays by it and compares it freely;
 /// the named modes live in `lockdefs::LockMode`.
 pub type LOCKMODE = i32;
-
-/// PGPROC is the per-backend proc slot (proc.h). Forward-declared here.
-// TODO(struct-forward): repoint to crate::storage::proc::PGPROC in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::storage::proc::PGPROC in Phase 2")]
-pub struct PGPROC;
-
-/// ResourceOwner tracks lock ownership for release-by-owner. Forward-declared
-/// here so level-1 resowner can name `crate::storage::lock::LOCALLOCK`.
-// TODO(struct-forward): repoint to crate::utils::resowner::ResourceOwner in Phase 2.
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::utils::resowner::ResourceOwnerData in Phase 2"
-)]
-pub struct ResourceOwnerData;
 
 // GUC variables.
 // TODO(global): GUCs become session/global config under the async model.

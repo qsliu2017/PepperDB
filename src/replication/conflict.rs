@@ -4,6 +4,8 @@
 use crate::access::xlogdefs::RepOriginId;
 use crate::c::TransactionId;
 use crate::datatype::timestamp::TimestampTz;
+use crate::executor::tuptable::TupleTableSlot;
+use crate::nodes::execnodes::{EState, ResultRelInfo};
 use crate::postgres_ext::Oid;
 
 /// Conflict types that could occur while applying remote changes.
@@ -28,17 +30,7 @@ pub enum ConflictType {
 
 pub const CONFLICT_NUM_TYPES: usize = ConflictType::MultipleUniqueConflicts as usize + 1;
 
-// TODO(struct-forward): EState/ResultRelInfo/TupleTableSlot are defined in
-// nodes/execnodes.h and executor/tuptable.h; repoint in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes::EState in Phase 2")]
-pub struct EState;
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes::ResultRelInfo in Phase 2")]
-pub struct ResultRelInfo;
-#[deprecated(note = "TODO(struct-forward): repoint to crate::executor::tuptable::TupleTableSlot in Phase 2")]
-pub struct TupleTableSlot;
-
 /// Information for the existing local row that caused the conflict.
-#[allow(deprecated)]
 pub struct ConflictTupleInfo {
     pub slot: Box<TupleTableSlot>, // tuple slot holding the conflicting local tuple
     pub indexoid: Oid,             // OID of the index where the conflict occurred
@@ -48,14 +40,12 @@ pub struct ConflictTupleInfo {
 }
 
 /// bool + (`*xmin`, `*localorigin`, `*localts`) out-params -> Option of a tuple.
-#[allow(deprecated)]
 pub fn get_tuple_transaction_info(
     _localslot: &TupleTableSlot,
 ) -> Option<(TransactionId, RepOriginId, TimestampTz)> {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn report_apply_conflict(
     _estate: &mut EState,
     _relinfo: &mut ResultRelInfo,
@@ -68,7 +58,6 @@ pub fn report_apply_conflict(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn init_conflict_indexes(_rel_info: &mut ResultRelInfo) {
     unimplemented!()
 }

@@ -31,10 +31,9 @@ pub trait ExpandedObjectMethods {
 /// In-memory only (not on disk), but the two embedded TOAST pointers are
 /// byte-laid-out, so the fields keep their C order and the pointer buffers their
 /// exact size.
-// Canonical definition; resolves the level-1 forward decl
-// crate::varatt::ExpandedObjectHeader (a `_private: [u8;0]` placeholder marked
-// TODO(struct-forward)). Phase 2 repoints crate::varatt::varatt_expanded.eohptr
-// here. (postgres.h also typedefs the pointer; same target.)
+// Canonical definition; the crate::varatt::ExpandedObjectHeader forward decl and
+// crate::varatt::varatt_expanded.eohptr resolve to this. (postgres.h also typedefs
+// the pointer; same target.)
 pub struct ExpandedObjectHeader {
     /// Phony varlena header: always EOH_HEADER_MAGIC.
     pub vl_len_: i32,

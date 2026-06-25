@@ -2,9 +2,7 @@
 //
 // Lexical scanner for SQL commands (psql heritage).
 
-// PQExpBuffer (pqexpbuffer.h) is the libpq client string buffer.
-// TODO(struct-forward): repoint to crate::interfaces::libpq::pqexpbuffer::PQExpBuffer in Phase 2.
-pub type PQExpBuffer = String;
+pub use crate::fe_utils::string_utils::PQExpBuffer;
 
 /// Termination states for psql_scan().
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

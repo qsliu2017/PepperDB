@@ -20,35 +20,13 @@ use crate::access::sdir::ScanDirection;
 use crate::access::skey::ScanKeyData;
 use crate::access::stratnum::StrategyNumber;
 use crate::c::bytea;
+use crate::nodes::execnodes::IndexInfo;
+use crate::nodes::pathnodes::{IndexPath, PlannerInfo};
 use crate::nodes::tidbitmap::TIDBitmap;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::storage::itemptr::ItemPointerData;
 use crate::utils::relcache::Relation;
-
-// These planner/exec structs are intentionally not pulled in by amapi.h (it
-// avoids depending on planner and execnodes headers). Rule 7: opaque local
-// placeholders, repointed in Phase 2.
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::nodes::pathnodes::PlannerInfo in Phase 2"
-)]
-pub struct PlannerInfo {
-    _private: [u8; 0],
-}
-
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::nodes::pathnodes::IndexPath in Phase 2"
-)]
-pub struct IndexPath {
-    _private: [u8; 0],
-}
-
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::nodes::execnodes::IndexInfo in Phase 2"
-)]
-pub struct IndexInfo {
-    _private: [u8; 0],
-}
 
 /// Properties for the amproperty API. Core-known properties; an AM can also
 /// define its own by matching the string property name.

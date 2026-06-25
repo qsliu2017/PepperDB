@@ -11,7 +11,7 @@ use crate::postgres_ext::Oid;
 use crate::access::cmptype::CompareType;
 use crate::fmgr::{FmgrInfo, PGFunction};
 use crate::nodes::execnodes::{
-    EeoFlag, ExprContext, ExprState, SubPlanState, WindowFuncExprState,
+    EeoFlag, ExprContext, ExprState, JsonExprState, SubPlanState, WindowFuncExprState,
 };
 use crate::nodes::miscnodes::ErrorSaveContext;
 use crate::nodes::primnodes::{
@@ -746,17 +746,9 @@ pub struct JsonConstructorArgTypeCache {
 
 // Forward-declared in the header; concrete defs live in the .c files.
 
-/// Opaque: defined in execExprInterp.c (`ScalarArrayOpExprHashTable`).
-#[deprecated(note = "TODO(struct-forward): private type defined in execExprInterp.c")]
-// TODO(struct-forward)
+/// Opaque; private type defined in execExprInterp.c, not ported.
 #[derive(Debug, Default)]
 pub struct ScalarArrayOpExprHashTable;
-
-/// Opaque: defined in execExpr.c / jsonfuncs (`JsonExprState`).
-#[deprecated(note = "TODO(struct-forward): private type defined in the executor .c files")]
-// TODO(struct-forward)
-#[derive(Debug, Default)]
-pub struct JsonExprState;
 
 // ---------------------------------------------------------------------------
 // functions in execExpr.c

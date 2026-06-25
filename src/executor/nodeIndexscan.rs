@@ -1,7 +1,10 @@
 //! Translated from PostgreSQL src/include/executor/nodeIndexscan.h
 
 use crate::access::parallel::{ParallelContext, ParallelWorkerContext};
-use crate::nodes::execnodes::{EState, ExprContext, IndexScanState, PlanState};
+use crate::access::skey::ScanKeyData;
+use crate::nodes::execnodes::{
+    EState, ExprContext, IndexArrayKeyInfo, IndexRuntimeKeyInfo, IndexScanState, PlanState,
+};
 use crate::nodes::plannodes::IndexScan;
 
 // TODO(ptr)
@@ -56,25 +59,11 @@ pub fn ExecIndexScanRetrieveInstrumentation(_node: &mut IndexScanState) {
 // Out-params (scanKeys, numScanKeys, runtimeKeys, numRuntimeKeys, arrayKeys,
 // numArrayKeys) folded into a returned struct.
 pub struct IndexScanKeys {
-    pub scan_keys: Vec<ScanKey>,
+    pub scan_keys: Vec<ScanKeyData>,
     pub runtime_keys: Vec<IndexRuntimeKeyInfo>,
     pub array_keys: Vec<IndexArrayKeyInfo>,
 }
 
-// TODO(struct-forward): repoint to crate::access::genam / crate::executor::execnodes in Phase 2
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access::genam in Phase 2")]
-pub type ScanKey = usize;
-// TODO(struct-forward): repoint to crate::nodes::execnodes in Phase 2
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes in Phase 2")]
-#[derive(Debug, Clone)]
-pub struct IndexRuntimeKeyInfo;
-// TODO(struct-forward): repoint to crate::nodes::execnodes in Phase 2
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes in Phase 2")]
-#[derive(Debug, Clone)]
-pub struct IndexArrayKeyInfo;
-
-// TODO(struct-forward): repoint Relation / List to real types in Phase 2
-#[allow(deprecated)]
 pub fn ExecIndexBuildScanKeys(
     _planstate: &mut PlanState,
     _index: usize,
@@ -84,7 +73,6 @@ pub fn ExecIndexBuildScanKeys(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ExecIndexEvalRuntimeKeys(
     _econtext: &mut ExprContext,
     _runtime_keys: &mut [IndexRuntimeKeyInfo],
@@ -92,7 +80,6 @@ pub fn ExecIndexEvalRuntimeKeys(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ExecIndexEvalArrayKeys(
     _econtext: &mut ExprContext,
     _array_keys: &mut [IndexArrayKeyInfo],
@@ -100,7 +87,6 @@ pub fn ExecIndexEvalArrayKeys(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ExecIndexAdvanceArrayKeys(_array_keys: &mut [IndexArrayKeyInfo]) -> bool {
     unimplemented!()
 }

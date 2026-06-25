@@ -2,6 +2,7 @@
 
 use crate::access::htup::HeapTuple;
 use crate::access::parallel::{shm_toc, ParallelContext};
+use crate::commands::explain_state::ExplainState;
 use crate::nodes::execnodes::{
     AsyncRequest, EState, ExecRowMark, ForeignScanState, ModifyTableState, ResultRelInfo,
 };
@@ -18,10 +19,6 @@ use crate::postgres_ext::Oid;
 use crate::storage::block::BlockNumber;
 use crate::utils::rel::Relation;
 use crate::c::Index;
-
-// To avoid including explain.h, fdwapi.h forward-declares `struct ExplainState`.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::commands::explain_state::ExplainState in Phase 2")]
-pub struct ExplainState; // TODO(struct-forward)
 
 /// AcquireSampleRowsFunc: fills `rows`; returns count + totalrows/totaldeadrows
 /// out-params (folded into the return tuple).
@@ -229,10 +226,8 @@ pub trait FdwRoutine {
 
     // --- Support functions for EXPLAIN (optional) ---
 
-    #[allow(deprecated)]
     fn explain_foreign_scan(&self, _node: &mut ForeignScanState, _es: &mut ExplainState) {}
 
-    #[allow(deprecated)]
     fn explain_foreign_modify(
         &self,
         _mtstate: &mut ModifyTableState,
@@ -243,7 +238,6 @@ pub trait FdwRoutine {
     ) {
     }
 
-    #[allow(deprecated)]
     fn explain_direct_modify(&self, _node: &mut ForeignScanState, _es: &mut ExplainState) {}
 
     // --- Support functions for ANALYZE (optional) ---

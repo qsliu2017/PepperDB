@@ -2,6 +2,7 @@
 
 use bitflags::bitflags;
 
+use crate::nodes::execnodes::PlanState;
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::Query;
 use crate::nodes::primnodes::{BoolExprType, CoercionForm, OpExpr, ScalarArrayOpExpr};
@@ -233,18 +234,8 @@ pub fn raw_expression_tree_walker(node: &Node, walker: impl FnMut(&Node) -> bool
     unimplemented!()
 }
 
-// C forward-declares `struct PlanState` to avoid including execnodes.h. That
-// header isn't translated yet, so mirror the forward decl locally.
-// TODO(struct-forward): repoint to crate::nodes::execnodes::PlanState in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes::PlanState in Phase 2")]
-#[derive(Debug)]
-pub struct PlanState {
-    _private: (),
-}
-
 // planstate_tree_walker operates over executor PlanState; the callback becomes
 // `FnMut(&PlanState) -> bool`.
-#[allow(deprecated)]
 pub fn planstate_tree_walker(
     planstate: &PlanState,
     walker: impl FnMut(&PlanState) -> bool,

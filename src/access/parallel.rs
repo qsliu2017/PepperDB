@@ -6,32 +6,27 @@
 
 use crate::access::xlogdefs::XLogRecPtr;
 use crate::c::SubTransactionId;
+use crate::postmaster::bgworker::BackgroundWorkerHandle;
 use crate::postgres::Datum;
+use crate::utils::elog::ErrorContextCallback;
 
-#[deprecated(note = "TODO(shm_mq): tombstoned dsm; per-worker state lives in Arc-shared fields in Phase 2")]
-pub struct dsm_segment; // TODO(struct-forward)
-#[deprecated(note = "TODO(shm_mq): tombstoned shm_toc; keyed regions -> struct fields in Phase 2")]
-pub struct shm_toc; // TODO(struct-forward)
-#[deprecated(note = "TODO(shm_mq): tombstoned shm_toc estimator in Phase 2")]
-pub struct shm_toc_estimator; // TODO(struct-forward)
-#[deprecated(note = "TODO(shm_mq): replace shm_mq_handle with a tokio channel endpoint in Phase 2")]
-pub struct shm_mq_handle; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::postmaster::bgworker::BackgroundWorkerHandle in Phase 2")]
-pub struct BackgroundWorkerHandle; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::elog::ErrorContextCallback in Phase 2")]
-pub struct ErrorContextCallback; // TODO(struct-forward)
+/// Opaque; tombstoned DSM segment, single-process port has no shared memory.
+pub struct dsm_segment;
+/// Opaque; tombstoned shm_toc, keyed regions become struct fields.
+pub struct shm_toc;
+/// Opaque; tombstoned shm_toc estimator.
+pub struct shm_toc_estimator;
+/// Opaque; tombstoned shm_mq, replaced by a tokio channel endpoint later.
+pub struct shm_mq_handle;
 
 // worker main: (seg, toc) shmem handoff -> a task body over Arc-shared state.
-#[allow(deprecated)]
 pub type parallel_worker_main_type = fn(seg: &dsm_segment, toc: &shm_toc);
 
-#[allow(deprecated)]
 pub struct ParallelWorkerInfo {
     pub bgwhandle: Option<Box<BackgroundWorkerHandle>>, // tokio JoinHandle later
     pub error_mqh: Option<Box<shm_mq_handle>>,          // error channel
 }
 
-#[allow(deprecated)]
 pub struct ParallelContext {
     // dlist_node link -> owning collection holds this; field dropped.
     pub subid: SubTransactionId,
@@ -50,7 +45,6 @@ pub struct ParallelContext {
     pub known_attached_workers: Vec<bool>,
 }
 
-#[allow(deprecated)]
 pub struct ParallelWorkerContext {
     pub seg: Option<Box<dsm_segment>>,
     pub toc: Option<Box<shm_toc>>,
@@ -66,7 +60,6 @@ pub fn IsParallelWorker() -> bool {
     unsafe { ParallelWorkerNumber >= 0 }
 }
 
-#[allow(deprecated)]
 pub fn CreateParallelContext(
     _library_name: &str,
     _function_name: &str,
@@ -75,37 +68,30 @@ pub fn CreateParallelContext(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn InitializeParallelDSM(_pcxt: &mut ParallelContext) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ReinitializeParallelDSM(_pcxt: &mut ParallelContext) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ReinitializeParallelWorkers(_pcxt: &mut ParallelContext, _nworkers_to_launch: i32) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn LaunchParallelWorkers(_pcxt: &mut ParallelContext) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn WaitForParallelWorkersToAttach(_pcxt: &mut ParallelContext) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn WaitForParallelWorkersToFinish(_pcxt: &mut ParallelContext) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn DestroyParallelContext(_pcxt: &mut ParallelContext) {
     unimplemented!()
 }

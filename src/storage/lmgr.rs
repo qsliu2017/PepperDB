@@ -3,11 +3,12 @@
 // High-level lock manager API (LOCKTAG-based wrappers over storage::lock).
 // TODO(lock-manager): sharded tables, async waits
 
+use crate::c::TransactionId;
 use crate::postgres_ext::Oid;
 use crate::storage::block::BlockNumber;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::lock::{LOCKMODE, LOCKTAG};
-use crate::utils::rel::LockRelId;
+use crate::utils::rel::{LockRelId, Relation};
 
 // XactLockTableWait operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,12 +24,6 @@ pub enum XLTW_Oper {
     XltwRecheckExclusionConstr,
 }
 
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]
-pub struct Relation; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::c::TransactionId in Phase 2")]
-pub type TransactionId = u32; // TODO(struct-forward)
-
-#[allow(deprecated)]
 pub fn RelationInitLockInfo(_relation: &Relation) {
     unimplemented!()
 }
@@ -54,22 +49,18 @@ pub fn UnlockRelationOid(_relid: Oid, _lockmode: LOCKMODE) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn LockRelation(_relation: &Relation, _lockmode: LOCKMODE) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ConditionalLockRelation(_relation: &Relation, _lockmode: LOCKMODE) -> bool {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn UnlockRelation(_relation: &Relation, _lockmode: LOCKMODE) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn CheckRelationLockedByMe(_relation: &Relation, _lockmode: LOCKMODE, _orstronger: bool) -> bool {
     unimplemented!()
 }
@@ -78,7 +69,6 @@ pub fn CheckRelationOidLockedByMe(_relid: Oid, _lockmode: LOCKMODE, _orstronger:
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn LockHasWaitersRelation(_relation: &Relation, _lockmode: LOCKMODE) -> bool {
     unimplemented!()
 }
@@ -92,22 +82,18 @@ pub fn UnlockRelationIdForSession(_relid: &LockRelId, _lockmode: LOCKMODE) {
 }
 
 // Lock a relation for extension.
-#[allow(deprecated)]
 pub fn LockRelationForExtension(_relation: &Relation, _lockmode: LOCKMODE) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn UnlockRelationForExtension(_relation: &Relation, _lockmode: LOCKMODE) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ConditionalLockRelationForExtension(_relation: &Relation, _lockmode: LOCKMODE) -> bool {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn RelationExtensionLockWaiterCount(_relation: &Relation) -> i32 {
     unimplemented!()
 }
@@ -118,28 +104,23 @@ pub fn LockDatabaseFrozenIds(_lockmode: LOCKMODE) {
 }
 
 // Lock a page (currently only used within indexes).
-#[allow(deprecated)]
 pub fn LockPage(_relation: &Relation, _blkno: BlockNumber, _lockmode: LOCKMODE) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ConditionalLockPage(_relation: &Relation, _blkno: BlockNumber, _lockmode: LOCKMODE) -> bool {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn UnlockPage(_relation: &Relation, _blkno: BlockNumber, _lockmode: LOCKMODE) {
     unimplemented!()
 }
 
 // Lock a tuple (see heap_lock_tuple before assuming you understand this).
-#[allow(deprecated)]
 pub fn LockTuple(_relation: &Relation, _tid: &ItemPointerData, _lockmode: LOCKMODE) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ConditionalLockTuple(
     _relation: &Relation,
     _tid: &ItemPointerData,
@@ -149,23 +130,19 @@ pub fn ConditionalLockTuple(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn UnlockTuple(_relation: &Relation, _tid: &ItemPointerData, _lockmode: LOCKMODE) {
     unimplemented!()
 }
 
 // Lock an XID (used to wait for a transaction to finish).
-#[allow(deprecated)]
 pub fn XactLockTableInsert(_xid: TransactionId) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn XactLockTableDelete(_xid: TransactionId) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn XactLockTableWait(
     _xid: TransactionId,
     _rel: &Relation,
@@ -175,7 +152,6 @@ pub fn XactLockTableWait(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn ConditionalXactLockTableWait(_xid: TransactionId, _log_lock_failure: bool) -> bool {
     unimplemented!()
 }
@@ -190,17 +166,14 @@ pub fn WaitForLockersMultiple(_locktags: &[LOCKTAG], _lockmode: LOCKMODE, _progr
 }
 
 // Lock an XID for tuple insertion (wait for an insertion to finish).
-#[allow(deprecated)]
 pub fn SpeculativeInsertionLockAcquire(_xid: TransactionId) -> u32 {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn SpeculativeInsertionLockRelease(_xid: TransactionId) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn SpeculativeInsertionWait(_xid: TransactionId, _token: u32) {
     unimplemented!()
 }
@@ -254,7 +227,6 @@ pub fn UnlockSharedObjectForSession(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn LockApplyTransactionForSession(
     _suboid: Oid,
     _xid: TransactionId,
@@ -264,7 +236,6 @@ pub fn LockApplyTransactionForSession(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn UnlockApplyTransactionForSession(
     _suboid: Oid,
     _xid: TransactionId,

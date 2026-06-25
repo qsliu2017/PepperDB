@@ -2,13 +2,14 @@
 
 use crate::c::{float4, text, NameData, TransactionId};
 use crate::postgres_ext::Oid;
+use crate::utils::acl::AclItem;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(83,RelationRelation_Rowtype_Id) BKI_SCHEMA_MACRO
 pub const RelationRelationId: Oid = Oid(1259);
 pub const RelationRelation_Rowtype_Id: Oid = Oid(83);
 
 // pg_node_tree catalog field = varlena (serialized node tree); modeled as text for now.
-pub type PgNodeTree = text; // TODO(struct-forward)
+pub type PgNodeTree = text;
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -45,18 +46,9 @@ pub struct FormData_pg_class {
     pub relfrozenxid: TransactionId,
     pub relminmxid: TransactionId, // really a MultiXactId
     // CATALOG_VARLEN (not in fixed part) -- variable-length fields:
-    pub relacl: [Aclitem; 1], // aclitem[1]; TODO(struct-forward)
+    pub relacl: [AclItem; 1], // aclitem[1]
     pub reloptions: [text; 1],
     pub relpartbound: PgNodeTree,
-}
-
-// aclitem placeholder; real def lives in utils/acl.h.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::acl::AclItem in Phase 2")]
-#[repr(C)]
-pub struct Aclitem {
-    pub ai_grantee: Oid,
-    pub ai_grantor: Oid,
-    pub ai_privs: u64,
 }
 
 // CLASS_TUPLE_SIZE = offsetof(relminmxid) + sizeof(TransactionId)

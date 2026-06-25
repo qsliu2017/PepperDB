@@ -15,6 +15,7 @@
 
 use bitflags::bitflags;
 
+use crate::access::hio::BulkInsertStateData;
 use crate::access::relscan::{
     IndexFetchTableData, ParallelBlockTableScanDescData, ParallelBlockTableScanWorkerData,
     ParallelTableScanDesc, TableScanDesc,
@@ -22,8 +23,11 @@ use crate::access::relscan::{
 use crate::access::sdir::ScanDirection;
 use crate::access::skey::ScanKeyData;
 use crate::c::{varlena, CommandId, MultiXactId, TransactionId};
+use crate::catalog::index::ValidateIndexState;
+pub use crate::commands::vacuum::VacuumParams;
 use crate::common::relpath::ForkNumber;
 use crate::executor::tuptable::{TupleTableSlot, TupleTableSlotOps};
+use crate::nodes::execnodes::{IndexInfo, SampleScanState};
 use crate::nodes::lockoptions::{LockTupleMode, LockWaitPolicy};
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
@@ -42,43 +46,6 @@ pub const DEFAULT_TABLE_ACCESS_METHOD: &str = "heap";
 // GUCs (process globals in C; will become session/config state in Phase 2).
 pub static mut default_table_access_method: &str = DEFAULT_TABLE_ACCESS_METHOD;
 pub static mut synchronize_seqscans: bool = true;
-
-// --- Rule 7: forward-declared structs the include graph does not provide ---
-
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::access::heapam::BulkInsertStateData in Phase 2"
-)]
-pub struct BulkInsertStateData {
-    _private: [u8; 0],
-}
-
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::nodes::execnodes::IndexInfo in Phase 2"
-)]
-pub struct IndexInfo {
-    _private: [u8; 0],
-}
-
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::access::tablesample::SampleScanState in Phase 2"
-)]
-pub struct SampleScanState {
-    _private: [u8; 0],
-}
-
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::commands::vacuum::VacuumParams in Phase 2"
-)]
-pub struct VacuumParams {
-    _private: [u8; 0],
-}
-
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::catalog::index::ValidateIndexState in Phase 2"
-)]
-pub struct ValidateIndexState {
-    _private: [u8; 0],
-}
 
 bitflags! {
     /// `ScanOptions`: the `flags` bitmask passed to scan_begin. PARTIAL (appendix

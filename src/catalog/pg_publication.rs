@@ -1,8 +1,16 @@
 //! Translated from PostgreSQL src/include/catalog/pg_publication.h
 
 use crate::c::NameData;
+use crate::catalog::objectaddress::ObjectAddress;
+use crate::nodes::bitmapset::Bitmapset;
+use crate::nodes::nodes::Node;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
+use crate::utils::palloc::MemoryContext;
+use crate::utils::rel::Relation;
+
+// pg_list tombstoned; these `List *` values are node/relation lists.
+type List = Vec<Box<Node>>;
 
 pub const PublicationRelationId: Oid = Oid(6104);
 
@@ -62,21 +70,6 @@ pub struct Publication {
     pub pubactions: PublicationActions,
 }
 
-// Forward refs; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]
-pub struct Relation; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::primnodes::Node in Phase 2")]
-pub struct Node; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to Vec<T> (pg_list List) in Phase 2")]
-pub struct List; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::bitmapset::Bitmapset in Phase 2")]
-pub struct Bitmapset; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to MemoryContext (arena/Box) in Phase 2")]
-pub struct MemoryContext; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
-pub struct ObjectAddress; // TODO(struct-forward)
-
-#[allow(deprecated)]
 pub struct PublicationRelInfo {
     pub relation: Relation,
     pub where_clause: Node, // whereClause
@@ -90,58 +83,47 @@ pub enum PublicationPartOpt {
     All,
 }
 
-#[allow(deprecated)]
 pub fn GetPublication(_pubid: Oid) -> Publication {
     unimplemented!()
 }
 
 // missing_ok -> Option
-#[allow(deprecated)]
 pub fn GetPublicationByName(_pubname: &str, _missing_ok: bool) -> Option<Publication> {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GetRelationPublications(_relid: Oid) -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GetPublicationRelations(_pubid: Oid, _pub_partopt: PublicationPartOpt) -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GetAllTablesPublications() -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GetAllTablesPublicationRelations(_pubviaroot: bool) -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GetPublicationSchemas(_pubid: Oid) -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GetSchemaPublications(_schemaid: Oid) -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GetSchemaPublicationRelations(_schemaid: Oid, _pub_partopt: PublicationPartOpt) -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GetAllSchemaPublicationRelations(_pubid: Oid, _pub_partopt: PublicationPartOpt) -> List {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GetPubPartitionOptionRelations(
     _result: List,
     _pub_partopt: PublicationPartOpt,
@@ -151,12 +133,10 @@ pub fn GetPubPartitionOptionRelations(
 }
 
 // returns top ancestor + ancestor_level out-param
-#[allow(deprecated)]
 pub fn GetTopMostAncestorInPublication(_puboid: Oid, _ancestors: &List) -> (Oid, i32) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn is_publishable_relation(_rel: &Relation) -> bool {
     unimplemented!()
 }
@@ -166,32 +146,26 @@ pub fn is_schema_publication(_pubid: Oid) -> bool {
 }
 
 // returns bool + cols out-param -> Option<Bitmapset>
-#[allow(deprecated)]
 pub fn check_and_fetch_column_list(_pub: &Publication, _relid: Oid, _mcxt: &MemoryContext) -> Option<Bitmapset> {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn publication_add_relation(_pubid: Oid, _pri: &PublicationRelInfo, _if_not_exists: bool) -> ObjectAddress {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn pub_collist_validate(_targetrel: &Relation, _columns: &List) -> Bitmapset {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn publication_add_schema(_pubid: Oid, _schemaid: Oid, _if_not_exists: bool) -> ObjectAddress {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn pub_collist_to_bitmapset(_columns: &Bitmapset, _pubcols: Datum, _mcxt: &MemoryContext) -> Bitmapset {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn pub_form_cols_map(_relation: &Relation, _include_gencols_type: PublishGencolsType) -> Bitmapset {
     unimplemented!()
 }

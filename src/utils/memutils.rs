@@ -7,13 +7,8 @@
 //! translated; bodies are stubs.
 // TODO(memory): Rust ownership; keep work_mem accounting at operators
 
-use crate::nodes::memnodes::{MemoryContextCounters, MemoryContextKind};
-
-/// `MemoryContext` is `*MemoryContextData` in C. In Rust it re-exports the
-/// in-memory context kind; the live owning representation comes later.
-// TODO(struct-forward): repoint to crate::utils::palloc once the owned context
-// type exists; for now alias the closed kind from memnodes.
-pub type MemoryContext = MemoryContextKind;
+use crate::nodes::memnodes::MemoryContextCounters;
+pub use crate::utils::palloc::MemoryContext;
 
 /// 1 gigabyte - 1; the palloc limit (corresponds to the varlena TOAST limit).
 pub const MAX_ALLOC_SIZE: usize = 0x3fff_ffff;

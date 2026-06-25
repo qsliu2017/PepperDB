@@ -1,17 +1,22 @@
 //! Translated from PostgreSQL src/include/catalog/pg_proc.h
 
-use crate::c::{float4, regproc, text, NameData};
+use crate::c::{float4, regproc, text, varlena, NameData};
+use crate::catalog::objectaddress::ObjectAddress;
+use crate::nodes::nodes::Node;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
+
+// pg_list is tombstoned; List* collapses to Vec. Element type varies per call.
+pub type List<T = ()> = Vec<T>;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(81,ProcedureRelation_Rowtype_Id) BKI_SCHEMA_MACRO
 pub const ProcedureRelationId: Oid = Oid(1255);
 pub const ProcedureRelation_Rowtype_Id: Oid = Oid(81);
 
 // oidvector / pg_node_tree / aclitem catalog fields are varlena; modeled here.
-pub type Oidvector = text; // TODO(struct-forward)
-pub type PgNodeTree = text; // TODO(struct-forward)
-pub type Aclitem = text; // TODO(struct-forward)
+pub type Oidvector = text;
+pub type PgNodeTree = text;
+pub type Aclitem = text;
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -81,17 +86,6 @@ pub const PROARGMODE_INOUT: i8 = b'b' as i8;
 pub const PROARGMODE_VARIADIC: i8 = b'v' as i8;
 pub const PROARGMODE_TABLE: i8 = b't' as i8;
 
-// Forward refs; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
-pub struct ObjectAddress; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::primnodes::Node in Phase 2")]
-pub struct Node; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to Vec<T> (pg_list List) in Phase 2")]
-pub struct List; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to oidvector type in Phase 2")]
-pub struct OidvectorPtr; // TODO(struct-forward)
-
-#[allow(deprecated)]
 pub fn ProcedureCreate(
     _procedure_name: &str,
     _proc_namespace: Oid,
@@ -110,7 +104,7 @@ pub fn ProcedureCreate(
     _is_strict: bool,
     _volatility: i8,
     _parallel: i8,
-    _parameter_types: &OidvectorPtr,
+    _parameter_types: &varlena,
     _all_parameter_types: Datum,
     _parameter_modes: Datum,
     _parameter_names: Datum,
@@ -129,7 +123,6 @@ pub fn function_parse_error_transpose(_prosrc: &str) -> bool {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn oid_array_to_list(_datum: Datum) -> List {
     unimplemented!()
 }

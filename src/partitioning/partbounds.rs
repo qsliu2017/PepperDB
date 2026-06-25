@@ -20,7 +20,7 @@ use crate::utils::relcache::Relation;
 /// planner/descriptor state (not on-disk), so modeled idiomatically.
 ///
 /// This is the canonical definition; `crate::partitioning::partdefs` forwards
-/// `PartitionBoundInfoData` to here (TODO(struct-forward) in partdefs).
+/// `PartitionBoundInfoData` to here.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PartitionBoundInfoData {
     /// hash, list or range?

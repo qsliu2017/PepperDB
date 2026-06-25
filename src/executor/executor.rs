@@ -407,8 +407,6 @@ pub fn EvalPlanQualSlot(
 
 /// `#define EvalPlanQualSetSlot(epqstate, slot) ((epqstate)->origslot = (slot))`
 pub fn EvalPlanQualSetSlot(epqstate: &mut EPQState, slot: Option<Box<TupleTableSlot>>) {
-    // TODO(struct-forward): EPQState.origslot is the execnodes placeholder slot type;
-    // unify with tuptable::TupleTableSlot in Phase 2.
     let _ = (epqstate, slot);
     unimplemented!()
 }
@@ -460,8 +458,6 @@ pub fn ExecSetTupleBound(_tuples_needed: i64, _child_node: &mut crate::nodes::ex
 pub fn ExecProcNode(
     node: &mut crate::nodes::execnodes::PlanState,
 ) -> Option<Box<TupleTableSlot>> {
-    // TODO(struct-forward): exec_proc_node returns the execnodes placeholder slot
-    // type; unify with tuptable::TupleTableSlot in Phase 2.
     let _ = node;
     unimplemented!()
 }

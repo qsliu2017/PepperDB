@@ -319,10 +319,7 @@ pub struct guts {
     pub nlacons: i32, // size of lacons[]; slots 1..nlacons-1 used
 }
 
-/// `struct vars` - regcomp.c's per-compile state. Forward-ref not in the include
-/// graph; translated locally as opaque until Phase 2 repoints it.
-// TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::regex::regcomp::vars in Phase 2")]
+/// Opaque; `struct vars` is regcomp.c's private per-compile state, not ported.
 pub struct vars {
     _opaque: [u8; 0],
 }

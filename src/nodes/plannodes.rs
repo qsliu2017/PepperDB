@@ -9,19 +9,14 @@ use crate::nodes::nodes::{
     AggSplit, AggStrategy, Cardinality, CmdType, Cost, JoinType, LimitOption, Node, OnConflictAction,
     ParseLoc, SetOpCmd, SetOpStrategy,
 };
+use crate::nodes::parsenodes::TableSampleClause;
 use crate::nodes::primnodes::{Index, TableFunc, Var};
 use crate::postgres_ext::Oid;
 
-// Forward references the include graph does not provide here.
-// TODO(struct-forward): repoint to crate::nodes::extensible::CustomScanMethods in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::extensible::CustomScanMethods in Phase 2")]
+/// Opaque CustomScan method table; modeled as a trait in nodes::extensible, which
+/// cannot be a struct field here without a cycle, so kept opaque in this port.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomScanMethods;
-
-// TODO(struct-forward): repoint to crate::nodes::parsenodes::TableSampleClause in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::parsenodes::TableSampleClause in Phase 2")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct TableSampleClause;
 
 /// Fetch the Plan of a SubPlan: subplans[subplan.plan_id - 1].
 /// (C macro `exec_subplan_get_plan`.)

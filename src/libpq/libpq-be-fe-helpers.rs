@@ -9,25 +9,21 @@
 
 use crate::datatype::timestamp::TimestampTz;
 
-// TODO(struct-forward): PGconn/PGresult/PGcancelConn are libpq-fe (client lib)
-// types; repoint to the libpq frontend bindings in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to the libpq-fe PGconn bindings in Phase 2")]
+/// Opaque frontend libpq handle; client lib not ported.
 pub struct PGconn;
-#[deprecated(note = "TODO(struct-forward): repoint to the libpq-fe PGresult bindings in Phase 2")]
+/// Opaque frontend libpq handle; client lib not ported.
 pub struct PGresult;
-#[deprecated(note = "TODO(struct-forward): repoint to the libpq-fe PGcancelConn bindings in Phase 2")]
+/// Opaque frontend libpq handle; client lib not ported.
 pub struct PGcancelConn;
 
 /// PQconnectdb() wrapper that reserves an FD and processes interrupts. Returns
 /// None if the connection object could not be created; otherwise the caller
 /// must check `PQstatus`.
-#[allow(deprecated)]
 pub fn libpqsrv_connect(_conninfo: &str, _wait_event_info: u32) -> Option<PGconn> {
     unimplemented!()
 }
 
 /// Like `libpqsrv_connect`, but a wrapper for PQconnectdbParams().
-#[allow(deprecated)]
 pub fn libpqsrv_connect_params(
     _keywords: &[&str],
     _values: &[&str],
@@ -38,19 +34,16 @@ pub fn libpqsrv_connect_params(
 }
 
 /// PQfinish() wrapper that also releases the reserved FD.
-#[allow(deprecated)]
 pub fn libpqsrv_disconnect(_conn: PGconn) {
     unimplemented!()
 }
 
 /// PQexec() wrapper that processes interrupts. None means a send failure.
-#[allow(deprecated)]
 pub fn libpqsrv_exec(_conn: &mut PGconn, _query: &str, _wait_event_info: u32) -> Option<PGresult> {
     unimplemented!()
 }
 
 /// PQexecParams() wrapper that processes interrupts.
-#[allow(deprecated)]
 pub fn libpqsrv_exec_params(
     _conn: &mut PGconn,
     _command: &str,
@@ -65,20 +58,17 @@ pub fn libpqsrv_exec_params(
 }
 
 /// Loop over PQgetResult() until NULL/terminal; return the last result.
-#[allow(deprecated)]
 pub fn libpqsrv_get_result_last(_conn: &mut PGconn, _wait_event_info: u32) -> Option<PGresult> {
     unimplemented!()
 }
 
 /// PQgetResult() equivalent that watches for interrupts.
-#[allow(deprecated)]
 pub fn libpqsrv_get_result(_conn: &mut PGconn, _wait_event_info: u32) -> Option<PGresult> {
     unimplemented!()
 }
 
 /// Submit a cancel request, waiting until `endtime`. None on success, otherwise
 /// a (static) error message.
-#[allow(deprecated)]
 pub fn libpqsrv_cancel(_conn: &mut PGconn, _endtime: TimestampTz) -> Option<&'static str> {
     unimplemented!()
 }

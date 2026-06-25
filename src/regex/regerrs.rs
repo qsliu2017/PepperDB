@@ -3,7 +3,6 @@
 // This header is a `{code, "NAME", "description"}` initializer fragment included
 // into a table in regex.c. Translated to a static table. The REG_* codes are
 // defined in regex/regex.h (not in this batch).
-// TODO(struct-forward): repoint codes to crate::regex::regex REG_* in Phase 2.
 
 /// One entry of the regex error table: (code, symbol name, human description).
 pub struct RegError {
@@ -13,7 +12,6 @@ pub struct RegError {
 }
 
 // REG_* numeric codes mirror regex/regex.h ordering (REG_OKAY = 0, ...).
-// TODO(struct-forward): repoint to crate::regex::regex REG_* in Phase 2.
 pub const REG_ERRORS: &[RegError] = &[
     RegError { code: 0, name: "REG_OKAY", explain: "no errors detected" },
     RegError { code: 1, name: "REG_NOMATCH", explain: "failed to match" },

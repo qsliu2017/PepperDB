@@ -52,18 +52,12 @@ pub struct LockInfoData {
 /// C `typedef LockInfoData *LockInfo;`.
 pub type LockInfo = *mut LockInfoData; // TODO(ptr)
 
-// Forward-decls for types whose headers are not yet translated (rule 7).
-// TableAmRoutine / FdwRoutine become trait/enum vtables in a later level.
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::access::tableam::TableAmRoutine in Phase 2"
-)]
+// Opaque raw-pointer targets; the canonical table AM (crate::access::tableam::TableAm)
+// and FDW API (crate::foreign::fdwapi::FdwRoutine) are traits, not thin structs.
 pub struct TableAmRoutine {
     _private: [u8; 0],
 }
 
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::foreign::fdwapi::FdwRoutine in Phase 2"
-)]
 pub struct FdwRoutine {
     _private: [u8; 0],
 }
@@ -72,7 +66,6 @@ pub struct FdwRoutine {
 /// pointers (`*mut`/`*const`, ownership is the relcache's) pending Phase 2, and
 /// C `List *` fields become `Vec`. The trailing variable-length nature does not
 /// apply (no FAM here).
-#[allow(deprecated)]
 pub struct RelationData {
     pub rd_locator: RelFileLocator, // relation physical identifier
     pub rd_smgr: *mut SmgrRelation, // cached file handle, or null // TODO(ptr)
@@ -183,10 +176,8 @@ pub struct RelationData {
 }
 
 // rd_indam points at the index AM API struct. In the routine-struct port the AM
-// is a closed enum / trait, not a single struct; forward-decl the handle here.
-#[deprecated(
-    note = "TODO(struct-forward): repoint to crate::access::amapi::IndexAmKind in Phase 2"
-)]
+// is the closed enum crate::access::amapi::IndexAmKind, not a thin struct, so
+// this stays an opaque raw-pointer target.
 pub struct IndexAmRoutineHandle {
     _private: [u8; 0],
 }
@@ -298,7 +289,6 @@ fn xlog_logical_info_active() -> bool {
     level >= WalLevel::Logical as i32
 }
 
-#[allow(deprecated)]
 impl RelationData {
     /// RelationGetToastTupleTarget: toast_tuple_target, or `defaulttarg`.
     pub fn toast_tuple_target(&self, defaulttarg: i32) -> i32 {
@@ -541,9 +531,9 @@ impl RelationData {
     }
 
     /// Bridge to the level-5 relcache `Relation` handle type, which forward-
-    /// declares a placeholder `RelationData`. The two types unify in Phase 2;
-    /// until then catalog.rs's signatures take the relcache handle, so reborrow
-    /// `self` through it. TODO(struct-forward): drop once the types merge.
+    /// declares a placeholder `RelationData`. The two types unify later; until
+    /// then catalog.rs's signatures take the relcache handle, so reborrow `self`
+    /// through it.
     fn as_relcache_handle(&self) -> crate::utils::relcache::Relation {
         self as *const RelationData as *mut crate::utils::relcache::RelationData
     }

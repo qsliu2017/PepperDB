@@ -3,18 +3,14 @@
 
 use bitflags::bitflags;
 
+// Bitmapset is forward-declared in params.h but unreferenced in 18.4 defs.
+#[allow(unused_imports)]
+use crate::nodes::bitmapset::Bitmapset;
+pub use crate::nodes::execnodes::ExprState;
+use crate::nodes::primnodes::Param;
+use crate::parser::parse_node::ParseState;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
-
-// Forward references (avoid including other headers). TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::bitmapset::Bitmapset in Phase 2")]
-pub struct Bitmapset;
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::execnodes::ExprState in Phase 2")]
-pub struct ExprState;
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::primnodes::Param in Phase 2")]
-pub struct Param;
-#[deprecated(note = "TODO(struct-forward): repoint to crate::parser::parse_node::ParseState in Phase 2")]
-pub struct ParseState;
 
 bitflags! {
     /// C: `#define PARAM_FLAG_CONST 0x0001` - pflags bits for ParamExternData.
@@ -34,7 +30,6 @@ pub struct ParamExternData {
 
 /// C: `typedef void (*ParserSetupHook) (struct ParseState *pstate, void *arg);`
 /// The void* arg is captured by the closure.
-#[allow(deprecated)]
 pub type ParserSetupHook = fn(pstate: &mut ParseState);
 
 /// C: `typedef ParamExternData *(*ParamFetchHook) (ParamListInfo params,
@@ -47,7 +42,6 @@ pub type ParamFetchHook =
 /// C: `typedef void (*ParamCompileHook) (ParamListInfo params, struct Param *param,
 /// struct ExprState *state, Datum *resv, bool *resnull);`
 /// Hook fn pointer; its void* `paramCompileArg` is dropped.
-#[allow(deprecated)]
 pub type ParamCompileHook =
     fn(params: &mut ParamListInfoData, param: &Param, state: &mut ExprState, resv: &mut Datum, resnull: &mut bool);
 
@@ -55,7 +49,6 @@ pub type ParamCompileHook =
 /// In-memory; the C FLEXIBLE_ARRAY_MEMBER `params[]` becomes a `Vec`. The
 /// dynamic-access hooks (paramFetch/paramCompile) are runtime-NULL-checkable
 /// fn pointers; their void* `arg` fields disappear (function-mapping 6.3).
-#[allow(deprecated)]
 pub struct ParamListInfoData {
     pub param_fetch: Option<ParamFetchHook>,
     pub param_compile: Option<ParamCompileHook>,

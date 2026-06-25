@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/catalog/pg_operator.h
 
+use crate::access::htup::HeapTuple;
 use crate::c::{regproc, NameData};
+use crate::catalog::objectaddress::ObjectAddress;
 use crate::postgres_ext::Oid;
 
 pub const OperatorRelationId: Oid = Oid(2617);
@@ -32,21 +34,14 @@ pub type Form_pg_operator = *mut FormData_pg_operator; // TODO(ptr)
 // MAKE_SYSCACHE(OPEROID, pg_operator_oid_index, 32)
 // MAKE_SYSCACHE(OPERNAMENSP, pg_operator_oprname_l_r_n_index, 256)
 
-// Forward refs; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
-pub struct ObjectAddress; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to Vec<T> (pg_list List) in Phase 2")]
-pub struct List; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access HeapTuple in Phase 2")]
-pub struct HeapTuple; // TODO(struct-forward)
+// pg_list tombstoned: name-list params become Vec<Node>.
+pub type List = Vec<crate::nodes::nodes::Node>;
 
 // returns oper Oid + `defined` out-param -> (oid, defined)
-#[allow(deprecated)]
 pub fn OperatorLookup(_operator_name: &List, _left_object_id: Oid, _right_object_id: Oid) -> (Oid, bool) {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn OperatorCreate(
     _operator_name: &str,
     _operator_namespace: Oid,
@@ -63,7 +58,6 @@ pub fn OperatorCreate(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn makeOperatorDependencies(
     _tuple: HeapTuple,
     _make_extension_dep: bool,
