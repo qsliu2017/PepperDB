@@ -12,6 +12,7 @@ pub type PgNodeTree = text; // TODO(struct-forward)
 pub type Aclitem = text; // TODO(struct-forward)
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_type {
     pub oid: Oid,
     pub typname: NameData,
@@ -56,41 +57,6 @@ pub type Form_pg_type = *mut FormData_pg_type; // TODO(ptr)
 // MAKE_SYSCACHE(TYPEOID, pg_type_oid_index, 64)
 // MAKE_SYSCACHE(TYPENAMENSP, pg_type_typname_nsp_index, 64)
 
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_type_oid: i32 = 1;
-pub const Anum_pg_type_typname: i32 = 2;
-pub const Anum_pg_type_typnamespace: i32 = 3;
-pub const Anum_pg_type_typowner: i32 = 4;
-pub const Anum_pg_type_typlen: i32 = 5;
-pub const Anum_pg_type_typbyval: i32 = 6;
-pub const Anum_pg_type_typtype: i32 = 7;
-pub const Anum_pg_type_typcategory: i32 = 8;
-pub const Anum_pg_type_typispreferred: i32 = 9;
-pub const Anum_pg_type_typisdefined: i32 = 10;
-pub const Anum_pg_type_typdelim: i32 = 11;
-pub const Anum_pg_type_typrelid: i32 = 12;
-pub const Anum_pg_type_typsubscript: i32 = 13;
-pub const Anum_pg_type_typelem: i32 = 14;
-pub const Anum_pg_type_typarray: i32 = 15;
-pub const Anum_pg_type_typinput: i32 = 16;
-pub const Anum_pg_type_typoutput: i32 = 17;
-pub const Anum_pg_type_typreceive: i32 = 18;
-pub const Anum_pg_type_typsend: i32 = 19;
-pub const Anum_pg_type_typmodin: i32 = 20;
-pub const Anum_pg_type_typmodout: i32 = 21;
-pub const Anum_pg_type_typanalyze: i32 = 22;
-pub const Anum_pg_type_typalign: i32 = 23;
-pub const Anum_pg_type_typstorage: i32 = 24;
-pub const Anum_pg_type_typnotnull: i32 = 25;
-pub const Anum_pg_type_typbasetype: i32 = 26;
-pub const Anum_pg_type_typtypmod: i32 = 27;
-pub const Anum_pg_type_typndims: i32 = 28;
-pub const Anum_pg_type_typcollation: i32 = 29;
-pub const Anum_pg_type_typdefaultbin: i32 = 30;
-pub const Anum_pg_type_typdefault: i32 = 31;
-pub const Anum_pg_type_typacl: i32 = 32;
-pub const Natts_pg_type: i32 = 32;
-
 // typtype values.
 pub const TYPTYPE_BASE: i8 = b'b' as i8;
 pub const TYPTYPE_COMPOSITE: i8 = b'c' as i8;
@@ -131,17 +97,35 @@ pub const TYPSTORAGE_EXTERNAL: i8 = b'e' as i8;
 pub const TYPSTORAGE_EXTENDED: i8 = b'x' as i8;
 pub const TYPSTORAGE_MAIN: i8 = b'm' as i8;
 
-// Polymorphic-type tests. The ANY*OID consts live in pg_type_d.h (generated);
-// referenced here via crate::catalog::pg_type_d once build.rs emits them.
-// TODO(catalog-derive): import ANY*OID from generated _d module.
+// Polymorphic-type tests. The ANY*OID type OIDs are generated into
+// crate::catalog::genbki by build.rs (from pg_type.dat typnames).
+use crate::catalog::genbki::{
+    ANYARRAYOID, ANYCOMPATIBLEARRAYOID, ANYCOMPATIBLEMULTIRANGEOID, ANYCOMPATIBLENONARRAYOID,
+    ANYCOMPATIBLEOID, ANYCOMPATIBLERANGEOID, ANYELEMENTOID, ANYENUMOID, ANYMULTIRANGEOID,
+    ANYNONARRAYOID, ANYRANGEOID, MONEYOID, PG_LSNOID,
+};
+
 pub fn IsPolymorphicTypeFamily1(typid: Oid) -> bool {
-    let _ = typid;
-    unimplemented!()
+    matches!(
+        typid,
+        x if x == ANYELEMENTOID
+            || x == ANYARRAYOID
+            || x == ANYNONARRAYOID
+            || x == ANYENUMOID
+            || x == ANYRANGEOID
+            || x == ANYMULTIRANGEOID
+    )
 }
 
 pub fn IsPolymorphicTypeFamily2(typid: Oid) -> bool {
-    let _ = typid;
-    unimplemented!()
+    matches!(
+        typid,
+        x if x == ANYCOMPATIBLEOID
+            || x == ANYCOMPATIBLEARRAYOID
+            || x == ANYCOMPATIBLENONARRAYOID
+            || x == ANYCOMPATIBLERANGEOID
+            || x == ANYCOMPATIBLEMULTIRANGEOID
+    )
 }
 
 pub fn IsPolymorphicType(typid: Oid) -> bool {
@@ -154,9 +138,9 @@ pub fn IsTrueArrayType(_type_form: &FormData_pg_type) -> bool {
     unimplemented!()
 }
 
-// Backwards-compat spellings (from pg_type_d.h OID macros).
-// pub const CASHOID: Oid = MONEYOID;  // TODO(catalog-derive)
-// pub const LSNOID: Oid = PG_LSNOID;  // TODO(catalog-derive)
+// Backwards-compat spellings of the generated type OIDs.
+pub const CASHOID: Oid = MONEYOID;
+pub const LSNOID: Oid = PG_LSNOID;
 
 // Forward refs; repointed in Phase 2.
 #[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
@@ -241,3 +225,4 @@ pub fn moveArrayTypeName(_type_oid: Oid, _type_name: &str, _type_namespace: Oid)
 pub fn makeMultirangeTypeName(_range_type_name: &str, _type_namespace: Oid) -> String {
     unimplemented!()
 }
+

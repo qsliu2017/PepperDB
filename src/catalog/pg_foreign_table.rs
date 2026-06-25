@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const ForeignTableRelationId: Oid = Oid(3118);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_foreign_table {
     pub ftrelid: Oid,  // BKI_LOOKUP(pg_class)
     pub ftserver: Oid, // BKI_LOOKUP(pg_foreign_server)
@@ -19,8 +20,3 @@ pub type Form_pg_foreign_table = *mut FormData_pg_foreign_table; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_foreign_table_relid_index, 3119, ForeignTableRelidIndexId)
 // MAKE_SYSCACHE(FOREIGNTABLEREL, pg_foreign_table_relid_index, 4)
 
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_foreign_table_ftrelid: i32 = 1;
-pub const Anum_pg_foreign_table_ftserver: i32 = 2;
-pub const Anum_pg_foreign_table_ftoptions: i32 = 3;
-pub const Natts_pg_foreign_table: i32 = 3;

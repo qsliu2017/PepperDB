@@ -11,6 +11,7 @@ pub const RelationRelation_Rowtype_Id: Oid = Oid(83);
 pub type PgNodeTree = text; // TODO(struct-forward)
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_class {
     pub oid: Oid,
     pub relname: NameData,
@@ -69,43 +70,6 @@ pub type Form_pg_class = *mut FormData_pg_class; // TODO(ptr)
 // DECLARE_INDEX(pg_class_tblspc_relfilenode_index, 3455, ClassTblspcRelfilenodeIndexId)
 // MAKE_SYSCACHE(RELOID, pg_class_oid_index, 128)
 // MAKE_SYSCACHE(RELNAMENSP, pg_class_relname_nsp_index, 128)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_class_oid: i32 = 1;
-pub const Anum_pg_class_relname: i32 = 2;
-pub const Anum_pg_class_relnamespace: i32 = 3;
-pub const Anum_pg_class_reltype: i32 = 4;
-pub const Anum_pg_class_reloftype: i32 = 5;
-pub const Anum_pg_class_relowner: i32 = 6;
-pub const Anum_pg_class_relam: i32 = 7;
-pub const Anum_pg_class_relfilenode: i32 = 8;
-pub const Anum_pg_class_reltablespace: i32 = 9;
-pub const Anum_pg_class_relpages: i32 = 10;
-pub const Anum_pg_class_reltuples: i32 = 11;
-pub const Anum_pg_class_relallvisible: i32 = 12;
-pub const Anum_pg_class_relallfrozen: i32 = 13;
-pub const Anum_pg_class_reltoastrelid: i32 = 14;
-pub const Anum_pg_class_relhasindex: i32 = 15;
-pub const Anum_pg_class_relisshared: i32 = 16;
-pub const Anum_pg_class_relpersistence: i32 = 17;
-pub const Anum_pg_class_relkind: i32 = 18;
-pub const Anum_pg_class_relnatts: i32 = 19;
-pub const Anum_pg_class_relchecks: i32 = 20;
-pub const Anum_pg_class_relhasrules: i32 = 21;
-pub const Anum_pg_class_relhastriggers: i32 = 22;
-pub const Anum_pg_class_relhassubclass: i32 = 23;
-pub const Anum_pg_class_relrowsecurity: i32 = 24;
-pub const Anum_pg_class_relforcerowsecurity: i32 = 25;
-pub const Anum_pg_class_relispopulated: i32 = 26;
-pub const Anum_pg_class_relreplident: i32 = 27;
-pub const Anum_pg_class_relispartition: i32 = 28;
-pub const Anum_pg_class_relrewrite: i32 = 29;
-pub const Anum_pg_class_relfrozenxid: i32 = 30;
-pub const Anum_pg_class_relminmxid: i32 = 31;
-pub const Anum_pg_class_relacl: i32 = 32;
-pub const Anum_pg_class_reloptions: i32 = 33;
-pub const Anum_pg_class_relpartbound: i32 = 34;
-pub const Natts_pg_class: i32 = 34;
 
 pub const RELKIND_RELATION: i8 = b'r' as i8;
 pub const RELKIND_INDEX: i8 = b'i' as i8;

@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const PublicationRelRelationId: Oid = Oid(6106);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_publication_rel {
     pub oid: Oid,
     pub prpubid: Oid,
@@ -16,14 +17,6 @@ pub struct FormData_pg_publication_rel {
 }
 
 pub type Form_pg_publication_rel = *mut FormData_pg_publication_rel; // TODO(ptr)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_publication_rel_oid: i32 = 1;
-pub const Anum_pg_publication_rel_prpubid: i32 = 2;
-pub const Anum_pg_publication_rel_prrelid: i32 = 3;
-pub const Anum_pg_publication_rel_prqual: i32 = 4;
-pub const Anum_pg_publication_rel_prattrs: i32 = 5;
-pub const Natts_pg_publication_rel: i32 = 5;
 
 // DECLARE_TOAST(pg_publication_rel, 6228, 6229)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_publication_rel_oid_index, 6112, ...)

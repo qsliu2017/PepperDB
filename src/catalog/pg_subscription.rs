@@ -9,6 +9,7 @@ pub const SubscriptionRelationId: Oid = Oid(6100);
 pub const SubscriptionRelation_Rowtype_Id: Oid = Oid(6101);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_subscription {
     pub oid: Oid,
     pub subdbid: Oid, // BKI_LOOKUP(pg_database)
@@ -38,27 +39,6 @@ pub type Form_pg_subscription = *mut FormData_pg_subscription; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX(pg_subscription_subname_index, 6115, SubscriptionNameIndexId)
 // MAKE_SYSCACHE(SUBSCRIPTIONOID, pg_subscription_oid_index, 4)
 // MAKE_SYSCACHE(SUBSCRIPTIONNAME, pg_subscription_subname_index, 4)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_subscription_oid: i32 = 1;
-pub const Anum_pg_subscription_subdbid: i32 = 2;
-pub const Anum_pg_subscription_subskiplsn: i32 = 3;
-pub const Anum_pg_subscription_subname: i32 = 4;
-pub const Anum_pg_subscription_subowner: i32 = 5;
-pub const Anum_pg_subscription_subenabled: i32 = 6;
-pub const Anum_pg_subscription_subbinary: i32 = 7;
-pub const Anum_pg_subscription_substream: i32 = 8;
-pub const Anum_pg_subscription_subtwophasestate: i32 = 9;
-pub const Anum_pg_subscription_subdisableonerr: i32 = 10;
-pub const Anum_pg_subscription_subpasswordrequired: i32 = 11;
-pub const Anum_pg_subscription_subrunasowner: i32 = 12;
-pub const Anum_pg_subscription_subfailover: i32 = 13;
-pub const Anum_pg_subscription_subconninfo: i32 = 14;
-pub const Anum_pg_subscription_subslotname: i32 = 15;
-pub const Anum_pg_subscription_subsynccommit: i32 = 16;
-pub const Anum_pg_subscription_subpublications: i32 = 17;
-pub const Anum_pg_subscription_suborigin: i32 = 18;
-pub const Natts_pg_subscription: i32 = 18;
 
 // In-memory representation (not on-disk): idiomatic Rust.
 pub struct Subscription {

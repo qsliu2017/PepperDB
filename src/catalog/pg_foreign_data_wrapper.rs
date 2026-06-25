@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const ForeignDataWrapperRelationId: Oid = Oid(2328);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_foreign_data_wrapper {
     pub oid: Oid,
     pub fdwname: NameData,
@@ -34,12 +35,3 @@ pub type Form_pg_foreign_data_wrapper = *mut FormData_pg_foreign_data_wrapper; /
 // MAKE_SYSCACHE(FOREIGNDATAWRAPPEROID, pg_foreign_data_wrapper_oid_index, 2)
 // MAKE_SYSCACHE(FOREIGNDATAWRAPPERNAME, pg_foreign_data_wrapper_name_index, 2)
 
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_foreign_data_wrapper_oid: i32 = 1;
-pub const Anum_pg_foreign_data_wrapper_fdwname: i32 = 2;
-pub const Anum_pg_foreign_data_wrapper_fdwowner: i32 = 3;
-pub const Anum_pg_foreign_data_wrapper_fdwhandler: i32 = 4;
-pub const Anum_pg_foreign_data_wrapper_fdwvalidator: i32 = 5;
-pub const Anum_pg_foreign_data_wrapper_fdwacl: i32 = 6;
-pub const Anum_pg_foreign_data_wrapper_fdwoptions: i32 = 7;
-pub const Natts_pg_foreign_data_wrapper: i32 = 7;

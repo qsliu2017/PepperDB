@@ -4,9 +4,9 @@ use crate::c::{bits8, DOUBLEALIGN, INTALIGN, SHORTALIGN, TYPEALIGN};
 use crate::postgres::Datum;
 use crate::varatt::{VARATT_IS_SHORT, VARATT_NOT_PAD_BYTE, VARSIZE_ANY};
 
-// TYPALIGN_* come from catalog/pg_type_d.h (generated). Hand-emit here until the
-// catalog generator exists; values are the C alignment-code chars.
-// TODO(catalog-derive): import TYPALIGN_* from crate::catalog::pg_type once generated.
+// TYPALIGN_* alignment-code chars (pg_type.h hand-translated #defines, not
+// catalog-generated). Kept here as u8 for the alignment arithmetic below; the
+// pg_type column form (i8) lives in crate::catalog::pg_type.
 pub const TYPALIGN_CHAR: u8 = b'c';
 pub const TYPALIGN_SHORT: u8 = b's';
 pub const TYPALIGN_INT: u8 = b'i';

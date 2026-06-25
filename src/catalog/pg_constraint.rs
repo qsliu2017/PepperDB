@@ -12,6 +12,7 @@ pub const ConstraintRelationId: Oid = Oid(2606);
 pub type PgNodeTree = text; // TODO(struct-forward)
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_constraint {
     pub oid: Oid,
     pub conname: NameData,
@@ -55,37 +56,6 @@ pub type Form_pg_constraint = *mut FormData_pg_constraint; // TODO(ptr)
 // MAKE_SYSCACHE(CONSTROID, pg_constraint_oid_index, 16)
 // DECLARE_ARRAY_FOREIGN_KEY_OPT((conrelid, conkey), pg_attribute, (attrelid, attnum))
 // DECLARE_ARRAY_FOREIGN_KEY((confrelid, confkey), pg_attribute, (attrelid, attnum))
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_constraint_oid: i32 = 1;
-pub const Anum_pg_constraint_conname: i32 = 2;
-pub const Anum_pg_constraint_connamespace: i32 = 3;
-pub const Anum_pg_constraint_contype: i32 = 4;
-pub const Anum_pg_constraint_condeferrable: i32 = 5;
-pub const Anum_pg_constraint_condeferred: i32 = 6;
-pub const Anum_pg_constraint_conenforced: i32 = 7;
-pub const Anum_pg_constraint_convalidated: i32 = 8;
-pub const Anum_pg_constraint_conrelid: i32 = 9;
-pub const Anum_pg_constraint_contypid: i32 = 10;
-pub const Anum_pg_constraint_conindid: i32 = 11;
-pub const Anum_pg_constraint_conparentid: i32 = 12;
-pub const Anum_pg_constraint_confrelid: i32 = 13;
-pub const Anum_pg_constraint_confupdtype: i32 = 14;
-pub const Anum_pg_constraint_confdeltype: i32 = 15;
-pub const Anum_pg_constraint_confmatchtype: i32 = 16;
-pub const Anum_pg_constraint_conislocal: i32 = 17;
-pub const Anum_pg_constraint_coninhcount: i32 = 18;
-pub const Anum_pg_constraint_connoinherit: i32 = 19;
-pub const Anum_pg_constraint_conperiod: i32 = 20;
-pub const Anum_pg_constraint_conkey: i32 = 21;
-pub const Anum_pg_constraint_confkey: i32 = 22;
-pub const Anum_pg_constraint_conpfeqop: i32 = 23;
-pub const Anum_pg_constraint_conppeqop: i32 = 24;
-pub const Anum_pg_constraint_conffeqop: i32 = 25;
-pub const Anum_pg_constraint_confdelsetcols: i32 = 26;
-pub const Anum_pg_constraint_conexclop: i32 = 27;
-pub const Anum_pg_constraint_conbin: i32 = 28;
-pub const Natts_pg_constraint: i32 = 28;
 
 // Valid values for contype.
 pub const CONSTRAINT_CHECK: i8 = b'c' as i8;

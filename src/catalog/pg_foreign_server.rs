@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const ForeignServerRelationId: Oid = Oid(1417);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_foreign_server {
     pub oid: Oid,
     pub srvname: NameData,
@@ -35,13 +36,3 @@ pub type Form_pg_foreign_server = *mut FormData_pg_foreign_server; // TODO(ptr)
 // MAKE_SYSCACHE(FOREIGNSERVEROID, pg_foreign_server_oid_index, 2)
 // MAKE_SYSCACHE(FOREIGNSERVERNAME, pg_foreign_server_name_index, 2)
 
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_foreign_server_oid: i32 = 1;
-pub const Anum_pg_foreign_server_srvname: i32 = 2;
-pub const Anum_pg_foreign_server_srvowner: i32 = 3;
-pub const Anum_pg_foreign_server_srvfdw: i32 = 4;
-pub const Anum_pg_foreign_server_srvtype: i32 = 5;
-pub const Anum_pg_foreign_server_srvversion: i32 = 6;
-pub const Anum_pg_foreign_server_srvacl: i32 = 7;
-pub const Anum_pg_foreign_server_srvoptions: i32 = 8;
-pub const Natts_pg_foreign_server: i32 = 8;

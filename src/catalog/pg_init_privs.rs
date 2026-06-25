@@ -5,6 +5,7 @@ use crate::postgres_ext::Oid;
 pub const InitPrivsRelationId: Oid = Oid(3394);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_init_privs {
     pub objoid: Oid,
     pub classoid: Oid, // BKI_LOOKUP(pg_class)
@@ -27,14 +28,6 @@ pub type Form_pg_init_privs = *mut FormData_pg_init_privs; // TODO(ptr)
 
 // DECLARE_TOAST(pg_init_privs, 4155, 4156)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_init_privs_o_c_o_index, 3395, InitPrivsObjIndexId)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_init_privs_objoid: i32 = 1;
-pub const Anum_pg_init_privs_classoid: i32 = 2;
-pub const Anum_pg_init_privs_objsubid: i32 = 3;
-pub const Anum_pg_init_privs_privtype: i32 = 4;
-pub const Anum_pg_init_privs_initprivs: i32 = 5;
-pub const Natts_pg_init_privs: i32 = 5;
 
 #[repr(i8)]
 pub enum InitPrivsType {

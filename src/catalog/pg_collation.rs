@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const CollationRelationId: Oid = Oid(3456);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_collation {
     pub oid: Oid,
     pub collname: NameData,
@@ -29,21 +30,6 @@ pub type Form_pg_collation = *mut FormData_pg_collation; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_collation_oid_index, 3085, CollationOidIndexId)
 // MAKE_SYSCACHE(COLLNAMEENCNSP, pg_collation_name_enc_nsp_index, 8)
 // MAKE_SYSCACHE(COLLOID, pg_collation_oid_index, 8)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_collation_oid: i32 = 1;
-pub const Anum_pg_collation_collname: i32 = 2;
-pub const Anum_pg_collation_collnamespace: i32 = 3;
-pub const Anum_pg_collation_collowner: i32 = 4;
-pub const Anum_pg_collation_collprovider: i32 = 5;
-pub const Anum_pg_collation_collisdeterministic: i32 = 6;
-pub const Anum_pg_collation_collencoding: i32 = 7;
-pub const Anum_pg_collation_collcollate: i32 = 8;
-pub const Anum_pg_collation_collctype: i32 = 9;
-pub const Anum_pg_collation_colllocale: i32 = 10;
-pub const Anum_pg_collation_collicurules: i32 = 11;
-pub const Anum_pg_collation_collversion: i32 = 12;
-pub const Natts_pg_collation: i32 = 12;
 
 pub const COLLPROVIDER_DEFAULT: i8 = b'd' as i8;
 pub const COLLPROVIDER_BUILTIN: i8 = b'b' as i8;

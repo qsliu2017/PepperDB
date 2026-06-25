@@ -5,6 +5,7 @@ use crate::postgres_ext::Oid;
 pub const DefaultAclRelationId: Oid = Oid(826);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_default_acl {
     pub oid: Oid,
     pub defaclrole: Oid,      // BKI_LOOKUP(pg_authid)
@@ -29,14 +30,6 @@ pub type Form_pg_default_acl = *mut FormData_pg_default_acl; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX(pg_default_acl_role_nsp_obj_index, 827, DefaultAclRoleNspObjIndexId)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_default_acl_oid_index, 828, DefaultAclOidIndexId)
 // MAKE_SYSCACHE(DEFACLROLENSPOBJ, pg_default_acl_role_nsp_obj_index, 8)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_default_acl_oid: i32 = 1;
-pub const Anum_pg_default_acl_defaclrole: i32 = 2;
-pub const Anum_pg_default_acl_defaclnamespace: i32 = 3;
-pub const Anum_pg_default_acl_defaclobjtype: i32 = 4;
-pub const Anum_pg_default_acl_defaclacl: i32 = 5;
-pub const Natts_pg_default_acl: i32 = 5;
 
 // Object types for defaclobjtype
 pub const DEFACLOBJ_RELATION: i8 = b'r' as i8;

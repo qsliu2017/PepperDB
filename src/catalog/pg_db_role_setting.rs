@@ -7,6 +7,7 @@ pub const DbRoleSettingRelationId: Oid = Oid(2964);
 
 // CATALOG(pg_db_role_setting,2964,DbRoleSettingRelationId) BKI_SHARED_RELATION
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_db_role_setting {
     pub setdatabase: Oid, // BKI_LOOKUP_OPT(pg_database); database, or 0 for role-specific
     pub setrole: Oid,     // BKI_LOOKUP_OPT(pg_authid); role, or 0 for database-specific
@@ -18,12 +19,6 @@ pub type Form_pg_db_role_setting = *mut FormData_pg_db_role_setting; // TODO(ptr
 
 // DECLARE_TOAST_WITH_MACRO(pg_db_role_setting, 2966, 2967, PgDbRoleSettingToastTable, PgDbRoleSettingToastIndex)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_db_role_setting_databaseid_rol_index, 2965, DbRoleSettingDatidRolidIndexId, ...)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_db_role_setting_setdatabase: i32 = 1;
-pub const Anum_pg_db_role_setting_setrole: i32 = 2;
-pub const Anum_pg_db_role_setting_setconfig: i32 = 3;
-pub const Natts_pg_db_role_setting: i32 = 3;
 
 // Forward refs for the function stubs; repointed in Phase 2.
 #[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::parsenodes::VariableSetStmt in Phase 2")]

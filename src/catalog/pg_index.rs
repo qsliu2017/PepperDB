@@ -13,6 +13,7 @@ pub type Oidvector = text; // TODO(struct-forward)
 pub type PgNodeTree = text; // TODO(struct-forward)
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_index {
     pub indexrelid: Oid, // BKI_LOOKUP(pg_class)
     pub indrelid: Oid,   // BKI_LOOKUP(pg_class)
@@ -46,30 +47,6 @@ pub type Form_pg_index = *mut FormData_pg_index; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_index_indexrelid_index, 2679, IndexRelidIndexId)
 // MAKE_SYSCACHE(INDEXRELID, pg_index_indexrelid_index, 64)
 // DECLARE_ARRAY_FOREIGN_KEY_OPT((indrelid, indkey), pg_attribute, (attrelid, attnum))
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_index_indexrelid: i32 = 1;
-pub const Anum_pg_index_indrelid: i32 = 2;
-pub const Anum_pg_index_indnatts: i32 = 3;
-pub const Anum_pg_index_indnkeyatts: i32 = 4;
-pub const Anum_pg_index_indisunique: i32 = 5;
-pub const Anum_pg_index_indnullsnotdistinct: i32 = 6;
-pub const Anum_pg_index_indisprimary: i32 = 7;
-pub const Anum_pg_index_indisexclusion: i32 = 8;
-pub const Anum_pg_index_indimmediate: i32 = 9;
-pub const Anum_pg_index_indisclustered: i32 = 10;
-pub const Anum_pg_index_indisvalid: i32 = 11;
-pub const Anum_pg_index_indcheckxmin: i32 = 12;
-pub const Anum_pg_index_indisready: i32 = 13;
-pub const Anum_pg_index_indislive: i32 = 14;
-pub const Anum_pg_index_indisreplident: i32 = 15;
-pub const Anum_pg_index_indkey: i32 = 16;
-pub const Anum_pg_index_indcollation: i32 = 17;
-pub const Anum_pg_index_indclass: i32 = 18;
-pub const Anum_pg_index_indoption: i32 = 19;
-pub const Anum_pg_index_indexprs: i32 = 20;
-pub const Anum_pg_index_indpred: i32 = 21;
-pub const Natts_pg_index: i32 = 21;
 
 // per-column indoption bits (packed in the on-disk indoption int2vector)
 bitflags! {

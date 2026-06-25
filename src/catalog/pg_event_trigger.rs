@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const EventTriggerRelationId: Oid = Oid(3466);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_event_trigger {
     pub oid: Oid,
     pub evtname: NameData,
@@ -25,12 +26,3 @@ pub type Form_pg_event_trigger = *mut FormData_pg_event_trigger; // TODO(ptr)
 // MAKE_SYSCACHE(EVENTTRIGGERNAME, pg_event_trigger_evtname_index, 8)
 // MAKE_SYSCACHE(EVENTTRIGGEROID, pg_event_trigger_oid_index, 8)
 
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_event_trigger_oid: i32 = 1;
-pub const Anum_pg_event_trigger_evtname: i32 = 2;
-pub const Anum_pg_event_trigger_evtevent: i32 = 3;
-pub const Anum_pg_event_trigger_evtowner: i32 = 4;
-pub const Anum_pg_event_trigger_evtfoid: i32 = 5;
-pub const Anum_pg_event_trigger_evtenabled: i32 = 6;
-pub const Anum_pg_event_trigger_evttags: i32 = 7;
-pub const Natts_pg_event_trigger: i32 = 7;

@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const ConversionRelationId: Oid = Oid(2607);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_conversion {
     pub oid: Oid,
     pub conname: NameData,
@@ -25,17 +26,6 @@ pub type Form_pg_conversion = *mut FormData_pg_conversion; // TODO(ptr)
 // MAKE_SYSCACHE(CONDEFAULT, pg_conversion_default_index, 8)
 // MAKE_SYSCACHE(CONNAMENSP, pg_conversion_name_nsp_index, 8)
 // MAKE_SYSCACHE(CONVOID, pg_conversion_oid_index, 8)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_conversion_oid: i32 = 1;
-pub const Anum_pg_conversion_conname: i32 = 2;
-pub const Anum_pg_conversion_connamespace: i32 = 3;
-pub const Anum_pg_conversion_conowner: i32 = 4;
-pub const Anum_pg_conversion_conforencoding: i32 = 5;
-pub const Anum_pg_conversion_contoencoding: i32 = 6;
-pub const Anum_pg_conversion_conproc: i32 = 7;
-pub const Anum_pg_conversion_condefault: i32 = 8;
-pub const Natts_pg_conversion: i32 = 8;
 
 #[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
 pub struct ObjectAddress; // TODO(struct-forward)

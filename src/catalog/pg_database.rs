@@ -8,6 +8,7 @@ pub const DatabaseRelationId: Oid = Oid(1262);
 pub const DatabaseRelation_Rowtype_Id: Oid = Oid(1248);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_database {
     pub oid: Oid,
     pub datname: NameData,
@@ -50,27 +51,6 @@ pub type Form_pg_database = *mut FormData_pg_database; // TODO(ptr)
 pub const Template0DbOid: Oid = Oid(4);
 // DECLARE_OID_DEFINING_MACRO(PostgresDbOid, 5)
 pub const PostgresDbOid: Oid = Oid(5);
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_database_oid: i32 = 1;
-pub const Anum_pg_database_datname: i32 = 2;
-pub const Anum_pg_database_datdba: i32 = 3;
-pub const Anum_pg_database_encoding: i32 = 4;
-pub const Anum_pg_database_datlocprovider: i32 = 5;
-pub const Anum_pg_database_datistemplate: i32 = 6;
-pub const Anum_pg_database_datallowconn: i32 = 7;
-pub const Anum_pg_database_dathasloginevt: i32 = 8;
-pub const Anum_pg_database_datconnlimit: i32 = 9;
-pub const Anum_pg_database_datfrozenxid: i32 = 10;
-pub const Anum_pg_database_datminmxid: i32 = 11;
-pub const Anum_pg_database_dattablespace: i32 = 12;
-pub const Anum_pg_database_datcollate: i32 = 13;
-pub const Anum_pg_database_datctype: i32 = 14;
-pub const Anum_pg_database_datlocale: i32 = 15;
-pub const Anum_pg_database_daticurules: i32 = 16;
-pub const Anum_pg_database_datcollversion: i32 = 17;
-pub const Anum_pg_database_datacl: i32 = 18;
-pub const Natts_pg_database: i32 = 18;
 
 pub const DATCONNLIMIT_UNLIMITED: i32 = -1;
 pub const DATCONNLIMIT_INVALID_DB: i32 = -2;

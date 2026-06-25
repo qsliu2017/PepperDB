@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const LanguageRelationId: Oid = Oid(2612);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_language {
     pub oid: Oid,
     pub lanname: NameData,
@@ -36,14 +37,3 @@ pub type Form_pg_language = *mut FormData_pg_language; // TODO(ptr)
 // MAKE_SYSCACHE(LANGNAME, pg_language_name_index, 4)
 // MAKE_SYSCACHE(LANGOID, pg_language_oid_index, 4)
 
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_language_oid: i32 = 1;
-pub const Anum_pg_language_lanname: i32 = 2;
-pub const Anum_pg_language_lanowner: i32 = 3;
-pub const Anum_pg_language_lanispl: i32 = 4;
-pub const Anum_pg_language_lanpltrusted: i32 = 5;
-pub const Anum_pg_language_lanplcallfoid: i32 = 6;
-pub const Anum_pg_language_laninline: i32 = 7;
-pub const Anum_pg_language_lanvalidator: i32 = 8;
-pub const Anum_pg_language_lanacl: i32 = 9;
-pub const Natts_pg_language: i32 = 9;

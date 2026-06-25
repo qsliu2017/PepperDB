@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const OperatorRelationId: Oid = Oid(2617);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_operator {
     pub oid: Oid,
     pub oprname: NameData,
@@ -30,24 +31,6 @@ pub type Form_pg_operator = *mut FormData_pg_operator; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX(pg_operator_oprname_l_r_n_index, 2689, OperatorNameNspIndexId, ...)
 // MAKE_SYSCACHE(OPEROID, pg_operator_oid_index, 32)
 // MAKE_SYSCACHE(OPERNAMENSP, pg_operator_oprname_l_r_n_index, 256)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_operator_oid: i32 = 1;
-pub const Anum_pg_operator_oprname: i32 = 2;
-pub const Anum_pg_operator_oprnamespace: i32 = 3;
-pub const Anum_pg_operator_oprowner: i32 = 4;
-pub const Anum_pg_operator_oprkind: i32 = 5;
-pub const Anum_pg_operator_oprcanmerge: i32 = 6;
-pub const Anum_pg_operator_oprcanhash: i32 = 7;
-pub const Anum_pg_operator_oprleft: i32 = 8;
-pub const Anum_pg_operator_oprright: i32 = 9;
-pub const Anum_pg_operator_oprresult: i32 = 10;
-pub const Anum_pg_operator_oprcom: i32 = 11;
-pub const Anum_pg_operator_oprnegate: i32 = 12;
-pub const Anum_pg_operator_oprcode: i32 = 13;
-pub const Anum_pg_operator_oprrest: i32 = 14;
-pub const Anum_pg_operator_oprjoin: i32 = 15;
-pub const Natts_pg_operator: i32 = 15;
 
 // Forward refs; repointed in Phase 2.
 #[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]

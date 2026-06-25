@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const TriggerRelationId: Oid = Oid(2620);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_trigger {
     pub oid: Oid,
     pub tgrelid: Oid,
@@ -30,28 +31,6 @@ pub struct FormData_pg_trigger {
 }
 
 pub type Form_pg_trigger = *mut FormData_pg_trigger; // TODO(ptr)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_trigger_oid: i32 = 1;
-pub const Anum_pg_trigger_tgrelid: i32 = 2;
-pub const Anum_pg_trigger_tgparentid: i32 = 3;
-pub const Anum_pg_trigger_tgname: i32 = 4;
-pub const Anum_pg_trigger_tgfoid: i32 = 5;
-pub const Anum_pg_trigger_tgtype: i32 = 6;
-pub const Anum_pg_trigger_tgenabled: i32 = 7;
-pub const Anum_pg_trigger_tgisinternal: i32 = 8;
-pub const Anum_pg_trigger_tgconstrrelid: i32 = 9;
-pub const Anum_pg_trigger_tgconstrindid: i32 = 10;
-pub const Anum_pg_trigger_tgconstraint: i32 = 11;
-pub const Anum_pg_trigger_tgdeferrable: i32 = 12;
-pub const Anum_pg_trigger_tginitdeferred: i32 = 13;
-pub const Anum_pg_trigger_tgnargs: i32 = 14;
-pub const Anum_pg_trigger_tgattr: i32 = 15;
-pub const Anum_pg_trigger_tgargs: i32 = 16;
-pub const Anum_pg_trigger_tgqual: i32 = 17;
-pub const Anum_pg_trigger_tgoldtable: i32 = 18;
-pub const Anum_pg_trigger_tgnewtable: i32 = 19;
-pub const Natts_pg_trigger: i32 = 19;
 
 // DECLARE_TOAST(pg_trigger, 2336, 2337)
 // DECLARE_INDEX(pg_trigger_tgconstraint_index, 2699, TriggerConstraintIndexId, ...)

@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const EnumRelationId: Oid = Oid(3501);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_enum {
     pub oid: Oid,
     pub enumtypid: Oid, // BKI_LOOKUP(pg_type)
@@ -20,13 +21,6 @@ pub type Form_pg_enum = *mut FormData_pg_enum; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX(pg_enum_typid_sortorder_index, 3534, EnumTypIdSortOrderIndexId)
 // MAKE_SYSCACHE(ENUMOID, pg_enum_oid_index, 8)
 // MAKE_SYSCACHE(ENUMTYPOIDNAME, pg_enum_typid_label_index, 8)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_enum_oid: i32 = 1;
-pub const Anum_pg_enum_enumtypid: i32 = 2;
-pub const Anum_pg_enum_enumsortorder: i32 = 3;
-pub const Anum_pg_enum_enumlabel: i32 = 4;
-pub const Natts_pg_enum: i32 = 4;
 
 // prototypes for functions in pg_enum.c
 

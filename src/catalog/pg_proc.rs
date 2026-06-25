@@ -14,6 +14,7 @@ pub type PgNodeTree = text; // TODO(struct-forward)
 pub type Aclitem = text; // TODO(struct-forward)
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_proc {
     pub oid: Oid,
     pub proname: NameData,
@@ -56,39 +57,6 @@ pub type Form_pg_proc = *mut FormData_pg_proc; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX(pg_proc_proname_args_nsp_index, 2691, ProcedureNameArgsNspIndexId, ...)
 // MAKE_SYSCACHE(PROCOID, pg_proc_oid_index, 128)
 // MAKE_SYSCACHE(PROCNAMEARGSNSP, pg_proc_proname_args_nsp_index, 128)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_proc_oid: i32 = 1;
-pub const Anum_pg_proc_proname: i32 = 2;
-pub const Anum_pg_proc_pronamespace: i32 = 3;
-pub const Anum_pg_proc_proowner: i32 = 4;
-pub const Anum_pg_proc_prolang: i32 = 5;
-pub const Anum_pg_proc_procost: i32 = 6;
-pub const Anum_pg_proc_prorows: i32 = 7;
-pub const Anum_pg_proc_provariadic: i32 = 8;
-pub const Anum_pg_proc_prosupport: i32 = 9;
-pub const Anum_pg_proc_prokind: i32 = 10;
-pub const Anum_pg_proc_prosecdef: i32 = 11;
-pub const Anum_pg_proc_proleakproof: i32 = 12;
-pub const Anum_pg_proc_proisstrict: i32 = 13;
-pub const Anum_pg_proc_proretset: i32 = 14;
-pub const Anum_pg_proc_provolatile: i32 = 15;
-pub const Anum_pg_proc_proparallel: i32 = 16;
-pub const Anum_pg_proc_pronargs: i32 = 17;
-pub const Anum_pg_proc_pronargdefaults: i32 = 18;
-pub const Anum_pg_proc_prorettype: i32 = 19;
-pub const Anum_pg_proc_proargtypes: i32 = 20;
-pub const Anum_pg_proc_proallargtypes: i32 = 21;
-pub const Anum_pg_proc_proargmodes: i32 = 22;
-pub const Anum_pg_proc_proargnames: i32 = 23;
-pub const Anum_pg_proc_proargdefaults: i32 = 24;
-pub const Anum_pg_proc_protrftypes: i32 = 25;
-pub const Anum_pg_proc_prosrc: i32 = 26;
-pub const Anum_pg_proc_probin: i32 = 27;
-pub const Anum_pg_proc_prosqlbody: i32 = 28;
-pub const Anum_pg_proc_proconfig: i32 = 29;
-pub const Anum_pg_proc_proacl: i32 = 30;
-pub const Natts_pg_proc: i32 = 30;
 
 // Symbolic values for prokind column.
 pub const PROKIND_FUNCTION: i8 = b'f' as i8;

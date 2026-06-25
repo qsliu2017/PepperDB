@@ -9,6 +9,7 @@ pub const AttrDefaultRelationId: Oid = Oid(2604);
 pub type PgNodeTree = text; // TODO(struct-forward)
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_attrdef {
     pub oid: Oid,
     pub adrelid: Oid, // BKI_LOOKUP(pg_class)
@@ -23,13 +24,6 @@ pub type Form_pg_attrdef = *mut FormData_pg_attrdef; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX(pg_attrdef_adrelid_adnum_index, 2656, AttrDefaultIndexId, ...)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_attrdef_oid_index, 2657, AttrDefaultOidIndexId, ...)
 // DECLARE_FOREIGN_KEY((adrelid, adnum), pg_attribute, (attrelid, attnum))
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_attrdef_oid: i32 = 1;
-pub const Anum_pg_attrdef_adrelid: i32 = 2;
-pub const Anum_pg_attrdef_adnum: i32 = 3;
-pub const Anum_pg_attrdef_adbin: i32 = 4;
-pub const Natts_pg_attrdef: i32 = 4;
 
 // Forward refs for the function stubs; repointed in Phase 2.
 #[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]

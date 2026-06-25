@@ -11,11 +11,11 @@ use crate::postgres_ext::Oid;
 // (NULL) HeapTuple is the "not found" sentinel, modeled as Option<HeapTuple>::None.
 pub type HeapTuple = *mut HeapTupleData; // TODO(ptr)
 
-/// System cache identifiers. Hand-maintained list mirroring the generated
-/// `enum SysCacheIdentifier` (catalog/syscache_ids.h): the alphabetically-sorted
-/// set of MAKE_SYSCACHE declarations across the catalog headers. The discriminant
-/// VALUES MATTER -- they index the cache array, so keep order and start at 0.
-/// TODO(catalog-derive): regenerate from MAKE_SYSCACHE via build.rs.
+/// System cache identifiers (the generated `catalog/syscache_ids.h`): the
+/// alphabetically-sorted set of `MAKE_SYSCACHE` declarations across the catalog
+/// headers. Hand-maintained here because those annotations live in the catalog
+/// `.h` headers (not a `.dat`); the discriminant VALUES MATTER -- they index the
+/// cache array, so keep the order and start at 0.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SysCacheIdentifier {

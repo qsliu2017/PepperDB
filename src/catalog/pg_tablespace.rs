@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const TableSpaceRelationId: Oid = Oid(1213); // BKI_SHARED_RELATION
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_tablespace {
     pub oid: Oid,
     pub spcname: NameData,
@@ -16,14 +17,6 @@ pub struct FormData_pg_tablespace {
 }
 
 pub type Form_pg_tablespace = *mut FormData_pg_tablespace; // TODO(ptr)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_tablespace_oid: i32 = 1;
-pub const Anum_pg_tablespace_spcname: i32 = 2;
-pub const Anum_pg_tablespace_spcowner: i32 = 3;
-pub const Anum_pg_tablespace_spcacl: i32 = 4;
-pub const Anum_pg_tablespace_spcoptions: i32 = 5;
-pub const Natts_pg_tablespace: i32 = 5;
 
 // DECLARE_TOAST_WITH_MACRO(pg_tablespace, 4185, 4186, ...)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_tablespace_oid_index, 2697, TablespaceOidIndexId, ...)

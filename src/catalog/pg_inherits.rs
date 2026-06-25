@@ -8,6 +8,7 @@ pub const InheritsRelationId: Oid = Oid(2611);
 
 /// pg_inherits has no implicit oid column.
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_inherits {
     pub inhrelid: Oid,   // BKI_LOOKUP(pg_class)
     pub inhparent: Oid,  // BKI_LOOKUP(pg_class)
@@ -19,13 +20,6 @@ pub type Form_pg_inherits = *mut FormData_pg_inherits; // TODO(ptr)
 
 // DECLARE_UNIQUE_INDEX_PKEY(pg_inherits_relid_seqno_index, 2680, InheritsRelidSeqnoIndexId, pg_inherits, btree(inhrelid oid_ops, inhseqno int4_ops))
 // DECLARE_INDEX(pg_inherits_parent_index, 2187, InheritsParentIndexId, pg_inherits, btree(inhparent oid_ops))
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_inherits_inhrelid: i32 = 1;
-pub const Anum_pg_inherits_inhparent: i32 = 2;
-pub const Anum_pg_inherits_inhseqno: i32 = 3;
-pub const Anum_pg_inherits_inhdetachpending: i32 = 4;
-pub const Natts_pg_inherits: i32 = 4;
 
 /// Outputs of `find_inheritance_children_extended` beyond the child list.
 pub struct DetachedInfo {

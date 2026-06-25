@@ -8,6 +8,7 @@ pub const StatisticRelationId: Oid = Oid(2619);
 pub const STATISTIC_NUM_SLOTS: i32 = 5;
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_statistic {
     pub starelid: Oid,
     pub staattnum: i16,
@@ -44,40 +45,6 @@ pub struct FormData_pg_statistic {
 }
 
 pub type Form_pg_statistic = *mut FormData_pg_statistic; // TODO(ptr)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_statistic_starelid: i32 = 1;
-pub const Anum_pg_statistic_staattnum: i32 = 2;
-pub const Anum_pg_statistic_stainherit: i32 = 3;
-pub const Anum_pg_statistic_stanullfrac: i32 = 4;
-pub const Anum_pg_statistic_stawidth: i32 = 5;
-pub const Anum_pg_statistic_stadistinct: i32 = 6;
-pub const Anum_pg_statistic_stakind1: i32 = 7;
-pub const Anum_pg_statistic_stakind2: i32 = 8;
-pub const Anum_pg_statistic_stakind3: i32 = 9;
-pub const Anum_pg_statistic_stakind4: i32 = 10;
-pub const Anum_pg_statistic_stakind5: i32 = 11;
-pub const Anum_pg_statistic_staop1: i32 = 12;
-pub const Anum_pg_statistic_staop2: i32 = 13;
-pub const Anum_pg_statistic_staop3: i32 = 14;
-pub const Anum_pg_statistic_staop4: i32 = 15;
-pub const Anum_pg_statistic_staop5: i32 = 16;
-pub const Anum_pg_statistic_stacoll1: i32 = 17;
-pub const Anum_pg_statistic_stacoll2: i32 = 18;
-pub const Anum_pg_statistic_stacoll3: i32 = 19;
-pub const Anum_pg_statistic_stacoll4: i32 = 20;
-pub const Anum_pg_statistic_stacoll5: i32 = 21;
-pub const Anum_pg_statistic_stanumbers1: i32 = 22;
-pub const Anum_pg_statistic_stanumbers2: i32 = 23;
-pub const Anum_pg_statistic_stanumbers3: i32 = 24;
-pub const Anum_pg_statistic_stanumbers4: i32 = 25;
-pub const Anum_pg_statistic_stanumbers5: i32 = 26;
-pub const Anum_pg_statistic_stavalues1: i32 = 27;
-pub const Anum_pg_statistic_stavalues2: i32 = 28;
-pub const Anum_pg_statistic_stavalues3: i32 = 29;
-pub const Anum_pg_statistic_stavalues4: i32 = 30;
-pub const Anum_pg_statistic_stavalues5: i32 = 31;
-pub const Natts_pg_statistic: i32 = 31;
 
 // DECLARE_TOAST(pg_statistic, 2840, 2841)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_statistic_relid_att_inh_index, 2696, StatisticRelidAttnumInhIndexId, ...)

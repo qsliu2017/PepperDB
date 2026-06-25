@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const SubscriptionRelRelationId: Oid = Oid(6102);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_subscription_rel {
     pub srsubid: Oid, // BKI_LOOKUP(pg_subscription)
     pub srrelid: Oid, // BKI_LOOKUP(pg_class)
@@ -18,13 +19,6 @@ pub type Form_pg_subscription_rel = *mut FormData_pg_subscription_rel; // TODO(p
 
 // DECLARE_UNIQUE_INDEX_PKEY(pg_subscription_rel_srrelid_srsubid_index, 6117, SubscriptionRelSrrelidSrsubidIndexId)
 // MAKE_SYSCACHE(SUBSCRIPTIONRELMAP, pg_subscription_rel_srrelid_srsubid_index, 64)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_subscription_rel_srsubid: i32 = 1;
-pub const Anum_pg_subscription_rel_srrelid: i32 = 2;
-pub const Anum_pg_subscription_rel_srsubstate: i32 = 3;
-pub const Anum_pg_subscription_rel_srsublsn: i32 = 4;
-pub const Natts_pg_subscription_rel: i32 = 4;
 
 // EXPOSE_TO_CLIENT_CODE -- substate constants
 

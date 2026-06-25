@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const StatisticExtRelationId: Oid = Oid(3381);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_statistic_ext {
     pub oid: Oid,
     pub stxrelid: Oid,
@@ -20,18 +21,6 @@ pub struct FormData_pg_statistic_ext {
 }
 
 pub type Form_pg_statistic_ext = *mut FormData_pg_statistic_ext; // TODO(ptr)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_statistic_ext_oid: i32 = 1;
-pub const Anum_pg_statistic_ext_stxrelid: i32 = 2;
-pub const Anum_pg_statistic_ext_stxname: i32 = 3;
-pub const Anum_pg_statistic_ext_stxnamespace: i32 = 4;
-pub const Anum_pg_statistic_ext_stxowner: i32 = 5;
-pub const Anum_pg_statistic_ext_stxkeys: i32 = 6;
-pub const Anum_pg_statistic_ext_stxstattarget: i32 = 7;
-pub const Anum_pg_statistic_ext_stxkind: i32 = 8;
-pub const Anum_pg_statistic_ext_stxexprs: i32 = 9;
-pub const Natts_pg_statistic_ext: i32 = 9;
 
 // DECLARE_TOAST(pg_statistic_ext, 3439, 3440)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_statistic_ext_oid_index, 3380, StatisticExtOidIndexId, ...)

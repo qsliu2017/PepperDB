@@ -6,6 +6,7 @@ use crate::postgres_ext::Oid;
 pub const ParameterAclRelationId: Oid = Oid(6243); // BKI_SHARED_RELATION
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_parameter_acl {
     pub oid: Oid,
     // CATALOG_VARLEN (not in fixed part)
@@ -14,12 +15,6 @@ pub struct FormData_pg_parameter_acl {
 }
 
 pub type Form_pg_parameter_acl = *mut FormData_pg_parameter_acl; // TODO(ptr)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_parameter_acl_oid: i32 = 1;
-pub const Anum_pg_parameter_acl_parname: i32 = 2;
-pub const Anum_pg_parameter_acl_paracl: i32 = 3;
-pub const Natts_pg_parameter_acl: i32 = 3;
 
 // DECLARE_TOAST_WITH_MACRO(pg_parameter_acl, 6244, 6245, ...)
 // DECLARE_UNIQUE_INDEX(pg_parameter_acl_parname_index, 6246, ...)

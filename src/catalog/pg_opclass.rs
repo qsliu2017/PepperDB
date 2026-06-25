@@ -8,6 +8,7 @@ pub const OperatorClassRelationId: Oid = Oid(2616);
 
 /// On-disk catalog row for pg_opclass.
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_opclass {
     pub oid: Oid,
     pub opcmethod: Oid,        // index access method opclass is for (BKI_LOOKUP pg_am)
@@ -21,18 +22,6 @@ pub struct FormData_pg_opclass {
 }
 
 pub type Form_pg_opclass = *mut FormData_pg_opclass; // TODO(ptr)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_opclass_oid: i32 = 1;
-pub const Anum_pg_opclass_opcmethod: i32 = 2;
-pub const Anum_pg_opclass_opcname: i32 = 3;
-pub const Anum_pg_opclass_opcnamespace: i32 = 4;
-pub const Anum_pg_opclass_opcowner: i32 = 5;
-pub const Anum_pg_opclass_opcfamily: i32 = 6;
-pub const Anum_pg_opclass_opcintype: i32 = 7;
-pub const Anum_pg_opclass_opcdefault: i32 = 8;
-pub const Anum_pg_opclass_opckeytype: i32 = 9;
-pub const Natts_pg_opclass: i32 = 9;
 
 // DECLARE_UNIQUE_INDEX(pg_opclass_am_name_nsp_index, 2686, OpclassAmNameNspIndexId, ...)
 pub const OpclassAmNameNspIndexId: Oid = Oid(2686);

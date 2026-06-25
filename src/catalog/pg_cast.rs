@@ -5,6 +5,7 @@ use crate::postgres_ext::Oid;
 pub const CastRelationId: Oid = Oid(2605);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_cast {
     pub oid: Oid,
     pub castsource: Oid, // BKI_LOOKUP(pg_type)
@@ -19,15 +20,6 @@ pub type Form_pg_cast = *mut FormData_pg_cast; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_cast_oid_index, 2660, CastOidIndexId, ...)
 // DECLARE_UNIQUE_INDEX(pg_cast_source_target_index, 2661, CastSourceTargetIndexId, ...)
 // MAKE_SYSCACHE(CASTSOURCETARGET, pg_cast_source_target_index, 256)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_cast_oid: i32 = 1;
-pub const Anum_pg_cast_castsource: i32 = 2;
-pub const Anum_pg_cast_casttarget: i32 = 3;
-pub const Anum_pg_cast_castfunc: i32 = 4;
-pub const Anum_pg_cast_castcontext: i32 = 5;
-pub const Anum_pg_cast_castmethod: i32 = 6;
-pub const Natts_pg_cast: i32 = 6;
 
 /// Allowable values for pg_cast.castcontext (stored as char; ASCII codes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

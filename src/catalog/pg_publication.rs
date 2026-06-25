@@ -7,6 +7,7 @@ use crate::postgres_ext::Oid;
 pub const PublicationRelationId: Oid = Oid(6104);
 
 #[repr(C)]
+#[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_publication {
     pub oid: Oid,
     pub pubname: NameData,
@@ -26,19 +27,6 @@ pub type Form_pg_publication = *mut FormData_pg_publication; // TODO(ptr)
 // DECLARE_UNIQUE_INDEX(pg_publication_pubname_index, 6111, PublicationNameIndexId, ...)
 // MAKE_SYSCACHE(PUBLICATIONOID, pg_publication_oid_index, 8)
 // MAKE_SYSCACHE(PUBLICATIONNAME, pg_publication_pubname_index, 8)
-
-// TODO(catalog-derive): replace hand-emitted _d.h consts with #[derive(Catalog)]
-pub const Anum_pg_publication_oid: i32 = 1;
-pub const Anum_pg_publication_pubname: i32 = 2;
-pub const Anum_pg_publication_pubowner: i32 = 3;
-pub const Anum_pg_publication_puballtables: i32 = 4;
-pub const Anum_pg_publication_pubinsert: i32 = 5;
-pub const Anum_pg_publication_pubupdate: i32 = 6;
-pub const Anum_pg_publication_pubdelete: i32 = 7;
-pub const Anum_pg_publication_pubtruncate: i32 = 8;
-pub const Anum_pg_publication_pubviaroot: i32 = 9;
-pub const Anum_pg_publication_pubgencols: i32 = 10;
-pub const Natts_pg_publication: i32 = 10;
 
 // In-memory structs (not on-disk).
 pub struct PublicationActions {
