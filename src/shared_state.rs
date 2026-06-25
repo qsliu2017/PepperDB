@@ -30,6 +30,9 @@ pub struct SharedStateConfig {
     /// budget blocks, so a soft cap above the budget would let opens stall on
     /// the semaphore instead of LRU-closing first (see step-05 fd.rs).
     pub max_open_files: usize,
+    /// Shared buffer count (PG `NBuffers`). Small test-friendly default; the real
+    /// size comes from the GUC at startup. TODO(guc): drive from ProcessConfig.
+    pub nbuffers: usize,
 }
 
 impl Default for SharedStateConfig {
@@ -39,6 +42,9 @@ impl Default for SharedStateConfig {
             // Leave headroom below the hard budget so transient/durable-op opens
             // and parent-dir fsyncs do not contend with the managed vfd pool.
             max_open_files: io_backend::DEFAULT_FD_BUDGET / 2,
+            // Small default keeps SharedState construction cheap; production
+            // sizing is a GUC concern (TODO(guc)).
+            nbuffers: 1024,
         }
     }
 }
@@ -66,6 +72,11 @@ pub struct SharedState {
     /// (step 17). Single-process: one shared structure instead of the
     /// per-checkpointer table + cross-process forward queue.
     pub sync_requests: Arc<crate::storage::sync::SyncRequests>,
+
+    /// Shared buffer pool (PG `BufferManagerShmemInit`): the page array,
+    /// descriptors, the tag->buffer map, and the clock-sweep strategy. Replaces
+    /// the C shmem buffer cache; reached via [`SharedState::buffers`].
+    pub buffers: Arc<crate::backend::storage::buffer::buf_init::BufferPool>,
     // Future Arc fields (varsup, xlog, clog, bufmgr, lockmgr, procarray,
     // sinval, checkpointer, ...) are inserted by later steps -- see new().
 }
@@ -111,7 +122,11 @@ impl SharedState {
         //   (CommitTsShmemInit -- deferred)
         // TODO(step14): SUBTRANSShmemInit  here
         //   (MultiXactShmemInit -- deferred)
-        // TODO(step12): BufferManagerShmemInit  here
+        // BufferManagerShmemInit -- step12 (part A), DONE. The page pool is
+        // sized from the NBuffers GUC carried on ProcessConfig.
+        let buffers = Arc::new(
+            crate::backend::storage::buffer::buf_init::BufferPool::new(config.nbuffers.max(1)),
+        );
 
         // Set up lock manager:
         // TODO(step15): LockManagerShmemInit  here
@@ -148,7 +163,7 @@ impl SharedState {
         //   (WaitEventCustomShmemInit / InjectionPointShmemInit -- deferred)
         //   (AioShmemInit -- deferred: tokio I/O leaf replaces the aio subsys)
 
-        Arc::new(SharedState { config: process_config, fd, proc_signal, sync_requests })
+        Arc::new(SharedState { config: process_config, fd, proc_signal, sync_requests, buffers })
     }
 
     /// Process-wide startup config (PG globals.c config half).
@@ -174,6 +189,11 @@ impl SharedState {
     /// The shared pending-fsync / pending-unlink queue (PG sync.c).
     pub fn sync_requests(&self) -> &Arc<crate::storage::sync::SyncRequests> {
         &self.sync_requests
+    }
+
+    /// The shared buffer pool (PG buffer cache).
+    pub fn buffers(&self) -> &Arc<crate::backend::storage::buffer::buf_init::BufferPool> {
+        &self.buffers
     }
 }
 
@@ -226,7 +246,8 @@ mod tests {
 
     #[test]
     fn config_respects_custom_budget() {
-        let s = SharedState::new(SharedStateConfig { fd_budget: 42, max_open_files: 8 });
+        let s = SharedState::new(SharedStateConfig { fd_budget: 42, max_open_files: 8, nbuffers: 16 });
         assert_eq!(s.io().available_permits(), 42);
+        assert_eq!(s.buffers().nbuffers(), 16);
     }
 }

@@ -564,10 +564,14 @@ pub type BTScanPos = *mut BTScanPosData; // TODO(ptr)
 
 /// True iff the scan position currently holds a buffer pin.
 pub fn BTScanPosIsPinned(scanpos: &BTScanPosData) -> bool {
-    crate::storage::bufmgr::BufferIsValid(scanpos.buf)
+    scanpos.buf.is_valid()
 }
 /// Release the scan position's buffer pin.
 pub fn BTScanPosUnpin(scanpos: &mut BTScanPosData) {
+    // nbtree is a deferred mechanical port still referencing the C-named
+    // ReleaseBuffer shim; the real call is `shared.buffers().release_buffer`.
+    // TODO(nbtree): route through the pool once the scan carries a SharedState.
+    #[allow(deprecated)]
     crate::storage::bufmgr::ReleaseBuffer(scanpos.buf);
     scanpos.buf = crate::storage::buf::INVALID_BUFFER;
 }

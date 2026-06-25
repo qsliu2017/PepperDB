@@ -30,28 +30,52 @@ pub const LEAF_NODES_PER_PAGE: usize = NODES_PER_PAGE - NON_LEAF_NODES_PER_PAGE;
 /// Number of FSM "slots" on a FSM page (use outside fsmpage.c).
 pub const SLOTS_PER_FSM_PAGE: usize = LEAF_NODES_PER_PAGE;
 
-/// Returns a slot with at least `minvalue` free space, or None if none. (C
-/// returns -1 when not found.)
+// The page-content logic lives in `backend::storage::freespace::fsmpage` as
+// methods on the `FsmPage` / `FsmPageMut` views (rules.md 3). The C-named free
+// functions below are `#[deprecated]` shims; new code uses the methods directly.
+
+use crate::backend::storage::freespace::fsmpage::{FsmPage, FsmPageMut};
+
+/// C: `fsm_search_avail`. In C this takes a `Buffer`; here the page-content
+/// search is [`FsmPageMut::search_avail`]. The `Buffer`-based form cannot resolve
+/// the page without the buffer pool handle, so callers in freespace.rs hold the
+/// page directly; this shim is retained only for cross-reference.
+#[deprecated(note = "use `FsmPageMut::new(page).search_avail(minvalue, advancenext)`")]
 pub fn fsm_search_avail(
     _buf: Buffer,
     _minvalue: u8,
     _advancenext: bool,
     _exclusive_lock_held: bool,
 ) -> Option<i32> {
-    unimplemented!()
+    unimplemented!("use FsmPageMut::search_avail on the locked page")
 }
-pub fn fsm_get_avail(_page: &Page, _slot: i32) -> u8 {
-    unimplemented!()
+
+/// C: `fsm_get_avail`. Use [`FsmPage::get_avail`].
+#[deprecated(note = "use `FsmPage::new(page).get_avail(slot)`")]
+pub fn fsm_get_avail(page: &Page, slot: i32) -> u8 {
+    FsmPage::new(page).get_avail(slot as usize)
 }
-pub fn fsm_get_max_avail(_page: &Page) -> u8 {
-    unimplemented!()
+
+/// C: `fsm_get_max_avail`. Use [`FsmPage::get_max_avail`].
+#[deprecated(note = "use `FsmPage::new(page).get_max_avail()`")]
+pub fn fsm_get_max_avail(page: &Page) -> u8 {
+    FsmPage::new(page).get_max_avail()
 }
-pub fn fsm_set_avail(_page: &mut Page, _slot: i32, _value: u8) -> bool {
-    unimplemented!()
+
+/// C: `fsm_set_avail`. Use [`FsmPageMut::set_avail`].
+#[deprecated(note = "use `FsmPageMut::new(page).set_avail(slot, value)`")]
+pub fn fsm_set_avail(page: &mut Page, slot: i32, value: u8) -> bool {
+    FsmPageMut::new(page).set_avail(slot as usize, value)
 }
-pub fn fsm_truncate_avail(_page: &mut Page, _nslots: i32) -> bool {
-    unimplemented!()
+
+/// C: `fsm_truncate_avail`. Use [`FsmPageMut::truncate_avail`].
+#[deprecated(note = "use `FsmPageMut::new(page).truncate_avail(nslots)`")]
+pub fn fsm_truncate_avail(page: &mut Page, nslots: i32) -> bool {
+    FsmPageMut::new(page).truncate_avail(nslots as usize)
 }
-pub fn fsm_rebuild_page(_page: &mut Page) -> bool {
-    unimplemented!()
+
+/// C: `fsm_rebuild_page`. Use [`FsmPageMut::rebuild_page`].
+#[deprecated(note = "use `FsmPageMut::new(page).rebuild_page()`")]
+pub fn fsm_rebuild_page(page: &mut Page) -> bool {
+    FsmPageMut::new(page).rebuild_page()
 }

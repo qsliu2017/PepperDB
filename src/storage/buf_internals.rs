@@ -13,7 +13,6 @@ use bitflags::bitflags;
 use crate::common::relpath::{ForkNumber, RelFileNumber, InvalidRelFileNumber};
 use crate::pg_config_manual::WRITEBACK_MAX_PENDING_FLUSHES;
 use crate::postgres_ext::{InvalidOid, Oid};
-use crate::storage::aio_types::PgAioWaitRef;
 use crate::storage::block::{BlockNumber, INVALID_BLOCK_NUMBER};
 use crate::storage::buf::Buffer;
 use crate::storage::relfilelocator::RelFileLocator;
@@ -122,27 +121,20 @@ impl BufferTag {
     }
 }
 
-/// BufferDesc: per-buffer descriptor.
+/// BufferDesc: per-buffer descriptor. Defined in the backend buffer module
+/// (step 12, `backend::storage::buffer::buf_init`) since its body -- the header
+/// lock, content lock, and IO-wait queue -- belongs to the `.c` translation, not
+/// the header. Re-exported here so cross-references resolve unchanged.
 ///
-/// NOTE(buffer-manager): in C this is a 64-byte cache-line-aligned shmem struct
-/// whose `state` is a `pg_atomic_uint32` packing flags+refcount+usagecount, with
-/// an embedded `content_lock` LWLock and a header spinlock (BM_LOCKED). Under the
-/// single-process port it is plain in-memory: `state` is an `AtomicU32`, the
-/// content lock a `parking_lot` RwLock added in the rewrite. No layout contract.
-pub struct BufferDesc {
-    pub tag: BufferTag,
-    pub buf_id: i32,
-    /// Packed flags/refcount/usagecount (see BUF_* / BufFlags). -> AtomicU32 later.
-    pub state: std::sync::atomic::AtomicU32,
-    pub wait_backend_pgprocno: i32,
-    pub free_next: i32,
-    pub io_wref: PgAioWaitRef,
-    // content_lock: LWLock -> parking_lot::RwLock added in the rewrite.
-}
+/// In C this is a 64-byte cache-line-aligned shmem struct whose `state` is a
+/// `pg_atomic_uint32` packing flags+refcount+usagecount, with an embedded
+/// `content_lock` LWLock and a header spinlock (BM_LOCKED). The port keeps it
+/// in-memory: `state` is an `AtomicU32`, the content lock a `std::sync::RwLock`,
+/// the per-buffer IO CV a `WaitQueue`. No layout contract.
+pub use crate::backend::storage::buffer::buf_init::BufferDesc;
 
-/// Special freeNext sentinels.
-pub const FREENEXT_END_OF_LIST: i32 = -1;
-pub const FREENEXT_NOT_IN_LIST: i32 = -2;
+/// Special freeNext sentinels (re-exported from the backend buffer module).
+pub use crate::backend::storage::buffer::buf_init::{FREENEXT_END_OF_LIST, FREENEXT_NOT_IN_LIST};
 
 /// One pending OS writeback request.
 pub struct PendingWriteback {
@@ -168,52 +160,41 @@ pub struct CkptSortItem {
     pub buf_id: i32,
 }
 
-// --- Internal buffer management routines: TODO(buffer-manager) stubs ---
+// --- Internal buffer management routines ---
+//
+// The header-lock spinlock, the IO-in-progress handshake, and the buffer table
+// now live in `backend::storage::buffer` as methods on `BufferDesc` / `BufTable`
+// / `BufferPool` (the bodies belong to the `.c` translation). C-named free
+// functions become `#[deprecated]` shims so cross-references and mechanical
+// ports keep compiling.
 
-// bufmgr.c
-pub fn writeback_context_init(_context: &mut WritebackContext, _max_pending: i32) {
-    unimplemented!() // TODO(buffer-manager)
-}
-pub fn lock_buf_hdr(_desc: &mut BufferDesc) -> u32 {
-    unimplemented!() // TODO(buffer-manager)
-}
-pub fn unlock_buf_hdr(_desc: &mut BufferDesc, _buf_state: u32) {
-    unimplemented!() // TODO(buffer-manager)
-}
-pub fn start_buffer_io(_buf: &mut BufferDesc, _for_input: bool, _nowait: bool) -> bool {
-    unimplemented!() // TODO(buffer-manager)
-}
-pub fn terminate_buffer_io(
-    _buf: &mut BufferDesc,
-    _clear_dirty: bool,
-    _set_flag_bits: u32,
-    _forget_owner: bool,
-    _release_aio: bool,
-) {
-    unimplemented!() // TODO(buffer-manager)
+/// The sharded buffer table type and its partition count.
+pub use crate::backend::storage::buffer::buf_table::{BufTable, NUM_BUFFER_PARTITIONS};
+
+/// C: `LockBufHdr`. Use [`BufferDesc::lock_hdr`].
+#[deprecated(note = "use `desc.lock_hdr()`")]
+#[inline]
+pub fn lock_buf_hdr(desc: &BufferDesc) -> u32 {
+    desc.lock_hdr()
 }
 
-// buf_table.c
-pub fn buf_table_shmem_size(_size: i32) -> usize {
-    unimplemented!() // TODO(buffer-manager)
-}
-pub fn init_buf_table(_size: i32) {
-    unimplemented!() // TODO(buffer-manager)
-}
-pub fn buf_table_hash_code(_tag: &BufferTag) -> u32 {
-    unimplemented!() // TODO(buffer-manager)
-}
-/// C returns buf_id or -1; -1 -> None.
-pub fn buf_table_lookup(_tag: &BufferTag, _hashcode: u32) -> Option<i32> {
-    unimplemented!() // TODO(buffer-manager)
-}
-pub fn buf_table_insert(_tag: &BufferTag, _hashcode: u32, _buf_id: i32) -> Option<i32> {
-    unimplemented!() // TODO(buffer-manager)
-}
-pub fn buf_table_delete(_tag: &BufferTag, _hashcode: u32) {
-    unimplemented!() // TODO(buffer-manager)
+/// C: `UnlockBufHdr`. Use [`BufferDesc::unlock_hdr`].
+#[deprecated(note = "use `desc.unlock_hdr(buf_state)`")]
+#[inline]
+pub fn unlock_buf_hdr(desc: &BufferDesc, buf_state: u32) {
+    desc.unlock_hdr(buf_state)
 }
 
+/// C: `BufTableHashCode`. Use [`BufTable::hash_code`].
+#[deprecated(note = "use `BufTable::hash_code(tag)`")]
+#[inline]
+pub fn buf_table_hash_code(tag: &BufferTag) -> u32 {
+    BufTable::hash_code(tag)
+}
+
+/// C: `BufferDescriptorGetBuffer`. Use [`BufferDesc::buffer`].
+#[deprecated(note = "use `desc.buffer()`")]
+#[inline]
 pub fn buffer_descriptor_get_buffer(bdesc: &BufferDesc) -> Buffer {
-    bdesc.buf_id + 1
+    bdesc.buffer()
 }

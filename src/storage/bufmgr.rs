@@ -2,17 +2,30 @@
 //!
 //! POSTGRES buffer manager definitions.
 //!
-//! STUB. The public buffer-manager API: pin/unpin, content locks, dirty marks,
-//! read/extend. Under the single-process async model the pin/lock primitives map
-//! onto Rust ownership + async-aware locks, and reads/extends route through the
-//! async I/O backend. The private descriptor layer (buf_internals.h) is deferred.
-// TODO(buffer-manager): implement in later pass
+//! The public buffer-manager API: pin/unpin, content locks, dirty marks,
+//! read/extend. The real bodies live in `backend::storage::buffer::bufmgr` as
+//! `read_buffer_common` (the read core) plus methods on
+//! [`BufferPool`](crate::backend::storage::buffer::buf_init::BufferPool)
+//! (`flush_buffer`, `mark_buffer_dirty`, `content_share`/`content_exclusive`,
+//! `release_buffer`, `buffer_get_block_number`/`buffer_get_tag`/`buffer_get_page`,
+//! ...), reached via `shared.buffers()`.
+//!
+//! The C-named free functions below take only a `Buffer` (the C global
+//! `BufferDescriptors`) or a `Relation` (the catalog), neither of which carries
+//! the `Arc<SharedState>` that owns the pool in the single-process port. They
+//! therefore remain shims/TODOs: a `Relation`-level `ReadBuffer` needs
+//! `RelationGetSmgr` (catalog, deferred) and a `&SharedState` to call
+//! `read_buffer_common`; the `Buffer`-only ops need the pool handle. New code
+//! calls the real `BufferPool` methods directly. The smgr-level read path
+//! (`read_buffer_common`) is the real, tested entry point.
+// TODO(catalog): wire Relation-level shims once RelationGetSmgr + a reachable
+// SharedState handle exist.
 
 use crate::common::relpath::ForkNumber;
 use crate::common::relpath::ForkNumber::MAIN_FORKNUM;
 use crate::postgres_ext::Oid;
 use crate::storage::block::{BlockNumber, INVALID_BLOCK_NUMBER};
-use crate::storage::buf::{buffer_is_local, Buffer, INVALID_BUFFER};
+use crate::storage::buf::{Buffer, INVALID_BUFFER};
 use crate::storage::bufpage::Page;
 use crate::storage::relfilelocator::RelFileLocator;
 use crate::storage::smgr::SmgrRelation;
@@ -176,6 +189,12 @@ pub const BUFFER_LOCK_EXCLUSIVE: i32 = 2;
 /// Re-export so callers can name the invalid buffer sentinel here.
 pub const InvalidBuffer: Buffer = INVALID_BUFFER;
 
+/// The real shared-buffer read core (C `ReadBuffer_common`), collapsed to a
+/// direct async read. New code calls this with an owned `SmgrRelation`; the
+/// `Relation`-taking `ReadBuffer`/`ReadBufferExtended` shims below are TODOs
+/// pending the catalog (`RelationGetSmgr`).
+pub use crate::backend::storage::buffer::bufmgr::read_buffer_common;
+
 // === prototypes for functions in bufmgr.c (stubs) ===
 
 pub fn PrefetchSharedBuffer(
@@ -204,10 +223,15 @@ pub fn ReadRecentBuffer(
     unimplemented!()
 }
 
+/// TODO(catalog): thin shim over `read_buffer_common` once `RelationGetSmgr`
+/// (catalog) and a reachable `&SharedState` exist; for now the real, tested
+/// entry is `read_buffer_common(shared, smgr, ...)`.
 pub fn ReadBuffer(_reln: Relation, _block_num: BlockNumber) -> Buffer {
-    unimplemented!()
+    unimplemented!("use read_buffer_common(shared, smgr, ...) -- Relation shim needs RelationGetSmgr")
 }
 
+/// TODO(catalog): as [`ReadBuffer`]; the smgr-level real path is
+/// `read_buffer_common`.
 pub fn ReadBufferExtended(
     _reln: Relation,
     _fork_num: ForkNumber,
@@ -215,7 +239,7 @@ pub fn ReadBufferExtended(
     _mode: ReadBufferMode,
     _strategy: Option<BufferAccessStrategy>,
 ) -> Buffer {
-    unimplemented!()
+    unimplemented!("use read_buffer_common(shared, smgr, ...) -- Relation shim needs RelationGetSmgr")
 }
 
 pub fn ReadBufferWithoutRelcache(
@@ -253,8 +277,9 @@ pub fn WaitReadBuffers(_operation: &mut ReadBuffersOperation) {
     unimplemented!()
 }
 
+#[deprecated(note = "use `shared.buffers().release_buffer(buffer)`")]
 pub fn ReleaseBuffer(_buffer: Buffer) {
-    unimplemented!()
+    unimplemented!("use BufferPool::release_buffer via shared.buffers()")
 }
 
 pub fn UnlockReleaseBuffer(_buffer: Buffer) {
@@ -269,12 +294,14 @@ pub fn BufferIsDirty(_buffer: Buffer) -> bool {
     unimplemented!()
 }
 
+#[deprecated(note = "use `shared.buffers().mark_buffer_dirty(buffer)`")]
 pub fn MarkBufferDirty(_buffer: Buffer) {
-    unimplemented!()
+    unimplemented!("use BufferPool::mark_buffer_dirty via shared.buffers()")
 }
 
+#[deprecated(note = "use `shared.buffers().incr_buffer_ref_count(buffer)`")]
 pub fn IncrBufferRefCount(_buffer: Buffer) {
-    unimplemented!()
+    unimplemented!("use BufferPool::incr_buffer_ref_count via shared.buffers()")
 }
 
 pub fn CheckBufferIsPinnedOnce(_buffer: Buffer) {
@@ -342,8 +369,9 @@ pub fn CheckPointBuffers(_flags: i32) {
     unimplemented!()
 }
 
+#[deprecated(note = "use `shared.buffers().buffer_get_block_number(buffer)`")]
 pub fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
-    unimplemented!()
+    unimplemented!("use BufferPool::buffer_get_block_number via shared.buffers()")
 }
 
 pub fn RelationGetNumberOfBlocksInFork(
@@ -353,8 +381,9 @@ pub fn RelationGetNumberOfBlocksInFork(
     unimplemented!()
 }
 
+#[deprecated(note = "use `shared.buffers().flush_buffer(shared, buffer - 1, reln).await`")]
 pub fn FlushOneBuffer(_buffer: Buffer) {
-    unimplemented!()
+    unimplemented!("use BufferPool::flush_buffer via shared.buffers()")
 }
 
 pub fn FlushRelationBuffers(_rel: Relation) {
@@ -407,28 +436,35 @@ pub fn BufferGetLSNAtomic(_buffer: Buffer) -> XLogRecPtr {
 }
 
 /// Returns (rlocator, forknum, blknum) (C out-params).
+#[deprecated(note = "use `shared.buffers().buffer_get_tag(buffer)`")]
 pub fn BufferGetTag(_buffer: Buffer) -> (RelFileLocator, ForkNumber, BlockNumber) {
-    unimplemented!()
+    unimplemented!("use BufferPool::buffer_get_tag via shared.buffers()")
 }
 
+#[deprecated(note = "use `shared.buffers().mark_buffer_dirty_hint(buffer, buffer_std)`")]
 pub fn MarkBufferDirtyHint(_buffer: Buffer, _buffer_std: bool) {
-    unimplemented!()
+    unimplemented!("use BufferPool::mark_buffer_dirty_hint via shared.buffers()")
 }
 
 pub fn UnlockBuffers() {
     unimplemented!()
 }
 
+#[deprecated(
+    note = "use `shared.buffers().content_share(buffer)` / `content_exclusive(buffer)` \
+            and drop the returned guard to unlock"
+)]
 pub fn LockBuffer(_buffer: Buffer, _mode: i32) {
-    unimplemented!()
+    unimplemented!("use BufferPool::content_share/content_exclusive via shared.buffers()")
 }
 
 pub fn ConditionalLockBuffer(_buffer: Buffer) -> bool {
     unimplemented!()
 }
 
+#[deprecated(note = "use `shared.buffers().lock_buffer_for_cleanup(buffer).await`")]
 pub fn LockBufferForCleanup(_buffer: Buffer) {
-    unimplemented!()
+    unimplemented!("use BufferPool::lock_buffer_for_cleanup via shared.buffers()")
 }
 
 pub fn ConditionalLockBufferForCleanup(_buffer: Buffer) -> bool {
@@ -527,29 +563,36 @@ pub fn FreeAccessStrategy(_strategy: BufferAccessStrategy) {
 
 // === inline functions (translated in full) ===
 
-/// True iff the given buffer number is valid (shared or local).
+/// True iff the given buffer handle is valid (shared or local). C: `BufferIsValid`.
+#[deprecated(note = "use `buffer.is_valid()`")]
+#[inline]
 pub fn BufferIsValid(bufnum: Buffer) -> bool {
-    debug_assert!(bufnum <= unsafe { NBuffers });
-    debug_assert!(bufnum >= -(unsafe { NLocBuffer }));
-    bufnum != INVALID_BUFFER
+    bufnum.is_valid()
 }
 
 /// Returns a reference to the disk page image associated with a buffer.
-/// Assumes buffer is valid. Backing storage (shared pool / local buffers) is
-/// deferred to the buffer-manager impl, so the access itself is stubbed.
+/// Assumes buffer is valid. The real accessor is
+/// [`BufferPool::buffer_get_page`](crate::backend::storage::buffer::buf_init::BufferPool::buffer_get_page)
+/// (reached via `shared.buffers()`); this `Buffer`-only inline cannot resolve
+/// the pool without a `SharedState` handle. TODO(catalog/session): route via a
+/// reachable pool handle.
+#[deprecated(note = "use `shared.buffers().buffer_get_page(buffer)`")]
 pub fn BufferGetBlock<'a>(buffer: Buffer) -> Block<'a> {
-    debug_assert!(BufferIsValid(buffer));
-    let _ = buffer_is_local(buffer);
-    unimplemented!()
+    debug_assert!(buffer.is_valid());
+    let _ = buffer.is_local();
+    unimplemented!("use BufferPool::buffer_get_page via shared.buffers()")
 }
 
 /// Returns the page size within a buffer (always BLCKSZ).
 pub fn BufferGetPageSize(buffer: Buffer) -> usize {
-    debug_assert!(BufferIsValid(buffer));
+    debug_assert!(buffer.is_valid());
     crate::pg_config::BLCKSZ as usize
 }
 
-/// Returns the page associated with a buffer.
+/// Returns the page associated with a buffer. The real accessor is
+/// [`BufferPool::buffer_get_page`](crate::backend::storage::buffer::buf_init::BufferPool::buffer_get_page).
+#[deprecated(note = "use `shared.buffers().buffer_get_page(buffer)`")]
 pub fn BufferGetPage<'a>(buffer: Buffer) -> &'a Page {
-    BufferGetBlock(buffer)
+    debug_assert!(buffer.is_valid());
+    unimplemented!("use BufferPool::buffer_get_page via shared.buffers()")
 }
