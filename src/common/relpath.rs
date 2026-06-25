@@ -42,9 +42,11 @@ pub const MAX_FORKNUM: ForkNumber = ForkNumber::INIT_FORKNUM;
 /// Max chars for a fork name.
 pub const FORKNAMECHARS: usize = 4;
 
-// TODO(generated): forkNames array lives in src/common/relpath.c.
+/// Fork names indexed by `ForkNumber` (C `forkNames[]` in relpath.c).
+pub static FORK_NAMES: [&str; 4] = ["main", "fsm", "vm", "init"];
+
 pub fn fork_names() -> &'static [&'static str] {
-    unimplemented!()
+    &FORK_NAMES
 }
 
 /// Look up a fork number by name; None if unknown.

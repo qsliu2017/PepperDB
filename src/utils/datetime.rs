@@ -163,10 +163,20 @@ pub fn TMODULO(t: &mut i64, q: &mut i64, u: i64) {
     }
 }
 
-// Date/time validation tables. TODO(generated): months/days/day_tab seeded from datetime.c.
-pub static months: &[&str] = &[];
-pub static days: &[&str] = &[];
-pub static day_tab: [[i32; 13]; 2] = [[0; 13]; 2];
+// Date/time names and month-length tables (from utils/adt/datetime.c). The C
+// arrays carry a trailing NULL sentinel; here callers index by ordinal instead.
+pub static months: &[&str] = &[
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+pub static days: &[&str] = &[
+    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+];
+/// Days per month; row 0 = common year, row 1 = leap year (trailing 0 is the
+/// C sentinel for a 1-based month index).
+pub static day_tab: [[i32; 13]; 2] = [
+    [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31, 0],
+    [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31, 0],
+];
 
 /// Gregorian leap-year test (used for all years per the SQL standard).
 pub const fn isleap(y: i32) -> bool {

@@ -60,8 +60,10 @@ pub struct ScannerCallbackState {
     pub errcallback: ErrorContextCallback,
 }
 
-// Constant data exported from parser/scan.l (built by build.rs / scan.l later).
-// TODO(generated): emit ScanKeywordTokens.
+// Per-keyword bison token values, parallel to the SQL keyword list. These are
+// emitted by the bison grammar (gram.y), not from a data file, so they are
+// produced when the grammar is ported - not part of the generated-table families.
+// TODO(grammar): ScanKeywordTokens come from the bison-generated gram.h.
 pub fn ScanKeywordTokens() -> &'static [u16] {
     unimplemented!()
 }

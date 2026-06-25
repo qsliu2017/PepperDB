@@ -18,14 +18,32 @@ pub struct ScanKeywordList {
     pub max_kw_len: i32,
 }
 
-/// Look up `str` in `keywords`; returns the keyword index, or None if absent.
+/// Look up `s` in `keywords`; returns the keyword index, or None if absent.
+/// The keyword set is ASCII-sorted, so this is a binary search (the C code uses
+/// the generated perfect hash; binary search is the equivalent without codegen).
+/// `s` must be lower-cased by the caller, matching the all-lowercase keyword set.
 pub fn scan_keyword_lookup(s: &str, keywords: &ScanKeywordList) -> Option<i32> {
-    let _ = (s, keywords);
-    unimplemented!()
+    if s.is_empty() || s.len() as i32 > keywords.max_kw_len {
+        return None;
+    }
+    let (mut lo, mut hi) = (0i32, keywords.num_keywords - 1);
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        match get_scan_keyword(mid, keywords).cmp(s) {
+            core::cmp::Ordering::Less => lo = mid + 1,
+            core::cmp::Ordering::Greater => hi = mid - 1,
+            core::cmp::Ordering::Equal => return Some(mid),
+        }
+    }
+    None
 }
 
-/// Retrieve the text of the N'th keyword.
+/// Retrieve the text of the N'th keyword (the \0-terminated slice at its offset).
 pub fn get_scan_keyword(n: i32, keywords: &ScanKeywordList) -> &str {
     let off = keywords.kw_offsets[n as usize] as usize;
-    &keywords.kw_string[off..]
+    let rest = &keywords.kw_string[off..];
+    match rest.find('\0') {
+        Some(end) => &rest[..end],
+        None => rest,
+    }
 }
