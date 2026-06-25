@@ -8,9 +8,9 @@ use crate::postgres_ext::Oid;
 pub const IndexRelationId: Oid = Oid(2610);
 
 // int2vector / oidvector / pg_node_tree catalog fields are varlena; modeled as text.
-pub type Int2vector = text; // TODO(struct-forward)
-pub type Oidvector = text; // TODO(struct-forward)
-pub type PgNodeTree = text; // TODO(struct-forward)
+pub type Int2vector = text;
+pub type Oidvector = text;
+pub type PgNodeTree = text;
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

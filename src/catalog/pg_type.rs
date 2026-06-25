@@ -1,15 +1,19 @@
 //! Translated from PostgreSQL src/include/catalog/pg_type.h
 
+use crate::access::htup::HeapTuple;
 use crate::c::{regproc, text, NameData};
+use crate::catalog::objectaddress::ObjectAddress;
+use crate::nodes::nodes::Node;
 use crate::postgres_ext::Oid;
+use crate::utils::rel::Relation;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(71,TypeRelation_Rowtype_Id) BKI_SCHEMA_MACRO
 pub const TypeRelationId: Oid = Oid(1247);
 pub const TypeRelation_Rowtype_Id: Oid = Oid(71);
 
-// pg_node_tree / aclitem catalog fields are varlena; modeled here.
-pub type PgNodeTree = text; // TODO(struct-forward)
-pub type Aclitem = text; // TODO(struct-forward)
+// pg_node_tree catalog field is varlena (text); aclitem is the fixed acl struct.
+pub type PgNodeTree = text;
+pub type Aclitem = crate::utils::acl::AclItem;
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -132,8 +136,7 @@ pub fn IsPolymorphicType(typid: Oid) -> bool {
     IsPolymorphicTypeFamily1(typid) || IsPolymorphicTypeFamily2(typid)
 }
 
-// Requires fmgroids.h (F_ARRAY_SUBSCRIPT_HANDLER); resolved in Phase 2.
-// TODO(struct-forward): use Form_pg_type field access + F_ARRAY_SUBSCRIPT_HANDLER.
+// TODO: implement via typsubscript == F_ARRAY_SUBSCRIPT_HANDLER && typelem != 0.
 pub fn IsTrueArrayType(_type_form: &FormData_pg_type) -> bool {
     unimplemented!()
 }
@@ -142,22 +145,10 @@ pub fn IsTrueArrayType(_type_form: &FormData_pg_type) -> bool {
 pub const CASHOID: Oid = MONEYOID;
 pub const LSNOID: Oid = PG_LSNOID;
 
-// Forward refs; repointed in Phase 2.
-#[deprecated(note = "TODO(struct-forward): repoint to crate::catalog::objectaddress::ObjectAddress in Phase 2")]
-pub struct ObjectAddress; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::access HeapTuple in Phase 2")]
-pub struct HeapTuple; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::utils::rel::Relation in Phase 2")]
-pub struct Relation; // TODO(struct-forward)
-#[deprecated(note = "TODO(struct-forward): repoint to crate::nodes::primnodes::Node in Phase 2")]
-pub struct Node; // TODO(struct-forward)
-
-#[allow(deprecated)]
 pub fn TypeShellMake(_type_name: &str, _type_namespace: Oid, _owner_id: Oid) -> ObjectAddress {
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn TypeCreate(
     _new_type_oid: Oid,
     _type_name: &str,
@@ -195,7 +186,6 @@ pub fn TypeCreate(
     unimplemented!()
 }
 
-#[allow(deprecated)]
 pub fn GenerateTypeDependencies(
     _type_tuple: HeapTuple,
     _type_catalog: &Relation,
