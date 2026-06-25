@@ -68,3 +68,6 @@ pub mod standbydefs;
 pub mod sync;
 pub mod waiteventset;
 // === end scaffold ===
+
+// Rust-native primitive (no C header origin): the reusable wait queue.
+pub mod wait_guard;

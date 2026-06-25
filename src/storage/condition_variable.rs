@@ -2,17 +2,26 @@
 //! Condition variables.
 //!
 //! PG's ConditionVariable is a shared-memory wait list guarded by a spinlock
-//! (slock_t + proclist_head). Under the single-process async model the whole
-//! thing collapses to a tokio-style notifier; the shmem/spinlock fields are
-//! dropped. API shape is preserved so callers port mechanically.
+//! (slock_t + proclist_head). Under the single-process async model it collapses
+//! to a [`WaitQueue`] (a generational slab of wakers); the shmem/spinlock fields
+//! are dropped.
+//!
+//! The prepared-sleep state PG kept in process globals (`cv_sleep_target` plus
+//! one `cvWaitLink`) becomes a per-task guard ([`CvSleep`]) on the caller's
+//! stack: it survives `.await` and thread migration, and its `Drop` dequeues
+//! (this is PG's `ConditionVariableCancelSleep`). Typical loop:
+//!
+//! ```ignore
+//! let mut s = ConditionVariablePrepareToSleep(&cv);
+//! while !predicate() { s.sleep(info).await; }  // drop(s) on scope exit = cancel
+//! ```
 
-// NOTE: in the async-coloring pass this becomes a `tokio::sync::Notify` wrapper
-// (tokio is not yet a dependency, and signatures stay synchronous in this phase).
+use crate::storage::wait_guard::WaitQueue;
 
 /// A method of waiting until a condition becomes true.
 #[derive(Default)]
 pub struct ConditionVariable {
-    _private: (), // TODO(async): replace with tokio::sync::Notify
+    pub(crate) wakeup: WaitQueue,
 }
 
 // CV_MINIMAL_SIZE / ConditionVariableMinimallyPadded existed only to avoid
@@ -20,45 +29,39 @@ pub struct ConditionVariable {
 
 impl ConditionVariable {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            wakeup: WaitQueue::new(),
+        }
     }
 }
 
-/// Initialize a condition variable.
-pub fn ConditionVariableInit(_cv: &ConditionVariable) {
-    unimplemented!()
+// CvSleep is a type, re-exported on the condition_variable.h API surface.
+pub use crate::backend::storage::lmgr::condition_variable::CvSleep;
+
+// The cv behavior lives as idiomatic methods on `ConditionVariable` (in the
+// backend module). The original C-named free functions are kept here as
+// deprecated inline shims for cross-reference and mechanical-port compatibility.
+
+#[deprecated(note = "use `cv.init()`")]
+#[inline]
+pub fn ConditionVariableInit(cv: &ConditionVariable) {
+    cv.init()
 }
 
-/// Sleep until signalled. (Will become `async` when the I/O layer is colored.)
-pub fn ConditionVariableSleep(_cv: &ConditionVariable, _wait_event_info: u32) {
-    unimplemented!()
+#[deprecated(note = "use `cv.signal()`")]
+#[inline]
+pub fn ConditionVariableSignal(cv: &ConditionVariable) {
+    cv.signal()
 }
 
-/// Sleep until signalled or `timeout` (ms) elapses; returns true on timeout.
-pub fn ConditionVariableTimedSleep(
-    _cv: &ConditionVariable,
-    _timeout: i64,
-    _wait_event_info: u32,
-) -> bool {
-    unimplemented!()
+#[deprecated(note = "use `cv.broadcast()`")]
+#[inline]
+pub fn ConditionVariableBroadcast(cv: &ConditionVariable) {
+    cv.broadcast()
 }
 
-/// Remove the caller from the wait list; returns true if it was waiting.
-pub fn ConditionVariableCancelSleep() -> bool {
-    unimplemented!()
-}
-
-/// Optional pre-loop hook; more efficient if at least one sleep is needed.
-pub fn ConditionVariablePrepareToSleep(_cv: &ConditionVariable) {
-    unimplemented!()
-}
-
-/// Wake up a single waiter.
-pub fn ConditionVariableSignal(_cv: &ConditionVariable) {
-    unimplemented!()
-}
-
-/// Wake up every waiter.
-pub fn ConditionVariableBroadcast(_cv: &ConditionVariable) {
-    unimplemented!()
+#[deprecated(note = "use `cv.prepare_to_sleep()`")]
+#[inline]
+pub fn ConditionVariablePrepareToSleep(cv: &ConditionVariable) -> CvSleep<'_> {
+    cv.prepare_to_sleep()
 }

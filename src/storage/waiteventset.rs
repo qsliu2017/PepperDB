@@ -1,16 +1,19 @@
 //! Translated from PostgreSQL src/include/storage/waiteventset.h
+//!
+//! The OS event-multiplexing transport (epoll/kqueue/poll/win32) is deleted;
+//! tokio drives readiness, timeouts, latch wakeups, and the postmaster-death
+//! signal. This header keeps the public types/consts; the `WaitEventSet`
+//! implementation and all functions live in the backend module and are
+//! re-exported below.
 
 use bitflags::bitflags;
 
 use crate::postgres::Datum;
-use crate::utils::resowner::ResourceOwner;
 
-// storage/latch.h is tombstoned (Latch -> tokio::sync::Notify). The `struct Latch`
-// forward decl is modeled as an opaque handle here; the real wakeup primitive
-// (tokio::sync::Notify) is wired in when the I/O leaves get async impls.
-pub struct Latch {
-    _private: (),
-}
+// storage/latch.h is no longer tombstoned: the real Latch lives in
+// crate::storage::latch. Re-export it so existing waiteventset::Latch users keep
+// working.
+pub use crate::storage::latch::Latch;
 
 // pgsocket is `int` (port.h, not yet translated); -1 is PGINVALID_SOCKET.
 pub type pgsocket = i32;
@@ -48,63 +51,80 @@ pub struct WaitEvent {
     pub user_data: Datum, // pointer provided in AddWaitEventToSet TODO(ptr)
 }
 
-/// Opaque to callers (implementation private to waiteventset.c).
-pub struct WaitEventSet {
-    _private: (),
+// WaitEventSet is opaque to callers (private to waiteventset.c in PG). The struct
+// and PostmasterDeath are defined in the backend module and re-exported here; the
+// behavior lives as idiomatic methods on WaitEventSet / Latch.
+pub use crate::backend::storage::ipc::waiteventset::{PostmasterDeath, WaitEventSet};
+
+// The original C-named free functions are kept here as deprecated inline shims
+// for cross-reference and mechanical-port compatibility.
+
+#[deprecated(note = "use `WaitEventSet::new(nevents)`")]
+#[inline]
+pub fn CreateWaitEventSet<'a>(nevents: i32) -> WaitEventSet<'a> {
+    WaitEventSet::new(nevents)
 }
 
-pub fn InitializeWaitEventSupport() {
-    unimplemented!()
-}
-
-pub fn CreateWaitEventSet(_resowner: ResourceOwner, _nevents: i32) -> Box<WaitEventSet> {
-    unimplemented!()
-}
-
-pub fn FreeWaitEventSet(_set: &mut WaitEventSet) {
-    unimplemented!()
-}
-
-pub fn FreeWaitEventSetAfterFork(_set: &mut WaitEventSet) {
-    unimplemented!()
-}
-
-pub fn AddWaitEventToSet(
-    _set: &mut WaitEventSet,
-    _events: u32,
-    _fd: pgsocket,
-    _latch: Option<&Latch>,
-    _user_data: Datum,
+#[deprecated(note = "use `set.add_event(...)`")]
+#[inline]
+pub fn AddWaitEventToSet<'a>(
+    set: &mut WaitEventSet<'a>,
+    events: WaitEventFlags,
+    fd: pgsocket,
+    latch: Option<&'a Latch>,
+    pmdeath: Option<PostmasterDeath>,
+    user_data: Datum,
 ) -> i32 {
-    unimplemented!()
+    set.add_event(events, fd, latch, pmdeath, user_data)
 }
 
-pub fn ModifyWaitEvent(_set: &mut WaitEventSet, _pos: i32, _events: u32, _latch: Option<&Latch>) {
-    unimplemented!()
+#[deprecated(note = "use `set.modify_event(...)`")]
+#[inline]
+pub fn ModifyWaitEvent(
+    set: &mut WaitEventSet,
+    pos: i32,
+    events: WaitEventFlags,
+    latch: Option<&Latch>,
+) {
+    set.modify_event(pos, events, latch)
 }
 
-pub fn WaitEventSetWait(
-    _set: &mut WaitEventSet,
-    _timeout: i64,
-    _occurred_events: &mut [WaitEvent],
-    _nevents: i32,
-    _wait_event_info: u32,
-) -> i32 {
-    unimplemented!()
+/// RAII handles teardown; dropping the set frees it.
+#[deprecated(note = "drop the `WaitEventSet` (RAII)")]
+#[inline]
+pub fn FreeWaitEventSet(_set: WaitEventSet<'_>) {} // RAII: dropped on move-in
+
+#[deprecated(note = "use `set.wait(timeout, max_events)`")]
+#[inline]
+pub async fn WaitEventSetWait(
+    set: &WaitEventSet<'_>,
+    timeout: i64,
+    max_events: usize,
+) -> Vec<WaitEvent> {
+    set.wait(timeout, max_events).await
 }
 
-pub fn GetNumRegisteredWaitEvents(_set: &WaitEventSet) -> i32 {
-    unimplemented!()
+#[deprecated(note = "use `latch.wait_for(events, PGINVALID_SOCKET, timeout, pmdeath)`")]
+#[inline]
+pub async fn WaitLatch(
+    latch: &Latch,
+    wake_events: WaitEventFlags,
+    timeout: i64,
+    pmdeath: Option<PostmasterDeath>,
+) -> WaitEventFlags {
+    latch
+        .wait_for(wake_events, PGINVALID_SOCKET, timeout, pmdeath)
+        .await
 }
 
-pub fn WaitEventSetCanReportClosed() -> bool {
-    unimplemented!()
-}
-
-pub fn WakeupMyProc() {
-    unimplemented!()
-}
-
-pub fn WakeupOtherProc(_pid: i32) {
-    unimplemented!()
+#[deprecated(note = "use `latch.wait_for(events, sock, timeout, pmdeath)`")]
+#[inline]
+pub async fn WaitLatchOrSocket(
+    latch: &Latch,
+    wake_events: WaitEventFlags,
+    sock: pgsocket,
+    timeout: i64,
+    pmdeath: Option<PostmasterDeath>,
+) -> WaitEventFlags {
+    latch.wait_for(wake_events, sock, timeout, pmdeath).await
 }
