@@ -27,44 +27,44 @@ pub const GUC_QUALIFIER_SEPARATOR: char = '.';
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GucContext {
-    PGC_INTERNAL,
-    PGC_POSTMASTER,
-    PGC_SIGHUP,
-    PGC_SU_BACKEND,
-    PGC_BACKEND,
-    PGC_SUSET,
-    PGC_USERSET,
+    INTERNAL,
+    POSTMASTER,
+    SIGHUP,
+    SU_BACKEND,
+    BACKEND,
+    SUSET,
+    USERSET,
 }
 
 /// Source of the current setting. A new setting takes effect only if the prior
-/// setting had the same or lower level. PGC_S_INTERACTIVE is the dividing line
+/// setting had the same or lower level. INTERACTIVE is the dividing line
 /// for error reporting, not a real source.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GucSource {
-    PGC_S_DEFAULT,         // hard-wired default ("boot_val")
-    PGC_S_DYNAMIC_DEFAULT, // default computed during initialization
-    PGC_S_ENV_VAR,         // postmaster environment variable
-    PGC_S_FILE,            // postgresql.conf
-    PGC_S_ARGV,            // postmaster command line
-    PGC_S_GLOBAL,          // global in-database setting
-    PGC_S_DATABASE,        // per-database setting
-    PGC_S_USER,            // per-user setting
-    PGC_S_DATABASE_USER,   // per-user-and-database setting
-    PGC_S_CLIENT,          // from client connection request
-    PGC_S_OVERRIDE,        // special case to forcibly set default
-    PGC_S_INTERACTIVE,     // dividing line for error reporting
-    PGC_S_TEST,            // test per-database or per-user setting
-    PGC_S_SESSION,         // SET command
+    DEFAULT,         // hard-wired default ("boot_val")
+    DYNAMIC_DEFAULT, // default computed during initialization
+    ENV_VAR,         // postmaster environment variable
+    FILE,            // postgresql.conf
+    ARGV,            // postmaster command line
+    GLOBAL,          // global in-database setting
+    DATABASE,        // per-database setting
+    USER,            // per-user setting
+    DATABASE_USER,   // per-user-and-database setting
+    CLIENT,          // from client connection request
+    OVERRIDE,        // special case to forcibly set default
+    INTERACTIVE,     // dividing line for error reporting
+    TEST,            // test per-database or per-user setting
+    SESSION,         // SET command
 }
 
 /// Types of set_config_option actions.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GucAction {
-    GUC_ACTION_SET,   // regular SET command
-    GUC_ACTION_LOCAL, // SET LOCAL command
-    GUC_ACTION_SAVE,  // function SET option, or temp assignment
+    SET,   // regular SET command
+    LOCAL, // SET LOCAL command
+    SAVE,  // function SET option, or temp assignment
 }
 
 /// A name-value pair (with source location) from parsing config file(s); also
@@ -181,11 +181,11 @@ impl GucUnit {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum config_type {
-    PGC_BOOL,
-    PGC_INT,
-    PGC_REAL,
-    PGC_STRING,
-    PGC_ENUM,
+    BOOL,
+    INT,
+    REAL,
+    STRING,
+    ENUM,
 }
 
 /// The actual value of a GUC variable. C is a `union`; the discriminant is the
@@ -264,10 +264,10 @@ pub enum config_group {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GucStackState {
-    GUC_SAVE,      // entry caused by function SET option
-    GUC_SET,       // entry caused by plain SET command
-    GUC_LOCAL,     // entry caused by SET LOCAL command
-    GUC_SET_LOCAL, // entry caused by SET then SET LOCAL
+    SAVE,      // entry caused by function SET option
+    SET,       // entry caused by plain SET command
+    LOCAL,     // entry caused by SET LOCAL command
+    SET_LOCAL, // entry caused by SET then SET LOCAL
 }
 
 /// Saved prior value of a GUC during an uncommitted transactional change.

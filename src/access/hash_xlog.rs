@@ -11,7 +11,7 @@ use crate::storage::off::OffsetNumber;
 /// Number of buffers required for XLOG_HASH_SQUEEZE_PAGE operation.
 pub const HASH_XLOG_FREE_OVFL_BUFS: i32 = 6;
 
-// WAL opcodes (xl_info nibble): raw consts, not a flag set.
+// WAL opcodes (info nibble): raw consts, not a flag set.
 pub const XLOG_HASH_INIT_META_PAGE: u8 = 0x00; // initialize the meta page
 pub const XLOG_HASH_INIT_BITMAP_PAGE: u8 = 0x10; // initialize the bitmap page
 pub const XLOG_HASH_INSERT: u8 = 0x20; // add index tuple without split

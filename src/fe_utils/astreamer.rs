@@ -3,7 +3,7 @@
 // The "archive streamer" - a composable chain of stream processors. The C
 // `astreamer_ops` vtable (content/finalize/free, all required) maps to a trait
 // (routine-struct.md recipe: required callbacks -> base trait; the C `free`
-// callback becomes Drop). The `bbs_next` successor pointer becomes an owned
+// callback becomes Drop). The `next` successor pointer becomes an owned
 // boxed successor; the StringInfo buffer (tombstoned) becomes a `Vec<u8>`.
 
 use crate::common::compression::PgCompressSpecification;

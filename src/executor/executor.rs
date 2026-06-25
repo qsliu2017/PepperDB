@@ -628,7 +628,7 @@ pub fn ExecProject(proj_info: &mut ProjectionInfo) -> &mut TupleTableSlot {
     // Inlined ExecStoreVirtualTuple: clear, run, mark valid virtual tuple.
     // Faithful body needs ExecClearTuple + slot/desc plumbing not yet wired;
     // keep the signature and defer the body.
-    let _ = &mut proj_info.pi_state;
+    let _ = &mut proj_info.state;
     unimplemented!()
 }
 
@@ -638,8 +638,8 @@ pub fn ExecQual(state: Option<&mut ExprState>, econtext: &mut ExprContext) -> bo
     // short-circuit for empty restriction list
     let Some(state) = state else { return true };
     debug_assert!(state.flags.contains(crate::nodes::execnodes::EeoFlag::IS_QUAL));
-    // EEOP_QUAL never returns NULL.
-    let ret = ExecEvalExprSwitchContext(state, econtext).expect("EEOP_QUAL returned NULL");
+    // QUAL never returns NULL.
+    let ret = ExecEvalExprSwitchContext(state, econtext).expect("QUAL returned NULL");
     DatumGetBool(ret)
 }
 
@@ -844,10 +844,10 @@ pub fn MakePerTupleExprContext(_estate: &mut EState) -> &mut ExprContext {
 /// `GetPerTupleExprContext` - get (creating if needed) the per-output-tuple
 /// exprcontext. Was a macro selecting the cached one or making it.
 pub fn GetPerTupleExprContext(estate: &mut EState) -> &mut ExprContext {
-    if estate.es_per_tuple_exprcontext.is_none() {
+    if estate.per_tuple_exprcontext.is_none() {
         return MakePerTupleExprContext(estate);
     }
-    estate.es_per_tuple_exprcontext.as_mut().unwrap()
+    estate.per_tuple_exprcontext.as_mut().unwrap()
 }
 
 /// `GetPerTupleMemoryContext` - per-tuple exprcontext's memory context.
@@ -859,7 +859,7 @@ pub fn GetPerTupleMemoryContext(estate: &mut EState) -> MemoryContext {
 
 /// `ResetPerTupleExprContext` - reset the per-tuple exprcontext if it exists.
 pub fn ResetPerTupleExprContext(estate: &mut EState) {
-    if let Some(ec) = estate.es_per_tuple_exprcontext.as_mut() {
+    if let Some(ec) = estate.per_tuple_exprcontext.as_mut() {
         ResetExprContext(ec);
     }
 }
@@ -930,9 +930,9 @@ pub fn ExecCloseResultRelations(_estate: &mut EState) {
     unimplemented!()
 }
 
-/// `exec_rt_fetch(rti, estate)` - `list_nth(es_range_table, rti - 1)`.
+/// `exec_rt_fetch(rti, estate)` - `list_nth(range_table, rti - 1)`.
 pub fn exec_rt_fetch(rti: Index, estate: &EState) -> &crate::nodes::parsenodes::RangeTblEntry {
-    let _ = &estate.es_range_table[rti - 1];
+    let _ = &estate.range_table[rti - 1];
     unimplemented!()
 }
 

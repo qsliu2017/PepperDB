@@ -137,34 +137,34 @@ pub struct ExprState {
 #[allow(deprecated)]
 #[derive(Default)]
 pub struct IndexInfo {
-    pub ii_num_index_attrs: i32,
-    pub ii_num_index_key_attrs: i32,
+    pub num_index_attrs: i32,
+    pub num_index_key_attrs: i32,
     /// underlying-rel attribute numbers used as keys (0 = expression).
-    pub ii_index_attr_numbers: Vec<AttrNumber>,
-    pub ii_expressions: Vec<Box<Node>>,
-    pub ii_expressions_state: Vec<ExprState>,
-    pub ii_predicate: Vec<Box<Node>>,
-    pub ii_predicate_state: Option<Box<ExprState>>,
-    pub ii_exclusion_ops: Vec<Oid>,
-    pub ii_exclusion_procs: Vec<Oid>,
-    pub ii_exclusion_strats: Vec<u16>,
-    pub ii_unique_ops: Vec<Oid>,
-    pub ii_unique_procs: Vec<Oid>,
-    pub ii_unique_strats: Vec<u16>,
-    pub ii_unique: bool,
-    pub ii_nulls_not_distinct: bool,
-    pub ii_ready_for_inserts: bool,
-    pub ii_checked_unchanged: bool,
-    pub ii_index_unchanged: bool,
-    pub ii_concurrent: bool,
-    pub ii_broken_hot_chain: bool,
-    pub ii_summarizing: bool,
-    pub ii_without_overlaps: bool,
-    pub ii_parallel_workers: i32,
-    pub ii_am: Oid,
+    pub index_attr_numbers: Vec<AttrNumber>,
+    pub expressions: Vec<Box<Node>>,
+    pub expressions_state: Vec<ExprState>,
+    pub predicate: Vec<Box<Node>>,
+    pub predicate_state: Option<Box<ExprState>>,
+    pub exclusion_ops: Vec<Oid>,
+    pub exclusion_procs: Vec<Oid>,
+    pub exclusion_strats: Vec<u16>,
+    pub unique_ops: Vec<Oid>,
+    pub unique_procs: Vec<Oid>,
+    pub unique_strats: Vec<u16>,
+    pub unique: bool,
+    pub nulls_not_distinct: bool,
+    pub ready_for_inserts: bool,
+    pub checked_unchanged: bool,
+    pub index_unchanged: bool,
+    pub concurrent: bool,
+    pub broken_hot_chain: bool,
+    pub summarizing: bool,
+    pub without_overlaps: bool,
+    pub parallel_workers: i32,
+    pub am: Oid,
     /// private cache area for index AM (C `void *`).
-    pub ii_am_cache: OpaqueState,
-    pub ii_context: MemoryContext,
+    pub am_cache: OpaqueState,
+    pub context: MemoryContext,
 }
 
 // ---------------------------------------------------------------------------
@@ -275,38 +275,38 @@ pub struct ReturnSetInfo {
 #[derive(Default)]
 pub struct ProjectionInfo {
     /// instructions to evaluate the projection.
-    pub pi_state: ExprState,
+    pub state: ExprState,
     /// expression context in which to evaluate.
-    pub pi_expr_context: Option<Box<ExprContext>>,
+    pub expr_context: Option<Box<ExprContext>>,
 }
 
 /// Stores information about junk attributes to strip from output tuples.
 #[allow(deprecated)]
 #[derive(Default)]
 pub struct JunkFilter {
-    pub jf_target_list: Vec<Box<Node>>,
-    pub jf_clean_tup_type: TupleDesc,
-    pub jf_clean_map: Vec<AttrNumber>,
-    pub jf_result_slot: Option<Box<TupleTableSlot>>,
+    pub target_list: Vec<Box<Node>>,
+    pub clean_tup_type: TupleDesc,
+    pub clean_map: Vec<AttrNumber>,
+    pub result_slot: Option<Box<TupleTableSlot>>,
 }
 
 /// Executor state of an ON CONFLICT DO UPDATE operation.
 #[allow(deprecated)]
 #[derive(Default)]
 pub struct OnConflictSetState {
-    pub oc_existing: Option<Box<TupleTableSlot>>,
-    pub oc_proj_slot: Option<Box<TupleTableSlot>>,
-    pub oc_proj_info: Option<Box<ProjectionInfo>>,
-    pub oc_where_clause: Option<Box<ExprState>>,
+    pub existing: Option<Box<TupleTableSlot>>,
+    pub proj_slot: Option<Box<TupleTableSlot>>,
+    pub proj_info: Option<Box<ProjectionInfo>>,
+    pub where_clause: Option<Box<ExprState>>,
 }
 
 /// Executor state for a MERGE action.
 #[allow(deprecated)]
 #[derive(Default)]
 pub struct MergeActionState {
-    pub mas_action: Option<Box<MergeAction>>,
-    pub mas_proj: Option<Box<ProjectionInfo>>,
-    pub mas_whenqual: Option<Box<ExprState>>,
+    pub action: Option<Box<MergeAction>>,
+    pub proj: Option<Box<ProjectionInfo>>,
+    pub whenqual: Option<Box<ExprState>>,
 }
 
 /// Number of MergeMatchKind values (mirrors parsenodes NUM_MERGE_MATCH_KINDS).
@@ -321,61 +321,61 @@ pub const NUM_MERGE_MATCH_KINDS: usize = 3;
 #[derive(Default)]
 pub struct ResultRelInfo {
     /// range table index, or 0 if not in range table.
-    pub ri_range_table_index: usize,
-    pub ri_relation_desc: Relation,
-    pub ri_num_indices: i32,
-    pub ri_index_relation_descs: RelationPtr,
-    pub ri_index_relation_info: Vec<Box<IndexInfo>>,
-    pub ri_row_id_att_no: AttrNumber,
-    pub ri_extra_updated_cols: Option<Bitmapset>,
-    pub ri_extra_updated_cols_valid: bool,
-    pub ri_project_new: Option<Box<ProjectionInfo>>,
-    pub ri_new_tuple_slot: Option<Box<TupleTableSlot>>,
-    pub ri_old_tuple_slot: Option<Box<TupleTableSlot>>,
-    pub ri_project_new_info_valid: bool,
-    pub ri_need_lock_tag_tuple: bool,
-    pub ri_trig_desc: Option<Box<TriggerDesc>>,
-    pub ri_trig_functions: Vec<FmgrInfo>,
-    pub ri_trig_when_exprs: Vec<Box<ExprState>>,
-    pub ri_trig_instrument: Option<Box<Instrumentation>>,
-    pub ri_returning_slot: Option<Box<TupleTableSlot>>,
-    pub ri_trig_old_slot: Option<Box<TupleTableSlot>>,
-    pub ri_trig_new_slot: Option<Box<TupleTableSlot>>,
-    pub ri_all_null_slot: Option<Box<TupleTableSlot>>,
-    pub ri_fdw_routine: Option<Box<FdwRoutine>>,
+    pub range_table_index: usize,
+    pub relation_desc: Relation,
+    pub num_indices: i32,
+    pub index_relation_descs: RelationPtr,
+    pub index_relation_info: Vec<Box<IndexInfo>>,
+    pub row_id_att_no: AttrNumber,
+    pub extra_updated_cols: Option<Bitmapset>,
+    pub extra_updated_cols_valid: bool,
+    pub project_new: Option<Box<ProjectionInfo>>,
+    pub new_tuple_slot: Option<Box<TupleTableSlot>>,
+    pub old_tuple_slot: Option<Box<TupleTableSlot>>,
+    pub project_new_info_valid: bool,
+    pub need_lock_tag_tuple: bool,
+    pub trig_desc: Option<Box<TriggerDesc>>,
+    pub trig_functions: Vec<FmgrInfo>,
+    pub trig_when_exprs: Vec<Box<ExprState>>,
+    pub trig_instrument: Option<Box<Instrumentation>>,
+    pub returning_slot: Option<Box<TupleTableSlot>>,
+    pub trig_old_slot: Option<Box<TupleTableSlot>>,
+    pub trig_new_slot: Option<Box<TupleTableSlot>>,
+    pub all_null_slot: Option<Box<TupleTableSlot>>,
+    pub fdw_routine: Option<Box<FdwRoutine>>,
     /// available to save private state of FDW (C `void *`).
-    pub ri_fdw_state: OpaqueState,
-    pub ri_uses_fdw_direct_modify: bool,
-    pub ri_num_slots: i32,
-    pub ri_num_slots_initialized: i32,
-    pub ri_batch_size: i32,
-    pub ri_slots: Vec<Box<TupleTableSlot>>,
-    pub ri_plan_slots: Vec<Box<TupleTableSlot>>,
-    pub ri_with_check_options: Vec<Box<Node>>,
-    pub ri_with_check_option_exprs: Vec<Box<ExprState>>,
-    pub ri_check_constraint_exprs: Vec<Box<ExprState>>,
-    pub ri_gen_virtual_not_null_constraint_exprs: Vec<Box<ExprState>>,
-    pub ri_generated_exprs_i: Vec<Box<ExprState>>,
-    pub ri_generated_exprs_u: Vec<Box<ExprState>>,
-    pub ri_num_generated_needed_i: i32,
-    pub ri_num_generated_needed_u: i32,
-    pub ri_returning_list: Vec<Box<Node>>,
-    pub ri_project_returning: Option<Box<ProjectionInfo>>,
-    pub ri_on_conflict_arbiter_indexes: Vec<Oid>,
-    pub ri_on_conflict: Option<Box<OnConflictSetState>>,
+    pub fdw_state: OpaqueState,
+    pub uses_fdw_direct_modify: bool,
+    pub num_slots: i32,
+    pub num_slots_initialized: i32,
+    pub batch_size: i32,
+    pub slots: Vec<Box<TupleTableSlot>>,
+    pub plan_slots: Vec<Box<TupleTableSlot>>,
+    pub with_check_options: Vec<Box<Node>>,
+    pub with_check_option_exprs: Vec<Box<ExprState>>,
+    pub check_constraint_exprs: Vec<Box<ExprState>>,
+    pub gen_virtual_not_null_constraint_exprs: Vec<Box<ExprState>>,
+    pub generated_exprs_i: Vec<Box<ExprState>>,
+    pub generated_exprs_u: Vec<Box<ExprState>>,
+    pub num_generated_needed_i: i32,
+    pub num_generated_needed_u: i32,
+    pub returning_list: Vec<Box<Node>>,
+    pub project_returning: Option<Box<ProjectionInfo>>,
+    pub on_conflict_arbiter_indexes: Vec<Oid>,
+    pub on_conflict: Option<Box<OnConflictSetState>>,
     /// for MERGE, one list of MergeActionState per MergeMatchKind.
-    pub ri_merge_actions: [Vec<Box<MergeActionState>>; NUM_MERGE_MATCH_KINDS],
-    pub ri_merge_join_condition: Option<Box<ExprState>>,
-    pub ri_partition_check_expr: Option<Box<ExprState>>,
-    pub ri_child_to_root_map: Option<Box<TupleConversionMap>>,
-    pub ri_child_to_root_map_valid: bool,
-    pub ri_root_to_child_map: Option<Box<TupleConversionMap>>,
-    pub ri_root_to_child_map_valid: bool,
-    pub ri_root_result_rel_info: Option<Box<ResultRelInfo>>,
-    pub ri_partition_tuple_slot: Option<Box<TupleTableSlot>>,
+    pub merge_actions: [Vec<Box<MergeActionState>>; NUM_MERGE_MATCH_KINDS],
+    pub merge_join_condition: Option<Box<ExprState>>,
+    pub partition_check_expr: Option<Box<ExprState>>,
+    pub child_to_root_map: Option<Box<TupleConversionMap>>,
+    pub child_to_root_map_valid: bool,
+    pub root_to_child_map: Option<Box<TupleConversionMap>>,
+    pub root_to_child_map_valid: bool,
+    pub root_result_rel_info: Option<Box<ResultRelInfo>>,
+    pub partition_tuple_slot: Option<Box<TupleTableSlot>>,
     /// for copyfrom.c multi-inserts (C `void *` to CopyMultiInsertBuffer).
-    pub ri_copy_multi_insert_buffer: OpaqueState,
-    pub ri_ancestor_result_rels: Vec<Box<ResultRelInfo>>,
+    pub copy_multi_insert_buffer: OpaqueState,
+    pub ancestor_result_rels: Vec<Box<ResultRelInfo>>,
 }
 
 /// State for an asynchronous tuple request. (Not itself a Node.)
@@ -397,62 +397,62 @@ pub struct AsyncRequest {
 #[allow(deprecated)]
 #[derive(Default)]
 pub struct EState {
-    pub es_direction: ScanDirection,
-    pub es_snapshot: Snapshot,
-    pub es_crosscheck_snapshot: Snapshot,
+    pub direction: ScanDirection,
+    pub snapshot: Snapshot,
+    pub crosscheck_snapshot: Snapshot,
     /// List of RangeTblEntry.
-    pub es_range_table: Vec<Box<Node>>,
-    pub es_range_table_size: usize,
-    pub es_relations: Vec<Relation>,
-    pub es_rowmarks: Vec<Box<ExecRowMark>>,
+    pub range_table: Vec<Box<Node>>,
+    pub range_table_size: usize,
+    pub relations: Vec<Relation>,
+    pub rowmarks: Vec<Box<ExecRowMark>>,
     /// List of RTEPermissionInfo.
-    pub es_rteperminfos: Vec<Box<Node>>,
-    pub es_plannedstmt: Option<Box<PlannedStmt>>,
+    pub rteperminfos: Vec<Box<Node>>,
+    pub plannedstmt: Option<Box<PlannedStmt>>,
     /// List of PartitionPruneInfo.
-    pub es_part_prune_infos: Vec<Box<Node>>,
+    pub part_prune_infos: Vec<Box<Node>>,
     /// List of PartitionPruneState.
-    pub es_part_prune_states: Vec<Box<Node>>,
+    pub part_prune_states: Vec<Box<Node>>,
     /// List of Bitmapset.
-    pub es_part_prune_results: Vec<Bitmapset>,
-    pub es_unpruned_relids: Option<Bitmapset>,
-    pub es_source_text: Option<String>,
-    pub es_junk_filter: Option<Box<JunkFilter>>,
+    pub part_prune_results: Vec<Bitmapset>,
+    pub unpruned_relids: Option<Bitmapset>,
+    pub source_text: Option<String>,
+    pub junk_filter: Option<Box<JunkFilter>>,
     /// command ID to mark inserted/deleted tuples with.
-    pub es_output_cid: crate::c::CommandId,
-    pub es_result_relations: Vec<Box<ResultRelInfo>>,
-    pub es_opened_result_relations: Vec<Box<ResultRelInfo>>,
-    pub es_partition_directory: PartitionDirectory,
-    pub es_tuple_routing_result_relations: Vec<Box<ResultRelInfo>>,
-    pub es_trig_target_relations: Vec<Box<ResultRelInfo>>,
-    pub es_param_list_info: Option<Box<ParamListInfo>>,
-    pub es_param_exec_vals: Option<Box<ParamExecData>>,
-    pub es_query_env: Option<Box<QueryEnvironment>>,
-    pub es_query_cxt: MemoryContext,
+    pub output_cid: crate::c::CommandId,
+    pub result_relations: Vec<Box<ResultRelInfo>>,
+    pub opened_result_relations: Vec<Box<ResultRelInfo>>,
+    pub partition_directory: PartitionDirectory,
+    pub tuple_routing_result_relations: Vec<Box<ResultRelInfo>>,
+    pub trig_target_relations: Vec<Box<ResultRelInfo>>,
+    pub param_list_info: Option<Box<ParamListInfo>>,
+    pub param_exec_vals: Option<Box<ParamExecData>>,
+    pub query_env: Option<Box<QueryEnvironment>>,
+    pub query_cxt: MemoryContext,
     /// List of TupleTableSlots.
-    pub es_tuple_table: Vec<Box<TupleTableSlot>>,
-    pub es_processed: u64,
-    pub es_total_processed: u64,
-    pub es_top_eflags: i32,
+    pub tuple_table: Vec<Box<TupleTableSlot>>,
+    pub processed: u64,
+    pub total_processed: u64,
+    pub top_eflags: i32,
     /// OR of InstrumentOption flags.
-    pub es_instrument: i32,
-    pub es_finished: bool,
-    pub es_exprcontexts: Vec<Box<ExprContext>>,
+    pub instrument: i32,
+    pub finished: bool,
+    pub exprcontexts: Vec<Box<ExprContext>>,
     /// List of PlanState for SubPlans.
-    pub es_subplanstates: Vec<Box<PlanState>>,
-    pub es_auxmodifytables: Vec<Box<Node>>,
-    pub es_per_tuple_exprcontext: Option<Box<ExprContext>>,
-    pub es_epq_active: Option<Box<EPQState>>,
-    pub es_use_parallel_mode: bool,
-    pub es_parallel_workers_to_launch: i32,
-    pub es_parallel_workers_launched: i32,
+    pub subplanstates: Vec<Box<PlanState>>,
+    pub auxmodifytables: Vec<Box<Node>>,
+    pub per_tuple_exprcontext: Option<Box<ExprContext>>,
+    pub epq_active: Option<Box<EPQState>>,
+    pub use_parallel_mode: bool,
+    pub parallel_workers_to_launch: i32,
+    pub parallel_workers_launched: i32,
     /// per-query shared memory area (C `dsa_area *`).
-    pub es_query_dsa: OpaqueState,
-    pub es_jit_flags: i32,
+    pub query_dsa: OpaqueState,
+    pub jit_flags: i32,
     /// JIT context, created on-demand (C `void *`).
-    pub es_jit: OpaqueState,
-    pub es_jit_worker_instr: OpaqueState,
-    pub es_insert_pending_result_relations: Vec<Box<ResultRelInfo>>,
-    pub es_insert_pending_modifytables: Vec<Box<Node>>,
+    pub jit: OpaqueState,
+    pub jit_worker_instr: OpaqueState,
+    pub insert_pending_result_relations: Vec<Box<ResultRelInfo>>,
+    pub insert_pending_modifytables: Vec<Box<Node>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -583,8 +583,8 @@ pub struct SubPlanState {
 /// One constraint to check during CoerceToDomain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DomainConstraintType {
-    DOM_CONSTRAINT_NOTNULL,
-    DOM_CONSTRAINT_CHECK,
+    NOTNULL,
+    CHECK,
 }
 
 #[allow(deprecated)]
@@ -989,9 +989,9 @@ pub struct BitmapHeapScanInstrumentation {
 /// Shared-state phase of a parallel bitmap heap scan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SharedBitmapState {
-    BM_INITIAL,
-    BM_INPROGRESS,
-    BM_FINISHED,
+    INITIAL,
+    INPROGRESS,
+    FINISHED,
 }
 
 /// Parallel coordination state for a bitmap heap scan. (Not a Node.)
@@ -1363,10 +1363,10 @@ pub struct SharedIncrementalSortInfo {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncrementalSortExecutionStatus {
-    INCSORT_LOADFULLSORT,
-    INCSORT_LOADPREFIXSORT,
-    INCSORT_READFULLSORT,
-    INCSORT_READPREFIXSORT,
+    LOADFULLSORT,
+    LOADPREFIXSORT,
+    READFULLSORT,
+    READPREFIXSORT,
 }
 
 /// IncrementalSortState information.
@@ -1491,10 +1491,10 @@ pub struct AggState {
 /// Run status of a WindowAggState.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowAggStatus {
-    WINDOWAGG_DONE,
-    WINDOWAGG_RUN,
-    WINDOWAGG_PASSTHROUGH,
-    WINDOWAGG_PASSTHROUGH_STRICT,
+    DONE,
+    RUN,
+    PASSTHROUGH,
+    PASSTHROUGH_STRICT,
 }
 
 /// WindowAggState information.
@@ -1688,14 +1688,14 @@ pub struct LockRowsState {
 /// State machine status for a Limit node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LimitStateCond {
-    LIMIT_INITIAL,
-    LIMIT_RESCAN,
-    LIMIT_EMPTY,
-    LIMIT_INWINDOW,
-    LIMIT_WINDOWEND_TIES,
-    LIMIT_SUBPLANEOF,
-    LIMIT_WINDOWEND,
-    LIMIT_WINDOWSTART,
+    INITIAL,
+    RESCAN,
+    EMPTY,
+    INWINDOW,
+    WINDOWEND_TIES,
+    SUBPLANEOF,
+    WINDOWEND,
+    WINDOWSTART,
 }
 
 /// LimitState information.

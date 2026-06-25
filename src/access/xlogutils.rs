@@ -21,16 +21,16 @@ pub static mut InRecovery: bool = false;
 /// Hot-standby state, valid only in the startup process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HotStandbyState {
-    STANDBY_DISABLED,
-    STANDBY_INITIALIZED,
-    STANDBY_SNAPSHOT_PENDING,
-    STANDBY_SNAPSHOT_READY,
+    DISABLED,
+    INITIALIZED,
+    SNAPSHOT_PENDING,
+    SNAPSHOT_READY,
 }
 
-pub static mut standbyState: HotStandbyState = HotStandbyState::STANDBY_DISABLED;
+pub static mut standbyState: HotStandbyState = HotStandbyState::DISABLED;
 
 pub fn InHotStandby() -> bool {
-    unsafe { standbyState >= HotStandbyState::STANDBY_SNAPSHOT_PENDING }
+    unsafe { standbyState >= HotStandbyState::SNAPSHOT_PENDING }
 }
 
 pub fn XLogHaveInvalidPages() -> bool {
@@ -59,10 +59,10 @@ pub fn XLogTruncateRelation(rlocator: RelFileLocator, fork_num: ForkNumber, nblo
 /// Result codes for XLogReadBufferForRedo[Extended].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XLogRedoAction {
-    BLK_NEEDS_REDO, // changes from WAL record need to be applied
-    BLK_DONE,       // block is already up-to-date
-    BLK_RESTORED,   // block was restored from a full-page image
-    BLK_NOTFOUND,   // block was not found (and hence need not be replayed)
+    NEEDS_REDO, // changes from WAL record need to be applied
+    DONE,       // block is already up-to-date
+    RESTORED,   // block was restored from a full-page image
+    NOTFOUND,   // block was not found (and hence need not be replayed)
 }
 
 /// Private data of the read_local_xlog_page_no_wait callback.

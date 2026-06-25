@@ -33,14 +33,14 @@ pub type FunctionCallInfo<'a> = &'a mut FunctionCallInfoBaseData;
 #[allow(deprecated)]
 pub struct FmgrInfo {
     pub fn_addr: Option<PGFunction>, // pointer to function or handler to be called
-    pub fn_oid: Oid,                 // OID of function (NOT of handler, if any)
-    pub fn_nargs: i16,               // number of input args (0..FUNC_MAX_ARGS)
-    pub fn_strict: bool,             // function is "strict" (NULL in => NULL out)
-    pub fn_retset: bool,             // function returns a set
-    pub fn_stats: u8,                // collect stats if track_functions > this
-    pub fn_extra: usize,             // extra space for use by handler (void *) TODO(ptr)
-    pub fn_mcxt: MemoryContext,      // memory context to store fn_extra in
-    pub fn_expr: fmNodePtr,          // expression parse tree for call, or NULL
+    pub oid: Oid,                 // OID of function (NOT of handler, if any)
+    pub nargs: i16,               // number of input args (0..FUNC_MAX_ARGS)
+    pub strict: bool,             // function is "strict" (NULL in => NULL out)
+    pub retset: bool,             // function returns a set
+    pub stats: u8,                // collect stats if track_functions > this
+    pub extra: usize,             // extra space for use by handler (void *) TODO(ptr)
+    pub mcxt: MemoryContext,      // memory context to store extra in
+    pub expr: fmNodePtr,          // expression parse tree for call, or NULL
 }
 
 pub const FIELDNO_FUNCTIONCALLINFODATA_ISNULL: usize = 4;
@@ -91,7 +91,7 @@ pub fn FunctionCallInvoke(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
 
 /// C: `#define fmgr_info_set_expr(expr, finfo)`
 pub fn fmgr_info_set_expr(expr: fmNodePtr, finfo: &mut FmgrInfo) {
-    finfo.fn_expr = expr;
+    finfo.expr = expr;
 }
 
 // PG_GET_COLLATION / PG_NARGS / PG_ARGISNULL are caller-side accessors on fcinfo.
@@ -143,13 +143,13 @@ pub const AGG_CONTEXT_WINDOW: i32 = 2; // window function
 
 /// Plugin hook event type for function entry/exit.
 pub enum FmgrHookEventType {
-    FHET_START,
-    FHET_END,
-    FHET_ABORT,
+    START,
+    END,
+    ABORT,
 }
 
-/// C: `typedef bool (*needs_fmgr_hook_type) (Oid fn_oid);`
-pub type needs_fmgr_hook_type = fn(fn_oid: Oid) -> bool;
+/// C: `typedef bool (*needs_fmgr_hook_type) (Oid oid);`
+pub type needs_fmgr_hook_type = fn(oid: Oid) -> bool;
 
 /// C: `typedef void (*fmgr_hook_type) (FmgrHookEventType event, FmgrInfo *flinfo, Datum *arg);`
 pub type fmgr_hook_type = fn(event: FmgrHookEventType, flinfo: &mut FmgrInfo, arg: &mut Datum);

@@ -100,12 +100,12 @@ pub type SubXactCallback =
 
 /// Saved characteristics for Save/RestoreTransactionCharacteristics.
 pub struct SavedTransactionCharacteristics {
-    pub save_XactIsoLevel: i32,
-    pub save_XactReadOnly: bool,
-    pub save_XactDeferrable: bool,
+    pub XactIsoLevel: i32,
+    pub XactReadOnly: bool,
+    pub XactDeferrable: bool,
 }
 
-// transaction-related XLOG opcodes (xl_info high nibble): raw consts.
+// transaction-related XLOG opcodes (info high nibble): raw consts.
 pub const XLOG_XACT_COMMIT: u8 = 0x00;
 pub const XLOG_XACT_PREPARE: u8 = 0x10;
 pub const XLOG_XACT_ABORT: u8 = 0x20;

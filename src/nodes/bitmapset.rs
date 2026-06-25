@@ -17,19 +17,19 @@ pub struct Bitmapset {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BMS_Comparison {
-    BMS_EQUAL = 0,
-    BMS_SUBSET1,
-    BMS_SUBSET2,
-    BMS_DIFFERENT,
+    EQUAL = 0,
+    SUBSET1,
+    SUBSET2,
+    DIFFERENT,
 }
 
 /// C: result of `bms_membership`.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BMS_Membership {
-    BMS_EMPTY_SET = 0,
-    BMS_SINGLETON,
-    BMS_MULTIPLE,
+    EMPTY_SET = 0,
+    SINGLETON,
+    MULTIPLE,
 }
 
 impl Bitmapset {

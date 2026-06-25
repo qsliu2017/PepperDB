@@ -10,7 +10,7 @@ use crate::storage::block::BlockNumber;
 use crate::storage::off::OffsetNumber;
 use crate::storage::relfilelocator::RelFileLocator;
 
-// WAL opcodes: high nibble of xl_info. Raw consts (opcode, not a flag set).
+// WAL opcodes: high nibble of info. Raw consts (opcode, not a flag set).
 pub const XLOG_GIST_PAGE_UPDATE: u8 = 0x00;
 pub const XLOG_GIST_DELETE: u8 = 0x10; // delete leaf index tuples for a page
 pub const XLOG_GIST_PAGE_REUSE: u8 = 0x20; // old page about to be reused from FSM

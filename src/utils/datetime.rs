@@ -194,8 +194,8 @@ pub const DTERR_BAD_ZONE_ABBREV: i32 = -7;
 
 /// Extra context for DateTimeParseError.
 pub struct DateTimeErrorExtra {
-    pub dtee_timezone: Option<String>, // incorrect time zone name
-    pub dtee_abbrev: Option<String>,   // relevant time zone abbreviation
+    pub timezone: Option<String>, // incorrect time zone name
+    pub abbrev: Option<String>,   // relevant time zone abbreviation
 }
 
 // Result codes for DecodeTimezoneName().

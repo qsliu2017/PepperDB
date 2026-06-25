@@ -38,7 +38,7 @@ pub struct RawColumnDefault {
 
 /// A transformed (cooked) constraint or default.
 pub struct CookedConstraint {
-    pub contype: ConstrType,    // CONSTR_DEFAULT, CONSTR_CHECK, CONSTR_NOTNULL
+    pub contype: ConstrType,    // DEFAULT, CHECK, NOTNULL
     pub conoid: Oid,            // constr OID if created, else Invalid
     pub name: Option<String>,   // name, or None if none
     pub attnum: AttrNumber,     // which attr (only for NOTNULL, DEFAULT)

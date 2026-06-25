@@ -8,26 +8,26 @@ use crate::parser::parse_node::ParseState;
 /// by `exec_setup`). Per routine-struct.md, the optional assignment-only
 /// callbacks are split into a supertrait; the required step is `fetch`.
 ///
-/// `sbs_check_subscripts` may be omitted (then `fetch` must subsume it), and
-/// `sbs_assign`/`sbs_fetch_old` are only present for types supporting
+/// `check_subscripts` may be omitted (then `fetch` must subsume it), and
+/// `assign`/`fetch_old` are only present for types supporting
 /// assignment, hence the `Option` slots in the concrete vtable below.
 pub trait SubscriptExec {
-    /// sbs_fetch: perform a subscripting fetch.
+    /// fetch: perform a subscripting fetch.
     fn fetch(&self, state: &mut SubscriptingRefState);
 
-    /// sbs_check_subscripts: validate/convert subscripts; false -> overall NULL.
+    /// check_subscripts: validate/convert subscripts; false -> overall NULL.
     /// Default folds into `fetch` (the no-separate-check case).
     fn check_subscripts(&self, _state: &mut SubscriptingRefState) -> bool {
         true
     }
 }
 
-/// Assignment-capable subscripting (sbs_assign + sbs_fetch_old).
+/// Assignment-capable subscripting (assign + fetch_old).
 pub trait SubscriptAssign: SubscriptExec {
-    /// sbs_assign: perform a subscripting assignment.
+    /// assign: perform a subscripting assignment.
     fn assign(&self, state: &mut SubscriptingRefState);
 
-    /// sbs_fetch_old: fetch the existing element/slice for nested assignment.
+    /// fetch_old: fetch the existing element/slice for nested assignment.
     fn fetch_old(&self, state: &mut SubscriptingRefState);
 }
 
@@ -35,10 +35,10 @@ pub trait SubscriptAssign: SubscriptExec {
 /// NULL fn pointers -> `None`.
 #[derive(Clone)]
 pub struct SubscriptExecSteps {
-    pub sbs_check_subscripts: Option<fn(&mut SubscriptingRefState) -> bool>,
-    pub sbs_fetch: Option<fn(&mut SubscriptingRefState)>,
-    pub sbs_assign: Option<fn(&mut SubscriptingRefState)>,
-    pub sbs_fetch_old: Option<fn(&mut SubscriptingRefState)>,
+    pub check_subscripts: Option<fn(&mut SubscriptingRefState) -> bool>,
+    pub fetch: Option<fn(&mut SubscriptingRefState)>,
+    pub assign: Option<fn(&mut SubscriptingRefState)>,
+    pub fetch_old: Option<fn(&mut SubscriptingRefState)>,
 }
 
 /// transform method: parse-analyze a subscripting construct, filling `sbsref`.

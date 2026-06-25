@@ -25,7 +25,7 @@ pub const INDEX_NULL_MASK: u16 = 0x8000;
 ///   bit 15: has nulls | bit 14: has var-width | bit 13: AM-defined | 12-0: size
 #[repr(C)]
 pub struct IndexTupleData {
-    pub t_tid: ItemPointerData, // reference TID to heap tuple
+    pub tid: ItemPointerData, // reference TID to heap tuple
     pub t_info: u16,            // size:13 | am_reserved:1 | var:1 | null:1
 }
 

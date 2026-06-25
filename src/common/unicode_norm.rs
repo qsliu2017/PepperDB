@@ -6,19 +6,19 @@ use crate::mb::pg_wchar::pg_wchar;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum UnicodeNormalizationForm {
-    UNICODE_NFC = 0,
-    UNICODE_NFD = 1,
-    UNICODE_NFKC = 2,
-    UNICODE_NFKD = 3,
+    NFC = 0,
+    NFD = 1,
+    NFKC = 2,
+    NFKD = 3,
 }
 
 /// Quick-check result, see UAX #15.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum UnicodeNormalizationQC {
-    UNICODE_NORM_QC_NO = 0,
-    UNICODE_NORM_QC_YES = 1,
-    UNICODE_NORM_QC_MAYBE = -1,
+    NO = 0,
+    YES = 1,
+    MAYBE = -1,
 }
 
 /// Normalize `input` (a code-point sequence) to the given form.

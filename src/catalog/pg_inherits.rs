@@ -24,7 +24,7 @@ pub type Form_pg_inherits = *mut FormData_pg_inherits; // TODO(ptr)
 /// Outputs of `find_inheritance_children_extended` beyond the child list.
 pub struct DetachedInfo {
     pub detached_exist: bool,
-    pub detached_xmin: TransactionId,
+    pub xmin: TransactionId,
 }
 
 pub fn find_inheritance_children(_parent_rel_id: Oid, _lockmode: LOCKMODE) -> Vec<Oid> {

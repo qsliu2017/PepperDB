@@ -73,12 +73,12 @@ pub const GIST_PAGE_ID: u16 = 0xFF81;
 
 /// Split Vector returned by the PickSplit method (in-memory method state).
 pub struct GIST_SPLITVEC {
-    pub spl_left: Vec<OffsetNumber>,   // entries that go left
-    pub spl_ldatum: Datum,             // union of keys in spl_left
-    pub spl_ldatum_exists: bool,       // true if spl_ldatum already exists
-    pub spl_right: Vec<OffsetNumber>,  // entries that go right
-    pub spl_rdatum: Datum,             // union of keys in spl_right
-    pub spl_rdatum_exists: bool,       // true if spl_rdatum already exists
+    pub left: Vec<OffsetNumber>,   // entries that go left
+    pub ldatum: Datum,             // union of keys in left
+    pub ldatum_exists: bool,       // true if ldatum already exists
+    pub right: Vec<OffsetNumber>,  // entries that go right
+    pub rdatum: Datum,             // union of keys in right
+    pub rdatum_exists: bool,       // true if rdatum already exists
 }
 
 /// An entry on a GiST node: key plus its own location (rel,page,offset).

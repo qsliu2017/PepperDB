@@ -38,7 +38,7 @@ pub fn bucket_to_blkno(_metap: &HashMetaPageData, _b: Bucket) -> BlockNumber {
 }
 
 bitflags! {
-    /// hasho_flag page-type code + flag bits. The page-type bits (LH_PAGE_TYPE)
+    /// flag page-type code + flag bits. The page-type bits (LH_PAGE_TYPE)
     /// are distinct single bits so they can be OR'd as an allowable-types mask;
     /// callers must still ensure exactly one page-type bit is set on a real page.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,24 +68,24 @@ impl LhFlags {
 #[repr(C)]
 pub struct HashPageOpaqueData {
     /// see header notes
-    pub hasho_prevblkno: BlockNumber,
+    pub prevblkno: BlockNumber,
     /// next page in bucket chain, or InvalidBlockNumber
-    pub hasho_nextblkno: BlockNumber,
+    pub nextblkno: BlockNumber,
     /// bucket number this page belongs to
-    pub hasho_bucket: Bucket,
+    pub bucket: Bucket,
     /// page type code + flag bits (raw word; use LhFlags accessors)
-    pub hasho_flag: u16,
+    pub flag: u16,
     /// for identification of hash indexes
-    pub hasho_page_id: u16,
+    pub page_id: u16,
 }
 const _: () = assert!(core::mem::size_of::<HashPageOpaqueData>() == 16);
-const _: () = assert!(core::mem::offset_of!(HashPageOpaqueData, hasho_flag) == 12);
+const _: () = assert!(core::mem::offset_of!(HashPageOpaqueData, flag) == 12);
 
 pub type HashPageOpaque = *mut HashPageOpaqueData; // TODO(ptr)
 
 impl HashPageOpaqueData {
     pub fn flags(&self) -> LhFlags {
-        LhFlags::from_bits_retain(self.hasho_flag)
+        LhFlags::from_bits_retain(self.flag)
     }
     pub fn needs_split_cleanup(&self) -> bool {
         self.flags().contains(LhFlags::BUCKET_NEEDS_SPLIT_CLEANUP)
@@ -188,43 +188,43 @@ pub const HASH_MAX_SPLITPOINTS: usize = (((HASH_MAX_SPLITPOINT_GROUP
 #[repr(C)]
 pub struct HashMetaPageData {
     /// magic no. for hash tables
-    pub hashm_magic: u32,
+    pub magic: u32,
     /// version ID
-    pub hashm_version: u32,
+    pub version: u32,
     /// number of tuples stored in the table
-    pub hashm_ntuples: f64,
+    pub ntuples: f64,
     /// target fill factor (tuples/bucket)
-    pub hashm_ffactor: u16,
+    pub ffactor: u16,
     /// index page size (bytes)
-    pub hashm_bsize: u16,
+    pub bsize: u16,
     /// bitmap array size (bytes) - must be a power of 2
-    pub hashm_bmsize: u16,
+    pub bmsize: u16,
     /// log2(bitmap array size in BITS)
-    pub hashm_bmshift: u16,
+    pub bmshift: u16,
     /// ID of maximum bucket in use
-    pub hashm_maxbucket: u32,
+    pub maxbucket: u32,
     /// mask to modulo into entire table
-    pub hashm_highmask: u32,
+    pub highmask: u32,
     /// mask to modulo into lower half of table
-    pub hashm_lowmask: u32,
+    pub lowmask: u32,
     /// splitpoint from which ovflpage being allocated
-    pub hashm_ovflpoint: u32,
+    pub ovflpoint: u32,
     /// lowest-number free ovflpage (bit#)
-    pub hashm_firstfree: u32,
+    pub firstfree: u32,
     /// number of bitmap pages
-    pub hashm_nmaps: u32,
+    pub nmaps: u32,
     /// hash function id from pg_proc
-    pub hashm_procid: RegProcedure,
+    pub procid: RegProcedure,
     /// spare pages before each splitpoint
-    pub hashm_spares: [u32; HASH_MAX_SPLITPOINTS],
+    pub spares: [u32; HASH_MAX_SPLITPOINTS],
     /// blknos of ovfl bitmaps
-    pub hashm_mapp: [BlockNumber; HASH_MAX_BITMAPS],
+    pub mapp: [BlockNumber; HASH_MAX_BITMAPS],
 }
 // Layout depends on HASH_MAX_SPLITPOINTS=98, HASH_MAX_BITMAPS=1024 (8K block).
 const _: () = assert!(HASH_MAX_SPLITPOINTS == 98);
 const _: () = assert!(HASH_MAX_BITMAPS == 1024);
-const _: () = assert!(core::mem::offset_of!(HashMetaPageData, hashm_ntuples) == 8);
-const _: () = assert!(core::mem::offset_of!(HashMetaPageData, hashm_spares) == 52);
+const _: () = assert!(core::mem::offset_of!(HashMetaPageData, ntuples) == 8);
+const _: () = assert!(core::mem::offset_of!(HashMetaPageData, spares) == 52);
 const _: () = assert!(core::mem::size_of::<HashMetaPageData>() == 4544);
 
 pub type HashMetaPage = *mut HashMetaPageData; // TODO(ptr)
@@ -263,13 +263,13 @@ pub const ALL_SET: u32 = !0;
 
 // Bitmap page helpers (operate on the metapage / a bitmap word array).
 pub const fn bmpgsz_byte(metap: &HashMetaPageData) -> u16 {
-    metap.hashm_bmsize
+    metap.bmsize
 }
 pub const fn bmpgsz_bit(metap: &HashMetaPageData) -> u32 {
-    (metap.hashm_bmsize as u32) << BYTE_TO_BIT
+    (metap.bmsize as u32) << BYTE_TO_BIT
 }
 pub const fn bmpg_shift(metap: &HashMetaPageData) -> u16 {
-    metap.hashm_bmshift
+    metap.bmshift
 }
 pub const fn bmpg_mask(metap: &HashMetaPageData) -> u32 {
     bmpgsz_bit(metap) - 1

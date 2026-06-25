@@ -115,13 +115,13 @@ pub struct ParallelHashJoinBatchAccessor {
 /// Growth directive set by a participant while hashing the inner relation.
 pub enum ParallelHashGrowth {
     /// current dimensions are sufficient
-    PHJ_GROWTH_OK,
+    OK,
     /// load factor too high; add buckets
-    PHJ_GROWTH_NEED_MORE_BUCKETS,
+    NEED_MORE_BUCKETS,
     /// memory budget exhausted; repartition
-    PHJ_GROWTH_NEED_MORE_BATCHES,
+    NEED_MORE_BATCHES,
     /// repartitioning didn't help; don't retry
-    PHJ_GROWTH_DISABLED,
+    DISABLED,
 }
 
 /// Shared coordination state for a Parallel Hash Join (DSM in C; owned here).

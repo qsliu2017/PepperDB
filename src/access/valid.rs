@@ -10,20 +10,20 @@ use crate::postgres::DatumGetBool;
 /// Test a heap tuple to see if it satisfies a scan key.
 pub fn HeapKeyTest(tuple: &HeapTupleData, tupdesc: &TupleDesc, keys: &mut [ScanKeyData]) -> bool {
     for cur_key in keys.iter_mut() {
-        if cur_key.sk_flags & ScanKeyFlags::ISNULL.bits() != 0 {
+        if cur_key.flags & ScanKeyFlags::ISNULL.bits() != 0 {
             return false;
         }
 
-        let (atp, isnull) = heap_getattr(tuple, cur_key.sk_attno as i32, tupdesc);
+        let (atp, isnull) = heap_getattr(tuple, cur_key.attno as i32, tupdesc);
         if isnull {
             return false;
         }
 
         let test = FunctionCall2Coll(
-            &mut cur_key.sk_func,
-            cur_key.sk_collation,
+            &mut cur_key.func,
+            cur_key.collation,
             atp,
-            cur_key.sk_argument,
+            cur_key.argument,
         );
 
         match test {

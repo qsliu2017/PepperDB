@@ -19,12 +19,12 @@ pub static mut conn_timing: Option<ConnectionTiming> = None;
 /// send an error and close. Sequential ordinals -> enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CAC_state {
-    CAC_OK,
-    CAC_STARTUP,
-    CAC_SHUTDOWN,
-    CAC_RECOVERY,
-    CAC_NOTHOTSTANDBY,
-    CAC_TOOMANY,
+    OK,
+    STARTUP,
+    SHUTDOWN,
+    RECOVERY,
+    NOTHOTSTANDBY,
+    TOOMANY,
 }
 
 /// Information passed from postmaster to backend in 'startup_data'.

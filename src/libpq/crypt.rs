@@ -11,9 +11,9 @@ pub static mut MD5_PASSWORD_WARNINGS: bool = true;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum PasswordType {
-    PASSWORD_TYPE_PLAINTEXT = 0,
-    PASSWORD_TYPE_MD5,
-    PASSWORD_TYPE_SCRAM_SHA_256,
+    PLAINTEXT = 0,
+    MD5,
+    SCRAM_SHA_256,
 }
 
 pub fn get_password_type(shadow_pass: &str) -> PasswordType {

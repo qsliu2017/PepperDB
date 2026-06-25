@@ -11,12 +11,12 @@ use crate::port::pg_crc32c::pg_crc32c;
 /// detection); MD5 is deliberately omitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum pg_checksum_type {
-    CHECKSUM_TYPE_NONE,
-    CHECKSUM_TYPE_CRC32C,
-    CHECKSUM_TYPE_SHA224,
-    CHECKSUM_TYPE_SHA256,
-    CHECKSUM_TYPE_SHA384,
-    CHECKSUM_TYPE_SHA512,
+    NONE,
+    CRC32C,
+    SHA224,
+    SHA256,
+    SHA384,
+    SHA512,
 }
 
 /// C union pg_checksum_raw_context (CRC-32C value or a cryptohash context).

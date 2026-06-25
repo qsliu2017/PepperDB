@@ -83,7 +83,7 @@ pub struct PartitionPruningData {
 pub struct PartitionPruneState {
     /// Standalone ExprContext to evaluate the pruning steps.
     pub econtext: Option<Box<ExprContext>>,
-    /// paramids of PARAM_EXEC Params inside any partprunedata.
+    /// paramids of EXEC Params inside any partprunedata.
     pub execparamids: Option<Box<Bitmapset>>,
     /// subplan indexes that belong to no partprunedata (never pruned).
     pub other_subplans: Option<Box<Bitmapset>>,

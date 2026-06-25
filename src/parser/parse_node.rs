@@ -140,9 +140,9 @@ pub struct ParseState {
     pub p_sourcetext: Option<String>,
     /// range table so far
     pub p_rtable: Vec<RangeTblEntry>,
-    /// RTEPermissionInfo nodes for each RTE_RELATION entry in rtable
+    /// RTEPermissionInfo nodes for each RELATION entry in rtable
     pub p_rteperminfos: Vec<RTEPermissionInfo>,
-    /// JoinExprs for RTE_JOIN p_rtable entries (NULLs for non-join RTEs)
+    /// JoinExprs for JOIN p_rtable entries (NULLs for non-join RTEs)
     pub p_joinexprs: Vec<Option<Box<Node>>>,
     /// Bitmapsets showing nulling outer joins
     pub p_nullingrels: Vec<Option<crate::nodes::bitmapset::Bitmapset>>,
@@ -150,7 +150,7 @@ pub struct ParseState {
     pub p_joinlist: Vec<Box<Node>>,
     /// currently-referenceable RTEs (list of ParseNamespaceItem)
     pub p_namespace: Vec<ParseNamespaceItem>,
-    /// p_lateral_only items visible?
+    /// lateral_only items visible?
     pub p_lateral_active: bool,
     /// current namespace for common table exprs
     pub p_ctenamespace: Vec<CommonTableExpr>,
@@ -206,47 +206,47 @@ pub struct ParseState {
 /// An element of a namespace list.
 pub struct ParseNamespaceItem {
     /// Table and column names
-    pub p_names: Box<Alias>,
+    pub names: Box<Alias>,
     /// The relation's rangetable entry
-    pub p_rte: Box<RangeTblEntry>,
+    pub rte: Box<RangeTblEntry>,
     /// The relation's index in the rangetable
-    pub p_rtindex: i32,
+    pub rtindex: i32,
     /// The relation's rteperminfos entry
-    pub p_perminfo: Option<Box<RTEPermissionInfo>>,
-    /// per-column data (array of same length as p_names->colnames)
-    pub p_nscolumns: Vec<ParseNamespaceColumn>,
+    pub perminfo: Option<Box<RTEPermissionInfo>>,
+    /// per-column data (array of same length as names->colnames)
+    pub nscolumns: Vec<ParseNamespaceColumn>,
     /// Relation name is visible?
-    pub p_rel_visible: bool,
+    pub rel_visible: bool,
     /// Column names visible as unqualified refs?
-    pub p_cols_visible: bool,
+    pub cols_visible: bool,
     /// Is only visible to LATERAL expressions?
-    pub p_lateral_only: bool,
+    pub lateral_only: bool,
     /// If so, does join type allow use?
-    pub p_lateral_ok: bool,
+    pub lateral_ok: bool,
     /// Is OLD/NEW for use in RETURNING?
-    pub p_returning_type: VarReturningType,
+    pub returning_type: VarReturningType,
 }
 
 /// Data about one column of a ParseNamespaceItem.
 pub struct ParseNamespaceColumn {
     /// rangetable index
-    pub p_varno: Index,
+    pub varno: Index,
     /// attribute number of the column
-    pub p_varattno: AttrNumber,
+    pub varattno: AttrNumber,
     /// pg_type OID
-    pub p_vartype: Oid,
+    pub vartype: Oid,
     /// type modifier value
-    pub p_vartypmod: i32,
+    pub vartypmod: i32,
     /// OID of collation, or InvalidOid
-    pub p_varcollid: Oid,
+    pub varcollid: Oid,
     /// for RETURNING OLD/NEW
-    pub p_varreturningtype: VarReturningType,
+    pub varreturningtype: VarReturningType,
     /// rangetable index of syntactic referent
-    pub p_varnosyn: Index,
+    pub varnosyn: Index,
     /// attribute number of syntactic referent
-    pub p_varattnosyn: AttrNumber,
+    pub varattnosyn: AttrNumber,
     /// not included in star expansion
-    pub p_dontexpand: bool,
+    pub dontexpand: bool,
 }
 
 /// Support for parser_errposition_callback function.

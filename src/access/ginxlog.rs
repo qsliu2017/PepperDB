@@ -12,7 +12,7 @@ use crate::storage::block::BlockNumber;
 use crate::storage::off::OffsetNumber;
 use crate::storage::relfilelocator::RelFileLocator;
 
-// WAL opcodes (xl_info nibble): raw consts, not a flag set.
+// WAL opcodes (info nibble): raw consts, not a flag set.
 pub const XLOG_GIN_CREATE_PTREE: u8 = 0x10;
 pub const XLOG_GIN_INSERT: u8 = 0x20;
 pub const XLOG_GIN_SPLIT: u8 = 0x30;

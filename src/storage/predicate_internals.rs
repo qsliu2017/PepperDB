@@ -147,7 +147,7 @@ pub struct PredicateLockTarget {
 
 /// `PREDICATELOCKTAG` - identifies an individual predicate lock.
 pub struct PredicateLockTag {
-    pub my_target: *mut PredicateLockTarget, // TODO(ptr)
+    pub target: *mut PredicateLockTarget, // TODO(ptr)
     pub my_xact: *mut SerializableXact,      // TODO(ptr)
 }
 

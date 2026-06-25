@@ -22,22 +22,22 @@ const _: () = assert!(core::mem::offset_of!(Interval, month) == 12);
 /// Broken-down interval (modeled on struct pg_tm).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct pg_itm {
-    pub tm_usec: i32,
-    pub tm_sec: i32,
-    pub tm_min: i32,
-    pub tm_hour: i64, // needs to be wide
-    pub tm_mday: i32,
-    pub tm_mon: i32,
-    pub tm_year: i32,
+    pub usec: i32,
+    pub sec: i32,
+    pub min: i32,
+    pub hour: i64, // needs to be wide
+    pub mday: i32,
+    pub mon: i32,
+    pub year: i32,
 }
 
 /// Data structure for decoding intervals.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct pg_itm_in {
-    pub tm_usec: i64, // needs to be wide
-    pub tm_mday: i32,
-    pub tm_mon: i32,
-    pub tm_year: i32,
+    pub usec: i64, // needs to be wide
+    pub mday: i32,
+    pub mon: i32,
+    pub year: i32,
 }
 
 // Limits on the "precision" option (typmod).

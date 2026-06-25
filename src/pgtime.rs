@@ -4,20 +4,20 @@
 /// 64-bit signed seconds-since-epoch (distinct from C library time_t).
 pub type pg_time_t = i64;
 
-/// Broken-down timestamp. NB: tm_mon/tm_year conventions differ between the IANA
+/// Broken-down timestamp. NB: mon/year conventions differ between the IANA
 /// timezone library and Postgres datetime code (see C header comment).
 pub struct pg_tm {
-    pub tm_sec: i32,
-    pub tm_min: i32,
-    pub tm_hour: i32,
-    pub tm_mday: i32,
-    pub tm_mon: i32,
-    pub tm_year: i32,
-    pub tm_wday: i32,
-    pub tm_yday: i32,
-    pub tm_isdst: i32,
-    pub tm_gmtoff: i64,
-    pub tm_zone: Option<String>, // const char *
+    pub sec: i32,
+    pub min: i32,
+    pub hour: i32,
+    pub mday: i32,
+    pub mon: i32,
+    pub year: i32,
+    pub wday: i32,
+    pub yday: i32,
+    pub isdst: i32,
+    pub gmtoff: i64,
+    pub zone: Option<String>, // const char *
 }
 
 /// Opaque outside the timezone library.

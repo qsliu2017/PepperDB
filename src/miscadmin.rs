@@ -222,33 +222,33 @@ pub fn SwitchBackToLocalLatch() {
 /// What kind of backend this process is. (C enum BackendType, sequential.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendType {
-    B_INVALID = 0,
-    B_BACKEND,
-    B_DEAD_END_BACKEND,
-    B_AUTOVAC_LAUNCHER,
-    B_AUTOVAC_WORKER,
-    B_BG_WORKER,
-    B_WAL_SENDER,
-    B_SLOTSYNC_WORKER,
-    B_STANDALONE_BACKEND,
-    B_ARCHIVER,
-    B_BG_WRITER,
-    B_CHECKPOINTER,
-    B_IO_WORKER,
-    B_STARTUP,
-    B_WAL_RECEIVER,
-    B_WAL_SUMMARIZER,
-    B_WAL_WRITER,
-    B_LOGGER,
+    INVALID = 0,
+    BACKEND,
+    DEAD_END_BACKEND,
+    AUTOVAC_LAUNCHER,
+    AUTOVAC_WORKER,
+    BG_WORKER,
+    WAL_SENDER,
+    SLOTSYNC_WORKER,
+    STANDALONE_BACKEND,
+    ARCHIVER,
+    BG_WRITER,
+    CHECKPOINTER,
+    IO_WORKER,
+    STARTUP,
+    WAL_RECEIVER,
+    WAL_SUMMARIZER,
+    WAL_WRITER,
+    LOGGER,
 }
 
-pub const BACKEND_NUM_TYPES: usize = BackendType::B_LOGGER as usize + 1;
+pub const BACKEND_NUM_TYPES: usize = BackendType::LOGGER as usize + 1;
 
-pub static mut MyBackendType: BackendType = BackendType::B_INVALID;
+pub static mut MyBackendType: BackendType = BackendType::INVALID;
 
 /// C: `IsExternalConnectionBackend(t)`.
 pub fn is_external_connection_backend(t: BackendType) -> bool {
-    matches!(t, BackendType::B_BACKEND | BackendType::B_WAL_SENDER)
+    matches!(t, BackendType::BACKEND | BackendType::WAL_SENDER)
 }
 
 pub fn GetBackendTypeDesc(backend_type: BackendType) -> &'static str {

@@ -12,13 +12,13 @@ use crate::utils::snapshot::Snapshot;
 #[repr(i32)]
 pub enum SnapBuildState {
     /// Initial state, we can't do much yet.
-    SNAPBUILD_START = -1,
+    START = -1,
     /// Collecting committed transactions, to build the initial catalog snapshot.
-    SNAPBUILD_BUILDING_SNAPSHOT = 0,
+    BUILDING_SNAPSHOT = 0,
     /// Enough info to decode tuples in transactions started after this.
-    SNAPBUILD_FULL_SNAPSHOT = 1,
+    FULL_SNAPSHOT = 1,
     /// All transactions running at FULL_SNAPSHOT have finished.
-    SNAPBUILD_CONSISTENT = 2,
+    CONSISTENT = 2,
 }
 
 // ReorderBuffer / xl_heap_new_cid / xl_running_xacts are referenced only via the

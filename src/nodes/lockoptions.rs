@@ -3,11 +3,11 @@
 /// Strengths of FOR UPDATE/SHARE clauses. Order matters: highest value wins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LockClauseStrength {
-    LCS_NONE,           // no such clause - only used in PlanRowMark
-    LCS_FORKEYSHARE,    // FOR KEY SHARE
-    LCS_FORSHARE,       // FOR SHARE
-    LCS_FORNOKEYUPDATE, // FOR NO KEY UPDATE
-    LCS_FORUPDATE,      // FOR UPDATE
+    NONE,           // no such clause - only used in PlanRowMark
+    FORKEYSHARE,    // FOR KEY SHARE
+    FORSHARE,       // FOR SHARE
+    FORNOKEYUPDATE, // FOR NO KEY UPDATE
+    FORUPDATE,      // FOR UPDATE
 }
 
 /// How to deal with rows being locked (NOWAIT / SKIP LOCKED). Order matters.

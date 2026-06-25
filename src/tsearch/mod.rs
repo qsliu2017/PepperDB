@@ -1,7 +1,6 @@
 //! Directory module: src/include/tsearch
 
 // === scaffold: child modules (Phase 0) ===
-#[path = "dicts/mod.rs"]
 pub mod dicts;
 pub mod ts_cache;
 pub mod ts_locale;

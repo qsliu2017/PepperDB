@@ -3,7 +3,7 @@
 //!
 //! A `bbsink` is a chain of sinks, each forwarding (possibly modified) callbacks
 //! to the next. The C `bbsink_ops` vtable -> a `BbsinkOps` trait (routine-struct.md);
-//! all callbacks are required, the forwarding sink calls into `bbs_next`.
+//! all callbacks are required, the forwarding sink calls into `next`.
 
 use crate::access::xlogdefs::{TimeLineID, XLogRecPtr};
 use crate::backup::basebackup::TablespaceInfo;
@@ -21,18 +21,18 @@ pub struct BbsinkState {
 }
 
 /// Common data for any type of basebackup sink. The C `bbs_ops` vtable field is
-/// replaced by the `BbsinkOps` trait impl; `bbs_next` is the forwarded-to sink.
+/// replaced by the `BbsinkOps` trait impl; `next` is the forwarded-to sink.
 pub struct Bbsink {
-    pub bbs_buffer: Vec<u8>, // buffer for data destined for the sink (multiple of BLCKSZ)
-    pub bbs_buffer_length: usize,
-    pub bbs_next: Option<Box<Bbsink>>, // sink we forward operations to
-    pub bbs_state: Option<Box<BbsinkState>>,
+    pub buffer: Vec<u8>, // buffer for data destined for the sink (multiple of BLCKSZ)
+    pub buffer_length: usize,
+    pub next: Option<Box<Bbsink>>, // sink we forward operations to
+    pub state: Option<Box<BbsinkState>>,
 }
 
 /// Callbacks for a base backup sink. All callbacks are required; a sink that only
 /// forwards uses the `bbsink_forward_*` free functions as its implementation.
 pub trait BbsinkOps {
-    /// Invoked once at the very start; must point `bbs_buffer` at writable storage.
+    /// Invoked once at the very start; must point `buffer` at writable storage.
     fn begin_backup(sink: &mut Bbsink);
     fn begin_archive(sink: &mut Bbsink, archive_name: &str);
     fn archive_contents(sink: &mut Bbsink, len: usize);

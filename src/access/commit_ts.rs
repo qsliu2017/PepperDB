@@ -69,7 +69,7 @@ pub fn committssyncfiletag(_ftag: &FileTag, _path: &mut String) -> i32 {
     unimplemented!()
 }
 
-// XLOG stuff: opcodes in the high nibble of xl_info (raw, not a flag set).
+// XLOG stuff: opcodes in the high nibble of info (raw, not a flag set).
 pub const COMMIT_TS_ZEROPAGE: u8 = 0x00;
 pub const COMMIT_TS_TRUNCATE: u8 = 0x10;
 

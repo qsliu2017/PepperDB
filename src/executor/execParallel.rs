@@ -20,7 +20,7 @@ pub struct ParallelExecutorInfo {
     pub instrumentation: Option<Box<SharedExecutorInstrumentation>>,
     pub jit_instrumentation: Option<Box<SharedJitInstrumentation>>,
     // dsa_area *area / dsa_pointer param_exec -> heap state (DSA tombstoned).
-    pub param_exec: Vec<u8>, // serialized PARAM_EXEC parameters
+    pub param_exec: Vec<u8>, // serialized EXEC parameters
     pub finished: bool,
     /* These arrays have pcxt->nworkers_launched entries: */
     pub tqueue: Vec<Box<shm_mq_handle>>,

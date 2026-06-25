@@ -91,7 +91,7 @@ pub struct spgChooseMatchNode {
 /// results for spgAddNode
 pub struct spgChooseAddNode {
     /// new node's label
-    pub node_label: Datum,
+    pub label: Datum,
     /// where to insert it (index from 0)
     pub node_n: i32,
 }

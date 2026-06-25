@@ -26,26 +26,26 @@ pub const PG_STAT_TMP_DIR: &str = "pg_stat_tmp";
 // track_functions GUC values -- order is significant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrackFunctionsLevel {
-    TRACK_FUNC_OFF,
-    TRACK_FUNC_PL,
-    TRACK_FUNC_ALL,
+    OFF,
+    PL,
+    ALL,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PgStat_FetchConsistency {
-    PGSTAT_FETCH_CONSISTENCY_NONE,
-    PGSTAT_FETCH_CONSISTENCY_CACHE,
-    PGSTAT_FETCH_CONSISTENCY_SNAPSHOT,
+    NONE,
+    CACHE,
+    SNAPSHOT,
 }
 
 // Cause of session termination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionEndType {
-    DISCONNECT_NOT_YET, // still active
-    DISCONNECT_NORMAL,
-    DISCONNECT_CLIENT_EOF,
-    DISCONNECT_FATAL,
-    DISCONNECT_KILLED,
+    NOT_YET, // still active
+    NORMAL,
+    CLIENT_EOF,
+    FATAL,
+    KILLED,
 }
 
 // The data type used for counters.
@@ -169,40 +169,40 @@ pub struct PgStat_CheckpointerStats {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IOObject {
-    IOOBJECT_RELATION,
-    IOOBJECT_TEMP_RELATION,
-    IOOBJECT_WAL,
+    RELATION,
+    TEMP_RELATION,
+    WAL,
 }
-pub const IOOBJECT_NUM_TYPES: usize = IOObject::IOOBJECT_WAL as usize + 1;
+pub const IOOBJECT_NUM_TYPES: usize = IOObject::WAL as usize + 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IOContext {
-    IOCONTEXT_BULKREAD,
-    IOCONTEXT_BULKWRITE,
-    IOCONTEXT_INIT,
-    IOCONTEXT_NORMAL,
-    IOCONTEXT_VACUUM,
+    BULKREAD,
+    BULKWRITE,
+    INIT,
+    NORMAL,
+    VACUUM,
 }
-pub const IOCONTEXT_NUM_TYPES: usize = IOContext::IOCONTEXT_VACUUM as usize + 1;
+pub const IOCONTEXT_NUM_TYPES: usize = IOContext::VACUUM as usize + 1;
 
-// IO operations. First-in-bytes is IOOP_EXTEND, last is IOOP_WRITE; order matters.
+// IO operations. First-in-bytes is EXTEND, last is WRITE; order matters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IOOp {
     // not tracked in bytes
-    IOOP_EVICT,
-    IOOP_FSYNC,
-    IOOP_HIT,
-    IOOP_REUSE,
-    IOOP_WRITEBACK,
+    EVICT,
+    FSYNC,
+    HIT,
+    REUSE,
+    WRITEBACK,
     // tracked in bytes
-    IOOP_EXTEND,
-    IOOP_READ,
-    IOOP_WRITE,
+    EXTEND,
+    READ,
+    WRITE,
 }
-pub const IOOP_NUM_TYPES: usize = IOOp::IOOP_WRITE as usize + 1;
+pub const IOOP_NUM_TYPES: usize = IOOp::WRITE as usize + 1;
 
 pub const fn pgstat_is_ioop_tracked_in_bytes(io_op: IOOp) -> bool {
-    (io_op as u32) < IOOP_NUM_TYPES as u32 && (io_op as u32) >= IOOp::IOOP_EXTEND as u32
+    (io_op as u32) < IOOP_NUM_TYPES as u32 && (io_op as u32) >= IOOp::EXTEND as u32
 }
 
 pub struct PgStat_BktypeIO {
@@ -340,10 +340,10 @@ pub struct PgStat_StatTabEntry {
 // WAL activity counters gathered from WalUsage (shared across Stats structures).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PgStat_WalCounters {
-    pub wal_records: PgStat_Counter,
-    pub wal_fpi: PgStat_Counter,
-    pub wal_bytes: u64,
-    pub wal_buffers_full: PgStat_Counter,
+    pub records: PgStat_Counter,
+    pub fpi: PgStat_Counter,
+    pub bytes: u64,
+    pub buffers_full: PgStat_Counter,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

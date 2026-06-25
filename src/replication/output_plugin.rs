@@ -14,8 +14,8 @@ use crate::utils::relcache::Relation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputPluginOutputType {
-    OUTPUT_PLUGIN_BINARY_OUTPUT,
-    OUTPUT_PLUGIN_TEXTUAL_OUTPUT,
+    BINARY_OUTPUT,
+    TEXTUAL_OUTPUT,
 }
 
 /// Options set by the output plugin, in the startup callback.

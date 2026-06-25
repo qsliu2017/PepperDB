@@ -33,25 +33,25 @@ use crate::utils::relcache::Relation;
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexAMProperty {
-    AMPROP_UNKNOWN = 0, // anything not known to core code
-    AMPROP_ASC,         // column properties
-    AMPROP_DESC,
-    AMPROP_NULLS_FIRST,
-    AMPROP_NULLS_LAST,
-    AMPROP_ORDERABLE,
-    AMPROP_DISTANCE_ORDERABLE,
-    AMPROP_RETURNABLE,
-    AMPROP_SEARCH_ARRAY,
-    AMPROP_SEARCH_NULLS,
-    AMPROP_CLUSTERABLE, // index properties
-    AMPROP_INDEX_SCAN,
-    AMPROP_BITMAP_SCAN,
-    AMPROP_BACKWARD_SCAN,
-    AMPROP_CAN_ORDER, // AM properties
-    AMPROP_CAN_UNIQUE,
-    AMPROP_CAN_MULTI_COL,
-    AMPROP_CAN_EXCLUDE,
-    AMPROP_CAN_INCLUDE,
+    UNKNOWN = 0, // anything not known to core code
+    ASC,         // column properties
+    DESC,
+    NULLS_FIRST,
+    NULLS_LAST,
+    ORDERABLE,
+    DISTANCE_ORDERABLE,
+    RETURNABLE,
+    SEARCH_ARRAY,
+    SEARCH_NULLS,
+    CLUSTERABLE, // index properties
+    INDEX_SCAN,
+    BITMAP_SCAN,
+    BACKWARD_SCAN,
+    CAN_ORDER, // AM properties
+    CAN_UNIQUE,
+    CAN_MULTI_COL,
+    CAN_EXCLUDE,
+    CAN_INCLUDE,
 }
 
 /// Tracks operators and support functions while building/adding to an opclass

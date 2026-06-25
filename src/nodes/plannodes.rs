@@ -26,7 +26,7 @@ pub fn exec_subplan_get_plan(stmt: &PlannedStmt, plan_id: i32) -> &Node {
 
 /// The output of the planner: a Plan tree headed by PlannedStmt, holding the
 /// "one time" info the executor needs. Utility statements are also wrapped here
-/// (commandType == CMD_UTILITY, statement in `utility_stmt`).
+/// (commandType == UTILITY, statement in `utility_stmt`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlannedStmt {
     pub command_type: CmdType,
@@ -258,9 +258,9 @@ pub struct TidRangeScan {
 /// Cached trivial_subqueryscan property; UNKNOWN = not yet determined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubqueryScanStatus {
-    SUBQUERY_SCAN_UNKNOWN,
-    SUBQUERY_SCAN_TRIVIAL,
-    SUBQUERY_SCAN_NONTRIVIAL,
+    UNKNOWN,
+    TRIVIAL,
+    NONTRIVIAL,
 }
 
 /// Subquery scan node: scans the output of a sub-query in the range table.
@@ -570,17 +570,17 @@ pub struct Limit {
 /// Types of row-marking operations. The first four are lock strengths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowMarkType {
-    ROW_MARK_EXCLUSIVE,
-    ROW_MARK_NOKEYEXCLUSIVE,
-    ROW_MARK_SHARE,
-    ROW_MARK_KEYSHARE,
-    ROW_MARK_REFERENCE,
-    ROW_MARK_COPY,
+    EXCLUSIVE,
+    NOKEYEXCLUSIVE,
+    SHARE,
+    KEYSHARE,
+    REFERENCE,
+    COPY,
 }
 
 /// True if the mark type requires a RowShareLock (first four kinds).
 pub fn row_mark_requires_row_share_lock(marktype: RowMarkType) -> bool {
-    (marktype as u32) <= (RowMarkType::ROW_MARK_KEYSHARE as u32)
+    (marktype as u32) <= (RowMarkType::KEYSHARE as u32)
 }
 
 /// Plan-time representation of FOR [KEY] UPDATE/SHARE clauses.
@@ -638,8 +638,8 @@ pub struct PartitionPruneStepOp {
 /// How to combine pruning results from sub-steps of a BoolExpr clause.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PartitionPruneCombineOp {
-    PARTPRUNE_COMBINE_UNION,
-    PARTPRUNE_COMBINE_INTERSECT,
+    UNION,
+    INTERSECT,
 }
 
 /// Prune by combining sub-step results (for a BoolExpr clause).
@@ -660,8 +660,8 @@ pub struct PlanInvalItem {
 /// Monotonic properties the planner tracks for functions. OR-able bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MonotonicFunction {
-    MONOTONICFUNC_NONE = 0,
-    MONOTONICFUNC_INCREASING = 1 << 0,
-    MONOTONICFUNC_DECREASING = 1 << 1,
-    MONOTONICFUNC_BOTH = (1 << 0) | (1 << 1),
+    NONE = 0,
+    INCREASING = 1 << 0,
+    DECREASING = 1 << 1,
+    BOTH = (1 << 0) | (1 << 1),
 }

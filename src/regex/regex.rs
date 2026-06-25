@@ -16,7 +16,7 @@ pub type pg_regoff_t = isize;
 use bitflags::bitflags;
 
 bitflags! {
-    /// `re_info` bitmask (the REG_U* flags recording features of a compiled RE).
+    /// `info` bitmask (the REG_U* flags recording features of a compiled RE).
     /// OR-able single bits. (C octal constants.)
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ReInfo: i64 {
@@ -107,24 +107,24 @@ pub const REG_ITOA: i32 = 102; // convert error-code number to name
 pub const REG_PREFIX: i32 = -1; // pg_regprefix: identified a common prefix
 pub const REG_EXACT: i32 = -2; // pg_regprefix: identified an exact match
 
-/// C: `pg_regex_t` - a compiled RE front end. The `re_guts`/`re_fns` opaque
+/// C: `pg_regex_t` - a compiled RE front end. The `guts`/`fns` opaque
 /// pointers stay as boxed opaque inner state. In-memory.
 pub struct pg_regex_t {
-    pub re_magic: i32,
-    pub re_nsub: usize,        // number of subexpressions
-    pub re_info: ReInfo,       // bitmask of features
-    pub re_csize: i32,         // sizeof(character)
-    pub re_endp: Option<String>, // backward-compatibility kludge
-    pub re_collation: Oid,     // collation defining LC_CTYPE behavior
-    pub re_guts: Option<Box<dyn core::any::Any>>, // opaque innards
-    pub re_fns: Option<Box<dyn core::any::Any>>,
+    pub magic: i32,
+    pub nsub: usize,        // number of subexpressions
+    pub info: ReInfo,       // bitmask of features
+    pub csize: i32,         // sizeof(character)
+    pub endp: Option<String>, // backward-compatibility kludge
+    pub collation: Oid,     // collation defining LC_CTYPE behavior
+    pub guts: Option<Box<dyn core::any::Any>>, // opaque innards
+    pub fns: Option<Box<dyn core::any::Any>>,
 }
 
 /// C: `pg_regmatch_t` - one reported substring.
 #[derive(Debug, Clone, Copy)]
 pub struct pg_regmatch_t {
-    pub rm_so: pg_regoff_t, // start of substring
-    pub rm_eo: pg_regoff_t, // end of substring
+    pub so: pg_regoff_t, // start of substring
+    pub eo: pg_regoff_t, // end of substring
 }
 
 /// C: `rm_detail_t` - supplementary control/reporting (REG_EXPECT).

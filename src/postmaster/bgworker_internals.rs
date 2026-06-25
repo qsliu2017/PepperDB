@@ -10,11 +10,11 @@ pub const MAX_PARALLEL_WORKER_LIMIT: i32 = 1024;
 /// A registered background worker. The C `dlist_node rw_lnode` (intrusive list
 /// link) is dropped; the registry below owns entries in a `Vec`.
 pub struct RegisteredBgWorker {
-    pub rw_worker: BackgroundWorker, // its registry entry
-    pub rw_pid: i32,                 // 0 if not running
-    pub rw_crashed_at: TimestampTz,  // if not 0, time it last crashed
-    pub rw_shmem_slot: i32,
-    pub rw_terminate: bool,
+    pub worker: BackgroundWorker, // its registry entry
+    pub pid: i32,                 // 0 if not running
+    pub crashed_at: TimestampTz,  // if not 0, time it last crashed
+    pub shmem_slot: i32,
+    pub terminate: bool,
 }
 
 // C: `dlist_head BackgroundWorkerList` (intrusive list) -> an owned Vec. TODO(global)

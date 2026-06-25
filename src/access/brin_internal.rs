@@ -15,39 +15,39 @@ use crate::utils::memutils::MemoryContext;
 use crate::utils::rel::Relation;
 use crate::utils::typcache::TypeCacheEntry;
 
-/// struct returned by "OpcInfo" amproc (in-memory). On-disk FAM `oi_typcache[]`
+/// struct returned by "OpcInfo" amproc (in-memory). On-disk FAM `typcache[]`
 /// becomes a `Vec`.
 pub struct BrinOpcInfo {
     /// Number of columns stored in an index column of this opclass
-    pub oi_nstored: u16,
+    pub nstored: u16,
     /// Regular processing of NULLs in BrinValues?
-    pub oi_regular_nulls: bool,
+    pub regular_nulls: bool,
     /// Opaque pointer for the opclass' private use
-    pub oi_opaque: *mut core::ffi::c_void, // TODO(ptr): opclass-private state
+    pub opaque: *mut core::ffi::c_void, // TODO(ptr): opclass-private state
     /// Type cache entries of the stored columns
-    pub oi_typcache: Vec<*mut TypeCacheEntry>, // TODO(ptr)
+    pub typcache: Vec<*mut TypeCacheEntry>, // TODO(ptr)
 }
 
 /// the size of a BrinOpcInfo for the given number of columns
 pub const fn sizeof_brin_opc_info(ncols: usize) -> usize {
-    core::mem::offset_of!(BrinOpcInfo, oi_typcache)
+    core::mem::offset_of!(BrinOpcInfo, typcache)
         + core::mem::size_of::<*mut TypeCacheEntry>() * ncols
 }
 
 /// Decodes a BRIN tuple between on-disk and in-memory form (in-memory state).
 pub struct BrinDesc {
     /// Containing memory context
-    pub bd_context: MemoryContext,
+    pub context: MemoryContext,
     /// the index relation itself
-    pub bd_index: Relation,
+    pub index: Relation,
     /// tuple descriptor of the index relation
-    pub bd_tupdesc: TupleDesc,
+    pub tupdesc: TupleDesc,
     /// cached copy for on-disk tuples; generated at first use
-    pub bd_disktdesc: TupleDesc,
+    pub disktdesc: TupleDesc,
     /// total number of Datum entries that are stored on-disk for all columns
-    pub bd_totalstored: i32,
-    /// per-column info; bd_tupdesc->natts entries long (on-disk FAM -> Vec)
-    pub bd_info: Vec<*mut BrinOpcInfo>, // TODO(ptr)
+    pub totalstored: i32,
+    /// per-column info; tupdesc->natts entries long (on-disk FAM -> Vec)
+    pub info: Vec<*mut BrinOpcInfo>, // TODO(ptr)
 }
 
 /*

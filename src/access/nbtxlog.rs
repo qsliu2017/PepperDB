@@ -8,7 +8,7 @@ use crate::storage::block::BlockNumber;
 use crate::storage::off::OffsetNumber;
 use crate::storage::relfilelocator::RelFileLocator;
 
-// btree WAL opcodes (xl_info high nibble): raw consts.
+// btree WAL opcodes (info high nibble): raw consts.
 pub const XLOG_BTREE_INSERT_LEAF: u8 = 0x00; // add index tuple without split
 pub const XLOG_BTREE_INSERT_UPPER: u8 = 0x10; // same, on a non-leaf page
 pub const XLOG_BTREE_INSERT_META: u8 = 0x20; // same, plus update metapage

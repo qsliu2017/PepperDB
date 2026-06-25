@@ -6,7 +6,7 @@ use crate::common::relpath::ForkNumber;
 use crate::storage::block::BlockNumber;
 use crate::storage::relfilelocator::RelFileLocator;
 
-// XLOG opcodes (xl_info high 4 bits) -- sequential WAL record types, raw consts.
+// XLOG opcodes (info high 4 bits) -- sequential WAL record types, raw consts.
 pub const XLOG_SMGR_CREATE: u8 = 0x10;
 pub const XLOG_SMGR_TRUNCATE: u8 = 0x20;
 

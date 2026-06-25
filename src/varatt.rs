@@ -14,14 +14,14 @@ use crate::utils::expandeddatum::ExpandedObjectHeader;
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct varatt_external {
-    pub va_rawsize: i32,    // original data size (includes header)
-    pub va_extinfo: u32,    // external saved size (w/o header) + compression method
-    pub va_valueid: Oid,    // unique ID of value within TOAST table
-    pub va_toastrelid: Oid, // RelID of TOAST table containing it
+    pub rawsize: i32,    // original data size (includes header)
+    pub extinfo: u32,    // external saved size (w/o header) + compression method
+    pub valueid: Oid,    // unique ID of value within TOAST table
+    pub toastrelid: Oid, // RelID of TOAST table containing it
 }
 const _: () = assert!(core::mem::size_of::<varatt_external>() == 16);
 
-// "Saved size" portion of va_extinfo; the two high bits select compression.
+// "Saved size" portion of extinfo; the two high bits select compression.
 pub const VARLENA_EXTSIZE_BITS: u32 = 30;
 pub const VARLENA_EXTSIZE_MASK: u32 = (1u32 << VARLENA_EXTSIZE_BITS) - 1;
 
@@ -49,27 +49,27 @@ pub struct varlena {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum vartag_external {
-    VARTAG_INDIRECT = 1,
-    VARTAG_EXPANDED_RO = 2,
-    VARTAG_EXPANDED_RW = 3,
-    VARTAG_ONDISK = 18,
+    INDIRECT = 1,
+    EXPANDED_RO = 2,
+    EXPANDED_RW = 3,
+    ONDISK = 18,
 }
 pub use vartag_external::*;
 
 /// This test relies on the specific tag values above.
 #[inline]
 pub const fn VARTAG_IS_EXPANDED(tag: u8) -> bool {
-    (tag & !1) == vartag_external::VARTAG_EXPANDED_RO as u8
+    (tag & !1) == vartag_external::EXPANDED_RO as u8
 }
 
 /// Size of a TOAST pointer's payload by tag.
 #[inline]
 pub fn VARTAG_SIZE(tag: u8) -> usize {
-    if tag == vartag_external::VARTAG_INDIRECT as u8 {
+    if tag == vartag_external::INDIRECT as u8 {
         core::mem::size_of::<varatt_indirect>()
     } else if VARTAG_IS_EXPANDED(tag) {
         core::mem::size_of::<varatt_expanded>()
-    } else if tag == vartag_external::VARTAG_ONDISK as u8 {
+    } else if tag == vartag_external::ONDISK as u8 {
         core::mem::size_of::<varatt_external>()
     } else {
         0
@@ -239,22 +239,22 @@ pub unsafe fn VARATT_IS_EXTERNAL(ptr: *const u8) -> bool {
 /// SAFETY: see `VARATT_IS_COMPRESSED`.
 #[inline]
 pub unsafe fn VARATT_IS_EXTERNAL_ONDISK(ptr: *const u8) -> bool {
-    VARATT_IS_EXTERNAL(ptr) && VARTAG_EXTERNAL(ptr) == vartag_external::VARTAG_ONDISK as u8
+    VARATT_IS_EXTERNAL(ptr) && VARTAG_EXTERNAL(ptr) == vartag_external::ONDISK as u8
 }
 /// SAFETY: see `VARATT_IS_COMPRESSED`.
 #[inline]
 pub unsafe fn VARATT_IS_EXTERNAL_INDIRECT(ptr: *const u8) -> bool {
-    VARATT_IS_EXTERNAL(ptr) && VARTAG_EXTERNAL(ptr) == vartag_external::VARTAG_INDIRECT as u8
+    VARATT_IS_EXTERNAL(ptr) && VARTAG_EXTERNAL(ptr) == vartag_external::INDIRECT as u8
 }
 /// SAFETY: see `VARATT_IS_COMPRESSED`.
 #[inline]
 pub unsafe fn VARATT_IS_EXTERNAL_EXPANDED_RO(ptr: *const u8) -> bool {
-    VARATT_IS_EXTERNAL(ptr) && VARTAG_EXTERNAL(ptr) == vartag_external::VARTAG_EXPANDED_RO as u8
+    VARATT_IS_EXTERNAL(ptr) && VARTAG_EXTERNAL(ptr) == vartag_external::EXPANDED_RO as u8
 }
 /// SAFETY: see `VARATT_IS_COMPRESSED`.
 #[inline]
 pub unsafe fn VARATT_IS_EXTERNAL_EXPANDED_RW(ptr: *const u8) -> bool {
-    VARATT_IS_EXTERNAL(ptr) && VARTAG_EXTERNAL(ptr) == vartag_external::VARTAG_EXPANDED_RW as u8
+    VARATT_IS_EXTERNAL(ptr) && VARTAG_EXTERNAL(ptr) == vartag_external::EXPANDED_RW as u8
 }
 /// SAFETY: see `VARATT_IS_COMPRESSED`.
 #[inline]
@@ -365,12 +365,12 @@ pub unsafe fn VARDATA_COMPRESSED_GET_COMPRESS_METHOD(ptr: *const u8) -> u32 {
 /// Saved external size of a TOAST pointer (argument is a `varatt_external`).
 #[inline]
 pub fn VARATT_EXTERNAL_GET_EXTSIZE(toast_pointer: varatt_external) -> u32 {
-    toast_pointer.va_extinfo & VARLENA_EXTSIZE_MASK
+    toast_pointer.extinfo & VARLENA_EXTSIZE_MASK
 }
 /// Compression method of a TOAST pointer.
 #[inline]
 pub fn VARATT_EXTERNAL_GET_COMPRESS_METHOD(toast_pointer: varatt_external) -> u32 {
-    toast_pointer.va_extinfo >> VARLENA_EXTSIZE_BITS
+    toast_pointer.extinfo >> VARLENA_EXTSIZE_BITS
 }
 
 /// Pack saved size and compression method into a TOAST pointer.
@@ -380,12 +380,12 @@ pub fn VARATT_EXTERNAL_SET_SIZE_AND_COMPRESS_METHOD(
     len: u32,
     cm: u32,
 ) {
-    toast_pointer.va_extinfo = len | (cm << VARLENA_EXTSIZE_BITS);
+    toast_pointer.extinfo = len | (cm << VARLENA_EXTSIZE_BITS);
 }
 
 /// Whether an externally-stored value is compressed.
 #[inline]
 pub fn VARATT_EXTERNAL_IS_COMPRESSED(toast_pointer: varatt_external) -> bool {
-    let rawsize = toast_pointer.va_rawsize;
+    let rawsize = toast_pointer.rawsize;
     VARATT_EXTERNAL_GET_EXTSIZE(toast_pointer) < (rawsize as u32).wrapping_sub(VARHDRSZ as u32)
 }

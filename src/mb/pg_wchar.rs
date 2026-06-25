@@ -33,20 +33,20 @@ pub const fn ISSJISTAIL(c: u8) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum LcOfficialSingle {
-    LC_ISO8859_1 = 0x81,
-    LC_ISO8859_2 = 0x82,
-    LC_ISO8859_3 = 0x83,
-    LC_ISO8859_4 = 0x84,
-    LC_TIS620 = 0x85,
-    LC_ISO8859_7 = 0x86,
-    LC_ISO8859_6 = 0x87,
-    LC_ISO8859_8 = 0x88,
-    LC_JISX0201K = 0x89,
-    LC_JISX0201R = 0x8a,
-    LC_KOI8_R = 0x8b,
-    LC_ISO8859_5 = 0x8c,
-    LC_ISO8859_9 = 0x8d,
-    LC_ISO8859_15 = 0x8e,
+    ISO8859_1 = 0x81,
+    ISO8859_2 = 0x82,
+    ISO8859_3 = 0x83,
+    ISO8859_4 = 0x84,
+    TIS620 = 0x85,
+    ISO8859_7 = 0x86,
+    ISO8859_6 = 0x87,
+    ISO8859_8 = 0x88,
+    JISX0201K = 0x89,
+    JISX0201R = 0x8a,
+    KOI8_R = 0x8b,
+    ISO8859_5 = 0x8c,
+    ISO8859_9 = 0x8d,
+    ISO8859_15 = 0x8e,
 }
 pub use LcOfficialSingle::*;
 
@@ -59,16 +59,16 @@ pub const fn IS_LC1(c: u8) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum LcOfficialMulti {
-    LC_JISX0208_1978 = 0x90,
-    LC_GB2312_80 = 0x91,
-    LC_JISX0208 = 0x92,
-    LC_KS5601 = 0x93,
-    LC_JISX0212 = 0x94,
-    LC_CNS11643_1 = 0x95,
-    LC_CNS11643_2 = 0x96,
-    LC_JISX0213_1 = 0x97,
-    LC_BIG5_1 = 0x98,
-    LC_BIG5_2 = 0x99,
+    JISX0208_1978 = 0x90,
+    GB2312_80 = 0x91,
+    JISX0208 = 0x92,
+    KS5601 = 0x93,
+    JISX0212 = 0x94,
+    CNS11643_1 = 0x95,
+    CNS11643_2 = 0x96,
+    JISX0213_1 = 0x97,
+    BIG5_1 = 0x98,
+    BIG5_2 = 0x99,
 }
 pub use LcOfficialMulti::*;
 

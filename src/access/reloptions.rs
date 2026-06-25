@@ -24,11 +24,11 @@ pub type AmoptionsFunction<'a> = dyn Fn(Datum, bool) -> *mut varlena + 'a;
 /// Types supported by reloptions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum relopt_type {
-    RELOPT_TYPE_BOOL,
-    RELOPT_TYPE_INT,
-    RELOPT_TYPE_REAL,
-    RELOPT_TYPE_ENUM,
-    RELOPT_TYPE_STRING,
+    BOOL,
+    INT,
+    REAL,
+    ENUM,
+    STRING,
 }
 
 bitflags! {

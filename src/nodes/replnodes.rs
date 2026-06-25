@@ -5,8 +5,8 @@ use crate::nodes::nodes::Node;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplicationKind {
-    REPLICATION_KIND_PHYSICAL,
-    REPLICATION_KIND_LOGICAL,
+    PHYSICAL,
+    LOGICAL,
 }
 
 /// IDENTIFY_SYSTEM command.

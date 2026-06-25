@@ -16,9 +16,9 @@ pub type Expr = Node;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverridingKind {
-    OVERRIDING_NOT_SET = 0,
-    OVERRIDING_USER_VALUE,
-    OVERRIDING_SYSTEM_VALUE,
+    NOT_SET = 0,
+    USER_VALUE,
+    SYSTEM_VALUE,
 }
 
 /// Alias for a range variable; may rename columns. `colnames` is a list of
@@ -32,10 +32,10 @@ pub struct Alias {
 /// What to do at commit time for temporary relations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnCommitAction {
-    ONCOMMIT_NOOP,
-    ONCOMMIT_PRESERVE_ROWS,
-    ONCOMMIT_DELETE_ROWS,
-    ONCOMMIT_DROP,
+    NOOP,
+    PRESERVE_ROWS,
+    DELETE_ROWS,
+    DROP,
 }
 
 /// Range variable, used in FROM clauses and as table names in utility stmts.
@@ -53,8 +53,8 @@ pub struct RangeVar {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TableFuncType {
-    TFT_XMLTABLE,
-    TFT_JSON_TABLE,
+    XMLTABLE,
+    JSON_TABLE,
 }
 
 /// Node for a table function, such as XMLTABLE and JSON_TABLE.
@@ -109,9 +109,9 @@ pub const PRS2_NEW_VARNO: i32 = 2;
 /// Returning behavior for Vars in RETURNING list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VarReturningType {
-    VAR_RETURNING_DEFAULT,
-    VAR_RETURNING_OLD,
-    VAR_RETURNING_NEW,
+    DEFAULT,
+    OLD,
+    NEW,
 }
 
 /// Expression node representing a variable (ie, a table column).
@@ -145,10 +145,10 @@ pub struct Const {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParamKind {
-    PARAM_EXTERN,
-    PARAM_EXEC,
-    PARAM_SUBLINK,
-    PARAM_MULTIEXPR,
+    EXTERN,
+    EXEC,
+    SUBLINK,
+    MULTIEXPR,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -246,19 +246,19 @@ pub struct SubscriptingRef {
 /// Distinguishes the allowed set of type casts. Ordering is significant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoercionContext {
-    COERCION_IMPLICIT,
-    COERCION_ASSIGNMENT,
-    COERCION_PLPGSQL,
-    COERCION_EXPLICIT,
+    IMPLICIT,
+    ASSIGNMENT,
+    PLPGSQL,
+    EXPLICIT,
 }
 
 /// How to display a FuncExpr or related node. equal() ignores this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoercionForm {
-    COERCE_EXPLICIT_CALL,
-    COERCE_EXPLICIT_CAST,
-    COERCE_IMPLICIT_CAST,
-    COERCE_SQL_SYNTAX,
+    EXPLICIT_CALL,
+    EXPLICIT_CAST,
+    IMPLICIT_CAST,
+    SQL_SYNTAX,
 }
 
 /// A function call.
@@ -522,8 +522,8 @@ pub struct CoalesceExpr {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MinMaxOp {
-    IS_GREATEST,
-    IS_LEAST,
+    GREATEST,
+    LEAST,
 }
 
 /// A GREATEST or LEAST function.
@@ -539,21 +539,21 @@ pub struct MinMaxExpr {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SQLValueFunctionOp {
-    SVFOP_CURRENT_DATE,
-    SVFOP_CURRENT_TIME,
-    SVFOP_CURRENT_TIME_N,
-    SVFOP_CURRENT_TIMESTAMP,
-    SVFOP_CURRENT_TIMESTAMP_N,
-    SVFOP_LOCALTIME,
-    SVFOP_LOCALTIME_N,
-    SVFOP_LOCALTIMESTAMP,
-    SVFOP_LOCALTIMESTAMP_N,
-    SVFOP_CURRENT_ROLE,
-    SVFOP_CURRENT_USER,
-    SVFOP_USER,
-    SVFOP_SESSION_USER,
-    SVFOP_CURRENT_CATALOG,
-    SVFOP_CURRENT_SCHEMA,
+    CURRENT_DATE,
+    CURRENT_TIME,
+    CURRENT_TIME_N,
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP_N,
+    LOCALTIME,
+    LOCALTIME_N,
+    LOCALTIMESTAMP,
+    LOCALTIMESTAMP_N,
+    CURRENT_ROLE,
+    CURRENT_USER,
+    USER,
+    SESSION_USER,
+    CURRENT_CATALOG,
+    CURRENT_SCHEMA,
 }
 
 /// Parameterless functions with special grammar productions.
@@ -567,20 +567,20 @@ pub struct SQLValueFunction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XmlExprOp {
-    IS_XMLCONCAT,
-    IS_XMLELEMENT,
-    IS_XMLFOREST,
-    IS_XMLPARSE,
-    IS_XMLPI,
-    IS_XMLROOT,
-    IS_XMLSERIALIZE,
-    IS_DOCUMENT,
+    XMLCONCAT,
+    XMLELEMENT,
+    XMLFOREST,
+    XMLPARSE,
+    XMLPI,
+    XMLROOT,
+    XMLSERIALIZE,
+    DOCUMENT,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XmlOptionType {
-    XMLOPTION_DOCUMENT,
-    XMLOPTION_CONTENT,
+    DOCUMENT,
+    CONTENT,
 }
 
 /// Various SQL/XML functions requiring special grammar productions.
@@ -600,17 +600,17 @@ pub struct XmlExpr {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonEncoding {
-    JS_ENC_DEFAULT,
-    JS_ENC_UTF8,
-    JS_ENC_UTF16,
-    JS_ENC_UTF32,
+    DEFAULT,
+    UTF8,
+    UTF16,
+    UTF32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonFormatType {
-    JS_FORMAT_DEFAULT,
-    JS_FORMAT_JSON,
-    JS_FORMAT_JSONB,
+    DEFAULT,
+    JSON,
+    JSONB,
 }
 
 /// Representation of JSON FORMAT clause.
@@ -639,13 +639,13 @@ pub struct JsonValueExpr {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonConstructorType {
-    JSCTOR_JSON_OBJECT = 1,
-    JSCTOR_JSON_ARRAY = 2,
-    JSCTOR_JSON_OBJECTAGG = 3,
-    JSCTOR_JSON_ARRAYAGG = 4,
-    JSCTOR_JSON_PARSE = 5,
-    JSCTOR_JSON_SCALAR = 6,
-    JSCTOR_JSON_SERIALIZE = 7,
+    OBJECT = 1,
+    ARRAY = 2,
+    OBJECTAGG = 3,
+    ARRAYAGG = 4,
+    PARSE = 5,
+    SCALAR = 6,
+    SERIALIZE = 7,
 }
 
 /// Wrapper over FuncExpr/Aggref/WindowFunc for SQL/JSON constructors.
@@ -663,10 +663,10 @@ pub struct JsonConstructorExpr {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonValueType {
-    JS_TYPE_ANY,
-    JS_TYPE_OBJECT,
-    JS_TYPE_ARRAY,
-    JS_TYPE_SCALAR,
+    ANY,
+    OBJECT,
+    ARRAY,
+    SCALAR,
 }
 
 /// Representation of IS JSON predicate.
@@ -681,23 +681,23 @@ pub struct JsonIsPredicate {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonWrapper {
-    JSW_UNSPEC,
-    JSW_NONE,
-    JSW_CONDITIONAL,
-    JSW_UNCONDITIONAL,
+    UNSPEC,
+    NONE,
+    CONDITIONAL,
+    UNCONDITIONAL,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonBehaviorType {
-    JSON_BEHAVIOR_NULL = 0,
-    JSON_BEHAVIOR_ERROR,
-    JSON_BEHAVIOR_EMPTY,
-    JSON_BEHAVIOR_TRUE,
-    JSON_BEHAVIOR_FALSE,
-    JSON_BEHAVIOR_UNKNOWN,
-    JSON_BEHAVIOR_EMPTY_ARRAY,
-    JSON_BEHAVIOR_EMPTY_OBJECT,
-    JSON_BEHAVIOR_DEFAULT,
+    NULL = 0,
+    ERROR,
+    EMPTY,
+    TRUE,
+    FALSE,
+    UNKNOWN,
+    EMPTY_ARRAY,
+    EMPTY_OBJECT,
+    DEFAULT,
 }
 
 /// ON ERROR / ON EMPTY behavior for SQL/JSON query functions.
@@ -711,10 +711,10 @@ pub struct JsonBehavior {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonExprOp {
-    JSON_EXISTS_OP,
-    JSON_QUERY_OP,
-    JSON_VALUE_OP,
-    JSON_TABLE_OP,
+    EXISTS_OP,
+    QUERY_OP,
+    VALUE_OP,
+    TABLE_OP,
 }
 
 /// Transformed JSON_VALUE(), JSON_QUERY(), JSON_EXISTS().
@@ -767,8 +767,8 @@ pub struct JsonTableSiblingJoin {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NullTestType {
-    IS_NULL,
-    IS_NOT_NULL,
+    NULL,
+    NOT_NULL,
 }
 
 /// Testing a value for NULLness.
@@ -782,12 +782,12 @@ pub struct NullTest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoolTestType {
-    IS_TRUE,
-    IS_NOT_TRUE,
-    IS_FALSE,
-    IS_NOT_FALSE,
-    IS_UNKNOWN,
-    IS_NOT_UNKNOWN,
+    TRUE,
+    NOT_TRUE,
+    FALSE,
+    NOT_FALSE,
+    UNKNOWN,
+    NOT_UNKNOWN,
 }
 
 /// Determining whether a boolean is TRUE, FALSE, or UNKNOWN.
@@ -800,13 +800,13 @@ pub struct BooleanTest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeMatchKind {
-    MERGE_WHEN_MATCHED,
-    MERGE_WHEN_NOT_MATCHED_BY_SOURCE,
-    MERGE_WHEN_NOT_MATCHED_BY_TARGET,
+    MATCHED,
+    NOT_MATCHED_BY_SOURCE,
+    NOT_MATCHED_BY_TARGET,
 }
 
 pub const NUM_MERGE_MATCH_KINDS: i32 =
-    MergeMatchKind::MERGE_WHEN_NOT_MATCHED_BY_TARGET as i32 + 1;
+    MergeMatchKind::NOT_MATCHED_BY_TARGET as i32 + 1;
 
 /// Transformed representation of a WHEN clause in a MERGE statement.
 #[derive(Debug, Clone, PartialEq)]

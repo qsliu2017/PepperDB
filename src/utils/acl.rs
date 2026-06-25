@@ -19,33 +19,33 @@ pub const ACL_ID_PUBLIC: Oid = Oid(0);
 /// layout is fixed (12 bytes: two Oid + one AclMode/u64).
 ///
 /// Note: must be same size on all platforms (size hardcoded in pg_type.h).
-/// The upper 32 bits of `ai_privs` are grant-option bits; the lower 32 bits are
+/// The upper 32 bits of `privs` are grant-option bits; the lower 32 bits are
 /// the actual privileges. Use the ACLITEM_* accessors below.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AclItem {
     /// ID that this item grants privs to
-    pub ai_grantee: Oid,
+    pub grantee: Oid,
     /// grantor of privs
-    pub ai_grantor: Oid,
+    pub grantor: Oid,
     /// privilege bits (upper 32 = grant options, lower 32 = privileges)
-    pub ai_privs: AclMode,
+    pub privs: AclMode,
 }
 const _: () = assert!(core::mem::size_of::<AclItem>() == 16);
 
 /// `ACLITEM_GET_PRIVS` - lower 32 privilege bits.
 pub const fn aclitem_get_privs(item: AclItem) -> AclMode {
-    AclMode::from_bits_retain(item.ai_privs.bits() & 0xFFFFFFFF)
+    AclMode::from_bits_retain(item.privs.bits() & 0xFFFFFFFF)
 }
 
 /// `ACLITEM_GET_GOPTIONS` - upper 32 grant-option bits, shifted down.
 pub const fn aclitem_get_goptions(item: AclItem) -> AclMode {
-    AclMode::from_bits_retain((item.ai_privs.bits() >> 32) & 0xFFFFFFFF)
+    AclMode::from_bits_retain((item.privs.bits() >> 32) & 0xFFFFFFFF)
 }
 
 /// `ACLITEM_GET_RIGHTS` - combined grant-option + privilege bits.
 pub const fn aclitem_get_rights(item: AclItem) -> AclMode {
-    item.ai_privs
+    item.privs
 }
 
 /// `ACL_GRANT_OPTION_FOR` - shift privs into the grant-option field.
@@ -60,25 +60,25 @@ pub const fn acl_option_to_privs(privs: AclMode) -> AclMode {
 
 /// `ACLITEM_SET_PRIVS` - replace the lower 32 privilege bits.
 pub fn aclitem_set_privs(item: &mut AclItem, privs: AclMode) {
-    let bits = (item.ai_privs.bits() & !0xFFFFFFFFu64) | (privs.bits() & 0xFFFFFFFF);
-    item.ai_privs = AclMode::from_bits_retain(bits);
+    let bits = (item.privs.bits() & !0xFFFFFFFFu64) | (privs.bits() & 0xFFFFFFFF);
+    item.privs = AclMode::from_bits_retain(bits);
 }
 
 /// `ACLITEM_SET_GOPTIONS` - replace the upper 32 grant-option bits.
 pub fn aclitem_set_goptions(item: &mut AclItem, goptions: AclMode) {
-    let bits = (item.ai_privs.bits() & !(0xFFFFFFFFu64 << 32)) | ((goptions.bits() & 0xFFFFFFFF) << 32);
-    item.ai_privs = AclMode::from_bits_retain(bits);
+    let bits = (item.privs.bits() & !(0xFFFFFFFFu64 << 32)) | ((goptions.bits() & 0xFFFFFFFF) << 32);
+    item.privs = AclMode::from_bits_retain(bits);
 }
 
 /// `ACLITEM_SET_RIGHTS` - replace both fields at once.
 pub fn aclitem_set_rights(item: &mut AclItem, rights: AclMode) {
-    item.ai_privs = rights;
+    item.privs = rights;
 }
 
 /// `ACLITEM_SET_PRIVS_GOPTIONS` - set privs and grant options together.
 pub fn aclitem_set_privs_goptions(item: &mut AclItem, privs: AclMode, goptions: AclMode) {
     let bits = (privs.bits() & 0xFFFFFFFF) | ((goptions.bits() & 0xFFFFFFFF) << 32);
-    item.ai_privs = AclMode::from_bits_retain(bits);
+    item.privs = AclMode::from_bits_retain(bits);
 }
 
 /// `ACLITEM_ALL_PRIV_BITS` - all lower 32 privilege bits.

@@ -73,7 +73,7 @@ pub fn clogsyncfiletag(_ftag: &FileTag, _path: &mut [u8]) -> i32 {
     unimplemented!()
 }
 
-// XLOG opcodes (xl_info nibble): raw consts, not a flag set.
+// XLOG opcodes (info nibble): raw consts, not a flag set.
 pub const CLOG_ZEROPAGE: u8 = 0x00;
 pub const CLOG_TRUNCATE: u8 = 0x10;
 

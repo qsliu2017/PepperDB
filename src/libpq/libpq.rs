@@ -138,11 +138,11 @@ pub fn secure_raw_write(port: &mut Port, ptr: &[u8]) -> isize {
 // SSL protocol version selector (sequential ordinal) -> enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ssl_protocol_versions {
-    PG_TLS_ANY = 0,
-    PG_TLS1_VERSION,
-    PG_TLS1_1_VERSION,
-    PG_TLS1_2_VERSION,
-    PG_TLS1_3_VERSION,
+    TLS_ANY = 0,
+    TLS1_VERSION,
+    TLS1_1_VERSION,
+    TLS1_2_VERSION,
+    TLS1_3_VERSION,
 }
 
 // prototypes for functions in be-secure-common.c

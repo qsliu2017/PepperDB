@@ -104,19 +104,19 @@ bitflags! {
 /// Checkpoint statistics.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CheckpointStatsData {
-    pub ckpt_start_t: TimestampTz,
-    pub ckpt_write_t: TimestampTz,
-    pub ckpt_sync_t: TimestampTz,
-    pub ckpt_sync_end_t: TimestampTz,
-    pub ckpt_end_t: TimestampTz,
-    pub ckpt_bufs_written: i32,
-    pub ckpt_slru_written: i32,
-    pub ckpt_segs_added: i32,
-    pub ckpt_segs_removed: i32,
-    pub ckpt_segs_recycled: i32,
-    pub ckpt_sync_rels: i32,
-    pub ckpt_longest_sync: u64,
-    pub ckpt_agg_sync_time: u64,
+    pub start_t: TimestampTz,
+    pub write_t: TimestampTz,
+    pub sync_t: TimestampTz,
+    pub sync_end_t: TimestampTz,
+    pub end_t: TimestampTz,
+    pub bufs_written: i32,
+    pub slru_written: i32,
+    pub segs_added: i32,
+    pub segs_removed: i32,
+    pub segs_recycled: i32,
+    pub sync_rels: i32,
+    pub longest_sync: u64,
+    pub agg_sync_time: u64,
 }
 
 /// GetWALAvailability return codes.

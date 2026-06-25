@@ -28,10 +28,10 @@ pub struct BufferUsage {
 /// WalUsage tracks per-query WAL activity shown by EXPLAIN etc. In-memory.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WalUsage {
-    pub wal_records: i64,
-    pub wal_fpi: i64,
-    pub wal_bytes: u64,
-    pub wal_buffers_full: i64,
+    pub records: i64,
+    pub fpi: i64,
+    pub bytes: u64,
+    pub buffers_full: i64,
 }
 
 bitflags! {
@@ -105,10 +105,10 @@ pub static mut pgBufferUsage: BufferUsage = BufferUsage {
 };
 // TODO(global)
 pub static mut pgWalUsage: WalUsage = WalUsage {
-    wal_records: 0,
-    wal_fpi: 0,
-    wal_bytes: 0,
-    wal_buffers_full: 0,
+    records: 0,
+    fpi: 0,
+    bytes: 0,
+    buffers_full: 0,
 };
 
 pub fn InstrAlloc(n: i32, instrument_options: InstrumentOption, async_mode: bool) -> Vec<Instrumentation> {

@@ -24,7 +24,7 @@ pub struct xl_replorigin_drop {
     pub node_id: RepOriginId,
 }
 
-/* WAL opcodes (xl_info nibble, kept raw) */
+/* WAL opcodes (info nibble, kept raw) */
 pub const XLOG_REPLORIGIN_SET: u8 = 0x00;
 pub const XLOG_REPLORIGIN_DROP: u8 = 0x10;
 

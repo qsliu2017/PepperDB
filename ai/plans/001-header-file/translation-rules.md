@@ -154,6 +154,41 @@ Map PG's generic containers to Rust equivalents. The full set:
 C enums -> Rust enums when exhaustive. C enums used as OR-able flags, and flag
 `#define` groups -> `bitflags`. See `bitflags-port.md`.
 
+### Naming - drop redundant C prefixes
+
+C has no namespacing, so it prefixes every enum constant and many struct fields
+with an abbreviation of the type. Rust qualifies them, so the prefix is noise -
+strip it.
+
+- **Enum variants**: remove the common prefix shared by all variants (trimmed back
+  to an `_` boundary). `TrackFunctionsLevel::TRACK_FUNC_OFF` ->
+  `TrackFunctionsLevel::OFF`; `PgStat_FetchConsistency::PGSTAT_FETCH_CONSISTENCY_NONE`
+  -> `::NONE`. Skip the whole enum when its variants share no underscore-bounded
+  prefix, or when stripping would yield an invalid ident (leading digit, keyword).
+- **Struct fields**: when *all* fields share a prefix, strip it.
+  `TriggerData { tg_event, tg_relation }` -> `{ event, relation }`;
+  `XLogRecord { xl_xid, xl_info }` -> `{ xid, info }`. Only strip when every field
+  carries the prefix (that keeps the names unique); a struct with mixed fields keeps
+  its names. Do **not** strip a prefix that is a meaningful word rather than a
+  type-name echo - e.g. `IndexCostEstimate` keeps `index_pages`/`index_selectivity`,
+  since `index_` names the quantity, not the struct.
+
+Renaming fields never changes `#[repr(C)]` layout (offsets are positional), so the
+on-disk asserts still hold - just update the `offset_of!` field names to match.
+
+## Modules
+
+Use `#[path = "..."]` only when the module name cannot reach its file by Rust's
+default resolution. Default: `mod foo;` resolves to `foo.rs` / `foo/mod.rs` beside
+the declaring file. So a `#[path]` whose final component already equals the module
+name is redundant - omit it. Keep `#[path]` only for:
+
+- dashed/punctuated file stems (`libpq-be.rs` -> `pub mod libpq_be;`,
+  `oauth-common.rs`, `arch-x86.rs`),
+- keyword stems via raw idents (`async.rs` -> `pub mod r#async;`, `in.rs` -> `r#in`),
+- a stem that clashes with another path (the `lib` module vs the crate root
+  `src/lib.rs`).
+
 ## Macros
 
 ### Object-like and pure function-like macros

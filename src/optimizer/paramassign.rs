@@ -1,5 +1,5 @@
 //! Translated from PostgreSQL src/include/optimizer/paramassign.h
-//! Functions for assigning PARAM_EXEC slots during planning.
+//! Functions for assigning EXEC slots during planning.
 
 use crate::nodes::pathnodes::{PlaceHolderVar, PlannerInfo, Relids};
 use crate::nodes::primnodes::{

@@ -15,7 +15,7 @@ use crate::storage::off::OffsetNumber;
 pub static mut ignore_checksum_failure: bool = false;
 
 // A postgres disk page is a byte buffer laid out as a slotted page:
-//   [ PageHeaderData | linp1..linpN -> pd_lower ... pd_upper <- tupleN..tuple1 | special ]
+//   [ PageHeaderData | linp1..linpN -> lower ... upper <- tupleN..tuple1 | special ]
 // C models `Page` as `char *` (PageData = char). We model it as a byte slice.
 pub type PageData = u8;
 pub type Page<'a> = &'a [u8];
@@ -57,37 +57,37 @@ impl PageXLogRecPtr {
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct PageHeaderData {
-    pub pd_lsn: PageXLogRecPtr,    // LSN of last change to this page
-    pub pd_checksum: u16,          // page checksum
-    pub pd_flags: u16,             // flag bits, see PageFlags
-    pub pd_lower: LocationIndex,   // offset to start of free space
-    pub pd_upper: LocationIndex,   // offset to end of free space
-    pub pd_special: LocationIndex, // offset to start of special space
-    pub pd_pagesize_version: u16,  // page size (high 8 bits) | layout version (low 8)
-    pub pd_prune_xid: TransactionId, // oldest prunable XID, or zero if none
+    pub lsn: PageXLogRecPtr,    // LSN of last change to this page
+    pub checksum: u16,          // page checksum
+    pub flags: u16,             // flag bits, see PageFlags
+    pub lower: LocationIndex,   // offset to start of free space
+    pub upper: LocationIndex,   // offset to end of free space
+    pub special: LocationIndex, // offset to start of special space
+    pub pagesize_version: u16,  // page size (high 8 bits) | layout version (low 8)
+    pub prune_xid: TransactionId, // oldest prunable XID, or zero if none
 }
 
 const _: () = assert!(core::mem::size_of::<PageHeaderData>() == 24);
-const _: () = assert!(core::mem::offset_of!(PageHeaderData, pd_lsn) == 0);
-const _: () = assert!(core::mem::offset_of!(PageHeaderData, pd_checksum) == 8);
-const _: () = assert!(core::mem::offset_of!(PageHeaderData, pd_flags) == 10);
-const _: () = assert!(core::mem::offset_of!(PageHeaderData, pd_lower) == 12);
-const _: () = assert!(core::mem::offset_of!(PageHeaderData, pd_upper) == 14);
-const _: () = assert!(core::mem::offset_of!(PageHeaderData, pd_special) == 16);
-const _: () = assert!(core::mem::offset_of!(PageHeaderData, pd_pagesize_version) == 18);
-const _: () = assert!(core::mem::offset_of!(PageHeaderData, pd_prune_xid) == 20);
+const _: () = assert!(core::mem::offset_of!(PageHeaderData, lsn) == 0);
+const _: () = assert!(core::mem::offset_of!(PageHeaderData, checksum) == 8);
+const _: () = assert!(core::mem::offset_of!(PageHeaderData, flags) == 10);
+const _: () = assert!(core::mem::offset_of!(PageHeaderData, lower) == 12);
+const _: () = assert!(core::mem::offset_of!(PageHeaderData, upper) == 14);
+const _: () = assert!(core::mem::offset_of!(PageHeaderData, special) == 16);
+const _: () = assert!(core::mem::offset_of!(PageHeaderData, pagesize_version) == 18);
+const _: () = assert!(core::mem::offset_of!(PageHeaderData, prune_xid) == 20);
 
 /// Line pointers do not count as part of the header. (= offsetof pd_linp.)
 pub const SizeOfPageHeaderData: usize = core::mem::size_of::<PageHeaderData>();
 
 bitflags! {
-    /// pd_flags bits. Undefined bits are initialized to zero.
+    /// flags bits. Undefined bits are initialized to zero.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct PageFlags: u16 {
         const HAS_FREE_LINES = 0x0001; // any unused line pointers?
         const PAGE_FULL      = 0x0002; // not enough free space for new tuple?
         const ALL_VISIBLE    = 0x0004; // all tuples on page visible to everyone
-        const VALID_FLAG_BITS = 0x0007; // OR of all valid pd_flags bits
+        const VALID_FLAG_BITS = 0x0007; // OR of all valid flags bits
     }
 }
 
@@ -130,12 +130,12 @@ fn header_mut(page: &mut [u8]) -> &mut PageHeaderData {
 
 /// True iff no itemid has been allocated on the page.
 pub fn PageIsEmpty(page: Page) -> bool {
-    (header(page).pd_lower as usize) <= SizeOfPageHeaderData
+    (header(page).lower as usize) <= SizeOfPageHeaderData
 }
 
 /// True iff page has not been initialized (by PageInit).
 pub fn PageIsNew(page: Page) -> bool {
-    header(page).pd_upper == 0
+    header(page).upper == 0
 }
 
 /// Returns the requested item identifier (line pointer). 1-based offset number.
@@ -145,7 +145,7 @@ pub fn PageGetItemId(page: Page, offset_number: OffsetNumber) -> ItemIdData {
 }
 
 /// The line-pointer array as a typed slice (MAXALIGN guarantees alignment at
-/// SizeOfPageHeaderData). Length is bounded by pd_lower.
+/// SizeOfPageHeaderData). Length is bounded by lower.
 pub fn page_linp(page: Page) -> &[ItemIdData] {
     let n = PageGetMaxOffsetNumber(page) as usize;
     let base = unsafe { page.as_ptr().add(SizeOfPageHeaderData) as *const ItemIdData };
@@ -164,37 +164,37 @@ pub fn PageGetContents(page: Page) -> &[u8] {
     &page[maxalign(SizeOfPageHeaderData)..]
 }
 
-/// Page size, from a formatted page (high 8 bits of pd_pagesize_version).
+/// Page size, from a formatted page (high 8 bits of pagesize_version).
 pub fn PageGetPageSize(page: Page) -> usize {
-    (header(page).pd_pagesize_version & 0xFF00) as usize
+    (header(page).pagesize_version & 0xFF00) as usize
 }
 
-/// Page layout version (low 8 bits of pd_pagesize_version).
+/// Page layout version (low 8 bits of pagesize_version).
 pub fn PageGetPageLayoutVersion(page: Page) -> u8 {
-    (header(page).pd_pagesize_version & 0x00FF) as u8
+    (header(page).pagesize_version & 0x00FF) as u8
 }
 
 /// Set page size and layout version together.
 pub fn PageSetPageSizeAndVersion(page: PageMut, size: usize, version: u8) {
     debug_assert!((size & 0xFF00) == size);
-    header_mut(page).pd_pagesize_version = (size as u16) | version as u16;
+    header_mut(page).pagesize_version = (size as u16) | version as u16;
 }
 
 /// Size of special space on a page.
 pub fn PageGetSpecialSize(page: Page) -> u16 {
-    (PageGetPageSize(page) - header(page).pd_special as usize) as u16
+    (PageGetPageSize(page) - header(page).special as usize) as u16
 }
 
 /// Validate the special pointer (catches use before initialization).
 pub fn PageValidateSpecialPointer(page: Page) {
-    debug_assert!((header(page).pd_special as u32) <= BLCKSZ);
-    debug_assert!((header(page).pd_special as usize) >= SizeOfPageHeaderData);
+    debug_assert!((header(page).special as u32) <= BLCKSZ);
+    debug_assert!((header(page).special as usize) >= SizeOfPageHeaderData);
 }
 
-/// Special space as a byte slice (page + pd_special).
+/// Special space as a byte slice (page + special).
 pub fn PageGetSpecialPointer(page: Page) -> &[u8] {
     PageValidateSpecialPointer(page);
-    &page[header(page).pd_special as usize..]
+    &page[header(page).special as usize..]
 }
 
 /// Retrieve an item on the page given its line pointer.
@@ -207,7 +207,7 @@ pub fn PageGetItem<'a>(page: Page<'a>, item_id: &ItemIdData) -> Item<'a> {
 
 /// Maximum offset number used (= number of items). 0 if uninitialized.
 pub fn PageGetMaxOffsetNumber(page: Page) -> OffsetNumber {
-    let lower = header(page).pd_lower as usize;
+    let lower = header(page).lower as usize;
     if lower <= SizeOfPageHeaderData {
         0
     } else {
@@ -217,55 +217,55 @@ pub fn PageGetMaxOffsetNumber(page: Page) -> OffsetNumber {
 
 /// Reassemble the page LSN.
 pub fn PageGetLSN(page: Page) -> XLogRecPtr {
-    header(page).pd_lsn.get()
+    header(page).lsn.get()
 }
 
 /// Store the page LSN.
 pub fn PageSetLSN(page: PageMut, lsn: XLogRecPtr) {
-    header_mut(page).pd_lsn.set(lsn);
+    header_mut(page).lsn.set(lsn);
 }
 
 pub fn PageHasFreeLinePointers(page: Page) -> bool {
-    PageFlags::from_bits_truncate(header(page).pd_flags).contains(PageFlags::HAS_FREE_LINES)
+    PageFlags::from_bits_truncate(header(page).flags).contains(PageFlags::HAS_FREE_LINES)
 }
 pub fn PageSetHasFreeLinePointers(page: PageMut) {
-    header_mut(page).pd_flags |= PageFlags::HAS_FREE_LINES.bits();
+    header_mut(page).flags |= PageFlags::HAS_FREE_LINES.bits();
 }
 pub fn PageClearHasFreeLinePointers(page: PageMut) {
-    header_mut(page).pd_flags &= !PageFlags::HAS_FREE_LINES.bits();
+    header_mut(page).flags &= !PageFlags::HAS_FREE_LINES.bits();
 }
 
 pub fn PageIsFull(page: Page) -> bool {
-    PageFlags::from_bits_truncate(header(page).pd_flags).contains(PageFlags::PAGE_FULL)
+    PageFlags::from_bits_truncate(header(page).flags).contains(PageFlags::PAGE_FULL)
 }
 pub fn PageSetFull(page: PageMut) {
-    header_mut(page).pd_flags |= PageFlags::PAGE_FULL.bits();
+    header_mut(page).flags |= PageFlags::PAGE_FULL.bits();
 }
 pub fn PageClearFull(page: PageMut) {
-    header_mut(page).pd_flags &= !PageFlags::PAGE_FULL.bits();
+    header_mut(page).flags &= !PageFlags::PAGE_FULL.bits();
 }
 
 pub fn PageIsAllVisible(page: Page) -> bool {
-    PageFlags::from_bits_truncate(header(page).pd_flags).contains(PageFlags::ALL_VISIBLE)
+    PageFlags::from_bits_truncate(header(page).flags).contains(PageFlags::ALL_VISIBLE)
 }
 pub fn PageSetAllVisible(page: PageMut) {
-    header_mut(page).pd_flags |= PageFlags::ALL_VISIBLE.bits();
+    header_mut(page).flags |= PageFlags::ALL_VISIBLE.bits();
 }
 pub fn PageClearAllVisible(page: PageMut) {
-    header_mut(page).pd_flags &= !PageFlags::ALL_VISIBLE.bits();
+    header_mut(page).flags &= !PageFlags::ALL_VISIBLE.bits();
 }
 
-/// Lower pd_prune_xid toward `xid` (C `PageSetPrunable`; needs transam, kept as fn).
+/// Lower prune_xid toward `xid` (C `PageSetPrunable`; needs transam, kept as fn).
 pub fn PageSetPrunable(page: PageMut, xid: TransactionId) {
     let h = header_mut(page);
     // TransactionIdIsValid == nonzero; precedes == <, modulo-32 elsewhere.
-    if h.pd_prune_xid.0 == 0 || xid < h.pd_prune_xid {
-        h.pd_prune_xid = xid;
+    if h.prune_xid.0 == 0 || xid < h.prune_xid {
+        h.prune_xid = xid;
     }
 }
 
 pub fn PageClearPrunable(page: PageMut) {
-    header_mut(page).pd_prune_xid = TransactionId(0); // InvalidTransactionId
+    header_mut(page).prune_xid = TransactionId(0); // InvalidTransactionId
 }
 
 // === extern declarations ===

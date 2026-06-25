@@ -27,18 +27,18 @@ pub type Form_pg_cast = *mut FormData_pg_cast; // TODO(ptr)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i8)]
 pub enum CoercionCodes {
-    COERCION_CODE_IMPLICIT = b'i' as i8,   // coercion in context of expression
-    COERCION_CODE_ASSIGNMENT = b'a' as i8, // coercion in context of assignment
-    COERCION_CODE_EXPLICIT = b'e' as i8,   // explicit cast operation
+    IMPLICIT = b'i' as i8,   // coercion in context of expression
+    ASSIGNMENT = b'a' as i8, // coercion in context of assignment
+    EXPLICIT = b'e' as i8,   // explicit cast operation
 }
 
 /// Allowable values for pg_cast.castmethod (stored as char; ASCII codes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i8)]
 pub enum CoercionMethod {
-    COERCION_METHOD_FUNCTION = b'f' as i8, // use a function
-    COERCION_METHOD_BINARY = b'b' as i8,   // types are binary-compatible
-    COERCION_METHOD_INOUT = b'i' as i8,    // use input/output functions
+    FUNCTION = b'f' as i8, // use a function
+    BINARY = b'b' as i8,   // types are binary-compatible
+    INOUT = b'i' as i8,    // use input/output functions
 }
 
 pub fn CastCreate(

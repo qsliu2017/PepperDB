@@ -114,12 +114,12 @@ pub fn FindPostmasterChildByPid(_pid: i32) -> Option<*mut PMChild> {
 /// Special must-be-first options for dispatching to subprograms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchOption {
-    DISPATCH_CHECK,
-    DISPATCH_BOOT,
-    DISPATCH_FORKCHILD,
-    DISPATCH_DESCRIBE_CONFIG,
-    DISPATCH_SINGLE,
-    DISPATCH_POSTMASTER, // must be last
+    CHECK,
+    BOOT,
+    FORKCHILD,
+    DESCRIBE_CONFIG,
+    SINGLE,
+    POSTMASTER, // must be last
 }
 
 /// Convert an option name to a DispatchOption (None if unrecognized).

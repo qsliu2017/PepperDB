@@ -19,19 +19,19 @@ pub const MaxTupleAttributeNumber: i32 = 1664; // 8 * 208
 // MaxHeapAttributeNumber limits the number of (user) columns in a table.
 pub const MaxHeapAttributeNumber: i32 = 1600; // 8 * 200
 
-// === t_choice: a union overlaying transaction (on-disk heap) fields with Datum
+// === choice: a union overlaying transaction (on-disk heap) fields with Datum
 // (in-memory composite) fields. Both arms are 3x u32 = 12 bytes; modelled as a
-// #[repr(C)] union mirroring the C layout. Inside HeapTupleFields, t_field3 is
+// #[repr(C)] union mirroring the C layout. Inside HeapTupleFields, field3 is
 // itself a union (t_cid / t_xvac), both u32, here collapsed to one u32 field.
 
 /// On-disk transaction fields (HEAP case).
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct HeapTupleFields {
-    pub t_xmin: TransactionId, // inserting xact ID
-    pub t_xmax: TransactionId, // deleting or locking xact ID
-    // union { CommandId t_cid; TransactionId t_xvac; } t_field3 -- both 4 bytes.
-    pub t_field3: u32,
+    pub xmin: TransactionId, // inserting xact ID
+    pub xmax: TransactionId, // deleting or locking xact ID
+    // union { CommandId t_cid; TransactionId t_xvac; } field3 -- both 4 bytes.
+    pub field3: u32,
 }
 
 const _: () = assert!(core::mem::size_of::<HeapTupleFields>() == 12);
@@ -40,9 +40,9 @@ const _: () = assert!(core::mem::size_of::<HeapTupleFields>() == 12);
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct DatumTupleFields {
-    pub datum_len_: i32,   // varlena header (do not touch directly!)
-    pub datum_typmod: i32, // -1, or identifier of a record type
-    pub datum_typeid: Oid, // composite type OID, or RECORDOID
+    pub len_: i32,   // varlena header (do not touch directly!)
+    pub typmod: i32, // -1, or identifier of a record type
+    pub typeid: Oid, // composite type OID, or RECORDOID
 }
 
 const _: () = assert!(core::mem::size_of::<DatumTupleFields>() == 12);
@@ -59,8 +59,8 @@ const _: () = assert!(core::mem::size_of::<HeapTupleHeaderChoice>() == 12);
 /// (`t_bits`) and user data are an on-disk FAM accessed via slice helpers.
 #[repr(C)]
 pub struct HeapTupleHeaderData {
-    pub t_choice: HeapTupleHeaderChoice,
-    pub t_ctid: ItemPointerData, // current TID of this or newer tuple (or spec token)
+    pub choice: HeapTupleHeaderChoice,
+    pub ctid: ItemPointerData, // current TID of this or newer tuple (or spec token)
     // Fields below here must match MinimalTupleData!
     pub t_infomask2: u16, // number of attributes + various flags
     pub t_infomask: u16,  // various flag bits, see below
@@ -77,8 +77,8 @@ pub const FIELDNO_HEAPTUPLEHEADERDATA_BITS: usize = 5;
 // struct has no trailing padding (the FAM is char), so we assert offsets rather
 // than size_of (Rust would pad the struct to align 4).
 pub const SizeofHeapTupleHeader: usize = 23;
-const _: () = assert!(core::mem::offset_of!(HeapTupleHeaderData, t_choice) == 0);
-const _: () = assert!(core::mem::offset_of!(HeapTupleHeaderData, t_ctid) == 12);
+const _: () = assert!(core::mem::offset_of!(HeapTupleHeaderData, choice) == 0);
+const _: () = assert!(core::mem::offset_of!(HeapTupleHeaderData, ctid) == 12);
 const _: () = assert!(core::mem::offset_of!(HeapTupleHeaderData, t_infomask2) == 18);
 const _: () = assert!(core::mem::offset_of!(HeapTupleHeaderData, t_infomask) == 20);
 const _: () = assert!(core::mem::offset_of!(HeapTupleHeaderData, t_hoff) == 22);
@@ -98,12 +98,12 @@ pub const HEAP_XMAX_SHR_LOCK: u16 = HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK;
 
 pub const HEAP_LOCK_MASK: u16 =
     HEAP_XMAX_SHR_LOCK | HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_KEYSHR_LOCK;
-pub const HEAP_XMIN_COMMITTED: u16 = 0x0100; // t_xmin committed
-pub const HEAP_XMIN_INVALID: u16 = 0x0200; // t_xmin invalid/aborted
+pub const HEAP_XMIN_COMMITTED: u16 = 0x0100; // xmin committed
+pub const HEAP_XMIN_INVALID: u16 = 0x0200; // xmin invalid/aborted
 pub const HEAP_XMIN_FROZEN: u16 = HEAP_XMIN_COMMITTED | HEAP_XMIN_INVALID;
-pub const HEAP_XMAX_COMMITTED: u16 = 0x0400; // t_xmax committed
-pub const HEAP_XMAX_INVALID: u16 = 0x0800; // t_xmax invalid/aborted
-pub const HEAP_XMAX_IS_MULTI: u16 = 0x1000; // t_xmax is a MultiXactId
+pub const HEAP_XMAX_COMMITTED: u16 = 0x0400; // xmax committed
+pub const HEAP_XMAX_INVALID: u16 = 0x0800; // xmax invalid/aborted
+pub const HEAP_XMAX_IS_MULTI: u16 = 0x1000; // xmax is a MultiXactId
 pub const HEAP_UPDATED: u16 = 0x2000; // this is UPDATEd version of row
 pub const HEAP_MOVED_OFF: u16 = 0x4000; // moved by pre-9.0 VACUUM FULL (upgrade only)
 pub const HEAP_MOVED_IN: u16 = 0x8000; // moved by pre-9.0 VACUUM FULL (upgrade only)
@@ -166,12 +166,12 @@ const _: () =
     assert!(crate::storage::off::MAX_OFFSET_NUMBER < SpecTokenOffsetNumber);
 
 // === HeapTupleHeader accessor functions (macros/inlines -> methods) ===
-// The t_choice union reads are safe: which arm is live is determined by usage
+// The choice union reads are safe: which arm is live is determined by usage
 // context (xact vs datum), exactly as in C. The unsafe is contained here.
 impl HeapTupleHeaderData {
     /// Raw xmin (the xid originally used to insert the tuple).
     pub fn get_raw_xmin(&self) -> TransactionId {
-        unsafe { self.t_choice.t_heap.t_xmin }
+        unsafe { self.choice.t_heap.xmin }
     }
 
     /// Xmin, resolving a frozen tuple to FrozenTransactionId.
@@ -184,7 +184,7 @@ impl HeapTupleHeaderData {
     }
 
     pub fn set_xmin(&mut self, xid: TransactionId) {
-        self.t_choice.t_heap.t_xmin = xid;
+        self.choice.t_heap.xmin = xid;
     }
 
     pub fn xmin_committed(&self) -> bool {
@@ -216,11 +216,11 @@ impl HeapTupleHeaderData {
 
     /// Raw Xmax field. Use get_update_xid to resolve a possible MultiXactId.
     pub fn get_raw_xmax(&self) -> TransactionId {
-        unsafe { self.t_choice.t_heap.t_xmax }
+        unsafe { self.choice.t_heap.xmax }
     }
 
     pub fn set_xmax(&mut self, xid: TransactionId) {
-        self.t_choice.t_heap.t_xmax = xid;
+        self.choice.t_heap.xmax = xid;
     }
 
     /// Xmax that updated the tuple, resolving a MultiXactId when necessary
@@ -238,18 +238,18 @@ impl HeapTupleHeaderData {
 
     /// Raw command id from the header (combo or not); see get_cmin/get_cmax.
     pub fn get_raw_command_id(&self) -> CommandId {
-        CommandId(unsafe { self.t_choice.t_heap.t_field3 })
+        CommandId(unsafe { self.choice.t_heap.field3 })
     }
 
     pub fn set_cmin(&mut self, cid: CommandId) {
         debug_assert!((self.t_infomask & HEAP_MOVED) == 0);
-        self.t_choice.t_heap.t_field3 = cid.0;
+        self.choice.t_heap.field3 = cid.0;
         self.t_infomask &= !HEAP_COMBOCID;
     }
 
     pub fn set_cmax(&mut self, cid: CommandId, iscombo: bool) {
         debug_assert!((self.t_infomask & HEAP_MOVED) == 0);
-        self.t_choice.t_heap.t_field3 = cid.0;
+        self.choice.t_heap.field3 = cid.0;
         if iscombo {
             self.t_infomask |= HEAP_COMBOCID;
         } else {
@@ -259,7 +259,7 @@ impl HeapTupleHeaderData {
 
     pub fn get_xvac(&self) -> TransactionId {
         if (self.t_infomask & HEAP_MOVED) != 0 {
-            TransactionId(unsafe { self.t_choice.t_heap.t_field3 })
+            TransactionId(unsafe { self.choice.t_heap.field3 })
         } else {
             InvalidTransactionId
         }
@@ -267,28 +267,28 @@ impl HeapTupleHeaderData {
 
     pub fn set_xvac(&mut self, xid: TransactionId) {
         debug_assert!((self.t_infomask & HEAP_MOVED) != 0);
-        self.t_choice.t_heap.t_field3 = xid.0;
+        self.choice.t_heap.field3 = xid.0;
     }
 
     pub fn is_speculative(&self) -> bool {
-        self.t_ctid.offset_number_no_check() == SpecTokenOffsetNumber
+        self.ctid.offset_number_no_check() == SpecTokenOffsetNumber
     }
 
     pub fn get_speculative_token(&self) -> BlockNumber {
         debug_assert!(self.is_speculative());
-        self.t_ctid.block_number_no_check()
+        self.ctid.block_number_no_check()
     }
 
     pub fn set_speculative_token(&mut self, token: BlockNumber) {
-        self.t_ctid.set(token, SpecTokenOffsetNumber);
+        self.ctid.set(token, SpecTokenOffsetNumber);
     }
 
     pub fn indicates_moved_partitions(&self) -> bool {
-        self.t_ctid.indicates_moved_partitions()
+        self.ctid.indicates_moved_partitions()
     }
 
     pub fn set_moved_partitions(&mut self) {
-        self.t_ctid.set_moved_partitions();
+        self.ctid.set_moved_partitions();
     }
 
     /// Datum length (VARSIZE of the overlaid varlena header). TODO(varlena).
@@ -301,19 +301,19 @@ impl HeapTupleHeaderData {
     }
 
     pub fn get_type_id(&self) -> Oid {
-        unsafe { self.t_choice.t_datum.datum_typeid }
+        unsafe { self.choice.t_datum.typeid }
     }
 
-    pub fn set_type_id(&mut self, datum_typeid: Oid) {
-        self.t_choice.t_datum.datum_typeid = datum_typeid;
+    pub fn set_type_id(&mut self, typeid: Oid) {
+        self.choice.t_datum.typeid = typeid;
     }
 
     pub fn get_typmod(&self) -> i32 {
-        unsafe { self.t_choice.t_datum.datum_typmod }
+        unsafe { self.choice.t_datum.typmod }
     }
 
     pub fn set_typmod(&mut self, typmod: i32) {
-        self.t_choice.t_datum.datum_typmod = typmod;
+        self.choice.t_datum.typmod = typmod;
     }
 
     /// HOT-updated: also requires the updater not known aborted.
@@ -394,7 +394,7 @@ pub const MINIMAL_TUPLE_OFFSET: usize = 8;
 // MINIMAL_TUPLE_PADDING = (18 - 4) % 8 = 6.
 pub const MINIMAL_TUPLE_PADDING: usize = 6;
 
-/// MinimalTuple: a HeapTupleHeader without xact info or t_ctid, padded so that
+/// MinimalTuple: a HeapTupleHeader without xact info or ctid, padded so that
 /// offsetof(t_infomask2) is congruent mod MAXALIGN with the full tuple.
 #[repr(C)]
 pub struct MinimalTupleData {

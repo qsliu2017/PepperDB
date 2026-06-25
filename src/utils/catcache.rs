@@ -120,9 +120,9 @@ pub struct CatCList {
 /// Information for managing all the caches.
 pub struct CatCacheHeader {
     /// head of list of CatCache structs (intrusive slist). TODO(ptr).
-    pub ch_caches: Vec<*mut CatCache>,
+    pub caches: Vec<*mut CatCache>,
     /// # of tuples in all caches
-    pub ch_ntup: i32,
+    pub ntup: i32,
 }
 
 pub fn CreateCacheMemoryContext() {

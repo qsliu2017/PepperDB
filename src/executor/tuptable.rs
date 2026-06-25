@@ -17,7 +17,7 @@ use crate::utils::palloc::MemoryContext;
 pub type MinimalTuple = *mut MinimalTupleData; // TODO(ptr)
 
 bitflags! {
-    /// TTS_FLAG_* boolean states (`tts_flags`). GOOD: clean single-bit set.
+    /// TTS_FLAG_* boolean states (`flags`). GOOD: clean single-bit set.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct TtsFlags: u16 {
         const EMPTY      = 1 << 1;  // slot is empty
@@ -29,15 +29,15 @@ bitflags! {
 
 /// Base tuple table slot type. In-memory: no layout contract.
 pub struct TupleTableSlot {
-    pub tts_flags: TtsFlags,           // Boolean states
-    pub tts_nvalid: i16,               // # of valid values in tts_values
-    pub tts_ops: &'static dyn TupleTableSlotOps, // implementation of slot; TODO(ptr)
-    pub tts_tupleDescriptor: TupleDesc, // slot's tuple descriptor
-    pub tts_values: *mut Datum,        // current per-attribute values; TODO(ptr)
-    pub tts_isnull: *mut bool,         // current per-attribute isnull flags; TODO(ptr)
-    pub tts_mcxt: MemoryContext,       // slot itself is in this context
-    pub tts_tid: ItemPointerData,      // stored tuple's tid
-    pub tts_tableOid: Oid,             // table oid of tuple
+    pub flags: TtsFlags,           // Boolean states
+    pub nvalid: i16,               // # of valid values in values
+    pub ops: &'static dyn TupleTableSlotOps, // implementation of slot; TODO(ptr)
+    pub tupleDescriptor: TupleDesc, // slot's tuple descriptor
+    pub values: *mut Datum,        // current per-attribute values; TODO(ptr)
+    pub isnull: *mut bool,         // current per-attribute isnull flags; TODO(ptr)
+    pub mcxt: MemoryContext,       // slot itself is in this context
+    pub tid: ItemPointerData,      // stored tuple's tid
+    pub tableOid: Oid,             // table oid of tuple
 }
 
 /// Routines for a TupleTableSlot implementation (was `TupleTableSlotOps`,
@@ -117,22 +117,22 @@ pub const FIELDNO_MINIMALTUPLETABLESLOT_OFF: usize = 4;
 
 /// TTS_EMPTY(slot)
 pub fn tts_empty(slot: &TupleTableSlot) -> bool {
-    slot.tts_flags.contains(TtsFlags::EMPTY)
+    slot.flags.contains(TtsFlags::EMPTY)
 }
 
 /// TTS_SHOULDFREE(slot)
 pub fn tts_shouldfree(slot: &TupleTableSlot) -> bool {
-    slot.tts_flags.contains(TtsFlags::SHOULDFREE)
+    slot.flags.contains(TtsFlags::SHOULDFREE)
 }
 
 /// TTS_SLOW(slot)
 pub fn tts_slow(slot: &TupleTableSlot) -> bool {
-    slot.tts_flags.contains(TtsFlags::SLOW)
+    slot.flags.contains(TtsFlags::SLOW)
 }
 
 /// TTS_FIXED(slot)
 pub fn tts_fixed(slot: &TupleTableSlot) -> bool {
-    slot.tts_flags.contains(TtsFlags::FIXED)
+    slot.flags.contains(TtsFlags::FIXED)
 }
 
 /// TupIsNull -- is a TupleTableSlot empty? (None or empty)
@@ -257,14 +257,14 @@ pub fn slot_getsomeattrs_int(_slot: &mut TupleTableSlot, _attnum: i32) {
 
 /// Force slot's Datum/isnull arrays valid up through `attnum`.
 pub fn slot_getsomeattrs(slot: &mut TupleTableSlot, attnum: i32) {
-    if (slot.tts_nvalid as i32) < attnum {
+    if (slot.nvalid as i32) < attnum {
         slot_getsomeattrs_int(slot, attnum);
     }
 }
 
 /// Force all entries of the slot's Datum/isnull arrays valid.
 pub fn slot_getallattrs(slot: &mut TupleTableSlot) {
-    let natts = unsafe { (*slot.tts_tupleDescriptor).natts };
+    let natts = unsafe { (*slot.tupleDescriptor).natts };
     slot_getsomeattrs(slot, natts);
 }
 
@@ -272,27 +272,27 @@ pub fn slot_getallattrs(slot: &mut TupleTableSlot) {
 pub fn slot_attisnull(slot: &mut TupleTableSlot, attnum: i32) -> bool {
     debug_assert!(attnum > 0);
 
-    if attnum > slot.tts_nvalid as i32 {
+    if attnum > slot.nvalid as i32 {
         slot_getsomeattrs(slot, attnum);
     }
 
-    unsafe { *slot.tts_isnull.add((attnum - 1) as usize) }
+    unsafe { *slot.isnull.add((attnum - 1) as usize) }
 }
 
 /// Fetch one attribute of the slot's contents. None == SQL NULL (folds isnull).
 pub fn slot_getattr(slot: &mut TupleTableSlot, attnum: i32) -> Option<Datum> {
     debug_assert!(attnum > 0);
 
-    if attnum > slot.tts_nvalid as i32 {
+    if attnum > slot.nvalid as i32 {
         slot_getsomeattrs(slot, attnum);
     }
 
     let idx = (attnum - 1) as usize;
     unsafe {
-        if *slot.tts_isnull.add(idx) {
+        if *slot.isnull.add(idx) {
             None
         } else {
-            Some(*slot.tts_values.add(idx))
+            Some(*slot.values.add(idx))
         }
     }
 }
@@ -302,51 +302,51 @@ pub fn slot_getsysattr(slot: &mut TupleTableSlot, attnum: i32) -> Option<Datum> 
     debug_assert!(attnum < 0); // caller error
 
     if attnum == TABLE_OID_ATTRIBUTE_NUMBER as i32 {
-        return Some(ObjectIdGetDatum(slot.tts_tableOid));
+        return Some(ObjectIdGetDatum(slot.tableOid));
     } else if attnum == SELF_ITEM_POINTER_ATTRIBUTE_NUMBER as i32 {
         return Some(PointerGetDatum(
-            (&slot.tts_tid as *const ItemPointerData).cast(),
+            (&slot.tid as *const ItemPointerData).cast(),
         ));
     }
 
-    let ops = slot.tts_ops;
+    let ops = slot.ops;
     ops.getsysattr(slot, attnum)
 }
 
 /// slot_is_current_xact_tuple
 pub fn slot_is_current_xact_tuple(slot: &TupleTableSlot) -> bool {
-    let ops = slot.tts_ops;
+    let ops = slot.ops;
     ops.is_current_xact_tuple(slot)
 }
 
 /// ExecClearTuple - clear the slot's contents.
 pub fn ExecClearTuple(slot: &mut TupleTableSlot) {
-    let ops = slot.tts_ops;
+    let ops = slot.ops;
     ops.clear(slot);
 }
 
 /// ExecMaterializeSlot - force a slot into the "materialized" state.
 pub fn ExecMaterializeSlot(slot: &mut TupleTableSlot) {
-    let ops = slot.tts_ops;
+    let ops = slot.ops;
     ops.materialize(slot);
 }
 
 /// ExecCopySlotHeapTuple - return HeapTuple allocated in caller's context.
 pub fn ExecCopySlotHeapTuple(slot: &mut TupleTableSlot) -> HeapTuple {
     debug_assert!(!tts_empty(slot));
-    let ops = slot.tts_ops;
+    let ops = slot.ops;
     ops.copy_heap_tuple(slot)
 }
 
 /// ExecCopySlotMinimalTuple - return MinimalTuple allocated in caller's context.
 pub fn ExecCopySlotMinimalTuple(slot: &mut TupleTableSlot) -> MinimalTuple {
-    let ops = slot.tts_ops;
+    let ops = slot.ops;
     ops.copy_minimal_tuple(slot, 0)
 }
 
 /// ExecCopySlotMinimalTupleExtra - like above, with extra leading bytes.
 pub fn ExecCopySlotMinimalTupleExtra(slot: &mut TupleTableSlot, extra: usize) -> MinimalTuple {
-    let ops = slot.tts_ops;
+    let ops = slot.ops;
     ops.copy_minimal_tuple(slot, extra)
 }
 
@@ -356,7 +356,7 @@ pub fn ExecCopySlot<'a>(
     srcslot: &TupleTableSlot,
 ) -> &'a mut TupleTableSlot {
     debug_assert!(!tts_empty(srcslot));
-    let ops = dstslot.tts_ops;
+    let ops = dstslot.ops;
     ops.copyslot(dstslot, srcslot);
     dstslot
 }

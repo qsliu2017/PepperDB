@@ -209,10 +209,10 @@ pub struct GISTInsertStack {
 pub struct GistSplitVector {
     /// passed to/from user PickSplit method
     pub split_vector: GIST_SPLITVEC,
-    /// Union of subkeys in splitVector.spl_left
+    /// Union of subkeys in splitVector.left
     pub spl_lattr: [Datum; INDEX_MAX_KEYS],
     pub spl_lisnull: [bool; INDEX_MAX_KEYS],
-    /// Union of subkeys in splitVector.spl_right
+    /// Union of subkeys in splitVector.right
     pub spl_rattr: [Datum; INDEX_MAX_KEYS],
     pub spl_risnull: [bool; INDEX_MAX_KEYS],
     /// flags tuples that could go to either side for zero penalty
@@ -238,7 +238,7 @@ pub const GIST_ROOT_BLKNO: BlockNumber = 0;
 pub const TUPLE_IS_VALID: u16 = 0xffff;
 pub const TUPLE_IS_INVALID: u16 = 0xfffe;
 
-// GistTupleIsInvalid / GistTupleSetValid operate on itup->t_tid offset; fns at
+// GistTupleIsInvalid / GistTupleSetValid operate on itup->tid offset; fns at
 // the call site (need ItemPointer accessors).
 
 /// A buffer attached to an internal node, used in buffering-mode build.

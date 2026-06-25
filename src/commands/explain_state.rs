@@ -59,7 +59,7 @@ pub struct ExplainState {
     pub deparse_cxt: Vec<Box<Node>>, // context list for deparsing expressions
     pub printed_subplans: Bitmapset, // ids of SubPlans we've printed
     pub hide_workers: bool,          // set if we find an invisible Gather
-    pub rtable_size: i32,            // length of rtable excluding the RTE_GROUP entry
+    pub rtable_size: i32,            // length of rtable excluding the GROUP entry
     // state related to the current plan node
     pub workers_state: Option<Box<ExplainWorkersState>>, // needed if parallel plan
     // extensions

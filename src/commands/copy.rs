@@ -15,29 +15,29 @@ use crate::utils::rel::Relation;
 /// Whether a header line should be present, and whether it must match names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopyHeaderChoice {
-    COPY_HEADER_FALSE = 0,
-    COPY_HEADER_TRUE,
-    COPY_HEADER_MATCH,
+    FALSE = 0,
+    TRUE,
+    MATCH,
 }
 
 /// Where to save input processing errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopyOnErrorChoice {
     /// immediately throw errors, default
-    COPY_ON_ERROR_STOP = 0,
+    STOP = 0,
     /// ignore errors
-    COPY_ON_ERROR_IGNORE,
+    IGNORE,
 }
 
 /// Verbosity of logged messages by COPY command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopyLogVerbosityChoice {
     /// logs none
-    COPY_LOG_VERBOSITY_SILENT = -1,
+    SILENT = -1,
     /// logs no additional messages (default, assigned 0)
-    COPY_LOG_VERBOSITY_DEFAULT = 0,
+    DEFAULT = 0,
     /// logs additional messages
-    COPY_LOG_VERBOSITY_VERBOSE,
+    VERBOSE,
 }
 
 /// Parsed COPY options (mostly formatting; `freeze` is parsed alongside).

@@ -14,29 +14,29 @@ use crate::storage::relfilelocator::RelFileLocator;
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct XLogRecord {
-    pub xl_tot_len: u32,       // total len of entire record
-    pub xl_xid: TransactionId, // xact id
-    pub xl_prev: XLogRecPtr,   // ptr to previous record in log
-    pub xl_info: u8,           // flag bits, see XLR_* below
-    pub xl_rmid: RmgrId,       // resource manager for this record
+    pub tot_len: u32,       // total len of entire record
+    pub xid: TransactionId, // xact id
+    pub prev: XLogRecPtr,   // ptr to previous record in log
+    pub info: u8,           // flag bits, see XLR_* below
+    pub rmid: RmgrId,       // resource manager for this record
     // 2 bytes of padding here, initialize to zero
-    pub xl_crc: pg_crc32c,     // CRC for this record
+    pub crc: pg_crc32c,     // CRC for this record
     // XLogRecordBlockHeaders and XLogRecordDataHeader follow, no padding
 }
 
 const _: () = assert!(core::mem::size_of::<XLogRecord>() == 24);
-const _: () = assert!(core::mem::offset_of!(XLogRecord, xl_tot_len) == 0);
-const _: () = assert!(core::mem::offset_of!(XLogRecord, xl_xid) == 4);
-const _: () = assert!(core::mem::offset_of!(XLogRecord, xl_prev) == 8);
-const _: () = assert!(core::mem::offset_of!(XLogRecord, xl_info) == 16);
-const _: () = assert!(core::mem::offset_of!(XLogRecord, xl_rmid) == 17);
-const _: () = assert!(core::mem::offset_of!(XLogRecord, xl_crc) == 20);
+const _: () = assert!(core::mem::offset_of!(XLogRecord, tot_len) == 0);
+const _: () = assert!(core::mem::offset_of!(XLogRecord, xid) == 4);
+const _: () = assert!(core::mem::offset_of!(XLogRecord, prev) == 8);
+const _: () = assert!(core::mem::offset_of!(XLogRecord, info) == 16);
+const _: () = assert!(core::mem::offset_of!(XLogRecord, rmid) == 17);
+const _: () = assert!(core::mem::offset_of!(XLogRecord, crc) == 20);
 
-/// offsetof(XLogRecord, xl_crc) + sizeof(pg_crc32c)
+/// offsetof(XLogRecord, crc) + sizeof(pg_crc32c)
 pub const SizeOfXLogRecord: usize =
-    core::mem::offset_of!(XLogRecord, xl_crc) + core::mem::size_of::<pg_crc32c>();
+    core::mem::offset_of!(XLogRecord, crc) + core::mem::size_of::<pg_crc32c>();
 
-// The high 4 bits in xl_info may be used freely by rmgr; the low 4 bits carry
+// The high 4 bits in info may be used freely by rmgr; the low 4 bits carry
 // the XLR_* flags below (set internally by XLogInsert, except SPECIAL_REL_UPDATE
 // and CHECK_CONSISTENCY which the caller may pass).
 pub const XLR_INFO_MASK: u8 = 0x0F;

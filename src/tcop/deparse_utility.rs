@@ -13,13 +13,13 @@ use crate::utils::aclchk_internal::InternalGrant;
 /// CollectedCommandType: the kind of collected command (the union discriminant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CollectedCommandType {
-    SCT_Simple,
-    SCT_AlterTable,
-    SCT_Grant,
-    SCT_AlterOpFamily,
-    SCT_AlterDefaultPrivileges,
-    SCT_CreateOpClass,
-    SCT_AlterTSConfig,
+    Simple,
+    AlterTable,
+    Grant,
+    AlterOpFamily,
+    AlterDefaultPrivileges,
+    CreateOpClass,
+    AlterTSConfig,
 }
 
 /// For ALTER TABLE commands, one subcommand therein.

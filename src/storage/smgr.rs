@@ -37,19 +37,19 @@ pub enum SMgrImpl {
 /// `&SmgrRelation` / `&mut SmgrRelation` at call sites.
 pub struct SmgrRelation {
     /// Relation physical identifier; the hashtable lookup key (must be first).
-    pub smgr_rlocator: RelFileLocatorBackend,
+    pub rlocator: RelFileLocatorBackend,
 
     /// Current insertion target block. Reset to InvalidBlockNumber on a cache
     /// flush event.
-    pub smgr_targblock: BlockNumber,
+    pub targblock: BlockNumber,
 
     /// Last known size for each fork; reset to InvalidBlockNumber on a cache
     /// flush event. Only reliable during recovery (no inval for fork extension).
-    pub smgr_cached_nblocks: [BlockNumber; NUM_FORKS],
+    pub cached_nblocks: [BlockNumber; NUM_FORKS],
 
     // --- Fields below are private to smgr.c and its submodules. ---
     /// Storage manager selector.
-    pub smgr_which: SMgrImpl,
+    pub which: SMgrImpl,
     // md.c per-fork open-segment bookkeeping (md_num_open_segs / md_seg_fds) and
     // the dlist pinning link are dropped: deferred to the I/O backend impl.
 }
@@ -58,7 +58,7 @@ impl SmgrRelation {
     /// True iff this relation is backend-local (temporary).
     /// Replaces the `SmgrIsTemp` macro.
     pub fn is_temp(&self) -> bool {
-        self.smgr_rlocator.is_temp()
+        self.rlocator.is_temp()
     }
 }
 

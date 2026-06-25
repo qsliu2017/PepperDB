@@ -63,13 +63,13 @@ pub const XLOG_CHECKPOINT_REDO: u8 = 0xE0;
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DBState {
-    DB_STARTUP = 0,
-    DB_SHUTDOWNED,
-    DB_SHUTDOWNED_IN_RECOVERY,
-    DB_SHUTDOWNING,
-    DB_IN_CRASH_RECOVERY,
-    DB_IN_ARCHIVE_RECOVERY,
-    DB_IN_PRODUCTION,
+    STARTUP = 0,
+    SHUTDOWNED,
+    SHUTDOWNED_IN_RECOVERY,
+    SHUTDOWNING,
+    IN_CRASH_RECOVERY,
+    IN_ARCHIVE_RECOVERY,
+    IN_PRODUCTION,
 }
 
 /// float8 sentinel stored in pg_control to check FP compatibility.

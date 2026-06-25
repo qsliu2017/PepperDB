@@ -16,7 +16,7 @@ use crate::storage::relfilelocator::RelFileLocator;
 use crate::storage::sinval::SharedInvalidationMessage;
 use crate::utils::relcache::Relation;
 
-// WAL opcodes (xl_info high nibble): 3 bits opcode + 1 init bit. Raw consts.
+// WAL opcodes (info high nibble): 3 bits opcode + 1 init bit. Raw consts.
 pub const XLOG_HEAP_INSERT: u8 = 0x00;
 pub const XLOG_HEAP_DELETE: u8 = 0x10;
 pub const XLOG_HEAP_UPDATE: u8 = 0x20;

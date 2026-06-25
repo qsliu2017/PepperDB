@@ -23,57 +23,57 @@ pub enum BackendState {
 
 /// SSL status, only filled in if SSL is enabled. All char arrays NUL-terminated.
 pub struct PgBackendSSLStatus {
-    pub ssl_bits: i32,
-    pub ssl_version: [u8; NAMEDATALEN],
-    pub ssl_cipher: [u8; NAMEDATALEN],
-    pub ssl_client_dn: [u8; NAMEDATALEN],
-    pub ssl_client_serial: [u8; NAMEDATALEN], // serial: max 20 octets per RFC 5280
-    pub ssl_issuer_dn: [u8; NAMEDATALEN],
+    pub bits: i32,
+    pub version: [u8; NAMEDATALEN],
+    pub cipher: [u8; NAMEDATALEN],
+    pub client_dn: [u8; NAMEDATALEN],
+    pub client_serial: [u8; NAMEDATALEN], // serial: max 20 octets per RFC 5280
+    pub issuer_dn: [u8; NAMEDATALEN],
 }
 
 /// GSS status, only filled in if GSS is enabled. All char arrays NUL-terminated.
 pub struct PgBackendGSSStatus {
-    pub gss_princ: [u8; NAMEDATALEN], // GSSAPI principal used to auth
-    pub gss_auth: bool,
-    pub gss_enc: bool,
-    pub gss_delegation: bool,
+    pub princ: [u8; NAMEDATALEN], // GSSAPI principal used to auth
+    pub auth: bool,
+    pub enc: bool,
+    pub delegation: bool,
 }
 
-/// Per-backend live activity. In-memory (single-process; the C st_changecount
+/// Per-backend live activity. In-memory (single-process; the C changecount
 /// seqlock and volatile pointers collapse away).
 pub struct PgBackendStatus {
-    pub st_changecount: i32, // seqlock counter (kept for read/write protocol)
-    pub st_procpid: i32,     // entry valid iff > 0
+    pub changecount: i32, // seqlock counter (kept for read/write protocol)
+    pub procpid: i32,     // entry valid iff > 0
 
-    pub st_backend_type: BackendType,
+    pub backend_type: BackendType,
 
-    pub st_proc_start_timestamp: TimestampTz,
-    pub st_xact_start_timestamp: TimestampTz,
-    pub st_activity_start_timestamp: TimestampTz,
-    pub st_state_start_timestamp: TimestampTz,
+    pub proc_start_timestamp: TimestampTz,
+    pub xact_start_timestamp: TimestampTz,
+    pub activity_start_timestamp: TimestampTz,
+    pub state_start_timestamp: TimestampTz,
 
-    pub st_databaseid: Oid,
-    pub st_userid: Oid,
-    pub st_clientaddr: SockAddr,
-    pub st_clienthostname: Option<String>, // null-terminated in C
+    pub databaseid: Oid,
+    pub userid: Oid,
+    pub clientaddr: SockAddr,
+    pub clienthostname: Option<String>, // null-terminated in C
 
-    pub st_ssl: bool,
-    pub st_sslstatus: Option<Box<PgBackendSSLStatus>>,
+    pub ssl: bool,
+    pub sslstatus: Option<Box<PgBackendSSLStatus>>,
 
-    pub st_gss: bool,
-    pub st_gssstatus: Option<Box<PgBackendGSSStatus>>,
+    pub gss: bool,
+    pub gssstatus: Option<Box<PgBackendGSSStatus>>,
 
-    pub st_state: BackendState,
+    pub state: BackendState,
 
-    pub st_appname: Option<String>,
-    pub st_activity_raw: Option<String>, // possibly truncated mid-multibyte char
+    pub appname: Option<String>,
+    pub activity_raw: Option<String>, // possibly truncated mid-multibyte char
 
-    pub st_progress_command: ProgressCommandType,
-    pub st_progress_command_target: Oid,
-    pub st_progress_param: [i64; PGSTAT_NUM_PROGRESS_PARAM],
+    pub progress_command: ProgressCommandType,
+    pub progress_command_target: Oid,
+    pub progress_param: [i64; PGSTAT_NUM_PROGRESS_PARAM],
 
-    pub st_query_id: i64,
-    pub st_plan_id: i64,
+    pub query_id: i64,
+    pub plan_id: i64,
 }
 
 /// Backend status array entry plus locally-derived fields.

@@ -70,15 +70,15 @@ pub fn pg_checksum_block(page: &[u8]) -> u32 {
 ///
 /// The checksum includes the block number (to detect transposed pages), the page
 /// header (excluding the checksum itself), and the page data. The caller must NOT
-/// have set pd_checksum; this function reads the page with the checksum field
+/// have set checksum; this function reads the page with the checksum field
 /// treated as zero (offset 8..10 in the header).
 pub fn pg_checksum_page(page: &[u8], blkno: BlockNumber) -> u16 {
-    // Compute over a copy with pd_checksum zeroed (the C code transiently zeroes
+    // Compute over a copy with checksum zeroed (the C code transiently zeroes
     // it on the page itself; we avoid mutating the caller's buffer).
     let mut buf = [0u8; BLCKSZ as usize];
     buf.copy_from_slice(page);
-    buf[8] = 0; // pd_checksum low byte
-    buf[9] = 0; // pd_checksum high byte
+    buf[8] = 0; // checksum low byte
+    buf[9] = 0; // checksum high byte
 
     let mut checksum = pg_checksum_block(&buf);
 

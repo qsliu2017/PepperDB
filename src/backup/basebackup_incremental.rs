@@ -14,8 +14,8 @@ pub const INCREMENTAL_MAGIC: u32 = 0xd3ae1f0d;
 /// How a file is to be backed up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileBackupMethod {
-    BACK_UP_FILE_FULLY,
-    BACK_UP_FILE_INCREMENTALLY,
+    FULLY,
+    INCREMENTALLY,
 }
 
 /// Opaque manifest-tracking state (defined in basebackup_incremental.c).

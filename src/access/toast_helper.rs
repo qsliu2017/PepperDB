@@ -14,8 +14,8 @@ use crate::postgres::Datum;
 use crate::utils::relcache::Relation;
 
 bitflags! {
-    /// Overall TOAST-operation flags (`ttc_flags`) and per-column flags
-    /// (`tai_colflags`); they share the same `u8` bit space. The low two bits are
+    /// Overall TOAST-operation flags (`flags`) and per-column flags
+    /// (`colflags`); they share the same `u8` bit space. The low two bits are
     /// common (NEEDS_DELETE_OLD, NEEDS_FREE); the rest are op- or column-specific.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ToastFlags: u8 {
@@ -37,26 +37,26 @@ impl ToastFlags {
     pub const COL_NEEDS_FREE: Self = Self::NEEDS_FREE;
 }
 
-/// Information about one column of a tuple being toasted. `tai_size` is only
+/// Information about one column of a tuple being toasted. `size` is only
 /// valid for varlena attrs whose `toast_action` differs from TYPSTORAGE_PLAIN.
 pub struct ToastAttrInfo {
-    pub tai_oldexternal: *mut varlena, // TODO(ptr)
-    pub tai_size: i32,
-    pub tai_colflags: ToastFlags,
-    pub tai_compression: i8, // a TYPSTORAGE_* / compression char
+    pub oldexternal: *mut varlena, // TODO(ptr)
+    pub size: i32,
+    pub colflags: ToastFlags,
+    pub compression: i8, // a TYPSTORAGE_* / compression char
 }
 
 /// Information about one tuple being toasted. The caller initializes the value/
-/// null/old arrays and the `ttc_attr` array (each length == natts) before
+/// null/old arrays and the `attr` array (each length == natts) before
 /// calling toast_tuple_init.
 pub struct ToastTupleContext {
-    pub ttc_rel: Relation,         // relation that contains the tuple
-    pub ttc_values: *mut Datum,    // values from the tuple columns // TODO(ptr)
-    pub ttc_isnull: *mut bool,     // null flags for the tuple columns // TODO(ptr)
-    pub ttc_oldvalues: *mut Datum, // values from previous tuple (NULL on insert) // TODO(ptr)
-    pub ttc_oldisnull: *mut bool,  // null flags from previous tuple // TODO(ptr)
-    pub ttc_flags: ToastFlags,
-    pub ttc_attr: *mut ToastAttrInfo, // array of length natts // TODO(ptr)
+    pub rel: Relation,         // relation that contains the tuple
+    pub values: *mut Datum,    // values from the tuple columns // TODO(ptr)
+    pub isnull: *mut bool,     // null flags for the tuple columns // TODO(ptr)
+    pub oldvalues: *mut Datum, // values from previous tuple (NULL on insert) // TODO(ptr)
+    pub oldisnull: *mut bool,  // null flags from previous tuple // TODO(ptr)
+    pub flags: ToastFlags,
+    pub attr: *mut ToastAttrInfo, // array of length natts // TODO(ptr)
 }
 
 /// Initialize the per-column TOAST state in `ttc`.

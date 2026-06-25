@@ -24,18 +24,18 @@ pub const XLOG_PAGE_MAGIC: u16 = 0xD118;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct XLogPageHeaderData {
-    pub xlp_magic: u16,           // magic value for correctness checks
-    pub xlp_info: u16,            // flag bits, see XlpFlags
-    pub xlp_tli: TimeLineID,      // TimeLineID of first record on page
-    pub xlp_pageaddr: XLogRecPtr, // XLOG address of this page
-    // Number of bytes remaining from a previous page (tracks xl_tot_len).
-    pub xlp_rem_len: u32,
+    pub magic: u16,           // magic value for correctness checks
+    pub info: u16,            // flag bits, see XlpFlags
+    pub tli: TimeLineID,      // TimeLineID of first record on page
+    pub pageaddr: XLogRecPtr, // XLOG address of this page
+    // Number of bytes remaining from a previous page (tracks tot_len).
+    pub rem_len: u32,
 }
 const _: () = assert!(core::mem::size_of::<XLogPageHeaderData>() == 24);
-const _: () = assert!(core::mem::offset_of!(XLogPageHeaderData, xlp_info) == 2);
-const _: () = assert!(core::mem::offset_of!(XLogPageHeaderData, xlp_tli) == 4);
-const _: () = assert!(core::mem::offset_of!(XLogPageHeaderData, xlp_pageaddr) == 8);
-const _: () = assert!(core::mem::offset_of!(XLogPageHeaderData, xlp_rem_len) == 16);
+const _: () = assert!(core::mem::offset_of!(XLogPageHeaderData, info) == 2);
+const _: () = assert!(core::mem::offset_of!(XLogPageHeaderData, tli) == 4);
+const _: () = assert!(core::mem::offset_of!(XLogPageHeaderData, pageaddr) == 8);
+const _: () = assert!(core::mem::offset_of!(XLogPageHeaderData, rem_len) == 16);
 
 pub const SizeOfXLogShortPHD: usize = MAXALIGN(core::mem::size_of::<XLogPageHeaderData>());
 
@@ -60,7 +60,7 @@ pub const SizeOfXLogLongPHD: usize = MAXALIGN(core::mem::size_of::<XLogLongPageH
 pub type XLogLongPageHeader<'a> = &'a mut XLogLongPageHeaderData;
 
 bitflags! {
-    /// xlp_info flag bits (GOOD; composite `ALL_FLAGS`).
+    /// info flag bits (GOOD; composite `ALL_FLAGS`).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct XlpFlags: u16 {
         const FIRST_IS_CONTRECORD            = 0x0001;
@@ -78,7 +78,7 @@ bitflags! {
 impl XLogPageHeaderData {
     /// Header size for this page (long vs short).
     pub fn page_header_size(&self) -> usize {
-        if self.xlp_info & XlpFlags::LONG_HEADER.bits() != 0 {
+        if self.info & XlpFlags::LONG_HEADER.bits() != 0 {
             SizeOfXLogLongPHD
         } else {
             SizeOfXLogShortPHD
@@ -211,8 +211,8 @@ pub struct xl_parameter_change {
 
 /// Logs a restore point.
 pub struct xl_restore_point {
-    pub rp_time: TimestampTz,
-    pub rp_name: [u8; MAXFNAMELEN],
+    pub time: TimestampTz,
+    pub name: [u8; MAXFNAMELEN],
 }
 
 /// Overwrite of a prior contrecord.

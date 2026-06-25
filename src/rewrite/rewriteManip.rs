@@ -28,11 +28,11 @@ pub type ReplaceRteVariablesCallback<'a> =
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplaceVarsNoMatchOption {
     /// throw error if no match
-    REPLACEVARS_REPORT_ERROR,
+    REPORT_ERROR,
     /// change the Var's varno, nothing else
-    REPLACEVARS_CHANGE_VARNO,
+    CHANGE_VARNO,
     /// replace with a NULL Const
-    REPLACEVARS_SUBSTITUTE_NULL,
+    SUBSTITUTE_NULL,
 }
 
 /// C: `ChangeVarNodes_context`.

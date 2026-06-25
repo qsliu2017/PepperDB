@@ -30,7 +30,7 @@ pub fn standby_desc_invalidations(
     unimplemented!()
 }
 
-/* XLOG message types (xl_info nibble opcodes, kept raw) */
+/* XLOG message types (info nibble opcodes, kept raw) */
 pub const XLOG_STANDBY_LOCK: u8 = 0x00;
 pub const XLOG_RUNNING_XACTS: u8 = 0x10;
 pub const XLOG_INVALIDATIONS: u8 = 0x20;

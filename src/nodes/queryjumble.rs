@@ -11,7 +11,7 @@ pub struct LocationLen {
     pub length: i32,
     /// Does this location represent a squashed list?
     pub squashed: bool,
-    /// Is this location a PARAM_EXTERN parameter?
+    /// Is this location a EXTERN parameter?
     pub extern_param: bool,
 }
 
@@ -28,7 +28,7 @@ pub struct JumbleState {
     pub clocations_buf_size: i32,
     /// Current number of valid entries in `clocations` array.
     pub clocations_count: i32,
-    /// Highest PARAM_EXTERN parameter id seen; starts normalization correctly.
+    /// Highest EXTERN parameter id seen; starts normalization correctly.
     pub highest_extern_param_id: i32,
     /// Whether squashable lists are present.
     pub has_squashed_lists: bool,
@@ -43,10 +43,10 @@ pub struct JumbleState {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComputeQueryIdType {
-    COMPUTE_QUERY_ID_OFF,
-    COMPUTE_QUERY_ID_ON,
-    COMPUTE_QUERY_ID_AUTO,
-    COMPUTE_QUERY_ID_REGRESS,
+    OFF,
+    ON,
+    AUTO,
+    REGRESS,
 }
 
 // GUC parameters (process-globals; become session/context state later).
@@ -71,10 +71,10 @@ pub fn EnableQueryId() {
 /// Whether query identifier computation has been enabled.
 pub fn IsQueryIdEnabled() -> bool {
     unsafe {
-        if compute_query_id == ComputeQueryIdType::COMPUTE_QUERY_ID_OFF as i32 {
+        if compute_query_id == ComputeQueryIdType::OFF as i32 {
             return false;
         }
-        if compute_query_id == ComputeQueryIdType::COMPUTE_QUERY_ID_ON as i32 {
+        if compute_query_id == ComputeQueryIdType::ON as i32 {
             return true;
         }
         query_id_enabled

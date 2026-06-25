@@ -43,7 +43,7 @@ pub struct MultiXactMember {
     pub status: MultiXactStatus,
 }
 
-// multixact-related XLOG opcodes (xl_info nibble): raw consts.
+// multixact-related XLOG opcodes (info nibble): raw consts.
 pub const XLOG_MULTIXACT_ZERO_OFF_PAGE: u8 = 0x00;
 pub const XLOG_MULTIXACT_ZERO_MEM_PAGE: u8 = 0x10;
 pub const XLOG_MULTIXACT_CREATE_ID: u8 = 0x20;

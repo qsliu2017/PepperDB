@@ -8,9 +8,9 @@ use crate::postgres_ext::Oid;
 
 /// Saved state for restoring the original user after a temporary switch.
 pub struct UserContext {
-    pub save_userid: Oid,
-    pub save_sec_context: i32,
-    pub save_nestlevel: i32,
+    pub userid: Oid,
+    pub sec_context: i32,
+    pub nestlevel: i32,
 }
 
 /// Switch to `userid`, returning the context needed to restore the prior state.

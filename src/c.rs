@@ -88,7 +88,7 @@ pub struct CommandId(pub u32);
 pub const InvalidSubTransactionId: SubTransactionId = SubTransactionId(0);
 pub const TopSubTransactionId: SubTransactionId = SubTransactionId(1);
 
-/// MultiXactId must be equivalent to TransactionId, to fit in t_xmax; it is the
+/// MultiXactId must be equivalent to TransactionId, to fit in xmax; it is the
 /// SAME newtype (an alias to a newtype, so still no implicit `u32` conversion).
 pub type MultiXactId = TransactionId;
 
@@ -111,15 +111,15 @@ pub const FirstMultiXactId: MultiXactId = TransactionId(1);
 pub struct varlena {
     /// Do not touch directly; use the VARSIZE/VARDATA accessors.
     pub vl_len_: [u8; 4],
-    /// Data content (flexible array member); access via `vl_dat()`.
-    pub vl_dat: [u8; 0],
+    /// Data content (flexible array member); access via `dat()`.
+    pub dat: [u8; 0],
 }
 
 impl varlena {
     /// Pointer to the data bytes following the 4-byte length header.
     /// SAFETY: `self` must point into a varlena buffer of its recorded length.
-    pub fn vl_dat(&self) -> *const u8 {
-        self.vl_dat.as_ptr()
+    pub fn dat(&self) -> *const u8 {
+        self.dat.as_ptr()
     }
 }
 

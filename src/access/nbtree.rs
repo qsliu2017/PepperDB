@@ -4,7 +4,7 @@
 //! On-disk: BTPageOpaqueData (page special space), BTMetaPageData, and
 //! BTDeletedPageData are `#[repr(C)]` with layout asserts. BTreeTupleData is just
 //! the shared IndexTuple (access/itup) -- nbtree's pivot/posting metadata is
-//! bit-packed into the tuple's t_info bit and into t_tid's offset-number word
+//! bit-packed into the tuple's t_info bit and into tid's offset-number word
 //! (BT_OFFSET_MASK low 12 bits = count, BT_STATUS_OFFSET_MASK high 4 bits =
 //! status); kept as raw masks + accessor fns (bitflags-port.md appendix C), NOT
 //! bitflags. BTP_* page flags and SK_BT_* scan-key flags ARE clean single-bit
@@ -58,20 +58,20 @@ pub type BTCycleId = u16;
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct BTPageOpaqueData {
-    pub btpo_prev: BlockNumber,   // left sibling, or P_NONE if leftmost
-    pub btpo_next: BlockNumber,   // right sibling, or P_NONE if rightmost
-    pub btpo_level: u32,          // tree level --- zero for leaf pages
-    pub btpo_flags: u16,          // flag bits, see BTP_*
-    pub btpo_cycleid: BTCycleId,  // vacuum cycle ID of latest split
+    pub prev: BlockNumber,   // left sibling, or P_NONE if leftmost
+    pub next: BlockNumber,   // right sibling, or P_NONE if rightmost
+    pub level: u32,          // tree level --- zero for leaf pages
+    pub flags: u16,          // flag bits, see BTP_*
+    pub cycleid: BTCycleId,  // vacuum cycle ID of latest split
 }
 pub type BTPageOpaque = *mut BTPageOpaqueData; // TODO(ptr)
 
 const _: () = assert!(core::mem::size_of::<BTPageOpaqueData>() == 16);
-const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, btpo_prev) == 0);
-const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, btpo_next) == 4);
-const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, btpo_level) == 8);
-const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, btpo_flags) == 12);
-const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, btpo_cycleid) == 14);
+const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, prev) == 0);
+const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, next) == 4);
+const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, level) == 8);
+const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, flags) == 12);
+const _: () = assert!(core::mem::offset_of!(BTPageOpaqueData, cycleid) == 14);
 
 /// BTPageGetOpaque - the page's btree opaque area (special pointer).
 pub fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
@@ -79,7 +79,7 @@ pub fn BTPageGetOpaque(page: Page) -> BTPageOpaque {
 }
 
 bitflags! {
-    /// Bits defined in btpo_flags. Clean single-bit page-status set (GOOD).
+    /// Bits defined in flags. Clean single-bit page-status set (GOOD).
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct BTPageFlags: u16 {
         const LEAF            = 1 << 0; // leaf page, i.e. not internal page
@@ -94,7 +94,7 @@ bitflags! {
     }
 }
 
-// Raw bit values for direct btpo_flags masking (keep alongside the bitflags set).
+// Raw bit values for direct flags masking (keep alongside the bitflags set).
 pub const BTP_LEAF: u16 = 1 << 0;
 pub const BTP_ROOT: u16 = 1 << 1;
 pub const BTP_DELETED: u16 = 1 << 2;
@@ -112,16 +112,16 @@ pub const MAX_BT_CYCLE_ID: u16 = 0xFF7F;
 /// BTMetaPageData -- the meta page (always the first page in the index). On-disk.
 #[repr(C)]
 pub struct BTMetaPageData {
-    pub btm_magic: u32,       // should contain BTREE_MAGIC
-    pub btm_version: u32,     // nbtree version (always <= BTREE_VERSION)
-    pub btm_root: BlockNumber, // current root location
-    pub btm_level: u32,       // tree level of the root page
-    pub btm_fastroot: BlockNumber, // current "fast" root location
-    pub btm_fastlevel: u32,   // tree level of the "fast" root page
-    // remaining fields only valid when btm_version >= BTREE_NOVAC_VERSION
-    pub btm_last_cleanup_num_delpages: u32, // # deleted, non-recyclable pages, last cleanup
-    pub btm_last_cleanup_num_heap_tuples: float8, // # heap tuples, last cleanup (deprecated)
-    pub btm_allequalimage: bool, // are all columns "equalimage"?
+    pub magic: u32,       // should contain BTREE_MAGIC
+    pub version: u32,     // nbtree version (always <= BTREE_VERSION)
+    pub root: BlockNumber, // current root location
+    pub level: u32,       // tree level of the root page
+    pub fastroot: BlockNumber, // current "fast" root location
+    pub fastlevel: u32,   // tree level of the "fast" root page
+    // remaining fields only valid when version >= BTREE_NOVAC_VERSION
+    pub last_cleanup_num_delpages: u32, // # deleted, non-recyclable pages, last cleanup
+    pub last_cleanup_num_heap_tuples: float8, // # heap tuples, last cleanup (deprecated)
+    pub allequalimage: bool, // are all columns "equalimage"?
 }
 
 /// BTPageGetMeta - the meta page contents.
@@ -174,37 +174,37 @@ pub const P_NONE: BlockNumber = 0;
 
 // Macros to test page state kept in the opaque data -> accessor fns.
 pub fn P_LEFTMOST(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_prev == P_NONE
+    opaque.prev == P_NONE
 }
 pub fn P_RIGHTMOST(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_next == P_NONE
+    opaque.next == P_NONE
 }
 pub fn P_ISLEAF(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_flags & BTP_LEAF != 0
+    opaque.flags & BTP_LEAF != 0
 }
 pub fn P_ISROOT(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_flags & BTP_ROOT != 0
+    opaque.flags & BTP_ROOT != 0
 }
 pub fn P_ISDELETED(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_flags & BTP_DELETED != 0
+    opaque.flags & BTP_DELETED != 0
 }
 pub fn P_ISMETA(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_flags & BTP_META != 0
+    opaque.flags & BTP_META != 0
 }
 pub fn P_ISHALFDEAD(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_flags & BTP_HALF_DEAD != 0
+    opaque.flags & BTP_HALF_DEAD != 0
 }
 pub fn P_IGNORE(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_flags & (BTP_DELETED | BTP_HALF_DEAD) != 0
+    opaque.flags & (BTP_DELETED | BTP_HALF_DEAD) != 0
 }
 pub fn P_HAS_GARBAGE(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_flags & BTP_HAS_GARBAGE != 0
+    opaque.flags & BTP_HAS_GARBAGE != 0
 }
 pub fn P_INCOMPLETE_SPLIT(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_flags & BTP_INCOMPLETE_SPLIT != 0
+    opaque.flags & BTP_INCOMPLETE_SPLIT != 0
 }
 pub fn P_HAS_FULLXID(opaque: &BTPageOpaqueData) -> bool {
-    opaque.btpo_flags & BTP_HAS_FULLXID != 0
+    opaque.flags & BTP_HAS_FULLXID != 0
 }
 
 /// BTDeletedPageData -- the page contents of a deleted page. On-disk.
@@ -216,7 +216,7 @@ const _: () = assert!(core::mem::size_of::<BTDeletedPageData>() == 8);
 
 /// Mark a page deleted, storing safexid in the page's tuple area (static inline).
 pub fn BTPageSetDeleted(_page: Page, _safexid: FullTransactionId) {
-    // Mutates BTPageOpaque flags + PageHeader pd_lower/pd_upper + writes
+    // Mutates BTPageOpaque flags + PageHeader lower/upper + writes
     // BTDeletedPageData into PageGetContents; needs mutable Page + PageHeader
     // access not yet wired in the skeleton.
     unimplemented!()
@@ -277,10 +277,10 @@ pub fn P_FIRSTDATAKEY(opaque: &BTPageOpaqueData) -> OffsetNumber {
     }
 }
 
-// === B-Tree tuple format: pivot/posting metadata packed into t_info + t_tid ===
+// === B-Tree tuple format: pivot/posting metadata packed into t_info + tid ===
 
 /// INDEX_ALT_TID_MASK: the t_info bit (INDEX_AM_RESERVED_BIT) marking a tuple as
-/// using the alternative t_tid representation (pivot or posting).
+/// using the alternative tid representation (pivot or posting).
 pub const INDEX_ALT_TID_MASK: u16 = INDEX_AM_RESERVED_BIT;
 
 // Item pointer offset-number bit masks (packs a count beside 4 status bits;
@@ -301,7 +301,7 @@ pub fn BTreeTupleIsPivot(itup: &IndexTupleData) -> bool {
         return false;
     }
     // absence of BT_IS_POSTING in offset number indicates pivot tuple
-    itup.t_tid.offset_number_no_check() & BT_IS_POSTING == 0
+    itup.tid.offset_number_no_check() & BT_IS_POSTING == 0
 }
 
 /// True iff `itup` is a posting-list tuple.
@@ -310,7 +310,7 @@ pub fn BTreeTupleIsPosting(itup: &IndexTupleData) -> bool {
         return false;
     }
     // presence of BT_IS_POSTING in offset number indicates posting tuple
-    itup.t_tid.offset_number_no_check() & BT_IS_POSTING != 0
+    itup.tid.offset_number_no_check() & BT_IS_POSTING != 0
 }
 
 /// Make `itup` a posting-list tuple: nhtids in the offset field (with BT_IS_POSTING),
@@ -323,20 +323,20 @@ pub fn BTreeTupleSetPosting(itup: &mut IndexTupleData, nhtids: u16, postingoffse
     debug_assert!(!BTreeTupleIsPivot(itup));
 
     itup.t_info |= INDEX_ALT_TID_MASK;
-    itup.t_tid.set_offset_number(nhtids | BT_IS_POSTING);
-    itup.t_tid.set_block_number(postingoffset as BlockNumber);
+    itup.tid.set_offset_number(nhtids | BT_IS_POSTING);
+    itup.tid.set_block_number(postingoffset as BlockNumber);
 }
 
 /// Number of heap TIDs in a posting-list tuple (low 12 bits of the offset field).
 pub fn BTreeTupleGetNPosting(posting: &IndexTupleData) -> u16 {
     debug_assert!(BTreeTupleIsPosting(posting));
-    posting.t_tid.offset_number_no_check() & BT_OFFSET_MASK
+    posting.tid.offset_number_no_check() & BT_OFFSET_MASK
 }
 
 /// Byte offset of the posting list within a posting-list tuple (block-number field).
 pub fn BTreeTupleGetPostingOffset(posting: &IndexTupleData) -> u32 {
     debug_assert!(BTreeTupleIsPosting(posting));
-    posting.t_tid.block_number_no_check()
+    posting.tid.block_number_no_check()
 }
 
 /// Pointer to the posting list (TID array) inside a posting-list tuple.
@@ -350,21 +350,21 @@ pub fn BTreeTupleGetPostingN(posting: &IndexTupleData, n: i32) -> ItemPointer {
     unsafe { BTreeTupleGetPosting(posting).add(n as usize) }
 }
 
-/// Get downlink block number from a pivot tuple's t_tid (no pivot assert).
+/// Get downlink block number from a pivot tuple's tid (no pivot assert).
 pub fn BTreeTupleGetDownLink(pivot: &IndexTupleData) -> BlockNumber {
-    pivot.t_tid.block_number_no_check()
+    pivot.tid.block_number_no_check()
 }
 
-/// Set downlink block number in a pivot tuple's t_tid.
+/// Set downlink block number in a pivot tuple's tid.
 pub fn BTreeTupleSetDownLink(pivot: &mut IndexTupleData, blkno: BlockNumber) {
-    pivot.t_tid.set_block_number(blkno);
+    pivot.tid.set_block_number(blkno);
 }
 
 /// Number of attributes within a tuple (excludes implicit heap-TID tiebreaker).
 /// C macro (avoids including rel.h); `rel` only used in the non-pivot branch.
 pub fn BTreeTupleGetNAtts(itup: &IndexTupleData, rel: Relation) -> u16 {
     if BTreeTupleIsPivot(itup) {
-        itup.t_tid.offset_number_no_check() & BT_OFFSET_MASK
+        itup.tid.offset_number_no_check() & BT_OFFSET_MASK
     } else {
         IndexRelationGetNumberOfAttributes(rel)
     }
@@ -385,25 +385,25 @@ pub fn BTreeTupleSetNAtts(itup: &mut IndexTupleData, nkeyatts: u16, heaptid: boo
         nkeyatts
     };
     // BT_IS_POSTING bit is deliberately unset here.
-    itup.t_tid.set_offset_number(off);
+    itup.tid.set_offset_number(off);
     debug_assert!(BTreeTupleIsPivot(itup));
 }
 
 /// Get a leaf page's "top parent" link from its high key (page deletion).
 pub fn BTreeTupleGetTopParent(leafhikey: &IndexTupleData) -> BlockNumber {
-    leafhikey.t_tid.block_number_no_check()
+    leafhikey.tid.block_number_no_check()
 }
 
 /// Set a leaf page's "top parent" link in its high key (page deletion).
 pub fn BTreeTupleSetTopParent(leafhikey: &mut IndexTupleData, blkno: BlockNumber) {
-    leafhikey.t_tid.set_block_number(blkno);
+    leafhikey.tid.set_block_number(blkno);
     BTreeTupleSetNAtts(leafhikey, 0, false);
 }
 
 /// Tiebreaker heap TID, if any (lowest TID for a posting list). None if truncated.
 pub fn BTreeTupleGetHeapTID(itup: &IndexTupleData) -> Option<ItemPointer> {
     if BTreeTupleIsPivot(itup) {
-        if itup.t_tid.offset_number_no_check() & BT_PIVOT_HEAP_TID_ATTR != 0 {
+        if itup.tid.offset_number_no_check() & BT_PIVOT_HEAP_TID_ATTR != 0 {
             let p = unsafe {
                 (itup as *const IndexTupleData as *const u8)
                     .add(IndexTupleSize(itup) - core::mem::size_of::<ItemPointerData>())
@@ -415,7 +415,7 @@ pub fn BTreeTupleGetHeapTID(itup: &IndexTupleData) -> Option<ItemPointer> {
     } else if BTreeTupleIsPosting(itup) {
         Some(BTreeTupleGetPosting(itup))
     } else {
-        Some(&itup.t_tid as *const ItemPointerData as ItemPointer)
+        Some(&itup.tid as *const ItemPointerData as ItemPointer)
     }
 }
 
@@ -426,7 +426,7 @@ pub fn BTreeTupleGetMaxHeapTID(itup: &IndexTupleData) -> ItemPointer {
         let nposting = BTreeTupleGetNPosting(itup);
         return BTreeTupleGetPostingN(itup, nposting as i32 - 1);
     }
-    &itup.t_tid as *const ItemPointerData as ItemPointer
+    &itup.tid as *const ItemPointerData as ItemPointer
 }
 
 /// Commute a btree strategy number by subtraction.
@@ -450,9 +450,9 @@ pub const BT_WRITE: i32 = BUFFER_LOCK_EXCLUSIVE;
 /// BTStackData -- stack of pivot-tuple locations recorded while descending the
 /// tree, walked back up to insert into parents after a split. In-memory.
 pub struct BTStackData {
-    pub bts_blkno: BlockNumber,
-    pub bts_offset: OffsetNumber,
-    pub bts_parent: Option<Box<BTStackData>>,
+    pub blkno: BlockNumber,
+    pub offset: OffsetNumber,
+    pub parent: Option<Box<BTStackData>>,
 }
 pub type BTStack = Option<Box<BTStackData>>;
 
@@ -664,7 +664,7 @@ pub struct BTReadPageState {
 }
 
 bitflags! {
-    /// Private sk_flags bits in preprocessed scan keys (bits 16-31 are available;
+    /// Private flags bits in preprocessed scan keys (bits 16-31 are available;
     /// see skey.h). Clean single-bit set (GOOD). The DESC/NULLS_FIRST bits are
     /// remapped from pg_index's indoption[] into the uppermost byte.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -673,10 +673,10 @@ bitflags! {
         const REQBKWD = 0x00020000; // required to continue backward scan
         const SKIP    = 0x00040000; // skip array on column without input =
         // SK_BT_SKIP-only flags (set/unset by array advancement)
-        const MINVAL  = 0x00080000; // invalid sk_argument, use low_compare
-        const MAXVAL  = 0x00100000; // invalid sk_argument, use high_compare
-        const NEXT    = 0x00200000; // positions the scan > sk_argument
-        const PRIOR   = 0x00400000; // positions the scan < sk_argument
+        const MINVAL  = 0x00080000; // invalid argument, use low_compare
+        const MAXVAL  = 0x00100000; // invalid argument, use high_compare
+        const NEXT    = 0x00200000; // positions the scan > argument
+        const PRIOR   = 0x00400000; // positions the scan < argument
     }
 }
 

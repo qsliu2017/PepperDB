@@ -52,22 +52,22 @@ pub struct AggClauseCosts {
 }
 
 /// Types of "upper" (post-scan/join) relations dealt with during planning.
-/// `UPPERREL_FINAL` must be last; it sizes arrays.
+/// `FINAL` must be last; it sizes arrays.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpperRelationKind {
-    UPPERREL_SETOP,
-    UPPERREL_PARTIAL_GROUP_AGG,
-    UPPERREL_GROUP_AGG,
-    UPPERREL_WINDOW,
-    UPPERREL_PARTIAL_DISTINCT,
-    UPPERREL_DISTINCT,
-    UPPERREL_ORDERED,
-    UPPERREL_FINAL,
+    SETOP,
+    PARTIAL_GROUP_AGG,
+    GROUP_AGG,
+    WINDOW,
+    PARTIAL_DISTINCT,
+    DISTINCT,
+    ORDERED,
+    FINAL,
 }
 
-/// Number of upper-rel slots (UPPERREL_FINAL + 1).
-pub const UPPERREL_COUNT: usize = UpperRelationKind::UPPERREL_FINAL as usize + 1;
+/// Number of upper-rel slots (FINAL + 1).
+pub const UPPERREL_COUNT: usize = UpperRelationKind::FINAL as usize + 1;
 
 /// Global information for an entire planner invocation.
 #[derive(Debug, Clone, PartialEq)]
@@ -102,7 +102,7 @@ pub struct PlannerGlobal {
     pub relation_oids: Vec<Oid>,
     /// Other dependencies, as PlanInvalItems.
     pub inval_items: Vec<Box<Node>>,
-    /// Type OIDs for PARAM_EXEC Params.
+    /// Type OIDs for EXEC Params.
     pub param_exec_types: Vec<Oid>,
     /// Highest PlaceHolderVar ID assigned.
     pub last_phid: usize,
@@ -246,7 +246,7 @@ pub struct PlannerInfo {
     pub has_alternative_subplans: bool,
     pub placeholders_frozen: bool,
     pub has_recursion: bool,
-    /// RT index for the RTE_GROUP RTE, or 0 if none.
+    /// RT index for the GROUP RTE, or 0 if none.
     pub group_rtindex: i32,
     /// AggInfo structs.
     pub agginfos: Vec<Box<AggInfo>>,
@@ -256,7 +256,7 @@ pub struct PlannerInfo {
     pub num_ordered_aggs: i32,
     pub has_non_partial_aggs: bool,
     pub has_non_serial_aggs: bool,
-    /// PARAM_EXEC ID for the work table (only if has_recursion).
+    /// EXEC ID for the work table (only if has_recursion).
     pub wt_param_id: i32,
     /// A path for non-recursive term.
     pub non_recursive_path: Option<Box<Path>>,
@@ -308,12 +308,12 @@ bitflags! {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelOptKind {
-    RELOPT_BASEREL,
-    RELOPT_JOINREL,
-    RELOPT_OTHER_MEMBER_REL,
-    RELOPT_OTHER_JOINREL,
-    RELOPT_UPPER_REL,
-    RELOPT_OTHER_UPPER_REL,
+    BASEREL,
+    JOINREL,
+    OTHER_MEMBER_REL,
+    OTHER_JOINREL,
+    UPPER_REL,
+    OTHER_UPPER_REL,
 }
 
 /// Per-relation planner information.
@@ -509,7 +509,7 @@ pub struct ForeignKeyOptInfo {
     pub conpfeqop: [Oid; INDEX_MAX_KEYS],
     /// # of FK cols matched by ECs.
     pub nmatched_ec: i32,
-    /// # of these ECs that are ec_has_const.
+    /// # of these ECs that are has_const.
     pub nconst_ec: i32,
     /// # of FK cols matched by non-EC rinfos.
     pub nmatched_rcols: i32,
@@ -551,48 +551,48 @@ pub struct JoinDomain {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EquivalenceClass {
     /// Btree operator family OIDs.
-    pub ec_opfamilies: Vec<Oid>,
+    pub opfamilies: Vec<Oid>,
     /// Collation, if datatypes are collatable.
-    pub ec_collation: Oid,
-    /// # elements in ec_childmembers.
-    pub ec_childmembers_size: i32,
+    pub collation: Oid,
+    /// # elements in childmembers.
+    pub childmembers_size: i32,
     /// EquivalenceMembers.
-    pub ec_members: Vec<Box<EquivalenceMember>>,
+    pub members: Vec<Box<EquivalenceMember>>,
     /// Per-relid arrays of child members.
-    pub ec_childmembers: Vec<Vec<Box<EquivalenceMember>>>,
+    pub childmembers: Vec<Vec<Box<EquivalenceMember>>>,
     /// Generating RestrictInfos.
-    pub ec_sources: Vec<Box<RestrictInfo>>,
+    pub sources: Vec<Box<RestrictInfo>>,
     /// Derived RestrictInfos.
-    pub ec_derives_list: Vec<Box<RestrictInfo>>,
+    pub derives_list: Vec<Box<RestrictInfo>>,
     // derives_hash *ec_derives_hash -> optional HashMap, dropped from skeleton.
-    /// All relids in ec_members (except child members).
-    pub ec_relids: Option<Relids>,
-    pub ec_has_const: bool,
-    pub ec_has_volatile: bool,
-    pub ec_broken: bool,
+    /// All relids in members (except child members).
+    pub relids: Option<Relids>,
+    pub has_const: bool,
+    pub has_volatile: bool,
+    pub broken: bool,
     /// Originating sortclause label, or 0.
-    pub ec_sortref: usize,
-    pub ec_min_security: usize,
-    pub ec_max_security: usize,
+    pub sortref: usize,
+    pub min_security: usize,
+    pub max_security: usize,
     /// Set if merged into another EC.
-    pub ec_merged: Option<Box<EquivalenceClass>>,
+    pub merged: Option<Box<EquivalenceClass>>,
 }
 
 /// One member expression of an EquivalenceClass.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EquivalenceMember {
     /// The expression represented.
-    pub em_expr: Box<Node>,
-    /// All relids appearing in em_expr.
-    pub em_relids: Option<Relids>,
-    pub em_is_const: bool,
-    pub em_is_child: bool,
+    pub expr: Box<Node>,
+    /// All relids appearing in expr.
+    pub relids: Option<Relids>,
+    pub is_const: bool,
+    pub is_child: bool,
     /// The "nominal type" used by the opfamily.
-    pub em_datatype: Oid,
+    pub datatype: Oid,
     /// Join domain containing the source clause.
-    pub em_jdomain: Box<JoinDomain>,
-    /// If em_is_child, link to the top-parent EM.
-    pub em_parent: Option<Box<EquivalenceMember>>,
+    pub jdomain: Box<JoinDomain>,
+    /// If is_child, link to the top-parent EM.
+    pub parent: Option<Box<EquivalenceMember>>,
 }
 
 /// Iterator over an EquivalenceClass's parent and selected child members.
@@ -600,7 +600,7 @@ pub struct EquivalenceMember {
 pub struct EquivalenceMemberIterator {
     /// The EquivalenceClass to iterate over.
     pub ec: Box<EquivalenceClass>,
-    /// Current relid position; -1 while looping ec_members, -2 at end.
+    /// Current relid position; -1 while looping members, -2 at end.
     pub current_relid: i32,
     /// Relids of child relations of interest.
     pub child_relids: Option<Relids>,
@@ -614,13 +614,13 @@ pub struct EquivalenceMemberIterator {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PathKey {
     /// The value that is ordered.
-    pub pk_eclass: Box<EquivalenceClass>,
+    pub eclass: Box<EquivalenceClass>,
     /// Index opfamily defining the ordering.
-    pub pk_opfamily: Oid,
+    pub opfamily: Oid,
     /// Sort direction (COMPARE_LT for ASC, COMPARE_GT for DESC).
-    pub pk_cmptype: CompareType,
+    pub cmptype: CompareType,
     /// Do NULLs come before normal values?
-    pub pk_nulls_first: bool,
+    pub nulls_first: bool,
 }
 
 /// An order of group-by clauses with the corresponding pathkeys.
@@ -634,9 +634,9 @@ pub struct GroupByOrdering {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VolatileFunctionStatus {
-    VOLATILITY_UNKNOWN = 0,
-    VOLATILITY_VOLATILE,
-    VOLATILITY_NOVOLATILE,
+    UNKNOWN = 0,
+    VOLATILE,
+    NOVOLATILE,
 }
 
 /// The targetlist (output columns) a Path will compute.
@@ -658,13 +658,13 @@ pub struct PathTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParamPathInfo {
     /// Rels supplying parameters used by path.
-    pub ppi_req_outer: Option<Relids>,
+    pub req_outer: Option<Relids>,
     /// Estimated number of result tuples.
-    pub ppi_rows: Cardinality,
+    pub rows: Cardinality,
     /// Join clauses available from outer rels.
-    pub ppi_clauses: Vec<Box<RestrictInfo>>,
+    pub clauses: Vec<Box<RestrictInfo>>,
     /// Set of rinfo_serial for enforced quals.
-    pub ppi_serials: Option<Bitmapset>,
+    pub serials: Option<Bitmapset>,
 }
 
 /// Base Path: sequential-scan and simple plan types use it as-is; other path
@@ -895,9 +895,9 @@ pub struct MemoizePath {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UniquePathMethod {
-    UNIQUE_PATH_NOOP,
-    UNIQUE_PATH_HASH,
-    UNIQUE_PATH_SORT,
+    NOOP,
+    HASH,
+    SORT,
 }
 
 /// Elimination of distinct rows from a subpath's output.
@@ -1156,7 +1156,7 @@ pub struct ModifyTablePath {
     /// Path producing source data.
     pub subpath: Box<Path>,
     pub operation: CmdType,
-    /// Do we set the command tag/es_processed?
+    /// Do we set the command tag/processed?
     pub can_set_tag: bool,
     /// Parent RT index for EXPLAIN.
     pub nominal_relation: usize,
@@ -1231,7 +1231,7 @@ pub struct RestrictInfo {
     pub parent_ec: Option<Box<EquivalenceClass>>,
     /// Eval cost of clause; -1 if not yet set.
     pub eval_cost: QualCost,
-    /// Selectivity for JOIN_INNER semantics; -1 if not yet set.
+    /// Selectivity for INNER semantics; -1 if not yet set.
     pub norm_selec: Selectivity,
     /// Selectivity for outer join semantics; -1 if not yet set.
     pub outer_selec: Selectivity,
@@ -1308,9 +1308,9 @@ pub struct SpecialJoinInfo {
     pub commute_below_r: Option<Relids>,
     /// Joinclause is strict for some LHS rel.
     pub lhs_strict: bool,
-    /// True if semi_operators are all btree (JOIN_SEMI only).
+    /// True if semi_operators are all btree (SEMI only).
     pub semi_can_btree: bool,
-    /// True if semi_operators are all hash (JOIN_SEMI only).
+    /// True if semi_operators are all hash (SEMI only).
     pub semi_can_hash: bool,
     /// OIDs of equality join operators.
     pub semi_operators: Vec<Oid>,
@@ -1402,7 +1402,7 @@ pub struct MinMaxAggInfo {
 pub struct PlannerParamItem {
     /// The Var, PlaceHolderVar, or Aggref.
     pub item: Box<Node>,
-    /// Its assigned PARAM_EXEC slot number.
+    /// Its assigned EXEC slot number.
     pub param_id: i32,
 }
 
@@ -1440,9 +1440,9 @@ bitflags! {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PartitionwiseAggregateType {
-    PARTITIONWISE_AGGREGATE_NONE,
-    PARTITIONWISE_AGGREGATE_FULL,
-    PARTITIONWISE_AGGREGATE_PARTIAL,
+    NONE,
+    FULL,
+    PARTIAL,
 }
 
 /// Extra info passed to subroutines of create_grouping_paths. Not a Node.

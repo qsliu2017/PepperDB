@@ -24,40 +24,40 @@ use crate::postgres_ext::Oid;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuerySource {
     /// original parsetree (explicit query)
-    QSRC_ORIGINAL,
+    ORIGINAL,
     /// added by parse analysis (now unused)
-    QSRC_PARSER,
+    PARSER,
     /// added by unconditional INSTEAD rule
-    QSRC_INSTEAD_RULE,
+    INSTEAD_RULE,
     /// added by conditional INSTEAD rule
-    QSRC_QUAL_INSTEAD_RULE,
+    QUAL_INSTEAD_RULE,
     /// added by non-INSTEAD rule
-    QSRC_NON_INSTEAD_RULE,
+    NON_INSTEAD_RULE,
 }
 
 /// Sort ordering options for ORDER BY and CREATE INDEX.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortByDir {
-    SORTBY_DEFAULT,
-    SORTBY_ASC,
-    SORTBY_DESC,
+    DEFAULT,
+    ASC,
+    DESC,
     /// not allowed in CREATE INDEX ...
-    SORTBY_USING,
+    USING,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortByNulls {
-    SORTBY_NULLS_DEFAULT,
-    SORTBY_NULLS_FIRST,
-    SORTBY_NULLS_LAST,
+    DEFAULT,
+    FIRST,
+    LAST,
 }
 
 /// Options for [ ALL | DISTINCT ].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetQuantifier {
-    SET_QUANTIFIER_DEFAULT,
-    SET_QUANTIFIER_ALL,
-    SET_QUANTIFIER_DISTINCT,
+    DEFAULT,
+    ALL,
+    DISTINCT,
 }
 
 bitflags! {
@@ -108,7 +108,7 @@ pub struct Query {
     pub querySource: QuerySource,
     pub queryId: i64,
     pub canSetTag: bool,
-    /// non-null if commandType == CMD_UTILITY
+    /// non-null if commandType == UTILITY
     pub utilityStmt: Option<Box<Node>>,
     pub resultRelation: i32,
     pub hasAggs: bool,
@@ -190,33 +190,33 @@ pub struct ParamRef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum A_Expr_Kind {
     /// normal operator
-    AEXPR_OP,
+    OP,
     /// scalar op ANY (array)
-    AEXPR_OP_ANY,
+    OP_ANY,
     /// scalar op ALL (array)
-    AEXPR_OP_ALL,
+    OP_ALL,
     /// IS DISTINCT FROM
-    AEXPR_DISTINCT,
+    DISTINCT,
     /// IS NOT DISTINCT FROM
-    AEXPR_NOT_DISTINCT,
+    NOT_DISTINCT,
     /// NULLIF
-    AEXPR_NULLIF,
+    NULLIF,
     /// [NOT] IN
-    AEXPR_IN,
+    IN,
     /// [NOT] LIKE
-    AEXPR_LIKE,
+    LIKE,
     /// [NOT] ILIKE
-    AEXPR_ILIKE,
+    ILIKE,
     /// [NOT] SIMILAR
-    AEXPR_SIMILAR,
+    SIMILAR,
     /// BETWEEN
-    AEXPR_BETWEEN,
+    BETWEEN,
     /// NOT BETWEEN
-    AEXPR_NOT_BETWEEN,
+    NOT_BETWEEN,
     /// BETWEEN SYMMETRIC
-    AEXPR_BETWEEN_SYM,
+    BETWEEN_SYM,
     /// NOT BETWEEN SYMMETRIC
-    AEXPR_NOT_BETWEEN_SYM,
+    NOT_BETWEEN_SYM,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -273,18 +273,18 @@ pub struct CollateClause {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoleSpecType {
     /// role name is stored as a C string
-    ROLESPEC_CSTRING,
-    ROLESPEC_CURRENT_ROLE,
-    ROLESPEC_CURRENT_USER,
-    ROLESPEC_SESSION_USER,
+    CSTRING,
+    CURRENT_ROLE,
+    CURRENT_USER,
+    SESSION_USER,
     /// role name is "public"
-    ROLESPEC_PUBLIC,
+    PUBLIC,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RoleSpec {
     pub roletype: RoleSpecType,
-    /// filled only for ROLESPEC_CSTRING
+    /// filled only for CSTRING
     pub rolename: Option<String>,
     pub location: ParseLoc,
 }
@@ -537,10 +537,10 @@ pub struct IndexElem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefElemAction {
     /// no action given
-    DEFELEM_UNSPEC,
-    DEFELEM_SET,
-    DEFELEM_ADD,
-    DEFELEM_DROP,
+    UNSPEC,
+    SET,
+    ADD,
+    DROP,
 }
 
 /// DefElem - a generic "name = value" option definition.
@@ -585,9 +585,9 @@ pub struct PartitionElem {
 #[repr(i8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PartitionStrategy {
-    PARTITION_STRATEGY_LIST = b'l' as i8,
-    PARTITION_STRATEGY_RANGE = b'r' as i8,
-    PARTITION_STRATEGY_HASH = b'h' as i8,
+    LIST = b'l' as i8,
+    RANGE = b'r' as i8,
+    HASH = b'h' as i8,
 }
 
 /// PartitionSpec - parse-time representation of a partition key specification.
@@ -621,11 +621,11 @@ pub struct PartitionBoundSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PartitionRangeDatumKind {
     /// less than any other value
-    PARTITION_RANGE_DATUM_MINVALUE = -1,
+    MINVALUE = -1,
     /// a specific (bounded) value
-    PARTITION_RANGE_DATUM_VALUE = 0,
+    VALUE = 0,
     /// greater than any other value
-    PARTITION_RANGE_DATUM_MAXVALUE = 1,
+    MAXVALUE = 1,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -647,25 +647,25 @@ pub struct PartitionCmd {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RTEKind {
     /// ordinary relation reference
-    RTE_RELATION,
+    RELATION,
     /// subquery in FROM
-    RTE_SUBQUERY,
+    SUBQUERY,
     /// join
-    RTE_JOIN,
+    JOIN,
     /// function in FROM
-    RTE_FUNCTION,
+    FUNCTION,
     /// TableFunc(.., column list)
-    RTE_TABLEFUNC,
+    TABLEFUNC,
     /// VALUES (<exprlist>), ...
-    RTE_VALUES,
+    VALUES,
     /// common table expr (WITH list element)
-    RTE_CTE,
+    CTE,
     /// tuplestore, e.g. for AFTER triggers
-    RTE_NAMEDTUPLESTORE,
+    NAMEDTUPLESTORE,
     /// empty FROM clause; added by the planner
-    RTE_RESULT,
+    RESULT,
     /// the grouping step
-    RTE_GROUP,
+    GROUP,
 }
 
 /// RangeTblEntry - a range table is a List of these.
@@ -742,12 +742,12 @@ pub struct TableSampleClause {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WCOKind {
     /// WCO on an auto-updatable view
-    WCO_VIEW_CHECK,
-    WCO_RLS_INSERT_CHECK,
-    WCO_RLS_UPDATE_CHECK,
-    WCO_RLS_CONFLICT_CHECK,
-    WCO_RLS_MERGE_UPDATE_CHECK,
-    WCO_RLS_MERGE_DELETE_CHECK,
+    VIEW_CHECK,
+    RLS_INSERT_CHECK,
+    RLS_UPDATE_CHECK,
+    RLS_CONFLICT_CHECK,
+    RLS_MERGE_UPDATE_CHECK,
+    RLS_MERGE_DELETE_CHECK,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -773,11 +773,11 @@ pub struct SortGroupClause {
 /// GroupingSetKind - CUBE, ROLLUP and GROUPING SETS clauses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupingSetKind {
-    GROUPING_SET_EMPTY,
-    GROUPING_SET_SIMPLE,
-    GROUPING_SET_ROLLUP,
-    GROUPING_SET_CUBE,
-    GROUPING_SET_SETS,
+    EMPTY,
+    SIMPLE,
+    ROLLUP,
+    CUBE,
+    SETS,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -908,9 +908,9 @@ pub struct MergeWhenClause {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReturningOptionKind {
     /// specify alias for OLD in RETURNING
-    RETURNING_OPTION_OLD,
+    OLD,
     /// specify alias for NEW in RETURNING
-    RETURNING_OPTION_NEW,
+    NEW,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -952,9 +952,9 @@ pub struct JsonArgument {
 /// JsonQuotes - [KEEP|OMIT] QUOTES clause for JSON_QUERY().
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonQuotes {
-    JS_QUOTES_UNSPEC,
-    JS_QUOTES_KEEP,
-    JS_QUOTES_OMIT,
+    UNSPEC,
+    KEEP,
+    OMIT,
 }
 
 /// JsonFuncExpr - untransformed SQL/JSON query function expressions.
@@ -998,11 +998,11 @@ pub struct JsonTable {
 /// JsonTableColumnType - enumeration of JSON_TABLE column types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonTableColumnType {
-    JTC_FOR_ORDINALITY,
-    JTC_REGULAR,
-    JTC_EXISTS,
-    JTC_FORMATTED,
-    JTC_NESTED,
+    FOR_ORDINALITY,
+    REGULAR,
+    EXISTS,
+    FORMATTED,
+    NESTED,
 }
 
 /// JsonTableColumn - untransformed representation of JSON_TABLE column.
@@ -1165,10 +1165,10 @@ pub struct MergeStmt {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetOperation {
-    SETOP_NONE = 0,
-    SETOP_UNION,
-    SETOP_INTERSECT,
-    SETOP_EXCEPT,
+    NONE = 0,
+    UNION,
+    INTERSECT,
+    EXCEPT,
 }
 
 /// SelectStmt - Select Statement.
@@ -1228,59 +1228,59 @@ pub struct PLAssignStmt {
 /// ObjectType - the kind of object a command acts on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectType {
-    OBJECT_ACCESS_METHOD,
-    OBJECT_AGGREGATE,
-    OBJECT_AMOP,
-    OBJECT_AMPROC,
+    ACCESS_METHOD,
+    AGGREGATE,
+    AMOP,
+    AMPROC,
     /// type's attribute, when distinct from column
-    OBJECT_ATTRIBUTE,
-    OBJECT_CAST,
-    OBJECT_COLUMN,
-    OBJECT_COLLATION,
-    OBJECT_CONVERSION,
-    OBJECT_DATABASE,
-    OBJECT_DEFAULT,
-    OBJECT_DEFACL,
-    OBJECT_DOMAIN,
-    OBJECT_DOMCONSTRAINT,
-    OBJECT_EVENT_TRIGGER,
-    OBJECT_EXTENSION,
-    OBJECT_FDW,
-    OBJECT_FOREIGN_SERVER,
-    OBJECT_FOREIGN_TABLE,
-    OBJECT_FUNCTION,
-    OBJECT_INDEX,
-    OBJECT_LANGUAGE,
-    OBJECT_LARGEOBJECT,
-    OBJECT_MATVIEW,
-    OBJECT_OPCLASS,
-    OBJECT_OPERATOR,
-    OBJECT_OPFAMILY,
-    OBJECT_PARAMETER_ACL,
-    OBJECT_POLICY,
-    OBJECT_PROCEDURE,
-    OBJECT_PUBLICATION,
-    OBJECT_PUBLICATION_NAMESPACE,
-    OBJECT_PUBLICATION_REL,
-    OBJECT_ROLE,
-    OBJECT_ROUTINE,
-    OBJECT_RULE,
-    OBJECT_SCHEMA,
-    OBJECT_SEQUENCE,
-    OBJECT_SUBSCRIPTION,
-    OBJECT_STATISTIC_EXT,
-    OBJECT_TABCONSTRAINT,
-    OBJECT_TABLE,
-    OBJECT_TABLESPACE,
-    OBJECT_TRANSFORM,
-    OBJECT_TRIGGER,
-    OBJECT_TSCONFIGURATION,
-    OBJECT_TSDICTIONARY,
-    OBJECT_TSPARSER,
-    OBJECT_TSTEMPLATE,
-    OBJECT_TYPE,
-    OBJECT_USER_MAPPING,
-    OBJECT_VIEW,
+    ATTRIBUTE,
+    CAST,
+    COLUMN,
+    COLLATION,
+    CONVERSION,
+    DATABASE,
+    DEFAULT,
+    DEFACL,
+    DOMAIN,
+    DOMCONSTRAINT,
+    EVENT_TRIGGER,
+    EXTENSION,
+    FDW,
+    FOREIGN_SERVER,
+    FOREIGN_TABLE,
+    FUNCTION,
+    INDEX,
+    LANGUAGE,
+    LARGEOBJECT,
+    MATVIEW,
+    OPCLASS,
+    OPERATOR,
+    OPFAMILY,
+    PARAMETER_ACL,
+    POLICY,
+    PROCEDURE,
+    PUBLICATION,
+    PUBLICATION_NAMESPACE,
+    PUBLICATION_REL,
+    ROLE,
+    ROUTINE,
+    RULE,
+    SCHEMA,
+    SEQUENCE,
+    SUBSCRIPTION,
+    STATISTIC_EXT,
+    TABCONSTRAINT,
+    TABLE,
+    TABLESPACE,
+    TRANSFORM,
+    TRIGGER,
+    TSCONFIGURATION,
+    TSDICTIONARY,
+    TSPARSER,
+    TSTEMPLATE,
+    TYPE,
+    USER_MAPPING,
+    VIEW,
 }
 
 /// CreateSchemaStmt - Create Schema Statement.
@@ -1296,9 +1296,9 @@ pub struct CreateSchemaStmt {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DropBehavior {
     /// drop fails if any dependent objects
-    DROP_RESTRICT,
+    RESTRICT,
     /// remove dependent objects too
-    DROP_CASCADE,
+    CASCADE,
 }
 
 /// AlterTableStmt - Alter Table.
@@ -1313,72 +1313,72 @@ pub struct AlterTableStmt {
 /// AlterTableType - subcommand kind for ALTER TABLE.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlterTableType {
-    AT_AddColumn,
-    AT_AddColumnToView,
-    AT_ColumnDefault,
-    AT_CookedColumnDefault,
-    AT_DropNotNull,
-    AT_SetNotNull,
-    AT_SetExpression,
-    AT_DropExpression,
-    AT_SetStatistics,
-    AT_SetOptions,
-    AT_ResetOptions,
-    AT_SetStorage,
-    AT_SetCompression,
-    AT_DropColumn,
-    AT_AddIndex,
-    AT_ReAddIndex,
-    AT_AddConstraint,
-    AT_ReAddConstraint,
-    AT_ReAddDomainConstraint,
-    AT_AlterConstraint,
-    AT_ValidateConstraint,
-    AT_AddIndexConstraint,
-    AT_DropConstraint,
-    AT_ReAddComment,
-    AT_AlterColumnType,
-    AT_AlterColumnGenericOptions,
-    AT_ChangeOwner,
-    AT_ClusterOn,
-    AT_DropCluster,
-    AT_SetLogged,
-    AT_SetUnLogged,
-    AT_DropOids,
-    AT_SetAccessMethod,
-    AT_SetTableSpace,
-    AT_SetRelOptions,
-    AT_ResetRelOptions,
-    AT_ReplaceRelOptions,
-    AT_EnableTrig,
-    AT_EnableAlwaysTrig,
-    AT_EnableReplicaTrig,
-    AT_DisableTrig,
-    AT_EnableTrigAll,
-    AT_DisableTrigAll,
-    AT_EnableTrigUser,
-    AT_DisableTrigUser,
-    AT_EnableRule,
-    AT_EnableAlwaysRule,
-    AT_EnableReplicaRule,
-    AT_DisableRule,
-    AT_AddInherit,
-    AT_DropInherit,
-    AT_AddOf,
-    AT_DropOf,
-    AT_ReplicaIdentity,
-    AT_EnableRowSecurity,
-    AT_DisableRowSecurity,
-    AT_ForceRowSecurity,
-    AT_NoForceRowSecurity,
-    AT_GenericOptions,
-    AT_AttachPartition,
-    AT_DetachPartition,
-    AT_DetachPartitionFinalize,
-    AT_AddIdentity,
-    AT_SetIdentity,
-    AT_DropIdentity,
-    AT_ReAddStatistics,
+    AddColumn,
+    AddColumnToView,
+    ColumnDefault,
+    CookedColumnDefault,
+    DropNotNull,
+    SetNotNull,
+    SetExpression,
+    DropExpression,
+    SetStatistics,
+    SetOptions,
+    ResetOptions,
+    SetStorage,
+    SetCompression,
+    DropColumn,
+    AddIndex,
+    ReAddIndex,
+    AddConstraint,
+    ReAddConstraint,
+    ReAddDomainConstraint,
+    AlterConstraint,
+    ValidateConstraint,
+    AddIndexConstraint,
+    DropConstraint,
+    ReAddComment,
+    AlterColumnType,
+    AlterColumnGenericOptions,
+    ChangeOwner,
+    ClusterOn,
+    DropCluster,
+    SetLogged,
+    SetUnLogged,
+    DropOids,
+    SetAccessMethod,
+    SetTableSpace,
+    SetRelOptions,
+    ResetRelOptions,
+    ReplaceRelOptions,
+    EnableTrig,
+    EnableAlwaysTrig,
+    EnableReplicaTrig,
+    DisableTrig,
+    EnableTrigAll,
+    DisableTrigAll,
+    EnableTrigUser,
+    DisableTrigUser,
+    EnableRule,
+    EnableAlwaysRule,
+    EnableReplicaRule,
+    DisableRule,
+    AddInherit,
+    DropInherit,
+    AddOf,
+    DropOf,
+    ReplicaIdentity,
+    EnableRowSecurity,
+    DisableRowSecurity,
+    ForceRowSecurity,
+    NoForceRowSecurity,
+    GenericOptions,
+    AttachPartition,
+    DetachPartition,
+    DetachPartitionFinalize,
+    AddIdentity,
+    SetIdentity,
+    DropIdentity,
+    ReAddStatistics,
 }
 
 /// AlterTableCmd - one subcommand of an ALTER TABLE.
@@ -1394,7 +1394,7 @@ pub struct AlterTableCmd {
     pub recurse: bool,
 }
 
-/// ATAlterConstraint - ad-hoc node for AT_AlterConstraint.
+/// ATAlterConstraint - ad-hoc node for AlterConstraint.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ATAlterConstraint {
     pub conname: Option<String>,
@@ -1407,7 +1407,7 @@ pub struct ATAlterConstraint {
     pub noinherit: bool,
 }
 
-/// ReplicaIdentityStmt - ad-hoc node for AT_ReplicaIdentity.
+/// ReplicaIdentityStmt - ad-hoc node for ReplicaIdentity.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReplicaIdentityStmt {
     pub identity_type: i8,
@@ -1436,11 +1436,11 @@ pub struct AlterDomainStmt {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrantTargetType {
     /// grant on specific named object(s)
-    ACL_TARGET_OBJECT,
+    OBJECT,
     /// grant on all objects in given schema(s)
-    ACL_TARGET_ALL_IN_SCHEMA,
+    ALL_IN_SCHEMA,
     /// ALTER DEFAULT PRIVILEGES
-    ACL_TARGET_DEFAULTS,
+    DEFAULTS,
 }
 
 /// GrantStmt - Grant|Revoke Statement.
@@ -1508,17 +1508,17 @@ pub struct CopyStmt {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VariableSetKind {
     /// SET var = value
-    VAR_SET_VALUE,
+    SET_VALUE,
     /// SET var TO DEFAULT
-    VAR_SET_DEFAULT,
+    SET_DEFAULT,
     /// SET var FROM CURRENT
-    VAR_SET_CURRENT,
+    SET_CURRENT,
     /// special case for SET TRANSACTION ...
-    VAR_SET_MULTI,
+    SET_MULTI,
     /// RESET var
-    VAR_RESET,
+    RESET,
     /// RESET ALL
-    VAR_RESET_ALL,
+    RESET_ALL,
 }
 
 /// VariableSetStmt - SET Statement (includes RESET).
@@ -1560,23 +1560,23 @@ pub struct CreateStmt {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstrType {
     /// not standard SQL, but expected
-    CONSTR_NULL,
-    CONSTR_NOTNULL,
-    CONSTR_DEFAULT,
-    CONSTR_IDENTITY,
-    CONSTR_GENERATED,
-    CONSTR_CHECK,
-    CONSTR_PRIMARY,
-    CONSTR_UNIQUE,
-    CONSTR_EXCLUSION,
-    CONSTR_FOREIGN,
+    NULL,
+    NOTNULL,
+    DEFAULT,
+    IDENTITY,
+    GENERATED,
+    CHECK,
+    PRIMARY,
+    UNIQUE,
+    EXCLUSION,
+    FOREIGN,
     /// attributes for previous constraint node
-    CONSTR_ATTR_DEFERRABLE,
-    CONSTR_ATTR_NOT_DEFERRABLE,
-    CONSTR_ATTR_DEFERRED,
-    CONSTR_ATTR_IMMEDIATE,
-    CONSTR_ATTR_ENFORCED,
-    CONSTR_ATTR_NOT_ENFORCED,
+    ATTR_DEFERRABLE,
+    ATTR_NOT_DEFERRABLE,
+    ATTR_DEFERRED,
+    ATTR_IMMEDIATE,
+    ATTR_ENFORCED,
+    ATTR_NOT_ENFORCED,
 }
 
 /// Foreign key action codes (stored in pg_constraint).
@@ -1764,11 +1764,11 @@ pub struct DropUserMappingStmt {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportForeignSchemaType {
     /// all relations wanted
-    FDW_IMPORT_SCHEMA_ALL,
+    ALL,
     /// include only listed tables
-    FDW_IMPORT_SCHEMA_LIMIT_TO,
+    LIMIT_TO,
     /// exclude listed tables
-    FDW_IMPORT_SCHEMA_EXCEPT,
+    EXCEPT,
 }
 
 /// ImportForeignSchemaStmt.
@@ -1864,9 +1864,9 @@ pub struct CreatePLangStmt {
 /// RoleStmtType - ROLE/USER/GROUP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoleStmtType {
-    ROLESTMT_ROLE,
-    ROLESTMT_USER,
-    ROLESTMT_GROUP,
+    ROLE,
+    USER,
+    GROUP,
 }
 
 /// CreateRoleStmt.
@@ -2065,10 +2065,10 @@ pub struct ClosePortalStmt {
 /// FetchDirection - Fetch Statement direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchDirection {
-    FETCH_FORWARD,
-    FETCH_BACKWARD,
-    FETCH_ABSOLUTE,
-    FETCH_RELATIVE,
+    FORWARD,
+    BACKWARD,
+    ABSOLUTE,
+    RELATIVE,
 }
 
 /// C: `FETCH_ALL` = `LONG_MAX`.
@@ -2157,12 +2157,12 @@ pub struct CreateFunctionStmt {
 #[repr(i8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FunctionParameterMode {
-    FUNC_PARAM_IN = b'i' as i8,
-    FUNC_PARAM_OUT = b'o' as i8,
-    FUNC_PARAM_INOUT = b'b' as i8,
-    FUNC_PARAM_VARIADIC = b'v' as i8,
-    FUNC_PARAM_TABLE = b't' as i8,
-    FUNC_PARAM_DEFAULT = b'd' as i8,
+    IN = b'i' as i8,
+    OUT = b'o' as i8,
+    INOUT = b'b' as i8,
+    VARIADIC = b'v' as i8,
+    TABLE = b't' as i8,
+    DEFAULT = b'd' as i8,
 }
 
 /// FunctionParameter.
@@ -2302,17 +2302,17 @@ pub struct UnlistenStmt {
 /// TransactionStmtKind - {Begin|Commit|Rollback} Transaction Statement kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransactionStmtKind {
-    TRANS_STMT_BEGIN,
+    BEGIN,
     /// semantically identical to BEGIN
-    TRANS_STMT_START,
-    TRANS_STMT_COMMIT,
-    TRANS_STMT_ROLLBACK,
-    TRANS_STMT_SAVEPOINT,
-    TRANS_STMT_RELEASE,
-    TRANS_STMT_ROLLBACK_TO,
-    TRANS_STMT_PREPARE,
-    TRANS_STMT_COMMIT_PREPARED,
-    TRANS_STMT_ROLLBACK_PREPARED,
+    START,
+    COMMIT,
+    ROLLBACK,
+    SAVEPOINT,
+    RELEASE,
+    ROLLBACK_TO,
+    PREPARE,
+    COMMIT_PREPARED,
+    ROLLBACK_PREPARED,
 }
 
 /// TransactionStmt.
@@ -2480,10 +2480,10 @@ pub struct CheckPointStmt {}
 /// DiscardMode - Discard Statement target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiscardMode {
-    DISCARD_ALL,
-    DISCARD_PLANS,
-    DISCARD_SEQUENCES,
-    DISCARD_TEMP,
+    ALL,
+    PLANS,
+    SEQUENCES,
+    TEMP,
 }
 
 /// DiscardStmt - Discard Statement.
@@ -2510,11 +2510,11 @@ pub struct ConstraintsSetStmt {
 /// ReindexObjectType - REINDEX target kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReindexObjectType {
-    REINDEX_OBJECT_INDEX,
-    REINDEX_OBJECT_TABLE,
-    REINDEX_OBJECT_SCHEMA,
-    REINDEX_OBJECT_SYSTEM,
-    REINDEX_OBJECT_DATABASE,
+    INDEX,
+    TABLE,
+    SCHEMA,
+    SYSTEM,
+    DATABASE,
 }
 
 /// ReindexStmt - REINDEX Statement.
@@ -2604,11 +2604,11 @@ pub struct AlterTSDictionaryStmt {
 /// AlterTSConfigType - TS Configuration stmt kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlterTSConfigType {
-    ALTER_TSCONFIG_ADD_MAPPING,
-    ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN,
-    ALTER_TSCONFIG_REPLACE_DICT,
-    ALTER_TSCONFIG_REPLACE_DICT_FOR_TOKEN,
-    ALTER_TSCONFIG_DROP_MAPPING,
+    ADD_MAPPING,
+    ALTER_MAPPING_FOR_TOKEN,
+    REPLACE_DICT,
+    REPLACE_DICT_FOR_TOKEN,
+    DROP_MAPPING,
 }
 
 /// AlterTSConfigurationStmt.
@@ -2635,13 +2635,13 @@ pub struct PublicationTable {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublicationObjSpecType {
     /// A table
-    PUBLICATIONOBJ_TABLE,
+    TABLE,
     /// All tables in schema
-    PUBLICATIONOBJ_TABLES_IN_SCHEMA,
+    TABLES_IN_SCHEMA,
     /// All tables in first search_path element
-    PUBLICATIONOBJ_TABLES_IN_CUR_SCHEMA,
+    TABLES_IN_CUR_SCHEMA,
     /// Continuation of previous type
-    PUBLICATIONOBJ_CONTINUATION,
+    CONTINUATION,
 }
 
 /// PublicationObjSpec.
@@ -2666,11 +2666,11 @@ pub struct CreatePublicationStmt {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlterPublicationAction {
     /// add objects to publication
-    AP_AddObjects,
+    AddObjects,
     /// remove objects from publication
-    AP_DropObjects,
+    DropObjects,
     /// set list of objects
-    AP_SetObjects,
+    SetObjects,
 }
 
 /// AlterPublicationStmt.
@@ -2695,14 +2695,14 @@ pub struct CreateSubscriptionStmt {
 /// AlterSubscriptionType.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlterSubscriptionType {
-    ALTER_SUBSCRIPTION_OPTIONS,
-    ALTER_SUBSCRIPTION_CONNECTION,
-    ALTER_SUBSCRIPTION_SET_PUBLICATION,
-    ALTER_SUBSCRIPTION_ADD_PUBLICATION,
-    ALTER_SUBSCRIPTION_DROP_PUBLICATION,
-    ALTER_SUBSCRIPTION_REFRESH,
-    ALTER_SUBSCRIPTION_ENABLED,
-    ALTER_SUBSCRIPTION_SKIP,
+    OPTIONS,
+    CONNECTION,
+    SET_PUBLICATION,
+    ADD_PUBLICATION,
+    DROP_PUBLICATION,
+    REFRESH,
+    ENABLED,
+    SKIP,
 }
 
 /// AlterSubscriptionStmt.

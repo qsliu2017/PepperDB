@@ -66,198 +66,198 @@ pub struct ExprEvalRowtypeCache {
 #[repr(u32)]
 pub enum ExprEvalOp {
     /// entire expression has been evaluated, return value
-    EEOP_DONE_RETURN,
+    DONE_RETURN,
     /// entire expression has been evaluated, no return value
-    EEOP_DONE_NO_RETURN,
+    DONE_NO_RETURN,
 
     /// apply slot_getsomeattrs on corresponding tuple slot
-    EEOP_INNER_FETCHSOME,
-    EEOP_OUTER_FETCHSOME,
-    EEOP_SCAN_FETCHSOME,
-    EEOP_OLD_FETCHSOME,
-    EEOP_NEW_FETCHSOME,
+    INNER_FETCHSOME,
+    OUTER_FETCHSOME,
+    SCAN_FETCHSOME,
+    OLD_FETCHSOME,
+    NEW_FETCHSOME,
 
     /// compute non-system Var value
-    EEOP_INNER_VAR,
-    EEOP_OUTER_VAR,
-    EEOP_SCAN_VAR,
-    EEOP_OLD_VAR,
-    EEOP_NEW_VAR,
+    INNER_VAR,
+    OUTER_VAR,
+    SCAN_VAR,
+    OLD_VAR,
+    NEW_VAR,
 
     /// compute system Var value
-    EEOP_INNER_SYSVAR,
-    EEOP_OUTER_SYSVAR,
-    EEOP_SCAN_SYSVAR,
-    EEOP_OLD_SYSVAR,
-    EEOP_NEW_SYSVAR,
+    INNER_SYSVAR,
+    OUTER_SYSVAR,
+    SCAN_SYSVAR,
+    OLD_SYSVAR,
+    NEW_SYSVAR,
 
     /// compute wholerow Var
-    EEOP_WHOLEROW,
+    WHOLEROW,
 
     /// compute non-system Var value, assign into resultslot
-    EEOP_ASSIGN_INNER_VAR,
-    EEOP_ASSIGN_OUTER_VAR,
-    EEOP_ASSIGN_SCAN_VAR,
-    EEOP_ASSIGN_OLD_VAR,
-    EEOP_ASSIGN_NEW_VAR,
+    ASSIGN_INNER_VAR,
+    ASSIGN_OUTER_VAR,
+    ASSIGN_SCAN_VAR,
+    ASSIGN_OLD_VAR,
+    ASSIGN_NEW_VAR,
 
     /// assign resvalue/resnull to a column of resultslot
-    EEOP_ASSIGN_TMP,
+    ASSIGN_TMP,
     /// ditto, applying MakeExpandedObjectReadOnly()
-    EEOP_ASSIGN_TMP_MAKE_RO,
+    ASSIGN_TMP_MAKE_RO,
 
     /// evaluate Const value
-    EEOP_CONST,
+    CONST,
 
     /// evaluate function call (including OpExprs etc)
-    EEOP_FUNCEXPR,
-    EEOP_FUNCEXPR_STRICT,
-    EEOP_FUNCEXPR_STRICT_1,
-    EEOP_FUNCEXPR_STRICT_2,
-    EEOP_FUNCEXPR_FUSAGE,
-    EEOP_FUNCEXPR_STRICT_FUSAGE,
+    FUNCEXPR,
+    FUNCEXPR_STRICT,
+    FUNCEXPR_STRICT_1,
+    FUNCEXPR_STRICT_2,
+    FUNCEXPR_FUSAGE,
+    FUNCEXPR_STRICT_FUSAGE,
 
     /// boolean AND, one step per subexpression
-    EEOP_BOOL_AND_STEP_FIRST,
-    EEOP_BOOL_AND_STEP,
-    EEOP_BOOL_AND_STEP_LAST,
+    BOOL_AND_STEP_FIRST,
+    BOOL_AND_STEP,
+    BOOL_AND_STEP_LAST,
 
     /// boolean OR
-    EEOP_BOOL_OR_STEP_FIRST,
-    EEOP_BOOL_OR_STEP,
-    EEOP_BOOL_OR_STEP_LAST,
+    BOOL_OR_STEP_FIRST,
+    BOOL_OR_STEP,
+    BOOL_OR_STEP_LAST,
 
     /// boolean NOT
-    EEOP_BOOL_NOT_STEP,
+    BOOL_NOT_STEP,
 
     /// simplified BOOL_AND_STEP for ExecQual()
-    EEOP_QUAL,
+    QUAL,
 
     /// unconditional jump
-    EEOP_JUMP,
+    JUMP,
 
     /// conditional jumps based on current result value
-    EEOP_JUMP_IF_NULL,
-    EEOP_JUMP_IF_NOT_NULL,
-    EEOP_JUMP_IF_NOT_TRUE,
+    JUMP_IF_NULL,
+    JUMP_IF_NOT_NULL,
+    JUMP_IF_NOT_TRUE,
 
     /// NULL tests for scalar values
-    EEOP_NULLTEST_ISNULL,
-    EEOP_NULLTEST_ISNOTNULL,
+    NULLTEST_ISNULL,
+    NULLTEST_ISNOTNULL,
 
     /// NULL tests for row values
-    EEOP_NULLTEST_ROWISNULL,
-    EEOP_NULLTEST_ROWISNOTNULL,
+    NULLTEST_ROWISNULL,
+    NULLTEST_ROWISNOTNULL,
 
     /// BooleanTest expression
-    EEOP_BOOLTEST_IS_TRUE,
-    EEOP_BOOLTEST_IS_NOT_TRUE,
-    EEOP_BOOLTEST_IS_FALSE,
-    EEOP_BOOLTEST_IS_NOT_FALSE,
+    BOOLTEST_IS_TRUE,
+    BOOLTEST_IS_NOT_TRUE,
+    BOOLTEST_IS_FALSE,
+    BOOLTEST_IS_NOT_FALSE,
 
-    /// PARAM_EXEC/EXTERN parameters
-    EEOP_PARAM_EXEC,
-    EEOP_PARAM_EXTERN,
-    EEOP_PARAM_CALLBACK,
-    /// set PARAM_EXEC value
-    EEOP_PARAM_SET,
+    /// EXEC/EXTERN parameters
+    PARAM_EXEC,
+    PARAM_EXTERN,
+    PARAM_CALLBACK,
+    /// set EXEC value
+    PARAM_SET,
 
     /// return CaseTestExpr value
-    EEOP_CASE_TESTVAL,
-    EEOP_CASE_TESTVAL_EXT,
+    CASE_TESTVAL,
+    CASE_TESTVAL_EXT,
 
     /// apply MakeExpandedObjectReadOnly() to target value
-    EEOP_MAKE_READONLY,
+    MAKE_READONLY,
 
     /// assorted special-purpose expression types
-    EEOP_IOCOERCE,
-    EEOP_IOCOERCE_SAFE,
-    EEOP_DISTINCT,
-    EEOP_NOT_DISTINCT,
-    EEOP_NULLIF,
-    EEOP_SQLVALUEFUNCTION,
-    EEOP_CURRENTOFEXPR,
-    EEOP_NEXTVALUEEXPR,
-    EEOP_RETURNINGEXPR,
-    EEOP_ARRAYEXPR,
-    EEOP_ARRAYCOERCE,
-    EEOP_ROW,
+    IOCOERCE,
+    IOCOERCE_SAFE,
+    DISTINCT,
+    NOT_DISTINCT,
+    NULLIF,
+    SQLVALUEFUNCTION,
+    CURRENTOFEXPR,
+    NEXTVALUEEXPR,
+    RETURNINGEXPR,
+    ARRAYEXPR,
+    ARRAYCOERCE,
+    ROW,
 
     /// compare two elements of two compared ROW() expressions
-    EEOP_ROWCOMPARE_STEP,
+    ROWCOMPARE_STEP,
     /// boolean value from previous ROWCOMPARE_STEP operations
-    EEOP_ROWCOMPARE_FINAL,
+    ROWCOMPARE_FINAL,
 
     /// GREATEST() or LEAST()
-    EEOP_MINMAX,
+    MINMAX,
 
     /// FieldSelect expression
-    EEOP_FIELDSELECT,
+    FIELDSELECT,
     /// deform tuple before evaluating FieldStore fields
-    EEOP_FIELDSTORE_DEFORM,
+    FIELDSTORE_DEFORM,
     /// form the new tuple for a FieldStore expression
-    EEOP_FIELDSTORE_FORM,
+    FIELDSTORE_FORM,
 
     /// process container subscripts
-    EEOP_SBSREF_SUBSCRIPTS,
+    SBSREF_SUBSCRIPTS,
     /// compute old container element/slice (SubscriptingRef assignment)
-    EEOP_SBSREF_OLD,
+    SBSREF_OLD,
     /// compute new value for SubscriptingRef assignment
-    EEOP_SBSREF_ASSIGN,
+    SBSREF_ASSIGN,
     /// compute element/slice for SubscriptingRef fetch
-    EEOP_SBSREF_FETCH,
+    SBSREF_FETCH,
 
     /// CoerceToDomainValue
-    EEOP_DOMAIN_TESTVAL,
-    EEOP_DOMAIN_TESTVAL_EXT,
+    DOMAIN_TESTVAL,
+    DOMAIN_TESTVAL_EXT,
     /// domain NOT NULL constraint
-    EEOP_DOMAIN_NOTNULL,
+    DOMAIN_NOTNULL,
     /// single domain CHECK constraint
-    EEOP_DOMAIN_CHECK,
+    DOMAIN_CHECK,
 
     /// hashing
-    EEOP_HASHDATUM_SET_INITVAL,
-    EEOP_HASHDATUM_FIRST,
-    EEOP_HASHDATUM_FIRST_STRICT,
-    EEOP_HASHDATUM_NEXT32,
-    EEOP_HASHDATUM_NEXT32_STRICT,
+    HASHDATUM_SET_INITVAL,
+    HASHDATUM_FIRST,
+    HASHDATUM_FIRST_STRICT,
+    HASHDATUM_NEXT32,
+    HASHDATUM_NEXT32_STRICT,
 
     /// assorted special-purpose expression types
-    EEOP_CONVERT_ROWTYPE,
-    EEOP_SCALARARRAYOP,
-    EEOP_HASHED_SCALARARRAYOP,
-    EEOP_XMLEXPR,
-    EEOP_JSON_CONSTRUCTOR,
-    EEOP_IS_JSON,
-    EEOP_JSONEXPR_PATH,
-    EEOP_JSONEXPR_COERCION,
-    EEOP_JSONEXPR_COERCION_FINISH,
-    EEOP_AGGREF,
-    EEOP_GROUPING_FUNC,
-    EEOP_WINDOW_FUNC,
-    EEOP_MERGE_SUPPORT_FUNC,
-    EEOP_SUBPLAN,
+    CONVERT_ROWTYPE,
+    SCALARARRAYOP,
+    HASHED_SCALARARRAYOP,
+    XMLEXPR,
+    JSON_CONSTRUCTOR,
+    IS_JSON,
+    JSONEXPR_PATH,
+    JSONEXPR_COERCION,
+    JSONEXPR_COERCION_FINISH,
+    AGGREF,
+    GROUPING_FUNC,
+    WINDOW_FUNC,
+    MERGE_SUPPORT_FUNC,
+    SUBPLAN,
 
     /// aggregation related nodes
-    EEOP_AGG_STRICT_DESERIALIZE,
-    EEOP_AGG_DESERIALIZE,
-    EEOP_AGG_STRICT_INPUT_CHECK_ARGS,
-    EEOP_AGG_STRICT_INPUT_CHECK_ARGS_1,
-    EEOP_AGG_STRICT_INPUT_CHECK_NULLS,
-    EEOP_AGG_PLAIN_PERGROUP_NULLCHECK,
-    EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYVAL,
-    EEOP_AGG_PLAIN_TRANS_STRICT_BYVAL,
-    EEOP_AGG_PLAIN_TRANS_BYVAL,
-    EEOP_AGG_PLAIN_TRANS_INIT_STRICT_BYREF,
-    EEOP_AGG_PLAIN_TRANS_STRICT_BYREF,
-    EEOP_AGG_PLAIN_TRANS_BYREF,
-    EEOP_AGG_PRESORTED_DISTINCT_SINGLE,
-    EEOP_AGG_PRESORTED_DISTINCT_MULTI,
-    EEOP_AGG_ORDERED_TRANS_DATUM,
-    EEOP_AGG_ORDERED_TRANS_TUPLE,
+    AGG_STRICT_DESERIALIZE,
+    AGG_DESERIALIZE,
+    AGG_STRICT_INPUT_CHECK_ARGS,
+    AGG_STRICT_INPUT_CHECK_ARGS_1,
+    AGG_STRICT_INPUT_CHECK_NULLS,
+    AGG_PLAIN_PERGROUP_NULLCHECK,
+    AGG_PLAIN_TRANS_INIT_STRICT_BYVAL,
+    AGG_PLAIN_TRANS_STRICT_BYVAL,
+    AGG_PLAIN_TRANS_BYVAL,
+    AGG_PLAIN_TRANS_INIT_STRICT_BYREF,
+    AGG_PLAIN_TRANS_STRICT_BYREF,
+    AGG_PLAIN_TRANS_BYREF,
+    AGG_PRESORTED_DISTINCT_SINGLE,
+    AGG_PRESORTED_DISTINCT_MULTI,
+    AGG_ORDERED_TRANS_DATUM,
+    AGG_ORDERED_TRANS_TUPLE,
 
     /// non-existent operation, used e.g. to check array lengths
-    EEOP_LAST,
+    LAST,
 }
 
 // ---------------------------------------------------------------------------
@@ -285,99 +285,99 @@ pub enum ExprEvalStepData {
     Fetch(FetchData),
     /// for EEOP_INNER/OUTER/SCAN/OLD/NEW_[SYS]VAR
     Var(VarData),
-    /// for EEOP_WHOLEROW
+    /// for WHOLEROW
     Wholerow(WholerowData),
     /// for EEOP_ASSIGN_*_VAR
     AssignVar(AssignVarData),
-    /// for EEOP_ASSIGN_TMP[_MAKE_RO]
+    /// for ASSIGN_TMP[_MAKE_RO]
     AssignTmp(AssignTmpData),
-    /// for EEOP_RETURNINGEXPR
+    /// for RETURNINGEXPR
     ReturningExpr(ReturningExprData),
-    /// for EEOP_CONST
+    /// for CONST
     Constval(ConstvalData),
     /// for EEOP_FUNCEXPR_* / NULLIF / DISTINCT
     Func(FuncData),
     /// for EEOP_BOOL_*_STEP
     Boolexpr(BoolexprData),
-    /// for EEOP_QUAL
+    /// for QUAL
     Qualexpr(QualexprData),
-    /// for EEOP_JUMP[_CONDITION]
+    /// for JUMP[_CONDITION]
     Jump(JumpData),
     /// for EEOP_NULLTEST_ROWIS[NOT]NULL
     NulltestRow(NulltestRowData),
-    /// for EEOP_PARAM_EXEC/EXTERN and EEOP_PARAM_SET
+    /// for PARAM_EXEC/EXTERN and PARAM_SET
     Param(ParamData),
-    /// for EEOP_PARAM_CALLBACK
+    /// for PARAM_CALLBACK
     Cparam(CparamData),
-    /// for EEOP_CASE_TESTVAL/DOMAIN_TESTVAL
+    /// for CASE_TESTVAL/DOMAIN_TESTVAL
     Casetest(CasetestData),
-    /// for EEOP_MAKE_READONLY
+    /// for MAKE_READONLY
     MakeReadonly(MakeReadonlyData),
-    /// for EEOP_IOCOERCE
+    /// for IOCOERCE
     Iocoerce(IocoerceData),
-    /// for EEOP_SQLVALUEFUNCTION
+    /// for SQLVALUEFUNCTION
     Sqlvaluefunction(SqlvaluefunctionData),
-    /// for EEOP_NEXTVALUEEXPR
+    /// for NEXTVALUEEXPR
     Nextvalueexpr(NextvalueexprData),
-    /// for EEOP_ARRAYEXPR
+    /// for ARRAYEXPR
     Arrayexpr(ArrayexprData),
-    /// for EEOP_ARRAYCOERCE
+    /// for ARRAYCOERCE
     Arraycoerce(ArraycoerceData),
-    /// for EEOP_ROW
+    /// for ROW
     Row(RowData),
-    /// for EEOP_ROWCOMPARE_STEP
+    /// for ROWCOMPARE_STEP
     RowcompareStep(RowcompareStepData),
-    /// for EEOP_ROWCOMPARE_FINAL
+    /// for ROWCOMPARE_FINAL
     RowcompareFinal(RowcompareFinalData),
-    /// for EEOP_MINMAX
+    /// for MINMAX
     Minmax(MinmaxData),
-    /// for EEOP_FIELDSELECT
+    /// for FIELDSELECT
     Fieldselect(FieldselectData),
-    /// for EEOP_FIELDSTORE_DEFORM / FIELDSTORE_FORM
+    /// for FIELDSTORE_DEFORM / FIELDSTORE_FORM
     Fieldstore(FieldstoreData),
-    /// for EEOP_SBSREF_SUBSCRIPTS
+    /// for SBSREF_SUBSCRIPTS
     SbsrefSubscript(SbsrefSubscriptData),
-    /// for EEOP_SBSREF_OLD / ASSIGN / FETCH
+    /// for SBSREF_OLD / ASSIGN / FETCH
     Sbsref(SbsrefData),
-    /// for EEOP_DOMAIN_NOTNULL / DOMAIN_CHECK
+    /// for DOMAIN_NOTNULL / DOMAIN_CHECK
     Domaincheck(DomaincheckData),
-    /// for EEOP_HASHDATUM_SET_INITVAL
+    /// for HASHDATUM_SET_INITVAL
     HashdatumInitvalue(HashdatumInitvalueData),
     /// for EEOP_HASHDATUM_(FIRST|NEXT32)[_STRICT]
     Hashdatum(HashdatumData),
-    /// for EEOP_CONVERT_ROWTYPE
+    /// for CONVERT_ROWTYPE
     ConvertRowtype(ConvertRowtypeData),
-    /// for EEOP_SCALARARRAYOP
+    /// for SCALARARRAYOP
     Scalararrayop(ScalararrayopData),
-    /// for EEOP_HASHED_SCALARARRAYOP
+    /// for HASHED_SCALARARRAYOP
     Hashedscalararrayop(HashedscalararrayopData),
-    /// for EEOP_XMLEXPR
+    /// for XMLEXPR
     Xmlexpr(XmlexprData),
-    /// for EEOP_JSON_CONSTRUCTOR
+    /// for JSON_CONSTRUCTOR
     JsonConstructor(JsonConstructorData),
-    /// for EEOP_AGGREF
+    /// for AGGREF
     Aggref(AggrefData),
-    /// for EEOP_GROUPING_FUNC
+    /// for GROUPING_FUNC
     GroupingFunc(GroupingFuncData),
-    /// for EEOP_WINDOW_FUNC
+    /// for WINDOW_FUNC
     WindowFunc(WindowFuncData),
-    /// for EEOP_SUBPLAN
+    /// for SUBPLAN
     Subplan(SubplanData),
     /// for EEOP_AGG_*DESERIALIZE
     AggDeserialize(AggDeserializeData),
     /// for EEOP_AGG_STRICT_INPUT_CHECK_{NULLS,ARGS}
     AggStrictInputCheck(AggStrictInputCheckData),
-    /// for EEOP_AGG_PLAIN_PERGROUP_NULLCHECK
+    /// for AGG_PLAIN_PERGROUP_NULLCHECK
     AggPlainPergroupNullcheck(AggPlainPergroupNullcheckData),
     /// for EEOP_AGG_PRESORTED_DISTINCT_{SINGLE,MULTI}
     AggPresortedDistinctcheck(AggPresortedDistinctcheckData),
     /// for EEOP_AGG_PLAIN_TRANS_* and EEOP_AGG_ORDERED_TRANS_*
     AggTrans(AggTransData),
-    /// for EEOP_IS_JSON
+    /// for IS_JSON
     IsJson(IsJsonData),
-    /// for EEOP_JSONEXPR_PATH
+    /// for JSONEXPR_PATH
     Jsonexpr(JsonexprData),
-    /// for EEOP_JSONEXPR_COERCION
+    /// for JSONEXPR_COERCION
     JsonexprCoercion(JsonexprCoercionData),
 }
 
@@ -687,7 +687,7 @@ pub struct JsonexprCoercionData {
     pub targettype: Oid,
     pub targettypmod: i32,
     pub omit_quotes: bool,
-    /// exists_* only relevant for JSON_EXISTS_OP.
+    /// exists_* only relevant for EXISTS_OP.
     pub exists_coerce: bool,
     pub exists_cast_to_int: bool,
     pub exists_check_domain: bool,
@@ -721,13 +721,13 @@ pub struct SubscriptingRefState {
 
 /// Execution step methods used for SubscriptingRef.
 pub struct SubscriptExecSteps {
-    pub sbs_check_subscripts: Option<ExecEvalBoolSubroutine>,
-    pub sbs_fetch: Option<ExecEvalSubroutine>,
-    pub sbs_assign: Option<ExecEvalSubroutine>,
-    pub sbs_fetch_old: Option<ExecEvalSubroutine>,
+    pub check_subscripts: Option<ExecEvalBoolSubroutine>,
+    pub fetch: Option<ExecEvalSubroutine>,
+    pub assign: Option<ExecEvalSubroutine>,
+    pub fetch_old: Option<ExecEvalSubroutine>,
 }
 
-/// EEOP_JSON_CONSTRUCTOR state, too big to inline.
+/// JSON_CONSTRUCTOR state, too big to inline.
 pub struct JsonConstructorExprState {
     pub constructor: Option<Box<JsonConstructorExpr>>,
     pub arg_values: Vec<Datum>,

@@ -11,31 +11,31 @@ use crate::storage::off::{OffsetNumber, INVALID_OFFSET_NUMBER};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(C, packed(2))]
 pub struct ItemPointerData {
-    pub ip_blkid: BlockIdData,
-    pub ip_posid: OffsetNumber,
+    pub blkid: BlockIdData,
+    pub posid: OffsetNumber,
 }
 
 const _: () = assert!(core::mem::size_of::<ItemPointerData>() == 6);
 const _: () = assert!(core::mem::align_of::<ItemPointerData>() == 2);
-const _: () = assert!(core::mem::offset_of!(ItemPointerData, ip_blkid) == 0);
-const _: () = assert!(core::mem::offset_of!(ItemPointerData, ip_posid) == 4);
+const _: () = assert!(core::mem::offset_of!(ItemPointerData, blkid) == 0);
+const _: () = assert!(core::mem::offset_of!(ItemPointerData, posid) == 4);
 
-/// Speculative-insertion token marker: ip_posid set to this, token in ip_blkid.
+/// Speculative-insertion token marker: posid set to this, token in blkid.
 pub const SpecTokenOffsetNumber: OffsetNumber = 0xfffe;
 
-/// t_ctid of an old tuple version moved to another partition by UPDATE.
+/// ctid of an old tuple version moved to another partition by UPDATE.
 pub const MovedPartitionsOffsetNumber: OffsetNumber = 0xfffd;
 pub const MovedPartitionsBlockNumber: BlockNumber = INVALID_BLOCK_NUMBER;
 
 impl ItemPointerData {
     /// True iff the disk item pointer is valid (non-zero offset).
     pub const fn is_valid(&self) -> bool {
-        self.ip_posid != 0
+        self.posid != 0
     }
 
     /// Block number, without validity check.
     pub const fn block_number_no_check(&self) -> BlockNumber {
-        self.ip_blkid.block_number()
+        self.blkid.block_number()
     }
 
     /// Block number; the C version asserts validity first.
@@ -46,35 +46,35 @@ impl ItemPointerData {
 
     /// Offset number, without validity check.
     pub const fn offset_number_no_check(&self) -> OffsetNumber {
-        self.ip_posid
+        self.posid
     }
 
     /// Offset number; the C version asserts validity first.
     pub const fn offset_number(&self) -> OffsetNumber {
         debug_assert!(self.is_valid());
-        self.ip_posid
+        self.posid
     }
 
     /// Set to the specified block and offset.
     pub const fn set(&mut self, block_number: BlockNumber, off_num: OffsetNumber) {
-        self.ip_blkid.set(block_number);
-        self.ip_posid = off_num;
+        self.blkid.set(block_number);
+        self.posid = off_num;
     }
 
     /// Set the block number only.
     pub const fn set_block_number(&mut self, block_number: BlockNumber) {
-        self.ip_blkid.set(block_number);
+        self.blkid.set(block_number);
     }
 
     /// Set the offset number only.
     pub const fn set_offset_number(&mut self, offset_number: OffsetNumber) {
-        self.ip_posid = offset_number;
+        self.posid = offset_number;
     }
 
     /// Set to invalid.
     pub const fn set_invalid(&mut self) {
-        self.ip_blkid.set(INVALID_BLOCK_NUMBER);
-        self.ip_posid = INVALID_OFFSET_NUMBER;
+        self.blkid.set(INVALID_BLOCK_NUMBER);
+        self.posid = INVALID_OFFSET_NUMBER;
     }
 
     /// True iff the tuple has moved to another partition.

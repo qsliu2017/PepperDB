@@ -2,7 +2,7 @@
 
 use crate::postgres_ext::Oid;
 
-// XLOG record types (xl_info high bits) -- raw opcode consts.
+// XLOG record types (info high bits) -- raw opcode consts.
 pub const XLOG_DBASE_CREATE_FILE_COPY: u8 = 0x00;
 pub const XLOG_DBASE_CREATE_WAL_LOG: u8 = 0x10;
 pub const XLOG_DBASE_DROP: u8 = 0x20;

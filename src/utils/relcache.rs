@@ -81,11 +81,11 @@ pub fn RelationGetIndexAttOptions(_relation: Relation, _copy: bool) -> Vec<Optio
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexAttrBitmapKind {
-    INDEX_ATTR_BITMAP_KEY,
-    INDEX_ATTR_BITMAP_PRIMARY_KEY,
-    INDEX_ATTR_BITMAP_IDENTITY_KEY,
-    INDEX_ATTR_BITMAP_HOT_BLOCKING,
-    INDEX_ATTR_BITMAP_SUMMARIZED,
+    KEY,
+    PRIMARY_KEY,
+    IDENTITY_KEY,
+    HOT_BLOCKING,
+    SUMMARIZED,
 }
 
 pub fn RelationGetIndexAttrBitmap(

@@ -20,7 +20,7 @@ bitflags! {
     }
 }
 
-/// Static per-parameter data for PARAM_EXTERN parameters.
+/// Static per-parameter data for EXTERN parameters.
 pub struct ParamExternData {
     pub value: Datum,         // parameter value
     pub isnull: bool,         // is it NULL?
@@ -61,7 +61,7 @@ pub struct ParamListInfoData {
 /// C: `typedef struct ParamListInfoData *ParamListInfo;`
 pub type ParamListInfo = Box<ParamListInfoData>; // TODO(ptr)
 
-/// Executor internal parameters (PARAM_EXEC).
+/// Executor internal parameters (EXEC).
 pub struct ParamExecData {
     pub exec_plan: usize, // should be "SubPlanState *" (void *) TODO(ptr)
     pub value: Datum,

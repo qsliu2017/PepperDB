@@ -31,16 +31,16 @@ pub type TriggerEvent = u32;
 // NOTE(node): C has a leading `NodeTag type`; dropped (Node enum is its own
 // discriminant, matching execnodes/plannodes). Reported, NOT added to nodes.rs.
 pub struct TriggerData {
-    pub tg_event: TriggerEvent,
-    pub tg_relation: Relation,
-    pub tg_trigtuple: HeapTuple,
-    pub tg_newtuple: HeapTuple,
-    pub tg_trigger: *mut Trigger, // TODO(ptr)
-    pub tg_trigslot: *mut TupleTableSlot, // TODO(ptr)
-    pub tg_newslot: *mut TupleTableSlot,  // TODO(ptr)
-    pub tg_oldtable: *mut Tuplestorestate, // TODO(ptr)
-    pub tg_newtable: *mut Tuplestorestate, // TODO(ptr)
-    pub tg_updatedcols: *const Bitmapset, // TODO(ptr)
+    pub event: TriggerEvent,
+    pub relation: Relation,
+    pub trigtuple: HeapTuple,
+    pub newtuple: HeapTuple,
+    pub trigger: *mut Trigger, // TODO(ptr)
+    pub trigslot: *mut TupleTableSlot, // TODO(ptr)
+    pub newslot: *mut TupleTableSlot,  // TODO(ptr)
+    pub oldtable: *mut Tuplestorestate, // TODO(ptr)
+    pub newtable: *mut Tuplestorestate, // TODO(ptr)
+    pub updatedcols: *const Bitmapset, // TODO(ptr)
 }
 
 /// Opaque; private state defined in trigger.c, not ported.
@@ -48,14 +48,14 @@ pub struct AfterTriggersTableData;
 
 /// State for capturing old/new tuples into transition tables for one operation.
 pub struct TransitionCaptureState {
-    pub tcs_delete_old_table: bool,
-    pub tcs_update_old_table: bool,
-    pub tcs_update_new_table: bool,
-    pub tcs_insert_new_table: bool,
-    pub tcs_original_insert_tuple: *mut TupleTableSlot, // TODO(ptr)
-    pub tcs_insert_private: *mut AfterTriggersTableData, // TODO(ptr)
-    pub tcs_update_private: *mut AfterTriggersTableData, // TODO(ptr)
-    pub tcs_delete_private: *mut AfterTriggersTableData, // TODO(ptr)
+    pub delete_old_table: bool,
+    pub update_old_table: bool,
+    pub update_new_table: bool,
+    pub insert_new_table: bool,
+    pub original_insert_tuple: *mut TupleTableSlot, // TODO(ptr)
+    pub insert_private: *mut AfterTriggersTableData, // TODO(ptr)
+    pub update_private: *mut AfterTriggersTableData, // TODO(ptr)
+    pub delete_private: *mut AfterTriggersTableData, // TODO(ptr)
 }
 
 // TriggerEvent bit flags. POOR per bitflags-port appendix 3.6: bits 0-1 are an

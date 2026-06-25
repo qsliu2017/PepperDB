@@ -8,7 +8,7 @@ use crate::postgres_ext::Oid;
 /// grantee names turned into Oids, the privilege list an AclMode bitmask.
 ///
 /// `all_privs`/`privileges` are object-level only; column-level privileges are
-/// in `col_privs` (untransformed AccessPriv nodes; valid only for OBJECT_TABLE).
+/// in `col_privs` (untransformed AccessPriv nodes; valid only for TABLE).
 #[derive(Debug, Clone, PartialEq)]
 pub struct InternalGrant {
     pub is_grant: bool,

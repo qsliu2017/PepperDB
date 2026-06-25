@@ -39,20 +39,20 @@ pub const fn isbset(uv: &[u32], sn: usize) -> bool {
 /// `char_classes` - known character classes.
 #[repr(i32)]
 pub enum char_classes {
-    CC_ALNUM,
-    CC_ALPHA,
-    CC_ASCII,
-    CC_BLANK,
-    CC_CNTRL,
-    CC_DIGIT,
-    CC_GRAPH,
-    CC_LOWER,
-    CC_PRINT,
-    CC_PUNCT,
-    CC_SPACE,
-    CC_UPPER,
-    CC_XDIGIT,
-    CC_WORD,
+    ALNUM,
+    ALPHA,
+    ASCII,
+    BLANK,
+    CNTRL,
+    DIGIT,
+    GRAPH,
+    LOWER,
+    PRINT,
+    PUNCT,
+    SPACE,
+    UPPER,
+    XDIGIT,
+    WORD,
 }
 
 pub const NUM_CCLASSES: usize = 14;
@@ -295,8 +295,8 @@ pub struct subre {
 }
 
 /// `fns` - table of fn pointers for generic regex manipulation. A regex_t's
-/// re_fns points to one of these (a routine struct; left as fn pointers per
-/// routine-struct.md, since this vtable is reached opaquely via re_fns).
+/// fns points to one of these (a routine struct; left as fn pointers per
+/// routine-struct.md, since this vtable is reached opaquely via fns).
 pub struct fns {
     pub free: Option<unsafe extern "C" fn(*mut regex_t)>,
     pub stack_too_deep: Option<unsafe extern "C" fn() -> i32>,
@@ -308,8 +308,8 @@ pub const GUTSMAGIC: i32 = 0xfed9;
 pub struct guts {
     pub magic: i32,
     pub cflags: i32, // copy of compile flags
-    pub info: i64,   // copy of re_info (C long)
-    pub nsub: usize, // copy of re_nsub
+    pub info: i64,   // copy of info (C long)
+    pub nsub: usize, // copy of nsub
     pub tree: *mut subre, // TODO(ptr)
     pub search: cnfa, // for fast preliminary search
     pub ntree: i32, // number of subre's, plus one

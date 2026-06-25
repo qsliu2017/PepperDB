@@ -45,10 +45,10 @@ pub type TableScanDesc = *mut TableScanDescData; // TODO(ptr)
 
 /// Shared state for a parallel table scan.
 pub struct ParallelTableScanDescData {
-    pub phs_locator: RelFileLocator, // physical relation to scan
-    pub phs_syncscan: bool,          // report location to syncscan logic?
-    pub phs_snapshot_any: bool,      // SnapshotAny, not phs_snapshot_data?
-    pub phs_snapshot_off: usize,     // data for snapshot
+    pub locator: RelFileLocator, // physical relation to scan
+    pub syncscan: bool,          // report location to syncscan logic?
+    pub snapshot_any: bool,      // SnapshotAny, not phs_snapshot_data?
+    pub snapshot_off: usize,     // data for snapshot
 }
 pub type ParallelTableScanDesc = *mut ParallelTableScanDescData; // TODO(ptr)
 
@@ -65,9 +65,9 @@ pub type ParallelBlockTableScanDesc = *mut ParallelBlockTableScanDescData; // TO
 
 /// Per-backend state for parallel table scan, block-oriented storage.
 pub struct ParallelBlockTableScanWorkerData {
-    pub phsw_nallocated: u64,       // current # of blocks into the scan
-    pub phsw_chunk_remaining: u32,  // # blocks left in this chunk
-    pub phsw_chunk_size: u32,       // # blocks to allocate per I/O chunk
+    pub nallocated: u64,       // current # of blocks into the scan
+    pub chunk_remaining: u32,  // # blocks left in this chunk
+    pub chunk_size: u32,       // # blocks to allocate per I/O chunk
 }
 pub type ParallelBlockTableScanWorker = *mut ParallelBlockTableScanWorkerData; // TODO(ptr)
 
@@ -124,10 +124,10 @@ pub type IndexScanDesc = *mut IndexScanDescData; // TODO(ptr)
 /// Generic structure for parallel index scans. `ps_snapshot_data` is an on-disk
 /// FAM tail in C; kept as a header here (snapshot data follows in the buffer).
 pub struct ParallelIndexScanDescData {
-    pub ps_locator: RelFileLocator,      // physical table relation to scan
-    pub ps_indexlocator: RelFileLocator, // physical index relation to scan
-    pub ps_offset_ins: usize,            // offset to SharedIndexScanInstrumentation
-    pub ps_offset_am: usize,             // offset to am-specific structure
+    pub locator: RelFileLocator,      // physical table relation to scan
+    pub indexlocator: RelFileLocator, // physical index relation to scan
+    pub offset_ins: usize,            // offset to SharedIndexScanInstrumentation
+    pub offset_am: usize,             // offset to am-specific structure
     // char ps_snapshot_data[FLEXIBLE_ARRAY_MEMBER]
 }
 pub type ParallelIndexScanDesc = *mut ParallelIndexScanDescData; // TODO(ptr)

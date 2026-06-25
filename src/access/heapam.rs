@@ -79,37 +79,37 @@ pub struct BulkInsertStateData {
 
 /// Descriptor for heap table scans (in-memory). Embeds the AM-independent base.
 pub struct HeapScanDescData {
-    pub rs_base: TableScanDescData, // AM independent part of the descriptor
+    pub base: TableScanDescData, // AM independent part of the descriptor
 
     // state set up at initscan time
-    pub rs_nblocks: BlockNumber,   // total number of blocks in rel
-    pub rs_startblock: BlockNumber, // block # to start at
-    pub rs_numblocks: BlockNumber, // max # of blocks to scan; usually InvalidBlockNumber
+    pub nblocks: BlockNumber,   // total number of blocks in rel
+    pub startblock: BlockNumber, // block # to start at
+    pub numblocks: BlockNumber, // max # of blocks to scan; usually InvalidBlockNumber
 
     // scan current state
-    pub rs_inited: bool,           // false = scan not init'd yet
-    pub rs_coffset: OffsetNumber,  // current offset # in non-page-at-a-time mode
-    pub rs_cblock: BlockNumber,    // current block # in scan, if any
-    pub rs_cbuf: Buffer,           // current buffer in scan, if any (pinned if valid)
+    pub inited: bool,           // false = scan not init'd yet
+    pub coffset: OffsetNumber,  // current offset # in non-page-at-a-time mode
+    pub cblock: BlockNumber,    // current block # in scan, if any
+    pub cbuf: Buffer,           // current buffer in scan, if any (pinned if valid)
 
-    pub rs_strategy: BufferAccessStrategy, // access strategy for reads
+    pub strategy: BufferAccessStrategy, // access strategy for reads
 
-    pub rs_ctup: HeapTupleData, // current tuple in scan, if any
+    pub ctup: HeapTupleData, // current tuple in scan, if any
 
     // For scans that stream reads
-    pub rs_read_stream: *mut ReadStream, // TODO(ptr)
+    pub read_stream: *mut ReadStream, // TODO(ptr)
 
     // Saved scan direction + prefetch block for read-stream seq/TID-range scans.
-    pub rs_dir: ScanDirection,
-    pub rs_prefetch_block: BlockNumber,
+    pub dir: ScanDirection,
+    pub prefetch_block: BlockNumber,
 
     // For parallel scans: page allocation data. NULL when not a parallel scan.
-    pub rs_parallelworkerdata: *mut ParallelBlockTableScanWorkerData, // TODO(ptr)
+    pub parallelworkerdata: *mut ParallelBlockTableScanWorkerData, // TODO(ptr)
 
     // page-at-a-time mode + bitmap scans
-    pub rs_cindex: u32,  // current tuple's index in vistuples
-    pub rs_ntuples: u32, // number of visible tuples on page
-    pub rs_vistuples: [OffsetNumber; MaxHeapTuplesPerPage as usize], // their offsets
+    pub cindex: u32,  // current tuple's index in vistuples
+    pub ntuples: u32, // number of visible tuples on page
+    pub vistuples: [OffsetNumber; MaxHeapTuplesPerPage as usize], // their offsets
 }
 pub type HeapScanDesc = *mut HeapScanDescData; // TODO(ptr)
 
@@ -121,8 +121,8 @@ pub type BitmapHeapScanDesc = *mut BitmapHeapScanDescData; // TODO(ptr)
 
 /// Descriptor for fetches from heap via an index (in-memory).
 pub struct IndexFetchHeapData {
-    pub xs_base: crate::access::relscan::IndexFetchTableData, // AM independent part
-    pub xs_cbuf: Buffer, // current heap buffer in scan, if any (pinned if valid)
+    pub base: crate::access::relscan::IndexFetchTableData, // AM independent part
+    pub cbuf: Buffer, // current heap buffer in scan, if any (pinned if valid)
 }
 
 /// Result codes for HeapTupleSatisfiesVacuum (sequential ordinals -> enum).

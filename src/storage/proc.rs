@@ -110,9 +110,9 @@ bitflags! {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum ProcWaitStatus {
-    PROC_WAIT_STATUS_OK = 0,
-    PROC_WAIT_STATUS_WAITING,
-    PROC_WAIT_STATUS_ERROR,
+    OK = 0,
+    WAITING,
+    ERROR,
 }
 
 /// Currently-running top-level transaction's virtual xid. Held as two fields

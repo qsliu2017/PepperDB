@@ -6,31 +6,31 @@ use crate::postgres_ext::Oid;
 /// Type of object access event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectAccessType {
-    OAT_POST_CREATE,
-    OAT_DROP,
-    OAT_POST_ALTER,
-    OAT_NAMESPACE_SEARCH,
-    OAT_FUNCTION_EXECUTE,
-    OAT_TRUNCATE,
+    POST_CREATE,
+    DROP,
+    POST_ALTER,
+    NAMESPACE_SEARCH,
+    FUNCTION_EXECUTE,
+    TRUNCATE,
 }
 
-/// Arguments of OAT_POST_CREATE event.
+/// Arguments of POST_CREATE event.
 pub struct ObjectAccessPostCreate {
     pub is_internal: bool, // creation invoked by internal stuff vs. user op
 }
 
-/// Arguments of OAT_DROP event.
+/// Arguments of DROP event.
 pub struct ObjectAccessDrop {
     pub dropflags: i32, // see PERFORM_DELETION_* in dependency.h
 }
 
-/// Arguments of OAT_POST_ALTER event.
+/// Arguments of POST_ALTER event.
 pub struct ObjectAccessPostAlter {
     pub auxiliary_id: Oid, // second ID for catalogs keyed by two IDs, else InvalidOid
     pub is_internal: bool, // internal alter vs. user-requested
 }
 
-/// Arguments of OAT_NAMESPACE_SEARCH event.
+/// Arguments of NAMESPACE_SEARCH event.
 pub struct ObjectAccessNamespaceSearch {
     pub ereport_on_violation: bool, // report an error when access denied
     pub result: bool,               // in/out: false denies access

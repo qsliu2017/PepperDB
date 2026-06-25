@@ -74,9 +74,9 @@ pub const CONSTRAINT_EXCLUSION: i8 = b'x' as i8;
 /// Identify constraint type for lookup purposes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstraintCategory {
-    CONSTRAINT_RELATION,
-    CONSTRAINT_DOMAIN,
-    CONSTRAINT_ASSERTION, // for future expansion
+    RELATION,
+    DOMAIN,
+    ASSERTION, // for future expansion
 }
 
 /// Outputs of DeconstructFkConstraintRow (C used 8 out-params).

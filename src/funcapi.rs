@@ -26,7 +26,7 @@ pub struct AttInMetadata {
     pub atttypmods: Vec<i32>,
 }
 
-/// Function context for Set Returning Functions (held via `fn_extra`).
+/// Function context for Set Returning Functions (held via `extra`).
 pub struct FuncCallContext {
     /// number of times we've been called before.
     pub call_cntr: u64,
@@ -181,9 +181,9 @@ pub fn end_MultiFuncCall(_fcinfo: FunctionCallInfo, _funcctx: Box<FuncCallContex
     unimplemented!()
 }
 
-/// SRF_IS_FIRSTCALL(): true when `fcinfo->flinfo->fn_extra == NULL`.
+/// SRF_IS_FIRSTCALL(): true when `fcinfo->flinfo->extra == NULL`.
 pub fn SRF_IS_FIRSTCALL(fcinfo: &crate::fmgr::FunctionCallInfoBaseData) -> bool {
-    fcinfo.flinfo.as_ref().map_or(true, |fi| fi.fn_extra == 0)
+    fcinfo.flinfo.as_ref().map_or(true, |fi| fi.extra == 0)
 }
 
 /// SRF_FIRSTCALL_INIT().

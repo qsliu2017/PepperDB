@@ -6,7 +6,7 @@ use crate::lib::stringinfo::StringInfo;
 use crate::storage::block::BlockNumber;
 use crate::storage::off::OffsetNumber;
 
-// XLOG record types for SP-GiST (xl_info nibble): raw consts. 0x00 not used.
+// XLOG record types for SP-GiST (info nibble): raw consts. 0x00 not used.
 pub const XLOG_SPGIST_ADD_LEAF: u8 = 0x10;
 pub const XLOG_SPGIST_MOVE_LEAFS: u8 = 0x20;
 pub const XLOG_SPGIST_ADD_NODE: u8 = 0x30;

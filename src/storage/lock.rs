@@ -204,8 +204,8 @@ pub struct LOCK {
 /// Key for a PROCLOCK: which lock + which proc. C uses pointers (only unique for
 /// the proclock's lifespan).
 pub struct PROCLOCKTAG {
-    pub my_lock: *mut LOCK,   // link to per-lockable-object information // TODO(ptr)
-    pub my_proc: *mut PGPROC, // link to PGPROC of owning backend // TODO(ptr)
+    pub lock: *mut LOCK,   // link to per-lockable-object information // TODO(ptr)
+    pub proc: *mut PGPROC, // link to PGPROC of owning backend // TODO(ptr)
 }
 
 /// Per-holder/waiter info for a lockable object. Intrusive list links drop out

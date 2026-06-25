@@ -17,15 +17,15 @@ use crate::storage::relfilelocator::RelFileLocator;
 
 /// A WAL segment being read.
 pub struct WALOpenSegment {
-    pub ws_file: i32,        // segment file descriptor (TODO: std::fs::File)
-    pub ws_segno: XLogSegNo, // segment number
-    pub ws_tli: TimeLineID,  // timeline ID of the currently open file
+    pub file: i32,        // segment file descriptor (TODO: std::fs::File)
+    pub segno: XLogSegNo, // segment number
+    pub tli: TimeLineID,  // timeline ID of the currently open file
 }
 
 /// Context information about the WAL segments to read.
 pub struct WALSegmentContext {
-    pub ws_dir: [u8; MAXPGPATH],
-    pub ws_segsize: i32,
+    pub dir: [u8; MAXPGPATH],
+    pub segsize: i32,
 }
 
 // Function pointer typedefs (XLogPageReadCB, WALSegmentOpenCB,
@@ -37,13 +37,13 @@ pub struct WALSegmentContext {
 /// NULL in C when the caller never calls read_record/find_next_record; that
 /// optional capability is the `PageRead` supertrait.
 pub trait XLogReaderRoutine {
-    /// Open the specified WAL segment; sets seg.ws_file. Raises on failure.
+    /// Open the specified WAL segment; sets seg.file. Raises on failure.
     /// `tli` is in/out: caller passes the desired timeline, callee may return
     /// the TLI it actually opened. Returns the (possibly updated) TLI.
     fn segment_open(&self, state: &mut XLogReaderState, next_seg_no: XLogSegNo, tli: TimeLineID)
         -> TimeLineID;
 
-    /// Close the open WAL segment; sets seg.ws_file negative.
+    /// Close the open WAL segment; sets seg.file negative.
     fn segment_close(&self, state: &mut XLogReaderState);
 }
 
@@ -206,11 +206,11 @@ pub enum XLogPageReadResult {
 
 /// Error info from WALRead, processable by both backend and frontend callers.
 pub struct WALReadError {
-    pub wre_errno: i32,        // errno set by the last pread()
-    pub wre_off: i32,          // offset we tried to read from
-    pub wre_req: i32,          // bytes requested to be read
-    pub wre_read: i32,         // bytes read by the last read()
-    pub wre_seg: WALOpenSegment, // segment we tried to read from
+    pub errno: i32,        // errno set by the last pread()
+    pub off: i32,          // offset we tried to read from
+    pub req: i32,          // bytes requested to be read
+    pub read: i32,         // bytes read by the last read()
+    pub seg: WALOpenSegment, // segment we tried to read from
 }
 
 // === functions ===
@@ -318,19 +318,19 @@ pub fn DecodeXLogRecord<R>(
 // These read decoder.record; modelled as methods on the decoded record.
 impl DecodedXLogRecord {
     pub fn total_len(&self) -> u32 {
-        self.header.xl_tot_len
+        self.header.tot_len
     }
     pub fn prev(&self) -> XLogRecPtr {
-        self.header.xl_prev
+        self.header.prev
     }
     pub fn info(&self) -> u8 {
-        self.header.xl_info
+        self.header.info
     }
     pub fn rmid(&self) -> crate::access::rmgr::RmgrId {
-        self.header.xl_rmid
+        self.header.rmid
     }
     pub fn xid(&self) -> TransactionId {
-        self.header.xl_xid
+        self.header.xid
     }
     pub fn origin(&self) -> RepOriginId {
         self.record_origin

@@ -34,13 +34,13 @@ pub type Block<'a> = Page<'a>;
 #[repr(i32)]
 pub enum BufferAccessStrategyType {
     /// Normal random access.
-    BAS_NORMAL = 0,
+    NORMAL = 0,
     /// Large read-only scan (hint bit updates are ok).
-    BAS_BULKREAD,
+    BULKREAD,
     /// Large multi-block write (e.g. COPY IN).
-    BAS_BULKWRITE,
+    BULKWRITE,
     /// VACUUM.
-    BAS_VACUUM,
+    VACUUM,
 }
 
 /// Possible modes for ReadBufferExtended(). Sequential ordinal -> enum.
@@ -48,15 +48,15 @@ pub enum BufferAccessStrategyType {
 #[repr(i32)]
 pub enum ReadBufferMode {
     /// Normal read.
-    RBM_NORMAL = 0,
+    NORMAL = 0,
     /// Don't read from disk, caller will initialize. Also locks the page.
-    RBM_ZERO_AND_LOCK,
-    /// Like RBM_ZERO_AND_LOCK, but locks the page in "cleanup" mode.
-    RBM_ZERO_AND_CLEANUP_LOCK,
+    ZERO_AND_LOCK,
+    /// Like ZERO_AND_LOCK, but locks the page in "cleanup" mode.
+    ZERO_AND_CLEANUP_LOCK,
     /// Read, but return an all-zeros page on error.
-    RBM_ZERO_ON_ERROR,
-    /// Don't log page as invalid during WAL replay; otherwise like RBM_NORMAL.
-    RBM_NORMAL_NO_LOG,
+    ZERO_ON_ERROR,
+    /// Don't log page as invalid during WAL replay; otherwise like NORMAL.
+    NORMAL_NO_LOG,
 }
 
 /// Type returned by PrefetchBuffer().

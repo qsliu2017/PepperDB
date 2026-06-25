@@ -5,7 +5,7 @@ use crate::lib::stringinfo::StringInfo;
 use crate::storage::block::BlockNumber;
 use crate::storage::off::OffsetNumber;
 
-// WAL record opcodes for BRIN: stored in the high 4 bits of xl_info. Raw consts
+// WAL record opcodes for BRIN: stored in the high 4 bits of info. Raw consts
 // (an opcode nibble, not a flag set).
 pub const XLOG_BRIN_CREATE_INDEX: u8 = 0x00;
 pub const XLOG_BRIN_INSERT: u8 = 0x10;

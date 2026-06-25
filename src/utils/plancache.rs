@@ -18,9 +18,9 @@ use crate::utils::resowner::ResourceOwner;
 /// possible values for plan_cache_mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanCacheMode {
-    PLAN_CACHE_MODE_AUTO,
-    PLAN_CACHE_MODE_FORCE_GENERIC_PLAN,
-    PLAN_CACHE_MODE_FORCE_CUSTOM_PLAN,
+    AUTO,
+    FORCE_GENERIC_PLAN,
+    FORCE_CUSTOM_PLAN,
 }
 
 /// GUC parameter (process global). TODO(global).

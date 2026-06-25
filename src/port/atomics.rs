@@ -13,9 +13,7 @@ pub mod arch_arm;
 pub mod arch_ppc;
 #[path = "atomics/arch-x86.rs"]
 pub mod arch_x86;
-#[path = "atomics/fallback.rs"]
 pub mod fallback;
-#[path = "atomics/generic.rs"]
 pub mod generic;
 #[path = "atomics/generic-gcc.rs"]
 pub mod generic_gcc;

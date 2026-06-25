@@ -228,9 +228,9 @@ pub struct AutoVacOpts {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StdRdOptIndexCleanup {
-    STDRD_OPTION_VACUUM_INDEX_CLEANUP_AUTO = 0,
-    STDRD_OPTION_VACUUM_INDEX_CLEANUP_OFF,
-    STDRD_OPTION_VACUUM_INDEX_CLEANUP_ON,
+    AUTO = 0,
+    OFF,
+    ON,
 }
 
 /// Standard contents of rd_options for heaps. On-disk-ish: it begins with a
@@ -257,9 +257,9 @@ pub const HEAP_DEFAULT_FILLFACTOR: i32 = 100;
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewOptCheckOption {
-    VIEW_OPTION_CHECK_OPTION_NOT_SET,
-    VIEW_OPTION_CHECK_OPTION_LOCAL,
-    VIEW_OPTION_CHECK_OPTION_CASCADED,
+    NOT_SET,
+    LOCAL,
+    CASCADED,
 }
 
 /// Contents of rd_options for views. Varlena-prefixed like StdRdOptions.
@@ -365,7 +365,7 @@ impl RelationData {
         }
         unsafe {
             (*(self.rd_options as *const ViewOptions)).check_option
-                != ViewOptCheckOption::VIEW_OPTION_CHECK_OPTION_NOT_SET
+                != ViewOptCheckOption::NOT_SET
         }
     }
 
@@ -376,7 +376,7 @@ impl RelationData {
         }
         unsafe {
             (*(self.rd_options as *const ViewOptions)).check_option
-                == ViewOptCheckOption::VIEW_OPTION_CHECK_OPTION_LOCAL
+                == ViewOptCheckOption::LOCAL
         }
     }
 
@@ -387,7 +387,7 @@ impl RelationData {
         }
         unsafe {
             (*(self.rd_options as *const ViewOptions)).check_option
-                == ViewOptCheckOption::VIEW_OPTION_CHECK_OPTION_CASCADED
+                == ViewOptCheckOption::CASCADED
         }
     }
 
@@ -466,14 +466,14 @@ impl RelationData {
         if self.rd_smgr.is_null() {
             INVALID_BLOCK_NUMBER
         } else {
-            unsafe { (*self.rd_smgr).smgr_targblock }
+            unsafe { (*self.rd_smgr).targblock }
         }
     }
 
     /// RelationSetTargetBlock: set the current insertion target block.
     pub fn set_target_block(&mut self, targblock: BlockNumber) {
         let smgr = self.smgr();
-        unsafe { (*smgr).smgr_targblock = targblock };
+        unsafe { (*smgr).targblock = targblock };
     }
 
     /// RelationIsPermanent.
