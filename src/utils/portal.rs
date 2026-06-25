@@ -55,7 +55,7 @@ pub struct PortalData {
     pub name: String,                  // portal's name
     pub prep_stmt_name: Option<String>, // source prepared statement, if any
     pub portal_context: MemoryContext, // subsidiary memory for portal
-    pub resowner: ResourceOwner,       // resources owned by portal
+    pub resowner: Option<ResourceOwner>, // resources owned by portal
     pub cleanup: Option<fn(Portal)>,   // cleanup hook (was fn pointer)
 
     // Which subtransaction(s) the portal was created/used in.

@@ -57,7 +57,7 @@ pub struct SPIExecuteOptions {
     pub tcount: u64,
     // TODO(ptr): dest is borrowed for the run.
     pub dest: Option<Box<dyn DestReceiver>>,
-    pub owner: ResourceOwner,
+    pub owner: Option<ResourceOwner>,
 }
 
 /// Optional arguments for SPI_cursor_parse_open.

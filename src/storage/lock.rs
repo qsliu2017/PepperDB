@@ -13,7 +13,7 @@ use crate::datatype::timestamp::TimestampTz;
 use crate::storage::lockdefs::{xl_standby_lock, LOCKMASK};
 pub use crate::storage::proc::PGPROC;
 use crate::storage::procnumber::{ProcNumber, INVALID_PROC_NUMBER};
-use crate::utils::resowner::ResourceOwnerData;
+use crate::utils::resowner::ResourceOwner;
 
 /// `LOCKMODE` is `typedef int` in C: an integer 1..N (0 = `NoLock`). Kept as a
 /// plain int here because lock.h indexes arrays by it and compares it freely;
@@ -227,7 +227,7 @@ pub struct LOCALLOCKTAG {
 /// Per-owner hold count for a local lock. `owner == None` -> held for the
 /// session; otherwise held for the current transaction.
 pub struct LOCALLOCKOWNER {
-    pub owner: *mut ResourceOwnerData, // TODO(ptr); forward-decl above
+    pub owner: Option<ResourceOwner>, // None -> session lock; else txn-scoped
     pub n_locks: i64,
 }
 

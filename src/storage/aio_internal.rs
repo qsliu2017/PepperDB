@@ -66,7 +66,7 @@ pub struct PgAioHandle {
     /// raw result of the IO operation
     pub result: i32,
     // dlist_node node -- linkage tracked by the owning backend list, not embedded.
-    pub resowner: ResourceOwner,
+    pub resowner: Option<ResourceOwner>,
     // dlist_node resowner_node -- linkage tracked by the resowner list.
     /// incremented every time the IO handle is reused
     pub generation: u64,
