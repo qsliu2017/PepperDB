@@ -3,6 +3,14 @@
 // Exports from postmaster.c. Process-management state; in-memory only. Many
 // GUC/process externs -> static mut with TODO(global). EXEC_BACKEND / WIN32
 // branches are dropped (non-target).
+//
+// REAL SUPERVISOR: the working postmaster (accept loop, child registry, shutdown
+// drain, backend dispatch) lives in `crate::backend::postmaster::postmaster`.
+// The `PostmasterMain(argc, argv) -> !` shim below and the
+// `launch_backend.c`/`pmchild.c` prototypes (postmaster_child_launch,
+// AssignPostmasterChildSlot, ...) are TOMBSTONED: fork/exec and fixed PMChild
+// slots are replaced by `tokio::spawn` + a generational child registry. They
+// remain as `unimplemented!()` shims only so the header surface stays documented.
 
 use crate::lib::ilist::{dlist_head, dlist_node};
 use crate::libpq::libpq_be::ClientSocket;

@@ -13,10 +13,10 @@
 //! The cancel key is a separate random token stored in the slot, compared in
 //! constant time -- it is NOT the slot identity.
 //!
-//! TODO(step09): ProcessInterrupts (tcop/postgres.c) and the miscadmin flag
-//! globals will READ and CLEAR these slot flags. The slot is the canonical
-//! per-task interrupt state; the miscadmin `static mut` flags are a stale mirror
-//! to be retired then.
+//! RESOLVED (step09): ProcessInterrupts (tcop/postgres.rs) and the miscadmin
+//! C-named flag accessors now READ and CLEAR these slot flags. The slot is the
+//! canonical per-task interrupt state; the miscadmin `static mut` flags were
+//! retired into `#[deprecated]` slot-backed accessors.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

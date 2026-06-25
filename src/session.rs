@@ -85,6 +85,18 @@ pub struct Session {
     session_user_is_superuser: AtomicBool,
     /// PG `SetRoleIsActive` -- whether a SET ROLE is currently in effect.
     set_role_is_active: AtomicBool,
+
+    // --- Interrupt holdoff / critical-section counters (miscadmin.h) ---
+    // In PG these are per-backend (`InterruptHoldoffCount`,
+    // `QueryCancelHoldoffCount`, `CritSectionCount`); a HOLD_INTERRUPTS in one
+    // backend must not gate interrupt processing in another. They live here so
+    // each tokio-task backend owns its own counter.
+    /// PG `InterruptHoldoffCount`.
+    interrupt_holdoff_count: AtomicU32,
+    /// PG `QueryCancelHoldoffCount`.
+    query_cancel_holdoff_count: AtomicU32,
+    /// PG `CritSectionCount`.
+    crit_section_count: AtomicU32,
 }
 
 impl Session {
@@ -110,6 +122,9 @@ impl Session {
             sec_context: AtomicI32::new(0),
             session_user_is_superuser: AtomicBool::new(false),
             set_role_is_active: AtomicBool::new(false),
+            interrupt_holdoff_count: AtomicU32::new(0),
+            query_cancel_holdoff_count: AtomicU32::new(0),
+            crit_section_count: AtomicU32::new(0),
         }
     }
 
@@ -207,6 +222,42 @@ impl Session {
     pub fn set_outer_user_id(&self, oid: Oid, _is_superuser: bool) {
         self.outer_user_id.store(oid.0, Ordering::Relaxed);
         self.current_user_id.store(oid.0, Ordering::Relaxed);
+    }
+
+    // --- Interrupt holdoff / critical-section counters ---
+    // Per-task, owner-only counters; only the owning task reads/writes them and
+    // never across an `.await` (they bracket sync critical sections). No
+    // cross-field invariant a concurrent reader relies on, so Relaxed suffices
+    // (same rationale as the other Session scalars above).
+    pub fn interrupt_holdoff_count(&self) -> u32 {
+        self.interrupt_holdoff_count.load(Ordering::Relaxed)
+    }
+    pub fn inc_interrupt_holdoff_count(&self) {
+        self.interrupt_holdoff_count.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn dec_interrupt_holdoff_count(&self) {
+        let prev = self.interrupt_holdoff_count.fetch_sub(1, Ordering::Relaxed);
+        debug_assert!(prev > 0);
+    }
+    pub fn query_cancel_holdoff_count(&self) -> u32 {
+        self.query_cancel_holdoff_count.load(Ordering::Relaxed)
+    }
+    pub fn inc_query_cancel_holdoff_count(&self) {
+        self.query_cancel_holdoff_count.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn dec_query_cancel_holdoff_count(&self) {
+        let prev = self.query_cancel_holdoff_count.fetch_sub(1, Ordering::Relaxed);
+        debug_assert!(prev > 0);
+    }
+    pub fn crit_section_count(&self) -> u32 {
+        self.crit_section_count.load(Ordering::Relaxed)
+    }
+    pub fn inc_crit_section_count(&self) {
+        self.crit_section_count.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn dec_crit_section_count(&self) {
+        let prev = self.crit_section_count.fetch_sub(1, Ordering::Relaxed);
+        debug_assert!(prev > 0);
     }
 }
 

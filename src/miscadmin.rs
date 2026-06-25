@@ -14,35 +14,84 @@ use bitflags::bitflags;
 
 pub const InvalidPid: i32 = -1;
 
-// --- Signal-handler flags (volatile sig_atomic_t). TODO(global) ---
-// TODO(step09): these globals are a stale mirror. The canonical per-task
-// interrupt state is `crate::backend::storage::ipc::procsignal::ProcSignalSlot`
-// (cross-task-settable atomics). ProcessInterrupts (step 09) will read/clear the
-// slot flags; this machinery is retired then. Do not rewire here.
-pub static mut InterruptPending: bool = false;
-pub static mut QueryCancelPending: bool = false;
-pub static mut ProcDiePending: bool = false;
-pub static mut IdleInTransactionSessionTimeoutPending: bool = false;
-pub static mut TransactionTimeoutPending: bool = false;
-pub static mut IdleSessionTimeoutPending: bool = false;
-pub static mut ProcSignalBarrierPending: bool = false;
-pub static mut LogMemoryContextPending: bool = false;
-pub static mut IdleStatsUpdateTimeoutPending: bool = false;
-pub static mut CheckClientConnectionPending: bool = false;
-pub static mut ClientConnectionLost: bool = false;
+// --- Signal-handler flags (volatile sig_atomic_t) -> per-task slot (step 09) ---
+// The canonical per-task interrupt state is the task's
+// `crate::backend::storage::ipc::procsignal::ProcSignalSlot` (cross-task-settable
+// atomics). The former `static mut` globals here were a stale mirror; they are
+// now `#[deprecated]` accessor functions that read/write the CURRENT task's slot.
+// With no slot in scope (aux/test) the readers report "not pending" and the
+// writers are no-ops, so flag access never panics. New code should touch the slot
+// directly (`procsignal::current()/try_current()`); these C-named shims exist for
+// mechanical-port call sites.
 
-pub static mut InterruptHoldoffCount: u32 = 0;
-pub static mut QueryCancelHoldoffCount: u32 = 0;
-pub static mut CritSectionCount: u32 = 0;
+use crate::backend::storage::ipc::procsignal;
 
-/// C: `void ProcessInterrupts(void)` (tcop/postgres.c).
-pub fn ProcessInterrupts() {
-    unimplemented!()
+/// C global `InterruptPending` (read).
+#[deprecated(note = "use procsignal::current().flags.interrupt_pending")]
+pub fn InterruptPending() -> bool {
+    procsignal::try_current()
+        .map(|s| s.flags.interrupt_pending.load(core::sync::atomic::Ordering::Acquire))
+        .unwrap_or(false)
 }
 
-/// C: `INTERRUPTS_PENDING_CONDITION()`.
+/// C global `QueryCancelPending` (read).
+#[deprecated(note = "use procsignal::current().flags.query_cancel_pending")]
+pub fn QueryCancelPending() -> bool {
+    procsignal::try_current()
+        .map(|s| s.flags.query_cancel_pending.load(core::sync::atomic::Ordering::Acquire))
+        .unwrap_or(false)
+}
+
+/// C global `ProcDiePending` (read).
+#[deprecated(note = "use procsignal::current().flags.proc_die_pending")]
+pub fn ProcDiePending() -> bool {
+    procsignal::try_current()
+        .map(|s| s.flags.proc_die_pending.load(core::sync::atomic::Ordering::Acquire))
+        .unwrap_or(false)
+}
+
+/// C global `ClientConnectionLost` (read).
+#[deprecated(note = "use procsignal::current().flags.client_connection_lost")]
+pub fn ClientConnectionLost() -> bool {
+    procsignal::try_current()
+        .map(|s| s.flags.client_connection_lost.load(core::sync::atomic::Ordering::Acquire))
+        .unwrap_or(false)
+}
+
+// Holdoff / critical-section counters: per-backend state in PG
+// (`InterruptHoldoffCount`, `QueryCancelHoldoffCount`, `CritSectionCount`). They
+// live on the per-task `crate::session::Session` -- a HOLD_INTERRUPTS in one
+// backend must NOT gate interrupt processing in another. These C-named shims
+// read/write the CURRENT task's Session.
+//
+// NO-SESSION GUARD: with no Session in scope (supervisor, early startup, aux
+// setup before a Session, or a test without a session scope) the counters read
+// as 0 and the inc/dec writers are no-ops -- never a panic. This matches
+// ProcessInterrupts' no-slot no-op behavior.
+
+/// Current `InterruptHoldoffCount` (0 if no Session in scope).
+pub fn interrupt_holdoff_count() -> u32 {
+    crate::session::try_current().map(|s| s.interrupt_holdoff_count()).unwrap_or(0)
+}
+/// Current `QueryCancelHoldoffCount` (0 if no Session in scope).
+pub fn query_cancel_holdoff_count() -> u32 {
+    crate::session::try_current().map(|s| s.query_cancel_holdoff_count()).unwrap_or(0)
+}
+/// Current `CritSectionCount` (0 if no Session in scope).
+pub fn crit_section_count() -> u32 {
+    crate::session::try_current().map(|s| s.crit_section_count()).unwrap_or(0)
+}
+
+/// C: `void ProcessInterrupts(void)` -- the real implementation lives in
+/// tcop/postgres.rs (step 09). Rewired here so existing C-named call sites keep
+/// resolving.
+pub use crate::backend::tcop::postgres::process_interrupts as ProcessInterrupts;
+
+/// C: `INTERRUPTS_PENDING_CONDITION()`. Reads the current task's slot flag.
 pub fn interrupts_pending_condition() -> bool {
-    unsafe { InterruptPending }
+    procsignal::try_current()
+        .map(|s| s.flags.interrupt_pending.load(core::sync::atomic::Ordering::Acquire))
+        .unwrap_or(false)
 }
 
 /// C: `CHECK_FOR_INTERRUPTS()`.
@@ -54,40 +103,46 @@ pub fn check_for_interrupts() {
 
 /// C: `INTERRUPTS_CAN_BE_PROCESSED()`.
 pub fn interrupts_can_be_processed() -> bool {
-    unsafe { InterruptHoldoffCount == 0 && CritSectionCount == 0 && QueryCancelHoldoffCount == 0 }
+    interrupt_holdoff_count() == 0 && crit_section_count() == 0 && query_cancel_holdoff_count() == 0
 }
+
+// hold/resume/crit operate on the current task's Session. With no Session in
+// scope they are no-ops (nothing to hold off); see the NO-SESSION GUARD note.
 
 /// C: `HOLD_INTERRUPTS()`.
 pub fn hold_interrupts() {
-    unsafe { InterruptHoldoffCount += 1 }
+    if let Some(s) = crate::session::try_current() {
+        s.inc_interrupt_holdoff_count();
+    }
 }
 /// C: `RESUME_INTERRUPTS()`.
 pub fn resume_interrupts() {
-    unsafe {
-        debug_assert!(InterruptHoldoffCount > 0);
-        InterruptHoldoffCount -= 1;
+    if let Some(s) = crate::session::try_current() {
+        s.dec_interrupt_holdoff_count();
     }
 }
 /// C: `HOLD_CANCEL_INTERRUPTS()`.
 pub fn hold_cancel_interrupts() {
-    unsafe { QueryCancelHoldoffCount += 1 }
+    if let Some(s) = crate::session::try_current() {
+        s.inc_query_cancel_holdoff_count();
+    }
 }
 /// C: `RESUME_CANCEL_INTERRUPTS()`.
 pub fn resume_cancel_interrupts() {
-    unsafe {
-        debug_assert!(QueryCancelHoldoffCount > 0);
-        QueryCancelHoldoffCount -= 1;
+    if let Some(s) = crate::session::try_current() {
+        s.dec_query_cancel_holdoff_count();
     }
 }
 /// C: `START_CRIT_SECTION()`.
 pub fn start_crit_section() {
-    unsafe { CritSectionCount += 1 }
+    if let Some(s) = crate::session::try_current() {
+        s.inc_crit_section_count();
+    }
 }
 /// C: `END_CRIT_SECTION()`.
 pub fn end_crit_section() {
-    unsafe {
-        debug_assert!(CritSectionCount > 0);
-        CritSectionCount -= 1;
+    if let Some(s) = crate::session::try_current() {
+        s.dec_crit_section_count();
     }
 }
 
