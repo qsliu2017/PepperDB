@@ -67,6 +67,11 @@ pub struct SharedState {
     /// Inter-task signaling registry (PG `ProcSignal`).
     pub proc_signal: Arc<ProcSignal>,
 
+    /// WAL write pipeline state (PG `XLogCtl`; ipci.c `XLOGShmemInit` slot). The
+    /// buffer ring, insert reservation, write/flush LSNs, and the flushed-LSN
+    /// watch. Reached via [`SharedState::xlog`].
+    pub xlog: Arc<crate::backend::access::transam::xlog::XLogCtl>,
+
     /// Pending-fsync / pending-unlink queue (PG sync.c `pendingOps`). Storage
     /// tasks (smgr/md) enqueue fsync/unlink requests; the checkpointer drains it
     /// (step 17). Single-process: one shared structure instead of the
@@ -115,7 +120,13 @@ impl SharedState {
 
         // Set up xlog, clog, and buffers:
         // TODO(step14): VarsupShmemInit  here
-        // TODO(step13): XLOGShmemInit  here
+        // XLOGShmemInit -- step13 (part A), DONE. The WAL buffer ring, insert
+        // reservation, write/flush LSNs, and the flushed-LSN watch. Bound to the
+        // I/O leaf and process config (both built above) for segment I/O.
+        let xlog = crate::backend::access::transam::xlog::XLogCtl::new(
+            fd.io().clone(),
+            process_config.clone(),
+        );
         //   (XLogPrefetchShmemInit -- deferred: prefetch is an aio concern)
         //   (XLogRecoveryShmemInit -- step13/recovery)
         // TODO(step14): CLOGShmemInit  here
@@ -163,7 +174,7 @@ impl SharedState {
         //   (WaitEventCustomShmemInit / InjectionPointShmemInit -- deferred)
         //   (AioShmemInit -- deferred: tokio I/O leaf replaces the aio subsys)
 
-        Arc::new(SharedState { config: process_config, fd, proc_signal, sync_requests, buffers })
+        Arc::new(SharedState { config: process_config, fd, proc_signal, xlog, sync_requests, buffers })
     }
 
     /// Process-wide startup config (PG globals.c config half).
@@ -184,6 +195,11 @@ impl SharedState {
 
     pub fn proc_signal(&self) -> &Arc<ProcSignal> {
         &self.proc_signal
+    }
+
+    /// The WAL write pipeline state (PG `XLogCtl`).
+    pub fn xlog(&self) -> &Arc<crate::backend::access::transam::xlog::XLogCtl> {
+        &self.xlog
     }
 
     /// The shared pending-fsync / pending-unlink queue (PG sync.c).

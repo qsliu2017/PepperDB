@@ -84,8 +84,15 @@ impl<'a> BulkWriteState<'a> {
             let blknos: Vec<BlockNumber> = self.pending.iter().map(|w| w.blkno).collect();
             let pages: Vec<&Page> = self.pending.iter().map(|w| w.buf.as_ref()).collect();
             let page_std = self.pending.iter().all(|w| w.page_std);
-            // log_newpages is the step-13 xloginsert stub.
-            log_newpages(&self.smgr.rlocator.locator, self.forknum, &blknos, &pages, page_std);
+            log_newpages(
+                self.shared.xlog(),
+                &self.smgr.rlocator.locator,
+                self.forknum,
+                &blknos,
+                &pages,
+                page_std,
+            )
+            .await;
         }
 
         let pending = std::mem::take(&mut self.pending);
@@ -174,6 +181,48 @@ mod tests {
             let mut buf = Page::boxed_zeroed();
             reln.read(&s, fork, i, &mut buf).await;
             assert!(buf.as_bytes().iter().all(|&b| b == 0x30 + i as u8));
+        }
+
+        let _ = crate::storage::io_backend::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bulk_write_wal_path() {
+        let (s, dir) = shared_with_tmpdir("wal").await;
+        // The WAL pipeline needs pg_wal/ to exist for segment files.
+        crate::storage::io_backend::mkdir_all(
+            dir.join(crate::access::xlog_internal::XLOGDIR),
+        )
+        .await
+        .unwrap();
+
+        let rloc = RelFileLocator { spcOid: Oid(1663), dbOid: Oid(70002), relNumber: Oid(18001) };
+        let mut reln = SmgrRelation::open(rloc, crate::storage::procnumber::INVALID_PROC_NUMBER);
+        let fork = ForkNumber::MAIN_FORKNUM;
+        reln.create(&s, fork, false).await;
+
+        let before = s.xlog().get_xlog_insert_rec_ptr();
+        {
+            // use_wal = true exercises the real log_newpages WAL path.
+            let mut bulk = BulkWriteState::start_smgr(s.clone(), &mut reln, fork, true).await;
+            for i in 0..3u32 {
+                let mut buf = bulk.get_buf();
+                buf.as_mut_bytes().fill(0x41 + i as u8);
+                bulk.write(i, buf, true).await;
+            }
+            bulk.finish().await;
+        }
+
+        // The WAL insert head advanced (an FPI record was logged).
+        let after = s.xlog().get_xlog_insert_rec_ptr();
+        assert!(after.0 > before.0, "WAL should have advanced for the FPI record");
+
+        // Pages are still written and readable.
+        assert_eq!(reln.nblocks(&s, fork).await, 3);
+        for i in 0..3u32 {
+            let mut buf = Page::boxed_zeroed();
+            reln.read(&s, fork, i, &mut buf).await;
+            assert!(buf.as_bytes().iter().all(|&b| b == 0x41 + i as u8));
         }
 
         let _ = crate::storage::io_backend::remove_dir_all(&dir).await;

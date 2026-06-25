@@ -37,3 +37,11 @@ pub const fn rmgr_id_is_valid(rmid: i32) -> bool {
 
 /// RmgrId for extensions still in development without a reserved RmgrId.
 pub const RM_EXPERIMENTAL_ID: u32 = 128;
+
+// The `Rmgr` trait + the `match`-based dispatch (`GetRmgr`/`RmgrIdExists`/
+// `RmgrStartup`/`RmgrCleanup`) live in the backend module (rmgr.c body).
+// Re-export so `use crate::access::rmgr::{Rmgr, GetRmgr}` resolves to the real
+// implementation (header declaration / .c definition split, rules.md section 2).
+pub use crate::backend::access::transam::rmgr::{
+    GetRmgr, Rmgr, RmgrCleanup, RmgrIdExists, RmgrStartup,
+};

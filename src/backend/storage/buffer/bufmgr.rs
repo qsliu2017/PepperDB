@@ -24,7 +24,7 @@
 
 use std::sync::Arc;
 
-use crate::access::xlog::xlog_flush;
+use crate::backend::access::transam::xlog::xlog_flush;
 use crate::catalog::pg_class::RELPERSISTENCE_PERMANENT;
 use crate::common::relpath::ForkNumber;
 use crate::shared_state::SharedState;
@@ -253,14 +253,11 @@ impl BufferPool {
         desc.unlock_hdr(buf_state & !BufFlags::JUST_DIRTIED.bits());
 
         // WAL-before-data rule: log must hit disk before the data page it
-        // describes. Skipped for non-permanent buffers (no real LSNs). C calls
-        // XLogFlush unconditionally for permanent buffers; XLogFlush(0) is a
-        // no-op (0 is always already flushed), so we elide it when the page has
-        // no LSN -- which is the only case until the WAL writer exists.
-        // TODO(step13): drop the `is_valid` guard once xlog_flush is real and the
-        // flushed-LSN watch lands; this is the real WAL-before-data call site.
-        if permanent && recptr.is_valid() {
-            xlog_flush(recptr);
+        // describes. Skipped for non-permanent buffers (no real LSNs). The
+        // group-commit point; xlog_flush fast-paths an invalid/already-flushed
+        // LSN, so no is_valid guard is needed here.
+        if permanent {
+            xlog_flush(shared.xlog(), recptr).await;
         }
 
         let tag = desc.tag_copy();

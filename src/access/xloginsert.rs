@@ -1,18 +1,12 @@
 //! Translated from PostgreSQL src/include/access/xloginsert.h
 //!
-//! STUB (foundation-rewrite: wal). Functions for generating WAL records. The
-//! REGBUF_* flags are translated; insert API bodies are `// TODO(wal)`.
+//! WAL-record construction API. The REGBUF_* flags ([`RegBuf`]) live here; the
+//! function bodies live in `crate::backend::access::transam::xloginsert` and are
+//! re-exported below so header call sites resolve. The construction functions
+//! that touch shared WAL state ([`XLogInsert`], `log_newpage*`) are `async` and
+//! take the [`XLogCtl`](crate::backend::access::transam::xlog::XLogCtl) handle.
 
 use bitflags::bitflags;
-
-use crate::access::rmgr::RmgrId;
-use crate::access::xlogdefs::XLogRecPtr;
-use crate::common::relpath::ForkNumber;
-use crate::storage::block::BlockNumber;
-use crate::storage::buf::Buffer;
-use crate::storage::bufpage::{Page, PageData};
-use crate::storage::relfilelocator::RelFileLocator;
-use crate::utils::relcache::Relation;
 
 /// The minimum size of the WAL construction working area; call
 /// `XLogEnsureRecordSpace` to grow beyond these.
@@ -33,79 +27,14 @@ bitflags! {
     }
 }
 
-// prototypes for public functions in xloginsert.c:
-pub fn XLogBeginInsert() {
-    unimplemented!() // TODO(wal)
-}
-pub fn XLogSetRecordFlags(_flags: u8) {
-    unimplemented!() // TODO(wal)
-}
-pub fn XLogInsert(_rmid: RmgrId, _info: u8) -> XLogRecPtr {
-    unimplemented!() // TODO(wal)
-}
-pub fn XLogEnsureRecordSpace(_max_block_id: i32, _ndatas: i32) {
-    unimplemented!() // TODO(wal)
-}
-pub fn XLogRegisterData(_data: &[u8]) {
-    unimplemented!() // TODO(wal)
-}
-pub fn XLogRegisterBuffer(_block_id: u8, _buffer: Buffer, _flags: RegBuf) {
-    unimplemented!() // TODO(wal)
-}
-pub fn XLogRegisterBlock(
-    _block_id: u8,
-    _rlocator: &RelFileLocator,
-    _forknum: ForkNumber,
-    _blknum: BlockNumber,
-    _page: &PageData,
-    _flags: RegBuf,
-) {
-    unimplemented!() // TODO(wal)
-}
-pub fn XLogRegisterBufData(_block_id: u8, _data: &[u8]) {
-    unimplemented!() // TODO(wal)
-}
-pub fn XLogResetInsertion() {
-    unimplemented!() // TODO(wal)
-}
-pub fn XLogCheckBufferNeedsBackup(_buffer: Buffer) -> bool {
-    unimplemented!() // TODO(wal)
-}
-
-pub fn log_newpage(
-    _rlocator: &RelFileLocator,
-    _forknum: ForkNumber,
-    _blkno: BlockNumber,
-    _page: &Page,
-    _page_std: bool,
-) -> XLogRecPtr {
-    unimplemented!() // TODO(wal)
-}
-pub fn log_newpages(
-    _rlocator: &RelFileLocator,
-    _forknum: ForkNumber,
-    _blknos: &[BlockNumber],
-    _pages: &[&Page],
-    _page_std: bool,
-) {
-    unimplemented!() // TODO(wal)
-}
-pub fn log_newpage_buffer(_buffer: Buffer, _page_std: bool) -> XLogRecPtr {
-    unimplemented!() // TODO(wal)
-}
-pub fn log_newpage_range(
-    _rel: Relation,
-    _forknum: ForkNumber,
-    _startblk: BlockNumber,
-    _endblk: BlockNumber,
-    _page_std: bool,
-) {
-    unimplemented!() // TODO(wal)
-}
-pub fn XLogSaveBufferForHint(_buffer: Buffer, _buffer_std: bool) -> XLogRecPtr {
-    unimplemented!() // TODO(wal)
-}
-
-pub fn InitXLogInsert() {
-    unimplemented!() // TODO(wal)
-}
+// The construction API is implemented in the backend module; re-export under the
+// header-facing names. The begin/register/set/reset functions operate on the
+// per-task staging (see `with_insertion`); `XLogInsert` and `log_newpage*` are
+// async and take the `XLogCtl` handle.
+pub use crate::backend::access::transam::xloginsert::{
+    begin_insert as XLogBeginInsert, check_page_needs_backup as XLogCheckBufferNeedsBackup,
+    log_newpage, log_newpage_range, log_newpages, register_block as XLogRegisterBlock,
+    register_buf_data as XLogRegisterBufData, register_data as XLogRegisterData,
+    reset_insertion as XLogResetInsertion, set_record_flags as XLogSetRecordFlags,
+    with_insertion, xlog_insert as XLogInsert,
+};

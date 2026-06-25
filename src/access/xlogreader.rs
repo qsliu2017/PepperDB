@@ -300,8 +300,26 @@ pub fn WALRead<R>(
 
 // === decoding ===
 
-pub fn DecodeXLogRecordRequiredSpace(_xl_tot_len: usize) -> usize {
-    unimplemented!()
+// The concrete, self-contained reader and the standalone record decoder live in
+// the backend module (the xlogreader.c body). Re-export them here so call sites
+// `use crate::access::xlogreader::{XLogReader, decode_xlog_record}` resolve to the
+// real implementation. The generic `XLogReaderState<R>` free functions below
+// remain the (deferred) recovery routine-struct surface.
+pub use crate::backend::access::transam::xlogreader::{decode_xlog_record, PageReadFn, XLogReader};
+
+/// Upper bound on the bytes a decoded record occupies (C
+/// `DecodeXLogRecordRequiredSpace`). Our decoder copies fragments into owned
+/// `Vec`s rather than one arena, so this is an over-estimate used only for
+/// pre-sizing; it mirrors the C accounting (fixed struct + max blocks array +
+/// the raw payload + per-fragment alignment padding).
+pub fn DecodeXLogRecordRequiredSpace(xl_tot_len: usize) -> usize {
+    use crate::access::xlogrecord::XLR_MAX_BLOCK_ID;
+    use crate::pg_config::MAXIMUM_ALIGNOF;
+    let nblocks = XLR_MAX_BLOCK_ID as usize + 1;
+    core::mem::size_of::<DecodedXLogRecord>()
+        + core::mem::size_of::<DecodedBkpBlock>() * nblocks
+        + xl_tot_len
+        + (MAXIMUM_ALIGNOF - 1) * (nblocks + 2)
 }
 
 /// Decode `record` at `lsn` into `decoded`. Returns Ok(()) or Err(message).
@@ -371,36 +389,59 @@ pub fn XLogRecGetFullXid<R>(_record: &XLogReaderState<R>) -> FullTransactionId {
     unimplemented!()
 }
 
+// The XLogRecGet* / RestoreBlockImage accessors read the state's most recently
+// decoded record; they delegate to the [`DecodedXLogRecord`] methods (the real
+// implementation lives with the decoder in the backend module). The C macros take
+// the reader and dereference `record->record`; here that is `state.record`.
+
 /// Restore a full-page image for `block_id` into `page`. Returns true on success.
 pub fn RestoreBlockImage<R>(
-    _record: &mut XLogReaderState<R>,
-    _block_id: u8,
-    _page: &mut [u8],
+    record: &mut XLogReaderState<R>,
+    block_id: u8,
+    page: &mut [u8],
 ) -> bool {
-    unimplemented!()
+    record
+        .record
+        .as_ref()
+        .expect("no decoded record")
+        .restore_block_image(block_id, page)
+        .unwrap_or(false)
 }
 
 /// Return the rmgr-specific data for `block_id` (C returned ptr + out-param len).
 pub fn XLogRecGetBlockData<R>(
-    _record: &mut XLogReaderState<R>,
-    _block_id: u8,
+    record: &mut XLogReaderState<R>,
+    block_id: u8,
 ) -> Option<Vec<u8>> {
-    unimplemented!() // TODO(ptr)
+    record
+        .record
+        .as_ref()
+        .expect("no decoded record")
+        .get_block_data(block_id)
+        .map(|s| s.to_vec())
 }
 
 /// Block tag for `block_id` as (rlocator, forknum, blknum). Panics if absent
 /// (matches the C variant that ereports when the block ref is missing).
 pub fn XLogRecGetBlockTag<R>(
-    _record: &mut XLogReaderState<R>,
-    _block_id: u8,
+    record: &mut XLogReaderState<R>,
+    block_id: u8,
 ) -> (RelFileLocator, ForkNumber, BlockNumber) {
-    unimplemented!()
+    record
+        .record
+        .as_ref()
+        .expect("no decoded record")
+        .get_block_tag(block_id)
 }
 
 /// Like XLogRecGetBlockTag, plus the prefetch buffer; None if no such block ref.
 pub fn XLogRecGetBlockTagExtended<R>(
-    _record: &mut XLogReaderState<R>,
-    _block_id: u8,
+    record: &mut XLogReaderState<R>,
+    block_id: u8,
 ) -> Option<(RelFileLocator, ForkNumber, BlockNumber, Buffer)> {
-    unimplemented!()
+    record
+        .record
+        .as_ref()
+        .expect("no decoded record")
+        .get_block_tag_extended(block_id)
 }

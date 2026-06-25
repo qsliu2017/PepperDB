@@ -18,18 +18,27 @@ pub struct XLogRecStats {
 
 /// Aggregated WAL statistics (in-memory analysis). startptr/endptr are only used
 /// by frontend tools (pg_waldump); kept inline under the single-process model.
+/// `record_stats` is the large per-(rmid, recid) matrix; it is boxed so the
+/// struct (and `Default`) does not place ~96 KB on the stack.
 pub struct XLogStats {
     pub count: u64,
     pub startptr: XLogRecPtr,
     pub endptr: XLogRecPtr,
     pub rmgr_stats: [XLogRecStats; RM_COUNT],
-    pub record_stats: [[XLogRecStats; MAX_XLINFO_TYPES]; RM_COUNT],
+    pub record_stats: Box<[[XLogRecStats; MAX_XLINFO_TYPES]; RM_COUNT]>,
 }
 
-/// Returns (rec_len, fpi_len) (out-params folded into a tuple).
-pub fn XLogRecGetLen(_record: &mut XLogReaderState) -> (u32, u32) {
-    unimplemented!()
+impl Default for XLogStats {
+    fn default() -> Self {
+        XLogStats {
+            count: 0,
+            startptr: XLogRecPtr(0),
+            endptr: XLogRecPtr(0),
+            rmgr_stats: [XLogRecStats::default(); RM_COUNT],
+            record_stats: Box::new([[XLogRecStats::default(); MAX_XLINFO_TYPES]; RM_COUNT]),
+        }
+    }
 }
-pub fn XLogRecStoreStats(_stats: &mut XLogStats, _record: &mut XLogReaderState) {
-    unimplemented!()
-}
+
+// The body lives in the backend module; re-export so header call sites resolve.
+pub use crate::backend::access::transam::xlogstats::{XLogRecGetLen, XLogRecStoreStats};

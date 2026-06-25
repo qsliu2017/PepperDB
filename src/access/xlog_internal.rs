@@ -144,26 +144,46 @@ pub const MAXFNAMELEN: usize = 64;
 /// Length of an XLog file name.
 pub const XLOG_FNAME_LEN: usize = 24;
 
-// WAL file naming: the C inline helpers format/parse hex names. Stubbed; the
-// real impl belongs with the segment manager. TODO(wal)
-pub fn XLogFileName(_tli: TimeLineID, _log_seg_no: XLogSegNo, _wal_segsz_bytes: i32) -> String {
-    unimplemented!() // TODO(wal)
+// WAL file naming: the C inline helpers format/parse the 24-hex-char names. The
+// name is "%08X%08X%08X" of (tli, logSegNo/segsPerId, logSegNo%segsPerId), where
+// segsPerId = XLogSegmentsPerXLogId(wal_segsz_bytes); see xlog_internal.h.
+
+/// PG `XLogFileName`: the 24-hex-char WAL segment file name.
+pub fn XLogFileName(tli: TimeLineID, log_seg_no: XLogSegNo, wal_segsz_bytes: i32) -> String {
+    let segs_per_id = XLogSegmentsPerXLogId(wal_segsz_bytes as u64);
+    XLogFileNameById(tli, (log_seg_no.0 / segs_per_id) as u32, (log_seg_no.0 % segs_per_id) as u32)
 }
-pub fn XLogFileNameById(_tli: TimeLineID, _log: u32, _seg: u32) -> String {
-    unimplemented!() // TODO(wal)
+
+/// PG `XLogFileNameById`: the name from an explicit (log, seg) high/low split.
+pub fn XLogFileNameById(tli: TimeLineID, log: u32, seg: u32) -> String {
+    format!("{:08X}{:08X}{:08X}", tli.0, log, seg)
 }
-pub fn IsXLogFileName(_fname: &str) -> bool {
-    unimplemented!() // TODO(wal)
+
+/// PG `IsXLogFileName`: exactly 24 hex characters.
+pub fn IsXLogFileName(fname: &str) -> bool {
+    fname.len() == XLOG_FNAME_LEN && fname.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_lowercase())
 }
-pub fn IsPartialXLogFileName(_fname: &str) -> bool {
-    unimplemented!() // TODO(wal)
+
+/// PG `IsPartialXLogFileName`: a 24-hex name plus the ".partial" suffix.
+pub fn IsPartialXLogFileName(fname: &str) -> bool {
+    fname.len() == XLOG_FNAME_LEN + ".partial".len()
+        && fname.ends_with(".partial")
+        && IsXLogFileName(&fname[..XLOG_FNAME_LEN])
 }
-// XLogFromFileName's tli/logSegNo out-params fold into the return tuple.
-pub fn XLogFromFileName(_fname: &str, _wal_segsz_bytes: i32) -> (TimeLineID, XLogSegNo) {
-    unimplemented!() // TODO(wal)
+
+/// PG `XLogFromFileName`: parse (tli, logSegNo) from a 24-hex name. The
+/// tli/logSegNo out-params fold into the return tuple.
+pub fn XLogFromFileName(fname: &str, wal_segsz_bytes: i32) -> (TimeLineID, XLogSegNo) {
+    let tli = u32::from_str_radix(&fname[0..8], 16).unwrap();
+    let log = u64::from_str_radix(&fname[8..16], 16).unwrap();
+    let seg = u64::from_str_radix(&fname[16..24], 16).unwrap();
+    let segs_per_id = XLogSegmentsPerXLogId(wal_segsz_bytes as u64);
+    (TimeLineID(tli), XLogSegNo(log * segs_per_id + seg))
 }
-pub fn XLogFilePath(_tli: TimeLineID, _log_seg_no: XLogSegNo, _wal_segsz_bytes: i32) -> String {
-    unimplemented!() // TODO(wal)
+
+/// PG `XLogFilePath`: pg_wal/<name> (relative to $PGDATA).
+pub fn XLogFilePath(tli: TimeLineID, log_seg_no: XLogSegNo, wal_segsz_bytes: i32) -> String {
+    format!("{}/{}", XLOGDIR, XLogFileName(tli, log_seg_no, wal_segsz_bytes))
 }
 pub fn TLHistoryFileName(_tli: TimeLineID) -> String {
     unimplemented!() // TODO(wal)
@@ -242,37 +262,17 @@ pub enum RecoveryTargetAction {
     Shutdown,
 }
 
-/// Method table for resource managers (routine struct -> trait, per
-/// routine-struct.md appendix B; `rm_mask`/`rm_decode` are optional). `rm_name`
-/// (a data field) becomes `NAME`; `rm_startup`/`rm_cleanup` default no-ops.
-pub trait Rmgr {
-    const NAME: &'static str;
-
-    fn redo(record: &mut XLogReaderState);
-    fn desc(buf: &mut Vec<u8>, record: &mut XLogReaderState);
-    fn identify(info: u8) -> &'static str;
-
-    fn startup() {}
-    fn cleanup() {}
-
-    // Optional: mask out non-deterministic bits for wal_consistency_checking.
-    fn mask(_pagedata: &mut [u8], _blkno: BlockNumber) {}
-    // Optional: logical decoding callback.
-    fn decode(_ctx: &mut LogicalDecodingContext, _buf: &mut XLogRecordBuffer) {}
-}
-
-// RmgrTable[] global + the dispatch helpers -> deferred to a closed enum of the
-// built-in rmgrs in Phase 2. TODO(wal)
-pub fn RmgrStartup() {
-    unimplemented!() // TODO(wal)
-}
-pub fn RmgrCleanup() {
-    unimplemented!() // TODO(wal)
-}
-pub fn RmgrNotFound(_rmid: RmgrId) -> ! {
-    unimplemented!() // TODO(wal)
-}
-// RegisterCustomRmgr / RmgrIdExists / GetRmgr depend on the RmgrTable; deferred.
+// The resource-manager dispatch (PG's `RmgrData` struct-of-pointers table ->
+// the `Rmgr` trait + a `match`-based `GetRmgr`) lives in the backend module
+// `crate::backend::access::transam::rmgr`. Re-export the trait and the dispatch
+// helpers so existing call sites that `use crate::access::xlog_internal::{Rmgr,
+// GetRmgr, RmgrStartup, ...}` keep resolving. (The old `RmgrData`/`RmgrTable`
+// fn-pointer surface is gone -- nothing referenced it -- replaced by the trait.)
+pub use crate::backend::access::transam::rmgr::{
+    GetRmgr, Rmgr, RmgrCleanup, RmgrIdExists, RmgrStartup,
+};
+#[allow(deprecated)]
+pub use crate::backend::access::transam::rmgr::RmgrNotFound;
 
 /// xlog switching support; the `*lastSwitchLSN` out-param folds into the tuple.
 pub fn GetLastSegSwitchData() -> (pg_time_t, XLogRecPtr) {
