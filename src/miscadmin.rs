@@ -15,6 +15,10 @@ use bitflags::bitflags;
 pub const InvalidPid: i32 = -1;
 
 // --- Signal-handler flags (volatile sig_atomic_t). TODO(global) ---
+// TODO(step09): these globals are a stale mirror. The canonical per-task
+// interrupt state is `crate::backend::storage::ipc::procsignal::ProcSignalSlot`
+// (cross-task-settable atomics). ProcessInterrupts (step 09) will read/clear the
+// slot flags; this machinery is retired then. Do not rewire here.
 pub static mut InterruptPending: bool = false;
 pub static mut QueryCancelPending: bool = false;
 pub static mut ProcDiePending: bool = false;

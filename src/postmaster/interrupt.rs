@@ -6,18 +6,12 @@ pub static CONFIG_RELOAD_PENDING: core::sync::atomic::AtomicBool =
 pub static SHUTDOWN_REQUEST_PENDING: core::sync::atomic::AtomicBool =
     core::sync::atomic::AtomicBool::new(false);
 
-pub fn process_main_loop_interrupts() {
-    unimplemented!()
-}
+// Non-type-centric (free functions over the flags): the definitions live in the
+// backend module; re-export them here.
+pub use crate::backend::postmaster::interrupt::{
+    process_main_loop_interrupts, signal_handler_for_config_reload,
+    signal_handler_for_crash_exit, signal_handler_for_shutdown_request,
+};
 
-pub fn signal_handler_for_config_reload(_signo: i32) {
-    unimplemented!()
-}
-
-pub fn signal_handler_for_crash_exit(_signo: i32) {
-    unimplemented!()
-}
-
-pub fn signal_handler_for_shutdown_request(_signo: i32) {
-    unimplemented!()
-}
+#[cfg(unix)]
+pub use crate::backend::postmaster::interrupt::install_signal_handlers;

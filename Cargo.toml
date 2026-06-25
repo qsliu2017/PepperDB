@@ -10,5 +10,5 @@ members = ["crates/pepperdb-derive"]
 [dependencies]
 bitflags = "2"
 pepperdb-derive = { path = "crates/pepperdb-derive" }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "net", "time", "io-util", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "net", "time", "io-util", "macros", "signal"] }
 futures-util = "0.3"
