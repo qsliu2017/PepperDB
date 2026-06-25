@@ -71,3 +71,6 @@ pub mod waiteventset;
 
 // Rust-native primitive (no C header origin): the reusable wait queue.
 pub mod wait_guard;
+
+// Rust-native I/O leaf (no C header origin): async positional file I/O.
+pub mod io_backend;
