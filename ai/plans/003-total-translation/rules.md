@@ -257,8 +257,9 @@ and is reached only via its stubs). `WARNING`/`LOG`/etc. format and return; only
 
 ---
 
-## 7. Reusable primitives built in F0 - use these, do not reinvent
+## 7. Reusable primitives - use these, do not reinvent
 
+Built in F0:
 - `GenSlab<T>` / `Key<T>` (`src/storage/procnumber.rs`) - generational slab; the
   canonical replacement for any fixed slot index (ProcNumber, child slot, VFD,
   proc-signal slot, wait queue, resource registry). A stale `Key` fails lookup, so
@@ -272,6 +273,21 @@ and is reached only via its stubs). `WARNING`/`LOG`/etc. format and return; only
 - `Session` (`src/session.rs`), `ProcSignal`, `ResourceOwner`
   (`src/backend/utils/resowner/resowner.rs`).
 - `ErrorData` + the `elog!`/`ereport!` macros (`src/utils/elog.rs`).
+
+Built in F1 (storage core):
+- `Page` (`src/storage/bufpage.rs`) - `#[repr(C, align(8))]` newtype over
+  `[u8; BLCKSZ]`, methods + deprecated C-named shims; the alignment makes the
+  `PageHeaderData`/`ItemIdData` overlay casts sound. `Page::checksum`, item ops.
+- `BufId` (`src/storage/buf.rs`) - the buffer handle enum
+  `{Invalid, Global(u32), Local(u32)}` (not a sign-encoded int); `Buffer = BufId`.
+- `BufferPool` (`src/backend/storage/buffer/buf_init.rs`) + `bufmgr.rs`
+  (`read_buffer_common`/`flush_buffer`/pin/`LockBuffer`) + `localbuf.rs` + the FSM
+  (`src/backend/storage/freespace/`) - all page access goes through the buffer mgr.
+- smgr / md (`src/backend/storage/smgr/`) - `SmgrRelation` over `FdManager`;
+  `SharedState.sync_requests` is the pending-fsync queue (checkpointer drains it).
+- WAL (`src/backend/access/transam/`): `XLogCtl` + `xlog_flush`/`XLogInsert`/
+  `log_newpage` (xlog.rs, xloginsert.rs), `XLogReader<F>` (xlogreader.rs),
+  `Rmgr`/`GetRmgr` (rmgr.rs); incremental CRC-32C (`src/port/pg_crc32c.rs`).
 
 ---
 
@@ -319,3 +335,90 @@ order is not naturally phased; see `ResourceOwner`. Each release runs inside
 - Per file/step: translate, then verify with `cargo check` + tests. In the staged
   foundation work the rhythm was: implement -> autocommit -> independent review ->
   manual gate; keep an equivalent review discipline.
+
+---
+
+## 11. Lessons from F1 (storage core: page, smgr/md, buffer manager, WAL)
+
+These emerged porting steps 10-13; apply them to the rest of the storage/access AMs.
+
+**Types.**
+- A value type that gets reinterpreted as a `#[repr(C)]` struct must be ALIGNED:
+  make it a `#[repr(C, align(8))]` newtype (`Page`), not a `&[u8]` alias, so the
+  pointer-cast to a header struct (`PageHeaderData`/`ItemIdData`) is sound. Prove it
+  with `const` size/align asserts.
+- Keep genuinely on-disk + arithmetic types as raw scalars (`BlockNumber = u32` +
+  sentinel; `ItemPointer`) - an enum would break the on-disk layout and the math.
+  Make in-memory HANDLES clear enums (`BufId{Invalid,Global,Local}`), not
+  sign-overloaded ints.
+
+**Shared mutable page storage.**
+- The buffer pool holds pages in `UnsafeCell` (`PageCell`) with a justified
+  `unsafe impl Sync`. It is sound ONLY because mutable page access is exclusive via
+  `BM_IO_IN_PROGRESS` (the single IO doer) or the EXCLUSIVE content lock. NEVER form
+  `&mut Page` under a SHARED lock (the `fsm_search` bug): a read path under a shared
+  lock uses `&Page` only; a write needs the exclusive lock or the IO-in-progress gate.
+
+**Async I/O integration.**
+- Positional file I/O = `std::os::unix::fs::FileExt::{read_exact_at, write_all_at}`
+  on `spawn_blocking` (the `IoBackend` leaf); read into a page via
+  `page.as_mut_bytes()`. EOF / zero-fill (reading past a relation's end) is the
+  SMGR layer's responsibility, not the leaf's (the leaf is all-or-`UnexpectedEof`).
+- Two-racer coordination: a per-buffer/per-segment IN-PROGRESS flag + a `WaitQueue`
+  so exactly one task does the read/write and others await (StartBufferIO/WaitIO).
+- A failed async I/O PANICS (elog ERROR/fsync abort). Any in-progress flag set
+  before an I/O await MUST be cleared and its waiters woken ON UNWIND - use an RAII
+  unwind guard (`InProgressIo`, mirroring PG `AbortBufferIO`), else waiters hang.
+
+**Locks across `.await`.**
+- Hot locks are SYNC and dropped before any `.await`: buffer header CAS lock,
+  content lock, buf_table shards, the sync-queue/strategy `Mutex`, the WAL insertpos
+  bump. Pattern: clone the handle / snapshot the bytes out, drop the guard, then await.
+- The ONLY locks held across an I/O await are deliberately-async `tokio::Mutex`es:
+  the WAL `WALWriteLock` and the held-exclusive WAL insert locks. Document each.
+
+**WAL durability invariants (load-bearing - silent data loss lives here).**
+- The flushed-LSN (an atomic AND a `tokio::watch`) is published ONLY after
+  `issue_xlog_fsync`, and MONOTONICALLY (never backward). Group commit: the
+  WALWriteLock holder writes+fsyncs for all; waiters await the watch.
+- `WaitXLogInsertionsToFinish` is called in `XLogFlush` BEFORE acquiring WALWriteLock
+  (deadlock-free: insert-lock then write-lock; eviction writes never wait). WAL
+  insert locks are HELD-EXCLUSIVE (PG model): advertise `inserting_at=0` (block-all)
+  before reserving, then the real LSN, cleared on release.
+- A PARTIAL last page backs the write cursor off to the request LSN (PG
+  `ispartialpage`) so a later same-page flush re-writes it - else the second
+  record is lost. Test incremental same-page flushes, not just flush-once.
+- WAL must be PG-compatible on disk: exact short/long page headers
+  (`XLOG_PAGE_MAGIC`, pageaddr, rem_len; long header on segment-first pages),
+  24-hex segment naming, and the record with the REAL `xl_prev` folded into the CRC
+  (assemble computes a partial CRC over the body; the insert finalizes over the
+  header after setting `xl_prev` - mirror `XLogInsertRecord`). CRC-32C is incremental.
+
+**Per-task state held across I/O.**
+- A pin/refcount/cache that is held across an I/O `.await` (PrivateRefCount, the
+  smgr cache, the local buffer pool, xloginsert staging) MUST be a tokio
+  `task_local`, NEVER `std::thread_local` - a thread-local splits across a thread
+  migration and corrupts the gated shared count. See [[per-task-state-must-be-send]].
+
+**Idiomatic Rust for dispatch / state machines.**
+- A self-contained reader/decoder taking an I/O callback is GENERIC over the
+  closure (`XLogReader<F>`), not `Box<dyn>`; keep its produced data type
+  (`DecodedXLogRecord`) non-generic so downstream stays simple.
+- A C dispatch table of function pointers (`RmgrTable`) becomes a trait + a match
+  (`GetRmgr(id) -> &'static dyn Rmgr`, unit-struct impls, inert defaults - NOT
+  `unimplemented!()`); keep the per-record arg non-generic so the trait is object-safe.
+
+**Construction order.** Add shared subsystems to `SharedState::new` at the
+`TODO(stepNN)` placeholder matching ipci.c's order (xlog before bufmgr; the sync
+queue near the checkpointer slot) - it encodes init dependencies.
+
+### Carried-forward TODOs (what F1 deferred; pick up at the named step)
+- step 17 checkpointer: drain `SharedState.sync_requests` AND finish the
+  fsync-failure / retry / cycle-counter semantics (`sync.rs` `TODO(step17)`);
+  `CreateCheckPoint`; source `xlp_sysid` from pg_control (currently a placeholder).
+- recovery (out of foundation): `StartupXLOG`/redo (`xlogrecovery.c`) and the async
+  WAL page-read driver (`XLogReader` takes a sync callback now).
+- `data_checksums_enabled()` is a stub (`PageIsVerified`/`PageSetChecksum*` panic
+  until the GUC lands); FSM `fp_next_slot` hint write is dropped (`TODO(perf)`: an
+  atomic byte); the buffer victim conditional content-lock is deferred; the smgr EOF
+  strict-error path needs the `InRecovery`/`zero_damaged_pages` GUCs.
