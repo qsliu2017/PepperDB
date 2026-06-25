@@ -81,15 +81,36 @@ pub const REL_PATH_STR_MAXLEN: usize = (PG_TBLSPC_DIR.len())
     + 1 // '_'
     + FORKNAMECHARS;
 
-/// String of the exact length required to represent a relation path.
+/// Tablespace OIDs from pg_tablespace.dat (the catalog .dat is not generated in
+/// the port yet, so the two well-known values are inlined here).
+pub const DEFAULTTABLESPACE_OID: Oid = Oid(1663);
+pub const GLOBALTABLESPACE_OID: Oid = Oid(1664);
+
+/// String of the exact length required to represent a relation path. The C type
+/// is a fixed `char[]`; we keep the produced path in a `String` since Rust paths
+/// are not built in critical sections here.
 pub struct RelPathStr {
-    pub str: [u8; REL_PATH_STR_MAXLEN + 1],
+    pub str: String,
+}
+
+impl RelPathStr {
+    pub fn as_str(&self) -> &str {
+        &self.str
+    }
 }
 
 /// Filesystem path for a database (relative to installation's $PGDATA).
 pub fn get_database_path(db_oid: Oid, spc_oid: Oid) -> String {
-    let _ = (db_oid, spc_oid);
-    unimplemented!()
+    if spc_oid == GLOBALTABLESPACE_OID {
+        // Shared system relations live in {datadir}/global
+        "global".to_string()
+    } else if spc_oid == DEFAULTTABLESPACE_OID {
+        // The default tablespace is {datadir}/base
+        format!("base/{}", db_oid.0)
+    } else {
+        // All other tablespaces are accessed via symlinks
+        format!("{}/{}/{}/{}", PG_TBLSPC_DIR, spc_oid.0, tablespace_version_directory(), db_oid.0)
+    }
 }
 
 /// Filesystem path for a relation fork.
@@ -100,8 +121,35 @@ pub fn get_relation_path(
     proc_number: ProcNumber,
     fork_number: ForkNumber,
 ) -> RelPathStr {
-    let _ = (db_oid, spc_oid, rel_number, proc_number, fork_number);
-    unimplemented!()
+    let fork_suffix = |s: &str| -> String {
+        if fork_number != ForkNumber::MAIN_FORKNUM {
+            format!("{s}_{}", FORK_NAMES[fork_number as usize])
+        } else {
+            s.to_string()
+        }
+    };
+
+    let str = if spc_oid == GLOBALTABLESPACE_OID {
+        // Shared system relations live in {datadir}/global
+        fork_suffix(&format!("global/{}", rel_number.0))
+    } else if spc_oid == DEFAULTTABLESPACE_OID {
+        // The default tablespace is {datadir}/base
+        if proc_number == INVALID_PROC_NUMBER {
+            fork_suffix(&format!("base/{}/{}", db_oid.0, rel_number.0))
+        } else {
+            fork_suffix(&format!("base/{}/t{}_{}", db_oid.0, proc_number, rel_number.0))
+        }
+    } else {
+        // All other tablespaces are accessed via symlinks
+        let base = format!("{}/{}/{}", PG_TBLSPC_DIR, spc_oid.0, tablespace_version_directory());
+        if proc_number == INVALID_PROC_NUMBER {
+            fork_suffix(&format!("{base}/{}/{}", db_oid.0, rel_number.0))
+        } else {
+            fork_suffix(&format!("{base}/{}/t{}_{}", db_oid.0, proc_number, rel_number.0))
+        }
+    };
+
+    RelPathStr { str }
 }
 
 /// Wrapper for GetRelationPath; first argument is a RelFileLocator.

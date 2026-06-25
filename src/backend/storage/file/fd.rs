@@ -122,7 +122,7 @@ impl FdManager {
             permit: None,
         });
         match self.ensure_open(key).await {
-            Ok(_) => Ok(File { key, mgr: self.clone() }),
+            Ok(_) => Ok(File::new(key, self.clone())),
             Err(e) => {
                 self.inner.lock().unwrap().cache.remove(key);
                 Err(e)
@@ -268,58 +268,70 @@ fn stale() -> io::Error {
 /// A generational handle to a managed file. Replaces fd.h's `File = i32`. A stale
 /// handle (used after close) fails safely: the generational key no longer
 /// resolves in the slab, so there is no reuse hazard.
-pub struct File {
+///
+/// `File` is a cheap `Clone` (an `Arc` bump): the vfd is closed only when the
+/// LAST clone drops. This lets the smgr/md layer clone a segment's handle out of
+/// its bookkeeping and `.await` an I/O on it without holding any borrow/lock
+/// across the suspension point.
+#[derive(Clone)]
+pub struct File(Arc<FileInner>);
+
+struct FileInner {
     key: Key<Vfd>,
     mgr: Arc<FdManager>,
 }
 
 impl File {
+    fn new(key: Key<Vfd>, mgr: Arc<FdManager>) -> Self {
+        File(Arc::new(FileInner { key, mgr }))
+    }
+
     /// Vectored positional read at `offset`.
     pub async fn read_v(&self, iov: &mut [IoSliceMut<'_>], offset: u64) -> io::Result<usize> {
-        let handle = self.mgr.ensure_open(self.key).await?;
-        self.mgr.io.read_vectored_at(&handle, iov, offset).await
+        let handle = self.0.mgr.ensure_open(self.0.key).await?;
+        self.0.mgr.io.read_vectored_at(&handle, iov, offset).await
     }
 
     /// Vectored positional write at `offset`.
     pub async fn write_v(&self, iov: &[IoSlice<'_>], offset: u64) -> io::Result<usize> {
-        let handle = self.mgr.ensure_open(self.key).await?;
-        self.mgr.io.write_vectored_at(&handle, iov, offset).await
+        let handle = self.0.mgr.ensure_open(self.0.key).await?;
+        self.0.mgr.io.write_vectored_at(&handle, iov, offset).await
     }
 
     /// Single-buffer positional read (convenience over `read_v`).
     pub async fn read(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
-        let handle = self.mgr.ensure_open(self.key).await?;
-        self.mgr.io.read_at(&handle, buf, offset).await
+        let handle = self.0.mgr.ensure_open(self.0.key).await?;
+        self.0.mgr.io.read_at(&handle, buf, offset).await
     }
 
     /// Single-buffer positional write (convenience over `write_v`).
     pub async fn write(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
-        let handle = self.mgr.ensure_open(self.key).await?;
-        self.mgr.io.write_at(&handle, buf, offset).await
+        let handle = self.0.mgr.ensure_open(self.0.key).await?;
+        self.0.mgr.io.write_at(&handle, buf, offset).await
     }
 
     /// fsync; aborts the process on failure (PG PANIC; data_sync_retry deleted).
     pub async fn sync(&self) -> io::Result<()> {
-        let handle = self.mgr.ensure_open(self.key).await?;
-        self.mgr.io.fsync(&handle).await;
+        let handle = self.0.mgr.ensure_open(self.0.key).await?;
+        self.0.mgr.io.fsync(&handle).await;
         Ok(())
     }
 
     pub async fn truncate(&self, len: u64) -> io::Result<()> {
-        let handle = self.mgr.ensure_open(self.key).await?;
-        self.mgr.io.truncate(&handle, len).await
+        let handle = self.0.mgr.ensure_open(self.0.key).await?;
+        self.0.mgr.io.truncate(&handle, len).await
     }
 
     /// Extend the file to at least `offset + len`, zero-filling (provisional;
     /// posix_fallocate is a future optimization -- see IoBackend::fallocate).
     pub async fn extend(&self, offset: u64, len: u64) -> io::Result<()> {
-        let handle = self.mgr.ensure_open(self.key).await?;
-        self.mgr.io.fallocate(&handle, offset, len).await
+        let handle = self.0.mgr.ensure_open(self.0.key).await?;
+        self.0.mgr.io.fallocate(&handle, offset, len).await
     }
 
     pub async fn size(&self) -> io::Result<u64> {
-        let handle = self.mgr.ensure_open(self.key).await?;
-        self.mgr.io.size(&handle).await
+        let handle = self.0.mgr.ensure_open(self.0.key).await?;
+        self.0.mgr.io.size(&handle).await
     }
 
     /// Best-effort prefetch. Provisional: posix_fadvise(WILLNEED) is a
@@ -327,12 +339,12 @@ impl File {
     /// optimization). Kept for call-site compatibility.
     pub fn prefetch(&self, _offset: u64, _amount: u64) {}
 
-    /// Close: drop the OS fd, free the slab slot, release the budget permit. Also
-    /// happens on Drop, so an explicit close is optional.
+    /// Close this handle. The OS fd / slab slot / budget permit are freed only
+    /// when the last clone drops; an explicit close is optional.
     pub fn close(self) {}
 }
 
-impl Drop for File {
+impl Drop for FileInner {
     fn drop(&mut self) {
         let mut g = self.mgr.inner.lock().unwrap();
         g.drop_from_lru(self.key);

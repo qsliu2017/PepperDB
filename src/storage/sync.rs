@@ -6,6 +6,7 @@ use crate::common::relpath::ForkNumber;
 use crate::storage::relfilelocator::RelFileLocator;
 
 /// Type of sync request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncRequestType {
     SyncRequest,       // schedule a call of sync function
     SyncUnlinkRequest, // schedule a call of unlink function
@@ -15,6 +16,7 @@ pub enum SyncRequestType {
 
 /// Which set of functions to use to handle a given request. The values must
 /// match the indexes of the function table in sync.c.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncRequestHandler {
     Md = 0,
     Clog,
@@ -26,6 +28,7 @@ pub enum SyncRequestHandler {
 
 /// A tag identifying a file (in-memory). `handler`/`forknum` are kept narrow
 /// (int16) to match md.c's space-saving usage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileTag {
     pub handler: i16, // SyncRequestHandler value
     pub forknum: i16, // ForkNumber value
@@ -55,22 +58,10 @@ impl FileTag {
     }
 }
 
-pub fn InitSync() {
-    unimplemented!()
-}
-pub fn SyncPreCheckpoint() {
-    unimplemented!()
-}
-pub fn SyncPostCheckpoint() {
-    unimplemented!()
-}
-pub fn ProcessSyncRequests() {
-    unimplemented!()
-}
-pub fn RememberSyncRequest(_ftag: &FileTag, _type: SyncRequestType) {
-    unimplemented!()
-}
-/// Returns true on success (false -> caller should retry / fall back).
-pub fn RegisterSyncRequest(_ftag: &FileTag, _type: SyncRequestType, _retry_on_error: bool) -> bool {
-    unimplemented!()
-}
+// The pending-fsync / pending-unlink queue (`SyncRequests`) and the request
+// functions live in `crate::backend::storage::sync::sync`; re-exported here so
+// sync.h call sites resolve. `SyncRequests` is an Arc field on `SharedState`.
+pub use crate::backend::storage::sync::sync::{
+    InitSync, ProcessSyncRequests, RegisterSyncRequest, RememberSyncRequest, SyncPostCheckpoint,
+    SyncPreCheckpoint, SyncRequests,
+};

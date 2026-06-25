@@ -60,6 +60,12 @@ pub struct SharedState {
 
     /// Inter-task signaling registry (PG `ProcSignal`).
     pub proc_signal: Arc<ProcSignal>,
+
+    /// Pending-fsync / pending-unlink queue (PG sync.c `pendingOps`). Storage
+    /// tasks (smgr/md) enqueue fsync/unlink requests; the checkpointer drains it
+    /// (step 17). Single-process: one shared structure instead of the
+    /// per-checkpointer table + cross-process forward queue.
+    pub sync_requests: Arc<crate::storage::sync::SyncRequests>,
     // Future Arc fields (varsup, xlog, clog, bufmgr, lockmgr, procarray,
     // sinval, checkpointer, ...) are inserted by later steps -- see new().
 }
@@ -124,6 +130,11 @@ impl SharedState {
         //   (PMSignalShmemInit -- postmaster signaling, supervisor/step17)
         // ProcSignalShmemInit -- step04, DONE (constructed below at this slot).
         let proc_signal = Arc::new(ProcSignal::new());
+        // The sync request queue (sync.c InitSync) is created for the
+        // checkpointer/standalone backend; under the single-process model it is
+        // one shared structure. Construct it here, at the checkpointer-adjacent
+        // slot; the checkpointer task drains it (TODO(step17)).
+        let sync_requests = Arc::new(crate::storage::sync::SyncRequests::new());
         // TODO(step17): CheckpointerShmemInit  here
         // TODO(step17): AutoVacuumShmemInit  here
         //   (Replication* / WalSnd / WalRcv / WalSummarizer / PgArch /
@@ -137,7 +148,7 @@ impl SharedState {
         //   (WaitEventCustomShmemInit / InjectionPointShmemInit -- deferred)
         //   (AioShmemInit -- deferred: tokio I/O leaf replaces the aio subsys)
 
-        Arc::new(SharedState { config: process_config, fd, proc_signal })
+        Arc::new(SharedState { config: process_config, fd, proc_signal, sync_requests })
     }
 
     /// Process-wide startup config (PG globals.c config half).
@@ -158,6 +169,11 @@ impl SharedState {
 
     pub fn proc_signal(&self) -> &Arc<ProcSignal> {
         &self.proc_signal
+    }
+
+    /// The shared pending-fsync / pending-unlink queue (PG sync.c).
+    pub fn sync_requests(&self) -> &Arc<crate::storage::sync::SyncRequests> {
+        &self.sync_requests
     }
 }
 

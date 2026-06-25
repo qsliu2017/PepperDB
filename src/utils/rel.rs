@@ -442,7 +442,7 @@ impl RelationData {
     pub fn smgr(&mut self) -> *mut SmgrRelation {
         if self.rd_smgr.is_null() {
             // smgropen returns an owned handle in this port; pin it.
-            let reln = crate::storage::smgr::smgropen(self.rd_locator, self.rd_backend);
+            let reln = crate::storage::smgr::SmgrRelation::open(self.rd_locator, self.rd_backend);
             self.rd_smgr = Box::into_raw(Box::new(reln));
             unsafe { crate::storage::smgr::smgrpin(&mut *self.rd_smgr) };
         }
@@ -454,7 +454,7 @@ impl RelationData {
         if !self.rd_smgr.is_null() {
             unsafe {
                 crate::storage::smgr::smgrunpin(&mut *self.rd_smgr);
-                crate::storage::smgr::smgrclose(&mut *self.rd_smgr);
+                (*self.rd_smgr).close();
                 drop(Box::from_raw(self.rd_smgr));
             }
             self.rd_smgr = core::ptr::null_mut();

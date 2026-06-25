@@ -22,7 +22,7 @@ use crate::storage::relfilelocator::{RelFileLocator, RelFileLocatorBackend};
 // becomes Rust ownership, and async I/O handles are deferred to the I/O backend.
 
 /// Number of forks (MAIN..INIT), i.e. MAX_FORKNUM + 1, used for per-fork arrays.
-const NUM_FORKS: usize = (MAX_FORKNUM as usize) + 1;
+pub const NUM_FORKS: usize = (MAX_FORKNUM as usize) + 1;
 
 /// Storage manager selector. Only magnetic disk (md.c) exists as a built-in, so
 /// the C `f_smgr` method table is a single variant rather than a vtable.
@@ -50,8 +50,11 @@ pub struct SmgrRelation {
     // --- Fields below are private to smgr.c and its submodules. ---
     /// Storage manager selector.
     pub which: SMgrImpl,
-    // md.c per-fork open-segment bookkeeping (md_num_open_segs / md_seg_fds) and
-    // the dlist pinning link are dropped: deferred to the I/O backend impl.
+
+    /// md.c per-fork open-segment bookkeeping (md_seg_fds / md_num_open_segs):
+    /// the open segment files for each fork, lowest segno first. The dlist
+    /// pinning link is dropped (Rust ownership replaces the pin GC).
+    pub(crate) md_seg_fds: [Vec<crate::backend::storage::smgr::md::MdfdVec>; NUM_FORKS],
 }
 
 impl SmgrRelation {
@@ -62,202 +65,210 @@ impl SmgrRelation {
     }
 }
 
-/// Initialize the storage manager subsystem.
+
+// ---------------------------------------------------------------------------
+// Deprecated C-named free-function shims. The real logic is idiomatic methods
+// on `SmgrRelation` (see `backend::storage::smgr::smgr`); these preserve the C
+// names for cross-reference and mechanical ports. The smgr*v / smgr* I/O ops
+// are async (over IoBackend) and take `&Arc<SharedState>` (the FdManager + sync
+// queue) plus the caller-owned `&mut SmgrRelation`. New code should call the
+// methods directly.
+// ---------------------------------------------------------------------------
+
+use std::sync::Arc;
+
+use crate::shared_state::SharedState;
+use crate::storage::bufpage::Page;
+
+pub use crate::backend::storage::smgr::smgr::{
+    at_eo_xact_smgr, smgr_cache_open, smgr_cache_put, smgr_is_cached, with_smgr_cache,
+};
+
+/// Initialize the storage manager subsystem. md has no per-task init under the
+/// async model, so this is a no-op (kept for call-site parity).
 pub fn smgrinit() {
-    unimplemented!()
+    // md::mdinit was a MemoryContext setup -> nothing to do.
 }
 
-/// Return an SMgrRelation handle for `rlocator`/`backend`, creating the cache
-/// entry if necessary. No I/O.
-pub fn smgropen(_rlocator: RelFileLocator, _backend: ProcNumber) -> SmgrRelation {
-    unimplemented!()
+#[deprecated(note = "use `SmgrRelation::open` / `smgr_cache_open`")]
+#[inline]
+pub fn smgropen(rlocator: RelFileLocator, backend: ProcNumber) -> SmgrRelation {
+    SmgrRelation::open(rlocator, backend)
 }
 
-/// Does the underlying file for `forknum` exist?
-pub fn smgrexists(_reln: &SmgrRelation, _forknum: ForkNumber) -> bool {
-    unimplemented!()
+#[deprecated(note = "use `reln.exists(shared, forknum).await`")]
+#[inline]
+pub async fn smgrexists(shared: &Arc<SharedState>, reln: &mut SmgrRelation, forknum: ForkNumber) -> bool {
+    reln.exists(shared, forknum).await
 }
 
-/// Pin an SMgrRelation so it is not destroyed while in use.
-pub fn smgrpin(_reln: &mut SmgrRelation) {
-    unimplemented!()
+#[deprecated(note = "use `reln.close()`")]
+#[inline]
+pub fn smgrclose(reln: &mut SmgrRelation) {
+    reln.close()
 }
 
-/// Unpin an SMgrRelation, allowing later destruction.
-pub fn smgrunpin(_reln: &mut SmgrRelation) {
-    unimplemented!()
+#[deprecated(note = "use `reln.release()`")]
+#[inline]
+pub fn smgrrelease(reln: &mut SmgrRelation) {
+    reln.release()
 }
 
-/// Close an SMgrRelation, releasing the cache entry.
-pub fn smgrclose(_reln: &mut SmgrRelation) {
-    unimplemented!()
-}
-
-/// Destroy all unpinned SMgrRelations.
-pub fn smgrdestroyall() {
-    unimplemented!()
-}
-
-/// Release resources (e.g. OS file descriptors) for one SMgrRelation.
-pub fn smgrrelease(_reln: &mut SmgrRelation) {
-    unimplemented!()
-}
-
-/// Release resources for all SMgrRelations.
-pub fn smgrreleaseall() {
-    unimplemented!()
-}
-
-/// Release the SMgrRelation matching `rlocator`, if cached.
-pub fn smgrreleaserellocator(_rlocator: RelFileLocatorBackend) {
-    unimplemented!()
-}
-
-/// Create the underlying storage for `forknum`. `is_redo` is set during recovery.
-pub fn smgrcreate(_reln: &mut SmgrRelation, _forknum: ForkNumber, _is_redo: bool) {
-    unimplemented!()
-}
-
-/// fsync all forks of the given relations.
-pub fn smgrdosyncall(_rels: &mut [SmgrRelation]) {
-    unimplemented!()
-}
-
-/// Unlink all forks of the given relations. `is_redo` is set during recovery.
-pub fn smgrdounlinkall(_rels: &mut [SmgrRelation], _is_redo: bool) {
-    unimplemented!()
-}
-
-/// Append `buffer` (one block) at `blocknum`, extending the fork.
-pub fn smgrextend(
-    _reln: &mut SmgrRelation,
-    _forknum: ForkNumber,
-    _blocknum: BlockNumber,
-    _buffer: &[u8],
-    _skip_fsync: bool,
+#[deprecated(note = "use `reln.create(shared, forknum, is_redo).await`")]
+#[inline]
+pub async fn smgrcreate(
+    shared: &Arc<SharedState>,
+    reln: &mut SmgrRelation,
+    forknum: ForkNumber,
+    is_redo: bool,
 ) {
-    unimplemented!()
+    reln.create(shared, forknum, is_redo).await
 }
 
-/// Extend the fork by `nblocks` zero-filled blocks starting at `blocknum`.
-pub fn smgrzeroextend(
-    _reln: &mut SmgrRelation,
-    _forknum: ForkNumber,
-    _blocknum: BlockNumber,
-    _nblocks: i32,
-    _skip_fsync: bool,
-) {
-    unimplemented!()
-}
-
-/// Prefetch `nblocks` blocks starting at `blocknum`. Returns false if not
-/// possible (e.g. posix_fadvise unsupported).
-pub fn smgrprefetch(
-    _reln: &mut SmgrRelation,
-    _forknum: ForkNumber,
-    _blocknum: BlockNumber,
-    _nblocks: i32,
-) -> bool {
-    unimplemented!()
-}
-
-/// Max number of blocks that can be combined into one I/O starting at `blocknum`.
-pub fn smgrmaxcombine(
-    _reln: &mut SmgrRelation,
-    _forknum: ForkNumber,
-    _blocknum: BlockNumber,
-) -> u32 {
-    unimplemented!()
-}
-
-/// Read `buffers.len()` blocks starting at `blocknum` into `buffers`
-/// (vectored read). Each buffer is one block.
-pub fn smgrreadv(
-    _reln: &mut SmgrRelation,
-    _forknum: ForkNumber,
-    _blocknum: BlockNumber,
-    _buffers: &mut [&mut [u8]],
-) {
-    unimplemented!()
-}
-
-/// Read one block at `blocknum` into `buffer`. Inline wrapper over `smgrreadv`.
-pub fn smgrread(
+#[deprecated(note = "use `reln.extend(shared, forknum, blocknum, buffer, skip_fsync).await`")]
+#[inline]
+pub async fn smgrextend(
+    shared: &Arc<SharedState>,
     reln: &mut SmgrRelation,
     forknum: ForkNumber,
     blocknum: BlockNumber,
-    buffer: &mut [u8],
-) {
-    smgrreadv(reln, forknum, blocknum, &mut [buffer]);
-}
-
-/// Write `buffers.len()` blocks starting at `blocknum` from `buffers`
-/// (vectored write). Each buffer is one block.
-pub fn smgrwritev(
-    _reln: &mut SmgrRelation,
-    _forknum: ForkNumber,
-    _blocknum: BlockNumber,
-    _buffers: &[&[u8]],
-    _skip_fsync: bool,
-) {
-    unimplemented!()
-}
-
-/// Write one block at `blocknum` from `buffer`. Inline wrapper over `smgrwritev`.
-pub fn smgrwrite(
-    reln: &mut SmgrRelation,
-    forknum: ForkNumber,
-    blocknum: BlockNumber,
-    buffer: &[u8],
+    buffer: &Page,
     skip_fsync: bool,
 ) {
-    smgrwritev(reln, forknum, blocknum, &[buffer], skip_fsync);
+    reln.extend(shared, forknum, blocknum, buffer, skip_fsync).await
 }
 
-/// Hint the OS to write back `nblocks` blocks starting at `blocknum`.
-pub fn smgrwriteback(
-    _reln: &mut SmgrRelation,
-    _forknum: ForkNumber,
-    _blocknum: BlockNumber,
-    _nblocks: BlockNumber,
+#[deprecated(note = "use `reln.zeroextend(shared, forknum, blocknum, nblocks, skip_fsync).await`")]
+#[inline]
+pub async fn smgrzeroextend(
+    shared: &Arc<SharedState>,
+    reln: &mut SmgrRelation,
+    forknum: ForkNumber,
+    blocknum: BlockNumber,
+    nblocks: i32,
+    skip_fsync: bool,
 ) {
-    unimplemented!()
+    reln.zeroextend(shared, forknum, blocknum, nblocks, skip_fsync).await
 }
 
-/// Number of blocks in `forknum`.
-pub fn smgrnblocks(_reln: &mut SmgrRelation, _forknum: ForkNumber) -> BlockNumber {
-    unimplemented!()
+#[deprecated(note = "use `reln.prefetch(forknum, blocknum, nblocks)`")]
+#[inline]
+pub fn smgrprefetch(
+    reln: &mut SmgrRelation,
+    forknum: ForkNumber,
+    blocknum: BlockNumber,
+    nblocks: i32,
+) -> bool {
+    reln.prefetch(forknum, blocknum, nblocks)
 }
 
-/// Cached number of blocks in `forknum`, if known; None if the cache is stale
-/// (was InvalidBlockNumber). C returned InvalidBlockNumber as the sentinel.
-pub fn smgrnblocks_cached(_reln: &mut SmgrRelation, _forknum: ForkNumber) -> Option<BlockNumber> {
+#[deprecated(note = "use `reln.maxcombine(forknum, blocknum)`")]
+#[inline]
+pub fn smgrmaxcombine(reln: &mut SmgrRelation, forknum: ForkNumber, blocknum: BlockNumber) -> u32 {
+    reln.maxcombine(forknum, blocknum)
+}
+
+#[deprecated(note = "use `reln.readv(shared, forknum, blocknum, buffers).await`")]
+#[inline]
+pub async fn smgrreadv(
+    shared: &Arc<SharedState>,
+    reln: &mut SmgrRelation,
+    forknum: ForkNumber,
+    blocknum: BlockNumber,
+    buffers: &mut [&mut Page],
+) {
+    reln.readv(shared, forknum, blocknum, buffers).await
+}
+
+#[deprecated(note = "use `reln.read(shared, forknum, blocknum, buffer).await`")]
+#[inline]
+pub async fn smgrread(
+    shared: &Arc<SharedState>,
+    reln: &mut SmgrRelation,
+    forknum: ForkNumber,
+    blocknum: BlockNumber,
+    buffer: &mut Page,
+) {
+    reln.read(shared, forknum, blocknum, buffer).await
+}
+
+#[deprecated(note = "use `reln.writev(shared, forknum, blocknum, buffers, skip_fsync).await`")]
+#[inline]
+pub async fn smgrwritev(
+    shared: &Arc<SharedState>,
+    reln: &mut SmgrRelation,
+    forknum: ForkNumber,
+    blocknum: BlockNumber,
+    buffers: &[&Page],
+    skip_fsync: bool,
+) {
+    reln.writev(shared, forknum, blocknum, buffers, skip_fsync).await
+}
+
+#[deprecated(note = "use `reln.write(shared, forknum, blocknum, buffer, skip_fsync).await`")]
+#[inline]
+pub async fn smgrwrite(
+    shared: &Arc<SharedState>,
+    reln: &mut SmgrRelation,
+    forknum: ForkNumber,
+    blocknum: BlockNumber,
+    buffer: &Page,
+    skip_fsync: bool,
+) {
+    reln.write(shared, forknum, blocknum, buffer, skip_fsync).await
+}
+
+#[deprecated(note = "use `reln.writeback(forknum, blocknum, nblocks)`")]
+#[inline]
+pub fn smgrwriteback(
+    reln: &mut SmgrRelation,
+    forknum: ForkNumber,
+    blocknum: BlockNumber,
+    nblocks: BlockNumber,
+) {
+    reln.writeback(forknum, blocknum, nblocks)
+}
+
+#[deprecated(note = "use `reln.nblocks(shared, forknum).await`")]
+#[inline]
+pub async fn smgrnblocks(shared: &Arc<SharedState>, reln: &mut SmgrRelation, forknum: ForkNumber) -> BlockNumber {
+    reln.nblocks(shared, forknum).await
+}
+
+#[deprecated(note = "use `reln.nblocks_cached(forknum)`")]
+#[inline]
+pub fn smgrnblocks_cached(reln: &mut SmgrRelation, forknum: ForkNumber) -> Option<BlockNumber> {
     let _ = INVALID_BLOCK_NUMBER;
-    unimplemented!()
+    reln.nblocks_cached(forknum)
 }
 
-/// Truncate the listed forks to the given new sizes. C took parallel arrays of
-/// (forknum, old_nblocks, nblocks); Rust takes one slice of triples.
-pub fn smgrtruncate(_reln: &mut SmgrRelation, _truncate: &[(ForkNumber, BlockNumber, BlockNumber)]) {
-    unimplemented!()
+#[deprecated(note = "use `reln.truncate(shared, &[(fork, old, new)]).await`")]
+#[inline]
+pub async fn smgrtruncate(
+    shared: &Arc<SharedState>,
+    reln: &mut SmgrRelation,
+    truncate: &[(ForkNumber, BlockNumber, BlockNumber)],
+) {
+    reln.truncate(shared, truncate).await
 }
 
-/// Immediately fsync `forknum`.
-pub fn smgrimmedsync(_reln: &mut SmgrRelation, _forknum: ForkNumber) {
-    unimplemented!()
+#[deprecated(note = "use `reln.immedsync(shared, forknum).await`")]
+#[inline]
+pub async fn smgrimmedsync(shared: &Arc<SharedState>, reln: &mut SmgrRelation, forknum: ForkNumber) {
+    reln.immedsync(shared, forknum).await
 }
 
-/// Register a deferred fsync request for `forknum`.
-pub fn smgrregistersync(_reln: &mut SmgrRelation, _forknum: ForkNumber) {
-    unimplemented!()
+#[deprecated(note = "use `reln.registersync(shared, forknum).await`")]
+#[inline]
+pub async fn smgrregistersync(shared: &Arc<SharedState>, reln: &mut SmgrRelation, forknum: ForkNumber) {
+    reln.registersync(shared, forknum).await
 }
 
-/// End-of-transaction cleanup of the smgr cache.
-pub fn at_eo_xact_smgr() {
-    unimplemented!()
-}
+/// smgrpin() / smgrunpin() -- the pin/unpin GC of the smgr handle cache is
+/// tombstoned: handle lifetime is Rust ownership now (the relcache owns its
+/// `SmgrRelation`). Kept as no-ops for call-site parity (relcache).
+#[inline]
+pub fn smgrpin(_reln: &mut SmgrRelation) {}
 
-/// Process a "smgr release" barrier; returns true when handled.
-pub fn process_barrier_smgr_release() -> bool {
-    unimplemented!()
-}
+#[inline]
+pub fn smgrunpin(_reln: &mut SmgrRelation) {}

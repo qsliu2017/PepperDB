@@ -285,6 +285,22 @@ pub async fn unlink(path: impl AsRef<Path>) -> io::Result<()> {
         .expect("unlink join")
 }
 
+/// Create a directory and all parents (mkdir -p). Free function: no fd handle.
+pub async fn mkdir_all(path: impl AsRef<Path>) -> io::Result<()> {
+    let path = path.as_ref().to_path_buf();
+    tokio::task::spawn_blocking(move || std::fs::create_dir_all(&path))
+        .await
+        .expect("mkdir_all join")
+}
+
+/// Recursively remove a directory and its contents (rm -rf). Free function.
+pub async fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+    let path = path.as_ref().to_path_buf();
+    tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&path))
+        .await
+        .expect("remove_dir_all join")
+}
+
 /// Rename within a filesystem (no cross-directory guarantee, per durable_rename).
 pub async fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     let from: PathBuf = from.as_ref().to_path_buf();
