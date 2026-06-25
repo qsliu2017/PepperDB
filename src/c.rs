@@ -252,10 +252,10 @@ pub fn AssertMacro(condition: bool) {
 // StaticAssertDecl/StaticAssertStmt/StaticAssertExpr -> `const _: () = assert!(...)`
 // at the use site. AssertVariableIsOfType -> Rust's type system handles this.
 
-/// C: `pg_noreturn extern void ExceptionalCondition(...)`. Aborts.
-pub fn ExceptionalCondition(_condition_name: &str, _file_name: &str, _line_number: i32) -> ! {
-    panic!("ExceptionalCondition");
-}
+/// C: `pg_noreturn extern void ExceptionalCondition(...)`. Handles a failed
+/// Assert(): reports on stderr and aborts. Intentionally bypasses elog() to
+/// minimize infrastructure needed to report an assertion failure.
+pub use crate::backend::utils::error::assert::ExceptionalCondition;
 
 // === Section 7: widely useful macros ===
 

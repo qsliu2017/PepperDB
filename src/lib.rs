@@ -6,6 +6,7 @@
 // === scaffold: child modules (Phase 0) ===
 pub mod access;
 pub mod archive;
+pub mod backend;
 pub mod backup;
 pub mod bootstrap;
 pub mod c;

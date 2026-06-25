@@ -1,9 +1,21 @@
 //! Translated from PostgreSQL src/include/utils/elog.h
 //!
 //! Error model: PG's `elog`/`ereport` use setjmp/longjmp. We keep `>= ERROR`
-//! semantics as a `panic!` (the eventual catch_unwind at task spawn); lower
-//! severities log-and-return. Every >=ERROR raising path is marked
+//! semantics as a `panic!` whose payload is the structured `ErrorData` value
+//! (`std::panic::panic_any(edata)`), to be caught by a future `catch_unwind` at
+//! the task boundary and downcast back to `ErrorData`. Lower severities
+//! log-and-return. Every >=ERROR raising path is marked
 //! `#[deprecated(note = "TODO(panic): migrate to Result + ?")]` + `// TODO(panic)`.
+//!
+//! The process-global errordata stack, recursion_depth and error_context_stack
+//! become per-task (thread-local) state under the single-process async model;
+//! palloc/MemoryContext are tombstoned to Rust ownership (ErrorData owns its
+//! `String`s). Subsystems not in this step (GUC knobs, libpq frontend send,
+//! syslog/csvlog/jsonlog, ps_display, pgstat, log_line_prefix grammar) are
+//! deferred: where elog.c calls into them we call the existing stubs.
+//!
+//! The function/global bodies declared here live in the backend definition
+//! module (crate::backend::utils::error::elog) and are re-exported below.
 
 use crate::utils::errcodes::make_sqlstate;
 
@@ -78,6 +90,17 @@ pub enum PgErrorVerbosity {
 }
 
 // ---------------------------------------------------------------------------
+// Deferred GUC parameters. errstart's gating reads these; real values come from
+// the GUC subsystem later. For now they reflect elog.c's static initializers,
+// so >=ERROR always raises and lower severities reach stderr.
+// ---------------------------------------------------------------------------
+
+pub const LOG_MIN_MESSAGES: i32 = WARNING;
+pub const CLIENT_MIN_MESSAGES: i32 = NOTICE;
+pub const LOG_DESTINATION: i32 = LOG_DESTINATION_STDERR;
+pub const LOG_ERROR_VERBOSITY: PgErrorVerbosity = PgErrorVerbosity::Default;
+
+// ---------------------------------------------------------------------------
 // ErrorData -- in-memory accumulator for one ereport() cycle. All the palloc'd
 // `char *` become owned `String`; the const message_id stays `&'static str`.
 // `assoc_context` (MemoryContextData*) is dropped under the arena model.
@@ -133,186 +156,27 @@ impl ErrorContextCallback {
     }
 }
 
-// PG's `ErrorContextCallback *error_context_stack` global + the `sigjmp_buf
-// *PG_exception_stack` global are both task-local concerns under the async
-// single-process model.
-// TODO(panic): make these task-local (tokio task_local!) rather than statics.
-pub static mut ERROR_CONTEXT_STACK: Vec<ErrorContextCallback> = Vec::new();
-
 // ---------------------------------------------------------------------------
-// Builder-style error field accessors. PG threads these (errcode/errmsg/...)
-// as comma-expression "int" calls inside ereport(); here they build/mutate an
-// ErrorData. printf varargs collapse to a pre-formatted `String` at the call
-// site (callers use format!()).
+// Definitions translated from elog.c live in the backend module; re-export the
+// header-declared API so `crate::utils::elog::<name>` call sites keep resolving.
 // ---------------------------------------------------------------------------
 
-impl ErrorData {
-    pub fn errcode(&mut self, sqlerrcode: i32) -> &mut Self {
-        self.sqlerrcode = sqlerrcode;
-        self
-    }
+pub use crate::backend::utils::error::elog::{
+    check_log_of_query, copy_error_data, debug_file_open, emit_error_report, err_generic_string,
+    errbacktrace, errcode_for_file_access, errcode_for_socket_access, errdetail_log_plural,
+    errdetail_plural, errhint_plural, errmsg_plural, errsave_start, errstart, errstart_cold,
+    error_severity, flush_error_state, format_elog_string, free_error_data, get_backend_type_for_log,
+    get_error_context_stack, get_formatted_log_time, get_formatted_start_time, geterrcode,
+    geterrposition, getinternalerrposition, in_error_recursion_trouble, log_status_format,
+    message_level_is_interesting, pg_try, pre_format_elog_string, reset_formatted_start_time,
+    set_errcontext_domain, unpack_sql_state, write_csvlog, write_jsonlog, write_pipe_chunks,
+    write_stderr, EMIT_LOG_HOOK, ERROR_CONTEXT_STACK,
+};
 
-    pub fn errmsg(&mut self, msg: impl Into<String>) -> &mut Self {
-        self.message = Some(msg.into());
-        self
-    }
-
-    pub fn errmsg_internal(&mut self, msg: impl Into<String>) -> &mut Self {
-        self.message = Some(msg.into());
-        self
-    }
-
-    pub fn errdetail(&mut self, msg: impl Into<String>) -> &mut Self {
-        self.detail = Some(msg.into());
-        self
-    }
-
-    pub fn errdetail_internal(&mut self, msg: impl Into<String>) -> &mut Self {
-        self.detail = Some(msg.into());
-        self
-    }
-
-    pub fn errdetail_log(&mut self, msg: impl Into<String>) -> &mut Self {
-        self.detail_log = Some(msg.into());
-        self
-    }
-
-    pub fn errhint(&mut self, msg: impl Into<String>) -> &mut Self {
-        self.hint = Some(msg.into());
-        self
-    }
-
-    pub fn errcontext_msg(&mut self, msg: impl Into<String>) -> &mut Self {
-        self.context = Some(msg.into());
-        self
-    }
-
-    pub fn errhidestmt(&mut self, hide_stmt: bool) -> &mut Self {
-        self.hide_stmt = hide_stmt;
-        self
-    }
-
-    pub fn errhidecontext(&mut self, hide_ctx: bool) -> &mut Self {
-        self.hide_ctx = hide_ctx;
-        self
-    }
-
-    pub fn errposition(&mut self, cursorpos: i32) -> &mut Self {
-        self.cursorpos = cursorpos;
-        self
-    }
-
-    pub fn internalerrposition(&mut self, cursorpos: i32) -> &mut Self {
-        self.internalpos = cursorpos;
-        self
-    }
-
-    pub fn internalerrquery(&mut self, query: impl Into<String>) -> &mut Self {
-        self.internalquery = Some(query.into());
-        self
-    }
-}
-
-// Plural variants collapse to a runtime pick of singular/plural; printf args are
-// pre-formatted by the caller, so we just select the format string.
-pub fn errmsg_plural<'a>(fmt_singular: &'a str, fmt_plural: &'a str, n: u64) -> &'a str {
-    if n == 1 { fmt_singular } else { fmt_plural }
-}
-pub fn errdetail_plural<'a>(fmt_singular: &'a str, fmt_plural: &'a str, n: u64) -> &'a str {
-    if n == 1 { fmt_singular } else { fmt_plural }
-}
-pub fn errdetail_log_plural<'a>(fmt_singular: &'a str, fmt_plural: &'a str, n: u64) -> &'a str {
-    if n == 1 { fmt_singular } else { fmt_plural }
-}
-pub fn errhint_plural<'a>(fmt_singular: &'a str, fmt_plural: &'a str, n: u64) -> &'a str {
-    if n == 1 { fmt_singular } else { fmt_plural }
-}
-
-// errcode helpers that derive a SQLSTATE from errno-style failures.
-pub fn errcode_for_file_access() -> i32 {
-    unimplemented!()
-}
-pub fn errcode_for_socket_access() -> i32 {
-    unimplemented!()
-}
-
-// Default sqlerrcode for an elevel (errstart's fallback, see header comment).
-pub const fn default_errcode_for(elevel: i32) -> i32 {
-    if elevel >= ERROR {
-        ERRCODE_INTERNAL_ERROR
-    } else if elevel == WARNING {
-        ERRCODE_WARNING
-    } else {
-        ERRCODE_SUCCESSFUL_COMPLETION
-    }
-}
-
-// ---------------------------------------------------------------------------
-// errstart / errfinish core. In PG `errstart` returns whether the message is
-// worth building; `errfinish` either logs (low severity) or longjmps (>=ERROR).
-// Here >=ERROR -> panic carrying the ErrorData; lower -> log and return.
-// ---------------------------------------------------------------------------
-
-pub fn message_level_is_interesting(elevel: i32) -> bool {
-    // Stub: real impl compares against client/log_min_messages GUCs.
-    let _ = elevel;
-    unimplemented!()
-}
-
-// Returns Some(ErrorData) when the message should be built (always, in the
-// skeleton); the caller fills fields then calls errfinish.
-pub fn errstart(elevel: i32, domain: Option<&str>) -> Option<ErrorData> {
-    let mut edata = ErrorData::default();
-    edata.elevel = elevel;
-    edata.sqlerrcode = default_errcode_for(elevel);
-    edata.domain = domain.map(|s| s.to_owned());
-    Some(edata)
-}
-
-// pg_attribute_cold variant taken for compile-time-constant elevel >= ERROR.
-pub fn errstart_cold(elevel: i32, domain: Option<&str>) -> Option<ErrorData> {
-    errstart(elevel, domain)
-}
-
-#[deprecated(note = "TODO(panic): migrate to Result + ?")]
-pub fn errfinish(mut edata: ErrorData, filename: &str, lineno: i32, funcname: &str) {
-    // TODO(panic): the >=ERROR path panics (caught by catch_unwind at task
-    // spawn); lower severities should log and return.
-    edata.filename = Some(filename.to_owned());
-    edata.lineno = lineno;
-    edata.funcname = Some(funcname.to_owned());
-    if edata.elevel >= ERROR {
-        // TODO(panic)
-        panic!(
-            "{}",
-            edata.message.clone().unwrap_or_else(|| "error".to_owned())
-        );
-    }
-    // log-and-return for WARNING/LOG/NOTICE/... -- real impl emits to log/client.
-    let _ = edata;
-}
-
-// errsave / ereturn soft-error path. `context` is a *Node (ErrorSaveContext) or
-// NULL; modeled as Option. With None it behaves like ereport(ERROR).
-pub fn errsave_start(context: Option<&mut ()>, domain: Option<&str>) -> Option<ErrorData> {
-    let _ = context;
-    errstart(ERROR, domain)
-}
-
-#[deprecated(note = "TODO(panic): migrate to Result + ?")]
-pub fn errsave_finish(
-    context: Option<&mut ()>,
-    edata: ErrorData,
-    filename: &str,
-    lineno: i32,
-    funcname: &str,
-) {
-    // TODO(panic): if context is a real ErrorSaveContext, stash edata and return;
-    // otherwise behave like errfinish(ERROR).
-    let _ = context;
-    #[allow(deprecated)]
-    errfinish(edata, filename, lineno, funcname);
-}
+#[allow(deprecated)]
+pub use crate::backend::utils::error::elog::{
+    errfinish, errsave_finish, pg_re_throw, re_throw_error, throw_error_data,
+};
 
 // ---------------------------------------------------------------------------
 // ereport! / elog! macros. printf varargs collapse to format!() at call sites.
@@ -344,170 +208,4 @@ macro_rules! elog {
             __e.errmsg_internal($msg);
         });
     }};
-}
-
-// ---------------------------------------------------------------------------
-// Context / position / generic-string accessors. These mutate the in-flight
-// ErrorData in PG; provided as free fns operating on a borrow for callers that
-// don't go through the builder methods.
-// ---------------------------------------------------------------------------
-
-pub fn set_errcontext_domain(_domain: Option<&str>) -> i32 {
-    0
-}
-
-pub fn errbacktrace() -> i32 {
-    unimplemented!()
-}
-
-pub fn err_generic_string(_field: i32, _str: &str) -> i32 {
-    unimplemented!()
-}
-
-pub fn geterrcode() -> i32 {
-    unimplemented!()
-}
-pub fn geterrposition() -> i32 {
-    unimplemented!()
-}
-pub fn getinternalerrposition() -> i32 {
-    unimplemented!()
-}
-
-// ---------------------------------------------------------------------------
-// Constructing error strings outside ereport().
-// ---------------------------------------------------------------------------
-
-pub fn pre_format_elog_string(_errnumber: i32, _domain: Option<&str>) {
-    unimplemented!()
-}
-
-// printf varargs collapse to a pre-formatted String supplied by the caller.
-pub fn format_elog_string(fmt: &str) -> String {
-    let _ = fmt;
-    unimplemented!()
-}
-
-// ---------------------------------------------------------------------------
-// PG_TRY / PG_CATCH / PG_RE_THROW. The setjmp/longjmp frame maps to
-// catch_unwind; pg_re_throw resumes the unwind (-> !).
-// ---------------------------------------------------------------------------
-
-// TODO(panic): catch_unwind-based replacement for PG_TRY/PG_CATCH. Runs `body`;
-// on a (>=ERROR) panic runs `catch`. Real impl threads ErrorData through the
-// panic payload and restores error_context_stack.
-pub fn pg_try<T>(body: impl FnOnce() -> T + std::panic::UnwindSafe, catch: impl FnOnce()) -> T {
-    match std::panic::catch_unwind(body) {
-        Ok(v) => v,
-        Err(_payload) => {
-            catch();
-            // TODO(panic): rethrow unless the catch handled it.
-            #[allow(deprecated)]
-            pg_re_throw();
-        }
-    }
-}
-
-// PG_RE_THROW(): resume the in-flight error. Never returns.
-#[deprecated(note = "TODO(panic): migrate to Result + ?")]
-pub fn pg_re_throw() -> ! {
-    // TODO(panic): resume_unwind with the saved ErrorData payload.
-    panic!("pg_re_throw");
-}
-
-// ---------------------------------------------------------------------------
-// ErrorData lifecycle + reporting.
-// ---------------------------------------------------------------------------
-
-pub fn emit_error_report() {
-    unimplemented!()
-}
-
-pub fn copy_error_data() -> ErrorData {
-    unimplemented!()
-}
-
-// FreeErrorData is a no-op under Rust ownership (drop handles it).
-pub fn free_error_data(_edata: ErrorData) {}
-
-pub fn flush_error_state() {
-    unimplemented!()
-}
-
-#[deprecated(note = "TODO(panic): migrate to Result + ?")]
-pub fn re_throw_error(_edata: ErrorData) -> ! {
-    // TODO(panic): pg_noreturn -- resume the unwind carrying edata.
-    panic!("ReThrowError");
-}
-
-#[deprecated(note = "TODO(panic): migrate to Result + ?")]
-pub fn throw_error_data(_edata: ErrorData) {
-    // TODO(panic): re-raise edata as an ERROR.
-    unimplemented!()
-}
-
-pub fn get_error_context_stack() -> String {
-    unimplemented!()
-}
-
-// emit_log_hook: void(*)(ErrorData*) -> optional captured closure.
-// TODO(panic): make this task-local rather than a process global.
-pub static mut EMIT_LOG_HOOK: Option<Box<dyn FnMut(&ErrorData)>> = None;
-
-// ---------------------------------------------------------------------------
-// Log formatting / destinations.
-// ---------------------------------------------------------------------------
-
-// StringInfo -> &mut String (see lib::stringinfo tombstone).
-pub fn log_status_format(buf: &mut String, format: &str, edata: &ErrorData) {
-    let _ = (buf, format, edata);
-    unimplemented!()
-}
-
-pub fn debug_file_open() {
-    unimplemented!()
-}
-
-pub fn unpack_sql_state(sql_state: i32) -> String {
-    let _ = sql_state;
-    unimplemented!()
-}
-
-pub fn in_error_recursion_trouble() -> bool {
-    unimplemented!()
-}
-
-pub fn reset_formatted_start_time() {
-    unimplemented!()
-}
-pub fn get_formatted_start_time() -> String {
-    unimplemented!()
-}
-pub fn get_formatted_log_time() -> String {
-    unimplemented!()
-}
-pub fn get_backend_type_for_log() -> &'static str {
-    unimplemented!()
-}
-pub fn check_log_of_query(_edata: &ErrorData) -> bool {
-    unimplemented!()
-}
-pub fn error_severity(elevel: i32) -> &'static str {
-    let _ = elevel;
-    unimplemented!()
-}
-pub fn write_pipe_chunks(_data: &[u8], _dest: i32) {
-    unimplemented!()
-}
-
-pub fn write_csvlog(_edata: &ErrorData) {
-    unimplemented!()
-}
-pub fn write_jsonlog(_edata: &ErrorData) {
-    unimplemented!()
-}
-
-// Pre-elog stderr writers. Varargs collapse to a pre-formatted &str.
-pub fn write_stderr(msg: &str) {
-    eprint!("{msg}");
 }
