@@ -713,3 +713,67 @@ wrappers (they no longer panic on the AcceptInvalidationMessages stub).
   `TODO(wal-logical)` (reached only under wal_level=logical); `ProcessCommittedInvalidation
   Messages` DatabasePath-during-recovery is a `TODO(recovery)`.
 - All cache-callback dispatch lands on catcache/relcache/relmapper stubs until those land.
+
+---
+
+## 17. Lessons from F3 (auxiliary tasks + sequenced shutdown: checkpointer/bgwriter/
+## walwriter/startup/pgarch/autovacuum/bgworker - step 17)
+
+**Every aux process is a long-lived tokio task with ONE shared shape.** `auxiliary_
+process_main_common_with_proc` (auxprocess.rs) is the cradle: run inside `my_proc_scope`,
+`InitAuxiliaryProcess()` (claims an aux PGPROC + inits its `proc_latch`), then register the
+procsignal slot WITH THAT proc_latch so there is a SINGLE unified wakeup latch (a second
+sticky latch in the select! busy-spins once anything sets it - the 17a bug). The loop:
+`proc_latch.reset()` at top, then `tokio::select!{ biased; proc_latch.wait() | sleep(timeout)
+| shutdown.notified() => break }`. A role woken by other backends advertises its ProcNumber
+in `ProcGlobal.<role>_proc` (checkpointer/walwriter/autovacuum_launcher); RequestX rings that
+proc's latch by number.
+
+**EVERY aux task needs an RAII exit guard (clear advertised proc + deregister slot +
+ProcKill) that runs on ALL exits including panic unwind.** The C clears these after the loop;
+a panic (e.g. a failed checkpoint re-raises) skips post-loop code and leaves a dangling proc
+-> a later RequestX rings a dead latch and hangs. A `Drop` guard covers normal break, early
+break, and unwind. PG's sigsetjmp in-loop recovery is NOT reproduced; the task-boundary
+`catch_unwind` + the supervisor restart policy replace it.
+
+**Don't let a long-lived task panic on a timer.** A loop that calls an `unimplemented!()`
+stub every tick crashes repeatedly. De-fang the SPECIFIC timer-reachable stubs to
+non-panicking no-ops with a `// TODO(subsys)` (grep their callers first - only do it if no
+caller depends on the panic). Bodies reached only by real work (do_autovacuum, archive a
+real .ready file) stay stubbed (s4): they fire only when driven, not on the timer.
+
+**Checkpointer: tombstone the cross-process fsync forwarding; keep the request protocol.**
+Backends `RegisterSyncRequest` directly into the shared `SyncRequests` (it dedups), so
+ForwardSyncRequest / CompactCheckpointerRequestQueue / the requests[] array / Checkpointer
+CommLock are deleted; AbsorbSyncRequests is a no-op. KEEP the ckpt_started/done/failed
+counters (modulo compare) + the two ConditionVariables (start_cv/done_cv) - that IS the
+backend<->checkpointer handshake. The checkpointer drains the real queue (ProcessSync
+Requests + SyncPostCheckpoint).
+
+**Supervisor: spawn aux onto a dedicated JoinSet with a restart policy; on-demand workers
+(autovac worker, bgworker) via a process-global OnceLock spawner hook the supervisor
+installs.** The respawn arm lives ONLY in the accept loop, never in `drain` (a respawn during
+shutdown wedges it). The SEQUENCED SHUTDOWN DRAIN follows PostmasterStateMachine: (1) stop
+accepting, (2) terminate+await backends, (3) checkpointer phase-1 (write shutdown checkpoint)
+and AWAIT its completion signal (PG PMSIGNAL_XLOG_IS_SHUTDOWN - model as an Arc<Notify> the
+checkpointer fires after the write, drain awaits it bounded by the deadline), (4) stop the
+other aux tasks (per-role Notify - a SHARED shutdown notify is consumed by the wrong task's
+loop-top poll), (5) checkpointer phase-2 (exit). Checkpointer is FIRST-started, LAST-stopped.
+Two-phase checkpointer shutdown = two Notifys (phase1=SIGINT, phase2=SIGUSR2).
+
+**Concurrent aux startup is a real concurrency test - it found a latent UB.** Five aux tasks
+calling `InitAuxiliaryProcess` at once exposed an unsynchronized slot scan-and-claim (PG holds
+ProcStructLock; our port had dropped it) and a raced `static mut Mode`. Symptom: SIGABRT/
+SIGTRAP at process/runtime teardown with NO Rust panic (heap corruption), only under multiple
+tests in one binary. Fix: claim the aux PGPROC slot under the free-list lock; make Mode an
+atomic. Lesson: any shared fixed-array claim must hold the lock across scan+write; verify
+with ThreadSanitizer (`-Zsanitizer=thread`) when a teardown abort has no panic message.
+
+### Carried-forward TODOs (F3 deferred)
+- The catchup/config-reload RECEIVE path is not main-loop-wired; aux ProcessXInterrupts that
+  need the consumed ConfigReloadPending flag (autovacuum rebuild_database_list - currently
+  rebuilds every tick -> would starve workers once get_database_list returns real rows) need
+  the interrupt layer to EXPOSE the reload flag (TODO(catalog) in autovacuum.rs).
+- do_autovacuum / vacuum / catalog scans / bgworker connection-init are stubs until those
+  subsystems land; archive copy + pgstat are stubs; StartupXLOG recovery body is xlogrecovery.
+- on-demand worker spawn hooks + bgworker entry registry are in-core only (dlopen tombstoned).
