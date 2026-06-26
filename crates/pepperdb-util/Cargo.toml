@@ -3,3 +3,6 @@ name = "pepperdb-util"
 version = "0.0.0"
 edition = "2024"
 license = "MIT"
+
+[lints]
+workspace = true

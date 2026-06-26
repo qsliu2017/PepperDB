@@ -615,3 +615,39 @@ Apply these everywhere; they make the port read like Rust, not transliterated C.
    replace them with an enum that makes invalid states unrepresentable:
    `enum LockGroupRole { None, Leader { members: Vec<ProcNumber> }, Member { leader: ProcNumber } }`.
    Preserve the C semantics (PG's leader points to itself -> the `Leader` variant).
+
+---
+
+## 15. Clippy (enforced; keep it clean)
+
+Clippy is a workspace lint policy in `[workspace.lints.clippy]` (root Cargo.toml;
+members opt in via `[lints] workspace = true`). `cargo clippy --all-targets` must be
+0 warnings / 0 errors -- do not add lints; a new warning is a regression.
+
+Policy (this is an agent-written port, so we run strict):
+- `pedantic` + `nursery` groups = `warn` (priority -1). NOT `clippy::restriction`
+  (self-contradictory by design).
+- `deny`: `await_holding_lock`, `await_holding_refcell_ref` -- rules s5, the
+  load-bearing async invariant. Keep these ALLOW-FREE in production; for genuine
+  held-across-await needs use a `tokio::sync::Mutex` (sound), not a std lock + allow.
+- `allow` (with the rationale in Cargo.toml): the lints that fight the 1:1 C port
+  (too_many_arguments, module_*, unreadable_literal, trailing_empty_array,
+  struct_excessive_bools, result_unit_err), the value-cast family
+  (cast_possible_truncation/wrap/sign_loss/precision_loss -- intentional C width
+  arithmetic in ~900 places), and pure doc/ceremony nags (must_use_candidate,
+  doc_markdown, missing_*_doc, missing_const_for_fn, ...). The SOUNDNESS-relevant
+  pointer casts stay enforced (cast_ptr_alignment, ptr_as_ptr, ref_as_ptr,
+  borrow_as_ptr) plus cast_lossless (widening must use `From`).
+
+Working with it:
+- Run `cargo clippy --fix --all-targets` first for the machine-applicable bulk, then
+  fix/justify the rest. Hollow `unimplemented!()` stub files: a file-level
+  `#![allow(clippy::LINT, reason = "hollow stubs mirror PG sigs; real impl consumes")]`
+  is fine (the params aren't consumed yet). Implemented code: prefer the real fix.
+- EVERY `#[allow]` needs a `reason = "..."`.
+- Clippy is load-bearing, not cosmetic: enabling it caught real bugs -- 8
+  `future_not_send` violations (a `!Send` `*mut RelationData` captured across `.await`
+  in the relation/page/tuple lock fns, so their futures couldn't be spawned; fixed by
+  the sync-outer / `impl Future + Send` pattern) and an unaligned-read UB in
+  `RestoreSnapshot`. Treat `future_not_send` / `cast_ptr_alignment` / the await-holding
+  denies as bug signals, not style nags.

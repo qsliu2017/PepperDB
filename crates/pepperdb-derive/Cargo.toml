@@ -11,3 +11,6 @@ proc-macro = true
 syn = { version = "2", features = ["derive"] }
 quote = "1"
 proc-macro2 = "1"
+
+[lints]
+workspace = true

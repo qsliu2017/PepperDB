@@ -7,6 +7,50 @@ license = "MIT"
 [workspace]
 members = ["crates/pepperdb-derive", "crates/pepperdb-util"]
 
+# Clippy lint policy, shared by all workspace crates (members opt in with
+# `[lints] workspace = true`). This is an agent-written port, so we enable the
+# strict default-"allow" groups (pedantic + nursery) as warn to keep agent code
+# idiomatic; NOT clippy::restriction (self-contradictory by design). See rules.md
+# section 14. Group lints get priority -1 so the specific overrides below win.
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# rules.md s5: never hold a sync guard across `.await`. We are clean here; deny so
+# any future violation is a hard error (module-level #[allow] is the escape hatch).
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+# PERMANENT allows -- inherent to the 1:1 translation; these fight faithful
+# C-signature/struct/literal ports and will not be "fixed":
+too_many_arguments = "allow" # PG functions take many params; we mirror them
+module_inception = "allow"   # the .c->.rs file-mapping yields mod foo { ... foo }
+module_name_repetitions = "allow" # type names mirror C (e.g. lock::LockShard)
+unreadable_literal = "allow" # numeric literals mirror PG's exact constants
+struct_excessive_bools = "allow" # structs mirror C field-for-field
+trailing_empty_array = "allow"   # [T; 0] mirrors C flexible array members
+# TEMPORARY allows (debt to revisit -- TODO). Not port-inherent; suppressed only to
+# keep the enforced set focused for now. Re-enable + fix when the named milestone hits.
+result_unit_err = "allow"        # TODO: enforce after the elog -> Result error-model migration
+must_use_candidate = "allow"     # TODO(doc): enable if we want #[must_use] coverage
+doc_markdown = "allow"           # TODO(doc): backticks in translated C comments
+missing_panics_doc = "allow"     # TODO(doc)
+missing_errors_doc = "allow"     # TODO(doc)
+missing_safety_doc = "allow"     # TODO(doc): we use inline `// SAFETY:`; add # Safety sections later
+too_long_first_doc_paragraph = "allow" # TODO(doc)
+missing_const_for_fn = "allow"   # TODO: nursery FP-prone vs the async/heap model; revisit
+significant_drop_tightening = "allow" # TODO: nursery FP-prone; revisit
+# TODO(cast): the value-cast family is allowed because the 1:1 port does intentional C
+# width/sign arithmetic in ~900 places (per-site annotation would be pure ceremony).
+# Revisit if we want strict per-site cast discipline. The SOUNDNESS-relevant POINTER
+# casts stay ENFORCED (cast_ptr_alignment, ptr_as_ptr, ref_as_ptr, borrow_as_ptr) as
+# does cast_lossless (widening must use From).
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+
+[lints]
+workspace = true
+
 [dependencies]
 bitflags = "2"
 pepperdb-derive = { path = "crates/pepperdb-derive" }
