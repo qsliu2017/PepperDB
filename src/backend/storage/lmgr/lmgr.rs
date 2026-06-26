@@ -574,13 +574,11 @@ pub async fn WaitForLockersMultiple(
         return;
     }
 
-    let mut holders: Vec<Vec<VirtualTransactionId>> = Vec::with_capacity(locktags.len());
-    let mut total = 0usize;
-    for locktag in locktags {
-        let conflicts = GetLockConflicts(locktag, lockmode);
-        total += conflicts.len();
-        holders.push(conflicts);
-    }
+    let holders: Vec<Vec<VirtualTransactionId>> = locktags
+        .iter()
+        .map(|locktag| GetLockConflicts(locktag, lockmode))
+        .collect();
+    let total: usize = holders.iter().map(Vec::len).sum();
 
     if progress {
         // Progress reporting lands on the backend-progress stub. TODO(progress).

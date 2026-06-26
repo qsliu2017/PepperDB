@@ -5,10 +5,11 @@ edition = "2024"
 license = "MIT"
 
 [workspace]
-members = ["crates/pepperdb-derive"]
+members = ["crates/pepperdb-derive", "crates/pepperdb-util"]
 
 [dependencies]
 bitflags = "2"
 pepperdb-derive = { path = "crates/pepperdb-derive" }
+pepperdb-util = { path = "crates/pepperdb-util" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "net", "time", "io-util", "macros", "signal"] }
 futures-util = "0.3"

@@ -462,15 +462,13 @@ impl ProcArray {
         if procno == INVALID_PROC_NUMBER {
             return;
         }
-        let g = match crate::storage::proc::proc_global() {
-            Some(g) => g,
-            None => return,
+        let Some(g) = crate::storage::proc::proc_global() else {
+            return;
         };
         let _a = self.inner.write().unwrap();
         // SAFETY: write guard held; we mutate our own proc's advertised fields.
-        let proc = match unsafe { g.proc_mut(procno) } {
-            Some(p) => p,
-            None => return,
+        let Some(proc) = (unsafe { g.proc_mut(procno) }) else {
+            return;
         };
         let pgxactoff = proc.pgxactoff;
         if !is_sub_xact {

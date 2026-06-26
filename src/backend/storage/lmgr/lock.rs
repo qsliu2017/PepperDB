@@ -898,18 +898,17 @@ fn clean_up_lock(
 /// double-clean the same wait. After it runs once, `wait_lock`/`wait_status` are
 /// cleared and a second call is a no-op. SYNC.
 fn remove_from_wait_queue_in_shard(shard: &mut LockShard, procno: ProcNumber) {
-    let g = match proc_global() {
-        Some(g) => g.clone(),
-        None => return,
+    let Some(g) = proc_global() else {
+        return;
     };
+    let g = g.clone();
 
     // Read the proc's wait state + clear it. The WAITING gate is the idempotency
     // guard: once cleared we never decrement counts again.
     // SAFETY: the partition Mutex held by the caller gates these wait fields.
     let (locktag, lockmode) = unsafe {
-        let proc = match g.proc_mut(procno) {
-            Some(p) => p,
-            None => return,
+        let Some(proc) = g.proc_mut(procno) else {
+            return;
         };
         if proc.wait_status != ProcWaitStatus::WAITING {
             return;
@@ -920,22 +919,20 @@ fn remove_from_wait_queue_in_shard(shard: &mut LockShard, procno: ProcNumber) {
         proc.wait_proc_lock = None;
         proc.wait_status = ProcWaitStatus::ERROR;
         proc.wait_start = 0;
-        match lp {
-            // SAFETY: the boxed LOCK is alive under the held partition Mutex.
-            Some(lp) => ((*lp).tag, lm),
-            None => return,
-        }
+        let Some(lp) = lp else {
+            return;
+        };
+        // SAFETY: the boxed LOCK is alive under the held partition Mutex.
+        ((*lp).tag, lm)
     };
 
-    let lock_method_table = match lock_methods(locktag.lockmethod()) {
-        Some(t) => t,
-        None => return,
+    let Some(lock_method_table) = lock_methods(locktag.lockmethod()) else {
+        return;
     };
 
     let wakeup_needed = {
-        let lock = match shard.locks.get_mut(&locktag) {
-            Some(lb) => &mut **lb,
-            None => return,
+        let Some(lock) = shard.locks.get_mut(&locktag).map(|lb| &mut **lb) else {
+            return;
         };
         // Remove from the LOCK.wait_procs queue + undo request counts.
         if let Some(pos) = lock.wait_procs.iter().position(|&p| p == procno) {
@@ -964,17 +961,17 @@ fn remove_from_wait_queue_in_shard(shard: &mut LockShard, procno: ProcNumber) {
 /// `view`). Locates the awaited lock's shard through the view -- WITHOUT re-locking
 /// (std::Mutex is not reentrant) -- and runs the shared cleanup core. SYNC.
 pub fn RemoveFromWaitQueue(procno: ProcNumber, view: &LockTablesView) {
-    let g = match proc_global() {
-        Some(g) => g.clone(),
-        None => return,
+    let Some(g) = proc_global() else {
+        return;
     };
+    let g = g.clone();
     // The awaited lock's tag (to pick the partition). Read under the held locks.
     // SAFETY: all partition Mutexes held by the caller (the view).
     let locktag = unsafe {
-        match g.proc(procno).and_then(|p| p.wait_lock) {
-            Some(lp) => (*lp).tag,
-            None => return,
-        }
+        let Some(lp) = g.proc(procno).and_then(|p| p.wait_lock) else {
+            return;
+        };
+        (*lp).tag
     };
     let shard = view.shard_for_mut(&locktag);
     remove_from_wait_queue_in_shard(shard, procno);
@@ -1084,9 +1081,8 @@ fn fast_path_transfer_relation_locks(
     locktag: &LOCKTAG,
     hashcode: u32,
 ) -> bool {
-    let g = match proc_global() {
-        Some(g) => g,
-        None => return true,
+    let Some(g) = proc_global() else {
+        return true;
     };
     let _ = lock_method_table;
     let relid = Oid(locktag.locktag_field2);
@@ -1137,9 +1133,8 @@ fn wire_proclock(shard: &mut LockShard, locktag: &LOCKTAG, proc: ProcNumber) {
         lock: *locktag,
         proc,
     };
-    let lp = match shard.locks.get_mut(locktag) {
-        Some(lb) => lock_ptr(lb),
-        None => return,
+    let Some(lp) = shard.locks.get_mut(locktag).map(lock_ptr) else {
+        return;
     };
     let g = proc_global();
     let proc_ptr = match g {
@@ -1181,9 +1176,8 @@ pub async fn LockAcquireExtended(
     _log_lock_failure: bool,
 ) -> (LockAcquireResult, Option<*mut LOCALLOCK>) {
     let lockmethodid = locktag.lockmethod();
-    let lock_method_table = match lock_methods(lockmethodid) {
-        Some(t) => t,
-        None => panic!("unrecognized lock method: {lockmethodid}"),
+    let Some(lock_method_table) = lock_methods(lockmethodid) else {
+        panic!("unrecognized lock method: {lockmethodid}");
     };
     if lockmode <= 0 || lockmode > lock_method_table.num_lock_modes {
         panic!("unrecognized lock mode: {lockmode}");
@@ -1466,9 +1460,8 @@ fn join_wait_queue(
     // SAFETY: the LOCALLOCK lives in the task_local table; we hand 15a a &mut to
     // it. 15a reads .lock/.proclock raw pointers (boxed, alive under the shard
     // Mutex which the caller holds).
-    let llp = match locallock_ptr(tag) {
-        Some(p) => p,
-        None => return ProcWaitStatus::ERROR,
+    let Some(llp) = locallock_ptr(tag) else {
+        return ProcWaitStatus::ERROR;
     };
     crate::storage::proc::JoinWaitQueue(unsafe { &mut *llp }, lock_method_table, dont_wait)
 }
@@ -1551,9 +1544,8 @@ async fn wait_on_lock(tag: LOCALLOCKTAG, owner: Option<ResourceOwner>) -> ProcWa
 /// PG `LockRelease`: release one mode on `locktag`.
 pub fn LockRelease(locktag: &LOCKTAG, lockmode: LOCKMODE, session_lock: bool) -> bool {
     let lockmethodid = locktag.lockmethod();
-    let lock_method_table = match lock_methods(lockmethodid) {
-        Some(t) => t,
-        None => panic!("unrecognized lock method: {lockmethodid}"),
+    let Some(lock_method_table) = lock_methods(lockmethodid) else {
+        panic!("unrecognized lock method: {lockmethodid}");
     };
     if lockmode <= 0 || lockmode > lock_method_table.num_lock_modes {
         panic!("unrecognized lock mode: {lockmode}");
@@ -1687,14 +1679,13 @@ fn release_local(
 
 /// PG `LockReleaseAll`: release all locks of a method held by this backend.
 pub fn LockReleaseAll(lockmethodid: LOCKMETHODID, all_locks: bool) {
-    let lock_method_table = match lock_methods(lockmethodid) {
-        Some(t) => t,
-        None => panic!("unrecognized lock method: {lockmethodid}"),
+    let Some(lock_method_table) = lock_methods(lockmethodid) else {
+        panic!("unrecognized lock method: {lockmethodid}");
     };
-    let m = match lock_manager() {
-        Some(m) => m.clone(),
-        None => return,
+    let Some(m) = lock_manager() else {
+        return;
     };
+    let m = m.clone();
     let procno = current_proc_number();
     if procno == INVALID_PROC_NUMBER {
         return;
@@ -1868,13 +1859,11 @@ pub fn LockHeldByMe(locktag: &LOCKTAG, lockmode: LOCKMODE, orstronger: bool) -> 
 /// PG `LockHasWaiters`.
 pub fn LockHasWaiters(locktag: &LOCKTAG, lockmode: LOCKMODE, _session_lock: bool) -> bool {
     let lockmethodid = locktag.lockmethod();
-    let lock_method_table = match lock_methods(lockmethodid) {
-        Some(t) => t,
-        None => panic!("unrecognized lock method: {lockmethodid}"),
+    let Some(lock_method_table) = lock_methods(lockmethodid) else {
+        panic!("unrecognized lock method: {lockmethodid}");
     };
-    let m = match lock_manager() {
-        Some(m) => m,
-        None => return false,
+    let Some(m) = lock_manager() else {
+        return false;
     };
     let localtag = LOCALLOCKTAG {
         lock: *locktag,
@@ -1904,9 +1893,8 @@ pub fn LockWaiterCount(locktag: &LOCKTAG) -> i32 {
     if lock_methods(lockmethodid).is_none() {
         panic!("unrecognized lock method: {lockmethodid}");
     }
-    let m = match lock_manager() {
-        Some(m) => m,
-        None => return 0,
+    let Some(m) = lock_manager() else {
+        return 0;
     };
     let hashcode = LockTagHashCode(locktag);
     let shard = m.shard(hashcode).lock().unwrap();
@@ -1917,13 +1905,11 @@ pub fn LockWaiterCount(locktag: &LOCKTAG) -> i32 {
 /// scan + the main-table proclock scan, deduped. Lock groups single-member.
 pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTransactionId> {
     let lockmethodid = locktag.lockmethod();
-    let lock_method_table = match lock_methods(lockmethodid) {
-        Some(t) => t,
-        None => panic!("unrecognized lock method: {lockmethodid}"),
+    let Some(lock_method_table) = lock_methods(lockmethodid) else {
+        panic!("unrecognized lock method: {lockmethodid}");
     };
-    let m = match lock_manager() {
-        Some(m) => m,
-        None => return Vec::new(),
+    let Some(m) = lock_manager() else {
+        return Vec::new();
     };
     let conflict_mask = lock_method_table.conflict_tab[lockmode as usize];
     let hashcode = LockTagHashCode(locktag);
@@ -2013,35 +1999,31 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
 /// PG `GetRunningTransactionLocks`: AccessExclusiveLocks on relations, for
 /// LogStandbySnapshot.
 pub fn GetRunningTransactionLocks() -> Vec<xl_standby_lock> {
-    let m = match lock_manager() {
-        Some(m) => m,
-        None => return Vec::new(),
+    let Some(m) = lock_manager() else {
+        return Vec::new();
     };
     let aex = lockbit_on(LockMode::AccessExclusiveLock as LOCKMODE);
     let g = proc_global();
-    let mut out = Vec::new();
     // Take all partitions (shared semantics; we use the Mutex). Ascending.
     let guards: Vec<_> = m.shards.iter().map(|s| s.lock().unwrap()).collect();
-    for shard in guards.iter() {
-        for (key, proclock) in shard.proclocks.iter() {
-            if (proclock.hold_mask & aex) != 0 && key.lock.locktag_type == LockTagType::Relation as u8
+    let out: Vec<xl_standby_lock> = guards
+        .iter()
+        .flat_map(|shard| shard.proclocks.iter())
+        .filter_map(|(key, proclock)| {
+            if (proclock.hold_mask & aex) == 0
+                || key.lock.locktag_type != LockTagType::Relation as u8
             {
-                if let Some(g) = g {
-                    // SAFETY: read of xid under the held partition Mutexes.
-                    let xid = unsafe { g.proc(key.proc).map(|p| p.xid) };
-                    if let Some(xid) = xid {
-                        if xid != crate::access::transam::INVALID_TRANSACTION_ID {
-                            out.push(xl_standby_lock {
-                                xid,
-                                db_oid: Oid(key.lock.locktag_field1),
-                                rel_oid: Oid(key.lock.locktag_field2),
-                            });
-                        }
-                    }
-                }
+                return None;
             }
-        }
-    }
+            // SAFETY: read of xid under the held partition Mutexes.
+            let xid = unsafe { g?.proc(key.proc).map(|p| p.xid)? };
+            (xid != crate::access::transam::INVALID_TRANSACTION_ID).then_some(xl_standby_lock {
+                xid,
+                db_oid: Oid(key.lock.locktag_field1),
+                rel_oid: Oid(key.lock.locktag_field2),
+            })
+        })
+        .collect();
     drop(guards);
     out
 }
@@ -2069,15 +2051,14 @@ pub fn VirtualXactLockTableCleanup() {
     if procno == INVALID_PROC_NUMBER {
         return;
     }
-    let (fastpath, lxid) = match with_fp_locked(procno, |proc| {
+    let Some((fastpath, lxid)) = with_fp_locked(procno, |proc| {
         let fastpath = proc.fp_vxid_lock;
         let lxid = proc.fp_local_transaction_id;
         proc.fp_vxid_lock = false;
         proc.fp_local_transaction_id = crate::c::LocalTransactionId(0);
         (fastpath, lxid)
-    }) {
-        Some(v) => v,
-        None => return,
+    }) else {
+        return;
     };
     if !fastpath && crate::storage::lock::local_transaction_id_is_valid(lxid) {
         // Materialized into the main table by another backend; release there.

@@ -257,10 +257,27 @@ pub struct PGPROC {
     /// lxid for the fast-path VXID lock.
     pub fp_local_transaction_id: LocalTransactionId,
 
-    /// Lock group leader's ProcNumber, if I'm a member; else INVALID_PROC_NUMBER.
-    pub lock_group_leader: ProcNumber,
-    /// ProcNumbers of members, if I'm a leader.
-    pub lock_group_members: Vec<ProcNumber>,
+    /// This backend's role in its lock group (PG `lockGroupLeader`/
+    /// `lockGroupMembers`). `None` = not in a group; `Leader` = I am the leader
+    /// (PG's `lockGroupLeader == self`), holding the member list; `Member` = I am
+    /// a member of `leader`'s group (PG's `lockGroupLeader == leader`).
+    pub lock_group_role: LockGroupRole,
+}
+
+/// A backend's lock-group membership. Replaces the PG sentinel-field pair
+/// `lockGroupLeader` (INVALID if none / self if leader) + `lockGroupMembers`.
+#[derive(Debug, Default)]
+pub enum LockGroupRole {
+    /// Not part of any lock group (PG `lockGroupLeader == NULL`).
+    #[default]
+    None,
+    /// This backend is the group leader (PG `lockGroupLeader == self`). The
+    /// member list includes the leader itself (PG pushes self in
+    /// `BecomeLockGroupLeader`).
+    Leader { members: Vec<ProcNumber> },
+    /// This backend is a member of `leader`'s group (PG `lockGroupLeader ==
+    /// leader`, with `leader != self`).
+    Member { leader: ProcNumber },
 }
 
 /// Which ProcGlobal free list a PGPROC was drawn from (PG `procgloballist`).
@@ -325,8 +342,7 @@ impl PGPROC {
             fp_rel_id: Vec::new(),
             fp_vxid_lock: false,
             fp_local_transaction_id: LocalTransactionId(0),
-            lock_group_leader: INVALID_PROC_NUMBER,
-            lock_group_members: Vec::new(),
+            lock_group_role: LockGroupRole::None,
         }
     }
 }

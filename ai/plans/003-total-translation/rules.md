@@ -581,3 +581,37 @@ a fairness/throughput difference, not a soundness bug; record it.
 - the step-14 group-batching ops (clog `TransactionGroupUpdateXidStatus`, procarray
   `ProcArrayGroupClearXid`) are now UNBLOCKED (the PGPROC group fields exist) - still
   `TODO(perf)`, implement when contention warrants.
+
+---
+
+## 14. Idiomatic Rust style (standing conventions)
+
+Apply these everywhere; they make the port read like Rust, not transliterated C.
+
+1. **`let ... else` for the bail-on-None/Err pattern.** Replace
+   `let x = match opt { Some(v) => v, None => return };` with
+   `let Some(v) = opt else { return; };` (or `continue`/`break`/`?`). Same for the
+   common `match get() { Some(g) => g, None => return }` at function tops.
+
+2. **Iterator pipelines over `let mut v = Vec::new(); for ... { v.push() }`.** A
+   build-by-push loop with a filter/guard is a code smell; express it as
+   `iter.filter(..).filter_map(..).map(..).collect()`. Use `filter_map` + `?` inside
+   the closure to flatten nested `if let Some`/conflict guards, and
+   `bool::then_some` for the "include this item when cond" tail. Keep an explicit
+   loop only when the body has real control flow / side effects that don't map to a
+   combinator.
+
+3. **Preallocate filtered collects with `pepperdb_util::PreallocCollect`.** `collect`
+   uses the lower size_hint, which `filter` zeroes -> reallocations. Use
+   `.prealloc_collect()` (preallocs from the upper hint) for `iter.filter().collect()`
+   where most items are kept or the upper bound is a tight small constant
+   (MaxBackends, NUM_LOCK_PARTITIONS). For `flat_map`/`flatten` chains (upper hint
+   `None`), use `.collect_with_capacity(n)` with a caller-computed bound. Don't use
+   it where a filter rejects most of a large input (it would over-allocate).
+
+4. **Enums over sentinel-field pairs that encode a sum type.** When two fields plus a
+   sentinel model mutually-exclusive states (e.g. `lock_group_leader: ProcNumber`
+   (INVALID if none / self if leader) + `lock_group_members: Vec<ProcNumber>`),
+   replace them with an enum that makes invalid states unrepresentable:
+   `enum LockGroupRole { None, Leader { members: Vec<ProcNumber> }, Member { leader: ProcNumber } }`.
+   Preserve the C semantics (PG's leader points to itself -> the `Leader` variant).

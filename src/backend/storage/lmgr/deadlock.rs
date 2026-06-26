@@ -27,7 +27,7 @@
 
 use crate::storage::lock::{DeadLockState, LOCK, LOCKMODE, LOCKTAG, LockTagType, lockbit_on};
 use crate::storage::lockdefs::LOCKMASK;
-use crate::storage::proc::{ProcGlobal, proc_global};
+use crate::storage::proc::{LockGroupRole, ProcGlobal, proc_global};
 use crate::storage::procnumber::{INVALID_PROC_NUMBER, ProcNumber};
 
 use super::lock::{GetLocksMethodTable, LockTablesView};
@@ -159,9 +159,14 @@ fn max_backends() -> usize {
 /// The group leader of `procno` (PG `proc->lockGroupLeader`); itself if none.
 /// SAFETY: caller holds all partition locks.
 unsafe fn leader_of(g: &ProcGlobal, procno: ProcNumber) -> ProcNumber {
+    // PG `proc->lockGroupLeader`: a member points at its leader; a leader points
+    // at itself; not-in-a-group is NULL. All non-Member cases resolve to `procno`.
     match unsafe { g.proc(procno) } {
-        Some(p) if p.lock_group_leader != INVALID_PROC_NUMBER => p.lock_group_leader,
-        _ => procno,
+        Some(p) => match p.lock_group_role {
+            LockGroupRole::Member { leader } => leader,
+            LockGroupRole::Leader { .. } | LockGroupRole::None => procno,
+        },
+        None => procno,
     }
 }
 
@@ -181,10 +186,10 @@ unsafe fn lock_locktag(lock: *mut LOCK) -> u8 {
 /// Caller (CheckDeadLock in proc.c) must already hold all partition locks; the
 /// `view` over those locked tables enumerates each lock's holders.
 pub fn DeadLockCheck(proc: ProcNumber, view: &LockTablesView) -> DeadLockState {
-    let g = match proc_global() {
-        Some(g) => g.clone(),
-        None => return DeadLockState::NoDeadlock,
+    let Some(g) = proc_global() else {
+        return DeadLockState::NoDeadlock;
     };
+    let g = g.clone();
     let mut ctx = DeadLockCtx::new(max_backends());
 
     // Initialize to "no constraints" + not blocked by autovacuum.
@@ -480,12 +485,13 @@ fn find_lock_cycle_recurse(
     }
 
     // Lock-group members may have outgoing edges even if this proc isn't waiting.
-    // Single-member groups: lock_group_members is empty or just self -> no-op.
+    // Only a leader has members; single-member groups -> just self -> no-op.
     // SAFETY: all partition locks held.
     let members: Vec<ProcNumber> = unsafe {
-        g.proc(check_proc)
-            .map(|p| p.lock_group_members.clone())
-            .unwrap_or_default()
+        match g.proc(check_proc).map(|p| &p.lock_group_role) {
+            Some(LockGroupRole::Leader { members }) => members.clone(),
+            _ => Vec::new(),
+        }
     };
     for member in members {
         if member == check_proc {
@@ -520,13 +526,13 @@ fn find_lock_cycle_recurse_member(
 ) -> bool {
     // SAFETY: all partition locks held; the waiter's wait fields are stable.
     let (lock, wait_lock_mode) = unsafe {
-        match g.proc(check_proc) {
-            Some(p) => match p.wait_lock {
-                Some(l) => (l, p.wait_lock_mode),
-                None => return false,
-            },
-            None => return false,
-        }
+        let Some((l, mode)) = g
+            .proc(check_proc)
+            .and_then(|p| p.wait_lock.map(|l| (l, p.wait_lock_mode)))
+        else {
+            return false;
+        };
+        (l, mode)
     };
 
     // The relation-extension lock can never be in an actual deadlock cycle.
@@ -784,9 +790,8 @@ fn topo_sort(
         let mut j = queue_size;
         while j > 0 {
             j -= 1;
-            let waiter = match topo_procs[j] {
-                Some(p) => p,
-                None => continue,
+            let Some(waiter) = topo_procs[j] else {
+                continue;
             };
             // SAFETY: all partition locks held.
             let is_member =
@@ -810,9 +815,8 @@ fn topo_sort(
         let mut k = queue_size;
         while k > 0 {
             k -= 1;
-            let blocker = match topo_procs[k] {
-                Some(p) => p,
-                None => continue,
+            let Some(blocker) = topo_procs[k] else {
+                continue;
             };
             // SAFETY: all partition locks held.
             let is_member =
@@ -866,9 +870,8 @@ fn topo_sort(
 
         let mut n_matches = 0i32;
         for c in 0..=last {
-            let cur = match topo_procs[c as usize] {
-                Some(p) => p,
-                None => continue,
+            let Some(cur) = topo_procs[c as usize] else {
+                continue;
             };
             // SAFETY: all partition locks held.
             let is_group = cur == proc || unsafe { leader_of(g, cur) } == proc;
@@ -947,9 +950,8 @@ pub fn RememberSimpleDeadLock(
     lock: &LOCK,
     proc2: ProcNumber,
 ) {
-    let g = match proc_global() {
-        Some(g) => g,
-        None => return,
+    let Some(g) = proc_global() else {
+        return;
     };
     // SAFETY: caller holds the partition lock for `lock`; reads pids + proc2's
     // wait fields, stable under it.

@@ -31,9 +31,9 @@ use crate::c::LocalTransactionId;
 use crate::lib::stringinfo::StringInfo;
 use crate::storage::lock::{DeadLockState, LOCALLOCK, LOCK, LockMethod};
 use crate::storage::proc::{
-    NUM_AUXILIARY_PROCS, NUM_SPECIAL_WORKER_PROCS, PGPROC, ProcCounts, ProcGlobal, ProcGlobalList,
-    ProcWaitStatus, current_proc_number, has_my_proc, proc_global, set_current_proc_number,
-    set_proc_global,
+    LockGroupRole, NUM_AUXILIARY_PROCS, NUM_SPECIAL_WORKER_PROCS, PGPROC, ProcCounts, ProcGlobal,
+    ProcGlobalList, ProcWaitStatus, current_proc_number, has_my_proc, proc_global,
+    set_current_proc_number, set_proc_global,
 };
 use crate::storage::procnumber::{INVALID_PROC_NUMBER, ProcNumber};
 
@@ -154,12 +154,9 @@ pub fn InitProcess() {
     // TODO(step17): route aux/bgworker/walsender categories by backend type.
     let kind = ProcGlobalList::Free;
 
-    let procno = match g.alloc_proc(kind) {
-        Some(p) => p,
-        None => {
-            // PG: ereport(FATAL, too many clients). TODO(panic).
-            panic!("sorry, too many clients already");
-        }
+    let Some(procno) = g.alloc_proc(kind) else {
+        // PG: ereport(FATAL, too many clients). TODO(panic).
+        panic!("sorry, too many clients already");
     };
 
     set_current_proc_number(procno);
@@ -261,9 +258,7 @@ fn init_backend_proc_fields(proc: &mut PGPROC, procno: ProcNumber, pid: i32, reg
     proc.clog_group_member_page = -1;
     proc.clog_group_member_lsn = crate::access::xlogdefs::XLogRecPtr(0);
     proc.clog_group_next = INVALID_PROC_NUMBER as u32;
-    proc.lock_group_leader = INVALID_PROC_NUMBER;
-    proc.lock_group_members.clear();
-    debug_assert!(proc.lock_group_members.is_empty());
+    proc.lock_group_role = crate::storage::proc::LockGroupRole::None;
 }
 
 /// PG `ProcKill`: return this backend's PGPROC to its free list and clear MyProc.
@@ -274,10 +269,10 @@ pub fn ProcKill() {
     if procno == INVALID_PROC_NUMBER {
         return;
     }
-    let g = match proc_global() {
-        Some(g) => g.clone(),
-        None => return,
+    let Some(g) = proc_global() else {
+        return;
     };
+    let g = g.clone();
 
     // RemoveProcFromArray: drop ourselves from the snapshot scan first.
     if let Some(s) = current_shared_proc_array() {
@@ -383,10 +378,10 @@ pub fn JoinWaitQueue(
     lock_method_table: LockMethod,
     dont_wait: bool,
 ) -> ProcWaitStatus {
-    let g = match proc_global() {
-        Some(g) => g.clone(),
-        None => return ProcWaitStatus::ERROR,
+    let Some(g) = proc_global() else {
+        return ProcWaitStatus::ERROR;
     };
+    let g = g.clone();
     let procno = current_proc_number();
     if procno == INVALID_PROC_NUMBER {
         return ProcWaitStatus::ERROR;
@@ -486,10 +481,10 @@ pub fn JoinWaitQueue(
 /// directly, so no `LOCALLOCK` argument is needed. Dropping it also keeps the
 /// future `Send` (a `&mut LOCALLOCK` carries the !Send raw lock pointers).
 pub async fn ProcSleep() -> ProcWaitStatus {
-    let g = match proc_global() {
-        Some(g) => g.clone(),
-        None => return ProcWaitStatus::ERROR,
+    let Some(g) = proc_global() else {
+        return ProcWaitStatus::ERROR;
     };
+    let g = g.clone();
     let procno = current_proc_number();
     if procno == INVALID_PROC_NUMBER {
         return ProcWaitStatus::ERROR;
@@ -569,16 +564,15 @@ pub async fn ProcSleep() -> ProcWaitStatus {
 /// lock's wait queue and passing it `wait_status`. SYNC; caller holds the
 /// partition Mutex.
 pub fn ProcWakeup(procno: ProcNumber, wait_status: ProcWaitStatus) {
-    let g = match proc_global() {
-        Some(g) => g.clone(),
-        None => return,
+    let Some(g) = proc_global() else {
+        return;
     };
+    let g = g.clone();
     // SAFETY: partition Mutex held by caller gates the wait fields + wait_lock's
     // wait_procs queue.
     let (lock_ptr, latch_ok) = unsafe {
-        let proc = match g.proc_mut(procno) {
-            Some(p) => p,
-            None => return,
+        let Some(proc) = g.proc_mut(procno) else {
+            return;
         };
         if proc.wait_status != ProcWaitStatus::WAITING {
             return;
@@ -611,10 +605,10 @@ pub fn ProcWakeup(procno: ProcNumber, wait_status: ProcWaitStatus) {
 /// `LOCK.wait_procs` and call the (stub) conflict check; once 15b lands the grant
 /// logic is complete.
 pub fn ProcLockWakeup(lock_method_table: LockMethod, lock: &mut LOCK) {
-    let g = match proc_global() {
-        Some(g) => g.clone(),
-        None => return,
+    let Some(g) = proc_global() else {
+        return;
     };
+    let g = g.clone();
     if lock.wait_procs.is_empty() {
         return;
     }
@@ -624,9 +618,8 @@ pub fn ProcLockWakeup(lock_method_table: LockMethod, lock: &mut LOCK) {
     for procno in waiters {
         // SAFETY: partition Mutex held by caller.
         let (lockmode, wait_proc_lock) = unsafe {
-            let proc = match g.proc(procno) {
-                Some(p) => p,
-                None => continue,
+            let Some(proc) = g.proc(procno) else {
+                continue;
             };
             (proc.wait_lock_mode, proc.wait_proc_lock)
         };
@@ -650,10 +643,10 @@ pub fn ProcLockWakeup(lock_method_table: LockMethod, lock: &mut LOCK) {
 /// error / handle a blocking autovacuum, release the partition locks in reverse.
 /// SYNC; no `.await` while any partition lock is held (rules s5).
 fn CheckDeadLock(procno: ProcNumber, g: &ProcGlobal) -> DeadLockState {
-    let m = match crate::storage::lock::lock_manager() {
-        Some(m) => m.clone(),
-        None => return DeadLockState::NoDeadlock,
+    let Some(m) = crate::storage::lock::lock_manager() else {
+        return DeadLockState::NoDeadlock;
     };
+    let m = m.clone();
 
     // Hold every partition Mutex across the whole graph walk so it can deref the
     // boxed LOCK/PROCLOCK + read any PGPROC's wait fields safely.
@@ -702,9 +695,8 @@ fn CheckDeadLock(procno: ProcNumber, g: &ProcGlobal) -> DeadLockState {
 /// deadlock arm IS the timer, so this is only the latch nudge for a backend whose
 /// timer the supervisor wants to force.
 pub fn CheckDeadLockAlert() {
-    let g = match proc_global() {
-        Some(g) => g,
-        None => return,
+    let Some(g) = proc_global() else {
+        return;
     };
     let procno = current_proc_number();
     if procno != INVALID_PROC_NUMBER {
@@ -786,10 +778,10 @@ pub fn GetLockHoldersAndWaiters(
 
 /// PG `ProcWaitForSignal`: wait on MyProc's latch for a generic signal.
 pub async fn ProcWaitForSignal(_wait_event_info: u32) {
-    let g = match proc_global() {
-        Some(g) => g.clone(),
-        None => return,
+    let Some(g) = proc_global() else {
+        return;
     };
+    let g = g.clone();
     let procno = current_proc_number();
     if procno == INVALID_PROC_NUMBER {
         return;
@@ -802,9 +794,8 @@ pub async fn ProcWaitForSignal(_wait_event_info: u32) {
 
 /// PG `ProcSendSignal`: set the latch of the backend identified by `procno`.
 pub fn ProcSendSignal(procno: ProcNumber) {
-    let g = match proc_global() {
-        Some(g) => g,
-        None => return,
+    let Some(g) = proc_global() else {
+        return;
     };
     if procno < 0 || procno as u32 >= g.all_proc_count {
         return; // PG: elog(ERROR, procNumber out of range)
@@ -834,9 +825,8 @@ pub fn AuxiliaryPidGetProc(pid: i32) -> Option<ProcNumber> {
 
 /// PG `BecomeLockGroupLeader`: make MyProc a single-member lock group leader.
 pub fn BecomeLockGroupLeader() {
-    let g = match proc_global() {
-        Some(g) => g,
-        None => return,
+    let Some(g) = proc_global() else {
+        return;
     };
     let procno = current_proc_number();
     if procno == INVALID_PROC_NUMBER {
@@ -845,20 +835,23 @@ pub fn BecomeLockGroupLeader() {
     // SAFETY: lock.c partition-by-proc Mutex would gate this (15b); the group
     // links are otherwise touched only by this backend at setup.
     let me = unsafe { g.proc_mut(procno).unwrap() };
-    if me.lock_group_leader == procno {
+    // Already a leader (PG `lockGroupLeader == procno`)? Nothing to do.
+    if matches!(me.lock_group_role, LockGroupRole::Leader { .. }) {
         return;
     }
-    debug_assert_eq!(me.lock_group_leader, INVALID_PROC_NUMBER);
-    me.lock_group_leader = procno;
-    me.lock_group_members.push(procno);
+    // PG asserts `lockGroupLeader == INVALID` here -- we must not be in a group.
+    debug_assert!(matches!(me.lock_group_role, LockGroupRole::None));
+    // Become a leader of my own single-member group (the self-membership PG adds).
+    me.lock_group_role = LockGroupRole::Leader {
+        members: vec![procno],
+    };
 }
 
 /// PG `BecomeLockGroupMember`: join `leader`'s lock group, gated on its pid as an
 /// interlock against PGPROC recycling. Returns whether we joined.
 pub fn BecomeLockGroupMember(leader: ProcNumber, pid: i32) -> bool {
-    let g = match proc_global() {
-        Some(g) => g,
-        None => return false,
+    let Some(g) = proc_global() else {
+        return false;
     };
     let procno = current_proc_number();
     if procno == INVALID_PROC_NUMBER || procno == leader || pid == 0 {
@@ -866,16 +859,21 @@ pub fn BecomeLockGroupMember(leader: ProcNumber, pid: i32) -> bool {
     }
     // SAFETY: lock.c partition-by-proc Mutex would gate this (15b).
     let (leader_pid, leader_is_leader) = unsafe {
-        let l = match g.proc(leader) {
-            Some(l) => l,
-            None => return false,
+        let Some(l) = g.proc(leader) else {
+            return false;
         };
-        (l.pid, l.lock_group_leader == leader)
+        // PG checks `leader->lockGroupLeader == leader`: the leader must actually
+        // be a group leader.
+        (l.pid, matches!(l.lock_group_role, LockGroupRole::Leader { .. }))
     };
     if leader_pid == pid && leader_is_leader {
         unsafe {
-            g.proc_mut(procno).unwrap().lock_group_leader = leader;
-            g.proc_mut(leader).unwrap().lock_group_members.push(procno);
+            g.proc_mut(procno).unwrap().lock_group_role = LockGroupRole::Member { leader };
+            if let LockGroupRole::Leader { members } =
+                &mut g.proc_mut(leader).unwrap().lock_group_role
+            {
+                members.push(procno);
+            }
         }
         true
     } else {
