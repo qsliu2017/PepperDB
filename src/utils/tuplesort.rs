@@ -158,7 +158,7 @@ pub fn PARALLEL_SORT(coordinate: Option<&SortCoordinateData>) -> i32 {
 }
 
 /// C: `(TuplesortPublic *) state` - the public part is the prefix of the state.
-pub fn TuplesortstateGetPublic(_state: &Tuplesortstate) -> &TuplesortPublic {
+pub fn TuplesortstateGetPublic(_state: &Tuplesortstate) -> &TuplesortPublic<'_> {
     unimplemented!()
 }
 

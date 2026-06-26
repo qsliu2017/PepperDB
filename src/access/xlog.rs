@@ -5,8 +5,8 @@
 //! GUC-ish globals, and the insert/flush/checkpoint signatures as stubs.
 // TODO(wal): implement insert/flush over async I/O later
 
-use crate::access::xlogbackup::BackupState;
 use crate::access::xlog_internal::XLogRecData;
+use crate::access::xlogbackup::BackupState;
 use crate::access::xlogdefs::{TimeLineID, XLogRecPtr, XLogSegNo};
 use crate::access::xlogreader::XLogReaderState;
 use crate::datatype::timestamp::TimestampTz;
@@ -20,9 +20,9 @@ use crate::postgres_ext::Oid;
 pub enum WalSyncMethod {
     Fsync = 0,
     Fdatasync,
-    Open,              // for O_SYNC
+    Open, // for O_SYNC
     FsyncWritethrough,
-    OpenDsync,         // for O_DSYNC
+    OpenDsync, // for O_DSYNC
 }
 
 // XLOG GUC parameters and global LSN cursors. PG process globals; under the
@@ -122,11 +122,11 @@ pub struct CheckpointStatsData {
 /// GetWALAvailability return codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WALAvailability {
-    InvalidLsn,  // parameter error
-    Reserved,    // within max_wal_size
-    Extended,    // reserved by a slot or wal_keep_size
-    Unreserved,  // no longer reserved, not removed yet
-    Removed,     // segment has been removed
+    InvalidLsn, // parameter error
+    Reserved,   // within max_wal_size
+    Extended,   // reserved by a slot or wal_keep_size
+    Unreserved, // no longer reserved, not removed yet
+    Removed,    // segment has been removed
 }
 
 /// Session-level base-backup status.
@@ -334,11 +334,7 @@ pub fn xlog_shutdown_wal_rcv() {
 }
 
 // Base-backup start/stop/status.
-pub fn do_pg_backup_start(
-    _backupidstr: &str,
-    _fast: bool,
-    _state: &mut BackupState,
-) -> Vec<()> {
+pub fn do_pg_backup_start(_backupidstr: &str, _fast: bool, _state: &mut BackupState) -> Vec<()> {
     unimplemented!()
 }
 pub fn do_pg_backup_stop(_state: &mut BackupState, _waitforarchive: bool) {

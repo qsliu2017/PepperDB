@@ -91,17 +91,31 @@ impl SyncRequests {
 
     /// Number of (non-canceled) pending fsync requests -- for tests.
     pub fn pending_op_count(&self) -> usize {
-        self.inner.lock().unwrap().pending_ops.values().filter(|e| !e.canceled).count()
+        self.inner
+            .lock()
+            .unwrap()
+            .pending_ops
+            .values()
+            .filter(|e| !e.canceled)
+            .count()
     }
 
     /// True if a sync request for `tag` is queued (and not canceled) -- tests.
     pub fn has_pending_sync(&self, tag: &FileTag) -> bool {
         let g = self.inner.lock().unwrap();
-        g.pending_ops.get(&FileTagKey::of(tag)).is_some_and(|e| !e.canceled)
+        g.pending_ops
+            .get(&FileTagKey::of(tag))
+            .is_some_and(|e| !e.canceled)
     }
 
     pub fn pending_unlink_count(&self) -> usize {
-        self.inner.lock().unwrap().pending_unlinks.iter().filter(|e| !e.canceled).count()
+        self.inner
+            .lock()
+            .unwrap()
+            .pending_unlinks
+            .iter()
+            .filter(|e| !e.canceled)
+            .count()
     }
 }
 
@@ -151,7 +165,10 @@ pub async fn SyncPostCheckpoint(shared: &Arc<SharedState>) {
     for tag in &to_unlink {
         if let Err(e) = unlink_filetag(shared, tag).await {
             if e.kind() != std::io::ErrorKind::NotFound {
-                crate::elog!(crate::utils::elog::WARNING, format!("could not remove file: {e}"));
+                crate::elog!(
+                    crate::utils::elog::WARNING,
+                    format!("could not remove file: {e}")
+                );
             }
         }
     }
@@ -205,7 +222,10 @@ pub async fn ProcessSyncRequests(shared: &Arc<SharedState>) {
                     // (c) escalates to PANIC (data_sync_retry) rather than this
                     // WARNING. Complete all three before the checkpointer (step
                     // 17) calls this, or a checkpoint can falsely report durability.
-                    crate::elog!(crate::utils::elog::WARNING, format!("could not fsync file: {e}"));
+                    crate::elog!(
+                        crate::utils::elog::WARNING,
+                        format!("could not fsync file: {e}")
+                    );
                 }
             }
         }
@@ -301,8 +321,10 @@ fn register_tag_locked(g: &mut SyncRequestsInner, ftag: &FileTag, req_type: Sync
         }
         SyncRequestType::SyncRequest => {
             let cycle = g.sync_cycle_ctr;
-            let entry =
-                g.pending_ops.entry(FileTagKey::of(ftag)).or_insert(PendingFsyncEntry {
+            let entry = g
+                .pending_ops
+                .entry(FileTagKey::of(ftag))
+                .or_insert(PendingFsyncEntry {
                     cycle_ctr: cycle,
                     canceled: false,
                 });
@@ -340,7 +362,11 @@ mod tests {
         FileTag {
             handler: SyncRequestHandler::Md as i16,
             forknum: ForkNumber::MAIN_FORKNUM as i16,
-            rlocator: RelFileLocator { spcOid: Oid(1663), dbOid: Oid(5), relNumber: Oid(rel) },
+            rlocator: RelFileLocator {
+                spcOid: Oid(1663),
+                dbOid: Oid(5),
+                relNumber: Oid(rel),
+            },
             segno,
         }
     }
@@ -374,7 +400,11 @@ mod tests {
         let filt = FileTag {
             handler: SyncRequestHandler::Md as i16,
             forknum: ForkNumber::InvalidForkNumber as i16,
-            rlocator: RelFileLocator { spcOid: Oid(0), dbOid: Oid(5), relNumber: Oid(0) },
+            rlocator: RelFileLocator {
+                spcOid: Oid(0),
+                dbOid: Oid(5),
+                relNumber: Oid(0),
+            },
             segno: 0,
         };
         RegisterSyncRequest(&s, &filt, SyncRequestType::SyncFilterRequest, true);

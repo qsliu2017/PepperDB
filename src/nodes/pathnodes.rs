@@ -296,8 +296,8 @@ pub struct PartitionSchemeData {
 
 pub type PartitionScheme = Box<PartitionSchemeData>;
 
-/// Bitmask of flags supported by table AMs.
 bitflags! {
+    /// Bitmask of flags supported by table AMs.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct AmFlags: u32 {
         const HAS_TID_RANGE = 1 << 0;

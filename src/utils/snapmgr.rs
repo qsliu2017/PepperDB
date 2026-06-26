@@ -22,18 +22,18 @@ use crate::utils::snapshot::{GlobalVisState, SnapshotData, SnapshotType};
 // Snapshot-manager entry points (PascalCase preserved; new `shared`-taking and
 // async shapes). Callers thread `shared` and `.await` the async ones.
 pub use crate::backend::utils::time::snapmgr::{
-    first_snapshot_set, ActiveSnapshotSet, AtEOXact_Snapshot, AtSubAbort_Snapshot,
-    AtSubCommit_Snapshot, DeleteAllExportedSnapshotFiles, EstimateSnapshotSpace, ExportSnapshot,
-    GetActiveSnapshot, GetCatalogSnapshot, GetLatestSnapshot, GetNonHistoricCatalogSnapshot,
-    GetTransactionSnapshot, GlobalVisTestFor, GlobalVisTestIsRemovableFullXid,
-    GlobalVisTestIsRemovableXid, HaveRegisteredOrActiveSnapshot, HistoricSnapshotActive,
-    HistoricSnapshotGetTupleCids, ImportSnapshot, InvalidateCatalogSnapshot,
-    InvalidateCatalogSnapshotConditionally, PopActiveSnapshot, PushActiveSnapshot,
-    PushActiveSnapshotWithLevel, PushCopiedSnapshot, RegisterSnapshot, RegisterSnapshotOnOwner,
-    RestoreSnapshot, RestoreTransactionSnapshot, SerializeSnapshot, SetupHistoricSnapshot,
-    SnapshotSetCommandId, TeardownHistoricSnapshot, ThereAreNoPriorRegisteredSnapshots,
-    UnregisterSnapshot, UnregisterSnapshotFromOwner, UpdateActiveSnapshotCommandId,
-    WaitForOlderSnapshots, XactHasExportedSnapshots, XidInMVCCSnapshot,
+    ActiveSnapshotSet, AtEOXact_Snapshot, AtSubAbort_Snapshot, AtSubCommit_Snapshot,
+    DeleteAllExportedSnapshotFiles, EstimateSnapshotSpace, ExportSnapshot, GetActiveSnapshot,
+    GetCatalogSnapshot, GetLatestSnapshot, GetNonHistoricCatalogSnapshot, GetTransactionSnapshot,
+    GlobalVisTestFor, GlobalVisTestIsRemovableFullXid, GlobalVisTestIsRemovableXid,
+    HaveRegisteredOrActiveSnapshot, HistoricSnapshotActive, HistoricSnapshotGetTupleCids,
+    ImportSnapshot, InvalidateCatalogSnapshot, InvalidateCatalogSnapshotConditionally,
+    PopActiveSnapshot, PushActiveSnapshot, PushActiveSnapshotWithLevel, PushCopiedSnapshot,
+    RegisterSnapshot, RegisterSnapshotOnOwner, RestoreSnapshot, RestoreTransactionSnapshot,
+    SerializeSnapshot, SetupHistoricSnapshot, SnapshotSetCommandId, TeardownHistoricSnapshot,
+    ThereAreNoPriorRegisteredSnapshots, UnregisterSnapshot, UnregisterSnapshotFromOwner,
+    UpdateActiveSnapshotCommandId, WaitForOlderSnapshots, XactHasExportedSnapshots,
+    XidInMVCCSnapshot, first_snapshot_set,
 };
 
 // Special-snapshot semantics. C exposes `static SnapshotData` globals; under the

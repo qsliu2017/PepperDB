@@ -11,9 +11,9 @@ use crate::storage::itemptr::ItemPointerData;
 /// see the C header for the full set of representations. In-memory: no layout
 /// contract, but kept as a plain struct mirroring the C fields.
 pub struct HeapTupleData {
-    pub t_len: u32,                // length of *t_data
-    pub t_self: ItemPointerData,   // SelfItemPointer
-    pub t_tableOid: Oid,           // table the tuple came from
+    pub t_len: u32,                       // length of *t_data
+    pub t_self: ItemPointerData,          // SelfItemPointer
+    pub t_tableOid: Oid,                  // table the tuple came from
     pub t_data: *mut HeapTupleHeaderData, // -> tuple header and data; TODO(ptr)
 }
 

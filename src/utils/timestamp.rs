@@ -3,12 +3,12 @@
 //! The on-disk types (Timestamp/TimestampTz/Interval/fsec_t) live in
 //! crate::datatype::timestamp; this header adds the fmgr glue + utility API.
 
-use crate::datatype::timestamp::fsec_t;
-use crate::datatype::timestamp::pg_itm;
-use crate::datatype::timestamp::pg_itm_in;
 use crate::datatype::timestamp::Interval;
 use crate::datatype::timestamp::Timestamp;
 use crate::datatype::timestamp::TimestampTz;
+use crate::datatype::timestamp::fsec_t;
+use crate::datatype::timestamp::pg_itm;
+use crate::datatype::timestamp::pg_itm_in;
 use crate::pgtime::pg_time_t;
 use crate::pgtime::pg_tm;
 use crate::pgtime::pg_tz;
@@ -143,12 +143,7 @@ pub fn timestamptz_to_str(t: TimestampTz) -> String {
 }
 
 /// `int *tzp` skippable out-param -> Option; (tm, fsec) folded into the tuple.
-pub fn tm2timestamp(
-    tm: &pg_tm,
-    fsec: fsec_t,
-    tzp: Option<&i32>,
-    result: &mut Timestamp,
-) -> i32 {
+pub fn tm2timestamp(tm: &pg_tm, fsec: fsec_t, tzp: Option<&i32>, result: &mut Timestamp) -> i32 {
     unimplemented!()
 }
 pub fn timestamp2tm(

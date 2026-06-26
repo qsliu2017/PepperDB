@@ -33,16 +33,16 @@ use crate::access::transam::{
     FullTransactionId, INVALID_FULL_TRANSACTION_ID, INVALID_TRANSACTION_ID,
 };
 use crate::access::xact::{
-    xl_xact_abort, xl_xact_commit, xl_xact_dbinfo, xl_xact_origin, xl_xact_relfilelocators,
-    xl_xact_stats_item, xl_xact_subxacts, xl_xact_xinfo, MinSizeOfXactAbort,
-    MinSizeOfXactRelfileLocators, MinSizeOfXactSubxacts, SavedTransactionCharacteristics,
-    SubXactCallback, SubXactEvent, XactCallback, XactEvent, XactFlags, SYNCHRONOUS_COMMIT_ON,
+    MinSizeOfXactAbort, MinSizeOfXactRelfileLocators, MinSizeOfXactSubxacts, SYNCHRONOUS_COMMIT_ON,
+    SavedTransactionCharacteristics, SubXactCallback, SubXactEvent,
     XACT_COMPLETION_FORCE_SYNC_COMMIT, XACT_COMPLETION_UPDATE_RELCACHE_FILE,
     XACT_FLAGS_ACQUIREDACCESSEXCLUSIVELOCK, XACT_READ_COMMITTED, XACT_XINFO_HAS_AE_LOCKS,
     XACT_XINFO_HAS_RELFILELOCATORS, XACT_XINFO_HAS_SUBXACTS, XLOG_XACT_ABORT, XLOG_XACT_COMMIT,
-    XLOG_XACT_HAS_INFO,
+    XLOG_XACT_HAS_INFO, XactCallback, XactEvent, XactFlags, xl_xact_abort, xl_xact_commit,
+    xl_xact_dbinfo, xl_xact_origin, xl_xact_relfilelocators, xl_xact_stats_item, xl_xact_subxacts,
+    xl_xact_xinfo,
 };
-use crate::access::xlogdefs::{XLogRecPtr, INVALID_XLOG_REC_PTR};
+use crate::access::xlogdefs::{INVALID_XLOG_REC_PTR, XLogRecPtr};
 use crate::access::xlogrecord::XLR_SPECIAL_REL_UPDATE;
 use crate::c::{
     CommandId, FirstCommandId, InvalidCommandId, InvalidSubTransactionId, SubTransactionId,
@@ -53,15 +53,13 @@ use crate::shared_state::SharedState;
 use crate::storage::relfilelocator::RelFileLocator;
 
 use crate::access::transam::{
-    transaction_id_is_valid as TransactionIdIsValid,
-    transaction_id_is_normal as TransactionIdIsNormal,
-    transaction_id_equals as TransactionIdEquals,
     full_transaction_id_is_valid as FullTransactionIdIsValid,
+    transaction_id_equals as TransactionIdEquals,
     xid_from_full_transaction_id as XidFromFullTransactionId,
 };
 use crate::backend::access::transam::transam::{
-    transaction_id_did_commit, transaction_id_precedes, transaction_id_latest as TransactionIdLatest,
-    transaction_id_commit_tree, transaction_id_async_commit_tree, transaction_id_abort_tree,
+    transaction_id_abort_tree, transaction_id_async_commit_tree, transaction_id_commit_tree,
+    transaction_id_did_commit, transaction_id_latest as TransactionIdLatest,
 };
 
 // ---------------------------------------------------------------------------
@@ -388,7 +386,7 @@ pub async fn GetTopTransactionId(shared: &Arc<SharedState>) -> TransactionId {
 pub fn GetTopTransactionIdIfAny() -> Option<TransactionId> {
     with_xact_or(None, |x| {
         let xid = XidFromFullTransactionId(x.xact_top_full_xid);
-        TransactionIdIsValid(xid).then_some(xid)
+        xid.is_valid().then_some(xid)
     })
 }
 
@@ -411,7 +409,7 @@ pub async fn GetCurrentTransactionId(shared: &Arc<SharedState>) -> TransactionId
 pub fn GetCurrentTransactionIdIfAny() -> Option<TransactionId> {
     with_xact(|x| {
         let xid = XidFromFullTransactionId(x.cur().full_transaction_id);
-        TransactionIdIsValid(xid).then_some(xid)
+        xid.is_valid().then_some(xid)
     })
 }
 
@@ -473,9 +471,7 @@ pub fn MarkSubxactTopXidLogged() {
 pub fn GetStableLatestTransactionId(shared: &Arc<SharedState>) -> TransactionId {
     match GetTopTransactionIdIfAny() {
         Some(xid) => xid,
-        None => XidFromFullTransactionId(
-            crate::backend::access::transam::varsup::ReadNextFullTransactionId(shared),
-        ),
+        None => XidFromFullTransactionId(shared.variable_cache().read_next_full_transaction_id()),
     }
 }
 
@@ -484,14 +480,19 @@ pub fn GetStableLatestTransactionId(shared: &Arc<SharedState>) -> TransactionId 
 /// child's xid always follows its parent's.
 async fn assign_transaction_id(shared: &Arc<SharedState>, idx: usize) {
     // Assert caller didn't screw up.
-    debug_assert!(with_xact(|x| !FullTransactionIdIsValid(x.stack[idx].full_transaction_id)
-        && x.stack[idx].state == TransState::InProgress));
+    debug_assert!(with_xact(|x| !FullTransactionIdIsValid(
+        x.stack[idx].full_transaction_id
+    ) && x.stack[idx].state
+        == TransState::InProgress));
 
     let is_sub_xact = idx != 0;
 
     if IsInParallelMode() || crate::access::parallel::IsParallelWorker() {
         // TODO(panic): migrate to Result + ?
-        crate::elog!(crate::utils::elog::ERROR, "cannot assign transaction IDs during a parallel operation".to_string());
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            "cannot assign transaction IDs during a parallel operation".to_string()
+        );
     }
 
     // Ensure parent(s) have xids first (iterative, deepest-unassigned-first).
@@ -512,7 +513,10 @@ async fn assign_transaction_id(shared: &Arc<SharedState>, idx: usize) {
     }
 
     // Generate the new FullTransactionId (extends clog/subtrans as needed).
-    let full = crate::backend::access::transam::varsup::GetNewTransactionId(shared, is_sub_xact).await;
+    let full = shared
+        .variable_cache()
+        .get_new_transaction_id(shared.clog(), shared.subtrans(), is_sub_xact)
+        .await;
     let (xid, parent_xid) = with_xact(|x| {
         x.stack[idx].full_transaction_id = full;
         if !is_sub_xact {
@@ -528,7 +532,9 @@ async fn assign_transaction_id(shared: &Arc<SharedState>, idx: usize) {
 
     // Record the subxact->parent link BEFORE the xid is visible elsewhere.
     if is_sub_xact {
-        crate::backend::access::transam::subtrans::sub_trans_set_parent(shared, xid, parent_xid)
+        shared
+            .subtrans()
+            .sub_trans_set_parent(xid, parent_xid)
             .await;
     }
 
@@ -622,7 +628,7 @@ pub fn GetCurrentTransactionNestLevel() -> i32 {
 /// xact.c `TransactionIdIsCurrentTransactionId`. Walks the state stack; does not
 /// assign xids, so it stays sync.
 pub fn TransactionIdIsCurrentTransactionId(xid: TransactionId) -> bool {
-    if !TransactionIdIsNormal(xid) {
+    if !xid.is_normal() {
         return false;
     }
     if let Some(top) = GetTopTransactionIdIfAny() {
@@ -821,8 +827,15 @@ async fn record_transaction_commit(shared: &Arc<SharedState>) -> TransactionId {
             return latest_xid;
         }
         // Fall through to the flush/async decision below with mark_xid=false.
-        return record_commit_finish(shared, INVALID_TRANSACTION_ID, &[], nrels, false, wrote_xlog)
-            .await;
+        return record_commit_finish(
+            shared,
+            INVALID_TRANSACTION_ID,
+            &[],
+            nrels,
+            false,
+            wrote_xlog,
+        )
+        .await;
     };
 
     // Mark our commit critical section: forces a concurrent checkpoint to wait
@@ -876,12 +889,14 @@ async fn record_commit_finish(
     // (clog is never set committed before the WAL is durable) until GUCs land.
     let sync = SYNCHRONOUS_COMMIT_DEFAULT;
 
-    if (wrote_xlog && mark_xid_committed && sync > SYNCHRONOUS_COMMIT_OFF) || force_sync || nrels > 0
+    if (wrote_xlog && mark_xid_committed && sync > SYNCHRONOUS_COMMIT_OFF)
+        || force_sync
+        || nrels > 0
     {
         // SYNC commit: flush the WAL to disk BEFORE updating clog.
         crate::backend::access::transam::xlog::xlog_flush(shared.xlog(), recptr).await;
         if mark_xid_committed {
-            transaction_id_commit_tree(shared, xid, children).await;
+            transaction_id_commit_tree(shared.clog(), xid, children).await;
         }
     } else {
         // ASYNC commit: record the commit LSN in clog and request a future
@@ -889,7 +904,7 @@ async fn record_commit_finish(
         // for synchronous_commit=off (see xact.c).
         shared.xlog().set_async_xact_lsn(recptr);
         if mark_xid_committed {
-            transaction_id_async_commit_tree(shared, xid, children, recptr).await;
+            transaction_id_async_commit_tree(shared.clog(), xid, children, recptr).await;
         }
     }
 
@@ -917,7 +932,13 @@ async fn commit_transaction(shared: &Arc<SharedState>) {
     let state = with_xact(|x| x.cur().state);
     if state != TransState::InProgress {
         // TODO(panic): WARNING only.
-        crate::elog!(crate::utils::elog::WARNING, format!("CommitTransaction while in {} state", trans_state_as_string(state)));
+        crate::elog!(
+            crate::utils::elog::WARNING,
+            format!(
+                "CommitTransaction while in {} state",
+                trans_state_as_string(state)
+            )
+        );
     }
     debug_assert!(with_xact(|x| !x.is_sub()));
 
@@ -982,7 +1003,14 @@ async fn record_transaction_abort(shared: &Arc<SharedState>, is_sub_xact: bool) 
     };
 
     // Check we haven't aborted halfway through commit.
-    if transaction_id_did_commit(shared, xid, INVALID_TRANSACTION_ID).await {
+    if transaction_id_did_commit(
+        shared.clog(),
+        shared.subtrans(),
+        xid,
+        INVALID_TRANSACTION_ID,
+    )
+    .await
+    {
         // PANIC: cannot abort an already-committed transaction.
         std::process::abort();
     }
@@ -1019,7 +1047,7 @@ async fn record_transaction_abort(shared: &Arc<SharedState>, is_sub_xact: bool) 
     }
 
     // Mark aborted in clog. OK without flushing -- a crash assumes abort anyway.
-    transaction_id_abort_tree(shared, xid, &children).await;
+    transaction_id_abort_tree(shared.clog(), xid, &children).await;
 
     crate::session::current().dec_crit_section_count();
 
@@ -1045,7 +1073,13 @@ async fn abort_transaction(shared: &Arc<SharedState>) {
     let state = with_xact(|x| x.cur().state);
     if state != TransState::InProgress && state != TransState::Prepare {
         // TODO(panic): WARNING only.
-        crate::elog!(crate::utils::elog::WARNING, format!("AbortTransaction while in {} state", trans_state_as_string(state)));
+        crate::elog!(
+            crate::utils::elog::WARNING,
+            format!(
+                "AbortTransaction while in {} state",
+                trans_state_as_string(state)
+            )
+        );
     }
     debug_assert!(with_xact(|x| !x.is_sub()));
 
@@ -1084,7 +1118,13 @@ fn cleanup_transaction() {
     let state = with_xact(|x| x.cur().state);
     if state != TransState::Abort {
         // TODO(panic): FATAL.
-        crate::elog!(crate::utils::elog::FATAL, format!("CleanupTransaction: unexpected state {}", trans_state_as_string(state)));
+        crate::elog!(
+            crate::utils::elog::FATAL,
+            format!(
+                "CleanupTransaction: unexpected state {}",
+                trans_state_as_string(state)
+            )
+        );
     }
     at_eoxact_snapshot(false, true);
     with_xact(|x| {
@@ -1138,9 +1178,9 @@ fn at_sub_abort_snapshot(level: i32) {
 /// latestCompletedXid + completion-count bookkeeping still runs).
 fn proc_array_end_transaction(shared: &Arc<SharedState>, latest_xid: TransactionId) {
     let mut proc = crate::storage::proc::PGPROC::default();
-    crate::backend::storage::ipc::procarray::proc_array_end_transaction(
-        shared, &mut proc, latest_xid,
-    );
+    shared
+        .proc_array()
+        .proc_array_end_transaction(shared.variable_cache(), &mut proc, latest_xid);
 }
 
 // ===========================================================================
@@ -1160,10 +1200,13 @@ pub async fn StartTransactionCommand(shared: &Arc<SharedState>) {
         Abort | SubAbort => {}
         _ => {
             // TODO(panic): migrate to Result + ?
-            crate::elog!(crate::utils::elog::ERROR, format!(
-                "StartTransactionCommand: unexpected state {}",
-                block_state_as_string(bs)
-            ));
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                format!(
+                    "StartTransactionCommand: unexpected state {}",
+                    block_state_as_string(bs)
+                )
+            );
         }
     }
 }
@@ -1204,10 +1247,13 @@ async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool 
     match bs {
         Default | ParallelInProgress => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, format!(
-                "CommitTransactionCommand: unexpected state {}",
-                block_state_as_string(bs)
-            ));
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                format!(
+                    "CommitTransactionCommand: unexpected state {}",
+                    block_state_as_string(bs)
+                )
+            );
         }
         Started => {
             Box::pin(commit_transaction(shared)).await;
@@ -1246,15 +1292,13 @@ async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool 
             Box::pin(start_sub_transaction(shared)).await;
             with_xact(|x| x.cur_mut().block_state = SubInProgress);
         }
-        SubRelease => {
-            loop {
-                Box::pin(commit_sub_transaction(shared)).await;
-                let s = with_xact(|x| x.cur().block_state);
-                if s != SubRelease {
-                    break;
-                }
+        SubRelease => loop {
+            Box::pin(commit_sub_transaction(shared)).await;
+            let s = with_xact(|x| x.cur().block_state);
+            if s != SubRelease {
+                break;
             }
-        }
+        },
         SubCommit => {
             loop {
                 Box::pin(commit_sub_transaction(shared)).await;
@@ -1273,10 +1317,13 @@ async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool 
                 with_xact(|x| x.cur_mut().block_state = Default);
             } else {
                 // TODO(panic): migrate to Result + ?
-                crate::elog!(crate::utils::elog::ERROR, format!(
-                    "CommitTransactionCommand: unexpected state {}",
-                    block_state_as_string(s)
-                ));
+                crate::elog!(
+                    crate::utils::elog::ERROR,
+                    format!(
+                        "CommitTransactionCommand: unexpected state {}",
+                        block_state_as_string(s)
+                    )
+                );
             }
         }
         SubAbortEnd => {
@@ -1413,20 +1460,32 @@ async fn abort_current_transaction_internal(shared: &Arc<SharedState>) -> bool {
 pub fn PreventInTransactionBlock(is_top_level: bool, stmt_type: &str) {
     if IsTransactionBlock() {
         // TODO(panic): migrate to Result + ?
-        crate::elog!(crate::utils::elog::ERROR, format!("{stmt_type} cannot run inside a transaction block"));
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("{stmt_type} cannot run inside a transaction block")
+        );
     }
     if IsSubTransaction() {
         // TODO(panic): migrate to Result + ?
-        crate::elog!(crate::utils::elog::ERROR, format!("{stmt_type} cannot run inside a subtransaction"));
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("{stmt_type} cannot run inside a subtransaction")
+        );
     }
     if !is_top_level {
         // TODO(panic): migrate to Result + ?
-        crate::elog!(crate::utils::elog::ERROR, format!("{stmt_type} cannot be executed from a function"));
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("{stmt_type} cannot be executed from a function")
+        );
     }
     let bs = with_xact(|x| x.cur().block_state);
     if bs != TBlockState::Default && bs != TBlockState::Started {
         // TODO(panic): FATAL.
-        crate::elog!(crate::utils::elog::FATAL, "cannot prevent transaction chain".to_string());
+        crate::elog!(
+            crate::utils::elog::FATAL,
+            "cannot prevent transaction chain".to_string()
+        );
     }
     with_xact(|x| x.my_xact_flags |= XactFlags::NEEDIMMEDIATECOMMIT.bits() as i32);
 }
@@ -1451,7 +1510,10 @@ fn check_transaction_block(is_top_level: bool, throw_error: bool, stmt_type: &st
         crate::utils::elog::WARNING
     };
     // TODO(panic): ERROR variant panics, WARNING logs.
-    crate::elog!(level, format!("{stmt_type} can only be used in transaction blocks"));
+    crate::elog!(
+        level,
+        format!("{stmt_type} can only be used in transaction blocks")
+    );
 }
 
 /// xact.c `IsInTransactionBlock`.
@@ -1535,14 +1597,20 @@ pub fn BeginTransactionBlock() {
         }
         InProgress | ParallelInProgress | SubInProgress | Abort | SubAbort => {
             // TODO(panic): WARNING only.
-            crate::elog!(crate::utils::elog::WARNING, "there is already a transaction in progress".to_string());
+            crate::elog!(
+                crate::utils::elog::WARNING,
+                "there is already a transaction in progress".to_string()
+            );
         }
         _ => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, format!(
-                "BeginTransactionBlock: unexpected state {}",
-                block_state_as_string(bs)
-            ));
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                format!(
+                    "BeginTransactionBlock: unexpected state {}",
+                    block_state_as_string(bs)
+                )
+            );
         }
     }
 }
@@ -1579,10 +1647,16 @@ pub fn EndTransactionBlock(chain: bool) -> bool {
         ImplicitInProgress => {
             if chain {
                 // TODO(panic): migrate to Result + ?
-                crate::elog!(crate::utils::elog::ERROR, "COMMIT AND CHAIN can only be used in transaction blocks".to_string());
+                crate::elog!(
+                    crate::utils::elog::ERROR,
+                    "COMMIT AND CHAIN can only be used in transaction blocks".to_string()
+                );
             } else {
                 // TODO(panic): WARNING only.
-                crate::elog!(crate::utils::elog::WARNING, "there is no transaction in progress".to_string());
+                crate::elog!(
+                    crate::utils::elog::WARNING,
+                    "there is no transaction in progress".to_string()
+                );
             }
             with_xact(|x| x.cur_mut().block_state = End);
             result = true;
@@ -1622,23 +1696,35 @@ pub fn EndTransactionBlock(chain: bool) -> bool {
         Started => {
             if chain {
                 // TODO(panic): migrate to Result + ?
-                crate::elog!(crate::utils::elog::ERROR, "COMMIT AND CHAIN can only be used in transaction blocks".to_string());
+                crate::elog!(
+                    crate::utils::elog::ERROR,
+                    "COMMIT AND CHAIN can only be used in transaction blocks".to_string()
+                );
             } else {
                 // TODO(panic): WARNING only.
-                crate::elog!(crate::utils::elog::WARNING, "there is no transaction in progress".to_string());
+                crate::elog!(
+                    crate::utils::elog::WARNING,
+                    "there is no transaction in progress".to_string()
+                );
             }
             result = true;
         }
         ParallelInProgress => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, "cannot commit during a parallel operation".to_string());
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                "cannot commit during a parallel operation".to_string()
+            );
         }
         _ => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, format!(
-                "EndTransactionBlock: unexpected state {}",
-                block_state_as_string(bs)
-            ));
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                format!(
+                    "EndTransactionBlock: unexpected state {}",
+                    block_state_as_string(bs)
+                )
+            );
         }
     }
     with_xact(|x| x.cur_mut().chain = chain);
@@ -1675,23 +1761,35 @@ pub fn UserAbortTransactionBlock(chain: bool) {
         Started | ImplicitInProgress => {
             if chain {
                 // TODO(panic): migrate to Result + ?
-                crate::elog!(crate::utils::elog::ERROR, "ROLLBACK AND CHAIN can only be used in transaction blocks".to_string());
+                crate::elog!(
+                    crate::utils::elog::ERROR,
+                    "ROLLBACK AND CHAIN can only be used in transaction blocks".to_string()
+                );
             } else {
                 // TODO(panic): WARNING only.
-                crate::elog!(crate::utils::elog::WARNING, "there is no transaction in progress".to_string());
+                crate::elog!(
+                    crate::utils::elog::WARNING,
+                    "there is no transaction in progress".to_string()
+                );
             }
             with_xact(|x| x.cur_mut().block_state = AbortPending);
         }
         ParallelInProgress => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, "cannot abort during a parallel operation".to_string());
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                "cannot abort during a parallel operation".to_string()
+            );
         }
         _ => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, format!(
-                "UserAbortTransactionBlock: unexpected state {}",
-                block_state_as_string(bs)
-            ));
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                format!(
+                    "UserAbortTransactionBlock: unexpected state {}",
+                    block_state_as_string(bs)
+                )
+            );
         }
     }
     with_xact(|x| x.cur_mut().chain = chain);
@@ -1719,7 +1817,10 @@ pub fn EndImplicitTransactionBlock() {
 pub fn DefineSavepoint(name: Option<&str>) {
     if IsInParallelMode() || crate::access::parallel::IsParallelWorker() {
         // TODO(panic): migrate to Result + ?
-        crate::elog!(crate::utils::elog::ERROR, "cannot define savepoints during a parallel operation".to_string());
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            "cannot define savepoints during a parallel operation".to_string()
+        );
     }
     use TBlockState::*;
     let bs = with_xact(|x| x.cur().block_state);
@@ -1732,14 +1833,20 @@ pub fn DefineSavepoint(name: Option<&str>) {
         }
         ImplicitInProgress => {
             // TODO(panic): migrate to Result + ?
-            crate::elog!(crate::utils::elog::ERROR, "SAVEPOINT can only be used in transaction blocks".to_string());
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                "SAVEPOINT can only be used in transaction blocks".to_string()
+            );
         }
         _ => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, format!(
-                "DefineSavepoint: unexpected state {}",
-                block_state_as_string(bs)
-            ));
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                format!(
+                    "DefineSavepoint: unexpected state {}",
+                    block_state_as_string(bs)
+                )
+            );
         }
     }
 }
@@ -1748,26 +1855,38 @@ pub fn DefineSavepoint(name: Option<&str>) {
 pub fn ReleaseSavepoint(name: &str) {
     if IsInParallelMode() || crate::access::parallel::IsParallelWorker() {
         // TODO(panic): migrate to Result + ?
-        crate::elog!(crate::utils::elog::ERROR, "cannot release savepoints during a parallel operation".to_string());
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            "cannot release savepoints during a parallel operation".to_string()
+        );
     }
     use TBlockState::*;
     let bs = with_xact(|x| x.cur().block_state);
     match bs {
         InProgress => {
             // TODO(panic): migrate to Result + ?
-            crate::elog!(crate::utils::elog::ERROR, format!("savepoint \"{name}\" does not exist"));
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                format!("savepoint \"{name}\" does not exist")
+            );
         }
         ImplicitInProgress => {
             // TODO(panic): migrate to Result + ?
-            crate::elog!(crate::utils::elog::ERROR, "RELEASE SAVEPOINT can only be used in transaction blocks".to_string());
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                "RELEASE SAVEPOINT can only be used in transaction blocks".to_string()
+            );
         }
         SubInProgress => {}
         _ => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, format!(
-                "ReleaseSavepoint: unexpected state {}",
-                block_state_as_string(bs)
-            ));
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                format!(
+                    "ReleaseSavepoint: unexpected state {}",
+                    block_state_as_string(bs)
+                )
+            );
         }
     }
 
@@ -1777,15 +1896,19 @@ pub fn ReleaseSavepoint(name: &str) {
         Some(i) => i,
         None => {
             // TODO(panic): migrate to Result + ?
-            crate::elog!(crate::utils::elog::ERROR, format!("savepoint \"{name}\" does not exist"));
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                format!("savepoint \"{name}\" does not exist")
+            );
             unreachable!()
         }
     };
     if with_xact(|x| x.stack[target_idx].savepoint_level) != cur_level {
         // TODO(panic): migrate to Result + ?
-        crate::elog!(crate::utils::elog::ERROR, format!(
-            "savepoint \"{name}\" does not exist within current savepoint level"
-        ));
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("savepoint \"{name}\" does not exist within current savepoint level")
+        );
     }
     // Mark "commit pending" from current down to the target (inclusive).
     with_xact(|x| {
@@ -1800,26 +1923,38 @@ pub fn ReleaseSavepoint(name: &str) {
 pub fn RollbackToSavepoint(name: &str) {
     if IsInParallelMode() || crate::access::parallel::IsParallelWorker() {
         // TODO(panic): migrate to Result + ?
-        crate::elog!(crate::utils::elog::ERROR, "cannot rollback to savepoints during a parallel operation".to_string());
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            "cannot rollback to savepoints during a parallel operation".to_string()
+        );
     }
     use TBlockState::*;
     let bs = with_xact(|x| x.cur().block_state);
     match bs {
         InProgress | Abort => {
             // TODO(panic): migrate to Result + ?
-            crate::elog!(crate::utils::elog::ERROR, format!("savepoint \"{name}\" does not exist"));
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                format!("savepoint \"{name}\" does not exist")
+            );
         }
         ImplicitInProgress => {
             // TODO(panic): migrate to Result + ?
-            crate::elog!(crate::utils::elog::ERROR, "ROLLBACK TO SAVEPOINT can only be used in transaction blocks".to_string());
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                "ROLLBACK TO SAVEPOINT can only be used in transaction blocks".to_string()
+            );
         }
         SubInProgress | SubAbort => {}
         _ => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, format!(
-                "RollbackToSavepoint: unexpected state {}",
-                block_state_as_string(bs)
-            ));
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                format!(
+                    "RollbackToSavepoint: unexpected state {}",
+                    block_state_as_string(bs)
+                )
+            );
         }
     }
 
@@ -1827,16 +1962,20 @@ pub fn RollbackToSavepoint(name: &str) {
         Some(i) => i,
         None => {
             // TODO(panic): migrate to Result + ?
-            crate::elog!(crate::utils::elog::ERROR, format!("savepoint \"{name}\" does not exist"));
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                format!("savepoint \"{name}\" does not exist")
+            );
             unreachable!()
         }
     };
     let cur_level = with_xact(|x| x.cur().savepoint_level);
     if with_xact(|x| x.stack[target_idx].savepoint_level) != cur_level {
         // TODO(panic): migrate to Result + ?
-        crate::elog!(crate::utils::elog::ERROR, format!(
-            "savepoint \"{name}\" does not exist within current savepoint level"
-        ));
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("savepoint \"{name}\" does not exist within current savepoint level")
+        );
     }
     // Mark "abort pending" from current down to (but excluding) target; the
     // target becomes "restart pending".
@@ -1883,10 +2022,13 @@ pub async fn BeginInternalSubTransaction(shared: &Arc<SharedState>, name: Option
         }
         _ => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, format!(
-                "BeginInternalSubTransaction: unexpected state {}",
-                block_state_as_string(bs)
-            ));
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                format!(
+                    "BeginInternalSubTransaction: unexpected state {}",
+                    block_state_as_string(bs)
+                )
+            );
         }
     }
     CommitTransactionCommand(shared).await;
@@ -1898,10 +2040,13 @@ pub async fn ReleaseCurrentSubTransaction(shared: &Arc<SharedState>) {
     let bs = with_xact(|x| x.cur().block_state);
     if bs != TBlockState::SubInProgress {
         // TODO(panic): migrate to Result + ?
-        crate::elog!(crate::utils::elog::ERROR, format!(
-            "ReleaseCurrentSubTransaction: unexpected state {}",
-            block_state_as_string(bs)
-        ));
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!(
+                "ReleaseCurrentSubTransaction: unexpected state {}",
+                block_state_as_string(bs)
+            )
+        );
     }
     Box::pin(commit_sub_transaction(shared)).await;
 }
@@ -1914,10 +2059,13 @@ pub async fn RollbackAndReleaseCurrentSubTransaction(shared: &Arc<SharedState>) 
         SubInProgress | SubAbort => {}
         _ => {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, format!(
-                "RollbackAndReleaseCurrentSubTransaction: unexpected state {}",
-                block_state_as_string(bs)
-            ));
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                format!(
+                    "RollbackAndReleaseCurrentSubTransaction: unexpected state {}",
+                    block_state_as_string(bs)
+                )
+            );
         }
     }
     if bs == SubInProgress {
@@ -2009,14 +2157,24 @@ async fn start_sub_transaction(shared: &Arc<SharedState>) {
     let state = with_xact(|x| x.cur().state);
     if state != TransState::Default {
         // TODO(panic): WARNING only.
-        crate::elog!(crate::utils::elog::WARNING, format!("StartSubTransaction while in {} state", trans_state_as_string(state)));
+        crate::elog!(
+            crate::utils::elog::WARNING,
+            format!(
+                "StartSubTransaction while in {} state",
+                trans_state_as_string(state)
+            )
+        );
     }
     with_xact(|x| x.cur_mut().state = TransState::Start);
     // AtSubStart_Memory/ResourceOwner: resource owner tree handled by resowner.
     // AfterTriggerBeginSubXact: deferred.
     with_xact(|x| x.cur_mut().state = TransState::InProgress);
-    let (my_subid, parent_subid) =
-        with_xact(|x| (x.cur().subtransaction_id, x.stack[x.stack.len() - 2].subtransaction_id));
+    let (my_subid, parent_subid) = with_xact(|x| {
+        (
+            x.cur().subtransaction_id,
+            x.stack[x.stack.len() - 2].subtransaction_id,
+        )
+    });
     call_sub_xact_callbacks(SubXactEvent::StartSub, my_subid, parent_subid);
     let _ = shared;
 }
@@ -2026,7 +2184,13 @@ async fn commit_sub_transaction(shared: &Arc<SharedState>) {
     let state = with_xact(|x| x.cur().state);
     if state != TransState::InProgress {
         // TODO(panic): WARNING only.
-        crate::elog!(crate::utils::elog::WARNING, format!("CommitSubTransaction while in {} state", trans_state_as_string(state)));
+        crate::elog!(
+            crate::utils::elog::WARNING,
+            format!(
+                "CommitSubTransaction while in {} state",
+                trans_state_as_string(state)
+            )
+        );
     }
     let (my_subid, parent_subid, nest_level, guc_nest_level) = with_xact(|x| {
         (
@@ -2078,7 +2242,13 @@ async fn abort_sub_transaction(shared: &Arc<SharedState>) {
     let state = with_xact(|x| x.cur().state);
     if state != TransState::InProgress {
         // TODO(panic): WARNING only.
-        crate::elog!(crate::utils::elog::WARNING, format!("AbortSubTransaction while in {} state", trans_state_as_string(state)));
+        crate::elog!(
+            crate::utils::elog::WARNING,
+            format!(
+                "AbortSubTransaction while in {} state",
+                trans_state_as_string(state)
+            )
+        );
     }
     with_xact(|x| x.cur_mut().state = TransState::Abort);
 
@@ -2116,7 +2286,13 @@ fn cleanup_sub_transaction() {
     let state = with_xact(|x| x.cur().state);
     if state != TransState::Abort {
         // TODO(panic): WARNING only.
-        crate::elog!(crate::utils::elog::WARNING, format!("CleanupSubTransaction while in {} state", trans_state_as_string(state)));
+        crate::elog!(
+            crate::utils::elog::WARNING,
+            format!(
+                "CleanupSubTransaction while in {} state",
+                trans_state_as_string(state)
+            )
+        );
     }
     with_xact(|x| x.cur_mut().state = TransState::Default);
     pop_transaction();
@@ -2145,7 +2321,9 @@ fn push_transaction() {
             prev_user: crate::session::try_current()
                 .map(|s| s.current_user_id())
                 .unwrap_or(crate::postgres_ext::Oid(0)),
-            prev_sec_context: crate::session::try_current().map(|s| s.sec_context()).unwrap_or(0),
+            prev_sec_context: crate::session::try_current()
+                .map(|s| s.sec_context())
+                .unwrap_or(0),
             prev_xact_read_only: x.xact_read_only,
             started_in_recovery: p.started_in_recovery,
             did_log_xid: false,
@@ -2164,11 +2342,20 @@ fn pop_transaction() {
         let state = x.cur().state;
         if state != TransState::Default {
             // TODO(panic): WARNING only.
-            crate::elog!(crate::utils::elog::WARNING, format!("PopTransaction while in {} state", trans_state_as_string(state)));
+            crate::elog!(
+                crate::utils::elog::WARNING,
+                format!(
+                    "PopTransaction while in {} state",
+                    trans_state_as_string(state)
+                )
+            );
         }
         if x.stack.len() < 2 {
             // TODO(panic): FATAL.
-            crate::elog!(crate::utils::elog::FATAL, "PopTransaction with no parent".to_string());
+            crate::elog!(
+                crate::utils::elog::FATAL,
+                "PopTransaction with no parent".to_string()
+            );
         }
         x.stack.pop();
     });
@@ -2234,7 +2421,7 @@ pub async fn XactLogCommitRecord(
 ) -> XLogRecPtr {
     debug_assert!(crate::session::current().crit_section_count() > 0);
     debug_assert!(
-        !TransactionIdIsValid(twophase_xid),
+        !twophase_xid.is_valid(),
         "two-phase commit records are deferred"
     );
 
@@ -2280,7 +2467,12 @@ pub async fn XactLogCommitRecord(
             xli::register_data(&relfilelocators_header_bytes(rels.len()));
             xli::register_data(&relfilelocators_to_bytes(rels));
         }
-        xli::xlog_insert(shared.xlog(), crate::access::rmgrlist::RmgrId::Xact as u8, info).await
+        xli::xlog_insert(
+            shared.xlog(),
+            crate::access::rmgrlist::RmgrId::Xact as u8,
+            info,
+        )
+        .await
     })
     .await
 }
@@ -2299,7 +2491,7 @@ pub async fn XactLogAbortRecord(
 ) -> XLogRecPtr {
     debug_assert!(crate::session::current().crit_section_count() > 0);
     debug_assert!(
-        !TransactionIdIsValid(twophase_xid),
+        !twophase_xid.is_valid(),
         "two-phase abort records are deferred"
     );
 
@@ -2338,7 +2530,12 @@ pub async fn XactLogAbortRecord(
             xli::register_data(&relfilelocators_header_bytes(rels.len()));
             xli::register_data(&relfilelocators_to_bytes(rels));
         }
-        xli::xlog_insert(shared.xlog(), crate::access::rmgrlist::RmgrId::Xact as u8, info).await
+        xli::xlog_insert(
+            shared.xlog(),
+            crate::access::rmgrlist::RmgrId::Xact as u8,
+            info,
+        )
+        .await
     })
     .await
 }
@@ -2383,12 +2580,14 @@ const _: () = {
     let _ = MinSizeOfXactCommit_CHECK;
 };
 #[allow(non_upper_case_globals)]
-const MinSizeOfXactCommit_CHECK: usize =
-    crate::access::xact::MinSizeOfXactCommit + MinSizeOfXactAbort + MinSizeOfXactSubxacts
-        + MinSizeOfXactRelfileLocators;
+const MinSizeOfXactCommit_CHECK: usize = crate::access::xact::MinSizeOfXactCommit
+    + MinSizeOfXactAbort
+    + MinSizeOfXactSubxacts
+    + MinSizeOfXactRelfileLocators;
 const _: () = {
     // Reference the deferred record sub-structs so their definitions stay used.
-    let _f = |_: xl_xact_dbinfo, _: xl_xact_origin, _: xl_xact_relfilelocators, _: xl_xact_subxacts| {};
+    let _f =
+        |_: xl_xact_dbinfo, _: xl_xact_origin, _: xl_xact_relfilelocators, _: xl_xact_subxacts| {};
 };
 
 // ===========================================================================
@@ -2481,10 +2680,18 @@ mod tests {
             StartTransactionCommand(&shared).await;
             // Force an xid + pretend WAL was written.
             let xid = GetCurrentTransactionId(&shared).await;
-            assert!(TransactionIdIsValid(xid));
+            assert!(xid.is_valid());
             with_xact(|x| x.xact_last_rec_end = XLogRecPtr(1)); // wrote_xlog
             // Not committed yet.
-            assert!(!transaction_id_did_commit(&shared, xid, INVALID_TRANSACTION_ID).await);
+            assert!(
+                !transaction_id_did_commit(
+                    shared.clog(),
+                    shared.subtrans(),
+                    xid,
+                    INVALID_TRANSACTION_ID
+                )
+                .await
+            );
 
             CommitTransactionCommand(&shared).await;
 
@@ -2492,7 +2699,15 @@ mod tests {
             // covers the commit record. The sync branch awaits xlog_flush(recptr)
             // BEFORE transaction_id_commit_tree, so the only way clog can report
             // COMMITTED is if the flush already reached >= the commit record end.
-            assert!(transaction_id_did_commit(&shared, xid, INVALID_TRANSACTION_ID).await);
+            assert!(
+                transaction_id_did_commit(
+                    shared.clog(),
+                    shared.subtrans(),
+                    xid,
+                    INVALID_TRANSACTION_ID
+                )
+                .await
+            );
             // The real commit record's end LSN (set inside RecordTransactionCommit)
             // is remembered as xact_last_commit_end.
             let commit_recptr = with_xact(|x| x.xact_last_commit_end);

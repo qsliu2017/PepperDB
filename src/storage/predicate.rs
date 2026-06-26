@@ -65,11 +65,7 @@ pub fn PredicateLockTID(
 ) {
     unimplemented!() // TODO(lock-manager)
 }
-pub fn PredicateLockPageSplit(
-    _relation: Relation,
-    _oldblkno: BlockNumber,
-    _newblkno: BlockNumber,
-) {
+pub fn PredicateLockPageSplit(_relation: Relation, _oldblkno: BlockNumber, _newblkno: BlockNumber) {
     unimplemented!() // TODO(lock-manager)
 }
 pub fn PredicateLockPageCombine(

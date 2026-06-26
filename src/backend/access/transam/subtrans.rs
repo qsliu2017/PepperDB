@@ -8,10 +8,10 @@
 use std::sync::Arc;
 
 use crate::access::transam::FIRST_NORMAL_TRANSACTION_ID;
-use crate::backend::access::transam::slru::{autotune_buffers, SlruCtl, SLRU_BANK_SIZE};
+use crate::backend::access::transam::slru::{SLRU_BANK_SIZE, SlruCtl, autotune_buffers};
+use crate::backend::access::transam::transam::VariableCache;
 use crate::c::TransactionId;
 use crate::pg_config::BLCKSZ;
-use crate::shared_state::SharedState;
 use crate::storage::sync::SyncRequestHandler;
 
 // subtrans.c: four bytes (one TransactionId) per xact.
@@ -62,11 +62,18 @@ pub fn subtrans_shmem_init_handles(
 /// subtrans.c SubTransPagePrecedes.
 fn subtrans_page_precedes(page1: i64, page2: i64) -> bool {
     let base = FIRST_NORMAL_TRANSACTION_ID.0.wrapping_add(1);
-    let xid1 = TransactionId((page1 as u32).wrapping_mul(SUBTRANS_XACTS_PER_PAGE).wrapping_add(base));
-    let xid2 = TransactionId((page2 as u32).wrapping_mul(SUBTRANS_XACTS_PER_PAGE).wrapping_add(base));
+    let xid1 = TransactionId(
+        (page1 as u32)
+            .wrapping_mul(SUBTRANS_XACTS_PER_PAGE)
+            .wrapping_add(base),
+    );
+    let xid2 = TransactionId(
+        (page2 as u32)
+            .wrapping_mul(SUBTRANS_XACTS_PER_PAGE)
+            .wrapping_add(base),
+    );
     let xid2_hi = TransactionId(xid2.0.wrapping_add(SUBTRANS_XACTS_PER_PAGE - 1));
-    crate::access::transam::TransactionIdPrecedes(xid1, xid2)
-        && crate::access::transam::TransactionIdPrecedes(xid1, xid2_hi)
+    xid1.precedes(xid2) && xid1.precedes(xid2_hi)
 }
 
 fn parent_to_le(parent: TransactionId) -> [u8; 4] {
@@ -74,118 +81,121 @@ fn parent_to_le(parent: TransactionId) -> [u8; 4] {
 }
 fn parent_from_le(buf: &[u8], entry: usize) -> TransactionId {
     let off = entry * 4;
-    TransactionId(u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]))
+    TransactionId(u32::from_le_bytes([
+        buf[off],
+        buf[off + 1],
+        buf[off + 2],
+        buf[off + 3],
+    ]))
 }
 
-/// subtrans.c SubTransSetParent: record `xid`'s parent.
-pub async fn sub_trans_set_parent(
-    shared: &Arc<SharedState>,
-    xid: TransactionId,
-    parent: TransactionId,
-) {
-    debug_assert!(crate::access::transam::transaction_id_is_valid(parent));
-    debug_assert!(crate::access::transam::TransactionIdFollows(xid, parent));
-    let pageno = xid_to_page(xid);
-    let entry = xid_to_entry(xid);
-    let st = shared.subtrans();
-    let slot = st.read_page(pageno, true, xid).await;
-    st.with_page_mut(pageno, slot, |buf| {
-        let cur = parent_from_le(buf, entry);
-        if cur.0 != parent.0 {
-            debug_assert!(cur.0 == 0, "subtrans parent must not change from one valid xid to another");
-            let le = parent_to_le(parent);
-            buf[entry * 4..entry * 4 + 4].copy_from_slice(&le);
-        }
-    });
-}
-
-/// subtrans.c SubTransGetParent.
-pub async fn sub_trans_get_parent(shared: &Arc<SharedState>, xid: TransactionId) -> TransactionId {
-    // Bootstrap and frozen XIDs have no parent.
-    if !crate::access::transam::transaction_id_is_normal(xid) {
-        return TransactionId(0);
+impl SlruCtl {
+    /// subtrans.c SubTransSetParent: record `xid`'s parent (`&self` = subtrans SLRU).
+    pub async fn sub_trans_set_parent(&self, xid: TransactionId, parent: TransactionId) {
+        debug_assert!(parent.is_valid());
+        debug_assert!(xid.follows(parent));
+        let pageno = xid_to_page(xid);
+        let entry = xid_to_entry(xid);
+        self.read_page_with(pageno, true, xid, |mut page| {
+            let buf = page.buf_mut();
+            let cur = parent_from_le(buf, entry);
+            if cur.0 != parent.0 {
+                debug_assert!(
+                    cur.0 == 0,
+                    "subtrans parent must not change from one valid xid to another"
+                );
+                let le = parent_to_le(parent);
+                buf[entry * 4..entry * 4 + 4].copy_from_slice(&le);
+            }
+        })
+        .await;
     }
-    let pageno = xid_to_page(xid);
-    let entry = xid_to_entry(xid);
-    let st = shared.subtrans();
-    let slot = st.read_page_readonly(pageno, xid).await;
-    st.with_page(pageno, slot, |buf| parent_from_le(buf, entry))
-}
 
-/// subtrans.c SubTransGetTopmostTransaction: walk the parent chain to the top
-/// (bounded by `transaction_xmin`, the oldest visible xid).
-pub async fn sub_trans_get_topmost_transaction(
-    shared: &Arc<SharedState>,
-    xid: TransactionId,
-    transaction_xmin: TransactionId,
-) -> TransactionId {
-    let mut parent = xid;
-    let mut previous = xid;
-    while crate::access::transam::transaction_id_is_valid(parent) {
-        previous = parent;
-        if crate::access::transam::TransactionIdPrecedes(parent, transaction_xmin) {
-            break;
+    /// subtrans.c SubTransGetParent.
+    pub async fn sub_trans_get_parent(&self, xid: TransactionId) -> TransactionId {
+        // Bootstrap and frozen XIDs have no parent.
+        if !xid.is_normal() {
+            return TransactionId(0);
         }
-        parent = sub_trans_get_parent(shared, parent).await;
-        // Parent is allocated before child, so must precede it; else corruption.
-        if !crate::access::transam::TransactionIdPrecedes(parent, previous) {
-            panic!(
-                "pg_subtrans contains invalid entry: xid {} points to parent xid {}",
-                previous.0, parent.0
-            );
+        let pageno = xid_to_page(xid);
+        let entry = xid_to_entry(xid);
+        self.read_page_readonly_with(pageno, xid, |page| parent_from_le(page.buf(), entry))
+            .await
+    }
+
+    /// subtrans.c SubTransGetTopmostTransaction: walk the parent chain to the top
+    /// (bounded by `transaction_xmin`, the oldest visible xid).
+    pub async fn sub_trans_get_topmost_transaction(
+        &self,
+        xid: TransactionId,
+        transaction_xmin: TransactionId,
+    ) -> TransactionId {
+        let mut parent = xid;
+        let mut previous = xid;
+        while parent.is_valid() {
+            previous = parent;
+            if parent.precedes(transaction_xmin) {
+                break;
+            }
+            parent = self.sub_trans_get_parent(parent).await;
+            // Parent is allocated before child, so must precede it; else corruption.
+            if !parent.precedes(previous) {
+                panic!(
+                    "pg_subtrans contains invalid entry: xid {} points to parent xid {}",
+                    previous.0, parent.0
+                );
+            }
+        }
+        previous
+    }
+
+    /// subtrans.c BootStrapSUBTRANS: create + zero + flush the first page.
+    pub async fn boot_strap_subtrans(&self) {
+        let slot = self.zero_page(0).await;
+        self.write_page(slot).await;
+    }
+
+    /// subtrans.c StartupSUBTRANS: zero the currently-active page span.
+    pub async fn startup_subtrans(&self, vc: &VariableCache, oldest_active_xid: TransactionId) {
+        let next = vc.with(|v| v.next_xid);
+        let end_page = xid_to_page(crate::access::transam::xid_from_full_transaction_id(next));
+        let mut page = xid_to_page(oldest_active_xid);
+        let max_page = xid_to_page(crate::access::transam::MAX_TRANSACTION_ID);
+        loop {
+            let _ = self.zero_page(page).await;
+            if page == end_page {
+                break;
+            }
+            page += 1;
+            if page > max_page {
+                page = 0;
+            }
         }
     }
-    previous
-}
 
-/// subtrans.c BootStrapSUBTRANS: create + zero + flush the first page.
-pub async fn boot_strap_subtrans(shared: &Arc<SharedState>) {
-    let st = shared.subtrans();
-    let slot = st.zero_page(0).await;
-    st.write_page(slot).await;
-}
-
-/// subtrans.c StartupSUBTRANS: zero the currently-active page span.
-pub async fn startup_subtrans(shared: &Arc<SharedState>, oldest_active_xid: TransactionId) {
-    let next = crate::access::transam::ReadNextFullTransactionId(shared);
-    let end_page = xid_to_page(crate::access::transam::xid_from_full_transaction_id(next));
-    let mut page = xid_to_page(oldest_active_xid);
-    let st = shared.subtrans();
-    let max_page = xid_to_page(crate::access::transam::MAX_TRANSACTION_ID);
-    loop {
-        let _ = st.zero_page(page).await;
-        if page == end_page {
-            break;
-        }
-        page += 1;
-        if page > max_page {
-            page = 0;
-        }
+    /// subtrans.c CheckPointSUBTRANS.
+    pub async fn check_point_subtrans(&self) {
+        self.write_all().await;
     }
-}
 
-/// subtrans.c CheckPointSUBTRANS.
-pub async fn check_point_subtrans(shared: &Arc<SharedState>) {
-    shared.subtrans().write_all().await;
-}
-
-/// subtrans.c ExtendSUBTRANS: zero a fresh page at a page boundary.
-pub async fn extend_subtrans(shared: &Arc<SharedState>, newest_xact: TransactionId) {
-    if (newest_xact.0 % SUBTRANS_XACTS_PER_PAGE) != 0
-        && newest_xact.0 != FIRST_NORMAL_TRANSACTION_ID.0
-    {
-        return;
+    /// subtrans.c ExtendSUBTRANS: zero a fresh page at a page boundary.
+    pub async fn extend_subtrans(&self, newest_xact: TransactionId) {
+        if (newest_xact.0 % SUBTRANS_XACTS_PER_PAGE) != 0
+            && newest_xact.0 != FIRST_NORMAL_TRANSACTION_ID.0
+        {
+            return;
+        }
+        let pageno = xid_to_page(newest_xact);
+        let _ = self.zero_page(pageno).await;
     }
-    let pageno = xid_to_page(newest_xact);
-    let _ = shared.subtrans().zero_page(pageno).await;
-}
 
-/// subtrans.c TruncateSUBTRANS.
-pub async fn truncate_subtrans(shared: &Arc<SharedState>, oldest_xact: TransactionId) {
-    let mut ox = oldest_xact;
-    crate::access::transam::transaction_id_retreat(&mut ox);
-    let cutoff_page = xid_to_page(ox);
-    shared.subtrans().truncate(cutoff_page).await;
+    /// subtrans.c TruncateSUBTRANS.
+    pub async fn truncate_subtrans(&self, oldest_xact: TransactionId) {
+        let mut ox = oldest_xact;
+        ox.retreat();
+        let cutoff_page = xid_to_page(ox);
+        self.truncate(cutoff_page).await;
+    }
 }
 
 #[cfg(test)]
@@ -214,21 +224,25 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn parent_chain_walk() {
         let shared = temp_shared("chain");
-        boot_strap_subtrans(&shared).await;
+        let st = shared.subtrans();
+        st.boot_strap_subtrans().await;
         // Build a chain: 100 (top) <- 200 <- 300.
         let top = TransactionId(100);
         let mid = TransactionId(200);
         let leaf = TransactionId(300);
-        sub_trans_set_parent(&shared, mid, top).await;
-        sub_trans_set_parent(&shared, leaf, mid).await;
+        st.sub_trans_set_parent(mid, top).await;
+        st.sub_trans_set_parent(leaf, mid).await;
 
-        assert_eq!(sub_trans_get_parent(&shared, leaf).await.0, 200);
-        assert_eq!(sub_trans_get_parent(&shared, mid).await.0, 100);
+        assert_eq!(st.sub_trans_get_parent(leaf).await.0, 200);
+        assert_eq!(st.sub_trans_get_parent(mid).await.0, 100);
         // top has no recorded parent -> 0 (Invalid).
-        assert_eq!(sub_trans_get_parent(&shared, top).await.0, 0);
+        assert_eq!(st.sub_trans_get_parent(top).await.0, 0);
 
         // Topmost from leaf, with xmin low enough to walk to the top.
         let xmin = TransactionId(50);
-        assert_eq!(sub_trans_get_topmost_transaction(&shared, leaf, xmin).await.0, 100);
+        assert_eq!(
+            st.sub_trans_get_topmost_transaction(leaf, xmin).await.0,
+            100
+        );
     }
 }

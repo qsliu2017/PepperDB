@@ -50,11 +50,11 @@ pub fn IsolationIsSerializable() -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum SyncCommitLevel {
-    Off = 0,            // asynchronous commit
-    LocalFlush,         // wait for local flush only
-    RemoteWrite,        // local flush + remote write
-    RemoteFlush,        // local + remote flush
-    RemoteApply,        // local + remote flush + remote apply
+    Off = 0,     // asynchronous commit
+    LocalFlush,  // wait for local flush only
+    RemoteWrite, // local flush + remote write
+    RemoteFlush, // local + remote flush
+    RemoteApply, // local + remote flush + remote apply
 }
 /// Default setting for synchronous_commit.
 pub const SYNCHRONOUS_COMMIT_ON: SyncCommitLevel = SyncCommitLevel::RemoteFlush;
@@ -170,7 +170,7 @@ pub const fn XactCompletionForceSyncCommit(xinfo: u32) -> bool {
 pub struct xl_xact_assignment {
     pub xtop: TransactionId, // assigned XID's top-level XID
     pub nsubxacts: i32,      // number of subtransaction XIDs
-    // FAM: xsub: [TransactionId]
+                             // FAM: xsub: [TransactionId]
 }
 pub const MinSizeOfXactAssignment: usize = core::mem::size_of::<xl_xact_assignment>();
 
@@ -252,21 +252,21 @@ pub const MinSizeOfXactAbort: usize = core::mem::size_of::<xl_xact_abort>();
 
 #[repr(C)]
 pub struct xl_xact_prepare {
-    pub magic: u32,         // format identifier
-    pub total_len: u32,     // actual file length
-    pub xid: TransactionId, // original transaction XID
-    pub database: Oid,      // OID of database it was in
-    pub prepared_at: TimestampTz, // time of preparation
-    pub owner: Oid,         // user running the transaction
-    pub nsubxacts: i32,     // following subxact XIDs
-    pub ncommitrels: i32,   // delete-on-commit rels
-    pub nabortrels: i32,    // delete-on-abort rels
-    pub ncommitstats: i32,  // stats to drop on commit
-    pub nabortstats: i32,   // stats to drop on abort
-    pub ninvalmsgs: i32,    // cache invalidation messages
-    pub initfileinval: bool, // relcache init file needs invalidation?
-    pub gidlen: u16,        // length of the GID (GID follows the header)
-    pub origin_lsn: XLogRecPtr, // lsn of this record at origin node
+    pub magic: u32,                    // format identifier
+    pub total_len: u32,                // actual file length
+    pub xid: TransactionId,            // original transaction XID
+    pub database: Oid,                 // OID of database it was in
+    pub prepared_at: TimestampTz,      // time of preparation
+    pub owner: Oid,                    // user running the transaction
+    pub nsubxacts: i32,                // following subxact XIDs
+    pub ncommitrels: i32,              // delete-on-commit rels
+    pub nabortrels: i32,               // delete-on-abort rels
+    pub ncommitstats: i32,             // stats to drop on commit
+    pub nabortstats: i32,              // stats to drop on abort
+    pub ninvalmsgs: i32,               // cache invalidation messages
+    pub initfileinval: bool,           // relcache init file needs invalidation?
+    pub gidlen: u16,                   // length of the GID (GID follows the header)
+    pub origin_lsn: XLogRecPtr,        // lsn of this record at origin node
     pub origin_timestamp: TimestampTz, // time of prepare at origin node
 }
 
@@ -280,9 +280,9 @@ pub struct xl_xact_parsed_commit {
     pub xlocators: Vec<RelFileLocator>,
     pub stats: Vec<xl_xact_stats_item>,
     pub msgs: Vec<SharedInvalidationMessage>,
-    pub twophase_xid: TransactionId,     // only for 2PC
-    pub twophase_gid: [u8; GIDSIZE],     // only for 2PC
-    pub abortlocators: Vec<RelFileLocator>, // only for 2PC
+    pub twophase_xid: TransactionId,         // only for 2PC
+    pub twophase_gid: [u8; GIDSIZE],         // only for 2PC
+    pub abortlocators: Vec<RelFileLocator>,  // only for 2PC
     pub abortstats: Vec<xl_xact_stats_item>, // only for 2PC
     pub origin_lsn: XLogRecPtr,
     pub origin_timestamp: TimestampTz,
@@ -299,8 +299,8 @@ pub struct xl_xact_parsed_abort {
     pub subxacts: Vec<TransactionId>,
     pub xlocators: Vec<RelFileLocator>,
     pub stats: Vec<xl_xact_stats_item>,
-    pub twophase_xid: TransactionId,  // only for 2PC
-    pub twophase_gid: [u8; GIDSIZE],  // only for 2PC
+    pub twophase_xid: TransactionId, // only for 2PC
+    pub twophase_gid: [u8; GIDSIZE], // only for 2PC
     pub origin_lsn: XLogRecPtr,
     pub origin_timestamp: TimestampTz,
 }
@@ -314,11 +314,12 @@ pub struct xl_xact_parsed_abort {
 pub use crate::backend::access::transam::xact::{
     AbortCurrentTransaction, AbortOutOfAnyTransaction, BeginImplicitTransactionBlock,
     BeginInternalSubTransaction, BeginTransactionBlock, CommandCounterIncrement,
-    CommitTransactionCommand, DefineSavepoint, EndImplicitTransactionBlock, EndParallelWorkerTransaction,
-    EndTransactionBlock, EnterParallelMode, EstimateTransactionStateSpace, ExitParallelMode,
-    ForceSyncCommit, GetCurrentCommandId, GetCurrentFullTransactionId,
-    GetCurrentFullTransactionIdIfAny, GetCurrentStatementStartTimestamp, GetCurrentSubTransactionId,
-    GetCurrentTransactionId, GetCurrentTransactionIdIfAny, GetCurrentTransactionNestLevel,
+    CommitTransactionCommand, DefineSavepoint, EndImplicitTransactionBlock,
+    EndParallelWorkerTransaction, EndTransactionBlock, EnterParallelMode,
+    EstimateTransactionStateSpace, ExitParallelMode, ForceSyncCommit, GetCurrentCommandId,
+    GetCurrentFullTransactionId, GetCurrentFullTransactionIdIfAny,
+    GetCurrentStatementStartTimestamp, GetCurrentSubTransactionId, GetCurrentTransactionId,
+    GetCurrentTransactionIdIfAny, GetCurrentTransactionNestLevel,
     GetCurrentTransactionStartTimestamp, GetCurrentTransactionStopTimestamp,
     GetStableLatestTransactionId, GetTopFullTransactionId, GetTopFullTransactionIdIfAny,
     GetTopTransactionId, GetTopTransactionIdIfAny, IsAbortedTransactionBlockState,
@@ -327,13 +328,14 @@ pub use crate::backend::access::transam::xact::{
     MarkCurrentTransactionIdLoggedIfAny, MarkSubxactTopXidLogged, PrepareTransactionBlock,
     PreventInTransactionBlock, RegisterSubXactCallback, RegisterXactCallback,
     ReleaseCurrentSubTransaction, ReleaseSavepoint, RequireTransactionBlock,
-    RestoreTransactionCharacteristics, RollbackAndReleaseCurrentSubTransaction, RollbackToSavepoint,
-    SaveTransactionCharacteristics, SerializeTransactionState, SetCurrentStatementStartTimestamp,
-    SetParallelStartTimestamps, StartParallelWorkerTransaction, StartTransactionCommand,
-    SubTransactionIsActive, TransactionBlockStatusCode, TransactionIdIsCurrentTransactionId,
-    TransactionStartedDuringRecovery, UnregisterSubXactCallback, UnregisterXactCallback,
-    UserAbortTransactionBlock, WarnNoTransactionBlock, XactLogAbortRecord, XactLogCommitRecord,
-    xactGetCommittedChildren, xact_redo,
+    RestoreTransactionCharacteristics, RollbackAndReleaseCurrentSubTransaction,
+    RollbackToSavepoint, SaveTransactionCharacteristics, SerializeTransactionState,
+    SetCurrentStatementStartTimestamp, SetParallelStartTimestamps, StartParallelWorkerTransaction,
+    StartTransactionCommand, SubTransactionIsActive, TransactionBlockStatusCode,
+    TransactionIdIsCurrentTransactionId, TransactionStartedDuringRecovery,
+    UnregisterSubXactCallback, UnregisterXactCallback, UserAbortTransactionBlock,
+    WarnNoTransactionBlock, XactLogAbortRecord, XactLogCommitRecord, xact_redo,
+    xactGetCommittedChildren,
 };
 
 // xactdesc.c (shared front/backend record description + parsing) is a separate

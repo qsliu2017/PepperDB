@@ -158,6 +158,14 @@ THE hard invariant: never hold a synchronous lock guard (`std::sync::Mutex`/
 future waiting in a shared queue must remove itself on `Drop` (cancellation safety):
 that is what `WaitGuard` is for.
 
+Shared-state Arc rule: DEREF, do not CLONE. Reaching a `SharedState` subsystem
+(`shared.clog()`, `shared.buffers()`) returns `&Arc<T>`; calling a method through it
+derefs to `&T` at zero atomic cost. `Arc::clone` is a refcount atomic (and a
+cache-line bounce when contended), so clone ONLY when you must own the handle past
+the borrow -- i.e. to hold it across an `.await` or move it into a spawned task.
+Never `shared.x().clone()` in a hot/per-row path just to call a method; pass `&T`
+or `&Arc<T>` and deref.
+
 ---
 
 ## 6. Translating common foundation constructs

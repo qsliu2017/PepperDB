@@ -86,7 +86,11 @@ pub fn snap_build_commit_txn(
 ) {
     unimplemented!()
 }
-pub fn snap_build_process_change(_builder: &mut SnapBuild, _xid: TransactionId, _lsn: XLogRecPtr) -> bool {
+pub fn snap_build_process_change(
+    _builder: &mut SnapBuild,
+    _xid: TransactionId,
+    _lsn: XLogRecPtr,
+) -> bool {
     unimplemented!()
 }
 pub fn snap_build_process_new_cid(

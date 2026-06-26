@@ -55,57 +55,92 @@ impl Default for SharedStateConfig {
     }
 }
 
-/// The shared heap state, replacing the shared-memory segment. Clone the
-/// `Arc<SharedState>` into a task to share the SAME subsystem instances; each
-/// field is itself `Arc` so reaching through any clone hits the same subsystem.
-///
-/// Fields are added by later steps at the position dictated by ipci.c order
-/// (see `SharedState::new`).
-pub struct SharedState {
+/// Declare `SharedState`'s `Arc` fields once and derive, for each:
+///   - a PRIVATE `name: Arc<Type>` struct field,
+///   - a `pub(crate) fn name(&self) -> &Arc<Type>` accessor,
+///   - a `Send + Sync + 'static` compile-time assertion on `Type`, so a field
+///     whose subsystem is not thread-shareable fails HERE with a clear bound
+///     error instead of later at a `tokio::spawn` site.
+/// Per-field doc comments apply to both the field and its accessor.
+/// (No per-field visibility override: every accessor is `pub(crate)`, matching
+/// the existing API; an `@ vis` token was deemed unnecessary complexity.)
+macro_rules! shared_state {
+    ( $( $(#[$meta:meta])* $name:ident : $ty:ty ),+ $(,)? ) => {
+        /// The shared heap state, replacing the shared-memory segment. Clone the
+        /// `Arc<SharedState>` into a task to share the SAME subsystem instances;
+        /// each field is itself `Arc` so reaching through any clone hits the same
+        /// subsystem.
+        ///
+        /// Fields are added by later steps at the position dictated by ipci.c
+        /// order (see `SharedState::new`).
+        pub struct SharedState {
+            $( $(#[$meta])* $name: Arc<$ty>, )+
+        }
+
+        impl SharedState {
+            $(
+                $(#[$meta])*
+                pub(crate) fn $name(&self) -> &Arc<$ty> {
+                    &self.$name
+                }
+            )+
+        }
+
+        // Per-field guard: each subsystem must be `Send + Sync + 'static` to be
+        // shared across tasks via `Arc<SharedState>`. Fails at the struct, not
+        // at a downstream spawn.
+        const _: () = {
+            fn _assert_shared<T: Send + Sync + 'static>() {}
+            fn _assert_all() {
+                $( let _ = _assert_shared::<$ty>; )+
+            }
+        };
+    };
+}
+
+shared_state! {
     /// Process-wide startup config (PG globals.c config half: DataDir, sizing
     /// GUCs). No ipci.c line -- it is process config, not a shmem struct.
-    pub config: Arc<ProcessConfig>,
+    config: ProcessConfig,
 
     /// VFD pool over the async I/O leaf. Holds the `IoBackend` internally;
     /// reach the raw leaf via [`SharedState::io`] for WAL/smgr append paths.
-    pub fd: Arc<FdManager>,
+    fd: FdManager,
 
     /// Inter-task signaling registry (PG `ProcSignal`).
-    pub proc_signal: Arc<ProcSignal>,
+    proc_signal: ProcSignal,
 
     /// WAL write pipeline state (PG `XLogCtl`; ipci.c `XLOGShmemInit` slot). The
     /// buffer ring, insert reservation, write/flush LSNs, and the flushed-LSN
-    /// watch. Reached via [`SharedState::xlog`].
-    pub xlog: Arc<crate::backend::access::transam::xlog::XLogCtl>,
+    /// watch.
+    xlog: crate::backend::access::transam::xlog::XLogCtl,
 
     /// Pending-fsync / pending-unlink queue (PG sync.c `pendingOps`). Storage
     /// tasks (smgr/md) enqueue fsync/unlink requests; the checkpointer drains it
     /// (step 17). Single-process: one shared structure instead of the
     /// per-checkpointer table + cross-process forward queue.
-    pub sync_requests: Arc<crate::storage::sync::SyncRequests>,
+    sync_requests: crate::storage::sync::SyncRequests,
 
     /// Shared buffer pool (PG `BufferManagerShmemInit`): the page array,
     /// descriptors, the tag->buffer map, and the clock-sweep strategy. Replaces
-    /// the C shmem buffer cache; reached via [`SharedState::buffers`].
-    pub buffers: Arc<crate::backend::storage::buffer::buf_init::BufferPool>,
+    /// the C shmem buffer cache.
+    buffers: crate::backend::storage::buffer::buf_init::BufferPool,
 
     /// OID/XID generation state (PG `TransamVariables`; ipci.c `VarsupShmemInit`
-    /// slot). One `Mutex` over the whole struct (low contention). Reached via
-    /// [`SharedState::variable_cache`].
-    pub variable_cache: Arc<crate::backend::access::transam::transam::VariableCache>,
+    /// slot). One `Mutex` over the whole struct (low contention).
+    variable_cache: crate::backend::access::transam::transam::VariableCache,
 
     /// Commit-log SLRU (PG clog.c `XactCtl`; ipci.c `CLOGShmemInit` slot).
-    /// Reached via [`SharedState::clog`].
-    pub clog: Arc<crate::backend::access::transam::slru::SlruCtl>,
+    clog: crate::backend::access::transam::slru::SlruCtl,
 
     /// Subtransaction-parent SLRU (PG subtrans.c `SubTransCtl`; ipci.c
-    /// `SUBTRANSShmemInit` slot). Reached via [`SharedState::subtrans`].
-    pub subtrans: Arc<crate::backend::access::transam::slru::SlruCtl>,
+    /// `SUBTRANSShmemInit` slot).
+    subtrans: crate::backend::access::transam::slru::SlruCtl,
 
     /// Process array (PG procarray.c `ProcArrayStruct`; ipci.c
     /// `ProcArrayShmemInit` slot). The snapshot/horizon source; `ProcArrayLock`
-    /// is its internal `RwLock`. Reached via [`SharedState::proc_array`].
-    pub proc_array: Arc<crate::backend::storage::ipc::procarray::ProcArray>,
+    /// is its internal `RwLock`.
+    proc_array: crate::backend::storage::ipc::procarray::ProcArray,
     // Future Arc fields (lockmgr, sinval, checkpointer, ...) are inserted by
     // later steps -- see new().
 }
@@ -192,9 +227,9 @@ impl SharedState {
         //   (MultiXactShmemInit -- deferred)
         // BufferManagerShmemInit -- step12 (part A), DONE. The page pool is
         // sized from the NBuffers GUC carried on ProcessConfig.
-        let buffers = Arc::new(
-            crate::backend::storage::buffer::buf_init::BufferPool::new(config.nbuffers.max(1)),
-        );
+        let buffers = Arc::new(crate::backend::storage::buffer::buf_init::BufferPool::new(
+            config.nbuffers.max(1),
+        ));
 
         // Set up lock manager:
         // TODO(step15): LockManagerShmemInit  here
@@ -250,59 +285,12 @@ impl SharedState {
         })
     }
 
-    /// Process-wide startup config (PG globals.c config half).
-    pub fn config(&self) -> &Arc<ProcessConfig> {
-        &self.config
-    }
-
     /// The raw async I/O leaf, for WAL/smgr append paths that need positional
     /// I/O without going through the vfd pool. Reached through `FdManager` so
-    /// `SharedState` stores a single I/O owner.
+    /// `SharedState` stores a single I/O owner. Derived (not a field), so it
+    /// stays hand-written.
     pub fn io(&self) -> &Arc<IoBackend> {
         self.fd.io()
-    }
-
-    pub fn fd(&self) -> &Arc<FdManager> {
-        &self.fd
-    }
-
-    pub fn proc_signal(&self) -> &Arc<ProcSignal> {
-        &self.proc_signal
-    }
-
-    /// The WAL write pipeline state (PG `XLogCtl`).
-    pub fn xlog(&self) -> &Arc<crate::backend::access::transam::xlog::XLogCtl> {
-        &self.xlog
-    }
-
-    /// The shared pending-fsync / pending-unlink queue (PG sync.c).
-    pub fn sync_requests(&self) -> &Arc<crate::storage::sync::SyncRequests> {
-        &self.sync_requests
-    }
-
-    /// The shared buffer pool (PG buffer cache).
-    pub fn buffers(&self) -> &Arc<crate::backend::storage::buffer::buf_init::BufferPool> {
-        &self.buffers
-    }
-
-    /// The OID/XID generation state (PG `TransamVariables`).
-    pub fn variable_cache(&self) -> &Arc<crate::backend::access::transam::transam::VariableCache> {
-        &self.variable_cache
-    }
-
-    /// The commit-log SLRU (PG clog.c `XactCtl`).
-    pub fn clog(&self) -> &Arc<crate::backend::access::transam::slru::SlruCtl> {
-        &self.clog
-    }
-
-    /// The subtransaction-parent SLRU (PG subtrans.c `SubTransCtl`).
-    pub fn subtrans(&self) -> &Arc<crate::backend::access::transam::slru::SlruCtl> {
-        &self.subtrans
-    }
-
-    /// The process array (PG procarray.c `ProcArrayStruct`).
-    pub fn proc_array(&self) -> &Arc<crate::backend::storage::ipc::procarray::ProcArray> {
-        &self.proc_array
     }
 }
 

@@ -31,12 +31,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use crate::access::transam::{
-    transaction_id_is_normal, transaction_id_is_valid, FullTransactionId, INVALID_TRANSACTION_ID,
-};
-use crate::backend::access::transam::transam::{
-    transaction_id_follows, transaction_id_follows_or_equals, transaction_id_precedes,
-};
+use crate::access::transam::{FullTransactionId, INVALID_TRANSACTION_ID};
 use crate::backend::storage::ipc::procarray;
 use crate::c::{CommandId, TransactionId};
 use crate::postgres_ext::Oid;
@@ -88,9 +83,10 @@ struct SnapMgrState {
     /// C `ActiveSnapshot` stack (top = last element).
     active: Vec<ActiveSnapshotElt>,
 
-    /// C `RegisteredSnapshots`: registered snapshots, owned here. (The pairing
-    /// heap is replaced by a Vec scanned for the min xmin; registration counts
-    /// are small, so linear is fine -- TODO(perf) if this ever grows hot.)
+    /// C `RegisteredSnapshots`: registered snapshots, owned here. PG uses a
+    /// pairingheap keyed by xmin (modular cmp); needs lib/pairingheap.c --
+    /// deferred. A plain BTreeMap can't substitute (modular xid order is not a
+    /// consistent total order); we keep a Vec scanned for the min xmin.
     registered: Vec<RegisteredSnapshot>,
 
     /// C `exportedSnapshots`.
@@ -109,7 +105,9 @@ pub async fn snapmgr_scope<F, T>(f: F) -> T
 where
     F: std::future::Future<Output = T>,
 {
-    SNAPMGR.scope(RefCell::new(SnapMgrState::default()), f).await
+    SNAPMGR
+        .scope(RefCell::new(SnapMgrState::default()), f)
+        .await
 }
 
 fn in_scope() -> bool {
@@ -122,7 +120,9 @@ fn in_scope() -> bool {
 
 /// C `FirstSnapshotSet`.
 pub fn first_snapshot_set() -> bool {
-    SNAPMGR.try_with(|s| s.borrow().first_snapshot_set).unwrap_or(false)
+    SNAPMGR
+        .try_with(|s| s.borrow().first_snapshot_set)
+        .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +321,9 @@ fn blank_mvcc() -> SnapshotData {
 /// Done outside any `RefCell` borrow so we never hold it while procarray locks.
 fn build_snapshot(shared: &Arc<SharedState>) -> SnapshotData {
     let mut data = blank_mvcc();
-    procarray::get_snapshot_data(shared, &mut data);
+    shared
+        .proc_array()
+        .get_snapshot_data(shared.variable_cache(), &mut data);
     data
 }
 
@@ -349,12 +351,19 @@ pub fn PushActiveSnapshot(snapshot: Snapshot) {
 pub fn PushActiveSnapshotWithLevel(snapshot: Snapshot, snap_level: i32) {
     let snap = snapshot.expect("PushActiveSnapshot: InvalidSnapshot");
     // Static/non-copied snapshots must be copied to long-lived storage.
-    let mut data = if snap.copied { (*snap).clone() } else { copy_snapshot(&snap) };
+    let mut data = if snap.copied {
+        (*snap).clone()
+    } else {
+        copy_snapshot(&snap)
+    };
     data.active_count += 1;
     SNAPMGR.with(|s| {
         let mut st = s.borrow_mut();
         debug_assert!(
-            st.active.last().map(|e| snap_level >= e.as_level).unwrap_or(true),
+            st.active
+                .last()
+                .map(|e| snap_level >= e.as_level)
+                .unwrap_or(true),
             "active snapshot level must be non-decreasing"
         );
         st.active.push(ActiveSnapshotElt {
@@ -432,7 +441,11 @@ pub fn RegisterSnapshot(snapshot: Snapshot) -> Snapshot {
         Some(s) => s,
         None => return None,
     };
-    let data = if snap.copied { (*snap).clone() } else { copy_snapshot(&snap) };
+    let data = if snap.copied {
+        (*snap).clone()
+    } else {
+        copy_snapshot(&snap)
+    };
     let arc = Arc::new(data);
     SNAPMGR.with(|s| {
         s.borrow_mut().registered.push(RegisteredSnapshot {
@@ -474,7 +487,11 @@ pub fn UnregisterSnapshotFromOwner(
 fn unregister_snapshot_no_owner(snap: &Arc<SnapshotData>) {
     let freed = SNAPMGR.with(|s| {
         let mut st = s.borrow_mut();
-        if let Some(pos) = st.registered.iter().position(|b| Arc::ptr_eq(&b.snap, snap)) {
+        if let Some(pos) = st
+            .registered
+            .iter()
+            .position(|b| Arc::ptr_eq(&b.snap, snap))
+        {
             let entry = &mut st.registered[pos];
             debug_assert!(entry.regd_count > 0);
             entry.regd_count -= 1;
@@ -509,13 +526,13 @@ fn snapshot_reset_xmin() {
         for b in &st.registered {
             let xmin = b.snap.xmin;
             min = Some(match min {
-                Some(m) if transaction_id_precedes(m, xmin) => m,
+                Some(m) if m.precedes(xmin) => m,
                 _ => xmin,
             });
         }
         if let Some(c) = st.catalog.as_ref() {
             min = Some(match min {
-                Some(m) if transaction_id_precedes(m, c.xmin) => m,
+                Some(m) if m.precedes(c.xmin) => m,
                 _ => c.xmin,
             });
         }
@@ -524,14 +541,14 @@ fn snapshot_reset_xmin() {
 
     match min_xmin {
         None => {}
-        Some(x) if !transaction_id_is_valid(x) => {
+        Some(x) if !x.is_valid() => {
             // No registered snapshots: reset TransactionXmin (and MyProc->xmin,
             // owned by procarray/step 15).
             procarray::set_transaction_xmin_public(INVALID_TRANSACTION_ID);
         }
         Some(min) => {
             let cur = procarray::transaction_xmin();
-            if transaction_id_precedes(cur, min) {
+            if cur.precedes(min) {
                 procarray::set_transaction_xmin_public(min);
             }
         }
@@ -656,7 +673,10 @@ pub async fn ExportSnapshot(shared: &Arc<SharedState>, snapshot: Snapshot) -> St
 
     let idx = SNAPMGR.with(|s| s.borrow().exported.len()) + 1;
     let (procnum, lxid) = my_vxid(shared);
-    let path = format!("{}/{:08X}-{:08X}-{}", SNAPSHOT_EXPORT_DIR, procnum, lxid, idx);
+    let path = format!(
+        "{}/{:08X}-{:08X}-{}",
+        SNAPSHOT_EXPORT_DIR, procnum, lxid, idx
+    );
 
     SNAPMGR.with(|s| {
         let mut st = s.borrow_mut();
@@ -676,7 +696,9 @@ pub async fn ExportSnapshot(shared: &Arc<SharedState>, snapshot: Snapshot) -> St
 
 fn my_vxid(shared: &Arc<SharedState>) -> (u32, u32) {
     // MyProc->vxid (step 15). Use the session's synthetic identity for now.
-    let pid = crate::session::try_current().map(|s| s.proc_pid()).unwrap_or(0);
+    let pid = crate::session::try_current()
+        .map(|s| s.proc_pid())
+        .unwrap_or(0);
     let _ = shared;
     (pid as u32, pid as u32)
 }
@@ -688,7 +710,9 @@ fn build_export_text(
     children: &[TransactionId],
 ) -> Vec<u8> {
     let (procnum, lxid) = my_vxid(shared);
-    let pid = crate::session::try_current().map(|s| s.proc_pid()).unwrap_or(0);
+    let pid = crate::session::try_current()
+        .map(|s| s.proc_pid())
+        .unwrap_or(0);
     let dbid = crate::session::try_current()
         .map(|s| s.database_id())
         .unwrap_or(Oid(0));
@@ -705,7 +729,7 @@ fn build_export_text(
     s.push_str(&format!("xmax:{}\n", snapshot.xmax.0));
 
     let add_top = top_xid
-        .map(|t| transaction_id_is_valid(t) && transaction_id_precedes(t, snapshot.xmax))
+        .map(|t| t.is_valid() && t.precedes(snapshot.xmax))
         .unwrap_or(false);
     s.push_str(&format!("xcnt:{}\n", snapshot.xip.len() + add_top as usize));
     for x in &snapshot.xip {
@@ -715,12 +739,15 @@ fn build_export_text(
         s.push_str(&format!("xip:{}\n", top_xid.unwrap().0));
     }
 
-    let max_sub = procarray::get_max_snapshot_subxid_count(shared) as usize;
+    let max_sub = shared.proc_array().get_max_snapshot_subxid_count() as usize;
     if snapshot.suboverflowed || snapshot.subxip.len() + children.len() > max_sub {
         s.push_str("sof:1\n");
     } else {
         s.push_str("sof:0\n");
-        s.push_str(&format!("sxcnt:{}\n", snapshot.subxip.len() + children.len()));
+        s.push_str(&format!(
+            "sxcnt:{}\n",
+            snapshot.subxip.len() + children.len()
+        ));
         for x in &snapshot.subxip {
             s.push_str(&format!("sxp:{}\n", x.0));
         }
@@ -791,7 +818,9 @@ pub async fn ImportSnapshot(shared: &Arc<SharedState>, idstr: &str) {
         panic!("SET TRANSACTION SNAPSHOT must be called before any query");
     }
     if !crate::access::xact::IsolationUsesXactSnapshot() {
-        panic!("a snapshot-importing transaction must have isolation level SERIALIZABLE or REPEATABLE READ");
+        panic!(
+            "a snapshot-importing transaction must have isolation level SERIALIZABLE or REPEATABLE READ"
+        );
     }
     if !idstr.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
         panic!("invalid snapshot identifier: \"{idstr}\"");
@@ -824,7 +853,9 @@ fn InvalidPid_value() -> i32 {
 fn parse_import(content: &str) -> (SnapshotData, VirtualTransactionId, Oid) {
     let mut lines = content.lines();
     let mut next = |prefix: &str| -> String {
-        let line = lines.next().unwrap_or_else(|| panic!("invalid snapshot data"));
+        let line = lines
+            .next()
+            .unwrap_or_else(|| panic!("invalid snapshot data"));
         let v = line
             .strip_prefix(prefix)
             .unwrap_or_else(|| panic!("invalid snapshot data"));
@@ -855,7 +886,8 @@ fn parse_import(content: &str) -> (SnapshotData, VirtualTransactionId, Oid) {
     if sof == 0 {
         let sxcnt: usize = next("sxcnt:").parse().unwrap();
         for _ in 0..sxcnt {
-            snap.subxip.push(TransactionId(next("sxp:").parse().unwrap()));
+            snap.subxip
+                .push(TransactionId(next("sxp:").parse().unwrap()));
         }
         snap.suboverflowed = false;
     } else {
@@ -863,7 +895,7 @@ fn parse_import(content: &str) -> (SnapshotData, VirtualTransactionId, Oid) {
     }
     snap.taken_during_recovery = next("rec:").parse::<u32>().unwrap() != 0;
 
-    if !transaction_id_is_normal(snap.xmin) || !transaction_id_is_normal(snap.xmax) {
+    if !snap.xmin.is_normal() || !snap.xmax.is_normal() {
         panic!("invalid snapshot data");
     }
     (snap, src_vxid, src_dbid)
@@ -896,7 +928,9 @@ fn set_transaction_snapshot(
     buf.snap_xact_completion_count = 0;
 
     let installed = match sourcevxid {
-        Some(vxid) => procarray::proc_array_install_imported_xmin(shared, buf.xmin, vxid),
+        Some(vxid) => shared
+            .proc_array()
+            .proc_array_install_imported_xmin(buf.xmin, vxid),
         None => false, // restored path needs PGPROC (step 15) -- TODO(restore)
     };
     if sourcevxid.is_some() && !installed {
@@ -953,10 +987,10 @@ pub async fn XidInMVCCSnapshot(
     mut xid: TransactionId,
     snapshot: &SnapshotData,
 ) -> bool {
-    if transaction_id_precedes(xid, snapshot.xmin) {
+    if xid.precedes(snapshot.xmin) {
         return false;
     }
-    if transaction_id_follows_or_equals(xid, snapshot.xmax) {
+    if xid.follows_or_equals(snapshot.xmax) {
         return true;
     }
 
@@ -966,13 +1000,11 @@ pub async fn XidInMVCCSnapshot(
                 return true;
             }
         } else {
-            xid = crate::backend::access::transam::subtrans::sub_trans_get_topmost_transaction(
-                shared,
-                xid,
-                procarray::transaction_xmin(),
-            )
-            .await;
-            if transaction_id_precedes(xid, snapshot.xmin) {
+            xid = shared
+                .subtrans()
+                .sub_trans_get_topmost_transaction(xid, procarray::transaction_xmin())
+                .await;
+            if xid.precedes(snapshot.xmin) {
                 return false;
             }
         }
@@ -981,13 +1013,11 @@ pub async fn XidInMVCCSnapshot(
         }
     } else {
         if snapshot.suboverflowed {
-            xid = crate::backend::access::transam::subtrans::sub_trans_get_topmost_transaction(
-                shared,
-                xid,
-                procarray::transaction_xmin(),
-            )
-            .await;
-            if transaction_id_precedes(xid, snapshot.xmin) {
+            xid = shared
+                .subtrans()
+                .sub_trans_get_topmost_transaction(xid, procarray::transaction_xmin())
+                .await;
+            if xid.precedes(snapshot.xmin) {
                 return false;
             }
         }
@@ -1026,7 +1056,9 @@ pub fn TeardownHistoricSnapshot(_is_error: bool) {
 
 /// snapmgr.c `HistoricSnapshotActive`.
 pub fn HistoricSnapshotActive() -> bool {
-    SNAPMGR.try_with(|s| s.borrow().historic_active).unwrap_or(false)
+    SNAPMGR
+        .try_with(|s| s.borrow().historic_active)
+        .unwrap_or(false)
 }
 
 /// snapmgr.c `HistoricSnapshotGetTupleCids`.
@@ -1116,13 +1148,15 @@ pub fn RestoreSnapshot(start_address: &[u8]) -> Snapshot {
 
     let mut off = SERIALIZED_HEADER_SIZE;
     for _ in 0..hdr.xcnt {
-        snap.xip
-            .push(TransactionId(u32::from_ne_bytes(start_address[off..off + 4].try_into().unwrap())));
+        snap.xip.push(TransactionId(u32::from_ne_bytes(
+            start_address[off..off + 4].try_into().unwrap(),
+        )));
         off += 4;
     }
     for _ in 0..hdr.subxcnt.max(0) {
-        snap.subxip
-            .push(TransactionId(u32::from_ne_bytes(start_address[off..off + 4].try_into().unwrap())));
+        snap.subxip.push(TransactionId(u32::from_ne_bytes(
+            start_address[off..off + 4].try_into().unwrap(),
+        )));
         off += 4;
     }
 
@@ -1147,7 +1181,7 @@ pub fn GlobalVisTestFor(
     shared: &Arc<SharedState>,
     rel: Option<&crate::utils::relcache::RelationData>,
 ) -> GlobalVisState {
-    procarray::global_vis_test_for(shared, rel)
+    shared.proc_array().global_vis_test_for(rel)
 }
 
 /// procarray.c `GlobalVisTestIsRemovableXid`.
@@ -1156,7 +1190,9 @@ pub fn GlobalVisTestIsRemovableXid(
     state: &GlobalVisState,
     xid: TransactionId,
 ) -> bool {
-    procarray::global_vis_test_is_removable_xid(shared, state, xid)
+    shared
+        .proc_array()
+        .global_vis_test_is_removable_xid(shared.variable_cache(), state, xid)
 }
 
 /// procarray.c `GlobalVisTestIsRemovableFullXid`.
@@ -1165,7 +1201,9 @@ pub fn GlobalVisTestIsRemovableFullXid(
     state: &GlobalVisState,
     fxid: FullTransactionId,
 ) -> bool {
-    procarray::global_vis_test_is_removable_full_xid(shared, state, fxid)
+    shared
+        .proc_array()
+        .global_vis_test_is_removable_full_xid(shared.variable_cache(), state, fxid)
 }
 
 /// procarray.c `GlobalVisCheckRemovableXid`.
@@ -1174,8 +1212,9 @@ pub fn GlobalVisCheckRemovableXid(
     rel: Option<&crate::utils::relcache::RelationData>,
     xid: TransactionId,
 ) -> bool {
-    let state = procarray::global_vis_test_for(shared, rel);
-    procarray::global_vis_test_is_removable_xid(shared, &state, xid)
+    let pa = shared.proc_array();
+    let state = pa.global_vis_test_for(rel);
+    pa.global_vis_test_is_removable_xid(shared.variable_cache(), &state, xid)
 }
 
 /// procarray.c `GlobalVisCheckRemovableFullXid`.
@@ -1184,8 +1223,9 @@ pub fn GlobalVisCheckRemovableFullXid(
     rel: Option<&crate::utils::relcache::RelationData>,
     fxid: FullTransactionId,
 ) -> bool {
-    let state = procarray::global_vis_test_for(shared, rel);
-    procarray::global_vis_test_is_removable_full_xid(shared, &state, fxid)
+    let pa = shared.proc_array();
+    let state = pa.global_vis_test_for(rel);
+    pa.global_vis_test_is_removable_full_xid(shared.variable_cache(), &state, fxid)
 }
 
 #[cfg(test)]

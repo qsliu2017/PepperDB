@@ -18,10 +18,10 @@ pub const SLRU_PAGES_PER_SEGMENT: i32 = 32;
 
 /// Page status codes (does not include the "dirty" bit).
 pub enum SlruPageStatus {
-    Empty,             // buffer is not in use
-    ReadInProgress,    // page is being read in
-    Valid,             // page is valid and not being written
-    WriteInProgress,   // page is being written out
+    Empty,           // buffer is not in use
+    ReadInProgress,  // page is being read in
+    Valid,           // page is valid and not being written
+    WriteInProgress, // page is being written out
 }
 
 // ---- definitions live in transam/slru.c; re-exported here (rules s2) ----
@@ -34,5 +34,5 @@ pub enum SlruPageStatus {
 // and its autotune helper; the consts/enum above are still the on-the-wire
 // vocabulary the backend uses.
 pub use crate::backend::access::transam::slru::{
-    autotune_buffers as SimpleLruAutotuneBuffers, SlruCtl, SLRU_BANK_SIZE,
+    SLRU_BANK_SIZE, SlruCtl, autotune_buffers as SimpleLruAutotuneBuffers,
 };

@@ -6,13 +6,13 @@ use crate::postgres_ext::Oid;
 use crate::storage::lockdefs::LockMode;
 use crate::utils::relcache::Relation;
 use crate::utils::snapshot::Snapshot;
-use crate::varatt::{varlena, VARLENA_EXTSIZE_BITS, VARLENA_EXTSIZE_MASK};
+use crate::varatt::{VARLENA_EXTSIZE_BITS, VARLENA_EXTSIZE_MASK, varlena};
 
 /// Information at the start of compressed toast data (on-disk).
 #[repr(C)]
 pub struct toast_compress_header {
-    pub vl_len_: i32,  // varlena header (do not touch directly!)
-    pub tcinfo: u32,   // 2 bits compression method + 30 bits external size
+    pub vl_len_: i32, // varlena header (do not touch directly!)
+    pub tcinfo: u32,  // 2 bits compression method + 30 bits external size
 }
 
 /// External (uncompressed) size from a compressed toast header.

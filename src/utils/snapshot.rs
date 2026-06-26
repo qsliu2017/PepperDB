@@ -44,9 +44,9 @@ pub struct SnapshotData {
     pub xmin: TransactionId, // all XID < xmin are visible to me
     pub xmax: TransactionId, // all XID >= xmax are invisible to me
 
-    pub xip: Vec<TransactionId>,    // in-progress xacts (xcnt = xip.len())
+    pub xip: Vec<TransactionId>, // in-progress xacts (xcnt = xip.len())
     pub subxip: Vec<TransactionId>, // in-progress subxacts (subxcnt = subxip.len())
-    pub suboverflowed: bool,        // has the subxip array overflowed?
+    pub suboverflowed: bool,     // has the subxip array overflowed?
 
     pub taken_during_recovery: bool,
     pub copied: bool, // false if it's a static snapshot

@@ -16,7 +16,7 @@ use crate::access::xlogdefs::XLogRecPtr;
 use crate::c::{LocalTransactionId, TransactionId};
 use crate::lib::stringinfo::StringInfo;
 use crate::postgres_ext::Oid;
-use crate::storage::lock::{LockMethod, LOCALLOCK, LOCK, LOCKMODE, PROCLOCK};
+use crate::storage::lock::{LOCALLOCK, LOCK, LOCKMODE, LockMethod, PROCLOCK};
 use crate::storage::lockdefs::LOCKMASK;
 use crate::storage::procnumber::ProcNumber;
 
@@ -134,7 +134,6 @@ pub struct PGPROC {
     /// Lock-wait result.
     pub wait_status: ProcWaitStatus,
     // procLatch (Latch): -> tokio::sync::Notify (dropped).
-
     /// Top-level xact's XID if running and assigned, else InvalidTransactionId.
     /// Mirrored in ProcGlobal->xids[pgxactoff].
     pub xid: TransactionId,
@@ -167,7 +166,6 @@ pub struct PGPROC {
     /// LWLock mode being waited for.
     pub lw_wait_mode: u8,
     // lwWaitLink / cvWaitLink (proclist_node): -> owned wait queues later.
-
     /// Lock object we're sleeping on, or None. // TODO(ptr): ownership unclear.
     pub wait_lock: Option<*mut LOCK>,
     /// Per-holder info for the awaited lock, or None. // TODO(ptr)
@@ -190,7 +188,6 @@ pub struct PGPROC {
     /// Wait state for sync rep.
     pub sync_rep_state: i32,
     // syncRepLinks (dlist_node): -> owned syncrep queue later.
-
     /// PROCLOCKs held/awaited by this backend, partitioned by lock partition.
     /// Was an array of intrusive dlist heads; owned collections now.
     pub my_proc_locks: [Vec<*mut PROCLOCK>; NUM_LOCK_PARTITIONS], // TODO(ptr)

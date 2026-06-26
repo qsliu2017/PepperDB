@@ -30,7 +30,7 @@ pub fn ts_copychar_with_len(dest: &mut [u8], src: &[u8], length: usize) -> usize
 
 /// Copy a multibyte char from a NUL-terminated string; return byte length.
 pub fn ts_copychar_cstr(dest: &mut [u8], src: *const u8) -> usize {
-    let len = unsafe { pg_mblen_cstr(src) } as usize;
+    let len = pg_mblen_cstr(src) as usize;
     let s = unsafe { core::slice::from_raw_parts(src, len) };
     ts_copychar_with_len(dest, s, len)
 }

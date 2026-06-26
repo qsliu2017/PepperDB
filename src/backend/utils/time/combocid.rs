@@ -14,7 +14,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use crate::access::htup_details::{HeapTupleHeaderData, HEAP_COMBOCID, HEAP_MOVED};
+use crate::access::htup_details::{HEAP_COMBOCID, HEAP_MOVED, HeapTupleHeaderData};
 use crate::c::CommandId;
 
 /// combocid.c `ComboCidKeyData`: the (cmin, cmax) pair used as a hash key.
@@ -262,8 +262,14 @@ mod tests {
             // Restore into a fresh task and verify the cids line up.
             combocid_scope(async move {
                 restore_combo_cid_state(&buf);
-                assert_eq!(get_combo_command_id(CommandId(1), CommandId(2)), CommandId(0));
-                assert_eq!(get_combo_command_id(CommandId(5), CommandId(8)), CommandId(1));
+                assert_eq!(
+                    get_combo_command_id(CommandId(1), CommandId(2)),
+                    CommandId(0)
+                );
+                assert_eq!(
+                    get_combo_command_id(CommandId(5), CommandId(8)),
+                    CommandId(1)
+                );
             })
             .await;
         })

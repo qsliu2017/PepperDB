@@ -32,12 +32,11 @@ pub struct xl_clog_truncate {
 }
 
 // Definitions live in transam/clog.c; re-exported here (rules s2). The clog
-// set/get + maintenance ops became async + threaded through `&Arc<SharedState>`
-// (async coloring from the SLRU leaf, design s4).
-pub use crate::backend::access::transam::clog::{
-    clog_identify, clogsyncfiletag, BootStrapCLOG, CheckPointCLOG, ExtendCLOG, StartupCLOG,
-    TransactionIdGetStatus, TransactionIdSetTreeStatus, TrimCLOG, TruncateCLOG,
-};
+// set/get + maintenance ops became inherent methods on the CLOG `SlruCtl`
+// (`shared.clog().set_tree_status(...)` etc., refactor14); they cannot be
+// `pub use`d, and all callers use the methods, so only the remaining free fns
+// are re-exported.
+pub use crate::backend::access::transam::clog::{clog_identify, clogsyncfiletag};
 
 /// clog.c CLOGShmemSize (estimate under the Arc model).
 pub fn CLOGShmemSize(nbuffers: usize) -> usize {

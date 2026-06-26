@@ -66,7 +66,8 @@ pub fn aclitem_set_privs(item: &mut AclItem, privs: AclMode) {
 
 /// `ACLITEM_SET_GOPTIONS` - replace the upper 32 grant-option bits.
 pub fn aclitem_set_goptions(item: &mut AclItem, goptions: AclMode) {
-    let bits = (item.privs.bits() & !(0xFFFFFFFFu64 << 32)) | ((goptions.bits() & 0xFFFFFFFF) << 32);
+    let bits =
+        (item.privs.bits() & !(0xFFFFFFFFu64 << 32)) | ((goptions.bits() & 0xFFFFFFFF) << 32);
     item.privs = AclMode::from_bits_retain(bits);
 }
 
@@ -119,16 +120,28 @@ pub const ACL_MAINTAIN_CHR: u8 = b'm';
 pub const ACL_ALL_RIGHTS_STR: &str = "arwdDxtXUCTcsAm";
 
 /// "all rights" composite masks per object type.
-pub const ACL_ALL_RIGHTS_COLUMN: AclMode =
-    AclMode::from_bits_retain(AclMode::INSERT.bits() | AclMode::SELECT.bits() | AclMode::UPDATE.bits() | AclMode::REFERENCES.bits());
-pub const ACL_ALL_RIGHTS_RELATION: AclMode = AclMode::from_bits_retain(
-    AclMode::INSERT.bits() | AclMode::SELECT.bits() | AclMode::UPDATE.bits() | AclMode::DELETE.bits()
-        | AclMode::TRUNCATE.bits() | AclMode::REFERENCES.bits() | AclMode::TRIGGER.bits() | AclMode::MAINTAIN.bits(),
+pub const ACL_ALL_RIGHTS_COLUMN: AclMode = AclMode::from_bits_retain(
+    AclMode::INSERT.bits()
+        | AclMode::SELECT.bits()
+        | AclMode::UPDATE.bits()
+        | AclMode::REFERENCES.bits(),
 );
-pub const ACL_ALL_RIGHTS_SEQUENCE: AclMode =
-    AclMode::from_bits_retain(AclMode::USAGE.bits() | AclMode::SELECT.bits() | AclMode::UPDATE.bits());
-pub const ACL_ALL_RIGHTS_DATABASE: AclMode =
-    AclMode::from_bits_retain(AclMode::CREATE.bits() | AclMode::CREATE_TEMP.bits() | AclMode::CONNECT.bits());
+pub const ACL_ALL_RIGHTS_RELATION: AclMode = AclMode::from_bits_retain(
+    AclMode::INSERT.bits()
+        | AclMode::SELECT.bits()
+        | AclMode::UPDATE.bits()
+        | AclMode::DELETE.bits()
+        | AclMode::TRUNCATE.bits()
+        | AclMode::REFERENCES.bits()
+        | AclMode::TRIGGER.bits()
+        | AclMode::MAINTAIN.bits(),
+);
+pub const ACL_ALL_RIGHTS_SEQUENCE: AclMode = AclMode::from_bits_retain(
+    AclMode::USAGE.bits() | AclMode::SELECT.bits() | AclMode::UPDATE.bits(),
+);
+pub const ACL_ALL_RIGHTS_DATABASE: AclMode = AclMode::from_bits_retain(
+    AclMode::CREATE.bits() | AclMode::CREATE_TEMP.bits() | AclMode::CONNECT.bits(),
+);
 pub const ACL_ALL_RIGHTS_FDW: AclMode = AclMode::USAGE;
 pub const ACL_ALL_RIGHTS_FOREIGN_SERVER: AclMode = AclMode::USAGE;
 pub const ACL_ALL_RIGHTS_FUNCTION: AclMode = AclMode::EXECUTE;
@@ -167,11 +180,23 @@ pub fn get_user_default_acl(_objtype: ObjectType, _owner_id: Oid, _nsp_oid: Oid)
     unimplemented!()
 }
 
-pub fn record_dependency_on_new_acl(_class_id: Oid, _object_id: Oid, _objsub_id: i32, _owner_id: Oid, _acl: &Acl) {
+pub fn record_dependency_on_new_acl(
+    _class_id: Oid,
+    _object_id: Oid,
+    _objsub_id: i32,
+    _owner_id: Oid,
+    _acl: &Acl,
+) {
     unimplemented!()
 }
 
-pub fn aclupdate(_old_acl: &Acl, _mod_aip: &AclItem, _modechg: AclModeChg, _owner_id: Oid, _behavior: DropBehavior) -> *mut Acl {
+pub fn aclupdate(
+    _old_acl: &Acl,
+    _mod_aip: &AclItem,
+    _modechg: AclModeChg,
+    _owner_id: Oid,
+    _behavior: DropBehavior,
+) -> *mut Acl {
     unimplemented!()
 }
 
@@ -203,7 +228,13 @@ pub fn aclequal(_left_acl: &Acl, _right_acl: &Acl) -> bool {
     unimplemented!()
 }
 
-pub fn aclmask(_acl: &Acl, _roleid: Oid, _owner_id: Oid, _mask: AclMode, _how: AclMaskHow) -> AclMode {
+pub fn aclmask(
+    _acl: &Acl,
+    _roleid: Oid,
+    _owner_id: Oid,
+    _mask: AclMode,
+    _how: AclMaskHow,
+) -> AclMode {
     unimplemented!()
 }
 
@@ -268,7 +299,12 @@ pub fn get_rolespec_name(_role: &RoleSpec) -> String {
 }
 
 /// `select_best_grantor` - two out-params `grantorId`/`grantOptions` -> tuple.
-pub fn select_best_grantor(_role_id: Oid, _privileges: AclMode, _acl: &Acl, _owner_id: Oid) -> (Oid, AclMode) {
+pub fn select_best_grantor(
+    _role_id: Oid,
+    _privileges: AclMode,
+    _acl: &Acl,
+    _owner_id: Oid,
+) -> (Oid, AclMode) {
     unimplemented!()
 }
 
@@ -280,7 +316,10 @@ pub fn execute_grant_stmt(_stmt: &GrantStmt) {
     unimplemented!()
 }
 
-pub fn exec_alter_default_privileges_stmt(_pstate: &mut ParseState, _stmt: &AlterDefaultPrivilegesStmt) {
+pub fn exec_alter_default_privileges_stmt(
+    _pstate: &mut ParseState,
+    _stmt: &AlterDefaultPrivilegesStmt,
+) {
     unimplemented!()
 }
 
@@ -288,7 +327,12 @@ pub fn remove_role_from_object_acl(_roleid: Oid, _classid: Oid, _objid: Oid) {
     unimplemented!()
 }
 
-pub fn pg_class_aclmask(_table_oid: Oid, _roleid: Oid, _mask: AclMode, _how: AclMaskHow) -> AclMode {
+pub fn pg_class_aclmask(
+    _table_oid: Oid,
+    _roleid: Oid,
+    _mask: AclMode,
+    _how: AclMaskHow,
+) -> AclMode {
     unimplemented!()
 }
 
@@ -297,23 +341,48 @@ pub fn object_aclcheck(_classid: Oid, _objectid: Oid, _roleid: Oid, _mode: AclMo
 }
 
 /// `object_aclcheck_ext` - `bool *is_missing` out-param -> tuple.
-pub fn object_aclcheck_ext(_classid: Oid, _objectid: Oid, _roleid: Oid, _mode: AclMode) -> (AclResult, bool) {
+pub fn object_aclcheck_ext(
+    _classid: Oid,
+    _objectid: Oid,
+    _roleid: Oid,
+    _mode: AclMode,
+) -> (AclResult, bool) {
     unimplemented!()
 }
 
-pub fn pg_attribute_aclcheck(_table_oid: Oid, _attnum: i16, _roleid: Oid, _mode: AclMode) -> AclResult {
+pub fn pg_attribute_aclcheck(
+    _table_oid: Oid,
+    _attnum: i16,
+    _roleid: Oid,
+    _mode: AclMode,
+) -> AclResult {
     unimplemented!()
 }
 
-pub fn pg_attribute_aclcheck_ext(_table_oid: Oid, _attnum: i16, _roleid: Oid, _mode: AclMode) -> (AclResult, bool) {
+pub fn pg_attribute_aclcheck_ext(
+    _table_oid: Oid,
+    _attnum: i16,
+    _roleid: Oid,
+    _mode: AclMode,
+) -> (AclResult, bool) {
     unimplemented!()
 }
 
-pub fn pg_attribute_aclcheck_all(_table_oid: Oid, _roleid: Oid, _mode: AclMode, _how: AclMaskHow) -> AclResult {
+pub fn pg_attribute_aclcheck_all(
+    _table_oid: Oid,
+    _roleid: Oid,
+    _mode: AclMode,
+    _how: AclMaskHow,
+) -> AclResult {
     unimplemented!()
 }
 
-pub fn pg_attribute_aclcheck_all_ext(_table_oid: Oid, _roleid: Oid, _mode: AclMode, _how: AclMaskHow) -> (AclResult, bool) {
+pub fn pg_attribute_aclcheck_all_ext(
+    _table_oid: Oid,
+    _roleid: Oid,
+    _mode: AclMode,
+    _how: AclMaskHow,
+) -> (AclResult, bool) {
     unimplemented!()
 }
 
@@ -329,7 +398,12 @@ pub fn pg_parameter_aclcheck(_name: &str, _roleid: Oid, _mode: AclMode) -> AclRe
     unimplemented!()
 }
 
-pub fn pg_largeobject_aclcheck_snapshot(_lobj_oid: Oid, _roleid: Oid, _mode: AclMode, _snapshot: Snapshot) -> AclResult {
+pub fn pg_largeobject_aclcheck_snapshot(
+    _lobj_oid: Oid,
+    _roleid: Oid,
+    _mode: AclMode,
+    _snapshot: Snapshot,
+) -> AclResult {
     unimplemented!()
 }
 
@@ -337,7 +411,12 @@ pub fn aclcheck_error(_aclerr: AclResult, _objtype: ObjectType, _objectname: &st
     unimplemented!()
 }
 
-pub fn aclcheck_error_col(_aclerr: AclResult, _objtype: ObjectType, _objectname: &str, _colname: &str) {
+pub fn aclcheck_error_col(
+    _aclerr: AclResult,
+    _objtype: ObjectType,
+    _objectname: &str,
+    _colname: &str,
+) {
     unimplemented!()
 }
 
@@ -353,7 +432,13 @@ pub fn remove_ext_obj_init_priv(_objoid: Oid, _classoid: Oid) {
     unimplemented!()
 }
 
-pub fn replace_role_in_init_priv(_oldroleid: Oid, _newroleid: Oid, _classid: Oid, _objid: Oid, _objsubid: i32) {
+pub fn replace_role_in_init_priv(
+    _oldroleid: Oid,
+    _newroleid: Oid,
+    _classid: Oid,
+    _objid: Oid,
+    _objsubid: i32,
+) {
     unimplemented!()
 }
 
