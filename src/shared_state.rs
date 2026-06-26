@@ -154,8 +154,11 @@ shared_state! {
     /// `ProcArrayShmemInit` slot). The snapshot/horizon source; `ProcArrayLock`
     /// is its internal `RwLock`.
     proc_array: crate::backend::storage::ipc::procarray::ProcArray,
-    // Future Arc fields (lockmgr, sinval, checkpointer, ...) are inserted by
-    // later steps -- see new().
+
+    /// Shared cache-invalidation transport (PG sinvaladt.c `SISeg`; ipci.c
+    /// `SharedInvalShmemInit` slot). The SI ring buffer + per-backend read state.
+    sinval: crate::backend::storage::ipc::sinvaladt::SInvalBuffer,
+    // Future Arc fields (checkpointer, ...) are inserted by later steps -- see new().
 }
 
 /// Default `PROCARRAY_MAXPROCS` (MaxBackends + max_prepared_xacts) when the
@@ -276,12 +279,15 @@ impl SharedState {
         // TODO(step17): BackgroundWorkerShmemInit  here
 
         // Set up shared-inval messaging:
-        // TODO(step16): SharedInvalShmemInit  here
+        // SharedInvalShmemInit -- step16. The SI ring transport; published
+        // process-wide so sinval.c's Send/Receive reach it without a handle.
+        let sinval = crate::backend::storage::ipc::sinvaladt::shared_inval_shmem_init();
 
         // Set up interprocess signaling mechanisms:
         //   (PMSignalShmemInit -- postmaster signaling, supervisor/step17)
         // ProcSignalShmemInit -- step04, DONE (constructed below at this slot).
-        let proc_signal = Arc::new(ProcSignal::new());
+        // Published process-wide so a foreign sender (sinval catchup) reaches it.
+        let proc_signal = crate::backend::storage::ipc::procsignal::proc_signal_shared();
         // (sync_requests is constructed earlier, before the clog/subtrans SLRUs.)
         // TODO(step17): CheckpointerShmemInit  here
         // TODO(step17): AutoVacuumShmemInit  here
@@ -309,6 +315,7 @@ impl SharedState {
             lock_manager,
             proc_global,
             proc_array,
+            sinval,
         })
     }
 

@@ -363,6 +363,13 @@ pub fn IsTransactionState() -> bool {
     with_xact(|x| x.cur().state == TransState::InProgress)
 }
 
+/// Like [`IsTransactionState`] but returns `false` when no xact scope is active,
+/// for assert-only callers (e.g. inval's AcceptInvalidationMessages) that may run
+/// outside a transaction scope.
+pub fn is_transaction_state_or_false() -> bool {
+    with_xact_or(false, |x| x.cur().state == TransState::InProgress)
+}
+
 /// xact.c `IsAbortedTransactionBlockState`.
 pub fn IsAbortedTransactionBlockState() -> bool {
     with_xact(|x| {

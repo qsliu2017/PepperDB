@@ -98,65 +98,38 @@ pub enum SharedInvalidationMessage {
     RelSync(SharedInvalRelSyncMsg),
 }
 
-/// Counter of messages processed; don't worry about overflow.
-// TODO(global): per-session/task state under the async model.
-pub static mut SHARED_INVALID_MESSAGE_COUNTER: u64 = 0;
-
-/// Whether a catchup interrupt is pending (was `volatile sig_atomic_t`).
-// TODO(global): replace the signal-driven flag with a tokio wakeup.
-pub static mut CATCHUP_INTERRUPT_PENDING: bool = false;
-
-// TODO(invalidation): shared queue + per-task wakeups
-pub fn send_shared_invalid_messages(_msgs: &[SharedInvalidationMessage]) {
-    unimplemented!()
+/// Counter of messages processed; don't worry about overflow. Defined in the
+/// backend module as an `AtomicU64`; read via the accessor below (no `static mut`).
+#[deprecated(note = "use crate::backend::storage::ipc::sinval::shared_invalid_message_counter()")]
+#[inline]
+pub fn shared_invalid_message_counter() -> u64 {
+    crate::backend::storage::ipc::sinval::shared_invalid_message_counter()
 }
 
-/// Drain pending messages, applying `inval_function` to each and calling
-/// `reset_function` on a queue-reset signal. C passed two function pointers;
-/// Rust takes closures (function-mapping section 6.3).
-// TODO(invalidation): shared queue + per-task wakeups
-pub fn receive_shared_invalid_messages(
-    _inval_function: impl FnMut(&SharedInvalidationMessage),
-    _reset_function: impl FnMut(),
-) {
-    unimplemented!()
+/// Whether a catchup interrupt is pending (was `volatile sig_atomic_t`). Now the
+/// per-task ProcSignal slot `CatchupInterrupt` reason bit; read via the slot.
+#[deprecated(note = "use the per-task ProcSignal slot CatchupInterrupt reason bit")]
+#[inline]
+pub fn catchup_interrupt_pending() -> bool {
+    crate::backend::storage::ipc::procsignal::try_current().is_some_and(|slot| {
+        slot.reason_is_set(crate::storage::procsignal::ProcSignalReason::CatchupInterrupt)
+    })
 }
 
-/// Signal handler for catchup events (PROCSIG_CATCHUP_INTERRUPT).
-// TODO(invalidation): shared queue + per-task wakeups
-pub fn handle_catchup_interrupt() {
-    unimplemented!()
-}
+// sinval.c function bodies live in the backend module; rewire the header stubs to
+// `pub use` (non-type-centric global-state fns).
+pub use crate::backend::storage::ipc::sinval::{
+    HandleCatchupInterrupt as handle_catchup_interrupt,
+    ProcessCatchupInterrupt as process_catchup_interrupt,
+    ReceiveSharedInvalidMessages as receive_shared_invalid_messages,
+    SendSharedInvalidMessages as send_shared_invalid_messages,
+};
 
-// TODO(invalidation): shared queue + per-task wakeups
-pub fn process_catchup_interrupt() {
-    unimplemented!()
-}
-
-/// Collect a committed xact's invalidation messages. C returned a count and
-/// filled an out-array plus a `*RelcacheInitFileInval` flag; Rust returns the
-/// messages and the flag (function-mapping section 5).
-// TODO(invalidation): shared queue + per-task wakeups
-pub fn xact_get_committed_invalidation_messages() -> (Vec<SharedInvalidationMessage>, bool) {
-    unimplemented!()
-}
-
-// TODO(invalidation): shared queue + per-task wakeups
-pub fn inplace_get_invalidation_messages() -> (Vec<SharedInvalidationMessage>, bool) {
-    unimplemented!()
-}
-
-// TODO(invalidation): shared queue + per-task wakeups
-pub fn process_committed_invalidation_messages(
-    _msgs: &[SharedInvalidationMessage],
-    _relcache_init_file_inval: bool,
-    _dbid: Oid,
-    _tsid: Oid,
-) {
-    unimplemented!()
-}
-
-// TODO(invalidation): shared queue + per-task wakeups
-pub fn local_execute_invalidation_message(_msg: &SharedInvalidationMessage) {
-    unimplemented!()
-}
+// These sinval.h-origin functions are defined in inval.c; rewire the header stubs
+// to `pub use` the backend implementations (under the snake_case header names).
+pub use crate::backend::utils::cache::inval::{
+    inplace_get_invalidation_messages as inplaceGetInvalidationMessages,
+    local_execute_invalidation_message as LocalExecuteInvalidationMessage,
+    process_committed_invalidation_messages as ProcessCommittedInvalidationMessages,
+    xact_get_committed_invalidation_messages as xactGetCommittedInvalidationMessages,
+};

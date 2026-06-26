@@ -293,6 +293,12 @@ fn xlog_logical_info_active() -> bool {
     level >= WalLevel::Logical as i32
 }
 
+/// PG `XLogLogicalInfoActive()` macro, header-facing name.
+#[allow(non_snake_case, reason = "mirrors the C macro name")]
+pub fn XLogLogicalInfoActive() -> bool {
+    xlog_logical_info_active()
+}
+
 impl RelationData {
     /// RelationGetToastTupleTarget: toast_tuple_target, or `defaulttarg`.
     pub fn toast_tuple_target(&self, defaulttarg: i32) -> i32 {

@@ -90,6 +90,13 @@ fn read_guc(v: i32, default: i32) -> i32 {
 // Shmem sizing reports
 // ---------------------------------------------------------------------------
 
+/// PG `NumProcStateSlots` = MaxBackends + NUM_AUXILIARY_PROCS: the sinval
+/// per-backend slot count, indexed by ProcNumber.
+pub fn num_proc_state_slots() -> usize {
+    let c = proc_counts();
+    c.max_backends + NUM_AUXILIARY_PROCS as usize
+}
+
 /// PG `ProcGlobalSemas`: one sema per backend + one per auxiliary process. Under
 /// the async model there are no SysV semaphores, but the count is still reported
 /// for compatibility / startup sizing checks.

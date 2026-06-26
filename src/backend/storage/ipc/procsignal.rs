@@ -107,6 +107,14 @@ impl ProcSignalSlot {
         self.flags.interrupt_pending.store(true, Ordering::Release);
     }
 
+    /// Set a reason bit + `interrupt_pending` on THIS slot. Public so a task can
+    /// raise an interrupt on its own slot (e.g. `HandleCatchupInterrupt` setting
+    /// the current task's CatchupInterrupt bit). Foreign senders go through the
+    /// registry (`send`/`send_by_proc_number`); this is the self-raise path.
+    pub fn raise_reason_self(&self, reason: ProcSignalReason) {
+        self.raise_reason(reason);
+    }
+
     /// Test-and-clear a reason bit. Returns whether it had been set. (PG's
     /// `CheckProcSignal`.)
     pub fn take_reason(&self, reason: ProcSignalReason) -> bool {
@@ -230,11 +238,31 @@ impl ProcSignal {
             let reg = self.inner.lock().unwrap();
             reg.slots.get(target).cloned()
         };
-        slot.is_some_and(|slot| {
+        slot.inspect(|slot| {
             slot.raise_reason(reason);
             slot.latch.set();
-            true
         })
+        .is_some()
+    }
+
+    /// Send a signal to a task by its `ProcNumber` (PG's `SendProcSignal`, which
+    /// targets `ProcSignal->psh_slot[procNumber]` BY INDEX). Scans the live slots
+    /// for the one registered at `procno`, sets the reason bit + rings its latch.
+    /// Returns false if no live slot has that proc_number. Few backends, so the
+    /// linear scan is cheap.
+    pub fn send_by_proc_number(&self, procno: ProcNumber, reason: ProcSignalReason) -> bool {
+        let slot = {
+            let reg = self.inner.lock().unwrap();
+            reg.slots
+                .iter()
+                .find(|(_, slot)| slot.proc_number == procno)
+                .map(|(_, slot)| slot.clone())
+        };
+        slot.inspect(|slot| {
+            slot.raise_reason(reason);
+            slot.latch.set();
+        })
+        .is_some()
     }
 
     /// Find the slot for `pid` and clone its `Arc`. Lock is held only for the
@@ -315,6 +343,28 @@ impl ProcSignal {
             .iter()
             .all(|(_, slot)| slot.barrier_generation.load(Ordering::Acquire) >= generation)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Process-wide registry handle (PG's global `ProcSignal` pointer)
+// ---------------------------------------------------------------------------
+
+/// Process-wide handle to the signaling registry. Published by `SharedState::new`
+/// so a sender (e.g. SICleanupQueue's catchup signal) can reach it without a
+/// SharedState handle, mirroring `lock_manager()`/`proc_global()`.
+static PROC_SIGNAL: std::sync::OnceLock<Arc<ProcSignal>> = std::sync::OnceLock::new();
+
+/// Build a fresh `Arc<ProcSignal>` for `SharedState::new`, also publishing it
+/// process-wide if none is published yet.
+pub fn proc_signal_shared() -> Arc<ProcSignal> {
+    let s = Arc::new(ProcSignal::new());
+    let _ = PROC_SIGNAL.set(s.clone());
+    s
+}
+
+/// The process-wide signaling registry, if initialized.
+pub fn current_proc_signal() -> Option<&'static Arc<ProcSignal>> {
+    PROC_SIGNAL.get()
 }
 
 // ---------------------------------------------------------------------------
@@ -426,6 +476,23 @@ mod tests {
             .unwrap();
         assert!(reason, "reason bit must be set");
         assert!(ip, "interrupt_pending must be set");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn send_by_proc_number_hits_the_right_slot() {
+        let reg = ProcSignal::new();
+        let latch = Arc::new(Latch::new());
+        // Register two slots; capture each one's proc_number.
+        let (_k0, s0) = reg.register(700, &key32(5), latch.clone());
+        let (_k1, s1) = reg.register(701, &key32(6), latch);
+
+        // Sending by s1's proc_number must hit s1, not s0.
+        assert!(reg.send_by_proc_number(s1.proc_number, ProcSignalReason::CatchupInterrupt));
+        assert!(s1.reason_is_set(ProcSignalReason::CatchupInterrupt));
+        assert!(!s0.reason_is_set(ProcSignalReason::CatchupInterrupt));
+
+        // An unknown proc_number is a no-op.
+        assert!(!reg.send_by_proc_number(9999, ProcSignalReason::CatchupInterrupt));
     }
 
     #[test]
