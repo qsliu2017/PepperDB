@@ -777,3 +777,47 @@ with ThreadSanitizer (`-Zsanitizer=thread`) when a teardown abort has no panic m
 - do_autovacuum / vacuum / catalog scans / bgworker connection-init are stubs until those
   subsystems land; archive copy + pgstat are stubs; StartupXLOG recovery body is xlogrecovery.
 - on-demand worker spawn hooks + bgworker entry registry are in-core only (dlopen tombstoned).
+
+---
+
+## 18. Lessons from F4 (parallel-query chassis: parallel.c - step 18)
+
+**Cross-process state transport is the thing that disappears.** parallel.c's bulk serializes
+GUC/snapshot/xact/combocid/relmapper/library/clientconninfo into DSM regions keyed by
+`PARALLEL_KEY_*` and restores them in the worker. ALL of it is tombstoned: a worker is a tokio
+task spawned INSIDE the leader's task-local scopes, so it inherits the leader's `Arc<Session>`
+(database/user) and (once wired) snapshot/xact by scope nesting - nothing to serialize. Keep
+only genuinely-shared scalars (last_xlog_end) as an `Arc<AtomicU64>` the workers fold into.
+
+**ParallelContext = plain leader-task struct; the shared bits inside are Arc.** No DSM/shm_toc
+fields. `workers: Vec<{ JoinHandle, mpsc::Receiver<ParallelMessage> }>`. shm_mq -> a TYPED
+tokio mpsc carrying a `ParallelMessage` enum (Error/Notice), NOT pqmq StringInfo byte framing.
+The active-context list (PG dlist) -> a `task_local! RefCell<Vec<..>>`; never hold its borrow
+across an `.await` (copy out the handle, drop the borrow, then await Destroy).
+
+**Keep the leader future Send.** A `ParallelContext` referenced by raw address in the task-local
+list must store the address as `usize` (not a raw pointer, which is !Send) so the leader future
+stays spawnable; deref it ONLY on the owning leader task (never capture it into a worker spawn).
+Worker closures capture only Send values (i32 / Arc / Option<Arc<Session>> / fn / mpsc Sender);
+worker proc identity is the per-task `MY_PROC_NUMBER` task-local set by the worker's own
+InitProcess inside its `my_proc_scope`.
+
+**Worker = backend with a PGPROC in the leader's lock group.** LaunchParallelWorkers does
+BecomeLockGroupLeader() then tokio::spawn per worker; the worker cradle: session::scope(leader
+session) > my_proc_scope > InitProcess() > BecomeLockGroupMember(leader_procno, leader_pid) >
+set ParallelWorkerNumber > entrypoint. The PGPROC MUST be released on every exit incl panic via
+an RAII drop-guard (the s17 lesson again - a worker that panics outside the entrypoint else
+leaks a slot); the guard lives inside my_proc_scope so ProcKill sees the right current_proc.
+
+**Worker error propagation replaces longjmp-to-leader.** Wrap the entrypoint in catch_unwind;
+a panic -> `ParallelMessage::Error(text)` on the unbounded mpsc (can't block/lose) -> the leader
+re-raises in WaitForParallelWorkersToFinish / ProcessParallelMessage. A clean worker closes its
+sender; the leader's drain terminates (no hang). A worker panic NEVER aborts the process.
+
+### Carried-forward TODOs (F4 deferred)
+- The entrypoints (ParallelQueryMain, _bt/_brin/_gin_parallel_build_main, parallel_vacuum_main)
+  are in-core-table stubs (unimplemented!()) until execParallel + the AM parallel-build paths
+  land. When ParallelQueryMain lands, worker_cradle must ALSO inherit the leader's snapshot
+  (snapmgr task-local) + an xact scope (TODO(execParallel) marker in worker_cradle).
+- WaitForParallelWorkersToAttach is a near-noop (spawned == attached); revisit if modelling
+  worker start failure. shm_mq/shm_toc/barrier stay tombstoned header stubs.
