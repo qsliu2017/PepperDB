@@ -430,3 +430,84 @@ queue near the checkpointer slot) - it encodes init dependencies.
   until the GUC lands); FSM `fp_next_slot` hint write is dropped (`TODO(perf)`: an
   atomic byte); the buffer victim conditional content-lock is deferred; the smgr EOF
   strict-error path needs the `InRecovery`/`zero_damaged_pages` GUCs.
+
+---
+
+## 12. Lessons from F2 (transaction/MVCC spine: SLRU, clog/subtrans, varsup,
+## procarray, snapmgr, combocid, xact)
+
+These emerged porting step 14; apply them to the rest of the access/AM tree.
+
+**SLRU is the second async leaf (after the buffer pool).** `SlruCtl` holds
+`banks: Vec<RwLock<SlruBank>>` + a per-slot `WaitQueue`. The bank `RwLock` is the
+ex-bank-control-LWLock; PG takes it EXCLUSIVE everywhere except the read-only
+status-lookup hit path (`SimpleLruReadPage_ReadOnly`, `LW_SHARED`) - so reads take
+`.read()`, read-in/claim/set take `.write()`. LRU-hint counters are atomics so
+`SlruRecentlyUsed` is sound under the shared lock (it is a benign-race hint). NEVER
+form `&mut` to a page under the shared lock; non-atomic slot fields are write-lock
+only. Select-victim and claim (mark ReadInProgress) MUST be ONE critical section
+(do not drop the lock between them, or two tasks claim the same slot); only the
+physical I/O awaits with the lock dropped, under an `InProgressSlruIo` unwind guard.
+The wait path enqueues its `WaitGuard` UNDER the lock (the queue's `woken` flag is
+per-slot, so a wake racing an enqueue done after the drop is LOST). Expose access as
+a CLOSURE that holds the lock across find+use (`read_page_with`/`read_page_readonly_with`)
+- a "return the slot, re-lock by slot" API races eviction (the slot can be repointed
+  before the second lock).
+
+**Snapshots are shared, owned values, NOT borrowed.** `Snapshot = Option<Arc<SnapshotData>>`.
+Do NOT lend `&'static mut`/`&'static` out of task-local storage (laundering a
+task_local borrow to `'static` lets safe code alias `&mut` = UB; the snapshot
+manager also mutates the same buffer for `SetCommandId`). Getters return cheap
+`Arc::clone`s; `curcid` mutation uses `Arc::make_mut` (copy-on-write). Keep the
+shared identity (first-xact snapshot IS the registered Arc, not a second copy).
+
+**Per-task transaction state is `task_local! RefCell<...>`, never `thread_local`.**
+The `TransactionState` stack (xact), the active/registered snapshot stacks +
+Current/Secondary/Catalog buffers (snapmgr), the combo-cid map (combocid), and the
+single-entry `cachedFetchXid` status cache (transam) are all per-backend state held
+across `.await`, so they must be `task_local` (thread migration). Never hold a
+`RefCell` borrow across an `.await` (borrow, copy/decide, drop, then await).
+
+**Durability ordering (xact RecordTransactionCommit) is load-bearing.** SYNC commit
+flushes WAL to disk (`xlog_flush` to >= the commit-record LSN) BEFORE clog is marked
+COMMITTED; ASYNC commit (`synchronous_commit=off`) records the commit LSN in clog
+(`TransactionIdAsyncCommitTree`) and requests a flush WITHOUT waiting. clog must
+never report committed before the WAL is durable in the sync case. The window runs
+in a crit section. (`synchronous_commit` is hardcoded ON until GUCs land - `TODO(guc)`.)
+
+**procarray is the one mostly-synchronous subsystem.** `ProcArrayLock` is a
+`RwLock` over the procarray data; `GetSnapshotData`/horizons/`IsInProgress` compute
+entirely in memory and DROP the guard before any `.await` (clog/subtrans probes
+happen after the guard, as PG releases ProcArrayLock before the pg_subtrans probe).
+Keep it that way. `GetSnapshotDataReuse` keys on `xactCompletionCount` (init 1, not 0).
+
+**xid comparison is modular, so NOT `Ord`.** `TransactionId::precedes`/`follows` are
+METHODS (modular wraparound + permanent-xid special-case); do NOT `impl Ord`/`<` with
+precedes semantics (non-transitive -> unsound; breaks sort/min/BTree). A raw derived
+`Ord` on `TransactionId` (numeric) is fine for sort/map keys but is NOT transaction
+order - document it. `FullTransactionId` (64-bit, monotonic) IS a true total order:
+real `Ord`, and `<`-delegating deprecated shims.
+
+**SharedState discipline.** Fields private behind `pub(crate)` accessors, generated
+by the `shared_state!` macro (also asserts each field `Send+Sync+'static`). Leaf
+routines take the NARROW handle (`&SlruCtl`/`&VariableCache`/`&ProcArray`) or are
+methods on it; only genuine multi-subsystem orchestrators (xact, snapmgr) take
+`&Arc<SharedState>`. Reaching a subsystem DEREFS (`shared.clog()` -> `&Arc<T>`, free);
+`Arc::clone` only to hold across an `.await` or move into a task (section 5). Add new
+subsystems to `SharedState::new` at the ipci.c-order marker.
+
+### Carried-forward TODOs (F2 deferred; pick up at the named step)
+- step 15 (proc/lock mgr): `proc.c` `InitProcGlobal` populates the real PGPROC array
+  that procarray scans (today it runs over the empty `ProcGlobal` stub - snapshots
+  are only end-to-end testable after this). Then implement the two group-batching
+  perf ops that NEED it: clog `TransactionGroupUpdateXidStatus` (PGPROC.clogGroup* +
+  ProcGlobal.clogGroupFirst) and procarray `ProcArrayGroupClearXid`
+  (PGPROC.procArrayGroup* + procArrayGroupFirst) - both marked `TODO(step15)`.
+- twophase (`PrepareTransaction`), parallel-worker xact state, `xact_redo`/recovery,
+  invalidation-message send, and smgr pending-deletes are stubs reached by xact.
+- snapmgr `RegisteredSnapshots` is a linear min-xmin scan; PG uses a pairingheap
+  keyed by xmin (MODULAR cmp) - needs `lib/pairingheap.c` (a BTreeMap can't
+  substitute: modular xid order is not a consistent total order).
+- SLRU `physical_read` short-read zero-fill is unreachable (`read_exact_at` ->
+  `UnexpectedEof`); only a wholly-absent segment zero-fills. Matters for recovery
+  reading a partially-written segment - `TODO(recovery)`.
