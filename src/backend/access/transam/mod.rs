@@ -1,6 +1,7 @@
 //! Directory module: src/backend/access/transam
 
 pub mod clog;
+pub mod parallel;
 pub mod rmgr;
 pub mod slru;
 pub mod subtrans;

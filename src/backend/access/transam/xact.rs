@@ -685,6 +685,16 @@ pub fn IsInParallelMode() -> bool {
     })
 }
 
+/// Fold a parallel worker's reported XactLastRecEnd into this backend's, taking
+/// the max (PG's WaitForParallelWorkersToFinish tail). Used by parallel.c.
+pub fn fold_worker_last_rec_end(worker_end: XLogRecPtr) {
+    with_xact(|x| {
+        if worker_end > x.xact_last_rec_end {
+            x.xact_last_rec_end = worker_end;
+        }
+    });
+}
+
 /// xact.c `CommandCounterIncrement`. Stays sync: it bumps the command id and
 /// processes local invalidation (the invalidation send is sync; that subsystem
 /// is a stub here).
