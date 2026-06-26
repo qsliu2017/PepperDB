@@ -511,3 +511,73 @@ subsystems to `SharedState::new` at the ipci.c-order marker.
 - SLRU `physical_read` short-read zero-fill is unreachable (`read_exact_at` ->
   `UnexpectedEof`); only a wholly-absent segment zero-fills. Matters for recovery
   reading a partially-written segment - `TODO(recovery)`.
+
+---
+
+## 13. Lessons from F2 (lock manager: proc, lock, deadlock, lmgr - step 15)
+
+**Shared mutable fixed-size arrays -> index + interior mutability (the BufId/PGPROC
+pattern).** A C array of structs shared by all backends and referenced by pointer
+(PGPROC, and PG's BUFFER/PROC arrays generally) becomes a fixed `Vec<UnsafeCell<T>>`
+(allocated once, NEVER resized/moved), indexed by a Send integer handle (ProcNumber,
+like BufId for buffers). Cross-task/shared references MUST be the index, not a raw
+`*mut T` (raw pointers are `!Send`; per-task/shared state must be Send, s6.1). Justify
+`unsafe impl Send+Sync` on the cell by: the arena never moves, and every mutable field
+access is serialized by a documented lock (ProcArrayLock / the partition Mutex /
+owner-only). The hot LOCK-FREE-READ fields (the xid/subxid/statusFlags a snapshot
+scans) live as PARALLEL mirror arrays of atomics, written under the one lock the
+reader also respects - never read a torn compound struct lock-free; mirror the
+scalars instead.
+
+**Async grant-wait (ProcSleep) = select! with the wake + timer arms; drop the
+partition lock first.** The C "join the wait queue under the partition lock, release
+it, then WaitLatch-loop with a deadlock timer" becomes: a SYNC JoinWaitQueue (under
+the partition Mutex) that enqueues + sets the proc wait-state, then DROP the Mutex,
+then an async `ProcSleep` = `tokio::select!` over the proc's sticky Latch (set by the
+waker), a `sleep(DeadlockTimeout)` arm (run the detector), and a `sleep(LockTimeout)`
+arm. NEVER hold the partition Mutex across the await. The waker (ProcWakeup, called by
+the releaser under the partition lock) sets wait-state THEN `latch.set()` - sticky, so
+a set racing the sleeper's arm is not lost.
+
+**EVERY wait must clean up on give-up - one idempotent partition-locked primitive +
+an RAII guard.** A waiter can leave the queue four ways: granted (OK), lock-timeout,
+hard-deadlock, or FUTURE-DROP (query cancel / select! loser / task abort). All the
+non-OK exits must run the SAME cleanup under the awaited lock's partition Mutex:
+unlink from the wait queue, undo the request counts (n_requested/requested[mode]),
+clear the wait-mask bit, delete the orphan PROCLOCK, GC the LOCK, and ProcLockWakeup
+the now-grantable trailing waiters (PG's RemoveFromWaitQueue + CleanUpLock). Make it
+IDEMPOTENT (no-op if the proc is no longer WAITING) so the deadlock path (which cleans
+under all-partitions) and the wait-site guard don't double-undo. Wrap the
+`ProcSleep().await` in an RAII guard that runs this on Drop unless disarmed on OK -
+this is the cancellation-safety requirement of s5 applied to the lock wait. The
+timeout/deadlock select arms must NOT mutate the shared queue lock-free; they signal
+the outcome and let the partition-locked guard do the cleanup.
+
+**Sharded hash tables = `Vec<Mutex<Shard>>`; the shard Mutex IS the partition lock.**
+LOCK/PROCLOCK live in NUM_LOCK_PARTITIONS shards (partition = tag hash % N). The shard
+Mutex replaces the C partition LWLock - never held across `.await`. Box the entries so
+a waiter/holder's raw `*mut LOCK`/`*mut PROCLOCK` stays valid while resident; a LOCK is
+GC'd only at n_requested==0, and a queued waiter keeps n_requested>=1, so the pointer a
+sleeper holds stays live (don't free an entry anyone still references). The per-task
+LOCALLOCK table + fast-path counts are `task_local` (Send: its raw pointers are only
+dereferenced under the shard Mutex by the owning task).
+
+**Whole-subsystem critical sections that take ALL partitions (deadlock check) are SYNC
+and acquire in a fixed index order, release in reverse** (no `.await` while any is
+held; no inter-partition deadlock). The deadlock detector reads the lock graph through
+the raw pointers safely precisely because it holds every partition. Per-task deadlock
+timers mean two cycle members can both abort (vs PG's single signal-driven victim) -
+a fairness/throughput difference, not a soundness bug; record it.
+
+### Carried-forward TODOs (F2 lock-mgr deferred)
+- A timer-detected hard deadlock surfaces as `LockAcquireResult::NotAvail`, not the
+  "deadlock detected" ERROR (cycle IS detected+broken; only the report is missing) -
+  route through `dead_lock_report()` when the panic->Result error model lands.
+- `LockRelationOid`/`LockRelation` call `AcceptInvalidationMessages` (sinval, step 16)
+  and `IsSharedRelation` (catalog) - translated but PANIC until those land.
+- lock groups single-member until F4 (LockCheckConflicts group-subtraction is a no-op);
+  2PC `lock_twophase_*`, `pg_locks` (`GetLockStatusData`), resowner->lock accounting
+  (a per-task current_owner marker today), autovac SIGINT cancel (step 17).
+- the step-14 group-batching ops (clog `TransactionGroupUpdateXidStatus`, procarray
+  `ProcArrayGroupClearXid`) are now UNBLOCKED (the PGPROC group fields exist) - still
+  `TODO(perf)`, implement when contention warrants.
