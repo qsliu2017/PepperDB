@@ -113,8 +113,14 @@ files (a struct with operations: `Latch`, `ConditionVariable`, `WaitEventSet`,
 
 For NON-type-centric files (global-state functions with no natural `self`, e.g.
 `elog.c`, `interrupt.c`): keep the function form - define `pub fn` in the backend
-module and rewire the header stub to `pub use crate::backend::<p>::<name>;` (no
-deprecated shim).
+module with a **snake_case** name and rewire the header stub to
+`pub use crate::backend::<p>::<snake> as <CName>;` so the C-named public API still
+resolves. Put the C symbol in the doc comment (`/// PG `AcceptInvalidationMessages``).
+Do NOT keep the C PascalCase name on the definition under
+`#[allow(non_snake_case, reason = "mirrors the C symbol name")]` - that per-fn allow
+is redundant (the crate has a global `#![allow(non_snake_case)]`) and the user
+rejected it: snake_case the definition, keep the C name in the doc comment + the
+header alias (grep-ability preserved both ways).
 
 Deprecated shims must NOT be called internally (call the method/real fn instead),
 so no deprecation warnings appear in `cargo check`.
@@ -651,3 +657,59 @@ Working with it:
   the sync-outer / `impl Future + Send` pattern) and an unaligned-read UB in
   `RestoreSnapshot`. Treat `future_not_send` / `cast_ptr_alignment` / the await-holding
   denies as bug signals, not style nags.
+
+---
+
+## 16. Lessons from F2 (shared-invalidation transport: sinvaladt/sinval/inval - step 16)
+
+**Follow PG's lock granularity faithfully (the binding decision), even at the cost of
+justified `unsafe`.** The SI ring (`SISeg`) keeps PG's two-lock + spinlock scheme:
+`SInvalWriteLock` -> `Mutex<SIWriteState>` (writers + register + cleanup), `SInvalReadLock`
+-> `RwLock<()>` (readers `.read()` mutate only their OWN ProcState; cleanup `.write()`
+does the array-wide pass), and the `maxMsgNum` spinlock -> `AtomicI32` (the spinlock only
+ever provided a memory barrier; Acquire/Release gives exactly that). The ring buffer is
+`Box<[UnsafeCell<Msg>]>`: a writer fills cell `max % N` under `write` THEN Release-stores
+`max_msg_num`; readers Acquire-load `max_msg_num` then read only cells `< max`, so the
+pair orders the cell store before the index publish - the SLRU/PGPROC `unsafe impl Sync`
+justification (arena never moves; cleanup forces a laggard to reset before the buffer can
+wrap a still-needed slot). Per-backend ProcState fields are atomics so two readers under
+the shared lock mutate distinct entries soundly. Do NOT collapse this to one Mutex.
+
+**Reuse ProcSignal for the catchup interrupt; send AFTER dropping the lock.** PG's
+`SICleanupQueue` signals a laggard via `SendProcSignal(PROCSIG_CATCHUP_INTERRUPT)`; map it
+to the existing per-task ProcSignal `CatchupInterrupt` reason bit (s6.1: a per-task flag a
+foreign task sets). PG drops both SI locks before the (possibly slow) send, so the cleanup
+returns the target `Option<ProcNumber>` and the caller sends only after the `write` guard
+is dropped (never hold the lock across the send). Added `ProcSignal::send_by_proc_number`
+(PG's `SendProcSignal` targets `psh_slot[procNumber]` by index).
+
+**inval.c's per-backend file-statics -> one `task_local! RefCell<InvalState>`.** The two
+dense message arrays + the parent-linked `TransInvalidationInfo` stack (modeled as an owned
+`Vec`, "parent" = element below) + the callback lists all live in one per-task RefCell. The
+`InvalidationMsgsGroup{firstmsg[2],nextmsg[2]}` index-range bookkeeping is the subtle part -
+keep it bit-exact (AddInvalidationMessage appends at `nextmsg`; AppendInvalidationMessageSub
+Group asserts `dest.nextmsg==src.firstmsg`; dedup scans the right subgroup). NEVER hold the
+RefCell borrow across a callback / `SendSharedInvalidMessages` / `LocalExecuteInvalidationMessage`
+(borrow, copy/decide, drop, then call). `ReceiveSharedInvalidMessages`'s recursion-safe
+file-static buffer also becomes a per-task RefCell (recursion is within one task).
+
+**Naming: snake_case the backend def, not `#[allow(non_snake_case)]`.** See s3 - a per-fn
+`#[allow(non_snake_case, reason = "mirrors the C symbol name")]` is redundant (global allow)
+and rejected. Name backend fns snake_case, keep the C symbol in the doc comment + a header
+`pub use <snake> as <CName>` alias.
+
+**Staging.** The cache layer (catcache/relcache/syscache/relmapper) is unimplemented;
+inval's `LocalExecuteInvalidationMessage`/`CacheInvalidate*` arms call those stubs and only
+panic when REAL catalog DDL queues a message (full-file rule s4). `AcceptInvalidationMessages`
+on an EMPTY queue is a true no-op, which is what UNBLOCKS the lock manager's relation-lock
+wrappers (they no longer panic on the AcceptInvalidationMessages stub).
+
+### Carried-forward TODOs (step 16 deferred)
+- The catchup RECEIVE path (`ProcessCatchupInterrupt` / `HandleCatchupInterrupt`) is
+  translated but not wired into a main loop (no `ProcessClientReadInterrupt` yet) - dead
+  code until step 17+.
+- `LocalExecuteInvalidationMessage` smgr arm calls a `smgrreleaserellocator` TODO stub (the
+  fn does not exist yet); `LogLogicalInvalidations` leaves the final async `XLogInsert` as a
+  `TODO(wal-logical)` (reached only under wal_level=logical); `ProcessCommittedInvalidation
+  Messages` DatabasePath-during-recovery is a `TODO(recovery)`.
+- All cache-callback dispatch lands on catcache/relcache/relmapper stubs until those land.
