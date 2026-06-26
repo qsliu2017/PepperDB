@@ -38,7 +38,7 @@ pub fn PageIsPredicateLocked(_relation: Relation, _blkno: BlockNumber) -> bool {
 }
 
 // predicate lock maintenance
-pub fn GetSerializableTransactionSnapshot(_snapshot: Snapshot) -> Snapshot<'static> {
+pub fn GetSerializableTransactionSnapshot(_snapshot: Snapshot) -> Snapshot {
     unimplemented!() // TODO(lock-manager)
 }
 pub fn SetSerializableTransactionSnapshot(

@@ -57,6 +57,6 @@ pub fn toast_open_indexes(_toastrel: Relation, _lock: LockMode) -> Vec<Relation>
 pub fn toast_close_indexes(_toastidxs: &[Relation], _lock: LockMode) {
     unimplemented!()
 }
-pub fn get_toast_snapshot() -> Snapshot<'static> {
+pub fn get_toast_snapshot() -> Snapshot {
     unimplemented!()
 }

@@ -95,7 +95,13 @@ pub fn anytimestamp_typmod_check(istz: bool, typmod: i32) -> i32 {
     unimplemented!()
 }
 pub fn GetCurrentTimestamp() -> TimestampTz {
-    unimplemented!()
+    // PG `GetCurrentTimestamp`: microseconds since the PostgreSQL epoch
+    // (2000-01-01 UTC). Computed from the system clock.
+    const PG_EPOCH_UNIX_SECS: i64 = 946_684_800; // 2000-01-01 - 1970-01-01
+    let dur = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    (dur.as_micros() as i64) - PG_EPOCH_UNIX_SECS * crate::datatype::timestamp::USECS_PER_SEC
 }
 pub fn GetSQLCurrentTimestamp(typmod: i32) -> TimestampTz {
     unimplemented!()

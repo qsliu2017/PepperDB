@@ -21,25 +21,30 @@ pub const XACT_READ_COMMITTED: i32 = 1;
 pub const XACT_REPEATABLE_READ: i32 = 2;
 pub const XACT_SERIALIZABLE: i32 = 3;
 
-// GUC / session globals. TODO(global-state): move to a threaded Session.
+// GUC defaults still carried as process-wide settings (read at StartTransaction).
+// TODO(guc): source these from the GUC machinery.
 pub static mut DefaultXactIsoLevel: i32 = 0;
-pub static mut XactIsoLevel: i32 = 0;
 pub static mut DefaultXactReadOnly: bool = false;
-pub static mut XactReadOnly: bool = false;
-pub static mut xact_is_sampled: bool = false;
 pub static mut DefaultXactDeferrable: bool = false;
-pub static mut XactDeferrable: bool = false;
 pub static mut synchronous_commit: i32 = 0;
 pub static mut CheckXidAlive: TransactionId = TransactionId(0);
 pub static mut bsysscan: bool = false;
-pub static mut MyXactFlags: i32 = 0;
+
+// The per-xact characteristics (`XactIsoLevel`/`XactReadOnly`/`XactDeferrable`)
+// and `MyXactFlags` were process globals; they are now per-task state owned by
+// the backend xact module. Read/write them through these accessors (step 14d).
+pub use crate::backend::access::transam::xact::{
+    my_xact_flags as MyXactFlags, set_my_xact_flags, set_xact_deferrable, set_xact_iso_level,
+    set_xact_read_only, xact_deferrable as XactDeferrable, xact_iso_level as XactIsoLevel,
+    xact_read_only as XactReadOnly,
+};
 
 /// XactIsoLevel >= REPEATABLE_READ uses one snapshot per transaction.
 pub fn IsolationUsesXactSnapshot() -> bool {
-    unsafe { XactIsoLevel >= XACT_REPEATABLE_READ }
+    XactIsoLevel() >= XACT_REPEATABLE_READ
 }
 pub fn IsolationIsSerializable() -> bool {
-    unsafe { XactIsoLevel == XACT_SERIALIZABLE }
+    XactIsoLevel() == XACT_SERIALIZABLE
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,232 +305,45 @@ pub struct xl_xact_parsed_abort {
     pub origin_timestamp: TimestampTz,
 }
 
-pub fn IsTransactionState() -> bool {
-    unimplemented!()
-}
-pub fn IsAbortedTransactionBlockState() -> bool {
-    unimplemented!()
-}
-pub fn GetTopTransactionId() -> TransactionId {
-    unimplemented!()
-}
-/// None if no top transaction id assigned yet.
-pub fn GetTopTransactionIdIfAny() -> Option<TransactionId> {
-    unimplemented!()
-}
-pub fn GetCurrentTransactionId() -> TransactionId {
-    unimplemented!()
-}
-pub fn GetCurrentTransactionIdIfAny() -> Option<TransactionId> {
-    unimplemented!()
-}
-pub fn GetStableLatestTransactionId() -> TransactionId {
-    unimplemented!()
-}
-pub fn GetCurrentSubTransactionId() -> SubTransactionId {
-    unimplemented!()
-}
-pub fn GetTopFullTransactionId() -> FullTransactionId {
-    unimplemented!()
-}
-pub fn GetTopFullTransactionIdIfAny() -> Option<FullTransactionId> {
-    unimplemented!()
-}
-pub fn GetCurrentFullTransactionId() -> FullTransactionId {
-    unimplemented!()
-}
-pub fn GetCurrentFullTransactionIdIfAny() -> Option<FullTransactionId> {
-    unimplemented!()
-}
-pub fn MarkCurrentTransactionIdLoggedIfAny() {
-    unimplemented!()
-}
-pub fn SubTransactionIsActive(_subxid: SubTransactionId) -> bool {
-    unimplemented!()
-}
-pub fn GetCurrentCommandId(_used: bool) -> CommandId {
-    unimplemented!()
-}
-pub fn SetParallelStartTimestamps(_xact_ts: TimestampTz, _stmt_ts: TimestampTz) {
-    unimplemented!()
-}
-pub fn GetCurrentTransactionStartTimestamp() -> TimestampTz {
-    unimplemented!()
-}
-pub fn GetCurrentStatementStartTimestamp() -> TimestampTz {
-    unimplemented!()
-}
-pub fn GetCurrentTransactionStopTimestamp() -> TimestampTz {
-    unimplemented!()
-}
-pub fn SetCurrentStatementStartTimestamp() {
-    unimplemented!()
-}
-pub fn GetCurrentTransactionNestLevel() -> i32 {
-    unimplemented!()
-}
-pub fn TransactionIdIsCurrentTransactionId(_xid: TransactionId) -> bool {
-    unimplemented!()
-}
-pub fn CommandCounterIncrement() {
-    unimplemented!()
-}
-pub fn ForceSyncCommit() {
-    unimplemented!()
-}
-pub fn StartTransactionCommand() {
-    unimplemented!()
-}
-pub fn SaveTransactionCharacteristics(_s: &mut SavedTransactionCharacteristics) {
-    unimplemented!()
-}
-pub fn RestoreTransactionCharacteristics(_s: &SavedTransactionCharacteristics) {
-    unimplemented!()
-}
-pub fn CommitTransactionCommand() {
-    unimplemented!()
-}
-pub fn AbortCurrentTransaction() {
-    unimplemented!()
-}
-pub fn BeginTransactionBlock() {
-    unimplemented!()
-}
-pub fn EndTransactionBlock(_chain: bool) -> bool {
-    unimplemented!()
-}
-pub fn PrepareTransactionBlock(_gid: &str) -> bool {
-    unimplemented!()
-}
-pub fn UserAbortTransactionBlock(_chain: bool) {
-    unimplemented!()
-}
-pub fn BeginImplicitTransactionBlock() {
-    unimplemented!()
-}
-pub fn EndImplicitTransactionBlock() {
-    unimplemented!()
-}
-pub fn ReleaseSavepoint(_name: &str) {
-    unimplemented!()
-}
-pub fn DefineSavepoint(_name: &str) {
-    unimplemented!()
-}
-pub fn RollbackToSavepoint(_name: &str) {
-    unimplemented!()
-}
-pub fn BeginInternalSubTransaction(_name: &str) {
-    unimplemented!()
-}
-pub fn ReleaseCurrentSubTransaction() {
-    unimplemented!()
-}
-pub fn RollbackAndReleaseCurrentSubTransaction() {
-    unimplemented!()
-}
-pub fn IsSubTransaction() -> bool {
-    unimplemented!()
-}
-pub fn EstimateTransactionStateSpace() -> usize {
-    unimplemented!()
-}
-pub fn SerializeTransactionState(_maxsize: usize, _start_address: &mut [u8]) {
-    unimplemented!()
-}
-pub fn StartParallelWorkerTransaction(_tstatespace: &[u8]) {
-    unimplemented!()
-}
-pub fn EndParallelWorkerTransaction() {
-    unimplemented!()
-}
-pub fn IsTransactionBlock() -> bool {
-    unimplemented!()
-}
-pub fn IsTransactionOrTransactionBlock() -> bool {
-    unimplemented!()
-}
-pub fn TransactionBlockStatusCode() -> i8 {
-    unimplemented!()
-}
-pub fn AbortOutOfAnyTransaction() {
-    unimplemented!()
-}
-pub fn PreventInTransactionBlock(_isTopLevel: bool, _stmtType: &str) {
-    unimplemented!()
-}
-pub fn RequireTransactionBlock(_isTopLevel: bool, _stmtType: &str) {
-    unimplemented!()
-}
-pub fn WarnNoTransactionBlock(_isTopLevel: bool, _stmtType: &str) {
-    unimplemented!()
-}
-pub fn IsInTransactionBlock(_isTopLevel: bool) -> bool {
-    unimplemented!()
-}
-pub fn RegisterXactCallback(_callback: XactCallback) {
-    unimplemented!()
-}
-pub fn UnregisterXactCallback(_callback: XactCallback) {
-    unimplemented!()
-}
-pub fn RegisterSubXactCallback(_callback: SubXactCallback) {
-    unimplemented!()
-}
-pub fn UnregisterSubXactCallback(_callback: SubXactCallback) {
-    unimplemented!()
-}
+// The transaction-state machine lives in the backend module (step 14d); the
+// header re-exports the C-named entry points (rules s2/s3). The lifecycle
+// drivers became `async` and thread `&Arc<SharedState>` (async coloring from the
+// WAL/clog/snapshot leaves); the read-only accessors stay sync. The
+// `TransState`/`TBlockState`/`TransactionStateData` types are defined in the
+// backend module (nothing outside xact imports them).
+pub use crate::backend::access::transam::xact::{
+    AbortCurrentTransaction, AbortOutOfAnyTransaction, BeginImplicitTransactionBlock,
+    BeginInternalSubTransaction, BeginTransactionBlock, CommandCounterIncrement,
+    CommitTransactionCommand, DefineSavepoint, EndImplicitTransactionBlock, EndParallelWorkerTransaction,
+    EndTransactionBlock, EnterParallelMode, EstimateTransactionStateSpace, ExitParallelMode,
+    ForceSyncCommit, GetCurrentCommandId, GetCurrentFullTransactionId,
+    GetCurrentFullTransactionIdIfAny, GetCurrentStatementStartTimestamp, GetCurrentSubTransactionId,
+    GetCurrentTransactionId, GetCurrentTransactionIdIfAny, GetCurrentTransactionNestLevel,
+    GetCurrentTransactionStartTimestamp, GetCurrentTransactionStopTimestamp,
+    GetStableLatestTransactionId, GetTopFullTransactionId, GetTopFullTransactionIdIfAny,
+    GetTopTransactionId, GetTopTransactionIdIfAny, IsAbortedTransactionBlockState,
+    IsInParallelMode, IsInTransactionBlock, IsSubTransaction, IsSubxactTopXidLogPending,
+    IsTransactionBlock, IsTransactionOrTransactionBlock, IsTransactionState,
+    MarkCurrentTransactionIdLoggedIfAny, MarkSubxactTopXidLogged, PrepareTransactionBlock,
+    PreventInTransactionBlock, RegisterSubXactCallback, RegisterXactCallback,
+    ReleaseCurrentSubTransaction, ReleaseSavepoint, RequireTransactionBlock,
+    RestoreTransactionCharacteristics, RollbackAndReleaseCurrentSubTransaction, RollbackToSavepoint,
+    SaveTransactionCharacteristics, SerializeTransactionState, SetCurrentStatementStartTimestamp,
+    SetParallelStartTimestamps, StartParallelWorkerTransaction, StartTransactionCommand,
+    SubTransactionIsActive, TransactionBlockStatusCode, TransactionIdIsCurrentTransactionId,
+    TransactionStartedDuringRecovery, UnregisterSubXactCallback, UnregisterXactCallback,
+    UserAbortTransactionBlock, WarnNoTransactionBlock, XactLogAbortRecord, XactLogCommitRecord,
+    xactGetCommittedChildren, xact_redo,
+};
 
-pub fn IsSubxactTopXidLogPending() -> bool {
-    unimplemented!()
-}
-pub fn MarkSubxactTopXidLogged() {
-    unimplemented!()
-}
-
-/// Returns the committed children XIDs (out-param + count folded into return).
-pub fn xactGetCommittedChildren() -> Vec<TransactionId> {
-    unimplemented!()
-}
-
-pub fn XactLogCommitRecord(
-    _commit_time: TimestampTz,
-    _subxacts: &[TransactionId],
-    _rels: &[RelFileLocator],
-    _droppedstats: &[xl_xact_stats_item],
-    _msgs: &[SharedInvalidationMessage],
-    _relcacheInval: bool,
-    _xactflags: i32,
-    _twophase_xid: TransactionId,
-    _twophase_gid: &str,
-) -> XLogRecPtr {
-    unimplemented!()
-}
-
-pub fn XactLogAbortRecord(
-    _abort_time: TimestampTz,
-    _subxacts: &[TransactionId],
-    _rels: &[RelFileLocator],
-    _droppedstats: &[xl_xact_stats_item],
-    _xactflags: i32,
-    _twophase_xid: TransactionId,
-    _twophase_gid: &str,
-) -> XLogRecPtr {
-    unimplemented!()
-}
-pub fn xact_redo(_record: &mut XLogReaderState) {
-    unimplemented!()
-}
-
-// xactdesc.c
+// xactdesc.c (shared front/backend record description + parsing) is a separate
+// .c file, not part of xact.c -- it stays stubbed until that file is translated.
 pub fn xact_desc(_buf: &mut StringInfo, _record: &mut XLogReaderState) {
     unimplemented!()
 }
 pub fn xact_identify(_info: u8) -> Option<&'static str> {
     unimplemented!()
 }
-
-// also in xactdesc.c (shared front/backend). Parse fills the parsed struct.
 pub fn ParseCommitRecord(_info: u8, _xlrec: &xl_xact_commit) -> xl_xact_parsed_commit {
     unimplemented!()
 }
@@ -533,15 +351,5 @@ pub fn ParseAbortRecord(_info: u8, _xlrec: &xl_xact_abort) -> xl_xact_parsed_abo
     unimplemented!()
 }
 pub fn ParsePrepareRecord(_info: u8, _xlrec: &xl_xact_prepare) -> xl_xact_parsed_prepare {
-    unimplemented!()
-}
-
-pub fn EnterParallelMode() {
-    unimplemented!()
-}
-pub fn ExitParallelMode() {
-    unimplemented!()
-}
-pub fn IsInParallelMode() -> bool {
     unimplemented!()
 }

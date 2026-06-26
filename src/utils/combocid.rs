@@ -1,19 +1,9 @@
 //! Translated from PostgreSQL src/include/utils/combocid.h
+//!
+//! Bodies live in `crate::backend::utils::time::combocid`; this header re-exports
+//! them (snake_case global-state file -> `pub use`, rules s2/s3).
 
-pub fn at_eo_xact_combo_cid() {
-    unimplemented!()
-}
-
-pub fn restore_combo_cid_state(combo_cid_state: &[u8]) {
-    let _ = combo_cid_state;
-    unimplemented!()
-}
-
-pub fn serialize_combo_cid_state(maxsize: usize, start_address: &mut [u8]) {
-    let _ = (maxsize, start_address);
-    unimplemented!()
-}
-
-pub fn estimate_combo_cid_state_space() -> usize {
-    unimplemented!()
-}
+pub use crate::backend::utils::time::combocid::{
+    at_eo_xact_combo_cid, estimate_combo_cid_state_space, restore_combo_cid_state,
+    serialize_combo_cid_state,
+};

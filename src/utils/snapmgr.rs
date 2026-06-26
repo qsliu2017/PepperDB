@@ -1,24 +1,76 @@
 //! Translated from PostgreSQL src/include/utils/snapmgr.h
 //! POSTGRES snapshot manager. In-memory API.
+//!
+//! The header declares; the backend module
+//! (`backend::utils::time::snapmgr`) defines (rules s2). Most entry points grew
+//! a leading `shared: &Arc<SharedState>` (they need the ProcArray /
+//! VariableCache to build snapshots, and the FdManager for exported-snapshot
+//! files); the file-touching and subtrans-probing paths became `async`. The
+//! re-exports below carry those NEW shapes, mirroring how `storage::procarray`
+//! re-exports the procarray entry points.
+//!
+//! `FirstSnapshotSet` / `TransactionXmin` / `RecentXmin` are no longer process
+//! globals: `FirstSnapshotSet` is the per-task `first_snapshot_set()` accessor
+//! (re-exported here); `TransactionXmin`/`RecentXmin` live in
+//! `storage::procarray` as per-task cells (`transaction_xmin()`/`recent_xmin()`).
 #![allow(deprecated)] // GlobalVisState is a Phase-2 forward-decl in utils::snapshot
 
 use crate::access::transam::FullTransactionId;
-use crate::c::{CommandId, TransactionId};
-use crate::postgres_ext::Oid;
 use crate::utils::relcache::Relation;
-use crate::utils::resowner::ResourceOwner;
-use crate::utils::snapshot::{GlobalVisState, Snapshot, SnapshotData, SnapshotType};
-use std::collections::HashMap;
+use crate::utils::snapshot::{GlobalVisState, SnapshotData, SnapshotType};
 
-// Process globals (TODO(global): move to Session/task state).
-pub static mut FirstSnapshotSet: bool = false;
-pub static mut TransactionXmin: TransactionId = TransactionId(0);
-pub static mut RecentXmin: TransactionId = TransactionId(0);
+// Snapshot-manager entry points (PascalCase preserved; new `shared`-taking and
+// async shapes). Callers thread `shared` and `.await` the async ones.
+pub use crate::backend::utils::time::snapmgr::{
+    first_snapshot_set, ActiveSnapshotSet, AtEOXact_Snapshot, AtSubAbort_Snapshot,
+    AtSubCommit_Snapshot, DeleteAllExportedSnapshotFiles, EstimateSnapshotSpace, ExportSnapshot,
+    GetActiveSnapshot, GetCatalogSnapshot, GetLatestSnapshot, GetNonHistoricCatalogSnapshot,
+    GetTransactionSnapshot, GlobalVisTestFor, GlobalVisTestIsRemovableFullXid,
+    GlobalVisTestIsRemovableXid, HaveRegisteredOrActiveSnapshot, HistoricSnapshotActive,
+    HistoricSnapshotGetTupleCids, ImportSnapshot, InvalidateCatalogSnapshot,
+    InvalidateCatalogSnapshotConditionally, PopActiveSnapshot, PushActiveSnapshot,
+    PushActiveSnapshotWithLevel, PushCopiedSnapshot, RegisterSnapshot, RegisterSnapshotOnOwner,
+    RestoreSnapshot, RestoreTransactionSnapshot, SerializeSnapshot, SetupHistoricSnapshot,
+    SnapshotSetCommandId, TeardownHistoricSnapshot, ThereAreNoPriorRegisteredSnapshots,
+    UnregisterSnapshot, UnregisterSnapshotFromOwner, UpdateActiveSnapshotCommandId,
+    WaitForOlderSnapshots, XactHasExportedSnapshots, XidInMVCCSnapshot,
+};
 
-// Special snapshot semantics. C exposes static SnapshotData; kept as globals.
-pub static mut SnapshotSelfData: Option<SnapshotData> = None;
-pub static mut SnapshotAnyData: Option<SnapshotData> = None;
-pub static mut SnapshotToastData: Option<SnapshotData> = None;
+// Special-snapshot semantics. C exposes `static SnapshotData` globals; under the
+// async/per-task model they are constructed on demand. `get_self_snapshot()` /
+// `get_any_snapshot()` build a fresh one (cheap, no XID arrays). Kept as
+// constructors rather than mutable statics (rules s6.1).
+/// C `SnapshotSelf` (`&SnapshotSelfData`).
+pub fn get_self_snapshot() -> SnapshotData {
+    special_snapshot(SnapshotType::Self_)
+}
+/// C `SnapshotAny` (`&SnapshotAnyData`).
+pub fn get_any_snapshot() -> SnapshotData {
+    special_snapshot(SnapshotType::Any)
+}
+/// C `SnapshotToastData`. (Use `get_toast_snapshot()` per the header note.)
+pub fn get_toast_snapshot() -> SnapshotData {
+    special_snapshot(SnapshotType::Toast)
+}
+
+fn special_snapshot(t: SnapshotType) -> SnapshotData {
+    SnapshotData {
+        snapshot_type: t,
+        xmin: crate::access::transam::INVALID_TRANSACTION_ID,
+        xmax: crate::access::transam::INVALID_TRANSACTION_ID,
+        xip: Vec::new(),
+        subxip: Vec::new(),
+        suboverflowed: false,
+        taken_during_recovery: false,
+        copied: false,
+        curcid: crate::c::CommandId(0),
+        speculative_token: 0,
+        vistest: None,
+        active_count: 0,
+        regd_count: 0,
+        snap_xact_completion_count: 0,
+    }
+}
 
 /// C: `InitDirtySnapshot(snapshotdata)`.
 pub fn InitDirtySnapshot(snapshotdata: &mut SnapshotData) {
@@ -26,7 +78,6 @@ pub fn InitDirtySnapshot(snapshotdata: &mut SnapshotData) {
 }
 
 /// C: `InitNonVacuumableSnapshot(snapshotdata, vistestp)`.
-#[allow(deprecated)]
 pub fn InitNonVacuumableSnapshot(
     snapshotdata: &mut SnapshotData,
     vistest: Option<Box<GlobalVisState>>,
@@ -43,146 +94,16 @@ pub fn IsMVCCSnapshot(snapshot: &SnapshotData) -> bool {
     )
 }
 
-pub fn GetTransactionSnapshot() -> Snapshot<'static> {
-    unimplemented!()
-}
-pub fn GetLatestSnapshot() -> Snapshot<'static> {
-    unimplemented!()
-}
-pub fn SnapshotSetCommandId(_curcid: CommandId) {
-    unimplemented!()
+/// procarray.c/snapmgr.c `GlobalVisCheckRemovableXid`. Staging stub: the
+/// `BTPageIsRecyclable` caller (nbtree static-inline) has no `SharedState`
+/// handle yet (step 15 threads it through the AM call path). The real
+/// implementation is `backend::utils::time::snapmgr::GlobalVisCheckRemovableXid`.
+pub fn GlobalVisCheckRemovableXid(_rel: Relation, _xid: crate::c::TransactionId) -> bool {
+    unimplemented!() // TODO(step15): thread SharedState through the AM call path
 }
 
-pub fn GetCatalogSnapshot(_relid: Oid) -> Snapshot<'static> {
-    unimplemented!()
-}
-pub fn GetNonHistoricCatalogSnapshot(_relid: Oid) -> Snapshot<'static> {
-    unimplemented!()
-}
-pub fn InvalidateCatalogSnapshot() {
-    unimplemented!()
-}
-pub fn InvalidateCatalogSnapshotConditionally() {
-    unimplemented!()
-}
-
-pub fn PushActiveSnapshot(_snapshot: Snapshot) {
-    unimplemented!()
-}
-pub fn PushActiveSnapshotWithLevel(_snapshot: Snapshot, _snap_level: i32) {
-    unimplemented!()
-}
-pub fn PushCopiedSnapshot(_snapshot: Snapshot) {
-    unimplemented!()
-}
-pub fn UpdateActiveSnapshotCommandId() {
-    unimplemented!()
-}
-pub fn PopActiveSnapshot() {
-    unimplemented!()
-}
-pub fn GetActiveSnapshot() -> Snapshot<'static> {
-    unimplemented!()
-}
-pub fn ActiveSnapshotSet() -> bool {
-    unimplemented!()
-}
-
-pub fn RegisterSnapshot(_snapshot: Snapshot) -> Snapshot<'static> {
-    unimplemented!()
-}
-pub fn UnregisterSnapshot(_snapshot: Snapshot) {
-    unimplemented!()
-}
-pub fn RegisterSnapshotOnOwner(_snapshot: Snapshot, _owner: ResourceOwner) -> Snapshot<'static> {
-    unimplemented!()
-}
-pub fn UnregisterSnapshotFromOwner(_snapshot: Snapshot, _owner: ResourceOwner) {
-    unimplemented!()
-}
-
-pub fn AtSubCommit_Snapshot(_level: i32) {
-    unimplemented!()
-}
-pub fn AtSubAbort_Snapshot(_level: i32) {
-    unimplemented!()
-}
-pub fn AtEOXact_Snapshot(_is_commit: bool, _reset_xmin: bool) {
-    unimplemented!()
-}
-
-pub fn ImportSnapshot(_idstr: &str) {
-    unimplemented!()
-}
-pub fn XactHasExportedSnapshots() -> bool {
-    unimplemented!()
-}
-pub fn DeleteAllExportedSnapshotFiles() {
-    unimplemented!()
-}
-pub fn WaitForOlderSnapshots(_limit_xmin: TransactionId, _progress: bool) {
-    unimplemented!()
-}
-pub fn ThereAreNoPriorRegisteredSnapshots() -> bool {
-    unimplemented!()
-}
-pub fn HaveRegisteredOrActiveSnapshot() -> bool {
-    unimplemented!()
-}
-
-pub fn ExportSnapshot(_snapshot: Snapshot) -> String {
-    unimplemented!()
-}
-
-// These live in procarray.c but thematically belong here.
-pub fn GlobalVisTestFor(_rel: Relation) -> *mut GlobalVisState {
-    unimplemented!() // TODO(ptr)
-}
-pub fn GlobalVisTestIsRemovableXid(_state: &mut GlobalVisState, _xid: TransactionId) -> bool {
-    unimplemented!()
-}
-pub fn GlobalVisTestIsRemovableFullXid(
-    _state: &mut GlobalVisState,
-    _fxid: FullTransactionId,
-) -> bool {
-    unimplemented!()
-}
-pub fn GlobalVisCheckRemovableXid(_rel: Relation, _xid: TransactionId) -> bool {
-    unimplemented!()
-}
+/// procarray.c/snapmgr.c `GlobalVisCheckRemovableFullXid`. Staging stub (see
+/// `GlobalVisCheckRemovableXid`).
 pub fn GlobalVisCheckRemovableFullXid(_rel: Relation, _fxid: FullTransactionId) -> bool {
-    unimplemented!()
-}
-
-pub fn XidInMVCCSnapshot(_xid: TransactionId, _snapshot: Snapshot) -> bool {
-    unimplemented!()
-}
-
-// Catalog timetravel for logical decoding. C `struct HTAB *` -> HashMap.
-// The tuplecids map keys/values are opaque here; modelled as a raw HashMap.
-pub fn HistoricSnapshotGetTupleCids() -> Option<*mut HashMap<u64, u64>> {
-    unimplemented!() // TODO(ptr): real CID map element types
-}
-pub fn SetupHistoricSnapshot(_historic_snapshot: Snapshot, _tuplecids: *mut HashMap<u64, u64>) {
-    unimplemented!()
-}
-pub fn TeardownHistoricSnapshot(_is_error: bool) {
-    unimplemented!()
-}
-pub fn HistoricSnapshotActive() -> bool {
-    unimplemented!()
-}
-
-pub fn EstimateSnapshotSpace(_snapshot: Snapshot) -> usize {
-    unimplemented!()
-}
-pub fn SerializeSnapshot(_snapshot: Snapshot, _start_address: &mut [u8]) {
-    unimplemented!()
-}
-pub fn RestoreSnapshot(_start_address: &[u8]) -> Snapshot<'static> {
-    unimplemented!()
-}
-/// `void *source_pgproc` -> opaque PGPROC pointer. TODO(ptr).
-pub fn RestoreTransactionSnapshot(_snapshot: Snapshot, _source_pgproc: *mut core::ffi::c_void) {
-    unimplemented!()
+    unimplemented!() // TODO(step15): thread SharedState through the AM call path
 }

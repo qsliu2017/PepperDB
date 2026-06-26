@@ -196,7 +196,9 @@ pub fn issue_xlog_fsync(_fd: i32, _segno: XLogSegNo, _tli: TimeLineID) {
     unimplemented!()
 }
 pub fn recovery_in_progress() -> bool {
-    unimplemented!()
+    // Foundation default: there is no recovery/standby yet (out of foundation),
+    // so a backend never starts in recovery. TODO(recovery): real RecoveryInProgress.
+    false
 }
 pub fn get_recovery_state() -> RecoveryState {
     unimplemented!()

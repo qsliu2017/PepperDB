@@ -188,105 +188,44 @@ pub struct TransamVariablesData {
     pub oldest_clog_xid: TransactionId,
 }
 
-// in transam/varsup.c -- global pointer to the shared state.
-// TODO(global): replace process-global with threaded session/global state.
-pub static mut TransamVariables: *mut TransamVariablesData = std::ptr::null_mut();
+// ---- definitions live in transam/{transam,varsup}.c; re-exported here ----
+//
+// The header declares; the backend modules define (rules s2). The xid
+// commit-status helpers and the xid generators became async + threaded through
+// `&Arc<SharedState>` (async coloring from the SLRU leaf, design s4); the
+// signatures here re-export those NEW shapes. The pure-arithmetic comparators
+// stay sync.
 
-// ---- extern declarations (stubbed) ----
+// transam/transam.c -- the modulo-2^32 xid comparators (sync).
+pub use crate::backend::access::transam::transam::{
+    transaction_id_follows as TransactionIdFollows,
+    transaction_id_follows_or_equals as TransactionIdFollowsOrEquals,
+    transaction_id_latest as TransactionIdLatest,
+    transaction_id_precedes as TransactionIdPrecedes,
+    transaction_id_precedes_or_equals as TransactionIdPrecedesOrEquals,
+};
 
-/// in transam/xact.c
+// transam/transam.c -- xid commit-status access + tree setters (async).
+pub use crate::backend::access::transam::transam::{
+    transaction_id_abort_tree as TransactionIdAbortTree,
+    transaction_id_async_commit_tree as TransactionIdAsyncCommitTree,
+    transaction_id_commit_tree as TransactionIdCommitTree,
+    transaction_id_did_abort as TransactionIdDidAbort,
+    transaction_id_did_commit as TransactionIdDidCommit,
+    transaction_id_get_commit_lsn as TransactionIdGetCommitLSN, VariableCache,
+};
+
+// transam/varsup.c -- OID/XID generation (async where it Extends clog/subtrans).
+pub use crate::backend::access::transam::varsup::{
+    varsup_shmem_size as VarsupShmemSize, AdvanceNextFullTransactionIdPastXid, AdvanceOldestClogXid,
+    ForceTransactionIdLimitUpdate, GetNewObjectId, GetNewTransactionId, ReadNextFullTransactionId,
+    SetTransactionIdLimit, StopGeneratingPinnedObjectIds,
+};
+
+/// in transam/xact.c (step 14d): is the current xact a recovery replay xact?
 pub fn TransactionStartedDuringRecovery() -> bool {
-    unimplemented!()
-}
-
-// transam/transam.c
-pub fn TransactionIdDidCommit(_transaction_id: TransactionId) -> bool {
-    unimplemented!()
-}
-
-pub fn TransactionIdDidAbort(_transaction_id: TransactionId) -> bool {
-    unimplemented!()
-}
-
-pub fn TransactionIdCommitTree(_xid: TransactionId, _xids: &[TransactionId]) {
-    unimplemented!()
-}
-
-pub fn TransactionIdAsyncCommitTree(
-    _xid: TransactionId,
-    _xids: &[TransactionId],
-    _lsn: XLogRecPtr,
-) {
-    unimplemented!()
-}
-
-pub fn TransactionIdAbortTree(_xid: TransactionId, _xids: &[TransactionId]) {
-    unimplemented!()
-}
-
-pub fn TransactionIdPrecedes(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!()
-}
-
-pub fn TransactionIdPrecedesOrEquals(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!()
-}
-
-pub fn TransactionIdFollows(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!()
-}
-
-pub fn TransactionIdFollowsOrEquals(_id1: TransactionId, _id2: TransactionId) -> bool {
-    unimplemented!()
-}
-
-pub fn TransactionIdLatest(_mainxid: TransactionId, _xids: &[TransactionId]) -> TransactionId {
-    unimplemented!()
-}
-
-pub fn TransactionIdGetCommitLSN(_xid: TransactionId) -> XLogRecPtr {
-    unimplemented!()
-}
-
-// transam/varsup.c
-pub fn VarsupShmemSize() -> usize {
-    unimplemented!()
-}
-
-pub fn VarsupShmemInit() {
-    unimplemented!()
-}
-
-pub fn GetNewTransactionId(_is_sub_xact: bool) -> FullTransactionId {
-    unimplemented!()
-}
-
-pub fn AdvanceNextFullTransactionIdPastXid(_xid: TransactionId) {
-    unimplemented!()
-}
-
-pub fn ReadNextFullTransactionId() -> FullTransactionId {
-    unimplemented!()
-}
-
-pub fn SetTransactionIdLimit(_oldest_datfrozenxid: TransactionId, _oldest_datoid: Oid) {
-    unimplemented!()
-}
-
-pub fn AdvanceOldestClogXid(_oldest_datfrozenxid: TransactionId) {
-    unimplemented!()
-}
-
-pub fn ForceTransactionIdLimitUpdate() -> bool {
-    unimplemented!()
-}
-
-pub fn GetNewObjectId() -> Oid {
-    unimplemented!()
-}
-
-pub fn StopGeneratingPinnedObjectIds() {
-    unimplemented!()
+    // No recovery driver in the foundation; backends are never replay xacts.
+    false
 }
 
 /// No-op outside assert builds; full check is a debug helper.
@@ -295,8 +234,10 @@ pub fn AssertTransactionIdInAllowableRange(_xid: TransactionId) {}
 // ---- inline functions (translated in full; FRONTEND-only guard dropped) ----
 
 /// XID part of the next transaction ID.
-pub fn ReadNextTransactionId() -> TransactionId {
-    xid_from_full_transaction_id(ReadNextFullTransactionId())
+pub fn ReadNextTransactionId(
+    shared: &std::sync::Arc<crate::shared_state::SharedState>,
+) -> TransactionId {
+    xid_from_full_transaction_id(ReadNextFullTransactionId(shared))
 }
 
 /// Return a transaction ID backed up by `amount`, handling wraparound.

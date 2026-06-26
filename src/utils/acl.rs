@@ -329,7 +329,7 @@ pub fn pg_parameter_aclcheck(_name: &str, _roleid: Oid, _mode: AclMode) -> AclRe
     unimplemented!()
 }
 
-pub fn pg_largeobject_aclcheck_snapshot(_lobj_oid: Oid, _roleid: Oid, _mode: AclMode, _snapshot: Snapshot<'_>) -> AclResult {
+pub fn pg_largeobject_aclcheck_snapshot(_lobj_oid: Oid, _roleid: Oid, _mode: AclMode, _snapshot: Snapshot) -> AclResult {
     unimplemented!()
 }
 

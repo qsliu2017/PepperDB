@@ -253,8 +253,19 @@ fn filetag_matches(tag: &FileTag, candidate: &FileTag) -> bool {
 
 /// RememberSyncRequest() -- enter/cancel a request in the shared queue (sync.c).
 pub fn RememberSyncRequest(shared: &Arc<SharedState>, ftag: &FileTag, req_type: SyncRequestType) {
-    let sr = shared.sync_requests();
-    let mut g = sr.inner.lock().unwrap();
+    shared.sync_requests().register_tag(ftag, req_type);
+}
+
+impl SyncRequests {
+    /// Enter/cancel a request directly on the queue (used by callers that hold
+    /// an `Arc<SyncRequests>` rather than the whole `SharedState`, e.g. SLRU).
+    pub fn register_tag(&self, ftag: &FileTag, req_type: SyncRequestType) {
+        let mut g = self.inner.lock().unwrap();
+        register_tag_locked(&mut g, ftag, req_type);
+    }
+}
+
+fn register_tag_locked(g: &mut SyncRequestsInner, ftag: &FileTag, req_type: SyncRequestType) {
     match req_type {
         SyncRequestType::SyncForgetRequest => {
             if let Some(e) = g.pending_ops.get_mut(&FileTagKey::of(ftag)) {

@@ -31,18 +31,9 @@ pub fn HeapTupleIsValid(tuple: Option<&HeapTupleData>) -> bool {
 }
 
 // HeapTupleHeader functions implemented in utils/time/combocid.c.
-pub fn HeapTupleHeaderGetCmin(_tup: &HeapTupleHeaderData) -> CommandId {
-    unimplemented!()
-}
-
-pub fn HeapTupleHeaderGetCmax(_tup: &HeapTupleHeaderData) -> CommandId {
-    unimplemented!()
-}
-
-/// Returns (cmax, iscombo) (C out-params).
-pub fn HeapTupleHeaderAdjustCmax(_tup: &HeapTupleHeaderData) -> (CommandId, bool) {
-    unimplemented!()
-}
+pub use crate::backend::utils::time::combocid::{
+    HeapTupleHeaderAdjustCmax, HeapTupleHeaderGetCmax, HeapTupleHeaderGetCmin,
+};
 
 // HeapTupleHeader accessor implemented in heapam.c.
 pub fn HeapTupleGetUpdateXid(_tup: &HeapTupleHeaderData) -> TransactionId {

@@ -33,6 +33,11 @@ pub struct SharedStateConfig {
     /// Shared buffer count (PG `NBuffers`). Small test-friendly default; the real
     /// size comes from the GUC at startup. TODO(guc): drive from ProcessConfig.
     pub nbuffers: usize,
+    /// Data directory (PG `DataDir`). Applied to `ProcessConfig` BEFORE the
+    /// clog/subtrans SLRUs are built so they resolve their segment dirs against
+    /// it. `None` leaves the compiled-in default (relative paths). Production
+    /// sets this from the startup `-D`/PGDATA; tests pass a tempdir.
+    pub data_dir: Option<String>,
 }
 
 impl Default for SharedStateConfig {
@@ -45,6 +50,7 @@ impl Default for SharedStateConfig {
             // Small default keeps SharedState construction cheap; production
             // sizing is a GUC concern (TODO(guc)).
             nbuffers: 1024,
+            data_dir: None,
         }
     }
 }
@@ -82,9 +88,32 @@ pub struct SharedState {
     /// descriptors, the tag->buffer map, and the clock-sweep strategy. Replaces
     /// the C shmem buffer cache; reached via [`SharedState::buffers`].
     pub buffers: Arc<crate::backend::storage::buffer::buf_init::BufferPool>,
-    // Future Arc fields (varsup, xlog, clog, bufmgr, lockmgr, procarray,
-    // sinval, checkpointer, ...) are inserted by later steps -- see new().
+
+    /// OID/XID generation state (PG `TransamVariables`; ipci.c `VarsupShmemInit`
+    /// slot). One `Mutex` over the whole struct (low contention). Reached via
+    /// [`SharedState::variable_cache`].
+    pub variable_cache: Arc<crate::backend::access::transam::transam::VariableCache>,
+
+    /// Commit-log SLRU (PG clog.c `XactCtl`; ipci.c `CLOGShmemInit` slot).
+    /// Reached via [`SharedState::clog`].
+    pub clog: Arc<crate::backend::access::transam::slru::SlruCtl>,
+
+    /// Subtransaction-parent SLRU (PG subtrans.c `SubTransCtl`; ipci.c
+    /// `SUBTRANSShmemInit` slot). Reached via [`SharedState::subtrans`].
+    pub subtrans: Arc<crate::backend::access::transam::slru::SlruCtl>,
+
+    /// Process array (PG procarray.c `ProcArrayStruct`; ipci.c
+    /// `ProcArrayShmemInit` slot). The snapshot/horizon source; `ProcArrayLock`
+    /// is its internal `RwLock`. Reached via [`SharedState::proc_array`].
+    pub proc_array: Arc<crate::backend::storage::ipc::procarray::ProcArray>,
+    // Future Arc fields (lockmgr, sinval, checkpointer, ...) are inserted by
+    // later steps -- see new().
 }
+
+/// Default `PROCARRAY_MAXPROCS` (MaxBackends + max_prepared_xacts) when the
+/// startup-computed `max_backends` is not yet set. Test-friendly; production
+/// sizing comes from the GUC. TODO(guc): drive from ProcessConfig.max_backends.
+const DEFAULT_PROCARRAY_MAXPROCS: usize = 128;
 
 impl SharedState {
     /// Build the shared state once, then `Arc::clone` it into tasks.
@@ -111,6 +140,10 @@ impl SharedState {
         // struct; constructed with compiled-in defaults, populated from GUC at
         // startup (TODO(guc)). DataDir is settable early via `config.set_data_dir`.
         let process_config = Arc::new(ProcessConfig::new());
+        // DataDir must be set before the clog/subtrans SLRUs below capture it.
+        if let Some(d) = &config.data_dir {
+            process_config.set_data_dir(d.clone());
+        }
         // Publish for the deprecated miscadmin `DataDir` shims (one per process).
         crate::backend::utils::init::globals::set_process_config(process_config.clone());
 
@@ -119,7 +152,10 @@ impl SharedState {
         //   tombstoned -- no LWLock arena, no shmem index, no DSM (Arc-shared).
 
         // Set up xlog, clog, and buffers:
-        // TODO(step14): VarsupShmemInit  here
+        // VarsupShmemInit -- step14. The OID/XID generation state; one Mutex over
+        // the ex-TransamVariables struct.
+        let variable_cache =
+            Arc::new(crate::backend::access::transam::transam::VariableCache::new());
         // XLOGShmemInit -- step13 (part A), DONE. The WAL buffer ring, insert
         // reservation, write/flush LSNs, and the flushed-LSN watch. Bound to the
         // I/O leaf and process config (both built above) for segment I/O.
@@ -129,9 +165,30 @@ impl SharedState {
         );
         //   (XLogPrefetchShmemInit -- deferred: prefetch is an aio concern)
         //   (XLogRecoveryShmemInit -- step13/recovery)
-        // TODO(step14): CLOGShmemInit  here
+        // The sync request queue (sync.c InitSync) is constructed early here so
+        // the clog/subtrans SLRUs can hold a handle to it (their physical writes
+        // enqueue fsync requests). It is logically the checkpointer-adjacent
+        // structure; the checkpointer task drains it (TODO(step17)).
+        let sync_requests = Arc::new(crate::storage::sync::SyncRequests::new());
+        // CLOGShmemInit -- step14. The commit-log SLRU over pg_xact. Holds I/O
+        // handles directly (not Arc<SharedState>) to avoid a reference cycle.
+        let clog = crate::backend::access::transam::clog::clog_shmem_init_handles(
+            config.nbuffers.max(1),
+            fd.clone(),
+            xlog.clone(),
+            sync_requests.clone(),
+            process_config.data_dir(),
+        );
         //   (CommitTsShmemInit -- deferred)
-        // TODO(step14): SUBTRANSShmemInit  here
+        // SUBTRANSShmemInit -- step14. The subtransaction-parent SLRU over
+        // pg_subtrans.
+        let subtrans = crate::backend::access::transam::subtrans::subtrans_shmem_init_handles(
+            config.nbuffers.max(1),
+            fd.clone(),
+            xlog.clone(),
+            sync_requests.clone(),
+            process_config.data_dir(),
+        );
         //   (MultiXactShmemInit -- deferred)
         // BufferManagerShmemInit -- step12 (part A), DONE. The page pool is
         // sized from the NBuffers GUC carried on ProcessConfig.
@@ -144,7 +201,16 @@ impl SharedState {
         //   (PredicateLockShmemInit -- deferred: SSI/serializable)
 
         // Set up process table:
-        // TODO(step14): ProcArrayShmemInit  here  (InitProcGlobal + ProcArray)
+        // ProcArrayShmemInit -- step14. The snapshot/horizon source. Sized from
+        // MaxBackends (+ max_prepared_xacts); falls back to a default until the
+        // startup-computed value lands (InitProcGlobal itself is step 15).
+        let procarray_maxprocs = if process_config.max_backends > 0 {
+            process_config.max_backends as usize
+        } else {
+            DEFAULT_PROCARRAY_MAXPROCS
+        };
+        let proc_array =
+            crate::backend::storage::ipc::procarray::proc_array_shmem_init(procarray_maxprocs);
         //   (BackendStatusShmemInit -- pgstat, deferred)
         //   (TwoPhaseShmemInit -- deferred)
         // TODO(step17): BackgroundWorkerShmemInit  here
@@ -156,11 +222,7 @@ impl SharedState {
         //   (PMSignalShmemInit -- postmaster signaling, supervisor/step17)
         // ProcSignalShmemInit -- step04, DONE (constructed below at this slot).
         let proc_signal = Arc::new(ProcSignal::new());
-        // The sync request queue (sync.c InitSync) is created for the
-        // checkpointer/standalone backend; under the single-process model it is
-        // one shared structure. Construct it here, at the checkpointer-adjacent
-        // slot; the checkpointer task drains it (TODO(step17)).
-        let sync_requests = Arc::new(crate::storage::sync::SyncRequests::new());
+        // (sync_requests is constructed earlier, before the clog/subtrans SLRUs.)
         // TODO(step17): CheckpointerShmemInit  here
         // TODO(step17): AutoVacuumShmemInit  here
         //   (Replication* / WalSnd / WalRcv / WalSummarizer / PgArch /
@@ -174,7 +236,18 @@ impl SharedState {
         //   (WaitEventCustomShmemInit / InjectionPointShmemInit -- deferred)
         //   (AioShmemInit -- deferred: tokio I/O leaf replaces the aio subsys)
 
-        Arc::new(SharedState { config: process_config, fd, proc_signal, xlog, sync_requests, buffers })
+        Arc::new(SharedState {
+            config: process_config,
+            fd,
+            proc_signal,
+            xlog,
+            sync_requests,
+            buffers,
+            variable_cache,
+            clog,
+            subtrans,
+            proc_array,
+        })
     }
 
     /// Process-wide startup config (PG globals.c config half).
@@ -210,6 +283,26 @@ impl SharedState {
     /// The shared buffer pool (PG buffer cache).
     pub fn buffers(&self) -> &Arc<crate::backend::storage::buffer::buf_init::BufferPool> {
         &self.buffers
+    }
+
+    /// The OID/XID generation state (PG `TransamVariables`).
+    pub fn variable_cache(&self) -> &Arc<crate::backend::access::transam::transam::VariableCache> {
+        &self.variable_cache
+    }
+
+    /// The commit-log SLRU (PG clog.c `XactCtl`).
+    pub fn clog(&self) -> &Arc<crate::backend::access::transam::slru::SlruCtl> {
+        &self.clog
+    }
+
+    /// The subtransaction-parent SLRU (PG subtrans.c `SubTransCtl`).
+    pub fn subtrans(&self) -> &Arc<crate::backend::access::transam::slru::SlruCtl> {
+        &self.subtrans
+    }
+
+    /// The process array (PG procarray.c `ProcArrayStruct`).
+    pub fn proc_array(&self) -> &Arc<crate::backend::storage::ipc::procarray::ProcArray> {
+        &self.proc_array
     }
 }
 
@@ -262,7 +355,12 @@ mod tests {
 
     #[test]
     fn config_respects_custom_budget() {
-        let s = SharedState::new(SharedStateConfig { fd_budget: 42, max_open_files: 8, nbuffers: 16 });
+        let s = SharedState::new(SharedStateConfig {
+            fd_budget: 42,
+            max_open_files: 8,
+            nbuffers: 16,
+            data_dir: None,
+        });
         assert_eq!(s.io().available_permits(), 42);
         assert_eq!(s.buffers().nbuffers(), 16);
     }

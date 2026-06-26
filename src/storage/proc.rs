@@ -240,6 +240,67 @@ pub struct PGPROC {
     // lockGroupLink (dlist_node): my member link -> owned by the leader's Vec.
 }
 
+impl PGPROC {
+    /// A freshly-zeroed PGPROC. Used as the per-task scratch proc until step 15
+    /// wires ProcGlobal / MyProc; mirrors InitProcGlobal zero-initializing slots.
+    pub fn new() -> PGPROC {
+        PGPROC {
+            wait_status: ProcWaitStatus::OK,
+            xid: TransactionId(0),
+            xmin: TransactionId(0),
+            pid: 0,
+            pgxactoff: 0,
+            vxid: PgProcVxid {
+                proc_number: crate::storage::procnumber::INVALID_PROC_NUMBER,
+                lxid: LocalTransactionId(0),
+            },
+            database_id: Oid(0),
+            role_id: Oid(0),
+            temp_namespace_id: Oid(0),
+            is_regular_backend: false,
+            recovery_conflict_pending: false,
+            lw_waiting: 0,
+            lw_wait_mode: 0,
+            wait_lock: None,
+            wait_proc_lock: None,
+            wait_lock_mode: 0,
+            held_locks: 0,
+            wait_start: 0,
+            delay_chkpt_flags: DelayChkptFlags::empty(),
+            status_flags: ProcStatusFlags::empty(),
+            wait_lsn: XLogRecPtr(0),
+            sync_rep_state: 0,
+            my_proc_locks: std::array::from_fn(|_| Vec::new()),
+            subxid_status: XidCacheStatus::default(),
+            subxids: XidCache {
+                xids: [TransactionId(0); PGPROC_MAX_CACHED_SUBXIDS],
+            },
+            proc_array_group_member: false,
+            proc_array_group_next: 0,
+            proc_array_group_member_xid: TransactionId(0),
+            wait_event_info: 0,
+            clog_group_member: false,
+            clog_group_next: 0,
+            clog_group_member_xid: TransactionId(0),
+            clog_group_member_xid_status: XidStatus::InProgress,
+            clog_group_member_page: 0,
+            clog_group_member_lsn: XLogRecPtr(0),
+            fp_lock_bits: Vec::new(),
+            fp_rel_id: Vec::new(),
+            fp_vxid_lock: false,
+            fp_local_transaction_id: LocalTransactionId(0),
+            lock_group_leader: None,
+            lock_group_members: Vec::new(),
+        }
+    }
+}
+
+impl Default for PGPROC {
+    fn default() -> Self {
+        PGPROC::new()
+    }
+}
+
 /// C global `PGPROC *MyProc`. // TODO(global): becomes task-local under async.
 pub static mut MyProc: Option<*mut PGPROC> = None;
 

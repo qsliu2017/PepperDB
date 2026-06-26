@@ -30,6 +30,6 @@ pub fn LargeObjectExists(_loid: Oid) -> bool {
     unimplemented!()
 }
 
-pub fn LargeObjectExistsWithSnapshot(_loid: Oid, _snapshot: Snapshot<'_>) -> bool {
+pub fn LargeObjectExistsWithSnapshot(_loid: Oid, _snapshot: Snapshot) -> bool {
     unimplemented!()
 }

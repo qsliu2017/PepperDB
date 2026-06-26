@@ -47,7 +47,7 @@ pub fn snap_build_snap_dec_refcount(_snap: Snapshot) {
     unimplemented!()
 }
 
-pub fn snap_build_initial_snapshot(_builder: &mut SnapBuild) -> Snapshot<'static> {
+pub fn snap_build_initial_snapshot(_builder: &mut SnapBuild) -> Snapshot {
     unimplemented!()
 }
 pub fn snap_build_export_snapshot(_builder: &mut SnapBuild) -> String {
@@ -63,7 +63,7 @@ pub fn snap_build_reset_exported_snapshot_state() {
 pub fn snap_build_current_state(_builder: &mut SnapBuild) -> SnapBuildState {
     unimplemented!()
 }
-pub fn snap_build_get_or_build_snapshot(_builder: &mut SnapBuild) -> Snapshot<'static> {
+pub fn snap_build_get_or_build_snapshot(_builder: &mut SnapBuild) -> Snapshot {
     unimplemented!()
 }
 

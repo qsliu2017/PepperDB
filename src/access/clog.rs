@@ -31,58 +31,29 @@ pub struct xl_clog_truncate {
     pub oldestXactDb: Oid,
 }
 
-pub fn TransactionIdSetTreeStatus(
-    _xid: TransactionId,
-    _subxids: &[TransactionId],
-    _status: XidStatus,
-    _lsn: XLogRecPtr,
-) {
-    unimplemented!()
-}
-/// Returns the status; the commit LSN is folded into the return tuple (out-param).
-pub fn TransactionIdGetStatus(_xid: TransactionId) -> (XidStatus, XLogRecPtr) {
-    unimplemented!()
-}
+// Definitions live in transam/clog.c; re-exported here (rules s2). The clog
+// set/get + maintenance ops became async + threaded through `&Arc<SharedState>`
+// (async coloring from the SLRU leaf, design s4).
+pub use crate::backend::access::transam::clog::{
+    clog_identify, clogsyncfiletag, BootStrapCLOG, CheckPointCLOG, ExtendCLOG, StartupCLOG,
+    TransactionIdGetStatus, TransactionIdSetTreeStatus, TrimCLOG, TruncateCLOG,
+};
 
-pub fn CLOGShmemSize() -> usize {
-    unimplemented!()
-}
-pub fn CLOGShmemInit() {
-    unimplemented!()
-}
-pub fn BootStrapCLOG() {
-    unimplemented!()
-}
-pub fn StartupCLOG() {
-    unimplemented!()
-}
-pub fn TrimCLOG() {
-    unimplemented!()
-}
-pub fn CheckPointCLOG() {
-    unimplemented!()
-}
-pub fn ExtendCLOG(_newestXact: TransactionId) {
-    unimplemented!()
-}
-pub fn TruncateCLOG(_oldestXact: TransactionId, _oldestxid_datoid: Oid) {
-    unimplemented!()
-}
-
-pub fn clogsyncfiletag(_ftag: &FileTag, _path: &mut [u8]) -> i32 {
-    unimplemented!()
+/// clog.c CLOGShmemSize (estimate under the Arc model).
+pub fn CLOGShmemSize(nbuffers: usize) -> usize {
+    crate::backend::access::transam::clog::clog_shmem_size(nbuffers)
 }
 
 // XLOG opcodes (info nibble): raw consts, not a flag set.
 pub const CLOG_ZEROPAGE: u8 = 0x00;
 pub const CLOG_TRUNCATE: u8 = 0x10;
 
+/// clog.c clog_redo: deferred to recovery (out of foundation).
 pub fn clog_redo(_record: &mut XLogReaderState) {
-    unimplemented!()
+    crate::backend::access::transam::clog::clog_redo()
 }
+
+/// clog.c clog_desc: format a clog WAL record (recovery tooling, deferred).
 pub fn clog_desc(_buf: &mut StringInfo, _record: &mut XLogReaderState) {
-    unimplemented!()
-}
-pub fn clog_identify(_info: u8) -> Option<&'static str> {
-    unimplemented!()
+    // TODO(recovery): rmgrdesc formatting needs the decoded record.
 }

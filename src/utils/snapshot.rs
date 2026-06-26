@@ -1,5 +1,6 @@
 //! Translated from PostgreSQL src/include/utils/snapshot.h
 
+use crate::access::transam::FullTransactionId;
 use crate::c::{CommandId, TransactionId};
 
 /// The different snapshot types (MVCC plus non-MVCC special semantics).
@@ -21,11 +22,22 @@ pub enum SnapshotType {
     NonVacuumable,
 }
 
-/// Opaque; GlobalVisState body is procarray.c-private and not ported.
-pub struct GlobalVisState;
+/// State for the `GlobalVisTest*` family (procarray.c owns the real shape).
+/// Two FullTransactionId boundaries computed while building a snapshot:
+/// XIDs `>= definitely_needed` are still considered running by someone; XIDs
+/// `< maybe_needed` are removable. The in-between range is resolved by
+/// recomputing horizons (see `backend::storage::ipc::procarray`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GlobalVisState {
+    /// XIDs >= are considered running by some backend.
+    pub definitely_needed: FullTransactionId,
+    /// XIDs < are not considered to be running by any backend.
+    pub maybe_needed: FullTransactionId,
+}
 
 /// In-memory snapshot. xip/subxip C arrays -> Vec; pairingheap link dropped
 /// (registration tracked by the snapshot manager's own container).
+#[derive(Clone)]
 pub struct SnapshotData {
     pub snapshot_type: SnapshotType,
 
@@ -51,10 +63,13 @@ pub struct SnapshotData {
     pub snap_xact_completion_count: u64,
 }
 
-/// C: `typedef struct SnapshotData *Snapshot;` nullable -> Option<&SnapshotData>.
-pub type Snapshot<'a> = Option<&'a mut SnapshotData>;
+/// C: `typedef struct SnapshotData *Snapshot;`. Shared ownership via `Arc` so a
+/// snapshot can be handed to multiple holders (active stack, registered set,
+/// callers) without aliasing `&mut`; nullable -> `Option`. Cloning is a refcount
+/// bump; curcid mutation uses `Arc::make_mut` (copy-on-write) in snapmgr.
+pub type Snapshot = Option<std::sync::Arc<SnapshotData>>;
 
 /// `InvalidSnapshot` == NULL.
-pub const fn invalid_snapshot<'a>() -> Snapshot<'a> {
+pub fn invalid_snapshot() -> Snapshot {
     None
 }
