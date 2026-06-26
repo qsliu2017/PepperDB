@@ -224,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "not registered")]
     fn get_rmgr_panics_on_unregistered_id() {
         let unused = BuiltinRmgrId::MAX_ID as RmgrId + 1;
         let _ = GetRmgr(unused);

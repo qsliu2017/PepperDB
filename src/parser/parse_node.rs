@@ -135,7 +135,7 @@ pub type CoerceParamHook = fn(
 /// Resolves the `crate::nodes::params::ParseState` forward declaration.
 pub struct ParseState {
     /// stack link (NULL in a top-level ParseState)
-    pub parent_parse_state: Option<Box<ParseState>>,
+    pub parent_parse_state: Option<Box<Self>>,
     /// source text, or None if not available
     pub p_sourcetext: Option<String>,
     /// range table so far

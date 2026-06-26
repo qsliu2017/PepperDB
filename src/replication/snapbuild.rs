@@ -2,6 +2,8 @@
 //!
 //! Exports from replication/logical/snapbuild.c.
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 use crate::access::xlogdefs::XLogRecPtr;
 use crate::c::TransactionId;
 pub use crate::replication::snapbuild_internal::SnapBuild;

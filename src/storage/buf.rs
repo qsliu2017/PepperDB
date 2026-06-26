@@ -26,38 +26,38 @@ impl BufId {
     /// True iff the handle refers to a real buffer (not [`BufId::Invalid`]).
     #[inline]
     pub fn is_valid(&self) -> bool {
-        !matches!(self, BufId::Invalid)
+        !matches!(self, Self::Invalid)
     }
 
     /// True iff this is a local (temp-relation) buffer.
     #[inline]
     pub fn is_local(&self) -> bool {
-        matches!(self, BufId::Local(_))
+        matches!(self, Self::Local(_))
     }
 
     /// True iff this is a shared-pool buffer.
     #[inline]
     pub fn is_global(&self) -> bool {
-        matches!(self, BufId::Global(_))
+        matches!(self, Self::Global(_))
     }
 
     /// Construct a shared-pool handle for a 0-based pool index.
     #[inline]
     pub fn global(index: u32) -> Self {
-        BufId::Global(index)
+        Self::Global(index)
     }
 
     /// Construct a local-pool handle for a 0-based pool index.
     #[inline]
     pub fn local(index: u32) -> Self {
-        BufId::Local(index)
+        Self::Local(index)
     }
 
     /// The 0-based shared-pool index, if this is a [`BufId::Global`].
     #[inline]
     pub fn as_global(&self) -> Option<u32> {
         match self {
-            BufId::Global(i) => Some(*i),
+            Self::Global(i) => Some(*i),
             _ => None,
         }
     }
@@ -66,7 +66,7 @@ impl BufId {
     #[inline]
     pub fn as_local(&self) -> Option<u32> {
         match self {
-            BufId::Local(i) => Some(*i),
+            Self::Local(i) => Some(*i),
             _ => None,
         }
     }
@@ -78,9 +78,9 @@ impl BufId {
     #[inline]
     pub fn to_legacy_i32(&self) -> i32 {
         match self {
-            BufId::Invalid => 0,
-            BufId::Global(i) => (*i as i32) + 1,
-            BufId::Local(i) => -(*i as i32) - 1,
+            Self::Invalid => 0,
+            Self::Global(i) => (*i as i32) + 1,
+            Self::Local(i) => -(*i as i32) - 1,
         }
     }
 
@@ -88,12 +88,10 @@ impl BufId {
     /// of [`to_legacy_i32`](Self::to_legacy_i32). Not for new code.
     #[inline]
     pub fn from_legacy_i32(i: i32) -> Self {
-        if i == 0 {
-            BufId::Invalid
-        } else if i > 0 {
-            BufId::Global((i - 1) as u32)
-        } else {
-            BufId::Local((-i - 1) as u32)
+        match i.cmp(&0) {
+            std::cmp::Ordering::Equal => Self::Invalid,
+            std::cmp::Ordering::Greater => Self::Global((i - 1) as u32),
+            std::cmp::Ordering::Less => Self::Local((-i - 1) as u32),
         }
     }
 }

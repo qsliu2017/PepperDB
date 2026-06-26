@@ -143,10 +143,8 @@ pub fn init_proc_global_shared() -> Arc<ProcGlobal> {
 /// wrapper) and after `InitProcGlobal`.
 pub fn InitProcess() {
     let g = proc_global().expect("proc header uninitialized").clone();
-    if has_my_proc() {
-        // PG: elog(ERROR, "you already exist"). TODO(panic).
-        panic!("you already exist");
-    }
+    // PG: elog(ERROR, "you already exist"). TODO(panic).
+    assert!(!has_my_proc(), "you already exist");
 
     // Decide which freelist supplies our PGPROC (must match InitProcGlobal).
     // Backend-type predicates (AmAutoVacuumWorker / AmBackgroundWorker /
@@ -166,8 +164,7 @@ pub fn InitProcess() {
     // references it (it was on the free list until alloc_proc).
     let proc = unsafe { g.proc_mut(procno).unwrap() };
     let pid = crate::session::try_current()
-        .map(|s| s.proc_pid())
-        .unwrap_or(0);
+        .map_or(0, |s| s.proc_pid());
     init_backend_proc_fields(proc, procno, pid, /* regular */ true);
     proc.proc_latch.init();
 }
@@ -186,16 +183,14 @@ pub fn InitProcessPhase2() {
 /// search for a free one, no freelist).
 pub fn InitAuxiliaryProcess() {
     let g = proc_global().expect("proc header uninitialized").clone();
-    if has_my_proc() {
-        panic!("you already exist");
-    }
+    assert!(!has_my_proc(), "you already exist");
 
     let base = g.aux_proc_base;
     let mut found = None;
     for i in 0..NUM_AUXILIARY_PROCS {
         let procno = base + i;
         // SAFETY: lifecycle field read under the (single-process) startup path.
-        let in_use = unsafe { g.proc(procno).map(|p| p.pid != 0).unwrap_or(true) };
+        let in_use = unsafe { g.proc(procno).is_none_or(|p| p.pid != 0) };
         if !in_use {
             found = Some(procno);
             break;
@@ -206,8 +201,7 @@ pub fn InitAuxiliaryProcess() {
 
     let proc = unsafe { g.proc_mut(procno).unwrap() };
     let pid = crate::session::try_current()
-        .map(|s| s.proc_pid())
-        .unwrap_or(0);
+        .map_or(0, |s| s.proc_pid());
     init_backend_proc_fields(proc, procno, pid, /* regular */ false);
     // Aux procs don't get a VXID.
     proc.vxid.proc_number = INVALID_PROC_NUMBER;
@@ -324,13 +318,12 @@ pub fn SetStartupBufferPinWaitBufId(bufid: i32) {
 /// PG `GetStartupBufferPinWaitBufId`.
 pub fn GetStartupBufferPinWaitBufId() -> i32 {
     proc_global()
-        .map(|g| g.startup_buffer_pin_wait_buf_id.load(std::sync::atomic::Ordering::Relaxed))
-        .unwrap_or(-1)
+        .map_or(-1, |g| g.startup_buffer_pin_wait_buf_id.load(std::sync::atomic::Ordering::Relaxed))
 }
 
 /// PG `HaveNFreeProcs`: (have_enough, n_free) for at least `n` free regular procs.
 pub fn HaveNFreeProcs(n: i32) -> (bool, i32) {
-    let nfree = proc_global().map(|g| g.n_free_regular(n)).unwrap_or(0);
+    let nfree = proc_global().map_or(0, |g| g.n_free_regular(n));
     (nfree == n, nfree)
 }
 
@@ -390,10 +383,7 @@ pub fn JoinWaitQueue(
     let lockmode = locallock.tag.mode;
     // SAFETY: lock.c holds the partition Mutex for `lock` (15b); here the lock
     // pointer comes from the LOCALLOCK the caller owns under that Mutex.
-    let lock: &mut LOCK = match locallock.lock.is_null() {
-        true => return ProcWaitStatus::ERROR,
-        false => unsafe { &mut *locallock.lock },
-    };
+    let lock: &mut LOCK = if locallock.lock.is_null() { return ProcWaitStatus::ERROR } else { unsafe { &mut *locallock.lock } };
 
     // Set bitmask of locks we already hold on this object (from our PROCLOCK).
     // proclock.hold_mask -> heldLocks: lock.c owns PROCLOCK; staged as 0 until 15b.
@@ -526,7 +516,7 @@ pub async fn ProcSleep() -> ProcWaitStatus {
 
         tokio::select! {
             biased;
-            _ = latch_ref.wait() => {
+            () = latch_ref.wait() => {
                 latch_ref.reset();
                 // Woken: read waitStatus once.
                 let status = unsafe { g.proc(procno).unwrap().wait_status };
@@ -535,7 +525,7 @@ pub async fn ProcSleep() -> ProcWaitStatus {
                 }
                 // Spurious wake (other latch source): loop and wait again.
             }
-            _ = &mut deadlock_timer, if deadlock_armed => {
+            () = &mut deadlock_timer, if deadlock_armed => {
                 deadlock_armed = false;
                 deadlock_state = CheckDeadLock(procno, &g);
                 if deadlock_state == DeadLockState::HardDeadlock {
@@ -547,7 +537,7 @@ pub async fn ProcSleep() -> ProcWaitStatus {
                 }
                 // Soft/no deadlock: keep waiting on the latch.
             }
-            _ = &mut lock_timer, if lock_timeout_ms > 0 => {
+            () = &mut lock_timer, if lock_timeout_ms > 0 => {
                 // Lock timeout: just SIGNAL the outcome. We do NOT touch the LOCK
                 // wait queue here (doing so lock-free would race a concurrent
                 // releaser's ProcLockWakeup under the partition Mutex). lock.c's
@@ -655,8 +645,7 @@ fn CheckDeadLock(procno: ProcNumber, g: &ProcGlobal) -> DeadLockState {
         // SAFETY: all partition locks held; read of our wait_lock.
         let still_waiting = unsafe {
             g.proc(procno)
-                .map(|p| p.wait_lock.is_some() && p.wait_status == ProcWaitStatus::WAITING)
-                .unwrap_or(false)
+                .is_some_and(|p| p.wait_lock.is_some() && p.wait_status == ProcWaitStatus::WAITING)
         };
         if !still_waiting {
             return DeadLockState::NoDeadlock;
@@ -666,6 +655,7 @@ fn CheckDeadLock(procno: ProcNumber, g: &ProcGlobal) -> DeadLockState {
         // reading holders/waiters through the locked-tables view.
         let state = crate::storage::lock::dead_lock_check(procno, view);
 
+        #[allow(clippy::match_same_arms, reason = "arms kept separate for port clarity")]
         match state {
             DeadLockState::HardDeadlock => {
                 // RemoveFromWaitQueue (lock.c): unlink us + fix the lock's request
@@ -754,11 +744,10 @@ fn lock_check_conflicts_proclock(
     lock: &mut LOCK,
     proclock: Option<*mut crate::storage::lock::PROCLOCK>,
 ) -> bool {
-    match proclock {
-        None => false,
-        // SAFETY: lock.c PROCLOCK under the partition Mutex (15b path).
-        Some(pl) => unsafe { crate::storage::lock::lock_check_conflicts(table, mode, lock, &mut *pl) },
-    }
+    // SAFETY: lock.c PROCLOCK under the partition Mutex (15b path).
+    proclock.is_some_and(|pl| unsafe {
+        crate::storage::lock::lock_check_conflicts(table, mode, lock, &mut *pl)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -816,7 +805,7 @@ pub fn AuxiliaryPidGetProc(pid: i32) -> Option<ProcNumber> {
     for i in 0..NUM_AUXILIARY_PROCS {
         let procno = base + i;
         // SAFETY: lifecycle read; pid is set under ProcStructLock.
-        if unsafe { g.proc(procno).map(|p| p.pid == pid).unwrap_or(false) } {
+        if unsafe { g.proc(procno).is_some_and(|p| p.pid == pid) } {
             return Some(procno);
         }
     }
@@ -889,8 +878,7 @@ pub fn BecomeLockGroupMember(leader: ProcNumber, pid: i32) -> bool {
 fn now_micros() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_micros() as u64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_micros() as u64)
 }
 
 #[cfg(test)]
@@ -907,7 +895,7 @@ mod tests {
     fn init_proc_global_populates_arena() {
         let _s = shared(); // builds + publishes ProcGlobal
         let g = proc_global().expect("ProcGlobal published by SharedState::new");
-        assert!(g.len() > 0, "arena has slots");
+        assert!(!g.is_empty(), "arena has slots");
         // A regular-backend slot is available on the free list.
         let (have, n) = HaveNFreeProcs(1);
         assert!(have, "at least one free regular proc");

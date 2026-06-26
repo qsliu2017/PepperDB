@@ -14,7 +14,7 @@ pub struct Datum(pub usize);
 
 impl Datum {
     pub const fn from_bool(b: bool) -> Self {
-        Datum(b as usize)
+        Self(b as usize)
     }
     pub const fn get_bool(self) -> bool {
         self.0 != 0

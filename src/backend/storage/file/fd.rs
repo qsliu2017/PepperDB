@@ -242,9 +242,8 @@ impl FdManager {
         let mut stack = vec![datadir.as_ref().to_path_buf()];
         while let Some(dir) = stack.pop() {
             self.fsync_fname(&dir, true).await.ok(); // dirs may be unsyncable on some FS
-            let rd = match std::fs::read_dir(&dir) {
-                Ok(rd) => rd,
-                Err(_) => continue,
+            let Ok(rd) = std::fs::read_dir(&dir) else {
+                continue;
             };
             for entry in rd.flatten() {
                 let p = entry.path();
@@ -283,7 +282,7 @@ struct FileInner {
 
 impl File {
     fn new(key: Key<Vfd>, mgr: Arc<FdManager>) -> Self {
-        File(Arc::new(FileInner { key, mgr }))
+        Self(Arc::new(FileInner { key, mgr }))
     }
 
     /// Vectored positional read at `offset`.
@@ -519,6 +518,9 @@ mod tests {
     #[tokio::test]
     async fn lru_keeps_open_count_bounded() {
         let mgr = FdManager::new(IoBackend::new(100), 3);
+        // Keep the vfds alive so the LRU bound is exercised; dropping them would
+        // close the OS fds and defeat the test.
+        #[allow(clippy::collection_is_never_read, reason = "RAII: holds vfds open")]
         let mut files = Vec::new();
         let mut paths = Vec::new();
         for i in 0..10 {

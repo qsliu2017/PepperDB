@@ -27,7 +27,7 @@ pub const fn eq_traditional_crc32(c1: pg_crc32, c2: pg_crc32) -> bool {
 /// Sarwate's algorithm with a "normal" lookup table.
 pub fn comp_crc32_normal_table(mut crc: pg_crc32, data: &[u8], table: &[u32; 256]) -> pg_crc32 {
     for &b in data {
-        let tab_index = ((crc ^ b as u32) & 0xFF) as usize;
+        let tab_index = ((crc ^ u32::from(b)) & 0xFF) as usize;
         crc = table[tab_index] ^ (crc >> 8);
     }
     crc
@@ -52,7 +52,7 @@ pub const fn eq_legacy_crc32(c1: pg_crc32, c2: pg_crc32) -> bool {
 /// normal table, hence the historical mismatch this comment preserves).
 pub fn comp_crc32_reflected_table(mut crc: pg_crc32, data: &[u8], table: &[u32; 256]) -> pg_crc32 {
     for &b in data {
-        let tab_index = (((crc >> 24) ^ b as u32) & 0xFF) as usize;
+        let tab_index = (((crc >> 24) ^ u32::from(b)) & 0xFF) as usize;
         crc = table[tab_index] ^ (crc << 8);
     }
     crc

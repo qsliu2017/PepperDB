@@ -30,32 +30,28 @@ use crate::backend::storage::ipc::procsignal;
 #[deprecated(note = "use procsignal::current().flags.interrupt_pending")]
 pub fn InterruptPending() -> bool {
     procsignal::try_current()
-        .map(|s| s.flags.interrupt_pending.load(core::sync::atomic::Ordering::Acquire))
-        .unwrap_or(false)
+        .is_some_and(|s| s.flags.interrupt_pending.load(core::sync::atomic::Ordering::Acquire))
 }
 
 /// C global `QueryCancelPending` (read).
 #[deprecated(note = "use procsignal::current().flags.query_cancel_pending")]
 pub fn QueryCancelPending() -> bool {
     procsignal::try_current()
-        .map(|s| s.flags.query_cancel_pending.load(core::sync::atomic::Ordering::Acquire))
-        .unwrap_or(false)
+        .is_some_and(|s| s.flags.query_cancel_pending.load(core::sync::atomic::Ordering::Acquire))
 }
 
 /// C global `ProcDiePending` (read).
 #[deprecated(note = "use procsignal::current().flags.proc_die_pending")]
 pub fn ProcDiePending() -> bool {
     procsignal::try_current()
-        .map(|s| s.flags.proc_die_pending.load(core::sync::atomic::Ordering::Acquire))
-        .unwrap_or(false)
+        .is_some_and(|s| s.flags.proc_die_pending.load(core::sync::atomic::Ordering::Acquire))
 }
 
 /// C global `ClientConnectionLost` (read).
 #[deprecated(note = "use procsignal::current().flags.client_connection_lost")]
 pub fn ClientConnectionLost() -> bool {
     procsignal::try_current()
-        .map(|s| s.flags.client_connection_lost.load(core::sync::atomic::Ordering::Acquire))
-        .unwrap_or(false)
+        .is_some_and(|s| s.flags.client_connection_lost.load(core::sync::atomic::Ordering::Acquire))
 }
 
 // Holdoff / critical-section counters: per-backend state in PG
@@ -71,15 +67,15 @@ pub fn ClientConnectionLost() -> bool {
 
 /// Current `InterruptHoldoffCount` (0 if no Session in scope).
 pub fn interrupt_holdoff_count() -> u32 {
-    crate::session::try_current().map(|s| s.interrupt_holdoff_count()).unwrap_or(0)
+    crate::session::try_current().map_or(0, |s| s.interrupt_holdoff_count())
 }
 /// Current `QueryCancelHoldoffCount` (0 if no Session in scope).
 pub fn query_cancel_holdoff_count() -> u32 {
-    crate::session::try_current().map(|s| s.query_cancel_holdoff_count()).unwrap_or(0)
+    crate::session::try_current().map_or(0, |s| s.query_cancel_holdoff_count())
 }
 /// Current `CritSectionCount` (0 if no Session in scope).
 pub fn crit_section_count() -> u32 {
-    crate::session::try_current().map(|s| s.crit_section_count()).unwrap_or(0)
+    crate::session::try_current().map_or(0, |s| s.crit_section_count())
 }
 
 /// C: `void ProcessInterrupts(void)` -- the real implementation lives in
@@ -90,8 +86,7 @@ pub use crate::backend::tcop::postgres::process_interrupts as ProcessInterrupts;
 /// C: `INTERRUPTS_PENDING_CONDITION()`. Reads the current task's slot flag.
 pub fn interrupts_pending_condition() -> bool {
     procsignal::try_current()
-        .map(|s| s.flags.interrupt_pending.load(core::sync::atomic::Ordering::Acquire))
-        .unwrap_or(false)
+        .is_some_and(|s| s.flags.interrupt_pending.load(core::sync::atomic::Ordering::Acquire))
 }
 
 /// C: `CHECK_FOR_INTERRUPTS()`.
@@ -251,8 +246,7 @@ pub fn SetDataDir(dir: &str) {
 #[deprecated(note = "use SharedState::config().data_directory_mode")]
 pub fn data_directory_mode() -> u32 {
     crate::backend::utils::init::globals::process_config()
-        .map(|c| c.data_directory_mode)
-        .unwrap_or(crate::backend::utils::init::globals::PG_DIR_MODE_OWNER)
+        .map_or(crate::backend::utils::init::globals::PG_DIR_MODE_OWNER, |c| c.data_directory_mode)
 }
 
 // --- Date/time configuration GUC value codes (C #defines) ---
@@ -385,8 +379,9 @@ pub const BACKEND_NUM_TYPES: usize = BackendType::LOGGER as usize + 1;
 impl BackendType {
     /// Reconstruct a `BackendType` from its discriminant (`as u32`). Used by
     /// `Session`'s atomic storage. An out-of-range value maps to `INVALID`.
-    pub fn from_u32(v: u32) -> BackendType {
-        use BackendType::*;
+    #[allow(clippy::match_same_arms, reason = "0 == INVALID discriminant; kept explicit for 1:1 PG clarity")]
+    pub fn from_u32(v: u32) -> Self {
+        use BackendType::{INVALID, BACKEND, DEAD_END_BACKEND, AUTOVAC_LAUNCHER, AUTOVAC_WORKER, BG_WORKER, WAL_SENDER, SLOTSYNC_WORKER, STANDALONE_BACKEND, ARCHIVER, BG_WRITER, CHECKPOINTER, IO_WORKER, STARTUP, WAL_RECEIVER, WAL_SUMMARIZER, WAL_WRITER, LOGGER};
         match v {
             0 => INVALID,
             1 => BACKEND,

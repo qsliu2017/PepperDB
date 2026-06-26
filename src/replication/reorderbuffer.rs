@@ -4,6 +4,9 @@
 //! plus API stubs. Intrusive `dlist`/`dclist` links become owned collections;
 //! `HTAB` -> `HashMap`; `pairingheap` -> `crate::lib::pairingheap`.
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+#![allow(clippy::zero_sized_map_values, reason = "map mirrors PG hash table; values added later")]
+
 use std::collections::HashMap;
 
 use crate::access::htup::HeapTupleData;
@@ -143,7 +146,7 @@ pub struct ReorderBufferTXN {
     pub end_lsn: XLogRecPtr,
     /// toplevel transaction for this subxact (None for top-level).
     // TODO(ptr): the C `toptxn` is a back-pointer; ownership unclear from header.
-    pub toptxn: Option<Box<ReorderBufferTXN>>,
+    pub toptxn: Option<Box<Self>>,
     pub restart_decoding_lsn: XLogRecPtr,
     pub origin_id: RepOriginId,
     pub origin_lsn: XLogRecPtr,
@@ -168,7 +171,7 @@ pub struct ReorderBufferTXN {
     /// (potentially partial) toast entries (was HTAB *).
     pub toast_hash: Option<HashMap<Oid, ()>>,
     /// non-aborted subtransactions, toplevel only (was dlist_head).
-    pub subtxns: Vec<ReorderBufferTXN>,
+    pub subtxns: Vec<Self>,
     pub nsubtxns: u32,
     /// stored cache invalidations (gathered at once).
     pub invalidations: Vec<SharedInvalidationMessage>,

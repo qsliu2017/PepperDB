@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/pgtime.h
 //! PostgreSQL internal timezone library.
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 /// 64-bit signed seconds-since-epoch (distinct from C library time_t).
 pub type pg_time_t = i64;
 

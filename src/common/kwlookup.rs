@@ -28,7 +28,7 @@ pub fn scan_keyword_lookup(s: &str, keywords: &ScanKeywordList) -> Option<i32> {
     }
     let (mut lo, mut hi) = (0i32, keywords.num_keywords - 1);
     while lo <= hi {
-        let mid = (lo + hi) / 2;
+        let mid = i32::midpoint(lo, hi);
         match get_scan_keyword(mid, keywords).cmp(s) {
             core::cmp::Ordering::Less => lo = mid + 1,
             core::cmp::Ordering::Greater => hi = mid - 1,
@@ -42,6 +42,7 @@ pub fn scan_keyword_lookup(s: &str, keywords: &ScanKeywordList) -> Option<i32> {
 pub fn get_scan_keyword(n: i32, keywords: &ScanKeywordList) -> &str {
     let off = keywords.kw_offsets[n as usize] as usize;
     let rest = &keywords.kw_string[off..];
+    #[allow(clippy::option_if_let_else, reason = "borrow of rest prevents map_or here")]
     match rest.find('\0') {
         Some(end) => &rest[..end],
         None => rest,

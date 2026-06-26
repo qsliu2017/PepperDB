@@ -66,8 +66,8 @@ struct RegisteredBlock {
 }
 
 impl RegisteredBlock {
-    fn empty() -> RegisteredBlock {
-        RegisteredBlock {
+    fn empty() -> Self {
+        Self {
             in_use: false,
             flags: RegBuf::empty(),
             rlocator: RelFileLocator {
@@ -95,8 +95,8 @@ struct Insertion {
 }
 
 impl Insertion {
-    fn new() -> Insertion {
-        Insertion {
+    fn new() -> Self {
+        Self {
             begininsert_called: false,
             max_registered_block_id: 0,
             blocks: (0..=XLR_MAX_BLOCK_ID as usize).map(|_| RegisteredBlock::empty()).collect(),
@@ -159,7 +159,7 @@ pub fn set_record_flags(flags: XLogRecordFlags) {
 
 /// PG `XLogResetInsertion`: discard the in-progress record construction state.
 pub fn reset_insertion() {
-    with_state(|s| s.reset());
+    with_state(Insertion::reset);
 }
 
 /// PG `XLogRegisterData`: append `data` to the record's main data chunk.
@@ -208,7 +208,7 @@ pub fn register_buf_data(block_id: u8, data: &[u8]) {
         let regbuf = &mut s.blocks[block_id as usize];
         assert!(regbuf.in_use, "no block with id {block_id} registered with WAL insertion");
         assert!(
-            regbuf.rdata.len() + data.len() <= u16::MAX as usize,
+            u16::try_from(regbuf.rdata.len() + data.len()).is_ok(),
             "too much per-block WAL data"
         );
         regbuf.rdata.extend_from_slice(data);
@@ -254,6 +254,7 @@ struct Assembled {
 /// `redo_rec_ptr` / `do_page_writes` are the full-page-write inputs sampled by
 /// the caller; a block gets a full-page image when forced, or when page writes
 /// are on and the page has not been written since the redo point.
+#[allow(clippy::too_many_lines, reason = "1:1 port of C XLogRecordAssemble; splitting would diverge from PG structure")]
 fn assemble(
     s: &Insertion,
     rmid: RmgrId,
@@ -281,9 +282,7 @@ fn assemble(
         // Decide whether this block needs a full-page image.
         let needs_backup = if regbuf.flags.contains(RegBuf::FORCE_IMAGE) {
             true
-        } else if regbuf.flags.contains(RegBuf::NO_IMAGE) {
-            false
-        } else if !do_page_writes {
+        } else if regbuf.flags.contains(RegBuf::NO_IMAGE) || !do_page_writes {
             false
         } else {
             let needs = regbuf.page_lsn <= redo_rec_ptr;
@@ -344,7 +343,7 @@ fn assemble(
                 let after = hole_offset as usize + hole_length as usize;
                 payload.extend_from_slice(&page[after..BLCKSZ]);
             }
-            total_len += length as u64;
+            total_len += u64::from(length);
         }
 
         let mut data_length: u16 = 0;
@@ -359,14 +358,15 @@ fn assemble(
         prev_rlocator = Some(regbuf.rlocator);
 
         // Emit the block header (id, fork_flags, data_length).
+        let hdr_start = hdr.len();
         hdr.push(block_id as u8);
         hdr.push(final_fork_flags);
         hdr.extend_from_slice(&data_length.to_ne_bytes());
         debug_assert_eq!(
-            hdr.len() % 1,
-            0,
+            hdr.len() - hdr_start,
+            SizeOfXLogRecordBlockHeader,
             "block header is {} bytes",
-            SizeOfXLogRecordBlockHeader
+            hdr.len() - hdr_start
         );
         if include_image {
             debug_assert_eq!(bimg_bytes.len(), SizeOfXLogRecordBlockImageHeader);
@@ -396,7 +396,7 @@ fn assemble(
     if !s.mainrdata.is_empty() {
         let len = s.mainrdata.len();
         if len > 255 {
-            assert!(len <= u32::MAX as usize, "too much WAL main data");
+            assert!(u32::try_from(len).is_ok(), "too much WAL main data");
             hdr.push(XLR_BLOCK_ID_DATA_LONG);
             hdr.extend_from_slice(&(len as u32).to_ne_bytes());
         } else {
@@ -408,7 +408,7 @@ fn assemble(
     }
 
     total_len += (SizeOfXLogRecord + hdr.len()) as u64;
-    assert!(total_len <= XLogRecordMaxSize as u64, "oversized WAL record");
+    assert!(total_len <= u64::from(XLogRecordMaxSize), "oversized WAL record");
 
     // Partial CRC: over the record BODY only (block/data header area, then the
     // payload), in C's order (rdata, backup blocks). NOT finalized and the fixed

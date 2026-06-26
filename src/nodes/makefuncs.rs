@@ -1,6 +1,9 @@
 //! Translated from PostgreSQL src/include/nodes/makefuncs.h
 //! Constructors for existing node types; bodies stubbed.
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+#![allow(clippy::fn_params_excessive_bools, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1")]
+
 use crate::access::attnum::AttrNumber;
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{

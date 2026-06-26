@@ -31,7 +31,7 @@ pub struct VariableCache {
 impl VariableCache {
     /// varsup.c VarsupShmemInit: zero-initialized state.
     pub fn new() -> Self {
-        VariableCache {
+        Self {
             inner: Mutex::new(TransamVariablesData {
                 next_oid: crate::postgres_ext::Oid(0),
                 oid_count: 0,

@@ -1,6 +1,7 @@
 //! Translated from PostgreSQL src/backend/utils/error/elog.c
 
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::io::Write;
 
 use crate::utils::elog::{
@@ -139,8 +140,8 @@ pub fn errhint_plural<'a>(fmt_singular: &'a str, fmt_plural: &'a str, n: u64) ->
 // comes from the saved value on the in-flight ErrorData. We map via portable
 // std::io::ErrorKind rather than raw libc errno numbers (which differ by OS).
 pub fn errcode_for_file_access() -> i32 {
-    use crate::utils::errcodes::*;
-    use std::io::ErrorKind::*;
+    use crate::utils::errcodes::{ERRCODE_INSUFFICIENT_PRIVILEGE, ERRCODE_UNDEFINED_FILE, ERRCODE_DUPLICATE_FILE, ERRCODE_WRONG_OBJECT_TYPE, ERRCODE_DISK_FULL, ERRCODE_OUT_OF_MEMORY, ERRCODE_INTERNAL_ERROR};
+    use std::io::ErrorKind::{PermissionDenied, ReadOnlyFilesystem, NotFound, AlreadyExists, NotADirectory, IsADirectory, DirectoryNotEmpty, StorageFull, OutOfMemory};
     let errno = with_top(|e| e.saved_errno);
     let sqlerrcode = match std::io::Error::from_raw_os_error(errno).kind() {
         PermissionDenied | ReadOnlyFilesystem => ERRCODE_INSUFFICIENT_PRIVILEGE,
@@ -156,8 +157,8 @@ pub fn errcode_for_file_access() -> i32 {
 }
 
 pub fn errcode_for_socket_access() -> i32 {
-    use crate::utils::errcodes::*;
-    use std::io::ErrorKind::*;
+    use crate::utils::errcodes::{ERRCODE_CONNECTION_FAILURE, ERRCODE_INTERNAL_ERROR};
+    use std::io::ErrorKind::{BrokenPipe, ConnectionReset, ConnectionAborted, NotConnected};
     let errno = with_top(|e| e.saved_errno);
     // ALL_CONNECTION_FAILURE_ERRNOS in PG: EPIPE / ECONNRESET et al.
     let sqlerrcode = match std::io::Error::from_raw_os_error(errno).kind() {
@@ -269,28 +270,31 @@ pub fn errstart(mut elevel: i32, domain: Option<&str>) -> Option<ErrorData> {
             #[allow(deprecated)]
             raise_panic(panic_frame(PANIC, "ERRORDATA_STACK_SIZE exceeded"));
         }
-        let mut edata = ErrorData::default();
-        edata.elevel = elevel;
-        edata.output_to_server = output_to_server;
-        edata.output_to_client = output_to_client;
         let dom = domain.unwrap_or("postgres").to_owned();
-        edata.context_domain = Some(dom.clone());
-        edata.domain = Some(dom);
-        edata.sqlerrcode = default_errcode_for(elevel);
-        // saved_errno: snapshot errno so message eval can't change it.
-        edata.saved_errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+        let edata = ErrorData {
+            elevel,
+            output_to_server,
+            output_to_client,
+            context_domain: Some(dom.clone()),
+            domain: Some(dom),
+            sqlerrcode: default_errcode_for(elevel),
+            // saved_errno: snapshot errno so message eval can't change it.
+            saved_errno: std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
+            ..Default::default()
+        };
         st.stack.push(edata);
         st.recursion_depth -= 1;
     });
 
     // Hand the caller a default frame to populate; errfinish reconciles it with
     // the pushed stack entry (saved_errno/domain stay authoritative there).
-    let mut out = ErrorData::default();
-    out.elevel = elevel;
-    out.output_to_server = output_to_server;
-    out.output_to_client = output_to_client;
-    out.sqlerrcode = default_errcode_for(elevel);
-    Some(out)
+    Some(ErrorData {
+        elevel,
+        output_to_server,
+        output_to_client,
+        sqlerrcode: default_errcode_for(elevel),
+        ..Default::default()
+    })
 }
 
 // pg_attribute_cold variant taken for compile-time-constant elevel >= ERROR.
@@ -299,6 +303,7 @@ pub fn errstart_cold(elevel: i32, domain: Option<&str>) -> Option<ErrorData> {
 }
 
 #[deprecated(note = "TODO(panic): migrate to Result + ?")]
+#[allow(clippy::needless_pass_by_value, reason = "consumes edata (merged then popped); macro caller passes by value")]
 pub fn errfinish(edata: ErrorData, filename: &str, lineno: i32, funcname: &str) {
     // TODO(panic): the >=ERROR path panics (caught by catch_unwind at task
     // spawn) carrying the ErrorData; lower severities log and return.
@@ -327,7 +332,7 @@ pub fn errfinish(edata: ErrorData, filename: &str, lineno: i32, funcname: &str) 
     // Run context callbacks. void(*)(void*)+arg collapse to closures.
     unsafe {
         let p = &raw mut ERROR_CONTEXT_STACK;
-        for cb in (*p).iter_mut() {
+        for cb in &mut (*p) {
             (cb.callback)();
         }
     }
@@ -397,6 +402,7 @@ fn set_stack_entry_filename(filename: &str) -> String {
 
 // errsave / ereturn soft-error path. `context` is a *Node (ErrorSaveContext) or
 // NULL; modeled as Option. With None it behaves like ereport(ERROR).
+#[allow(clippy::needless_pass_by_value, reason = "context consumed (ErrorSaveContext stash); mirrors C signature")]
 pub fn errsave_start(context: Option<&mut ()>, domain: Option<&str>) -> Option<ErrorData> {
     // TODO: real ErrorSaveContext stashes the error and returns without raising.
     let _ = context;
@@ -404,6 +410,7 @@ pub fn errsave_start(context: Option<&mut ()>, domain: Option<&str>) -> Option<E
 }
 
 #[deprecated(note = "TODO(panic): migrate to Result + ?")]
+#[allow(clippy::needless_pass_by_value, reason = "consumes context + edata; mirrors C signature")]
 pub fn errsave_finish(
     context: Option<&mut ()>,
     edata: ErrorData,
@@ -421,12 +428,13 @@ pub fn errsave_finish(
 // Build a one-shot frame and raise it as a panic (used for internal PANICs that
 // must not recurse through the stack machinery, e.g. stack overflow).
 fn panic_frame(elevel: i32, msg: &str) -> ErrorData {
-    let mut edata = ErrorData::default();
-    edata.elevel = elevel;
-    edata.sqlerrcode = ERRCODE_INTERNAL_ERROR;
-    edata.message = Some(msg.to_owned());
-    edata.output_to_server = true;
-    edata
+    ErrorData {
+        elevel,
+        sqlerrcode: ERRCODE_INTERNAL_ERROR,
+        message: Some(msg.to_owned()),
+        output_to_server: true,
+        ..Default::default()
+    }
 }
 
 #[deprecated(note = "TODO(panic): migrate to Result + ?")]
@@ -454,7 +462,7 @@ pub fn errbacktrace() -> i32 {
 }
 
 pub fn err_generic_string(field: i32, s: &str) -> i32 {
-    use crate::postgres_ext::*;
+    use crate::postgres_ext::{PG_DIAG_SCHEMA_NAME, PG_DIAG_TABLE_NAME, PG_DIAG_COLUMN_NAME, PG_DIAG_DATATYPE_NAME, PG_DIAG_CONSTRAINT_NAME};
     with_top(|e| {
         let f = field as u8;
         if f == PG_DIAG_SCHEMA_NAME {
@@ -567,11 +575,10 @@ fn emit_error_report_for(edata: &mut ErrorData) {
     // emit_log_hook may turn off output_to_server.
     unsafe {
         let p = &raw mut EMIT_LOG_HOOK;
-        if edata.output_to_server {
-            if let Some(hook) = (*p).as_mut() {
+        if edata.output_to_server
+            && let Some(hook) = (*p).as_mut() {
                 hook(edata);
             }
-        }
     }
     if edata.output_to_server {
         send_message_to_server_log(edata);
@@ -608,6 +615,7 @@ pub fn re_throw_error(mut edata: ErrorData) -> ! {
 }
 
 #[deprecated(note = "TODO(panic): migrate to Result + ?")]
+#[allow(clippy::needless_pass_by_value, reason = "consumes edata (merged into a fresh frame)")]
 pub fn throw_error_data(edata: ErrorData) {
     // ThrowErrorData: report an error described by a standalone ErrorData. Run
     // it through errstart/errfinish so gating + raise semantics apply.
@@ -634,7 +642,7 @@ pub fn get_error_context_stack() -> String {
     }
     unsafe {
         let p = &raw mut ERROR_CONTEXT_STACK;
-        for cb in (*p).iter_mut() {
+        for cb in &mut (*p) {
             (cb.callback)();
         }
     }
@@ -655,7 +663,8 @@ pub static mut ERROR_CONTEXT_STACK: Vec<ErrorContextCallback> = Vec::new();
 
 // emit_log_hook: void(*)(ErrorData*) -> optional captured closure.
 // TODO(panic): make this task-local rather than a process global.
-pub static mut EMIT_LOG_HOOK: Option<Box<dyn FnMut(&mut ErrorData)>> = None;
+pub type EmitLogHook = Box<dyn FnMut(&mut ErrorData)>;
+pub static mut EMIT_LOG_HOOK: Option<EmitLogHook> = None;
 
 // ---------------------------------------------------------------------------
 // Log formatting / destinations.
@@ -668,7 +677,7 @@ pub fn log_status_format(buf: &mut String, format: &str, edata: &ErrorData) {
     if format.is_empty() {
         return;
     }
-    let mut chars = format.chars().peekable();
+    let mut chars = format.chars();
     while let Some(c) = chars.next() {
         if c != '%' {
             buf.push(c);
@@ -771,9 +780,9 @@ fn send_message_to_server_log(edata: &ErrorData) {
     }
 
     if edata.cursorpos > 0 {
-        buf.push_str(&format!(" at character {}", edata.cursorpos));
+        write!(buf, " at character {}", edata.cursorpos).unwrap();
     } else if edata.internalpos > 0 {
-        buf.push_str(&format!(" at character {}", edata.internalpos));
+        write!(buf, " at character {}", edata.internalpos).unwrap();
     }
     buf.push('\n');
 
@@ -793,20 +802,19 @@ fn send_message_to_server_log(edata: &ErrorData) {
             append_with_tabs(&mut buf, q);
             buf.push('\n');
         }
-        if let Some(ctx) = edata.context.as_deref() {
-            if !edata.hide_ctx {
+        if let Some(ctx) = edata.context.as_deref()
+            && !edata.hide_ctx {
                 buf.push_str("CONTEXT:  ");
                 append_with_tabs(&mut buf, ctx);
                 buf.push('\n');
             }
-        }
         if LOG_ERROR_VERBOSITY == PgErrorVerbosity::Verbose {
             match (edata.funcname.as_deref(), edata.filename.as_deref()) {
                 (Some(func), Some(file)) => {
-                    buf.push_str(&format!("LOCATION:  {func}, {file}:{}\n", edata.lineno));
+                    writeln!(buf, "LOCATION:  {func}, {file}:{}", edata.lineno).unwrap();
                 }
                 (None, Some(file)) => {
-                    buf.push_str(&format!("LOCATION:  {file}:{}\n", edata.lineno));
+                    writeln!(buf, "LOCATION:  {file}:{}", edata.lineno).unwrap();
                 }
                 _ => {}
             }

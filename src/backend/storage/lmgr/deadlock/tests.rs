@@ -100,8 +100,8 @@ async fn two_task_hard_deadlock_one_aborts() {
     // cycle before either removal is visible, both may abort (PG avoids this with
     // a single signal-driven detector; our per-task timer model permits it). The
     // load-bearing invariant is that the deadlock never hangs and is broken.
-    let aborted = (ra == LockAcquireResult::NotAvail) as i32
-        + (rb == LockAcquireResult::NotAvail) as i32;
+    let aborted = i32::from(ra == LockAcquireResult::NotAvail)
+        + i32::from(rb == LockAcquireResult::NotAvail);
     assert!(aborted >= 1, "deadlock broken: a task aborts ({ra:?}, {rb:?})");
     for r in [ra, rb] {
         assert!(
@@ -111,9 +111,30 @@ async fn two_task_hard_deadlock_one_aborts() {
     }
 }
 
+async fn three_task_cycle_run(
+    first: LOCKTAG,
+    second: LOCKTAG,
+    ex: i32,
+    held: Arc<std::sync::atomic::AtomicUsize>,
+) -> LockAcquireResult {
+    use std::sync::atomic::Ordering;
+    backend(|| async move {
+        fast_deadlock_timer();
+        assert_eq!(LockAcquire(&first, ex, false, false).await, LockAcquireResult::Ok);
+        held.fetch_add(1, Ordering::SeqCst);
+        while held.load(Ordering::SeqCst) < 3 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let r = LockAcquire(&second, ex, false, false).await;
+        LockReleaseAll(DEFAULT_LOCKMETHOD, true);
+        r
+    })
+    .await
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn three_task_cycle_one_aborts() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
     let _s = shared();
     let l1 = LOCKTAG::set_relation(0, 9101);
     let l2 = LOCKTAG::set_relation(0, 9102);
@@ -125,21 +146,7 @@ async fn three_task_cycle_one_aborts() {
     // all three hold their first lock before requesting the second.
     let held = Arc::new(AtomicUsize::new(0));
 
-    async fn run(first: LOCKTAG, second: LOCKTAG, ex: i32, held: Arc<AtomicUsize>) -> LockAcquireResult {
-        backend(|| async move {
-            fast_deadlock_timer();
-            assert_eq!(LockAcquire(&first, ex, false, false).await, LockAcquireResult::Ok);
-            held.fetch_add(1, Ordering::SeqCst);
-            while held.load(Ordering::SeqCst) < 3 {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-            let r = LockAcquire(&second, ex, false, false).await;
-            LockReleaseAll(DEFAULT_LOCKMETHOD, true);
-            r
-        })
-        .await
-    }
-
+    let run = three_task_cycle_run;
     let ta = tokio::spawn(run(l1, l2, ex, held.clone()));
     let tb = tokio::spawn(run(l2, l3, ex, held.clone()));
     let tc = tokio::spawn(run(l3, l1, ex, held.clone()));
@@ -171,7 +178,7 @@ async fn no_deadlock_simple_wait_then_grant() {
             tokio::time::sleep(Duration::from_millis(60)).await;
             assert!(LockRelease(&tag, ex, false));
         })
-        .await
+        .await;
     });
     acq_rx.await.unwrap();
 
@@ -182,7 +189,7 @@ async fn no_deadlock_simple_wait_then_grant() {
             assert_eq!(r, LockAcquireResult::Ok, "no deadlock: granted on release");
             assert!(LockRelease(&tag, ex, false));
         })
-        .await
+        .await;
     });
 
     holder.await.unwrap();
@@ -209,7 +216,7 @@ async fn deadlock_check_no_cycle_returns_no_deadlock() {
             done_rx.await.unwrap();
             assert!(LockRelease(&tag, ex, false));
         })
-        .await
+        .await;
     });
     acq_rx.await.unwrap();
 
@@ -230,7 +237,7 @@ async fn deadlock_check_no_cycle_returns_no_deadlock() {
                     // Will time out (holder still holds); we only need it queued.
                     let _ = LockAcquire(&waiter_tag, ex, false, false).await;
                 })
-                .await
+                .await;
             });
             // Give it a moment to enqueue, then run DeadLockCheck over OUR (empty)
             // proc -- not queued on anything -> NoDeadlock.
@@ -244,7 +251,7 @@ async fn deadlock_check_no_cycle_returns_no_deadlock() {
             let _: Arc<LockManager> = m;
             h.await.unwrap();
         })
-        .await
+        .await;
     });
 
     waiter.await.unwrap();

@@ -56,7 +56,7 @@ pub fn get_partition_strategy(key: &PartitionKeyData) -> PartitionStrategy {
     key.strategy
 }
 pub fn get_partition_natts(key: &PartitionKeyData) -> i32 {
-    key.partnatts as i32
+    i32::from(key.partnatts)
 }
 pub fn get_partition_exprs(key: &PartitionKeyData) -> &[Expr] {
     &key.partexprs

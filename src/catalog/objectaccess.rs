@@ -91,7 +91,7 @@ pub fn RunFunctionExecuteHookStr(_object_name: &str) {
 
 // Invoke* wrappers: the C macros guard the Run* call on the hook being set.
 pub fn InvokeObjectPostCreateHook(class_id: Oid, object_id: Oid, sub_id: i32) {
-    InvokeObjectPostCreateHookArg(class_id, object_id, sub_id, false)
+    InvokeObjectPostCreateHookArg(class_id, object_id, sub_id, false);
 }
 pub fn InvokeObjectPostCreateHookArg(class_id: Oid, object_id: Oid, sub_id: i32, is_internal: bool) {
     if unsafe { object_access_hook }.is_some() {
@@ -99,7 +99,7 @@ pub fn InvokeObjectPostCreateHookArg(class_id: Oid, object_id: Oid, sub_id: i32,
     }
 }
 pub fn InvokeObjectDropHook(class_id: Oid, object_id: Oid, sub_id: i32) {
-    InvokeObjectDropHookArg(class_id, object_id, sub_id, 0)
+    InvokeObjectDropHookArg(class_id, object_id, sub_id, 0);
 }
 pub fn InvokeObjectDropHookArg(class_id: Oid, object_id: Oid, sub_id: i32, dropflags: i32) {
     if unsafe { object_access_hook }.is_some() {
@@ -112,7 +112,7 @@ pub fn InvokeObjectTruncateHook(object_id: Oid) {
     }
 }
 pub fn InvokeObjectPostAlterHook(class_id: Oid, object_id: Oid, sub_id: i32) {
-    InvokeObjectPostAlterHookArg(class_id, object_id, sub_id, crate::postgres_ext::InvalidOid, false)
+    InvokeObjectPostAlterHookArg(class_id, object_id, sub_id, crate::postgres_ext::InvalidOid, false);
 }
 pub fn InvokeObjectPostAlterHookArg(class_id: Oid, object_id: Oid, sub_id: i32, auxiliary_id: Oid, is_internal: bool) {
     if unsafe { object_access_hook }.is_some() {
@@ -134,7 +134,7 @@ pub fn InvokeFunctionExecuteHook(object_id: Oid) {
 
 // String Invoke* wrappers.
 pub fn InvokeObjectPostCreateHookStr(class_id: Oid, object_name: &str, sub_id: i32) {
-    InvokeObjectPostCreateHookArgStr(class_id, object_name, sub_id, false)
+    InvokeObjectPostCreateHookArgStr(class_id, object_name, sub_id, false);
 }
 pub fn InvokeObjectPostCreateHookArgStr(class_id: Oid, object_name: &str, sub_id: i32, is_internal: bool) {
     if unsafe { object_access_hook_str }.is_some() {
@@ -142,7 +142,7 @@ pub fn InvokeObjectPostCreateHookArgStr(class_id: Oid, object_name: &str, sub_id
     }
 }
 pub fn InvokeObjectDropHookStr(class_id: Oid, object_name: &str, sub_id: i32) {
-    InvokeObjectDropHookArgStr(class_id, object_name, sub_id, 0)
+    InvokeObjectDropHookArgStr(class_id, object_name, sub_id, 0);
 }
 pub fn InvokeObjectDropHookArgStr(class_id: Oid, object_name: &str, sub_id: i32, dropflags: i32) {
     if unsafe { object_access_hook_str }.is_some() {
@@ -155,7 +155,7 @@ pub fn InvokeObjectTruncateHookStr(object_name: &str) {
     }
 }
 pub fn InvokeObjectPostAlterHookStr(class_id: Oid, object_name: &str, sub_id: i32) {
-    InvokeObjectPostAlterHookArgStr(class_id, object_name, sub_id, crate::postgres_ext::InvalidOid, false)
+    InvokeObjectPostAlterHookArgStr(class_id, object_name, sub_id, crate::postgres_ext::InvalidOid, false);
 }
 pub fn InvokeObjectPostAlterHookArgStr(class_id: Oid, object_name: &str, sub_id: i32, auxiliary_id: Oid, is_internal: bool) {
     if unsafe { object_access_hook_str }.is_some() {

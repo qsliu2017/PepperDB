@@ -65,7 +65,7 @@ pub struct ExpandedRecordHeader {
     /// Short-lived context for some operations.
     pub er_short_term_cxt: MemoryContext,
     /// Dummy record header used for domain checking (ER_FLAG_IS_DOMAIN).
-    pub er_dummy_header: Option<Box<ExpandedRecordHeader>>,
+    pub er_dummy_header: Option<Box<Self>>,
     /// Cache space for domain_check().
     pub er_domaininfo: *mut u8, // TODO(ptr): opaque domain cache
     /// Callback info (active if er_mcb.arg is not NULL).
@@ -192,7 +192,7 @@ pub fn expanded_record_set_field(
     isnull: bool,
     expand_external: bool,
 ) {
-    expanded_record_set_field_internal(erh, fnumber, new_value, isnull, expand_external, true)
+    expanded_record_set_field_internal(erh, fnumber, new_value, isnull, expand_external, true);
 }
 
 /// Inline fast path: tupdesc for the expanded record's actual type.

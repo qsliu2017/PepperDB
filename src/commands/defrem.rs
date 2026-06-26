@@ -1,5 +1,11 @@
 //! Translated from PostgreSQL src/include/commands/defrem.h
 
+#![allow(
+    clippy::boxed_local,
+    clippy::fn_params_excessive_bools,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::access::cmptype::CompareType;
 use crate::access::stratnum::StrategyNumber;
 use crate::access::tupdesc::TupleDesc;

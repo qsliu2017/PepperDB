@@ -46,6 +46,7 @@ impl HeadlineWordBits {
     pub const fn type_(self) -> u8 {
         ((self.0 >> 8) & 0xff) as u8
     }
+    #[allow(clippy::len_without_is_empty, reason = "mirrors PG length accessor; is_empty not part of PG API")]
     pub const fn len(self) -> u16 {
         ((self.0 >> 16) & 0xffff) as u16
     }

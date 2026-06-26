@@ -1,4 +1,8 @@
 //! Translated from PostgreSQL src/include/utils/rel.h
+#![allow(
+    clippy::cast_ptr_alignment,
+    reason = "PG rd_options/varlena pointer reinterpretation, faithful to C"
+)]
 //! POSTGRES relation descriptor (a/k/a relcache entry) definitions.
 //!
 //! In-memory (no layout contract). `RelationData` is the full relcache entry;
@@ -535,7 +539,7 @@ impl RelationData {
     /// then catalog.rs's signatures take the relcache handle, so reborrow `self`
     /// through it.
     fn as_relcache_handle(&self) -> crate::utils::relcache::Relation {
-        self as *const RelationData as *mut crate::utils::relcache::RelationData
+        std::ptr::from_ref::<Self>(self).cast_mut()
     }
 }
 

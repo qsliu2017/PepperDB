@@ -10,7 +10,7 @@ pub fn init_tour(root: &mut PlannerInfo, tour: &mut [Gene], num_gene: i32) {
 }
 
 /// edge recombination crossover [ERX]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Edge {
     /// list of edges
     pub edge_list: [Gene; 4],
@@ -61,7 +61,7 @@ pub fn pmx(
     unimplemented!()
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct City {
     pub tour2_position: i32,
     pub tour1_position: i32,

@@ -199,7 +199,7 @@ pub fn pgaio_io_uses_fd(_ioh: &mut PgAioHandle, _fd: i32) -> bool {
     unimplemented!()
 }
 /// C out-param `struct iovec **iov` + returned length -> (slice, length).
-pub fn pgaio_io_get_iovec_length<'a>(_ioh: &'a mut PgAioHandle) -> (&'a mut [IoVec<'a>], i32) {
+pub fn pgaio_io_get_iovec_length(_ioh: &mut PgAioHandle) -> (&mut [IoVec<'_>], i32) {
     unimplemented!()
 }
 

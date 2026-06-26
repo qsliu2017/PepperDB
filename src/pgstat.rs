@@ -2,6 +2,7 @@
 //
 // Cumulative statistics system. Counter structs are in-memory (idiomatic Rust, no
 // #[repr(C)]); enums are sequential ordinals; the API fns are stubbed.
+#![allow(clippy::needless_pass_by_value, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 
 use crate::access::xact::xl_xact_stats_item;
 use crate::c::TransactionId;
@@ -120,9 +121,9 @@ pub struct PgStat_TableXactStatus {
     pub deleted_pre_truncdrop: PgStat_Counter,
     pub nest_level: i32,
     // intrusive links (upper subxact / per-table parent / same-subxact next); TODO(ptr).
-    pub upper: Option<Box<PgStat_TableXactStatus>>,
+    pub upper: Option<Box<Self>>,
     pub parent: *mut PgStat_TableStatus,
-    pub next: Option<Box<PgStat_TableXactStatus>>,
+    pub next: Option<Box<Self>>,
 }
 
 // ---- Data structures on disk and in shared memory follow ----

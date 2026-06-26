@@ -44,13 +44,13 @@ impl SPNodeData {
         (self.bits & 0xff) as u8
     }
     pub fn set_val(&mut self, v: u8) {
-        self.bits = (self.bits & !0xff) | v as u32;
+        self.bits = (self.bits & !0xff) | u32::from(v);
     }
     pub fn isword(&self) -> bool {
         (self.bits >> 8) & 0x1 != 0
     }
     pub fn set_isword(&mut self, v: bool) {
-        self.bits = (self.bits & !(0x1 << 8)) | ((v as u32) << 8);
+        self.bits = (self.bits & !(0x1 << 8)) | (u32::from(v) << 8);
     }
     pub fn compoundflag(&self) -> u32 {
         (self.bits >> 9) & 0xf
@@ -117,13 +117,13 @@ impl AFFIX {
         (self.bits >> 8) & 0x1 != 0
     }
     pub fn set_issimple(&mut self, v: bool) {
-        self.bits = (self.bits & !(0x1 << 8)) | ((v as u32) << 8);
+        self.bits = (self.bits & !(0x1 << 8)) | (u32::from(v) << 8);
     }
     pub fn isregis(&self) -> bool {
         (self.bits >> 9) & 0x1 != 0
     }
     pub fn set_isregis(&mut self, v: bool) {
-        self.bits = (self.bits & !(0x1 << 9)) | ((v as u32) << 9);
+        self.bits = (self.bits & !(0x1 << 9)) | (u32::from(v) << 9);
     }
     pub fn replen(&self) -> u32 {
         (self.bits >> 10) & 0x3fff
@@ -145,7 +145,7 @@ impl AffixNodeData {
         (self.bits & 0xff) as u8
     }
     pub fn set_val(&mut self, v: u8) {
-        self.bits = (self.bits & !0xff) | v as u32;
+        self.bits = (self.bits & !0xff) | u32::from(v);
     }
     pub fn naff(&self) -> u32 {
         self.bits >> 8
@@ -167,7 +167,7 @@ impl AffixNode {
         self.bits & 0x1 != 0
     }
     pub fn set_isvoid(&mut self, v: bool) {
-        self.bits = (self.bits & !0x1) | (v as u32);
+        self.bits = (self.bits & !0x1) | u32::from(v);
     }
     pub fn length(&self) -> u32 {
         self.bits >> 1

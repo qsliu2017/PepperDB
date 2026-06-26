@@ -47,6 +47,7 @@ pub fn alloc_proc_pid() -> i32 {
 /// (`MyProcPid`, `MyStartTime[stamp]`, `MyBackendType`, `MyDatabaseId`, ...) and
 /// the `miscinit.c` user-id statics (`AuthenticatedUserId`, `SessionUserId`,
 /// `OuterUserId`, `CurrentUserId`, `SecurityRestrictionContext`).
+#[allow(clippy::struct_field_names, reason = "field names mirror PG struct members")]
 pub struct Session {
     // --- Identity (fixed at creation, no atomic needed) ---
     /// Synthetic per-backend id (PG `MyProcPid`).
@@ -301,7 +302,7 @@ pub fn current() -> Arc<Session> {
 
 /// The current task's session, or `None` if not inside a [`scope`].
 pub fn try_current() -> Option<Arc<Session>> {
-    CURRENT_SESSION.try_with(|s| s.clone()).ok()
+    CURRENT_SESSION.try_with(std::clone::Clone::clone).ok()
 }
 
 /// Run `f` (an async block) with `session` published as the task-local.
@@ -356,12 +357,12 @@ mod tests {
         assert!(try_current().is_none(), "scope must not leak");
     }
 
-    fn _assert_send_sync<T: Send + Sync>() {}
+    fn assert_send_sync<T: Send + Sync>() {}
 
     #[test]
     fn session_is_send_sync() {
-        _assert_send_sync::<Session>();
-        _assert_send_sync::<Arc<Session>>();
+        assert_send_sync::<Session>();
+        assert_send_sync::<Arc<Session>>();
     }
 
     // Compiles only if the scoped future is `Send` (so `tokio::spawn` accepts it

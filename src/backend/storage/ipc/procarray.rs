@@ -75,13 +75,13 @@ tokio::task_local! {
 /// PG `TransactionXmin`. Returns InvalidTransactionId outside a backend scope.
 pub fn transaction_xmin() -> TransactionId {
     TRANSACTION_XMIN
-        .try_with(|c| c.get())
+        .try_with(std::cell::Cell::get)
         .unwrap_or(INVALID_XID)
 }
 
 /// PG `RecentXmin`. Returns InvalidTransactionId outside a backend scope.
 pub fn recent_xmin() -> TransactionId {
-    RECENT_XMIN.try_with(|c| c.get()).unwrap_or(INVALID_XID)
+    RECENT_XMIN.try_with(std::cell::Cell::get).unwrap_or(INVALID_XID)
 }
 
 fn set_transaction_xmin(xid: TransactionId) {
@@ -176,7 +176,7 @@ struct ProcArrayInner {
 
 impl ProcArrayInner {
     fn new(max_procs: usize, total_max_cached_subxids: usize) -> Self {
-        ProcArrayInner {
+        Self {
             num_procs: 0,
             max_procs,
             max_known_assigned_xids: total_max_cached_subxids,
@@ -213,7 +213,7 @@ impl GlobalVisStates {
             definitely_needed: INVALID_FULL_TRANSACTION_ID,
             maybe_needed: INVALID_FULL_TRANSACTION_ID,
         };
-        GlobalVisStates {
+        Self {
             shared: z,
             catalog: z,
             data: z,
@@ -236,7 +236,7 @@ impl ProcArray {
     /// PG's `PROCARRAY_MAXPROCS` (MaxBackends + max_prepared_xacts).
     pub fn new(max_procs: usize) -> Self {
         let total = total_max_cached_subxids(max_procs);
-        ProcArray {
+        Self {
             inner: RwLock::new(ProcArrayInner::new(max_procs, total)),
             vis: std::sync::Mutex::new(GlobalVisStates::new()),
         }
@@ -303,10 +303,8 @@ impl ProcArray {
     /// exclusively; here the write guard suffices.)
     pub fn proc_array_add(&self, pgprocno: ProcNumber) {
         let mut a = self.inner.write().unwrap();
-        if a.num_procs >= a.max_procs {
-            // TODO(panic): ereport(FATAL, too many clients).
-            panic!("sorry, too many clients already");
-        }
+        // TODO(panic): ereport(FATAL, too many clients).
+        assert!(a.num_procs < a.max_procs, "sorry, too many clients already");
         // Keep pgprocnos sorted by proc number (PG: by PGPROC* for cache locality).
         let index = a.pgprocnos.partition_point(|&p| p < pgprocno);
         a.pgprocnos.insert(index, pgprocno);
@@ -471,11 +469,7 @@ impl ProcArray {
             return;
         };
         let pgxactoff = proc.pgxactoff;
-        if !is_sub_xact {
-            // Top-level xact: store into MyProc->xid and the mirror.
-            proc.xid = xid;
-            mirror_set_xid(pgxactoff, xid);
-        } else {
+        if is_sub_xact {
             // Subxact: append to the subxid cache or set overflowed.
             let nxids = proc.subxid_status.count as usize;
             if nxids < PGPROC_MAX_CACHED_SUBXIDS {
@@ -485,6 +479,10 @@ impl ProcArray {
                 proc.subxid_status.overflowed = true;
             }
             mirror_set_subxid_flags(pgxactoff, proc.subxid_status, proc.status_flags);
+        } else {
+            // Top-level xact: store into MyProc->xid and the mirror.
+            proc.xid = xid;
+            mirror_set_xid(pgxactoff, xid);
         }
     }
 }
@@ -493,6 +491,7 @@ impl ProcArray {
     /// procarray.c `MaintainLatestCompletedXid`: bump latestCompletedXid to
     /// `latest_xid` if older. Caller holds the write guard (so the read-modify-write
     /// of latestCompletedXid is atomic wrt other procarray mutators).
+    #[allow(clippy::unused_self, reason = "kept &self for API/port parity")]
     fn maintain_latest_completed_xid(&self, vc: &VariableCache, latest_xid: TransactionId) {
         vc.with(|v| {
             let cur = v.latest_completed_xid;
@@ -506,6 +505,7 @@ impl ProcArray {
 impl ProcArray {
     /// procarray.c `MaintainLatestCompletedXidRecovery`: same, for WAL replay
     /// (latestCompletedXid may be uninitialized; relative to nextXid).
+    #[allow(clippy::unused_self, reason = "kept &self for API/port parity")]
     fn maintain_latest_completed_xid_recovery(
         &self,
         vc: &VariableCache,
@@ -618,10 +618,7 @@ impl ProcArray {
         {
             let mut a = self.inner.write().unwrap();
             match running.subxid_status {
-                SubxidsArrayStatus::Missing => {
-                    a.last_overflowed_xid = latest_observed_xid();
-                }
-                SubxidsArrayStatus::InSubtrans => {
+                SubxidsArrayStatus::Missing | SubxidsArrayStatus::InSubtrans => {
                     a.last_overflowed_xid = latest_observed_xid();
                 }
                 SubxidsArrayStatus::InArray => {
@@ -803,8 +800,7 @@ impl ProcArray {
     fn compute_xid_horizons(&self, vc: &VariableCache) -> ComputeXidHorizonsResult {
         let in_recovery = crate::access::transam::TransactionStartedDuringRecovery();
         let my_database_id = crate::session::try_current()
-            .map(|s| s.database_id())
-            .unwrap_or(crate::postgres_ext::InvalidOid);
+            .map_or(crate::postgres_ext::InvalidOid, |s| s.database_id());
 
         let (latest_completed, oldest_xid) = vc.with(|v| (v.latest_completed_xid, v.oldest_xid));
 
@@ -840,7 +836,7 @@ impl ProcArray {
                     let pgprocno = a.pgprocnos[index];
                     let status_flags = g.status_flag(index);
                     let xid = g.xid(index);
-                    let xmin = g.proc(pgprocno).map(|p| p.xmin).unwrap_or(INVALID_XID);
+                    let xmin = g.proc(pgprocno).map_or(INVALID_XID, |p| p.xmin);
 
                     let xmin = transaction_id_older(xmin, xid);
                     if !xmin.is_valid() {
@@ -858,7 +854,7 @@ impl ProcArray {
                     h.shared_oldest_nonremovable =
                         transaction_id_older(h.shared_oldest_nonremovable, xmin);
 
-                    let proc_db = g.proc(pgprocno).map(|p| p.database_id).unwrap_or(Oid(0));
+                    let proc_db = g.proc(pgprocno).map_or(Oid(0), |p| p.database_id);
                     if proc_db == my_database_id
                         || my_database_id == crate::postgres_ext::InvalidOid
                         || status_flags.contains(
@@ -977,6 +973,7 @@ impl ProcArray {
     /// `xactCompletionCount`, and != 0), the rebuilt contents would be identical,
     /// so reuse xip/subxip/xmin/xmax and only refresh RecentXmin / MyProc->xmin.
     /// Caller holds the read guard. Returns true if the snapshot was reused.
+    #[allow(clippy::unused_self, reason = "kept &self for API/port parity")]
     fn get_snapshot_data_reuse(&self, vc: &VariableCache, snapshot: &SnapshotData) -> bool {
         if snapshot.snap_xact_completion_count == 0 {
             return false;
@@ -1010,6 +1007,11 @@ impl ProcArray {
     ///
     /// Fast path: `GetSnapshotDataReuse` reuses the prior snapshot when
     /// `xactCompletionCount` is unchanged (observably equivalent, just cheaper).
+    #[allow(
+        clippy::too_many_lines,
+        reason = "1:1 port of C function GetSnapshotData; splitting would diverge from PG structure"
+    )]
+    #[allow(clippy::similar_names, reason = "mirrors C GlobalVis variable names")]
     pub fn get_snapshot_data<'a>(
         &self,
         vc: &VariableCache,
@@ -1055,7 +1057,20 @@ impl ProcArray {
         {
             let a = self.inner.read().unwrap();
 
-            if !taken_during_recovery {
+            if taken_during_recovery {
+                // Hot standby: pull from KnownAssignedXids into subxip.
+                let mut kxmin = xmin;
+                subcount = known_assigned_xids_get_and_set_xmin(
+                    &a,
+                    &mut snapshot.subxip,
+                    &mut kxmin,
+                    xmax,
+                );
+                xmin = kxmin;
+                if xmin.precedes_or_equals(a.last_overflowed_xid) {
+                    suboverflowed = true;
+                }
+            } else {
                 let myoff = my_proc_pgxactoff();
                 with_proc_globals(&a, |g| {
                     let n = g.num();
@@ -1099,19 +1114,6 @@ impl ProcArray {
                         }
                     }
                 });
-            } else {
-                // Hot standby: pull from KnownAssignedXids into subxip.
-                let mut kxmin = xmin;
-                subcount = known_assigned_xids_get_and_set_xmin(
-                    &a,
-                    &mut snapshot.subxip,
-                    &mut kxmin,
-                    xmax,
-                );
-                xmin = kxmin;
-                if xmin.precedes_or_equals(a.last_overflowed_xid) {
-                    suboverflowed = true;
-                }
             }
 
             replication_slot_xmin = a.replication_slot_xmin;
@@ -1182,16 +1184,12 @@ impl ProcArray {
             return false;
         }
         let my_database_id = crate::session::try_current()
-            .map(|s| s.database_id())
-            .unwrap_or(crate::postgres_ext::InvalidOid);
+            .map_or(crate::postgres_ext::InvalidOid, |s| s.database_id());
         let a = self.inner.read().unwrap();
         let found = with_proc_globals(&a, |g| {
             for index in 0..a.pgprocnos.len() {
                 let pgprocno = a.pgprocnos[index];
-                let proc = match g.proc(pgprocno) {
-                    Some(p) => p,
-                    None => continue,
-                };
+                let Some(proc) = g.proc(pgprocno) else { continue };
                 let status_flags = g.status_flag(index);
                 if status_flags.contains(crate::storage::proc::ProcStatusFlags::PROC_IN_VACUUM) {
                     continue;
@@ -1228,8 +1226,7 @@ impl ProcArray {
             return false;
         }
         let my_database_id = crate::session::try_current()
-            .map(|s| s.database_id())
-            .unwrap_or(crate::postgres_ext::InvalidOid);
+            .map_or(crate::postgres_ext::InvalidOid, |s| s.database_id());
         let _a = self.inner.write().unwrap();
         let xid = proc.xmin;
         if proc.database_id == my_database_id && xid.is_normal() && xid.precedes_or_equals(xmin) {
@@ -1253,8 +1250,7 @@ impl ProcArray {
     /// data (the locks are internal and dropped before return).
     pub fn get_running_transaction_data(&self, vc: &VariableCache) -> RunningTransactionsData {
         let my_database_id = crate::session::try_current()
-            .map(|s| s.database_id())
-            .unwrap_or(crate::postgres_ext::InvalidOid);
+            .map_or(crate::postgres_ext::InvalidOid, |s| s.database_id());
         let mut xids: Vec<TransactionId> = Vec::new();
         let mut count = 0usize;
         let mut subcount = 0usize;
@@ -1282,7 +1278,7 @@ impl ProcArray {
                 }
                 if xid.precedes(oldest_database_running_xid) {
                     let pgprocno = a.pgprocnos[index];
-                    if g.proc(pgprocno).map(|p| p.database_id).unwrap_or(Oid(0)) == my_database_id {
+                    if g.proc(pgprocno).map_or(Oid(0), |p| p.database_id) == my_database_id {
                         oldest_database_running_xid = xid;
                     }
                 }
@@ -1398,14 +1394,13 @@ impl ProcArray {
         let a = self.inner.read().unwrap();
         with_proc_globals(&a, |g| {
             for &pgprocno in &a.pgprocnos {
-                if let Some(proc) = g.proc(pgprocno) {
-                    if proc.delay_chkpt_flags.bits() & type_ != 0 {
+                if let Some(proc) = g.proc(pgprocno)
+                    && proc.delay_chkpt_flags.bits() & type_ != 0 {
                         let vxid = vxid_from_proc(proc);
                         if vxid.is_valid() {
                             vxids.push(vxid);
                         }
                     }
-                }
             }
         });
         vxids
@@ -1426,7 +1421,7 @@ impl ProcArray {
                     let vxid = vxid_from_proc(proc);
                     if proc.delay_chkpt_flags.bits() & type_ != 0
                         && vxid.is_valid()
-                        && vxids.iter().any(|v| *v == vxid)
+                        && vxids.contains(&vxid)
                     {
                         return true;
                     }
@@ -1468,14 +1463,13 @@ impl ProcArray {
         };
         let a = self.inner.read().unwrap();
         with_proc_globals(&a, |g| {
-            if let Some(proc) = g.proc(proc_number) {
-                if proc.pid != 0 {
+            if let Some(proc) = g.proc(proc_number)
+                && proc.pid != 0 {
                     out.xid = proc.xid;
                     out.xmin = proc.xmin;
-                    out.nsubxid = proc.subxid_status.count as i32;
+                    out.nsubxid = i32::from(proc.subxid_status.count);
                     out.overflowed = proc.subxid_status.overflowed;
                 }
-            }
         });
         out
     }
@@ -1532,8 +1526,7 @@ impl ProcArray {
         exclude_vacuum: i32,
     ) -> Vec<VirtualTransactionId> {
         let my_database_id = crate::session::try_current()
-            .map(|s| s.database_id())
-            .unwrap_or(crate::postgres_ext::InvalidOid);
+            .map_or(crate::postgres_ext::InvalidOid, |s| s.database_id());
         let mut vxids = Vec::new();
         let a = self.inner.read().unwrap();
         with_proc_globals(&a, |g| {
@@ -1541,11 +1534,8 @@ impl ProcArray {
             for index in 0..n {
                 let pgprocno = a.pgprocnos[index];
                 let status_flags = g.status_flag(index).bits();
-                let proc = match g.proc(pgprocno) {
-                    Some(p) => p,
-                    None => continue,
-                };
-                if exclude_vacuum & status_flags as i32 != 0 {
+                let Some(proc) = g.proc(pgprocno) else { continue };
+                if exclude_vacuum & i32::from(status_flags) != 0 {
                     continue;
                 }
                 if all_dbs || proc.database_id == my_database_id {
@@ -1577,10 +1567,7 @@ impl ProcArray {
         let a = self.inner.read().unwrap();
         with_proc_globals(&a, |g| {
             for &pgprocno in &a.pgprocnos {
-                let proc = match g.proc(pgprocno) {
-                    Some(p) => p,
-                    None => continue,
-                };
+                let Some(proc) = g.proc(pgprocno) else { continue };
                 if proc.pid == 0 {
                     continue; // prepared xact
                 }
@@ -1619,6 +1606,8 @@ impl ProcArray {
         _sigmode: crate::storage::procsignal::ProcSignalReason,
         conflict_pending: bool,
     ) -> i32 {
+        // write guard gates proc_mut's &mut PGPROC (the only mutator); not readonly.
+        #[allow(clippy::readonly_write_lock, reason = "guard gates proc_mut aliasing")]
         let a = self.inner.write().unwrap();
         with_proc_globals_mut(&a, |g| {
             for &pgprocno in &a.pgprocnos {
@@ -1721,17 +1710,18 @@ impl ProcArray {
         _sigmode: crate::storage::procsignal::ProcSignalReason,
         conflict_pending: bool,
     ) {
+        // write guard gates proc_mut's &mut PGPROC (the only mutator); not readonly.
+        #[allow(clippy::readonly_write_lock, reason = "guard gates proc_mut aliasing")]
         let a = self.inner.write().unwrap();
         with_proc_globals_mut(&a, |g| {
             for &pgprocno in &a.pgprocnos {
-                if let Some(proc) = g.proc_mut(pgprocno) {
-                    if databaseid == crate::postgres_ext::InvalidOid
-                        || proc.database_id == databaseid
+                if let Some(proc) = g.proc_mut(pgprocno)
+                    && (databaseid == crate::postgres_ext::InvalidOid
+                        || proc.database_id == databaseid)
                     {
                         proc.recovery_conflict_pending = conflict_pending;
                         // SendProcSignal: procsignal.
                     }
-                }
             }
         });
     }
@@ -1946,7 +1936,7 @@ tokio::task_local! {
 
 fn latest_observed_xid() -> TransactionId {
     LATEST_OBSERVED_XID
-        .try_with(|c| c.get())
+        .try_with(std::cell::Cell::get)
         .unwrap_or(INVALID_XID)
 }
 
@@ -2097,17 +2087,13 @@ fn known_assigned_xids_add(
     let mut head = a.head_known_assigned_xids;
     let tail = a.tail_known_assigned_xids;
 
-    if head > tail && a.known_assigned_xids[head - 1].follows_or_equals(from_xid) {
-        // TODO(panic): elog(ERROR, out-of-order XID insertion).
-        panic!("out-of-order XID insertion in KnownAssignedXids");
-    }
+    // TODO(panic): elog(ERROR, out-of-order XID insertion).
+    assert!(!(head > tail && a.known_assigned_xids[head - 1].follows_or_equals(from_xid)), "out-of-order XID insertion in KnownAssignedXids");
 
     if head + nxids > a.max_known_assigned_xids {
         known_assigned_xids_compress(a, KaxCompressReason::NoSpace);
         head = a.head_known_assigned_xids;
-        if head + nxids > a.max_known_assigned_xids {
-            panic!("too many KnownAssignedXids");
-        }
+        assert!(head + nxids <= a.max_known_assigned_xids, "too many KnownAssignedXids");
     }
 
     let mut next = from_xid;
@@ -2133,7 +2119,7 @@ fn known_assigned_xids_search(a: &mut ProcArrayInner, xid: TransactionId, remove
     let mut last = head as isize - 1;
     let mut result_index: isize = -1;
     while first <= last {
-        let mid = ((first + last) / 2) as usize;
+        let mid = isize::midpoint(first, last) as usize;
         let mid_xid = a.known_assigned_xids[mid];
         if xid.0 == mid_xid.0 {
             result_index = mid as isize;
@@ -2180,7 +2166,7 @@ fn known_assigned_xid_exists(a: &ProcArrayInner, xid: TransactionId) -> bool {
     let mut first = tail as isize;
     let mut last = head as isize - 1;
     while first <= last {
-        let mid = ((first + last) / 2) as usize;
+        let mid = isize::midpoint(first, last) as usize;
         let mid_xid = a.known_assigned_xids[mid];
         if xid.0 == mid_xid.0 {
             return a.known_assigned_xids_valid[mid];
@@ -2310,7 +2296,7 @@ fn full_xid_relative_to(rel: FullTransactionId, xid: TransactionId) -> FullTrans
     let rel_xid = xid_from_full_transaction_id(rel);
     let delta = xid.0.wrapping_sub(rel_xid.0) as i32;
     crate::access::transam::full_transaction_id_from_u64(
-        crate::access::transam::u64_from_full_transaction_id(rel).wrapping_add(delta as i64 as u64),
+        crate::access::transam::u64_from_full_transaction_id(rel).wrapping_add(i64::from(delta) as u64),
     )
 }
 
@@ -2327,28 +2313,25 @@ struct ProcGlobalView<'a> {
 impl<'a> ProcGlobalView<'a> {
     /// Mirror `xids[pgxactoff]` (authoritative shared copy, under ProcArrayLock).
     fn xid(&self, pgxactoff: usize) -> TransactionId {
-        match self.g {
-            Some(g) => TransactionId(g.xids[pgxactoff].load(std::sync::atomic::Ordering::Acquire)),
-            None => INVALID_XID,
-        }
+        self.g.map_or(INVALID_XID, |g| {
+            TransactionId(g.xids[pgxactoff].load(std::sync::atomic::Ordering::Acquire))
+        })
     }
     /// Mirror `subxidStates[pgxactoff]`.
     fn subxid_state(&self, pgxactoff: usize) -> crate::storage::proc::XidCacheStatus {
-        match self.g {
-            Some(g) => crate::storage::proc::xid_cache_status_unpack(
+        self.g.map_or_else(crate::storage::proc::XidCacheStatus::default, |g| {
+            crate::storage::proc::xid_cache_status_unpack(
                 g.subxid_states[pgxactoff].load(std::sync::atomic::Ordering::Acquire),
-            ),
-            None => crate::storage::proc::XidCacheStatus::default(),
-        }
+            )
+        })
     }
     /// Mirror `statusFlags[pgxactoff]` as the bitflag type.
     fn status_flag(&self, pgxactoff: usize) -> crate::storage::proc::ProcStatusFlags {
-        match self.g {
-            Some(g) => crate::storage::proc::ProcStatusFlags::from_bits_truncate(
+        self.g.map_or_else(crate::storage::proc::ProcStatusFlags::empty, |g| {
+            crate::storage::proc::ProcStatusFlags::from_bits_truncate(
                 g.status_flags[pgxactoff].load(std::sync::atomic::Ordering::Acquire) as u8,
-            ),
-            None => crate::storage::proc::ProcStatusFlags::empty(),
-        }
+            )
+        })
     }
     /// Number of dense mirror entries (procs in the array).
     fn num(&self) -> usize {
@@ -2371,7 +2354,7 @@ impl<'a> ProcGlobalView<'a> {
 /// When ProcGlobal is unpublished the view is empty (a backend with no other
 /// running transactions). Caller holds the ProcArray guard (`a`).
 fn with_proc_globals<R>(a: &ProcArrayInner, f: impl FnOnce(&ProcGlobalView) -> R) -> R {
-    let g = crate::storage::proc::proc_global().map(|h| h.as_ref());
+    let g = crate::storage::proc::proc_global().map(std::convert::AsRef::as_ref);
     let n = a.pgprocnos.len();
     let view = ProcGlobalView { g, n };
     f(&view)
@@ -2387,6 +2370,7 @@ use std::sync::atomic::Ordering as MirrorOrd;
 /// Shift the dense mirror arrays up by one at `index` and write the new entry.
 /// `old_num` is the pre-insert num_procs; entries [index, old_num) move right by
 /// one (PG's `movecount`). Caller holds the ProcArray write guard.
+#[allow(clippy::many_single_char_names, reason = "mirrors C mirror-shift locals")]
 fn mirror_insert(
     g: &crate::storage::proc::ProcGlobal,
     index: usize,
@@ -2412,7 +2396,7 @@ fn mirror_insert(
         crate::storage::proc::xid_cache_status_pack(subxid),
         MirrorOrd::Release,
     );
-    g.status_flags[index].store(flags.bits() as u32, MirrorOrd::Release);
+    g.status_flags[index].store(u32::from(flags.bits()), MirrorOrd::Release);
 }
 
 /// Shift the dense mirror arrays down by one over `index`. `new_num` is the
@@ -2434,11 +2418,10 @@ fn mirror_set_xid(pgxactoff: i32, xid: TransactionId) {
     if pgxactoff < 0 {
         return;
     }
-    if let Some(g) = crate::storage::proc::proc_global() {
-        if let Some(slot) = g.xids.get(pgxactoff as usize) {
+    if let Some(g) = crate::storage::proc::proc_global()
+        && let Some(slot) = g.xids.get(pgxactoff as usize) {
             slot.store(xid.0, MirrorOrd::Release);
         }
-    }
 }
 
 /// Write the `subxidStates[pgxactoff]` + `statusFlags[pgxactoff]` mirror entries.
@@ -2458,7 +2441,7 @@ fn mirror_set_subxid_flags(
             );
         }
         if let Some(slot) = g.status_flags.get(pgxactoff as usize) {
-            slot.store(flags.bits() as u32, MirrorOrd::Release);
+            slot.store(u32::from(flags.bits()), MirrorOrd::Release);
         }
     }
 }
@@ -2490,11 +2473,10 @@ fn set_my_proc_xmin(x: TransactionId) {
     if procno == INVALID_PROC_NUMBER {
         return;
     }
-    if let Some(g) = crate::storage::proc::proc_global() {
-        if let Some(p) = unsafe { g.proc_mut(procno) } {
+    if let Some(g) = crate::storage::proc::proc_global()
+        && let Some(p) = unsafe { g.proc_mut(procno) } {
             p.xmin = x;
         }
-    }
 }
 
 /// procarray.c `GET_VXID_FROM_PGPROC`.
@@ -2687,7 +2669,7 @@ mod tests {
                         .get_snapshot_data(s.variable_cache(), &mut snap);
                     let (xmin1, xmax1) = (snap.xmin, snap.xmax);
                     assert_eq!(
-                        REUSE_HITS.with(|c| c.get()),
+                        REUSE_HITS.with(std::cell::Cell::get),
                         0,
                         "first build is not a reuse"
                     );
@@ -2695,7 +2677,7 @@ mod tests {
                     // Second build with the same completion count: reuse fast path.
                     s.proc_array()
                         .get_snapshot_data(s.variable_cache(), &mut snap);
-                    assert_eq!(REUSE_HITS.with(|c| c.get()), 1, "reuse path taken");
+                    assert_eq!(REUSE_HITS.with(std::cell::Cell::get), 1, "reuse path taken");
                     assert_eq!(snap.xmin.0, xmin1.0);
                     assert_eq!(snap.xmax.0, xmax1.0);
 
@@ -2704,7 +2686,7 @@ mod tests {
                     s.variable_cache().with(|v| v.xact_completion_count += 1);
                     s.proc_array()
                         .get_snapshot_data(s.variable_cache(), &mut snap);
-                    assert_eq!(REUSE_HITS.with(|c| c.get()), 1, "no reuse after a bump");
+                    assert_eq!(REUSE_HITS.with(std::cell::Cell::get), 1, "no reuse after a bump");
                     assert_eq!(snap.xmin.0, xmin1.0, "rebuild agrees with reuse");
                     assert_eq!(snap.xmax.0, xmax1.0);
                 }),
@@ -2787,7 +2769,7 @@ mod tests {
     #[test]
     fn full_xid_relative_to_lifts_epoch() {
         // xid just below rel's xid stays in the same epoch.
-        let rel = crate::access::transam::full_transaction_id_from_u64((5u64 << 32) | 100);
+        let rel = crate::access::transam::full_transaction_id_from_u64((5u64 << 32) | 0x64);
         let f = full_xid_relative_to(rel, TransactionId(90));
         assert_eq!(crate::access::transam::epoch_from_full_transaction_id(f), 5);
         assert_eq!(xid_from_full_transaction_id(f).0, 90);

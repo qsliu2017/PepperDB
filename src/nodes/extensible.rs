@@ -16,7 +16,7 @@ pub const EXTNODENAME_MAX_LEN: usize = 64;
 
 /// An extensible node is a new type of node defined by an extension. The
 /// concrete type is identified at runtime by `extnodename`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensibleNode {
     pub extnodename: Option<String>,
 }

@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/access/gin_tuple.h
 //! Sort tuple used while building a GIN index in parallel.
 
+#![allow(clippy::cast_ptr_alignment, reason = "PG on-disk/varlena pointer reinterpretation, faithful to C")]
+
 use crate::access::ginblock::GinPostingList;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
@@ -25,7 +27,7 @@ impl GinTuple {
     /// SAFETY: `self` points into a GinTuple buffer of its recorded length; the
     /// posting list begins at SHORTALIGN(data + keylen).
     pub fn get_first(&self) -> &ItemPointerData {
-        let data = (self as *const Self).cast::<u8>().wrapping_add(core::mem::size_of::<Self>());
+        let data = std::ptr::from_ref::<Self>(self).cast::<u8>().wrapping_add(core::mem::size_of::<Self>());
         let off = (self.keylen as usize + 1) & !1; // SHORTALIGN
         let list = data.wrapping_add(off).cast::<GinPostingList>();
         unsafe { &(*list).first }

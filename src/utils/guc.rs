@@ -77,7 +77,7 @@ pub struct ConfigVariable {
     pub sourceline: i32,
     pub ignore: bool,
     pub applied: bool,
-    pub next: Option<Box<ConfigVariable>>,
+    pub next: Option<Box<Self>>,
 }
 
 /// One acceptable value of an enum GUC. `hidden` values are accepted but not
@@ -160,17 +160,17 @@ pub const GUC_UNIT: i32 = GUC_UNIT_MEMORY | GUC_UNIT_TIME;
 
 impl GucUnit {
     /// Extract the unit selector from a raw "flags" word.
-    pub fn from_flags(flags: i32) -> GucUnit {
+    pub fn from_flags(flags: i32) -> Self {
         match flags & GUC_UNIT {
-            0x01000000 => GucUnit::Kb,
-            0x02000000 => GucUnit::Blocks,
-            0x03000000 => GucUnit::XBlocks,
-            0x04000000 => GucUnit::Mb,
-            0x05000000 => GucUnit::Byte,
-            0x10000000 => GucUnit::Ms,
-            0x20000000 => GucUnit::S,
-            0x30000000 => GucUnit::Min,
-            _ => GucUnit::None,
+            0x01000000 => Self::Kb,
+            0x02000000 => Self::Blocks,
+            0x03000000 => Self::XBlocks,
+            0x04000000 => Self::Mb,
+            0x05000000 => Self::Byte,
+            0x10000000 => Self::Ms,
+            0x20000000 => Self::S,
+            0x30000000 => Self::Min,
+            _ => Self::None,
         }
     }
 }
@@ -272,7 +272,7 @@ pub enum GucStackState {
 
 /// Saved prior value of a GUC during an uncommitted transactional change.
 pub struct GucStack {
-    pub prev: Option<Box<GucStack>>,
+    pub prev: Option<Box<Self>>,
     pub nest_level: i32,
     pub state: GucStackState,
     pub source: GucSource,

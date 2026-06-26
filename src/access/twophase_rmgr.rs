@@ -18,7 +18,7 @@ pub enum TwoPhaseRmgrId {
 
 impl TwoPhaseRmgrId {
     /// Highest assigned two-phase rmgr ID.
-    pub const MAX_ID: TwoPhaseRmgrId = TwoPhaseRmgrId::Predicatelock;
+    pub const MAX_ID: Self = Self::Predicatelock;
 }
 
 pub static TWOPHASE_RECOVER_CALLBACKS: &[TwoPhaseCallback] = &[];

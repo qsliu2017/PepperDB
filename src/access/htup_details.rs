@@ -242,13 +242,13 @@ impl HeapTupleHeaderData {
     }
 
     pub fn set_cmin(&mut self, cid: CommandId) {
-        debug_assert!((self.t_infomask & HEAP_MOVED) == 0);
+        debug_assert_eq!((self.t_infomask & HEAP_MOVED), 0);
         self.choice.t_heap.field3 = cid.0;
         self.t_infomask &= !HEAP_COMBOCID;
     }
 
     pub fn set_cmax(&mut self, cid: CommandId, iscombo: bool) {
-        debug_assert!((self.t_infomask & HEAP_MOVED) == 0);
+        debug_assert_eq!((self.t_infomask & HEAP_MOVED), 0);
         self.choice.t_heap.field3 = cid.0;
         if iscombo {
             self.t_infomask |= HEAP_COMBOCID;
@@ -359,7 +359,7 @@ impl HeapTupleHeaderData {
     /// Nulls bitmap (on-disk FAM at t_bits). Present only if HEAP_HASNULL.
     /// SAFETY: `self` must point into a tuple buffer with `natts` columns.
     pub unsafe fn t_bits(&self, natts: usize) -> &[bits8] {
-        let base = (self as *const Self).cast::<u8>().add(SizeofHeapTupleHeader);
+        let base = std::ptr::from_ref::<Self>(self).cast::<u8>().add(SizeofHeapTupleHeader);
         core::slice::from_raw_parts(base, BITMAPLEN(natts as i32) as usize)
     }
 }

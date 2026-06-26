@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/optimizer/optimizer.h
 //! External API for the Postgres planner.
 
+#![allow(clippy::boxed_local, reason = "1:1 PG port: Box<Node>/Box<Path> mirrors PG pointer-passed nodes")]
+
 use bitflags::bitflags;
 
 use crate::access::htup::HeapTupleData;

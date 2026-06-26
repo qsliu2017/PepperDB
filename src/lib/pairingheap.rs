@@ -141,10 +141,10 @@ impl<T, F: Fn(&T, &T) -> Ordering> PairingHeap<T, F> {
             (Some(a), Some(b)) => {
                 let va = self.nodes[a].value.as_ref().unwrap();
                 let vb = self.nodes[b].value.as_ref().unwrap();
-                let (parent, child) = if (self.compare)(va, vb) != Ordering::Less {
-                    (a, b)
-                } else {
+                let (parent, child) = if (self.compare)(va, vb) == Ordering::Less {
                     (b, a)
+                } else {
+                    (a, b)
                 };
                 let old_first = self.nodes[parent].first_child;
                 self.nodes[child].next_sibling = old_first;
@@ -176,10 +176,7 @@ impl<T, F: Fn(&T, &T) -> Ordering> PairingHeap<T, F> {
             } else {
                 pairs[i]
             };
-            merged = Some(match merged {
-                Some(prev) => self.merge_nodes(Some(prev), Some(m)),
-                None => m,
-            });
+            merged = Some(merged.map_or(m, |prev| self.merge_nodes(Some(prev), Some(m))));
             i += 2;
         }
         merged

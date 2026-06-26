@@ -65,8 +65,8 @@ impl WaitQueue {
         let mut slots = self.slots.lock().unwrap();
         // Oldest live slot = lowest index. iter() yields live entries; pick min.
         let oldest = slots.iter().map(|(k, _)| k).min_by_key(Key::index);
-        if let Some(key) = oldest {
-            if let Some(w) = slots.get_mut(key) {
+        if let Some(key) = oldest
+            && let Some(w) = slots.get_mut(key) {
                 w.woken = true;
                 let waker = w.waker.take();
                 drop(slots); // release lock before .wake()
@@ -74,7 +74,6 @@ impl WaitQueue {
                     waker.wake();
                 }
             }
-        }
     }
 
     /// Wake every waiter currently in the queue. Sync.
@@ -120,8 +119,7 @@ impl WaitGuard<'_> {
             .lock()
             .unwrap()
             .get(self.key)
-            .map(|w| w.woken)
-            .unwrap_or(true)
+            .is_none_or(|w| w.woken)
     }
 }
 
@@ -174,7 +172,7 @@ mod tests {
         assert_eq!(q.len(), 1, "one waiter remains enqueued");
 
         q.wake_one(); // clean up the other
-        let _ = tokio::time::timeout(Duration::from_secs(1), async {
+        let () = tokio::time::timeout(Duration::from_secs(1), async {
             let _ = w1.await;
             let _ = w2.await;
         })

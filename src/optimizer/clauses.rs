@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/optimizer/clauses.h
 //! prototypes for clauses.c.
 
+#![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
+
 use crate::nodes::bitmapset::Bitmapset;
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{Query, RangeTblEntry};

@@ -44,31 +44,31 @@ pub fn fasthash_accum(hs: &mut FasthashState, k: &[u8]) {
     match len {
         8 => hs.accum = u64::from_le_bytes(k[..8].try_into().unwrap()),
         7 => {
-            hs.accum |= (k[6] as u64) << 48;
-            hs.accum |= (k[5] as u64) << 40;
-            hs.accum |= (k[4] as u64) << 32;
-            hs.accum |= u32::from_le_bytes(k[..4].try_into().unwrap()) as u64;
+            hs.accum |= u64::from(k[6]) << 48;
+            hs.accum |= u64::from(k[5]) << 40;
+            hs.accum |= u64::from(k[4]) << 32;
+            hs.accum |= u64::from(u32::from_le_bytes(k[..4].try_into().unwrap()));
         }
         6 => {
-            hs.accum |= (k[5] as u64) << 40;
-            hs.accum |= (k[4] as u64) << 32;
-            hs.accum |= u32::from_le_bytes(k[..4].try_into().unwrap()) as u64;
+            hs.accum |= u64::from(k[5]) << 40;
+            hs.accum |= u64::from(k[4]) << 32;
+            hs.accum |= u64::from(u32::from_le_bytes(k[..4].try_into().unwrap()));
         }
         5 => {
-            hs.accum |= (k[4] as u64) << 32;
-            hs.accum |= u32::from_le_bytes(k[..4].try_into().unwrap()) as u64;
+            hs.accum |= u64::from(k[4]) << 32;
+            hs.accum |= u64::from(u32::from_le_bytes(k[..4].try_into().unwrap()));
         }
-        4 => hs.accum |= u32::from_le_bytes(k[..4].try_into().unwrap()) as u64,
+        4 => hs.accum |= u64::from(u32::from_le_bytes(k[..4].try_into().unwrap())),
         3 => {
-            hs.accum |= (k[2] as u64) << 16;
-            hs.accum |= (k[1] as u64) << 8;
-            hs.accum |= k[0] as u64;
+            hs.accum |= u64::from(k[2]) << 16;
+            hs.accum |= u64::from(k[1]) << 8;
+            hs.accum |= u64::from(k[0]);
         }
         2 => {
-            hs.accum |= (k[1] as u64) << 8;
-            hs.accum |= k[0] as u64;
+            hs.accum |= u64::from(k[1]) << 8;
+            hs.accum |= u64::from(k[0]);
         }
-        1 => hs.accum |= k[0] as u64,
+        1 => hs.accum |= u64::from(k[0]),
         0 => return,
         _ => unreachable!(),
     }

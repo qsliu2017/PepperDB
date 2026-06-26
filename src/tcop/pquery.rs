@@ -3,6 +3,8 @@
 //! Prototypes for pquery.c (portal execution). `List *` of statements ->
 //! `&[Box<Node>]`; the C `ActivePortal` global -> a `static mut` placeholder.
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 use crate::nodes::nodes::Node;
 use crate::nodes::params::ParamListInfo;
 use crate::nodes::parsenodes::FetchDirection;

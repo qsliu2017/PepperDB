@@ -1,5 +1,7 @@
 //! Translated from PostgreSQL src/include/parser/parse_relation.h
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 use crate::c::NameData;
 use crate::nodes::nodes::{JoinType, Node};
 use crate::nodes::parsenodes::{

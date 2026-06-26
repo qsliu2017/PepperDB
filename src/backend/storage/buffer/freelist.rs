@@ -53,7 +53,7 @@ impl StrategyControl {
     /// C: `StrategyInitialize`. The freelist starts holding every buffer
     /// (0..nbuffers-1, already linked by `BufferPool::new`), the hand at 0.
     pub fn new(nbuffers: usize) -> Self {
-        StrategyControl {
+        Self {
             next_victim: AtomicU32::new(0),
             num_buffer_allocs: AtomicU32::new(0),
             freelist: Mutex::new(FreelistState {
@@ -235,7 +235,7 @@ mod tests {
             p.descriptor(id).unlock_hdr(s);
             seen.push(id);
         }
-        seen.sort();
+        seen.sort_unstable();
         assert_eq!(seen, vec![0, 1, 2, 3]);
         assert!(!p.strategy.have_free_buffer());
     }
@@ -289,7 +289,7 @@ mod tests {
             p.descriptor(id).unlock_hdr(s);
         }
         assert!(
-            p.strategy.complete_passes() >= before + 1,
+            p.strategy.complete_passes() > before,
             "the hand wrapped at least once"
         );
     }

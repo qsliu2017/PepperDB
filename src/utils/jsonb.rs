@@ -142,7 +142,7 @@ impl JsonbContainer {
     pub fn children(&self) -> &[JEntry] {
         let n = self.size() as usize;
         unsafe {
-            let base = (self as *const Self).add(1).cast::<JEntry>();
+            let base = std::ptr::from_ref::<Self>(self).add(1).cast::<JEntry>();
             core::slice::from_raw_parts(base, n)
         }
     }
@@ -202,7 +202,7 @@ pub enum JsonbValue {
     Bool(bool),
     Array {
         n_elems: i32,
-        elems: *mut JsonbValue, // TODO(ptr)
+        elems: *mut Self, // TODO(ptr)
         raw_scalar: bool,       // top-level "raw scalar" array?
     },
     Object {
@@ -226,11 +226,11 @@ impl JsonbValue {
     pub fn is_scalar(&self) -> bool {
         matches!(
             self,
-            JsonbValue::Null
-                | JsonbValue::String { .. }
-                | JsonbValue::Numeric(_)
-                | JsonbValue::Bool(_)
-                | JsonbValue::Datetime { .. }
+            Self::Null
+                | Self::String { .. }
+                | Self::Numeric(_)
+                | Self::Bool(_)
+                | Self::Datetime { .. }
         )
     }
 }
@@ -247,7 +247,7 @@ pub struct JsonbPair {
 pub struct JsonbParseState {
     pub cont_val: JsonbValue,
     pub size: usize,
-    pub next: Option<Box<JsonbParseState>>,
+    pub next: Option<Box<Self>>,
     pub unique_keys: bool, // check object key uniqueness
     pub skip_nulls: bool,  // skip null object fields
 }
@@ -273,7 +273,7 @@ pub struct JsonbIterator {
     pub cur_data_offset: u32,
     pub cur_value_offset: u32, // current value offset when iterating an object
     pub state: JsonbIterState,
-    pub parent: Option<Box<JsonbIterator>>,
+    pub parent: Option<Box<Self>>,
 }
 
 // Convenience Datum<->Jsonb helpers. TODO(ptr): detoasting returns owned/borrowed

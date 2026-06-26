@@ -1,4 +1,8 @@
 //! Translated from PostgreSQL src/include/lib/ilist.h
+#![allow(
+    clippy::cast_ptr_alignment,
+    reason = "PG intrusive-list node pointer reinterpretation, faithful to C"
+)]
 //!
 //! Intrusive doubly- and singly-linked lists. These embed their links directly
 //! in caller objects and never allocate, so the faithful 1:1 translation keeps
@@ -11,13 +15,13 @@ use core::ptr;
 /// Node of a doubly linked list. Embed in structs that join such a list.
 #[derive(Debug)]
 pub struct dlist_node {
-    pub prev: *mut dlist_node,
-    pub next: *mut dlist_node,
+    pub prev: *mut Self,
+    pub next: *mut Self,
 }
 
 impl Default for dlist_node {
     fn default() -> Self {
-        dlist_node {
+        Self {
             prev: ptr::null_mut(),
             next: ptr::null_mut(),
         }
@@ -55,12 +59,12 @@ pub struct dclist_head {
 /// Node of a singly linked list.
 #[derive(Debug)]
 pub struct slist_node {
-    pub next: *mut slist_node,
+    pub next: *mut Self,
 }
 
 impl Default for slist_node {
     fn default() -> Self {
-        slist_node {
+        Self {
             next: ptr::null_mut(),
         }
     }
@@ -96,7 +100,7 @@ pub fn slist_delete(_head: &mut slist_head, _node: *const slist_node) {
 /// Initialize a doubly linked list (circular self-reference).
 #[inline]
 pub fn dlist_init(head: &mut dlist_head) {
-    let p: *mut dlist_node = &mut head.head;
+    let p: *mut dlist_node = &raw mut head.head;
     head.head.next = p;
     head.head.prev = p;
 }
@@ -111,8 +115,8 @@ pub fn dlist_node_init(node: &mut dlist_node) {
 /// Is the list empty?
 #[inline]
 pub fn dlist_is_empty(head: &dlist_head) -> bool {
-    let p: *const dlist_node = &head.head;
-    head.head.next.is_null() || head.head.next as *const dlist_node == p
+    let p: *const dlist_node = &raw const head.head;
+    head.head.next.is_null() || head.head.next.cast_const() == p
 }
 
 /// Insert a node at the beginning of the list.
@@ -123,7 +127,7 @@ pub unsafe fn dlist_push_head(head: &mut dlist_head, node: *mut dlist_node) {
     if head.head.next.is_null() {
         dlist_init(head);
     }
-    let h: *mut dlist_node = &mut head.head;
+    let h: *mut dlist_node = &raw mut head.head;
     (*node).next = head.head.next;
     (*node).prev = h;
     (*(*node).next).prev = node;
@@ -138,7 +142,7 @@ pub unsafe fn dlist_push_tail(head: &mut dlist_head, node: *mut dlist_node) {
     if head.head.next.is_null() {
         dlist_init(head);
     }
-    let h: *mut dlist_node = &mut head.head;
+    let h: *mut dlist_node = &raw mut head.head;
     (*node).next = h;
     (*node).prev = head.head.prev;
     (*(*node).prev).next = node;
@@ -242,8 +246,8 @@ pub unsafe fn dlist_move_tail(head: &mut dlist_head, node: *mut dlist_node) {
 /// SAFETY: `node` must be valid.
 #[inline]
 pub unsafe fn dlist_has_next(head: &dlist_head, node: *const dlist_node) -> bool {
-    let h: *const dlist_node = &head.head;
-    (*node).next as *const dlist_node != h
+    let h: *const dlist_node = &raw const head.head;
+    (*node).next.cast_const() != h
 }
 
 /// Whether `node` has a preceding node.
@@ -251,8 +255,8 @@ pub unsafe fn dlist_has_next(head: &dlist_head, node: *const dlist_node) -> bool
 /// SAFETY: `node` must be valid.
 #[inline]
 pub unsafe fn dlist_has_prev(head: &dlist_head, node: *const dlist_node) -> bool {
-    let h: *const dlist_node = &head.head;
-    (*node).prev as *const dlist_node != h
+    let h: *const dlist_node = &raw const head.head;
+    (*node).prev.cast_const() != h
 }
 
 /// Whether `node` is detached (initialized/deleted thoroughly).
@@ -284,7 +288,7 @@ pub unsafe fn dlist_prev_node(_head: &mut dlist_head, node: *mut dlist_node) -> 
 /// SAFETY: the list must be non-empty; `off` must be the embedded member offset.
 #[inline]
 pub unsafe fn dlist_head_element_off(head: &mut dlist_head, off: usize) -> *mut u8 {
-    (head.head.next as *mut u8).sub(off)
+    head.head.next.cast::<u8>().sub(off)
 }
 
 /// Return the first node (there must be one).
@@ -292,7 +296,7 @@ pub unsafe fn dlist_head_element_off(head: &mut dlist_head, off: usize) -> *mut 
 /// SAFETY: the list must be non-empty.
 #[inline]
 pub unsafe fn dlist_head_node(head: &mut dlist_head) -> *mut dlist_node {
-    dlist_head_element_off(head, 0) as *mut dlist_node
+    dlist_head_element_off(head, 0).cast::<dlist_node>()
 }
 
 /// Address of the tail element's containing struct, given member offset.
@@ -300,7 +304,7 @@ pub unsafe fn dlist_head_node(head: &mut dlist_head) -> *mut dlist_node {
 /// SAFETY: the list must be non-empty; `off` must be the embedded member offset.
 #[inline]
 pub unsafe fn dlist_tail_element_off(head: &mut dlist_head, off: usize) -> *mut u8 {
-    (head.head.prev as *mut u8).sub(off)
+    head.head.prev.cast::<u8>().sub(off)
 }
 
 /// Return the last node (there must be one).
@@ -308,7 +312,7 @@ pub unsafe fn dlist_tail_element_off(head: &mut dlist_head, off: usize) -> *mut 
 /// SAFETY: the list must be non-empty.
 #[inline]
 pub unsafe fn dlist_tail_node(head: &mut dlist_head) -> *mut dlist_node {
-    dlist_tail_element_off(head, 0) as *mut dlist_node
+    dlist_tail_element_off(head, 0).cast::<dlist_node>()
 }
 
 /// Recover the containing struct of an embedded `dlist_node`.
@@ -466,7 +470,7 @@ pub unsafe fn dclist_prev_node(head: &mut dclist_head, node: *mut dlist_node) ->
 /// SAFETY: the list must be non-empty.
 #[inline]
 pub unsafe fn dclist_head_node(head: &mut dclist_head) -> *mut dlist_node {
-    dlist_head_element_off(&mut head.dlist, 0) as *mut dlist_node
+    dlist_head_element_off(&mut head.dlist, 0).cast::<dlist_node>()
 }
 
 /// Return the last node (there must be one).
@@ -474,7 +478,7 @@ pub unsafe fn dclist_head_node(head: &mut dclist_head) -> *mut dlist_node {
 /// SAFETY: the list must be non-empty.
 #[inline]
 pub unsafe fn dclist_tail_node(head: &mut dclist_head) -> *mut dlist_node {
-    dlist_tail_element_off(&mut head.dlist, 0) as *mut dlist_node
+    dlist_tail_element_off(&mut head.dlist, 0).cast::<dlist_node>()
 }
 
 /// Stored number of entries.
@@ -546,7 +550,7 @@ pub unsafe fn slist_next_node(_head: &mut slist_head, node: *mut slist_node) -> 
 /// SAFETY: the list must be non-empty.
 #[inline]
 pub unsafe fn slist_head_element_off(head: &mut slist_head, off: usize) -> *mut u8 {
-    (head.head.next as *mut u8).sub(off)
+    head.head.next.cast::<u8>().sub(off)
 }
 
 /// Return the first node (there must be one).
@@ -554,7 +558,7 @@ pub unsafe fn slist_head_element_off(head: &mut slist_head, off: usize) -> *mut 
 /// SAFETY: the list must be non-empty.
 #[inline]
 pub unsafe fn slist_head_node(head: &mut slist_head) -> *mut slist_node {
-    slist_head_element_off(head, 0) as *mut slist_node
+    slist_head_element_off(head, 0).cast::<slist_node>()
 }
 
 /// Delete the element the mutable iterator currently points to.

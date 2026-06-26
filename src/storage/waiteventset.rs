@@ -86,7 +86,7 @@ pub fn ModifyWaitEvent(
     events: WaitEventFlags,
     latch: Option<&Latch>,
 ) {
-    set.modify_event(pos, events, latch)
+    set.modify_event(pos, events, latch);
 }
 
 /// RAII handles teardown; dropping the set frees it.

@@ -69,7 +69,7 @@ pub struct SerializableXact {
     // by the owning PredXactList collections).
     // perXactPredicateListLock: LWLock -> tombstoned (parking_lot at owner).
     /// r/o: concurrent r/w transactions we could conflict with, and vice versa.
-    pub possible_unsafe_conflicts: Vec<*mut SerializableXact>, // TODO(ptr)
+    pub possible_unsafe_conflicts: Vec<*mut Self>, // TODO(ptr)
     /// Top level xid, or invalid.
     pub top_xid: TransactionId,
     /// Invalid means still running.
@@ -192,7 +192,7 @@ pub fn set_predicatelocktargettag_relation(
     locktag.locktag_field1 = dboid.0;
     locktag.locktag_field2 = reloid.0;
     locktag.locktag_field3 = crate::storage::block::INVALID_BLOCK_NUMBER;
-    locktag.locktag_field4 = crate::storage::off::INVALID_OFFSET_NUMBER as u32;
+    locktag.locktag_field4 = u32::from(crate::storage::off::INVALID_OFFSET_NUMBER);
 }
 
 pub fn set_predicatelocktargettag_page(
@@ -204,7 +204,7 @@ pub fn set_predicatelocktargettag_page(
     locktag.locktag_field1 = dboid.0;
     locktag.locktag_field2 = reloid.0;
     locktag.locktag_field3 = blocknum;
-    locktag.locktag_field4 = crate::storage::off::INVALID_OFFSET_NUMBER as u32;
+    locktag.locktag_field4 = u32::from(crate::storage::off::INVALID_OFFSET_NUMBER);
 }
 
 pub fn set_predicatelocktargettag_tuple(
@@ -217,7 +217,7 @@ pub fn set_predicatelocktargettag_tuple(
     locktag.locktag_field1 = dboid.0;
     locktag.locktag_field2 = reloid.0;
     locktag.locktag_field3 = blocknum;
-    locktag.locktag_field4 = offnum as u32;
+    locktag.locktag_field4 = u32::from(offnum);
 }
 
 pub fn get_predicatelocktargettag_db(locktag: &PredicateLockTargetTag) -> Oid {
@@ -235,7 +235,7 @@ pub fn get_predicatelocktargettag_offset(locktag: &PredicateLockTargetTag) -> Of
 pub fn get_predicatelocktargettag_type(
     locktag: &PredicateLockTargetTag,
 ) -> PredicateLockTargetType {
-    if locktag.locktag_field4 != crate::storage::off::INVALID_OFFSET_NUMBER as u32 {
+    if locktag.locktag_field4 != u32::from(crate::storage::off::INVALID_OFFSET_NUMBER) {
         PredicateLockTargetType::Tuple
     } else if locktag.locktag_field3 != crate::storage::block::INVALID_BLOCK_NUMBER {
         PredicateLockTargetType::Page

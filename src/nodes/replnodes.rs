@@ -10,7 +10,7 @@ pub enum ReplicationKind {
 }
 
 /// IDENTIFY_SYSTEM command.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentifySystemCmd;
 
 /// BASE_BACKUP command.
@@ -30,7 +30,7 @@ pub struct CreateReplicationSlotCmd {
 }
 
 /// DROP_REPLICATION_SLOT command.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DropReplicationSlotCmd {
     pub slotname: Option<String>,
     pub wait: bool,
@@ -54,17 +54,17 @@ pub struct StartReplicationCmd {
 }
 
 /// READ_REPLICATION_SLOT command.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadReplicationSlotCmd {
     pub slotname: Option<String>,
 }
 
 /// TIMELINE_HISTORY command.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimeLineHistoryCmd {
     pub timeline: TimeLineID,
 }
 
 /// UPLOAD_MANIFEST command.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UploadManifestCmd;

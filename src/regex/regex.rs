@@ -5,6 +5,7 @@
 // from the `regex` crate, so this engine's behavior must be preserved; only the
 // type/flag surface is translated here. The system <regex.h> clash handling and
 // the `regoff_t`/`regex_t`/`regmatch_t` redirect #defines are C-only and dropped.
+#![allow(clippy::needless_pass_by_value, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 
 use crate::c::text;
 use crate::mb::pg_wchar::pg_wchar;

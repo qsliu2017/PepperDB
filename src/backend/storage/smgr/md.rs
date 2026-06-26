@@ -69,17 +69,17 @@ fn init_md_filetag(rlocator: RelFileLocatorBackend, forknum: ForkNumber, segno: 
         handler: SyncRequestHandler::Md as i16,
         forknum: forknum as i16,
         rlocator: rlocator.locator,
-        segno: segno as u64,
+        segno: u64::from(segno),
     }
 }
 
 /// Resolve a relpath (relative to PGDATA) to an absolute filesystem path using
 /// the configured DataDir. If DataDir is unset (tests), use the path as-is.
 fn resolve_path(shared: &Arc<SharedState>, rel: &str) -> PathBuf {
-    match shared.config().data_dir() {
-        Some(dir) => PathBuf::from(dir).join(rel),
-        None => PathBuf::from(rel),
-    }
+    shared
+        .config()
+        .data_dir()
+        .map_or_else(|| PathBuf::from(rel), |dir| PathBuf::from(dir).join(rel))
 }
 
 /// Filesystem path for the given segment (md.c `_mdfd_segpath`).
@@ -228,14 +228,14 @@ async fn mdunlinkfork(
             // Prevent other backends' fds from pinning the disk space.
             truncate_to_zero(shared, &path0).await;
             // Forget any pending sync requests for the first segment.
-            register_forget_request(shared, rlocator, forknum, 0).await;
+            register_forget_request(shared, rlocator, forknum, 0);
         }
         let _ = io_backend::unlink(&path0).await;
     } else {
         // Regular main fork, not redo: truncate now, defer the unlink to after
         // the next checkpoint (protects relfilenumber reuse, see md.c).
         truncate_to_zero(shared, &path0).await;
-        register_unlink_segment(shared, rlocator, forknum, 0).await;
+        register_unlink_segment(shared, rlocator, forknum, 0);
     }
 
     // Delete any additional segments (truncate then unlink), stopping at ENOENT.
@@ -245,7 +245,7 @@ async fn mdunlinkfork(
             if !truncate_to_zero(shared, &segpath).await {
                 break; // ENOENT: no more segments
             }
-            register_forget_request(shared, rlocator, forknum, segno).await;
+            register_forget_request(shared, rlocator, forknum, segno);
         }
         if io_backend::unlink(&segpath).await.is_err() {
             break; // ENOENT expected after the last segment
@@ -262,13 +262,11 @@ pub async fn mdextend(
     buffer: &Page,
     skip_fsync: bool,
 ) {
-    if blocknum == INVALID_BLOCK_NUMBER {
-        panic!("cannot extend file beyond {INVALID_BLOCK_NUMBER} blocks");
-    }
+    assert!(blocknum != INVALID_BLOCK_NUMBER, "cannot extend file beyond {INVALID_BLOCK_NUMBER} blocks");
     let (file, segno) = getseg(shared, reln, forknum, blocknum, skip_fsync, Extension::Create)
         .await
         .expect("mdextend: getseg with EXTENSION_CREATE must succeed");
-    let seekpos = BLCKSZ_U64 * (blocknum % RELSEG_SIZE_BN) as u64;
+    let seekpos = BLCKSZ_U64 * u64::from(blocknum % RELSEG_SIZE_BN);
     let n = file
         .write(buffer.as_bytes(), seekpos)
         .await
@@ -290,15 +288,13 @@ pub async fn mdzeroextend(
     skip_fsync: bool,
 ) {
     assert!(nblocks > 0);
-    if (blocknum as u64) + (nblocks as u64) >= INVALID_BLOCK_NUMBER as u64 {
-        panic!("cannot extend file beyond {INVALID_BLOCK_NUMBER} blocks");
-    }
+    assert!(u64::from(blocknum) + (nblocks as u64) < u64::from(INVALID_BLOCK_NUMBER), "cannot extend file beyond {INVALID_BLOCK_NUMBER} blocks");
 
     let mut curblock = blocknum;
     let mut remblocks = nblocks;
     while remblocks > 0 {
         let segstart = curblock % RELSEG_SIZE_BN;
-        let seekpos = BLCKSZ_U64 * segstart as u64;
+        let seekpos = BLCKSZ_U64 * u64::from(segstart);
         let numblocks = if segstart + remblocks as BlockNumber > RELSEG_SIZE_BN {
             (RELSEG_SIZE_BN - segstart) as i32
         } else {
@@ -358,14 +354,12 @@ pub async fn mdreadv(
         return;
     }
     let segoff = blocknum % RELSEG_SIZE_BN;
-    if segoff + nblocks > RELSEG_SIZE_BN {
-        panic!("read crosses segment boundary");
-    }
+    assert!(segoff + nblocks <= RELSEG_SIZE_BN, "read crosses segment boundary");
 
     let (file, _segno) = getseg(shared, reln, forknum, blocknum, false, Extension::Fail)
         .await
         .expect("mdreadv: getseg(EXTENSION_FAIL) must succeed");
-    let seekpos = BLCKSZ_U64 * segoff as u64;
+    let seekpos = BLCKSZ_U64 * u64::from(segoff);
 
     // Determine how many blocks actually exist in this segment from seekpos.
     let segblocks = seg_nblocks(&file).await;
@@ -404,15 +398,13 @@ pub async fn mdwritev(
         return;
     }
     let segoff = blocknum % RELSEG_SIZE_BN;
-    if segoff + nblocks > RELSEG_SIZE_BN {
-        panic!("write crosses segment boundary");
-    }
+    assert!(segoff + nblocks <= RELSEG_SIZE_BN, "write crosses segment boundary");
 
     let (file, segno) =
         getseg(shared, reln, forknum, blocknum, skip_fsync, Extension::Fail)
             .await
             .expect("mdwritev: getseg(EXTENSION_FAIL) must succeed");
-    let seekpos = BLCKSZ_U64 * segoff as u64;
+    let seekpos = BLCKSZ_U64 * u64::from(segoff);
 
     let iov: Vec<IoSlice> = buffers.iter().map(|p| IoSlice::new(p.as_bytes())).collect();
     let n = file.write_v(&iov, seekpos).await.expect("could not write blocks");
@@ -451,9 +443,7 @@ pub async fn mdnblocks(
             let file = reln.md_seg_fds[fork][segno as usize].mdfd_file.clone();
             seg_nblocks(&file).await
         };
-        if nblocks > RELSEG_SIZE_BN {
-            panic!("segment too big");
-        }
+        assert!(nblocks <= RELSEG_SIZE_BN, "segment too big");
         if nblocks < RELSEG_SIZE_BN {
             return segno * RELSEG_SIZE_BN + nblocks;
         }
@@ -502,7 +492,7 @@ pub async fn mdtruncate(
             // Last segment to keep: truncate to the right length.
             let lastsegblocks = nblocks - priorblocks;
             let file = reln.md_seg_fds[fork][curopensegs - 1].mdfd_file.clone();
-            file.truncate(lastsegblocks as u64 * BLCKSZ_U64)
+            file.truncate(u64::from(lastsegblocks) * BLCKSZ_U64)
                 .await
                 .expect("could not truncate segment");
             if !reln.is_temp() {
@@ -642,9 +632,7 @@ async fn getseg(
             let file = reln.md_seg_fds[fork][nextsegno as usize - 1].mdfd_file.clone();
             seg_nblocks(&file).await
         };
-        if cur_nblocks > RELSEG_SIZE_BN {
-            panic!("segment too big");
-        }
+        assert!(cur_nblocks <= RELSEG_SIZE_BN, "segment too big");
 
         let create = behavior == Extension::Create;
         if create {
@@ -694,14 +682,17 @@ async fn register_dirty_segment(
     if !RegisterSyncRequest(shared, &tag, SyncRequestType::SyncRequest, false) {
         // Queue full: fsync locally. The segment is open (caller just wrote it).
         let fork = forknum as usize;
-        if let Some(v) = reln.md_seg_fds[fork].iter().find(|v| v.mdfd_segno == segno) {
-            let file = v.mdfd_file.clone();
+        let file = reln.md_seg_fds[fork]
+            .iter()
+            .find(|v| v.mdfd_segno == segno)
+            .map(|v| v.mdfd_file.clone());
+        if let Some(file) = file {
             file.sync().await.expect("could not fsync segment");
         }
     }
 }
 
-async fn register_unlink_segment(
+fn register_unlink_segment(
     shared: &Arc<SharedState>,
     rlocator: RelFileLocatorBackend,
     forknum: ForkNumber,
@@ -712,7 +703,7 @@ async fn register_unlink_segment(
     RegisterSyncRequest(shared, &tag, SyncRequestType::SyncUnlinkRequest, true);
 }
 
-async fn register_forget_request(
+fn register_forget_request(
     shared: &Arc<SharedState>,
     rlocator: RelFileLocatorBackend,
     forknum: ForkNumber,
@@ -733,7 +724,7 @@ pub fn forget_database_sync_requests(shared: &Arc<SharedState>, dbid: Oid) {
         handler: SyncRequestHandler::Md as i16,
         forknum: ForkNumber::InvalidForkNumber as i16,
         rlocator,
-        segno: INVALID_BLOCK_NUMBER as u64,
+        segno: u64::from(INVALID_BLOCK_NUMBER),
     };
     RegisterSyncRequest(shared, &tag, SyncRequestType::SyncFilterRequest, true);
 }

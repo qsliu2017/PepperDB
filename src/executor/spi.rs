@@ -4,6 +4,8 @@
 //! (SPI_OK_* success, SPI_ERROR_* negative) maps to `Result<SpiOk, SpiError>`
 //! per function-mapping.md 3.2.
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 use bitflags::bitflags;
 
 use crate::access::htup::{HeapTuple, HeapTupleHeaderData};

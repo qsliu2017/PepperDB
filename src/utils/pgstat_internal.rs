@@ -84,7 +84,7 @@ pub struct PgStat_SubXactStatus {
     /// Subtransaction nest level.
     pub nest_level: i32,
     /// Higher-level subxact if any.
-    pub prev: Option<Box<PgStat_SubXactStatus>>,
+    pub prev: Option<Box<Self>>,
     /// Stats dropped in this (sub)transaction, executed on commit/abort.
     /// C: dclist_head pending_drops -> Vec.
     pub pending_drops: Vec<PgStat_HashKey>,
@@ -611,14 +611,14 @@ pub static mut pgstat_report_fixed: bool = false;
 
 /// Begin a change-count write (odd value indicates write in progress).
 pub fn pgstat_begin_changecount_write(cc: &mut u32) {
-    debug_assert!(*cc & 1 == 0);
+    debug_assert_eq!(*cc & 1, 0);
     // START_CRIT_SECTION + write barrier: critical-section/barrier deferred.
     *cc += 1;
 }
 
 /// End a change-count write.
 pub fn pgstat_end_changecount_write(cc: &mut u32) {
-    debug_assert!(*cc & 1 == 1);
+    debug_assert_eq!(*cc & 1, 1);
     *cc += 1;
     // END_CRIT_SECTION + write barrier deferred.
 }
@@ -659,7 +659,7 @@ pub fn pgstat_cmp_hash_key(a: &PgStat_HashKey, b: &PgStat_HashKey) -> bool {
 pub fn pgstat_hash_hash_key(d: &PgStat_HashKey) -> u32 {
     let bytes = unsafe {
         core::slice::from_raw_parts(
-            (d as *const PgStat_HashKey).cast::<u8>(),
+            std::ptr::from_ref::<PgStat_HashKey>(d).cast::<u8>(),
             core::mem::size_of::<PgStat_HashKey>(),
         )
     };
@@ -675,7 +675,7 @@ pub fn pgstat_get_entry_len(kind: PgStat_Kind) -> usize {
 pub fn pgstat_get_entry_data(kind: PgStat_Kind, entry: *mut PgStatShared_Common) -> *mut () {
     let off = pgstat_get_kind_info(kind).unwrap().shared_data_off as usize;
     debug_assert!(off != 0);
-    unsafe { (entry as *mut u8).add(off) as *mut () }
+    unsafe { entry.cast::<u8>().add(off).cast::<()>() }
 }
 
 /// Shared memory area of custom stats for fixed-numbered statistics.

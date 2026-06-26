@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/fmgr.h
 //! Function manager and function-call interface.
 
+#![allow(clippy::similar_names, reason = "names mirror PG identifiers")]
+
 use crate::c::{bytea, varlena};
 use crate::lib::stringinfo::StringInfo;
 use crate::nodes::nodes::Node;

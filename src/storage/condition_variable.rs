@@ -45,19 +45,19 @@ pub use crate::backend::storage::lmgr::condition_variable::CvSleep;
 #[deprecated(note = "use `cv.init()`")]
 #[inline]
 pub fn ConditionVariableInit(cv: &ConditionVariable) {
-    cv.init()
+    cv.init();
 }
 
 #[deprecated(note = "use `cv.signal()`")]
 #[inline]
 pub fn ConditionVariableSignal(cv: &ConditionVariable) {
-    cv.signal()
+    cv.signal();
 }
 
 #[deprecated(note = "use `cv.broadcast()`")]
 #[inline]
 pub fn ConditionVariableBroadcast(cv: &ConditionVariable) {
-    cv.broadcast()
+    cv.broadcast();
 }
 
 #[deprecated(note = "use `cv.prepare_to_sleep()`")]

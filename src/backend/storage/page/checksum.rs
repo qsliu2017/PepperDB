@@ -26,6 +26,7 @@ const PD_CHECKSUM_OFFSET: usize = 8;
 
 const _: () = assert!(N_BLOCKS * 4 * N_SUMS == BLCKSZ as usize);
 const _: () = assert!(N_BLOCKS == 64);
+const _: () = assert!(PD_CHECKSUM_OFFSET < SizeOfPageHeaderData);
 
 /// Base offsets to initialize each of the parallel FNV hashes into a different
 /// initial state. Chosen randomly; the values themselves don't matter as much
@@ -60,8 +61,8 @@ fn pg_checksum_block(words: &[u32; N_BLOCKS * N_SUMS]) -> u32 {
 
     // Two more rounds of zeroes for additional mixing.
     for _ in 0..2 {
-        for j in 0..N_SUMS {
-            sums[j] = checksum_comp(sums[j], 0);
+        for s in &mut sums {
+            *s = checksum_comp(*s, 0);
         }
     }
 
@@ -92,8 +93,7 @@ impl Page {
         }
         // Zero out the pd_checksum field (a u16 at PD_CHECKSUM_OFFSET). It sits in
         // the low half of the word at PD_CHECKSUM_OFFSET/4 on little-endian.
-        debug_assert!(PD_CHECKSUM_OFFSET % 4 == 0);
-        debug_assert!(PD_CHECKSUM_OFFSET < SizeOfPageHeaderData);
+        debug_assert!(PD_CHECKSUM_OFFSET.is_multiple_of(4));
         words[PD_CHECKSUM_OFFSET / 4] &= 0xFFFF_0000;
 
         let mut checksum = pg_checksum_block(&words);

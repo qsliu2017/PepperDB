@@ -35,33 +35,33 @@ pub enum RmgrId {
 
 impl RmgrId {
     /// Highest assigned resource manager ID.
-    pub const MAX_ID: RmgrId = RmgrId::Logicalmsg;
+    pub const MAX_ID: Self = Self::Logicalmsg;
 
     /// Textual name (from the PG_RMGR list).
     pub fn name(self) -> &'static str {
         match self {
-            RmgrId::Xlog => "XLOG",
-            RmgrId::Xact => "Transaction",
-            RmgrId::Smgr => "Storage",
-            RmgrId::Clog => "CLOG",
-            RmgrId::Dbase => "Database",
-            RmgrId::Tblspc => "Tablespace",
-            RmgrId::Multixact => "MultiXact",
-            RmgrId::Relmap => "RelMap",
-            RmgrId::Standby => "Standby",
-            RmgrId::Heap2 => "Heap2",
-            RmgrId::Heap => "Heap",
-            RmgrId::Btree => "Btree",
-            RmgrId::Hash => "Hash",
-            RmgrId::Gin => "Gin",
-            RmgrId::Gist => "Gist",
-            RmgrId::Seq => "Sequence",
-            RmgrId::Spgist => "SPGist",
-            RmgrId::Brin => "BRIN",
-            RmgrId::CommitTs => "CommitTs",
-            RmgrId::Replorigin => "ReplicationOrigin",
-            RmgrId::Generic => "Generic",
-            RmgrId::Logicalmsg => "LogicalMessage",
+            Self::Xlog => "XLOG",
+            Self::Xact => "Transaction",
+            Self::Smgr => "Storage",
+            Self::Clog => "CLOG",
+            Self::Dbase => "Database",
+            Self::Tblspc => "Tablespace",
+            Self::Multixact => "MultiXact",
+            Self::Relmap => "RelMap",
+            Self::Standby => "Standby",
+            Self::Heap2 => "Heap2",
+            Self::Heap => "Heap",
+            Self::Btree => "Btree",
+            Self::Hash => "Hash",
+            Self::Gin => "Gin",
+            Self::Gist => "Gist",
+            Self::Seq => "Sequence",
+            Self::Spgist => "SPGist",
+            Self::Brin => "BRIN",
+            Self::CommitTs => "CommitTs",
+            Self::Replorigin => "ReplicationOrigin",
+            Self::Generic => "Generic",
+            Self::Logicalmsg => "LogicalMessage",
         }
     }
 }

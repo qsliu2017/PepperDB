@@ -2,6 +2,8 @@
 
 // lib/stringinfo.h is a tombstone: StringInfo -> &mut String.
 
+#![allow(clippy::ptr_arg, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1")]
+
 use crate::c::text;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;

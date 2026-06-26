@@ -57,6 +57,8 @@ tokio::task_local! {
 /// backend, but the SLRU/test harness may not establish the scope).
 fn with_spec_token<R>(f: impl FnOnce(&std::cell::Cell<u32>) -> R) -> R {
     let mut held = Some(f);
+    // map_or_else would move `held` into both closures; the match runs only one.
+    #[allow(clippy::option_if_let_else, reason = "both arms move-take the same `held`")]
     match SPECULATIVE_INSERTION_TOKEN.try_with(|c| (held.take().unwrap())(c)) {
         Ok(r) => r,
         // Outside a backend scope: a fresh cell (the wrappers are always called
@@ -79,8 +81,7 @@ where
 /// PG `MyDatabaseId`: the connected database OID (session-local).
 fn my_database_id() -> Oid {
     crate::session::try_current()
-        .map(|s| s.database_id())
-        .unwrap_or(InvalidOid)
+        .map_or(InvalidOid, |s| s.database_id())
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +90,10 @@ fn my_database_id() -> Oid {
 
 /// PG `RelationInitLockInfo`: initialize a reldesc's lock info. relcache.c calls
 /// this when creating a reldesc.
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "mirrors the C fn taking a Relation pointer; safe-ref migration is later"
+)]
 pub fn RelationInitLockInfo(relation: Relation) {
     debug_assert!(!relation.is_null());
     // SAFETY: relcache hands us a live RelationData (rules: trust internal code).
@@ -168,22 +173,35 @@ pub fn UnlockRelationOid(relid: Oid, lockmode: LOCKMODE) {
 }
 
 /// PG `LockRelation`: an additional lock on an already-open relation.
-pub async fn LockRelation(relation: Relation, lockmode: LOCKMODE) {
+///
+/// Sync wrapper: derive the Send `LOCKTAG` from the `!Send` raw `Relation` here
+/// so it never enters the returned future (same shape as `XactLockTableWait`).
+pub fn LockRelation(
+    relation: Relation,
+    lockmode: LOCKMODE,
+) -> impl std::future::Future<Output = ()> + Send {
     let tag = rel_locktag(relation);
-    let (res, locallock) =
-        LockAcquireExtended(&tag, lockmode, false, false, true, false).await;
-    accept_inval_after_acquire(res, locallock);
+    async move {
+        let (res, locallock) =
+            LockAcquireExtended(&tag, lockmode, false, false, true, false).await;
+        accept_inval_after_acquire(res, locallock);
+    }
 }
 
 /// PG `ConditionalLockRelation`.
-pub async fn ConditionalLockRelation(relation: Relation, lockmode: LOCKMODE) -> bool {
+pub fn ConditionalLockRelation(
+    relation: Relation,
+    lockmode: LOCKMODE,
+) -> impl std::future::Future<Output = bool> + Send {
     let tag = rel_locktag(relation);
-    let (res, locallock) = LockAcquireExtended(&tag, lockmode, false, true, true, false).await;
-    if res == LockAcquireResult::NotAvail {
-        return false;
+    async move {
+        let (res, locallock) = LockAcquireExtended(&tag, lockmode, false, true, true, false).await;
+        if res == LockAcquireResult::NotAvail {
+            return false;
+        }
+        accept_inval_after_acquire(res, locallock);
+        true
     }
-    accept_inval_after_acquire(res, locallock);
-    true
 }
 
 /// PG `UnlockRelation`.
@@ -244,17 +262,25 @@ pub fn UnlockRelationIdForSession(relid: &LockRelId, lockmode: LOCKMODE) {
 
 /// PG `LockRelationForExtension`: interlock addition of pages to a relation. The
 /// caller already holds a regular lock, so no AcceptInvalidationMessages here.
-pub async fn LockRelationForExtension(relation: Relation, lockmode: LOCKMODE) {
+pub fn LockRelationForExtension(
+    relation: Relation,
+    lockmode: LOCKMODE,
+) -> impl std::future::Future<Output = ()> + Send {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_relation_extend(id.dbId.0, id.relId.0);
-    let _ = LockAcquire(&tag, lockmode, false, false).await;
+    async move {
+        let _ = LockAcquire(&tag, lockmode, false, false).await;
+    }
 }
 
 /// PG `ConditionalLockRelationForExtension`.
-pub async fn ConditionalLockRelationForExtension(relation: Relation, lockmode: LOCKMODE) -> bool {
+pub fn ConditionalLockRelationForExtension(
+    relation: Relation,
+    lockmode: LOCKMODE,
+) -> impl std::future::Future<Output = bool> + Send {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_relation_extend(id.dbId.0, id.relId.0);
-    LockAcquire(&tag, lockmode, false, true).await != LockAcquireResult::NotAvail
+    async move { LockAcquire(&tag, lockmode, false, true).await != LockAcquireResult::NotAvail }
 }
 
 /// PG `RelationExtensionLockWaiterCount`.
@@ -279,21 +305,27 @@ pub async fn LockDatabaseFrozenIds(lockmode: LOCKMODE) {
 }
 
 /// PG `LockPage`: a page-level lock (used by some index AMs).
-pub async fn LockPage(relation: Relation, blkno: BlockNumber, lockmode: LOCKMODE) {
-    let id = rel_lock_id(relation);
-    let tag = LOCKTAG::set_page(id.dbId.0, id.relId.0, blkno);
-    let _ = LockAcquire(&tag, lockmode, false, false).await;
-}
-
-/// PG `ConditionalLockPage`.
-pub async fn ConditionalLockPage(
+pub fn LockPage(
     relation: Relation,
     blkno: BlockNumber,
     lockmode: LOCKMODE,
-) -> bool {
+) -> impl std::future::Future<Output = ()> + Send {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_page(id.dbId.0, id.relId.0, blkno);
-    LockAcquire(&tag, lockmode, false, true).await != LockAcquireResult::NotAvail
+    async move {
+        let _ = LockAcquire(&tag, lockmode, false, false).await;
+    }
+}
+
+/// PG `ConditionalLockPage`.
+pub fn ConditionalLockPage(
+    relation: Relation,
+    blkno: BlockNumber,
+    lockmode: LOCKMODE,
+) -> impl std::future::Future<Output = bool> + Send {
+    let id = rel_lock_id(relation);
+    let tag = LOCKTAG::set_page(id.dbId.0, id.relId.0, blkno);
+    async move { LockAcquire(&tag, lockmode, false, true).await != LockAcquireResult::NotAvail }
 }
 
 /// PG `UnlockPage`.
@@ -304,7 +336,11 @@ pub fn UnlockPage(relation: Relation, blkno: BlockNumber, lockmode: LOCKMODE) {
 }
 
 /// PG `LockTuple`: a tuple-level lock (see heap_lock_tuple before using).
-pub async fn LockTuple(relation: Relation, tid: &ItemPointerData, lockmode: LOCKMODE) {
+pub fn LockTuple(
+    relation: Relation,
+    tid: &ItemPointerData,
+    lockmode: LOCKMODE,
+) -> impl std::future::Future<Output = ()> + Send {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_tuple(
         id.dbId.0,
@@ -312,16 +348,18 @@ pub async fn LockTuple(relation: Relation, tid: &ItemPointerData, lockmode: LOCK
         tid.block_number(),
         tid.offset_number(),
     );
-    let _ = LockAcquire(&tag, lockmode, false, false).await;
+    async move {
+        let _ = LockAcquire(&tag, lockmode, false, false).await;
+    }
 }
 
 /// PG `ConditionalLockTuple`.
-pub async fn ConditionalLockTuple(
+pub fn ConditionalLockTuple(
     relation: Relation,
     tid: &ItemPointerData,
     lockmode: LOCKMODE,
     log_lock_failure: bool,
-) -> bool {
+) -> impl std::future::Future<Output = bool> + Send {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_tuple(
         id.dbId.0,
@@ -329,10 +367,12 @@ pub async fn ConditionalLockTuple(
         tid.block_number(),
         tid.offset_number(),
     );
-    LockAcquireExtended(&tag, lockmode, false, true, true, log_lock_failure)
-        .await
-        .0
-        != LockAcquireResult::NotAvail
+    async move {
+        LockAcquireExtended(&tag, lockmode, false, true, true, log_lock_failure)
+            .await
+            .0
+            != LockAcquireResult::NotAvail
+    }
 }
 
 /// PG `UnlockTuple`.
@@ -386,8 +426,8 @@ pub fn XactLockTableWait<'a>(
     // synchronous wrapper, so the `!Send` raw `Relation`/ctid never enter the
     // returned future. TODO(panic): push this onto the error-context stack once it
     // is async-aware.
-    let _wait_ctx = xact_lock_wait_context(oper, rel, ctid);
-    xact_lock_table_wait_inner(shared, xid, _wait_ctx)
+    let wait_ctx = xact_lock_wait_context(oper, rel, ctid);
+    xact_lock_table_wait_inner(shared, xid, wait_ctx)
 }
 
 async fn xact_lock_table_wait_inner(
@@ -544,7 +584,7 @@ pub async fn SpeculativeInsertionLockAcquire(xid: TransactionId) -> u32 {
 
 /// PG `SpeculativeInsertionLockRelease`.
 pub fn SpeculativeInsertionLockRelease(xid: TransactionId) {
-    let token = with_spec_token(|c| c.get());
+    let token = with_spec_token(std::cell::Cell::get);
     let tag = LOCKTAG::set_speculative_insertion(xid.0, token);
     LockRelease(&tag, LockMode::ExclusiveLock as LOCKMODE, false);
 }
@@ -762,12 +802,12 @@ pub fn DescribeLockTag(buf: &mut String, tag: &LOCKTAG) {
             buf,
             "remote transaction {f3} of subscription {f2} of database {f1}"
         ),
-        None => write!(buf, "unrecognized locktag type {}", tag.locktag_type as i32),
+        None => write!(buf, "unrecognized locktag type {}", i32::from(tag.locktag_type)),
     };
 }
 
 fn lock_tag_type_of(t: u8) -> Option<LockTagType> {
-    use LockTagType::*;
+    use LockTagType::{Relation, RelationExtend, DatabaseFrozenIds, Page, Tuple, Transaction, VirtualTransaction, SpeculativeToken, Object, UserLock, Advisory, ApplyTransaction};
     Some(match t {
         0 => Relation,
         1 => RelationExtend,

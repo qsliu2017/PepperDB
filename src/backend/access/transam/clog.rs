@@ -38,7 +38,7 @@ const CLOG_LSNS_PER_PAGE: usize = (CLOG_XACTS_PER_PAGE / CLOG_XACTS_PER_LSN_GROU
 
 #[inline]
 fn xid_to_page(xid: TransactionId) -> i64 {
-    xid.0 as i64 / CLOG_XACTS_PER_PAGE as i64
+    i64::from(xid.0) / i64::from(CLOG_XACTS_PER_PAGE)
 }
 #[inline]
 fn xid_to_pgindex(xid: TransactionId) -> u32 {
@@ -85,7 +85,7 @@ pub fn clog_shmem_init_handles(
 ) -> Arc<SlruCtl> {
     // autotune_buffers already returns a multiple of SLRU_BANK_SIZE >= one bank.
     let nslots = clog_shmem_buffers(nbuffers);
-    debug_assert!(nslots % SLRU_BANK_SIZE == 0);
+    debug_assert!(nslots.is_multiple_of(SLRU_BANK_SIZE));
     SlruCtl::new(
         nslots,
         CLOG_LSNS_PER_PAGE,

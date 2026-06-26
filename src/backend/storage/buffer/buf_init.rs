@@ -111,7 +111,7 @@ impl BufferDesc {
             block_num: crate::storage::block::INVALID_BLOCK_NUMBER,
         };
         tag.clear();
-        BufferDesc {
+        Self {
             tag: UnsafeCell::new(tag),
             buf_id,
             state: AtomicU32::new(0),
@@ -242,7 +242,7 @@ fn with_refcount_map<R>(f: impl FnOnce(&mut HashMap<Buffer, u32>) -> R) -> R {
     thread_local! {
         static FALLBACK: RefCell<HashMap<Buffer, u32>> = RefCell::new(HashMap::new());
     }
-    match PRIVATE_REFCOUNT.try_with(|m| m as *const RefCell<HashMap<Buffer, u32>>) {
+    match PRIVATE_REFCOUNT.try_with(std::ptr::from_ref::<RefCell<HashMap<Buffer, u32>>>) {
         Ok(ptr) => {
             // SAFETY: the pointer is valid for the duration of this call -- the
             // task_local outlives the synchronous `f`, which never `.await`s.
@@ -314,7 +314,7 @@ impl BufferPool {
 
         let strategy = StrategyControl::new(nbuffers);
 
-        BufferPool {
+        Self {
             blocks,
             descriptors,
             buf_table: BufTable::new(),
@@ -390,7 +390,9 @@ impl BufferPool {
         let b = desc.buffer();
 
         let had_private = private_refcount(b) > 0;
-        let valid = if !had_private {
+        let valid = if had_private {
+            desc.state.load(Ordering::Relaxed) & BufFlags::VALID.bits() != 0
+        } else {
             let mut old = desc.state.load(Ordering::Relaxed);
             loop {
                 if old & BufFlags::LOCKED.bits() != 0 {
@@ -411,8 +413,6 @@ impl BufferPool {
                     Err(cur) => old = cur,
                 }
             }
-        } else {
-            desc.state.load(Ordering::Relaxed) & BufFlags::VALID.bits() != 0
         };
 
         with_refcount_map(|m| *m.entry(b).or_insert(0) += 1);
@@ -678,7 +678,7 @@ mod tests {
     fn header_lock_serializes() {
         // A pile of tasks each take the header lock, bump a counter under it,
         // and release. The final count must be exact (mutual exclusion).
-        let p = pool(1);
+        let pool = pool(1);
         let counter = Arc::new(AtomicUsize::new(0));
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(4)
@@ -687,16 +687,16 @@ mod tests {
         rt.block_on(async {
             let mut handles = Vec::new();
             for _ in 0..16 {
-                let p = p.clone();
-                let c = counter.clone();
+                let pool = pool.clone();
+                let counter = counter.clone();
                 handles.push(tokio::spawn(async move {
                     for _ in 0..1000 {
-                        let d = p.descriptor(0);
-                        let s = d.lock_hdr();
+                        let desc = pool.descriptor(0);
+                        let state = desc.lock_hdr();
                         // non-atomic read-modify-write protected by the hdr lock
-                        let v = c.load(Ordering::Relaxed);
-                        c.store(v + 1, Ordering::Relaxed);
-                        d.unlock_hdr(s);
+                        let cur = counter.load(Ordering::Relaxed);
+                        counter.store(cur + 1, Ordering::Relaxed);
+                        desc.unlock_hdr(state);
                     }
                 }));
             }
@@ -870,7 +870,7 @@ mod tests {
     async fn terminate_wakes_waiter() {
         let p = pool(1);
         // Claim IO synchronously.
-        assert_eq!(p.start_buffer_io(0, true).await, true);
+        assert!(p.start_buffer_io(0, true).await);
 
         let pw = p.clone();
         let waiter = tokio::spawn(async move {
@@ -890,7 +890,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn dropping_wait_io_future_dequeues() {
         let p = pool(1);
-        assert_eq!(p.start_buffer_io(0, true).await, true);
+        assert!(p.start_buffer_io(0, true).await);
 
         // Start waiting, then cancel mid-wait by dropping the future.
         {

@@ -1,6 +1,15 @@
 //! Translated from PostgreSQL src/include/access/heapam.h
 //! POSTGRES heap access method definitions.
 //!
+#![allow(
+    clippy::fn_params_excessive_bools,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+#![allow(
+    clippy::implicit_hasher,
+    reason = "TODO(stub): drop when implemented; hollow stub; PG API uses a concrete HashMap, not a generic hasher"
+)]
+//!
 //! HeapScanDescData/BitmapHeapScanDescData/IndexFetchHeapData are in-memory scan
 //! state (idiomatic structs embedding their AM-independent base). The two flag
 //! groups split per bitflags-port.md: HEAP_PAGE_PRUNE_* and HEAP_FREEZE_CHECK_*

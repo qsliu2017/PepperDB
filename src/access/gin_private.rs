@@ -1,5 +1,7 @@
 //! Translated from PostgreSQL src/include/access/gin_private.h
 
+#![allow(clippy::type_complexity, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG fn-pointer vtable signatures 1:1")]
+
 use bitflags::bitflags;
 
 use crate::access::gin::{GinStatsData, GinTernaryValue};
@@ -169,7 +171,7 @@ pub struct GinBtreeStack {
     pub iptr: ItemPointerData,
     /// Predicted number of pages on current level.
     pub predict_number: u32,
-    pub parent: *mut GinBtreeStack, // TODO(ptr)
+    pub parent: *mut Self, // TODO(ptr)
 }
 
 pub type GinBtree = *mut GinBtreeData; // TODO(ptr)
@@ -596,8 +598,8 @@ pub fn ginMergeItemPointers(_a: &[ItemPointerData], _na: u32,
 
 /// Compares item pointers; inlined for hot merge loops.
 pub fn ginCompareItemPointers(a: &ItemPointerData, b: &ItemPointerData) -> i32 {
-    let ia = (a.block_number() as u64) << 32 | a.offset_number() as u64;
-    let ib = (b.block_number() as u64) << 32 | b.offset_number() as u64;
+    let ia = u64::from(a.block_number()) << 32 | u64::from(a.offset_number());
+    let ib = u64::from(b.block_number()) << 32 | u64::from(b.offset_number());
     pg_cmp_u64(ia, ib)
 }
 

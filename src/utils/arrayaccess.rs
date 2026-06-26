@@ -40,17 +40,9 @@ pub unsafe fn array_iter_next(
     elmbyval: bool,
     elmalign: u8,
 ) -> (Datum, bool) {
-    if !it.datumptr.is_null() {
-        let ret = unsafe { *it.datumptr.add(i) };
-        let isnull = if it.isnullptr.is_null() {
-            false
-        } else {
-            unsafe { *it.isnullptr.add(i) }
-        };
-        (ret, isnull)
-    } else {
+    if it.datumptr.is_null() {
         let (ret, isnull);
-        if !it.bitmapptr.is_null() && (unsafe { *it.bitmapptr } as i32 & it.bitmask) == 0 {
+        if !it.bitmapptr.is_null() && (i32::from(unsafe { *it.bitmapptr }) & it.bitmask) == 0 {
             isnull = true;
             ret = Datum(0);
         } else {
@@ -69,6 +61,14 @@ pub unsafe fn array_iter_next(
             }
             it.bitmask = 1;
         }
+        (ret, isnull)
+    } else {
+        let ret = unsafe { *it.datumptr.add(i) };
+        let isnull = if it.isnullptr.is_null() {
+            false
+        } else {
+            unsafe { *it.isnullptr.add(i) }
+        };
         (ret, isnull)
     }
 }

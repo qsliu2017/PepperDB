@@ -72,5 +72,5 @@ pub enum AuthRequest {
 
 impl AuthRequest {
     /// Maximum AUTH_REQ_* value.
-    pub const MAX: AuthRequest = AuthRequest::SaslFin;
+    pub const MAX: Self = Self::SaslFin;
 }

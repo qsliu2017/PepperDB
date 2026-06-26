@@ -30,7 +30,7 @@ pub fn DatumGetVarBitPCopy(x: Datum) -> *mut VarBit {
 }
 #[inline]
 pub fn VarBitPGetDatum(x: &VarBit) -> Datum {
-    Datum(x as *const VarBit as usize)
+    Datum(std::ptr::from_ref::<VarBit>(x) as usize)
 }
 
 /// Header overhead in addition to VARHDRSZ.

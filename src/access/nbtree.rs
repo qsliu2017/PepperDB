@@ -1,6 +1,9 @@
 //! Translated from PostgreSQL src/include/access/nbtree.h
 //! header file for postgres btree access method implementation.
 //!
+#![allow(clippy::cast_ptr_alignment, reason = "PG on-disk/varlena pointer reinterpretation, faithful to C")]
+#![allow(clippy::as_ptr_cast_mut, reason = "faithful to C pointer cast; source slice is immutable")]
+//!
 //! On-disk: BTPageOpaqueData (page special space), BTMetaPageData, and
 //! BTDeletedPageData are `#[repr(C)]` with layout asserts. BTreeTupleData is just
 //! the shared IndexTuple (access/itup) -- nbtree's pivot/posting metadata is
@@ -227,7 +230,7 @@ pub fn BTPageGetDeleteXid(page: &Page) -> FullTransactionId {
     if !P_HAS_FULLXID(opaque) {
         return FIRST_NORMAL_FULL_TRANSACTION_ID;
     }
-    let contents = page.get_contents().as_ptr() as *const BTDeletedPageData;
+    let contents = page.get_contents().as_ptr().cast::<BTDeletedPageData>();
     unsafe { (*contents).safexid }
 }
 
@@ -315,8 +318,8 @@ pub fn BTreeTupleIsPosting(itup: &IndexTupleData) -> bool {
 /// posting list byte offset in the block-number field.
 pub fn BTreeTupleSetPosting(itup: &mut IndexTupleData, nhtids: u16, postingoffset: usize) {
     debug_assert!(nhtids > 1);
-    debug_assert!(nhtids & BT_STATUS_OFFSET_MASK == 0);
-    debug_assert!(postingoffset == maxalign(postingoffset));
+    debug_assert_eq!(nhtids & BT_STATUS_OFFSET_MASK, 0);
+    debug_assert_eq!(postingoffset, maxalign(postingoffset));
     debug_assert!(postingoffset < INDEX_SIZE_MASK as usize);
     debug_assert!(!BTreeTupleIsPivot(itup));
 
@@ -340,7 +343,7 @@ pub fn BTreeTupleGetPostingOffset(posting: &IndexTupleData) -> u32 {
 /// Pointer to the posting list (TID array) inside a posting-list tuple.
 pub fn BTreeTupleGetPosting(posting: &IndexTupleData) -> ItemPointer {
     let off = BTreeTupleGetPostingOffset(posting) as usize;
-    unsafe { (posting as *const IndexTupleData as *const u8).add(off) as ItemPointer }
+    unsafe { std::ptr::from_ref::<IndexTupleData>(posting).cast::<u8>().add(off) as ItemPointer }
 }
 
 /// Pointer to the n-th posting-list TID.
@@ -371,7 +374,7 @@ pub fn BTreeTupleGetNAtts(itup: &IndexTupleData, rel: Relation) -> u16 {
 /// Set number of key attributes in a tuple; optionally flag a trailing heap TID.
 pub fn BTreeTupleSetNAtts(itup: &mut IndexTupleData, nkeyatts: u16, heaptid: bool) {
     debug_assert!(nkeyatts <= crate::pg_config_manual::INDEX_MAX_KEYS as u16);
-    debug_assert!(nkeyatts & BT_STATUS_OFFSET_MASK == 0);
+    debug_assert_eq!(nkeyatts & BT_STATUS_OFFSET_MASK, 0);
     debug_assert!(!heaptid || nkeyatts > 0);
     debug_assert!(!BTreeTupleIsPivot(itup) || nkeyatts == 0);
 
@@ -403,7 +406,7 @@ pub fn BTreeTupleGetHeapTID(itup: &IndexTupleData) -> Option<ItemPointer> {
     if BTreeTupleIsPivot(itup) {
         if itup.tid.offset_number_no_check() & BT_PIVOT_HEAP_TID_ATTR != 0 {
             let p = unsafe {
-                (itup as *const IndexTupleData as *const u8)
+                std::ptr::from_ref::<IndexTupleData>(itup).cast::<u8>()
                     .add(IndexTupleSize(itup) - core::mem::size_of::<ItemPointerData>())
             } as ItemPointer;
             return Some(p);
@@ -413,7 +416,7 @@ pub fn BTreeTupleGetHeapTID(itup: &IndexTupleData) -> Option<ItemPointer> {
     } else if BTreeTupleIsPosting(itup) {
         Some(BTreeTupleGetPosting(itup))
     } else {
-        Some(&itup.tid as *const ItemPointerData as ItemPointer)
+        Some((&raw const itup.tid).cast_mut())
     }
 }
 
@@ -422,9 +425,9 @@ pub fn BTreeTupleGetMaxHeapTID(itup: &IndexTupleData) -> ItemPointer {
     debug_assert!(!BTreeTupleIsPivot(itup));
     if BTreeTupleIsPosting(itup) {
         let nposting = BTreeTupleGetNPosting(itup);
-        return BTreeTupleGetPostingN(itup, nposting as i32 - 1);
+        return BTreeTupleGetPostingN(itup, i32::from(nposting) - 1);
     }
-    &itup.tid as *const ItemPointerData as ItemPointer
+    (&raw const itup.tid).cast_mut()
 }
 
 /// Commute a btree strategy number by subtraction.
@@ -450,7 +453,7 @@ pub const BT_WRITE: i32 = BUFFER_LOCK_EXCLUSIVE;
 pub struct BTStackData {
     pub blkno: BlockNumber,
     pub offset: OffsetNumber,
-    pub parent: Option<Box<BTStackData>>,
+    pub parent: Option<Box<Self>>,
 }
 pub type BTStack = Option<Box<BTStackData>>;
 

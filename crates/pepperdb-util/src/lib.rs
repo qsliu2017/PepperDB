@@ -10,27 +10,27 @@ pub trait WithCapacity {
 }
 impl<T> WithCapacity for Vec<T> {
     fn with_capacity(c: usize) -> Self {
-        Vec::with_capacity(c)
+        Self::with_capacity(c)
     }
 }
 impl<T> WithCapacity for VecDeque<T> {
     fn with_capacity(c: usize) -> Self {
-        VecDeque::with_capacity(c)
+        Self::with_capacity(c)
     }
 }
 impl WithCapacity for String {
     fn with_capacity(c: usize) -> Self {
-        String::with_capacity(c)
+        Self::with_capacity(c)
     }
 }
 impl<K, V, S: BuildHasher + Default> WithCapacity for HashMap<K, V, S> {
     fn with_capacity(c: usize) -> Self {
-        HashMap::with_capacity_and_hasher(c, S::default())
+        Self::with_capacity_and_hasher(c, S::default())
     }
 }
 impl<T, S: BuildHasher + Default> WithCapacity for HashSet<T, S> {
     fn with_capacity(c: usize) -> Self {
-        HashSet::with_capacity_and_hasher(c, S::default())
+        Self::with_capacity_and_hasher(c, S::default())
     }
 }
 

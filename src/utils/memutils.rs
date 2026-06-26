@@ -40,7 +40,7 @@ pub const ALLOCSET_DEFAULT_SIZES: (usize, usize, usize) = (
 
 // Recommended alloc params for "small" contexts (e.g. a query plan).
 pub const ALLOCSET_SMALL_MINSIZE: usize = 0;
-pub const ALLOCSET_SMALL_INITSIZE: usize = 1 * 1024;
+pub const ALLOCSET_SMALL_INITSIZE: usize = 1024;
 pub const ALLOCSET_SMALL_MAXSIZE: usize = 8 * 1024;
 pub const ALLOCSET_SMALL_SIZES: (usize, usize, usize) = (
     ALLOCSET_SMALL_MINSIZE,

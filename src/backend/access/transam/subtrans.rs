@@ -19,7 +19,7 @@ const SUBTRANS_XACTS_PER_PAGE: u32 = BLCKSZ / 4;
 
 #[inline]
 fn xid_to_page(xid: TransactionId) -> i64 {
-    xid.0 as i64 / SUBTRANS_XACTS_PER_PAGE as i64
+    i64::from(xid.0) / i64::from(SUBTRANS_XACTS_PER_PAGE)
 }
 #[inline]
 fn xid_to_entry(xid: TransactionId) -> usize {
@@ -44,7 +44,7 @@ pub fn subtrans_shmem_init_handles(
     data_dir: Option<String>,
 ) -> Arc<SlruCtl> {
     let nslots = subtrans_shmem_buffers(nbuffers);
-    debug_assert!(nslots % SLRU_BANK_SIZE == 0);
+    debug_assert!(nslots.is_multiple_of(SLRU_BANK_SIZE));
     SlruCtl::new(
         nslots,
         0,
@@ -139,12 +139,10 @@ impl SlruCtl {
             }
             parent = self.sub_trans_get_parent(parent).await;
             // Parent is allocated before child, so must precede it; else corruption.
-            if !parent.precedes(previous) {
-                panic!(
-                    "pg_subtrans contains invalid entry: xid {} points to parent xid {}",
-                    previous.0, parent.0
-                );
-            }
+            assert!(parent.precedes(previous), 
+                "pg_subtrans contains invalid entry: xid {} points to parent xid {}",
+                previous.0, parent.0
+            );
         }
         previous
     }
@@ -180,7 +178,7 @@ impl SlruCtl {
 
     /// subtrans.c ExtendSUBTRANS: zero a fresh page at a page boundary.
     pub async fn extend_subtrans(&self, newest_xact: TransactionId) {
-        if (newest_xact.0 % SUBTRANS_XACTS_PER_PAGE) != 0
+        if !newest_xact.0.is_multiple_of(SUBTRANS_XACTS_PER_PAGE)
             && newest_xact.0 != FIRST_NORMAL_TRANSACTION_ID.0
         {
             return;

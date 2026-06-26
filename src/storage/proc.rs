@@ -293,8 +293,8 @@ pub enum ProcGlobalList {
 
 impl PGPROC {
     /// A freshly-zeroed PGPROC (InitProcGlobal zero-inits each slot).
-    pub fn new() -> PGPROC {
-        PGPROC {
+    pub fn new() -> Self {
+        Self {
             proc_global_list: ProcGlobalList::None,
             wait_status: ProcWaitStatus::OK,
             proc_latch: crate::storage::latch::Latch::new(),
@@ -349,7 +349,7 @@ impl PGPROC {
 
 impl Default for PGPROC {
     fn default() -> Self {
-        PGPROC::new()
+        Self::new()
     }
 }
 
@@ -364,7 +364,7 @@ pub struct ProcCell(UnsafeCell<PGPROC>);
 
 impl ProcCell {
     fn new(proc: PGPROC) -> Self {
-        ProcCell(UnsafeCell::new(proc))
+        Self(UnsafeCell::new(proc))
     }
 
     /// Shared reference to the slot's PGPROC.
@@ -403,6 +403,7 @@ impl ProcCell {
 // whole `ProcGlobal` -- and thus `ProcCell` -- must be Send + Sync. That is sound
 // because the arena is never moved and the locking above serializes mutation.
 unsafe impl Sync for ProcCell {}
+#[allow(clippy::non_send_fields_in_send_ty, reason = "PGPROC arena Send is gated by lock discipline per the # Safety docs")]
 unsafe impl Send for ProcCell {}
 
 /// Cluster-wide proc directory (PG `PROC_HDR`). The arena + the dense MVCC mirror
@@ -462,7 +463,7 @@ const DEFAULT_SPINS_PER_DELAY: i32 = 100;
 impl ProcGlobal {
     /// Build the arena. `counts` carries the per-category slot counts computed by
     /// `InitProcGlobal` from the sizing GUCs. Called once.
-    pub(crate) fn new(counts: ProcCounts) -> ProcGlobal {
+    pub(crate) fn new(counts: ProcCounts) -> Self {
         let total = counts.total();
         let mut all_procs = Vec::with_capacity(total);
         let mut free = ProcFreeLists {
@@ -495,7 +496,7 @@ impl ProcGlobal {
         }
 
         let mirror_len = total;
-        ProcGlobal {
+        Self {
             all_procs,
             xids: (0..mirror_len).map(|_| AtomicU32::new(0)).collect(),
             subxid_states: (0..mirror_len).map(|_| AtomicU32::new(0)).collect(),
@@ -536,6 +537,10 @@ impl ProcGlobal {
     ///
     /// # Safety
     /// Caller must hold the lock gating the mutated field group (PGPROC doc).
+    #[allow(
+        clippy::mut_from_ref,
+        reason = "PGPROC arena interior-mutability accessor; caller holds the gating lock per the # Safety doc"
+    )]
     pub unsafe fn proc_mut(&self, procno: ProcNumber) -> Option<&mut PGPROC> {
         self.all_procs
             .get(procno as usize)
@@ -576,6 +581,7 @@ impl ProcGlobal {
 
 impl ProcFreeLists {
     fn list_mut(&mut self, kind: ProcGlobalList) -> &mut Vec<ProcNumber> {
+        #[allow(clippy::match_same_arms, reason = "variants kept separate for 1:1 PG ProcGlobalList mapping")]
         match kind {
             ProcGlobalList::Free => &mut self.free_procs,
             ProcGlobalList::Autovac => &mut self.autovac_free_procs,
@@ -612,7 +618,7 @@ impl ProcCounts {
 /// Pack a `XidCacheStatus` into the mirror `AtomicU32` (count in low byte,
 /// overflowed in bit 8).
 pub fn xid_cache_status_pack(s: XidCacheStatus) -> u32 {
-    (s.count as u32) | if s.overflowed { 0x100 } else { 0 }
+    u32::from(s.count) | if s.overflowed { 0x100 } else { 0 }
 }
 
 /// Unpack a mirror `AtomicU32` into a `XidCacheStatus`.
@@ -654,7 +660,7 @@ tokio::task_local! {
 /// This backend's ProcNumber, or INVALID_PROC_NUMBER outside a backend scope.
 pub fn current_proc_number() -> ProcNumber {
     MY_PROC_NUMBER
-        .try_with(|c| c.get())
+        .try_with(std::cell::Cell::get)
         .unwrap_or(INVALID_PROC_NUMBER)
 }
 

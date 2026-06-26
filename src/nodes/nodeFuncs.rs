@@ -1,5 +1,8 @@
 //! Translated from PostgreSQL src/include/nodes/nodeFuncs.h
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+#![allow(clippy::needless_pass_by_value, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 use bitflags::bitflags;
 
 use crate::nodes::execnodes::PlanState;
@@ -126,7 +129,7 @@ pub fn is_opclause(clause: Option<&Node>) -> bool {
 /// Extract left arg of a binary opclause, or only arg of a unary opclause.
 pub fn get_leftop(clause: &Node) -> Option<&Node> {
     match clause {
-        Node::OpExpr(e) => e.args.first().map(|a| a.as_ref()),
+        Node::OpExpr(e) => e.args.first().map(std::convert::AsRef::as_ref),
         _ => None,
     }
 }
@@ -134,7 +137,7 @@ pub fn get_leftop(clause: &Node) -> Option<&Node> {
 /// Extract right arg of a binary opclause (None if unary).
 pub fn get_rightop(clause: &Node) -> Option<&Node> {
     match clause {
-        Node::OpExpr(e) if e.args.len() >= 2 => e.args.get(1).map(|a| a.as_ref()),
+        Node::OpExpr(e) if e.args.len() >= 2 => e.args.get(1).map(std::convert::AsRef::as_ref),
         _ => None,
     }
 }
@@ -157,7 +160,7 @@ pub fn is_notclause(clause: Option<&Node>) -> bool {
 /// Extract argument from a clause known to be a NOT clause.
 pub fn get_notclausearg(notclause: &Node) -> Option<&Node> {
     match notclause {
-        Node::BoolExpr(e) => e.args.first().map(|a| a.as_ref()),
+        Node::BoolExpr(e) => e.args.first().map(std::convert::AsRef::as_ref),
         _ => None,
     }
 }

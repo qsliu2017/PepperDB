@@ -106,8 +106,8 @@ where
 {
     /// PG `XLogReaderAllocate`: build a reader for the given segment size, taking
     /// the caller's page-read routine (monomorphized; no boxing).
-    pub fn new(wal_segment_size: u64, page_read: F) -> XLogReader<F> {
-        XLogReader {
+    pub fn new(wal_segment_size: u64, page_read: F) -> Self {
+        Self {
             page_read,
             wal_seg_size: wal_segment_size,
             read_rec_ptr: INVALID_XLOG_REC_PTR,
@@ -129,7 +129,7 @@ where
     /// PG `XLogBeginRead`: position the reader at `rec_ptr` (must be a valid
     /// record start or a page boundary).
     pub fn begin_read(&mut self, rec_ptr: XLogRecPtr) {
-        debug_assert!(rec_ptr.0 % BLCKSZ_U64 == 0 || rec_ptr.0 % 8 == 0);
+        debug_assert!(rec_ptr.0.is_multiple_of(BLCKSZ_U64) || rec_ptr.0.is_multiple_of(8));
         // Reset the decode cursors; the next read starts here, treated as random
         // access (no prev-link cross-check against a prior decode).
         self.decode_rec_ptr = INVALID_XLOG_REC_PTR;
@@ -152,7 +152,7 @@ where
     /// at least `req_len` valid bytes, calling the page-read routine on a miss.
     /// Validates the page header before returning. Returns the valid byte count.
     fn read_page_internal(&mut self, pageptr: XLogRecPtr, req_len: usize) -> Result<usize, String> {
-        debug_assert!(pageptr.0 % BLCKSZ_U64 == 0);
+        debug_assert!(pageptr.0.is_multiple_of(BLCKSZ_U64));
 
         // Cache hit: same page, enough bytes already valid.
         if self.read_buf_origin == pageptr && self.read_len >= req_len {
@@ -190,7 +190,7 @@ where
         }
         let info = u16::from_ne_bytes([buf[2], buf[3]]);
         if info & !XlpFlags::ALL_FLAGS.bits() != 0 {
-            let m = format!("invalid info bits {:04X} in WAL segment", info);
+            let m = format!("invalid info bits {info:04X} in WAL segment");
             self.report(m.clone());
             return Err(m);
         }
@@ -243,6 +243,7 @@ where
     /// PG `XLogDecodeNextRecord`: the read+reassemble loop. Produces a fully
     /// decoded record (or an error). Handles the page-boundary continuation case
     /// (XLP_FIRST_IS_CONTRECORD / xlp_rem_len) and validates header + CRC.
+    #[allow(clippy::too_many_lines, reason = "1:1 port of C XLogDecodeNextRecord; splitting would diverge from PG structure")]
     fn decode_next_record(&mut self) -> Result<DecodedXLogRecord, String> {
         let mut rec_ptr = self.next_rec_ptr;
         // Random access (no prev decode) verifies prev-link loosely; sequential
@@ -330,7 +331,7 @@ where
                     return Err(format!(
                         "invalid contrecord length {} (expected {}) at {:X}/{:X}",
                         rem_len,
-                        total_len as i64 - got_len as i64,
+                        i64::from(total_len) - got_len as i64,
                         rec_ptr.0 >> 32,
                         rec_ptr.0 as u32
                     ));
@@ -398,9 +399,8 @@ where
         self.curr_rec_ptr = rec_ptr;
 
         let mut decoded = decode_xlog_record(&record_bytes, &header, rec_ptr)
-            .map_err(|m| {
+            .inspect_err(|m| {
                 self.report(m.clone());
-                m
             })?;
         decoded.next_lsn = next;
         Ok(decoded)
@@ -429,7 +429,7 @@ where
             self.report(m.clone());
             return Err(m);
         }
-        if !rmgr_id_is_valid(record.rmid as i32) {
+        if !rmgr_id_is_valid(i32::from(record.rmid)) {
             let m = format!(
                 "invalid resource manager ID {} at {:X}/{:X}",
                 record.rmid,
@@ -440,7 +440,7 @@ where
             return Err(m);
         }
         if rand_access {
-            if !(record.prev < rec_ptr) {
+            if record.prev >= rec_ptr {
                 let m = format!(
                     "record with incorrect prev-link {:X}/{:X} at {:X}/{:X}",
                     record.prev.0 >> 32,
@@ -505,6 +505,7 @@ fn read_header_from(bytes: &[u8], off: usize) -> XLogRecord {
 /// data headers, then copy each fragment's payload (block images first, then
 /// block data, then the main data) -- in the same payload order the assembler
 /// emitted. Native-endian field reads.
+#[allow(clippy::too_many_lines, reason = "1:1 port of C DecodeXLogRecord; splitting would diverge from PG structure")]
 pub fn decode_xlog_record(
     record: &[u8],
     header: &XLogRecord,
@@ -554,7 +555,7 @@ pub fn decode_xlog_record(
         let block_id = take!(1)[0];
 
         if block_id == XLR_BLOCK_ID_DATA_SHORT {
-            let n = take!(1)[0] as u32;
+            let n = u32::from(take!(1)[0]);
             decoded.main_data_len = n;
             datatotal += n as usize;
             break; // main data is always last
@@ -571,13 +572,13 @@ pub fn decode_xlog_record(
             decoded.toplevel_xid = TransactionId(v);
         } else if block_id <= XLR_MAX_BLOCK_ID {
             // Mark intervening unused block ids.
-            for i in (decoded.max_block_id + 1)..block_id as i32 {
+            for i in (decoded.max_block_id + 1)..i32::from(block_id) {
                 decoded.blocks[i as usize].in_use = false;
             }
-            if (block_id as i32) <= decoded.max_block_id {
+            if i32::from(block_id) <= decoded.max_block_id {
                 return Err(format!("out-of-order block_id {} at {:X}/{:X}", block_id, lsn.0 >> 32, lsn.0 as u32));
             }
-            decoded.max_block_id = block_id as i32;
+            decoded.max_block_id = i32::from(block_id);
 
             let fork_flags = take!(1)[0];
             let data_len = u16::from_ne_bytes(take!(2).try_into().unwrap());
@@ -769,7 +770,7 @@ impl DecodedXLogRecord {
 
     /// PG `XLogRecGetBlockData`: the rmgr-specific data for `block_id`, if any.
     pub fn get_block_data(&self, block_id: u8) -> Option<&[u8]> {
-        if block_id as i32 > self.max_block_id || !self.blocks[block_id as usize].in_use {
+        if i32::from(block_id) > self.max_block_id || !self.blocks[block_id as usize].in_use {
             return None;
         }
         let blk = &self.blocks[block_id as usize];
@@ -785,7 +786,7 @@ impl DecodedXLogRecord {
         &self,
         block_id: u8,
     ) -> Option<(RelFileLocator, ForkNumber, BlockNumber, crate::storage::buf::Buffer)> {
-        if block_id as i32 > self.max_block_id || !self.blocks[block_id as usize].in_use {
+        if i32::from(block_id) > self.max_block_id || !self.blocks[block_id as usize].in_use {
             return None;
         }
         let blk = &self.blocks[block_id as usize];
@@ -803,14 +804,14 @@ impl DecodedXLogRecord {
 
     /// PG `XLogRecHasBlockImage`.
     pub fn has_block_image_for(&self, block_id: u8) -> bool {
-        (block_id as i32) <= self.max_block_id && self.blocks[block_id as usize].has_image
+        i32::from(block_id) <= self.max_block_id && self.blocks[block_id as usize].has_image
     }
 
     /// PG `RestoreBlockImage`: reconstruct the full `BLCKSZ` page for `block_id`
     /// into `page`, re-inserting the eliminated hole as zeroes. (No compression in
     /// the foundation; a compressed image is rejected.) Returns true on success.
     pub fn restore_block_image(&self, block_id: u8, page: &mut [u8]) -> Result<bool, String> {
-        if block_id as i32 > self.max_block_id || !self.blocks[block_id as usize].in_use {
+        if i32::from(block_id) > self.max_block_id || !self.blocks[block_id as usize].in_use {
             return Err(format!(
                 "could not restore image at {:X}/{:X} with invalid block {} specified",
                 self.lsn.0 >> 32,

@@ -7,7 +7,7 @@
 //!   * SOCKET_*       -> `tokio::io::unix::AsyncFd` readiness on the raw fd
 //!   * TIMEOUT        -> `tokio::time::sleep`
 //!   * POSTMASTER_DEATH -> a shared `Notify`/flag standing in for supervisor
-//!                         shutdown (wired to the real supervisor in a later step)
+//!     shutdown (wired to the real supervisor in a later step)
 //!
 //! WaitEventSetWait races these with `futures_util::future::select_all` and
 //! returns the WaitEvent(s) that fired. Socket-event shaping (distinguishing
@@ -79,7 +79,7 @@ pub struct WaitEventSet<'a> {
 impl<'a> WaitEventSet<'a> {
     /// Create an empty wait-event set sized for up to `nevents` sources. The
     /// ResourceOwner and OS-handle preallocation from PG are gone.
-    pub fn new(nevents: i32) -> WaitEventSet<'a> {
+    pub fn new(nevents: i32) -> Self {
         WaitEventSet {
             sources: Vec::with_capacity(nevents.max(0) as usize),
             next_pos: 0,
@@ -267,12 +267,11 @@ async fn wait_socket(fd: RawFd, flags: WaitEventFlags, pos: i32, user_data: Datu
             g.clear_ready();
             events |= WaitEventFlags::SOCKET_READABLE;
         }
-    } else if want_write {
-        if let Ok(mut g) = async_fd.writable().await {
+    } else if want_write
+        && let Ok(mut g) = async_fd.writable().await {
             g.clear_ready();
             events |= WaitEventFlags::SOCKET_WRITEABLE;
         }
-    }
 
     WaitEvent {
         pos,
@@ -308,8 +307,8 @@ impl Latch {
         if sock != PGINVALID_SOCKET && wake_events.intersects(WaitEventFlags::SOCKET_MASK) {
             set.add_event(wake_events & WaitEventFlags::SOCKET_MASK, sock, None, None, nil);
         }
-        if let Some(pm) = pmdeath {
-            if wake_events
+        if let Some(pm) = pmdeath
+            && wake_events
                 .intersects(WaitEventFlags::POSTMASTER_DEATH | WaitEventFlags::EXIT_ON_PM_DEATH)
             {
                 set.add_event(
@@ -321,7 +320,6 @@ impl Latch {
                     nil,
                 );
             }
-        }
 
         let events = set.wait(timeout, 1).await;
         match events.into_iter().next() {

@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/commands/prepare.h
 
+#![allow(
+    clippy::boxed_local,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::access::tupdesc::TupleDesc;
 use crate::commands::explain_state::ExplainState;
 use crate::datatype::timestamp::TimestampTz;

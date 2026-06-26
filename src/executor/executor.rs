@@ -6,6 +6,7 @@
 //! function pointers.
 
 #![allow(non_snake_case, non_camel_case_types, deprecated)]
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 
 use bitflags::bitflags;
 
@@ -241,7 +242,7 @@ pub fn ExecFilterJunk(_junkfilter: &mut JunkFilter, _slot: &mut TupleTableSlot) 
 /// out-param folds into the Option (None == SQL NULL).
 pub fn ExecGetJunkAttribute(slot: &mut TupleTableSlot, attno: AttrNumber) -> Option<Datum> {
     debug_assert!(attno > 0);
-    crate::executor::tuptable::slot_getattr(slot, attno as i32)
+    crate::executor::tuptable::slot_getattr(slot, i32::from(attno))
 }
 
 // ---------------------------------------------------------------------------

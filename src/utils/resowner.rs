@@ -95,13 +95,13 @@ pub fn ResourceOwnerRelease(
     is_commit: bool,
     is_top_level: bool,
 ) {
-    owner.release(phase, is_commit, is_top_level)
+    owner.release(phase, is_commit, is_top_level);
 }
 
 #[deprecated(note = "use owner.delete()")]
 #[inline]
 pub fn ResourceOwnerDelete(owner: ResourceOwner) {
-    owner.delete()
+    owner.delete();
 }
 
 #[deprecated(note = "use owner.parent()")]
@@ -113,7 +113,7 @@ pub fn ResourceOwnerGetParent(owner: &ResourceOwner) -> Option<ResourceOwner> {
 #[deprecated(note = "use owner.new_parent(new_parent)")]
 #[inline]
 pub fn ResourceOwnerNewParent(owner: &ResourceOwner, new_parent: Option<&ResourceOwner>) {
-    owner.new_parent(new_parent)
+    owner.new_parent(new_parent);
 }
 
 /// Tombstoned: the per-phase slab grows itself; reservation before acquire is
@@ -136,7 +136,7 @@ pub fn ResourceOwnerRemember(
 #[deprecated(note = "use ResourceGuard::forget")]
 #[inline]
 pub fn ResourceOwnerForget(guard: ResourceGuard) {
-    guard.forget()
+    guard.forget();
 }
 
 /// Tombstoned: the "release all of a kind" scan existed for the Datum-hash
@@ -167,7 +167,7 @@ pub fn CreateAuxProcessResourceOwner() -> ResourceOwner {
 #[deprecated(note = "use release_aux_process_resources(owner, is_commit)")]
 #[inline]
 pub fn ReleaseAuxProcessResources(owner: &ResourceOwner, is_commit: bool) {
-    release_aux_process_resources(owner, is_commit)
+    release_aux_process_resources(owner, is_commit);
 }
 
 // === special support: local lock management ===

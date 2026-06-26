@@ -1,5 +1,7 @@
 //! Translated from PostgreSQL src/include/access/gist.h
 
+#![allow(clippy::many_single_char_names, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG macro/inline param names 1:1")]
+
 use bitflags::bitflags;
 
 use crate::access::cmptype::CompareType;

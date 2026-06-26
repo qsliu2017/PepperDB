@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/catalog/pg_subscription.h
 
+#![allow(
+    clippy::boxed_local,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::access::xlogdefs::XLogRecPtr;
 use crate::c::{text, NameData};
 use crate::postgres_ext::Oid;

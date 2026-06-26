@@ -5,17 +5,17 @@
 //! (`PostmasterStateMachine`/`UpdatePMState`) for startup and shutdown. Under
 //! the single-process async model the postmaster is a supervisor TASK:
 //!
-//! - `PostmasterMain`     -> [`postmaster_main`]: build `SharedState`, bind the
-//!                           listener, run the accept loop, then drain.
-//! - `ServerLoop`         -> the `tokio::select!` accept loop inside
-//!                           [`postmaster_main`].
+//! - `PostmasterMain` -> [`postmaster_main`]: build `SharedState`, bind the
+//!   listener, run the accept loop, then drain.
+//! - `ServerLoop` -> the `tokio::select!` accept loop inside
+//!   [`postmaster_main`].
 //! - `BackendStartup`/fork -> `tokio::spawn` of the backend task onto a
-//!                           `JoinSet`, wrapped in `catch_unwind`.
+//!   `JoinSet`, wrapped in `catch_unwind`.
 //! - SIGCHLD/waitpid reap -> draining finished tasks off the `JoinSet`.
 //! - `PMChild` fixed slots -> a generational [`GenSlab`] child registry keyed by
-//!                           a [`ChildKey`].
+//!   a [`ChildKey`].
 //! - the shutdown state machine -> [`Shutdown`] + the drain at the end of
-//!                           [`postmaster_main`].
+//!   [`postmaster_main`].
 //!
 //! DELETED (single-process redesign):
 //! - `fork`/`exec`, `BackendStartup`, `postmaster_child_launch`, and all of
@@ -234,7 +234,7 @@ async fn server_loop(
             }
 
             // (b) shutdown requested: stop accepting, break to the drain.
-            _ = shutdown.wait() => {
+            () = shutdown.wait() => {
                 crate::elog!(crate::utils::elog::LOG, "postmaster: shutdown requested".to_string());
                 break;
             }
@@ -303,7 +303,7 @@ fn admit_and_spawn(
         use futures_util::FutureExt;
         let result = std::panic::AssertUnwindSafe(entry_fut).catch_unwind().await;
         if let Err(payload) = result {
-            log_caught_panic(payload);
+            log_caught_panic(&*payload);
         }
         // Yield the key so the supervisor reaper can deregister this child,
         // whether it returned normally or panicked.
@@ -314,7 +314,7 @@ fn admit_and_spawn(
 /// Log a panic payload caught at the task boundary. If it is an
 /// `elog(ERROR)`-style `ErrorData`, log it as such; otherwise log a generic
 /// panic. Either way the connection task ends without taking down the supervisor.
-fn log_caught_panic(payload: Box<dyn std::any::Any + Send>) {
+fn log_caught_panic(payload: &(dyn std::any::Any + Send)) {
     if let Some(edata) = payload.downcast_ref::<crate::utils::elog::ErrorData>() {
         let msg = edata.message.clone().unwrap_or_else(|| "(no message)".to_string());
         crate::elog!(crate::utils::elog::LOG, format!("backend terminated by error: {msg}"));
@@ -367,7 +367,7 @@ async fn drain(backends: &mut JoinSet<ChildKey>, registry: &ChildRegistry, _shut
                     None => break, // all drained
                 }
             }
-            _ = &mut deadline => {
+            () = &mut deadline => {
                 crate::elog!(
                     crate::utils::elog::LOG,
                     format!("shutdown drain timed out; abandoning {} backend(s)", backends.len())
@@ -453,7 +453,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn accepts_and_spawns_backend() {
-        let _hook = hook_serial();
+        let _hook = hook_serial().await;
         test_hook::PANIC_ON_CONNECT.store(false, Ordering::SeqCst);
         let before = test_hook::CONNECTED.load(Ordering::SeqCst);
 
@@ -497,7 +497,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn registry_tracks_and_clears_a_backend() {
-        let _hook = hook_serial();
+        let _hook = hook_serial().await;
         // The backend blocks reading the startup-packet length prefix; if we
         // never send and never close, it stays parked there, so the registry
         // holds it. Closing the client makes the read return EOF and the task
@@ -529,7 +529,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn catch_unwind_contains_backend_panic() {
-        let _hook = hook_serial();
+        let _hook = hook_serial().await;
         // A panicking backend must NOT take down the supervisor runtime.
         test_hook::PANIC_ON_CONNECT.store(true, Ordering::SeqCst);
 

@@ -124,7 +124,7 @@ fn trans_state_as_string(s: TransState) -> &'static str {
 }
 
 fn block_state_as_string(s: TBlockState) -> &'static str {
-    use TBlockState::*;
+    use TBlockState::{Default, Started, Begin, InProgress, ImplicitInProgress, ParallelInProgress, End, Abort, AbortEnd, AbortPending, Prepare, SubBegin, SubInProgress, SubRelease, SubCommit, SubAbort, SubAbortEnd, SubAbortPending, SubRestart, SubAbortRestart};
     match s {
         Default => "DEFAULT",
         Started => "STARTED",
@@ -181,8 +181,8 @@ pub struct TransactionStateData {
 
 impl TransactionStateData {
     /// The static `TopTransactionStateData` initializer (xact.c): idle top frame.
-    fn top() -> TransactionStateData {
-        TransactionStateData {
+    fn top() -> Self {
+        Self {
             full_transaction_id: INVALID_FULL_TRANSACTION_ID,
             subtransaction_id: InvalidSubTransactionId,
             name: None,
@@ -247,8 +247,8 @@ pub struct XactState {
 }
 
 impl XactState {
-    fn new() -> XactState {
-        XactState {
+    fn new() -> Self {
+        Self {
             stack: vec![TransactionStateData::top()],
             xact_top_full_xid: INVALID_FULL_TRANSACTION_ID,
             current_sub_transaction_id: InvalidSubTransactionId,
@@ -469,10 +469,9 @@ pub fn MarkSubxactTopXidLogged() {
 /// xact.c `GetStableLatestTransactionId`. Without a per-backend lxid cache yet,
 /// return the top xid if assigned, else the next-to-be-assigned xid.
 pub fn GetStableLatestTransactionId(shared: &Arc<SharedState>) -> TransactionId {
-    match GetTopTransactionIdIfAny() {
-        Some(xid) => xid,
-        None => XidFromFullTransactionId(shared.variable_cache().read_next_full_transaction_id()),
-    }
+    GetTopTransactionIdIfAny().unwrap_or_else(|| {
+        XidFromFullTransactionId(shared.variable_cache().read_next_full_transaction_id())
+    })
 }
 
 /// xact.c `AssignTransactionId`: assign a permanent FullTransactionId to the
@@ -570,10 +569,8 @@ pub fn GetCurrentCommandId(used: bool) -> CommandId {
     with_xact(|x| {
         if used {
             // Forbid in a parallel worker; we can't communicate this back.
-            if crate::access::parallel::IsParallelWorker() {
-                // TODO(panic): migrate to Result + ?
-                panic!("cannot modify data in a parallel worker");
-            }
+            // TODO(panic): migrate to Result + ?
+            assert!(!crate::access::parallel::IsParallelWorker(), "cannot modify data in a parallel worker");
             x.current_command_id_used = true;
         }
         x.current_command_id
@@ -631,11 +628,10 @@ pub fn TransactionIdIsCurrentTransactionId(xid: TransactionId) -> bool {
     if !xid.is_normal() {
         return false;
     }
-    if let Some(top) = GetTopTransactionIdIfAny() {
-        if TransactionIdEquals(xid, top) {
+    if let Some(top) = GetTopTransactionIdIfAny()
+        && TransactionIdEquals(xid, top) {
             return true;
         }
-    }
     // ParallelCurrentXids (parallel worker) is out of foundation.
     with_xact_or(false, |x| {
         for s in x.stack.iter().rev() {
@@ -728,7 +724,7 @@ fn at_start_cache() {
 }
 
 /// xact.c `StartTransaction`.
-async fn start_transaction(shared: &Arc<SharedState>) {
+fn start_transaction(shared: &Arc<SharedState>) {
     // Reset to the (single) top frame; assert the stack was empty.
     with_xact(|x| {
         debug_assert!(!FullTransactionIdIsValid(x.xact_top_full_xid));
@@ -816,10 +812,8 @@ async fn record_transaction_commit(shared: &Arc<SharedState>) -> TransactionId {
 
     let Some(xid) = xid else {
         // No xid: can neither nor want to write a COMMIT record.
-        if nrels != 0 {
-            // TODO(panic): migrate to Result + ?
-            panic!("cannot commit a transaction that deleted files but has no xid");
-        }
+        // TODO(panic): migrate to Result + ?
+        assert!(nrels == 0, "cannot commit a transaction that deleted files but has no xid");
         debug_assert!(children.is_empty());
         // If we wrote WAL (e.g. HOT pruning), trigger a flush like a commit
         // would; otherwise we are done.
@@ -1181,15 +1175,13 @@ fn proc_array_end_transaction(shared: &Arc<SharedState>, latest_xid: Transaction
     if procno == crate::storage::procnumber::INVALID_PROC_NUMBER {
         return;
     }
-    let g = match crate::storage::proc::proc_global() {
-        Some(g) => g,
-        None => return,
+    let Some(g) = crate::storage::proc::proc_global() else {
+        return;
     };
     // SAFETY: we own our own slot; proc_array_end_transaction takes ProcArrayLock
     // for the shared bookkeeping (mirror + latestCompletedXid).
-    let proc = match unsafe { g.proc_mut(procno) } {
-        Some(p) => p,
-        None => return,
+    let Some(proc) = (unsafe { g.proc_mut(procno) }) else {
+        return;
     };
     shared
         .proc_array()
@@ -1202,15 +1194,14 @@ fn proc_array_end_transaction(shared: &Arc<SharedState>, latest_xid: Transaction
 
 /// xact.c `StartTransactionCommand`.
 pub async fn StartTransactionCommand(shared: &Arc<SharedState>) {
+    use TBlockState::{Default, Started, InProgress, ImplicitInProgress, SubInProgress, Abort, SubAbort};
     let bs = with_xact(|x| x.cur().block_state);
-    use TBlockState::*;
     match bs {
         Default => {
-            Box::pin(start_transaction(shared)).await;
+            start_transaction(shared);
             with_xact(|x| x.cur_mut().block_state = Started);
         }
-        InProgress | ImplicitInProgress | SubInProgress => {}
-        Abort | SubAbort => {}
+        InProgress | ImplicitInProgress | SubInProgress | Abort | SubAbort => {}
         _ => {
             // TODO(panic): migrate to Result + ?
             crate::elog!(
@@ -1247,8 +1238,9 @@ pub async fn CommitTransactionCommand(shared: &Arc<SharedState>) {
     while !commit_transaction_command_internal(shared).await {}
 }
 
+#[allow(clippy::too_many_lines, reason = "1:1 port of C CommitTransactionCommand; splitting would diverge from PG structure")]
 async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool {
-    use TBlockState::*;
+    use TBlockState::{Default, ParallelInProgress, Started, Begin, InProgress, ImplicitInProgress, SubInProgress, End, Abort, SubAbort, AbortEnd, AbortPending, Prepare, SubBegin, SubRelease, SubCommit, SubAbortEnd, SubAbortPending, SubRestart, SubAbortRestart};
     let mut savetc = SavedTransactionCharacteristics {
         XactIsoLevel: 0,
         XactReadOnly: false,
@@ -1281,19 +1273,19 @@ async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool 
         End => {
             Box::pin(commit_transaction(shared)).await;
             with_xact(|x| x.cur_mut().block_state = Default);
-            maybe_chain(shared, &savetc).await;
+            maybe_chain(shared, &savetc);
         }
         Abort | SubAbort => {}
         AbortEnd => {
             cleanup_transaction();
             with_xact(|x| x.cur_mut().block_state = Default);
-            maybe_chain(shared, &savetc).await;
+            maybe_chain(shared, &savetc);
         }
         AbortPending => {
             Box::pin(abort_transaction(shared)).await;
             cleanup_transaction();
             with_xact(|x| x.cur_mut().block_state = Default);
-            maybe_chain(shared, &savetc).await;
+            maybe_chain(shared, &savetc);
         }
         Prepare => {
             // PrepareTransaction (two-phase) is a stub. TODO(twophase).
@@ -1302,11 +1294,11 @@ async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool 
         }
         SubBegin => {
             // SAVEPOINT pushed a SUBBEGIN frame; finish starting the subxact.
-            Box::pin(start_sub_transaction(shared)).await;
+            start_sub_transaction(shared);
             with_xact(|x| x.cur_mut().block_state = SubInProgress);
         }
         SubRelease => loop {
-            Box::pin(commit_sub_transaction(shared)).await;
+            commit_sub_transaction(shared);
             let s = with_xact(|x| x.cur().block_state);
             if s != SubRelease {
                 break;
@@ -1314,7 +1306,7 @@ async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool 
         },
         SubCommit => {
             loop {
-                Box::pin(commit_sub_transaction(shared)).await;
+                commit_sub_transaction(shared);
                 let s = with_xact(|x| x.cur().block_state);
                 if s != SubCommit {
                     break;
@@ -1324,7 +1316,7 @@ async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool 
             if s == End {
                 Box::pin(commit_transaction(shared)).await;
                 with_xact(|x| x.cur_mut().block_state = Default);
-                maybe_chain(shared, &savetc).await;
+                maybe_chain(shared, &savetc);
             } else if s == Prepare {
                 prepare_transaction_stub();
                 with_xact(|x| x.cur_mut().block_state = Default);
@@ -1357,7 +1349,7 @@ async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool 
                 x.cur_mut().name = name;
                 x.cur_mut().savepoint_level = level;
             });
-            Box::pin(start_sub_transaction(shared)).await;
+            start_sub_transaction(shared);
             with_xact(|x| x.cur_mut().block_state = SubInProgress);
         }
         SubAbortRestart => {
@@ -1368,7 +1360,7 @@ async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool 
                 x.cur_mut().name = name;
                 x.cur_mut().savepoint_level = level;
             });
-            Box::pin(start_sub_transaction(shared)).await;
+            start_sub_transaction(shared);
             with_xact(|x| x.cur_mut().block_state = SubInProgress);
         }
     }
@@ -1376,10 +1368,10 @@ async fn commit_transaction_command_internal(shared: &Arc<SharedState>) -> bool 
 }
 
 /// The `s->chain` re-start tail shared by several CommitTransactionCommand arms.
-async fn maybe_chain(shared: &Arc<SharedState>, savetc: &SavedTransactionCharacteristics) {
+fn maybe_chain(shared: &Arc<SharedState>, savetc: &SavedTransactionCharacteristics) {
     let chain = with_xact(|x| x.cur().chain);
     if chain {
-        Box::pin(start_transaction(shared)).await;
+        start_transaction(shared);
         with_xact(|x| {
             x.cur_mut().block_state = TBlockState::InProgress;
             x.cur_mut().chain = false;
@@ -1400,7 +1392,7 @@ pub async fn AbortCurrentTransaction(shared: &Arc<SharedState>) {
 }
 
 async fn abort_current_transaction_internal(shared: &Arc<SharedState>) -> bool {
-    use TBlockState::*;
+    use TBlockState::{Default, Started, ImplicitInProgress, Begin, InProgress, ParallelInProgress, Abort, End, SubAbort, AbortEnd, AbortPending, Prepare, SubInProgress, SubBegin, SubRelease, SubCommit, SubAbortPending, SubRestart, SubAbortEnd, SubAbortRestart};
     let (bs, low_state) = with_xact(|x| (x.cur().block_state, x.cur().state));
     match bs {
         Default => {
@@ -1602,7 +1594,7 @@ fn call_sub_xact_callbacks(
 
 /// xact.c `BeginTransactionBlock` (BEGIN).
 pub fn BeginTransactionBlock() {
-    use TBlockState::*;
+    use TBlockState::{Started, ImplicitInProgress, Begin, InProgress, ParallelInProgress, SubInProgress, Abort, SubAbort};
     let bs = with_xact(|x| x.cur().block_state);
     match bs {
         Started | ImplicitInProgress => {
@@ -1649,7 +1641,7 @@ pub fn PrepareTransactionBlock(gid: &str) -> bool {
 /// xact.c `EndTransactionBlock` (COMMIT). Returns true for COMMIT, false for the
 /// ROLLBACK-equivalent path.
 pub fn EndTransactionBlock(chain: bool) -> bool {
-    use TBlockState::*;
+    use TBlockState::{InProgress, End, ImplicitInProgress, Abort, AbortEnd, SubInProgress, SubCommit, SubAbort, SubAbortPending, SubAbortEnd, AbortPending, Started, ParallelInProgress};
     let bs = with_xact(|x| x.cur().block_state);
     let mut result = false;
     match bs {
@@ -1746,7 +1738,7 @@ pub fn EndTransactionBlock(chain: bool) -> bool {
 
 /// xact.c `UserAbortTransactionBlock` (ROLLBACK).
 pub fn UserAbortTransactionBlock(chain: bool) {
-    use TBlockState::*;
+    use TBlockState::{InProgress, AbortPending, Abort, AbortEnd, SubInProgress, SubAbort, SubAbortPending, SubAbortEnd, Started, ImplicitInProgress, ParallelInProgress};
     let bs = with_xact(|x| x.cur().block_state);
     match bs {
         InProgress => {
@@ -1828,6 +1820,7 @@ pub fn EndImplicitTransactionBlock() {
 
 /// xact.c `DefineSavepoint` (SAVEPOINT).
 pub fn DefineSavepoint(name: Option<&str>) {
+    use TBlockState::{InProgress, SubInProgress, ImplicitInProgress};
     if IsInParallelMode() || crate::access::parallel::IsParallelWorker() {
         // TODO(panic): migrate to Result + ?
         crate::elog!(
@@ -1835,7 +1828,6 @@ pub fn DefineSavepoint(name: Option<&str>) {
             "cannot define savepoints during a parallel operation".to_string()
         );
     }
-    use TBlockState::*;
     let bs = with_xact(|x| x.cur().block_state);
     match bs {
         InProgress | SubInProgress => {
@@ -1866,6 +1858,7 @@ pub fn DefineSavepoint(name: Option<&str>) {
 
 /// xact.c `ReleaseSavepoint` (RELEASE).
 pub fn ReleaseSavepoint(name: &str) {
+    use TBlockState::{InProgress, ImplicitInProgress, SubInProgress};
     if IsInParallelMode() || crate::access::parallel::IsParallelWorker() {
         // TODO(panic): migrate to Result + ?
         crate::elog!(
@@ -1873,7 +1866,6 @@ pub fn ReleaseSavepoint(name: &str) {
             "cannot release savepoints during a parallel operation".to_string()
         );
     }
-    use TBlockState::*;
     let bs = with_xact(|x| x.cur().block_state);
     match bs {
         InProgress => {
@@ -1905,16 +1897,13 @@ pub fn ReleaseSavepoint(name: &str) {
 
     let target = find_savepoint_target(name);
     let cur_level = with_xact(|x| x.cur().savepoint_level);
-    let target_idx = match target {
-        Some(i) => i,
-        None => {
-            // TODO(panic): migrate to Result + ?
-            crate::elog!(
-                crate::utils::elog::ERROR,
-                format!("savepoint \"{name}\" does not exist")
-            );
-            unreachable!()
-        }
+    let Some(target_idx) = target else {
+        // TODO(panic): migrate to Result + ?
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("savepoint \"{name}\" does not exist")
+        );
+        unreachable!()
     };
     if with_xact(|x| x.stack[target_idx].savepoint_level) != cur_level {
         // TODO(panic): migrate to Result + ?
@@ -1934,6 +1923,7 @@ pub fn ReleaseSavepoint(name: &str) {
 
 /// xact.c `RollbackToSavepoint` (ROLLBACK TO).
 pub fn RollbackToSavepoint(name: &str) {
+    use TBlockState::{InProgress, Abort, ImplicitInProgress, SubInProgress, SubAbort};
     if IsInParallelMode() || crate::access::parallel::IsParallelWorker() {
         // TODO(panic): migrate to Result + ?
         crate::elog!(
@@ -1941,7 +1931,6 @@ pub fn RollbackToSavepoint(name: &str) {
             "cannot rollback to savepoints during a parallel operation".to_string()
         );
     }
-    use TBlockState::*;
     let bs = with_xact(|x| x.cur().block_state);
     match bs {
         InProgress | Abort => {
@@ -1971,16 +1960,13 @@ pub fn RollbackToSavepoint(name: &str) {
         }
     }
 
-    let target_idx = match find_savepoint_target(name) {
-        Some(i) => i,
-        None => {
-            // TODO(panic): migrate to Result + ?
-            crate::elog!(
-                crate::utils::elog::ERROR,
-                format!("savepoint \"{name}\" does not exist")
-            );
-            unreachable!()
-        }
+    let Some(target_idx) = find_savepoint_target(name) else {
+        // TODO(panic): migrate to Result + ?
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("savepoint \"{name}\" does not exist")
+        );
+        unreachable!()
     };
     let cur_level = with_xact(|x| x.cur().savepoint_level);
     if with_xact(|x| x.stack[target_idx].savepoint_level) != cur_level {
@@ -2023,7 +2009,7 @@ fn find_savepoint_target(name: &str) -> Option<usize> {
 
 /// xact.c `BeginInternalSubTransaction`.
 pub async fn BeginInternalSubTransaction(shared: &Arc<SharedState>, name: Option<&str>) {
-    use TBlockState::*;
+    use TBlockState::{Started, InProgress, ImplicitInProgress, ParallelInProgress, End, Prepare, SubInProgress};
     let bs = with_xact(|x| x.cur().block_state);
     match bs {
         Started | InProgress | ImplicitInProgress | ParallelInProgress | End | Prepare
@@ -2061,12 +2047,12 @@ pub async fn ReleaseCurrentSubTransaction(shared: &Arc<SharedState>) {
             )
         );
     }
-    Box::pin(commit_sub_transaction(shared)).await;
+    commit_sub_transaction(shared);
 }
 
 /// xact.c `RollbackAndReleaseCurrentSubTransaction`.
 pub async fn RollbackAndReleaseCurrentSubTransaction(shared: &Arc<SharedState>) {
-    use TBlockState::*;
+    use TBlockState::{SubInProgress, SubAbort};
     let bs = with_xact(|x| x.cur().block_state);
     match bs {
         SubInProgress | SubAbort => {}
@@ -2089,7 +2075,7 @@ pub async fn RollbackAndReleaseCurrentSubTransaction(shared: &Arc<SharedState>) 
 
 /// xact.c `AbortOutOfAnyTransaction`.
 pub async fn AbortOutOfAnyTransaction(shared: &Arc<SharedState>) {
-    use TBlockState::*;
+    use TBlockState::{Default, Started, Begin, InProgress, ImplicitInProgress, ParallelInProgress, End, AbortPending, Prepare, Abort, AbortEnd, SubBegin, SubInProgress, SubRelease, SubCommit, SubAbortPending, SubRestart, SubAbort, SubAbortEnd, SubAbortRestart};
     loop {
         let (bs, low_state) = with_xact(|x| (x.cur().block_state, x.cur().state));
         match bs {
@@ -2144,7 +2130,7 @@ pub fn IsTransactionOrTransactionBlock() -> bool {
 
 /// xact.c `TransactionBlockStatusCode`: 'I' idle, 'T' in xact, 'E' failed.
 pub fn TransactionBlockStatusCode() -> i8 {
-    use TBlockState::*;
+    use TBlockState::{Default, Started, Begin, SubBegin, InProgress, ImplicitInProgress, ParallelInProgress, SubInProgress, End, SubRelease, SubCommit, Prepare, Abort, SubAbort, AbortEnd, SubAbortEnd, AbortPending, SubAbortPending, SubRestart, SubAbortRestart};
     let bs = with_xact(|x| x.cur().block_state);
     let c = match bs {
         Default | Started => b'I',
@@ -2166,7 +2152,7 @@ pub fn IsSubTransaction() -> bool {
 // ===========================================================================
 
 /// xact.c `StartSubTransaction`.
-async fn start_sub_transaction(shared: &Arc<SharedState>) {
+fn start_sub_transaction(shared: &Arc<SharedState>) {
     let state = with_xact(|x| x.cur().state);
     if state != TransState::Default {
         // TODO(panic): WARNING only.
@@ -2193,7 +2179,7 @@ async fn start_sub_transaction(shared: &Arc<SharedState>) {
 }
 
 /// xact.c `CommitSubTransaction`.
-async fn commit_sub_transaction(shared: &Arc<SharedState>) {
+fn commit_sub_transaction(shared: &Arc<SharedState>) {
     let state = with_xact(|x| x.cur().state);
     if state != TransState::InProgress {
         // TODO(panic): WARNING only.
@@ -2332,11 +2318,9 @@ fn push_transaction() {
             guc_nest_level: p.guc_nest_level + 1, // NewGUCNestLevel (GUC deferred)
             child_xids: Vec::new(),
             prev_user: crate::session::try_current()
-                .map(|s| s.current_user_id())
-                .unwrap_or(crate::postgres_ext::Oid(0)),
+                .map_or(crate::postgres_ext::Oid(0), |s| s.current_user_id()),
             prev_sec_context: crate::session::try_current()
-                .map(|s| s.sec_context())
-                .unwrap_or(0),
+                .map_or(0, |s| s.sec_context()),
             prev_xact_read_only: x.xact_read_only,
             started_in_recovery: p.started_in_recovery,
             did_log_xid: false,
@@ -2432,6 +2416,7 @@ pub async fn XactLogCommitRecord(
     twophase_xid: TransactionId,
     _twophase_gid: &str,
 ) -> XLogRecPtr {
+    use crate::backend::access::transam::xloginsert as xli;
     debug_assert!(crate::session::current().crit_section_count() > 0);
     debug_assert!(
         !twophase_xid.is_valid(),
@@ -2465,7 +2450,6 @@ pub async fn XactLogCommitRecord(
         info |= XLOG_XACT_HAS_INFO;
     }
 
-    use crate::backend::access::transam::xloginsert as xli;
     xli::with_insertion(async {
         xli::begin_insert();
         xli::register_data(&commit_bytes(&xlrec));
@@ -2502,6 +2486,7 @@ pub async fn XactLogAbortRecord(
     twophase_xid: TransactionId,
     _twophase_gid: &str,
 ) -> XLogRecPtr {
+    use crate::backend::access::transam::xloginsert as xli;
     debug_assert!(crate::session::current().crit_section_count() > 0);
     debug_assert!(
         !twophase_xid.is_valid(),
@@ -2528,7 +2513,6 @@ pub async fn XactLogAbortRecord(
         info |= XLOG_XACT_HAS_INFO;
     }
 
-    use crate::backend::access::transam::xloginsert as xli;
     xli::with_insertion(async {
         xli::begin_insert();
         xli::register_data(&abort_bytes(&xlrec));
@@ -2599,6 +2583,7 @@ const MinSizeOfXactCommit_CHECK: usize = crate::access::xact::MinSizeOfXactCommi
     + MinSizeOfXactRelfileLocators;
 const _: () = {
     // Reference the deferred record sub-structs so their definitions stay used.
+    #[allow(clippy::no_effect_underscore_binding, reason = "compile-time type reference keeps struct defs used")]
     let _f =
         |_: xl_xact_dbinfo, _: xl_xact_origin, _: xl_xact_relfilelocators, _: xl_xact_subxacts| {};
 };
@@ -2618,7 +2603,7 @@ mod tests {
     use super::*;
     use crate::shared_state::{SharedState, SharedStateConfig};
 
-    async fn new_shared() -> Arc<SharedState> {
+    fn new_shared() -> Arc<SharedState> {
         let dir = std::env::temp_dir().join(format!(
             "pepperdb-xact-{}-{}",
             std::process::id(),
@@ -2657,7 +2642,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn start_commit_cycle_advances_state() {
-        let shared = new_shared().await;
+        let shared = new_shared();
         in_all_scopes(shared.clone(), |shared| async move {
             assert_eq!(with_xact(|x| x.cur().state), TransState::Default);
             StartTransactionCommand(&shared).await;
@@ -2673,7 +2658,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn command_counter_increment_bumps_id() {
-        let shared = new_shared().await;
+        let shared = new_shared();
         in_all_scopes(shared.clone(), |shared| async move {
             StartTransactionCommand(&shared).await;
             BeginTransactionBlock();
@@ -2688,8 +2673,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn commit_with_xid_flushes_wal_before_clog() {
-        let shared = new_shared().await;
-        in_all_scopes(shared.clone(), |shared| async move {
+        let shared = new_shared();
+        Box::pin(in_all_scopes(shared.clone(), |shared| async move {
             StartTransactionCommand(&shared).await;
             // Force an xid + pretend WAL was written.
             let xid = GetCurrentTransactionId(&shared).await;
@@ -2731,13 +2716,13 @@ mod tests {
                 flushed.0,
                 commit_recptr.0
             );
-        })
+        }))
         .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn savepoint_define_release_roundtrip() {
-        let shared = new_shared().await;
+        let shared = new_shared();
         in_all_scopes(shared.clone(), |shared| async move {
             StartTransactionCommand(&shared).await;
             BeginTransactionBlock();
@@ -2759,7 +2744,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn savepoint_rollback_roundtrip() {
-        let shared = new_shared().await;
+        let shared = new_shared();
         in_all_scopes(shared.clone(), |shared| async move {
             StartTransactionCommand(&shared).await;
             BeginTransactionBlock();
@@ -2780,7 +2765,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn abort_current_transaction_from_error() {
-        let shared = new_shared().await;
+        let shared = new_shared();
         in_all_scopes(shared.clone(), |shared| async move {
             StartTransactionCommand(&shared).await;
             BeginTransactionBlock();

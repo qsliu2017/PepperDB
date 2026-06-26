@@ -14,7 +14,7 @@ pub fn HeapKeyTest(tuple: &HeapTupleData, tupdesc: &TupleDesc, keys: &mut [ScanK
             return false;
         }
 
-        let (atp, isnull) = heap_getattr(tuple, cur_key.attno as i32, tupdesc);
+        let (atp, isnull) = heap_getattr(tuple, i32::from(cur_key.attno), tupdesc);
         if isnull {
             return false;
         }

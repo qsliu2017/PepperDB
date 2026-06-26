@@ -257,7 +257,7 @@ pub fn slot_getsomeattrs_int(_slot: &mut TupleTableSlot, _attnum: i32) {
 
 /// Force slot's Datum/isnull arrays valid up through `attnum`.
 pub fn slot_getsomeattrs(slot: &mut TupleTableSlot, attnum: i32) {
-    if (slot.nvalid as i32) < attnum {
+    if i32::from(slot.nvalid) < attnum {
         slot_getsomeattrs_int(slot, attnum);
     }
 }
@@ -272,7 +272,7 @@ pub fn slot_getallattrs(slot: &mut TupleTableSlot) {
 pub fn slot_attisnull(slot: &mut TupleTableSlot, attnum: i32) -> bool {
     debug_assert!(attnum > 0);
 
-    if attnum > slot.nvalid as i32 {
+    if attnum > i32::from(slot.nvalid) {
         slot_getsomeattrs(slot, attnum);
     }
 
@@ -283,7 +283,7 @@ pub fn slot_attisnull(slot: &mut TupleTableSlot, attnum: i32) -> bool {
 pub fn slot_getattr(slot: &mut TupleTableSlot, attnum: i32) -> Option<Datum> {
     debug_assert!(attnum > 0);
 
-    if attnum > slot.nvalid as i32 {
+    if attnum > i32::from(slot.nvalid) {
         slot_getsomeattrs(slot, attnum);
     }
 
@@ -301,11 +301,11 @@ pub fn slot_getattr(slot: &mut TupleTableSlot, attnum: i32) -> Option<Datum> {
 pub fn slot_getsysattr(slot: &mut TupleTableSlot, attnum: i32) -> Option<Datum> {
     debug_assert!(attnum < 0); // caller error
 
-    if attnum == TABLE_OID_ATTRIBUTE_NUMBER as i32 {
+    if attnum == i32::from(TABLE_OID_ATTRIBUTE_NUMBER) {
         return Some(ObjectIdGetDatum(slot.tableOid));
-    } else if attnum == SELF_ITEM_POINTER_ATTRIBUTE_NUMBER as i32 {
+    } else if attnum == i32::from(SELF_ITEM_POINTER_ATTRIBUTE_NUMBER) {
         return Some(PointerGetDatum(
-            (&slot.tid as *const ItemPointerData).cast(),
+            (&raw const slot.tid).cast(),
         ));
     }
 

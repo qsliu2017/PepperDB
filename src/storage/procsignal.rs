@@ -107,7 +107,7 @@ pub fn wait_for_proc_signal_barrier(registry: &ProcSignal, generation: u64) -> b
 #[deprecated(note = "use ProcSignal::process_barrier")]
 #[inline]
 pub fn process_proc_signal_barrier(registry: &ProcSignal, slot: &ProcSignalSlot) {
-    registry.process_barrier(slot)
+    registry.process_barrier(slot);
 }
 
 // Tombstone: the OS SIGUSR1 multiplexer is gone. Reasons are delivered by

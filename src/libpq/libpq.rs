@@ -3,6 +3,8 @@
 // Backend libpq send/recv API. These are in-memory wire-message helpers (NOT
 // on-disk / #[repr(C)]); signatures kept, bodies stubbed over crate::libpq::pqcomm.
 
+#![allow(clippy::ptr_arg, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1")]
+
 use crate::libpq::libpq_be::{ClientSocket, Port};
 
 // pq_getmessage() max-size conventions.

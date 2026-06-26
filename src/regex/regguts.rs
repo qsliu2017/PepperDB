@@ -136,12 +136,12 @@ pub struct arc {
     pub co: color,  // color the arc matches (possibly RAINBOW)
     pub from: *mut state, // TODO(ptr)
     pub to: *mut state,   // TODO(ptr)
-    pub outchain: *mut arc,    // link in *from's outs chain or free chain. TODO(ptr)
-    pub outchainRev: *mut arc, // back-link. TODO(ptr)
-    pub inchain: *mut arc,     // link in *to's ins chain. TODO(ptr)
-    pub inchainRev: *mut arc,  // back-link. TODO(ptr)
-    pub colorchain: *mut arc,    // link in color's arc chain. TODO(ptr)
-    pub colorchainRev: *mut arc, // back-link. TODO(ptr)
+    pub outchain: *mut Self,    // link in *from's outs chain or free chain. TODO(ptr)
+    pub outchainRev: *mut Self, // back-link. TODO(ptr)
+    pub inchain: *mut Self,     // link in *to's ins chain. TODO(ptr)
+    pub inchainRev: *mut Self,  // back-link. TODO(ptr)
+    pub colorchain: *mut Self,    // link in color's arc chain. TODO(ptr)
+    pub colorchainRev: *mut Self, // back-link. TODO(ptr)
 }
 
 pub const FIRSTABSIZE: usize = 64;
@@ -149,7 +149,7 @@ pub const MAXABSIZE: usize = 1024;
 
 /// `arcbatch` - bulk allocation of arcs (on-heap FAM: `a[]` lives past header).
 pub struct arcbatch {
-    pub next: *mut arcbatch, // chain link. TODO(ptr)
+    pub next: *mut Self, // chain link. TODO(ptr)
     pub narcs: usize,
     // a: [arc; FLEXIBLE_ARRAY_MEMBER] - trailing in buffer
 }
@@ -164,9 +164,9 @@ pub struct state {
     pub nouts: i32,
     pub ins: *mut arc,  // chain of inarcs. TODO(ptr)
     pub outs: *mut arc, // chain of outarcs. TODO(ptr)
-    pub tmp: *mut state,  // temporary for traversal. TODO(ptr)
-    pub next: *mut state, // chain of live states / free chain. TODO(ptr)
-    pub prev: *mut state, // back-link. TODO(ptr)
+    pub tmp: *mut Self,  // temporary for traversal. TODO(ptr)
+    pub next: *mut Self, // chain of live states / free chain. TODO(ptr)
+    pub prev: *mut Self, // back-link. TODO(ptr)
 }
 
 pub const FIRSTSBSIZE: usize = 32;
@@ -174,7 +174,7 @@ pub const MAXSBSIZE: usize = 1024;
 
 /// `statebatch` - bulk allocation of states (on-heap FAM: `s[]` past header).
 pub struct statebatch {
-    pub next: *mut statebatch, // chain link. TODO(ptr)
+    pub next: *mut Self, // chain link. TODO(ptr)
     pub nstates: usize,
     // s: [state; FLEXIBLE_ARRAY_MEMBER] - trailing in buffer
 }
@@ -201,7 +201,7 @@ pub struct nfa {
     pub minmatchall: i32,
     pub maxmatchall: i32,
     pub v: *mut vars,      // TODO(ptr)
-    pub parent: *mut nfa, // parent NFA, if any. TODO(ptr)
+    pub parent: *mut Self, // parent NFA, if any. TODO(ptr)
 }
 
 // compacted NFA flags (in nfa/cnfa `flags`).
@@ -286,12 +286,12 @@ pub struct subre {
     pub backno: i32, // if backref node, subno it refers to
     pub min: i16, // min repetitions for iteration or backref
     pub max: i16, // max repetitions for iteration or backref
-    pub child: *mut subre,   // first child / freelist chain. TODO(ptr)
-    pub sibling: *mut subre, // next child of same parent. TODO(ptr)
+    pub child: *mut Self,   // first child / freelist chain. TODO(ptr)
+    pub sibling: *mut Self, // next child of same parent. TODO(ptr)
     pub begin: *mut state, // outarcs from here. TODO(ptr)
     pub end: *mut state,   // ...ending in inarcs here. TODO(ptr)
     pub cnfa: cnfa, // compacted NFA, if any
-    pub chain: *mut subre, // for bookkeeping and error cleanup. TODO(ptr)
+    pub chain: *mut Self, // for bookkeeping and error cleanup. TODO(ptr)
 }
 
 /// `fns` - table of fn pointers for generic regex manipulation. A regex_t's

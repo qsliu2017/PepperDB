@@ -5,7 +5,7 @@ use crate::nodes::nodes::Node;
 
 /// C: `#define nodeDisplay(x) pprint(x)`
 pub fn node_display(obj: &Node) {
-    pprint(obj)
+    pprint(obj);
 }
 
 pub fn print(_obj: &Node) {

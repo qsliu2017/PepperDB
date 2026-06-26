@@ -28,7 +28,7 @@ pub struct Latch {
 #[deprecated(note = "use `latch.init()`")]
 #[inline]
 pub fn InitLatch(latch: &Latch) {
-    latch.init()
+    latch.init();
 }
 
 /// Single-process: identical to a local latch; the shared/owner distinction is
@@ -36,19 +36,19 @@ pub fn InitLatch(latch: &Latch) {
 #[deprecated(note = "use `latch.init()`")]
 #[inline]
 pub fn InitSharedLatch(latch: &Latch) {
-    latch.init()
+    latch.init();
 }
 
 #[deprecated(note = "use `latch.set()`")]
 #[inline]
 pub fn SetLatch(latch: &Latch) {
-    latch.set()
+    latch.set();
 }
 
 #[deprecated(note = "use `latch.reset()`")]
 #[inline]
 pub fn ResetLatch(latch: &Latch) {
-    latch.reset()
+    latch.reset();
 }
 
 // OwnLatch/DisownLatch/ShutdownLatchSupport managed the self-pipe / owner_pid in

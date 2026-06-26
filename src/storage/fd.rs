@@ -107,13 +107,13 @@ pub async fn OpenTemporaryFile(mgr: &Arc<FdManager>, _inter_xact: bool) -> std::
 #[deprecated(note = "drop the `File` (Drop closes the fd + frees the slot)")]
 #[inline]
 pub fn FileClose(file: File) {
-    file.close()
+    file.close();
 }
 
 #[deprecated(note = "use `file.prefetch(offset, amount)`")]
 #[inline]
 pub fn FilePrefetch(file: &File, offset: u64, amount: u64, _wait_event_info: u32) {
-    file.prefetch(offset, amount)
+    file.prefetch(offset, amount);
 }
 
 #[deprecated(note = "use `file.read_v(iov, offset)`")]

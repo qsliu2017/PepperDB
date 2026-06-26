@@ -1,6 +1,7 @@
 //! Translated from PostgreSQL src/include/storage/read_stream.h
 //!
 //! Mechanism for accessing buffered relation data with look-ahead.
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 
 use bitflags::bitflags;
 
@@ -52,12 +53,12 @@ pub fn block_range_read_stream_cb(
     unimplemented!()
 }
 
-pub fn read_stream_begin_relation<'a>(
+pub fn read_stream_begin_relation(
     _flags: ReadStreamFlags,
     _strategy: Option<BufferAccessStrategy>,
     _rel: Relation,
     _forknum: ForkNumber,
-    _callback: Box<ReadStreamBlockNumberCb<'a>>,
+    _callback: Box<ReadStreamBlockNumberCb<'_>>,
     _per_buffer_data_size: usize,
 ) -> Box<ReadStream> {
     unimplemented!()
@@ -76,13 +77,13 @@ pub fn read_stream_next_block(
     unimplemented!()
 }
 
-pub fn read_stream_begin_smgr_relation<'a>(
+pub fn read_stream_begin_smgr_relation(
     _flags: ReadStreamFlags,
     _strategy: Option<BufferAccessStrategy>,
     _smgr: &mut SmgrRelation,
     _smgr_persistence: u8,
     _forknum: ForkNumber,
-    _callback: Box<ReadStreamBlockNumberCb<'a>>,
+    _callback: Box<ReadStreamBlockNumberCb<'_>>,
     _per_buffer_data_size: usize,
 ) -> Box<ReadStream> {
     unimplemented!()

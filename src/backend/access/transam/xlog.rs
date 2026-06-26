@@ -247,7 +247,7 @@ impl XLogCtl {
     pub fn new(
         io: Arc<crate::storage::io_backend::IoBackend>,
         config: Arc<crate::backend::utils::init::globals::ProcessConfig>,
-    ) -> Arc<XLogCtl> {
+    ) -> Arc<Self> {
         Self::with_config(io, config, DEFAULT_WAL_SEGMENT_SIZE, DEFAULT_WAL_BUFFERS)
     }
 
@@ -258,8 +258,8 @@ impl XLogCtl {
         config: Arc<crate::backend::utils::init::globals::ProcessConfig>,
         wal_seg_size: u64,
         n_pages: usize,
-    ) -> Arc<XLogCtl> {
-        assert!(wal_seg_size >= BLCKSZ && wal_seg_size % BLCKSZ == 0);
+    ) -> Arc<Self> {
+        assert!(wal_seg_size >= BLCKSZ && wal_seg_size.is_multiple_of(BLCKSZ));
         assert!(n_pages >= 2);
         let pages = (0..n_pages)
             .map(|_| Mutex::new(vec![0u8; XLOG_BLCKSZ as usize].into_boxed_slice()))
@@ -272,7 +272,7 @@ impl XLogCtl {
             advanced: Notify::new(),
         });
         let (flushed_tx, _rx) = watch::channel(INVALID_XLOG_REC_PTR);
-        Arc::new(XLogCtl {
+        Arc::new(Self {
             wal_seg_size,
             n_pages,
             pages,
@@ -319,15 +319,14 @@ impl XLogCtl {
 
         let fullsegs = bytepos / uis;
         let mut bytesleft = bytepos % uis;
-        let seg_offset;
-        if bytesleft < BLCKSZ - long_phd {
-            seg_offset = bytesleft + long_phd;
+        let seg_offset = if bytesleft < BLCKSZ - long_phd {
+            bytesleft + long_phd
         } else {
             bytesleft -= BLCKSZ - long_phd;
             let fullpages = bytesleft / uip;
             bytesleft %= uip;
-            seg_offset = BLCKSZ + fullpages * BLCKSZ + bytesleft + short_phd;
-        }
+            BLCKSZ + fullpages * BLCKSZ + bytesleft + short_phd
+        };
         XLogRecPtr(fullsegs * self.wal_seg_size + seg_offset)
     }
 
@@ -342,19 +341,18 @@ impl XLogCtl {
 
         let fullsegs = bytepos / uis;
         let mut bytesleft = bytepos % uis;
-        let seg_offset;
-        if bytesleft < BLCKSZ - long_phd {
-            seg_offset = if bytesleft == 0 { 0 } else { bytesleft + long_phd };
+        let seg_offset = if bytesleft < BLCKSZ - long_phd {
+            if bytesleft == 0 { 0 } else { bytesleft + long_phd }
         } else {
             bytesleft -= BLCKSZ - long_phd;
             let fullpages = bytesleft / uip;
             bytesleft %= uip;
-            seg_offset = if bytesleft == 0 {
+            if bytesleft == 0 {
                 BLCKSZ + fullpages * BLCKSZ
             } else {
                 BLCKSZ + fullpages * BLCKSZ + bytesleft + short_phd
-            };
-        }
+            }
+        };
         XLogRecPtr(fullsegs * self.wal_seg_size + seg_offset)
     }
 
@@ -479,6 +477,8 @@ impl XLogCtl {
         record: &[u8],
         partial_crc: pg_crc32c,
     ) -> XLogRecPtr {
+        const PREV_OFF: usize = 8; // offsetof(XLogRecord, xl_prev)
+        const CRC_OFF: usize = SizeOfXLogRecord - 4; // offsetof(XLogRecord, xl_crc)
         assert!(record.len() >= SizeOfXLogRecord, "record shorter than header");
 
         // PG WALInsertLockAcquire: pick MyLockNo and take the lock HELD. The
@@ -486,7 +486,7 @@ impl XLogCtl {
         // yet"), which blocks any waiter on this lock until we advertise.
         let lock_no = self.my_lock_no();
         let lock = &self.insert_locks[lock_no];
-        let _guard = lock.guard.lock().await;
+        let guard = lock.guard.lock().await;
         lock.inserting_at.store(INSERTING_UNKNOWN, Ordering::Release);
 
         // PG ReserveXLogInsertLocation: reserve space WHILE HOLDING the insert
@@ -499,8 +499,6 @@ impl XLogCtl {
         // final CRC. Mirrors XLogInsertRecord: COMP_CRC32C(rdata_crc, rechdr,
         // offsetof(XLogRecord, xl_crc)); FIN_CRC32C.
         let mut bytes = record.to_vec();
-        const PREV_OFF: usize = 8; // offsetof(XLogRecord, xl_prev)
-        const CRC_OFF: usize = SizeOfXLogRecord - 4; // offsetof(XLogRecord, xl_crc)
         bytes[PREV_OFF..PREV_OFF + 8].copy_from_slice(&prev.0.to_ne_bytes());
         let crc = fin_crc32c(comp_crc32c(partial_crc, &bytes[..CRC_OFF]));
         bytes[CRC_OFF..CRC_OFF + 4].copy_from_slice(&crc.to_ne_bytes());
@@ -517,7 +515,7 @@ impl XLogCtl {
         // non-constraining), wake waiters, then drop the held guard.
         lock.inserting_at.store(NOT_INSERTING, Ordering::Release);
         lock.advanced.notify_waiters();
-        drop(_guard);
+        drop(guard);
 
         // If we crossed a page boundary, advance the shared write request so a
         // later flush knows the page is ready.
@@ -529,6 +527,7 @@ impl XLogCtl {
 
     /// PG `WALInsertLockAcquire`'s `MyLockNo` selection: round-robin from a
     /// process-global counter, overridable by the test pin.
+    #[allow(clippy::unused_self, reason = "self used only under #[cfg(test)] for pin_lock_no")]
     fn my_lock_no(&self) -> usize {
         #[cfg(test)]
         {
@@ -654,7 +653,7 @@ impl XLogCtl {
         if self.xlblocks[idx].load(Ordering::Acquire) != expected_end {
             self.advance_insert_buffer(ptr).await;
             let endptr = self.xlblocks[idx].load(Ordering::Acquire);
-            assert_eq!(endptr, expected_end, "could not find WAL buffer for {:X}", ptr);
+            assert_eq!(endptr, expected_end, "could not find WAL buffer for {ptr:X}");
         }
         idx
     }
@@ -665,7 +664,7 @@ impl XLogCtl {
     /// write to avoid deadlock).
     async fn advance_insert_buffer(self: &Arc<Self>, upto: u64) {
         loop {
-            let _map = self.buf_mapping.lock().await;
+            let map = self.buf_mapping.lock().await;
             let init_upto = self.initialized_upto.load(Ordering::Acquire);
             if upto < init_upto {
                 return; // someone initialized it already
@@ -684,7 +683,7 @@ impl XLogCtl {
                     // page strictly below every live insert position (we only
                     // evict pages already behind the insert head), so this wait
                     // returns promptly and the write touches no in-flight page.
-                    drop(_map);
+                    drop(map);
                     self.wait_xlog_insertions_to_finish(old_end).await;
                     self.xlog_write(XLogRecPtr(old_end)).await;
                     continue;
@@ -1089,7 +1088,7 @@ impl XLogCtl {
 
 /// Space left on the WAL page after `endptr`. Mirrors `INSERT_FREESPACE`.
 fn insert_freespace(endptr: u64) -> u64 {
-    if endptr % BLCKSZ == 0 {
+    if endptr.is_multiple_of(BLCKSZ) {
         0
     } else {
         BLCKSZ - (endptr % BLCKSZ)
@@ -1113,7 +1112,7 @@ mod tests {
     }
 
     impl WalFixture {
-        async fn new(wal_seg_size: u64, n_pages: usize) -> WalFixture {
+        async fn new(wal_seg_size: u64, n_pages: usize) -> Self {
             use std::sync::atomic::AtomicU64;
             static SEQ: AtomicU64 = AtomicU64::new(0);
             let uniq = SEQ.fetch_add(1, Ordering::Relaxed);
@@ -1132,7 +1131,7 @@ mod tests {
                 Arc::new(crate::backend::utils::init::globals::ProcessConfig::new());
             config.set_data_dir(dir.to_str().unwrap());
             let xlog = XLogCtl::with_config(io, config, wal_seg_size, n_pages);
-            WalFixture { xlog, dir }
+            Self { xlog, dir }
         }
     }
 
@@ -1644,6 +1643,8 @@ mod tests {
         use crate::access::xlog_internal::{
             XLogFileName, XLogFromFileName, XlpFlags, SizeOfXLogLongPHD, XLOG_PAGE_MAGIC,
         };
+        // The long-header cross-check below reads bytes [32..40].
+        const _: () = assert!(SizeOfXLogLongPHD >= 40);
         let seg = 4 * BLCKSZ;
         let fx = WalFixture::new(seg, 8).await;
 
@@ -1672,9 +1673,8 @@ mod tests {
         // Long-header cross-check fields.
         let seg_size = u32::from_ne_bytes(bytes[32..36].try_into().unwrap());
         let blcksz = u32::from_ne_bytes(bytes[36..40].try_into().unwrap());
-        assert_eq!(seg_size as u64, seg, "xlp_seg_size");
+        assert_eq!(u64::from(seg_size), seg, "xlp_seg_size");
         assert_eq!(blcksz, XLOG_BLCKSZ, "xlp_xlog_blcksz");
-        assert!(SizeOfXLogLongPHD >= 40);
 
         // Second page (offset BLCKSZ): short header (no long-header flag).
         let p2 = BLCKSZ as usize;

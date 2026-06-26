@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/optimizer/appendinfo.h
 //! Routines for mapping expressions between append rel parent(s) and children
 
+#![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
+
 use crate::nodes::nodes::Node;
 use crate::nodes::pathnodes::{AppendRelInfo, PlannerInfo, RelOptInfo, Relids};
 use crate::nodes::parsenodes::RangeTblEntry;
@@ -68,10 +70,10 @@ pub fn get_translated_update_targetlist(
 }
 
 /// C: out-param `nappinfos` -> the returned Vec's length.
-pub fn find_appinfos_by_relids<'a>(
-    root: &'a PlannerInfo,
+pub fn find_appinfos_by_relids(
+    root: &PlannerInfo,
     relids: Relids,
-) -> Vec<&'a AppendRelInfo> {
+) -> Vec<&AppendRelInfo> {
     unimplemented!()
 }
 

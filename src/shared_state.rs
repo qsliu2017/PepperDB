@@ -61,6 +61,7 @@ impl Default for SharedStateConfig {
 ///   - a `Send + Sync + 'static` compile-time assertion on `Type`, so a field
 ///     whose subsystem is not thread-shareable fails HERE with a clear bound
 ///     error instead of later at a `tokio::spawn` site.
+///
 /// Per-field doc comments apply to both the field and its accessor.
 /// (No per-field visibility override: every accessor is `pub(crate)`, matching
 /// the existing API; an `@ vis` token was deemed unnecessary complexity.)
@@ -170,7 +171,8 @@ impl SharedState {
     /// roster; insert the corresponding `Arc` field construction at that exact
     /// point so init dependencies stay faithful. `deferred` = no step assigned
     /// yet (multixact, twophase, aio, and the replication/stats/sync-scan tail).
-    pub fn new(config: SharedStateConfig) -> Arc<SharedState> {
+    #[allow(clippy::needless_pass_by_value, reason = "callers in src/backend/ pass by value; changing to &ref would ripple to all callers")]
+    pub fn new(config: SharedStateConfig) -> Arc<Self> {
         // max_open must stay <= the fd budget: the VFD LRU frees a permit by
         // closing an idle fd before acquiring, so a larger soft cap can wedge on
         // the budget semaphore (see step-05 fd.rs).
@@ -294,7 +296,7 @@ impl SharedState {
         //   (WaitEventCustomShmemInit / InjectionPointShmemInit -- deferred)
         //   (AioShmemInit -- deferred: tokio I/O leaf replaces the aio subsys)
 
-        Arc::new(SharedState {
+        Arc::new(Self {
             config: process_config,
             fd,
             proc_signal,

@@ -2,6 +2,7 @@
 //!
 //! Large objects (inversion). The descriptor is in-memory; the LO bytes live in
 //! pg_largeobject as bytea chunks.
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 
 use bitflags::bitflags;
 

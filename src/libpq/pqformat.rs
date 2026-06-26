@@ -6,6 +6,7 @@
 // (network byte order). The C `enlargeStringInfo`/preallocation dance is
 // unnecessary - `Vec::extend_from_slice` grows as needed - so the `pq_write*`/
 // `pq_send*` split collapses to a single set of append helpers.
+#![allow(clippy::needless_pass_by_value, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 
 use std::io::Cursor;
 

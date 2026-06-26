@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/common/cryptohash.h
 //! Generic interface for cryptographic hash functions.
+#![allow(
+    clippy::boxed_local,
+    clippy::needless_pass_by_value,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
 
 /// Supported cryptographic hash types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

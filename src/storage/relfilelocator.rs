@@ -23,7 +23,7 @@ const _: () = assert!(core::mem::offset_of!(RelFileLocator, relNumber) == 8);
 
 impl RelFileLocator {
     /// Compares relNumber first (most likely to differ), per PG.
-    pub const fn equals(&self, other: &RelFileLocator) -> bool {
+    pub const fn equals(&self, other: &Self) -> bool {
         self.relNumber.0 == other.relNumber.0
             && self.dbOid.0 == other.dbOid.0
             && self.spcOid.0 == other.spcOid.0
@@ -46,7 +46,7 @@ impl RelFileLocatorBackend {
     }
 
     /// Compares relNumber first, then dbOid, backend, spcOid, per PG.
-    pub const fn equals(&self, other: &RelFileLocatorBackend) -> bool {
+    pub const fn equals(&self, other: &Self) -> bool {
         self.locator.relNumber.0 == other.locator.relNumber.0
             && self.locator.dbOid.0 == other.locator.dbOid.0
             && self.backend == other.backend

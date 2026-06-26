@@ -97,6 +97,10 @@ impl BufferPool {
     /// the flush, exactly as C.
     ///
     /// `shared` is needed because evicting a dirty victim flushes it via smgr.
+    #[allow(
+        clippy::never_loop,
+        reason = "retry is encapsulated in the awaited callee (get_victim_buffer); loop kept for PG structural parity"
+    )]
     async fn buffer_alloc(
         self: &Arc<Self>,
         shared: &Arc<SharedState>,
@@ -118,42 +122,39 @@ impl BufferPool {
             let victim = self.get_victim_buffer(shared).await;
 
             // Try to claim the tag. Shard lock taken + dropped synchronously.
-            match self.buf_table.insert(&tag, hash, victim) {
-                Some(existing) => {
-                    // Someone inserted the same tag first. Give up the victim
-                    // (unpin + free) and use the existing buffer (C double-check).
-                    self.unpin_buffer(victim);
-                    self.strategy.free_buffer(self, victim);
-                    let valid = self.pin_buffer(existing);
-                    return (existing, valid);
+            if let Some(existing) = self.buf_table.insert(&tag, hash, victim) {
+                // Someone inserted the same tag first. Give up the victim
+                // (unpin + free) and use the existing buffer (C double-check).
+                self.unpin_buffer(victim);
+                self.strategy.free_buffer(self, victim);
+                let valid = self.pin_buffer(existing);
+                return (existing, valid);
+            }
+            // We own the tag. Set up the victim's descriptor: assign the
+            // tag and BM_TAG_VALID + a starting usagecount under the
+            // header lock. The victim is pinned (refcount == 1), invalid.
+            {
+                let desc = self.descriptor(victim);
+                let buf_state = desc.lock_hdr();
+                debug_assert_eq!(buf_state_get_refcount(buf_state), 1);
+                debug_assert_eq!(
+                    buf_state
+                        & (BufFlags::TAG_VALID.bits()
+                            | BufFlags::VALID.bits()
+                            | BufFlags::DIRTY.bits()
+                            | BufFlags::IO_IN_PROGRESS.bits()), 0
+                );
+                // SAFETY: header lock held; tag write is serialized by it and
+                // the victim is pinned so no clock-sweep can take it.
+                self.descriptor(victim).set_tag(tag);
+                let mut new = buf_state | BufFlags::TAG_VALID.bits() | BUF_USAGECOUNT_ONE;
+                if relpersistence == RELPERSISTENCE_PERMANENT
+                    || tag.fork_num() == ForkNumber::INIT_FORKNUM
+                {
+                    new |= BufFlags::PERMANENT.bits();
                 }
-                None => {
-                    // We own the tag. Set up the victim's descriptor: assign the
-                    // tag and BM_TAG_VALID + a starting usagecount under the
-                    // header lock. The victim is pinned (refcount == 1), invalid.
-                    let desc = self.descriptor(victim);
-                    let buf_state = desc.lock_hdr();
-                    debug_assert_eq!(buf_state_get_refcount(buf_state), 1);
-                    debug_assert!(
-                        buf_state
-                            & (BufFlags::TAG_VALID.bits()
-                                | BufFlags::VALID.bits()
-                                | BufFlags::DIRTY.bits()
-                                | BufFlags::IO_IN_PROGRESS.bits())
-                            == 0
-                    );
-                    // SAFETY: header lock held; tag write is serialized by it and
-                    // the victim is pinned so no clock-sweep can take it.
-                    self.descriptor(victim).set_tag(tag);
-                    let mut new = buf_state | BufFlags::TAG_VALID.bits() | BUF_USAGECOUNT_ONE;
-                    if relpersistence == RELPERSISTENCE_PERMANENT
-                        || tag.fork_num() == ForkNumber::INIT_FORKNUM
-                    {
-                        new |= BufFlags::PERMANENT.bits();
-                    }
-                    desc.unlock_hdr(new);
-                    return (victim, false);
-                }
+                desc.unlock_hdr(new);
+                return (victim, false);
             }
         }
     }
@@ -267,16 +268,13 @@ impl BufferPool {
         // Do the write with no buffer lock held; BM_IO_IN_PROGRESS protects the
         // page slot. The page bytes are read-only here (smgrwrite takes &Page).
         let page: &Page = self.block(buf_id);
-        match reln {
-            Some(r) => r.write(shared, forknum, blocknum, page, false).await,
-            None => {
-                // Open an smgr for the buffer's own relation (C: smgropen on the
-                // tag with INVALID_PROC_NUMBER). Owned on the stack, no cache
-                // borrow across the await.
-                let rlocator: RelFileLocator = tag.rel_file_locator();
-                let mut smgr = SmgrRelation::open(rlocator, INVALID_PROC_NUMBER);
-                smgr.write(shared, forknum, blocknum, page, false).await;
-            }
+        if let Some(r) = reln { r.write(shared, forknum, blocknum, page, false).await } else {
+            // Open an smgr for the buffer's own relation (C: smgropen on the
+            // tag with INVALID_PROC_NUMBER). Owned on the stack, no cache
+            // borrow across the await.
+            let rlocator: RelFileLocator = tag.rel_file_locator();
+            let mut smgr = SmgrRelation::open(rlocator, INVALID_PROC_NUMBER);
+            smgr.write(shared, forknum, blocknum, page, false).await;
         }
 
         // Mark clean (unless re-dirtied) and end the IO; wakes any WaitIO waiter.
@@ -420,6 +418,10 @@ fn global_buf_id(buffer: Buffer) -> i32 {
 /// of reading.
 ///
 /// No buffer-table/header/content lock is held across the smgr `.await`.
+#[allow(
+    clippy::never_loop,
+    reason = "retry is encapsulated in the awaited callee (start_buffer_io); loop kept for PG structural parity"
+)]
 pub async fn read_buffer_common(
     shared: &Arc<SharedState>,
     smgr: &mut SmgrRelation,
@@ -541,7 +543,7 @@ mod tests {
             // foundation stage, so a real data page has no LSN yet, and a zero
             // LSN makes FlushBuffer's WAL-before-data flush a no-op (step 13).
             p.set_lsn(crate::access::xlogdefs::INVALID_XLOG_REC_PTR);
-            reln.extend(s, fork, i as BlockNumber, &p, true).await;
+            reln.extend(s, fork, BlockNumber::from(i), &p, true).await;
         }
         reln
     }
@@ -603,7 +605,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn two_racers_one_reads_both_get_valid_buffer() {
         let (s, dir) = shared_with_tmpdir("race", 16).await;
-        let mut reln = make_rel_with_pages(&s, 1, 2).await;
+        let reln = make_rel_with_pages(&s, 1, 2).await;
         let fork = ForkNumber::MAIN_FORKNUM;
 
         // Two tasks read the same missing block concurrently. Each opens its own

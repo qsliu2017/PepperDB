@@ -24,7 +24,7 @@ pub enum LockMode {
 
 impl LockMode {
     /// Lock used for inplace updates (see README.tuplock).
-    pub const INPLACE_UPDATE_TUPLE_LOCK: LockMode = LockMode::ExclusiveLock;
+    pub const INPLACE_UPDATE_TUPLE_LOCK: Self = Self::ExclusiveLock;
 }
 
 /// Highest standard lock mode.

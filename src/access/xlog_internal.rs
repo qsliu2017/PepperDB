@@ -93,7 +93,7 @@ pub const DEFAULT_MIN_WAL_SEGS: i32 = 5;
 pub const DEFAULT_MAX_WAL_SEGS: i32 = 64;
 
 pub const fn IsPowerOf2(x: usize) -> bool {
-    x > 0 && (x & (x - 1)) == 0
+    x > 0 && x.is_power_of_two()
 }
 pub const fn IsValidWalSegSize(size: usize) -> bool {
     IsPowerOf2(size) && size >= WalSegMinSize && size <= WalSegMaxSize

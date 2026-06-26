@@ -13,10 +13,12 @@ pub fn FPzero(a: f64) -> bool {
     a.abs() <= EPSILON
 }
 #[inline]
+#[allow(clippy::float_cmp, reason = "PG geometric exact-equality semantics")]
 pub fn FPeq(a: f64, b: f64) -> bool {
     a == b || (a - b).abs() <= EPSILON
 }
 #[inline]
+#[allow(clippy::float_cmp, reason = "PG geometric exact-equality semantics")]
 pub fn FPne(a: f64, b: f64) -> bool {
     a != b && (a - b).abs() > EPSILON
 }
@@ -116,7 +118,7 @@ pub fn DatumGetPointP(x: Datum) -> *mut Point {
 }
 #[inline]
 pub fn PointPGetDatum(x: &Point) -> Datum {
-    Datum(x as *const Point as usize)
+    Datum(std::ptr::from_ref::<Point>(x) as usize)
 }
 #[inline]
 pub fn DatumGetLsegP(x: Datum) -> *mut LSEG {
@@ -124,7 +126,7 @@ pub fn DatumGetLsegP(x: Datum) -> *mut LSEG {
 }
 #[inline]
 pub fn LsegPGetDatum(x: &LSEG) -> Datum {
-    Datum(x as *const LSEG as usize)
+    Datum(std::ptr::from_ref::<LSEG>(x) as usize)
 }
 #[inline]
 pub fn DatumGetPathP(x: Datum) -> *mut PATH {
@@ -136,7 +138,7 @@ pub fn DatumGetPathPCopy(x: Datum) -> *mut PATH {
 }
 #[inline]
 pub fn PathPGetDatum(x: &PATH) -> Datum {
-    Datum(x as *const PATH as usize)
+    Datum(std::ptr::from_ref::<PATH>(x) as usize)
 }
 #[inline]
 pub fn DatumGetLineP(x: Datum) -> *mut LINE {
@@ -144,7 +146,7 @@ pub fn DatumGetLineP(x: Datum) -> *mut LINE {
 }
 #[inline]
 pub fn LinePGetDatum(x: &LINE) -> Datum {
-    Datum(x as *const LINE as usize)
+    Datum(std::ptr::from_ref::<LINE>(x) as usize)
 }
 #[inline]
 pub fn DatumGetBoxP(x: Datum) -> *mut BOX {
@@ -152,7 +154,7 @@ pub fn DatumGetBoxP(x: Datum) -> *mut BOX {
 }
 #[inline]
 pub fn BoxPGetDatum(x: &BOX) -> Datum {
-    Datum(x as *const BOX as usize)
+    Datum(std::ptr::from_ref::<BOX>(x) as usize)
 }
 #[inline]
 pub fn DatumGetPolygonP(x: Datum) -> *mut POLYGON {
@@ -164,7 +166,7 @@ pub fn DatumGetPolygonPCopy(x: Datum) -> *mut POLYGON {
 }
 #[inline]
 pub fn PolygonPGetDatum(x: &POLYGON) -> Datum {
-    Datum(x as *const POLYGON as usize)
+    Datum(std::ptr::from_ref::<POLYGON>(x) as usize)
 }
 #[inline]
 pub fn DatumGetCircleP(x: Datum) -> *mut CIRCLE {
@@ -172,7 +174,7 @@ pub fn DatumGetCircleP(x: Datum) -> *mut CIRCLE {
 }
 #[inline]
 pub fn CirclePGetDatum(x: &CIRCLE) -> Datum {
-    Datum(x as *const CIRCLE as usize)
+    Datum(std::ptr::from_ref::<CIRCLE>(x) as usize)
 }
 
 // in geo_ops.c

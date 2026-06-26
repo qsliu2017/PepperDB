@@ -20,7 +20,7 @@ pub fn rec_get_len(record: &DecodedXLogRecord) -> (u32, u32) {
             continue;
         }
         if record.has_block_image(block_id as usize) {
-            fpi_len += record.block(block_id as usize).bimg_len as u32;
+            fpi_len += u32::from(record.block(block_id as usize).bimg_len);
         }
     }
     let rec_len = record.total_len() - fpi_len;
@@ -37,8 +37,8 @@ pub fn store_stats(stats: &mut XLogStats, record: &DecodedXLogRecord) {
     // Per-rmgr statistics.
     let r = &mut stats.rmgr_stats[rmid as usize];
     r.count += 1;
-    r.rec_len += rec_len as u64;
-    r.fpi_len += fpi_len as u64;
+    r.rec_len += u64::from(rec_len);
+    r.fpi_len += u64::from(fpi_len);
 
     // Per-record statistics: keyed by RmgrId plus the four rmgr-owned high bits
     // of xl_info (sixteen possible entries per RmgrId).
@@ -52,8 +52,8 @@ pub fn store_stats(stats: &mut XLogStats, record: &DecodedXLogRecord) {
 
     let rs = &mut stats.record_stats[rmid as usize][recid as usize];
     rs.count += 1;
-    rs.rec_len += rec_len as u64;
-    rs.fpi_len += fpi_len as u64;
+    rs.rec_len += u64::from(rec_len);
+    rs.fpi_len += u64::from(fpi_len);
 }
 
 /// Header-compatible `XLogRecGetLen(record)` shim: reads the reader's most
@@ -112,7 +112,7 @@ mod tests {
             size: 0,
             oversized: false,
             lsn: XLogRecPtr(100),
-            next_lsn: XLogRecPtr(100 + tot_len as u64),
+            next_lsn: XLogRecPtr(100 + u64::from(tot_len)),
             header: XLogRecord {
                 tot_len,
                 xid: crate::c::InvalidTransactionId,

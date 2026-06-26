@@ -3,7 +3,7 @@
 use crate::nodes::parsenodes::Query;
 
 /// Tracks location/length of constants during normalization.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocationLen {
     /// Start offset in query text.
     pub location: i32,
@@ -16,7 +16,7 @@ pub struct LocationLen {
 }
 
 /// Working state for computing a query jumble and normalized query string.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JumbleState {
     /// Jumble of current query tree.
     pub jumble: Vec<u8>,

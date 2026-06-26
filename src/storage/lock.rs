@@ -47,7 +47,7 @@ impl VirtualTransactionId {
         self.proc_number == INVALID_PROC_NUMBER
     }
     pub const fn invalid() -> Self {
-        VirtualTransactionId {
+        Self {
             proc_number: INVALID_PROC_NUMBER,
             local_transaction_id: INVALID_LOCAL_TRANSACTION_ID,
         }
@@ -172,7 +172,7 @@ impl LOCKTAG {
     }
 
     fn new(f1: u32, f2: u32, f3: u32, f4: u16, ty: LockTagType, method: LOCKMETHODID) -> Self {
-        LOCKTAG {
+        Self {
             locktag_field1: f1,
             locktag_field2: f2,
             locktag_field3: f3,
@@ -183,7 +183,7 @@ impl LOCKTAG {
     }
 
     pub fn lockmethod(&self) -> LOCKMETHODID {
-        self.locktag_lockmethodid as LOCKMETHODID
+        LOCKMETHODID::from(self.locktag_lockmethodid)
     }
 }
 

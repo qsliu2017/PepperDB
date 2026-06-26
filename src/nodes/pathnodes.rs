@@ -133,7 +133,7 @@ pub struct PlannerInfo {
     /// 1 at the outermost Query.
     pub query_level: usize,
     /// NULL at outermost Query.
-    pub parent_root: Option<Box<PlannerInfo>>,
+    pub parent_root: Option<Box<Self>>,
     /// List of PlannerParamItems.
     pub plan_params: Vec<Box<PlannerParamItem>>,
     pub outer_params: Option<Bitmapset>,
@@ -275,7 +275,7 @@ pub struct PlannerInfo {
 }
 
 /// Properties shared by relations partitioned the same way.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionSchemeData {
     /// Partition strategy.
     pub strategy: u8,
@@ -404,9 +404,9 @@ pub struct RelOptInfo {
     pub has_eclass_joins: bool,
     pub consider_partitionwise_join: bool,
     /// Immediate parent relation (otherrel).
-    pub parent: Option<Box<RelOptInfo>>,
+    pub parent: Option<Box<Self>>,
     /// Topmost parent relation.
-    pub top_parent: Option<Box<RelOptInfo>>,
+    pub top_parent: Option<Box<Self>>,
     /// Relids of topmost parent.
     pub top_parent_relids: Option<Relids>,
     /// Partitioning scheme.
@@ -418,7 +418,7 @@ pub struct RelOptInfo {
     /// Partition constraint, if not the root.
     pub partition_qual: Vec<Box<Node>>,
     /// RelOptInfos for each partition.
-    pub part_rels: Vec<Option<Box<RelOptInfo>>>,
+    pub part_rels: Vec<Option<Box<Self>>>,
     /// Live partitions after pruning (indexes into part_rels).
     pub live_parts: Option<Bitmapset>,
     /// All partition relids.
@@ -541,7 +541,7 @@ pub struct StatisticExtInfo {
 }
 
 /// Scope of EquivalenceClass deductions.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JoinDomain {
     /// All relids contained within the domain.
     pub jd_relids: Option<Relids>,
@@ -575,7 +575,7 @@ pub struct EquivalenceClass {
     pub min_security: usize,
     pub max_security: usize,
     /// Set if merged into another EC.
-    pub merged: Option<Box<EquivalenceClass>>,
+    pub merged: Option<Box<Self>>,
 }
 
 /// One member expression of an EquivalenceClass.
@@ -592,7 +592,7 @@ pub struct EquivalenceMember {
     /// Join domain containing the source clause.
     pub jdomain: Box<JoinDomain>,
     /// If is_child, link to the top-parent EM.
-    pub parent: Option<Box<EquivalenceMember>>,
+    pub parent: Option<Box<Self>>,
 }
 
 /// Iterator over an EquivalenceClass's parent and selected child members.
@@ -1349,7 +1349,7 @@ pub struct AppendRelInfo {
 }
 
 /// Info about a row-identity "resjunk" column in UPDATE/DELETE/MERGE.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowIdentityVarInfo {
     /// Var to be evaluated (varno=ROWID_VAR).
     pub rowidvar: Box<Var>,

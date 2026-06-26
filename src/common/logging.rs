@@ -73,40 +73,40 @@ pub fn pg_log_generic(level: PgLogLevel, part: PgLogPart, msg: &str) {
 // The pg_log_error/warning/info/debug + _detail/_hint macros are thin wrappers
 // over pg_log_generic; callers pass an already-formatted message.
 pub fn pg_log_error(msg: &str) {
-    pg_log_generic(PgLogLevel::Error, PgLogPart::Primary, msg)
+    pg_log_generic(PgLogLevel::Error, PgLogPart::Primary, msg);
 }
 pub fn pg_log_error_detail(msg: &str) {
-    pg_log_generic(PgLogLevel::Error, PgLogPart::Detail, msg)
+    pg_log_generic(PgLogLevel::Error, PgLogPart::Detail, msg);
 }
 pub fn pg_log_error_hint(msg: &str) {
-    pg_log_generic(PgLogLevel::Error, PgLogPart::Hint, msg)
+    pg_log_generic(PgLogLevel::Error, PgLogPart::Hint, msg);
 }
 pub fn pg_log_warning(msg: &str) {
-    pg_log_generic(PgLogLevel::Warning, PgLogPart::Primary, msg)
+    pg_log_generic(PgLogLevel::Warning, PgLogPart::Primary, msg);
 }
 pub fn pg_log_warning_detail(msg: &str) {
-    pg_log_generic(PgLogLevel::Warning, PgLogPart::Detail, msg)
+    pg_log_generic(PgLogLevel::Warning, PgLogPart::Detail, msg);
 }
 pub fn pg_log_warning_hint(msg: &str) {
-    pg_log_generic(PgLogLevel::Warning, PgLogPart::Hint, msg)
+    pg_log_generic(PgLogLevel::Warning, PgLogPart::Hint, msg);
 }
 pub fn pg_log_info(msg: &str) {
-    pg_log_generic(PgLogLevel::Info, PgLogPart::Primary, msg)
+    pg_log_generic(PgLogLevel::Info, PgLogPart::Primary, msg);
 }
 pub fn pg_log_info_detail(msg: &str) {
-    pg_log_generic(PgLogLevel::Info, PgLogPart::Detail, msg)
+    pg_log_generic(PgLogLevel::Info, PgLogPart::Detail, msg);
 }
 pub fn pg_log_info_hint(msg: &str) {
-    pg_log_generic(PgLogLevel::Info, PgLogPart::Hint, msg)
+    pg_log_generic(PgLogLevel::Info, PgLogPart::Hint, msg);
 }
 pub fn pg_log_debug(msg: &str) {
-    pg_log_generic(PgLogLevel::Debug, PgLogPart::Primary, msg)
+    pg_log_generic(PgLogLevel::Debug, PgLogPart::Primary, msg);
 }
 pub fn pg_log_debug_detail(msg: &str) {
-    pg_log_generic(PgLogLevel::Debug, PgLogPart::Detail, msg)
+    pg_log_generic(PgLogLevel::Debug, PgLogPart::Detail, msg);
 }
 pub fn pg_log_debug_hint(msg: &str) {
-    pg_log_generic(PgLogLevel::Debug, PgLogPart::Hint, msg)
+    pg_log_generic(PgLogLevel::Debug, PgLogPart::Hint, msg);
 }
 
 /// pg_log_error() then exit(1).

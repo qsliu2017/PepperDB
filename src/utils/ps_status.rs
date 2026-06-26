@@ -30,7 +30,7 @@ pub fn set_ps_display_with_len(_activity: &str, _len: usize) {
 
 /// Inlined in C so strlen folds for string constants; here just forward the len.
 pub fn set_ps_display(activity: &str) {
-    set_ps_display_with_len(activity, activity.len())
+    set_ps_display_with_len(activity, activity.len());
 }
 
 /// Returns the current display string and its length.

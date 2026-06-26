@@ -5,6 +5,8 @@
 //! `get_call_result_type` & siblings fold their out-params into a returned tuple
 //! per function-mapping.md 5.
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 use bitflags::bitflags;
 
 use crate::access::htup::{HeapTuple, HeapTupleData, HeapTupleHeaderData};
@@ -183,7 +185,7 @@ pub fn end_MultiFuncCall(_fcinfo: FunctionCallInfo, _funcctx: Box<FuncCallContex
 
 /// SRF_IS_FIRSTCALL(): true when `fcinfo->flinfo->extra == NULL`.
 pub fn SRF_IS_FIRSTCALL(fcinfo: &crate::fmgr::FunctionCallInfoBaseData) -> bool {
-    fcinfo.flinfo.as_ref().map_or(true, |fi| fi.extra == 0)
+    fcinfo.flinfo.as_ref().is_none_or(|fi| fi.extra == 0)
 }
 
 /// SRF_FIRSTCALL_INIT().

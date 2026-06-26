@@ -275,7 +275,7 @@ impl<'a> FsmPageMut<'a> {
 
             // At a leaf with enough space.
             let slot = nodeno - NON_LEAF_NODES_PER_PAGE;
-            self.set_next_slot(slot as i32 + if advancenext { 1 } else { 0 });
+            self.set_next_slot(slot as i32 + i32::from(advancenext));
             return Some(slot);
         }
     }
@@ -305,10 +305,11 @@ impl<'a> FsmPageMut<'a> {
         for nodeno in (0..NON_LEAF_NODES_PER_PAGE).rev() {
             let lchild = leftchild(nodeno);
             let rchild = lchild + 1;
-            let mut newvalue = 0u8;
-            if lchild < NODES_PER_PAGE {
-                newvalue = self.node(lchild);
-            }
+            let mut newvalue = if lchild < NODES_PER_PAGE {
+                self.node(lchild)
+            } else {
+                0u8
+            };
             if rchild < NODES_PER_PAGE {
                 newvalue = newvalue.max(self.node(rchild));
             }

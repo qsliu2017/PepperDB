@@ -15,7 +15,7 @@ use crate::postgres_ext::Oid;
 
 /// Opaque CustomScan method table; modeled as a trait in nodes::extensible, which
 /// cannot be a struct field here without a cycle, so kept opaque in this port.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomScanMethods;
 
 /// Fetch the Plan of a SubPlan: subplans[subplan.plan_id - 1].
@@ -366,7 +366,7 @@ pub struct NestLoop {
 }
 
 /// Param to pass from the current outer row into the inner subplan of a nestloop.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NestLoopParam {
     pub paramno: i32,
     pub paramval: Box<Var>,
@@ -584,7 +584,7 @@ pub fn row_mark_requires_row_share_lock(marktype: RowMarkType) -> bool {
 }
 
 /// Plan-time representation of FOR [KEY] UPDATE/SHARE clauses.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanRowMark {
     pub rti: Index,
     pub prti: Index,
@@ -620,7 +620,7 @@ pub struct PartitionedRelPruneInfo {
 }
 
 /// Abstract base for partition pruning steps (no concrete nodes of this type).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionPruneStep {
     pub step_id: i32,
 }
@@ -643,7 +643,7 @@ pub enum PartitionPruneCombineOp {
 }
 
 /// Prune by combining sub-step results (for a BoolExpr clause).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionPruneStepCombine {
     pub step: PartitionPruneStep,
     pub combine_op: PartitionPruneCombineOp,
@@ -651,7 +651,7 @@ pub struct PartitionPruneStepCombine {
 }
 
 /// Plan invalidation item: identifies a syscache entry by cache ID + hash value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanInvalItem {
     pub cache_id: i32,
     pub hash_value: u32,

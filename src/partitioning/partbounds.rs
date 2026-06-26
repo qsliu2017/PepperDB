@@ -21,7 +21,7 @@ use crate::utils::relcache::Relation;
 ///
 /// This is the canonical definition; `crate::partitioning::partdefs` forwards
 /// `PartitionBoundInfoData` to here.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionBoundInfoData {
     /// hash, list or range?
     pub strategy: PartitionStrategy,

@@ -234,6 +234,7 @@ impl IoBackend {
     /// durability, so we log and crash rather than risk silent corruption. This
     /// bypasses any per-task catch_unwind by design (process::abort, not panic).
     #[cold]
+    #[allow(clippy::needless_pass_by_value, reason = "io::Error consumed in elog! before process abort")]
     fn abort_fsync(op: &str, e: io::Error) -> ! {
         elog!(LOG, format!("could not {op} file: {e}"));
         std::process::abort();
@@ -331,12 +332,12 @@ mod tests {
 
     #[tokio::test]
     async fn write_then_read_pages_at_offsets() {
+        const PAGE: usize = 8192;
+        const N: u64 = 4;
         let io = IoBackend::with_default_budget();
         let path = tmp_path("pages");
         let (file, _permit) = io.open(&path, OpenFlags::create_read_write()).await.unwrap();
 
-        const PAGE: usize = 8192;
-        const N: u64 = 4;
         for i in 0..N {
             let buf = vec![(i as u8).wrapping_add(1); PAGE];
             let n = io.write_at(&file, &buf, i * PAGE as u64).await.unwrap();
@@ -499,7 +500,7 @@ mod tests {
         let path = tmp_path("read_eof");
         let (file, _p) = io.open(&path, OpenFlags::create_read_write()).await.unwrap();
 
-        assert_eq!(io.write_at(&file, &vec![0xABu8; 10], 0).await.unwrap(), 10);
+        assert_eq!(io.write_at(&file, &[0xABu8; 10], 0).await.unwrap(), 10);
 
         // Ask for 16 bytes when only 10 exist.
         let mut buf = vec![0u8; 16];

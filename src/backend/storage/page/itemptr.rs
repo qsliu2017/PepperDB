@@ -22,21 +22,20 @@ impl ItemPointerData {
     /// Returns <0, 0, or >0. Uses the *_no_check accessors so a user-supplied TID
     /// with ip_posid == 0 does not trip the validity assert.
     pub fn compare(&self, other: &Self) -> i32 {
+        use core::cmp::Ordering;
         let b1 = self.block_number_no_check();
         let b2 = other.block_number_no_check();
-        if b1 < b2 {
-            -1
-        } else if b1 > b2 {
-            1
-        } else {
-            let o1 = self.offset_number_no_check();
-            let o2 = other.offset_number_no_check();
-            if o1 < o2 {
-                -1
-            } else if o1 > o2 {
-                1
-            } else {
-                0
+        match b1.cmp(&b2) {
+            Ordering::Less => -1,
+            Ordering::Greater => 1,
+            Ordering::Equal => {
+                let o1 = self.offset_number_no_check();
+                let o2 = other.offset_number_no_check();
+                match o1.cmp(&o2) {
+                    Ordering::Less => -1,
+                    Ordering::Equal => 0,
+                    Ordering::Greater => 1,
+                }
             }
         }
     }

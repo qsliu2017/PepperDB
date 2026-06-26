@@ -186,7 +186,7 @@ pub struct SplitPageLayout {
     pub page: &'static mut Page, // TODO(ptr): Page is a borrowed slice
     /// buffer to write after all proceed
     pub buffer: Buffer,
-    pub next: Option<Box<SplitPageLayout>>,
+    pub next: Option<Box<Self>>,
 }
 
 /// GISTInsertStack: locking buffers and transfer args during insertion.
@@ -202,7 +202,7 @@ pub struct GISTInsertStack {
     /// offset of the downlink in the parent page pointing to this page
     pub downlinkoffnum: OffsetNumber,
     /// pointer to parent
-    pub parent: *mut GISTInsertStack, // TODO(ptr)
+    pub parent: *mut Self, // TODO(ptr)
 }
 
 /// Working state and results for multi-column split logic in gistsplit.c.

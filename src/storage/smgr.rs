@@ -105,13 +105,13 @@ pub async fn smgrexists(shared: &Arc<SharedState>, reln: &mut SmgrRelation, fork
 #[deprecated(note = "use `reln.close()`")]
 #[inline]
 pub fn smgrclose(reln: &mut SmgrRelation) {
-    reln.close()
+    reln.close();
 }
 
 #[deprecated(note = "use `reln.release()`")]
 #[inline]
 pub fn smgrrelease(reln: &mut SmgrRelation) {
-    reln.release()
+    reln.release();
 }
 
 #[deprecated(note = "use `reln.create(shared, forknum, is_redo).await`")]
@@ -122,7 +122,7 @@ pub async fn smgrcreate(
     forknum: ForkNumber,
     is_redo: bool,
 ) {
-    reln.create(shared, forknum, is_redo).await
+    reln.create(shared, forknum, is_redo).await;
 }
 
 #[deprecated(note = "use `reln.extend(shared, forknum, blocknum, buffer, skip_fsync).await`")]
@@ -135,7 +135,7 @@ pub async fn smgrextend(
     buffer: &Page,
     skip_fsync: bool,
 ) {
-    reln.extend(shared, forknum, blocknum, buffer, skip_fsync).await
+    reln.extend(shared, forknum, blocknum, buffer, skip_fsync).await;
 }
 
 #[deprecated(note = "use `reln.zeroextend(shared, forknum, blocknum, nblocks, skip_fsync).await`")]
@@ -148,7 +148,7 @@ pub async fn smgrzeroextend(
     nblocks: i32,
     skip_fsync: bool,
 ) {
-    reln.zeroextend(shared, forknum, blocknum, nblocks, skip_fsync).await
+    reln.zeroextend(shared, forknum, blocknum, nblocks, skip_fsync).await;
 }
 
 #[deprecated(note = "use `reln.prefetch(forknum, blocknum, nblocks)`")]
@@ -177,7 +177,7 @@ pub async fn smgrreadv(
     blocknum: BlockNumber,
     buffers: &mut [&mut Page],
 ) {
-    reln.readv(shared, forknum, blocknum, buffers).await
+    reln.readv(shared, forknum, blocknum, buffers).await;
 }
 
 #[deprecated(note = "use `reln.read(shared, forknum, blocknum, buffer).await`")]
@@ -189,7 +189,7 @@ pub async fn smgrread(
     blocknum: BlockNumber,
     buffer: &mut Page,
 ) {
-    reln.read(shared, forknum, blocknum, buffer).await
+    reln.read(shared, forknum, blocknum, buffer).await;
 }
 
 #[deprecated(note = "use `reln.writev(shared, forknum, blocknum, buffers, skip_fsync).await`")]
@@ -202,7 +202,7 @@ pub async fn smgrwritev(
     buffers: &[&Page],
     skip_fsync: bool,
 ) {
-    reln.writev(shared, forknum, blocknum, buffers, skip_fsync).await
+    reln.writev(shared, forknum, blocknum, buffers, skip_fsync).await;
 }
 
 #[deprecated(note = "use `reln.write(shared, forknum, blocknum, buffer, skip_fsync).await`")]
@@ -215,7 +215,7 @@ pub async fn smgrwrite(
     buffer: &Page,
     skip_fsync: bool,
 ) {
-    reln.write(shared, forknum, blocknum, buffer, skip_fsync).await
+    reln.write(shared, forknum, blocknum, buffer, skip_fsync).await;
 }
 
 #[deprecated(note = "use `reln.writeback(forknum, blocknum, nblocks)`")]
@@ -226,7 +226,7 @@ pub fn smgrwriteback(
     blocknum: BlockNumber,
     nblocks: BlockNumber,
 ) {
-    reln.writeback(forknum, blocknum, nblocks)
+    reln.writeback(forknum, blocknum, nblocks);
 }
 
 #[deprecated(note = "use `reln.nblocks(shared, forknum).await`")]
@@ -249,19 +249,19 @@ pub async fn smgrtruncate(
     reln: &mut SmgrRelation,
     truncate: &[(ForkNumber, BlockNumber, BlockNumber)],
 ) {
-    reln.truncate(shared, truncate).await
+    reln.truncate(shared, truncate).await;
 }
 
 #[deprecated(note = "use `reln.immedsync(shared, forknum).await`")]
 #[inline]
 pub async fn smgrimmedsync(shared: &Arc<SharedState>, reln: &mut SmgrRelation, forknum: ForkNumber) {
-    reln.immedsync(shared, forknum).await
+    reln.immedsync(shared, forknum).await;
 }
 
 #[deprecated(note = "use `reln.registersync(shared, forknum).await`")]
 #[inline]
 pub async fn smgrregistersync(shared: &Arc<SharedState>, reln: &mut SmgrRelation, forknum: ForkNumber) {
-    reln.registersync(shared, forknum).await
+    reln.registersync(shared, forknum).await;
 }
 
 /// smgrpin() / smgrunpin() -- the pin/unpin GC of the smgr handle cache is

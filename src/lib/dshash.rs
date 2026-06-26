@@ -21,7 +21,7 @@ pub struct DsHashTable<K, V> {
 impl<K: std::hash::Hash + Eq, V> DsHashTable<K, V> {
     /// `dshash_create` (the `dshash_parameters`/tranche/`dsa_area` args vanish).
     pub fn new() -> Self {
-        DsHashTable {
+        Self {
             inner: Mutex::new(HashMap::new()),
         }
     }

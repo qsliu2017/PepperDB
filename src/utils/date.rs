@@ -70,7 +70,7 @@ pub fn TimeADTGetDatum(x: TimeADT) -> Datum {
 }
 #[inline]
 pub fn TimeTzADTPGetDatum(x: &TimeTzADT) -> Datum {
-    Datum(x as *const TimeTzADT as usize) // TODO(ptr)
+    Datum(std::ptr::from_ref::<TimeTzADT>(x) as usize) // TODO(ptr)
 }
 
 // date.c

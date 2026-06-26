@@ -72,21 +72,21 @@ pub struct ResourceOwner(Arc<OwnerInner>);
 struct OwnerInner {
     name: String,
     locked: Mutex<Locked>,
-    parent: Mutex<Weak<OwnerInner>>,
+    parent: Mutex<Weak<Self>>,
     children: Mutex<Vec<ResourceOwner>>,
 }
 
 impl ResourceOwner {
     /// Identity comparison (PG compared raw `ResourceOwner` pointers). Two handles
     /// are the same owner iff they share the inner `Arc`.
-    pub fn ptr_eq(&self, other: &ResourceOwner) -> bool {
+    pub fn ptr_eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 
     /// Create an owner, optionally registered as a child of `parent`
     /// (PG's `ResourceOwnerCreate`).
-    pub fn create(parent: Option<&ResourceOwner>, name: &str) -> ResourceOwner {
-        let owner = ResourceOwner(Arc::new(OwnerInner {
+    pub fn create(parent: Option<&Self>, name: &str) -> Self {
+        let owner = Self(Arc::new(OwnerInner {
             name: name.to_string(),
             locked: Mutex::new(Locked {
                 phases: std::array::from_fn(|_| GenSlab::new()),
@@ -136,11 +136,12 @@ impl ResourceOwner {
     /// owner's entries in priority-ascending, seq-descending (LIFO) order. On
     /// commit, a non-empty phase means a leaked resource: warn before releasing.
     /// (PG's `ResourceOwnerRelease` for a single phase.)
+    #[allow(clippy::only_used_in_recursion, reason = "is_top_level mirrors C ResourceOwnerRelease signature")]
     pub fn release(&self, phase: ResourceReleasePhase, is_commit: bool, is_top_level: bool) {
         // Snapshot child handles under the lock, then drop it before recursing:
         // a release closure could re-enter the owner tree and we must not hold
         // `children` across that.
-        let children: Vec<ResourceOwner> = self.0.children.lock().unwrap().clone();
+        let children: Vec<Self> = self.0.children.lock().unwrap().clone();
         for child in &children {
             child.release(phase, is_commit, is_top_level);
         }
@@ -150,6 +151,9 @@ impl ResourceOwner {
         let entries: Vec<Entry> = {
             let mut locked = self.0.locked.lock().unwrap();
             let slab = &mut locked.phases[phase_index(phase)];
+            // Collect keys first: iter() borrows &slab, remove() needs &mut slab,
+            // so the immutable borrow must end before the removes (not chainable).
+            #[allow(clippy::needless_collect, reason = "ends &slab borrow before &mut slab removes")]
             let keys: Vec<Key<Entry>> = slab.iter().map(|(key, _)| key).collect();
             let mut entries: Vec<Entry> = keys.into_iter().filter_map(|key| slab.remove(key)).collect();
             // priority ascending, then seq descending (LIFO within a priority).
@@ -172,10 +176,10 @@ impl ResourceOwner {
                 elog!(WARNING, format!("resource was not closed: {}", entry.name));
             }
             let release = entry.release;
-            if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || release())) {
+            if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(release)) {
                 let msg = payload
                     .downcast_ref::<&str>()
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .or_else(|| payload.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "non-string panic payload".to_string());
                 elog!(
@@ -214,14 +218,15 @@ impl ResourceOwner {
     }
 
     /// Parent owner, if any (PG's `ResourceOwnerGetParent`).
-    pub fn parent(&self) -> Option<ResourceOwner> {
+    pub fn parent(&self) -> Option<Self> {
         self.0.parent.lock().unwrap().upgrade().map(ResourceOwner)
     }
 
     /// Reassign to a new parent, detaching from the old one
     /// (PG's `ResourceOwnerNewParent`).
-    pub fn new_parent(&self, new_parent: Option<&ResourceOwner>) {
-        if let Some(old) = self.0.parent.lock().unwrap().upgrade() {
+    pub fn new_parent(&self, new_parent: Option<&Self>) {
+        let old = self.0.parent.lock().unwrap().upgrade();
+        if let Some(old) = old {
             old.children
                 .lock()
                 .unwrap()
@@ -297,7 +302,7 @@ pub fn current() -> ResourceOwner {
 
 /// The current task's owner, or `None` if not inside a [`scope`].
 pub fn try_current() -> Option<ResourceOwner> {
-    CURRENT_RESOURCE_OWNER.try_with(|o| o.clone()).ok()
+    CURRENT_RESOURCE_OWNER.try_with(std::clone::Clone::clone).ok()
 }
 
 /// Run `f` with `owner` published as the task-local current owner.

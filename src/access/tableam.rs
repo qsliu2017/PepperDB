@@ -1,6 +1,11 @@
 //! Translated from PostgreSQL src/include/access/tableam.h
 //! POSTGRES table access method definitions.
 //!
+#![allow(
+    clippy::fn_params_excessive_bools,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+//!
 //! Per routine-struct.md: `TableAmRoutine` (a vtable of fn pointers) becomes a
 //! base trait `TableAm` carrying the required callbacks plus a scan-handle
 //! factory; optional callback groups (TID-range, bitmap scan, sample scan,
@@ -88,14 +93,14 @@ pub enum ScanType {
 
 impl ScanType {
     /// Read the exclusive scan type from a `ScanOptions` word, if one is set.
-    pub fn from_options(opts: ScanOptions) -> Option<ScanType> {
+    pub fn from_options(opts: ScanOptions) -> Option<Self> {
         match opts.intersection(ScanOptions::TYPE_MASK) {
-            ScanOptions::TYPE_SEQSCAN => Some(ScanType::SeqScan),
-            ScanOptions::TYPE_BITMAPSCAN => Some(ScanType::BitmapScan),
-            ScanOptions::TYPE_SAMPLESCAN => Some(ScanType::SampleScan),
-            ScanOptions::TYPE_TIDSCAN => Some(ScanType::TidScan),
-            ScanOptions::TYPE_TIDRANGESCAN => Some(ScanType::TidRangeScan),
-            ScanOptions::TYPE_ANALYZE => Some(ScanType::Analyze),
+            ScanOptions::TYPE_SEQSCAN => Some(Self::SeqScan),
+            ScanOptions::TYPE_BITMAPSCAN => Some(Self::BitmapScan),
+            ScanOptions::TYPE_SAMPLESCAN => Some(Self::SampleScan),
+            ScanOptions::TYPE_TIDSCAN => Some(Self::TidScan),
+            ScanOptions::TYPE_TIDRANGESCAN => Some(Self::TidRangeScan),
+            ScanOptions::TYPE_ANALYZE => Some(Self::Analyze),
             _ => None,
         }
     }

@@ -61,7 +61,7 @@ pub struct TypeCacheEntry {
     pub tup_desc_identifier: u64,
 
     // Range-type fields (TYPECACHE_RANGE_INFO). Zeroed if not a range / unset.
-    pub rngelemtype: *mut TypeCacheEntry, // range's element type; TODO(ptr)
+    pub rngelemtype: *mut Self, // range's element type; TODO(ptr)
     pub rng_opfamily: Oid,
     pub rng_collation: Oid,
     pub rng_cmp_proc_finfo: FmgrInfo,
@@ -69,7 +69,7 @@ pub struct TypeCacheEntry {
     pub rng_subdiff_finfo: FmgrInfo,
 
     // Multirange field (TYPECACHE_MULTIRANGE_INFO).
-    pub rngtype: *mut TypeCacheEntry, // multirange's underlying range type; TODO(ptr)
+    pub rngtype: *mut Self, // multirange's underlying range type; TODO(ptr)
 
     // Domain base type/typmod (zeroed if not a domain / unset).
     pub domain_base_type: Oid,
@@ -85,7 +85,7 @@ pub struct TypeCacheEntry {
     pub enum_data: *mut TypeCacheEnumData, // TODO(ptr)
 
     // Intrusive list of all known domain-type cache entries.
-    pub next_domain: *mut TypeCacheEntry, // TODO(ptr)
+    pub next_domain: *mut Self, // TODO(ptr)
 }
 
 bitflags! {

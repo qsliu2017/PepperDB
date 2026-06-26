@@ -43,7 +43,7 @@ impl SmgrRelation {
     /// top via [`smgr_cache_open`].
     pub fn open(rlocator: RelFileLocator, backend: ProcNumber) -> Self {
         debug_assert!(rlocator.relNumber.0 != 0, "relNumber must be valid");
-        let mut reln = SmgrRelation {
+        let mut reln = Self {
             rlocator: RelFileLocatorBackend { locator: rlocator, backend },
             targblock: INVALID_BLOCK_NUMBER,
             cached_nblocks: [INVALID_BLOCK_NUMBER; NUM_FORKS],
@@ -325,14 +325,14 @@ mod tests {
         // Extend 5 distinct pages with known patterns.
         for i in 0..5u8 {
             let page = pattern_page(0x10 + i);
-            reln.extend(&s, fork, i as BlockNumber, &page, true).await;
+            reln.extend(&s, fork, BlockNumber::from(i), &page, true).await;
         }
         assert_eq!(reln.nblocks(&s, fork).await, 5);
 
         // Read each back and verify.
         for i in 0..5u8 {
             let mut buf = Page::boxed_zeroed();
-            reln.read(&s, fork, i as BlockNumber, &mut buf).await;
+            reln.read(&s, fork, BlockNumber::from(i), &mut buf).await;
             assert!(buf.as_bytes().iter().all(|&b| b == 0x10 + i), "block {i} mismatch");
         }
 
@@ -421,7 +421,7 @@ mod tests {
         use crate::pg_config::{BLCKSZ, RELSEG_SIZE};
         let n: BlockNumber = RELSEG_SIZE + 7;
         assert_eq!(n / RELSEG_SIZE, 1);
-        assert_eq!((n % RELSEG_SIZE) as u64 * BLCKSZ as u64, 7 * BLCKSZ as u64);
+        assert_eq!(u64::from(n % RELSEG_SIZE) * u64::from(BLCKSZ), 7 * u64::from(BLCKSZ));
         let zero: BlockNumber = 0;
         assert_eq!(zero / RELSEG_SIZE, 0);
     }

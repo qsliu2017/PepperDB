@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/catalog/pg_proc.h
 
+#![allow(
+    clippy::fn_params_excessive_bools,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::c::{float4, regproc, text, varlena, NameData};
 use crate::catalog::objectaddress::ObjectAddress;
 use crate::nodes::nodes::Node;

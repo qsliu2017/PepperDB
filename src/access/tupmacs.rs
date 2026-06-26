@@ -1,5 +1,7 @@
 //! Translated from PostgreSQL src/include/access/tupmacs.h
 
+#![allow(clippy::cast_ptr_alignment, reason = "PG on-disk/varlena pointer reinterpretation, faithful to C")]
+
 use crate::c::{bits8, DOUBLEALIGN, INTALIGN, SHORTALIGN, TYPEALIGN};
 use crate::postgres::Datum;
 use crate::varatt::{VARATT_IS_SHORT, VARATT_NOT_PAD_BYTE, VARSIZE_ANY};
@@ -111,7 +113,7 @@ pub fn att_align_nominal(cur_offset: usize, attalign: u8) -> usize {
     } else if attalign == TYPALIGN_DOUBLE {
         DOUBLEALIGN(cur_offset)
     } else {
-        debug_assert!(attalign == TYPALIGN_SHORT);
+        debug_assert_eq!(attalign, TYPALIGN_SHORT);
         SHORTALIGN(cur_offset)
     }
 }
@@ -138,7 +140,7 @@ pub unsafe fn att_addlength_pointer(cur_offset: usize, attlen: i32, attptr: *con
     } else if attlen == -1 {
         cur_offset + VARSIZE_ANY(attptr)
     } else {
-        debug_assert!(attlen == -2);
+        debug_assert_eq!(attlen, -2);
         let mut len = 0usize;
         while attptr.add(len).read() != 0 {
             len += 1;

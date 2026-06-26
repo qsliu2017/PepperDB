@@ -48,7 +48,7 @@ pub struct CollectedCommand {
     pub in_extension: bool,
     pub parsetree: Option<Box<Node>>,
     /// when nested
-    pub parent: Option<Box<CollectedCommand>>,
+    pub parent: Option<Box<Self>>,
     pub data: CollectedCommandData,
 }
 

@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/commands/createas.h
 
+#![allow(
+    clippy::boxed_local,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::catalog::objectaddress::ObjectAddress;
 use crate::nodes::params::ParamListInfo;
 use crate::nodes::parsenodes::CreateTableAsStmt;

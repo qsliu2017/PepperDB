@@ -62,7 +62,7 @@ const fn on(m: LockMode) -> LOCKMASK {
 /// PG `LockConflicts[]`: for each lock mode, the bitmask of modes it conflicts
 /// with. Index 0 is unused (NoLock).
 const LOCK_CONFLICTS: [LOCKMASK; MAX_LOCKMODES] = {
-    use LockMode::*;
+    use LockMode::{AccessShareLock, AccessExclusiveLock, RowShareLock, ExclusiveLock, RowExclusiveLock, ShareLock, ShareRowExclusiveLock, ShareUpdateExclusiveLock};
     let mut t = [0i32; MAX_LOCKMODES];
     t[AccessShareLock as usize] = on(AccessExclusiveLock);
     t[RowShareLock as usize] = on(ExclusiveLock) | on(AccessExclusiveLock);
@@ -207,7 +207,7 @@ fn fast_path_slots_per_backend() -> u32 {
 
 /// PG `FAST_PATH_REL_GROUP`.
 fn fast_path_rel_group(relid: Oid) -> u32 {
-    (((relid.0 as u64).wrapping_mul(49157)) & (fast_path_groups() as u64 - 1)) as u32
+    ((u64::from(relid.0).wrapping_mul(49157)) & (u64::from(fast_path_groups()) - 1)) as u32
 }
 
 /// PG `FAST_PATH_SLOT(group, index)`.
@@ -264,8 +264,7 @@ fn conflicts_with_relation_fast_path(locktag: &LOCKTAG, mode: LOCKMODE) -> bool 
 
 fn my_database_id() -> Oid {
     crate::session::try_current()
-        .map(|s| s.database_id())
-        .unwrap_or(InvalidOid)
+        .map_or(InvalidOid, |s| s.database_id())
 }
 
 /// Run `f` with `&mut PGPROC` for `procno` while holding that proc's fast-path
@@ -308,8 +307,8 @@ pub struct LockShard {
 }
 
 impl LockShard {
-    fn new() -> LockShard {
-        LockShard {
+    fn new() -> Self {
+        Self {
             locks: HashMap::new(),
             proclocks: HashMap::new(),
         }
@@ -330,8 +329,8 @@ pub struct LockManager {
 }
 
 impl LockManager {
-    pub fn new() -> LockManager {
-        LockManager {
+    pub fn new() -> Self {
+        Self {
             shards: (0..NUM_LOCK_PARTITIONS).map(|_| Mutex::new(LockShard::new())).collect(),
             strong: Mutex::new(FastPathStrongLocks {
                 count: [0; FAST_PATH_STRONG_LOCK_HASH_PARTITIONS],
@@ -357,7 +356,7 @@ impl LockManager {
         // the whole `f` call; the view is the sole accessor. Lets the deadlock
         // give-up path mutate a shard (orphan-PROCLOCK GC) under the all-held locks.
         let shards: Vec<*mut LockShard> =
-            guards.iter_mut().map(|g| &mut **g as *mut LockShard).collect();
+            guards.iter_mut().map(|g| &raw mut **g).collect();
         let view = LockTablesView { shards };
         let r = f(&view);
         // Release in reverse index order (PG releases the partition LWLocks high
@@ -401,6 +400,10 @@ impl LockTablesView {
     /// shard; the immutable `&MutexGuard` we hold is the sole live reference, so
     /// forming a `&mut LockShard` through it does not alias. Used by the deadlock
     /// give-up path (RemoveFromWaitQueue) to GC the orphan PROCLOCK / empty LOCK.
+    #[allow(
+        clippy::mut_from_ref,
+        reason = "all partitions held by with_all_partitions_locked; sole live reference, no alias"
+    )]
     fn shard_for_mut(&self, locktag: &LOCKTAG) -> &mut LockShard {
         let hashcode = LockTagHashCode(locktag);
         let p = self.shards[lock_hash_partition(hashcode)];
@@ -413,7 +416,7 @@ impl LockTablesView {
 
 impl Default for LockManager {
     fn default() -> Self {
-        LockManager::new()
+        Self::new()
     }
 }
 
@@ -426,6 +429,10 @@ impl Default for LockManager {
 // shared by `Arc` across the tokio multi-thread runtime, so it must be
 // Send + Sync; that is sound given the partition-Mutex discipline. Mirrors the
 // `unsafe impl` on `ProcCell`/`ProcGlobal`.
+#[allow(
+    clippy::non_send_fields_in_send_ty,
+    reason = "raw ptrs in shards' boxed entries gated by per-shard partition Mutex; see SAFETY"
+)]
 unsafe impl Send for LockManager {}
 unsafe impl Sync for LockManager {}
 
@@ -500,8 +507,8 @@ struct LocalLockTable {
 }
 
 impl LocalLockTable {
-    fn new() -> LocalLockTable {
-        LocalLockTable {
+    fn new() -> Self {
+        Self {
             locks: HashMap::new(),
             fast_path_use: vec![0; fast_path_groups() as usize],
             strong_in_progress: None,
@@ -520,6 +527,10 @@ impl LocalLockTable {
 // only ever DEREFERENCED by the owning task while holding the target entry's
 // partition shard `Mutex`; merely moving the pointer values across threads is
 // safe. No other task touches this table (it is task_local).
+#[allow(
+    clippy::non_send_fields_in_send_ty,
+    reason = "raw ptrs in LOCALLOCK gated by the target entry's partition shard Mutex; see SAFETY"
+)]
 unsafe impl Send for LocalLockTable {}
 
 tokio::task_local! {
@@ -546,10 +557,10 @@ fn with_local<R>(f: impl FnOnce(&mut LocalLockTable) -> R) -> R {
 // ---------------------------------------------------------------------------
 
 fn lock_ptr(b: &mut Box<LOCK>) -> *mut LOCK {
-    &mut **b as *mut LOCK
+    &raw mut **b
 }
 fn proclock_ptr(b: &mut Box<PROCLOCK>) -> *mut PROCLOCK {
-    &mut **b as *mut PROCLOCK
+    &raw mut **b
 }
 
 // ---------------------------------------------------------------------------
@@ -651,7 +662,7 @@ pub fn RememberSimpleDeadLock(
     lock: &LOCK,
     proc2: ProcNumber,
 ) {
-    crate::backend::storage::lmgr::deadlock::RememberSimpleDeadLock(proc1, lockmode, lock, proc2)
+    crate::backend::storage::lmgr::deadlock::RememberSimpleDeadLock(proc1, lockmode, lock, proc2);
 }
 
 // ---------------------------------------------------------------------------
@@ -660,14 +671,13 @@ pub fn RememberSimpleDeadLock(
 
 /// PG `AbortStrongLockAcquire`: undo a `BeginStrongLockAcquire` on error.
 pub fn AbortStrongLockAcquire() {
-    let (tag, hashcode) = match with_local(|l| {
+    let Some((tag, Some(hashcode))) = with_local(|l| {
         l.strong_in_progress.map(|t| {
             l.strong_in_progress = None;
             (t, l.locks.get(&t).map(|ll| ll.hashcode))
         })
-    }) {
-        Some((t, Some(hc))) => (t, hc),
-        _ => return,
+    }) else {
+        return;
     };
     if let Some(m) = lock_manager() {
         let fasthash = fast_path_strong_lock_hash_partition(hashcode);
@@ -688,7 +698,7 @@ pub fn AbortStrongLockAcquire() {
 pub fn GetAwaitedLock() -> Option<*mut LOCALLOCK> {
     with_local(|l| {
         l.awaited_lock
-            .and_then(|t| l.locks.get_mut(&t).map(|b| &mut **b as *mut LOCALLOCK))
+            .and_then(|t| l.locks.get_mut(&t).map(|b| &raw mut **b))
     })
 }
 
@@ -724,8 +734,8 @@ pub fn MarkLockClear(locallock: &mut LOCALLOCK) {
 fn grant_lock_local(l: &mut LocalLockTable, tag: LOCALLOCKTAG, owner: Option<ResourceOwner>) {
     let ll = l.locks.get_mut(&tag).expect("locallock present");
     ll.n_locks += 1;
-    for lo in ll.lock_owners.iter_mut() {
-        if owners_eq(&lo.owner, &owner) {
+    for lo in &mut ll.lock_owners {
+        if owners_eq(lo.owner.as_ref(), owner.as_ref()) {
             lo.n_locks += 1;
             return;
         }
@@ -736,7 +746,7 @@ fn grant_lock_local(l: &mut LocalLockTable, tag: LOCALLOCKTAG, owner: Option<Res
     });
 }
 
-fn owners_eq(a: &Option<ResourceOwner>, b: &Option<ResourceOwner>) -> bool {
+fn owners_eq(a: Option<&ResourceOwner>, b: Option<&ResourceOwner>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(x), Some(y)) => x.ptr_eq(y),
@@ -747,17 +757,16 @@ fn owners_eq(a: &Option<ResourceOwner>, b: &Option<ResourceOwner>) -> bool {
 /// PG `RemoveLocalLock`: drop the LOCALLOCK entry, reverting any strong-lock
 /// count it held.
 fn remove_local_lock(l: &mut LocalLockTable, tag: LOCALLOCKTAG) {
-    let holds_strong = l.locks.get(&tag).map(|ll| ll.holds_strong_lock_count).unwrap_or(false);
-    let hashcode = l.locks.get(&tag).map(|ll| ll.hashcode).unwrap_or(0);
-    if holds_strong {
-        if let Some(m) = lock_manager() {
+    let holds_strong = l.locks.get(&tag).is_some_and(|ll| ll.holds_strong_lock_count);
+    let hashcode = l.locks.get(&tag).map_or(0, |ll| ll.hashcode);
+    if holds_strong
+        && let Some(m) = lock_manager() {
             let fasthash = fast_path_strong_lock_hash_partition(hashcode);
             let mut s = m.strong.lock().unwrap();
             if s.count[fasthash] > 0 {
                 s.count[fasthash] -= 1;
             }
         }
-    }
     l.locks.remove(&tag);
 }
 
@@ -770,6 +779,10 @@ fn remove_local_lock(l: &mut LocalLockTable, tag: LOCALLOCKTAG) {
 /// shard Mutex. Returns the raw stable pointers (the boxed entries live in the
 /// shard). Group leader is single-member (F4 pending).
 #[allow(clippy::type_complexity)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "Option mirrors C SetupLockInTable NULL-on-OOM contract; caller has the OOM path"
+)]
 fn setup_lock_in_table(
     shard: &mut LockShard,
     proc: ProcNumber,
@@ -805,10 +818,8 @@ fn setup_lock_in_table(
     // We shouldn't already hold the desired mode.
     {
         let pl = shard.proclocks.get(&pl_key).unwrap();
-        if (pl.hold_mask & lockbit_on(lockmode)) != 0 {
-            // PG elog(ERROR). TODO(panic).
-            panic!("lock already held");
-        }
+        // PG elog(ERROR). TODO(panic).
+        assert!((pl.hold_mask & lockbit_on(lockmode)) == 0, "lock already held");
     }
 
     let lp = lock_ptr(shard.locks.get_mut(locktag).unwrap());
@@ -865,13 +876,12 @@ fn clean_up_lock(
     let proclock_empty = shard
         .proclocks
         .get(&pl_key)
-        .map(|p| p.hold_mask == 0)
-        .unwrap_or(false);
+        .is_some_and(|p| p.hold_mask == 0);
     if proclock_empty {
         shard.proclocks.remove(&pl_key);
     }
 
-    let n_requested = shard.locks.get(locktag).map(|l| l.n_requested).unwrap_or(0);
+    let n_requested = shard.locks.get(locktag).map_or(0, |l| l.n_requested);
     if n_requested == 0 {
         shard.locks.remove(locktag);
     } else if wakeup_needed {
@@ -990,7 +1000,7 @@ fn clean_up_after_give_up(procno: ProcNumber, hashcode: u32, localtag: LOCALLOCK
     }
     AbortStrongLockAcquire();
     with_local(|l| {
-        let empty = l.locks.get(&localtag).map(|x| x.n_locks == 0).unwrap_or(false);
+        let empty = l.locks.get(&localtag).is_some_and(|x| x.n_locks == 0);
         if empty {
             remove_local_lock(l, localtag);
         }
@@ -1137,11 +1147,11 @@ fn wire_proclock(shard: &mut LockShard, locktag: &LOCKTAG, proc: ProcNumber) {
         return;
     };
     let g = proc_global();
-    let proc_ptr = match g {
-        // SAFETY: the arena slot is stable for the process lifetime.
-        Some(g) => unsafe { g.proc_mut(proc).map(|p| p as *mut PGPROC) }.unwrap_or(std::ptr::null_mut()),
-        None => std::ptr::null_mut(),
-    };
+    // SAFETY: the arena slot is stable for the process lifetime.
+    let proc_ptr = g.map_or(std::ptr::null_mut(), |g| {
+        unsafe { g.proc_mut(proc).map(std::ptr::from_mut::<PGPROC>) }
+            .unwrap_or(std::ptr::null_mut())
+    });
     if let Some(plb) = shard.proclocks.get_mut(&pl_key) {
         plb.tag.lock = lp;
         plb.tag.proc = proc_ptr;
@@ -1167,6 +1177,11 @@ pub async fn LockAcquire(
 /// PG `LockAcquireExtended`. ASYNC: the WAIT path drops the shard Mutex before
 /// `ProcSleep().await`. The `LOCALLOCK **locallockp` out-param is folded into the
 /// return (we return a sentinel pointer into the task_local table).
+#[allow(
+    clippy::too_many_lines,
+    reason = "1:1 port of C LockAcquireExtended; splitting would diverge from PG structure"
+)]
+#[allow(clippy::fn_params_excessive_bools, reason = "mirrors C signature")]
 pub async fn LockAcquireExtended(
     locktag: &LOCKTAG,
     lockmode: LOCKMODE,
@@ -1179,15 +1194,11 @@ pub async fn LockAcquireExtended(
     let Some(lock_method_table) = lock_methods(lockmethodid) else {
         panic!("unrecognized lock method: {lockmethodid}");
     };
-    if lockmode <= 0 || lockmode > lock_method_table.num_lock_modes {
-        panic!("unrecognized lock mode: {lockmode}");
-    }
+    assert!(!(lockmode <= 0 || lockmode > lock_method_table.num_lock_modes), "unrecognized lock mode: {lockmode}");
 
     let m = lock_manager().expect("lock manager initialized").clone();
     let procno = current_proc_number();
-    if procno == INVALID_PROC_NUMBER {
-        panic!("LockAcquire without a PGPROC");
-    }
+    assert!(procno != INVALID_PROC_NUMBER, "LockAcquire without a PGPROC");
 
     // PG: owner = sessionLock ? NULL : CurrentResourceOwner. We stand in with the
     // per-task current_owner marker until resowner is wired (TODO(15d/resowner)).
@@ -1274,14 +1285,12 @@ pub async fn LockAcquireExtended(
         if !fast_path_transfer_relation_locks(&m, lock_method_table, locktag, hashcode) {
             AbortStrongLockAcquire();
             with_local(|l| {
-                let empty = l.locks.get(&localtag).map(|x| x.n_locks == 0).unwrap_or(false);
+                let empty = l.locks.get(&localtag).is_some_and(|x| x.n_locks == 0);
                 if empty {
                     remove_local_lock(l, localtag);
                 }
             });
-            if report_memory_error {
-                panic!("out of shared memory");
-            }
+            assert!(!report_memory_error, "out of shared memory");
             return (LockAcquireResult::NotAvail, None);
         }
     }
@@ -1290,6 +1299,7 @@ pub async fn LockAcquireExtended(
     // and the raw LOCK/PROCLOCK pointers; both are DROPPED before any `.await`
     // (rules s5: never hold the shard Mutex / a !Send raw pointer across await).
     // The block yields only a plain (Send) ProcWaitStatus / early result.
+    #[allow(clippy::items_after_statements, reason = "local helper scoped to this fn's await discipline")]
     enum Pre {
         Done(LockAcquireResult),
         Waiting,
@@ -1299,25 +1309,20 @@ pub async fn LockAcquireExtended(
     let pre = {
         let mut shard = m.shard(hashcode).lock().unwrap();
 
-        let (lock_ptr_raw, proclock_ptr_raw) =
-            match setup_lock_in_table(&mut shard, procno, locktag, lockmode) {
-                Some(p) => p,
-                None => {
-                    drop(shard);
-                    AbortStrongLockAcquire();
-                    with_local(|l| {
-                        let empty =
-                            l.locks.get(&localtag).map(|x| x.n_locks == 0).unwrap_or(false);
-                        if empty {
-                            remove_local_lock(l, localtag);
-                        }
-                    });
-                    if report_memory_error {
-                        panic!("out of shared memory");
-                    }
-                    return (LockAcquireResult::NotAvail, None);
+        let Some((lock_ptr_raw, proclock_ptr_raw)) =
+            setup_lock_in_table(&mut shard, procno, locktag, lockmode)
+        else {
+            drop(shard);
+            AbortStrongLockAcquire();
+            with_local(|l| {
+                let empty = l.locks.get(&localtag).is_some_and(|x| x.n_locks == 0);
+                if empty {
+                    remove_local_lock(l, localtag);
                 }
-            };
+            });
+            assert!(!report_memory_error, "out of shared memory");
+            return (LockAcquireResult::NotAvail, None);
+        };
         wire_proclock(&mut shard, locktag, procno);
 
         // Record the LOCK/PROCLOCK pointers in the LOCALLOCK.
@@ -1340,7 +1345,11 @@ pub async fn LockAcquireExtended(
             }
         };
 
-        let wait_result = if !found_conflict {
+        let wait_result = if found_conflict {
+            // JoinWaitQueue (15a, sync) reads lock/proclock via the raw pointers
+            // we stored. It runs under the shard Mutex.
+            join_wait_queue(localtag, lock_method_table, dont_wait)
+        } else {
             // SAFETY: shard Mutex held.
             GrantLock(
                 unsafe { &mut *lock_ptr_raw },
@@ -1348,10 +1357,6 @@ pub async fn LockAcquireExtended(
                 lockmode,
             );
             ProcWaitStatus::OK
-        } else {
-            // JoinWaitQueue (15a, sync) reads lock/proclock via the raw pointers
-            // we stored. It runs under the shard Mutex.
-            join_wait_queue(localtag, lock_method_table, dont_wait)
         };
 
         if wait_result == ProcWaitStatus::ERROR {
@@ -1373,7 +1378,7 @@ pub async fn LockAcquireExtended(
             }
             drop(shard);
             with_local(|l| {
-                let empty = l.locks.get(&localtag).map(|x| x.n_locks == 0).unwrap_or(false);
+                let empty = l.locks.get(&localtag).is_some_and(|x| x.n_locks == 0);
                 if empty {
                     remove_local_lock(l, localtag);
                 }
@@ -1423,7 +1428,7 @@ pub async fn LockAcquireExtended(
         }
     }
 
-    debug_assert!(wait_result == ProcWaitStatus::OK);
+    debug_assert_eq!(wait_result, ProcWaitStatus::OK);
 
     // The lock was granted. Update the LOCALLOCK.
     with_local(|l| grant_lock_local(l, localtag, owner.clone()));
@@ -1446,7 +1451,7 @@ fn new_locallock(tag: LOCALLOCKTAG, hashcode: u32) -> LOCALLOCK {
 }
 
 fn locallock_ptr(tag: LOCALLOCKTAG) -> Option<*mut LOCALLOCK> {
-    with_local(|l| l.locks.get_mut(&tag).map(|b| &mut **b as *mut LOCALLOCK))
+    with_local(|l| l.locks.get_mut(&tag).map(|b| &raw mut **b))
 }
 
 /// PG `JoinWaitQueue` is in proc.c (15a). It is sync and runs under the shard
@@ -1466,13 +1471,13 @@ fn join_wait_queue(
     crate::storage::proc::JoinWaitQueue(unsafe { &mut *llp }, lock_method_table, dont_wait)
 }
 
-/// RAII give-up guard for `wait_on_lock` (PG's PG_TRY/PG_CATCH around ProcSleep
-/// + LockErrorCleanup). Armed by default; `disarm()` is called only once the lock
+/// RAII give-up guard for `wait_on_lock` (PG's PG_TRY/PG_CATCH around ProcSleep,
+/// LockErrorCleanup). Armed by default; `disarm()` is called only once the lock
 /// is truly granted (ProcSleep returned OK). If the future is DROPPED while still
 /// waiting -- query cancel, `select!` loser, task abort, or a normal ERROR exit --
 /// `Drop` takes the awaited lock's SINGLE partition Mutex and runs the full
-/// partition-locked cleanup (RemoveFromWaitQueue + CleanUpLock +
-/// AbortStrongLockAcquire + RemoveLocalLock). Cancellation, timeout, and the
+/// partition-locked cleanup (RemoveFromWaitQueue, CleanUpLock,
+/// AbortStrongLockAcquire, RemoveLocalLock). Cancellation, timeout, and the
 /// deadlock-ERROR exit thus all funnel through ONE cleanup. The cleanup is
 /// idempotent (`remove_from_wait_queue_in_shard` is a no-op once dequeued), so a
 /// hard-deadlock that CheckDeadLock already cleaned is not double-decremented.
@@ -1504,7 +1509,7 @@ impl Drop for WaitGuard {
 /// PG `WaitOnLock`: a wrapper around `ProcSleep` (15a) with awaited-lock
 /// bookkeeping for `LockErrorCleanup`. ASYNC; entered with NO shard Mutex held.
 async fn wait_on_lock(tag: LOCALLOCKTAG, owner: Option<ResourceOwner>) -> ProcWaitStatus {
-    let hashcode = with_local(|l| l.locks.get(&tag).map(|x| x.hashcode).unwrap_or(0));
+    let hashcode = with_local(|l| l.locks.get(&tag).map_or(0, |x| x.hashcode));
     let procno = current_proc_number();
     with_local(|l| {
         l.awaited_lock = Some(tag);
@@ -1547,9 +1552,7 @@ pub fn LockRelease(locktag: &LOCKTAG, lockmode: LOCKMODE, session_lock: bool) ->
     let Some(lock_method_table) = lock_methods(lockmethodid) else {
         panic!("unrecognized lock method: {lockmethodid}");
     };
-    if lockmode <= 0 || lockmode > lock_method_table.num_lock_modes {
-        panic!("unrecognized lock mode: {lockmode}");
-    }
+    assert!(!(lockmode <= 0 || lockmode > lock_method_table.num_lock_modes), "unrecognized lock mode: {lockmode}");
     let m = lock_manager().expect("lock manager initialized").clone();
     let procno = current_proc_number();
 
@@ -1564,14 +1567,14 @@ pub fn LockRelease(locktag: &LOCKTAG, lockmode: LOCKMODE, session_lock: bool) ->
     } else {
         Some(with_local(|l| l.current_owner.clone()))
     };
-    let decision = with_local(|l| release_local(l, localtag, &owner));
+    let decision = with_local(|l| release_local(l, localtag, owner.as_ref()));
     match decision {
         LocalReleaseDecision::NotHeld => return false,
         LocalReleaseDecision::StillHeld => return true,
         LocalReleaseDecision::Released => {}
     }
 
-    let hashcode = with_local(|l| l.locks.get(&localtag).map(|x| x.hashcode).unwrap_or(0));
+    let hashcode = with_local(|l| l.locks.get(&localtag).map_or(0, |x| x.hashcode));
 
     // Try the fast path.
     if eligible_for_relation_fast_path(locktag, lockmode) {
@@ -1644,7 +1647,7 @@ enum LocalReleaseDecision {
 fn release_local(
     l: &mut LocalLockTable,
     tag: LOCALLOCKTAG,
-    owner: &Option<ResourceOwner>,
+    owner: Option<&ResourceOwner>,
 ) -> LocalReleaseDecision {
     let ll = match l.locks.get_mut(&tag) {
         Some(ll) if ll.n_locks > 0 => ll,
@@ -1654,7 +1657,7 @@ fn release_local(
     let mut found = false;
     let mut remove_idx = None;
     for (i, lo) in ll.lock_owners.iter_mut().enumerate() {
-        if owners_eq(&lo.owner, owner) {
+        if owners_eq(lo.owner.as_ref(), owner) {
             lo.n_locks -= 1;
             if lo.n_locks == 0 {
                 remove_idx = Some(i);
@@ -1699,6 +1702,7 @@ pub fn LockReleaseAll(lockmethodid: LOCKMETHODID, all_locks: bool) {
     // Collect this method's held locks from the per-task table, classifying
     // fast-path vs main-table, then act. We snapshot to avoid holding the
     // task_local borrow across the shard locks.
+    #[allow(clippy::items_after_statements, reason = "local snapshot type scoped to this fn")]
     struct Held {
         tag: LOCALLOCKTAG,
         is_fast_path: bool,
@@ -1767,9 +1771,7 @@ pub fn LockReleaseAll(lockmethodid: LOCKMETHODID, all_locks: bool) {
 
 /// PG `LockReleaseSession`.
 pub fn LockReleaseSession(lockmethodid: LOCKMETHODID) {
-    if lock_methods(lockmethodid).is_none() {
-        panic!("unrecognized lock method: {lockmethodid}");
-    }
+    assert!(lock_methods(lockmethodid).is_some(), "unrecognized lock method: {lockmethodid}");
     // Release session-level holds (owner == None). Snapshot then release.
     let tags: Vec<LOCALLOCKTAG> = with_local(|l| {
         l.locks
@@ -1840,8 +1842,7 @@ pub fn LockHeldByMe(locktag: &LOCKTAG, lockmode: LOCKMODE, orstronger: bool) -> 
                 lock: *locktag,
                 mode: lockmode,
             })
-            .map(|ll| ll.n_locks > 0)
-            .unwrap_or(false)
+            .is_some_and(|ll| ll.n_locks > 0)
     });
     if held {
         return true;
@@ -1872,33 +1873,29 @@ pub fn LockHasWaiters(locktag: &LOCKTAG, lockmode: LOCKMODE, _session_lock: bool
     let (hashcode, held) = with_local(|l| {
         l.locks
             .get(&localtag)
-            .map(|ll| (ll.hashcode, ll.n_locks > 0))
-            .unwrap_or((0, false))
+            .map_or((0, false), |ll| (ll.hashcode, ll.n_locks > 0))
     });
     if !held {
         return false;
     }
     let shard = m.shard(hashcode).lock().unwrap();
-    let has_waiters = shard
+    
+    shard
         .locks
         .get(locktag)
-        .map(|lock| (lock_method_table.conflict_tab[lockmode as usize] & lock.wait_mask) != 0)
-        .unwrap_or(false);
-    has_waiters
+        .is_some_and(|lock| (lock_method_table.conflict_tab[lockmode as usize] & lock.wait_mask) != 0)
 }
 
 /// PG `LockWaiterCount`: returns `nRequested` (granted + waiting) for the lock.
 pub fn LockWaiterCount(locktag: &LOCKTAG) -> i32 {
     let lockmethodid = locktag.lockmethod();
-    if lock_methods(lockmethodid).is_none() {
-        panic!("unrecognized lock method: {lockmethodid}");
-    }
+    assert!(lock_methods(lockmethodid).is_some(), "unrecognized lock method: {lockmethodid}");
     let Some(m) = lock_manager() else {
         return 0;
     };
     let hashcode = LockTagHashCode(locktag);
     let shard = m.shard(hashcode).lock().unwrap();
-    shard.locks.get(locktag).map(|l| l.n_requested).unwrap_or(0)
+    shard.locks.get(locktag).map_or(0, |l| l.n_requested)
 }
 
 /// PG `GetLockConflicts`: VXIDs of xacts holding conflicting locks. The fast-path
@@ -1918,8 +1915,8 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
     let mut out: Vec<VirtualTransactionId> = Vec::new();
 
     // Fast-path scan if the lock could conflict with fast-path locks.
-    if conflicts_with_relation_fast_path(locktag, lockmode) {
-        if let Some(g) = proc_global() {
+    if conflicts_with_relation_fast_path(locktag, lockmode)
+        && let Some(g) = proc_global() {
             let relid = Oid(locktag.locktag_field2);
             let group = fast_path_rel_group(relid);
             for i in 0..g.all_proc_count {
@@ -1958,14 +1955,13 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
                 });
             }
         }
-    }
     let fast_count = out.len();
 
     // Main-table scan.
     let shard = m.shard(hashcode).lock().unwrap();
     if let Some(lock) = shard.locks.get(locktag) {
         let _ = lock;
-        for (key, proclock) in shard.proclocks.iter() {
+        for (key, proclock) in &shard.proclocks {
             if key.lock != *locktag {
                 continue;
             }
@@ -1984,11 +1980,10 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
                         local_transaction_id: p.vxid.lxid,
                     })
                 };
-                if let Some(vxid) = vxid {
-                    if vxid.is_valid() && !out[..fast_count].iter().any(|v| *v == vxid) {
+                if let Some(vxid) = vxid
+                    && vxid.is_valid() && !out[..fast_count].contains(&vxid) {
                         out.push(vxid);
                     }
-                }
             }
         }
     }
@@ -2159,7 +2154,7 @@ pub fn lock_twophase_recover(_xid: crate::c::TransactionId, _info: u16, _recdata
 pub fn lock_twophase_postcommit(_xid: crate::c::TransactionId, _info: u16, _recdata: &[u8]) {}
 /// PG `lock_twophase_postabort`. TODO(twophase).
 pub fn lock_twophase_postabort(xid: crate::c::TransactionId, info: u16, recdata: &[u8]) {
-    lock_twophase_postcommit(xid, info, recdata)
+    lock_twophase_postcommit(xid, info, recdata);
 }
 /// PG `lock_twophase_standby_recover`. TODO(twophase/standby).
 pub fn lock_twophase_standby_recover(_xid: crate::c::TransactionId, _info: u16, _recdata: &[u8]) {}

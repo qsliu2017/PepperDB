@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/catalog/storage_xlog.h
 
+#![allow(
+    clippy::ptr_arg,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use bitflags::bitflags;
 
 use crate::common::relpath::ForkNumber;

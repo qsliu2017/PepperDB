@@ -24,7 +24,7 @@ impl QueryCompletion {
     }
 
     /// C: `CopyQueryCompletion(dst, src)`.
-    pub fn copy_from(&mut self, src: &QueryCompletion) {
+    pub fn copy_from(&mut self, src: &Self) {
         *self = *src;
     }
 }

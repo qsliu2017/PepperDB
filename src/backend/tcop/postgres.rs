@@ -46,6 +46,10 @@ use crate::utils::errcodes::{
 /// through `stream` directly -- pqcomm owns the wire transport once it lands. The
 /// loop calls `CHECK_FOR_INTERRUPTS` at the top of each iteration; that is now
 /// live (see [`process_interrupts`]).
+#[allow(
+    clippy::unused_async,
+    reason = "PostgresMain command loop is driven as a future (tokio::pin!/select! in run_backend); awaits land once pqcomm (read_command/ready_for_query) is ported"
+)]
 pub async fn postgres_main(stream: TcpStream, dbname: String, username: String) {
     // Keep the connection alive for the backend's lifetime. pqcomm will take it
     // over; until then it parks here so the socket is not dropped mid-loop.
@@ -103,7 +107,7 @@ pub async fn postgres_main(stream: TcpStream, dbname: String, username: String) 
             // Terminate or EOF: the frontend is closing the socket. Normal exit.
             Some(PQMSG_TERMINATE) | None => return,
             // COPY messages after a failed COPY: accept and ignore.
-            Some(PQMSG_COPY_DATA) | Some(PQMSG_COPY_DONE) | Some(PQMSG_COPY_FAIL) => {}
+            Some(PQMSG_COPY_DATA | PQMSG_COPY_DONE | PQMSG_COPY_FAIL) => {}
             Some(other) => {
                 // PG: ereport(FATAL, ERRCODE_PROTOCOL_VIOLATION).
                 crate::ereport!(crate::utils::elog::FATAL, |e: &mut crate::utils::elog::ErrorData| {
@@ -144,10 +148,10 @@ fn pq_flush() {
     crate::libpq::libpq::pq_flush();
 }
 
-fn exec_simple_query(_query_string: &str) {
+fn exec_simple_query(query_string: &str) {
     // PG exec_simple_query: pg_parse_query -> pg_analyze_and_rewrite ->
     // pg_plan_queries -> PortalRun. All deferred.
-    crate::tcop::tcopprot::pg_parse_query(_query_string);
+    crate::tcop::tcopprot::pg_parse_query(query_string);
 }
 
 fn exec_parse_message() {
@@ -349,7 +353,7 @@ mod tests {
                     s.flags.query_cancel_pending.store(true, Ordering::Release);
                     s.flags.interrupt_pending.store(true, Ordering::Release);
                 },
-                || process_interrupts(),
+                process_interrupts,
             );
         }));
         let payload = caught.expect_err("query cancel must panic");
@@ -367,7 +371,7 @@ mod tests {
                     s.flags.proc_die_pending.store(true, Ordering::Release);
                     s.flags.interrupt_pending.store(true, Ordering::Release);
                 },
-                || process_interrupts(),
+                process_interrupts,
             );
         }));
         let payload = caught.expect_err("proc die must panic");

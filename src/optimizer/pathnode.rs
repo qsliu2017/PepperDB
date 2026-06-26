@@ -1,6 +1,9 @@
 //! Translated from PostgreSQL src/include/optimizer/pathnode.h
 //! prototypes for pathnode.c, relnode.c.
 
+#![allow(clippy::boxed_local, reason = "1:1 PG port: Box<Node>/Box<Path> mirrors PG pointer-passed nodes")]
+#![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
+
 use crate::access::cmptype::CompareType;
 use crate::access::sdir::ScanDirection;
 use crate::nodes::bitmapset::Bitmapset;

@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/optimizer/geqo.h
 //! prototypes for various files in optimizer/geqo
 
+#![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
+
 use crate::common::pg_prng::PgPrngState;
 use crate::nodes::nodes::{Cost, Node};
 use crate::nodes::pathnodes::{PlannerInfo, RelOptInfo};

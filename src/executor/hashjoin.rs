@@ -18,7 +18,7 @@ use std::sync::Mutex;
 /// with the DSA replacement.
 pub struct HashJoinTupleData {
     /// link to next tuple in same bucket
-    pub next: Option<Box<HashJoinTupleData>>,
+    pub next: Option<Box<Self>>,
     pub hashvalue: u32, // tuple's hash code
     // Tuple data (MinimalTuple) follows on a MAXALIGN boundary; see HJTUPLE_*.
 }
@@ -56,7 +56,7 @@ pub struct HashMemoryChunkData {
     pub maxlen: usize, // size of the chunk's tuple buffer
     pub used: usize, // buffer bytes already used
     /// pointer to the next chunk (linked list); shared variant collapses
-    pub next: Option<Box<HashMemoryChunkData>>,
+    pub next: Option<Box<Self>>,
     // Tuple buffer starts at offset HASH_CHUNK_HEADER_SIZE (maxaligned).
 }
 

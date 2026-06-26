@@ -1,5 +1,7 @@
 //! Translated from PostgreSQL src/include/port.h
 
+#![allow(clippy::ptr_arg, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1")]
+
 // === scaffold: child modules (Phase 0) ===
 pub mod atomics;
 pub mod cygwin;
@@ -240,7 +242,7 @@ pub fn qsort_interruptible<T>(items: &mut [T], cmp: impl Fn(&T, &T) -> core::cmp
 }
 /// C: `void *bsearch_arg(...)` -> Option of the matching index.
 pub fn bsearch_arg<T>(items: &[T], cmp: impl Fn(&T) -> core::cmp::Ordering) -> Option<usize> {
-    items.binary_search_by(|x| cmp(x)).ok()
+    items.binary_search_by(cmp).ok()
 }
 
 pub fn pg_get_encoding_from_locale(ctype: &str, write_message: bool) -> i32 {

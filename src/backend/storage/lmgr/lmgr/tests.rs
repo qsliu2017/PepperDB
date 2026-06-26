@@ -117,7 +117,7 @@ async fn xact_lock_table_wait_blocks_until_holder_releases() {
             // Release via XactLockTableDelete (subxid-style explicit release).
             XactLockTableDelete(xid);
         })
-        .await
+        .await;
     });
 
     acquired_rx.await.unwrap();
@@ -125,15 +125,15 @@ async fn xact_lock_table_wait_blocks_until_holder_releases() {
     // Waiter: XactLockTableWait must block until the holder releases.
     let s2 = s.clone();
     let waiter = tokio::spawn(async move {
-        backend(0, || async move {
+        Box::pin(backend(0, || async move {
             let mut ctid = crate::storage::itemptr::ItemPointerData {
                 blkid: crate::storage::block::BlockIdData { hi: 0, lo: 0 },
                 posid: 0,
             };
             ctid.set_invalid();
             XactLockTableWait(&s2, xid, std::ptr::null_mut(), &ctid, XLTW_Oper::XltwNone).await;
-        })
-        .await
+        }))
+        .await;
     });
 
     // The waiter should still be blocked shortly after start.
@@ -164,16 +164,16 @@ async fn conditional_xact_lock_table_wait_false_while_held() {
             release_rx.await.unwrap();
             XactLockTableDelete(xid);
         })
-        .await
+        .await;
     });
 
     acquired_rx.await.unwrap();
 
     let s2 = s.clone();
     let got = tokio::spawn(async move {
-        backend(0, || async move {
+        Box::pin(backend(0, || async move {
             ConditionalXactLockTableWait(&s2, xid, false).await
-        })
+        }))
         .await
     })
     .await

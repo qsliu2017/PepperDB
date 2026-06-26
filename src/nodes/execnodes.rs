@@ -28,7 +28,7 @@ use bitflags::bitflags;
 macro_rules! opaque_forward {
     ($($name:ident),* $(,)?) => {
         $(
-            #[derive(Debug, Clone, PartialEq, Default)]
+            #[derive(Debug, Clone, PartialEq, Eq, Default)]
             pub struct $name;
         )*
     };
@@ -53,7 +53,7 @@ mod fwd {
 pub use fwd::*;
 
 /// Opaque private/foreign struct only referenced via pointer in the header.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Opaque;
 
 /// C `void *` handle whose concrete type lives in a private .c file (hash join
@@ -94,7 +94,7 @@ bitflags! {
 
 impl Default for EeoFlag {
     fn default() -> Self {
-        EeoFlag::empty()
+        Self::empty()
     }
 }
 
@@ -245,7 +245,7 @@ bitflags! {
 
 impl Default for SetFunctionReturnMode {
     fn default() -> Self {
-        SetFunctionReturnMode::empty()
+        Self::empty()
     }
 }
 
@@ -371,11 +371,11 @@ pub struct ResultRelInfo {
     pub child_to_root_map_valid: bool,
     pub root_to_child_map: Option<Box<TupleConversionMap>>,
     pub root_to_child_map_valid: bool,
-    pub root_result_rel_info: Option<Box<ResultRelInfo>>,
+    pub root_result_rel_info: Option<Box<Self>>,
     pub partition_tuple_slot: Option<Box<TupleTableSlot>>,
     /// for copyfrom.c multi-inserts (C `void *` to CopyMultiInsertBuffer).
     pub copy_multi_insert_buffer: OpaqueState,
-    pub ancestor_result_rels: Vec<Box<ResultRelInfo>>,
+    pub ancestor_result_rels: Vec<Box<Self>>,
 }
 
 /// State for an asynchronous tuple request. (Not itself a Node.)
@@ -640,8 +640,8 @@ pub struct PlanState {
     pub worker_jit_instrument: OpaqueState,
     /// boolean qual condition.
     pub qual: Option<Box<ExprState>>,
-    pub lefttree: Option<Box<PlanState>>,
-    pub righttree: Option<Box<PlanState>>,
+    pub lefttree: Option<Box<Self>>,
+    pub righttree: Option<Box<Self>>,
     /// Init SubPlanState nodes (un-correlated expr subselects).
     pub init_plan: Vec<Box<SubPlanState>>,
     /// SubPlanState nodes in my expressions.
@@ -1121,7 +1121,7 @@ pub struct CteScanState {
     pub eflags: i32,
     pub readptr: i32,
     pub cteplanstate: Option<Box<PlanState>>,
-    pub leader: Option<Box<CteScanState>>,
+    pub leader: Option<Box<Self>>,
     pub cte_table: Option<Box<Tuplestorestate>>,
     pub eof_cte: bool,
 }

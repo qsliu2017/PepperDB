@@ -67,8 +67,8 @@ struct DeadlockInfo {
 }
 
 impl DeadlockInfo {
-    fn zero() -> DeadlockInfo {
-        DeadlockInfo {
+    fn zero() -> Self {
+        Self {
             locktag: LOCKTAG::set_relation(0, 0),
             lockmode: 0,
             pid: 0,
@@ -113,7 +113,7 @@ struct DeadLockCtx {
 }
 
 impl DeadLockCtx {
-    fn new(max_backends: usize) -> DeadLockCtx {
+    fn new(max_backends: usize) -> Self {
         // PG InitDeadLockChecking sizing:
         //   visitedProcs/deadlockDetails: MaxBackends
         //   topoProcs (== visitedProcs), before/afterConstraints: MaxBackends
@@ -121,7 +121,7 @@ impl DeadLockCtx {
         //   possibleConstraints: 4*MaxBackends (last MaxBackends reserved for the
         //     FindLockCycle output window).
         let max_possible = max_backends * 4;
-        DeadLockCtx {
+        Self {
             max_backends,
             visited_procs: Vec::with_capacity(max_backends),
             deadlock_details: vec![DeadlockInfo::zero(); max_backends],
@@ -161,13 +161,10 @@ fn max_backends() -> usize {
 unsafe fn leader_of(g: &ProcGlobal, procno: ProcNumber) -> ProcNumber {
     // PG `proc->lockGroupLeader`: a member points at its leader; a leader points
     // at itself; not-in-a-group is NULL. All non-Member cases resolve to `procno`.
-    match unsafe { g.proc(procno) } {
-        Some(p) => match p.lock_group_role {
-            LockGroupRole::Member { leader } => leader,
-            LockGroupRole::Leader { .. } | LockGroupRole::None => procno,
-        },
-        None => procno,
-    }
+    unsafe { g.proc(procno) }.map_or(procno, |p| match p.lock_group_role {
+        LockGroupRole::Member { leader } => leader,
+        LockGroupRole::Leader { .. } | LockGroupRole::None => procno,
+    })
 }
 
 /// PG `LOCK_LOCKTAG(*lock)`: the lock's tag type.
@@ -204,10 +201,8 @@ pub fn DeadLockCheck(proc: ProcNumber, view: &LockTablesView) -> DeadLockState {
         // the correct deadlockDetails[] for the report.
         ctx.wait_orders.clear();
         let mut soft_edges = Vec::new();
-        if !find_lock_cycle(&mut ctx, &g, view, proc, &mut soft_edges) {
-            // PG elog(FATAL). TODO(panic): "deadlock seems to have disappeared".
-            panic!("deadlock seems to have disappeared");
-        }
+        // PG elog(FATAL). TODO(panic): "deadlock seems to have disappeared".
+        assert!(find_lock_cycle(&mut ctx, &g, view, proc, &mut soft_edges), "deadlock seems to have disappeared");
         publish_deadlock_details(&ctx);
         return DeadLockState::HardDeadlock;
     }
@@ -290,7 +285,7 @@ fn publish_blocking_autovacuum(procno: ProcNumber) {
                 details: Vec::new(),
                 n: 0,
                 blocking_autovacuum_proc: procno,
-            })
+            });
         }
     }
 }
@@ -331,9 +326,7 @@ fn dead_lock_check_recurse(
     for i in 0..n_edges as usize {
         if !saved_list && i > 0 {
             // Regenerate the list of possible added constraints.
-            if n_edges != test_configuration(ctx, g, view, proc) {
-                panic!("inconsistent results during deadlock check");
-            }
+            assert!(n_edges == test_configuration(ctx, g, view, proc), "inconsistent results during deadlock check");
         }
         let edge = ctx.possible_constraints[old_possible_constraints + i];
         ctx.cur_constraints.push(edge);
@@ -469,20 +462,16 @@ fn find_lock_cycle_recurse(
     // If the process is waiting, an outgoing edge to each proc that blocks it.
     // SAFETY: all partition locks held; the waiter's wait fields are stable.
     let (is_waiting, wait_lock) = unsafe {
-        match g.proc(check_proc) {
-            Some(p) => (p.wait_lock.is_some(), p.wait_lock),
-            None => (false, None),
-        }
+        g.proc(check_proc)
+            .map_or((false, None), |p| (p.wait_lock.is_some(), p.wait_lock))
     };
-    if is_waiting {
-        if let Some(_lock) = wait_lock {
-            if find_lock_cycle_recurse_member(
+    if is_waiting
+        && let Some(_lock) = wait_lock
+            && find_lock_cycle_recurse_member(
                 ctx, g, view, check_proc, check_proc, depth, soft_edges,
             ) {
                 return true;
             }
-        }
-    }
 
     // Lock-group members may have outgoing edges even if this proc isn't waiting.
     // Only a leader has members; single-member groups -> just self -> no-op.
@@ -500,8 +489,7 @@ fn find_lock_cycle_recurse(
         // SAFETY: all partition locks held.
         let member_waiting = unsafe {
             g.proc(member)
-                .map(|p| p.wait_lock.is_some())
-                .unwrap_or(false)
+                .is_some_and(|p| p.wait_lock.is_some())
         };
         if member_waiting
             && find_lock_cycle_recurse_member(
@@ -515,6 +503,10 @@ fn find_lock_cycle_recurse(
     false
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "1:1 port of C FindLockCycleRecurseMember; splitting would diverge from PG structure"
+)]
 fn find_lock_cycle_recurse_member(
     ctx: &mut DeadLockCtx,
     g: &ProcGlobal,
@@ -548,7 +540,7 @@ fn find_lock_cycle_recurse_member(
     // SAFETY: lock alive.
     let lock_tag = unsafe { (*lock).tag };
     // SAFETY: our own slot.
-    let check_pid = unsafe { g.proc(check_proc).map(|p| p.pid).unwrap_or(0) };
+    let check_pid = unsafe { g.proc(check_proc).map_or(0, |p| p.pid) };
 
     // Scan for procs holding conflicting locks: these are HARD edges. The holder
     // list comes from the locked-tables view (15b keys PROCLOCKs by (tag, proc)).
@@ -607,7 +599,7 @@ fn find_lock_cycle_recurse_member(
                 break;
             }
             // SAFETY: another waiter's wait fields, stable under partition locks.
-            let p_wait_mode = unsafe { g.proc(proc).map(|p| p.wait_lock_mode).unwrap_or(0) };
+            let p_wait_mode = unsafe { g.proc(proc).map_or(0, |p| p.wait_lock_mode) };
             if (lockbit_on(p_wait_mode) & conflict_mask) != 0
                 && find_lock_cycle_recurse(ctx, g, view, proc, depth + 1, soft_edges)
             {
@@ -660,7 +652,7 @@ fn find_lock_cycle_recurse_member(
                 break;
             }
             // SAFETY: another waiter's wait fields, stable under partition locks.
-            let p_wait_mode = unsafe { g.proc(proc).map(|p| p.wait_lock_mode).unwrap_or(0) };
+            let p_wait_mode = unsafe { g.proc(proc).map_or(0, |p| p.wait_lock_mode) };
             if (lockbit_on(p_wait_mode) & conflict_mask) != 0
                 && leader != check_proc_leader
                 && find_lock_cycle_recurse(ctx, g, view, proc, depth + 1, soft_edges)
@@ -693,11 +685,10 @@ fn proc_is_autovacuum(g: &ProcGlobal, proc: ProcNumber) -> bool {
     // SAFETY: reading the never-reset PROC_IS_AUTOVACUUM bit; benign without lock.
     unsafe {
         g.proc(proc)
-            .map(|p| {
+            .is_some_and(|p| {
                 p.status_flags
                     .contains(crate::storage::proc::ProcStatusFlags::PROC_IS_AUTOVACUUM)
             })
-            .unwrap_or(false)
     }
 }
 
@@ -757,6 +748,10 @@ fn expand_constraints(ctx: &mut DeadLockCtx, g: &ProcGlobal) -> bool {
 /// `constraints[0..n_constraints]` (each EDGE means waiter must come before
 /// blocker), minimizing change. Output to `ordering`. Returns false on a
 /// contradiction.
+#[allow(
+    clippy::too_many_lines,
+    reason = "1:1 port of C TopoSort; splitting would diverge from PG structure"
+)]
 fn topo_sort(
     ctx: &mut DeadLockCtx,
     g: &ProcGlobal,
@@ -776,10 +771,10 @@ fn topo_sort(
     // beforeConstraints[j]: # constraints saying topoProcs[j] must precede;
     //   -1 marks a non-representative group member.
     // afterConstraints[k]: 1-based list head of constraints after topoProcs[k].
-    for v in ctx.before_constraints[..queue_size].iter_mut() {
+    for v in &mut ctx.before_constraints[..queue_size] {
         *v = 0;
     }
-    for v in ctx.after_constraints[..queue_size].iter_mut() {
+    for v in &mut ctx.after_constraints[..queue_size] {
         *v = 0;
     }
 
@@ -917,6 +912,7 @@ pub fn DeadLockReport() -> ! {
 
 /// Build the "Process N waits for ... blocked by process M" detail lines.
 fn describe_cycle(details: &[DeadlockInfo]) -> String {
+    use std::fmt::Write;
     let mut out = String::new();
     for (i, info) in details.iter().enumerate() {
         let next_pid = if i < details.len() - 1 {
@@ -927,16 +923,18 @@ fn describe_cycle(details: &[DeadlockInfo]) -> String {
         let mut tagbuf = String::new();
         crate::storage::lmgr::DescribeLockTag(&mut tagbuf, &info.locktag);
         let modename = crate::backend::storage::lmgr::lock::GetLockmodeName(
-            info.locktag.locktag_lockmethodid as u16,
+            u16::from(info.locktag.locktag_lockmethodid),
             info.lockmode,
         );
         if i > 0 {
             out.push('\n');
         }
-        out.push_str(&format!(
+        write!(
+            out,
             "Process {} waits for {} on {}; blocked by process {}.",
             info.pid, modename, tagbuf, next_pid
-        ));
+        )
+        .unwrap();
     }
     out
 }
@@ -956,9 +954,9 @@ pub fn RememberSimpleDeadLock(
     // SAFETY: caller holds the partition lock for `lock`; reads pids + proc2's
     // wait fields, stable under it.
     let (proc1_pid, proc2_pid, proc2_wait_tag, proc2_wait_mode) = unsafe {
-        let p1 = g.proc(proc1).map(|p| p.pid).unwrap_or(0);
+        let p1 = g.proc(proc1).map_or(0, |p| p.pid);
         let p2 = g.proc(proc2);
-        let p2_pid = p2.map(|p| p.pid).unwrap_or(0);
+        let p2_pid = p2.map_or(0, |p| p.pid);
         let (tag, mode) = match p2.and_then(|p| p.wait_lock.map(|l| (l, p.wait_lock_mode))) {
             Some((l, m)) => ((*l).tag, m),
             None => (lock.tag, lockmode),

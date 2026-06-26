@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/access/xlogreader.h
 //! Definitions for the generic XLog reading facility.
 //!
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+//!
 //! Allocate an XLogReaderState, position it with begin_read/find_next_record,
 //! then call read_record until it returns None. In-memory facility (no on-disk
 //! layout contract): modelled idiomatically.
@@ -418,7 +420,7 @@ pub fn XLogRecGetBlockData<R>(
         .as_ref()
         .expect("no decoded record")
         .get_block_data(block_id)
-        .map(|s| s.to_vec())
+        .map(<[u8]>::to_vec)
 }
 
 /// Block tag for `block_id` as (rlocator, forknum, blknum). Panics if absent

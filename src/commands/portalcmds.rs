@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/commands/portalcmds.h
 
+#![allow(
+    clippy::boxed_local,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::nodes::params::ParamListInfo;
 use crate::nodes::parsenodes::{DeclareCursorStmt, FetchStmt};
 use crate::parser::parse_node::ParseState;

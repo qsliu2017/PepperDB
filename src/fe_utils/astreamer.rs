@@ -1,4 +1,8 @@
 //! Translated from PostgreSQL src/include/fe_utils/astreamer.h
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
 //
 // The "archive streamer" - a composable chain of stream processors. The C
 // `astreamer_ops` vtable (content/finalize/free, all required) maps to a trait

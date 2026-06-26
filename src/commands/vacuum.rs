@@ -1,6 +1,11 @@
 //! Translated from PostgreSQL src/include/commands/vacuum.h
 //! Header for the vacuum cleaner and statistics analyzer.
 
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use bitflags::bitflags;
 
 use crate::access::genam::{IndexBulkDeleteResult, IndexVacuumInfo};

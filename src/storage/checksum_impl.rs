@@ -35,7 +35,7 @@ const fn checksum_comp(checksum: u32, value: u32) -> u32 {
 /// Block checksum algorithm. `page` is the BLCKSZ-byte page viewed as a
 /// row-major `[N_ROWS][N_SUMS]` array of native (little-endian) u32 values.
 pub fn pg_checksum_block(page: &[u8]) -> u32 {
-    assert!(page.len() == BLCKSZ as usize);
+    assert_eq!(page.len(), BLCKSZ as usize);
 
     let mut sums: [u32; N_SUMS] = CHECKSUM_BASE_OFFSETS;
 
@@ -46,15 +46,15 @@ pub fn pg_checksum_block(page: &[u8]) -> u32 {
 
     // main checksum calculation
     for i in 0..N_ROWS {
-        for j in 0..N_SUMS {
-            sums[j] = checksum_comp(sums[j], u32_at(i, j));
+        for (j, s) in sums.iter_mut().enumerate() {
+            *s = checksum_comp(*s, u32_at(i, j));
         }
     }
 
     // two rounds of zeroes for additional mixing
     for _ in 0..2 {
-        for j in 0..N_SUMS {
-            sums[j] = checksum_comp(sums[j], 0);
+        for s in &mut sums {
+            *s = checksum_comp(*s, 0);
         }
     }
 

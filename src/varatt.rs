@@ -100,6 +100,7 @@ pub unsafe fn VARATT_IS_4B(ptr: *const u8) -> bool {
 }
 /// SAFETY: see `VARATT_IS_4B`.
 #[inline]
+#[allow(clippy::verbose_bit_mask, reason = "varlena tag bit-mask check faithful to C")]
 pub unsafe fn VARATT_IS_4B_U(ptr: *const u8) -> bool {
     (*ptr & 0x03) == 0x00
 }
@@ -128,13 +129,13 @@ pub unsafe fn VARATT_NOT_PAD_BYTE(ptr: *const u8) -> bool {
 /// SAFETY: `ptr` points at an aligned 4-byte-header varlena.
 #[inline]
 pub unsafe fn VARSIZE_4B(ptr: *const u8) -> u32 {
-    let hdr = (ptr as *const u32).read_unaligned();
+    let hdr = ptr.cast::<u32>().read_unaligned();
     (hdr >> 2) & 0x3FFFFFFF
 }
 /// SAFETY: see `VARATT_IS_4B`.
 #[inline]
 pub unsafe fn VARSIZE_1B(ptr: *const u8) -> u32 {
-    ((*ptr >> 1) & 0x7F) as u32
+    u32::from((*ptr >> 1) & 0x7F)
 }
 /// SAFETY: `ptr` points at a 1-byte-header external (toast) varlena.
 #[inline]
@@ -145,12 +146,12 @@ pub unsafe fn VARTAG_1B_E(ptr: *const u8) -> u8 {
 /// SAFETY: `ptr` points at writable storage for a 4-byte-header varlena.
 #[inline]
 pub unsafe fn SET_VARSIZE_4B(ptr: *mut u8, len: u32) {
-    (ptr as *mut u32).write_unaligned(len << 2);
+    ptr.cast::<u32>().write_unaligned(len << 2);
 }
 /// SAFETY: see `SET_VARSIZE_4B`.
 #[inline]
 pub unsafe fn SET_VARSIZE_4B_C(ptr: *mut u8, len: u32) {
-    (ptr as *mut u32).write_unaligned((len << 2) | 0x02);
+    ptr.cast::<u32>().write_unaligned((len << 2) | 0x02);
 }
 /// SAFETY: `ptr` points at writable storage for a 1-byte-header varlena.
 #[inline]
@@ -293,22 +294,22 @@ pub unsafe fn VARATT_CONVERTED_SHORT_SIZE(ptr: *const u8) -> usize {
 /// SAFETY: `ptr` points at writable aligned storage.
 #[inline]
 pub unsafe fn SET_VARSIZE(ptr: *mut u8, len: u32) {
-    SET_VARSIZE_4B(ptr, len)
+    SET_VARSIZE_4B(ptr, len);
 }
 /// SAFETY: `ptr` points at writable storage.
 #[inline]
 pub unsafe fn SET_VARSIZE_SHORT(ptr: *mut u8, len: u8) {
-    SET_VARSIZE_1B(ptr, len)
+    SET_VARSIZE_1B(ptr, len);
 }
 /// SAFETY: `ptr` points at writable aligned storage.
 #[inline]
 pub unsafe fn SET_VARSIZE_COMPRESSED(ptr: *mut u8, len: u32) {
-    SET_VARSIZE_4B_C(ptr, len)
+    SET_VARSIZE_4B_C(ptr, len);
 }
 /// SAFETY: `ptr` points at writable storage for an external varlena.
 #[inline]
 pub unsafe fn SET_VARTAG_EXTERNAL(ptr: *mut u8, tag: u8) {
-    SET_VARTAG_1B_E(ptr, tag)
+    SET_VARTAG_1B_E(ptr, tag);
 }
 
 /// VARSIZE_ANY: total size of any varlena form.
@@ -352,13 +353,13 @@ pub unsafe fn VARDATA_ANY(ptr: *mut u8) -> *mut u8 {
 /// SAFETY: `ptr` points at a compressed 4-byte-header varlena.
 #[inline]
 pub unsafe fn VARDATA_COMPRESSED_GET_EXTSIZE(ptr: *const u8) -> u32 {
-    let tcinfo = (ptr.add(VARHDRSZ) as *const u32).read_unaligned();
+    let tcinfo = ptr.add(VARHDRSZ).cast::<u32>().read_unaligned();
     tcinfo & VARLENA_EXTSIZE_MASK
 }
 /// SAFETY: see `VARDATA_COMPRESSED_GET_EXTSIZE`.
 #[inline]
 pub unsafe fn VARDATA_COMPRESSED_GET_COMPRESS_METHOD(ptr: *const u8) -> u32 {
-    let tcinfo = (ptr.add(VARHDRSZ) as *const u32).read_unaligned();
+    let tcinfo = ptr.add(VARHDRSZ).cast::<u32>().read_unaligned();
     tcinfo >> VARLENA_EXTSIZE_BITS
 }
 

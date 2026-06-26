@@ -246,7 +246,7 @@ pub fn walrcv_connect(
 }
 
 pub fn walrcv_check_conninfo(conninfo: &str, must_use_password: bool) {
-    funcs().check_conninfo(conninfo, must_use_password)
+    funcs().check_conninfo(conninfo, must_use_password);
 }
 
 pub fn walrcv_get_conninfo(conn: &WalReceiverConn) -> String {
@@ -286,7 +286,7 @@ pub fn walrcv_receive(conn: &WalReceiverConn) -> WalRcvReceive {
 }
 
 pub fn walrcv_send(conn: &WalReceiverConn, buffer: &[u8]) {
-    funcs().send(conn, buffer)
+    funcs().send(conn, buffer);
 }
 
 pub fn walrcv_create_slot(
@@ -306,7 +306,7 @@ pub fn walrcv_alter_slot(
     failover: Option<bool>,
     two_phase: Option<bool>,
 ) {
-    funcs().alter_slot(conn, slotname, failover, two_phase)
+    funcs().alter_slot(conn, slotname, failover, two_phase);
 }
 
 pub fn walrcv_get_backend_pid(conn: &WalReceiverConn) -> i32 {
@@ -318,7 +318,7 @@ pub fn walrcv_exec(conn: &WalReceiverConn, query: &str, ret_types: &[Oid]) -> Wa
 }
 
 pub fn walrcv_disconnect(conn: Box<WalReceiverConn>) {
-    funcs().disconnect(conn)
+    funcs().disconnect(conn);
 }
 
 /// C inline `walrcv_clear_result`: frees the result and its owned members. In

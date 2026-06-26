@@ -8,11 +8,11 @@ pub fn ExceptionalCondition(condition_name: &str, file_name: &str, line_number: 
     let pid = std::process::id();
     let mut stderr = std::io::stderr();
     if condition_name.is_empty() || file_name.is_empty() {
-        let _ = write!(stderr, "TRAP: ExceptionalCondition: bad arguments in PID {pid}\n");
+        let _ = writeln!(stderr, "TRAP: ExceptionalCondition: bad arguments in PID {pid}");
     } else {
-        let _ = write!(
+        let _ = writeln!(
             stderr,
-            "TRAP: failed Assert(\"{condition_name}\"), File: \"{file_name}\", Line: {line_number}, PID: {pid}\n"
+            "TRAP: failed Assert(\"{condition_name}\"), File: \"{file_name}\", Line: {line_number}, PID: {pid}"
         );
     }
     let _ = stderr.flush();

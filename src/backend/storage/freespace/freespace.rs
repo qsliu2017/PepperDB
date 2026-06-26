@@ -84,9 +84,7 @@ fn fsm_space_cat_to_avail(cat: u8) -> usize {
 
 /// C: `fsm_space_needed_to_cat`. Rounds up (a request needs at least this cat).
 fn fsm_space_needed_to_cat(needed: usize) -> u8 {
-    if needed > MAX_FSM_REQUEST_SIZE {
-        panic!("invalid FSM request size {needed}");
-    }
+    assert!(needed <= MAX_FSM_REQUEST_SIZE, "invalid FSM request size {needed}");
     if needed == 0 {
         return 1;
     }
@@ -99,7 +97,7 @@ fn fsm_space_needed_to_cat(needed: usize) -> u8 {
 /// C: `fsm_logical_to_physical`. Physical block number of a logical FSM address.
 fn fsm_logical_to_physical(addr: FsmAddress) -> BlockNumber {
     // Logical page number of the first leaf below this page.
-    let mut leafno: u64 = addr.logpageno as u64;
+    let mut leafno: u64 = u64::from(addr.logpageno);
     for _ in 0..addr.level {
         leafno *= SLOTS_PER_FSM_PAGE as u64;
     }
@@ -127,7 +125,7 @@ fn fsm_get_location(heapblk: BlockNumber) -> (FsmAddress, u16) {
 /// C: `fsm_get_heap_blk`. Heap block for a bottom-level FSM location + slot.
 fn fsm_get_heap_blk(addr: FsmAddress, slot: u16) -> BlockNumber {
     debug_assert_eq!(addr.level, FSM_BOTTOM_LEVEL);
-    addr.logpageno * SLOTS_PER_FSM_PAGE as u32 + slot as u32
+    addr.logpageno * SLOTS_PER_FSM_PAGE as u32 + u32::from(slot)
 }
 
 /// C: `fsm_get_parent`. Parent address of a child page, plus the slot in it.
@@ -146,7 +144,7 @@ fn fsm_get_child(parent: FsmAddress, slot: u16) -> FsmAddress {
     debug_assert!(parent.level > FSM_BOTTOM_LEVEL);
     FsmAddress {
         level: parent.level - 1,
-        logpageno: parent.logpageno * SLOTS_PER_FSM_PAGE as u32 + slot as u32,
+        logpageno: parent.logpageno * SLOTS_PER_FSM_PAGE as u32 + u32::from(slot),
     }
 }
 
@@ -198,7 +196,7 @@ async fn fsm_readbuf(
             )
             .await;
             // The extended block is zero; PageInit it under the content lock.
-            init_if_new(shared, b).await;
+            init_if_new(shared, b);
             shared.buffers().release_buffer(b);
             cur += 1;
         }
@@ -215,13 +213,13 @@ async fn fsm_readbuf(
     )
     .await;
 
-    init_if_new(shared, buf).await;
+    init_if_new(shared, buf);
     Some(buf)
 }
 
 /// PageInit a freshly-read FSM page if it is still new (zeroed). The check is
 /// done under the exclusive content lock to avoid two tasks both initializing.
-async fn init_if_new(shared: &Arc<SharedState>, buf: Buffer) {
+fn init_if_new(shared: &Arc<SharedState>, buf: Buffer) {
     let pool = shared.buffers();
     if pool.buffer_get_page(buf).is_new() {
         let _g = pool.content_exclusive(buf);
@@ -290,28 +288,25 @@ async fn fsm_search(
         // Read the FSM page (no extend on search).
         let buf = fsm_readbuf(shared, smgr, relpersistence, addr, false).await;
 
-        let slot: Option<u16> = match buf {
-            Some(buf) => {
-                let _g = pool.content_share(buf);
-                // Read-only search under the SHARED content lock: descend the
-                // max-tree via `&Page` only (no `block_mut`, no `&mut Page`).
-                // Two concurrent searchers both holding the share lock are sound
-                // because nothing here writes the page.
-                // TODO(perf): PG updates fp_next_slot under the shared lock as a
-                // benign byte race to spread inserts; reintroduce later via an
-                // atomic byte through the UnsafeCell (never as &mut Page under a
-                // shared lock).
-                let view = FsmPage::new(pool.buffer_get_page(buf));
-                let s = view.search_avail(min_cat);
-                if s.is_none() {
-                    max_avail = view.get_max_avail();
-                }
-                drop(_g);
-                pool.release_buffer(buf);
-                s.map(|x| x as u16)
+        let slot: Option<u16> = buf.and_then(|buf| {
+            let g = pool.content_share(buf);
+            // Read-only search under the SHARED content lock: descend the
+            // max-tree via `&Page` only (no `block_mut`, no `&mut Page`).
+            // Two concurrent searchers both holding the share lock are sound
+            // because nothing here writes the page.
+            // TODO(perf): PG updates fp_next_slot under the shared lock as a
+            // benign byte race to spread inserts; reintroduce later via an
+            // atomic byte through the UnsafeCell (never as &mut Page under a
+            // shared lock).
+            let view = FsmPage::new(pool.buffer_get_page(buf));
+            let s = view.search_avail(min_cat);
+            if s.is_none() {
+                max_avail = view.get_max_avail();
             }
-            None => None,
-        };
+            drop(g);
+            pool.release_buffer(buf);
+            s.map(|x| x as u16)
+        });
 
         if let Some(slot) = slot {
             if addr.level == FSM_BOTTOM_LEVEL {
@@ -398,9 +393,8 @@ pub async fn get_recorded_free_space(
     heap_blk: BlockNumber,
 ) -> usize {
     let (addr, slot) = fsm_get_location(heap_blk);
-    let buf = match fsm_readbuf(shared, smgr, relpersistence, addr, false).await {
-        Some(b) => b,
-        None => return 0,
+    let Some(buf) = fsm_readbuf(shared, smgr, relpersistence, addr, false).await else {
+        return 0;
     };
     let pool = shared.buffers();
     let cat = FsmPage::new(pool.buffer_get_page(buf)).get_avail(slot as usize);
@@ -509,9 +503,8 @@ fn fsm_vacuum_page<'a>(
     end: BlockNumber,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = (u8, bool)> + Send + 'a>> {
     Box::pin(async move {
-        let buf = match fsm_readbuf(shared, smgr, relpersistence, addr, false).await {
-            Some(b) => b,
-            None => return (0, true), // EOF
+        let Some(buf) = fsm_readbuf(shared, smgr, relpersistence, addr, false).await else {
+            return (0, true); // EOF
         };
         let pool = shared.buffers();
 
@@ -528,25 +521,23 @@ fn fsm_vacuum_page<'a>(
                 fsm_end = pe;
                 fsm_end_slot = pes;
             }
-            let start_slot: i32 = if fsm_start.logpageno == addr.logpageno {
-                fsm_start_slot as i32
-            } else if fsm_start.logpageno > addr.logpageno {
-                SLOTS_PER_FSM_PAGE as i32
-            } else {
-                0
+            let start_slot: i32 = match fsm_start.logpageno.cmp(&addr.logpageno) {
+                std::cmp::Ordering::Equal => i32::from(fsm_start_slot),
+                std::cmp::Ordering::Greater => SLOTS_PER_FSM_PAGE as i32,
+                std::cmp::Ordering::Less => 0,
             };
-            let end_slot: i32 = if fsm_end.logpageno == addr.logpageno {
-                fsm_end_slot as i32
-            } else if fsm_end.logpageno > addr.logpageno {
-                SLOTS_PER_FSM_PAGE as i32 - 1
-            } else {
-                -1
+            let end_slot: i32 = match fsm_end.logpageno.cmp(&addr.logpageno) {
+                std::cmp::Ordering::Equal => i32::from(fsm_end_slot),
+                std::cmp::Ordering::Greater => SLOTS_PER_FSM_PAGE as i32 - 1,
+                std::cmp::Ordering::Less => -1,
             };
 
             let mut eof = false;
             let mut slot = start_slot;
             while slot <= end_slot {
-                let child_avail = if !eof {
+                let child_avail = if eof {
+                    0
+                } else {
                     let (ca, child_eof) = fsm_vacuum_page(
                         shared,
                         smgr,
@@ -558,8 +549,6 @@ fn fsm_vacuum_page<'a>(
                     .await;
                     eof = child_eof;
                     if child_eof { 0 } else { ca }
-                } else {
-                    0
                 };
 
                 let cur = FsmPage::new(pool.buffer_get_page(buf)).get_avail(slot as usize);

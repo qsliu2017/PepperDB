@@ -1,4 +1,9 @@
 //! Translated from PostgreSQL src/include/fe_utils/parallel_slot.h
+#![allow(
+    clippy::boxed_local,
+    clippy::needless_pass_by_value,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
 //
 // Parallel connection slots for bin/scripts. The result-handler callback's
 // `void *context` collapses into a captured closure.

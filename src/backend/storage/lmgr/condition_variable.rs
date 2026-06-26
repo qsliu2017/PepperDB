@@ -64,7 +64,7 @@ pub struct CvSleep<'cv> {
     guard: WaitGuard<'cv>,
 }
 
-impl<'cv> CvSleep<'cv> {
+impl CvSleep<'_> {
     /// Await the currently-armed wakeup, then re-arm for the next iteration.
     ///
     /// `wait_event_info` mirrors PG's pg_stat_activity wait-event reporting; it is

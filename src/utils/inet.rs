@@ -18,7 +18,7 @@ const _: () = assert!(core::mem::offset_of!(inet_struct, ipaddr) == 2);
 
 // "family" field values. AF_INET is libc's address family (2 on Linux+macOS).
 pub const AF_INET: i32 = 2;
-pub const PGSQL_AF_INET: i32 = AF_INET + 0;
+pub const PGSQL_AF_INET: i32 = AF_INET;
 pub const PGSQL_AF_INET6: i32 = AF_INET + 1;
 
 /// INET/CIDR varlena wrapper (uncompressed in-memory shape). On-disk varlena.
@@ -84,7 +84,7 @@ pub fn DatumGetInetPP(x: Datum) -> *mut inet {
 }
 #[inline]
 pub fn InetPGetDatum(x: &inet) -> Datum {
-    Datum(x as *const inet as usize)
+    Datum(std::ptr::from_ref::<inet>(x) as usize)
 }
 #[inline]
 pub fn DatumGetInetP(x: Datum) -> *mut inet {
@@ -96,7 +96,7 @@ pub fn DatumGetMacaddrP(x: Datum) -> *mut macaddr {
 }
 #[inline]
 pub fn MacaddrPGetDatum(x: &macaddr) -> Datum {
-    Datum(x as *const macaddr as usize)
+    Datum(std::ptr::from_ref::<macaddr>(x) as usize)
 }
 #[inline]
 pub fn DatumGetMacaddr8P(x: Datum) -> *mut macaddr8 {
@@ -104,7 +104,7 @@ pub fn DatumGetMacaddr8P(x: Datum) -> *mut macaddr8 {
 }
 #[inline]
 pub fn Macaddr8PGetDatum(x: &macaddr8) -> Datum {
-    Datum(x as *const macaddr8 as usize)
+    Datum(std::ptr::from_ref::<macaddr8>(x) as usize)
 }
 
 // Support functions in network.c

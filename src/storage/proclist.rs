@@ -40,15 +40,15 @@ pub fn proclist_push_head(
     debug_assert!(nodes[procno as usize].next == 0 && nodes[procno as usize].prev == 0);
 
     if list.head == INVALID_PROC_NUMBER {
-        debug_assert!(list.tail == INVALID_PROC_NUMBER);
+        debug_assert_eq!(list.tail, INVALID_PROC_NUMBER);
         nodes[procno as usize].next = INVALID_PROC_NUMBER;
         nodes[procno as usize].prev = INVALID_PROC_NUMBER;
         list.head = procno;
         list.tail = procno;
     } else {
         debug_assert!(list.tail != INVALID_PROC_NUMBER);
-        debug_assert!(list.head != procno);
-        debug_assert!(list.tail != procno);
+        debug_assert_ne!(list.head, procno);
+        debug_assert_ne!(list.tail, procno);
         let old_head = list.head;
         nodes[procno as usize].next = old_head;
         nodes[old_head as usize].prev = procno;
@@ -66,21 +66,20 @@ pub fn proclist_push_tail(
     debug_assert!(nodes[procno as usize].next == 0 && nodes[procno as usize].prev == 0);
 
     if list.tail == INVALID_PROC_NUMBER {
-        debug_assert!(list.head == INVALID_PROC_NUMBER);
+        debug_assert_eq!(list.head, INVALID_PROC_NUMBER);
         nodes[procno as usize].next = INVALID_PROC_NUMBER;
         nodes[procno as usize].prev = INVALID_PROC_NUMBER;
         list.head = procno;
-        list.tail = procno;
     } else {
         debug_assert!(list.head != INVALID_PROC_NUMBER);
-        debug_assert!(list.head != procno);
-        debug_assert!(list.tail != procno);
+        debug_assert_ne!(list.head, procno);
+        debug_assert_ne!(list.tail, procno);
         let old_tail = list.tail;
         nodes[procno as usize].prev = old_tail;
         nodes[old_tail as usize].next = procno;
         nodes[procno as usize].next = INVALID_PROC_NUMBER;
-        list.tail = procno;
     }
+    list.tail = procno;
 }
 
 /// Delete a process from a list --- it must be in the list!
@@ -89,14 +88,14 @@ pub fn proclist_delete(list: &mut proclist_head, procno: ProcNumber, nodes: &mut
     debug_assert!(node.next != 0 || node.prev != 0);
 
     if node.prev == INVALID_PROC_NUMBER {
-        debug_assert!(list.head == procno);
+        debug_assert_eq!(list.head, procno);
         list.head = node.next;
     } else {
         nodes[node.prev as usize].next = node.next;
     }
 
     if node.next == INVALID_PROC_NUMBER {
-        debug_assert!(list.tail == procno);
+        debug_assert_eq!(list.tail, procno);
         list.tail = node.prev;
     } else {
         nodes[node.next as usize].prev = node.prev;

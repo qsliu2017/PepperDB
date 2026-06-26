@@ -29,8 +29,8 @@ pub struct ConditionalStack {
 }
 
 impl ConditionalStack {
-    pub fn create() -> ConditionalStack {
-        ConditionalStack { stack: Vec::new() }
+    pub fn create() -> Self {
+        Self { stack: Vec::new() }
     }
 
     pub fn reset(&mut self) {

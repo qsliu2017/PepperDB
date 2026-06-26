@@ -18,7 +18,7 @@ pub const fn rel_file_number_is_valid(relnumber: RelFileNumber) -> bool {
 
 /// Name of major-version-specific tablespace subdirectories.
 pub fn tablespace_version_directory() -> String {
-    format!("PG_{}_{}", PG_MAJORVERSION, CATALOG_VERSION_NO)
+    format!("PG_{PG_MAJORVERSION}_{CATALOG_VERSION_NO}")
 }
 
 pub const PG_TBLSPC_DIR: &str = "pg_tblspc";
@@ -122,10 +122,10 @@ pub fn get_relation_path(
     fork_number: ForkNumber,
 ) -> RelPathStr {
     let fork_suffix = |s: &str| -> String {
-        if fork_number != ForkNumber::MAIN_FORKNUM {
-            format!("{s}_{}", FORK_NAMES[fork_number as usize])
-        } else {
+        if fork_number == ForkNumber::MAIN_FORKNUM {
             s.to_string()
+        } else {
+            format!("{s}_{}", FORK_NAMES[fork_number as usize])
         }
     };
 

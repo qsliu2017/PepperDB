@@ -1,5 +1,7 @@
 //! Translated from PostgreSQL src/include/parser/analyze.h
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
 use crate::nodes::nodes::Node;
 use crate::nodes::params::ParserSetupHook;

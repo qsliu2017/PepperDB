@@ -2,6 +2,8 @@
 //! TidStore interface. In-memory; shared-memory (DSA) variants collapse under
 //! the single-process model and are omitted (utils/dsa.h is a tombstone).
 
+#![allow(clippy::should_implement_trait, reason = "inherent method mirrors PG API name")]
+
 use crate::storage::block::BlockNumber;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
@@ -26,7 +28,7 @@ pub struct TidStoreIterResult {
 
 impl TidStore {
     /// Local (process-private) store with a memory budget.
-    pub fn create_local(_max_bytes: usize, _insert_only: bool) -> Box<TidStore> {
+    pub fn create_local(_max_bytes: usize, _insert_only: bool) -> Box<Self> {
         unimplemented!()
     }
 

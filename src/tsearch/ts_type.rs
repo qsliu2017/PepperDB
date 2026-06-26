@@ -23,6 +23,7 @@ impl WordEntry {
         (self.0 & 0x1) != 0
     }
     /// len:11 (bits 1..12). MAX 2Kb.
+    #[allow(clippy::len_without_is_empty, reason = "mirrors PG length accessor; is_empty not part of PG API")]
     pub const fn len(self) -> u32 {
         (self.0 >> 1) & MAXSTRLEN
     }
@@ -31,7 +32,7 @@ impl WordEntry {
         (self.0 >> 12) & MAXSTRPOS
     }
     pub const fn new(haspos: bool, len: u32, pos: u32) -> Self {
-        WordEntry((haspos as u32) | ((len & MAXSTRLEN) << 1) | ((pos & MAXSTRPOS) << 12))
+        Self((haspos as u32) | ((len & MAXSTRLEN) << 1) | ((pos & MAXSTRPOS) << 12))
     }
 }
 
@@ -160,7 +161,7 @@ impl QueryOperandLenDist {
         (self.0 >> 12) & 0xfffff
     }
     pub const fn new(length: u32, distance: u32) -> Self {
-        QueryOperandLenDist((length & 0xfff) | ((distance & 0xfffff) << 12))
+        Self((length & 0xfff) | ((distance & 0xfffff) << 12))
     }
 }
 

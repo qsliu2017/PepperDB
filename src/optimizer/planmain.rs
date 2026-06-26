@@ -1,5 +1,8 @@
 //! Translated from PostgreSQL src/include/optimizer/planmain.h
 
+#![allow(clippy::boxed_local, reason = "1:1 PG port: Box<Node>/Box<Path> mirrors PG pointer-passed nodes")]
+#![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
+
 use crate::access::attnum::AttrNumber;
 use crate::nodes::nodes::{AggSplit, AggStrategy, JoinType, LimitOption};
 use crate::nodes::parsenodes::Query;

@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/access/tupconvert.h
 //! Tuple conversion support.
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 use crate::access::attmap::AttrMap;
 use crate::access::htup::HeapTuple;
 use crate::access::tupdesc::TupleDesc;

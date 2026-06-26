@@ -65,9 +65,8 @@ pub fn switch_to_untrusted_user(userid: Oid) -> UserContext {
     let (save_userid, save_sec_context) = get_user_id_and_sec_context();
 
     // Permission to assume the target role (catalog/acl stub).
-    if !member_can_set_role(save_userid, userid) {
-        panic!("role cannot SET ROLE to target role"); // TODO(panic): ereport(ERROR)
-    }
+    // TODO(panic): ereport(ERROR)
+    assert!(member_can_set_role(save_userid, userid), "role cannot SET ROLE to target role");
 
     if member_can_set_role(userid, save_userid) {
         // Each can SET ROLE to the other: no restriction needed.

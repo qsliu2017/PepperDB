@@ -1,9 +1,9 @@
 //! Translated from PostgreSQL src/include/utils/float.h
 
 /// PI, from M_PI fallback.
-pub const M_PI: f64 = 3.14159265358979323846;
+pub const M_PI: f64 = std::f64::consts::PI;
 /// Radians per degree, a.k.a. PI / 180.
-pub const RADIANS_PER_DEGREE: f64 = 0.0174532925199432957692;
+pub const RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
 
 // Utility functions in float.c (bare declarations -> stubs).
 
@@ -176,10 +176,12 @@ pub fn float8_eq(val1: f64, val2: f64) -> bool {
     if val1.is_nan() { val2.is_nan() } else { !val2.is_nan() && val1 == val2 }
 }
 
+#[allow(clippy::float_cmp, reason = "PG float comparison semantics, exact equality intended")]
 pub fn float4_ne(val1: f32, val2: f32) -> bool {
     if val1.is_nan() { !val2.is_nan() } else { val2.is_nan() || val1 != val2 }
 }
 
+#[allow(clippy::float_cmp, reason = "PG float comparison semantics, exact equality intended")]
 pub fn float8_ne(val1: f64, val2: f64) -> bool {
     if val1.is_nan() { !val2.is_nan() } else { val2.is_nan() || val1 != val2 }
 }

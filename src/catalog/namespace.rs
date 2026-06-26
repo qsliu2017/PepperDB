@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/catalog/namespace.h
 
+#![allow(
+    clippy::fn_params_excessive_bools,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::c::SubTransactionId;
 use crate::nodes::primnodes::RangeVar;
 use crate::postgres_ext::Oid;

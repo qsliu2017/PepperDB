@@ -78,7 +78,7 @@ pub(crate) struct SlruBank {
 
 impl SlruBank {
     fn new(bankstart: usize, lsn_groups_per_page: usize) -> Self {
-        SlruBank {
+        Self {
             page_buffer: (0..SLRU_BANK_SIZE)
                 .map(|_| Box::new([0u8; BLCKSZ_USIZE]))
                 .collect(),
@@ -289,9 +289,9 @@ impl SlruCtl {
         xlog: Arc<XLogCtl>,
         sync_requests: Arc<SyncRequests>,
         data_dir: Option<String>,
-    ) -> Arc<SlruCtl> {
+    ) -> Arc<Self> {
         assert!(
-            nslots % SLRU_BANK_SIZE == 0,
+            nslots.is_multiple_of(SLRU_BANK_SIZE),
             "nslots must be a multiple of SLRU_BANK_SIZE"
         );
         let nbanks = nslots / SLRU_BANK_SIZE;
@@ -299,11 +299,8 @@ impl SlruCtl {
             .map(|b| RwLock::new(SlruBank::new(b * SLRU_BANK_SIZE, nlsns)))
             .collect();
         let slot_io = (0..nslots).map(|_| WaitQueue::new()).collect();
-        let dir = match data_dir {
-            Some(d) => PathBuf::from(d).join(subdir),
-            None => PathBuf::from(subdir),
-        };
-        Arc::new(SlruCtl {
+        let dir = data_dir.map_or_else(|| PathBuf::from(subdir), |d| PathBuf::from(d).join(subdir));
+        Arc::new(Self {
             banks,
             slot_io,
             nbanks,
@@ -343,9 +340,9 @@ impl SlruCtl {
 
     fn segment_path(&self, segno: i64) -> PathBuf {
         let name = if self.long_segment_names {
-            format!("{:015X}", segno)
+            format!("{segno:015X}")
         } else {
-            format!("{:04X}", segno)
+            format!("{segno:04X}")
         };
         self.dir.join(name)
     }
@@ -359,8 +356,8 @@ impl SlruCtl {
     /// UnexpectedEof, not a short Ok) -- it matters only for recovery reading a
     /// partially-written segment; TODO(recovery).
     async fn physical_read(&self, pageno: i64, buf: &mut [u8; BLCKSZ_USIZE]) -> bool {
-        let segno = pageno / SLRU_PAGES_PER_SEGMENT as i64;
-        let rpageno = pageno % SLRU_PAGES_PER_SEGMENT as i64;
+        let segno = pageno / i64::from(SLRU_PAGES_PER_SEGMENT);
+        let rpageno = pageno % i64::from(SLRU_PAGES_PER_SEGMENT);
         let offset = rpageno as u64 * BLCKSZ_U64;
         let path = self.segment_path(segno);
 
@@ -386,8 +383,8 @@ impl SlruCtl {
     /// Physical write of `buf` to `pageno`. Creates the segment if absent (no
     /// O_EXCL/O_TRUNC, per slru.c). Returns true on success.
     async fn physical_write(&self, pageno: i64, buf: &[u8; BLCKSZ_USIZE]) -> bool {
-        let segno = pageno / SLRU_PAGES_PER_SEGMENT as i64;
-        let rpageno = pageno % SLRU_PAGES_PER_SEGMENT as i64;
+        let segno = pageno / i64::from(SLRU_PAGES_PER_SEGMENT);
+        let rpageno = pageno % i64::from(SLRU_PAGES_PER_SEGMENT);
         let offset = rpageno as u64 * BLCKSZ_U64;
         let path = self.segment_path(segno);
 
@@ -396,9 +393,8 @@ impl SlruCtl {
 
         let mut flags = OpenFlags::read_write();
         flags.create = true;
-        let file = match self.fd.open(&path, flags).await {
-            Ok(f) => f,
-            Err(_) => return false,
+        let Ok(file) = self.fd.open(&path, flags).await else {
+            return false;
         };
         match file.write(&buf[..], offset).await {
             Ok(n) if n == BLCKSZ_USIZE => {}
@@ -486,14 +482,14 @@ impl SlruCtl {
         match best_valid {
             None => {
                 // All valid pages busy; wait for an I/O on the LRU busy slot.
-                let i = best_invalid.map(|(i, _, _)| i).unwrap_or(0);
+                let i = best_invalid.map_or(0, |(i, _, _)| i);
                 SlruSelect::WaitIo(i)
             }
             Some((i, _, _)) => {
-                if !bank.page_dirty[i] {
-                    SlruSelect::Ready(i)
-                } else {
+                if bank.page_dirty[i] {
                     SlruSelect::WriteVictim(i)
+                } else {
+                    SlruSelect::Ready(i)
                 }
             }
         }
@@ -562,11 +558,9 @@ impl SlruCtl {
                 Next::Return(slot) => return slot,
                 Next::Wait(g) => {
                     g.await;
-                    continue;
                 }
                 Next::WriteVictim(slot) => {
                     self.write_page(slot).await;
-                    continue;
                 }
                 Next::Read(slot) => {
                     let local = slot - self.bankstart(pageno);
@@ -654,11 +648,9 @@ impl SlruCtl {
             match next {
                 Next::Wait(g) => {
                     g.await;
-                    continue;
                 }
                 Next::WriteVictim(slot) => {
                     self.write_page(slot).await;
-                    continue;
                 }
                 Next::Read(slot) => {
                     let local = slot - self.bankstart(pageno);
@@ -709,8 +701,8 @@ impl SlruCtl {
     ) -> R {
         {
             let bank = self.bank(pageno).read().unwrap();
-            if let Some(i) = bank.find(pageno) {
-                if matches!(
+            if let Some(i) = bank.find(pageno)
+                && matches!(
                     bank.page_status[i],
                     SlruPageStatus::Valid | SlruPageStatus::WriteInProgress
                 ) {
@@ -718,7 +710,6 @@ impl SlruCtl {
                     let page = SlruPageRef::new(&bank, i, bank.lsn_groups_per_page);
                     return f(page);
                 }
-            }
         }
         // Miss: regular exclusive read. Adapt the &mut wrapper to the & one.
         self.read_page_with(pageno, true, xid, |page| f(page.as_ref()))
@@ -764,11 +755,9 @@ impl SlruCtl {
                 }
                 Next::Wait(g) => {
                     g.await;
-                    continue;
                 }
                 Next::WriteVictim(slot) => {
                     self.write_page(slot).await;
-                    continue;
                 }
             }
         }
@@ -848,12 +837,12 @@ impl SlruCtl {
 
     /// slru.c SimpleLruDoesPhysicalPageExist.
     pub async fn does_physical_page_exist(&self, pageno: i64) -> bool {
-        let segno = pageno / SLRU_PAGES_PER_SEGMENT as i64;
-        let rpageno = pageno % SLRU_PAGES_PER_SEGMENT as i64;
+        let segno = pageno / i64::from(SLRU_PAGES_PER_SEGMENT);
+        let rpageno = pageno % i64::from(SLRU_PAGES_PER_SEGMENT);
         let need = (rpageno as u64 + 1) * BLCKSZ_U64;
         let path = self.segment_path(segno);
         match self.fd.open(&path, OpenFlags::read_only()).await {
-            Ok(f) => f.size().await.map(|sz| sz >= need).unwrap_or(false),
+            Ok(f) => f.size().await.is_ok_and(|sz| sz >= need),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
             Err(_) => false,
         }
@@ -893,9 +882,9 @@ impl SlruCtl {
 
     /// Remove every segment whose pages all precede `cutoff_page`.
     async fn remove_segments_before(&self, cutoff_page: i64) {
-        for (name, segpage) in self.scan_directory().await {
+        for (name, segpage) in self.scan_directory() {
             if self.may_delete_segment(segpage, cutoff_page) {
-                self.delete_segment_file(segpage / SLRU_PAGES_PER_SEGMENT as i64, &name)
+                self.delete_segment_file(segpage / i64::from(SLRU_PAGES_PER_SEGMENT), &name)
                     .await;
             }
         }
@@ -903,17 +892,16 @@ impl SlruCtl {
 
     /// slru.c SlruMayDeleteSegment.
     fn may_delete_segment(&self, segpage: i64, cutoff_page: i64) -> bool {
-        let last = segpage + SLRU_PAGES_PER_SEGMENT as i64 - 1;
+        let last = segpage + i64::from(SLRU_PAGES_PER_SEGMENT) - 1;
         (self.page_precedes)(segpage, cutoff_page) && (self.page_precedes)(last, cutoff_page)
     }
 
     /// slru.c SlruScanDirectory: returns (filename, first-page) for each valid
     /// SLRU segment file in the directory.
-    async fn scan_directory(&self) -> Vec<(String, i64)> {
+    fn scan_directory(&self) -> Vec<(String, i64)> {
         let mut out = Vec::new();
-        let rd = match std::fs::read_dir(&self.dir) {
-            Ok(rd) => rd,
-            Err(_) => return out,
+        let Ok(rd) = std::fs::read_dir(&self.dir) else {
+            return out;
         };
         for entry in rd.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -927,11 +915,9 @@ impl SlruCtl {
                 && name
                     .bytes()
                     .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_lowercase())
-            {
-                if let Ok(segno) = i64::from_str_radix(&name, 16) {
-                    out.push((name, segno * SLRU_PAGES_PER_SEGMENT as i64));
+                && let Ok(segno) = i64::from_str_radix(&name, 16) {
+                    out.push((name, segno * i64::from(SLRU_PAGES_PER_SEGMENT)));
                 }
-            }
         }
         out
     }
@@ -956,7 +942,7 @@ impl SlruCtl {
                 let needs_write = {
                     let mut bank = self.banks[bankno].write().unwrap();
                     if matches!(bank.page_status[local], SlruPageStatus::Empty)
-                        || bank.page_number[local] / SLRU_PAGES_PER_SEGMENT as i64 != segno
+                        || bank.page_number[local] / i64::from(SLRU_PAGES_PER_SEGMENT) != segno
                     {
                         false
                     } else if matches!(bank.page_status[local], SlruPageStatus::Valid)
@@ -1087,7 +1073,7 @@ mod tests {
         })
     }
 
-    fn ctl(shared: Arc<SharedState>, subdir: &str) -> Arc<SlruCtl> {
+    fn ctl(shared: &Arc<SharedState>, subdir: &str) -> Arc<SlruCtl> {
         SlruCtl::new(
             SLRU_BANK_SIZE * 2,
             0,
@@ -1105,7 +1091,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn zero_write_read_roundtrip() {
         let shared = temp_shared("rw");
-        let c = ctl(shared, "slru_rw");
+        let c = ctl(&shared, "slru_rw");
         let slot = c.zero_page(0).await;
         c.with_page_mut(0, slot, |buf| buf[5] = 0xAB);
         c.write_page(slot).await;
@@ -1118,7 +1104,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn never_written_page_reads_zeroes() {
         let shared = temp_shared("zero");
-        let c = ctl(shared, "slru_zero");
+        let c = ctl(&shared, "slru_zero");
         // page 0 lives in bank 0; page 99 also resolves; read a page never written.
         let slot = c.read_page(0, false, TransactionId(0)).await;
         let all_zero = c.with_page(0, slot, |buf| buf.iter().all(|&b| b == 0));
@@ -1128,7 +1114,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn evict_and_reload_preserves_data() {
         let shared = temp_shared("evict");
-        let c = ctl(shared, "slru_evict");
+        let c = ctl(&shared, "slru_evict");
         // Write page 0 with a marker.
         let s = c.zero_page(0).await;
         c.with_page_mut(0, s, |buf| buf[1] = 0x77);
@@ -1147,7 +1133,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn two_tasks_race_same_page_read() {
         let shared = temp_shared("race");
-        let c = ctl(shared, "slru_race");
+        let c = ctl(&shared, "slru_race");
         // Pre-write page 0 so a physical read happens.
         let s = c.zero_page(0).await;
         c.with_page_mut(0, s, |buf| buf[0] = 0x42);
@@ -1174,7 +1160,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn two_tasks_distinct_pages_same_bank_no_clobber() {
         let shared = temp_shared("victim");
-        let c = ctl(shared, "slru_victim");
+        let c = ctl(&shared, "slru_victim");
         // ctl has 2 banks (SLRU_BANK_SIZE*2 slots); even pages -> bank 0.
         let bank0: Vec<i64> = (0..SLRU_BANK_SIZE as i64).map(|i| i * 2).collect();
         for &p in &bank0 {
@@ -1208,7 +1194,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn readonly_with_hit_and_miss() {
         let shared = temp_shared("ro");
-        let c = ctl(shared, "slru_ro");
+        let c = ctl(&shared, "slru_ro");
         // Bring page 0 in and write a marker via the closure write path.
         c.read_page_with(0, true, TransactionId(0), |mut p| p.buf_mut()[7] = 0x5A)
             .await;
@@ -1240,7 +1226,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn concurrent_shared_readers() {
         let shared = temp_shared("shared");
-        let c = ctl(shared, "slru_shared");
+        let c = ctl(&shared, "slru_shared");
         c.read_page_with(0, true, TransactionId(0), |mut p| p.buf_mut()[0] = 0x42)
             .await;
 

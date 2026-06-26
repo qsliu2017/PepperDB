@@ -57,7 +57,7 @@ pub struct HTAB;
 
 impl HTAB {
     /// hash_create.
-    pub fn hash_create(tabname: &str, nelem: i64, info: &HASHCTL, flags: HashFlags) -> Box<HTAB> {
+    pub fn hash_create(tabname: &str, nelem: i64, info: &HASHCTL, flags: HashFlags) -> Box<Self> {
         let _ = (tabname, nelem, info, flags);
         unimplemented!()
     }
@@ -124,17 +124,18 @@ impl HTAB {
 pub struct HashSeqStatus;
 
 impl HashSeqStatus {
-    pub fn init(hashp: &HTAB) -> HashSeqStatus {
+    pub fn init(hashp: &HTAB) -> Self {
         let _ = hashp;
         unimplemented!()
     }
 
-    pub fn init_with_hash_value(hashp: &HTAB, hashvalue: u32) -> HashSeqStatus {
+    pub fn init_with_hash_value(hashp: &HTAB, hashvalue: u32) -> Self {
         let _ = (hashp, hashvalue);
         unimplemented!()
     }
 
     /// Returns the next entry, or None at end of scan.
+    #[allow(clippy::should_implement_trait, reason = "inherent method mirrors PG hash_search API name")]
     pub fn next(&mut self) -> Option<*mut u8> {
         unimplemented!()
     }

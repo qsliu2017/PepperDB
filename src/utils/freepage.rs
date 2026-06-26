@@ -19,7 +19,7 @@ pub const FPM_NUM_FREELISTS: usize = 129;
 /// Everything needed to manage free pages (see freepage.c). Lives at the start of
 /// the managed region; uses relative pointers for self-relocatability.
 pub struct FreePageManager {
-    pub self_: RelPtr<FreePageManager>,
+    pub self_: RelPtr<Self>,
     pub btree_root: RelPtr<FreePageBtree>,
     pub btree_recycle: RelPtr<FreePageSpanLeader>,
     pub btree_depth: u32,
@@ -46,24 +46,24 @@ pub unsafe fn fpm_pointer_to_page(base: *mut u8, ptr: *mut u8) -> usize {
 
 /// fpm_size_to_pages: ceil(sz / FPM_PAGE_SIZE).
 pub const fn fpm_size_to_pages(sz: usize) -> usize {
-    (sz + FPM_PAGE_SIZE - 1) / FPM_PAGE_SIZE
+    sz.div_ceil(FPM_PAGE_SIZE)
 }
 
 /// fpm_pointer_is_page_aligned.
 /// SAFETY: `ptr` must be >= `base` within the same region.
 pub unsafe fn fpm_pointer_is_page_aligned(base: *mut u8, ptr: *mut u8) -> bool {
-    (unsafe { ptr.offset_from(base) } as usize) % FPM_PAGE_SIZE == 0
+    (unsafe { ptr.offset_from(base) } as usize).is_multiple_of(FPM_PAGE_SIZE)
 }
 
 /// fpm_relptr_is_page_aligned.
 pub fn fpm_relptr_is_page_aligned<T>(relptr: RelPtr<T>) -> bool {
-    relptr.offset() % FPM_PAGE_SIZE == 0
+    relptr.offset().is_multiple_of(FPM_PAGE_SIZE)
 }
 
 /// fpm_segment_base: base address of the segment containing the manager.
 /// SAFETY: `fpm` must reside in a region whose start it records via `self_`.
 pub unsafe fn fpm_segment_base(fpm: &FreePageManager) -> *mut u8 {
-    let p = fpm as *const FreePageManager as *mut u8;
+    let p = std::ptr::from_ref::<FreePageManager>(fpm) as *mut u8;
     unsafe { p.sub(fpm.self_.offset()) }
 }
 

@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/optimizer/paramassign.h
 //! Functions for assigning EXEC slots during planning.
 
+#![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
+
 use crate::nodes::pathnodes::{PlaceHolderVar, PlannerInfo, Relids};
 use crate::nodes::primnodes::{
     Aggref, GroupingFunc, MergeSupportFunc, Param, ReturningExpr, Var,

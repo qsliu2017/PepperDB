@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/catalog/pg_constraint.h
 
+#![allow(
+    clippy::fn_params_excessive_bools,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::access::attnum::AttrNumber;
 use crate::access::htup::HeapTuple;
 use crate::c::{text, NameData};

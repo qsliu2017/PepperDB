@@ -83,12 +83,9 @@ impl BufTable {
         debug_assert!(buf_id >= 0); // -1 is reserved for not-in-table
         let shard = &self.shards[Self::partition(hashcode)];
         let mut guard = shard.write().unwrap();
-        match guard.get(tag) {
-            Some(&existing) => Some(existing),
-            None => {
-                guard.insert(*tag, buf_id);
-                None
-            }
+        if let Some(&existing) = guard.get(tag) { Some(existing) } else {
+            guard.insert(*tag, buf_id);
+            None
         }
     }
 
@@ -96,11 +93,9 @@ impl BufTable {
     pub fn delete(&self, tag: &BufferTag, hashcode: u32) {
         let shard = &self.shards[Self::partition(hashcode)];
         let mut guard = shard.write().unwrap();
-        if guard.remove(tag).is_none() {
-            // C: elog(ERROR, "shared buffer hash table corrupted").
-            // TODO(panic): migrate to Result + ?
-            panic!("shared buffer hash table corrupted");
-        }
+        // C: elog(ERROR, "shared buffer hash table corrupted").
+        // TODO(panic): migrate to Result + ?
+        assert!(guard.remove(tag).is_some(), "shared buffer hash table corrupted");
     }
 
     /// Number of mapped buffers across all shards. For tests/assertions.

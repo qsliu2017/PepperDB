@@ -14,6 +14,7 @@ pub fn bloom_create(_total_elems: i64, _bloom_work_mem: i32, _seed: u64) -> bloo
 }
 
 /// bloom_free: drop the filter (RAII; provided for parity).
+#[allow(clippy::drop_non_drop, reason = "explicit drop mirrors PG free; no-op on non-Drop type")]
 pub fn bloom_free(filter: bloom_filter) {
     drop(filter);
 }

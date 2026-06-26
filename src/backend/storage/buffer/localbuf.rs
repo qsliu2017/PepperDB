@@ -16,7 +16,8 @@
 //! `.await`, so the backend future stays `Send` (the `task_local` follows the
 //! task across thread migration, exactly like `PrivateRefCount`).
 //!
-//! Buffer handle: a user-facing local buffer is [`BufId::Local`]`(index)`, the
+//! Buffer handle: a user-facing local buffer is the [`BufId::Local`] variant
+//! carrying `index`, the
 //! 0-based pool index. (C overloaded a negative `Buffer = -index - 1`; the enum
 //! replaces the sign trick.) We index the pool arrays by the 0-based `index`
 //! directly and convert at the API edge via [`local_buf_index`] / [`local_buffer`].
@@ -86,7 +87,7 @@ impl LocalBufferDesc {
             block_num: crate::storage::block::INVALID_BLOCK_NUMBER,
         };
         tag.clear();
-        LocalBufferDesc { tag, buf_state: 0, refcount: 0 }
+        Self { tag, buf_state: 0, refcount: 0 }
     }
 }
 
@@ -115,7 +116,7 @@ impl LocalBufferPool {
     /// lookup hash. Page storage is allocated lazily on first use.
     fn new(num_temp_buffers: usize) -> Self {
         assert!(num_temp_buffers > 0, "num_temp_buffers must be positive");
-        LocalBufferPool {
+        Self {
             num_temp_buffers,
             descriptors: (0..num_temp_buffers).map(|_| LocalBufferDesc::new()).collect(),
             blocks: (0..num_temp_buffers).map(|_| None).collect(),
@@ -216,10 +217,8 @@ impl LocalBufferPool {
                 }
             } else {
                 trycounter -= 1;
-                if trycounter == 0 {
-                    // C: ereport(ERROR, "no empty local buffer available").
-                    panic!("no empty local buffer available");
-                }
+                // C: ereport(ERROR, "no empty local buffer available").
+                assert!(trycounter != 0, "no empty local buffer available");
             }
         }
     }
@@ -229,9 +228,7 @@ impl LocalBufferPool {
     /// is still pinned (used when dropping, not when reusing identity).
     fn invalidate(&mut self, index: usize, check_unreferenced: bool) {
         let d = &mut self.descriptors[index];
-        if check_unreferenced && (d.refcount != 0 || buf_state_get_refcount(d.buf_state) != 0) {
-            panic!("local buffer {:?} is still referenced", local_buffer(index));
-        }
+        assert!(!(check_unreferenced && (d.refcount != 0 || buf_state_get_refcount(d.buf_state) != 0)), "local buffer {:?} is still referenced", local_buffer(index));
         let tag = d.tag;
         let removed = self.hash.remove(&tag);
         debug_assert!(removed.is_some(), "local buffer hash table corrupted");
@@ -381,7 +378,7 @@ pub async fn local_buffer_alloc(
     // Miss: get a victim (clock-sweep, pins it, materializes storage). If the
     // victim is dirty, flush it BEFORE claiming the new tag, releasing the borrow
     // across the smgr write.
-    let index = with_pool(|p| p.get_victim());
+    let index = with_pool(LocalBufferPool::get_victim);
 
     let dirty = with_pool(|p| p.descriptor(index).buf_state & BufFlags::DIRTY.bits() != 0);
     if dirty {
@@ -458,9 +455,7 @@ pub async fn extend_buffered_rel_local(
 
     let first_block = smgr.nblocks(shared, forknum).await;
 
-    if (first_block as u64) + 1 >= MAX_BLOCK_NUMBER as u64 {
-        panic!("cannot extend relation beyond {} blocks", MAX_BLOCK_NUMBER);
-    }
+    assert!(u64::from(first_block) + 1 < u64::from(MAX_BLOCK_NUMBER), "cannot extend relation beyond {MAX_BLOCK_NUMBER} blocks");
 
     let new_tag = BufferTag::init(&smgr.rlocator.locator, forknum, first_block);
 
@@ -658,7 +653,7 @@ mod tests {
             // evict block 0 (clock sweep). After this, block 0's tag is gone.
             let (a, _) = local_buffer_alloc(&s, &mut smgr, fork, 1).await;
             let (c, _) = local_buffer_alloc(&s, &mut smgr, fork, 2).await;
-            assert!(with_pool(|p| p.hash.get(&tag0).is_none()), "evicted tag removed");
+            assert!(with_pool(|p| !p.hash.contains_key(&tag0)), "evicted tag removed");
 
             // The dirty block-0 bytes were flushed to disk on eviction.
             let mut check = Page::boxed_zeroed();

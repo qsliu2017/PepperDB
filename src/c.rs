@@ -175,8 +175,9 @@ pub fn NameStr(name: &NameData) -> &[u8] {
 
 // === Section 4: IsValid macros for system types ===
 
+#[allow(clippy::overly_complex_bool_expr, reason = "mirrors C macro; always-true is intentional type-check stub")]
 pub fn BoolIsValid(boolean: bool) -> bool {
-    boolean == false || boolean == true
+    !boolean || boolean
 }
 
 pub fn PointerIsValid<T>(pointer: *const T) -> bool {
@@ -279,7 +280,7 @@ pub fn Min<T: PartialOrd>(x: T, y: T) -> T {
 // `slice.fill(0)` in Rust. Dropped.
 
 pub fn FLOAT4_FITS_IN_INT16(num: f32) -> bool {
-    num >= (PG_INT16_MIN as f32) && num < -(PG_INT16_MIN as f32)
+    num >= f32::from(PG_INT16_MIN) && num < -f32::from(PG_INT16_MIN)
 }
 pub fn FLOAT4_FITS_IN_INT32(num: f32) -> bool {
     num >= (PG_INT32_MIN as f32) && num < -(PG_INT32_MIN as f32)
@@ -288,10 +289,10 @@ pub fn FLOAT4_FITS_IN_INT64(num: f32) -> bool {
     num >= (PG_INT64_MIN as f32) && num < -(PG_INT64_MIN as f32)
 }
 pub fn FLOAT8_FITS_IN_INT16(num: f64) -> bool {
-    num >= (PG_INT16_MIN as f64) && num < -(PG_INT16_MIN as f64)
+    num >= f64::from(PG_INT16_MIN) && num < -f64::from(PG_INT16_MIN)
 }
 pub fn FLOAT8_FITS_IN_INT32(num: f64) -> bool {
-    num >= (PG_INT32_MIN as f64) && num < -(PG_INT32_MIN as f64)
+    num >= f64::from(PG_INT32_MIN) && num < -f64::from(PG_INT32_MIN)
 }
 pub fn FLOAT8_FITS_IN_INT64(num: f64) -> bool {
     num >= (PG_INT64_MIN as f64) && num < -(PG_INT64_MIN as f64)

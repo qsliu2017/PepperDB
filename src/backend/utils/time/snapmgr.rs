@@ -29,6 +29,7 @@
 #![allow(clippy::await_holding_refcell_ref)] // enforced by hand; see module note
 
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use crate::access::transam::{FullTransactionId, INVALID_TRANSACTION_ID};
@@ -159,10 +160,8 @@ pub fn GetTransactionSnapshot(shared: &Arc<SharedState>) -> Snapshot {
     if !first {
         InvalidateCatalogSnapshot();
 
-        if crate::access::xact::IsInParallelMode() {
-            // TODO(panic): migrate to Result + ?
-            panic!("cannot take query snapshot during a parallel operation");
-        }
+        // TODO(panic): migrate to Result + ?
+        assert!(!crate::access::xact::IsInParallelMode(), "cannot take query snapshot during a parallel operation");
 
         let data = build_snapshot(shared);
         if crate::access::xact::IsolationUsesXactSnapshot() {
@@ -209,10 +208,8 @@ pub fn GetTransactionSnapshot(shared: &Arc<SharedState>) -> Snapshot {
 
 /// snapmgr.c `GetLatestSnapshot`.
 pub fn GetLatestSnapshot(shared: &Arc<SharedState>) -> Snapshot {
-    if crate::access::xact::IsInParallelMode() {
-        // TODO(panic): migrate to Result + ?
-        panic!("cannot update SecondarySnapshot during a parallel operation");
-    }
+    // TODO(panic): migrate to Result + ?
+    assert!(!crate::access::xact::IsInParallelMode(), "cannot update SecondarySnapshot during a parallel operation");
     debug_assert!(!HistoricSnapshotActive());
 
     if !SNAPMGR.with(|s| s.borrow().first_snapshot_set) {
@@ -362,8 +359,7 @@ pub fn PushActiveSnapshotWithLevel(snapshot: Snapshot, snap_level: i32) {
         debug_assert!(
             st.active
                 .last()
-                .map(|e| snap_level >= e.as_level)
-                .unwrap_or(true),
+                .is_none_or(|e| snap_level >= e.as_level),
             "active snapshot level must be non-decreasing"
         );
         st.active.push(ActiveSnapshotElt {
@@ -395,10 +391,8 @@ pub fn UpdateActiveSnapshotCommandId() {
         let mut st = s.borrow_mut();
         let top = st.active.last_mut().expect("no active snapshot");
         debug_assert!(top.as_snap.active_count == 1 && top.as_snap.regd_count == 0);
-        if crate::access::xact::IsInParallelMode() && top.as_snap.curcid != curcid {
-            // TODO(panic): migrate to Result + ?
-            panic!("cannot modify commandid in active snapshot during a parallel operation");
-        }
+        // TODO(panic): migrate to Result + ?
+        assert!(!(crate::access::xact::IsInParallelMode() && top.as_snap.curcid != curcid), "cannot modify commandid in active snapshot during a parallel operation");
         Arc::make_mut(&mut top.as_snap).curcid = curcid;
     });
 }
@@ -437,10 +431,7 @@ pub fn ActiveSnapshotSet() -> bool {
 /// TODO(resowner) because the snapshot-tracking resowner API isn't wired yet --
 /// the count is reset at end of (sub)xact regardless.
 pub fn RegisterSnapshot(snapshot: Snapshot) -> Snapshot {
-    let snap = match snapshot {
-        Some(s) => s,
-        None => return None,
-    };
+    let snap = snapshot?;
     let data = if snap.copied {
         (*snap).clone()
     } else {
@@ -451,7 +442,7 @@ pub fn RegisterSnapshot(snapshot: Snapshot) -> Snapshot {
         s.borrow_mut().registered.push(RegisteredSnapshot {
             snap: arc.clone(),
             regd_count: 1,
-        })
+        });
     });
     Some(arc)
 }
@@ -467,10 +458,7 @@ pub fn RegisterSnapshotOnOwner(
 
 /// snapmgr.c `UnregisterSnapshot`.
 pub fn UnregisterSnapshot(snapshot: Snapshot) {
-    let snap = match snapshot {
-        Some(s) => s,
-        None => return,
-    };
+    let Some(snap) = snapshot else { return };
     unregister_snapshot_no_owner(&snap);
 }
 
@@ -660,10 +648,8 @@ pub async fn ExportSnapshot(shared: &Arc<SharedState>, snapshot: Snapshot) -> St
     let snap = snapshot.expect("ExportSnapshot: InvalidSnapshot");
 
     let top_xid = crate::access::xact::GetTopTransactionIdIfAny();
-    if crate::access::xact::IsSubTransaction() {
-        // TODO(panic): migrate to Result + ?
-        panic!("cannot export a snapshot from a subtransaction");
-    }
+    // TODO(panic): migrate to Result + ?
+    assert!(!crate::access::xact::IsSubTransaction(), "cannot export a snapshot from a subtransaction");
     let children = crate::access::xact::xactGetCommittedChildren();
 
     // Snapshot copy registered for the rest of the xact (xmin honored).
@@ -674,8 +660,7 @@ pub async fn ExportSnapshot(shared: &Arc<SharedState>, snapshot: Snapshot) -> St
     let idx = SNAPMGR.with(|s| s.borrow().exported.len()) + 1;
     let (procnum, lxid) = my_vxid(shared);
     let path = format!(
-        "{}/{:08X}-{:08X}-{}",
-        SNAPSHOT_EXPORT_DIR, procnum, lxid, idx
+        "{SNAPSHOT_EXPORT_DIR}/{procnum:08X}-{lxid:08X}-{idx}"
     );
 
     SNAPMGR.with(|s| {
@@ -697,8 +682,7 @@ pub async fn ExportSnapshot(shared: &Arc<SharedState>, snapshot: Snapshot) -> St
 fn my_vxid(shared: &Arc<SharedState>) -> (u32, u32) {
     // MyProc->vxid (step 15). Use the session's synthetic identity for now.
     let pid = crate::session::try_current()
-        .map(|s| s.proc_pid())
-        .unwrap_or(0);
+        .map_or(0, |s| s.proc_pid());
     let _ = shared;
     (pid as u32, pid as u32)
 }
@@ -711,32 +695,29 @@ fn build_export_text(
 ) -> Vec<u8> {
     let (procnum, lxid) = my_vxid(shared);
     let pid = crate::session::try_current()
-        .map(|s| s.proc_pid())
-        .unwrap_or(0);
+        .map_or(0, |s| s.proc_pid());
     let dbid = crate::session::try_current()
-        .map(|s| s.database_id())
-        .unwrap_or(Oid(0));
+        .map_or(Oid(0), |s| s.database_id());
     let iso = crate::access::xact::XactIsoLevel();
-    let ro = crate::access::xact::XactReadOnly() as i32;
+    let ro = i32::from(crate::access::xact::XactReadOnly());
 
     let mut s = String::new();
-    s.push_str(&format!("vxid:{}/{}\n", procnum, lxid));
-    s.push_str(&format!("pid:{}\n", pid));
-    s.push_str(&format!("dbid:{}\n", dbid.0));
-    s.push_str(&format!("iso:{}\n", iso));
-    s.push_str(&format!("ro:{}\n", ro));
-    s.push_str(&format!("xmin:{}\n", snapshot.xmin.0));
-    s.push_str(&format!("xmax:{}\n", snapshot.xmax.0));
+    writeln!(s, "vxid:{procnum}/{lxid}").unwrap();
+    writeln!(s, "pid:{pid}").unwrap();
+    writeln!(s, "dbid:{}", dbid.0).unwrap();
+    writeln!(s, "iso:{iso}").unwrap();
+    writeln!(s, "ro:{ro}").unwrap();
+    writeln!(s, "xmin:{}", snapshot.xmin.0).unwrap();
+    writeln!(s, "xmax:{}", snapshot.xmax.0).unwrap();
 
     let add_top = top_xid
-        .map(|t| t.is_valid() && t.precedes(snapshot.xmax))
-        .unwrap_or(false);
-    s.push_str(&format!("xcnt:{}\n", snapshot.xip.len() + add_top as usize));
+        .is_some_and(|t| t.is_valid() && t.precedes(snapshot.xmax));
+    writeln!(s, "xcnt:{}", snapshot.xip.len() + usize::from(add_top)).unwrap();
     for x in &snapshot.xip {
-        s.push_str(&format!("xip:{}\n", x.0));
+        writeln!(s, "xip:{}", x.0).unwrap();
     }
     if add_top {
-        s.push_str(&format!("xip:{}\n", top_xid.unwrap().0));
+        writeln!(s, "xip:{}", top_xid.unwrap().0).unwrap();
     }
 
     let max_sub = shared.proc_array().get_max_snapshot_subxid_count() as usize;
@@ -744,26 +725,23 @@ fn build_export_text(
         s.push_str("sof:1\n");
     } else {
         s.push_str("sof:0\n");
-        s.push_str(&format!(
-            "sxcnt:{}\n",
-            snapshot.subxip.len() + children.len()
-        ));
+        writeln!(s, "sxcnt:{}", snapshot.subxip.len() + children.len()).unwrap();
         for x in &snapshot.subxip {
-            s.push_str(&format!("sxp:{}\n", x.0));
+            writeln!(s, "sxp:{}", x.0).unwrap();
         }
         for c in children {
-            s.push_str(&format!("sxp:{}\n", c.0));
+            writeln!(s, "sxp:{}", c.0).unwrap();
         }
     }
-    s.push_str(&format!("rec:{}\n", snapshot.taken_during_recovery as u32));
+    writeln!(s, "rec:{}", u32::from(snapshot.taken_during_recovery)).unwrap();
     s.into_bytes()
 }
 
 fn data_dir_base(shared: &Arc<SharedState>) -> std::path::PathBuf {
-    match shared.config().data_dir() {
-        Some(d) => std::path::PathBuf::from(d),
-        None => std::path::PathBuf::from("."),
-    }
+    shared
+        .config()
+        .data_dir()
+        .map_or_else(|| std::path::PathBuf::from("."), std::path::PathBuf::from)
 }
 
 async fn write_export_file(shared: &Arc<SharedState>, path: &str, buf: &[u8]) {
@@ -771,7 +749,7 @@ async fn write_export_file(shared: &Arc<SharedState>, path: &str, buf: &[u8]) {
     let data_dir = data_dir_base(shared);
     let dir = data_dir.join(SNAPSHOT_EXPORT_DIR);
     let final_path = data_dir.join(path);
-    let tmp_path = data_dir.join(format!("{}.tmp", path));
+    let tmp_path = data_dir.join(format!("{path}.tmp"));
     let buf = buf.to_vec();
     tokio::task::spawn_blocking(move || {
         let _ = std::fs::create_dir_all(&dir);
@@ -817,14 +795,10 @@ pub async fn ImportSnapshot(shared: &Arc<SharedState>, idstr: &str) {
         // TODO(panic): migrate to Result + ?
         panic!("SET TRANSACTION SNAPSHOT must be called before any query");
     }
-    if !crate::access::xact::IsolationUsesXactSnapshot() {
-        panic!(
-            "a snapshot-importing transaction must have isolation level SERIALIZABLE or REPEATABLE READ"
-        );
-    }
-    if !idstr.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
-        panic!("invalid snapshot identifier: \"{idstr}\"");
-    }
+    assert!(crate::access::xact::IsolationUsesXactSnapshot(), 
+        "a snapshot-importing transaction must have isolation level SERIALIZABLE or REPEATABLE READ"
+    );
+    assert!(idstr.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-'), "invalid snapshot identifier: \"{idstr}\"");
 
     let path = data_dir_base(shared).join(SNAPSHOT_EXPORT_DIR).join(idstr);
     let content = tokio::task::spawn_blocking(move || std::fs::read_to_string(&path))
@@ -836,8 +810,7 @@ pub async fn ImportSnapshot(shared: &Arc<SharedState>, idstr: &str) {
 
     if src_dbid
         != crate::session::try_current()
-            .map(|s| s.database_id())
-            .unwrap_or(Oid(0))
+            .map_or(Oid(0), |s| s.database_id())
     {
         panic!("cannot import a snapshot from a different database");
     }
@@ -895,9 +868,7 @@ fn parse_import(content: &str) -> (SnapshotData, VirtualTransactionId, Oid) {
     }
     snap.taken_during_recovery = next("rec:").parse::<u32>().unwrap() != 0;
 
-    if !snap.xmin.is_normal() || !snap.xmax.is_normal() {
-        panic!("invalid snapshot data");
-    }
+    assert!(!(!snap.xmin.is_normal() || !snap.xmax.is_normal()), "invalid snapshot data");
     (snap, src_vxid, src_dbid)
 }
 
@@ -921,8 +892,8 @@ fn set_transaction_snapshot(
     let mut buf = build_snapshot(shared);
     buf.xmin = sourcesnap.xmin;
     buf.xmax = sourcesnap.xmax;
-    buf.xip = sourcesnap.xip.clone();
-    buf.subxip = sourcesnap.subxip.clone();
+    buf.xip.clone_from(&sourcesnap.xip);
+    buf.subxip.clone_from(&sourcesnap.subxip);
     buf.suboverflowed = sourcesnap.suboverflowed;
     buf.taken_during_recovery = sourcesnap.taken_during_recovery;
     buf.snap_xact_completion_count = 0;
@@ -933,10 +904,8 @@ fn set_transaction_snapshot(
             .proc_array_install_imported_xmin(buf.xmin, vxid),
         None => false, // restored path needs PGPROC (step 15) -- TODO(restore)
     };
-    if sourcevxid.is_some() && !installed {
-        // TODO(panic): migrate to Result + ?
-        panic!("could not import the requested snapshot");
-    }
+    // TODO(panic): migrate to Result + ?
+    assert!(sourcevxid.is_none() || installed, "could not import the requested snapshot");
 
     let uses_xact = crate::access::xact::IsolationUsesXactSnapshot();
     let arc = Arc::new(buf);
@@ -994,24 +963,7 @@ pub async fn XidInMVCCSnapshot(
         return true;
     }
 
-    if !snapshot.taken_during_recovery {
-        if !snapshot.suboverflowed {
-            if pg_lfind(&snapshot.subxip, xid) {
-                return true;
-            }
-        } else {
-            xid = shared
-                .subtrans()
-                .sub_trans_get_topmost_transaction(xid, procarray::transaction_xmin())
-                .await;
-            if xid.precedes(snapshot.xmin) {
-                return false;
-            }
-        }
-        if pg_lfind(&snapshot.xip, xid) {
-            return true;
-        }
-    } else {
+    if snapshot.taken_during_recovery {
         if snapshot.suboverflowed {
             xid = shared
                 .subtrans()
@@ -1024,13 +976,28 @@ pub async fn XidInMVCCSnapshot(
         if pg_lfind(&snapshot.subxip, xid) {
             return true;
         }
+    } else {
+        if snapshot.suboverflowed {
+            xid = shared
+                .subtrans()
+                .sub_trans_get_topmost_transaction(xid, procarray::transaction_xmin())
+                .await;
+            if xid.precedes(snapshot.xmin) {
+                return false;
+            }
+        } else if pg_lfind(&snapshot.subxip, xid) {
+            return true;
+        }
+        if pg_lfind(&snapshot.xip, xid) {
+            return true;
+        }
     }
     false
 }
 
 fn pg_lfind(arr: &[TransactionId], xid: TransactionId) -> bool {
     crate::port::pg_lfind::pg_lfind32(xid.0, unsafe {
-        std::slice::from_raw_parts(arr.as_ptr() as *const u32, arr.len())
+        std::slice::from_raw_parts(arr.as_ptr().cast::<u32>(), arr.len())
     })
 }
 
@@ -1040,6 +1007,7 @@ fn pg_lfind(arr: &[TransactionId], xid: TransactionId) -> bool {
 
 /// snapmgr.c `SetupHistoricSnapshot`. Logical decoding is out of foundation; we
 /// only track the active flag and the tuplecid map opaquely.
+#[allow(clippy::implicit_hasher, reason = "raw-ptr stub mirrors C HTAB* arg; default hasher intended")]
 pub fn SetupHistoricSnapshot(
     _historic_snapshot: Snapshot,
     _tuplecids: *mut std::collections::HashMap<u64, u64>,
@@ -1088,7 +1056,7 @@ const SERIALIZED_HEADER_SIZE: usize = std::mem::size_of::<SerializedSnapshotData
 /// snapmgr.c `EstimateSnapshotSpace`.
 pub fn EstimateSnapshotSpace(snapshot: Snapshot) -> usize {
     let snap = snapshot.expect("EstimateSnapshotSpace: InvalidSnapshot");
-    debug_assert!(snap.snapshot_type == SnapshotType::Mvcc);
+    debug_assert_eq!(snap.snapshot_type, SnapshotType::Mvcc);
     let mut size = SERIALIZED_HEADER_SIZE + snap.xip.len() * std::mem::size_of::<TransactionId>();
     if !snap.subxip.is_empty() && (!snap.suboverflowed || snap.taken_during_recovery) {
         size += snap.subxip.len() * std::mem::size_of::<TransactionId>();
@@ -1116,7 +1084,7 @@ pub fn SerializeSnapshot(snapshot: Snapshot, start_address: &mut [u8]) {
     };
     let hdr_bytes = unsafe {
         std::slice::from_raw_parts(
-            &hdr as *const SerializedSnapshotData as *const u8,
+            (&raw const hdr).cast::<u8>(),
             SERIALIZED_HEADER_SIZE,
         )
     };
@@ -1137,7 +1105,9 @@ pub fn SerializeSnapshot(snapshot: Snapshot, start_address: &mut [u8]) {
 
 /// snapmgr.c `RestoreSnapshot`.
 pub fn RestoreSnapshot(start_address: &[u8]) -> Snapshot {
-    let hdr = unsafe { &*(start_address.as_ptr() as *const SerializedSnapshotData) };
+    // start_address is &[u8] (no alignment guarantee); read_unaligned avoids the
+    // unaligned-deref UB. Fields are all Copy, so this is identical to the C overlay.
+    let hdr = unsafe { start_address.as_ptr().cast::<SerializedSnapshotData>().read_unaligned() };
     let mut snap = blank_mvcc();
     snap.xmin = hdr.xmin;
     snap.xmax = hdr.xmax;
@@ -1167,7 +1137,7 @@ pub fn RestoreSnapshot(start_address: &[u8]) -> Snapshot {
         s.borrow_mut().registered.push(RegisteredSnapshot {
             snap: arc.clone(),
             regd_count: 0,
-        })
+        });
     });
     Some(arc)
 }

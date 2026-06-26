@@ -1,4 +1,5 @@
 //! Translated from PostgreSQL src/include/utils/array.h
+#![allow(clippy::cast_ptr_alignment, reason = "PG on-disk/varlena pointer reinterpretation, faithful to C")]
 
 use crate::c::{bits8, MAXALIGN};
 use crate::fmgr::FmgrInfo;
@@ -141,10 +142,10 @@ impl ArrayType {
     /// ARR_DIMS: dimensions array, immediately after the fixed header.
     /// SAFETY: `self` points into an array buffer of its recorded length.
     pub fn arr_dims(&self) -> &[i32] {
-        let base = (self as *const Self).cast::<u8>();
+        let base = std::ptr::from_ref::<Self>(self).cast::<u8>();
         unsafe {
             core::slice::from_raw_parts(
-                base.add(core::mem::size_of::<ArrayType>()).cast::<i32>(),
+                base.add(core::mem::size_of::<Self>()).cast::<i32>(),
                 self.ndim as usize,
             )
         }
@@ -153,8 +154,8 @@ impl ArrayType {
     /// ARR_LBOUND: lower-bounds array, after the dimensions array.
     /// SAFETY: as arr_dims.
     pub fn arr_lbound(&self) -> &[i32] {
-        let base = (self as *const Self).cast::<u8>();
-        let off = core::mem::size_of::<ArrayType>()
+        let base = std::ptr::from_ref::<Self>(self).cast::<u8>();
+        let off = core::mem::size_of::<Self>()
             + core::mem::size_of::<i32>() * self.ndim as usize;
         unsafe {
             core::slice::from_raw_parts(base.add(off).cast::<i32>(), self.ndim as usize)
@@ -172,15 +173,15 @@ impl ArrayType {
 
     /// ARR_OVERHEAD_NONULLS: total header size with no null bitmap.
     pub fn arr_overhead_nonulls(ndims: usize) -> usize {
-        MAXALIGN(core::mem::size_of::<ArrayType>() + 2 * core::mem::size_of::<i32>() * ndims)
+        MAXALIGN(core::mem::size_of::<Self>() + 2 * core::mem::size_of::<i32>() * ndims)
     }
 
     /// ARR_OVERHEAD_WITHNULLS: total header size including a null bitmap.
     pub fn arr_overhead_withnulls(ndims: usize, nitems: usize) -> usize {
         MAXALIGN(
-            core::mem::size_of::<ArrayType>()
+            core::mem::size_of::<Self>()
                 + 2 * core::mem::size_of::<i32>() * ndims
-                + (nitems + 7) / 8,
+                + nitems.div_ceil(8),
         )
     }
 }

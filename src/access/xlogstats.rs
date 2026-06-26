@@ -28,9 +28,10 @@ pub struct XLogStats {
     pub record_stats: Box<[[XLogRecStats; MAX_XLINFO_TYPES]; RM_COUNT]>,
 }
 
+#[allow(clippy::large_stack_arrays, reason = "fixed-size PG stats array, faithful to C; Boxing moves it to heap")]
 impl Default for XLogStats {
     fn default() -> Self {
-        XLogStats {
+        Self {
             count: 0,
             startptr: XLogRecPtr(0),
             endptr: XLogRecPtr(0),

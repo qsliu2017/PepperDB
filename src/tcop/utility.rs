@@ -1,6 +1,9 @@
 //! Translated from PostgreSQL src/include/tcop/utility.h
 //! Prototypes for utility.c.
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+#![allow(clippy::needless_pass_by_value, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 use bitflags::bitflags;
 
 use crate::nodes::nodes::Node;

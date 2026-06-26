@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/commands/sequence.h
 
+#![allow(
+    clippy::ptr_arg,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::access::xlogreader::XLogReaderState;
 use crate::catalog::objectaddress::ObjectAddress;
 use crate::fmgr::FunctionCallInfo;

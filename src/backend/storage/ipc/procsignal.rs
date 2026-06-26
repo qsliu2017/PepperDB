@@ -230,14 +230,11 @@ impl ProcSignal {
             let reg = self.inner.lock().unwrap();
             reg.slots.get(target).cloned()
         };
-        match slot {
-            Some(slot) => {
-                slot.raise_reason(reason);
-                slot.latch.set();
-                true
-            }
-            None => false,
-        }
+        slot.is_some_and(|slot| {
+            slot.raise_reason(reason);
+            slot.latch.set();
+            true
+        })
     }
 
     /// Find the slot for `pid` and clone its `Arc`. Lock is held only for the
@@ -336,7 +333,7 @@ pub fn current() -> Arc<ProcSignalSlot> {
 
 /// The current task's slot, or `None` if not inside a [`scope`].
 pub fn try_current() -> Option<Arc<ProcSignalSlot>> {
-    MY_PROC_SIGNAL_SLOT.try_with(|s| s.clone()).ok()
+    MY_PROC_SIGNAL_SLOT.try_with(std::clone::Clone::clone).ok()
 }
 
 /// Run `f` (an async block) with `slot` published as the task-local handle.

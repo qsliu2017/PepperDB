@@ -65,9 +65,9 @@ async fn conditional_lock_returns_not_avail_on_conflict() {
         // Second backend on another task tries to conditionally acquire.
         let t2 = tokio::spawn(async move {
             backend(0, || async move {
-                let r = LockAcquire(&tag, LockMode::ExclusiveLock as i32, false, /*dont_wait*/ true)
-                    .await;
-                r
+                
+                LockAcquire(&tag, LockMode::ExclusiveLock as i32, false, /*dont_wait*/ true)
+                    .await
             })
             .await
         });

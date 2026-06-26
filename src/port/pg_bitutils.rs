@@ -6,13 +6,13 @@
 /// Position of the most significant set bit, from the LSB. word must not be 0.
 pub fn pg_leftmost_one_pos32(word: u32) -> i32 {
     debug_assert!(word != 0);
-    (31 - word.leading_zeros()) as i32
+    word.ilog2() as i32
 }
 
 /// As above, for a 64-bit word.
 pub fn pg_leftmost_one_pos64(word: u64) -> i32 {
     debug_assert!(word != 0);
-    (63 - word.leading_zeros()) as i32
+    word.ilog2() as i32
 }
 
 /// Position of the least significant set bit, from the LSB. word must not be 0.
@@ -30,7 +30,7 @@ pub fn pg_rightmost_one_pos64(word: u64) -> i32 {
 /// Next higher power of 2 >= num (num itself if already a power of 2).
 pub fn pg_nextpower2_32(num: u32) -> u32 {
     debug_assert!(num > 0 && num <= u32::MAX / 2 + 1);
-    if num & (num - 1) == 0 {
+    if num.is_power_of_two() {
         return num;
     }
     1u32 << (pg_leftmost_one_pos32(num) + 1)
@@ -39,7 +39,7 @@ pub fn pg_nextpower2_32(num: u32) -> u32 {
 /// Next higher power of 2 >= num (num itself if already a power of 2).
 pub fn pg_nextpower2_64(num: u64) -> u64 {
     debug_assert!(num > 0 && num <= u64::MAX / 2 + 1);
-    if num & (num - 1) == 0 {
+    if num.is_power_of_two() {
         return num;
     }
     1u64 << (pg_leftmost_one_pos64(num) + 1)
@@ -85,12 +85,12 @@ pub fn pg_popcount64(word: u64) -> i32 {
 
 /// Number of 1-bits in buf.
 pub fn pg_popcount(buf: &[u8]) -> u64 {
-    buf.iter().map(|b| b.count_ones() as u64).sum()
+    buf.iter().map(|b| u64::from(b.count_ones())).sum()
 }
 
 /// Number of 1-bits in buf after applying mask to each byte.
 pub fn pg_popcount_masked(buf: &[u8], mask: u8) -> u64 {
-    buf.iter().map(|b| (b & mask).count_ones() as u64).sum()
+    buf.iter().map(|b| u64::from((b & mask).count_ones())).sum()
 }
 
 /// Rotate the bits of word to the right by n bits.

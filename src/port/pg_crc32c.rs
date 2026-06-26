@@ -82,7 +82,7 @@ pub fn comp_crc32c(mut crc: pg_crc32c, data: &[u8]) -> pg_crc32c {
             ^ CRC32C_TABLE[0][(hi >> 24) as usize];
     }
     for &b in chunks.remainder() {
-        crc = CRC32C_TABLE[0][((crc ^ b as u32) & 0xFF) as usize] ^ (crc >> 8);
+        crc = CRC32C_TABLE[0][((crc ^ u32::from(b)) & 0xFF) as usize] ^ (crc >> 8);
     }
     crc
 }

@@ -1,4 +1,5 @@
 //! Translated from PostgreSQL src/include/utils/jsonpath.h
+#![allow(clippy::needless_pass_by_value, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 
 use bitflags::bitflags;
 
@@ -212,7 +213,7 @@ pub fn jspOperationName(t: JsonPathItemType) -> &'static str {
 /// In-memory parsed jsonpath item (recursive via Box).
 pub struct JsonPathParseItem {
     pub r#type: JsonPathItemType,
-    pub next: Option<Box<JsonPathParseItem>>, // next in path
+    pub next: Option<Box<Self>>, // next in path
     pub value: JsonPathParseValue,
 }
 

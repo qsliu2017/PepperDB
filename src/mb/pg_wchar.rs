@@ -319,12 +319,12 @@ pub fn is_valid_unicode_codepoint(c: pg_wchar) -> bool {
 
 #[inline]
 pub fn is_utf16_surrogate_first(c: pg_wchar) -> bool {
-    c >= 0xD800 && c <= 0xDBFF
+    (0xD800..=0xDBFF).contains(&c)
 }
 
 #[inline]
 pub fn is_utf16_surrogate_second(c: pg_wchar) -> bool {
-    c >= 0xDC00 && c <= 0xDFFF
+    (0xDC00..=0xDFFF).contains(&c)
 }
 
 #[inline]
@@ -337,18 +337,18 @@ pub fn surrogate_pair_to_codepoint(first: pg_wchar, second: pg_wchar) -> pg_wcha
 pub fn utf8_to_unicode(c: &[u8]) -> pg_wchar {
     let c0 = c[0];
     if (c0 & 0x80) == 0 {
-        c0 as pg_wchar
+        pg_wchar::from(c0)
     } else if (c0 & 0xe0) == 0xc0 {
-        (((c0 & 0x1f) as pg_wchar) << 6) | (c[1] & 0x3f) as pg_wchar
+        (pg_wchar::from(c0 & 0x1f) << 6) | pg_wchar::from(c[1] & 0x3f)
     } else if (c0 & 0xf0) == 0xe0 {
-        (((c0 & 0x0f) as pg_wchar) << 12)
-            | (((c[1] & 0x3f) as pg_wchar) << 6)
-            | (c[2] & 0x3f) as pg_wchar
+        (pg_wchar::from(c0 & 0x0f) << 12)
+            | (pg_wchar::from(c[1] & 0x3f) << 6)
+            | pg_wchar::from(c[2] & 0x3f)
     } else if (c0 & 0xf8) == 0xf0 {
-        (((c0 & 0x07) as pg_wchar) << 18)
-            | (((c[1] & 0x3f) as pg_wchar) << 12)
-            | (((c[2] & 0x3f) as pg_wchar) << 6)
-            | (c[3] & 0x3f) as pg_wchar
+        (pg_wchar::from(c0 & 0x07) << 18)
+            | (pg_wchar::from(c[1] & 0x3f) << 12)
+            | (pg_wchar::from(c[2] & 0x3f) << 6)
+            | pg_wchar::from(c[3] & 0x3f)
     } else {
         0xffffffff
     }

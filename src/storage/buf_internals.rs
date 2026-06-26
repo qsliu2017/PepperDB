@@ -105,7 +105,7 @@ impl BufferTag {
         self.block_num = INVALID_BLOCK_NUMBER;
     }
     pub fn init(rlocator: &RelFileLocator, fork_num: ForkNumber, block_num: BlockNumber) -> Self {
-        BufferTag {
+        Self {
             spc_oid: rlocator.spcOid,
             db_oid: rlocator.dbOid,
             rel_number: rlocator.relNumber,
@@ -182,7 +182,7 @@ pub fn lock_buf_hdr(desc: &BufferDesc) -> u32 {
 #[deprecated(note = "use `desc.unlock_hdr(buf_state)`")]
 #[inline]
 pub fn unlock_buf_hdr(desc: &BufferDesc, buf_state: u32) {
-    desc.unlock_hdr(buf_state)
+    desc.unlock_hdr(buf_state);
 }
 
 /// C: `BufTableHashCode`. Use [`BufTable::hash_code`].

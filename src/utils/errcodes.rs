@@ -27,7 +27,7 @@ pub const fn make_sqlstate_str(s: &[u8]) -> i32 {
 
 macro_rules! define_errcodes {
     ($(($name:ident, $code:literal)),* $(,)?) => {
-        $( pub const $name: i32 = make_sqlstate_str($code.as_bytes()); )*
+        $( pub const $name: i32 = make_sqlstate_str(b"XX002"); )*
     };
 }
 

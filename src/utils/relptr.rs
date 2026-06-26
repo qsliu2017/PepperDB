@@ -26,7 +26,7 @@ impl<T> Copy for RelPtr<T> {}
 
 impl<T> RelPtr<T> {
     pub const fn null() -> Self {
-        RelPtr { relptr_off: 0, _marker: PhantomData }
+        Self { relptr_off: 0, _marker: PhantomData }
     }
 
     pub const fn is_null(self) -> bool {
@@ -55,7 +55,7 @@ impl<T> RelPtr<T> {
     }
 
     /// relptr_copy.
-    pub fn copy_from(&mut self, other: RelPtr<T>) {
+    pub fn copy_from(&mut self, other: Self) {
         self.relptr_off = other.relptr_off;
     }
 }

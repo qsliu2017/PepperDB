@@ -21,7 +21,7 @@ impl TransactionId {
     /// Logically < `other` (modulo-2^32 for normal xids; plain unsigned for
     /// permanent xids). transam.c TransactionIdPrecedes.
     #[inline]
-    pub fn precedes(self, other: TransactionId) -> bool {
+    pub fn precedes(self, other: Self) -> bool {
         if !self.is_normal() || !other.is_normal() {
             return self.0 < other.0;
         }
@@ -29,7 +29,7 @@ impl TransactionId {
     }
 
     #[inline]
-    pub fn precedes_or_equals(self, other: TransactionId) -> bool {
+    pub fn precedes_or_equals(self, other: Self) -> bool {
         if !self.is_normal() || !other.is_normal() {
             return self.0 <= other.0;
         }
@@ -37,7 +37,7 @@ impl TransactionId {
     }
 
     #[inline]
-    pub fn follows(self, other: TransactionId) -> bool {
+    pub fn follows(self, other: Self) -> bool {
         if !self.is_normal() || !other.is_normal() {
             return self.0 > other.0;
         }
@@ -45,7 +45,7 @@ impl TransactionId {
     }
 
     #[inline]
-    pub fn follows_or_equals(self, other: TransactionId) -> bool {
+    pub fn follows_or_equals(self, other: Self) -> bool {
         if !self.is_normal() || !other.is_normal() {
             return self.0 >= other.0;
         }

@@ -167,9 +167,8 @@ async fn read_startup_packet(
     peer: SocketAddr,
 ) -> StartupOutcome {
     loop {
-        let body = match read_length_prefixed(stream).await {
-            Some(b) => b,
-            None => return StartupOutcome::Closed,
+        let Some(body) = read_length_prefixed(stream).await else {
+            return StartupOutcome::Closed;
         };
         if body.len() < 4 {
             crate::elog!(crate::utils::elog::LOG, format!("short startup packet from {peer}"));
@@ -184,7 +183,7 @@ async fn read_startup_packet(
                 if stream.write_all(b"N").await.is_err() {
                     return StartupOutcome::Closed;
                 }
-                continue;
+                // Fall through to re-read the real startup packet on the next loop.
             }
             CANCEL_REQUEST_CODE => {
                 // Body: code(4) | backend pid(4) | cancel key(remaining).
@@ -276,10 +275,11 @@ pub mod test_hook {
     /// `PANIC_ON_CONNECT` / `CONNECTED` are process-global; any test that touches
     /// the connection hook must hold this so one test's panic flag doesn't bleed
     /// into another's backend. Shared by both the supervisor and backend-startup
-    /// test modules. Recovers from poisoning (some tests intentionally panic).
-    static SERIAL: Mutex<()> = Mutex::new(());
-    pub fn serial() -> std::sync::MutexGuard<'static, ()> {
-        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    /// test modules. A `tokio::sync::Mutex` so the guard is soundly held across the
+    /// test body's `.await`s (and it doesn't poison on the intentional test panics).
+    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    pub async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().await
     }
 
     /// Incremented once each time the backend reaches connection.
@@ -292,9 +292,7 @@ pub mod test_hook {
 
     pub fn on_backend_connected(_peer: SocketAddr) {
         CONNECTED.fetch_add(1, Ordering::SeqCst);
-        if PANIC_ON_CONNECT.load(Ordering::SeqCst) {
-            panic!("test-induced backend panic");
-        }
+        assert!(!PANIC_ON_CONNECT.load(Ordering::SeqCst), "test-induced backend panic");
     }
 }
 
@@ -351,7 +349,7 @@ mod tests {
     // by the supervisor's catch_unwind and leaves the slot registered).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn startup_packet_registers_slot() {
-        let _hook = test_hook::serial();
+        let _hook = test_hook::serial().await;
         let (sup, handle) = start_supervisor(loopback_port0(), SharedStateConfig::default()).await;
 
         let mut client = ClientStream::connect(sup.local_addr).await.expect("connect");
@@ -376,7 +374,7 @@ mod tests {
     // SSL NEGOTIATION: an SSLRequest must get a single 'N' (no SSL) reply.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ssl_request_gets_n_reply() {
-        let _hook = test_hook::serial();
+        let _hook = test_hook::serial().await;
         let (sup, handle) = start_supervisor(loopback_port0(), SharedStateConfig::default()).await;
 
         let mut client = ClientStream::connect(sup.local_addr).await.expect("connect");
@@ -407,7 +405,7 @@ mod tests {
     async fn cancel_request_sets_target_flag() {
         use std::sync::atomic::Ordering;
 
-        let _hook = test_hook::serial();
+        let _hook = test_hook::serial().await;
         let (sup, handle) = start_supervisor(loopback_port0(), SharedStateConfig::default()).await;
 
         // Seed a target slot.

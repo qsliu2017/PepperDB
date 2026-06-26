@@ -12,7 +12,7 @@
 //! keep the limit math and the stop-limit ERROR, and drop the WARNING lookups.
 
 use crate::access::transam::{
-    FIRST_GENBKI_OBJECT_ID, FIRST_NORMAL_OBJECT_ID, FIRST_NORMAL_TRANSACTION_ID,
+    FIRST_NORMAL_OBJECT_ID, FIRST_NORMAL_TRANSACTION_ID,
     FIRST_UNPINNED_OBJECT_ID, FullTransactionId, MAX_TRANSACTION_ID, full_transaction_id_advance,
     xid_from_full_transaction_id,
 };
@@ -56,13 +56,11 @@ impl VariableCache {
 
         // Refuse to assign past the stop limit (wraparound protection). varsup.c
         // does the database-name lookup for the message; that needs syscache.
-        if past_stop {
-            panic!(
-                "database is not accepting commands that assign new transaction IDs \
-                 to avoid wraparound data loss (xid {})",
-                xid.0
-            );
-        }
+        assert!(!past_stop, 
+            "database is not accepting commands that assign new transaction IDs \
+             to avoid wraparound data loss (xid {})",
+            xid.0
+        );
 
         // Extend clog/subtrans for the page this xid lands on (no-ops except at a
         // page boundary). These await SLRU I/O, so they run with the lock dropped.
@@ -178,7 +176,7 @@ impl VariableCache {
         let (result, need_log, new_next) = self.with(|v| {
             // Wraparound / first post-initdb assignment handling (standalone
             // path; the postmaster-environment fork is a later concern). TODO(guc).
-            if v.next_oid.0 < FIRST_NORMAL_OBJECT_ID && v.next_oid.0 < FIRST_GENBKI_OBJECT_ID {
+            if v.next_oid.0 < FIRST_NORMAL_OBJECT_ID {
                 v.next_oid = Oid(FIRST_NORMAL_OBJECT_ID);
                 v.oid_count = 0;
             }
@@ -200,12 +198,10 @@ impl VariableCache {
     /// varsup.c SetNextObjectId (initdb only).
     fn set_next_object_id(&self, next_oid: Oid) {
         self.with(|v| {
-            if v.next_oid.0 > next_oid.0 {
-                panic!(
-                    "too late to advance OID counter to {}, it is now {}",
-                    next_oid.0, v.next_oid.0
-                );
-            }
+            assert!(v.next_oid.0 <= next_oid.0, 
+                "too late to advance OID counter to {}, it is now {}",
+                next_oid.0, v.next_oid.0
+            );
             v.next_oid = next_oid;
             v.oid_count = 0;
         });

@@ -64,7 +64,7 @@ impl MemoryChunk {
     /// <= MEMORYCHUNK_MAX_BLOCKOFFSET; `value` <= MEMORYCHUNK_MAX_VALUE.
     pub fn set_hdr_mask(&mut self, blockoffset: Size, value: Size, methodid: MemoryContextMethodID) {
         let blockoffset = blockoffset as u64;
-        debug_assert!((blockoffset & MEMORYCHUNK_BLOCKOFFSET_MASK) == blockoffset);
+        debug_assert_eq!((blockoffset & MEMORYCHUNK_BLOCKOFFSET_MASK), blockoffset);
         debug_assert!(value as u64 <= MEMORYCHUNK_MAX_VALUE);
         let methodid = methodid as u64;
         debug_assert!(methodid <= MEMORY_CONTEXT_METHODID_MASK);

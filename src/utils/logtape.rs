@@ -1,4 +1,5 @@
 //! Translated from PostgreSQL src/include/utils/logtape.h
+#![allow(clippy::needless_pass_by_value, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 
 // LogicalTapeSet and LogicalTape are opaque spill-to-disk handles whose details
 // live in logtape.c. Modeled as opaque structs; API stubbed.

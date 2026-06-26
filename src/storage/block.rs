@@ -33,7 +33,7 @@ impl BlockIdData {
     }
 
     /// Check for block number equality.
-    pub const fn equals(&self, other: &BlockIdData) -> bool {
+    pub const fn equals(&self, other: &Self) -> bool {
         self.hi == other.hi && self.lo == other.lo
     }
 

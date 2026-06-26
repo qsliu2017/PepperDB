@@ -17,7 +17,7 @@ pub enum RegisNodeType {
 /// into `bits`; the variable-length `data[]` becomes an owned byte buffer.
 pub struct RegisNode {
     bits: u32, // type:2 | len:16 | unused:14 (low-to-high)
-    pub next: Option<Box<RegisNode>>,
+    pub next: Option<Box<Self>>,
     pub data: Vec<u8>,
 }
 
@@ -32,6 +32,7 @@ impl RegisNode {
     pub fn set_type(&mut self, v: RegisNodeType) {
         self.bits = (self.bits & !0x3) | (v as u32 & 0x3);
     }
+    #[allow(clippy::len_without_is_empty, reason = "mirrors PG length accessor; is_empty not part of PG API")]
     pub fn len(&self) -> u32 {
         (self.bits >> 2) & 0xffff
     }
@@ -52,7 +53,7 @@ impl Regis {
         (self.bits & 0x1) != 0
     }
     pub fn set_issuffix(&mut self, v: bool) {
-        self.bits = (self.bits & !0x1) | (v as u32);
+        self.bits = (self.bits & !0x1) | u32::from(v);
     }
     pub fn nchar(&self) -> u32 {
         (self.bits >> 1) & 0xffff

@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/common/hmac.h
 //! Generic interface for HMAC.
+#![allow(
+    clippy::boxed_local,
+    clippy::needless_pass_by_value,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
 
 use crate::common::cryptohash::PgCryptohashType;
 

@@ -67,7 +67,7 @@ fn in_scope() -> bool {
 pub fn HeapTupleHeaderGetCmin(tup: &HeapTupleHeaderData) -> CommandId {
     let cid = tup.get_raw_command_id();
 
-    debug_assert!((tup.t_infomask & HEAP_MOVED) == 0);
+    debug_assert_eq!((tup.t_infomask & HEAP_MOVED), 0);
     // Assert(TransactionIdIsCurrentTransactionId(GetXmin)): xact.c, step 14d.
 
     if (tup.t_infomask & HEAP_COMBOCID) != 0 {
@@ -81,7 +81,7 @@ pub fn HeapTupleHeaderGetCmin(tup: &HeapTupleHeaderData) -> CommandId {
 pub fn HeapTupleHeaderGetCmax(tup: &HeapTupleHeaderData) -> CommandId {
     let cid = tup.get_raw_command_id();
 
-    debug_assert!((tup.t_infomask & HEAP_MOVED) == 0);
+    debug_assert_eq!((tup.t_infomask & HEAP_MOVED), 0);
     // Assert(CritSectionCount > 0 || IsCurrentTransactionId(GetUpdateXid)):
     // the xid check is xact.c (step 14d); CritSectionCount lives in miscadmin.
 
@@ -173,10 +173,8 @@ pub fn serialize_combo_cid_state(maxsize: usize, start_address: &mut [u8]) {
     let used = COMBO_CID_STATE.with(|s| s.borrow().entries.len());
 
     let needed = std::mem::size_of::<i32>() + std::mem::size_of::<ComboCidKeyData>() * used;
-    if needed > maxsize || needed > start_address.len() {
-        // TODO(panic): migrate to Result + ?
-        panic!("not enough space to serialize ComboCID state");
-    }
+    // TODO(panic): migrate to Result + ?
+    assert!(!(needed > maxsize || needed > start_address.len()), "not enough space to serialize ComboCID state");
 
     start_address[0..4].copy_from_slice(&(used as i32).to_ne_bytes());
     COMBO_CID_STATE.with(|s| {
@@ -206,10 +204,8 @@ pub fn restore_combo_cid_state(combo_cid_state: &[u8]) {
         ));
         off += 8;
         let cid = get_combo_command_id(cmin, cmax);
-        if cid.0 != i as u32 {
-            // TODO(panic): migrate to Result + ?
-            panic!("unexpected command ID while restoring combo CIDs");
-        }
+        // TODO(panic): migrate to Result + ?
+        assert!(cid.0 == i as u32, "unexpected command ID while restoring combo CIDs");
     }
 }
 

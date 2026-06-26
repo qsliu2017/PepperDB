@@ -54,7 +54,7 @@ pub type IndexTuple = *mut IndexTupleData; // TODO(ptr)
 /// Size does not vary with attribute count; it is sized for INDEX_MAX_KEYS.
 #[repr(C)]
 pub struct IndexAttributeBitMapData {
-    pub bits: [u8; (INDEX_MAX_KEYS + 8 - 1) / 8],
+    pub bits: [u8; INDEX_MAX_KEYS.div_ceil(8)],
 }
 
 pub type IndexAttributeBitMap = *mut IndexAttributeBitMapData; // TODO(ptr)

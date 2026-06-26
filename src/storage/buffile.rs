@@ -2,6 +2,7 @@
 //!
 //! Management of large buffered temporary files. In-memory/temp-file module
 //! (opaque type; details live in buffile.c).
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 
 use crate::storage::fileset::FileSet;
 

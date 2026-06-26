@@ -337,7 +337,7 @@ pub fn IndexSetParentIndex(partition_idx: &Relation, parent_oid: Oid) {
 pub fn itemptr_encode(itemptr: &ItemPointerData) -> i64 {
     let block = itemptr.block_number();
     let offset = itemptr.offset_number();
-    (((block as u64) << 16) | (offset as u64)) as i64
+    ((u64::from(block) << 16) | u64::from(offset)) as i64
 }
 
 /// Decode the int64 representation back to ItemPointer.

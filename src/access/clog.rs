@@ -49,7 +49,7 @@ pub const CLOG_TRUNCATE: u8 = 0x10;
 
 /// clog.c clog_redo: deferred to recovery (out of foundation).
 pub fn clog_redo(_record: &mut XLogReaderState) {
-    crate::backend::access::transam::clog::clog_redo()
+    crate::backend::access::transam::clog::clog_redo();
 }
 
 /// clog.c clog_desc: format a clog WAL record (recovery tooling, deferred).

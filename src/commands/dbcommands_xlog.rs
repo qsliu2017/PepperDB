@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/commands/dbcommands_xlog.h
 
+#![allow(
+    clippy::ptr_arg,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::postgres_ext::Oid;
 
 // XLOG record types (info high bits) -- raw opcode consts.

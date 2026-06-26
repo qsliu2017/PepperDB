@@ -1,5 +1,9 @@
 //! Translated from PostgreSQL src/include/optimizer/restrictinfo.h
 
+#![allow(clippy::boxed_local, reason = "1:1 PG port: Box<Node>/Box<Path> mirrors PG pointer-passed nodes")]
+#![allow(clippy::fn_params_excessive_bools, reason = "1:1 PG port: bool flags mirror PG C signature")]
+#![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
+
 use crate::nodes::bitmapset::{bms_is_subset, Bitmapset};
 use crate::nodes::pathnodes::{PlannerInfo, RelOptInfo, Relids, RestrictInfo};
 use crate::nodes::primnodes::{Expr, Index};
@@ -97,7 +101,7 @@ pub fn clause_sides_match_join(
 ) -> bool {
     let left = rinfo.left_relids.as_ref();
     let right = rinfo.right_relids.as_ref();
-    let is_sub = |r: Option<&Relids>, b: &Bitmapset| r.map_or(true, |x| bms_is_subset(x, b));
+    let is_sub = |r: Option<&Relids>, b: &Bitmapset| r.is_none_or(|x| bms_is_subset(x, b));
     if is_sub(left, outerrelids) && is_sub(right, innerrelids) {
         rinfo.outer_is_left = true; // lefthand side is outer
         true

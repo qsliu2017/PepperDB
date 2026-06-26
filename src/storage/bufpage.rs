@@ -1,5 +1,6 @@
 //! Translated from PostgreSQL src/include/storage/bufpage.h
 //! Standard POSTGRES buffer page definitions.
+#![allow(clippy::cast_ptr_alignment, reason = "PG on-disk/varlena pointer reinterpretation, faithful to C")]
 
 use bitflags::bitflags;
 
@@ -35,7 +36,7 @@ const _: () = assert!(core::mem::align_of::<Page>() >= core::mem::align_of::<Ite
 impl Page {
     /// An all-zero page block (an uninitialized / new page).
     pub const fn zeroed() -> Self {
-        Page([0u8; BLCKSZ as usize])
+        Self([0u8; BLCKSZ as usize])
     }
 
     /// An all-zero page block on the heap (avoids an 8KB stack move).
@@ -43,8 +44,8 @@ impl Page {
         // SAFETY: Page is a plain byte array; all-zero is a valid bit pattern and
         // the alloc is sized/aligned for Page via Layout::new.
         unsafe {
-            let layout = core::alloc::Layout::new::<Page>();
-            let ptr = std::alloc::alloc_zeroed(layout) as *mut Page;
+            let layout = core::alloc::Layout::new::<Self>();
+            let ptr = std::alloc::alloc_zeroed(layout).cast::<Self>();
             if ptr.is_null() {
                 std::alloc::handle_alloc_error(layout);
             }
@@ -178,12 +179,12 @@ bitflags! {
 impl Page {
     #[inline]
     pub(crate) fn header(&self) -> &PageHeaderData {
-        unsafe { &*(self.0.as_ptr() as *const PageHeaderData) }
+        unsafe { &*self.0.as_ptr().cast::<PageHeaderData>() }
     }
 
     #[inline]
     pub(crate) fn header_mut(&mut self) -> &mut PageHeaderData {
-        unsafe { &mut *(self.0.as_mut_ptr() as *mut PageHeaderData) }
+        unsafe { &mut *self.0.as_mut_ptr().cast::<PageHeaderData>() }
     }
 
     /// True iff no itemid has been allocated on the page.
@@ -202,7 +203,7 @@ impl Page {
     #[inline]
     pub fn get_item_id(&self, offset_number: OffsetNumber) -> ItemIdData {
         let idx = (offset_number - 1) as usize;
-        let base = unsafe { self.0.as_ptr().add(SizeOfPageHeaderData) as *const ItemIdData };
+        let base = unsafe { self.0.as_ptr().add(SizeOfPageHeaderData).cast::<ItemIdData>() };
         unsafe { *base.add(idx) }
     }
 
@@ -227,8 +228,8 @@ impl Page {
     /// Set page size and layout version together.
     #[inline]
     pub fn set_page_size_and_version(&mut self, size: usize, version: u8) {
-        debug_assert!((size & 0xFF00) == size);
-        self.header_mut().pagesize_version = (size as u16) | version as u16;
+        debug_assert_eq!((size & 0xFF00), size);
+        self.header_mut().pagesize_version = (size as u16) | u16::from(version);
     }
 
     /// Size of special space on a page.
@@ -240,7 +241,7 @@ impl Page {
     /// Validate the special pointer (catches use before initialization).
     #[inline]
     pub fn validate_special_pointer(&self) {
-        debug_assert!((self.header().special as u32) <= BLCKSZ);
+        debug_assert!(u32::from(self.header().special) <= BLCKSZ);
         debug_assert!((self.header().special as usize) >= SizeOfPageHeaderData);
     }
 
@@ -383,7 +384,7 @@ pub fn PageGetPageLayoutVersion(page: &Page) -> u8 {
 #[deprecated(note = "use `page.set_page_size_and_version(size, version)`")]
 #[inline]
 pub fn PageSetPageSizeAndVersion(page: &mut Page, size: usize, version: u8) {
-    page.set_page_size_and_version(size, version)
+    page.set_page_size_and_version(size, version);
 }
 
 #[deprecated(note = "use `page.get_special_size()`")]
@@ -395,7 +396,7 @@ pub fn PageGetSpecialSize(page: &Page) -> u16 {
 #[deprecated(note = "use `page.validate_special_pointer()`")]
 #[inline]
 pub fn PageValidateSpecialPointer(page: &Page) {
-    page.validate_special_pointer()
+    page.validate_special_pointer();
 }
 
 #[deprecated(note = "use `page.get_special_pointer()`")]
@@ -425,7 +426,7 @@ pub fn PageGetLSN(page: &Page) -> XLogRecPtr {
 #[deprecated(note = "use `page.set_lsn(lsn)`")]
 #[inline]
 pub fn PageSetLSN(page: &mut Page, lsn: XLogRecPtr) {
-    page.set_lsn(lsn)
+    page.set_lsn(lsn);
 }
 
 #[deprecated(note = "use `page.has_free_line_pointers()`")]
@@ -436,12 +437,12 @@ pub fn PageHasFreeLinePointers(page: &Page) -> bool {
 #[deprecated(note = "use `page.set_has_free_line_pointers()`")]
 #[inline]
 pub fn PageSetHasFreeLinePointers(page: &mut Page) {
-    page.set_has_free_line_pointers()
+    page.set_has_free_line_pointers();
 }
 #[deprecated(note = "use `page.clear_has_free_line_pointers()`")]
 #[inline]
 pub fn PageClearHasFreeLinePointers(page: &mut Page) {
-    page.clear_has_free_line_pointers()
+    page.clear_has_free_line_pointers();
 }
 
 #[deprecated(note = "use `page.is_full()`")]
@@ -452,12 +453,12 @@ pub fn PageIsFull(page: &Page) -> bool {
 #[deprecated(note = "use `page.set_full()`")]
 #[inline]
 pub fn PageSetFull(page: &mut Page) {
-    page.set_full()
+    page.set_full();
 }
 #[deprecated(note = "use `page.clear_full()`")]
 #[inline]
 pub fn PageClearFull(page: &mut Page) {
-    page.clear_full()
+    page.clear_full();
 }
 
 #[deprecated(note = "use `page.is_all_visible()`")]
@@ -468,23 +469,23 @@ pub fn PageIsAllVisible(page: &Page) -> bool {
 #[deprecated(note = "use `page.set_all_visible()`")]
 #[inline]
 pub fn PageSetAllVisible(page: &mut Page) {
-    page.set_all_visible()
+    page.set_all_visible();
 }
 #[deprecated(note = "use `page.clear_all_visible()`")]
 #[inline]
 pub fn PageClearAllVisible(page: &mut Page) {
-    page.clear_all_visible()
+    page.clear_all_visible();
 }
 
 #[deprecated(note = "use `page.set_prunable(xid)`")]
 #[inline]
 pub fn PageSetPrunable(page: &mut Page, xid: TransactionId) {
-    page.set_prunable(xid)
+    page.set_prunable(xid);
 }
 #[deprecated(note = "use `page.clear_prunable()`")]
 #[inline]
 pub fn PageClearPrunable(page: &mut Page) {
-    page.clear_prunable()
+    page.clear_prunable();
 }
 
 // === .c function shims (bodies are `impl Page` methods in the backend module) ===
@@ -492,7 +493,7 @@ pub fn PageClearPrunable(page: &mut Page) {
 #[deprecated(note = "use `page.init(page_size, special_size)`")]
 #[inline]
 pub fn PageInit(page: &mut Page, page_size: usize, special_size: usize) {
-    page.init(page_size, special_size)
+    page.init(page_size, special_size);
 }
 
 #[deprecated(note = "use `page.is_verified(blkno, flags)`")]
@@ -547,19 +548,19 @@ pub fn PageGetTempPageCopySpecial(page: &Page) -> Box<Page> {
 #[deprecated(note = "use `old_page.restore_temp_page(temp_page)`")]
 #[inline]
 pub fn PageRestoreTempPage(temp_page: &Page, old_page: &mut Page) {
-    old_page.restore_temp_page(temp_page)
+    old_page.restore_temp_page(temp_page);
 }
 
 #[deprecated(note = "use `page.repair_fragmentation()`")]
 #[inline]
 pub fn PageRepairFragmentation(page: &mut Page) {
-    page.repair_fragmentation()
+    page.repair_fragmentation();
 }
 
 #[deprecated(note = "use `page.truncate_line_pointer_array()`")]
 #[inline]
 pub fn PageTruncateLinePointerArray(page: &mut Page) {
-    page.truncate_line_pointer_array()
+    page.truncate_line_pointer_array();
 }
 
 #[deprecated(note = "use `page.get_free_space()`")]
@@ -589,19 +590,19 @@ pub fn PageGetHeapFreeSpace(page: &Page) -> usize {
 #[deprecated(note = "use `page.index_tuple_delete(offnum)`")]
 #[inline]
 pub fn PageIndexTupleDelete(page: &mut Page, offnum: OffsetNumber) {
-    page.index_tuple_delete(offnum)
+    page.index_tuple_delete(offnum);
 }
 
 #[deprecated(note = "use `page.index_multi_delete(itemnos)`")]
 #[inline]
 pub fn PageIndexMultiDelete(page: &mut Page, itemnos: &[OffsetNumber]) {
-    page.index_multi_delete(itemnos)
+    page.index_multi_delete(itemnos);
 }
 
 #[deprecated(note = "use `page.index_tuple_delete_no_compact(offnum)`")]
 #[inline]
 pub fn PageIndexTupleDeleteNoCompact(page: &mut Page, offnum: OffsetNumber) {
-    page.index_tuple_delete_no_compact(offnum)
+    page.index_tuple_delete_no_compact(offnum);
 }
 
 #[deprecated(note = "use `page.index_tuple_overwrite(offnum, newtup, newsize)`")]
@@ -624,5 +625,5 @@ pub fn PageSetChecksumCopy(page: &Page, blkno: BlockNumber) -> Box<Page> {
 #[deprecated(note = "use `page.set_checksum_inplace(blkno)`")]
 #[inline]
 pub fn PageSetChecksumInplace(page: &mut Page, blkno: BlockNumber) {
-    page.set_checksum_inplace(blkno)
+    page.set_checksum_inplace(blkno);
 }

@@ -8,6 +8,8 @@
 //! spinlock / LWLock / ConditionVariable (`slock_t`, `LWLock`,
 //! `ConditionVariable`) - replaced with owned/std types and short notes.
 
+#![allow(clippy::fn_params_excessive_bools, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1")]
+
 use crate::access::xlogdefs::{XLogRecPtr, XLogSegNo};
 use crate::c::{NameData, TransactionId};
 use crate::datatype::timestamp::TimestampTz;

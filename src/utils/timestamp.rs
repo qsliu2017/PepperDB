@@ -1,4 +1,8 @@
 //! Translated from PostgreSQL src/include/utils/timestamp.h
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "TODO(stub): drop when implemented; hollow stub mirrors PG signature; real impl consumes params"
+)]
 //!
 //! The on-disk types (Timestamp/TimestampTz/Interval/fsec_t) live in
 //! crate::datatype::timestamp; this header adds the fmgr glue + utility API.
@@ -37,7 +41,7 @@ pub fn TimestampTzGetDatum(x: TimestampTz) -> Datum {
 }
 #[inline]
 pub fn IntervalPGetDatum(x: &Interval) -> Datum {
-    Datum(x as *const Interval as usize) // TODO(ptr)
+    Datum(std::ptr::from_ref::<Interval>(x) as usize) // TODO(ptr)
 }
 
 #[inline]

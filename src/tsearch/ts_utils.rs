@@ -229,7 +229,7 @@ pub struct QTNode {
     pub flags: QtnFlags,
     pub word: Option<String>,
     pub sign: u32,
-    pub child: Vec<QTNode>,
+    pub child: Vec<Self>,
 }
 
 bitflags! {

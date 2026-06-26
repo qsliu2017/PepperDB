@@ -135,27 +135,24 @@ impl<T> GenSlab<T> {
 
     pub fn insert(&mut self, value: T) -> Key<T> {
         self.len += 1;
-        match self.free.pop() {
-            Some(index) => {
-                let slot = &mut self.slots[index as usize];
-                slot.occupant = Some(value);
-                Key {
-                    index,
-                    generation: NonZeroU32::new(slot.generation).unwrap(),
-                    _marker: PhantomData,
-                }
+        if let Some(index) = self.free.pop() {
+            let slot = &mut self.slots[index as usize];
+            slot.occupant = Some(value);
+            Key {
+                index,
+                generation: NonZeroU32::new(slot.generation).unwrap(),
+                _marker: PhantomData,
             }
-            None => {
-                let index = self.slots.len() as u32;
-                self.slots.push(Slot {
-                    generation: 1,
-                    occupant: Some(value),
-                });
-                Key {
-                    index,
-                    generation: NonZeroU32::new(1).unwrap(),
-                    _marker: PhantomData,
-                }
+        } else {
+            let index = self.slots.len() as u32;
+            self.slots.push(Slot {
+                generation: 1,
+                occupant: Some(value),
+            });
+            Key {
+                index,
+                generation: NonZeroU32::new(1).unwrap(),
+                _marker: PhantomData,
             }
         }
     }
@@ -291,7 +288,7 @@ mod tests {
                 (key.index(), value)
             })
             .collect();
-        seen.sort();
+        seen.sort_unstable();
         assert_eq!(seen, vec![(a.index(), 10), (c.index(), 30)]);
     }
 

@@ -155,7 +155,7 @@ pub async fn SyncPostCheckpoint(shared: &Arc<SharedState>) {
             }
             keep_from = i + 1;
             if !e.canceled {
-                tags.push(e.tag.clone());
+                tags.push(e.tag);
             }
         }
         g.pending_unlinks.drain(..keep_from);
@@ -163,14 +163,13 @@ pub async fn SyncPostCheckpoint(shared: &Arc<SharedState>) {
     };
 
     for tag in &to_unlink {
-        if let Err(e) = unlink_filetag(shared, tag).await {
-            if e.kind() != std::io::ErrorKind::NotFound {
+        if let Err(e) = unlink_filetag(shared, tag).await
+            && e.kind() != std::io::ErrorKind::NotFound {
                 crate::elog!(
                     crate::utils::elog::WARNING,
                     format!("could not remove file: {e}")
                 );
             }
-        }
     }
 }
 
@@ -305,7 +304,7 @@ fn register_tag_locked(g: &mut SyncRequestsInner, ftag: &FileTag, req_type: Sync
                     e.canceled = true;
                 }
             }
-            for pue in g.pending_unlinks.iter_mut() {
+            for pue in &mut g.pending_unlinks {
                 if pue.tag.handler == ftag.handler && filetag_matches(ftag, &pue.tag) {
                     pue.canceled = true;
                 }
@@ -314,7 +313,7 @@ fn register_tag_locked(g: &mut SyncRequestsInner, ftag: &FileTag, req_type: Sync
         SyncRequestType::SyncUnlinkRequest => {
             let cycle = g.checkpoint_cycle_ctr;
             g.pending_unlinks.push(PendingUnlinkEntry {
-                tag: ftag.clone(),
+                tag: *ftag,
                 cycle_ctr: cycle,
                 canceled: false,
             });
@@ -373,7 +372,7 @@ mod tests {
 
     #[test]
     fn register_and_forget() {
-        let s = SharedState::new(Default::default());
+        let s = SharedState::new(crate::shared_state::SharedStateConfig::default());
         let t = tag(100, 0);
         assert!(!s.sync_requests().has_pending_sync(&t));
         RegisterSyncRequest(&s, &t, SyncRequestType::SyncRequest, false);
@@ -391,7 +390,7 @@ mod tests {
 
     #[test]
     fn filter_cancels_by_database() {
-        let s = SharedState::new(Default::default());
+        let s = SharedState::new(crate::shared_state::SharedStateConfig::default());
         RegisterSyncRequest(&s, &tag(1, 0), SyncRequestType::SyncRequest, false);
         RegisterSyncRequest(&s, &tag(2, 0), SyncRequestType::SyncRequest, false);
         assert_eq!(s.sync_requests().pending_op_count(), 2);

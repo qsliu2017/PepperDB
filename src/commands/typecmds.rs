@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/commands/typecmds.h
 
+#![allow(
+    clippy::boxed_local,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::access::htup::HeapTuple;
 use crate::catalog::dependency::ObjectAddresses;
 use crate::catalog::objectaddress::ObjectAddress;

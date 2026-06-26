@@ -114,6 +114,6 @@ impl GinPostingList {
     /// up to 2 on the targets.
     pub const fn size_of(&self) -> usize {
         let short_aligned = (self.nbytes as usize + 1) & !1;
-        core::mem::size_of::<GinPostingList>() + short_aligned
+        core::mem::size_of::<Self>() + short_aligned
     }
 }

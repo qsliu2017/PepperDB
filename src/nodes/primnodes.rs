@@ -115,7 +115,7 @@ pub enum VarReturningType {
 }
 
 /// Expression node representing a variable (ie, a table column).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Var {
     pub varno: i32,
     pub varattno: AttrNumber,
@@ -131,7 +131,7 @@ pub struct Var {
 }
 
 /// A constant value. For varlena types the value is in non-extended form.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Const {
     pub consttype: Oid,
     pub consttypmod: i32,
@@ -151,7 +151,7 @@ pub enum ParamKind {
     MULTIEXPR,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Param {
     pub paramkind: ParamKind,
     pub paramid: i32,
@@ -222,7 +222,7 @@ pub struct WindowFuncRunCondition {
 }
 
 /// A merge support function expression (MERGE_ACTION()).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergeSupportFunc {
     pub msftype: Oid,
     pub msfcollid: Oid,
@@ -470,7 +470,7 @@ pub struct CaseWhen {
 }
 
 /// Placeholder for the test value processed by a CASE expression.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaseTestExpr {
     pub typeId: Oid,
     pub typeMod: i32,
@@ -557,7 +557,7 @@ pub enum SQLValueFunctionOp {
 }
 
 /// Parameterless functions with special grammar productions.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SQLValueFunction {
     pub op: SQLValueFunctionOp,
     pub r#type: Oid,
@@ -614,7 +614,7 @@ pub enum JsonFormatType {
 }
 
 /// Representation of JSON FORMAT clause.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonFormat {
     pub format_type: JsonFormatType,
     pub encoding: JsonEncoding,
@@ -622,7 +622,7 @@ pub struct JsonFormat {
 }
 
 /// Transformed representation of JSON RETURNING clause.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonReturning {
     pub format: Option<Box<JsonFormat>>,
     pub typid: Oid,
@@ -739,7 +739,7 @@ pub struct JsonExpr {
 }
 
 /// A JSON path expression computed for a JSON_TABLE plan node.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonTablePath {
     pub value: Option<Box<Const>>,
     pub name: Option<String>,
@@ -831,7 +831,7 @@ pub struct CoerceToDomain {
 }
 
 /// Placeholder for the value processed by a domain's check constraint.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoerceToDomainValue {
     pub typeId: Oid,
     pub typeMod: i32,
@@ -840,7 +840,7 @@ pub struct CoerceToDomainValue {
 }
 
 /// Placeholder for a DEFAULT marker in an INSERT or UPDATE command.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetToDefault {
     pub typeId: Oid,
     pub typeMod: i32,
@@ -849,7 +849,7 @@ pub struct SetToDefault {
 }
 
 /// [WHERE] CURRENT OF cursor_name.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CurrentOfExpr {
     pub cvarno: Index,
     pub cursor_name: Option<String>,
@@ -857,7 +857,7 @@ pub struct CurrentOfExpr {
 }
 
 /// Get next value from sequence (no permission check).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NextValueExpr {
     pub seqid: Oid,
     pub typeId: Oid,
@@ -892,7 +892,7 @@ pub struct TargetEntry {
 }
 
 /// Reference to an entry in the query's rangetable.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RangeTblRef {
     pub rtindex: i32,
 }

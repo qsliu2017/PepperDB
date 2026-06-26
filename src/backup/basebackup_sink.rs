@@ -25,7 +25,7 @@ pub struct BbsinkState {
 pub struct Bbsink {
     pub buffer: Vec<u8>, // buffer for data destined for the sink (multiple of BLCKSZ)
     pub buffer_length: usize,
-    pub next: Option<Box<Bbsink>>, // sink we forward operations to
+    pub next: Option<Box<Self>>, // sink we forward operations to
     pub state: Option<Box<BbsinkState>>,
 }
 

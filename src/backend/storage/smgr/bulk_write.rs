@@ -139,7 +139,7 @@ mod tests {
     use crate::shared_state::SharedStateConfig;
     use crate::storage::relfilelocator::RelFileLocator;
 
-    async fn shared_with_tmpdir(tag: &str) -> (Arc<SharedState>, std::path::PathBuf) {
+    fn shared_with_tmpdir(tag: &str) -> (Arc<SharedState>, std::path::PathBuf) {
         let mut dir = std::env::temp_dir();
         dir.push(format!(
             "pepperdb_bulk_{tag}_{}_{}",
@@ -156,7 +156,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn bulk_write_no_wal_path() {
-        let (s, dir) = shared_with_tmpdir("nowal").await;
+        let (s, dir) = shared_with_tmpdir("nowal");
         let rloc = RelFileLocator { spcOid: Oid(1663), dbOid: Oid(70001), relNumber: Oid(18000) };
         let mut reln = SmgrRelation::open(rloc, crate::storage::procnumber::INVALID_PROC_NUMBER);
         let fork = ForkNumber::MAIN_FORKNUM;
@@ -188,7 +188,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn bulk_write_wal_path() {
-        let (s, dir) = shared_with_tmpdir("wal").await;
+        let (s, dir) = shared_with_tmpdir("wal");
         // The WAL pipeline needs pg_wal/ to exist for segment files.
         crate::storage::io_backend::mkdir_all(
             dir.join(crate::access::xlog_internal::XLOGDIR),

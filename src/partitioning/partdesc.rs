@@ -1,5 +1,7 @@
 //! Translated from PostgreSQL src/include/partitioning/partdesc.h
 
+#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+
 use crate::partitioning::partdefs::{PartitionBoundInfo, PartitionDesc, PartitionDirectory};
 use crate::postgres_ext::Oid;
 use crate::utils::palloc::MemoryContext;

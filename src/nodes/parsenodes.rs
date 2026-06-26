@@ -180,7 +180,7 @@ pub struct ColumnRef {
 }
 
 /// ParamRef - specifies a $n parameter reference.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParamRef {
     pub number: i32,
     pub location: ParseLoc,
@@ -281,7 +281,7 @@ pub enum RoleSpecType {
     PUBLIC,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoleSpec {
     pub roletype: RoleSpecType,
     /// filled only for CSTRING
@@ -306,7 +306,7 @@ pub struct FuncCall {
 }
 
 /// A_Star - '*' representing all columns of a table or compound field.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct A_Star {}
 
 /// A_Indices - array subscript or slice bounds.
@@ -707,7 +707,7 @@ pub struct RangeTblEntry {
 }
 
 /// RTEPermissionInfo - per-relation information for permission checking.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RTEPermissionInfo {
     pub relid: Oid,
     pub inh: bool,
@@ -760,7 +760,7 @@ pub struct WithCheckOption {
 }
 
 /// SortGroupClause - ORDER BY/GROUP BY/PARTITION BY/DISTINCT items.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SortGroupClause {
     pub tleSortGroupRef: Index,
     pub eqop: Oid,
@@ -807,7 +807,7 @@ pub struct WindowClause {
 }
 
 /// RowMarkClause - parser output for FOR [KEY] UPDATE/SHARE clauses.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowMarkClause {
     pub rti: Index,
     pub strength: LockClauseStrength,
@@ -913,7 +913,7 @@ pub enum ReturningOptionKind {
     NEW,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReturningOption {
     pub option: ReturningOptionKind,
     pub value: Option<String>,
@@ -928,7 +928,7 @@ pub struct ReturningClause {
 }
 
 /// TriggerTransition - transition row or table naming clause.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TriggerTransition {
     pub name: Option<String>,
     pub isNew: bool,
@@ -1192,8 +1192,8 @@ pub struct SelectStmt {
     pub withClause: Option<Box<WithClause>>,
     pub op: SetOperation,
     pub all: bool,
-    pub larg: Option<Box<SelectStmt>>,
-    pub rarg: Option<Box<SelectStmt>>,
+    pub larg: Option<Box<Self>>,
+    pub rarg: Option<Box<Self>>,
 }
 
 /// SetOperationStmt - set operation node for post-analysis query trees.
@@ -1395,7 +1395,7 @@ pub struct AlterTableCmd {
 }
 
 /// ATAlterConstraint - ad-hoc node for AlterConstraint.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ATAlterConstraint {
     pub conname: Option<String>,
     pub alterEnforceability: bool,
@@ -1408,7 +1408,7 @@ pub struct ATAlterConstraint {
 }
 
 /// ReplicaIdentityStmt - ad-hoc node for ReplicaIdentity.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplicaIdentityStmt {
     pub identity_type: i8,
     pub name: Option<String>,
@@ -1533,7 +1533,7 @@ pub struct VariableSetStmt {
 }
 
 /// VariableShowStmt - Show Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariableShowStmt {
     pub name: Option<String>,
 }
@@ -1641,7 +1641,7 @@ pub struct CreateTableSpaceStmt {
 }
 
 /// DropTableSpaceStmt - Drop Table Space Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DropTableSpaceStmt {
     pub tablespacename: Option<String>,
     pub missing_ok: bool,
@@ -1753,7 +1753,7 @@ pub struct AlterUserMappingStmt {
 }
 
 /// DropUserMappingStmt.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DropUserMappingStmt {
     pub user: Option<Box<RoleSpec>>,
     pub servername: Option<String>,
@@ -1844,7 +1844,7 @@ pub struct CreateEventTrigStmt {
 }
 
 /// AlterEventTrigStmt - Alter EVENT TRIGGER Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlterEventTrigStmt {
     pub trigname: Option<String>,
     pub tgenabled: i8,
@@ -2056,7 +2056,7 @@ pub struct DeclareCursorStmt {
 }
 
 /// ClosePortalStmt - Close Portal Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClosePortalStmt {
     /// None means CLOSE ALL
     pub portalname: Option<String>,
@@ -2075,7 +2075,7 @@ pub enum FetchDirection {
 pub const FETCH_ALL: i64 = i64::MAX;
 
 /// FetchStmt - Fetch Statement (also Move).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchStmt {
     pub direction: FetchDirection,
     /// number of rows, or position argument
@@ -2190,7 +2190,7 @@ pub struct DoStmt {
 }
 
 /// InlineCodeBlock - execution-time API for DO (not a parse-tree member).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlineCodeBlock {
     pub source_text: Option<String>,
     pub langOid: Oid,
@@ -2207,7 +2207,7 @@ pub struct CallStmt {
 }
 
 /// CallContext - not a member of parse trees.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallContext {
     pub atomic: bool,
 }
@@ -2281,20 +2281,20 @@ pub struct RuleStmt {
 }
 
 /// NotifyStmt - Notify Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotifyStmt {
     pub conditionname: Option<String>,
     pub payload: Option<String>,
 }
 
 /// ListenStmt - Listen Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListenStmt {
     pub conditionname: Option<String>,
 }
 
 /// UnlistenStmt - Unlisten Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnlistenStmt {
     pub conditionname: Option<String>,
 }
@@ -2378,7 +2378,7 @@ pub struct ViewStmt {
 }
 
 /// LoadStmt - Load Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadStmt {
     pub filename: Option<String>,
 }
@@ -2398,7 +2398,7 @@ pub struct AlterDatabaseStmt {
 }
 
 /// AlterDatabaseRefreshCollStmt.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlterDatabaseRefreshCollStmt {
     pub dbname: Option<String>,
 }
@@ -2474,7 +2474,7 @@ pub struct RefreshMatViewStmt {
 }
 
 /// CheckPointStmt - Checkpoint Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckPointStmt {}
 
 /// DiscardMode - Discard Statement target.
@@ -2487,7 +2487,7 @@ pub enum DiscardMode {
 }
 
 /// DiscardStmt - Discard Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscardStmt {
     pub target: DiscardMode,
 }
@@ -2572,7 +2572,7 @@ pub struct ExecuteStmt {
 }
 
 /// DeallocateStmt - DEALLOCATE Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeallocateStmt {
     /// None if DEALLOCATE ALL
     pub name: Option<String>,
@@ -2716,7 +2716,7 @@ pub struct AlterSubscriptionStmt {
 }
 
 /// DropSubscriptionStmt.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DropSubscriptionStmt {
     pub subname: Option<String>,
     pub missing_ok: bool,

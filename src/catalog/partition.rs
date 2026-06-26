@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/catalog/partition.h
 
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
+)]
+
 use crate::nodes::bitmapset::Bitmapset;
 use crate::nodes::nodes::Node;
 use crate::postgres_ext::Oid;

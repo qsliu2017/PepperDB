@@ -52,9 +52,13 @@ const PageFlagsValidBits: u16 = 0x0007;
 
 impl Page {
     #[inline]
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "page buffer is MAXALIGN/8-byte aligned by construction and SizeOfPageHeaderData is a multiple of 4, so the ItemIdData (4-byte) base is aligned"
+    )]
     fn set_item_id_raw(&mut self, offset_number: OffsetNumber, value: ItemIdData) {
         let idx = (offset_number - 1) as usize;
-        let base = unsafe { self.as_mut_bytes().as_mut_ptr().add(SizeOfPageHeaderData) as *mut ItemIdData };
+        let base = unsafe { self.as_mut_bytes().as_mut_ptr().add(SizeOfPageHeaderData).cast::<ItemIdData>() };
         unsafe { *base.add(idx) = value };
     }
 
@@ -76,7 +80,7 @@ impl Page {
     pub fn init(&mut self, page_size: usize, special_size: usize) {
         let special_size = maxalign(special_size);
 
-        debug_assert!(page_size == BLCKSZ as usize);
+        debug_assert_eq!(page_size, BLCKSZ as usize);
         debug_assert!(page_size > special_size + SizeOfPageHeaderData);
 
         // Make sure all fields of page are zero, as well as unused space.
@@ -119,7 +123,7 @@ impl Page {
             if (p.flags & !PageFlagsValidBits) == 0
                 && p.lower <= p.upper
                 && p.upper <= p.special
-                && (p.special as u32) <= BLCKSZ
+                && u32::from(p.special) <= BLCKSZ
                 && p.special as usize == maxalign(p.special as usize)
             {
                 header_sane = true;
@@ -146,8 +150,7 @@ impl Page {
                 let expected = self.header().checksum;
                 ereport!(lvl, |e: &mut crate::utils::elog::ErrorData| {
                     e.errcode(ERRCODE_DATA_CORRUPTED).errmsg(format!(
-                        "page verification failed, calculated checksum {} but expected {}",
-                        checksum, expected
+                        "page verification failed, calculated checksum {checksum} but expected {expected}"
                     ));
                 });
             }
@@ -184,7 +187,7 @@ impl Page {
             if (phdr.lower as usize) < SizeOfPageHeaderData
                 || phdr.lower > phdr.upper
                 || phdr.upper > phdr.special
-                || (phdr.special as u32) > BLCKSZ
+                || u32::from(phdr.special) > BLCKSZ
             {
                 corrupted_page_pointers_panic(phdr.lower, phdr.upper, phdr.special);
             }
@@ -240,7 +243,7 @@ impl Page {
 
         // Reject placing items beyond the heap boundary, if heap.
         if flags.contains(PageAddItemFlags::IS_HEAP)
-            && offset_number as i32 > MaxHeapTuplesPerPage
+            && i32::from(offset_number) > MaxHeapTuplesPerPage
         {
             elog!(
                 WARNING,
@@ -251,13 +254,13 @@ impl Page {
 
         // Compute new lower and upper pointers; signed to avoid wraparound mistakes.
         let lower: i32 = if offset_number == limit || needshuffle {
-            self.header().lower as i32 + SIZE_OF_ITEM_ID as i32
+            i32::from(self.header().lower) + SIZE_OF_ITEM_ID as i32
         } else {
-            self.header().lower as i32
+            i32::from(self.header().lower)
         };
 
         let aligned_size = maxalign(size);
-        let upper = self.header().upper as i32 - aligned_size as i32;
+        let upper = i32::from(self.header().upper) - aligned_size as i32;
 
         if lower > upper {
             return INVALID_OFFSET_NUMBER;
@@ -310,25 +313,25 @@ impl Page {
 
     /// PageGetTempPage
     ///     Get a temporary page in local memory. Not initialized; caller does that.
-    pub fn get_temp_page(&self) -> Box<Page> {
-        Page::boxed_zeroed()
+    pub fn get_temp_page(&self) -> Box<Self> {
+        Self::boxed_zeroed()
     }
 
     /// PageGetTempPageCopy
     ///     Temp page initialized by copying the contents of the given page.
-    pub fn get_temp_page_copy(&self) -> Box<Page> {
+    pub fn get_temp_page_copy(&self) -> Box<Self> {
         let page_size = self.get_page_size();
-        let mut temp = Page::boxed_zeroed();
+        let mut temp = Self::boxed_zeroed();
         temp.as_mut_bytes()[..page_size].copy_from_slice(&self.as_bytes()[..page_size]);
         temp
     }
 
     /// PageGetTempPageCopySpecial
     ///     Temp page PageInit'd with the same special-space size, special copied over.
-    pub fn get_temp_page_copy_special(&self) -> Box<Page> {
+    pub fn get_temp_page_copy_special(&self) -> Box<Self> {
         let page_size = self.get_page_size();
         let special_size = self.get_special_size() as usize;
-        let mut temp = Page::boxed_zeroed();
+        let mut temp = Self::boxed_zeroed();
         temp.init(page_size, special_size);
         // Copy the special space (the trailing special_size bytes).
         let src_special = self.header().special as usize;
@@ -341,7 +344,7 @@ impl Page {
     /// PageRestoreTempPage
     ///     Copy a temporary page back over a permanent page after special processing.
     ///     (C also pfree's tempPage; here the Box is dropped by the caller.)
-    pub fn restore_temp_page(&mut self, temp_page: &Page) {
+    pub fn restore_temp_page(&mut self, temp_page: &Self) {
         let page_size = temp_page.get_page_size();
         self.as_mut_bytes()[..page_size].copy_from_slice(&temp_page.as_bytes()[..page_size]);
     }
@@ -353,9 +356,9 @@ impl Page {
     /// and sets/clears the PD_HAS_FREE_LINES hint. Caller had better have a full
     /// cleanup lock on the page's buffer.
     pub fn repair_fragmentation(&mut self) {
-        let pd_lower = self.header().lower as i32;
-        let pd_upper = self.header().upper as i32;
-        let pd_special = self.header().special as i32;
+        let pd_lower = i32::from(self.header().lower);
+        let pd_upper = i32::from(self.header().upper);
+        let pd_special = i32::from(self.header().special);
 
         // Be more paranoid than usual: we're about to reshuffle a shared buffer.
         if pd_lower < SizeOfPageHeaderData as i32
@@ -386,7 +389,7 @@ impl Page {
             let lp = self.get_item_id(i);
             if lp.is_used() {
                 if lp.has_storage() {
-                    let itemoff = lp.lp_off() as i32;
+                    let itemoff = i32::from(lp.lp_off());
                     if last_offset > itemoff {
                         last_offset = itemoff;
                     } else {
@@ -430,7 +433,7 @@ impl Page {
 
         if finalusedlp != nline {
             // The last line pointer is not the last used line pointer.
-            let nunusedend = (nline - finalusedlp) as i32;
+            let nunusedend = i32::from(nline - finalusedlp);
             debug_assert!(nunused >= nunusedend && nunusedend > 0);
             nunused -= nunusedend;
             self.header_mut().lower -= (SIZE_OF_ITEM_ID as i32 * nunusedend) as u16;
@@ -455,15 +458,15 @@ impl Page {
         let mut nunusedend = 0i32;
 
         // Scan line pointer array back-to-front.
-        let mut i = self.get_max_offset_number() as i32;
-        while i >= FIRST_OFFSET_NUMBER as i32 {
+        let mut i = i32::from(self.get_max_offset_number());
+        while i >= i32::from(FIRST_OFFSET_NUMBER) {
             let lp = self.get_item_id(i as OffsetNumber);
 
-            if !countdone && i > FIRST_OFFSET_NUMBER as i32 {
-                if !lp.is_used() {
-                    nunusedend += 1;
-                } else {
+            if !countdone && i > i32::from(FIRST_OFFSET_NUMBER) {
+                if lp.is_used() {
                     countdone = true;
+                } else {
+                    nunusedend += 1;
                 }
             } else if !lp.is_used() {
                 // An unused line pointer we won't truncate -- so there is at least one.
@@ -492,7 +495,7 @@ impl Page {
     pub fn get_free_space(&self) -> usize {
         let phdr = self.header();
         // Signed so pd_lower > pd_upper behaves sensibly.
-        let mut space = phdr.upper as i32 - phdr.lower as i32;
+        let mut space = i32::from(phdr.upper) - i32::from(phdr.lower);
         if space < SIZE_OF_ITEM_ID as i32 {
             return 0;
         }
@@ -504,7 +507,7 @@ impl Page {
     ///     Free space reduced by `ntups` new line pointers.
     pub fn get_free_space_for_multiple_tuples(&self, ntups: i32) -> usize {
         let phdr = self.header();
-        let mut space = phdr.upper as i32 - phdr.lower as i32;
+        let mut space = i32::from(phdr.upper) - i32::from(phdr.lower);
         if space < ntups * SIZE_OF_ITEM_ID as i32 {
             return 0;
         }
@@ -516,7 +519,7 @@ impl Page {
     ///     Free space with no consideration for adding/removing line pointers.
     pub fn get_exact_free_space(&self) -> usize {
         let phdr = self.header();
-        let space = phdr.upper as i32 - phdr.lower as i32;
+        let space = i32::from(phdr.upper) - i32::from(phdr.lower);
         if space < 0 {
             return 0;
         }
@@ -646,9 +649,9 @@ impl Page {
             return;
         }
 
-        let pd_lower = self.header().lower as i32;
-        let pd_upper = self.header().upper as i32;
-        let pd_special = self.header().special as i32;
+        let pd_lower = i32::from(self.header().lower);
+        let pd_upper = i32::from(self.header().upper);
+        let pd_special = i32::from(self.header().special);
 
         if pd_lower < SizeOfPageHeaderData as i32
             || pd_lower > pd_upper
@@ -679,7 +682,7 @@ impl Page {
             let lp = self.get_item_id(offnum);
             debug_assert!(lp.has_storage());
             let size = lp.lp_len() as usize;
-            let offset = lp.lp_off() as i32;
+            let offset = i32::from(lp.lp_off());
             if offset < pd_upper
                 || offset + size as i32 > pd_special
                 || offset != maxalign(offset as usize) as i32
@@ -719,8 +722,12 @@ impl Page {
 
         // Overwrite the line pointers with the copy (unused items removed).
         {
+            #[allow(
+                clippy::cast_ptr_alignment,
+                reason = "page buffer is MAXALIGN/8-byte aligned by construction and SizeOfPageHeaderData is a multiple of 4, so the ItemIdData (4-byte) base is aligned"
+            )]
             let base = unsafe {
-                self.as_mut_bytes().as_mut_ptr().add(SizeOfPageHeaderData) as *mut ItemIdData
+                self.as_mut_bytes().as_mut_ptr().add(SizeOfPageHeaderData).cast::<ItemIdData>()
             };
             for (k, &v) in newitemids[..nused].iter().enumerate() {
                 unsafe { *base.add(k) = v };
@@ -819,7 +826,7 @@ impl Page {
 
         let tupid = self.get_item_id(offnum);
         debug_assert!(tupid.has_storage());
-        let mut oldsize = tupid.lp_len() as i32;
+        let mut oldsize = i32::from(tupid.lp_len());
         let offset = tupid.lp_off() as usize;
 
         {
@@ -837,7 +844,7 @@ impl Page {
         let alignednewsize = maxalign(newsize) as i32;
         {
             let phdr = self.header();
-            if alignednewsize > oldsize + (phdr.upper as i32 - phdr.lower as i32) {
+            if alignednewsize > oldsize + (i32::from(phdr.upper) - i32::from(phdr.lower)) {
                 return false;
             }
         }
@@ -862,7 +869,7 @@ impl Page {
                 let mut ii = self.get_item_id(i);
                 // Allow items without storage (currently only BRIN needs that).
                 if ii.has_storage() && (ii.lp_off() as usize) <= offset {
-                    ii.set_off((ii.lp_off() as i32 + size_diff) as u16);
+                    ii.set_off((i32::from(ii.lp_off()) + size_diff) as u16);
                     self.set_item_id_raw(i, ii);
                 }
                 i += 1;
@@ -890,8 +897,8 @@ impl Page {
     /// input unchanged if checksums are disabled / the page is new.
     ///
     /// (C returns a pointer into a reused static buffer; we return an owned Box.)
-    pub fn set_checksum_copy(&self, blkno: BlockNumber) -> Box<Page> {
-        let mut copy = Page::boxed_zeroed();
+    pub fn set_checksum_copy(&self, blkno: BlockNumber) -> Box<Self> {
+        let mut copy = Self::boxed_zeroed();
         copy.as_mut_bytes()[..BLCKSZ as usize].copy_from_slice(&self.as_bytes()[..BLCKSZ as usize]);
         if self.is_new() || !data_checksums_enabled() {
             return copy;
@@ -921,7 +928,7 @@ impl Page {
         if (phdr.lower as usize) < SizeOfPageHeaderData
             || phdr.lower > phdr.upper
             || phdr.upper > phdr.special
-            || (phdr.special as u32) > BLCKSZ
+            || u32::from(phdr.special) > BLCKSZ
             || phdr.special as usize != maxalign(phdr.special as usize)
         {
             corrupted_page_pointers_panic_error(phdr.lower, phdr.upper, phdr.special);
@@ -936,21 +943,24 @@ impl Page {
     /// `presorted` => itemidbase is in descending itemoff order, so we can memmove
     /// tuples toward the end without overwriting unmoved tuples. Otherwise we stage
     /// the to-be-moved tuples in a scratch buffer first. Callers ensure nitems > 0.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "1:1 port of C compactify_tuples; splitting would diverge from PG structure"
+    )]
     fn compactify_tuples(&mut self, itemidbase: &[ItemIdCompact], nitems: usize, presorted: bool) {
         debug_assert!(nitems > 0);
 
-        let pd_special = self.header().special as i32;
-        let pd_upper = self.header().upper as i32;
-        let upper: i32;
+        let pd_special = i32::from(self.header().special);
+        let pd_upper = i32::from(self.header().upper);
 
-        if presorted {
+        let upper = if presorted {
             #[cfg(debug_assertions)]
             {
                 // Verify no caller incorrectly passed a true presorted value.
                 let mut lastoff = pd_special;
                 for it in &itemidbase[..nitems] {
-                    debug_assert!(lastoff > it.itemoff as i32);
-                    lastoff = it.itemoff as i32;
+                    debug_assert!(lastoff > i32::from(it.itemoff));
+                    lastoff = i32::from(it.itemoff);
                 }
             }
 
@@ -964,30 +974,30 @@ impl Page {
             while i < nitems {
                 idx_ptr = i;
                 let it = &itemidbase[i];
-                if up != it.itemoff as i32 + it.alignedlen as i32 {
+                if up != i32::from(it.itemoff) + i32::from(it.alignedlen) {
                     break;
                 }
-                up -= it.alignedlen as i32;
+                up -= i32::from(it.alignedlen);
                 i += 1;
             }
 
             // Now compactify. Minimize memmove() calls: only move when there's a gap.
             let mut copy_tail =
-                itemidbase[idx_ptr].itemoff as i32 + itemidbase[idx_ptr].alignedlen as i32;
+                i32::from(itemidbase[idx_ptr].itemoff) + i32::from(itemidbase[idx_ptr].alignedlen);
             let mut copy_head = copy_tail;
             while i < nitems {
                 let it = itemidbase[i];
 
-                if copy_head != it.itemoff as i32 + it.alignedlen as i32 {
+                if copy_head != i32::from(it.itemoff) + i32::from(it.alignedlen) {
                     self.page_memmove(
                         up as usize,
                         copy_head as usize,
                         (copy_tail - copy_head) as usize,
                     );
-                    copy_tail = it.itemoff as i32 + it.alignedlen as i32;
+                    copy_tail = i32::from(it.itemoff) + i32::from(it.alignedlen);
                 }
-                up -= it.alignedlen as i32;
-                copy_head = it.itemoff as i32;
+                up -= i32::from(it.alignedlen);
+                copy_head = i32::from(it.itemoff);
 
                 // Update the line pointer to reference the new offset.
                 let off = (it.offsetindex + 1) as OffsetNumber;
@@ -1005,7 +1015,7 @@ impl Page {
                 (copy_tail - copy_head) as usize,
             );
 
-            upper = up;
+            up
         } else {
             // Non-presorted: tuples may be in any order, so stage to-be-moved tuples
             // in a scratch buffer before copying them back at the new offsets.
@@ -1034,10 +1044,10 @@ impl Page {
                 while i < nitems {
                     idx_ptr = i;
                     let it = &itemidbase[i];
-                    if up != it.itemoff as i32 + it.alignedlen as i32 {
+                    if up != i32::from(it.itemoff) + i32::from(it.alignedlen) {
                         break;
                     }
-                    up -= it.alignedlen as i32;
+                    up -= i32::from(it.alignedlen);
                     i += 1;
                 }
                 // Copy all tuples that need to be moved into the temp buffer.
@@ -1048,20 +1058,20 @@ impl Page {
 
             // Do the compactification; idx_ptr points at the first tuple to move.
             let mut copy_tail =
-                itemidbase[idx_ptr].itemoff as i32 + itemidbase[idx_ptr].alignedlen as i32;
+                i32::from(itemidbase[idx_ptr].itemoff) + i32::from(itemidbase[idx_ptr].alignedlen);
             let mut copy_head = copy_tail;
             while i < nitems {
                 let it = itemidbase[i];
 
-                if copy_head != it.itemoff as i32 + it.alignedlen as i32 {
+                if copy_head != i32::from(it.itemoff) + i32::from(it.alignedlen) {
                     let dst = up as usize;
                     let src = copy_head as usize;
                     let len = (copy_tail - copy_head) as usize;
                     self.as_mut_bytes()[dst..dst + len].copy_from_slice(&scratch[src..src + len]);
-                    copy_tail = it.itemoff as i32 + it.alignedlen as i32;
+                    copy_tail = i32::from(it.itemoff) + i32::from(it.alignedlen);
                 }
-                up -= it.alignedlen as i32;
-                copy_head = it.itemoff as i32;
+                up -= i32::from(it.alignedlen);
+                copy_head = i32::from(it.itemoff);
 
                 let off = (it.offsetindex + 1) as OffsetNumber;
                 let mut lp = self.get_item_id(off);
@@ -1077,8 +1087,8 @@ impl Page {
             let len = (copy_tail - copy_head) as usize;
             self.as_mut_bytes()[dst..dst + len].copy_from_slice(&scratch[src..src + len]);
 
-            upper = up;
-        }
+            up
+        };
 
         self.header_mut().upper = upper as u16;
     }
@@ -1102,8 +1112,7 @@ fn corrupted_page_pointers_panic(lower: u16, upper: u16, special: u16) -> ! {
     // TODO(panic): C ereport(PANIC, ERRCODE_DATA_CORRUPTED).
     ereport!(PANIC, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(ERRCODE_DATA_CORRUPTED).errmsg(format!(
-            "corrupted page pointers: lower = {}, upper = {}, special = {}",
-            lower, upper, special
+            "corrupted page pointers: lower = {lower}, upper = {upper}, special = {special}"
         ));
     });
     unreachable!()
@@ -1114,8 +1123,7 @@ fn corrupted_page_pointers_panic_error(lower: u16, upper: u16, special: u16) -> 
     // TODO(panic): C ereport(ERROR, ERRCODE_DATA_CORRUPTED).
     ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(ERRCODE_DATA_CORRUPTED).errmsg(format!(
-            "corrupted page pointers: lower = {}, upper = {}, special = {}",
-            lower, upper, special
+            "corrupted page pointers: lower = {lower}, upper = {upper}, special = {special}"
         ));
     });
     unreachable!()
@@ -1126,7 +1134,7 @@ fn corrupted_line_pointer_panic(itemoff: u32) -> ! {
     // TODO(panic): C ereport(ERROR, ERRCODE_DATA_CORRUPTED).
     ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(ERRCODE_DATA_CORRUPTED)
-            .errmsg(format!("corrupted line pointer: {}", itemoff));
+            .errmsg(format!("corrupted line pointer: {itemoff}"));
     });
     unreachable!()
 }
@@ -1136,8 +1144,7 @@ fn corrupted_line_pointer_offset_panic(offset: u32, size: u32) -> ! {
     // TODO(panic): C ereport(ERROR, ERRCODE_DATA_CORRUPTED).
     ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(ERRCODE_DATA_CORRUPTED).errmsg(format!(
-            "corrupted line pointer: offset = {}, size = {}",
-            offset, size
+            "corrupted line pointer: offset = {offset}, size = {size}"
         ));
     });
     unreachable!()
@@ -1148,8 +1155,7 @@ fn corrupted_item_lengths_panic(total: u32, available: u32) -> ! {
     // TODO(panic): C ereport(ERROR, ERRCODE_DATA_CORRUPTED).
     ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(ERRCODE_DATA_CORRUPTED).errmsg(format!(
-            "corrupted item lengths: total {}, available space {}",
-            total, available
+            "corrupted item lengths: total {total}, available space {available}"
         ));
     });
     unreachable!()
@@ -1189,8 +1195,8 @@ mod tests {
         let p = new_page();
         let h = p.header();
         assert_eq!(h.lower as usize, SizeOfPageHeaderData);
-        assert_eq!(h.upper as u32, BLCKSZ);
-        assert_eq!(h.special as u32, BLCKSZ);
+        assert_eq!(u32::from(h.upper), BLCKSZ);
+        assert_eq!(u32::from(h.special), BLCKSZ);
         assert!(p.is_empty());
         assert!(!p.is_new());
         assert_eq!(p.get_max_offset_number(), 0);
