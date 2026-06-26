@@ -1,55 +1,36 @@
 //! Translated from PostgreSQL src/include/postmaster/bgworker_internals.h
 //! Postmaster-private background-worker bookkeeping.
+//!
+//! The definitions live in the .c translation (src/backend/postmaster/bgworker.rs);
+//! this header re-exposes them under their C names. The intrusive `dlist`
+//! machinery (`BackgroundWorkerList` as a `dlist_head`, `rw_lnode`) is dropped:
+//! the static-registered list is a process-global `Vec` owned by the impl, and
+//! the postmaster-side bookkeeping operates on the shmem slot table by index.
 
-use crate::datatype::timestamp::TimestampTz;
-use crate::postmaster::bgworker::BackgroundWorker;
+/// PG `MAX_PARALLEL_WORKER_LIMIT`.
+pub use crate::backend::postmaster::bgworker::MAX_PARALLEL_WORKER_LIMIT;
 
-/// Maximum possible value of parallel workers.
-pub const MAX_PARALLEL_WORKER_LIMIT: i32 = 1024;
+/// PG `RegisteredBgWorker`. Re-exported from the impl (a `dlist`-free owned
+/// entry).
+pub use crate::backend::postmaster::bgworker::RegisteredBgWorker;
 
-/// A registered background worker. The C `dlist_node rw_lnode` (intrusive list
-/// link) is dropped; the registry below owns entries in a `Vec`.
-pub struct RegisteredBgWorker {
-    pub worker: BackgroundWorker, // its registry entry
-    pub pid: i32,                 // 0 if not running
-    pub crashed_at: TimestampTz,  // if not 0, time it last crashed
-    pub shmem_slot: i32,
-    pub terminate: bool,
-}
+// Shmem sizing/init: shmem -> Arc-shared heap state in a single process. Sizing
+// is implicit (the Vec length), so `BackgroundWorkerShmemSize` is dropped; init
+// is `BackgroundWorkerShmem::new`, called from `SharedState::new`.
 
-// C: `dlist_head BackgroundWorkerList` (intrusive list) -> an owned Vec. TODO(global)
-pub static mut BackgroundWorkerList: Vec<RegisteredBgWorker> = Vec::new();
+// Postmaster-side bookkeeping (the reconcile/poll path the supervisor 17f drives
+// against the shmem slot table). Re-exposed under their C names; the signatures
+// take a slot index rather than `&mut RegisteredBgWorker` (no intrusive list).
+pub use crate::backend::postmaster::bgworker::{
+    background_worker_state_change as BackgroundWorkerStateChange,
+    background_worker_stop_notifications as BackgroundWorkerStopNotifications,
+    forget_background_worker as ForgetBackgroundWorker,
+    forget_unstarted_background_workers as ForgetUnstartedBackgroundWorkers,
+    report_background_worker_exit as ReportBackgroundWorkerExit,
+    report_background_worker_pid as ReportBackgroundWorkerPID,
+    reset_background_worker_crash_times as ResetBackgroundWorkerCrashTimes,
+};
 
-// Shared-memory sizing/init: shmem -> Arc-shared heap state in single process.
-pub fn BackgroundWorkerShmemSize() -> usize {
-    unimplemented!()
-}
-pub fn BackgroundWorkerShmemInit() {
-    unimplemented!()
-}
-pub fn BackgroundWorkerStateChange(allow_new_workers: bool) {
-    unimplemented!()
-}
-pub fn ForgetBackgroundWorker(rw: &mut RegisteredBgWorker) {
-    unimplemented!()
-}
-pub fn ReportBackgroundWorkerPID(rw: &mut RegisteredBgWorker) {
-    unimplemented!()
-}
-pub fn ReportBackgroundWorkerExit(rw: &mut RegisteredBgWorker) {
-    unimplemented!()
-}
-pub fn BackgroundWorkerStopNotifications(pid: i32) {
-    unimplemented!()
-}
-pub fn ForgetUnstartedBackgroundWorkers() {
-    unimplemented!()
-}
-pub fn ResetBackgroundWorkerCrashTimes() {
-    unimplemented!()
-}
-
-/// C: `pg_noreturn ... BackgroundWorkerMain(const void*, size_t)`.
-pub fn BackgroundWorkerMain(startup_data: &[u8]) -> ! {
-    unimplemented!()
-}
+// deleted by redesign: BackgroundWorkerMain (the forked-child entry point) +
+// bgworker_die + the sigsetjmp recovery -- a worker is a tokio task whose panic
+// propagates to the supervisor (17f), which restarts it.

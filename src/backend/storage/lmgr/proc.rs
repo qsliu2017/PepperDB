@@ -192,27 +192,20 @@ pub fn InitAuxiliaryProcess() {
     let g = proc_global().expect("proc header uninitialized").clone();
     assert!(!has_my_proc(), "you already exist");
 
-    let base = g.aux_proc_base;
-    let mut found = None;
-    for i in 0..NUM_AUXILIARY_PROCS {
-        let procno = base + i;
-        // SAFETY: lifecycle field read under the (single-process) startup path.
-        let in_use = unsafe { g.proc(procno).is_none_or(|p| p.pid != 0) };
-        if !in_use {
-            found = Some(procno);
-            break;
-        }
-    }
-    let procno = found.unwrap_or_else(|| panic!("all AuxiliaryProcs are in use"));
+    // PG scans + claims the slot under ProcStructLock so two aux tasks starting
+    // concurrently never pick (and `&mut`-alias) the same PGPROC. The full field
+    // init runs under that same lock: a concurrent scan reads every slot's `pid`,
+    // and the init re-touches `pid`, so the two must not overlap.
+    let pid = crate::session::try_current().map_or(0, |s| s.proc_pid());
+    let procno = g
+        .claim_aux_slot(pid, |proc, procno| {
+            init_backend_proc_fields(proc, procno, pid, /* regular */ false);
+            // Aux procs don't get a VXID.
+            proc.vxid.proc_number = INVALID_PROC_NUMBER;
+            proc.proc_latch.init();
+        })
+        .unwrap_or_else(|| panic!("all AuxiliaryProcs are in use"));
     set_current_proc_number(procno);
-
-    let proc = unsafe { g.proc_mut(procno).unwrap() };
-    let pid = crate::session::try_current()
-        .map_or(0, |s| s.proc_pid());
-    init_backend_proc_fields(proc, procno, pid, /* regular */ false);
-    // Aux procs don't get a VXID.
-    proc.vxid.proc_number = INVALID_PROC_NUMBER;
-    proc.proc_latch.init();
 }
 
 /// Shared field init for InitProcess / InitAuxiliaryProcess.
@@ -284,17 +277,24 @@ pub fn ProcKill() {
         );
     }
 
-    // Mark the proc no longer in use and return it to the freelist.
-    let kind = {
-        // SAFETY: exclusive owner at teardown.
+    // SAFETY: exclusive owner at teardown; read-only field needed below.
+    let kind = unsafe { g.proc_mut(procno).unwrap() }.proc_global_list;
+    if kind == ProcGlobalList::None {
+        // Aux PGPROC: no freelist. PG `AuxiliaryProcKill` clears the slot under
+        // ProcStructLock; we do the same so the field clears + the `pid` release
+        // cannot race a concurrent `claim_aux_slot` scan/init on this slot.
+        g.release_aux_slot(procno, |proc| {
+            proc.vxid.proc_number = INVALID_PROC_NUMBER;
+            proc.vxid.lxid = LocalTransactionId(0);
+            proc.proc_latch.reset();
+        });
+    } else {
+        // SAFETY: exclusive owner; the freelist push below makes it claimable.
         let proc = unsafe { g.proc_mut(procno).unwrap() };
-        proc.pid = 0;
         proc.vxid.proc_number = INVALID_PROC_NUMBER;
         proc.vxid.lxid = LocalTransactionId(0);
         proc.proc_latch.reset();
-        proc.proc_global_list
-    };
-    if kind != ProcGlobalList::None {
+        proc.pid = 0;
         g.free_proc(kind, procno);
     }
     set_current_proc_number(INVALID_PROC_NUMBER);

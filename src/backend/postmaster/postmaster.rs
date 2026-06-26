@@ -39,6 +39,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
 
+use crate::backend::postmaster::{
+    autovacuum, bgwriter, checkpointer, pgarch, walwriter,
+};
 use crate::backend::tcop::backend_startup::backend_main;
 use crate::miscadmin::BackendType;
 use crate::shared_state::{SharedState, SharedStateConfig};
@@ -217,6 +220,11 @@ async fn server_loop(
 ) {
     let mut backends: JoinSet<ChildKey> = JoinSet::new();
 
+    // Start the long-lived auxiliary tasks (PG launches them right after shared
+    // memory is up) and install the on-demand spawner hooks.
+    let mut aux = AuxTasks::new();
+    launch_missing_background_tasks(&shared, &mut aux);
+
     loop {
         tokio::select! {
             // (a) accept a new connection.
@@ -243,13 +251,43 @@ async fn server_loop(
             Some(joined) = backends.join_next() => {
                 reap(&registry, joined);
             }
+
+            // (d) an aux task exited unexpectedly (not during shutdown): respawn
+            // it (PG's LaunchMissingBackgroundProcesses restart policy).
+            Some(joined) = aux.join_set.join_next() => {
+                respawn_aux(&mut aux, &shared, joined);
+            }
         }
     }
 
-    // --- shutdown state machine (simplified) -------------------------------
-    // PG's PostmasterStateMachine sequences smart/fast/immediate; we collapse to
-    // one graceful drain. TODO: distinguish modes.
-    drain(&mut backends, &registry, &shutdown).await;
+    // --- shutdown state machine -------------------------------------------
+    // PG's PostmasterStateMachine sequences the shutdown; see `drain` for the
+    // exact order (backends -> shutdown checkpoint -> other aux -> checkpointer).
+    drain(&mut backends, &registry, &mut aux).await;
+}
+
+/// An aux task ended during NORMAL operation (PG treats an aux exit outside
+/// shutdown as a crash and relaunches it). Identify the role and respawn it.
+fn respawn_aux(
+    aux: &mut AuxTasks,
+    shared: &Arc<SharedState>,
+    joined: Result<AuxRole, tokio::task::JoinError>,
+) {
+    match joined {
+        Ok(role) => {
+            crate::elog!(
+                crate::utils::elog::LOG,
+                format!("aux task {role:?} exited unexpectedly; restarting")
+            );
+            aux.spawn_role(role, shared);
+        }
+        Err(e) => {
+            // Aborted before yielding its role; cannot tell which one. The next
+            // launch_missing pass on a future revision could reconcile; for now
+            // log it (the abort path is only hit on runtime cancel).
+            crate::elog!(crate::utils::elog::LOG, format!("aux task aborted: {e}"));
+        }
+    }
 }
 
 /// PG `BackendStartup` + admission (`canAcceptConnections`/`CountChildren`).
@@ -344,36 +382,109 @@ fn reap(registry: &ChildRegistry, joined: Result<ChildKey, tokio::task::JoinErro
     }
 }
 
-/// PG's shutdown drain (the tail of `PostmasterStateMachine`). Stop accepting
-/// (the caller already broke the loop), signal every live child to terminate,
-/// then await the `JoinSet` with a deadline. After the deadline, abandon the
-/// stragglers (PG escalates to immediate shutdown / SIGKILL).
-async fn drain(backends: &mut JoinSet<ChildKey>, registry: &ChildRegistry, _shutdown: &Shutdown) {
-    // Signal all children to terminate (PG's SignalChildren(SIGTERM)). Part B's
-    // backend loop selects on this Notify; the placeholder ignores it and exits
-    // on its own.
-    for cancel in registry.cancel_handles() {
-        cancel.notify_waiters();
-    }
-
+/// PG's shutdown drain (the tail of `PostmasterStateMachine`). Encodes PG's
+/// shutdown ORDER (fast-shutdown PM_WAIT_BACKENDS -> PM_WAIT_XLOG_SHUTDOWN ->
+/// PM_WAIT_AUX -> checkpointer exit):
+///
+///   1. Stop accepting (the caller already broke the accept loop).
+///   2. Signal regular BACKENDS to terminate and await them.
+///   3. Tell the checkpointer to write the SHUTDOWN checkpoint (phase-1) and AWAIT
+///      its PMSIGNAL_XLOG_IS_SHUTDOWN completion -- nothing else may stop until
+///      WAL is shut down (PG PM_WAIT_XLOG_SHUTDOWN -> PM_WAIT_XLOG_ARCHIVAL).
+///   4. Shut down the OTHER aux tasks (bgwriter / walwriter / pgarch / autovac
+///      launcher) and the on-demand workers.
+///   5. Tell the checkpointer to EXIT (phase-2): it is FIRST-started, LAST-stopped.
+///   6. Await the aux JoinSet with the deadline; abandon stragglers past it.
+async fn drain(backends: &mut JoinSet<ChildKey>, registry: &ChildRegistry, aux: &mut AuxTasks) {
     let deadline = tokio::time::sleep(SHUTDOWN_DRAIN_TIMEOUT);
     tokio::pin!(deadline);
 
+    // (2) Signal all backends to terminate (PG SignalChildren(SIGTERM)) and wait.
+    for cancel in registry.cancel_handles() {
+        cancel.notify_waiters();
+    }
+    drain_backends(backends, registry, &mut deadline).await;
+
+    // (3) PM_WAIT_XLOG_SHUTDOWN: ask the checkpointer to write the shutdown
+    // checkpoint (PG SIGINT) and WAIT until it has done so. PG's
+    // PostmasterStateMachine only leaves PM_WAIT_XLOG_SHUTDOWN for
+    // PM_WAIT_XLOG_ARCHIVAL once the checkpointer signals
+    // PMSIGNAL_XLOG_IS_SHUTDOWN; nothing else may stop until WAL is shut down. The
+    // phase-1 notify is sticky (notify_waiters + notify_one); we then await the
+    // checkpointer's xlog-is-shutdown completion, bounded by the drain deadline so
+    // a dead checkpointer cannot hang us (we log and proceed, like a straggler).
+    aux.ckpt_phase1.notify_waiters();
+    aux.ckpt_phase1.notify_one();
+    tokio::select! {
+        () = aux.ckpt_xlog_done.notified() => {}
+        () = &mut deadline => {
+            crate::elog!(
+                crate::utils::elog::LOG,
+                "shutdown drain timed out waiting for shutdown checkpoint; proceeding".to_string()
+            );
+        }
+    }
+
+    // (4) PM_WAIT_AUX: shut down the non-checkpointer aux tasks. Each per-role
+    // notify wakes bgwriter/walwriter/pgarch/autovac-launcher exactly once.
+    for notify in aux.role_shutdown.values() {
+        notify.notify_waiters();
+        notify.notify_one();
+    }
+
+    // (5) Tell the checkpointer to EXIT (PG SIGUSR2). Sticky so a checkpointer
+    // that reaches phase-2 after this still sees it.
+    aux.ckpt_phase2.notify_waiters();
+    aux.ckpt_phase2.notify_one();
+
+    // (6) Await every aux task with the (remaining) deadline.
     loop {
         tokio::select! {
-            joined = backends.join_next() => {
+            joined = aux.join_set.join_next() => {
                 match joined {
-                    Some(j) => reap(registry, j),
-                    None => break, // all drained
+                    Some(Ok(role)) => {
+                        crate::elog!(crate::utils::elog::LOG, format!("aux task {role:?} exited"));
+                    }
+                    Some(Err(e)) => {
+                        crate::elog!(crate::utils::elog::LOG, format!("aux task join error: {e}"));
+                    }
+                    None => break, // all aux drained
                 }
             }
             () = &mut deadline => {
                 crate::elog!(
                     crate::utils::elog::LOG,
+                    format!("shutdown drain timed out; abandoning {} aux task(s)", aux.join_set.len())
+                );
+                aux.join_set.shutdown().await; // abort the stragglers
+                break;
+            }
+        }
+    }
+}
+
+/// Await the backend JoinSet until empty or the deadline fires (step 2 of the
+/// drain). On timeout, abort the stragglers (PG escalates to immediate / SIGKILL).
+async fn drain_backends(
+    backends: &mut JoinSet<ChildKey>,
+    registry: &ChildRegistry,
+    deadline: &mut std::pin::Pin<&mut tokio::time::Sleep>,
+) {
+    loop {
+        tokio::select! {
+            joined = backends.join_next() => {
+                match joined {
+                    Some(j) => reap(registry, j),
+                    None => break, // all backends drained
+                }
+            }
+            () = deadline.as_mut() => {
+                crate::elog!(
+                    crate::utils::elog::LOG,
                     format!("shutdown drain timed out; abandoning {} backend(s)", backends.len())
                 );
                 backends.shutdown().await; // abort the stragglers
-                break;
+                return;
             }
         }
     }
@@ -407,13 +518,161 @@ fn spawn_signal_shutdown(_shutdown: Shutdown) {
     // TODO: non-unix signal wiring; tests use the programmatic Shutdown handle.
 }
 
-/// PG `LaunchMissingBackgroundProcesses`. Aux tasks (checkpointer, bgwriter, WAL
-/// writer, autovacuum, archiver) are spawned here in step 17. Currently a no-op
-/// hook so the call site exists for Part B / step 17 to fill.
-#[allow(dead_code)]
-fn launch_missing_background_tasks(_shared: &Arc<SharedState>) {
-    // TODO(step17): spawn the long-lived auxiliary tasks as their own JoinSet
-    // children, restarting them on exit per PG's policy.
+/// The long-lived auxiliary roles the supervisor keeps running and restarts on
+/// unexpected exit (PG's `LaunchMissingBackgroundProcesses` set). The startup
+/// process is a boot-time one-shot and is NOT in this set; autovac/bgworkers are
+/// spawned on demand via the spawner hooks, not restarted here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum AuxRole {
+    Checkpointer,
+    BgWriter,
+    WalWriter,
+    PgArch,
+    AutoVacLauncher,
+}
+
+impl AuxRole {
+    /// The restartable roles, in first-started order. The checkpointer is first
+    /// (PG starts it first and stops it last; see the sequenced drain).
+    const RESTARTABLE: [Self; 5] = [
+        Self::Checkpointer,
+        Self::BgWriter,
+        Self::WalWriter,
+        Self::PgArch,
+        Self::AutoVacLauncher,
+    ];
+}
+
+/// Supervisor-side control block for the auxiliary tasks. Holds a DEDICATED aux
+/// `JoinSet` (separate from the backend `JoinSet`), a PER-ROLE shutdown signal,
+/// and the checkpointer's two-phase shutdown handles so the drain can sequence
+/// write-shutdown-checkpoint then exit.
+struct AuxTasks {
+    join_set: JoinSet<AuxRole>,
+    /// One shutdown `Notify` per non-checkpointer role (PG's SIGTERM to that aux
+    /// child). Each task owns its own handle so a single drain wakes it exactly
+    /// once -- a shared notify could be consumed by the wrong task's loop-top
+    /// poll. The checkpointer is driven by its two-phase handles instead.
+    role_shutdown: HashMap<AuxRole, Arc<Notify>>,
+    /// Checkpointer phase-1 (PG SIGINT / ShutdownXLOGPending): write the shutdown
+    /// checkpoint.
+    ckpt_phase1: Arc<Notify>,
+    /// Checkpointer phase-2 (PG SIGUSR2 / ShutdownRequestPending): exit.
+    ckpt_phase2: Arc<Notify>,
+    /// Checkpointer xlog-is-shutdown completion (PG
+    /// PMSIGNAL_XLOG_IS_SHUTDOWN): fired by the checkpointer once the shutdown
+    /// checkpoint is written. The drain AWAITS this between phase-1 and stopping
+    /// the other aux tasks (PM_WAIT_XLOG_SHUTDOWN -> PM_WAIT_XLOG_ARCHIVAL).
+    ckpt_xlog_done: Arc<Notify>,
+}
+
+impl AuxTasks {
+    fn new() -> Self {
+        Self {
+            join_set: JoinSet::new(),
+            role_shutdown: HashMap::new(),
+            ckpt_phase1: Arc::new(Notify::new()),
+            ckpt_phase2: Arc::new(Notify::new()),
+            ckpt_xlog_done: Arc::new(Notify::new()),
+        }
+    }
+
+    /// The shutdown handle for a non-checkpointer role, created on first use so a
+    /// restart reuses the same handle.
+    fn role_shutdown(&mut self, role: AuxRole) -> Arc<Notify> {
+        self.role_shutdown.entry(role).or_insert_with(|| Arc::new(Notify::new())).clone()
+    }
+
+    /// Spawn one aux role onto the aux JoinSet, wrapped in `catch_unwind` (the
+    /// task-boundary error model) and yielding its `AuxRole` so the restart logic
+    /// can identify which role exited. The checkpointer gets its two-phase
+    /// handles; the others get their per-role shutdown notify.
+    fn spawn_role(&mut self, role: AuxRole, shared: &Arc<SharedState>) {
+        let shared = shared.clone();
+        let shutdown = self.role_shutdown(role);
+        let ckpt_phase1 = self.ckpt_phase1.clone();
+        let ckpt_phase2 = self.ckpt_phase2.clone();
+        let ckpt_xlog_done = self.ckpt_xlog_done.clone();
+        self.join_set.spawn(async move {
+            use futures_util::FutureExt;
+            let fut = async move {
+                match role {
+                    AuxRole::Checkpointer => {
+                        checkpointer::checkpointer_main_phased(
+                            shared,
+                            ckpt_phase1,
+                            ckpt_phase2,
+                            ckpt_xlog_done,
+                        )
+                        .await;
+                    }
+                    AuxRole::BgWriter => bgwriter::background_writer_main(shared, shutdown).await,
+                    AuxRole::WalWriter => walwriter::wal_writer_main(shared, shutdown).await,
+                    AuxRole::PgArch => pgarch::pgarch_main(shared, shutdown).await,
+                    AuxRole::AutoVacLauncher => {
+                        autovacuum::auto_vac_launcher_main(shared, shutdown).await;
+                    }
+                }
+            };
+            if let Err(payload) = std::panic::AssertUnwindSafe(fut).catch_unwind().await {
+                log_caught_panic(&*payload);
+            }
+            role
+        });
+    }
+}
+
+/// PG `LaunchMissingBackgroundProcesses`. Spawn the long-lived auxiliary tasks
+/// onto the aux JoinSet and install the on-demand spawner hooks (autovac worker,
+/// bgworker) so the launcher->worker and register->worker paths reach the
+/// supervisor. Idempotent re-launch happens in `server_loop` (restart policy).
+fn launch_missing_background_tasks(shared: &Arc<SharedState>, aux: &mut AuxTasks) {
+    for role in AuxRole::RESTARTABLE {
+        // PG's postmaster only forks the autovacuum launcher when autovacuum is
+        // enabled (the for-wraparound-emergency case aside, which is deferred). With
+        // autovacuum off by default, the now-faithful get_database_list /
+        // do_autovacuum bodies are not driven into the deferred catalog stubs on the
+        // launcher's naptime timer.
+        if role == AuxRole::AutoVacLauncher
+            && !crate::backend::postmaster::autovacuum::auto_vacuuming_active()
+        {
+            continue;
+        }
+        aux.spawn_role(role, shared);
+    }
+    install_spawner_hooks(shared);
+}
+
+/// Install the autovac-worker and bgworker spawn hooks. The closures spawn the
+/// on-demand worker tasks onto a detached task (they are short-lived and not part
+/// of the restart set); each is wrapped in `catch_unwind` so a worker panic is
+/// contained. First install wins (the hooks are process-global `OnceLock`s), so
+/// re-launch after a restart is a no-op.
+fn install_spawner_hooks(shared: &Arc<SharedState>) {
+    let shared_av = shared.clone();
+    autovacuum::set_autovac_worker_spawner(Box::new(move |dbid| {
+        let shared = shared_av.clone();
+        tokio::spawn(async move {
+            use futures_util::FutureExt;
+            let fut = autovacuum::auto_vac_worker_main(shared, dbid);
+            if let Err(payload) = std::panic::AssertUnwindSafe(fut).catch_unwind().await {
+                log_caught_panic(&*payload);
+            }
+        });
+    }));
+
+    // bgworkers observe their slot `terminate` flag, not an aux shutdown notify.
+    crate::backend::postmaster::bgworker::set_bgworker_spawner(Box::new(move |handle| {
+        tokio::spawn(async move {
+            use futures_util::FutureExt;
+            let fut = async move {
+                crate::backend::postmaster::bgworker::run_background_worker(handle);
+            };
+            if let Err(payload) = std::panic::AssertUnwindSafe(fut).catch_unwind().await {
+                log_caught_panic(&*payload);
+            }
+        });
+    }));
 }
 
 // Compatibility note: the old header-stub `PostmasterMain(argc, argv) -> !` and
@@ -424,7 +683,10 @@ fn launch_missing_background_tasks(_shared: &Arc<SharedState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::postmaster::auxprocess::aux_test_serial;
     use crate::backend::tcop::backend_startup::test_hook;
+    use crate::storage::proc::proc_global;
+    use crate::storage::procnumber::INVALID_PROC_NUMBER;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tokio::io::AsyncWriteExt;
@@ -440,6 +702,12 @@ mod tests {
     // used by the backend-startup test module).
     use test_hook::serial as hook_serial;
 
+    // Every test that spawns the supervisor brings up the aux tasks, which claim
+    // process-wide aux PGPROCs + advertise ProcGlobal.<role>_proc. They MUST hold
+    // `aux_test_serial` (shared with checkpointer/walwriter/autovacuum tests) so
+    // those shared slots never interleave. When both guards are needed, take
+    // `aux_test_serial` FIRST (consistent order avoids deadlock).
+
     async fn wait_until<F: Fn() -> bool>(pred: F, timeout: Duration) -> bool {
         let start = std::time::Instant::now();
         while start.elapsed() < timeout {
@@ -453,6 +721,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn accepts_and_spawns_backend() {
+        let _aux = aux_test_serial().await;
         let _hook = hook_serial().await;
         test_hook::PANIC_ON_CONNECT.store(false, Ordering::SeqCst);
         let before = test_hook::CONNECTED.load(Ordering::SeqCst);
@@ -482,6 +751,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutdown_drains_and_returns() {
+        let _aux = aux_test_serial().await;
         let (sup, handle) =
             start_supervisor(loopback_port0(), SharedStateConfig::default()).await;
 
@@ -497,6 +767,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn registry_tracks_and_clears_a_backend() {
+        let _aux = aux_test_serial().await;
         let _hook = hook_serial().await;
         // The backend blocks reading the startup-packet length prefix; if we
         // never send and never close, it stays parked there, so the registry
@@ -529,6 +800,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn catch_unwind_contains_backend_panic() {
+        let _aux = aux_test_serial().await;
         let _hook = hook_serial().await;
         // A panicking backend must NOT take down the supervisor runtime.
         test_hook::PANIC_ON_CONNECT.store(true, Ordering::SeqCst);
@@ -584,5 +856,143 @@ mod tests {
 
         registry.remove(key);
         assert!(registry.count() < max, "after exit, admits again");
+    }
+
+    // --- step 17f: supervisor aux integration --------------------------------
+    use std::sync::atomic::Ordering as AtomicOrdering;
+
+    /// start_supervisor brings the aux tasks up: the checkpointer, walwriter, and
+    /// autovac launcher each advertise their ProcGlobal proc number. Triggering
+    /// shutdown drains every aux task and clears those advertisements.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn supervisor_starts_and_drains_aux_tasks() {
+        let _serial = aux_test_serial().await;
+        // Autovacuum defaults OFF, so the supervisor does NOT start the launcher
+        // (its now-faithful get_database_list / do_autovacuum bodies would drive the
+        // deferred pg_database/pg_class catalog stubs on the launcher's naptime
+        // timer). We therefore assert only the always-on roles that advertise a
+        // ProcGlobal slot: the checkpointer and the walwriter.
+        let (sup, handle) =
+            start_supervisor(loopback_port0(), SharedStateConfig::default()).await;
+        let g = proc_global().expect("ProcGlobal published").clone();
+
+        // The always-on roles that advertise a ProcGlobal slot come up.
+        assert!(
+            wait_until(
+                || g.checkpointer_proc.load(AtomicOrdering::Acquire) != INVALID_PROC_NUMBER
+                    && g.walwriter_proc.load(AtomicOrdering::Acquire) != INVALID_PROC_NUMBER,
+                Duration::from_secs(3)
+            )
+            .await,
+            "checkpointer/walwriter should advertise their procs"
+        );
+
+        // Shutdown drains the aux JoinSet within the timeout and the supervisor
+        // task returns.
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(8), handle)
+            .await
+            .expect("supervisor should drain aux tasks and return")
+            .expect("supervisor task panicked");
+
+        // Every advertised aux proc is cleared on exit.
+        assert!(
+            wait_until(
+                || g.checkpointer_proc.load(AtomicOrdering::Acquire) == INVALID_PROC_NUMBER
+                    && g.walwriter_proc.load(AtomicOrdering::Acquire) == INVALID_PROC_NUMBER,
+                Duration::from_secs(2)
+            )
+            .await,
+            "aux proc advertisements should be cleared after drain"
+        );
+    }
+
+    /// The two-phase checkpointer shutdown writes the SHUTDOWN checkpoint (phase
+    /// 1) BEFORE it exits (phase 2). Drives `checkpointer_main_phased` directly
+    /// and asserts the ordering via the test flag the post-loop sets.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+    async fn checkpointer_two_phase_writes_shutdown_ckpt_before_exit() {
+        use crate::backend::postmaster::checkpointer;
+        let _serial = aux_test_serial().await;
+
+        let shared = SharedState::new(SharedStateConfig::default());
+        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
+        let g = proc_global().expect("ProcGlobal published").clone();
+
+        checkpointer::tests::SHUTDOWN_CKPT_WRITTEN.store(false, AtomicOrdering::Release);
+        let phase1 = Arc::new(Notify::new());
+        let phase2 = Arc::new(Notify::new());
+        let xlog_shutdown_done = Arc::new(Notify::new());
+
+        let task = tokio::spawn(checkpointer::checkpointer_main_phased(
+            shared.clone(),
+            phase1.clone(),
+            phase2.clone(),
+            xlog_shutdown_done.clone(),
+        ));
+
+        assert!(
+            wait_until(
+                || g.checkpointer_proc.load(AtomicOrdering::Acquire) != INVALID_PROC_NUMBER,
+                Duration::from_secs(2)
+            )
+            .await,
+            "checkpointer should advertise its proc"
+        );
+
+        // Phase 1: write the shutdown checkpoint. The task must NOT exit yet -- it
+        // parks on phase 2 -- but it must record that the checkpoint was written.
+        phase1.notify_waiters();
+        phase1.notify_one();
+        assert!(
+            wait_until(
+                || checkpointer::tests::SHUTDOWN_CKPT_WRITTEN.load(AtomicOrdering::Acquire),
+                Duration::from_secs(2)
+            )
+            .await,
+            "phase 1 should write the shutdown checkpoint"
+        );
+        // The xlog-is-shutdown completion fires AFTER the checkpoint is written and
+        // BEFORE phase-2 (we have not fired phase-2 yet), so it must be observable
+        // now -- this is what the drain awaits before stopping the other aux tasks.
+        tokio::time::timeout(Duration::from_secs(2), xlog_shutdown_done.notified())
+            .await
+            .expect("xlog-is-shutdown completion should fire after the shutdown checkpoint");
+        assert!(!task.is_finished(), "checkpointer must wait for phase 2 to exit");
+
+        // Phase 2: now the task may exit.
+        phase2.notify_waiters();
+        phase2.notify_one();
+        tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .expect("checkpointer should exit after phase 2")
+            .expect("checkpointer task panicked");
+        assert_eq!(
+            g.checkpointer_proc.load(AtomicOrdering::Acquire),
+            INVALID_PROC_NUMBER,
+            "checkpointer proc cleared on exit"
+        );
+    }
+
+    /// An aux task that exits during NORMAL operation is respawned (PG's
+    /// LaunchMissingBackgroundProcesses restart policy). Drive `respawn_aux`
+    /// directly: a synthetic "exited" result for a role re-populates the JoinSet.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+    async fn unexpected_aux_exit_is_respawned() {
+        let _serial = aux_test_serial().await;
+        let shared = SharedState::new(SharedStateConfig::default());
+        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
+
+        let mut aux = AuxTasks::new();
+        // Simulate the bgwriter having just exited unexpectedly.
+        respawn_aux(&mut aux, &shared, Ok(AuxRole::BgWriter));
+        assert_eq!(aux.join_set.len(), 1, "respawn should put a task back on the set");
+
+        // Drain it so the test leaves no live task behind.
+        for notify in aux.role_shutdown.values() {
+            notify.notify_waiters();
+            notify.notify_one();
+        }
+        let _ = tokio::time::timeout(Duration::from_secs(3), aux.join_set.join_next()).await;
     }
 }

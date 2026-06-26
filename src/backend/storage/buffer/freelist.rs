@@ -206,6 +206,13 @@ impl StrategyControl {
     }
 }
 
+/// C: `StrategyNotifyBgWriter`. Records the bgwriter's ProcNumber so
+/// `StrategyGetBuffer` can wake it at the next buffer allocation (`-1` clears the
+/// request). TODO(bufmgr): store into StrategyControl + ring the latch on alloc.
+/// A non-panicking no-op for now: the long-lived bgwriter calls this on its
+/// hibernate path and must not panic on a timer.
+pub fn strategy_notify_bg_writer(_bgwprocno: crate::storage::procnumber::ProcNumber) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

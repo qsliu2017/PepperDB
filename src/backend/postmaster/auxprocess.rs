@@ -17,24 +17,51 @@
 use std::sync::Arc;
 
 use crate::backend::storage::ipc::procsignal::{ProcSignal, ProcSignalSlot, SlotKey};
+use crate::backend::storage::lmgr::proc::InitAuxiliaryProcess;
 use crate::backend::utils::init::postinit::backend_task_init;
 use crate::backend::utils::resowner::resowner::ResourceOwner;
 use crate::miscadmin::BackendType;
 use crate::session::Session;
 use crate::storage::latch::Latch;
+use crate::storage::proc::{current_proc_number, proc_global};
+use crate::storage::procnumber::ProcNumber;
 
 // Re-export the aux main-loop interrupt service entry (step 04 / interrupt.c) so
 // step-17 loops call it as `auxprocess::process_main_loop_interrupts()`.
 pub use crate::backend::postmaster::interrupt::process_main_loop_interrupts;
 
+/// Test-only serialization across ALL aux-task tests (checkpointer / bgwriter /
+/// walwriter). They share the single process-wide `ProcGlobal` arena + the aux
+/// PGPROC slots + the `ProcGlobal.<role>_proc` advertisements, so two aux tasks
+/// from different modules running concurrently would contend on that shared state
+/// (e.g. an aux task claiming/returning slots while a checkpointer WAIT is in
+/// flight). Every aux-task test holds this guard for its duration.
+#[cfg(test)]
+pub(crate) async fn aux_test_serial() -> tokio::sync::MutexGuard<'static, ()> {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    LOCK.lock().await
+}
+
 /// The per-task handles an auxiliary task holds for its lifetime. The aux loop
-/// scopes `session` / `slot` / `owner` as task-locals and rings `slot.latch` /
+/// scopes `session` / `slot` / `owner` as task-locals and rings `latch` /
 /// reads `slot.flags` for wakeups; on exit it deregisters via `slot_key`.
 pub struct AuxProcess {
     pub session: Arc<Session>,
     pub slot: Arc<ProcSignalSlot>,
     pub slot_key: SlotKey,
     pub owner: ResourceOwner,
+    /// The task's single wakeup latch -- the loop waits AND resets exactly this
+    /// one. For the `_with_proc` cradle it is the claimed PGPROC `proc_latch`
+    /// (also the latch the proc-signal slot was registered with: PG's
+    /// `MyLatch == MyProc->procLatch` for an aux proc), so a wake by `ProcNumber`
+    /// (the PGPROC latch) AND a proc-signal/barrier send hit the same latch -- no
+    /// second sticky latch to busy-spin on. For the plain cradle it is the
+    /// freshly created slot latch (same object as `slot.latch`).
+    pub latch: Arc<Latch>,
+    /// Set when this aux flavor claimed a PGPROC (the `_with_proc` variant). The
+    /// task advertises this in `ProcGlobal.<role>_proc` so backends can wake it
+    /// by `ProcNumber`. `INVALID_PROC_NUMBER` for the plain cradle.
+    pub proc_number: ProcNumber,
 }
 
 /// PG `AuxiliaryProcessMainCommon`. Build the aux task's identity + proc-signal
@@ -48,6 +75,22 @@ pub async fn auxiliary_process_main_common(
     proc_signal: &Arc<ProcSignal>,
     backend_type: BackendType,
 ) -> AuxProcess {
+    // Plain cradle: a fresh slot latch is the only wakeup source.
+    let latch = Arc::new(Latch::new());
+    aux_common(proc_signal, backend_type, latch, crate::storage::procnumber::INVALID_PROC_NUMBER)
+        .await
+}
+
+/// Shared body of both cradles. Builds identity + resource owner, registers the
+/// proc-signal slot WITH the given `latch`, and returns the handles. `latch` is
+/// the task's single wakeup latch; for `_with_proc` it is the claimed PGPROC
+/// `proc_latch` so the slot and the PGPROC-latch wakeup share one latch.
+async fn aux_common(
+    proc_signal: &Arc<ProcSignal>,
+    backend_type: BackendType,
+    latch: Arc<Latch>,
+    proc_number: ProcNumber,
+) -> AuxProcess {
     // Identity slice (step 08) for this aux task.
     let session = backend_task_init(backend_type).await;
     let proc_pid = session.proc_pid();
@@ -56,10 +99,9 @@ pub async fn auxiliary_process_main_common(
     // deferred (steps 12-15); nothing to do yet.
     crate::backend::utils::init::postinit::base_init();
 
-    // Register a proc-signal slot. Aux processes have no query-cancel key
-    // (PG passes ProcSignalInit(NULL, 0)); an empty key disables cancellation.
-    let latch = Arc::new(Latch::new());
-    let (slot_key, slot) = proc_signal.register(proc_pid, &[], latch);
+    // Register a proc-signal slot WITH `latch`. Aux processes have no query-cancel
+    // key (PG passes ProcSignalInit(NULL, 0)); an empty key disables cancellation.
+    let (slot_key, slot) = proc_signal.register(proc_pid, &[], latch.clone());
 
     // Aux processes don't run transactions but may pin buffers outside one
     // (PG's CreateAuxProcessResourceOwner).
@@ -69,7 +111,34 @@ pub async fn auxiliary_process_main_common(
 
     // TODO(step17): pgstat_beinit / before_shmem_exit(ShutdownAuxiliaryProcess)
     // and the concrete aux loop are wired by the individual aux tasks.
-    AuxProcess { session, slot, slot_key, owner }
+    AuxProcess { session, slot, slot_key, owner, latch, proc_number }
+}
+
+/// PG `AuxiliaryProcessMainCommon` for aux tasks that backends wake BY
+/// `ProcNumber` (checkpointer / walwriter / bgwriter). Same as
+/// [`auxiliary_process_main_common`] but also claims a PGPROC via
+/// `InitAuxiliaryProcess` and reports its `proc_number`. The caller advertises
+/// that number in `ProcGlobal.<role>_proc`, and waits on the PGPROC `proc_latch`
+/// (reached through the arena) as its single wakeup latch -- PG's
+/// `MyLatch == MyProc->procLatch` for an aux process.
+///
+/// Must run inside `my_proc_scope` (the PGPROC `task_local` slot) so
+/// `InitAuxiliaryProcess` can publish `MyProcNumber`.
+pub async fn auxiliary_process_main_common_with_proc(
+    proc_signal: &Arc<ProcSignal>,
+    backend_type: BackendType,
+) -> AuxProcess {
+    // Claim one of the auxiliary PGPROC slots + initialize its proc_latch FIRST,
+    // so we can register the proc-signal slot against that SAME latch (one unified
+    // wakeup: PG's MyLatch == MyProc->procLatch for an aux proc).
+    InitAuxiliaryProcess();
+    let proc_number = current_proc_number();
+    let g = proc_global().expect("InitAuxiliaryProcess requires a published ProcGlobal");
+    // SAFETY: read-only clone of our own freshly claimed slot's proc_latch Arc;
+    // proc_latch is internally synchronized and InitAuxiliaryProcess just inited it.
+    let proc_latch = unsafe { g.proc(proc_number).expect("our aux PGPROC").proc_latch.clone() };
+
+    aux_common(proc_signal, backend_type, proc_latch, proc_number).await
 }
 
 #[cfg(test)]
@@ -82,9 +151,53 @@ mod tests {
         let aux = auxiliary_process_main_common(&reg, BackendType::CHECKPOINTER).await;
         assert_eq!(aux.session.backend_type(), BackendType::CHECKPOINTER);
         assert_eq!(reg.len(), 1, "aux slot should be registered");
+        assert_eq!(
+            aux.proc_number,
+            crate::storage::procnumber::INVALID_PROC_NUMBER,
+            "plain cradle claims no PGPROC"
+        );
 
         // Deregister cleans up.
         reg.deregister(aux.slot_key);
         assert_eq!(reg.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn with_proc_claims_a_pgproc() {
+        // Publish a ProcGlobal so InitAuxiliaryProcess can claim an aux slot.
+        let shared = crate::shared_state::SharedState::new(
+            crate::shared_state::SharedStateConfig::default(),
+        );
+        let _ = proc_global().is_some() || crate::storage::proc::set_proc_global(shared.proc_global().clone());
+        let g = proc_global().expect("a ProcGlobal is published").clone();
+
+        crate::storage::proc::my_proc_scope(async {
+            let aux = auxiliary_process_main_common_with_proc(
+                shared.proc_signal(),
+                BackendType::CHECKPOINTER,
+            )
+            .await;
+            assert_ne!(
+                aux.proc_number,
+                crate::storage::procnumber::INVALID_PROC_NUMBER,
+                "the _with_proc cradle claims a PGPROC"
+            );
+            // The aux's single latch IS the claimed PGPROC's proc_latch AND the
+            // proc-signal slot's latch -- one unified wakeup (no second latch).
+            // SAFETY: read-only access to our own slot's latch.
+            let proc_latch = unsafe { &g.proc(aux.proc_number).expect("aux PGPROC").proc_latch };
+            assert!(
+                Arc::ptr_eq(&aux.latch, proc_latch),
+                "aux.latch is the PGPROC proc_latch"
+            );
+            assert!(
+                Arc::ptr_eq(&aux.latch, &aux.slot.latch),
+                "the proc-signal slot was registered with the SAME latch"
+            );
+            // The unified latch is usable (set/wait).
+            aux.latch.set();
+            aux.latch.wait().await; // set-before-wait returns immediately
+        })
+        .await;
     }
 }

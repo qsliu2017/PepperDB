@@ -299,6 +299,7 @@ pub mod test_hook {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::postmaster::auxprocess::aux_test_serial;
     use crate::backend::postmaster::postmaster::start_supervisor;
     use crate::shared_state::SharedStateConfig;
     use std::time::Duration;
@@ -349,8 +350,15 @@ mod tests {
     // by the supervisor's catch_unwind and leaves the slot registered).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn startup_packet_registers_slot() {
+        let _aux = aux_test_serial().await;
         let _hook = test_hook::serial().await;
         let (sup, handle) = start_supervisor(loopback_port0(), SharedStateConfig::default()).await;
+
+        // The supervisor also brings up the aux tasks, which register their own
+        // proc-signal slots; let those settle, then measure the backend as a
+        // DELTA of one over that baseline.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let baseline = sup.shared.proc_signal().len();
 
         let mut client = ClientStream::connect(sup.local_addr).await.expect("connect");
         // protocol 0x00030000 + "user\0alice\0database\0db1\0\0".
@@ -359,7 +367,11 @@ mod tests {
         client.write_all(&framed(&body)).await.expect("write startup");
 
         assert!(
-            wait_until(|| sup.shared.proc_signal().len() == 1, Duration::from_secs(2)).await,
+            wait_until(
+                || sup.shared.proc_signal().len() == baseline + 1,
+                Duration::from_secs(2)
+            )
+            .await,
             "backend should have registered exactly one proc-signal slot"
         );
 
@@ -374,6 +386,7 @@ mod tests {
     // SSL NEGOTIATION: an SSLRequest must get a single 'N' (no SSL) reply.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ssl_request_gets_n_reply() {
+        let _aux = aux_test_serial().await;
         let _hook = test_hook::serial().await;
         let (sup, handle) = start_supervisor(loopback_port0(), SharedStateConfig::default()).await;
 
@@ -405,6 +418,7 @@ mod tests {
     async fn cancel_request_sets_target_flag() {
         use std::sync::atomic::Ordering;
 
+        let _aux = aux_test_serial().await;
         let _hook = test_hook::serial().await;
         let (sup, handle) = start_supervisor(loopback_port0(), SharedStateConfig::default()).await;
 

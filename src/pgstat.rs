@@ -424,7 +424,9 @@ pub fn pgstat_have_entry(kind: PgStat_Kind, dboid: Oid, objid: u64) -> bool {
 // ---- Functions in pgstat_archiver.c ----
 
 pub fn pgstat_report_archiver(xlog: &str, failed: bool) {
-    unimplemented!()
+    // TODO(pgstat): cumulative stats not wired; no-op so the archiver's periodic
+    // scan path never panics (matches pgstat_report_bgwriter/wal).
+    let _ = (xlog, failed);
 }
 pub fn pgstat_fetch_stat_archiver() -> &'static PgStat_ArchiverStats {
     unimplemented!()
@@ -468,7 +470,8 @@ pub fn pgstat_create_backend(procnum: ProcNumber) {
 // ---- Functions in pgstat_bgwriter.c ----
 
 pub fn pgstat_report_bgwriter() {
-    unimplemented!()
+    // TODO(pgstat): flush the pending bgwriter stats. No-op for now: the
+    // long-lived bgwriter calls this every cycle and must not panic on a timer.
 }
 pub fn pgstat_fetch_stat_bgwriter() -> &'static PgStat_BgWriterStats {
     unimplemented!()
@@ -791,8 +794,9 @@ pub fn pgstat_execute_transactional_drops(
 
 // ---- Functions in pgstat_wal.c ----
 
-pub fn pgstat_report_wal(force: bool) {
-    unimplemented!()
+pub fn pgstat_report_wal(_force: bool) {
+    // TODO(pgstat): flush the pending WAL stats. No-op for now: the long-lived
+    // bgwriter / walwriter call this every cycle and must not panic on a timer.
 }
 pub fn pgstat_fetch_stat_wal() -> &'static PgStat_WalStats {
     unimplemented!()

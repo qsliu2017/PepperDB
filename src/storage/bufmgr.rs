@@ -366,7 +366,9 @@ pub fn DebugPrintBufferRefcount(_buffer: Buffer) -> String {
 }
 
 pub fn CheckPointBuffers(_flags: i32) {
-    unimplemented!()
+    // TODO(step:bufmgr): real BufferSync (flush all dirty shared buffers, throttled
+    // via CheckpointWriteDelay). A no-op for now so the checkpointer task never
+    // panics on a timed checkpoint.
 }
 
 #[deprecated(note = "use `shared.buffers().buffer_get_block_number(buffer)`")]
@@ -480,8 +482,12 @@ pub fn HoldingBufferPinThatDelaysRecovery() -> bool {
 }
 
 /// `wb_context` is a buf_internals.h type (deferred); dropped from the signature.
+/// Returns whether the bgwriter may hibernate (PG: true when nothing happened).
+/// TODO(bufmgr): the real clock-sweep dirty-buffer flush. A non-panicking no-op
+/// for now: the long-lived bgwriter task calls this every BgWriterDelay and must
+/// not panic on a timer. Reports "can hibernate" (nothing to do).
 pub fn BgBufferSync() -> bool {
-    unimplemented!()
+    true
 }
 
 pub fn GetPinLimit() -> u32 {

@@ -158,7 +158,7 @@ pub struct PGPROC {
     pub wait_status: ProcWaitStatus,
     /// Grant-wait wake primitive (PG procLatch). ProcWakeup sets it; ProcSleep
     /// awaits it.
-    pub proc_latch: crate::storage::latch::Latch,
+    pub proc_latch: Arc<crate::storage::latch::Latch>,
     /// Top-level xact's XID if running and assigned, else InvalidTransactionId.
     /// Mirrored in ProcGlobal->xids[pgxactoff].
     pub xid: TransactionId,
@@ -297,7 +297,7 @@ impl PGPROC {
         Self {
             proc_global_list: ProcGlobalList::None,
             wait_status: ProcWaitStatus::OK,
-            proc_latch: crate::storage::latch::Latch::new(),
+            proc_latch: Arc::new(crate::storage::latch::Latch::new()),
             xid: TransactionId(0),
             xmin: TransactionId(0),
             pid: 0,
@@ -437,6 +437,10 @@ pub struct ProcGlobal {
     pub walwriter_proc: AtomicI32,
     /// Current slot number of the checkpointer.
     pub checkpointer_proc: AtomicI32,
+    /// Proc number of the autovacuum launcher, or INVALID when none. PG advertises
+    /// the launcher PID in `AutoVacuumShmem->av_launcherpid`; under our model a
+    /// worker rings the launcher by its proc number on exit (FreeWorkerInfo).
+    pub autovacuum_launcher_proc: AtomicI32,
 
     /// Buffer id the Startup process waits for pin on, or -1.
     pub startup_buffer_pin_wait_buf_id: AtomicI32,
@@ -507,6 +511,7 @@ impl ProcGlobal {
             clog_group_first: AtomicU32::new(INVALID_PROC_NUMBER as u32),
             walwriter_proc: AtomicI32::new(INVALID_PROC_NUMBER),
             checkpointer_proc: AtomicI32::new(INVALID_PROC_NUMBER),
+            autovacuum_launcher_proc: AtomicI32::new(INVALID_PROC_NUMBER),
             startup_buffer_pin_wait_buf_id: AtomicI32::new(-1),
             aux_proc_base: counts.max_backends as ProcNumber,
             prepared_xact_base: (counts.max_backends + counts.num_auxiliary) as ProcNumber,
@@ -566,6 +571,46 @@ impl ProcGlobal {
     pub(crate) fn free_proc(&self, kind: ProcGlobalList, procno: ProcNumber) {
         let mut f = self.free.lock().unwrap();
         f.list_mut(kind).push(procno);
+    }
+
+    /// PG `InitAuxiliaryProcess` scan+claim, serialized under the ex-`ProcStructLock`.
+    /// Aux PGPROCs have no freelist; PG scans `AuxiliaryProcs` for a slot with
+    /// `pid == 0` and claims it by writing `pid`. The whole claim AND the owner's
+    /// field init (`init`) run under `ProcStructLock`: another task's scan reads the
+    /// `pid` of every slot, so the slot's own field init -- which also touches
+    /// `pid` -- must not run concurrently with a scan, or the two data-race on the
+    /// PGPROC. Returns the claimed slot, or None if all aux slots are in use.
+    pub(crate) fn claim_aux_slot(
+        &self,
+        pid: i32,
+        init: impl FnOnce(&mut PGPROC, ProcNumber),
+    ) -> Option<ProcNumber> {
+        let _f = self.free.lock().unwrap();
+        for i in 0..NUM_AUXILIARY_PROCS {
+            let procno = self.aux_proc_base + i;
+            // SAFETY: the ProcStructLock (`free`) is held for the whole claim +
+            // init, gating every PGPROC field a concurrent scan/claim could read.
+            let proc = unsafe { self.proc_mut(procno)? };
+            if proc.pid == 0 {
+                proc.pid = pid;
+                init(proc, procno);
+                return Some(procno);
+            }
+        }
+        None
+    }
+
+    /// PG `AuxiliaryProcKill`: release an aux PGPROC, serialized under the
+    /// ex-`ProcStructLock` so the owner's final field clears (`clear`) and the
+    /// `pid` release cannot race a concurrent `claim_aux_slot` scan/init.
+    pub(crate) fn release_aux_slot(&self, procno: ProcNumber, clear: impl FnOnce(&mut PGPROC)) {
+        let _f = self.free.lock().unwrap();
+        // SAFETY: the ProcStructLock (`free`) is held, gating every PGPROC field a
+        // concurrent scan/claim could read.
+        if let Some(proc) = unsafe { self.proc_mut(procno) } {
+            clear(proc);
+            proc.pid = 0;
+        }
     }
 
     /// Count of free regular-backend PGPROCs, capped at `n` (PG HaveNFreeProcs).

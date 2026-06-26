@@ -596,28 +596,41 @@ pub fn superuser_arg(roleid: Oid) -> bool {
 
 /// The three POSTGRES processing modes. (C enum, sequential.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ProcessingMode {
     BootstrapProcessing,
     InitProcessing,
     NormalProcessing,
 }
 
-pub static mut Mode: ProcessingMode = ProcessingMode::InitProcessing;
+// PG `Mode` is a per-process global; in the single-process async model every task
+// shares it, so it is an atomic (tasks set NormalProcessing at startup concurrently).
+static MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(ProcessingMode::InitProcessing as u8);
+
+impl ProcessingMode {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            x if x == Self::BootstrapProcessing as u8 => Self::BootstrapProcessing,
+            x if x == Self::NormalProcessing as u8 => Self::NormalProcessing,
+            _ => Self::InitProcessing,
+        }
+    }
+}
 
 pub fn is_bootstrap_processing_mode() -> bool {
-    unsafe { Mode == ProcessingMode::BootstrapProcessing }
+    get_processing_mode() == ProcessingMode::BootstrapProcessing
 }
 pub fn is_init_processing_mode() -> bool {
-    unsafe { Mode == ProcessingMode::InitProcessing }
+    get_processing_mode() == ProcessingMode::InitProcessing
 }
 pub fn is_normal_processing_mode() -> bool {
-    unsafe { Mode == ProcessingMode::NormalProcessing }
+    get_processing_mode() == ProcessingMode::NormalProcessing
 }
 pub fn get_processing_mode() -> ProcessingMode {
-    unsafe { Mode }
+    ProcessingMode::from_u8(MODE.load(std::sync::atomic::Ordering::Relaxed))
 }
 pub fn set_processing_mode(mode: ProcessingMode) {
-    unsafe { Mode = mode }
+    MODE.store(mode as u8, std::sync::atomic::Ordering::Relaxed);
 }
 
 bitflags! {

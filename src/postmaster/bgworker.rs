@@ -3,7 +3,6 @@
 use bitflags::bitflags;
 
 use crate::postgres::Datum;
-use crate::postgres_ext::Oid;
 
 // bgw_flags values (BGWORKER_*). BGWORKER_CLASS_PARALLEL is internal.
 bitflags! {
@@ -66,65 +65,30 @@ pub enum BgwHandleStatus {
     PostmasterDied,   // postmaster died; worker status unclear
 }
 
-// Opaque handle to a dynamically-registered worker.
+// Opaque handle to a dynamically-registered worker: a (slot, generation) pair.
+// The fields are pub(crate) so the implementation (src/backend/.../bgworker.rs)
+// reads them while external callers treat the handle as opaque.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BackgroundWorkerHandle {
-    _private: (),
+    pub(crate) slot: usize,
+    pub(crate) generation: u64,
 }
 
-pub fn register_background_worker(_worker: &BackgroundWorker) {
-    unimplemented!()
-}
-
-/// C: `bool RegisterDynamicBackgroundWorker(BackgroundWorker *, BackgroundWorkerHandle **)`.
-/// Returns the handle on success, `None` on failure.
-pub fn register_dynamic_background_worker(
-    _worker: &BackgroundWorker,
-) -> Option<BackgroundWorkerHandle> {
-    unimplemented!()
-}
-
-/// C: `BgwHandleStatus GetBackgroundWorkerPid(handle, pid_t *pidp)`.
-/// Pairs the status with the worker pid when started.
-pub fn get_background_worker_pid(_handle: &BackgroundWorkerHandle) -> (BgwHandleStatus, i32) {
-    unimplemented!()
-}
-
-pub fn wait_for_background_worker_startup(_handle: &BackgroundWorkerHandle) -> (BgwHandleStatus, i32) {
-    unimplemented!()
-}
-
-pub fn wait_for_background_worker_shutdown(_handle: &BackgroundWorkerHandle) -> BgwHandleStatus {
-    unimplemented!()
-}
-
-pub fn get_background_worker_type_by_pid(_pid: i32) -> Option<String> {
-    unimplemented!()
-}
-
-pub fn terminate_background_worker(_handle: &BackgroundWorkerHandle) {
-    unimplemented!()
-}
-
-pub fn background_worker_initialize_connection(
-    _dbname: Option<&str>,
-    _username: Option<&str>,
-    _flags: BgworkerBypassFlags,
-) {
-    unimplemented!()
-}
-
-pub fn background_worker_initialize_connection_by_oid(
-    _dboid: Oid,
-    _useroid: Oid,
-    _flags: BgworkerBypassFlags,
-) {
-    unimplemented!()
-}
-
-pub fn background_worker_block_signals() {
-    unimplemented!()
-}
-
-pub fn background_worker_unblock_signals() {
-    unimplemented!()
-}
+// Definitions live in src/backend/postmaster/bgworker.rs (the .c translation);
+// these `pub use`s expose them under their C names.
+pub use crate::backend::postmaster::bgworker::{
+    background_worker_block_signals, background_worker_initialize_connection,
+    background_worker_initialize_connection_by_oid, background_worker_unblock_signals,
+    get_background_worker_handle as GetBackgroundWorkerHandle,
+    get_background_worker_pid as GetBackgroundWorkerPid,
+    get_background_worker_type_by_pid as GetBackgroundWorkerTypeByPid,
+    register_background_worker as RegisterBackgroundWorker,
+    register_dynamic_background_worker as RegisterDynamicBackgroundWorker,
+    terminate_background_worker as TerminateBackgroundWorker,
+    wait_for_background_worker_shutdown as WaitForBackgroundWorkerShutdown,
+    wait_for_background_worker_startup as WaitForBackgroundWorkerStartup,
+};
+pub use background_worker_block_signals as BackgroundWorkerBlockSignals;
+pub use background_worker_initialize_connection as BackgroundWorkerInitializeConnection;
+pub use background_worker_initialize_connection_by_oid as BackgroundWorkerInitializeConnectionByOid;
+pub use background_worker_unblock_signals as BackgroundWorkerUnblockSignals;

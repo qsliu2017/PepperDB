@@ -277,6 +277,14 @@ pub fn at_eo_xact_smgr() {
     let _ = SMGR_CACHE.try_with(|c| c.borrow_mut().clear());
 }
 
+/// smgrdestroyall() -- close and destroy every open smgr relation. The bgwriter
+/// calls this after each checkpoint to release dropped-relation handles (it does
+/// not see invalidation messages). Here it drops every cached handle for this
+/// task; the underlying close is I/O-free.
+pub fn smgrdestroyall() {
+    let _ = SMGR_CACHE.try_with(|c| c.borrow_mut().clear());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

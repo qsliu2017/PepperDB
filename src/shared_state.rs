@@ -158,7 +158,26 @@ shared_state! {
     /// Shared cache-invalidation transport (PG sinvaladt.c `SISeg`; ipci.c
     /// `SharedInvalShmemInit` slot). The SI ring buffer + per-backend read state.
     sinval: crate::backend::storage::ipc::sinvaladt::SInvalBuffer,
-    // Future Arc fields (checkpointer, ...) are inserted by later steps -- see new().
+
+    /// Checkpointer<->backend shared state (PG checkpointer.c
+    /// `CheckpointerShmemStruct`; ipci.c `CheckpointerShmemInit` slot). The
+    /// checkpoint-request counters + the start/done condition variables. The
+    /// cross-process fsync forwarding is gone (single-process drains the shared
+    /// `sync_requests` queue directly).
+    checkpointer: crate::backend::postmaster::checkpointer::CheckpointerShmem,
+
+    /// Autovacuum launcher<->worker shared state (PG autovacuum.c
+    /// `AutoVacuumShmemStruct`; ipci.c `AutoVacuumShmemInit` slot). The worker
+    /// freelist / running list / starting-worker pointer + the WorkerInfo array +
+    /// the work-item array, all under one Mutex (PG `AutovacuumLock`).
+    autovacuum: crate::backend::postmaster::autovacuum::AutoVacuumShmem,
+
+    /// Background-worker slot table (PG bgworker.c `BackgroundWorkerData`; ipci.c
+    /// `BackgroundWorkerShmemInit` slot, between TwoPhase and SharedInval). The
+    /// fixed slot array + the parallel register/terminate counters, all under one
+    /// Mutex (PG `BackgroundWorkerLock`). Published process-wide so dynamic
+    /// registration / handle polling reach one struct without a SharedState handle.
+    bgworker: crate::backend::postmaster::bgworker::BackgroundWorkerShmem,
 }
 
 /// Default `PROCARRAY_MAXPROCS` (MaxBackends + max_prepared_xacts) when the
@@ -276,7 +295,12 @@ impl SharedState {
             crate::backend::storage::ipc::procarray::proc_array_shmem_init(procarray_maxprocs);
         //   (BackendStatusShmemInit -- pgstat, deferred)
         //   (TwoPhaseShmemInit -- deferred)
-        // TODO(step17): BackgroundWorkerShmemInit  here
+        // BackgroundWorkerShmemInit -- step17. The bgworker slot table + the
+        // parallel register/terminate counters. Sized from max_worker_processes.
+        // Published process-wide so RegisterDynamicBackgroundWorker / handle
+        // polling, called by arbitrary backends, reach one struct.
+        let bgworker = crate::backend::postmaster::bgworker::BackgroundWorkerShmem::new();
+        crate::backend::postmaster::bgworker::set_bgworker_shmem(bgworker.clone());
 
         // Set up shared-inval messaging:
         // SharedInvalShmemInit -- step16. The SI ring transport; published
@@ -289,8 +313,17 @@ impl SharedState {
         // Published process-wide so a foreign sender (sinval catchup) reaches it.
         let proc_signal = crate::backend::storage::ipc::procsignal::proc_signal_shared();
         // (sync_requests is constructed earlier, before the clog/subtrans SLRUs.)
-        // TODO(step17): CheckpointerShmemInit  here
-        // TODO(step17): AutoVacuumShmemInit  here
+        // CheckpointerShmemInit -- step17. The checkpoint-request counters + the
+        // start/done CVs. Published process-wide so RequestCheckpoint, called by
+        // arbitrary backends, reaches it without a SharedState handle.
+        let checkpointer = crate::backend::postmaster::checkpointer::CheckpointerShmem::new();
+        crate::backend::postmaster::checkpointer::set_checkpointer_shmem(checkpointer.clone());
+        // AutoVacuumShmemInit -- step17. The launcher<->worker worker freelist /
+        // running list / work items. Published process-wide so the launcher, the
+        // workers, and backends (AutoVacuumRequestWork) reach one struct without a
+        // SharedState handle.
+        let autovacuum = crate::backend::postmaster::autovacuum::AutoVacuumShmem::new();
+        crate::backend::postmaster::autovacuum::set_autovacuum_shmem(autovacuum.clone());
         //   (Replication* / WalSnd / WalRcv / WalSummarizer / PgArch /
         //    ApplyLauncher / SlotSync -- deferred)
 
@@ -316,6 +349,9 @@ impl SharedState {
             proc_global,
             proc_array,
             sinval,
+            checkpointer,
+            autovacuum,
+            bgworker,
         })
     }
 
