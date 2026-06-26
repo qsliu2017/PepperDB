@@ -77,6 +77,12 @@ struct OwnerInner {
 }
 
 impl ResourceOwner {
+    /// Identity comparison (PG compared raw `ResourceOwner` pointers). Two handles
+    /// are the same owner iff they share the inner `Arc`.
+    pub fn ptr_eq(&self, other: &ResourceOwner) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     /// Create an owner, optionally registered as a child of `parent`
     /// (PG's `ResourceOwnerCreate`).
     pub fn create(parent: Option<&ResourceOwner>, name: &str) -> ResourceOwner {

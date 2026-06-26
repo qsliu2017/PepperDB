@@ -194,7 +194,7 @@ pub struct LOCK {
     pub grant_mask: LOCKMASK,    // lock types already granted
     pub wait_mask: LOCKMASK,     // lock types awaited
     pub proc_locks: Vec<PROCLOCK>, // PROCLOCKs assoc. with this lock (was dlist)
-    pub wait_procs: Vec<*mut PGPROC>, // PGPROCs waiting on lock (was dclist) // TODO(ptr)
+    pub wait_procs: Vec<ProcNumber>, // PGPROCs waiting on lock, in queue order (was dclist)
     pub requested: [i32; MAX_LOCKMODES],
     pub n_requested: i32,
     pub granted: [i32; MAX_LOCKMODES],
@@ -212,13 +212,13 @@ pub struct PROCLOCKTAG {
 /// (the lists become owned collections on `LOCK`/`PGPROC`).
 pub struct PROCLOCK {
     pub tag: PROCLOCKTAG,
-    pub group_leader: *mut PGPROC, // lock group leader, or proc itself // TODO(ptr)
+    pub group_leader: ProcNumber, // lock group leader's ProcNumber, or own
     pub hold_mask: LOCKMASK,       // lock types currently held
     pub release_mask: LOCKMASK,    // lock types to be released (LockReleaseAll)
 }
 
 /// Key for a LOCALLOCK entry: lockable object + mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LOCALLOCKTAG {
     pub lock: LOCKTAG,
     pub mode: LOCKMODE,
@@ -299,167 +299,67 @@ pub enum DeadLockState {
     BlockedByAutovacuum, // queue blocked by autovacuum worker
 }
 
-// --- function prototypes (stub bodies) ---
+// --- function prototypes: rewired to the backend module (lock.c bodies) ---
+//
+// The lock.c definitions live in `crate::backend::storage::lmgr::lock` (15b).
+// The header re-exports them under both the C name (PascalCase) and the
+// snake_case names plan-001 used / that proc.c (15a) calls. The LockManager
+// shared type + the per-task LOCALLOCK scope are exported too.
 
-pub fn lock_manager_shmem_init() {
-    unimplemented!()
-}
-pub fn lock_manager_shmem_size() -> usize {
-    unimplemented!()
-}
-pub fn init_lock_manager_access() {
-    unimplemented!()
-}
-pub fn get_locks_method_table(_lock: &LOCK) -> LockMethod {
-    unimplemented!()
-}
-pub fn get_lock_tags_method_table(_locktag: &LOCKTAG) -> LockMethod {
-    unimplemented!()
-}
-pub fn lock_tag_hash_code(_locktag: &LOCKTAG) -> u32 {
-    unimplemented!()
-}
-pub fn do_lock_modes_conflict(_mode1: LOCKMODE, _mode2: LOCKMODE) -> bool {
-    unimplemented!()
-}
-pub fn lock_acquire(
-    _locktag: &LOCKTAG,
-    _lockmode: LOCKMODE,
-    _session_lock: bool,
-    _dont_wait: bool,
-) -> LockAcquireResult {
-    unimplemented!()
-}
-/// `LockAcquireExtended`: the `LOCALLOCK **locallockp` out-param is folded into
-/// the return (function-mapping section 5).
-pub fn lock_acquire_extended(
-    _locktag: &LOCKTAG,
-    _lockmode: LOCKMODE,
-    _session_lock: bool,
-    _dont_wait: bool,
-    _report_memory_error: bool,
-    _log_lock_failure: bool,
-) -> (LockAcquireResult, Option<*mut LOCALLOCK>) {
-    unimplemented!()
-}
-pub fn abort_strong_lock_acquire() {
-    unimplemented!()
-}
-pub fn mark_lock_clear(_locallock: &mut LOCALLOCK) {
-    unimplemented!()
-}
-pub fn lock_release(_locktag: &LOCKTAG, _lockmode: LOCKMODE, _session_lock: bool) -> bool {
-    unimplemented!()
-}
-pub fn lock_release_all(_lockmethodid: LOCKMETHODID, _all_locks: bool) {
-    unimplemented!()
-}
-pub fn lock_release_session(_lockmethodid: LOCKMETHODID) {
-    unimplemented!()
-}
-pub fn lock_release_current_owner(_locallocks: &mut [*mut LOCALLOCK]) {
-    unimplemented!()
-}
-pub fn lock_reassign_current_owner(_locallocks: &mut [*mut LOCALLOCK]) {
-    unimplemented!()
-}
-pub fn lock_held_by_me(_locktag: &LOCKTAG, _lockmode: LOCKMODE, _orstronger: bool) -> bool {
-    unimplemented!()
-}
-pub fn lock_has_waiters(_locktag: &LOCKTAG, _lockmode: LOCKMODE, _session_lock: bool) -> bool {
-    unimplemented!()
-}
-/// `GetLockConflicts`: the `*countp` out-param vanishes (the `Vec` carries len).
-pub fn get_lock_conflicts(_locktag: &LOCKTAG, _lockmode: LOCKMODE) -> Vec<VirtualTransactionId> {
-    unimplemented!()
-}
-pub fn at_prepare_locks() {
-    unimplemented!()
-}
-pub fn post_prepare_locks(_xid: TransactionId) {
-    unimplemented!()
-}
-pub fn lock_check_conflicts(
-    _lock_method_table: LockMethod,
-    _lockmode: LOCKMODE,
-    _lock: &mut LOCK,
-    _proclock: &mut PROCLOCK,
-) -> bool {
-    unimplemented!()
-}
-pub fn grant_lock(_lock: &mut LOCK, _proclock: &mut PROCLOCK, _lockmode: LOCKMODE) {
-    unimplemented!()
-}
-pub fn grant_awaited_lock() {
-    unimplemented!()
-}
-pub fn get_awaited_lock() -> Option<*mut LOCALLOCK> {
-    unimplemented!()
-}
-pub fn reset_awaited_lock() {
-    unimplemented!()
-}
-pub fn remove_from_wait_queue(_proc: *mut PGPROC, _hashcode: u32) {
-    unimplemented!()
-}
-pub fn get_lock_status_data() -> LockData {
-    unimplemented!()
-}
-pub fn get_blocker_status_data(_blocked_pid: i32) -> BlockedProcsData {
-    unimplemented!()
-}
-/// `GetRunningTransactionLocks`: the `*nlocks` out-param vanishes.
-pub fn get_running_transaction_locks() -> Vec<xl_standby_lock> {
-    unimplemented!()
-}
-pub fn get_lockmode_name(_lockmethodid: LOCKMETHODID, _mode: LOCKMODE) -> &'static str {
-    unimplemented!()
-}
-pub fn lock_twophase_recover(_xid: TransactionId, _info: u16, _recdata: &[u8]) {
-    unimplemented!()
-}
-pub fn lock_twophase_postcommit(_xid: TransactionId, _info: u16, _recdata: &[u8]) {
-    unimplemented!()
-}
-pub fn lock_twophase_postabort(_xid: TransactionId, _info: u16, _recdata: &[u8]) {
-    unimplemented!()
-}
-pub fn lock_twophase_standby_recover(_xid: TransactionId, _info: u16, _recdata: &[u8]) {
-    unimplemented!()
-}
-pub fn dead_lock_check(_proc: *mut PGPROC) -> DeadLockState {
-    unimplemented!()
-}
-pub fn get_blocking_autovacuum_pgproc() -> Option<*mut PGPROC> {
-    unimplemented!()
-}
-/// `DeadLockReport` is `pg_noreturn` in C; it raises ERROR (panic per error model).
-#[deprecated(note = "TODO(panic): migrate to Result + ?")]
-pub fn dead_lock_report() -> ! {
-    unimplemented!()
-}
-pub fn remember_simple_dead_lock(
-    _proc1: *mut PGPROC,
-    _lockmode: LOCKMODE,
-    _lock: &mut LOCK,
-    _proc2: *mut PGPROC,
-) {
-    unimplemented!()
-}
-pub fn init_dead_lock_checking() {
-    unimplemented!()
-}
-pub fn lock_waiter_count(_locktag: &LOCKTAG) -> i32 {
-    unimplemented!()
-}
+pub use crate::backend::storage::lmgr::lock::{
+    AbortStrongLockAcquire, AtPrepare_Locks, DoLockModesConflict, GetLockConflicts,
+    GetLockTagsMethodTable, GetLocksMethodTable, GetLockmodeName, GetRunningTransactionLocks,
+    GrantAwaitedLock, InitLockManagerAccess, LockAcquire, LockAcquireExtended, LockCheckConflicts,
+    LockHasWaiters, LockHeldByMe, LockManager, LockManagerShmemInit, LockManagerShmemSize,
+    LockRelease, LockReleaseAll, LockReleaseSession, LockTagHashCode, LockWaiterCount, MarkLockClear,
+    PostPrepare_Locks, VirtualXactLock, VirtualXactLockTableCleanup, VirtualXactLockTableInsert,
+    local_lock_scope, lock_manager, lock_manager_shared,
+};
 
-// Lock a VXID (used to wait for a transaction to finish).
-pub fn virtual_xact_lock_table_insert(_vxid: VirtualTransactionId) {
-    unimplemented!()
-}
-pub fn virtual_xact_lock_table_cleanup() {
-    unimplemented!()
-}
-pub fn virtual_xact_lock(_vxid: VirtualTransactionId, _wait: bool) -> bool {
-    unimplemented!()
-}
+// snake_case aliases (plan-001 names + the ones proc.c calls):
+pub use crate::backend::storage::lmgr::lock::{
+    AbortStrongLockAcquire as abort_strong_lock_acquire, GetLockConflicts as get_lock_conflicts,
+    GetLockmodeName as get_lockmode_name, GrantLock as grant_lock,
+    LockCheckConflicts as lock_check_conflicts, LockManagerShmemInit as lock_manager_shmem_init,
+    LockManagerShmemSize as lock_manager_shmem_size, LockTagHashCode as lock_tag_hash_code,
+    LockWaiterCount as lock_waiter_count, MarkLockClear as mark_lock_clear,
+    RememberSimpleDeadLock as remember_simple_dead_lock, ResetAwaitedLock as reset_awaited_lock,
+    lock_twophase_postabort, lock_twophase_postcommit, lock_twophase_recover,
+    lock_twophase_standby_recover,
+};
+
+/// `GrantLock` (PG name); the backend export. Re-exported for the C name.
+pub use crate::backend::storage::lmgr::lock::GrantLock;
+/// `RemoveFromWaitQueue` (PG name); pulls a waiter out on deadlock/abort.
+pub use crate::backend::storage::lmgr::lock::RemoveFromWaitQueue;
+/// `RememberSimpleDeadLock` (PG name).
+pub use crate::backend::storage::lmgr::lock::RememberSimpleDeadLock;
+/// `GetAwaitedLock` (PG name) + its snake alias.
+pub use crate::backend::storage::lmgr::lock::GetAwaitedLock;
+pub use crate::backend::storage::lmgr::lock::GetAwaitedLock as get_awaited_lock;
+/// `ResetAwaitedLock` (PG name).
+pub use crate::backend::storage::lmgr::lock::ResetAwaitedLock;
+
+// --- still-stubbed: the lockfuncs/pg_locks status views ---
+
+/// `GetLockStatusData` (pg_locks). TODO(lockfuncs).
+pub use crate::backend::storage::lmgr::lock::GetLockStatusData;
+pub use crate::backend::storage::lmgr::lock::GetLockStatusData as get_lock_status_data;
+/// `GetBlockerStatusData`. TODO(lockfuncs).
+pub use crate::backend::storage::lmgr::lock::GetBlockerStatusData;
+pub use crate::backend::storage::lmgr::lock::GetBlockerStatusData as get_blocker_status_data;
+
+// --- deadlock.c (15c): the waits-for-graph detector ---
+//
+// The bodies live in `crate::backend::storage::lmgr::deadlock`; they operate over
+// `ProcNumber` (the arena identity), called by CheckDeadLock (proc.c) with all
+// partition locks held.
+
+pub use crate::backend::storage::lmgr::deadlock::DeadLockCheck;
+pub use crate::backend::storage::lmgr::deadlock::DeadLockCheck as dead_lock_check;
+pub use crate::backend::storage::lmgr::deadlock::GetBlockingAutoVacuumPgproc;
+pub use crate::backend::storage::lmgr::deadlock::GetBlockingAutoVacuumPgproc as get_blocking_autovacuum_pgproc;
+pub use crate::backend::storage::lmgr::deadlock::InitDeadLockChecking;
+pub use crate::backend::storage::lmgr::deadlock::InitDeadLockChecking as init_dead_lock_checking;
+pub use crate::backend::storage::lmgr::deadlock::DeadLockReport;
+pub use crate::backend::storage::lmgr::deadlock::DeadLockReport as dead_lock_report;

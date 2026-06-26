@@ -137,6 +137,18 @@ shared_state! {
     /// `SUBTRANSShmemInit` slot).
     subtrans: crate::backend::access::transam::slru::SlruCtl,
 
+    /// Heavyweight lock manager (PG lock.c `LockMethodLockHash`/
+    /// `LockMethodProcLockHash`; ipci.c `LockManagerShmemInit` slot, before the
+    /// proc table). The sharded LOCK/PROCLOCK tables + the fast-path strong-lock
+    /// counts.
+    lock_manager: crate::backend::storage::lmgr::lock::LockManager,
+
+    /// PGPROC arena (PG proc.c `PROC_HDR`/ProcGlobal; ipci.c `InitProcGlobal`,
+    /// called from CreateSharedMemoryAndSemaphores after the lock tables). The
+    /// fixed, process-lifetime arena indexed by ProcNumber + the dense MVCC mirror
+    /// arrays the procarray scans.
+    proc_global: crate::storage::proc::ProcGlobal,
+
     /// Process array (PG procarray.c `ProcArrayStruct`; ipci.c
     /// `ProcArrayShmemInit` slot). The snapshot/horizon source; `ProcArrayLock`
     /// is its internal `RwLock`.
@@ -191,6 +203,9 @@ impl SharedState {
         // the ex-TransamVariables struct.
         let variable_cache =
             Arc::new(crate::backend::access::transam::transam::VariableCache::new());
+        // Publish process-wide so proc.c (ProcKill) can reach it like PG's shmem
+        // TransamVariables (first SharedState wins; tests build their own).
+        crate::backend::access::transam::transam::set_variable_cache(variable_cache.clone());
         // XLOGShmemInit -- step13 (part A), DONE. The WAL buffer ring, insert
         // reservation, write/flush LSNs, and the flushed-LSN watch. Bound to the
         // I/O leaf and process config (both built above) for segment I/O.
@@ -232,13 +247,21 @@ impl SharedState {
         ));
 
         // Set up lock manager:
-        // TODO(step15): LockManagerShmemInit  here
+        // LockManagerShmemInit -- step15. The sharded LOCK/PROCLOCK tables +
+        // fast-path strong-lock counts. Built before the proc table (ipci.c
+        // order) and published process-wide so LockAcquire/Release reach the
+        // same tables.
+        let lock_manager = crate::backend::storage::lmgr::lock::lock_manager_shared();
         //   (PredicateLockShmemInit -- deferred: SSI/serializable)
 
         // Set up process table:
+        // InitProcGlobal -- step15. The PGPROC arena + the dense MVCC mirror arrays
+        // the procarray scans. Built before the ProcArray (which reads it) and
+        // published process-wide so InitProcess/ProcKill reach the same arena.
+        let proc_global = crate::backend::storage::lmgr::proc::init_proc_global_shared();
         // ProcArrayShmemInit -- step14. The snapshot/horizon source. Sized from
-        // MaxBackends (+ max_prepared_xacts); falls back to a default until the
-        // startup-computed value lands (InitProcGlobal itself is step 15).
+        // the arena (MaxBackends + max_prepared_xacts); falls back to a default
+        // until the startup-computed value lands.
         let procarray_maxprocs = if process_config.max_backends > 0 {
             process_config.max_backends as usize
         } else {
@@ -281,6 +304,8 @@ impl SharedState {
             variable_cache,
             clog,
             subtrans,
+            lock_manager,
+            proc_global,
             proc_array,
         })
     }

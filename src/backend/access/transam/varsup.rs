@@ -5,11 +5,11 @@
 //! collapses to the single VariableCache `Mutex`; we compute what's needed under
 //! the lock, drop it, then await the async clog/subtrans extends (design s3).
 //!
-//! Staging (design step14 section 0): recording the new xid into MyProc /
-//! ProcGlobal is owned by step 15; that store is omitted here (the proc array is
-//! still a stub). The wraparound warn/stop signaling and get_database_name land
-//! on their absence (autovacuum/syscache are later) -- we keep the limit math
-//! and the stop-limit ERROR, and drop the WARNING database-name lookups.
+//! GetNewTransactionId advertises the new xid into MyProc + the ProcGlobal mirror
+//! via `ProcArray::advertise_my_xid` (under ProcArrayLock), matching varsup.c's
+//! store before XidGenLock release. The wraparound warn/stop signaling and
+//! get_database_name land on their absence (autovacuum/syscache are later) -- we
+//! keep the limit math and the stop-limit ERROR, and drop the WARNING lookups.
 
 use crate::access::transam::{
     FIRST_GENBKI_OBJECT_ID, FIRST_NORMAL_OBJECT_ID, FIRST_NORMAL_TRANSACTION_ID,
@@ -43,7 +43,7 @@ impl VariableCache {
         &self,
         clog: &SlruCtl,
         subtrans: &SlruCtl,
-        _is_sub_xact: bool,
+        is_sub_xact: bool,
     ) -> FullTransactionId {
         // Snapshot nextXid + the wrap limits under the lock.
         let (full_xid, xid, stop_limit, past_stop) = self.with(|v| {
@@ -77,7 +77,12 @@ impl VariableCache {
             }
         });
 
-        // TODO(step15): store xid into MyProc->xid / ProcGlobal->xids[].
+        // Advertise the new xid into MyProc + the ProcGlobal mirror (varsup.c does
+        // this store before releasing XidGenLock; here it runs under ProcArrayLock).
+        // Top xacts set MyProc->xid; subxacts append to the subxid cache.
+        if let Some(pa) = crate::backend::storage::ipc::procarray::current_proc_array() {
+            pa.advertise_my_xid(xid, is_sub_xact);
+        }
         full_xid
     }
 

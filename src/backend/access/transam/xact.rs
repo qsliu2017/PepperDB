@@ -1173,14 +1173,27 @@ fn at_sub_abort_snapshot(level: i32) {
     crate::backend::utils::time::snapmgr::AtSubAbort_Snapshot(level);
 }
 
-/// procarray.c `ProcArrayEndTransaction`. ProcGlobal/PGPROC are populated in
-/// step 15, so we operate on a scratch PGPROC for now (correct staging: the
-/// latestCompletedXid + completion-count bookkeeping still runs).
+/// procarray.c `ProcArrayEndTransaction`. Clear the real MyProc slot (xid,
+/// subxid cache, mirror) and advance latestCompletedXid / xactCompletionCount.
+/// No-op when this backend has no live PGPROC (bootstrap / thin tests).
 fn proc_array_end_transaction(shared: &Arc<SharedState>, latest_xid: TransactionId) {
-    let mut proc = crate::storage::proc::PGPROC::default();
+    let procno = crate::storage::proc::current_proc_number();
+    if procno == crate::storage::procnumber::INVALID_PROC_NUMBER {
+        return;
+    }
+    let g = match crate::storage::proc::proc_global() {
+        Some(g) => g,
+        None => return,
+    };
+    // SAFETY: we own our own slot; proc_array_end_transaction takes ProcArrayLock
+    // for the shared bookkeeping (mirror + latestCompletedXid).
+    let proc = match unsafe { g.proc_mut(procno) } {
+        Some(p) => p,
+        None => return,
+    };
     shared
         .proc_array()
-        .proc_array_end_transaction(shared.variable_cache(), &mut proc, latest_xid);
+        .proc_array_end_transaction(shared.variable_cache(), proc, latest_xid);
 }
 
 // ===========================================================================

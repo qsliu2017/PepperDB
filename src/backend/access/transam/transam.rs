@@ -59,6 +59,23 @@ impl VariableCache {
     }
 }
 
+// Process-wide VariableCache accessor (single-process model: one per process),
+// published by `SharedState::new`. proc.c's `ProcKill` reaches it the way PG
+// reached the shmem `TransamVariables`, without a SharedState handle. New code
+// should prefer `shared.variable_cache()`.
+static VARIABLE_CACHE: std::sync::OnceLock<std::sync::Arc<VariableCache>> = std::sync::OnceLock::new();
+
+/// Publish the process-wide `VariableCache` (called once by `SharedState::new`).
+/// First publisher wins (tests building multiple SharedStates do not panic).
+pub fn set_variable_cache(vc: std::sync::Arc<VariableCache>) {
+    let _ = VARIABLE_CACHE.set(vc);
+}
+
+/// The process-wide `VariableCache`, if published.
+pub fn current_variable_cache() -> Option<std::sync::Arc<VariableCache>> {
+    VARIABLE_CACHE.get().cloned()
+}
+
 impl Default for VariableCache {
     fn default() -> Self {
         Self::new()
