@@ -821,3 +821,58 @@ sender; the leader's drain terminates (no hang). A worker panic NEVER aborts the
   (snapmgr task-local) + an xact scope (TODO(execParallel) marker in worker_cradle).
 - WaitForParallelWorkersToAttach is a near-noop (spawned == attached); revisit if modelling
   worker start failure. shm_mq/shm_toc/barrier stay tombstoned header stubs.
+
+---
+
+## 19. Lock preconditions are types, not comments
+
+A C function whose contract is "caller must hold lock X" (PG's `LWLockHeldByMe`,
+`callerHasWriteLock`, the `*_internal`/`*_locked` helpers under a partition lock) must NOT
+be translated as a private fn with a `// caller holds X` comment and an implicit
+assumption. Encode the precondition in the signature so it cannot be violated by accident.
+This also removes a live deadlock footgun: our locks are `parking_lot` (NON-reentrant, s2.7
+of error.md), so a helper that re-acquires a lock the caller already holds HANGS.
+
+Two forms, by what the helper actually touches:
+
+**Case A -- the helper reads/writes the GUARDED data: take the data, not `&self`.**
+Pass the dereferenced guard (`&mut Inner` / `&Inner`), so the only way to call it is to
+hold the lock, and the helper has no handle to re-lock.
+```rust
+fn do_thing(inner: &mut ProcArrayInner, ...) { inner.field = ...; }
+// caller:
+let mut g = self.inner.write();
+Self::do_thing(&mut g, ...);   // &mut *g coerces to &mut ProcArrayInner
+```
+Benefits: compiler-enforced precondition; cannot self-deadlock (no lock handle); decoupled
+from the lock type; unit-testable without a lock. Prefer this whenever the helper
+dereferences the lock. Make it an associated/free fn taking `&mut Inner` (+ other args);
+add `&self` only if it also needs unrelated `self` fields that are NOT the locked data.
+
+**Case B -- the helper touches state CONVENTIONALLY under the lock but not the guarded
+data: take a `&guard` witness.** Some state is lock-free for readers but written under the
+lock (s13: the PGPROC/xid mirror atomics written under ProcArrayLock; the UnsafeCell arena
+gated by a partition Mutex). A helper that mutates only that state still requires the lock
+held for consistency, yet has no `Inner` to borrow. Pass the guard as an unused proof token:
+```rust
+type ProcArrayWrite<'a> = parking_lot::RwLockWriteGuard<'a, ProcArrayInner>;
+fn end_xact_internal(&self, _g: &ProcArrayWrite<'_>, vc: &VariableCache, proc: &mut PGPROC, ...) { ... }
+// caller:
+let g = self.inner.write();
+self.end_xact_internal(&g, vc, proc, ...);
+```
+The witness makes the precondition type-checked. Tradeoffs (accept them, they beat a
+comment for hot invariant-critical helpers): it is a weaker guarantee (a guard from a
+different instance of the same lock type could satisfy it -- a non-issue when there is one
+instance), it couples the signature to the lock type, and the param is unused (`_g`). Use a
+`&` witness (proof it exists); `&mut` only if the helper legitimately needs to act on the
+guard.
+
+Rules:
+- NEVER re-acquire inside the helper a lock the caller holds (parking_lot deadlock).
+- Don't drop the guard before the helper if the helper needs the lock held -- pass it (A or
+  B) so the lifetime makes the hold explicit.
+- `*_locked`/`*_internal` naming may stay for grep/cross-ref, but the SIGNATURE now carries
+  the contract; the comment becomes a one-liner.
+- This applies to every "caller holds the lock" helper in the translated tree (procarray,
+  lmgr/lock shard helpers, slru bank helpers, buffer manager, proc, sinval, ...).
