@@ -23,6 +23,11 @@
 //! `RemoveFromWaitQueue`, `GetAwaitedLock`) they call the existing `storage::lock`
 //! stubs, which 15b fills in. `ProcSleep`'s select! structure + latch wake + timers
 //! are REAL here (the deliverable).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::sync::Arc;
 use std::time::Duration;

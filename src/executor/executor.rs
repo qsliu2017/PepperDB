@@ -4,6 +4,11 @@
 //! In-memory executor API. Stubs for the .c-implemented functions; the hot
 //! `static inline` wrappers are translated through the ExprState/PlanState
 //! function pointers.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 #![allow(non_snake_case, non_camel_case_types, deprecated)]
 #![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]

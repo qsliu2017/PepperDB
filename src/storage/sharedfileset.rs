@@ -5,7 +5,7 @@
 //! `std::sync::Mutex<i32>`, and the `dsm_segment` parameter is dropped (dsm.h
 //! is tombstoned -> Arc-shared heap state).
 
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use crate::storage::fileset::FileSet;
 

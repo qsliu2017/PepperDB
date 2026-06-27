@@ -25,6 +25,11 @@
 //! replication origins, large objects, portals, triggers and GUC nest levels
 //! are deferred subsystems reached through their existing stubs (`TODO`s mark
 //! each). `xact_redo` is recovery and stays a stub (`TODO(recovery)`).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::cell::RefCell;
 use std::sync::Arc;

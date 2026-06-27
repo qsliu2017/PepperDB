@@ -1,4 +1,9 @@
 //! Translated from PostgreSQL src/include/lib/pairingheap.h
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 //
 // A pairing heap. C uses an intrusive node (pairingheap_node embedded in the
 // caller's struct) plus a comparator that gets a void* arg. Rust resists

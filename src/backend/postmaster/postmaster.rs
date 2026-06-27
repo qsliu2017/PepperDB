@@ -28,12 +28,18 @@
 //!   replaces it; a dropped supervisor drops its children.
 //! - `sig_atomic_t` signal handlers -- replaced by `tokio::signal` (production)
 //!   and a programmatic [`Shutdown`] handle (tests).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
+
+use parking_lot::Mutex;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
@@ -89,17 +95,17 @@ impl ChildRegistry {
 
     /// Register a child; returns its generational key.
     pub fn register(&self, entry: ChildEntry) -> ChildKey {
-        self.inner.lock().unwrap().insert(entry)
+        self.inner.lock().insert(entry)
     }
 
     /// Remove a child on exit (stale key is a no-op).
     pub fn remove(&self, key: ChildKey) -> Option<ChildEntry> {
-        self.inner.lock().unwrap().remove(key)
+        self.inner.lock().remove(key)
     }
 
     /// Live child count (PG's `CountChildren`), for the admission check.
     pub fn count(&self) -> usize {
-        self.inner.lock().unwrap().len()
+        self.inner.lock().len()
     }
 
     /// Collect every live child's cancel handle (PG's `SignalChildren` target
@@ -107,7 +113,6 @@ impl ChildRegistry {
     pub fn cancel_handles(&self) -> Vec<Arc<Notify>> {
         self.inner
             .lock()
-            .unwrap()
             .iter()
             .map(|(_, e)| e.cancel.clone())
             .collect()

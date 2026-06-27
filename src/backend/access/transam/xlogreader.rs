@@ -22,6 +22,11 @@
 //! routine-struct shape is retained for the eventual recovery wiring; the
 //! foundation read+decode machinery lives on this concrete type and the header's
 //! C-named free functions are re-exported / shimmed onto it.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use crate::access::rmgr::{rmgr_id_is_valid, RmgrId};
 use crate::access::xlog_internal::{

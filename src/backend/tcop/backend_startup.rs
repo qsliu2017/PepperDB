@@ -270,7 +270,7 @@ fn placeholder_cancel_key(proc_pid: i32, start_time: i64) -> Vec<u8> {
 pub mod test_hook {
     use std::net::SocketAddr;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     /// `PANIC_ON_CONNECT` / `CONNECTED` are process-global; any test that touches
     /// the connection hook must hold this so one test's panic flag doesn't bleed

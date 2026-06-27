@@ -3,6 +3,11 @@
 //! Rust ownership (Box/Vec/String); only the size constants, allocation flags,
 //! and overflow-checked size helpers carry over. Allocator signatures are kept
 //! as stubs for skeleton resolution.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use bitflags::bitflags;
 

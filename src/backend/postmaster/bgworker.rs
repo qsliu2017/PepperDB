@@ -32,7 +32,9 @@
 //!   signal masks in the single-process model).
 
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, OnceLock};
+
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::postgres::Datum;
 use crate::postgres_ext::{InvalidOid, Oid};
@@ -177,7 +179,7 @@ impl BackgroundWorkerShmem {
     /// via poison -- every critical section is a complete, short update, so
     /// recover the guard if poisoned.
     fn lock(&self) -> MutexGuard<'_, BackgroundWorkerArray> {
-        self.array.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.array.lock()
     }
 
     /// PG `parallel_register_count - parallel_terminate_count`: the active count.
@@ -237,9 +239,7 @@ fn internal_bgworkers() -> &'static Mutex<Vec<(String, BgworkerMainType)>> {
 /// compile-time `InternalBGWorkers[]` array (a single binary can populate it at
 /// startup). Idempotent: re-registering the same name overwrites.
 pub fn register_internal_bgworker(fn_name: &str, fn_addr: BgworkerMainType) {
-    let mut tbl = internal_bgworkers()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut tbl = internal_bgworkers().lock();
     if let Some(e) = tbl.iter_mut().find(|(n, _)| n == fn_name) {
         e.1 = fn_addr;
     } else {
@@ -251,9 +251,7 @@ pub fn register_internal_bgworker(fn_name: &str, fn_addr: BgworkerMainType) {
 /// library name is ignored (no dynamic loading); all entry points are in-core.
 /// Returns `None` if unknown (PG `elog(ERROR)`s; callers here decide).
 pub fn lookup_background_worker_function(funcname: &str) -> Option<BgworkerMainType> {
-    let tbl = internal_bgworkers()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tbl = internal_bgworkers().lock();
     tbl.iter().find(|(n, _)| n == funcname).map(|(_, f)| *f)
 }
 
@@ -403,9 +401,7 @@ pub fn register_background_worker(worker: &BackgroundWorker) {
         return;
     }
 
-    let mut list = background_worker_list()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut list = background_worker_list().lock();
 
     // Enforce the maximum number of workers.
     if list.len() + 1 > max_worker_processes() as usize {
@@ -429,10 +425,7 @@ pub fn register_background_worker(worker: &BackgroundWorker) {
 /// Read-only snapshot of the static-registered worker list (PG iterates
 /// `BackgroundWorkerList`). For the supervisor (17f) / tests.
 pub fn registered_background_workers() -> Vec<RegisteredBgWorker> {
-    background_worker_list()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone()
+    background_worker_list().lock().clone()
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,10 +1062,7 @@ mod tests {
     async fn static_register_accumulates() {
         let _serial = test_serial().await;
         // Clear the static list for a known baseline.
-        background_worker_list()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clear();
+        background_worker_list().lock().clear();
 
         register_background_worker(&a_worker("static1"));
         register_background_worker(&a_worker("static2"));
@@ -1088,10 +1078,7 @@ mod tests {
     #[tokio::test]
     async fn static_register_rejects_no_shmem_access() {
         let _serial = test_serial().await;
-        background_worker_list()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clear();
+        background_worker_list().lock().clear();
 
         let mut w = a_worker("bad");
         w.bgw_flags = BgworkerFlags::empty();

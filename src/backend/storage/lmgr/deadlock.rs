@@ -24,6 +24,11 @@
 //!
 //! Lock groups are single-member until F4: a proc's group leader is itself, so the
 //! group-member loops collapse. The structure is faithful so F4 can fill them.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use crate::storage::lock::{DeadLockState, LOCK, LOCKMODE, LOCKTAG, LockTagType, lockbit_on};
 use crate::storage::lockdefs::LOCKMASK;
@@ -245,7 +250,7 @@ pub fn DeadLockCheck(proc: ProcNumber, view: &LockTablesView) -> DeadLockState {
 // locks drop. We mirror that with module statics published at the end of a check
 // (a check runs once at a time, under all partition locks, in one task).
 
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 struct PublishedDetails {
     details: Vec<DeadlockInfo>,
@@ -256,7 +261,7 @@ struct PublishedDetails {
 static PUBLISHED: Mutex<Option<PublishedDetails>> = Mutex::new(None);
 
 fn publish_deadlock_details(ctx: &DeadLockCtx) {
-    let mut p = PUBLISHED.lock().unwrap();
+    let mut p = PUBLISHED.lock();
     *p = Some(PublishedDetails {
         details: ctx.deadlock_details[..ctx.n_deadlock_details].to_vec(),
         n: ctx.n_deadlock_details,
@@ -267,7 +272,7 @@ fn publish_deadlock_details(ctx: &DeadLockCtx) {
 /// PG `GetBlockingAutoVacuumPgproc`: the autovacuum worker blocking our proc, if
 /// the last check found one. Reset as soon as it is passed back.
 pub fn GetBlockingAutoVacuumPgproc() -> Option<ProcNumber> {
-    let mut p = PUBLISHED.lock().unwrap();
+    let mut p = PUBLISHED.lock();
     let pd = p.as_mut()?;
     let v = pd.blocking_autovacuum_proc;
     pd.blocking_autovacuum_proc = INVALID_PROC_NUMBER;
@@ -277,7 +282,7 @@ pub fn GetBlockingAutoVacuumPgproc() -> Option<ProcNumber> {
 /// Record the blocking-autovac proc found during a check (DeadLockCheck stores it
 /// in the ctx; this is the cross-call handoff for the non-hard-deadlock case).
 fn publish_blocking_autovacuum(procno: ProcNumber) {
-    let mut p = PUBLISHED.lock().unwrap();
+    let mut p = PUBLISHED.lock();
     match p.as_mut() {
         Some(pd) => pd.blocking_autovacuum_proc = procno,
         None => {
@@ -900,7 +905,7 @@ fn topo_sort(
 // TODO(panic): migrate to Result + ?.
 pub fn DeadLockReport() -> ! {
     let detail = {
-        let p = PUBLISHED.lock().unwrap();
+        let p = PUBLISHED.lock();
         match p.as_ref() {
             Some(pd) if pd.n > 0 => describe_cycle(&pd.details[..pd.n]),
             _ => String::from("deadlock detected"),
@@ -975,7 +980,7 @@ pub fn RememberSimpleDeadLock(
             pid: proc2_pid,
         },
     ];
-    let mut p = PUBLISHED.lock().unwrap();
+    let mut p = PUBLISHED.lock();
     *p = Some(PublishedDetails {
         details,
         n: 2,

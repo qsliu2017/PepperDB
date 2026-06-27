@@ -1,5 +1,10 @@
 //! Translated from PostgreSQL src/include/utils/sortsupport.h
 //! Framework for accelerated sorting.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use crate::access::attnum::AttrNumber;
 use crate::c::INVERT_COMPARE_RESULT;

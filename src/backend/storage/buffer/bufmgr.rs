@@ -319,13 +319,13 @@ impl BufferPool {
     ///
     /// Modeled as explicit guard acquisition rather than C's mode-int + global
     /// "which lock do I hold" tracking; see [`content_share`] / [`content_exclusive`].
-    pub fn content_share(&self, buffer: Buffer) -> std::sync::RwLockReadGuard<'_, ()> {
-        self.descriptor(global_buf_id(buffer)).content_lock.read().unwrap()
+    pub fn content_share(&self, buffer: Buffer) -> parking_lot::RwLockReadGuard<'_, ()> {
+        self.descriptor(global_buf_id(buffer)).content_lock.read()
     }
 
     /// Exclusive content lock guard. See [`content_share`].
-    pub fn content_exclusive(&self, buffer: Buffer) -> std::sync::RwLockWriteGuard<'_, ()> {
-        self.descriptor(global_buf_id(buffer)).content_lock.write().unwrap()
+    pub fn content_exclusive(&self, buffer: Buffer) -> parking_lot::RwLockWriteGuard<'_, ()> {
+        self.descriptor(global_buf_id(buffer)).content_lock.write()
     }
 
     /// C: `LockBufferForCleanup`. Exclusive content lock plus a wait until this
@@ -340,7 +340,7 @@ impl BufferPool {
     pub async fn lock_buffer_for_cleanup(
         self: &Arc<Self>,
         buffer: Buffer,
-    ) -> std::sync::RwLockWriteGuard<'_, ()> {
+    ) -> parking_lot::RwLockWriteGuard<'_, ()> {
         let buf_id = global_buf_id(buffer);
         debug_assert_eq!(
             crate::backend::storage::buffer::buf_init::private_refcount(buffer),
@@ -404,7 +404,12 @@ impl BufferPool {
 /// are shared-buffer ops; local buffers go through `localbuf`).
 #[inline]
 fn global_buf_id(buffer: Buffer) -> i32 {
-    buffer.as_global().expect("shared (global) buffer expected") as i32
+    #[allow(
+        clippy::expect_used,
+        reason = "callers pass only shared buffers to this private helper"
+    )]
+    let id = buffer.as_global().expect("shared (global) buffer expected") as i32;
+    id
 }
 
 /// C: `ReadBuffer_common`. The shared-buffer read core, collapsed to a direct
@@ -761,14 +766,14 @@ mod tests {
             {
                 let _s1 = pool.content_share(b);
                 let _s2 = pool.content_share(b);
-                assert!(pool.descriptor(b.as_global().unwrap() as i32).content_lock.try_write().is_err());
+                assert!(pool.descriptor(b.as_global().unwrap() as i32).content_lock.try_write().is_none());
             }
             {
                 let _x = pool.content_exclusive(b);
-                assert!(pool.descriptor(b.as_global().unwrap() as i32).content_lock.try_read().is_err());
+                assert!(pool.descriptor(b.as_global().unwrap() as i32).content_lock.try_read().is_none());
             }
             // Released again.
-            assert!(pool.descriptor(b.as_global().unwrap() as i32).content_lock.try_write().is_ok());
+            assert!(pool.descriptor(b.as_global().unwrap() as i32).content_lock.try_write().is_some());
             pool.release_buffer(b);
         })
         .await;

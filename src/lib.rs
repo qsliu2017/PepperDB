@@ -60,3 +60,30 @@ pub mod utils;
 pub mod varatt;
 pub mod windowapi;
 // === end scaffold ===
+
+/// PG's `Assert` (error.md s3.2): an internal-invariant check that runs in debug
+/// builds only and, on failure, takes the PANIC path -- an UNCATCHABLE process
+/// abort (via `ereport!(PANIC, ...)`), NOT a catchable `std::panic!`. Compiled out
+/// in release (like `debug_assert!`). Use `crate::assert!`; do NOT use
+/// `std::assert!`/`std::debug_assert!` for invariants -- a std assert is a
+/// catchable unwind that `catch_unwind` could swallow, hiding a corruption signal.
+///
+/// Call as `crate::assert!(cond)` or `crate::assert!(cond, "fmt {x}")`. Unqualified
+/// `assert!` is unaffected and still resolves to `std::assert!`.
+#[macro_export]
+macro_rules! assert {
+    ($cond:expr $(,)?) => {{
+        if ::core::cfg!(debug_assertions) && !$cond {
+            $crate::ereport!($crate::utils::elog::PANIC, |__e: &mut $crate::utils::elog::ErrorData| {
+                __e.errmsg_internal(::core::concat!("assertion failed: ", ::core::stringify!($cond)));
+            });
+        }
+    }};
+    ($cond:expr, $($arg:tt)+) => {{
+        if ::core::cfg!(debug_assertions) && !$cond {
+            $crate::ereport!($crate::utils::elog::PANIC, |__e: &mut $crate::utils::elog::ErrorData| {
+                __e.errmsg_internal(::std::format!($($arg)+));
+            });
+        }
+    }};
+}

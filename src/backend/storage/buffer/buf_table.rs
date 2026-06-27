@@ -20,7 +20,8 @@
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::RwLock;
+
+use parking_lot::RwLock;
 
 use crate::storage::buf_internals::BufferTag;
 
@@ -71,7 +72,7 @@ impl BufTable {
     /// as C passes it to choose the partition lock.
     pub fn lookup(&self, tag: &BufferTag, hashcode: u32) -> Option<i32> {
         let shard = &self.shards[Self::partition(hashcode)];
-        let guard = shard.read().unwrap();
+        let guard = shard.read();
         guard.get(tag).copied()
     }
 
@@ -82,7 +83,7 @@ impl BufTable {
     pub fn insert(&self, tag: &BufferTag, hashcode: u32, buf_id: i32) -> Option<i32> {
         debug_assert!(buf_id >= 0); // -1 is reserved for not-in-table
         let shard = &self.shards[Self::partition(hashcode)];
-        let mut guard = shard.write().unwrap();
+        let mut guard = shard.write();
         if let Some(&existing) = guard.get(tag) { Some(existing) } else {
             guard.insert(*tag, buf_id);
             None
@@ -92,7 +93,7 @@ impl BufTable {
     /// C: `BufTableDelete`. Remove the entry for `tag` (which must exist).
     pub fn delete(&self, tag: &BufferTag, hashcode: u32) {
         let shard = &self.shards[Self::partition(hashcode)];
-        let mut guard = shard.write().unwrap();
+        let mut guard = shard.write();
         // C: elog(ERROR, "shared buffer hash table corrupted").
         // TODO(panic): migrate to Result + ?
         assert!(guard.remove(tag).is_some(), "shared buffer hash table corrupted");
@@ -100,7 +101,7 @@ impl BufTable {
 
     /// Number of mapped buffers across all shards. For tests/assertions.
     pub fn len(&self) -> usize {
-        self.shards.iter().map(|s| s.read().unwrap().len()).sum()
+        self.shards.iter().map(|s| s.read().len()).sum()
     }
 
     pub fn is_empty(&self) -> bool {

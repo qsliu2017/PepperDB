@@ -13,6 +13,11 @@
 //! returns the WaitEvent(s) that fired. Socket-event shaping (distinguishing
 //! readable vs writable vs closed precisely) is provisional pending step 09, the
 //! first real consumer.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::os::fd::{BorrowedFd, RawFd};
 use std::sync::Arc;

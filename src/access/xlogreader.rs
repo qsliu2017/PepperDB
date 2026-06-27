@@ -1,6 +1,11 @@
 //! Translated from PostgreSQL src/include/access/xlogreader.h
 //! Definitions for the generic XLog reading facility.
 //!
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 #![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 //!
 //! Allocate an XLogReaderState, position it with begin_read/find_next_record,

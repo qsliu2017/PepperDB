@@ -39,8 +39,9 @@
 use std::cell::RefCell;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicU32, Ordering};
+
+use parking_lot::RwLock;
 
 use crate::storage::buf::{BufId, Buffer};
 use crate::storage::buf_internals::{
@@ -440,6 +441,10 @@ impl BufferPool {
         let b = desc.buffer();
 
         let drop_shared = with_refcount_map(|map| {
+            #[allow(
+                clippy::expect_used,
+                reason = "every pinned buffer has a refcount-map entry; unpin pairs with pin"
+            )]
             let count = map.get_mut(&b).expect("unpin without a private pin");
             debug_assert!(*count > 0);
             *count -= 1;

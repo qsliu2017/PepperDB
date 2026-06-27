@@ -18,7 +18,9 @@
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
+
+use parking_lot::Mutex;
 
 use crate::access::clog::XidStatus;
 use crate::access::xlogdefs::XLogRecPtr;
@@ -562,14 +564,14 @@ impl ProcGlobal {
     /// Pop a free PGPROC from the list for `kind`, or None if exhausted. Also
     /// snapshots spins_per_delay into the caller's return.
     pub(crate) fn alloc_proc(&self, kind: ProcGlobalList) -> Option<ProcNumber> {
-        let mut f = self.free.lock().unwrap();
+        let mut f = self.free.lock();
         let list = f.list_mut(kind);
         list.pop()
     }
 
     /// Return a PGPROC to its free list (ProcKill).
     pub(crate) fn free_proc(&self, kind: ProcGlobalList, procno: ProcNumber) {
-        let mut f = self.free.lock().unwrap();
+        let mut f = self.free.lock();
         f.list_mut(kind).push(procno);
     }
 
@@ -585,7 +587,7 @@ impl ProcGlobal {
         pid: i32,
         init: impl FnOnce(&mut PGPROC, ProcNumber),
     ) -> Option<ProcNumber> {
-        let _f = self.free.lock().unwrap();
+        let _f = self.free.lock();
         for i in 0..NUM_AUXILIARY_PROCS {
             let procno = self.aux_proc_base + i;
             // SAFETY: the ProcStructLock (`free`) is held for the whole claim +
@@ -604,7 +606,7 @@ impl ProcGlobal {
     /// ex-`ProcStructLock` so the owner's final field clears (`clear`) and the
     /// `pid` release cannot race a concurrent `claim_aux_slot` scan/init.
     pub(crate) fn release_aux_slot(&self, procno: ProcNumber, clear: impl FnOnce(&mut PGPROC)) {
-        let _f = self.free.lock().unwrap();
+        let _f = self.free.lock();
         // SAFETY: the ProcStructLock (`free`) is held, gating every PGPROC field a
         // concurrent scan/claim could read.
         if let Some(proc) = unsafe { self.proc_mut(procno) } {
@@ -615,12 +617,12 @@ impl ProcGlobal {
 
     /// Count of free regular-backend PGPROCs, capped at `n` (PG HaveNFreeProcs).
     pub(crate) fn n_free_regular(&self, n: i32) -> i32 {
-        let f = self.free.lock().unwrap();
+        let f = self.free.lock();
         (f.free_procs.len() as i32).min(n)
     }
 
     pub(crate) fn spins_per_delay(&self) -> i32 {
-        self.free.lock().unwrap().spins_per_delay
+        self.free.lock().spins_per_delay
     }
 }
 

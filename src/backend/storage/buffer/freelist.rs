@@ -18,8 +18,9 @@
 //! Part B does the actual eviction/flush. The ring `BufferAccessStrategy` is
 //! minimal here (default strategy = clock sweep is what matters now).
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
+
+use parking_lot::Mutex;
 
 use crate::storage::buf_internals::{BUF_USAGECOUNT_ONE, buf_state_get_refcount, buf_state_get_usagecount};
 
@@ -67,7 +68,7 @@ impl StrategyControl {
 
     /// C: `completePasses` reader (tests / BgBufferSync).
     pub fn complete_passes(&self) -> u32 {
-        self.freelist.lock().unwrap().complete_passes
+        self.freelist.lock().complete_passes
     }
 
     /// C: `numBufferAllocs` reader.
@@ -78,7 +79,7 @@ impl StrategyControl {
     /// C: `have_free_buffer` -- a lockless check for a free buffer. Stale by the
     /// time it returns, so do not rely on it to actually obtain one.
     pub fn have_free_buffer(&self) -> bool {
-        self.freelist.lock().unwrap().first_free >= 0
+        self.freelist.lock().first_free >= 0
     }
 
     /// C: `ClockSweepTick`. Advance the hand one buffer and return the buf_id now
@@ -98,7 +99,7 @@ impl StrategyControl {
             let reset_to = expected_reset % self.nbuffers;
             // CAS the hand back under the lock so the pass bump is consistent.
             loop {
-                let mut g = self.freelist.lock().unwrap();
+                let mut g = self.freelist.lock();
                 let mut cur = expected_reset;
                 match self.next_victim.compare_exchange(
                     cur,
@@ -129,7 +130,7 @@ impl StrategyControl {
     /// treats `freeNext` as protected by `buffer_strategy_lock`).
     pub fn free_buffer(&self, pool: &BufferPool, buf_id: i32) {
         let desc = pool.descriptor(buf_id);
-        let mut g = self.freelist.lock().unwrap();
+        let mut g = self.freelist.lock();
         if desc.free_next.load(Ordering::Relaxed) as i32 == FREENEXT_NOT_IN_LIST {
             desc.free_next.store(g.first_free as u32, Ordering::Relaxed);
             if g.first_free < 0 {
@@ -155,7 +156,7 @@ impl StrategyControl {
         // 1) Freelist fast path.
         loop {
             let buf_id = {
-                let mut g = self.freelist.lock().unwrap();
+                let mut g = self.freelist.lock();
                 if g.first_free < 0 {
                     break;
                 }

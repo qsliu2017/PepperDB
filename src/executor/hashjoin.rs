@@ -5,7 +5,7 @@ use crate::storage::buffile::BufFile;
 use crate::storage::sharedfileset::SharedFileSet;
 use crate::utils::sharedtuplestore::{SharedTuplestoreAccessor, sts_estimate};
 use core::sync::atomic::AtomicU32;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 // HashJoinTuple / HashJoinTable are forward-declared opaque in execnodes.h; this
 // header provides their real definitions. Resolved here as `HashJoinTuple` and

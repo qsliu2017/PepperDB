@@ -232,7 +232,13 @@ pub static mut WalReceiverFunctions: Option<&'static dyn WalReceiver> = None;
 // The walrcv_* dispatch macros become thin forwarders over WalReceiverFunctions.
 
 fn funcs() -> &'static dyn WalReceiver {
-    unsafe { WalReceiverFunctions.expect("WalReceiverFunctions not installed") }
+    #[allow(
+        clippy::expect_used,
+        reason = "walrcv_* dispatch is reachable only after the receiver installs its vtable"
+    )]
+    unsafe {
+        WalReceiverFunctions.expect("WalReceiverFunctions not installed")
+    }
 }
 
 pub fn walrcv_connect(

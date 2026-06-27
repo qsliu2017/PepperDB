@@ -13,11 +13,18 @@
 //!   - `SInvalWriteLock` (exclusive only)  -> `write: Mutex<SIWriteState>`
 //!   - `SInvalReadLock`  (shared readers / exclusive cleanup) -> `read_lock: RwLock<()>`
 //!   - `msgnumLock` spinlock (a memory barrier on maxMsgNum) -> `max_msg_num: AtomicI32`
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock};
 use std::cell::UnsafeCell;
+
+use parking_lot::{Mutex, RwLock};
 
 use crate::c::LocalTransactionId;
 use crate::storage::lock::{INVALID_LOCAL_TRANSACTION_ID, local_transaction_id_is_valid};
@@ -197,7 +204,7 @@ impl SInvalBuffer {
 
         // Can run in parallel with readers, but not writers (SIInsertDataEntries
         // relies on pgprocnos to set hasMessages).
-        let mut w = self.write.lock().unwrap();
+        let mut w = self.write.lock();
 
         // PG: elog(ERROR, "sinval slot ... already in use"). TODO(panic).
         let old_pid = state.proc_pid.load(Ordering::Relaxed);
@@ -228,7 +235,7 @@ impl SInvalBuffer {
     /// inactive. Called explicitly at backend teardown.
     pub fn cleanup_invalidation_state(&self) {
         let me = current_proc_number();
-        let mut w = self.write.lock().unwrap();
+        let mut w = self.write.lock();
         let state = &self.proc_state[me as usize];
 
         // Update next local transaction ID for the next holder of this slot.
@@ -259,7 +266,7 @@ impl SInvalBuffer {
             let (batch, tail) = rest.split_at(nthistime);
             rest = tail;
 
-            let mut w = self.write.lock().unwrap();
+            let mut w = self.write.lock();
 
             // If the buffer is full we MUST acquire space; otherwise clean only
             // when past the next threshold. Loop and recheck after any cleanup.
@@ -322,7 +329,7 @@ impl SInvalBuffer {
             return 0;
         }
 
-        let _r = self.read_lock.read().unwrap();
+        let _r = self.read_lock.read();
 
         // Reset hasMessages BEFORE deciding how many to read, so a concurrent
         // insert re-sets it and we notice the remainder next time.
@@ -369,7 +376,7 @@ impl SInvalBuffer {
     /// `write` before delivering any catchup signal (as PG does).
     pub fn si_cleanup_queue(&self, min_free: i32) {
         let target = {
-            let mut w = self.write.lock().unwrap();
+            let mut w = self.write.lock();
             self.si_cleanup_queue_locked(&mut w, min_free)
         };
         if let Some(procno) = target {
@@ -384,7 +391,7 @@ impl SInvalBuffer {
     /// released). The `signaled = true` bookkeeping stays UNDER the lock.
     fn si_cleanup_queue_locked(&self, w: &mut SIWriteState, min_free: i32) -> Option<ProcNumber> {
         // Lock out all readers (we already hold the writer lock).
-        let r = self.read_lock.write().unwrap();
+        let r = self.read_lock.write();
 
         // Recompute minMsgNum, identify the furthest-back backend needing a
         // signal, and reset backends that are too far back. sendOnly backends are
@@ -613,10 +620,10 @@ mod tests {
         as_backend(0, || async move {
             b.shared_inval_backend_init(false);
             assert_eq!(b.proc_state[0].proc_pid.load(Ordering::Relaxed), my_proc_pid());
-            assert_eq!(b.write.lock().unwrap().pgprocnos, vec![0]);
+            assert_eq!(b.write.lock().pgprocnos, vec![0]);
             b.cleanup_invalidation_state();
             assert_eq!(b.proc_state[0].proc_pid.load(Ordering::Relaxed), 0);
-            assert!(b.write.lock().unwrap().pgprocnos.is_empty());
+            assert!(b.write.lock().pgprocnos.is_empty());
         })
         .await;
     }
@@ -769,7 +776,7 @@ mod tests {
         buf.si_cleanup_queue(0);
         assert_eq!(buf.max_msg_num.load(Ordering::Relaxed), 10);
         assert_eq!(
-            buf.write.lock().unwrap().min_msg_num,
+            buf.write.lock().min_msg_num,
             4,
             "min advances to the slower backend's cursor, not max"
         );
@@ -785,10 +792,10 @@ mod tests {
             b.si_insert_data_entries(&(0..10).map(relcache_msg).collect::<Vec<_>>());
             let mut out = [relcache_msg(0); 16];
             assert_eq!(b.si_get_data_entries(&mut out), 10);
-            assert_eq!(b.write.lock().unwrap().min_msg_num, 0);
+            assert_eq!(b.write.lock().min_msg_num, 0);
             b.si_cleanup_queue(0);
             let max = b.max_msg_num.load(Ordering::Relaxed);
-            assert_eq!(b.write.lock().unwrap().min_msg_num, max, "min advanced to max");
+            assert_eq!(b.write.lock().min_msg_num, max, "min advanced to max");
             assert_eq!(max, 10);
         })
         .await;

@@ -6,10 +6,15 @@
 //! `std::sync::Mutex<()>` placeholder marks the protected region); dsa pointers
 //! become owned/`Box`; the dshash table becomes a `HashMap`. pg_atomic_* become
 //! `core::sync::atomic` types.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, AtomicU64};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use bitflags::bitflags;
 

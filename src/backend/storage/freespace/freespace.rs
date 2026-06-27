@@ -20,6 +20,11 @@
 //! manager already uses -- `&Arc<SharedState>`, `&mut SmgrRelation`, and the
 //! relation persistence -- and the header `src/storage/freespace.rs` keeps the
 //! `Relation`-based C signatures as TODO shims.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::sync::Arc;
 

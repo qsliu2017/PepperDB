@@ -227,6 +227,10 @@ pub async fn validate_pg_version(io: &Arc<IoBackend>, path: &str) -> io::Result<
             )
         })?;
 
+    #[allow(
+        clippy::expect_used,
+        reason = "PG_MAJORVERSION is a compile-time numeric constant literal"
+    )]
     let my_major: u32 = PG_MAJORVERSION.parse().expect("PG_MAJORVERSION is numeric");
     if file_major != my_major {
         return Err(io::Error::new(

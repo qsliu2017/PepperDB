@@ -15,6 +15,11 @@
 //!    -> a tokio `task_local! RefCell<ReceiveState>` (per-task; the recursion is
 //!    within one task). The RefCell borrow is NEVER held across the inval/reset
 //!    callback: we borrow to pop one message by value, drop the borrow, then call.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::cell::RefCell;
 use std::sync::Arc;

@@ -19,6 +19,13 @@ nursery = { level = "warn", priority = -1 }
 # any future violation is a hard error (module-level #[allow] is the escape hatch).
 await_holding_lock = "deny"
 await_holding_refcell_ref = "deny"
+# error.md s3.3: bare unwrap/expect forbidden in non-test code. Sanctioned
+# replacements are the OrElog trait (unwrap_or_error/_fatal/_panic [+_with]),
+# `?`/Result, and crate::assert!. Test code is exempt via clippy.toml
+# (allow-unwrap-in-tests / allow-expect-in-tests). New code stays clean; the
+# pre-existing backlog is tracked by file-level TODO(error-migration) allows.
+unwrap_used = "deny"
+expect_used = "deny"
 # PERMANENT allows -- inherent to the 1:1 translation; these fight faithful
 # C-signature/struct/literal ports and will not be "fixed":
 too_many_arguments = "allow" # PG functions take many params; we mirror them
@@ -53,6 +60,7 @@ workspace = true
 
 [dependencies]
 bitflags = "2"
+parking_lot = "0.12"
 pepperdb-derive = { path = "crates/pepperdb-derive" }
 pepperdb-util = { path = "crates/pepperdb-util" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "net", "time", "io-util", "macros", "signal"] }

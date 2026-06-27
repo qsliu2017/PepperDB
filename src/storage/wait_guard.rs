@@ -18,8 +18,9 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Mutex;
 use std::task::{Context, Poll, Waker};
+
+use parking_lot::Mutex;
 
 use crate::storage::procnumber::{GenSlab, Key};
 
@@ -48,7 +49,7 @@ impl WaitQueue {
     /// Enqueue a slot and return a guard. The guard is a `Future` that completes
     /// once this slot is woken, and removes the slot on `Drop`.
     pub fn enqueue(&self) -> WaitGuard<'_> {
-        let key = self.slots.lock().unwrap().insert(Waiter {
+        let key = self.slots.lock().insert(Waiter {
             waker: None,
             woken: false,
         });
@@ -62,7 +63,7 @@ impl WaitQueue {
 
     /// Wake the oldest waiter, if any. Sync.
     pub fn wake_one(&self) {
-        let mut slots = self.slots.lock().unwrap();
+        let mut slots = self.slots.lock();
         // Oldest live slot = lowest index. iter() yields live entries; pick min.
         let oldest = slots.iter().map(|(k, _)| k).min_by_key(Key::index);
         if let Some(key) = oldest
@@ -78,7 +79,7 @@ impl WaitQueue {
 
     /// Wake every waiter currently in the queue. Sync.
     pub fn wake_all(&self) {
-        let mut slots = self.slots.lock().unwrap();
+        let mut slots = self.slots.lock();
         let wakers: Vec<Waker> = slots
             .iter()
             .map(|(k, _)| k)
@@ -96,7 +97,7 @@ impl WaitQueue {
 
     /// Number of waiters currently enqueued. Mainly for tests/assertions.
     pub fn len(&self) -> usize {
-        self.slots.lock().unwrap().len()
+        self.slots.lock().len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -117,7 +118,6 @@ impl WaitGuard<'_> {
         self.queue
             .slots
             .lock()
-            .unwrap()
             .get(self.key)
             .is_none_or(|w| w.woken)
     }
@@ -127,7 +127,7 @@ impl Future for WaitGuard<'_> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let mut slots = self.queue.slots.lock().unwrap();
+        let mut slots = self.queue.slots.lock();
         match slots.get_mut(self.key) {
             Some(w) if w.woken => Poll::Ready(()),
             Some(w) => {
@@ -143,7 +143,7 @@ impl Future for WaitGuard<'_> {
 impl Drop for WaitGuard<'_> {
     fn drop(&mut self) {
         // Dequeue-on-Drop: a cancelled waiter must not linger in the queue.
-        self.queue.slots.lock().unwrap().remove(self.key);
+        self.queue.slots.lock().remove(self.key);
     }
 }
 

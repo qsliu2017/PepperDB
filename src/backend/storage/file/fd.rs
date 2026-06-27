@@ -20,12 +20,19 @@
 //! scans (AllocateDir), and temporary files are RAII guard types -- their Drop
 //! closes the fd / unlinks the temp file, so unwind and normal scope-exit both
 //! clean up without an explicit registry.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::collections::VecDeque;
 use std::io::{self, IoSlice, IoSliceMut};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use crate::storage::io_backend::{self, FdPermit, IoBackend, OpenFlags};
 use crate::storage::procnumber::{GenSlab, Key};
@@ -115,7 +122,7 @@ impl FdManager {
         path: impl AsRef<Path>,
         flags: OpenFlags,
     ) -> io::Result<File> {
-        let key = self.inner.lock().unwrap().cache.insert(Vfd {
+        let key = self.inner.lock().cache.insert(Vfd {
             path: path.as_ref().to_path_buf(),
             flags,
             handle: None,
@@ -124,7 +131,7 @@ impl FdManager {
         match self.ensure_open(key).await {
             Ok(_) => Ok(File::new(key, self.clone())),
             Err(e) => {
-                self.inner.lock().unwrap().cache.remove(key);
+                self.inner.lock().cache.remove(key);
                 Err(e)
             }
         }
@@ -135,7 +142,7 @@ impl FdManager {
     async fn ensure_open(&self, key: Key<Vfd>) -> io::Result<Arc<std::fs::File>> {
         // Fast path + LRU trim, all under one short critical section.
         {
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.inner.lock();
             match g.cache.get(key) {
                 None => return Err(stale()),
                 Some(vfd) => {
@@ -154,7 +161,7 @@ impl FdManager {
 
         // Snapshot the reopen parameters, then open with the lock dropped.
         let (path, mut flags) = {
-            let g = self.inner.lock().unwrap();
+            let g = self.inner.lock();
             let vfd = g.cache.get(key).ok_or_else(stale)?;
             (vfd.path.clone(), vfd.flags)
         };
@@ -165,7 +172,7 @@ impl FdManager {
 
         let (handle, permit) = self.io.open(&path, flags).await?;
 
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.inner.lock();
         // The vfd may have been removed while we awaited; if so, fail safe.
         let vfd = g.cache.get_mut(key).ok_or_else(stale)?;
         vfd.handle = Some(handle.clone());
@@ -345,7 +352,7 @@ impl File {
 
 impl Drop for FileInner {
     fn drop(&mut self) {
-        let mut g = self.mgr.inner.lock().unwrap();
+        let mut g = self.mgr.inner.lock();
         g.drop_from_lru(self.key);
         g.cache.remove(self.key); // drops handle (fd) + permit (budget)
     }
@@ -531,7 +538,7 @@ mod tests {
             paths.push(p);
         }
         // At most max_open vfds hold an OS fd at once.
-        assert!(mgr.inner.lock().unwrap().lru.len() <= 3);
+        assert!(mgr.inner.lock().lru.len() <= 3);
         for p in &paths {
             let _ = io_backend::unlink(p).await;
         }

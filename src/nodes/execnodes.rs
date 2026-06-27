@@ -1000,7 +1000,7 @@ pub struct ParallelBitmapHeapState {
     /// dsa_pointer to the shared iterator.
     pub tbmiterator: usize,
     /// mutual exclusion for state (was slock_t).
-    pub mutex: std::sync::Mutex<()>,
+    pub mutex: parking_lot::Mutex<()>,
     pub state: SharedBitmapState,
     pub cv: ConditionVariable,
 }

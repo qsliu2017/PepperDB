@@ -13,7 +13,8 @@
 //! `.await` (borrow to check, drop, await, borrow to update).
 
 use std::cell::RefCell;
-use std::sync::Mutex;
+
+use parking_lot::Mutex;
 
 use crate::access::clog::XidStatus;
 use crate::access::transam::{FullTransactionId, TransamVariablesData};
@@ -55,7 +56,7 @@ impl VariableCache {
 
     /// Run `f` under the variable-cache lock. Caller must not `.await` inside.
     pub fn with<R>(&self, f: impl FnOnce(&mut TransamVariablesData) -> R) -> R {
-        f(&mut self.inner.lock().unwrap())
+        f(&mut self.inner.lock())
     }
 }
 

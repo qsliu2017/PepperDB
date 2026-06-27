@@ -13,6 +13,11 @@
 //! (`session::scope` / `procsignal::scope` / `resowner::scope`) around its loop,
 //! and services interrupts via [`process_main_loop_interrupts`]. The concrete aux
 //! loops are step 17; this only provides their common cradle.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::sync::Arc;
 

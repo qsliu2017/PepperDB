@@ -29,12 +29,19 @@
 //!
 //! Staging: deadlock detection (deadlock.c, 15c) and the lmgr.c wrappers (15d)
 //! land on existing stubs. Lock groups are single-member until F4 (noted inline).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
+
+use parking_lot::Mutex;
 
 use crate::postgres_ext::{InvalidOid, Oid};
 use crate::storage::lock::{
@@ -276,7 +283,7 @@ fn with_fp_locked<R>(procno: ProcNumber, f: impl FnOnce(&mut PGPROC) -> R) -> Op
     let cell = g.cell(procno)?;
     // SAFETY: shared ref to the slot only to reach the Mutex; the Mutex is
     // internally synchronized.
-    let guard = unsafe { cell.get().fp_info_lock.lock().unwrap() };
+    let guard = unsafe { cell.get().fp_info_lock.lock() };
     // SAFETY: the fpInfoLock guard serializes all fast-path access to this slot;
     // no other task forms a &mut to the fast-path fields while we hold it.
     let proc = unsafe { cell.get_mut() };
@@ -350,7 +357,7 @@ impl LockManager {
     /// The closure is SYNC -- no `.await` may occur while the guards are held
     /// (rules s5).
     pub fn with_all_partitions_locked<R>(&self, f: impl FnOnce(&LockTablesView) -> R) -> R {
-        let mut guards: Vec<_> = self.shards.iter().map(|s| s.lock().unwrap()).collect();
+        let mut guards: Vec<_> = self.shards.iter().map(|s| s.lock()).collect();
         // Raw `*mut LockShard` per partition, taken once from each held guard. Sound
         // because the guards live (and exclusively hold every partition Mutex) for
         // the whole `f` call; the view is the sole accessor. Lets the deadlock
@@ -681,7 +688,7 @@ pub fn AbortStrongLockAcquire() {
     };
     if let Some(m) = lock_manager() {
         let fasthash = fast_path_strong_lock_hash_partition(hashcode);
-        let mut s = m.strong.lock().unwrap();
+        let mut s = m.strong.lock();
         if s.count[fasthash] > 0 {
             s.count[fasthash] -= 1;
         }
@@ -762,7 +769,7 @@ fn remove_local_lock(l: &mut LocalLockTable, tag: LOCALLOCKTAG) {
     if holds_strong
         && let Some(m) = lock_manager() {
             let fasthash = fast_path_strong_lock_hash_partition(hashcode);
-            let mut s = m.strong.lock().unwrap();
+            let mut s = m.strong.lock();
             if s.count[fasthash] > 0 {
                 s.count[fasthash] -= 1;
             }
@@ -994,7 +1001,7 @@ pub fn RemoveFromWaitQueue(procno: ProcNumber, view: &LockTablesView) {
 /// was already dequeued by a grantor or by CheckDeadLock). SYNC -- no `.await`.
 fn clean_up_after_give_up(procno: ProcNumber, hashcode: u32, localtag: LOCALLOCKTAG) {
     if let Some(m) = lock_manager() {
-        let mut shard = m.shard(hashcode).lock().unwrap();
+        let mut shard = m.shard(hashcode).lock();
         remove_from_wait_queue_in_shard(&mut shard, procno);
         drop(shard);
     }
@@ -1015,7 +1022,7 @@ fn clean_up_after_give_up(procno: ProcNumber, hashcode: u32, localtag: LOCALLOCK
 /// remember the in-progress LOCALLOCK for error cleanup.
 fn begin_strong_lock_acquire(l: &mut LocalLockTable, tag: LOCALLOCKTAG, fasthash: usize) {
     if let Some(m) = lock_manager() {
-        let mut s = m.strong.lock().unwrap();
+        let mut s = m.strong.lock();
         s.count[fasthash] += 1;
     }
     if let Some(ll) = l.locks.get_mut(&tag) {
@@ -1111,7 +1118,7 @@ fn fast_path_transfer_relation_locks(
                 if proc.fp_rel_id[f as usize] != relid || fast_path_get_bits(proc, f) == 0 {
                     continue;
                 }
-                let mut shard = m.shard(hashcode).lock().unwrap();
+                let mut shard = m.shard(hashcode).lock();
                 for lockmode in FAST_PATH_LOCKNUMBER_OFFSET
                     ..(FAST_PATH_LOCKNUMBER_OFFSET + FAST_PATH_BITS_PER_SLOT)
                 {
@@ -1246,7 +1253,7 @@ pub async fn LockAcquireExtended(
         if has_room {
             let fasthash = fast_path_strong_lock_hash_partition(hashcode);
             let strong_present = {
-                let s = m.strong.lock().unwrap();
+                let s = m.strong.lock();
                 s.count[fasthash] != 0
             };
             let acquired = if strong_present {
@@ -1307,7 +1314,7 @@ pub async fn LockAcquireExtended(
     }
 
     let pre = {
-        let mut shard = m.shard(hashcode).lock().unwrap();
+        let mut shard = m.shard(hashcode).lock();
 
         let Some((lock_ptr_raw, proclock_ptr_raw)) =
             setup_lock_in_table(&mut shard, procno, locktag, lockmode)
@@ -1600,7 +1607,7 @@ pub fn LockRelease(locktag: &LOCKTAG, lockmode: LOCKMODE, session_lock: bool) ->
     }
 
     // Mess with the shared lock table under the partition shard Mutex.
-    let mut shard = m.shard(hashcode).lock().unwrap();
+    let mut shard = m.shard(hashcode).lock();
 
     // Re-find the lock/proclock. Under fast-path transfer the LOCALLOCK.lock can
     // be null; re-find by tag.
@@ -1799,7 +1806,7 @@ fn lock_refind_and_release(
 ) {
     let lock_method_table = GetLockTagsMethodTable(locktag);
     let hashcode = LockTagHashCode(locktag);
-    let mut shard = m.shard(hashcode).lock().unwrap();
+    let mut shard = m.shard(hashcode).lock();
 
     let pl_key = ProcLockKey {
         lock: *locktag,
@@ -1823,7 +1830,7 @@ fn lock_refind_and_release(
 
     if decrement_strong_lock_count && conflicts_with_relation_fast_path(locktag, lockmode) {
         let fasthash = fast_path_strong_lock_hash_partition(hashcode);
-        let mut s = m.strong.lock().unwrap();
+        let mut s = m.strong.lock();
         if s.count[fasthash] > 0 {
             s.count[fasthash] -= 1;
         }
@@ -1878,7 +1885,7 @@ pub fn LockHasWaiters(locktag: &LOCKTAG, lockmode: LOCKMODE, _session_lock: bool
     if !held {
         return false;
     }
-    let shard = m.shard(hashcode).lock().unwrap();
+    let shard = m.shard(hashcode).lock();
     
     shard
         .locks
@@ -1894,7 +1901,7 @@ pub fn LockWaiterCount(locktag: &LOCKTAG) -> i32 {
         return 0;
     };
     let hashcode = LockTagHashCode(locktag);
-    let shard = m.shard(hashcode).lock().unwrap();
+    let shard = m.shard(hashcode).lock();
     shard.locks.get(locktag).map_or(0, |l| l.n_requested)
 }
 
@@ -1958,7 +1965,7 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
     let fast_count = out.len();
 
     // Main-table scan.
-    let shard = m.shard(hashcode).lock().unwrap();
+    let shard = m.shard(hashcode).lock();
     if let Some(lock) = shard.locks.get(locktag) {
         let _ = lock;
         for (key, proclock) in &shard.proclocks {
@@ -2000,7 +2007,7 @@ pub fn GetRunningTransactionLocks() -> Vec<xl_standby_lock> {
     let aex = lockbit_on(LockMode::AccessExclusiveLock as LOCKMODE);
     let g = proc_global();
     // Take all partitions (shared semantics; we use the Mutex). Ascending.
-    let guards: Vec<_> = m.shards.iter().map(|s| s.lock().unwrap()).collect();
+    let guards: Vec<_> = m.shards.iter().map(|s| s.lock()).collect();
     let out: Vec<xl_standby_lock> = guards
         .iter()
         .flat_map(|shard| shard.proclocks.iter())
@@ -2110,7 +2117,7 @@ pub async fn VirtualXactLock(vxid: VirtualTransactionId, wait: bool) -> bool {
         })
         .unwrap_or(false);
         if did {
-            let mut shard = m.shard(hashcode).lock().unwrap();
+            let mut shard = m.shard(hashcode).lock();
             if let Some((lp, plp)) = setup_lock_in_table(
                 &mut shard,
                 vxid.proc_number,

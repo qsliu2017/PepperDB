@@ -13,7 +13,9 @@
 //! mirrors sync.c's `syncsw` table.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use crate::backend::storage::smgr::md;
 use crate::shared_state::SharedState;
@@ -93,7 +95,6 @@ impl SyncRequests {
     pub fn pending_op_count(&self) -> usize {
         self.inner
             .lock()
-            .unwrap()
             .pending_ops
             .values()
             .filter(|e| !e.canceled)
@@ -102,7 +103,7 @@ impl SyncRequests {
 
     /// True if a sync request for `tag` is queued (and not canceled) -- tests.
     pub fn has_pending_sync(&self, tag: &FileTag) -> bool {
-        let g = self.inner.lock().unwrap();
+        let g = self.inner.lock();
         g.pending_ops
             .get(&FileTagKey::of(tag))
             .is_some_and(|e| !e.canceled)
@@ -111,7 +112,6 @@ impl SyncRequests {
     pub fn pending_unlink_count(&self) -> usize {
         self.inner
             .lock()
-            .unwrap()
             .pending_unlinks
             .iter()
             .filter(|e| !e.canceled)
@@ -135,7 +135,7 @@ pub fn InitSync() {
 /// SyncPreCheckpoint() -- advance the unlink cycle counter so unlinks arriving
 /// after this point wait for the next checkpoint.
 pub fn SyncPreCheckpoint(shared: &Arc<SharedState>) {
-    let mut g = shared.sync_requests().inner.lock().unwrap();
+    let mut g = shared.sync_requests().inner.lock();
     g.checkpoint_cycle_ctr = g.checkpoint_cycle_ctr.wrapping_add(1);
 }
 
@@ -143,7 +143,7 @@ pub fn SyncPreCheckpoint(shared: &Arc<SharedState>) {
 /// the tags under the lock, drops it, then unlinks (no lock across `.await`).
 pub async fn SyncPostCheckpoint(shared: &Arc<SharedState>) {
     let to_unlink: Vec<FileTag> = {
-        let mut g = shared.sync_requests().inner.lock().unwrap();
+        let mut g = shared.sync_requests().inner.lock();
         let checkpoint_cycle = g.checkpoint_cycle_ctr;
         let mut tags = Vec::new();
         // New entries are appended; stop at the first entry from this cycle.
@@ -183,7 +183,7 @@ pub async fn ProcessSyncRequests(shared: &Arc<SharedState>) {
 
     // Advance the cycle counter so requests added after this point are skipped.
     let cur_cycle = {
-        let mut g = sr.inner.lock().unwrap();
+        let mut g = sr.inner.lock();
         let cur = g.sync_cycle_ctr;
         g.sync_cycle_ctr = g.sync_cycle_ctr.wrapping_add(1);
         cur
@@ -192,7 +192,7 @@ pub async fn ProcessSyncRequests(shared: &Arc<SharedState>) {
     // Snapshot the tags to fsync: old entries (cycle_ctr == cur_cycle), not
     // canceled. Drop the lock before any I/O.
     let to_sync: Vec<FileTag> = {
-        let g = sr.inner.lock().unwrap();
+        let g = sr.inner.lock();
         g.pending_ops
             .iter()
             .filter(|(_, e)| !e.canceled && e.cycle_ctr == cur_cycle)
@@ -202,7 +202,7 @@ pub async fn ProcessSyncRequests(shared: &Arc<SharedState>) {
 
     for tag in &to_sync {
         let result = sync_filetag(shared, tag).await;
-        let mut g = sr.inner.lock().unwrap();
+        let mut g = sr.inner.lock();
         match result {
             Ok(_) => {
                 g.pending_ops.remove(&FileTagKey::of(tag));
@@ -279,7 +279,7 @@ impl SyncRequests {
     /// Enter/cancel a request directly on the queue (used by callers that hold
     /// an `Arc<SyncRequests>` rather than the whole `SharedState`, e.g. SLRU).
     pub fn register_tag(&self, ftag: &FileTag, req_type: SyncRequestType) {
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.inner.lock();
         register_tag_locked(&mut g, ftag, req_type);
     }
 }

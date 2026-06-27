@@ -195,7 +195,7 @@ async fn lock_timeout_path_returns_not_avail() {
 fn lock_state(tag: &LOCKTAG) -> Option<(i32, i32, usize)> {
     let m = lock_manager().unwrap();
     let hashcode = LockTagHashCode(tag);
-    let shard = m.shard(hashcode).lock().unwrap();
+    let shard = m.shard(hashcode).lock();
     shard
         .locks
         .get(tag)

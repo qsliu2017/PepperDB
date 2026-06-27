@@ -21,6 +21,11 @@
 //! Staging (rules s4): `AcceptInvalidationMessages` (sinval), the relcache, and
 //! the progress-reporting / CREATE INDEX CONCURRENTLY machinery land on existing
 //! stubs.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::sync::Arc;
 

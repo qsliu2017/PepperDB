@@ -87,6 +87,10 @@ pub fn InitFunctionCallInfoData(
 
 /// C: `#define FunctionCallInvoke(fcinfo)` - invoke via the looked-up fn_addr.
 pub fn FunctionCallInvoke(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    #[allow(
+        clippy::unwrap_used,
+        reason = "FunctionCallInvoke is only reached after fmgr_info installs fn_addr"
+    )]
     let f = fcinfo.flinfo.as_ref().and_then(|fi| fi.fn_addr).unwrap();
     f(fcinfo)
 }

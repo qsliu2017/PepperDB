@@ -145,13 +145,15 @@ pub struct ErrorData {
 // ---------------------------------------------------------------------------
 
 // TODO(panic): error_context_stack should be task-local state, not a process
-// global. Modeled here as a list of boxed closures.
+// global. Modeled here as a list of boxed closures. PG's callback receives the
+// live errordata stack top; here it receives `&mut ErrorData` (the single
+// in-flight error) so callbacks can append CONTEXT lines via errcontext_msg.
 pub struct ErrorContextCallback {
-    pub callback: Box<dyn FnMut()>,
+    pub callback: Box<dyn FnMut(&mut ErrorData)>,
 }
 
 impl ErrorContextCallback {
-    pub fn new(callback: impl FnMut() + 'static) -> Self {
+    pub fn new(callback: impl FnMut(&mut ErrorData) + 'static) -> Self {
         Self { callback: Box::new(callback) }
     }
 }
@@ -162,15 +164,15 @@ impl ErrorContextCallback {
 // ---------------------------------------------------------------------------
 
 pub use crate::backend::utils::error::elog::{
-    check_log_of_query, copy_error_data, debug_file_open, emit_error_report, err_generic_string,
-    errbacktrace, errcode_for_file_access, errcode_for_socket_access, errdetail_log_plural,
+    check_log_of_query, copy_error_data, debug_file_open, emit_error_report, errdetail_log_plural,
     errdetail_plural, errhint_plural, errmsg_plural, errsave_start, errstart, errstart_cold,
     error_severity, flush_error_state, format_elog_string, free_error_data, get_backend_type_for_log,
-    get_error_context_stack, get_formatted_log_time, get_formatted_start_time, geterrcode,
-    geterrposition, getinternalerrposition, in_error_recursion_trouble, log_status_format,
-    message_level_is_interesting, pg_try, pre_format_elog_string, reset_formatted_start_time,
-    set_errcontext_domain, unpack_sql_state, write_csvlog, write_jsonlog, write_pipe_chunks,
-    write_stderr, EMIT_LOG_HOOK, ERROR_CONTEXT_STACK,
+    get_error_context_stack, get_formatted_log_time, get_formatted_start_time,
+    clear_error_context_stack, in_error_recursion_trouble, log_status_format,
+    message_level_is_interesting, pg_try, pop_error_context_callback, pre_format_elog_string,
+    push_error_context_callback, report_recovered_error,
+    reset_formatted_start_time, unpack_sql_state, write_csvlog,
+    write_jsonlog, write_pipe_chunks, write_stderr, PgCaught, PgTry, EMIT_LOG_HOOK,
 };
 
 #[allow(deprecated)]
@@ -208,4 +210,162 @@ macro_rules! elog {
             __e.errmsg_internal($msg);
         });
     }};
+}
+
+// ---------------------------------------------------------------------------
+// OrElog (error.md s3.3). The sanctioned replacement for bare
+// `unwrap`/`expect`/`panic!` in non-test code: on None/Err it raises the named
+// severity through the elog path (capturing the `Err` Display as errdetail)
+// instead of an opaque panic. The `_with` variants take a LAZY closure so the
+// happy path allocates nothing. `use crate::utils::elog::OrElog;` at call sites.
+// ---------------------------------------------------------------------------
+
+/// Raise `elevel` with `msg` (and optional `detail`) via errstart/errfinish.
+/// For `>= ERROR` this diverges; the `-> !` callers below rely on that.
+fn raise_or_elog(elevel: i32, msg: String, detail: Option<String>) -> ! {
+    if let Some(mut edata) = errstart(elevel, None) {
+        edata.errmsg(msg);
+        if let Some(d) = detail {
+            edata.errdetail(d);
+        }
+        #[allow(deprecated)]
+        errfinish(edata, file!(), line!() as i32, "");
+    }
+    // errstart returned None (gated off) for a `>= ERROR` severity: this cannot
+    // happen (errstart never gates out `>= ERROR`), but the contract is divergence.
+    unreachable!("OrElog severity >= ERROR always raises");
+}
+
+/// Extension trait raising an elog error in place of `unwrap`/`expect`.
+/// Implemented for `Option<T>` and `Result<T, E: Display>`.
+pub trait OrElog<T> {
+    /// On None/Err: raise `ERROR` with a generic default message.
+    fn unwrap_or_error(self) -> T;
+    /// On None/Err: raise `ERROR` with a lazily-built message.
+    fn unwrap_or_error_with<S: Into<String>>(self, f: impl FnOnce() -> S) -> T;
+    /// On None/Err: raise `FATAL` with a generic default message.
+    fn unwrap_or_fatal(self) -> T;
+    /// On None/Err: raise `FATAL` with a lazily-built message.
+    fn unwrap_or_fatal_with<S: Into<String>>(self, f: impl FnOnce() -> S) -> T;
+    /// On None/Err: raise `PANIC` (corruption -> uncatchable abort).
+    fn unwrap_or_panic(self) -> T;
+    /// On None/Err: raise `PANIC` with a lazily-built message.
+    fn unwrap_or_panic_with<S: Into<String>>(self, f: impl FnOnce() -> S) -> T;
+}
+
+const OR_ELOG_NULL_MSG: &str = "unexpected null value";
+
+impl<T> OrElog<T> for Option<T> {
+    fn unwrap_or_error(self) -> T {
+        self.unwrap_or_else(|| raise_or_elog(ERROR, OR_ELOG_NULL_MSG.to_owned(), None))
+    }
+    fn unwrap_or_error_with<S: Into<String>>(self, f: impl FnOnce() -> S) -> T {
+        self.unwrap_or_else(|| raise_or_elog(ERROR, f().into(), None))
+    }
+    fn unwrap_or_fatal(self) -> T {
+        self.unwrap_or_else(|| raise_or_elog(FATAL, OR_ELOG_NULL_MSG.to_owned(), None))
+    }
+    fn unwrap_or_fatal_with<S: Into<String>>(self, f: impl FnOnce() -> S) -> T {
+        self.unwrap_or_else(|| raise_or_elog(FATAL, f().into(), None))
+    }
+    fn unwrap_or_panic(self) -> T {
+        self.unwrap_or_else(|| raise_or_elog(PANIC, OR_ELOG_NULL_MSG.to_owned(), None))
+    }
+    fn unwrap_or_panic_with<S: Into<String>>(self, f: impl FnOnce() -> S) -> T {
+        self.unwrap_or_else(|| raise_or_elog(PANIC, f().into(), None))
+    }
+}
+
+impl<T, E: std::fmt::Display> OrElog<T> for Result<T, E> {
+    fn unwrap_or_error(self) -> T {
+        self.unwrap_or_else(|e| raise_or_elog(ERROR, e.to_string(), None))
+    }
+    fn unwrap_or_error_with<S: Into<String>>(self, f: impl FnOnce() -> S) -> T {
+        self.unwrap_or_else(|e| raise_or_elog(ERROR, f().into(), Some(e.to_string())))
+    }
+    fn unwrap_or_fatal(self) -> T {
+        self.unwrap_or_else(|e| raise_or_elog(FATAL, e.to_string(), None))
+    }
+    fn unwrap_or_fatal_with<S: Into<String>>(self, f: impl FnOnce() -> S) -> T {
+        self.unwrap_or_else(|e| raise_or_elog(FATAL, f().into(), Some(e.to_string())))
+    }
+    fn unwrap_or_panic(self) -> T {
+        self.unwrap_or_else(|e| raise_or_elog(PANIC, e.to_string(), None))
+    }
+    fn unwrap_or_panic_with<S: Into<String>>(self, f: impl FnOnce() -> S) -> T {
+        self.unwrap_or_else(|e| raise_or_elog(PANIC, f().into(), Some(e.to_string())))
+    }
+}
+
+#[cfg(test)]
+mod or_elog_tests {
+    use super::*;
+    use std::panic::catch_unwind;
+
+    #[test]
+    fn option_some_and_ok_passthrough() {
+        flush_error_state();
+        assert_eq!(Some(5).unwrap_or_error(), 5);
+        assert_eq!(Some(6).unwrap_or_error_with(|| "x"), 6);
+        let ok: Result<i32, String> = Ok(7);
+        assert_eq!(ok.unwrap_or_fatal(), 7);
+        let ok2: Result<i32, &str> = Ok(8);
+        assert_eq!(ok2.unwrap_or_error_with(|| "x"), 8);
+        flush_error_state();
+    }
+
+    #[test]
+    fn option_none_raises_error() {
+        flush_error_state();
+        let result = catch_unwind(|| {
+            let v: Option<i32> = None;
+            v.unwrap_or_error()
+        });
+        let payload = result.expect_err("None must raise ERROR");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.elevel, ERROR);
+        assert_eq!(edata.message.as_deref(), Some(super::OR_ELOG_NULL_MSG));
+        flush_error_state();
+    }
+
+    #[test]
+    fn result_err_captures_display_as_detail() {
+        flush_error_state();
+        let result = catch_unwind(|| {
+            let v: Result<i32, String> = Err("disk gone".to_string());
+            v.unwrap_or_error_with(|| "could not read block")
+        });
+        let payload = result.expect_err("Err must raise ERROR");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.elevel, ERROR);
+        assert_eq!(edata.message.as_deref(), Some("could not read block"));
+        assert_eq!(edata.detail.as_deref(), Some("disk gone"));
+        flush_error_state();
+    }
+
+    #[test]
+    fn result_err_default_message_is_display() {
+        flush_error_state();
+        let result = catch_unwind(|| {
+            let v: Result<i32, &str> = Err("boom");
+            v.unwrap_or_error()
+        });
+        let payload = result.expect_err("Err must raise ERROR");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.message.as_deref(), Some("boom"));
+        flush_error_state();
+    }
+
+    #[test]
+    fn unwrap_or_fatal_raises_fatal() {
+        flush_error_state();
+        let result = catch_unwind(|| {
+            let v: Option<i32> = None;
+            v.unwrap_or_fatal_with(|| "connection unusable")
+        });
+        let payload = result.expect_err("None must raise FATAL");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.elevel, FATAL);
+        flush_error_state();
+    }
 }

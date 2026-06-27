@@ -26,6 +26,11 @@
 //! there is no concurrent reader/writer to coordinate. The only async part is the
 //! smgr flush write; the local-pool borrow is dropped before that `.await`
 //! (`FlushLocalBuffer` copies the page bytes out, releases the borrow, awaits).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::cell::RefCell;
 use std::collections::HashMap;

@@ -5,7 +5,7 @@
 //! Rust state; `slock_t`/`Latch`/atomics map to `std::sync`/`tokio`/`std::atomic`.
 
 use std::sync::atomic::AtomicU32;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use crate::access::xlogdefs::XLogRecPtr;
 use crate::c::TransactionId;

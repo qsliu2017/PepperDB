@@ -4,6 +4,11 @@
 //! (FPI) and non-FPI parts, and tally per-rmgr / per-record-type counts and
 //! bytes. Used by pg_waldump and the WAL-stats views. Pure value logic over a
 //! decoded record.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use crate::access::rmgrlist::RmgrId as BuiltinRmgrId;
 use crate::access::xlogreader::{DecodedXLogRecord, XLogReaderState};

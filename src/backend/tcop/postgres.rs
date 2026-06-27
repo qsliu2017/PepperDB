@@ -75,48 +75,142 @@ pub async fn postgres_main(stream: TcpStream, dbname: String, username: String) 
             send_ready_for_query = false;
         }
 
-        // (3) Read a command (blocks here in PG via secure_read). pqcomm is
-        // deferred: read_command hits the pq_* stub at runtime.
-        let firstchar = read_command();
+        // Per-command recovery point (error.md s2.2, boundary 2 -- PG's top-level
+        // sigsetjmp). Wrap the read + dispatch of one command in catch_unwind so
+        // an ERROR (a panic carrying ErrorData) is recovered HERE, backend-local,
+        // and the loop continues with the next command. FATAL and non-ErrorData
+        // bug-panics are resumed so they reach the task boundary (end the
+        // backend). No lock/guard is held across the catch.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            process_one_command()
+        }));
 
-        // (5) Service any interrupts that arrived while we slept. Query cancel is
-        // a no-op when idle; ProcessInterrupts has that effect here. This is the
-        // live CHECK_FOR_INTERRUPTS payoff.
-        crate::miscadmin::check_for_interrupts();
-
-        // (7) Process the command.
-        match firstchar {
-            Some(PQMSG_QUERY) => {
-                exec_simple_query("");
-                send_ready_for_query = true;
-            }
-            Some(PQMSG_PARSE) => exec_parse_message(),
-            Some(PQMSG_BIND) => exec_bind_message(),
-            Some(PQMSG_EXECUTE) => exec_execute_message(),
-            Some(PQMSG_FUNCTION_CALL) => {
-                handle_function_request();
-                send_ready_for_query = true;
-            }
-            Some(PQMSG_CLOSE) => exec_close_message(),
-            Some(PQMSG_DESCRIBE) => exec_describe_message(),
-            Some(PQMSG_FLUSH) => pq_flush(),
-            Some(PQMSG_SYNC) => {
-                finish_xact_command();
-                send_ready_for_query = true;
+        match outcome {
+            Ok(CommandResult::Continue { ready }) => {
+                send_ready_for_query |= ready;
             }
             // Terminate or EOF: the frontend is closing the socket. Normal exit.
-            Some(PQMSG_TERMINATE) | None => return,
-            // COPY messages after a failed COPY: accept and ignore.
-            Some(PQMSG_COPY_DATA | PQMSG_COPY_DONE | PQMSG_COPY_FAIL) => {}
-            Some(other) => {
-                // PG: ereport(FATAL, ERRCODE_PROTOCOL_VIOLATION).
-                crate::ereport!(crate::utils::elog::FATAL, |e: &mut crate::utils::elog::ErrorData| {
-                    e.errcode(crate::utils::errcodes::ERRCODE_PROTOCOL_VIOLATION)
-                        .errmsg(format!("invalid frontend message type {other}"));
-                });
+            Ok(CommandResult::Done) => return,
+            Err(payload) => {
+                // error.md s2.3-2.4: an ERROR (elevel < FATAL) is recovered in
+                // the backend; FATAL (or a non-ErrorData bug-panic) resumes to the
+                // task boundary, which ends the backend.
+                match payload.downcast::<crate::utils::elog::ErrorData>() {
+                    Ok(edata) if edata.elevel < crate::utils::elog::FATAL => {
+                        recover_from_error(&edata);
+                        // After recovery the session is idle again -- announce it.
+                        send_ready_for_query = true;
+                    }
+                    Ok(edata) => std::panic::resume_unwind(edata), // FATAL
+                    Err(other) => std::panic::resume_unwind(other), // bug-panic
+                }
             }
         }
     }
+}
+
+/// What processing one client command resolved to.
+enum CommandResult {
+    /// Keep looping; `ready` requests a ReadyForQuery before the next read.
+    Continue { ready: bool },
+    /// The frontend closed (Terminate / EOF): exit the command loop.
+    Done,
+}
+
+/// Read and dispatch exactly one client command (steps 3/5/7 of `PostgresMain`).
+/// Sync (no `.await`) so the whole unit sits inside the per-command `catch_unwind`
+/// recovery point. An `elog(ERROR/FATAL)` raised in here unwinds out as a panic.
+fn process_one_command() -> CommandResult {
+    // (3) Read a command (blocks here in PG via secure_read). pqcomm is
+    // deferred: read_command hits the pq_* stub at runtime.
+    let firstchar = read_command();
+
+    // (5) Service any interrupts that arrived while we slept. Query cancel is
+    // a no-op when idle; ProcessInterrupts has that effect here. This is the
+    // live CHECK_FOR_INTERRUPTS payoff.
+    crate::miscadmin::check_for_interrupts();
+
+    // (7) Process the command.
+    match firstchar {
+        Some(PQMSG_QUERY) => {
+            exec_simple_query("");
+            CommandResult::Continue { ready: true }
+        }
+        Some(PQMSG_PARSE) => {
+            exec_parse_message();
+            CommandResult::Continue { ready: false }
+        }
+        Some(PQMSG_BIND) => {
+            exec_bind_message();
+            CommandResult::Continue { ready: false }
+        }
+        Some(PQMSG_EXECUTE) => {
+            exec_execute_message();
+            CommandResult::Continue { ready: false }
+        }
+        Some(PQMSG_FUNCTION_CALL) => {
+            handle_function_request();
+            CommandResult::Continue { ready: true }
+        }
+        Some(PQMSG_CLOSE) => {
+            exec_close_message();
+            CommandResult::Continue { ready: false }
+        }
+        Some(PQMSG_DESCRIBE) => {
+            exec_describe_message();
+            CommandResult::Continue { ready: false }
+        }
+        Some(PQMSG_FLUSH) => {
+            pq_flush();
+            CommandResult::Continue { ready: false }
+        }
+        Some(PQMSG_SYNC) => {
+            finish_xact_command();
+            CommandResult::Continue { ready: true }
+        }
+        // Terminate or EOF: the frontend is closing the socket. Normal exit.
+        Some(PQMSG_TERMINATE) | None => CommandResult::Done,
+        // COPY messages after a failed COPY: accept and ignore.
+        Some(PQMSG_COPY_DATA | PQMSG_COPY_DONE | PQMSG_COPY_FAIL) => {
+            CommandResult::Continue { ready: false }
+        }
+        Some(other) => {
+            // PG: ereport(FATAL, ERRCODE_PROTOCOL_VIOLATION).
+            crate::ereport!(crate::utils::elog::FATAL, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_PROTOCOL_VIOLATION)
+                    .errmsg(format!("invalid frontend message type {other}"));
+            });
+            CommandResult::Continue { ready: false }
+        }
+    }
+}
+
+/// Recover from a backend-local ERROR caught at the per-command recovery point
+/// (error.md s2.2-2.3). PG's top-level sigsetjmp handler runs AbortCurrentTransaction,
+/// reports the error to the client, and resets per-task error state before looping.
+///
+/// NOTE: AbortCurrentTransaction (xact.c) is `async` and cannot be driven from this
+/// sync recovery handler (it sits inside the per-command `catch_unwind`, which must
+/// not hold a future across the catch). Wiring the (sub)transaction rollback in here
+/// is a follow-up; for now the rollback step is a clearly-marked TODO so the
+/// structural recovery point lands and is correct staging.
+fn recover_from_error(edata: &crate::utils::elog::ErrorData) {
+    // TODO(xact): run AbortCurrentTransaction / AtAbort_* here once a sync entry
+    // (or a drive-the-future shim) exists; it is async today (xact.rs).
+    abort_current_transaction_stub();
+
+    // Report the error to the client + server log. send_message_to_frontend is a
+    // deferred pq stub; report_recovered_error walks the enabled destinations.
+    crate::utils::elog::report_recovered_error(edata);
+
+    // Reset per-task error state so the next command starts clean.
+    crate::utils::elog::flush_error_state();
+}
+
+/// Placeholder for the (sub)transaction rollback step of ERROR recovery. The real
+/// `AbortCurrentTransaction` is async (xact.rs); see `recover_from_error`.
+fn abort_current_transaction_stub() {
+    // TODO(xact): AbortCurrentTransaction(&shared).await -- needs a sync bridge.
 }
 
 // --- Deferred wire/exec entries (pqcomm + parser/planner/executor) ---------
@@ -446,5 +540,68 @@ mod tests {
     fn no_current_slot_is_noop() {
         // Outside any slot scope, must be a no-op (no panic).
         process_interrupts();
+    }
+
+    // --- per-command recovery point (error.md s2.2-2.4) ---
+
+    use crate::utils::elog::{errstart, ERROR as ELEVEL_ERROR, FATAL as ELEVEL_FATAL};
+
+    /// Mirror of the command loop's catch-and-classify around one iteration:
+    /// recover an ERROR (continue the session), resume a FATAL or bug-panic.
+    /// Returns true if the iteration was recovered (loop would continue), false
+    /// if it should propagate to the task boundary (after re-raising).
+    fn drive_one(body: impl FnOnce() + std::panic::UnwindSafe) -> std::thread::Result<bool> {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+                Ok(()) => true,
+                Err(payload) => match payload.downcast::<ErrorData>() {
+                    Ok(edata) if edata.elevel < ELEVEL_FATAL => {
+                        recover_from_error(&edata);
+                        true
+                    }
+                    Ok(edata) => std::panic::resume_unwind(edata),
+                    Err(other) => std::panic::resume_unwind(other),
+                },
+            }
+        }))
+    }
+
+    #[test]
+    fn error_is_recovered_backend_local() {
+        crate::utils::elog::flush_error_state();
+        let recovered = drive_one(|| {
+            if let Some(mut e) = errstart(ELEVEL_ERROR, None) {
+                e.errmsg("recoverable boom");
+                #[allow(deprecated)]
+                crate::backend::utils::error::elog::errfinish(e, "postgres.rs", 1, "test");
+            }
+        });
+        assert!(recovered.expect("ERROR must be recovered, not resumed"));
+        crate::utils::elog::flush_error_state();
+    }
+
+    #[test]
+    fn fatal_resumes_to_task_boundary() {
+        crate::utils::elog::flush_error_state();
+        let result = drive_one(|| {
+            if let Some(mut e) = errstart(ELEVEL_FATAL, None) {
+                e.errmsg("connection unusable");
+                #[allow(deprecated)]
+                crate::backend::utils::error::elog::errfinish(e, "postgres.rs", 1, "test");
+            }
+        });
+        let payload = result.expect_err("FATAL must propagate past the recovery point");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.elevel, ELEVEL_FATAL);
+        crate::utils::elog::flush_error_state();
+    }
+
+    #[test]
+    fn bug_panic_resumes_to_task_boundary() {
+        crate::utils::elog::flush_error_state();
+        let result = drive_one(|| panic!("not an ErrorData"));
+        let payload = result.expect_err("a non-ErrorData bug-panic must propagate");
+        assert!(payload.downcast_ref::<ErrorData>().is_none());
+        crate::utils::elog::flush_error_state();
     }
 }

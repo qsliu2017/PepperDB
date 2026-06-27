@@ -10,6 +10,11 @@
 //! `task_local!` `RefCell<ComboCidState>`; `AtEOXact_ComboCid` resets it. NEVER
 //! hold the `RefCell` borrow across `.await` (every function here is sync, so
 //! there is no `.await` to begin with).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::cell::RefCell;
 use std::collections::HashMap;

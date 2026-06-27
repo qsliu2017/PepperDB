@@ -20,7 +20,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::Arc;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use crate::datatype::timestamp::TimestampTz;
 use crate::miscadmin::BackendType;
@@ -170,10 +170,10 @@ impl Session {
         self.database_has_login_event_triggers.store(v, Ordering::Relaxed);
     }
     pub fn database_name(&self) -> Option<String> {
-        self.database_name.lock().unwrap().clone()
+        self.database_name.lock().clone()
     }
     pub fn set_database_name(&self, name: Option<String>) {
-        *self.database_name.lock().unwrap() = name;
+        *self.database_name.lock() = name;
     }
 
     // --- User-id stack ---
@@ -297,7 +297,12 @@ tokio::task_local! {
 
 /// The current task's session. Panics if not inside a [`scope`].
 pub fn current() -> Arc<Session> {
-    try_current().expect("no Session in scope for this task")
+    #[allow(
+        clippy::expect_used,
+        reason = "documented precondition: caller is inside a scope() task-local"
+    )]
+    let session = try_current().expect("no Session in scope for this task");
+    session
 }
 
 /// The current task's session, or `None` if not inside a [`scope`].

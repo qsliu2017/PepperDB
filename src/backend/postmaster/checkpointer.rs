@@ -24,7 +24,9 @@
 //!   happens, via a guard around `CreateCheckPoint` (see `do_checkpoint_cycle`).
 
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
+
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::access::xlog::{create_check_point, create_restart_point, recovery_in_progress, CheckpointFlags};
 use crate::backend::postmaster::auxprocess::{
@@ -115,8 +117,8 @@ impl CheckpointerShmem {
     /// is a complete, short update, so it is never left inconsistent. A panic on
     /// the checkpointer task (which the supervisor restarts) must therefore NOT
     /// brick the shared counters via poison -- recover the guard if poisoned.
-    fn lock_ckpt(&self) -> std::sync::MutexGuard<'_, CkptCounters> {
-        self.ckpt.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    fn lock_ckpt(&self) -> MutexGuard<'_, CkptCounters> {
+        self.ckpt.lock()
     }
 }
 
@@ -332,6 +334,10 @@ pub async fn checkpointer_main_phased(
 
         // Advertise our proc number so backends can wake us (PG:
         // ProcGlobal->checkpointerProc = MyProcNumber).
+        #[allow(
+            clippy::expect_used,
+            reason = "aux cradle runs only after shared memory init publishes ProcGlobal"
+        )]
         let g = proc_global().expect("ProcGlobal published").clone();
         g.checkpointer_proc.store(aux.proc_number, Ordering::Release);
 

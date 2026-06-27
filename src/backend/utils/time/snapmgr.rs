@@ -25,6 +25,11 @@
 //! (they open/read/write/unlink via `shared.fd()`), and `XidInMVCCSnapshot` /
 //! `WaitForOlderSnapshots` (subtrans probe / sleeping). No `RefCell` borrow is
 //! ever held across an `.await`.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 #![allow(clippy::await_holding_refcell_ref)] // enforced by hand; see module note
 

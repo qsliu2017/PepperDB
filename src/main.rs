@@ -43,6 +43,10 @@ fn main() {
     // Multi-thread runtime: per-task state is Send (step 08), so backends can run
     // on the multi-thread scheduler. PG's postmaster is the long-lived root; this
     // runtime owns every task.
+    #[allow(
+        clippy::expect_used,
+        reason = "process entry point: a runtime that cannot be built means we cannot run at all"
+    )]
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

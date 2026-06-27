@@ -2,6 +2,11 @@
 //! fasthash building blocks. NOT stable across versions/platforms - never use in
 //! indexes or on-disk structures (see hashfn.rs for stable hashes). Inline funcs
 //! translated in full; little-endian only (the WORDS_BIGENDIAN path is dropped).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 /// Incremental fasthash state.
 #[derive(Clone, Copy)]

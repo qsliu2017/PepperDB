@@ -4,6 +4,11 @@
 //! (`#[repr(C)]` + layout asserts). XLP_* page flags are a bitflags set. The
 //! XLogRecPtr/segment macros are `const fn`s. File-naming and WAL-insert
 //! internals are `// TODO(wal)` stubs.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use bitflags::bitflags;
 

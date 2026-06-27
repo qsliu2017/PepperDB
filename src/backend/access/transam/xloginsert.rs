@@ -21,6 +21,11 @@
 //! record into an owned `Vec<u8>` while holding the borrow, drops it, and only
 //! then awaits [`XLogCtl::insert_record`]. So the future is `Send` and the
 //! single await in the begin->register->insert sequence holds nothing borrowed.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::cell::RefCell;
 use std::sync::Arc;

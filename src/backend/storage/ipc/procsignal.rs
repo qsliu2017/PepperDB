@@ -17,9 +17,16 @@
 //! C-named flag accessors now READ and CLEAR these slot flags. The slot is the
 //! canonical per-task interrupt state; the miscadmin `static mut` flags were
 //! retired into `#[deprecated]` slot-backed accessors.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use crate::storage::latch::Latch;
 use crate::storage::procnumber::ProcNumber;
@@ -193,7 +200,7 @@ impl ProcSignal {
         latch: Arc<Latch>,
     ) -> (SlotKey, Arc<ProcSignalSlot>) {
         let generation = self.barrier_generation.load(Ordering::Acquire);
-        let mut reg = self.inner.lock().unwrap();
+        let mut reg = self.inner.lock();
         // Reserve the index first so the slot can record its own proc_number.
         let placeholder = Arc::new(ProcSignalSlot::new(
             pid,
@@ -218,12 +225,12 @@ impl ProcSignal {
     /// Remove a slot on task exit (PG's `CleanupProcSignalState`). A stale key
     /// (already removed, or generation advanced) is a no-op.
     pub fn deregister(&self, key: SlotKey) {
-        self.inner.lock().unwrap().slots.remove(key);
+        self.inner.lock().slots.remove(key);
     }
 
     /// Number of live slots.
     pub fn len(&self) -> usize {
-        self.inner.lock().unwrap().slots.len()
+        self.inner.lock().slots.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -235,7 +242,7 @@ impl ProcSignal {
     /// key is a no-op (returns false). The latch is woken AFTER the lock drops.
     pub fn send(&self, target: SlotKey, reason: ProcSignalReason) -> bool {
         let slot = {
-            let reg = self.inner.lock().unwrap();
+            let reg = self.inner.lock();
             reg.slots.get(target).cloned()
         };
         slot.inspect(|slot| {
@@ -252,7 +259,7 @@ impl ProcSignal {
     /// linear scan is cheap.
     pub fn send_by_proc_number(&self, procno: ProcNumber, reason: ProcSignalReason) -> bool {
         let slot = {
-            let reg = self.inner.lock().unwrap();
+            let reg = self.inner.lock();
             reg.slots
                 .iter()
                 .find(|(_, slot)| slot.proc_number == procno)
@@ -268,7 +275,7 @@ impl ProcSignal {
     /// Find the slot for `pid` and clone its `Arc`. Lock is held only for the
     /// scan + clone.
     fn slot_by_pid(&self, pid: i32) -> Option<Arc<ProcSignalSlot>> {
-        let reg = self.inner.lock().unwrap();
+        let reg = self.inner.lock();
         reg.slots
             .iter()
             .find(|(_, slot)| slot.pid == pid)
@@ -308,7 +315,7 @@ impl ProcSignal {
     pub fn emit_barrier(&self, _barrier_type: ProcSignalBarrierType) -> u64 {
         let generation = self.barrier_generation.fetch_add(1, Ordering::AcqRel) + 1;
         let slots: Vec<Arc<ProcSignalSlot>> = {
-            let reg = self.inner.lock().unwrap();
+            let reg = self.inner.lock();
             reg.slots.iter().map(|(_, slot)| slot.clone()).collect()
         };
         for slot in slots {
@@ -338,7 +345,7 @@ impl ProcSignal {
     /// PROVISIONAL. Return whether every live slot has absorbed `generation`.
     /// (The real `WaitForProcSignalBarrier` blocks; here the supervisor polls.)
     pub fn barrier_absorbed(&self, generation: u64) -> bool {
-        let reg = self.inner.lock().unwrap();
+        let reg = self.inner.lock();
         reg.slots
             .iter()
             .all(|(_, slot)| slot.barrier_generation.load(Ordering::Acquire) >= generation)

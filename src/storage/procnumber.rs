@@ -1,4 +1,9 @@
 //! Translated from PostgreSQL src/include/storage/procnumber.h
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 /// Uniquely identifies an active backend/auxiliary process; an index into the
 /// proc array, starting from 0.

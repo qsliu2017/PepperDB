@@ -7,6 +7,11 @@
 //! Non-type-centric: these are free functions over the flags, so the header
 //! `src/postmaster/interrupt.rs` re-exports them (`pub use`) rather than holding
 //! deprecated shims.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::sync::atomic::Ordering;
 

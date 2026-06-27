@@ -1,4 +1,9 @@
 //! Translated from PostgreSQL src/backend/utils/error/elog.c
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::cell::RefCell;
 use std::fmt::Write as _;
@@ -12,34 +17,84 @@ use crate::utils::elog::{
     WARNING_CLIENT_ONLY,
 };
 
-// ERRORDATA_STACK_SIZE: small stack of ErrorData for re-entrant cases.
-const ERRORDATA_STACK_SIZE: usize = 5;
+// ---------------------------------------------------------------------------
+// PANIC abort. Per the error model (error.md s2.5) a PANIC must crash the
+// process via std::process::abort() -- uncatchable, no Drop -- so half-updated
+// shared state is never flushed. In production this is a real abort(); under
+// cfg(test) a real abort would kill the whole test binary, so tests redirect it
+// to a catchable, distinguished panic carrying the ErrorData (marked PANIC) via
+// a hook, letting them assert the PANIC path without aborting the runner.
+// ---------------------------------------------------------------------------
+
+/// Emit `edata` to the server log, then take the PANIC abort path. In production
+/// this never returns (it aborts the process). Under cfg(test) the abort hook
+/// raises a catchable panic instead, so it diverges either way.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "consumes edata: moved into panic_any (cfg(test) hook) or discarded at process::abort (prod)"
+)]
+fn abort_for_panic(edata: ErrorData) -> ! {
+    send_message_to_server_log(&edata);
+    #[cfg(test)]
+    {
+        test_abort::take_abort_path(edata)
+    }
+    #[cfg(not(test))]
+    {
+        let _ = edata;
+        std::process::abort()
+    }
+}
+
+#[cfg(test)]
+mod test_abort {
+    use super::ErrorData;
+
+    /// Test substitute for `std::process::abort()`: records that the PANIC abort
+    /// path was taken, then raises the ErrorData as a catchable panic so a test
+    /// can `catch_unwind` it and assert the severity/sqlstate without killing the
+    /// test binary. Diverges (`-> !`) like the real abort.
+    pub fn take_abort_path(edata: ErrorData) -> ! {
+        ABORT_TAKEN.with(|c| c.set(c.get() + 1));
+        std::panic::panic_any(edata);
+    }
+
+    thread_local! {
+        static ABORT_TAKEN: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+
+    /// Number of times the PANIC abort path fired on this thread (test-only).
+    pub fn abort_count() -> u32 {
+        ABORT_TAKEN.with(std::cell::Cell::get)
+    }
+
+    /// Reset the per-thread abort counter (test-only).
+    pub fn reset_abort_count() {
+        ABORT_TAKEN.with(|c| c.set(0));
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Per-task error state (replaces PG's process globals: errordata[],
-// errordata_stack_depth, recursion_depth). TODO(panic): once tasks are tokio
-// tasks, move from thread_local! to tokio task-local storage.
+// errordata_stack_depth, recursion_depth). error.md s2.8 collapses PG's
+// multi-level errordata[] recursion stack to a single in-flight slot: an
+// ereport!/elog! builds one ErrorData value atomically and raises, so there is
+// no open span for a nested ereport to interleave into. `in_flight` marks that a
+// build is open; a second >=ERROR raise while one is open is a double fault and
+// escalates to PANIC (replacing the old ERRORDATA_STACK_SIZE overflow guard).
+// recursion_depth is kept for the recursion-trouble checks (drop context
+// callbacks when errors nest deeply). TODO(panic): once tasks are tokio tasks,
+// move from thread_local! to tokio task-local storage.
 // ---------------------------------------------------------------------------
 
 struct ErrorState {
-    stack: Vec<ErrorData>,
+    in_flight: bool,
     recursion_depth: i32,
 }
 
 thread_local! {
     static ERROR_STATE: RefCell<ErrorState> =
-        const { RefCell::new(ErrorState { stack: Vec::new(), recursion_depth: 0 }) };
-}
-
-fn with_top<R>(f: impl FnOnce(&mut ErrorData) -> R) -> R {
-    ERROR_STATE.with(|st| {
-        let mut st = st.borrow_mut();
-        let edata = st
-            .stack
-            .last_mut()
-            .expect("errstart was not called"); // CHECK_STACK_DEPTH()
-        f(edata)
-    })
+        const { RefCell::new(ErrorState { in_flight: false, recursion_depth: 0 }) };
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +174,85 @@ impl ErrorData {
         self.internalquery = Some(query.into());
         self
     }
+
+    // errcode_for_file_access: derive a SQLSTATE from the saved errno-style
+    // failure (errno snapshotted into saved_errno at errstart). We map via
+    // portable std::io::ErrorKind rather than raw libc errno numbers (which
+    // differ by OS). Mutates this one in-flight ErrorData (no split-brain).
+    pub fn errcode_for_file_access(&mut self) -> &mut Self {
+        use crate::utils::errcodes::{ERRCODE_INSUFFICIENT_PRIVILEGE, ERRCODE_UNDEFINED_FILE, ERRCODE_DUPLICATE_FILE, ERRCODE_WRONG_OBJECT_TYPE, ERRCODE_DISK_FULL, ERRCODE_OUT_OF_MEMORY, ERRCODE_INTERNAL_ERROR};
+        use std::io::ErrorKind::{PermissionDenied, ReadOnlyFilesystem, NotFound, AlreadyExists, NotADirectory, IsADirectory, DirectoryNotEmpty, StorageFull, OutOfMemory};
+        self.sqlerrcode = match std::io::Error::from_raw_os_error(self.saved_errno).kind() {
+            PermissionDenied | ReadOnlyFilesystem => ERRCODE_INSUFFICIENT_PRIVILEGE,
+            NotFound => ERRCODE_UNDEFINED_FILE,
+            AlreadyExists => ERRCODE_DUPLICATE_FILE,
+            NotADirectory | IsADirectory | DirectoryNotEmpty => ERRCODE_WRONG_OBJECT_TYPE,
+            StorageFull => ERRCODE_DISK_FULL,
+            OutOfMemory => ERRCODE_OUT_OF_MEMORY,
+            _ => ERRCODE_INTERNAL_ERROR,
+        };
+        self
+    }
+
+    // errcode_for_socket_access: ALL_CONNECTION_FAILURE_ERRNOS in PG (EPIPE /
+    // ECONNRESET et al.) -> connection_failure; mutates this in-flight ErrorData.
+    pub fn errcode_for_socket_access(&mut self) -> &mut Self {
+        use crate::utils::errcodes::{ERRCODE_CONNECTION_FAILURE, ERRCODE_INTERNAL_ERROR};
+        use std::io::ErrorKind::{BrokenPipe, ConnectionReset, ConnectionAborted, NotConnected};
+        self.sqlerrcode = match std::io::Error::from_raw_os_error(self.saved_errno).kind() {
+            BrokenPipe | ConnectionReset | ConnectionAborted | NotConnected => {
+                ERRCODE_CONNECTION_FAILURE
+            }
+            _ => ERRCODE_INTERNAL_ERROR,
+        };
+        self
+    }
+
+    // geterrcode / geterrposition / getinternalerrposition read back fields of
+    // the in-flight error mid-build (PG reads errordata[] top). With a single
+    // build target they read this same value.
+    pub fn geterrcode(&self) -> i32 {
+        self.sqlerrcode
+    }
+    pub fn geterrposition(&self) -> i32 {
+        self.cursorpos
+    }
+    pub fn getinternalerrposition(&self) -> i32 {
+        self.internalpos
+    }
+
+    // errbacktrace: capture a backtrace into this in-flight error.
+    pub fn errbacktrace(&mut self) -> &mut Self {
+        self.backtrace = Some(std::backtrace::Backtrace::force_capture().to_string());
+        self
+    }
+
+    // set_errcontext_domain: domain used by errcontext message translation.
+    pub fn set_errcontext_domain(&mut self, domain: Option<&str>) -> &mut Self {
+        self.context_domain = Some(domain.unwrap_or("postgres").to_owned());
+        self
+    }
+
+    // err_generic_string: set a PG_DIAG_* generic string field on this error.
+    pub fn err_generic_string(&mut self, field: i32, s: &str) -> &mut Self {
+        use crate::postgres_ext::{PG_DIAG_SCHEMA_NAME, PG_DIAG_TABLE_NAME, PG_DIAG_COLUMN_NAME, PG_DIAG_DATATYPE_NAME, PG_DIAG_CONSTRAINT_NAME};
+        let f = field as u8;
+        if f == PG_DIAG_SCHEMA_NAME {
+            self.schema_name = Some(s.to_owned());
+        } else if f == PG_DIAG_TABLE_NAME {
+            self.table_name = Some(s.to_owned());
+        } else if f == PG_DIAG_COLUMN_NAME {
+            self.column_name = Some(s.to_owned());
+        } else if f == PG_DIAG_DATATYPE_NAME {
+            self.datatype_name = Some(s.to_owned());
+        } else if f == PG_DIAG_CONSTRAINT_NAME {
+            self.constraint_name = Some(s.to_owned());
+        } else {
+            // TODO(panic): PG elog(ERROR) here; deferred to keep this non-raising.
+            panic!("unsupported ErrorData field id: {field}");
+        }
+        self
+    }
 }
 
 // Plural variants collapse to a runtime pick of singular/plural; printf args are
@@ -134,41 +268,6 @@ pub fn errdetail_log_plural<'a>(fmt_singular: &'a str, fmt_plural: &'a str, n: u
 }
 pub fn errhint_plural<'a>(fmt_singular: &'a str, fmt_plural: &'a str, n: u64) -> &'a str {
     if n == 1 { fmt_singular } else { fmt_plural }
-}
-
-// errcode helpers that derive a SQLSTATE from errno-style failures. The errno
-// comes from the saved value on the in-flight ErrorData. We map via portable
-// std::io::ErrorKind rather than raw libc errno numbers (which differ by OS).
-pub fn errcode_for_file_access() -> i32 {
-    use crate::utils::errcodes::{ERRCODE_INSUFFICIENT_PRIVILEGE, ERRCODE_UNDEFINED_FILE, ERRCODE_DUPLICATE_FILE, ERRCODE_WRONG_OBJECT_TYPE, ERRCODE_DISK_FULL, ERRCODE_OUT_OF_MEMORY, ERRCODE_INTERNAL_ERROR};
-    use std::io::ErrorKind::{PermissionDenied, ReadOnlyFilesystem, NotFound, AlreadyExists, NotADirectory, IsADirectory, DirectoryNotEmpty, StorageFull, OutOfMemory};
-    let errno = with_top(|e| e.saved_errno);
-    let sqlerrcode = match std::io::Error::from_raw_os_error(errno).kind() {
-        PermissionDenied | ReadOnlyFilesystem => ERRCODE_INSUFFICIENT_PRIVILEGE,
-        NotFound => ERRCODE_UNDEFINED_FILE,
-        AlreadyExists => ERRCODE_DUPLICATE_FILE,
-        NotADirectory | IsADirectory | DirectoryNotEmpty => ERRCODE_WRONG_OBJECT_TYPE,
-        StorageFull => ERRCODE_DISK_FULL,
-        OutOfMemory => ERRCODE_OUT_OF_MEMORY,
-        _ => ERRCODE_INTERNAL_ERROR,
-    };
-    with_top(|e| e.sqlerrcode = sqlerrcode);
-    0
-}
-
-pub fn errcode_for_socket_access() -> i32 {
-    use crate::utils::errcodes::{ERRCODE_CONNECTION_FAILURE, ERRCODE_INTERNAL_ERROR};
-    use std::io::ErrorKind::{BrokenPipe, ConnectionReset, ConnectionAborted, NotConnected};
-    let errno = with_top(|e| e.saved_errno);
-    // ALL_CONNECTION_FAILURE_ERRNOS in PG: EPIPE / ECONNRESET et al.
-    let sqlerrcode = match std::io::Error::from_raw_os_error(errno).kind() {
-        BrokenPipe | ConnectionReset | ConnectionAborted | NotConnected => {
-            ERRCODE_CONNECTION_FAILURE
-        }
-        _ => ERRCODE_INTERNAL_ERROR,
-    };
-    with_top(|e| e.sqlerrcode = sqlerrcode);
-    0
 }
 
 // Default sqlerrcode for an elevel (errstart's fallback, see header comment).
@@ -229,18 +328,14 @@ pub fn in_error_recursion_trouble() -> bool {
 // ---------------------------------------------------------------------------
 
 // Returns Some(ErrorData) when the message should be built, None to
-// short-circuit (warning-or-less not enabled anywhere). The returned frame is
-// pushed onto the per-task stack; errfinish pops it.
-pub fn errstart(mut elevel: i32, domain: Option<&str>) -> Option<ErrorData> {
-    // Promote ERROR to FATAL when there is no handler to pass it to. Under the
-    // panic model the eventual catch_unwind at task spawn is the handler, so we
-    // keep ERROR as ERROR here. CritSectionCount/ExitOnAnyError are deferred.
-    if elevel >= ERROR {
-        // Make sure we panic if a stacked frame already warrants higher severity.
-        elevel = ERROR_STATE.with(|st| {
-            st.borrow().stack.iter().fold(elevel, |acc, e| acc.max(e.elevel))
-        });
-    }
+// short-circuit (warning-or-less not enabled anywhere). The returned value IS
+// the single in-flight build target (error.md s2.8): the ereport! closure and
+// every builder method/helper mutate THAT one ErrorData; errfinish consumes it.
+// A >=ERROR raise while a build is already in flight is a double fault -> PANIC.
+pub fn errstart(elevel: i32, domain: Option<&str>) -> Option<ErrorData> {
+    // ERROR stays ERROR under the panic model: the eventual catch_unwind at the
+    // per-command/task boundary is the handler. CritSectionCount/ExitOnAnyError
+    // are deferred.
 
     let output_to_server = should_output_to_server(elevel);
     let output_to_client = should_output_to_client(elevel);
@@ -248,51 +343,42 @@ pub fn errstart(mut elevel: i32, domain: Option<&str>) -> Option<ErrorData> {
         return None;
     }
 
-    ERROR_STATE.with(|st| {
+    let recursion_trouble = ERROR_STATE.with(|st| {
         let mut st = st.borrow_mut();
         st.recursion_depth += 1;
-        if st.recursion_depth > 1 && elevel >= ERROR {
-            // Error during error processing; abandon context callbacks if deep.
-            if st.recursion_depth > 2 {
-                // in_error_recursion_trouble(): drop context callbacks.
-                // TODO(panic): also clear debug_query_string when wired up.
-                unsafe {
-                    let p = &raw mut ERROR_CONTEXT_STACK;
-                    (*p).clear();
-                }
-            }
-        }
-        if st.stack.len() >= ERRORDATA_STACK_SIZE {
-            // Almost certainly an infinite error loop; give up and PANIC.
+        if st.in_flight && elevel >= ERROR {
+            // Double fault: a >=ERROR raised while another error is still being
+            // built (e.g. inside a build closure or an errcontext callback).
+            // error.md s2.8: escalate to PANIC (uncatchable abort), replacing the
+            // old ERRORDATA_STACK_SIZE overflow guard.
+            st.in_flight = false;
             st.recursion_depth = 0;
-            st.stack.clear();
             drop(st);
             #[allow(deprecated)]
-            raise_panic(panic_frame(PANIC, "ERRORDATA_STACK_SIZE exceeded"));
+            raise_panic(panic_frame(PANIC, "error raised while another error was in flight"));
         }
-        let dom = domain.unwrap_or("postgres").to_owned();
-        let edata = ErrorData {
-            elevel,
-            output_to_server,
-            output_to_client,
-            context_domain: Some(dom.clone()),
-            domain: Some(dom),
-            sqlerrcode: default_errcode_for(elevel),
-            // saved_errno: snapshot errno so message eval can't change it.
-            saved_errno: std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
-            ..Default::default()
-        };
-        st.stack.push(edata);
+        let recursion_trouble = st.recursion_depth > 2;
+        st.in_flight = true;
         st.recursion_depth -= 1;
+        recursion_trouble
     });
 
-    // Hand the caller a default frame to populate; errfinish reconciles it with
-    // the pushed stack entry (saved_errno/domain stay authoritative there).
+    if recursion_trouble {
+        // in_error_recursion_trouble(): drop context callbacks to avoid an
+        // infinite error loop. TODO(panic): also clear debug_query_string.
+        clear_error_context_stack();
+    }
+
+    let dom = domain.unwrap_or("postgres").to_owned();
     Some(ErrorData {
         elevel,
         output_to_server,
         output_to_client,
+        context_domain: Some(dom.clone()),
+        domain: Some(dom),
         sqlerrcode: default_errcode_for(elevel),
+        // saved_errno: snapshot errno so message eval can't change it.
+        saved_errno: std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
         ..Default::default()
     })
 }
@@ -303,92 +389,51 @@ pub fn errstart_cold(elevel: i32, domain: Option<&str>) -> Option<ErrorData> {
 }
 
 #[deprecated(note = "TODO(panic): migrate to Result + ?")]
-#[allow(clippy::needless_pass_by_value, reason = "consumes edata (merged then popped); macro caller passes by value")]
-pub fn errfinish(edata: ErrorData, filename: &str, lineno: i32, funcname: &str) {
+#[allow(clippy::needless_pass_by_value, reason = "consumes edata: the single in-flight error, moved into panic_any / abort / emit")]
+pub fn errfinish(mut edata: ErrorData, filename: &str, lineno: i32, funcname: &str) {
     // TODO(panic): the >=ERROR path panics (caught by catch_unwind at task
     // spawn) carrying the ErrorData; lower severities log and return.
 
-    // Reconcile the caller-built frame into the pushed stack entry, then take
-    // ownership of the completed entry (pops the stack).
-    let mut edata = ERROR_STATE.with(|st| {
-        let mut st = st.borrow_mut();
-        st.recursion_depth += 1;
-        let top = st.stack.last_mut().expect("errstart was not called");
-        // The caller mutated its own copy via the builder methods; merge those
-        // fields (everything but saved_errno/domain set up by errstart).
-        merge_built_fields(top, &edata);
-        top.filename = Some(set_stack_entry_filename(filename));
-        top.lineno = lineno;
-        top.funcname = (!funcname.is_empty()).then(|| funcname.to_owned());
-        let done = st.stack.pop().unwrap();
-        st.recursion_depth -= 1;
-        done
-    });
+    // edata is the single in-flight build target (error.md s2.8): the closure
+    // and every helper mutated this one value. Record the raise location.
+    edata.filename = Some(set_stack_entry_filename(filename));
+    edata.lineno = lineno;
+    edata.funcname = (!funcname.is_empty()).then(|| funcname.to_owned());
 
-    // TODO(review,MAJOR): errcontext callbacks are inert here -- they are no-arg
-    // closures with no handle to the in-flight ErrorData, and they run AFTER the
-    // frame is popped. C runs them on the live stack top before throw, calling
-    // errcontext_msg. Give the callback `&mut ErrorData` and move this before pop.
-    // Run context callbacks. void(*)(void*)+arg collapse to closures.
-    unsafe {
-        let p = &raw mut ERROR_CONTEXT_STACK;
-        for cb in &mut (*p) {
-            (cb.callback)();
-        }
-    }
+    // Run errcontext callbacks on the LIVE in-flight error before it is
+    // finalized, so they append CONTEXT lines onto the actual ErrorData (PG runs
+    // them on errordata[] top calling errcontext_msg), innermost -> outermost.
+    run_error_context_callbacks(&mut edata);
+
+    // The build is complete; clear the in-flight slot so the next ereport can
+    // start (and so a >=ERROR raised from here on counts as a fresh error).
+    ERROR_STATE.with(|st| st.borrow_mut().in_flight = false);
 
     let elevel = edata.elevel;
 
-    // TODO(review,MAJOR): FATAL and PANIC are collapsed into the same catchable
-    // panic. C terminates the backend on FATAL and abort()s the process on PANIC;
-    // PANIC must not be swallowable by catch_unwind. Distinguish severity here
-    // (e.g. process::abort() for >= PANIC) per the design's crit-section invariant.
+    // PANIC (error.md s2.5): crash the process via process::abort() -- never a
+    // catchable panic, no Drop -- so a half-updated shared structure is never
+    // observed or flushed. abort_for_panic emits to the server log first, then
+    // aborts (production) or takes the test abort hook (cfg(test)).
+    if elevel >= PANIC {
+        abort_for_panic(edata);
+    }
+
+    // ERROR / FATAL (error.md s2.1-2.4): raise a catchable panic carrying the
+    // ErrorData. ERROR is recovered at the per-command catch (backend-local);
+    // FATAL escapes that catch to the task boundary (ends the backend). The
+    // task-boundary catch_unwind downcasts the payload back to ErrorData.
     if elevel >= ERROR {
         // Emit to the server log first so the message is seen even if nobody
         // catches the panic, then raise it as a panic carrying the ErrorData.
         if edata.output_to_server {
             send_message_to_server_log(&edata);
         }
-        // TODO(panic): a later catch_unwind at the task boundary downcasts the
-        // payload back to ErrorData (sqlstate/severity/message/detail/context).
         std::panic::panic_any(edata);
     }
 
     // log-and-return for WARNING/LOG/NOTICE/INFO/DEBUGx.
     emit_error_report_for(&mut edata);
-}
-
-// Merge the fields the caller set via builder methods on its working copy into
-// the authoritative stack entry. saved_errno and domain remain as errstart set.
-fn merge_built_fields(dst: &mut ErrorData, src: &ErrorData) {
-    // TODO(review,MAJOR): unconditional copy clobbers a sqlerrcode set on the
-    // stack entry by errcode_for_file_access/_socket_access (split-brain builder:
-    // those free fns write `dst`, the methods write `src`). Unify on one target.
-    dst.sqlerrcode = src.sqlerrcode;
-    dst.hide_stmt = src.hide_stmt;
-    dst.hide_ctx = src.hide_ctx;
-    dst.cursorpos = src.cursorpos;
-    dst.internalpos = src.internalpos;
-    dst.message_id = src.message_id.or(dst.message_id);
-    macro_rules! take {
-        ($f:ident) => {
-            if src.$f.is_some() {
-                dst.$f = src.$f.clone();
-            }
-        };
-    }
-    take!(message);
-    take!(detail);
-    take!(detail_log);
-    take!(hint);
-    take!(context);
-    take!(backtrace);
-    take!(internalquery);
-    take!(schema_name);
-    take!(table_name);
-    take!(column_name);
-    take!(datatype_name);
-    take!(constraint_name);
 }
 
 // set_stack_entry_location's filename normalization: keep only the base name.
@@ -437,64 +482,23 @@ fn panic_frame(elevel: i32, msg: &str) -> ErrorData {
     }
 }
 
+// Raise a standalone frame (used by re_throw_error / pg_re_throw / internal
+// PANICs that bypass the stack machinery). Splits on severity per error.md:
+// >= PANIC takes the uncatchable abort path; ERROR/FATAL raise a catchable
+// panic carrying the ErrorData.
 #[deprecated(note = "TODO(panic): migrate to Result + ?")]
 fn raise_panic(edata: ErrorData) -> ! {
-    // TODO(panic)
+    if edata.elevel >= PANIC {
+        abort_for_panic(edata);
+    }
     send_message_to_server_log(&edata);
     std::panic::panic_any(edata);
 }
 
-// ---------------------------------------------------------------------------
-// Context / position / generic-string accessors. These mutate the in-flight
-// ErrorData (top of the per-task stack).
-// ---------------------------------------------------------------------------
-
-pub fn set_errcontext_domain(domain: Option<&str>) -> i32 {
-    let dom = domain.unwrap_or("postgres").to_owned();
-    with_top(|e| e.context_domain = Some(dom));
-    0
-}
-
-pub fn errbacktrace() -> i32 {
-    let bt = std::backtrace::Backtrace::force_capture().to_string();
-    with_top(|e| e.backtrace = Some(bt));
-    0
-}
-
-pub fn err_generic_string(field: i32, s: &str) -> i32 {
-    use crate::postgres_ext::{PG_DIAG_SCHEMA_NAME, PG_DIAG_TABLE_NAME, PG_DIAG_COLUMN_NAME, PG_DIAG_DATATYPE_NAME, PG_DIAG_CONSTRAINT_NAME};
-    with_top(|e| {
-        let f = field as u8;
-        if f == PG_DIAG_SCHEMA_NAME {
-            e.schema_name = Some(s.to_owned());
-        } else if f == PG_DIAG_TABLE_NAME {
-            e.table_name = Some(s.to_owned());
-        } else if f == PG_DIAG_COLUMN_NAME {
-            e.column_name = Some(s.to_owned());
-        } else if f == PG_DIAG_DATATYPE_NAME {
-            e.datatype_name = Some(s.to_owned());
-        } else if f == PG_DIAG_CONSTRAINT_NAME {
-            e.constraint_name = Some(s.to_owned());
-        } else {
-            // TODO(panic): PG elog(ERROR) here; deferred to keep this non-raising.
-            panic!("unsupported ErrorData field id: {field}");
-        }
-    });
-    0
-}
-
-// TODO(review,MAJOR): these read the stack entry, but errcode()/errposition()
-// set the caller's working copy (split-brain builder), so mid-build reads are
-// stale. Same root cause as merge_built_fields; fix by unifying the build target.
-pub fn geterrcode() -> i32 {
-    with_top(|e| e.sqlerrcode)
-}
-pub fn geterrposition() -> i32 {
-    with_top(|e| e.cursorpos)
-}
-pub fn getinternalerrposition() -> i32 {
-    with_top(|e| e.internalpos)
-}
+// Context / position / generic-string accessors (set_errcontext_domain,
+// errbacktrace, err_generic_string, geterrcode, geterrposition,
+// getinternalerrposition) are methods on ErrorData -- they mutate/read the one
+// in-flight build target the closure holds, so there is no split-brain.
 
 // ---------------------------------------------------------------------------
 // Constructing error strings outside ereport(). pre_format_elog_string saves
@@ -531,15 +535,79 @@ fn substitute_errno(s: &str, errno: i32) -> String {
 // catch_unwind; pg_re_throw resumes the unwind (-> !).
 // ---------------------------------------------------------------------------
 
-// TODO(panic): catch_unwind-based replacement for PG_TRY/PG_CATCH. Runs `body`;
-// on a (>=ERROR) panic runs `catch` then resumes the unwind carrying ErrorData.
-pub fn pg_try<T>(body: impl FnOnce() -> T + std::panic::UnwindSafe, catch: impl FnOnce()) -> T {
-    match std::panic::catch_unwind(body) {
-        Ok(v) => v,
-        Err(payload) => {
-            catch();
-            // TODO(panic): rethrow the original payload (carries ErrorData).
-            std::panic::resume_unwind(payload);
+// catch_unwind-based replacement for PG_TRY / PG_CATCH / PG_FINALLY (error.md
+// s3.4). `pg_try(body)` runs `body` under catch_unwind and returns a `PgTry`
+// builder; `.pg_catch(f)` handles an ErrorData unwind (f may re_throw_error to
+// propagate); `.pg_finally(g)` runs g on both paths. Only ErrorData payloads are
+// caught -- a non-ErrorData bug-panic, and the PANIC abort path, are never caught
+// (pg_finally still runs for an ErrorData unwind, never for an abort).
+pub fn pg_try<T>(body: impl FnOnce() -> T + std::panic::UnwindSafe) -> PgTry<T> {
+    PgTry { outcome: std::panic::catch_unwind(body) }
+}
+
+/// Builder returned by [`pg_try`]. Holds the try closure's outcome: `Ok(T)` or a
+/// caught panic payload. Resolve it with [`PgTry::pg_catch`], [`PgTry::pg_finally`],
+/// or both; if neither catches an in-flight `ErrorData`, dropping into a resolver
+/// re-raises it.
+#[must_use = "a PgTry must be resolved with .pg_catch(...) / .pg_finally(...) to surface or re-raise an error"]
+pub struct PgTry<T> {
+    outcome: std::thread::Result<T>,
+}
+
+impl<T> PgTry<T> {
+    /// PG_CATCH: if the try raised an `ErrorData`, run `catch(error)` (which
+    /// handles it, or calls `re_throw_error` to propagate). Non-`ErrorData`
+    /// payloads (bug-panics) are never caught -- they resume unwinding. Yields the
+    /// try's `T` on the normal path.
+    pub fn pg_catch(self, catch: impl FnOnce(ErrorData) -> T) -> PgCaught<T> {
+        let resolved = match self.outcome {
+            Ok(v) => Ok(v),
+            Err(payload) => match payload.downcast::<ErrorData>() {
+                Ok(edata) => Ok(catch(*edata)),
+                // Not an ErrorData (bug-panic): stash to resume later so a
+                // chained pg_finally still runs first.
+                Err(other) => Err(other),
+            },
+        };
+        PgCaught { resolved }
+    }
+
+    /// PG_FINALLY: run `finally` on both the normal and error paths, then yield
+    /// the try's `T` or re-raise the (uncaught) panic payload.
+    pub fn pg_finally(self, finally: impl FnOnce()) -> T {
+        finally();
+        match self.outcome {
+            Ok(v) => v,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+}
+
+/// Result of a [`PgTry::pg_catch`]: either the (possibly catch-produced) value, or
+/// an uncaught non-`ErrorData` payload still to be resumed. Yields `T` directly via
+/// [`From`]/deref-style use, or chains a [`PgCaught::pg_finally`].
+#[must_use = "a PgCaught must be resolved (yield its value or chain .pg_finally(...))"]
+pub struct PgCaught<T> {
+    resolved: std::thread::Result<T>,
+}
+
+impl<T> PgCaught<T> {
+    /// PG_TRY / PG_CATCH / PG_FINALLY combined: run `finally` on both paths after
+    /// the catch, then yield the value or resume an uncaught bug-panic.
+    pub fn pg_finally(self, finally: impl FnOnce()) -> T {
+        finally();
+        match self.resolved {
+            Ok(v) => v,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    /// Yield the value, resuming an uncaught (non-`ErrorData`) bug-panic. Use when
+    /// the chain is `pg_try(t).pg_catch(c)` with no finally.
+    pub fn done(self) -> T {
+        match self.resolved {
+            Ok(v) => v,
+            Err(payload) => std::panic::resume_unwind(payload),
         }
     }
 }
@@ -547,27 +615,33 @@ pub fn pg_try<T>(body: impl FnOnce() -> T + std::panic::UnwindSafe, catch: impl 
 // PG_RE_THROW(): resume the in-flight error. Never returns.
 #[deprecated(note = "TODO(panic): migrate to Result + ?")]
 pub fn pg_re_throw() -> ! {
-    // TODO(panic): the in-flight ErrorData lives in the panic payload, which the
-    // surrounding pg_try/catch_unwind resumes; reaching here without a payload
-    // means the stack top, promoted to FATAL.
-    let edata = ERROR_STATE.with(|st| st.borrow_mut().stack.pop());
-    match edata {
-        Some(mut e) => {
-            e.elevel = FATAL;
-            #[allow(deprecated)]
-            raise_panic(e);
-        }
-        None => panic!("pg_re_throw with no error in progress"),
-    }
+    // The in-flight ErrorData lives in the panic payload, which the surrounding
+    // pg_try/catch_unwind resumes; this entry point is reached only with no
+    // payload to resume. Under the single-slot model there is no stacked frame to
+    // recover, so this is a lost error -> escalate to FATAL.
+    ERROR_STATE.with(|st| st.borrow_mut().in_flight = false);
+    #[allow(deprecated)]
+    raise_panic(panic_frame(FATAL, "pg_re_throw with no error in progress"));
 }
 
 // ---------------------------------------------------------------------------
 // ErrorData lifecycle + reporting.
 // ---------------------------------------------------------------------------
 
-// Output the top-of-stack error to its enabled destinations.
-pub fn emit_error_report() {
-    let mut edata = with_top(|e| e.clone());
+// EmitErrorReport: output an error to its enabled destinations. Under the
+// single-slot model the in-flight error is a value held by the raise path (or
+// the caught panic payload), so the caller passes it in rather than reading a
+// persistent errordata[] top.
+pub fn emit_error_report(edata: &ErrorData) {
+    let mut edata = edata.clone();
+    emit_error_report_for(&mut edata);
+}
+
+// Report a recovered ERROR (caught at the per-command recovery point) to its
+// enabled destinations. The errfinish that raised it already popped the stack, so
+// recovery reports the caught ErrorData directly rather than the stack top.
+pub fn report_recovered_error(edata: &ErrorData) {
+    let mut edata = edata.clone();
     emit_error_report_for(&mut edata);
 }
 
@@ -588,20 +662,21 @@ fn emit_error_report_for(edata: &mut ErrorData) {
     }
 }
 
-// CopyErrorData: copy of the topmost stack entry. Under Rust ownership this is a
-// plain clone.
-pub fn copy_error_data() -> ErrorData {
-    with_top(|e| e.clone())
+// CopyErrorData: a copy of an error for handling. Under Rust ownership the
+// caught error is the panic payload (or the in-flight value); copying it is a
+// plain clone of that value.
+pub fn copy_error_data(edata: &ErrorData) -> ErrorData {
+    edata.clone()
 }
 
 // FreeErrorData is a no-op under Rust ownership (drop handles it).
 pub fn free_error_data(_edata: ErrorData) {}
 
-// Reset the error stack to empty after recovery.
+// Reset the error state after recovery (clears any in-flight build slot).
 pub fn flush_error_state() {
     ERROR_STATE.with(|st| {
         let mut st = st.borrow_mut();
-        st.stack.clear();
+        st.in_flight = false;
         st.recursion_depth = 0;
     });
 }
@@ -615,51 +690,79 @@ pub fn re_throw_error(mut edata: ErrorData) -> ! {
 }
 
 #[deprecated(note = "TODO(panic): migrate to Result + ?")]
-#[allow(clippy::needless_pass_by_value, reason = "consumes edata (merged into a fresh frame)")]
+#[allow(clippy::needless_pass_by_value, reason = "consumes edata (the error to throw)")]
 pub fn throw_error_data(edata: ErrorData) {
-    // ThrowErrorData: report an error described by a standalone ErrorData. Run
-    // it through errstart/errfinish so gating + raise semantics apply.
+    // ThrowErrorData: report an error described by a standalone ErrorData. Open
+    // an in-flight slot for gating + raise semantics, carry the standalone
+    // fields onto it (it is the single build target), then finish.
     let elevel = edata.elevel;
     let domain = edata.domain.clone();
     if let Some(mut frame) = errstart(elevel, domain.as_deref()) {
-        merge_built_fields(&mut frame, &edata);
         let (file, line, func) = (
             edata.filename.clone().unwrap_or_default(),
             edata.lineno,
             edata.funcname.clone().unwrap_or_default(),
         );
+        frame = ErrorData {
+            elevel: frame.elevel,
+            output_to_server: frame.output_to_server,
+            output_to_client: frame.output_to_client,
+            saved_errno: frame.saved_errno,
+            ..edata
+        };
         #[allow(deprecated)]
         errfinish(frame, &file, line, &func);
     }
 }
 
-// GetErrorContextStack: run the context callbacks to build a context string.
+// GetErrorContextStack: run the context callbacks against a throwaway error to
+// build a context string (callbacks call errcontext_msg on the &mut ErrorData).
 pub fn get_error_context_stack() -> String {
-    // Push a throwaway frame, run callbacks (which call errcontext_msg), take it.
-    let frame = errstart(LOG, None);
-    if frame.is_none() {
-        return String::new();
-    }
-    unsafe {
-        let p = &raw mut ERROR_CONTEXT_STACK;
-        for cb in &mut (*p) {
-            (cb.callback)();
-        }
-    }
-    ERROR_STATE.with(|st| {
-        st.borrow_mut()
-            .stack
-            .pop()
-            .and_then(|e| e.context)
-            .unwrap_or_default()
+    let mut frame = ErrorData::default();
+    run_error_context_callbacks(&mut frame);
+    frame.context.unwrap_or_default()
+}
+
+// PG's `ErrorContextCallback *error_context_stack` global is per-task state under
+// the async single-process model (error.md s2.8): the errcontext callback chain
+// that produces CONTEXT: lines, registered/popped by RAII and walked at raise
+// time. Held thread-local (TODO(panic): tokio task_local! once tasks are tokio
+// tasks). Callbacks are pushed innermost-last; errfinish walks them in reverse
+// (innermost -> outermost), matching PG.
+thread_local! {
+    static ERROR_CONTEXT_STACK: RefCell<Vec<ErrorContextCallback>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Register an errcontext callback; returns its index for `pop_error_context_callback`.
+/// (PG pushes onto `error_context_stack` via the intrusive `previous` link; RAII
+/// guards at the call site pop it.)
+pub fn push_error_context_callback(cb: ErrorContextCallback) -> usize {
+    ERROR_CONTEXT_STACK.with(|s| {
+        let mut s = s.borrow_mut();
+        s.push(cb);
+        s.len() - 1
     })
 }
 
-// PG's `ErrorContextCallback *error_context_stack` global + the `sigjmp_buf
-// *PG_exception_stack` global are both task-local concerns under the async
-// single-process model.
-// TODO(panic): make these task-local (tokio task_local!) rather than statics.
-pub static mut ERROR_CONTEXT_STACK: Vec<ErrorContextCallback> = Vec::new();
+/// Pop the most-recently-registered errcontext callback(s) down to `index`.
+pub fn pop_error_context_callback(index: usize) {
+    ERROR_CONTEXT_STACK.with(|s| s.borrow_mut().truncate(index));
+}
+
+/// Drop all registered errcontext callbacks (recursion-trouble / reset).
+pub fn clear_error_context_stack() {
+    ERROR_CONTEXT_STACK.with(|s| s.borrow_mut().clear());
+}
+
+// Run each registered errcontext callback against the live in-flight error,
+// innermost -> outermost, so they append CONTEXT lines via errcontext_msg.
+fn run_error_context_callbacks(edata: &mut ErrorData) {
+    ERROR_CONTEXT_STACK.with(|s| {
+        for cb in s.borrow_mut().iter_mut().rev() {
+            (cb.callback)(edata);
+        }
+    });
+}
 
 // emit_log_hook: void(*)(ErrorData*) -> optional captured closure.
 // TODO(panic): make this task-local rather than a process global.
@@ -915,5 +1018,280 @@ mod tests {
     fn unpack_sql_state_roundtrip() {
         let code = make_sqlstate(b'4', b'2', b'7', b'0', b'3');
         assert_eq!(unpack_sql_state(code), "42703");
+    }
+
+    #[test]
+    fn panic_takes_abort_path_via_hook() {
+        drain_state();
+        test_abort::reset_abort_count();
+        let result = catch_unwind(|| {
+            if let Some(mut e) = errstart(PANIC, None) {
+                e.errmsg("corruption: take abort path");
+                #[allow(deprecated)]
+                errfinish(e, "elog.rs", 1, "test_fn");
+            }
+        });
+        // Under cfg(test) the abort hook raises a catchable panic carrying the
+        // ErrorData (production would have process::abort()ed here).
+        assert_eq!(test_abort::abort_count(), 1, "PANIC must take the abort path");
+        let payload = result.expect_err("PANIC must diverge");
+        let edata = payload
+            .downcast_ref::<ErrorData>()
+            .expect("abort-hook payload downcasts to ErrorData");
+        assert_eq!(edata.elevel, PANIC);
+        drain_state();
+        test_abort::reset_abort_count();
+    }
+
+    // --- pg_try builder (error.md s3.4) ---
+
+    fn raise_error(msg: &str) {
+        if let Some(mut e) = errstart(ERROR, None) {
+            e.errmsg(msg);
+            #[allow(deprecated)]
+            errfinish(e, "elog.rs", 1, "test_fn");
+        }
+    }
+
+    #[test]
+    fn pg_try_ok_passthrough() {
+        drain_state();
+        let v = pg_try(|| 7).pg_catch(|_e| 0).done();
+        assert_eq!(v, 7);
+        drain_state();
+    }
+
+    #[test]
+    fn pg_try_error_caught_not_reraised() {
+        drain_state();
+        let mut caught = None;
+        let v = pg_try(|| {
+            raise_error("boom in try");
+            0
+        })
+        .pg_catch(|e| {
+            caught = Some(e.message);
+            42 // handled: produce a recovery value
+        })
+        .done();
+        assert_eq!(v, 42);
+        assert_eq!(caught, Some(Some("boom in try".to_string())));
+        drain_state();
+    }
+
+    #[test]
+    fn pg_try_re_throw_propagates() {
+        drain_state();
+        let result = catch_unwind(|| {
+            pg_try(|| {
+                raise_error("propagate me");
+                0
+            })
+            .pg_catch(|e| {
+                #[allow(deprecated)]
+                re_throw_error(e); // never returns
+            })
+            .done()
+        });
+        let payload = result.expect_err("re_throw_error must propagate");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.elevel, ERROR);
+        assert_eq!(edata.message.as_deref(), Some("propagate me"));
+        drain_state();
+    }
+
+    #[test]
+    fn pg_finally_runs_on_ok_path() {
+        drain_state();
+        let mut ran = false;
+        let v = pg_try(|| 5).pg_finally(|| ran = true);
+        assert_eq!(v, 5);
+        assert!(ran, "pg_finally must run on the ok path");
+        drain_state();
+    }
+
+    #[test]
+    fn pg_finally_runs_on_error_path() {
+        drain_state();
+        let mut ran = false;
+        let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pg_try(|| {
+                raise_error("boom");
+                0
+            })
+            .pg_finally(|| ran = true)
+        }));
+        assert!(ran, "pg_finally must run on the error path");
+        let payload = result.expect_err("an unhandled error re-raises after finally");
+        assert!(payload.downcast_ref::<ErrorData>().is_some());
+        drain_state();
+    }
+
+    #[test]
+    fn pg_catch_then_finally_combined() {
+        drain_state();
+        let mut order = Vec::new();
+        let v = pg_try(|| {
+            raise_error("boom");
+            0
+        })
+        .pg_catch(|_e| {
+            order.push("catch");
+            9
+        })
+        .pg_finally(|| order.push("finally"));
+        assert_eq!(v, 9);
+        assert_eq!(order, ["catch", "finally"]);
+        drain_state();
+    }
+
+    // --- unified build target (error.md s2.8, ITEM 1) ---
+
+    // A sqlstate set by errcode_for_file_access plus a cursor position plus an
+    // errmsg must ALL survive on the one in-flight ErrorData -- no clobber from a
+    // separate working copy (the old split-brain builder lost the helper's code).
+    #[test]
+    fn unified_builder_helper_code_and_message_both_survive() {
+        use crate::utils::errcodes::ERRCODE_UNDEFINED_FILE;
+        drain_state();
+        let result = catch_unwind(|| {
+            if let Some(mut e) = errstart(ERROR, None) {
+                // Simulate a "file not found" errno snapshot then derive the code.
+                e.saved_errno =
+                    std::io::Error::from(std::io::ErrorKind::NotFound).raw_os_error().unwrap_or(2);
+                e.errcode_for_file_access().errposition(42).errmsg("could not open file");
+                #[allow(deprecated)]
+                errfinish(e, "elog.rs", 1, "test_fn");
+            }
+        });
+        let payload = result.expect_err("ERROR must panic");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.sqlerrcode, ERRCODE_UNDEFINED_FILE, "helper's sqlstate must survive");
+        assert_eq!(edata.message.as_deref(), Some("could not open file"));
+        assert_eq!(edata.cursorpos, 42, "errposition must survive");
+        // geterrcode reads back the same in-flight value mid-build.
+        drain_state();
+    }
+
+    #[test]
+    fn geterrcode_reads_in_flight_value() {
+        drain_state();
+        let mut e = errstart(ERROR, None).expect("ERROR always starts");
+        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_FILE);
+        assert_eq!(e.geterrcode(), crate::utils::errcodes::ERRCODE_UNDEFINED_FILE);
+        // Discard without finishing: clear the in-flight slot.
+        drain_state();
+    }
+
+    // --- errcontext callbacks (error.md s2.8, ITEM 2) ---
+
+    // A registered errcontext callback must append a CONTEXT line onto the raised
+    // error's context (it now receives &mut ErrorData and runs before finalize).
+    #[test]
+    fn errcontext_callback_appends_context_to_error() {
+        drain_state();
+        clear_error_context_stack();
+        push_error_context_callback(ErrorContextCallback::new(|e: &mut ErrorData| {
+            e.errcontext_msg("while doing the thing");
+        }));
+        let result = catch_unwind(|| {
+            if let Some(mut e) = errstart(ERROR, None) {
+                e.errmsg("boom with context");
+                #[allow(deprecated)]
+                errfinish(e, "elog.rs", 1, "test_fn");
+            }
+        });
+        clear_error_context_stack();
+        let payload = result.expect_err("ERROR must panic");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.context.as_deref(), Some("while doing the thing"));
+        assert_eq!(edata.message.as_deref(), Some("boom with context"));
+        drain_state();
+    }
+
+    // --- double-fault -> PANIC (error.md s2.8, ITEM 3) ---
+
+    // Raising an ERROR while another error is in flight (e.g. from inside an
+    // errcontext callback) is a double fault and must escalate to the PANIC abort
+    // path (uncatchable in prod; the test hook makes it observable).
+    #[test]
+    fn double_fault_in_callback_escalates_to_panic() {
+        drain_state();
+        test_abort::reset_abort_count();
+        clear_error_context_stack();
+        push_error_context_callback(ErrorContextCallback::new(|_e: &mut ErrorData| {
+            // Raise a second ERROR while the first is still in flight.
+            if let Some(mut e2) = errstart(ERROR, None) {
+                e2.errmsg("nested error during context");
+                #[allow(deprecated)]
+                errfinish(e2, "elog.rs", 2, "cb");
+            }
+        }));
+        let result = catch_unwind(|| {
+            if let Some(mut e) = errstart(ERROR, None) {
+                e.errmsg("outer error");
+                #[allow(deprecated)]
+                errfinish(e, "elog.rs", 1, "test_fn");
+            }
+        });
+        clear_error_context_stack();
+        assert_eq!(test_abort::abort_count(), 1, "double fault must take the PANIC abort path");
+        let payload = result.expect_err("double fault must diverge");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.elevel, PANIC);
+        drain_state();
+        test_abort::reset_abort_count();
+    }
+
+    // WARNING/NOTICE/LOG build+emit+return and clear the single slot, so a later
+    // ERROR is not a spurious double fault.
+    #[test]
+    fn warning_clears_slot_then_error_raises_cleanly() {
+        drain_state();
+        if let Some(mut w) = errstart(WARNING, None) {
+            w.errmsg("just a warning");
+            #[allow(deprecated)]
+            errfinish(w, "elog.rs", 1, "test_fn");
+        }
+        let result = catch_unwind(|| {
+            if let Some(mut e) = errstart(ERROR, None) {
+                e.errmsg("real error after warning");
+                #[allow(deprecated)]
+                errfinish(e, "elog.rs", 2, "test_fn");
+            }
+        });
+        let payload = result.expect_err("ERROR must panic (not a double fault)");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.elevel, ERROR);
+        assert_eq!(edata.message.as_deref(), Some("real error after warning"));
+        drain_state();
+    }
+
+    // --- crate::assert! (error.md s3.2) ---
+
+    #[test]
+    fn crate_assert_pass_is_noop() {
+        drain_state();
+        test_abort::reset_abort_count();
+        crate::assert!(1 + 1 == 2);
+        crate::assert!(true, "should not fire: {}", 1);
+        assert_eq!(test_abort::abort_count(), 0);
+        drain_state();
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn crate_assert_fail_takes_panic_abort_path() {
+        drain_state();
+        test_abort::reset_abort_count();
+        let result = catch_unwind(|| {
+            crate::assert!(2 + 2 == 5, "math broke: {}", 5);
+        });
+        assert_eq!(test_abort::abort_count(), 1, "failing assert takes the abort path");
+        let payload = result.expect_err("crate::assert! failure must diverge");
+        let edata = payload.downcast_ref::<ErrorData>().expect("ErrorData payload");
+        assert_eq!(edata.elevel, PANIC);
+        drain_state();
+        test_abort::reset_abort_count();
     }
 }

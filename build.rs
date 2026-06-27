@@ -1,4 +1,9 @@
 #![allow(clippy::format_push_string, reason = "build-time codegen string assembly")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "build-time tooling: panicking on a broken build env (missing submodule / malformed .dat) is the correct fail-fast; the error model governs the runtime backend, not build scripts"
+)]
 //! Build-time generators for data-driven PostgreSQL tables kept as upstream `.dat`
 //! files (we read them from the `ref/postgres` submodule, the single source of
 //! truth). Per the project's mechanism rule, build.rs is used only for these

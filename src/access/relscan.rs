@@ -57,7 +57,7 @@ pub struct ParallelBlockTableScanDescData {
     pub base: ParallelTableScanDescData,
     pub phs_nblocks: u32, // # blocks in relation at start of scan
     // slock_t phs_mutex -> std Mutex (single-process); guards phs_startblock.
-    pub phs_mutex: std::sync::Mutex<()>,
+    pub phs_mutex: parking_lot::Mutex<()>,
     pub phs_startblock: u32,        // starting block number
     pub phs_nallocated: AtomicU64,  // blocks allocated to workers so far
 }

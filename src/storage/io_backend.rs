@@ -27,6 +27,11 @@
 //!    reserved for sequential/socket I/O (WAL append, libpq) in later steps and are
 //!    not used here -- a single shared cursor cannot serve concurrent positional
 //!    access on one handle, which is why we avoid `tokio::fs::File` for pages.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::io::{self, IoSlice, IoSliceMut};
 use std::os::unix::fs::FileExt;

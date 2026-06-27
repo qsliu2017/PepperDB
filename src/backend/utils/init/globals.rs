@@ -36,7 +36,7 @@ pub struct ProcessConfig {
     /// Absolute path to the PGDATA root (PG `DataDir`). `None` until set by
     /// startup. Behind a `Mutex` because it is assigned early and read by
     /// `miscinit`'s lock-file / version-check code.
-    data_dir: std::sync::Mutex<Option<String>>,
+    data_dir: parking_lot::Mutex<Option<String>>,
 
     /// Mode of the data directory (PG `data_directory_mode`); 0700, or 0750 if
     /// the datadir grants group read/execute (set by `checkDataDir`).
@@ -63,7 +63,7 @@ impl ProcessConfig {
     /// `DataDir` starts unset. TODO(guc): overwrite from parsed GUC at startup.
     pub fn new() -> Self {
         Self {
-            data_dir: std::sync::Mutex::new(None),
+            data_dir: parking_lot::Mutex::new(None),
             data_directory_mode: PG_DIR_MODE_OWNER,
             nbuffers: 16384,
             max_backends: 0,
@@ -75,13 +75,13 @@ impl ProcessConfig {
 
     /// Current data directory, if set (PG `DataDir`).
     pub fn data_dir(&self) -> Option<String> {
-        self.data_dir.lock().unwrap().clone()
+        self.data_dir.lock().clone()
     }
 
     /// Set the data directory (PG `SetDataDir`). The caller is responsible for
     /// passing an absolute path.
     pub fn set_data_dir(&self, dir: impl Into<String>) {
-        *self.data_dir.lock().unwrap() = Some(dir.into());
+        *self.data_dir.lock() = Some(dir.into());
     }
 }
 

@@ -8,7 +8,7 @@
 //! handles, and per-backend function pointers fall away.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 /// The type for hash values.
 pub type DsHashHash = u32;

@@ -227,6 +227,10 @@ pub async fn startup_process_main(shared: Arc<SharedState>, shutdown: Arc<tokio:
             auxiliary_process_main_common_with_proc(shared.proc_signal(), BackendType::STARTUP)
                 .await;
 
+        #[allow(
+            clippy::expect_used,
+            reason = "aux cradle runs only after shared memory init publishes ProcGlobal"
+        )]
         let g = proc_global().expect("ProcGlobal published").clone();
 
         // Cleanup on EVERY exit (normal return + panic unwind): clear the

@@ -46,6 +46,10 @@ pub fn derive_catalog(input: TokenStream) -> TokenStream {
     let mut n: i32 = 0;
     for f in fields {
         n += 1;
+        #[allow(
+            clippy::unwrap_used,
+            reason = "fields come from Fields::Named, so every field has an ident"
+        )]
         let fname = f.ident.as_ref().unwrap().to_string();
         let anum = format_ident!("Anum_{}_{}", catname, fname);
         consts.push(quote! { pub const #anum: i32 = #n; });

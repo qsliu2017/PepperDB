@@ -39,6 +39,11 @@
 //!   fork the launcher when `autovacuum=off`, the wraparound-emergency case aside,
 //!   which is deferred). The bodies therefore EXIST and are correct, but are only
 //!   reached when autovacuum is turned on and a real catalog is present.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 #![allow(
     clippy::cast_ptr_alignment,
@@ -47,7 +52,9 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, OnceLock};
+
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::access::transam::ReadNextTransactionId;
 use crate::backend::postmaster::auxprocess::{
@@ -289,7 +296,7 @@ impl AutoVacuumShmem {
     /// so recover the guard if poisoned (every critical section is a complete,
     /// short update).
     fn lock(&self) -> MutexGuard<'_, AutoVacuumShmemInner> {
-        self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.inner.lock()
     }
 }
 

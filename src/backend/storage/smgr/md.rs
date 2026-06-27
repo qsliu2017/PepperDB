@@ -22,6 +22,11 @@
 //!  * Paths from `relpath(...)` are relative to PGDATA; we join them onto
 //!    `DataDir` (PG runs chdir'd into the data dir, so its relative paths work
 //!    directly; we have no such cwd, so we resolve here).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::io::{IoSlice, IoSliceMut};
 use std::path::PathBuf;

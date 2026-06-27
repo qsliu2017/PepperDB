@@ -31,10 +31,17 @@
 //!    strands waiters (rules s11).
 //!  * Reading a not-yet-written page (EOF) returns a zero-filled buffer ok=true
 //!    (mirrors `SlruPhysicalReadPage` zeroing on ENOENT/short read).
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 use crate::access::slru::{SLRU_PAGES_PER_SEGMENT, SlruPageStatus};
 use crate::access::xlogdefs::XLogRecPtr;
@@ -262,14 +269,14 @@ impl Drop for InProgressSlruIo<'_> {
         }
         // Panic during I/O: restore a sane slot state and wake waiters.
         let local = self.slot - self.ctl.bankstart(self.pageno);
-        if let Ok(mut bank) = self.ctl.bank(self.pageno).write() {
-            if self.is_read {
-                bank.page_status[local] = SlruPageStatus::Empty;
-            } else {
-                bank.page_status[local] = SlruPageStatus::Valid;
-                bank.page_dirty[local] = true;
-            }
+        let mut bank = self.ctl.bank(self.pageno).write();
+        if self.is_read {
+            bank.page_status[local] = SlruPageStatus::Empty;
+        } else {
+            bank.page_status[local] = SlruPageStatus::Valid;
+            bank.page_dirty[local] = true;
         }
+        drop(bank);
         self.ctl.slot_io[self.slot].wake_all();
     }
 }
@@ -522,7 +529,7 @@ impl SlruCtl {
                 Wait(WaitGuard<'q>),
             }
             let next = {
-                let mut bank = self.bank(pageno).write().unwrap();
+                let mut bank = self.bank(pageno).write();
                 let bankstart = bank.bankstart;
                 match self.select_lru(&bank, pageno) {
                     SlruSelect::Ready(i) => {
@@ -568,7 +575,7 @@ impl SlruCtl {
                     let mut tmp = Box::new([0u8; BLCKSZ_USIZE]);
                     let ok = self.physical_read(pageno, &mut tmp).await;
 
-                    let mut bank = self.bank(pageno).write().unwrap();
+                    let mut bank = self.bank(pageno).write();
                     bank.page_buffer[local].copy_from_slice(&tmp[..]);
                     bank.zero_lsns(local);
                     bank.page_status[local] = if ok {
@@ -613,7 +620,7 @@ impl SlruCtl {
                 Wait(WaitGuard<'q>),
             }
             let next = {
-                let mut bank = self.bank(pageno).write().unwrap();
+                let mut bank = self.bank(pageno).write();
                 let bankstart = bank.bankstart;
                 let lsn_groups = bank.lsn_groups_per_page;
                 match self.select_lru(&bank, pageno) {
@@ -658,7 +665,7 @@ impl SlruCtl {
                     let mut tmp = Box::new([0u8; BLCKSZ_USIZE]);
                     let ok = self.physical_read(pageno, &mut tmp).await;
 
-                    let mut bank = self.bank(pageno).write().unwrap();
+                    let mut bank = self.bank(pageno).write();
                     let lsn_groups = bank.lsn_groups_per_page;
                     bank.page_buffer[local].copy_from_slice(&tmp[..]);
                     bank.zero_lsns(local);
@@ -700,7 +707,7 @@ impl SlruCtl {
         f: impl FnOnce(SlruPageRef<'_>) -> R,
     ) -> R {
         {
-            let bank = self.bank(pageno).read().unwrap();
+            let bank = self.bank(pageno).read();
             if let Some(i) = bank.find(pageno)
                 && matches!(
                     bank.page_status[i],
@@ -729,7 +736,7 @@ impl SlruCtl {
                 Wait(WaitGuard<'q>),
             }
             let next = {
-                let mut bank = self.bank(pageno).write().unwrap();
+                let mut bank = self.bank(pageno).write();
                 let bankstart = bank.bankstart;
                 match self.select_lru(&bank, pageno) {
                     SlruSelect::Ready(local) => {
@@ -771,7 +778,7 @@ impl SlruCtl {
 
         // Snapshot under the lock: pageno, bytes, max group_lsn. Mark write-busy.
         let (pageno, bytes, max_lsn) = {
-            let mut bank = self.banks[bankno].write().unwrap();
+            let mut bank = self.banks[bankno].write();
             // If a write is already in progress or not dirty/valid, nothing to do.
             if !bank.page_dirty[local] || !matches!(bank.page_status[local], SlruPageStatus::Valid)
             {
@@ -802,7 +809,7 @@ impl SlruCtl {
         let mut io = InProgressSlruIo::arm(self, pageno, slot, false);
         let ok = self.physical_write(pageno, &bytes).await;
 
-        let mut bank = self.banks[bankno].write().unwrap();
+        let mut bank = self.banks[bankno].write();
         if !ok {
             bank.page_dirty[local] = true;
         }
@@ -822,7 +829,7 @@ impl SlruCtl {
             let bankno = slot / SLRU_BANK_SIZE;
             let local = slot - bankno * SLRU_BANK_SIZE;
             let needs_write = {
-                let bank = self.banks[bankno].read().unwrap();
+                let bank = self.banks[bankno].read();
                 !matches!(bank.page_status[local], SlruPageStatus::Empty)
             };
             if needs_write {
@@ -859,7 +866,7 @@ impl SlruCtl {
             let bankno = slot / SLRU_BANK_SIZE;
             let local = slot - bankno * SLRU_BANK_SIZE;
             let needs_write = {
-                let mut bank = self.banks[bankno].write().unwrap();
+                let mut bank = self.banks[bankno].write();
                 if matches!(bank.page_status[local], SlruPageStatus::Empty)
                     || !(self.page_precedes)(bank.page_number[local], cutoff_page)
                 {
@@ -940,7 +947,7 @@ impl SlruCtl {
                 let bankno = slot / SLRU_BANK_SIZE;
                 let local = slot - bankno * SLRU_BANK_SIZE;
                 let needs_write = {
-                    let mut bank = self.banks[bankno].write().unwrap();
+                    let mut bank = self.banks[bankno].write();
                     if matches!(bank.page_status[local], SlruPageStatus::Empty)
                         || bank.page_number[local] / i64::from(SLRU_PAGES_PER_SEGMENT) != segno
                     {
@@ -993,7 +1000,7 @@ impl SlruCtl {
     ) -> R {
         let bankno = self.bankno(pageno);
         let local = slot - bankno * SLRU_BANK_SIZE;
-        let bank = self.banks[bankno].read().unwrap();
+        let bank = self.banks[bankno].read();
         f(&bank.page_buffer[local])
     }
 
@@ -1007,7 +1014,7 @@ impl SlruCtl {
     ) -> R {
         let bankno = self.bankno(pageno);
         let local = slot - bankno * SLRU_BANK_SIZE;
-        let mut bank = self.banks[bankno].write().unwrap();
+        let mut bank = self.banks[bankno].write();
         let r = f(&mut bank.page_buffer[local]);
         bank.page_dirty[local] = true;
         r

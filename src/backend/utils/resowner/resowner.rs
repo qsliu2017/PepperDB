@@ -26,7 +26,8 @@
 //! could re-enter the owner), so every release path collects the closures under
 //! the lock, drops the guard, then calls them.
 
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
+use parking_lot::Mutex;
 
 use crate::elog;
 use crate::storage::procnumber::{GenSlab, Key};
@@ -96,8 +97,8 @@ impl ResourceOwner {
             children: Mutex::new(Vec::new()),
         }));
         if let Some(parent) = parent {
-            *owner.0.parent.lock().unwrap() = Arc::downgrade(&parent.0);
-            parent.0.children.lock().unwrap().push(owner.clone());
+            *owner.0.parent.lock() = Arc::downgrade(&parent.0);
+            parent.0.children.lock().push(owner.clone());
         }
         owner
     }
@@ -116,7 +117,7 @@ impl ResourceOwner {
         name: &'static str,
         release: impl FnOnce() + Send + 'static,
     ) -> ResourceGuard {
-        let mut locked = self.0.locked.lock().unwrap();
+        let mut locked = self.0.locked.lock();
         let seq = locked.next_seq;
         locked.next_seq += 1;
         let key = locked.phases[phase_index(phase)].insert(Entry {
@@ -141,7 +142,7 @@ impl ResourceOwner {
         // Snapshot child handles under the lock, then drop it before recursing:
         // a release closure could re-enter the owner tree and we must not hold
         // `children` across that.
-        let children: Vec<Self> = self.0.children.lock().unwrap().clone();
+        let children: Vec<Self> = self.0.children.lock().clone();
         for child in &children {
             child.release(phase, is_commit, is_top_level);
         }
@@ -149,7 +150,7 @@ impl ResourceOwner {
         // Drain the phase slab and sort under the lock, but run the closures
         // only after the guard drops (a closure could re-enter this owner).
         let entries: Vec<Entry> = {
-            let mut locked = self.0.locked.lock().unwrap();
+            let mut locked = self.0.locked.lock();
             let slab = &mut locked.phases[phase_index(phase)];
             // Collect keys first: iter() borrows &slab, remove() needs &mut slab,
             // so the immutable borrow must end before the removes (not chainable).
@@ -202,7 +203,7 @@ impl ResourceOwner {
     /// Asserts every phase is empty (resources must have been released first).
     pub fn delete(self) {
         {
-            let locked = self.0.locked.lock().unwrap();
+            let locked = self.0.locked.lock();
             debug_assert!(
                 locked.phases.iter().all(GenSlab::is_empty),
                 "ResourceOwnerDelete: owner {} still owns resources",
@@ -210,7 +211,7 @@ impl ResourceOwner {
             );
         }
         // Delete children first (each detaches itself from us).
-        let children = std::mem::take(&mut *self.0.children.lock().unwrap());
+        let children = std::mem::take(&mut *self.0.children.lock());
         for child in children {
             child.delete();
         }
@@ -219,25 +220,24 @@ impl ResourceOwner {
 
     /// Parent owner, if any (PG's `ResourceOwnerGetParent`).
     pub fn parent(&self) -> Option<Self> {
-        self.0.parent.lock().unwrap().upgrade().map(ResourceOwner)
+        self.0.parent.lock().upgrade().map(ResourceOwner)
     }
 
     /// Reassign to a new parent, detaching from the old one
     /// (PG's `ResourceOwnerNewParent`).
     pub fn new_parent(&self, new_parent: Option<&Self>) {
-        let old = self.0.parent.lock().unwrap().upgrade();
+        let old = self.0.parent.lock().upgrade();
         if let Some(old) = old {
             old.children
                 .lock()
-                .unwrap()
                 .retain(|c| !Arc::ptr_eq(&c.0, &self.0));
         }
         match new_parent {
             Some(parent) => {
-                *self.0.parent.lock().unwrap() = Arc::downgrade(&parent.0);
-                parent.0.children.lock().unwrap().push(self.clone());
+                *self.0.parent.lock() = Arc::downgrade(&parent.0);
+                parent.0.children.lock().push(self.clone());
             }
-            None => *self.0.parent.lock().unwrap() = Weak::new(),
+            None => *self.0.parent.lock() = Weak::new(),
         }
     }
 }
@@ -256,7 +256,7 @@ impl ResourceGuard {
     /// `release_now`, and `forget`. Lock dropped before the caller acts.
     fn take(&self) -> Option<Entry> {
         let owner = self.owner.upgrade()?;
-        let mut locked = owner.locked.lock().unwrap();
+        let mut locked = owner.locked.lock();
         locked.phases[phase_index(self.phase)].remove(self.key)
     }
 
@@ -297,7 +297,12 @@ tokio::task_local! {
 
 /// The current task's owner. Panics if not inside a [`scope`].
 pub fn current() -> ResourceOwner {
-    try_current().expect("no ResourceOwner in scope for this task")
+    #[allow(
+        clippy::expect_used,
+        reason = "documented precondition: caller is inside a scope() task-local"
+    )]
+    let owner = try_current().expect("no ResourceOwner in scope for this task");
+    owner
 }
 
 /// The current task's owner, or `None` if not inside a [`scope`].
@@ -334,13 +339,14 @@ mod tests {
     use crate::utils::resowner::{
         RELEASE_PRIO_BUFFER_IOS, RELEASE_PRIO_BUFFER_PINS, RELEASE_PRIO_FILES,
     };
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use parking_lot::Mutex;
 
     type Log = Arc<Mutex<Vec<&'static str>>>;
 
     fn record(log: &Log, id: &'static str) -> impl FnOnce() + Send + 'static {
         let log = log.clone();
-        move || log.lock().unwrap().push(id)
+        move || log.lock().push(id)
     }
 
     #[test]
@@ -356,7 +362,7 @@ mod tests {
         std::mem::forget(g3);
 
         owner.release_all(false, true);
-        assert_eq!(*log.lock().unwrap(), vec!["before", "locks", "after"]);
+        assert_eq!(*log.lock(), vec!["before", "locks", "after"]);
     }
 
     #[test]
@@ -373,7 +379,7 @@ mod tests {
 
         owner.release_all(false, true);
         // io priority (100) before pin priority (200); within io, LIFO -> io2 then io1.
-        assert_eq!(*log.lock().unwrap(), vec!["io2", "io1", "pin1"]);
+        assert_eq!(*log.lock(), vec!["io2", "io1", "pin1"]);
     }
 
     #[test]
@@ -382,10 +388,10 @@ mod tests {
         let owner = ResourceOwner::create(None, "t");
         let g = owner.remember(ResourceReleasePhase::AfterLocks, RELEASE_PRIO_FILES, "f", record(&log, "f"));
         drop(g); // early release
-        assert_eq!(*log.lock().unwrap(), vec!["f"]);
+        assert_eq!(*log.lock(), vec!["f"]);
 
         owner.release_all(false, true); // must not release again
-        assert_eq!(*log.lock().unwrap(), vec!["f"]);
+        assert_eq!(*log.lock(), vec!["f"]);
     }
 
     #[test]
@@ -395,10 +401,10 @@ mod tests {
         let g = owner.remember(ResourceReleasePhase::AfterLocks, RELEASE_PRIO_FILES, "f", record(&log, "f"));
 
         owner.release_all(false, true); // drains the entry, releases once
-        assert_eq!(*log.lock().unwrap(), vec!["f"]);
+        assert_eq!(*log.lock(), vec!["f"]);
 
         drop(g); // stale key -> no-op, no panic, no double release
-        assert_eq!(*log.lock().unwrap(), vec!["f"]);
+        assert_eq!(*log.lock(), vec!["f"]);
     }
 
     #[test]
@@ -413,7 +419,7 @@ mod tests {
         std::mem::forget(cg);
 
         parent.release_all(false, true);
-        assert_eq!(*log.lock().unwrap(), vec!["c", "p"]);
+        assert_eq!(*log.lock(), vec!["c", "p"]);
     }
 
     #[test]
@@ -424,7 +430,7 @@ mod tests {
         g.forget();
 
         owner.release_all(false, true);
-        assert!(log.lock().unwrap().is_empty(), "forgotten resource must never release");
+        assert!(log.lock().is_empty(), "forgotten resource must never release");
     }
 
     #[test]
@@ -433,9 +439,9 @@ mod tests {
         let owner = ResourceOwner::create(None, "t");
         let g = owner.remember(ResourceReleasePhase::BeforeLocks, 100, "x", record(&log, "x"));
         g.release_now();
-        assert_eq!(*log.lock().unwrap(), vec!["x"]);
+        assert_eq!(*log.lock(), vec!["x"]);
         owner.release_all(false, true);
-        assert_eq!(*log.lock().unwrap(), vec!["x"]);
+        assert_eq!(*log.lock(), vec!["x"]);
     }
 
     #[test]
@@ -446,7 +452,7 @@ mod tests {
         std::mem::forget(g);
         // is_commit = true with a non-empty phase exercises the WARNING path.
         owner.release_all(true, true);
-        assert_eq!(*log.lock().unwrap(), vec!["leaked"]);
+        assert_eq!(*log.lock(), vec!["leaked"]);
     }
 
     #[test]
@@ -457,7 +463,7 @@ mod tests {
         let a = owner.remember(ResourceReleasePhase::BeforeLocks, 100, "a", record(&log, "a"));
         let log2 = log.clone();
         let b = owner.remember(ResourceReleasePhase::BeforeLocks, 100, "b", move || {
-            log2.lock().unwrap().push("b-start");
+            log2.lock().push("b-start");
             panic!("boom");
         });
         let c = owner.remember(ResourceReleasePhase::BeforeLocks, 100, "c", record(&log, "c"));
@@ -468,7 +474,7 @@ mod tests {
         // Must not propagate the panic.
         owner.release_all(false, true);
 
-        let entries = log.lock().unwrap().clone();
+        let entries = log.lock().clone();
         // The two non-panicking resources released; the panicking one started.
         assert!(entries.contains(&"a"), "a must release: {entries:?}");
         assert!(entries.contains(&"c"), "c must release: {entries:?}");
@@ -485,7 +491,7 @@ mod tests {
         std::mem::forget(late);
 
         owner.release_all(false, true);
-        assert_eq!(*log.lock().unwrap(), vec!["late"]);
+        assert_eq!(*log.lock(), vec!["late"]);
     }
 
     #[test]
@@ -501,7 +507,7 @@ mod tests {
 
         // Child releases first and panics; parent must still tear down.
         parent.release_all(false, true);
-        assert_eq!(*log.lock().unwrap(), vec!["p"]);
+        assert_eq!(*log.lock(), vec!["p"]);
     }
 
     #[test]
@@ -515,11 +521,11 @@ mod tests {
 
         // A no longer parents C; B does.
         assert!(
-            !a.0.children.lock().unwrap().iter().any(|ch| Arc::ptr_eq(&ch.0, &c.0)),
+            !a.0.children.lock().iter().any(|ch| Arc::ptr_eq(&ch.0, &c.0)),
             "A's children must no longer contain C"
         );
         assert!(
-            b.0.children.lock().unwrap().iter().any(|ch| Arc::ptr_eq(&ch.0, &c.0)),
+            b.0.children.lock().iter().any(|ch| Arc::ptr_eq(&ch.0, &c.0)),
             "B's children must contain C"
         );
 
@@ -527,10 +533,10 @@ mod tests {
         std::mem::forget(cg);
 
         a.release_all(false, true); // C is no longer under A
-        assert!(log.lock().unwrap().is_empty(), "C must not release via A: {:?}", *log.lock().unwrap());
+        assert!(log.lock().is_empty(), "C must not release via A: {:?}", *log.lock());
 
         b.release_all(false, true); // C is under B now
-        assert_eq!(*log.lock().unwrap(), vec!["c"]);
+        assert_eq!(*log.lock(), vec!["c"]);
     }
 
     #[test]
@@ -541,7 +547,7 @@ mod tests {
         // Drained owner: delete must succeed and detach from the parent.
         child.clone().delete();
         assert!(
-            !parent.0.children.lock().unwrap().iter().any(|ch| Arc::ptr_eq(&ch.0, &child.0)),
+            !parent.0.children.lock().iter().any(|ch| Arc::ptr_eq(&ch.0, &child.0)),
             "parent's children must no longer contain the deleted child"
         );
     }

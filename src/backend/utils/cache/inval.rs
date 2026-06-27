@@ -15,6 +15,11 @@
 //!    "parent" is the element below the top (s8: memory contexts -> ownership).
 //!  - `debug_discard_caches` (GUC) -> a process-global atomic + accessor.
 #![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
+#![allow(
     clippy::cast_ptr_alignment,
     reason = "faithful GETSTRUCT reinterpretation of a heap tuple to a Form_* struct; staged until GETSTRUCT lands"
 )]

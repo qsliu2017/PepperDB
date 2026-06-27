@@ -32,10 +32,16 @@
 //!  * `LogwrtResult` (Write/Flush LSNs) are atomics; the flushed LSN is published
 //!    on a `tokio::watch` ONLY after `issue_xlog_fsync` succeeds, and only when it
 //!    advances (monotonic). This couples WAL durability to FlushBuffer / commit.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
+)]
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use tokio::sync::{watch, Mutex as AsyncMutex, Notify};
 
 use crate::access::xlog_internal::{
@@ -401,7 +407,7 @@ impl XLogCtl {
 
     /// PG `GetXLogInsertRecPtr`: the current insert (reservation) head.
     pub fn get_xlog_insert_rec_ptr(&self) -> XLogRecPtr {
-        let curr = self.insert_pos.lock().unwrap().curr_byte_pos;
+        let curr = self.insert_pos.lock().curr_byte_pos;
         self.byte_pos_to_rec_ptr(curr)
     }
 
@@ -433,7 +439,7 @@ impl XLogCtl {
     fn reserve_insert_location(&self, size: usize) -> (XLogRecPtr, XLogRecPtr, XLogRecPtr) {
         let size = MAXALIGN(size) as u64;
         let (startbytepos, endbytepos, prevbytepos) = {
-            let mut pos = self.insert_pos.lock().unwrap();
+            let mut pos = self.insert_pos.lock();
             let start = pos.curr_byte_pos;
             let end = start + size;
             let prev = pos.prev_byte_pos;
@@ -621,7 +627,7 @@ impl XLogCtl {
         }
         let page = self.get_xlog_buffer(pos).await;
         let off = (pos % BLCKSZ) as usize;
-        let mut guard = self.pages[page].lock().unwrap();
+        let mut guard = self.pages[page].lock();
         guard[off..off + bytes.len()].copy_from_slice(bytes);
     }
 
@@ -630,7 +636,7 @@ impl XLogCtl {
     /// `CopyXLogRecordToWAL`.
     async fn begin_contrecord_page(self: &Arc<Self>, page_start: u64, rem_len: u32) {
         let idx = self.get_xlog_buffer(page_start).await;
-        let mut guard = self.pages[idx].lock().unwrap();
+        let mut guard = self.pages[idx].lock();
         // xlp_info is at offset 2 (u16), xlp_rem_len at offset 16 (u32).
         let info = u16::from_ne_bytes([guard[2], guard[3]])
             | crate::access::xlog_internal::XlpFlags::FIRST_IS_CONTRECORD.bits();
@@ -708,7 +714,7 @@ impl XLogCtl {
     /// Zero a ring slot and write its WAL page header (long header on a segment's
     /// first page). Mirrors the page-init half of `AdvanceXLInsertBuffer`.
     fn init_page(&self, idx: usize, page_begin: u64) {
-        let mut guard = self.pages[idx].lock().unwrap();
+        let mut guard = self.pages[idx].lock();
         guard.fill(0);
         // XLogPageHeaderData: magic(u16)@0, info(u16)@2, tli(u32)@4,
         // pageaddr(u64)@8, rem_len(u32)@16.
@@ -758,7 +764,7 @@ impl XLogCtl {
         // Cap at the reserved head (PG: reservedUpto = XLogBytePosToEndRecPtr of
         // CurrBytePos). Nothing past it can be in progress.
         let reserved_upto = {
-            let curr = self.insert_pos.lock().unwrap().curr_byte_pos;
+            let curr = self.insert_pos.lock().curr_byte_pos;
             self.byte_pos_to_end_rec_ptr(curr).0
         };
         let upto = upto.min(reserved_upto);
@@ -833,7 +839,7 @@ impl XLogCtl {
 
             // Write the whole page at its segment offset.
             let seg_offset = XLogSegmentOffset(page_begin, self.wal_seg_size);
-            let bytes = self.pages[idx].lock().unwrap().clone();
+            let bytes = self.pages[idx].lock().clone();
             let seg = open.as_ref().expect("segment open");
             self.io_of()
                 .write_at(&seg.file, &bytes, seg_offset)
