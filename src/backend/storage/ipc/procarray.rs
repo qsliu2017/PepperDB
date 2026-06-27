@@ -89,10 +89,11 @@ fn set_transaction_xmin(xid: TransactionId) {
 }
 
 /// Public setter for snapmgr's `SnapshotResetXmin` (PG sets
-/// `MyProc->xmin = TransactionXmin = ...`). MyProc->xmin lands in step 15.
+/// `MyProc->xmin = TransactionXmin = ...` to the same value: the new horizon, or
+/// `InvalidTransactionId` when no snapshots remain).
 pub fn set_transaction_xmin_public(xid: TransactionId) {
     set_transaction_xmin(xid);
-    // TODO(step15): also set MyProc->xmin once the proc array is populated.
+    set_my_proc_xmin(xid);
 }
 
 fn set_recent_xmin(xid: TransactionId) {
@@ -368,11 +369,12 @@ impl ProcArray {
 
 impl ProcArray {
     /// procarray.c `ProcArrayEndTransaction`: mark a transaction no longer running.
-    /// The commit/abort must already be in WAL + pg_xact. TODO(step15): the
+    /// The commit/abort must already be in WAL + pg_xact. TODO(perf): the
     /// `ProcArrayGroupClearXid` batching (per-proc `PGPROC.procArrayGroup*` fields
     /// linked via the atomic `ProcGlobal.procArrayGroupFirst` head, so one leader
-    /// clears many backends' xids under a single ProcArrayLock acquisition) needs
-    /// the real PGPROC/ProcGlobal; here we clear directly under the write guard.
+    /// clears many backends' xids under a single ProcArrayLock acquisition) is
+    /// unblocked but deferred for contention; here we clear directly under the
+    /// write guard.
     pub fn proc_array_end_transaction(
         &self,
         vc: &VariableCache,

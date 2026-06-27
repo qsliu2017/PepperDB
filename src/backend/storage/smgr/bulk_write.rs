@@ -10,7 +10,7 @@
 //! Port notes: `BulkWriteBuffer` is an owned `Box<Page>` (smgr.c's palloc'd
 //! aligned block); `smgr_bulk_get_buf` returns a fresh zeroed page and
 //! `smgr_bulk_write` takes ownership. The MyProc->delayChkptFlags / RedoRecPtr
-//! checkpoint-race guard is TODO(step13/step17) -- we always registersync.
+//! checkpoint-race guard is TODO(checkpoint) -- we always registersync.
 
 use std::sync::Arc;
 
@@ -54,7 +54,7 @@ impl<'a> BulkWriteState<'a> {
         use_wal: bool,
     ) -> BulkWriteState<'a> {
         let relsize = smgr.nblocks(&shared, forknum).await;
-        // TODO(step13): start_RedoRecPtr = GetRedoRecPtr() for the finish-time
+        // TODO(checkpoint): start_RedoRecPtr = GetRedoRecPtr() for the finish-time
         // concurrent-checkpoint race check.
         BulkWriteState { smgr, forknum, use_wal, pending: Vec::new(), relsize, shared }
     }
@@ -124,7 +124,7 @@ impl<'a> BulkWriteState<'a> {
             // Temp relations are never fsync'd.
         } else {
             // For both the unlogged and WAL-logged cases we registersync here.
-            // TODO(step13/step17): the WAL-logged case should check whether a
+            // TODO(checkpoint): the WAL-logged case should check whether a
             // checkpoint started concurrently (RedoRecPtr changed) and call
             // immedsync instead; needs GetRedoRecPtr + delayChkptFlags.
             self.smgr.registersync(&self.shared, self.forknum).await;

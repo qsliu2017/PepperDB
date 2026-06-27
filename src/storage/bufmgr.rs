@@ -366,7 +366,7 @@ pub fn DebugPrintBufferRefcount(_buffer: Buffer) -> String {
 }
 
 pub fn CheckPointBuffers(_flags: i32) {
-    // TODO(step:bufmgr): real BufferSync (flush all dirty shared buffers, throttled
+    // TODO(bufmgr): real BufferSync (flush all dirty shared buffers, throttled
     // via CheckpointWriteDelay). A no-op for now so the checkpointer task never
     // panics on a timed checkpoint.
 }
@@ -408,12 +408,34 @@ pub fn FlushDatabaseBuffers(_dbid: Oid) {
     unimplemented!()
 }
 
+/// C `DropRelationBuffers`: drop all buffers for the listed forks at block >=
+/// `first_del_block`. `fork_num` and `first_del_block` are parallel (PG's
+/// `forkNum[]` / `firstDelBlock[]`); the C `nforks` is the slice length.
 pub fn DropRelationBuffers(
-    _smgr_reln: &mut SmgrRelation,
-    _fork_num: &[ForkNumber],
-    _first_del_block: &[BlockNumber],
+    smgr_reln: &mut SmgrRelation,
+    fork_num: &[ForkNumber],
+    first_del_block: &[BlockNumber],
 ) {
-    unimplemented!()
+    let rlocator = smgr_reln.rlocator;
+    // A local (temp) relation is localbuf.c's problem.
+    if rlocator.is_temp() {
+        if rlocator.backend == crate::storage::proc::current_proc_number() {
+            for (&fork, &first) in fork_num.iter().zip(first_del_block) {
+                crate::backend::storage::buffer::localbuf::drop_relation_local_buffers(
+                    &rlocator.locator,
+                    fork,
+                    first,
+                );
+            }
+        }
+        return;
+    }
+    // TODO(bufmgr): the shared buffer-pool scan -- a BufferPool method dropping
+    // every resident buffer of these forks at block >= first_del_block -- is not
+    // implemented yet (only the local-buffer path exists). It is a no-op for now:
+    // nothing reaches the shared pool by relation today, so there is nothing to
+    // drop; wire the scan when the BufferPool gains drop-by-relation.
+    let _ = (fork_num, first_del_block);
 }
 
 pub fn DropRelationsAllBuffers(_smgr_reln: &mut [&mut SmgrRelation]) {

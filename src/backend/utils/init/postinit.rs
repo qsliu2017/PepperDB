@@ -40,12 +40,12 @@ pub async fn backend_task_init(backend_type: BackendType) -> Arc<Session> {
 }
 
 /// PG `BaseInit` -- process-local storage/buffer/lock/xlog-insert setup that runs
-/// even for auxiliary processes. Every subsystem it touches is a deferred step,
-/// so this is left calling the stubs. TODO(stepNN): wire to smgr/bufmgr/xlog
-/// once those land.
+/// even for auxiliary processes. TODO(startup): wire the per-task access init
+/// (smgrinit / InitBufferManagerAccess / InitXLogInsert / InitLockManagerAccess)
+/// into the backend/aux startup sequence; the subsystems themselves now exist.
 pub fn base_init() {
-    // smgrinit / InitBufferManagerAccess / InitXLogInsert / InitLockManagerAccess
-    // are all deferred subsystems (steps 12-15). Nothing to do here yet.
+    // The per-task access-init calls are not yet sequenced here; the local buffer
+    // pool / smgr cache / xloginsert staging are lazily scoped by their callers.
 }
 
 /// PG `InitPostgres`: full backend startup -- identity, then the deferred

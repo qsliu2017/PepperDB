@@ -291,9 +291,9 @@ tokio::task_local! {
     static CURRENT_RESOURCE_OWNER: ResourceOwner;
 }
 
-// TODO(step14): CurTransactionResourceOwner / TopTransactionResourceOwner /
-// AuxProcessResourceOwner become Session state when transactions land. For now
-// only the CurrentResourceOwner accessor exists.
+// TODO(xact): CurTransactionResourceOwner / TopTransactionResourceOwner /
+// AuxProcessResourceOwner become Session state when transactions wire up the
+// resource owner. For now only the CurrentResourceOwner accessor exists.
 
 /// The current task's owner. Panics if not inside a [`scope`].
 pub fn current() -> ResourceOwner {

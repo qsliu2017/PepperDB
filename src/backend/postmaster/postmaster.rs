@@ -142,9 +142,9 @@ impl Shutdown {
 }
 
 /// Map a [`BackendType`] to its async entry point. Replaces
-/// `launch_backend.c`'s `child_process_kinds[]` dispatch table. For Part A only
-/// the regular backend is real; aux types are TODO(step17) and currently
-/// rejected at admission (the supervisor only accepts client connections).
+/// `launch_backend.c`'s `child_process_kinds[]` dispatch table. A client
+/// connection is always a regular backend; the aux tasks are spawned separately
+/// by `launch_missing_background_tasks`, not via the connection-admission path.
 fn backend_type_for_connection() -> BackendType {
     BackendType::BACKEND
 }
@@ -323,14 +323,15 @@ fn admit_and_spawn(
 
     let shared = shared.clone();
     // type -> async-entry dispatch (replaces launch_backend's child_process_kinds[]).
-    // Only the regular backend is real in Part A; aux arms are TODO(step17).
+    // A connection is always a client backend; the aux tasks (checkpointer,
+    // bgwriter, walwriter, autovacuum, archiver) are spawned by
+    // launch_missing_background_tasks, never through connection admission -- so any
+    // other type here is unreachable.
     // `cancel` is the per-child termination Notify (PG's SIGTERM target); the
     // backend selects on it to set ProcDie (step 09 Part B).
     let entry_fut = match backend_type_for_connection() {
         BackendType::BACKEND => backend_main(stream, peer, shared, key, cancel),
-        // TODO(step17): Checkpointer/BgWriter/WalWriter/Autovacuum/Archiver aux
-        // entries are not spawned here yet (see launch_missing_background_tasks).
-        other => unreachable!("supervisor only spawns client backends in Part A, got {other:?}"),
+        other => unreachable!("supervisor only spawns client backends, got {other:?}"),
     };
 
     // catch_unwind at the task boundary (design-000 error model): an

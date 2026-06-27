@@ -5,12 +5,12 @@
 //! `SharedState`; reached via `shared.clog()`.
 //!
 //! Simplifications (design step14 section 6):
-//!  * TODO(step15): `TransactionGroupUpdateXidStatus` batches concurrent clog
+//!  * TODO(perf): `TransactionGroupUpdateXidStatus` batches concurrent clog
 //!    status updates from many backends into one bank-lock acquisition by the
 //!    group leader, via per-proc `PGPROC.clogGroup*` fields linked through the
-//!    atomic `ProcGlobal.clogGroupFirst` head. Both require the real PGPROC/
-//!    ProcGlobal that step 15 builds (the gating MyProc xid check is also a
-//!    step-15 concern), so statuses are set directly under the bank lock here.
+//!    atomic `ProcGlobal.clogGroupFirst` head. The PGPROC/ProcGlobal fields now
+//!    exist; this is unblocked but deferred until contention warrants it, so
+//!    statuses are set directly under the bank lock here.
 //!  * clog_redo is deferred (recovery is out of foundation); see clog_redo.
 
 use std::sync::Arc;
@@ -174,10 +174,10 @@ impl SlruCtl {
     }
 
     /// clog.c TransactionIdSetPageStatus(Internal): set the status bits for the
-    /// (optional) main xid + subxids that all lie on `pageno`. TODO(step15): the
+    /// (optional) main xid + subxids that all lie on `pageno`. TODO(perf): the
     /// `TransactionGroupUpdateXidStatus` batching (PGPROC.clogGroup* +
-    /// ProcGlobal.clogGroupFirst) lands with the real PGPROC array; this is the
-    /// direct path.
+    /// ProcGlobal.clogGroupFirst) is unblocked but deferred for contention; this
+    /// is the direct path.
     async fn set_page_status(
         &self,
         xid: TransactionId,

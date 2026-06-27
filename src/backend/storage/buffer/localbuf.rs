@@ -689,6 +689,35 @@ mod tests {
         let _ = crate::storage::io_backend::remove_dir_all(&dir).await;
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn smgr_truncate_drops_local_buffers() {
+        use crate::backend::storage::ipc::sinvaladt::{SInvalBuffer, with_sinval_buffer};
+        use crate::storage::proc::{my_proc_scope, set_current_proc_number};
+        let (s, dir) = shared_with_tmpdir("smgrtrunc").await;
+        let buf = Arc::new(SInvalBuffer::new_for_test());
+        // smgr.truncate's DropRelationBuffers only takes the local branch when the
+        // temp rel's backend == MyProcNumber; temp_smgr uses backend 7.
+        my_proc_scope(with_sinval_buffer(buf, with_local_buffers(|| async {
+            set_current_proc_number(7 as ProcNumber);
+            let mut smgr = temp_smgr(1);
+            let fork = ForkNumber::MAIN_FORKNUM;
+            smgr.create(&s, fork, false).await;
+            for _ in 0..3 {
+                let b = extend_buffered_rel_local(&s, &mut smgr, fork).await;
+                unpin_local_buffer(b);
+            }
+            assert_eq!(with_pool(|p| p.hash.len()), 3);
+
+            // smgrtruncate to 1 block drops the buffers for the removed blocks
+            // (first_del_block = the new size, 1) via DropRelationBuffers.
+            smgr.truncate(&s, &[(fork, 3, 1)]).await;
+            assert_eq!(with_pool(|p| p.hash.len()), 1, "blocks >= 1 dropped on truncate");
+            assert_eq!(smgr.nblocks(&s, fork).await, 1);
+        })))
+        .await;
+        let _ = crate::storage::io_backend::remove_dir_all(&dir).await;
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn pin_survives_thread_migration() {
         // The per-task pool follows the task across an await that migrates it.

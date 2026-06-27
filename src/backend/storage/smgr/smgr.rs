@@ -17,9 +17,11 @@
 //! Deleted vs smgr.c: the pin/unpin dlist GC (Rust ownership), the
 //! PROCSIGNAL_BARRIER_SMGRRELEASE early-close dance, the AIO target machinery
 //! (smgr_aio_reopen / pgaio_io_set_target_smgr), and HOLD/RESUME_INTERRUPTS
-//! (cooperative async, not signal-driven). The cache-invalidation hooks
-//! (CacheInvalidateSmgr / DropRelationBuffers) are TODO(step16 sinval) /
-//! TODO(step12 bufmgr).
+//! (cooperative async, not signal-driven). `truncate` drops buffers (temp path
+//! live; shared-pool scan is TODO(bufmgr)) and sends `cache_invalidate_smgr`,
+//! matching smgrtruncate. The smgr-level unlink wrapper (smgrdounlinkall, which
+//! likewise sends CacheInvalidateSmgr before unlinking) is not yet translated --
+//! only md-level `mdunlink` exists; wire that invalidation when it lands.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -186,8 +188,18 @@ impl SmgrRelation {
         shared: &Arc<SharedState>,
         truncate: &[(ForkNumber, BlockNumber, BlockNumber)],
     ) {
-        // TODO(step12 bufmgr): DropRelationBuffers for the removed blocks.
-        // TODO(step16 sinval): CacheInvalidateSmgr to force other tasks to close.
+        // PG smgrtruncate: drop buffers for the about-to-be-deleted blocks first
+        // (firstDelBlock = the new size), so bufmgr won't try to flush vanished
+        // pages. The shared-pool scan is deferred (DropRelationBuffers TODO);
+        // the temp-relation path is live.
+        let forks: Vec<ForkNumber> = truncate.iter().map(|&(f, _, _)| f).collect();
+        let new_sizes: Vec<BlockNumber> = truncate.iter().map(|&(_, _, n)| n).collect();
+        crate::storage::bufmgr::DropRelationBuffers(self, &forks, &new_sizes);
+
+        // Force other tasks to close any smgr references / past-end targblock
+        // before we change the files on disk (PG sends this from smgrtruncate).
+        crate::backend::utils::cache::inval::cache_invalidate_smgr(self.rlocator);
+
         for &(forknum, old_nblocks, nblocks) in truncate {
             self.cached_nblocks[forknum as usize] = INVALID_BLOCK_NUMBER;
             md::mdtruncate(shared, self, forknum, old_nblocks, nblocks).await;
@@ -323,6 +335,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn extend_nblocks_read_truncate_roundtrip() {
+        use crate::backend::storage::ipc::sinvaladt::{SInvalBuffer, with_sinval_buffer};
+        // `truncate` sends a smgr cache invalidation, which needs an SI buffer.
+        let buf = std::sync::Arc::new(SInvalBuffer::new_for_test());
+        with_sinval_buffer(buf, async {
         let (s, dir) = shared_with_tmpdir("rt").await;
         let mut reln = SmgrRelation::open(rloc(1), crate::storage::procnumber::INVALID_PROC_NUMBER);
         let fork = ForkNumber::MAIN_FORKNUM;
@@ -350,6 +366,8 @@ mod tests {
         assert_eq!(reln.nblocks(&s, fork).await, 2);
 
         let _ = crate::storage::io_backend::remove_dir_all(&dir).await;
+        })
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

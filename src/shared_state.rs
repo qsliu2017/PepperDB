@@ -242,7 +242,7 @@ impl SharedState {
         // The sync request queue (sync.c InitSync) is constructed early here so
         // the clog/subtrans SLRUs can hold a handle to it (their physical writes
         // enqueue fsync requests). It is logically the checkpointer-adjacent
-        // structure; the checkpointer task drains it (TODO(step17)).
+        // structure; the checkpointer task drains it (ProcessSyncRequests).
         let sync_requests = Arc::new(crate::storage::sync::SyncRequests::new());
         // CLOGShmemInit -- step14. The commit-log SLRU over pg_xact. Holds I/O
         // handles directly (not Arc<SharedState>) to avoid a reference cycle.

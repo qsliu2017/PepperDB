@@ -637,8 +637,8 @@ fn check_archive_timeout(st: &mut CheckpointerState) {
 /// standbys-defined, full_page_writes). The underlying calls are syncrep/xlog
 /// stubs; this is a faithful no-op shell until those land (17 GUC wiring).
 fn update_shared_memory_config() {
-    // TODO(step:syncrep): SyncRepUpdateSyncStandbysDefined().
-    // TODO(step:xlog): UpdateFullPageWrites().
+    // TODO(syncrep): SyncRepUpdateSyncStandbysDefined().
+    // TODO(xlog): UpdateFullPageWrites().
 }
 
 /// PG `IsCheckpointOnSchedule`: whether progress is ahead of elapsed time/WAL.
@@ -654,7 +654,7 @@ fn is_checkpoint_on_schedule(_progress: f64) -> bool {
 /// is a no-op until BufferSync lands.
 #[allow(dead_code, reason = "called by BufferSync (17/bufmgr) once it lands")]
 pub async fn checkpoint_write_delay(_flags: i32, _progress: f64) {
-    // TODO(step:bufmgr): the on-schedule nap + AbsorbSyncRequests cadence.
+    // TODO(bufmgr): the on-schedule nap + AbsorbSyncRequests cadence.
 }
 
 /// PG `(pg_time_t) time(NULL)`: current wall-clock seconds.

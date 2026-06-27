@@ -8,7 +8,7 @@
 //! AIO read path is collapsed to a direct async read in mdreadv). `mdfd`
 //! (FileGetRawDesc for cross-process AIO) is gone with the AIO machinery.
 //! `DropRelationFiles` depends on the buffer manager / xlog and is deferred to
-//! its consumers (TODO(step12)).
+//! its consumers (TODO(bufmgr)).
 
 pub use crate::backend::storage::smgr::md::{
     forget_database_sync_requests, mdclose, mdcreate, mdexists, mdextend, mdfiletagmatches,

@@ -109,8 +109,8 @@ async fn aux_common(
 
     crate::miscadmin::set_processing_mode(crate::miscadmin::ProcessingMode::NormalProcessing);
 
-    // TODO(step17): pgstat_beinit / before_shmem_exit(ShutdownAuxiliaryProcess)
-    // and the concrete aux loop are wired by the individual aux tasks.
+    // TODO(pgstat): pgstat_beinit. The before_shmem_exit(ShutdownAuxiliaryProcess)
+    // cleanup is the aux exit guard (RAII Drop) in the individual aux tasks.
     AuxProcess { session, slot, slot_key, owner, latch, proc_number }
 }
 

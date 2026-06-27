@@ -29,6 +29,7 @@ use std::time::Duration;
 
 use crate::c::LocalTransactionId;
 use crate::lib::stringinfo::StringInfo;
+use crate::miscadmin::BackendType;
 use crate::storage::lock::{DeadLockState, LOCALLOCK, LOCK, LockMethod};
 use crate::storage::proc::{
     LockGroupRole, NUM_AUXILIARY_PROCS, NUM_SPECIAL_WORKER_PROCS, PGPROC, ProcCounts, ProcGlobal,
@@ -154,10 +155,14 @@ pub fn InitProcess() {
     assert!(!has_my_proc(), "you already exist");
 
     // Decide which freelist supplies our PGPROC (must match InitProcGlobal).
-    // Backend-type predicates (AmAutoVacuumWorker / AmBackgroundWorker /
-    // AmWalSender) are not yet modeled; regular backends use the Free list.
-    // TODO(step17): route aux/bgworker/walsender categories by backend type.
-    let kind = ProcGlobalList::Free;
+    // PG: autovac worker / special worker -> autovacFreeProcs; bgworker ->
+    // bgworkerFreeProcs; wal sender -> walsenderFreeProcs; else freeProcs.
+    let kind = match crate::session::try_current().map(|s| s.backend_type()) {
+        Some(BackendType::AUTOVAC_WORKER | BackendType::SLOTSYNC_WORKER) => ProcGlobalList::Autovac,
+        Some(BackendType::BG_WORKER) => ProcGlobalList::Bgworker,
+        Some(BackendType::WAL_SENDER) => ProcGlobalList::Walsender,
+        _ => ProcGlobalList::Free,
+    };
 
     let Some(procno) = g.alloc_proc(kind) else {
         // PG: ereport(FATAL, too many clients). TODO(panic).
@@ -676,9 +681,9 @@ fn CheckDeadLock(procno: ProcNumber, g: &ProcGlobal) -> DeadLockState {
             }
             DeadLockState::BlockedByAutovacuum => {
                 // PG sends SIGINT to the autovac worker (GetBlockingAutoVacuumPgproc)
-                // then keeps waiting. The autovac-worker cancel path is not wired in
-                // this step; surface the proc for the caller and keep waiting.
-                // TODO(step17/autovac): cancel the blocking autovacuum worker.
+                // then keeps waiting. The autovac-worker cancel path is not wired
+                // yet; surface the proc for the caller and keep waiting.
+                // TODO(autovac): cancel the blocking autovacuum worker.
                 let _ = crate::storage::lock::get_blocking_autovacuum_pgproc();
             }
             DeadLockState::NoDeadlock | DeadLockState::NotYetChecked => {}

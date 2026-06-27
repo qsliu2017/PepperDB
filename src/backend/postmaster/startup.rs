@@ -131,8 +131,8 @@ pub fn process_startup_proc_interrupts() -> bool {
         return true;
     }
 
-    // TODO(step09): ProcSignalBarrierPending -> ProcessProcSignalBarrier();
-    // LogMemoryContextPending -> ProcessLogMemoryContextInterrupt();
+    // TODO(procsignal): ProcSignalBarrierPending -> ProcessProcSignalBarrier();
+    // LogMemoryContextPending -> ProcessLogMemoryContextInterrupt() (TODO(pgstat));
     // and the PostmasterIsAlive emergency bailout (supervisor-driven here).
     false
 }

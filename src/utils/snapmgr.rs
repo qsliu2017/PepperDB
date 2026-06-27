@@ -96,14 +96,14 @@ pub fn IsMVCCSnapshot(snapshot: &SnapshotData) -> bool {
 
 /// procarray.c/snapmgr.c `GlobalVisCheckRemovableXid`. Staging stub: the
 /// `BTPageIsRecyclable` caller (nbtree static-inline) has no `SharedState`
-/// handle yet (step 15 threads it through the AM call path). The real
+/// handle yet (nbtree must thread it through the AM call path). The real
 /// implementation is `backend::utils::time::snapmgr::GlobalVisCheckRemovableXid`.
 pub fn GlobalVisCheckRemovableXid(_rel: Relation, _xid: crate::c::TransactionId) -> bool {
-    unimplemented!() // TODO(step15): thread SharedState through the AM call path
+    unimplemented!() // TODO(nbtree): thread SharedState through the AM call path
 }
 
 /// procarray.c/snapmgr.c `GlobalVisCheckRemovableFullXid`. Staging stub (see
 /// `GlobalVisCheckRemovableXid`).
 pub fn GlobalVisCheckRemovableFullXid(_rel: Relation, _fxid: FullTransactionId) -> bool {
-    unimplemented!() // TODO(step15): thread SharedState through the AM call path
+    unimplemented!() // TODO(nbtree): thread SharedState through the AM call path
 }

@@ -273,7 +273,7 @@ async fn pgarch_archiver_copy_loop(
 /// `.ready` file actually exists in `archive_status` (none in normal operation /
 /// tests), so the retry/give-up path is exercised only when archiving is in use.
 fn pgarch_archive_xlog(_xlog: &str) -> bool {
-    // TODO(step:archive): shell_archive_init + archive_file_cb (run
+    // TODO(archive): shell_archive_init + archive_file_cb (run
     // archive_command on the segment, durable on success). No-op for now.
     false
 }
@@ -398,7 +398,7 @@ fn process_pgarch_interrupts() {
     // ProcessPgArchInterrupts does not check shutdown; the loops do that via
     // `shutdown_now`. We still call it to drain the config-reload flag + barriers.
     let _ = process_main_loop_interrupts();
-    // TODO(step:archive): on archive_library change, restart the archiver. No
+    // TODO(archive): on archive_library change, restart the archiver. No
     // dynamic library loading, so nothing to do.
 }
 

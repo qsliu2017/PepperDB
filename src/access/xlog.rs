@@ -255,7 +255,7 @@ pub fn get_active_wal_level_on_standby() -> WalLevel {
     unimplemented!()
 }
 pub fn startup_xlog() {
-    // TODO(step:xlog/recovery): real StartupXLOG -- read the control file, run
+    // TODO(recovery): real StartupXLOG -- read the control file, run
     // InitWalRecovery/PerformWalRecovery, write the end-of-recovery checkpoint,
     // and let RecoveryInProgress() flip to false. A no-op for now so the startup
     // aux task (startup.rs) does not panic at boot; it currently has no WAL to
@@ -265,14 +265,14 @@ pub fn shutdown_xlog(_code: i32, _arg: Datum) {
     unimplemented!()
 }
 pub fn create_check_point(_flags: CheckpointFlags) -> bool {
-    // TODO(step:xlog): real CheckPointGuts (redo-ptr advance, CheckPointBuffers,
+    // TODO(xlog): real CheckPointGuts (redo-ptr advance, CheckPointBuffers,
     // SLRU/twophase/multixact checkpoints, control-file update, WAL CHECKPOINT
     // record). A no-op for now so the long-lived checkpointer task never panics on
     // a timed checkpoint; it still drains the real fsync queue (ProcessSyncRequests).
     true
 }
 pub fn create_restart_point(_flags: CheckpointFlags) -> bool {
-    // TODO(step:xlog): real CreateRestartPoint. No-op (no recovery yet).
+    // TODO(recovery): real CreateRestartPoint. No-op (no recovery yet).
     false
 }
 pub fn get_wal_availability(_target_lsn: XLogRecPtr) -> WALAvailability {

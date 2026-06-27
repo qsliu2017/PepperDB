@@ -36,7 +36,7 @@ fn parse_dispatch(args: &[String]) -> Dispatch {
 
 fn main() {
     // PG's startup_hacks() / set_pglocale_pgservice() / check_root(): minimal.
-    // TODO(step09+): locale setup, env scrubbing, and the not-running-as-root
+    // TODO(startup): locale setup, env scrubbing, and the not-running-as-root
     // check. Single-process: no EXEC_BACKEND forkchild arm.
     let args: Vec<String> = std::env::args().collect();
 
@@ -52,7 +52,7 @@ fn main() {
         Dispatch::Postmaster => {
             runtime.block_on(postmaster_main(SharedStateConfig::default()));
         }
-        // TODO(step09+): real implementations. Bootstrap/check/describe-config/
+        // TODO(bootstrap): real implementations. Bootstrap/check/describe-config/
         // single-user modes are not yet ported.
         other => {
             eprintln!("pepperdb: dispatch mode {other:?} is not yet implemented");

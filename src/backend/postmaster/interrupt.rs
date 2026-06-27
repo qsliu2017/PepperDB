@@ -13,7 +13,7 @@ use std::sync::atomic::Ordering;
 use crate::postmaster::interrupt::{CONFIG_RELOAD_PENDING, SHUTDOWN_REQUEST_PENDING};
 use crate::storage::latch::Latch;
 
-// TODO(step09): these are still process-global. PG sets them per-aux-process;
+// TODO(procsignal): these are still process-global. PG sets them per-aux-process;
 // the per-task home is the ProcSignalSlot. Keep global for now -- aux tasks are
 // not yet multiplexed.
 
@@ -26,7 +26,7 @@ use crate::storage::latch::Latch;
 /// model exit is supervisor-driven, so we surface the request instead.
 #[must_use]
 pub fn process_main_loop_interrupts() -> bool {
-    // TODO(step09): if ProcSignalBarrierPending -> ProcessProcSignalBarrier().
+    // TODO(procsignal): if ProcSignalBarrierPending -> ProcessProcSignalBarrier().
 
     if CONFIG_RELOAD_PENDING.swap(false, Ordering::AcqRel) {
         // TODO: ProcessConfigFile(PGC_SIGHUP) -- GUC reload not yet ported.
@@ -36,7 +36,7 @@ pub fn process_main_loop_interrupts() -> bool {
         return true;
     }
 
-    // TODO(step09): if LogMemoryContextPending -> ProcessLogMemoryContextInterrupt().
+    // TODO(pgstat): if LogMemoryContextPending -> ProcessLogMemoryContextInterrupt().
     false
 }
 

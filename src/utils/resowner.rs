@@ -46,10 +46,10 @@ pub use crate::backend::utils::resowner::resowner::{
     ResourceGuard, ResourceOwner,
 };
 
-// TODO(step14): CurrentResourceOwner/CurTransactionResourceOwner/
+// TODO(xact): CurrentResourceOwner/CurTransactionResourceOwner/
 // TopTransactionResourceOwner/AuxProcessResourceOwner were process globals.
 // CurrentResourceOwner is now task-local (use `current()`); the others become
-// Session state with transactions.
+// Session state when xact wires up the resource owner.
 
 // === TOMBSTONED by redesign ===
 //
@@ -172,35 +172,36 @@ pub fn ReleaseAuxProcessResources(owner: &ResourceOwner, is_commit: bool) {
 
 // === special support: local lock management ===
 //
-// TODO(step15): real locks don't exist yet. Locks register in the Locks phase
-// via the generic mechanism (owner.remember(Locks, ...)). These C-named shims
-// are thin stubs to be wired once LOCALLOCK release lands.
+// TODO(resowner): the LOCALLOCK <-> ResourceOwner accounting is not wired yet.
+// Locks register in the Locks phase via the generic mechanism
+// (owner.remember(Locks, ...)). These C-named shims are thin stubs until that
+// integration lands.
 
-#[deprecated(note = "TODO(step15): register the lock release in the Locks phase via owner.remember")]
+#[deprecated(note = "TODO(resowner): register the lock release in the Locks phase via owner.remember")]
 #[inline]
 pub fn ResourceOwnerRememberLock(_owner: &ResourceOwner) {
-    // TODO(step15): owner.remember(Locks, RELEASE_PRIO_FIRST, "lock", || release(locallock))
+    // TODO(resowner): owner.remember(Locks, RELEASE_PRIO_FIRST, "lock", || release(locallock))
 }
 
-#[deprecated(note = "TODO(step15): drop the lock's ResourceGuard")]
+#[deprecated(note = "TODO(resowner): drop the lock's ResourceGuard")]
 #[inline]
 pub fn ResourceOwnerForgetLock(_owner: &ResourceOwner) {
-    // TODO(step15)
+    // TODO(resowner)
 }
 
 // === special support: AIO ===
 //
-// TODO(step F1): AIO handles register in the BeforeLocks phase. Stubs until the
+// TODO(aio): AIO handles register in the BeforeLocks phase. Stubs until the
 // AIO subsystem lands.
 
-#[deprecated(note = "TODO(F1): register the AIO handle release via owner.remember")]
+#[deprecated(note = "TODO(aio): register the AIO handle release via owner.remember")]
 #[inline]
 pub fn ResourceOwnerRememberAioHandle(_owner: &ResourceOwner) {
-    // TODO(F1)
+    // TODO(aio)
 }
 
-#[deprecated(note = "TODO(F1): drop the AIO handle's ResourceGuard")]
+#[deprecated(note = "TODO(aio): drop the AIO handle's ResourceGuard")]
 #[inline]
 pub fn ResourceOwnerForgetAioHandle(_owner: &ResourceOwner) {
-    // TODO(F1)
+    // TODO(aio)
 }

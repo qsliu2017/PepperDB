@@ -177,7 +177,7 @@ pub async fn SyncPostCheckpoint(shared: &Arc<SharedState>) {
 /// phase). Collects the tags under the lock, drops it, fsyncs, then removes the
 /// processed entries. No lock is held across the fsync `.await`.
 ///
-/// TODO(step17): this has no caller yet; the checkpointer task will call it.
+/// Called by the checkpointer task during its sync phase (checkpointer.rs).
 pub async fn ProcessSyncRequests(shared: &Arc<SharedState>) {
     let sr = shared.sync_requests();
 
@@ -212,15 +212,15 @@ pub async fn ProcessSyncRequests(shared: &Arc<SharedState>) {
                     // Relation dropped/truncated since the request: forget it.
                     g.pending_ops.remove(&FileTagKey::of(tag));
                 } else {
-                    // TODO(step17): incomplete fsync-failure semantics. PG's
+                    // TODO(checkpoint): incomplete fsync-failure semantics. PG's
                     // ProcessSyncRequests (a) resets stale cycle_ctr of all
                     // entries on a failed prior run to forestall u16 wraparound
                     // (sync.c: a left-behind entry whose cycle_ctr no longer
                     // matches `cur_cycle` is silently skipped here -- it must be
                     // re-armed), (b) has an absorb-and-retry inner loop, and
                     // (c) escalates to PANIC (data_sync_retry) rather than this
-                    // WARNING. Complete all three before the checkpointer (step
-                    // 17) calls this, or a checkpoint can falsely report durability.
+                    // WARNING. Complete all three or a checkpoint can falsely
+                    // report durability.
                     crate::elog!(
                         crate::utils::elog::WARNING,
                         format!("could not fsync file: {e}")
@@ -249,7 +249,7 @@ fn key_to_tag(k: &FileTagKey) -> FileTag {
 async fn sync_filetag(shared: &Arc<SharedState>, tag: &FileTag) -> std::io::Result<String> {
     match tag.handler() {
         SyncRequestHandler::Md => md::mdsyncfiletag(shared, tag).await,
-        // TODO(step14): clog/commit_ts/multixact handlers.
+        // TODO(slru): clog/commit_ts/multixact sync handlers.
         _ => Ok(String::new()),
     }
 }

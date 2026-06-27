@@ -295,10 +295,10 @@ impl BufferPool {
     }
 
     /// C: `MarkBufferDirtyHint`. The non-critical, possibly-share-locked dirty
-    /// mark. WAL/checksum FPI handling (C cases 1-3) is deferred to step 13; here
+    /// mark. WAL/checksum FPI handling (C cases 1-3) is deferred; here
     /// it sets `BM_DIRTY | BM_JUST_DIRTIED` like `mark_buffer_dirty`.
     pub fn mark_buffer_dirty_hint(&self, buffer: Buffer, _buffer_std: bool) {
-        // TODO(step13): XLOG_FPI_FOR_HINT record when checksums/wal_log_hints on.
+        // TODO(xlog): XLOG_FPI_FOR_HINT record when checksums/wal_log_hints on.
         let buf_id = global_buf_id(buffer);
         let desc = self.descriptor(buf_id);
         let buf_state = desc.lock_hdr();
