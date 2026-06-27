@@ -229,7 +229,7 @@ impl SharedState {
             Arc::new(crate::backend::access::transam::transam::VariableCache::new());
         // Publish process-wide so proc.c (ProcKill) can reach it like PG's shmem
         // TransamVariables (first SharedState wins; tests build their own).
-        crate::backend::access::transam::transam::set_variable_cache(variable_cache.clone());
+        crate::backend::access::transam::transam::VariableCache::set(variable_cache.clone());
         // XLOGShmemInit -- step13 (part A), DONE. The WAL buffer ring, insert
         // reservation, write/flush LSNs, and the flushed-LSN watch. Bound to the
         // I/O leaf and process config (both built above) for segment I/O.

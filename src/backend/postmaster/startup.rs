@@ -29,7 +29,7 @@ use crate::backend::postmaster::auxprocess::auxiliary_process_main_common_with_p
 use crate::miscadmin::BackendType;
 use crate::shared_state::SharedState;
 use crate::storage::latch::Latch;
-use crate::storage::proc::{my_proc_scope, proc_global};
+use crate::storage::proc::{my_proc_scope, ProcGlobal};
 use crate::storage::procnumber::INVALID_PROC_NUMBER;
 
 /// PG GUC `log_startup_progress_interval` (ms between progress reports for long
@@ -75,7 +75,7 @@ static STARTUP_PROC_NUMBER: std::sync::atomic::AtomicI32 =
 /// `proc_latch`. Reaches the aux PGPROC by the advertised proc number; a no-op if
 /// no startup task is running (the proc number is INVALID).
 pub fn wakeup_recovery() -> bool {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return false;
     };
     let procno = STARTUP_PROC_NUMBER.load(Ordering::Acquire);
@@ -227,11 +227,7 @@ pub async fn startup_process_main(shared: Arc<SharedState>, shutdown: Arc<tokio:
             auxiliary_process_main_common_with_proc(shared.proc_signal(), BackendType::STARTUP)
                 .await;
 
-        #[allow(
-            clippy::expect_used,
-            reason = "aux cradle runs only after shared memory init publishes ProcGlobal"
-        )]
-        let g = proc_global().expect("ProcGlobal published").clone();
+        let g = ProcGlobal::expect().clone();
 
         // Cleanup on EVERY exit (normal return + panic unwind): clear the
         // advertised proc so a later wakeup_recovery does not ring a dead latch,
@@ -316,12 +312,12 @@ mod tests {
 
     fn fresh_shared() -> Arc<SharedState> {
         let shared = SharedState::new(SharedStateConfig::default());
-        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
+        let _ = crate::storage::proc::ProcGlobal::set(shared.proc_global().clone());
         shared
     }
 
     fn published_proc_global() -> Arc<crate::storage::proc::ProcGlobal> {
-        crate::storage::proc::proc_global()
+        crate::storage::proc::ProcGlobal::get()
             .expect("a ProcGlobal is published")
             .clone()
     }

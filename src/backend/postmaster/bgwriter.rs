@@ -30,7 +30,7 @@ use crate::miscadmin::BackendType;
 use crate::shared_state::SharedState;
 use crate::storage::bufmgr::BgBufferSync;
 use crate::storage::latch::Latch;
-use crate::storage::proc::{my_proc_scope, proc_global};
+use crate::storage::proc::{my_proc_scope, ProcGlobal};
 use crate::storage::procnumber::INVALID_PROC_NUMBER;
 
 /// PG GUC `BgWriterDelay` (ms between bgwriter cycles; default 200). Process-
@@ -204,7 +204,7 @@ mod tests {
 
     fn fresh_shared() -> Arc<SharedState> {
         let shared = SharedState::new(SharedStateConfig::default());
-        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
+        let _ = crate::storage::proc::ProcGlobal::set(shared.proc_global().clone());
         let _ = crate::backend::postmaster::checkpointer::set_checkpointer_shmem(
             shared.checkpointer().clone(),
         );

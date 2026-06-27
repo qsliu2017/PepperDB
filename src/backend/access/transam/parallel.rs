@@ -610,7 +610,7 @@ mod tests {
 
     fn fresh_shared() -> Arc<SharedState> {
         let shared = SharedState::new(SharedStateConfig::default());
-        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
+        let _ = crate::storage::proc::ProcGlobal::set(shared.proc_global().clone());
         shared
     }
 

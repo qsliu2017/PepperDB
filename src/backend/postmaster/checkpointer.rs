@@ -38,7 +38,7 @@ use crate::pgtime::pg_time_t;
 use crate::shared_state::SharedState;
 use crate::storage::condition_variable::ConditionVariable;
 use crate::storage::latch::Latch;
-use crate::storage::proc::{my_proc_scope, proc_global};
+use crate::storage::proc::{my_proc_scope, ProcGlobal};
 use crate::storage::procnumber::{ProcNumber, INVALID_PROC_NUMBER};
 
 /// GUC parameters (PG globals; default values from checkpointer.c). Settable for
@@ -142,7 +142,7 @@ pub fn checkpointer_shmem() -> Option<&'static Arc<CheckpointerShmem>> {
 /// `ProcGlobal.checkpointer_proc` and sets its `proc_latch`. Returns false if no
 /// checkpointer is running (the proc number is INVALID).
 fn wake_checkpointer() -> bool {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return false;
     };
     let procno = g.checkpointer_proc.load(Ordering::Acquire);
@@ -334,11 +334,7 @@ pub async fn checkpointer_main_phased(
 
         // Advertise our proc number so backends can wake us (PG:
         // ProcGlobal->checkpointerProc = MyProcNumber).
-        #[allow(
-            clippy::expect_used,
-            reason = "aux cradle runs only after shared memory init publishes ProcGlobal"
-        )]
-        let g = proc_global().expect("ProcGlobal published").clone();
+        let g = ProcGlobal::expect().clone();
         g.checkpointer_proc.store(aux.proc_number, Ordering::Release);
 
         // Cleanup runs on EVERY exit -- normal break, early break, AND a panic
@@ -690,19 +686,19 @@ pub(crate) mod tests {
     /// CheckpointerShmem to the process OnceLocks. The OnceLocks ignore a second
     /// publish (first SharedState in the test process wins), so the checkpointer
     /// task + request_checkpoint operate on the PUBLISHED arena/shmem, which the
-    /// tests therefore read via `proc_global()` / `checkpointer_shmem()` rather
+    /// tests therefore read via `ProcGlobal::get()` / `checkpointer_shmem()` rather
     /// than `shared.*`. The per-test `shared` still owns the sync_requests queue
     /// the task drains, which is independent of the OnceLocks.
     fn fresh_shared() -> Arc<SharedState> {
         let shared = SharedState::new(SharedStateConfig::default());
-        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
+        let _ = crate::storage::proc::ProcGlobal::set(shared.proc_global().clone());
         let _ = set_checkpointer_shmem(shared.checkpointer().clone());
         shared
     }
 
     /// The process-published ProcGlobal the checkpointer advertises on.
     fn published_proc_global() -> Arc<crate::storage::proc::ProcGlobal> {
-        crate::storage::proc::proc_global()
+        crate::storage::proc::ProcGlobal::get()
             .expect("a ProcGlobal is published")
             .clone()
     }

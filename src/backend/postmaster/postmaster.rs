@@ -691,7 +691,7 @@ mod tests {
     use super::*;
     use crate::backend::postmaster::auxprocess::aux_test_serial;
     use crate::backend::tcop::backend_startup::test_hook;
-    use crate::storage::proc::proc_global;
+    use crate::storage::proc::ProcGlobal;
     use crate::storage::procnumber::INVALID_PROC_NUMBER;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
@@ -880,7 +880,7 @@ mod tests {
         // ProcGlobal slot: the checkpointer and the walwriter.
         let (sup, handle) =
             start_supervisor(loopback_port0(), SharedStateConfig::default()).await;
-        let g = proc_global().expect("ProcGlobal published").clone();
+        let g = ProcGlobal::expect().clone();
 
         // The always-on roles that advertise a ProcGlobal slot come up.
         assert!(
@@ -922,8 +922,8 @@ mod tests {
         let _serial = aux_test_serial().await;
 
         let shared = SharedState::new(SharedStateConfig::default());
-        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
-        let g = proc_global().expect("ProcGlobal published").clone();
+        let _ = crate::storage::proc::ProcGlobal::set(shared.proc_global().clone());
+        let g = ProcGlobal::expect().clone();
 
         checkpointer::tests::SHUTDOWN_CKPT_WRITTEN.store(false, AtomicOrdering::Release);
         let phase1 = Arc::new(Notify::new());
@@ -987,7 +987,7 @@ mod tests {
     async fn unexpected_aux_exit_is_respawned() {
         let _serial = aux_test_serial().await;
         let shared = SharedState::new(SharedStateConfig::default());
-        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
+        let _ = crate::storage::proc::ProcGlobal::set(shared.proc_global().clone());
 
         let mut aux = AuxTasks::new();
         // Simulate the bgwriter having just exited unexpectedly.

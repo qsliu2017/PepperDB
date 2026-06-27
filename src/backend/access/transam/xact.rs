@@ -1197,7 +1197,7 @@ fn proc_array_end_transaction(shared: &Arc<SharedState>, latest_xid: Transaction
     if procno == crate::storage::procnumber::INVALID_PROC_NUMBER {
         return;
     }
-    let Some(g) = crate::storage::proc::proc_global() else {
+    let Some(g) = crate::storage::proc::ProcGlobal::get() else {
         return;
     };
     // SAFETY: we own our own slot; proc_array_end_transaction takes ProcArrayLock

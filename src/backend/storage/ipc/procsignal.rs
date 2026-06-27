@@ -358,7 +358,7 @@ impl ProcSignal {
 
 /// Process-wide handle to the signaling registry. Published by `SharedState::new`
 /// so a sender (e.g. SICleanupQueue's catchup signal) can reach it without a
-/// SharedState handle, mirroring `lock_manager()`/`proc_global()`.
+/// SharedState handle, mirroring `LockManager::get()`/`ProcGlobal::get()`.
 static PROC_SIGNAL: std::sync::OnceLock<Arc<ProcSignal>> = std::sync::OnceLock::new();
 
 /// Build a fresh `Arc<ProcSignal>` for `SharedState::new`, also publishing it

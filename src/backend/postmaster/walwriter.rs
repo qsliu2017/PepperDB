@@ -28,7 +28,7 @@ use crate::miscadmin::BackendType;
 use crate::postmaster::walwriter::DEFAULT_WAL_WRITER_FLUSH_AFTER;
 use crate::shared_state::SharedState;
 use crate::storage::latch::Latch;
-use crate::storage::proc::{my_proc_scope, proc_global};
+use crate::storage::proc::{my_proc_scope, ProcGlobal};
 use crate::storage::procnumber::INVALID_PROC_NUMBER;
 
 /// PG GUC `WalWriterDelay` (ms between walwriter cycles; default 200). Process-
@@ -67,7 +67,7 @@ const HIBERNATE_FACTOR: i32 = 25;
 /// walwriter is running (the proc number is INVALID). Used by async-commit
 /// backends to flush WAL promptly.
 pub fn wake_walwriter() -> bool {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return false;
     };
     let procno = g.walwriter_proc.load(Ordering::Acquire);
@@ -97,11 +97,7 @@ pub async fn wal_writer_main(shared: Arc<SharedState>, shutdown: Arc<tokio::sync
             auxiliary_process_main_common_with_proc(shared.proc_signal(), BackendType::WAL_WRITER)
                 .await;
 
-        #[allow(
-            clippy::expect_used,
-            reason = "aux cradle runs only after shared memory init publishes ProcGlobal"
-        )]
-        let g = proc_global().expect("ProcGlobal published").clone();
+        let g = ProcGlobal::expect().clone();
 
         // Cleanup on EVERY exit (normal break + panic unwind): clear the advertised
         // proc so a later wake_walwriter does not ring a dead latch, deregister the
@@ -223,12 +219,12 @@ mod tests {
 
     fn fresh_shared() -> Arc<SharedState> {
         let shared = SharedState::new(SharedStateConfig::default());
-        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
+        let _ = crate::storage::proc::ProcGlobal::set(shared.proc_global().clone());
         shared
     }
 
     fn published_proc_global() -> Arc<crate::storage::proc::ProcGlobal> {
-        crate::storage::proc::proc_global()
+        crate::storage::proc::ProcGlobal::get()
             .expect("a ProcGlobal is published")
             .clone()
     }

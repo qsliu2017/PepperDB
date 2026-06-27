@@ -11,6 +11,66 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
+/// `#[process_global]` on a subsystem struct generates the process-wide
+/// publish/access trio that mirrors the owned `Arc<T>` (built by
+/// `SharedState::new`) into a private `OnceLock`:
+///
+/// - `T::set(Arc<T>) -> bool` -- first-wins publish (a second publish is ignored
+///   so tests building multiple `SharedState`s do not panic); returns whether it won.
+/// - `T::get() -> Option<&'static Arc<T>>` -- the published instance, if any.
+/// - `T::expect() -> &'static Arc<T>` -- ditto, panicking if none is published
+///   (for the postmaster paths that run only after shared-memory init).
+///
+/// `SharedState` remains the owner; the `OnceLock` is a published handle so code
+/// without a `SharedState` clone (C-named shims, signal handlers) still reaches it.
+#[proc_macro_attribute]
+pub fn process_global(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    let ty = &input.ident;
+
+    let upper: String =
+        ty.to_string()
+            .chars()
+            .enumerate()
+            .fold(String::new(), |mut acc, (i, ch)| {
+                if ch.is_ascii_uppercase() && i != 0 {
+                    acc.push('_');
+                }
+                acc.push(ch.to_ascii_uppercase());
+                acc
+            });
+    let cell = format_ident!("__PG_{}", upper);
+    let not_published = format!("{ty} not published");
+
+    quote! {
+        #input
+
+        static #cell: ::std::sync::OnceLock<::std::sync::Arc<#ty>> =
+            ::std::sync::OnceLock::new();
+
+        impl #ty {
+            /// Publish the process-wide instance (first-wins; a second publish is
+            /// ignored). Returns whether this call won.
+            pub fn set(instance: ::std::sync::Arc<#ty>) -> bool {
+                #cell.set(instance).is_ok()
+            }
+            /// The process-wide instance, if one has been published.
+            pub fn get() -> ::core::option::Option<&'static ::std::sync::Arc<#ty>> {
+                #cell.get()
+            }
+            /// The process-wide instance; panics if none has been published.
+            #[allow(
+                clippy::expect_used,
+                reason = "process-global accessor: published by SharedState::new before any backend runs"
+            )]
+            pub fn expect() -> &'static ::std::sync::Arc<#ty> {
+                #cell.get().expect(#not_published)
+            }
+        }
+    }
+    .into()
+}
+
 #[proc_macro_derive(Catalog, attributes(catalog, bki))]
 pub fn derive_catalog(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

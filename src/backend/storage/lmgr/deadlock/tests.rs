@@ -242,7 +242,7 @@ async fn deadlock_check_no_cycle_returns_no_deadlock() {
             // Give it a moment to enqueue, then run DeadLockCheck over OUR (empty)
             // proc -- not queued on anything -> NoDeadlock.
             tokio::time::sleep(Duration::from_millis(20)).await;
-            let m = crate::backend::storage::lmgr::lock::lock_manager().unwrap().clone();
+            let m = crate::backend::storage::lmgr::lock::LockManager::get().unwrap().clone();
             let state = m.with_all_partitions_locked(|view| {
                 let me = crate::storage::proc::current_proc_number();
                 crate::backend::storage::lmgr::deadlock::DeadLockCheck(me, view)

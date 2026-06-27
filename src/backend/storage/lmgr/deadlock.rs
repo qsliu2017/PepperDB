@@ -32,7 +32,7 @@
 
 use crate::storage::lock::{DeadLockState, LOCK, LOCKMODE, LOCKTAG, LockTagType, lockbit_on};
 use crate::storage::lockdefs::LOCKMASK;
-use crate::storage::proc::{LockGroupRole, ProcGlobal, proc_global};
+use crate::storage::proc::{LockGroupRole, ProcGlobal};
 use crate::storage::procnumber::{INVALID_PROC_NUMBER, ProcNumber};
 
 use super::lock::{GetLocksMethodTable, LockTablesView};
@@ -188,7 +188,7 @@ unsafe fn lock_locktag(lock: *mut LOCK) -> u8 {
 /// Caller (CheckDeadLock in proc.c) must already hold all partition locks; the
 /// `view` over those locked tables enumerates each lock's holders.
 pub fn DeadLockCheck(proc: ProcNumber, view: &LockTablesView) -> DeadLockState {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return DeadLockState::NoDeadlock;
     };
     let g = g.clone();
@@ -953,7 +953,7 @@ pub fn RememberSimpleDeadLock(
     lock: &LOCK,
     proc2: ProcNumber,
 ) {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return;
     };
     // SAFETY: caller holds the partition lock for `lock`; reads pids + proc2's

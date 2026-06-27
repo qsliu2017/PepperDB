@@ -67,7 +67,7 @@ use crate::postmaster::autovacuum::AutoVacuumWorkItemType;
 use crate::shared_state::SharedState;
 use crate::storage::block::BlockNumber;
 use crate::storage::latch::Latch;
-use crate::storage::proc::{my_proc_scope, proc_global};
+use crate::storage::proc::{my_proc_scope, ProcGlobal};
 use crate::storage::procnumber::{ProcNumber, INVALID_PROC_NUMBER};
 use crate::utils::timestamp::GetCurrentTimestamp;
 
@@ -399,7 +399,7 @@ pub async fn auto_vac_launcher_main(shared: Arc<SharedState>, shutdown: Arc<toki
         )
         .await;
 
-        let g = proc_global().expect("ProcGlobal published").clone();
+        let g = ProcGlobal::expect().clone();
 
         // Cleanup on EVERY exit (PG AutoVacLauncherShutdown sets av_launcherpid=0):
         // clear the advertised proc so a worker does not ring a dead latch,
@@ -1056,7 +1056,7 @@ fn free_worker_info(shmem: &Arc<AutoVacuumShmem>, idx: usize) {
 /// av_launcherpid)). Reaches the launcher PGPROC via `ProcGlobal.autovacuum_
 /// launcher_proc`; a no-op if no launcher is running.
 pub fn wake_launcher() -> bool {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return false;
     };
     let procno = g.autovacuum_launcher_proc.load(Ordering::Acquire);
@@ -1588,13 +1588,13 @@ mod tests {
 
     fn fresh_shared() -> Arc<SharedState> {
         let shared = SharedState::new(SharedStateConfig::default());
-        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
+        let _ = crate::storage::proc::ProcGlobal::set(shared.proc_global().clone());
         let _ = set_autovacuum_shmem(shared.autovacuum().clone());
         shared
     }
 
     fn published_proc_global() -> Arc<crate::storage::proc::ProcGlobal> {
-        crate::storage::proc::proc_global()
+        crate::storage::proc::ProcGlobal::get()
             .expect("a ProcGlobal is published")
             .clone()
     }

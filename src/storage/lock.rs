@@ -313,7 +313,7 @@ pub use crate::backend::storage::lmgr::lock::{
     LockHasWaiters, LockHeldByMe, LockManager, LockManagerShmemInit, LockManagerShmemSize,
     LockRelease, LockReleaseAll, LockReleaseSession, LockTagHashCode, LockWaiterCount, MarkLockClear,
     PostPrepare_Locks, VirtualXactLock, VirtualXactLockTableCleanup, VirtualXactLockTableInsert,
-    local_lock_scope, lock_manager, lock_manager_shared,
+    local_lock_scope, lock_manager_shared,
 };
 
 // snake_case aliases (plan-001 names + the ones proc.c calls):

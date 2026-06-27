@@ -38,8 +38,8 @@ use crate::miscadmin::BackendType;
 use crate::storage::lock::{DeadLockState, LOCALLOCK, LOCK, LockMethod};
 use crate::storage::proc::{
     LockGroupRole, NUM_AUXILIARY_PROCS, NUM_SPECIAL_WORKER_PROCS, PGPROC, ProcCounts, ProcGlobal,
-    ProcGlobalList, ProcWaitStatus, current_proc_number, has_my_proc, proc_global,
-    set_current_proc_number, set_proc_global,
+    ProcGlobalList, ProcWaitStatus, current_proc_number, has_my_proc,
+    set_current_proc_number,
 };
 use crate::storage::procnumber::{INVALID_PROC_NUMBER, ProcNumber};
 
@@ -129,21 +129,21 @@ pub fn ProcGlobalShmemSize() -> usize {
 /// lists, then publish it process-wide. Called once at startup (after the lock
 /// tables in ipci.c order). Under the Arc model the arena is `Arc<ProcGlobal>`;
 /// `SharedState::new` also constructs it (so a SharedState is self-contained) and
-/// this publishes the same handle for the process-wide `proc_global()` accessor.
+/// this publishes the same handle for the process-wide `ProcGlobal::get()` accessor.
 pub fn InitProcGlobal() {
-    if proc_global().is_some() {
+    if ProcGlobal::get().is_some() {
         return; // already initialized
     }
     let g = Arc::new(ProcGlobal::new(proc_counts()));
-    set_proc_global(g);
+    ProcGlobal::set(g);
 }
 
 /// Build a fresh `Arc<ProcGlobal>` for `SharedState::new` (ipci.c ProcArray slot
 /// neighbor). Also publishes it process-wide if none is published yet, so the
-/// procarray's `proc_global()` reads the same arena a test's SharedState built.
+/// procarray's `ProcGlobal::get()` reads the same arena a test's SharedState built.
 pub fn init_proc_global_shared() -> Arc<ProcGlobal> {
     let g = Arc::new(ProcGlobal::new(proc_counts()));
-    set_proc_global(g.clone());
+    ProcGlobal::set(g.clone());
     g
 }
 
@@ -155,7 +155,7 @@ pub fn init_proc_global_shared() -> Arc<ProcGlobal> {
 /// ProcNumber as MyProc. Must run inside a `my_proc_scope` (the backend task
 /// wrapper) and after `InitProcGlobal`.
 pub fn InitProcess() {
-    let g = proc_global().expect("proc header uninitialized").clone();
+    let g = ProcGlobal::expect().clone();
     // PG: elog(ERROR, "you already exist"). TODO(panic).
     assert!(!has_my_proc(), "you already exist");
 
@@ -199,7 +199,7 @@ pub fn InitProcessPhase2() {
 /// PG `InitAuxiliaryProcess`: claim one of the auxiliary PGPROC slots (linear
 /// search for a free one, no freelist).
 pub fn InitAuxiliaryProcess() {
-    let g = proc_global().expect("proc header uninitialized").clone();
+    let g = ProcGlobal::expect().clone();
     assert!(!has_my_proc(), "you already exist");
 
     // PG scans + claims the slot under ProcStructLock so two aux tasks starting
@@ -273,7 +273,7 @@ pub fn ProcKill() {
     if procno == INVALID_PROC_NUMBER {
         return;
     }
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return;
     };
     let g = g.clone();
@@ -317,7 +317,7 @@ fn current_shared_proc_array() -> Option<Arc<crate::backend::storage::ipc::proca
 }
 fn current_variable_cache(
 ) -> Option<Arc<crate::backend::access::transam::transam::VariableCache>> {
-    crate::backend::access::transam::transam::current_variable_cache()
+    crate::backend::access::transam::transam::VariableCache::get().cloned()
 }
 
 // ---------------------------------------------------------------------------
@@ -326,7 +326,7 @@ fn current_variable_cache(
 
 /// PG `SetStartupBufferPinWaitBufId`.
 pub fn SetStartupBufferPinWaitBufId(bufid: i32) {
-    if let Some(g) = proc_global() {
+    if let Some(g) = ProcGlobal::get() {
         g.startup_buffer_pin_wait_buf_id
             .store(bufid, std::sync::atomic::Ordering::Relaxed);
     }
@@ -334,13 +334,13 @@ pub fn SetStartupBufferPinWaitBufId(bufid: i32) {
 
 /// PG `GetStartupBufferPinWaitBufId`.
 pub fn GetStartupBufferPinWaitBufId() -> i32 {
-    proc_global()
+    ProcGlobal::get()
         .map_or(-1, |g| g.startup_buffer_pin_wait_buf_id.load(std::sync::atomic::Ordering::Relaxed))
 }
 
 /// PG `HaveNFreeProcs`: (have_enough, n_free) for at least `n` free regular procs.
 pub fn HaveNFreeProcs(n: i32) -> (bool, i32) {
-    let nfree = proc_global().map_or(0, |g| g.n_free_regular(n));
+    let nfree = ProcGlobal::get().map_or(0, |g| g.n_free_regular(n));
     (nfree == n, nfree)
 }
 
@@ -388,7 +388,7 @@ pub fn JoinWaitQueue(
     lock_method_table: LockMethod,
     dont_wait: bool,
 ) -> ProcWaitStatus {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return ProcWaitStatus::ERROR;
     };
     let g = g.clone();
@@ -488,7 +488,7 @@ pub fn JoinWaitQueue(
 /// directly, so no `LOCALLOCK` argument is needed. Dropping it also keeps the
 /// future `Send` (a `&mut LOCALLOCK` carries the !Send raw lock pointers).
 pub async fn ProcSleep() -> ProcWaitStatus {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return ProcWaitStatus::ERROR;
     };
     let g = g.clone();
@@ -571,7 +571,7 @@ pub async fn ProcSleep() -> ProcWaitStatus {
 /// lock's wait queue and passing it `wait_status`. SYNC; caller holds the
 /// partition Mutex.
 pub fn ProcWakeup(procno: ProcNumber, wait_status: ProcWaitStatus) {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return;
     };
     let g = g.clone();
@@ -612,7 +612,7 @@ pub fn ProcWakeup(procno: ProcNumber, wait_status: ProcWaitStatus) {
 /// `LOCK.wait_procs` and call the (stub) conflict check; once 15b lands the grant
 /// logic is complete.
 pub fn ProcLockWakeup(lock_method_table: LockMethod, lock: &mut LOCK) {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return;
     };
     let g = g.clone();
@@ -650,7 +650,7 @@ pub fn ProcLockWakeup(lock_method_table: LockMethod, lock: &mut LOCK) {
 /// error / handle a blocking autovacuum, release the partition locks in reverse.
 /// SYNC; no `.await` while any partition lock is held (rules s5).
 fn CheckDeadLock(procno: ProcNumber, g: &ProcGlobal) -> DeadLockState {
-    let Some(m) = crate::storage::lock::lock_manager() else {
+    let Some(m) = crate::storage::lock::LockManager::get() else {
         return DeadLockState::NoDeadlock;
     };
     let m = m.clone();
@@ -702,7 +702,7 @@ fn CheckDeadLock(procno: ProcNumber, g: &ProcGlobal) -> DeadLockState {
 /// deadlock arm IS the timer, so this is only the latch nudge for a backend whose
 /// timer the supervisor wants to force.
 pub fn CheckDeadLockAlert() {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return;
     };
     let procno = current_proc_number();
@@ -784,7 +784,7 @@ pub fn GetLockHoldersAndWaiters(
 
 /// PG `ProcWaitForSignal`: wait on MyProc's latch for a generic signal.
 pub async fn ProcWaitForSignal(_wait_event_info: u32) {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return;
     };
     let g = g.clone();
@@ -800,7 +800,7 @@ pub async fn ProcWaitForSignal(_wait_event_info: u32) {
 
 /// PG `ProcSendSignal`: set the latch of the backend identified by `procno`.
 pub fn ProcSendSignal(procno: ProcNumber) {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return;
     };
     if procno < 0 || procno as u32 >= g.all_proc_count {
@@ -817,7 +817,7 @@ pub fn AuxiliaryPidGetProc(pid: i32) -> Option<ProcNumber> {
     if pid == 0 {
         return None;
     }
-    let g = proc_global()?;
+    let g = ProcGlobal::get()?;
     let base = g.aux_proc_base;
     for i in 0..NUM_AUXILIARY_PROCS {
         let procno = base + i;
@@ -831,7 +831,7 @@ pub fn AuxiliaryPidGetProc(pid: i32) -> Option<ProcNumber> {
 
 /// PG `BecomeLockGroupLeader`: make MyProc a single-member lock group leader.
 pub fn BecomeLockGroupLeader() {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return;
     };
     let procno = current_proc_number();
@@ -856,7 +856,7 @@ pub fn BecomeLockGroupLeader() {
 /// PG `BecomeLockGroupMember`: join `leader`'s lock group, gated on its pid as an
 /// interlock against PGPROC recycling. Returns whether we joined.
 pub fn BecomeLockGroupMember(leader: ProcNumber, pid: i32) -> bool {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return false;
     };
     let procno = current_proc_number();
@@ -911,7 +911,7 @@ mod tests {
     #[test]
     fn init_proc_global_populates_arena() {
         let _s = shared(); // builds + publishes ProcGlobal
-        let g = proc_global().expect("ProcGlobal published by SharedState::new");
+        let g = ProcGlobal::expect();
         assert!(!g.is_empty(), "arena has slots");
         // A regular-backend slot is available on the free list.
         let (have, n) = HaveNFreeProcs(1);
@@ -930,7 +930,7 @@ mod tests {
                 assert!(has_my_proc());
                 let procno = current_proc_number();
                 // The claimed slot carries our pid + a valid vxid proc_number.
-                let g = proc_global().unwrap();
+                let g = ProcGlobal::get().unwrap();
                 let pid = unsafe { g.proc(procno).unwrap().pid };
                 assert!(pid != 0);
                 // Make it visible in the procarray, then tear down.
@@ -947,7 +947,7 @@ mod tests {
     async fn procsleep_wakes_on_procwakeup() {
         let s = shared();
         let _ = &s;
-        let g = proc_global().unwrap().clone();
+        let g = ProcGlobal::get().unwrap().clone();
         my_proc_scope(crate::session::scope(
             Arc::new(crate::session::Session::new(crate::miscadmin::BackendType::BACKEND)),
             async move {
@@ -987,7 +987,7 @@ mod tests {
     async fn procsleep_times_out_on_lock_timeout() {
         let s = shared();
         let _ = &s;
-        let g = proc_global().unwrap().clone();
+        let g = ProcGlobal::get().unwrap().clone();
         my_proc_scope(crate::session::scope(
             Arc::new(crate::session::Session::new(crate::miscadmin::BackendType::BACKEND)),
             async move {
@@ -1016,7 +1016,7 @@ mod tests {
     async fn procsleep_runs_deadlock_check_on_timeout() {
         let s = shared();
         let _ = &s;
-        let g = proc_global().unwrap().clone();
+        let g = ProcGlobal::get().unwrap().clone();
         my_proc_scope(crate::session::scope(
             Arc::new(crate::session::Session::new(crate::miscadmin::BackendType::BACKEND)),
             async move {

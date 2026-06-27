@@ -326,7 +326,7 @@ impl ProcArray {
 
         // Seed + shift the dense mirror arrays (indexed by pgxactoff). The arrays
         // are the authoritative shared copies the lock-free snapshot scan reads.
-        if let Some(g) = crate::storage::proc::proc_global() {
+        if let Some(g) = crate::storage::proc::ProcGlobal::get() {
             let (xid, subxid, flags) = {
                 // SAFETY: write guard held; we read our own proc's advertised
                 // fields and set its pgxactoff (the only mutator under this guard).
@@ -369,7 +369,7 @@ impl ProcArray {
             a.num_procs -= 1;
             // Shift the dense mirror arrays down over the removed slot and fix the
             // pgxactoff of every following proc.
-            if let Some(g) = crate::storage::proc::proc_global() {
+            if let Some(g) = crate::storage::proc::ProcGlobal::get() {
                 mirror_remove(g, pos, a.num_procs);
                 for off in pos..a.pgprocnos.len() {
                     let procno = a.pgprocnos[off];
@@ -476,7 +476,7 @@ impl ProcArray {
         if procno == INVALID_PROC_NUMBER {
             return;
         }
-        let Some(g) = crate::storage::proc::proc_global() else {
+        let Some(g) = crate::storage::proc::ProcGlobal::get() else {
             return;
         };
         let _a = self.inner.write();
@@ -2378,7 +2378,7 @@ impl<'a> ProcGlobalView<'a> {
 /// When ProcGlobal is unpublished the view is empty (a backend with no other
 /// running transactions). Caller holds the ProcArray guard (`a`).
 fn with_proc_globals<R>(a: &ProcArrayInner, f: impl FnOnce(&ProcGlobalView) -> R) -> R {
-    let g = crate::storage::proc::proc_global().map(std::convert::AsRef::as_ref);
+    let g = crate::storage::proc::ProcGlobal::get().map(std::convert::AsRef::as_ref);
     let n = a.pgprocnos.len();
     let view = ProcGlobalView { g, n };
     f(&view)
@@ -2442,7 +2442,7 @@ fn mirror_set_xid(pgxactoff: i32, xid: TransactionId) {
     if pgxactoff < 0 {
         return;
     }
-    if let Some(g) = crate::storage::proc::proc_global()
+    if let Some(g) = crate::storage::proc::ProcGlobal::get()
         && let Some(slot) = g.xids.get(pgxactoff as usize) {
             slot.store(xid.0, MirrorOrd::Release);
         }
@@ -2457,7 +2457,7 @@ fn mirror_set_subxid_flags(
     if pgxactoff < 0 {
         return;
     }
-    if let Some(g) = crate::storage::proc::proc_global() {
+    if let Some(g) = crate::storage::proc::ProcGlobal::get() {
         if let Some(slot) = g.subxid_states.get(pgxactoff as usize) {
             slot.store(
                 crate::storage::proc::xid_cache_status_pack(subxid),
@@ -2476,7 +2476,7 @@ fn my_proc_xid() -> TransactionId {
     if procno == INVALID_PROC_NUMBER {
         return INVALID_XID;
     }
-    crate::storage::proc::proc_global()
+    crate::storage::proc::ProcGlobal::get()
         .and_then(|g| unsafe { g.proc(procno) }.map(|p| p.xid))
         .unwrap_or(INVALID_XID)
 }
@@ -2487,7 +2487,7 @@ fn my_proc_pgxactoff() -> Option<usize> {
     if procno == INVALID_PROC_NUMBER {
         return None;
     }
-    crate::storage::proc::proc_global()
+    crate::storage::proc::ProcGlobal::get()
         .and_then(|g| unsafe { g.proc(procno) }.map(|p| p.pgxactoff as usize))
 }
 
@@ -2497,7 +2497,7 @@ fn set_my_proc_xmin(x: TransactionId) {
     if procno == INVALID_PROC_NUMBER {
         return;
     }
-    if let Some(g) = crate::storage::proc::proc_global()
+    if let Some(g) = crate::storage::proc::ProcGlobal::get()
         && let Some(p) = unsafe { g.proc_mut(procno) } {
             p.xmin = x;
         }
@@ -2576,8 +2576,7 @@ mod tests {
 
         // The process-wide instances GetNewTransactionId/end advertise into.
         let pa = current_proc_array().expect("procarray published");
-        let vc = crate::backend::access::transam::transam::current_variable_cache()
-            .expect("variable cache published");
+        let vc = crate::backend::access::transam::transam::VariableCache::expect().clone();
         // Pin a running window so the freshly allocated xid lands in [xmin, xmax).
         vc.with(|v| {
             v.latest_completed_xid = crate::access::transam::full_transaction_id_from_u64(50_000);
@@ -2633,7 +2632,7 @@ mod tests {
                 let lc_before = vc.with(|v| xid_from_full_transaction_id(v.latest_completed_xid));
                 let cc_before = vc.with(|v| v.xact_completion_count);
                 {
-                    let g = crate::storage::proc::proc_global().unwrap();
+                    let g = crate::storage::proc::ProcGlobal::get().unwrap();
                     // SAFETY: we own our own slot.
                     let proc = unsafe { g.proc_mut(procno).unwrap() };
                     pa.proc_array_end_transaction(&vc, proc, xid);

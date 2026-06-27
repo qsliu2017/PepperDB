@@ -28,7 +28,7 @@ use crate::backend::utils::resowner::resowner::ResourceOwner;
 use crate::miscadmin::BackendType;
 use crate::session::Session;
 use crate::storage::latch::Latch;
-use crate::storage::proc::{current_proc_number, proc_global};
+use crate::storage::proc::{current_proc_number, ProcGlobal};
 use crate::storage::procnumber::ProcNumber;
 
 // Re-export the aux main-loop interrupt service entry (step 04 / interrupt.c) so
@@ -138,7 +138,7 @@ pub async fn auxiliary_process_main_common_with_proc(
     // wakeup: PG's MyLatch == MyProc->procLatch for an aux proc).
     InitAuxiliaryProcess();
     let proc_number = current_proc_number();
-    let g = proc_global().expect("InitAuxiliaryProcess requires a published ProcGlobal");
+    let g = ProcGlobal::expect();
     // SAFETY: read-only clone of our own freshly claimed slot's proc_latch Arc;
     // proc_latch is internally synchronized and InitAuxiliaryProcess just inited it.
     let proc_latch = unsafe { g.proc(proc_number).expect("our aux PGPROC").proc_latch.clone() };
@@ -173,8 +173,8 @@ mod tests {
         let shared = crate::shared_state::SharedState::new(
             crate::shared_state::SharedStateConfig::default(),
         );
-        let _ = proc_global().is_some() || crate::storage::proc::set_proc_global(shared.proc_global().clone());
-        let g = proc_global().expect("a ProcGlobal is published").clone();
+        let _ = ProcGlobal::get().is_some() || crate::storage::proc::ProcGlobal::set(shared.proc_global().clone());
+        let g = ProcGlobal::expect().clone();
 
         crate::storage::proc::my_proc_scope(async {
             let aux = auxiliary_process_main_common_with_proc(

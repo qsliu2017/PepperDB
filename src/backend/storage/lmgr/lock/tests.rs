@@ -193,7 +193,7 @@ async fn lock_timeout_path_returns_not_avail() {
 
 /// Snapshot of a LOCK's shared-table state for a tag (None if no LOCK exists).
 fn lock_state(tag: &LOCKTAG) -> Option<(i32, i32, usize)> {
-    let m = lock_manager().unwrap();
+    let m = LockManager::get().unwrap();
     let hashcode = LockTagHashCode(tag);
     let shard = m.shard(hashcode).lock();
     shard

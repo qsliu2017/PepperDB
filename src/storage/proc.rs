@@ -10,7 +10,7 @@
 //! tasks or live in shared structures use `ProcNumber` (i32 index into the arena),
 //! NOT `*mut PGPROC` -- a raw `*mut` is `!Send` and our per-task/shared state must
 //! be Send (rules s6.1). The arena is `Arc<ProcGlobal>` reachable via the
-//! process-wide `proc_global()` accessor (published by `InitProcGlobal`); `MyProc`
+//! process-wide `ProcGlobal::get()` accessor (published by `InitProcGlobal`); `MyProc`
 //! is a per-task `task_local` holding this backend's `ProcNumber`.
 //!
 //! This RESOLVES the level-4 `storage::lock::PGPROC` forward declaration: the real
@@ -410,7 +410,8 @@ unsafe impl Send for ProcCell {}
 
 /// Cluster-wide proc directory (PG `PROC_HDR`). The arena + the dense MVCC mirror
 /// arrays + the free lists. Allocated once by `InitProcGlobal`, never resized.
-/// Shared as `Arc<ProcGlobal>`; published process-wide by `set_proc_global`.
+/// Shared as `Arc<ProcGlobal>`; published process-wide by `ProcGlobal::set`.
+#[pepperdb_derive::process_global]
 pub struct ProcGlobal {
     /// All PGPROC structures (arena), indexed by ProcNumber. Includes the aux +
     /// prepared-xact slots; never resized after InitProcGlobal.
@@ -679,23 +680,6 @@ pub fn xid_cache_status_unpack(v: u32) -> XidCacheStatus {
 // ---------------------------------------------------------------------------
 // Process-wide ProcGlobal + per-task MyProc accessors (ex `static mut`)
 // ---------------------------------------------------------------------------
-
-/// The one `Arc<ProcGlobal>` for this process, published by `InitProcGlobal`
-/// (single-process model: exactly one). Replaces C `PROC_HDR *ProcGlobal`.
-static PROC_GLOBAL: OnceLock<Arc<ProcGlobal>> = OnceLock::new();
-
-/// Publish the process-wide ProcGlobal (InitProcGlobal). Ignores a second publish
-/// so tests building multiple arenas do not panic; the first wins, and a test
-/// builds its own via `SharedState`. Returns whether this call won.
-pub fn set_proc_global(g: Arc<ProcGlobal>) -> bool {
-    PROC_GLOBAL.set(g).is_ok()
-}
-
-/// The process-wide ProcGlobal, if `InitProcGlobal` has run. Replaces reads of
-/// the C `static mut ProcGlobal`.
-pub fn proc_global() -> Option<&'static Arc<ProcGlobal>> {
-    PROC_GLOBAL.get()
-}
 
 tokio::task_local! {
     /// This backend's ProcNumber (PG `MyProc`/`MyProcNumber`). Set by `InitProcess`

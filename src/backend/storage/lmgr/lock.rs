@@ -51,7 +51,7 @@ use crate::storage::lock::{
 };
 use crate::storage::lockdefs::{LOCKMASK, LockMode, MAX_LOCK_MODE, xl_standby_lock};
 use crate::storage::proc::{
-    NUM_LOCK_PARTITIONS, PGPROC, ProcWaitStatus, current_proc_number, proc_global,
+    NUM_LOCK_PARTITIONS, PGPROC, ProcGlobal, ProcWaitStatus, current_proc_number,
 };
 use crate::storage::procnumber::{INVALID_PROC_NUMBER, ProcNumber};
 use crate::utils::resowner::ResourceOwner;
@@ -279,7 +279,7 @@ fn my_database_id() -> Oid {
 /// via the arena's UnsafeCell, so the two borrows don't alias the same `proc`
 /// binding -- soundness comes from the held guard serializing fast-path access.
 fn with_fp_locked<R>(procno: ProcNumber, f: impl FnOnce(&mut PGPROC) -> R) -> Option<R> {
-    let g = proc_global()?;
+    let g = ProcGlobal::get()?;
     let cell = g.cell(procno)?;
     // SAFETY: shared ref to the slot only to reach the Mutex; the Mutex is
     // internally synchronized.
@@ -330,6 +330,7 @@ struct FastPathStrongLocks {
 
 /// The heavyweight lock manager: the sharded tables + the strong-lock counts.
 /// On `SharedState` as `Arc<LockManager>` (the ex shared-memory hash tables).
+#[pepperdb_derive::process_global]
 pub struct LockManager {
     shards: Vec<Mutex<LockShard>>,
     strong: Mutex<FastPathStrongLocks>,
@@ -443,31 +444,22 @@ impl Default for LockManager {
 unsafe impl Send for LockManager {}
 unsafe impl Sync for LockManager {}
 
-/// Process-wide handle to the lock manager (PG's global shmem hash-table
-/// pointers). Published by `LockManagerShmemInit`/`SharedState::new`.
-static LOCK_MANAGER: OnceLock<Arc<LockManager>> = OnceLock::new();
-
 /// PG `LockManagerShmemInit`: build + publish the lock tables. `SharedState::new`
 /// also constructs one (so a SharedState is self-contained) and publishes the
 /// same handle for the process-wide accessor.
 pub fn LockManagerShmemInit() {
-    if LOCK_MANAGER.get().is_some() {
+    if LockManager::get().is_some() {
         return;
     }
-    let _ = LOCK_MANAGER.set(Arc::new(LockManager::new()));
+    LockManager::set(Arc::new(LockManager::new()));
 }
 
 /// Build a fresh `Arc<LockManager>` for `SharedState::new`, also publishing it
 /// process-wide if none is published yet.
 pub fn lock_manager_shared() -> Arc<LockManager> {
     let m = Arc::new(LockManager::new());
-    let _ = LOCK_MANAGER.set(m.clone());
+    LockManager::set(m.clone());
     m
-}
-
-/// The process-wide lock manager, if initialized.
-pub fn lock_manager() -> Option<&'static Arc<LockManager>> {
-    LOCK_MANAGER.get()
 }
 
 /// PG `LockManagerShmemSize`: bytes the shmem hash tables would occupy. No
@@ -686,7 +678,7 @@ pub fn AbortStrongLockAcquire() {
     }) else {
         return;
     };
-    if let Some(m) = lock_manager() {
+    if let Some(m) = LockManager::get() {
         let fasthash = fast_path_strong_lock_hash_partition(hashcode);
         let mut s = m.strong.lock();
         if s.count[fasthash] > 0 {
@@ -767,7 +759,7 @@ fn remove_local_lock(l: &mut LocalLockTable, tag: LOCALLOCKTAG) {
     let holds_strong = l.locks.get(&tag).is_some_and(|ll| ll.holds_strong_lock_count);
     let hashcode = l.locks.get(&tag).map_or(0, |ll| ll.hashcode);
     if holds_strong
-        && let Some(m) = lock_manager() {
+        && let Some(m) = LockManager::get() {
             let fasthash = fast_path_strong_lock_hash_partition(hashcode);
             let mut s = m.strong.lock();
             if s.count[fasthash] > 0 {
@@ -915,7 +907,7 @@ fn clean_up_lock(
 /// double-clean the same wait. After it runs once, `wait_lock`/`wait_status` are
 /// cleared and a second call is a no-op. SYNC.
 fn remove_from_wait_queue_in_shard(shard: &mut LockShard, procno: ProcNumber) {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return;
     };
     let g = g.clone();
@@ -978,7 +970,7 @@ fn remove_from_wait_queue_in_shard(shard: &mut LockShard, procno: ProcNumber) {
 /// `view`). Locates the awaited lock's shard through the view -- WITHOUT re-locking
 /// (std::Mutex is not reentrant) -- and runs the shared cleanup core. SYNC.
 pub fn RemoveFromWaitQueue(procno: ProcNumber, view: &LockTablesView) {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return;
     };
     let g = g.clone();
@@ -1000,7 +992,7 @@ pub fn RemoveFromWaitQueue(procno: ProcNumber, view: &LockTablesView) {
 /// guard. Idempotent via `remove_from_wait_queue_in_shard` (a no-op if the proc
 /// was already dequeued by a grantor or by CheckDeadLock). SYNC -- no `.await`.
 fn clean_up_after_give_up(procno: ProcNumber, hashcode: u32, localtag: LOCALLOCKTAG) {
-    if let Some(m) = lock_manager() {
+    if let Some(m) = LockManager::get() {
         let mut shard = m.shard(hashcode).lock();
         remove_from_wait_queue_in_shard(&mut shard, procno);
         drop(shard);
@@ -1021,7 +1013,7 @@ fn clean_up_after_give_up(procno: ProcNumber, hashcode: u32, localtag: LOCALLOCK
 /// PG `BeginStrongLockAcquire`: bump the strong-lock count for the partition and
 /// remember the in-progress LOCALLOCK for error cleanup.
 fn begin_strong_lock_acquire(l: &mut LocalLockTable, tag: LOCALLOCKTAG, fasthash: usize) {
-    if let Some(m) = lock_manager() {
+    if let Some(m) = LockManager::get() {
         let mut s = m.strong.lock();
         s.count[fasthash] += 1;
     }
@@ -1098,7 +1090,7 @@ fn fast_path_transfer_relation_locks(
     locktag: &LOCKTAG,
     hashcode: u32,
 ) -> bool {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return true;
     };
     let _ = lock_method_table;
@@ -1153,7 +1145,7 @@ fn wire_proclock(shard: &mut LockShard, locktag: &LOCKTAG, proc: ProcNumber) {
     let Some(lp) = shard.locks.get_mut(locktag).map(lock_ptr) else {
         return;
     };
-    let g = proc_global();
+    let g = ProcGlobal::get();
     // SAFETY: the arena slot is stable for the process lifetime.
     let proc_ptr = g.map_or(std::ptr::null_mut(), |g| {
         unsafe { g.proc_mut(proc).map(std::ptr::from_mut::<PGPROC>) }
@@ -1203,7 +1195,7 @@ pub async fn LockAcquireExtended(
     };
     assert!(!(lockmode <= 0 || lockmode > lock_method_table.num_lock_modes), "unrecognized lock mode: {lockmode}");
 
-    let m = lock_manager().expect("lock manager initialized").clone();
+    let m = LockManager::expect().clone();
     let procno = current_proc_number();
     assert!(procno != INVALID_PROC_NUMBER, "LockAcquire without a PGPROC");
 
@@ -1560,7 +1552,7 @@ pub fn LockRelease(locktag: &LOCKTAG, lockmode: LOCKMODE, session_lock: bool) ->
         panic!("unrecognized lock method: {lockmethodid}");
     };
     assert!(!(lockmode <= 0 || lockmode > lock_method_table.num_lock_modes), "unrecognized lock mode: {lockmode}");
-    let m = lock_manager().expect("lock manager initialized").clone();
+    let m = LockManager::expect().clone();
     let procno = current_proc_number();
 
     let localtag = LOCALLOCKTAG {
@@ -1692,7 +1684,7 @@ pub fn LockReleaseAll(lockmethodid: LOCKMETHODID, all_locks: bool) {
     let Some(lock_method_table) = lock_methods(lockmethodid) else {
         panic!("unrecognized lock method: {lockmethodid}");
     };
-    let Some(m) = lock_manager() else {
+    let Some(m) = LockManager::get() else {
         return;
     };
     let m = m.clone();
@@ -1870,7 +1862,7 @@ pub fn LockHasWaiters(locktag: &LOCKTAG, lockmode: LOCKMODE, _session_lock: bool
     let Some(lock_method_table) = lock_methods(lockmethodid) else {
         panic!("unrecognized lock method: {lockmethodid}");
     };
-    let Some(m) = lock_manager() else {
+    let Some(m) = LockManager::get() else {
         return false;
     };
     let localtag = LOCALLOCKTAG {
@@ -1897,7 +1889,7 @@ pub fn LockHasWaiters(locktag: &LOCKTAG, lockmode: LOCKMODE, _session_lock: bool
 pub fn LockWaiterCount(locktag: &LOCKTAG) -> i32 {
     let lockmethodid = locktag.lockmethod();
     assert!(lock_methods(lockmethodid).is_some(), "unrecognized lock method: {lockmethodid}");
-    let Some(m) = lock_manager() else {
+    let Some(m) = LockManager::get() else {
         return 0;
     };
     let hashcode = LockTagHashCode(locktag);
@@ -1912,7 +1904,7 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
     let Some(lock_method_table) = lock_methods(lockmethodid) else {
         panic!("unrecognized lock method: {lockmethodid}");
     };
-    let Some(m) = lock_manager() else {
+    let Some(m) = LockManager::get() else {
         return Vec::new();
     };
     let conflict_mask = lock_method_table.conflict_tab[lockmode as usize];
@@ -1923,7 +1915,7 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
 
     // Fast-path scan if the lock could conflict with fast-path locks.
     if conflicts_with_relation_fast_path(locktag, lockmode)
-        && let Some(g) = proc_global() {
+        && let Some(g) = ProcGlobal::get() {
             let relid = Oid(locktag.locktag_field2);
             let group = fast_path_rel_group(relid);
             for i in 0..g.all_proc_count {
@@ -1979,7 +1971,7 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
             if proc == myproc {
                 continue;
             }
-            if let Some(g) = proc_global() {
+            if let Some(g) = ProcGlobal::get() {
                 // SAFETY: read of vxid under the shard Mutex; benign-race in pg_locks.
                 let vxid = unsafe {
                     g.proc(proc).map(|p| VirtualTransactionId {
@@ -2001,11 +1993,11 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
 /// PG `GetRunningTransactionLocks`: AccessExclusiveLocks on relations, for
 /// LogStandbySnapshot.
 pub fn GetRunningTransactionLocks() -> Vec<xl_standby_lock> {
-    let Some(m) = lock_manager() else {
+    let Some(m) = LockManager::get() else {
         return Vec::new();
     };
     let aex = lockbit_on(LockMode::AccessExclusiveLock as LOCKMODE);
-    let g = proc_global();
+    let g = ProcGlobal::get();
     // Take all partitions (shared semantics; we use the Mutex). Ascending.
     let guards: Vec<_> = m.shards.iter().map(|s| s.lock()).collect();
     let out: Vec<xl_standby_lock> = guards
@@ -2069,7 +2061,7 @@ pub fn VirtualXactLockTableCleanup() {
             local_transaction_id: lxid,
         };
         let locktag = LOCKTAG::set_virtual_transaction(vxid);
-        if let Some(m) = lock_manager() {
+        if let Some(m) = LockManager::get() {
             lock_refind_and_release(
                 m,
                 procno,
@@ -2107,7 +2099,7 @@ pub async fn VirtualXactLock(vxid: VirtualTransactionId, wait: bool) -> bool {
     // it, then block on a ShareLock.
     let locktag = LOCKTAG::set_virtual_transaction(vxid);
     let hashcode = LockTagHashCode(&locktag);
-    if let Some(m) = lock_manager() {
+    if let Some(m) = LockManager::get() {
         let did = with_fp_locked(vxid.proc_number, |proc| {
             let needs = proc.fp_vxid_lock;
             if needs {

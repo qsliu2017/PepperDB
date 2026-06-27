@@ -35,7 +35,7 @@ use crate::miscadmin::BackendType;
 use crate::postmaster::pgarch::{MAX_XFN_CHARS, MIN_XFN_CHARS, VALID_XFN_CHARS};
 use crate::shared_state::SharedState;
 use crate::storage::latch::Latch;
-use crate::storage::proc::{my_proc_scope, proc_global};
+use crate::storage::proc::{my_proc_scope, ProcGlobal};
 use crate::storage::procnumber::INVALID_PROC_NUMBER;
 
 /// PG `PGARCH_AUTOWAKE_INTERVAL`: how often to force a poll of the archive status
@@ -105,7 +105,7 @@ pub fn pgarch_can_restart() -> bool {
 /// aux PGPROC by the advertised `PgArchData.pgprocno`; a no-op if no archiver is
 /// running. Returns whether a latch was set.
 pub fn pgarch_wakeup() -> bool {
-    let Some(g) = proc_global() else {
+    let Some(g) = ProcGlobal::get() else {
         return false;
     };
     let procno = pgarch_data().pgprocno.load(Ordering::Acquire);
@@ -458,7 +458,7 @@ mod tests {
 
     fn fresh_shared() -> Arc<SharedState> {
         let shared = SharedState::new(SharedStateConfig::default());
-        let _ = crate::storage::proc::set_proc_global(shared.proc_global().clone());
+        let _ = crate::storage::proc::ProcGlobal::set(shared.proc_global().clone());
         shared
     }
 
