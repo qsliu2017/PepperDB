@@ -814,7 +814,15 @@ impl XLogCtl {
     ///
     /// Whole completed segments are fsynced here (PG fsyncs at segment end);
     /// partial-page flushing + the final fsync is [`Self::xlog_flush`]'s job.
-    async fn xlog_write_locked(self: &Arc<Self>, upto: u64) {
+    ///
+    /// The `_guard` witness encodes that the caller holds the WAL write lock
+    /// ([`Self::write_lock`]); it is held across the I/O `.await` by design (the
+    /// group-commit critical section -- an async mutex, so no `await_holding`).
+    async fn xlog_write_locked(
+        self: &Arc<Self>,
+        _guard: &tokio::sync::MutexGuard<'_, ()>,
+        upto: u64,
+    ) {
         let mut write = self.log_write_result.load(Ordering::Acquire);
         let mut open = self.open_seg.lock().await;
 
@@ -914,11 +922,11 @@ impl XLogCtl {
         if self.log_write_result.load(Ordering::Acquire) >= upto.0 {
             return;
         }
-        let _w = self.write_lock.lock().await;
+        let w = self.write_lock.lock().await;
         if self.log_write_result.load(Ordering::Acquire) >= upto.0 {
             return;
         }
-        self.xlog_write_locked(upto.0).await;
+        self.xlog_write_locked(&w, upto.0).await;
     }
 
     /// PG `XLogFlush`: ensure WAL up to `lsn` is durably on disk. The group-commit
@@ -947,7 +955,7 @@ impl XLogCtl {
         // reserved head and we flush as far as possible.
         let safe = self.wait_xlog_insertions_to_finish(target).await.0;
 
-        let _w = self.write_lock.lock().await;
+        let w = self.write_lock.lock().await;
 
         // Recheck: someone may have flushed past us while we waited.
         if self.log_flush_result.load(Ordering::Acquire) >= lsn.0 {
@@ -956,7 +964,7 @@ impl XLogCtl {
 
         // Write out everything we have safely waited for (group commit: this can
         // exceed our own `target` when a later committer has reserved more).
-        self.xlog_write_locked(safe).await;
+        self.xlog_write_locked(&w, safe).await;
 
         // Flush (fsync) up to what we've written, if not already done by a
         // segment-end fsync inside xlog_write_locked.

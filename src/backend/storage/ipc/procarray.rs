@@ -60,6 +60,13 @@ use crate::utils::snapshot::{GlobalVisState, SnapshotData};
 
 const INVALID_XID: TransactionId = crate::access::transam::INVALID_TRANSACTION_ID;
 
+/// Witness that the caller holds `ProcArray::inner` write-locked (rules s19,
+/// Case B). Threaded as a `&`-proof token into helpers that touch only the
+/// lock-free mirror atomics / `VariableCache` counters, not `ProcArrayInner`.
+type ProcArrayWrite<'a> = parking_lot::RwLockWriteGuard<'a, ProcArrayInner>;
+/// Witness that the caller holds `ProcArray::inner` read-locked (rules s19).
+type ProcArrayRead<'a> = parking_lot::RwLockReadGuard<'a, ProcArrayInner>;
+
 // ---------------------------------------------------------------------------
 // per-task TransactionXmin / RecentXmin (PG backend globals -> task_local)
 // ---------------------------------------------------------------------------
@@ -354,7 +361,7 @@ impl ProcArray {
     ) {
         let mut a = self.inner.write();
         if latest_xid.is_valid() {
-            self.maintain_latest_completed_xid(vc, latest_xid);
+            Self::maintain_latest_completed_xid(&a, vc, latest_xid);
             vc.with(|v| v.xact_completion_count += 1);
         }
         if let Some(pos) = a.pgprocnos.iter().position(|&p| p == pgprocno) {
@@ -389,8 +396,8 @@ impl ProcArray {
         latest_xid: TransactionId,
     ) {
         if latest_xid.is_valid() {
-            let _a = self.inner.write();
-            self.proc_array_end_transaction_internal(vc, proc, latest_xid);
+            let a = self.inner.write();
+            Self::proc_array_end_transaction_internal(&a, vc, proc, latest_xid);
         } else {
             // No XID: no need to lock to clear our own non-shared bookkeeping.
             proc.vxid.lxid = crate::c::LocalTransactionId(0);
@@ -412,10 +419,10 @@ impl ProcArray {
 
 impl ProcArray {
     /// procarray.c `ProcArrayEndTransactionInternal`: clear a write transaction's
-    /// advertised xid/xmin/subxids and advance latestCompletedXid. Caller holds the
-    /// write guard.
+    /// advertised xid/xmin/subxids and advance latestCompletedXid. The `_guard`
+    /// witness encodes that the caller holds ProcArrayLock (write).
     fn proc_array_end_transaction_internal(
-        &self,
+        guard: &ProcArrayWrite<'_>,
         vc: &VariableCache,
         proc: &mut PGPROC,
         latest_xid: TransactionId,
@@ -434,7 +441,7 @@ impl ProcArray {
         // Mirror the cleared xid/subxids/flags (authoritative shared copies).
         mirror_set_xid(proc.pgxactoff, INVALID_XID);
         mirror_set_subxid_flags(proc.pgxactoff, proc.subxid_status, proc.status_flags);
-        self.maintain_latest_completed_xid(vc, latest_xid);
+        Self::maintain_latest_completed_xid(guard, vc, latest_xid);
         vc.with(|v| v.xact_completion_count += 1);
     }
 }
@@ -498,10 +505,14 @@ impl ProcArray {
 
 impl ProcArray {
     /// procarray.c `MaintainLatestCompletedXid`: bump latestCompletedXid to
-    /// `latest_xid` if older. Caller holds the write guard (so the read-modify-write
-    /// of latestCompletedXid is atomic wrt other procarray mutators).
-    #[allow(clippy::unused_self, reason = "kept &self for API/port parity")]
-    fn maintain_latest_completed_xid(&self, vc: &VariableCache, latest_xid: TransactionId) {
+    /// `latest_xid` if older. The `_guard` witness encodes that the caller holds
+    /// ProcArrayLock (write), so the read-modify-write of latestCompletedXid is
+    /// atomic wrt other procarray mutators.
+    fn maintain_latest_completed_xid(
+        _guard: &ProcArrayWrite<'_>,
+        vc: &VariableCache,
+        latest_xid: TransactionId,
+    ) {
         vc.with(|v| {
             let cur = v.latest_completed_xid;
             if xid_from_full_transaction_id(cur).precedes(latest_xid) {
@@ -513,10 +524,10 @@ impl ProcArray {
 
 impl ProcArray {
     /// procarray.c `MaintainLatestCompletedXidRecovery`: same, for WAL replay
-    /// (latestCompletedXid may be uninitialized; relative to nextXid).
-    #[allow(clippy::unused_self, reason = "kept &self for API/port parity")]
+    /// (latestCompletedXid may be uninitialized; relative to nextXid). The `_guard`
+    /// witness encodes that the caller holds ProcArrayLock (write).
     fn maintain_latest_completed_xid_recovery(
-        &self,
+        _guard: &ProcArrayWrite<'_>,
         vc: &VariableCache,
         latest_xid: TransactionId,
     ) {
@@ -624,6 +635,7 @@ impl ProcArray {
         }
 
         // lastOverflowedXid + latestCompletedXid (subxid_status drives overflow).
+        // PG holds ProcArrayLock across the latestCompletedXid update too.
         {
             let mut a = self.inner.write();
             match running.subxid_status {
@@ -634,8 +646,8 @@ impl ProcArray {
                     a.last_overflowed_xid = INVALID_XID;
                 }
             }
+            Self::maintain_latest_completed_xid_recovery(&a, vc, running.latest_completed_xid);
         }
-        self.maintain_latest_completed_xid_recovery(vc, running.latest_completed_xid);
     }
 }
 
@@ -981,9 +993,13 @@ impl ProcArray {
     /// `snapshot` was built (its `snap_xact_completion_count` equals the current
     /// `xactCompletionCount`, and != 0), the rebuilt contents would be identical,
     /// so reuse xip/subxip/xmin/xmax and only refresh RecentXmin / MyProc->xmin.
-    /// Caller holds the read guard. Returns true if the snapshot was reused.
-    #[allow(clippy::unused_self, reason = "kept &self for API/port parity")]
-    fn get_snapshot_data_reuse(&self, vc: &VariableCache, snapshot: &SnapshotData) -> bool {
+    /// The `_guard` witness encodes that the caller holds ProcArrayLock (read).
+    /// Returns true if the snapshot was reused.
+    fn get_snapshot_data_reuse(
+        _guard: &ProcArrayRead<'_>,
+        vc: &VariableCache,
+        snapshot: &SnapshotData,
+    ) -> bool {
         if snapshot.snap_xact_completion_count == 0 {
             return false;
         }
@@ -1029,7 +1045,7 @@ impl ProcArray {
         // Reuse fast path: an MVCC snapshot whose completion count is current.
         if snapshot.snapshot_type == crate::utils::snapshot::SnapshotType::Mvcc {
             let a = self.inner.read();
-            if self.get_snapshot_data_reuse(vc, snapshot) {
+            if Self::get_snapshot_data_reuse(&a, vc, snapshot) {
                 return snapshot;
             }
         }
@@ -1811,9 +1827,9 @@ impl ProcArray {
         _xids: &[TransactionId],
         latest_xid: TransactionId,
     ) {
-        let _a = self.inner.write();
+        let a = self.inner.write();
         // MyProc->subxids cache removal: step 15.
-        self.maintain_latest_completed_xid(vc, latest_xid);
+        Self::maintain_latest_completed_xid(&a, vc, latest_xid);
         vc.with(|v| v.xact_completion_count += 1);
     }
 }
@@ -1992,8 +2008,7 @@ impl ProcArray {
     ) {
         let mut a = self.inner.write();
         known_assigned_xids_remove_tree(&mut a, xid, subxids);
-        drop(a);
-        self.maintain_latest_completed_xid_recovery(vc, max_xid);
+        Self::maintain_latest_completed_xid_recovery(&a, vc, max_xid);
         vc.with(|v| v.xact_completion_count += 1);
     }
 }
@@ -2023,9 +2038,9 @@ impl ProcArray {
     ) {
         let mut latest = xid;
         latest.retreat();
-        self.maintain_latest_completed_xid_recovery(vc, latest);
-        vc.with(|v| v.xact_completion_count += 1);
         let mut a = self.inner.write();
+        Self::maintain_latest_completed_xid_recovery(&a, vc, latest);
+        vc.with(|v| v.xact_completion_count += 1);
         if a.last_overflowed_xid.precedes(xid) {
             a.last_overflowed_xid = INVALID_XID;
         }
