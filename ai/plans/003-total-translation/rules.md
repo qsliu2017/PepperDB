@@ -1,327 +1,158 @@
-# Plan 003 - Total translation: rules for turning a C file into a Rust file
+# Translation rules: turning a PostgreSQL `.c` file into a PepperDB Rust file
 
-Audience: an agent translating a PostgreSQL `.c` file (in `ref/postgres`) into the
-PepperDB Rust port. These rules generalize what Phase F0 (plan 002 steps 01-09)
-established. Foundation primitives the rest of the tree depends on now exist - use
-them, do not reinvent them.
-
-Background you must read once: `ai/plans/000-foundation-design/README.md` (the
-single-process async-tokio model), `ai/plans/001-header-file/translation-rules.md`
-(header/type/macro construct rules), and the per-construct notes
-`ai/plans/001-header-file/{bitflags-port,function-mapping,routine-struct}.md`.
+Audience: an agent translating a PostgreSQL file (`ref/postgres`, pinned at `REL_18_4`)
+into the PepperDB port. The foundation (the single-process async spine) is complete; its
+primitives exist - use them, do not reinvent them. This is a reference, not a changelog.
 
 ---
 
-## 0. The mental model
+## 1. The model and the per-file disposition
 
-PostgreSQL is multi-process with a shared-memory segment and `longjmp` errors.
-PepperDB is one process on the tokio multi-thread runtime: each backend and each
-auxiliary process is an async task; shared state lives on the heap behind `Arc`
-with each structure owning its own locking; errors are panics caught at the task
-boundary. Translation is therefore not mechanical transliteration - it is
-re-expressing C intent in that model. Three dispositions per `.c` file:
+PostgreSQL is multi-process with a shared-memory segment and `longjmp` errors. PepperDB is
+one process on the tokio multi-thread runtime: every backend and auxiliary process is an
+async task. Translation re-expresses C intent in that model - three kinds of state in
+particular:
+- **Ex-shared state** (shmem, DSM, ...) lives on the heap behind `Arc`, each structure
+  owning its locking; add the field to `src/shared_state.rs` (section 6.2).
+- **Ex-process-private state** (a per-backend `.c` `static`) becomes per-task state: a
+  `task_local!` (the per-backend `Session`, `src/session.rs`, is the model), or a
+  process-wide `OnceLock` / `SharedState` field for a genuine singleton. Do NOT use
+  `std::thread_local` - a task migrates OS threads across `.await` (section 6.1).
+- **Errors** are panics carrying `ErrorData`, caught at a task boundary (see `error.md`).
 
-- **full** - translate the whole file's behavior (the default).
-- **rewrite-to-design** - the file's mechanism is replaced (e.g. the VFD pool over
-  `IoBackend`, resowner over RAII); translate the *intent*, delete the C mechanism.
-- **tombstone** - the file is subsumed by tokio/std/Arc (fork/exec, DSM, shmem
-  segment, spinlocks, MemoryContext); write a tombstone note, do not translate.
-
-The file-list under `ai/plans/002-foundation-implement/file-list/NN.txt` records
-each file's disposition for the foundation; later phases get their own lists.
-
----
-
-## 1. Path mapping
-
-A `.c` definition file maps 1:1 by path under `src/backend/`, KEEPING the
-`backend/` segment, so the Rust file cross-references its C source:
-
-```
-ref/postgres/src/backend/utils/error/elog.c  ->  src/backend/utils/error/elog.rs
-ref/postgres/src/backend/storage/file/fd.c   ->  src/backend/storage/file/fd.rs
-```
-
-Headers were already translated in plan 001 with `include/` STRIPPED:
-
-```
-src/include/utils/elog.h     ->  src/utils/elog.rs
-src/include/storage/fd.h     ->  src/storage/fd.rs
-```
-
-A genuinely Rust-native abstraction with no C counterpart goes in a sensibly named
-module (it is not a translation): `src/shared_state.rs`, `src/session.rs`,
-`src/storage/wait_guard.rs`, and `GenSlab` living in `src/storage/procnumber.rs`.
-
-Scaffold the `src/backend/...` tree as you go: add `pub mod <child>;` lines to each
-`mod.rs` (same style as the include-tree scaffold) and create only the dirs a step
-needs. Validate with `cargo check` (never `cargo build`, except once to confirm a
-new bin links). It must stay green.
+Pick a disposition per file: **full** (translate the whole behavior - the default),
+**rewrite-to-design** (the mechanism is replaced - the VFD pool over `IoBackend`, parallel
+state over `Arc`; translate the intent, delete the C mechanism with a `// deleted by
+redesign:` note), or **tombstone** (subsumed by tokio/std/Arc - fork/exec, DSM, the shmem
+segment, spinlocks, `MemoryContext`; write a tombstone note, do not translate). A phase's
+file-list (`ai/plans/00N-.../file-list/`) records each file's disposition.
 
 ---
 
-## 2. Declaration / definition split, and updating the header
+## 2. Path mapping and scaffolding
 
-C splits declaration (header) from definition (`.c`). Preserve that split:
+`.c` definitions map 1:1 by path (KEEPING the `backend/` segment); headers were already
+translated with `include/` STRIPPED:
+```
+ref/postgres/src/backend/utils/error/elog.c -> src/backend/utils/error/elog.rs
+ref/postgres/src/include/utils/elog.h       -> src/utils/elog.rs
+```
+A Rust-native abstraction with no C counterpart gets a sensible module name (not a
+translation): `src/shared_state.rs`, `src/session.rs`, `src/storage/wait_guard.rs`,
+`GenSlab` in `src/storage/procnumber.rs`.
 
-- **Header module (`src/<p>.rs`)** keeps header-origin items: types, consts,
-  macros, and `static inline` functions defined in the header. It does NOT keep
-  function bodies that come from a `.c`.
-- **Backend module (`src/backend/<p>.rs`)** holds the `.c` function bodies as
-  `pub`, plus the file-local `static` helpers, file-local statics, and the
-  `#[cfg(test)]` tests (all private to that module unless the header declared them).
-- Every former `unimplemented!()` stub in the header is replaced - either by a
-  `pub use` re-export or a deprecated shim (section 3), so existing
-  `use crate::<header>::<name>` call sites keep resolving unchanged.
-
-Globals declared in a header but defined in a `.c` follow the same rule: define in
-the backend module, re-export/shim from the header.
+Scaffold the tree as you go (`pub mod <child>;` in each `mod.rs`; create only what a step
+needs). Validate with `cargo check` (never `cargo build`, except once to confirm a new bin
+links). It must stay green, warning-free.
 
 ---
 
-## 3. Method over function
+## 3. Translating a definition; updating the header
 
-Prefer idiomatic Rust methods over free functions for self-contained, type-centric
-files (a struct with operations: `Latch`, `ConditionVariable`, `WaitEventSet`,
-`ResourceOwner`, `ProcSignal`, the VFD `File`).
+The C header (declaration) was already translated. When translating a source file (`.c`,
+the definition): the backend module (`src/backend/<p>.rs`) holds the `.c` bodies (`pub`),
+the file-local `static` helpers/state, and the `#[cfg(test)]` tests (private unless the
+header declared them). Replace every former header `unimplemented!()` stub with a `pub use`
+re-export or a shim, so existing `use crate::<header>::<name>` keeps resolving. Globals
+declared in a header but defined in a `.c` follow the same rule.
 
-- **Backend module**: idiomatic methods on the type.
-
-  ```rust
-  impl Latch {
-      pub fn new() -> Self { ... }
-      pub async fn wait(&self) { ... }
-      #[inline] pub fn init(&self) { self.reset() }
-      pub fn set(&self) { ... }
-  }
-  ```
-
-- **Header module**: keep each original C-named free function as a thin
-  `#[deprecated]` `#[inline]` shim delegating to the method - this preserves
-  cross-reference (grep for the C name) and lets mechanical ports compile, while
-  the deprecation nudges new code to the method.
-
-  ```rust
-  #[deprecated(note = "use `latch.set()`")]
-  #[inline]
-  pub fn SetLatch(latch: &Latch) { latch.set() }
-  ```
-
-  (The attribute key is `note`, not `message`. The inherent `impl` block lives in
-  the backend module even though the `struct` is in the header module - same crate,
-  allowed. Make struct fields `pub(crate)`.)
-
-For NON-type-centric files (global-state functions with no natural `self`, e.g.
-`elog.c`, `interrupt.c`): keep the function form - define `pub fn` in the backend
-module with a **snake_case** name and rewire the header stub to
-`pub use crate::backend::<p>::<snake> as <CName>;` so the C-named public API still
-resolves. Put the C symbol in the doc comment (`/// PG `AcceptInvalidationMessages``).
-Do NOT keep the C PascalCase name on the definition under
-`#[allow(non_snake_case, reason = "mirrors the C symbol name")]` - that per-fn allow
-is redundant (the crate has a global `#![allow(non_snake_case)]`) and the user
-rejected it: snake_case the definition, keep the C name in the doc comment + the
-header alias (grep-ability preserved both ways).
-
-Deprecated shims must NOT be called internally (call the method/real fn instead),
-so no deprecation warnings appear in `cargo check`.
+**Naming / method-vs-function:**
+- Type-centric file (a struct + operations: `Latch`, `ConditionVariable`, `ResourceOwner`,
+  the VFD `File`): put idiomatic METHODS on the type in the backend module (the inherent
+  `impl` may live there even though the `struct` is in the header - same crate; fields
+  `pub(crate)`). The header keeps each C-named free fn as a `#[deprecated(note=..)] #[inline]`
+  shim delegating to the method (grep-ability; nudges new code to the method).
+- Non-type-centric file (global-state fns, e.g. `elog.c`): define a **snake_case** `pub fn`
+  in the backend module, put the C symbol in the doc comment (`/// PG `AcceptInvalidationMessages``),
+  and rewire the header as `pub use crate::backend::<p>::<snake> as <CName>;`. Do NOT keep
+  the C PascalCase name on the definition behind `#[allow(non_snake_case, reason="mirrors C")]`
+  - that per-fn allow is redundant (a crate-global `#![allow(non_snake_case)]` exists) and
+  banned; snake-case the def, keep the C name in the doc + the header alias.
+- Never call your own `#[deprecated]` shims internally (no deprecation warnings in `check`).
 
 ---
 
 ## 4. The full-file principle
 
-Translate the ENTIRE file's behavior; do not leave a half-translated file for a
-later stage to "remember". A function that calls a not-yet-implemented subsystem
-calls its existing `unimplemented!()` stub - that compiles and is correct staging.
-This is different from deleted-by-redesign C (OS portability, fork/exec, Windows,
-`sync_file_range`): that is removed entirely with a `// deleted by redesign:` note,
-which is the redesign, not a partial translation.
-
-Async coloring is the one thing that legitimately revisits an already-translated
-file: when a leaf becomes `async`, the `async` propagates up its callers. That is
-expected; the file's *logic* is still translated once.
+Translate the ENTIRE file's behavior; do not leave a half-translated file. A function that
+calls a not-yet-translated subsystem calls its existing `unimplemented!()` stub - that
+compiles and is correct staging. This differs from deleted-by-redesign C (OS portability,
+fork/exec, Windows, `sync_file_range`), which is removed with a `// deleted by redesign:`
+note. Async coloring is the one thing that legitimately revisits a translated file.
 
 ---
 
-## 5. Async coloring
+## 5. Async coloring and the lock-across-await invariant
 
-Async spreads outward from the I/O / wait leaves; everything that transitively
-reaches an `.await` becomes `async`.
+Async spreads outward from the I/O and wait leaves; everything transitively reaching an
+`.await` becomes `async`.
+- **Leaves** (where `async` originates): `IoBackend` file I/O, the latch wait, socket I/O,
+  WAL fsync, lock/CV waits.
+- **Stays synchronous**: flag setters, `SetLatch`/`wake_one`, `ProcessInterrupts`,
+  `CHECK_FOR_INTERRUPTS`, and hot critical sections. Only the *wait* side is async.
+- **Positional file I/O** (concurrent offset reads/writes on one handle):
+  `std::os::unix::fs::FileExt::{read_exact_at, write_all_at}` on `tokio::task::spawn_blocking`
+  (why `IoBackend` uses `std::fs::File`). **Sequential/socket I/O** (WAL append, libpq wire):
+  `tokio::io::{AsyncReadExt,AsyncWriteExt}`. Don't hand-roll the loops.
 
-- **Leaves**: `IoBackend` file I/O, the latch wait, socket I/O, WAL fsync, lock
-  waits. These are where `async` originates.
-- **Stays synchronous**: flag setters, `SetLatch`/`wake_one`/`Signal`,
-  `ProcessInterrupts`, and any hot critical section. These must be callable from
-  deep sync code; only the *wait* side is `async`.
-- **Positional file I/O** (concurrent reads/writes at offsets on one shared
-  handle): `std::os::unix::fs::FileExt::{read_exact_at, write_all_at, ...}` run on
-  `tokio::task::spawn_blocking` (this is why `IoBackend` uses `std::fs::File`, not
-  `tokio::fs::File` - a single cursor cannot serve concurrent positional access).
-- **Sequential / socket I/O** (WAL append, the libpq wire): `tokio::io::AsyncReadExt`
-  / `AsyncWriteExt` (`read_exact`, `write_all`). Do not hand-roll the loops.
+**THE hard invariant: never hold a synchronous lock guard (`parking_lot`/`std` `Mutex`/
+`RwLock`) across an `.await`.** Take the lock, compute, snapshot/clone what you need, drop
+the guard, THEN await. Enforced by clippy `await_holding_lock` = deny. State legitimately
+held across `.await` uses `tokio::sync::{Mutex,RwLock}` (document each). A future waiting in
+a shared queue must remove itself on `Drop` (cancellation safety - that is `WaitGuard`).
 
-THE hard invariant: never hold a synchronous lock guard (`std::sync::Mutex`/
-`RwLock`) across an `.await`. Take the lock, compute, drop the guard, THEN await. A
-future waiting in a shared queue must remove itself on `Drop` (cancellation safety):
-that is what `WaitGuard` is for.
-
-Shared-state Arc rule: DEREF, do not CLONE. Reaching a `SharedState` subsystem
-(`shared.clog()`, `shared.buffers()`) returns `&Arc<T>`; calling a method through it
-derefs to `&T` at zero atomic cost. `Arc::clone` is a refcount atomic (and a
-cache-line bounce when contended), so clone ONLY when you must own the handle past
-the borrow -- i.e. to hold it across an `.await` or move it into a spawned task.
-Never `shared.x().clone()` in a hot/per-row path just to call a method; pass `&T`
-or `&Arc<T>` and deref.
+**Arc rule: DEREF, don't CLONE.** `shared.clog()` returns `&Arc<T>`; calling through it
+derefs to `&T` at zero cost. `Arc::clone` is a refcount atomic (+ a cache bounce when
+contended) - clone ONLY to own the handle past the borrow (hold across `.await`, move into a
+task). Never `shared.x().clone()` on a hot path; pass `&T`/`&Arc<T>` and deref.
 
 ---
 
-## 6. Translating common foundation constructs
+## 6. Translating common constructs
 
-### 6.1 `static` per-process variables
+### 6.1 `static` per-process variables - split by who reads/writes
+- **Process-wide config** (`DataDir`, sizing GUCs): `ProcessConfig` on `SharedState`
+  (`src/backend/utils/init/globals.rs`), set once at startup.
+- **Per-backend identity** (`MyProcPid`, `MyDatabaseId`, the user-id stack): the per-task
+  `Session` (`src/session.rs`), a `task_local!` `Arc<Session>` (`current`/`try_current`/`scope`).
+- **Per-task state ANOTHER task must set** (interrupt/cancel flags): a shared per-task slot
+  in a generational slab as atomics, settable cross-task via a registry (`ProcSignal` is the
+  model); the owner keeps a `task_local` handle for fast reads.
+- **Ex-shared-memory state**: typed `Arc` fields on `SharedState`, each owning its locking.
 
-PostgreSQL's process globals split by who reads/writes them:
+Per-task state MUST be `Send`: atomics, `Mutex`/`RwLock`, `Arc` - NEVER `Rc`/`Cell`/`RefCell`
+in a Send position (tasks migrate threads across `.await`). Per-task state HELD across an
+`.await` is a `task_local!` (`RefCell` for non-`Copy`), NEVER `std::thread_local` (a
+thread-local splits on migration and corrupts the state). Replace a header `pub static mut X`
+with `#[deprecated]` accessors over the Session/ProcessConfig/slot - one source of truth.
 
-- **Process-wide config** (e.g. `DataDir`, the sizing GUCs): a `ProcessConfig`
-  reachable from `SharedState` (`src/backend/utils/init/globals.rs`). Set once at
-  startup.
-- **Per-backend identity / session** (e.g. `MyProcPid`, `MyDatabaseId`, the
-  user-id stack): the per-task `Session` (`src/session.rs`), published as a tokio
-  `task_local!` `Arc<Session>` with `current()`/`try_current()`/`scope()`.
-- **Per-task state that ANOTHER task must set** (interrupt/cancel flags): not a
-  `task_local` (only the owner could set it) - put it in a shared per-task slot in
-  a generational slab as atomics, settable cross-task by `Key` via a registry
-  (`ProcSignal` is the model). The owning task holds a cheap `task_local` handle to
-  its own slot for fast reads.
-- **Ex-shared-memory state** (the shared segment): typed `Arc` fields on
-  `SharedState`, each structure owning its own locking; cloned into tasks by `Arc`.
-
-Per-task state MUST be `Send` - use atomics (`AtomicU32`/`AtomicI32`/`AtomicBool`),
-`Mutex`/`RwLock`, and `Arc`, NEVER `Rc`/`Cell`/`RefCell` - because backends run on
-the multi-thread runtime via `tokio::spawn` and may migrate threads across an
-`.await`. (`Session` uses atomics + a `Mutex<String>` for exactly this reason.)
-Replace the header's `pub static mut X` with `#[deprecated]` accessor functions
-reading/writing the Session/ProcessConfig/slot - keep a single source of truth.
-
-### 6.2 Error reporting (`elog` / `ereport`)
-
-The end goal is `Result` + `?`; the interim keeps `elog(ERROR)` semantics as a
-panic (see `src/utils/elog.rs` / `src/backend/utils/error/elog.rs`).
-
-- `elevel >= ERROR` raises by `std::panic::panic_any(error_data)` carrying the
-  structured `ErrorData` value (NOT a bare string), so a `catch_unwind` at the task
-  boundary downcasts it back and recovers sqlstate / severity / message / detail /
-  context.
-- Distinguish severities: `ERROR` is catchable (subtransaction/handler); `FATAL`
-  terminates the backend task; `PANIC` (and any critical-section failure) calls
-  `std::process::abort()` and must NOT be swallowed by `catch_unwind`.
-- Lower severities (`WARNING`/`NOTICE`/`LOG`/`INFO`/`DEBUGx`) format and return;
-  they never panic.
-- Mark every raising path `#[deprecated(note = "TODO(panic): migrate to Result + ?")]`
-  and `// TODO(panic)`.
-- The `errordata` stack is per-task (Session-style), not a process global.
-  `ErrorData` owns its `String`s (no `palloc`).
-- The task spawn wraps the backend future in `catch_unwind` (via
-  `futures_util::FutureExt::catch_unwind` + `AssertUnwindSafe`); on a caught panic,
-  downcast to `ErrorData`, log it, and end the task without crashing the supervisor.
-  RAII `Drop` releases locks/pins/buffers during the unwind.
-
-### 6.3 IPC
-
-The shared segment and its allocators are gone:
-
+### 6.2 IPC (the shared segment and its allocators are gone)
 - **Shared-memory structs** -> `Arc` fields on `SharedState`; each owns its locking.
-- **DSM / DSA / `shm_toc` / `shm_mq`** -> `Arc` + tokio channels; tombstone.
-- **`ProcSignal`** (one backend signals another) -> a generational-slab registry of
-  per-task slots; each slot has atomic reason/interrupt flags + an `Arc<Latch>` +
-  a cancel key. `SendProcSignal` sets the flag (Release) and rings the latch; the
-  owner reads (Acquire) at `CHECK_FOR_INTERRUPTS`. Cancel keys are compared in
-  constant time. (`src/backend/storage/ipc/procsignal.rs`.)
-- **`PMSignal`** (child -> postmaster) -> typed channels to the supervisor task.
-- **Latch** (`SetLatch`/`WaitLatch`) -> `tokio::sync::Notify` plus a sticky
-  `AtomicBool is_set`: `set` stores the flag and `notify_one` (a stored permit);
-  `wait` checks the flag, arms `notified()`, re-checks, then awaits - so a set
-  before the wait is never lost. (`src/storage/latch.rs`.)
-- **`WaitEventSet`** -> a `tokio::select!` over `AsyncFd` (sockets), `tokio::time`
-  (timeout), `Notify` (latch), and a shutdown signal.
-- **`ConditionVariable`** -> the reusable `WaitQueue`/`WaitGuard`
-  (`src/storage/wait_guard.rs`): a `GenSlab<Waker>` under a `Mutex`; `enqueue`
-  returns a guard whose `Drop` dequeues (cancellation-safe); `wake_one`/`wake_all`
-  set a sticky `woken` flag. The CV protocol enqueues up front (in
-  `prepare_to_sleep`) so a signal racing the predicate check is not lost.
-- **`PGSemaphore`** -> `tokio::sync::Semaphore`. **LWLock / spinlock** -> a data-
-  owning `parking_lot`/`std` `Mutex`/`RwLock` (wrap the data the lock protects, do
-  not reproduce naked locks). **`pg_atomic_*`** -> `core::sync::atomic`.
-- **`proc_exit` / `on_shmem_exit` / `before_shmem_exit`** -> RAII `Drop`; the
-  callback registry is tombstoned.
-- **Interrupts / cancellation**: per-task flags in the shared `ProcSignal` slot;
-  `CHECK_FOR_INTERRUPTS` calls the sync, holdoff-gated `ProcessInterrupts`, which
-  reads/clears the flags and panics (cancel -> `ERROR`/`ERRCODE_QUERY_CANCELED`,
-  terminate -> `FATAL`). Holdoff/crit-section counters are per-task (Session), so
-  one backend's holdoff never gates another. A statement/lock timeout is a
-  `tokio::time` timer that sets the flag + rings the latch.
+- **DSM / DSA / shm_toc / shm_mq** -> `Arc` + typed tokio channels; tombstone.
+- **Latch** (`SetLatch`/`WaitLatch`) -> `tokio::sync::Notify` + a sticky `AtomicBool is_set`:
+  `set` stores the flag + `notify_one`; `wait` checks the flag, arms `notified()`, re-checks,
+  awaits - a set before the wait is never lost (`src/storage/latch.rs`).
+- **ConditionVariable** -> `WaitQueue`/`WaitGuard` (`src/storage/wait_guard.rs`):
+  `GenSlab<Waker>` under a `Mutex`; `enqueue` returns a guard whose `Drop` dequeues; the CV
+  protocol enqueues up front so a signal racing the predicate check is not lost.
+- **WaitEventSet** -> `tokio::select!` over `AsyncFd`/`tokio::time`/`Notify`/shutdown.
+- **ProcSignal** (backend->backend) -> generational-slab registry of per-task slots (atomic
+  reason/interrupt flags + `Arc<Latch>` + constant-time-compared cancel key). `SendProcSignal`
+  sets the flag (Release) + rings the latch; the owner reads (Acquire) at
+  `CHECK_FOR_INTERRUPTS`. (`src/backend/storage/ipc/procsignal.rs`.)
+- **PMSignal** (child->postmaster) -> typed channels to the supervisor task.
+- **PGSemaphore** -> `tokio::sync::Semaphore`. **`pg_atomic_*`** -> `core::sync::atomic`.
+- **`proc_exit`/`on_shmem_exit`/`before_shmem_exit`** -> RAII `Drop` (registry tombstoned).
+- **Interrupts/cancellation**: per-task `ProcSignal` slot flags; `CHECK_FOR_INTERRUPTS` calls
+  the sync, holdoff-gated `ProcessInterrupts` which reads/clears flags and raises (cancel ->
+  `ERROR`, terminate -> `FATAL`). Holdoff/crit-section counters are per-task (Session). A
+  statement/lock timeout is a `tokio::time` timer that sets the flag + rings the latch.
 
-### 6.4 Log reporting
-
-Server-log output is a minimal plain-text stderr emitter today
-(`send_message_to_server_log` -> `write_console`). The structured/destination
-machinery is DEFERRED and its calls land on existing stubs: `log_line_prefix`
-grammar, `csvlog`/`jsonlog` formatters, the syslogger pipe, and
-`send_message_to_frontend` (the libpq wire send - `pqcomm` is not in the foundation
-and is reached only via its stubs). `WARNING`/`LOG`/etc. format and return; only
-`>= ERROR` panics (6.2). `emit_log_hook` is a single hook (no dynamic extensions).
-
----
-
-## 7. Reusable primitives - use these, do not reinvent
-
-Built in F0:
-- `GenSlab<T>` / `Key<T>` (`src/storage/procnumber.rs`) - generational slab; the
-  canonical replacement for any fixed slot index (ProcNumber, child slot, VFD,
-  proc-signal slot, wait queue, resource registry). A stale `Key` fails lookup, so
-  it dedups "released by owner" vs "released by guard" automatically.
-- `Latch`, `WaitQueue`/`WaitGuard`, `ConditionVariable` (sections 6.3).
-- `IoBackend` (`src/storage/io_backend.rs`) + `FdManager`/`File`
-  (`src/backend/storage/file/fd.rs`) - all file I/O goes through these.
-- `SharedState` (`src/shared_state.rs`) - the Arc-shared root; add new shared
-  subsystems as fields at the position matching ipci.c's `CreateOrAttachShmemStructs`
-  order (that order encodes init dependencies; the placeholders mark where).
-- `Session` (`src/session.rs`), `ProcSignal`, `ResourceOwner`
-  (`src/backend/utils/resowner/resowner.rs`).
-- `ErrorData` + the `elog!`/`ereport!` macros (`src/utils/elog.rs`).
-
-Built in F1 (storage core):
-- `Page` (`src/storage/bufpage.rs`) - `#[repr(C, align(8))]` newtype over
-  `[u8; BLCKSZ]`, methods + deprecated C-named shims; the alignment makes the
-  `PageHeaderData`/`ItemIdData` overlay casts sound. `Page::checksum`, item ops.
-- `BufId` (`src/storage/buf.rs`) - the buffer handle enum
-  `{Invalid, Global(u32), Local(u32)}` (not a sign-encoded int); `Buffer = BufId`.
-- `BufferPool` (`src/backend/storage/buffer/buf_init.rs`) + `bufmgr.rs`
-  (`read_buffer_common`/`flush_buffer`/pin/`LockBuffer`) + `localbuf.rs` + the FSM
-  (`src/backend/storage/freespace/`) - all page access goes through the buffer mgr.
-- smgr / md (`src/backend/storage/smgr/`) - `SmgrRelation` over `FdManager`;
-  `SharedState.sync_requests` is the pending-fsync queue (checkpointer drains it).
-- WAL (`src/backend/access/transam/`): `XLogCtl` + `xlog_flush`/`XLogInsert`/
-  `log_newpage` (xlog.rs, xloginsert.rs), `XLogReader<F>` (xlogreader.rs),
-  `Rmgr`/`GetRmgr` (rmgr.rs); incremental CRC-32C (`src/port/pg_crc32c.rs`).
-
----
-
-## 8. Memory management
-
-`MemoryContext` / `palloc` are tombstoned - use Rust ownership and `Drop`. Keep
-`work_mem` *accounting* only where spill decisions need it (sort/hash/agg
-operators), not a global current-context. Resource cleanup that PG did via
-`ResourceOwner` is typed RAII guards plus a phased transaction-abort release order
-(`BEFORE_LOCKS` -> `LOCKS` -> `AFTER_LOCKS`), because heterogeneous guard `Drop`
-order is not naturally phased; see `ResourceOwner`. Each release runs inside
-`catch_unwind` so one bad resource cannot abort the abort.
-
----
-
-## 9. Concurrency-primitive mapping (from design 000)
-
+### 6.3 Locks - concurrency-primitive mapping
 | PostgreSQL | PepperDB |
 | --- | --- |
-| LWLock / spinlock | `parking_lot`/`std` `Mutex`/`RwLock` wrapping the protected data |
+| LWLock / spinlock (sync critical section) | `parking_lot::{Mutex,RwLock}` wrapping the protected data |
+| a lock held across `.await` | `tokio::sync::{Mutex,RwLock}` |
 | `pg_atomic_*` | `core::sync::atomic` |
 | `SetLatch`/`WaitLatch` | `tokio::sync::Notify` + sticky `AtomicBool` |
 | `WaitEventSet` | `tokio::select!` |
@@ -329,550 +160,216 @@ order is not naturally phased; see `ResourceOwner`. Each release runs inside
 | ConditionVariable | `WaitQueue`/`WaitGuard` (`GenSlab<Waker>`) |
 | shared-memory segment | `Arc` fields on `SharedState`, each owning its lock |
 | DSM / DSA / shm_mq / shm_toc | `Arc` + tokio channels |
-| `ProcSignal` | generational-slab registry of per-task atomic-flag slots + Latch |
-| `PMSignal` | typed channels to the supervisor |
-| OS signals | `tokio::signal` driving shutdown/reload/cancel |
+| ProcSignal / PMSignal | per-task atomic-flag slab + Latch / typed supervisor channels |
+| OS signals | `tokio::signal` (shutdown/reload/cancel) |
 | `proc_exit`/`on_shmem_exit` | RAII `Drop` |
-| `MemoryContext`/`palloc` | Rust ownership + `Drop` (work_mem accounting in operators) |
+| `MemoryContext`/`palloc` | Rust ownership + `Drop` |
 | fork/exec, postmaster | `tokio::spawn`; supervisor task |
-| `longjmp`/`PG_TRY`/`PG_CATCH` | panic carrying `ErrorData` + `catch_unwind` at the task boundary |
+| `longjmp`/`PG_TRY` | panic carrying `ErrorData` + `catch_unwind` (see error.md) |
+
+Sync locks are `parking_lot` (NOT `std`): they do not poison, so an `ERROR`-as-panic raised
+while a lock is held cannot poison it and cascade through `.lock()` callers (error.md s2.7).
+Wrap the data the lock protects; do not reproduce naked locks. `OnceLock`/`Arc`/atomics stay
+`std`.
+
+### 6.4 Memory
+`MemoryContext`/`palloc` are tombstoned - use ownership + `Drop`. Keep `work_mem`
+*accounting* only where spill decisions need it (sort/hash/agg), not a global current
+context. `ResourceOwner` cleanup is typed RAII guards + a phased abort release order
+(`BEFORE_LOCKS` -> `LOCKS` -> `AFTER_LOCKS`), each release inside `catch_unwind` so one bad
+resource can't abort the abort.
+
+### 6.5 Errors and logging
+The error model is normative in `ai/plans/003-total-translation/error.md` - follow it.
+Summary: `elog!`/`ereport!` for `elog`/`ereport`; `>= ERROR` raises (`panic_any(ErrorData)`),
+`FATAL` ends the backend task, `PANIC` aborts the process (uncatchable), `< ERROR` formats +
+returns. Use the `OrElog` trait (`unwrap_or_error/_fatal/_panic[_with]`) instead of bare
+`unwrap`/`expect`; `crate::assert!` for `Assert`; `pg_try(..).pg_catch(..).pg_finally(..)`
+for `PG_TRY`. Server-log output is a minimal stderr emitter; the structured/destination
+machinery (csvlog/jsonlog/syslogger, libpq `send_message_to_frontend`) is deferred to stubs.
 
 ---
 
-## 10. Validation & workflow
+## 7. Reusable primitives - use these
 
-- `cargo check` must stay green (lib and, where relevant, bin); never introduce new
-  warnings, including deprecation warnings (do not call your own deprecated shims).
-- Tests: inline `#[cfg(test)]`; `#[tokio::test]` (often `flavor = "multi_thread"`)
-  for anything async or cross-task. Cover the cancellation/race/dedup paths, not
-  just the happy path.
-- Per file/step: translate, then verify with `cargo check` + tests. In the staged
-  foundation work the rhythm was: implement -> autocommit -> independent review ->
-  manual gate; keep an equivalent review discipline.
+Foundation:
+- `GenSlab<T>`/`Key<T>` (`storage/procnumber.rs`) - generational slab; the replacement for
+  any fixed slot index (ProcNumber, child/VFD/proc-signal slot, wait queue). A stale `Key`
+  fails lookup, so it auto-dedups "released by owner" vs "released by guard".
+- `Latch`, `WaitQueue`/`WaitGuard`, `ConditionVariable` (s6.2).
+- `IoBackend` (`storage/io_backend.rs`) + `FdManager`/`File` (`backend/storage/file/fd.rs`) -
+  all file I/O.
+- `SharedState` (`shared_state.rs`) - the Arc-shared root; add subsystems at the
+  `TODO(stepNN)` marker matching ipci.c `CreateOrAttachShmemStructs` order (it encodes init
+  dependencies). Fields are private behind `pub(crate)` accessors generated by the
+  `shared_state!` macro (which also asserts each field `Send+Sync+'static`).
+- `Session` (`session.rs`), `ProcSignal`, `ResourceOwner`, `ErrorData` + `elog!`/`ereport!`.
+- `pepperdb_util::PreallocCollect` (`.prealloc_collect()`/`.collect_with_capacity(n)`).
 
----
-
-## 11. Lessons from F1 (storage core: page, smgr/md, buffer manager, WAL)
-
-These emerged porting steps 10-13; apply them to the rest of the storage/access AMs.
-
-**Types.**
-- A value type that gets reinterpreted as a `#[repr(C)]` struct must be ALIGNED:
-  make it a `#[repr(C, align(8))]` newtype (`Page`), not a `&[u8]` alias, so the
-  pointer-cast to a header struct (`PageHeaderData`/`ItemIdData`) is sound. Prove it
-  with `const` size/align asserts.
-- Keep genuinely on-disk + arithmetic types as raw scalars (`BlockNumber = u32` +
-  sentinel; `ItemPointer`) - an enum would break the on-disk layout and the math.
-  Make in-memory HANDLES clear enums (`BufId{Invalid,Global,Local}`), not
-  sign-overloaded ints.
-
-**Shared mutable page storage.**
-- The buffer pool holds pages in `UnsafeCell` (`PageCell`) with a justified
-  `unsafe impl Sync`. It is sound ONLY because mutable page access is exclusive via
-  `BM_IO_IN_PROGRESS` (the single IO doer) or the EXCLUSIVE content lock. NEVER form
-  `&mut Page` under a SHARED lock (the `fsm_search` bug): a read path under a shared
-  lock uses `&Page` only; a write needs the exclusive lock or the IO-in-progress gate.
-
-**Async I/O integration.**
-- Positional file I/O = `std::os::unix::fs::FileExt::{read_exact_at, write_all_at}`
-  on `spawn_blocking` (the `IoBackend` leaf); read into a page via
-  `page.as_mut_bytes()`. EOF / zero-fill (reading past a relation's end) is the
-  SMGR layer's responsibility, not the leaf's (the leaf is all-or-`UnexpectedEof`).
-- Two-racer coordination: a per-buffer/per-segment IN-PROGRESS flag + a `WaitQueue`
-  so exactly one task does the read/write and others await (StartBufferIO/WaitIO).
-- A failed async I/O PANICS (elog ERROR/fsync abort). Any in-progress flag set
-  before an I/O await MUST be cleared and its waiters woken ON UNWIND - use an RAII
-  unwind guard (`InProgressIo`, mirroring PG `AbortBufferIO`), else waiters hang.
-
-**Locks across `.await`.**
-- Hot locks are SYNC and dropped before any `.await`: buffer header CAS lock,
-  content lock, buf_table shards, the sync-queue/strategy `Mutex`, the WAL insertpos
-  bump. Pattern: clone the handle / snapshot the bytes out, drop the guard, then await.
-- The ONLY locks held across an I/O await are deliberately-async `tokio::Mutex`es:
-  the WAL `WALWriteLock` and the held-exclusive WAL insert locks. Document each.
-
-**WAL durability invariants (load-bearing - silent data loss lives here).**
-- The flushed-LSN (an atomic AND a `tokio::watch`) is published ONLY after
-  `issue_xlog_fsync`, and MONOTONICALLY (never backward). Group commit: the
-  WALWriteLock holder writes+fsyncs for all; waiters await the watch.
-- `WaitXLogInsertionsToFinish` is called in `XLogFlush` BEFORE acquiring WALWriteLock
-  (deadlock-free: insert-lock then write-lock; eviction writes never wait). WAL
-  insert locks are HELD-EXCLUSIVE (PG model): advertise `inserting_at=0` (block-all)
-  before reserving, then the real LSN, cleared on release.
-- A PARTIAL last page backs the write cursor off to the request LSN (PG
-  `ispartialpage`) so a later same-page flush re-writes it - else the second
-  record is lost. Test incremental same-page flushes, not just flush-once.
-- WAL must be PG-compatible on disk: exact short/long page headers
-  (`XLOG_PAGE_MAGIC`, pageaddr, rem_len; long header on segment-first pages),
-  24-hex segment naming, and the record with the REAL `xl_prev` folded into the CRC
-  (assemble computes a partial CRC over the body; the insert finalizes over the
-  header after setting `xl_prev` - mirror `XLogInsertRecord`). CRC-32C is incremental.
-
-**Per-task state held across I/O.**
-- A pin/refcount/cache that is held across an I/O `.await` (PrivateRefCount, the
-  smgr cache, the local buffer pool, xloginsert staging) MUST be a tokio
-  `task_local`, NEVER `std::thread_local` - a thread-local splits across a thread
-  migration and corrupts the gated shared count. See [[per-task-state-must-be-send]].
-
-**Idiomatic Rust for dispatch / state machines.**
-- A self-contained reader/decoder taking an I/O callback is GENERIC over the
-  closure (`XLogReader<F>`), not `Box<dyn>`; keep its produced data type
-  (`DecodedXLogRecord`) non-generic so downstream stays simple.
-- A C dispatch table of function pointers (`RmgrTable`) becomes a trait + a match
-  (`GetRmgr(id) -> &'static dyn Rmgr`, unit-struct impls, inert defaults - NOT
-  `unimplemented!()`); keep the per-record arg non-generic so the trait is object-safe.
-
-**Construction order.** Add shared subsystems to `SharedState::new` at the
-`TODO(stepNN)` placeholder matching ipci.c's order (xlog before bufmgr; the sync
-queue near the checkpointer slot) - it encodes init dependencies.
-
-### Carried-forward TODOs (what F1 deferred; pick up at the named step)
-- step 17 checkpointer: drain `SharedState.sync_requests` AND finish the
-  fsync-failure / retry / cycle-counter semantics (`sync.rs` `TODO(step17)`);
-  `CreateCheckPoint`; source `xlp_sysid` from pg_control (currently a placeholder).
-- recovery (out of foundation): `StartupXLOG`/redo (`xlogrecovery.c`) and the async
-  WAL page-read driver (`XLogReader` takes a sync callback now).
-- `data_checksums_enabled()` is a stub (`PageIsVerified`/`PageSetChecksum*` panic
-  until the GUC lands); FSM `fp_next_slot` hint write is dropped (`TODO(perf)`: an
-  atomic byte); the buffer victim conditional content-lock is deferred; the smgr EOF
-  strict-error path needs the `InRecovery`/`zero_damaged_pages` GUCs.
+Storage core:
+- `Page` (`storage/bufpage.rs`) - `#[repr(C, align(8))]` newtype over `[u8; BLCKSZ]` so the
+  `PageHeaderData`/`ItemIdData` overlay casts are sound (prove with `const` size/align asserts).
+- `BufId` (`storage/buf.rs`) - `{Invalid, Global(u32), Local(u32)}` (not a sign-encoded int).
+- `BufferPool` (`backend/storage/buffer/`) + `bufmgr`/`localbuf` + the FSM - all page access.
+- smgr/md (`backend/storage/smgr/`) over `FdManager`; `SharedState.sync_requests` is the
+  pending-fsync queue (the checkpointer drains it).
+- WAL (`backend/access/transam/`): `XLogCtl` + `xlog_flush`/`XLogInsert`/`log_newpage`,
+  `XLogReader<F>`, `Rmgr`/`GetRmgr`; incremental CRC-32C (`port/pg_crc32c.rs`).
+- SLRU (`backend/access/transam/slru.rs`) for clog/subtrans; the PGPROC arena + `ProcGlobal`
+  (`storage/proc.rs`); `ProcArray`, snapshot manager, the lock manager, sinval, the aux tasks
+  + supervisor (`backend/postmaster/`), and the parallel chassis (`access/transam/parallel.rs`).
 
 ---
 
-## 12. Lessons from F2 (transaction/MVCC spine: SLRU, clog/subtrans, varsup,
-## procarray, snapmgr, combocid, xact)
+## 8. Proven design patterns (apply across the access/AM/executor tree)
 
-These emerged porting step 14; apply them to the rest of the access/AM tree.
+Each is a reusable shape; the named file is the worked example.
 
-**SLRU is the second async leaf (after the buffer pool).** `SlruCtl` holds
-`banks: Vec<RwLock<SlruBank>>` + a per-slot `WaitQueue`. The bank `RwLock` is the
-ex-bank-control-LWLock; PG takes it EXCLUSIVE everywhere except the read-only
-status-lookup hit path (`SimpleLruReadPage_ReadOnly`, `LW_SHARED`) - so reads take
-`.read()`, read-in/claim/set take `.write()`. LRU-hint counters are atomics so
-`SlruRecentlyUsed` is sound under the shared lock (it is a benign-race hint). NEVER
-form `&mut` to a page under the shared lock; non-atomic slot fields are write-lock
-only. Select-victim and claim (mark ReadInProgress) MUST be ONE critical section
-(do not drop the lock between them, or two tasks claim the same slot); only the
-physical I/O awaits with the lock dropped, under an `InProgressSlruIo` unwind guard.
-The wait path enqueues its `WaitGuard` UNDER the lock (the queue's `woken` flag is
-per-slot, so a wake racing an enqueue done after the drop is LOST). Expose access as
-a CLOSURE that holds the lock across find+use (`read_page_with`/`read_page_readonly_with`)
-- a "return the slot, re-lock by slot" API races eviction (the slot can be repointed
-  before the second lock).
+- **Shared mutable fixed-size array -> index handle + interior mutability + atomic mirror.**
+  A C array of structs shared by all backends and referenced by pointer (PGPROC, buffers)
+  becomes a fixed `Vec<UnsafeCell<T>>` (allocated once, never resized/moved), indexed by a
+  Send integer handle (ProcNumber/BufId) - NOT a raw `*mut` (which is `!Send`). Justify
+  `unsafe impl Send+Sync` by: never moves, and every mutable access is serialized by a
+  documented lock. Hot LOCK-FREE-READ scalars (the xid/subxid/statusFlags a snapshot scans)
+  live as PARALLEL atomic mirror arrays, written under the one lock the reader respects -
+  never read a torn compound struct lock-free. (`storage/proc.rs`, `buffer/buf_init.rs`.)
+  A claim into such an array MUST hold the lock across scan+write (scan-then-write races =
+  UB); when a teardown abort has no Rust panic message, suspect this and check with
+  ThreadSanitizer (`-Zsanitizer=thread`).
 
-**Snapshots are shared, owned values, NOT borrowed.** `Snapshot = Option<Arc<SnapshotData>>`.
-Do NOT lend `&'static mut`/`&'static` out of task-local storage (laundering a
-task_local borrow to `'static` lets safe code alias `&mut` = UB; the snapshot
-manager also mutates the same buffer for `SetCommandId`). Getters return cheap
-`Arc::clone`s; `curcid` mutation uses `Arc::make_mut` (copy-on-write). Keep the
-shared identity (first-xact snapshot IS the registered Arc, not a second copy).
+- **Async leaf (buffer pool, SLRU, SI ring).** Per-slot IN-PROGRESS flag + a `WaitQueue`:
+  exactly one task does the I/O, others await. Select-victim and claim (mark in-progress)
+  are ONE critical section (don't drop the lock between them, or two tasks claim the same
+  slot). Only the physical I/O awaits, with the lock dropped, under an RAII unwind guard that
+  clears the flag + wakes waiters on panic (else waiters hang). Expose access as a CLOSURE
+  that holds the lock across find+use; a "return the slot, re-lock by slot" API races
+  eviction. Enqueue the `WaitGuard` UNDER the lock (a wake racing an enqueue-after-drop is
+  lost). NEVER form `&mut` to a page/slot under a SHARED lock; reads use `&`, writes need the
+  exclusive lock or the in-progress gate. (`buffer/bufmgr.rs`, `transam/slru.rs`.)
 
-**Per-task transaction state is `task_local! RefCell<...>`, never `thread_local`.**
-The `TransactionState` stack (xact), the active/registered snapshot stacks +
-Current/Secondary/Catalog buffers (snapmgr), the combo-cid map (combocid), and the
-single-entry `cachedFetchXid` status cache (transam) are all per-backend state held
-across `.await`, so they must be `task_local` (thread migration). Never hold a
-`RefCell` borrow across an `.await` (borrow, copy/decide, drop, then await).
+- **Every blocking wait cleans up on give-up.** A waiter leaves a queue four ways: granted,
+  timeout, error, or future-drop (cancel / select! loser / abort). All non-OK exits run ONE
+  idempotent locked cleanup primitive (unlink, undo counts, wake now-grantable waiters); wrap
+  the `.await` in an RAII guard that runs it on `Drop` unless disarmed on OK. Timeout/deadlock
+  select arms signal the outcome; they do not mutate the shared queue lock-free.
+  (`storage/lmgr/proc.rs` ProcSleep.)
 
-**Durability ordering (xact RecordTransactionCommit) is load-bearing.** SYNC commit
-flushes WAL to disk (`xlog_flush` to >= the commit-record LSN) BEFORE clog is marked
-COMMITTED; ASYNC commit (`synchronous_commit=off`) records the commit LSN in clog
-(`TransactionIdAsyncCommitTree`) and requests a flush WITHOUT waiting. clog must
-never report committed before the WAL is durable in the sync case. The window runs
-in a crit section. (`synchronous_commit` is hardcoded ON until GUCs land - `TODO(guc)`.)
+- **Sharded hash table = `Vec<Mutex<Shard>>`.** Partition = tag-hash % N; the shard Mutex IS
+  the partition LWLock (never held across `.await`). Box entries so a holder's raw pointer
+  stays valid while resident (GC only when no one references it). A whole-subsystem critical
+  section (deadlock check) takes all shards in fixed index order, releases in reverse, no
+  `.await` while any is held. (`storage/lmgr/lock.rs`.)
 
-**procarray is the one mostly-synchronous subsystem.** `ProcArrayLock` is a
-`RwLock` over the procarray data; `GetSnapshotData`/horizons/`IsInProgress` compute
-entirely in memory and DROP the guard before any `.await` (clog/subtrans probes
-happen after the guard, as PG releases ProcArrayLock before the pg_subtrans probe).
-Keep it that way. `GetSnapshotDataReuse` keys on `xactCompletionCount` (init 1, not 0).
+- **Per-task subsystem state = `task_local! RefCell<...>`.** The xact `TransactionState`
+  stack, snapmgr's snapshot stacks, the combo-cid map, inval's pending lists, the receive
+  buffers - all per-backend state held across `.await`. Never hold the `RefCell` borrow
+  across an `.await` or a callback (borrow, copy/decide, drop, then call).
 
-**xid comparison is modular, so NOT `Ord`.** `TransactionId::precedes`/`follows` are
-METHODS (modular wraparound + permanent-xid special-case); do NOT `impl Ord`/`<` with
-precedes semantics (non-transitive -> unsound; breaks sort/min/BTree). A raw derived
-`Ord` on `TransactionId` (numeric) is fine for sort/map keys but is NOT transaction
-order - document it. `FullTransactionId` (64-bit, monotonic) IS a true total order:
-real `Ord`, and `<`-delegating deprecated shims.
+- **A shared owned value is an `Arc`, not a borrow.** `Snapshot = Option<Arc<SnapshotData>>`;
+  never lend `&'static mut` out of task-local storage (laundering a task_local borrow to
+  `'static` is aliasing UB). Getters return `Arc::clone`; mutate via `Arc::make_mut` (COW).
 
-**SharedState discipline.** Fields private behind `pub(crate)` accessors, generated
-by the `shared_state!` macro (also asserts each field `Send+Sync+'static`). Leaf
-routines take the NARROW handle (`&SlruCtl`/`&VariableCache`/`&ProcArray`) or are
-methods on it; only genuine multi-subsystem orchestrators (xact, snapmgr) take
-`&Arc<SharedState>`. Reaching a subsystem DEREFS (`shared.clog()` -> `&Arc<T>`, free);
-`Arc::clone` only to hold across an `.await` or move into a task (section 5). Add new
-subsystems to `SharedState::new` at the ipci.c-order marker.
+- **Modular xid order is a METHOD, not `Ord`.** `TransactionId::precedes`/`follows` (modular
+  wraparound + permanent-xid case) are non-transitive -> do NOT `impl Ord`/`<` with those
+  semantics (breaks sort/min/BTree). A derived numeric `Ord` is fine for map keys but is not
+  transaction order (document it). `FullTransactionId` (64-bit) IS a true total order.
 
-### Carried-forward TODOs (F2 deferred; pick up at the named step)
-- step 15 (proc/lock mgr): `proc.c` `InitProcGlobal` populates the real PGPROC array
-  that procarray scans (today it runs over the empty `ProcGlobal` stub - snapshots
-  are only end-to-end testable after this). Then implement the two group-batching
-  perf ops that NEED it: clog `TransactionGroupUpdateXidStatus` (PGPROC.clogGroup* +
-  ProcGlobal.clogGroupFirst) and procarray `ProcArrayGroupClearXid`
-  (PGPROC.procArrayGroup* + procArrayGroupFirst) - both marked `TODO(step15)`.
-- twophase (`PrepareTransaction`), parallel-worker xact state, `xact_redo`/recovery,
-  invalidation-message send, and smgr pending-deletes are stubs reached by xact.
-- snapmgr `RegisteredSnapshots` is a linear min-xmin scan; PG uses a pairingheap
-  keyed by xmin (MODULAR cmp) - needs `lib/pairingheap.c` (a BTreeMap can't
-  substitute: modular xid order is not a consistent total order).
-- SLRU `physical_read` short-read zero-fill is unreachable (`read_exact_at` ->
-  `UnexpectedEof`); only a wholly-absent segment zero-fills. Matters for recovery
-  reading a partially-written segment - `TODO(recovery)`.
+- **Auxiliary/background process = long-lived tokio task, one shape.** Cradle:
+  `InitAuxiliaryProcess` (claims an aux PGPROC + inits `proc_latch`), register the procsignal
+  slot WITH that same `proc_latch` so there is ONE unified wakeup latch (a second sticky
+  latch busy-spins). Loop: `proc_latch.reset()`, then `select!{ biased; proc_latch.wait() |
+  sleep(timeout) | shutdown.notified() => break }`. Advertise the role's ProcNumber in
+  `ProcGlobal.<role>_proc` so others wake it by number. An RAII exit guard (clear advertised
+  proc + deregister slot + ProcKill) runs on EVERY exit incl panic. Don't let the loop panic
+  on a timer (de-fang the specific timer-reachable stub to a non-panicking no-op). The
+  supervisor spawns aux onto a JoinSet with a restart policy (respawn only in the accept
+  loop, never during drain) and a sequenced shutdown drain (PostmasterStateMachine order;
+  checkpointer first-started, last-stopped). (`backend/postmaster/`.)
 
----
+- **Cross-process transport -> tombstone, share by Arc.** DSM/shm_mq/shm_toc and the
+  parallel-worker state serialization (GUC/snapshot/xact/relmapper into DSM) disappear: a
+  worker is a task spawned INSIDE the leader's task-local scopes, inheriting `Arc<Session>` +
+  snapshot/xact by scope nesting; messages go over a TYPED tokio mpsc (an enum, not pqmq byte
+  framing); keep only genuinely-shared scalars as `Arc<Atomic*>`. Worker errors -> a
+  `Message::Error(text)` on the channel; the leader re-raises (no longjmp-to-leader).
+  (`access/transam/parallel.rs`.)
 
-## 13. Lessons from F2 (lock manager: proc, lock, deadlock, lmgr - step 15)
-
-**Shared mutable fixed-size arrays -> index + interior mutability (the BufId/PGPROC
-pattern).** A C array of structs shared by all backends and referenced by pointer
-(PGPROC, and PG's BUFFER/PROC arrays generally) becomes a fixed `Vec<UnsafeCell<T>>`
-(allocated once, NEVER resized/moved), indexed by a Send integer handle (ProcNumber,
-like BufId for buffers). Cross-task/shared references MUST be the index, not a raw
-`*mut T` (raw pointers are `!Send`; per-task/shared state must be Send, s6.1). Justify
-`unsafe impl Send+Sync` on the cell by: the arena never moves, and every mutable field
-access is serialized by a documented lock (ProcArrayLock / the partition Mutex /
-owner-only). The hot LOCK-FREE-READ fields (the xid/subxid/statusFlags a snapshot
-scans) live as PARALLEL mirror arrays of atomics, written under the one lock the
-reader also respects - never read a torn compound struct lock-free; mirror the
-scalars instead.
-
-**Async grant-wait (ProcSleep) = select! with the wake + timer arms; drop the
-partition lock first.** The C "join the wait queue under the partition lock, release
-it, then WaitLatch-loop with a deadlock timer" becomes: a SYNC JoinWaitQueue (under
-the partition Mutex) that enqueues + sets the proc wait-state, then DROP the Mutex,
-then an async `ProcSleep` = `tokio::select!` over the proc's sticky Latch (set by the
-waker), a `sleep(DeadlockTimeout)` arm (run the detector), and a `sleep(LockTimeout)`
-arm. NEVER hold the partition Mutex across the await. The waker (ProcWakeup, called by
-the releaser under the partition lock) sets wait-state THEN `latch.set()` - sticky, so
-a set racing the sleeper's arm is not lost.
-
-**EVERY wait must clean up on give-up - one idempotent partition-locked primitive +
-an RAII guard.** A waiter can leave the queue four ways: granted (OK), lock-timeout,
-hard-deadlock, or FUTURE-DROP (query cancel / select! loser / task abort). All the
-non-OK exits must run the SAME cleanup under the awaited lock's partition Mutex:
-unlink from the wait queue, undo the request counts (n_requested/requested[mode]),
-clear the wait-mask bit, delete the orphan PROCLOCK, GC the LOCK, and ProcLockWakeup
-the now-grantable trailing waiters (PG's RemoveFromWaitQueue + CleanUpLock). Make it
-IDEMPOTENT (no-op if the proc is no longer WAITING) so the deadlock path (which cleans
-under all-partitions) and the wait-site guard don't double-undo. Wrap the
-`ProcSleep().await` in an RAII guard that runs this on Drop unless disarmed on OK -
-this is the cancellation-safety requirement of s5 applied to the lock wait. The
-timeout/deadlock select arms must NOT mutate the shared queue lock-free; they signal
-the outcome and let the partition-locked guard do the cleanup.
-
-**Sharded hash tables = `Vec<Mutex<Shard>>`; the shard Mutex IS the partition lock.**
-LOCK/PROCLOCK live in NUM_LOCK_PARTITIONS shards (partition = tag hash % N). The shard
-Mutex replaces the C partition LWLock - never held across `.await`. Box the entries so
-a waiter/holder's raw `*mut LOCK`/`*mut PROCLOCK` stays valid while resident; a LOCK is
-GC'd only at n_requested==0, and a queued waiter keeps n_requested>=1, so the pointer a
-sleeper holds stays live (don't free an entry anyone still references). The per-task
-LOCALLOCK table + fast-path counts are `task_local` (Send: its raw pointers are only
-dereferenced under the shard Mutex by the owning task).
-
-**Whole-subsystem critical sections that take ALL partitions (deadlock check) are SYNC
-and acquire in a fixed index order, release in reverse** (no `.await` while any is
-held; no inter-partition deadlock). The deadlock detector reads the lock graph through
-the raw pointers safely precisely because it holds every partition. Per-task deadlock
-timers mean two cycle members can both abort (vs PG's single signal-driven victim) -
-a fairness/throughput difference, not a soundness bug; record it.
-
-### Carried-forward TODOs (F2 lock-mgr deferred)
-- A timer-detected hard deadlock surfaces as `LockAcquireResult::NotAvail`, not the
-  "deadlock detected" ERROR (cycle IS detected+broken; only the report is missing) -
-  route through `dead_lock_report()` when the panic->Result error model lands.
-- `LockRelationOid`/`LockRelation` call `AcceptInvalidationMessages` (sinval, step 16)
-  and `IsSharedRelation` (catalog) - translated but PANIC until those land.
-- lock groups single-member until F4 (LockCheckConflicts group-subtraction is a no-op);
-  2PC `lock_twophase_*`, `pg_locks` (`GetLockStatusData`), resowner->lock accounting
-  (a per-task current_owner marker today), autovac SIGINT cancel (step 17).
-- the step-14 group-batching ops (clog `TransactionGroupUpdateXidStatus`, procarray
-  `ProcArrayGroupClearXid`) are now UNBLOCKED (the PGPROC group fields exist) - still
-  `TODO(perf)`, implement when contention warrants.
+- **Durability (only if you touch WAL/clog).** The flushed-LSN (atomic + `tokio::watch`) is
+  published only AFTER `issue_xlog_fsync`, monotonically; group commit via the held-exclusive
+  WAL insert locks + `WaitXLogInsertionsToFinish` before the write lock; a partial last page
+  backs the cursor off so a later same-page flush rewrites it; PG-compatible on-disk format
+  with `xl_prev` folded into the CRC. SYNC commit flushes WAL >= the commit LSN BEFORE clog
+  is marked committed. (`access/transam/xlog.rs`, `xact.rs`, `clog.rs`.)
 
 ---
 
-## 14. Idiomatic Rust style (standing conventions)
+## 9. Lock preconditions are types, not comments
 
-Apply these everywhere; they make the port read like Rust, not transliterated C.
+A function whose contract is "caller holds lock X" (`LWLockHeldByMe`, `callerHasWriteLock`,
+the `*_internal`/`*_locked` helpers) must encode that in its signature - never a `// caller
+holds X` comment + an implicit assumption. This also removes a deadlock footgun: `parking_lot`
+is non-reentrant, so a helper that re-acquires a lock the caller holds HANGS. Two forms:
 
-1. **`let ... else` for the bail-on-None/Err pattern.** Replace
-   `let x = match opt { Some(v) => v, None => return };` with
-   `let Some(v) = opt else { return; };` (or `continue`/`break`/`?`). Same for the
-   common `match get() { Some(g) => g, None => return }` at function tops.
+- **Case A - the helper reads/writes the GUARDED data:** take the dereferenced guard
+  (`&mut Inner` / `&Inner`), not `&self`. The only way to call it is to hold the lock, and it
+  has no handle to re-lock. Caller: `let mut g = self.inner.write(); Self::do_thing(&mut g, ..)`.
+  Compiler-enforced, deadlock-proof, decoupled from the lock type, unit-testable. Prefer this
+  whenever the helper dereferences the lock.
+- **Case B - the helper touches state CONVENTIONALLY under the lock but not the guarded
+  data** (the lock-free mirror atomics, the UnsafeCell arena gated by a partition Mutex):
+  take a `&guard` witness as a proof token (may be unused -> `_g`). `fn end_xact_internal(&self,
+  _g: &ProcArrayWrite<'_>, ..)`; caller passes `&g`. Weaker (forgeable across instances of the
+  same lock type; couples to the lock type) but beats a comment for hot invariant helpers.
 
-2. **Iterator pipelines over `let mut v = Vec::new(); for ... { v.push() }`.** A
-   build-by-push loop with a filter/guard is a code smell; express it as
-   `iter.filter(..).filter_map(..).map(..).collect()`. Use `filter_map` + `?` inside
-   the closure to flatten nested `if let Some`/conflict guards, and
-   `bool::then_some` for the "include this item when cond" tail. Keep an explicit
-   loop only when the body has real control flow / side effects that don't map to a
-   combinator.
-
-3. **Preallocate filtered collects with `pepperdb_util::PreallocCollect`.** `collect`
-   uses the lower size_hint, which `filter` zeroes -> reallocations. Use
-   `.prealloc_collect()` (preallocs from the upper hint) for `iter.filter().collect()`
-   where most items are kept or the upper bound is a tight small constant
-   (MaxBackends, NUM_LOCK_PARTITIONS). For `flat_map`/`flatten` chains (upper hint
-   `None`), use `.collect_with_capacity(n)` with a caller-computed bound. Don't use
-   it where a filter rejects most of a large input (it would over-allocate).
-
-4. **Enums over sentinel-field pairs that encode a sum type.** When two fields plus a
-   sentinel model mutually-exclusive states (e.g. `lock_group_leader: ProcNumber`
-   (INVALID if none / self if leader) + `lock_group_members: Vec<ProcNumber>`),
-   replace them with an enum that makes invalid states unrepresentable:
-   `enum LockGroupRole { None, Leader { members: Vec<ProcNumber> }, Member { leader: ProcNumber } }`.
-   Preserve the C semantics (PG's leader points to itself -> the `Leader` variant).
+Never re-acquire inside the helper a lock the caller holds. `*_locked`/`*_internal` naming may
+stay for grep; the SIGNATURE now carries the contract.
 
 ---
 
-## 15. Clippy (enforced; keep it clean)
+## 10. Idiomatic Rust style
 
-Clippy is a workspace lint policy in `[workspace.lints.clippy]` (root Cargo.toml;
-members opt in via `[lints] workspace = true`). `cargo clippy --all-targets` must be
-0 warnings / 0 errors -- do not add lints; a new warning is a regression.
-
-Policy (this is an agent-written port, so we run strict):
-- `pedantic` + `nursery` groups = `warn` (priority -1). NOT `clippy::restriction`
-  (self-contradictory by design).
-- `deny`: `await_holding_lock`, `await_holding_refcell_ref` -- rules s5, the
-  load-bearing async invariant. Keep these ALLOW-FREE in production; for genuine
-  held-across-await needs use a `tokio::sync::Mutex` (sound), not a std lock + allow.
-- `allow` (with the rationale in Cargo.toml): the lints that fight the 1:1 C port
-  (too_many_arguments, module_*, unreadable_literal, trailing_empty_array,
-  struct_excessive_bools, result_unit_err), the value-cast family
-  (cast_possible_truncation/wrap/sign_loss/precision_loss -- intentional C width
-  arithmetic in ~900 places), and pure doc/ceremony nags (must_use_candidate,
-  doc_markdown, missing_*_doc, missing_const_for_fn, ...). The SOUNDNESS-relevant
-  pointer casts stay enforced (cast_ptr_alignment, ptr_as_ptr, ref_as_ptr,
-  borrow_as_ptr) plus cast_lossless (widening must use `From`).
-
-Working with it:
-- Run `cargo clippy --fix --all-targets` first for the machine-applicable bulk, then
-  fix/justify the rest. Hollow `unimplemented!()` stub files: a file-level
-  `#![allow(clippy::LINT, reason = "hollow stubs mirror PG sigs; real impl consumes")]`
-  is fine (the params aren't consumed yet). Implemented code: prefer the real fix.
-- EVERY `#[allow]` needs a `reason = "..."`.
-- Clippy is load-bearing, not cosmetic: enabling it caught real bugs -- 8
-  `future_not_send` violations (a `!Send` `*mut RelationData` captured across `.await`
-  in the relation/page/tuple lock fns, so their futures couldn't be spawned; fixed by
-  the sync-outer / `impl Future + Send` pattern) and an unaligned-read UB in
-  `RestoreSnapshot`. Treat `future_not_send` / `cast_ptr_alignment` / the await-holding
-  denies as bug signals, not style nags.
+1. **`let ... else`** for bail-on-None/Err, not `let x = match opt { Some(v)=>v, None=>return };`.
+2. **Iterator pipelines** (`filter`/`filter_map`/`map`/`collect`, `?` and `bool::then_some`
+   inside the closure) over `let mut v; for { v.push() }` build-loops. Keep an explicit loop
+   only for real control flow / side effects.
+3. **Preallocate filtered collects** with `pepperdb_util::PreallocCollect` where most items
+   are kept or the upper bound is a tight small constant (MaxBackends, NUM_LOCK_PARTITIONS);
+   `collect_with_capacity(n)` for `flat_map`/`flatten` (upper hint `None`).
+4. **Enums over sentinel-field pairs** that encode a sum type (`enum LockGroupRole { None,
+   Leader{members}, Member{leader} }`, preserving the C semantics) - make invalid states
+   unrepresentable.
 
 ---
 
-## 16. Lessons from F2 (shared-invalidation transport: sinvaladt/sinval/inval - step 16)
+## 11. Clippy (enforced; keep it 0/0)
 
-**Follow PG's lock granularity faithfully (the binding decision), even at the cost of
-justified `unsafe`.** The SI ring (`SISeg`) keeps PG's two-lock + spinlock scheme:
-`SInvalWriteLock` -> `Mutex<SIWriteState>` (writers + register + cleanup), `SInvalReadLock`
--> `RwLock<()>` (readers `.read()` mutate only their OWN ProcState; cleanup `.write()`
-does the array-wide pass), and the `maxMsgNum` spinlock -> `AtomicI32` (the spinlock only
-ever provided a memory barrier; Acquire/Release gives exactly that). The ring buffer is
-`Box<[UnsafeCell<Msg>]>`: a writer fills cell `max % N` under `write` THEN Release-stores
-`max_msg_num`; readers Acquire-load `max_msg_num` then read only cells `< max`, so the
-pair orders the cell store before the index publish - the SLRU/PGPROC `unsafe impl Sync`
-justification (arena never moves; cleanup forces a laggard to reset before the buffer can
-wrap a still-needed slot). Per-backend ProcState fields are atomics so two readers under
-the shared lock mutate distinct entries soundly. Do NOT collapse this to one Mutex.
-
-**Reuse ProcSignal for the catchup interrupt; send AFTER dropping the lock.** PG's
-`SICleanupQueue` signals a laggard via `SendProcSignal(PROCSIG_CATCHUP_INTERRUPT)`; map it
-to the existing per-task ProcSignal `CatchupInterrupt` reason bit (s6.1: a per-task flag a
-foreign task sets). PG drops both SI locks before the (possibly slow) send, so the cleanup
-returns the target `Option<ProcNumber>` and the caller sends only after the `write` guard
-is dropped (never hold the lock across the send). Added `ProcSignal::send_by_proc_number`
-(PG's `SendProcSignal` targets `psh_slot[procNumber]` by index).
-
-**inval.c's per-backend file-statics -> one `task_local! RefCell<InvalState>`.** The two
-dense message arrays + the parent-linked `TransInvalidationInfo` stack (modeled as an owned
-`Vec`, "parent" = element below) + the callback lists all live in one per-task RefCell. The
-`InvalidationMsgsGroup{firstmsg[2],nextmsg[2]}` index-range bookkeeping is the subtle part -
-keep it bit-exact (AddInvalidationMessage appends at `nextmsg`; AppendInvalidationMessageSub
-Group asserts `dest.nextmsg==src.firstmsg`; dedup scans the right subgroup). NEVER hold the
-RefCell borrow across a callback / `SendSharedInvalidMessages` / `LocalExecuteInvalidationMessage`
-(borrow, copy/decide, drop, then call). `ReceiveSharedInvalidMessages`'s recursion-safe
-file-static buffer also becomes a per-task RefCell (recursion is within one task).
-
-**Naming: snake_case the backend def, not `#[allow(non_snake_case)]`.** See s3 - a per-fn
-`#[allow(non_snake_case, reason = "mirrors the C symbol name")]` is redundant (global allow)
-and rejected. Name backend fns snake_case, keep the C symbol in the doc comment + a header
-`pub use <snake> as <CName>` alias.
-
-**Staging.** The cache layer (catcache/relcache/syscache/relmapper) is unimplemented;
-inval's `LocalExecuteInvalidationMessage`/`CacheInvalidate*` arms call those stubs and only
-panic when REAL catalog DDL queues a message (full-file rule s4). `AcceptInvalidationMessages`
-on an EMPTY queue is a true no-op, which is what UNBLOCKS the lock manager's relation-lock
-wrappers (they no longer panic on the AcceptInvalidationMessages stub).
-
-### Carried-forward TODOs (step 16 deferred)
-- The catchup RECEIVE path (`ProcessCatchupInterrupt` / `HandleCatchupInterrupt`) is
-  translated but not wired into a main loop (no `ProcessClientReadInterrupt` yet) - dead
-  code until step 17+.
-- `LocalExecuteInvalidationMessage` smgr arm calls a `smgrreleaserellocator` TODO stub (the
-  fn does not exist yet); `LogLogicalInvalidations` leaves the final async `XLogInsert` as a
-  `TODO(wal-logical)` (reached only under wal_level=logical); `ProcessCommittedInvalidation
-  Messages` DatabasePath-during-recovery is a `TODO(recovery)`.
-- All cache-callback dispatch lands on catcache/relcache/relmapper stubs until those land.
+Workspace lint policy in `[workspace.lints.clippy]` (members opt in via `[lints] workspace =
+true`); `cargo clippy --all-targets` must be 0 warnings / 0 errors - a new warning is a
+regression.
+- `pedantic` + `nursery` = `warn` (priority -1); NOT `clippy::restriction`.
+- `deny`: `await_holding_lock`/`await_holding_refcell_ref` (s5); the soundness pointer casts
+  (`cast_ptr_alignment`, `ptr_as_ptr`, `ref_as_ptr`, `borrow_as_ptr`) + `cast_lossless`;
+  `unwrap_used`/`expect_used` (use `OrElog`/`?`/`crate::assert!` - tests are exempt via
+  `clippy.toml`).
+- `allow` (rationale in Cargo.toml): port-inherent lints (too_many_arguments, module_*,
+  unreadable_literal, struct_excessive_bools, trailing_empty_array) and the value-cast family
+  (intentional C width arithmetic). EVERY `#[allow]` needs `reason = "..."`. A pre-existing
+  unwrap/expect backlog carries a file/site `#[allow(.., reason="TODO(error-migration)")]`;
+  migrate per file as subsystems get exercised.
+- Clippy is load-bearing, not cosmetic: it has caught `future_not_send` (a `!Send` captured
+  across `.await`) and an unaligned-read UB. Treat `future_not_send`/`cast_ptr_alignment`/the
+  await-holding denies as bug signals. Run `cargo clippy --fix --all-targets` first, then
+  fix/justify the rest.
 
 ---
 
-## 17. Lessons from F3 (auxiliary tasks + sequenced shutdown: checkpointer/bgwriter/
-## walwriter/startup/pgarch/autovacuum/bgworker - step 17)
+## 12. Validation and workflow
 
-**Every aux process is a long-lived tokio task with ONE shared shape.** `auxiliary_
-process_main_common_with_proc` (auxprocess.rs) is the cradle: run inside `my_proc_scope`,
-`InitAuxiliaryProcess()` (claims an aux PGPROC + inits its `proc_latch`), then register the
-procsignal slot WITH THAT proc_latch so there is a SINGLE unified wakeup latch (a second
-sticky latch in the select! busy-spins once anything sets it - the 17a bug). The loop:
-`proc_latch.reset()` at top, then `tokio::select!{ biased; proc_latch.wait() | sleep(timeout)
-| shutdown.notified() => break }`. A role woken by other backends advertises its ProcNumber
-in `ProcGlobal.<role>_proc` (checkpointer/walwriter/autovacuum_launcher); RequestX rings that
-proc's latch by number.
-
-**EVERY aux task needs an RAII exit guard (clear advertised proc + deregister slot +
-ProcKill) that runs on ALL exits including panic unwind.** The C clears these after the loop;
-a panic (e.g. a failed checkpoint re-raises) skips post-loop code and leaves a dangling proc
--> a later RequestX rings a dead latch and hangs. A `Drop` guard covers normal break, early
-break, and unwind. PG's sigsetjmp in-loop recovery is NOT reproduced; the task-boundary
-`catch_unwind` + the supervisor restart policy replace it.
-
-**Don't let a long-lived task panic on a timer.** A loop that calls an `unimplemented!()`
-stub every tick crashes repeatedly. De-fang the SPECIFIC timer-reachable stubs to
-non-panicking no-ops with a `// TODO(subsys)` (grep their callers first - only do it if no
-caller depends on the panic). Bodies reached only by real work (do_autovacuum, archive a
-real .ready file) stay stubbed (s4): they fire only when driven, not on the timer.
-
-**Checkpointer: tombstone the cross-process fsync forwarding; keep the request protocol.**
-Backends `RegisterSyncRequest` directly into the shared `SyncRequests` (it dedups), so
-ForwardSyncRequest / CompactCheckpointerRequestQueue / the requests[] array / Checkpointer
-CommLock are deleted; AbsorbSyncRequests is a no-op. KEEP the ckpt_started/done/failed
-counters (modulo compare) + the two ConditionVariables (start_cv/done_cv) - that IS the
-backend<->checkpointer handshake. The checkpointer drains the real queue (ProcessSync
-Requests + SyncPostCheckpoint).
-
-**Supervisor: spawn aux onto a dedicated JoinSet with a restart policy; on-demand workers
-(autovac worker, bgworker) via a process-global OnceLock spawner hook the supervisor
-installs.** The respawn arm lives ONLY in the accept loop, never in `drain` (a respawn during
-shutdown wedges it). The SEQUENCED SHUTDOWN DRAIN follows PostmasterStateMachine: (1) stop
-accepting, (2) terminate+await backends, (3) checkpointer phase-1 (write shutdown checkpoint)
-and AWAIT its completion signal (PG PMSIGNAL_XLOG_IS_SHUTDOWN - model as an Arc<Notify> the
-checkpointer fires after the write, drain awaits it bounded by the deadline), (4) stop the
-other aux tasks (per-role Notify - a SHARED shutdown notify is consumed by the wrong task's
-loop-top poll), (5) checkpointer phase-2 (exit). Checkpointer is FIRST-started, LAST-stopped.
-Two-phase checkpointer shutdown = two Notifys (phase1=SIGINT, phase2=SIGUSR2).
-
-**Concurrent aux startup is a real concurrency test - it found a latent UB.** Five aux tasks
-calling `InitAuxiliaryProcess` at once exposed an unsynchronized slot scan-and-claim (PG holds
-ProcStructLock; our port had dropped it) and a raced `static mut Mode`. Symptom: SIGABRT/
-SIGTRAP at process/runtime teardown with NO Rust panic (heap corruption), only under multiple
-tests in one binary. Fix: claim the aux PGPROC slot under the free-list lock; make Mode an
-atomic. Lesson: any shared fixed-array claim must hold the lock across scan+write; verify
-with ThreadSanitizer (`-Zsanitizer=thread`) when a teardown abort has no panic message.
-
-### Carried-forward TODOs (F3 deferred)
-- The catchup/config-reload RECEIVE path is not main-loop-wired; aux ProcessXInterrupts that
-  need the consumed ConfigReloadPending flag (autovacuum rebuild_database_list - currently
-  rebuilds every tick -> would starve workers once get_database_list returns real rows) need
-  the interrupt layer to EXPOSE the reload flag (TODO(catalog) in autovacuum.rs).
-- do_autovacuum / vacuum / catalog scans / bgworker connection-init are stubs until those
-  subsystems land; archive copy + pgstat are stubs; StartupXLOG recovery body is xlogrecovery.
-- on-demand worker spawn hooks + bgworker entry registry are in-core only (dlopen tombstoned).
-
----
-
-## 18. Lessons from F4 (parallel-query chassis: parallel.c - step 18)
-
-**Cross-process state transport is the thing that disappears.** parallel.c's bulk serializes
-GUC/snapshot/xact/combocid/relmapper/library/clientconninfo into DSM regions keyed by
-`PARALLEL_KEY_*` and restores them in the worker. ALL of it is tombstoned: a worker is a tokio
-task spawned INSIDE the leader's task-local scopes, so it inherits the leader's `Arc<Session>`
-(database/user) and (once wired) snapshot/xact by scope nesting - nothing to serialize. Keep
-only genuinely-shared scalars (last_xlog_end) as an `Arc<AtomicU64>` the workers fold into.
-
-**ParallelContext = plain leader-task struct; the shared bits inside are Arc.** No DSM/shm_toc
-fields. `workers: Vec<{ JoinHandle, mpsc::Receiver<ParallelMessage> }>`. shm_mq -> a TYPED
-tokio mpsc carrying a `ParallelMessage` enum (Error/Notice), NOT pqmq StringInfo byte framing.
-The active-context list (PG dlist) -> a `task_local! RefCell<Vec<..>>`; never hold its borrow
-across an `.await` (copy out the handle, drop the borrow, then await Destroy).
-
-**Keep the leader future Send.** A `ParallelContext` referenced by raw address in the task-local
-list must store the address as `usize` (not a raw pointer, which is !Send) so the leader future
-stays spawnable; deref it ONLY on the owning leader task (never capture it into a worker spawn).
-Worker closures capture only Send values (i32 / Arc / Option<Arc<Session>> / fn / mpsc Sender);
-worker proc identity is the per-task `MY_PROC_NUMBER` task-local set by the worker's own
-InitProcess inside its `my_proc_scope`.
-
-**Worker = backend with a PGPROC in the leader's lock group.** LaunchParallelWorkers does
-BecomeLockGroupLeader() then tokio::spawn per worker; the worker cradle: session::scope(leader
-session) > my_proc_scope > InitProcess() > BecomeLockGroupMember(leader_procno, leader_pid) >
-set ParallelWorkerNumber > entrypoint. The PGPROC MUST be released on every exit incl panic via
-an RAII drop-guard (the s17 lesson again - a worker that panics outside the entrypoint else
-leaks a slot); the guard lives inside my_proc_scope so ProcKill sees the right current_proc.
-
-**Worker error propagation replaces longjmp-to-leader.** Wrap the entrypoint in catch_unwind;
-a panic -> `ParallelMessage::Error(text)` on the unbounded mpsc (can't block/lose) -> the leader
-re-raises in WaitForParallelWorkersToFinish / ProcessParallelMessage. A clean worker closes its
-sender; the leader's drain terminates (no hang). A worker panic NEVER aborts the process.
-
-### Carried-forward TODOs (F4 deferred)
-- The entrypoints (ParallelQueryMain, _bt/_brin/_gin_parallel_build_main, parallel_vacuum_main)
-  are in-core-table stubs (unimplemented!()) until execParallel + the AM parallel-build paths
-  land. When ParallelQueryMain lands, worker_cradle must ALSO inherit the leader's snapshot
-  (snapmgr task-local) + an xact scope (TODO(execParallel) marker in worker_cradle).
-- WaitForParallelWorkersToAttach is a near-noop (spawned == attached); revisit if modelling
-  worker start failure. shm_mq/shm_toc/barrier stay tombstoned header stubs.
-
----
-
-## 19. Lock preconditions are types, not comments
-
-A C function whose contract is "caller must hold lock X" (PG's `LWLockHeldByMe`,
-`callerHasWriteLock`, the `*_internal`/`*_locked` helpers under a partition lock) must NOT
-be translated as a private fn with a `// caller holds X` comment and an implicit
-assumption. Encode the precondition in the signature so it cannot be violated by accident.
-This also removes a live deadlock footgun: our locks are `parking_lot` (NON-reentrant, s2.7
-of error.md), so a helper that re-acquires a lock the caller already holds HANGS.
-
-Two forms, by what the helper actually touches:
-
-**Case A -- the helper reads/writes the GUARDED data: take the data, not `&self`.**
-Pass the dereferenced guard (`&mut Inner` / `&Inner`), so the only way to call it is to
-hold the lock, and the helper has no handle to re-lock.
-```rust
-fn do_thing(inner: &mut ProcArrayInner, ...) { inner.field = ...; }
-// caller:
-let mut g = self.inner.write();
-Self::do_thing(&mut g, ...);   // &mut *g coerces to &mut ProcArrayInner
-```
-Benefits: compiler-enforced precondition; cannot self-deadlock (no lock handle); decoupled
-from the lock type; unit-testable without a lock. Prefer this whenever the helper
-dereferences the lock. Make it an associated/free fn taking `&mut Inner` (+ other args);
-add `&self` only if it also needs unrelated `self` fields that are NOT the locked data.
-
-**Case B -- the helper touches state CONVENTIONALLY under the lock but not the guarded
-data: take a `&guard` witness.** Some state is lock-free for readers but written under the
-lock (s13: the PGPROC/xid mirror atomics written under ProcArrayLock; the UnsafeCell arena
-gated by a partition Mutex). A helper that mutates only that state still requires the lock
-held for consistency, yet has no `Inner` to borrow. Pass the guard as an unused proof token:
-```rust
-type ProcArrayWrite<'a> = parking_lot::RwLockWriteGuard<'a, ProcArrayInner>;
-fn end_xact_internal(&self, _g: &ProcArrayWrite<'_>, vc: &VariableCache, proc: &mut PGPROC, ...) { ... }
-// caller:
-let g = self.inner.write();
-self.end_xact_internal(&g, vc, proc, ...);
-```
-The witness makes the precondition type-checked. Tradeoffs (accept them, they beat a
-comment for hot invariant-critical helpers): it is a weaker guarantee (a guard from a
-different instance of the same lock type could satisfy it -- a non-issue when there is one
-instance), it couples the signature to the lock type, and the param is unused (`_g`). Use a
-`&` witness (proof it exists); `&mut` only if the helper legitimately needs to act on the
-guard.
-
-Rules:
-- NEVER re-acquire inside the helper a lock the caller holds (parking_lot deadlock).
-- Don't drop the guard before the helper if the helper needs the lock held -- pass it (A or
-  B) so the lifetime makes the hold explicit.
-- `*_locked`/`*_internal` naming may stay for grep/cross-ref, but the SIGNATURE now carries
-  the contract; the comment becomes a one-liner.
-- This applies to every "caller holds the lock" helper in the translated tree (procarray,
-  lmgr/lock shard helpers, slru bank helpers, buffer manager, proc, sinval, ...).
+- `cargo check` + `cargo clippy --all-targets` stay green/0; `cargo test --lib` green and
+  growing. Inline `#[cfg(test)]`; `#[tokio::test(flavor="multi_thread")]` for async/cross-task
+  code. Cover the cancellation/race/dedup/teardown paths, not just the happy path; tests use a
+  tempdir, not the repo root.
+- Rhythm per file/step: translate -> verify -> independent review -> manual gate. A small step
+  is one squashed commit; a large step splits into dependency-ordered sub-commits (each
+  reviewed) with one gate after all, then squash. Review agents are READ-ONLY: never
+  `git checkout`/`reset`/`stash`/`commit`, never delete cron jobs or edit the task list.
