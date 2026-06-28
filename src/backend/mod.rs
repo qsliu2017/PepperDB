@@ -3,6 +3,7 @@
 pub mod access;
 pub mod bootstrap;
 pub mod catalog;
+pub mod commands;
 pub mod executor;
 pub mod libpq;
 pub mod nodes;

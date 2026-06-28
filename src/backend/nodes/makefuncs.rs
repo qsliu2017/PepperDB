@@ -10,11 +10,10 @@
 //! `list_make1`/`NIL` idioms become `vec![..]`/`Vec::new()`. `makeNode(T)` is just
 //! constructing the struct value; `pstrdup` is `String` ownership.
 //!
-//! A handful of constructors (`makeSimpleA_Expr`, `makeTypeName`,
-//! `makeNotNullConstraint`) build a node list whose elements are value nodes
-//! (`T_String`). Value nodes are not yet `Node` enum variants (see
-//! `crate::nodes::value`), so those constructors stage to `unimplemented!()` until
-//! the node-defining pass adds the variants; none is reachable for M1.
+//! `makeNotNullConstraint` builds a node list whose key elements are value nodes
+//! (`T_String`); value nodes are not yet general `Node` enum variants (see
+//! `crate::nodes::value`), so it stages to `unimplemented!()` until the
+//! node-defining pass adds the variant; it is not reachable for M2.
 
 use crate::access::attnum::AttrNumber;
 use crate::catalog::genbki::BOOLOID;
@@ -265,14 +264,12 @@ pub fn make_not_null_constraint(_colname: &String_) -> Constraint {
 }
 
 /// PG `makeTypeName`: build a `TypeName` for an unqualified name.
-pub fn make_type_name(_typnam: &str) -> TypeName {
-    // makeTypeNameFromNameList(list_make1(makeString(typnam))); a T_String value
-    // node is not yet a Node enum variant (crate::nodes::value). Not for M1.
-    unimplemented!("makeTypeName: T_String value node not yet a Node variant")
+pub fn make_type_name(typnam: &str) -> TypeName {
+    make_type_name_from_name_list(vec![crate::nodes::value::makeString(typnam.to_owned())])
 }
 
 /// PG `makeTypeNameFromNameList`: build a `TypeName` from a `String` name list.
-pub fn make_type_name_from_name_list(names: Vec<Node>) -> TypeName {
+pub fn make_type_name_from_name_list(names: Vec<String_>) -> TypeName {
     TypeName {
         names,
         typeOid: InvalidOid,

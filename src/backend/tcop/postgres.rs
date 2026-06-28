@@ -267,9 +267,27 @@ fn exec_simple_query(query_string: &str) {
 
     crate::miscadmin::check_for_interrupts();
 
-    // The command tag for the completion message. M1 reaches SELECT only;
-    // CreateCommandTag (utility.c) is deferred, so derive it from the plan.
+    // The command tag for the completion message (SELECT directly; a utility plan
+    // via CreateCommandTag, e.g. "CREATE TABLE").
     let command_tag = command_tag_for(&plan);
+
+    // A utility statement (CMD_UTILITY) runs through the multi-query portal path
+    // (ChoosePortalStrategy -> MULTI_QUERY -> PortalRunMulti -> PortalRunUtility ->
+    // ProcessUtility), which is async (DefineRelation -> heap_create_with_catalog
+    // reaches the buffer pool/WAL). The socket command loop does not yet own an
+    // `Arc<SharedState>` nor the per-task database scopes (relcache / snapmgr /
+    // catalog-index / WAL insertion) that initdb + heap_create_with_catalog need
+    // (InitPostgres / connect-to-database is the deferred backend phase, see
+    // postgres_main); driving CREATE TABLE over the wire is therefore staged here.
+    // The full routing machinery (utility portal path) is exercised end-to-end by
+    // the parser/utility integration tests over the initdb'd catalogs. rules.md s4.
+    if plan.command_type == crate::nodes::nodes::CmdType::UTILITY {
+        unimplemented!(
+            "exec_simple_query: utility statement over the wire needs the backend \
+             database-init phase (Arc<SharedState> + per-task catalog scopes); \
+             the utility portal path is wired and tested via the integration tests"
+        );
+    }
 
     // CreatePortal / PortalDefineQuery / PortalStart.
     let mut portal = crate::backend::tcop::pquery::create_portal("");
@@ -304,12 +322,20 @@ fn exec_simple_query(query_string: &str) {
     crate::backend::tcop::dest::end_command(&qc, dest, false);
 }
 
-/// Derive the completion command tag from a planned statement. M1 reaches SELECT;
-/// the full `CreateCommandTag` (utility.c, raw-statement based) grows later.
+/// Derive the completion command tag from a planned statement. SELECT derives
+/// directly; a CMD_UTILITY plan defers to `CreateCommandTag` over its carried
+/// utilityStmt (e.g. a `CreateStmt` -> "CREATE TABLE"); other plannable command
+/// types grow with their statements.
 fn command_tag_for(plan: &crate::nodes::plannodes::PlannedStmt) -> CommandTag {
     match plan.command_type {
         crate::nodes::nodes::CmdType::SELECT => CommandTag::Select,
-        other => unimplemented!("command_tag_for: {other:?} (non-SELECT) deferred"),
+        crate::nodes::nodes::CmdType::UTILITY => {
+            let stmt = plan.utility_stmt.as_ref().unwrap_or_else(|| {
+                unreachable!("a CMD_UTILITY plan carries its utilityStmt")
+            });
+            crate::backend::tcop::utility::create_command_tag(stmt)
+        }
+        other => unimplemented!("command_tag_for: {other:?} deferred"),
     }
 }
 

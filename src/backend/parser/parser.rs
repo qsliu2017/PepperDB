@@ -9,8 +9,9 @@
 
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{
-    A_Const, A_Star, ColumnRef, ColumnRefField, RawStmt, ResTarget, ValUnion,
+    A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, RawStmt, ResTarget, TypeName, ValUnion,
 };
+use crate::nodes::primnodes::{OnCommitAction, RangeVar};
 use crate::nodes::value::{makeFloat, makeInteger, makeString};
 use crate::parser::parser::RawParseMode;
 
@@ -82,6 +83,71 @@ pub fn make_star_target() -> Node {
         location: -1,
     };
     Node::ResTarget(Box::new(rt))
+}
+
+/// gram.y `CreateStmt: CREATE ... TABLE qualified_name '(' OptTableElementList ')'`
+/// (the M2 plain form). Builds the raw `CreateStmt` node; the inheritance /
+/// partition / OF-type / WITH / ON COMMIT / tablespace / access-method clauses
+/// default to empty and grow at their milestones.
+pub fn make_create_stmt(relation: RangeVar, table_elts: Vec<Node>) -> Node {
+    Node::CreateStmt(Box::new(CreateStmt {
+        relation: Some(Box::new(relation)),
+        tableElts: table_elts,
+        inhRelations: Vec::new(),
+        partbound: None,
+        partspec: None,
+        ofTypename: None,
+        constraints: Vec::new(),
+        nnconstraints: Vec::new(),
+        options: Vec::new(),
+        oncommit: OnCommitAction::NOOP,
+        tablespacename: None,
+        accessMethod: None,
+        if_not_exists: false,
+    }))
+}
+
+/// gram.y `columnDef: ColId Typename ...` (the M2 plain form). Builds a `ColumnDef`
+/// carrying just the name and type; storage / compression / collation and the
+/// constraint list (ColQualList) grow at their milestones.
+pub fn make_column_def_elt(colname: String, type_name: TypeName) -> Node {
+    Node::ColumnDef(Box::new(crate::nodes::parsenodes::ColumnDef {
+        colname: Some(colname),
+        typeName: Some(Box::new(type_name)),
+        compression: None,
+        inhcount: 0,
+        is_local: true,
+        is_not_null: false,
+        is_from_type: false,
+        storage: 0,
+        storage_name: None,
+        raw_default: None,
+        cooked_default: None,
+        identity: 0,
+        identitySequence: None,
+        generated: 0,
+        collClause: None,
+        collOid: crate::postgres_ext::InvalidOid,
+        constraints: Vec::new(),
+        fdwoptions: Vec::new(),
+        location: -1,
+    }))
+}
+
+/// gram.y `SystemTypeName(name)`: a `pg_catalog`-qualified built-in type name
+/// (`makeTypeNameFromNameList(["pg_catalog", name])`), used by the `Numeric`
+/// productions (e.g. `int`/`integer` -> `pg_catalog.int4`).
+pub fn system_type_name(name: &str) -> TypeName {
+    crate::nodes::makefuncs::makeTypeNameFromNameList(vec![
+        makeString("pg_catalog".to_owned()),
+        makeString(name.to_owned()),
+    ])
+}
+
+/// gram.y `GenericType`: a bare (unqualified) type name resolved by catalog lookup
+/// at analysis time (`makeTypeNameFromNameList([name])`).
+pub fn generic_type_name(name: String) -> TypeName {
+    crate::nodes::makefuncs::makeTypeNameFromNameList(vec![makeString(name)])
 }
 
 /// PG `makeRawStmt`: wrap a top-level statement node in a RawStmt. The
@@ -230,6 +296,65 @@ mod tests {
     fn empty_input_is_empty_list() {
         assert!(parse("").is_empty());
         assert!(parse(";").is_empty());
+    }
+
+    /// Unwrap the single CreateStmt out of a one-statement parse.
+    fn one_create(list: &RawStmtVec) -> &CreateStmt {
+        assert_eq!(list.len(), 1, "expected exactly one RawStmt");
+        let Node::RawStmt(rs) = &list[0] else { panic!("not a RawStmt") };
+        let Node::CreateStmt(c) = rs.stmt.as_ref().expect("non-empty RawStmt") else {
+            panic!("not a CreateStmt")
+        };
+        c
+    }
+
+    fn column(c: &CreateStmt, i: usize) -> &crate::nodes::parsenodes::ColumnDef {
+        let Node::ColumnDef(cd) = &c.tableElts[i] else { panic!("not a ColumnDef") };
+        cd
+    }
+
+    #[test]
+    fn create_table_one_int_column() {
+        let list = parse("CREATE TABLE t (a int)");
+        let c = one_create(&list);
+        assert_eq!(c.relation.as_ref().unwrap().relname.as_deref(), Some("t"));
+        assert_eq!(c.tableElts.len(), 1);
+        let col = column(c, 0);
+        assert_eq!(col.colname.as_deref(), Some("a"));
+        // `int` -> pg_catalog.int4 (a SystemTypeName 2-part name).
+        let tn = col.typeName.as_ref().unwrap();
+        let names: Vec<&str> = tn.names.iter().map(|s| s.sval.as_str()).collect();
+        assert_eq!(names, ["pg_catalog", "int4"]);
+    }
+
+    #[test]
+    fn create_table_two_columns() {
+        let list = parse("CREATE TABLE t (a int, b integer)");
+        let c = one_create(&list);
+        assert_eq!(c.tableElts.len(), 2);
+        assert_eq!(column(c, 0).colname.as_deref(), Some("a"));
+        assert_eq!(column(c, 1).colname.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn create_table_generic_type_name() {
+        // A non-keyword type identifier parses as a bare (unqualified) GenericType
+        // (the keyword-spelled type names like `text` grow as ColId admits those
+        // keyword categories).
+        let list = parse("CREATE TABLE t (a myt)");
+        let c = one_create(&list);
+        let tn = column(c, 0).typeName.as_ref().unwrap();
+        let names: Vec<&str> = tn.names.iter().map(|s| s.sval.as_str()).collect();
+        assert_eq!(names, ["myt"]);
+    }
+
+    #[test]
+    fn create_table_schema_qualified() {
+        let list = parse("CREATE TABLE public.t (a int)");
+        let c = one_create(&list);
+        let rv = c.relation.as_ref().unwrap();
+        assert_eq!(rv.schemaname.as_deref(), Some("public"));
+        assert_eq!(rv.relname.as_deref(), Some("t"));
     }
 
     #[test]

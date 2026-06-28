@@ -377,45 +377,10 @@ pub fn get_am_name(_amOid: Oid) -> String {
 
 /* support routines in commands/define.c */
 
-pub fn defGetString(_def: &DefElem) -> String {
-    unimplemented!()
-}
-
-pub fn defGetNumeric(_def: &DefElem) -> f64 {
-    unimplemented!()
-}
-
-pub fn defGetBoolean(_def: &DefElem) -> bool {
-    unimplemented!()
-}
-
-pub fn defGetInt32(_def: &DefElem) -> i32 {
-    unimplemented!()
-}
-
-pub fn defGetInt64(_def: &DefElem) -> i64 {
-    unimplemented!()
-}
-
-pub fn defGetObjectId(_def: &DefElem) -> Oid {
-    unimplemented!()
-}
-
-pub fn defGetQualifiedName(_def: &DefElem) -> Vec<Node> {
-    unimplemented!()
-}
-
-pub fn defGetTypeName(_def: &DefElem) -> TypeName {
-    unimplemented!()
-}
-
-pub fn defGetTypeLength(_def: &DefElem) -> i32 {
-    unimplemented!()
-}
-
-pub fn defGetStringList(_def: &DefElem) -> Vec<Node> {
-    unimplemented!()
-}
+pub use crate::backend::commands::define::{
+    defGetBoolean, defGetInt32, defGetInt64, defGetNumeric, defGetObjectId, defGetQualifiedName,
+    defGetString, defGetStringList, defGetTypeLength, defGetTypeName,
+};
 
 // pg_noreturn -> diverging fn (-> !).
 pub fn errorConflictingDefElem(_defel: &DefElem, _pstate: &mut ParseState) -> ! {

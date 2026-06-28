@@ -137,9 +137,17 @@ pub fn transformStmt(pstate: &mut ParseState, parse_tree: &Node) -> Box<Query> {
                 not_yet_reachable("transformStmt: set-operation SELECT");
             }
         }
-        // InsertStmt / DeleteStmt / UpdateStmt / MergeStmt / utility statements
-        // grow in later milestones.
-        other => not_yet_reachable(&format!("transformStmt: {other:?}")),
+        // InsertStmt / DeleteStmt / UpdateStmt / MergeStmt and the special-case
+        // transforms (DECLARE CURSOR / EXPLAIN / CREATE TABLE AS / CALL) grow in
+        // later milestones. Everything else - the utility statements (CreateStmt,
+        // ...) - needs no transformation: return the original parse tree with a
+        // CMD_UTILITY Query node plastered on top (PG transformStmt default arm).
+        other => {
+            let mut q = make_query();
+            q.commandType = CmdType::UTILITY;
+            q.utilityStmt = Some(other.clone());
+            q
+        }
     };
 
     // Mark as original query until we learn differently.

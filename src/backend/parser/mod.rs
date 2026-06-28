@@ -7,6 +7,7 @@ pub mod parse_collate;
 pub mod parse_expr;
 pub mod parse_node;
 pub mod parse_target;
+pub mod parse_utilcmd;
 pub mod parser;
 pub mod scan;
 pub mod scansup;

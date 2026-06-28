@@ -13,10 +13,11 @@
 use crate::backend::parser::scan::Token;
 use crate::backend::parser::parser::{
     make_int_const, make_float_const, make_string_const, make_raw_stmt, make_star_target,
-    do_negate, RawStmtVec,
+    do_negate, make_create_stmt, make_column_def_elt, system_type_name, generic_type_name,
+    RawStmtVec,
 };
 use crate::nodes::nodes::Node;
-use crate::nodes::parsenodes::{ResTarget, SelectStmt};
+use crate::nodes::parsenodes::{ResTarget, SelectStmt, TypeName};
 
 grammar;
 
@@ -29,6 +30,10 @@ extern {
         // keywords by canonical spelling (scan.rs resolves words against kwlist)
         "SELECT"  => Token::Keyword("select"),
         "AS"      => Token::Keyword("as"),
+        "CREATE"  => Token::Keyword("create"),
+        "TABLE"   => Token::Keyword("table"),
+        "INT"     => Token::Keyword("int"),
+        "INTEGER" => Token::Keyword("integer"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -74,7 +79,91 @@ TopLevelStmt: Option<Node> = {
 // statement type per milestone; an empty statement yields None (dropped above).
 Stmt: Option<Node> = {
     <s:SelectStmt> => Some(s),
+    <s:CreateStmt> => Some(s),
     => None,            // empty statement (e.g. trailing ';')
+};
+
+// ===========================================================================
+//  CREATE TABLE
+// ===========================================================================
+
+// gram.y `CreateStmt`. M2 reaches the plain `CREATE TABLE name ( elts )` form;
+// IF NOT EXISTS, OF type, PARTITION OF, inheritance, partition spec, WITH options,
+// ON COMMIT, tablespace and access-method clauses arrive at their milestones.
+CreateStmt: Node = {
+    "CREATE" "TABLE" <name:QualifiedName> "(" <elts:OptTableElementList> ")" => {
+        make_create_stmt(name, elts)
+    },
+};
+
+// gram.y `qualified_name`: ColId | ColId indirection. M2 supports the bare and
+// schema-qualified (`schema.name`) forms; the general indirection (subscripts) is
+// rejected by makeRangeVarFromQualifiedName in PG and is not reached here.
+QualifiedName: crate::nodes::primnodes::RangeVar = {
+    <n:ColId> => crate::nodes::makefuncs::makeRangeVar(None, Some(n), -1),
+    <s:ColId> "." <n:ColId> =>
+        crate::nodes::makefuncs::makeRangeVar(Some(s), Some(n), -1),
+};
+
+// gram.y `OptTableElementList` / `TableElementList`. M2 element = columnDef;
+// TableConstraint and TableLikeClause grow with constraints / LIKE.
+OptTableElementList: Vec<Node> = {
+    TableElementList,
+    => Vec::new(),
+};
+
+TableElementList: Vec<Node> = {
+    <e:TableElement> => vec![e],
+    <mut list:TableElementList> "," <e:TableElement> => { list.push(e); list },
+};
+
+TableElement: Node = {
+    ColumnDef,
+};
+
+// gram.y `columnDef`: ColId Typename ColQualList. M2 builds the plain
+// `name type` ColumnDef; column constraints (NOT NULL / DEFAULT / ...) grow with
+// the ColQualList machinery.
+ColumnDef: Node = {
+    <name:ColId> <typ:Typename> => make_column_def_elt(name, typ),
+};
+
+// ===========================================================================
+//  Type names  (gram.y Typename -> SimpleTypename -> Numeric / GenericType).
+//  The full type tower (arrays, intervals, character types, typmods, %TYPE,
+//  SETOF) grows at later milestones; M2 covers int/integer and a bare generic
+//  type name resolved by catalog lookup.
+// ===========================================================================
+
+Typename: TypeName = {
+    SimpleTypename,
+};
+
+SimpleTypename: TypeName = {
+    Numeric,
+    GenericType,
+};
+
+// gram.y `Numeric`: the built-in numeric/boolean spellings. M2 maps the integer
+// aliases to their pg_catalog type; the rest (smallint/bigint/real/double/numeric/
+// decimal/boolean and their typmods) grow as the lexer gains those keywords.
+Numeric: TypeName = {
+    "INT"     => system_type_name("int4"),
+    "INTEGER" => system_type_name("int4"),
+};
+
+// gram.y `GenericType`: a (possibly schema-qualified) user/catalog type name,
+// resolved by catalog lookup at analysis time. M2 takes a bare type identifier;
+// the qualified form + opt_type_modifiers + array bounds grow later.
+GenericType: TypeName = {
+    <n:ColId> => generic_type_name(n),
+};
+
+// gram.y `ColId`: an identifier usable as a column/table name. The unreserved /
+// col-name keyword spellings that ColId also admits grow as those keywords enter
+// the grammar; M2 accepts a bare IDENT.
+ColId: String = {
+    <n:"IDENT"> => n,
 };
 
 // ===========================================================================

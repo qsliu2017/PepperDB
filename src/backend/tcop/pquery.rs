@@ -18,12 +18,20 @@
 //! portalmem lands. `ActivePortal`/`PortalContext` globals are likewise deferred
 //! (no internal-transaction-restarting utility runs on the M1 path).
 
+#![allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: the async utility portal path (PortalRunUtility/Multi) holds the per-backend &mut DestReceiver task-confined across the catalog-create await; single-backend state, never sent across tasks"
+)]
+
+use std::sync::Arc;
+
 use crate::access::sdir::ScanDirection;
 use crate::executor::execdesc::QueryDesc;
 use crate::executor::executor::{ExecutorEnd, ExecutorRun, ExecutorStart};
 use crate::nodes::nodes::CmdType;
 use crate::nodes::params::ParamListInfoData;
 use crate::nodes::plannodes::PlannedStmt;
+use crate::shared_state::SharedState;
 use crate::tcop::cmdtag::QueryCompletion;
 use crate::tcop::cmdtaglist::CommandTag;
 use crate::tcop::dest::DestReceiver;
@@ -92,12 +100,15 @@ pub fn choose_portal_strategy(stmts: &[PlannedStmt]) -> PortalStrategy {
                 return PortalStrategy::OneSelect;
             }
             if pstmt.command_type == CmdType::UTILITY {
-                unimplemented!("ChoosePortalStrategy: utility statements deferred");
+                // A utility statement runs through the multi-query path (PG: a
+                // utility PlannedStmt has utilityStmt set and no plan tree).
+                return PortalStrategy::MultiQuery;
             }
         }
     }
-    // ONE_RETURNING / MULTI_QUERY classification grows with INSERT/multi-stmt.
-    unimplemented!("ChoosePortalStrategy: non-single-SELECT statement lists deferred")
+    // ONE_RETURNING classification grows with INSERT/RETURNING; a multi-statement
+    // list (incl. utility) is MULTI_QUERY.
+    PortalStrategy::MultiQuery
 }
 
 /// PG `PortalSetResultFormat`: store the per-column wire format codes.
@@ -139,11 +150,88 @@ pub fn portal_start(portal: &mut PortalData) {
             unimplemented!("PortalStart: holdStore strategies (RETURNING/MOD_WITH/UTIL) deferred")
         }
         PortalStrategy::MultiQuery => {
-            unimplemented!("PortalStart: PORTAL_MULTI_QUERY deferred")
+            // PG: "Need do nothing now" -- no result descriptor; execution happens
+            // in PortalRun -> PortalRunMulti.
+            portal.tup_desc = None;
         }
     }
 
     portal.status = PortalStatus::Ready;
+}
+
+/// PG `PortalRunUtility`: run one utility `PlannedStmt` through `ProcessUtility`.
+/// Async (`ProcessUtility` reaches the catalog/heap create). The portal snapshot
+/// handling is staged for M2 (CREATE TABLE runs under the caller's active
+/// snapshot).
+pub async fn portal_run_utility(
+    shared: &Arc<SharedState>,
+    portal: &mut PortalData,
+    pstmt: &PlannedStmt,
+    is_top_level: bool,
+    dest: &mut dyn DestReceiver,
+    qc: Option<&mut QueryCompletion>,
+) {
+    use crate::tcop::utility::ProcessUtilityContext;
+    let context = if is_top_level {
+        ProcessUtilityContext::Toplevel
+    } else {
+        ProcessUtilityContext::Query
+    };
+    crate::backend::tcop::utility::process_utility(
+        shared,
+        pstmt,
+        &portal.source_text,
+        context,
+        dest,
+        qc,
+    )
+    .await;
+}
+
+/// PG `PortalRunMulti` (the M2 utility subset): iterate the portal's PlannedStmts,
+/// dispatching each utility statement through `PortalRunUtility`. The plannable-
+/// query arm (ProcessQuery) grows with multi-statement DML; M2 reaches only
+/// utility statements here. Async (`PortalRunUtility` is async).
+pub async fn portal_run_multi(
+    shared: &Arc<SharedState>,
+    portal: &mut PortalData,
+    is_top_level: bool,
+    dest: &mut dyn DestReceiver,
+    mut qc: Option<&mut QueryCompletion>,
+) {
+    let stmts = std::mem::take(&mut portal.stmts);
+    for pstmt in &stmts {
+        crate::miscadmin::check_for_interrupts();
+
+        if pstmt.utility_stmt.is_none() {
+            unimplemented!("PortalRunMulti: plannable-query statement deferred");
+        }
+
+        // A canSetTag utility carries the result tag; pass qc only for that one.
+        let qc_for_stmt = if pstmt.can_set_tag { qc.as_deref_mut() } else { None };
+        portal_run_utility(shared, portal, pstmt, is_top_level, dest, qc_for_stmt).await;
+
+        // CCI after each utility command.
+        crate::backend::access::transam::xact::CommandCounterIncrement();
+    }
+    portal.stmts = stmts;
+}
+
+/// PG `PortalRun` for the MULTI_QUERY strategy (async). Drives `PortalRunMulti`,
+/// marks the portal done, and reports completion. The synchronous `portal_run`
+/// above stays the ONE_SELECT path; this is the utility/multi path.
+pub async fn portal_run_multi_query(
+    shared: &Arc<SharedState>,
+    portal: &mut PortalData,
+    is_top_level: bool,
+    dest: &mut dyn DestReceiver,
+    qc: Option<&mut QueryCompletion>,
+) {
+    crate::assert!(portal.status == PortalStatus::Ready);
+    crate::assert!(portal.strategy == PortalStrategy::MultiQuery);
+    portal.status = PortalStatus::Active;
+    portal_run_multi(shared, portal, is_top_level, dest, qc).await;
+    portal.status = PortalStatus::Done;
 }
 
 /// PG `PortalRun`: execute the portal to completion. Returns "all rows fetched".

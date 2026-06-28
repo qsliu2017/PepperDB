@@ -113,9 +113,7 @@ pub fn UtilityContainsQuery(parsetree: &Node) -> Option<Box<Query>> {
     unimplemented!()
 }
 
-pub fn CreateCommandTag(parsetree: &Node) -> CommandTag {
-    unimplemented!()
-}
+pub use crate::backend::tcop::utility::create_command_tag as CreateCommandTag;
 
 /// Inline in the header: name for the command tag of a parse tree.
 pub fn CreateCommandName(parsetree: &Node) -> &'static str {

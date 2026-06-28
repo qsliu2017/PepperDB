@@ -160,9 +160,14 @@ pub struct Query {
 }
 
 /// TypeName - specifies a type in definitions.
+///
+/// `names` is a possibly-qualified type name; PG documents it as a list of String
+/// value nodes (`parsenodes.h`: "list of String nodes"). Narrowed to `Vec<String_>`
+/// (survey item B5): no tree walker recurses into it, so the closed leaf type is
+/// safe and makes a non-String element unrepresentable.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeName {
-    pub names: Vec<Node>,
+    pub names: Vec<String_>,
     pub typeOid: Oid,
     pub setof: bool,
     pub pct_type: bool,
