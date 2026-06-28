@@ -2,6 +2,13 @@
 //!
 //! Prototypes for pquery.c (portal execution). `List *` of statements ->
 //! `&[Box<Node>]`; the C `ActivePortal` global -> a `static mut` placeholder.
+//!
+//! The M1 portal-execution bodies live in `crate::backend::tcop::pquery` with an
+//! OWNED `&mut PortalData` signature (the portalmem.c hashtable / raw-`Portal`
+//! lifecycle is deferred). The raw-`Portal` declarations below are the C ABI and
+//! remain deferred stubs until portalmem lands; M1 callers (`exec_simple_query`)
+//! use the backend bodies directly: `create_portal`, `portal_define_query`,
+//! `portal_start`, `portal_run`, `portal_drop`, `create_query_desc`.
 
 #![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
 

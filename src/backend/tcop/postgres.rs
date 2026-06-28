@@ -28,41 +28,52 @@
 //! calls into one of those subsystems.
 
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use tokio::net::TcpStream;
 
+use crate::backend::libpq::pqcomm::{self as pq, PqComm};
 use crate::backend::storage::ipc::procsignal::{self, ProcSignalSlot};
+use crate::libpq::libpq::PQ_LARGE_MESSAGE_LIMIT;
 use crate::libpq::protocol::{
     PQMSG_BIND, PQMSG_CLOSE, PQMSG_COPY_DATA, PQMSG_COPY_DONE, PQMSG_COPY_FAIL, PQMSG_DESCRIBE,
     PQMSG_EXECUTE, PQMSG_FLUSH, PQMSG_FUNCTION_CALL, PQMSG_PARSE, PQMSG_QUERY, PQMSG_SYNC,
     PQMSG_TERMINATE,
 };
 use crate::miscadmin::{interrupts_can_be_processed, BackendType};
+use crate::tcop::cmdtaglist::CommandTag;
+use crate::tcop::dest::CommandDest;
 use crate::utils::errcodes::{
     ERRCODE_ADMIN_SHUTDOWN, ERRCODE_CONNECTION_FAILURE, ERRCODE_IDLE_IN_TRANSACTION_SESSION_TIMEOUT,
     ERRCODE_IDLE_SESSION_TIMEOUT, ERRCODE_QUERY_CANCELED,
 };
 
+/// Where the backend sends query results. PG `whereToSendOutput`; a normal client
+/// backend always uses `DestRemote` (M1 has no standalone / replication mode).
+const WHERE_TO_SEND_OUTPUT: CommandDest = CommandDest::DestRemote;
+
 // ---------------------------------------------------------------------------
 // PostgresMain -- the backend command loop.
 // ---------------------------------------------------------------------------
 
-/// PG `PostgresMain`. Sends this backend's startup responses, then loops reading
-/// and dispatching client messages until Terminate/EOF.
+/// PG `PostgresMain`. Installs the connection's pqcomm layer over `stream`,
+/// announces readiness, then loops reading and dispatching client messages until
+/// Terminate/EOF.
 ///
-/// `stream` is held so the socket stays open for the life of the backend; the
-/// translated loop reaches the client through the `pq_*` helpers (deferred), not
-/// through `stream` directly -- pqcomm owns the wire transport once it lands. The
-/// loop calls `CHECK_FOR_INTERRUPTS` at the top of each iteration; that is now
-/// live (see [`process_interrupts`]).
-#[allow(
-    clippy::unused_async,
-    reason = "PostgresMain command loop is driven as a future (tokio::pin!/select! in run_backend); awaits land once pqcomm (read_command/ready_for_query) is ported"
-)]
+/// THE ASYNC BOUNDARY (rules.md s5): the command loop is `async` -- it awaits the
+/// wire read (`pq_getmessage`) and the flush (`pq_flush`). The per-command
+/// pipeline it dispatches (parse/analyze/rewrite/plan/Portal/ExecutorRun/printtup)
+/// is SYNCHRONOUS and sits inside the per-command `catch_unwind` recovery point;
+/// the receiver appends each message to the send buffer with the SYNC
+/// `pq_putmessage_sync` (never `.await`), and the loop flushes afterward. No lock
+/// guard is held across any `.await` (the read/flush only touch the async socket
+/// mutex inside pqcomm).
+///
+/// The whole loop runs inside `pqcomm::scope` (publishes the per-task `PqComm`,
+/// PG's `MyProcPort`) and `xact_scope` (a per-task transaction state so
+/// `TransactionBlockStatusCode` reports 'I' idle for ReadyForQuery; M1's
+/// start/finish_xact_command are near-no-ops over it).
 pub async fn postgres_main(stream: TcpStream, dbname: String, username: String) {
-    // Keep the connection alive for the backend's lifetime. pqcomm will take it
-    // over; until then it parks here so the socket is not dropped mid-loop.
-    let _stream = stream;
     let _ = (&dbname, &username);
 
     // PG runs InitPostgres (auth + connect-to-database) here; that is the
@@ -71,49 +82,76 @@ pub async fn postgres_main(stream: TcpStream, dbname: String, username: String) 
     // normal processing mode for the loop.
     crate::miscadmin::set_processing_mode(crate::miscadmin::ProcessingMode::NormalProcessing);
 
-    // Send this backend's cancellation key to the frontend (BackendKeyData),
-    // then enter the message loop. These wire sends go through the deferred pq_*
-    // stubs; the structure is faithful to postgres.c.
-    send_backend_key_data();
+    // Install the wire transport (PG `pq_init` over MyProcPort) and the per-task
+    // transaction state, then run the command loop inside both scopes. The loop
+    // future is boxed: the SYNC pipeline's transient locals + the per-task
+    // `XactState` make the combined future large, and `Box::pin` keeps it off the
+    // caller's stack (clippy::large_futures) without changing behavior.
+    let comm = Arc::new(PqComm::new(stream));
+    let loop_fut = Box::pin(crate::backend::access::transam::xact::xact_scope(command_loop()));
+    pq::scope(comm, loop_fut).await;
+}
+
+/// The backend message loop proper (PG `PostgresMain`'s `for (;;)`), run inside
+/// the pqcomm + xact scopes. Async (awaits the wire read + flush).
+async fn command_loop() {
+    // Send this backend's cancellation key to the frontend (BackendKeyData).
+    send_backend_key_data().await;
 
     let mut send_ready_for_query = true;
     loop {
-        // (1) If idle, tell the frontend we're ready for a new query.
+        // (1) If idle, tell the frontend we're ready (ReadyForQuery flushes).
         if send_ready_for_query {
-            ready_for_query();
+            crate::backend::tcop::dest::ready_for_query(WHERE_TO_SEND_OUTPUT).await;
             send_ready_for_query = false;
         }
 
-        // Per-command recovery point (error.md s2.2, boundary 2 -- PG's top-level
-        // sigsetjmp). Wrap the read + dispatch of one command in catch_unwind so
-        // an ERROR (a panic carrying ErrorData) is recovered HERE, backend-local,
-        // and the loop continues with the next command. FATAL and non-ErrorData
-        // bug-panics are resumed so they reach the task boundary (end the
-        // backend). No lock/guard is held across the catch.
+        // (2) A query-cancel arriving while we block on the read is suppressed:
+        // ProcessInterrupts treats it as a no-op while DoingCommandRead.
+        set_doing_command_read(true);
+
+        // (3) Read one command from the wire (ASYNC -- the only blocking point).
+        let read = read_command().await;
+
+        // (5) Service interrupts that arrived while reading, before clearing
+        // DoingCommandRead (an idle cancel is reset, not thrown).
+        crate::miscadmin::check_for_interrupts();
+        set_doing_command_read(false);
+
+        // Terminate or EOF: the frontend is closing the socket. Normal exit.
+        let Some((firstchar, body)) = read else {
+            return;
+        };
+
+        // (7) Per-command recovery point (error.md s2.2, boundary 2 -- PG's
+        // top-level sigsetjmp). The SYNC dispatch builds all reply bytes into the
+        // send buffer; wrap it in catch_unwind so an ERROR (a panic carrying
+        // ErrorData) is recovered HERE, backend-local, and the loop continues.
+        // FATAL / non-ErrorData bug-panics resume to the task boundary. No lock
+        // guard or future is held across the catch.
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            process_one_command()
+            dispatch_command(firstchar, &body)
         }));
 
         match outcome {
             Ok(CommandResult::Continue { ready }) => {
                 send_ready_for_query |= ready;
+                // Flush whatever the dispatch buffered (RowDescription/DataRow/
+                // CommandComplete). If a ReadyForQuery follows it flushes too, but
+                // flushing here keeps extended-protocol replies prompt.
+                let _ = pq::pq_flush().await;
             }
-            // Terminate or EOF: the frontend is closing the socket. Normal exit.
             Ok(CommandResult::Done) => return,
-            Err(payload) => {
-                // error.md s2.3-2.4: an ERROR (elevel < FATAL) is recovered in
-                // the backend; FATAL (or a non-ErrorData bug-panic) resumes to the
-                // task boundary, which ends the backend.
-                match payload.downcast::<crate::utils::elog::ErrorData>() {
-                    Ok(edata) if edata.elevel < crate::utils::elog::FATAL => {
-                        recover_from_error(&edata);
-                        // After recovery the session is idle again -- announce it.
-                        send_ready_for_query = true;
-                    }
-                    Ok(edata) => std::panic::resume_unwind(edata), // FATAL
-                    Err(other) => std::panic::resume_unwind(other), // bug-panic
+            Err(payload) => match payload.downcast::<crate::utils::elog::ErrorData>() {
+                Ok(edata) if edata.elevel < crate::utils::elog::FATAL => {
+                    recover_from_error(&edata);
+                    // Flush the buffered ErrorResponse, then announce idle.
+                    let _ = pq::pq_flush().await;
+                    send_ready_for_query = true;
                 }
-            }
+                Ok(edata) => std::panic::resume_unwind(edata), // FATAL
+                Err(other) => std::panic::resume_unwind(other), // bug-panic
+            },
         }
     }
 }
@@ -126,69 +164,35 @@ enum CommandResult {
     Done,
 }
 
-/// Read and dispatch exactly one client command (steps 3/5/7 of `PostgresMain`).
-/// Sync (no `.await`) so the whole unit sits inside the per-command `catch_unwind`
-/// recovery point. An `elog(ERROR/FATAL)` raised in here unwinds out as a panic.
-fn process_one_command() -> CommandResult {
-    // (2) Allow a query-cancel arriving while we block on the read to be a
-    // no-op: ProcessInterrupts suppresses the cancel ERROR while DoingCommandRead.
-    set_doing_command_read(true);
-
-    // (3) Read a command (blocks here in PG via secure_read). pqcomm is
-    // deferred: read_command hits the pq_* stub at runtime.
-    let firstchar = read_command();
-
-    // (5) Service any interrupts that arrived while we slept, before clearing
-    // DoingCommandRead, so an idle cancel is reset rather than thrown. This is
-    // the live CHECK_FOR_INTERRUPTS payoff.
-    crate::miscadmin::check_for_interrupts();
-    set_doing_command_read(false);
-
-    // (7) Process the command.
+/// Dispatch one already-read client command by message type (step 7 of
+/// `PostgresMain`). SYNC (no `.await`) so the whole unit sits inside the
+/// per-command `catch_unwind`. An `elog(ERROR/FATAL)` raised here unwinds as a
+/// panic. The simple-Query / DestRemote path is COMPLETE; the extended-protocol
+/// arms are grow guards (rules.md s4).
+fn dispatch_command(firstchar: u8, body: &[u8]) -> CommandResult {
     match firstchar {
-        Some(PQMSG_QUERY) => {
-            exec_simple_query("");
+        PQMSG_QUERY => {
+            // Body is the null-terminated query string.
+            let query_string = cstr_body(body);
+            exec_simple_query(query_string);
             CommandResult::Continue { ready: true }
         }
-        Some(PQMSG_PARSE) => {
-            exec_parse_message();
-            CommandResult::Continue { ready: false }
+        PQMSG_PARSE | PQMSG_BIND | PQMSG_EXECUTE | PQMSG_DESCRIBE | PQMSG_CLOSE => {
+            unimplemented!("extended query protocol (Parse/Bind/Execute/Describe/Close) deferred")
         }
-        Some(PQMSG_BIND) => {
-            exec_bind_message();
-            CommandResult::Continue { ready: false }
-        }
-        Some(PQMSG_EXECUTE) => {
-            exec_execute_message();
-            CommandResult::Continue { ready: false }
-        }
-        Some(PQMSG_FUNCTION_CALL) => {
-            handle_function_request();
-            CommandResult::Continue { ready: true }
-        }
-        Some(PQMSG_CLOSE) => {
-            exec_close_message();
-            CommandResult::Continue { ready: false }
-        }
-        Some(PQMSG_DESCRIBE) => {
-            exec_describe_message();
-            CommandResult::Continue { ready: false }
-        }
-        Some(PQMSG_FLUSH) => {
-            pq_flush();
-            CommandResult::Continue { ready: false }
-        }
-        Some(PQMSG_SYNC) => {
+        PQMSG_FUNCTION_CALL => unimplemented!("fastpath function call deferred"),
+        PQMSG_FLUSH => CommandResult::Continue { ready: false },
+        PQMSG_SYNC => {
             finish_xact_command();
             CommandResult::Continue { ready: true }
         }
         // Terminate or EOF: the frontend is closing the socket. Normal exit.
-        Some(PQMSG_TERMINATE) | None => CommandResult::Done,
+        PQMSG_TERMINATE => CommandResult::Done,
         // COPY messages after a failed COPY: accept and ignore.
-        Some(PQMSG_COPY_DATA | PQMSG_COPY_DONE | PQMSG_COPY_FAIL) => {
+        PQMSG_COPY_DATA | PQMSG_COPY_DONE | PQMSG_COPY_FAIL => {
             CommandResult::Continue { ready: false }
         }
-        Some(other) => {
+        other => {
             // PG: ereport(FATAL, ERRCODE_PROTOCOL_VIOLATION).
             crate::ereport!(crate::utils::elog::FATAL, |e: &mut crate::utils::elog::ErrorData| {
                 e.errcode(crate::utils::errcodes::ERRCODE_PROTOCOL_VIOLATION)
@@ -197,6 +201,129 @@ fn process_one_command() -> CommandResult {
             CommandResult::Continue { ready: false }
         }
     }
+}
+
+/// PG `exec_simple_query`: the real pipeline for a simple Query message.
+///
+/// raw_parser -> parse_analyze_fixedparams + QueryRewrite -> standard_planner ->
+/// CreatePortal/PortalDefineQuery/PortalStart/PortalRun (driving a DestRemote
+/// printtup receiver) -> EndCommand (CommandComplete). Everything here is
+/// synchronous and buffers its wire output via `pq_putmessage_sync`; the command
+/// loop flushes after this returns.
+///
+/// M1 scope: exactly one SELECT statement. An empty query string -> NullCommand
+/// (EmptyQueryResponse). Multi-statement strings, utility/DML statements, and the
+/// implicit-transaction-block handling grow with their subsystems (rules.md s4).
+fn exec_simple_query(query_string: &str) {
+    use crate::backend::parser::analyze::parse_analyze_fixedparams;
+    use crate::backend::parser::parser::raw_parser;
+    use crate::backend::optimizer::plan::planner::standard_planner;
+    use crate::backend::rewrite::rewriteHandler::query_rewrite;
+    use crate::nodes::nodes::Node;
+    use crate::nodes::parsenodes::{RawStmt, FETCH_ALL};
+    use crate::parser::parser::RawParseMode;
+
+    let dest = WHERE_TO_SEND_OUTPUT;
+
+    // start_xact_command(): near-no-op over the xact scope for M1 (the loop runs
+    // inside xact_scope; full StartTransactionCommand grows with xact.rs wiring).
+    start_xact_command();
+
+    // pg_parse_query: raw parse. (tcopprot.c's pg_parse_query wrapper is deferred;
+    // call the parser body directly, as the executor tests do.)
+    let mut parsetrees = raw_parser(query_string, RawParseMode::Default);
+
+    // Empty query string: tell the frontend and finish.
+    if parsetrees.is_empty() {
+        finish_xact_command();
+        crate::backend::tcop::dest::null_command(dest);
+        return;
+    }
+
+    // M1 handles a single statement; multi-statement strings grow.
+    if parsetrees.len() != 1 {
+        unimplemented!("exec_simple_query: multi-statement query strings deferred");
+    }
+    let Node::RawStmt(raw) = *parsetrees.remove(0) else {
+        unreachable!("raw_parser yields RawStmt nodes");
+    };
+    let raw: RawStmt = *raw;
+
+    crate::backend::tcop::dest::begin_command(CommandTag::Unknown, dest);
+
+    // If we got a cancel signal in parsing, quit.
+    crate::miscadmin::check_for_interrupts();
+
+    // pg_analyze_and_rewrite_fixedparams: parse analysis + rewrite.
+    let analyzed = parse_analyze_fixedparams(&raw, query_string, &[], 0, None);
+    let mut rewritten = query_rewrite(analyzed);
+    if rewritten.len() != 1 {
+        unimplemented!("exec_simple_query: query rewrite producing multiple queries deferred");
+    }
+
+    // pg_plan_queries: plan.
+    let mut query = rewritten.remove(0);
+    let plan = standard_planner(&mut query, query_string, 0, None);
+
+    crate::miscadmin::check_for_interrupts();
+
+    // The command tag for the completion message. M1 reaches SELECT only;
+    // CreateCommandTag (utility.c) is deferred, so derive it from the plan.
+    let command_tag = command_tag_for(&plan);
+
+    // CreatePortal / PortalDefineQuery / PortalStart.
+    let mut portal = crate::backend::tcop::pquery::create_portal("");
+    crate::backend::tcop::pquery::portal_define_query(
+        &mut portal,
+        query_string,
+        command_tag,
+        vec![plan],
+    );
+    // Select the wire format: text (0) for every column in simple Query mode.
+    crate::backend::tcop::pquery::portal_set_result_format(&mut portal, &[]);
+    crate::backend::tcop::pquery::portal_start(&mut portal);
+
+    // Create the destination receiver and bind it to the portal (formats).
+    let mut receiver = crate::backend::tcop::dest::create_dest_receiver(dest);
+    if dest == CommandDest::DestRemote {
+        crate::access::printtup::SetRemoteDestReceiverParams(receiver.as_mut(), portal.as_mut());
+    }
+
+    // Run the portal to completion (drives ExecutorRun -> printtup, which appends
+    // RowDescription + DataRow(s) to the send buffer), then finish + drop.
+    let mut qc = crate::tcop::cmdtag::QueryCompletion { command_tag, nprocessed: 0 };
+    crate::backend::tcop::pquery::portal_run(&mut portal, FETCH_ALL, receiver, Some(&mut qc));
+
+    if let Some(query_desc) = portal.query_desc.as_mut() {
+        crate::executor::executor::ExecutorFinish(query_desc);
+    }
+    crate::backend::tcop::pquery::portal_drop(&mut portal);
+
+    // Close the transaction statement (near-no-op for M1), then report completion.
+    finish_xact_command();
+    crate::backend::tcop::dest::end_command(&qc, dest, false);
+}
+
+/// Derive the completion command tag from a planned statement. M1 reaches SELECT;
+/// the full `CreateCommandTag` (utility.c, raw-statement based) grows later.
+fn command_tag_for(plan: &crate::nodes::plannodes::PlannedStmt) -> CommandTag {
+    match plan.command_type {
+        crate::nodes::nodes::CmdType::SELECT => CommandTag::Select,
+        other => unimplemented!("command_tag_for: {other:?} (non-SELECT) deferred"),
+    }
+}
+
+/// PG `start_xact_command`: ensure a transaction command is open. M1 runs the
+/// whole loop inside `xact_scope`, so this is a near-no-op; the full
+/// StartTransactionCommand wiring grows with xact.rs.
+fn start_xact_command() {
+    // TODO(xact): StartTransactionCommand(&shared) + statement-timeout arm.
+}
+
+/// PG `finish_xact_command`: close the transaction statement. Near-no-op for M1
+/// (see `start_xact_command`); CommitTransactionCommand grows with xact.rs.
+fn finish_xact_command() {
+    // TODO(xact): CommitTransactionCommand(&shared).
 }
 
 /// Recover from a backend-local ERROR caught at the per-command recovery point
@@ -227,33 +354,36 @@ fn abort_current_transaction_stub() {
     // TODO(xact): AbortCurrentTransaction(&shared).await -- needs a sync bridge.
 }
 
-// --- Deferred wire/exec entries (pqcomm + parser/planner/executor) ---------
-// These translate the postgres.c call sites onto the existing deferred stubs.
-// They are thin so the loop above reads like postgres.c; each lands on an
-// `unimplemented!()` at runtime until its subsystem is ported.
+// --- Wire helpers over the per-task PqComm (rules.md s5) --------------------
 
-fn send_backend_key_data() {
-    // PG: pq_beginmessage(BackendKeyData) + pid + MyCancelKey + pq_endmessage.
-    crate::libpq::libpq::pq_putmessage(crate::libpq::protocol::PQMSG_BACKEND_KEY_DATA, &[]);
+/// PG `pq_putmessage(BackendKeyData, ...)`. Sent once after startup. The cancel
+/// key payload (pid + MyCancelKey) is appended by backend_startup; M1 sends an
+/// empty BackendKeyData body (the cancel handshake is exercised separately).
+async fn send_backend_key_data() {
+    let _ = pq::pq_putmessage(crate::libpq::protocol::PQMSG_BACKEND_KEY_DATA, &[]).await;
 }
 
-fn ready_for_query() {
-    // PG: ReadyForQuery(whereToSendOutput) (commands/dest.c) -> 'Z' + flush.
-    crate::libpq::libpq::pq_putmessage(crate::libpq::protocol::PQMSG_READY_FOR_QUERY, &[]);
-    pq_flush();
-}
-
-/// PG `ReadCommand`/`SocketBackend`: read the message-type byte then the body.
-/// Returns the firstchar, or `None` for EOF. pqcomm deferred -> pq_* stub.
-fn read_command() -> Option<u8> {
-    match crate::libpq::libpq::pq_getbyte() {
-        -1 => None,
-        b => Some(b as u8),
+/// PG `ReadCommand`/`SocketBackend`: read one message (type byte + body) from the
+/// wire. Returns `Some((firstchar, body))`, or `None` on EOF / protocol loss.
+/// Async (the only blocking point in the loop).
+async fn read_command() -> Option<(u8, Vec<u8>)> {
+    pq::pq_startmsgread();
+    let firstchar = pq::pq_getbyte().await;
+    if firstchar == pq::EOF {
+        return None;
     }
+    let mut body = Vec::new();
+    if pq::pq_getmessage(&mut body, PQ_LARGE_MESSAGE_LIMIT).await.is_err() {
+        return None;
+    }
+    Some((firstchar as u8, body))
 }
 
-fn pq_flush() {
-    crate::libpq::libpq::pq_flush();
+/// Interpret a message body as the null-terminated query string (PG simple Query
+/// body is a single C string). Strips the trailing NUL; lossy for non-UTF-8.
+fn cstr_body(body: &[u8]) -> &str {
+    let end = body.iter().position(|&b| b == 0).unwrap_or(body.len());
+    std::str::from_utf8(&body[..end]).unwrap_or("")
 }
 
 /// PG `DoingCommandRead` setter. Per-task state on the Session; a no-op with no
@@ -267,41 +397,6 @@ fn set_doing_command_read(v: bool) {
 /// PG `DoingCommandRead` reader. False with no Session in scope.
 fn doing_command_read() -> bool {
     crate::session::try_current().is_some_and(|s| s.doing_command_read())
-}
-
-fn exec_simple_query(query_string: &str) {
-    // PG exec_simple_query: pg_parse_query -> pg_analyze_and_rewrite ->
-    // pg_plan_queries -> PortalRun. All deferred.
-    crate::tcop::tcopprot::pg_parse_query(query_string);
-}
-
-fn exec_parse_message() {
-    crate::tcop::tcopprot::pg_parse_query("");
-}
-
-fn exec_bind_message() {
-    crate::tcop::tcopprot::pg_parse_query("");
-}
-
-fn exec_execute_message() {
-    crate::tcop::tcopprot::pg_parse_query("");
-}
-
-fn exec_close_message() {
-    crate::libpq::libpq::pq_putmessage(crate::libpq::protocol::PQMSG_CLOSE_COMPLETE, &[]);
-}
-
-fn exec_describe_message() {
-    crate::tcop::tcopprot::pg_parse_query("");
-}
-
-fn handle_function_request() {
-    crate::tcop::tcopprot::pg_parse_query("");
-}
-
-fn finish_xact_command() {
-    // PG finish_xact_command -> CommitTransactionCommand (xact.c). Deferred.
-    crate::tcop::tcopprot::pg_parse_query("");
 }
 
 // ---------------------------------------------------------------------------
@@ -657,5 +752,186 @@ mod tests {
         let payload = result.expect_err("a non-ErrorData bug-panic must propagate");
         assert!(payload.downcast_ref::<ErrorData>().is_none());
         crate::utils::elog::flush_error_state();
+    }
+}
+
+// --- end-to-end M1 wire test (the SELECT 1 milestone) ----------------------
+#[cfg(test)]
+mod wire_tests {
+    use super::*;
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use crate::backend::libpq::pqcomm::{self as pq, PqComm};
+
+    /// One decoded backend->frontend message: type byte + body (length stripped).
+    #[derive(Debug, PartialEq, Eq)]
+    struct Msg {
+        ty: u8,
+        body: Vec<u8>,
+    }
+
+    /// Split a raw byte stream into typed, length-prefixed messages.
+    fn decode(mut bytes: &[u8]) -> Vec<Msg> {
+        let mut out = Vec::new();
+        while bytes.len() >= 5 {
+            let ty = bytes[0];
+            let len = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
+            let body = bytes[5..5 + (len - 4)].to_vec();
+            out.push(Msg { ty, body });
+            bytes = &bytes[1 + len..];
+        }
+        out
+    }
+
+    /// Frame a frontend message (type + int32 len-incl-self + body).
+    fn framed(ty: u8, body: &[u8]) -> Vec<u8> {
+        let mut v = vec![ty];
+        v.extend_from_slice(&((body.len() as u32 + 4).to_be_bytes()));
+        v.extend_from_slice(body);
+        v
+    }
+
+    /// Drive the backend command loop for a single simple Query, returning the
+    /// decoded message sequence the client received.
+    ///
+    /// The backend runs as its own task over the server end of a duplex. The
+    /// client writes the Query, then reads the whole response (the M1 reply is
+    /// fully flushed before the backend blocks on the next read), then drops the
+    /// duplex client end -- which makes the backend's next read see EOF, so it
+    /// exits cleanly. We read a bounded amount with a timeout rather than to EOF,
+    /// because `tokio::io::duplex` only signals EOF once the WHOLE peer end drops.
+    async fn run_query(sql: &str) -> Vec<Msg> {
+        let (server, mut client) = tokio::io::duplex(64 * 1024);
+
+        let backend = tokio::spawn(async move {
+            let comm = Arc::new(PqComm::new(server));
+            let loop_fut =
+                Box::pin(crate::backend::access::transam::xact::xact_scope(command_loop()));
+            pq::scope(comm, loop_fut).await;
+        });
+
+        let mut q = sql.as_bytes().to_vec();
+        q.push(0); // null-terminated query string
+        client
+            .write_all(&framed(crate::libpq::protocol::PQMSG_QUERY, &q))
+            .await
+            .unwrap();
+        client.flush().await.unwrap();
+
+        // Read the response until it ends with a ReadyForQuery ('Z') message --
+        // the M1 reply terminates with the idle 'Z' that closes the query cycle.
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                client.read(&mut chunk),
+            )
+            .await
+            .expect("backend response timed out")
+            .unwrap();
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            // The cycle is done once we've seen the post-query ReadyForQuery: the
+            // startup 'Z' plus the 'Z' that follows CommandComplete => two 'Z's.
+            let msgs = decode(&buf);
+            let zcount = msgs.iter().filter(|m| m.ty == b'Z').count();
+            if zcount >= 2 && total_decoded_len(&msgs) == buf.len() {
+                break;
+            }
+        }
+
+        // Drop the client -> backend's next read sees EOF -> command loop exits.
+        drop(client);
+        backend.await.unwrap();
+        decode(&buf)
+    }
+
+    /// Sum of the on-wire size of decoded messages (1 type byte + int32 len).
+    fn total_decoded_len(msgs: &[Msg]) -> usize {
+        msgs.iter().map(|m| 1 + 4 + m.body.len()).sum()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn select_1_produces_full_message_sequence() {
+        let msgs = run_query("SELECT 1").await;
+
+        // Sequence: BackendKeyData('K') | ReadyForQuery('Z','I') |
+        //           RowDescription('T') | DataRow('D') | CommandComplete('C') |
+        //           ReadyForQuery('Z','I')
+        let types: Vec<u8> = msgs.iter().map(|m| m.ty).collect();
+        assert_eq!(
+            types,
+            vec![b'K', b'Z', b'T', b'D', b'C', b'Z'],
+            "M1 message sequence"
+        );
+
+        // RowDescription: 1 field "?column?", type OID 23, attlen 4, typmod -1, fmt 0.
+        let t = &msgs[2];
+        assert_eq!(t.ty, b'T');
+        let mut td = Vec::new();
+        td.extend_from_slice(&1u16.to_be_bytes()); // natts
+        td.extend_from_slice(b"?column?\0");
+        td.extend_from_slice(&0u32.to_be_bytes()); // resorigtbl
+        td.extend_from_slice(&0u16.to_be_bytes()); // resorigcol
+        td.extend_from_slice(&23u32.to_be_bytes()); // INT4OID
+        td.extend_from_slice(&4u16.to_be_bytes()); // attlen
+        td.extend_from_slice(&(-1i32 as u32).to_be_bytes()); // typmod
+        td.extend_from_slice(&0u16.to_be_bytes()); // format
+        assert_eq!(t.body, td);
+
+        // DataRow: 1 column, text "1".
+        let d = &msgs[3];
+        assert_eq!(d.ty, b'D');
+        let mut dr = Vec::new();
+        dr.extend_from_slice(&1u16.to_be_bytes()); // 1 column
+        dr.extend_from_slice(&1u32.to_be_bytes()); // length 1
+        dr.extend_from_slice(b"1");
+        assert_eq!(d.body, dr);
+
+        // CommandComplete: "SELECT 1\0".
+        assert_eq!(msgs[4].ty, b'C');
+        assert_eq!(msgs[4].body, b"SELECT 1\0");
+
+        // ReadyForQuery: 'I' idle.
+        assert_eq!(msgs[5].ty, b'Z');
+        assert_eq!(msgs[5].body, b"I");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn select_42_data_row_is_text_42() {
+        let msgs = run_query("SELECT 42").await;
+        let d = msgs.iter().find(|m| m.ty == b'D').expect("a DataRow");
+        let mut dr = Vec::new();
+        dr.extend_from_slice(&1u16.to_be_bytes());
+        dr.extend_from_slice(&2u32.to_be_bytes()); // "42" is 2 bytes
+        dr.extend_from_slice(b"42");
+        assert_eq!(d.body, dr);
+
+        let c = msgs.iter().find(|m| m.ty == b'C').expect("a CommandComplete");
+        assert_eq!(c.body, b"SELECT 1\0"); // one row processed
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn select_two_columns() {
+        let msgs = run_query("SELECT 1, 2").await;
+
+        // RowDescription has 2 fields.
+        let t = msgs.iter().find(|m| m.ty == b'T').expect("a RowDescription");
+        let natts = u16::from_be_bytes([t.body[0], t.body[1]]);
+        assert_eq!(natts, 2);
+
+        // DataRow has 2 text columns "1","2".
+        let d = msgs.iter().find(|m| m.ty == b'D').expect("a DataRow");
+        let mut dr = Vec::new();
+        dr.extend_from_slice(&2u16.to_be_bytes()); // 2 columns
+        dr.extend_from_slice(&1u32.to_be_bytes());
+        dr.extend_from_slice(b"1");
+        dr.extend_from_slice(&1u32.to_be_bytes());
+        dr.extend_from_slice(b"2");
+        assert_eq!(d.body, dr);
     }
 }

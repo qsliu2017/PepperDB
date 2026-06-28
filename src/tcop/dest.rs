@@ -49,39 +49,40 @@ pub trait DestReceiver {
 
     /// CommandDest code for this receiver.
     fn mydest(&self) -> CommandDest;
+
+    /// Downcast hook for receivers that carry destination-specific state set
+    /// after construction (C casts `DestReceiver *` to the concrete struct,
+    /// e.g. `SetRemoteDestReceiverParams` -> `DR_printtup`). Default `None`-like
+    /// behavior is impossible for `Any`, so the default panics: only receivers
+    /// that need post-construction binding override it.
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        unimplemented!("this DestReceiver does not support downcast (as_any_mut)")
+    }
 }
 
-// `None_Receiver` is the permanent receiver for DestNone. The global instance is
-// installed at startup; modeled as task/session state in the single-process port.
+// `None_Receiver` is the permanent receiver for DestNone (C `donothingDR`). The
+// concrete do-nothing receiver lives in the backend body; callers construct one
+// via `NoneReceiver` or `CreateDestReceiver(DestNone)`.
+pub use crate::backend::tcop::dest::NoneReceiver;
+
+// The bodies live in `crate::backend::tcop::dest`; rewire each header decl to a
+// `pub use` so existing `crate::tcop::dest::<CName>` call sites keep resolving
+// (rules.md s3, non-type-centric file).
 
 /// CreateDestReceiver: return a receiver appropriate to the destination.
-// TODO(ptr): the concrete receiver type is chosen at runtime; revisit ownership.
-pub fn create_dest_receiver(_dest: CommandDest) -> Box<dyn DestReceiver> {
-    unimplemented!()
-}
+pub use crate::backend::tcop::dest::create_dest_receiver as CreateDestReceiver;
 
 /// BeginCommand: initialize the destination at start of command.
-pub fn begin_command(_command_tag: CommandTag, _dest: CommandDest) {
-    unimplemented!()
-}
+pub use crate::backend::tcop::dest::begin_command as BeginCommand;
 
-/// EndCommand: clean up the destination at end of command.
-pub fn end_command(
-    _qc: &QueryCompletion,
-    _dest: CommandDest,
-    _force_undecorated_output: bool,
-) {
-    unimplemented!()
-}
+/// EndCommand: send the CommandComplete tag at end of command.
+pub use crate::backend::tcop::dest::end_command as EndCommand;
 
-pub fn end_replication_command(_command_tag: &str) {
-    unimplemented!()
-}
+/// EndReplicationCommand: stripped-down EndCommand for replication (deferred).
+pub use crate::backend::tcop::dest::end_replication_command as EndReplicationCommand;
 
-pub fn null_command(_dest: CommandDest) {
-    unimplemented!()
-}
+/// NullCommand: tell the dest an empty query string was recognized.
+pub use crate::backend::tcop::dest::null_command as NullCommand;
 
-pub fn ready_for_query(_dest: CommandDest) {
-    unimplemented!()
-}
+/// ReadyForQuery: announce readiness for a new query and flush (async).
+pub use crate::backend::tcop::dest::ready_for_query as ReadyForQuery;

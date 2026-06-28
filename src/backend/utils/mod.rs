@@ -5,5 +5,6 @@ pub mod cache;
 pub mod error;
 pub mod fmgr;
 pub mod init;
+pub mod misc;
 pub mod resowner;
 pub mod time;

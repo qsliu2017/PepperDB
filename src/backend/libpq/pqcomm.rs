@@ -662,6 +662,38 @@ pub async fn pq_putmessage_noblock(msgtype: u8, s: &[u8]) {
     let _ = pq_putmessage(msgtype, s).await;
 }
 
+/// Append a typed, length-prefixed message to the send buffer WITHOUT flushing.
+/// The synchronous sibling of [`pq_putmessage`], for callers reached from the
+/// SYNC executor (printtup's `receiveSlot`/`rStartup`, EndCommand) which must not
+/// `.await` (rules.md s5). The bytes accumulate in `send_buffer`; the async
+/// command loop flushes them with [`pq_flush`] after the SYNC pipeline returns.
+///
+/// Only touches the `state` Mutex, locked and dropped here -- never held across
+/// an `.await` (there is no await). The buffer is a `Vec` that grows on demand,
+/// so a message larger than `PQ_SEND_BUFFER_SIZE` still appends correctly; it
+/// just is not auto-flushed mid-stream.
+///
+/// M1 SIMPLIFICATION (carry-forward TODO): a whole result set is buffered before
+/// the single async flush, so a result larger than memory needs an
+/// async-`receiveSlot` redesign (interleave `pq_flush` between rows). For M1's
+/// one small DataRow this is correct and cannot overflow a real send.
+pub fn pq_putmessage_sync(msgtype: u8, s: &[u8]) {
+    crate::assert!(msgtype != 0);
+    let comm = comm();
+    let mut st = comm.state.lock();
+    let at = st.send_pointer;
+    let header_len = 1 + 4;
+    let total = header_len + s.len();
+    if st.send_buffer.len() < at + total {
+        st.send_buffer.resize(at + total, 0);
+    }
+    st.send_buffer[at] = msgtype;
+    let n32 = (s.len() as u32 + 4).to_be_bytes();
+    st.send_buffer[at + 1..at + 5].copy_from_slice(&n32);
+    st.send_buffer[at + 5..at + total].copy_from_slice(s);
+    st.send_pointer = at + total;
+}
+
 /// PG `pq_comm_reset` (`socket_comm_reset`): reset libpq during error recovery.
 /// Keeps pending data, clears the busy flag. Synchronous.
 pub fn pq_comm_reset() {
