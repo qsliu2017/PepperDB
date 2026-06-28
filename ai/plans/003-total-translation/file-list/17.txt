@@ -1,0 +1,14 @@
+# Step 17 -- parser/planner for INSERT + sequential scan.
+# Milestone M2. Depends on: 16 (table exists), 14 (plancat reads relcache). Parallel: limited.
+# Deliverable: INSERT and `SELECT * FROM t` analyze + plan (a SeqScan path over a real rel).
+# Disposition: grow=dispatcher; full=leaf.
+parser/gram.y           # grow -- InsertStmt, SELECT with FROM clause, '*'
+parser/analyze.c        # grow -- transformInsertStmt
+parser/parse_target.c   # grow -- '*' expansion to column list; INSERT target list
+parser/parse_relation.c # grow -- addRangeTableEntry (real table RTE)
+parser/parse_clause.c   # grow -- transformFromClause for FROM t
+parser/parse_expr.c     # grow -- INSERT VALUES handling
+optimizer/util/plancat.c  # grow -- get_relation_info (relcache for t)
+optimizer/path/allpaths.c # grow -- seqscan path over a base rel
+optimizer/path/costsize.c # grow -- cost_seqscan
+optimizer/plan/createplan.c # grow -- create_seqscan_plan arm

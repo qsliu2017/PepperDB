@@ -1,0 +1,10 @@
+# Step 32 -- join executor nodes.   [MILESTONE: multi-table joins]
+# Milestone M7 (completes it). Depends on: 31 (join plans). Parallel: yes (leaf nodes).
+# Deliverable: `SELECT ... FROM a JOIN b ON ...` executes via the cost-chosen join method.
+# Disposition: full=leaf node; grow=dispatcher.
+parser/gram.y           # grow -- JOIN syntax, ON/USING, table aliases, subquery-in-FROM
+executor/nodeNestloop.c # full -- nested loop join
+executor/nodeHashjoin.c # full -- hash join
+executor/nodeHash.c     # full -- hash table build (work_mem)
+executor/nodeMergejoin.c # full -- merge join
+executor/execProcnode.c # grow -- join node init arms

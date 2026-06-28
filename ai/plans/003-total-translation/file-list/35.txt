@@ -1,0 +1,7 @@
+# Step 35 -- the full GUC system (replaces the M1 defaults-shim).
+# Milestone M9. Depends on: M1 shim (step 09). Parallel: yes within (big but isolatable).
+# Deletes the step-09 GUC shim. Disposition: full=leaf entire-file.
+utils/misc/guc.c        # full -- GUC machinery (set/show/reset, config file, contexts)
+utils/misc/guc_tables.c # full -- the variable definition table
+utils/misc/guc_funcs.c  # full -- SET/RESET statement handlers
+commands/variable.c     # full -- assign/show hooks for special GUCs

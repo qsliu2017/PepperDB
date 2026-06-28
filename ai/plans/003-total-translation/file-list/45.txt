@@ -1,0 +1,9 @@
+# Step 45 -- COPY.
+# Milestone M13. Depends on: M2 (heap insert/scan). Parallel: yes (leaf files).
+# Deliverable: COPY FROM / COPY TO (text/CSV/binary).
+# Disposition: full=leaf; grow=dispatcher.
+parser/gram.y            # grow -- COPY statement
+commands/copy.c          # full -- COPY dispatch + options
+commands/copyfrom.c      # full -- COPY FROM (bulk insert)
+commands/copyto.c        # full -- COPY TO
+commands/copyfromparse.c # full -- text/CSV/binary input parsing

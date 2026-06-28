@@ -1,0 +1,9 @@
+# Step 44 -- subqueries / sublinks.   [MILESTONE: window functions / CTEs / set operations]
+# Milestone M12 (completes it). Depends on: 43. Parallel: limited.
+# Deliverable: correlated subqueries and sublinks (IN/EXISTS/scalar) execute.
+# Disposition: full=leaf node; grow=dispatcher.
+parser/gram.y              # grow -- subquery expressions (IN/EXISTS/ANY/ALL)
+executor/nodeSubplan.c     # full -- SubPlan / InitPlan execution (leaf)
+optimizer/plan/subselect.c # grow -- make_subplan, SubLink -> SubPlan
+parser/parse_expr.c        # grow -- transformSubLink
+executor/execProcnode.c    # grow -- SubPlan init arm

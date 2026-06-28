@@ -1,0 +1,14 @@
+# Step 48 -- WAL replay driver + per-AM redo.
+# Milestone M14. Depends on: foundation (WAL write spine + XLogReader); the WAL records were
+# already EMITTED from M2 (steps 12/13). Parallel: limited. Deliverable: crash recovery replays
+# the WAL the running system writes. Redo routines live in separate files (no leaf retouch).
+# Disposition: full=leaf; grow=dispatcher (redo arms on existing files).
+access/transam/xlogrecovery.c # full -- the redo loop: ReadRecord -> rmgr->rm_redo dispatch
+access/transam/xlogutils.c    # full -- XLogReadBufferForRedo, redo buffer mgmt (leaf)
+access/transam/xlog.c         # grow -- StartupXLOG recovery entry (write spine is foundation)
+access/heap/heapam_xlog.c     # full -- heap_redo (insert/update/delete/prune) (leaf, separate file)
+access/nbtree/nbtxlog.c       # full -- btree_redo (insert/split/delete) (leaf, separate file)
+access/heap/visibilitymap.c   # grow -- VM redo + set/clear
+access/transam/xact.c         # grow -- xact_redo (commit/abort)
+access/transam/clog.c         # grow -- clog_redo (clog itself is foundation)
+access/transam/multixact.c    # grow -- multixact redo (if row locking exercised)

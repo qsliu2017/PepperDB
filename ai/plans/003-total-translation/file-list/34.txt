@@ -1,0 +1,15 @@
+# Step 34 -- modify executor + EvalPlanQual + parser/planner.   [MILESTONE: UPDATE / DELETE / MERGE]
+# Milestone M8 (completes it). Depends on: 33 (AM update/delete). Parallel: limited (EPQ couples
+# executor<->MVCC). Triggers use a no-op SHIM here (real trigger.c at step 41).
+# Disposition: grow=dispatcher; full=leaf; shim=temporary stand-in.
+parser/gram.y              # grow -- UPDATE/DELETE/MERGE, RETURNING, FOR UPDATE
+parser/analyze.c           # grow -- transformUpdateStmt/DeleteStmt/MergeStmt
+parser/parse_clause.c      # grow -- UPDATE SET / RETURNING targets
+optimizer/plan/planner.c   # grow -- ModifyTable plan for update/delete/merge
+optimizer/prep/preptlist.c # grow -- expand_targetlist for UPDATE
+executor/nodeModifyTable.c # grow -- ExecUpdate/ExecDelete/ExecMerge
+executor/execMain.c        # grow -- EvalPlanQual{,Begin,Fetch,Next}, ExecUpdateLockMode
+executor/nodeLockRows.c    # full -- SELECT FOR UPDATE row locking (leaf)
+executor/nodeTidscan.c     # full -- TID scan / WHERE CURRENT OF (leaf)
+executor/execProcnode.c    # grow -- LockRows/Tidscan init arms
+# commands/trigger.c -- shim only here (ExecBSInsertTriggers etc. as no-ops)

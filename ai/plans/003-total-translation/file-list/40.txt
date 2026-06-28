@@ -1,0 +1,10 @@
+# Step 40 -- rule rewriting + views.
+# Milestone M11. Depends on: 38 (deparse). Parallel: limited.
+# Deliverable: CREATE RULE / CREATE VIEW (the _RETURN rule); SELECT through a view expands.
+# Disposition: grow=dispatcher; full=leaf.
+parser/gram.y            # grow -- CREATE VIEW / RULE
+rewrite/rewriteHandler.c # grow -- ON SELECT (view expansion) + INSERT/UPDATE/DELETE rules
+rewrite/rewriteDefine.c  # full -- DefineRule, DefineQueryRewrite (leaf)
+rewrite/rewriteSupport.c # full -- rule catalog support (leaf)
+rewrite/rewriteManip.c   # full -- OffsetVarNodes, ChangeVarNodes (leaf)
+commands/view.c          # full -- CREATE/ALTER VIEW (creates _RETURN rule via rewriteDefine)

@@ -1,0 +1,11 @@
+# Step 08 -- executor spine + expression evaluation (run the Result, project the const).
+# Milestone M1. Depends on: 07 (PlannedStmt), 01/02 (fmgr/int4). Parallel: limited.
+# Deliverable: ExecutorStart/Run/End drives the Result node and produces one tuple.
+# Disposition: grow=dispatcher (node/opcode switch); full=leaf node/util.
+executor/execMain.c       # grow -- standard_ExecutorStart/Run/End, InitPlan, ExecutePlan
+executor/execProcnode.c   # grow -- ExecInitNode/ExecProcNode/ExecEndNode: T_Result arm
+executor/execExpr.c       # grow -- ExecInitExpr: Const/projection
+executor/execExprInterp.c # grow -- ExecInterpExpr: Const opcode
+executor/nodeResult.c     # full -- ExecInitResult/ExecResult/ExecEndResult (leaf node)
+executor/execTuples.c     # full -- TupleTableSlot mgmt, ExecStoreVirtualTuple, ExecTypeFromTL (leaf)
+executor/execUtils.c      # full -- CreateExecutorState/FreeExecutorState, ExprContext, projection (leaf)

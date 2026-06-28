@@ -1,0 +1,12 @@
+# Step 28 -- CREATE INDEX + index paths.   [MILESTONE: user index scans + CREATE INDEX]
+# Milestone M6 (completes it). Depends on: 27 (scan nodes), 13 (btree AM). Parallel: limited.
+# Deliverable: CREATE INDEX on a user table; the planner chooses index/bitmap scans by cost.
+# Disposition: grow=dispatcher; full=leaf.
+parser/gram.y               # grow -- CREATE INDEX
+commands/indexcmds.c        # full -- DefineIndex, ReindexIndex (leaf)
+optimizer/path/indxpath.c   # full -- create_index_paths, match_clause_to_index (leaf)
+optimizer/path/costsize.c   # grow -- cost_index, cost_bitmap_heap_scan
+optimizer/util/plancat.c    # grow -- get_relation_info reads the index list
+optimizer/plan/createplan.c # grow -- create_indexscan_plan / bitmap plan arms
+optimizer/util/pathnode.c   # grow -- create_index_path / create_bitmap_*_path
+executor/execProcnode.c     # grow -- index/bitmap scan init arms

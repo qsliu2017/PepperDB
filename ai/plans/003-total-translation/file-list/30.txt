@@ -1,0 +1,12 @@
+# Step 30 -- join path generation + cost.
+# Milestone M7. Depends on: 29. Parallel: no (path/cost graph is mutually recursive -- LOW).
+# Deliverable: nestloop/merge/hash join paths generated and costed over joinrels.
+# Disposition: full=leaf; grow=dispatcher.
+optimizer/path/allpaths.c # grow -- set_rel_pathlist join driver, make_one_rel
+optimizer/path/joinpath.c # full -- add_paths_to_joinrel (nestloop/merge/hash) (leaf)
+optimizer/path/joinrels.c # full -- make_join_rel, join order (leaf)
+optimizer/util/pathnode.c # grow -- join path constructors
+optimizer/path/costsize.c # grow -- cost_nestloop/mergejoin/hashjoin
+optimizer/path/clausesel.c # grow -- real clause selectivity
+optimizer/util/clauses.c  # grow -- full clause analysis
+optimizer/util/plancat.c  # grow -- relation/index info for joins

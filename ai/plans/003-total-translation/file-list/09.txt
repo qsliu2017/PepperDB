@@ -1,0 +1,10 @@
+# Step 09 -- printtup + tcop wiring.   [MILESTONE: `SELECT 1;` works]
+# Milestone M1 (completes it). Depends on: 08 (tuples), 03 (wire), 01 (tupdesc).
+# Parallel: no (connects the whole pipeline). Deliverable: a client sends simple Query
+# 'SELECT 1' and receives RowDescription + DataRow + CommandComplete + ReadyForQuery.
+# Disposition: full=leaf; grow=dispatcher (message/portal/dest switch).
+access/common/printtup.c # full -- printtup_create_DR, startup (RowDescription), printtup (DataRow), shutdown
+tcop/postgres.c          # grow -- exec_simple_query arm; start/finish_xact_command
+tcop/pquery.c            # grow -- CreatePortal/PortalDefineQuery/PortalStart/PortalRun(Select); CreateQueryDesc
+tcop/dest.c              # grow -- CreateDestReceiver(DestRemote), BeginCommand, ReadyForQuery -> printtup
+# substrate shim: utils/misc/guc.c -- defaults-returning store (NOT a translation; real guc.c at step 35)

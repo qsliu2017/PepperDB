@@ -1,0 +1,14 @@
+# Step 07 -- planner spine (Query -> PlannedStmt with a Result plan).
+# Milestone M1. Depends on: 06 (Query). Parallel: no (planner graph is coupled).
+# Deliverable: a constant SELECT plans to a single Result node; stands up the
+# PlannerInfo/RelOptInfo/Path/Plan scaffolding the later milestones extend.
+# Disposition: grow=dispatcher; full=leaf utility.
+optimizer/plan/planner.c    # grow -- standard_planner/grouping_planner -> Result
+optimizer/plan/planmain.c   # grow -- query_planner: no rangetable -> Result path
+optimizer/plan/createplan.c # grow -- create_result_plan arm
+optimizer/plan/setrefs.c    # grow -- set_plan_references (Result arm)
+optimizer/plan/subselect.c  # grow -- SS_finalize touch-points
+optimizer/util/pathnode.c   # grow -- create_result_path / create_group_result_path
+optimizer/prep/preptlist.c  # grow -- preprocess_targetlist
+optimizer/util/clauses.c    # grow -- expression_planner / eval_const_expressions (Const fold)
+optimizer/util/tlist.c      # full -- tlist_member / make_tlist_from_pathtarget (leaf)

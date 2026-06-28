@@ -1,0 +1,12 @@
+# Step 38 -- deparse + dependency + ALTER/DROP dispatch.
+# Milestone M10. Depends on: M2 (catalog manip). Parallel: limited (these are the substrates 39 uses).
+# Deliverable: ruleutils deparse (EXPLAIN/view defs/error context); performDeletion; ALTER/DROP arms.
+# Disposition: grow=dispatcher; full=leaf.
+parser/gram.y           # grow -- ALTER/DROP/RENAME, GRANT, COMMENT
+utils/adt/ruleutils.c   # grow -- deparse; first translation here
+catalog/dependency.c    # grow -- performDeletion, dependency traversal
+catalog/objectaddress.c # grow -- get_object_address for all object types
+commands/tablecmds.c    # grow -- ALTER TABLE subcommands, DROP, RENAME arms
+tcop/utility.c          # grow -- remaining utility-statement arms
+commands/dropcmds.c     # full -- generic DROP dispatch (leaf)
+commands/alter.c        # full -- generic ALTER dispatch (leaf)

@@ -1,0 +1,10 @@
+# Step 27 -- index/bitmap scan executor nodes.
+# Milestone M6. Depends on: 13 (btree AM, already full). Parallel: yes (independent leaf nodes).
+# Disposition: full=leaf node.
+executor/nodeIndexscan.c       # full -- ExecIndexScan
+executor/nodeIndexonlyscan.c   # full -- index-only scan (VM check)
+executor/nodeBitmapIndexscan.c # full -- bitmap index scan
+executor/nodeBitmapHeapscan.c  # full -- bitmap heap scan
+executor/nodeBitmapAnd.c       # full -- bitmap AND
+executor/nodeBitmapOr.c        # full -- bitmap OR
+nodes/tidbitmap.c              # full -- TIDBitmap support

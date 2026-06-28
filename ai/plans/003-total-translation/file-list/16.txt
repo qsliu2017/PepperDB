@@ -1,0 +1,9 @@
+# Step 16 -- utility dispatch + CREATE TABLE.
+# Milestone M2. Depends on: 15 (catalog manip). Parallel: no (tablecmds is the driver).
+# Deliverable: `CREATE TABLE t(a int)` runs end-to-end (catalog rows + heap created).
+# Disposition: grow=dispatcher (statement/subcommand switch); full=leaf.
+parser/gram.y         # grow -- CreateStmt (CREATE TABLE column defs)
+parser/parse_utilcmd.c # grow -- transformCreateStmt (column defs -> ColumnDef list)
+tcop/utility.c        # grow -- standard_ProcessUtility: T_CreateStmt -> DefineRelation
+commands/tablecmds.c  # grow -- DefineRelation (create path; ALTER/DROP arms added at step 38)
+commands/define.c     # full -- defGet* helpers (leaf)

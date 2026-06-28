@@ -1,0 +1,11 @@
+# Step 05 -- parse analysis (raw tree -> Query).
+# Milestone M1. Depends on: 04 (RawStmt), 01 (nodes). Parallel: limited (analyze is the hub).
+# Deliverable: parse_analyze -> Query for the table-less constant SELECT.
+# Disposition: grow=dispatcher (transform switch); full=leaf helper.
+parser/analyze.c        # grow -- transformStmt: SELECT (targetlist) arm
+parser/parse_target.c   # grow -- transformTargetList/transformTargetEntry
+parser/parse_expr.c     # grow -- transformExpr: A_Const arm -> Const
+parser/parse_node.c     # full -- make_parsestate, make_const, free_parsestate (leaf)
+parser/parse_coerce.c   # grow -- coercion dispatch (Const int4 case)
+parser/parse_collate.c  # grow -- assign_query_collations walker
+parser/parse_relation.c # grow -- colname helpers (no RTE yet for table-less SELECT)

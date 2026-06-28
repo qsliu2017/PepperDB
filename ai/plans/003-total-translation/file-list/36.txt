@@ -1,0 +1,7 @@
+# Step 36 -- transaction + SET command surface.
+# Milestone M9. Depends on: 35 (GUC for SET), foundation (xact engine). Parallel: limited.
+# Deliverable: BEGIN/COMMIT/ROLLBACK/SAVEPOINT and SET/SHOW run as utility statements.
+# Disposition: grow=dispatcher.
+parser/gram.y         # grow -- TransactionStmt, VariableSetStmt/ShowStmt
+access/transam/xact.c # grow -- BeginTransactionBlock/EndTransactionBlock/DefineSavepoint/RollbackToSavepoint
+tcop/utility.c        # grow -- T_TransactionStmt / T_VariableSetStmt arms

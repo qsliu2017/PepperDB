@@ -1,0 +1,9 @@
+# Step 10 -- catalog bootstrap / row seeding (NEW design; do first in M2).
+# Milestone M2. Depends on: foundation (heap/buffer/smgr). Parallel: no (everything below needs it).
+# Decision 2: extend build.rs to emit FormData_pg_* seed rows from src/include/catalog/*.dat;
+# a Rust initdb-equivalent writes the seed catalog heaps; formrdesc lets the bootstrap
+# catalogs be read before they exist on disk.
+# Disposition: new=no .c counterpart; tombstone=replaced.
+# new -- build.rs catalog-seed codegen from catalog/*.dat
+bootstrap/bootstrap.rs # new -- Rust initdb-equivalent: write seed catalog heaps + formrdesc bootstrap
+# bootstrap/bootparse.y, bootscanner.l -- tombstone (BKI bison parser; replaced by .dat codegen)

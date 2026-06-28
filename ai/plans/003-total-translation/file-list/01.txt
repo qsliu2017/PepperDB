@@ -1,0 +1,11 @@
+# Step 01 -- Node / list / descriptor / fmgr infrastructure.
+# Milestone M1. Depends on: foundation only. Parallel: yes (independent leaf files).
+# The pervasive substrate the whole pipeline builds on. Compiles standalone (no runtime
+# path yet). C sources relative to ref/postgres/src/backend/ (../common = src/common).
+# Disposition: full=leaf entire-file; grow=dispatcher adds case(s); new=codegen.
+nodes/list.c             # full -- List (lappend/lfirst/foreach); pervasive
+nodes/makefuncs.c        # full -- makeConst, makeTargetEntry, makeVar
+nodes/nodeFuncs.c        # grow -- exprType/exprTypmod/exprCollation, expression_tree_walker
+access/common/tupdesc.c  # full -- TupleDesc create + accessors (RowDescription + slots)
+utils/fmgr/fmgr.c        # full -- fmgr_info, FunctionCall*, OutputFunctionCall, OidOutputFunctionCall
+# utils/fmgr/fmgrtab.c -- new: extend build.rs to bind real Rust fn pointers (currently func: None)

@@ -1,0 +1,7 @@
+# Step 33 -- heap AM update/delete + tuple locking.
+# Milestone M8. Depends on: 12 (heap AM insert/scan). Parallel: no (extends the AM dispatchers).
+# Deliverable: heap_update/heap_delete/heap_lock_tuple + update-visibility.
+# Disposition: grow=dispatcher (AM ops).
+access/heap/heapam.c            # grow -- heap_update, heap_delete, heap_lock_tuple
+access/heap/heapam_handler.c    # grow -- tuple_update/delete/lock callbacks
+access/heap/heapam_visibility.c # grow -- HeapTupleSatisfiesUpdate

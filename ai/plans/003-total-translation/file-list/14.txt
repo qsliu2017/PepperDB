@@ -1,0 +1,10 @@
+# Step 14 -- catalog caches (relcache / syscache / catcache / lsyscache).
+# Milestone M2. Depends on: 10 (bootstrap), 12 (heap scan), 13 (systable index scan), 11.
+# Parallel: limited (relcache<->syscache chicken-and-egg via formrdesc). Deletes the
+# step-02 type-output shim (lsyscache.getTypeOutputInfo now works).
+# Disposition: full=leaf generic machinery; grow=accessor/phase dispatcher.
+utils/cache/catcache.c  # full -- generic catalog-cache machinery (hash buckets, SearchCatCache)
+utils/cache/syscache.c  # full -- cache descriptor table + SearchSysCache1/2/3, GetSysCacheOid
+utils/cache/relcache.c  # grow -- RelationIdGetRelation, formrdesc, CacheInitializePhase2/3, BuildLocalRelation
+utils/cache/lsyscache.c # grow -- typed accessors (get_typoutput/typlenbyval/atttype/rel_name)
+# utils/cache/inval.c -- DONE (foundation); verify CacheInvalidateHeapTuple coverage

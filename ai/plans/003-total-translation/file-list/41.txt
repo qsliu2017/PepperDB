@@ -1,0 +1,10 @@
+# Step 41 -- triggers + referential integrity.   [MILESTONE: views / rules / triggers / FK]
+# Milestone M11 (completes it). Depends on: 40, 34 (modify hooks). Parallel: limited.
+# Deletes the step-34 trigger SHIM (real trigger.c lands). Deliverable: CREATE TRIGGER fires;
+# FOREIGN KEY enforced via system triggers.
+# Disposition: full=leaf; grow=dispatcher.
+parser/gram.y           # grow -- CREATE TRIGGER, FOREIGN KEY clause
+commands/trigger.c      # full -- CreateTrigger, ExecCallTriggerFunc, after-trigger queue
+executor/execMain.c     # grow -- AfterTrigger event-queue integration
+utils/adt/ri_triggers.c # full -- RI_FKey_check / cascade / restrict
+commands/tablecmds.c    # grow -- ATAddForeignKeyConstraint

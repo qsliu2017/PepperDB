@@ -1,0 +1,14 @@
+# Step 49 -- rmgr description routines.   [MILESTONE: crash recovery for all core AMs]
+# Milestone M14 (completes it). Depends on: 48. Parallel: yes (one agent per file, all leaf).
+# Deliverable: human-readable WAL record descriptions for pg_waldump / recovery logging.
+# Disposition: full=leaf.
+access/rmgrdesc/heapdesc.c  # full
+access/rmgrdesc/nbtdesc.c   # full
+access/rmgrdesc/xactdesc.c  # full
+access/rmgrdesc/xlogdesc.c  # full
+access/rmgrdesc/clogdesc.c  # full
+access/rmgrdesc/smgrdesc.c  # full
+access/rmgrdesc/dbasedesc.c # full
+access/rmgrdesc/seqdesc.c   # full
+# ... remaining ~14 rmgrdesc/*.c (gin/gist/brin/spg/hash/logical/standby/...) follow as
+#     their AMs land or deep-defer is lifted; one agent per file, all full leaf.

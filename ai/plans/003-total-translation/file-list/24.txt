@@ -1,0 +1,6 @@
+# Step 24 -- sort/store infrastructure (keystone).
+# Milestone M5. Depends on: M3 (comparison support fns). Parallel: no (keystone before the nodes).
+# Disposition: full=leaf entire-file.
+utils/sort/tuplesort.c  # full -- in-memory + external merge sort (work_mem accounting)
+utils/sort/tuplestore.c # full -- materialized tuple store
+utils/sort/logtape.c    # full -- external-sort tape

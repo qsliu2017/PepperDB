@@ -1,0 +1,14 @@
+# Step 37 -- extended protocol + prepared statements + cursors + SPI.   [MILESTONE: prepared statements / cursors]
+# Milestone M9 (completes it). Depends on: 36. Parallel: limited.
+# Deliverable: Parse/Bind/Describe/Execute (extended protocol), PREPARE/EXECUTE, DECLARE
+# CURSOR/FETCH, $n params, SPI for server-side queries.
+# Disposition: grow=dispatcher; full=leaf.
+parser/gram.y           # grow -- DECLARE/FETCH/MOVE/CLOSE, PREPARE/EXECUTE/DEALLOCATE
+parser/parse_param.c    # full -- $1 param refs (leaf)
+tcop/postgres.c         # grow -- exec_parse/bind/execute/describe message arms
+tcop/pquery.c           # grow -- named portals, PortalRunFetch
+commands/prepare.c      # full -- PREPARE/EXECUTE/DEALLOCATE (leaf)
+utils/cache/plancache.c # full -- CachedPlanSource, revalidation (leaf)
+commands/portalcmds.c   # full -- DECLARE/FETCH/MOVE/CLOSE cursor (leaf)
+executor/execExprInterp.c # grow -- Param opcodes
+executor/spi.c          # full -- SPI_connect/execute/prepare/cursor (leaf)

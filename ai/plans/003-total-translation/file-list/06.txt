@@ -1,0 +1,5 @@
+# Step 06 -- rewriter (pass-through for a non-view SELECT).
+# Milestone M1. Depends on: 05 (Query). Parallel: n/a.
+# Deliverable: QueryRewrite returns the single Query unchanged (no rules yet).
+# Disposition: grow=dispatcher (starts pass-through).
+rewrite/rewriteHandler.c # grow -- QueryRewrite returns the Query list unchanged

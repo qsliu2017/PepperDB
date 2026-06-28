@@ -1,0 +1,11 @@
+# Step 42 -- window functions.
+# Milestone M12. Depends on: M5 (agg infra). Parallel: limited.
+# Deliverable: OVER(...) window aggregates.
+# Disposition: full=leaf; grow=dispatcher.
+parser/gram.y            # grow -- OVER / WINDOW clause
+executor/nodeWindowAgg.c # full -- window frame evaluation (leaf)
+utils/adt/windowfuncs.c  # full -- row_number/rank/lead/lag builtins (leaf)
+parser/parse_agg.c       # grow -- transformWindowFuncCall
+parser/parse_clause.c    # grow -- transformWindowDefinitions
+optimizer/plan/planner.c # grow -- create_windowagg plan
+executor/execProcnode.c  # grow -- WindowAgg init arm

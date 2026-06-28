@@ -1,0 +1,7 @@
+# Step 22 -- date/time type library.
+# Milestone M4. Depends on: 01 (fmgr). Parallel: yes (independent leaf files).
+# Disposition: full=leaf entire-file.
+utils/adt/date.c       # full -- date in/out/compare/arithmetic
+utils/adt/timestamp.c  # full -- timestamp/timestamptz/interval
+utils/adt/datetime.c   # full -- shared DecodeDateTime/EncodeDateTime
+utils/adt/formatting.c # full -- to_char/to_date (large but self-contained)

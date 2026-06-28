@@ -1,0 +1,10 @@
+# Step 19 -- grammar + operator/function resolution.
+# Milestone M3. Depends on: M2 complete. Parallel: limited.
+# Deliverable: parse + resolve `a+1` and `a > 0` (operator/function lookup to int4pl/int4gt).
+# Disposition: grow=dispatcher/grammar; full=leaf.
+parser/gram.y         # grow -- a_expr operators, WHERE clause, function calls
+parser/scan.l         # grow -- operator tokens, string literals
+parser/parse_oper.c   # full -- oper(), make_op (resolve '+', '>') (leaf)
+parser/parse_func.c   # full -- ParseFuncOrColumn, func_get_detail (leaf)
+parser/parse_expr.c   # grow -- A_Expr/BoolExpr/FuncCall arms
+parser/parse_coerce.c # grow -- real numeric coercion in expressions

@@ -1,0 +1,10 @@
+# Step 18 -- DML + scan executor.   [MILESTONE: `CREATE TABLE t(a int); INSERT INTO t VALUES (1); SELECT * FROM t;` works]
+# Milestone M2 (completes it). Depends on: 17 (plan), 12 (heap AM), 08 (executor spine).
+# Parallel: limited. Deliverable: INSERT writes a tuple via the AM; SELECT * seqscans it back.
+# Disposition: grow=dispatcher (node arms); full=leaf node.
+executor/nodeModifyTable.c # grow -- ExecInsert -> table_tuple_insert
+executor/nodeSeqscan.c     # full -- sequential scan node (leaf)
+executor/execScan.c        # full -- generic scan loop (leaf)
+executor/execAmi.c         # grow -- ExecReScan / scan-method glue
+executor/execProcnode.c    # grow -- T_SeqScan + T_ModifyTable init arms
+executor/execMain.c        # grow -- result-relation init for INSERT

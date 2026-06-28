@@ -1,0 +1,17 @@
+# Step 29 -- planner support utilities (the join substrate).
+# Milestone M7. Depends on: M5 complete. Parallel: yes for the leaf util files; do before 30-31.
+# Deliverable: the RelOptInfo/equivclass/pathkeys/jointree machinery the join planner needs.
+# Disposition: full=leaf utility.
+optimizer/util/relnode.c      # full -- build_join_rel, RelOptInfo mgmt
+optimizer/util/var.c          # full -- pull_varnos, var analysis
+optimizer/util/placeholder.c  # full -- placeholder vars
+optimizer/util/joininfo.c     # full -- join clause lists
+optimizer/path/equivclass.c   # full -- equivalence classes (join keys)
+optimizer/path/pathkeys.c     # full -- pathkeys / sort-order reasoning
+optimizer/path/tidpath.c      # full -- TID paths
+optimizer/plan/initsplan.c    # full -- deconstruct_jointree, build join quals
+optimizer/plan/analyzejoins.c # full -- join removal / unique
+optimizer/plan/planagg.c      # full -- MIN/MAX index optimization
+optimizer/prep/prepjointree.c # full -- subquery pull-up, flatten joins
+optimizer/prep/prepqual.c     # full -- canonicalize_qual
+optimizer/prep/prepagg.c      # full -- aggregate preprocessing

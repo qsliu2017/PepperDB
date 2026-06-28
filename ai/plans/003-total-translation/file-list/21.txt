@@ -1,0 +1,10 @@
+# Step 21 -- expression engine + qual planning.   [MILESTONE: WHERE + scalar arithmetic/comparison]
+# Milestone M3 (completes it). Depends on: 19 (resolved ops), 20 (types). Parallel: limited.
+# Deliverable: `SELECT a+1 FROM t WHERE a > 0` evaluates correctly.
+# Disposition: grow=dispatcher (opcode/clause switch); full=leaf.
+executor/execExpr.c           # grow -- ExecInitExpr: OpExpr/FuncExpr/BoolExpr/qual
+executor/execExprInterp.c     # grow -- interpreter opcodes for the above
+optimizer/util/clauses.c      # grow -- eval_const_expressions over operators
+optimizer/util/restrictinfo.c # full -- RestrictInfo for WHERE quals (leaf)
+optimizer/path/clausesel.c    # grow -- clause selectivity (rough constants pre-M7)
+optimizer/plan/createplan.c   # grow -- attach scan quals to plans

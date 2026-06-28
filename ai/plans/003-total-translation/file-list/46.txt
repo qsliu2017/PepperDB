@@ -1,0 +1,12 @@
+# Step 46 -- VACUUM / ANALYZE.
+# Milestone M13. Depends on: M2 (heap), M6 (btree vacuum already in step 13). Parallel: limited.
+# Deliverable: dead-tuple reclamation + pg_statistic population; planner consumes real stats.
+# Disposition: full=leaf; grow=dispatcher.
+parser/gram.y            # grow -- VACUUM, ANALYZE
+commands/vacuum.c        # full -- vacuum() driver, vacuum_rel
+access/heap/vacuumlazy.c # full -- lazy heap vacuum (dead-tuple removal, VM update)
+access/heap/pruneheap.c  # full -- HOT prune / page defrag
+commands/analyze.c       # full -- ANALYZE: sample rows, compute pg_statistic
+utils/adt/selfuncs.c     # grow -- consume the new statistics (was rough constants in M7)
+access/index/genam.c     # grow -- index_vacuum entry
+postmaster/autovacuum.c  # grow -- launch analyze/vacuum work items (task shell is foundation)

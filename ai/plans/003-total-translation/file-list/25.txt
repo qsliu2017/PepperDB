@@ -1,0 +1,10 @@
+# Step 25 -- aggregate/sort executor nodes.
+# Milestone M5. Depends on: 24 (tuplesort). Parallel: yes (independent leaf nodes, one agent each).
+# Aggregate transition/final fns already exist in their type files (int.c/numeric.c) -- done once.
+# Disposition: full=leaf node.
+executor/nodeSort.c     # full -- ORDER BY
+executor/nodeAgg.c      # full -- aggregates (hash + sorted); large
+executor/nodeGroup.c    # full -- GROUP BY (sorted)
+executor/nodeUnique.c   # full -- DISTINCT
+executor/nodeLimit.c    # full -- LIMIT/OFFSET
+executor/nodeMaterial.c # full -- materialization

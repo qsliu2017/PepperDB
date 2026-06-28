@@ -1,0 +1,12 @@
+# Step 26 -- parser/planner for grouping.   [MILESTONE: ORDER BY / GROUP BY / aggregates / DISTINCT / LIMIT]
+# Milestone M5 (completes it). Depends on: 25 (nodes). Parallel: limited.
+# Deliverable: `SELECT a, count(*) FROM t GROUP BY a ORDER BY a LIMIT 5`.
+# Disposition: grow=dispatcher; full=leaf.
+parser/gram.y               # grow -- GROUP BY / ORDER BY / DISTINCT / LIMIT / aggregate calls
+parser/parse_agg.c          # full -- transformAggregateCall, parseCheckAggregates (leaf)
+parser/parse_clause.c       # grow -- transformGroupClause/SortClause/transformLimit
+optimizer/plan/planner.c    # grow -- grouping_planner: sort/agg/group/limit upper plans
+optimizer/plan/createplan.c # grow -- create_sort/agg/group/limit plan arms
+optimizer/plan/setrefs.c    # grow -- agg/sort ref fixup
+executor/execProcnode.c     # grow -- Sort/Agg/Group/Unique/Limit/Material init arms
+executor/execExpr.c         # grow -- Aggref / aggregate-arg expression init

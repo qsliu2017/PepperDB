@@ -1,0 +1,7 @@
+# Step 47 -- CLUSTER / VACUUM FULL.   [MILESTONE: COPY / VACUUM / ANALYZE]
+# Milestone M13 (completes it). Depends on: 46. Parallel: yes (leaf files).
+# Deliverable: table rewrite (CLUSTER, VACUUM FULL).
+# Disposition: full=leaf.
+parser/gram.y             # grow -- CLUSTER, VACUUM FULL
+commands/cluster.c        # full -- CLUSTER, VACUUM FULL rewrite
+access/heap/rewriteheap.c # full -- rewrite_heap_tuple

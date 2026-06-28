@@ -1,0 +1,14 @@
+# Step 15 -- catalog manipulation (create the new table's catalog rows).
+# Milestone M2. Depends on: 14 (caches), 12/13 (AMs). Parallel: limited.
+# Deliverable: heap_create_with_catalog writes pg_class/pg_attribute/pg_type rows + the
+# catalog unique indexes; name resolution t -> oid works.
+# Disposition: full=leaf; grow=dispatcher (deletion/object-type arms added at M10).
+catalog/heap.c          # full -- heap_create_with_catalog, InsertPgClass/AttributeTuples, cookDefault
+catalog/index.c         # full -- index_create + index_build (catalog AND user indexes; done once)
+catalog/indexing.c      # full -- CatalogTupleInsert (+ index update); universal catalog-row insert
+catalog/catalog.c       # full -- GetNewRelFileNumber, IsSystemRelation, relfilenode assignment
+catalog/namespace.c     # full -- RangeVarGetRelid, RelnameGetRelid, search-path resolution
+catalog/pg_type.c       # full -- TypeCreate (the table's rowtype)
+catalog/pg_namespace.c  # full -- namespace lookups
+catalog/dependency.c    # grow -- recordDependencyOn (performDeletion arm added at step 38)
+catalog/objectaddress.c # grow -- get_object_address (CreateStmt/Relation arms)

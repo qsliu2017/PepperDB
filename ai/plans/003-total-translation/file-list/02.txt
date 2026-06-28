@@ -1,0 +1,7 @@
+# Step 02 -- int4 type I/O.
+# Milestone M1. Depends on: 01 (fmgr). Parallel: n/a (single file).
+# int.c translated in full (done once for all later arithmetic/comparison/agg use).
+# A type-output OID lookup SHIM stands in until syscache lands (step 14); deleted then.
+# Disposition: full=leaf entire-file; shim=temporary non-translation stand-in.
+utils/adt/int.c # full -- int2/int4/int8 in/out + arithmetic + comparison + aggregate transitions
+# type-output OID lookup -- shim: hardcode int4 -> F_INT4OUT for M1 (deleted at step 14)

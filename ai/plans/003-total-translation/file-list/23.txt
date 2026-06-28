@@ -1,0 +1,11 @@
+# Step 23 -- casts + conditional expressions.   [MILESTONE: date/time + casts + CASE/COALESCE]
+# Milestone M4 (completes it). Depends on: 22 (date/time types), 21 (expr engine). Parallel: limited.
+# Deliverable: typed literals, explicit/implicit casts, CASE/COALESCE/NULLIF.
+# Disposition: grow=dispatcher; full=leaf.
+parser/gram.y             # grow -- typed literals, CAST, CASE/COALESCE/NULLIF, AT TIME ZONE
+parser/parse_coerce.c     # grow -- coerce_to_target_type, find_coercion_pathway
+utils/cache/lsyscache.c   # grow -- get_cast_func / type-category lookups
+executor/execExprInterp.c # grow -- CASE/COALESCE/NULLIF/GREATEST/LEAST opcodes
+parser/parse_expr.c       # grow -- transformCaseExpr/CoalesceExpr/MinMaxExpr
+nodes/nodeFuncs.c         # grow -- exprType over CaseExpr/CoalesceExpr
+# deparse (ruleutils.c) is NOT translated yet -- first done at step 38; pre-then messages omit deparse.

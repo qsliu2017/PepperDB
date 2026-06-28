@@ -1,0 +1,7 @@
+# Step 03 -- libpq wire layer (recv/send the message bytes).
+# Milestone M1. Depends on: foundation (tokio socket held by backend_startup) only.
+# Parallel: yes; independent of the parser/planner pipeline (steps 04-08).
+# Disposition: full=leaf entire-file.
+libpq/pqcomm.c    # full -- pq_getbyte/pq_getmessage, pq_putmessage/begin/end, pq_flush over tokio socket
+libpq/pqformat.c  # full -- pq_sendint16/32, pq_sendstring, pq_sendbytes (build wire messages)
+libpq/be-secure.c # full -- thin secure_read/secure_write passthrough to the tokio socket

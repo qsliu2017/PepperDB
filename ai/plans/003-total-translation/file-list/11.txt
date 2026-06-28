@@ -1,0 +1,11 @@
+# Step 11 -- tuple/descriptor infra + remaining scalar type I/O.
+# Milestone M2. Depends on: 10 (bootstrap), 01 (tupdesc). Parallel: yes (independent leaf files).
+# Deliverable: form/deform any heap & index tuple; name/text/bool I/O for catalog columns.
+# Disposition: full=leaf entire-file.
+access/common/heaptuple.c  # full -- heap_form_tuple/heap_deform_tuple/heap_getattr
+access/common/indextuple.c # full -- index_form_tuple
+access/common/reloptions.c # full -- parse WITH (...) (minimal but complete)
+access/common/relation.c   # full -- relation_open
+utils/adt/name.c           # full -- nameout/namein
+utils/adt/varlena.c        # full -- text in/out + comparison + concat + length
+utils/adt/bool.c           # full -- boolin/boolout + bool ops

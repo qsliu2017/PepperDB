@@ -1,0 +1,11 @@
+# Step 31 -- plan creation + selectivity.
+# Milestone M7. Depends on: 30. Parallel: no (LOW). Deliverable: chosen join paths become
+# join Plan nodes; per-operator selectivity estimators feed cost.
+# Disposition: grow=dispatcher; full=leaf.
+optimizer/plan/planner.c    # grow -- full subquery_planner/grouping_planner
+optimizer/plan/planmain.c   # grow -- query_planner with real joins
+optimizer/plan/createplan.c # grow -- create_join_plan + join node arms
+optimizer/plan/setrefs.c    # grow -- join ref fixup
+optimizer/plan/subselect.c  # grow -- sublink/subplan handling
+optimizer/prep/preptlist.c  # grow -- full target preprocessing
+utils/adt/selfuncs.c        # grow -- eqsel/scalarltsel + join selectivity (per-operator estimators)

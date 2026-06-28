@@ -1,0 +1,11 @@
+# Step 12 -- heap access method + table AM.
+# Milestone M2. Depends on: 11 (tuple infra), foundation (buffer/smgr). Parallel: with step 13.
+# Deliverable: insert a heap tuple, seqscan it back, MVCC visibility. heap_insert EMITS WAL
+# (replay deferred to step 48). Disposition: grow=dispatcher (AM ops added over milestones); full=leaf.
+access/heap/heapam.c            # grow -- heap_insert, heap_getnext, heap_beginscan/endscan
+access/heap/heapam_handler.c    # grow -- TableAmRoutine vtable: insert/scan callbacks
+access/heap/heapam_visibility.c # grow -- HeapTupleSatisfiesMVCC
+access/heap/hio.c               # full -- RelationGetBufferForTuple (leaf)
+access/table/tableam.c          # grow -- table_tuple_insert, table_beginscan, slot scan API
+access/table/tableamapi.c       # full -- GetTableAmRoutine / heap handler lookup
+access/table/table.c            # full -- table_open/table_openrv

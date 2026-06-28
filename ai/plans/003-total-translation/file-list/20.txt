@@ -1,0 +1,8 @@
+# Step 20 -- remaining scalar types.
+# Milestone M3. Depends on: 01 (fmgr). Parallel: yes (independent leaf files, one agent each).
+# Each translated in full incl arithmetic/comparison/btree-support/aggregate transitions.
+# Disposition: full=leaf entire-file.
+utils/adt/float.c   # full -- float4/float8
+utils/adt/numeric.c # full -- numeric (large)
+utils/adt/oid.c     # full -- oid type
+utils/adt/char.c    # full -- "char"

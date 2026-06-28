@@ -1,0 +1,12 @@
+# Step 04 -- grammar + lexer (raw parse tree for SELECT <const>).
+# Milestone M1. Depends on: 01 (makefuncs/nodes). Parallel: no (grammar is the spine).
+# Decision 1: gram.y -> lalrpop, grown per milestone; scan.l -> custom/logos lexer.
+# Deliverable: raw_parser("SELECT 1") -> RawStmt{SelectStmt{targetList=[A_Const(1)]}}.
+# C sources relative to ref/postgres/src/backend/ (../common = src/common).
+# Disposition: grow=grammar/dispatcher; full=leaf.
+parser/gram.y          # grow -- SELECT + constant target-list production
+parser/scan.l          # grow -- lexer: SELECT keyword, integer literal, ';'
+parser/parser.c        # full -- raw_parser() driver over lexer+grammar
+parser/scansup.c       # full -- downcase/truncate identifier helpers
+../common/keywords.c   # full -- ScanKeywordLookup (kwlist.rs data already ported)
+../common/kwlookup.c   # full -- keyword binary search

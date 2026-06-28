@@ -1,0 +1,17 @@
+# Step 13 -- btree access method (decision 3: real catalog indexes; serves all index use).
+# Milestone M2. Depends on: 11 (tuple infra, indextuple), foundation (buffer). Parallel: with step 12.
+# Translated in full (generic over scankeys/multi-column) so M6 needs no btree work.
+# btinsert EMITS WAL (replay deferred to step 48). Disposition: full=leaf; grow=AM-ops dispatcher.
+access/nbtree/nbtree.c      # full -- AM entry points (btbuild/btinsert/btbeginscan/btgettuple)
+access/nbtree/nbtinsert.c   # full -- _bt_doinsert / _bt_insertonpg
+access/nbtree/nbtsearch.c   # full -- _bt_search / _bt_first / _bt_next
+access/nbtree/nbtpage.c     # full -- page/meta management
+access/nbtree/nbtutils.c    # full -- scankey + insertion-scankey helpers
+access/nbtree/nbtcompare.c  # full -- btint4cmp etc. comparison support fns
+access/nbtree/nbtsort.c     # full -- index build sort path
+access/nbtree/nbtsplitloc.c # full -- split point choice
+access/nbtree/nbtdedup.c    # full -- deduplication
+access/index/indexam.c      # grow -- index_open/index_insert/index_beginscan/index_getnext
+access/index/genam.c        # full -- systable_beginscan/systable_getnext (catalog scans)
+access/index/amapi.c        # full -- IndexAmRoutine accessor
+access/index/amvalidate.c   # full -- amvalidate

@@ -1,0 +1,16 @@
+# Step 43 -- CTEs + recursive + set operations.
+# Milestone M12. Depends on: M7 (planner). Parallel: yes (leaf nodes); planner arms grow.
+# Deliverable: WITH [RECURSIVE], UNION/INTERSECT/EXCEPT.
+# Disposition: full=leaf node; grow=dispatcher.
+parser/gram.y                 # grow -- WITH [RECURSIVE], UNION/INTERSECT/EXCEPT
+executor/nodeCtescan.c        # full -- CTE scan
+executor/nodeRecursiveunion.c # full -- WITH RECURSIVE
+executor/nodeWorktablescan.c  # full -- recursive worktable
+executor/nodeSetOp.c          # full -- INTERSECT/EXCEPT
+executor/nodeAppend.c         # full -- UNION ALL append
+executor/nodeMergeAppend.c    # full -- ordered append
+parser/parse_cte.c            # full -- transformWithClause (leaf)
+parser/analyze.c              # grow -- transformSetOperationStmt
+optimizer/prep/prepunion.c    # grow -- set-op planning
+optimizer/plan/subselect.c    # grow -- SS_process_ctes
+executor/execProcnode.c       # grow -- CteScan/RecursiveUnion/SetOp/Append init arms

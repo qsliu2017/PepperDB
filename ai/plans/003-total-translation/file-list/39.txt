@@ -1,0 +1,19 @@
+# Step 39 -- object-type DDL commands.   [MILESTONE: full DDL breadth]
+# Milestone M10 (completes it). Depends on: 38. Parallel: yes (one agent per command file).
+# Deliverable: CREATE/ALTER/DROP for sequences, schemas, types, functions, etc.
+# Disposition: full=leaf; grow=dispatcher.
+commands/sequence.c       # full -- CREATE SEQUENCE, nextval/currval/setval
+commands/schemacmds.c     # full -- CREATE/ALTER SCHEMA
+commands/typecmds.c       # full -- CREATE TYPE/DOMAIN
+commands/functioncmds.c   # full -- CREATE FUNCTION/PROCEDURE
+catalog/pg_proc.c         # full -- ProcedureCreate
+commands/comment.c        # full -- COMMENT ON
+commands/constraint.c     # full -- constraint helpers
+catalog/pg_constraint.c   # full -- CreateConstraintEntry
+commands/tablespace.c     # full -- (single-tablespace; minimal but complete)
+commands/dbcommands.c     # full -- CREATE/DROP DATABASE
+catalog/aclchk.c          # full -- GRANT/REVOKE (ExecuteGrantStmt)
+commands/conversioncmds.c # full -- CREATE CONVERSION
+commands/collationcmds.c  # full -- CREATE COLLATION
+utils/cache/typcache.c    # full -- typcache (composite/domain), now reached by DDL
+rewrite/rewriteHandler.c  # grow -- DEFAULT expansion on INSERT
