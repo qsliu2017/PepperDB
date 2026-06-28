@@ -2,7 +2,7 @@
 
 use bitflags::bitflags;
 
-use crate::c::{int2vector, oidvector, text, Name};
+use crate::c::{int2vector, oidvector, text};
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::utils::palloc::MemoryContext;
@@ -10,13 +10,8 @@ use crate::utils::palloc::MemoryContext;
 /// Sign + the most decimal digits an 8-byte number could have.
 pub const MAXINT8LEN: usize = 20;
 
-// bool.c -- success bool + out-param -> Result/Option.
-pub fn parse_bool(_value: &str) -> Option<bool> {
-    unimplemented!()
-}
-pub fn parse_bool_with_len(_value: &str, _len: usize) -> Option<bool> {
-    unimplemented!()
-}
+// bool.c -- success bool + out-param -> Option (body in backend/utils/adt/bool.rs).
+pub use crate::backend::utils::adt::bool::{parse_bool, parse_bool_with_len};
 
 // domains.c -- escontext / void**extra preserved as raw for now (TODO(panic)).
 pub fn domain_check(
@@ -61,13 +56,8 @@ pub fn buildint2vector(_int2s: &[i16]) -> *mut int2vector {
     unimplemented!()
 }
 
-// name.c
-pub fn namestrcpy(_name: Name, _str: &str) {
-    unimplemented!()
-}
-pub fn namestrcmp(_name: Name, _str: &str) -> i32 {
-    unimplemented!()
-}
+// name.c -- bodies in backend/utils/adt/name.rs (type-centric: &mut NameData).
+pub use crate::backend::utils::adt::name::{namestrcmp, namestrcpy};
 
 // numutils.c -- the _safe variants route errors via escontext (TODO(panic)/Result).
 pub fn pg_strtoint16(_s: &str) -> i16 {
@@ -163,19 +153,10 @@ pub fn bpchartruelen(_s: &mut [u8], _len: i32) -> i32 {
     unimplemented!()
 }
 
-// varlena.c
-pub fn cstring_to_text(_s: &str) -> *mut text {
-    unimplemented!()
-}
-pub fn cstring_to_text_with_len(_s: &str, _len: i32) -> *mut text {
-    unimplemented!()
-}
-pub fn text_to_cstring(_t: &text) -> String {
-    unimplemented!()
-}
-pub fn text_to_cstring_buffer(_src: &text, _dst: &mut [u8]) {
-    unimplemented!()
-}
+// varlena.c -- bodies in backend/utils/adt/varlena.rs.
+pub use crate::backend::utils::adt::varlena::{
+    cstring_to_text, cstring_to_text_with_len, text_to_cstring, text_to_cstring_buffer,
+};
 
 /// CStringGetTextDatum(s) -> PointerGetDatum(cstring_to_text(s)).
 pub fn CStringGetTextDatum(s: &str) -> Datum {

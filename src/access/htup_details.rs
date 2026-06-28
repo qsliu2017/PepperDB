@@ -483,156 +483,20 @@ pub fn HeapTupleClearHeapOnly(_tuple: &HeapTupleData) {
     unimplemented!() // t_data->clear_heap_only()
 }
 
-// === prototypes for functions in common/heaptuple.c ===
-
-pub fn heap_compute_data_size(
-    _tuple_desc: &TupleDesc,
-    _values: &[Datum],
-    _isnull: &[bool],
-) -> usize {
-    unimplemented!()
-}
-
-/// Returns (infomask, bitmap) updates via the data buffer (C out-params).
-pub fn heap_fill_tuple(
-    _tuple_desc: &TupleDesc,
-    _values: &[Datum],
-    _isnull: &[bool],
-    _data: &mut [u8],
-    _data_size: usize,
-    _infomask: &mut u16,
-    _bit: &mut [bits8],
-) {
-    unimplemented!()
-}
-
-pub fn heap_attisnull(_tup: &HeapTupleData, _attnum: i32, _tuple_desc: &TupleDesc) -> bool {
-    unimplemented!()
-}
-
-pub fn nocachegetattr(_tup: &HeapTupleData, _attnum: i32, _tuple_desc: &TupleDesc) -> Datum {
-    unimplemented!()
-}
-
-/// Returns (value, isnull) (C out-param isnull folded into the tuple).
-pub fn heap_getsysattr(
-    _tup: &HeapTupleData,
-    _attnum: i32,
-    _tuple_desc: &TupleDesc,
-) -> (Datum, bool) {
-    unimplemented!()
-}
-
-/// Returns (value, isnull).
-pub fn getmissingattr(_tuple_desc: &TupleDesc, _attnum: i32) -> (Datum, bool) {
-    unimplemented!()
-}
-
-pub fn heap_copytuple(_tuple: &HeapTupleData) -> HeapTupleData {
-    unimplemented!()
-}
-
-pub fn heap_copytuple_with_tuple(_src: &HeapTupleData, _dest: &mut HeapTupleData) {
-    unimplemented!()
-}
-
-pub fn heap_copy_tuple_as_datum(_tuple: &HeapTupleData, _tuple_desc: &TupleDesc) -> Datum {
-    unimplemented!()
-}
-
-pub fn heap_form_tuple(
-    _tuple_descriptor: &TupleDesc,
-    _values: &[Datum],
-    _isnull: &[bool],
-) -> HeapTupleData {
-    unimplemented!()
-}
-
-pub fn heap_modify_tuple(
-    _tuple: &HeapTupleData,
-    _tuple_desc: &TupleDesc,
-    _repl_values: &[Datum],
-    _repl_isnull: &[bool],
-    _do_replace: &[bool],
-) -> HeapTupleData {
-    unimplemented!()
-}
-
-pub fn heap_modify_tuple_by_cols(
-    _tuple: &HeapTupleData,
-    _tuple_desc: &TupleDesc,
-    _repl_cols: &[i32],
-    _repl_values: &[Datum],
-    _repl_isnull: &[bool],
-) -> HeapTupleData {
-    unimplemented!()
-}
-
-/// Deforms a tuple into (values, isnull) (C out-param arrays).
-pub fn heap_deform_tuple(_tuple: &HeapTupleData, _tuple_desc: &TupleDesc) -> (Vec<Datum>, Vec<bool>) {
-    unimplemented!()
-}
-
-pub fn heap_freetuple(_htup: HeapTupleData) {
-    unimplemented!()
-}
-
-pub fn heap_form_minimal_tuple(
-    _tuple_descriptor: &TupleDesc,
-    _values: &[Datum],
-    _isnull: &[bool],
-    _extra: usize,
-) -> *mut MinimalTupleData {
-    unimplemented!() // TODO(ptr)
-}
-
-pub fn heap_free_minimal_tuple(_mtup: *mut MinimalTupleData) {
-    unimplemented!() // TODO(ptr)
-}
-
-pub fn heap_copy_minimal_tuple(_mtup: *mut MinimalTupleData, _extra: usize) -> *mut MinimalTupleData {
-    unimplemented!() // TODO(ptr)
-}
-
-pub fn heap_tuple_from_minimal_tuple(_mtup: *mut MinimalTupleData) -> HeapTupleData {
-    unimplemented!() // TODO(ptr)
-}
-
-pub fn minimal_tuple_from_heap_tuple(_htup: &HeapTupleData, _extra: usize) -> *mut MinimalTupleData {
-    unimplemented!() // TODO(ptr)
-}
-
-pub fn varsize_any(_p: *mut u8) -> usize {
-    unimplemented!() // TODO(ptr)
-}
-
-pub fn heap_expand_tuple(_source_tuple: &HeapTupleData, _tuple_desc: &TupleDesc) -> HeapTupleData {
-    unimplemented!()
-}
-
-pub fn minimal_expand_tuple(
-    _source_tuple: &HeapTupleData,
-    _tuple_desc: &TupleDesc,
-) -> *mut MinimalTupleData {
-    unimplemented!() // TODO(ptr)
-}
-
-/// Fetch a user attribute's value as (value, isnull). attnum MUST be valid and
-/// must not be a system attribute; use heap_getattr if in doubt.
-pub fn fastgetattr(
-    _tup: &HeapTupleData,
-    _attnum: i32,
-    _tuple_desc: &TupleDesc,
-) -> (Datum, bool) {
-    unimplemented!()
-}
-
-/// Extract an attribute of a heap tuple as (value, isnull), range-checked, and
-/// works for either system or user attributes.
-pub fn heap_getattr(
-    _tup: &HeapTupleData,
-    _attnum: i32,
-    _tuple_desc: &TupleDesc,
-) -> (Datum, bool) {
-    unimplemented!()
-}
+// === functions in common/heaptuple.c ===
+//
+// The bodies live in `crate::backend::access::common::heaptuple` and are
+// re-exported here so `crate::access::htup_details::<name>` keeps resolving. The
+// real signatures differ from the original placeholder stubs: the tuple
+// accessors are `unsafe` (they walk a raw `t_data` body), and routines that
+// cache attribute offsets take `&mut TupleDescData` (C mutates the shared
+// descriptor's `attcacheoff`). The form/deform on-disk byte logic is faithful to
+// PG; see the backend module.
+pub use crate::backend::access::common::heaptuple::{
+    fastgetattr, getmissingattr, heap_attisnull, heap_compute_data_size, heap_copy_minimal_tuple,
+    heap_copy_tuple_as_datum, heap_copytuple, heap_copytuple_with_tuple, heap_deform_tuple,
+    heap_expand_tuple, heap_fill_tuple, heap_form_minimal_tuple, heap_form_tuple, heap_free_minimal_tuple,
+    heap_freetuple, heap_getattr, heap_getsysattr, heap_modify_tuple, heap_modify_tuple_by_cols,
+    heap_tuple_from_minimal_tuple, minimal_expand_tuple, minimal_tuple_from_heap_tuple,
+    nocachegetattr, varsize_any,
+};

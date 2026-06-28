@@ -86,73 +86,27 @@ pub const fn IndexInfoFindDataOffset(t_info: u16) -> usize {
     }
 }
 
-/// routines in indextuple.c
-pub fn index_form_tuple(
-    _tuple_descriptor: crate::access::tupdesc::TupleDesc,
-    _values: &[Datum],
-    _isnull: &[bool],
-) -> IndexTuple {
-    unimplemented!()
-}
+// === routines in indextuple.c ===
+//
+// Bodies live in `crate::backend::access::common::indextuple` and are re-exported
+// here. The real signatures differ from the original placeholder stubs: the
+// accessors are `unsafe` (they walk a raw index-tuple block), they take
+// `&TupleDescData` (a borrow of the shared descriptor, the descriptor's offset
+// cache is not persisted), and `index_form_tuple_context` drops the C
+// `MemoryContext` parameter (memory is tombstoned -> Rust ownership). The C name
+// `CopyIndexTuple` is kept as a deprecated shim over `copy_index_tuple`.
+pub use crate::backend::access::common::indextuple::{
+    copy_index_tuple, index_deform_tuple, index_deform_tuple_internal, index_form_tuple,
+    index_form_tuple_context, index_getattr, index_truncate_tuple, nocache_index_getattr,
+};
 
-pub fn index_form_tuple_context(
-    _tuple_descriptor: crate::access::tupdesc::TupleDesc,
-    _values: &[Datum],
-    _isnull: &[bool],
-    _context: crate::utils::palloc::MemoryContext,
-) -> IndexTuple {
-    unimplemented!()
-}
-
-pub fn nocache_index_getattr(
-    _tup: IndexTuple,
-    _attnum: i32,
-    _tuple_desc: crate::access::tupdesc::TupleDesc,
-) -> Datum {
-    unimplemented!()
-}
-
-/// out-params (values, isnull) become caller-provided slices, as in C.
-pub fn index_deform_tuple(
-    _tup: IndexTuple,
-    _tuple_descriptor: crate::access::tupdesc::TupleDesc,
-    _values: &mut [Datum],
-    _isnull: &mut [bool],
-) {
-    unimplemented!()
-}
-
-pub fn index_deform_tuple_internal(
-    _tuple_descriptor: crate::access::tupdesc::TupleDesc,
-    _values: &mut [Datum],
-    _isnull: &mut [bool],
-    _tp: *const u8,
-    _bp: *const u8,
-    _hasnulls: i32,
-) {
-    unimplemented!()
-}
-
-pub fn CopyIndexTuple(_source: IndexTuple) -> IndexTuple {
-    unimplemented!()
-}
-
-pub fn index_truncate_tuple(
-    _source_descriptor: crate::access::tupdesc::TupleDesc,
-    _source: IndexTuple,
-    _leavenatts: i32,
-) -> IndexTuple {
-    unimplemented!()
-}
-
-/// index_getattr - fetch a user attribute's value as a Datum. Returns the Datum
-/// and the isnull flag (C's `bool *isnull` out-param).
-pub fn index_getattr(
-    _tup: IndexTuple,
-    _attnum: i32,
-    _tuple_desc: crate::access::tupdesc::TupleDesc,
-) -> (Datum, bool) {
-    unimplemented!()
+/// C `CopyIndexTuple`: now `copy_index_tuple`.
+///
+/// SAFETY: `source` must point at a valid index-tuple block.
+#[deprecated(note = "use copy_index_tuple")]
+#[inline]
+pub unsafe fn CopyIndexTuple(source: IndexTuple) -> IndexTuple {
+    copy_index_tuple(source)
 }
 
 /// Upper bound on the number of index tuples that can fit on one page.

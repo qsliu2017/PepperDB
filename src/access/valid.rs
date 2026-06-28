@@ -14,7 +14,9 @@ pub fn HeapKeyTest(tuple: &HeapTupleData, tupdesc: &TupleDesc, keys: &mut [ScanK
             return false;
         }
 
-        let (atp, isnull) = heap_getattr(tuple, i32::from(cur_key.attno), tupdesc);
+        // SAFETY: `tuple` is a valid heap tuple; `heap_getattr` walks its body.
+        let (atp, isnull) =
+            unsafe { heap_getattr(tuple, i32::from(cur_key.attno), tupdesc) };
         if isnull {
             return false;
         }

@@ -311,16 +311,25 @@ pub fn add_local_string_reloption(
     unimplemented!()
 }
 
-/// transformRelOptions: merge `def_list` into `old_options`.
+/// transformRelOptions: merge `def_list` into `old_options`. Body in
+/// `backend::access::common::reloptions` (only the empty-list path is live;
+/// see that module). `namspace` is optional (C `NULL` -> `None`).
 pub fn transformRelOptions(
-    _old_options: Datum,
-    _def_list: &[*mut core::ffi::c_void],
-    _namspace: &str,
-    _valid_nsps: &[&str],
-    _accept_oids_off: bool,
-    _is_reset: bool,
+    old_options: Datum,
+    def_list: &[*mut core::ffi::c_void],
+    namspace: Option<&str>,
+    valid_nsps: &[&str],
+    accept_oids_off: bool,
+    is_reset: bool,
 ) -> Datum {
-    unimplemented!()
+    crate::backend::access::common::reloptions::transform_rel_options(
+        old_options,
+        def_list,
+        namspace,
+        valid_nsps,
+        accept_oids_off,
+        is_reset,
+    )
 }
 
 /// untransformRelOptions: decode an options Datum into a list of definitions.
@@ -357,16 +366,20 @@ pub fn build_local_reloptions(
     unimplemented!()
 }
 
+/// Body in `backend::access::common::reloptions` (only the empty/NULL-options
+/// path is live; non-empty options are staged).
 pub fn default_reloptions(
-    _reloptions: Datum,
-    _validate: bool,
-    _kind: relopt_kind,
+    reloptions: Datum,
+    validate: bool,
+    kind: relopt_kind,
 ) -> Option<*mut varlena> {
-    unimplemented!()
+    crate::backend::access::common::reloptions::default_reloptions(reloptions, validate, kind)
 }
 
-pub fn heap_reloptions(_relkind: u8, _reloptions: Datum, _validate: bool) -> Option<*mut varlena> {
-    unimplemented!()
+/// Body in `backend::access::common::reloptions` (relkind dispatch; empty
+/// options -> `None`).
+pub fn heap_reloptions(relkind: u8, reloptions: Datum, validate: bool) -> Option<*mut varlena> {
+    crate::backend::access::common::reloptions::heap_reloptions(relkind, reloptions, validate)
 }
 
 pub fn view_reloptions(_reloptions: Datum, _validate: bool) -> Option<*mut varlena> {
