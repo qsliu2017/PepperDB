@@ -229,18 +229,14 @@ pub fn DeconstructQualifiedName(_names: &[Oid]) -> (Option<String>, String) {
     unimplemented!()
 }
 
-pub fn LookupNamespaceNoError(_nspname: &str) -> Option<Oid> {
-    unimplemented!()
+pub fn LookupNamespaceNoError(nspname: &str) -> Option<Oid> {
+    crate::backend::catalog::namespace::get_namespace_oid(nspname, true)
 }
 
 /// `missing_ok` bool folds into the `Option` result.
-pub fn LookupExplicitNamespace(_nspname: &str, _missing_ok: bool) -> Option<Oid> {
-    unimplemented!()
-}
+pub use crate::backend::catalog::namespace::lookup_explicit_namespace as LookupExplicitNamespace;
 
-pub fn get_namespace_oid(_nspname: &str, _missing_ok: bool) -> Option<Oid> {
-    unimplemented!()
-}
+pub use crate::backend::catalog::namespace::get_namespace_oid;
 
 pub fn LookupCreationNamespace(_nspname: &str) -> Oid {
     unimplemented!()

@@ -133,6 +133,11 @@ pub struct FormExtraData_pg_attribute {
 // MAKE_SYSCACHE(ATTNAME, pg_attribute_relid_attnam_index, 32)
 // MAKE_SYSCACHE(ATTNUM, pg_attribute_relid_attnum_index, 128)
 
+/// pg_attribute_relid_attnam_index: unique index on (attrelid, attname).
+pub const AttributeRelidNameIndexId: Oid = Oid(2658);
+/// pg_attribute_relid_attnum_index: unique index on (attrelid, attnum).
+pub const AttributeRelidNumIndexId: Oid = Oid(2659);
+
 pub const ATTRIBUTE_IDENTITY_ALWAYS: i8 = b'a' as i8;
 pub const ATTRIBUTE_IDENTITY_BY_DEFAULT: i8 = b'd' as i8;
 pub const ATTRIBUTE_GENERATED_STORED: i8 = b's' as i8;

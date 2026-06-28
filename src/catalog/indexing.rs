@@ -1,70 +1,18 @@
 //! Translated from PostgreSQL src/include/catalog/indexing.h
+//!
+//! The bodies live in `crate::backend::catalog::indexing`; this header re-exports
+//! them under their C names (rules.md s3). `CatalogIndexState` is the port's owned
+//! open-indexes handle (PG aliases `ResultRelInfo`; here it carries the heap
+//! relation + its open indexes directly).
 
-use crate::access::htup::HeapTuple;
-use crate::nodes::execnodes::ResultRelInfo;
-use crate::executor::tuptable::TupleTableSlot;
-use crate::storage::itemptr::ItemPointerData;
-use crate::utils::rel::Relation;
-
-/// State used by CatalogOpenIndexes and friends; aliases the executor's
-/// ResultRelInfo but kept distinct to decouple callers.
-pub type CatalogIndexState = *mut ResultRelInfo; // TODO(ptr)
-
-/// Cap on bytes allocated for multi-inserts with system catalogs.
-pub const MAX_CATALOG_MULTI_INSERT_BYTES: usize = 65535;
-
-pub fn CatalogOpenIndexes(heap_rel: &Relation) -> CatalogIndexState {
-    let _ = heap_rel;
-    unimplemented!()
-}
-
-pub fn CatalogCloseIndexes(indstate: CatalogIndexState) {
-    let _ = indstate;
-    unimplemented!()
-}
-
-pub fn CatalogTupleInsert(heap_rel: &Relation, tup: HeapTuple) {
-    let _ = (heap_rel, tup);
-    unimplemented!()
-}
-
-pub fn CatalogTupleInsertWithInfo(
-    heap_rel: &Relation,
-    tup: HeapTuple,
-    indstate: CatalogIndexState,
-) {
-    let _ = (heap_rel, tup, indstate);
-    unimplemented!()
-}
-
-pub fn CatalogTuplesMultiInsertWithInfo(
-    heap_rel: &Relation,
-    slot: &mut [*mut TupleTableSlot],
-    indstate: CatalogIndexState,
-) {
-    let _ = (heap_rel, slot, indstate);
-    unimplemented!()
-}
-
-pub fn CatalogTupleUpdate(heap_rel: &Relation, otid: &ItemPointerData, tup: HeapTuple) {
-    let _ = (heap_rel, otid, tup);
-    unimplemented!()
-}
-
-pub fn CatalogTupleUpdateWithInfo(
-    heap_rel: &Relation,
-    otid: &ItemPointerData,
-    tup: HeapTuple,
-    indstate: CatalogIndexState,
-) {
-    let _ = (heap_rel, otid, tup, indstate);
-    unimplemented!()
-}
-
-pub fn CatalogTupleDelete(heap_rel: &Relation, tid: &ItemPointerData) {
-    let _ = (heap_rel, tid);
-    unimplemented!()
-}
+pub use crate::backend::catalog::indexing::{
+    catalog_close_indexes as CatalogCloseIndexes, catalog_open_indexes as CatalogOpenIndexes,
+    catalog_tuple_insert as CatalogTupleInsert,
+    catalog_tuple_insert_with_info as CatalogTupleInsertWithInfo,
+    catalog_tuple_update as CatalogTupleUpdate, CatalogIndexState,
+    MAX_CATALOG_MULTI_INSERT_BYTES,
+};
 
 // The DECLARE_*_INDEX/DECLARE_OID bootstrap macros in catalog/indexing.h are BKI
-// metadata emitted by genbki; not modeled here (handled by build.rs later).
+// metadata emitted by genbki; the per-catalog index OIDs are declared next to each
+// catalog's Form struct (e.g. ClassOidIndexId in pg_class).

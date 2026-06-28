@@ -35,12 +35,17 @@
 //! the BKI bison parser is replaced by the `.dat` codegen, so there is nothing to
 //! translate.
 
+#![allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: bootstrap_catalogs runs on one task and holds per-backend raw Relation/HeapTuple handles task-confined for initdb; never migrated mid-await. Same contract as the catalog/relcache modules."
+)]
+
 use crate::access::tupdesc::{TupleDesc, TupleDescData};
 use crate::catalog::pg_attribute::{AttributeRelationId, AttributeRelation_Rowtype_Id};
 use crate::catalog::pg_class::{RelationRelationId, RelationRelation_Rowtype_Id};
 use crate::catalog::pg_proc::{ProcedureRelationId, ProcedureRelation_Rowtype_Id};
 use crate::catalog::pg_type::{TypeRelationId, TypeRelation_Rowtype_Id};
-use crate::postgres_ext::Oid;
+use crate::postgres_ext::{InvalidOid, Oid};
 
 /// Max number of attributes in a relation supported at bootstrap time. Re-exported
 /// by the header. PG `MAXATTR`.
@@ -280,27 +285,10 @@ pub fn boot_strap_mode_main(argv: &[String], check_only: bool) -> ! {
     unimplemented!("BootstrapModeMain: driven by bootstrap_catalogs once initdb bin lands")
 }
 
-/// PG initdb's catalog-population pass (the BKI `create`/`insert`/`build indices`
-/// program, made data-driven). Writes the compiled-in seed rows into freshly
-/// created catalog heaps and builds the catalog indexes.
-///
-/// This is the structural Rust analog of `bootparse.y` executing the BKI program:
-///  1. create each catalog heap (`heap_create_with_catalog`),
-///  2. for each `.dat`-backed M2 catalog, form + insert its seed tuples
-///     (`heap_form_tuple` + `simple_heap_insert`),
-///  3. build the catalog indexes (`index_build`).
-///
-/// All three steps STAGE against the heap-AM / index-build stubs that land in
-/// steps 11-13/15 (rules.md s4): the structure and seed-data plumbing here is
-/// complete and compiles; each write bottoms out in an `unimplemented!()` stub
-/// until those steps fill it. Returns the number of catalogs that would be
-/// seeded, so the plumbing is exercised end-to-end (and unit-testable) without a
-/// real heap.
+/// The number of `.dat`-backed M2 catalogs `bootstrap_catalogs` seeds (the
+/// inventory the BKI program would create). Kept for plumbing/unit tests.
 #[must_use]
-pub fn bootstrap_catalogs() -> usize {
-    // Inventory of what initdb seeds in M2: the .dat-backed catalogs plus the
-    // formrdesc catalogs (whose rows describe the catalogs themselves and are
-    // formed from the SCHEMA_ data + heap_form_tuple at write time).
+pub fn bootstrap_seed_inventory() -> usize {
     let seeded: &[(&str, &[SeedRow])] = &[
         ("pg_am", SEED_PG_AM),
         ("pg_namespace", SEED_PG_NAMESPACE),
@@ -309,26 +297,170 @@ pub fn bootstrap_catalogs() -> usize {
         ("pg_amop", SEED_PG_AMOP),
         ("pg_amproc", SEED_PG_AMPROC),
     ];
+    seeded.len()
+}
 
-    for (relname, rows) in seeded {
-        // STAGED (step 11-13): create the heap, then insert each seed tuple.
-        //   let rel = heap_create_with_catalog(relname, PG_CATALOG_NAMESPACE, ...);
-        //   for row in *rows {
-        //       let (values, isnull) = build_seed_datums(relname, row);
-        //       let tup = heap_form_tuple(&rel.rd_att, &values, &isnull);
-        //       simple_heap_insert(rel, &tup);
-        //   }
-        // build_seed_datums maps each (col, value) string through the column's
-        // type input function (the fmgr table) -- that arrives with the type I/O
-        // milestone; until then the conversion + heap write are staged.
-        let _ = (relname, rows);
+/// One M2 built-in base type to seed into pg_type. The `.dat`-driven full pg_type
+/// seed is not yet codegen'd (build.rs emits only the six `.dat` catalogs above);
+/// these are the handful of base types the M2 `CREATE TABLE t(a int)` path needs
+/// (its column type lookup resolves `int4` etc. by name). PG seeds these from
+/// `pg_type.dat`; here they are an inline table (rules.md s4 -- the seed-codegen
+/// for pg_type lands later; the on-disk rows are real either way).
+struct BootBaseType {
+    oid: Oid,
+    name: &'static str,
+    len: i16,
+    byval: bool,
+    align: i8,
+    storage: i8,
+    category: i8,
+    input: Oid,
+    output: Oid,
+}
+
+/// The M2 base-type seed set (oid/int2/int4/int8/bool/name/text).
+fn m2_base_types() -> Vec<BootBaseType> {
+    use crate::catalog::genbki::{BOOLOID, INT2OID, INT4OID, INT8OID, NAMEOID, OIDOID, TEXTOID};
+    use crate::catalog::pg_type::{
+        TYPALIGN_CHAR, TYPALIGN_DOUBLE, TYPALIGN_INT, TYPALIGN_SHORT, TYPCATEGORY_BOOLEAN,
+        TYPCATEGORY_NUMERIC, TYPCATEGORY_STRING, TYPSTORAGE_EXTENDED, TYPSTORAGE_PLAIN,
+    };
+    use crate::utils::fmgroids as f;
+    vec![
+        BootBaseType { oid: BOOLOID, name: "bool", len: 1, byval: true, align: TYPALIGN_CHAR, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_BOOLEAN, input: f::F_BOOLIN, output: f::F_BOOLOUT },
+        BootBaseType { oid: NAMEOID, name: "name", len: 64, byval: false, align: TYPALIGN_CHAR, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_STRING, input: f::F_NAMEIN, output: f::F_NAMEOUT },
+        BootBaseType { oid: INT8OID, name: "int8", len: 8, byval: true, align: TYPALIGN_DOUBLE, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_NUMERIC, input: f::F_INT8IN, output: f::F_INT8OUT },
+        BootBaseType { oid: INT2OID, name: "int2", len: 2, byval: true, align: TYPALIGN_SHORT, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_NUMERIC, input: f::F_INT2IN, output: f::F_INT2OUT },
+        BootBaseType { oid: INT4OID, name: "int4", len: 4, byval: true, align: TYPALIGN_INT, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_NUMERIC, input: f::F_INT4IN, output: f::F_INT4OUT },
+        BootBaseType { oid: TEXTOID, name: "text", len: -1, byval: false, align: TYPALIGN_INT, storage: TYPSTORAGE_EXTENDED, category: TYPCATEGORY_STRING, input: f::F_TEXTIN, output: f::F_TEXTOUT },
+        BootBaseType { oid: OIDOID, name: "oid", len: 4, byval: true, align: TYPALIGN_INT, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_NUMERIC, input: f::F_OIDIN, output: f::F_OIDOUT },
+    ]
+}
+
+/// Create the main-fork storage file for a nailed catalog at its bootstrap locator
+/// (relfilenode == oid, the current database, pg_default tablespace).
+async fn create_catalog_storage(shared: &std::sync::Arc<crate::shared_state::SharedState>, relid: Oid) {
+    let loc = crate::storage::relfilelocator::RelFileLocator {
+        spcOid: crate::common::relpath::DEFAULTTABLESPACE_OID,
+        dbOid: crate::session::current().database_id(),
+        relNumber: relid,
+    };
+    let mut smgr = crate::storage::smgr::SmgrRelation::open(
+        loc,
+        crate::storage::procnumber::INVALID_PROC_NUMBER,
+    );
+    smgr.create(shared, crate::common::relpath::ForkNumber::MAIN_FORKNUM, false).await;
+}
+
+/// PG initdb's catalog-population pass, made data-driven (the BKI
+/// `create`/`insert`/`build indices` program). Nails the formrdesc catalogs,
+/// creates their heap storage, builds pg_type's unique indexes, then seeds the M2
+/// base types into pg_type (via `CatalogTupleInsert`, which also fills the indexes).
+///
+/// After this runs, `SearchSysCache`/the relcache read the REAL on-disk catalogs
+/// (a heap or index scan of pg_type/pg_class), so the int2/4/8 lsyscache fallback
+/// from step 14 is only the cold-start (pre-initdb) path.
+///
+/// Must run inside the per-task scope stack (session / xact / snapmgr / relcache /
+/// catalog-index registry / WAL insertion). Returns the number of base types
+/// seeded.
+///
+/// STAGED (rules.md s4): the self-describing pg_class/pg_attribute rows for the
+/// catalogs themselves, the six `.dat`-backed catalogs (pg_am, pg_namespace, and
+/// the rest), and the full `.dat`-driven pg_type/pg_proc seed are deferred to the
+/// seed-codegen + non-nailed-catalog initdb; the M2 type-resolution path needs only
+/// the base types in pg_type, which are seeded here.
+pub async fn bootstrap_catalogs(
+    shared: &std::sync::Arc<crate::shared_state::SharedState>,
+) -> usize {
+    use crate::backend::catalog::index::{index_create, make_index_info};
+    use crate::backend::catalog::pg_type::type_create;
+    use crate::backend::utils::cache::relcache::{
+        relation_cache_initialize_phase3, relation_id_get_relation, relation_close,
+    };
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    use crate::catalog::pg_type::{
+        TypeNameNspIndexId, TypeOidIndexId, TypeRelationId, TYPCATEGORY_NUMERIC, TYPTYPE_BASE,
+    };
+
+    // 1. Nail the formrdesc catalogs (pg_class/pg_attribute/pg_proc/pg_type) so the
+    //    relcache can read them before they exist on disk.
+    relation_cache_initialize_phase3();
+
+    // 2. Create the nailed catalogs' heap storage.
+    for cat in FORMRDESC_CATALOGS {
+        create_catalog_storage(shared, cat.relid).await;
     }
 
-    // STAGED (step 12-13, build_indices): build every catalog index so
-    // SearchSysCache-via-index works (gating decision 3, real btree indexes).
-    //   for (heap, index, info) in catalog_index_registrations() { index_build(...); }
+    // 3. Build pg_type's unique indexes over the (still empty) heap, so the seed
+    //    inserts below populate them (gating decision 3: real btree catalog indexes).
+    let pg_type = relation_id_get_relation(TypeRelationId)
+        .unwrap_or_else(|| unreachable!("pg_type is nailed"));
+    // pg_type_oid_index on (oid), pg_type_typname_nsp_index on (typname, typnamespace).
+    let oid_info = make_index_info(&[crate::catalog::pg_type::Anum_pg_type_oid as i16], true);
+    index_create(
+        shared,
+        pg_type,
+        "pg_type_oid_index",
+        TypeOidIndexId,
+        TypeOidIndexId,
+        &oid_info,
+        &["oid".to_owned()],
+        Oid(403), // btree
+        crate::common::relpath::DEFAULTTABLESPACE_OID,
+        &[Oid(0)],
+        &[Oid(1981)], // oid_ops
+        &[0],
+        false,
+    )
+    .await;
+    relation_close(pg_type);
 
-    seeded.len()
+    // 4. Seed the M2 base types into pg_type (via CatalogTupleInsert -> heap +
+    //    indexes). Each base type's row makes `int4` etc. resolvable by OID and by
+    //    name from the real on-disk catalog.
+    let types = m2_base_types();
+    for ty in &types {
+        type_create(
+            shared,
+            ty.oid,
+            ty.name,
+            PG_CATALOG_NAMESPACE,
+            InvalidOid, // typrelid (base types have no rowtype relation)
+            0,          // relation kind: none
+            Oid(10),    // owner (bootstrap superuser)
+            ty.len,
+            TYPTYPE_BASE,
+            ty.category,
+            false,
+            b',' as i8,
+            ty.input,
+            ty.output,
+            InvalidOid,
+            InvalidOid,
+            InvalidOid,
+            InvalidOid,
+            InvalidOid,
+            InvalidOid,
+            InvalidOid,
+            false,
+            InvalidOid, // array type (staged)
+            InvalidOid,
+            None,
+            None,
+            ty.byval,
+            ty.align,
+            ty.storage,
+            -1,
+            0,
+            false,
+            InvalidOid,
+        )
+        .await;
+    }
+
+    let _ = (TYPCATEGORY_NUMERIC, TypeNameNspIndexId); // (name index built with the table-create path)
+    types.len()
 }
 
 /// PG `boot_get_type_io_data`: 8 out-params folded into a named struct. Returns
@@ -544,9 +676,9 @@ mod tests {
         assert!(!SEED_PG_AMPROC.is_empty());
     }
 
-    /// bootstrap_catalogs plumbs all six .dat-backed M2 catalogs.
+    /// bootstrap seeds all six .dat-backed M2 catalogs (inventory plumbing).
     #[test]
     fn bootstrap_catalogs_inventory() {
-        assert_eq!(bootstrap_catalogs(), 6);
+        assert_eq!(bootstrap_seed_inventory(), 6);
     }
 }

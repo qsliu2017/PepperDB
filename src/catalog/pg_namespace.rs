@@ -24,6 +24,17 @@ pub type Form_pg_namespace = *mut FormData_pg_namespace; // TODO(ptr)
 // MAKE_SYSCACHE(NAMESPACENAME, pg_namespace_nspname_index, 4)
 // MAKE_SYSCACHE(NAMESPACEOID, pg_namespace_oid_index, 16)
 
-pub fn NamespaceCreate(_nsp_name: &str, _owner_id: Oid, _is_temp: bool) -> Oid {
-    unimplemented!()
-}
+/// pg_namespace_nspname_index: unique index on nspname.
+pub const NamespaceNameIndexId: Oid = Oid(2684);
+/// pg_namespace_oid_index: unique index on oid (the pkey).
+pub const NamespaceOidIndexId: Oid = Oid(2685);
+
+// Well-known namespace OIDs (BKI seed OIDs from pg_namespace.dat).
+/// pg_catalog: the system catalog schema.
+pub const PG_CATALOG_NAMESPACE: Oid = Oid(11);
+/// pg_toast: the reserved TOAST schema.
+pub const PG_TOAST_NAMESPACE: Oid = Oid(99);
+/// public: the standard public schema.
+pub const PG_PUBLIC_NAMESPACE: Oid = Oid(2200);
+
+pub use crate::backend::catalog::pg_namespace::namespace_create as NamespaceCreate;

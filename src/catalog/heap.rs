@@ -56,51 +56,13 @@ pub struct CookedConstraint {
     pub is_no_inherit: bool,    // local def and cannot be inherited
 }
 
-pub fn heap_create(
-    _relname: &str,
-    _relnamespace: Oid,
-    _reltablespace: Oid,
-    _relid: Oid,
-    _relfilenumber: RelFileNumber,
-    _accessmtd: Oid,
-    _tup_desc: TupleDesc,
-    _relkind: u8,
-    _relpersistence: u8,
-    _shared_relation: bool,
-    _mapped_relation: bool,
-    _allow_system_table_mods: bool,
-    _relfrozenxid: &mut TransactionId,
-    _relminmxid: &mut MultiXactId,
-    _create_storage: bool,
-) -> Relation {
-    unimplemented!()
-}
-
-pub fn heap_create_with_catalog(
-    _relname: &str,
-    _relnamespace: Oid,
-    _reltablespace: Oid,
-    _relid: Oid,
-    _reltypeid: Oid,
-    _reloftypeid: Oid,
-    _ownerid: Oid,
-    _accessmtd: Oid,
-    _tupdesc: TupleDesc,
-    _cooked_constraints: Vec<CookedConstraint>,
-    _relkind: u8,
-    _relpersistence: u8,
-    _shared_relation: bool,
-    _mapped_relation: bool,
-    _oncommit: OnCommitAction,
-    _reloptions: Datum,
-    _use_user_acl: bool,
-    _allow_system_table_mods: bool,
-    _is_internal: bool,
-    _relrewrite: Oid,
-    _typaddress: Option<&mut ObjectAddress>,
-) -> Oid {
-    unimplemented!()
-}
+// The storage-level `heap_create` and the `heap_create_with_catalog` orchestrator
+// are implemented in `crate::backend::catalog::heap` (M2 form: a plain heap table;
+// the `&Arc<SharedState>` thread is the foundation convention, and the toast /
+// array-type / defaults / mapped-relation parameters are staged -- rules.md s4/s5).
+pub use crate::backend::catalog::heap::{
+    heap_create, heap_create_with_catalog,
+};
 
 pub fn heap_drop_with_catalog(_relid: Oid) {
     unimplemented!()

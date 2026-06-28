@@ -1,75 +1,48 @@
 //! Translated from PostgreSQL src/include/catalog/catalog.h
+//!
+//! The bodies live in `crate::backend::catalog::catalog`; this header re-exports
+//! the snake_case definitions under their C names (rules.md s3). The M2 path
+//! implements the OID/relfilenumber allocators and the system/catalog/pinned
+//! predicates; the remaining toast/inplace/text-unique helpers stay staged stubs.
 
-use crate::access::attnum::AttrNumber;
 use crate::catalog::pg_class::Form_pg_class;
-use crate::common::relpath::RelFileNumber;
 use crate::postgres_ext::Oid;
 use crate::utils::relcache::Relation;
 
-pub fn IsSystemRelation(relation: Relation) -> bool {
-    unimplemented!()
-}
+pub use crate::backend::catalog::catalog::{
+    get_new_oid_with_index as GetNewOidWithIndex, get_new_rel_file_number as GetNewRelFileNumber,
+    is_catalog_namespace as IsCatalogNamespace, is_catalog_relation as IsCatalogRelation,
+    is_catalog_relation_oid as IsCatalogRelationOid, is_pinned_object as IsPinnedObject,
+    is_shared_relation as IsSharedRelation, is_system_class as IsSystemClass,
+    is_system_relation as IsSystemRelation, is_toast_namespace as IsToastNamespace,
+};
 
 pub fn IsToastRelation(relation: Relation) -> bool {
-    unimplemented!()
-}
-
-pub fn IsCatalogRelation(relation: Relation) -> bool {
+    let _ = relation;
     unimplemented!()
 }
 
 pub fn IsInplaceUpdateRelation(relation: Relation) -> bool {
-    unimplemented!()
-}
-
-pub fn IsSystemClass(relid: Oid, reltuple: Form_pg_class) -> bool {
+    let _ = relation;
     unimplemented!()
 }
 
 pub fn IsToastClass(reltuple: Form_pg_class) -> bool {
-    unimplemented!()
-}
-
-pub fn IsCatalogRelationOid(relid: Oid) -> bool {
+    let _ = reltuple;
     unimplemented!()
 }
 
 pub fn IsCatalogTextUniqueIndexOid(relid: Oid) -> bool {
+    let _ = relid;
     unimplemented!()
 }
 
 pub fn IsInplaceUpdateOid(relid: Oid) -> bool {
-    unimplemented!()
-}
-
-pub fn IsCatalogNamespace(namespace_id: Oid) -> bool {
-    unimplemented!()
-}
-
-pub fn IsToastNamespace(namespace_id: Oid) -> bool {
+    let _ = relid;
     unimplemented!()
 }
 
 pub fn IsReservedName(name: &str) -> bool {
-    unimplemented!()
-}
-
-pub fn IsSharedRelation(relation_id: Oid) -> bool {
-    unimplemented!()
-}
-
-pub fn IsPinnedObject(class_id: Oid, object_id: Oid) -> bool {
-    unimplemented!()
-}
-
-pub fn GetNewOidWithIndex(relation: Relation, index_id: Oid, oidcolumn: AttrNumber) -> Oid {
-    unimplemented!()
-}
-
-pub fn GetNewRelFileNumber(
-    reltablespace: Oid,
-    pg_class: Relation,
-    relpersistence: u8,
-) -> RelFileNumber {
+    let _ = name;
     unimplemented!()
 }

@@ -66,6 +66,11 @@ pub type Form_pg_type = *mut FormData_pg_type; // TODO(ptr)
 // MAKE_SYSCACHE(TYPEOID, pg_type_oid_index, 64)
 // MAKE_SYSCACHE(TYPENAMENSP, pg_type_typname_nsp_index, 64)
 
+/// pg_type_oid_index: unique index on oid (the pkey).
+pub const TypeOidIndexId: Oid = Oid(2703);
+/// pg_type_typname_nsp_index: unique index on (typname, typnamespace).
+pub const TypeNameNspIndexId: Oid = Oid(2704);
+
 // typtype values.
 pub const TYPTYPE_BASE: i8 = b'b' as i8;
 pub const TYPTYPE_COMPOSITE: i8 = b'c' as i8;
@@ -154,42 +159,7 @@ pub fn TypeShellMake(_type_name: &str, _type_namespace: Oid, _owner_id: Oid) -> 
     unimplemented!()
 }
 
-pub fn TypeCreate(
-    _new_type_oid: Oid,
-    _type_name: &str,
-    _type_namespace: Oid,
-    _relation_oid: Oid,
-    _relation_kind: i8,
-    _owner_id: Oid,
-    _internal_size: i16,
-    _type_type: i8,
-    _type_category: i8,
-    _type_preferred: bool,
-    _typ_delim: i8,
-    _input_procedure: Oid,
-    _output_procedure: Oid,
-    _receive_procedure: Oid,
-    _send_procedure: Oid,
-    _typmodin_procedure: Oid,
-    _typmodout_procedure: Oid,
-    _analyze_procedure: Oid,
-    _subscript_procedure: Oid,
-    _element_type: Oid,
-    _is_implicit_array: bool,
-    _array_type: Oid,
-    _base_type: Oid,
-    _default_type_value: &str,
-    _default_type_bin: &str,
-    _passed_by_value: bool,
-    _alignment: i8,
-    _storage: i8,
-    _type_mod: i32,
-    _typ_ndims: i32,
-    _type_not_null: bool,
-    _type_collation: Oid,
-) -> ObjectAddress {
-    unimplemented!()
-}
+pub use crate::backend::catalog::pg_type::type_create as TypeCreate;
 
 pub fn GenerateTypeDependencies(
     _type_tuple: HeapTuple,

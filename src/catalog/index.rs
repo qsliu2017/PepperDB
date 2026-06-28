@@ -88,54 +88,12 @@ bitflags! {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn index_create(
-    heap_relation: &Relation,
-    index_relation_name: &str,
-    index_relation_id: Oid,
-    parent_index_relid: Oid,
-    parent_constraint_id: Oid,
-    rel_file_number: RelFileNumber,
-    index_info: &mut IndexInfo,
-    index_col_names: &[String],
-    access_method_id: Oid,
-    table_space_id: Oid,
-    collation_ids: &[Oid],
-    opclass_ids: &[Oid],
-    opclass_options: &[Datum],
-    coloptions: &[i16],
-    stattargets: &[NullableDatum],
-    reloptions: Datum,
-    flags: IndexCreate,
-    constr_flags: IndexConstrCreate,
-    allow_system_table_mods: bool,
-    is_internal: bool,
-) -> (Oid, Oid) {
-    // returns the new index Oid; trailing `*constraintId` out-param folded in.
-    let _ = (
-        heap_relation,
-        index_relation_name,
-        index_relation_id,
-        parent_index_relid,
-        parent_constraint_id,
-        rel_file_number,
-        index_info,
-        index_col_names,
-        access_method_id,
-        table_space_id,
-        collation_ids,
-        opclass_ids,
-        opclass_options,
-        coloptions,
-        stattargets,
-        reloptions,
-        flags,
-        constr_flags,
-        allow_system_table_mods,
-        is_internal,
-    );
-    unimplemented!()
-}
+// `index_create` + `index_build` are implemented in
+// `crate::backend::catalog::index` (M2 form: a plain btree index on simple heap
+// columns; the `&Arc<SharedState>` thread is the foundation convention, and the
+// constraint / concurrency / partitioning / pg_index-row parameters are staged --
+// rules.md s4/s5).
+pub use crate::backend::catalog::index::{index_build, index_create, make_index_info};
 
 pub fn index_concurrently_create_copy(
     heap_relation: &Relation,
@@ -239,16 +197,6 @@ pub fn FormIndexDatum(
     unimplemented!()
 }
 
-pub fn index_build(
-    heap_relation: &Relation,
-    index_relation: &Relation,
-    index_info: &IndexInfo,
-    isreindex: bool,
-    parallel: bool,
-) {
-    let _ = (heap_relation, index_relation, index_info, isreindex, parallel);
-    unimplemented!()
-}
 
 pub fn validate_index(heap_id: Oid, index_id: Oid, snapshot: Snapshot) {
     let _ = (heap_id, index_id, snapshot);

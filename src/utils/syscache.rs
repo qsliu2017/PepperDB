@@ -276,16 +276,29 @@ pub fn SysCacheInvalidate(_cache_id: SysCacheIdentifier, _hash_value: u32) {
     unimplemented!()
 }
 
-pub fn RelationInvalidatesSnapshotsOnly(_relid: Oid) -> bool {
-    unimplemented!()
+/// PG `RelationInvalidatesSnapshotsOnly`: a catalog whose changes need a fresh
+/// catalog snapshot but which has no syscache to invalidate. PG's hard-coded set;
+/// the M2-reachable members are pg_class / pg_attribute / pg_proc.
+pub fn RelationInvalidatesSnapshotsOnly(relid: Oid) -> bool {
+    relid == crate::catalog::pg_class::RelationRelationId
+        || relid == crate::catalog::pg_attribute::AttributeRelationId
+        || relid == crate::catalog::pg_proc::ProcedureRelationId
 }
 
-pub fn RelationHasSysCache(_relid: Oid) -> bool {
-    unimplemented!()
+/// PG `RelationHasSysCache`: whether `relid` is a catalog backing at least one
+/// system cache. The M2 syscache set covers pg_type / pg_proc / pg_class /
+/// pg_attribute / pg_namespace.
+pub fn RelationHasSysCache(relid: Oid) -> bool {
+    relid == crate::catalog::pg_type::TypeRelationId
+        || relid == crate::catalog::pg_proc::ProcedureRelationId
+        || relid == crate::catalog::pg_class::RelationRelationId
+        || relid == crate::catalog::pg_attribute::AttributeRelationId
+        || relid == crate::catalog::pg_namespace::NamespaceRelationId
 }
 
-pub fn RelationSupportsSysCache(_relid: Oid) -> bool {
-    unimplemented!()
+/// PG `RelationSupportsSysCache`: alias of [`RelationHasSysCache`] for the M2 set.
+pub fn RelationSupportsSysCache(relid: Oid) -> bool {
+    RelationHasSysCache(relid)
 }
 
 // The C key-count-specific macros (SearchSysCacheCopyN / SearchSysCacheExistsN /

@@ -63,6 +63,11 @@ pub type Form_pg_class = *mut FormData_pg_class; // TODO(ptr)
 // MAKE_SYSCACHE(RELOID, pg_class_oid_index, 128)
 // MAKE_SYSCACHE(RELNAMENSP, pg_class_relname_nsp_index, 128)
 
+/// pg_class_oid_index: the unique index on pg_class.oid.
+pub const ClassOidIndexId: Oid = Oid(2662);
+/// pg_class_relname_nsp_index: the unique index on (relname, relnamespace).
+pub const ClassNameNspIndexId: Oid = Oid(2663);
+
 pub const RELKIND_RELATION: i8 = b'r' as i8;
 pub const RELKIND_INDEX: i8 = b'i' as i8;
 pub const RELKIND_SEQUENCE: i8 = b'S' as i8;

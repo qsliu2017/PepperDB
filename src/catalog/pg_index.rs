@@ -46,6 +46,11 @@ pub type Form_pg_index = *mut FormData_pg_index; // TODO(ptr)
 // DECLARE_INDEX(pg_index_indrelid_index, 2678, IndexIndrelidIndexId)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_index_indexrelid_index, 2679, IndexRelidIndexId)
 // MAKE_SYSCACHE(INDEXRELID, pg_index_indexrelid_index, 64)
+
+/// pg_index_indrelid_index: (non-unique) index on indrelid.
+pub const IndexIndrelidIndexId: Oid = Oid(2678);
+/// pg_index_indexrelid_index: unique index on indexrelid (the pkey).
+pub const IndexRelidIndexId: Oid = Oid(2679);
 // DECLARE_ARRAY_FOREIGN_KEY_OPT((indrelid, indkey), pg_attribute, (attrelid, attnum))
 
 // per-column indoption bits (packed in the on-disk indoption int2vector)
