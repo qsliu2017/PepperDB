@@ -12,7 +12,7 @@
 //! Families: the fmgr tables (Gen_fmgrtab.pl) from `catalog/pg_proc.dat`, and the
 //! catalog symbolic OID constants (genbki.pl) from the `catalog/pg_*.dat` rows.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() {
     let pg = PathBuf::from("ref/postgres/src/include/catalog");
@@ -39,6 +39,26 @@ fn main() {
         println!("cargo:rerun-if-changed={}", d.display());
     }
     std::fs::write(out.join("catalog_oids_generated.rs"), gen_catalog_oids(&dats)).unwrap();
+
+    // Catalog bootstrap codegen (genbki-equivalent), gating decision 2:
+    //  - Schema_pg_* attribute descriptor arrays for the formrdesc catalogs
+    //    (pg_class/pg_attribute/pg_proc/pg_type), derived from each catalog's
+    //    `CATALOG(...)` column list in its .h plus per-column physical type props
+    //    resolved from pg_type.dat (this is genbki's `morph_row_for_pgattr`).
+    //  - generic .dat seed rows for the M2 bootstrap catalogs (pg_am, pg_namespace,
+    //    pg_collation, pg_opclass, pg_amop, pg_amproc).
+    let inc = PathBuf::from("ref/postgres/src/include/catalog");
+    let types = read_pg_type_props(&inc.join("pg_type.dat"));
+    std::fs::write(
+        out.join("bootstrap_schema_generated.rs"),
+        gen_bootstrap_schemas(&inc, &types),
+    )
+    .unwrap();
+    std::fs::write(
+        out.join("bootstrap_seed_generated.rs"),
+        gen_bootstrap_seeds(&inc),
+    )
+    .unwrap();
 
     // Grammar (gram.y analog): process every .lalrpop under src/ into OUT_DIR
     // (mirroring the source path), so gram.rs can include it via lalrpop_mod!.
@@ -441,4 +461,407 @@ fn gen_catalog_oids(dats: &[PathBuf]) -> String {
         }
     }
     out
+}
+
+// ===========================================================================
+// Catalog bootstrap codegen (genbki-equivalent) -- gating decision 2.
+// ===========================================================================
+
+/// pg_collation.dat C_COLLATION_OID -- the collation morph_row_for_pgattr stamps
+/// onto every collatable catalog column (collation-aware catalog columns use C).
+const C_COLLATION_OID: u32 = 950;
+/// pg_collation.dat DEFAULT_COLLATION_OID -- the `default` symbolic collation.
+const DEFAULT_COLLATION_OID: u32 = 100;
+
+/// Physical properties of a pg_type row that genbki copies onto a pg_attribute
+/// row (`morph_row_for_pgattr`): the OID + the on-disk layout fields.
+struct TypeProps {
+    oid: u32,
+    typlen: i16,
+    typbyval: bool,
+    typalign: i8,           // the char value: 'c'/'s'/'i'/'d'
+    typstorage: i8,         // 'p'/'e'/'x'/'m'
+    typcategory: u8,        // 'A' marks an array type -> attndims = 1
+    typcollation: u32,      // 0, or non-0 for collatable types
+    array_type_oid: u32,    // element types: OID of the auto-generated array type (0 if none)
+}
+
+/// Derive the auto-generated array type's physical props from its element type,
+/// matching Catalog.pm `GenerateArrayTypes` + pg_type.h `BKI_ARRAY_DEFAULT`:
+///   typlen = -1, typbyval = f, typstorage = 'x' (BKI_ARRAY_DEFAULT),
+///   typcategory = 'A', oid = elem.array_type_oid,
+///   typalign = 'd' if the element requires double alignment, else 'i',
+///   typcollation = copied from the element (no BKI_ARRAY_DEFAULT for it), so the
+///                  array is collatable iff its element is.
+fn array_type_props(elem_name: &str, elem: &TypeProps) -> TypeProps {
+    assert!(
+        elem.array_type_oid != 0,
+        "pg_type {elem_name} has no array_type_oid but is used as a `[]` column element",
+    );
+    TypeProps {
+        oid: elem.array_type_oid,
+        typlen: -1,
+        typbyval: false,
+        typalign: if elem.typalign == b'd' as i8 { b'd' as i8 } else { b'i' as i8 },
+        typstorage: b'x' as i8,
+        typcategory: b'A',
+        typcollation: elem.typcollation,
+        array_type_oid: 0,
+    }
+}
+
+/// Read pg_type.dat into a typname -> TypeProps map, applying the .dat defaults
+/// genbki applies (typbyval=f, typalign='i', typstorage='p', typcollation=0).
+fn read_pg_type_props(path: &Path) -> std::collections::HashMap<String, TypeProps> {
+    let text =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let mut map = std::collections::HashMap::new();
+    for r in parse_records(&text) {
+        let (Some(name), Some(oid)) = (r.get("typname"), r.get("oid")) else { continue };
+        let oid: u32 = oid.parse().unwrap_or(0);
+        let typlen = parse_typlen(r.get("typlen").map_or("0", String::as_str));
+        let typbyval = r.get("typbyval").is_some_and(|s| s == "t");
+        let typalign = r.get("typalign").and_then(|s| s.bytes().next()).unwrap_or(b'i') as i8;
+        let typstorage = r.get("typstorage").and_then(|s| s.bytes().next()).unwrap_or(b'p') as i8;
+        let typcategory = r.get("typcategory").and_then(|s| s.bytes().next()).unwrap_or(0);
+        let typcollation =
+            r.get("typcollation").map_or(0, |s| parse_collation(s));
+        let array_type_oid = r.get("array_type_oid").and_then(|s| s.parse().ok()).unwrap_or(0);
+        map.insert(
+            name.clone(),
+            TypeProps {
+                oid,
+                typlen,
+                typbyval,
+                typalign,
+                typstorage,
+                typcategory,
+                typcollation,
+                array_type_oid,
+            },
+        );
+    }
+    map
+}
+
+/// pg_type.dat's typlen is a number or the symbolic `NAMEDATALEN`.
+fn parse_typlen(s: &str) -> i16 {
+    match s.trim() {
+        "NAMEDATALEN" => 64, // matches src/c.rs NAMEDATALEN
+        n => n.parse().unwrap_or(0),
+    }
+}
+
+/// pg_type.dat's typcollation is a numeric OID or one of the symbolic collation
+/// names genbki resolves via FindDefinedSymbolFromData (`default` ->
+/// DEFAULT_COLLATION_OID, `C` -> C_COLLATION_OID). Only the non-zero/zero
+/// distinction is load-bearing for morph_row_for_pgattr's attcollation.
+fn parse_collation(s: &str) -> u32 {
+    match s.trim() {
+        "default" => DEFAULT_COLLATION_OID,
+        "C" => C_COLLATION_OID,
+        n => n.parse().unwrap_or(0),
+    }
+}
+
+/// The C type names genbki maps to a differently-named pg_type (Catalog.pm
+/// %RENAME_ATTTYPE); every other C type name IS the pg_type name.
+fn c_type_to_pg_type(c: &str) -> &str {
+    match c {
+        "int16" => "int2",
+        "int32" => "int4",
+        "int64" => "int8",
+        "Oid" => "oid",
+        "NameData" => "name",
+        "TransactionId" => "xid",
+        "XLogRecPtr" => "pg_lsn",
+        other => other,
+    }
+}
+
+/// One parsed catalog column.
+struct CatColumn {
+    name: String,
+    pgtype: String,
+    is_array: bool,
+    force_null: bool,
+    force_not_null: bool,
+}
+
+/// Parse a catalog header's `CATALOG(<name>,...) { ... }` body into its ordered
+/// column list (the genbki "schema").
+fn parse_catalog_columns(header: &Path, catalog: &str) -> Vec<CatColumn> {
+    let text = std::fs::read_to_string(header)
+        .unwrap_or_else(|e| panic!("read {}: {e}", header.display()));
+    let marker = format!("CATALOG({catalog},");
+    let start = text
+        .find(&marker)
+        .unwrap_or_else(|| panic!("no {marker} in {}", header.display()));
+    let brace = text[start..].find('{').map(|p| start + p + 1).unwrap();
+    let end = text[brace..].find("\n}").map(|p| brace + p).unwrap();
+    let body = clean_catalog_body(&text[brace..end]);
+
+    let mut cols = Vec::new();
+    for raw in body.split(';') {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mut toks = line.split_whitespace();
+        let Some(ctype) = toks.next() else { continue };
+        let Some(rawname) = toks.next() else { continue };
+        if !ctype.bytes().next().is_some_and(|b| b.is_ascii_alphabetic()) {
+            continue;
+        }
+        let is_array = rawname.contains('[');
+        let name: String = rawname.chars().take_while(|&c| c != '[' && c != ';').collect();
+        if name.is_empty() {
+            continue;
+        }
+        cols.push(CatColumn {
+            name,
+            pgtype: c_type_to_pg_type(ctype).to_string(),
+            is_array,
+            force_null: line.contains("BKI_FORCE_NULL"),
+            force_not_null: line.contains("BKI_FORCE_NOT_NULL"),
+        });
+    }
+    cols
+}
+
+/// Clean a `CATALOG(...) { ... }` body for column parsing: drop preprocessor
+/// directive lines (`#ifdef CATALOG_VARLEN` / `#endif` guarding the varlen tail)
+/// and line comments, then strip `/* ... */` block comments (which may span
+/// lines). The result is split on `;` into one fragment per column declaration.
+fn clean_catalog_body(body: &str) -> String {
+    let mut filtered = String::with_capacity(body.len());
+    for line in body.lines() {
+        let t = line.trim_start();
+        if t.starts_with('#') {
+            continue; // #ifdef CATALOG_VARLEN / #endif / #ifndef ...
+        }
+        // Drop a `// ...` line comment tail (none in current headers, but safe).
+        let line = line.split("//").next().unwrap_or(line);
+        filtered.push_str(line);
+        filtered.push('\n');
+    }
+    // Strip /* ... */ block comments.
+    let s = &filtered;
+    let mut out = String::with_capacity(s.len());
+    let b = s.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if i + 1 < b.len() && b[i] == b'/' && b[i + 1] == b'*' {
+            if let Some(end) = s[i + 2..].find("*/") {
+                i = i + 2 + end + 2;
+                continue;
+            }
+            break;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Emit the `Schema_pg_*` attribute descriptor arrays for the formrdesc catalogs
+/// (the genbki schemapg.h analog), as `BootstrapAttr` literals consumed by
+/// `formrdesc`.
+fn gen_bootstrap_schemas(
+    inc: &Path,
+    types: &std::collections::HashMap<String, TypeProps>,
+) -> String {
+    let mut out = String::from(
+        "// Generated by build.rs (genbki schemapg.h analog). Schema_pg_* attribute\n\
+         // descriptor arrays for the formrdesc bootstrap catalogs.\n",
+    );
+
+    let catalogs: &[(&str, &str)] = &[
+        ("pg_type", "pg_type.h"),
+        ("pg_attribute", "pg_attribute.h"),
+        ("pg_proc", "pg_proc.h"),
+        ("pg_class", "pg_class.h"),
+    ];
+
+    for (cat, hdr) in catalogs {
+        let cols = parse_catalog_columns(&inc.join(hdr), cat);
+        let arr = format!("SCHEMA_{}", cat.to_uppercase());
+        out.push_str(&format!("pub static {arr}: &[BootstrapAttr] = &[\n"));
+        // genbki tracks `priorfixedwidth` left-to-right: it starts true and is
+        // `&=`-ed by (attnotnull && attlen > 0) after each column (genbki.pl).
+        let mut prior_fixed_width = true;
+        for (i, col) in cols.iter().enumerate() {
+            let attnum = i + 1;
+            // Resolve the column's pg_type exactly as genbki/Catalog.pm does: a
+            // `foo[]` column has type `_<elem>` (the auto-generated array type),
+            // whose physical fields come from GenerateArrayTypes. Both array and
+            // scalar columns then flow through the same morph_row_for_pgattr copy.
+            let tp = if col.is_array {
+                let elem = types.get(&col.pgtype).unwrap_or_else(|| {
+                    panic!(
+                        "catalog {cat} array column {} references unknown element pg_type {}",
+                        col.name, col.pgtype
+                    )
+                });
+                array_type_props(&col.pgtype, elem)
+            } else {
+                let tp = types.get(&col.pgtype).unwrap_or_else(|| {
+                    panic!(
+                        "catalog {cat} column {} references unknown pg_type {}",
+                        col.name, col.pgtype
+                    )
+                });
+                TypeProps { array_type_oid: 0, ..*tp }
+            };
+
+            let atttypid = tp.oid;
+            let attlen = tp.typlen;
+            let attbyval = tp.typbyval;
+            let attalign = tp.typalign;
+            let attstorage = tp.typstorage;
+            // morph_row_for_pgattr: attndims = 1 for an array type (typcategory 'A'),
+            // else 0.
+            let attndims = i16::from(tp.typcategory == b'A');
+            // morph_row_for_pgattr: collation-aware columns use C collation; a
+            // column is collatable iff its (array or scalar) type's typcollation
+            // is non-zero (the array type copies typcollation from its element).
+            let attcollation = if tp.typcollation != 0 { C_COLLATION_OID } else { 0 };
+
+            // attnotnull, per genbki morph_row_for_pgattr: FORCE_NOT_NULL -> true,
+            // FORCE_NULL -> false, else `priorfixedwidth` (this column and all
+            // prior columns are fixed-width AND not-null).
+            let fixed = attlen > 0;
+            let attnotnull = if col.force_not_null {
+                true
+            } else if col.force_null {
+                false
+            } else {
+                prior_fixed_width && fixed
+            };
+            // Update priorfixedwidth for the NEXT column (genbki: `&= attnotnull
+            // && attlen > 0`).
+            prior_fixed_width &= attnotnull && fixed;
+
+            out.push_str(&format!(
+                "    BootstrapAttr {{ attname: \"{}\", atttypid: {atttypid}, attlen: {attlen}, \
+                 attbyval: {attbyval}, attalign: {attalign}, attstorage: {attstorage}, \
+                 attnotnull: {attnotnull}, attndims: {attndims}, attcollation: {attcollation}, \
+                 attnum: {attnum} }},\n",
+                col.name,
+            ));
+        }
+        out.push_str("];\n");
+        out.push_str(&format!(
+            "pub const NATTS_{}: usize = {};\n",
+            cat.to_uppercase(),
+            cols.len()
+        ));
+    }
+    out
+}
+
+/// Emit generic seed rows for the M2 bootstrap catalogs that have a `.dat` file.
+/// A seed row is an ordered `&[(column, value)]` exactly as written in the `.dat`.
+fn gen_bootstrap_seeds(inc: &Path) -> String {
+    let mut out = String::from(
+        "// Generated by build.rs (genbki BKI `insert` analog). Generic seed rows\n\
+         // for the M2 bootstrap catalogs: each row is an ordered &[(col, value)].\n\
+         // value `_null_` denotes SQL NULL; `-` is the regproc/unknown sentinel.\n",
+    );
+
+    // The M2-needed catalogs whose initial contents come from a .dat. pg_proc has
+    // its own fmgr codegen; pg_class/pg_attribute/pg_type rows that DESCRIBE the
+    // catalogs are produced by formrdesc + the schema codegen above, not seeded
+    // from a .dat. opclass/amop/amproc seed the int4/oid/name/text btree operator
+    // classes so the M2 catalog indexes resolve.
+    let m2_catalogs =
+        ["pg_am", "pg_namespace", "pg_collation", "pg_opclass", "pg_amop", "pg_amproc"];
+
+    for cat in m2_catalogs {
+        let dat = inc.join(format!("{cat}.dat"));
+        let const_name = format!("SEED_{}", cat.to_uppercase());
+        let Ok(text) = std::fs::read_to_string(&dat) else {
+            out.push_str(&format!(
+                "// TODO(seed): {cat}.dat not found; no seed rows emitted.\n\
+                 pub static {const_name}: &[&[(&str, &str)]] = &[];\n"
+            ));
+            continue;
+        };
+        let recs = parse_ordered_records(&text);
+        out.push_str(&format!("pub static {const_name}: &[&[(&str, &str)]] = &[\n"));
+        for rec in &recs {
+            out.push_str("    &[");
+            for (k, v) in rec {
+                let v = v.replace('\\', "\\\\").replace('"', "\\\"");
+                out.push_str(&format!("(\"{k}\", \"{v}\"), "));
+            }
+            out.push_str("],\n");
+        }
+        out.push_str("];\n");
+    }
+
+    out.push_str(
+        "// TODO(seed,M3+): pg_cast, pg_operator, pg_aggregate, pg_range,\n\
+         // pg_conversion, pg_language, pg_ts_* -- emit seed rows at their milestone.\n",
+    );
+    out
+}
+
+/// Like `parse_records` but preserves column ORDER within each record (the
+/// seed-row codegen needs declaration order, which a HashMap loses).
+fn parse_ordered_records(text: &str) -> Vec<Vec<(String, String)>> {
+    let mut buf = String::with_capacity(text.len());
+    for line in text.lines() {
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
+        buf.push_str(line);
+        buf.push('\n');
+    }
+    let mut recs = Vec::new();
+    let mut i = 0;
+    while let Some(open) = buf[i..].find('{') {
+        let start = i + open + 1;
+        let Some(close) = buf[start..].find('}').map(|p| start + p) else { break };
+        let rec = &buf[start..close];
+        let b = rec.as_bytes();
+        let mut kv = Vec::new();
+        let mut j = 0;
+        while j < b.len() {
+            if !(b[j] as char).is_ascii_alphabetic() {
+                j += 1;
+                continue;
+            }
+            let ks = j;
+            while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+                j += 1;
+            }
+            let key = rec[ks..j].to_string();
+            while j < b.len() && matches!(b[j], b' ' | b'\t' | b'\n') {
+                j += 1;
+            }
+            if !(j + 1 < b.len() && b[j] == b'=' && b[j + 1] == b'>') {
+                continue;
+            }
+            j += 2;
+            while j < b.len() && matches!(b[j], b' ' | b'\t' | b'\n') {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b'\'' {
+                j += 1;
+                let vs = j;
+                while j < b.len() && b[j] != b'\'' {
+                    if b[j] == b'\\' {
+                        j += 1;
+                    }
+                    j += 1;
+                }
+                kv.push((key, rec[vs..j].to_string()));
+                j += 1;
+            }
+        }
+        recs.push(kv);
+        i = close + 1;
+    }
+    recs
 }

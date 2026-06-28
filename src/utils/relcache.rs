@@ -139,10 +139,21 @@ pub fn RelationCacheInitialize() {
     unimplemented!()
 }
 
+/// PG `RelationCacheInitializePhase2`: fake up relcache entries for the nailed
+/// SHARED catalogs (pg_database/pg_authid/...). Those are deep-deferred; when this
+/// lands it calls `crate::bootstrap::bootstrap::formrdesc` per shared
+/// `BootstrapCatalog`, using the descriptor it returns as the nailed entry's
+/// `rd_att`.
 pub fn RelationCacheInitializePhase2() {
     unimplemented!()
 }
 
+/// PG `RelationCacheInitializePhase3`: fake up relcache entries for the nailed
+/// LOCAL catalogs (pg_class/pg_attribute/pg_proc/pg_type), then load the real
+/// pg_class rows. The fake-up step is `crate::bootstrap::bootstrap::formrdesc`
+/// over `crate::bootstrap::bootstrap::FORMRDESC_CATALOGS`; step 14 wraps the
+/// returned `TupleDesc` in a nailed `RelationData` (see the formrdesc doc for the
+/// staged `rd_rel`/RelationCacheInsert wiring).
 pub fn RelationCacheInitializePhase3() {
     unimplemented!()
 }

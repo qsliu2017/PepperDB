@@ -1,6 +1,7 @@
 //! Directory module: src/backend
 
 pub mod access;
+pub mod bootstrap;
 pub mod executor;
 pub mod libpq;
 pub mod nodes;
