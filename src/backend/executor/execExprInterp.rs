@@ -11,6 +11,7 @@
 //! touches no I/O leaf, so the interpreter does not `.await`.
 
 use crate::executor::execExpr::{ExprEvalOp, ExprEvalStepData};
+use crate::executor::tuptable::slot_getsomeattrs;
 use crate::nodes::execnodes::{EeoFlag, ExprContext, ExprState};
 use crate::postgres::Datum;
 
@@ -96,6 +97,62 @@ pub fn exec_interp_expr(state: &mut ExprState, econtext: &mut ExprContext, is_nu
                     .unwrap_or_else(|| unimplemented!("ASSIGN_TMP_MAKE_RO with no result slot"));
                 slot.isnull[resultnum] = n;
                 slot.values[resultnum] = v;
+                pc += 1;
+            }
+            ExprEvalOp::SCAN_FETCHSOME => {
+                // EEOP_SCAN_FETCHSOME: force the scan slot's value/null arrays
+                // valid up through `last_var`. The scan slot is a virtual slot
+                // (the SeqScan deforms the heap tuple into it), whose arrays are
+                // always fully valid, so getsomeattrs is a no-op here -- but call
+                // it for faithfulness (it grows when non-virtual scan slots land).
+                let ExprEvalStepData::Fetch(f) = &state.steps[pc].d else {
+                    unreachable!("EEOP_SCAN_FETCHSOME without Fetch payload");
+                };
+                let last_var = f.last_var;
+                let slot = econtext
+                    .ecxt_scantuple
+                    .as_mut()
+                    .unwrap_or_else(|| unimplemented!("SCAN_FETCHSOME with no scan tuple"));
+                slot_getsomeattrs(slot, last_var);
+                pc += 1;
+            }
+            ExprEvalOp::SCAN_VAR => {
+                // EEOP_SCAN_VAR: read tts_values[attnum]/tts_isnull[attnum] from
+                // the scan slot (aliased by econtext->ecxt_scantuple) into the
+                // scratch. `attnum` is the 0-based attribute index.
+                let ExprEvalStepData::Var(v) = &state.steps[pc].d else {
+                    unreachable!("EEOP_SCAN_VAR without Var payload");
+                };
+                let attnum = v.attnum as usize;
+                let slot = econtext
+                    .ecxt_scantuple
+                    .as_ref()
+                    .unwrap_or_else(|| unimplemented!("SCAN_VAR with no scan tuple"));
+                state.resvalue = slot.values[attnum];
+                state.resnull = slot.isnull[attnum];
+                pc += 1;
+            }
+            ExprEvalOp::ASSIGN_SCAN_VAR => {
+                // EEOP_ASSIGN_SCAN_VAR: copy scan slot attr `attnum` straight into
+                // the result slot at `resultnum` (the projection fast path for a
+                // simple Var; fuses SCAN_VAR + ASSIGN_TMP).
+                let ExprEvalStepData::AssignVar(a) = &state.steps[pc].d else {
+                    unreachable!("EEOP_ASSIGN_SCAN_VAR without AssignVar payload");
+                };
+                let (attnum, resultnum) = (a.attnum as usize, a.resultnum as usize);
+                let (v, n) = {
+                    let scan = econtext
+                        .ecxt_scantuple
+                        .as_ref()
+                        .unwrap_or_else(|| unimplemented!("ASSIGN_SCAN_VAR with no scan tuple"));
+                    (scan.values[attnum], scan.isnull[attnum])
+                };
+                let slot = state
+                    .resultslot
+                    .as_mut()
+                    .unwrap_or_else(|| unimplemented!("ASSIGN_SCAN_VAR with no result slot"));
+                slot.values[resultnum] = v;
+                slot.isnull[resultnum] = n;
                 pc += 1;
             }
             ExprEvalOp::DONE_RETURN => {

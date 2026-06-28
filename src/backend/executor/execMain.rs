@@ -8,14 +8,62 @@
 //! milestone (rules.md s4). The whole M1 const path is synchronous (rules.md s5):
 //! no node reaches an I/O leaf, so ExecutorRun does not `.await`.
 
+use std::sync::Arc;
+
 use crate::access::sdir::{scan_direction_is_no_movement, ScanDirection};
 use crate::executor::execdesc::QueryDesc;
 use crate::executor::executor::ExecFlag;
 use crate::nodes::nodes::CmdType;
+use crate::shared_state::SharedState;
 
 use crate::backend::executor::execProcnode::{exec_end_node, exec_init_node, exec_proc_node, PlanStateNode};
 use crate::backend::executor::execTuples::exec_reset_tuple_table;
 use crate::backend::executor::execUtils::{create_executor_state, free_executor_state};
+use crate::utils::relcache::RelationData;
+
+// ---------------------------------------------------------------------------
+// Executor range-table relation registry (the es_relations equivalent).
+//
+// PG's `ExecInitRangeTable` sizes `estate->es_relations` and the scan/result-rel
+// openers (`ExecGetRangeTableRelation`) fill each slot with the open `Relation`.
+// In this port the `EState.relations` field is typed to the opaque forward
+// placeholder `nodes::execnodes::Relation` (a ZST stand-in, not the real
+// `*mut RelationData`), so it cannot carry a real relation handle. Until that
+// placeholder is wired to `*mut RelationData`, the executor reads its open
+// relations from this per-task registry keyed by RT index: the caller establishes
+// the scope (`with_exec_relations`) around ExecutorStart..End with the relations
+// it has opened (faithful to PG, where the caller's range-table relations are
+// already open under the right locks before InitPlan).
+// ---------------------------------------------------------------------------
+
+tokio::task_local! {
+    static EXEC_RELATIONS: std::cell::RefCell<std::collections::HashMap<usize, *mut RelationData>>;
+}
+
+/// Run `fut` with the executor's per-task range-table relation registry populated
+/// from `(rti, relation)` pairs. The scope must enclose ExecutorStart..ExecutorEnd
+/// for any plan that scans or modifies a relation (M2). PG's equivalent is the
+/// open range-table relations the caller hands InitPlan via the EState.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: the registry holds raw Relation handles (!Send), task-confined for one backend's query; the scoped future is driven on one task."
+)]
+pub async fn with_exec_relations<F, T>(relations: Vec<(usize, *mut RelationData)>, fut: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    let map = relations.into_iter().collect::<std::collections::HashMap<_, _>>();
+    EXEC_RELATIONS.scope(std::cell::RefCell::new(map), fut).await
+}
+
+/// The open `Relation` for range-table index `rti` from the per-task registry, or
+/// `None` if absent (no scope established, or the RTI was not registered).
+pub(crate) fn exec_relation_for_rti(rti: usize) -> Option<*mut RelationData> {
+    EXEC_RELATIONS
+        .try_with(|m| m.borrow().get(&rti).copied())
+        .ok()
+        .flatten()
+}
 
 /// PG `standard_ExecutorStart`: set up the EState and the plan-state tree.
 pub fn standard_executor_start(query_desc: &mut QueryDesc, eflags: i32) {
@@ -29,46 +77,64 @@ pub fn standard_executor_start(query_desc: &mut QueryDesc, eflags: i32) {
         .unwrap_or_else(|| unreachable!("estate just set"));
 
     estate.top_eflags = eflags;
-    // Snapshot registration, param setup, junkfilter and trigger setup grow with
-    // their subsystems; none is reachable on the const SELECT path.
+    // es_snapshot / es_crosscheck_snapshot: the scan path (M2) reads tuples under
+    // the query snapshot, so copy it from the QueryDesc (the caller registers the
+    // active snapshot before ExecutorStart, mirroring PG's es_snapshot setup).
+    if let Some(snap) = query_desc.snapshot.as_deref() {
+        estate.snapshot.clone_from(snap);
+    }
+    if let Some(cc) = query_desc.crosscheck_snapshot.as_deref() {
+        estate.crosscheck_snapshot.clone_from(cc);
+    }
+    // es_output_cid: the inserting/deleting command id for a data-modifying query.
+    if query_desc.operation != CmdType::SELECT {
+        estate.output_cid = crate::backend::access::transam::xact::GetCurrentCommandId(true);
+    }
+    // Param setup, junkfilter and trigger setup grow with their subsystems.
 
     init_plan(query_desc, eflags);
 }
 
-/// PG `InitPlan`: initialize the plan-state tree and result tupdesc for a
-/// non-modifying SELECT. The rangetable/pruning/rowmark/subplan/junkfilter setup
-/// is empty on the const path and grows with those features.
+/// PG `InitPlan`: initialize the plan-state tree and result tupdesc. Sets up the
+/// executor range table (`ExecInitRangeTable`) and, for a data-modifying command,
+/// the result relation(s) (`ExecInitResultRelation`), then `ExecInitNode`. The
+/// rowmark/pruning/subplan/junkfilter setup grows with those features.
 fn init_plan(query_desc: &mut QueryDesc, eflags: i32) {
     let plannedstmt = query_desc
         .plannedstmt
         .as_ref()
         .unwrap_or_else(|| unimplemented!("InitPlan: no planned statement"));
-    // The plan's rangetable may hold an RTE_RESULT (the FROM-less SELECT
-    // placeholder injected by replace_empty_jointree); the Result node ignores the
-    // rangetable, so M1 execution is unaffected. The general ExecInitRangeTable /
-    // relation-scan range-table setup (RTE_RELATION) is step 18 (execution).
-    let rtable_is_result_only = plannedstmt.rtable.iter().all(|rte| {
-        matches!(
-            rte,
-            crate::nodes::nodes::Node::RangeTblEntry(e)
-                if e.rtekind == crate::nodes::parsenodes::RTEKind::RESULT
-        )
-    });
-    crate::assert!(rtable_is_result_only);
-    crate::assert!(plannedstmt.result_relations.is_empty());
-
+    let operation = plannedstmt.command_type;
     let plan_tree = plannedstmt.plan_tree.clone();
+    let rtable = plannedstmt.rtable.clone();
+    let result_relations = plannedstmt.result_relations.clone();
 
     let estate = query_desc
         .estate
         .as_mut()
         .unwrap_or_else(|| unreachable!("estate set by ExecutorStart"));
 
+    // ExecInitRangeTable: publish the rangetable. The open `Relation`s for the
+    // RTE_RELATION entries live in the per-task `EXEC_RELATIONS` registry (the
+    // es_relations equivalent; see the module-level note), read by
+    // ExecGetRangeTableRelation during node init. The scan/result-rel openers
+    // resolve relations from there by RT index.
+    estate.range_table_size = rtable.len();
+    estate.range_table = rtable;
+    // Result relations are surfaced to ExecInitModifyTable via the planned
+    // `result_relations` RT indices (also stashed on the EState as integers).
+    estate.result_relations.clear();
+    crate::assert!(
+        operation == CmdType::SELECT || !result_relations.is_empty(),
+        "InitPlan: data-modifying command without a result relation"
+    );
+
     let planstate = exec_init_node(Some(&plan_tree), estate, eflags)
         .unwrap_or_else(|| unimplemented!("InitPlan: null plan tree"));
 
     // ExecGetResultType: the root node's result tupdesc (an Arc clone the
-    // QueryDesc co-owns alongside the planstate's slot).
+    // QueryDesc co-owns alongside the planstate's slot). A non-RETURNING
+    // ModifyTable yields no tuples, hence no result descriptor.
     query_desc.tupDesc = result_type_of(&planstate);
     query_desc.planstate = Some(Box::new(planstate));
 }
@@ -77,12 +143,27 @@ fn init_plan(query_desc: &mut QueryDesc, eflags: i32) {
 fn result_type_of(node: &PlanStateNode) -> Option<crate::access::tupdesc::TupleDesc> {
     match node {
         PlanStateNode::Result(rs) => rs.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::SeqScan(ss) => ss.state.ss.ps.ps_result_tuple_desc.clone(),
+        // A non-RETURNING ModifyTable returns no tuples.
+        PlanStateNode::ModifyTable(mt) => mt.state.ps.ps_result_tuple_desc.clone(),
     }
 }
 
 /// PG `standard_ExecutorRun`: drive the plan, sending tuples to the destination.
-/// Synchronous on the M1 path.
-pub fn standard_executor_run(query_desc: &mut QueryDesc, direction: ScanDirection, count: u64) {
+/// Async because the scan path reaches the table AM's buffer reads (rules.md s5);
+/// the M1 const path still resolves immediately (no `.await` on the inner futures
+/// hits an I/O leaf). `dest.receive_slot` stays synchronous (printtup buffers into
+/// the send buffer synchronously, step 09).
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: the executor's per-query state (TupleTableSlot value arrays, raw Relation handles) is !Send and task-confined; a backend's plan runs on one task, never sent across tasks. Same contract as the table AM scan/insert futures."
+)]
+pub async fn standard_executor_run(
+    shared: Option<&Arc<SharedState>>,
+    query_desc: &mut QueryDesc,
+    direction: ScanDirection,
+    count: u64,
+) {
     let operation = query_desc.operation;
     let send_tuples =
         operation == CmdType::SELECT || query_desc.plannedstmt.as_ref().is_some_and(|p| p.has_returning);
@@ -106,7 +187,7 @@ pub fn standard_executor_run(query_desc: &mut QueryDesc, direction: ScanDirectio
     }
 
     if !scan_direction_is_no_movement(direction) {
-        execute_plan(query_desc, operation, send_tuples, count, direction);
+        execute_plan(shared, query_desc, operation, send_tuples, count, direction).await;
     }
 
     // dest->rShutdown().
@@ -122,45 +203,61 @@ pub fn standard_executor_run(query_desc: &mut QueryDesc, direction: ScanDirectio
 }
 
 /// PG `ExecutePlan`: the retrieval loop. Pull a tuple, (junk-filter,) send it,
-/// honor `count` and direction. The Result node returns one row then None.
-fn execute_plan(
+/// honor `count` and direction. The scan node returns a BORROW of its node-owned
+/// slot each call; the borrow is consumed (sent to the destination) before the
+/// next `ExecProcNode` so there is no per-tuple clone. A non-RETURNING
+/// ModifyTable returns None on its single drive (the count lives in es_processed),
+/// so the loop ends immediately.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: task-confined per-query state (the borrowed scan/result slot, raw Relation handles) is !Send; the plan runs on one backend task. See standard_executor_run."
+)]
+async fn execute_plan(
+    shared: Option<&Arc<SharedState>>,
     query_desc: &mut QueryDesc,
     operation: CmdType,
     send_tuples: bool,
     number_tuples: u64,
     direction: ScanDirection,
 ) {
-    if let Some(estate) = query_desc.estate.as_mut() {
+    // Split the QueryDesc into disjoint field borrows up front: the plan-state
+    // (which yields the borrowed slot), the destination, and the estate are
+    // distinct fields, so borrowing them separately lets the slot borrowed from
+    // `planstate` coexist with the `dest`/`estate` accesses in one loop iteration.
+    let QueryDesc {
+        planstate,
+        dest,
+        estate,
+        ..
+    } = query_desc;
+    let planstate = planstate
+        .as_mut()
+        .unwrap_or_else(|| unimplemented!("ExecutePlan: no plan state"));
+    if let Some(estate) = estate.as_mut() {
         estate.direction = direction;
     }
 
     let mut current_tuple_count: u64 = 0;
     loop {
         // ResetPerTupleExprContext(estate): no-op (memory tombstoned).
-        let planstate = query_desc
-            .planstate
-            .as_mut()
-            .unwrap_or_else(|| unimplemented!("ExecutePlan: no plan state"));
-
-        let Some(mut slot) = exec_proc_node(planstate) else {
+        let Some(slot) = exec_proc_node(shared, planstate).await else {
             break; // TupIsNull -> done
         };
 
         // es_junkFilter is NULL for a plain SELECT; junk filtering grows.
 
         if send_tuples {
-            let dest = query_desc
-                .dest
+            let dest = dest
                 .as_mut()
                 .unwrap_or_else(|| unimplemented!("ExecutePlan: no destination receiver"));
-            if !dest.receive_slot(&mut slot) {
+            if !dest.receive_slot(slot) {
                 break; // receiver asked to stop
             }
         }
 
         // es_processed is only bumped for SELECT (RETURNING grows later).
         if operation == CmdType::SELECT
-            && let Some(estate) = query_desc.estate.as_mut()
+            && let Some(estate) = estate.as_mut()
         {
             estate.processed += 1;
         }
@@ -171,7 +268,15 @@ fn execute_plan(
         }
     }
 
-    // ExecShutdownNode grows with parallel/async nodes; nothing to do on M1.
+    // For a data-modifying ModifyTable, PG bumps es_processed inside the node; the
+    // EState lives on the QueryDesc here, so fold the node's count in afterwards.
+    if let PlanStateNode::ModifyTable(mt) = planstate.as_mut()
+        && let Some(estate) = estate.as_mut()
+    {
+        estate.processed += mt.processed;
+    }
+
+    // ExecShutdownNode grows with parallel/async nodes; nothing to do on M1/M2.
 }
 
 /// PG `standard_ExecutorFinish`: run any post-processing (ModifyTable to
@@ -182,10 +287,12 @@ pub fn standard_executor_finish(query_desc: &mut QueryDesc) {
     }
 }
 
-/// PG `standard_ExecutorEnd`: tear down the plan and free the EState.
-pub fn standard_executor_end(query_desc: &mut QueryDesc) {
+/// PG `standard_ExecutorEnd`: tear down the plan and free the EState. Takes
+/// `shared` so node teardown can release buffers/scans (heap_endscan). Stays
+/// synchronous (buffer release does not `.await`).
+pub fn standard_executor_end(shared: Option<&Arc<SharedState>>, query_desc: &mut QueryDesc) {
     if let Some(mut planstate) = query_desc.planstate.take() {
-        exec_end_plan(&mut planstate, query_desc);
+        exec_end_plan(shared, &mut planstate, query_desc);
     }
 
     if let Some(estate) = query_desc.estate.take() {
@@ -195,12 +302,13 @@ pub fn standard_executor_end(query_desc: &mut QueryDesc) {
 }
 
 /// PG `ExecEndPlan`: end the node tree and release the tuple table / relations.
-fn exec_end_plan(planstate: &mut PlanStateNode, query_desc: &mut QueryDesc) {
-    exec_end_node(planstate);
+fn exec_end_plan(shared: Option<&Arc<SharedState>>, planstate: &mut PlanStateNode, query_desc: &mut QueryDesc) {
+    exec_end_node(shared, planstate);
     if let Some(estate) = query_desc.estate.as_mut() {
         exec_reset_tuple_table(&mut estate.tuple_table, false);
     }
-    // ExecCloseResultRelations / ExecCloseRangeTableRelations grow with relations.
+    // ExecCloseResultRelations / ExecCloseRangeTableRelations grow with relations
+    // (M2 relations are caller-owned, not closed here).
 }
 
 /// `ExecFlag` is kept referenced so the eflags type stays wired as start/run grow.
@@ -315,7 +423,7 @@ mod tests {
         assert_eq!(result_desc.natts, 1);
         assert_eq!(result_desc.attr(0).atttypid, INT4OID);
 
-        ExecutorRun(&mut qd, ScanDirection::Forward, 0);
+        block_on_ready(ExecutorRun(None, &mut qd, ScanDirection::Forward, 0));
         ExecutorFinish(&mut qd);
 
         {
@@ -329,7 +437,7 @@ mod tests {
         }
         assert_eq!(qd.estate.as_ref().unwrap().processed, 1);
 
-        ExecutorEnd(&mut qd);
+        ExecutorEnd(None, &mut qd);
         assert!(qd.estate.is_none());
     }
 
@@ -340,10 +448,10 @@ mod tests {
         let mut estate = create_executor_state();
         let mut ps = exec_init_node(Some(&stmt.plan_tree), &mut estate, 0).expect("a Result node");
 
-        assert!(exec_proc_node(&mut ps).is_some(), "first pull yields the row");
-        assert!(exec_proc_node(&mut ps).is_none(), "second pull yields nothing");
+        assert!(block_on_ready(exec_proc_node(None, &mut ps)).is_some(), "first pull yields the row");
+        assert!(block_on_ready(exec_proc_node(None, &mut ps)).is_none(), "second pull yields nothing");
         // A third pull is still None (idempotent EOF).
-        assert!(exec_proc_node(&mut ps).is_none());
+        assert!(block_on_ready(exec_proc_node(None, &mut ps)).is_none());
     }
 
     #[test]
@@ -351,10 +459,10 @@ mod tests {
         let sink = Rc::new(RefCell::new(Collected::default()));
         let mut qd = query_desc("SELECT 42", &sink);
         ExecutorStart(&mut qd, 0);
-        ExecutorRun(&mut qd, ScanDirection::Forward, 0);
+        block_on_ready(ExecutorRun(None, &mut qd, ScanDirection::Forward, 0));
         ExecutorFinish(&mut qd);
         assert_eq!(DatumGetInt32(sink.borrow().rows[0][0].0), 42);
-        ExecutorEnd(&mut qd);
+        ExecutorEnd(None, &mut qd);
     }
 
     #[test]
@@ -362,7 +470,7 @@ mod tests {
         let sink = Rc::new(RefCell::new(Collected::default()));
         let mut qd = query_desc("SELECT 1, 2", &sink);
         ExecutorStart(&mut qd, 0);
-        ExecutorRun(&mut qd, ScanDirection::Forward, 0);
+        block_on_ready(ExecutorRun(None, &mut qd, ScanDirection::Forward, 0));
         ExecutorFinish(&mut qd);
         {
             let dest = sink.borrow();
@@ -371,6 +479,19 @@ mod tests {
             assert_eq!(DatumGetInt32(dest.rows[0][0].0), 1);
             assert_eq!(DatumGetInt32(dest.rows[0][1].0), 2);
         }
-        ExecutorEnd(&mut qd);
+        ExecutorEnd(None, &mut qd);
+    }
+
+    /// Drive a const-path executor future to completion synchronously (it reaches
+    /// no I/O leaf, so it is Ready on the first poll).
+    fn block_on_ready<F: std::future::Future<Output = T>, T>(fut: F) -> T {
+        use std::task::{Context, Poll};
+        let waker = std::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        let mut fut = std::pin::pin!(fut);
+        match fut.as_mut().poll(&mut cx) {
+            Poll::Ready(v) => v,
+            Poll::Pending => panic!("const executor future suspended unexpectedly"),
+        }
     }
 }

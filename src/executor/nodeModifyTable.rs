@@ -16,12 +16,13 @@ pub fn ExecComputeStoredGenerated(
 ) {
     unimplemented!()
 }
-pub fn ExecInitModifyTable(_node: &ModifyTable, _estate: &mut EState, _eflags: i32) -> *mut ModifyTableState {
-    unimplemented!() // TODO(ptr)
-}
-pub fn ExecEndModifyTable(_node: &mut ModifyTableState) {
-    unimplemented!()
-}
+/// PG `ExecInitModifyTable`. Returns the owned `Box<ModifyTableRun>` (the C
+/// `ModifyTableState*` plus its child plan-state and target relation).
+pub use crate::backend::executor::nodeModifyTable::exec_init_modify_table as ExecInitModifyTable;
+/// PG `ExecEndModifyTable`.
+pub use crate::backend::executor::nodeModifyTable::exec_end_modify_table as ExecEndModifyTable;
+/// PG `ExecModifyTable`: the `ExecProcNodeMtd` that runs the modification.
+pub use crate::backend::executor::nodeModifyTable::exec_modify_table as ExecModifyTable;
 pub fn ExecReScanModifyTable(_node: &mut ModifyTableState) {
     unimplemented!()
 }

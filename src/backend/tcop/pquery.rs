@@ -33,6 +33,25 @@ use crate::nodes::params::ParamListInfoData;
 use crate::nodes::plannodes::PlannedStmt;
 use crate::shared_state::SharedState;
 use crate::tcop::cmdtag::QueryCompletion;
+
+/// Drive a future that is known not to await any I/O leaf (the childless-const
+/// executor path) to completion synchronously. The const `ExecutorRun` future
+/// resolves on the first poll (it reaches no `.await` leaf), so a noop-waker poll
+/// suffices; if a future that DOES suspend is ever routed here it panics rather
+/// than busy-spin. The SharedState-driven async wire path (step 18B) runs under
+/// the tokio runtime instead.
+fn drive_const_executor<F: std::future::Future<Output = ()>>(fut: F) {
+    use std::task::{Context, Poll};
+    let waker = std::task::Waker::noop();
+    let mut cx = Context::from_waker(waker);
+    let mut fut = std::pin::pin!(fut);
+    match fut.as_mut().poll(&mut cx) {
+        Poll::Ready(()) => {}
+        Poll::Pending => {
+            unimplemented!("PortalRunSelect: const executor future suspended (needs the async wire path, 18B)")
+        }
+    }
+}
 use crate::tcop::cmdtaglist::CommandTag;
 use crate::tcop::dest::DestReceiver;
 use crate::utils::portal::{PortalData, PortalStatus, PortalStrategy};
@@ -307,8 +326,12 @@ fn portal_run_select(
         count = 0;
     }
 
-    // Snapshot push is deferred (const SELECT). Run the executor.
-    ExecutorRun(query_desc, direction, count as u64);
+    // Snapshot push is deferred (const SELECT). Run the executor. The M1 wire
+    // path drives only the childless-const plan, which reaches no I/O leaf, so
+    // the (now async) ExecutorRun future is driven to completion synchronously
+    // here with no SharedState (None). The SharedState-supplying wire path for
+    // table scans/inserts is step 18B (rules.md s5).
+    drive_const_executor(ExecutorRun(None, query_desc, direction, count as u64));
     let nprocessed = query_desc.estate.as_ref().map_or(0, |e| e.processed);
 
     if direction != ScanDirection::NoMovement {
@@ -330,8 +353,9 @@ fn portal_run_select(
 pub fn portal_drop(portal: &mut PortalData) {
     if let Some(mut query_desc) = portal.query_desc.take() {
         // ExecutorEnd is only valid once the executor has finished; the M1 path
-        // always runs ExecutorFinish via the caller before drop.
-        ExecutorEnd(&mut query_desc);
+        // always runs ExecutorFinish via the caller before drop. No SharedState on
+        // the const wire path (None); 18B supplies it for scan/insert teardown.
+        ExecutorEnd(None, &mut query_desc);
     }
     portal.status = PortalStatus::Done;
 }

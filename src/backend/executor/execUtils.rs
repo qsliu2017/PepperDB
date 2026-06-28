@@ -101,6 +101,7 @@ fn plan_targetlist(planstate: &PlanState) -> Vec<crate::nodes::nodes::Node> {
         .unwrap_or_else(|| unimplemented!("plan_targetlist: PlanState has no plan"));
     match plan {
         Node::Result(r) => r.plan.targetlist.clone(),
+        Node::SeqScan(s) => s.scan.plan.targetlist.clone(),
         other => unimplemented!("plan_targetlist: {other:?} not reachable for this milestone"),
     }
 }

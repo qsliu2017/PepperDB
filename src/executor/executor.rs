@@ -260,9 +260,21 @@ pub fn ExecutorStart(query_desc: &mut QueryDesc, eflags: i32) {
 }
 pub use crate::backend::executor::execMain::standard_executor_start as standard_ExecutorStart;
 
-/// PG `ExecutorRun`: hook or `standard_ExecutorRun`.
-pub fn ExecutorRun(query_desc: &mut QueryDesc, direction: ScanDirection, count: u64) {
-    standard_ExecutorRun(query_desc, direction, count);
+/// PG `ExecutorRun`: hook or `standard_ExecutorRun`. Async since M2 (the scan
+/// path reaches the table AM's buffer reads, rules.md s5); takes the SharedState
+/// the table AM needs. `shared` is `Option` so the childless-const path can run
+/// without one (it reaches no I/O leaf); scan/insert plans require `Some`.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: the executor's per-query state is !Send and task-confined (one backend task per plan); see standard_executor_run."
+)]
+pub async fn ExecutorRun(
+    shared: Option<&std::sync::Arc<crate::shared_state::SharedState>>,
+    query_desc: &mut QueryDesc,
+    direction: ScanDirection,
+    count: u64,
+) {
+    standard_ExecutorRun(shared, query_desc, direction, count).await;
 }
 pub use crate::backend::executor::execMain::standard_executor_run as standard_ExecutorRun;
 
@@ -272,9 +284,13 @@ pub fn ExecutorFinish(query_desc: &mut QueryDesc) {
 }
 pub use crate::backend::executor::execMain::standard_executor_finish as standard_ExecutorFinish;
 
-/// PG `ExecutorEnd`: hook or `standard_ExecutorEnd`.
-pub fn ExecutorEnd(query_desc: &mut QueryDesc) {
-    standard_ExecutorEnd(query_desc);
+/// PG `ExecutorEnd`: hook or `standard_ExecutorEnd`. Takes the SharedState so
+/// node teardown can release buffers/scans (`Option`; the const path needs none).
+pub fn ExecutorEnd(
+    shared: Option<&std::sync::Arc<crate::shared_state::SharedState>>,
+    query_desc: &mut QueryDesc,
+) {
+    standard_ExecutorEnd(shared, query_desc);
 }
 pub use crate::backend::executor::execMain::standard_executor_end as standard_ExecutorEnd;
 pub fn ExecutorRewind(_query_desc: &mut QueryDesc) {
@@ -691,11 +707,15 @@ pub fn ExecScan(
     _access_mtd: ExecScanAccessMtd,
     _recheck_mtd: ExecScanRecheckMtd,
 ) -> Option<Box<TupleTableSlot>> {
-    unimplemented!()
+    // The C fn-pointer-driven generic loop is replaced by per-node drivers
+    // (ExecSeqScan) over the plan-state enum; the qual+project tail lives in
+    // backend/executor/execScan.rs::exec_scan, called by those drivers. This
+    // pointer-signature entry stays a grow guard (rules.md s3/s4).
+    unimplemented!("ExecScan: use the per-node driver (ExecSeqScan); see backend execScan::exec_scan")
 }
-pub fn ExecAssignScanProjectionInfo(_node: &mut ScanState) {
-    unimplemented!()
-}
+/// PG `ExecAssignScanProjectionInfo`: build the scan node's projection (input desc
+/// = the scan tuple descriptor).
+pub use crate::backend::executor::execScan::exec_assign_scan_projection_info as ExecAssignScanProjectionInfo;
 pub fn ExecAssignScanProjectionInfoWithVarno(_node: &mut ScanState, _varno: i32) {
     unimplemented!()
 }

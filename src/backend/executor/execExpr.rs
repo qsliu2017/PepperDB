@@ -14,11 +14,12 @@
 )]
 
 use crate::executor::execExpr::{
-    AssignTmpData, ConstvalData, ExprEvalOp, ExprEvalStep, ExprEvalStepData,
+    AssignTmpData, AssignVarData, ConstvalData, ExprEvalOp, ExprEvalStep, ExprEvalStepData,
+    FetchData, VarData,
 };
 use crate::nodes::execnodes::{ExprContext, ExprState, PlanState, ProjectionInfo};
 use crate::nodes::nodes::Node;
-use crate::nodes::primnodes::Expr;
+use crate::nodes::primnodes::{Expr, Var, VarReturningType};
 use crate::postgres::Datum;
 
 use crate::backend::executor::execExprInterp::exec_ready_interpreted_expr;
@@ -101,10 +102,13 @@ pub fn exec_init_expr(node: Option<&Expr>, parent: Option<&mut PlanState>) -> Op
 /// PG `ExecBuildProjectionInfo`: compile a targetlist into a ProjectionInfo whose
 /// steps deposit each target into `slot` (the projection's result slot).
 ///
-/// For each target whose expr is NOT a simple Var (the M1 const path is always
-/// the non-Var branch): emit the expr (into the scratch), then `EEOP_ASSIGN_TMP`
-/// (or `_MAKE_RO` for a varlena typlen) to copy the scratch into
-/// `resultslot->tts_values[resno-1]`. The list ends with `EEOP_DONE_NO_RETURN`.
+/// A target that is a simple scan `Var` short-circuits to `EEOP_ASSIGN_SCAN_VAR`
+/// (copy the scan slot attr straight into the result slot) -- this is the
+/// `SELECT * FROM t` / `SELECT a FROM t` path. Any other target compiles the
+/// expr into the scratch, then `EEOP_ASSIGN_TMP[_MAKE_RO]` (the const path). When
+/// any Var is present the list is prefixed with one `EEOP_SCAN_FETCHSOME` that
+/// forces the scan slot deformed up through the largest referenced attribute. The
+/// list ends with `EEOP_DONE_NO_RETURN`.
 pub fn exec_build_projection_info(
     target_list: &[Node],
     econtext: &mut ExprContext,
@@ -112,12 +116,44 @@ pub fn exec_build_projection_info(
     parent: Option<&mut PlanState>,
     input_desc: Option<crate::access::tupdesc::TupleDesc>,
 ) -> Box<ProjectionInfo> {
-    let _ = (econtext, parent, input_desc);
+    let _ = (econtext, parent);
 
     let mut state = ExprState {
         resultslot: Some(slot),
         ..ExprState::default()
     };
+
+    // Prologue: if any target is a scan Var, deform the scan slot up through the
+    // largest referenced attno (PG emits one EEOP_*_FETCHSOME per slot kind).
+    let max_scan_attno = target_list
+        .iter()
+        .filter_map(|n| match n {
+            Node::TargetEntry(tle) => match tle.expr.as_ref() {
+                Some(Node::Var(v)) => Some(i32::from(v.varattno)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .max();
+    if let Some(last_var) = max_scan_attno {
+        let known_desc = input_desc
+            
+            .unwrap_or_else(|| not_yet_reachable("ExecBuildProjectionInfo: scan Var without input desc"));
+        expr_eval_push_step(
+            &mut state,
+            ExprEvalStep {
+                opcode: ExprEvalOp::SCAN_FETCHSOME,
+                resvalue: None,
+                resnull: None,
+                d: ExprEvalStepData::Fetch(FetchData {
+                    last_var,
+                    fixed: false,
+                    known_desc,
+                    kind: None,
+                }),
+            },
+        );
+    }
 
     for n in target_list {
         let Node::TargetEntry(tle) = n else {
@@ -127,17 +163,19 @@ pub fn exec_build_projection_info(
             .expr
             .as_ref()
             .unwrap_or_else(|| not_yet_reachable("ExecBuildProjectionInfo: empty target expr"));
+        let resultnum = i32::from(tle.resno) - 1;
 
-        // A simple Var would short-circuit to ASSIGN_*_VAR in PG; the M1 const
-        // path always takes the general branch: compile the expr, then ASSIGN_TMP.
-        if matches!(expr, Node::Var(_)) {
-            not_yet_reachable("ExecBuildProjectionInfo: simple-Var fast path");
+        // Simple-Var fast path: copy the scan slot attr into the result slot.
+        if let Node::Var(var) = expr {
+            push_assign_scan_var(&mut state, var, resultnum);
+            continue;
         }
 
+        // General branch: compile the expr into the scratch, then ASSIGN_TMP.
         exec_init_expr_rec(expr, &mut state);
 
         // PG: get_typlen(exprType(tle->expr)) == -1 chooses ASSIGN_TMP_MAKE_RO.
-        // get_typlen reaches the (untranslated) syscache; on the M1 const path the
+        // get_typlen reaches the (untranslated) syscache; on the const path the
         // typlen is carried directly on the Const node, so read it there.
         let make_ro = expr_typlen(expr) == -1;
         let opcode = if make_ro {
@@ -151,9 +189,7 @@ pub fn exec_build_projection_info(
                 opcode,
                 resvalue: None,
                 resnull: None,
-                d: ExprEvalStepData::AssignTmp(AssignTmpData {
-                    resultnum: i32::from(tle.resno) - 1,
-                }),
+                d: ExprEvalStepData::AssignTmp(AssignTmpData { resultnum }),
             },
         );
     }
@@ -177,6 +213,29 @@ pub fn exec_build_projection_info(
         state,
         expr_context: None,
     })
+}
+
+/// Emit `EEOP_ASSIGN_SCAN_VAR` for a simple scan `Var`. M2 plans only SeqScans,
+/// so every projection Var is a scan var (OUTER_VAR/INNER_VAR for join inputs
+/// grow with join nodes). `attnum` is the 0-based scan-slot attribute index.
+fn push_assign_scan_var(state: &mut ExprState, var: &Var, resultnum: i32) {
+    crate::assert!(var.varattno > 0, "system/whole-row Var in projection not yet reachable");
+    crate::assert!(
+        var.varreturningtype == VarReturningType::DEFAULT,
+        "OLD/NEW returning Var not yet reachable"
+    );
+    expr_eval_push_step(
+        state,
+        ExprEvalStep {
+            opcode: ExprEvalOp::ASSIGN_SCAN_VAR,
+            resvalue: None,
+            resnull: None,
+            d: ExprEvalStepData::AssignVar(AssignVarData {
+                resultnum,
+                attnum: i32::from(var.varattno) - 1,
+            }),
+        },
+    );
 }
 
 /// PG `ExecInitQual`: an empty qual (the M1 const path has none) yields None

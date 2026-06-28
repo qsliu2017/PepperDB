@@ -74,9 +74,10 @@ pub fn exec_init_result(node: &ResultPlan, estate: &mut EState, eflags: i32) -> 
 ///
 /// Childless + qual-free: the first call sets `rs_done = true` and returns the
 /// projected const row; the second call sees `rs_done` and returns None.
-/// Returns an owned slot clone (the canonical result row lives in the
-/// projection's result slot; `ExecProcNodeMtd` hands callers an owned slot).
-pub fn exec_result(node: &mut ResultState) -> Option<Box<TupleTableSlot>> {
+/// Returns a BORROW of the node-owned projection result slot (the canonical
+/// result row lives in the projection's result slot; `ExecProcNodeMtd` returns
+/// the reused `TupleTableSlot*`).
+pub fn exec_result(node: &mut ResultState) -> Option<&mut TupleTableSlot> {
     crate::miscadmin::check_for_interrupts();
 
     // rs_checkqual is false on the M1 path (no resconstantqual); the one-time
@@ -95,52 +96,62 @@ pub fn exec_result(node: &mut ResultState) -> Option<Box<TupleTableSlot>> {
 
     // No outer plan on the M1 path -> mark done, project the one row.
     node.rs_done = true;
-    Some(Box::new(exec_project(node)))
+    Some(exec_project(node))
 }
 
 /// Inlined `ExecProject` for the Result node: clear the result slot, run the
 /// projection's interpreter (which deposits the const into the slot's value
-/// arrays), then mark the virtual tuple stored. Returns an owned clone.
-fn exec_project(node: &mut ResultState) -> TupleTableSlot {
+/// arrays), then mark the virtual tuple stored. Returns a borrow of the
+/// node-owned result slot (no per-tuple clone).
+fn exec_project(node: &mut ResultState) -> &mut TupleTableSlot {
+    let econtext = node
+        .ps
+        .ps_expr_context
+        .take()
+        .unwrap_or_else(|| unimplemented!("ExecProject: no exprcontext"));
     let proj = node
         .ps
         .ps_proj_info
         .as_mut()
         .unwrap_or_else(|| unimplemented!("ExecResult: no projection info"));
 
-    // Clear the result slot held by the projection.
+    let mut econtext = econtext;
+    project_const_into(&mut proj.state, &mut econtext);
+    node.ps.ps_expr_context = Some(econtext);
+
+    // Re-borrow the result slot (now filled + stored) to hand back.
+    node.ps
+        .ps_proj_info
+        .as_mut()
+        .and_then(|p| p.state.resultslot.as_deref_mut())
+        .unwrap_or_else(|| unimplemented!("ExecProject: projection lost its result slot"))
+}
+
+/// Run a variable-free (const) projection: clear the result slot, run the
+/// interpreter (it deposits the const into the slot's value arrays), mark the
+/// virtual tuple stored. A childless Result reads no Var, so `ecxt_scantuple` is
+/// untouched.
+fn project_const_into(
+    state: &mut crate::nodes::execnodes::ExprState,
+    econtext: &mut crate::nodes::execnodes::ExprContext,
+) {
     {
-        let slot = proj
-            .state
+        let slot = state
             .resultslot
             .as_mut()
             .unwrap_or_else(|| unimplemented!("ExecProject: projection has no result slot"));
         ExecClearTuple(slot);
     }
-
-    // Run the projection steps (ExecEvalExprNoReturn: no scalar return).
-    let mut econtext = node
-        .ps
-        .ps_expr_context
-        .take()
-        .unwrap_or_else(|| unimplemented!("ExecProject: no exprcontext"));
-    let evalfunc = proj
-        .state
+    let evalfunc = state
         .evalfunc
         .unwrap_or_else(|| unimplemented!("ExecProject: projection not ready"));
     let mut is_null = false;
-    let _ = evalfunc(&mut proj.state, &mut econtext, &mut is_null);
-    node.ps.ps_expr_context = Some(econtext);
-
-    // Inlined ExecStoreVirtualTuple: mark the (filled) virtual slot valid, then
-    // hand back an owned clone of the row.
-    let slot = proj
-        .state
+    let _ = evalfunc(state, econtext, &mut is_null);
+    let slot = state
         .resultslot
         .as_mut()
         .unwrap_or_else(|| unimplemented!("ExecProject: projection lost its result slot"));
     exec_store_virtual_tuple(slot);
-    (**slot).clone()
 }
 
 /// PG `ExecEndResult`: tear down the Result node. Childless, so the only C work
