@@ -228,7 +228,12 @@ pub fn get_mock_authentication_nonce() -> String {
     unimplemented!()
 }
 pub fn data_checksums_enabled() -> bool {
-    unimplemented!()
+    // PG: `ControlFile->data_checksum_version > 0`. The control file is not loaded
+    // in the foundation yet (system_identifier and friends above are likewise
+    // deferred), so a cluster here runs without data checksums; the page-checksum
+    // stamping paths (PageSetChecksum{Copy,Inplace}) become no-ops accordingly.
+    // TODO(control-file): return ControlFile.data_checksum_version > 0 once loaded.
+    false
 }
 pub fn get_default_char_signedness() -> bool {
     unimplemented!()

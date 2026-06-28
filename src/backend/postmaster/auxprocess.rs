@@ -1,18 +1,35 @@
-//! Translated from PostgreSQL src/backend/postmaster/auxprocess.c
+//! Common startup for auxiliary processes. Translated from backend/postmaster/auxprocess.c.
 //!
-//! `AuxiliaryProcessMainCommon` -- the shared setup an auxiliary task (bgwriter,
-//! checkpointer, walwriter, ...) runs before its own loop. Under the
-//! single-process async model an aux process is a tokio task, so this is a thin
-//! async helper that establishes the per-task basics and hands back the handles
-//! the (step-17) aux loops need:
-//! - a [`Session`] / identity for the aux `BackendType` (step 08),
-//! - a registered proc-signal slot + [`Latch`] (step 04),
-//! - a resource owner for buffer pins held outside transactions (step 06).
+//! Auxiliary processes -- the background writer, checkpointer, WAL writer, WAL
+//! receiver, and the startup process -- are not full backends: they never run
+//! transactions and skip the complete `InitPostgres` sequence. They still need a
+//! handful of subsystems lit up before they enter their own service loop. In
+//! PostgreSQL `AuxiliaryProcessMainCommon` performs that shared initialization:
+//! it creates a `PGPROC` so the process can take LWLocks and reach shared memory,
+//! runs `BaseInit`, registers a proc-signal slot, and creates a resource owner to
+//! track buffer pins acquired outside any transaction. It also installs a
+//! before-shutdown callback that releases held LWLocks on exit, which matters
+//! chiefly on the error-exit path.
 //!
-//! The caller scopes the returned handles with the per-task task-locals
-//! (`session::scope` / `procsignal::scope` / `resowner::scope`) around its loop,
-//! and services interrupts via [`process_main_loop_interrupts`]. The concrete aux
-//! loops are step 17; this only provides their common cradle.
+//! An auxiliary process in PepperDB is a tokio task rather than a forked child,
+//! so the equivalent setup is an async helper that returns the per-task handles
+//! the auxiliary loop holds for its lifetime: a session identity carrying the
+//! auxiliary `BackendType`, a registered proc-signal slot paired with a wakeup
+//! [`Latch`], and a resource owner for out-of-transaction buffer pins. The caller
+//! scopes those handles as task-locals around its loop and services interrupts
+//! through [`process_main_loop_interrupts`].
+//!
+//! Two cradles are provided. The plain one suits auxiliaries that are woken only
+//! by proc-signal or barrier sends; it allocates a fresh latch as the sole wakeup
+//! source. The `_with_proc` variant additionally claims a `PGPROC` slot so that
+//! backends can wake the task by its `ProcNumber` (as the checkpointer, WAL
+//! writer, and background writer require); it registers the proc-signal slot
+//! against that `PGPROC`'s own latch, mirroring PostgreSQL's invariant that an
+//! auxiliary process's `MyLatch` is its `MyProc->procLatch`, so every wakeup path
+//! lands on a single latch. Process-wide shared memory is replaced by an
+//! Arc-shared proc-signal registry and `PGPROC` arena, and the before-shutdown
+//! LWLock-release callback is realized as RAII cleanup in the individual auxiliary
+//! tasks rather than a registered exit hook.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -106,7 +123,15 @@ async fn aux_common(
 
     // Register a proc-signal slot WITH `latch`. Aux processes have no query-cancel
     // key (PG passes ProcSignalInit(NULL, 0)); an empty key disables cancellation.
-    let (slot_key, slot) = proc_signal.register(proc_pid, &[], latch.clone());
+    // A `_with_proc` cradle holds a PGPROC, so the slot's proc_number must be its
+    // MyProcNumber (PG's psh_slot[MyProcNumber]) -- not the slab index -- so a
+    // wake-by-ProcNumber (sinval catchup) targets this slot. The plain cradle has
+    // no PGPROC and falls back to the slab index.
+    let (slot_key, slot) = if proc_number == crate::storage::procnumber::INVALID_PROC_NUMBER {
+        proc_signal.register(proc_pid, &[], latch.clone())
+    } else {
+        proc_signal.register_at(proc_number, proc_pid, &[], latch.clone())
+    };
 
     // Aux processes don't run transactions but may pin buffers outside one
     // (PG's CreateAuxProcessResourceOwner).

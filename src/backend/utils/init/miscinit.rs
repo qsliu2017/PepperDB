@@ -1,15 +1,28 @@
-//! Translated from PostgreSQL src/backend/utils/init/miscinit.c
+//! Miscellaneous backend initialization support. Translated from backend/utils/init/miscinit.c.
 //!
-//! Backend identity, data-directory checks, and the data-directory lock file
-//! (`postmaster.pid`). The multiprocess/privilege machinery is mostly deleted by
-//! the redesign: there is no `fork`/setuid, no kill-based stale-pid interlock, no
-//! `on_proc_exit` unlink list. The lock-file writer keeps the on-disk format so
-//! an existing datadir round-trips; I/O goes through the async [`IoBackend`].
+//! Collects the assorted startup helpers that do not belong to any single
+//! subsystem: the effective/session/authenticated user-id state and the role
+//! machinery behind `SET ROLE` and `SET SESSION AUTHORIZATION`, the OS user-name
+//! lookup, validation of a data directory's `PG_VERSION` marker, and the data
+//! directory lock file (`postmaster.pid`) that records the owning process and its
+//! connection parameters.
 //!
-//! The user-id state (`AuthenticatedUserId`, `SessionUserId`, `OuterUserId`,
-//! `CurrentUserId`, `SecurityRestrictionContext`) moved from file-static `Oid`s
-//! to [`crate::session::Session`]; the functions here operate on the task's
-//! session.
+//! The user-id values that PostgreSQL keeps as file-static `Oid`s
+//! (`AuthenticatedUserId`, `SessionUserId`, `OuterUserId`, `CurrentUserId`, and
+//! the security-restriction context) live on the per-task [`crate::session::Session`]
+//! instead, so the accessors here read and mutate the current task's session
+//! rather than process-wide globals. The lock-file reader and writer preserve the
+//! on-disk line format so an existing data directory round-trips, but file access
+//! goes through the asynchronous [`IoBackend`].
+//!
+//! Because the server runs as a single process, the multiprocess and privilege
+//! machinery is dropped: there is no `fork`, no `setuid`/group handling, no
+//! signal-based interlock that probes a stale pid before overwriting the lock
+//! file, and no `on_proc_exit` callback that unlinks it. A pre-existing lock file
+//! is therefore treated as a hard error rather than reclaimed. Two helpers are
+//! provisional pending deferred subsystems: the OS user name is read from the
+//! environment instead of the password database, and mapping a role oid to a name
+//! requires a `pg_authid` catalog lookup that is not yet implemented.
 
 use std::io;
 use std::sync::Arc;
@@ -124,7 +137,7 @@ pub struct LockFileInfo {
     pub pid: i32,
     pub data_dir: String,
     pub start_time: i64,
-    pub port: u16,
+    pub port: i32,
     pub socket_dir: String,
 }
 
@@ -132,11 +145,15 @@ pub struct LockFileInfo {
 /// standalone backend writes a negated pid; line order matches `pidfile.h`.
 fn render_lock_file(info: &LockFileInfo, am_postmaster: bool) -> String {
     let pid = if am_postmaster { info.pid } else { -info.pid };
-    // LOCK_FILE_LINE_LISTEN_ADDR is left empty for a standalone backend.
-    format!(
-        "{}\n{}\n{}\n{}\n{}\n\n",
+    let mut s = format!(
+        "{}\n{}\n{}\n{}\n{}\n",
         pid, info.data_dir, info.start_time, info.port, info.socket_dir
-    )
+    );
+    // LOCK_FILE_LINE_LISTEN_ADDR is filled empty now only for a standalone backend.
+    if !am_postmaster {
+        s.push('\n');
+    }
+    s
 }
 
 /// Parse a datadir lock file's first lines back into [`LockFileInfo`]. The pid is
@@ -146,7 +163,7 @@ pub fn parse_lock_file(contents: &str) -> Option<LockFileInfo> {
     let pid: i32 = lines.next()?.trim().parse().ok()?;
     let data_dir = lines.next()?.to_string();
     let start_time: i64 = lines.next()?.trim().parse().ok()?;
-    let port: u16 = lines.next()?.trim().parse().ok()?;
+    let port: i32 = lines.next()?.trim().parse().ok()?;
     let socket_dir = lines.next().unwrap_or("").to_string();
     Some(LockFileInfo {
         pid: pid.abs(),

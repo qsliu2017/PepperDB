@@ -1,28 +1,39 @@
-//! Translated from PostgreSQL src/backend/storage/lmgr/proc.c
+//! Routines to manage the per-process PGPROC data structure. Translated from backend/storage/lmgr/proc.c.
 //!
-//! Per-process backend state lifecycle (`InitProcGlobal`/`InitProcess`/`ProcKill`)
-//! and the lock grant-wait machinery (`JoinWaitQueue`/`ProcSleep`/`ProcWakeup`/
-//! `ProcLockWakeup`/`CheckDeadLock`). The big `PGPROC`/`ProcGlobal` types live in
-//! the header `src/storage/proc.rs`.
+//! Each backend owns a PGPROC slot holding the state other backends must see: its
+//! transaction ids, its lock wait-state, and the latch used to wake it. This file
+//! covers two interfaces. The first is the lock grant-wait machinery -- `JoinWaitQueue`
+//! places a backend on a lock's wait queue, `ProcSleep` puts it to sleep until the
+//! lock is granted, and `ProcWakeup`/`ProcLockWakeup` wake waiters once a conflicting
+//! lock is released, handing each an outcome so it knows whether it awoke on success
+//! or on an error such as a deadlock or timeout. The second is lifecycle management:
+//! `InitProcGlobal` builds the slot arena at startup, `InitProcess`/`InitAuxiliaryProcess`
+//! claim a slot for the current backend, and `ProcKill` returns it. `CheckDeadLock`
+//! runs the deadlock detector when a wait exceeds the deadlock timeout. Also here are
+//! lock-group formation (`BecomeLockGroupLeader`/`BecomeLockGroupMember`), generic
+//! signal waits (`ProcWaitForSignal`/`ProcSendSignal`), and the sizing reports.
 //!
-//! Representation (design step15 s0): the PGPROC arena is a fixed `Arc<ProcGlobal>`
-//! published process-wide by `InitProcGlobal`; cross-task references are
-//! `ProcNumber` indices. `MyProc` is a per-task `task_local` ProcNumber. The
-//! grant-wait wake is each PGPROC's `Latch`.
+//! In PostgreSQL the PGPROC arena lives in a shared-memory segment and slots are
+//! referenced by raw pointers. Here the arena is a fixed `Arc<ProcGlobal>` published
+//! once at startup; backends refer to slots by `ProcNumber` index and the current
+//! backend's slot is held in a task-local. A slot's latch is a tokio-backed `Latch`
+//! rather than a SysV semaphore, so the count of process semaphores is reported only
+//! for compatibility and no segment is actually allocated.
 //!
-//! Async coloring (design step15 s6): `ProcSleep` is ASYNC -- it is entered with NO
-//! lock partition Mutex held (the lock.c caller drops it first) and `tokio::select!`s
-//! over the proc's Latch (woken by `ProcWakeup`), a deadlock-timeout timer (->
-//! `CheckDeadLock`), and a lock-timeout timer. NEVER hold a sync guard across that
-//! await. `JoinWaitQueue`/`ProcWakeup`/`ProcLockWakeup` are SYNC (the caller holds
-//! the partition Mutex). `CheckDeadLock` runs `DeadLockCheck` (deadlock.c, 15c
-//! stub) with all partition locks held -- no `.await` while any is held.
+//! `ProcSleep` is async: it is entered with no lock-partition lock held and selects
+//! over its latch, a deadlock-timeout timer, and a lock-timeout timer, in place of
+//! PostgreSQL's blocking semaphore wait plus a signal-driven timeout. The deadlock
+//! and lock timers, which PostgreSQL arms through its timeout subsystem and signal
+//! handlers, are local timers in the select loop. `JoinWaitQueue`, `ProcWakeup`, and
+//! `ProcLockWakeup` remain synchronous and run with the lock partition held by their
+//! caller; `CheckDeadLock` holds every partition lock across the graph walk and never
+//! awaits while any is held.
 //!
-//! Staging: the LOCK/PROCLOCK tables are lock.c (15b). Where these functions need
-//! lock-conflict internals (`LockCheckConflicts`, `GrantLock`, `RememberSimpleDeadLock`,
-//! `RemoveFromWaitQueue`, `GetAwaitedLock`) they call the existing `storage::lock`
-//! stubs, which 15b fills in. `ProcSleep`'s select! structure + latch wake + timers
-//! are REAL here (the deliverable).
+//! The LOCK and PROCLOCK hash tables and their conflict/grant internals belong to the
+//! lock manager and are reached here through that module. Where those internals are
+//! not yet implemented this file calls placeholder routines that behave as if no
+//! locks are held; the wait-queue bookkeeping, the sleep/wake/timer structure, and the
+//! lifecycle paths are fully realized.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -243,7 +254,15 @@ fn init_backend_proc_fields(proc: &mut PGPROC, procno: ProcNumber, pid: i32, reg
     proc.temp_namespace_id = crate::postgres_ext::Oid(0);
     proc.is_regular_backend = regular;
     proc.delay_chkpt_flags = crate::storage::proc::DelayChkptFlags::empty();
-    proc.status_flags = crate::storage::proc::ProcStatusFlags::empty();
+    // NB -- autovac launcher intentionally does NOT set IS_AUTOVACUUM (proc.c:487).
+    proc.status_flags = if matches!(
+        crate::session::try_current().map(|s| s.backend_type()),
+        Some(BackendType::AUTOVAC_WORKER)
+    ) {
+        crate::storage::proc::ProcStatusFlags::PROC_IS_AUTOVACUUM
+    } else {
+        crate::storage::proc::ProcStatusFlags::empty()
+    };
     proc.lw_waiting = 0;
     proc.lw_wait_mode = 0;
     proc.wait_lock = None;
@@ -402,8 +421,15 @@ pub fn JoinWaitQueue(
     // pointer comes from the LOCALLOCK the caller owns under that Mutex.
     let lock: &mut LOCK = if locallock.lock.is_null() { return ProcWaitStatus::ERROR } else { unsafe { &mut *locallock.lock } };
 
+    // My lock-group leader (None = not in a group; Some(leader) otherwise).
+    // SAFETY: read of our own group role under the partition Mutex (held by caller).
+    let my_leader = unsafe { lock_group_leader_of(&g, procno) };
+
     // Set bitmask of locks we already hold on this object (from our PROCLOCK).
     // proclock.hold_mask -> heldLocks: lock.c owns PROCLOCK; staged as 0 until 15b.
+    // TODO(15b): if my_leader.is_some(), also OR in holdMask of every PROCLOCK on
+    // this LOCK whose groupLeader == my_leader (proc.c:1175-1188); needs the
+    // lock->procLocks list lock.c owns.
     let my_held_locks = held_mask_from_proclock(locallock);
     // SAFETY: exclusive access to our own slot's wait fields under the partition
     // Mutex held by the caller.
@@ -416,6 +442,12 @@ pub fn JoinWaitQueue(
     if my_held_locks != 0 && !lock.wait_procs.is_empty() {
         let mut ahead_requests: crate::storage::lockdefs::LOCKMASK = 0;
         for (idx, &waiter) in lock.wait_procs.iter().enumerate() {
+            // Same locking group: this waiter's locks neither conflict with ours
+            // nor contribute to aheadRequests (proc.c:1221-1222).
+            // SAFETY: read of the waiter's group role under the partition Mutex.
+            if my_leader.is_some() && unsafe { lock_group_leader_of(&g, waiter) } == my_leader {
+                continue;
+            }
             // SAFETY: read-only of another waiter's wait fields under the
             // partition Mutex (held by caller); waiters do not mutate them.
             let (w_wait_mode, w_held) = unsafe {
@@ -658,11 +690,16 @@ fn CheckDeadLock(procno: ProcNumber, g: &ProcGlobal) -> DeadLockState {
     // Hold every partition Mutex across the whole graph walk so it can deref the
     // boxed LOCK/PROCLOCK + read any PGPROC's wait fields safely.
     m.with_all_partitions_locked(|view| {
-        // If we were granted in the interim (no longer queued), happy day.
-        // SAFETY: all partition locks held; read of our wait_lock.
+        // If we were granted in the interim (no longer queued), happy day. Mirror
+        // proc.c:1814-1816 exactly: decide by wait-queue membership, not by a
+        // wait_status proxy. ProcWakeup/RemoveFromWaitQueue clear wait_lock and
+        // unlink us together under the partition lock, so an unlinked proc has a
+        // None wait_lock; we also confirm we are present in the lock's queue.
+        // SAFETY: all partition locks held; reads our wait_lock + the LOCK queue.
         let still_waiting = unsafe {
-            g.proc(procno)
-                .is_some_and(|p| p.wait_lock.is_some() && p.wait_status == ProcWaitStatus::WAITING)
+            g.proc(procno).and_then(|p| p.wait_lock).is_some_and(|lp| {
+                (*lp).wait_procs.contains(&procno)
+            })
         };
         if !still_waiting {
             return DeadLockState::NoDeadlock;
@@ -721,6 +758,19 @@ fn conflicts(
     mask: crate::storage::lockdefs::LOCKMASK,
 ) -> bool {
     (table.conflict_tab[mode as usize] & mask) != 0
+}
+
+/// PG `MyProc->lockGroupLeader` for `procno`: None if not in a group, else the
+/// leader's ProcNumber (the proc itself if it is the leader).
+///
+/// # Safety
+/// Caller holds the partition Mutex gating the proc's `lock_group_role`.
+unsafe fn lock_group_leader_of(g: &ProcGlobal, procno: ProcNumber) -> Option<ProcNumber> {
+    match unsafe { g.proc(procno) }.map(|p| &p.lock_group_role) {
+        Some(LockGroupRole::Leader { .. }) => Some(procno),
+        Some(LockGroupRole::Member { leader }) => Some(*leader),
+        _ => None,
+    }
 }
 
 /// Bitmask of locks held on this object from our PROCLOCK. lock.c owns PROCLOCK;
@@ -838,19 +888,27 @@ pub fn BecomeLockGroupLeader() {
     if procno == INVALID_PROC_NUMBER {
         return;
     }
-    // SAFETY: lock.c partition-by-proc Mutex would gate this (15b); the group
-    // links are otherwise touched only by this backend at setup.
-    let me = unsafe { g.proc_mut(procno).unwrap() };
-    // Already a leader (PG `lockGroupLeader == procno`)? Nothing to do.
-    if matches!(me.lock_group_role, LockGroupRole::Leader { .. }) {
+    // PG holds LockHashPartitionLockByProc(MyProc) EXCLUSIVE across this edit
+    // (proc.c:2001-2017) so the deadlock detector (which holds every partition
+    // lock) cannot read a torn group.
+    let Some(m) = crate::storage::lock::LockManager::get() else {
         return;
-    }
-    // PG asserts `lockGroupLeader == INVALID` here -- we must not be in a group.
-    debug_assert!(matches!(me.lock_group_role, LockGroupRole::None));
-    // Become a leader of my own single-member group (the self-membership PG adds).
-    me.lock_group_role = LockGroupRole::Leader {
-        members: vec![procno],
     };
+    m.with_proc_partition_locked(procno, || {
+        // SAFETY: the leader's group partition Mutex (held above) gates this slot's
+        // group role against the deadlock detector's all-partitions read.
+        let me = unsafe { g.proc_mut(procno).unwrap() };
+        // Already a leader (PG `lockGroupLeader == procno`)? Nothing to do.
+        if matches!(me.lock_group_role, LockGroupRole::Leader { .. }) {
+            return;
+        }
+        // PG asserts `lockGroupLeader == INVALID` here -- we must not be in a group.
+        debug_assert!(matches!(me.lock_group_role, LockGroupRole::None));
+        // Become a leader of my own single-member group (the self-membership PG adds).
+        me.lock_group_role = LockGroupRole::Leader {
+            members: vec![procno],
+        };
+    });
 }
 
 /// PG `BecomeLockGroupMember`: join `leader`'s lock group, gated on its pid as an
@@ -863,28 +921,39 @@ pub fn BecomeLockGroupMember(leader: ProcNumber, pid: i32) -> bool {
     if procno == INVALID_PROC_NUMBER || procno == leader || pid == 0 {
         return false;
     }
-    // SAFETY: lock.c partition-by-proc Mutex would gate this (15b).
-    let (leader_pid, leader_is_leader) = unsafe {
-        let Some(l) = g.proc(leader) else {
-            return false;
-        };
-        // PG checks `leader->lockGroupLeader == leader`: the leader must actually
-        // be a group leader.
-        (l.pid, matches!(l.lock_group_role, LockGroupRole::Leader { .. }))
+    // PG takes the leader's LockHashPartitionLockByProc EXCLUSIVE around both the
+    // pid recheck and the lockGroupMembers push (proc.c:2031+), so the deadlock
+    // detector never sees a half-joined group. The partition is keyed on the
+    // leader's ProcNumber alone, so the correct lock is taken even if the leader
+    // PGPROC is being recycled (hence the pid interlock recheck inside).
+    let Some(m) = crate::storage::lock::LockManager::get() else {
+        return false;
     };
-    if leader_pid == pid && leader_is_leader {
-        unsafe {
-            g.proc_mut(procno).unwrap().lock_group_role = LockGroupRole::Member { leader };
-            if let LockGroupRole::Leader { members } =
-                &mut g.proc_mut(leader).unwrap().lock_group_role
-            {
-                members.push(procno);
+    m.with_proc_partition_locked(leader, || {
+        // SAFETY: the leader's group partition Mutex (held above) gates both slots'
+        // group roles against the deadlock detector's all-partitions read.
+        let (leader_pid, leader_is_leader) = unsafe {
+            let Some(l) = g.proc(leader) else {
+                return false;
+            };
+            // PG checks `leader->lockGroupLeader == leader`: the leader must
+            // actually be a group leader.
+            (l.pid, matches!(l.lock_group_role, LockGroupRole::Leader { .. }))
+        };
+        if leader_pid == pid && leader_is_leader {
+            unsafe {
+                g.proc_mut(procno).unwrap().lock_group_role = LockGroupRole::Member { leader };
+                if let LockGroupRole::Leader { members } =
+                    &mut g.proc_mut(leader).unwrap().lock_group_role
+                {
+                    members.push(procno);
+                }
             }
+            true
+        } else {
+            false
         }
-        true
-    } else {
-        false
-    }
+    })
 }
 
 // ---------------------------------------------------------------------------

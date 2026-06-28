@@ -1,19 +1,42 @@
-//! Translated from PostgreSQL src/backend/utils/cache/inval.c
+//! Cache invalidation dispatcher. Translated from backend/utils/cache/inval.c.
 //!
-//! The cache-invalidation dispatcher: transactional pending-message bookkeeping
-//! plus callback dispatch. See the C file header for the full theory of operation.
+//! This is subtle stuff, so pay attention. When a tuple is updated or deleted,
+//! the standard visibility rules consider it still valid until the next command
+//! boundary, so a system-cache entry cannot simply be flushed during the update
+//! or delete itself; doing so would also risk an immediate reload within the same
+//! command. The correct behavior is to remember every insert, update, and delete
+//! of a tuple that might live in the system caches, then perform the required
+//! catcache and relcache flushes at the next command boundary. Updates are
+//! recorded as a delete plus an insert. Inserted tuples must be remembered even
+//! past the command so that abort can flush them, and deleted tuples so that any
+//! negative entries loaded in their place can be flushed too.
 //!
-//! Mapping notes:
-//!  - All of inval.c's file-statics are per-backend, so they live in ONE
-//!    `task_local! RefCell<InvalState>` (s6.1, s12). The RefCell borrow is NEVER
-//!    held across a callback invocation: we borrow, copy/decide, drop, then call.
-//!  - The two `InvalMessageArrays` become `Vec<SharedInvalidationMessage>` backing
-//!    stores; the `InvalidationMsgsGroup` firstmsg/nextmsg index-ranges into them
-//!    are preserved bit-exact.
-//!  - The parent-linked `TransInvalidationInfo` chain (PG: allocated in
-//!    TopTransactionContext) becomes an owned `Vec<TransInvalidationInfo>` stack;
-//!    "parent" is the element below the top (s8: memory contexts -> ownership).
-//!  - `debug_discard_caches` (GUC) -> a process-global atomic + accessor.
+//! Only operations on tuples in relations that have associated catcaches need to
+//! be registered, but every such operation must be, whether or not the tuple is
+//! currently cached. Operations on pg_class, pg_attribute, and pg_index tuples
+//! additionally queue a relcache flush for the described relation, as do
+//! pg_constraint tuples for foreign keys. Catcache and relcache flush requests are
+//! kept in separate lists so that all catcache flushes can be issued before
+//! relcache flushes, and duplicate relcache requests for one relation are
+//! collapsed. Subsystems with higher-level caches register callbacks here.
+//! On a successful commit the accumulated invalidation events are broadcast to
+//! other backends over the shared-invalidation message queue, after recording the
+//! commit, so that they flush their own obsolete entries. A subtransaction abort
+//! discards its queued events; a subtransaction commit merges them into the
+//! parent's pending lists. Nontransactional changes (inplace heap updates, relmap,
+//! smgr) send their invalidations immediately.
+//!
+//! In PepperDB the per-backend file-statics of the original become a single
+//! task-local `RefCell<InvalState>`, one per backend task; the borrow is released
+//! before any callback runs. The two message arrays are `Vec` backing stores and
+//! the message groups index into them by range, preserving the original layout.
+//! The parent-linked chain of transaction-invalidation records, allocated in the
+//! top transaction memory context in PostgreSQL, becomes an owned stack whose
+//! "parent" is simply the entry below the top, so that subtransaction nesting is
+//! expressed by ownership rather than by manual context allocation. The
+//! debug-discard-caches setting, a GUC in PostgreSQL, is a process-global atomic
+//! reached through an accessor. Logical-decoding WAL emission of invalidations is
+//! not yet implemented.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -45,6 +68,8 @@ use crate::storage::relfilelocator::RelFileLocatorBackend;
 use crate::storage::sinval::{
     SharedInvalCatalogMsg, SharedInvalCatcacheMsg, SharedInvalRelSyncMsg, SharedInvalRelcacheMsg,
     SharedInvalRelmapMsg, SharedInvalSmgrMsg, SharedInvalSnapshotMsg, SharedInvalidationMessage,
+    SHAREDINVALCATALOG_ID, SHAREDINVALRELCACHE_ID, SHAREDINVALRELMAP_ID, SHAREDINVALRELSYNC_ID,
+    SHAREDINVALSMGR_ID, SHAREDINVALSNAPSHOT_ID,
 };
 use crate::utils::relcache::{AssertCouldGetRelation, Relation};
 
@@ -1338,13 +1363,63 @@ fn register_msgs(msgs: &[SharedInvalidationMessage]) {
     if msgs.is_empty() {
         return;
     }
-    let bytes = unsafe {
-        std::slice::from_raw_parts(
-            msgs.as_ptr().cast::<u8>(),
-            std::mem::size_of_val(msgs),
-        )
-    };
-    crate::access::xloginsert::XLogRegisterData(bytes);
+    let mut bytes = Vec::with_capacity(msgs.len() * SIZEOF_SHARED_INVAL_MSG);
+    for msg in msgs {
+        serialize_shared_inval_msg(msg, &mut bytes);
+    }
+    crate::access::xloginsert::XLogRegisterData(&bytes);
+}
+
+/// Wire size of PG's `union SharedInvalidationMessage` (packed into 16 bytes).
+const SIZEOF_SHARED_INVAL_MSG: usize = 16;
+
+/// Serialize one message in PG's `union SharedInvalidationMessage` on-disk image:
+/// a fixed 16-byte slot, leading `int8 id`, fields at the C union's offsets/padding
+/// (native-endian, matching PG's memcpy-of-struct WAL/commit-record encoding).
+fn serialize_shared_inval_msg(msg: &SharedInvalidationMessage, out: &mut Vec<u8>) {
+    let start = out.len();
+    out.resize(start + SIZEOF_SHARED_INVAL_MSG, 0);
+    let slot = &mut out[start..start + SIZEOF_SHARED_INVAL_MSG];
+    match *msg {
+        SharedInvalidationMessage::Catcache(m) => {
+            slot[0] = m.id as u8; // cache id (>= 0) is the id field
+            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.hash_value.to_ne_bytes());
+        }
+        SharedInvalidationMessage::Catalog(m) => {
+            slot[0] = SHAREDINVALCATALOG_ID as u8;
+            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.cat_id.0.to_ne_bytes());
+        }
+        SharedInvalidationMessage::Relcache(m) => {
+            slot[0] = SHAREDINVALRELCACHE_ID as u8;
+            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.rel_id.0.to_ne_bytes());
+        }
+        SharedInvalidationMessage::Smgr(m) => {
+            // PG packs the procno into backend_hi (int8) + backend_lo (uint16).
+            slot[0] = SHAREDINVALSMGR_ID as u8;
+            slot[1] = (m.backend >> 16) as i8 as u8;
+            slot[2..4].copy_from_slice(&((m.backend & 0xffff) as u16).to_ne_bytes());
+            slot[4..8].copy_from_slice(&m.rlocator.spcOid.0.to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.rlocator.dbOid.0.to_ne_bytes());
+            slot[12..16].copy_from_slice(&m.rlocator.relNumber.0.to_ne_bytes());
+        }
+        SharedInvalidationMessage::Relmap(m) => {
+            slot[0] = SHAREDINVALRELMAP_ID as u8;
+            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
+        }
+        SharedInvalidationMessage::Snapshot(m) => {
+            slot[0] = SHAREDINVALSNAPSHOT_ID as u8;
+            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.rel_id.0.to_ne_bytes());
+        }
+        SharedInvalidationMessage::RelSync(m) => {
+            slot[0] = SHAREDINVALRELSYNC_ID as u8;
+            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.relid.0.to_ne_bytes());
+        }
+    }
 }
 
 #[cfg(test)]

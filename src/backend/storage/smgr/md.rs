@@ -1,27 +1,35 @@
-//! Translated from PostgreSQL src/backend/storage/smgr/md.c
+//! The magnetic-disk storage manager. Translated from backend/storage/smgr/md.c.
 //!
-//! The magnetic-disk storage manager: the interface from the smgr API to the
-//! filesystem. A relation is broken into 1GB "segment" files (RELSEG_SIZE
-//! blocks); md.c maps (fork, block) -> (segment file, byte offset) and does the
-//! actual read/write/extend/fsync.
+//! This is the storage-manager backend that maps the abstract smgr API onto an
+//! ordinary filesystem, so it works with any device the operating system can
+//! mount. To support relations larger than a single OS file, a relation fork is
+//! split into consecutively numbered "segment" files of at most `RELSEG_SIZE`
+//! blocks each; this code translates a (fork, block number) pair into the right
+//! segment file and byte offset and performs the actual read, write, extend,
+//! truncate, and fsync. On disk a fork is zero or more full segments, exactly
+//! one partial segment, and optionally trailing zero-length segments left behind
+//! by a truncate. Open segment files are cached in a per-fork array hanging off
+//! the `SmgrRelation`; the array reflects only the segments opened so far, not
+//! necessarily every segment that exists, since another part of the system may
+//! extend the relation at any time.
 //!
-//! Port notes vs md.c:
-//!  * The MdfdVec array (md_seg_fds) is per-fork state owned by the
-//!    SMgrRelation; `_fdvec_resize`/MemoryContext bookkeeping becomes a `Vec`.
-//!  * All file access goes through the VFD pool ([`File`]/[`FdManager`]); the
-//!    `File` handle is a cheap Clone, so we clone the target segment's handle
-//!    out of the MdfdVec, drop any borrow, then `.await` the I/O -- no borrow or
-//!    lock is held across a suspension point.
-//!  * The PG18 AIO read path (mdstartreadv / the pgaio handle machinery and the
-//!    md_readv_complete/report callbacks) is DELETED: mdreadv collapses to a
-//!    direct async `File::read_v`. The EOF responsibility that the step-05 read
-//!    leaf pushed up (its read is all-or-`UnexpectedEof`) is handled here: md
-//!    size-checks against the segment and zero-fills past EOF in recovery /
-//!    zero_damaged_pages mode, else errors like md.c's mdreadv.
-//!  * mdprefetch / mdwriteback (posix_fadvise / sync_file_range) -> no-ops.
-//!  * Paths from `relpath(...)` are relative to PGDATA; we join them onto
-//!    `DataDir` (PG runs chdir'd into the data dir, so its relative paths work
-//!    directly; we have no such cwd, so we resolve here).
+//! Open files are obtained from the virtual file descriptor pool, so the manager
+//! never exhausts real OS descriptors no matter how many segments are open. Each
+//! cached entry holds a cheap clonable `File` handle; an I/O call clones the
+//! handle for the target segment, releases any borrow of the cache, and only then
+//! awaits the operation, so no borrow or lock is held across a suspension point.
+//!
+//! Several PostgreSQL paths are simplified here. The asynchronous read path
+//! (the AIO handle machinery and its completion callbacks) is not used; reads
+//! issue a direct vectored read against the segment file. End-of-file handling
+//! lives in this module: a read past the end of a segment zero-fills the missing
+//! blocks only during recovery or when damaged pages are being tolerated, and
+//! otherwise reports data corruption. The prefetch and writeback hints
+//! (posix_fadvise and sync_file_range) are no-ops. Because PostgreSQL runs with
+//! its working directory inside the data directory and uses paths relative to it,
+//! while this server does not, relation paths are resolved against the configured
+//! data directory before opening; when no data directory is configured the path
+//! is used as given.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -64,6 +72,8 @@ enum Extension {
     ReturnNull,
     /// create new segments as needed (mdextend).
     Create,
+    /// create new segments only during recovery (mdreadv/mdwritev).
+    CreateRecovery,
     /// don't open a segment if not already open (mdwriteback).
     DontOpen,
 }
@@ -228,19 +238,32 @@ async fn mdunlinkfork(
     let base = relpath(rlocator, forknum);
     let path0 = resolve_path(shared, base.as_str());
 
+    // C records the first-segment truncate result: if it was already gone (ENOENT)
+    // it skips both the first unlink and the additional-segment loop. For temp rels
+    // and the deferred-unlink branch the truncate is not the gate (C: ret = 0).
+    let first_present;
     if is_redo || forknum != ForkNumber::MAIN_FORKNUM || rlocator.is_temp() {
-        if !rlocator.is_temp() {
+        if rlocator.is_temp() {
+            first_present = true;
+        } else {
             // Prevent other backends' fds from pinning the disk space.
-            truncate_to_zero(shared, &path0).await;
+            first_present = truncate_to_zero(shared, &path0).await;
             // Forget any pending sync requests for the first segment.
             register_forget_request(shared, rlocator, forknum, 0);
         }
-        let _ = io_backend::unlink(&path0).await;
+        if first_present {
+            let _ = io_backend::unlink(&path0).await;
+        }
     } else {
         // Regular main fork, not redo: truncate now, defer the unlink to after
         // the next checkpoint (protects relfilenumber reuse, see md.c).
         truncate_to_zero(shared, &path0).await;
         register_unlink_segment(shared, rlocator, forknum, 0);
+        first_present = true;
+    }
+
+    if !first_present {
+        return; // first segment already gone: skip the additional-segment loop
     }
 
     // Delete any additional segments (truncate then unlink), stopping at ENOENT.
@@ -361,9 +384,11 @@ pub async fn mdreadv(
     let segoff = blocknum % RELSEG_SIZE_BN;
     assert!(segoff + nblocks <= RELSEG_SIZE_BN, "read crosses segment boundary");
 
-    let (file, _segno) = getseg(shared, reln, forknum, blocknum, false, Extension::Fail)
+    // md.c passes EXTENSION_FAIL|EXTENSION_CREATE_RECOVERY: in recovery a read of
+    // a not-yet-existing high segment creates (and zero-pads) it rather than failing.
+    let (file, _segno) = getseg(shared, reln, forknum, blocknum, false, Extension::CreateRecovery)
         .await
-        .expect("mdreadv: getseg(EXTENSION_FAIL) must succeed");
+        .expect("mdreadv: getseg must succeed");
     let seekpos = BLCKSZ_U64 * u64::from(segoff);
 
     // Determine how many blocks actually exist in this segment from seekpos.
@@ -378,13 +403,27 @@ pub async fn mdreadv(
     }
 
     if read_n < nblocks {
-        // Past EOF. md.c: error unless zero_damaged_pages or InRecovery, in
-        // which case zero-fill. We don't have those GUCs wired yet; zero-fill is
-        // the safe behavior for the buffer manager's relation-extension reads.
-        // TODO(zero_damaged_pages/InRecovery): error in the strict (non-recovery)
-        // case once those flags exist.
-        for p in &mut buffers[read_n as usize..] {
-            p.as_mut_bytes().fill(0);
+        // Past EOF. md.c errors (ERRCODE_DATA_CORRUPTED) unless zero_damaged_pages
+        // or InRecovery, in which case it zero-fills the missing tail.
+        let lenient =
+            unsafe { crate::storage::bufmgr::zero_damaged_pages || crate::access::xlogutils::InRecovery };
+        if lenient {
+            for p in &mut buffers[read_n as usize..] {
+                p.as_mut_bytes().fill(0);
+            }
+        } else {
+            let path = mdfd_segpath(shared, reln, forknum, blocknum / RELSEG_SIZE_BN);
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                format!(
+                    "could not read blocks {}..{} in file \"{}\": read only {} of {} bytes",
+                    blocknum,
+                    blocknum + nblocks - 1,
+                    path.display(),
+                    u64::from(read_n) * BLCKSZ_U64,
+                    u64::from(nblocks) * BLCKSZ_U64
+                )
+            );
         }
     }
 }
@@ -405,10 +444,11 @@ pub async fn mdwritev(
     let segoff = blocknum % RELSEG_SIZE_BN;
     assert!(segoff + nblocks <= RELSEG_SIZE_BN, "write crosses segment boundary");
 
+    // md.c passes EXTENSION_FAIL|EXTENSION_CREATE_RECOVERY (create high segment in recovery).
     let (file, segno) =
-        getseg(shared, reln, forknum, blocknum, skip_fsync, Extension::Fail)
+        getseg(shared, reln, forknum, blocknum, skip_fsync, Extension::CreateRecovery)
             .await
-            .expect("mdwritev: getseg(EXTENSION_FAIL) must succeed");
+            .expect("mdwritev: getseg must succeed");
     let seekpos = BLCKSZ_U64 * u64::from(segoff);
 
     let iov: Vec<IoSlice> = buffers.iter().map(|p| IoSlice::new(p.as_bytes())).collect();
@@ -448,7 +488,9 @@ pub async fn mdnblocks(
             let file = reln.md_seg_fds[fork][segno as usize].mdfd_file.clone();
             seg_nblocks(&file).await
         };
-        assert!(nblocks <= RELSEG_SIZE_BN, "segment too big");
+        if nblocks > RELSEG_SIZE_BN {
+            crate::elog!(crate::utils::elog::FATAL, "segment too big");
+        }
         if nblocks < RELSEG_SIZE_BN {
             return segno * RELSEG_SIZE_BN + nblocks;
         }
@@ -637,9 +679,14 @@ async fn getseg(
             let file = reln.md_seg_fds[fork][nextsegno as usize - 1].mdfd_file.clone();
             seg_nblocks(&file).await
         };
-        assert!(cur_nblocks <= RELSEG_SIZE_BN, "segment too big");
+        if cur_nblocks > RELSEG_SIZE_BN {
+            crate::elog!(crate::utils::elog::FATAL, "segment too big");
+        }
 
-        let create = behavior == Extension::Create;
+        // EXTENSION_CREATE always creates; EXTENSION_CREATE_RECOVERY only while
+        // replaying WAL (md.c: write into a high segment of a since-truncated rel).
+        let create = behavior == Extension::Create
+            || (behavior == Extension::CreateRecovery && unsafe { crate::access::xlogutils::InRecovery });
         if create {
             // Pad the prior segment to RELSEG_SIZE if needed (invariant: all
             // segments before the last active one are exactly RELSEG_SIZE).

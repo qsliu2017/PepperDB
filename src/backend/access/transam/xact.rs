@@ -1,30 +1,40 @@
-//! Translated from PostgreSQL src/backend/access/transam/xact.c
+//! Top-level transaction system support routines. Translated from backend/access/transam/xact.c.
 //!
-//! The top-level transaction state machine: the `TransactionState` stack, the
-//! low-level (`TransState`) and block-level (`TBlockState`) state transitions,
-//! commit/abort durability, and savepoints. This ties together the xid
-//! generator (varsup), clog/subtrans, procarray, snapshot manager, combocid,
-//! the resource owner, and WAL.
+//! This is the three-layer transaction machinery at the heart of the backend.
+//! The low level implements raw transactions and subtransactions through a
+//! stack of [`TransState`] state machines; the middle layer drives one
+//! transaction per query via the command-level routines (start, commit, and
+//! abort of the current transaction); and the top layer interprets the
+//! user-visible `BEGIN`/`COMMIT`/`ROLLBACK`/`SAVEPOINT` family by walking the
+//! block-level [`TBlockState`] automaton. Commit and abort tie together the
+//! transaction-id generator, the commit log and subtransaction map, the
+//! snapshot manager, combo command ids, the resource owner, and the
+//! write-ahead log so that a transaction's effects become durable and visible
+//! atomically.
 //!
-//! Per-task model (rules s6.1 / s7): xact.c's process globals -- the
-//! `CurrentTransactionState` stack, `XactTopFullTransactionId`,
-//! `currentCommandId`, the timestamps, `XactIsoLevel`/`XactReadOnly`, etc. --
-//! become one per-task [`XactState`] published as a `task_local!`
-//! `RefCell<XactState>`. The `RefCell` borrow is never held across an `.await`
-//! (we borrow, copy/decide, drop the borrow, then await). The state is `Send`
-//! (owned data only), so a backend future can migrate threads.
+//! Where PostgreSQL keeps its current transaction in a tree of process-global
+//! `TransactionState` records reachable from `CurrentTransactionState`, here
+//! the whole of that mutable state -- the transaction-state stack, the top
+//! full transaction id, the current command id, the start and commit
+//! timestamps, and the per-transaction isolation and read-only flags -- lives
+//! in a single per-task [`XactState`] owned by the backend rather than in
+//! shared memory. Each connection runs as its own asynchronous task, so no
+//! locking guards the state; it is owned entirely by the task that mutates it,
+//! and being plain owned data it can move with the task between worker threads.
 //!
-//! Async coloring (rules s5): `StartTransaction`/`CommitTransaction`/
-//! `AbortTransaction` and their command-level drivers are `async` because they
-//! await WAL flush, clog writes and snapshot acquisition. The block-state
-//! mutators (`BeginTransactionBlock` etc.) and the read-only accessors stay
-//! sync. `GetCurrentTransactionId` is `async` because it may assign an xid
-//! (`GetNewTransactionId`, async); the `*IfAny` variants stay sync.
+//! The command-level drivers and the start/commit/abort routines are
+//! asynchronous because they wait on write-ahead-log flushes, commit-log
+//! writes, and snapshot acquisition; the block-state mutators and the
+//! read-only accessors remain synchronous. Acquiring the current transaction
+//! id is asynchronous as well, since it may have to assign a new id, while the
+//! "if any" accessors that never assign stay synchronous.
 //!
-//! Staging: invalidation messages, two-phase prepare, multixact, pgstat,
-//! replication origins, large objects, portals, triggers and GUC nest levels
-//! are deferred subsystems reached through their existing stubs (`TODO`s mark
-//! each). `xact_redo` is recovery and stays a stub (`TODO(recovery)`).
+//! Several adjacent subsystems that a full transaction touches in PostgreSQL
+//! -- cache invalidation, two-phase prepare, multixact, statistics, logical
+//! replication origins, large objects, portals, and triggers -- are reached
+//! through their own modules and are only partially wired up here; the
+//! recovery-side replay of commit and abort records is likewise not yet
+//! implemented.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -787,12 +797,12 @@ fn start_transaction(shared: &Arc<SharedState>) {
     // must initialize resource-management first (AtStart_ResourceOwner): the
     // task already runs inside a transaction ResourceOwner scope; nothing to do.
 
-    // transaction_timestamp() = first statement_timestamp() (no fresh clock).
-    with_xact(|x| {
-        if x.xact_start_timestamp == 0 {
-            x.xact_start_timestamp = x.stmt_start_timestamp;
-        }
-    });
+    // transaction_timestamp() = statement_timestamp() (no fresh clock). C sets
+    // this afresh every StartTransaction; a parallel worker gets it via
+    // SetParallelStartTimestamps instead. (SPI nonatomic context is deferred.)
+    if !crate::access::parallel::IsParallelWorker() {
+        with_xact(|x| x.xact_start_timestamp = x.stmt_start_timestamp);
+    }
 
     // AtStart_GUC / AtStart_Cache / AfterTriggerBeginXact: stubs.
     at_start_cache();
@@ -854,9 +864,12 @@ async fn record_transaction_commit(shared: &Arc<SharedState>) -> TransactionId {
         .await;
     };
 
-    // Mark our commit critical section: forces a concurrent checkpoint to wait
-    // until we've updated pg_xact. (delayChkptFlags on MyProc -- step 15.)
+    // Mark our commit critical section and set DELAY_CHKPT_START on our own
+    // PGPROC: a concurrent checkpoint must wait until we've updated pg_xact, so
+    // it can't set REDO past the commit record before the clog write is durable.
+    // Safe lock-free on our own proc (only we modify it; xact.c:1430).
     crate::session::current().inc_crit_section_count();
+    set_delay_chkpt_start(true);
 
     // Insert the commit XLOG record.
     let commit_time = GetCurrentTransactionStopTimestamp();
@@ -881,7 +894,8 @@ async fn record_transaction_commit(shared: &Arc<SharedState>) -> TransactionId {
 
     let r = record_commit_finish(shared, xid, &children, nrels, true, wrote_xlog).await;
 
-    // Leave the commit critical section.
+    // Leave the commit critical section: clog is updated, checkpoints may proceed.
+    set_delay_chkpt_start(false);
     crate::session::current().dec_crit_section_count();
 
     latest_xid = r;
@@ -1187,6 +1201,30 @@ fn at_sub_commit_snapshot(level: i32) {
 
 fn at_sub_abort_snapshot(level: i32) {
     crate::backend::utils::time::snapmgr::AtSubAbort_Snapshot(level);
+}
+
+/// Set or clear `DELAY_CHKPT_START` on this backend's own PGPROC (xact.c:1437/
+/// 1540). Safe lock-free since only this backend modifies its own flags; the
+/// checkpoint's reader treats it as fuzzy. No-op without a live PGPROC.
+fn set_delay_chkpt_start(set: bool) {
+    use crate::storage::proc::DelayChkptFlags;
+    let procno = crate::storage::proc::current_proc_number();
+    if procno == crate::storage::procnumber::INVALID_PROC_NUMBER {
+        return;
+    }
+    let Some(g) = crate::storage::proc::ProcGlobal::get() else {
+        return;
+    };
+    // SAFETY: a backend mutates only its own slot's delay_chkpt_flags.
+    let Some(proc) = (unsafe { g.proc_mut(procno) }) else {
+        return;
+    };
+    if set {
+        debug_assert!(!proc.delay_chkpt_flags.contains(DelayChkptFlags::DELAY_CHKPT_START));
+        proc.delay_chkpt_flags |= DelayChkptFlags::DELAY_CHKPT_START;
+    } else {
+        proc.delay_chkpt_flags &= !DelayChkptFlags::DELAY_CHKPT_START;
+    }
 }
 
 /// procarray.c `ProcArrayEndTransaction`. Clear the real MyProc slot (xid,
@@ -1754,7 +1792,9 @@ pub fn EndTransactionBlock(chain: bool) -> bool {
             );
         }
     }
-    with_xact(|x| x.cur_mut().chain = chain);
+    // C sets s->chain after walking s up to the top frame, so chain always
+    // lands on the top frame (subxact arms walk s = s->parent).
+    with_xact(|x| x.top_mut().chain = chain);
     result
 }
 
@@ -1819,7 +1859,8 @@ pub fn UserAbortTransactionBlock(chain: bool) {
             );
         }
     }
-    with_xact(|x| x.cur_mut().chain = chain);
+    // chain lands on the top frame (C walks s = s->parent before setting it).
+    with_xact(|x| x.top_mut().chain = chain);
 }
 
 /// xact.c `BeginImplicitTransactionBlock`.
@@ -2486,6 +2527,8 @@ pub async fn XactLogCommitRecord(
             xli::register_data(&relfilelocators_header_bytes(rels.len()));
             xli::register_data(&relfilelocators_to_bytes(rels));
         }
+        // TODO(replication-origin): C sets XLOG_INCLUDE_ORIGIN here; harmless to
+        // omit while origins are always Invalid (no origin block is appended).
         xli::xlog_insert(
             shared.xlog(),
             crate::access::rmgrlist::RmgrId::Xact as u8,
@@ -2549,6 +2592,8 @@ pub async fn XactLogAbortRecord(
             xli::register_data(&relfilelocators_header_bytes(rels.len()));
             xli::register_data(&relfilelocators_to_bytes(rels));
         }
+        // TODO(replication-origin): C sets XLOG_INCLUDE_ORIGIN here; harmless to
+        // omit while origins are always Invalid (no origin block is appended).
         xli::xlog_insert(
             shared.xlog(),
             crate::access::rmgrlist::RmgrId::Xact as u8,

@@ -1,27 +1,30 @@
-//! Translated from PostgreSQL src/backend/access/transam/xlogreader.c
+//! Generic WAL reading facility. Translated from backend/access/transam/xlogreader.c.
 //!
-//! The WAL read/decode state machine: position a reader, then pull records back
-//! one at a time. This is the exact INVERSE of step 13B's `xloginsert.rs`
-//! assembler -- it parses the same on-disk byte layout (the fixed `XLogRecord`
-//! header, the per-block `XLogRecordBlockHeader` (+ optional image header +
-//! `RelFileLocator` + `BlockNumber`), and the main-data id byte) and validates
-//! the record CRC with the real `pg_crc32c`. It also decodes real PostgreSQL WAL.
+//! Given a starting position in the write-ahead log, this facility reads and
+//! decodes WAL records one at a time. It validates each record's header and
+//! checksum against the same on-disk layout the WAL insertion path produces --
+//! the fixed `XLogRecord` header, the per-block headers (with optional full-page
+//! image header, `RelFileLocator`, and `BlockNumber`), and the main-data id byte
+//! -- and reassembles records that span page or segment boundaries. The decoded
+//! result ([`DecodedXLogRecord`]) carries the main data and per-block payloads so
+//! callers can replay or inspect a record without re-parsing it.
 //!
-//! The reader does NO I/O itself: the caller supplies a *page-read* routine that
-//! fetches a WAL page on demand (recovery's real async page reader -- prefetch,
-//! `read_local_xlog_page` -- is DEFERRED to xlogrecovery/xlogprefetcher). The
-//! routine is a synchronous closure stored on the reader as a GENERIC type
-//! parameter `F` (monomorphized per caller, no `dyn` dispatch); the async I/O
-//! driver is the caller's concern (rules.md section 5: the wait side is async, the
-//! reader's decode loop is pure-CPU and stays sync). The decoded output
-//! ([`DecodedXLogRecord`]) is F-independent, so downstream redo/recovery never has
-//! to be generic over `F`.
+//! The reader performs no I/O of its own. The caller supplies a page-read routine
+//! that fetches a WAL page on demand; the reader drives that routine to obtain the
+//! bytes it needs, then validates page headers and record contents. Records are
+//! pulled with `read_record`, which returns the next decoded record or `None` at
+//! the end of available WAL.
 //!
-//! `XLogReader` is the concrete reader (the C `XLogReaderState` for the
-//! self-contained read+decode path). The header's generic `XLogReaderState<R>`
-//! routine-struct shape is retained for the eventual recovery wiring; the
-//! foundation read+decode machinery lives on this concrete type and the header's
-//! C-named free functions are re-exported / shimmed onto it.
+//! In PepperDB the page-read routine is a synchronous closure carried on the
+//! reader as a generic type parameter, monomorphized per caller rather than
+//! invoked through dynamic dispatch. This keeps the decode loop pure CPU work and
+//! leaves any waiting or asynchronous fetching to the caller, in keeping with the
+//! single-process async design where the wait side is async and the parse side is
+//! not. The recovery-oriented page readers (prefetching, reading from a running
+//! server) are provided elsewhere and are not implemented here. `XLogReader` is
+//! the concrete reader corresponding to the C `XLogReaderState`; the decoded
+//! output is independent of the page-read closure type, so downstream replay code
+//! never has to be generic over it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -30,7 +33,8 @@
 
 use crate::access::rmgr::{rmgr_id_is_valid, RmgrId};
 use crate::access::xlog_internal::{
-    SizeOfXLogLongPHD, SizeOfXLogShortPHD, XLogSegmentOffset, XlpFlags, XLOG_PAGE_MAGIC,
+    SizeOfXLogLongPHD, SizeOfXLogShortPHD, XLByteToSeg, XLogSegmentOffset, XlpFlags,
+    XLOG_PAGE_MAGIC,
 };
 use crate::access::xlogdefs::{TimeLineID, XLogRecPtr, XLogSegNo, INVALID_XLOG_REC_PTR};
 use crate::access::xlogreader::{DecodedBkpBlock, DecodedXLogRecord};
@@ -77,6 +81,26 @@ pub struct XLogReader<F> {
     /// WAL segment size (bytes); needed for the XLOG_SWITCH end-of-segment skip.
     wal_seg_size: u64,
 
+    /// pg_control system identifier; cross-checked against long page headers when
+    /// nonzero (0 = unset, skip the check, matching C `state->system_identifier`).
+    system_identifier: u64,
+
+    /// Segment currently cached in `read_buf` (C `state->seg.ws_segno`); used to
+    /// trigger per-segment first-page long-header validation.
+    seg_no: XLogSegNo,
+
+    // ---- timeline-monotonicity tracking (C latestPagePtr / latestPageTLI) ----
+    latest_page_ptr: XLogRecPtr,
+    latest_page_tli: TimeLineID,
+
+    /// Set when a contrecord was overwritten (C `overwrittenRecPtr`).
+    pub overwritten_rec_ptr: XLogRecPtr,
+    /// On a failed multi-page assembly, the aborted record start (C `abortedRecPtr`).
+    pub aborted_rec_ptr: XLogRecPtr,
+    /// On a failed multi-page assembly, the page missing the contrecord
+    /// (C `missingContrecPtr`).
+    pub missing_contrec_ptr: XLogRecPtr,
+
     // ---- read/decode cursors ----
     /// Start of the last record read (C `ReadRecPtr`).
     pub read_rec_ptr: XLogRecPtr,
@@ -115,6 +139,13 @@ where
         Self {
             page_read,
             wal_seg_size: wal_segment_size,
+            system_identifier: 0,
+            seg_no: XLogSegNo(0),
+            latest_page_ptr: INVALID_XLOG_REC_PTR,
+            latest_page_tli: TimeLineID(0),
+            overwritten_rec_ptr: INVALID_XLOG_REC_PTR,
+            aborted_rec_ptr: INVALID_XLOG_REC_PTR,
+            missing_contrec_ptr: INVALID_XLOG_REC_PTR,
             read_rec_ptr: INVALID_XLOG_REC_PTR,
             end_rec_ptr: INVALID_XLOG_REC_PTR,
             decode_rec_ptr: INVALID_XLOG_REC_PTR,
@@ -144,9 +175,18 @@ where
         self.inval_read_state();
     }
 
+    /// Set the pg_control system identifier cross-checked against long page
+    /// headers (0 = skip, matching C `state->system_identifier`).
+    pub fn set_system_identifier(&mut self, system_identifier: u64) {
+        self.system_identifier = system_identifier;
+    }
+
     fn inval_read_state(&mut self) {
+        // C XLogReaderInvalReadState resets ws_segno too so we re-validate the
+        // first page of the segment after a failure.
         self.read_buf_origin = INVALID_XLOG_REC_PTR;
         self.read_len = 0;
+        self.seg_no = XLogSegNo(0);
     }
 
     fn report(&mut self, msg: String) {
@@ -164,51 +204,140 @@ where
             return Ok(self.read_len);
         }
 
+        let target_seg_no = XLogSegNo(XLByteToSeg(pageptr.0, self.wal_seg_size));
+        let target_page_off = XLogSegmentOffset(pageptr.0, self.wal_seg_size) as usize;
+
+        // Whenever we switch to a new WAL segment at a non-zero page offset, read
+        // and validate the segment's first page (long header) so the per-segment
+        // identification info is always checked once. (C ReadPageInternal.)
+        if target_seg_no != self.seg_no && target_page_off != 0 {
+            let seg_ptr = XLogRecPtr(pageptr.0 - target_page_off as u64);
+            let mut buf = std::mem::take(&mut self.read_buf);
+            let read = (self.page_read)(seg_ptr, BLCKSZ, &mut buf);
+            self.read_buf = buf;
+            let read = read?;
+            if read < BLCKSZ {
+                return Err(format!("could not read page at {:X}/{:X}", seg_ptr.0 >> 32, seg_ptr.0 as u32));
+            }
+            self.read_buf_origin = seg_ptr;
+            self.read_len = read;
+            self.validate_page_header(seg_ptr)?;
+        }
+
+        // Read at least a short page header so the header length is parseable.
+        let want = req_len.max(SizeOfXLogShortPHD);
         let mut buf = std::mem::take(&mut self.read_buf);
-        let read = (self.page_read)(pageptr, req_len, &mut buf);
+        let read = (self.page_read)(pageptr, want, &mut buf);
         self.read_buf = buf;
-        let read = read?;
-        if read < req_len {
+        let mut read = read?;
+        if read <= SizeOfXLogShortPHD || read < want {
             return Err(format!("could not read page at {:X}/{:X}", pageptr.0 >> 32, pageptr.0 as u32));
         }
         self.read_buf_origin = pageptr;
         self.read_len = read;
 
-        // Validate the page header now that the page is in the buffer.
+        // If the page has a long header and we read fewer bytes, re-read the full
+        // header before validating (C ReadPageInternal lines 1090-1099).
+        let hdr_size = self.page_header_size();
+        if read < hdr_size {
+            let mut buf = std::mem::take(&mut self.read_buf);
+            let r = (self.page_read)(pageptr, hdr_size, &mut buf);
+            self.read_buf = buf;
+            read = r?;
+            if read < hdr_size {
+                return Err(format!("could not read page at {:X}/{:X}", pageptr.0 >> 32, pageptr.0 as u32));
+            }
+            self.read_len = read;
+        }
+
+        // Validate the page header now that the full header is in the buffer.
         self.validate_page_header(pageptr)?;
+
+        self.seg_no = target_seg_no;
         Ok(read)
     }
 
-    /// PG `XLogReaderValidatePageHeader` (the checks the reader relies on for the
-    /// foundation: magic, flag bits, and pageaddr match).
+    /// PG `XLogReaderValidatePageHeader`: magic, flag bits, long-header identity
+    /// cross-checks, the offset==0-needs-long-header rule, pageaddr match, and TLI
+    /// monotonicity.
     fn validate_page_header(&mut self, recptr: XLogRecPtr) -> Result<(), String> {
+        debug_assert!(recptr.0.is_multiple_of(BLCKSZ_U64));
+        let offset = XLogSegmentOffset(recptr.0, self.wal_seg_size);
+        // Copy out every header field up front so no borrow of `read_buf` is held
+        // across the `self.report` (&mut self) calls below.
         let buf = &self.read_buf;
         let magic = u16::from_ne_bytes([buf[0], buf[1]]);
+        let info = u16::from_ne_bytes([buf[2], buf[3]]);
+        let tli = TimeLineID(u32::from_ne_bytes(buf[4..8].try_into().unwrap()));
+        let pageaddr = u64::from_ne_bytes(buf[8..16].try_into().unwrap());
+        let sysid = u64::from_ne_bytes(buf[24..32].try_into().unwrap());
+        let seg_size = u32::from_ne_bytes(buf[32..36].try_into().unwrap());
+        let blcksz = u32::from_ne_bytes(buf[36..40].try_into().unwrap());
+
         if magic != XLOG_PAGE_MAGIC {
             let m = format!(
-                "invalid magic number {:04X} in WAL segment, offset {}",
-                magic,
-                XLogSegmentOffset(recptr.0, self.wal_seg_size)
+                "invalid magic number {magic:04X} in WAL segment, offset {offset}"
             );
             self.report(m.clone());
             return Err(m);
         }
-        let info = u16::from_ne_bytes([buf[2], buf[3]]);
         if info & !XlpFlags::ALL_FLAGS.bits() != 0 {
-            let m = format!("invalid info bits {info:04X} in WAL segment");
+            let m = format!("invalid info bits {info:04X} in WAL segment, offset {offset}");
             self.report(m.clone());
             return Err(m);
         }
-        let pageaddr = u64::from_ne_bytes(buf[8..16].try_into().unwrap());
+
+        if info & XlpFlags::LONG_HEADER.bits() != 0 {
+            // Long header: cross-check the identification info (xlp_sysid,
+            // xlp_seg_size, xlp_xlog_blcksz) read above.
+            if self.system_identifier != 0 && sysid != self.system_identifier {
+                let m = format!(
+                    "WAL file is from different database system: WAL file database system identifier is {sysid}, pg_control database system identifier is {}",
+                    self.system_identifier
+                );
+                self.report(m.clone());
+                return Err(m);
+            }
+            if u64::from(seg_size) != self.wal_seg_size {
+                let m = "WAL file is from different database system: incorrect segment size in page header".to_string();
+                self.report(m.clone());
+                return Err(m);
+            }
+            if blcksz != XLOG_BLCKSZ {
+                let m = "WAL file is from different database system: incorrect XLOG_BLCKSZ in page header".to_string();
+                self.report(m.clone());
+                return Err(m);
+            }
+        } else if offset == 0 {
+            let m = format!(
+                "invalid info bits {info:04X} in WAL segment, offset {offset}"
+            );
+            self.report(m.clone());
+            return Err(m);
+        }
+
         if pageaddr != recptr.0 {
             let m = format!(
-                "unexpected pageaddr {:X}/{:X} in WAL segment",
+                "unexpected pageaddr {:X}/{:X} in WAL segment, offset {offset}",
                 pageaddr >> 32,
                 pageaddr as u32
             );
             self.report(m.clone());
             return Err(m);
         }
+
+        // A child timeline always has a TLI greater than its parent, so TLI must
+        // never go backwards across pages later than the last remembered LSN.
+        if recptr > self.latest_page_ptr && tli < self.latest_page_tli {
+            let m = format!(
+                "out-of-sequence timeline ID {} (after {}) in WAL segment, offset {offset}",
+                tli.0, self.latest_page_tli.0
+            );
+            self.report(m.clone());
+            return Err(m);
+        }
+        self.latest_page_ptr = recptr;
+        self.latest_page_tli = tli;
         Ok(())
     }
 
@@ -254,6 +383,11 @@ where
         // Random access (no prev decode) verifies prev-link loosely; sequential
         // access (after a prior decode) verifies it exactly.
         let rand_access = self.decode_rec_ptr.is_invalid();
+
+        // The whole read can restart from a new RecPtr when we hit an overwrite
+        // contrecord flag mid-reassembly (C `goto restart`).
+        'restart: loop {
+        self.curr_rec_ptr = rec_ptr;
 
         let mut target_page_ptr = XLogRecPtr(rec_ptr.0 - rec_ptr.0 % BLCKSZ_U64);
         let mut target_rec_off = (rec_ptr.0 % BLCKSZ_U64) as usize;
@@ -309,8 +443,10 @@ where
         let record_bytes: Vec<u8>;
         let next_rec_ptr: XLogRecPtr;
 
+        let mut assembled = false;
         if total_len as usize > len_on_page {
             // ---- Need to reassemble a boundary-spanning record. ----
+            assembled = true;
             let mut buf = Vec::with_capacity(total_len as usize);
             buf.extend_from_slice(&self.read_buf[rec_off..rec_off + len_on_page]);
             let mut got_len = len_on_page;
@@ -321,10 +457,21 @@ where
                 target_page_ptr = XLogRecPtr(target_page_ptr.0 + BLCKSZ_U64);
 
                 // Read the short page header first to inspect the contrecord flag.
-                self.read_page_internal(target_page_ptr, SizeOfXLogShortPHD)?;
+                self.read_page_internal(target_page_ptr, SizeOfXLogShortPHD)
+                    .inspect_err(|m| { self.set_aborted(rec_ptr, target_page_ptr); })?;
 
                 let info = self.page_info();
+                // If we expected a continuation but the page carries the overwrite
+                // flag, the contrecord was overwritten by a different record after
+                // an aborted write. Restart the whole read from this page (C
+                // `goto restart`), remembering the record we were reading.
+                if (info & XlpFlags::FIRST_IS_OVERWRITE_CONTRECORD.bits()) != 0 {
+                    self.overwritten_rec_ptr = rec_ptr;
+                    rec_ptr = target_page_ptr;
+                    continue 'restart;
+                }
                 if (info & XlpFlags::FIRST_IS_CONTRECORD.bits()) == 0 {
+                    self.set_aborted(rec_ptr, target_page_ptr);
                     return Err(format!(
                         "there is no contrecord flag at {:X}/{:X}",
                         rec_ptr.0 >> 32,
@@ -333,6 +480,7 @@ where
                 }
                 let rem_len = self.page_rem_len();
                 if rem_len == 0 || total_len != rem_len + got_len as u32 {
+                    self.set_aborted(rec_ptr, target_page_ptr);
                     return Err(format!(
                         "invalid contrecord length {} (expected {}) at {:X}/{:X}",
                         rem_len,
@@ -348,7 +496,8 @@ where
                 if (rem_len as usize) < take {
                     take = rem_len as usize;
                 }
-                self.read_page_internal(target_page_ptr, page_header_size + take)?;
+                self.read_page_internal(target_page_ptr, page_header_size + take)
+                    .inspect_err(|m| { self.set_aborted(rec_ptr, target_page_ptr); })?;
                 buf.extend_from_slice(
                     &self.read_buf[page_header_size..page_header_size + take],
                 );
@@ -359,7 +508,8 @@ where
                 if !got_header {
                     // The header itself spanned the boundary; validate it now.
                     let hdr = read_header_from(&buf, 0);
-                    self.valid_xlog_record_header(rec_ptr, &hdr, rand_access)?;
+                    self.valid_xlog_record_header(rec_ptr, &hdr, rand_access)
+                        .inspect_err(|m| { self.set_aborted(rec_ptr, target_page_ptr); })?;
                     got_header = true;
                 }
 
@@ -385,7 +535,12 @@ where
         debug_assert!(got_header);
 
         // CRC check over the full reassembled record.
-        self.valid_xlog_record(&record_bytes, rec_ptr)?;
+        if assembled {
+            self.valid_xlog_record(&record_bytes, rec_ptr)
+                .inspect_err(|m| { self.set_aborted(rec_ptr, target_page_ptr); })?;
+        } else {
+            self.valid_xlog_record(&record_bytes, rec_ptr)?;
+        }
 
         let header = read_header_from(&record_bytes, 0);
 
@@ -401,14 +556,21 @@ where
 
         self.decode_rec_ptr = rec_ptr;
         self.next_rec_ptr = next;
-        self.curr_rec_ptr = rec_ptr;
 
         let mut decoded = decode_xlog_record(&record_bytes, &header, rec_ptr)
             .inspect_err(|m| {
                 self.report(m.clone());
             })?;
         decoded.next_lsn = next;
-        Ok(decoded)
+        return Ok(decoded);
+        } // 'restart
+    }
+
+    /// Record the aborted-record / missing-contrecord positions on a failed
+    /// multi-page assembly (C `err:` block: abortedRecPtr / missingContrecPtr).
+    fn set_aborted(&mut self, rec_ptr: XLogRecPtr, target_page_ptr: XLogRecPtr) {
+        self.aborted_rec_ptr = rec_ptr;
+        self.missing_contrec_ptr = target_page_ptr;
     }
 
     /// Read a copy of the `XLogRecord` header out of `read_buf` at byte `off`.

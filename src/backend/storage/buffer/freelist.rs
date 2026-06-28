@@ -1,22 +1,30 @@
-//! Translated from PostgreSQL src/backend/storage/buffer/freelist.c
+//! Routines for managing the buffer pool's replacement strategy. Translated from backend/storage/buffer/freelist.c.
 //!
-//! The buffer-pool replacement strategy: the clock sweep plus the (now mostly
-//! vestigial) freelist and the per-backend ring strategies.
+//! A buffer pool needs a policy for choosing which buffer to evict when a new
+//! page must be read in and no buffer is free. The primary mechanism is the
+//! clock sweep: a hand advances over the buffers in a circle, decrementing each
+//! buffer's usage count and reclaiming the first one it finds that is unpinned
+//! and whose usage count has reached zero. A separate freelist of never-used
+//! buffers is consulted first and supplies victims cheaply at startup, but is
+//! otherwise mostly empty once the pool warms up. The control data - the clock
+//! hand, the freelist head and tail, the count of complete sweep cycles, and the
+//! number of allocations since the last reset - are read by the background
+//! writer to pace its work.
 //!
-//! C shape: a shmem `BufferStrategyControl` under `buffer_strategy_lock`
-//! (spinlock) holds the clock hand `nextVictimBuffer` (a `pg_atomic_uint32` that
-//! only ever increases, taken modulo `NBuffers`), the unused-buffer freelist
-//! head/tail, the `completePasses` wrap counter, and `numBufferAllocs`.
-//! `StrategyGetBuffer` pops the freelist if non-empty, else sweeps the clock
-//! decrementing usagecounts until it finds an unpinned, usagecount==0 victim,
-//! returning it WITH the header lock held so no one can pin it first.
+//! Obtaining a victim and actually evicting it are split in two. The strategy
+//! returns a victim candidate whose buffer-header lock is held and whose
+//! reference count and usage count are both zero, guaranteeing no other backend
+//! can pin it in the interim; the caller then performs the eviction and any
+//! required flush. If every buffer is pinned for a full sweep, no victim can be
+//! produced.
 //!
-//! PepperDB shape (rules.md sections 6.3 / 9): the spinlock-protected control
-//! block becomes [`StrategyControl`] with `AtomicU32` hand/alloc counters and a
-//! `Mutex` guarding the freelist + `completePasses` (the spinlock wrapped its
-//! data). Part A returns a victim CANDIDATE (buf_id) with the header lock held;
-//! Part B does the actual eviction/flush. The ring `BufferAccessStrategy` is
-//! minimal here (default strategy = clock sweep is what matters now).
+//! In PostgreSQL this state lives in a shared-memory `BufferStrategyControl`
+//! guarded by a spinlock. Here it is the [`StrategyControl`] struct shared
+//! through the buffer pool: the clock hand and the allocation counter are
+//! plain atomics, while the freelist head and tail and the complete-pass counter
+//! sit together under a `parking_lot` mutex, since those fields must move as a
+//! unit. The per-backend ring access strategies are not yet implemented; only
+//! the default clock-sweep path is provided.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -91,18 +99,19 @@ impl StrategyControl {
         if victim < self.nbuffers {
             return victim;
         }
-        let original = victim;
         let wrapped = victim % self.nbuffers;
         if wrapped == 0 {
             // We caused a wraparound: fold the hand back and count the pass.
-            let expected_reset = original + 1;
-            let reset_to = expected_reset % self.nbuffers;
-            // CAS the hand back under the lock so the pass bump is consistent.
+            // Mirror C: chase the advancing hand (CAS updates `expected` to the
+            // current value on failure) until the fold succeeds, recomputing the
+            // wrap target each retry. Holding the freelist mutex across the CAS
+            // keeps the (hand, passes) pair consistent for readers.
+            let mut expected = victim + 1;
             loop {
                 let mut g = self.freelist.lock();
-                let mut cur = expected_reset;
+                let reset_to = expected % self.nbuffers;
                 match self.next_victim.compare_exchange(
-                    cur,
+                    expected,
                     reset_to,
                     Ordering::Relaxed,
                     Ordering::Relaxed,
@@ -112,12 +121,8 @@ impl StrategyControl {
                         break;
                     }
                     Err(actual) => {
-                        cur = actual;
-                        // Another tick moved the hand past our expected value;
-                        // it (or its own wrap handler) owns the bookkeeping.
-                        if cur != expected_reset {
-                            break;
-                        }
+                        drop(g);
+                        expected = actual;
                     }
                 }
             }
@@ -153,28 +158,34 @@ impl StrategyControl {
     pub fn get_buffer(&self, pool: &BufferPool) -> (i32, u32) {
         self.num_buffer_allocs.fetch_add(1, Ordering::Relaxed);
 
-        // 1) Freelist fast path.
-        loop {
-            let buf_id = {
-                let mut g = self.freelist.lock();
-                if g.first_free < 0 {
-                    break;
-                }
-                let buf_id = g.first_free;
+        // 1) Freelist fast path. C does an unlocked pre-check first so the hot
+        // allocation path skips the mutex when the (usually empty) freelist has
+        // nothing -- accepting the documented benign race on a just-pushed buffer.
+        if self.have_free_buffer() {
+            loop {
+                let buf_id = {
+                    let mut g = self.freelist.lock();
+                    if g.first_free < 0 {
+                        break;
+                    }
+                    let buf_id = g.first_free;
+                    let desc = pool.descriptor(buf_id);
+                    let next = desc.free_next.load(Ordering::Relaxed) as i32;
+                    g.first_free = next;
+                    desc.free_next
+                        .store(FREENEXT_NOT_IN_LIST as u32, Ordering::Relaxed);
+                    buf_id
+                };
+                // Validate under the header lock without the freelist lock held.
                 let desc = pool.descriptor(buf_id);
-                let next = desc.free_next.load(Ordering::Relaxed) as i32;
-                g.first_free = next;
-                desc.free_next
-                    .store(FREENEXT_NOT_IN_LIST as u32, Ordering::Relaxed);
-                buf_id
-            };
-            // Validate under the header lock without the freelist lock held.
-            let desc = pool.descriptor(buf_id);
-            let buf_state = desc.lock_hdr();
-            if buf_state_get_refcount(buf_state) == 0 && buf_state_get_usagecount(buf_state) == 0 {
-                return (buf_id, buf_state);
+                let buf_state = desc.lock_hdr();
+                if buf_state_get_refcount(buf_state) == 0
+                    && buf_state_get_usagecount(buf_state) == 0
+                {
+                    return (buf_id, buf_state);
+                }
+                desc.unlock_hdr(buf_state);
             }
-            desc.unlock_hdr(buf_state);
         }
 
         // 2) Clock sweep.

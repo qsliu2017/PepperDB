@@ -1,18 +1,35 @@
-//! Translated from PostgreSQL src/backend/tcop/backend_startup.c
+//! Backend startup code. Translated from backend/tcop/backend_startup.c.
 //!
-//! The per-connection backend entry. In PG this is `BackendMain` -> startup
-//! packet read + auth + handoff to `PostgresMain`. Under the single-process
-//! async model the supervisor (postmaster.rs) spawns one task per accepted
-//! connection running [`backend_main`]; there is no fork/exec and no
-//! startup-data marshalling -- the socket and shared state are passed by value.
+//! This is the entry point for a freshly accepted client connection. It reads
+//! the client's startup packet, negotiates any encryption layer the client
+//! requested, classifies the packet as a normal connection or a query-cancel
+//! request, and then hands control to the main command loop. A cancel request
+//! is dispatched to the target backend and the connection is closed without a
+//! reply; a normal startup packet carries the protocol version followed by a
+//! sequence of null-terminated key/value parameter pairs (user, database, and
+//! other session options) that configure the backend before its command loop
+//! begins.
 //!
-//! Part B replaces Part A's placeholder body with the real path: read the
-//! startup packet directly off the socket (pqcomm is deferred, so framing is
-//! one-shot tokio I/O), handle SSL/GSS negotiation and cancel requests, register
-//! the per-task proc-signal slot, then run [`crate::backend::tcop::postgres`]'s
-//! `PostgresMain` command loop nested inside the three per-task task-local scopes
-//! (Session, proc-signal slot, resource owner). The supervisor's per-child
-//! `cancel` Notify is selected against so a shutdown raises ProcDie.
+//! In PostgreSQL a new backend is a separate process, forked by the postmaster
+//! and entered through `BackendMain`. PepperDB runs every backend as a tokio
+//! task instead: the supervisor spawns one task per accepted connection running
+//! [`backend_main`], so there is no fork/exec and no marshalling of startup data
+//! across a process boundary -- the client socket and the shared state are
+//! passed directly by value. Socket I/O is async rather than blocking, and the
+//! startup-packet framing is read directly off the socket with simple
+//! length-prefixed reads.
+//!
+//! SSL and GSSAPI negotiation are not yet implemented: a negotiation request is
+//! declined with a single `N` byte and the real startup packet is read on the
+//! same plaintext socket. Once the packet is parsed, the backend registers a
+//! proc-signal slot (used to deliver query-cancel and termination signals),
+//! establishes a top-level resource owner, and runs the command loop inside the
+//! per-task scopes for the session, proc-signal slot, and resource owner. The
+//! supervisor delivers shutdown through a per-connection notification rather
+//! than a Unix signal: the command loop races against it, and when it fires the
+//! backend raises a pending-death interrupt so the next interrupt check
+//! terminates the backend. The query-cancel key is currently derived
+//! deterministically rather than from a cryptographically strong random source.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -190,8 +207,17 @@ async fn read_startup_packet(
                 if body.len() < 8 {
                     return StartupOutcome::Closed;
                 }
-                let pid = i32::from_be_bytes([body[4], body[5], body[6], body[7]]);
+                // PG rejects a key length of 0 or > 256 as a protocol violation
+                // before dispatching (ProcessCancelRequestPacket).
                 let key = &body[8..];
+                if key.is_empty() || key.len() > 256 {
+                    crate::elog!(
+                        crate::utils::elog::LOG,
+                        format!("invalid length of cancel key in cancel request packet from {peer}")
+                    );
+                    return StartupOutcome::Cancel;
+                }
+                let pid = i32::from_be_bytes([body[4], body[5], body[6], body[7]]);
                 shared.proc_signal().send_cancel(pid, key);
                 // Cancel requests get no reply; just close.
                 return StartupOutcome::Cancel;

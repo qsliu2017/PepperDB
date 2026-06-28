@@ -1,15 +1,24 @@
-//! Translated from PostgreSQL src/backend/utils/time/combocid.c
+//! Combo command ID support routines. Translated from backend/utils/time/combocid.c.
 //!
-//! Combo command ID support. cmin and cmax are overlaid in one tuple-header
-//! field; when the inserting transaction also deletes the tuple we store a
-//! "combo" command id that maps back to the real (cmin, cmax) pair through a
-//! per-backend array + hash table.
+//! A heap tuple header overlays `cmin` and `cmax` in a single field to save
+//! space, which works because a tuple is rarely both inserted and deleted by
+//! the same transaction and neither value needs to survive past that
+//! transaction. When the inserting transaction does delete its own tuple, a
+//! "combo" command id is stored in the header instead, and this module maps it
+//! back to the real `(cmin, cmax)` pair. The mapping lives in two structures:
+//! an array indexed by combo cid, and a hash table keyed by `(cmin, cmax)` so
+//! that repeated pairs reuse an existing combo cid. The structures are
+//! transaction-local and discarded at end of transaction.
 //!
-//! Per-task state (rules s6.1 / s7): the C file kept `comboHash`/`comboCids` in
-//! TopTransactionContext, destroyed at end of xact. Here they are a per-task
-//! `task_local!` `RefCell<ComboCidState>`; `AtEOXact_ComboCid` resets it. NEVER
-//! hold the `RefCell` borrow across `.await` (every function here is sync, so
-//! there is no `.await` to begin with).
+//! In PostgreSQL the array and hash table are allocated in
+//! `TopTransactionContext` of a single backend process. Here they are held in a
+//! per-task `RefCell<ComboCidState>` carried by a tokio task-local, so each
+//! concurrent backend has its own state; `combocid_scope` establishes it for
+//! the duration of a backend's work and `at_eo_xact_combo_cid` clears it at end
+//! of transaction. All entry points are synchronous, so the borrow of the
+//! task-local is never held across an await point. The parallel-worker
+//! serialization routines preserve PostgreSQL's wire layout: an `i32` count
+//! followed by that many `(cmin, cmax)` `u32` pairs.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -23,6 +32,9 @@ use crate::access::htup_details::{HEAP_COMBOCID, HEAP_MOVED, HeapTupleHeaderData
 use crate::c::CommandId;
 
 /// combocid.c `ComboCidKeyData`: the (cmin, cmax) pair used as a hash key.
+/// `#[repr(C)]` locks the no-padding invariant the serialization size math
+/// relies on (C combocid.c:252 "We assume there is no struct padding").
+#[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ComboCidKeyData {
     pub cmin: CommandId,
@@ -169,7 +181,18 @@ fn get_real_cmax(combocid: CommandId) -> CommandId {
 /// Layout: an `i32` count followed by `count` (cmin, cmax) `u32` pairs.
 pub fn estimate_combo_cid_state_space() -> usize {
     let used = COMBO_CID_STATE.with(|s| s.borrow().entries.len());
-    std::mem::size_of::<i32>() + std::mem::size_of::<ComboCidKeyData>() * used
+    combo_cid_state_size(used)
+}
+
+/// Serialized size for `used` combo cids; checked like C `add_size`/`mul_size`.
+fn combo_cid_state_size(used: usize) -> usize {
+    debug_assert_eq!(std::mem::size_of::<ComboCidKeyData>(), 8);
+    let size = std::mem::size_of::<ComboCidKeyData>()
+        .checked_mul(used)
+        .and_then(|n| n.checked_add(std::mem::size_of::<i32>()));
+    // TODO(panic): migrate to Result + ?
+    assert!(size.is_some(), "requested size overflows usize");
+    size.unwrap()
 }
 
 /// combocid.c `SerializeComboCIDState`: write count + (cmin, cmax) pairs into
@@ -177,7 +200,7 @@ pub fn estimate_combo_cid_state_space() -> usize {
 pub fn serialize_combo_cid_state(maxsize: usize, start_address: &mut [u8]) {
     let used = COMBO_CID_STATE.with(|s| s.borrow().entries.len());
 
-    let needed = std::mem::size_of::<i32>() + std::mem::size_of::<ComboCidKeyData>() * used;
+    let needed = combo_cid_state_size(used);
     // TODO(panic): migrate to Result + ?
     assert!(!(needed > maxsize || needed > start_address.len()), "not enough space to serialize ComboCID state");
 

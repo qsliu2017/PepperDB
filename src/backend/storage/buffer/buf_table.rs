@@ -1,27 +1,33 @@
-//! Translated from PostgreSQL src/backend/storage/buffer/buf_table.c
+//! Mapping of buffer tags to buffer indexes. Translated from backend/storage/buffer/buf_table.c.
 //!
-//! Routines for mapping `BufferTag`s to buffer indexes.
+//! The shared buffer manager keeps an associative table that maps a
+//! [`BufferTag`] (the disk-page identity: relation, fork, and block number) to
+//! the index of the buffer frame that currently holds that page, or reports a
+//! miss. In PostgreSQL this is a single chained hash table, `SharedBufHash`,
+//! living in shared memory and partitioned into `NUM_BUFFER_PARTITIONS` ranges
+//! that are each guarded by a `BufMappingLock`. A caller computes the tag's hash
+//! code once, uses it to choose and lock the right partition, performs the
+//! lookup, insert, or delete, and keeps the lock held while it adjusts the
+//! buffer header, since the table routines themselves do no locking.
 //!
-//! In C this is a single chained shmem hash (`SharedBufHash`) whose entries are
-//! protected by `NUM_BUFFER_PARTITIONS` `BufMappingLock` partitions; callers
-//! compute `BufTableHashCode()` once, then lock the partition before
-//! lookup/insert/delete and hold it across a buffer-header adjustment.
+//! Here the table is a `BufTable`: an array of `NUM_BUFFER_PARTITIONS` shards,
+//! each a `parking_lot::RwLock` wrapping a `HashMap<BufferTag, i32>` that owns
+//! the entries it protects rather than leaving a bare lock beside the data. The
+//! partition for a tag is its hash code modulo the partition count. A shard
+//! guard plays the role of a partition `BufMappingLock`: the buffer manager
+//! takes it, mutates both the map and the buffer header, and releases it without
+//! any intervening suspension point, so the lock is never held across an
+//! `.await`. This preserves the original contract that the header is adjusted
+//! before the mapping lock is released.
 //!
-//! Under the single-process port the shmem hash + naked partition LWLocks become
-//! a `BufTable`: an array of `NUM_BUFFER_PARTITIONS` shards, each a
-//! `std::sync::RwLock<HashMap<BufferTag, i32>>` owning the data it protects (per
-//! rules.md section 9: a lock wraps its data, not a naked lock). The partition is
-//! chosen by `hashcode % NUM_BUFFER_PARTITIONS`, matching `BufTableHashPartition`.
-//!
-//! INVARIANT (rules.md section 5): a shard lock is a brief sync critical section;
-//! it is NEVER held across an `.await`. Part B (`bufmgr`) takes the shard guard,
-//! mutates the map + buffer header, and drops it before any suspension point.
+//! The shared-memory sizing parameter from the C interface is dropped, as the
+//! Rust hash maps grow on demand.
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockWriteGuard};
 
 use crate::storage::buf_internals::BufferTag;
 
@@ -30,10 +36,15 @@ use crate::storage::buf_internals::BufferTag;
 pub const NUM_BUFFER_PARTITIONS: usize = 128;
 const _: () = assert!(NUM_BUFFER_PARTITIONS.is_power_of_two());
 
+/// One partition's map. The held guard ([`BufTable::lock_shard`]) is the
+/// partition LWLock; `lookup_in`/`insert_in`/`delete_in` operate on it so the
+/// caller can hold it across a buffer-header adjustment, exactly as C does.
+pub type Shard = HashMap<BufferTag, i32>;
+
 /// The shared buffer-lookup table: `BufferTag -> buf_id` (0-based), sharded for
 /// concurrency. Replaces C's `SharedBufHash` + the `BufMappingLock` partitions.
 pub struct BufTable {
-    shards: Box<[RwLock<HashMap<BufferTag, i32>>]>,
+    shards: Box<[RwLock<Shard>]>,
 }
 
 impl Default for BufTable {
@@ -66,6 +77,42 @@ impl BufTable {
         hashcode as usize % NUM_BUFFER_PARTITIONS
     }
 
+    /// Acquire the partition LWLock for `hashcode` and hold it. The caller runs
+    /// `lookup_in`/`insert_in`/`delete_in` on the returned guard and then adjusts
+    /// the buffer header before dropping it (C's mapping-lock-across-header
+    /// contract). The guard is write even for read-only lookups because the
+    /// hit/miss paths immediately mutate (pin or insert) under the same lock.
+    pub fn lock_shard(&self, hashcode: u32) -> RwLockWriteGuard<'_, Shard> {
+        self.shards[Self::partition(hashcode)].write()
+    }
+
+    /// C: `BufTableLookup` under a held partition lock. `None` is C's `-1`.
+    pub fn lookup_in(shard: &Shard, tag: &BufferTag) -> Option<i32> {
+        shard.get(tag).copied()
+    }
+
+    /// C: `BufTableInsert` under a held partition lock. Returns `None` (C `-1`)
+    /// on insertion; on conflict returns the existing id without overwriting.
+    pub fn insert_in(shard: &mut Shard, tag: &BufferTag, buf_id: i32) -> Option<i32> {
+        debug_assert!(buf_id >= 0); // -1 is reserved for not-in-table
+        debug_assert_ne!(
+            tag.block_num,
+            crate::storage::block::INVALID_BLOCK_NUMBER,
+            "invalid tag (P_NEW)"
+        );
+        if let Some(&existing) = shard.get(tag) { Some(existing) } else {
+            shard.insert(*tag, buf_id);
+            None
+        }
+    }
+
+    /// C: `BufTableDelete` under a held partition lock. The entry must exist.
+    pub fn delete_in(shard: &mut Shard, tag: &BufferTag) {
+        // C: elog(ERROR, "shared buffer hash table corrupted").
+        // TODO(panic): migrate to Result + ?
+        assert!(shard.remove(tag).is_some(), "shared buffer hash table corrupted");
+    }
+
     /// C: `BufTableLookup`. Return the buffer id for `tag`, or `None` (C `-1`).
     ///
     /// The caller passes the precomputed `hashcode` to pick the shard, exactly
@@ -81,22 +128,16 @@ impl BufTable {
     /// entry already exists, returns the existing buffer id (and does NOT
     /// overwrite it), matching C `HASH_ENTER` + `found`.
     pub fn insert(&self, tag: &BufferTag, hashcode: u32, buf_id: i32) -> Option<i32> {
-        debug_assert!(buf_id >= 0); // -1 is reserved for not-in-table
         let shard = &self.shards[Self::partition(hashcode)];
         let mut guard = shard.write();
-        if let Some(&existing) = guard.get(tag) { Some(existing) } else {
-            guard.insert(*tag, buf_id);
-            None
-        }
+        Self::insert_in(&mut guard, tag, buf_id)
     }
 
     /// C: `BufTableDelete`. Remove the entry for `tag` (which must exist).
     pub fn delete(&self, tag: &BufferTag, hashcode: u32) {
         let shard = &self.shards[Self::partition(hashcode)];
         let mut guard = shard.write();
-        // C: elog(ERROR, "shared buffer hash table corrupted").
-        // TODO(panic): migrate to Result + ?
-        assert!(guard.remove(tag).is_some(), "shared buffer hash table corrupted");
+        Self::delete_in(&mut guard, tag);
     }
 
     /// Number of mapped buffers across all shards. For tests/assertions.

@@ -18,38 +18,47 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use parking_lot::Mutex;
 
 use crate::storage::procnumber::{GenSlab, Key};
 
-/// State stored per waiter: a place to park the current `Waker`, and a flag the
-/// waker sets so the guard's next poll returns `Ready`.
+/// State stored per waiter: an arrival sequence number for FIFO wakeup, a place
+/// to park the current `Waker`, and a flag the waker sets so the guard's next
+/// poll returns `Ready`.
 struct Waiter {
+    seq: u64,
     waker: Option<Waker>,
     woken: bool,
 }
 
-/// A FIFO-ish wait queue. Waiters enqueue a slot and await a [`WaitGuard`];
+/// A FIFO wait queue. Waiters enqueue a slot and await a [`WaitGuard`];
 /// `wake_one`/`wake_all` flag and wake parked wakers. All methods are sync so
 /// they can run inside hot critical sections.
 #[derive(Default)]
 pub struct WaitQueue {
     slots: Mutex<GenSlab<Waiter>>,
+    // Monotonic arrival counter: wakeup order follows `seq`, not slab index,
+    // since the slab reuses freed indices LIFO (PG's proclist is strict FIFO).
+    next_seq: AtomicU64,
 }
 
 impl WaitQueue {
     pub fn new() -> Self {
         Self {
             slots: Mutex::new(GenSlab::new()),
+            next_seq: AtomicU64::new(0),
         }
     }
 
     /// Enqueue a slot and return a guard. The guard is a `Future` that completes
     /// once this slot is woken, and removes the slot on `Drop`.
     pub fn enqueue(&self) -> WaitGuard<'_> {
+        let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
         let key = self.slots.lock().insert(Waiter {
+            seq,
             waker: None,
             woken: false,
         });
@@ -64,8 +73,9 @@ impl WaitQueue {
     /// Wake the oldest waiter, if any. Sync.
     pub fn wake_one(&self) {
         let mut slots = self.slots.lock();
-        // Oldest live slot = lowest index. iter() yields live entries; pick min.
-        let oldest = slots.iter().map(|(k, _)| k).min_by_key(Key::index);
+        // Oldest = lowest arrival seq (slab index is not arrival order: freed
+        // indices are reused LIFO). Mirrors PG's FIFO proclist_pop_head_node.
+        let oldest = slots.iter().min_by_key(|(_, w)| w.seq).map(|(k, _)| k);
         if let Some(key) = oldest
             && let Some(w) = slots.get_mut(key) {
                 w.woken = true;

@@ -1,26 +1,28 @@
-//! Translated from PostgreSQL src/backend/storage/buffer/bufmgr.c -- the shared-
-//! buffer I/O paths on top of the Part-A buffer pool core (`buf_init`,
-//! `buf_table`, `freelist`).
+//! Buffer manager interface routines. Translated from backend/storage/buffer/bufmgr.c.
 //!
-//! What lives here: the read/pin/dirty/flush entry points
-//! (`ReadBuffer_common`, `BufferAlloc`, `GetVictimBuffer`, `FlushBuffer`,
-//! `MarkBufferDirty`, `LockBuffer`, `ReleaseBuffer`, ...). The header lock, pin
-//! cache, clock sweep, buffer table, and the IO-in-progress handshake are
-//! Part A.
+//! The buffer manager hands out shared-memory pages to the rest of the system
+//! and brokers their reads and writes against the storage manager. Principal
+//! entry points are `ReadBuffer`, which finds or creates a buffer holding the
+//! requested page and pins it so no one can evict it while in use;
+//! `ReleaseBuffer`, which unpins; and `MarkBufferDirty`, which records that a
+//! pinned buffer's contents have changed (the disk write is deferred until
+//! buffer replacement or a checkpoint). On a miss, this module allocates a slot,
+//! chooses and evicts a victim, and faults the page in, coordinating concurrent
+//! readers through the per-buffer in-progress-I/O flag so two backends never
+//! read the same page at once. Victim selection lives in `freelist`, and the
+//! page-to-buffer lookup table lives in `buf_table`.
 //!
-//! THE AIO collapse (file-list note): PG18's batched read path
-//! (`StartReadBuffers` / `WaitReadBuffers` / pgaio / read_stream) is DELETED. A
-//! miss does a single direct `smgrreadv` `.await` for one block, coordinated by
-//! `BM_IO_IN_PROGRESS` so two racers never both read.
-//!
-//! Lock-across-await discipline (rules.md section 5): a buffer-table shard lock,
-//! the header lock, and the content lock are ALL brief synchronous critical
-//! sections. The pattern for every I/O is: resolve the buffer under the lock,
-//! DROP the lock, `.await` the smgr op (with `BM_IO_IN_PROGRESS` claimed so the
-//! page slot is ours), then re-lock to finalize via `terminate_buffer_io`. No
-//! sync lock guard is ever held across an `.await`; the backend future stays
-//! `Send` (the pin cache is `task_local`, the page slot access is by raw split,
-//! and the smgr future is `Send`).
+//! PostgreSQL 18's batched, asynchronous read path (`StartReadBuffers`,
+//! `WaitReadBuffers`, and the pgaio/read-stream machinery) is replaced here by a
+//! single direct storage-manager read of one block per miss, issued as an async
+//! `.await`. The buffer-table partition lock, the per-buffer header lock, and
+//! the content lock are all brief synchronous critical sections; none is held
+//! across an `.await`. Every I/O resolves its buffer under a lock, drops the
+//! lock, claims the in-progress flag, awaits the storage-manager operation, then
+//! re-locks to finalize. Because the storage manager reports failures by
+//! panicking, an unwind-guard tied to the in-progress flag clears the claim and
+//! wakes waiters if an awaited read or write unwinds, so a failed I/O can never
+//! strand the page slot.
 
 use std::sync::Arc;
 
@@ -92,7 +94,7 @@ impl BufferPool {
     /// us). `found == false` means THIS task must read/zero the page into the
     /// returned (pinned, tag-valid, contents-invalid) buffer.
     ///
-    /// No buffer-table shard lock or header lock is held across the eviction
+    /// No buffer-table part lock or header lock is held across the eviction
     /// flush `.await`; the victim is pinned (so it cannot be re-stolen) before
     /// the flush, exactly as C.
     ///
@@ -107,13 +109,20 @@ impl BufferPool {
         tag: BufferTag,
         relpersistence: i8,
     ) -> (i32, bool) {
-        let hash = crate::backend::storage::buffer::buf_table::BufTable::hash_code(&tag);
+        use crate::backend::storage::buffer::buf_table::BufTable;
+        let hash = BufTable::hash_code(&tag);
 
-        // 1) Fast path: already in the pool? (shard lock taken + dropped here).
-        if let Some(existing) = self.buf_table.lookup(&tag, hash) {
-            let valid = self.pin_buffer(existing);
-            // found, but if not valid another task is mid-read -> we must wait/read.
-            return (existing, valid);
+        // 1) Fast path: already in the pool? Hold the partition lock across the
+        // pin so the (table-entry, pinned-descriptor) pair is atomic, exactly
+        // as C holds newPartitionLock SHARED across BufTableLookup + PinBuffer.
+        {
+            let part = self.buf_table.lock_shard(hash);
+            if let Some(existing) = BufTable::lookup_in(&part, &tag) {
+                let valid = self.pin_buffer(existing);
+                drop(part);
+                // found, but if not valid another task is mid-read -> wait/read.
+                return (existing, valid);
+            }
         }
 
         // 2) Miss. Loop because a chosen victim can become unusable concurrently.
@@ -121,41 +130,43 @@ impl BufferPool {
             // Acquire a victim (pinned, possibly flushed). No lock held now.
             let victim = self.get_victim_buffer(shared).await;
 
-            // Try to claim the tag. Shard lock taken + dropped synchronously.
-            if let Some(existing) = self.buf_table.insert(&tag, hash, victim) {
-                // Someone inserted the same tag first. Give up the victim
-                // (unpin + free) and use the existing buffer (C double-check).
+            // Re-take the partition lock (EXCLUSIVE) for the insert AND the
+            // header tag/flags adjustment; C holds it across both.
+            let mut part = self.buf_table.lock_shard(hash);
+            if let Some(existing) = BufTable::insert_in(&mut part, &tag, victim) {
+                // Someone inserted the same tag first. Pin the existing buffer
+                // under the lock (C double-check), then give up the victim.
+                let valid = self.pin_buffer(existing);
+                drop(part);
                 self.unpin_buffer(victim);
                 self.strategy.free_buffer(self, victim);
-                let valid = self.pin_buffer(existing);
                 return (existing, valid);
             }
-            // We own the tag. Set up the victim's descriptor: assign the
-            // tag and BM_TAG_VALID + a starting usagecount under the
-            // header lock. The victim is pinned (refcount == 1), invalid.
+            // We own the tag. Set up the victim's descriptor: assign the tag and
+            // BM_TAG_VALID + a starting usagecount under the header lock, still
+            // holding the partition lock. The victim is pinned (refcount == 1).
+            let desc = self.descriptor(victim);
+            let buf_state = desc.lock_hdr();
+            debug_assert_eq!(buf_state_get_refcount(buf_state), 1);
+            debug_assert_eq!(
+                buf_state
+                    & (BufFlags::TAG_VALID.bits()
+                        | BufFlags::VALID.bits()
+                        | BufFlags::DIRTY.bits()
+                        | BufFlags::IO_IN_PROGRESS.bits()), 0
+            );
+            // SAFETY: header lock held; tag write is serialized by it and
+            // the victim is pinned so no clock-sweep can take it.
+            desc.set_tag(tag);
+            let mut new = buf_state | BufFlags::TAG_VALID.bits() | BUF_USAGECOUNT_ONE;
+            if relpersistence == RELPERSISTENCE_PERMANENT
+                || tag.fork_num() == ForkNumber::INIT_FORKNUM
             {
-                let desc = self.descriptor(victim);
-                let buf_state = desc.lock_hdr();
-                debug_assert_eq!(buf_state_get_refcount(buf_state), 1);
-                debug_assert_eq!(
-                    buf_state
-                        & (BufFlags::TAG_VALID.bits()
-                            | BufFlags::VALID.bits()
-                            | BufFlags::DIRTY.bits()
-                            | BufFlags::IO_IN_PROGRESS.bits()), 0
-                );
-                // SAFETY: header lock held; tag write is serialized by it and
-                // the victim is pinned so no clock-sweep can take it.
-                self.descriptor(victim).set_tag(tag);
-                let mut new = buf_state | BufFlags::TAG_VALID.bits() | BUF_USAGECOUNT_ONE;
-                if relpersistence == RELPERSISTENCE_PERMANENT
-                    || tag.fork_num() == ForkNumber::INIT_FORKNUM
-                {
-                    new |= BufFlags::PERMANENT.bits();
-                }
-                desc.unlock_hdr(new);
-                return (victim, false);
+                new |= BufFlags::PERMANENT.bits();
             }
+            desc.unlock_hdr(new);
+            drop(part);
+            return (victim, false);
         }
     }
 
@@ -175,13 +186,11 @@ impl BufferPool {
             self.pin_buffer_locked(buf_id, buf_state);
 
             if buf_state & BufFlags::DIRTY.bits() != 0 {
-                // Flush the dirty victim before reusing it. The page is read
-                // under BM_IO_IN_PROGRESS inside FlushBuffer; we hold the pin.
-                // (C share-locks the content here against hint-bit writers; in
-                // this port hint-bit updates also take the content lock, and the
-                // single-writer page invariant is upheld by BM_IO_IN_PROGRESS,
-                // so the explicit content lock is unnecessary for correctness of
-                // the bytes. TODO: take content share-lock once readers exist.)
+                // Flush the dirty victim before reusing it; we hold the pin.
+                // C share-locks the content across FlushBuffer to keep the bytes
+                // stable against concurrent content-exclusive writers (hint bits /
+                // page compaction); flush_buffer reproduces this by copying the
+                // page under a brief content share-lock and writing the copy.
                 self.flush_buffer(shared, buf_id, None).await;
             }
 
@@ -199,13 +208,17 @@ impl BufferPool {
     /// remove its tag from the buffer table and clear its tag/flags/usagecount.
     /// Returns `false` if it was re-pinned or re-dirtied since (caller retries).
     fn invalidate_victim(&self, buf_id: i32) -> bool {
+        use crate::backend::storage::buffer::buf_table::BufTable;
         let desc = self.descriptor(buf_id);
         // Pinned, so the tag is stable to read without the header lock.
         let tag = desc.tag_copy();
-        let hash = crate::backend::storage::buffer::buf_table::BufTable::hash_code(&tag);
+        let hash = BufTable::hash_code(&tag);
 
-        // Header lock to inspect/clear; the shard delete is a separate brief
-        // critical section (both sync, neither across an await).
+        // Hold the partition lock across BOTH the header clear AND the table
+        // delete (C: LWLockAcquire(partition) ... ClearBufferTag ... BufTableDelete
+        // ... LWLockRelease), so a concurrent buffer_alloc cannot look up + pin
+        // this buffer between the tag clear and the table removal.
+        let mut part = self.buf_table.lock_shard(hash);
         let buf_state = desc.lock_hdr();
         debug_assert!(buf_state & BufFlags::TAG_VALID.bits() != 0);
         if buf_state_get_refcount(buf_state) != 1 || buf_state & BufFlags::DIRTY.bits() != 0 {
@@ -218,7 +231,8 @@ impl BufferPool {
                 | crate::storage::buf_internals::BUF_USAGECOUNT_MASK);
         desc.unlock_hdr(cleared);
 
-        self.buf_table.delete(&tag, hash);
+        BufTable::delete_in(&mut part, &tag);
+        drop(part);
         true
     }
 
@@ -253,6 +267,27 @@ impl BufferPool {
         let permanent = buf_state & BufFlags::PERMANENT.bits() != 0;
         desc.unlock_hdr(buf_state & !BufFlags::JUST_DIRTIED.bits());
 
+        // Snapshot the page bytes into an owned copy under a brief content
+        // share-lock. C share-locks the buffer across FlushBuffer (PageSetChecksumCopy
+        // works on a copy precisely because only a share-lock is held and hint-bit /
+        // compaction writers may mutate concurrently). The async port cannot hold a
+        // sync guard across the smgrwrite `.await`, so it copies under the share-lock
+        // (a brief sync critical section, never across an await) and writes the copy:
+        // this keeps the on-disk image self-consistent (no torn write) and avoids a
+        // live `&Page` aliasing a `block_mut` writer's `&mut Page` across the await.
+        // The copy is checksum-stamped below (PageSetChecksumCopy): stamping the
+        // copy, not the shared block, is why C tolerates only a share-lock here.
+        // TODO(bufmgr): C GetVictimBuffer uses LWLockConditionalAcquire(SHARED) +
+        // pick-another-victim on failure; we take the share-lock unconditionally.
+        // No content-exclusive-then-WaitIO-on-this-slot waiter path is reachable in
+        // the foundation, so the deadlock C guards against cannot occur yet.
+        let mut page_copy: Box<Page> = {
+            let _g = self.descriptor(buf_id).content_lock.read();
+            let mut copy = Page::boxed_zeroed();
+            copy.as_mut_bytes().copy_from_slice(self.block(buf_id).as_bytes());
+            copy
+        };
+
         // WAL-before-data rule: log must hit disk before the data page it
         // describes. Skipped for non-permanent buffers (no real LSNs). The
         // group-commit point; xlog_flush fast-paths an invalid/already-flushed
@@ -265,9 +300,11 @@ impl BufferPool {
         let forknum = tag.fork_num();
         let blocknum = tag.block_num;
 
-        // Do the write with no buffer lock held; BM_IO_IN_PROGRESS protects the
-        // page slot. The page bytes are read-only here (smgrwrite takes &Page).
-        let page: &Page = self.block(buf_id);
+        // C: bufToWrite = PageSetChecksumCopy(page, blockNum) before smgrwrite.
+        page_copy.set_checksum_inplace(blocknum);
+
+        // Write the owned copy; no buffer lock is held across the `.await`.
+        let page: &Page = &page_copy;
         if let Some(r) = reln { r.write(shared, forknum, blocknum, page, false).await } else {
             // Open an smgr for the buffer's own relation (C: smgropen on the
             // tag with INVALID_PROC_NUMBER). Owned on the stack, no cache
@@ -282,9 +319,14 @@ impl BufferPool {
         io_guard.disarm();
     }
 
-    /// C: `MarkBufferDirty`. Set `BM_DIRTY | BM_JUST_DIRTIED` via a header-lock
-    /// CAS loop. The caller must hold the buffer pinned and (in PG) the content
-    /// lock exclusively; we assert the pin.
+    /// C: `MarkBufferDirty`. Set `BM_DIRTY | BM_JUST_DIRTIED`. The caller must
+    /// hold the buffer pinned and (in PG) the content lock exclusively; we
+    /// assert the pin.
+    ///
+    /// C dirties via a lock-free `compare_exchange` loop (only spinning on
+    /// `BM_LOCKED`); this port uses the header spinlock instead. The end state
+    /// is identical and the mutation is equally mutually-exclusive -- an accepted
+    /// simplification that trades the hot-path CAS for the existing header lock.
     pub fn mark_buffer_dirty(&self, buffer: Buffer) {
         debug_assert!(crate::backend::storage::buffer::buf_init::private_refcount(buffer) > 0);
         let buf_id = global_buf_id(buffer);
@@ -493,6 +535,10 @@ pub async fn read_buffer_common(
             let page = unsafe { pool.block_mut(buf_id) };
             smgr.read(shared, forknum, target_block, page).await;
         }
+        // TODO(control-file): verify the page on read (C PageIsVerified ->
+        // BM_IO_ERROR + ereport on a bad page, else BM_VALID). Wired together with
+        // data_checksums_enabled()/zero_damaged_pages once the control file loads;
+        // with checksums off only header-sanity would apply and it is dormant here.
         // Publish BM_VALID and wake any waiters.
         pool.terminate_buffer_io(buf_id, false, BufFlags::VALID.bits());
         io_guard.disarm();
@@ -826,12 +872,17 @@ mod tests {
             st_after_claim & BufFlags::IO_IN_PROGRESS.bits() != 0,
             "the re-claimer now owns the IO"
         );
+        // C: StartBufferIO sets only BM_IO_IN_PROGRESS; BM_IO_ERROR survives the
+        // re-claim so a repeat failure stays detectable. terminate_buffer_io
+        // clears it (C: TerminateBufferIO "if this IO failed, it'll be marked again").
         assert!(
-            st_after_claim & BufFlags::IO_ERROR.bits() == 0,
-            "claiming the IO clears the prior BM_IO_ERROR"
+            st_after_claim & BufFlags::IO_ERROR.bits() != 0,
+            "re-claiming leaves the prior BM_IO_ERROR for the abort path"
         );
-        // Finish the re-attempted IO so no waiters linger.
+        // Finish the re-attempted IO; terminate clears BM_IO_ERROR.
         p.terminate_buffer_io(0, false, BufFlags::VALID.bits());
+        let st_done = p.descriptor(0).state.load(Ordering::Acquire);
+        assert!(st_done & BufFlags::IO_ERROR.bits() == 0, "terminate clears BM_IO_ERROR");
         assert!(p.descriptor(0).io_cv.is_empty());
     }
 

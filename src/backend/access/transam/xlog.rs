@@ -1,37 +1,41 @@
-//! Translated from PostgreSQL src/backend/access/transam/xlog.c
+//! Write-ahead log manager: the running-system WAL insert/write/flush path. Translated from backend/access/transam/xlog.c.
 //!
-//! Part A of the F1 WAL pipeline: the insert -> copy-to-ring -> write -> fsync ->
-//! publish-flushed-LSN slice, plus `XLogCtl` (the ex-shared-memory WAL state) and
-//! WAL-segment file management. The recovery driver (StartupXLOG, ReadRecord,
-//! redo) lives in the deferred xlogrecovery.c; CreateCheckPoint is a step-17
-//! skeleton. Record *assembly* (xloginsert.c) is step 13B and calls
-//! [`XLogCtl::insert_record`] with an already-assembled record.
+//! The Write-Ahead Log (WAL) records every change to the database before it is
+//! applied, so a cluster can be recovered after a crash. PostgreSQL splits this
+//! functionality across several files; the original xlog.c coordinates database
+//! startup and checkpointing and manages the WAL buffers while the system is
+//! running. `XLogInsertRecord` reserves space for an already-assembled record,
+//! copies it into the shared WAL buffer ring, and returns its log position;
+//! `XLogFlush` forces the log up to a given position out to durable storage.
+//! WAL-record construction (xloginsert.c), recovery and standby replay
+//! (xlogrecovery.c), and the WAL reader (xlogreader.c) live in their own files.
 //!
-//! Concurrency model (design 000), mirroring xlog.c's held-exclusive WAL insert
-//! LWLocks:
-//!  * The insert-reservation cursor (`CurrBytePos`/`PrevBytePos`) is bumped under
-//!    a brief synchronous mutex -- the faithful image of PG's `insertpos_lck`
-//!    spinlock; never held across `.await`.
-//!  * The N WAL *insert* locks (PG's `NUM_XLOGINSERT_LOCKS` LWLocks) are HELD
-//!    `tokio::sync::Mutex`es, each guarding one insertion slot. A backend takes
-//!    its `MyLockNo` lock (round-robin), reserves WAL space WHILE HOLDING it (no
-//!    reserve->advertise gap), and holds it across the whole copy-into-ring
-//!    `.await`. While held it advertises `inserting_at` (an `AtomicU64`) so a
-//!    flusher's [`XLogCtl::wait_xlog_insertions_to_finish`] never writes/fsyncs a
-//!    page an inserter is still filling. This is the async-mutex exception (the
-//!    copy can `.await` on buffer eviction); the brief insertpos bump stays a
-//!    sync lock. Holding the lock exclusively eliminates the same-`lock_no`
-//!    clobber; setting `inserting_at = 0` (block-all) before reserve eliminates
-//!    the reserve->advertise gap.
-//!  * `WALWriteLock` is an async `tokio::sync::Mutex`, correctly held across the
-//!    write+fsync `.await` (it serializes writers and is the group-commit point).
-//!    Lock ordering is insert-lock then WALWriteLock: an inserter mid-copy may
-//!    evict a page (acquire WALWriteLock while holding its insert lock); the
-//!    flusher waits on insert locks BEFORE acquiring WALWriteLock and never the
-//!    reverse, so there is no cycle.
-//!  * `LogwrtResult` (Write/Flush LSNs) are atomics; the flushed LSN is published
-//!    on a `tokio::watch` ONLY after `issue_xlog_fsync` succeeds, and only when it
-//!    advances (monotonic). This couples WAL durability to FlushBuffer / commit.
+//! This module covers the running-system path: the insert-reservation cursor,
+//! `XLogCtl` (the WAL control state), the copy into the buffer ring, the write,
+//! the fsync, and the publication of the durably-flushed log position, together
+//! with WAL segment file creation and naming. Crash-recovery startup and
+//! checkpoint creation are coordinated elsewhere and are not yet implemented
+//! here. The system identifier stamped into each segment's long page header is a
+//! fixed placeholder until a control file exists; the header layout is exact, so
+//! a real PostgreSQL can still parse it.
+//!
+//! Whereas PostgreSQL keeps `XLogCtl` in a shared-memory segment guarded by a
+//! spinlock and a set of LWLocks, PepperDB is a single async process and holds
+//! the same state in `Arc`-shared structures. The insert-reservation cursor is
+//! bumped under a brief `parking_lot` mutex -- the faithful image of
+//! PostgreSQL's `insertpos_lck` spinlock -- and is never held across an
+//! `.await`. The fixed set of WAL insert locks (PostgreSQL's
+//! `NUM_XLOGINSERT_LOCKS` LWLocks) become held async mutexes, one per insertion
+//! slot: a backend takes its slot lock, reserves WAL space while holding it, and
+//! keeps it across the copy into the ring (which may await on page eviction).
+//! While held it advertises the position it is inserting at via an atomic, so a
+//! flusher never writes or fsyncs a page an inserter is still filling. The
+//! single write lock is an async mutex held across the write-and-fsync await,
+//! serializing writers and forming the group-commit point; lock order is always
+//! insert lock before write lock, so there is no cycle. The write and flush log
+//! positions are atomics, and the flushed position is published on a watch
+//! channel only after the fsync succeeds and only when it advances, coupling WAL
+//! durability to buffer flushes and commits.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -197,6 +201,10 @@ pub struct XLogCtl {
     insert_locks: [InsertLock; NUM_XLOGINSERT_LOCKS],
 
     // --- write/flush results (atomics) ---
+    /// Highest LSN known fully inserted (PG `logInsertResult`): a shared cache
+    /// that lets `wait_xlog_insertions_to_finish` callers piggyback on another
+    /// caller's already-proven progress and skip the lock scan entirely.
+    log_insert_result: AtomicU64,
     log_write_result: AtomicU64,
     log_flush_result: AtomicU64,
     /// Shared write request (highest LSN someone wants written). Bumped when an
@@ -287,6 +295,7 @@ impl XLogCtl {
             buf_mapping: AsyncMutex::new(()),
             insert_pos: Mutex::new(InsertPos { curr_byte_pos: 0, prev_byte_pos: NO_PREV_RECORD }),
             insert_locks,
+            log_insert_result: AtomicU64::new(0),
             log_write_result: AtomicU64::new(0),
             log_flush_result: AtomicU64::new(0),
             logwrt_rqst_write: AtomicU64::new(0),
@@ -761,6 +770,13 @@ impl XLogCtl {
     /// value `< upto`). The return value is the LSN through which all insertions
     /// are known finished -- always `>= min(upto, reservedUpto)`.
     async fn wait_xlog_insertions_to_finish(&self, upto: u64) -> XLogRecPtr {
+        // Fast path: someone already proved everything up to `upto` is finished
+        // (PG: logInsertResult cache). Return the freshest known value, no scan.
+        let inserted = self.log_insert_result.load(Ordering::Acquire);
+        if upto <= inserted {
+            return XLogRecPtr(inserted);
+        }
+
         // Cap at the reserved head (PG: reservedUpto = XLogBytePosToEndRecPtr of
         // CurrBytePos). Nothing past it can be in progress.
         let reserved_upto = {
@@ -794,7 +810,12 @@ impl XLogCtl {
                 notified.await;
             }
         }
-        XLogRecPtr(finished_upto.max(upto))
+        // Monotonically advance the shared cache and return the freshest value,
+        // which may be beyond `finished_upto` if a concurrent caller proved more
+        // (PG: pg_atomic_monotonic_advance_u64 of logInsertResult).
+        let finished_upto = finished_upto.max(upto);
+        let prev = self.log_insert_result.fetch_max(finished_upto, Ordering::AcqRel);
+        XLogRecPtr(prev.max(finished_upto))
     }
 
     // --- write / fsync / flush ----------------------------------------------
@@ -854,34 +875,37 @@ impl XLogCtl {
                 .await
                 .expect("WAL segment write");
 
-            // If we just wrote the whole last page of a segment (only possible
-            // for a FULL page), fsync the segment immediately (PG: finishing_seg =
-            // !ispartialpage && at segment end).
-            let finishing_seg =
-                !ispartialpage && XLogSegmentOffset(end_ptr, self.wal_seg_size) == 0;
-            if finishing_seg {
-                let seg = open.as_ref().expect("segment open");
-                self.issue_xlog_fsync(&seg.file).await;
-                // End-of-page flush is durable now.
-                self.log_flush_result.fetch_max(end_ptr, Ordering::AcqRel);
-                self.publish_flushed(end_ptr);
-            }
-
             if ispartialpage {
                 // Only a partial page was asked for: keep the persisted write
                 // cursor at the actual request so the next flush re-writes this
                 // page with the newly-inserted bytes (PG: LogwrtResult.Write =
                 // WriteRqst.Write; break). The page's current bytes are on disk;
                 // durability of the partial page is handled by the fsync in
-                // xlog_flush.
+                // xlog_flush. A partial page can never be a finishing_seg.
                 write = upto;
                 self.log_write_result.fetch_max(write, Ordering::AcqRel);
                 break;
             }
 
-            // Full page: advance the cursor to the page end as usual.
+            // Full page: advance the write cursor to the page end. PG sets
+            // LogwrtResult.Write = EndPtr at the top of the loop, BEFORE the
+            // finishing_seg block sets Flush = Write, so a reader never sees
+            // Flush > Write. Publish Write first (matching xlog.c's
+            // write-Write-barrier-write-Flush ordering).
             write = end_ptr;
             self.log_write_result.fetch_max(write, Ordering::AcqRel);
+
+            // If we just wrote the whole last page of a segment, fsync the
+            // segment immediately (PG: finishing_seg = !ispartialpage && at
+            // segment end).
+            let finishing_seg = XLogSegmentOffset(end_ptr, self.wal_seg_size) == 0;
+            if finishing_seg {
+                let seg = open.as_ref().expect("segment open");
+                self.issue_xlog_fsync(&seg.file).await;
+                // End-of-page flush is durable now (Write already advanced).
+                self.log_flush_result.fetch_max(end_ptr, Ordering::AcqRel);
+                self.publish_flushed(end_ptr);
+            }
         }
     }
 

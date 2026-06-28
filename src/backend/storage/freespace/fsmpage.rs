@@ -1,18 +1,22 @@
-//! Translated from PostgreSQL src/backend/storage/freespace/fsmpage.c -- search
-//! and manipulation of a single FSM page.
+//! Routines to search and manipulate one Free Space Map page. Translated from backend/storage/freespace/fsmpage.c.
 //!
-//! An FSM page stores a binary max-tree of 1-byte free-space categories in
-//! `FSMPageData.fp_nodes`: the first `NON_LEAF_NODES_PER_PAGE` entries are upper
-//! nodes, the next `LEAF_NODES_PER_PAGE` are the leaves (one per heap block this
-//! page covers). Each upper node holds the max of its two children, so the root
-//! (node 0) holds the max category on the page. `fsm_search_avail` descends the
-//! tree to find a leaf with at least the requested category in O(log n).
+//! These operations form an API that hides the internal structure of an FSM
+//! page, allowing the rest of the free space machinery to treat each page as a
+//! black box with a fixed number of "slots". An FSM page stores a binary
+//! max-heap of one-byte free-space categories: the first
+//! `NON_LEAF_NODES_PER_PAGE` entries are interior nodes and the following
+//! `LEAF_NODES_PER_PAGE` entries are the leaves, one per heap block the page
+//! covers. Each interior node holds the maximum of its two children, so the
+//! root (node 0) holds the largest category on the page. Setting a slot
+//! propagates the new value up to the root; getting a slot reads a leaf; and
+//! searching for a slot with value at least X descends the tree in time
+//! proportional to its height.
 //!
-//! These are pure page-content operations (rules.md: type-centric -> methods on
-//! a thin [`FsmPage`] view over the page bytes). The caller holds the buffer
-//! content lock for the duration; nothing here `.await`s. The header module
-//! `src/storage/fsm_internals.rs` keeps the C-named free functions as
-//! `#[deprecated]` shims over these methods.
+//! In PepperDB these are pure page-content operations exposed as methods on a
+//! thin [`FsmPage`] view over the raw page bytes, in place of PostgreSQL's free
+//! functions over a `Page` pointer. They perform no I/O and never block on
+//! asynchronous work; the caller is responsible for holding the buffer content
+//! lock that protects the page while a slot is read or written.
 
 use crate::c::MAXALIGN;
 use crate::storage::bufpage::{Page, SizeOfPageHeaderData};
@@ -162,6 +166,13 @@ impl<'a> FsmPageMut<'a> {
     fn set_next_slot(&mut self, v: i32) {
         let bytes = v.to_ne_bytes();
         self.0.as_mut_bytes()[FSM_CONTENTS_OFFSET..FSM_CONTENTS_OFFSET + 4].copy_from_slice(&bytes);
+    }
+
+    /// C: `((FSMPage) PageGetContents(page))->fp_next_slot = 0` in fsm_vacuum_page.
+    /// Resets the round-robin hint to bias searches toward low-numbered pages.
+    #[inline]
+    pub fn reset_next_slot(&mut self) {
+        self.set_next_slot(0);
     }
 
     #[inline]

@@ -1,30 +1,44 @@
-//! Translated from PostgreSQL src/backend/utils/time/snapmgr.c
+//! The snapshot manager. Translated from backend/utils/time/snapmgr.c.
 //!
-//! The snapshot manager: transaction/latest/catalog snapshots, the active
-//! snapshot stack, registered snapshots, end-of-(sub)xact cleanup, and the
-//! exported/serialized/historic snapshot machinery.
+//! Hands out the MVCC snapshots used in tuple-visibility checks
+//! (`GetTransactionSnapshot`, `GetLatestSnapshot`, `GetCatalogSnapshot`) and
+//! owns the bookkeeping that keeps them alive for exactly as long as something
+//! needs them. The get-snapshot entry points return a short-lived snapshot that
+//! is liable to change on the next snapshot call; callers who need to hold one
+//! push it onto the active-snapshot stack or register it. The active stack
+//! mirrors the execution call stack so that the snapshot at the top is the one
+//! current visibility checks use, while registered snapshots have an
+//! independent lifetime. A snapshot is freed once it is no longer on the stack
+//! or in the registered set, which is also what lets the backend's reported
+//! xmin be reset or advanced as the oldest in-use snapshot changes.
 //!
-//! Memory + globals model (rules s6.1 / s7, design s9):
-//! - PG kept the Current/Secondary/Catalog `SnapshotData` in process-static
-//!   storage and the active stack + registered heap in TopTransactionContext.
-//!   Here all of that is per-task state behind one `task_local!`
-//!   `RefCell<SnapMgrState>`.
-//! - The header type is `Snapshot = Option<Arc<SnapshotData>>`. Like the C
-//!   functions (which return `SnapshotData *` into long-lived storage), the
-//!   entry points hand back a snapshot the caller can hold; here that is a cheap
-//!   `Arc::clone` (refcount bump) of an Arc owned by the per-task state, NOT a
-//!   reference into task-local storage. Shared ownership lets the same snapshot
-//!   live on the active stack, in the registered set, and in the caller's hands
-//!   simultaneously without aliasing `&mut` (the B1 soundness fix).
-//! - `TransactionXmin`/`RecentXmin` are NOT redeclared here: they live in
-//!   procarray (14b) as per-task cells; we read/set them through its accessors.
+//! Beyond MVCC snapshots, the module manages the exported snapshots used by
+//! `pg_export_snapshot` (synchronizing snapshots across sessions through files
+//! in `pg_snapshots`), the historic snapshots used during logical decoding, and
+//! the special non-MVCC snapshots (Self, Any, Dirty) that cannot be registered
+//! or pushed.
 //!
-//! Async coloring (rules s5): `get_snapshot_data` is sync (in-memory procarray
-//! scan), so the hot snapshot-get path stays sync. Only the file-touching paths
-//! are async: `ExportSnapshot`, `ImportSnapshot`, `DeleteAllExportedSnapshotFiles`
-//! (they open/read/write/unlink via `shared.fd()`), and `XidInMVCCSnapshot` /
-//! `WaitForOlderSnapshots` (subtrans probe / sleeping). No `RefCell` borrow is
-//! ever held across an `.await`.
+//! Where PostgreSQL keeps the current/secondary/catalog snapshots in
+//! process-static storage and the active stack and registered set in
+//! transaction-lifetime memory contexts, PepperDB gathers all of that
+//! per-backend state into a single `RefCell<SnapMgrState>` held in a
+//! `task_local!`, one instance per backend task. A snapshot is an
+//! `Arc<SnapshotData>` rather than a raw pointer into long-lived storage: the
+//! get-snapshot entry points return a cheap `Arc::clone`, so the same snapshot
+//! can sit on the active stack, in the registered set, and in the caller's hand
+//! at once with shared ownership and no aliasing. The transaction-xmin and
+//! recent-xmin values are not redeclared here; they live with the process-array
+//! subsystem and are read and set through its accessors.
+//!
+//! The hot snapshot-get path is synchronous, since taking a snapshot is an
+//! in-memory scan of the process array. Only the paths that touch the
+//! filesystem or sleep are async: exporting, importing, and clearing exported
+//! snapshot files, and the visibility/wait helpers that probe sub-transaction
+//! state or wait for older snapshots to drain. No `RefCell` borrow is held
+//! across an await point. PostgreSQL's pairing-heap of registered snapshots
+//! (keyed by xmin under modular comparison) is represented as a vector scanned
+//! for the minimum xmin, because modular xid order is not a consistent total
+//! order that an ordered map could rely on.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -811,7 +825,19 @@ pub async fn ImportSnapshot(shared: &Arc<SharedState>, idstr: &str) {
         .expect("import-file task panicked")
         .unwrap_or_else(|_| panic!("snapshot \"{idstr}\" does not exist"));
 
-    let (snapshot, src_vxid, src_dbid) = parse_import(&content);
+    let max_xcnt = shared.proc_array().get_max_snapshot_xid_count();
+    let max_subxcnt = shared.proc_array().get_max_snapshot_subxid_count();
+    let (snapshot, src_vxid, src_dbid) = parse_import(&content, max_xcnt, max_subxcnt);
+
+    // C: VirtualTransactionIdIsValid(src_vxid) && OidIsValid(src_dbid) checks.
+    assert!(
+        src_vxid.is_valid() && src_dbid != Oid(0),
+        "invalid snapshot data"
+    );
+
+    // TODO(predicate): when IsolationIsSerializable() is wired, reject a
+    // non-SERIALIZABLE source (src_isolevel) and a read-only source adopted by a
+    // non-read-only importer (src_readonly && !XactReadOnly), per C.
 
     if src_dbid
         != crate::session::try_current()
@@ -828,7 +854,11 @@ fn InvalidPid_value() -> i32 {
 }
 
 /// Parse the text export format into (snapshot, src_vxid, src_dbid).
-fn parse_import(content: &str) -> (SnapshotData, VirtualTransactionId, Oid) {
+fn parse_import(
+    content: &str,
+    max_xcnt: i32,
+    max_subxcnt: i32,
+) -> (SnapshotData, VirtualTransactionId, Oid) {
     let mut lines = content.lines();
     let mut next = |prefix: &str| -> String {
         let line = lines
@@ -856,13 +886,16 @@ fn parse_import(content: &str) -> (SnapshotData, VirtualTransactionId, Oid) {
     let mut snap = blank_mvcc();
     snap.xmin = TransactionId(next("xmin:").parse().unwrap());
     snap.xmax = TransactionId(next("xmax:").parse().unwrap());
-    let xcnt: usize = next("xcnt:").parse().unwrap();
+    let xcnt: i64 = next("xcnt:").parse().unwrap();
+    // Sanity-check the count against the procarray bound before allocating.
+    assert!(xcnt >= 0 && xcnt <= i64::from(max_xcnt), "invalid snapshot data");
     for _ in 0..xcnt {
         snap.xip.push(TransactionId(next("xip:").parse().unwrap()));
     }
     let sof: i32 = next("sof:").parse().unwrap();
     if sof == 0 {
-        let sxcnt: usize = next("sxcnt:").parse().unwrap();
+        let sxcnt: i64 = next("sxcnt:").parse().unwrap();
+        assert!(sxcnt >= 0 && sxcnt <= i64::from(max_subxcnt), "invalid snapshot data");
         for _ in 0..sxcnt {
             snap.subxip
                 .push(TransactionId(next("sxp:").parse().unwrap()));
@@ -1058,12 +1091,23 @@ struct SerializedSnapshotData {
 
 const SERIALIZED_HEADER_SIZE: usize = std::mem::size_of::<SerializedSnapshotData>();
 
+// repr(C) field order + size is load-bearing for the DSM hand-off (xmin, xmax,
+// u32 xcnt, i32 subxcnt, 2x bool, u32 curcid with 2 bytes pad -> 24); guard it.
+const _: () = assert!(SERIALIZED_HEADER_SIZE == 24);
+
+/// C `subxcnt>0 && (!suboverflowed || takenDuringRecovery)`: whether the subxip
+/// array is part of the serialized image. One predicate so EstimateSnapshotSpace
+/// and SerializeSnapshot can never disagree on the wire size.
+fn serialize_subxip(snap: &SnapshotData) -> bool {
+    !snap.subxip.is_empty() && (!snap.suboverflowed || snap.taken_during_recovery)
+}
+
 /// snapmgr.c `EstimateSnapshotSpace`.
 pub fn EstimateSnapshotSpace(snapshot: Snapshot) -> usize {
     let snap = snapshot.expect("EstimateSnapshotSpace: InvalidSnapshot");
     debug_assert_eq!(snap.snapshot_type, SnapshotType::Mvcc);
     let mut size = SERIALIZED_HEADER_SIZE + snap.xip.len() * std::mem::size_of::<TransactionId>();
-    if !snap.subxip.is_empty() && (!snap.suboverflowed || snap.taken_during_recovery) {
+    if serialize_subxip(&snap) {
         size += snap.subxip.len() * std::mem::size_of::<TransactionId>();
     }
     size
@@ -1072,10 +1116,10 @@ pub fn EstimateSnapshotSpace(snapshot: Snapshot) -> usize {
 /// snapmgr.c `SerializeSnapshot`.
 pub fn SerializeSnapshot(snapshot: Snapshot, start_address: &mut [u8]) {
     let snap = snapshot.expect("SerializeSnapshot: InvalidSnapshot");
-    let subxcnt = if snap.suboverflowed && !snap.taken_during_recovery {
-        0
-    } else {
+    let subxcnt = if serialize_subxip(&snap) {
         snap.subxip.len() as i32
+    } else {
+        0
     };
 
     let hdr = SerializedSnapshotData {

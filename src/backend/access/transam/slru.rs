@@ -1,36 +1,38 @@
-//! Translated from PostgreSQL src/backend/access/transam/slru.c
+//! Simple LRU buffering for wrap-around-able permanent metadata. Translated from backend/access/transam/slru.c.
 //!
-//! Simple LRU buffering for wrap-around-able permanent metadata (clog,
-//! subtrans, ...). This is the async leaf of the F2 transaction spine.
+//! This module maintains various pieces of transaction status indexed by
+//! TransactionId -- commit status, parent transaction ID, commit timestamp --
+//! along with storage for multixacts, serializable isolation locks, and NOTIFY
+//! traffic. Write traffic ordinarily lands on the latest page (and the just-prior
+//! page across a transition), while reads touch a wider span, so a small pool of
+//! buffers suffices. The pool is split into banks by the low bits of the page
+//! number and managed with a straight least-recently-used scheme over the bank's
+//! slots, never evicting the latest page; a linear scan of a single bank replaces
+//! any need for a hash table. As in the regular buffer manager, a page that is
+//! re-dirtied while being written out simply has its dirty flag re-set.
 //!
-//! Port model (design step14 section 5, refactor R-C):
-//!  * The shared-memory `SlruSharedData` + per-bank/per-buffer LWLocks collapse
-//!    into `SlruCtl { banks: Vec<RwLock<SlruBank>>, slot_io: Vec<WaitQueue> }`.
-//!    Each bank owns `SLRU_BANK_SIZE` contiguous slots; the bank `RwLock` is the
-//!    ex-bank-control-LWLock and the per-slot `WaitQueue` is the ex-buffer
-//!    LWLock used for `SimpleLruWaitIO`.
-//!  * PG's bank control lock is EXCLUSIVE everywhere except the read-only hit
-//!    path of `SimpleLruReadPage_ReadOnly` (LW_SHARED). So the read-in / claim /
-//!    set-bits paths take the WRITE lock; the status-lookup hit path takes the
-//!    READ lock. Under the shared lock ONLY the LRU hint atomics may be mutated
-//!    (`SlruRecentlyUsed`); page_status/page_number/page_buffer/page_dirty are
-//!    written ONLY under the write lock. The RwLock guarantees no writer runs
-//!    concurrently with readers, so reading those non-atomic fields under the
-//!    read lock is sound, and we never form `&mut` to a page under it.
-//!  * THE invariant: a bank guard is SYNC and is NEVER held across an `.await`.
-//!    Acquire, inspect/mutate slot metadata, drop, THEN await I/O, reacquire and
-//!    recheck (mirrors slru.c releasing the control lock around
-//!    `SlruPhysicalReadPage`/`WritePage`). The closure `f` in the `*_with`
-//!    accessors is sync and DOES run under the held lock -- that mirrors PG
-//!    holding the bank lock across the buffer access; only physical I/O awaits
-//!    with the lock dropped.
-//!  * Physical read goes into a temp `Box<[u8; BLCKSZ]>`, then is copied into
-//!    the slot buffer under the reacquired lock (no `UnsafeCell`).
-//!  * An `InProgressSlruIo` RAII unwind guard resets the slot to Empty (read) or
-//!    Valid+dirty (write) and wakes waiters on panic, so a failed I/O never
-//!    strands waiters (rules s11).
-//!  * Reading a not-yet-written page (EOF) returns a zero-filled buffer ok=true
-//!    (mirrors `SlruPhysicalReadPage` zeroing on ENOENT/short read).
+//! PostgreSQL protects each bank with a control LWLock and synchronizes per-buffer
+//! I/O with a per-buffer LWLock, all over a shared-memory `SlruSharedData`. Here the
+//! shared segment and its locks collapse into an `Arc`-shared `SlruCtl` holding one
+//! `parking_lot::RwLock<SlruBank>` per bank plus a per-slot wait queue. Each bank
+//! owns a contiguous run of slots; the bank `RwLock` stands in for the bank control
+//! lock and the per-slot wait queue stands in for the per-buffer lock used to wait
+//! for in-flight I/O. The control lock is exclusive in every path except the
+//! read-only status-lookup hit, so the read-in, claim, and set-bits paths take the
+//! write lock while that hit path takes the read lock. Under the read lock only the
+//! LRU-hint atomics may be mutated; page status, number, buffer, and dirty flag are
+//! written solely under the write lock, which keeps reads of those non-atomic fields
+//! sound and forms no `&mut` to a buffer.
+//!
+//! A bank guard is synchronous and is never held across an `.await`: callers acquire
+//! it, inspect or mutate slot metadata, drop it, then await physical I/O, reacquire,
+//! and recheck the slot -- mirroring how slru.c releases the control lock around the
+//! physical read and write. Physical reads land in a temporary block-sized buffer and
+//! are copied into the slot under the reacquired lock. An RAII guard resets the slot
+//! (to empty after a failed read, or valid-and-dirty after a failed write) and wakes
+//! any waiters if an I/O panics, so a failed transfer never strands waiters. Reading a
+//! missing segment zero-fills successfully only during recovery, matching the C path;
+//! otherwise it is an I/O error.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -356,12 +358,12 @@ impl SlruCtl {
 
     // -- physical I/O (slru.c SlruPhysicalReadPage / WritePage) ----------------
 
-    /// Physical read of `pageno` into `buf`. Returns true on success; a wholly
-    /// absent segment (ENOENT) zero-fills `buf` and returns true (the SLRU's
-    /// zero-on-EOF responsibility, like SlruPhysicalReadPage). The short-read
-    /// fallback below is currently unreachable (read_exact_at returns
-    /// UnexpectedEof, not a short Ok) -- it matters only for recovery reading a
-    /// partially-written segment; TODO(recovery).
+    /// Physical read of `pageno` into `buf`. Returns true on success. An absent
+    /// segment (ENOENT) zero-fills `buf` and returns true ONLY during recovery
+    /// (SlruPhysicalReadPage: replaying status sets for already-truncated
+    /// segments); outside recovery a missing segment is an I/O error (false), so
+    /// the caller reaches slru_report_io_error. A short read is also an error in
+    /// PG, but read_exact_at surfaces it as Err, so there is no short-Ok arm.
     async fn physical_read(&self, pageno: i64, buf: &mut [u8; BLCKSZ_USIZE]) -> bool {
         let segno = pageno / i64::from(SLRU_PAGES_PER_SEGMENT);
         let rpageno = pageno % i64::from(SLRU_PAGES_PER_SEGMENT);
@@ -370,21 +372,16 @@ impl SlruCtl {
 
         let file = match self.fd.open(&path, OpenFlags::read_only()).await {
             Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::NotFound
+                    && crate::access::xlog::recovery_in_progress() =>
+            {
                 buf.fill(0);
                 return true;
             }
             Err(_) => return false,
         };
-        match file.read(&mut buf[..], offset).await {
-            Ok(n) if n == BLCKSZ_USIZE => true,
-            // Short read past EOF: a not-yet-written page in an existing segment.
-            Ok(_) => {
-                buf.fill(0);
-                true
-            }
-            Err(_) => false,
-        }
+        matches!(file.read(&mut buf[..], offset).await, Ok(n) if n == BLCKSZ_USIZE)
     }
 
     /// Physical write of `buf` to `pageno`. Creates the segment if absent (no
@@ -777,28 +774,49 @@ impl SlruCtl {
         let local = slot - bankno * SLRU_BANK_SIZE;
 
         // Snapshot under the lock: pageno, bytes, max group_lsn. Mark write-busy.
-        let (pageno, bytes, max_lsn) = {
-            let mut bank = self.banks[bankno].write();
-            // If a write is already in progress or not dirty/valid, nothing to do.
-            if !bank.page_dirty[local] || !matches!(bank.page_status[local], SlruPageStatus::Valid)
-            {
-                return;
+        // Mirrors SlruInternalWritePage: if a write is already in progress for the
+        // same page, wait for it (lock dropped) and re-check, so a checkpoint
+        // still captures bytes re-dirtied while the prior write was in flight.
+        let (pageno, bytes, max_lsn) = 'snapshot: loop {
+            enum Next<'q> {
+                Skip,
+                Wait(WaitGuard<'q>),
+                Write(i64, Box<[u8; BLCKSZ_USIZE]>, u64),
             }
-            let pageno = bank.page_number[local];
-            bank.page_status[local] = SlruPageStatus::WriteInProgress;
-            bank.page_dirty[local] = false;
-            let bytes = bank.page_buffer[local].clone();
-            let max_lsn = if bank.lsn_groups_per_page > 0 {
-                let base = local * bank.lsn_groups_per_page;
-                bank.group_lsn[base..base + bank.lsn_groups_per_page]
-                    .iter()
-                    .copied()
-                    .max()
-                    .unwrap_or(0)
-            } else {
-                0
+            let next = {
+                let mut bank = self.banks[bankno].write();
+                let pageno = bank.page_number[local];
+                if matches!(bank.page_status[local], SlruPageStatus::WriteInProgress) {
+                    // Wait for the in-flight write, then re-evaluate (enqueue under lock).
+                    Next::Wait(self.slot_io[slot].enqueue())
+                } else if !bank.page_dirty[local]
+                    || !matches!(bank.page_status[local], SlruPageStatus::Valid)
+                {
+                    Next::Skip
+                } else {
+                    bank.page_status[local] = SlruPageStatus::WriteInProgress;
+                    bank.page_dirty[local] = false;
+                    let bytes = bank.page_buffer[local].clone();
+                    let max_lsn = if bank.lsn_groups_per_page > 0 {
+                        let base = local * bank.lsn_groups_per_page;
+                        bank.group_lsn[base..base + bank.lsn_groups_per_page]
+                            .iter()
+                            .copied()
+                            .max()
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    Next::Write(pageno, bytes, max_lsn)
+                }
             };
-            (pageno, bytes, max_lsn)
+            match next {
+                Next::Skip => return,
+                Next::Wait(g) => {
+                    g.await;
+                }
+                Next::Write(pageno, bytes, max_lsn) => break 'snapshot (pageno, bytes, max_lsn),
+            }
         };
 
         // WAL-before-data: flush WAL through the page's largest async-commit LSN.
@@ -862,27 +880,51 @@ impl SlruCtl {
             // apparent wraparound: refuse (slru.c logs and returns).
             return;
         }
-        for slot in 0..self.num_slots {
-            let bankno = slot / SLRU_BANK_SIZE;
-            let local = slot - bankno * SLRU_BANK_SIZE;
-            let needs_write = {
-                let mut bank = self.banks[bankno].write();
-                if matches!(bank.page_status[local], SlruPageStatus::Empty)
-                    || !(self.page_precedes)(bank.page_number[local], cutoff_page)
-                {
-                    false
-                } else if matches!(bank.page_status[local], SlruPageStatus::Valid)
-                    && !bank.page_dirty[local]
-                {
-                    bank.page_status[local] = SlruPageStatus::Empty;
-                    false
-                } else {
-                    true
+        // PG's `goto restart`: a slot mid-I/O must be waited on (write_page waits
+        // for an in-flight write, or writes a dirty page) and then the whole scan
+        // re-run, since the I/O drops the bank lock and a page could be re-read in.
+        'restart: loop {
+            for slot in 0..self.num_slots {
+                enum Act<'q> {
+                    Skip,
+                    Flush,
+                    Wait(WaitGuard<'q>),
                 }
-            };
-            if needs_write {
-                self.write_page(slot).await;
+                let bankno = slot / SLRU_BANK_SIZE;
+                let local = slot - bankno * SLRU_BANK_SIZE;
+                let act = {
+                    let mut bank = self.banks[bankno].write();
+                    if matches!(bank.page_status[local], SlruPageStatus::Empty)
+                        || !(self.page_precedes)(bank.page_number[local], cutoff_page)
+                    {
+                        Act::Skip
+                    } else if matches!(bank.page_status[local], SlruPageStatus::Valid) {
+                        if bank.page_dirty[local] {
+                            Act::Flush
+                        } else {
+                            bank.page_status[local] = SlruPageStatus::Empty;
+                            Act::Skip
+                        }
+                    } else {
+                        // Read/WriteInProgress: SimpleLruWaitIO parks on the slot's
+                        // I/O (enqueue under the bank lock so no wakeup is missed),
+                        // then the scan restarts -- never busy-spins.
+                        Act::Wait(self.slot_io[slot].enqueue())
+                    }
+                };
+                match act {
+                    Act::Skip => {}
+                    Act::Flush => {
+                        self.write_page(slot).await;
+                        continue 'restart;
+                    }
+                    Act::Wait(g) => {
+                        g.await;
+                        continue 'restart;
+                    }
+                }
             }
+            break;
         }
         self.remove_segments_before(cutoff_page).await;
     }
@@ -901,6 +943,15 @@ impl SlruCtl {
     fn may_delete_segment(&self, segpage: i64, cutoff_page: i64) -> bool {
         let last = segpage + i64::from(SLRU_PAGES_PER_SEGMENT) - 1;
         (self.page_precedes)(segpage, cutoff_page) && (self.page_precedes)(last, cutoff_page)
+    }
+
+    /// slru.c `SlruScanDirCbReportPresence`: true if any on-disk segment is fully
+    /// before `cutoff_page` (i.e. removable). Clients (TruncateCLOG) gate their
+    /// truncate + WAL flush on this without seeing the dir-scan internals.
+    pub fn has_removable_segment(&self, cutoff_page: i64) -> bool {
+        self.scan_directory()
+            .into_iter()
+            .any(|(_, segpage)| self.may_delete_segment(segpage, cutoff_page))
     }
 
     /// slru.c SlruScanDirectory: returns (filename, first-page) for each valid
@@ -941,34 +992,47 @@ impl SlruCtl {
 
     /// slru.c SlruDeleteSegment: drop in-memory refs to `segno`, then unlink.
     pub async fn delete_segment(&self, segno: i64) {
-        loop {
-            let mut did_write = false;
+        'restart: loop {
             for slot in 0..self.num_slots {
+                enum Act<'q> {
+                    Skip,
+                    Flush,
+                    Wait(WaitGuard<'q>),
+                }
                 let bankno = slot / SLRU_BANK_SIZE;
                 let local = slot - bankno * SLRU_BANK_SIZE;
-                let needs_write = {
+                let act = {
                     let mut bank = self.banks[bankno].write();
                     if matches!(bank.page_status[local], SlruPageStatus::Empty)
                         || bank.page_number[local] / i64::from(SLRU_PAGES_PER_SEGMENT) != segno
                     {
-                        false
-                    } else if matches!(bank.page_status[local], SlruPageStatus::Valid)
-                        && !bank.page_dirty[local]
-                    {
-                        bank.page_status[local] = SlruPageStatus::Empty;
-                        false
+                        Act::Skip
+                    } else if matches!(bank.page_status[local], SlruPageStatus::Valid) {
+                        if bank.page_dirty[local] {
+                            Act::Flush
+                        } else {
+                            bank.page_status[local] = SlruPageStatus::Empty;
+                            Act::Skip
+                        }
                     } else {
-                        true
+                        // Read/WriteInProgress: park on the slot's I/O (SimpleLruWaitIO)
+                        // and restart, rather than busy-spinning.
+                        Act::Wait(self.slot_io[slot].enqueue())
                     }
                 };
-                if needs_write {
-                    self.write_page(slot).await;
-                    did_write = true;
+                match act {
+                    Act::Skip => {}
+                    Act::Flush => {
+                        self.write_page(slot).await;
+                        continue 'restart;
+                    }
+                    Act::Wait(g) => {
+                        g.await;
+                        continue 'restart;
+                    }
                 }
             }
-            if !did_write {
-                break;
-            }
+            break;
         }
         self.delete_segment_file(segno, "").await;
     }
@@ -1109,13 +1173,14 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn never_written_page_reads_zeroes() {
+    async fn fresh_zeroed_page_reads_zeroes() {
         let shared = temp_shared("zero");
         let c = ctl(&shared, "slru_zero");
-        // page 0 lives in bank 0; page 99 also resolves; read a page never written.
-        let slot = c.read_page(0, false, TransactionId(0)).await;
+        // The fresh-page path is zero_page (in-memory), as clog/subtrans do before
+        // any read; a missing segment is an I/O error outside recovery (PG).
+        let slot = c.zero_page(0).await;
         let all_zero = c.with_page(0, slot, |buf| buf.iter().all(|&b| b == 0));
-        assert!(all_zero, "a never-written page must read as zeroes");
+        assert!(all_zero, "a freshly zeroed page must read as zeroes");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1202,7 +1267,10 @@ mod tests {
     async fn readonly_with_hit_and_miss() {
         let shared = temp_shared("ro");
         let c = ctl(&shared, "slru_ro");
-        // Bring page 0 in and write a marker via the closure write path.
+        // A brand-new page is materialized via zero_page (SimpleLruZeroPage), as
+        // clog/subtrans do; reading a missing segment outside recovery errors (PG).
+        c.zero_page(0).await;
+        // Write a marker via the closure write path (now a resident HIT).
         c.read_page_with(0, true, TransactionId(0), |mut p| p.buf_mut()[7] = 0x5A)
             .await;
         c.write_page(0).await; // make it clean so it can be a victim later
@@ -1234,6 +1302,8 @@ mod tests {
     async fn concurrent_shared_readers() {
         let shared = temp_shared("shared");
         let c = ctl(&shared, "slru_shared");
+        // Materialize the fresh page in memory (SimpleLruZeroPage) before writing.
+        c.zero_page(0).await;
         c.read_page_with(0, true, TransactionId(0), |mut p| p.buf_mut()[0] = 0x42)
             .await;
 
@@ -1267,6 +1337,8 @@ mod tests {
             shared.sync_requests().clone(),
             shared.config().data_dir(),
         );
+        // Materialize the fresh page in memory (SimpleLruZeroPage) before writing.
+        c.zero_page(0).await;
         c.read_page_with(0, true, TransactionId(0), |mut p| {
             p.buf_mut()[0] = 1;
             p.set_group_lsn(2, 0xABCD);

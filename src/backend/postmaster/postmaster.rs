@@ -1,33 +1,42 @@
-//! Translated from PostgreSQL src/backend/postmaster/postmaster.c
+//! The server supervisor: accepts client connections and manages the auxiliary
+//! background tasks. Translated from backend/postmaster/postmaster.c.
 //!
-//! The supervisor. In PG the postmaster is a process that `fork`s a child per
-//! connection and reaps them via SIGCHLD/waitpid, driving a state machine
-//! (`PostmasterStateMachine`/`UpdatePMState`) for startup and shutdown. Under
-//! the single-process async model the postmaster is a supervisor TASK:
+//! In PostgreSQL the postmaster is the clearing house for the whole server. It
+//! creates the shared-memory and semaphore pools at startup, listens for
+//! frontend connections, and forks a fresh backend process to handle each one.
+//! It also drives system-wide startup and shutdown through a state machine,
+//! launches and supervises the auxiliary processes (checkpointer, background
+//! writer, WAL writer, archiver, autovacuum launcher), and recovers the system
+//! by resetting shared memory when a backend crashes. As a rule the postmaster
+//! itself avoids touching shared memory and never blocks on a frontend, so that
+//! a misbehaving backend cannot wedge or crash the supervisor.
 //!
-//! - `PostmasterMain` -> [`postmaster_main`]: build `SharedState`, bind the
-//!   listener, run the accept loop, then drain.
-//! - `ServerLoop` -> the `tokio::select!` accept loop inside
-//!   [`postmaster_main`].
-//! - `BackendStartup`/fork -> `tokio::spawn` of the backend task onto a
-//!   `JoinSet`, wrapped in `catch_unwind`.
-//! - SIGCHLD/waitpid reap -> draining finished tasks off the `JoinSet`.
-//! - `PMChild` fixed slots -> a generational [`GenSlab`] child registry keyed by
-//!   a [`ChildKey`].
-//! - the shutdown state machine -> [`Shutdown`] + the drain at the end of
-//!   [`postmaster_main`].
+//! PepperDB runs the whole server inside one process on an async tokio runtime,
+//! so the postmaster is a supervisor task rather than a forking parent process.
+//! `PostmasterMain` becomes [`postmaster_main`]: it builds the shared state,
+//! binds the listener, and runs the accept loop. Each accepted connection is
+//! admitted against `max_connections` and dispatched to a backend by
+//! `tokio::spawn` onto a `JoinSet` instead of `fork`/`exec`; the spawned future
+//! is wrapped in `catch_unwind` so an error raised as a panic in one backend is
+//! contained and never brings down the supervisor. Reaping a child means
+//! draining its finished task off the `JoinSet` rather than handling SIGCHLD.
+//! The fixed `PMChild` slot pool is replaced by a generational child registry
+//! ([`ChildRegistry`]) keyed by [`ChildKey`], so a freed slot's stale key can
+//! never alias a new occupant.
 //!
-//! DELETED (single-process redesign):
-//! - `fork`/`exec`, `BackendStartup`, `postmaster_child_launch`, and all of
-//!   `launch_backend.c` / `fork_process.c` (TOMBSTONED -- replaced by
-//!   `tokio::spawn` + the `BackendType` match-dispatch below).
-//! - `pmchild.c` fixed-slot pools (`AssignPostmasterChildSlot`, ...) -- folded
-//!   into the generational [`ChildRegistry`] (TOMBSTONED).
-//! - `EXEC_BACKEND` child-variable marshalling and the Windows paths.
-//! - the postmaster-death watch pipe (`postmaster_alive_fds`) -- task lifetime
-//!   replaces it; a dropped supervisor drops its children.
-//! - `sig_atomic_t` signal handlers -- replaced by `tokio::signal` (production)
-//!   and a programmatic [`Shutdown`] handle (tests).
+//! Shutdown is requested through the [`Shutdown`] handle, fired either by an OS
+//! signal (SIGTERM/SIGINT/SIGQUIT, translated by `tokio::signal`) or
+//! programmatically by tests. The drain reproduces PostgreSQL's shutdown
+//! ordering: terminate the client backends and on-demand workers, ask the
+//! checkpointer to write the shutdown checkpoint and wait for it, stop the other
+//! auxiliary tasks, then let the checkpointer exit last. Per-child termination
+//! and per-task shutdown use tokio `Notify` handles in place of signals.
+//!
+//! The `EXEC_BACKEND` child-variable marshalling, the Windows code paths, and
+//! the postmaster-death watch pipe are dropped: in a single process, task
+//! lifetime subsumes the death pipe (a dropped supervisor drops its children),
+//! and shared state is held in `Arc`-shared structures rather than a separate
+//! shared-memory segment. Configuration reload on SIGHUP is not yet implemented.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -43,7 +52,8 @@ use parking_lot::Mutex;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
-use tokio::task::JoinSet;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::task::{JoinHandle, JoinSet};
 
 use crate::backend::postmaster::{
     autovacuum, bgwriter, checkpointer, pgarch, walwriter,
@@ -225,10 +235,19 @@ async fn server_loop(
 ) {
     let mut backends: JoinSet<ChildKey> = JoinSet::new();
 
+    // On-demand workers (autovac workers, bgworkers) are spawned by the launcher /
+    // registrant via the process-global spawner hooks, not the accept path. They
+    // are part of PG's PM_WAIT_BACKENDS targetMask (B_AUTOVAC_WORKER/B_BG_WORKER),
+    // so the supervisor must track and await them BEFORE the shutdown checkpoint.
+    // The hooks forward each spawned JoinHandle here over `worker_rx`; we collect
+    // them into a JoinSet the drain awaits in phase 2.
+    let (worker_tx, mut worker_rx) = unbounded_channel::<JoinHandle<()>>();
+    let mut workers: JoinSet<()> = JoinSet::new();
+
     // Start the long-lived auxiliary tasks (PG launches them right after shared
     // memory is up) and install the on-demand spawner hooks.
     let mut aux = AuxTasks::new();
-    launch_missing_background_tasks(&shared, &mut aux);
+    launch_missing_background_tasks(&shared, &mut aux, worker_tx);
 
     loop {
         tokio::select! {
@@ -262,13 +281,27 @@ async fn server_loop(
             Some(joined) = aux.join_set.join_next() => {
                 respawn_aux(&mut aux, &shared, joined);
             }
+
+            // (e) a new on-demand worker was spawned: take ownership of its handle
+            // so PM_WAIT_BACKENDS can await it.
+            Some(h) = worker_rx.recv() => {
+                workers.spawn(async move { let _ = h.await; });
+            }
+
+            // (f) an on-demand worker exited (autovac workers are one-shot): reap it.
+            Some(_) = workers.join_next() => {}
         }
     }
 
     // --- shutdown state machine -------------------------------------------
     // PG's PostmasterStateMachine sequences the shutdown; see `drain` for the
-    // exact order (backends -> shutdown checkpoint -> other aux -> checkpointer).
-    drain(&mut backends, &registry, &mut aux).await;
+    // exact order (backends + workers -> shutdown checkpoint -> other aux ->
+    // checkpointer). Drain the channel first so any worker spawned in the last
+    // instant before shutdown is tracked rather than orphaned.
+    while let Ok(h) = worker_rx.try_recv() {
+        workers.spawn(async move { let _ = h.await; });
+    }
+    drain(&mut backends, &registry, &mut workers, &mut aux).await;
 }
 
 /// An aux task ended during NORMAL operation (PG treats an aux exit outside
@@ -393,23 +426,37 @@ fn reap(registry: &ChildRegistry, joined: Result<ChildKey, tokio::task::JoinErro
 /// PM_WAIT_AUX -> checkpointer exit):
 ///
 ///   1. Stop accepting (the caller already broke the accept loop).
-///   2. Signal regular BACKENDS to terminate and await them.
+///   2. PM_WAIT_BACKENDS: signal regular BACKENDS to terminate and await them
+///      AND the on-demand workers (autovac workers / bgworkers, part of PG's
+///      targetMask) -- none of them may outlive the shutdown checkpoint and emit
+///      WAL after it.
 ///   3. Tell the checkpointer to write the SHUTDOWN checkpoint (phase-1) and AWAIT
 ///      its PMSIGNAL_XLOG_IS_SHUTDOWN completion -- nothing else may stop until
 ///      WAL is shut down (PG PM_WAIT_XLOG_SHUTDOWN -> PM_WAIT_XLOG_ARCHIVAL).
 ///   4. Shut down the OTHER aux tasks (bgwriter / walwriter / pgarch / autovac
-///      launcher) and the on-demand workers.
+///      launcher).
 ///   5. Tell the checkpointer to EXIT (phase-2): it is FIRST-started, LAST-stopped.
 ///   6. Await the aux JoinSet with the deadline; abandon stragglers past it.
-async fn drain(backends: &mut JoinSet<ChildKey>, registry: &ChildRegistry, aux: &mut AuxTasks) {
+async fn drain(
+    backends: &mut JoinSet<ChildKey>,
+    registry: &ChildRegistry,
+    workers: &mut JoinSet<()>,
+    aux: &mut AuxTasks,
+) {
     let deadline = tokio::time::sleep(SHUTDOWN_DRAIN_TIMEOUT);
     tokio::pin!(deadline);
 
-    // (2) Signal all backends to terminate (PG SignalChildren(SIGTERM)) and wait.
+    // (2) PM_WAIT_BACKENDS: signal all backends to terminate (PG
+    // SignalChildren(SIGTERM)) and wait, then await the on-demand workers. The
+    // autovac worker is one-shot and self-terminates; awaiting it here guarantees
+    // it cannot emit WAL after the shutdown checkpoint. NOTE: looping bgworkers
+    // are not yet sent a cancel here (the worker entrypoint in bgworker.rs does
+    // not observe one), so such a worker is only reaped at the deadline below.
     for cancel in registry.cancel_handles() {
         cancel.notify_waiters();
     }
     drain_backends(backends, registry, &mut deadline).await;
+    drain_workers(workers, &mut deadline).await;
 
     // (3) PM_WAIT_XLOG_SHUTDOWN: ask the checkpointer to write the shutdown
     // checkpoint (PG SIGINT) and WAIT until it has done so. PG's
@@ -490,6 +537,32 @@ async fn drain_backends(
                     format!("shutdown drain timed out; abandoning {} backend(s)", backends.len())
                 );
                 backends.shutdown().await; // abort the stragglers
+                return;
+            }
+        }
+    }
+}
+
+/// Await the on-demand worker JoinSet until empty or the (shared) deadline fires.
+/// Part of PM_WAIT_BACKENDS: these must drain before the shutdown checkpoint.
+/// On timeout, abort the stragglers (PG escalates to immediate / SIGKILL).
+async fn drain_workers(
+    workers: &mut JoinSet<()>,
+    deadline: &mut std::pin::Pin<&mut tokio::time::Sleep>,
+) {
+    loop {
+        tokio::select! {
+            joined = workers.join_next() => {
+                if joined.is_none() {
+                    break; // all workers drained
+                }
+            }
+            () = deadline.as_mut() => {
+                crate::elog!(
+                    crate::utils::elog::LOG,
+                    format!("shutdown drain timed out; abandoning {} on-demand worker(s)", workers.len())
+                );
+                workers.shutdown().await; // abort the stragglers
                 return;
             }
         }
@@ -632,7 +705,11 @@ impl AuxTasks {
 /// onto the aux JoinSet and install the on-demand spawner hooks (autovac worker,
 /// bgworker) so the launcher->worker and register->worker paths reach the
 /// supervisor. Idempotent re-launch happens in `server_loop` (restart policy).
-fn launch_missing_background_tasks(shared: &Arc<SharedState>, aux: &mut AuxTasks) {
+fn launch_missing_background_tasks(
+    shared: &Arc<SharedState>,
+    aux: &mut AuxTasks,
+    worker_tx: UnboundedSender<JoinHandle<()>>,
+) {
     for role in AuxRole::RESTARTABLE {
         // PG's postmaster only forks the autovacuum launcher when autovacuum is
         // enabled (the for-wraparound-emergency case aside, which is deferred). With
@@ -646,30 +723,34 @@ fn launch_missing_background_tasks(shared: &Arc<SharedState>, aux: &mut AuxTasks
         }
         aux.spawn_role(role, shared);
     }
-    install_spawner_hooks(shared);
+    install_spawner_hooks(shared, worker_tx);
 }
 
 /// Install the autovac-worker and bgworker spawn hooks. The closures spawn the
-/// on-demand worker tasks onto a detached task (they are short-lived and not part
-/// of the restart set); each is wrapped in `catch_unwind` so a worker panic is
-/// contained. First install wins (the hooks are process-global `OnceLock`s), so
-/// re-launch after a restart is a no-op.
-fn install_spawner_hooks(shared: &Arc<SharedState>) {
+/// on-demand worker tasks and FORWARD each `JoinHandle` to the supervisor over
+/// `worker_tx` so PM_WAIT_BACKENDS can await them before the shutdown checkpoint
+/// (they are part of PG's targetMask). Each task is wrapped in `catch_unwind` so
+/// a worker panic is contained. First install wins (the hooks are process-global
+/// `OnceLock`s), so re-launch after a restart is a no-op; if the supervisor is
+/// gone the `send` simply fails and the task still runs detached.
+fn install_spawner_hooks(shared: &Arc<SharedState>, worker_tx: UnboundedSender<JoinHandle<()>>) {
     let shared_av = shared.clone();
+    let tx_av = worker_tx.clone();
     autovacuum::set_autovac_worker_spawner(Box::new(move |dbid| {
         let shared = shared_av.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             use futures_util::FutureExt;
             let fut = autovacuum::auto_vac_worker_main(shared, dbid);
             if let Err(payload) = std::panic::AssertUnwindSafe(fut).catch_unwind().await {
                 log_caught_panic(&*payload);
             }
         });
+        let _ = tx_av.send(handle);
     }));
 
     // bgworkers observe their slot `terminate` flag, not an aux shutdown notify.
     crate::backend::postmaster::bgworker::set_bgworker_spawner(Box::new(move |handle| {
-        tokio::spawn(async move {
+        let jh = tokio::spawn(async move {
             use futures_util::FutureExt;
             let fut = async move {
                 crate::backend::postmaster::bgworker::run_background_worker(handle);
@@ -678,6 +759,7 @@ fn install_spawner_hooks(shared: &Arc<SharedState>) {
                 log_caught_panic(&*payload);
             }
         });
+        let _ = worker_tx.send(jh);
     }));
 }
 

@@ -1,25 +1,29 @@
-//! Translated from PostgreSQL src/backend/postmaster/startup.c
+//! The startup process: server initialization and WAL recovery. Translated from backend/postmaster/startup.c.
 //!
-//! The startup task initializes the server and performs WAL recovery. Unlike the
-//! other auxiliary tasks it has no steady-state "main loop": it runs
-//! `StartupXLOG()` and exits as soon as recovery is complete (exit code 0 tells
-//! the supervisor recovery succeeded). In standby mode the replay loop inside
-//! `StartupXLOG` acts as its main loop, servicing interrupts via
-//! [`process_startup_proc_interrupts`].
+//! The startup process initializes the server and performs any recovery actions
+//! that have been specified. Unlike the other auxiliary processes it has no
+//! steady-state main loop: it runs `StartupXLOG()` and ends as soon as recovery
+//! is complete, signalling success to the supervisor with a zero exit. In standby
+//! mode the WAL replay loop inside `StartupXLOG` can be thought of as the main
+//! loop; it periodically services the interrupt flags raised by the SIGHUP,
+//! SIGTERM, and promote (SIGUSR2) handlers, and reports progress on long-running
+//! startup operations governed by `log_startup_progress_interval`.
 //!
-//! Single-process redesign vs PG's startup.c:
-//! - The startup process IS the recovery proc. It claims an aux PGPROC (the
-//!   `_with_proc` cradle) so `wakeup_recovery` can ring its `proc_latch` while it
-//!   replays WAL; PG keeps this proc reachable via `ProcGlobal->allProcs` rather
-//!   than a dedicated `ProcGlobal.<role>_proc` slot, so we advertise it the same
-//!   way the other aux tasks do (see [`STARTUP_PROC_NUMBER`]).
-//! - PG's three signal flags (`got_SIGHUP`, `shutdown_requested`,
-//!   `promote_signaled`) become process atomics fed by the supervisor / signal
-//!   listener; [`process_startup_proc_interrupts`] services them.
-//! - `StartupXLOG()` lives in xlogrecovery.c / xlog.c (deferred files); we call
-//!   the existing stub, which is a non-panicking no-op until recovery lands. A
-//!   startup task that panicked at boot would be useless, so the stub must not
-//!   panic (it does not -- see `access::xlog::startup_xlog`).
+//! In PepperDB the startup process is a tokio task rather than a forked child, so
+//! it carries an auxiliary `PGPROC` and advertises its proc number (rather than
+//! occupying a shared-memory segment) so that backends can wake the recovery loop
+//! through it. The three signal flags (`got_SIGHUP`, `shutdown_requested`,
+//! `promote_signaled`) and the restore-command and progress-timer flags become
+//! process-global atomics fed by the supervisor and signal listener; the SIGTERM
+//! handler additionally reports whether the task may exit immediately. Per-exit
+//! teardown (clearing the advertised proc, deregistering the proc-signal slot,
+//! returning the `PGPROC`) is an RAII guard that runs on both normal return and
+//! panic unwind, in place of PostgreSQL's `proc_exit` callbacks.
+//!
+//! `StartupXLOG`, the GUC reload path, the walreceiver restart, and the timeout
+//! and hot-standby machinery live in subsystems that are not yet implemented; the
+//! corresponding helpers here are no-op shells that preserve the public surface
+//! and signal/flag behavior, and recovery currently returns immediately.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -71,9 +75,18 @@ static STARTUP_PROGRESS_TIMER_EXPIRED: AtomicBool = AtomicBool::new(false);
 static STARTUP_PROC_NUMBER: std::sync::atomic::AtomicI32 =
     std::sync::atomic::AtomicI32::new(INVALID_PROC_NUMBER);
 
-/// PG `WakeupRecovery`: wake the startup process's recovery loop by ringing its
-/// `proc_latch`. Reaches the aux PGPROC by the advertised proc number; a no-op if
-/// no startup task is running (the proc number is INVALID).
+/// PG `WakeupRecovery`: wake the startup process's recovery loop. Reaches the aux
+/// PGPROC by the advertised proc number; a no-op if no startup task is running
+/// (the proc number is INVALID).
+///
+/// TODO(recovery): PG rings a DEDICATED `XLogRecoveryCtl->recoveryWakeupLatch`,
+/// kept distinct from the startup proc's `proc_latch` on purpose -- `proc_latch`
+/// is the recovery-conflict wait latch (hot standby), and conflating the two
+/// risks the wrong waiter consuming a wakeup (xlogrecovery.c:325-339). Both the
+/// recovery wait loops and the conflict-wait path are still deferred stubs, so no
+/// waiter exists yet; this shim rings `proc_latch` as a placeholder. When recovery
+/// lands, add `recoveryWakeupLatch` to the `XLogRecoveryCtl` analogue and ring
+/// THAT here, leaving `proc_latch` for conflict waits.
 pub fn wakeup_recovery() -> bool {
     let Some(g) = ProcGlobal::get() else {
         return false;
@@ -245,8 +258,9 @@ pub async fn startup_process_main(shared: Arc<SharedState>, shutdown: Arc<tokio:
         PROMOTE_SIGNALED.store(false, Ordering::Release);
         IN_RESTORE_COMMAND.store(false, Ordering::Release);
 
-        // Our single wakeup latch IS our PGPROC's proc_latch (PG MyLatch ==
-        // MyProc->procLatch for the startup process); wakeup_recovery rings it.
+        // Placeholder wakeup latch. PG uses a dedicated recoveryWakeupLatch (not
+        // proc_latch, which is the recovery-conflict latch); both waiters are
+        // deferred, so wakeup_recovery rings proc_latch as a shim (see its TODO).
         let proc_latch: &Latch = &aux.latch;
 
         // Advertise our proc number so backends / the supervisor can wake the

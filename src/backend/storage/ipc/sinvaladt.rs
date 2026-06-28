@@ -1,18 +1,32 @@
-//! Translated from PostgreSQL src/backend/storage/ipc/sinvaladt.c
+//! Shared cache invalidation data manager. Translated from backend/storage/ipc/sinvaladt.c.
 //!
-//! POSTGRES shared cache invalidation data manager.
+//! Conceptually the invalidation messages live in an infinite array: `maxMsgNum`
+//! is the next subscript to write, `minMsgNum` is the smallest subscript holding
+//! a message not yet read by every backend, and each active backend has a
+//! `nextMsgNum` cursor, with `maxMsgNum >= nextMsgNum >= minMsgNum` always. In
+//! reality the messages occupy a circular buffer of `MAXNUMMESSAGES` entries,
+//! indexed by `MsgNum % MAXNUMMESSAGES`. If the buffer overflows, every backend
+//! that has fallen too far behind is forced into a "reset" state and must
+//! discard all of its invalidatable cache state, since it can no longer know
+//! what it missed. To make resets rare, a backend that lags unreasonably far is
+//! sent a catchup signal; the recipient eventually runs cleanup and signals the
+//! next-furthest-behind backend, so at most one catchup is normally in flight.
+//! When `minMsgNum` grows large it is periodically reduced (along with every
+//! other message number) to forestall integer overflow.
 //!
-//! Conceptually the SI messages live in an infinite array; `max_msg_num` is the
-//! next subscript to write, `min_msg_num` the smallest not-yet-read-by-all, and
-//! each active backend has a `next_msg_num`. In reality they sit in a circular
-//! buffer of `MAXNUMMESSAGES` entries (index = MsgNum % MAXNUMMESSAGES). On
-//! overflow we set the "reset" flag for backends that fell too far behind.
-//!
-//! PG protects the SISeg with two LWLocks + one spinlock; we follow that scheme
-//! faithfully (the binding step-16 decision):
-//!   - `SInvalWriteLock` (exclusive only)  -> `write: Mutex<SIWriteState>`
-//!   - `SInvalReadLock`  (shared readers / exclusive cleanup) -> `read_lock: RwLock<()>`
-//!   - `msgnumLock` spinlock (a memory barrier on maxMsgNum) -> `max_msg_num: AtomicI32`
+//! PostgreSQL guards the shared segment with two LWLocks (`SInvalReadLock`,
+//! `SInvalWriteLock`) and a spinlock that exists only as a memory barrier on
+//! `maxMsgNum`. PepperDB keeps the same concurrency split rather than collapsing
+//! to one lock: the writer-serialized fields become a `parking_lot::Mutex`, the
+//! reader/cleanup lock becomes an `RwLock` (shared for readers that each touch
+//! only their own slot, exclusive for the array-wide cleanup recompute), and the
+//! message-number barrier becomes an `AtomicI32` published with release/acquire
+//! ordering. The shared-memory segment is replaced by an `Arc`-shared buffer
+//! published in a process-wide `OnceLock`; the per-process `nextLocalTransactionId`
+//! counter becomes a task-local; and the `on_shmem_exit` cleanup callback is
+//! invoked explicitly at backend teardown rather than through the shmem-exit
+//! mechanism. Catchup signals are collected under the locks and delivered only
+//! after the locks are released, matching PostgreSQL's ordering.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -300,11 +314,13 @@ impl SInvalBuffer {
             // before any reader's Acquire-load sees the new index.
             self.max_msg_num.store(max, Ordering::Release);
 
-            // Kick everyone to read the newly added messages.
+            // Kick everyone to read the newly added messages. Release so the
+            // reader's fast-path Acquire-load of has_messages synchronizes-with
+            // this store (PG relies on the SInvalWriteLock release barrier here).
             for &procno in &w.pgprocnos {
                 self.proc_state[procno as usize]
                     .has_messages
-                    .store(true, Ordering::Relaxed);
+                    .store(true, Ordering::Release);
             }
 
             drop(w);

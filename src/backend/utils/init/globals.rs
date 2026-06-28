@@ -1,28 +1,31 @@
-//! Translated from PostgreSQL src/backend/utils/init/globals.c
+//! Process-wide global state and startup configuration. Translated from backend/utils/init/globals.c.
 //!
-//! globals.c was a flat list of process-global variables. Under the
-//! single-process async model that list is split by lifetime and scope:
+//! In PostgreSQL, globals.c is the single home for variables that are used all
+//! over the backend rather than belonging to any one module: the frontend
+//! protocol version, the volatile interrupt-pending flags, per-backend identity
+//! (process id, start time, backend type, database and tablespace ids, the
+//! authenticated and current user ids), the data directory path and its
+//! permission mode, and the compiled-in defaults for shared-structure sizing
+//! such as the buffer count and the backend/connection/worker limits.
 //!
-//! - Per-task identity + user/database state (`MyProcPid`, `MyStartTime[stamp]`,
-//!   `MyBackendType`, `MyDatabaseId`, `MyDatabaseTableSpace`, the user-id stack)
-//!   moved to [`crate::session::Session`], published as a task-local.
-//! - Process-wide startup config (`DataDir`, `data_directory_mode`, and the
-//!   shared-structure sizing GUCs `NBuffers` / `MaxBackends` / ...) is collected
-//!   in [`ProcessConfig`], reachable through
-//!   [`crate::shared_state::SharedState::config`].
-//! - The interrupt-flag / holdoff / crit-section counters and the
-//!   processing-mode + miscadmin function shims stay in
-//!   [`crate::miscadmin`] (header-origin), where the C-named accessors now read
-//!   `Session` / `ProcessConfig` instead of `static mut`s.
+//! Under PepperDB's single-process async model that flat list no longer fits in
+//! one place, so it is split by lifetime and scope. Per-task identity and
+//! user/database state live on the backend's session object and are reached
+//! through a task-local rather than as process-wide `static mut`s, since many
+//! backends share one address space. The interrupt-pending and critical-section
+//! counters, processing mode, and the related accessor shims live with the rest
+//! of the miscellaneous backend administration code.
 //!
-//! What remains genuinely process-global with no better home is translated as
-//! constants here; the rest of globals.c is therefore a tombstone pointing at
-//! the modules above.
-//!
-//! NOTE(guc): the GUC sizing fields below currently carry only their compiled-in
-//! defaults. They are populated from the GUC machinery at startup (TODO(guc));
-//! `MaxBackends` in particular is computed by the supervisor after background
-//! workers register (PG `InitializeMaxBackends`).
+//! What remains here is the genuinely process-wide startup configuration,
+//! gathered into [`ProcessConfig`]: the data directory and its mode plus the
+//! shared-structure sizing parameters. One instance exists per process and is
+//! shared read-only through an `Arc` held by the shared state; the data
+//! directory is the exception, kept behind a mutex because it is assigned very
+//! early (before the shared state is fully wired) and read by the lock-file and
+//! version-check code. The sizing fields currently hold only PostgreSQL's
+//! compiled-in defaults; populating them from configuration is not yet wired up,
+//! and the maximum backend count, which PostgreSQL computes once background
+//! workers have registered, is likewise still a placeholder.
 
 /// PostgreSQL data-directory default mode (`PG_DIR_MODE_OWNER`, 0700).
 pub const PG_DIR_MODE_OWNER: u32 = 0o700;

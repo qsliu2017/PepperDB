@@ -1,13 +1,39 @@
-//! Translated from PostgreSQL src/backend/access/transam/parallel.c
+//! Infrastructure for launching parallel workers. Translated from backend/access/transam/parallel.c.
 //!
-//! REWRITE to the single-process async model (not a 1:1 port). parallel.c's
-//! bulk is cross-process state transport: it serializes GUCs, snapshots, xact
-//! state, combocid, relmapper, the entrypoint, etc. into DSM regions keyed by
-//! PARALLEL_KEY_* and the worker restores them. Here a worker is a tokio task
-//! that shares the leader's state by Arc / task-local inheritance, so all of
-//! that is tombstoned. What survives is the chassis: the ParallelContext
-//! lifecycle, launching worker tasks, error exchange over tokio mpsc, the
-//! lock-group join, and dispatch to the entrypoint.
+//! A backend that wants help with a query, index build, or vacuum creates a
+//! parallel context, launches one or more workers under it, hands each worker
+//! an entry-point function to run, and waits for them to finish. In PostgreSQL
+//! the leader and its workers are separate processes, so the bulk of this file
+//! is state transport: the leader serializes the GUC settings, the active and
+//! transaction snapshots, the transaction state, combo CIDs, the relation map,
+//! pending relation syncs, and the chosen entry point into a dynamic
+//! shared-memory segment keyed by a set of `PARALLEL_KEY_*` constants, and each
+//! worker reattaches and restores them before running. Workers report errors
+//! and notices back to the leader over a shared-memory message queue, and the
+//! leader re-raises any worker error as its own. The principal entry points are
+//! creating a context, initializing it, launching the workers, waiting for them
+//! to attach and to finish, and destroying the context.
+//!
+//! PepperDB runs the whole server in one process, so a parallel worker here is a
+//! tokio task rather than a forked backend, and the leader shares its state with
+//! workers directly: process-wide subsystems are reached through an `Arc`-shared
+//! state value, and per-backend context (the session, the worker number) is
+//! inherited through task-local scopes. Because nothing crosses a process
+//! boundary, the dynamic shared-memory segment and all of the per-key
+//! serialize/restore machinery is removed; the keyed regions either become plain
+//! struct fields or are inherited implicitly. The error message queue is
+//! replaced by a tokio channel carrying typed messages instead of wire-format
+//! bytes, and a worker failure surfaces as a caught panic that is forwarded to
+//! the leader and re-raised there. Launching a worker cannot fail (a spawned task
+//! always starts), so the "attach" wait collapses to bookkeeping, and worker
+//! shutdown and resource release are handled by `Drop` guards rather than
+//! on-exit callbacks.
+//!
+//! The context lifecycle, worker launch and join, lock-group membership, error
+//! exchange, and entry-point dispatch are implemented. The concrete worker
+//! entry points themselves -- parallel query execution, the B-tree, BRIN, and
+//! GIN index builds, and parallel vacuum -- are not yet implemented and stand as
+//! stubs until those subsystems are translated.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
@@ -137,6 +163,10 @@ pub fn CreateParallelContext(
 /// state by Arc, no DSM serialization. We only create the per-worker error
 /// channels and zero last_xlog_end.
 pub fn InitializeParallelDSM(pcxt: &mut ParallelContext) {
+    // PG zeroes nworkers when !INTERRUPTS_CAN_BE_PROCESSED() (parallel.c:245-246)
+    // so a non-interruptible leader can't deadlock awaiting a worker whose error
+    // interrupt it can't receive. Intentionally dropped: worker errors here are
+    // observed by awaiting the JoinHandles + draining the mpsc, not via interrupts.
     pcxt.last_xlog_end.store(0, Ordering::Relaxed);
     setup_worker_slots(pcxt);
     pcxt.nworkers_to_launch = pcxt.nworkers;
@@ -229,9 +259,12 @@ async fn worker_cradle(
         .unwrap_or_else(|| Arc::new(Session::new(crate::miscadmin::BackendType::BG_WORKER)));
     // TODO(execParallel): once the real entrypoints (ParallelQueryMain /
     // execParallel) land, this cradle must ALSO inherit the leader's snapshot
-    // (snapmgr task-local) and establish an xact scope around the nested scopes
-    // below before invoking the entrypoint. Today the worker runs with no active
-    // snapshot/xact, which is correct only because every real entrypoint is an
+    // (snapmgr task-local), establish an xact scope around the nested scopes
+    // below, and wrap the entrypoint in EnterParallelMode()/ExitParallelMode()
+    // (parallel.c:1565-1573) so parallel_mode_level is armed in the worker.
+    // Today the worker runs with no active snapshot/xact and parallel_mode_level
+    // == 0; this is masked only because IsParallelWorker() is set (so the
+    // write-prohibitions still fire) and every real entrypoint is an
     // unimplemented!() stub (staging s4).
     session::scope(
         session,

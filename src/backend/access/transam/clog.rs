@@ -1,17 +1,29 @@
-//! Translated from PostgreSQL src/backend/access/transam/clog.c
+//! The transaction-commit-log manager. Translated from backend/access/transam/clog.c.
 //!
-//! The transaction-commit-log manager: two bits of commit/abort status per xid
-//! over the SLRU async leaf (`SlruCtl`). The CLOG `SlruCtl` lives on
-//! `SharedState`; reached via `shared.clog()`.
+//! Stores two bits per transaction recording its commit/abort status; the
+//! status for four transactions fits in a byte. This is a thin abstraction on
+//! top of the SLRU machinery, mapping each transaction id onto a bit position
+//! within a page of `pg_xact`. Page numbering wraps with the 32-bit transaction
+//! id space, which matters only when comparing page ages during truncation.
 //!
-//! Simplifications (design step14 section 6):
-//!  * TODO(perf): `TransactionGroupUpdateXidStatus` batches concurrent clog
-//!    status updates from many backends into one bank-lock acquisition by the
-//!    group leader, via per-proc `PGPROC.clogGroup*` fields linked through the
-//!    atomic `ProcGlobal.clogGroupFirst` head. The PGPROC/ProcGlobal fields now
-//!    exist; this is unblocked but deferred until contention warrants it, so
-//!    statuses are set directly under the bank lock here.
-//!  * clog_redo is deferred (recovery is out of foundation); see clog_redo.
+//! XLOG interactions follow PostgreSQL: a new CLOG page being zeroed is the only
+//! event this module would itself log, since the commit/abort writes originate
+//! in the transaction code, which emits its own records and re-performs the
+//! status update on redo. For synchronous commits the WAL "write xlog before
+//! data" rule is satisfied automatically, because the commit record is already
+//! flushed before the status is recorded. For asynchronous commits this module
+//! tracks the latest LSN affecting each page (grouped per block of
+//! transactions) so the required WAL extent can be flushed before the status
+//! reaches disk; aborts need no such tracking.
+//!
+//! The CLOG lives as an `SlruCtl` owned by the shared state and reached through
+//! `shared.clog()`, replacing PostgreSQL's shared-memory SLRU control segment.
+//! All set/get and maintenance operations are async methods so page reads and
+//! writes can yield, and concurrency is governed by the SLRU bank locks rather
+//! than LWLocks. The group-update fast path that lets one backend record many
+//! concurrent commits under a single lock acquisition is not implemented; status
+//! updates take the direct per-page path. WAL replay (`clog_redo`) is part of
+//! recovery and is not yet implemented.
 
 use std::sync::Arc;
 
@@ -290,16 +302,34 @@ impl SlruCtl {
         _oldest_xid_datoid: crate::postgres_ext::Oid,
     ) {
         let cutoff_page = xid_to_page(oldest_xact);
-        // Advance oldestClogXid before truncating (concurrent lookups).
+        // clog.c gates the oldest-xid advance + (deferred) WAL TRUNCATE flush on a
+        // presence pre-scan: skip entirely when no segment is removable.
+        if !self.has_removable_segment(cutoff_page) {
+            return;
+        }
         vc.advance_oldest_clog_xid(oldest_xact);
         self.truncate(cutoff_page).await;
     }
 }
 
 /// clog.c TransactionIdSetStatusBit (no LSN handling; done by caller).
+/// TODO(recovery): clog.c also short-circuits a SUB_COMMITTED write over an
+/// already-COMMITTED slot when InRecovery; reintroduce that no-op (threading an
+/// in_recovery flag) once clog_redo lands. The direct path here cannot hit it.
 fn set_status_bit(buf: &mut [u8], xid: TransactionId, status: XidStatus) {
     let byteno = xid_to_byte(xid);
     let bshift = xid_to_bindex(xid) * CLOG_BITS_PER_XACT;
+    // clog.c: legal transition is from 0, from SUB_COMMITTED (not back to
+    // IN_PROGRESS), or already at the target (corruption tripwire).
+    let curval = (buf[byteno] >> bshift) & CLOG_XACT_BITMASK;
+    debug_assert!(
+        curval == 0
+            || (curval == status_ordinal(XidStatus::SubCommitted)
+                && status != XidStatus::InProgress)
+            || curval == status_ordinal(status),
+        "clog illegal status transition {curval} -> {}",
+        status_ordinal(status)
+    );
     let mut byteval = buf[byteno];
     byteval &= !(CLOG_XACT_BITMASK << bshift);
     byteval |= status_ordinal(status) << bshift;

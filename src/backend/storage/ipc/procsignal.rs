@@ -1,22 +1,38 @@
-//! Translated from PostgreSQL src/backend/storage/ipc/procsignal.c
+//! Routines for interprocess signaling. Translated from backend/storage/ipc/procsignal.c.
 //!
-//! Interprocess signaling collapses to inter-task signaling under the
-//! single-process async model. The shmem `ProcSignalSlots` array becomes a
-//! generational slab of per-task [`ProcSignalSlot`]s (each shared as an `Arc`),
-//! the SIGUSR1 multiplexer becomes per-flag atomics + a [`Latch`] wakeup, and
-//! query-cancel routing becomes a pid -> slot lookup with a constant-time
-//! cancel-key compare.
+//! In PostgreSQL the SIGUSR1 signal is multiplexed to carry many event types:
+//! the specific reason is communicated through a boolean flag per reason, so
+//! distinct reasons can be signaled concurrently (though the same reason raised
+//! twice in quick succession may be observed only once). Each process that wants
+//! to receive signals registers its PID in a shared `ProcSignalSlots` array,
+//! indexed by `ProcNumber` so that a sender who knows the target's proc number
+//! can address it without searching; signaling by PID alone is also supported,
+//! at slightly higher cost. Slot fields are protected by a spinlock, except the
+//! PID, which may be read locklessly as a preliminary check. Some signals are
+//! fire-and-forget; others require confirmation that every backend has noticed a
+//! global state change, which PostgreSQL provides through per-slot barrier
+//! generations.
 //!
-//! DESIGN: per-task interrupt flags must be settable by ANOTHER task (a cancel
-//! task, a timeout task). So the flags live in the SHARED slot as atomics; the
-//! owning task keeps a `task_local` `Arc` handle to its own slot for fast reads.
-//! The cancel key is a separate random token stored in the slot, compared in
-//! constant time -- it is NOT the slot identity.
+//! Under PepperDB's single-process async model every backend is a tokio task
+//! rather than a forked process, so interprocess signaling becomes inter-task
+//! signaling. The shared-memory slot array becomes a generational slab of
+//! [`ProcSignalSlot`]s, each shared as an `Arc`. A task's interrupt flags and
+//! reason bits must be settable by other tasks (a cancel task, a timeout task),
+//! so they live in the shared slot as atomics; the owning task keeps a
+//! task-local `Arc` handle to its own slot for fast reads, and a [`Latch`]
+//! replaces the SIGUSR1 wakeup -- after a sender raises a flag it rings the
+//! target's latch so a task parked in `latch.wait()` re-checks its flags. The
+//! spinlock guarding slot fields is replaced by atomic flag access plus a short
+//! `parking_lot::Mutex` over the slab for registration and lookup; the lock is
+//! never held across a latch wakeup. Query-cancel routing is a PID-to-slot
+//! lookup with a constant-time comparison against a per-slot cancel key, which
+//! is a separate random secret and not the slot's identity.
 //!
-//! RESOLVED (step09): ProcessInterrupts (tcop/postgres.rs) and the miscadmin
-//! C-named flag accessors now READ and CLEAR these slot flags. The slot is the
-//! canonical per-task interrupt state; the miscadmin `static mut` flags were
-//! retired into `#[deprecated]` slot-backed accessors.
+//! Barrier support here is minimal: a global generation counter that
+//! [`ProcSignal::emit_barrier`] bumps while raising the barrier reason on every
+//! live slot, with tasks absorbing it through `process_barrier` and a supervisor
+//! polling `barrier_absorbed`. The per-barrier-type check mask and blocking
+//! wait that PostgreSQL implements are not yet modeled.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -199,8 +215,38 @@ impl ProcSignal {
         cancel_key: &[u8],
         latch: Arc<Latch>,
     ) -> (SlotKey, Arc<ProcSignalSlot>) {
-        let generation = self.barrier_generation.load(Ordering::Acquire);
+        self.register_inner(pid, cancel_key, latch, None)
+    }
+
+    /// Register WITH an explicit `proc_number` (PG's `psh_slot[MyProcNumber]`
+    /// index). A process holding a PGPROC must pass its `MyProcNumber` so the
+    /// slot's `proc_number` matches the PGPROC namespace -- otherwise
+    /// `send_by_proc_number` (sinval catchup, SendProcSignal-by-procNumber)
+    /// would scan for the PGPROC number and miss this slab-indexed slot.
+    pub fn register_at(
+        &self,
+        proc_number: ProcNumber,
+        pid: i32,
+        cancel_key: &[u8],
+        latch: Arc<Latch>,
+    ) -> (SlotKey, Arc<ProcSignalSlot>) {
+        self.register_inner(pid, cancel_key, latch, Some(proc_number))
+    }
+
+    fn register_inner(
+        &self,
+        pid: i32,
+        cancel_key: &[u8],
+        latch: Arc<Latch>,
+        proc_number: Option<ProcNumber>,
+    ) -> (SlotKey, Arc<ProcSignalSlot>) {
         let mut reg = self.inner.lock();
+        // Read the generation INSIDE the registry lock so it is consistent with
+        // emit_barrier's snapshot: an emit either inserts before this snapshot
+        // (we observe >= the new generation) or runs after the insert (its
+        // snapshot includes this slot and raises its pending bit). Reading
+        // outside the lock could miss both, livelocking the barrier poll.
+        let generation = self.barrier_generation.load(Ordering::Acquire);
         // Reserve the index first so the slot can record its own proc_number.
         let placeholder = Arc::new(ProcSignalSlot::new(
             pid,
@@ -210,7 +256,10 @@ impl ProcSignal {
             generation,
         ));
         let key = reg.slots.insert(placeholder);
-        let proc_number = key.as_proc_number();
+        // PG indexes psh_slot by MyProcNumber; with no PGPROC the slab index is
+        // the identity. A PGPROC holder passes its MyProcNumber so both
+        // namespaces agree.
+        let proc_number = proc_number.unwrap_or_else(|| key.as_proc_number());
         let slot = Arc::new(ProcSignalSlot::new(
             pid,
             proc_number,
@@ -289,9 +338,8 @@ impl ProcSignal {
         let Some(slot) = self.slot_by_pid(pid) else {
             return CancelResult::NoSuchBackend;
         };
-        if slot.cancel_key_len == 0 {
-            return CancelResult::WrongKey;
-        }
+        // Mirror C: match = (len equal) && constant-time compare. A disabled slot
+        // (cancel_key_len == 0) thus only matches a zero-length request.
         if constant_time_eq(&slot.cancel_key[..slot.cancel_key_len], key) {
             slot.raise_cancel();
             slot.latch.set();

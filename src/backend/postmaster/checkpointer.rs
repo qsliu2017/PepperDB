@@ -1,27 +1,38 @@
-//! Translated from PostgreSQL src/backend/postmaster/checkpointer.c
+//! The checkpointer auxiliary task: performs all checkpoints. Translated from backend/postmaster/checkpointer.c.
 //!
-//! The checkpointer: a long-lived auxiliary task that performs all checkpoints.
-//! Checkpoints fire on a timer (`CheckPointTimeout`) and on request
-//! (`request_checkpoint`). Backends wake the checkpointer by its `ProcNumber`
-//! (advertised in `ProcGlobal.checkpointer_proc`) and watch a pair of counters
-//! (`started`/`done`/`failed`) guarded by a `Mutex` + two `ConditionVariable`s
-//! to detect completion of a requested checkpoint.
+//! The checkpointer is a long-lived auxiliary process that handles every
+//! checkpoint. Checkpoints are dispatched automatically once a configured
+//! interval (`CheckPointTimeout`) has elapsed since the last one, and the
+//! checkpointer can also be signaled to perform requested checkpoints on demand.
+//! A backend requests a checkpoint by setting request flags and waking the
+//! checkpointer, then watches a set of counters -- `started`, `done`, and
+//! `failed`, guarded by the checkpointer's lock -- to learn that its checkpoint
+//! began, completed, or failed. On the normal shutdown path the checkpointer is
+//! instructed to write the shutdown checkpoint, then to exit only after the other
+//! auxiliary tasks have stopped, so it is first to start and last to stop.
 //!
-//! Single-process redesign vs PG's checkpointer.c:
-//! - The cross-process fsync FORWARDING is gone. PG backends that must write a
-//!   relation directly forward an fsync request to the checkpointer over a
-//!   shared-memory ring (`requests[]` + `CheckpointerCommLock` +
-//!   `ForwardSyncRequest`/`CompactCheckpointerRequestQueue`). Under one process
-//!   every task enqueues directly into the shared [`SyncRequests`] queue (which
-//!   already dedups by file tag), so that whole machinery is TOMBSTONED.
-//!   `AbsorbSyncRequests` becomes a no-op (nothing to absorb).
-//! - The checkpoint-request protocol (the `ckpt_*` counters + the two CVs) is
-//!   kept faithfully -- that is how a backend in `request_checkpoint(WAIT)` knows
-//!   its checkpoint started and finished.
-//! - PG's in-loop `sigsetjmp` error recovery is NOT reproduced: an
-//!   `elog(ERROR)`-as-panic propagates to the task boundary, where the supervisor
-//!   (17f) restarts the task. The `ckpt_failed` bump on a failed checkpoint still
-//!   happens, via a guard around `CreateCheckPoint` (see `do_checkpoint_cycle`).
+//! In PostgreSQL the checkpointer also serves as the central collector for fsync
+//! requests: any backend that writes a relation forwards an fsync request to the
+//! checkpointer over a shared-memory ring buffer, which the checkpointer absorbs
+//! into its pending-operations table and flushes during the next checkpoint.
+//!
+//! Because PepperDB runs as a single process, that cross-process request
+//! forwarding does not exist. Every task enqueues fsync and unlink requests
+//! directly into one shared sync-request queue (already deduplicated by file tag),
+//! so the ring buffer, its lock, the forward/compact helpers, and the
+//! request struct are all gone, and `absorb_sync_requests` is a no-op. The
+//! shared state that connects the checkpointer with requesting backends is an
+//! `Arc`-shared struct holding the counters under a `parking_lot` mutex and two
+//! condition variables, published once at startup, rather than a fixed
+//! shared-memory segment. Wakeups travel over a `tokio`-backed latch instead of a
+//! signal, and the checkpointer is a spawned task rather than a forked process.
+//! PostgreSQL's in-loop `sigsetjmp` error recovery is not reproduced: a failed
+//! checkpoint surfaces as an unwinding panic, which still bumps the `failed`
+//! counter and wakes any waiter before propagating to the task boundary, where the
+//! supervisor restarts the task. Several deeper paths -- WAL-segment switching for
+//! `archive_timeout`, the buffer-sync write throttle, and the shared-memory config
+//! push -- are present as faithful shells but are inert until the WAL and buffer
+//! manager subsystems they depend on are implemented.
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
@@ -32,7 +43,8 @@ use crate::access::xlog::{create_check_point, create_restart_point, recovery_in_
 use crate::backend::postmaster::auxprocess::{
     auxiliary_process_main_common_with_proc, process_main_loop_interrupts,
 };
-use crate::backend::storage::sync::sync::{ProcessSyncRequests, SyncPostCheckpoint};
+use crate::backend::storage::smgr::smgr::smgrdestroyall;
+use crate::backend::storage::sync::sync::{ProcessSyncRequests, SyncPostCheckpoint, SyncPreCheckpoint};
 use crate::miscadmin::BackendType;
 use crate::pgtime::pg_time_t;
 use crate::shared_state::SharedState;
@@ -169,6 +181,8 @@ pub async fn request_checkpoint(flags: i32) {
     let Some(shmem) = checkpointer_shmem() else {
         // No shmem published: behave like a standalone backend (do it inline).
         create_check_point(CheckpointFlags::from_bits_truncate(flags) | CheckpointFlags::IMMEDIATE);
+        // Free all smgr objects, as CheckpointerMain would (checkpointer.c:1021).
+        smgrdestroyall();
         return;
     };
 
@@ -449,6 +463,9 @@ pub async fn checkpointer_main_phased(
             // postmaster we're done. ShutdownXLOG is an xlog stub; we drain the
             // real fsync queue as CheckPointGuts would.
             // TODO(xlog): normally inside ShutdownXLOG -> CreateCheckPoint.
+            // SyncPreCheckpoint bumps the unlink cycle (CreateCheckPoint top,
+            // xlog.c:6970) so SyncPostCheckpoint unlinks the PRIOR cycle's files.
+            SyncPreCheckpoint(&shared);
             create_check_point(CheckpointFlags::IS_SHUTDOWN | CheckpointFlags::IMMEDIATE);
             ProcessSyncRequests(&shared).await;
             SyncPostCheckpoint(&shared).await;
@@ -549,6 +566,9 @@ async fn do_checkpoint_cycle(
             if do_restartpoint {
                 create_restart_point(flags)
             } else {
+                // SyncPreCheckpoint bumps the unlink cycle (CreateCheckPoint top,
+                // xlog.c:6970) so SyncPostCheckpoint unlinks only PRIOR-cycle files.
+                SyncPreCheckpoint(shared);
                 create_check_point(flags)
             }
             // TODO(xlog): normally inside CreateCheckPoint->CheckPointGuts->smgrsync.
@@ -564,6 +584,9 @@ async fn do_checkpoint_cycle(
 
     match ckpt_result {
         Ok(_ckpt_performed) => {
+            // After any checkpoint free all smgr objects, else dropped-relation
+            // handles leak (the checkpointer sees no invalidation; checkpointer.c:490).
+            smgrdestroyall();
             // Indicate completion (done = started) and wake waiters.
             {
                 let mut c = shmem.lock_ckpt();

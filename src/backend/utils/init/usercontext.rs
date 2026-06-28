@@ -1,9 +1,25 @@
-//! Translated from PostgreSQL src/backend/utils/init/usercontext.c
+//! Convenience functions for running code as a different database user. Translated from backend/utils/init/usercontext.c.
 //!
-//! Run code temporarily as a different database user. The save/restore mechanics
-//! operate over [`crate::session::Session`] (current user id + security
-//! context). The permission check (`member_can_set_role`) and GUC nest-level
-//! roll-back are catalog/acl/guc concerns and call the existing stubs.
+//! A caller can temporarily assume another role's identity, run some code, and
+//! then restore the original identity. `switch_to_untrusted_user` records the
+//! current user id and security context into a `UserContext`, verifies the
+//! caller is permitted to SET ROLE to the target, and switches. If the target
+//! role cannot in turn SET ROLE back to the original user, the switch imposes
+//! `SECURITY_RESTRICTED_OPERATION` and opens a new GUC nest level so that any
+//! configuration changes made while running as the target can be rolled back.
+//! `restore_user_context` reverses the switch, discarding GUC changes made in
+//! that nest level. The remaining helpers read and write the effective user id
+//! and security-restriction flags and report whether a given restriction is in
+//! force.
+//!
+//! In PostgreSQL the effective user id and security context live in backend
+//! process state. Here they belong to the per-connection
+//! [`crate::session::Session`], so the get/set helpers operate on the current
+//! session rather than process-global variables. A permission failure that
+//! PostgreSQL reports with `ereport(ERROR)` is raised here as a panic that
+//! unwinds back to the command boundary. The role-membership check and the GUC
+//! nest-level bookkeeping defer to the access-control and configuration
+//! subsystems, parts of which are not yet fully implemented.
 
 use crate::miscadmin::SecurityContext;
 use crate::postgres_ext::Oid;

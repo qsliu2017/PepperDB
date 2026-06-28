@@ -1,25 +1,37 @@
-//! Translated from PostgreSQL src/backend/storage/lmgr/condition_variable.c
+//! Implementation of condition variables. Translated from backend/storage/lmgr/condition_variable.c.
 //!
-//! Implemented over [`WaitQueue`]/[`WaitGuard`]. PG tracks the prepared sleep in
-//! the process-global `cv_sleep_target` plus one `cvWaitLink` in PGPROC; that
-//! per-process state is replaced by a per-task guard on the caller's stack
-//! ([`CvSleep`]). The guard survives `.await` and tokio thread migration (no
-//! thread-locals), and its `Drop` dequeues the waiter -- the cancellation that PG
-//! spells `ConditionVariableCancelSleep`.
+//! Condition variables let one task wait until a specific condition occurs
+//! without needing to know the identity of the task it is waiting for. They are
+//! used in a predicate loop: the caller optionally prepares to sleep, then
+//! repeatedly tests its exit condition and sleeps until that condition becomes
+//! true, finally cancelling the prepared sleep on exit. Signalling is one-sided:
+//! a producer flips the condition and then wakes either the oldest waiter
+//! (signal) or all current waiters (broadcast).
 //!
-//! Protocol (mirrors PG's predicate loop):
+//! The central correctness property is that no wakeup is lost. A waiter enqueues
+//! itself up front, before its first predicate test, so a signal that arrives in
+//! the window between observing the condition as false and beginning to sleep
+//! still reaches an already-enqueued waiter rather than vanishing.
 //!
-//! ```ignore
-//! let mut s = ConditionVariablePrepareToSleep(&cv);
-//! while !predicate() { s.sleep(info).await; }  // drop(s) on scope exit = cancel
-//! ```
+//! In PostgreSQL these are shared-memory objects safe to embed in dynamic shared
+//! memory segments. A waiter records its target in the process-global
+//! `cv_sleep_target` and links itself into the variable's wait list through the
+//! single `cvWaitLink` field of its PGPROC, with the list protected by a
+//! spinlock; sleeping itself is performed on the process latch and is
+//! interruptible.
 //!
-//! The enqueue happens up front in `PrepareToSleep`, before the caller's first
-//! predicate test, exactly as PG does. A `Signal` arriving between predicate-false
-//! and the `.await` cannot be lost: the waiter is already enqueued, and
-//! `WaitQueue` sets a sticky woken flag even on a not-yet-polled slot. Each
-//! `sleep` re-arms (re-enqueues a fresh `WaitGuard`) before returning, so the
-//! waiter is enqueued again across the caller's predicate re-check.
+//! Here the variable is ordinary in-process shared state and the per-process
+//! bookkeeping is gone. Instead of a process-global sleep target plus a wait-list
+//! link in PGPROC, a prepared sleep is a guard ([`CvSleep`]) living on the
+//! waiting task's stack and holding one queued [`WaitGuard`]. This guard survives
+//! `.await` points and tokio worker-thread migration because it carries no
+//! thread-local state, and its `Drop` dequeues the waiter, taking the role of
+//! PostgreSQL's `ConditionVariableCancelSleep`. The latch-based sleep becomes a
+//! plain `.await` on the queued guard; a timed sleep wraps it in
+//! `tokio::time::timeout`. Each return from `sleep` re-arms a fresh queued guard
+//! so the waiter is already enqueued when the caller re-tests its predicate, and
+//! the wait queue records a sticky woken flag so a signal delivered to a
+//! not-yet-polled waiter is still observed.
 
 use crate::storage::condition_variable::ConditionVariable;
 use crate::storage::wait_guard::WaitGuard;

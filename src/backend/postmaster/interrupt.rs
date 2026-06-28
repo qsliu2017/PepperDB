@@ -1,12 +1,30 @@
-//! Translated from PostgreSQL src/backend/postmaster/interrupt.c
+//! Interrupt handling routines for the main loops of background processes.
+//! Translated from backend/postmaster/interrupt.c.
 //!
-//! Interrupt handling for the main loops of long-running (auxiliary) tasks.
-//! PG's `volatile sig_atomic_t` flags set from OS signal handlers become process
-//! atomics fed by tokio::signal tasks; `SetLatch(MyLatch)` becomes a latch wake.
+//! Long-running background processes raise interrupts asynchronously and act on
+//! them at convenient points in their main loops. A pair of pending flags records
+//! the two common requests: reload the configuration file, and shut down. The
+//! signal handlers do the minimum -- set the relevant flag and wake the process so
+//! it notices promptly -- while the actual work happens later, when the main loop
+//! calls the interrupt-processing routine. A separate crash-exit handler bails out
+//! immediately without running any cleanup, on the assumption that shared state may
+//! be corrupt.
 //!
-//! Non-type-centric: these are free functions over the flags, so the header
-//! `src/postmaster/interrupt.rs` re-exports them (`pub use`) rather than holding
-//! deprecated shims.
+//! In PostgreSQL the flags are `volatile sig_atomic_t` values toggled directly from
+//! OS signal handlers (SIGHUP for reload, SIGTERM for shutdown, SIGQUIT for crash
+//! exit), and waking the process is `SetLatch(MyLatch)`. Here the flags are process
+//! atomics, and OS signals are delivered through a tokio task that listens for them
+//! and invokes the corresponding handler, waking the process by setting a `Latch`.
+//! Where PostgreSQL calls `proc_exit(0)` directly inside the main-loop handler,
+//! this version returns a flag instead: process exit is supervisor-driven under the
+//! async model, so the routine reports that a shutdown was requested and lets the
+//! caller unwind. The crash-exit path maps PostgreSQL's `_exit(2)` to
+//! `process::abort`, which likewise terminates without running any cleanup.
+//!
+//! The configuration-reload, proc-signal-barrier, and memory-context-logging
+//! follow-up actions are not yet implemented; the corresponding flags are checked
+//! (or reserved) but the work they would trigger is left for the relevant
+//! subsystems once they are ported.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

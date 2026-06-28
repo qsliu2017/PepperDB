@@ -1,4 +1,21 @@
-//! Translated from PostgreSQL src/include/storage/procnumber.h
+//! Process-number identity and the generational slab that backs it. Translated
+//! from src/include/storage/procnumber.h; the slab is a PepperDB addition.
+//!
+//! A `ProcNumber` uniquely identifies an active backend or auxiliary process as a
+//! dense index counting from zero, bounded by `MAX_BACKENDS`. In PostgreSQL it is
+//! the offset of a process's `PGPROC` within the fixed shared-memory arrays (the
+//! proc array, the `ProcSignal` slots, the sinval message cursors), and the
+//! current process caches its own value in the `MyProcNumber` global.
+//!
+//! PepperDB has no shared-memory segment and no fixed process slots, so those
+//! slot-index arrays become a generational slab (`GenSlab`): every `Key` carries
+//! a generation alongside its index, and when a slot is vacated and later reused
+//! the generation advances, so a stale key from the previous occupant fails
+//! lookup rather than silently aliasing the new occupant. The slab itself holds
+//! no lock -- each consumer wraps it in the lock that fits its access pattern.
+//! The per-process `MyProcNumber` and `ParallelLeaderProcNumber` globals become
+//! per-task values (in `proc`), because each backend runs as its own task instead
+//! of its own process.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -14,22 +31,9 @@ pub const INVALID_PROC_NUMBER: ProcNumber = -1;
 pub const MAX_BACKENDS_BITS: u32 = 18;
 pub const MAX_BACKENDS: u32 = (1u32 << MAX_BACKENDS_BITS) - 1;
 
-/// Proc number of this backend.
-pub static mut MY_PROC_NUMBER: ProcNumber = INVALID_PROC_NUMBER;
-
-/// Proc number of our parallel session leader, or INVALID_PROC_NUMBER if none.
-pub static mut PARALLEL_LEADER_PROC_NUMBER: ProcNumber = INVALID_PROC_NUMBER;
-
-/// ProcNumber to use for our session's temp relations.
-pub fn proc_number_for_temp_relations() -> ProcNumber {
-    unsafe {
-        if PARALLEL_LEADER_PROC_NUMBER == INVALID_PROC_NUMBER {
-            MY_PROC_NUMBER
-        } else {
-            PARALLEL_LEADER_PROC_NUMBER
-        }
-    }
-}
+// PG's per-process MyProcNumber/ParallelLeaderProcNumber are realized as a
+// per-task task-local in proc.rs (current_proc_number/set_current_proc_number),
+// not a shared global -- each backend task must see its own proc number.
 
 // Generational slab: the Rust-native replacement for PostgreSQL's fixed
 // slot-index arrays (proc array, ProcSignal slots, sinval cursors, the
@@ -95,9 +99,13 @@ impl<T> Key<T> {
         self.generation
     }
 
-    /// View the key's index as a `ProcNumber`. Slabs are bounded well under
-    /// `i32::MAX`, so the cast never loses or sign-flips the index.
+    /// View the key's index as a `ProcNumber`. `GenSlab` itself is unbounded;
+    /// proc-number-bearing consumers must keep their slab under `MAX_BACKENDS`
+    /// (PG's `InitializeMaxBackends` invariant) so the index stays a valid
+    /// `ProcNumber` and never sign-flips. The assert enforces that invariant at
+    /// the conversion point, mirroring PG's `MaxBackends <= MAX_BACKENDS` check.
     pub fn as_proc_number(&self) -> ProcNumber {
+        crate::assert!(self.index < MAX_BACKENDS, "proc number {} exceeds MAX_BACKENDS", self.index);
         self.index as ProcNumber
     }
 }

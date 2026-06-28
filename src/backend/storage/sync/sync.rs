@@ -1,16 +1,29 @@
-//! Translated from PostgreSQL src/backend/storage/sync/sync.c
+//! File synchronization management. Translated from backend/storage/sync/sync.c.
 //!
-//! The pending-fsync / pending-unlink request queue. In PostgreSQL this is a
-//! per-process hash table owned by the checkpointer (or a standalone backend);
-//! regular backends forward requests to the checkpointer over a shared-memory
-//! queue. Under the single-process model there is one shared [`SyncRequests`]
-//! ([`Arc`] field on [`SharedState`]); every task enqueues into it directly and
-//! the checkpointer task (step 17) drains it via [`ProcessSyncRequests`].
+//! Tracks the relation segments that have been written since the last
+//! checkpoint so they can be fsynced to disk before the next checkpoint
+//! completes. Pending fsync operations are held in a hash table, which also
+//! serves to merge duplicate requests; no-longer-needed files awaiting deletion
+//! are held in a list, since duplicates are not expected there. A pair of cycle
+//! counters distinguishes requests entered before a checkpoint began from those
+//! entered during it, so that fsyncs are not skipped and files are not deleted
+//! too soon. These mechanisms apply only to non-temp relations. Each request
+//! carries a `FileTag` that names the owning storage manager; the sync, unlink,
+//! and match operations are dispatched to that manager (currently only md, the
+//! magnetic-disk manager).
 //!
-//! Lock discipline: [`ProcessSyncRequests`] collects the tags to fsync under the
-//! `Mutex`, drops it, then awaits the fsyncs -- the lock is never held across an
-//! `.await`. The dispatch to the owning module's syncfiletag (only md exists)
-//! mirrors sync.c's `syncsw` table.
+//! In PostgreSQL the pending-ops table is private to whichever process keeps it
+//! -- a standalone backend or the checkpointer auxiliary process -- and regular
+//! backends forward their requests to the checkpointer over a shared-memory
+//! queue. PepperDB runs as a single process, so there is one shared
+//! [`SyncRequests`] structure (an [`Arc`] field on [`SharedState`]) guarded by a
+//! `parking_lot::Mutex`; every task enqueues into it directly and the
+//! checkpointer task drains it. Each entry-collecting routine takes the tags to
+//! act on under the lock, releases it, and only then performs the fsync or
+//! unlink, so the lock is never held across an `.await`. An fsync failure raises
+//! a PANIC (or an error if data-sync retry is enabled), preserving PostgreSQL's
+//! guarantee that a checkpoint never falsely reports durability. The SLRU sync
+//! handlers (clog, commit_ts, multixact) are not yet wired in.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -46,6 +59,9 @@ struct SyncRequestsInner {
     pending_unlinks: Vec<PendingUnlinkEntry>,
     sync_cycle_ctr: CycleCtr,
     checkpoint_cycle_ctr: CycleCtr,
+    /// True while a ProcessSyncRequests run is in flight; if still set on entry a
+    /// prior run failed, so stale cycle_ctr values must be re-armed (sync.c).
+    sync_in_progress: bool,
 }
 
 /// A hashable key for a [`FileTag`] (the header `FileTag` is the identity).
@@ -87,6 +103,7 @@ impl SyncRequests {
                 pending_unlinks: Vec::new(),
                 sync_cycle_ctr: 0,
                 checkpoint_cycle_ctr: 0,
+                sync_in_progress: false,
             }),
         }
     }
@@ -181,54 +198,57 @@ pub async fn SyncPostCheckpoint(shared: &Arc<SharedState>) {
 pub async fn ProcessSyncRequests(shared: &Arc<SharedState>) {
     let sr = shared.sync_requests();
 
-    // Advance the cycle counter so requests added after this point are skipped.
-    let cur_cycle = {
+    // Snapshot the entries to process and arm the cycle counter under the lock.
+    // We process every entry that is NOT new (cycle_ctr != the post-increment
+    // value), matching sync.c, and remove all of them -- including canceled ones.
+    let to_process: Vec<(FileTag, bool)> = {
         let mut g = sr.inner.lock();
-        let cur = g.sync_cycle_ctr;
+        // If a prior run did not complete, forcibly re-arm stale cycle_ctr values
+        // so left-behind entries are guaranteed to be picked up (forestalls u16
+        // wraparound silently skipping them).
+        if g.sync_in_progress {
+            let cur = g.sync_cycle_ctr;
+            for e in g.pending_ops.values_mut() {
+                e.cycle_ctr = cur;
+            }
+        }
         g.sync_cycle_ctr = g.sync_cycle_ctr.wrapping_add(1);
-        cur
-    };
-
-    // Snapshot the tags to fsync: old entries (cycle_ctr == cur_cycle), not
-    // canceled. Drop the lock before any I/O.
-    let to_sync: Vec<FileTag> = {
-        let g = sr.inner.lock();
+        g.sync_in_progress = true;
+        let new_cycle = g.sync_cycle_ctr;
         g.pending_ops
             .iter()
-            .filter(|(_, e)| !e.canceled && e.cycle_ctr == cur_cycle)
-            .map(|(k, _)| key_to_tag(k))
+            .filter(|(_, e)| e.cycle_ctr != new_cycle)
+            .map(|(k, e)| (key_to_tag(k), e.canceled))
             .collect()
     };
 
-    for tag in &to_sync {
-        let result = sync_filetag(shared, tag).await;
-        let mut g = sr.inner.lock();
-        match result {
-            Ok(_) => {
-                g.pending_ops.remove(&FileTagKey::of(tag));
-            }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    // Relation dropped/truncated since the request: forget it.
-                    g.pending_ops.remove(&FileTagKey::of(tag));
-                } else {
-                    // TODO(checkpoint): incomplete fsync-failure semantics. PG's
-                    // ProcessSyncRequests (a) resets stale cycle_ctr of all
-                    // entries on a failed prior run to forestall u16 wraparound
-                    // (sync.c: a left-behind entry whose cycle_ctr no longer
-                    // matches `cur_cycle` is silently skipped here -- it must be
-                    // re-armed), (b) has an absorb-and-retry inner loop, and
-                    // (c) escalates to PANIC (data_sync_retry) rather than this
-                    // WARNING. Complete all three or a checkpoint can falsely
-                    // report durability.
-                    crate::elog!(
-                        crate::utils::elog::WARNING,
-                        format!("could not fsync file: {e}")
-                    );
+    let enable_fsync = unsafe { crate::miscadmin::enableFsync };
+
+    for (tag, canceled) in to_process {
+        // A canceled entry skips the fsync but is still removed (sync.c).
+        // fsync off: don't even open the file, but still remove the entry.
+        if !canceled && enable_fsync {
+            match sync_filetag(shared, &tag).await {
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    // Relation dropped/truncated since the request: allow ENOENT.
+                }
+                Err(e) => {
+                    // data_sync_elevel: PANIC unless data_sync_retry is set, so a
+                    // checkpoint can never falsely report durability.
+                    let elevel = if unsafe { crate::storage::fd::data_sync_retry } {
+                        crate::utils::elog::ERROR
+                    } else {
+                        crate::utils::elog::PANIC
+                    };
+                    crate::elog!(elevel, format!("could not fsync file: {e}"));
                 }
             }
         }
+        sr.inner.lock().pending_ops.remove(&FileTagKey::of(&tag));
     }
+
+    sr.inner.lock().sync_in_progress = false;
 }
 
 fn key_to_tag(k: &FileTagKey) -> FileTag {

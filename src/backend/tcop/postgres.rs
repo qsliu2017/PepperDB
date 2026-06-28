@@ -1,22 +1,31 @@
-//! Translated from PostgreSQL src/backend/tcop/postgres.c
+//! The POSTGRES backend command loop -- the "traffic cop". Translated from backend/tcop/postgres.c.
 //!
-//! `PostgresMain` (the backend command loop) and `ProcessInterrupts` (the
-//! deferred-interrupt service routine that `CHECK_FOR_INTERRUPTS` calls).
+//! This is the main module of the backend: once a connection's identity and
+//! database are established, control enters the command loop, which reads a
+//! message from the frontend, dispatches it by message type (simple query;
+//! the extended-protocol Parse/Bind/Describe/Execute/Close; function call;
+//! Sync/Flush; Terminate), and replies, announcing ReadyForQuery whenever the
+//! session falls idle. The principal entry point is [`postgres_main`]; the other
+//! exported routine is [`process_interrupts`], the deferred-interrupt service
+//! routine invoked from `CHECK_FOR_INTERRUPTS` to act on signals (cancel, die,
+//! the various idle/transaction timeouts) at the next safe point.
 //!
-//! Under the single-process async model:
-//! - `PostgresMain` is an async task body, not a `setjmp`-anchored function. The
-//!   outer-error `sigsetjmp` recovery block becomes the `catch_unwind` at the
-//!   task boundary (postmaster.rs); an `elog(ERROR)` is a panic carrying
-//!   `ErrorData`. The translated read-dispatch loop calls the libpq `pq_*` send/
-//!   recv helpers and the parser/planner/executor entries, which are DEFERRED
-//!   subsystems still on `unimplemented!()` stubs -- so the loop compiles and the
-//!   connection path runs up to the first real wire message, where it hits a
-//!   stub. pqcomm is NOT reimplemented here.
-//! - `ProcessInterrupts` is implemented FOR REAL against the per-task
-//!   [`ProcSignalSlot`] (step 04). It is SYNC (callable from arbitrary sync
-//!   code), never `.await`s, only reads/clears atomic flags and panics
-//!   (`elog(ERROR/FATAL)`). With no current slot (aux task / slotless test) it is
-//!   a no-op.
+//! In PostgreSQL the backend is a forked child whose lifetime error recovery is
+//! anchored by two `sigsetjmp` points; PepperDB runs each backend as a tokio
+//! task instead. There is no outer `setjmp`: an `elog(ERROR)` is a panic carrying
+//! `ErrorData`, the per-command recovery point is a `catch_unwind` wrapping the
+//! read-and-dispatch of one command, and a caught ERROR aborts the current
+//! command and resumes the loop, while a FATAL (or any non-`ErrorData` bug panic)
+//! is re-raised so it reaches the task boundary and ends the backend.
+//!
+//! [`process_interrupts`] is fully realized against the per-task signal slot
+//! ([`ProcSignalSlot`]): it is synchronous, never awaits, and only reads and
+//! clears atomic flags before panicking with the appropriate ERROR or FATAL.
+//! With no slot in scope (an auxiliary task, or a test without a slot) it is a
+//! no-op. The command loop's wire transport (the `pq_*` send/recv helpers) and
+//! the parser, planner, and executor it dispatches into are not yet implemented;
+//! the loop is faithful to the C control flow and runs up to the point where it
+//! calls into one of those subsystems.
 
 use std::sync::atomic::Ordering;
 
@@ -121,14 +130,19 @@ enum CommandResult {
 /// Sync (no `.await`) so the whole unit sits inside the per-command `catch_unwind`
 /// recovery point. An `elog(ERROR/FATAL)` raised in here unwinds out as a panic.
 fn process_one_command() -> CommandResult {
+    // (2) Allow a query-cancel arriving while we block on the read to be a
+    // no-op: ProcessInterrupts suppresses the cancel ERROR while DoingCommandRead.
+    set_doing_command_read(true);
+
     // (3) Read a command (blocks here in PG via secure_read). pqcomm is
     // deferred: read_command hits the pq_* stub at runtime.
     let firstchar = read_command();
 
-    // (5) Service any interrupts that arrived while we slept. Query cancel is
-    // a no-op when idle; ProcessInterrupts has that effect here. This is the
-    // live CHECK_FOR_INTERRUPTS payoff.
+    // (5) Service any interrupts that arrived while we slept, before clearing
+    // DoingCommandRead, so an idle cancel is reset rather than thrown. This is
+    // the live CHECK_FOR_INTERRUPTS payoff.
     crate::miscadmin::check_for_interrupts();
+    set_doing_command_read(false);
 
     // (7) Process the command.
     match firstchar {
@@ -242,6 +256,19 @@ fn pq_flush() {
     crate::libpq::libpq::pq_flush();
 }
 
+/// PG `DoingCommandRead` setter. Per-task state on the Session; a no-op with no
+/// Session in scope (slotless test).
+fn set_doing_command_read(v: bool) {
+    if let Some(s) = crate::session::try_current() {
+        s.set_doing_command_read(v);
+    }
+}
+
+/// PG `DoingCommandRead` reader. False with no Session in scope.
+fn doing_command_read() -> bool {
+    crate::session::try_current().is_some_and(|s| s.doing_command_read())
+}
+
 fn exec_simple_query(query_string: &str) {
     // PG exec_simple_query: pg_parse_query -> pg_analyze_and_rewrite ->
     // pg_plan_queries -> PortalRun. All deferred.
@@ -306,11 +333,13 @@ pub fn process_interrupts() {
 
     if f.proc_die_pending.swap(false, Ordering::AcqRel) {
         f.query_cancel_pending.store(false, Ordering::Release); // ProcDie trumps QueryCancel
+        crate::storage::proc::LockErrorCleanup(); // cancel any pending lock wait before dying
         proc_die_fatal();
     }
 
     if f.client_connection_lost.swap(false, Ordering::AcqRel) {
         f.query_cancel_pending.store(false, Ordering::Release); // lost connection trumps cancel
+        crate::storage::proc::LockErrorCleanup();
         crate::ereport!(crate::utils::elog::FATAL, |e: &mut crate::utils::elog::ErrorData| {
             e.errcode(ERRCODE_CONNECTION_FAILURE)
                 .errmsg("connection to client lost");
@@ -323,11 +352,15 @@ pub fn process_interrupts() {
         f.interrupt_pending.store(true, Ordering::Release);
     } else if f.query_cancel_pending.swap(false, Ordering::AcqRel) {
         // PG inspects lock/statement-timeout indicators here (deferred); the base
-        // case is a user cancel request.
-        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
-            e.errcode(ERRCODE_QUERY_CANCELED)
-                .errmsg("canceling statement due to user request");
-        });
+        // case is a user cancel request. A cancel arriving while idle (reading a
+        // command from the client) is a no-op: clear the flag, send no error.
+        if !doing_command_read() {
+            crate::storage::proc::LockErrorCleanup();
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(ERRCODE_QUERY_CANCELED)
+                    .errmsg("canceling statement due to user request");
+            });
+        }
     }
 
     // Recovery-conflict interrupts: deferred (HandleRecoveryConflictInterrupt).
@@ -411,9 +444,12 @@ mod tests {
         // scope synchronously via a tiny runtime.
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         rt.block_on(async {
-            procsignal::scope(slot, async {
+            // process_interrupts now runs LockErrorCleanup (PG postgres.c:3310/
+            // 3382/3450), which reads the LOCAL_LOCKS task-local a real backend
+            // always sets; mirror that here.
+            crate::storage::lock::local_lock_scope(procsignal::scope(slot, async {
                 body();
-            })
+            }))
             .await;
         });
     }
@@ -430,9 +466,9 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         rt.block_on(async {
             crate::session::scope(session, async {
-                procsignal::scope(slot, async {
+                crate::storage::lock::local_lock_scope(procsignal::scope(slot, async {
                     body();
-                })
+                }))
                 .await;
             })
             .await;
@@ -455,6 +491,24 @@ mod tests {
             .downcast_ref::<ErrorData>()
             .expect("panic payload is ErrorData");
         assert_eq!(edata.sqlerrcode, ERRCODE_QUERY_CANCELED);
+    }
+
+    #[test]
+    fn query_cancel_while_idle_is_noop() {
+        // DoingCommandRead set: an idle cancel must clear the flag, not panic.
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_slot_and_session(
+                |s| {
+                    s.flags.query_cancel_pending.store(true, Ordering::Release);
+                    s.flags.interrupt_pending.store(true, Ordering::Release);
+                },
+                || {
+                    crate::session::current().set_doing_command_read(true);
+                    process_interrupts(); // idle -- cancel suppressed, no panic
+                },
+            );
+        }));
+        assert!(caught.is_ok(), "idle query cancel must not throw");
     }
 
     #[test]

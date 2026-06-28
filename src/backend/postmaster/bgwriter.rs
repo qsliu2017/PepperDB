@@ -1,20 +1,27 @@
-//! Translated from PostgreSQL src/backend/postmaster/bgwriter.c
+//! The background writer process. Translated from backend/postmaster/bgwriter.c.
 //!
-//! The background writer: a long-lived auxiliary task that keeps regular backends
-//! from having to write out dirty shared buffers. Each cycle runs one round of
-//! `BgBufferSync`, then sleeps `BgWriterDelay` milliseconds (or much longer in
-//! "hibernation" mode when nothing is happening) until its latch is rung or the
-//! delay elapses. As of PG 9.2 the bgwriter no longer handles checkpoints.
+//! The background writer attempts to keep regular backends from having to write
+//! out dirty shared buffers, which they would otherwise do when they need to
+//! free a buffer to read in another page. In the best case all writes from
+//! shared buffers are issued by the background writer; regular backends remain
+//! empowered to issue their own writes if the bgwriter fails to keep enough
+//! clean buffers available. Each cycle runs one round of `BgBufferSync` and then
+//! sleeps for `BgWriterDelay` milliseconds, or much longer in "hibernation" mode
+//! when the system is idle, until it is woken or the delay elapses. As of
+//! PostgreSQL 9.2 the background writer no longer handles checkpoints; that work
+//! belongs to the checkpointer.
 //!
-//! Single-process redesign vs PG's bgwriter.c:
-//! - PG's in-loop `sigsetjmp` error recovery is NOT reproduced: an
-//!   `elog(ERROR)`-as-panic propagates to the task boundary, where the supervisor
-//!   (17f) restarts the task (mirrors the checkpointer, 17a).
-//! - The bgwriter does NOT advertise a PGPROC number to backends (PG never does
-//!   either); it still claims an aux PGPROC for its `proc_latch` so the unified
-//!   single-latch wakeup (PG `MyLatch == MyProc->procLatch`) works. The freelist
-//!   wakes it via `StrategyNotifyBgWriter` (a freelist stub for now), not by a
-//!   `ProcGlobal.<role>_proc` advertisement.
+//! In PepperDB the bgwriter is a long-lived async task rather than a forked
+//! process. PostgreSQL's per-iteration `sigsetjmp` error-recovery block is not
+//! reproduced: an error raised mid-cycle unwinds to the task boundary, where the
+//! supervisor restarts the task. Termination is driven by a shutdown signal from
+//! the supervisor instead of SIGTERM/SIGQUIT. The task claims an auxiliary PGPROC
+//! so that its proc latch serves as the single wakeup source (matching
+//! PostgreSQL's `MyLatch == MyProc->procLatch` for an auxiliary process); a
+//! backend that allocates a buffer wakes it through `StrategyNotifyBgWriter`. As
+//! in PostgreSQL, the bgwriter advertises no PGPROC slot of its own for backends
+//! to address. Standby-snapshot logging is present but inert until replication is
+//! enabled.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -151,14 +158,19 @@ pub async fn background_writer_main(shared: Arc<SharedState>, shutdown: Arc<toki
                 let hibernate_ms =
                     (i64::from(bg_writer_delay()) * i64::from(HIBERNATE_FACTOR)).max(0) as u64;
                 let sleep = tokio::time::sleep(std::time::Duration::from_millis(hibernate_ms));
-                tokio::select! {
+                let shutdown_break = tokio::select! {
                     biased;
-                    () = proc_latch.wait() => {}
-                    () = sleep => {}
-                    () = shutdown.notified() => break,
-                }
-                // Reset the notification request in case we timed out.
+                    () = proc_latch.wait() => false,
+                    () = sleep => false,
+                    () = shutdown.notified() => true,
+                };
+                // Reset the notification request before continuing OR exiting, so
+                // our PGPROC number never stays registered as the freelist target
+                // after we go away (PG always pairs the (-1) with the prior call).
                 strategy_notify_bg_writer(INVALID_PROC_NUMBER);
+                if shutdown_break {
+                    break;
+                }
             }
 
             prev_hibernate = can_hibernate;

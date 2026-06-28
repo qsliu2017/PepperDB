@@ -577,7 +577,7 @@ pub fn pgstat_update_parallel_workers_stats(
 // pgstat_count_buffer_*_time / _conn_*_time macros bump process-global counters
 // (pgStatBlockReadTime etc., deferred to session state).
 
-pub fn pgstat_fetch_stat_dbentry(dboid: Oid) -> &'static PgStat_StatDBEntry {
+pub fn pgstat_fetch_stat_dbentry(dboid: Oid) -> Option<&'static PgStat_StatDBEntry> {
     unimplemented!()
 }
 

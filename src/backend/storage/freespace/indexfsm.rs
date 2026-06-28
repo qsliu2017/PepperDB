@@ -1,14 +1,18 @@
-//! Translated from PostgreSQL src/backend/storage/freespace/indexfsm.c -- the FSM
-//! used by index AMs. Unlike the heap FSM (which tracks how *much* space a page
-//! has), an index only tracks whether a page is completely free or in use, so it
-//! reuses the heap FSM machinery with two fixed categories: `0` = used, and
-//! `BLCKSZ - 1` (a full empty page) = free. A request for `BLCKSZ / 2` therefore
-//! matches only a wholly-free page.
+//! Free space map for quickly finding free pages in index relations. Translated from backend/storage/freespace/indexfsm.c.
 //!
-//! These are thin wrappers over `freespace.rs`; like there, the catalog
-//! `Relation` is replaced by the smgr-level inputs (`&Arc<SharedState>`,
-//! `&mut SmgrRelation`, persistence). The header `src/storage/indexfsm.rs` keeps
-//! the C-named `Relation`-based signatures as TODO shims.
+//! This is similar to the FSM used for the heap, but instead of tracking the
+//! amount of free space on each page, an index only needs to know whether a page
+//! is completely free or in use. It therefore reuses the heap FSM implementation
+//! with two fixed categories: `0` denotes a used page, and `BLCKSZ - 1` (a full
+//! empty page) denotes a free one. A request for `BLCKSZ / 2` consequently
+//! matches only a wholly-free page. The exported routines are thin wrappers that
+//! call into the heap FSM with these category values.
+//!
+//! Where PostgreSQL passes a catalog `Relation`, these routines take the
+//! storage-manager inputs the FSM actually needs: the shared backend state, the
+//! open `SmgrRelation`, and the relation's persistence. The operations are async
+//! because the underlying FSM reads and writes pages through asynchronous storage
+//! I/O.
 
 use std::sync::Arc;
 

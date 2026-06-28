@@ -1,15 +1,32 @@
-//! Translated from PostgreSQL src/backend/access/transam/varsup.c
+//! PostgreSQL OID and transaction-ID variable support routines. Translated from backend/access/transam/varsup.c.
 //!
-//! OID & XID generation over the `VariableCache` (ex-`TransamVariables`).
-//! Reached via `shared.variable_cache()`. The XidGenLock / OidGenLock split
-//! collapses to the single VariableCache `Mutex`; we compute what's needed under
-//! the lock, drop it, then await the async clog/subtrans extends (design s3).
+//! This module is the allocator for the two cluster-wide counters that
+//! PostgreSQL hands out on demand: transaction IDs and object IDs. Allocating a
+//! transaction ID advances the next-XID counter, zeroes the relevant clog and
+//! subtrans slots before the ID can be used, and publishes the new ID into the
+//! caller's proc entry. Allocating an object ID hands back the next OID from a
+//! prefetched block, skipping reserved low values and wrapping around the 32-bit
+//! space. Alongside the allocators sit the routines that maintain the
+//! anti-wraparound limits derived from the oldest unfrozen transaction ID: the
+//! vacuum, warning, and stop thresholds, plus the read-only and recovery-time
+//! helpers that advance the next-XID counter past a known ID without consuming
+//! one. The stop limit is enforced as a hard error so that the cluster refuses
+//! to assign transaction IDs rather than risk wraparound data loss.
 //!
-//! GetNewTransactionId advertises the new xid into MyProc + the ProcGlobal mirror
-//! via `ProcArray::advertise_my_xid` (under ProcArrayLock), matching varsup.c's
-//! store before XidGenLock release. The wraparound warn/stop signaling and
-//! get_database_name land on their absence (autovacuum/syscache are later) -- we
-//! keep the limit math and the stop-limit ERROR, and drop the WARNING lookups.
+//! In PostgreSQL these counters live in a shared-memory struct guarded by the
+//! XidGenLock and OidGenLock light-weight locks. Here that struct is the
+//! `VariableCache`, shared state reached through the running instance and guarded
+//! by a single internal lock; the two lock domains collapse into it. Transaction
+//! allocation computes the next ID and the limit checks under that lock, releases
+//! it, then awaits the asynchronous clog and subtrans page extensions before
+//! advancing the counter, so no lock is held across I/O. The new transaction ID
+//! is published into the caller's proc entry through the proc array rather than
+//! written directly into a shared-memory mirror. The wraparound warning path,
+//! the autovacuum force signaling, and the database-name lookup used in those
+//! messages depend on subsystems not yet present, so the limit arithmetic and
+//! the hard stop are kept while the advisory warnings are omitted. Object-ID
+//! durability (the WAL record that logs each prefetched block) is likewise not
+//! yet emitted.
 
 use crate::access::transam::{
     FIRST_NORMAL_OBJECT_ID, FIRST_NORMAL_TRANSACTION_ID,
@@ -45,6 +62,22 @@ impl VariableCache {
         subtrans: &SlruCtl,
         is_sub_xact: bool,
     ) -> FullTransactionId {
+        // TODO(parallel): elog(ERROR) if IsInParallelMode (varsup.c:86).
+        // TODO(recovery): elog(ERROR) if RecoveryInProgress (varsup.c:102).
+
+        // Bootstrap: return the fixed BootstrapTransactionId WITHOUT advancing
+        // nextXid (varsup.c:91-99); advertise it like a normal top xact.
+        if crate::miscadmin::is_bootstrap_processing_mode() {
+            debug_assert!(!is_sub_xact);
+            if let Some(pa) = crate::backend::storage::ipc::procarray::current_proc_array() {
+                pa.advertise_my_xid(crate::access::transam::BOOTSTRAP_TRANSACTION_ID, false);
+            }
+            return crate::access::transam::full_transaction_id_from_epoch_and_xid(
+                0,
+                crate::access::transam::BOOTSTRAP_TRANSACTION_ID,
+            );
+        }
+
         // Snapshot nextXid + the wrap limits under the lock.
         let (full_xid, xid, stop_limit, past_stop) = self.with(|v| {
             let full = v.next_xid;
@@ -55,7 +88,10 @@ impl VariableCache {
         let _ = stop_limit;
 
         // Refuse to assign past the stop limit (wraparound protection). varsup.c
-        // does the database-name lookup for the message; that needs syscache.
+        // gates this on the xidVacLimit branch and re-reads nextXid after dropping
+        // XidGenLock for signals/warnings; those are collapsed away here (no lock
+        // drop before this check), so no re-read is needed. varsup.c does the
+        // database-name lookup for the message; that needs syscache.
         assert!(!past_stop, 
             "database is not accepting commands that assign new transaction IDs \
              to avoid wraparound data loss (xid {})",
@@ -65,6 +101,8 @@ impl VariableCache {
         // Extend clog/subtrans for the page this xid lands on (no-ops except at a
         // page boundary). These await SLRU I/O, so they run with the lock dropped.
         clog.extend_clog(xid).await;
+        // TODO(commit_ts): ExtendCommitTs(xid) -- zero its SLRU page under this
+        // same extend point when pg_commit_ts lands (varsup.c:205).
         subtrans.extend_subtrans(xid).await;
 
         // Now advance nextXid (only after a successful extend). Re-read to be safe

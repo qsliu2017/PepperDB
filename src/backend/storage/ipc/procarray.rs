@@ -1,35 +1,32 @@
-//! Translated from PostgreSQL src/backend/storage/ipc/procarray.c
+//! The process array: tracking running transactions and building MVCC snapshots. Translated from backend/storage/ipc/procarray.c.
 //!
-//! The process array: snapshot building (`GetSnapshotData`), xid horizons
-//! (`ComputeXidHorizons` + the `GlobalVisState` family), running-xact tests
-//! (`TransactionIdIsInProgress`/`IsActive`), proc add/remove/end-transaction,
-//! and the hot-standby `KnownAssignedXids` machinery.
+//! This module maintains the array of active backends and the per-backend
+//! transaction state associated with it. Although it has several uses, the
+//! principal one is determining the set of currently running transactions, from
+//! which snapshots (`GetSnapshotData`) and xid horizons (`ComputeXidHorizons`
+//! and the `GlobalVisState` family) are computed. It also answers running-xact
+//! tests such as `TransactionIdIsInProgress`, performs proc add/remove and
+//! end-of-transaction bookkeeping, and -- during hot standby -- maintains the
+//! `KnownAssignedXids` list of transactions known to be running on the primary
+//! as of the current point in the WAL stream. Leaving those xids out of standby
+//! snapshots would make them appear already complete and cause MVCC failures,
+//! so the array is watched as xids arrive and pruned when a fresh running-xacts
+//! list is replayed.
 //!
-//! Concurrency mapping (rules s9): PG's `ProcArrayLock` (an LWLock) becomes a
-//! `RwLock<ProcArrayInner>` wrapping the data the lock protected -- the
-//! `pgprocnos` offset array, the KnownAssignedXids state, and the
-//! replication-slot xmins. Snapshots take the read (shared) side; add/remove/
-//! end-transaction take the write (exclusive) side. The whole subsystem is
-//! in-memory computation: NO `.await` is ever held across a procarray guard
-//! (procarray is the one MVCC subsystem that is almost entirely synchronous).
-//! The few functions that consult clog/subtrans (`TransactionIdIsInProgress`
-//! step 4, recovery apply) drop the guard first, exactly as PG releases
-//! ProcArrayLock before the pg_subtrans probe.
+//! PostgreSQL's shared-memory `ProcArrayStruct`, protected by the `ProcArrayLock`
+//! LWLock, becomes a `RwLock<ProcArrayInner>` whose guarded data -- the proc
+//! offset array, the `KnownAssignedXids` state, and the replication-slot xmins
+//! -- is exactly what the lock protected. Snapshot reads take the shared side;
+//! add, remove, and end-transaction take the exclusive side. The subsystem is
+//! almost entirely in-memory computation, so no `.await` is held across a
+//! procarray guard; the few paths that must consult clog or subtrans (one branch
+//! of `TransactionIdIsInProgress`, and recovery apply) release the guard first,
+//! mirroring how the C code drops `ProcArrayLock` before probing pg_subtrans.
 //!
-//! Staging (design step14 s0): `proc.c` / `InitProcGlobal` / the real PGPROC
-//! array land in step 15. We translate procarray.c IN FULL now, but its scans
-//! run over the existing `ProcGlobal` stub (`src/storage/proc.rs`), which is an
-//! empty/unpopulated `PROC_HDR`. So `GetSnapshotData` etc. compile and are
-//! logically complete; they see an empty array until step 15 populates it.
-//! `MyProc` (the current backend's PGPROC) is likewise a step-15 stub -- where
-//! C reads `MyProc->pgxactoff` / `MyProc->xid` we treat "no MyProc yet" as a
-//! backend with no advertised xid (the common read-only case), which is the
-//! correct behavior for an unpopulated array.
-//!
-//! Per-task `TransactionXmin`/`RecentXmin` (PG process globals): set by
-//! `GetSnapshotData` and read by visibility code. They become a per-task
-//! `task_local` here (the GetSnapshotData writer owns them); snapmgr.c (step
-//! 14c) reaches them through the accessors below. See rules s6.1 / design s7.
+//! PostgreSQL's per-backend process globals `TransactionXmin` and `RecentXmin`
+//! -- written by `GetSnapshotData` and read by visibility code -- become
+//! task-local cells owned by the snapshot builder, exposed through the accessor
+//! functions below.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -467,10 +464,13 @@ impl ProcArray {
 
 impl ProcArray {
     /// varsup.c `GetNewTransactionId` advertisement: store a freshly allocated xid
-    /// into the real MyProc + the ProcGlobal mirror under ProcArrayLock. PG does
-    /// this store before releasing XidGenLock so the xid is in the ProcArray view
-    /// for any concurrent OldestXmin scan; we hold the write guard for the store.
-    /// No-op when this backend has no live PGPROC (bootstrap / thin tests).
+    /// into the real MyProc + the ProcGlobal mirror. In PG this store is under
+    /// XidGenLock (NOT ProcArrayLock) and snapshot readers scan lock-free via
+    /// barriers; this port instead takes the ProcArray write guard, which is sound
+    /// (the store is published before any concurrent snapshot's read guard) but
+    /// more serialized than PG -- it folds the XidGenLock/ProcArrayLock split.
+    /// Visibility is preserved regardless: a just-advertised xid a snapshot misses
+    /// is >= xmax and so treated running. No-op without a live PGPROC.
     pub fn advertise_my_xid(&self, xid: TransactionId, is_sub_xact: bool) {
         let procno = crate::storage::proc::current_proc_number();
         if procno == INVALID_PROC_NUMBER {
@@ -611,7 +611,14 @@ impl ProcArray {
                     std::cmp::Ordering::Equal
                 }
             });
+            // PG's single ProcArrayLock section is split here because
+            // ExtendSUBTRANS awaits SLRU I/O; safe in recovery startup (no
+            // concurrent ProcArray writer). The non-empty guard still applies.
             let mut a = self.inner.write();
+            assert!(
+                a.num_known_assigned_xids == 0,
+                "KnownAssignedXids is not empty"
+            );
             let mut prev: Option<TransactionId> = None;
             for &xid in &xids {
                 if prev == Some(xid) {
@@ -823,26 +830,31 @@ impl ProcArray {
         let my_database_id = crate::session::try_current()
             .map_or(crate::postgres_ext::InvalidOid, |s| s.database_id());
 
-        let (latest_completed, oldest_xid) = vc.with(|v| (v.latest_completed_xid, v.oldest_xid));
-
-        let mut initial = xid_from_full_transaction_id(latest_completed);
-        initial.advance();
-
-        let mut h = ComputeXidHorizonsResult {
-            latest_completed,
-            slot_xmin: INVALID_XID,
-            slot_catalog_xmin: INVALID_XID,
-            oldest_considered_running: initial,
-            shared_oldest_nonremovable: initial,
-            shared_oldest_nonremovable_raw: INVALID_XID,
-            catalog_oldest_nonremovable: INVALID_XID,
-            data_oldest_nonremovable: initial,
-            temp_oldest_nonremovable: initial,
-        };
-
         let kaxmin;
+        let latest_completed;
+        let mut h;
         {
             let a = self.inner.read();
+
+            // Read latestCompletedXid/oldestXid under the read guard so the xmax
+            // lower bound and the array scan are one consistent lock hold
+            // (procarray.c reads latestCompletedXid after LWLockAcquire SHARED).
+            latest_completed = vc.with(|v| v.latest_completed_xid);
+
+            let mut initial = xid_from_full_transaction_id(latest_completed);
+            initial.advance();
+
+            h = ComputeXidHorizonsResult {
+                latest_completed,
+                slot_xmin: INVALID_XID,
+                slot_catalog_xmin: INVALID_XID,
+                oldest_considered_running: initial,
+                shared_oldest_nonremovable: initial,
+                shared_oldest_nonremovable_raw: INVALID_XID,
+                catalog_oldest_nonremovable: INVALID_XID,
+                data_oldest_nonremovable: initial,
+                temp_oldest_nonremovable: initial,
+            };
 
             // temp horizon: only this backend's own xid matters.
             let myxid = my_proc_xid();
@@ -1058,29 +1070,30 @@ impl ProcArray {
 
         let taken_during_recovery = crate::access::transam::TransactionStartedDuringRecovery();
 
-        let (latest_completed, oldest_xid, cur_completion) = vc.with(|v| {
-            (
-                v.latest_completed_xid,
-                v.oldest_xid,
-                v.xact_completion_count,
-            )
-        });
-
         let myxid = my_proc_xid();
 
-        // xmax = latestCompletedXid + 1.
-        let mut xmax = xid_from_full_transaction_id(latest_completed);
-        xmax.advance();
-
-        let mut xmin = xmax;
-        if myxid.is_normal() && crate::access::transam::normal_transaction_id_precedes(myxid, xmin)
-        {
-            xmin = myxid;
-        }
-
+        let (latest_completed, oldest_xid, cur_completion);
+        let (mut xmax, mut xmin);
         let (replication_slot_xmin, replication_slot_catalog_xmin);
         {
             let a = self.inner.read();
+
+            // Read latestCompletedXid/oldestXid/xactCompletionCount under the read
+            // guard so xmax and the scanned array are one consistent lock hold
+            // (procarray.c reads them after LWLockAcquire SHARED).
+            (latest_completed, oldest_xid, cur_completion) =
+                vc.with(|v| (v.latest_completed_xid, v.oldest_xid, v.xact_completion_count));
+
+            // xmax = latestCompletedXid + 1.
+            xmax = xid_from_full_transaction_id(latest_completed);
+            xmax.advance();
+
+            xmin = xmax;
+            if myxid.is_normal()
+                && crate::access::transam::normal_transaction_id_precedes(myxid, xmin)
+            {
+                xmin = myxid;
+            }
 
             if taken_during_recovery {
                 // Hot standby: pull from KnownAssignedXids into subxip.
@@ -1127,9 +1140,12 @@ impl ProcArray {
                             if g.subxid_state(pgxactoff).overflowed {
                                 suboverflowed = true;
                             } else {
+                                // count from the mirror (the Acquire load pairs
+                                // with the Release in advertise; procarray.c reads
+                                // subxidStates[pgxactoff].count), xids from arena.
+                                let nsub = g.subxid_state(pgxactoff).count as usize;
                                 let pgprocno = a.pgprocnos[pgxactoff];
                                 if let Some(proc) = g.proc(pgprocno) {
-                                    let nsub = proc.subxid_status.count as usize;
                                     for j in 0..nsub {
                                         snapshot.subxip.push(proc.subxids.xids[j]);
                                     }
@@ -2018,14 +2034,15 @@ impl ProcArray {
     pub fn expire_all_known_assigned_transaction_ids(&self, vc: &VariableCache) {
         let mut a = self.inner.write();
         known_assigned_xids_remove_preceding(&mut a, INVALID_XID);
-        a.last_overflowed_xid = INVALID_XID;
-        drop(a);
+        // latestCompletedXid reset + completion bump under the same guard as the
+        // KnownAssignedXids clear (procarray.c keeps all of this in one section).
         vc.with(|v| {
             let mut latest = v.next_xid;
             crate::access::transam::full_transaction_id_retreat(&mut latest);
             v.latest_completed_xid = latest;
             v.xact_completion_count += 1;
         });
+        a.last_overflowed_xid = INVALID_XID;
     }
 }
 

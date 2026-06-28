@@ -1,27 +1,33 @@
-//! Translated from PostgreSQL src/backend/storage/smgr/smgr.c
+//! Public interface routines to the storage manager switch. Translated from backend/storage/smgr/smgr.c.
 //!
-//! Public interface to the storage-manager switch. An [`SmgrRelation`] is a
-//! cached set of open file handles for one physical relation. smgr.c dispatches
-//! every relation file op to a storage-manager backend; only magnetic disk
-//! ([`md`]) exists, so the C `f_smgr` vtable collapses to direct calls into md.
+//! All file system operations on relations dispatch through these routines. An
+//! [`SmgrRelation`] represents the physical on-disk files of one relation, open
+//! for reading and writing. PostgreSQL routes each relation file operation
+//! through an `f_smgr` vtable to a pluggable storage-manager backend; the only
+//! backend that exists is magnetic disk ([`md`]), so the switch collapses to
+//! direct calls into it. Opening the same relation locator twice yields the same
+//! cached handle, valid until end of transaction, which lets the handle cache
+//! things such as each fork's block count.
 //!
-//! Ownership model (chosen for Send-safety): the I/O ops are `async` methods on
-//! `&mut SmgrRelation`, so the *caller* owns the relation on its stack -- there
-//! is NO RefCell/lock borrow held across an `.await`. The buffer manager
-//! (step 12) will own these. A per-task `smgropen` cache (a tokio `task_local`
-//! `RefCell<HashMap<..>>`) provides the C "same locator -> same object"
-//! semantics; it is only ever borrowed inside synchronous sections (insert /
-//! lookup / take), never across the I/O await -- ops run on a value taken out of
-//! (or never placed in) the cache.
+//! Operations on a relation (create, extend, read, write, truncate, sync, and
+//! so on) are methods on a handle; sizes are cached on the handle and refreshed
+//! or invalidated as files grow and shrink. `truncate` first drops the
+//! about-to-be-deleted buffers, then broadcasts an smgr cache invalidation so
+//! other tasks close stale handles before the files change on disk.
 //!
-//! Deleted vs smgr.c: the pin/unpin dlist GC (Rust ownership), the
-//! PROCSIGNAL_BARRIER_SMGRRELEASE early-close dance, the AIO target machinery
-//! (smgr_aio_reopen / pgaio_io_set_target_smgr), and HOLD/RESUME_INTERRUPTS
-//! (cooperative async, not signal-driven). `truncate` drops buffers (temp path
-//! live; shared-pool scan is TODO(bufmgr)) and sends `cache_invalidate_smgr`,
-//! matching smgrtruncate. The smgr-level unlink wrapper (smgrdounlinkall, which
-//! likewise sends CacheInvalidateSmgr before unlinking) is not yet translated --
-//! only md-level `mdunlink` exists; wire that invalidation when it lands.
+//! PepperDB runs as a single async process, so several PostgreSQL mechanisms are
+//! replaced. The I/O operations are `async` methods on `&mut SmgrRelation`: the
+//! caller owns the relation on its stack, and no cache borrow is ever held
+//! across an `.await`. The per-backend hash table of open handles becomes a
+//! per-task cache (a tokio `task_local` map) that is borrowed only inside
+//! synchronous insert/lookup/take sections; an operation runs on a handle taken
+//! out of the cache and is returned to it afterward. The pin/unpin reference GC
+//! is handled by ownership, the `PROCSIGNAL_BARRIER_SMGRRELEASE` early-close
+//! handshake and the `HOLD`/`RESUME_INTERRUPTS` guards are unneeded under
+//! cooperative async scheduling, and the asynchronous-I/O target machinery is
+//! omitted. The shared-buffer scan in `truncate` and the smgr-level unlink
+//! wrapper are not yet implemented; only the temp-relation buffer drop and the
+//! md-level unlink exist today.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -174,15 +180,21 @@ impl SmgrRelation {
         result
     }
 
-    /// smgrnblocks_cached() -- the cached size, if known. Only trusted in
-    /// recovery (no shared size invalidation); we currently always honor the
-    /// cache when set. TODO(InRecovery): gate on recovery like smgr.c.
+    /// smgrnblocks_cached() -- the cached size, if known. Trusted only in
+    /// recovery (no shared size invalidation for fork sizes); outside recovery
+    /// returns None so callers re-probe the kernel, matching smgr.c line 854.
     pub fn nblocks_cached(&self, forknum: ForkNumber) -> Option<BlockNumber> {
+        let in_recovery = unsafe { crate::access::xlogutils::InRecovery };
         let v = self.cached_nblocks[forknum as usize];
-        (v != INVALID_BLOCK_NUMBER).then_some(v)
+        (in_recovery && v != INVALID_BLOCK_NUMBER).then_some(v)
     }
 
     /// smgrtruncate() -- truncate the listed forks to the given new sizes.
+    ///
+    /// Precondition: the caller must hold AccessExclusiveLock on the relation so
+    /// other tasks receive the smgr invalidation (sent below) before re-accessing
+    /// any fork. Not yet a type witness -- no relation-lock-held token exists and
+    /// the production caller (RelationTruncate) is unported. TODO(rules-s19).
     pub async fn truncate(
         &mut self,
         shared: &Arc<SharedState>,
@@ -391,20 +403,45 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn read_past_eof_zero_fills() {
+    async fn read_past_eof_errors() {
+        use futures_util::FutureExt;
         let (s, dir) = shared_with_tmpdir("eof").await;
         let mut reln = SmgrRelation::open(rloc(1), crate::storage::procnumber::INVALID_PROC_NUMBER);
         let fork = ForkNumber::MAIN_FORKNUM;
         reln.create(&s, fork, false).await;
         reln.extend(&s, fork, 0, &pattern_page(0x77), true).await;
 
-        // Reading block 0 and a nonexistent block 1 zero-fills block 1.
+        // Default path: reading block 0 plus a nonexistent block 1 raises ERROR
+        // (mdreadv, ERRCODE_DATA_CORRUPTED) -- PG only zero-fills under
+        // zero_damaged_pages or InRecovery.
         let mut b0 = Page::boxed_zeroed();
         let mut b1 = pattern_page(0xFF);
+        let payload = std::panic::AssertUnwindSafe(async {
+            let mut bufs: Vec<&mut Page> = vec![&mut b0, &mut b1];
+            reln.readv(&s, fork, 0, &mut bufs).await;
+        })
+        .catch_unwind()
+        .await
+        .expect_err("past-EOF read must raise ERROR");
+        let edata = payload
+            .downcast_ref::<crate::utils::elog::ErrorData>()
+            .expect("panic payload must downcast to ErrorData");
+        assert_eq!(edata.elevel, crate::utils::elog::ERROR);
+        assert!(
+            edata.message.as_deref().unwrap_or_default().contains("could not read blocks"),
+            "message was {:?}",
+            edata.message
+        );
+
+        // Lenient path: with zero_damaged_pages the missing tail is zero-filled.
+        let mut b0 = Page::boxed_zeroed();
+        let mut b1 = pattern_page(0xFF);
+        unsafe { crate::storage::bufmgr::zero_damaged_pages = true };
         {
             let mut bufs: Vec<&mut Page> = vec![&mut b0, &mut b1];
             reln.readv(&s, fork, 0, &mut bufs).await;
         }
+        unsafe { crate::storage::bufmgr::zero_damaged_pages = false };
         assert!(b0.as_bytes().iter().all(|&b| b == 0x77));
         assert!(b1.as_bytes().iter().all(|&b| b == 0), "past-EOF block must be zero-filled");
 

@@ -1,23 +1,33 @@
-//! Translated from PostgreSQL src/backend/utils/init/postinit.c
+//! Backend startup and session initialization utilities. Translated from backend/utils/init/postinit.c.
 //!
-//! Backend initialization. PG's `InitPostgres` runs as one long function inside
-//! a freshly forked process; here it is split to match the async-task lifecycle:
+//! This module drives the per-backend startup sequence: it assigns the
+//! backend's identity, attaches to the shared subsystems, authenticates the
+//! connecting user, binds the session to its target database, and resolves the
+//! session/current user ids. In PostgreSQL this is the work of `InitPostgres`,
+//! the long function every backend runs once after it is forked, together with
+//! the `BaseInit` local-subsystem setup and the `InitializeSessionUserId`
+//! helpers that establish role identity.
 //!
-//! - [`backend_task_init`] is the early, catalog-free slice: assign the synthetic
-//!   proc-pid, start time and backend type, and create the per-task
-//!   [`Session`] (identity only; database and user unset). It is the analog of
-//!   PG's `InitProcessGlobals` + the `BaseInit` local-subsystem setup that does
-//!   not need the catalog, auth, or proc array. It must run on its own.
+//! Because PepperDB backends are async tasks rather than forked processes, the
+//! single C `InitPostgres` is split to match the task lifecycle. The early,
+//! catalog-free slice -- assigning the synthetic proc-pid, start timestamp and
+//! backend type and creating the per-task [`Session`] -- lives in
+//! [`backend_task_init`], the analog of PostgreSQL's `InitProcessGlobals` and
+//! the implicit identity setup that fork would otherwise provide. The full
+//! sequence is [`init_postgres`], which runs the early slice, publishes the
+//! session for the rest of the backend's life, and then performs the
+//! connect-to-database and authentication steps. User identity is set by
+//! [`initialize_session_user_id`] and, for the bootstrap / no-auth path, by
+//! [`initialize_session_user_id_standalone`], which installs the bootstrap
+//! superuser.
 //!
-//! - [`init_postgres`] runs `backend_task_init` then the deferred
-//!   connect-to-database / authentication sequence, calling the existing stubs
-//!   for the subsystems that are not part of this step (proc array, relcache,
-//!   catalog, auth, GUC). Those calls are deliberately left on
-//!   `unimplemented!()` stubs.
-//!
-//! - [`initialize_session_user_id`] / [`initialize_session_user_id_standalone`]
-//!   set the session's user fields. The standalone (bootstrap / no-auth) variant
-//!   uses the bootstrap superuser.
+//! Several of the deferred phases are not yet implemented. The proc-array
+//! attach, relation/catalog cache initialization, client authentication, and
+//! the `CheckMyDatabase` lookup against `pg_database` are left as stubs that the
+//! startup sequence calls into. Until the catalog is available, role resolution
+//! sets the user ids directly from the caller-supplied oids rather than reading
+//! `pg_authid`, so role attributes such as login permission, connection limit,
+//! and superuser status are not yet enforced.
 
 use crate::catalog::pg_authid::BOOTSTRAP_SUPERUSERID;
 use crate::miscadmin::{is_bootstrap_processing_mode, BackendType, InitPgFlags};
@@ -99,6 +109,13 @@ pub async fn init_postgres(
         // Deferred: resolve the database (CheckMyDatabase against pg_database),
         // set up relcache phase 3, ACL framework, client encoding, GUC settings.
         // check_my_database(dbname, am_superuser, override_allow_connections);
+        //
+        // Concurrency contract to preserve when this lands (postinit.c:1036-1138):
+        // take LockSharedObject(DatabaseRelationId, dboid, RowExclusiveLock) FIRST,
+        // then set MyProc->databaseId (ProcArray publication MUST follow the lock,
+        // else deadlock with CountOtherDBBackends / DROP DATABASE), then
+        // InvalidateCatalogSnapshot(). This per-object lock is distinct from any
+        // catalog AccessShareLock; do not reorder or collapse these.
 
         in_dbname.unwrap_or("").to_string()
     })

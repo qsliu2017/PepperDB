@@ -106,12 +106,16 @@ pub fn ItemPointerCompare(arg1: &ItemPointerData, arg2: &ItemPointerData) -> i32
     arg1.compare(arg2)
 }
 
-pub fn ItemPointerInc(_pointer: &mut ItemPointerData) {
-    unimplemented!()
+#[deprecated(note = "use `pointer.inc()`")]
+#[inline]
+pub fn ItemPointerInc(pointer: &mut ItemPointerData) {
+    pointer.inc();
 }
 
-pub fn ItemPointerDec(_pointer: &mut ItemPointerData) {
-    unimplemented!()
+#[deprecated(note = "use `pointer.dec()`")]
+#[inline]
+pub fn ItemPointerDec(pointer: &mut ItemPointerData) {
+    pointer.dec();
 }
 
 // Datum conversions: an ItemPointer travels in a Datum as a pointer value.

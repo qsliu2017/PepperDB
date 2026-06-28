@@ -1,27 +1,39 @@
-//! Translated from PostgreSQL src/backend/access/transam/rmgr.c
+//! Resource manager definitions and lookup. Translated from backend/access/transam/rmgr.c.
 //!
-//! Resource-manager dispatch. PG keeps a fixed `RmgrData` array (a struct of
-//! function pointers) indexed by `RmgrId` (the value stored in every WAL record's
-//! `xl_rmid`); recovery and pg_waldump look an rmgr up there for its
-//! `redo`/`desc`/etc. handlers. Here that table-of-pointers becomes the [`Rmgr`]
-//! trait plus a `match`-based [`GetRmgr`]: each builtin is a zero-sized unit struct
-//! implementing `Rmgr`, and `GetRmgr` returns a `&'static dyn Rmgr` for the id.
+//! Every WAL record carries an `RmgrId` in its `xl_rmid` field naming the resource
+//! manager that owns it. PostgreSQL keeps a fixed `RmgrTable` array of `RmgrData`
+//! entries - structs of function pointers (`rm_redo`, `rm_desc`, `rm_identify`,
+//! `rm_startup`, `rm_cleanup`, ...) - indexed by that id. Recovery, `pg_waldump`,
+//! and logical decoding look up an rmgr by id to apply, describe, or decode a
+//! record. The builtin set is declared by the `PG_RMGR(...)` list in
+//! `access/rmgrlist.h`; ids beyond the builtins are reserved for custom resource
+//! managers loaded from `shared_preload_libraries`. `RmgrStartup`/`RmgrCleanup`
+//! iterate the table to drive per-rmgr recovery hooks, and `RmgrNotFound` reports
+//! an error when a record names an unregistered id.
 //!
-//! The per-AM handlers (heap/btree/xact/... redo, desc, ...) are DEFERRED to later
-//! steps, so the builtins inherit the trait's deferred-default `redo`/`desc`/
-//! `identify` (an empty/no-op default, NOT `unimplemented!()`: per-AM redo lands
-//! later and an unfired record must not panic). Only `name()` is overridden, with
-//! the correct PG name.
+//! Each entry exposes its method handlers: `redo` applies a decoded record during
+//! recovery, `desc` renders a human-readable description, `identify` names the
+//! record type encoded in the rmgr-owned bits of `xl_info`, and the optional
+//! `startup`/`cleanup` callbacks bracket recovery for managers that need them.
 //!
-//! `redo` takes the NON-generic [`DecodedXLogRecord`] (the part of the C
-//! `XLogReaderState*` a redo handler actually reads), so the trait and `GetRmgr`
-//! stay non-generic regardless of the reader's `XLogReader<F>` generic.
+//! Here the table of function pointers becomes the [`Rmgr`] trait plus a
+//! `match`-based [`GetRmgr`]: each builtin is a zero-sized unit struct implementing
+//! `Rmgr`, and `GetRmgr` returns a `&'static dyn Rmgr` for an id. Because the
+//! builtins are immutable zero-sized values dispatched by a `match`, there is no
+//! mutable shared table and no lock; the custom-rmgr registration path
+//! (`RegisterCustomRmgr`) and the `pg_get_wal_resource_managers` SQL function are
+//! not implemented here.
 //!
-//! Concurrency: builtin rmgrs are immutable zero-sized values, dispatched by a
-//! `match`; there is no mutable table and no lock. Custom-rmgr registration (the
-//! shared-preload-libraries path) is not part of the foundation.
+//! The per-resource-manager handlers (heap, btree, transaction, ... redo and desc)
+//! are not yet ported, so the builtins inherit the trait's default `redo`/`desc`/
+//! `identify`, which are inert no-ops rather than panics - an unfired record must
+//! not abort recovery. Only `name()` is overridden, returning the correct
+//! PostgreSQL name. `redo` takes the non-generic [`DecodedXLogRecord`] (the slice
+//! of a WAL reader's state a redo handler actually reads), keeping the trait and
+//! `GetRmgr` independent of the reader's generic parameter. `RmgrNotFound` raises a
+//! PostgreSQL-style error carrying the original message and hint.
 
-use crate::access::rmgr::RmgrId;
+use crate::access::rmgr::{RmgrId, RM_N_BUILTIN_IDS};
 use crate::access::rmgrlist::RmgrId as BuiltinRmgrId;
 use crate::access::xlogreader::DecodedXLogRecord;
 
@@ -122,7 +134,8 @@ const BUILTIN_RMGR_IDS: [BuiltinRmgrId; RM_N_BUILTINS] = [
     BuiltinRmgrId::Logicalmsg,
 ];
 
-const RM_N_BUILTINS: usize = BuiltinRmgrId::MAX_ID as usize + 1;
+/// Builtin rmgr count = canonical C `RM_N_BUILTIN_IDS` (single source of truth).
+const RM_N_BUILTINS: usize = RM_N_BUILTIN_IDS as usize;
 
 /// C `GetRmgr(rmid)`: the resource manager for `rmid`. Panics on an unregistered
 /// id (the C macro asserts `RmgrIdExists`; the prior table lookup likewise
@@ -152,9 +165,8 @@ pub fn GetRmgr(rmid: RmgrId) -> &'static dyn Rmgr {
         x if x == BuiltinRmgrId::Replorigin as RmgrId => REPLORIGIN_RMGR,
         x if x == BuiltinRmgrId::Generic as RmgrId => GENERIC_RMGR,
         x if x == BuiltinRmgrId::Logicalmsg as RmgrId => LOGICALMSG_RMGR,
-        // TODO(panic): the C macro asserts RmgrIdExists; an unregistered id is a
-        // programming error (custom rmgrs are not registered in the foundation).
-        other => panic!("resource manager with ID {other} not registered"),
+        // C routes an unregistered id through RmgrNotFound (errmsg + errhint).
+        other => RmgrNotFound(other),
     }
 }
 
@@ -180,12 +192,14 @@ pub fn RmgrCleanup() {
     }
 }
 
-/// C `RmgrNotFound`: raise when a record carries an unrecognized RmgrId.
+/// C `RmgrNotFound`: ereport(ERROR) when a record carries an unrecognized
+/// RmgrId. Carries PG's errmsg + errhint; ereport(ERROR) -> panic per error model.
 #[allow(non_snake_case)]
-#[deprecated(note = "TODO(panic): migrate to Result + ?")]
 pub fn RmgrNotFound(rmid: RmgrId) -> ! {
-    // TODO(panic): this is the ereport(ERROR) path; for now panic.
-    panic!("resource manager with ID {rmid} not registered");
+    panic!(
+        "resource manager with ID {rmid} not registered\n\
+         HINT: Include the extension module that implements this resource manager in \"shared_preload_libraries\"."
+    );
 }
 
 #[cfg(test)]

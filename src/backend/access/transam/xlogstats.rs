@@ -1,9 +1,22 @@
-//! Translated from PostgreSQL src/backend/access/transam/xlogstats.c
+//! WAL statistics accumulation. Translated from backend/access/transam/xlogstats.c.
 //!
-//! WAL statistics accumulation: split a record's length into its full-page-image
-//! (FPI) and non-FPI parts, and tally per-rmgr / per-record-type counts and
-//! bytes. Used by pg_waldump and the WAL-stats views. Pure value logic over a
-//! decoded record.
+//! Provides the functions that tally write-ahead-log usage as records are read
+//! back. A record's total length is split into its full-page-image (FPI) part
+//! and everything else, and those byte counts plus a record tally are folded
+//! into running totals. Statistics are kept two ways: per resource manager
+//! (rmgr), and per record type, where a record type is identified by the rmgr
+//! plus the four bits of the info field that belong to the rmgr (sixteen
+//! possible entries per rmgr). XACT records are special-cased: the high bit of
+//! those four is an optional flag, so it is masked off and only the three-bit
+//! opcode identifies the record. These counts back tools such as pg_waldump and
+//! the WAL-statistics views.
+//!
+//! The logic is pure value computation over an already-decoded record and does
+//! not depend on shared state, so it is a faithful translation of the C source.
+//! The C out-parameters of `XLogRecGetLen` are folded into a returned
+//! `(rec_len, fpi_len)` tuple. Both entry points also have header-compatible
+//! shims taking an `XLogReaderState`, which read its most recently decoded
+//! record.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

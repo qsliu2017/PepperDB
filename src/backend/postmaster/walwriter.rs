@@ -1,21 +1,33 @@
-//! Translated from PostgreSQL src/backend/postmaster/walwriter.c
+//! The WAL writer background task. Translated from backend/postmaster/walwriter.c.
 //!
-//! The WAL writer: a long-lived auxiliary task that keeps regular backends from
-//! having to write out (and fsync) WAL pages, and that guarantees asynchronously
-//! committed transactions reach disk within a bounded time (at most three
-//! `wal_writer_delay` cycles). Each cycle runs `XLogBackgroundFlush`, then sleeps
-//! `WalWriterDelay` ms (or `WalWriterDelay * HIBERNATE_FACTOR` once it has been
-//! idle for `LOOPS_UNTIL_HIBERNATE` cycles) until its latch is rung or the delay
-//! elapses.
+//! The WAL writer attempts to keep regular backends from having to write out (and
+//! fsync) WAL pages. It also guarantees that transaction commit records that were
+//! not synced to disk immediately upon commit -- that is, "asynchronous" commits --
+//! will reach disk within a knowable time, which is at most three times the
+//! `wal_writer_delay` cycle time. Because the cycle is directly linked to that
+//! bound, the writer deliberately does nothing else: each cycle flushes pending WAL
+//! and then sleeps. As with the background writer, regular backends remain free to
+//! issue WAL writes and fsyncs when the writer does not keep up, so the writer is
+//! not an essential task and can shut down quickly when asked.
 //!
-//! Single-process redesign vs PG's walwriter.c:
-//! - The walwriter advertises its ProcNumber in `ProcGlobal.walwriter_proc` so
-//!   async-commit backends can wake it by `ProcNumber` (PG `ProcGlobal->
-//!   walwriterProc`). [`wake_walwriter`] rings that PGPROC's `proc_latch`; the
-//!   advertisement is cleared on exit by the RAII guard.
-//! - PG's in-loop `sigsetjmp` error recovery is NOT reproduced: an
-//!   `elog(ERROR)`-as-panic propagates to the task boundary, where the supervisor
-//!   (17f) restarts the task (mirrors the checkpointer, 17a).
+//! Each cycle flushes any background WAL, reports pending statistics, and then
+//! sleeps for `WalWriterDelay` milliseconds. After `LOOPS_UNTIL_HIBERNATE` cycles
+//! with nothing useful to do, the writer lengthens its sleep to
+//! `WalWriterDelay * HIBERNATE_FACTOR` to reduce idle power consumption, returning
+//! to the short delay as soon as there is work. While hibernating it advertises a
+//! sleeping flag so async-commit backends know to wake it.
+//!
+//! In PepperDB the writer is a long-lived async task rather than a forked process.
+//! It runs until its supervisor cancels it instead of exiting on SIGTERM, and its
+//! wakeup latch is its own PGPROC's latch over a tokio notification rather than a
+//! POSIX latch. The writer advertises its proc number in the shared `ProcGlobal`
+//! so async-commit backends can ring that latch through `wake_walwriter`. The
+//! per-process memory context and in-loop `sigsetjmp` error recovery are not
+//! reproduced: a fatal error unwinds the task as a panic, and the supervisor
+//! restarts it. All exit cleanup -- clearing the advertised proc number,
+//! deregistering the proc-signal slot, and releasing the PGPROC -- runs from an
+//! RAII guard on every exit, normal or panicking, in place of `proc_exit`
+//! callbacks.
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;

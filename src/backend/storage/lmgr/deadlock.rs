@@ -1,35 +1,44 @@
-//! Translated from PostgreSQL src/backend/storage/lmgr/deadlock.c
+//! POSTGRES deadlock detection code. Translated from backend/storage/lmgr/deadlock.c.
 //!
-//! The deadlock detector: `DeadLockCheck` builds the waits-for graph from the
-//! lock tables, looks for a cycle (FindLockCycle DFS, distinguishing HARD edges
-//! -- a proc holds a conflicting lock -- from SOFT edges -- a proc is merely
-//! ahead in the same wait queue and could be reordered), and tries to find a
-//! deadlock-free reordering of the soft edges (DeadLockCheckRecurse ->
-//! TestConfiguration -> ExpandConstraints -> TopoSort). A soft solution is
-//! applied by rewriting each LOCK.wait_procs queue and waking the now-grantable
-//! waiters (ProcLockWakeup); no solution is a hard deadlock (ERROR).
+//! When a backend has waited too long for a lock, it runs the deadlock detector.
+//! `DeadLockCheck` builds the waits-for graph from the lock tables and searches it
+//! for a cycle. Each edge is classified as either a hard edge -- a process holds a
+//! conflicting lock that another process is waiting for -- or a soft edge, where a
+//! process is merely ahead of another in the same lock's wait queue and could in
+//! principle be reordered. A cycle made only of hard edges is an unbreakable
+//! deadlock and is reported as an error; a cycle that includes soft edges may be
+//! resolvable by rearranging one or more wait queues so that no cycle remains.
+//! The detector enumerates candidate reorderings (TestConfiguration,
+//! ExpandConstraints) and topologically sorts each affected queue (TopoSort); a
+//! valid configuration is applied by rewriting the queues and waking any waiters
+//! that have become grantable. The principal entry point is `DeadLockCheck`, with
+//! `DeadLockReport` building the diagnostic message for an unresolvable cycle. The
+//! original algorithm is described in backend/storage/lmgr/README.
 //!
-//! Locking (design step15 s4): `DeadLockCheck` is SYNC and runs with ALL
-//! `NUM_LOCK_PARTITIONS` partition Mutexes held (acquired by `CheckDeadLock` in
-//! proc.c). Because every partition is locked, the graph walk can safely deref the
-//! `*mut LOCK`/`*mut PROCLOCK` it finds and read any PGPROC slot's wait fields. No
-//! `.await` happens here.
+//! PepperDB runs as a single process rather than many backends sharing memory, so
+//! the detector operates over the in-process lock tables. `DeadLockCheck` is fully
+//! synchronous and is called while every lock-partition mutex is already held, so
+//! it may freely walk the graph and read each process's wait fields without further
+//! locking and without awaiting. Processes are identified by `ProcNumber` (a stable
+//! arena index that is cheap to copy and pass between tasks) instead of raw `PGPROC`
+//! pointers; locks are still referenced by pointer into the boxed partition entries,
+//! which stay fixed while their partition is locked. PostgreSQL allocates the
+//! detector's scratch arrays once per backend in `InitDeadLockChecking`; here they
+//! are sized from `MaxBackends` and allocated per call, which is cheap because a
+//! deadlock check is rare and `MaxBackends` is bounded.
 //!
-//! Representation: PG keeps `PGPROC *`/`LOCK *` in EDGE/WAIT_ORDER; we use
-//! `ProcNumber` for procs (the arena identity, Send-friendly) and `*mut LOCK` for
-//! locks (the boxed shard entries are stable while their partition is locked). The
-//! per-call workspaces (visited/topo/constraints/wait-orders) are allocated on
-//! demand sized from `MaxBackends` (NOT shmem); PG does this once per backend in
-//! `InitDeadLockChecking`.
-//!
-//! Lock groups are single-member until F4: a proc's group leader is itself, so the
-//! group-member loops collapse. The structure is faithful so F4 can fill them.
+//! Lock groups (parallel-query cooperating processes that share locks) are modeled
+//! but currently always single-member: a process is its own group leader, so the
+//! group-member loops collapse to a single iteration. The graph structure follows
+//! PostgreSQL faithfully so that multi-member groups can be populated later.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     reason = "TODO(error-migration): pre-existing backlog; new code uses OrElog/?/crate::assert!"
 )]
 
+use crate::ereport;
+use crate::utils::elog::ERROR;
 use crate::storage::lock::{DeadLockState, LOCK, LOCKMODE, LOCKTAG, LockTagType, lockbit_on};
 use crate::storage::lockdefs::LOCKMASK;
 use crate::storage::proc::{LockGroupRole, ProcGlobal};
@@ -901,18 +910,28 @@ fn topo_sort(
 // ---------------------------------------------------------------------------
 
 /// PG `DeadLockReport`: raise the deadlock ERROR with the recorded cycle details.
-/// `pg_noreturn` in C; here a panic carrying the error (rules s6.2).
-// TODO(panic): migrate to Result + ?.
+/// `pg_noreturn` in C; here `ereport!(ERROR)` panics with the ErrorData (error.md
+/// s2.1), recovered at the per-command catch as SQLSTATE 40P01.
 pub fn DeadLockReport() -> ! {
-    let detail = {
+    let client_detail = {
         let p = PUBLISHED.lock();
         match p.as_ref() {
             Some(pd) if pd.n > 0 => describe_cycle(&pd.details[..pd.n]),
             _ => String::from("deadlock detected"),
         }
     };
-    // PG ereport(ERROR, ERRCODE_T_R_DEADLOCK_DETECTED, "deadlock detected", detail).
-    panic!("deadlock detected: {detail}");
+    // PG's logbuf duplicates clientbuf then appends per-pid current-activity
+    // lines (pgstat_get_backend_current_activity, not wired yet); baseline-match
+    // appendBinaryStringInfo(logbuf, clientbuf) for now.
+    let log_detail = client_detail.clone();
+    ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_T_R_DEADLOCK_DETECTED)
+            .errmsg("deadlock detected")
+            .errdetail_internal(client_detail.clone())
+            .errdetail_log(log_detail.clone())
+            .errhint("See server log for query details.");
+    });
+    unreachable!()
 }
 
 /// Build the "Process N waits for ... blocked by process M" detail lines.
@@ -962,10 +981,11 @@ pub fn RememberSimpleDeadLock(
         let p1 = g.proc(proc1).map_or(0, |p| p.pid);
         let p2 = g.proc(proc2);
         let p2_pid = p2.map_or(0, |p| p.pid);
-        let (tag, mode) = match p2.and_then(|p| p.wait_lock.map(|l| (l, p.wait_lock_mode))) {
-            Some((l, m)) => ((*l).tag, m),
-            None => (lock.tag, lockmode),
-        };
+        // PG dereferences proc2->waitLock unconditionally: proc2 is already
+        // waiting, so it is non-NULL. Surface the broken invariant instead.
+        let p2_wait = p2.and_then(|p| p.wait_lock.map(|l| (l, p.wait_lock_mode)));
+        crate::assert!(p2_wait.is_some());
+        let (tag, mode) = p2_wait.map_or((lock.tag, lockmode), |(l, m)| ((*l).tag, m));
         (p1, p2_pid, tag, mode)
     };
     let details = vec![

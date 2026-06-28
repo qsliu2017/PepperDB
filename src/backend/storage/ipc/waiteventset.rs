@@ -1,18 +1,27 @@
-//! Translated from PostgreSQL src/backend/storage/ipc/waiteventset.c
+//! ppoll()/pselect()-like abstraction for waiting on multiple events at once.
+//! Translated from backend/storage/ipc/waiteventset.c.
 //!
-//! The OS multiplexing (CreateWaitEventSet's epoll/kqueue/poll/win32 backends and
-//! WaitEventSetWaitBlock) is deleted. tokio supplies every wakeup source:
+//! A WaitEventSet collects several wakeup sources and waits on them together,
+//! returning as soon as any one of them fires. The sources are: a latch being set
+//! (LATCH_SET), a socket becoming readable or writable (SOCKET_*), supervisor
+//! death (POSTMASTER_DEATH, or EXIT_ON_PM_DEATH which exits rather than reporting),
+//! and a timeout. In PostgreSQL the waiting is race-free, comparable to ppoll() or
+//! pselect() rather than plain poll()/select(): a latch set concurrently or from a
+//! signal handler is guaranteed to be observed instead of being lost just before
+//! the sleep begins.
 //!
-//!   * LATCH_SET      -> the Latch's `Notify` (via `Latch::wait`)
-//!   * SOCKET_*       -> `tokio::io::unix::AsyncFd` readiness on the raw fd
-//!   * TIMEOUT        -> `tokio::time::sleep`
-//!   * POSTMASTER_DEATH -> a shared `Notify`/flag standing in for supervisor
-//!     shutdown (wired to the real supervisor in a later step)
-//!
-//! WaitEventSetWait races these with `futures_util::future::select_all` and
-//! returns the WaitEvent(s) that fired. Socket-event shaping (distinguishing
-//! readable vs writable vs closed precisely) is provisional pending step 09, the
-//! first real consumer.
+//! PostgreSQL builds this on the most modern OS readiness primitive available
+//! (epoll, kqueue, poll, or Windows events), and closes the latch race with a
+//! self-pipe or signalfd. None of that machinery exists here. The tokio runtime is
+//! the multiplexer, so each source becomes a future and they are raced together:
+//! LATCH_SET awaits the latch's notification, SOCKET_* registers the borrowed file
+//! descriptor with the tokio reactor and awaits the requested readiness, the
+//! timeout is a tokio timer, and POSTMASTER_DEATH awaits a shared notification that
+//! stands in for supervisor shutdown in this single-process design. Because tokio
+//! already serializes wakeups against the awaiting task, the self-pipe and signalfd
+//! tricks are unnecessary and are dropped. The per-OS backend selection, the
+//! preallocated kernel event arrays, and the ResourceOwner bookkeeping likewise
+//! have no analogue and are gone; teardown is ordinary Rust drop.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -230,23 +239,33 @@ impl WaitEventSet<'_> {
         }
 
         let race = select_all(futures);
-        match timeout {
+        let (event, rest) = match timeout {
             t if t < 0 => {
-                let (event, _idx, _rest) = race.await;
-                vec![event]
+                let (event, _idx, rest) = race.await;
+                (event, rest)
             }
             t => {
                 let dur = Duration::from_millis(t as u64);
                 match tokio::time::timeout(dur, race).await {
-                    Ok((event, _idx, _rest)) => {
-                        let mut out = vec![event];
-                        out.truncate(max_events.max(1));
-                        out
-                    }
-                    Err(_) => Vec::new(), // timed out
+                    Ok((event, _idx, rest)) => (event, rest),
+                    Err(_) => return Vec::new(), // timed out
                 }
             }
+        };
+
+        // PG, after seeing one event, polls once with zero timeout to pack any
+        // other already-ready events into the output buffer. Mirror that: drain
+        // the remaining futures that resolve immediately, up to max_events.
+        let mut out = vec![event];
+        for fut in rest {
+            if out.len() >= max_events.max(1) {
+                break;
+            }
+            if let Some(extra) = fut.now_or_never() {
+                out.push(extra);
+            }
         }
+        out
     }
 }
 
@@ -266,17 +285,19 @@ async fn wait_socket(fd: RawFd, flags: WaitEventFlags, pos: i32, user_data: Datu
     let async_fd = AsyncFd::with_interest(borrowed, interest)
         .expect("registering fd with the tokio reactor failed");
 
+    // Race readable and writable; PG reports both bits when both are ready in one
+    // call, so don't if/else one branch. `ready(interest)` returns whichever fired.
     let mut events = WaitEventFlags::empty();
-    if want_read {
-        if let Ok(mut g) = async_fd.readable().await {
-            g.clear_ready();
+    if let Ok(mut g) = async_fd.ready(interest).await {
+        let ready = g.ready();
+        if want_read && (ready.is_readable() || ready.is_read_closed()) {
             events |= WaitEventFlags::SOCKET_READABLE;
         }
-    } else if want_write
-        && let Ok(mut g) = async_fd.writable().await {
-            g.clear_ready();
+        if want_write && (ready.is_writable() || ready.is_write_closed()) {
             events |= WaitEventFlags::SOCKET_WRITEABLE;
         }
+        g.clear_ready();
+    }
 
     WaitEvent {
         pos,

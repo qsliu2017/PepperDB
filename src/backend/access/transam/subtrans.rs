@@ -1,9 +1,29 @@
-//! Translated from PostgreSQL src/backend/access/transam/subtrans.c
+//! The pg_subtrans subtransaction-log manager. Translated from backend/access/transam/subtrans.c.
 //!
-//! The pg_subtrans manager: stores the immediate parent xid of each
-//! subtransaction over the SLRU async leaf. No WAL (not preserved across
-//! crashes). The subtrans `SlruCtl` lives on `SharedState`; reached via
-//! `shared.subtrans()`.
+//! The pg_subtrans manager is a pg_xact-like manager that stores the parent
+//! transaction id for each transaction; it is a fundamental part of the nested
+//! transactions implementation. A main transaction has a parent of
+//! `InvalidTransactionId`, and each subtransaction records its immediate
+//! parent. The tree can be walked from child to parent, but not the other way.
+//! Four bytes (one TransactionId) are stored per xact, packed BLCKSZ pages at a
+//! time over an SLRU.
+//!
+//! Unlike pg_xact, the robustness requirements are minimal: only the
+//! subtransaction information for currently-open transactions matters, so there
+//! is no need to preserve data across a crash and restart. There are
+//! correspondingly no WAL interactions; on startup the currently-active page
+//! span is simply forced to zeroes. The principal entry points are
+//! `sub_trans_set_parent`, `sub_trans_get_parent`, and
+//! `sub_trans_get_topmost_transaction`, with `boot_strap_subtrans`,
+//! `startup_subtrans`, `extend_subtrans`, `truncate_subtrans`, and
+//! `check_point_subtrans` managing the backing pages.
+//!
+//! The entry points are methods on the shared `SlruCtl`, which replaces
+//! PostgreSQL's shared-memory `SlruCtlData` link: the control structure is
+//! `Arc`-shared rather than mapped into a shared-memory segment, and page reads
+//! and writes are `async` rather than blocking. Page access goes through the
+//! SLRU's own read/write helpers, so the locking that C performed with SLRU
+//! LWLocks is handled inside that layer instead of here.
 
 use std::sync::Arc;
 
@@ -97,15 +117,16 @@ impl SlruCtl {
         let pageno = xid_to_page(xid);
         let entry = xid_to_entry(xid);
         self.read_page_with(pageno, true, xid, |mut page| {
-            let buf = page.buf_mut();
-            let cur = parent_from_le(buf, entry);
+            // Compare via the read view; only dirty the page if it actually
+            // changes (subtrans.c sets page_dirty only inside the `*ptr != parent`).
+            let cur = parent_from_le(page.buf(), entry);
             if cur.0 != parent.0 {
                 debug_assert!(
                     cur.0 == 0,
                     "subtrans parent must not change from one valid xid to another"
                 );
                 let le = parent_to_le(parent);
-                buf[entry * 4..entry * 4 + 4].copy_from_slice(&le);
+                page.buf_mut()[entry * 4..entry * 4 + 4].copy_from_slice(&le);
             }
         })
         .await;

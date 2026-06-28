@@ -1,18 +1,26 @@
-//! Translated from PostgreSQL src/backend/storage/page/bufpage.c
-//! POSTGRES standard buffer page code.
+//! Standard buffer-page support routines. Translated from backend/storage/page/bufpage.c.
 //!
-//! Slotted-page operations as `impl Page` methods over the concrete
-//! `#[repr(C, align(8))]` page block. The fixed [`PageHeaderData`] header is
-//! overlaid on the leading bytes via the header module's `header`/`header_mut`
-//! accessors (sound: the newtype is aligned); the line-pointer array follows it.
+//! Implements PostgreSQL's slotted-page format: a fixed page header followed by a
+//! growing line-pointer (item id) array at the low end and tuple data filling in from
+//! the high end, with an optional special space reserved at the very top for access
+//! methods. The principal entry points initialize a page (`init`), validate one freshly
+//! read from disk (`is_verified`), add and remove items (`add_item`,
+//! `add_item_extended`, the `index_tuple_*` and `index_multi_delete` deletions),
+//! reclaim free space (`repair_fragmentation`, `truncate_line_pointer_array`), report
+//! available space (`get_free_space`, `get_exact_free_space`, `get_heap_free_space`),
+//! produce scratch copies (`get_temp_page*`, `restore_temp_page`), and compute or stamp
+//! the page checksum (`set_checksum_copy`, `set_checksum_inplace`).
 //!
-//! ON-DISK BIT-EXACT: layout, MAXALIGN rounding, item placement and fragmentation
-//! repair must match C byte-for-byte (an existing PG datadir must be readable). No
-//! layout "improvements".
+//! The page layout, MAXALIGN rounding, item placement, and fragmentation repair are
+//! byte-for-byte identical to PostgreSQL so that an on-disk data directory remains
+//! readable. Operations are realized as methods on the `#[repr(C, align(8))]` page
+//! block, with the fixed header overlaid on its leading bytes; there are no layout
+//! changes.
 //!
-//! NO ASYNC / NO LOCKS: pure synchronous value operations on an in-memory page
-//! buffer. The CALLER holds the buffer (content) lock. Nothing here awaits, takes
-//! a lock, or does I/O. Corruption (the C ereport(ERROR/PANIC)) maps to panic.
+//! These routines are pure synchronous operations on an in-memory page buffer: nothing
+//! here awaits, acquires a lock, or performs I/O. The caller is responsible for holding
+//! the buffer's content lock. Detected corruption, which PostgreSQL reports via
+//! ereport(ERROR) or ereport(PANIC), is signalled here as a panic.
 
 use crate::access::htup_details::MaxHeapTuplesPerPage;
 use crate::access::itup::MaxIndexTuplesPerPage;
@@ -477,7 +485,17 @@ impl Page {
         }
 
         if nunusedend > 0 {
-            self.header_mut().lower -= (SIZE_OF_ITEM_ID as i32 * nunusedend) as u16;
+            let freed = (SIZE_OF_ITEM_ID as i32 * nunusedend) as u16;
+            let old_lower = self.header().lower;
+            self.header_mut().lower -= freed;
+            // CLOBBER_FREED_MEMORY: clobber the truncated line-pointer bytes (debug only).
+            #[cfg(debug_assertions)]
+            {
+                let new_lower = self.header().lower as usize;
+                self[new_lower..old_lower as usize].fill(0x7F);
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = old_lower;
         } else {
             debug_assert!(sethint);
         }

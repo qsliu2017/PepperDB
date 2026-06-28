@@ -1,44 +1,45 @@
-//! Translated from PostgreSQL src/backend/postmaster/autovacuum.c
+//! The integrated autovacuum daemon. Translated from backend/postmaster/autovacuum.c.
 //!
-//! The integrated autovacuum daemon, structured as two kinds of long-lived
-//! auxiliary tasks:
-//! - the LAUNCHER ([`auto_vac_launcher_main`]): always running while autovacuum is
-//!   enabled. It maintains a per-database schedule (`DatabaseList`, ordered by next
-//!   wakeup) and, each naptime, asks for a worker to be started on the database
-//!   that is due. It does not start workers itself (PG: it signals the postmaster);
-//!   under our model it calls [`request_autovac_worker`], which spawns the worker
-//!   task through a hook the supervisor (17f) installs.
-//! - the WORKER ([`auto_vac_worker_main`]): claims the `av_startingWorker` slot the
-//!   launcher set up, moves it onto the running list, connects to the chosen
-//!   database, and runs [`do_autovacuum`] (the catalog scan + per-table
-//!   vacuum/analyze). On exit it returns its WorkerInfo to the freelist
-//!   ([`free_worker_info`]) and wakes the launcher.
+//! Autovacuum is structured around two kinds of long-lived workers: the
+//! launcher and the worker. The launcher is an always-running task, started
+//! while the `autovacuum` setting is enabled. It maintains a per-database
+//! schedule ordered by next wakeup and, once it decides a database is due,
+//! arranges for a worker to be started on it. The launcher does not start
+//! workers directly: it records the database it wants vacuumed and requests a
+//! worker, leaving the actual launch to the surrounding supervisor. A worker
+//! claims the slot the launcher set up, connects to the chosen database,
+//! examines the catalogs to pick the tables to vacuum, and runs the per-table
+//! vacuum and analyze. When a worker finishes it returns its slot to the free
+//! list and wakes the launcher, which can then launch another worker if the
+//! schedule is tight and can rebalance the cost-based vacuum delay across the
+//! remaining workers.
 //!
-//! Single-process redesign vs PG's autovacuum.c:
-//! - `AutoVacuumShmemStruct` becomes `Arc<AutoVacuumShmem>` published process-wide
-//!   via a `OnceLock` (like checkpointer.rs / pgarch.rs). PG's `dclist`/`dlist`
-//!   worker lists are modeled as `Vec<usize>` index lists over a fixed
-//!   `Vec<WorkerInfoData>` (the worker slot array), all under one `Mutex` (PG's
-//!   `AutovacuumLock`; the rarely-separate `AutovacuumScheduleLock` collapses into
-//!   the same lock here, faithful for a single process).
-//! - The launcher advertises its proc number in `ProcGlobal.autovacuum_launcher_
-//!   proc` (PG advertises `av_launcherpid`); a worker rings that latch on exit.
-//! - PG's in-loop `sigsetjmp` recovery is NOT reproduced: an `elog(ERROR)`-as-panic
-//!   propagates to the task boundary, where the supervisor (17f) restarts the task
-//!   (mirrors the checkpointer, 17a).
-//! - The launch handshake `SendPostmasterSignal(PMSIGNAL_START_AUTOVAC_WORKER)` ->
-//!   the spawn hook (see [`request_autovac_worker`]). If no hook is installed
-//!   (e.g. unit tests) the launcher still records the request faithfully (sets
-//!   `av_startingWorker`) and logs; the worker is simply not spawned.
-//! - `get_database_list` / `do_start_worker` / `do_autovacuum` are translated in
-//!   full (s4): they call the deferred pg_database/pg_class catalog scan, syscache,
-//!   vacuum, and pgstat stubs, which `unimplemented!()`. To keep the launcher from
-//!   being driven into those stubs on its naptime timer, autovacuum defaults OFF
-//!   (`autovacuum_start_daemon=false`) and the supervisor only spawns the launcher
-//!   when [`auto_vacuuming_active`] is true (faithful: PG's postmaster does not
-//!   fork the launcher when `autovacuum=off`, the wraparound-emergency case aside,
-//!   which is deferred). The bodies therefore EXIST and are correct, but are only
-//!   reached when autovacuum is turned on and a real catalog is present.
+//! More than one worker can be active in a single database at once. Each worker
+//! records the table it is currently vacuuming in shared state so that the
+//! others avoid blocking on the same relation, and consults the latest vacuum
+//! statistics just before each table to skip work another worker has already
+//! done.
+//!
+//! Unlike PostgreSQL, PepperDB runs as a single process, so the multi-process
+//! machinery collapses. The shared-memory autovacuum area becomes an
+//! `Arc`-shared state struct published process-wide through a `OnceLock`; the
+//! launcher's and workers' intrusive worker lists become index lists over a
+//! fixed slot array, all guarded by one mutex that stands in for PostgreSQL's
+//! separate autovacuum locks. There is no postmaster fork-and-signal handshake
+//! to start a worker: the launcher records the request and asks the supervisor
+//! to spawn the worker task; if no spawn hook is installed (as in unit tests)
+//! the request is still recorded faithfully but no worker runs. The launcher
+//! advertises its identity in the shared process table rather than by process
+//! id, and a finishing worker notifies it directly. PostgreSQL's per-iteration
+//! `sigsetjmp` error recovery is not reproduced: an error propagates as a panic
+//! to the task boundary, where the supervisor restarts the task.
+//!
+//! The catalog-driven core - building the database list, choosing a database,
+//! and the per-table vacuum and analyze scan - is translated in full but
+//! depends on catalog access, vacuum, and statistics machinery that is not yet
+//! implemented and will panic if reached. To keep the launcher from being
+//! driven into those paths, autovacuum defaults off and the launcher is only
+//! spawned when it is explicitly enabled and a real catalog is present.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -481,12 +482,18 @@ pub async fn auto_vac_launcher_main(shared: Arc<SharedState>, shutdown: Arc<toki
             }
 
             // Conditions to check before launching: a free slot, and no other
-            // worker stuck while starting up.
+            // worker stuck while starting up. PG evaluates both under a single
+            // AutovacuumLock hold (shared, upgraded to exclusive only to reclaim a
+            // stuck slot); we inline av_worker_available's freelist check under the
+            // one shmem guard so the count and the starting-worker decision are
+            // observed atomically.
             let current_time = GetCurrentTimestamp();
-            let mut can_launch = av_worker_available(&shmem);
+            let mut can_launch;
 
             {
                 let mut inner = shmem.lock();
+                let reserved = (autovacuum_worker_slots() - autovacuum_max_workers()).max(0);
+                can_launch = inner.free_workers.len() as i32 > reserved;
                 if let Some(idx) = inner.starting_worker {
                     // A worker is still starting. Wait up to min(naptime, 60)s for
                     // it; if it took too long, reclaim its slot (PG: the only cause
@@ -809,8 +816,10 @@ async fn do_start_worker(
         }
 
         // Find the pgstat entry; skip a database with none (no activity since the
-        // stats were initialized).
-        let entry = crate::pgstat::pgstat_fetch_stat_dbentry(tmp.datid);
+        // stats were initialized) -- PG autovacuum.c:1204 `if (!tmp->adw_entry) continue;`.
+        let Some(entry) = crate::pgstat::pgstat_fetch_stat_dbentry(tmp.datid) else {
+            continue;
+        };
 
         // Skip a database that the schedule shows was processed recently (its
         // next_worker falls within [now, now + naptime]): we may have just picked
@@ -831,7 +840,7 @@ async fn do_start_worker(
         }
 
         // Remember the db with the oldest autovac time.
-        if avdb.is_none() || entry.last_autovac_time < avdb_last_autovac(avdb) {
+        if avdb.is_none_or(|cur| entry.last_autovac_time < avdb_last_autovac(cur)) {
             avdb = Some(tmp);
         }
     }
@@ -859,10 +868,15 @@ async fn do_start_worker(
 
 /// Helper for the least-recently-autovacuumed comparison in [`do_start_worker`]:
 /// the current best candidate's `last_autovac_time` (its pgstat entry). Lands on
-/// the deferred pgstat stub.
-fn avdb_last_autovac(avdb: Option<&AvwDbase>) -> TimestampTz {
-    let avdb = avdb.expect("called only when a candidate is set");
-    crate::pgstat::pgstat_fetch_stat_dbentry(avdb.datid).last_autovac_time
+/// the deferred pgstat stub. PG invariant (autovacuum.c:1240): reached only in the
+/// non-wraparound path, where every candidate passed the entry guard, so the entry
+/// is always present here.
+fn avdb_last_autovac(avdb: &AvwDbase) -> TimestampTz {
+    let Some(entry) = crate::pgstat::pgstat_fetch_stat_dbentry(avdb.datid) else {
+        crate::assert!(false, "candidate db lost its pgstat entry");
+        return TimestampTz::MIN;
+    };
+    entry.last_autovac_time
 }
 
 /// PG `launch_worker`. Start a worker (via `do_start_worker`) and update the
@@ -1023,7 +1037,7 @@ pub async fn auto_vac_worker_main(shared: Arc<SharedState>, _dbid: Oid) {
             RECENT_MULTI.store(crate::access::multixact::ReadNextMultiXactId().0, Ordering::Relaxed);
 
             // And do an appropriate amount of work.
-            do_autovacuum(&shared).await;
+            do_autovacuum(&shared, &shmem, exit.my_worker.get()).await;
         }
 
         // `exit` runs FreeWorkerInfo + wakes the launcher + returns the PGPROC.
@@ -1083,7 +1097,7 @@ struct AutovacTable {
     storage_param_vac_cost_limit: i32,
     /// C `at_dobalance`.
     dobalance: bool,
-    #[allow(dead_code, reason = "C at_sharedrel; consumed by the concurrent-worker skip check")]
+    /// C `at_sharedrel`; consumed by the concurrent-worker claim.
     sharedrel: bool,
     /// C `at_relname`.
     relname: Option<String>,
@@ -1103,7 +1117,11 @@ struct AutovacTable {
 /// database (autovacuum enabled + a real catalog), never on the launcher's timer.
 /// The `!Send` raw catalog handles are confined to the synchronous `collect_*`
 /// helpers so this future stays `Send`.
-async fn do_autovacuum(shared: &Arc<SharedState>) {
+async fn do_autovacuum(
+    shared: &Arc<SharedState>,
+    shmem: &Arc<AutoVacuumShmem>,
+    my_worker: Option<usize>,
+) {
     use crate::backend::access::transam::xact::{CommitTransactionCommand, StartTransactionCommand};
 
     // PG creates AutovacMemCxt to keep the table list across transactions; under
@@ -1126,25 +1144,60 @@ async fn do_autovacuum(shared: &Arc<SharedState>) {
     // Perform operations on collected tables, one transaction per table (PG runs
     // each vacuum in its own transaction so a failure aborts only that table).
     let mut did_vacuum = false;
-    let found_concurrent_worker = false;
+    let mut found_concurrent_worker = false;
+    let my_db = my_database_id();
     for relid in table_oids {
         crate::miscadmin::check_for_interrupts();
 
         StartTransactionCommand(shared).await;
+
+        // Skip the table if another worker is vacuuming it concurrently, else
+        // claim it by publishing wi_tableoid (PG holds AutovacuumScheduleLock +
+        // AutovacuumLock(SHARED); both collapse into our single shmem Mutex). Only
+        // a worker that owns a slot participates in the claim protocol.
+        if let Some(idx) = my_worker {
+            let skipit = {
+                let mut inner = shmem.lock();
+                let skip = inner.running_workers.iter().any(|&o| {
+                    o != idx
+                        && (inner.workers[o].wi_sharedrel || inner.workers[o].wi_dboid == my_db)
+                        && inner.workers[o].wi_tableoid == relid
+                });
+                if !skip {
+                    inner.workers[idx].wi_tableoid = relid;
+                }
+                skip
+            };
+            if skipit {
+                found_concurrent_worker = true;
+                CommitTransactionCommand(shared).await;
+                continue;
+            }
+        }
+
         // Recheck pgstat: the table may have been processed since we looked.
         let tab = table_recheck_autovac(relid, effective_multixact_freeze_max_age);
         let Some(mut tab) = tab else {
-            // Someone else vacuumed it, or it went away.
+            // Someone else vacuumed it, or it went away: drop our claim.
+            if let Some(idx) = my_worker {
+                let mut inner = shmem.lock();
+                inner.workers[idx].wi_tableoid = InvalidOid;
+                inner.workers[idx].wi_sharedrel = false;
+            }
             CommitTransactionCommand(shared).await;
             continue;
         };
 
-        // Recalculate the cost-balance participation (PG sets MyWorkerInfo->
-        // wi_dobalance then autovac_recalculate_workers_for_balance + VacuumUpdate
-        // Costs). The shared recount is reached only with a live worker slot.
-        if let Some(shmem) = autovacuum_shmem() {
-            autovac_recalculate_workers_for_balance(shmem);
+        // Finish the claim now that recheck gave us relisshared, set the worker's
+        // cost-balance participation from at_dobalance, then recount (PG:
+        // wi_sharedrel / pg_atomic_*_flag(wi_dobalance) under AutovacuumLock,
+        // then autovac_recalculate_workers_for_balance + VacuumUpdateCosts).
+        if let Some(idx) = my_worker {
+            let mut inner = shmem.lock();
+            inner.workers[idx].wi_sharedrel = tab.sharedrel;
+            inner.workers[idx].wi_dobalance = tab.dobalance;
         }
+        autovac_recalculate_workers_for_balance(shmem);
 
         // Save the relation name for a possible error message (a NULL means the rel
         // was dropped since we checked; skip it). PG get_rel_name /
@@ -1156,6 +1209,7 @@ async fn do_autovacuum(shared: &Arc<SharedState>) {
             ));
         tab.datname = crate::commands::dbcommands::get_database_name(my_database_id());
         if tab.relname.is_none() || tab.nspname.is_none() || tab.datname.is_none() {
+            release_table_claim(shmem, my_worker);
             CommitTransactionCommand(shared).await;
             continue;
         }
@@ -1166,6 +1220,9 @@ async fn do_autovacuum(shared: &Arc<SharedState>) {
         autovacuum_do_vac_analyze(&tab);
         did_vacuum = true;
 
+        // Release our claim on the table (PG :2517-2520: clear wi_tableoid /
+        // wi_sharedrel, then optimistically re-set wi_dobalance for the next table).
+        release_table_claim(shmem, my_worker);
         CommitTransactionCommand(shared).await;
     }
 
@@ -1180,6 +1237,19 @@ async fn do_autovacuum(shared: &Arc<SharedState>) {
         crate::commands::vacuum::vac_update_datfrozenxid();
         CommitTransactionCommand(shared).await;
     }
+}
+
+/// PG's per-table cleanup (autovacuum.c:2517-2520): clear the worker's table claim
+/// (wi_tableoid / wi_sharedrel) and optimistically re-set wi_dobalance for the next
+/// table, under the shmem lock. No-op when the worker owns no slot (tests).
+fn release_table_claim(shmem: &Arc<AutoVacuumShmem>, my_worker: Option<usize>) {
+    let Some(idx) = my_worker else {
+        return;
+    };
+    let mut inner = shmem.lock();
+    inner.workers[idx].wi_tableoid = InvalidOid;
+    inner.workers[idx].wi_sharedrel = false;
+    inner.workers[idx].wi_dobalance = true;
 }
 
 /// The synchronous two-pass pg_class scan of [`do_autovacuum`]: collect the OIDs of
@@ -1223,7 +1293,7 @@ fn collect_tables_to_vacuum(effective_multixact_freeze_max_age: i32) -> Vec<Oid>
         if cf.relpersistence == RELPERSISTENCE_TEMP {
             continue;
         }
-        let (dovacuum, doanalyze) =
+        let (dovacuum, doanalyze, _wraparound) =
             relation_needs_vacanalyze(cf.oid, cf, effective_multixact_freeze_max_age);
         if dovacuum || doanalyze {
             table_oids.push(cf.oid);
@@ -1248,7 +1318,7 @@ fn collect_tables_to_vacuum(effective_multixact_freeze_max_age: i32) -> Vec<Oid>
         if cf.relpersistence == RELPERSISTENCE_TEMP {
             continue;
         }
-        let (dovacuum, _doanalyze) =
+        let (dovacuum, _doanalyze, _wraparound) =
             relation_needs_vacanalyze(cf.oid, cf, effective_multixact_freeze_max_age);
         // Ignore analyze for toast tables.
         if dovacuum {
@@ -1263,13 +1333,13 @@ fn collect_tables_to_vacuum(effective_multixact_freeze_max_age: i32) -> Vec<Oid>
 
 /// PG `relation_needs_vacanalyze`. Decide whether a relation needs vacuum and/or
 /// analyze from its pg_class row + pgstat counters + the wraparound limits. The
-/// reloptions / pgstat fetch land on deferred stubs; returns `(dovacuum, doanalyze)`
-/// (PG also returns `wraparound`, folded into the vacuum decision here).
+/// reloptions / pgstat fetch land on deferred stubs; returns
+/// `(dovacuum, doanalyze, wraparound)` (PG's three out-params).
 fn relation_needs_vacanalyze(
     relid: Oid,
     class_form: &crate::catalog::pg_class::FormData_pg_class,
     effective_multixact_freeze_max_age: i32,
-) -> (bool, bool) {
+) -> (bool, bool, bool) {
     // Force vacuum if the table is at risk of xid/multixact wraparound. PG reads the
     // autovacuum_freeze_max_age GUC (+ per-table reloptions); reloptions are
     // deferred, so use the GUC defaults.
@@ -1300,7 +1370,7 @@ fn relation_needs_vacanalyze(
     let tabentry =
         crate::pgstat::pgstat_fetch_stat_tabentry_ext(class_form.relisshared, relid);
     let Some(tabentry) = tabentry else {
-        return (force_vacuum, false);
+        return (force_vacuum, false, force_vacuum);
     };
 
     let reltuples = f64::from(class_form.reltuples).max(0.0);
@@ -1311,7 +1381,7 @@ fn relation_needs_vacanalyze(
 
     let dovacuum = force_vacuum || vactuples > vacthresh;
     let doanalyze = anltuples > anlthresh;
-    (dovacuum, doanalyze)
+    (dovacuum, doanalyze, force_vacuum)
 }
 
 /// PG `table_recheck_autovac`. Re-fetch the relation and re-check whether it still
@@ -1332,7 +1402,8 @@ fn table_recheck_autovac(relid: Oid, effective_multixact_freeze_max_age: i32) ->
     let class_form = GETSTRUCT(unsafe { &*class_tup }).cast::<FormData_pg_class>();
     let cf = unsafe { &*class_form };
 
-    let (dovacuum, doanalyze) = relation_needs_vacanalyze(relid, cf, effective_multixact_freeze_max_age);
+    let (dovacuum, doanalyze, wraparound) =
+        relation_needs_vacanalyze(relid, cf, effective_multixact_freeze_max_age);
     if !dovacuum && !doanalyze {
         return None;
     }
@@ -1341,13 +1412,16 @@ fn table_recheck_autovac(relid: Oid, effective_multixact_freeze_max_age: i32) ->
     // the autovac/vacuum GUC defaults since reloptions are deferred). Select VACUUM
     // options: don't process toast (vacuum() skips it), skip the database-stats
     // update (we do vac_update_datfrozenxid ourselves), and skip-locked unless
-    // anti-wraparound (force_vacuum folds into dovacuum above).
+    // anti-wraparound.
     let mut options = VacOpt::empty();
     if dovacuum {
         options |= VacOpt::VACUUM | VacOpt::PROCESS_MAIN | VacOpt::SKIP_DATABASE_STATS;
     }
     if doanalyze {
         options |= VacOpt::ANALYZE;
+    }
+    if !wraparound {
+        options |= VacOpt::SKIP_LOCKED;
     }
 
     let params = VacuumParams {
@@ -1356,7 +1430,7 @@ fn table_recheck_autovac(relid: Oid, effective_multixact_freeze_max_age: i32) ->
         freeze_table_age: -1,
         multixact_freeze_min_age: -1,
         multixact_freeze_table_age: -1,
-        is_wraparound: false,
+        is_wraparound: wraparound,
         log_min_duration: -1,
         index_cleanup: VacOptValue::Unspecified,
         truncate: VacOptValue::Unspecified,
@@ -1387,7 +1461,6 @@ fn autovacuum_do_vac_analyze(tab: &AutovacTable) {
     // identified by OID and call vacuum(rel_list, &tab->params, bstrategy,
     // vac_context, true). The relation-target node construction + vacuum() are
     // deferred; pass an empty target list to the stub.
-    let _ = tab.dobalance;
     crate::commands::vacuum::vacuum(
         &[],
         &tab.params,

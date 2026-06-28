@@ -1,30 +1,37 @@
-//! Rewritten from PostgreSQL src/backend/utils/resowner/resowner.c
+//! Resource-owner management. Translated from backend/utils/resowner/resowner.c.
 //!
-//! Resource-owner tracking, redesigned for the single-process async model.
+//! Query-lifespan resources -- buffer pins, relcache references, registered
+//! snapshots, open files -- are tracked by associating them with a resource
+//! owner so they are guaranteed to be freed at the right time. Owners form a
+//! tree following the transaction and subtransaction nesting; when a (sub)
+//! transaction ends, its owner releases everything it holds, children before
+//! their parent. Release proceeds in ordered phases (before locks, locks, after
+//! locks) and, within a phase, by ascending priority so that, for example,
+//! buffer I/Os are settled before buffer pins are dropped.
 //!
-//! PG's resowner.c is a generic `(Datum value, ResourceOwnerDesc*)` registry: a
-//! small array spilling to an open-addressing hash, with the release order
-//! reconstructed at teardown by sorting on the per-kind descriptor's phase +
-//! priority. That whole machine is replaced here.
+//! In PostgreSQL each owner stores generic `(Datum, ResourceOwnerDesc*)`
+//! references in a small fixed array that spills into an open-addressing hash
+//! table, and the release order is reconstructed at teardown by sorting on each
+//! descriptor's phase and priority. Local lock references are kept in a separate
+//! per-owner cache to speed up bulk release and reassignment to a parent.
 //!
-//! In Rust a tracked resource is just a `FnOnce()` closure that releases it
-//! (drops a buffer pin, unregisters a snapshot, closes a file). An owner keeps
-//! one [`GenSlab`] of these closures per release phase. Registering returns a
-//! [`ResourceGuard`] whose `Drop` releases the resource on scope exit -- the
-//! common pin/read/unpin path needs no explicit teardown and is panic/cancel
-//! safe. The owner's phased teardown ([`ResourceOwner::release_all`]) drains any
-//! still-registered closures in phase, then priority, then LIFO order, matching
-//! PG's transaction-end semantics.
+//! PepperDB takes a more idiomatic Rust shape. A tracked resource is a
+//! `FnOnce()` closure that releases it, and an owner keeps one generational
+//! slab of closures per release phase rather than the array/hash/descriptor
+//! machinery. Registering a resource returns a guard whose `Drop` releases it on
+//! scope exit, so the common pin/read/unpin path needs no explicit teardown and
+//! is panic- and cancellation-safe; the slab's generational key ensures a
+//! resource registered once is released exactly once even when early release and
+//! end-of-transaction teardown race. End-of-transaction teardown drains the
+//! still-held closures in phase, then priority, then last-in-first-out order,
+//! reproducing PostgreSQL's semantics.
 //!
-//! Generational dedup ([`GenSlab`]'s key) is what lets early-release and phased
-//! teardown coexist: whichever runs first removes the entry and advances the
-//! slot generation, so the other one's key no longer resolves and is a no-op. A
-//! resource is released exactly once.
-//!
-//! Locking: the inner state lives behind a std `Mutex` held only for the short
-//! slab mutations. A release closure must NEVER run while the lock is held (it
-//! could re-enter the owner), so every release path collects the closures under
-//! the lock, drops the guard, then calls them.
+//! Per-owner state lives behind a parking_lot mutex held only for the brief slab
+//! mutations; a release closure could re-enter the owner, so each release path
+//! collects the closures under the lock, drops the guard, then runs them, each
+//! inside a catch so one failing release cannot skip the rest. Local-lock
+//! tracking and the subtransaction reassign-to-parent path are not yet
+//! implemented; the locks phase currently drains like any other.
 
 use std::sync::{Arc, Weak};
 use parking_lot::Mutex;
@@ -137,6 +144,12 @@ impl ResourceOwner {
     /// owner's entries in priority-ascending, seq-descending (LIFO) order. On
     /// commit, a non-empty phase means a leaked resource: warn before releasing.
     /// (PG's `ResourceOwnerRelease` for a single phase.)
+    ///
+    /// TODO(lock-manager): when LOCALLOCK tracking lands, the `Locks` phase must
+    /// NOT use this generic drain. Mirror resowner.c:746: top-level -> bulk
+    /// release; subtransaction + `is_commit` -> REASSIGN locks to the parent
+    /// owner (keep them, not release); subtransaction + abort -> release. The
+    /// `is_commit`/`is_top_level` args are already threaded for that branch.
     #[allow(clippy::only_used_in_recursion, reason = "is_top_level mirrors C ResourceOwnerRelease signature")]
     pub fn release(&self, phase: ResourceReleasePhase, is_commit: bool, is_top_level: bool) {
         // Snapshot child handles under the lock, then drop it before recursing:

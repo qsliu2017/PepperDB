@@ -24,8 +24,8 @@
 //!    read_exact_at}` on `spawn_blocking`: these own the all-or-error short-I/O
 //!    loops, so reads are all-or-EOF (a short read at EOF surfaces as
 //!    `UnexpectedEof`). Cursor-based `tokio::io::{AsyncReadExt, AsyncWriteExt}` are
-//!    reserved for sequential/socket I/O (WAL append, libpq) in later steps and are
-//!    not used here -- a single shared cursor cannot serve concurrent positional
+//!    reserved for sequential/socket I/O (WAL append, libpq) and are not used
+//!    here -- a single shared cursor cannot serve concurrent positional
 //!    access on one handle, which is why we avoid `tokio::fs::File` for pages.
 #![allow(
     clippy::unwrap_used,
@@ -41,7 +41,7 @@ use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::elog;
-use crate::utils::elog::LOG;
+use crate::utils::elog::PANIC;
 
 /// Conservative default kernel-fd budget. PG probes by opening until EMFILE; a
 /// configured cap is sufficient here (see fd.rs set_max_safe_fds).
@@ -236,13 +236,15 @@ impl IoBackend {
     }
 
     /// The critical-section abort: a sync failure means we cannot guarantee
-    /// durability, so we log and crash rather than risk silent corruption. This
-    /// bypasses any per-task catch_unwind by design (process::abort, not panic).
+    /// durability, so we crash rather than risk silent corruption. PANIC is the
+    /// data_sync_elevel mapping (data_sync_retry off) and realizes process::abort
+    /// uncatchably -- bypassing any per-task catch_unwind by design.
     #[cold]
     #[allow(clippy::needless_pass_by_value, reason = "io::Error consumed in elog! before process abort")]
     fn abort_fsync(op: &str, e: io::Error) -> ! {
-        elog!(LOG, format!("could not {op} file: {e}"));
-        std::process::abort();
+        elog!(PANIC, format!("could not {op} file: {e}"));
+        // elog!(PANIC,...) diverges via process::abort; keep the never-type contract.
+        unreachable!("elog!(PANIC) aborts the process")
     }
 
     /// Truncate (or, via set_len, extend) to `len`.
@@ -307,7 +309,8 @@ pub async fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
         .expect("remove_dir_all join")
 }
 
-/// Rename within a filesystem (no cross-directory guarantee, per durable_rename).
+/// Bare rename(2): NOT crash-durable (no fsync of source/target/parent dir).
+/// Crash-critical callers (WAL, control file) must use `FdManager::durable_rename`.
 pub async fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     let from: PathBuf = from.as_ref().to_path_buf();
     let to: PathBuf = to.as_ref().to_path_buf();

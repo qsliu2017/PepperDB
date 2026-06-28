@@ -1,25 +1,27 @@
-//! Translated from PostgreSQL src/backend/storage/freespace/freespace.c -- the
-//! Free Space Map: track how much free space each heap (or index) page has and
-//! quickly find a page with enough.
+//! Free Space Map: quickly find a page in a relation with enough free space. Translated from backend/storage/freespace/freespace.c.
 //!
-//! The FSM is a separate relation fork (`FSM_FORKNUM`) holding a 3-level (for the
-//! default 8 KB BLCKSZ) tree of FSM pages. Each leaf FSM page covers
-//! `SLOTS_PER_FSM_PAGE` heap blocks; an upper FSM page's slots index lower FSM
-//! pages. `fsm_logical_to_physical` maps a logical (level, page) address to the
-//! physical block number in the fork (the tree is stored depth-first). One byte
-//! per slot encodes the free-space *category* (0..255), where the byte count is
-//! `category * FSM_CAT_STEP` (and 255 means >= MaxFSMRequestSize).
+//! The Free Space Map records how much free space each heap (and index) page
+//! holds and lets callers search for a page that can satisfy a request of a
+//! given size. It is kept in a dedicated relation fork (`FSM_FORKNUM`) on every
+//! heap relation and on the index access methods that need it. The fork stores
+//! a tree of FSM pages -- three levels for the default 8 KB block size -- where
+//! each leaf slot covers one heap block and each upper-level slot summarizes a
+//! child FSM page. One byte per slot encodes the free space as a category in
+//! `0..=255`; category `c` represents `c * FSM_CAT_STEP` bytes, and the top
+//! category 255 means at least `MaxFSMRequestSize` bytes are available. The
+//! internal routines address the tree with a logical (level, page) scheme that
+//! `fsm_logical_to_physical` maps to a physical block within the depth-first
+//! on-disk layout.
 //!
-//! Buffer-manager integration (rules.md 5): every FSM-fork page is read through
-//! `read_buffer_common` (the async part), then the synchronous `fsmpage` tree op
-//! runs between taking and dropping the content lock, then `mark_buffer_dirty`.
-//! No content lock or header lock is ever held across an `.await`.
-//!
-//! Catalog note: C threads a `Relation` through these. The relcache (`Relation`)
-//! is deferred, so the backend functions take the smgr-level inputs the buffer
-//! manager already uses -- `&Arc<SharedState>`, `&mut SmgrRelation`, and the
-//! relation persistence -- and the header `src/storage/freespace.rs` keeps the
-//! `Relation`-based C signatures as TODO shims.
+//! PepperDB reads every FSM-fork page through the asynchronous buffer manager:
+//! the synchronous tree manipulation on an `fsmpage` runs entirely between
+//! acquiring and releasing the buffer content lock, and no content or header
+//! lock is held across an `.await`. PostgreSQL threads a `Relation` (relcache
+//! entry) through these routines; because the relcache is not yet present, the
+//! functions here instead take the storage-manager inputs the buffer manager
+//! already operates on -- the shared state, an `SmgrRelation`, and the relation
+//! persistence -- while the relation-typed C entry points are exposed as thin
+//! shims elsewhere.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -269,7 +271,7 @@ async fn fsm_set_and_search(
                 .map(|s| s as u16);
         }
         if changed {
-            pool.mark_buffer_dirty(buf);
+            pool.mark_buffer_dirty_hint(buf, false);
         }
     }
     pool.release_buffer(buf);
@@ -385,6 +387,9 @@ pub async fn record_and_get_page_with_free_space(
     if let Some(search_slot) =
         fsm_set_and_search(shared, smgr, relpersistence, addr, slot, old_cat, search_cat).await
     {
+        // TODO: C rechecks fsm_does_block_exist here and falls through to
+        // fsm_search if the block is past EOF; gated on heap-fork-size access
+        // (same as the fsm_search recheck).
         return Some(fsm_get_heap_blk(addr, search_slot));
     }
     fsm_search(shared, smgr, relpersistence, search_cat).await
@@ -458,6 +463,10 @@ pub async fn free_space_map_prepare_truncate_rel(
             // SAFETY: exclusive content lock held.
             let page = unsafe { pool.block_mut(buf_id) };
             FsmPageMut::new(page).truncate_avail(first_removed_slot as usize);
+            // C uses a full MarkBufferDirty here (not the hint variant) -- keep it.
+            // TODO(xlog): C also crit-sections this and conditionally emits
+            // log_newpage_buffer(buf, false) when !InRecovery && RelationNeedsWAL
+            // && XLogHintBitIsNeeded; optional FPI, deferred with the WAL layer.
             pool.mark_buffer_dirty(buf);
         }
         pool.release_buffer(buf);
@@ -563,13 +572,22 @@ fn fsm_vacuum_page<'a>(
                     // SAFETY: exclusive content lock held.
                     let page = unsafe { pool.block_mut(buf_id) };
                     FsmPageMut::new(page).set_avail(slot as usize, child_avail);
-                    pool.mark_buffer_dirty(buf);
+                    pool.mark_buffer_dirty_hint(buf, false);
                 }
                 slot += 1;
             }
         }
 
         let max_avail = FsmPage::new(pool.buffer_get_page(buf)).get_max_avail();
+        // C: reset fp_next_slot to 0 to bias future searches toward low-numbered
+        // pages (helps later vacuum truncate the relation). A pure hint: no lock,
+        // no dirty-mark.
+        {
+            let buf_id = buf.as_global().unwrap() as i32;
+            // SAFETY: deliberate unlocked hint write, mirroring PG's benign race.
+            let page = unsafe { pool.block_mut(buf_id) };
+            FsmPageMut::new(page).reset_next_slot();
+        }
         pool.release_buffer(buf);
         (max_avail, false)
     })

@@ -1,31 +1,32 @@
-//! Translated from PostgreSQL src/backend/storage/buffer/localbuf.c -- the local
-//! buffer manager for temporary relations, which never need WAL, checkpointing,
-//! or shared locking.
+//! Local buffer manager: a fast, backend-private buffer pool for temporary
+//! relations, which never need to be WAL-logged or checkpointed. Translated from
+//! backend/storage/buffer/localbuf.c.
 //!
-//! C shape: a backend-private set of parallel arrays (`LocalBufferDescriptors`,
-//! `LocalBufferBlockPointers`, `LocalRefCount`) plus a `LocalBufHash`, all
-//! process-local statics, with a clock sweep (`GetLocalVictimBuffer`) and no
-//! atomics/locks (no other process can see a temp relation). C identifies local
-//! buffers by a negative `Buffer` (`-i - 1`); here that is [`BufId::Local`].
+//! Because a temporary relation is visible only to the backend that created it,
+//! its buffers require no locking and no inter-process coordination: there is no
+//! other reader or writer to synchronize against. The pool is a private set of
+//! buffer descriptors and page blocks indexed by a hash table from page tag to
+//! buffer, with a simple clock sweep choosing a victim when a new page must be
+//! read in. Allocation mirrors the shared buffer manager's `BufferAlloc`, minus
+//! the locking, the I/O-in-progress handshake, and the pluggable access
+//! strategies (usage counts are always advanced).
 //!
-//! PepperDB shape (rules.md 6.1: per-task state must be `Send`): a temp relation
-//! is private to its backend, which is a tokio task -- so the whole local pool is
-//! ONE per-task value behind a tokio `task_local!` `RefCell<LocalBufferPool>`.
-//! The map/descriptors/blocks are touched only inside synchronous sections
-//! (borrow, mutate, drop the borrow); the `RefCell` is never held across an
-//! `.await`, so the backend future stays `Send` (the `task_local` follows the
-//! task across thread migration, exactly like `PrivateRefCount`).
+//! In PostgreSQL the pool is a collection of process-local statics
+//! (`LocalBufferDescriptors`, `LocalBufferBlockPointers`, `LocalRefCount`,
+//! `LocalBufHash`) and local buffers are named by a negative `Buffer` value
+//! (`-index - 1`). Here the entire pool is a single per-backend value, held in a
+//! `task_local!` `RefCell<LocalBufferPool>`: a backend is a tokio task, so this
+//! state follows the task across thread migration the way the process-local
+//! statics followed the process. The pool is borrowed only inside synchronous
+//! sections and the borrow is never held across an `.await`, keeping the backend
+//! future `Send`; the flushing path copies the page bytes out and releases the
+//! borrow before awaiting the storage-manager write.
 //!
-//! Buffer handle: a user-facing local buffer is the [`BufId::Local`] variant
-//! carrying `index`, the
-//! 0-based pool index. (C overloaded a negative `Buffer = -index - 1`; the enum
-//! replaces the sign trick.) We index the pool arrays by the 0-based `index`
-//! directly and convert at the API edge via [`local_buf_index`] / [`local_buffer`].
-//!
-//! No `BM_IO_IN_PROGRESS` / IO CV / WaitQueue: a temp buffer is single-task, so
-//! there is no concurrent reader/writer to coordinate. The only async part is the
-//! smgr flush write; the local-pool borrow is dropped before that `.await`
-//! (`FlushLocalBuffer` copies the page bytes out, releases the borrow, awaits).
+//! A local buffer handle is the [`BufId::Local`] variant carrying the 0-based
+//! pool index, replacing the C sign trick; [`local_buf_index`] and
+//! [`local_buffer`] convert at the API edge. Without concurrent access there is
+//! no `BM_IO_IN_PROGRESS` flag, I/O condition variable, or wait queue; the only
+//! asynchronous step is the storage-manager flush.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -431,9 +432,12 @@ pub async fn flush_local_buffer(
         Some((tag, page))
     });
 
-    let Some((tag, page)) = snapshot else {
+    let Some((tag, mut page)) = snapshot else {
         return;
     };
+
+    // C: PageSetChecksumInplace (no-ops when new or checksums disabled).
+    page.set_checksum_inplace(tag.block_num);
 
     // No borrow held: write to disk.
     smgr.write(shared, tag.fork_num(), tag.block_num, &page, false).await;
@@ -471,6 +475,8 @@ pub async fn extend_buffered_rel_local(
                 // A buffer already holds this block: pin it, drop the victim.
                 p.pin(existing, false);
                 let d = &mut p.descriptors[existing];
+                debug_assert!(d.buf_state & BufFlags::TAG_VALID.bits() != 0);
+                debug_assert_eq!(d.buf_state & BufFlags::DIRTY.bits(), 0);
                 d.buf_state &= !BufFlags::VALID.bits();
                 (local_buffer(existing), Some(index))
             }

@@ -1,26 +1,31 @@
-//! Translated from PostgreSQL src/backend/access/transam/xloginsert.c
+//! Functions for constructing WAL records. Translated from backend/access/transam/xloginsert.c.
 //!
-//! WAL record *assembly*: stage the main data, block references and full-page
-//! images for a record (via the `XLogBeginInsert` / `XLogRegister*` calls), then
-//! pack them into the on-disk record byte layout and hand the bytes to Part A's
-//! [`XLogCtl::insert_record`] (PG `XLogInsertRecord`).
+//! Constructing a WAL record begins with a call to [`begin_insert`], followed by
+//! a number of `register_*` calls. The registered main data, block references
+//! and buffer data are collected in private working memory, then assembled into
+//! the on-disk record byte layout by [`assemble`] and handed to the WAL insert
+//! machinery via [`XLogCtl::insert_record`]. `assemble` lays out the fixed
+//! `XLogRecord` header, then for each registered block an `XLogRecordBlockHeader`
+//! (plus an optional block-image header, the `RelFileLocator` when it differs
+//! from the previous block, and the `BlockNumber`), then the main-data id byte
+//! and length, followed by the data and any full-page images. A block receives a
+//! full-page image when one is forced, or when full-page writes are enabled and
+//! the page has not been written since the last redo point. The record CRC is
+//! CRC-32C computed over the record body first and then the header, matching the
+//! on-disk encoding that the WAL reader and PostgreSQL itself decode.
 //!
-//! On-disk fidelity: [`assemble`] reproduces xloginsert.c `XLogRecordAssemble`
-//! byte-for-byte -- the fixed `XLogRecord` header, then per-block
-//! `XLogRecordBlockHeader` (+ optional image/compress headers + RelFileLocator +
-//! BlockNumber), then the origin / top-xid / main-data id bytes, then the data
-//! and page images -- so xlogreader (13C) and real PostgreSQL can decode it. The
-//! record CRC is CRC-32C over (block/data area .. then the header), matching the
-//! C ordering. We do not compress page images (wal_compression = none here), so
-//! the compress-header path is omitted as it is in a no-compression build.
+//! Where PostgreSQL keeps the in-progress record in per-backend static memory,
+//! the registered buffers and data are kept in a per-task `Insertion` published
+//! through a tokio `task_local` cell. The cell holds only owned and `Copy` data,
+//! and its borrow is never held across an await point: [`xlog_insert`] assembles
+//! the record into an owned byte buffer while the borrow is live, releases it,
+//! and only then awaits the insert, so the construction sequence stays `Send`.
 //!
-//! Per-task staging (Send): the registered buffers / data chain are kept in a
-//! per-task [`Insertion`] published as a tokio `task_local` `RefCell`. It holds
-//! only owned/`Copy` data (no `Rc`/raw pointers), and the `RefCell` borrow is
-//! never held across an `.await`: [`XLogInsert`] snapshots the fully-assembled
-//! record into an owned `Vec<u8>` while holding the borrow, drops it, and only
-//! then awaits [`XLogCtl::insert_record`]. So the future is `Send` and the
-//! single await in the begin->register->insert sequence holds nothing borrowed.
+//! Page-image compression is not implemented (the equivalent of
+//! `wal_compression = none`), so the compress-header path is omitted as it is in
+//! a build without compression. Replication-origin and subtransaction top-xid
+//! identifier bytes are likewise not emitted, exactly as PostgreSQL omits them
+//! when no origin session is active and no top-xid needs logging.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -147,8 +152,10 @@ fn with_state<R>(f: impl FnOnce(&mut Insertion) -> R) -> R {
 /// PG `XLogBeginInsert`: begin constructing a WAL record.
 pub fn begin_insert() {
     with_state(|s| {
-        assert_eq!(s.max_registered_block_id, 0);
-        assert!(s.mainrdata.is_empty());
+        // PG: these two preconditions are USE_ASSERT_CHECKING-only (Assert).
+        crate::assert!(s.max_registered_block_id == 0);
+        crate::assert!(s.mainrdata.is_empty());
+        // PG: the re-entry guard is always-on (elog ERROR).
         assert!(!s.begininsert_called, "XLogBeginInsert was already called");
         s.begininsert_called = true;
     });
@@ -423,14 +430,24 @@ fn assemble(
     partial_crc = comp_crc32c(partial_crc, &hdr);
     partial_crc = comp_crc32c(partial_crc, &payload);
 
+    // xl_xid: C stamps GetCurrentTransactionIdIfAny() (xloginsert.c:926). That
+    // accessor reads the current xact frame's xid, returning Invalid when none is
+    // assigned; the no-scope emitters (log_newpage/FPI/tests) have no xid, so we
+    // gate on a scope-tolerant predicate and stamp 0 there -- same bytes C emits.
+    let xl_xid = if crate::backend::access::transam::xact::is_transaction_state_or_false() {
+        crate::access::xact::GetCurrentTransactionIdIfAny().map_or(0, |x| x.0)
+    } else {
+        0
+    };
+
     // Assemble the final contiguous record: fixed header, then hdr, then payload.
     let mut bytes = Vec::with_capacity(total_len as usize);
     // XLogRecord header: tot_len(u32), xid(u32), prev(u64), info(u8), rmid(u8),
     // 2 pad, crc(u32). xl_prev is a 0 placeholder filled by the insert path from
     // the reservation; xl_crc is left 0 and written by the insert path after the
-    // header is folded in. xl_xid is 0 here (no transaction context yet).
+    // header is folded in.
     bytes.extend_from_slice(&(total_len as u32).to_ne_bytes());
-    bytes.extend_from_slice(&0u32.to_ne_bytes()); // xl_xid
+    bytes.extend_from_slice(&xl_xid.to_ne_bytes()); // xl_xid
     bytes.extend_from_slice(&INVALID_XLOG_REC_PTR.0.to_ne_bytes()); // xl_prev placeholder
     bytes.push(info);
     bytes.push(rmid);
@@ -454,7 +471,10 @@ pub async fn xlog_insert(xlog: &Arc<XLogCtl>, rmid: RmgrId, info: u8) -> XLogRec
     const RESERVED: u8 = !(crate::access::xlogrecord::XLR_RMGR_INFO_MASK
         | crate::access::xlogrecord::XLR_SPECIAL_REL_UPDATE
         | crate::access::xlogrecord::XLR_CHECK_CONSISTENCY);
-    assert_eq!(info & RESERVED, 0, "invalid xlog info mask {info:02X}");
+    if info & RESERVED != 0 {
+        // C: elog(PANIC) -- uncatchable process abort, not a recoverable ERROR.
+        crate::elog!(crate::utils::elog::PANIC, format!("invalid xlog info mask {info:02X}"));
+    }
 
     assert!(
         with_state(|s| s.begininsert_called),
@@ -476,6 +496,9 @@ pub async fn xlog_insert(xlog: &Arc<XLogCtl>, rmid: RmgrId, info: u8) -> XLogRec
 
         // FPW recheck: if a checkpoint advanced the redo pointer past the lowest
         // un-imaged page LSN, our decision is stale -> reassemble.
+        // TODO(checkpointer): C also re-assembles on a false->true transition of
+        // doPageWrites (!prevDoPageWrites) and performs this recheck under the WAL
+        // insert lock; dead here while do_page_writes is constant `true`.
         let redo_now = xlog.get_redo_rec_ptr();
         if !assembled.fpw_lsn.is_invalid() && redo_now > redo_rec_ptr && assembled.fpw_lsn <= redo_now
         {
@@ -484,6 +507,12 @@ pub async fn xlog_insert(xlog: &Arc<XLogCtl>, rmid: RmgrId, info: u8) -> XLogRec
 
         break xlog.insert_record(&assembled.bytes, assembled.partial_crc).await;
     };
+
+    // C: MarkCurrentTransactionIdLoggedIfAny() after the insert (xlog.c:954). No-op
+    // when no xact scope/xid is active (FPI/log_newpage paths).
+    if crate::backend::access::transam::xact::is_transaction_state_or_false() {
+        crate::access::xact::MarkCurrentTransactionIdLoggedIfAny();
+    }
 
     reset_insertion();
     end

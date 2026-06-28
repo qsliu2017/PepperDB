@@ -1,13 +1,21 @@
-//! Translated from PostgreSQL src/backend/main/main.c
+//! Entry point for the pepperdb server executable. Translated from backend/main/main.c.
 //!
-//! The binary entry point. PG's `main` does startup hacks (locale, env), a
-//! root-user check, then dispatches on the first `--` argument to one of several
-//! subprograms (bootstrap/check/describe-config/single-user/postmaster).
+//! Any server process begins execution here. This performs the essential
+//! startup tasks shared by every incarnation of the server and then dispatches
+//! to the routine for the chosen incarnation. PostgreSQL recognizes a special
+//! must-be-first `--` option that selects the subprogram - bootstrap (`boot`),
+//! consistency check (`check`), GUC description (`describe-config`), or a
+//! standalone single-user backend (`single`) - and otherwise launches the
+//! postmaster.
 //!
-//! Under the single-process async model the postmaster is a supervisor task, so
-//! `main` builds a multi-thread tokio runtime and runs the supervisor entry
-//! (`postmaster_main`) to completion. The non-postmaster dispatch arms are
-//! minimal stubs for now.
+//! Under the single-process async model there are no separately forked or
+//! exec'd children, so the `forkchild` dispatch arm has no analogue and the
+//! postmaster is realized as a supervisor task rather than a long-lived parent
+//! process. `main` builds a multi-threaded Tokio runtime - backends run as
+//! tasks across its worker threads - and runs the postmaster supervisor to
+//! completion. The platform startup hacks, locale setup, and not-running-as-root
+//! check are minimal here, and the non-postmaster dispatch modes are not yet
+//! implemented.
 
 use pepperdb::backend::postmaster::postmaster::postmaster_main;
 use pepperdb::shared_state::SharedStateConfig;

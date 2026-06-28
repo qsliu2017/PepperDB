@@ -1,35 +1,34 @@
-//! Translated from PostgreSQL src/backend/postmaster/bgworker.c
+//! Pluggable background workers implementation. Translated from backend/postmaster/bgworker.c.
 //!
-//! Pluggable background workers: registration (static + dynamic) and the
-//! postmaster-side bookkeeping that maps registered workers onto a fixed slot
-//! table. Backends register a worker, get back a [`BackgroundWorkerHandle`], and
-//! poll/await its lifecycle through the slot's `pid`/`generation`/`in_use` state.
+//! Background workers are auxiliary processes that the server starts on behalf
+//! of extensions or core subsystems (parallel query, logical replication, and
+//! so on). Workers are either registered statically at startup or requested
+//! dynamically by a running backend. Each registered worker occupies a slot in
+//! a fixed-size table; the registering backend receives a handle and tracks the
+//! worker's lifecycle through the slot's `pid`, `generation`, and `in_use`
+//! fields. In PostgreSQL that slot table lives in shared memory and is
+//! coordinated with a lockless protocol so the postmaster, which must never
+//! take a lock, can hand slots back and forth with regular backends: a backend
+//! claims a slot by fully initializing it and setting `in_use`, after which the
+//! postmaster owns it; a backend may still set `terminate` to ask that the
+//! worker not be restarted. A separate pair of registered/terminated counters
+//! caps the number of concurrent parallel workers without locking.
 //!
-//! Single-process redesign vs PG's bgworker.c:
-//! - PG keeps `BackgroundWorkerData` (the slot array) in shared memory with a
-//!   LOCKLESS postmaster <-> backend protocol (the postmaster never takes locks).
-//!   Under one process the array becomes `Arc<BackgroundWorkerShmem>` on
-//!   [`SharedState`] (the ipci.c `BackgroundWorkerShmemInit` slot) plus a
-//!   process-wide `OnceLock` (like checkpointer/autovacuum). There is no lockless
-//!   postmaster constraint, so the slot table is simply a `Mutex<Vec<..>>` (PG's
-//!   `BackgroundWorkerLock`); the `in_use`/`terminate`/`pid` handoff semantics are
-//!   preserved faithfully because callers across tasks still rely on them.
-//! - DYNAMIC LIBRARY LOADING is gone: a single binary has no `load_external_
-//!   function`. The supported path is the in-core entry-point registry (name ->
-//!   fn), the PG `InternalBGWorkers` table generalized to a process-global map.
-//! - The actual SPAWN (PG `SendPostmasterSignal(PMSIGNAL_BACKGROUND_WORKER_
-//!   CHANGE)` -> postmaster forks the child) becomes a `OnceLock` spawner hook the
-//!   supervisor (17f) installs. With no hook (unit tests) the request is still
-//!   recorded faithfully in the slot (`in_use=true`, `pid=InvalidPid`) and a
-//!   debug line is logged; the worker simply never appears -- mirroring PG, where
-//!   the registering backend only writes shmem + signals and the child shows up
-//!   asynchronously.
-//! - `BackgroundWorkerMain` (the child entry point), `bgworker_die`, and the
-//!   `sigsetjmp` recovery are NOT reproduced here: a worker is a tokio task whose
-//!   panic propagates to the supervisor (17f). The connection-init helpers call
-//!   the deferred `InitPostgres` stub (s4).
-//! - `BackgroundWorkerBlockSignals`/`UnblockSignals` are no-ops (no per-process
-//!   signal masks in the single-process model).
+//! In the single-process model there is no separate postmaster and no shared
+//! memory, so the slot table is a `Mutex`-guarded vector held in shared process
+//! state and reached through a process-wide handle. The lockless constraint no
+//! longer applies, but the `in_use`/`terminate`/`pid`/`generation` handoff
+//! semantics are kept intact because callers across tasks still depend on them.
+//! Dynamic library loading is not supported: a single binary cannot load an
+//! external function by name, so the only entry-point source is the in-core
+//! registry mapping a worker name to a Rust function. Spawning a worker is
+//! delegated to a hook installed by the supervisor; absent a hook the request
+//! is still recorded faithfully in the slot and the worker simply never
+//! appears, mirroring PostgreSQL, where the registering backend only writes the
+//! request and the child arrives asynchronously. The child entry point,
+//! signal-based death handling, and `sigsetjmp` recovery are not reproduced: a
+//! worker is an async task whose panic propagates to the supervisor, and the
+//! signal-mask block/unblock helpers are no-ops.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -643,8 +642,11 @@ pub fn background_worker_state_change(allow_new_workers: bool) -> Vec<usize> {
         if !allow_new_workers && slot.pid == INVALID_PID {
             slot.terminate = true;
         }
-        // Free a to-be-terminated slot once its worker is no longer running.
-        if slot.terminate && slot.pid != INVALID_PID && slot.pid <= 0 {
+        // Free a to-be-terminated slot whenever its worker is not running
+        // (never-started INVALID_PID or already-exited 0); a positive pid is
+        // still running and must wait. PG frees the slot unconditionally so any
+        // waiter is awoken even if the worker never ran.
+        if slot.terminate && slot.pid <= 0 {
             if slot.worker.bgw_flags.contains(BgworkerFlags::CLASS_PARALLEL) {
                 shmem.parallel_terminate_count.fetch_add(1, Ordering::Relaxed);
             }

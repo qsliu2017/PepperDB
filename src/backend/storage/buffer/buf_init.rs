@@ -1,40 +1,45 @@
-//! Translated from PostgreSQL src/backend/storage/buffer/buf_init.c plus the
-//! buffer-header / pin / IO-wait state machine from bufmgr.c (the parts that do
-//! NOT do smgr I/O -- the actual read/flush is Part B).
+//! Buffer manager initialization and the buffer-header state machine. Translated from backend/storage/buffer/buf_init.c.
 //!
-//! C shape: `BufferManagerShmemInit` allocates four parallel shmem arrays -- the
-//! `BufferDescPadded` descriptors, the `BufferBlocks` page pool (IO-aligned), the
-//! per-buffer `BufferIOCVArray` condition variables, and the checkpoint sort
-//! array -- then links the descriptors into a freelist and calls
-//! `StrategyInitialize`. The buffer-header spinlock (`BM_LOCKED`), pin counts
-//! (`refcount`/`usagecount` packed in `state`), and the IO-in-progress handshake
-//! (`BM_IO_IN_PROGRESS` + the per-buffer CV) live in bufmgr.c.
+//! In PostgreSQL, `BufferManagerShmemInit` runs once during shared-memory setup
+//! and lays out the shared buffer pool: four parallel arrays -- the buffer
+//! descriptors, the data-page pool (aligned for direct I/O), the per-buffer I/O
+//! condition variables, and the checkpoint sort array -- after which it links the
+//! descriptors into a freelist and hands off to the replacement strategy. The
+//! pool obeys two rules: a buffer must be registered in the lookup table before
+//! its I/O begins (so a second reader finds it rather than faulting in a duplicate
+//! copy), and a buffer may not be replaced while it is pinned or has I/O in
+//! flight. Each descriptor packs its flags, pin count (refcount), and usage count
+//! into one atomic word guarded by a brief header spinlock; an `IO_IN_PROGRESS`
+//! flag plus a per-buffer condition variable serialize the page fault so only one
+//! process performs the read or write. To avoid touching the shared refcount on
+//! every pin, each backend keeps a private pin cache and bumps the shared count
+//! only on the first pin and last unpin of a buffer.
 //!
-//! PepperDB shape (rules.md sections 6.3 / 9): the shmem segment is gone, so the
-//! pool is one owned [`BufferPool`] on the heap behind an `Arc` on `SharedState`.
-//! It holds an 8-aligned `Box<[Page]>` (step-10's `#[repr(C, align(8))]` Page is
-//! what makes the header overlays sound for real buffers), a `Box<[BufferDesc]>`,
-//! the sharded [`BufTable`], and the clock-sweep [`StrategyControl`].
+//! PepperDB has no shared-memory segment, so the pool is a single owned
+//! [`BufferPool`] held behind an `Arc` and shared across backend tasks. It carries
+//! an 8-aligned page array (the `Page` overlay is `repr(C, align(8))`, which makes
+//! the on-page header casts sound), the descriptor array, the lookup table, and
+//! the clock-sweep strategy control. The atomic state word maps directly to an
+//! `AtomicU32`, mutated only by compare-and-swap or under the header lock; the
+//! header spinlock becomes [`BufferDesc::lock_hdr`] / [`BufferDesc::unlock_hdr`],
+//! a short synchronous CAS spin that is never held across an await. The per-buffer
+//! content lock is a plain `RwLock<()>` over the page bytes, and the I/O condition
+//! variable becomes a cancellation-safe [`WaitQueue`]: a waiter awaits the queue
+//! with no lock held while `IO_IN_PROGRESS` is set, and the task performing the
+//! I/O wakes all waiters when it finishes.
 //!
-//! Concurrency mapping:
-//!  * `pg_atomic_uint32 state` -> `AtomicU32`; mutated only via CAS or under the
-//!    header lock, exactly as C (buf_internals.h: "updating of state without
-//!    holding buffer header lock is restricted to CAS").
-//!  * the `BM_LOCKED` spinlock -> [`BufferDesc::lock_hdr`] / [`BufferDesc::unlock_hdr`],
-//!    a brief sync `fetch_or`/`store` CAS spin -- NEVER held across an `.await`.
-//!  * the content LWLock -> a naked `std::sync::RwLock<()>` guarding the page
-//!    bytes in the pool array (parking_lot is not a dependency).
-//!  * the per-buffer IO condition variable + `BM_IO_IN_PROGRESS` -> a
-//!    [`WaitQueue`] (cancellation-safe `WaitGuard`) + the flag; the waiter awaits
-//!    the queue with NO lock held, the IO-doer wakes it on terminate.
-//!  * `PrivateRefCount` (per-backend pin cache) -> a per-task refcount map in a
-//!    tokio `task_local!` `RefCell`. It is per-task and never shared, so it stays
-//!    `Send` (the `Arc<BufferPool>` carried across tasks is `Send + Sync`). A pin
-//!    is held across an `.await` (the read/flush I/O), and the multi-thread
-//!    runtime migrates the task between threads at that point, so a plain
-//!    `thread_local` would split the map across threads and misfire the
-//!    shared-refcount-gating 0->1 / 1->0 transitions; the `task_local` follows
-//!    the task across migration and keeps the gating exact.
+//! The per-backend private pin cache is a per-task map kept in a tokio task-local.
+//! It is intentionally task-local rather than thread-local because a pin is held
+//! across the read/flush await and the multi-threaded runtime may migrate the task
+//! to a different worker thread at that point; a thread-local cache would split the
+//! map across threads and misfire the "first pin increments / last unpin
+//! decrements the shared count" gating. The shared refcount in the descriptor
+//! remains authoritative; the cache only decides when to touch it. Pins are
+//! released through an RAII [`PinGuard`] whose Drop unpins exactly once, which
+//! survives panics and future cancellation. This file implements pool allocation,
+//! the pin/unpin and header-lock primitives, and the I/O-start / wait / terminate
+//! handshake; the actual storage-manager read and write of page bytes is performed
+//! elsewhere and is not yet implemented here.
 
 use std::cell::RefCell;
 use std::cell::UnsafeCell;
@@ -372,7 +377,10 @@ impl BufferPool {
         unsafe { &mut *self.blocks[buf_id as usize].0.get() }
     }
 
-    /// 8-alignment / size assertions for the page pool base (tests rely on this).
+    /// Page pool base address (tests assert 8-alignment). C aligns the pool to
+    /// PG_IO_ALIGN_SIZE (4096) for O_DIRECT/io_uring; we use buffered IO only, so
+    /// MAXALIGN=8 (sound for the header overlays) is intentionally enough. Revisit
+    /// if the async IO path ever opens data files O_DIRECT.
     #[inline]
     fn block_base_addr(&self) -> usize {
         self.blocks.as_ptr() as usize
@@ -514,12 +522,10 @@ impl BufferPool {
                     desc.unlock_hdr(buf_state);
                     return false;
                 }
-                // Claim the IO. Clear any BM_IO_ERROR left by a prior failed
-                // attempt (C: StartBufferIO resets the error state on a fresh
-                // claim, so the re-doer starts clean).
-                desc.unlock_hdr(
-                    (buf_state | BufFlags::IO_IN_PROGRESS.bits()) & !BufFlags::IO_ERROR.bits(),
-                );
+                // Claim the IO. C: StartBufferIO sets only BM_IO_IN_PROGRESS and
+                // leaves BM_IO_ERROR set, so a retry-after-failure lets the abort
+                // path detect repeat failures. terminate_buffer_io clears it.
+                desc.unlock_hdr(buf_state | BufFlags::IO_IN_PROGRESS.bits());
                 return true;
             }
             // Another task holds the IO. Drop the header lock, then wait on the
@@ -548,10 +554,9 @@ impl BufferPool {
             desc.unlock_hdr(buf_state);
             return Some(false);
         }
-        // Claim; clear any prior BM_IO_ERROR (C: StartBufferIO resets it).
-        desc.unlock_hdr(
-            (buf_state | BufFlags::IO_IN_PROGRESS.bits()) & !BufFlags::IO_ERROR.bits(),
-        );
+        // Claim; set only BM_IO_IN_PROGRESS (C leaves BM_IO_ERROR for the abort
+        // path to detect repeat failures; terminate_buffer_io clears it).
+        desc.unlock_hdr(buf_state | BufFlags::IO_IN_PROGRESS.bits());
         Some(true)
     }
 

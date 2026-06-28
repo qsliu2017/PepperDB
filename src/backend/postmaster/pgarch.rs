@@ -1,28 +1,39 @@
-//! Translated from PostgreSQL src/backend/postmaster/pgarch.c
+//! The PostgreSQL WAL archiver. Translated from backend/postmaster/pgarch.c.
 //!
-//! The WAL archiver: a long-lived auxiliary task that copies completed WAL
-//! segments to the archive. It mostly sleeps, waking on its latch (a backend rang
-//! [`pgarch_wakeup`] after marking a segment `.ready`) or every
-//! `PGARCH_AUTOWAKE_INTERVAL` seconds to proactively scan `archive_status` for
-//! `.ready` files. Each wake runs `pgarch_archiver_copy_loop`, which archives all
-//! outstanding segments (oldest first) via the archive module callback, then
-//! renames each `.ready` status file to `.done`.
+//! The archiver is a long-lived auxiliary process responsible for copying
+//! completed write-ahead log segments to the configured archive. It mostly
+//! sleeps, waking when a backend marks a segment `.ready` (and rings its latch via
+//! [`pgarch_wakeup`]) or every `PGARCH_AUTOWAKE_INTERVAL` seconds to proactively
+//! poll the `pg_wal/archive_status` directory for `.ready` files. On each wake it
+//! archives every outstanding segment in priority order -- timeline history files
+//! first, then oldest segment first -- invoking the archive callback for each and
+//! renaming the segment's status file from `.ready` to `.done` on success.
+//! Failures are retried a bounded number of times before the archiver gives up and
+//! tries again on its next wake.
 //!
-//! Single-process redesign vs PG's pgarch.c:
-//! - `PgArchData` (the `pgprocno` advertise + the `force_dir_scan` flag) is a
-//!   small `Arc<PgArchData>` published process-wide via a `OnceLock` (like the
-//!   checkpointer's shmem), since there is no shared-memory segment. The archiver
-//!   advertises its proc number there so [`pgarch_wakeup`] rings its `proc_latch`.
-//! - The archive module loading (`LoadArchiveLibrary` / `_PG_archive_module_init`)
-//!   is TOMBSTONED: there is no dynamic library loading in a single binary. Shell
-//!   archiving via `archive_command` is the supported path; [`pgarch_archive_xlog`]
-//!   is a non-panicking stub until that lands (a long-lived task must not panic on
-//!   the periodic scan).
-//! - PG's `pgarch_archiveXlog` `sigsetjmp` error handler becomes the task-boundary
-//!   `catch_unwind` + supervisor restart model (mirrors the checkpointer, 17a).
-//! - The max-heap prioritization of `.ready` files (`binaryheap` over
-//!   `arch_files`) is translated as a sorted `VecDeque`; the comparator
-//!   ([`ready_file_comparator`]) is faithful (history files first, then oldest).
+//! In PostgreSQL the archiver is forked from the postmaster and the two
+//! communicate by signals and a small shared-memory area; this file collects both
+//! the functions run by the archiver process and the helpers backends call to
+//! wake it or force a directory rescan.
+//!
+//! Here the archiver is a single `tokio` task supervised like the other auxiliary
+//! processes rather than a forked child. The shared-memory `PgArchData` area --
+//! the advertised process number and the force-rescan flag -- becomes a small
+//! `Arc<PgArchData>` published process-wide through a `OnceLock`; the running
+//! archiver advertises its process number there so any backend's [`pgarch_wakeup`]
+//! can find and set its latch. The latch itself is a `tokio` notification, and the
+//! main loop sleeps on a `select!` over the latch, the autowake timer, and a
+//! shutdown handle (PostgreSQL's "do one more cycle then exit" on SIGTERM). On exit
+//! -- including an unwinding panic -- an RAII guard clears the advertised process
+//! number and returns the auxiliary `PGPROC`, replacing the C `sigsetjmp` handler
+//! and `proc_exit` callbacks. The bounded max-heap that orders `.ready` files is a
+//! sorted `VecDeque`, with the same priority comparator.
+//!
+//! Dynamic loading of an archive library is not reproduced -- there is no shared
+//! object loading in a single binary -- so the actual copy step
+//! ([`pgarch_archive_xlog`]) is currently a non-failing-fatally stub that reports
+//! the segment as not archived; shell archiving via `archive_command` is the
+//! intended path and is not yet implemented.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -366,7 +377,7 @@ fn ready_file_comparator(a: &str, b: &str) -> std::cmp::Ordering {
 fn is_tl_history_file_name(name: &str) -> bool {
     name.len() == 8 + ".history".len()
         && name.ends_with(".history")
-        && name[..8].chars().all(|c| c.is_ascii_hexdigit())
+        && name[..8].chars().all(|c| matches!(c, '0'..='9' | 'A'..='F'))
 }
 
 /// PG `pgarch_archiveDone`. Mark a segment archived by renaming its status file

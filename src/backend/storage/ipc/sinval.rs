@@ -1,20 +1,30 @@
-//! Translated from PostgreSQL src/backend/storage/ipc/sinval.c
+//! Shared cache invalidation communication code. Translated from backend/storage/ipc/sinval.c.
 //!
-//! Shared cache invalidation communication code: the thin send/receive wrappers
-//! over the SI ring (sinvaladt.rs) plus the catchup-interrupt machinery.
+//! This is the thin send/receive layer over the shared invalidation (SI) message
+//! ring maintained in `sinvaladt`. `SendSharedInvalidMessages` appends messages to
+//! the global queue; `ReceiveSharedInvalidMessages` processes every message that was
+//! queued before it was entered, invoking a caller-supplied callback per message and
+//! a separate reset callback when a backend has fallen so far behind that the queue
+//! forced it through a full cache reset. The receive routine may recurse, because a
+//! callback can itself trigger invalidation processing, so it drains messages already
+//! pulled out of the ring before fetching more.
 //!
-//! Mapping notes:
-//!  - PG's `SharedInvalidMessageCounter` (a uint64 process global) -> a module
-//!    `AtomicU64`; every C `SharedInvalidMessageCounter++` is `fetch_add(1)`.
-//!  - PG's `catchupInterruptPending` (a `volatile sig_atomic_t` per-process flag
-//!    a signal handler raised) -> the per-task ProcSignal slot `CatchupInterrupt`
-//!    reason bit (s6.1/s6.3: per-task state a FOREIGN task sets). Read/clear via
-//!    the task's own slot handle; a backend with no slot is treated as "not
-//!    pending".
-//!  - ReceiveSharedInvalidMessages' recursion-safe file-static buffer + counters
-//!    -> a tokio `task_local! RefCell<ReceiveState>` (per-task; the recursion is
-//!    within one task). The RefCell borrow is NEVER held across the inval/reset
-//!    callback: we borrow to pop one message by value, drop the borrow, then call.
+//! It also carries the catchup-interrupt machinery. Idle backends do not read the SI
+//! queue on their own, so a backend that gets too far behind is sent a catchup
+//! interrupt; when it next becomes able to process one, it accepts the pending
+//! invalidations and daisy-chains the signal on to the next slowest backend so the
+//! whole queue keeps draining.
+//!
+//! PepperDB differs from PostgreSQL in how the shared, per-process state is realized.
+//! `SharedInvalidMessageCounter`, a plain process global in C, is a module `AtomicU64`.
+//! The C `catchupInterruptPending` flag (set from a signal handler) becomes a per-task
+//! `CatchupInterrupt` bit in the task's ProcSignal slot, raised by another task through
+//! the process-wide ProcSignal registry rather than by a Unix signal; a task with no
+//! slot is simply treated as not pending. The recursion-safe static message buffer and
+//! its counters, which C keeps as file-static state, are held in a tokio task-local
+//! cell so each backend task has its own copy and the in-task recursion behaves as in
+//! the original. `ProcessCatchupInterrupt` is async here because starting and
+//! committing the surrounding transaction are async operations.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

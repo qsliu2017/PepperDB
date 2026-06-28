@@ -1,26 +1,33 @@
-//! Translated from PostgreSQL src/backend/storage/lmgr/lmgr.c
+//! POSTGRES high-level lock manager. Translated from backend/storage/lmgr/lmgr.c.
 //!
-//! The high-level lock manager: thin LOCKTAG-based wrappers over the heavyweight
-//! lock manager (15b, `crate::backend::storage::lmgr::lock`). Each wrapper builds
-//! a `LOCKTAG` via the `LOCKTAG::set_*` helpers (header `src/storage/lock.rs`),
-//! then calls `LockAcquire`/`LockAcquireExtended`/`LockRelease`. The big header
-//! types live in `src/storage/lmgr.rs`.
+//! This is the object-oriented layer over the heavyweight lock manager: a family
+//! of thin wrappers that lock and unlock named database objects - relations,
+//! pages, tuples, transactions, databases, and general catalog objects. Each
+//! wrapper builds the appropriate `LOCKTAG` from the object's identity and then
+//! defers to the underlying `LockAcquire`/`LockAcquireExtended`/`LockRelease`
+//! routines. It also provides the routines that wait on another transaction to
+//! finish (`XactLockTableWait`), the speculative-insertion locks used to
+//! interlock concurrent unique inserts, the `WaitForLockers` helpers used by
+//! CREATE/REINDEX INDEX CONCURRENTLY, and `DescribeLockTag`/`GetLockNameFromTagType`,
+//! which render a lock tag for deadlock and error reports.
 //!
-//! Async coloring (design step15 s5/s6): anything reaching `LockAcquire().await`
-//! is `async`; the pure tag-builders and `DescribeLockTag`/`GetLockNameFromTagType`
-//! stay sync. `LockRelease` is sync (the 15b release path is sync), so the
-//! `Unlock*` wrappers are sync too.
+//! In PepperDB the lock manager keeps the same shared lock table, so the
+//! `LockAcquire` family resolves it internally and these wrappers remain plain
+//! free functions. Acquisition can block, so any wrapper that may reach an
+//! acquire is `async` and awaits it; the pure tag builders, the `Unlock*`
+//! release paths, and the lock-description routines stay synchronous. The
+//! per-backend speculative-insertion token counter, a static global in
+//! PostgreSQL, is a per-task cell here so concurrent backends never share it.
 //!
-//! Cross-cutting handles (rules s3): the relation/object wrappers reach the lock
-//! manager through the process-wide `LockAcquire`/`LockRelease` (which resolve it
-//! internally) and `MyDatabaseId` through the per-task `Session`, so they keep the
-//! C-name free-function form. `XactLockTableWait` and `WaitForLockers*` also need
-//! procarray + subtrans to re-check whether an xid is still running, so they take
-//! `shared: &Arc<SharedState>` (the multi-subsystem orchestrator case).
-//!
-//! Staging (rules s4): `AcceptInvalidationMessages` (sinval), the relcache, and
-//! the progress-reporting / CREATE INDEX CONCURRENTLY machinery land on existing
-//! stubs.
+//! `XactLockTableWait`, `ConditionalXactLockTableWait`, and the `WaitForLockers`
+//! routines must re-check whether a transaction is still running, which consults
+//! the procarray, commit log, and subtransaction map; these take an explicit
+//! reference to the shared state rather than reaching a process global. The
+//! transaction-wait error-context message, which PostgreSQL pushes as an error
+//! callback, is instead captured eagerly into an owned string in the synchronous
+//! prologue so the relation reference never crosses an await point. Invalidation
+//! processing, relcache integration, and the CREATE INDEX CONCURRENTLY progress
+//! reporting currently call into not-yet-implemented subsystems.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -32,6 +39,7 @@ use std::sync::Arc;
 use crate::access::transam::INVALID_TRANSACTION_ID;
 use crate::c::TransactionId;
 use crate::catalog::catalog::IsSharedRelation;
+use crate::commands::progress::ProgressWaitfor;
 use crate::postgres_ext::{InvalidOid, Oid};
 use crate::shared_state::SharedState;
 use crate::storage::block::BlockNumber;
@@ -647,8 +655,15 @@ pub async fn WaitForLockersMultiple(
     }
 
     if progress {
-        pgstat_progress_update_param_total(0);
-        pgstat_progress_update_param_done(0);
+        // Reset TOTAL, DONE, CURRENT_PID together (lmgr.c uses multi_param).
+        crate::utils::backend_progress::pgstat_progress_update_multi_param(
+            &[
+                ProgressWaitfor::Total as i32,
+                ProgressWaitfor::Done as i32,
+                ProgressWaitfor::CurrentPid as i32,
+            ],
+            &[0, 0, 0],
+        );
     }
 }
 
@@ -659,11 +674,17 @@ pub async fn WaitForLockers(heaplocktag: LOCKTAG, lockmode: LOCKMODE, progress: 
 
 /// PROGRESS_WAITFOR_TOTAL update (lands on the backend-progress stub).
 fn pgstat_progress_update_param_total(v: i64) {
-    crate::utils::backend_progress::pgstat_progress_update_param(0, v);
+    crate::utils::backend_progress::pgstat_progress_update_param(
+        ProgressWaitfor::Total as i32,
+        v,
+    );
 }
 /// PROGRESS_WAITFOR_DONE update (lands on the backend-progress stub).
 fn pgstat_progress_update_param_done(v: i64) {
-    crate::utils::backend_progress::pgstat_progress_update_param(1, v);
+    crate::utils::backend_progress::pgstat_progress_update_param(
+        ProgressWaitfor::Done as i32,
+        v,
+    );
 }
 
 // ---------------------------------------------------------------------------

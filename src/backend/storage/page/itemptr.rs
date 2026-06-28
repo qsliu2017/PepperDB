@@ -1,13 +1,22 @@
-//! Translated from PostgreSQL src/backend/storage/page/itemptr.c
-//! POSTGRES disk item pointer code.
+//! Disk item pointer (TID) operations. Translated from backend/storage/page/itemptr.c.
 //!
-//! Only the two non-inline functions from itemptr.c live here: the equality test
-//! and the btree-style 3-way compare. The increment/decrement/get/set operations
-//! are inline in the header (src/storage/itemptr.rs). Type-centric, so these are
-//! idiomatic methods on ItemPointerData; the header keeps deprecated C-named shims.
+//! An item pointer, or TID, is the six-byte on-disk address of a heap tuple: a
+//! block number plus an offset within that block. PostgreSQL keeps the simple
+//! accessors and the set/get helpers inline in the header and places only the
+//! non-trivial routines in this file: the equality test, the generic btree-style
+//! three-way comparison, and the increment/decrement helpers that step a pointer
+//! by one within the raw range of its component types (ignoring the usual
+//! FirstOffsetNumber/MaxOffsetNumber bounds, so the result may be an invalid
+//! offset). Comparison and equality use the unchecked block/offset accessors so
+//! that a user-supplied TID with a zero offset does not trip a validity assertion.
 //!
-//! Pure synchronous value operations.
+//! PepperDB is type-centric: these routines are methods on `ItemPointerData`
+//! (`equals`, `compare`, `inc`, `dec`) rather than free functions, while the
+//! header retains the inline accessors and C-named shims. All operations are
+//! pure synchronous value computations with no I/O or shared state.
 
+use crate::c::PG_UINT16_MAX;
+use crate::storage::block::INVALID_BLOCK_NUMBER;
 use crate::storage::itemptr::ItemPointerData;
 
 impl ItemPointerData {
@@ -38,6 +47,38 @@ impl ItemPointerData {
                 }
             }
         }
+    }
+
+    /// Increment by 1, respecting only the types' range limits (not
+    /// MaxOffsetNumber). May make the pointer invalid; no-op at the maximum.
+    pub fn inc(&mut self) {
+        let mut blk = self.block_number_no_check();
+        let mut off = self.offset_number_no_check();
+        if off == PG_UINT16_MAX {
+            if blk != INVALID_BLOCK_NUMBER {
+                off = 0;
+                blk += 1;
+            }
+        } else {
+            off += 1;
+        }
+        self.set(blk, off);
+    }
+
+    /// Decrement by 1, respecting only the types' range limits. May make the
+    /// pointer invalid; no-op at the minimum. Relies on FirstOffsetNumber == 1.
+    pub fn dec(&mut self) {
+        let mut blk = self.block_number_no_check();
+        let mut off = self.offset_number_no_check();
+        if off == 0 {
+            if blk != 0 {
+                off = PG_UINT16_MAX;
+                blk -= 1;
+            }
+        } else {
+            off -= 1;
+        }
+        self.set(blk, off);
     }
 }
 

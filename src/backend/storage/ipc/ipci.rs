@@ -1,18 +1,34 @@
-//! Translated from PostgreSQL src/backend/storage/ipc/ipci.c
+//! Inter-process communication initialization. Translated from backend/storage/ipc/ipci.c.
 //!
-//! ipci.c set up the shared-memory segment and ran the ordered roster of
-//! `*ShmemInit` calls. Under the single-process async model there is no segment:
-//! `CreateSharedMemoryAndSemaphores` becomes the constructor for the
-//! `Arc`-shared [`SharedState`] (the typed replacement for the segment), and the
-//! segment-sizing machinery is tombstoned.
+//! In PostgreSQL, this is where the postmaster creates the shared-memory
+//! segment and brings every shared subsystem online. `CalculateShmemSize`
+//! sums each subsystem's space request (plus extension requests) to size the
+//! segment; `CreateSharedMemoryAndSemaphores` allocates the segment and the
+//! semaphore set and then runs `CreateOrAttachShmemStructs`, a fixed ordered
+//! roster of per-subsystem `*ShmemInit` calls (LWLocks, the shmem index, the
+//! transaction log, buffers, the lock manager, the process array, shared-
+//! invalidation messaging, and so on). The roster order encodes real
+//! initialization dependencies. Under `EXEC_BACKEND`, `AttachSharedMemoryStructs`
+//! re-runs the same roster so a freshly exec'd child can rebuild its local
+//! pointers into the already-existing segment.
 //!
-//! The ordered roster itself lives in [`SharedState::new`] -- ipci.c's
-//! `CreateOrAttachShmemStructs` ordering encodes real init dependencies and is
-//! reproduced there with `TODO(stepNN)` placeholders.
+//! PepperDB runs as a single process, so there is no shared-memory segment to
+//! size, allocate, or attach. The shared state is an `Arc`-shared `SharedState`
+//! value living on the heap, whose fields are the per-subsystem structures that
+//! PostgreSQL would place in the segment. `CreateSharedMemoryAndSemaphores`
+//! therefore becomes the constructor for that value: it builds the `SharedState`
+//! and hands back an `Arc` that the supervisor clones into each spawned task.
+//! The dependency-ordered roster of subsystem initializations is reproduced
+//! inside `SharedState`'s constructor rather than here.
 //!
-//! Tombstoned siblings (headers only, no backend files): storage/ipc/shmem.c,
-//! dsm.c, dsm_impl.c, dsm_registry.c -- all replaced by Arc-shared heap state
-//! and tokio channels; no shared-memory segment exists to size or attach.
+//! Because there is no segment and no dynamic loader, several PostgreSQL entry
+//! points have no counterpart and remain as deprecated stubs: segment sizing
+//! (`CalculateShmemSize`), extension shared-memory requests
+//! (`RequestAddinShmemSpace`), the `EXEC_BACKEND` re-attach
+//! (`AttachSharedMemoryStructs`), and the standalone roster
+//! (`CreateOrAttachShmemStructs`). The loadable-module startup hook, dynamic
+//! shared memory startup, and the runtime shared-memory-size GUCs describe a
+//! segment that does not exist here and are dropped entirely.
 
 use std::sync::Arc;
 

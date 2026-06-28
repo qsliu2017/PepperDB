@@ -1,34 +1,33 @@
-//! Translated from PostgreSQL src/backend/storage/lmgr/lock.c
+//! The POSTGRES primary (heavyweight) lock mechanism. Translated from backend/storage/lmgr/lock.c.
 //!
-//! The heavyweight (regular) lock manager: the sharded LOCK/PROCLOCK tables,
-//! `LockAcquire`/`LockRelease`/`LockReleaseAll`, the relation fast-path, and the
-//! conflict internals (`LockCheckConflicts`/`GrantLock`/`UnGrantLock`) that
-//! proc.c's grant-wait machinery (15a) calls. The big header types (LOCK,
-//! PROCLOCK, LOCALLOCK, LOCKTAG, LockAcquireResult) live in `src/storage/lock.rs`.
+//! This is the regular lock manager: a lock table keyed by `LOCKTAG`, the
+//! conflict-mode semantics for the standard lock methods, and the principal
+//! entry points `LockAcquire`, `LockRelease`, `LockReleaseAll`,
+//! `LockCheckConflicts`, and `GrantLock`. When a process tries to acquire a
+//! lock of a type that conflicts with existing locks, it is put to sleep using
+//! the routines in storage/lmgr/proc. For the most part this code is invoked
+//! through lmgr or another lock-management module rather than directly. The
+//! large lock structures (`LOCK`, `PROCLOCK`, `LOCALLOCK`, `LOCKTAG`,
+//! `LockAcquireResult`) are defined in `crate::storage::lock`.
 //!
-//! Representation (design step15 s3):
-//! - The LOCK and PROCLOCK tables are sharded into `NUM_LOCK_PARTITIONS` (16)
-//!   `Mutex<LockShard>`s. The shard `Mutex` IS the ex-lwlock partition lock
-//!   (rules s9). Partition = `lock_tag_hash_code(tag) % NUM_LOCK_PARTITIONS`.
-//!   A `LockShard` holds `HashMap<LOCKTAG, Box<LOCK>>` + `HashMap<ProcLockKey,
-//!   Box<PROCLOCK>>`. The `Box` gives each entry a STABLE heap address so the
-//!   raw `*mut LOCK`/`*mut PROCLOCK` that proc.c (15a) keeps in PGPROC.wait_lock
-//!   / myProcLocks and in the LOCALLOCK stay valid while the entry lives.
-//! - The LOCALLOCK table + the fast-path local-use counts are PER-TASK: a tokio
-//!   `task_local` `RefCell<LocalLockTable>` (rules s6.1). Never borrow it across
-//!   an `.await`.
-//! - The fast-path arrays (`fp_lock_bits`/`fp_rel_id`) live on the PGPROC
-//!   (shared) under the proc's `fp_info_lock` (a per-proc `Mutex` from 15a).
+//! In PepperDB the shared-memory hash tables become process-internal state.
+//! The `LOCK` and `PROCLOCK` tables are split into `NUM_LOCK_PARTITIONS`
+//! shards, each a `parking_lot::Mutex<LockShard>` that subsumes the per-
+//! partition LWLock of the C original; the partition for a tag is its hash
+//! modulo the partition count. Each shard holds boxed `LOCK` and `PROCLOCK`
+//! entries so that the raw pointers held by proc and by the per-task
+//! `LOCALLOCK` remain stable for the lifetime of the entry. The `LOCALLOCK`
+//! table and the fast-path local-use counts are per-backend rather than
+//! per-process: they live in a tokio task-local cell and must not be borrowed
+//! across an await. The per-backend fast-path arrays remain on the `PGPROC`,
+//! guarded by that proc's fast-path lock.
 //!
-//! Async coloring (design step15 s6): `LockAcquireExtended` is ASYNC. The grant
-//! path is sync; on the WAIT path we DROP the partition shard `Mutex` BEFORE
-//! `ProcSleep().await` (rules s5 -- never hold the shard Mutex across the await).
-//! `LockRelease`/`LockReleaseAll` are sync under the shard Mutex (UnGrantLock +
-//! ProcLockWakeup, then drop). `LockCheckConflicts`/`GrantLock`/`UnGrantLock` are
-//! sync.
-//!
-//! Staging: deadlock detection (deadlock.c, 15c) and the lmgr.c wrappers (15d)
-//! land on existing stubs. Lock groups are single-member until F4 (noted inline).
+//! Lock acquisition is asynchronous. The grant path runs synchronously under
+//! the partition shard mutex; on the wait path the shard mutex is released
+//! before sleeping on the proc-wait future, so no shard lock is held across an
+//! await. Release paths run synchronously under the shard mutex. Deadlock
+//! detection and the higher-level lmgr wrappers live in their own modules, and
+//! lock groups are treated as single-member.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -111,7 +110,7 @@ const LOCK_CONFLICTS: [LOCKMASK; MAX_LOCKMODES] = {
     t
 };
 
-const LOCK_MODE_NAMES: [&str; MAX_LOCKMODES] = [
+const LOCK_MODE_NAMES: [&str; 9] = [
     "INVALID",
     "AccessShareLock",
     "RowShareLock",
@@ -121,7 +120,6 @@ const LOCK_MODE_NAMES: [&str; MAX_LOCKMODES] = [
     "ShareRowExclusiveLock",
     "ExclusiveLock",
     "AccessExclusiveLock",
-    "INVALID",
 ];
 
 static DEFAULT_LOCK_METHOD: LockMethodData = LockMethodData {
@@ -372,6 +370,20 @@ impl LockManager {
         drop(view);
         while guards.pop().is_some() {}
         r
+    }
+
+    /// PG `LockHashPartitionLockByProc(leader)`: run `f` holding the single
+    /// partition Mutex that guards `leader`'s lock-group fields (lockGroupLeader /
+    /// lockGroupMembers). The partition is `leader_procno % NUM_LOCK_PARTITIONS`,
+    /// chosen by the leader's ProcNumber alone (not its contents), so the right
+    /// lock is taken even if the leader PGPROC is being recycled. The deadlock
+    /// detector holds every partition Mutex via `with_all_partitions_locked`, so
+    /// it reads those group fields safely without extra locking. SYNC; no `.await`
+    /// while the guard is held (rules s5).
+    pub fn with_proc_partition_locked<R>(&self, procno: ProcNumber, f: impl FnOnce() -> R) -> R {
+        let idx = (procno as usize) % NUM_LOCK_PARTITIONS;
+        let _guard = self.shards[idx].lock();
+        f()
     }
 }
 
@@ -1135,8 +1147,9 @@ fn fast_path_transfer_relation_locks(
 
 /// Wire a freshly-created PROCLOCK's raw-pointer tag (PG keeps `myLock`/`myProc`
 /// pointers in the tag; here we set them from the stable boxed addresses so
-/// proc.c's `proclock.tag` reads work). Also pushes the proclock onto the LOCK's
-/// `proc_locks` list. Caller holds the shard Mutex.
+/// proc.c's `proclock.tag` reads work). The holder list PG keeps in
+/// `LOCK.procLocks` is instead the shard's proclock HashMap filtered by tag
+/// (`holders_of`); `LOCK.proc_locks` is unused. Caller holds the shard Mutex.
 fn wire_proclock(shard: &mut LockShard, locktag: &LOCKTAG, proc: ProcNumber) {
     let pl_key = ProcLockKey {
         lock: *locktag,
@@ -1195,6 +1208,11 @@ pub async fn LockAcquireExtended(
     };
     assert!(!(lockmode <= 0 || lockmode > lock_method_table.num_lock_modes), "unrecognized lock mode: {lockmode}");
 
+    // TODO(recovery/standby): PG (lock.c:863-871) raises ERROR for relation/object
+    // locks > RowExclusiveLock while RecoveryInProgress(), and logs
+    // AccessExclusiveLock for standby replay (lock.c:967-974/1257-1266). Deferred
+    // with the recovery + hot-standby WAL subsystem (RecoveryInProgress is a stub).
+
     let m = LockManager::expect().clone();
     let procno = current_proc_number();
     assert!(procno != INVALID_PROC_NUMBER, "LockAcquire without a PGPROC");
@@ -1244,25 +1262,24 @@ pub async fn LockAcquireExtended(
         });
         if has_room {
             let fasthash = fast_path_strong_lock_hash_partition(hashcode);
-            let strong_present = {
-                let s = m.strong.lock();
-                s.count[fasthash] != 0
-            };
-            let acquired = if strong_present {
-                false
-            } else {
-                with_fp_locked(procno, |proc| {
-                    with_local(|l| {
-                        fast_path_grant_relation_lock(
-                            proc,
-                            &mut l.fast_path_use,
-                            Oid(locktag.locktag_field2),
-                            lockmode,
-                        )
-                    })
+            // PG checks the strong-lock count and grants the fast-path bit inside
+            // ONE fpInfoLock critical section (lock.c:998-1004); the atomicity is
+            // what orders against FastPathTransferRelationLocks taking the same
+            // fpInfoLock. m.strong is a leaf lock (no await) taken while held.
+            let acquired = with_fp_locked(procno, |proc| {
+                if m.strong.lock().count[fasthash] != 0 {
+                    return false;
+                }
+                with_local(|l| {
+                    fast_path_grant_relation_lock(
+                        proc,
+                        &mut l.fast_path_use,
+                        Oid(locktag.locktag_field2),
+                        lockmode,
+                    )
                 })
-                .unwrap_or(false)
-            };
+            })
+            .unwrap_or(false);
             if acquired {
                 with_local(|l| {
                     if let Some(ll) = l.locks.get_mut(&localtag) {
@@ -1719,14 +1736,24 @@ pub fn LockReleaseAll(lockmethodid: LOCKMETHODID, all_locks: bool) {
             if tag.lock.lockmethod() != lockmethodid {
                 continue;
             }
-            // Session-lock retention (not all_locks): keep session-only holds.
+            // Session-lock retention (not all_locks, lock.c:2337-2362): forget the
+            // xact owners, but if a session owner (owner==None) remains, rewrite
+            // the locallock to show just the session count and KEEP the heavyweight
+            // lock -- regardless of whether xact owners were also present.
             if !all_locks {
-                let has_session = ll.lock_owners.iter().any(|o| o.owner.is_none());
-                let has_xact = ll.lock_owners.iter().any(|o| o.owner.is_some());
-                if has_session && !has_xact {
-                    continue; // session-only: keep
+                let session_n_locks: i64 = ll
+                    .lock_owners
+                    .iter()
+                    .find(|o| o.owner.is_none())
+                    .map_or(0, |o| o.n_locks);
+                if session_n_locks > 0 {
+                    let ll = l.locks.get_mut(&tag).unwrap();
+                    ll.lock_owners.retain(|o| o.owner.is_none());
+                    ll.n_locks = session_n_locks;
+                    continue; // session hold retained
                 }
             }
+            let ll = l.locks.get(&tag).unwrap();
             let is_fp = ll.lock.is_null() || ll.proclock.is_null();
             out.push(Held {
                 tag,
@@ -2083,32 +2110,28 @@ pub async fn VirtualXactLock(vxid: VirtualTransactionId, wait: bool) -> bool {
         // TODO(15d/twophase): XactLockForVirtualXact.
         return true;
     }
-    let still_running = with_fp_locked(vxid.proc_number, |proc| {
-        proc.vxid.proc_number == vxid.proc_number
-            && proc.fp_local_transaction_id == vxid.local_transaction_id
-    });
-    match still_running {
-        Some(true) => {}
-        _ => return true, // proc gone or vxid ended
-    }
-    if !wait {
-        return false;
-    }
-
-    // Materialize the fast-path VXID lock into the main table so we can wait on
-    // it, then block on a ShareLock.
+    // PG holds fpInfoLock as ONE critical section spanning the still-running
+    // recheck, the fpVXIDLock clear, AND the SetupLockInTable/GrantLock
+    // materialization (lock.c:4744-4809). That section is what excludes
+    // VirtualXactLockTableCleanup, so the VXID lock is never absent from both the
+    // fast path and the main table. Do it all inside one with_fp_locked; the
+    // shard Mutex nests inside fpInfoLock (same order as
+    // fast_path_transfer_relation_locks).
     let locktag = LOCKTAG::set_virtual_transaction(vxid);
     let hashcode = LockTagHashCode(&locktag);
-    if let Some(m) = LockManager::get() {
-        let did = with_fp_locked(vxid.proc_number, |proc| {
-            let needs = proc.fp_vxid_lock;
-            if needs {
-                proc.fp_vxid_lock = false;
-            }
-            needs
-        })
-        .unwrap_or(false);
-        if did {
+    let Some(m) = LockManager::get() else {
+        return true;
+    };
+    let proceed = with_fp_locked(vxid.proc_number, |proc| {
+        if proc.vxid.proc_number != vxid.proc_number
+            || proc.fp_local_transaction_id != vxid.local_transaction_id
+        {
+            return true; // vxid ended (caller returns true)
+        }
+        if !wait {
+            return false; // still running, not asked to wait
+        }
+        if proc.fp_vxid_lock {
             let mut shard = m.shard(hashcode).lock();
             if let Some((lp, plp)) = setup_lock_in_table(
                 &mut shard,
@@ -2125,7 +2148,16 @@ pub async fn VirtualXactLock(vxid: VirtualTransactionId, wait: bool) -> bool {
                 wire_proclock(&mut shard, &locktag, vxid.proc_number);
             }
             drop(shard);
+            proc.fp_vxid_lock = false;
         }
+        false // materialized; fall through to wait
+    })
+    .unwrap_or(true); // proc gone
+    if proceed {
+        return true;
+    }
+    if !wait {
+        return false;
     }
     let _ = LockAcquire(&locktag, LockMode::ShareLock as LOCKMODE, false, false).await;
     let _ = LockRelease(&locktag, LockMode::ShareLock as LOCKMODE, false);

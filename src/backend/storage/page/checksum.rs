@@ -1,14 +1,26 @@
-//! Translated from PostgreSQL src/backend/storage/page/checksum.c
-//! (which #includes src/include/storage/checksum_impl.h -- the real algorithm).
+//! Checksum implementation for data pages. Translated from backend/storage/page/checksum.c.
 //!
-//! Data-page checksum: 32 parallel FNV-1a-style lanes over the page as 32-bit
-//! words, the pd_checksum field excluded (transiently zeroed), then XOR-folded,
-//! mixed with the block number, and reduced to a non-zero u16.
+//! PostgreSQL computes a page checksum with an algorithm chosen for very fast
+//! calculation, so that the checksum does not become the bottleneck when pages
+//! stream in from the OS file cache. It is based on the FNV-1a hash, modified to
+//! mix high-order bits better by also xor-ing in the value shifted right by 17
+//! bits, and to fold in four bytes at a time. To hide multiply latency and exploit
+//! SIMD parallelism, the page is viewed as a two-dimensional array of 32 columns of
+//! 32-bit words; each column accumulates a partial checksum from a distinct initial
+//! offset basis, two extra zero rounds mix in the final word, and the partial sums
+//! are XOR-folded into one 32-bit value. The block number is mixed in to catch
+//! transposed pages, and the result is reduced modulo 65535 with an offset of one so
+//! it is always a non-zero u16. The stored pd_checksum field is excluded from the
+//! computation (treated as zero). In C the actual code lives in checksum_impl.h so
+//! external programs can incorporate it; that algorithm is translated directly here.
 //!
-//! ON-DISK BIT-EXACT: this must match C byte-for-byte (an existing PG datadir's
-//! checksums must validate). Do not "improve" the math.
-//!
-//! Pure synchronous value computation; the caller holds the buffer lock.
+//! The output is bit-for-bit identical to PostgreSQL: an existing data directory's
+//! checksums validate unchanged, and a regression anchor cross-checked against the C
+//! reference guards the on-disk format. Where C zeroes pd_checksum in place and then
+//! restores it, this version copies the page into a word array with that field
+//! masked, avoiding any transient mutation of the live page. The computation is a
+//! pure synchronous value calculation invoked while the caller holds the buffer
+//! lock; nothing here is stored back onto the page.
 
 use crate::pg_config::BLCKSZ;
 use crate::storage::block::BlockNumber;

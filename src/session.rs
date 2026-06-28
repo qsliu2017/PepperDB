@@ -98,6 +98,12 @@ pub struct Session {
     query_cancel_holdoff_count: AtomicU32,
     /// PG `CritSectionCount`.
     crit_section_count: AtomicU32,
+
+    // --- Command-loop state (postgres.c) ---
+    /// PG `DoingCommandRead`: true while blocked reading a client command. A
+    /// query-cancel arriving in this state is a no-op (postgres.c suppresses the
+    /// ERROR throw). Owner-only; never read across an `.await`.
+    doing_command_read: AtomicBool,
 }
 
 impl Session {
@@ -126,6 +132,7 @@ impl Session {
             interrupt_holdoff_count: AtomicU32::new(0),
             query_cancel_holdoff_count: AtomicU32::new(0),
             crit_section_count: AtomicU32::new(0),
+            doing_command_read: AtomicBool::new(false),
         }
     }
 
@@ -259,6 +266,14 @@ impl Session {
     pub fn dec_crit_section_count(&self) {
         let prev = self.crit_section_count.fetch_sub(1, Ordering::Relaxed);
         debug_assert!(prev > 0);
+    }
+
+    // --- Command-loop state ---
+    pub fn doing_command_read(&self) -> bool {
+        self.doing_command_read.load(Ordering::Relaxed)
+    }
+    pub fn set_doing_command_read(&self, v: bool) {
+        self.doing_command_read.store(v, Ordering::Relaxed);
     }
 }
 

@@ -1,4 +1,32 @@
-//! Translated from PostgreSQL src/backend/utils/error/elog.c
+//! Error logging and reporting. Translated from backend/utils/error/elog.c.
+//!
+//! Because log messages can be generated at an extremely high rate, this code is
+//! careful about the cost of gathering anything that might be logged, and it must
+//! stay robust when called from within an aborted transaction, where operations
+//! such as catalog-cache lookups are unsafe. The principal entry points build an
+//! `ErrorData` record through chained field accessors (`errcode`, `errmsg`,
+//! `errdetail`, `errhint`, `errcontext_msg`, ...), then `errstart`/`errfinish`
+//! decide whether a message is worth emitting and route it to the server log
+//! and/or the connected client. Messages below `ERROR` severity return to the
+//! caller; messages at `ERROR` and above do not.
+//!
+//! PepperDB collapses PostgreSQL's multi-level `errordata[]` recursion stack into
+//! a single in-flight build slot: an error is constructed as one `ErrorData`
+//! value and raised atomically, so there is no open span for a nested report to
+//! interleave into. An `in_flight` flag marks that a build is open; a second
+//! error-or-higher raise while one is open is treated as a double fault and
+//! escalated to `PANIC`. Severity drives the unwinding model: `ERROR` and `FATAL`
+//! raise a catchable panic carrying the `ErrorData`, which `PG_TRY`/`PG_CATCH`
+//! (realized as `catch_unwind`) can intercept and re-throw, while `PANIC` aborts
+//! the process outright so half-updated shared state is never flushed. Per-task
+//! error state lives in thread-local storage rather than process globals, and
+//! `printf`-style varargs are pre-formatted into owned `String`s at the call
+//! site instead of being expanded here.
+//!
+//! Only the standard-error log destination is implemented. The syslog, event-log,
+//! CSV-log, JSON-log, and syslogger pipe destinations, the protocol-encoded send
+//! to a connected frontend, and the `log_line_prefix` timestamp expansion are not
+//! yet implemented and are left as stubs.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -400,6 +428,11 @@ pub fn errfinish(mut edata: ErrorData, filename: &str, lineno: i32, funcname: &s
     edata.lineno = lineno;
     edata.funcname = (!funcname.is_empty()).then(|| funcname.to_owned());
 
+    // Bump recursion_depth across the callback+emit phase (PG errfinish does the
+    // same), so an ereport re-entered from a context callback or message eval
+    // observes the elevated depth and in_error_recursion_trouble() fires.
+    ERROR_STATE.with(|st| st.borrow_mut().recursion_depth += 1);
+
     // Run errcontext callbacks on the LIVE in-flight error before it is
     // finalized, so they append CONTEXT lines onto the actual ErrorData (PG runs
     // them on errordata[] top calling errcontext_msg), innermost -> outermost.
@@ -424,6 +457,9 @@ pub fn errfinish(mut edata: ErrorData, filename: &str, lineno: i32, funcname: &s
     // FATAL escapes that catch to the task boundary (ends the backend). The
     // task-boundary catch_unwind downcasts the payload back to ErrorData.
     if elevel >= ERROR {
+        // PG decrements recursion_depth before PG_RE_THROW; the recovery point
+        // (flush_error_state) also resets it.
+        ERROR_STATE.with(|st| st.borrow_mut().recursion_depth -= 1);
         // Emit to the server log first so the message is seen even if nobody
         // catches the panic, then raise it as a panic carrying the ErrorData.
         if edata.output_to_server {
@@ -434,6 +470,7 @@ pub fn errfinish(mut edata: ErrorData, filename: &str, lineno: i32, funcname: &s
 
     // log-and-return for WARNING/LOG/NOTICE/INFO/DEBUGx.
     emit_error_report_for(&mut edata);
+    ERROR_STATE.with(|st| st.borrow_mut().recursion_depth -= 1);
 }
 
 // set_stack_entry_location's filename normalization: keep only the base name.
@@ -647,12 +684,12 @@ pub fn report_recovered_error(edata: &ErrorData) {
 
 fn emit_error_report_for(edata: &mut ErrorData) {
     // emit_log_hook may turn off output_to_server.
-    unsafe {
-        let p = &raw mut EMIT_LOG_HOOK;
-        if edata.output_to_server
-            && let Some(hook) = (*p).as_mut() {
+    if edata.output_to_server {
+        EMIT_LOG_HOOK.with(|h| {
+            if let Some(hook) = h.borrow_mut().as_mut() {
                 hook(edata);
             }
+        });
     }
     if edata.output_to_server {
         send_message_to_server_log(edata);
@@ -764,10 +801,14 @@ fn run_error_context_callbacks(edata: &mut ErrorData) {
     });
 }
 
-// emit_log_hook: void(*)(ErrorData*) -> optional captured closure.
-// TODO(panic): make this task-local rather than a process global.
+// emit_log_hook: void(*)(ErrorData*) -> optional captured closure. PG's global
+// is installed once at module load; under the async model we hold it per-task
+// (thread_local!, matching ERROR_STATE/ERROR_CONTEXT_STACK) -- no static mut, no
+// cross-task data race. TODO(panic): tokio task_local! once tasks are tokio tasks.
 pub type EmitLogHook = Box<dyn FnMut(&mut ErrorData)>;
-pub static mut EMIT_LOG_HOOK: Option<EmitLogHook> = None;
+thread_local! {
+    pub static EMIT_LOG_HOOK: RefCell<Option<EmitLogHook>> = const { RefCell::new(None) };
+}
 
 // ---------------------------------------------------------------------------
 // Log formatting / destinations.

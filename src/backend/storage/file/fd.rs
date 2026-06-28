@@ -1,25 +1,34 @@
-//! Translated from PostgreSQL src/backend/storage/file/fd.c
+//! Virtual file descriptor (VFD) management. Translated from backend/storage/file/fd.c.
 //!
-//! The Virtual File Descriptor (VFD) pool over [`IoBackend`]. PG keeps more vfds
-//! than the OS allows real fds, LRU-closing idle ones so an open never fails with
-//! EMFILE. We keep that contract: a [`File`] is a generational handle into a
-//! [`GenSlab<Vfd>`]; a vfd may have its OS fd LRU-closed (handle dropped) and
-//! lazily reopened on next access. The kernel-fd budget is the IoBackend
-//! semaphore: each currently-open vfd holds one [`FdPermit`].
+//! The server opens many OS file descriptors -- for relation files, scratch
+//! files such as sort and hash spools, and assorted library calls -- and it is
+//! easy to exceed the per-process limit on open files (often around 1024). To
+//! avoid running out, file access goes through a pool of virtual file
+//! descriptors managed as an LRU cache: a virtual file remembers the path and
+//! flags needed to open it, but its real OS handle is opened and closed on
+//! demand. Idle handles are closed when the pool is full, and reopened lazily on
+//! the next access, so opening a file never fails merely because the process has
+//! too many descriptors live. A virtual file is not a real OS descriptor, so all
+//! access to a pooled file must go through this interface.
 //!
-//! Deleted by redesign (vs fd.c): Windows paths; sync_file_range / posix_fadvise
-//! used as portability shims; F_NOCACHE simulation; the data_sync_retry loop (we
-//! abort on fsync failure instead); EXEC_BACKEND fd inheritance; the dup()-based
-//! AllocateFile FILE* machinery and the allocatedDescs registry (replaced by RAII
-//! guards whose Drop closes the resource). VfdCache realloc/doubling is replaced
-//! by GenSlab growth; the intrusive lruMoreRecently/lruLessRecently ring is a
-//! plain VecDeque of MRU keys.
+//! Here a [`File`] is a generational handle into a [`GenSlab`] of virtual file
+//! descriptors. Each currently-open virtual file holds one [`FdPermit`] from the
+//! [`IoBackend`] semaphore, which is the hard cap on simultaneously-open kernel
+//! descriptors; a separate soft cap drives proactive LRU closing so the pool
+//! rarely has to block on the budget. The cache lock guards only the in-memory
+//! bookkeeping and is never held across an await point.
 //!
-//! Transaction/error cleanup model: PG's AtEOXact_Files / CleanupTempFiles /
-//! shmem-exit hooks are gone. Transient files (OpenTransientFile), directory
-//! scans (AllocateDir), and temporary files are RAII guard types -- their Drop
-//! closes the fd / unlinks the temp file, so unwind and normal scope-exit both
-//! clean up without an explicit registry.
+//! Several portability and platform shims from the original are dropped:
+//! Windows-specific paths, the F_NOCACHE simulation, posix_fadvise/sync_file_range
+//! used purely as portability cover, and EXEC_BACKEND descriptor inheritance. The
+//! retry-on-fsync-failure loop is replaced by treating a sync failure as fatal.
+//! In place of PostgreSQL's allocated-descriptor registry and end-of-transaction
+//! cleanup hooks (AtEOXact_Files and the shmem-exit callbacks), transient files,
+//! directory scans, and temporary files are RAII guard types: closing the
+//! descriptor or unlinking the temp file happens in their Drop, so both normal
+//! scope exit and unwinding clean up without an explicit registry. The growable
+//! descriptor table becomes slab growth, and the intrusive recency ring becomes a
+//! plain queue of most-recently-used keys.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -209,11 +218,13 @@ impl FdManager {
         self.fsync_parent_dir(fname).await
     }
 
-    /// fsync a file or directory by name. fsync failure aborts (PG PANIC). The
-    /// `isdir` flag is accepted for call-site parity; opening read-only suffices
-    /// for both files and directories on the platforms we target.
-    pub async fn fsync_fname(&self, fname: impl AsRef<Path>, _isdir: bool) -> io::Result<()> {
-        let (h, _permit) = self.io.open(fname.as_ref(), OpenFlags::read_only()).await?;
+    /// fsync a file or directory by name. fsync failure aborts (PG PANIC). Files
+    /// are opened O_RDWR and directories O_RDONLY: some platforms refuse to fsync
+    /// a read-only file fd, others refuse to open a directory writable
+    /// (fsync_fname_ext).
+    pub async fn fsync_fname(&self, fname: impl AsRef<Path>, isdir: bool) -> io::Result<()> {
+        let flags = if isdir { OpenFlags::read_only() } else { OpenFlags::read_write() };
+        let (h, _permit) = self.io.open(fname.as_ref(), flags).await?;
         self.io.fsync(&h).await;
         Ok(())
     }
@@ -246,22 +257,32 @@ impl FdManager {
     /// straightforward (no recovery_init_sync_method variants -- syncfs/parallel
     /// are a step-17 startup concern). fsync failure aborts.
     pub async fn sync_data_directory(self: &Arc<Self>, datadir: impl AsRef<Path>) -> io::Result<()> {
-        let mut stack = vec![datadir.as_ref().to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            self.fsync_fname(&dir, true).await.ok(); // dirs may be unsyncable on some FS
+        // Post-order, mirroring walkdir: fsync every regular file, then fsync the
+        // directory itself AFTER its entries -- a file fsync doesn't guarantee the
+        // directory entry naming it is durable (fd.c walkdir).
+        let mut dirs = vec![datadir.as_ref().to_path_buf()];
+        let mut i = 0;
+        while i < dirs.len() {
+            let dir = dirs[i].clone();
+            i += 1;
             let Ok(rd) = std::fs::read_dir(&dir) else {
                 continue;
             };
             for entry in rd.flatten() {
                 let p = entry.path();
                 match entry.file_type() {
-                    Ok(ft) if ft.is_dir() => stack.push(p),
+                    Ok(ft) if ft.is_dir() => dirs.push(p),
                     Ok(_) => {
                         let _ = self.fsync_fname(&p, false).await;
                     }
                     Err(_) => {}
                 }
             }
+        }
+        // Deepest directories last: fsync in reverse discovery order so each
+        // directory is synced after all of its children.
+        for dir in dirs.iter().rev() {
+            self.fsync_fname(dir, true).await.ok(); // dirs may be unsyncable on some FS
         }
         Ok(())
     }

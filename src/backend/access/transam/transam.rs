@@ -1,16 +1,31 @@
-//! Translated from PostgreSQL src/backend/access/transam/transam.c
+//! High-level access-method interface to the transaction system. Translated from backend/access/transam/transam.c.
 //!
-//! High-level transaction-status access: xid commit/abort tests over clog +
-//! subtrans, the modulo-2^32 xid comparators, and the commit-tree setters.
-//! Also home to `VariableCache` (the ex-`TransamVariables` shared struct,
-//! design step14 section 3), reached via `shared.variable_cache()`.
+//! This is the top of the transaction-status stack: it answers whether a given
+//! transaction id committed or aborted by consulting the commit log (clog) and,
+//! for subtransactions, the subtransaction parent map (subtrans). It provides
+//! the modulo-2^32 xid comparators, picks the latest xid among a parent and its
+//! children, and marks whole subtransaction trees committed or aborted (both
+//! synchronous and asynchronous commit). A single-item cache fronts the commit
+//! log lookup, since callers tend to re-check the same xid repeatedly - for
+//! example while scanning a table just after a bulk insert, update, or delete.
 //!
-//! The single-item TransactionLogFetch cache (transam.c `cachedFetchXid` /
-//! `cachedFetchXidStatus` / `cachedCommitLSN`) is a per-task `task_local`
-//! `RefCell` here: it is per-backend state held across `.await` (rules s6.1/
-//! s11), never thread_local. Only resolved (COMMITTED/ABORTED) statuses are
-//! cached, exactly as PG. The borrow is never held across the clog/subtrans
-//! `.await` (borrow to check, drop, await, borrow to update).
+//! In PostgreSQL the single-item cache (`cachedFetchXid`, `cachedFetchXidStatus`,
+//! `cachedCommitLSN`) is per-process backend state living for the life of the
+//! process. Here each backend is an async task rather than a separate process,
+//! so the cache is task-local: it persists across `.await` points but is private
+//! to the owning task, never shared between threads. The borrow is taken only to
+//! read or update the cache and is always dropped before awaiting the commit log.
+//! As in PostgreSQL, only resolved statuses (committed or aborted) are cached;
+//! in-progress and sub-committed statuses are never stored.
+//!
+//! This file also hosts `VariableCache`, the translation of PostgreSQL's
+//! `TransamVariables` shared struct (next xid and oid, oldest xids, commit-ts
+//! bounds, completion counters). PostgreSQL keeps that struct in a shared-memory
+//! segment partitioned across several LWLocks; here it is a single process-wide
+//! value guarded by one lock, reflecting the single-process model. The
+//! comparator free functions are thin deprecated shims that forward to the
+//! equivalent `TransactionId` methods, kept only for cross-reference with the C
+//! source.
 
 use std::cell::RefCell;
 
@@ -21,10 +36,15 @@ use crate::access::transam::{FullTransactionId, TransamVariablesData};
 use crate::access::xlogdefs::{INVALID_XLOG_REC_PTR, XLogRecPtr};
 use crate::backend::access::transam::slru::SlruCtl;
 use crate::c::TransactionId;
+use crate::elog;
+use crate::utils::elog::WARNING;
 
 /// The ex-`TransamVariables` shared struct (varsup/transam globals). One `Mutex`
 /// for the whole struct is acceptable for the foundation: contention is low now
 /// (no concurrent OLTP). NEVER hold the guard across an `.await` (design s3).
+/// TODO(lock-split): PG splits these fields across XidGenLock (xid generation),
+/// OidGenLock (next_oid/oid_count), and CommitTsLock (commit-ts bounds); split to
+/// mirror that partitioning before concurrent OLTP is exercised.
 #[pepperdb_derive::process_global]
 pub struct VariableCache {
     inner: Mutex<TransamVariablesData>,
@@ -211,7 +231,8 @@ pub async fn transaction_id_did_commit(
             }
             let parent = subtrans.sub_trans_get_parent(xid).await;
             if !parent.is_valid() {
-                // see transam.c notes: parent crashed without cleanup.
+                // parent crashed without cleanup (see transam.c notes).
+                elog!(WARNING, format!("no pg_subtrans entry for subcommitted XID {}", xid.0));
                 return false;
             }
             Box::pin(transaction_id_did_commit(
@@ -241,6 +262,8 @@ pub async fn transaction_id_did_abort(
             }
             let parent = subtrans.sub_trans_get_parent(xid).await;
             if !parent.is_valid() {
+                // see notes in transaction_id_did_commit.
+                elog!(WARNING, format!("no pg_subtrans entry for subcommitted XID {}", xid.0));
                 return true;
             }
             Box::pin(transaction_id_did_abort(
@@ -384,13 +407,14 @@ mod tests {
                 XidStatus::Committed
             );
             assert!(fetch_cache_get(xid).is_some());
-            // Overwrite the clog bits to ABORTED but keep the cache: a hit must
-            // return the cached COMMITTED, proving the clog read was skipped.
-            clog.set_tree_status(xid, &[], XidStatus::Aborted, INVALID_XLOG_REC_PTR)
-                .await;
+            // Poison only the cache (clog stays COMMITTED): a hit must return the
+            // cached ABORTED, proving the clog read was skipped. (Overwriting the
+            // clog bits COMMITTED->ABORTED would trip clog.c's illegal-transition
+            // assert, so we divert the cache instead.)
+            fetch_cache_put(xid, XidStatus::Aborted, INVALID_XLOG_REC_PTR);
             assert_eq!(
                 transaction_log_fetch(clog, xid).await.0,
-                XidStatus::Committed
+                XidStatus::Aborted
             );
 
             // An in-progress (untouched) xid is never cached.

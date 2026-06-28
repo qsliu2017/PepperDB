@@ -1,16 +1,28 @@
-//! Translated from PostgreSQL src/backend/storage/smgr/bulk_write.c
+//! Efficiently and reliably populate a new relation. Translated from backend/storage/smgr/bulk_write.c.
 //!
-//! Efficiently populate a new relation by bypassing the buffer manager and
-//! calling smgr extend/write directly, batching WAL records. Pages are buffered
-//! and flushed in batches (sorted by block number); the batch is WAL-logged via
-//! [`log_newpages`] (the step-13 xloginsert stub) when `use_wal`, then written.
-//! Because we bypass the buffer manager we register the relation for fsync at
-//! finish.
+//! The assumption is that no other backend accesses the relation while it is
+//! being loaded, so some shortcuts are possible. Pages already present in the
+//! target fork when the bulk write starts are left untouched unless explicitly
+//! written. Regular buffer-manager access and the bulk-loading interface must
+//! not be mixed on the same relation.
 //!
-//! Port notes: `BulkWriteBuffer` is an owned `Box<Page>` (smgr.c's palloc'd
-//! aligned block); `smgr_bulk_get_buf` returns a fresh zeroed page and
-//! `smgr_bulk_write` takes ownership. The MyProc->delayChkptFlags / RedoRecPtr
-//! checkpoint-race guard is TODO(checkpoint) -- we always registersync.
+//! The buffer manager is bypassed to avoid its locking overhead: pages are
+//! written by extending the relation directly. The cost is that the pages must
+//! be re-read into shared buffers on first use after the build finishes, which
+//! is usually a good tradeoff for large relations and negligible for small
+//! ones. Writes are queued and flushed in batches sorted by block number; when
+//! the relation is WAL-logged, a whole batch is logged in one record to amortize
+//! WAL header overhead. Because the buffer manager is bypassed, the relation is
+//! registered for fsync at finish so that it is durably flushed by this backend
+//! or the checkpointer.
+//!
+//! A page buffer here is an owned, page-sized box rather than PostgreSQL's
+//! palloc'd I/O-aligned block: `get_buf` hands out a fresh zeroed page and
+//! `write` takes ownership of it. The guard PostgreSQL uses against a checkpoint
+//! that starts concurrently with a bulk write -- comparing the redo pointer at
+//! finish and issuing an immediate sync instead of registering one -- is not yet
+//! implemented; the relation is always registered for sync at the next
+//! checkpoint.
 
 use std::sync::Arc;
 
@@ -95,9 +107,9 @@ impl<'a> BulkWriteState<'a> {
             .await;
         }
 
-        let pending = std::mem::take(&mut self.pending);
-        for w in pending {
-            // TODO(checksum): PageSetChecksumInplace(page, blkno).
+        let mut pending = std::mem::take(&mut self.pending);
+        for w in &mut pending {
+            w.buf.set_checksum_inplace(w.blkno);
             if w.blkno >= self.relsize {
                 // Fill any gap with zero pages (not WAL-logged), then write.
                 while w.blkno > self.relsize {
