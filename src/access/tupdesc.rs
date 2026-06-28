@@ -65,8 +65,23 @@ pub struct TupleDescData {
     pub attrs: Vec<FormData_pg_attribute>,
 }
 
-/// TupleDesc is a handle to a TupleDescData (C uses a bare pointer).
-pub type TupleDesc = *mut TupleDescData; // TODO(ptr): likely Arc/Rc in Phase 2
+/// Handle to a `TupleDescData`. C uses a bare, freely-copied pointer that is
+/// manually reference-counted (`tdrefcount`); ~40 sibling call sites already copy
+/// this handle by value (e.g. `RelationData::descr` returns `self.rd_att`), which
+/// only a `Copy` type supports, so the alias stays a raw pointer for now.
+///
+/// The per-descriptor operations on this file's API are nonetheless expressed as
+/// safe `&`/`&mut TupleDescData` methods (see the backend module); only the few
+/// create/free/refcount entry points touch the raw handle.
+///
+/// TODO(migrate-tupledesc): graduate this to `Arc<TupleDescData>` (shared +
+/// reference-counted, no `unsafe`). It is a CROSS-FILE change, not doable from
+/// this island alone: it needs (1) `FormData_pg_attribute: Clone` (in
+/// `catalog/pg_attribute.rs`) so `Arc::make_mut` works, and (2) sweeping the
+/// by-value copy sites (`utils/rel.rs::descr`, funcapi, executor, access/*, ...)
+/// onto `&`/`&mut TupleDescData` + `Arc` clones. The main agent should schedule
+/// this once those files are owned in one step.
+pub type TupleDesc = *mut TupleDescData; // TODO(migrate-tupledesc): -> Arc<TupleDescData>
 
 impl TupleDescData {
     /// Accessor for the i'th FormData_pg_attribute (C TupleDescAttr).
@@ -80,57 +95,89 @@ impl TupleDescData {
     }
 }
 
-pub fn populate_compact_attribute(_tupdesc: TupleDesc, _attnum: i32) {
-    unimplemented!()
+// The real bodies live in the backend module
+// (`crate::backend::access::common::tupdesc`) as inherent methods on
+// `TupleDescData`. The C-named entry points below are deprecated `#[inline]`
+// shims delegating there, so existing `crate::access::tupdesc::<CName>` call
+// sites keep resolving while new code is nudged to the methods. The
+// per-descriptor operations take `&`/`&mut TupleDescData` (no `unsafe`, no raw
+// pointers); only create/free move the owning `TupleDesc` handle.
+
+#[deprecated(note = "use TupleDescData::populate_compact_attribute")]
+#[inline]
+pub fn populate_compact_attribute(tupdesc: &mut TupleDescData, attnum: i32) {
+    tupdesc.populate_compact_attribute(attnum as usize);
 }
 
-pub fn verify_compact_attribute(_tupdesc: TupleDesc, _attnum: i32) {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::verify_compact_attribute")]
+#[inline]
+pub fn verify_compact_attribute(tupdesc: &TupleDescData, attnum: i32) {
+    tupdesc.verify_compact_attribute(attnum as usize);
 }
 
-pub fn CreateTemplateTupleDesc(_natts: i32) -> TupleDesc {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::create_template")]
+#[inline]
+pub fn CreateTemplateTupleDesc(natts: i32) -> TupleDescData {
+    TupleDescData::create_template(natts)
 }
 
-pub fn CreateTupleDesc(_natts: i32, _attrs: &[Form_pg_attribute]) -> TupleDesc {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::create")]
+#[inline]
+pub fn CreateTupleDesc(natts: i32, attrs: &[Form_pg_attribute]) -> TupleDescData {
+    TupleDescData::create(natts, attrs)
 }
 
-pub fn CreateTupleDescCopy(_tupdesc: TupleDesc) -> TupleDesc {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::create_copy")]
+#[inline]
+pub fn CreateTupleDescCopy(tupdesc: &TupleDescData) -> TupleDescData {
+    tupdesc.create_copy()
 }
 
-pub fn CreateTupleDescTruncatedCopy(_tupdesc: TupleDesc, _natts: i32) -> TupleDesc {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::create_truncated_copy")]
+#[inline]
+pub fn CreateTupleDescTruncatedCopy(tupdesc: &TupleDescData, natts: i32) -> TupleDescData {
+    tupdesc.create_truncated_copy(natts)
 }
 
-pub fn CreateTupleDescCopyConstr(_tupdesc: TupleDesc) -> TupleDesc {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::create_copy_constr")]
+#[inline]
+pub fn CreateTupleDescCopyConstr(tupdesc: &TupleDescData) -> TupleDescData {
+    tupdesc.create_copy_constr()
 }
 
-pub fn TupleDescCopy(_dst: TupleDesc, _src: TupleDesc) {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::copy_into")]
+#[inline]
+pub fn TupleDescCopy(dst: &mut TupleDescData, src: &TupleDescData) {
+    src.copy_into(dst);
 }
 
+#[deprecated(note = "use TupleDescData::copy_entry")]
+#[inline]
 pub fn TupleDescCopyEntry(
-    _dst: TupleDesc,
-    _dstAttno: AttrNumber,
-    _src: TupleDesc,
-    _srcAttno: AttrNumber,
+    dst: &mut TupleDescData,
+    dstAttno: AttrNumber,
+    src: &TupleDescData,
+    srcAttno: AttrNumber,
 ) {
-    unimplemented!()
+    TupleDescData::copy_entry(dst, dstAttno, src, srcAttno);
 }
 
-pub fn FreeTupleDesc(_tupdesc: TupleDesc) {
-    unimplemented!()
+#[deprecated(note = "use free_tuple_desc")]
+#[inline]
+pub fn FreeTupleDesc(tupdesc: TupleDescData) {
+    crate::backend::access::common::tupdesc::free_tuple_desc(tupdesc);
 }
 
-pub fn IncrTupleDescRefCount(_tupdesc: TupleDesc) {
-    unimplemented!()
+#[deprecated(note = "use incr_tuple_desc_ref_count")]
+#[inline]
+pub fn IncrTupleDescRefCount(tupdesc: &mut TupleDescData) {
+    crate::backend::access::common::tupdesc::incr_tuple_desc_ref_count(tupdesc);
 }
 
-pub fn DecrTupleDescRefCount(_tupdesc: TupleDesc) {
-    unimplemented!()
+#[deprecated(note = "use decr_tuple_desc_ref_count")]
+#[inline]
+pub fn DecrTupleDescRefCount(tupdesc: &mut TupleDescData) {
+    crate::backend::access::common::tupdesc::decr_tuple_desc_ref_count(tupdesc);
 }
 
 /// C PinTupleDesc: increments the refcount only if the descriptor is counted.
@@ -147,57 +194,73 @@ pub fn ReleaseTupleDesc(tupdesc: &mut TupleDescData) {
     }
 }
 
-pub fn equalTupleDescs(_tupdesc1: TupleDesc, _tupdesc2: TupleDesc) -> bool {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::equals")]
+#[inline]
+pub fn equalTupleDescs(tupdesc1: &TupleDescData, tupdesc2: &TupleDescData) -> bool {
+    tupdesc1.equals(tupdesc2)
 }
 
-pub fn equalRowTypes(_tupdesc1: TupleDesc, _tupdesc2: TupleDesc) -> bool {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::row_types_equal")]
+#[inline]
+pub fn equalRowTypes(tupdesc1: &TupleDescData, tupdesc2: &TupleDescData) -> bool {
+    tupdesc1.row_types_equal(tupdesc2)
 }
 
-pub fn hashRowType(_desc: TupleDesc) -> u32 {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::hash_row_type")]
+#[inline]
+pub fn hashRowType(desc: &TupleDescData) -> u32 {
+    desc.hash_row_type()
 }
 
+#[deprecated(note = "use TupleDescData::init_entry")]
+#[inline]
 pub fn TupleDescInitEntry(
-    _desc: TupleDesc,
-    _attributeNumber: AttrNumber,
-    _attributeName: &str,
-    _oidtypeid: Oid,
-    _typmod: i32,
-    _attdim: i32,
+    desc: &mut TupleDescData,
+    attributeNumber: AttrNumber,
+    attributeName: Option<&str>,
+    oidtypeid: Oid,
+    typmod: i32,
+    attdim: i32,
 ) {
-    unimplemented!()
+    desc.init_entry(attributeNumber, attributeName, oidtypeid, typmod, attdim);
 }
 
+#[deprecated(note = "use TupleDescData::init_builtin_entry")]
+#[inline]
 pub fn TupleDescInitBuiltinEntry(
-    _desc: TupleDesc,
-    _attributeNumber: AttrNumber,
-    _attributeName: &str,
-    _oidtypeid: Oid,
-    _typmod: i32,
-    _attdim: i32,
+    desc: &mut TupleDescData,
+    attributeNumber: AttrNumber,
+    attributeName: &str,
+    oidtypeid: Oid,
+    typmod: i32,
+    attdim: i32,
 ) {
-    unimplemented!()
+    desc.init_builtin_entry(attributeNumber, attributeName, oidtypeid, typmod, attdim);
 }
 
+#[deprecated(note = "use TupleDescData::init_entry_collation")]
+#[inline]
 pub fn TupleDescInitEntryCollation(
-    _desc: TupleDesc,
-    _attributeNumber: AttrNumber,
-    _collationid: Oid,
+    desc: &mut TupleDescData,
+    attributeNumber: AttrNumber,
+    collationid: Oid,
 ) {
-    unimplemented!()
+    desc.init_entry_collation(attributeNumber, collationid);
 }
 
+#[deprecated(note = "use build_desc_from_lists")]
+#[inline]
 pub fn BuildDescFromLists(
-    _names: &[String],
-    _types: &[Oid],
-    _typmods: &[i32],
-    _collations: &[Oid],
-) -> TupleDesc {
-    unimplemented!()
+    names: &[String],
+    types: &[Oid],
+    typmods: &[i32],
+    collations: &[Oid],
+) -> TupleDescData {
+    crate::backend::access::common::tupdesc::build_desc_from_lists(names, types, typmods, collations)
 }
 
-pub fn TupleDescGetDefault(_tupdesc: TupleDesc, _attnum: AttrNumber) -> Node {
-    unimplemented!()
+#[deprecated(note = "use TupleDescData::get_default")]
+#[inline]
+pub fn TupleDescGetDefault(tupdesc: &TupleDescData, attnum: AttrNumber) -> Option<Node> {
+    tupdesc.get_default(attnum)
 }

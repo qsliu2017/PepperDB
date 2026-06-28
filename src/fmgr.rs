@@ -163,160 +163,64 @@ pub type fmgr_hook_type = fn(event: FmgrHookEventType, flinfo: &mut FmgrInfo, ar
 /// Opaque outside dfmgr.c. C: `typedef struct DynamicFileList DynamicFileList;`
 pub struct DynamicFileList;
 
-// ---- Routines in fmgr.c / dfmgr.c / nodeAgg.c -----------------------------
-// Bodies unimplemented; signatures translated per function-mapping.md.
+// ---- Routines in fmgr.c -----------------------------------------------------
+// Bodies live in the backend definition module (crate::backend::utils::fmgr::fmgr)
+// per rules.md s3; re-export them so `crate::fmgr::<name>` keeps resolving.
 
-#[allow(deprecated)]
-pub fn fmgr_info(_function_id: Oid, _finfo: &mut FmgrInfo) {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn fmgr_info_cxt(_function_id: Oid, _finfo: &mut FmgrInfo, _mcxt: MemoryContext) {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn fmgr_info_copy(_dstinfo: &mut FmgrInfo, _srcinfo: &mut FmgrInfo, _destcxt: MemoryContext) {
-    unimplemented!()
-}
-/// Two string out-params -> tuple (module, fn).
-pub fn fmgr_symbol(_function_id: Oid) -> (String, String) {
-    unimplemented!()
-}
-
-// Detoast returns either the input datum (borrow) or a palloc'd copy; the
-// header alone does not reveal which, so ownership stays raw for now.
-#[allow(deprecated)]
-pub fn pg_detoast_datum(_datum: *mut varlena) -> *mut varlena {
-    // TODO(ptr)
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn pg_detoast_datum_copy(_datum: *mut varlena) -> *mut varlena {
-    // TODO(ptr)
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn pg_detoast_datum_slice(_datum: *mut varlena, _first: i32, _count: i32) -> *mut varlena {
-    // TODO(ptr)
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn pg_detoast_datum_packed(_datum: *mut varlena) -> *mut varlena {
-    // TODO(ptr)
-    unimplemented!()
-}
+pub use crate::backend::utils::fmgr::fmgr::{
+    fetch_finfo_record, fmgr_info, fmgr_info_copy, fmgr_info_cxt, fmgr_internal_function,
+    fmgr_symbol, CheckFunctionValidatorAccess,
+};
+pub use crate::backend::utils::fmgr::fmgr::{
+    pg_detoast_datum, pg_detoast_datum_copy, pg_detoast_datum_packed, pg_detoast_datum_slice,
+};
+pub use crate::backend::utils::fmgr::fmgr::{
+    get_call_expr_arg_stable, get_call_expr_argtype, get_fn_expr_arg_stable, get_fn_expr_argtype,
+    get_fn_expr_rettype, get_fn_expr_variadic, get_fn_opclass_options, has_fn_opclass_options,
+    set_fn_opclass_options,
+};
 
 // DirectFunctionCallN: invoke a named function with a computed argument list.
-// Result folds fcinfo->isnull: None == SQL NULL.
-pub fn DirectFunctionCall1Coll(_func: PGFunction, _collation: Oid, _arg1: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn DirectFunctionCall2Coll(_func: PGFunction, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn DirectFunctionCall3Coll(_func: PGFunction, _collation: Oid, _a1: Datum, _a2: Datum, _a3: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn DirectFunctionCall4Coll(_func: PGFunction, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn DirectFunctionCall5Coll(_func: PGFunction, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn DirectFunctionCall6Coll(_func: PGFunction, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn DirectFunctionCall7Coll(_func: PGFunction, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum, _a7: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn DirectFunctionCall8Coll(_func: PGFunction, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum, _a7: Datum, _a8: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn DirectFunctionCall9Coll(_func: PGFunction, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum, _a7: Datum, _a8: Datum, _a9: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-
-pub fn CallerFInfoFunctionCall1(_func: PGFunction, _flinfo: &mut FmgrInfo, _collation: Oid, _arg1: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn CallerFInfoFunctionCall2(_func: PGFunction, _flinfo: &mut FmgrInfo, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Option<Datum> {
-    unimplemented!()
-}
+pub use crate::backend::utils::fmgr::fmgr::{
+    DirectFunctionCall1Coll, DirectFunctionCall2Coll, DirectFunctionCall3Coll,
+    DirectFunctionCall4Coll, DirectFunctionCall5Coll, DirectFunctionCall6Coll,
+    DirectFunctionCall7Coll, DirectFunctionCall8Coll, DirectFunctionCall9Coll,
+};
+pub use crate::backend::utils::fmgr::fmgr::{CallerFInfoFunctionCall1, CallerFInfoFunctionCall2};
 
 // FunctionCallNColl: invoke a previously-looked-up function.
-pub fn FunctionCall0Coll(_flinfo: &mut FmgrInfo, _collation: Oid) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn FunctionCall1Coll(_flinfo: &mut FmgrInfo, _collation: Oid, _arg1: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn FunctionCall2Coll(_flinfo: &mut FmgrInfo, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn FunctionCall3Coll(_flinfo: &mut FmgrInfo, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn FunctionCall4Coll(_flinfo: &mut FmgrInfo, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn FunctionCall5Coll(_flinfo: &mut FmgrInfo, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn FunctionCall6Coll(_flinfo: &mut FmgrInfo, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn FunctionCall7Coll(_flinfo: &mut FmgrInfo, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum, _a7: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn FunctionCall8Coll(_flinfo: &mut FmgrInfo, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum, _a7: Datum, _a8: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn FunctionCall9Coll(_flinfo: &mut FmgrInfo, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum, _a7: Datum, _a8: Datum, _a9: Datum) -> Option<Datum> {
-    unimplemented!()
-}
+pub use crate::backend::utils::fmgr::fmgr::{
+    FunctionCall0Coll, FunctionCall1Coll, FunctionCall2Coll, FunctionCall3Coll, FunctionCall4Coll,
+    FunctionCall5Coll, FunctionCall6Coll, FunctionCall7Coll, FunctionCall8Coll, FunctionCall9Coll,
+};
 
 // OidFunctionCallNColl: fmgr_info() followed by FunctionCallN().
-pub fn OidFunctionCall0Coll(_function_id: Oid, _collation: Oid) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn OidFunctionCall1Coll(_function_id: Oid, _collation: Oid, _arg1: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn OidFunctionCall2Coll(_function_id: Oid, _collation: Oid, _arg1: Datum, _arg2: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn OidFunctionCall3Coll(_fid: Oid, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn OidFunctionCall4Coll(_fid: Oid, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn OidFunctionCall5Coll(_fid: Oid, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn OidFunctionCall6Coll(_fid: Oid, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn OidFunctionCall7Coll(_fid: Oid, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum, _a7: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn OidFunctionCall8Coll(_fid: Oid, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum, _a7: Datum, _a8: Datum) -> Option<Datum> {
-    unimplemented!()
-}
-pub fn OidFunctionCall9Coll(_fid: Oid, _c: Oid, _a1: Datum, _a2: Datum, _a3: Datum, _a4: Datum, _a5: Datum, _a6: Datum, _a7: Datum, _a8: Datum, _a9: Datum) -> Option<Datum> {
-    unimplemented!()
-}
+pub use crate::backend::utils::fmgr::fmgr::{
+    OidFunctionCall0Coll, OidFunctionCall1Coll, OidFunctionCall2Coll, OidFunctionCall3Coll,
+    OidFunctionCall4Coll, OidFunctionCall5Coll, OidFunctionCall6Coll, OidFunctionCall7Coll,
+    OidFunctionCall8Coll, OidFunctionCall9Coll,
+};
 
-// Non-Coll convenience wrappers default collation to InvalidOid.
+// Datatype I/O convenience invocations.
+pub use crate::backend::utils::fmgr::fmgr::{
+    DirectInputFunctionCallSafe, InputFunctionCall, InputFunctionCallSafe, OidInputFunctionCall,
+    OidOutputFunctionCall, OidReceiveFunctionCall, OidSendFunctionCall, OutputFunctionCall,
+    ReceiveFunctionCall, SendFunctionCall,
+};
+
+// Non-Coll convenience wrappers default collation to InvalidOid. These are C
+// macros in fmgr.h (no .c body); keep them here delegating to the *Coll forms.
 pub fn DirectFunctionCall1(func: PGFunction, arg1: Datum) -> Option<Datum> {
     DirectFunctionCall1Coll(func, InvalidOid, arg1)
 }
 pub fn DirectFunctionCall2(func: PGFunction, arg1: Datum, arg2: Datum) -> Option<Datum> {
     DirectFunctionCall2Coll(func, InvalidOid, arg1, arg2)
 }
+#[allow(deprecated)]
 pub fn FunctionCall1(flinfo: &mut FmgrInfo, arg1: Datum) -> Option<Datum> {
     FunctionCall1Coll(flinfo, InvalidOid, arg1)
 }
+#[allow(deprecated)]
 pub fn FunctionCall2(flinfo: &mut FmgrInfo, arg1: Datum, arg2: Datum) -> Option<Datum> {
     FunctionCall2Coll(flinfo, InvalidOid, arg1, arg2)
 }
@@ -328,98 +232,6 @@ pub fn OidFunctionCall1(function_id: Oid, arg1: Datum) -> Option<Datum> {
 }
 pub fn OidFunctionCall2(function_id: Oid, arg1: Datum, arg2: Datum) -> Option<Datum> {
     OidFunctionCall2Coll(function_id, InvalidOid, arg1, arg2)
-}
-
-// Datatype I/O convenience invocations.
-#[allow(deprecated)]
-pub fn InputFunctionCall(_flinfo: &mut FmgrInfo, _str: &str, _typioparam: Oid, _typmod: i32) -> Option<Datum> {
-    unimplemented!()
-}
-/// Soft-error variant: bool success + Datum out-param -> Option<Datum>.
-#[allow(deprecated)]
-pub fn InputFunctionCallSafe(_flinfo: &mut FmgrInfo, _str: &str, _typioparam: Oid, _typmod: i32, _escontext: fmNodePtr) -> Option<Datum> {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn DirectInputFunctionCallSafe(_func: PGFunction, _str: &str, _typioparam: Oid, _typmod: i32, _escontext: fmNodePtr) -> Option<Datum> {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn OidInputFunctionCall(_function_id: Oid, _str: &str, _typioparam: Oid, _typmod: i32) -> Option<Datum> {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn OutputFunctionCall(_flinfo: &mut FmgrInfo, _val: Datum) -> String {
-    unimplemented!()
-}
-pub fn OidOutputFunctionCall(_function_id: Oid, _val: Datum) -> String {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn ReceiveFunctionCall(_flinfo: &mut FmgrInfo, _buf: fmStringInfo, _typioparam: Oid, _typmod: i32) -> Option<Datum> {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn OidReceiveFunctionCall(_function_id: Oid, _buf: fmStringInfo, _typioparam: Oid, _typmod: i32) -> Option<Datum> {
-    unimplemented!()
-}
-// Send produces a freshly palloc'd bytea; the caller owns it -> Box.
-#[allow(deprecated)]
-pub fn SendFunctionCall(_flinfo: &mut FmgrInfo, _val: Datum) -> Box<bytea> {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn OidSendFunctionCall(_function_id: Oid, _val: Datum) -> Box<bytea> {
-    unimplemented!()
-}
-
-// Routines in fmgr.c (lookups -> Option<Oid> for sentinel returns).
-pub fn fetch_finfo_record(_filehandle: usize, _funcname: &str) -> &'static Pg_finfo_record {
-    unimplemented!()
-}
-pub fn fmgr_internal_function(_proname: &str) -> Option<Oid> {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn get_fn_expr_rettype(_flinfo: &mut FmgrInfo) -> Oid {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn get_fn_expr_argtype(_flinfo: &mut FmgrInfo, _argnum: i32) -> Oid {
-    unimplemented!()
-}
-pub fn get_call_expr_argtype(_expr: fmNodePtr, _argnum: i32) -> Oid {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn get_fn_expr_arg_stable(_flinfo: &mut FmgrInfo, _argnum: i32) -> bool {
-    unimplemented!()
-}
-pub fn get_call_expr_arg_stable(_expr: fmNodePtr, _argnum: i32) -> bool {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn get_fn_expr_variadic(_flinfo: &mut FmgrInfo) -> bool {
-    unimplemented!()
-}
-// Returns the opclass-options bytea cached in flinfo; borrow vs palloc'd copy
-// is not clear from the header.
-#[allow(deprecated)]
-pub fn get_fn_opclass_options(_flinfo: &mut FmgrInfo) -> *mut bytea {
-    // TODO(ptr)
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn has_fn_opclass_options(_flinfo: &mut FmgrInfo) -> bool {
-    unimplemented!()
-}
-#[allow(deprecated)]
-pub fn set_fn_opclass_options(_flinfo: &mut FmgrInfo, _options: *mut bytea) {
-    // TODO(ptr)
-    unimplemented!()
-}
-pub fn CheckFunctionValidatorAccess(_validator_oid: Oid, _function_oid: Oid) -> bool {
-    unimplemented!()
 }
 
 // Routines in dfmgr.c.

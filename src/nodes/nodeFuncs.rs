@@ -1,14 +1,33 @@
 //! Translated from PostgreSQL src/include/nodes/nodeFuncs.h
+//!
+//! General-purpose node-tree manipulations. The translated bodies live in the
+//! backend definition module (`crate::backend::nodes::nodeFuncs`) and are
+//! re-exported below under their C names. Functions whose milestone has not
+//! arrived remain `unimplemented!()` stubs here (they will move to the backend
+//! module and be re-exported as each is translated; nodeFuncs.c is a `grow`
+//! dispatcher).
+//!
+//! `QueryTreeWalkerFlags` is a type declaration and stays in this header. The C
+//! callbacks (`tree_walker_callback`, `tree_mutator_callback`, ...) threaded a
+//! `void *context`; a Rust closure captures that state, so the entry points take
+//! `impl FnMut(&Node) -> bool` / `impl FnMut(Node) -> Node` and the context
+//! parameter disappears.
 
-#![allow(clippy::boxed_local, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
-#![allow(clippy::needless_pass_by_value, reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params")]
+#![allow(
+    clippy::boxed_local,
+    reason = "TODO(grow): hollow stubs mirror PG signatures 1:1; real impl consumes the Box"
+)]
+#![allow(
+    clippy::needless_pass_by_value,
+    reason = "TODO(grow): hollow stubs mirror PG signatures 1:1; real impl consumes the params"
+)]
 
 use bitflags::bitflags;
 
 use crate::nodes::execnodes::PlanState;
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::Query;
-use crate::nodes::primnodes::{BoolExprType, CoercionForm, OpExpr, ScalarArrayOpExpr};
+use crate::nodes::primnodes::{CoercionForm, OpExpr, ScalarArrayOpExpr};
 use crate::postgres_ext::Oid;
 
 bitflags! {
@@ -39,26 +58,13 @@ bitflags! {
     }
 }
 
-// Callback types -> closures. C threaded a `void *context`; a Rust closure
-// captures that state directly, so the context param disappears.
-// - check_function_callback:        FnMut(Oid) -> bool
-// - tree_walker_callback:           FnMut(&Node) -> bool
-// - planstate_tree_walker_callback: FnMut(&PlanState) -> bool
-// - tree_mutator_callback:          FnMut(Node) -> Node
-
-pub fn exprType(expr: &Node) -> Oid {
-    unimplemented!()
-}
-
-pub fn exprTypmod(expr: &Node) -> i32 {
-    unimplemented!()
-}
-
-/// Returns whether the expr is a length coercion; the coerced typmod is the
-/// payload when so.
-pub fn exprIsLengthCoercion(expr: &Node) -> Option<i32> {
-    unimplemented!()
-}
+// Translated bodies (crate::backend::nodes::nodeFuncs), re-exported under C names
+// (these are already C-cased) and snake_case names where PG uses them.
+pub use crate::backend::nodes::nodeFuncs::{
+    exprCollation, exprIsLengthCoercion, exprType, exprTypmod, expression_tree_mutator,
+    expression_tree_walker, get_leftop, get_notclausearg, get_rightop, is_andclause,
+    is_funcclause, is_notclause, is_opclause, is_orclause,
+};
 
 pub fn applyRelabelType(
     arg: Box<Node>,
@@ -69,111 +75,62 @@ pub fn applyRelabelType(
     rlocation: i32,
     overwrite_ok: bool,
 ) -> Box<Node> {
+    let _ = (arg, rtype, rtypmod, rcollid, rformat, rlocation, overwrite_ok);
     unimplemented!()
 }
 
 pub fn relabel_to_typmod(expr: Box<Node>, typmod: i32) -> Box<Node> {
+    let _ = (expr, typmod);
     unimplemented!()
 }
 
 pub fn strip_implicit_coercions(node: Box<Node>) -> Box<Node> {
+    let _ = node;
     unimplemented!()
 }
 
 pub fn expression_returns_set(clause: &Node) -> bool {
-    unimplemented!()
-}
-
-pub fn exprCollation(expr: &Node) -> Oid {
+    let _ = clause;
     unimplemented!()
 }
 
 pub fn exprInputCollation(expr: &Node) -> Oid {
+    let _ = expr;
     unimplemented!()
 }
 
 pub fn exprSetCollation(expr: &mut Node, collation: Oid) {
+    let _ = (expr, collation);
     unimplemented!()
 }
 
 pub fn exprSetInputCollation(expr: &mut Node, inputcollation: Oid) {
+    let _ = (expr, inputcollation);
     unimplemented!()
 }
 
 pub fn exprLocation(expr: &Node) -> i32 {
+    let _ = expr;
     unimplemented!()
 }
 
 pub fn fix_opfuncids(node: &mut Node) {
+    let _ = node;
     unimplemented!()
 }
 
 pub fn set_opfuncid(opexpr: &mut OpExpr) {
+    let _ = opexpr;
     unimplemented!()
 }
 
 pub fn set_sa_opfuncid(opexpr: &mut ScalarArrayOpExpr) {
+    let _ = opexpr;
     unimplemented!()
-}
-
-/// Is clause a FuncExpr clause?
-pub fn is_funcclause(clause: Option<&Node>) -> bool {
-    matches!(clause, Some(Node::FuncExpr(_)))
-}
-
-/// Is clause an OpExpr clause?
-pub fn is_opclause(clause: Option<&Node>) -> bool {
-    matches!(clause, Some(Node::OpExpr(_)))
-}
-
-/// Extract left arg of a binary opclause, or only arg of a unary opclause.
-pub fn get_leftop(clause: &Node) -> Option<&Node> {
-    match clause {
-        Node::OpExpr(e) => e.args.first().map(std::convert::AsRef::as_ref),
-        _ => None,
-    }
-}
-
-/// Extract right arg of a binary opclause (None if unary).
-pub fn get_rightop(clause: &Node) -> Option<&Node> {
-    match clause {
-        Node::OpExpr(e) if e.args.len() >= 2 => e.args.get(1).map(std::convert::AsRef::as_ref),
-        _ => None,
-    }
-}
-
-/// Is clause an AND clause?
-pub fn is_andclause(clause: Option<&Node>) -> bool {
-    matches!(clause, Some(Node::BoolExpr(e)) if e.boolop == BoolExprType::AND_EXPR)
-}
-
-/// Is clause an OR clause?
-pub fn is_orclause(clause: Option<&Node>) -> bool {
-    matches!(clause, Some(Node::BoolExpr(e)) if e.boolop == BoolExprType::OR_EXPR)
-}
-
-/// Is clause a NOT clause?
-pub fn is_notclause(clause: Option<&Node>) -> bool {
-    matches!(clause, Some(Node::BoolExpr(e)) if e.boolop == BoolExprType::NOT_EXPR)
-}
-
-/// Extract argument from a clause known to be a NOT clause.
-pub fn get_notclausearg(notclause: &Node) -> Option<&Node> {
-    match notclause {
-        Node::BoolExpr(e) => e.args.first().map(std::convert::AsRef::as_ref),
-        _ => None,
-    }
 }
 
 pub fn check_functions_in_node(node: &Node, checker: impl FnMut(Oid) -> bool) -> bool {
-    unimplemented!()
-}
-
-pub fn expression_tree_walker(node: &Node, walker: impl FnMut(&Node) -> bool) -> bool {
-    unimplemented!()
-}
-
-pub fn expression_tree_mutator(node: Node, mutator: impl FnMut(Node) -> Node) -> Node {
+    let _ = (node, checker);
     unimplemented!()
 }
 
@@ -182,6 +139,7 @@ pub fn query_tree_walker(
     walker: impl FnMut(&Node) -> bool,
     flags: QueryTreeWalkerFlags,
 ) -> bool {
+    let _ = (query, walker, flags);
     unimplemented!()
 }
 
@@ -190,6 +148,7 @@ pub fn query_tree_mutator(
     mutator: impl FnMut(Node) -> Node,
     flags: QueryTreeWalkerFlags,
 ) -> Box<Query> {
+    let _ = (query, mutator, flags);
     unimplemented!()
 }
 
@@ -198,6 +157,7 @@ pub fn range_table_walker(
     walker: impl FnMut(&Node) -> bool,
     flags: QueryTreeWalkerFlags,
 ) -> bool {
+    let _ = (rtable, walker, flags);
     unimplemented!()
 }
 
@@ -206,6 +166,7 @@ pub fn range_table_mutator(
     mutator: impl FnMut(Node) -> Node,
     flags: QueryTreeWalkerFlags,
 ) -> Vec<Box<Node>> {
+    let _ = (rtable, mutator, flags);
     unimplemented!()
 }
 
@@ -214,6 +175,7 @@ pub fn range_table_entry_walker(
     walker: impl FnMut(&Node) -> bool,
     flags: QueryTreeWalkerFlags,
 ) -> bool {
+    let _ = (rte, walker, flags);
     unimplemented!()
 }
 
@@ -222,6 +184,7 @@ pub fn query_or_expression_tree_walker(
     walker: impl FnMut(&Node) -> bool,
     flags: QueryTreeWalkerFlags,
 ) -> bool {
+    let _ = (node, walker, flags);
     unimplemented!()
 }
 
@@ -230,10 +193,12 @@ pub fn query_or_expression_tree_mutator(
     mutator: impl FnMut(Node) -> Node,
     flags: QueryTreeWalkerFlags,
 ) -> Node {
+    let _ = (node, mutator, flags);
     unimplemented!()
 }
 
 pub fn raw_expression_tree_walker(node: &Node, walker: impl FnMut(&Node) -> bool) -> bool {
+    let _ = (node, walker);
     unimplemented!()
 }
 
@@ -243,5 +208,6 @@ pub fn planstate_tree_walker(
     planstate: &PlanState,
     walker: impl FnMut(&PlanState) -> bool,
 ) -> bool {
+    let _ = (planstate, walker);
     unimplemented!()
 }

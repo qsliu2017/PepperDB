@@ -14,3 +14,6 @@
 //! `extend`. The PG-specific set helpers (`list_union`/`list_difference`/
 //! `list_member`/`list_delete_ptr`/...) become iterator combinators or small free
 //! functions introduced at the call sites that need them. There is no `List` type.
+//!
+//! The `list.c` body is correspondingly a tombstone (see
+//! `crate::backend::nodes::list`): nothing to re-export here.
