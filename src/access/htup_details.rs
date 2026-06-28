@@ -434,9 +434,19 @@ impl MinimalTupleData {
 // These delegate to HeapTupleHeaderData methods via tuple.t_data, typed
 // *mut crate::access::htup::HeapTupleHeaderData; bodies are stubbed.
 
-/// Address of the user data following the header. TODO(ptr).
-pub fn GETSTRUCT(_tuple: &HeapTupleData) -> *mut u8 {
-    unimplemented!()
+/// Address of the user data following the header (C `GETSTRUCT`: cast a
+/// `HeapTuple` to its `Form_pg_*` body, i.e. `t_data + t_hoff`). Only valid for
+/// catalog rows whose fixed part is non-nullable and not toasted -- exactly the
+/// catcache/relcache use.
+///
+/// SAFETY: `tuple.t_data` must point at a live `tuple.t_len` body.
+#[must_use]
+pub fn GETSTRUCT(tuple: &HeapTupleData) -> *mut u8 {
+    // SAFETY: t_data points at a valid body whose t_hoff bytes are the header.
+    unsafe {
+        let hoff = (*tuple.t_data).t_hoff as usize;
+        tuple.t_data.cast::<u8>().add(hoff)
+    }
 }
 
 pub fn HeapTupleHasNulls(_tuple: &HeapTupleData) -> bool {

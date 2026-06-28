@@ -347,13 +347,9 @@ pub fn get_relname_relid(relname: &str, relnamespace: Oid) -> Option<Oid> {
     unimplemented!()
 }
 
-pub fn get_rel_name(relid: Oid) -> Option<String> {
-    unimplemented!()
-}
+pub use crate::backend::utils::cache::lsyscache::get_rel_name;
 
-pub fn get_rel_namespace(relid: Oid) -> Oid {
-    unimplemented!()
-}
+pub use crate::backend::utils::cache::lsyscache::get_rel_namespace;
 
 pub fn get_rel_type_id(relid: Oid) -> Option<Oid> {
     unimplemented!()
@@ -399,15 +395,12 @@ pub fn get_typbyval(typid: Oid) -> bool {
     unimplemented!()
 }
 
-/// C out-params `(int16 *typlen, bool *typbyval)` -> tuple.
-pub fn get_typlenbyval(typid: Oid) -> (i16, bool) {
-    unimplemented!()
-}
+/// C out-params `(int16 *typlen, bool *typbyval)` -> tuple. Body in
+/// crate::backend::utils::cache::lsyscache (warm-syscache hit + builtin fallback).
+pub use crate::backend::utils::cache::lsyscache::get_typlenbyval;
 
 /// C out-params `(int16 *typlen, bool *typbyval, char *typalign)` -> tuple.
-pub fn get_typlenbyvalalign(typid: Oid) -> (i16, bool, u8) {
-    unimplemented!()
-}
+pub use crate::backend::utils::cache::lsyscache::get_typlenbyvalalign;
 
 pub fn getTypeIOParam(type_tuple: &HeapTuple) -> Oid {
     unimplemented!()
@@ -479,25 +472,12 @@ pub fn getTypeInputInfo(r#type: Oid) -> (Oid, Oid) {
 
 /// C out-params `(Oid *typOutput, bool *typIsVarlena)` -> tuple.
 ///
-/// SHIM(step14): hardcoded type->output-fn map; DELETE when syscache/lsyscache lands.
-/// The real `getTypeOutputInfo` reads pg_type via `SearchSysCache1(TYPEOID, ...)`,
-/// which needs the syscache (step 14). Until then M1's printtup needs to map a
-/// result column's type OID to its output-function OID for the int types that
-/// `utils/adt/int.c` (step 02) implements. int2/int4/int8 are pass-by-value
-/// fixed-length, so `typIsVarlena` is false. Any other type hits the
-/// not-yet-translated real lookup.
-pub fn getTypeOutputInfo(r#type: Oid) -> (Oid, bool) {
-    use crate::catalog::genbki::{INT2OID, INT4OID, INT8OID};
-    use crate::utils::fmgroids::{F_INT2OUT, F_INT4OUT, F_INT8OUT};
-
-    let typoutput = match r#type {
-        t if t == INT4OID => F_INT4OUT,
-        t if t == INT2OID => F_INT2OUT,
-        t if t == INT8OID => F_INT8OUT,
-        _ => unimplemented!("getTypeOutputInfo needs syscache (step14) for non-int types"),
-    };
-    (typoutput, false)
-}
+/// Step-14: the step-02 shim is GONE. This now reads pg_type through the real
+/// syscache (a warm TYPEOID hit); the body is in
+/// `crate::backend::utils::cache::lsyscache::get_type_output_info`. For the
+/// catalog-less M1 SELECT-1 window (no pg_type heap), it falls back to the builtin
+/// int2/4/8 output map there.
+pub use crate::backend::utils::cache::lsyscache::get_type_output_info as getTypeOutputInfo;
 
 /// C out-params `(Oid *typReceive, Oid *typIOParam)` -> tuple.
 pub fn getTypeBinaryInputInfo(r#type: Oid) -> (Oid, Oid) {

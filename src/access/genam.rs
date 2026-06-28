@@ -336,31 +336,14 @@ pub fn index_compute_xid_horizon_for_tuples(
     unimplemented!()
 }
 
-// heap-or-index access to system catalogs (in genam.c)
-
-pub fn systable_beginscan(
-    _heapRelation: Relation,
-    _indexId: Oid,
-    _indexOK: bool,
-    _snapshot: Snapshot,
-    _nkeys: i32,
-    _key: ScanKey,
-) -> SysScanDesc {
-    unimplemented!()
-}
-
-/// Returns the next tuple, or None at end of scan.
-pub fn systable_getnext(_sysscan: SysScanDesc) -> Option<HeapTuple> {
-    unimplemented!()
-}
-
-pub fn systable_recheck_tuple(_sysscan: SysScanDesc, _tup: HeapTuple) -> bool {
-    unimplemented!()
-}
-
-pub fn systable_endscan(_sysscan: SysScanDesc) {
-    unimplemented!()
-}
+// heap-or-index access to system catalogs (in genam.c). The systable_* bodies
+// (HEAP-SCAN path; index path staged for step 13-rest) live in
+// crate::backend::access::index::genam. They are ASYNC (the heap scan reaches the
+// buffer pool) and thread `&Arc<SharedState>`, replacing the C sync `SysScanDesc`
+// pointer handle with an owned `SysScanState` box. Re-exported here.
+pub use crate::backend::access::index::genam::{
+    systable_beginscan, systable_endscan, systable_getnext, systable_recheck_tuple, SysScanState,
+};
 
 pub fn systable_beginscan_ordered(
     _heapRelation: Relation,

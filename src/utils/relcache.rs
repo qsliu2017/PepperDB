@@ -22,13 +22,9 @@ pub const RELCACHE_INIT_FILENAME: &str = "pg_internal.init";
 pub fn AssertCouldGetRelation() {}
 
 // Routines to open (lookup) and close a relcache entry. Lookup can miss -> Option.
-pub fn RelationIdGetRelation(_relation_id: Oid) -> Option<Relation> {
-    unimplemented!()
-}
-
-pub fn RelationClose(_relation: Relation) {
-    unimplemented!()
-}
+// Bodies in crate::backend::utils::cache::relcache (step 14).
+pub use crate::backend::utils::cache::relcache::relation_id_get_relation as RelationIdGetRelation;
+pub use crate::backend::utils::cache::relcache::relation_close as RelationClose;
 
 // Routines to compute/retrieve additional cached information.
 // C `List *` returns map to `Vec<T>` per the container table; element types per use.
@@ -104,9 +100,7 @@ pub fn RelationGetExclusionInfo(_index_relation: Relation) -> (Vec<Oid>, Vec<Oid
     unimplemented!()
 }
 
-pub fn RelationInitIndexAccessInfo(_relation: Relation) {
-    unimplemented!()
-}
+pub use crate::backend::utils::cache::relcache::relation_init_index_access_info as RelationInitIndexAccessInfo;
 
 pub fn RelationBuildPublicationDesc(_relation: Relation, _pubdesc: &mut PublicationDesc) {
     unimplemented!()
@@ -135,9 +129,7 @@ pub fn errtableconstraint(_rel: Relation, _conname: &str) -> i32 {
 }
 
 // Routines for backend startup.
-pub fn RelationCacheInitialize() {
-    unimplemented!()
-}
+pub use crate::backend::utils::cache::relcache::relation_cache_initialize as RelationCacheInitialize;
 
 /// PG `RelationCacheInitializePhase2`: fake up relcache entries for the nailed
 /// SHARED catalogs (pg_database/pg_authid/...). Those are deep-deferred; when this
@@ -154,9 +146,7 @@ pub fn RelationCacheInitializePhase2() {
 /// over `crate::bootstrap::bootstrap::FORMRDESC_CATALOGS`; step 14 wraps the
 /// returned `TupleDesc` in a nailed `RelationData` (see the formrdesc doc for the
 /// staged `rd_rel`/RelationCacheInsert wiring).
-pub fn RelationCacheInitializePhase3() {
-    unimplemented!()
-}
+pub use crate::backend::utils::cache::relcache::relation_cache_initialize_phase3 as RelationCacheInitializePhase3;
 
 /// Create a relcache entry for an about-to-be-created relation.
 pub fn RelationBuildLocalRelation(

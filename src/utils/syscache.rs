@@ -118,51 +118,49 @@ pub fn InitCatalogCachePhase2() {
     unimplemented!()
 }
 
-// Search routines. An invalid HeapTuple ("not found") -> None per function-mapping.
+// Search routines. SYNC (hit-only) bodies in
+// crate::backend::utils::cache::syscache (step 14); the async warm path is
+// search_sys_cache_populate. An invalid HeapTuple ("not found") -> None.
 pub fn SearchSysCache(
-    _cache_id: SysCacheIdentifier,
-    _key1: Datum,
-    _key2: Datum,
-    _key3: Datum,
-    _key4: Datum,
+    cache_id: SysCacheIdentifier,
+    key1: Datum,
+    key2: Datum,
+    key3: Datum,
+    key4: Datum,
 ) -> Option<HeapTuple> {
-    unimplemented!()
+    crate::backend::utils::cache::syscache::search_sys_cache(cache_id, &[key1, key2, key3, key4])
 }
 
 // Argument-specific variants are preferred (faster, key-count insulated).
-pub fn SearchSysCache1(_cache_id: SysCacheIdentifier, _key1: Datum) -> Option<HeapTuple> {
-    unimplemented!()
+pub fn SearchSysCache1(cache_id: SysCacheIdentifier, key1: Datum) -> Option<HeapTuple> {
+    crate::backend::utils::cache::syscache::search_sys_cache(cache_id, &[key1])
 }
 
-pub fn SearchSysCache2(
-    _cache_id: SysCacheIdentifier,
-    _key1: Datum,
-    _key2: Datum,
-) -> Option<HeapTuple> {
-    unimplemented!()
+pub fn SearchSysCache2(cache_id: SysCacheIdentifier, key1: Datum, key2: Datum) -> Option<HeapTuple> {
+    crate::backend::utils::cache::syscache::search_sys_cache(cache_id, &[key1, key2])
 }
 
 pub fn SearchSysCache3(
-    _cache_id: SysCacheIdentifier,
-    _key1: Datum,
-    _key2: Datum,
-    _key3: Datum,
+    cache_id: SysCacheIdentifier,
+    key1: Datum,
+    key2: Datum,
+    key3: Datum,
 ) -> Option<HeapTuple> {
-    unimplemented!()
+    crate::backend::utils::cache::syscache::search_sys_cache(cache_id, &[key1, key2, key3])
 }
 
 pub fn SearchSysCache4(
-    _cache_id: SysCacheIdentifier,
-    _key1: Datum,
-    _key2: Datum,
-    _key3: Datum,
-    _key4: Datum,
+    cache_id: SysCacheIdentifier,
+    key1: Datum,
+    key2: Datum,
+    key3: Datum,
+    key4: Datum,
 ) -> Option<HeapTuple> {
-    unimplemented!()
+    crate::backend::utils::cache::syscache::search_sys_cache(cache_id, &[key1, key2, key3, key4])
 }
 
-pub fn ReleaseSysCache(_tuple: HeapTuple) {
-    unimplemented!()
+pub fn ReleaseSysCache(tuple: HeapTuple) {
+    crate::backend::utils::cache::syscache::release_sys_cache(tuple);
 }
 
 pub fn SearchSysCacheLocked1(_cache_id: SysCacheIdentifier, _key1: Datum) -> Option<HeapTuple> {
@@ -188,25 +186,32 @@ pub fn SearchSysCacheLockedCopy1(
 }
 
 pub fn SearchSysCacheExists(
-    _cache_id: SysCacheIdentifier,
-    _key1: Datum,
-    _key2: Datum,
-    _key3: Datum,
-    _key4: Datum,
+    cache_id: SysCacheIdentifier,
+    key1: Datum,
+    key2: Datum,
+    key3: Datum,
+    key4: Datum,
 ) -> bool {
-    unimplemented!()
+    crate::backend::utils::cache::syscache::search_sys_cache_exists(
+        cache_id,
+        &[key1, key2, key3, key4],
+    )
 }
 
 /// OID lookup. InvalidOid sentinel -> None.
 pub fn GetSysCacheOid(
-    _cache_id: SysCacheIdentifier,
-    _oidcol: AttrNumber,
-    _key1: Datum,
-    _key2: Datum,
-    _key3: Datum,
-    _key4: Datum,
+    cache_id: SysCacheIdentifier,
+    oidcol: AttrNumber,
+    key1: Datum,
+    key2: Datum,
+    key3: Datum,
+    key4: Datum,
 ) -> Option<Oid> {
-    unimplemented!()
+    crate::backend::utils::cache::syscache::get_sys_cache_oid(
+        cache_id,
+        oidcol,
+        &[key1, key2, key3, key4],
+    )
 }
 
 pub fn SearchSysCacheAttName(_relid: Oid, _attname: &str) -> Option<HeapTuple> {

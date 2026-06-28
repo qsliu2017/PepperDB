@@ -302,6 +302,94 @@ pub fn XLogLogicalInfoActive() -> bool {
 }
 
 impl RelationData {
+    /// A zeroed relation descriptor (C `AllocateRelationDesc`'s `palloc0`). All
+    /// pointers null, lists empty, flags false; the relcache fills the load-bearing
+    /// fields (`rd_id`/`rd_rel`/`rd_att`/`rd_isnailed`/...) after this.
+    #[must_use]
+    pub fn blank() -> Self {
+        use crate::c::{InvalidSubTransactionId, InvalidTransactionId};
+        use crate::common::relpath::InvalidRelFileNumber;
+        use crate::postgres_ext::InvalidOid;
+        use crate::storage::procnumber::INVALID_PROC_NUMBER;
+        Self {
+            rd_locator: RelFileLocator {
+                spcOid: InvalidOid,
+                dbOid: InvalidOid,
+                relNumber: InvalidRelFileNumber,
+            },
+            rd_smgr: core::ptr::null_mut(),
+            rd_refcnt: 0,
+            rd_backend: INVALID_PROC_NUMBER,
+            rd_islocaltemp: false,
+            rd_isnailed: false,
+            rd_isvalid: false,
+            rd_indexvalid: false,
+            rd_statvalid: false,
+            rd_createSubid: InvalidSubTransactionId,
+            rd_newRelfilelocatorSubid: InvalidSubTransactionId,
+            rd_firstRelfilelocatorSubid: InvalidSubTransactionId,
+            rd_droppedSubid: InvalidSubTransactionId,
+            rd_rel: core::ptr::null_mut(),
+            rd_att: None,
+            rd_id: InvalidOid,
+            rd_lockInfo: LockInfoData {
+                lockRelId: LockRelId { relId: InvalidOid, dbId: InvalidOid },
+            },
+            rd_rules: core::ptr::null_mut(),
+            rd_rulescxt: core::ptr::null_mut(),
+            trigdesc: core::ptr::null_mut(),
+            rd_rsdesc: core::ptr::null_mut(),
+            rd_fkeylist: Vec::new(),
+            rd_fkeyvalid: false,
+            rd_partkey: None,
+            rd_partkeycxt: core::ptr::null_mut(),
+            rd_partdesc: None,
+            rd_pdcxt: core::ptr::null_mut(),
+            rd_partdesc_nodetached: None,
+            rd_pddcxt: core::ptr::null_mut(),
+            rd_partdesc_nodetached_xmin: InvalidTransactionId,
+            rd_partcheck: Vec::new(),
+            rd_partcheckvalid: false,
+            rd_partcheckcxt: core::ptr::null_mut(),
+            rd_indexlist: Vec::new(),
+            rd_pkindex: InvalidOid,
+            rd_ispkdeferrable: false,
+            rd_replidindex: InvalidOid,
+            rd_statlist: Vec::new(),
+            rd_attrsvalid: false,
+            rd_keyattr: None,
+            rd_pkattr: None,
+            rd_idattr: None,
+            rd_hotblockingattr: None,
+            rd_summarizedattr: None,
+            rd_pubdesc: core::ptr::null_mut(),
+            rd_options: core::ptr::null_mut(),
+            rd_amhandler: InvalidOid,
+            rd_tableam: core::ptr::null(),
+            rd_index: core::ptr::null_mut(),
+            rd_indextuple: core::ptr::null_mut(),
+            rd_indexcxt: core::ptr::null_mut(),
+            rd_indam: core::ptr::null_mut(),
+            rd_opfamily: core::ptr::null_mut(),
+            rd_opcintype: core::ptr::null_mut(),
+            rd_support: core::ptr::null_mut(),
+            rd_supportinfo: core::ptr::null_mut(),
+            rd_indoption: core::ptr::null_mut(),
+            rd_indexprs: Vec::new(),
+            rd_indpred: Vec::new(),
+            rd_exclops: core::ptr::null_mut(),
+            rd_exclprocs: core::ptr::null_mut(),
+            rd_exclstrats: core::ptr::null_mut(),
+            rd_indcollation: core::ptr::null_mut(),
+            rd_opcoptions: core::ptr::null_mut(),
+            rd_amcache: core::ptr::null_mut(),
+            rd_fdwroutine: core::ptr::null_mut(),
+            rd_toastoid: InvalidOid,
+            pgstat_enabled: false,
+            pgstat_info: core::ptr::null_mut(),
+        }
+    }
+
     /// RelationGetToastTupleTarget: toast_tuple_target, or `defaulttarg`.
     pub fn toast_tuple_target(&self, defaulttarg: i32) -> i32 {
         if self.rd_options.is_null() {

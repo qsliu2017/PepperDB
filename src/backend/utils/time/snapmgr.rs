@@ -340,6 +340,9 @@ fn build_snapshot(shared: &Arc<SharedState>) -> SnapshotData {
     shared
         .proc_array()
         .get_snapshot_data(shared.variable_cache(), &mut data);
+    // GetSnapshotData's tail: stamp the current command id so in-transaction
+    // tuples written by earlier commands of this transaction are visible.
+    data.curcid = crate::access::xact::GetCurrentCommandId(false);
     data
 }
 
