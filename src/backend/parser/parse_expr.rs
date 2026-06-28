@@ -13,6 +13,7 @@
 //! `not_yet_reachable` staging arm (rules.md s4); none is half-written.
 
 use crate::nodes::nodes::Node;
+use crate::nodes::parsenodes::{ColumnRef, ColumnRefField};
 use crate::parser::parse_node::{ParseExprKind, ParseState};
 
 /// Panic for an expression node tag whose transform arm reaches a subsystem not
@@ -53,10 +54,68 @@ fn transform_expr_recurse(pstate: &mut ParseState, expr: Option<Node>) -> Option
         Node::A_Const(aconst) => {
             Some(Node::Const(crate::parser::parse_node::make_const(pstate, &aconst)))
         }
-        // ColumnRef / ParamRef / A_Expr / FuncCall / TypeCast / ... arms are
-        // filled by later milestones; for M1 they route here cleanly.
+        Node::ColumnRef(cref) => Some(transform_column_ref(pstate, &cref)),
+        // ParamRef / A_Expr / FuncCall / TypeCast / ... arms are filled by later
+        // milestones; for now they route here cleanly.
         other => not_yet_reachable(&other),
     }
+}
+
+/// PG `transformColumnRef`: resolve a `ColumnRef` to a `Var` (or whole-row ref).
+/// M2 covers an unqualified column (`a`) and a table-qualified column (`t.a`); the
+/// 3-part (schema-qualified) form, whole-row `t.*`, the pre/post columnref hooks,
+/// and the backwards-compatible bare-relation-name path grow at their milestones.
+fn transform_column_ref(pstate: &mut ParseState, cref: &ColumnRef) -> Node {
+    use crate::backend::parser::parse_relation::{col_name_to_var, scan_ns_item_for_column};
+
+    match cref.fields.as_slice() {
+        [ColumnRefField::String(field1)] => {
+            let colname = &field1.sval;
+            col_name_to_var(pstate, colname, false, cref.location)
+                .unwrap_or_else(|| undefined_column(colname))
+        }
+        [ColumnRefField::String(field1), ColumnRefField::String(field2)] => {
+            let relname = &field1.sval;
+            let colname = &field2.sval;
+            let idx = refname_namespace_item(pstate, relname)
+                .unwrap_or_else(|| missing_from_entry(relname));
+            scan_ns_item_for_column(&pstate.p_namespace[idx], 0, colname, cref.location)
+                .unwrap_or_else(|| undefined_column(colname))
+        }
+        [.., ColumnRefField::Star(_)] => {
+            unimplemented!("transformColumnRef: whole-row (table.*) reference not yet translated for this milestone");
+        }
+        _ => unimplemented!("transformColumnRef: 3+-part / schema-qualified column reference not yet translated for this milestone"),
+    }
+}
+
+/// PG `refnameNamespaceItem` (M2 subset): find the index of a namespace item whose
+/// refname (eref aliasname) equals `relname`. Only the current level is searched
+/// (no parent-level / schema-qualified lookup yet).
+fn refname_namespace_item(pstate: &ParseState, relname: &str) -> Option<usize> {
+    pstate
+        .p_namespace
+        .iter()
+        .position(|ns| ns.rel_visible && ns.names.aliasname.as_deref() == Some(relname))
+}
+
+#[cold]
+fn undefined_column(colname: &str) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_COLUMN)
+            .errmsg(format!("column \"{colname}\" does not exist"));
+    });
+    unreachable!("ereport(ERROR) diverges");
+}
+
+#[cold]
+fn missing_from_entry(relname: &str) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_TABLE).errmsg(format!(
+            "missing FROM-clause entry for table \"{relname}\""
+        ));
+    });
+    unreachable!("ereport(ERROR) diverges");
 }
 
 /// PG `ParseExprKindName`: the user-facing name of a `ParseExprKind`, for error

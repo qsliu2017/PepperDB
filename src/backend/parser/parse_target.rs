@@ -14,12 +14,13 @@
 //! self-contained arms are live and whose subquery/JSON arms route to a single
 //! not-yet-reachable staging arm (rules.md s4).
 
-use crate::nodes::makefuncs::makeTargetEntry;
+use crate::access::attnum::AttrNumber;
+use crate::nodes::makefuncs::{makeTargetEntry, makeVar};
 use crate::nodes::nodes::Node;
-use crate::nodes::parsenodes::{A_Expr_Kind, ResTarget};
-use crate::nodes::primnodes::TargetEntry;
+use crate::nodes::parsenodes::{AclMode, A_Expr_Kind, ColumnRef, ColumnRefField, RTEKind, ResTarget};
+use crate::nodes::primnodes::{TargetEntry, VarReturningType};
 use crate::parser::parse_expr::transformExpr;
-use crate::parser::parse_node::{ParseExprKind, ParseState};
+use crate::parser::parse_node::{ParseExprKind, ParseNamespaceItem, ParseState};
 
 /// PG `transformTargetList`: turn a list of raw `ResTarget`s into a list of
 /// transformed `TargetEntry`s.
@@ -36,8 +37,8 @@ pub fn transformTargetList(
     crate::assert!(pstate.p_multiassign_exprs.is_empty());
 
     // PG expands "something.*" in SELECT and RETURNING (but not UPDATE) before the
-    // plain-expression path; that expansion needs range-table machinery not
-    // present for M1, so only the plain path below is wired here.
+    // plain-expression path.
+    let expand_star = expr_kind != ParseExprKind::UpdateSource;
     let mut p_target: Vec<Node> = Vec::with_capacity(targetlist.len());
     for o_target in targetlist {
         let Node::ResTarget(res) = o_target else {
@@ -49,10 +50,16 @@ pub fn transformTargetList(
         };
         let ResTarget { name, val, .. } = *res;
 
-        // Star-expansion (res->val is a ColumnRef/A_Indirection ending in A_Star)
-        // is handled by ExpandColumnRefStar / ExpandIndirectionStar in PG; those
-        // need RTE expansion not translated for M1. The plain-expression path
-        // below handles a single transformed expression.
+        // Check for "something.*": the star appears as the last field of a
+        // ColumnRef. (A_Indirection ending in A_Star grows with indirection.)
+        if expand_star
+            && let Some(Node::ColumnRef(cref)) = val.as_ref()
+            && matches!(cref.fields.last(), Some(ColumnRefField::Star(_)))
+        {
+            p_target.extend(expand_column_ref_star(pstate, cref));
+            continue;
+        }
+
         let tle = transformTargetEntry(pstate, val, None, expr_kind, name, false);
         p_target.push(Node::TargetEntry(tle));
     }
@@ -90,6 +97,106 @@ pub fn transformTargetEntry(
     let resno = pstate.p_next_resno as crate::access::attnum::AttrNumber;
     pstate.p_next_resno += 1;
     Box::new(makeTargetEntry(expr, resno, colname, resjunk))
+}
+
+/// PG `ExpandColumnRefStar`: expand a `something.*` target. M2 covers the bare `*`
+/// form (expand all tables in the namespace); the `relation.*` form grows with the
+/// whole-row / hook machinery.
+fn expand_column_ref_star(pstate: &mut ParseState, cref: &ColumnRef) -> Vec<Node> {
+    if cref.fields.len() == 1 {
+        // Bare '*': expand all tables.
+        expand_all_tables(pstate, cref.location)
+    } else {
+        unimplemented!("ExpandColumnRefStar: relation.* expansion not yet translated for this milestone")
+    }
+}
+
+/// PG `ExpandAllTables`: expand a bare `*` into the columns of every col-visible
+/// namespace item. Errors if there is no table to expand (`SELECT *` with no FROM).
+fn expand_all_tables(pstate: &mut ParseState, location: i32) -> Vec<Node> {
+    let mut target: Vec<Node> = Vec::new();
+    let mut found_table = false;
+    // Index loop so the per-nsitem borrow ends before bumping p_next_resno.
+    for idx in 0..pstate.p_namespace.len() {
+        if !pstate.p_namespace[idx].cols_visible {
+            continue;
+        }
+        crate::assert!(!pstate.p_namespace[idx].lateral_only);
+        found_table = true;
+        let mut tes = expand_ns_item_attrs(pstate, idx, location);
+        target.append(&mut tes);
+    }
+    if !found_table {
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_SYNTAX_ERROR)
+                .errmsg("SELECT * with no tables specified is not valid".to_string());
+        });
+        unreachable!("ereport(ERROR) diverges");
+    }
+    target
+}
+
+/// PG `expandNSItemAttrs`: build a `TargetEntry` per live column of the nsitem,
+/// each over a `Var` (from `expandNSItemVars`), assigning sequential resnos. Marks
+/// the relation's perminfo as needing SELECT. (`markVarForSelectPriv` per-column
+/// detail grows with column-level privileges.)
+fn expand_ns_item_attrs(pstate: &mut ParseState, ns_idx: usize, location: i32) -> Vec<Node> {
+    let (vars, names) = expand_ns_item_vars(&pstate.p_namespace[ns_idx], 0, location);
+
+    // Require read access to the table (redundant with per-column for non-empty
+    // rels, but needed for a zero-column table).
+    if pstate.p_namespace[ns_idx].rte.rtekind == RTEKind::RELATION {
+        let perminfo_index = pstate.p_namespace[ns_idx].rte.perminfoindex;
+        pstate.p_rteperminfos[perminfo_index - 1].requiredPerms |= AclMode::SELECT;
+    }
+
+    vars.into_iter()
+        .zip(names)
+        .map(|(var, label)| {
+            let resno = pstate.p_next_resno as AttrNumber;
+            pstate.p_next_resno += 1;
+            Node::TargetEntry(Box::new(makeTargetEntry(Some(var), resno, Some(label), false)))
+        })
+        .collect()
+}
+
+/// PG `expandNSItemVars`: build a `Var` for each live (non-dropped) column of the
+/// nsitem, returning the Vars and their colnames in parallel.
+fn expand_ns_item_vars(
+    nsitem: &ParseNamespaceItem,
+    sublevels_up: crate::c::Index,
+    location: i32,
+) -> (Vec<Node>, Vec<String>) {
+    let mut vars = Vec::new();
+    let mut names = Vec::new();
+    for (colindex, colnameval) in nsitem.names.colnames.iter().enumerate() {
+        let colname = &colnameval.sval;
+        let nscol = &nsitem.nscolumns[colindex];
+        if nscol.dontexpand {
+            continue;
+        }
+        if colname.is_empty() {
+            // dropped column, ignore
+            crate::assert!(nscol.varno == 0);
+            continue;
+        }
+        crate::assert!(nscol.varno > 0);
+        let mut var = makeVar(
+            nscol.varno as i32,
+            nscol.varattno,
+            nscol.vartype,
+            nscol.vartypmod,
+            nscol.varcollid,
+            sublevels_up,
+        );
+        var.varreturningtype = VarReturningType::DEFAULT;
+        var.varnosyn = nscol.varnosyn;
+        var.varattnosyn = nscol.varattnosyn;
+        var.location = location;
+        vars.push(Node::Var(Box::new(var)));
+        names.push(colname.clone());
+    }
+    (vars, names)
 }
 
 /// PG `FigureColname`: pick a column name for a target without an explicit AS.

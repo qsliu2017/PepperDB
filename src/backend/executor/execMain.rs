@@ -43,7 +43,18 @@ fn init_plan(query_desc: &mut QueryDesc, eflags: i32) {
         .plannedstmt
         .as_ref()
         .unwrap_or_else(|| unimplemented!("InitPlan: no planned statement"));
-    crate::assert!(plannedstmt.rtable.is_empty());
+    // The plan's rangetable may hold an RTE_RESULT (the FROM-less SELECT
+    // placeholder injected by replace_empty_jointree); the Result node ignores the
+    // rangetable, so M1 execution is unaffected. The general ExecInitRangeTable /
+    // relation-scan range-table setup (RTE_RELATION) is step 18 (execution).
+    let rtable_is_result_only = plannedstmt.rtable.iter().all(|rte| {
+        matches!(
+            rte,
+            crate::nodes::nodes::Node::RangeTblEntry(e)
+                if e.rtekind == crate::nodes::parsenodes::RTEKind::RESULT
+        )
+    });
+    crate::assert!(rtable_is_result_only);
     crate::assert!(plannedstmt.result_relations.is_empty());
 
     let plan_tree = plannedstmt.plan_tree.clone();

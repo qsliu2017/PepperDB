@@ -76,10 +76,19 @@ fn rewrite_query(
 /// grow with the range-table and rule machinery.
 fn fire_rir_rules(parsetree: Query, _active_rirs: &mut Vec<crate::postgres_ext::Oid>) -> Query {
     // PG walks parsetree->rtable expanding view/subquery RTEs and applying RLS,
-    // then recurses into sublinks. An empty range table with no sublinks has
-    // nothing to do.
-    if !parsetree.rtable.is_empty() {
-        not_yet_reachable("fireRIRrules: range-table / view / RLS expansion");
+    // then recurses into sublinks. A plain RTE_RELATION (an ordinary table) and the
+    // planner-injected RTE_RESULT have no ON SELECT rule, view, or RLS to expand,
+    // so the pass is a no-op for them. View/subquery RTE expansion and RLS grow at
+    // their milestone (M11); a non-relation/result RTE still routes to the guard.
+    for rte in &parsetree.rtable {
+        let crate::nodes::nodes::Node::RangeTblEntry(rte) = rte else {
+            not_yet_reachable("fireRIRrules: rangetable entry is not an RTE");
+        };
+        match rte.rtekind {
+            crate::nodes::parsenodes::RTEKind::RELATION
+            | crate::nodes::parsenodes::RTEKind::RESULT => {}
+            _ => not_yet_reachable("fireRIRrules: range-table / view / RLS expansion"),
+        }
     }
     if parsetree.hasSubLinks {
         not_yet_reachable("fireRIRrules: sublink RIR recursion");

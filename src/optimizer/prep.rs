@@ -11,9 +11,7 @@ pub fn transform_merge_to_join(parse: &mut Query) {
     unimplemented!()
 }
 
-pub fn replace_empty_jointree(parse: &mut Query) {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::prep::prepjointree::replace_empty_jointree;
 
 pub fn pull_up_sublinks(root: &mut PlannerInfo) {
     unimplemented!()

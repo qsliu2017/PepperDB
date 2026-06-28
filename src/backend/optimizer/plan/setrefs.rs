@@ -16,7 +16,7 @@
 
 use crate::nodes::nodes::Node;
 use crate::nodes::pathnodes::PlannerInfo;
-use crate::nodes::plannodes::Result;
+use crate::nodes::plannodes::{Result, SeqScan};
 
 /// Panic for a setrefs path not yet translated for this milestone (rules.md s4).
 #[cold]
@@ -28,35 +28,93 @@ fn not_yet_reachable(what: &str) -> ! {
 /// the rangetable into `glob->finalrtable` (offsetting RT indexes) and fixing up
 /// Var references throughout the plan.
 ///
-/// `plan` is the polymorphic top plan node. M1's only plan node is a `Result`.
+/// `plan` is the polymorphic top plan node. M1's plan is a `Result` (empty
+/// rangetable); M2 adds a `SeqScan` over a single base-rel rangetable. With one
+/// query the rtoffset is 0, so the flattened indexes equal the originals.
 pub fn set_plan_references(root: &mut PlannerInfo, plan: Node) -> Node {
     let rtoffset = root.glob.finalrtable.len();
+    crate::assert!(rtoffset == 0);
 
-    // add_rtes_to_flat_rtable: append this query's RTEs to the flat rangetable.
-    // M1's rangetable is empty (a table-less SELECT), so nothing is added and the
-    // final rtable stays empty. The RTE-flattening (and the rowmark / appendrel /
-    // AlternativeSubPlan workspace handling) grows with the rangetable machinery.
-    if !root.parse.rtable.is_empty() {
-        not_yet_reachable("set_plan_references: rangetable flattening");
-    }
     if !root.row_marks.is_empty() || !root.append_rel_list.is_empty() {
         not_yet_reachable("set_plan_references: rowmarks / appendrels");
     }
-    crate::assert!(rtoffset == 0);
+
+    // add_rtes_to_flat_rtable: append this query's RTEs (and their perminfos) to
+    // the flat rangetable. With a single query the indexes are unchanged. The
+    // per-RTE field scrubbing PG does (dropping subquery/joinaliasvars detail) is
+    // not needed for the M2 RTE_RELATION entry.
+    add_rtes_to_flat_rtable(root);
 
     set_plan_refs(root, plan, rtoffset)
 }
 
+/// PG `add_rtes_to_flat_rtable` (M2 subset): copy the query's RTEs and perminfos
+/// into the global flat rangetable. Single-query, so a straight append.
+fn add_rtes_to_flat_rtable(root: &mut PlannerInfo) {
+    let rtable = root.parse.rtable.clone();
+    let perminfos = root.parse.rteperminfos.clone();
+    root.glob.finalrtable.extend(rtable);
+    root.glob.finalrteperminfos.extend(perminfos);
+}
+
 /// PG `set_plan_refs`: per-node-tag fixup of a single plan node and its subtree.
-/// M1 lives the `T_Result` arm; the rest grow per milestone.
+/// M1 lives the `T_Result` arm; M2 adds `T_SeqScan`; the rest grow per milestone.
 fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
     match plan {
         Node::Result(r) => Node::Result(Box::new(set_result_refs(root, *r, rtoffset))),
+        Node::SeqScan(s) => Node::SeqScan(Box::new(set_seqscan_refs(root, *s, rtoffset))),
+        Node::ModifyTable(m) => Node::ModifyTable(Box::new(set_modifytable_refs(root, *m, rtoffset))),
         other => not_yet_reachable(&format!("set_plan_refs: {other:?}")),
     }
 }
 
-fn set_result_refs(root: &mut PlannerInfo, mut plan: Result, _rtoffset: usize) -> Result {
+/// PG `set_plan_refs` T_ModifyTable arm (M2 subset): offset the result-relation RT
+/// indexes, assign the plan node id, and recurse into the source subplan. RETURNING
+/// tlist fixup / WCO / ON CONFLICT / per-target lists grow at their milestones.
+fn set_modifytable_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::ModifyTable,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::ModifyTable {
+    plan.plan.plan_node_id = root.glob.last_plan_node_id;
+    root.glob.last_plan_node_id += 1;
+
+    let off = rtoffset as crate::nodes::primnodes::Index;
+    plan.nominal_relation += off;
+    if plan.root_relation != 0 {
+        plan.root_relation += off;
+    }
+    plan.result_relations = plan
+        .result_relations
+        .iter()
+        .map(|&rti| rti + rtoffset as i32)
+        .collect();
+
+    // Recurse into the source subplan.
+    if let Some(sub) = plan.plan.lefttree.take() {
+        plan.plan.lefttree = Some(set_plan_refs(root, sub, rtoffset));
+    }
+    plan
+}
+
+/// PG `set_plan_refs` T_SeqScan arm: offset the scanrelid and fix the scan's
+/// targetlist/qual Var references. With rtoffset 0 (single query) the scanrelid
+/// and base-rel Var varnos are unchanged; this assigns the plan node id and
+/// asserts the tlist is well-formed (Vars over the scan rel, or Consts).
+fn set_seqscan_refs(root: &mut PlannerInfo, mut plan: SeqScan, rtoffset: usize) -> SeqScan {
+    plan.scan.scanrelid += rtoffset as crate::nodes::primnodes::Index;
+    plan.scan.plan.plan_node_id = root.glob.last_plan_node_id;
+    root.glob.last_plan_node_id += 1;
+
+    // fix_scan_list over the tlist: with rtoffset 0, a base-rel Var keeps its
+    // varno/varattno; the only fixups (ROWID_VAR / Param / upper-var offsetting)
+    // are not present on the M2 scan tlist.
+    fix_scan_tlist_identity(&plan.scan.plan.targetlist, rtoffset);
+    crate::assert!(plan.scan.plan.qual.is_empty());
+    plan
+}
+
+fn set_result_refs(root: &mut PlannerInfo, mut plan: Result, rtoffset: usize) -> Result {
     // Assign this node a unique ID.
     plan.plan.plan_node_id = root.glob.last_plan_node_id;
     root.glob.last_plan_node_id += 1;
@@ -70,23 +128,28 @@ fn set_result_refs(root: &mut PlannerInfo, mut plan: Result, _rtoffset: usize) -
     // Childless Result: fix_scan_list over the tlist. For a const tlist there are
     // no Vars (and no ROWID_VARs) to rewrite, so this is identity. resconstantqual
     // is NULL on the const path.
-    fix_scan_tlist_identity(&plan.plan.targetlist);
+    fix_scan_tlist_identity(&plan.plan.targetlist, rtoffset);
     crate::assert!(plan.plan.qual.is_empty());
     crate::assert!(plan.resconstantqual.is_none());
 
     plan
 }
 
-/// `fix_scan_list` over a const targetlist is identity: assert there are no Vars
-/// (which would need RT-index offsetting / Param replacement that grows later).
-fn fix_scan_tlist_identity(tlist: &[Node]) {
+/// `fix_scan_list` over an M1/M2 scan/result targetlist. With `rtoffset == 0` the
+/// fixup is identity: a base-rel `Var` keeps its varno/varattno and a `Const`
+/// folds to itself. A non-zero offset, or a non-Var/Const expr (OpExpr/FuncCall),
+/// needs the general `fix_scan_expr` walk that grows with WHERE/expression plans.
+fn fix_scan_tlist_identity(tlist: &[Node], rtoffset: usize) {
+    if rtoffset != 0 {
+        not_yet_reachable("set_plan_refs: non-zero rtoffset Var fixup");
+    }
     for entry in tlist {
         let Node::TargetEntry(te) = entry else {
             not_yet_reachable("set_plan_refs: tlist entry is not a TargetEntry");
         };
         match te.expr.as_ref() {
-            Some(Node::Const(_)) | None => {}
-            Some(_) => not_yet_reachable("set_plan_refs: non-Const expr in scan tlist"),
+            Some(Node::Const(_) | Node::Var(_)) | None => {}
+            Some(_) => not_yet_reachable("set_plan_refs: non-Var/Const expr in scan tlist"),
         }
     }
 }

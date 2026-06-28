@@ -15,7 +15,7 @@
 use crate::nodes::makefuncs::makeTargetEntry;
 use crate::nodes::nodes::Node;
 use crate::nodes::pathnodes::{Path, PathType, PlannerInfo};
-use crate::nodes::plannodes::{Plan, Result};
+use crate::nodes::plannodes::{Plan, Result, Scan, SeqScan};
 
 /// Panic for a createplan path not yet translated for this milestone
 /// (rules.md s4).
@@ -25,17 +25,74 @@ fn not_yet_reachable(what: &str) -> ! {
 }
 
 /// PG `create_plan_recurse`: recursively build a Plan from a Path. Dispatches on
-/// the Path's pathtype (the NodeTag of the plan it builds). M1 lives the
-/// `T_Result` arm; the rest grow per milestone.
-pub fn create_plan_recurse(root: &mut PlannerInfo, best_path: &Path) -> Result {
+/// the Path's pathtype (the NodeTag of the plan it builds). M1/M2 live the
+/// `T_Result` and `T_SeqScan` arms; the rest grow per milestone. Returns the
+/// polymorphic plan node.
+pub fn create_plan_recurse(root: &mut PlannerInfo, best_path: &Path) -> Node {
     match best_path.pathtype {
         PathType::Result => {
             // PG distinguishes ProjectionPath / MinMaxAggPath / GroupResultPath /
             // simple RTE_RESULT scan here. For M1 the only Result path is the
             // group-result path of a FROM-less SELECT.
-            create_group_result_plan(root, best_path)
+            Node::Result(Box::new(create_group_result_plan(root, best_path)))
         }
+        PathType::SeqScan => Node::SeqScan(Box::new(create_seqscan_plan(root, best_path))),
         other => not_yet_reachable(&format!("create_plan_recurse: {other:?}")),
+    }
+}
+
+/// PG `create_seqscan_plan`: build a `SeqScan` plan from a seqscan Path. The plan's
+/// targetlist is built from the path's pathtarget (`build_path_tlist`); M2 has no
+/// scan_clauses (no WHERE), so the qual is empty. The scanrelid is the base rel's
+/// RT index.
+fn create_seqscan_plan(root: &mut PlannerInfo, best_path: &Path) -> SeqScan {
+    let scan_relid = best_path
+        .parent
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("create_seqscan_plan: missing parent rel"))
+        .relid;
+    crate::assert!(scan_relid > 0);
+
+    if best_path.param_info.is_some() {
+        not_yet_reachable("create_seqscan_plan: parameterized scan (nestloop params)");
+    }
+
+    let tlist = build_path_tlist(root, best_path);
+    // scan_clauses are rel->baserestrictinfo, empty in M2 (no WHERE).
+    let mut plan = make_seqscan(tlist, Vec::new(), scan_relid);
+    copy_generic_path_info(&mut plan.scan.plan, best_path);
+    plan
+}
+
+/// PG `make_seqscan`: construct a `SeqScan` plan node.
+fn make_seqscan(tlist: Vec<Node>, qual: Vec<Node>, scanrelid: crate::nodes::primnodes::Index) -> SeqScan {
+    SeqScan {
+        scan: Scan {
+            plan: empty_plan(tlist, qual),
+            scanrelid,
+        },
+    }
+}
+
+/// A zero-default `Plan` (makeNode(Plan) semantics) carrying the given tlist+qual.
+fn empty_plan(tlist: Vec<Node>, qual: Vec<Node>) -> Plan {
+    Plan {
+        disabled_nodes: 0,
+        startup_cost: 0.0,
+        total_cost: 0.0,
+        plan_rows: 0.0,
+        plan_width: 0,
+        parallel_aware: false,
+        parallel_safe: false,
+        async_capable: false,
+        plan_node_id: 0,
+        targetlist: tlist,
+        qual,
+        lefttree: None,
+        righttree: None,
+        init_plan: Vec::new(),
+        ext_param: None,
+        all_param: None,
     }
 }
 

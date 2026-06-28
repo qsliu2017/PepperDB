@@ -29,14 +29,20 @@ pub fn preprocess_targetlist(root: &mut PlannerInfo) {
     let result_relation = root.parse.resultRelation;
 
     if result_relation != 0 {
-        // INSERT/UPDATE/DELETE/MERGE open the target relation and expand/renumber
-        // the tlist; not reachable for an M1 SELECT.
-        not_yet_reachable("preprocess_targetlist: result relation");
+        // INSERT/UPDATE/DELETE/MERGE have a result relation. M2 supports INSERT,
+        // whose tlist was already keyed to target attnos by transformInsertStmt
+        // (rewriteTargetListIU normally fills missing columns with defaults and
+        // re-orders by attno; M2 assumes VALUES supplies every column in order, so
+        // the tlist passes through). UPDATE/DELETE/MERGE expansion grows later.
+        if command_type != CmdType::INSERT {
+            not_yet_reachable("preprocess_targetlist: non-INSERT result relation");
+        }
+    } else {
+        crate::assert!(command_type == CmdType::SELECT);
     }
-    crate::assert!(command_type == CmdType::SELECT);
 
-    // INSERT targetlist expansion and UPDATE colno extraction are gated on the
-    // command type above. For SELECT the tlist passes through unchanged.
+    // INSERT targetlist expansion (expand_insert_targetlist) and UPDATE colno
+    // extraction grow later. For SELECT and the M2 INSERT the tlist passes through.
     let tlist = root.parse.targetList.clone();
 
     if command_type == CmdType::UPDATE

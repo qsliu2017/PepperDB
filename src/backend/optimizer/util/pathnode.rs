@@ -96,6 +96,43 @@ pub fn create_group_result_path(
     Box::new(GroupResultPath { path, quals: havingqual })
 }
 
+/// PG `create_seqscan_path`: build a sequential-scan `Path` over a base rel. M2
+/// has no parameterization (no lateral refs) and no parallelism; the path's
+/// pathtarget is the rel's reltarget, and `cost_seqscan` fills its costs.
+pub fn create_seqscan_path(
+    root: &mut PlannerInfo,
+    rel: &RelOptInfo,
+    parallel_workers: i32,
+) -> Box<Path> {
+    if parallel_workers > 0 {
+        not_yet_reachable("create_seqscan_path: parallel workers");
+    }
+    let Some(target) = rel.reltarget.as_ref().map(|t| (**t).clone()) else {
+        not_yet_reachable("create_seqscan_path: missing reltarget");
+    };
+
+    let mut path = Path {
+        pathtype: PathType::SeqScan,
+        parent: Some(Box::new(rel.clone())),
+        pathtarget: Some(Box::new(target)),
+        // get_baserel_parampathinfo(root, rel, NULL) is NULL with no required_outer.
+        param_info: None,
+        parallel_aware: false,
+        parallel_safe: rel.consider_parallel,
+        parallel_workers: 0,
+        rows: 0.0,
+        disabled_nodes: 0,
+        startup_cost: 0.0,
+        total_cost: 0.0,
+        // seqscan has an unordered result.
+        pathkeys: Vec::new(),
+    };
+
+    crate::backend::optimizer::path::costsize::cost_seqscan(&mut path, root, rel, None);
+
+    Box::new(path)
+}
+
 /// Panic for a pathnode path not yet translated for this milestone (rules.md s4).
 #[cold]
 fn not_yet_reachable(what: &str) -> ! {

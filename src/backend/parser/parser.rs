@@ -9,9 +9,10 @@
 
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{
-    A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, RawStmt, ResTarget, TypeName, ValUnion,
+    A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, InsertStmt, RawStmt, ResTarget,
+    SelectStmt, SetOperation, TypeName, ValUnion,
 };
-use crate::nodes::primnodes::{OnCommitAction, RangeVar};
+use crate::nodes::primnodes::{OnCommitAction, OverridingKind, RangeVar};
 use crate::nodes::value::{makeFloat, makeInteger, makeString};
 use crate::parser::parser::RawParseMode;
 
@@ -83,6 +84,76 @@ pub fn make_star_target() -> Node {
         location: -1,
     };
     Node::ResTarget(Box::new(rt))
+}
+
+/// gram.y `columnref`: build a ColumnRef from a dotted name-part list. The last
+/// part may be `*` in PG; M2's grammar only constructs name parts here (the
+/// `table.*` form grows with the indirection machinery), so every part is a String
+/// field.
+pub fn make_column_ref(parts: Vec<String>) -> Node {
+    let fields = parts.into_iter().map(|p| ColumnRefField::String(makeString(p))).collect();
+    Node::ColumnRef(Box::new(ColumnRef { fields, location: -1 }))
+}
+
+/// gram.y `table_ref: relation_expr`: a plain table name in FROM becomes a
+/// RangeVar node (the from_clause/table_ref item). Aliases / joins / subqueries
+/// grow at their milestones.
+pub fn make_range_var_table_ref(relation: RangeVar) -> Node {
+    Node::RangeVar(Box::new(relation))
+}
+
+/// gram.y `insert_rest: VALUES ...`: wrap the parsed VALUES rows in a SelectStmt
+/// carrying `valuesLists`, exactly as gram.y builds the VALUES clause. Each row is
+/// a RowExpr carrier (see gram.lalrpop ValuesRow). The targetList/fromClause are
+/// empty for a VALUES SelectStmt.
+pub fn make_values_select(values_lists: Vec<Node>) -> Node {
+    Node::SelectStmt(Box::new(empty_select_stmt(Vec::new(), Vec::new(), values_lists)))
+}
+
+/// gram.y `InsertStmt`: build the raw InsertStmt node (M2 plain form). WITH / ON
+/// CONFLICT / RETURNING / OVERRIDING grow at their milestones.
+pub fn make_insert_stmt(relation: RangeVar, cols: Vec<Node>, select_stmt: Option<Node>) -> Node {
+    Node::InsertStmt(Box::new(InsertStmt {
+        relation: Some(Box::new(relation)),
+        cols,
+        selectStmt: select_stmt,
+        onConflictClause: None,
+        returningClause: None,
+        withClause: None,
+        r#override: OverridingKind::NOT_SET,
+    }))
+}
+
+/// A zero-default SelectStmt (makeNode(SelectStmt) semantics) carrying the given
+/// target list, FROM clause, and VALUES lists; every other clause is empty. Shared
+/// by the grammar's SimpleSelect and the VALUES wrapper.
+fn empty_select_stmt(
+    target_list: Vec<Node>,
+    from_clause: Vec<Node>,
+    values_lists: Vec<Node>,
+) -> SelectStmt {
+    SelectStmt {
+        distinctClause: Vec::new(),
+        intoClause: None,
+        targetList: target_list,
+        fromClause: from_clause,
+        whereClause: None,
+        groupClause: Vec::new(),
+        groupDistinct: false,
+        havingClause: None,
+        windowClause: Vec::new(),
+        valuesLists: values_lists,
+        sortClause: Vec::new(),
+        limitOffset: None,
+        limitCount: None,
+        limitOption: crate::nodes::nodes::LimitOption::COUNT,
+        lockingClause: Vec::new(),
+        withClause: None,
+        op: SetOperation::NONE,
+        all: false,
+        larg: None,
+        rarg: None,
+    }
 }
 
 /// gram.y `CreateStmt: CREATE ... TABLE qualified_name '(' OptTableElementList ')'`
@@ -355,6 +426,54 @@ mod tests {
         let rv = c.relation.as_ref().unwrap();
         assert_eq!(rv.schemaname.as_deref(), Some("public"));
         assert_eq!(rv.relname.as_deref(), Some("t"));
+    }
+
+    #[test]
+    fn select_star_from_table_parses() {
+        let list = parse("SELECT * FROM t");
+        let sel = one_select(&list);
+        assert_eq!(sel.fromClause.len(), 1);
+        let Node::RangeVar(rv) = &sel.fromClause[0] else { panic!("FROM item not a RangeVar") };
+        assert_eq!(rv.relname.as_deref(), Some("t"));
+        // `*` target.
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!() };
+        let Node::ColumnRef(cr) = rt.val.as_ref().unwrap() else { panic!() };
+        assert!(matches!(&cr.fields[0], ColumnRefField::Star(_)));
+    }
+
+    #[test]
+    fn select_column_from_table_parses() {
+        let list = parse("SELECT a FROM t");
+        let sel = one_select(&list);
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!() };
+        let Node::ColumnRef(cr) = rt.val.as_ref().unwrap() else { panic!("not a ColumnRef") };
+        assert!(matches!(&cr.fields[0], ColumnRefField::String(s) if s.sval == "a"));
+    }
+
+    #[test]
+    fn insert_values_parses() {
+        let list = parse("INSERT INTO t VALUES (1)");
+        assert_eq!(list.len(), 1);
+        let Node::RawStmt(rs) = &list[0] else { panic!("not a RawStmt") };
+        let Node::InsertStmt(ins) = rs.stmt.as_ref().unwrap() else { panic!("not an InsertStmt") };
+        assert_eq!(ins.relation.as_ref().unwrap().relname.as_deref(), Some("t"));
+        assert!(ins.cols.is_empty(), "no explicit column list");
+        // VALUES wrapped as a SelectStmt with one RowExpr-carried row.
+        let Node::SelectStmt(sel) = ins.selectStmt.as_ref().unwrap() else { panic!("source not a SelectStmt") };
+        assert_eq!(sel.valuesLists.len(), 1);
+        let Node::RowExpr(row) = &sel.valuesLists[0] else { panic!("row not a RowExpr") };
+        assert_eq!(row.args.len(), 1);
+        assert!(matches!(&row.args[0], Node::A_Const(_)));
+    }
+
+    #[test]
+    fn insert_with_column_list_parses() {
+        let list = parse("INSERT INTO t (a) VALUES (1)");
+        let Node::RawStmt(rs) = &list[0] else { panic!() };
+        let Node::InsertStmt(ins) = rs.stmt.as_ref().unwrap() else { panic!() };
+        assert_eq!(ins.cols.len(), 1);
+        let Node::ResTarget(rt) = &ins.cols[0] else { panic!("col not a ResTarget") };
+        assert_eq!(rt.name.as_deref(), Some("a"));
     }
 
     #[test]

@@ -128,6 +128,14 @@ pub fn standard_planner(
 
     let mut top_plan = create_plan(&mut root, &best_path);
 
+    // For a data-modifying statement, wrap the source plan in a ModifyTable. PG
+    // builds a ModifyTablePath in grouping_planner; M2 wraps the source plan here
+    // for the single, non-inherited target (the ModifyTablePath/bitmapset path for
+    // inherited targets grows later). Records the result relation on glob.
+    if parse.commandType == CmdType::INSERT {
+        top_plan = make_modifytable_plan(&mut root, parse, top_plan);
+    }
+
     // Scrollable-cursor materialization and the debug_parallel_query Gather
     // injection are gated out above (no cursor/parallel options in M1).
 
@@ -138,7 +146,6 @@ pub fn standard_planner(
     }
 
     // Final cleanup of the plan: flatten the rangetable and fix var refs.
-    crate::assert!(glob.finalrtable.is_empty());
     let top_plan = set_plan_references(&mut root, top_plan);
 
     // Build the PlannedStmt result.
@@ -177,6 +184,67 @@ pub fn standard_planner(
     }
 }
 
+/// PG `create_modifytable_plan` (M2 subset): wrap `subplan` (the source rows) in a
+/// `ModifyTable` plan targeting the query's single result relation. Records the
+/// result relation in `glob.result_relations`. Inherited targets, RETURNING, WCO,
+/// ON CONFLICT, and the FDW/merge fields grow at their milestones.
+fn make_modifytable_plan(
+    root: &mut PlannerInfo,
+    parse: &Query,
+    subplan: Node,
+) -> Node {
+    let result_relation = parse.resultRelation;
+    crate::assert!(result_relation > 0);
+    root.glob.result_relations = vec![result_relation];
+
+    let modify = crate::nodes::plannodes::ModifyTable {
+        plan: crate::nodes::plannodes::Plan {
+            disabled_nodes: 0,
+            startup_cost: 0.0,
+            total_cost: 0.0,
+            plan_rows: 0.0,
+            plan_width: 0,
+            parallel_aware: false,
+            parallel_safe: false,
+            async_capable: false,
+            plan_node_id: 0,
+            // ModifyTable's own tlist is empty unless RETURNING (none in M2).
+            targetlist: Vec::new(),
+            qual: Vec::new(),
+            lefttree: Some(subplan),
+            righttree: None,
+            init_plan: Vec::new(),
+            ext_param: None,
+            all_param: None,
+        },
+        operation: CmdType::INSERT,
+        can_set_tag: parse.canSetTag,
+        nominal_relation: result_relation as crate::nodes::primnodes::Index,
+        root_relation: 0,
+        part_cols_updated: false,
+        result_relations: vec![result_relation],
+        update_colnos_lists: Vec::new(),
+        with_check_option_lists: Vec::new(),
+        returning_old_alias: None,
+        returning_new_alias: None,
+        returning_lists: Vec::new(),
+        fdw_priv_lists: Vec::new(),
+        fdw_direct_modify_plans: None,
+        row_marks: Vec::new(),
+        epq_param: -1,
+        on_conflict_action: crate::nodes::nodes::OnConflictAction::NONE,
+        arbiter_indexes: Vec::new(),
+        on_conflict_set: Vec::new(),
+        on_conflict_cols: Vec::new(),
+        on_conflict_where: None,
+        excl_rel_rti: 0,
+        excl_rel_tlist: Vec::new(),
+        merge_action_lists: Vec::new(),
+        merge_join_conditions: Vec::new(),
+    };
+    Node::ModifyTable(Box::new(modify))
+}
+
 /// PG `subquery_planner`: the per-Query planning driver. Sets up the
 /// `PlannerInfo` ("root"), runs the simplification/pullup/preprocessing passes,
 /// then `grouping_planner`, and returns the root with the final rel's cheapest
@@ -203,10 +271,10 @@ pub fn subquery_planner(
     // Create a PlannerInfo data structure for this subquery.
     let mut root = make_planner_info(glob, parse, query_level);
 
-    // The WITH list (SS_process_ctes), MERGE jointree transform, empty-jointree
-    // RTE_RESULT injection, ANY/EXISTS sublink pullup, function-RTE inlining,
-    // generated-column expansion, subquery pullup, and UNION ALL flattening all
-    // precede the rangetable survey. None applies to a table-less constant SELECT.
+    // The WITH list (SS_process_ctes), MERGE jointree transform, ANY/EXISTS
+    // sublink pullup, function-RTE inlining, generated-column expansion, subquery
+    // pullup, and UNION ALL flattening all precede the rangetable survey. None
+    // applies to the M2 single-rel / const SELECT / INSERT ... VALUES paths.
     if !root.parse.cteList.is_empty() {
         not_yet_reachable("subquery_planner: WITH clause");
     }
@@ -217,18 +285,27 @@ pub fn subquery_planner(
         not_yet_reachable("subquery_planner: sublinks");
     }
 
-    // Survey the rangetable. M1's const SELECT has an empty rangetable, so there
-    // is nothing to survey (no JOIN/RESULT/GROUP RTEs, no lateral, no security
-    // quals). The per-RTE-kind survey and expression preprocessing grow with the
-    // rangetable machinery.
-    if !root.parse.rtable.is_empty() {
-        not_yet_reachable("subquery_planner: rangetable survey / preprocessing");
-    }
-    if root.parse.resultRelation != 0 {
-        not_yet_reachable("subquery_planner: result relation");
+    // If the FROM clause is empty, replace it with a dummy RTE_RESULT so that the
+    // jointree is never empty (PG: replace_empty_jointree in prepjointree). This
+    // gives a FROM-less `SELECT 1` a one-entry rangetable (an RTE_RESULT), matching
+    // PG, and is the source of the M2 RTE_RESULT.
+    crate::backend::optimizer::prep::prepjointree::replace_empty_jointree(&mut root.parse);
+
+    // Survey the rangetable. M2 supports an RTE_RELATION (a base rel) and an
+    // RTE_RESULT (the empty-FROM placeholder). JOIN/SUBQUERY/FUNCTION/VALUES/GROUP
+    // RTEs, lateral refs, and security quals grow with their milestones.
+    for rte in &root.parse.rtable {
+        let Node::RangeTblEntry(rte) = rte else {
+            not_yet_reachable("subquery_planner: rangetable entry is not an RTE");
+        };
+        match rte.rtekind {
+            crate::nodes::parsenodes::RTEKind::RELATION
+            | crate::nodes::parsenodes::RTEKind::RESULT => {}
+            other => not_yet_reachable(&format!("subquery_planner: RTE kind {other:?}")),
+        }
     }
 
-    // preprocess_rowmarks: none in M1.
+    // preprocess_rowmarks: none in M1/M2.
 
     root.has_having_qual = root.parse.havingQual.is_some();
     if root.has_having_qual {
@@ -418,12 +495,17 @@ fn grouping_planner(root: &mut PlannerInfo, tuple_fraction: f64, setops: Option<
         not_yet_reachable("grouping_planner: ORDER BY / DISTINCT / WINDOW targets");
     }
 
-    // The final-output upper rel IS the scan/join rel for the const path (no
-    // grouping/window/distinct/sort/limit upper rels added). PG copies the
-    // pathlist into UPPERREL_FINAL with LockRows/Limit/ModifyTable steps as
-    // needed; M1 needs none, so the scan/join rel is the final rel directly.
-    if !root.parse.rowMarks.is_empty() || root.parse.commandType != CmdType::SELECT {
-        not_yet_reachable("grouping_planner: LockRows / ModifyTable");
+    // The final-output upper rel IS the scan/join rel for SELECT and the source
+    // rel for INSERT (M2 wraps the source plan in a ModifyTable in standard_planner
+    // rather than building a ModifyTablePath here -- the path/bitmapset machinery
+    // for inherited result rels grows later). LockRows (rowMarks) and the
+    // UPDATE/DELETE/MERGE ModifyTable paths are grow guards.
+    if !root.parse.rowMarks.is_empty() {
+        not_yet_reachable("grouping_planner: LockRows (FOR UPDATE/SHARE)");
+    }
+    match root.parse.commandType {
+        CmdType::SELECT | CmdType::INSERT => {}
+        other => not_yet_reachable(&format!("grouping_planner: {other:?} ModifyTable")),
     }
     root.upper_rels[UpperRelationKind::FINAL as usize] = vec![Box::new(current_rel)];
 }
@@ -515,7 +597,15 @@ mod tests {
         let stmt = plan("SELECT 1");
         assert_eq!(stmt.command_type, CmdType::SELECT);
         assert!(stmt.can_set_tag);
-        assert!(stmt.rtable.is_empty(), "table-less SELECT has an empty rangetable");
+        // replace_empty_jointree injects one RTE_RESULT for a FROM-less SELECT, so
+        // the planned rangetable has exactly that one entry (matching PG 18.4).
+        assert_eq!(stmt.rtable.len(), 1, "FROM-less SELECT gets one RTE_RESULT");
+        let Node::RangeTblEntry(rte) = &stmt.rtable[0] else { panic!("not an RTE") };
+        assert_eq!(
+            rte.rtekind,
+            crate::nodes::parsenodes::RTEKind::RESULT,
+            "the injected RTE is an RTE_RESULT"
+        );
         assert!(!stmt.has_returning);
 
         let r = result_of(&stmt);

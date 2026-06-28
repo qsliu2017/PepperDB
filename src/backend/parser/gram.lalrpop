@@ -14,6 +14,7 @@ use crate::backend::parser::scan::Token;
 use crate::backend::parser::parser::{
     make_int_const, make_float_const, make_string_const, make_raw_stmt, make_star_target,
     do_negate, make_create_stmt, make_column_def_elt, system_type_name, generic_type_name,
+    make_insert_stmt, make_values_select, make_column_ref, make_range_var_table_ref,
     RawStmtVec,
 };
 use crate::nodes::nodes::Node;
@@ -34,6 +35,10 @@ extern {
         "TABLE"   => Token::Keyword("table"),
         "INT"     => Token::Keyword("int"),
         "INTEGER" => Token::Keyword("integer"),
+        "FROM"    => Token::Keyword("from"),
+        "INSERT"  => Token::Keyword("insert"),
+        "INTO"    => Token::Keyword("into"),
+        "VALUES"  => Token::Keyword("values"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -80,7 +85,78 @@ TopLevelStmt: Option<Node> = {
 Stmt: Option<Node> = {
     <s:SelectStmt> => Some(s),
     <s:CreateStmt> => Some(s),
+    <s:InsertStmt> => Some(s),
     => None,            // empty statement (e.g. trailing ';')
+};
+
+// ===========================================================================
+//  INSERT
+// ===========================================================================
+
+// gram.y `InsertStmt`: opt_with_clause INSERT INTO insert_target insert_rest
+// opt_on_conflict returning_clause. M2 reaches `INSERT INTO qname [(collist)]
+// (VALUES (...) | SelectStmt)`; WITH / ON CONFLICT / RETURNING / OVERRIDING and
+// the DEFAULT VALUES form grow at their milestones.
+InsertStmt: Node = {
+    "INSERT" "INTO" <rel:QualifiedName> <cols:OptInsertColumnList> <src:InsertRest> => {
+        make_insert_stmt(rel, cols, src)
+    },
+};
+
+// gram.y `insert_rest`: the source after the target. M2 supports a `VALUES (...)`
+// list (wrapped as a SelectStmt with valuesLists, exactly as gram.y does) and a
+// general SelectStmt; the `DEFAULT VALUES` and column-list+SELECT forms grow.
+InsertRest: Option<Node> = {
+    "VALUES" <rows:ValuesLists> => Some(make_values_select(rows)),
+    <s:SelectStmt> => Some(s),
+};
+
+// gram.y `'(' insert_column_list ')' | /*EMPTY*/`. A ColumnRef per column.
+OptInsertColumnList: Vec<Node> = {
+    "(" <cols:InsertColumnList> ")" => cols,
+    => Vec::new(),
+};
+
+InsertColumnList: Vec<Node> = {
+    <c:InsertColumnItem> => vec![c],
+    <mut list:InsertColumnList> "," <c:InsertColumnItem> => { list.push(c); list },
+};
+
+// gram.y `insert_column_item: ColId opt_indirection` -> a ResTarget naming the
+// target column. M2 takes the bare column name (no indirection).
+InsertColumnItem: Node = {
+    <n:ColId> => {
+        let rt = ResTarget { name: Some(n), indirection: Vec::new(), val: None, location: -1 };
+        Node::ResTarget(Box::new(rt))
+    },
+};
+
+// gram.y `values_clause`: VALUES ctext_row [, ...]. Each row is a parenthesized
+// expression list. M2 covers one or more rows of constant expressions.
+ValuesLists: Vec<Node> = {
+    <r:ValuesRow> => vec![r],
+    <mut list:ValuesLists> "," <r:ValuesRow> => { list.push(r); list },
+};
+
+// gram.y `ctext_row: '(' ctext_expr_list ')'`. In PG the row is a bare `List *`
+// element of valuesLists; the port has no `List` Node type (pg_list tombstone),
+// so a row's expr list is carried as the `args` of a RowExpr node (an exact-fit
+// Vec<Node> carrier). transformInsertStmt reads `RowExpr.args` as the sublist.
+ValuesRow: Node = {
+    "(" <exprs:ExprList> ")" => {
+        Node::RowExpr(Box::new(crate::nodes::primnodes::RowExpr {
+            args: exprs,
+            row_typeid: crate::postgres_ext::InvalidOid,
+            row_format: crate::nodes::primnodes::CoercionForm::IMPLICIT_CAST,
+            colnames: Vec::new(),
+            location: -1,
+        }))
+    },
+};
+
+ExprList: Vec<Node> = {
+    <e:AExpr> => vec![e],
+    <mut list:ExprList> "," <e:AExpr> => { list.push(e); list },
 };
 
 // ===========================================================================
@@ -189,12 +265,12 @@ SelectClause: Node = {
 // only one reachable in M1; FROM/WHERE/GROUP/HAVING/DISTINCT/VALUES/TABLE and the
 // set operations are added at their milestones.
 SimpleSelect: Node = {
-    "SELECT" <targets:OptTargetList> => {
+    "SELECT" <targets:OptTargetList> <frm:FromClause> => {
         let n = SelectStmt {
             distinctClause: Vec::new(),
             intoClause: None,
             targetList: targets,
-            fromClause: Vec::new(),
+            fromClause: frm,
             whereClause: None,
             groupClause: Vec::new(),
             groupDistinct: false,
@@ -214,6 +290,29 @@ SimpleSelect: Node = {
         };
         Node::SelectStmt(Box::new(n))
     },
+};
+
+// ===========================================================================
+//  FROM clause  (gram.y from_clause -> from_list -> table_ref)
+// ===========================================================================
+
+// gram.y `from_clause: FROM from_list | /*EMPTY*/`. M2 covers a comma-separated
+// list of plain table references (cross-product, no JOIN syntax yet).
+FromClause: Vec<Node> = {
+    "FROM" <list:FromList> => list,
+    => Vec::new(),
+};
+
+FromList: Vec<Node> = {
+    <t:TableRef> => vec![t],
+    <mut list:FromList> "," <t:TableRef> => { list.push(t); list },
+};
+
+// gram.y `table_ref`: relation_expr opt_alias_clause | func_table | ... M2 covers
+// a plain (optionally schema-qualified) table name as a RangeVar; joins, subquery
+// FROM items, function FROM items, and aliases grow at their milestones.
+TableRef: Node = {
+    <r:QualifiedName> => make_range_var_table_ref(r),
 };
 
 // ===========================================================================
@@ -260,6 +359,16 @@ AExpr: Node = {
 
 CExpr: Node = {
     AexprConst,
+    // gram.y `c_expr: columnref`. A bare or table-qualified column reference.
+    ColumnRef,
+};
+
+// gram.y `columnref: ColId | ColId indirection`. M2 covers `col` and
+// `table.col`; the general indirection (subscripts, `.*` mid-chain) grows with
+// the A_Indirection machinery.
+ColumnRef: Node = {
+    <n:ColId> => make_column_ref(vec![n]),
+    <t:ColId> "." <n:ColId> => make_column_ref(vec![t, n]),
 };
 
 // gram.y `AexprConst`. Iconst/FCONST/Sconst are the M1 forms; BCONST/XCONST and

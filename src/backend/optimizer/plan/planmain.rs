@@ -41,44 +41,33 @@ fn not_yet_reachable(what: &str) -> ! {
 /// empty), and build the dummy result rel directly. The full join-search grows
 /// in M3+ when the query has base relations.
 pub fn query_planner(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback) -> RelOptInfo {
-    let parse = &root.parse;
+    use crate::nodes::nodes::Node;
 
-    // setup_simple_rel_arrays would size the per-RT-index arrays; the M1 rel is
-    // not RT-indexed (no rangetable), so they stay empty.
-
-    // The trivial case: the jointree has no base relations to scan. PG checks for
-    // a single RangeTblRef to an RTE_RESULT; here the equivalent is an empty
-    // jointree fromlist (no FROM clause) with an empty rangetable.
-    let from_is_empty = jointree_is_empty(root);
-    if !from_is_empty {
-        not_yet_reachable("query_planner: scan/join search over base relations");
+    // The jointree always holds one RangeTblRef after replace_empty_jointree (a
+    // FROM-less SELECT got an RTE_RESULT). M2 supports exactly one FROM item.
+    let joinlist = jointree_fromlist(root);
+    if joinlist.len() != 1 {
+        not_yet_reachable("query_planner: scan/join over multiple base relations");
     }
-    if !parse.rtable.is_empty() {
-        not_yet_reachable("query_planner: non-empty rangetable");
-    }
+    let Node::RangeTblRef(rtr) = &joinlist[0] else {
+        not_yet_reachable("query_planner: non-RangeTblRef jointree item");
+    };
+    let rti = rtr.rtindex as usize;
+    let rtekind = rte_kind(root, rti);
 
-    // Build the RelOptInfo for the dummy result relation directly. Its reltarget
-    // carries the (already const-folded) processed tlist, so build_path_tlist
-    // produces the final const TargetEntry list.
+    // Build the dummy result rel's / base rel's reltarget from the processed tlist
+    // (the const exprs or the SELECT-list Vars).
     let reltarget = make_pathtarget_from_tlist_nodes(root);
-    let mut final_rel = make_result_rel(reltarget);
 
-    // The only path is a trivial Result path. We use create_group_result_path
-    // (PG: a FROM-less SELECT is a degenerate-grouping case), jamming the
-    // jointree quals in unprocessed. M1 has no quals.
-    let reltarget_clone = final_rel
-        .reltarget
-        .clone()
-        .unwrap_or_else(|| not_yet_reachable("query_planner: missing reltarget"));
-    let grp = create_group_result_path(root, &final_rel, &reltarget_clone, Vec::new());
-    // The pathlist holds base `Path`s; createplan re-discriminates the Result by
-    // pathtype + pathtarget, and the GroupResultPath's `quals` are empty on the
-    // const path, so the embedded Path carries everything M1 needs.
-    crate::assert!(grp.quals.is_empty());
-    add_path(&mut final_rel, Box::new(grp.path));
-
-    // Select cheapest path (trivial: a single path).
-    set_cheapest(&mut final_rel);
+    let final_rel = match rtekind {
+        crate::nodes::parsenodes::RTEKind::RESULT => {
+            build_result_rel_with_path(root, reltarget)
+        }
+        crate::nodes::parsenodes::RTEKind::RELATION => {
+            build_scan_rel_with_path(root, rti, reltarget)
+        }
+        other => not_yet_reachable(&format!("query_planner: FROM item RTE kind {other:?}")),
+    };
 
     // We don't need generate_base_implied_equalities, but must pretend EC merging
     // is complete.
@@ -90,16 +79,82 @@ pub fn query_planner(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback)
     final_rel
 }
 
-/// Is the query's FROM clause empty (no base relations)? The M1 analyze/rewrite
-/// output represents a FROM-less SELECT as an empty FromExpr fromlist and an
-/// empty rangetable.
-fn jointree_is_empty(root: &PlannerInfo) -> bool {
+/// The FROM item RTE kind at RT index `rti`.
+fn rte_kind(root: &PlannerInfo, rti: usize) -> crate::nodes::parsenodes::RTEKind {
+    use crate::nodes::nodes::Node;
+    let Node::RangeTblEntry(rte) = &root.parse.rtable[rti - 1] else {
+        not_yet_reachable("query_planner: rangetable entry is not an RTE");
+    };
+    rte.rtekind
+}
+
+/// The jointree's fromlist (a clone of its RangeTblRef items).
+fn jointree_fromlist(root: &PlannerInfo) -> Vec<crate::nodes::nodes::Node> {
     use crate::nodes::nodes::Node;
     match root.parse.jointree.as_ref() {
-        Some(Node::FromExpr(f)) => f.fromlist.is_empty(),
-        // No jointree at all is also "empty FROM" for our purposes.
-        None => true,
+        Some(Node::FromExpr(f)) => f.fromlist.clone(),
+        None => Vec::new(),
         Some(_) => not_yet_reachable("query_planner: non-FromExpr jointree"),
+    }
+}
+
+/// Build the dummy RTE_RESULT rel and its single Result path (the FROM-less SELECT
+/// degenerate-grouping case). The reltarget carries the const tlist.
+fn build_result_rel_with_path(root: &mut PlannerInfo, reltarget: PathTarget) -> RelOptInfo {
+    let mut final_rel = make_result_rel(reltarget);
+    let reltarget_clone = final_rel
+        .reltarget
+        .clone()
+        .unwrap_or_else(|| not_yet_reachable("query_planner: missing reltarget"));
+    let grp = create_group_result_path(root, &final_rel, &reltarget_clone, Vec::new());
+    crate::assert!(grp.quals.is_empty());
+    add_path(&mut final_rel, Box::new(grp.path));
+    set_cheapest(&mut final_rel);
+    final_rel
+}
+
+/// Build the base RelOptInfo for the relation at RT index `rti`, fill it from the
+/// relcache (`get_relation_info`), set its reltarget (the SELECT-list Vars), and
+/// run `make_one_rel` to add the seqscan path and select the cheapest.
+fn build_scan_rel_with_path(
+    root: &mut PlannerInfo,
+    rti: usize,
+    reltarget: PathTarget,
+) -> RelOptInfo {
+    use crate::nodes::nodes::Node;
+
+    // setup_simple_rel_arrays: size the per-RT-index arrays to match the rtable.
+    setup_simple_rel_arrays(root);
+
+    // build_simple_rel: a base RelOptInfo for this rti, then get_relation_info.
+    let relid = {
+        let Node::RangeTblEntry(rte) = &root.parse.rtable[rti - 1] else {
+            not_yet_reachable("query_planner: rangetable entry is not an RTE");
+        };
+        rte.relid
+    };
+    let mut rel = make_base_rel(rti, reltarget);
+    crate::backend::optimizer::util::plancat::get_relation_info(root, relid, false, &mut rel);
+
+    // Park the rel in the simple_rel_array so make_one_rel can find it by index.
+    root.simple_rel_array[rti] = Some(Box::new(rel));
+
+    let joinlist = jointree_fromlist(root);
+    crate::backend::optimizer::path::allpaths::make_one_rel(root, &joinlist)
+}
+
+/// PG `setup_simple_rel_arrays`: size `simple_rel_array`/`simple_rte_array` to
+/// `rtable.len() + 1` (1-based RT indexes), filling the RTE array from the rtable.
+fn setup_simple_rel_arrays(root: &mut PlannerInfo) {
+    use crate::nodes::nodes::Node;
+    let n = root.parse.rtable.len() + 1;
+    root.simple_rel_array = (0..n).map(|_| None).collect();
+    root.simple_rte_array = (0..n).map(|_| None).collect();
+    for (i, rte) in root.parse.rtable.iter().enumerate() {
+        let Node::RangeTblEntry(rte) = rte else {
+            not_yet_reachable("setup_simple_rel_arrays: rangetable entry is not an RTE");
+        };
+        root.simple_rte_array[i + 1] = Some(rte.clone());
     }
 }
 
@@ -187,12 +242,21 @@ fn make_result_rel(reltarget: PathTarget) -> RelOptInfo {
     }
 }
 
+/// PG `build_simple_rel` (M2 subset): a base `RelOptInfo` for the relation at RT
+/// index `rti`, with reloptkind BASEREL, rtekind RELATION, and the given reltarget.
+/// `get_relation_info` fills the attribute/size fields afterward.
+fn make_base_rel(rti: usize, reltarget: PathTarget) -> RelOptInfo {
+    let mut rel = make_result_rel(reltarget);
+    rel.relid = rti as crate::nodes::primnodes::Index;
+    rel.rtekind = RTEKind::RELATION;
+    rel
+}
+
 /// PG `create_plan`: top-level driver to turn the chosen Path into a Plan tree.
 /// Returns the polymorphic top plan node (`Plan *` in C). For M1 the path is the
 /// Result path; create_plan_recurse builds the Result node, and
 /// apply_tlist_labeling stamps the original column names.
 pub fn create_plan(root: &mut PlannerInfo, best_path: &Path) -> crate::nodes::nodes::Node {
-    use crate::nodes::nodes::Node;
     crate::assert!(root.plan_params.is_empty());
 
     root.cur_outer_rels = None;
@@ -204,23 +268,21 @@ pub fn create_plan(root: &mut PlannerInfo, best_path: &Path) -> crate::nodes::no
     // Stamp the original column names / decoration onto the top-level tlist.
     apply_top_tlist_labeling(root, &mut plan);
 
-    // SS_attach_initplans: none on the M1 path.
+    // SS_attach_initplans: none on the M1/M2 path.
     crate::assert!(root.cur_outer_params.is_empty());
     root.plan_params = Vec::new();
 
-    Node::Result(Box::new(plan))
+    plan
 }
 
-/// `apply_tlist_labeling(plan->targetlist, root->processed_tlist)` over the
-/// Result node's plan targetlist. Both are `Vec<Node>` of TargetEntries.
-fn apply_top_tlist_labeling(root: &PlannerInfo, plan: &mut crate::nodes::plannodes::Result) {
-    use crate::nodes::nodes::Node;
-    let mut dest: Vec<_> = plan
-        .plan
-        .targetlist
+/// `apply_tlist_labeling(plan->targetlist, root->processed_tlist)` over the top
+/// plan node's targetlist (Result or SeqScan). Both are `Vec<Node>` of TargetEntries.
+fn apply_top_tlist_labeling(root: &PlannerInfo, plan: &mut crate::nodes::nodes::Node) {
+    let tlist = top_plan_tlist_mut(plan);
+    let mut dest: Vec<_> = tlist
         .iter()
         .map(|n| match n {
-            Node::TargetEntry(te) => (**te).clone(),
+            crate::nodes::nodes::Node::TargetEntry(te) => (**te).clone(),
             _ => not_yet_reachable("apply_tlist_labeling: plan tlist entry is not a TargetEntry"),
         })
         .collect();
@@ -228,13 +290,24 @@ fn apply_top_tlist_labeling(root: &PlannerInfo, plan: &mut crate::nodes::plannod
         .processed_tlist
         .iter()
         .map(|n| match n {
-            Node::TargetEntry(te) => (**te).clone(),
+            crate::nodes::nodes::Node::TargetEntry(te) => (**te).clone(),
             _ => not_yet_reachable("apply_tlist_labeling: processed_tlist entry is not a TargetEntry"),
         })
         .collect();
     crate::backend::optimizer::util::tlist::apply_tlist_labeling(&mut dest, &src);
-    plan.plan.targetlist = dest
+    *tlist = dest
         .into_iter()
-        .map(|te| Node::TargetEntry(Box::new(te)))
+        .map(|te| crate::nodes::nodes::Node::TargetEntry(Box::new(te)))
         .collect();
+}
+
+/// Borrow the top plan node's targetlist (the `Plan.targetlist` of whichever
+/// concrete plan node M1/M2 produces).
+fn top_plan_tlist_mut(plan: &mut crate::nodes::nodes::Node) -> &mut Vec<crate::nodes::nodes::Node> {
+    use crate::nodes::nodes::Node;
+    match plan {
+        Node::Result(r) => &mut r.plan.targetlist,
+        Node::SeqScan(s) => &mut s.scan.plan.targetlist,
+        _ => not_yet_reachable("apply_tlist_labeling: unexpected top plan node"),
+    }
 }

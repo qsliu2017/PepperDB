@@ -112,15 +112,19 @@ fn assign_collations_walker(
     context: &mut AssignCollationsContext,
 ) -> bool {
     match node {
-        // An uncollatable leaf: its result type carries no collation, so it does
-        // not influence its parent. PG's general default recurses first (no
-        // children here) then leaves collation = InvalidOid / COLLATE_NONE.
-        Node::Const(_) => {
+        // A leaf expression (a `Const` or a `Var`): no children to recurse into.
+        // Its result-type collation (if any) propagates to its parent with implicit
+        // strength; an uncollatable leaf (int/bool, collation InvalidOid) is a
+        // no-op. PG handles a Var/Const this way in the walker's leaf default.
+        Node::Const(_) | Node::Var(_) => {
             let collation = exprCollation(node);
-            // int4 (and every M1 const) is uncollatable: nothing to propagate.
-            crate::assert!(collation == InvalidOid);
-            context.collation = InvalidOid;
-            context.strength = CollateStrength::None;
+            if collation == InvalidOid {
+                context.collation = InvalidOid;
+                context.strength = CollateStrength::None;
+            } else {
+                context.collation = collation;
+                context.strength = CollateStrength::Implicit;
+            }
             context.location = -1;
             false
         }
