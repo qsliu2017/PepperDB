@@ -1262,8 +1262,13 @@ pub fn _bt_parallel_build_main(_seg: &mut dsm_segment, _toc: &mut shm_toc) {
     unimplemented!()
 }
 
-/// IndexRelationGetNumberOfAttributes(rel) -- rel->rd_index->indnatts. Reaches
-/// into RelationData not yet available in the skeleton.
-pub fn IndexRelationGetNumberOfAttributes(_rel: Relation) -> u16 {
-    unimplemented!()
+/// IndexRelationGetNumberOfAttributes(rel) -- rel->rd_index->indnatts.
+#[allow(
+    clippy::not_unsafe_ptr_arg_deref,
+    reason = "macro-style accessor over a live index Relation handle, faithful to the C macro"
+)]
+pub fn IndexRelationGetNumberOfAttributes(rel: Relation) -> u16 {
+    // SAFETY: `rel` is a live index relation whose rd_index points at its pg_index
+    // fixed part (set by relation_init_index_access_info / the index builder).
+    unsafe { (*rel).index_number_of_attributes() as u16 }
 }

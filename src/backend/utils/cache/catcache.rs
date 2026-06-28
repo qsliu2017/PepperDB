@@ -380,10 +380,15 @@ pub async fn search_cat_cache_populate(
     crate::utils::relcache::RelationClose(relation.get());
 
     if found.is_none() {
-        // Add a negative entry (absence is cached). Bootstrap mode skips this, but
-        // M2 has inval alive, so we cache it.
-        let entry = build_negative_entry(cache_id, &search);
-        insert_entry(cache_id, entry);
+        // Add a negative entry (absence is cached) -- but NOT during bootstrap
+        // processing: the catalogs are still being seeded, so a "miss" now may
+        // become a hit once the row is inserted, and a cached negative entry would
+        // wrongly shadow it (PG's SearchCatCacheMiss likewise skips negative
+        // caching while bootstrapping).
+        if !crate::miscadmin::is_bootstrap_processing_mode() {
+            let entry = build_negative_entry(cache_id, &search);
+            insert_entry(cache_id, entry);
+        }
         return None;
     }
     found
@@ -451,9 +456,13 @@ fn insert_entry(cache_id: usize, entry: CatCTup) -> Option<HeapTuple> {
 fn entry_tupdesc(cache_id: usize) -> Option<TupleDesc> {
     let reloid = with_cache(cache_id, |c| c.cc_reloid)?;
     // The relation was just opened by the caller and is in the relcache.
+    // RelationIdGetRelation bumps the refcount; balance it with RelationClose after
+    // cloning the (Arc) tuple descriptor so the pin is not leaked.
     let rel = crate::utils::relcache::RelationIdGetRelation(reloid)?;
     // SAFETY: cached relation.
-    unsafe { (*rel).rd_att.clone() }
+    let td = unsafe { (*rel).rd_att.clone() };
+    crate::utils::relcache::RelationClose(rel);
+    td
 }
 
 /// Construct a scan key for `attno` with `argument` (equality). The strategy/func

@@ -15,12 +15,22 @@
 //! until the relation-open + buffer-by-relation path exists; this module wires
 //! the page-level half that the higher levels build on.
 
+use std::sync::Arc;
+
 use crate::access::nbtree::{
     BTMetaPageData, BTPageGetOpaque, BTPageOpaqueData, BTREE_MAGIC, BTREE_METAPAGE,
-    BTREE_NOVAC_VERSION, BTREE_VERSION, BTP_LEAF, BTP_META, P_ISMETA,
+    BTREE_NOVAC_VERSION, BTREE_VERSION, BTP_LEAF, BTP_META, P_ISMETA, P_NONE,
 };
+use crate::backend::access::heap::heapam::SendPtr;
+use crate::common::relpath::ForkNumber;
 use crate::pg_config::BLCKSZ;
+use crate::shared_state::SharedState;
+use crate::storage::block::BlockNumber;
+use crate::storage::buf::Buffer;
+use crate::storage::bufmgr::{ReadBufferMode, P_NEW};
 use crate::storage::bufpage::{Page, SizeOfPageHeaderData};
+use crate::utils::rel::RelationData;
+use crate::utils::relcache::Relation;
 
 const fn maxalign(n: usize) -> usize {
     (n + 7) & !7
@@ -161,10 +171,166 @@ pub fn bt_init_root_leaf(page: &mut Page) {
     opaque.next = crate::access::nbtree::P_NONE;
 }
 
+// ===========================================================================
+// Relation-bound buffer access (the buffer-by-relation path).
+//
+// Async-lock discipline (rules.md s5/s8): the foundation buffer pool exposes a
+// page either read-only (`buffer_get_page`, `&Page`, under a content lock) or
+// mutably (`block_mut`, only while the exclusive content lock guard is held,
+// with NO `.await` in that window). The btree descends across pages; we cannot
+// hold a `parking_lot` content-lock guard across the `.await` of the next page
+// read. So the relation-bound helpers below COPY a page out under a brief lock
+// into an owned `Box<Page>` ([`bt_read_page_copy`]), drop the lock, and the
+// caller decides/descends on the copy; a writer re-takes the exclusive lock and
+// copies its finished page image back ([`bt_write_page`]) in one lock window.
+// This preserves the L&Y "decide under the page lock, then move on" semantics
+// without ever holding a sync guard across an await.
+// ===========================================================================
+
+/// The global buffer-pool slot index for a pinned shared buffer.
+fn buf_id_of(buffer: Buffer) -> i32 {
+    #[allow(clippy::expect_used, reason = "btree index pages are always shared (global) buffers")]
+    let id = buffer.as_global().expect("shared buffer expected") as i32;
+    id
+}
+
+/// A `Send` index-relation handle for async helpers that hold it across `.await`
+/// (the raw `*mut RelationData` is task-confined for the operation; same contract
+/// as the heap AM's `SendRelation`).
+pub type SendRelation = SendPtr<RelationData>;
+
+/// Pull the (Send) smgr handle + relpersistence out of an index relation.
+fn index_smgr(relation: Relation) -> (SendPtr<crate::storage::smgr::SmgrRelation>, i8) {
+    // SAFETY: live, open index relation held by the caller.
+    let rel: &mut RelationData = unsafe { &mut *relation };
+    let relpersistence = unsafe { (*rel.rd_rel).relpersistence };
+    (SendPtr(rel.smgr()), relpersistence)
+}
+
+/// `ReadBuffer(rel, blkno)` for an index: pin `blkno` of the index's main fork
+/// (async; no lock taken -- the caller locks via the copy/write helpers).
+pub async fn bt_read_buffer(
+    shared: &Arc<SharedState>,
+    relation: SendRelation,
+    blkno: BlockNumber,
+) -> Buffer {
+    let (smgr_ptr, relpersistence) = index_smgr(relation.0);
+    // SAFETY: relcache-owned smgr handle, valid while the rel is open; Send.
+    let smgr = unsafe { &mut *smgr_ptr.0 };
+    crate::backend::storage::buffer::bufmgr::read_buffer_common(
+        shared,
+        smgr,
+        relpersistence,
+        ForkNumber::MAIN_FORKNUM,
+        blkno,
+        ReadBufferMode::NORMAL,
+        None,
+    )
+    .await
+}
+
+/// Read an owned COPY of a pinned buffer's page under a brief share lock. The
+/// pin is kept (the caller releases it). Decoupling the page bytes from the lock
+/// is what lets the descent await the next read without holding a sync guard.
+pub fn bt_read_page_copy(shared: &Arc<SharedState>, buffer: Buffer) -> Box<Page> {
+    let pool = shared.buffers();
+    let _g = pool.content_share(buffer);
+    let page = pool.buffer_get_page(buffer);
+    let mut copy = Page::boxed_zeroed();
+    copy.as_mut_bytes().copy_from_slice(page.as_bytes());
+    copy
+}
+
+/// Copy a finished page image back into a pinned buffer under the exclusive
+/// content lock (one lock window, no await), mark it dirty, and (if `recptr` is
+/// given) set the page LSN. The caller WAL-logs first, then calls this.
+pub fn bt_write_page(shared: &Arc<SharedState>, buffer: Buffer, src: &Page, recptr: crate::access::xlogdefs::XLogRecPtr) {
+    let pool = shared.buffers();
+    let _g = pool.content_exclusive(buffer);
+    let buf_id = buf_id_of(buffer);
+    // SAFETY: exclusive content lock held -> sole writer to this slot.
+    let page = unsafe { pool.block_mut(buf_id) };
+    page.as_mut_bytes().copy_from_slice(src.as_bytes());
+    if recptr != crate::access::xlogdefs::INVALID_XLOG_REC_PTR {
+        page.set_lsn(recptr);
+    }
+    pool.mark_buffer_dirty(buffer);
+}
+
+/// `_bt_relbuf`: drop the pin on an index buffer (the content lock, if any, was
+/// released when the copy/write helper's guard dropped).
+pub fn bt_relbuf(shared: &Arc<SharedState>, buffer: Buffer) {
+    shared.buffers().release_buffer(buffer);
+}
+
+/// `_bt_allocbuf` (M2 core): obtain a fresh page for the index by extending the
+/// relation by one block. FSM recycling of deleted pages is deferred (M-vacuum);
+/// here we always extend, which is correct (just not space-optimal). Returns the
+/// pinned buffer for the new, zero-initialized, btree-pageinit'd page (NOT
+/// locked; the caller fills it via [`bt_write_page`]).
+pub async fn bt_allocbuf(shared: &Arc<SharedState>, relation: SendRelation) -> Buffer {
+    let buffer = {
+        let (smgr_ptr, relpersistence) = index_smgr(relation.0);
+        // SAFETY: relcache-owned smgr handle valid while rel open; Send.
+        let smgr = unsafe { &mut *smgr_ptr.0 };
+        crate::backend::storage::buffer::bufmgr::read_buffer_common(
+            shared,
+            smgr,
+            relpersistence,
+            ForkNumber::MAIN_FORKNUM,
+            P_NEW,
+            ReadBufferMode::ZERO_AND_LOCK,
+            None,
+        )
+        .await
+    };
+    // Initialize as an empty btree page under the exclusive lock.
+    {
+        let pool = shared.buffers();
+        let _g = pool.content_exclusive(buffer);
+        let buf_id = buf_id_of(buffer);
+        // SAFETY: exclusive content lock held -> sole writer.
+        let page = unsafe { pool.block_mut(buf_id) };
+        bt_pageinit(page, BLCKSZ as usize);
+        pool.mark_buffer_dirty(buffer);
+    }
+    buffer
+}
+
+/// `_bt_getroot` (read path, M2): return an owned copy of the current root page
+/// plus its block number, or `None` if the index has no root yet (empty index,
+/// read access). Reads the meta page, follows `btm_fastroot`. The write path
+/// (create the root on first insert) lives in nbtinsert via the metapage update.
+pub async fn bt_getroot_read(
+    shared: &Arc<SharedState>,
+    relation: SendRelation,
+) -> Option<(BlockNumber, Box<Page>)> {
+    let metabuf = bt_read_buffer(shared, relation, BTREE_METAPAGE).await;
+    let metapage = bt_read_page_copy(shared, metabuf);
+    bt_relbuf(shared, metabuf);
+    let metad = bt_getmeta(&metapage);
+    if metad.root == P_NONE {
+        return None;
+    }
+    let rootblk = metad.fastroot;
+    let rootbuf = bt_read_buffer(shared, relation, rootblk).await;
+    let rootpage = bt_read_page_copy(shared, rootbuf);
+    bt_relbuf(shared, rootbuf);
+    Some((rootblk, rootpage))
+}
+
+/// `_bt_metaversion`: `(heapkeyspace, allequalimage)` from the index's meta page.
+pub async fn bt_metaversion(shared: &Arc<SharedState>, relation: SendRelation) -> (bool, bool) {
+    let metabuf = bt_read_buffer(shared, relation, BTREE_METAPAGE).await;
+    let metapage = bt_read_page_copy(shared, metabuf);
+    bt_relbuf(shared, metabuf);
+    bt_metaversion_from_page(&metapage)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::access::nbtree::{P_ISLEAF, P_ISROOT, P_NONE};
+    use crate::access::nbtree::{P_ISLEAF, P_ISROOT};
 
     #[test]
     fn pageinit_sets_btree_special() {

@@ -307,14 +307,13 @@ pub trait Translate: IndexAm {
 // --- Functions in access/index/amapi.c ---
 
 /// Look up an index AM's routine from its handler function OID.
-pub fn GetIndexAmRoutine(_amhandler: Oid) -> IndexAmKind {
-    unimplemented!()
-}
+pub use crate::backend::access::index::amapi::get_index_am_routine as GetIndexAmRoutine;
 
 /// Look up an index AM's routine by AM OID; None on miss when `noerror`.
-pub fn GetIndexAmRoutineByAmId(_amoid: Oid, _noerror: bool) -> Option<IndexAmKind> {
-    unimplemented!()
-}
+pub use crate::backend::access::index::amapi::get_index_am_routine_by_am_id as GetIndexAmRoutineByAmId;
+
+/// `amvalidate(opclassoid)`: validate an opclass definition for its AM.
+pub use crate::backend::access::index::amapi::amvalidate;
 
 /// Translate an AM-specific strategy to a CompareType. None on miss when
 /// `missing_ok` (C's CompareType + missing_ok).

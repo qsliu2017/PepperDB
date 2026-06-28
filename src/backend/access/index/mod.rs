@@ -4,3 +4,5 @@
 //! under `src/access/` and re-export these via `pub use`.
 
 pub mod genam;
+pub mod amapi;
+pub mod indexam;

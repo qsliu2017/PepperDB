@@ -45,9 +45,12 @@ use crate::utils::snapshot::{Snapshot, SnapshotData};
 /// getnext / endscan).
 pub struct SysScanState {
     heap_rel: Relation,
-    /// Boxed heap scan descriptor (heap-scan arm). `None` once the index arm
-    /// lands (step 13-rest).
+    /// Boxed heap scan descriptor (heap-scan arm). `None` when the index arm is in
+    /// use (`iscan` is `Some`).
     hscan: Option<Box<HeapScanDescData>>,
+    /// Index-scan arm (the index-scan path, used when the catalog has a usable
+    /// unique index -- Decision 3). `None` on the heap-scan path.
+    iscan: Option<Box<crate::backend::access::index::indexam::IndexScanState>>,
     /// Registered catalog snapshot for the scan (kept alive for its lifetime).
     snapshot: Snapshot,
     /// The scan keys as (heap attno, equality argument) pairs. `ScanKeyData`
@@ -122,6 +125,50 @@ pub fn systable_beginscan(
     Box::new(SysScanState {
         heap_rel: heap_relation,
         hscan: Some(hscan),
+        iscan: None,
+        snapshot: snap,
+        keys: key_pairs,
+        cur: None,
+    })
+}
+
+/// `systable_beginscan` (INDEX path, Decision 3): scan a catalog through its unique
+/// btree index. `index_relation` must be an open, built index over `heap_relation`
+/// whose key columns map 1:1 to the heap key columns named in `keys` (the catalog
+/// indexes are plain column indexes). Equality keys are pushed into the index scan;
+/// `systable_getnext` then fetches each matching heap tuple via `index_fetch_heap`.
+///
+/// This is the faithful path PG takes once `criticalRelcachesBuilt`; the heap-scan
+/// `systable_beginscan` stays the fallback used before the critical indexes exist.
+#[must_use]
+pub fn systable_beginscan_indexed(
+    shared: &Arc<SharedState>,
+    heap_relation: Relation,
+    index_relation: Relation,
+    snapshot: Snapshot,
+    keys: &[ScanKeyData],
+) -> SysScanDesc {
+    use crate::backend::access::index::indexam::{index_beginscan, index_rescan};
+
+    // SAFETY: caller passes a live, open relation.
+    let relid = unsafe { (*heap_relation).rd_id };
+    let snap = snapshot.map_or_else(|| GetCatalogSnapshot(shared, relid), Some);
+
+    let mut iscan = index_beginscan(heap_relation, index_relation, snap.clone());
+    // The catalog index columns are 1:1 with the heap key columns in `keys`; remap
+    // each heap attno to its index column position (1-based, in key order).
+    let index_keys: Vec<(i32, Datum)> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, k)| ((i + 1) as i32, k.argument))
+        .collect();
+    index_rescan(&mut iscan, index_keys);
+
+    let key_pairs: Vec<(i16, Datum)> = keys.iter().map(|k| (k.attno, k.argument)).collect();
+    Box::new(SysScanState {
+        heap_rel: heap_relation,
+        hscan: None,
+        iscan: Some(iscan),
         snapshot: snap,
         keys: key_pairs,
         cur: None,
@@ -146,10 +193,30 @@ pub async fn systable_getnext(shared: &Arc<SharedState>, sysscan: &mut SysScanSt
     let tupdesc = unsafe { (*sysscan.heap_rel).rd_att.clone() }
         .unwrap_or_else(|| unreachable!("open catalog has a tuple descriptor"));
 
+    // INDEX path (Decision 3): drive the btree scan + heap fetch. The index already
+    // applies the equality keys, but we re-check post-fetch (the catalog key types
+    // compare directly) for safety against any non-key columns.
+    if sysscan.iscan.is_some() {
+        let iscan = sysscan.iscan.as_mut().unwrap_or_else(|| unreachable!());
+        while let Some(mut tup) =
+            crate::backend::access::index::indexam::index_getnext_heaptuple(shared, iscan, ScanDirection::Forward).await
+        {
+            let matched = scankeys_match(&tup, &tupdesc, &sysscan.keys);
+            if matched {
+                let ptr: *mut HeapTupleData = std::ptr::from_mut::<HeapTupleData>(tup.as_mut());
+                sysscan.cur = Some(tup);
+                return Some(ptr);
+            }
+            // Else free and continue (index_getnext_heaptuple returns an owned copy).
+            heap_freetuple(*tup);
+        }
+        return None;
+    }
+
     let hscan = sysscan
         .hscan
         .as_mut()
-        .unwrap_or_else(|| unreachable!("step-14 systable scan always has a heap scan"));
+        .unwrap_or_else(|| unreachable!("systable scan has a heap or index arm"));
 
     while let Some(tup) = heap_getnext(shared, hscan, ScanDirection::Forward).await {
         // SAFETY: tup points into the pinned scan buffer; valid until next getnext.
@@ -175,6 +242,9 @@ pub fn systable_endscan(shared: &Arc<SharedState>, sysscan: &mut SysScanState) {
     }
     if let Some(mut hscan) = sysscan.hscan.take() {
         heap_endscan(shared, &mut hscan);
+    }
+    if let Some(iscan) = sysscan.iscan.take() {
+        crate::backend::access::index::indexam::index_endscan(iscan);
     }
     // The snapshot Arc is released when `sysscan.snapshot` drops.
     sysscan.snapshot = None;

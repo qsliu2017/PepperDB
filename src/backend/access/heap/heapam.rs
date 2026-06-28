@@ -55,7 +55,7 @@ use crate::storage::bufmgr::InvalidBuffer;
 use crate::storage::off::{OffsetNumber, FIRST_OFFSET_NUMBER};
 use crate::utils::rel::RelationData;
 use crate::utils::relcache::Relation;
-use crate::utils::snapshot::{SnapshotData, SnapshotType};
+use crate::utils::snapshot::{Snapshot, SnapshotData, SnapshotType};
 
 pub use crate::access::heapam::{
     HeapScanDescData, HEAP_INSERT_FROZEN, HEAP_INSERT_NO_LOGICAL, HEAP_INSERT_SKIP_FSM,
@@ -567,6 +567,16 @@ fn buf_id_of(buffer: Buffer) -> i32 {
     id
 }
 
+/// A zeroed (invalid) item pointer.
+fn zero_item_pointer() -> crate::storage::itemptr::ItemPointerData {
+    let mut ip = crate::storage::itemptr::ItemPointerData {
+        blkid: crate::storage::block::BlockIdData { hi: 0, lo: 0 },
+        posid: 0,
+    };
+    ip.set_invalid();
+    ip
+}
+
 /// `heap_prepare_pagescan` (M2): collect the visible-tuple offsets of the current
 /// page into `scan.vistuples`. The per-tuple MVCC visibility test runs with the
 /// SHARE content lock dropped (it `.await`s clog/subtrans); only the pin is held
@@ -636,6 +646,93 @@ unsafe fn read_header(item: &[u8]) -> HeapTupleHeaderData {
 /// (M6: index fetch / row-version fetch).
 pub fn heap_fetch() {
     unimplemented!("heap_fetch: M6 (index fetch / row-version)")
+}
+
+/// Fetch the heap tuple at `tid` from `relation`, applying the MVCC visibility
+/// test against `snapshot`, returning an OWNED copy (header+data) or `None` if the
+/// line pointer is unused or the tuple is invisible. This is the table-AM index
+/// fetch primitive (`table_index_fetch_tuple` -> heap) used by the index scan +
+/// systable index path; it reads one heap block, tests visibility with the
+/// content lock dropped (only the pin held, like the page-at-a-time scan), and
+/// copies the bytes out so the caller need not hold a pin.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: the raw Relation handle is task-confined for this fetch; the future never migrates the pointee between tasks (same contract as the heap scan)"
+)]
+pub async fn heap_fetch_tid(
+    shared: &Arc<SharedState>,
+    relation: Relation,
+    tid: &crate::storage::itemptr::ItemPointerData,
+    snapshot: Snapshot,
+) -> Option<Box<HeapTupleData>> {
+    let block = tid.block_number();
+    let offnum = tid.offset_number();
+
+    let buffer = read_relation_block(shared, SendPtr(relation), block).await;
+
+    // Copy the candidate header out under a brief share lock, drop it, test
+    // visibility (awaits), then copy the full tuple bytes under another brief lock.
+    let header_copy = {
+        let pool = shared.buffers();
+        let _g = pool.content_share(buffer);
+        let page = pool.buffer_get_page(buffer);
+        if offnum == 0 || offnum > page.get_max_offset_number() {
+            None
+        } else {
+            let item_id = page.get_item_id(offnum);
+            if item_id.is_normal() {
+                let item = page.get_item(&item_id);
+                // SAFETY: a normal heap item begins with a HeapTupleHeaderData.
+                Some(unsafe { read_header(item) })
+            } else {
+                None
+            }
+        }
+    };
+
+    let Some(hdr) = header_copy else {
+        shared.buffers().release_buffer(buffer);
+        return None;
+    };
+
+    let snap: &SnapshotData = snapshot
+        .as_deref()
+        .unwrap_or_else(|| unreachable!("heap_fetch_tid requires a snapshot"));
+    let visible = heap_tuple_satisfies_mvcc(shared, &hdr, snap).await;
+    if !visible {
+        shared.buffers().release_buffer(buffer);
+        return None;
+    }
+
+    // Copy the full tuple out under a brief share lock, via heap_copytuple so the
+    // owned body is managed (heap_freetuple frees it). Build a transient
+    // HeapTupleData over the page item, then copy.
+    let result = {
+        let pool = shared.buffers();
+        let _g = pool.content_share(buffer);
+        let page = pool.buffer_get_page(buffer);
+        let item_id = page.get_item_id(offnum);
+        let item = page.get_item(&item_id);
+        // SAFETY: a normal heap item's bytes begin with a HeapTupleHeaderData; the
+        // page stays pinned and content-locked for this borrow.
+        #[allow(
+            clippy::cast_ptr_alignment,
+            reason = "sound overlay: the page is 8-aligned and PageAddItem MAXALIGNs item offsets"
+        )]
+        let t_data = item.as_ptr().cast::<HeapTupleHeaderData>().cast_mut();
+        let mut transient = HeapTupleData {
+            t_len: item.len() as u32,
+            t_self: zero_item_pointer(),
+            t_tableOid: unsafe { (*relation).rd_id },
+            t_data,
+        };
+        transient.t_self.set(block, offnum);
+        // SAFETY: transient is a valid tuple over the pinned, locked page.
+        Box::new(unsafe { crate::backend::access::common::heaptuple::heap_copytuple(&transient) })
+    };
+
+    shared.buffers().release_buffer(buffer);
+    Some(result)
 }
 
 /// `heap_update`: grow guard (M8).

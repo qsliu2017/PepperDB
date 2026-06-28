@@ -4,5 +4,9 @@
 //! (`nbtree.rs`, `nbtutils` decls, ...) and re-export these via `pub use`.
 
 pub mod nbtcompare;
+pub mod nbtinsert;
 pub mod nbtpage;
 pub mod nbtsearch;
+pub mod nbtsort;
+pub mod nbtree;
+pub mod nbtutils;

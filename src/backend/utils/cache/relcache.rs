@@ -379,28 +379,164 @@ async fn relation_build_tuple_desc(
 // RelationInitIndexAccessInfo (what step-13 btree consumes)
 // ---------------------------------------------------------------------------
 
-/// `RelationInitIndexAccessInfo`: load an index relation's pg_index row and
-/// resolve its per-column opclass support procedures, filling the fields the
-/// btree index AM consumes: `rd_indoption`, `rd_opfamily`, `rd_opcintype`,
-/// `rd_support`, `rd_supportinfo`, `rd_indcollation`.
+/// btree's `amsupport`: the number of support procedures per opclass column.
+/// Mirrors `BTNProcs` (nbtree.h). The relcache arrays for a btree index are
+/// sized `indnatts * BT_AMSUPPORT`.
+pub const BT_AMSUPPORT: usize = crate::access::nbtree::BTNProcs as usize;
+
+/// `RelationInitIndexAccessInfo`: allocate an index relation's per-column access
+/// arrays (`rd_indoption`, `rd_opfamily`, `rd_opcintype`, `rd_support`,
+/// `rd_supportinfo`, `rd_indcollation`) and zero them, sized from the index's
+/// pg_index row (`rd_index`).
 ///
-/// STAGED (step 13-rest): the support-proc resolution reads pg_index + pg_opclass
-/// via syscache and looks up the AM support routines through fmgr. That machinery
-/// (the btree `amsupport` count + `index_getprocinfo`) lands with the btree
-/// completion. Until then this allocates the per-column arrays as empty/null so
-/// the descriptor is well-formed; the btree step fills them. Documented here so
-/// the consumer contract is explicit.
+/// The support-proc OIDs (`rd_support`) and per-column metadata are filled by
+/// [`index_init_opclass_support`] from each key column's opclass. The C path
+/// reads pg_opclass + pg_amproc via syscache inside `IndexSupportInitialize`; in
+/// the M2 port the catalog seed rows are not yet loaded into a scannable heap
+/// (that is step 15: `index_create` + bootstrap seeding), so callers that build
+/// an index relation (tests, and step-15 `index_create`) drive
+/// `index_init_opclass_support` with the column opclass OIDs directly. Once the
+/// catalogs are populated the syscache-driven resolution can supersede it.
+///
+/// `rd_supportinfo` entries start with `fn_oid = InvalidOid`; `index_getprocinfo`
+/// fills each on first use via `fmgr_info` (the builtin fast path resolves the
+/// `bt*cmp` comparators).
 pub fn relation_init_index_access_info(relation: Relation) {
     if relation.is_null() {
         return;
     }
     // SAFETY: live index relation.
     let rel = unsafe { &mut *relation };
-    // The arrays (rd_opfamily/rd_opcintype/rd_support/rd_supportinfo/rd_indoption/
-    // rd_indcollation) stay null until step 13-rest resolves them from pg_index +
-    // pg_opclass + the AM support procs. rd_indam (the btree IndexAmRoutine) is
-    // likewise wired then. Mark index info not yet valid.
-    rel.rd_indexvalid = false;
+    if rel.rd_index.is_null() {
+        // No pg_index row attached yet: leave the descriptor index-invalid; the
+        // builder will attach rd_index and call index_init_opclass_support.
+        rel.rd_indexvalid = false;
+        return;
+    }
+    // SAFETY: rd_index points at this index's pg_index fixed part.
+    let (indnatts, indnkeyatts) = unsafe {
+        ((*rel.rd_index).indnatts as usize, (*rel.rd_index).indnkeyatts as usize)
+    };
+
+    alloc_index_arrays(rel, indnatts, indnkeyatts);
+    rel.rd_indexvalid = true;
+}
+
+/// Allocate (boxed-leak) the zeroed per-column index-access arrays on `rel`. The
+/// support arrays span `indnatts` columns (included columns have no opclass, so
+/// opclass arrays span only `indnkeyatts`). Idempotent: frees prior arrays.
+fn alloc_index_arrays(rel: &mut RelationData, indnatts: usize, indnkeyatts: usize) {
+    use crate::c::RegProcedure;
+    use crate::fmgr::FmgrInfo;
+    use crate::postgres_ext::InvalidOid;
+
+    free_index_arrays(rel);
+
+    let nsupport = indnatts * BT_AMSUPPORT;
+    rel.rd_support = leak_slice::<RegProcedure>(vec![InvalidOid; nsupport]);
+    rel.rd_supportinfo = leak_slice::<FmgrInfo>(
+        (0..nsupport).map(|_| zero_fmgr_info()).collect::<Vec<_>>(),
+    );
+    rel.rd_opfamily = leak_slice::<Oid>(vec![InvalidOid; indnkeyatts]);
+    rel.rd_opcintype = leak_slice::<Oid>(vec![InvalidOid; indnkeyatts]);
+    rel.rd_indcollation = leak_slice::<Oid>(vec![InvalidOid; indnkeyatts]);
+    rel.rd_indoption = leak_slice::<i16>(vec![0i16; indnkeyatts]);
+}
+
+/// Free the boxed index-access arrays previously allocated by [`alloc_index_arrays`].
+fn free_index_arrays(rel: &mut RelationData) {
+    use crate::c::RegProcedure;
+    use crate::fmgr::FmgrInfo;
+    // SAFETY: each pointer was produced by leak_slice (Box::into_raw of a slice's
+    // first element with a known length recorded by the consumer); here we only
+    // null them out -- the relcache leaks index arrays for a relation's lifetime
+    // (PG keeps them in rd_indexcxt, freed on relcache flush, which M2 omits).
+    rel.rd_support = core::ptr::null_mut::<RegProcedure>();
+    rel.rd_supportinfo = core::ptr::null_mut::<FmgrInfo>();
+    rel.rd_opfamily = core::ptr::null_mut();
+    rel.rd_opcintype = core::ptr::null_mut();
+    rel.rd_indcollation = core::ptr::null_mut();
+    rel.rd_indoption = core::ptr::null_mut();
+}
+
+/// Leak a `Vec<T>` as a raw element pointer (the relcache owns index arrays for
+/// the entry's lifetime; M2 does not flush the relcache, so this is a deliberate
+/// long-lived allocation mirroring PG's `rd_indexcxt`).
+fn leak_slice<T>(v: Vec<T>) -> *mut T {
+    let boxed = v.into_boxed_slice();
+    Box::into_raw(boxed).cast::<T>()
+}
+
+/// `IndexSupportInitialize` (M2 direct form): fill an index relation's support
+/// arrays for each key column from the column's btree opclass. `opclasses[i]` is
+/// the opclass OID for key column `i+1`; `collations[i]` its collation;
+/// `indoption[i]` its DESC/NULLS_FIRST flags. The arrays must already be
+/// allocated (via [`relation_init_index_access_info`]).
+///
+/// The comparator (`BTORDER_PROC`) OID is looked up from the opclass via
+/// [`btree_opclass_cmp_proc`]; the other support slots stay `InvalidOid` (optional
+/// for M2). This is the data `IndexSupportInitialize` reads from pg_amproc; the
+/// seed mapping is encoded in [`btree_opclass_cmp_proc`].
+pub fn index_init_opclass_support(
+    relation: Relation,
+    opclasses: &[Oid],
+    collations: &[Oid],
+    indoption: &[i16],
+) {
+    // SAFETY: live index relation with arrays allocated.
+    let rel = unsafe { &mut *relation };
+    debug_assert!(!rel.rd_support.is_null(), "call relation_init_index_access_info first");
+    let indnkeyatts = opclasses.len();
+    #[allow(
+        clippy::needless_range_loop,
+        reason = "index drives writes into several parallel raw relcache arrays by column number"
+    )]
+    for i in 0..indnkeyatts {
+        let opclass = opclasses[i];
+        // SAFETY: arrays sized >= indnkeyatts by alloc_index_arrays.
+        unsafe {
+            *rel.rd_opcintype.add(i) = btree_opclass_intype(opclass);
+            *rel.rd_indcollation.add(i) = collations.get(i).copied().unwrap_or(crate::postgres_ext::InvalidOid);
+            *rel.rd_indoption.add(i) = indoption.get(i).copied().unwrap_or(0);
+            // rd_support layout: column-major, BT_AMSUPPORT slots per column.
+            let base = i * BT_AMSUPPORT;
+            *rel.rd_support.add(base + (crate::access::nbtree::BTORDER_PROC as usize - 1)) =
+                btree_opclass_cmp_proc(opclass);
+        }
+    }
+    rel.rd_indexvalid = true;
+}
+
+/// The `BTORDER_PROC` (comparator) function OID for a builtin btree opclass OID.
+/// This is the M2 stand-in for the pg_amproc syscache lookup in
+/// `IndexSupportInitialize`/`LookupOpclassInfo`: the same `(opclass -> cmp proc)`
+/// mapping the seed data encodes, resolved statically for the builtin opclasses
+/// the M2 catalogs use.
+#[must_use]
+pub fn btree_opclass_cmp_proc(opclass: Oid) -> Oid {
+    use crate::utils::fmgroids as f;
+    match opclass.0 {
+        1978 => f::F_BTINT4CMP, // INT4_BTREE_OPS_OID
+        1979 => f::F_BTINT2CMP, // INT2_BTREE_OPS_OID
+        3124 => f::F_BTINT8CMP, // INT8_BTREE_OPS_OID
+        1981 => f::F_BTOIDCMP,  // OID_BTREE_OPS_OID
+        3126 => f::F_BTTEXTCMP, // TEXT_BTREE_OPS_OID
+        _ => crate::postgres_ext::InvalidOid,
+    }
+}
+
+/// The opclass input type for a builtin btree opclass OID (the `opcintype` the
+/// syscache would return). M2 builtin set.
+#[must_use]
+fn btree_opclass_intype(opclass: Oid) -> Oid {
+    match opclass.0 {
+        1978 => Oid(23),  // int4
+        1979 => Oid(21),  // int2
+        3124 => Oid(20),  // int8
+        1981 => Oid(26),  // oid
+        3126 => Oid(25),  // text
+        _ => crate::postgres_ext::InvalidOid,
+    }
 }
 
 // ---------------------------------------------------------------------------
