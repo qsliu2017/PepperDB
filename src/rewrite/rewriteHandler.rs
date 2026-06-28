@@ -7,9 +7,8 @@ use crate::nodes::parsenodes::Query;
 use crate::postgres_ext::Oid;
 use crate::utils::relcache::Relation;
 
-pub fn query_rewrite(_parsetree: Box<Query>) -> Vec<Query> {
-    unimplemented!()
-}
+/// PG `QueryRewrite`.
+pub use crate::backend::rewrite::rewriteHandler::query_rewrite as QueryRewrite;
 
 pub fn acquire_rewrite_locks(
     _parsetree: &mut Query,
