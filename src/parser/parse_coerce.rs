@@ -46,18 +46,8 @@ pub fn TypeCategory(_ty: Oid) -> TYPCATEGORY {
     unimplemented!()
 }
 
-pub fn coerce_to_target_type(
-    _pstate: &mut ParseState,
-    _expr: Option<Box<Node>>,
-    _exprtype: Oid,
-    _targettype: Oid,
-    _targettypmod: i32,
-    _ccontext: CoercionContext,
-    _cformat: CoercionForm,
-    _location: i32,
-) -> Option<Box<Node>> {
-    unimplemented!()
-}
+/// PG `coerce_to_target_type`. See `crate::backend::parser::parse_coerce`.
+pub use crate::backend::parser::parse_coerce::coerce_to_target_type;
 
 pub fn can_coerce_type(
     _nargs: i32,
@@ -68,18 +58,8 @@ pub fn can_coerce_type(
     unimplemented!()
 }
 
-pub fn coerce_type(
-    _pstate: &mut ParseState,
-    _node: Box<Node>,
-    _input_type_id: Oid,
-    _target_type_id: Oid,
-    _target_type_mod: i32,
-    _ccontext: CoercionContext,
-    _cformat: CoercionForm,
-    _location: i32,
-) -> Box<Node> {
-    unimplemented!()
-}
+/// PG `coerce_type`. See `crate::backend::parser::parse_coerce`.
+pub use crate::backend::parser::parse_coerce::coerce_type;
 
 pub fn coerce_to_domain(
     _arg: Box<Node>,

@@ -256,13 +256,11 @@ pub struct ParseCallbackState {
     pub errcallback: ErrorContextCallback,
 }
 
-pub fn make_parsestate(_parent_parse_state: Option<Box<ParseState>>) -> Box<ParseState> {
-    unimplemented!()
-}
+/// PG `make_parsestate`. See `crate::backend::parser::parse_node`.
+pub use crate::backend::parser::parse_node::make_parsestate;
 
-pub fn free_parsestate(_pstate: &mut ParseState) {
-    unimplemented!()
-}
+/// PG `free_parsestate`. See `crate::backend::parser::parse_node`.
+pub use crate::backend::parser::parse_node::free_parsestate;
 
 pub fn parser_errposition(_pstate: &mut ParseState, _location: i32) -> i32 {
     unimplemented!()
@@ -296,6 +294,5 @@ pub fn transform_container_subscripts(
     unimplemented!()
 }
 
-pub fn make_const(_pstate: &mut ParseState, _aconst: &A_Const) -> Box<Const> {
-    unimplemented!()
-}
+/// PG `make_const`. See `crate::backend::parser::parse_node`.
+pub use crate::backend::parser::parse_node::make_const;

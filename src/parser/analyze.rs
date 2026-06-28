@@ -18,15 +18,8 @@ pub type PostParseAnalyzeHookType =
 
 pub static mut post_parse_analyze_hook: Option<PostParseAnalyzeHookType> = None;
 
-pub fn parse_analyze_fixedparams(
-    _parse_tree: &RawStmt,
-    _source_text: &str,
-    _param_types: &[Oid],
-    _num_params: i32,
-    _query_env: Option<&mut QueryEnvironment>,
-) -> Box<Query> {
-    unimplemented!()
-}
+/// PG `parse_analyze_fixedparams`. See `crate::backend::parser::analyze`.
+pub use crate::backend::parser::analyze::parse_analyze_fixedparams;
 
 pub fn parse_analyze_varparams(
     _parse_tree: &RawStmt,
@@ -83,13 +76,12 @@ pub fn transformReturningClause(
     unimplemented!()
 }
 
-pub fn transformTopLevelStmt(_pstate: &mut ParseState, _parse_tree: &RawStmt) -> Box<Query> {
-    unimplemented!()
-}
+/// PG `transformTopLevelStmt`. See `crate::backend::parser::analyze`.
+pub use crate::backend::parser::analyze::transformTopLevelStmt;
 
-pub fn transformStmt(_pstate: &mut ParseState, _parse_tree: Box<Node>) -> Box<Query> {
-    unimplemented!()
-}
+/// PG `transformStmt`. See `crate::backend::parser::analyze`.
+/// (`parseTree` is `Node *` in C -- a borrow -- so `&Node` here.)
+pub use crate::backend::parser::analyze::transformStmt;
 
 pub fn stmt_requires_parse_analysis(_parse_tree: &RawStmt) -> bool {
     unimplemented!()

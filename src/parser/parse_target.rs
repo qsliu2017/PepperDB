@@ -8,13 +8,8 @@ use crate::nodes::primnodes::{CoercionContext, TargetEntry, Var};
 use crate::parser::parse_node::{ParseExprKind, ParseState};
 use crate::postgres_ext::Oid;
 
-pub fn transformTargetList(
-    _pstate: &mut ParseState,
-    _targetlist: Vec<Box<Node>>,
-    _expr_kind: ParseExprKind,
-) -> Vec<Box<Node>> {
-    unimplemented!()
-}
+/// PG `transformTargetList`. See `crate::backend::parser::parse_target`.
+pub use crate::backend::parser::parse_target::transformTargetList;
 
 pub fn transformExpressionList(
     _pstate: &mut ParseState,
@@ -33,16 +28,9 @@ pub fn markTargetListOrigins(_pstate: &mut ParseState, _targetlist: &mut [Box<No
     unimplemented!()
 }
 
-pub fn transformTargetEntry(
-    _pstate: &mut ParseState,
-    _node: Box<Node>,
-    _expr: Option<Box<Node>>,
-    _expr_kind: ParseExprKind,
-    _colname: Option<String>,
-    _resjunk: bool,
-) -> Box<TargetEntry> {
-    unimplemented!()
-}
+/// PG `transformTargetEntry`. See `crate::backend::parser::parse_target`.
+/// (`node` is `Node *` in C -- nullable -- so `Option<Box<Node>>` here.)
+pub use crate::backend::parser::parse_target::transformTargetEntry;
 
 pub fn transformAssignedExpr(
     _pstate: &mut ParseState,
@@ -96,9 +84,8 @@ pub fn expandRecordVariable(_pstate: &mut ParseState, _var: &Var, _levelsup: i32
     unimplemented!()
 }
 
-pub fn FigureColname(_node: &Node) -> String {
-    unimplemented!()
-}
+/// PG `FigureColname`. See `crate::backend::parser::parse_target`.
+pub use crate::backend::parser::parse_target::FigureColname;
 
 pub fn FigureIndexColname(_node: &Node) -> String {
     unimplemented!()

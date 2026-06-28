@@ -28,6 +28,7 @@ extern {
     enum Token {
         // keywords by canonical spelling (scan.rs resolves words against kwlist)
         "SELECT"  => Token::Keyword("select"),
+        "AS"      => Token::Keyword("as"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -140,9 +141,14 @@ TargetList: Vec<NodeBox> = {
     <mut list:TargetList> "," <t:TargetEl> => { list.push(t); list },
 };
 
-// gram.y `target_el`. The AS/BareColLabel aliasing alternatives arrive with the
-// keyword/label machinery; '*' and a bare expression are the M1 reachable forms.
+// gram.y `target_el`. '*', a bare expression, and `a_expr AS ColLabel` are the
+// M1 reachable forms; the bare-label (no-AS) and full ColLabel keyword set arrive
+// with the keyword/label machinery. ColLabel is restricted to IDENT for now.
 TargetEl: NodeBox = {
+    <v:AExpr> "AS" <n:"IDENT"> => {
+        let rt = ResTarget { name: Some(n), indirection: Vec::new(), val: Some(v), location: -1 };
+        Box::new(Node::ResTarget(Box::new(rt)))
+    },
     <v:AExpr> => {
         let rt = ResTarget { name: None, indirection: Vec::new(), val: Some(v), location: -1 };
         Box::new(Node::ResTarget(Box::new(rt)))

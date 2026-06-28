@@ -5,22 +5,14 @@ use crate::nodes::parsenodes::Query;
 use crate::parser::parse_node::ParseState;
 use crate::postgres_ext::Oid;
 
-pub fn assign_query_collations(_pstate: &mut ParseState, _query: &mut Query) {
-    unimplemented!()
-}
+/// PG `assign_query_collations`. See `crate::backend::parser::parse_collate`.
+pub use crate::backend::parser::parse_collate::assign_query_collations;
 
-pub fn assign_list_collations(_pstate: &mut ParseState, _exprs: &mut [Box<Node>]) {
-    unimplemented!()
-}
+/// PG `assign_list_collations`. See `crate::backend::parser::parse_collate`.
+pub use crate::backend::parser::parse_collate::assign_list_collations;
 
-pub fn assign_expr_collations(_pstate: &mut ParseState, _expr: &mut Node) {
-    unimplemented!()
-}
+/// PG `assign_expr_collations`. See `crate::backend::parser::parse_collate`.
+pub use crate::backend::parser::parse_collate::assign_expr_collations;
 
-pub fn select_common_collation(
-    _pstate: &mut ParseState,
-    _exprs: &[Box<Node>],
-    _none_ok: bool,
-) -> Oid {
-    unimplemented!()
-}
+/// PG `select_common_collation`. See `crate::backend::parser::parse_collate`.
+pub use crate::backend::parser::parse_collate::select_common_collation;
