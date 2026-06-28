@@ -16,3 +16,6 @@ Cargo.lock
 # SLRU test artifacts (tests should use tempdirs - TODO)
 /pg_xact/
 /pg_subtrans/
+
+ai/harness/
+ai/tmp/
