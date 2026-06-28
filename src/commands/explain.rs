@@ -52,7 +52,7 @@ pub static mut explain_per_plan_hook: Option<ExplainPerPlanHook> = None;
 /// `PlanState` lives in nodes::execnodes (level 5); use Node placeholder.
 pub type ExplainPerNodeHook = fn(
     planstate: &mut Node,
-    ancestors: &[Box<Node>],
+    ancestors: &[Node],
     relationship: &str,
     plan_name: &str,
     es: &mut ExplainState,

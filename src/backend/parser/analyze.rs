@@ -209,17 +209,17 @@ fn transformSelectStmt(pstate: &mut ParseState, stmt: &SelectStmt) -> Box<Query>
 
     qry.rtable = std::mem::take(&mut pstate.p_rtable)
         .into_iter()
-        .map(|rte| Box::new(Node::RangeTblEntry(Box::new(rte))))
+        .map(|rte| Node::RangeTblEntry(Box::new(rte)))
         .collect();
     qry.rteperminfos = std::mem::take(&mut pstate.p_rteperminfos)
         .into_iter()
-        .map(|pi| Box::new(Node::RTEPermissionInfo(Box::new(pi))))
+        .map(|pi| Node::RTEPermissionInfo(Box::new(pi)))
         .collect();
     // jointree = makeFromExpr(p_joinlist, qual). For M1 the join list and qual are
     // both empty (table-less SELECT, no WHERE).
     let joinlist = std::mem::take(&mut pstate.p_joinlist);
     qry.jointree =
-        Some(Box::new(Node::FromExpr(Box::new(crate::nodes::makefuncs::makeFromExpr(joinlist, None)))));
+        Some(Node::FromExpr(Box::new(crate::nodes::makefuncs::makeFromExpr(joinlist, None))));
 
     qry.hasSubLinks = pstate.p_has_sub_links;
     qry.hasWindowFuncs = pstate.p_has_window_funcs;
@@ -246,7 +246,7 @@ mod tests {
     fn raw(s: &str) -> RawStmt {
         let mut list = crate::backend::parser::parser::raw_parser(s, RawParseMode::Default);
         assert_eq!(list.len(), 1, "expected exactly one statement");
-        let Node::RawStmt(rs) = *list.remove(0) else { panic!("not a RawStmt") };
+        let Node::RawStmt(rs) = list.remove(0) else { panic!("not a RawStmt") };
         *rs
     }
 
@@ -256,13 +256,13 @@ mod tests {
 
     /// Pull the i-th TargetEntry out of a Query.
     fn tle(q: &Query, i: usize) -> &crate::nodes::primnodes::TargetEntry {
-        let Node::TargetEntry(te) = &*q.targetList[i] else { panic!("not a TargetEntry") };
+        let Node::TargetEntry(te) = &q.targetList[i] else { panic!("not a TargetEntry") };
         te
     }
 
     /// Pull the Const out of a TargetEntry's expr.
     fn const_of(q: &Query, i: usize) -> &crate::nodes::primnodes::Const {
-        let Node::Const(c) = &**tle(q, i).expr.as_ref().unwrap() else { panic!("not a Const") };
+        let Node::Const(c) = tle(q, i).expr.as_ref().unwrap() else { panic!("not a Const") };
         c
     }
 
@@ -288,7 +288,7 @@ mod tests {
 
         // rtable empty; jointree is an empty-from FromExpr.
         assert!(q.rtable.is_empty());
-        let Node::FromExpr(f) = &**q.jointree.as_ref().unwrap() else { panic!("not FromExpr") };
+        let Node::FromExpr(f) = q.jointree.as_ref().unwrap() else { panic!("not FromExpr") };
         assert!(f.fromlist.is_empty());
         assert!(f.quals.is_none());
     }
@@ -343,7 +343,7 @@ mod tests {
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             crate::parser::parse_expr::transformExpr(
                 &mut pstate,
-                Some(Box::new(cref)),
+                Some(cref),
                 ParseExprKind::SelectTarget,
             )
         }));

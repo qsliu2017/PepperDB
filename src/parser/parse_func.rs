@@ -33,25 +33,25 @@ pub struct FuncDetail {
     pub nvargs: i32,
     pub vatype: Oid,
     pub true_typeids: Vec<Oid>,
-    pub argdefaults: Vec<Box<Node>>,
+    pub argdefaults: Vec<Node>,
 }
 
 pub fn ParseFuncOrColumn(
     _pstate: &mut ParseState,
-    _funcname: Vec<Box<Node>>,
-    _fargs: Vec<Box<Node>>,
-    _last_srf: Option<Box<Node>>,
+    _funcname: Vec<Node>,
+    _fargs: Vec<Node>,
+    _last_srf: Option<Node>,
     _fn_: &FuncCall,
     _proc_call: bool,
     _location: i32,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
 pub fn func_get_detail(
-    _funcname: Vec<Box<Node>>,
-    _fargs: Vec<Box<Node>>,
-    _fargnames: Vec<Box<Node>>,
+    _funcname: Vec<Node>,
+    _fargs: Vec<Node>,
+    _fargnames: Vec<Node>,
     _nargs: i32,
     _argtypes: &[Oid],
     _expand_variadic: bool,
@@ -81,7 +81,7 @@ pub fn func_select_candidate(
 
 pub fn make_fn_arguments(
     _pstate: &mut ParseState,
-    _fargs: &mut [Box<Node>],
+    _fargs: &mut [Node],
     _actual_arg_types: &[Oid],
     _declared_arg_types: &[Oid],
 ) {
@@ -91,16 +91,16 @@ pub fn make_fn_arguments(
 pub fn funcname_signature_string(
     _funcname: &str,
     _nargs: i32,
-    _argnames: &[Box<Node>],
+    _argnames: &[Node],
     _argtypes: &[Oid],
 ) -> String {
     unimplemented!()
 }
 
 pub fn func_signature_string(
-    _funcname: Vec<Box<Node>>,
+    _funcname: Vec<Node>,
     _nargs: i32,
-    _argnames: &[Box<Node>],
+    _argnames: &[Node],
     _argtypes: &[Oid],
 ) -> String {
     unimplemented!()
@@ -108,7 +108,7 @@ pub fn func_signature_string(
 
 /// `InvalidOid` sentinel (when `missing_ok`) -> `Option`.
 pub fn LookupFuncName(
-    _funcname: Vec<Box<Node>>,
+    _funcname: Vec<Node>,
     _nargs: i32,
     _argtypes: &[Oid],
     _missing_ok: bool,
@@ -127,7 +127,7 @@ pub fn LookupFuncWithArgs(
 
 pub fn check_srf_call_placement(
     _pstate: &mut ParseState,
-    _last_srf: Option<Box<Node>>,
+    _last_srf: Option<Node>,
     _location: i32,
 ) {
     unimplemented!()

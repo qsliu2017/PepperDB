@@ -28,9 +28,9 @@ fn not_yet_reachable(node: &Node) -> ! {
 /// are correct. A NULL input transforms to NULL.
 pub fn transformExpr(
     pstate: &mut ParseState,
-    expr: Option<Box<Node>>,
+    expr: Option<Node>,
     expr_kind: ParseExprKind,
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     crate::assert!(expr_kind != ParseExprKind::None);
     let sv_expr_kind = pstate.p_expr_kind;
     pstate.p_expr_kind = expr_kind;
@@ -43,15 +43,15 @@ pub fn transformExpr(
 
 /// PG `transformExprRecurse`: the per-nodetag transform dispatcher (file-local in
 /// parse_expr.c, so private here). Grows one arm per milestone.
-fn transform_expr_recurse(pstate: &mut ParseState, expr: Option<Box<Node>>) -> Option<Box<Node>> {
+fn transform_expr_recurse(pstate: &mut ParseState, expr: Option<Node>) -> Option<Node> {
     // Need do nothing for an empty subexpression.
     let expr = expr?;
 
     // PG guards recursion depth with check_stack_depth(); the recursive descent
     // here is bounded by the same call graph and grows with it.
-    match *expr {
+    match expr {
         Node::A_Const(aconst) => {
-            Some(Box::new(Node::Const(crate::parser::parse_node::make_const(pstate, &aconst))))
+            Some(Node::Const(crate::parser::parse_node::make_const(pstate, &aconst)))
         }
         // ColumnRef / ParamRef / A_Expr / FuncCall / TypeCast / ... arms are
         // filled by later milestones; for M1 they route here cleanly.

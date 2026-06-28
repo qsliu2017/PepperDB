@@ -163,7 +163,7 @@ pub fn standard_planner(
         perm_infos: glob.finalrteperminfos.clone(),
         result_relations: glob.result_relations.clone(),
         // glob.append_relations is empty on the M1 path (no inheritance/partitioning);
-        // its Vec<Box<AppendRelInfo>> -> Vec<Box<Node>> conversion grows with that.
+        // its Vec<Box<AppendRelInfo>> -> Vec<Node> conversion grows with that.
         append_relations: Vec::new(),
         subplans: glob.subplans.clone(),
         rewind_plan_ids: glob.rewind_plan_ids.clone(),
@@ -455,7 +455,7 @@ fn fetch_final_rel(root: &PlannerInfo) -> &crate::nodes::pathnodes::RelOptInfo {
 /// on a bare expression. M1 needs only the const-fold (a Const folds to itself);
 /// fix_opfuncids over a const tree is a no-op. (Defined in planner.c in PG;
 /// declared in optimizer.h.)
-pub fn expression_planner(expr: Box<Node>) -> Box<Node> {
+pub fn expression_planner(expr: Node) -> Node {
     let result = eval_const_expressions(None, Some(expr));
     // fix_opfuncids fills in missing opfuncid values; no OpExprs on the M1 path.
     result.unwrap_or_else(|| not_yet_reachable("expression_planner: NULL expression"))
@@ -483,10 +483,10 @@ mod tests {
     fn plan(s: &str) -> PlannedStmt {
         let mut list = crate::backend::parser::parser::raw_parser(s, RawParseMode::Default);
         assert_eq!(list.len(), 1, "expected exactly one statement");
-        let Node::RawStmt(rs) = *list.remove(0) else { panic!("not a RawStmt") };
+        let Node::RawStmt(rs) = list.remove(0) else { panic!("not a RawStmt") };
         let rs: RawStmt = *rs;
         let q = crate::backend::parser::analyze::parse_analyze_fixedparams(&rs, s, &[], 0, None);
-        let mut rewritten = crate::backend::rewrite::rewriteHandler::query_rewrite(q);
+        let mut rewritten = crate::backend::rewrite::rewriteHandler::query_rewrite(*q);
         assert_eq!(rewritten.len(), 1, "table-less SELECT rewrites to one query");
         let mut parse = rewritten.remove(0);
         standard_planner(&mut parse, s, 0, None)
@@ -494,19 +494,19 @@ mod tests {
 
     /// Pull the Result plan node out of a PlannedStmt.
     fn result_of(stmt: &PlannedStmt) -> &crate::nodes::plannodes::Result {
-        let Node::Result(r) = &*stmt.plan_tree else { panic!("planTree is not a Result") };
+        let Node::Result(r) = &stmt.plan_tree else { panic!("planTree is not a Result") };
         r
     }
 
     /// Pull the i-th TargetEntry of the Result's plan targetlist.
     fn tle(r: &crate::nodes::plannodes::Result, i: usize) -> &crate::nodes::primnodes::TargetEntry {
-        let Node::TargetEntry(te) = &*r.plan.targetlist[i] else { panic!("not a TargetEntry") };
+        let Node::TargetEntry(te) = &r.plan.targetlist[i] else { panic!("not a TargetEntry") };
         te
     }
 
     /// Pull the Const out of a TargetEntry's expr.
     fn const_of(r: &crate::nodes::plannodes::Result, i: usize) -> &crate::nodes::primnodes::Const {
-        let Node::Const(c) = &**tle(r, i).expr.as_ref().unwrap() else { panic!("not a Const") };
+        let Node::Const(c) = tle(r, i).expr.as_ref().unwrap() else { panic!("not a Const") };
         c
     }
 

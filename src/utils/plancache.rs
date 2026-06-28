@@ -133,7 +133,7 @@ pub struct CachedExpression {
     /// should equal CACHEDEXPR_MAGIC
     pub magic: i32,
     /// planned form of expression
-    pub expr: Box<Node>,
+    pub expr: Node,
     pub is_valid: bool,
     // private to plancache.c:
     pub relationOids: Vec<Oid>,

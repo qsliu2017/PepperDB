@@ -45,8 +45,8 @@ pub const fn PruneCxtStateIdx(partnatts: i32, step_id: i32, keyno: i32) -> i32 {
 pub fn make_partition_pruneinfo(
     _root: &mut PlannerInfo,
     _parentrel: &RelOptInfo,
-    _subpaths: Vec<Box<Node>>,
-    _prunequal: Vec<Box<Node>>,
+    _subpaths: Vec<Node>,
+    _prunequal: Vec<Node>,
 ) -> i32 {
     unimplemented!()
 }
@@ -57,7 +57,7 @@ pub fn prune_append_rel_partitions(_rel: &RelOptInfo) -> Bitmapset {
 
 pub fn get_matching_partitions(
     _context: &mut PartitionPruneContext,
-    _pruning_steps: Vec<Box<Node>>,
+    _pruning_steps: Vec<Node>,
 ) -> Bitmapset {
     unimplemented!()
 }

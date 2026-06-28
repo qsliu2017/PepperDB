@@ -41,7 +41,7 @@ fn not_yet_reachable(what: &str) -> ! {
 /// by this pass: the single input query falls straight through to the result
 /// list.
 fn rewrite_query(
-    parsetree: Box<Query>,
+    parsetree: Query,
     _rewrite_events: &mut Vec<RewriteEvent>,
     _orig_rt_length: i32,
     _num_ctes_processed: i32,
@@ -64,7 +64,7 @@ fn rewrite_query(
     // SELECT and UTILITY are not rewritten by this pass. With no INSTEAD rule
     // and no product query, the (unmodified) original query is the sole result.
     // (PG distinguishes INSERT lcons vs append ordering, irrelevant for SELECT.)
-    vec![*parsetree]
+    vec![parsetree]
 }
 
 /// PG `fireRIRrules`: apply ON SELECT (RIR) rules and expand views/RLS, recursing
@@ -92,7 +92,7 @@ fn fire_rir_rules(parsetree: Query, _active_rirs: &mut Vec<crate::postgres_ext::
 ///
 /// The parsetree must have come straight from the parser or been scanned by
 /// `AcquireRewriteLocks` for suitable locks.
-pub fn query_rewrite(parsetree: Box<Query>) -> Vec<Query> {
+pub fn query_rewrite(parsetree: Query) -> Vec<Query> {
     let input_query_id = parsetree.queryId;
     let orig_cmd_type = parsetree.commandType;
 
@@ -168,12 +168,12 @@ mod tests {
     use crate::parser::parser::RawParseMode;
 
     /// Raw-parse + analyze `s` into its single top-level Query.
-    fn analyze(s: &str) -> Box<Query> {
+    fn analyze(s: &str) -> Query {
         let mut list = crate::backend::parser::parser::raw_parser(s, RawParseMode::Default);
         assert_eq!(list.len(), 1, "expected exactly one statement");
-        let Node::RawStmt(rs) = *list.remove(0) else { panic!("not a RawStmt") };
+        let Node::RawStmt(rs) = list.remove(0) else { panic!("not a RawStmt") };
         let rs: RawStmt = *rs;
-        crate::backend::parser::analyze::parse_analyze_fixedparams(&rs, s, &[], 0, None)
+        *crate::backend::parser::analyze::parse_analyze_fixedparams(&rs, s, &[], 0, None)
     }
 
     #[test]
@@ -192,7 +192,7 @@ mod tests {
         // queryId is stamped from the input (0 here) -- unchanged.
         assert_eq!(got.queryId, expected.queryId);
         // The query is returned unchanged.
-        assert_eq!(*got, *expected);
+        assert_eq!(*got, expected);
     }
 
     #[test]
@@ -200,7 +200,7 @@ mod tests {
         let q = analyze("SELECT 42");
         let out = query_rewrite(q);
         assert_eq!(out.len(), 1);
-        let Node::TargetEntry(te) = &*out[0].targetList[0] else { panic!("not a TargetEntry") };
+        let Node::TargetEntry(te) = &out[0].targetList[0] else { panic!("not a TargetEntry") };
         assert_eq!(te.resno, 1);
         assert!(!te.resjunk);
     }
@@ -219,8 +219,8 @@ mod tests {
 
         assert_eq!(out1.len(), 1);
         assert_eq!(out2.len(), 1);
-        assert_eq!(out1[0], *e1);
-        assert_eq!(out2[0], *e2);
+        assert_eq!(out1[0], e1);
+        assert_eq!(out2[0], e2);
         // The two rewrites are independent and distinct.
         assert_ne!(out1[0], out2[0]);
     }

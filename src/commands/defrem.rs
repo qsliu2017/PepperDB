@@ -70,8 +70,8 @@ pub fn ChooseRelationName(
 pub fn CheckIndexCompatible(
     _oldId: Oid,
     _accessMethodName: &str,
-    _attributeList: &[Box<Node>],
-    _exclusionOpNames: &[Box<Node>],
+    _attributeList: &[Node],
+    _exclusionOpNames: &[Node],
     _isWithoutOverlaps: bool,
 ) -> bool {
     unimplemented!()
@@ -82,7 +82,7 @@ pub fn GetDefaultOpClass(_type_id: Oid, _am_id: Oid) -> Oid {
 }
 
 pub fn ResolveOpClass(
-    _opclass: &[Box<Node>],
+    _opclass: &[Node],
     _attrType: Oid,
     _accessMethodName: &str,
     _accessMethodId: Oid,
@@ -154,19 +154,19 @@ pub fn get_transform_oid(_type_id: Oid, _lang_id: Oid) -> Option<Oid> {
 /// 11 out-params of interpret_function_parameter_list, gathered into a struct.
 pub struct InterpretedFunctionParameters {
     pub parameterTypes: oidvector,
-    pub parameterTypes_list: Vec<Box<Node>>,
+    pub parameterTypes_list: Vec<Node>,
     pub allParameterTypes: ArrayType,
     pub parameterModes: ArrayType,
     pub parameterNames: ArrayType,
-    pub inParameterNames_list: Vec<Box<Node>>,
-    pub parameterDefaults: Vec<Box<Node>>,
+    pub inParameterNames_list: Vec<Node>,
+    pub parameterDefaults: Vec<Node>,
     pub variadicArgType: Oid,
     pub requiredResultType: Oid,
 }
 
 pub fn interpret_function_parameter_list(
     _pstate: &mut ParseState,
-    _parameters: &[Box<Node>],
+    _parameters: &[Node],
     _languageOid: Oid,
     _objtype: ObjectType,
 ) -> InterpretedFunctionParameters {
@@ -174,7 +174,7 @@ pub fn interpret_function_parameter_list(
 }
 
 /* commands/operatorcmds.c */
-pub fn DefineOperator(_names: Vec<Box<Node>>, _parameters: Vec<Box<Node>>) -> ObjectAddress {
+pub fn DefineOperator(_names: Vec<Node>, _parameters: Vec<Node>) -> ObjectAddress {
     unimplemented!()
 }
 
@@ -211,10 +211,10 @@ pub fn StatisticsGetRelation(_statId: Oid) -> Option<Oid> {
 /* commands/aggregatecmds.c */
 pub fn DefineAggregate(
     _pstate: &mut ParseState,
-    _name: Vec<Box<Node>>,
-    _args: Vec<Box<Node>>,
+    _name: Vec<Node>,
+    _args: Vec<Node>,
     _oldstyle: bool,
-    _parameters: Vec<Box<Node>>,
+    _parameters: Vec<Node>,
     _replace: bool,
 ) -> ObjectAddress {
     unimplemented!()
@@ -242,20 +242,20 @@ pub fn IsThereOpFamilyInNamespace(_opfname: &str, _opfmethod: Oid, _opfnamespace
 }
 
 // missing_ok -> Option (InvalidOid sentinel collapses to None).
-pub fn get_opclass_oid(_amID: Oid, _opclassname: &[Box<Node>]) -> Option<Oid> {
+pub fn get_opclass_oid(_amID: Oid, _opclassname: &[Node]) -> Option<Oid> {
     unimplemented!()
 }
 
-pub fn get_opfamily_oid(_amID: Oid, _opfamilyname: &[Box<Node>]) -> Option<Oid> {
+pub fn get_opfamily_oid(_amID: Oid, _opfamilyname: &[Node]) -> Option<Oid> {
     unimplemented!()
 }
 
 /* commands/tsearchcmds.c */
-pub fn DefineTSParser(_names: Vec<Box<Node>>, _parameters: Vec<Box<Node>>) -> ObjectAddress {
+pub fn DefineTSParser(_names: Vec<Node>, _parameters: Vec<Node>) -> ObjectAddress {
     unimplemented!()
 }
 
-pub fn DefineTSDictionary(_names: Vec<Box<Node>>, _parameters: Vec<Box<Node>>) -> ObjectAddress {
+pub fn DefineTSDictionary(_names: Vec<Node>, _parameters: Vec<Node>) -> ObjectAddress {
     unimplemented!()
 }
 
@@ -263,14 +263,14 @@ pub fn AlterTSDictionary(_stmt: &AlterTSDictionaryStmt) -> ObjectAddress {
     unimplemented!()
 }
 
-pub fn DefineTSTemplate(_names: Vec<Box<Node>>, _parameters: Vec<Box<Node>>) -> ObjectAddress {
+pub fn DefineTSTemplate(_names: Vec<Node>, _parameters: Vec<Node>) -> ObjectAddress {
     unimplemented!()
 }
 
 // out-param copied folded into the returned tuple.
 pub fn DefineTSConfiguration(
-    _names: Vec<Box<Node>>,
-    _parameters: Vec<Box<Node>>,
+    _names: Vec<Node>,
+    _parameters: Vec<Node>,
 ) -> (ObjectAddress, ObjectAddress) {
     unimplemented!()
 }
@@ -283,11 +283,11 @@ pub fn AlterTSConfiguration(_stmt: &AlterTSConfigurationStmt) -> ObjectAddress {
     unimplemented!()
 }
 
-pub fn serialize_deflist(_deflist: &[Box<Node>]) -> text {
+pub fn serialize_deflist(_deflist: &[Node]) -> text {
     unimplemented!()
 }
 
-pub fn deserialize_deflist(_txt: Datum) -> Vec<Box<Node>> {
+pub fn deserialize_deflist(_txt: Datum) -> Vec<Node> {
     unimplemented!()
 }
 
@@ -347,7 +347,7 @@ pub fn ImportForeignSchema(_stmt: &ImportForeignSchemaStmt) {
 pub fn transformGenericOptions(
     _catalogId: Oid,
     _oldOptions: Datum,
-    _options: &[Box<Node>],
+    _options: &[Node],
     _fdwvalidator: Oid,
 ) -> Datum {
     unimplemented!()
@@ -401,7 +401,7 @@ pub fn defGetObjectId(_def: &DefElem) -> Oid {
     unimplemented!()
 }
 
-pub fn defGetQualifiedName(_def: &DefElem) -> Vec<Box<Node>> {
+pub fn defGetQualifiedName(_def: &DefElem) -> Vec<Node> {
     unimplemented!()
 }
 
@@ -413,7 +413,7 @@ pub fn defGetTypeLength(_def: &DefElem) -> i32 {
     unimplemented!()
 }
 
-pub fn defGetStringList(_def: &DefElem) -> Vec<Box<Node>> {
+pub fn defGetStringList(_def: &DefElem) -> Vec<Node> {
     unimplemented!()
 }
 

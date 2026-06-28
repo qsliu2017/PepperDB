@@ -166,7 +166,7 @@ pub fn build_sorted_items(
 
 /// Returns the parsed (expr, const, expr-on-left) on success, or None.
 /// C: `bool` status + `exprp`/`cstp`/`expronleftp` out-params.
-pub fn examine_opclause_args(_args: &[Box<Node>]) -> Option<(Box<Node>, Box<Const>, bool)> {
+pub fn examine_opclause_args(_args: &[Node]) -> Option<(Node, Box<Const>, bool)> {
     unimplemented!()
 }
 
@@ -183,7 +183,7 @@ pub fn mcv_combine_selectivities(
 pub fn mcv_clauselist_selectivity(
     _root: &mut PlannerInfo,
     _stat: &StatisticExtInfo,
-    _clauses: &[Box<Node>],
+    _clauses: &[Node],
     _var_relid: i32,
     _jointype: JoinType,
     _sjinfo: &SpecialJoinInfo,

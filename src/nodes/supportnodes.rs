@@ -23,7 +23,7 @@ pub struct SupportRequestSelectivity {
     /// Function we are inquiring about.
     pub funcid: Oid,
     /// Pre-simplified arguments to function.
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     /// Function's input collation.
     pub inputcollid: Oid,
     /// Is this a join or restriction case?
@@ -47,7 +47,7 @@ pub struct SupportRequestCost {
     /// Function we are inquiring about.
     pub funcid: Oid,
     /// Parse node invoking function, or NULL.
-    pub node: Option<Box<Node>>,
+    pub node: Option<Node>,
     // Output fields:
     /// One-time cost.
     pub startup: Cost,
@@ -63,7 +63,7 @@ pub struct SupportRequestRows {
     /// Function we are inquiring about.
     pub funcid: Oid,
     /// Parse node invoking function.
-    pub node: Option<Box<Node>>,
+    pub node: Option<Node>,
     // Output fields:
     /// Number of rows expected to be returned.
     pub rows: f64,
@@ -77,7 +77,7 @@ pub struct SupportRequestIndexCondition {
     /// Function we are inquiring about.
     pub funcid: Oid,
     /// Parse node invoking function.
-    pub node: Option<Box<Node>>,
+    pub node: Option<Node>,
     /// Index of function arg matching indexcol.
     pub indexarg: i32,
     /// Planner's info about target index.
@@ -122,7 +122,7 @@ pub struct SupportRequestModifyInPlace {
     /// PG_PROC OID of the target function.
     pub funcid: Oid,
     /// Arguments to the function.
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     /// ID of Param(s) representing variable.
     pub paramid: i32,
 }

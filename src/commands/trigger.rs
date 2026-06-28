@@ -235,7 +235,7 @@ pub fn ExecARInsertTriggers(
     _estate: &mut EState,
     _relinfo: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
-    _recheck_indexes: Vec<Box<Node>>,
+    _recheck_indexes: Vec<Node>,
     _transition_capture: *mut TransitionCaptureState,
 ) {
     unimplemented!()
@@ -324,7 +324,7 @@ pub fn ExecARUpdateTriggers(
     _tupleid: ItemPointer,
     _fdw_trigtuple: HeapTuple,
     _newslot: &mut TupleTableSlot,
-    _recheck_indexes: Vec<Box<Node>>,
+    _recheck_indexes: Vec<Node>,
     _transition_capture: *mut TransitionCaptureState,
     _is_crosspart_update: bool,
 ) {

@@ -4,7 +4,7 @@
 //! four flavors T_List/T_IntList/T_OidList/T_XidList) is replaced by Rust's
 //! `Vec<T>` per the translation-rules container table, with the element type
 //! chosen per use site:
-//!   - `List *` of nodes  -> `Vec<Box<Node>>` (or `Vec<Node>` once Node is sized)
+//!   - `List *` of nodes  -> `Vec<Node>` (or `Vec<Node>` once Node is sized)
 //!   - `IntList`          -> `Vec<i32>`
 //!   - `OidList`          -> `Vec<Oid>`
 //!   - `XidList`          -> `Vec<TransactionId>`

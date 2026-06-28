@@ -82,7 +82,7 @@ pub fn FetchPreparedStatementResultDesc(_stmt: &PreparedStatement) -> TupleDesc 
     unimplemented!()
 }
 
-pub fn FetchPreparedStatementTargetList(_stmt: &PreparedStatement) -> Vec<Box<Node>> {
+pub fn FetchPreparedStatementTargetList(_stmt: &PreparedStatement) -> Vec<Node> {
     unimplemented!()
 }
 

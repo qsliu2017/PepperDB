@@ -19,7 +19,7 @@ pub struct SortGroupOperators {
 /// `InvalidOid` sentinel (when `noError`) -> `Option`.
 pub fn LookupOperName(
     _pstate: &mut ParseState,
-    _opername: Vec<Box<Node>>,
+    _opername: Vec<Node>,
     _oprleft: Oid,
     _oprright: Oid,
     _no_error: bool,
@@ -36,7 +36,7 @@ pub fn LookupOperWithArgs(_oper: &ObjectWithArgs, _no_error: bool) -> Option<Oid
 /// Invalid-tuple sentinel (when `noError`) -> `Option`.
 pub fn oper(
     _pstate: &mut ParseState,
-    _opname: Vec<Box<Node>>,
+    _opname: Vec<Node>,
     _ltype_id: Oid,
     _rtype_id: Oid,
     _no_error: bool,
@@ -48,7 +48,7 @@ pub fn oper(
 /// Invalid-tuple sentinel (when `noError`) -> `Option`.
 pub fn left_oper(
     _pstate: &mut ParseState,
-    _op: Vec<Box<Node>>,
+    _op: Vec<Node>,
     _arg: Oid,
     _no_error: bool,
     _location: i32,
@@ -59,7 +59,7 @@ pub fn left_oper(
 /// Invalid-tuple sentinel (when `noError`) -> `Option`.
 pub fn compatible_oper(
     _pstate: &mut ParseState,
-    _op: Vec<Box<Node>>,
+    _op: Vec<Node>,
     _arg1: Oid,
     _arg2: Oid,
     _no_error: bool,
@@ -68,7 +68,7 @@ pub fn compatible_oper(
     unimplemented!()
 }
 
-pub fn op_signature_string(_op: Vec<Box<Node>>, _arg1: Oid, _arg2: Oid) -> String {
+pub fn op_signature_string(_op: Vec<Node>, _arg1: Oid, _arg2: Oid) -> String {
     unimplemented!()
 }
 
@@ -83,7 +83,7 @@ pub fn get_sort_group_operators(
 
 /// `InvalidOid` sentinel (when `noError`) -> `Option`.
 pub fn compatible_oper_opid(
-    _op: Vec<Box<Node>>,
+    _op: Vec<Node>,
     _arg1: Oid,
     _arg2: Oid,
     _no_error: bool,
@@ -103,22 +103,22 @@ pub fn oprfuncid(_op: Operator) -> Oid {
 
 pub fn make_op(
     _pstate: &mut ParseState,
-    _opname: Vec<Box<Node>>,
-    _ltree: Option<Box<Node>>,
-    _rtree: Option<Box<Node>>,
-    _last_srf: Option<Box<Node>>,
+    _opname: Vec<Node>,
+    _ltree: Option<Node>,
+    _rtree: Option<Node>,
+    _last_srf: Option<Node>,
     _location: i32,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
 pub fn make_scalar_array_op(
     _pstate: &mut ParseState,
-    _opname: Vec<Box<Node>>,
+    _opname: Vec<Node>,
     _use_or: bool,
-    _ltree: Option<Box<Node>>,
-    _rtree: Option<Box<Node>>,
+    _ltree: Option<Node>,
+    _rtree: Option<Node>,
     _location: i32,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }

@@ -13,7 +13,7 @@
 use crate::backend::parser::scan::Token;
 use crate::backend::parser::parser::{
     make_int_const, make_float_const, make_string_const, make_raw_stmt, make_star_target,
-    do_negate, ResTargetBox, NodeBox, SelectStmtBox, RawStmtVec,
+    do_negate, RawStmtVec,
 };
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{ResTarget, SelectStmt};
@@ -66,13 +66,13 @@ pub Stmtmulti: RawStmtVec = {
 };
 
 // gram.y `toplevel_stmt`: stmt (+ TransactionStmtLegacy, added with BEGIN/END).
-TopLevelStmt: Option<NodeBox> = {
+TopLevelStmt: Option<Node> = {
     Stmt,
 };
 
 // gram.y `stmt`: the giant alternation over every statement kind. Grows one
 // statement type per milestone; an empty statement yields None (dropped above).
-Stmt: Option<NodeBox> = {
+Stmt: Option<Node> = {
     <s:SelectStmt> => Some(s),
     => None,            // empty statement (e.g. trailing ';')
 };
@@ -84,22 +84,22 @@ Stmt: Option<NodeBox> = {
 // gram.y `SelectStmt`: select_no_parens | select_with_parens. The paren form and
 // the with/sort/locking/limit wrappers in select_no_parens arrive at their
 // milestones (M5 sort/limit, M12 set ops).
-SelectStmt: NodeBox = {
+SelectStmt: Node = {
     SelectNoParens,
 };
 
-SelectNoParens: NodeBox = {
+SelectNoParens: Node = {
     SimpleSelect,
 };
 
-SelectClause: NodeBox = {
+SelectClause: Node = {
     SimpleSelect,
 };
 
 // gram.y `simple_select`. The first alternative (SELECT target_list ...) is the
 // only one reachable in M1; FROM/WHERE/GROUP/HAVING/DISTINCT/VALUES/TABLE and the
 // set operations are added at their milestones.
-SimpleSelect: NodeBox = {
+SimpleSelect: Node = {
     "SELECT" <targets:OptTargetList> => {
         let n = SelectStmt {
             distinctClause: Vec::new(),
@@ -123,7 +123,7 @@ SimpleSelect: NodeBox = {
             larg: None,
             rarg: None,
         };
-        Box::new(Node::SelectStmt(Box::new(n)))
+        Node::SelectStmt(Box::new(n))
     },
 };
 
@@ -131,12 +131,12 @@ SimpleSelect: NodeBox = {
 //  Target list
 // ===========================================================================
 
-OptTargetList: Vec<NodeBox> = {
+OptTargetList: Vec<Node> = {
     TargetList,
     => Vec::new(),         // gram.y opt_target_list: /*EMPTY*/
 };
 
-TargetList: Vec<NodeBox> = {
+TargetList: Vec<Node> = {
     <t:TargetEl> => vec![t],
     <mut list:TargetList> "," <t:TargetEl> => { list.push(t); list },
 };
@@ -144,14 +144,14 @@ TargetList: Vec<NodeBox> = {
 // gram.y `target_el`. '*', a bare expression, and `a_expr AS ColLabel` are the
 // M1 reachable forms; the bare-label (no-AS) and full ColLabel keyword set arrive
 // with the keyword/label machinery. ColLabel is restricted to IDENT for now.
-TargetEl: NodeBox = {
+TargetEl: Node = {
     <v:AExpr> "AS" <n:"IDENT"> => {
         let rt = ResTarget { name: Some(n), indirection: Vec::new(), val: Some(v), location: -1 };
-        Box::new(Node::ResTarget(Box::new(rt)))
+        Node::ResTarget(Box::new(rt))
     },
     <v:AExpr> => {
         let rt = ResTarget { name: None, indirection: Vec::new(), val: Some(v), location: -1 };
-        Box::new(Node::ResTarget(Box::new(rt)))
+        Node::ResTarget(Box::new(rt))
     },
     "*" => make_star_target(),
 };
@@ -161,7 +161,7 @@ TargetEl: NodeBox = {
 //  comparison / function tower is built out in M3+.
 // ===========================================================================
 
-AExpr: NodeBox = {
+AExpr: Node = {
     CExpr,
     // gram.y: '-' a_expr %prec UMINUS { doNegate }, '+' a_expr %prec UMINUS.
     // Restricted to a constant operand for now (no general unary expr yet).
@@ -169,13 +169,13 @@ AExpr: NodeBox = {
     "+" <c:CExpr> => c,
 };
 
-CExpr: NodeBox = {
+CExpr: Node = {
     AexprConst,
 };
 
 // gram.y `AexprConst`. Iconst/FCONST/Sconst are the M1 forms; BCONST/XCONST and
 // the typed-literal (`typename 'string'`) forms arrive with the type machinery.
-AexprConst: NodeBox = {
+AexprConst: Node = {
     <i:"ICONST"> => make_int_const(i),
     <f:"FCONST"> => make_float_const(f),
     <s:"SCONST"> => make_string_const(s),

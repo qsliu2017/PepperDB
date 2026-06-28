@@ -20,18 +20,18 @@ pub fn make_append_rel_info(
 
 pub fn adjust_appendrel_attrs(
     root: &mut PlannerInfo,
-    node: Option<Box<Node>>,
+    node: Option<Node>,
     appinfos: &[&AppendRelInfo],
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     unimplemented!()
 }
 
 pub fn adjust_appendrel_attrs_multilevel(
     root: &mut PlannerInfo,
-    node: Option<Box<Node>>,
+    node: Option<Node>,
     childrel: &RelOptInfo,
     parentrel: &RelOptInfo,
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     unimplemented!()
 }
 
@@ -65,7 +65,7 @@ pub fn adjust_inherited_attnums_multilevel(
 pub fn get_translated_update_targetlist(
     root: &mut PlannerInfo,
     relid: usize,
-) -> (Vec<Box<Node>>, Vec<i32>) {
+) -> (Vec<Node>, Vec<i32>) {
     unimplemented!()
 }
 

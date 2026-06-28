@@ -76,7 +76,7 @@ pub fn exec_init_expr(node: Option<&Expr>, parent: Option<&mut PlanState>) -> Op
     // `Expr` is an alias of `Node` in this port (primnodes.rs).
     let node = node?;
     let mut state = Box::new(ExprState {
-        expr: Some(Box::new(node.clone())),
+        expr: Some(node.clone()),
         ..ExprState::default()
     });
 
@@ -106,7 +106,7 @@ pub fn exec_init_expr(node: Option<&Expr>, parent: Option<&mut PlanState>) -> Op
 /// (or `_MAKE_RO` for a varlena typlen) to copy the scratch into
 /// `resultslot->tts_values[resno-1]`. The list ends with `EEOP_DONE_NO_RETURN`.
 pub fn exec_build_projection_info(
-    target_list: &[Box<Node>],
+    target_list: &[Node],
     econtext: &mut ExprContext,
     slot: Box<crate::executor::tuptable::TupleTableSlot>,
     parent: Option<&mut PlanState>,
@@ -120,7 +120,7 @@ pub fn exec_build_projection_info(
     };
 
     for n in target_list {
-        let Node::TargetEntry(tle) = &**n else {
+        let Node::TargetEntry(tle) = n else {
             not_yet_reachable("ExecBuildProjectionInfo: tlist entry is not a TargetEntry");
         };
         let expr = tle
@@ -130,7 +130,7 @@ pub fn exec_build_projection_info(
 
         // A simple Var would short-circuit to ASSIGN_*_VAR in PG; the M1 const
         // path always takes the general branch: compile the expr, then ASSIGN_TMP.
-        if matches!(&**expr, Node::Var(_)) {
+        if matches!(expr, Node::Var(_)) {
             not_yet_reachable("ExecBuildProjectionInfo: simple-Var fast path");
         }
 
@@ -182,7 +182,7 @@ pub fn exec_build_projection_info(
 /// PG `ExecInitQual`: an empty qual (the M1 const path has none) yields None
 /// (C returns NULL, which `ExecQual` treats as always-true). A non-empty qual
 /// grows in later milestones.
-pub fn exec_init_qual(qual: &[Box<Node>], parent: Option<&mut PlanState>) -> Option<Box<ExprState>> {
+pub fn exec_init_qual(qual: &[Node], parent: Option<&mut PlanState>) -> Option<Box<ExprState>> {
     let _ = parent;
     if qual.is_empty() {
         return None;

@@ -10,6 +10,12 @@
 // over an already-received body. The `pq_send*` builders and `pq_getmsg*`
 // readers are synchronous; `pq_endmessage`/`pq_puttextmessage`/
 // `pq_putemptymessage` are async (they reach the socket via pqcomm).
+//
+// The `pq_beginmessage`/`pq_send*`/`pq_end*` builders are now `#[deprecated]`
+// shims delegating to inherent `PqMsg` methods (rules.md s3); re-exporting them
+// here so `use crate::libpq::pqformat::pq_*` keeps resolving is deliberate, so
+// the header allows the deprecation.
+#![allow(deprecated)]
 
 pub use crate::backend::libpq::pqformat::{
     pq_begintypsend, pq_beginmessage, pq_beginmessage_reuse, pq_copymsgbytes, pq_endmessage,

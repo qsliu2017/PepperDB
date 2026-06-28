@@ -62,7 +62,7 @@ pub fn can_coerce_type(
 pub use crate::backend::parser::parse_coerce::coerce_type;
 
 pub fn coerce_to_domain(
-    _arg: Box<Node>,
+    _arg: Node,
     _base_type_id: Oid,
     _base_type_mod: i32,
     _type_id: Oid,
@@ -70,34 +70,34 @@ pub fn coerce_to_domain(
     _cformat: CoercionForm,
     _location: i32,
     _hide_input_coercion: bool,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
 pub fn coerce_to_boolean(
     _pstate: &mut ParseState,
-    _node: Box<Node>,
+    _node: Node,
     _construct_name: &str,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
 pub fn coerce_to_specific_type(
     _pstate: &mut ParseState,
-    _node: Box<Node>,
+    _node: Node,
     _target_type_id: Oid,
     _construct_name: &str,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
 pub fn coerce_to_specific_type_typmod(
     _pstate: &mut ParseState,
-    _node: Box<Node>,
+    _node: Node,
     _target_type_id: Oid,
     _target_typmod: i32,
     _construct_name: &str,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
@@ -107,7 +107,7 @@ pub fn coerce_null_to_domain(
     _collation: Oid,
     _typlen: i32,
     _typbyval: bool,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
@@ -122,28 +122,28 @@ pub fn parser_coercion_errposition(
 /// `which_expr` out-param folded into the return as the second tuple element.
 pub fn select_common_type(
     _pstate: &mut ParseState,
-    _exprs: &[Box<Node>],
+    _exprs: &[Node],
     _context: &str,
-) -> (Oid, Option<Box<Node>>) {
+) -> (Oid, Option<Node>) {
     unimplemented!()
 }
 
 pub fn coerce_to_common_type(
     _pstate: &mut ParseState,
-    _node: Box<Node>,
+    _node: Node,
     _target_type_id: Oid,
     _context: &str,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
-pub fn verify_common_type(_common_type: Oid, _exprs: &[Box<Node>]) -> bool {
+pub fn verify_common_type(_common_type: Oid, _exprs: &[Node]) -> bool {
     unimplemented!()
 }
 
 pub fn select_common_typmod(
     _pstate: &mut ParseState,
-    _exprs: &[Box<Node>],
+    _exprs: &[Node],
     _common_type: Oid,
 ) -> i32 {
     unimplemented!()

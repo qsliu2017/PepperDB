@@ -8,7 +8,7 @@ use crate::postgres_ext::Oid;
 pub struct RewriteRule {
     pub rule_id: Oid,
     pub event: CmdType,
-    pub qual: Option<Box<Node>>,
+    pub qual: Option<Node>,
     pub actions: Vec<Node>,
     pub enabled: u8, // char-coded enable state (rule firing setting)
     pub is_instead: bool,

@@ -28,7 +28,7 @@ use crate::utils::snapshot::Snapshot;
 
 /// Result table returned by SPI queries. `vals`/`numvals` are the public part;
 /// the rest is internal bookkeeping (the slist link collapses under the owned
-/// Rust model). `List *` of nodes -> `Vec<Box<Node>>`.
+/// Rust model). `List *` of nodes -> `Vec<Node>`.
 pub struct SPITupleTable {
     // Public members:
     pub tupdesc: TupleDesc,
@@ -252,7 +252,7 @@ pub fn SPI_result_code_string(_code: i32) -> &'static str {
     unimplemented!()
 }
 
-pub fn SPI_plan_get_plan_sources(_plan: SPIPlanPtr) -> Vec<Box<Node>> {
+pub fn SPI_plan_get_plan_sources(_plan: SPIPlanPtr) -> Vec<Node> {
     unimplemented!()
 }
 pub fn SPI_plan_get_cached_plan(_plan: SPIPlanPtr) -> Option<Box<CachedPlan>> {

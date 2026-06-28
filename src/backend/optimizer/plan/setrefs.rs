@@ -14,12 +14,6 @@
 //! rangetable-flattening / rowmark / appendrel / subplan handling are grow guards
 //! (rules.md s4) and grow per milestone.
 
-#![allow(
-    clippy::boxed_local,
-    clippy::unnecessary_box_returns,
-    reason = "1:1 PG port: set_plan_refs takes/returns the polymorphic plan node by pointer (Plan* -> Box<Node>)"
-)]
-
 use crate::nodes::nodes::Node;
 use crate::nodes::pathnodes::PlannerInfo;
 use crate::nodes::plannodes::Result;
@@ -35,7 +29,7 @@ fn not_yet_reachable(what: &str) -> ! {
 /// Var references throughout the plan.
 ///
 /// `plan` is the polymorphic top plan node. M1's only plan node is a `Result`.
-pub fn set_plan_references(root: &mut PlannerInfo, plan: Box<Node>) -> Box<Node> {
+pub fn set_plan_references(root: &mut PlannerInfo, plan: Node) -> Node {
     let rtoffset = root.glob.finalrtable.len();
 
     // add_rtes_to_flat_rtable: append this query's RTEs to the flat rangetable.
@@ -55,9 +49,9 @@ pub fn set_plan_references(root: &mut PlannerInfo, plan: Box<Node>) -> Box<Node>
 
 /// PG `set_plan_refs`: per-node-tag fixup of a single plan node and its subtree.
 /// M1 lives the `T_Result` arm; the rest grow per milestone.
-fn set_plan_refs(root: &mut PlannerInfo, plan: Box<Node>, rtoffset: usize) -> Box<Node> {
-    match *plan {
-        Node::Result(r) => Box::new(Node::Result(Box::new(set_result_refs(root, *r, rtoffset)))),
+fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
+    match plan {
+        Node::Result(r) => Node::Result(Box::new(set_result_refs(root, *r, rtoffset))),
         other => not_yet_reachable(&format!("set_plan_refs: {other:?}")),
     }
 }
@@ -85,12 +79,12 @@ fn set_result_refs(root: &mut PlannerInfo, mut plan: Result, _rtoffset: usize) -
 
 /// `fix_scan_list` over a const targetlist is identity: assert there are no Vars
 /// (which would need RT-index offsetting / Param replacement that grows later).
-fn fix_scan_tlist_identity(tlist: &[Box<Node>]) {
+fn fix_scan_tlist_identity(tlist: &[Node]) {
     for entry in tlist {
-        let Node::TargetEntry(te) = &**entry else {
+        let Node::TargetEntry(te) = entry else {
             not_yet_reachable("set_plan_refs: tlist entry is not a TargetEntry");
         };
-        match te.expr.as_deref() {
+        match te.expr.as_ref() {
             Some(Node::Const(_)) | None => {}
             Some(_) => not_yet_reachable("set_plan_refs: non-Const expr in scan tlist"),
         }

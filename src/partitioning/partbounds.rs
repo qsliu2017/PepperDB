@@ -66,7 +66,7 @@ pub fn compute_partition_hash_value(
 pub fn get_qual_from_partbound(
     _parent: Relation,
     _spec: &PartitionBoundSpec,
-) -> Vec<Box<crate::nodes::nodes::Node>> {
+) -> Vec<crate::nodes::nodes::Node> {
     unimplemented!()
 }
 

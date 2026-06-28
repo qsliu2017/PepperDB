@@ -1,7 +1,7 @@
 //! Translated from PostgreSQL src/include/optimizer/pathnode.h
 //! prototypes for pathnode.c, relnode.c.
 
-#![allow(clippy::boxed_local, reason = "1:1 PG port: Box<Node>/Box<Path> mirrors PG pointer-passed nodes")]
+#![allow(clippy::boxed_local, reason = "1:1 PG port: Node/Box<Path> mirrors PG pointer-passed nodes")]
 #![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
 
 use crate::access::cmptype::CompareType;
@@ -47,7 +47,7 @@ pub fn add_path_precheck(
     disabled_nodes: i32,
     startup_cost: Cost,
     total_cost: Cost,
-    pathkeys: &[Box<Node>],
+    pathkeys: &[Node],
     required_outer: Relids,
 ) -> bool {
     unimplemented!()
@@ -61,7 +61,7 @@ pub fn add_partial_path_precheck(
     parent_rel: &RelOptInfo,
     disabled_nodes: i32,
     total_cost: Cost,
-    pathkeys: &[Box<Node>],
+    pathkeys: &[Node],
 ) -> bool {
     unimplemented!()
 }
@@ -86,10 +86,10 @@ pub fn create_samplescan_path(
 pub fn create_index_path(
     root: &mut PlannerInfo,
     index: &IndexOptInfo,
-    indexclauses: Vec<Box<Node>>,
-    indexorderbys: Vec<Box<Node>>,
+    indexclauses: Vec<Node>,
+    indexorderbys: Vec<Node>,
     indexorderbycols: Vec<i32>,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     indexscandir: ScanDirection,
     indexonly: bool,
     required_outer: Relids,
@@ -129,7 +129,7 @@ pub fn create_bitmap_or_path(
 pub fn create_tidscan_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
-    tidquals: Vec<Box<Node>>,
+    tidquals: Vec<Node>,
     required_outer: Relids,
 ) -> Box<TidPath> {
     unimplemented!()
@@ -138,7 +138,7 @@ pub fn create_tidscan_path(
 pub fn create_tidrangescan_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
-    tidrangequals: Vec<Box<Node>>,
+    tidrangequals: Vec<Node>,
     required_outer: Relids,
 ) -> Box<TidRangePath> {
     unimplemented!()
@@ -149,7 +149,7 @@ pub fn create_append_path(
     rel: &RelOptInfo,
     subpaths: Vec<Box<Path>>,
     partial_subpaths: Vec<Box<Path>>,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     required_outer: Relids,
     parallel_workers: i32,
     parallel_aware: bool,
@@ -162,7 +162,7 @@ pub fn create_merge_append_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
     subpaths: Vec<Box<Path>>,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     required_outer: Relids,
 ) -> Box<MergeAppendPath> {
     unimplemented!()
@@ -179,8 +179,8 @@ pub fn create_memoize_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
     subpath: Box<Path>,
-    param_exprs: Vec<Box<Node>>,
-    hash_operators: Vec<Box<Node>>,
+    param_exprs: Vec<Node>,
+    hash_operators: Vec<Node>,
     singlerow: bool,
     binary_mode: bool,
     calls: f64,
@@ -215,7 +215,7 @@ pub fn create_gather_merge_path(
     rel: &RelOptInfo,
     subpath: Box<Path>,
     target: &PathTarget,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     required_outer: Relids,
     rows: &mut f64,
 ) -> Box<GatherMergePath> {
@@ -227,7 +227,7 @@ pub fn create_subqueryscan_path(
     rel: &RelOptInfo,
     subpath: Box<Path>,
     trivial_pathtarget: bool,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     required_outer: Relids,
 ) -> Box<SubqueryScanPath> {
     unimplemented!()
@@ -236,7 +236,7 @@ pub fn create_subqueryscan_path(
 pub fn create_functionscan_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     required_outer: Relids,
 ) -> Box<Path> {
     unimplemented!()
@@ -261,7 +261,7 @@ pub fn create_tablefuncscan_path(
 pub fn create_ctescan_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     required_outer: Relids,
 ) -> Box<Path> {
     unimplemented!()
@@ -299,11 +299,11 @@ pub fn create_foreignscan_path(
     disabled_nodes: i32,
     startup_cost: Cost,
     total_cost: Cost,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     required_outer: Relids,
     fdw_outerpath: Option<Box<Path>>,
-    fdw_restrictinfo: Vec<Box<Node>>,
-    fdw_private: Vec<Box<Node>>,
+    fdw_restrictinfo: Vec<Node>,
+    fdw_private: Vec<Node>,
 ) -> Box<ForeignPath> {
     unimplemented!()
 }
@@ -316,11 +316,11 @@ pub fn create_foreign_join_path(
     disabled_nodes: i32,
     startup_cost: Cost,
     total_cost: Cost,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     required_outer: Relids,
     fdw_outerpath: Option<Box<Path>>,
-    fdw_restrictinfo: Vec<Box<Node>>,
-    fdw_private: Vec<Box<Node>>,
+    fdw_restrictinfo: Vec<Node>,
+    fdw_private: Vec<Node>,
 ) -> Box<ForeignPath> {
     unimplemented!()
 }
@@ -333,10 +333,10 @@ pub fn create_foreign_upper_path(
     disabled_nodes: i32,
     startup_cost: Cost,
     total_cost: Cost,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     fdw_outerpath: Option<Box<Path>>,
-    fdw_restrictinfo: Vec<Box<Node>>,
-    fdw_private: Vec<Box<Node>>,
+    fdw_restrictinfo: Vec<Node>,
+    fdw_private: Vec<Node>,
 ) -> Box<ForeignPath> {
     unimplemented!()
 }
@@ -362,8 +362,8 @@ pub fn create_nestloop_path(
     extra: &JoinPathExtraData,
     outer_path: Box<Path>,
     inner_path: Box<Path>,
-    restrict_clauses: Vec<Box<Node>>,
-    pathkeys: Vec<Box<Node>>,
+    restrict_clauses: Vec<Node>,
+    pathkeys: Vec<Node>,
     required_outer: Relids,
 ) -> Box<NestPath> {
     unimplemented!()
@@ -377,12 +377,12 @@ pub fn create_mergejoin_path(
     extra: &JoinPathExtraData,
     outer_path: Box<Path>,
     inner_path: Box<Path>,
-    restrict_clauses: Vec<Box<Node>>,
-    pathkeys: Vec<Box<Node>>,
+    restrict_clauses: Vec<Node>,
+    pathkeys: Vec<Node>,
     required_outer: Relids,
-    mergeclauses: Vec<Box<Node>>,
-    outersortkeys: Vec<Box<Node>>,
-    innersortkeys: Vec<Box<Node>>,
+    mergeclauses: Vec<Node>,
+    outersortkeys: Vec<Node>,
+    innersortkeys: Vec<Node>,
     outer_presorted_keys: i32,
 ) -> Box<MergePath> {
     unimplemented!()
@@ -397,9 +397,9 @@ pub fn create_hashjoin_path(
     outer_path: Box<Path>,
     inner_path: Box<Path>,
     parallel_hash: bool,
-    restrict_clauses: Vec<Box<Node>>,
+    restrict_clauses: Vec<Node>,
     required_outer: Relids,
-    hashclauses: Vec<Box<Node>>,
+    hashclauses: Vec<Node>,
 ) -> Box<HashPath> {
     unimplemented!()
 }
@@ -435,7 +435,7 @@ pub fn create_sort_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
     subpath: Box<Path>,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     limit_tuples: f64,
 ) -> Box<SortPath> {
     unimplemented!()
@@ -445,7 +445,7 @@ pub fn create_incremental_sort_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
     subpath: Box<Path>,
-    pathkeys: Vec<Box<Node>>,
+    pathkeys: Vec<Node>,
     presorted_keys: i32,
     limit_tuples: f64,
 ) -> Box<IncrementalSortPath> {
@@ -456,8 +456,8 @@ pub fn create_group_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
     subpath: Box<Path>,
-    group_clause: Vec<Box<Node>>,
-    qual: Vec<Box<Node>>,
+    group_clause: Vec<Node>,
+    qual: Vec<Node>,
     num_groups: f64,
 ) -> Box<GroupPath> {
     unimplemented!()
@@ -480,8 +480,8 @@ pub fn create_agg_path(
     target: &PathTarget,
     aggstrategy: AggStrategy,
     aggsplit: AggSplit,
-    group_clause: Vec<Box<Node>>,
-    qual: Vec<Box<Node>>,
+    group_clause: Vec<Node>,
+    qual: Vec<Node>,
     aggcosts: Option<&AggClauseCosts>,
     num_groups: f64,
 ) -> Box<AggPath> {
@@ -492,9 +492,9 @@ pub fn create_groupingsets_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
     subpath: Box<Path>,
-    having_qual: Vec<Box<Node>>,
+    having_qual: Vec<Node>,
     aggstrategy: AggStrategy,
-    rollups: Vec<Box<Node>>,
+    rollups: Vec<Node>,
     agg_costs: Option<&AggClauseCosts>,
 ) -> Box<GroupingSetsPath> {
     unimplemented!()
@@ -504,8 +504,8 @@ pub fn create_minmaxagg_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
     target: &PathTarget,
-    mmaggregates: Vec<Box<Node>>,
-    quals: Vec<Box<Node>>,
+    mmaggregates: Vec<Node>,
+    quals: Vec<Node>,
 ) -> Box<MinMaxAggPath> {
     unimplemented!()
 }
@@ -515,10 +515,10 @@ pub fn create_windowagg_path(
     rel: &RelOptInfo,
     subpath: Box<Path>,
     target: &PathTarget,
-    window_funcs: Vec<Box<Node>>,
-    run_condition: Vec<Box<Node>>,
+    window_funcs: Vec<Node>,
+    run_condition: Vec<Node>,
     winclause: &WindowClause,
-    qual: Vec<Box<Node>>,
+    qual: Vec<Node>,
     topwindow: bool,
 ) -> Box<WindowAggPath> {
     unimplemented!()
@@ -531,7 +531,7 @@ pub fn create_setop_path(
     rightpath: Box<Path>,
     cmd: SetOpCmd,
     strategy: SetOpStrategy,
-    group_list: Vec<Box<Node>>,
+    group_list: Vec<Node>,
     num_groups: f64,
     output_rows: f64,
 ) -> Box<SetOpPath> {
@@ -544,7 +544,7 @@ pub fn create_recursiveunion_path(
     leftpath: Box<Path>,
     rightpath: Box<Path>,
     target: &PathTarget,
-    distinct_list: Vec<Box<Node>>,
+    distinct_list: Vec<Node>,
     wt_param: i32,
     num_groups: f64,
 ) -> Box<RecursiveUnionPath> {
@@ -555,7 +555,7 @@ pub fn create_lockrows_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
     subpath: Box<Path>,
-    row_marks: Vec<Box<Node>>,
+    row_marks: Vec<Node>,
     epq_param: i32,
 ) -> Box<LockRowsPath> {
     unimplemented!()
@@ -571,13 +571,13 @@ pub fn create_modifytable_path(
     root_relation: usize,
     part_cols_updated: bool,
     result_relations: Vec<i32>,
-    update_colnos_lists: Vec<Box<Node>>,
-    with_check_option_lists: Vec<Box<Node>>,
-    returning_lists: Vec<Box<Node>>,
-    row_marks: Vec<Box<Node>>,
+    update_colnos_lists: Vec<Node>,
+    with_check_option_lists: Vec<Node>,
+    returning_lists: Vec<Node>,
+    row_marks: Vec<Node>,
     onconflict: Option<Box<OnConflictExpr>>,
-    merge_action_lists: Vec<Box<Node>>,
-    merge_join_conditions: Vec<Box<Node>>,
+    merge_action_lists: Vec<Node>,
+    merge_join_conditions: Vec<Node>,
     epq_param: i32,
 ) -> Box<ModifyTablePath> {
     unimplemented!()
@@ -587,8 +587,8 @@ pub fn create_limit_path(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
     subpath: Box<Path>,
-    limit_offset: Option<Box<Node>>,
-    limit_count: Option<Box<Node>>,
+    limit_offset: Option<Node>,
+    limit_count: Option<Node>,
     limit_option: LimitOption,
     offset_est: i64,
     count_est: i64,
@@ -670,8 +670,8 @@ pub fn build_join_rel(
     outer_rel: &RelOptInfo,
     inner_rel: &RelOptInfo,
     sjinfo: &SpecialJoinInfo,
-    pushed_down_joins: Vec<Box<Node>>,
-) -> (Box<RelOptInfo>, Vec<Box<Node>>) {
+    pushed_down_joins: Vec<Node>,
+) -> (Box<RelOptInfo>, Vec<Node>) {
     unimplemented!()
 }
 
@@ -712,7 +712,7 @@ pub fn get_joinrel_parampathinfo(
     inner_path: &Path,
     sjinfo: &SpecialJoinInfo,
     required_outer: Relids,
-) -> (Option<Box<ParamPathInfo>>, Vec<Box<Node>>) {
+) -> (Option<Box<ParamPathInfo>>, Vec<Node>) {
     unimplemented!()
 }
 
@@ -739,7 +739,7 @@ pub fn build_child_join_rel(
     outer_rel: &RelOptInfo,
     inner_rel: &RelOptInfo,
     parent_joinrel: &RelOptInfo,
-    restrictlist: Vec<Box<Node>>,
+    restrictlist: Vec<Node>,
     sjinfo: &SpecialJoinInfo,
     appinfos: &[&AppendRelInfo],
 ) -> Box<RelOptInfo> {

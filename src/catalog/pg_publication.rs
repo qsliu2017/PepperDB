@@ -10,7 +10,7 @@ use crate::utils::palloc::MemoryContext;
 use crate::utils::rel::Relation;
 
 // pg_list tombstoned; these `List *` values are node/relation lists.
-type List = Vec<Box<Node>>;
+type List = Vec<Node>;
 
 pub const PublicationRelationId: Oid = Oid(6104);
 

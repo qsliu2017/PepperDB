@@ -46,8 +46,8 @@ struct EvalConstContext<'a> {
 /// (None for a standalone expression).
 pub fn eval_const_expressions(
     root: Option<&PlannerInfo>,
-    node: Option<Box<Node>>,
-) -> Option<Box<Node>> {
+    node: Option<Node>,
+) -> Option<Node> {
     // PG: context.boundParams = root ? root->glob->boundParams : NULL. boundParams
     // are not modeled yet; no Param appears on the M1 const path.
     let context = EvalConstContext { root, estimate: false };
@@ -58,12 +58,12 @@ pub fn eval_const_expressions(
 /// Dispatches on the node tag. M1 lives the `Const` (and NULL) cases; every
 /// other tag routes to a grow guard.
 fn eval_const_expressions_mutator(
-    node: Option<Box<Node>>,
+    node: Option<Node>,
     context: &EvalConstContext<'_>,
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     let node = node?;
 
-    match *node {
+    match &node {
         // A Const folds to itself (PG: falls through to the generic default,
         // which copies the node unchanged because it has no subexpressions).
         Node::Const(_) => Some(node),
@@ -72,7 +72,7 @@ fn eval_const_expressions_mutator(
         // DistinctExpr folding, BoolExpr short-circuiting, RelabelType/CoerceVia*,
         // CASE/COALESCE/ArrayExpr simplification, and the generic
         // recurse-into-subexpressions default all grow in later milestones.
-        ref other => {
+        other => {
             let _ = context.estimate;
             not_yet_reachable(&format!("eval_const_expressions_mutator: {other:?}"));
         }
@@ -102,9 +102,9 @@ mod tests {
 
     #[test]
     fn const_folds_to_itself() {
-        let folded = eval_const_expressions(None, Some(Box::new(int4(5))));
+        let folded = eval_const_expressions(None, Some(int4(5)));
         let Some(node) = folded else { panic!("a Const folds to a value, not None") };
-        let Node::Const(c) = *node else { panic!("a Const folds to a Const") };
+        let Node::Const(c) = node else { panic!("a Const folds to a Const") };
         assert_eq!(c.consttype, INT4OID);
         assert_eq!(DatumGetInt32(c.constvalue), 5);
     }

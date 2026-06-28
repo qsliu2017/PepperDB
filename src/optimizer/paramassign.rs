@@ -44,7 +44,7 @@ pub fn replace_nestloop_param_placeholdervar(
     unimplemented!()
 }
 
-pub fn process_subquery_nestloop_params(root: &mut PlannerInfo, subplan_params: &[Box<crate::nodes::nodes::Node>]) {
+pub fn process_subquery_nestloop_params(root: &mut PlannerInfo, subplan_params: &[crate::nodes::nodes::Node]) {
     unimplemented!()
 }
 
@@ -52,7 +52,7 @@ pub fn identify_current_nestloop_params(
     root: &mut PlannerInfo,
     leftrelids: Relids,
     outerrelids: Relids,
-) -> Vec<Box<crate::nodes::nodes::Node>> {
+) -> Vec<crate::nodes::nodes::Node> {
     unimplemented!()
 }
 

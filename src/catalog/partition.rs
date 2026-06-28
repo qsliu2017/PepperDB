@@ -27,11 +27,11 @@ pub fn index_get_partition(partition: Relation, index_id: Oid) -> Option<Oid> {
 }
 
 pub fn map_partition_varattnos(
-    expr: Vec<Box<Node>>,
+    expr: Vec<Node>,
     fromrel_varno: i32,
     to_rel: Relation,
     from_rel: Relation,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
@@ -48,6 +48,6 @@ pub fn update_default_partition_oid(parent_id: Oid, default_part_id: Oid) {
     unimplemented!()
 }
 
-pub fn get_proposed_default_constraint(new_part_constraints: Vec<Box<Node>>) -> Vec<Box<Node>> {
+pub fn get_proposed_default_constraint(new_part_constraints: Vec<Node>) -> Vec<Node> {
     unimplemented!()
 }

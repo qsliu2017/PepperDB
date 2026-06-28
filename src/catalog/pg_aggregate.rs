@@ -8,7 +8,7 @@ use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 
 // pg_list tombstoned; these `List *` args are node/name lists.
-type List = Vec<Box<Node>>;
+type List = Vec<Node>;
 
 pub const AggregateRelationId: Oid = Oid(2600);
 

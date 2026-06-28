@@ -6,7 +6,7 @@ use crate::nodes::primnodes::{RangeVar, TargetEntry};
 use crate::parser::parse_node::{ParseExprKind, ParseNamespaceItem, ParseState};
 use crate::postgres_ext::Oid;
 
-pub fn transformFromClause(_pstate: &mut ParseState, _frm_list: Vec<Box<Node>>) {
+pub fn transformFromClause(_pstate: &mut ParseState, _frm_list: Vec<Node>) {
     unimplemented!()
 }
 
@@ -23,69 +23,69 @@ pub fn setTargetTable(
 
 pub fn transformWhereClause(
     _pstate: &mut ParseState,
-    _clause: Option<Box<Node>>,
+    _clause: Option<Node>,
     _expr_kind: ParseExprKind,
     _construct_name: &str,
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     unimplemented!()
 }
 
 pub fn transformLimitClause(
     _pstate: &mut ParseState,
-    _clause: Option<Box<Node>>,
+    _clause: Option<Node>,
     _expr_kind: ParseExprKind,
     _construct_name: &str,
     _limit_option: LimitOption,
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     unimplemented!()
 }
 
 /// `groupingSets`, `targetlist` are in/out params -> threaded as `&mut`.
 pub fn transformGroupClause(
     _pstate: &mut ParseState,
-    _grouplist: Vec<Box<Node>>,
-    _grouping_sets: &mut Vec<Box<Node>>,
-    _targetlist: &mut Vec<Box<Node>>,
-    _sort_clause: Vec<Box<Node>>,
+    _grouplist: Vec<Node>,
+    _grouping_sets: &mut Vec<Node>,
+    _targetlist: &mut Vec<Node>,
+    _sort_clause: Vec<Node>,
     _expr_kind: ParseExprKind,
     _use_sql99: bool,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
 pub fn transformSortClause(
     _pstate: &mut ParseState,
-    _orderlist: Vec<Box<Node>>,
-    _targetlist: &mut Vec<Box<Node>>,
+    _orderlist: Vec<Node>,
+    _targetlist: &mut Vec<Node>,
     _expr_kind: ParseExprKind,
     _use_sql99: bool,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
 pub fn transformWindowDefinitions(
     _pstate: &mut ParseState,
-    _windowdefs: Vec<Box<Node>>,
-    _targetlist: &mut Vec<Box<Node>>,
-) -> Vec<Box<Node>> {
+    _windowdefs: Vec<Node>,
+    _targetlist: &mut Vec<Node>,
+) -> Vec<Node> {
     unimplemented!()
 }
 
 pub fn transformDistinctClause(
     _pstate: &mut ParseState,
-    _targetlist: &mut Vec<Box<Node>>,
-    _sort_clause: Vec<Box<Node>>,
+    _targetlist: &mut Vec<Node>,
+    _sort_clause: Vec<Node>,
     _is_agg: bool,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
 pub fn transformDistinctOnClause(
     _pstate: &mut ParseState,
-    _distinctlist: Vec<Box<Node>>,
-    _targetlist: &mut Vec<Box<Node>>,
-    _sort_clause: Vec<Box<Node>>,
-) -> Vec<Box<Node>> {
+    _distinctlist: Vec<Node>,
+    _targetlist: &mut Vec<Node>,
+    _sort_clause: Vec<Node>,
+) -> Vec<Node> {
     unimplemented!()
 }
 
@@ -93,26 +93,26 @@ pub fn transformDistinctOnClause(
 pub fn transformOnConflictArbiter(
     _pstate: &mut ParseState,
     _on_conflict_clause: &OnConflictClause,
-) -> (Vec<Box<Node>>, Option<Box<Node>>, Oid) {
+) -> (Vec<Node>, Option<Node>, Oid) {
     unimplemented!()
 }
 
 pub fn addTargetToSortList(
     _pstate: &mut ParseState,
     _tle: &mut TargetEntry,
-    _sortlist: Vec<Box<Node>>,
-    _targetlist: Vec<Box<Node>>,
+    _sortlist: Vec<Node>,
+    _targetlist: Vec<Node>,
     _sortby: &SortBy,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
 /// Returns the sort/group ref index.
-pub fn assignSortGroupRef(_tle: &mut TargetEntry, _tlist: &[Box<Node>]) -> usize {
+pub fn assignSortGroupRef(_tle: &mut TargetEntry, _tlist: &[Node]) -> usize {
     unimplemented!()
 }
 
-pub fn targetIsInSortList(_tle: &TargetEntry, _sortop: Oid, _sort_list: &[Box<Node>]) -> bool {
+pub fn targetIsInSortList(_tle: &TargetEntry, _sortop: Oid, _sort_list: &[Node]) -> bool {
     unimplemented!()
 }
 

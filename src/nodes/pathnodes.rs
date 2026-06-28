@@ -3,7 +3,7 @@
 //! Planner internal data structures. All in-memory (no on-disk layout), so
 //! everything is idiomatic Rust. Many of these carry a NodeTag in C and so get
 //! a `Node` variant; the planner-internal cross-links stay concrete boxed types
-//! rather than `Box<Node>`.
+//! rather than `Node`.
 
 use bitflags::bitflags;
 
@@ -75,7 +75,7 @@ pub struct PlannerGlobal {
     // ParamListInfo boundParams -> opaque planner input (read_write_ignore in C,
     // and not Clone/Eq); dropped from the skeleton.
     /// Plans for SubPlan nodes.
-    pub subplans: Vec<Box<Node>>,
+    pub subplans: Vec<Node>,
     /// Paths from which the SubPlan Plans were made.
     pub subpaths: Vec<Box<Path>>,
     /// PlannerInfos for SubPlan nodes.
@@ -83,25 +83,25 @@ pub struct PlannerGlobal {
     /// Indices of subplans that require REWIND.
     pub rewind_plan_ids: Option<Bitmapset>,
     /// "flat" rangetable for executor.
-    pub finalrtable: Vec<Box<Node>>,
+    pub finalrtable: Vec<Node>,
     /// RT indexes of all relation RTEs in finalrtable.
     pub all_relids: Option<Bitmapset>,
     /// RT indexes of leaf partitions subject to initial pruning.
     pub prunable_relids: Option<Bitmapset>,
     /// "flat" list of RTEPermissionInfos.
-    pub finalrteperminfos: Vec<Box<Node>>,
+    pub finalrteperminfos: Vec<Node>,
     /// "flat" list of PlanRowMarks.
-    pub finalrowmarks: Vec<Box<Node>>,
+    pub finalrowmarks: Vec<Node>,
     /// "flat" list of integer RT indexes.
     pub result_relations: Vec<i32>,
     /// "flat" list of AppendRelInfos.
     pub append_relations: Vec<Box<AppendRelInfo>>,
     /// "flat" list of PartitionPruneInfos.
-    pub part_prune_infos: Vec<Box<Node>>,
+    pub part_prune_infos: Vec<Node>,
     /// OIDs of relations the plan depends on.
     pub relation_oids: Vec<Oid>,
     /// Other dependencies, as PlanInvalItems.
-    pub inval_items: Vec<Box<Node>>,
+    pub inval_items: Vec<Node>,
     /// Type OIDs for EXEC Params.
     pub param_exec_types: Vec<Oid>,
     /// Highest PlaceHolderVar ID assigned.
@@ -157,11 +157,11 @@ pub struct PlannerInfo {
     /// Index of list being extended.
     pub join_cur_level: i32,
     /// Init SubPlans for query.
-    pub init_plans: Vec<Box<Node>>,
+    pub init_plans: Vec<Node>,
     /// Per-CTE-item subplan IDs (-1 if none).
     pub cte_plan_ids: Vec<i32>,
     /// Lists of Lists of Params for MULTIEXPR subquery outputs.
-    pub multiexpr_params: Vec<Box<Node>>,
+    pub multiexpr_params: Vec<Node>,
     /// JoinDomains used in the query (higher ones first).
     pub join_domains: Vec<Box<JoinDomain>>,
     /// Active EquivalenceClasses.
@@ -189,7 +189,7 @@ pub struct PlannerInfo {
     /// RowIdentityVarInfos.
     pub row_identity_vars: Vec<Box<RowIdentityVarInfo>>,
     /// PlanRowMarks.
-    pub row_marks: Vec<Box<Node>>,
+    pub row_marks: Vec<Node>,
     /// PlaceHolderInfos.
     pub placeholder_list: Vec<Box<PlaceHolderInfo>>,
     /// PlaceHolderInfos indexed by phid.
@@ -219,11 +219,11 @@ pub struct PlannerInfo {
     /// Result tlists for upper-stage processing, indexed by UpperRelationKind.
     pub upper_targets: [Option<Box<PathTarget>>; UPPERREL_COUNT],
     /// Fully-processed groupClause.
-    pub processed_group_clause: Vec<Box<Node>>,
+    pub processed_group_clause: Vec<Node>,
     /// Fully-processed distinctClause.
-    pub processed_distinct_clause: Vec<Box<Node>>,
+    pub processed_distinct_clause: Vec<Node>,
     /// Fully-processed targetlist.
-    pub processed_tlist: Vec<Box<Node>>,
+    pub processed_tlist: Vec<Node>,
     /// UPDATE target attribute numbers for first N processed_tlist entries.
     pub update_colnos: Vec<i32>,
     /// For GroupingFunc fixup.
@@ -263,7 +263,7 @@ pub struct PlannerInfo {
     /// Outer rels above current node (workspace for createplan.c).
     pub cur_outer_rels: Option<Relids>,
     /// Not-yet-assigned NestLoopParams.
-    pub cur_outer_params: Vec<Box<Node>>,
+    pub cur_outer_params: Vec<Node>,
     /// Workspace for setrefs.c: per-subplan alt-subplan flags.
     pub is_alt_subplan: Vec<bool>,
     pub is_used_subplan: Vec<bool>,
@@ -271,7 +271,7 @@ pub struct PlannerInfo {
     /// Does this query modify any partition key columns?
     pub part_cols_updated: bool,
     /// PartitionPruneInfos added in this query's plan.
-    pub part_prune_infos: Vec<Box<Node>>,
+    pub part_prune_infos: Vec<Node>,
 }
 
 /// Properties shared by relations partitioned the same way.
@@ -362,7 +362,7 @@ pub struct RelOptInfo {
     /// Relids of outer joins that can null this baserel.
     pub nulling_relids: Option<Relids>,
     /// LATERAL Vars and PHVs referenced by rel.
-    pub lateral_vars: Vec<Box<Node>>,
+    pub lateral_vars: Vec<Node>,
     /// Rels that reference this baserel laterally.
     pub lateral_referencers: Option<Relids>,
     /// IndexOptInfo list.
@@ -392,7 +392,7 @@ pub struct RelOptInfo {
     /// Known unique for these other relid set(s) given in UniqueRelInfo(s).
     pub unique_for_rels: Vec<Box<UniqueRelInfo>>,
     /// Known not unique for these set(s).
-    pub non_unique_for_rels: Vec<Box<Node>>,
+    pub non_unique_for_rels: Vec<Node>,
     /// RestrictInfo structures (if base rel).
     pub baserestrictinfo: Vec<Box<RestrictInfo>>,
     /// Cost of evaluating the above.
@@ -416,7 +416,7 @@ pub struct RelOptInfo {
     // PartitionBoundInfoData *boundinfo -> opaque bound info, dropped.
     pub partbounds_merged: bool,
     /// Partition constraint, if not the root.
-    pub partition_qual: Vec<Box<Node>>,
+    pub partition_qual: Vec<Node>,
     /// RelOptInfos for each partition.
     pub part_rels: Vec<Option<Box<Self>>>,
     /// Live partitions after pruning (indexes into part_rels).
@@ -424,9 +424,9 @@ pub struct RelOptInfo {
     /// All partition relids.
     pub all_partrels: Option<Relids>,
     /// Non-nullable partition key expressions (length partnatts).
-    pub partexprs: Vec<Vec<Box<Node>>>,
+    pub partexprs: Vec<Vec<Node>>,
     /// Nullable partition key expressions (length partnatts).
-    pub nullable_partexprs: Vec<Vec<Box<Node>>>,
+    pub nullable_partexprs: Vec<Vec<Node>>,
 }
 
 /// Per-index planner information.
@@ -469,11 +469,11 @@ pub struct IndexOptInfo {
     /// Access method OID (pg_am).
     pub relam: Oid,
     /// Expressions for non-simple index columns.
-    pub indexprs: Vec<Box<Node>>,
+    pub indexprs: Vec<Node>,
     /// Predicate if a partial index, else empty.
-    pub indpred: Vec<Box<Node>>,
+    pub indpred: Vec<Node>,
     /// Targetlist representing index columns.
-    pub indextlist: Vec<Box<Node>>,
+    pub indextlist: Vec<Node>,
     /// Parent's baserestrictinfo less conditions implied by the index predicate.
     pub indrestrictinfo: Vec<Box<RestrictInfo>>,
     pub pred_ok: bool,
@@ -537,7 +537,7 @@ pub struct StatisticExtInfo {
     /// Attnums of the columns covered.
     pub keys: Option<Bitmapset>,
     /// Expressions.
-    pub exprs: Vec<Box<Node>>,
+    pub exprs: Vec<Node>,
 }
 
 /// Scope of EquivalenceClass deductions.
@@ -582,7 +582,7 @@ pub struct EquivalenceClass {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EquivalenceMember {
     /// The expression represented.
-    pub expr: Box<Node>,
+    pub expr: Node,
     /// All relids appearing in expr.
     pub relids: Option<Relids>,
     pub is_const: bool,
@@ -627,7 +627,7 @@ pub struct PathKey {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupByOrdering {
     pub pathkeys: Vec<Box<PathKey>>,
-    pub clauses: Vec<Box<Node>>,
+    pub clauses: Vec<Node>,
 }
 
 /// Cached contain_volatile_functions status.
@@ -643,7 +643,7 @@ pub enum VolatileFunctionStatus {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PathTarget {
     /// Expressions to be computed.
-    pub exprs: Vec<Box<Node>>,
+    pub exprs: Vec<Node>,
     /// Corresponding sort/group refnos, or 0; length matches exprs (or empty).
     pub sortgrouprefs: Vec<usize>,
     /// Cost of evaluating the expressions.
@@ -746,7 +746,7 @@ pub struct IndexPath {
     pub path: Path,
     pub indexinfo: Box<IndexOptInfo>,
     pub indexclauses: Vec<Box<IndexClause>>,
-    pub indexorderbys: Vec<Box<Node>>,
+    pub indexorderbys: Vec<Node>,
     pub indexorderbycols: Vec<i32>,
     pub indexscandir: ScanDirection,
     pub indextotalcost: Cost,
@@ -799,14 +799,14 @@ pub struct BitmapOrPath {
 pub struct TidPath {
     pub path: Path,
     /// Qual(s) involving CTID = something.
-    pub tidquals: Vec<Box<Node>>,
+    pub tidquals: Vec<Node>,
 }
 
 /// A scan by a contiguous range of TIDs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TidRangePath {
     pub path: Path,
-    pub tidrangequals: Vec<Box<Node>>,
+    pub tidrangequals: Vec<Node>,
 }
 
 /// A scan of an unflattened subquery-in-FROM.
@@ -823,7 +823,7 @@ pub struct ForeignPath {
     pub path: Path,
     pub fdw_outerpath: Option<Box<Path>>,
     pub fdw_restrictinfo: Vec<Box<RestrictInfo>>,
-    pub fdw_private: Vec<Box<Node>>,
+    pub fdw_private: Vec<Node>,
 }
 
 /// A table scan/join done by an out-of-core extension.
@@ -835,7 +835,7 @@ pub struct CustomPath {
     /// Child Path nodes, if any.
     pub custom_paths: Vec<Box<Path>>,
     pub custom_restrictinfo: Vec<Box<RestrictInfo>>,
-    pub custom_private: Vec<Box<Node>>,
+    pub custom_private: Vec<Node>,
     // const CustomPathMethods *methods -> extension vtable; dropped from skeleton.
 }
 
@@ -863,7 +863,7 @@ pub struct MergeAppendPath {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupResultPath {
     pub path: Path,
-    pub quals: Vec<Box<Node>>,
+    pub quals: Vec<Node>,
 }
 
 /// A Material plan (caching the output of its subpath).
@@ -882,7 +882,7 @@ pub struct MemoizePath {
     /// OIDs of hash equality ops for cache keys.
     pub hash_operators: Vec<Oid>,
     /// Expressions that are cache keys.
-    pub param_exprs: Vec<Box<Node>>,
+    pub param_exprs: Vec<Node>,
     pub singlerow: bool,
     pub binary_mode: bool,
     /// Expected number of rescans.
@@ -909,7 +909,7 @@ pub struct UniquePath {
     /// Equality operators of the IN clause.
     pub in_operators: Vec<Oid>,
     /// Expressions to be made unique.
-    pub uniq_exprs: Vec<Box<Node>>,
+    pub uniq_exprs: Vec<Node>,
 }
 
 /// Runs several copies of a plan in parallel and collects results.
@@ -1021,9 +1021,9 @@ pub struct GroupPath {
     pub path: Path,
     pub subpath: Box<Path>,
     /// SortGroupClause's.
-    pub group_clause: Vec<Box<Node>>,
+    pub group_clause: Vec<Node>,
     /// HAVING quals, if any.
-    pub qual: Vec<Box<Node>>,
+    pub qual: Vec<Node>,
 }
 
 /// Adjacent-duplicate removal in presorted input.
@@ -1046,8 +1046,8 @@ pub struct AggPath {
     pub num_groups: Cardinality,
     /// For pass-by-ref transition data.
     pub transition_space: u64,
-    pub group_clause: Vec<Box<Node>>,
-    pub qual: Vec<Box<Node>>,
+    pub group_clause: Vec<Node>,
+    pub qual: Vec<Node>,
 }
 
 /// Annotations for one grouping set.
@@ -1063,9 +1063,9 @@ pub struct GroupingSetData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RollupData {
     /// Applicable subset of parse->groupClause.
-    pub group_clause: Vec<Box<Node>>,
+    pub group_clause: Vec<Node>,
     /// Lists of integer indexes into group_clause.
-    pub gsets: Vec<Box<Node>>,
+    pub gsets: Vec<Node>,
     /// GroupingSetData list.
     pub gsets_data: Vec<Box<GroupingSetData>>,
     pub num_groups: Cardinality,
@@ -1081,7 +1081,7 @@ pub struct GroupingSetsPath {
     pub aggstrategy: AggStrategy,
     /// RollupData list.
     pub rollups: Vec<Box<RollupData>>,
-    pub qual: Vec<Box<Node>>,
+    pub qual: Vec<Node>,
     pub transition_space: u64,
 }
 
@@ -1092,7 +1092,7 @@ pub struct MinMaxAggPath {
     /// MinMaxAggInfo list.
     pub mmaggregates: Vec<Box<MinMaxAggInfo>>,
     /// HAVING quals, if any.
-    pub quals: Vec<Box<Node>>,
+    pub quals: Vec<Node>,
 }
 
 /// Generic window-function computation.
@@ -1103,9 +1103,9 @@ pub struct WindowAggPath {
     /// WindowClause we'll be using.
     pub winclause: Box<WindowClause>,
     /// Lower-level WindowAgg runconditions.
-    pub qual: Vec<Box<Node>>,
+    pub qual: Vec<Node>,
     /// OpExpr list to short-circuit execution.
-    pub run_condition: Vec<Box<Node>>,
+    pub run_condition: Vec<Node>,
     /// False for all apart from the WindowAgg closest to the root.
     pub topwindow: bool,
 }
@@ -1120,7 +1120,7 @@ pub struct SetOpPath {
     pub cmd: SetOpCmd,
     pub strategy: SetOpStrategy,
     /// SortGroupClauses identifying target cols.
-    pub group_list: Vec<Box<Node>>,
+    pub group_list: Vec<Node>,
     /// Estimated number of groups in left input.
     pub num_groups: Cardinality,
 }
@@ -1132,7 +1132,7 @@ pub struct RecursiveUnionPath {
     pub leftpath: Box<Path>,
     pub rightpath: Box<Path>,
     /// SortGroupClauses identifying target cols.
-    pub distinct_list: Vec<Box<Node>>,
+    pub distinct_list: Vec<Node>,
     /// ID of Param representing work table.
     pub wt_param: i32,
     pub num_groups: Cardinality,
@@ -1144,7 +1144,7 @@ pub struct LockRowsPath {
     pub path: Path,
     pub subpath: Box<Path>,
     /// PlanRowMark list.
-    pub row_marks: Vec<Box<Node>>,
+    pub row_marks: Vec<Node>,
     /// ID of Param for EvalPlanQual re-eval.
     pub epq_param: i32,
 }
@@ -1167,21 +1167,21 @@ pub struct ModifyTablePath {
     /// Integer list of RT indexes.
     pub result_relations: Vec<i32>,
     /// Per-target-table update_colnos lists.
-    pub update_colnos_lists: Vec<Box<Node>>,
+    pub update_colnos_lists: Vec<Node>,
     /// Per-target-table WCO lists.
-    pub with_check_option_lists: Vec<Box<Node>>,
+    pub with_check_option_lists: Vec<Node>,
     /// Per-target-table RETURNING tlists.
-    pub returning_lists: Vec<Box<Node>>,
+    pub returning_lists: Vec<Node>,
     /// PlanRowMarks (non-locking only).
-    pub row_marks: Vec<Box<Node>>,
+    pub row_marks: Vec<Node>,
     /// ON CONFLICT clause, or None.
     pub onconflict: Option<Box<OnConflictExpr>>,
     /// ID of Param for EvalPlanQual re-eval.
     pub epq_param: i32,
     /// Per-target-table MERGE action lists.
-    pub merge_action_lists: Vec<Box<Node>>,
+    pub merge_action_lists: Vec<Node>,
     /// Per-target-table MERGE join conditions.
-    pub merge_join_conditions: Vec<Box<Node>>,
+    pub merge_join_conditions: Vec<Node>,
 }
 
 /// Applying LIMIT/OFFSET restrictions.
@@ -1190,9 +1190,9 @@ pub struct LimitPath {
     pub path: Path,
     pub subpath: Box<Path>,
     /// OFFSET parameter, or None.
-    pub limit_offset: Option<Box<Node>>,
+    pub limit_offset: Option<Node>,
     /// COUNT parameter, or None.
-    pub limit_count: Option<Box<Node>>,
+    pub limit_count: Option<Node>,
     pub limit_option: LimitOption,
 }
 
@@ -1200,7 +1200,7 @@ pub struct LimitPath {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RestrictInfo {
     /// The represented clause of WHERE or JOIN.
-    pub clause: Box<Node>,
+    pub clause: Node,
     /// True if clause was pushed down in level.
     pub is_pushed_down: bool,
     pub can_join: bool,
@@ -1224,7 +1224,7 @@ pub struct RestrictInfo {
     pub left_relids: Option<Relids>,
     pub right_relids: Option<Relids>,
     /// Modified clause with RestrictInfos; None unless clause is an OR clause.
-    pub orclause: Option<Box<Node>>,
+    pub orclause: Option<Node>,
     /// Serial number, unique within the PlannerInfo context.
     pub rinfo_serial: i32,
     /// Generating EquivalenceClass; None unless potentially redundant.
@@ -1276,7 +1276,7 @@ pub struct MergeScanSelCache {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlaceHolderVar {
     /// The represented expression.
-    pub phexpr: Box<Node>,
+    pub phexpr: Node,
     /// Base+OJ relids syntactically within expr src.
     pub phrels: Option<Relids>,
     /// RT indexes of outer joins that can null PHV's value.
@@ -1315,7 +1315,7 @@ pub struct SpecialJoinInfo {
     /// OIDs of equality join operators.
     pub semi_operators: Vec<Oid>,
     /// Righthand-side expressions of these ops.
-    pub semi_rhs_exprs: Vec<Box<Node>>,
+    pub semi_rhs_exprs: Vec<Node>,
 }
 
 /// Transient mergejoinable outer-join clause info.
@@ -1339,7 +1339,7 @@ pub struct AppendRelInfo {
     /// OID of child's composite type.
     pub child_reltype: Oid,
     /// Per-parent-column child expressions (NULL element = dropped column).
-    pub translated_vars: Vec<Option<Box<Node>>>,
+    pub translated_vars: Vec<Option<Node>>,
     /// Length of parent_colnos array.
     pub num_child_cols: i32,
     /// 1-based parent column number for each child column, or 0.
@@ -1386,7 +1386,7 @@ pub struct MinMaxAggInfo {
     /// Oid of its sort operator.
     pub aggsortop: Oid,
     /// Expression we are aggregating on.
-    pub target: Box<Node>,
+    pub target: Node,
     /// Modified "root" for planning the subquery.
     pub subroot: Option<Box<PlannerInfo>>,
     /// Access path for subquery.
@@ -1401,7 +1401,7 @@ pub struct MinMaxAggInfo {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlannerParamItem {
     /// The Var, PlaceHolderVar, or Aggref.
-    pub item: Box<Node>,
+    pub item: Node,
     /// Its assigned EXEC slot number.
     pub param_id: i32,
 }
@@ -1453,8 +1453,8 @@ pub struct GroupPathExtraData {
     pub agg_partial_costs: AggClauseCosts,
     pub agg_final_costs: AggClauseCosts,
     pub target_parallel_safe: bool,
-    pub having_qual: Option<Box<Node>>,
-    pub target_list: Vec<Box<Node>>,
+    pub having_qual: Option<Node>,
+    pub target_list: Vec<Node>,
     pub patype: PartitionwiseAggregateType,
 }
 
@@ -1489,7 +1489,7 @@ pub struct JoinCostWorkspace {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggInfo {
     /// Aggref exprs that this state value is for.
-    pub aggrefs: Vec<Box<Node>>,
+    pub aggrefs: Vec<Node>,
     /// Transition state number for this aggregate.
     pub transno: i32,
     /// False if this agg cannot share state values (read-write final fn).
@@ -1502,8 +1502,8 @@ pub struct AggInfo {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggTransInfo {
     /// Inputs for this transition state.
-    pub args: Vec<Box<Node>>,
-    pub aggfilter: Option<Box<Node>>,
+    pub args: Vec<Node>,
+    pub aggfilter: Option<Node>,
     pub transfn_oid: Oid,
     pub serialfn_oid: Oid,
     pub deserialfn_oid: Oid,

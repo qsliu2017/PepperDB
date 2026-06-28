@@ -18,7 +18,7 @@ pub fn acquire_rewrite_locks(
     unimplemented!()
 }
 
-pub fn build_column_default(_rel: Relation, _attrno: i32) -> Option<Box<Node>> {
+pub fn build_column_default(_rel: Relation, _attrno: i32) -> Option<Node> {
     unimplemented!()
 }
 
@@ -29,7 +29,7 @@ pub fn get_view_query(_view: Relation) -> Box<Query> {
 pub fn view_has_instead_trigger(
     _view: Relation,
     _event: CmdType,
-    _merge_action_list: Vec<Box<Node>>,
+    _merge_action_list: Vec<Node>,
 ) -> bool {
     unimplemented!()
 }
@@ -51,20 +51,20 @@ pub fn relation_is_updatable(
 pub fn error_view_not_updatable(
     _view: Relation,
     _command: CmdType,
-    _merge_action_list: Vec<Box<Node>>,
+    _merge_action_list: Vec<Node>,
     _detail: Option<&str>,
 ) {
     unimplemented!()
 }
 
 pub fn expand_generated_columns_in_expr(
-    _node: Option<Box<Node>>,
+    _node: Option<Node>,
     _rel: Relation,
     _rt_index: i32,
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     unimplemented!()
 }
 
-pub fn build_generation_expression(_rel: Relation, _attrno: i32) -> Option<Box<Node>> {
+pub fn build_generation_expression(_rel: Relation, _attrno: i32) -> Option<Node> {
     unimplemented!()
 }

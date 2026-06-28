@@ -44,7 +44,7 @@ pub struct SubscriptExecSteps {
 /// transform method: parse-analyze a subscripting construct, filling `sbsref`.
 /// `indirection` is the raw subscript list (List of A_Indices nodes).
 pub type SubscriptTransform =
-    fn(&mut SubscriptingRef, &[Box<crate::nodes::nodes::Node>], &mut ParseState, bool, bool);
+    fn(&mut SubscriptingRef, &[crate::nodes::nodes::Node], &mut ParseState, bool, bool);
 
 /// exec_setup method: install the execution steps for a SubscriptingRef.
 pub type SubscriptExecSetup =

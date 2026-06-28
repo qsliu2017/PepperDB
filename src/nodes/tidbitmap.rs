@@ -42,7 +42,7 @@ pub struct TBMIterateResult {
     pub recheck: bool,
     /// Page containing the bitmap for this block; opaque PagetableEntry view.
     // TODO(ptr): was `void *internal_page`; ownership unclear from header.
-    pub internal_page: Option<Box<crate::nodes::nodes::Node>>,
+    pub internal_page: Option<crate::nodes::nodes::Node>,
 }
 
 // dsa_area / dsa_pointer (utils/dsa.h) are tombstoned under single-process; the

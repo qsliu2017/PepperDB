@@ -17,9 +17,9 @@ pub struct RowSecurityPolicy {
     /// restrictive or permissive policy
     pub permissive: bool,
     /// Expression to filter rows
-    pub qual: Option<Box<Node>>,
+    pub qual: Option<Node>,
     /// Expression to limit rows allowed
-    pub with_check_qual: Option<Box<Node>>,
+    pub with_check_qual: Option<Node>,
     /// If either expression has sublinks
     pub hassublinks: bool,
 }
@@ -43,8 +43,8 @@ pub static mut ROW_SECURITY_POLICY_HOOK_RESTRICTIVE: Option<RowSecurityPolicyHoo
 /// C out-params `List **securityQuals, List **withCheckOptions, bool
 /// *hasRowSecurity, bool *hasSubLinks` -> a named struct (4 mixed outputs).
 pub struct RowSecurityPolicies {
-    pub security_quals: Vec<Box<Node>>,
-    pub with_check_options: Vec<Box<Node>>,
+    pub security_quals: Vec<Node>,
+    pub with_check_options: Vec<Node>,
     pub has_row_security: bool,
     pub has_sub_links: bool,
 }

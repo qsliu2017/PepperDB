@@ -19,11 +19,11 @@ pub fn define_rule(_stmt: &RuleStmt, _query_string: &str) -> ObjectAddress {
 pub fn define_query_rewrite(
     _rulename: &str,
     _event_relid: Oid,
-    _event_qual: Option<Box<Node>>,
+    _event_qual: Option<Node>,
     _event_type: CmdType,
     _is_instead: bool,
     _replace: bool,
-    _action: Vec<Box<Node>>,
+    _action: Vec<Node>,
 ) -> ObjectAddress {
     unimplemented!()
 }

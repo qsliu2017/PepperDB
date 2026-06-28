@@ -25,9 +25,7 @@ use crate::postgres::Datum;
 use crate::tcop::dest::{CommandDest, DestReceiver};
 
 use crate::backend::libpq::pqcomm;
-use crate::backend::libpq::pqformat::{
-    pq_beginmessage, pq_sendcountedtext, pq_sendint16, pq_sendint32, pq_sendstring, PqMsg,
-};
+use crate::backend::libpq::pqformat::PqMsg;
 use crate::backend::utils::fmgr::fmgr::OidOutputFunctionCall;
 use crate::utils::lsyscache::getTypeOutputInfo;
 
@@ -118,20 +116,20 @@ impl DestReceiver for DRprinttup {
 
         // Prepare a DataRow message.
         let mut buf = PqMsg::default();
-        pq_beginmessage(&mut buf, PQMSG_DATA_ROW);
-        pq_sendint16(&mut buf, natts as u16);
+        buf.begin_message(PQMSG_DATA_ROW);
+        buf.send_int16(natts as u16);
 
         for i in 0..natts as usize {
             let this_state = &self.myinfo[i];
             if slot.isnull[i] {
-                pq_sendint32(&mut buf, u32::MAX); // -1 length == SQL NULL
+                buf.send_int32(u32::MAX); // -1 length == SQL NULL
                 continue;
             }
             let attr: Datum = slot.values[i];
             if this_state.format == 0 {
                 // Text output.
                 let outputstr = OidOutputFunctionCall(this_state.typoutput, attr);
-                pq_sendcountedtext(&mut buf, &outputstr);
+                buf.send_counted_text(&outputstr);
             } else {
                 // Binary output grows with SendFunctionCall / varlena.
                 unimplemented!("printtup binary output (format == 1) deferred");
@@ -196,21 +194,21 @@ pub fn send_row_description_message(typeinfo: TupleDesc, formats: &[i16]) {
     let natts = desc.natts;
 
     let mut buf = PqMsg::default();
-    pq_beginmessage(&mut buf, PQMSG_ROW_DESCRIPTION);
-    pq_sendint16(&mut buf, natts as u16);
+    buf.begin_message(PQMSG_ROW_DESCRIPTION);
+    buf.send_int16(natts as u16);
 
     for i in 0..natts as usize {
         let att = desc.attr(i);
         let attname = name_str(&att.attname);
         let format = formats.get(i).copied().unwrap_or(0);
 
-        pq_sendstring(&mut buf, attname); // column name (null-terminated)
-        pq_sendint32(&mut buf, 0); // resorigtbl (table OID)
-        pq_sendint16(&mut buf, 0); // resorigcol (column attnum)
-        pq_sendint32(&mut buf, att.atttypid.0); // type OID
-        pq_sendint16(&mut buf, att.attlen as u16); // type length
-        pq_sendint32(&mut buf, att.atttypmod as u32); // type modifier
-        pq_sendint16(&mut buf, format as u16); // format code
+        buf.send_string(attname); // column name (null-terminated)
+        buf.send_int32(0); // resorigtbl (table OID)
+        buf.send_int16(0); // resorigcol (column attnum)
+        buf.send_int32(att.atttypid.0); // type OID
+        buf.send_int16(att.attlen as u16); // type length
+        buf.send_int32(att.atttypmod as u32); // type modifier
+        buf.send_int16(format as u16); // format code
     }
 
     pqcomm::pq_putmessage_sync(buf.msgtype, &buf.data);
@@ -243,20 +241,19 @@ mod tests {
     use crate::postgres_ext::InvalidOid;
 
     /// A `[Const int4]` targetlist (named "?column?"), mirroring execTuples tests.
-    #[allow(clippy::vec_box, reason = "mirrors a PG List of node pointers")]
-    fn const_int4_tlist(values: &[i32]) -> Vec<Box<Node>> {
+    fn const_int4_tlist(values: &[i32]) -> Vec<Node> {
         values
             .iter()
             .enumerate()
             .map(|(i, &v)| {
                 let con = make_const(INT4OID, -1, InvalidOid, 4, Int32GetDatum(v), false, true);
                 let tle = make_target_entry(
-                    Some(Box::new(Node::Const(Box::new(con)))),
+                    Some(Node::Const(Box::new(con))),
                     (i + 1) as i16,
                     Some("?column?".to_string()),
                     false,
                 );
-                Box::new(Node::TargetEntry(Box::new(tle)))
+                Node::TargetEntry(Box::new(tle))
             })
             .collect()
     }

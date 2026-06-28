@@ -27,7 +27,7 @@ pub fn DefineRelation(
     unimplemented!()
 }
 
-pub fn BuildDescForRelation(_columns: &[Box<Node>]) -> TupleDesc {
+pub fn BuildDescForRelation(_columns: &[Node]) -> TupleDesc {
     unimplemented!()
 }
 
@@ -47,7 +47,7 @@ pub fn AlterTable(
     unimplemented!()
 }
 
-pub fn AlterTableGetLockLevel(_cmds: &[Box<Node>]) -> LOCKMODE {
+pub fn AlterTableGetLockLevel(_cmds: &[Node]) -> LOCKMODE {
     unimplemented!()
 }
 
@@ -60,7 +60,7 @@ pub fn ATExecChangeOwner(
     unimplemented!()
 }
 
-pub fn AlterTableInternal(_relid: Oid, _cmds: &[Box<Node>], _recurse: bool) {
+pub fn AlterTableInternal(_relid: Oid, _cmds: &[Node], _recurse: bool) {
     unimplemented!()
 }
 
@@ -102,9 +102,9 @@ pub fn ExecuteTruncate(_stmt: &TruncateStmt) {
 }
 
 pub fn ExecuteTruncateGuts(
-    _explicit_rels: &[Box<Node>],
-    _relids: &[Box<Node>],
-    _relids_logged: &[Box<Node>],
+    _explicit_rels: &[Node],
+    _relids: &[Node],
+    _relids_logged: &[Node],
     _behavior: DropBehavior,
     _restart_seqs: bool,
     _run_as_table_owner: bool,
@@ -210,7 +210,7 @@ pub fn RangeVarCallbackOwnsRelation(
 
 pub fn PartConstraintImpliedByRelConstraint(
     _scanrel: Relation,
-    _partConstraint: &[Box<Node>],
+    _partConstraint: &[Node],
 ) -> bool {
     unimplemented!()
 }

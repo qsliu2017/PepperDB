@@ -1,8 +1,9 @@
 //! Translated from PostgreSQL src/include/catalog/pg_attribute.h
 
-use crate::c::{text, NameData};
+use crate::c::{text, varlena, NameData, NAMEDATALEN};
+use crate::nodes::parsenodes::AclMode;
 use crate::postgres::NullableDatum;
-use crate::postgres_ext::Oid;
+use crate::postgres_ext::{InvalidOid, Oid};
 use crate::utils::acl::AclItem;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(75,AttributeRelation_Rowtype_Id) BKI_SCHEMA_MACRO
@@ -47,6 +48,75 @@ pub type Anyarray = text;
 pub const ATTRIBUTE_FIXED_PART_SIZE: usize =
     core::mem::offset_of!(FormData_pg_attribute, attcollation) + core::mem::size_of::<Oid>();
 
+impl FormData_pg_attribute {
+    /// An empty attribute row. The `CATALOG_VARLEN` tail fields (attacl/
+    /// attoptions/attfdwoptions/attmissingval) are never present in an in-memory
+    /// tupdesc; only the fixed part is ever touched. They are constructed as
+    /// empty/zero placeholders so the `#[repr(C)]` struct is well-formed.
+    #[must_use]
+    pub fn new() -> Self {
+        let empty_varlena = || varlena { vl_len_: [0u8; 4], dat: [] };
+        Self {
+            attrelid: InvalidOid,
+            attname: NameData { data: [0u8; NAMEDATALEN] },
+            atttypid: InvalidOid,
+            attlen: 0,
+            attnum: 0,
+            atttypmod: -1,
+            attndims: 0,
+            attbyval: false,
+            attalign: 0,
+            attstorage: 0,
+            attcompression: 0,
+            attnotnull: false,
+            atthasdef: false,
+            atthasmissing: false,
+            attidentity: 0,
+            attgenerated: 0,
+            attisdropped: false,
+            attislocal: false,
+            attinhcount: 0,
+            attcollation: InvalidOid,
+            attstattarget: 0,
+            attacl: [AclItem {
+                grantee: InvalidOid,
+                grantor: InvalidOid,
+                privs: AclMode::from_bits_retain(0),
+            }],
+            attoptions: [empty_varlena()],
+            attfdwoptions: [empty_varlena()],
+            attmissingval: empty_varlena(),
+        }
+    }
+}
+
+impl Default for FormData_pg_attribute {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Clone for FormData_pg_attribute {
+    /// Copy the fixed part (the only part an in-memory tupdesc uses) byte-for-byte
+    /// as C `memcpy` does; the variable-length tail is reconstructed empty.
+    fn clone(&self) -> Self {
+        let mut out = Self::new();
+        // SAFETY: both are valid `FormData_pg_attribute`; the first
+        // `ATTRIBUTE_FIXED_PART_SIZE` bytes are the fixed part. `#[repr(C)]` makes
+        // the layout stable, and a plain-old-data attribute row has no Drop, so a
+        // byte copy of the fixed part is sound (mirrors the C memcpy).
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                core::ptr::from_ref::<Self>(self).cast::<u8>(),
+                core::ptr::from_mut::<Self>(&mut out).cast::<u8>(),
+                ATTRIBUTE_FIXED_PART_SIZE,
+            );
+        }
+        out
+    }
+}
+
+// TODO(migrate-tupledesc): Form_pg_attribute *mut -> & or Arc handle alongside the TupleDesc migration.
 pub type Form_pg_attribute = *mut FormData_pg_attribute; // TODO(ptr)
 
 // Fields excluded by CATALOG_VARLEN, for DDL use alongside FormData_pg_attribute.

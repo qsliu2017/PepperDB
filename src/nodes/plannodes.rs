@@ -39,20 +39,20 @@ pub struct PlannedStmt {
     pub depends_on_role: bool,
     pub parallel_mode_needed: bool,
     pub jit_flags: i32,
-    pub plan_tree: Box<Node>,
-    pub part_prune_infos: Vec<Box<Node>>,
-    pub rtable: Vec<Box<Node>>,
+    pub plan_tree: Node,
+    pub part_prune_infos: Vec<Node>,
+    pub rtable: Vec<Node>,
     pub unprunable_relids: Option<Bitmapset>,
-    pub perm_infos: Vec<Box<Node>>,
+    pub perm_infos: Vec<Node>,
     pub result_relations: Vec<i32>,
-    pub append_relations: Vec<Box<Node>>,
-    pub subplans: Vec<Box<Node>>,
+    pub append_relations: Vec<Node>,
+    pub subplans: Vec<Node>,
     pub rewind_plan_ids: Option<Bitmapset>,
-    pub row_marks: Vec<Box<Node>>,
+    pub row_marks: Vec<Node>,
     pub relation_oids: Vec<Oid>,
-    pub inval_items: Vec<Box<Node>>,
+    pub inval_items: Vec<Node>,
     pub param_exec_types: Vec<Oid>,
-    pub utility_stmt: Option<Box<Node>>,
+    pub utility_stmt: Option<Node>,
     pub stmt_location: ParseLoc,
     pub stmt_len: ParseLoc,
 }
@@ -72,11 +72,11 @@ pub struct Plan {
     pub parallel_safe: bool,
     pub async_capable: bool,
     pub plan_node_id: i32,
-    pub targetlist: Vec<Box<Node>>,
-    pub qual: Vec<Box<Node>>,
-    pub lefttree: Option<Box<Node>>,
-    pub righttree: Option<Box<Node>>,
-    pub init_plan: Vec<Box<Node>>,
+    pub targetlist: Vec<Node>,
+    pub qual: Vec<Node>,
+    pub lefttree: Option<Node>,
+    pub righttree: Option<Node>,
+    pub init_plan: Vec<Node>,
     pub ext_param: Option<Bitmapset>,
     pub all_param: Option<Bitmapset>,
 }
@@ -86,7 +86,7 @@ pub struct Plan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Result {
     pub plan: Plan,
-    pub resconstantqual: Option<Box<Node>>,
+    pub resconstantqual: Option<Node>,
 }
 
 /// ProjectSet: apply a projection containing set-returning functions.
@@ -105,24 +105,24 @@ pub struct ModifyTable {
     pub root_relation: Index,
     pub part_cols_updated: bool,
     pub result_relations: Vec<i32>,
-    pub update_colnos_lists: Vec<Box<Node>>,
-    pub with_check_option_lists: Vec<Box<Node>>,
+    pub update_colnos_lists: Vec<Node>,
+    pub with_check_option_lists: Vec<Node>,
     pub returning_old_alias: Option<String>,
     pub returning_new_alias: Option<String>,
-    pub returning_lists: Vec<Box<Node>>,
-    pub fdw_priv_lists: Vec<Box<Node>>,
+    pub returning_lists: Vec<Node>,
+    pub fdw_priv_lists: Vec<Node>,
     pub fdw_direct_modify_plans: Option<Bitmapset>,
-    pub row_marks: Vec<Box<Node>>,
+    pub row_marks: Vec<Node>,
     pub epq_param: i32,
     pub on_conflict_action: OnConflictAction,
     pub arbiter_indexes: Vec<Oid>,
-    pub on_conflict_set: Vec<Box<Node>>,
-    pub on_conflict_cols: Vec<Box<Node>>,
-    pub on_conflict_where: Option<Box<Node>>,
+    pub on_conflict_set: Vec<Node>,
+    pub on_conflict_cols: Vec<Node>,
+    pub on_conflict_where: Option<Node>,
     pub excl_rel_rti: Index,
-    pub excl_rel_tlist: Vec<Box<Node>>,
-    pub merge_action_lists: Vec<Box<Node>>,
-    pub merge_join_conditions: Vec<Box<Node>>,
+    pub excl_rel_tlist: Vec<Node>,
+    pub merge_action_lists: Vec<Node>,
+    pub merge_join_conditions: Vec<Node>,
 }
 
 /// Append: concatenation of the results of sub-plans.
@@ -130,7 +130,7 @@ pub struct ModifyTable {
 pub struct Append {
     pub plan: Plan,
     pub apprelids: Option<Bitmapset>,
-    pub appendplans: Vec<Box<Node>>,
+    pub appendplans: Vec<Node>,
     pub nasyncplans: i32,
     pub first_partial_plan: i32,
     pub part_prune_index: i32,
@@ -141,7 +141,7 @@ pub struct Append {
 pub struct MergeAppend {
     pub plan: Plan,
     pub apprelids: Option<Bitmapset>,
-    pub mergeplans: Vec<Box<Node>>,
+    pub mergeplans: Vec<Node>,
     pub num_cols: i32,
     pub sort_col_idx: Vec<AttrNumber>,
     pub sort_operators: Vec<Oid>,
@@ -167,7 +167,7 @@ pub struct RecursiveUnion {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BitmapAnd {
     pub plan: Plan,
-    pub bitmapplans: Vec<Box<Node>>,
+    pub bitmapplans: Vec<Node>,
 }
 
 /// BitmapOr: union of sub-plan bitmaps.
@@ -175,7 +175,7 @@ pub struct BitmapAnd {
 pub struct BitmapOr {
     pub plan: Plan,
     pub isshared: bool,
-    pub bitmapplans: Vec<Box<Node>>,
+    pub bitmapplans: Vec<Node>,
 }
 
 /// Abstract base for all relation scan plan types (C `Scan`). Embedded as the
@@ -204,10 +204,10 @@ pub struct SampleScan {
 pub struct IndexScan {
     pub scan: Scan,
     pub indexid: Oid,
-    pub indexqual: Vec<Box<Node>>,
-    pub indexqualorig: Vec<Box<Node>>,
-    pub indexorderby: Vec<Box<Node>>,
-    pub indexorderbyorig: Vec<Box<Node>>,
+    pub indexqual: Vec<Node>,
+    pub indexqualorig: Vec<Node>,
+    pub indexorderby: Vec<Node>,
+    pub indexorderbyorig: Vec<Node>,
     pub indexorderbyops: Vec<Oid>,
     pub indexorderdir: ScanDirection,
 }
@@ -217,10 +217,10 @@ pub struct IndexScan {
 pub struct IndexOnlyScan {
     pub scan: Scan,
     pub indexid: Oid,
-    pub indexqual: Vec<Box<Node>>,
-    pub recheckqual: Vec<Box<Node>>,
-    pub indexorderby: Vec<Box<Node>>,
-    pub indextlist: Vec<Box<Node>>,
+    pub indexqual: Vec<Node>,
+    pub recheckqual: Vec<Node>,
+    pub indexorderby: Vec<Node>,
+    pub indextlist: Vec<Node>,
     pub indexorderdir: ScanDirection,
 }
 
@@ -230,29 +230,29 @@ pub struct BitmapIndexScan {
     pub scan: Scan,
     pub indexid: Oid,
     pub isshared: bool,
-    pub indexqual: Vec<Box<Node>>,
-    pub indexqualorig: Vec<Box<Node>>,
+    pub indexqual: Vec<Node>,
+    pub indexqualorig: Vec<Node>,
 }
 
 /// Bitmap heap scan node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BitmapHeapScan {
     pub scan: Scan,
-    pub bitmapqualorig: Vec<Box<Node>>,
+    pub bitmapqualorig: Vec<Node>,
 }
 
 /// TID scan node (CTID = something).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TidScan {
     pub scan: Scan,
-    pub tidquals: Vec<Box<Node>>,
+    pub tidquals: Vec<Node>,
 }
 
 /// TID range scan node (CTID relop something).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TidRangeScan {
     pub scan: Scan,
-    pub tidrangequals: Vec<Box<Node>>,
+    pub tidrangequals: Vec<Node>,
 }
 
 /// Cached trivial_subqueryscan property; UNKNOWN = not yet determined.
@@ -269,7 +269,7 @@ pub enum SubqueryScanStatus {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubqueryScan {
     pub scan: Scan,
-    pub subplan: Box<Node>,
+    pub subplan: Node,
     pub scanstatus: SubqueryScanStatus,
 }
 
@@ -277,7 +277,7 @@ pub struct SubqueryScan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionScan {
     pub scan: Scan,
-    pub functions: Vec<Box<Node>>,
+    pub functions: Vec<Node>,
     pub funcordinality: bool,
 }
 
@@ -285,7 +285,7 @@ pub struct FunctionScan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValuesScan {
     pub scan: Scan,
-    pub values_lists: Vec<Box<Node>>,
+    pub values_lists: Vec<Node>,
 }
 
 /// TableFunc scan node.
@@ -325,10 +325,10 @@ pub struct ForeignScan {
     pub result_relation: Index,
     pub check_as_user: Oid,
     pub fs_server: Oid,
-    pub fdw_exprs: Vec<Box<Node>>,
-    pub fdw_private: Vec<Box<Node>>,
-    pub fdw_scan_tlist: Vec<Box<Node>>,
-    pub fdw_recheck_quals: Vec<Box<Node>>,
+    pub fdw_exprs: Vec<Node>,
+    pub fdw_private: Vec<Node>,
+    pub fdw_scan_tlist: Vec<Node>,
+    pub fdw_recheck_quals: Vec<Node>,
     pub fs_relids: Option<Bitmapset>,
     pub fs_base_relids: Option<Bitmapset>,
     pub fs_system_col: bool,
@@ -339,10 +339,10 @@ pub struct ForeignScan {
 pub struct CustomScan {
     pub scan: Scan,
     pub flags: u32,
-    pub custom_plans: Vec<Box<Node>>,
-    pub custom_exprs: Vec<Box<Node>>,
-    pub custom_private: Vec<Box<Node>>,
-    pub custom_scan_tlist: Vec<Box<Node>>,
+    pub custom_plans: Vec<Node>,
+    pub custom_exprs: Vec<Node>,
+    pub custom_private: Vec<Node>,
+    pub custom_scan_tlist: Vec<Node>,
     pub custom_relids: Option<Bitmapset>,
     // TODO(ptr): borrows a process-static method table.
     pub methods: Box<CustomScanMethods>,
@@ -355,14 +355,14 @@ pub struct Join {
     pub plan: Plan,
     pub jointype: JoinType,
     pub inner_unique: bool,
-    pub joinqual: Vec<Box<Node>>,
+    pub joinqual: Vec<Node>,
 }
 
 /// Nested loop join node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NestLoop {
     pub join: Join,
-    pub nest_params: Vec<Box<Node>>,
+    pub nest_params: Vec<Node>,
 }
 
 /// Param to pass from the current outer row into the inner subplan of a nestloop.
@@ -377,7 +377,7 @@ pub struct NestLoopParam {
 pub struct MergeJoin {
     pub join: Join,
     pub skip_mark_restore: bool,
-    pub mergeclauses: Vec<Box<Node>>,
+    pub mergeclauses: Vec<Node>,
     pub merge_families: Vec<Oid>,
     pub merge_collations: Vec<Oid>,
     pub merge_reversals: Vec<bool>,
@@ -388,10 +388,10 @@ pub struct MergeJoin {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HashJoin {
     pub join: Join,
-    pub hashclauses: Vec<Box<Node>>,
+    pub hashclauses: Vec<Node>,
     pub hashoperators: Vec<Oid>,
     pub hashcollations: Vec<Oid>,
-    pub hashkeys: Vec<Box<Node>>,
+    pub hashkeys: Vec<Node>,
 }
 
 /// Materialization node.
@@ -407,7 +407,7 @@ pub struct Memoize {
     pub num_keys: i32,
     pub hash_operators: Vec<Oid>,
     pub collations: Vec<Oid>,
-    pub param_exprs: Vec<Box<Node>>,
+    pub param_exprs: Vec<Node>,
     pub singlerow: bool,
     pub binary_mode: bool,
     pub est_entries: u32,
@@ -455,8 +455,8 @@ pub struct Agg {
     pub num_groups: i64,
     pub transition_space: u64,
     pub agg_params: Option<Bitmapset>,
-    pub grouping_sets: Vec<Box<Node>>,
-    pub chain: Vec<Box<Node>>,
+    pub grouping_sets: Vec<Node>,
+    pub chain: Vec<Node>,
 }
 
 /// Window aggregate node.
@@ -474,10 +474,10 @@ pub struct WindowAgg {
     pub ord_operators: Vec<Oid>,
     pub ord_collations: Vec<Oid>,
     pub frame_options: i32,
-    pub start_offset: Option<Box<Node>>,
-    pub end_offset: Option<Box<Node>>,
-    pub run_condition: Vec<Box<Node>>,
-    pub run_condition_orig: Vec<Box<Node>>,
+    pub start_offset: Option<Node>,
+    pub end_offset: Option<Node>,
+    pub run_condition: Vec<Node>,
+    pub run_condition_orig: Vec<Node>,
     pub start_in_range_func: Oid,
     pub end_in_range_func: Oid,
     pub in_range_coll: Oid,
@@ -525,7 +525,7 @@ pub struct GatherMerge {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hash {
     pub plan: Plan,
-    pub hashkeys: Vec<Box<Node>>,
+    pub hashkeys: Vec<Node>,
     pub skew_table: Oid,
     pub skew_column: AttrNumber,
     pub skew_inherit: bool,
@@ -550,7 +550,7 @@ pub struct SetOp {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LockRows {
     pub plan: Plan,
-    pub row_marks: Vec<Box<Node>>,
+    pub row_marks: Vec<Node>,
     pub epq_param: i32,
 }
 
@@ -558,8 +558,8 @@ pub struct LockRows {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Limit {
     pub plan: Plan,
-    pub limit_offset: Option<Box<Node>>,
-    pub limit_count: Option<Box<Node>>,
+    pub limit_offset: Option<Node>,
+    pub limit_count: Option<Node>,
     pub limit_option: LimitOption,
     pub uniq_num_cols: i32,
     pub uniq_col_idx: Vec<AttrNumber>,
@@ -600,7 +600,7 @@ pub struct PlanRowMark {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PartitionPruneInfo {
     pub relids: Option<Bitmapset>,
-    pub prune_infos: Vec<Box<Node>>,
+    pub prune_infos: Vec<Node>,
     pub other_subplans: Option<Bitmapset>,
 }
 
@@ -614,8 +614,8 @@ pub struct PartitionedRelPruneInfo {
     pub subpart_map: Vec<i32>,
     pub leafpart_rti_map: Vec<i32>,
     pub relid_map: Vec<Oid>,
-    pub initial_pruning_steps: Vec<Box<Node>>,
-    pub exec_pruning_steps: Vec<Box<Node>>,
+    pub initial_pruning_steps: Vec<Node>,
+    pub exec_pruning_steps: Vec<Node>,
     pub execparamids: Option<Bitmapset>,
 }
 
@@ -630,8 +630,8 @@ pub struct PartitionPruneStep {
 pub struct PartitionPruneStepOp {
     pub step: PartitionPruneStep,
     pub opstrategy: StrategyNumber,
-    pub exprs: Vec<Box<Node>>,
-    pub cmpfns: Vec<Box<Node>>,
+    pub exprs: Vec<Node>,
+    pub cmpfns: Vec<Node>,
     pub nullkeys: Option<Bitmapset>,
 }
 

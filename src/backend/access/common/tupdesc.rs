@@ -32,7 +32,7 @@ use crate::access::tupdesc::{
 };
 use crate::access::tupdesc_details::AttrMissing;
 use crate::access::toast_compression::INVALID_COMPRESSION_METHOD;
-use crate::c::{varlena, NameData, NameStr, NAMEDATALEN, PG_INT16_MAX};
+use crate::c::{NameData, NameStr, NAMEDATALEN, PG_INT16_MAX};
 use crate::catalog::catalog::IsCatalogRelationOid;
 use crate::catalog::genbki::{
     BOOLOID, DEFAULT_COLLATION_OID, INT4OID, INT8OID, OIDOID, RECORDOID, TEXTARRAYOID, TEXTOID,
@@ -47,8 +47,6 @@ use crate::nodes::nodes::{stringToNode, Node};
 use crate::pg_config::{ALIGNOF_DOUBLE, ALIGNOF_INT, ALIGNOF_SHORT, FLOAT8PASSBYVAL};
 use crate::postgres::{DatumGetUInt32, ObjectIdGetDatum};
 use crate::postgres_ext::{InvalidOid, Oid};
-use crate::nodes::parsenodes::AclMode;
-use crate::utils::acl::AclItem;
 use crate::utils::datum::{datum_copy, datum_is_equal};
 use crate::utils::syscache::{ReleaseSysCache, SearchSysCache1, SysCacheIdentifier};
 use crate::elog;
@@ -134,7 +132,7 @@ impl TupleDescData {
     /// `attnum` (0-based) from its `FormData_pg_attribute`. Must be called after
     /// any change to a `FormData_pg_attribute` in the descriptor.
     pub(crate) fn populate_compact_attribute(&mut self, attnum: usize) {
-        let mut tmp = empty_compact_attribute();
+        let mut tmp = CompactAttribute::new();
         Self::populate_compact_attribute_internal(&self.attrs[attnum], &mut tmp);
         self.compact_attrs[attnum] = tmp;
     }
@@ -145,11 +143,11 @@ impl TupleDescData {
     pub(crate) fn verify_compact_attribute(&self, attnum: usize) {
         if cfg!(debug_assertions) {
             let cattr = &self.compact_attrs[attnum];
-            let mut tmp = empty_compact_attribute();
+            let mut tmp = CompactAttribute::new();
             Self::populate_compact_attribute_internal(&self.attrs[attnum], &mut tmp);
             tmp.attcacheoff = cattr.attcacheoff;
             tmp.attnullability = cattr.attnullability;
-            crate::assert!(compact_attribute_eq(&tmp, cattr));
+            crate::assert!(&tmp == cattr);
         }
     }
 
@@ -162,8 +160,8 @@ impl TupleDescData {
         let mut attrs = Vec::with_capacity(n);
         let mut compact_attrs = Vec::with_capacity(n);
         for _ in 0..n {
-            attrs.push(empty_form_attribute());
-            compact_attrs.push(empty_compact_attribute());
+            attrs.push(FormData_pg_attribute::new());
+            compact_attrs.push(CompactAttribute::new());
         }
 
         Self {
@@ -196,7 +194,7 @@ impl TupleDescData {
     pub fn create_copy(&self) -> Self {
         let mut desc = Self::create_template(self.natts);
         for i in 0..desc.natts_usize() {
-            desc.attrs[i] = clone_form_attribute(&self.attrs[i]);
+            desc.attrs[i] = self.attrs[i].clone();
             let att = &mut desc.attrs[i];
             att.attnotnull = false;
             att.atthasdef = false;
@@ -217,7 +215,7 @@ impl TupleDescData {
         crate::assert!(natts <= self.natts);
         let mut desc = Self::create_template(natts);
         for i in 0..desc.natts_usize() {
-            desc.attrs[i] = clone_form_attribute(&self.attrs[i]);
+            desc.attrs[i] = self.attrs[i].clone();
             let att = &mut desc.attrs[i];
             att.attnotnull = false;
             att.atthasdef = false;
@@ -237,7 +235,7 @@ impl TupleDescData {
     pub fn create_copy_constr(&self) -> Self {
         let mut desc = Self::create_template(self.natts);
         for i in 0..desc.natts_usize() {
-            desc.attrs[i] = clone_form_attribute(&self.attrs[i]);
+            desc.attrs[i] = self.attrs[i].clone();
             desc.populate_compact_attribute(i);
             desc.compact_attrs[i].attnullability = self.compact_attrs[i].attnullability;
         }
@@ -305,8 +303,8 @@ impl TupleDescData {
         dst.natts = self.natts;
         dst.tdtypeid = self.tdtypeid;
         dst.tdtypmod = self.tdtypmod;
-        dst.attrs = self.attrs.iter().map(clone_form_attribute).collect();
-        dst.compact_attrs = self.compact_attrs.iter().map(clone_compact_attribute).collect();
+        dst.attrs.clone_from(&self.attrs);
+        dst.compact_attrs.clone_from(&self.compact_attrs);
 
         for i in 0..dst.natts_usize() {
             let att = &mut dst.attrs[i];
@@ -689,34 +687,12 @@ impl TupleDescData {
 
 /// `FreeTupleDesc`: free a descriptor and all its substructure. Taking the
 /// descriptor by value reclaims it; its `Vec`s and `Box<TupleConstr>` drop with
-/// it. Mirrors the C entry point and asserts the refcount.
+/// it. Mirrors the C entry point and asserts the refcount. Explicit calls are no
+/// longer needed: a `TupleDescData` drops on scope exit.
+#[deprecated(note = "TupleDescData drops on scope exit; explicit free is unnecessary")]
 pub fn free_tuple_desc(tupdesc: TupleDescData) {
     crate::assert!(tupdesc.tdrefcount <= 0);
     drop(tupdesc);
-}
-
-/// `IncrTupleDescRefCount`: bump a reference-counted descriptor's refcount.
-///
-/// TODO(resowner): C also logs the reference in `CurrentResourceOwner` so an
-/// `ERROR` unwind releases it. That registration needs a second owning handle to
-/// the descriptor, which only exists once the handle graduates from `Box` (unique
-/// ownership) to `Arc<TupleDescData>` at the relcache/typcache milestone. Until
-/// then this maintains only the manual counter (the descriptors that reach M1 are
-/// not yet shared or resource-owner tracked).
-pub fn incr_tuple_desc_ref_count(tupdesc: &mut TupleDescData) {
-    crate::assert!(tupdesc.tdrefcount >= 0);
-    tupdesc.tdrefcount += 1;
-}
-
-/// `DecrTupleDescRefCount`: drop a reference taken by `incr_tuple_desc_ref_count`.
-///
-/// TODO(resowner): see `incr_tuple_desc_ref_count`. With unique `Box` ownership
-/// the descriptor cannot be freed from here (the owner holds the `Box`); this
-/// adjusts the manual counter only. Freeing at zero is reinstated with the `Arc`
-/// handle, when this and `FreeTupleDesc` converge on dropping the last reference.
-pub fn decr_tuple_desc_ref_count(tupdesc: &mut TupleDescData) {
-    crate::assert!(tupdesc.tdrefcount > 0);
-    tupdesc.tdrefcount -= 1;
 }
 
 /// `BuildDescFromLists`: build a constraint-free descriptor for a RECORD return
@@ -739,93 +715,6 @@ pub fn build_desc_from_lists(
         desc.init_entry_collation(attnum, collations[i]);
     }
     desc
-}
-
-// --- small constructors / comparisons for the owned attribute rows ---
-
-fn empty_compact_attribute() -> CompactAttribute {
-    CompactAttribute {
-        attcacheoff: -1,
-        attlen: 0,
-        attbyval: false,
-        attispackable: false,
-        atthasmissing: false,
-        attisdropped: false,
-        attgenerated: false,
-        attnullability: 0,
-        attalignby: 0,
-    }
-}
-
-fn clone_compact_attribute(c: &CompactAttribute) -> CompactAttribute {
-    CompactAttribute {
-        attcacheoff: c.attcacheoff,
-        attlen: c.attlen,
-        attbyval: c.attbyval,
-        attispackable: c.attispackable,
-        atthasmissing: c.atthasmissing,
-        attisdropped: c.attisdropped,
-        attgenerated: c.attgenerated,
-        attnullability: c.attnullability,
-        attalignby: c.attalignby,
-    }
-}
-
-fn compact_attribute_eq(a: &CompactAttribute, b: &CompactAttribute) -> bool {
-    a.attcacheoff == b.attcacheoff
-        && a.attlen == b.attlen
-        && a.attbyval == b.attbyval
-        && a.attispackable == b.attispackable
-        && a.atthasmissing == b.atthasmissing
-        && a.attisdropped == b.attisdropped
-        && a.attgenerated == b.attgenerated
-        && a.attnullability == b.attnullability
-        && a.attalignby == b.attalignby
-}
-
-fn empty_form_attribute() -> FormData_pg_attribute {
-    // The CATALOG_VARLEN tail fields (attacl/attoptions/attfdwoptions/
-    // attmissingval) are never present in an in-memory tupdesc; we only ever
-    // touch the fixed part. Construct them as empty/zero placeholders so the
-    // struct (`#[repr(C)]`) is well-formed.
-    let empty_varlena = || varlena { vl_len_: [0u8; 4], dat: [] };
-    FormData_pg_attribute {
-        attrelid: InvalidOid,
-        attname: NameData { data: [0u8; NAMEDATALEN] },
-        atttypid: InvalidOid,
-        attlen: 0,
-        attnum: 0,
-        atttypmod: -1,
-        attndims: 0,
-        attbyval: false,
-        attalign: 0,
-        attstorage: 0,
-        attcompression: 0,
-        attnotnull: false,
-        atthasdef: false,
-        atthasmissing: false,
-        attidentity: 0,
-        attgenerated: 0,
-        attisdropped: false,
-        attislocal: false,
-        attinhcount: 0,
-        attcollation: InvalidOid,
-        attstattarget: 0,
-        attacl: [AclItem {
-            grantee: InvalidOid,
-            grantor: InvalidOid,
-            privs: AclMode::from_bits_retain(0),
-        }],
-        attoptions: [empty_varlena()],
-        attfdwoptions: [empty_varlena()],
-        attmissingval: empty_varlena(),
-    }
-}
-
-fn clone_form_attribute(a: &FormData_pg_attribute) -> FormData_pg_attribute {
-    let mut out = empty_form_attribute();
-    copy_attr_fixed(&mut out, a);
-    out
 }
 
 #[cfg(test)]
@@ -852,7 +741,7 @@ mod tests {
         assert!(desc.constr.is_none());
         assert_eq!(desc.attrs.len(), 3);
         assert_eq!(desc.compact_attrs.len(), 3);
-        free_tuple_desc(desc);
+        drop(desc);
     }
 
     #[test]
@@ -873,7 +762,7 @@ mod tests {
         assert!(desc.compact_attr(0).attbyval);
         assert_eq!(desc.compact_attr(0).attnullability, ATTNULLABLE_UNRESTRICTED);
 
-        free_tuple_desc(desc);
+        drop(desc);
     }
 
     #[test]
@@ -886,8 +775,8 @@ mod tests {
         assert_eq!(NameStr(&copy.attr(0).attname)[..1], *b"a");
         assert_eq!(copy.attr(1).atttypid, INT8OID);
 
-        free_tuple_desc(src);
-        free_tuple_desc(copy);
+        drop(src);
+        drop(copy);
     }
 
     #[test]
@@ -901,10 +790,10 @@ mod tests {
         assert!(!a.equals(&c));
         assert!(!a.equals(&d));
 
-        free_tuple_desc(a);
-        free_tuple_desc(b);
-        free_tuple_desc(c);
-        free_tuple_desc(d);
+        drop(a);
+        drop(b);
+        drop(c);
+        drop(d);
     }
 
     #[test]
@@ -912,8 +801,8 @@ mod tests {
         let a = make_desc(&[("x", INT4OID)]);
         let b = make_desc(&[("x", INT4OID), ("y", BOOLOID)]);
         assert!(!a.equals(&b));
-        free_tuple_desc(a);
-        free_tuple_desc(b);
+        drop(a);
+        drop(b);
     }
 
     #[test]
@@ -925,9 +814,9 @@ mod tests {
         let c = make_desc(&[("y", INT4OID)]); // different name
         assert!(!a.row_types_equal(&c));
 
-        free_tuple_desc(a);
-        free_tuple_desc(b);
-        free_tuple_desc(c);
+        drop(a);
+        drop(b);
+        drop(c);
     }
 
     // hash_row_type is structurally covered by row_types_equal; its numeric
@@ -945,8 +834,8 @@ mod tests {
         assert!(dst.constr.is_none());
         assert_eq!(NameStr(&dst.attr(0).attname)[..1], *b"a");
 
-        free_tuple_desc(src);
-        free_tuple_desc(dst);
+        drop(src);
+        drop(dst);
     }
 
     #[test]
@@ -960,8 +849,8 @@ mod tests {
         assert_eq!(dst.attr(0).atttypid, INT8OID);
         assert_eq!(dst.attr(0).attnum, 1); // renumbered to dst position
 
-        free_tuple_desc(src);
-        free_tuple_desc(dst);
+        drop(src);
+        drop(dst);
     }
 
     #[test]
@@ -970,7 +859,7 @@ mod tests {
         let copy = src.create_truncated_copy(2);
         assert_eq!(copy.natts, 2);
         assert_eq!(NameStr(&copy.attr(1).attname)[..1], *b"b");
-        free_tuple_desc(src);
-        free_tuple_desc(copy);
+        drop(src);
+        drop(copy);
     }
 }

@@ -67,24 +67,24 @@ pub use crate::backend::nodes::nodeFuncs::{
 };
 
 pub fn applyRelabelType(
-    arg: Box<Node>,
+    arg: Node,
     rtype: Oid,
     rtypmod: i32,
     rcollid: Oid,
     rformat: CoercionForm,
     rlocation: i32,
     overwrite_ok: bool,
-) -> Box<Node> {
+) -> Node {
     let _ = (arg, rtype, rtypmod, rcollid, rformat, rlocation, overwrite_ok);
     unimplemented!()
 }
 
-pub fn relabel_to_typmod(expr: Box<Node>, typmod: i32) -> Box<Node> {
+pub fn relabel_to_typmod(expr: Node, typmod: i32) -> Node {
     let _ = (expr, typmod);
     unimplemented!()
 }
 
-pub fn strip_implicit_coercions(node: Box<Node>) -> Box<Node> {
+pub fn strip_implicit_coercions(node: Node) -> Node {
     let _ = node;
     unimplemented!()
 }
@@ -153,7 +153,7 @@ pub fn query_tree_mutator(
 }
 
 pub fn range_table_walker(
-    rtable: &[Box<Node>],
+    rtable: &[Node],
     walker: impl FnMut(&Node) -> bool,
     flags: QueryTreeWalkerFlags,
 ) -> bool {
@@ -162,10 +162,10 @@ pub fn range_table_walker(
 }
 
 pub fn range_table_mutator(
-    rtable: Vec<Box<Node>>,
+    rtable: Vec<Node>,
     mutator: impl FnMut(Node) -> Node,
     flags: QueryTreeWalkerFlags,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     let _ = (rtable, mutator, flags);
     unimplemented!()
 }

@@ -62,15 +62,15 @@ pub struct CopyFormatOptions {
     /// CSV escape char (must be 1 byte)
     pub escape: Option<String>,
     /// list of column names
-    pub force_quote: Vec<Box<Node>>,
+    pub force_quote: Vec<Node>,
     /// FORCE_QUOTE *?
     pub force_quote_all: bool,
     /// per-column CSV FQ flags
     pub force_quote_flags: Vec<bool>,
-    pub force_notnull: Vec<Box<Node>>,
+    pub force_notnull: Vec<Node>,
     pub force_notnull_all: bool,
     pub force_notnull_flags: Vec<bool>,
-    pub force_null: Vec<Box<Node>>,
+    pub force_null: Vec<Node>,
     pub force_null_all: bool,
     pub force_null_flags: Vec<bool>,
     pub convert_selectively: bool,
@@ -79,7 +79,7 @@ pub struct CopyFormatOptions {
     /// maximum tolerable number of errors
     pub reject_limit: i64,
     /// list of column names (can be empty)
-    pub convert_select: Vec<Box<Node>>,
+    pub convert_select: Vec<Node>,
 }
 
 /// Opaque; private state defined in copyto.c, not ported.
@@ -105,7 +105,7 @@ pub fn ProcessCopyOptions(
     _pstate: &mut ParseState,
     _opts_out: &mut CopyFormatOptions,
     _is_from: bool,
-    _options: Vec<Box<Node>>,
+    _options: Vec<Node>,
 ) {
     unimplemented!()
 }
@@ -118,8 +118,8 @@ pub fn BeginCopyFrom(
     _filename: Option<&str>,
     _is_program: bool,
     _data_source_cb: Option<CopyDataSourceCb>,
-    _attnamelist: Vec<Box<Node>>,
-    _options: Vec<Box<Node>>,
+    _attnamelist: Vec<Node>,
+    _options: Vec<Node>,
 ) -> CopyFromState {
     unimplemented!()
 }
@@ -169,8 +169,8 @@ pub fn BeginCopyTo(
     _filename: Option<&str>,
     _is_program: bool,
     _data_dest_cb: Option<CopyDataDestCb>,
-    _attnamelist: Vec<Box<Node>>,
-    _options: Vec<Box<Node>>,
+    _attnamelist: Vec<Node>,
+    _options: Vec<Node>,
 ) -> CopyToState {
     unimplemented!()
 }
@@ -186,7 +186,7 @@ pub fn DoCopyTo(_cstate: CopyToState) -> u64 {
 pub fn CopyGetAttnums(
     _tup_desc: TupleDesc,
     _rel: Relation,
-    _attnamelist: Vec<Box<Node>>,
-) -> Vec<Box<Node>> {
+    _attnamelist: Vec<Node>,
+) -> Vec<Node> {
     unimplemented!()
 }

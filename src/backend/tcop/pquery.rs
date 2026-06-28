@@ -316,10 +316,10 @@ mod tests {
     /// Plan a const SELECT through the real front half of the pipeline.
     fn plan(sql: &str) -> PlannedStmt {
         let mut list = crate::backend::parser::parser::raw_parser(sql, RawParseMode::Default);
-        let Node::RawStmt(rs) = *list.remove(0) else { panic!("not a RawStmt") };
+        let Node::RawStmt(rs) = list.remove(0) else { panic!("not a RawStmt") };
         let rs: RawStmt = *rs;
         let q = crate::backend::parser::analyze::parse_analyze_fixedparams(&rs, sql, &[], 0, None);
-        let mut rewritten = crate::backend::rewrite::rewriteHandler::query_rewrite(q);
+        let mut rewritten = crate::backend::rewrite::rewriteHandler::query_rewrite(*q);
         let mut parse = rewritten.remove(0);
         crate::backend::optimizer::plan::planner::standard_planner(&mut parse, sql, 0, None)
     }

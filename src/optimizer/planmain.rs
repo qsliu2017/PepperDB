@@ -1,6 +1,6 @@
 //! Translated from PostgreSQL src/include/optimizer/planmain.h
 
-#![allow(clippy::boxed_local, reason = "1:1 PG port: Box<Node>/Box<Path> mirrors PG pointer-passed nodes")]
+#![allow(clippy::boxed_local, reason = "1:1 PG port: Node/Box<Path> mirrors PG pointer-passed nodes")]
 #![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
 
 use crate::access::attnum::AttrNumber;
@@ -33,7 +33,7 @@ pub fn preprocess_minmax_aggregates(root: &mut PlannerInfo) {
 
 /* prototypes for plan/createplan.c */
 /// PG `create_plan`. See `crate::backend::optimizer::plan::planmain`. Returns the
-/// polymorphic top plan node (`Plan *` in C -> `Box<Node>`).
+/// polymorphic top plan node (`Plan *` in C -> `Node`).
 pub use crate::backend::optimizer::plan::planmain::create_plan;
 
 pub fn make_foreignscan(
@@ -94,8 +94,8 @@ pub fn make_agg(
 
 pub fn make_limit(
     lefttree: Box<Plan>,
-    limit_offset: Option<Box<Node>>,
-    limit_count: Option<Box<Node>>,
+    limit_offset: Option<Node>,
+    limit_count: Option<Node>,
     limit_option: LimitOption,
     uniq_num_cols: i32,
     uniq_col_idx: &[AttrNumber],
@@ -242,7 +242,7 @@ pub fn remove_useless_self_joins(root: &mut PlannerInfo, joinlist: Vec<Node>) ->
 
 /* prototypes for plan/setrefs.c */
 /// PG `set_plan_references`. See `crate::backend::optimizer::plan::setrefs`.
-/// `plan` is the polymorphic top plan node (`Plan *` in C -> `Box<Node>`).
+/// `plan` is the polymorphic top plan node (`Plan *` in C -> `Node`).
 pub use crate::backend::optimizer::plan::setrefs::set_plan_references;
 
 pub fn trivial_subqueryscan(plan: &SubqueryScan) -> bool {

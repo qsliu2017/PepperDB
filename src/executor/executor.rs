@@ -75,7 +75,7 @@ pub type ExecutorRun_hook_type =
 pub type ExecutorFinish_hook_type = fn(query_desc: &mut QueryDesc);
 pub type ExecutorEnd_hook_type = fn(query_desc: &mut QueryDesc);
 pub type ExecutorCheckPerms_hook_type =
-    fn(range_table: &[Box<Node>], rte_perm_infos: &[Box<Node>], ereport_on_violation: bool) -> bool;
+    fn(range_table: &[Node], rte_perm_infos: &[Node], ereport_on_violation: bool) -> bool;
 
 // extern globals; live process state goes in a later phase.
 pub static mut ExecutorStart_hook: Option<ExecutorStart_hook_type> = None;
@@ -217,13 +217,13 @@ pub fn TupleHashEntryGetAdditional(
 // execJunk.c
 // ---------------------------------------------------------------------------
 pub fn ExecInitJunkFilter(
-    _target_list: &[Box<Node>],
+    _target_list: &[Node],
     _slot: &mut TupleTableSlot,
 ) -> Box<JunkFilter> {
     unimplemented!()
 }
 pub fn ExecInitJunkFilterConversion(
-    _target_list: &[Box<Node>],
+    _target_list: &[Node],
     _clean_tup_type: TupleDesc,
     _slot: &mut TupleTableSlot,
 ) -> Box<JunkFilter> {
@@ -234,7 +234,7 @@ pub fn ExecFindJunkAttribute(_junkfilter: &JunkFilter, _attr_name: &str) -> Opti
     unimplemented!()
 }
 pub fn ExecFindJunkAttributeInTlist(
-    _targetlist: &[Box<Node>],
+    _targetlist: &[Node],
     _attr_name: &str,
 ) -> Option<AttrNumber> {
     unimplemented!()
@@ -281,8 +281,8 @@ pub fn ExecutorRewind(_query_desc: &mut QueryDesc) {
     unimplemented!()
 }
 pub fn ExecCheckPermissions(
-    _range_table: &[Box<Node>],
-    _rteperminfos: &[Box<Node>],
+    _range_table: &[Node],
+    _rteperminfos: &[Node],
     _ereport_on_violation: bool,
 ) -> bool {
     unimplemented!()
@@ -294,7 +294,7 @@ pub fn CheckValidResultRel(
     _result_rel_info: &mut ResultRelInfo,
     _operation: CmdType,
     _on_conflict_action: OnConflictAction,
-    _merge_actions: &[Box<Node>],
+    _merge_actions: &[Node],
 ) {
     unimplemented!()
 }
@@ -332,7 +332,7 @@ pub fn ExecRelGenVirtualNotNull(
     _result_rel_info: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
     _estate: &mut EState,
-    _notnull_virtual_attrs: &[Box<Node>],
+    _notnull_virtual_attrs: &[Node],
 ) -> Option<AttrNumber> {
     unimplemented!()
 }
@@ -375,7 +375,7 @@ pub fn ExecUpdateLockMode(_estate: &mut EState, _relinfo: &mut ResultRelInfo) ->
 pub fn ExecFindRowMark(_estate: &mut EState, _rti: Index, _missing_ok: bool) -> Option<Box<ExecRowMark>> {
     unimplemented!()
 }
-pub fn ExecBuildAuxRowMark(_erm: &mut ExecRowMark, _targetlist: &[Box<Node>]) -> Box<ExecAuxRowMark> {
+pub fn ExecBuildAuxRowMark(_erm: &mut ExecRowMark, _targetlist: &[Node]) -> Box<ExecAuxRowMark> {
     unimplemented!()
 }
 pub fn EvalPlanQual(
@@ -390,16 +390,16 @@ pub fn EvalPlanQualInit(
     _epqstate: &mut EPQState,
     _parentestate: &mut EState,
     _subplan: Option<&crate::nodes::plannodes::Plan>,
-    _auxrowmarks: &[Box<Node>],
+    _auxrowmarks: &[Node],
     _epq_param: i32,
-    _result_relations: &[Box<Node>],
+    _result_relations: &[Node],
 ) {
     unimplemented!()
 }
 pub fn EvalPlanQualSetPlan(
     _epqstate: &mut EPQState,
     _subplan: Option<&crate::nodes::plannodes::Plan>,
-    _auxrowmarks: &[Box<Node>],
+    _auxrowmarks: &[Node],
 ) {
     unimplemented!()
 }
@@ -443,7 +443,7 @@ pub fn ExecSetExecProcNode(
 ) {
     node.exec_proc_node = Some(function);
 }
-pub fn MultiExecProcNode(_node: &mut crate::nodes::execnodes::PlanState) -> Option<Box<Node>> {
+pub fn MultiExecProcNode(_node: &mut crate::nodes::execnodes::PlanState) -> Option<Node> {
     unimplemented!()
 }
 /// PG `ExecEndNode`. Takes the `PlanStateNode` enum (downcast-free dispatch).
@@ -474,13 +474,13 @@ pub fn ExecInitExprWithParams(
 /// always-true).
 pub use crate::backend::executor::execExpr::exec_init_qual as ExecInitQual;
 pub fn ExecInitCheck(
-    _qual: &[Box<Node>],
+    _qual: &[Node],
     _parent: Option<&mut crate::nodes::execnodes::PlanState>,
 ) -> Box<ExprState> {
     unimplemented!()
 }
 pub fn ExecInitExprList(
-    _nodes: &[Box<Node>],
+    _nodes: &[Node],
     _parent: Option<&mut crate::nodes::execnodes::PlanState>,
 ) -> Vec<Box<ExprState>> {
     unimplemented!()
@@ -512,8 +512,8 @@ pub fn ExecBuildHash32Expr(
     _desc: TupleDesc,
     _ops: &'static dyn TupleTableSlotOps,
     _hashfunc_oids: &[Oid],
-    _collations: &[Box<Node>],
-    _hash_exprs: &[Box<Node>],
+    _collations: &[Node],
+    _hash_exprs: &[Node],
     _opstrict: &[bool],
     _parent: &mut crate::nodes::execnodes::PlanState,
     _init_value: u32,
@@ -542,13 +542,13 @@ pub fn ExecBuildParamSetEqual(
     _rops: &'static dyn TupleTableSlotOps,
     _eqfunctions: &[Oid],
     _collations: &[Oid],
-    _param_exprs: &[Box<Node>],
+    _param_exprs: &[Node],
     _parent: &mut crate::nodes::execnodes::PlanState,
 ) -> Box<ExprState> {
     unimplemented!()
 }
 pub fn ExecBuildProjectionInfo(
-    _target_list: &[Box<Node>],
+    _target_list: &[Node],
     _econtext: &mut ExprContext,
     _slot: &mut TupleTableSlot,
     _parent: Option<&mut crate::nodes::execnodes::PlanState>,
@@ -558,9 +558,9 @@ pub fn ExecBuildProjectionInfo(
 }
 #[allow(clippy::too_many_arguments)]
 pub fn ExecBuildUpdateProjection(
-    _target_list: &[Box<Node>],
+    _target_list: &[Node],
     _eval_target_list: bool,
-    _target_colnos: &[Box<Node>],
+    _target_colnos: &[Node],
     _rel_desc: TupleDesc,
     _econtext: &mut ExprContext,
     _slot: &mut TupleTableSlot,
@@ -571,13 +571,13 @@ pub fn ExecBuildUpdateProjection(
 pub fn ExecPrepareExpr(_node: &crate::nodes::primnodes::Expr, _estate: &mut EState) -> Box<ExprState> {
     unimplemented!()
 }
-pub fn ExecPrepareQual(_qual: &[Box<Node>], _estate: &mut EState) -> Box<ExprState> {
+pub fn ExecPrepareQual(_qual: &[Node], _estate: &mut EState) -> Box<ExprState> {
     unimplemented!()
 }
-pub fn ExecPrepareCheck(_qual: &[Box<Node>], _estate: &mut EState) -> Box<ExprState> {
+pub fn ExecPrepareCheck(_qual: &[Node], _estate: &mut EState) -> Box<ExprState> {
     unimplemented!()
 }
-pub fn ExecPrepareExprList(_nodes: &[Box<Node>], _estate: &mut EState) -> Vec<Box<ExprState>> {
+pub fn ExecPrepareExprList(_nodes: &[Node], _estate: &mut EState) -> Vec<Box<ExprState>> {
     unimplemented!()
 }
 
@@ -745,10 +745,10 @@ pub fn ExecInitNullTupleSlot(
 }
 pub use crate::backend::executor::execTuples::exec_type_from_tl as ExecTypeFromTL;
 pub use crate::backend::executor::execTuples::exec_clean_type_from_tl as ExecCleanTypeFromTL;
-pub fn ExecTypeFromExprList(_expr_list: &[Box<Node>]) -> TupleDesc {
+pub fn ExecTypeFromExprList(_expr_list: &[Node]) -> TupleDesc {
     unimplemented!()
 }
-pub fn ExecTypeSetColNames(_type_info: TupleDesc, _names_list: &[Box<Node>]) {
+pub fn ExecTypeSetColNames(_type_info: TupleDesc, _names_list: &[Node]) {
     unimplemented!()
 }
 pub fn UpdateChangedParamSet(_node: &mut crate::nodes::execnodes::PlanState, _newchg: &Bitmapset) {
@@ -877,8 +877,8 @@ pub fn ExecOpenScanRelation(_estate: &mut EState, _scanrelid: Index, _eflags: i3
 }
 pub fn ExecInitRangeTable(
     _estate: &mut EState,
-    _range_table: &[Box<Node>],
-    _perm_infos: &[Box<Node>],
+    _range_table: &[Node],
+    _perm_infos: &[Node],
     _unpruned_relids: &Bitmapset,
 ) {
     unimplemented!()
@@ -994,9 +994,9 @@ pub fn ExecInsertIndexTuples(
     _estate: &mut EState,
     _update: bool,
     _no_dup_err: bool,
-    _arbiter_indexes: &[Box<Node>],
+    _arbiter_indexes: &[Node],
     _only_summarizing: bool,
-) -> (Vec<Box<Node>>, bool) {
+) -> (Vec<Node>, bool) {
     unimplemented!()
 }
 pub fn ExecCheckIndexConstraints(
@@ -1005,7 +1005,7 @@ pub fn ExecCheckIndexConstraints(
     _estate: &mut EState,
     _conflict_tid: crate::access::heapam::ItemPointer,
     _tupleid: crate::access::heapam::ItemPointer,
-    _arbiter_indexes: &[Box<Node>],
+    _arbiter_indexes: &[Node],
 ) -> bool {
     unimplemented!()
 }

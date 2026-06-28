@@ -21,8 +21,8 @@ pub const DEFAULT_TYPDELIM: u8 = b',';
 
 pub fn DefineType(
     _pstate: &mut ParseState,
-    _names: Vec<Box<Node>>,
-    _parameters: Vec<Box<Node>>,
+    _names: Vec<Node>,
+    _parameters: Vec<Node>,
 ) -> ObjectAddress {
     unimplemented!()
 }
@@ -47,7 +47,7 @@ pub fn AlterEnum(_stmt: &AlterEnumStmt) -> ObjectAddress {
     unimplemented!()
 }
 
-pub fn DefineCompositeType(_typevar: &RangeVar, _coldeflist: Vec<Box<Node>>) -> ObjectAddress {
+pub fn DefineCompositeType(_typevar: &RangeVar, _coldeflist: Vec<Node>) -> ObjectAddress {
     unimplemented!()
 }
 
@@ -63,28 +63,28 @@ pub fn AssignTypeMultirangeArrayOid() -> Oid {
     unimplemented!()
 }
 
-pub fn AlterDomainDefault(_names: Vec<Box<Node>>, _defaultRaw: Box<Node>) -> ObjectAddress {
+pub fn AlterDomainDefault(_names: Vec<Node>, _defaultRaw: Node) -> ObjectAddress {
     unimplemented!()
 }
 
-pub fn AlterDomainNotNull(_names: Vec<Box<Node>>, _notNull: bool) -> ObjectAddress {
+pub fn AlterDomainNotNull(_names: Vec<Node>, _notNull: bool) -> ObjectAddress {
     unimplemented!()
 }
 
 // out-param constrAddr folded into the returned tuple.
 pub fn AlterDomainAddConstraint(
-    _names: Vec<Box<Node>>,
-    _newConstraint: Box<Node>,
+    _names: Vec<Node>,
+    _newConstraint: Node,
 ) -> (ObjectAddress, ObjectAddress) {
     unimplemented!()
 }
 
-pub fn AlterDomainValidateConstraint(_names: Vec<Box<Node>>, _constrName: &str) -> ObjectAddress {
+pub fn AlterDomainValidateConstraint(_names: Vec<Node>, _constrName: &str) -> ObjectAddress {
     unimplemented!()
 }
 
 pub fn AlterDomainDropConstraint(
-    _names: Vec<Box<Node>>,
+    _names: Vec<Node>,
     _constrName: &str,
     _behavior: DropBehavior,
     _missing_ok: bool,
@@ -101,7 +101,7 @@ pub fn RenameType(_stmt: &RenameStmt) -> ObjectAddress {
 }
 
 pub fn AlterTypeOwner(
-    _names: Vec<Box<Node>>,
+    _names: Vec<Node>,
     _newOwnerId: Oid,
     _objecttype: ObjectType,
 ) -> ObjectAddress {
@@ -118,7 +118,7 @@ pub fn AlterTypeOwnerInternal(_typeOid: Oid, _newOwnerId: Oid) {
 
 // out-param oldschema folded into the returned tuple.
 pub fn AlterTypeNamespace(
-    _names: Vec<Box<Node>>,
+    _names: Vec<Node>,
     _newschema: &str,
     _objecttype: ObjectType,
 ) -> (ObjectAddress, Oid) {

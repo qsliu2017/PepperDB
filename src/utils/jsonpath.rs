@@ -200,7 +200,7 @@ pub fn jspGetArraySubscript(
     unimplemented!()
 }
 
-pub fn jspIsMutable(path: &JsonPath, varnames: &[Box<Node>], varexprs: &[Box<Node>]) -> bool {
+pub fn jspIsMutable(path: &JsonPath, varnames: &[Node], varexprs: &[Node]) -> bool {
     unimplemented!()
 }
 

@@ -51,12 +51,12 @@ pub struct ExplainState {
     pub format: ExplainFormat, // output format
     // state for output formatting --- not reset for each new plan tree
     pub indent: i32,                  // current indentation level
-    pub grouping_stack: Vec<Box<Node>>, // format-specific grouping state
+    pub grouping_stack: Vec<Node>, // format-specific grouping state
     // state related to the current plan tree (filled by ExplainPrintPlan)
     pub pstmt: *mut PlannedStmt,      // top of plan // TODO(ptr)
-    pub rtable: Vec<Box<Node>>,      // range table
-    pub rtable_names: Vec<Box<Node>>, // alias names for RTEs
-    pub deparse_cxt: Vec<Box<Node>>, // context list for deparsing expressions
+    pub rtable: Vec<Node>,      // range table
+    pub rtable_names: Vec<Node>, // alias names for RTEs
+    pub deparse_cxt: Vec<Node>, // context list for deparsing expressions
     pub printed_subplans: Bitmapset, // ids of SubPlans we've printed
     pub hide_workers: bool,          // set if we find an invisible Gather
     pub rtable_size: i32,            // length of rtable excluding the GROUP entry
@@ -73,7 +73,7 @@ pub type ExplainOptionHandler =
 /// Hook to perform additional EXPLAIN options validation.
 /// C: `void (*explain_validate_options_hook_type)(ExplainState *, List *, ParseState *);`
 pub type explain_validate_options_hook_type =
-    fn(es: &mut ExplainState, options: &[Box<Node>], pstate: &mut ParseState);
+    fn(es: &mut ExplainState, options: &[Node], pstate: &mut ParseState);
 
 pub static mut explain_validate_options_hook: Option<explain_validate_options_hook_type> = None;
 
@@ -81,7 +81,7 @@ pub fn NewExplainState() -> Box<ExplainState> {
     unimplemented!()
 }
 
-pub fn ParseExplainOptionList(_es: &mut ExplainState, _options: &[Box<Node>], _pstate: &mut ParseState) {
+pub fn ParseExplainOptionList(_es: &mut ExplainState, _options: &[Node], _pstate: &mut ParseState) {
     unimplemented!()
 }
 

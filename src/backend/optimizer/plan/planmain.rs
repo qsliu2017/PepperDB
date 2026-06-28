@@ -95,7 +95,7 @@ pub fn query_planner(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback)
 /// empty rangetable.
 fn jointree_is_empty(root: &PlannerInfo) -> bool {
     use crate::nodes::nodes::Node;
-    match root.parse.jointree.as_deref() {
+    match root.parse.jointree.as_ref() {
         Some(Node::FromExpr(f)) => f.fromlist.is_empty(),
         // No jointree at all is also "empty FROM" for our purposes.
         None => true,
@@ -104,14 +104,14 @@ fn jointree_is_empty(root: &PlannerInfo) -> bool {
 }
 
 /// Build the dummy result rel's PathTarget from `root.processed_tlist`. The
-/// processed_tlist holds `Box<Node>` (TargetEntry-wrapped); unwrap them for
+/// processed_tlist holds `Node` (TargetEntry-wrapped); unwrap them for
 /// make_pathtarget_from_tlist.
 fn make_pathtarget_from_tlist_nodes(root: &PlannerInfo) -> PathTarget {
     use crate::nodes::nodes::Node;
     let tlist: Vec<_> = root
         .processed_tlist
         .iter()
-        .map(|n| match &**n {
+        .map(|n| match n {
             Node::TargetEntry(te) => (**te).clone(),
             _ => not_yet_reachable("query_planner: processed_tlist entry is not a TargetEntry"),
         })
@@ -191,7 +191,7 @@ fn make_result_rel(reltarget: PathTarget) -> RelOptInfo {
 /// Returns the polymorphic top plan node (`Plan *` in C). For M1 the path is the
 /// Result path; create_plan_recurse builds the Result node, and
 /// apply_tlist_labeling stamps the original column names.
-pub fn create_plan(root: &mut PlannerInfo, best_path: &Path) -> Box<crate::nodes::nodes::Node> {
+pub fn create_plan(root: &mut PlannerInfo, best_path: &Path) -> crate::nodes::nodes::Node {
     use crate::nodes::nodes::Node;
     crate::assert!(root.plan_params.is_empty());
 
@@ -208,18 +208,18 @@ pub fn create_plan(root: &mut PlannerInfo, best_path: &Path) -> Box<crate::nodes
     crate::assert!(root.cur_outer_params.is_empty());
     root.plan_params = Vec::new();
 
-    Box::new(Node::Result(Box::new(plan)))
+    Node::Result(Box::new(plan))
 }
 
 /// `apply_tlist_labeling(plan->targetlist, root->processed_tlist)` over the
-/// Result node's plan targetlist. Both are `Vec<Box<Node>>` of TargetEntries.
+/// Result node's plan targetlist. Both are `Vec<Node>` of TargetEntries.
 fn apply_top_tlist_labeling(root: &PlannerInfo, plan: &mut crate::nodes::plannodes::Result) {
     use crate::nodes::nodes::Node;
     let mut dest: Vec<_> = plan
         .plan
         .targetlist
         .iter()
-        .map(|n| match &**n {
+        .map(|n| match n {
             Node::TargetEntry(te) => (**te).clone(),
             _ => not_yet_reachable("apply_tlist_labeling: plan tlist entry is not a TargetEntry"),
         })
@@ -227,7 +227,7 @@ fn apply_top_tlist_labeling(root: &PlannerInfo, plan: &mut crate::nodes::plannod
     let src: Vec<_> = root
         .processed_tlist
         .iter()
-        .map(|n| match &**n {
+        .map(|n| match n {
             Node::TargetEntry(te) => (**te).clone(),
             _ => not_yet_reachable("apply_tlist_labeling: processed_tlist entry is not a TargetEntry"),
         })
@@ -235,6 +235,6 @@ fn apply_top_tlist_labeling(root: &PlannerInfo, plan: &mut crate::nodes::plannod
     crate::backend::optimizer::util::tlist::apply_tlist_labeling(&mut dest, &src);
     plan.plan.targetlist = dest
         .into_iter()
-        .map(|te| Box::new(Node::TargetEntry(Box::new(te))))
+        .map(|te| Node::TargetEntry(Box::new(te)))
         .collect();
 }

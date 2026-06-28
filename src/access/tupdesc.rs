@@ -32,6 +32,7 @@ pub struct TupleConstr {
 
 /// Cut-down version of FormData_pg_attribute for fast tuple deformation.
 /// In-memory cache; populated from FormData_pg_attribute.
+#[derive(Clone, PartialEq, Eq)]
 pub struct CompactAttribute {
     pub attcacheoff: i32, // fixed offset into tuple, or -1
     pub attlen: i16,      // attr len in bytes, -1 = varlen, -2 = cstring
@@ -42,6 +43,30 @@ pub struct CompactAttribute {
     pub attgenerated: bool,
     pub attnullability: u8, // ATTNULLABLE_* below
     pub attalignby: u8,     // alignment requirement in bytes
+}
+
+impl CompactAttribute {
+    /// An empty compact attribute (all-zero except `attcacheoff = -1`).
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            attcacheoff: -1,
+            attlen: 0,
+            attbyval: false,
+            attispackable: false,
+            atthasmissing: false,
+            attisdropped: false,
+            attgenerated: false,
+            attnullability: 0,
+            attalignby: 0,
+        }
+    }
+}
+
+impl Default for CompactAttribute {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // Valid values for CompactAttribute::attnullability.
@@ -81,6 +106,7 @@ pub struct TupleDescData {
 /// by-value copy sites (`utils/rel.rs::descr`, funcapi, executor, access/*, ...)
 /// onto `&`/`&mut TupleDescData` + `Arc` clones. The main agent should schedule
 /// this once those files are owned in one step.
+// TODO(migrate-tupledesc): replace *mut with Arc<TupleDescData> (borrowed refs are infeasible: result-tupdesc ownership cycle + DestReceiver pointer caching). FormData_pg_attribute: Clone prerequisite now in place.
 pub type TupleDesc = *mut TupleDescData; // TODO(migrate-tupledesc): -> Arc<TupleDescData>
 
 impl TupleDescData {
@@ -92,6 +118,30 @@ impl TupleDescData {
     /// Accessor for the i'th CompactAttribute (C TupleDescCompactAttr).
     pub fn compact_attr(&self, i: usize) -> &CompactAttribute {
         &self.compact_attrs[i]
+    }
+
+    /// `IncrTupleDescRefCount`: bump a reference-counted descriptor's refcount.
+    ///
+    /// TODO(resowner): C also logs the reference in `CurrentResourceOwner` so an
+    /// `ERROR` unwind releases it. That registration needs a second owning handle
+    /// to the descriptor, which only exists once the handle graduates from `Box`
+    /// (unique ownership) to `Arc<TupleDescData>` at the relcache/typcache
+    /// milestone. Until then this maintains only the manual counter (the
+    /// descriptors that reach M1 are not yet shared or resource-owner tracked).
+    pub fn incr_ref_count(&mut self) {
+        crate::assert!(self.tdrefcount >= 0);
+        self.tdrefcount += 1;
+    }
+
+    /// `DecrTupleDescRefCount`: drop a reference taken by `incr_ref_count`.
+    ///
+    /// TODO(resowner): see `incr_ref_count`. With unique `Box` ownership the
+    /// descriptor cannot be freed from here (the owner holds the `Box`); this
+    /// adjusts the manual counter only. Freeing at zero is reinstated with the
+    /// `Arc` handle, when this and the drop path converge on the last reference.
+    pub fn decr_ref_count(&mut self) {
+        crate::assert!(self.tdrefcount > 0);
+        self.tdrefcount -= 1;
     }
 }
 
@@ -162,22 +212,23 @@ pub fn TupleDescCopyEntry(
     TupleDescData::copy_entry(dst, dstAttno, src, srcAttno);
 }
 
-#[deprecated(note = "use free_tuple_desc")]
+#[deprecated(note = "TupleDescData drops on scope exit; explicit free is unnecessary")]
 #[inline]
 pub fn FreeTupleDesc(tupdesc: TupleDescData) {
-    crate::backend::access::common::tupdesc::free_tuple_desc(tupdesc);
+    crate::assert!(tupdesc.tdrefcount <= 0);
+    drop(tupdesc);
 }
 
-#[deprecated(note = "use incr_tuple_desc_ref_count")]
+#[deprecated(note = "use TupleDescData::incr_ref_count")]
 #[inline]
 pub fn IncrTupleDescRefCount(tupdesc: &mut TupleDescData) {
-    crate::backend::access::common::tupdesc::incr_tuple_desc_ref_count(tupdesc);
+    tupdesc.incr_ref_count();
 }
 
-#[deprecated(note = "use decr_tuple_desc_ref_count")]
+#[deprecated(note = "use TupleDescData::decr_ref_count")]
 #[inline]
 pub fn DecrTupleDescRefCount(tupdesc: &mut TupleDescData) {
-    crate::backend::access::common::tupdesc::decr_tuple_desc_ref_count(tupdesc);
+    tupdesc.decr_ref_count();
 }
 
 /// C PinTupleDesc: increments the refcount only if the descriptor is counted.

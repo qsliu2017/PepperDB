@@ -9,14 +9,14 @@ use crate::postgres_ext::Oid;
 pub fn transformAggregateCall(
     _pstate: &mut ParseState,
     _agg: &mut Aggref,
-    _args: Vec<Box<Node>>,
-    _aggorder: Vec<Box<Node>>,
+    _args: Vec<Node>,
+    _aggorder: Vec<Node>,
     _agg_distinct: bool,
 ) {
     unimplemented!()
 }
 
-pub fn transformGroupingFunc(_pstate: &mut ParseState, _p: &mut GroupingFunc) -> Box<Node> {
+pub fn transformGroupingFunc(_pstate: &mut ParseState, _p: &mut GroupingFunc) -> Node {
     unimplemented!()
 }
 
@@ -33,10 +33,10 @@ pub fn parseCheckAggregates(_pstate: &mut ParseState, _qry: &mut Query) {
 }
 
 pub fn expand_grouping_sets(
-    _grouping_sets: Vec<Box<Node>>,
+    _grouping_sets: Vec<Node>,
     _group_distinct: bool,
     _limit: i32,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
@@ -68,15 +68,15 @@ pub fn build_aggregate_transfn_expr(
     _agg_input_collation: Oid,
     _transfn_oid: Oid,
     _invtransfn_oid: Oid,
-) -> (Box<Node>, Option<Box<Node>>) {
+) -> (Node, Option<Node>) {
     unimplemented!()
 }
 
-pub fn build_aggregate_serialfn_expr(_serialfn_oid: Oid) -> Box<Node> {
+pub fn build_aggregate_serialfn_expr(_serialfn_oid: Oid) -> Node {
     unimplemented!()
 }
 
-pub fn build_aggregate_deserialfn_expr(_deserialfn_oid: Oid) -> Box<Node> {
+pub fn build_aggregate_deserialfn_expr(_deserialfn_oid: Oid) -> Node {
     unimplemented!()
 }
 
@@ -87,6 +87,6 @@ pub fn build_aggregate_finalfn_expr(
     _agg_result_type: Oid,
     _agg_input_collation: Oid,
     _finalfn_oid: Oid,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }

@@ -59,11 +59,11 @@ pub fn TypeNameToString(_type_name: &TypeName) -> String {
     unimplemented!()
 }
 
-pub fn TypeNameListToString(_typenames: &[Box<Node>]) -> String {
+pub fn TypeNameListToString(_typenames: &[Node]) -> String {
     unimplemented!()
 }
 
-pub fn LookupCollation(_pstate: &mut ParseState, _collnames: Vec<Box<Node>>, _location: i32) -> Oid {
+pub fn LookupCollation(_pstate: &mut ParseState, _collnames: Vec<Node>, _location: i32) -> Oid {
     unimplemented!()
 }
 

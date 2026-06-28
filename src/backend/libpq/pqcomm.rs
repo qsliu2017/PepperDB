@@ -131,6 +131,14 @@ impl PqCommState {
 
 /// Per-task connection state: the async socket plus the buffer/flag state. The
 /// per-task analog of PG's `MyProcPort` + the pqcomm `static` buffers.
+///
+/// Kept non-generic (`Box<dyn BackendStream>`, NOT `PqComm<S>`): the value is
+/// published as one [`PQ_COMM`] `task_local!`, which holds a SINGLE concrete
+/// type. The real backend's stream (`TcpStream`) and the tests' stream
+/// (`tokio::io::DuplexStream`) are different types, so a generic `PqComm<S>`
+/// could not share one task-local global-access path without a second
+/// task_local or per-type monomorphization. Type-erasing the stream keeps
+/// `PqComm` one concrete type while staying decoupled from the stream kind.
 pub struct PqComm {
     /// The async I/O leaf. A `tokio::sync::Mutex` so the guard may be held
     /// across the socket `.await` (rules.md s5). Only the owning task locks it.
@@ -153,6 +161,24 @@ impl PqComm {
             socket: AsyncMutex::new(Box::new(stream)),
             state: Mutex::new(PqCommState::new()),
         }
+    }
+
+    /// One socket read into `buf`; returns bytes read (0 = EOF). The async leaf
+    /// behind `secure_raw_read`. `&self` (not `&mut self`): `PqComm` is shared as
+    /// `Arc<PqComm>` via the [`PQ_COMM`] task-local, so mutation goes through the
+    /// `socket` `AsyncMutex` (interior mutability). Holds only the async socket
+    /// `Mutex` across `.await` -- never the `state` Mutex.
+    pub async fn socket_read(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut sock = self.socket.lock().await;
+        sock.read(buf).await
+    }
+
+    /// One socket write of `buf`; returns bytes written. The async leaf behind
+    /// `secure_raw_write`. `&self` for the same Arc-shared reason as
+    /// [`PqComm::socket_read`].
+    pub async fn socket_write(&self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut sock = self.socket.lock().await;
+        sock.write(buf).await
     }
 }
 
@@ -195,21 +221,16 @@ pub fn has_comm() -> bool {
 // socket leaves (called by be-secure.rs). One socket read / write each.
 // ---------------------------------------------------------------------------
 
-/// One socket read into `buf`; returns bytes read (0 = EOF). The actual async
-/// leaf behind `secure_raw_read`. Holds only the async socket `Mutex` across
-/// `.await` -- never the `state` Mutex.
+/// One socket read into `buf`; returns bytes read (0 = EOF). Thin wrapper over
+/// [`PqComm::socket_read`] resolving this task's connection from [`PQ_COMM`].
 pub async fn socket_read(buf: &mut [u8]) -> std::io::Result<usize> {
-    let comm = comm();
-    let mut sock = comm.socket.lock().await;
-    sock.read(buf).await
+    comm().socket_read(buf).await
 }
 
-/// One socket write of `buf`; returns bytes written. The async leaf behind
-/// `secure_raw_write`.
+/// One socket write of `buf`; returns bytes written. Thin wrapper over
+/// [`PqComm::socket_write`] resolving this task's connection from [`PQ_COMM`].
 pub async fn socket_write(buf: &[u8]) -> std::io::Result<usize> {
-    let comm = comm();
-    let mut sock = comm.socket.lock().await;
-    sock.write(buf).await
+    comm().socket_write(buf).await
 }
 
 /// Consume up to `buf.len()` bytes of the Port `raw_buf` "unread" pushback into

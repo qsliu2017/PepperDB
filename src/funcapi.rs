@@ -130,7 +130,7 @@ pub fn build_function_result_tupdesc_t(_proc_tuple: HeapTuple) -> Option<TupleDe
 pub fn RelationNameGetTupleDesc(_relname: &str) -> TupleDesc {
     unimplemented!()
 }
-pub fn TypeGetTupleDesc(_typeoid: Oid, _colaliases: &[Box<Node>]) -> TupleDesc {
+pub fn TypeGetTupleDesc(_typeoid: Oid, _colaliases: &[Node]) -> TupleDesc {
     unimplemented!()
 }
 

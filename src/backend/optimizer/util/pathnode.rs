@@ -66,7 +66,7 @@ pub fn create_group_result_path(
     _root: &mut PlannerInfo,
     rel: &RelOptInfo,
     target: &PathTarget,
-    havingqual: Vec<Box<Node>>,
+    havingqual: Vec<Node>,
 ) -> Box<GroupResultPath> {
     if !havingqual.is_empty() {
         // HAVING on a FROM-less SELECT (empty grouping set) is not reachable in

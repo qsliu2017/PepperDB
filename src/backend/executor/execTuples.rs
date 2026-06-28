@@ -258,21 +258,21 @@ pub fn exec_store_all_null_tuple(slot: &mut TupleTableSlot) {
 /// PG `ExecTypeFromTL`: build a TupleDesc from a tlist, keeping junk columns.
 /// Returns an owning raw `TupleDesc` handle (C `palloc`'d, freed via the tuple
 /// table); the caller takes ownership of the `Box::into_raw` allocation.
-pub fn exec_type_from_tl(target_list: &[Box<Node>]) -> TupleDesc {
+pub fn exec_type_from_tl(target_list: &[Node]) -> TupleDesc {
     exec_type_from_tl_internal(target_list, false)
 }
 
 /// PG `ExecCleanTypeFromTL`: build a TupleDesc dropping junk columns.
-pub fn exec_clean_type_from_tl(target_list: &[Box<Node>]) -> TupleDesc {
+pub fn exec_clean_type_from_tl(target_list: &[Node]) -> TupleDesc {
     exec_type_from_tl_internal(target_list, true)
 }
 
 /// PG `ExecTypeFromTLInternal`: the shared body.
-fn exec_type_from_tl_internal(target_list: &[Box<Node>], skip_junk: bool) -> TupleDesc {
+fn exec_type_from_tl_internal(target_list: &[Node], skip_junk: bool) -> TupleDesc {
     let entries: Vec<&crate::nodes::primnodes::TargetEntry> = target_list
         .iter()
         .filter_map(|n| {
-            let Node::TargetEntry(te) = &**n else {
+            let Node::TargetEntry(te) = n else {
                 return None;
             };
             (!(skip_junk && te.resjunk)).then_some(&**te)
@@ -303,15 +303,15 @@ fn exec_type_from_tl_internal(target_list: &[Box<Node>], skip_junk: bool) -> Tup
 }
 
 /// PG `ExecTargetListLength`: number of (non-junk-agnostic) target entries.
-pub fn exec_target_list_length(target_list: &[Box<Node>]) -> i32 {
+pub fn exec_target_list_length(target_list: &[Node]) -> i32 {
     i32::try_from(target_list.len()).unwrap_or(0)
 }
 
 /// PG `ExecCleanTargetListLength`: number of non-junk target entries.
-pub fn exec_clean_target_list_length(target_list: &[Box<Node>]) -> i32 {
+pub fn exec_clean_target_list_length(target_list: &[Node]) -> i32 {
     let n = target_list
         .iter()
-        .filter(|node| match &***node {
+        .filter(|node| match &**node {
             Node::TargetEntry(te) => !te.resjunk,
             _ => true,
         })
@@ -328,8 +328,7 @@ mod tests {
     use crate::postgres::Int32GetDatum;
 
     /// A `[Const int4]` targetlist node.
-    #[allow(clippy::vec_box, reason = "mirrors a PG List of node pointers (Plan.targetlist)")]
-    fn const_int4_tlist(values: &[i32]) -> Vec<Box<Node>> {
+    fn const_int4_tlist(values: &[i32]) -> Vec<Node> {
         values
             .iter()
             .enumerate()
@@ -344,12 +343,12 @@ mod tests {
                     true,
                 );
                 let tle = make_target_entry(
-                    Some(Box::new(Node::Const(Box::new(con)))),
+                    Some(Node::Const(Box::new(con))),
                     (i + 1) as i16,
                     Some("?column?".to_string()),
                     false,
                 );
-                Box::new(Node::TargetEntry(Box::new(tle)))
+                Node::TargetEntry(Box::new(tle))
             })
             .collect()
     }

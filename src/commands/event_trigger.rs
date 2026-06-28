@@ -16,7 +16,7 @@ use bitflags::bitflags;
 /// `Node` enum carries the tag).
 pub struct EventTriggerData<'a> {
     pub event: &'a str,       // event name
-    pub parsetree: Box<Node>, // parse tree
+    pub parsetree: Node, // parse tree
     pub tag: CommandTag,
 }
 
@@ -139,8 +139,8 @@ pub fn EventTriggerCollectGrant(_istmt: &InternalGrant) {
 pub fn EventTriggerCollectAlterOpFam(
     _stmt: &AlterOpFamilyStmt,
     _opfamoid: Oid,
-    _operators: Vec<Box<Node>>,
-    _procedures: Vec<Box<Node>>,
+    _operators: Vec<Node>,
+    _procedures: Vec<Node>,
 ) {
     unimplemented!()
 }
@@ -148,8 +148,8 @@ pub fn EventTriggerCollectAlterOpFam(
 pub fn EventTriggerCollectCreateOpClass(
     _stmt: &CreateOpClassStmt,
     _opcoid: Oid,
-    _operators: Vec<Box<Node>>,
-    _procedures: Vec<Box<Node>>,
+    _operators: Vec<Node>,
+    _procedures: Vec<Node>,
 ) {
     unimplemented!()
 }

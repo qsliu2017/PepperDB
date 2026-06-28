@@ -29,18 +29,18 @@ use crate::parser::parse_node::{ParseExprKind, ParseState};
 /// present for M1; a star target reaches `transformTargetEntry`'s deferred path.
 pub fn transformTargetList(
     pstate: &mut ParseState,
-    targetlist: Vec<Box<Node>>,
+    targetlist: Vec<Node>,
     expr_kind: ParseExprKind,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     // Shouldn't have any leftover multiassign items at start.
     crate::assert!(pstate.p_multiassign_exprs.is_empty());
 
     // PG expands "something.*" in SELECT and RETURNING (but not UPDATE) before the
     // plain-expression path; that expansion needs range-table machinery not
     // present for M1, so only the plain path below is wired here.
-    let mut p_target: Vec<Box<Node>> = Vec::with_capacity(targetlist.len());
+    let mut p_target: Vec<Node> = Vec::with_capacity(targetlist.len());
     for o_target in targetlist {
-        let Node::ResTarget(res) = *o_target else {
+        let Node::ResTarget(res) = o_target else {
             crate::elog!(
                 crate::utils::elog::ERROR,
                 "transformTargetList expected a ResTarget".to_string()
@@ -54,7 +54,7 @@ pub fn transformTargetList(
         // need RTE expansion not translated for M1. The plain-expression path
         // below handles a single transformed expression.
         let tle = transformTargetEntry(pstate, val, None, expr_kind, name, false);
-        p_target.push(Box::new(Node::TargetEntry(tle)));
+        p_target.push(Node::TargetEntry(tle));
     }
 
     // Multiassign resjunk items only arise in an UPDATE tlist (not M1); none to
@@ -70,8 +70,8 @@ pub fn transformTargetList(
 /// transform), we read the name before consuming the node into `transformExpr`.
 pub fn transformTargetEntry(
     pstate: &mut ParseState,
-    node: Option<Box<Node>>,
-    expr: Option<Box<Node>>,
+    node: Option<Node>,
+    expr: Option<Node>,
     expr_kind: ParseExprKind,
     colname: Option<String>,
     resjunk: bool,
@@ -80,7 +80,7 @@ pub fn transformTargetEntry(
     // (EXPR_KIND_UPDATE_SOURCE SetToDefault passthrough is not reachable for M1.)
     let colname = match colname {
         Some(c) => Some(c),
-        None if !resjunk => node.as_deref().map(FigureColname),
+        None if !resjunk => node.as_ref().map(FigureColname),
         None => None,
     };
 
@@ -121,7 +121,7 @@ fn figure_colname_internal<'a>(node: &'a Node, name: &mut Option<&'a str>) -> i3
             0
         }
         Node::CollateClause(c) => {
-            c.arg.as_deref().map_or(0, |arg| figure_colname_internal(arg, name))
+            c.arg.as_ref().map_or(0, |arg| figure_colname_internal(arg, name))
         }
         Node::GroupingFunc(_) => {
             *name = Some("grouping");

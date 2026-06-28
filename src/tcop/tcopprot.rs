@@ -13,7 +13,7 @@ use crate::utils::queryenvironment::QueryEnvironment;
 use bitflags::bitflags;
 
 /// C `List *` of parse/plan tree nodes; pg_list is tombstoned -> Vec of nodes.
-pub type List = Vec<Box<Node>>;
+pub type List = Vec<Node>;
 
 // Process-global backend state (-> session/task-local later).
 pub static mut whereToSendOutput: i32 = 0; // CommandDest

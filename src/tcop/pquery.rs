@@ -1,7 +1,7 @@
 //! Translated from PostgreSQL src/include/tcop/pquery.h
 //!
 //! Prototypes for pquery.c (portal execution). `List *` of statements ->
-//! `&[Box<Node>]`; the C `ActivePortal` global -> a `static mut` placeholder.
+//! `&[Node]`; the C `ActivePortal` global -> a `static mut` placeholder.
 //!
 //! The M1 portal-execution bodies live in `crate::backend::tcop::pquery` with an
 //! OWNED `&mut PortalData` signature (the portalmem.c hashtable / raw-`Portal`
@@ -25,15 +25,15 @@ use crate::utils::snapshot::Snapshot;
 // session/task state.
 pub static mut ActivePortal: Portal = core::ptr::null_mut();
 
-pub fn ChoosePortalStrategy(_stmts: &[Box<Node>]) -> PortalStrategy {
+pub fn ChoosePortalStrategy(_stmts: &[Node]) -> PortalStrategy {
     unimplemented!()
 }
 
-pub fn FetchPortalTargetList(_portal: Portal) -> Vec<Box<Node>> {
+pub fn FetchPortalTargetList(_portal: Portal) -> Vec<Node> {
     unimplemented!()
 }
 
-pub fn FetchStatementTargetList(_stmt: &Node) -> Vec<Box<Node>> {
+pub fn FetchStatementTargetList(_stmt: &Node) -> Vec<Node> {
     unimplemented!()
 }
 

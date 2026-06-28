@@ -244,7 +244,7 @@ fn exec_simple_query(query_string: &str) {
     if parsetrees.len() != 1 {
         unimplemented!("exec_simple_query: multi-statement query strings deferred");
     }
-    let Node::RawStmt(raw) = *parsetrees.remove(0) else {
+    let Node::RawStmt(raw) = parsetrees.remove(0) else {
         unreachable!("raw_parser yields RawStmt nodes");
     };
     let raw: RawStmt = *raw;
@@ -256,7 +256,7 @@ fn exec_simple_query(query_string: &str) {
 
     // pg_analyze_and_rewrite_fixedparams: parse analysis + rewrite.
     let analyzed = parse_analyze_fixedparams(&raw, query_string, &[], 0, None);
-    let mut rewritten = query_rewrite(analyzed);
+    let mut rewritten = query_rewrite(*analyzed);
     if rewritten.len() != 1 {
         unimplemented!("exec_simple_query: query rewrite producing multiple queries deferred");
     }

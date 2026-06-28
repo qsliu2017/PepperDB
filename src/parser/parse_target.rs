@@ -13,34 +13,34 @@ pub use crate::backend::parser::parse_target::transformTargetList;
 
 pub fn transformExpressionList(
     _pstate: &mut ParseState,
-    _exprlist: Vec<Box<Node>>,
+    _exprlist: Vec<Node>,
     _expr_kind: ParseExprKind,
     _allow_default: bool,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
-pub fn resolveTargetListUnknowns(_pstate: &mut ParseState, _targetlist: &mut [Box<Node>]) {
+pub fn resolveTargetListUnknowns(_pstate: &mut ParseState, _targetlist: &mut [Node]) {
     unimplemented!()
 }
 
-pub fn markTargetListOrigins(_pstate: &mut ParseState, _targetlist: &mut [Box<Node>]) {
+pub fn markTargetListOrigins(_pstate: &mut ParseState, _targetlist: &mut [Node]) {
     unimplemented!()
 }
 
 /// PG `transformTargetEntry`. See `crate::backend::parser::parse_target`.
-/// (`node` is `Node *` in C -- nullable -- so `Option<Box<Node>>` here.)
+/// (`node` is `Node *` in C -- nullable -- so `Option<Node>` here.)
 pub use crate::backend::parser::parse_target::transformTargetEntry;
 
 pub fn transformAssignedExpr(
     _pstate: &mut ParseState,
-    _expr: Box<Node>,
+    _expr: Node,
     _expr_kind: ParseExprKind,
     _colname: &str,
     _attrno: i32,
-    _indirection: Vec<Box<Node>>,
+    _indirection: Vec<Node>,
     _location: i32,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
@@ -49,7 +49,7 @@ pub fn updateTargetListEntry(
     _tle: &mut TargetEntry,
     _colname: Option<String>,
     _attrno: i32,
-    _indirection: Vec<Box<Node>>,
+    _indirection: Vec<Node>,
     _location: i32,
 ) {
     unimplemented!()
@@ -57,26 +57,26 @@ pub fn updateTargetListEntry(
 
 pub fn transformAssignmentIndirection(
     _pstate: &mut ParseState,
-    _basenode: Option<Box<Node>>,
+    _basenode: Option<Node>,
     _target_name: &str,
     _target_is_subscripting: bool,
     _target_type_id: Oid,
     _target_typmod: i32,
     _target_collation: Oid,
-    _indirection: Vec<Box<Node>>,
+    _indirection: Vec<Node>,
     _indirection_cell: usize,
-    _rhs: Box<Node>,
+    _rhs: Node,
     _ccontext: CoercionContext,
     _location: i32,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
 /// `attrnos` out-param folded into the return tuple.
 pub fn checkInsertTargets(
     _pstate: &mut ParseState,
-    _cols: Vec<Box<Node>>,
-) -> (Vec<Box<Node>>, Vec<i32>) {
+    _cols: Vec<Node>,
+) -> (Vec<Node>, Vec<i32>) {
     unimplemented!()
 }
 

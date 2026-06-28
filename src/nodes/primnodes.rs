@@ -11,7 +11,7 @@ pub type Index = usize;
 
 /// C `Expr` is the abstract supertype of all expression nodes; in this port the
 /// universal `Node` enum subsumes it. Alias kept so `Expr`-typed signatures
-/// translate directly (an `Expr *` field is `Option<Box<Node>>`).
+/// translate directly (an `Expr *` field is `Option<Node>`).
 pub type Expr = Node;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +26,7 @@ pub enum OverridingKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Alias {
     pub aliasname: Option<String>,
-    pub colnames: Vec<Box<Node>>,
+    pub colnames: Vec<Node>,
 }
 
 /// What to do at commit time for temporary relations.
@@ -61,20 +61,20 @@ pub enum TableFuncType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableFunc {
     pub functype: TableFuncType,
-    pub ns_uris: Vec<Box<Node>>,
-    pub ns_names: Vec<Box<Node>>,
-    pub docexpr: Option<Box<Node>>,
-    pub rowexpr: Option<Box<Node>>,
-    pub colnames: Vec<Box<Node>>,
+    pub ns_uris: Vec<Node>,
+    pub ns_names: Vec<Node>,
+    pub docexpr: Option<Node>,
+    pub rowexpr: Option<Node>,
+    pub colnames: Vec<Node>,
     pub coltypes: Vec<Oid>,
     pub coltypmods: Vec<i32>,
     pub colcollations: Vec<Oid>,
-    pub colexprs: Vec<Box<Node>>,
-    pub coldefexprs: Vec<Box<Node>>,
-    pub colvalexprs: Vec<Box<Node>>,
-    pub passingvalexprs: Vec<Box<Node>>,
+    pub colexprs: Vec<Node>,
+    pub coldefexprs: Vec<Node>,
+    pub colvalexprs: Vec<Node>,
+    pub passingvalexprs: Vec<Node>,
     pub notnulls: Option<Bitmapset>,
-    pub plan: Option<Box<Node>>,
+    pub plan: Option<Node>,
     pub ordinalitycol: i32,
     pub location: ParseLoc,
 }
@@ -83,13 +83,13 @@ pub struct TableFunc {
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntoClause {
     pub rel: Option<Box<RangeVar>>,
-    pub colNames: Vec<Box<Node>>,
+    pub colNames: Vec<Node>,
     pub accessMethod: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
     pub onCommit: OnCommitAction,
     pub tableSpaceName: Option<String>,
     /// materialized view's SELECT query (struct Query*)
-    pub viewQuery: Option<Box<Node>>,
+    pub viewQuery: Option<Node>,
     pub skipData: bool,
 }
 
@@ -170,11 +170,11 @@ pub struct Aggref {
     pub inputcollid: Oid,
     pub aggtranstype: Oid,
     pub aggargtypes: Vec<Oid>,
-    pub aggdirectargs: Vec<Box<Node>>,
-    pub args: Vec<Box<Node>>,
-    pub aggorder: Vec<Box<Node>>,
-    pub aggdistinct: Vec<Box<Node>>,
-    pub aggfilter: Option<Box<Node>>,
+    pub aggdirectargs: Vec<Node>,
+    pub args: Vec<Node>,
+    pub aggorder: Vec<Node>,
+    pub aggdistinct: Vec<Node>,
+    pub aggfilter: Option<Node>,
     pub aggstar: bool,
     pub aggvariadic: bool,
     pub aggkind: i8,
@@ -189,7 +189,7 @@ pub struct Aggref {
 /// A GROUPING(...) expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupingFunc {
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     pub refs: Vec<i32>,
     pub cols: Vec<i32>,
     pub agglevelsup: Index,
@@ -203,9 +203,9 @@ pub struct WindowFunc {
     pub wintype: Oid,
     pub wincollid: Oid,
     pub inputcollid: Oid,
-    pub args: Vec<Box<Node>>,
-    pub aggfilter: Option<Box<Node>>,
-    pub runCondition: Vec<Box<Node>>,
+    pub args: Vec<Node>,
+    pub aggfilter: Option<Node>,
+    pub runCondition: Vec<Node>,
     pub winref: Index,
     pub winstar: bool,
     pub winagg: bool,
@@ -218,7 +218,7 @@ pub struct WindowFuncRunCondition {
     pub opno: Oid,
     pub inputcollid: Oid,
     pub wfunc_left: bool,
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
 }
 
 /// A merge support function expression (MERGE_ACTION()).
@@ -237,10 +237,10 @@ pub struct SubscriptingRef {
     pub refrestype: Oid,
     pub reftypmod: i32,
     pub refcollid: Oid,
-    pub refupperindexpr: Vec<Box<Node>>,
-    pub reflowerindexpr: Vec<Box<Node>>,
-    pub refexpr: Option<Box<Node>>,
-    pub refassgnexpr: Option<Box<Node>>,
+    pub refupperindexpr: Vec<Node>,
+    pub reflowerindexpr: Vec<Node>,
+    pub refexpr: Option<Node>,
+    pub refassgnexpr: Option<Node>,
 }
 
 /// Distinguishes the allowed set of type casts. Ordering is significant.
@@ -271,14 +271,14 @@ pub struct FuncExpr {
     pub funcformat: CoercionForm,
     pub funccollid: Oid,
     pub inputcollid: Oid,
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     pub location: ParseLoc,
 }
 
 /// A named argument of a function.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamedArgExpr {
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub name: Option<String>,
     pub argnumber: i32,
     pub location: ParseLoc,
@@ -293,7 +293,7 @@ pub struct OpExpr {
     pub opretset: bool,
     pub opcollid: Oid,
     pub inputcollid: Oid,
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -312,7 +312,7 @@ pub struct ScalarArrayOpExpr {
     pub negfuncid: Oid,
     pub useOr: bool,
     pub inputcollid: Oid,
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -327,7 +327,7 @@ pub enum BoolExprType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoolExpr {
     pub boolop: BoolExprType,
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -348,9 +348,9 @@ pub enum SubLinkType {
 pub struct SubLink {
     pub subLinkType: SubLinkType,
     pub subLinkId: i32,
-    pub testexpr: Option<Box<Node>>,
-    pub operName: Vec<Box<Node>>,
-    pub subselect: Option<Box<Node>>,
+    pub testexpr: Option<Node>,
+    pub operName: Vec<Node>,
+    pub subselect: Option<Node>,
     pub location: ParseLoc,
 }
 
@@ -358,7 +358,7 @@ pub struct SubLink {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubPlan {
     pub subLinkType: SubLinkType,
-    pub testexpr: Option<Box<Node>>,
+    pub testexpr: Option<Node>,
     pub paramIds: Vec<i32>,
     pub plan_id: i32,
     pub plan_name: Option<String>,
@@ -370,7 +370,7 @@ pub struct SubPlan {
     pub parallel_safe: bool,
     pub setParam: Vec<i32>,
     pub parParam: Vec<i32>,
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     pub startup_cost: crate::nodes::nodes::Cost,
     pub per_call_cost: crate::nodes::nodes::Cost,
 }
@@ -378,13 +378,13 @@ pub struct SubPlan {
 /// A choice among SubPlans; used only transiently during planning.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlternativeSubPlan {
-    pub subplans: Vec<Box<Node>>,
+    pub subplans: Vec<Node>,
 }
 
 /// Extracting one field from a tuple value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldSelect {
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub fieldnum: AttrNumber,
     pub resulttype: Oid,
     pub resulttypmod: i32,
@@ -394,8 +394,8 @@ pub struct FieldSelect {
 /// Modifying one field in a tuple value, yielding a new tuple value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldStore {
-    pub arg: Option<Box<Node>>,
-    pub newvals: Vec<Box<Node>>,
+    pub arg: Option<Node>,
+    pub newvals: Vec<Node>,
     pub fieldnums: Vec<i32>,
     pub resulttype: Oid,
 }
@@ -403,7 +403,7 @@ pub struct FieldStore {
 /// A no-op type coercion between binary-compatible datatypes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RelabelType {
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub resulttype: Oid,
     pub resulttypmod: i32,
     pub resultcollid: Oid,
@@ -414,7 +414,7 @@ pub struct RelabelType {
 /// Coercion implemented via the source typoutput then dest typinput.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoerceViaIO {
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub resulttype: Oid,
     pub resultcollid: Oid,
     pub coerceformat: CoercionForm,
@@ -424,8 +424,8 @@ pub struct CoerceViaIO {
 /// Coercion from one array type to another, per-element.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrayCoerceExpr {
-    pub arg: Option<Box<Node>>,
-    pub elemexpr: Option<Box<Node>>,
+    pub arg: Option<Node>,
+    pub elemexpr: Option<Node>,
     pub resulttype: Oid,
     pub resulttypmod: i32,
     pub resultcollid: Oid,
@@ -436,7 +436,7 @@ pub struct ArrayCoerceExpr {
 /// Coercion from one composite type to another (matched by name).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConvertRowtypeExpr {
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub resulttype: Oid,
     pub convertformat: CoercionForm,
     pub location: ParseLoc,
@@ -445,7 +445,7 @@ pub struct ConvertRowtypeExpr {
 /// COLLATE expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CollateExpr {
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub collOid: Oid,
     pub location: ParseLoc,
 }
@@ -455,17 +455,17 @@ pub struct CollateExpr {
 pub struct CaseExpr {
     pub casetype: Oid,
     pub casecollid: Oid,
-    pub arg: Option<Box<Node>>,
-    pub args: Vec<Box<Node>>,
-    pub defresult: Option<Box<Node>>,
+    pub arg: Option<Node>,
+    pub args: Vec<Node>,
+    pub defresult: Option<Node>,
     pub location: ParseLoc,
 }
 
 /// One arm of a CASE expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaseWhen {
-    pub expr: Option<Box<Node>>,
-    pub result: Option<Box<Node>>,
+    pub expr: Option<Node>,
+    pub result: Option<Node>,
     pub location: ParseLoc,
 }
 
@@ -483,7 +483,7 @@ pub struct ArrayExpr {
     pub array_typeid: Oid,
     pub array_collid: Oid,
     pub element_typeid: Oid,
-    pub elements: Vec<Box<Node>>,
+    pub elements: Vec<Node>,
     pub multidims: bool,
     pub list_start: ParseLoc,
     pub list_end: ParseLoc,
@@ -493,10 +493,10 @@ pub struct ArrayExpr {
 /// A ROW() expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RowExpr {
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     pub row_typeid: Oid,
     pub row_format: CoercionForm,
-    pub colnames: Vec<Box<Node>>,
+    pub colnames: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -507,8 +507,8 @@ pub struct RowCompareExpr {
     pub opnos: Vec<Oid>,
     pub opfamilies: Vec<Oid>,
     pub inputcollids: Vec<Oid>,
-    pub largs: Vec<Box<Node>>,
-    pub rargs: Vec<Box<Node>>,
+    pub largs: Vec<Node>,
+    pub rargs: Vec<Node>,
 }
 
 /// A COALESCE expression.
@@ -516,7 +516,7 @@ pub struct RowCompareExpr {
 pub struct CoalesceExpr {
     pub coalescetype: Oid,
     pub coalescecollid: Oid,
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -533,7 +533,7 @@ pub struct MinMaxExpr {
     pub minmaxcollid: Oid,
     pub inputcollid: Oid,
     pub op: MinMaxOp,
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -588,9 +588,9 @@ pub enum XmlOptionType {
 pub struct XmlExpr {
     pub op: XmlExprOp,
     pub name: Option<String>,
-    pub named_args: Vec<Box<Node>>,
-    pub arg_names: Vec<Box<Node>>,
-    pub args: Vec<Box<Node>>,
+    pub named_args: Vec<Node>,
+    pub arg_names: Vec<Node>,
+    pub args: Vec<Node>,
     pub xmloption: XmlOptionType,
     pub indent: bool,
     pub r#type: Oid,
@@ -632,8 +632,8 @@ pub struct JsonReturning {
 /// Representation of JSON value expression (expr [FORMAT JsonFormat]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonValueExpr {
-    pub raw_expr: Option<Box<Node>>,
-    pub formatted_expr: Option<Box<Node>>,
+    pub raw_expr: Option<Node>,
+    pub formatted_expr: Option<Node>,
     pub format: Option<Box<JsonFormat>>,
 }
 
@@ -652,9 +652,9 @@ pub enum JsonConstructorType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonConstructorExpr {
     pub r#type: JsonConstructorType,
-    pub args: Vec<Box<Node>>,
-    pub func: Option<Box<Node>>,
-    pub coercion: Option<Box<Node>>,
+    pub args: Vec<Node>,
+    pub func: Option<Node>,
+    pub coercion: Option<Node>,
     pub returning: Option<Box<JsonReturning>>,
     pub absent_on_null: bool,
     pub unique: bool,
@@ -672,7 +672,7 @@ pub enum JsonValueType {
 /// Representation of IS JSON predicate.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonIsPredicate {
-    pub expr: Option<Box<Node>>,
+    pub expr: Option<Node>,
     pub format: Option<Box<JsonFormat>>,
     pub item_type: JsonValueType,
     pub unique_keys: bool,
@@ -704,7 +704,7 @@ pub enum JsonBehaviorType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonBehavior {
     pub btype: JsonBehaviorType,
-    pub expr: Option<Box<Node>>,
+    pub expr: Option<Node>,
     pub coerce: bool,
     pub location: ParseLoc,
 }
@@ -722,12 +722,12 @@ pub enum JsonExprOp {
 pub struct JsonExpr {
     pub op: JsonExprOp,
     pub column_name: Option<String>,
-    pub formatted_expr: Option<Box<Node>>,
+    pub formatted_expr: Option<Node>,
     pub format: Option<Box<JsonFormat>>,
-    pub path_spec: Option<Box<Node>>,
+    pub path_spec: Option<Node>,
     pub returning: Option<Box<JsonReturning>>,
-    pub passing_names: Vec<Box<Node>>,
-    pub passing_values: Vec<Box<Node>>,
+    pub passing_names: Vec<Node>,
+    pub passing_values: Vec<Node>,
     pub on_empty: Option<Box<JsonBehavior>>,
     pub on_error: Option<Box<JsonBehavior>>,
     pub use_io_coercion: bool,
@@ -753,7 +753,7 @@ pub struct JsonTablePath {
 pub struct JsonTablePathScan {
     pub path: Option<Box<JsonTablePath>>,
     pub errorOnError: bool,
-    pub child: Option<Box<Node>>,
+    pub child: Option<Node>,
     pub colMin: i32,
     pub colMax: i32,
 }
@@ -761,8 +761,8 @@ pub struct JsonTablePathScan {
 /// Plan to join rows of sibling NESTED COLUMNS clauses.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonTableSiblingJoin {
-    pub lplan: Option<Box<Node>>,
-    pub rplan: Option<Box<Node>>,
+    pub lplan: Option<Node>,
+    pub rplan: Option<Node>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -774,7 +774,7 @@ pub enum NullTestType {
 /// Testing a value for NULLness.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NullTest {
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub nulltesttype: NullTestType,
     pub argisrow: bool,
     pub location: ParseLoc,
@@ -793,7 +793,7 @@ pub enum BoolTestType {
 /// Determining whether a boolean is TRUE, FALSE, or UNKNOWN.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BooleanTest {
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub booltesttype: BoolTestType,
     pub location: ParseLoc,
 }
@@ -814,15 +814,15 @@ pub struct MergeAction {
     pub matchKind: MergeMatchKind,
     pub commandType: CmdType,
     pub r#override: OverridingKind,
-    pub qual: Option<Box<Node>>,
-    pub targetList: Vec<Box<Node>>,
+    pub qual: Option<Node>,
+    pub targetList: Vec<Node>,
     pub updateColnos: Vec<i32>,
 }
 
 /// Coercing a value to a domain type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoerceToDomain {
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub resulttype: Oid,
     pub resulttypmod: i32,
     pub resultcollid: Oid,
@@ -866,7 +866,7 @@ pub struct NextValueExpr {
 /// An element of a unique index inference specification.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InferenceElem {
-    pub expr: Option<Box<Node>>,
+    pub expr: Option<Node>,
     pub infercollid: Oid,
     pub inferopclass: Oid,
 }
@@ -876,13 +876,13 @@ pub struct InferenceElem {
 pub struct ReturningExpr {
     pub retlevelsup: i32,
     pub retold: bool,
-    pub retexpr: Option<Box<Node>>,
+    pub retexpr: Option<Node>,
 }
 
 /// A target entry (used in query target lists).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TargetEntry {
-    pub expr: Option<Box<Node>>,
+    pub expr: Option<Node>,
     pub resno: AttrNumber,
     pub resname: Option<String>,
     pub ressortgroupref: Index,
@@ -902,11 +902,11 @@ pub struct RangeTblRef {
 pub struct JoinExpr {
     pub jointype: crate::nodes::nodes::JoinType,
     pub isNatural: bool,
-    pub larg: Option<Box<Node>>,
-    pub rarg: Option<Box<Node>>,
-    pub usingClause: Vec<Box<Node>>,
+    pub larg: Option<Node>,
+    pub rarg: Option<Node>,
+    pub usingClause: Vec<Node>,
     pub join_using_alias: Option<Box<Alias>>,
-    pub quals: Option<Box<Node>>,
+    pub quals: Option<Node>,
     pub alias: Option<Box<Alias>>,
     pub rtindex: i32,
 }
@@ -914,19 +914,19 @@ pub struct JoinExpr {
 /// A FROM ... WHERE ... construct.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FromExpr {
-    pub fromlist: Vec<Box<Node>>,
-    pub quals: Option<Box<Node>>,
+    pub fromlist: Vec<Node>,
+    pub quals: Option<Node>,
 }
 
 /// An ON CONFLICT DO ... expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OnConflictExpr {
     pub action: crate::nodes::nodes::OnConflictAction,
-    pub arbiterElems: Vec<Box<Node>>,
-    pub arbiterWhere: Option<Box<Node>>,
+    pub arbiterElems: Vec<Node>,
+    pub arbiterWhere: Option<Node>,
     pub constraint: Oid,
-    pub onConflictSet: Vec<Box<Node>>,
-    pub onConflictWhere: Option<Box<Node>>,
+    pub onConflictSet: Vec<Node>,
+    pub onConflictWhere: Option<Node>,
     pub exclRelIndex: i32,
-    pub exclRelTlist: Vec<Box<Node>>,
+    pub exclRelTlist: Vec<Node>,
 }

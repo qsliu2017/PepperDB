@@ -11,7 +11,7 @@ use crate::parser::parse_node::ParseState;
 use crate::postgres_ext::Oid;
 use crate::utils::relcache::Relation;
 
-pub fn transformCreateStmt(_stmt: &mut CreateStmt, _query_string: &str) -> Vec<Box<Node>> {
+pub fn transformCreateStmt(_stmt: &mut CreateStmt, _query_string: &str) -> Vec<Node> {
     unimplemented!()
 }
 
@@ -20,7 +20,7 @@ pub fn transformAlterTableStmt(
     _relid: Oid,
     _stmt: &mut AlterTableStmt,
     _query_string: &str,
-) -> (Box<AlterTableStmt>, Vec<Box<Node>>, Vec<Box<Node>>) {
+) -> (Box<AlterTableStmt>, Vec<Node>, Vec<Node>) {
     unimplemented!()
 }
 
@@ -44,14 +44,14 @@ pub fn transformStatsStmt(
 pub fn transformRuleStmt(
     _stmt: &mut RuleStmt,
     _query_string: &str,
-) -> (Vec<Box<Node>>, Option<Box<Node>>) {
+) -> (Vec<Node>, Option<Node>) {
     unimplemented!()
 }
 
 pub fn transformCreateSchemaStmtElements(
-    _schema_elts: Vec<Box<Node>>,
+    _schema_elts: Vec<Node>,
     _schema_name: &str,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
@@ -66,7 +66,7 @@ pub fn transformPartitionBound(
 pub fn expandTableLikeClause(
     _heap_rel: &RangeVar,
     _table_like_clause: &TableLikeClause,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 

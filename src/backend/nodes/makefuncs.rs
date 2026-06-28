@@ -37,9 +37,9 @@ use crate::postgres_ext::{InvalidOid, Oid};
 /// PG `makeA_Expr`: makes an `A_Expr` node.
 pub fn make_a_expr(
     kind: A_Expr_Kind,
-    name: Vec<Box<Node>>,
-    lexpr: Option<Box<Node>>,
-    rexpr: Option<Box<Node>>,
+    name: Vec<Node>,
+    lexpr: Option<Node>,
+    rexpr: Option<Node>,
     location: i32,
 ) -> A_Expr {
     A_Expr {
@@ -57,8 +57,8 @@ pub fn make_a_expr(
 pub fn make_simple_a_expr(
     _kind: A_Expr_Kind,
     _name: &str,
-    _lexpr: Option<Box<Node>>,
-    _rexpr: Option<Box<Node>>,
+    _lexpr: Option<Node>,
+    _rexpr: Option<Node>,
     _location: i32,
 ) -> A_Expr {
     // name = list_make1(makeString(name)); a T_String value node is not yet a
@@ -97,7 +97,7 @@ pub fn make_var(
 
 /// PG `makeVarFromTargetEntry`: create a same-level `Var` from a `TargetEntry`.
 pub fn make_var_from_target_entry(varno: i32, tle: &TargetEntry) -> Var {
-    let expr = tle.expr.as_deref();
+    let expr = tle.expr.as_ref();
     make_var(
         varno,
         tle.resno,
@@ -122,7 +122,7 @@ pub fn make_whole_row_var(
 
 /// PG `makeTargetEntry`: creates a `TargetEntry` node.
 pub fn make_target_entry(
-    expr: Option<Box<Node>>,
+    expr: Option<Node>,
     resno: AttrNumber,
     resname: Option<String>,
     resjunk: bool,
@@ -144,7 +144,7 @@ pub fn flat_copy_target_entry(src_tle: &TargetEntry) -> TargetEntry {
 }
 
 /// PG `makeFromExpr`: creates a `FromExpr` node.
-pub fn make_from_expr(fromlist: Vec<Box<Node>>, quals: Option<Box<Node>>) -> FromExpr {
+pub fn make_from_expr(fromlist: Vec<Node>, quals: Option<Node>) -> FromExpr {
     FromExpr { fromlist, quals }
 }
 
@@ -191,9 +191,9 @@ pub fn make_null_const(consttype: Oid, consttypmod: i32, constcollid: Oid) -> Co
 }
 
 /// PG `makeBoolConst`: creates a `Const` representing a boolean value (or NULL).
-pub fn make_bool_const(value: bool, isnull: bool) -> Box<Node> {
+pub fn make_bool_const(value: bool, isnull: bool) -> Node {
     // pg_type.h hardwires size of bool as 1.
-    Box::new(Node::Const(Box::new(make_const(
+    Node::Const(Box::new(make_const(
         BOOLOID,
         -1,
         InvalidOid,
@@ -201,20 +201,20 @@ pub fn make_bool_const(value: bool, isnull: bool) -> Box<Node> {
         Datum(usize::from(value)),
         isnull,
         true,
-    ))))
+    )))
 }
 
 /// PG `makeBoolExpr`: creates a `BoolExpr` node.
-pub fn make_bool_expr(boolop: BoolExprType, args: Vec<Box<Node>>, location: i32) -> Box<Node> {
-    Box::new(Node::BoolExpr(Box::new(BoolExpr {
+pub fn make_bool_expr(boolop: BoolExprType, args: Vec<Node>, location: i32) -> Node {
+    Node::BoolExpr(Box::new(BoolExpr {
         boolop,
         args,
         location,
-    })))
+    }))
 }
 
 /// PG `makeAlias`: creates an `Alias` node. The name is copied; `colnames` is not.
-pub fn make_alias(aliasname: &str, colnames: Vec<Box<Node>>) -> Alias {
+pub fn make_alias(aliasname: &str, colnames: Vec<Node>) -> Alias {
     Alias {
         aliasname: Some(aliasname.to_owned()),
         colnames,
@@ -223,7 +223,7 @@ pub fn make_alias(aliasname: &str, colnames: Vec<Box<Node>>) -> Alias {
 
 /// PG `makeRelabelType`: creates a `RelabelType` node.
 pub fn make_relabel_type(
-    arg: Option<Box<Node>>,
+    arg: Option<Node>,
     rtype: Oid,
     rtypmod: i32,
     rcollid: Oid,
@@ -272,7 +272,7 @@ pub fn make_type_name(_typnam: &str) -> TypeName {
 }
 
 /// PG `makeTypeNameFromNameList`: build a `TypeName` from a `String` name list.
-pub fn make_type_name_from_name_list(names: Vec<Box<Node>>) -> TypeName {
+pub fn make_type_name_from_name_list(names: Vec<Node>) -> TypeName {
     TypeName {
         names,
         typeOid: InvalidOid,
@@ -328,7 +328,7 @@ pub fn make_column_def(colname: &str, type_oid: Oid, typmod: i32, coll_oid: Oid)
 pub fn make_func_expr(
     funcid: Oid,
     rettype: Oid,
-    args: Vec<Box<Node>>,
+    args: Vec<Node>,
     funccollid: Oid,
     inputcollid: Oid,
     fformat: CoercionForm,
@@ -354,17 +354,17 @@ pub fn make_opclause(
     opno: Oid,
     opresulttype: Oid,
     opretset: bool,
-    leftop: Option<Box<Node>>,
-    rightop: Option<Box<Node>>,
+    leftop: Option<Node>,
+    rightop: Option<Node>,
     opcollid: Oid,
     inputcollid: Oid,
-) -> Box<Node> {
+) -> Node {
     let leftop = leftop.unwrap_or_else(|| unreachable!("make_opclause: leftop is NULL"));
     let args = match rightop {
         Some(r) => vec![leftop, r],
         None => vec![leftop],
     };
-    Box::new(Node::OpExpr(Box::new(OpExpr {
+    Node::OpExpr(Box::new(OpExpr {
         opno,
         opfuncid: InvalidOid,
         opresulttype,
@@ -373,26 +373,26 @@ pub fn make_opclause(
         inputcollid,
         args,
         location: -1,
-    })))
+    }))
 }
 
 /// PG `make_andclause`: create an AND clause from a list of subclauses.
-pub fn make_andclause(andclauses: Vec<Box<Node>>) -> Box<Node> {
+pub fn make_andclause(andclauses: Vec<Node>) -> Node {
     make_bool_expr(BoolExprType::AND_EXPR, andclauses, -1)
 }
 
 /// PG `make_orclause`: create an OR clause from a list of subclauses.
-pub fn make_orclause(orclauses: Vec<Box<Node>>) -> Box<Node> {
+pub fn make_orclause(orclauses: Vec<Node>) -> Node {
     make_bool_expr(BoolExprType::OR_EXPR, orclauses, -1)
 }
 
 /// PG `make_notclause`: create a NOT clause negating the given expression.
-pub fn make_notclause(notclause: Box<Node>) -> Box<Node> {
+pub fn make_notclause(notclause: Node) -> Node {
     make_bool_expr(BoolExprType::NOT_EXPR, vec![notclause], -1)
 }
 
 /// PG `make_and_qual`: AND two qual conditions; a NULL nodetree means TRUE.
-pub fn make_and_qual(qual1: Option<Box<Node>>, qual2: Option<Box<Node>>) -> Option<Box<Node>> {
+pub fn make_and_qual(qual1: Option<Node>, qual2: Option<Node>) -> Option<Node> {
     match (qual1, qual2) {
         (None, q) | (q, None) => q,
         (Some(q1), Some(q2)) => Some(make_andclause(vec![q1, q2])),
@@ -401,7 +401,7 @@ pub fn make_and_qual(qual1: Option<Box<Node>>, qual2: Option<Box<Node>>) -> Opti
 
 /// PG `make_ands_explicit`: convert an implicit-AND clause list to one expression.
 /// An empty list is equivalent to TRUE.
-pub fn make_ands_explicit(mut andclauses: Vec<Box<Node>>) -> Box<Node> {
+pub fn make_ands_explicit(mut andclauses: Vec<Node>) -> Node {
     match andclauses.len() {
         0 => make_bool_const(true, false),
         1 => andclauses
@@ -413,16 +413,16 @@ pub fn make_ands_explicit(mut andclauses: Vec<Box<Node>>) -> Box<Node> {
 
 /// PG `make_ands_implicit`: convert a boolean expression to an implicit-AND list.
 /// NULL and a constant-TRUE both map to an empty list.
-pub fn make_ands_implicit(clause: Option<Box<Node>>) -> Vec<Box<Node>> {
+pub fn make_ands_implicit(clause: Option<Node>) -> Vec<Node> {
     // NULL -> NIL list == TRUE (parser leaves qual NULL for no WHERE).
     let Some(c) = clause else {
         return Vec::new();
     };
-    match *c {
+    match c {
         Node::BoolExpr(b) if b.boolop == BoolExprType::AND_EXPR => b.args,
         // constant TRUE input -> NIL list
         Node::Const(ref k) if !k.constisnull && DatumGetBool(k.constvalue) => Vec::new(),
-        other => vec![Box::new(other)],
+        other => vec![other],
     }
 }
 
@@ -435,8 +435,8 @@ pub fn make_index_info(
     _numattrs: i32,
     _numkeyattrs: i32,
     _amoid: Oid,
-    _expressions: Vec<Box<Node>>,
-    _predicates: Vec<Box<Node>>,
+    _expressions: Vec<Node>,
+    _predicates: Vec<Node>,
     _unique: bool,
     _nulls_not_distinct: bool,
     _isready: bool,
@@ -453,7 +453,7 @@ pub fn make_index_info(
 /// PG `makeGroupingSet`: create a `GroupingSet` node.
 pub fn make_grouping_set(
     kind: GroupingSetKind,
-    content: Vec<Box<Node>>,
+    content: Vec<Node>,
     location: i32,
 ) -> GroupingSet {
     GroupingSet {
@@ -467,7 +467,7 @@ pub fn make_grouping_set(
 pub fn make_vacuum_relation(
     relation: Option<Box<RangeVar>>,
     oid: Oid,
-    va_cols: Vec<Box<Node>>,
+    va_cols: Vec<Node>,
 ) -> VacuumRelation {
     VacuumRelation {
         relation,
@@ -477,16 +477,16 @@ pub fn make_vacuum_relation(
 }
 
 /// PG `makeStringConst`: build an `A_Const` node of type `T_String` for a string.
-pub fn make_string_const(str: &str, location: i32) -> Box<Node> {
-    Box::new(Node::A_Const(Box::new(A_Const {
+pub fn make_string_const(str: &str, location: i32) -> Node {
+    Node::A_Const(Box::new(A_Const {
         val: ValUnion::String(makeString(str.to_owned())),
         isnull: false,
         location,
-    })))
+    }))
 }
 
 /// PG `makeDefElem`: build a `DefElem` (unqualified name, no special action).
-pub fn make_def_elem(name: &str, arg: Option<Box<Node>>, location: i32) -> DefElem {
+pub fn make_def_elem(name: &str, arg: Option<Node>, location: i32) -> DefElem {
     DefElem {
         defnamespace: None,
         defname: Some(name.to_owned()),
@@ -500,7 +500,7 @@ pub fn make_def_elem(name: &str, arg: Option<Box<Node>>, location: i32) -> DefEl
 pub fn make_def_elem_extended(
     name_space: Option<String>,
     name: &str,
-    arg: Option<Box<Node>>,
+    arg: Option<Node>,
     defaction: DefElemAction,
     location: i32,
 ) -> DefElem {
@@ -515,8 +515,8 @@ pub fn make_def_elem_extended(
 
 /// PG `makeFuncCall`: initialize a `FuncCall` with the always-required info.
 pub fn make_func_call(
-    name: Vec<Box<Node>>,
-    args: Vec<Box<Node>>,
+    name: Vec<Node>,
+    args: Vec<Node>,
     funcformat: CoercionForm,
     location: i32,
 ) -> FuncCall {
@@ -546,8 +546,8 @@ pub fn make_json_format(typ: JsonFormatType, encoding: JsonEncoding, location: i
 
 /// PG `makeJsonValueExpr`: creates a `JsonValueExpr` node.
 pub fn make_json_value_expr(
-    raw_expr: Option<Box<Node>>,
-    formatted_expr: Option<Box<Node>>,
+    raw_expr: Option<Node>,
+    formatted_expr: Option<Node>,
     format: Option<Box<JsonFormat>>,
 ) -> JsonValueExpr {
     JsonValueExpr {
@@ -560,7 +560,7 @@ pub fn make_json_value_expr(
 /// PG `makeJsonBehavior`: creates a `JsonBehavior` node.
 pub fn make_json_behavior(
     btype: JsonBehaviorType,
-    expr: Option<Box<Node>>,
+    expr: Option<Node>,
     location: i32,
 ) -> JsonBehavior {
     JsonBehavior {
@@ -572,30 +572,30 @@ pub fn make_json_behavior(
 }
 
 /// PG `makeJsonKeyValue`: creates a `JsonKeyValue` node.
-pub fn make_json_key_value(key: Option<Box<Node>>, value: Option<Box<Node>>) -> Box<Node> {
+pub fn make_json_key_value(key: Option<Node>, value: Option<Node>) -> Node {
     // C: n->value = castNode(JsonValueExpr, value).
-    let value = value.map(|v| match *v {
+    let value = value.map(|v| match v {
         Node::JsonValueExpr(jve) => jve,
         _ => unreachable!("makeJsonKeyValue: value is not a JsonValueExpr"),
     });
-    Box::new(Node::JsonKeyValue(Box::new(JsonKeyValue { key, value })))
+    Node::JsonKeyValue(Box::new(JsonKeyValue { key, value }))
 }
 
 /// PG `makeJsonIsPredicate`: creates a `JsonIsPredicate` node.
 pub fn make_json_is_predicate(
-    expr: Option<Box<Node>>,
+    expr: Option<Node>,
     format: Option<Box<JsonFormat>>,
     item_type: JsonValueType,
     unique_keys: bool,
     location: i32,
-) -> Box<Node> {
-    Box::new(Node::JsonIsPredicate(Box::new(JsonIsPredicate {
+) -> Node {
+    Node::JsonIsPredicate(Box::new(JsonIsPredicate {
         expr,
         format,
         item_type,
         unique_keys,
         location,
-    })))
+    }))
 }
 
 /// PG `makeJsonTablePath`: make a `JsonTablePath` for a path string and name.
@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn make_bool_const_is_bool_typed_const_node() {
         let n = make_bool_const(true, false);
-        let Node::Const(c) = &*n else {
+        let Node::Const(c) = &n else {
             panic!("expected Const node");
         };
         assert_eq!(c.consttype, BOOLOID);
@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn make_target_entry_zeroes_extra_fields() {
-        let expr = Some(Box::new(Node::Const(Box::new(make_const(
+        let expr = Some(Node::Const(Box::new(make_const(
             INT4OID,
             -1,
             InvalidOid,
@@ -683,7 +683,7 @@ mod tests {
             Datum(7),
             false,
             true,
-        )))));
+        ))));
         let tle = make_target_entry(expr, 1, Some("c".to_owned()), false);
         assert_eq!(tle.resno, 1);
         assert_eq!(tle.resname.as_deref(), Some("c"));
@@ -695,7 +695,7 @@ mod tests {
 
     #[test]
     fn make_var_from_target_entry_pulls_type_from_expr() {
-        let expr = Box::new(Node::Const(Box::new(make_const(
+        let expr = Node::Const(Box::new(make_const(
             INT4OID,
             -1,
             InvalidOid,
@@ -703,7 +703,7 @@ mod tests {
             Datum(7),
             false,
             true,
-        ))));
+        )));
         let tle = make_target_entry(Some(expr), 5, None, false);
         let v = make_var_from_target_entry(2, &tle);
         assert_eq!(v.varno, 2);
@@ -715,7 +715,7 @@ mod tests {
     #[test]
     fn make_ands_explicit_empty_is_true_const() {
         let n = make_ands_explicit(Vec::new());
-        let Node::Const(c) = &*n else {
+        let Node::Const(c) = &n else {
             panic!("expected Const");
         };
         assert_eq!(c.consttype, BOOLOID);
@@ -726,7 +726,7 @@ mod tests {
     fn make_ands_explicit_single_returns_clause() {
         let clause = make_bool_const(false, false);
         let n = make_ands_explicit(vec![clause]);
-        assert!(matches!(&*n, Node::Const(_)));
+        assert!(matches!(&n, Node::Const(_)));
     }
 
     #[test]
@@ -748,7 +748,7 @@ mod tests {
     fn make_and_qual_collapses_nulls() {
         let q = make_bool_const(false, false);
         assert!(make_and_qual(None, None).is_none());
-        assert!(matches!(make_and_qual(Some(q), None), Some(b) if matches!(*b, Node::Const(_))));
+        assert!(matches!(make_and_qual(Some(q), None), Some(b) if matches!(b, Node::Const(_))));
     }
 
     #[test]
@@ -756,7 +756,7 @@ mod tests {
         let l = make_bool_const(false, false);
         let r = make_bool_const(true, false);
         let n = make_opclause(InvalidOid, BOOLOID, false, Some(l), Some(r), InvalidOid, InvalidOid);
-        let Node::OpExpr(o) = &*n else {
+        let Node::OpExpr(o) = &n else {
             panic!("expected OpExpr");
         };
         assert_eq!(o.args.len(), 2);

@@ -94,7 +94,7 @@ pub fn wal_snd_set_state(_state: WalSndState) {
 
 // Replication grammar parser entry points (repl_gram.y / repl_scanner.l).
 // yyscan_t -> opaque scanner handle (FFI); modeled as a raw pointer stub.
-// Node** out-param -> &mut Option<Box<Node>> at call sites; kept minimal here.
+// Node** out-param -> &mut Option<Node> at call sites; kept minimal here.
 
 /// Parse a replication command. Returns the yacc status code.
 pub fn replication_yyparse() -> i32 {

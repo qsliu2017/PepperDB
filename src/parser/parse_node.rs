@@ -114,13 +114,13 @@ pub enum ParseExprKind {
 
 /// C: `Node *(*PreParseColumnRefHook)(ParseState *pstate, ColumnRef *cref);`
 pub type PreParseColumnRefHook =
-    fn(pstate: &mut ParseState, cref: &mut ColumnRef) -> Option<Box<Node>>;
+    fn(pstate: &mut ParseState, cref: &mut ColumnRef) -> Option<Node>;
 /// C: `Node *(*PostParseColumnRefHook)(ParseState *pstate, ColumnRef *cref, Node *var);`
 pub type PostParseColumnRefHook =
-    fn(pstate: &mut ParseState, cref: &mut ColumnRef, var: Option<Box<Node>>) -> Option<Box<Node>>;
+    fn(pstate: &mut ParseState, cref: &mut ColumnRef, var: Option<Node>) -> Option<Node>;
 /// C: `Node *(*ParseParamRefHook)(ParseState *pstate, ParamRef *pref);`
 pub type ParseParamRefHook =
-    fn(pstate: &mut ParseState, pref: &mut ParamRef) -> Option<Box<Node>>;
+    fn(pstate: &mut ParseState, pref: &mut ParamRef) -> Option<Node>;
 /// C: `Node *(*CoerceParamHook)(ParseState *, Param *, Oid, int32, int);`
 pub type CoerceParamHook = fn(
     pstate: &mut ParseState,
@@ -128,7 +128,7 @@ pub type CoerceParamHook = fn(
     target_type_id: Oid,
     target_type_mod: i32,
     location: i32,
-) -> Option<Box<Node>>;
+) -> Option<Node>;
 
 /// State information used during parse analysis.
 ///
@@ -143,11 +143,11 @@ pub struct ParseState {
     /// RTEPermissionInfo nodes for each RELATION entry in rtable
     pub p_rteperminfos: Vec<RTEPermissionInfo>,
     /// JoinExprs for JOIN p_rtable entries (NULLs for non-join RTEs)
-    pub p_joinexprs: Vec<Option<Box<Node>>>,
+    pub p_joinexprs: Vec<Option<Node>>,
     /// Bitmapsets showing nulling outer joins
     pub p_nullingrels: Vec<Option<crate::nodes::bitmapset::Bitmapset>>,
     /// join items so far (will become FromExpr node's fromlist)
-    pub p_joinlist: Vec<Box<Node>>,
+    pub p_joinlist: Vec<Node>,
     /// currently-referenceable RTEs (list of ParseNamespaceItem)
     pub p_namespace: Vec<ParseNamespaceItem>,
     /// lateral_only items visible?
@@ -167,15 +167,15 @@ pub struct ParseState {
     /// process assignment like INSERT not UPDATE
     pub p_is_insert: bool,
     /// raw representations of window clauses
-    pub p_windowdefs: Vec<Box<Node>>,
+    pub p_windowdefs: Vec<Node>,
     /// what kind of expression we're parsing
     pub p_expr_kind: ParseExprKind,
     /// next targetlist resno to assign
     pub p_next_resno: i32,
     /// junk tlist entries for multiassign
-    pub p_multiassign_exprs: Vec<Box<Node>>,
+    pub p_multiassign_exprs: Vec<Node>,
     /// raw FOR UPDATE/FOR SHARE info
-    pub p_locking_clause: Vec<Box<Node>>,
+    pub p_locking_clause: Vec<Node>,
     /// parent has marked this subquery with FOR UPDATE/FOR SHARE
     pub p_locked_from_parent: bool,
     /// resolve unknown-type SELECT outputs as type text
@@ -191,7 +191,7 @@ pub struct ParseState {
     pub p_has_modifying_cte: bool,
 
     /// most recent set-returning func/op found
-    pub p_last_srf: Option<Box<Node>>,
+    pub p_last_srf: Option<Node>,
 
     // Optional hook functions for parser callbacks. None unless set up by the
     // caller of make_parsestate.
@@ -200,7 +200,7 @@ pub struct ParseState {
     pub p_paramref_hook: Option<ParseParamRefHook>,
     pub p_coerce_param_hook: Option<CoerceParamHook>,
     /// common passthrough link for the hooks above (C `void *p_ref_hook_state`)
-    pub p_ref_hook_state: Option<Box<Node>>, // TODO(ptr): opaque hook state
+    pub p_ref_hook_state: Option<Node>, // TODO(ptr): opaque hook state
 }
 
 /// An element of a namespace list.
@@ -285,10 +285,10 @@ pub fn transform_container_type(_container_type: Oid, _container_typmod: i32) ->
 
 pub fn transform_container_subscripts(
     _pstate: &mut ParseState,
-    _container_base: Option<Box<Node>>,
+    _container_base: Option<Node>,
     _container_type: Oid,
     _container_typ_mod: i32,
-    _indirection: Vec<Box<Node>>,
+    _indirection: Vec<Node>,
     _is_assignment: bool,
 ) -> Box<SubscriptingRef> {
     unimplemented!()

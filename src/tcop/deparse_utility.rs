@@ -27,7 +27,7 @@ pub enum CollectedCommandType {
 pub struct CollectedATSubcmd {
     /// affected column, constraint, index, ...
     pub address: ObjectAddress,
-    pub parsetree: Box<Node>,
+    pub parsetree: Node,
 }
 
 /// Per-type payload for the ALTER TABLE variant.
@@ -46,7 +46,7 @@ pub struct CollectedAlterTable {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CollectedCommand {
     pub in_extension: bool,
-    pub parsetree: Option<Box<Node>>,
+    pub parsetree: Option<Node>,
     /// when nested
     pub parent: Option<Box<Self>>,
     pub data: CollectedCommandData,
@@ -67,14 +67,14 @@ pub enum CollectedCommandData {
     /// ALTER OPERATOR FAMILY
     AlterOpFamily {
         address: ObjectAddress,
-        operators: Vec<Box<Node>>,
-        procedures: Vec<Box<Node>>,
+        operators: Vec<Node>,
+        procedures: Vec<Node>,
     },
     /// CREATE OPERATOR CLASS
     CreateOpClass {
         address: ObjectAddress,
-        operators: Vec<Box<Node>>,
-        procedures: Vec<Box<Node>>,
+        operators: Vec<Node>,
+        procedures: Vec<Node>,
     },
     /// ALTER TEXT SEARCH CONFIGURATION ADD/ALTER/DROP MAPPING
     AlterTSConfig {

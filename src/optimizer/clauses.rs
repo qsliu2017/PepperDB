@@ -16,7 +16,7 @@ pub struct WindowFuncLists {
     /// window_funcs[] is indexed 0 .. max_win_ref
     pub max_win_ref: usize,
     /// lists of WindowFuncs for each winref
-    pub window_funcs: Vec<Vec<Box<Node>>>,
+    pub window_funcs: Vec<Vec<Node>>,
 }
 
 pub fn contain_agg_clause(clause: Option<&Node>) -> bool {
@@ -64,11 +64,11 @@ pub fn find_nonnullable_rels(clause: Option<&Node>) -> Relids {
     unimplemented!()
 }
 
-pub fn find_nonnullable_vars(clause: Option<&Node>) -> Vec<Box<Node>> {
+pub fn find_nonnullable_vars(clause: Option<&Node>) -> Vec<Node> {
     unimplemented!()
 }
 
-pub fn find_forced_null_vars(node: Option<&Node>) -> Vec<Box<Node>> {
+pub fn find_forced_null_vars(node: Option<&Node>) -> Vec<Node> {
     unimplemented!()
 }
 

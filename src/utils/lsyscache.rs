@@ -422,7 +422,7 @@ pub fn get_typstorage(typid: Oid) -> u8 {
     unimplemented!()
 }
 
-pub fn get_typdefault(typid: Oid) -> Option<Box<Node>> {
+pub fn get_typdefault(typid: Oid) -> Option<Node> {
     unimplemented!()
 }
 

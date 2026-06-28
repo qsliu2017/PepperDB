@@ -33,14 +33,14 @@ fn not_yet_reachable() -> ! {
 /// relabel, domain coercion) grows in later milestones.
 pub fn coerce_type(
     _pstate: &mut ParseState,
-    node: Box<Node>,
+    node: Node,
     input_type_id: Oid,
     target_type_id: Oid,
     _target_type_mod: i32,
     _ccontext: CoercionContext,
     _cformat: CoercionForm,
     _location: i32,
-) -> Box<Node> {
+) -> Node {
     if target_type_id == input_type_id {
         // no conversion needed
         return node;
@@ -56,14 +56,14 @@ pub fn coerce_type(
 /// length coercion grow later.
 pub fn coerce_to_target_type(
     pstate: &mut ParseState,
-    expr: Option<Box<Node>>,
+    expr: Option<Node>,
     exprtype: Oid,
     targettype: Oid,
     targettypmod: i32,
     ccontext: CoercionContext,
     cformat: CoercionForm,
     location: i32,
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     let expr = expr?;
     if exprtype == targettype {
         // Already the target type; no cast search or typmod coercion needed for

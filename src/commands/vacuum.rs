@@ -205,7 +205,7 @@ pub fn ExecVacuum(pstate: &mut ParseState, vacstmt: &VacuumStmt, is_top_level: b
 }
 
 pub fn vacuum(
-    relations: &[Box<Node>],
+    relations: &[Node],
     params: &VacuumParams,
     bstrategy: Option<&BufferAccessStrategy>,
     vac_context: MemoryContext,
@@ -359,7 +359,7 @@ pub fn analyze_rel(
     relid: Oid,
     relation: Option<&RangeVar>,
     params: &VacuumParams,
-    va_cols: &[Box<Node>],
+    va_cols: &[Node],
     in_outer_xact: bool,
     bstrategy: Option<&BufferAccessStrategy>,
 ) {

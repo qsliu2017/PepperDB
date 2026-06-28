@@ -40,7 +40,7 @@ pub fn parse_analyze_withcb(
 }
 
 pub fn parse_sub_analyze(
-    _parse_tree: Box<Node>,
+    _parse_tree: Node,
     _parent_parse_state: &mut ParseState,
     _parent_cte: Option<&CommonTableExpr>,
     _locked_from_parent: bool,
@@ -51,19 +51,19 @@ pub fn parse_sub_analyze(
 
 pub fn transformInsertRow(
     _pstate: &mut ParseState,
-    _exprlist: Vec<Box<Node>>,
-    _stmtcols: Vec<Box<Node>>,
-    _icolumns: Vec<Box<Node>>,
+    _exprlist: Vec<Node>,
+    _stmtcols: Vec<Node>,
+    _icolumns: Vec<Node>,
     _attrnos: Vec<i32>,
     _strip_indirection: bool,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
 pub fn transformUpdateTargetList(
     _pstate: &mut ParseState,
-    _orig_tlist: Vec<Box<Node>>,
-) -> Vec<Box<Node>> {
+    _orig_tlist: Vec<Node>,
+) -> Vec<Node> {
     unimplemented!()
 }
 
@@ -116,7 +116,7 @@ pub fn applyLockingClause(
 pub fn BuildOnConflictExcludedTargetlist(
     _target_rel: Relation,
     _excl_rel_index: usize,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 

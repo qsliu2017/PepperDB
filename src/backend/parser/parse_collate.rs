@@ -66,20 +66,20 @@ fn not_yet_reachable(node: &Node) -> ! {
 /// tree's qualification. Both are no-ops for uncollatable expressions.
 pub fn assign_query_collations(pstate: &mut ParseState, query: &mut Query) {
     for tle in &mut query.targetList {
-        if let Node::TargetEntry(te) = &mut **tle
-            && let Some(expr) = te.expr.as_deref_mut() {
+        if let Node::TargetEntry(te) = tle
+            && let Some(expr) = te.expr.as_mut() {
                 assign_expr_collations(pstate, expr);
             }
     }
-    if let Some(jointree) = query.jointree.as_deref_mut()
+    if let Some(jointree) = query.jointree.as_mut()
         && let Node::FromExpr(f) = jointree
-            && let Some(quals) = f.quals.as_deref_mut() {
+            && let Some(quals) = f.quals.as_mut() {
                 assign_expr_collations(pstate, quals);
             }
 }
 
 /// PG `assign_list_collations`: assign collations to each expression in a list.
-pub fn assign_list_collations(pstate: &mut ParseState, exprs: &mut [Box<Node>]) {
+pub fn assign_list_collations(pstate: &mut ParseState, exprs: &mut [Node]) {
     for node in exprs {
         assign_expr_collations(pstate, node);
     }
@@ -135,7 +135,7 @@ fn assign_collations_walker(
 /// grows with the operator/function transform paths.
 pub fn select_common_collation(
     _pstate: &mut ParseState,
-    _exprs: &[Box<Node>],
+    _exprs: &[Node],
     _none_ok: bool,
 ) -> Oid {
     unimplemented!("select_common_collation: collatable multi-input expressions deferred");

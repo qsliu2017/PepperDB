@@ -54,8 +54,8 @@ pub trait FdwRoutine {
         baserel: &mut RelOptInfo,
         foreigntableid: Oid,
         best_path: &mut ForeignPath,
-        tlist: Vec<Box<crate::nodes::nodes::Node>>,
-        scan_clauses: Vec<Box<crate::nodes::nodes::Node>>,
+        tlist: Vec<crate::nodes::nodes::Node>,
+        scan_clauses: Vec<crate::nodes::nodes::Node>,
         outer_plan: *mut Plan,
     ) -> *mut ForeignScan;
 
@@ -111,7 +111,7 @@ pub trait FdwRoutine {
         _plan: &mut ModifyTable,
         _result_relation: Index,
         _subplan_index: i32,
-    ) -> Vec<Box<crate::nodes::nodes::Node>> {
+    ) -> Vec<crate::nodes::nodes::Node> {
         unimplemented!()
     }
 
@@ -119,7 +119,7 @@ pub trait FdwRoutine {
         &self,
         _mtstate: &mut ModifyTableState,
         _rinfo: &mut ResultRelInfo,
-        _fdw_private: Vec<Box<crate::nodes::nodes::Node>>,
+        _fdw_private: Vec<crate::nodes::nodes::Node>,
         _subplan_index: i32,
         _eflags: i32,
     ) {
@@ -232,7 +232,7 @@ pub trait FdwRoutine {
         &self,
         _mtstate: &mut ModifyTableState,
         _rinfo: &mut ResultRelInfo,
-        _fdw_private: Vec<Box<crate::nodes::nodes::Node>>,
+        _fdw_private: Vec<crate::nodes::nodes::Node>,
         _subplan_index: i32,
         _es: &mut ExplainState,
     ) {
@@ -257,7 +257,7 @@ pub trait FdwRoutine {
         &self,
         _stmt: &mut ImportForeignSchemaStmt,
         _server_oid: Oid,
-    ) -> Vec<Box<crate::nodes::nodes::Node>> {
+    ) -> Vec<crate::nodes::nodes::Node> {
         unimplemented!()
     }
 
@@ -265,7 +265,7 @@ pub trait FdwRoutine {
 
     fn exec_foreign_truncate(
         &self,
-        _rels: Vec<Box<crate::nodes::nodes::Node>>,
+        _rels: Vec<crate::nodes::nodes::Node>,
         _behavior: DropBehavior,
         _restart_seqs: bool,
     ) {
@@ -321,9 +321,9 @@ pub trait FdwRoutine {
     fn reparameterize_foreign_path_by_child(
         &self,
         _root: &mut PlannerInfo,
-        _fdw_private: Vec<Box<crate::nodes::nodes::Node>>,
+        _fdw_private: Vec<crate::nodes::nodes::Node>,
         _child_rel: &mut RelOptInfo,
-    ) -> Vec<Box<crate::nodes::nodes::Node>> {
+    ) -> Vec<crate::nodes::nodes::Node> {
         unimplemented!()
     }
 

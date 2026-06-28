@@ -1,6 +1,6 @@
 //! Translated from PostgreSQL src/include/optimizer/subselect.h
 
-#![allow(clippy::boxed_local, reason = "1:1 PG port: Box<Node>/Box<Path> mirrors PG pointer-passed nodes")]
+#![allow(clippy::boxed_local, reason = "1:1 PG port: Node/Box<Path> mirrors PG pointer-passed nodes")]
 #![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
 
 use crate::nodes::nodes::{Cost, Node};
@@ -39,11 +39,11 @@ pub fn convert_exists_sublink_to_join(
     unimplemented!()
 }
 
-pub fn ss_replace_correlation_vars(root: &mut PlannerInfo, expr: Box<Node>) -> Box<Node> {
+pub fn ss_replace_correlation_vars(root: &mut PlannerInfo, expr: Node) -> Node {
     unimplemented!()
 }
 
-pub fn ss_process_sublinks(root: &mut PlannerInfo, expr: Box<Node>, is_qual: bool) -> Box<Node> {
+pub fn ss_process_sublinks(root: &mut PlannerInfo, expr: Node, is_qual: bool) -> Node {
     unimplemented!()
 }
 

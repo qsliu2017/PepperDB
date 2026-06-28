@@ -7,11 +7,6 @@
 //! `CreateExprContext` only initialize the live fields, `ResetExprContext` is a
 //! no-op (no arena to reset for by-val data), and `FreeExecutorState` is `Drop`.
 
-#![allow(
-    clippy::vec_box,
-    reason = "1:1 PG port: Vec<Box<Node>> mirrors a PG List of node pointers and matches Plan.targetlist"
-)]
-
 use crate::access::tupdesc::TupleDesc;
 use crate::nodes::execnodes::{EState, ExprContext, PlanState};
 
@@ -96,14 +91,14 @@ pub fn exec_assign_projection_info(planstate: &mut PlanState, input_desc: TupleD
     planstate.resultopsfixed = true;
 }
 
-/// Extract a clone of a PlanState's plan targetlist (the plan is a `Box<Node>`).
-fn plan_targetlist(planstate: &PlanState) -> Vec<Box<crate::nodes::nodes::Node>> {
+/// Extract a clone of a PlanState's plan targetlist (the plan is a `Node`).
+fn plan_targetlist(planstate: &PlanState) -> Vec<crate::nodes::nodes::Node> {
     use crate::nodes::nodes::Node;
     let plan = planstate
         .plan
         .as_ref()
         .unwrap_or_else(|| unimplemented!("plan_targetlist: PlanState has no plan"));
-    match &**plan {
+    match plan {
         Node::Result(r) => r.plan.targetlist.clone(),
         other => unimplemented!("plan_targetlist: {other:?} not reachable for this milestone"),
     }

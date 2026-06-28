@@ -31,7 +31,7 @@ pub fn exec_init_result(node: &ResultPlan, estate: &mut EState, eflags: i32) -> 
     }
 
     let mut ps = PlanState {
-        plan: Some(Box::new(Node::Result(Box::new(node.clone())))),
+        plan: Some(Node::Result(Box::new(node.clone()))),
         ..PlanState::default()
     };
 

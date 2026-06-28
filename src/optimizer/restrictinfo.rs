@@ -1,6 +1,6 @@
 //! Translated from PostgreSQL src/include/optimizer/restrictinfo.h
 
-#![allow(clippy::boxed_local, reason = "1:1 PG port: Box<Node>/Box<Path> mirrors PG pointer-passed nodes")]
+#![allow(clippy::boxed_local, reason = "1:1 PG port: Node/Box<Path> mirrors PG pointer-passed nodes")]
 #![allow(clippy::fn_params_excessive_bools, reason = "1:1 PG port: bool flags mirror PG C signature")]
 #![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
 

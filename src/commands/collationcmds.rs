@@ -8,8 +8,8 @@ use crate::postgres_ext::Oid;
 
 pub fn DefineCollation(
     _pstate: &mut ParseState,
-    _names: &[Box<Node>],
-    _parameters: &[Box<Node>],
+    _names: &[Node],
+    _parameters: &[Node],
     _if_not_exists: bool,
 ) -> ObjectAddress {
     unimplemented!()

@@ -67,7 +67,7 @@ pub fn xml_ereport(_errcxt: &mut PgXmlErrorContext, _level: i32, _sqlcode: i32, 
     unimplemented!()
 }
 
-pub fn xmlconcat(_args: Vec<Box<Node>>) -> Box<xmltype> {
+pub fn xmlconcat(_args: Vec<Node>) -> Box<xmltype> {
     unimplemented!()
 }
 

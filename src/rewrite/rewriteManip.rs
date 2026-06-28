@@ -22,7 +22,7 @@ pub struct ReplaceRteVariablesContext<'a> {
 }
 
 pub type ReplaceRteVariablesCallback<'a> =
-    &'a mut dyn FnMut(&Var, &mut ReplaceRteVariablesContext) -> Box<Node>;
+    &'a mut dyn FnMut(&Var, &mut ReplaceRteVariablesContext) -> Node;
 
 /// C: `ReplaceVarsNoMatchOption`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,10 +51,10 @@ pub fn adjust_relid_set(_relids: Relids, _oldrelid: i32, _newrelid: i32) -> Reli
 
 /// Combines src range tables into dst. Mutates `dst_rtable`/`dst_perminfos`.
 pub fn combine_range_tables(
-    _dst_rtable: &mut Vec<Box<Node>>,
-    _dst_perminfos: &mut Vec<Box<Node>>,
-    _src_rtable: Vec<Box<Node>>,
-    _src_perminfos: Vec<Box<Node>>,
+    _dst_rtable: &mut Vec<Node>,
+    _dst_perminfos: &mut Vec<Node>,
+    _src_rtable: Vec<Node>,
+    _src_perminfos: Vec<Node>,
 ) {
     unimplemented!()
 }
@@ -86,7 +86,7 @@ pub fn increment_var_sublevels_up(_node: &mut Node, _delta_sublevels_up: i32, _m
 }
 
 pub fn increment_var_sublevels_up_rtable(
-    _rtable: &mut [Box<Node>],
+    _rtable: &mut [Node],
     _delta_sublevels_up: i32,
     _min_sublevels_up: i32,
 ) {
@@ -102,10 +102,10 @@ pub fn get_insert_select_query(_parsetree: &mut Query) -> Option<&mut Query> {
     unimplemented!()
 }
 
-pub fn add_qual(_parsetree: &mut Query, _qual: Option<Box<Node>>) {
+pub fn add_qual(_parsetree: &mut Query, _qual: Option<Node>) {
     unimplemented!()
 }
-pub fn add_inverted_qual(_parsetree: &mut Query, _qual: Option<Box<Node>>) {
+pub fn add_inverted_qual(_parsetree: &mut Query, _qual: Option<Node>) {
     unimplemented!()
 }
 
@@ -129,14 +129,14 @@ pub fn add_nulling_relids(
     _node: &Node,
     _target_relids: &Bitmapset,
     _added_relids: &Bitmapset,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 pub fn remove_nulling_relids(
     _node: &Node,
     _removable_relids: &Bitmapset,
     _except_relids: &Bitmapset,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
@@ -146,11 +146,11 @@ pub fn replace_rte_variables(
     _target_varno: i32,
     _sublevels_up: i32,
     _callback: ReplaceRteVariablesCallback,
-) -> (Box<Node>, bool) {
+) -> (Node, bool) {
     unimplemented!()
 }
 
-pub fn replace_rte_variables_mutator(_node: &Node, _context: &mut ReplaceRteVariablesContext) -> Box<Node> {
+pub fn replace_rte_variables_mutator(_node: &Node, _context: &mut ReplaceRteVariablesContext) -> Node {
     unimplemented!()
 }
 
@@ -161,18 +161,18 @@ pub fn map_variable_attnos(
     _sublevels_up: i32,
     _attno_map: &AttrMap,
     _to_rowtype: Oid,
-) -> (Box<Node>, bool) {
+) -> (Node, bool) {
     unimplemented!()
 }
 
 pub fn replace_var_from_target_list(
     _var: &Var,
     _target_rte: &RangeTblEntry,
-    _targetlist: &[Box<Node>],
+    _targetlist: &[Node],
     _result_relation: i32,
     _nomatch_option: ReplaceVarsNoMatchOption,
     _nomatch_varno: i32,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
@@ -182,10 +182,10 @@ pub fn replace_vars_from_target_list(
     _target_varno: i32,
     _sublevels_up: i32,
     _target_rte: &RangeTblEntry,
-    _targetlist: &[Box<Node>],
+    _targetlist: &[Node],
     _result_relation: i32,
     _nomatch_option: ReplaceVarsNoMatchOption,
     _nomatch_varno: i32,
-) -> (Box<Node>, bool) {
+) -> (Node, bool) {
     unimplemented!()
 }

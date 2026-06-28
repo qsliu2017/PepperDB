@@ -67,7 +67,7 @@ pub struct CopyFromStateData {
 
     pub opts: CopyFormatOptions,
     pub convert_select_flags: Option<Vec<bool>>, // per-column CSV/TEXT CS flags
-    pub where_clause: Option<Box<Node>>,         // WHERE condition (or None)
+    pub where_clause: Option<Node>,         // WHERE condition (or None)
 
     // just for error messages, see CopyFromErrorCallback
     pub cur_relname: Option<String>, // table name for error messages

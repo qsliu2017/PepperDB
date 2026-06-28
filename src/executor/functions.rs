@@ -28,7 +28,7 @@ pub fn fmgr_sql(_fcinfo: FunctionCallInfo) -> Datum {
 #[allow(deprecated)]
 pub fn prepare_sql_fn_parse_info(
     _procedureTuple: HeapTuple,
-    _call_expr: Option<Box<Node>>,
+    _call_expr: Option<Node>,
     _inputCollation: Oid,
 ) -> SQLFunctionParseInfoPtr {
     unimplemented!()
@@ -38,12 +38,12 @@ pub fn sql_fn_parser_setup(_pstate: &mut ParseState, _pinfo: &SQLFunctionParseIn
     unimplemented!()
 }
 
-pub fn check_sql_fn_statements(_queryTreeLists: Vec<Box<Node>>) {
+pub fn check_sql_fn_statements(_queryTreeLists: Vec<Node>) {
     unimplemented!()
 }
 
 pub fn check_sql_fn_retval(
-    _queryTreeLists: Vec<Box<Node>>,
+    _queryTreeLists: Vec<Node>,
     _rettype: Oid,
     _rettupdesc: Option<Box<TupleDesc>>,
     _prokind: u8,

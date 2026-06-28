@@ -45,7 +45,7 @@ pub fn exprType(expr: &Node) -> Oid {
         Node::MergeSupportFunc(m) => m.msftype,
         Node::SubscriptingRef(s) => s.refrestype,
         Node::FuncExpr(f) => f.funcresulttype,
-        Node::NamedArgExpr(n) => n.arg.as_deref().map_or(InvalidOid, exprType),
+        Node::NamedArgExpr(n) => n.arg.as_ref().map_or(InvalidOid, exprType),
         Node::OpExpr(o) | Node::DistinctExpr(o) | Node::NullIfExpr(o) => o.opresulttype,
         Node::ScalarArrayOpExpr(_) | Node::BoolExpr(_) | Node::RowCompareExpr(_) => BOOLOID,
         Node::FieldSelect(f) => f.resulttype,
@@ -54,7 +54,7 @@ pub fn exprType(expr: &Node) -> Oid {
         Node::CoerceViaIO(c) => c.resulttype,
         Node::ArrayCoerceExpr(a) => a.resulttype,
         Node::ConvertRowtypeExpr(c) => c.resulttype,
-        Node::CollateExpr(c) => c.arg.as_deref().map_or(InvalidOid, exprType),
+        Node::CollateExpr(c) => c.arg.as_ref().map_or(InvalidOid, exprType),
         Node::CaseExpr(c) => c.casetype,
         Node::CaseTestExpr(c) => c.typeId,
         Node::ArrayExpr(a) => a.array_typeid,
@@ -67,18 +67,18 @@ pub fn exprType(expr: &Node) -> Oid {
             XmlExprOp::XMLSERIALIZE => TEXTOID,
             _ => XMLOID,
         },
-        Node::JsonValueExpr(j) => j.formatted_expr.as_deref().map_or(InvalidOid, exprType),
+        Node::JsonValueExpr(j) => j.formatted_expr.as_ref().map_or(InvalidOid, exprType),
         Node::JsonConstructorExpr(j) => j.returning.as_ref().map_or(InvalidOid, |r| r.typid),
         Node::JsonIsPredicate(_) => BOOLOID,
         Node::JsonExpr(j) => j.returning.as_ref().map_or(InvalidOid, |r| r.typid),
-        Node::JsonBehavior(b) => b.expr.as_deref().map_or(InvalidOid, exprType),
+        Node::JsonBehavior(b) => b.expr.as_ref().map_or(InvalidOid, exprType),
         Node::NullTest(_) | Node::BooleanTest(_) | Node::CurrentOfExpr(_) => BOOLOID,
         Node::CoerceToDomain(c) => c.resulttype,
         Node::CoerceToDomainValue(c) => c.typeId,
         Node::SetToDefault(s) => s.typeId,
         Node::NextValueExpr(n) => n.typeId,
-        Node::InferenceElem(i) => i.expr.as_deref().map_or(InvalidOid, exprType),
-        Node::ReturningExpr(r) => r.retexpr.as_deref().map_or(InvalidOid, exprType),
+        Node::InferenceElem(i) => i.expr.as_ref().map_or(InvalidOid, exprType),
+        Node::ReturningExpr(r) => r.retexpr.as_ref().map_or(InvalidOid, exprType),
         Node::PlaceHolderVar(p) => exprType(&p.phexpr),
         // SubLink/SubPlan/AlternativeSubPlan need Query typing or array-type
         // promotion (get_promoted_array_type / format_type_be) not translated yet.
@@ -103,12 +103,12 @@ pub fn exprTypmod(expr: &Node) -> i32 {
         Node::Const(c) => c.consttypmod,
         Node::Param(p) => p.paramtypmod,
         Node::SubscriptingRef(s) => s.reftypmod,
-        Node::NamedArgExpr(n) => n.arg.as_deref().map_or(-1, exprTypmod),
-        Node::NullIfExpr(n) => n.args.first().map_or(-1, |a| exprTypmod(a)),
+        Node::NamedArgExpr(n) => n.arg.as_ref().map_or(-1, exprTypmod),
+        Node::NullIfExpr(n) => n.args.first().map_or(-1, exprTypmod),
         Node::FieldSelect(f) => f.resulttypmod,
         Node::RelabelType(r) => r.resulttypmod,
         Node::ArrayCoerceExpr(a) => a.resulttypmod,
-        Node::CollateExpr(c) => c.arg.as_deref().map_or(-1, exprTypmod),
+        Node::CollateExpr(c) => c.arg.as_ref().map_or(-1, exprTypmod),
         Node::CaseExpr(c) => case_expr_typmod(c),
         Node::CaseTestExpr(c) => c.typeMod,
         Node::ArrayExpr(a) => array_expr_typmod(a),
@@ -119,7 +119,7 @@ pub fn exprTypmod(expr: &Node) -> i32 {
         Node::CoerceToDomainValue(c) => c.typeMod,
         Node::SetToDefault(s) => s.typeMod,
         Node::PlaceHolderVar(p) => exprTypmod(&p.phexpr),
-        Node::ReturningExpr(r) => r.retexpr.as_deref().map_or(-1, exprTypmod),
+        Node::ReturningExpr(r) => r.retexpr.as_ref().map_or(-1, exprTypmod),
         Node::FuncExpr(_) => {
             // Length-coercion functions report a coerced typmod; that path needs
             // exprIsLengthCoercion (syscache), not translated yet.
@@ -136,7 +136,7 @@ pub fn exprTypmod(expr: &Node) -> i32 {
 
 fn case_expr_typmod(cexpr: &crate::nodes::primnodes::CaseExpr) -> i32 {
     // If all alternatives agree on type/typmod, return that typmod, else -1.
-    let Some(defresult) = cexpr.defresult.as_deref() else {
+    let Some(defresult) = cexpr.defresult.as_ref() else {
         return -1;
     };
     let casetype = cexpr.casetype;
@@ -148,10 +148,10 @@ fn case_expr_typmod(cexpr: &crate::nodes::primnodes::CaseExpr) -> i32 {
         return -1;
     }
     for w in &cexpr.args {
-        let Node::CaseWhen(w) = &**w else {
+        let Node::CaseWhen(w) = w else {
             continue;
         };
-        let Some(result) = w.result.as_deref() else {
+        let Some(result) = w.result.as_ref() else {
             return -1;
         };
         if exprType(result) != casetype || exprTypmod(result) != typmod {
@@ -232,7 +232,7 @@ pub fn exprCollation(expr: &Node) -> Oid {
         Node::MergeSupportFunc(m) => m.msfcollid,
         Node::SubscriptingRef(s) => s.refcollid,
         Node::FuncExpr(f) => f.funccollid,
-        Node::NamedArgExpr(n) => n.arg.as_deref().map_or(InvalidOid, exprCollation),
+        Node::NamedArgExpr(n) => n.arg.as_ref().map_or(InvalidOid, exprCollation),
         Node::OpExpr(o) | Node::DistinctExpr(o) | Node::NullIfExpr(o) => o.opcollid,
         // boolean / record results have no collation
         Node::ScalarArrayOpExpr(_) | Node::BoolExpr(_) | Node::RowCompareExpr(_) => InvalidOid,
@@ -261,17 +261,17 @@ pub fn exprCollation(expr: &Node) -> Oid {
                 InvalidOid
             }
         }
-        Node::JsonValueExpr(j) => j.formatted_expr.as_deref().map_or(InvalidOid, exprCollation),
-        Node::JsonConstructorExpr(j) => j.coercion.as_deref().map_or(InvalidOid, exprCollation),
+        Node::JsonValueExpr(j) => j.formatted_expr.as_ref().map_or(InvalidOid, exprCollation),
+        Node::JsonConstructorExpr(j) => j.coercion.as_ref().map_or(InvalidOid, exprCollation),
         Node::JsonIsPredicate(_) => InvalidOid,
         Node::JsonExpr(j) => j.collation,
-        Node::JsonBehavior(b) => b.expr.as_deref().map_or(InvalidOid, exprCollation),
+        Node::JsonBehavior(b) => b.expr.as_ref().map_or(InvalidOid, exprCollation),
         Node::NullTest(_) | Node::BooleanTest(_) => InvalidOid,
         Node::CoerceToDomain(c) => c.resultcollid,
         Node::CoerceToDomainValue(c) => c.collation,
         Node::SetToDefault(s) => s.collation,
-        Node::InferenceElem(i) => i.expr.as_deref().map_or(InvalidOid, exprCollation),
-        Node::ReturningExpr(r) => r.retexpr.as_deref().map_or(InvalidOid, exprCollation),
+        Node::InferenceElem(i) => i.expr.as_ref().map_or(InvalidOid, exprCollation),
+        Node::ReturningExpr(r) => r.retexpr.as_ref().map_or(InvalidOid, exprCollation),
         Node::PlaceHolderVar(p) => exprCollation(&p.phexpr),
         // SubLink/SubPlan/AlternativeSubPlan need Query typing not translated yet.
         Node::SubLink(_) | Node::SubPlan(_) | Node::AlternativeSubPlan(_) => {
@@ -300,9 +300,9 @@ pub fn exprIsLengthCoercion(_expr: &Node) -> Option<i32> {
 //
 // C threads a `void *context` and recurses via a function pointer; a Rust closure
 // captures the context, so the public API takes `impl FnMut(&Node) -> bool`
-// (walker) / `impl FnMut(Node) -> Node` (mutator). To recurse with the same
-// callback the public entry wraps the closure as `&mut dyn FnMut`, which the
-// internal `walk_node`/`mutate_node` recursors share.
+// (walker) / `impl FnMut(Node) -> Node` (mutator). The internal
+// `walk_node`/`mutate_node` recursors are generic over the same `F` and call
+// themselves with `&mut *f`, so the closure type threads through unchanged.
 // ---------------------------------------------------------------------------
 
 /// PG `expression_tree_walker`: visit a node's sub-nodes, calling `walker` on each.
@@ -311,9 +311,9 @@ pub fn expression_tree_walker(node: &Node, mut walker: impl FnMut(&Node) -> bool
     walk_node(node, &mut walker)
 }
 
-fn walk_node(node: &Node, walker: &mut dyn FnMut(&Node) -> bool) -> bool {
+fn walk_node<F: FnMut(&Node) -> bool>(node: &Node, walker: &mut F) -> bool {
     // The walker has already visited `node`; recurse into its sub-nodes only.
-    // Node lists (`Vec<Box<Node>>`) are iterated, calling the walker on each element.
+    // Node lists (`Vec<Node>`) are iterated, calling the walker on each element.
     match node {
         // Primitive node types with no expression subnodes.
         Node::Var(_)
@@ -328,16 +328,16 @@ fn walk_node(node: &Node, walker: &mut dyn FnMut(&Node) -> bool) -> bool {
         | Node::RangeTblRef(_)
         | Node::SortGroupClause(_)
         | Node::MergeSupportFunc(_) => false,
-        Node::TargetEntry(t) => t.expr.as_deref().is_some_and(&mut *walker),
+        Node::TargetEntry(t) => t.expr.as_ref().is_some_and(&mut *walker),
         Node::FromExpr(f) => {
-            f.fromlist.iter().any(|n| walker(n)) || f.quals.as_deref().is_some_and(&mut *walker)
+            f.fromlist.iter().any(&mut *walker) || f.quals.as_ref().is_some_and(&mut *walker)
         }
-        Node::BoolExpr(b) => b.args.iter().any(|n| walker(n)),
+        Node::BoolExpr(b) => b.args.iter().any(&mut *walker),
         Node::OpExpr(o) | Node::DistinctExpr(o) | Node::NullIfExpr(o) => {
-            o.args.iter().any(|n| walker(n))
+            o.args.iter().any(&mut *walker)
         }
-        Node::FuncExpr(f) => f.args.iter().any(|n| walker(n)),
-        Node::RelabelType(r) => r.arg.as_deref().is_some_and(&mut *walker),
+        Node::FuncExpr(f) => f.args.iter().any(&mut *walker),
+        Node::RelabelType(r) => r.arg.as_ref().is_some_and(&mut *walker),
         // Remaining node tags are not reachable for the current milestone; the
         // walker grows complete arms per milestone (rules.md s4 / README grow).
         other => not_yet_reachable("expression_tree_walker", other),
@@ -350,7 +350,7 @@ pub fn expression_tree_mutator(node: Node, mut mutator: impl FnMut(Node) -> Node
     mutate_node(node, &mut mutator)
 }
 
-fn mutate_node(node: Node, mutator: &mut dyn FnMut(Node) -> Node) -> Node {
+fn mutate_node<F: FnMut(Node) -> Node>(node: Node, mutator: &mut F) -> Node {
     match node {
         // Primitive node types: a flat copy (no sub-nodes to mutate).
         n @ (Node::Var(_)
@@ -366,12 +366,12 @@ fn mutate_node(node: Node, mutator: &mut dyn FnMut(Node) -> Node) -> Node {
         | Node::SortGroupClause(_)
         | Node::MergeSupportFunc(_)) => n,
         Node::TargetEntry(mut t) => {
-            t.expr = t.expr.map(|e| Box::new(mutator(*e)));
+            t.expr = t.expr.map(&mut *mutator);
             Node::TargetEntry(t)
         }
         Node::FromExpr(mut f) => {
             f.fromlist = mutate_list(f.fromlist, mutator);
-            f.quals = f.quals.map(|q| Box::new(mutator(*q)));
+            f.quals = f.quals.map(&mut *mutator);
             Node::FromExpr(f)
         }
         Node::BoolExpr(mut b) => {
@@ -387,21 +387,16 @@ fn mutate_node(node: Node, mutator: &mut dyn FnMut(Node) -> Node) -> Node {
             Node::FuncExpr(f)
         }
         Node::RelabelType(mut r) => {
-            r.arg = r.arg.map(|a| Box::new(mutator(*a)));
+            r.arg = r.arg.map(&mut *mutator);
             Node::RelabelType(r)
         }
         other => not_yet_reachable("expression_tree_mutator", &other),
     }
 }
 
-/// Apply `mutator` to each element of a node list (`Vec<Box<Node>>` mirrors the
-/// node-struct field types, so the boxing is part of the data model, not avoidable).
-#[allow(
-    clippy::vec_box,
-    reason = "node-list fields are Vec<Box<Node>> throughout the node model"
-)]
-fn mutate_list(list: Vec<Box<Node>>, mutator: &mut dyn FnMut(Node) -> Node) -> Vec<Box<Node>> {
-    list.into_iter().map(|n| Box::new(mutator(*n))).collect()
+/// Apply `mutator` to each element of a node list (`Vec<Node>`).
+fn mutate_list<F: FnMut(Node) -> Node>(list: Vec<Node>, mutator: &mut F) -> Vec<Node> {
+    list.into_iter().map(mutator).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +418,7 @@ pub fn is_opclause(clause: Option<&Node>) -> bool {
 /// unary one).
 pub fn get_leftop(clause: &Node) -> Option<&Node> {
     match clause {
-        Node::OpExpr(e) => e.args.first().map(AsRef::as_ref),
+        Node::OpExpr(e) => e.args.first(),
         _ => None,
     }
 }
@@ -431,7 +426,7 @@ pub fn get_leftop(clause: &Node) -> Option<&Node> {
 /// PG `get_rightop`: extract the right arg of a binary opclause (None if unary).
 pub fn get_rightop(clause: &Node) -> Option<&Node> {
     match clause {
-        Node::OpExpr(e) if e.args.len() >= 2 => e.args.get(1).map(AsRef::as_ref),
+        Node::OpExpr(e) if e.args.len() >= 2 => e.args.get(1),
         _ => None,
     }
 }
@@ -454,7 +449,7 @@ pub fn is_notclause(clause: Option<&Node>) -> bool {
 /// PG `get_notclausearg`: extract the argument from a known NOT clause.
 pub fn get_notclausearg(notclause: &Node) -> Option<&Node> {
     match notclause {
-        Node::BoolExpr(e) => e.args.first().map(AsRef::as_ref),
+        Node::BoolExpr(e) => e.args.first(),
         _ => None,
     }
 }
@@ -526,7 +521,7 @@ mod tests {
     #[test]
     fn walker_visits_target_entry_expr() {
         let tle = Node::TargetEntry(Box::new(TargetEntry {
-            expr: Some(Box::new(int_const(9))),
+            expr: Some(int_const(9)),
             resno: 1,
             resname: None,
             ressortgroupref: 0,
@@ -548,7 +543,7 @@ mod tests {
     #[test]
     fn walker_early_abort_propagates() {
         let tle = Node::TargetEntry(Box::new(TargetEntry {
-            expr: Some(Box::new(int_const(9))),
+            expr: Some(int_const(9)),
             resno: 1,
             resname: None,
             ressortgroupref: 0,
@@ -574,7 +569,7 @@ mod tests {
     #[test]
     fn mutator_rewrites_target_entry_child() {
         let tle = Node::TargetEntry(Box::new(TargetEntry {
-            expr: Some(Box::new(int_const(1))),
+            expr: Some(int_const(1)),
             resno: 1,
             resname: None,
             ressortgroupref: 0,
@@ -593,10 +588,10 @@ mod tests {
         let Node::TargetEntry(t) = out else {
             panic!("expected TargetEntry");
         };
-        let Some(boxed) = t.expr else {
+        let Some(child) = t.expr else {
             panic!("expected expr");
         };
-        let Node::Const(c) = *boxed else {
+        let Node::Const(c) = child else {
             panic!("expected Const");
         };
         assert_eq!(c.constvalue, Datum(100));
@@ -611,7 +606,7 @@ mod tests {
             opretset: false,
             opcollid: InvalidOid,
             inputcollid: InvalidOid,
-            args: vec![Box::new(int_const(1)), Box::new(int_const(2))],
+            args: vec![int_const(1), int_const(2)],
             location: -1,
         }));
         assert!(is_opclause(Some(&op)));
@@ -621,7 +616,7 @@ mod tests {
 
         let and = Node::BoolExpr(Box::new(BoolExpr {
             boolop: BoolExprType::AND_EXPR,
-            args: vec![Box::new(int_const(1))],
+            args: vec![int_const(1)],
             location: -1,
         }));
         assert!(is_andclause(Some(&and)));

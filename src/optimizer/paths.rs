@@ -1,6 +1,6 @@
 //! Translated from PostgreSQL src/include/optimizer/paths.h
 
-#![allow(clippy::boxed_local, reason = "1:1 PG port: Box<Node>/Box<Path> mirrors PG pointer-passed nodes")]
+#![allow(clippy::boxed_local, reason = "1:1 PG port: Node/Box<Path> mirrors PG pointer-passed nodes")]
 #![allow(clippy::needless_pass_by_value, reason = "1:1 PG port: stubs take owned node values matching PG C signatures; consumed once implemented")]
 #![allow(clippy::ptr_arg, reason = "1:1 PG port: &mut Vec matches PG list mutation API")]
 
@@ -123,7 +123,7 @@ pub fn match_index_to_operand(operand: &Node, indexcol: i32, index: &IndexOptInf
     unimplemented!()
 }
 
-pub fn strip_phvs_in_index_operand(operand: Box<Node>) -> Box<Node> {
+pub fn strip_phvs_in_index_operand(operand: Node) -> Node {
     unimplemented!()
 }
 

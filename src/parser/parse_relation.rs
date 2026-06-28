@@ -38,8 +38,8 @@ pub fn scanNameSpaceForENR(_pstate: &mut ParseState, _refname: &str) -> bool {
 
 pub fn checkNameSpaceConflicts(
     _pstate: &mut ParseState,
-    _namespace1: &[Box<Node>],
-    _namespace2: &[Box<Node>],
+    _namespace1: &[Node],
+    _namespace2: &[Node],
 ) {
     unimplemented!()
 }
@@ -74,7 +74,7 @@ pub fn scanNSItemForColumn(
     _sublevels_up: i32,
     _colname: &str,
     _location: i32,
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     unimplemented!()
 }
 
@@ -83,7 +83,7 @@ pub fn colNameToVar(
     _colname: &str,
     _localonly: bool,
     _location: i32,
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     unimplemented!()
 }
 
@@ -136,9 +136,9 @@ pub fn addRangeTableEntryForSubquery(
 
 pub fn addRangeTableEntryForFunction(
     _pstate: &mut ParseState,
-    _funcnames: Vec<Box<Node>>,
-    _funcexprs: Vec<Box<Node>>,
-    _coldeflists: Vec<Box<Node>>,
+    _funcnames: Vec<Node>,
+    _funcexprs: Vec<Node>,
+    _coldeflists: Vec<Node>,
     _rangefunc: &RangeFunction,
     _lateral: bool,
     _in_from_cl: bool,
@@ -148,7 +148,7 @@ pub fn addRangeTableEntryForFunction(
 
 pub fn addRangeTableEntryForValues(
     _pstate: &mut ParseState,
-    _exprs: Vec<Box<Node>>,
+    _exprs: Vec<Node>,
     _coltypes: Vec<Oid>,
     _coltypmods: Vec<i32>,
     _colcollations: Vec<Oid>,
@@ -171,11 +171,11 @@ pub fn addRangeTableEntryForTableFunc(
 
 pub fn addRangeTableEntryForJoin(
     _pstate: &mut ParseState,
-    _colnames: Vec<Box<Node>>,
+    _colnames: Vec<Node>,
     _nscolumns: &mut [ParseNamespaceColumn],
     _jointype: JoinType,
     _nummergedcols: i32,
-    _aliasvars: Vec<Box<Node>>,
+    _aliasvars: Vec<Node>,
     _leftcols: Vec<i32>,
     _rightcols: Vec<i32>,
     _join_using_alias: Option<&Alias>,
@@ -205,7 +205,7 @@ pub fn addRangeTableEntryForENR(
 
 pub fn addRangeTableEntryForGroup(
     _pstate: &mut ParseState,
-    _group_clauses: Vec<Box<Node>>,
+    _group_clauses: Vec<Node>,
 ) -> Box<ParseNamespaceItem> {
     unimplemented!()
 }
@@ -261,7 +261,7 @@ pub fn expandRTE(
     _returning_type: VarReturningType,
     _location: i32,
     _include_dropped: bool,
-) -> (Vec<Box<Node>>, Vec<Box<Node>>) {
+) -> (Vec<Node>, Vec<Node>) {
     unimplemented!()
 }
 
@@ -271,7 +271,7 @@ pub fn expandNSItemVars(
     _nsitem: &ParseNamespaceItem,
     _sublevels_up: i32,
     _location: i32,
-) -> (Vec<Box<Node>>, Vec<Box<Node>>) {
+) -> (Vec<Node>, Vec<Node>) {
     unimplemented!()
 }
 
@@ -281,7 +281,7 @@ pub fn expandNSItemAttrs(
     _sublevels_up: i32,
     _require_col_privs: bool,
     _location: i32,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 

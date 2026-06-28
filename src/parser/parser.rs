@@ -42,7 +42,7 @@ pub static mut STANDARD_CONFORMING_STRINGS: bool = false;
 pub use crate::backend::parser::parser::raw_parser;
 
 /// Utility function exported by gram.y.
-pub fn system_func_name(_name: &str) -> Vec<Box<Node>> {
+pub fn system_func_name(_name: &str) -> Vec<Node> {
     unimplemented!()
 }
 

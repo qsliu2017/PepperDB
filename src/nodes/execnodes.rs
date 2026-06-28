@@ -6,8 +6,8 @@
 //! embedded base (`PlanState ps` / `ScanState ss` / `JoinState js`) as the first
 //! field, which carries the real shared data (plan, lefttree, qual, ...).
 //!
-//! Node pointers map to `Option<Box<Node>>` / `Box<Node>`; `List*` of nodes ->
-//! `Vec<Box<Node>>`; fn-ptr exec callbacks -> Rust fn pointers; `void *arg` ->
+//! Node pointers map to `Option<Node>` / `Node`; `List*` of nodes ->
+//! `Vec<Node>`; fn-ptr exec callbacks -> Rust fn pointers; `void *arg` ->
 //! closures. Many fields reference types from modules not yet translated; those
 //! are opaque aliases below.
 
@@ -123,7 +123,7 @@ pub struct ExprState {
     /// function that actually evaluates the expression.
     pub evalfunc: Option<ExprStateEvalFunc>,
     /// original expression tree, for debugging only.
-    pub expr: Option<Box<Node>>,
+    pub expr: Option<Node>,
     /// private state for an evalfunc (C `void *`).
     pub evalfunc_private: OpaqueState,
     pub steps_len: i32,
@@ -151,9 +151,9 @@ pub struct IndexInfo {
     pub num_index_key_attrs: i32,
     /// underlying-rel attribute numbers used as keys (0 = expression).
     pub index_attr_numbers: Vec<AttrNumber>,
-    pub expressions: Vec<Box<Node>>,
+    pub expressions: Vec<Node>,
     pub expressions_state: Vec<ExprState>,
-    pub predicate: Vec<Box<Node>>,
+    pub predicate: Vec<Node>,
     pub predicate_state: Option<Box<ExprState>>,
     pub exclusion_ops: Vec<Oid>,
     pub exclusion_procs: Vec<Oid>,
@@ -294,7 +294,7 @@ pub struct ProjectionInfo {
 #[allow(deprecated)]
 #[derive(Default)]
 pub struct JunkFilter {
-    pub target_list: Vec<Box<Node>>,
+    pub target_list: Vec<Node>,
     pub clean_tup_type: TupleDesc,
     pub clean_map: Vec<AttrNumber>,
     pub result_slot: Option<Box<TupleTableSlot>>,
@@ -361,7 +361,7 @@ pub struct ResultRelInfo {
     pub batch_size: i32,
     pub slots: Vec<Box<TupleTableSlot>>,
     pub plan_slots: Vec<Box<TupleTableSlot>>,
-    pub with_check_options: Vec<Box<Node>>,
+    pub with_check_options: Vec<Node>,
     pub with_check_option_exprs: Vec<Box<ExprState>>,
     pub check_constraint_exprs: Vec<Box<ExprState>>,
     pub gen_virtual_not_null_constraint_exprs: Vec<Box<ExprState>>,
@@ -369,7 +369,7 @@ pub struct ResultRelInfo {
     pub generated_exprs_u: Vec<Box<ExprState>>,
     pub num_generated_needed_i: i32,
     pub num_generated_needed_u: i32,
-    pub returning_list: Vec<Box<Node>>,
+    pub returning_list: Vec<Node>,
     pub project_returning: Option<Box<ProjectionInfo>>,
     pub on_conflict_arbiter_indexes: Vec<Oid>,
     pub on_conflict: Option<Box<OnConflictSetState>>,
@@ -410,17 +410,17 @@ pub struct EState {
     pub snapshot: Snapshot,
     pub crosscheck_snapshot: Snapshot,
     /// List of RangeTblEntry.
-    pub range_table: Vec<Box<Node>>,
+    pub range_table: Vec<Node>,
     pub range_table_size: usize,
     pub relations: Vec<Relation>,
     pub rowmarks: Vec<Box<ExecRowMark>>,
     /// List of RTEPermissionInfo.
-    pub rteperminfos: Vec<Box<Node>>,
+    pub rteperminfos: Vec<Node>,
     pub plannedstmt: Option<Box<PlannedStmt>>,
     /// List of PartitionPruneInfo.
-    pub part_prune_infos: Vec<Box<Node>>,
+    pub part_prune_infos: Vec<Node>,
     /// List of PartitionPruneState.
-    pub part_prune_states: Vec<Box<Node>>,
+    pub part_prune_states: Vec<Node>,
     /// List of Bitmapset.
     pub part_prune_results: Vec<Bitmapset>,
     pub unpruned_relids: Option<Bitmapset>,
@@ -448,7 +448,7 @@ pub struct EState {
     pub exprcontexts: Vec<Box<ExprContext>>,
     /// List of PlanState for SubPlans.
     pub subplanstates: Vec<Box<PlanState>>,
-    pub auxmodifytables: Vec<Box<Node>>,
+    pub auxmodifytables: Vec<Node>,
     pub per_tuple_exprcontext: Option<Box<ExprContext>>,
     pub epq_active: Option<Box<EPQState>>,
     pub use_parallel_mode: bool,
@@ -461,7 +461,7 @@ pub struct EState {
     pub jit: OpaqueState,
     pub jit_worker_instr: OpaqueState,
     pub insert_pending_result_relations: Vec<Box<ResultRelInfo>>,
-    pub insert_pending_modifytables: Vec<Box<Node>>,
+    pub insert_pending_modifytables: Vec<Node>,
 }
 
 #[allow(deprecated)]
@@ -603,7 +603,7 @@ pub struct WindowFuncExprState {
 /// State for evaluating a potentially set-returning expression.
 #[allow(deprecated)]
 pub struct SetExprState {
-    pub expr: Option<Box<Node>>,
+    pub expr: Option<Node>,
     pub args: Vec<Box<ExprState>>,
     pub elided_func_state: Option<Box<ExprState>>,
     pub func: FmgrInfo,
@@ -658,7 +658,7 @@ pub struct DomainConstraintState {
     /// name of constraint (for error msgs).
     pub name: Option<String>,
     /// for CHECK, a boolean expression.
-    pub check_expr: Option<Box<Node>>,
+    pub check_expr: Option<Node>,
     pub check_exprstate: Option<Box<ExprState>>,
 }
 
@@ -694,7 +694,7 @@ pub type ExecProcNodeMtd = fn(pstate: &mut PlanState) -> Option<Box<TupleTableSl
 #[derive(Default)]
 pub struct PlanState {
     /// associated Plan node.
-    pub plan: Option<Box<Node>>,
+    pub plan: Option<Node>,
     /// the one EState for the whole top-level plan.
     pub state: Option<Box<EState>>,
     pub exec_proc_node: Option<ExecProcNodeMtd>,
@@ -744,7 +744,7 @@ pub struct EPQState {
     /// tuple table for relsubs_slot.
     pub tuple_table: Vec<Box<TupleTableSlot>>,
     pub relsubs_slot: Vec<Box<TupleTableSlot>>,
-    pub plan: Option<Box<Node>>,
+    pub plan: Option<Node>,
     /// ExecAuxRowMarks (non-locking only).
     pub arow_marks: Vec<Box<ExecAuxRowMark>>,
     pub origslot: Option<Box<TupleTableSlot>>,
@@ -781,7 +781,7 @@ bitflags! {
 pub struct ProjectSetState {
     pub ps: PlanState,
     /// array of expression states.
-    pub elems: Vec<Box<Node>>,
+    pub elems: Vec<Node>,
     /// per-SRF is-done states.
     pub elemdone: Vec<ExprDoneCond>,
     pub nelems: i32,
@@ -818,9 +818,9 @@ pub struct ModifyTableState {
     pub mt_merge_inserted: f64,
     pub mt_merge_updated: f64,
     pub mt_merge_deleted: f64,
-    pub mt_update_colnos_lists: Vec<Box<Node>>,
-    pub mt_merge_action_lists: Vec<Box<Node>>,
-    pub mt_merge_join_conditions: Vec<Box<Node>>,
+    pub mt_update_colnos_lists: Vec<Node>,
+    pub mt_merge_action_lists: Vec<Node>,
+    pub mt_merge_join_conditions: Vec<Node>,
 }
 
 /// Chooses the next subplan for an Append node.
@@ -975,7 +975,7 @@ pub struct IndexArrayKeyInfo {
 pub struct IndexScanState {
     pub ss: ScanState,
     pub indexqualorig: Option<Box<ExprState>>,
-    pub indexorderbyorig: Vec<Box<Node>>,
+    pub indexorderbyorig: Vec<Node>,
     pub iss_scan_keys: Vec<ScanKeyData>,
     pub iss_num_scan_keys: i32,
     pub iss_order_by_keys: Vec<ScanKeyData>,
@@ -1098,7 +1098,7 @@ pub struct BitmapHeapScanState {
 #[derive(Default)]
 pub struct TidScanState {
     pub ss: ScanState,
-    pub tss_tidexprs: Vec<Box<Node>>,
+    pub tss_tidexprs: Vec<Node>,
     pub tss_is_current_of: bool,
     pub tss_num_tids: i32,
     pub tss_tid_ptr: i32,
@@ -1110,7 +1110,7 @@ pub struct TidScanState {
 #[derive(Default)]
 pub struct TidRangeScanState {
     pub ss: ScanState,
-    pub trss_tidexprs: Vec<Box<Node>>,
+    pub trss_tidexprs: Vec<Node>,
     pub trss_mintid: ItemPointerData,
     pub trss_maxtid: ItemPointerData,
     pub trss_in_scan: bool,
@@ -1146,9 +1146,9 @@ pub struct ValuesScanState {
     pub ss: ScanState,
     pub rowcontext: Option<Box<ExprContext>>,
     /// array of expression lists being evaluated.
-    pub exprlists: Vec<Vec<Box<Node>>>,
+    pub exprlists: Vec<Vec<Node>>,
     /// array of expression state lists (for SubPlans only).
-    pub exprstatelists: Vec<Vec<Box<Node>>>,
+    pub exprstatelists: Vec<Vec<Node>>,
     pub array_len: i32,
     pub curr_idx: i32,
 }
@@ -1160,12 +1160,12 @@ pub struct TableFuncScanState {
     pub ss: ScanState,
     pub docexpr: Option<Box<ExprState>>,
     pub rowexpr: Option<Box<ExprState>>,
-    pub colexprs: Vec<Box<Node>>,
-    pub coldefexprs: Vec<Box<Node>>,
-    pub colvalexprs: Vec<Box<Node>>,
-    pub passingvalexprs: Vec<Box<Node>>,
-    pub ns_names: Vec<Box<Node>>,
-    pub ns_uris: Vec<Box<Node>>,
+    pub colexprs: Vec<Node>,
+    pub coldefexprs: Vec<Node>,
+    pub colvalexprs: Vec<Node>,
+    pub passingvalexprs: Vec<Node>,
+    pub ns_names: Vec<Node>,
+    pub ns_uris: Vec<Node>,
     pub notnulls: Option<Bitmapset>,
     /// table builder private space (C `void *`).
     pub opaque: OpaqueState,
@@ -1484,7 +1484,7 @@ pub struct SharedAggInfo {
 pub struct AggState {
     pub ss: ScanState,
     /// all Aggref nodes in targetlist & quals.
-    pub aggs: Vec<Box<Node>>,
+    pub aggs: Vec<Node>,
     pub numaggs: i32,
     pub numtrans: i32,
     pub aggstrategy: Option<AggStrategy>,
@@ -1510,7 +1510,7 @@ pub struct AggState {
     pub projected_set: i32,
     pub current_set: i32,
     pub grouped_cols: Option<Bitmapset>,
-    pub all_grouped_cols: Vec<Box<Node>>,
+    pub all_grouped_cols: Vec<Node>,
     pub colnos_needed: Option<Bitmapset>,
     pub max_colno_needed: i32,
     pub all_cols_needed: bool,
@@ -1534,7 +1534,7 @@ pub struct AggState {
     pub hash_spills: OpaqueState,
     pub hash_spill_rslot: Option<Box<TupleTableSlot>>,
     pub hash_spill_wslot: Option<Box<TupleTableSlot>>,
-    pub hash_batches: Vec<Box<Node>>,
+    pub hash_batches: Vec<Node>,
     pub hash_ever_spilled: bool,
     pub hash_spill_mode: bool,
     pub hash_mem_limit: usize,
@@ -1567,7 +1567,7 @@ pub enum WindowAggStatus {
 pub struct WindowAggState {
     pub ss: ScanState,
     /// all WindowFunc nodes in targetlist.
-    pub funcs: Vec<Box<Node>>,
+    pub funcs: Vec<Node>,
     pub numfuncs: i32,
     pub numaggs: i32,
     /// per-window-function info (C `void *`, private to nodeWindowAgg.c).

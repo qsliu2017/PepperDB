@@ -6,58 +6,51 @@
 //! `makeRawStmt` node constructors that gram.y keeps as static helpers at the foot
 //! of the grammar file; lalrpop semantic actions cannot hold Rust fn bodies as
 //! cleanly as bison, so they live here and the grammar calls them.
-#![allow(
-    clippy::unnecessary_box_returns,
-    reason = "node-tree constructors mirror gram.y's `Node *` returns; the parse \
-              tree is uniformly Box<Node> (NodeBox), so boxed returns are intrinsic"
-)]
 
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{A_Const, A_Star, ColumnRef, RawStmt, ResTarget, ValUnion};
 use crate::nodes::value::{makeFloat, makeInteger, makeString};
 use crate::parser::parser::RawParseMode;
 
-/// Node boxed for the heterogeneous parse tree (gram.y `Node *`).
-pub type NodeBox = Box<Node>;
+// The parse tree's node-tree currency is the `Node` enum value itself: each
+// variant already boxes its payload (`Node::A_Const(Box<A_Const>)`), so a `Node`
+// is one pointer wide and needs no second box at the field/list level. gram.y's
+// `Node *` thus maps to `Node`, and its `List *` of nodes to `Vec<Node>`.
+
 /// gram.y `ResTarget *`.
 pub type ResTargetBox = Box<ResTarget>;
 /// gram.y `SelectStmt *`.
 pub type SelectStmtBox = Box<crate::nodes::parsenodes::SelectStmt>;
 /// gram.y `List *` of RawStmt (the parser result).
-pub type RawStmtVec = Vec<NodeBox>;
+pub type RawStmtVec = Vec<Node>;
 
 /// PG `makeIntConst`: an A_Const holding a T_Integer value.
-pub fn make_int_const(val: i32) -> NodeBox {
+pub fn make_int_const(val: i32) -> Node {
     a_const(ValUnion::Integer(makeInteger(val)))
 }
 
 /// PG `makeFloatConst`: an A_Const holding a T_Float value (kept as its text).
-pub fn make_float_const(text: String) -> NodeBox {
+pub fn make_float_const(text: String) -> Node {
     a_const(ValUnion::Float(makeFloat(text)))
 }
 
 /// PG `makeStringConst`: an A_Const holding a T_String value.
-pub fn make_string_const(text: String) -> NodeBox {
+pub fn make_string_const(text: String) -> Node {
     a_const(ValUnion::String(makeString(text)))
 }
 
 /// Build an A_Const node from an already-constructed value (location currently -1
 /// pending location threading through the lexer; PG passes the `@N` token loc).
-fn a_const(val: ValUnion) -> NodeBox {
-    Box::new(Node::A_Const(Box::new(A_Const { val, isnull: false, location: -1 })))
+fn a_const(val: ValUnion) -> Node {
+    Node::A_Const(Box::new(A_Const { val, isnull: false, location: -1 }))
 }
 
 /// PG `doNegate` for a numeric A_Const operand: an integer flips its sign in
 /// place; a float gets a leading '-' prepended to its text (matching gram.y's
 /// `doNegateFloat`). The general case (`- arg` -> a '-' operator OpExpr over a
 /// non-constant) needs the A_Expr/operator path, deferred to M3.
-#[allow(
-    clippy::boxed_local,
-    reason = "takes the grammar's NodeBox (Box<Node>) operand by value, matching \
-              gram.y's `Node *` doNegate; the box is the parse-tree currency"
-)]
-pub fn do_negate(arg: NodeBox) -> NodeBox {
-    let Node::A_Const(mut c) = *arg else {
+pub fn do_negate(arg: Node) -> Node {
+    let Node::A_Const(mut c) = arg else {
         unimplemented!("unary minus over non-constant: A_Expr operator path deferred to M3");
     };
     match &mut c.val {
@@ -71,33 +64,33 @@ pub fn do_negate(arg: NodeBox) -> NodeBox {
         }
         _ => unimplemented!("unary minus over a non-numeric constant: deferred to M3"),
     }
-    Box::new(Node::A_Const(c))
+    Node::A_Const(c)
 }
 
 /// gram.y `target_el: '*'` - a ResTarget whose value is a ColumnRef of one A_Star.
-pub fn make_star_target() -> NodeBox {
+pub fn make_star_target() -> Node {
     let cr = ColumnRef {
-        fields: vec![Box::new(Node::A_Star(Box::new(A_Star {})))],
+        fields: vec![Node::A_Star(Box::new(A_Star {}))],
         location: -1,
     };
     let rt = ResTarget {
         name: None,
         indirection: Vec::new(),
-        val: Some(Box::new(Node::ColumnRef(Box::new(cr)))),
+        val: Some(Node::ColumnRef(Box::new(cr))),
         location: -1,
     };
-    Box::new(Node::ResTarget(Box::new(rt)))
+    Node::ResTarget(Box::new(rt))
 }
 
 /// PG `makeRawStmt`: wrap a top-level statement node in a RawStmt. The
 /// stmt_location / stmt_len text bookkeeping that gram.y threads from `@N` is
 /// added when location tracking is wired through the lexer.
-pub fn make_raw_stmt(stmt: NodeBox) -> NodeBox {
-    Box::new(Node::RawStmt(Box::new(RawStmt {
+pub fn make_raw_stmt(stmt: Node) -> Node {
+    Node::RawStmt(Box::new(RawStmt {
         stmt: Some(stmt),
         stmt_location: 0,
         stmt_len: 0,
-    })))
+    }))
 }
 
 /// PG `raw_parser`: parse `s` into a list of RawStmt nodes. Only RAW_PARSE_DEFAULT
@@ -159,16 +152,16 @@ mod tests {
     /// Unwrap the single SelectStmt out of a one-statement parse.
     fn one_select(list: &RawStmtVec) -> &crate::nodes::parsenodes::SelectStmt {
         assert_eq!(list.len(), 1, "expected exactly one RawStmt");
-        let Node::RawStmt(rs) = &*list[0] else { panic!("not a RawStmt") };
+        let Node::RawStmt(rs) = &list[0] else { panic!("not a RawStmt") };
         let Some(stmt) = &rs.stmt else { panic!("empty RawStmt") };
-        let Node::SelectStmt(sel) = &**stmt else { panic!("not a SelectStmt") };
+        let Node::SelectStmt(sel) = stmt else { panic!("not a SelectStmt") };
         sel
     }
 
     fn int_of_restarget(node: &Node) -> i32 {
         let Node::ResTarget(rt) = node else { panic!("not a ResTarget") };
         let Some(val) = &rt.val else { panic!("ResTarget has no val") };
-        let Node::A_Const(c) = &**val else { panic!("ResTarget val not A_Const") };
+        let Node::A_Const(c) = val else { panic!("ResTarget val not A_Const") };
         let ValUnion::Integer(i) = &c.val else { panic!("A_Const not Integer") };
         i.ival
     }
@@ -194,8 +187,8 @@ mod tests {
         assert_eq!(list.len(), 2);
         // each is a SelectStmt
         for (i, stmt) in list.iter().enumerate() {
-            let Node::RawStmt(rs) = &**stmt else { panic!("not RawStmt") };
-            let Node::SelectStmt(sel) = &**rs.stmt.as_ref().unwrap() else { panic!() };
+            let Node::RawStmt(rs) = stmt else { panic!("not RawStmt") };
+            let Node::SelectStmt(sel) = rs.stmt.as_ref().unwrap() else { panic!() };
             assert_eq!(int_of_restarget(&sel.targetList[0]), (i + 1) as i32);
         }
     }
@@ -216,8 +209,8 @@ mod tests {
     fn select_overflow_literal_is_float() {
         let list = parse("SELECT 9999999999");
         let sel = one_select(&list);
-        let Node::ResTarget(rt) = &*sel.targetList[0] else { panic!() };
-        let Node::A_Const(c) = &**rt.val.as_ref().unwrap() else { panic!() };
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!() };
+        let Node::A_Const(c) = rt.val.as_ref().unwrap() else { panic!() };
         assert!(matches!(&c.val, ValUnion::Float(f) if f.fval == "9999999999"));
     }
 
@@ -225,10 +218,10 @@ mod tests {
     fn select_star() {
         let list = parse("SELECT *");
         let sel = one_select(&list);
-        let Node::ResTarget(rt) = &*sel.targetList[0] else { panic!("not ResTarget") };
-        let Node::ColumnRef(cr) = &**rt.val.as_ref().unwrap() else { panic!("not ColumnRef") };
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!("not ResTarget") };
+        let Node::ColumnRef(cr) = rt.val.as_ref().unwrap() else { panic!("not ColumnRef") };
         assert_eq!(cr.fields.len(), 1);
-        assert!(matches!(&*cr.fields[0], Node::A_Star(_)));
+        assert!(matches!(&cr.fields[0], Node::A_Star(_)));
     }
 
     #[test]

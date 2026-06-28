@@ -109,7 +109,7 @@ pub struct Query {
     pub queryId: i64,
     pub canSetTag: bool,
     /// non-null if commandType == UTILITY
-    pub utilityStmt: Option<Box<Node>>,
+    pub utilityStmt: Option<Node>,
     pub resultRelation: i32,
     pub hasAggs: bool,
     pub hasWindowFuncs: bool,
@@ -123,38 +123,38 @@ pub struct Query {
     pub hasGroupRTE: bool,
     pub isReturn: bool,
     /// WITH list (of CommonTableExpr's)
-    pub cteList: Vec<Box<Node>>,
+    pub cteList: Vec<Node>,
     /// list of range table entries
-    pub rtable: Vec<Box<Node>>,
+    pub rtable: Vec<Node>,
     /// list of RTEPermissionInfo nodes
-    pub rteperminfos: Vec<Box<Node>>,
+    pub rteperminfos: Vec<Node>,
     /// table join tree (FROM and WHERE clauses)
-    pub jointree: Option<Box<Node>>,
+    pub jointree: Option<Node>,
     /// list of actions for MERGE (only)
-    pub mergeActionList: Vec<Box<Node>>,
+    pub mergeActionList: Vec<Node>,
     pub mergeTargetRelation: i32,
-    pub mergeJoinCondition: Option<Box<Node>>,
+    pub mergeJoinCondition: Option<Node>,
     /// target list (of TargetEntry)
-    pub targetList: Vec<Box<Node>>,
+    pub targetList: Vec<Node>,
     pub r#override: OverridingKind,
     pub onConflict: Option<Box<OnConflictExpr>>,
     pub returningOldAlias: Option<String>,
     pub returningNewAlias: Option<String>,
-    pub returningList: Vec<Box<Node>>,
-    pub groupClause: Vec<Box<Node>>,
+    pub returningList: Vec<Node>,
+    pub groupClause: Vec<Node>,
     pub groupDistinct: bool,
-    pub groupingSets: Vec<Box<Node>>,
-    pub havingQual: Option<Box<Node>>,
-    pub windowClause: Vec<Box<Node>>,
-    pub distinctClause: Vec<Box<Node>>,
-    pub sortClause: Vec<Box<Node>>,
-    pub limitOffset: Option<Box<Node>>,
-    pub limitCount: Option<Box<Node>>,
+    pub groupingSets: Vec<Node>,
+    pub havingQual: Option<Node>,
+    pub windowClause: Vec<Node>,
+    pub distinctClause: Vec<Node>,
+    pub sortClause: Vec<Node>,
+    pub limitOffset: Option<Node>,
+    pub limitCount: Option<Node>,
     pub limitOption: crate::nodes::nodes::LimitOption,
-    pub rowMarks: Vec<Box<Node>>,
-    pub setOperations: Option<Box<Node>>,
-    pub constraintDeps: Vec<Box<Node>>,
-    pub withCheckOptions: Vec<Box<Node>>,
+    pub rowMarks: Vec<Node>,
+    pub setOperations: Option<Node>,
+    pub constraintDeps: Vec<Node>,
+    pub withCheckOptions: Vec<Node>,
     pub stmt_location: ParseLoc,
     pub stmt_len: ParseLoc,
 }
@@ -162,20 +162,20 @@ pub struct Query {
 /// TypeName - specifies a type in definitions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeName {
-    pub names: Vec<Box<Node>>,
+    pub names: Vec<Node>,
     pub typeOid: Oid,
     pub setof: bool,
     pub pct_type: bool,
-    pub typmods: Vec<Box<Node>>,
+    pub typmods: Vec<Node>,
     pub typemod: i32,
-    pub arrayBounds: Vec<Box<Node>>,
+    pub arrayBounds: Vec<Node>,
     pub location: ParseLoc,
 }
 
 /// ColumnRef - reference to a column, or possibly a whole tuple.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnRef {
-    pub fields: Vec<Box<Node>>,
+    pub fields: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -219,15 +219,17 @@ pub enum A_Expr_Kind {
     NOT_BETWEEN_SYM,
 }
 
+// TODO(M3): restructure A_Expr into a per-kind enum (OP/OP_ANY/OP_ALL/...), each variant keeping only its needed fields; deferred until operator productions populate it at M3.
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct A_Expr {
     pub kind: A_Expr_Kind,
     /// possibly-qualified name of operator
-    pub name: Vec<Box<Node>>,
+    pub name: Vec<Node>,
     /// left argument, or None if none
-    pub lexpr: Option<Box<Node>>,
+    pub lexpr: Option<Node>,
     /// right argument, or None if none
-    pub rexpr: Option<Box<Node>>,
+    pub rexpr: Option<Node>,
     pub rexpr_list_start: ParseLoc,
     pub rexpr_list_end: ParseLoc,
     pub location: ParseLoc,
@@ -236,7 +238,7 @@ pub struct A_Expr {
 /// C: `union ValUnion` - inline value node for A_Const.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValUnion {
-    Node(Box<Node>),
+    Node(Node),
     Integer(crate::nodes::value::Integer),
     Float(crate::nodes::value::Float),
     Boolean(crate::nodes::value::Boolean),
@@ -256,7 +258,7 @@ pub struct A_Const {
 /// TypeCast - a CAST expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeCast {
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub typeName: Option<Box<TypeName>>,
     pub location: ParseLoc,
 }
@@ -264,8 +266,8 @@ pub struct TypeCast {
 /// CollateClause - a COLLATE expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CollateClause {
-    pub arg: Option<Box<Node>>,
-    pub collname: Vec<Box<Node>>,
+    pub arg: Option<Node>,
+    pub collname: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -292,10 +294,10 @@ pub struct RoleSpec {
 /// FuncCall - a function or aggregate invocation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FuncCall {
-    pub funcname: Vec<Box<Node>>,
-    pub args: Vec<Box<Node>>,
-    pub agg_order: Vec<Box<Node>>,
-    pub agg_filter: Option<Box<Node>>,
+    pub funcname: Vec<Node>,
+    pub args: Vec<Node>,
+    pub agg_order: Vec<Node>,
+    pub agg_filter: Option<Node>,
     pub over: Option<Box<WindowDef>>,
     pub agg_within_group: bool,
     pub agg_star: bool,
@@ -313,21 +315,21 @@ pub struct A_Star {}
 #[derive(Debug, Clone, PartialEq)]
 pub struct A_Indices {
     pub is_slice: bool,
-    pub lidx: Option<Box<Node>>,
-    pub uidx: Option<Box<Node>>,
+    pub lidx: Option<Node>,
+    pub uidx: Option<Node>,
 }
 
 /// A_Indirection - select a field and/or array element from an expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct A_Indirection {
-    pub arg: Option<Box<Node>>,
-    pub indirection: Vec<Box<Node>>,
+    pub arg: Option<Node>,
+    pub indirection: Vec<Node>,
 }
 
 /// A_ArrayExpr - an ARRAY[] construct.
 #[derive(Debug, Clone, PartialEq)]
 pub struct A_ArrayExpr {
-    pub elements: Vec<Box<Node>>,
+    pub elements: Vec<Node>,
     pub list_start: ParseLoc,
     pub list_end: ParseLoc,
     pub location: ParseLoc,
@@ -337,15 +339,15 @@ pub struct A_ArrayExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResTarget {
     pub name: Option<String>,
-    pub indirection: Vec<Box<Node>>,
-    pub val: Option<Box<Node>>,
+    pub indirection: Vec<Node>,
+    pub val: Option<Node>,
     pub location: ParseLoc,
 }
 
 /// MultiAssignRef - element of a row source expression for UPDATE.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MultiAssignRef {
-    pub source: Option<Box<Node>>,
+    pub source: Option<Node>,
     pub colno: i32,
     pub ncolumns: i32,
 }
@@ -353,10 +355,10 @@ pub struct MultiAssignRef {
 /// SortBy - for ORDER BY clause.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SortBy {
-    pub node: Option<Box<Node>>,
+    pub node: Option<Node>,
     pub sortby_dir: SortByDir,
     pub sortby_nulls: SortByNulls,
-    pub useOp: Vec<Box<Node>>,
+    pub useOp: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -365,12 +367,12 @@ pub struct SortBy {
 pub struct WindowDef {
     pub name: Option<String>,
     pub refname: Option<String>,
-    pub partitionClause: Vec<Box<Node>>,
-    pub orderClause: Vec<Box<Node>>,
+    pub partitionClause: Vec<Node>,
+    pub orderClause: Vec<Node>,
     /// frame_clause options, see FRAMEOPTION_* (FrameOptions)
     pub frameOptions: i32,
-    pub startOffset: Option<Box<Node>>,
-    pub endOffset: Option<Box<Node>>,
+    pub startOffset: Option<Node>,
+    pub endOffset: Option<Node>,
     pub location: ParseLoc,
 }
 
@@ -417,7 +419,7 @@ bitflags! {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RangeSubselect {
     pub lateral: bool,
-    pub subquery: Option<Box<Node>>,
+    pub subquery: Option<Node>,
     pub alias: Option<Box<Alias>>,
 }
 
@@ -427,19 +429,19 @@ pub struct RangeFunction {
     pub lateral: bool,
     pub ordinality: bool,
     pub is_rowsfrom: bool,
-    pub functions: Vec<Box<Node>>,
+    pub functions: Vec<Node>,
     pub alias: Option<Box<Alias>>,
-    pub coldeflist: Vec<Box<Node>>,
+    pub coldeflist: Vec<Node>,
 }
 
 /// RangeTableFunc - raw form of "table functions" such as XMLTABLE.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RangeTableFunc {
     pub lateral: bool,
-    pub docexpr: Option<Box<Node>>,
-    pub rowexpr: Option<Box<Node>>,
-    pub namespaces: Vec<Box<Node>>,
-    pub columns: Vec<Box<Node>>,
+    pub docexpr: Option<Node>,
+    pub rowexpr: Option<Node>,
+    pub namespaces: Vec<Node>,
+    pub columns: Vec<Node>,
     pub alias: Option<Box<Alias>>,
     pub location: ParseLoc,
 }
@@ -451,18 +453,18 @@ pub struct RangeTableFuncCol {
     pub typeName: Option<Box<TypeName>>,
     pub for_ordinality: bool,
     pub is_not_null: bool,
-    pub colexpr: Option<Box<Node>>,
-    pub coldefexpr: Option<Box<Node>>,
+    pub colexpr: Option<Node>,
+    pub coldefexpr: Option<Node>,
     pub location: ParseLoc,
 }
 
 /// RangeTableSample - TABLESAMPLE appearing in a raw FROM clause.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RangeTableSample {
-    pub relation: Option<Box<Node>>,
-    pub method: Vec<Box<Node>>,
-    pub args: Vec<Box<Node>>,
-    pub repeatable: Option<Box<Node>>,
+    pub relation: Option<Node>,
+    pub method: Vec<Node>,
+    pub args: Vec<Node>,
+    pub repeatable: Option<Node>,
     pub location: ParseLoc,
 }
 
@@ -479,8 +481,8 @@ pub struct ColumnDef {
     /// attstorage setting, or 0 for default
     pub storage: i8,
     pub storage_name: Option<String>,
-    pub raw_default: Option<Box<Node>>,
-    pub cooked_default: Option<Box<Node>>,
+    pub raw_default: Option<Node>,
+    pub cooked_default: Option<Node>,
     /// attidentity setting
     pub identity: i8,
     pub identitySequence: Option<Box<RangeVar>>,
@@ -488,8 +490,8 @@ pub struct ColumnDef {
     pub generated: i8,
     pub collClause: Option<Box<CollateClause>>,
     pub collOid: Oid,
-    pub constraints: Vec<Box<Node>>,
-    pub fdwoptions: Vec<Box<Node>>,
+    pub constraints: Vec<Node>,
+    pub fdwoptions: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -524,11 +526,11 @@ bitflags! {
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexElem {
     pub name: Option<String>,
-    pub expr: Option<Box<Node>>,
+    pub expr: Option<Node>,
     pub indexcolname: Option<String>,
-    pub collation: Vec<Box<Node>>,
-    pub opclass: Vec<Box<Node>>,
-    pub opclassopts: Vec<Box<Node>>,
+    pub collation: Vec<Node>,
+    pub opclass: Vec<Node>,
+    pub opclassopts: Vec<Node>,
     pub ordering: SortByDir,
     pub nulls_ordering: SortByNulls,
 }
@@ -548,7 +550,7 @@ pub enum DefElemAction {
 pub struct DefElem {
     pub defnamespace: Option<String>,
     pub defname: Option<String>,
-    pub arg: Option<Box<Node>>,
+    pub arg: Option<Node>,
     pub defaction: DefElemAction,
     pub location: ParseLoc,
 }
@@ -556,7 +558,7 @@ pub struct DefElem {
 /// LockingClause - raw FOR [NO KEY] UPDATE/[KEY] SHARE options.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LockingClause {
-    pub lockedRels: Vec<Box<Node>>,
+    pub lockedRels: Vec<Node>,
     pub strength: LockClauseStrength,
     pub waitPolicy: LockWaitPolicy,
 }
@@ -565,7 +567,7 @@ pub struct LockingClause {
 #[derive(Debug, Clone, PartialEq)]
 pub struct XmlSerialize {
     pub xmloption: XmlOptionType,
-    pub expr: Option<Box<Node>>,
+    pub expr: Option<Node>,
     pub typeName: Option<Box<TypeName>>,
     pub indent: bool,
     pub location: ParseLoc,
@@ -575,9 +577,9 @@ pub struct XmlSerialize {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PartitionElem {
     pub name: Option<String>,
-    pub expr: Option<Box<Node>>,
-    pub collation: Vec<Box<Node>>,
-    pub opclass: Vec<Box<Node>>,
+    pub expr: Option<Node>,
+    pub collation: Vec<Node>,
+    pub opclass: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -594,7 +596,7 @@ pub enum PartitionStrategy {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PartitionSpec {
     pub strategy: PartitionStrategy,
-    pub partParams: Vec<Box<Node>>,
+    pub partParams: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -610,9 +612,9 @@ pub struct PartitionBoundSpec {
     pub is_default: bool,
     pub modulus: i32,
     pub remainder: i32,
-    pub listdatums: Vec<Box<Node>>,
-    pub lowerdatums: Vec<Box<Node>>,
-    pub upperdatums: Vec<Box<Node>>,
+    pub listdatums: Vec<Node>,
+    pub lowerdatums: Vec<Node>,
+    pub upperdatums: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -631,7 +633,7 @@ pub enum PartitionRangeDatumKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PartitionRangeDatum {
     pub kind: PartitionRangeDatumKind,
-    pub value: Option<Box<Node>>,
+    pub value: Option<Node>,
     pub location: ParseLoc,
 }
 
@@ -684,14 +686,14 @@ pub struct RangeTblEntry {
     pub security_barrier: bool,
     pub jointype: JoinType,
     pub joinmergedcols: i32,
-    pub joinaliasvars: Vec<Box<Node>>,
+    pub joinaliasvars: Vec<Node>,
     pub joinleftcols: Vec<i32>,
     pub joinrightcols: Vec<i32>,
     pub join_using_alias: Option<Box<Alias>>,
-    pub functions: Vec<Box<Node>>,
+    pub functions: Vec<Node>,
     pub funcordinality: bool,
     pub tablefunc: Option<Box<TableFunc>>,
-    pub values_lists: Vec<Box<Node>>,
+    pub values_lists: Vec<Node>,
     pub ctename: Option<String>,
     pub ctelevelsup: Index,
     pub self_reference: bool,
@@ -700,10 +702,10 @@ pub struct RangeTblEntry {
     pub colcollations: Vec<Oid>,
     pub enrname: Option<String>,
     pub enrtuples: Cardinality,
-    pub groupexprs: Vec<Box<Node>>,
+    pub groupexprs: Vec<Node>,
     pub lateral: bool,
     pub inFromCl: bool,
-    pub securityQuals: Vec<Box<Node>>,
+    pub securityQuals: Vec<Node>,
 }
 
 /// RTEPermissionInfo - per-relation information for permission checking.
@@ -721,9 +723,9 @@ pub struct RTEPermissionInfo {
 /// RangeTblFunction - RTE subsidiary data for one function in a FUNCTION RTE.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RangeTblFunction {
-    pub funcexpr: Option<Box<Node>>,
+    pub funcexpr: Option<Node>,
     pub funccolcount: i32,
-    pub funccolnames: Vec<Box<Node>>,
+    pub funccolnames: Vec<Node>,
     pub funccoltypes: Vec<Oid>,
     pub funccoltypmods: Vec<i32>,
     pub funccolcollations: Vec<Oid>,
@@ -734,8 +736,8 @@ pub struct RangeTblFunction {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableSampleClause {
     pub tsmhandler: Oid,
-    pub args: Vec<Box<Node>>,
-    pub repeatable: Option<Box<Node>>,
+    pub args: Vec<Node>,
+    pub repeatable: Option<Node>,
 }
 
 /// WCOKind - kind of WITH CHECK OPTION.
@@ -755,7 +757,7 @@ pub struct WithCheckOption {
     pub kind: WCOKind,
     pub relname: Option<String>,
     pub polname: Option<String>,
-    pub qual: Option<Box<Node>>,
+    pub qual: Option<Node>,
     pub cascaded: bool,
 }
 
@@ -783,7 +785,7 @@ pub enum GroupingSetKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupingSet {
     pub kind: GroupingSetKind,
-    pub content: Vec<Box<Node>>,
+    pub content: Vec<Node>,
     pub location: ParseLoc,
 }
 
@@ -792,11 +794,11 @@ pub struct GroupingSet {
 pub struct WindowClause {
     pub name: Option<String>,
     pub refname: Option<String>,
-    pub partitionClause: Vec<Box<Node>>,
-    pub orderClause: Vec<Box<Node>>,
+    pub partitionClause: Vec<Node>,
+    pub orderClause: Vec<Node>,
     pub frameOptions: i32,
-    pub startOffset: Option<Box<Node>>,
-    pub endOffset: Option<Box<Node>>,
+    pub startOffset: Option<Node>,
+    pub endOffset: Option<Node>,
     pub startInRangeFunc: Oid,
     pub endInRangeFunc: Oid,
     pub inRangeColl: Oid,
@@ -818,7 +820,7 @@ pub struct RowMarkClause {
 /// WithClause - representation of WITH clause.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WithClause {
-    pub ctes: Vec<Box<Node>>,
+    pub ctes: Vec<Node>,
     pub recursive: bool,
     pub location: ParseLoc,
 }
@@ -826,8 +828,8 @@ pub struct WithClause {
 /// InferClause - ON CONFLICT unique index inference clause.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InferClause {
-    pub indexElems: Vec<Box<Node>>,
-    pub whereClause: Option<Box<Node>>,
+    pub indexElems: Vec<Node>,
+    pub whereClause: Option<Node>,
     pub conname: Option<String>,
     pub location: ParseLoc,
 }
@@ -837,8 +839,8 @@ pub struct InferClause {
 pub struct OnConflictClause {
     pub action: crate::nodes::nodes::OnConflictAction,
     pub infer: Option<Box<InferClause>>,
-    pub targetList: Vec<Box<Node>>,
-    pub whereClause: Option<Box<Node>>,
+    pub targetList: Vec<Node>,
+    pub whereClause: Option<Node>,
     pub location: ParseLoc,
 }
 
@@ -855,7 +857,7 @@ pub enum CTEMaterialize {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CTESearchClause {
-    pub search_col_list: Vec<Box<Node>>,
+    pub search_col_list: Vec<Node>,
     pub search_breadth_first: bool,
     pub search_seq_column: Option<String>,
     pub location: ParseLoc,
@@ -863,10 +865,10 @@ pub struct CTESearchClause {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CTECycleClause {
-    pub cycle_col_list: Vec<Box<Node>>,
+    pub cycle_col_list: Vec<Node>,
     pub cycle_mark_column: Option<String>,
-    pub cycle_mark_value: Option<Box<Node>>,
-    pub cycle_mark_default: Option<Box<Node>>,
+    pub cycle_mark_value: Option<Node>,
+    pub cycle_mark_default: Option<Node>,
     pub cycle_path_column: Option<String>,
     pub location: ParseLoc,
     pub cycle_mark_type: Oid,
@@ -879,15 +881,15 @@ pub struct CTECycleClause {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommonTableExpr {
     pub ctename: Option<String>,
-    pub aliascolnames: Vec<Box<Node>>,
+    pub aliascolnames: Vec<Node>,
     pub ctematerialized: CTEMaterialize,
-    pub ctequery: Option<Box<Node>>,
+    pub ctequery: Option<Node>,
     pub search_clause: Option<Box<CTESearchClause>>,
     pub cycle_clause: Option<Box<CTECycleClause>>,
     pub location: ParseLoc,
     pub cterecursive: bool,
     pub cterefcount: i32,
-    pub ctecolnames: Vec<Box<Node>>,
+    pub ctecolnames: Vec<Node>,
     pub ctecoltypes: Vec<Oid>,
     pub ctecoltypmods: Vec<i32>,
     pub ctecolcollations: Vec<Oid>,
@@ -899,9 +901,9 @@ pub struct MergeWhenClause {
     pub matchKind: crate::nodes::primnodes::MergeMatchKind,
     pub commandType: CmdType,
     pub r#override: OverridingKind,
-    pub condition: Option<Box<Node>>,
-    pub targetList: Vec<Box<Node>>,
-    pub values: Vec<Box<Node>>,
+    pub condition: Option<Node>,
+    pub targetList: Vec<Node>,
+    pub values: Vec<Node>,
 }
 
 /// ReturningOptionKind - kind of option in RETURNING WITH(...) list.
@@ -923,8 +925,8 @@ pub struct ReturningOption {
 /// ReturningClause - RETURNING expressions plus WITH(...) options.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReturningClause {
-    pub options: Vec<Box<Node>>,
-    pub exprs: Vec<Box<Node>>,
+    pub options: Vec<Node>,
+    pub exprs: Vec<Node>,
 }
 
 /// TriggerTransition - transition row or table naming clause.
@@ -963,8 +965,8 @@ pub struct JsonFuncExpr {
     pub op: JsonExprOp,
     pub column_name: Option<String>,
     pub context_item: Option<Box<JsonValueExpr>>,
-    pub pathspec: Option<Box<Node>>,
-    pub passing: Vec<Box<Node>>,
+    pub pathspec: Option<Node>,
+    pub passing: Vec<Node>,
     pub output: Option<Box<JsonOutput>>,
     pub on_empty: Option<Box<JsonBehavior>>,
     pub on_error: Option<Box<JsonBehavior>>,
@@ -976,7 +978,7 @@ pub struct JsonFuncExpr {
 /// JsonTablePathSpec - untransformed JSON path expression with optional name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonTablePathSpec {
-    pub string: Option<Box<Node>>,
+    pub string: Option<Node>,
     pub name: Option<String>,
     pub name_location: ParseLoc,
     pub location: ParseLoc,
@@ -987,8 +989,8 @@ pub struct JsonTablePathSpec {
 pub struct JsonTable {
     pub context_item: Option<Box<JsonValueExpr>>,
     pub pathspec: Option<Box<JsonTablePathSpec>>,
-    pub passing: Vec<Box<Node>>,
-    pub columns: Vec<Box<Node>>,
+    pub passing: Vec<Node>,
+    pub columns: Vec<Node>,
     pub on_error: Option<Box<JsonBehavior>>,
     pub alias: Option<Box<Alias>>,
     pub lateral: bool,
@@ -1015,7 +1017,7 @@ pub struct JsonTableColumn {
     pub format: Option<Box<JsonFormat>>,
     pub wrapper: JsonWrapper,
     pub quotes: JsonQuotes,
-    pub columns: Vec<Box<Node>>,
+    pub columns: Vec<Node>,
     pub on_empty: Option<Box<JsonBehavior>>,
     pub on_error: Option<Box<JsonBehavior>>,
     pub location: ParseLoc,
@@ -1024,7 +1026,7 @@ pub struct JsonTableColumn {
 /// JsonKeyValue - untransformed JSON object key-value pair.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonKeyValue {
-    pub key: Option<Box<Node>>,
+    pub key: Option<Node>,
     pub value: Option<Box<JsonValueExpr>>,
 }
 
@@ -1040,7 +1042,7 @@ pub struct JsonParseExpr {
 /// JsonScalarExpr - untransformed representation of JSON_SCALAR().
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonScalarExpr {
-    pub expr: Option<Box<Node>>,
+    pub expr: Option<Node>,
     pub output: Option<Box<JsonOutput>>,
     pub location: ParseLoc,
 }
@@ -1056,7 +1058,7 @@ pub struct JsonSerializeExpr {
 /// JsonObjectConstructor - untransformed JSON_OBJECT() constructor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonObjectConstructor {
-    pub exprs: Vec<Box<Node>>,
+    pub exprs: Vec<Node>,
     pub output: Option<Box<JsonOutput>>,
     pub absent_on_null: bool,
     pub unique: bool,
@@ -1066,7 +1068,7 @@ pub struct JsonObjectConstructor {
 /// JsonArrayConstructor - untransformed JSON_ARRAY(element,...) constructor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonArrayConstructor {
-    pub exprs: Vec<Box<Node>>,
+    pub exprs: Vec<Node>,
     pub output: Option<Box<JsonOutput>>,
     pub absent_on_null: bool,
     pub location: ParseLoc,
@@ -1075,7 +1077,7 @@ pub struct JsonArrayConstructor {
 /// JsonArrayQueryConstructor - untransformed JSON_ARRAY(subquery) constructor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonArrayQueryConstructor {
-    pub query: Option<Box<Node>>,
+    pub query: Option<Node>,
     pub output: Option<Box<JsonOutput>>,
     pub format: Option<Box<JsonFormat>>,
     pub absent_on_null: bool,
@@ -1086,8 +1088,8 @@ pub struct JsonArrayQueryConstructor {
 #[derive(Debug, Clone, PartialEq)]
 pub struct JsonAggConstructor {
     pub output: Option<Box<JsonOutput>>,
-    pub agg_filter: Option<Box<Node>>,
-    pub agg_order: Vec<Box<Node>>,
+    pub agg_filter: Option<Node>,
+    pub agg_order: Vec<Node>,
     pub over: Option<Box<WindowDef>>,
     pub location: ParseLoc,
 }
@@ -1112,7 +1114,7 @@ pub struct JsonArrayAgg {
 /// RawStmt - container for any one statement's raw parse tree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawStmt {
-    pub stmt: Option<Box<Node>>,
+    pub stmt: Option<Node>,
     pub stmt_location: ParseLoc,
     pub stmt_len: ParseLoc,
 }
@@ -1121,8 +1123,8 @@ pub struct RawStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertStmt {
     pub relation: Option<Box<RangeVar>>,
-    pub cols: Vec<Box<Node>>,
-    pub selectStmt: Option<Box<Node>>,
+    pub cols: Vec<Node>,
+    pub selectStmt: Option<Node>,
     pub onConflictClause: Option<Box<OnConflictClause>>,
     pub returningClause: Option<Box<ReturningClause>>,
     pub withClause: Option<Box<WithClause>>,
@@ -1133,8 +1135,8 @@ pub struct InsertStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeleteStmt {
     pub relation: Option<Box<RangeVar>>,
-    pub usingClause: Vec<Box<Node>>,
-    pub whereClause: Option<Box<Node>>,
+    pub usingClause: Vec<Node>,
+    pub whereClause: Option<Node>,
     pub returningClause: Option<Box<ReturningClause>>,
     pub withClause: Option<Box<WithClause>>,
 }
@@ -1143,9 +1145,9 @@ pub struct DeleteStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateStmt {
     pub relation: Option<Box<RangeVar>>,
-    pub targetList: Vec<Box<Node>>,
-    pub whereClause: Option<Box<Node>>,
-    pub fromClause: Vec<Box<Node>>,
+    pub targetList: Vec<Node>,
+    pub whereClause: Option<Node>,
+    pub fromClause: Vec<Node>,
     pub returningClause: Option<Box<ReturningClause>>,
     pub withClause: Option<Box<WithClause>>,
 }
@@ -1154,9 +1156,9 @@ pub struct UpdateStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MergeStmt {
     pub relation: Option<Box<RangeVar>>,
-    pub sourceRelation: Option<Box<Node>>,
-    pub joinCondition: Option<Box<Node>>,
-    pub mergeWhenClauses: Vec<Box<Node>>,
+    pub sourceRelation: Option<Node>,
+    pub joinCondition: Option<Node>,
+    pub mergeWhenClauses: Vec<Node>,
     pub returningClause: Option<Box<ReturningClause>>,
     pub withClause: Option<Box<WithClause>>,
 }
@@ -1174,21 +1176,21 @@ pub enum SetOperation {
 /// SelectStmt - Select Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectStmt {
-    pub distinctClause: Vec<Box<Node>>,
+    pub distinctClause: Vec<Node>,
     pub intoClause: Option<Box<IntoClause>>,
-    pub targetList: Vec<Box<Node>>,
-    pub fromClause: Vec<Box<Node>>,
-    pub whereClause: Option<Box<Node>>,
-    pub groupClause: Vec<Box<Node>>,
+    pub targetList: Vec<Node>,
+    pub fromClause: Vec<Node>,
+    pub whereClause: Option<Node>,
+    pub groupClause: Vec<Node>,
     pub groupDistinct: bool,
-    pub havingClause: Option<Box<Node>>,
-    pub windowClause: Vec<Box<Node>>,
-    pub valuesLists: Vec<Box<Node>>,
-    pub sortClause: Vec<Box<Node>>,
-    pub limitOffset: Option<Box<Node>>,
-    pub limitCount: Option<Box<Node>>,
+    pub havingClause: Option<Node>,
+    pub windowClause: Vec<Node>,
+    pub valuesLists: Vec<Node>,
+    pub sortClause: Vec<Node>,
+    pub limitOffset: Option<Node>,
+    pub limitCount: Option<Node>,
     pub limitOption: crate::nodes::nodes::LimitOption,
-    pub lockingClause: Vec<Box<Node>>,
+    pub lockingClause: Vec<Node>,
     pub withClause: Option<Box<WithClause>>,
     pub op: SetOperation,
     pub all: bool,
@@ -1201,25 +1203,25 @@ pub struct SelectStmt {
 pub struct SetOperationStmt {
     pub op: SetOperation,
     pub all: bool,
-    pub larg: Option<Box<Node>>,
-    pub rarg: Option<Box<Node>>,
+    pub larg: Option<Node>,
+    pub rarg: Option<Node>,
     pub colTypes: Vec<Oid>,
     pub colTypmods: Vec<i32>,
     pub colCollations: Vec<Oid>,
-    pub groupClauses: Vec<Box<Node>>,
+    pub groupClauses: Vec<Node>,
 }
 
 /// ReturnStmt - RETURN statement (inside SQL function body).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReturnStmt {
-    pub returnval: Option<Box<Node>>,
+    pub returnval: Option<Node>,
 }
 
 /// PLAssignStmt - PL/pgSQL Assignment Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PLAssignStmt {
     pub name: Option<String>,
-    pub indirection: Vec<Box<Node>>,
+    pub indirection: Vec<Node>,
     pub nnames: i32,
     pub val: Option<Box<SelectStmt>>,
     pub location: ParseLoc,
@@ -1288,7 +1290,7 @@ pub enum ObjectType {
 pub struct CreateSchemaStmt {
     pub schemaname: Option<String>,
     pub authrole: Option<Box<RoleSpec>>,
-    pub schemaElts: Vec<Box<Node>>,
+    pub schemaElts: Vec<Node>,
     pub if_not_exists: bool,
 }
 
@@ -1305,7 +1307,7 @@ pub enum DropBehavior {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterTableStmt {
     pub relation: Option<Box<RangeVar>>,
-    pub cmds: Vec<Box<Node>>,
+    pub cmds: Vec<Node>,
     pub objtype: ObjectType,
     pub missing_ok: bool,
 }
@@ -1388,7 +1390,7 @@ pub struct AlterTableCmd {
     pub name: Option<String>,
     pub num: i16,
     pub newowner: Option<Box<RoleSpec>>,
-    pub def: Option<Box<Node>>,
+    pub def: Option<Node>,
     pub behavior: DropBehavior,
     pub missing_ok: bool,
     pub recurse: bool,
@@ -1417,7 +1419,7 @@ pub struct ReplicaIdentityStmt {
 /// AlterCollationStmt - Alter Collation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterCollationStmt {
-    pub collname: Vec<Box<Node>>,
+    pub collname: Vec<Node>,
 }
 
 /// AlterDomainStmt - Alter Domain.
@@ -1425,9 +1427,9 @@ pub struct AlterCollationStmt {
 pub struct AlterDomainStmt {
     /// T/N/O/C/X subtype code
     pub subtype: i8,
-    pub typeName: Vec<Box<Node>>,
+    pub typeName: Vec<Node>,
     pub name: Option<String>,
-    pub def: Option<Box<Node>>,
+    pub def: Option<Node>,
     pub behavior: DropBehavior,
     pub missing_ok: bool,
 }
@@ -1449,9 +1451,9 @@ pub struct GrantStmt {
     pub is_grant: bool,
     pub targtype: GrantTargetType,
     pub objtype: ObjectType,
-    pub objects: Vec<Box<Node>>,
-    pub privileges: Vec<Box<Node>>,
-    pub grantees: Vec<Box<Node>>,
+    pub objects: Vec<Node>,
+    pub privileges: Vec<Node>,
+    pub grantees: Vec<Node>,
     pub grant_option: bool,
     pub grantor: Option<Box<RoleSpec>>,
     pub behavior: DropBehavior,
@@ -1460,9 +1462,9 @@ pub struct GrantStmt {
 /// ObjectWithArgs - function/procedure/operator name plus parameter ids.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectWithArgs {
-    pub objname: Vec<Box<Node>>,
-    pub objargs: Vec<Box<Node>>,
-    pub objfuncargs: Vec<Box<Node>>,
+    pub objname: Vec<Node>,
+    pub objargs: Vec<Node>,
+    pub objfuncargs: Vec<Node>,
     pub args_unspecified: bool,
 }
 
@@ -1470,16 +1472,16 @@ pub struct ObjectWithArgs {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccessPriv {
     pub priv_name: Option<String>,
-    pub cols: Vec<Box<Node>>,
+    pub cols: Vec<Node>,
 }
 
 /// GrantRoleStmt - Grant/Revoke Role Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GrantRoleStmt {
-    pub granted_roles: Vec<Box<Node>>,
-    pub grantee_roles: Vec<Box<Node>>,
+    pub granted_roles: Vec<Node>,
+    pub grantee_roles: Vec<Node>,
     pub is_grant: bool,
-    pub opt: Vec<Box<Node>>,
+    pub opt: Vec<Node>,
     pub grantor: Option<Box<RoleSpec>>,
     pub behavior: DropBehavior,
 }
@@ -1487,7 +1489,7 @@ pub struct GrantRoleStmt {
 /// AlterDefaultPrivilegesStmt - Alter Default Privileges Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterDefaultPrivilegesStmt {
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
     pub action: Option<Box<GrantStmt>>,
 }
 
@@ -1495,13 +1497,13 @@ pub struct AlterDefaultPrivilegesStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CopyStmt {
     pub relation: Option<Box<RangeVar>>,
-    pub query: Option<Box<Node>>,
-    pub attlist: Vec<Box<Node>>,
+    pub query: Option<Node>,
+    pub attlist: Vec<Node>,
     pub is_from: bool,
     pub is_program: bool,
     pub filename: Option<String>,
-    pub options: Vec<Box<Node>>,
-    pub whereClause: Option<Box<Node>>,
+    pub options: Vec<Node>,
+    pub whereClause: Option<Node>,
 }
 
 /// VariableSetKind - SET/RESET variant.
@@ -1526,7 +1528,7 @@ pub enum VariableSetKind {
 pub struct VariableSetStmt {
     pub kind: VariableSetKind,
     pub name: Option<String>,
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
     pub jumble_args: bool,
     pub is_local: bool,
     pub location: ParseLoc,
@@ -1542,14 +1544,14 @@ pub struct VariableShowStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateStmt {
     pub relation: Option<Box<RangeVar>>,
-    pub tableElts: Vec<Box<Node>>,
-    pub inhRelations: Vec<Box<Node>>,
+    pub tableElts: Vec<Node>,
+    pub inhRelations: Vec<Node>,
     pub partbound: Option<Box<PartitionBoundSpec>>,
     pub partspec: Option<Box<PartitionSpec>>,
     pub ofTypename: Option<Box<TypeName>>,
-    pub constraints: Vec<Box<Node>>,
-    pub nnconstraints: Vec<Box<Node>>,
-    pub options: Vec<Box<Node>>,
+    pub constraints: Vec<Node>,
+    pub nnconstraints: Vec<Node>,
+    pub options: Vec<Node>,
     pub oncommit: OnCommitAction,
     pub tablespacename: Option<String>,
     pub accessMethod: Option<String>,
@@ -1602,31 +1604,31 @@ pub struct Constraint {
     pub skip_validation: bool,
     pub initially_valid: bool,
     pub is_no_inherit: bool,
-    pub raw_expr: Option<Box<Node>>,
+    pub raw_expr: Option<Node>,
     pub cooked_expr: Option<String>,
     pub generated_when: i8,
     pub generated_kind: i8,
     pub nulls_not_distinct: bool,
-    pub keys: Vec<Box<Node>>,
+    pub keys: Vec<Node>,
     pub without_overlaps: bool,
-    pub including: Vec<Box<Node>>,
-    pub exclusions: Vec<Box<Node>>,
-    pub options: Vec<Box<Node>>,
+    pub including: Vec<Node>,
+    pub exclusions: Vec<Node>,
+    pub options: Vec<Node>,
     pub indexname: Option<String>,
     pub indexspace: Option<String>,
     pub reset_default_tblspc: bool,
     pub access_method: Option<String>,
-    pub where_clause: Option<Box<Node>>,
+    pub where_clause: Option<Node>,
     pub pktable: Option<Box<RangeVar>>,
-    pub fk_attrs: Vec<Box<Node>>,
-    pub pk_attrs: Vec<Box<Node>>,
+    pub fk_attrs: Vec<Node>,
+    pub pk_attrs: Vec<Node>,
     pub fk_with_period: bool,
     pub pk_with_period: bool,
     pub fk_matchtype: i8,
     pub fk_upd_action: i8,
     pub fk_del_action: i8,
-    pub fk_del_set_cols: Vec<Box<Node>>,
-    pub old_conpfeqop: Vec<Box<Node>>,
+    pub fk_del_set_cols: Vec<Node>,
+    pub old_conpfeqop: Vec<Node>,
     pub old_pktable_oid: Oid,
     pub location: ParseLoc,
 }
@@ -1637,7 +1639,7 @@ pub struct CreateTableSpaceStmt {
     pub tablespacename: Option<String>,
     pub owner: Option<Box<RoleSpec>>,
     pub location: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// DropTableSpaceStmt - Drop Table Space Statement.
@@ -1651,7 +1653,7 @@ pub struct DropTableSpaceStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterTableSpaceOptionsStmt {
     pub tablespacename: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
     pub isReset: bool,
 }
 
@@ -1660,7 +1662,7 @@ pub struct AlterTableSpaceOptionsStmt {
 pub struct AlterTableMoveAllStmt {
     pub orig_tablespacename: Option<String>,
     pub objtype: ObjectType,
-    pub roles: Vec<Box<Node>>,
+    pub roles: Vec<Node>,
     pub new_tablespacename: Option<String>,
     pub nowait: bool,
 }
@@ -1670,14 +1672,14 @@ pub struct AlterTableMoveAllStmt {
 pub struct CreateExtensionStmt {
     pub extname: Option<String>,
     pub if_not_exists: bool,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// AlterExtensionStmt.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterExtensionStmt {
     pub extname: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// AlterExtensionContentsStmt.
@@ -1687,23 +1689,23 @@ pub struct AlterExtensionContentsStmt {
     /// +1 = add object, -1 = drop object
     pub action: i32,
     pub objtype: ObjectType,
-    pub object: Option<Box<Node>>,
+    pub object: Option<Node>,
 }
 
 /// CreateFdwStmt - Create FOREIGN DATA WRAPPER.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateFdwStmt {
     pub fdwname: Option<String>,
-    pub func_options: Vec<Box<Node>>,
-    pub options: Vec<Box<Node>>,
+    pub func_options: Vec<Node>,
+    pub options: Vec<Node>,
 }
 
 /// AlterFdwStmt - Alter FOREIGN DATA WRAPPER.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterFdwStmt {
     pub fdwname: Option<String>,
-    pub func_options: Vec<Box<Node>>,
-    pub options: Vec<Box<Node>>,
+    pub func_options: Vec<Node>,
+    pub options: Vec<Node>,
 }
 
 /// CreateForeignServerStmt.
@@ -1714,7 +1716,7 @@ pub struct CreateForeignServerStmt {
     pub version: Option<String>,
     pub fdwname: Option<String>,
     pub if_not_exists: bool,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// AlterForeignServerStmt.
@@ -1722,7 +1724,7 @@ pub struct CreateForeignServerStmt {
 pub struct AlterForeignServerStmt {
     pub servername: Option<String>,
     pub version: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
     pub has_version: bool,
 }
 
@@ -1732,7 +1734,7 @@ pub struct AlterForeignServerStmt {
 pub struct CreateForeignTableStmt {
     pub base: CreateStmt,
     pub servername: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// CreateUserMappingStmt.
@@ -1741,7 +1743,7 @@ pub struct CreateUserMappingStmt {
     pub user: Option<Box<RoleSpec>>,
     pub servername: Option<String>,
     pub if_not_exists: bool,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// AlterUserMappingStmt.
@@ -1749,7 +1751,7 @@ pub struct CreateUserMappingStmt {
 pub struct AlterUserMappingStmt {
     pub user: Option<Box<RoleSpec>>,
     pub servername: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// DropUserMappingStmt.
@@ -1778,8 +1780,8 @@ pub struct ImportForeignSchemaStmt {
     pub remote_schema: Option<String>,
     pub local_schema: Option<String>,
     pub list_type: ImportForeignSchemaType,
-    pub table_list: Vec<Box<Node>>,
-    pub options: Vec<Box<Node>>,
+    pub table_list: Vec<Node>,
+    pub options: Vec<Node>,
 }
 
 /// CreatePolicyStmt - Create POLICY Statement.
@@ -1789,9 +1791,9 @@ pub struct CreatePolicyStmt {
     pub table: Option<Box<RangeVar>>,
     pub cmd_name: Option<String>,
     pub permissive: bool,
-    pub roles: Vec<Box<Node>>,
-    pub qual: Option<Box<Node>>,
-    pub with_check: Option<Box<Node>>,
+    pub roles: Vec<Node>,
+    pub qual: Option<Node>,
+    pub with_check: Option<Node>,
 }
 
 /// AlterPolicyStmt - Alter POLICY Statement.
@@ -1799,16 +1801,16 @@ pub struct CreatePolicyStmt {
 pub struct AlterPolicyStmt {
     pub policy_name: Option<String>,
     pub table: Option<Box<RangeVar>>,
-    pub roles: Vec<Box<Node>>,
-    pub qual: Option<Box<Node>>,
-    pub with_check: Option<Box<Node>>,
+    pub roles: Vec<Node>,
+    pub qual: Option<Node>,
+    pub with_check: Option<Node>,
 }
 
 /// CreateAmStmt - Create ACCESS METHOD Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateAmStmt {
     pub amname: Option<String>,
-    pub handler_name: Vec<Box<Node>>,
+    pub handler_name: Vec<Node>,
     pub amtype: i8,
 }
 
@@ -1819,16 +1821,16 @@ pub struct CreateTrigStmt {
     pub isconstraint: bool,
     pub trigname: Option<String>,
     pub relation: Option<Box<RangeVar>>,
-    pub funcname: Vec<Box<Node>>,
-    pub args: Vec<Box<Node>>,
+    pub funcname: Vec<Node>,
+    pub args: Vec<Node>,
     pub row: bool,
     /// BEFORE, AFTER, or INSTEAD (TRIGGER_TYPE bits)
     pub timing: i16,
     /// OR of INSERT/UPDATE/DELETE/TRUNCATE (TRIGGER_TYPE bits)
     pub events: i16,
-    pub columns: Vec<Box<Node>>,
-    pub whenClause: Option<Box<Node>>,
-    pub transitionRels: Vec<Box<Node>>,
+    pub columns: Vec<Node>,
+    pub whenClause: Option<Node>,
+    pub transitionRels: Vec<Node>,
     pub deferrable: bool,
     pub initdeferred: bool,
     pub constrrel: Option<Box<RangeVar>>,
@@ -1839,8 +1841,8 @@ pub struct CreateTrigStmt {
 pub struct CreateEventTrigStmt {
     pub trigname: Option<String>,
     pub eventname: Option<String>,
-    pub whenclause: Vec<Box<Node>>,
-    pub funcname: Vec<Box<Node>>,
+    pub whenclause: Vec<Node>,
+    pub funcname: Vec<Node>,
 }
 
 /// AlterEventTrigStmt - Alter EVENT TRIGGER Statement.
@@ -1855,9 +1857,9 @@ pub struct AlterEventTrigStmt {
 pub struct CreatePLangStmt {
     pub replace: bool,
     pub plname: Option<String>,
-    pub plhandler: Vec<Box<Node>>,
-    pub plinline: Vec<Box<Node>>,
-    pub plvalidator: Vec<Box<Node>>,
+    pub plhandler: Vec<Node>,
+    pub plinline: Vec<Node>,
+    pub plvalidator: Vec<Node>,
     pub pltrusted: bool,
 }
 
@@ -1874,14 +1876,14 @@ pub enum RoleStmtType {
 pub struct CreateRoleStmt {
     pub stmt_type: RoleStmtType,
     pub role: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// AlterRoleStmt.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterRoleStmt {
     pub role: Option<Box<RoleSpec>>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
     /// +1 = add members, -1 = drop members
     pub action: i32,
 }
@@ -1897,7 +1899,7 @@ pub struct AlterRoleSetStmt {
 /// DropRoleStmt.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DropRoleStmt {
-    pub roles: Vec<Box<Node>>,
+    pub roles: Vec<Node>,
     pub missing_ok: bool,
 }
 
@@ -1905,7 +1907,7 @@ pub struct DropRoleStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateSeqStmt {
     pub sequence: Option<Box<RangeVar>>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
     pub ownerId: Oid,
     pub for_identity: bool,
     pub if_not_exists: bool,
@@ -1915,7 +1917,7 @@ pub struct CreateSeqStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterSeqStmt {
     pub sequence: Option<Box<RangeVar>>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
     pub for_identity: bool,
     pub missing_ok: bool,
 }
@@ -1925,9 +1927,9 @@ pub struct AlterSeqStmt {
 pub struct DefineStmt {
     pub kind: ObjectType,
     pub oldstyle: bool,
-    pub defnames: Vec<Box<Node>>,
-    pub args: Vec<Box<Node>>,
-    pub definition: Vec<Box<Node>>,
+    pub defnames: Vec<Node>,
+    pub args: Vec<Node>,
+    pub definition: Vec<Node>,
     pub if_not_exists: bool,
     pub replace: bool,
 }
@@ -1935,20 +1937,20 @@ pub struct DefineStmt {
 /// CreateDomainStmt - Create Domain Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateDomainStmt {
-    pub domainname: Vec<Box<Node>>,
+    pub domainname: Vec<Node>,
     pub typeName: Option<Box<TypeName>>,
     pub collClause: Option<Box<CollateClause>>,
-    pub constraints: Vec<Box<Node>>,
+    pub constraints: Vec<Node>,
 }
 
 /// CreateOpClassStmt - Create Operator Class Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateOpClassStmt {
-    pub opclassname: Vec<Box<Node>>,
-    pub opfamilyname: Vec<Box<Node>>,
+    pub opclassname: Vec<Node>,
+    pub opfamilyname: Vec<Node>,
     pub amname: Option<String>,
     pub datatype: Option<Box<TypeName>>,
-    pub items: Vec<Box<Node>>,
+    pub items: Vec<Node>,
     pub isDefault: bool,
 }
 
@@ -1963,31 +1965,31 @@ pub struct CreateOpClassItem {
     pub itemtype: i32,
     pub name: Option<Box<ObjectWithArgs>>,
     pub number: i32,
-    pub order_family: Vec<Box<Node>>,
-    pub class_args: Vec<Box<Node>>,
+    pub order_family: Vec<Node>,
+    pub class_args: Vec<Node>,
     pub storedtype: Option<Box<TypeName>>,
 }
 
 /// CreateOpFamilyStmt.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateOpFamilyStmt {
-    pub opfamilyname: Vec<Box<Node>>,
+    pub opfamilyname: Vec<Node>,
     pub amname: Option<String>,
 }
 
 /// AlterOpFamilyStmt.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterOpFamilyStmt {
-    pub opfamilyname: Vec<Box<Node>>,
+    pub opfamilyname: Vec<Node>,
     pub amname: Option<String>,
     pub isDrop: bool,
-    pub items: Vec<Box<Node>>,
+    pub items: Vec<Node>,
 }
 
 /// DropStmt - Drop Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DropStmt {
-    pub objects: Vec<Box<Node>>,
+    pub objects: Vec<Node>,
     pub removeType: ObjectType,
     pub behavior: DropBehavior,
     pub missing_ok: bool,
@@ -1997,7 +1999,7 @@ pub struct DropStmt {
 /// TruncateStmt - Truncate Table Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TruncateStmt {
-    pub relations: Vec<Box<Node>>,
+    pub relations: Vec<Node>,
     pub restart_seqs: bool,
     pub behavior: DropBehavior,
 }
@@ -2006,7 +2008,7 @@ pub struct TruncateStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommentStmt {
     pub objtype: ObjectType,
-    pub object: Option<Box<Node>>,
+    pub object: Option<Node>,
     pub comment: Option<String>,
 }
 
@@ -2014,7 +2016,7 @@ pub struct CommentStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SecLabelStmt {
     pub objtype: ObjectType,
-    pub object: Option<Box<Node>>,
+    pub object: Option<Node>,
     pub provider: Option<String>,
     pub label: Option<String>,
 }
@@ -2052,7 +2054,7 @@ pub struct DeclareCursorStmt {
     pub portalname: Option<String>,
     /// bitmask of CURSOR_OPT_* (CursorOptions)
     pub options: i32,
-    pub query: Option<Box<Node>>,
+    pub query: Option<Node>,
 }
 
 /// ClosePortalStmt - Close Portal Statement.
@@ -2091,11 +2093,11 @@ pub struct IndexStmt {
     pub relation: Option<Box<RangeVar>>,
     pub accessMethod: Option<String>,
     pub tableSpace: Option<String>,
-    pub indexParams: Vec<Box<Node>>,
-    pub indexIncludingParams: Vec<Box<Node>>,
-    pub options: Vec<Box<Node>>,
-    pub whereClause: Option<Box<Node>>,
-    pub excludeOpNames: Vec<Box<Node>>,
+    pub indexParams: Vec<Node>,
+    pub indexIncludingParams: Vec<Node>,
+    pub options: Vec<Node>,
+    pub whereClause: Option<Node>,
+    pub excludeOpNames: Vec<Node>,
     pub idxcomment: Option<String>,
     pub indexOid: Oid,
     pub oldNumber: RelFileNumber,
@@ -2117,10 +2119,10 @@ pub struct IndexStmt {
 /// CreateStatsStmt - Create Statistics Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateStatsStmt {
-    pub defnames: Vec<Box<Node>>,
-    pub stat_types: Vec<Box<Node>>,
-    pub exprs: Vec<Box<Node>>,
-    pub relations: Vec<Box<Node>>,
+    pub defnames: Vec<Node>,
+    pub stat_types: Vec<Node>,
+    pub exprs: Vec<Node>,
+    pub relations: Vec<Node>,
     pub stxcomment: Option<String>,
     pub transformed: bool,
     pub if_not_exists: bool,
@@ -2130,14 +2132,14 @@ pub struct CreateStatsStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatsElem {
     pub name: Option<String>,
-    pub expr: Option<Box<Node>>,
+    pub expr: Option<Node>,
 }
 
 /// AlterStatsStmt - Alter Statistics Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterStatsStmt {
-    pub defnames: Vec<Box<Node>>,
-    pub stxstattarget: Option<Box<Node>>,
+    pub defnames: Vec<Node>,
+    pub stxstattarget: Option<Node>,
     pub missing_ok: bool,
 }
 
@@ -2146,11 +2148,11 @@ pub struct AlterStatsStmt {
 pub struct CreateFunctionStmt {
     pub is_procedure: bool,
     pub replace: bool,
-    pub funcname: Vec<Box<Node>>,
-    pub parameters: Vec<Box<Node>>,
+    pub funcname: Vec<Node>,
+    pub parameters: Vec<Node>,
     pub returnType: Option<Box<TypeName>>,
-    pub options: Vec<Box<Node>>,
-    pub sql_body: Option<Box<Node>>,
+    pub options: Vec<Node>,
+    pub sql_body: Option<Node>,
 }
 
 /// FunctionParameterMode - IN/OUT/etc (values appear in pg_proc).
@@ -2171,7 +2173,7 @@ pub struct FunctionParameter {
     pub name: Option<String>,
     pub argType: Option<Box<TypeName>>,
     pub mode: FunctionParameterMode,
-    pub defexpr: Option<Box<Node>>,
+    pub defexpr: Option<Node>,
     pub location: ParseLoc,
 }
 
@@ -2180,13 +2182,13 @@ pub struct FunctionParameter {
 pub struct AlterFunctionStmt {
     pub objtype: ObjectType,
     pub func: Option<Box<ObjectWithArgs>>,
-    pub actions: Vec<Box<Node>>,
+    pub actions: Vec<Node>,
 }
 
 /// DoStmt - DO Statement (raw parser output).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DoStmt {
-    pub args: Vec<Box<Node>>,
+    pub args: Vec<Node>,
 }
 
 /// InlineCodeBlock - execution-time API for DO (not a parse-tree member).
@@ -2203,7 +2205,7 @@ pub struct InlineCodeBlock {
 pub struct CallStmt {
     pub funccall: Option<Box<FuncCall>>,
     pub funcexpr: Option<Box<FuncExpr>>,
-    pub outargs: Vec<Box<Node>>,
+    pub outargs: Vec<Node>,
 }
 
 /// CallContext - not a member of parse trees.
@@ -2218,7 +2220,7 @@ pub struct RenameStmt {
     pub renameType: ObjectType,
     pub relationType: ObjectType,
     pub relation: Option<Box<RangeVar>>,
-    pub object: Option<Box<Node>>,
+    pub object: Option<Node>,
     pub subname: Option<String>,
     pub newname: Option<String>,
     pub behavior: DropBehavior,
@@ -2230,7 +2232,7 @@ pub struct RenameStmt {
 pub struct AlterObjectDependsStmt {
     pub objectType: ObjectType,
     pub relation: Option<Box<RangeVar>>,
-    pub object: Option<Box<Node>>,
+    pub object: Option<Node>,
     pub extname: Option<Box<String_>>,
     pub remove: bool,
 }
@@ -2240,7 +2242,7 @@ pub struct AlterObjectDependsStmt {
 pub struct AlterObjectSchemaStmt {
     pub objectType: ObjectType,
     pub relation: Option<Box<RangeVar>>,
-    pub object: Option<Box<Node>>,
+    pub object: Option<Node>,
     pub newschema: Option<String>,
     pub missing_ok: bool,
 }
@@ -2250,7 +2252,7 @@ pub struct AlterObjectSchemaStmt {
 pub struct AlterOwnerStmt {
     pub objectType: ObjectType,
     pub relation: Option<Box<RangeVar>>,
-    pub object: Option<Box<Node>>,
+    pub object: Option<Node>,
     pub newowner: Option<Box<RoleSpec>>,
 }
 
@@ -2258,14 +2260,14 @@ pub struct AlterOwnerStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterOperatorStmt {
     pub opername: Option<Box<ObjectWithArgs>>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// AlterTypeStmt - Alter Type Set ( this-n-that ).
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterTypeStmt {
-    pub typeName: Vec<Box<Node>>,
-    pub options: Vec<Box<Node>>,
+    pub typeName: Vec<Node>,
+    pub options: Vec<Node>,
 }
 
 /// RuleStmt - Create Rule Statement.
@@ -2273,10 +2275,10 @@ pub struct AlterTypeStmt {
 pub struct RuleStmt {
     pub relation: Option<Box<RangeVar>>,
     pub rulename: Option<String>,
-    pub whereClause: Option<Box<Node>>,
+    pub whereClause: Option<Node>,
     pub event: CmdType,
     pub instead: bool,
-    pub actions: Vec<Box<Node>>,
+    pub actions: Vec<Node>,
     pub replace: bool,
 }
 
@@ -2319,7 +2321,7 @@ pub enum TransactionStmtKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransactionStmt {
     pub kind: TransactionStmtKind,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
     pub savepoint_name: Option<String>,
     pub gid: Option<String>,
     pub chain: bool,
@@ -2330,27 +2332,27 @@ pub struct TransactionStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompositeTypeStmt {
     pub typevar: Option<Box<RangeVar>>,
-    pub coldeflist: Vec<Box<Node>>,
+    pub coldeflist: Vec<Node>,
 }
 
 /// CreateEnumStmt - Create Type Statement, enum types.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateEnumStmt {
-    pub typeName: Vec<Box<Node>>,
-    pub vals: Vec<Box<Node>>,
+    pub typeName: Vec<Node>,
+    pub vals: Vec<Node>,
 }
 
 /// CreateRangeStmt - Create Type Statement, range types.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateRangeStmt {
-    pub typeName: Vec<Box<Node>>,
-    pub params: Vec<Box<Node>>,
+    pub typeName: Vec<Node>,
+    pub params: Vec<Node>,
 }
 
 /// AlterEnumStmt - Alter Type Statement, enum types.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterEnumStmt {
-    pub typeName: Vec<Box<Node>>,
+    pub typeName: Vec<Node>,
     pub oldVal: Option<String>,
     pub newVal: Option<String>,
     pub newValNeighbor: Option<String>,
@@ -2370,10 +2372,10 @@ pub enum ViewCheckOption {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewStmt {
     pub view: Option<Box<RangeVar>>,
-    pub aliases: Vec<Box<Node>>,
-    pub query: Option<Box<Node>>,
+    pub aliases: Vec<Node>,
+    pub query: Option<Node>,
     pub replace: bool,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
     pub withCheckOption: ViewCheckOption,
 }
 
@@ -2387,14 +2389,14 @@ pub struct LoadStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreatedbStmt {
     pub dbname: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// AlterDatabaseStmt - Alter Database.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterDatabaseStmt {
     pub dbname: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// AlterDatabaseRefreshCollStmt.
@@ -2415,7 +2417,7 @@ pub struct AlterDatabaseSetStmt {
 pub struct DropdbStmt {
     pub dbname: Option<String>,
     pub missing_ok: bool,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// AlterSystemStmt - Alter System Statement.
@@ -2429,14 +2431,14 @@ pub struct AlterSystemStmt {
 pub struct ClusterStmt {
     pub relation: Option<Box<RangeVar>>,
     pub indexname: Option<String>,
-    pub params: Vec<Box<Node>>,
+    pub params: Vec<Node>,
 }
 
 /// VacuumStmt - Vacuum and Analyze Statements.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VacuumStmt {
-    pub options: Vec<Box<Node>>,
-    pub rels: Vec<Box<Node>>,
+    pub options: Vec<Node>,
+    pub rels: Vec<Node>,
     pub is_vacuumcmd: bool,
 }
 
@@ -2445,20 +2447,20 @@ pub struct VacuumStmt {
 pub struct VacuumRelation {
     pub relation: Option<Box<RangeVar>>,
     pub oid: Oid,
-    pub va_cols: Vec<Box<Node>>,
+    pub va_cols: Vec<Node>,
 }
 
 /// ExplainStmt - Explain Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExplainStmt {
-    pub query: Option<Box<Node>>,
-    pub options: Vec<Box<Node>>,
+    pub query: Option<Node>,
+    pub options: Vec<Node>,
 }
 
 /// CreateTableAsStmt - CREATE TABLE AS Statement (a/k/a SELECT INTO).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateTableAsStmt {
-    pub query: Option<Box<Node>>,
+    pub query: Option<Node>,
     pub into: Option<Box<IntoClause>>,
     pub objtype: ObjectType,
     pub is_select_into: bool,
@@ -2495,7 +2497,7 @@ pub struct DiscardStmt {
 /// LockStmt - LOCK Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LockStmt {
-    pub relations: Vec<Box<Node>>,
+    pub relations: Vec<Node>,
     pub mode: i32,
     pub nowait: bool,
 }
@@ -2503,7 +2505,7 @@ pub struct LockStmt {
 /// ConstraintsSetStmt - SET CONSTRAINTS Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConstraintsSetStmt {
-    pub constraints: Vec<Box<Node>>,
+    pub constraints: Vec<Node>,
     pub deferred: bool,
 }
 
@@ -2523,16 +2525,16 @@ pub struct ReindexStmt {
     pub kind: ReindexObjectType,
     pub relation: Option<Box<RangeVar>>,
     pub name: Option<String>,
-    pub params: Vec<Box<Node>>,
+    pub params: Vec<Node>,
 }
 
 /// CreateConversionStmt - CREATE CONVERSION Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateConversionStmt {
-    pub conversion_name: Vec<Box<Node>>,
+    pub conversion_name: Vec<Node>,
     pub for_encoding_name: Option<String>,
     pub to_encoding_name: Option<String>,
-    pub func_name: Vec<Box<Node>>,
+    pub func_name: Vec<Node>,
     pub def: bool,
 }
 
@@ -2560,15 +2562,15 @@ pub struct CreateTransformStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrepareStmt {
     pub name: Option<String>,
-    pub argtypes: Vec<Box<Node>>,
-    pub query: Option<Box<Node>>,
+    pub argtypes: Vec<Node>,
+    pub query: Option<Node>,
 }
 
 /// ExecuteStmt - EXECUTE Statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExecuteStmt {
     pub name: Option<String>,
-    pub params: Vec<Box<Node>>,
+    pub params: Vec<Node>,
 }
 
 /// DeallocateStmt - DEALLOCATE Statement.
@@ -2583,22 +2585,22 @@ pub struct DeallocateStmt {
 /// DropOwnedStmt - DROP OWNED statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DropOwnedStmt {
-    pub roles: Vec<Box<Node>>,
+    pub roles: Vec<Node>,
     pub behavior: DropBehavior,
 }
 
 /// ReassignOwnedStmt - REASSIGN OWNED statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReassignOwnedStmt {
-    pub roles: Vec<Box<Node>>,
+    pub roles: Vec<Node>,
     pub newrole: Option<Box<RoleSpec>>,
 }
 
 /// AlterTSDictionaryStmt - TS Dictionary stmt.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterTSDictionaryStmt {
-    pub dictname: Vec<Box<Node>>,
-    pub options: Vec<Box<Node>>,
+    pub dictname: Vec<Node>,
+    pub options: Vec<Node>,
 }
 
 /// AlterTSConfigType - TS Configuration stmt kind.
@@ -2615,9 +2617,9 @@ pub enum AlterTSConfigType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterTSConfigurationStmt {
     pub kind: AlterTSConfigType,
-    pub cfgname: Vec<Box<Node>>,
-    pub tokentype: Vec<Box<Node>>,
-    pub dicts: Vec<Box<Node>>,
+    pub cfgname: Vec<Node>,
+    pub tokentype: Vec<Node>,
+    pub dicts: Vec<Node>,
     pub r#override: bool,
     pub replace: bool,
     pub missing_ok: bool,
@@ -2627,8 +2629,8 @@ pub struct AlterTSConfigurationStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PublicationTable {
     pub relation: Option<Box<RangeVar>>,
-    pub whereClause: Option<Box<Node>>,
-    pub columns: Vec<Box<Node>>,
+    pub whereClause: Option<Node>,
+    pub columns: Vec<Node>,
 }
 
 /// PublicationObjSpecType - Publication object type.
@@ -2657,8 +2659,8 @@ pub struct PublicationObjSpec {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreatePublicationStmt {
     pub pubname: Option<String>,
-    pub options: Vec<Box<Node>>,
-    pub pubobjects: Vec<Box<Node>>,
+    pub options: Vec<Node>,
+    pub pubobjects: Vec<Node>,
     pub for_all_tables: bool,
 }
 
@@ -2677,8 +2679,8 @@ pub enum AlterPublicationAction {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterPublicationStmt {
     pub pubname: Option<String>,
-    pub options: Vec<Box<Node>>,
-    pub pubobjects: Vec<Box<Node>>,
+    pub options: Vec<Node>,
+    pub pubobjects: Vec<Node>,
     pub for_all_tables: bool,
     pub action: AlterPublicationAction,
 }
@@ -2688,8 +2690,8 @@ pub struct AlterPublicationStmt {
 pub struct CreateSubscriptionStmt {
     pub subname: Option<String>,
     pub conninfo: Option<String>,
-    pub publication: Vec<Box<Node>>,
-    pub options: Vec<Box<Node>>,
+    pub publication: Vec<Node>,
+    pub options: Vec<Node>,
 }
 
 /// AlterSubscriptionType.
@@ -2711,8 +2713,8 @@ pub struct AlterSubscriptionStmt {
     pub kind: AlterSubscriptionType,
     pub subname: Option<String>,
     pub conninfo: Option<String>,
-    pub publication: Vec<Box<Node>>,
-    pub options: Vec<Box<Node>>,
+    pub publication: Vec<Node>,
+    pub options: Vec<Node>,
 }
 
 /// DropSubscriptionStmt.

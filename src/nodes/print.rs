@@ -23,16 +23,16 @@ pub fn format_node_dump(_dump: &str) -> String {
 pub fn pretty_format_node_dump(_dump: &str) -> String {
     unimplemented!()
 }
-pub fn print_rt(_rtable: &[Box<Node>]) {
+pub fn print_rt(_rtable: &[Node]) {
     unimplemented!()
 }
-pub fn print_expr(_expr: &Node, _rtable: &[Box<Node>]) {
+pub fn print_expr(_expr: &Node, _rtable: &[Node]) {
     unimplemented!()
 }
-pub fn print_pathkeys(_pathkeys: &[Box<Node>], _rtable: &[Box<Node>]) {
+pub fn print_pathkeys(_pathkeys: &[Node], _rtable: &[Node]) {
     unimplemented!()
 }
-pub fn print_tl(_tlist: &[Box<Node>], _rtable: &[Box<Node>]) {
+pub fn print_tl(_tlist: &[Node], _rtable: &[Node]) {
     unimplemented!()
 }
 pub fn print_slot(_slot: &mut TupleTableSlot) {

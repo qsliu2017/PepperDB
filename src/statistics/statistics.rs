@@ -117,7 +117,7 @@ pub fn statext_is_kind_built(_htup: HeapTuple, _type: u8) -> bool {
 // `Bitmapset **estimatedclauses` is an in/out accumulator; modeled as &mut.
 pub fn dependencies_clauselist_selectivity(
     _root: &mut PlannerInfo,
-    _clauses: &[Box<Node>],
+    _clauses: &[Node],
     _varRelid: i32,
     _jointype: JoinType,
     _sjinfo: &SpecialJoinInfo,
@@ -129,7 +129,7 @@ pub fn dependencies_clauselist_selectivity(
 
 pub fn statext_clauselist_selectivity(
     _root: &mut PlannerInfo,
-    _clauses: &[Box<Node>],
+    _clauses: &[Node],
     _varRelid: i32,
     _jointype: JoinType,
     _sjinfo: &SpecialJoinInfo,
@@ -150,7 +150,7 @@ pub fn choose_best_statistics(
     _requiredkind: u8,
     _inh: bool,
     _clause_attnums: &mut [Option<Bitmapset>], // Bitmapset **clause_attnums (array)
-    _clause_exprs: &mut Vec<Vec<Box<Node>>>,   // List **clause_exprs (out list-of-lists)
+    _clause_exprs: &mut Vec<Vec<Node>>,   // List **clause_exprs (out list-of-lists)
     _nclauses: i32,
 ) -> Option<&'static StatisticExtInfo> {
     unimplemented!()

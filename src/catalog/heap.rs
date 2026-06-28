@@ -38,7 +38,7 @@ bitflags! {
 /// Untransformed default for a column.
 pub struct RawColumnDefault {
     pub attnum: AttrNumber,         // attribute to attach default to
-    pub raw_default: Box<Node>,     // default value (untransformed parse tree)
+    pub raw_default: Node,     // default value (untransformed parse tree)
     pub generated: u8,              // attgenerated setting (was char)
 }
 
@@ -48,7 +48,7 @@ pub struct CookedConstraint {
     pub conoid: Oid,            // constr OID if created, else Invalid
     pub name: Option<String>,   // name, or None if none
     pub attnum: AttrNumber,     // which attr (only for NOTNULL, DEFAULT)
-    pub expr: Box<Node>,        // transformed default or check expr
+    pub expr: Node,        // transformed default or check expr
     pub is_enforced: bool,      // is enforced? (only for CHECK)
     pub skip_validation: bool,  // skip validation? (only for CHECK)
     pub is_local: bool,         // constraint has local (non-inherited) def
@@ -177,12 +177,12 @@ pub fn SetAttrMissing(_relid: Oid, _attname: &str, _value: &str) {
 
 pub fn cookDefault(
     _pstate: &mut ParseState,
-    _raw_default: Box<Node>,
+    _raw_default: Node,
     _atttypid: Oid,
     _atttypmod: i32,
     _attname: &str,
     _attgenerated: u8,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 

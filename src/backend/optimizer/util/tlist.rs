@@ -23,7 +23,7 @@ use crate::utils::elog::OrElog;
 pub fn tlist_member(node: &Node, targetlist: &[TargetEntry]) -> Option<TargetEntry> {
     targetlist
         .iter()
-        .find(|tle| tle.expr.as_deref() == Some(node))
+        .find(|tle| tle.expr.as_ref() == Some(node))
         .cloned()
 }
 
@@ -104,7 +104,7 @@ mod tests {
 
     /// Build a one-column tlist over the given expr with resno 1.
     fn tlist_of(expr: Node) -> Vec<TargetEntry> {
-        vec![makeTargetEntry(Some(Box::new(expr)), 1, Some("c".to_owned()), false)]
+        vec![makeTargetEntry(Some(expr), 1, Some("c".to_owned()), false)]
     }
 
     #[test]
@@ -128,8 +128,8 @@ mod tests {
         // make_pathtarget_from_tlist then make_tlist_from_pathtarget recovers the
         // exprs and resnos (resnames are intentionally not preserved).
         let original = vec![
-            makeTargetEntry(Some(Box::new(int4(1))), 1, Some("a".to_owned()), false),
-            makeTargetEntry(Some(Box::new(int4(2))), 2, Some("b".to_owned()), false),
+            makeTargetEntry(Some(int4(1)), 1, Some("a".to_owned()), false),
+            makeTargetEntry(Some(int4(2)), 2, Some("b".to_owned()), false),
         ];
         let target = make_pathtarget_from_tlist(&original);
         assert_eq!(target.exprs.len(), 2);
@@ -138,7 +138,7 @@ mod tests {
         assert_eq!(back.len(), 2);
         assert_eq!(back[0].resno, 1);
         assert_eq!(back[1].resno, 2);
-        assert_eq!(back[0].expr.as_deref(), original[0].expr.as_deref());
-        assert_eq!(back[1].expr.as_deref(), original[1].expr.as_deref());
+        assert_eq!(back[0].expr.as_ref(), original[0].expr.as_ref());
+        assert_eq!(back[1].expr.as_ref(), original[1].expr.as_ref());
     }
 }

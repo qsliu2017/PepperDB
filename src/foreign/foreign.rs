@@ -30,7 +30,7 @@ pub struct ForeignDataWrapper {
     pub fdwname: String,       // Name of the FDW
     pub fdwhandler: Oid,       // Oid of handler function, or 0
     pub fdwvalidator: Oid,     // Oid of validator function, or 0
-    pub options: Vec<Box<Node>>, // fdwoptions as DefElem list
+    pub options: Vec<Node>, // fdwoptions as DefElem list
 }
 
 pub struct ForeignServer {
@@ -40,20 +40,20 @@ pub struct ForeignServer {
     pub servername: String,       // name of the server
     pub servertype: Option<String>, // server type, optional
     pub serverversion: Option<String>, // server version, optional
-    pub options: Vec<Box<Node>>,  // srvoptions as DefElem list
+    pub options: Vec<Node>,  // srvoptions as DefElem list
 }
 
 pub struct UserMapping {
     pub umid: Oid,               // Oid of user mapping
     pub userid: Oid,             // local user Oid
     pub serverid: Oid,           // server Oid
-    pub options: Vec<Box<Node>>, // useoptions as DefElem list
+    pub options: Vec<Node>, // useoptions as DefElem list
 }
 
 pub struct ForeignTable {
     pub relid: Oid,              // relation Oid
     pub serverid: Oid,           // server Oid
-    pub options: Vec<Box<Node>>, // ftoptions as DefElem list
+    pub options: Vec<Node>, // ftoptions as DefElem list
 }
 
 /// MappingUserName(userid): username for a user mapping, "public" if invalid.
@@ -103,7 +103,7 @@ pub fn GetForeignTable(_relid: Oid) -> Option<ForeignTable> {
     unimplemented!()
 }
 
-pub fn GetForeignColumnOptions(_relid: Oid, _attnum: AttrNumber) -> Vec<Box<Node>> {
+pub fn GetForeignColumnOptions(_relid: Oid, _attnum: AttrNumber) -> Vec<Node> {
     unimplemented!()
 }
 

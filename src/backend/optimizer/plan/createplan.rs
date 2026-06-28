@@ -12,11 +12,6 @@
 //! scan/join/append/agg/sort/limit/... arms of the nodeTag switch are grow guards
 //! (rules.md s4) and grow per milestone.
 
-#![allow(
-    clippy::vec_box,
-    reason = "1:1 PG port: Vec<Box<Node>> mirrors a PG List of node pointers and matches Plan.targetlist"
-)]
-
 use crate::nodes::makefuncs::makeTargetEntry;
 use crate::nodes::nodes::Node;
 use crate::nodes::pathnodes::{Path, PathType, PlannerInfo};
@@ -53,7 +48,7 @@ fn create_group_result_plan(root: &mut PlannerInfo, best_path: &Path) -> Result 
     // best_path->quals are the GroupResultPath's bare clauses; M1 has none. The
     // skeleton stores the embedded Path in the rel pathlist (planmain), so the
     // quals (always empty on the const path) are not carried here.
-    let quals: Option<Box<Node>> = None;
+    let quals: Option<Node> = None;
 
     let mut plan = make_result(tlist, quals, None);
     copy_generic_path_info(&mut plan.plan, best_path);
@@ -63,7 +58,7 @@ fn create_group_result_plan(root: &mut PlannerInfo, best_path: &Path) -> Result 
 /// PG `build_path_tlist`: build a targetlist from a path's pathtarget, assigning
 /// resnos 1..n. Parameterized-path lateral-ref replacement is not reachable on
 /// the M1 path (no param_info).
-fn build_path_tlist(_root: &mut PlannerInfo, path: &Path) -> Vec<Box<Node>> {
+fn build_path_tlist(_root: &mut PlannerInfo, path: &Path) -> Vec<Node> {
     if path.param_info.is_some() {
         not_yet_reachable("build_path_tlist: parameterized path lateral refs");
     }
@@ -82,7 +77,7 @@ fn build_path_tlist(_root: &mut PlannerInfo, path: &Path) -> Vec<Box<Node>> {
             if has_sortgrouprefs {
                 tle.ressortgroupref = pathtarget.sortgrouprefs[i];
             }
-            Box::new(Node::TargetEntry(Box::new(tle)))
+            Node::TargetEntry(Box::new(tle))
         })
         .collect()
 }
@@ -90,9 +85,9 @@ fn build_path_tlist(_root: &mut PlannerInfo, path: &Path) -> Vec<Box<Node>> {
 /// PG `make_result`: construct a Result plan node with the given tlist and
 /// one-time qual (`resconstantqual`), over an optional subplan.
 fn make_result(
-    tlist: Vec<Box<Node>>,
-    resconstantqual: Option<Box<Node>>,
-    subplan: Option<Box<Node>>,
+    tlist: Vec<Node>,
+    resconstantqual: Option<Node>,
+    subplan: Option<Node>,
 ) -> Result {
     Result {
         plan: Plan {

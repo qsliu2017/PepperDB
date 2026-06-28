@@ -35,7 +35,7 @@ pub static mut Geqo_seed: f64 = 0.0;
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeqoPrivateData {
     /// the base relations we are joining
-    pub initial_rels: Vec<Box<Node>>,
+    pub initial_rels: Vec<Node>,
     /// PRNG state
     pub random_state: PgPrngState,
 }
@@ -44,7 +44,7 @@ pub struct GeqoPrivateData {
 pub fn geqo(
     root: &mut PlannerInfo,
     number_of_rels: i32,
-    initial_rels: Vec<Box<Node>>,
+    initial_rels: Vec<Node>,
 ) -> Box<RelOptInfo> {
     unimplemented!()
 }

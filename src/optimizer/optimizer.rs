@@ -1,7 +1,7 @@
 //! Translated from PostgreSQL src/include/optimizer/optimizer.h
 //! External API for the Postgres planner.
 
-#![allow(clippy::boxed_local, reason = "1:1 PG port: Box<Node>/Box<Path> mirrors PG pointer-passed nodes")]
+#![allow(clippy::boxed_local, reason = "1:1 PG port: Node/Box<Path> mirrors PG pointer-passed nodes")]
 
 use bitflags::bitflags;
 
@@ -24,7 +24,7 @@ type IndexOptInfoRef<'a> = &'a IndexOptInfo;
 
 pub fn clause_selectivity(
     _root: PlannerInfoRef,
-    _clause: Option<Box<Node>>,
+    _clause: Option<Node>,
     _var_relid: i32,
     _jointype: JoinType,
     _sjinfo: Option<SpecialJoinInfoRef>,
@@ -34,7 +34,7 @@ pub fn clause_selectivity(
 
 pub fn clause_selectivity_ext(
     _root: PlannerInfoRef,
-    _clause: Option<Box<Node>>,
+    _clause: Option<Node>,
     _var_relid: i32,
     _jointype: JoinType,
     _sjinfo: Option<SpecialJoinInfoRef>,
@@ -45,7 +45,7 @@ pub fn clause_selectivity_ext(
 
 pub fn clauselist_selectivity(
     _root: PlannerInfoRef,
-    _clauses: Vec<Box<Node>>,
+    _clauses: Vec<Node>,
     _var_relid: i32,
     _jointype: JoinType,
     _sjinfo: Option<SpecialJoinInfoRef>,
@@ -55,7 +55,7 @@ pub fn clauselist_selectivity(
 
 pub fn clauselist_selectivity_ext(
     _root: PlannerInfoRef,
-    _clauses: Vec<Box<Node>>,
+    _clauses: Vec<Node>,
     _var_relid: i32,
     _jointype: JoinType,
     _sjinfo: Option<SpecialJoinInfoRef>,
@@ -92,7 +92,7 @@ pub fn clamp_cardinality_to_long(_x: Cardinality) -> i64 {
 
 pub fn is_pseudo_constant_for_index(
     _root: PlannerInfoRef,
-    _expr: Option<Box<Node>>,
+    _expr: Option<Node>,
     _index: IndexOptInfoRef,
 ) -> bool {
     unimplemented!()
@@ -127,8 +127,8 @@ pub use crate::backend::optimizer::plan::planner::expression_planner;
 
 /// C out-params `List **relationOids, List **invalItems` -> returned tuple.
 pub fn expression_planner_with_deps(
-    _expr: Box<Node>,
-) -> (Box<Node>, Vec<Oid>, Vec<Box<Node>>) {
+    _expr: Node,
+) -> (Node, Vec<Oid>, Vec<Node>) {
     unimplemented!()
 }
 
@@ -143,81 +143,81 @@ pub fn plan_create_index_workers(_table_oid: Oid, _index_oid: Oid) -> i32 {
 // in plan/setrefs.c:
 
 /// C out-params `relationOids, invalItems, hasRowSecurity` -> returned tuple.
-pub fn extract_query_dependencies(_query: Option<Box<Node>>) -> (Vec<Oid>, Vec<Box<Node>>, bool) {
+pub fn extract_query_dependencies(_query: Option<Node>) -> (Vec<Oid>, Vec<Node>, bool) {
     unimplemented!()
 }
 
 // in prep/prepqual.c:
 
-pub fn negate_clause(_node: Option<Box<Node>>) -> Option<Box<Node>> {
+pub fn negate_clause(_node: Option<Node>) -> Option<Node> {
     unimplemented!()
 }
 
-pub fn canonicalize_qual(_qual: Option<Box<Node>>, _is_check: bool) -> Option<Box<Node>> {
+pub fn canonicalize_qual(_qual: Option<Node>, _is_check: bool) -> Option<Node> {
     unimplemented!()
 }
 
 // in util/clauses.c:
 
-pub fn contain_mutable_functions(_clause: Option<Box<Node>>) -> bool {
+pub fn contain_mutable_functions(_clause: Option<Node>) -> bool {
     unimplemented!()
 }
 
-pub fn contain_mutable_functions_after_planning(_expr: Box<Node>) -> bool {
+pub fn contain_mutable_functions_after_planning(_expr: Node) -> bool {
     unimplemented!()
 }
 
-pub fn contain_volatile_functions(_clause: Option<Box<Node>>) -> bool {
+pub fn contain_volatile_functions(_clause: Option<Node>) -> bool {
     unimplemented!()
 }
 
-pub fn contain_volatile_functions_after_planning(_expr: Box<Node>) -> bool {
+pub fn contain_volatile_functions_after_planning(_expr: Node) -> bool {
     unimplemented!()
 }
 
-pub fn contain_volatile_functions_not_nextval(_clause: Option<Box<Node>>) -> bool {
+pub fn contain_volatile_functions_not_nextval(_clause: Option<Node>) -> bool {
     unimplemented!()
 }
 
 /// PG `eval_const_expressions`. See `crate::backend::optimizer::util::clauses`.
 pub use crate::backend::optimizer::util::clauses::eval_const_expressions;
 
-pub fn convert_saop_to_hashed_saop(_node: Option<Box<Node>>) {
+pub fn convert_saop_to_hashed_saop(_node: Option<Node>) {
     unimplemented!()
 }
 
 pub fn estimate_expression_value(
     _root: PlannerInfoRef,
-    _node: Option<Box<Node>>,
-) -> Option<Box<Node>> {
+    _node: Option<Node>,
+) -> Option<Node> {
     unimplemented!()
 }
 
 pub fn evaluate_expr(
-    _expr: Box<Node>,
+    _expr: Node,
     _result_type: Oid,
     _result_typmod: i32,
     _result_collation: Oid,
-) -> Box<Node> {
+) -> Node {
     unimplemented!()
 }
 
 pub fn expand_function_arguments(
-    _args: Vec<Box<Node>>,
+    _args: Vec<Node>,
     _include_out_arguments: bool,
     _result_type: Oid,
     _func_tuple: &HeapTupleData,
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
 pub fn make_saop_expr(
     _oper: Oid,
-    _leftexpr: Option<Box<Node>>,
+    _leftexpr: Option<Node>,
     _coltype: Oid,
     _arraycollid: Oid,
     _inputcollid: Oid,
-    _exprs: Vec<Box<Node>>,
+    _exprs: Vec<Node>,
     _have_non_const: bool,
 ) -> Box<ScalarArrayOpExpr> {
     unimplemented!()
@@ -226,16 +226,16 @@ pub fn make_saop_expr(
 // in util/predtest.c:
 
 pub fn predicate_implied_by(
-    _predicate_list: Vec<Box<Node>>,
-    _clause_list: Vec<Box<Node>>,
+    _predicate_list: Vec<Node>,
+    _clause_list: Vec<Node>,
     _weak: bool,
 ) -> bool {
     unimplemented!()
 }
 
 pub fn predicate_refuted_by(
-    _predicate_list: Vec<Box<Node>>,
-    _clause_list: Vec<Box<Node>>,
+    _predicate_list: Vec<Node>,
+    _clause_list: Vec<Node>,
     _weak: bool,
 ) -> bool {
     unimplemented!()
@@ -261,14 +261,14 @@ pub fn get_sortgroupclause_tle<'a>(
 pub fn get_sortgroupclause_expr(
     _sg_clause: &SortGroupClause,
     _target_list: &[TargetEntry],
-) -> Option<Box<Node>> {
+) -> Option<Node> {
     unimplemented!()
 }
 
 pub fn get_sortgrouplist_exprs(
     _sg_clauses: &[SortGroupClause],
     _target_list: &[TargetEntry],
-) -> Vec<Box<Node>> {
+) -> Vec<Node> {
     unimplemented!()
 }
 
@@ -306,59 +306,59 @@ bitflags! {
     }
 }
 
-pub fn pull_varnos(_root: PlannerInfoRef, _node: Option<Box<Node>>) -> Bitmapset {
+pub fn pull_varnos(_root: PlannerInfoRef, _node: Option<Node>) -> Bitmapset {
     unimplemented!()
 }
 
 pub fn pull_varnos_of_level(
     _root: PlannerInfoRef,
-    _node: Option<Box<Node>>,
+    _node: Option<Node>,
     _levelsup: i32,
 ) -> Bitmapset {
     unimplemented!()
 }
 
 /// C out-param `Bitmapset **varattnos` -> returned value.
-pub fn pull_varattnos(_node: Option<Box<Node>>, _varno: Index) -> Bitmapset {
+pub fn pull_varattnos(_node: Option<Node>, _varno: Index) -> Bitmapset {
     unimplemented!()
 }
 
-pub fn pull_vars_of_level(_node: Option<Box<Node>>, _levelsup: i32) -> Vec<Box<Node>> {
+pub fn pull_vars_of_level(_node: Option<Node>, _levelsup: i32) -> Vec<Node> {
     unimplemented!()
 }
 
-pub fn contain_var_clause(_node: Option<Box<Node>>) -> bool {
+pub fn contain_var_clause(_node: Option<Node>) -> bool {
     unimplemented!()
 }
 
-pub fn contain_vars_of_level(_node: Option<Box<Node>>, _levelsup: i32) -> bool {
+pub fn contain_vars_of_level(_node: Option<Node>, _levelsup: i32) -> bool {
     unimplemented!()
 }
 
-pub fn contain_vars_returning_old_or_new(_node: Option<Box<Node>>) -> bool {
+pub fn contain_vars_returning_old_or_new(_node: Option<Node>) -> bool {
     unimplemented!()
 }
 
-pub fn locate_var_of_level(_node: Option<Box<Node>>, _levelsup: i32) -> i32 {
+pub fn locate_var_of_level(_node: Option<Node>, _levelsup: i32) -> i32 {
     unimplemented!()
 }
 
-pub fn pull_var_clause(_node: Option<Box<Node>>, _flags: PullVarClauseFlags) -> Vec<Box<Node>> {
+pub fn pull_var_clause(_node: Option<Node>, _flags: PullVarClauseFlags) -> Vec<Node> {
     unimplemented!()
 }
 
 pub fn flatten_join_alias_vars(
     _root: PlannerInfoRef,
     _query: &Query,
-    _node: Option<Box<Node>>,
-) -> Option<Box<Node>> {
+    _node: Option<Node>,
+) -> Option<Node> {
     unimplemented!()
 }
 
 pub fn flatten_group_exprs(
     _root: PlannerInfoRef,
     _query: &Query,
-    _node: Option<Box<Node>>,
-) -> Option<Box<Node>> {
+    _node: Option<Node>,
+) -> Option<Node> {
     unimplemented!()
 }

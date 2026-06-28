@@ -60,7 +60,7 @@ pub fn get_object_address(
 pub fn get_object_address_rv(
     objtype: ObjectType,
     rel: &RangeVar,
-    object: Vec<Box<Node>>,
+    object: Vec<Node>,
     relp: &mut Relation,
     lockmode: LOCKMODE,
     missing_ok: bool,
@@ -171,15 +171,15 @@ pub fn getObjectIdentity(object: &ObjectAddress, missing_ok: bool) -> String {
 /// C: char* return + `List **objname`/`List **objargs` out-params -> struct.
 pub struct ObjectIdentityParts {
     pub identity: String,
-    pub objname: Vec<Box<Node>>,
-    pub objargs: Vec<Box<Node>>,
+    pub objname: Vec<Node>,
+    pub objargs: Vec<Node>,
 }
 
 pub fn getObjectIdentityParts(object: &ObjectAddress, missing_ok: bool) -> ObjectIdentityParts {
     unimplemented!()
 }
 
-pub fn strlist_to_textarray(list: Vec<Box<Node>>) -> *mut ArrayType {
+pub fn strlist_to_textarray(list: Vec<Node>) -> *mut ArrayType {
     unimplemented!()
 }
 

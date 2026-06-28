@@ -254,12 +254,12 @@ mod tests {
     fn plan(s: &str) -> crate::nodes::plannodes::PlannedStmt {
         let mut list = crate::backend::parser::parser::raw_parser(s, RawParseMode::Default);
         assert_eq!(list.len(), 1);
-        let Node::RawStmt(rs) = *list.remove(0) else {
+        let Node::RawStmt(rs) = list.remove(0) else {
             panic!("not a RawStmt")
         };
         let rs: RawStmt = *rs;
         let q = crate::backend::parser::analyze::parse_analyze_fixedparams(&rs, s, &[], 0, None);
-        let mut rewritten = crate::backend::rewrite::rewriteHandler::query_rewrite(q);
+        let mut rewritten = crate::backend::rewrite::rewriteHandler::query_rewrite(*q);
         assert_eq!(rewritten.len(), 1);
         let mut parse = rewritten.remove(0);
         crate::backend::optimizer::plan::planner::standard_planner(&mut parse, s, 0, None)

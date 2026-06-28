@@ -123,7 +123,7 @@ pub fn cost_tidscan(
     path: &mut Path,
     root: &mut PlannerInfo,
     baserel: &RelOptInfo,
-    tidquals: &[Box<Node>],
+    tidquals: &[Node],
     param_info: Option<&ParamPathInfo>,
 ) {
     unimplemented!()
@@ -133,7 +133,7 @@ pub fn cost_tidrangescan(
     path: &mut Path,
     root: &mut PlannerInfo,
     baserel: &RelOptInfo,
-    tidrangequals: &[Box<Node>],
+    tidrangequals: &[Node],
     param_info: Option<&ParamPathInfo>,
 ) {
     unimplemented!()
@@ -210,7 +210,7 @@ pub fn cost_recursive_union(runion: &mut Path, nrterm: &Path, rterm: &Path) {
 pub fn cost_sort(
     path: &mut Path,
     root: &mut PlannerInfo,
-    pathkeys: &[Box<Node>],
+    pathkeys: &[Node],
     input_disabled_nodes: i32,
     input_cost: Cost,
     tuples: f64,
@@ -225,7 +225,7 @@ pub fn cost_sort(
 pub fn cost_incremental_sort(
     path: &mut Path,
     root: &mut PlannerInfo,
-    pathkeys: &[Box<Node>],
+    pathkeys: &[Node],
     presorted_keys: i32,
     input_disabled_nodes: i32,
     input_startup_cost: Cost,
@@ -246,7 +246,7 @@ pub fn cost_append(apath: &mut AppendPath) {
 pub fn cost_merge_append(
     path: &mut Path,
     root: &mut PlannerInfo,
-    pathkeys: &[Box<Node>],
+    pathkeys: &[Node],
     n_streams: i32,
     input_disabled_nodes: i32,
     input_startup_cost: Cost,
@@ -274,7 +274,7 @@ pub fn cost_agg(
     aggcosts: Option<&AggClauseCosts>,
     num_group_cols: i32,
     num_groups: f64,
-    quals: &[Box<Node>],
+    quals: &[Node],
     disabled_nodes: i32,
     input_startup_cost: Cost,
     input_total_cost: Cost,
@@ -287,7 +287,7 @@ pub fn cost_agg(
 pub fn cost_windowagg(
     path: &mut Path,
     root: &mut PlannerInfo,
-    window_funcs: &[Box<Node>],
+    window_funcs: &[Node],
     winclause: &WindowClause,
     input_disabled_nodes: i32,
     input_startup_cost: Cost,
@@ -302,7 +302,7 @@ pub fn cost_group(
     root: &mut PlannerInfo,
     num_group_cols: i32,
     num_groups: f64,
-    quals: &[Box<Node>],
+    quals: &[Node],
     input_disabled_nodes: i32,
     input_startup_cost: Cost,
     input_total_cost: Cost,
@@ -335,11 +335,11 @@ pub fn initial_cost_mergejoin(
     root: &mut PlannerInfo,
     workspace: &mut JoinCostWorkspace,
     jointype: JoinType,
-    mergeclauses: &[Box<Node>],
+    mergeclauses: &[Node],
     outer_path: &Path,
     inner_path: &Path,
-    outersortkeys: &[Box<Node>],
-    innersortkeys: &[Box<Node>],
+    outersortkeys: &[Node],
+    innersortkeys: &[Node],
     outer_presorted_keys: i32,
     extra: &JoinPathExtraData,
 ) {
@@ -359,7 +359,7 @@ pub fn initial_cost_hashjoin(
     root: &mut PlannerInfo,
     workspace: &mut JoinCostWorkspace,
     jointype: JoinType,
-    hashclauses: &[Box<Node>],
+    hashclauses: &[Node],
     outer_path: &Path,
     inner_path: &Path,
     extra: &JoinPathExtraData,
@@ -405,7 +405,7 @@ pub fn cost_subplan(root: &mut PlannerInfo, subplan: &mut SubPlan, plan: &Plan) 
 }
 
 /// C out-param `cost` -> returned QualCost.
-pub fn cost_qual_eval(quals: &[Box<Node>], root: &mut PlannerInfo) -> QualCost {
+pub fn cost_qual_eval(quals: &[Node], root: &mut PlannerInfo) -> QualCost {
     unimplemented!()
 }
 
@@ -422,7 +422,7 @@ pub fn compute_semi_anti_join_factors(
     innerrel: &RelOptInfo,
     jointype: JoinType,
     sjinfo: &SpecialJoinInfo,
-    restrictlist: &[Box<Node>],
+    restrictlist: &[Node],
 ) -> SemiAntiJoinFactors {
     unimplemented!()
 }
@@ -434,7 +434,7 @@ pub fn set_baserel_size_estimates(root: &mut PlannerInfo, rel: &mut RelOptInfo) 
 pub fn get_parameterized_baserel_size(
     root: &mut PlannerInfo,
     rel: &RelOptInfo,
-    param_clauses: &[Box<Node>],
+    param_clauses: &[Node],
 ) -> f64 {
     unimplemented!()
 }
@@ -445,7 +445,7 @@ pub fn get_parameterized_joinrel_size(
     outer_path: &Path,
     inner_path: &Path,
     sjinfo: &SpecialJoinInfo,
-    restrict_clauses: &[Box<Node>],
+    restrict_clauses: &[Node],
 ) -> f64 {
     unimplemented!()
 }
@@ -456,7 +456,7 @@ pub fn set_joinrel_size_estimates(
     outer_rel: &RelOptInfo,
     inner_rel: &RelOptInfo,
     sjinfo: &SpecialJoinInfo,
-    restrictlist: &[Box<Node>],
+    restrictlist: &[Node],
 ) {
     unimplemented!()
 }

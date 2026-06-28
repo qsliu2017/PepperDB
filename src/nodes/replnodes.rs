@@ -16,7 +16,7 @@ pub struct IdentifySystemCmd;
 /// BASE_BACKUP command.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BaseBackupCmd {
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// CREATE_REPLICATION_SLOT command.
@@ -26,7 +26,7 @@ pub struct CreateReplicationSlotCmd {
     pub kind: ReplicationKind,
     pub plugin: Option<String>,
     pub temporary: bool,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// DROP_REPLICATION_SLOT command.
@@ -40,7 +40,7 @@ pub struct DropReplicationSlotCmd {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlterReplicationSlotCmd {
     pub slotname: Option<String>,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// START_REPLICATION command.
@@ -50,7 +50,7 @@ pub struct StartReplicationCmd {
     pub slotname: Option<String>,
     pub timeline: TimeLineID,
     pub startpoint: XLogRecPtr,
-    pub options: Vec<Box<Node>>,
+    pub options: Vec<Node>,
 }
 
 /// READ_REPLICATION_SLOT command.

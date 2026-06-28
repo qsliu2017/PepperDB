@@ -81,17 +81,17 @@ pub trait CustomPathMethods {
         root: &mut PlannerInfo,
         rel: &RelOptInfo,
         best_path: &CustomPath,
-        tlist: Vec<Box<Node>>,
-        clauses: Vec<Box<Node>>,
-        custom_plans: Vec<Box<Node>>,
+        tlist: Vec<Node>,
+        clauses: Vec<Node>,
+        custom_plans: Vec<Node>,
     ) -> Box<Plan>;
 
     /// `ReparameterizeCustomPathByChild`.
     fn reparameterize_custom_path_by_child(
         root: &mut PlannerInfo,
-        custom_private: Vec<Box<Node>>,
+        custom_private: Vec<Node>,
         child_rel: &RelOptInfo,
-    ) -> Vec<Box<Node>>;
+    ) -> Vec<Node>;
 }
 
 /// Custom scan methods (routine struct -> trait; all required).
@@ -99,13 +99,13 @@ pub trait CustomScanMethods {
     const CUSTOM_NAME: &'static str;
 
     /// Create execution state (CustomScanState) from a CustomScan plan node.
-    fn create_custom_scan_state(cscan: &CustomScan) -> Box<Node>;
+    fn create_custom_scan_state(cscan: &CustomScan) -> Node;
 }
 
 /// Object-safe handle for the CustomScanMethods registry.
 pub trait CustomScanMethodsDyn {
     fn custom_name(&self) -> &str;
-    fn create_custom_scan_state(&self, cscan: &CustomScan) -> Box<Node>;
+    fn create_custom_scan_state(&self, cscan: &CustomScan) -> Node;
 }
 
 /// Execution-time methods for a CustomScanState (routine struct -> trait).
@@ -150,7 +150,7 @@ pub trait CustomScanParallel: CustomExecMethods {
 pub trait CustomScanExplain: CustomExecMethods {
     fn explain_custom_scan(
         node: &mut CustomScanState,
-        ancestors: Vec<Box<Node>>,
+        ancestors: Vec<Node>,
         es: &mut ExplainState,
     );
 }
