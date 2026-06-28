@@ -56,16 +56,16 @@ fn init_plan(query_desc: &mut QueryDesc, eflags: i32) {
     let planstate = exec_init_node(Some(&plan_tree), estate, eflags)
         .unwrap_or_else(|| unimplemented!("InitPlan: null plan tree"));
 
-    // ExecGetResultType: the root node's result tupdesc.
-    let tup_desc = result_type_of(&planstate);
-    query_desc.tupDesc = (!tup_desc.is_null()).then_some(tup_desc);
+    // ExecGetResultType: the root node's result tupdesc (an Arc clone the
+    // QueryDesc co-owns alongside the planstate's slot).
+    query_desc.tupDesc = result_type_of(&planstate);
     query_desc.planstate = Some(Box::new(planstate));
 }
 
 /// The result TupleDesc of a plan-state node (PG `ExecGetResultType`).
-fn result_type_of(node: &PlanStateNode) -> crate::access::tupdesc::TupleDesc {
+fn result_type_of(node: &PlanStateNode) -> Option<crate::access::tupdesc::TupleDesc> {
     match node {
-        PlanStateNode::Result(rs) => rs.ps.ps_result_tuple_desc,
+        PlanStateNode::Result(rs) => rs.ps.ps_result_tuple_desc.clone(),
     }
 }
 
@@ -80,9 +80,13 @@ pub fn standard_executor_run(query_desc: &mut QueryDesc, direction: ScanDirectio
         estate.processed = 0;
     }
 
-    // dest->rStartup(operation, tupDesc).
+    // dest->rStartup(operation, tupDesc). A tuple-returning run always has a
+    // result descriptor; hand the receiver an Arc clone (a co-owner).
     if send_tuples {
-        let tup_desc = query_desc.tupDesc.unwrap_or(core::ptr::null_mut());
+        let tup_desc = query_desc
+            .tupDesc
+            .clone()
+            .unwrap_or_else(|| unimplemented!("ExecutorRun: tuple-returning run without a result descriptor"));
         let dest = query_desc
             .dest
             .as_mut()
@@ -296,12 +300,9 @@ mod tests {
         ExecutorStart(&mut qd, 0);
 
         // ExecutorStart built the result tupdesc (one int4 attr).
-        let result_desc = qd.tupDesc.expect("tupDesc set by ExecutorStart");
-        // SAFETY: live descriptor for the duration of the test.
-        unsafe {
-            assert_eq!((*result_desc).natts, 1);
-            assert_eq!((*result_desc).attr(0).atttypid, INT4OID);
-        }
+        let result_desc = qd.tupDesc.as_ref().expect("tupDesc set by ExecutorStart");
+        assert_eq!(result_desc.natts, 1);
+        assert_eq!(result_desc.attr(0).atttypid, INT4OID);
 
         ExecutorRun(&mut qd, ScanDirection::Forward, 0);
         ExecutorFinish(&mut qd);

@@ -1,9 +1,11 @@
 //! Translated from PostgreSQL src/include/access/tupdesc.h
 //! POSTGRES tuple descriptor definitions. In-memory (no layout contract).
 
+use std::sync::Arc;
+
 use crate::access::attnum::AttrNumber;
 use crate::access::tupdesc_details::AttrMissing;
-use crate::catalog::pg_attribute::{Form_pg_attribute, FormData_pg_attribute};
+use crate::catalog::pg_attribute::FormData_pg_attribute;
 use crate::nodes::nodes::Node;
 use crate::postgres_ext::Oid;
 
@@ -90,24 +92,21 @@ pub struct TupleDescData {
     pub attrs: Vec<FormData_pg_attribute>,
 }
 
-/// Handle to a `TupleDescData`. C uses a bare, freely-copied pointer that is
-/// manually reference-counted (`tdrefcount`); ~40 sibling call sites already copy
-/// this handle by value (e.g. `RelationData::descr` returns `self.rd_att`), which
-/// only a `Copy` type supports, so the alias stays a raw pointer for now.
+/// Handle to a `TupleDescData`: a shared, reference-counted owner. C uses a bare,
+/// freely-copied pointer manually reference-counted via `tdrefcount`; here that
+/// becomes an `Arc`, which allows the multiple simultaneous co-owners the result
+/// descriptor needs (`Portal` -> `QueryDesc` -> `estate`/`planstate`/`dest`/slot)
+/// and gives pointer-identity via [`Arc::ptr_eq`] (used by the printtup receiver
+/// to detect a mid-stream descriptor change). A "no descriptor" slot is
+/// `Option<TupleDesc>` (`None` = the old null pointer).
 ///
-/// The per-descriptor operations on this file's API are nonetheless expressed as
-/// safe `&`/`&mut TupleDescData` methods (see the backend module); only the few
-/// create/free/refcount entry points touch the raw handle.
-///
-/// TODO(migrate-tupledesc): graduate this to `Arc<TupleDescData>` (shared +
-/// reference-counted, no `unsafe`). It is a CROSS-FILE change, not doable from
-/// this island alone: it needs (1) `FormData_pg_attribute: Clone` (in
-/// `catalog/pg_attribute.rs`) so `Arc::make_mut` works, and (2) sweeping the
-/// by-value copy sites (`utils/rel.rs::descr`, funcapi, executor, access/*, ...)
-/// onto `&`/`&mut TupleDescData` + `Arc` clones. The main agent should schedule
-/// this once those files are owned in one step.
-// TODO(migrate-tupledesc): replace *mut with Arc<TupleDescData> (borrowed refs are infeasible: result-tupdesc ownership cycle + DestReceiver pointer caching). FormData_pg_attribute: Clone prerequisite now in place.
-pub type TupleDesc = *mut TupleDescData; // TODO(migrate-tupledesc): -> Arc<TupleDescData>
+/// Memory lifetime is now `Arc`'s: the descriptor is freed when the last handle
+/// drops. The `tdrefcount` field/methods are retained for PG resource-owner
+/// bookkeeping semantics (vestigial until resowner integration); they no longer
+/// govern freeing. Construct from a by-value `TupleDescData` with `Arc::new`;
+/// read through the `Arc` (deref to `&TupleDescData`, rules.md s5); mutate a
+/// shared descriptor with [`Arc::make_mut`] (copy-on-write, rules.md s8).
+pub type TupleDesc = Arc<TupleDescData>;
 
 impl TupleDescData {
     /// Accessor for the i'th FormData_pg_attribute (C TupleDescAttr).
@@ -122,12 +121,11 @@ impl TupleDescData {
 
     /// `IncrTupleDescRefCount`: bump a reference-counted descriptor's refcount.
     ///
-    /// TODO(resowner): C also logs the reference in `CurrentResourceOwner` so an
-    /// `ERROR` unwind releases it. That registration needs a second owning handle
-    /// to the descriptor, which only exists once the handle graduates from `Box`
-    /// (unique ownership) to `Arc<TupleDescData>` at the relcache/typcache
-    /// milestone. Until then this maintains only the manual counter (the
-    /// descriptors that reach M1 are not yet shared or resource-owner tracked).
+    /// `Arc` now owns the descriptor's MEMORY lifetime; `tdrefcount` is retained
+    /// only for PG resource-owner BOOKKEEPING (vestigial until resowner
+    /// integration). In C this also logs the reference in `CurrentResourceOwner`
+    /// so an `ERROR` unwind releases it; here an unwind drops the `Arc` handle
+    /// directly, so the counter is advisory and never governs freeing.
     pub fn incr_ref_count(&mut self) {
         crate::assert!(self.tdrefcount >= 0);
         self.tdrefcount += 1;
@@ -135,10 +133,8 @@ impl TupleDescData {
 
     /// `DecrTupleDescRefCount`: drop a reference taken by `incr_ref_count`.
     ///
-    /// TODO(resowner): see `incr_ref_count`. With unique `Box` ownership the
-    /// descriptor cannot be freed from here (the owner holds the `Box`); this
-    /// adjusts the manual counter only. Freeing at zero is reinstated with the
-    /// `Arc` handle, when this and the drop path converge on the last reference.
+    /// Adjusts the advisory `tdrefcount` only; the descriptor is freed when the
+    /// last `Arc` drops, not here (see `incr_ref_count`).
     pub fn decr_ref_count(&mut self) {
         crate::assert!(self.tdrefcount > 0);
         self.tdrefcount -= 1;
@@ -173,7 +169,7 @@ pub fn CreateTemplateTupleDesc(natts: i32) -> TupleDescData {
 
 #[deprecated(note = "use TupleDescData::create")]
 #[inline]
-pub fn CreateTupleDesc(natts: i32, attrs: &[Form_pg_attribute]) -> TupleDescData {
+pub fn CreateTupleDesc(natts: i32, attrs: &[&FormData_pg_attribute]) -> TupleDescData {
     TupleDescData::create(natts, attrs)
 }
 

@@ -116,8 +116,11 @@ impl Clone for FormData_pg_attribute {
     }
 }
 
-// TODO(migrate-tupledesc): Form_pg_attribute *mut -> & or Arc handle alongside the TupleDesc migration.
-pub type Form_pg_attribute = *mut FormData_pg_attribute; // TODO(ptr)
+// The C `Form_pg_attribute` (`FormData_pg_attribute *`) is gone: attributes live
+// INSIDE a `TupleDescData` (its `attrs: Vec<FormData_pg_attribute>`), so an
+// attribute handle is a borrow into the owning descriptor -- `TupleDescAttr`/
+// `TupleDescData::attr` return `&FormData_pg_attribute`. Stub/param signatures
+// that took the old pointer now take `&`/`&mut FormData_pg_attribute`.
 
 // Fields excluded by CATALOG_VARLEN, for DDL use alongside FormData_pg_attribute.
 pub struct FormExtraData_pg_attribute {

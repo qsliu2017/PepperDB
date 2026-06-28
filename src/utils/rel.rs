@@ -12,6 +12,8 @@
 //! `RelationNeeds*` accessor macros become methods on `RelationData`.
 
 use crate::access::htup::HeapTupleData;
+use std::sync::Arc;
+
 use crate::access::tupdesc::TupleDesc;
 use crate::access::xlog::{WalLevel, WAL_LEVEL};
 use crate::c::{bytea, RegProcedure, SubTransactionId, TransactionId};
@@ -88,7 +90,7 @@ pub struct RelationData {
     pub rd_droppedSubid: SubTransactionId,             // dropped with another Subid set
 
     pub rd_rel: Form_pg_class,           // RELATION tuple
-    pub rd_att: TupleDesc,               // tuple descriptor
+    pub rd_att: Option<TupleDesc>,       // tuple descriptor (None until built)
     pub rd_id: Oid,                      // relation's object id
     pub rd_lockInfo: LockInfoData,       // lock mgr's info for locking relation
     pub rd_rules: *mut RuleLock,         // rewrite rules // TODO(ptr)
@@ -431,9 +433,14 @@ impl RelationData {
         unsafe { (*self.rd_index).indnkeyatts }
     }
 
-    /// RelationGetDescr: the tuple descriptor.
+    /// RelationGetDescr: the tuple descriptor. C returns the (non-null) pointer;
+    /// here a clone of the `Arc` handle (a relcache entry always has one built).
     pub fn descr(&self) -> TupleDesc {
-        self.rd_att
+        Arc::clone(
+            self.rd_att
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("relcache entry has a tuple descriptor")),
+        )
     }
 
     /// RelationGetNamespace: the rel's namespace OID.

@@ -86,7 +86,7 @@ pub struct PortalData {
     pub query_desc: Option<Box<QueryDesc>>, // info needed for executor invocation
 
     // If portal returns tuples, this is their tupdesc.
-    pub tup_desc: TupleDesc,    // descriptor for result tuples; TODO(ptr)
+    pub tup_desc: Option<TupleDesc>, // descriptor for result tuples (None if none)
     pub formats: Vec<i16>,      // a format code for each column
 
     // Outermost ActiveSnapshot for execution of the portal's queries.

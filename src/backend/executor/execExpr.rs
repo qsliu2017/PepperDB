@@ -110,7 +110,7 @@ pub fn exec_build_projection_info(
     econtext: &mut ExprContext,
     slot: Box<crate::executor::tuptable::TupleTableSlot>,
     parent: Option<&mut PlanState>,
-    input_desc: crate::access::tupdesc::TupleDesc,
+    input_desc: Option<crate::access::tupdesc::TupleDesc>,
 ) -> Box<ProjectionInfo> {
     let _ = (econtext, parent, input_desc);
 

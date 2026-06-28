@@ -38,17 +38,22 @@ pub fn exec_init_result(node: &ResultPlan, estate: &mut EState, eflags: i32) -> 
     // ExecAssignExprContext: per-node expression context.
     ps.ps_expr_context = Some(create_expr_context(estate));
 
-    // ExecInitResultTupleSlotTL: result tupdesc + virtual result slot.
+    // ExecInitResultTupleSlotTL: result tupdesc + virtual result slot. The desc
+    // is an Arc shared between the PlanState's `ps_result_tuple_desc` and the
+    // result slot's `tupleDescriptor` (co-owners; freed when the last drops).
     let desc = exec_type_from_tl(&node.plan.targetlist);
-    ps.ps_result_tuple_desc = desc;
-    let slot = crate::backend::executor::execTuples::make_tuple_table_slot(desc, &TTS_OPS_VIRTUAL);
+    let slot = crate::backend::executor::execTuples::make_tuple_table_slot(
+        Some(std::sync::Arc::clone(&desc)),
+        &TTS_OPS_VIRTUAL,
+    );
+    ps.ps_result_tuple_desc = Some(desc);
     ps.ps_result_tuple_slot = Some(slot);
     ps.resultops = Some(&TTS_OPS_VIRTUAL);
     ps.resultopsset = true;
     ps.resultopsfixed = true;
 
-    // ExecAssignProjectionInfo: build the projection (inputDesc = NULL).
-    exec_assign_projection_info(&mut ps, core::ptr::null_mut());
+    // ExecAssignProjectionInfo: build the projection (inputDesc = None).
+    exec_assign_projection_info(&mut ps, None);
 
     // ExecInitQual on plan.qual (empty) and resconstantqual.
     ps.qual = exec_init_qual(&node.plan.qual, None);

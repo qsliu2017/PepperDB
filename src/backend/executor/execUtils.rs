@@ -62,9 +62,10 @@ pub fn exec_assign_expr_context(estate: &mut EState, planstate: &mut PlanState) 
     planstate.ps_expr_context = Some(create_expr_context(estate));
 }
 
-/// PG `ExecGetResultType`: the PlanState's result tuple descriptor.
-pub fn exec_get_result_type(planstate: &mut PlanState) -> TupleDesc {
-    planstate.ps_result_tuple_desc
+/// PG `ExecGetResultType`: the PlanState's result tuple descriptor (an `Arc`
+/// clone; `None` if the node has none).
+pub fn exec_get_result_type(planstate: &mut PlanState) -> Option<TupleDesc> {
+    planstate.ps_result_tuple_desc.clone()
 }
 
 /// PG `ExecAssignProjectionInfo`: build the PlanState's projection from its
@@ -72,7 +73,7 @@ pub fn exec_get_result_type(planstate: &mut PlanState) -> TupleDesc {
 /// by pointer (it stays in es_tupleTable); here the result slot is owned by the
 /// PlanState (`ps_result_tuple_slot`), so it is moved into the ProjectionInfo,
 /// which becomes the live owner of the projected row for the node's lifetime.
-pub fn exec_assign_projection_info(planstate: &mut PlanState, input_desc: TupleDesc) {
+pub fn exec_assign_projection_info(planstate: &mut PlanState, input_desc: Option<TupleDesc>) {
     let targetlist = plan_targetlist(planstate);
 
     let slot = planstate

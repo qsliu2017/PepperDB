@@ -40,7 +40,7 @@ pub fn SetRemoteDestReceiverParams(self_: &mut dyn DestReceiver, portal: Portal)
 /// C `StringInfo buf` and `targetlist` are folded away on the M1 path (the
 /// message is appended straight to the send buffer; the targetlist is empty so
 /// resorigtbl/resorigcol are zeroes). `formats` empty => text (format 0).
-pub fn SendRowDescriptionMessage(typeinfo: TupleDesc, formats: Option<&[i16]>) {
+pub fn SendRowDescriptionMessage(typeinfo: &TupleDesc, formats: Option<&[i16]>) {
     crate::backend::access::common::printtup::send_row_description_message(
         typeinfo,
         formats.unwrap_or(&[]),

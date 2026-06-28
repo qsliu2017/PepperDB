@@ -368,7 +368,7 @@ pub fn logicalrep_message_type(_action: LogicalRepMsgType) -> &'static str {
 }
 
 pub fn logicalrep_should_publish_column(
-    _att: crate::catalog::pg_attribute::Form_pg_attribute,
+    _att: &crate::catalog::pg_attribute::FormData_pg_attribute,
     _columns: &Bitmapset,
     _include_gencols_type: PublishGencolsType,
 ) -> bool {

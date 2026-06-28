@@ -37,7 +37,7 @@ use crate::catalog::catalog::IsCatalogRelationOid;
 use crate::catalog::genbki::{
     BOOLOID, DEFAULT_COLLATION_OID, INT4OID, INT8OID, OIDOID, RECORDOID, TEXTARRAYOID, TEXTOID,
 };
-use crate::catalog::pg_attribute::{FormData_pg_attribute, Form_pg_attribute, ATTRIBUTE_FIXED_PART_SIZE};
+use crate::catalog::pg_attribute::{FormData_pg_attribute, ATTRIBUTE_FIXED_PART_SIZE};
 use crate::catalog::pg_type::{
     FormData_pg_type, Form_pg_type, TYPALIGN_CHAR, TYPALIGN_DOUBLE, TYPALIGN_INT, TYPALIGN_SHORT,
     TYPSTORAGE_EXTENDED, TYPSTORAGE_PLAIN,
@@ -176,13 +176,12 @@ impl TupleDescData {
     }
 
     /// `CreateTupleDesc`: build a descriptor by copying an array of attribute
-    /// rows (the C signature takes `Form_pg_attribute *`, an array of pointers).
-    pub fn create(natts: i32, attrs: &[Form_pg_attribute]) -> Self {
+    /// rows (the C signature took `Form_pg_attribute *`, an array of pointers;
+    /// here a slice of borrows into the source rows).
+    pub fn create(natts: i32, attrs: &[&FormData_pg_attribute]) -> Self {
         let mut desc = Self::create_template(natts);
         for (i, &src) in attrs.iter().enumerate().take(desc.natts_usize()) {
-            // SAFETY: caller supplies valid attribute-row pointers (C contract).
-            let src_ref = unsafe { &*src };
-            copy_attr_fixed(&mut desc.attrs[i], src_ref);
+            copy_attr_fixed(&mut desc.attrs[i], src);
             desc.populate_compact_attribute(i);
         }
         desc
@@ -685,11 +684,13 @@ impl TupleDescData {
     }
 }
 
-/// `FreeTupleDesc`: free a descriptor and all its substructure. Taking the
-/// descriptor by value reclaims it; its `Vec`s and `Box<TupleConstr>` drop with
-/// it. Mirrors the C entry point and asserts the refcount. Explicit calls are no
-/// longer needed: a `TupleDescData` drops on scope exit.
-#[deprecated(note = "TupleDescData drops on scope exit; explicit free is unnecessary")]
+/// `FreeTupleDesc`: free a descriptor and all its substructure. With the `Arc`
+/// handle, real freeing happens when the last `TupleDesc` clone drops; this
+/// by-value entry point is now just an explicit drop of a uniquely-held
+/// `TupleDescData` (its `Vec`s and `Box<TupleConstr>` drop with it) and is
+/// unnecessary in practice (a `TupleDescData`/`Arc` drops on scope exit). The
+/// refcount assertion is retained to mirror the C contract.
+#[deprecated(note = "TupleDesc is Arc-owned; it drops on scope exit, explicit free is unnecessary")]
 pub fn free_tuple_desc(tupdesc: TupleDescData) {
     crate::assert!(tupdesc.tdrefcount <= 0);
     drop(tupdesc);

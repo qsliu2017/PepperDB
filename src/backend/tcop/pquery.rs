@@ -124,8 +124,9 @@ pub fn portal_start(portal: &mut PortalData) {
 
             ExecutorStart(&mut query_desc, 0);
 
-            // Remember the tuple descriptor computed by ExecutorStart.
-            portal.tup_desc = query_desc.tupDesc.unwrap_or(core::ptr::null_mut());
+            // Remember the tuple descriptor computed by ExecutorStart (an Arc
+            // clone the portal co-owns alongside the QueryDesc).
+            portal.tup_desc.clone_from(&query_desc.tupDesc);
             portal.query_desc = Some(Box::new(query_desc));
 
             portal.at_start = true;
@@ -271,7 +272,7 @@ fn empty_portal(name: &str) -> PortalData {
         portal_pinned: false,
         auto_held: false,
         query_desc: None,
-        tup_desc: core::ptr::null_mut(),
+        tup_desc: None,
         formats: Vec::new(),
         portal_snapshot: None,
         hold_store: None,
@@ -365,12 +366,9 @@ mod tests {
         portal_start(&mut portal);
 
         // ExecutorStart computed a one-int4 result descriptor.
-        let td = portal.tup_desc;
-        // SAFETY: live for the test.
-        unsafe {
-            assert_eq!((*td).natts, 1);
-            assert_eq!((*td).attr(0).atttypid, INT4OID);
-        }
+        let td = portal.tup_desc.as_ref().expect("portal carries a tupdesc");
+        assert_eq!(td.natts, 1);
+        assert_eq!(td.attr(0).atttypid, INT4OID);
 
         let mut qc = QueryCompletion { command_tag: CommandTag::Unknown, nprocessed: 0 };
         let all_done = portal_run(&mut portal, FETCH_ALL, dest, Some(&mut qc));

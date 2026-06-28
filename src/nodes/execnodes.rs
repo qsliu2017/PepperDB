@@ -265,7 +265,7 @@ impl Default for SetFunctionReturnMode {
 pub struct ReturnSetInfo {
     // set by caller:
     pub econtext: Option<Box<ExprContext>>,
-    pub expected_desc: TupleDesc,
+    pub expected_desc: Option<TupleDesc>,
     /// bitmask of return modes the caller can handle.
     pub allowed_modes: i32,
     // result status from function (pre-initialized by caller):
@@ -273,7 +273,7 @@ pub struct ReturnSetInfo {
     pub is_done: Option<ExprDoneCond>,
     // filled by the function in Materialize mode:
     pub set_result: Option<Box<Tuplestorestate>>,
-    pub set_desc: TupleDesc,
+    pub set_desc: Option<TupleDesc>,
 }
 
 // ---------------------------------------------------------------------------
@@ -295,7 +295,7 @@ pub struct ProjectionInfo {
 #[derive(Default)]
 pub struct JunkFilter {
     pub target_list: Vec<Node>,
-    pub clean_tup_type: TupleDesc,
+    pub clean_tup_type: Option<TupleDesc>,
     pub clean_map: Vec<AttrNumber>,
     pub result_slot: Option<Box<TupleTableSlot>>,
 }
@@ -609,7 +609,7 @@ pub struct SetExprState {
     pub func: FmgrInfo,
     pub func_result_store: Option<Box<Tuplestorestate>>,
     pub func_result_slot: Option<Box<TupleTableSlot>>,
-    pub func_result_desc: TupleDesc,
+    pub func_result_desc: Option<TupleDesc>,
     pub func_returns_tuple: bool,
     pub func_returns_set: bool,
     pub set_args_valid: bool,
@@ -625,7 +625,7 @@ pub struct SubPlanState {
     pub testexpr: Option<Box<ExprState>>,
     pub cur_tuple: HeapTuple,
     pub cur_array: Datum,
-    pub desc_right: TupleDesc,
+    pub desc_right: Option<TupleDesc>,
     pub proj_left: Option<Box<ProjectionInfo>>,
     pub proj_right: Option<Box<ProjectionInfo>>,
     pub hashtable: TupleHashTable,
@@ -713,12 +713,12 @@ pub struct PlanState {
     pub sub_plan: Vec<Box<SubPlanState>>,
     /// set of IDs of changed Params.
     pub chg_param: Option<Bitmapset>,
-    pub ps_result_tuple_desc: TupleDesc,
+    pub ps_result_tuple_desc: Option<TupleDesc>,
     pub ps_result_tuple_slot: Option<Box<TupleTableSlot>>,
     pub ps_expr_context: Option<Box<ExprContext>>,
     pub ps_proj_info: Option<Box<ProjectionInfo>>,
     pub async_capable: bool,
-    pub scandesc: TupleDesc,
+    pub scandesc: Option<TupleDesc>,
     pub scanops: Option<&'static dyn TupleTableSlotOps>,
     pub outerops: Option<&'static dyn TupleTableSlotOps>,
     pub innerops: Option<&'static dyn TupleTableSlotOps>,
@@ -1197,7 +1197,7 @@ pub struct CteScanState {
 pub struct NamedTuplestoreScanState {
     pub ss: ScanState,
     pub readptr: i32,
-    pub tupdesc: TupleDesc,
+    pub tupdesc: Option<TupleDesc>,
     pub relation: Option<Box<Tuplestorestate>>,
 }
 
@@ -1346,7 +1346,7 @@ pub struct MemoizeState {
     pub nkeys: i32,
     /// hash table for cache entries (C `void *`).
     pub hashtable: OpaqueState,
-    pub hashkeydesc: TupleDesc,
+    pub hashkeydesc: Option<TupleDesc>,
     pub tableslot: Option<Box<TupleTableSlot>>,
     pub probeslot: Option<Box<TupleTableSlot>>,
     pub cache_eq_expr: Option<Box<ExprState>>,
@@ -1662,7 +1662,7 @@ pub struct GatherMergeState {
     pub gm_initialized: bool,
     pub need_to_scan_locally: bool,
     pub tuples_needed: i64,
-    pub tup_desc: TupleDesc,
+    pub tup_desc: Option<TupleDesc>,
     pub gm_nkeys: i32,
     pub gm_sortkeys: Vec<SortSupport>,
     /// ParallelExecutorInfo (C `void *`).

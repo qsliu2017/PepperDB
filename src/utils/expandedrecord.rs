@@ -108,7 +108,7 @@ pub fn make_expanded_record_from_typeid(
 }
 
 pub fn make_expanded_record_from_tupdesc(
-    tupdesc: TupleDesc,
+    tupdesc: &TupleDesc,
     parentcontext: MemoryContext,
 ) -> Box<ExpandedRecordHeader> {
     unimplemented!()

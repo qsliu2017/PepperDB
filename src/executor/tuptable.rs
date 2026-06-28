@@ -38,7 +38,7 @@ pub struct TupleTableSlot {
     pub flags: TtsFlags,           // Boolean states
     pub nvalid: i16,               // # of valid values in values
     pub ops: &'static dyn TupleTableSlotOps, // implementation of slot; TODO(ptr)
-    pub tupleDescriptor: TupleDesc, // slot's tuple descriptor
+    pub tupleDescriptor: Option<TupleDesc>, // slot's tuple descriptor (None if unset)
     pub values: Vec<Datum>,        // current per-attribute values (C tts_values[])
     pub isnull: Vec<bool>,         // current per-attribute isnull flags (C tts_isnull[])
     pub mcxt: MemoryContext,       // slot itself is in this context
@@ -253,7 +253,10 @@ pub fn slot_getsomeattrs(slot: &mut TupleTableSlot, attnum: i32) {
 
 /// Force all entries of the slot's Datum/isnull arrays valid.
 pub fn slot_getallattrs(slot: &mut TupleTableSlot) {
-    let natts = unsafe { (*slot.tupleDescriptor).natts };
+    let natts = slot
+        .tupleDescriptor
+        .as_ref()
+        .map_or(0, |d| d.natts);
     slot_getsomeattrs(slot, natts);
 }
 

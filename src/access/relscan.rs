@@ -7,7 +7,7 @@ use crate::access::genam::IndexScanInstrumentation;
 use crate::access::htup::HeapTuple;
 use crate::access::itup::IndexTuple;
 use crate::access::skey::ScanKeyData;
-use crate::access::tupdesc::TupleDescData;
+use crate::access::tupdesc::TupleDesc;
 use crate::executor::tuptable::TupleTableSlot;
 use crate::nodes::tidbitmap::TBMIterator;
 use crate::postgres::Datum;
@@ -102,9 +102,9 @@ pub struct IndexScanDescData {
 
     // index-only scan: amgettuple fills xs_itup/xs_hitup
     pub xs_itup: IndexTuple,               // index tuple returned by AM
-    pub xs_itupdesc: *mut TupleDescData,   // rowtype descriptor of xs_itup // TODO(ptr)
+    pub xs_itupdesc: Option<TupleDesc>,    // rowtype descriptor of xs_itup
     pub xs_hitup: HeapTuple,               // index data returned by AM, as HeapTuple
-    pub xs_hitupdesc: *mut TupleDescData,  // rowtype descriptor of xs_hitup // TODO(ptr)
+    pub xs_hitupdesc: Option<TupleDesc>,   // rowtype descriptor of xs_hitup
 
     pub xs_heaptid: ItemPointerData, // result
     pub xs_heap_continue: bool,      // T if must keep walking

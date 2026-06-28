@@ -11,10 +11,7 @@
 //! (memory recovered between rows) is tombstoned: Rust ownership frees the
 //! per-row `String`/`PqMsg` at end of scope.
 
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "printtup takes a raw TupleDesc handle per the C API (TupleDesc = *mut TupleDescData until the Arc migration); the deref of a live result descriptor is faithful to C"
-)]
+use std::sync::Arc;
 
 use crate::access::tupdesc::TupleDesc;
 use crate::catalog::genbki::INT4OID;
@@ -57,8 +54,9 @@ pub struct DRprinttup {
     /// Per-column format codes (from the portal). Empty => all text.
     formats: Vec<i16>,
     /// The TupleDesc we built `myinfo` for (C `attrinfo`); cached to detect a
-    /// mid-stream type change. A raw handle (TupleDesc is `*mut`).
-    attrinfo: TupleDesc,
+    /// mid-stream type change. `None` is the C null sentinel (no info built yet);
+    /// identity is compared with [`Arc::ptr_eq`] (C compared the raw pointer).
+    attrinfo: Option<TupleDesc>,
     /// Per-column output info (C `myinfo`).
     myinfo: Vec<PrinttupAttrInfo>,
 }
@@ -70,7 +68,7 @@ pub fn printtup_create_DR(dest: CommandDest) -> Box<dyn DestReceiver> {
         mydest: dest,
         send_descrip: dest == CommandDest::DestRemote,
         formats: Vec::new(),
-        attrinfo: core::ptr::null_mut(),
+        attrinfo: None,
         myinfo: Vec::new(),
     })
 }
@@ -96,19 +94,28 @@ impl DestReceiver for DRprinttup {
     /// tombstoned (per-message `PqMsg` is owned and dropped per call).
     fn r_startup(&mut self, _operation: CmdType, typeinfo: TupleDesc) {
         if self.send_descrip {
-            send_row_description_message(typeinfo, &self.formats);
+            send_row_description_message(&typeinfo, &self.formats);
         }
     }
 
     /// PG `printtup`: send one tuple to the client as a DataRow message.
     fn receive_slot(&mut self, slot: &mut TupleTableSlot) -> bool {
-        let typeinfo = slot.tupleDescriptor;
-        // SAFETY: the slot's descriptor is live for the duration of the run.
-        let natts = unsafe { (*typeinfo).natts };
+        let typeinfo = slot
+            .tupleDescriptor
+            .as_ref()
+            .unwrap_or_else(|| unreachable!("printtup: slot has a tuple descriptor"));
+        let natts = typeinfo.natts;
 
-        // Set or update derived attribute info, if needed.
-        if self.attrinfo != typeinfo || self.myinfo.len() != natts as usize {
-            self.prepare_info(typeinfo, natts);
+        // Set or update derived attribute info, if needed. C compared the cached
+        // descriptor pointer; here the same identity test via Arc::ptr_eq (None =
+        // the C null, i.e. nothing built yet).
+        let changed = self
+            .attrinfo
+            .as_ref()
+            .is_none_or(|a| !Arc::ptr_eq(a, typeinfo));
+        if changed || self.myinfo.len() != natts as usize {
+            let typeinfo = Arc::clone(typeinfo);
+            self.prepare_info(&typeinfo, natts);
         }
 
         // Make sure the tuple is fully deconstructed.
@@ -144,7 +151,7 @@ impl DestReceiver for DRprinttup {
     /// frees are RAII here.
     fn r_shutdown(&mut self) {
         self.myinfo.clear();
-        self.attrinfo = core::ptr::null_mut();
+        self.attrinfo = None;
     }
 
     fn mydest(&self) -> CommandDest {
@@ -157,15 +164,15 @@ impl DestReceiver for DRprinttup {
 }
 
 impl DRprinttup {
-    /// PG `printtup_prepare_info`: compute the per-column output info.
-    fn prepare_info(&mut self, typeinfo: TupleDesc, num_attrs: i32) {
+    /// PG `printtup_prepare_info`: compute the per-column output info. Caches an
+    /// Arc clone of the descriptor it built `myinfo` for (C cached the pointer).
+    fn prepare_info(&mut self, typeinfo: &TupleDesc, num_attrs: i32) {
         self.myinfo.clear();
-        self.attrinfo = typeinfo;
+        self.attrinfo = Some(Arc::clone(typeinfo));
         if num_attrs <= 0 {
             return;
         }
-        // SAFETY: live descriptor (see receive_slot).
-        let desc = unsafe { &*typeinfo };
+        let desc = &**typeinfo;
         self.myinfo = (0..num_attrs as usize)
             .map(|i| {
                 let format = self.formats.get(i).copied().unwrap_or(0);
@@ -188,9 +195,8 @@ impl DRprinttup {
 /// column; `formats` empty => format code 0 (text). Domains (the
 /// `getBaseTypeAndTypmod` rewrite) are not reachable yet, so the attr's own
 /// `atttypid`/`atttypmod` are sent directly.
-pub fn send_row_description_message(typeinfo: TupleDesc, formats: &[i16]) {
-    // SAFETY: live descriptor for the duration of the run.
-    let desc = unsafe { &*typeinfo };
+pub fn send_row_description_message(typeinfo: &TupleDesc, formats: &[i16]) {
+    let desc = &**typeinfo;
     let natts = desc.natts;
 
     let mut buf = PqMsg::default();
@@ -283,7 +289,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn row_description_bytes_for_one_int4_attr() {
         let desc = exec_type_from_tl(&const_int4_tlist(&[1]));
-        let bytes = capture(|| send_row_description_message(desc, &[])).await;
+        let bytes = capture(|| send_row_description_message(&desc, &[])).await;
 
         // Expected: 'T' | len | natts(1) | "?column?\0" | resorigtbl(0) |
         //           resorigcol(0) | typoid(23) | attlen(4) | typmod(-1) | format(0)
@@ -301,14 +307,12 @@ mod tests {
         expect.extend_from_slice(&body);
 
         assert_eq!(bytes, expect);
-        // SAFETY: reclaim the leaked descriptor.
-        drop(unsafe { Box::from_raw(desc) });
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn data_row_for_null_sends_minus_one_length() {
         let desc = exec_type_from_tl(&const_int4_tlist(&[1]));
-        let mut slot = make_tuple_table_slot(desc, &TTSOpsVirtual);
+        let mut slot = make_tuple_table_slot(Some(desc), &TTSOpsVirtual);
         // Mark the single attribute NULL and valid.
         slot.nvalid = 1;
         slot.values[0] = Datum(0);
@@ -328,7 +332,5 @@ mod tests {
         expect.extend_from_slice(&((body.len() as u32 + 4).to_be_bytes()));
         expect.extend_from_slice(&body);
         assert_eq!(bytes, expect);
-
-        drop(unsafe { Box::from_raw(desc) });
     }
 }

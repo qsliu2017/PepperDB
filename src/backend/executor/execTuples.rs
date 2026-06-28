@@ -12,10 +12,7 @@
 //! owned `Box<TupleTableSlot>` carrying owned `Vec`s (tuptable.rs), so there are
 //! no raw value/null pointers to keep in step.
 
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "MakeTupleTableSlot takes a raw TupleDesc handle per the C API (TupleDesc = *mut TupleDescData until the Arc migration); the deref is faithful to C"
-)]
+use std::sync::Arc;
 
 use crate::access::tupdesc::{TupleDesc, TupleDescData};
 use crate::executor::tuptable::{
@@ -120,8 +117,8 @@ impl TupleTableSlotOps for TtsOpsVirtual {
     /// materialize dst.
     fn copyslot(&self, dstslot: &mut TupleTableSlot, srcslot: &TupleTableSlot) {
         self.clear(dstslot);
-        let dst_natts = tupdesc_natts(dstslot.tupleDescriptor);
-        let src_natts = tupdesc_natts(srcslot.tupleDescriptor);
+        let dst_natts = tupdesc_natts(dstslot.tupleDescriptor.as_ref());
+        let src_natts = tupdesc_natts(srcslot.tupleDescriptor.as_ref());
         crate::assert!(dst_natts == src_natts);
         let n = dst_natts as usize;
         dstslot.values[..n].copy_from_slice(&srcslot.values[..n]);
@@ -143,11 +140,10 @@ impl TupleTableSlotOps for TtsOpsVirtual {
     }
 }
 
-/// `natts` of a (raw-handle) TupleDesc.
-fn tupdesc_natts(desc: TupleDesc) -> i32 {
-    // SAFETY: callers pass a live descriptor handle owned for the slot's life.
-    crate::assert!(!desc.is_null());
-    unsafe { (*desc).natts }
+/// `natts` of a slot's TupleDesc; the caller's slot always has one set.
+fn tupdesc_natts(desc: Option<&TupleDesc>) -> i32 {
+    desc.unwrap_or_else(|| unreachable!("slot has a tuple descriptor"))
+        .natts
 }
 
 // ---------------------------------------------------------------------------
@@ -158,18 +154,19 @@ fn tupdesc_natts(desc: TupleDesc) -> i32 {
 /// Returns an owned `Box` (the C single-palloc-block becomes one allocation that
 /// owns its value/null Vecs).
 pub fn make_tuple_table_slot(
-    tuple_desc: TupleDesc,
+    tuple_desc: Option<TupleDesc>,
     tts_ops: &'static dyn TupleTableSlotOps,
 ) -> Box<TupleTableSlot> {
     let mut flags = TtsFlags::EMPTY;
-    let natts = if tuple_desc.is_null() {
-        0
-    } else {
+    let natts = tuple_desc.as_ref().map_or(0, |desc| {
         flags.insert(TtsFlags::FIXED);
-        tupdesc_natts(tuple_desc)
-    };
+        desc.natts
+    });
     let n = natts.max(0) as usize;
 
+    // PinTupleDesc only bumps the advisory refcount of a counted descriptor
+    // (tdrefcount >= 0); M1 result descriptors are anonymous (tdrefcount == -1).
+    // The Arc clone stored below is what keeps the descriptor alive.
     let mut slot = Box::new(TupleTableSlot {
         flags,
         nvalid: 0,
@@ -182,13 +179,6 @@ pub fn make_tuple_table_slot(
         tableOid: InvalidOid,
     });
 
-    if !tuple_desc.is_null() {
-        // SAFETY: live descriptor handle for the slot's lifetime. PinTupleDesc
-        // only bumps the refcount when the descriptor is counted (tdrefcount>=0);
-        // M1 result descriptors are anonymous (tdrefcount == -1), so this no-ops.
-        unsafe { crate::access::tupdesc::PinTupleDesc(&mut *tuple_desc) };
-    }
-
     tts_ops.init(&mut slot);
     slot
 }
@@ -196,7 +186,7 @@ pub fn make_tuple_table_slot(
 /// PG `ExecAllocTableSlot`: make a slot and append it to a tuple table.
 pub fn exec_alloc_table_slot(
     tuple_table: &mut Vec<Box<TupleTableSlot>>,
-    desc: TupleDesc,
+    desc: Option<TupleDesc>,
     tts_ops: &'static dyn TupleTableSlotOps,
 ) -> usize {
     let slot = make_tuple_table_slot(desc, tts_ops);
@@ -206,7 +196,7 @@ pub fn exec_alloc_table_slot(
 
 /// PG `MakeSingleTupleTableSlot`: a standalone slot not tracked in a tuple table.
 pub fn make_single_tuple_table_slot(
-    tupdesc: TupleDesc,
+    tupdesc: Option<TupleDesc>,
     tts_ops: &'static dyn TupleTableSlotOps,
 ) -> Box<TupleTableSlot> {
     make_tuple_table_slot(tupdesc, tts_ops)
@@ -230,10 +220,10 @@ pub fn exec_reset_tuple_table(tuple_table: &mut Vec<Box<TupleTableSlot>>, _shoul
 /// directly; mark the (previously empty) slot valid.
 pub fn exec_store_virtual_tuple(slot: &mut TupleTableSlot) {
     crate::assert!(tts_empty(slot));
-    crate::assert!(!slot.tupleDescriptor.is_null());
+    crate::assert!(slot.tupleDescriptor.is_some());
 
     slot.flags.remove(TtsFlags::EMPTY);
-    slot.nvalid = tupdesc_natts(slot.tupleDescriptor) as i16;
+    slot.nvalid = tupdesc_natts(slot.tupleDescriptor.as_ref()) as i16;
 }
 
 /// PG `ExecStoreAllNullTuple`: set every attribute null, then store virtual.
@@ -256,8 +246,9 @@ pub fn exec_store_all_null_tuple(slot: &mut TupleTableSlot) {
 // ---------------------------------------------------------------------------
 
 /// PG `ExecTypeFromTL`: build a TupleDesc from a tlist, keeping junk columns.
-/// Returns an owning raw `TupleDesc` handle (C `palloc`'d, freed via the tuple
-/// table); the caller takes ownership of the `Box::into_raw` allocation.
+/// Returns a shared `Arc<TupleDescData>` handle; co-owners (EState/QueryDesc/
+/// PlanState/slot/Portal/dest) each hold an `Arc` clone, and the descriptor is
+/// freed when the last drops (no leak; the former `Box::into_raw` is gone).
 pub fn exec_type_from_tl(target_list: &[Node]) -> TupleDesc {
     exec_type_from_tl_internal(target_list, false)
 }
@@ -280,7 +271,7 @@ fn exec_type_from_tl_internal(target_list: &[Node], skip_junk: bool) -> TupleDes
         .collect();
 
     let len = i32::try_from(entries.len()).unwrap_or(0);
-    let mut type_info = Box::new(TupleDescData::create_template(len));
+    let mut type_info = TupleDescData::create_template(len);
 
     for (i, te) in entries.iter().enumerate() {
         let cur_resno = (i + 1) as i16;
@@ -299,7 +290,7 @@ fn exec_type_from_tl_internal(target_list: &[Node], skip_junk: bool) -> TupleDes
         type_info.init_entry_collation(cur_resno, exprCollation(expr));
     }
 
-    Box::into_raw(type_info)
+    Arc::new(type_info)
 }
 
 /// PG `ExecTargetListLength`: number of (non-junk-agnostic) target entries.
@@ -356,9 +347,7 @@ mod tests {
     #[test]
     fn exec_type_from_tl_builds_one_int4_attr() {
         let tl = const_int4_tlist(&[1]);
-        let desc = exec_type_from_tl(&tl);
-        // SAFETY: freshly built descriptor, owned here.
-        let d = unsafe { Box::from_raw(desc) };
+        let d = exec_type_from_tl(&tl);
         assert_eq!(d.natts, 1);
         assert_eq!(d.attr(0).atttypid, INT4OID);
         assert_eq!(d.attr(0).attlen, 4);
@@ -368,19 +357,36 @@ mod tests {
     #[test]
     fn exec_type_from_tl_builds_two_int4_attrs() {
         let tl = const_int4_tlist(&[1, 2]);
-        let desc = exec_type_from_tl(&tl);
-        // SAFETY: freshly built descriptor, owned here.
-        let d = unsafe { Box::from_raw(desc) };
+        let d = exec_type_from_tl(&tl);
         assert_eq!(d.natts, 2);
         assert_eq!(d.attr(0).atttypid, INT4OID);
         assert_eq!(d.attr(1).atttypid, INT4OID);
+    }
+
+    /// The result descriptor is a shared `Arc`, not a leaked allocation: a slot
+    /// and the original handle co-own the same `TupleDescData` (Arc::ptr_eq), and
+    /// the strong count reflects exactly the live handles.
+    #[test]
+    fn result_tupdesc_is_shared_arc_not_leaked() {
+        let tl = const_int4_tlist(&[1]);
+        let desc = exec_type_from_tl(&tl);
+        assert_eq!(Arc::strong_count(&desc), 1);
+        let slot = make_tuple_table_slot(Some(Arc::clone(&desc)), &TTS_OPS_VIRTUAL);
+        assert_eq!(Arc::strong_count(&desc), 2);
+        let slot_desc = slot
+            .tupleDescriptor
+            .as_ref()
+            .expect("slot carries the descriptor");
+        assert!(Arc::ptr_eq(&desc, slot_desc));
+        drop(slot);
+        assert_eq!(Arc::strong_count(&desc), 1);
     }
 
     #[test]
     fn store_and_clear_virtual_slot_transitions() {
         let tl = const_int4_tlist(&[7]);
         let desc = exec_type_from_tl(&tl);
-        let mut slot = make_tuple_table_slot(desc, &TTS_OPS_VIRTUAL);
+        let mut slot = make_tuple_table_slot(Some(desc), &TTS_OPS_VIRTUAL);
 
         // A fresh slot is empty with nvalid == 0.
         assert!(tts_empty(&slot));
@@ -397,21 +403,16 @@ mod tests {
         ExecClearTuple(&mut slot);
         assert!(tts_empty(&slot));
         assert_eq!(slot.nvalid, 0);
-
-        // SAFETY: reclaim the descriptor the slot's raw handle points at.
-        unsafe { drop(Box::from_raw(desc)) };
     }
 
     #[test]
     fn all_null_tuple_sets_every_attr_null() {
         let tl = const_int4_tlist(&[0, 0]);
         let desc = exec_type_from_tl(&tl);
-        let mut slot = make_tuple_table_slot(desc, &TTS_OPS_VIRTUAL);
+        let mut slot = make_tuple_table_slot(Some(desc), &TTS_OPS_VIRTUAL);
         exec_store_all_null_tuple(&mut slot);
         assert!(!tts_empty(&slot));
         assert_eq!(slot.nvalid, 2);
         assert!(slot.isnull.iter().all(|&n| n));
-        // SAFETY: reclaim the descriptor.
-        unsafe { drop(Box::from_raw(desc)) };
     }
 }
