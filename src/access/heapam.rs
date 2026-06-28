@@ -101,7 +101,9 @@ pub struct HeapScanDescData {
     pub cblock: BlockNumber,    // current block # in scan, if any
     pub cbuf: Buffer,           // current buffer in scan, if any (pinned if valid)
 
-    pub strategy: BufferAccessStrategy, // access strategy for reads
+    // access strategy for reads; C `BufferAccessStrategy` is a nullable pointer
+    // (`*BufferAccessStrategyData`), so None == no strategy (the default).
+    pub strategy: Option<BufferAccessStrategy>,
 
     pub ctup: HeapTupleData, // current tuple in scan, if any
 

@@ -1,4 +1,13 @@
 //! Translated from PostgreSQL src/include/access/table.h
+//!
+//! M2 (step 12): the `async` table-open/close bodies live in
+//! `crate::backend::access::table::table` (they delegate to the async
+//! `relation_open` lock-wait leaf; rules.md s5). They are NOT re-exported under
+//! these C names yet: existing sync callers (e.g. autovacuum.rs) still use the
+//! pre-async stubs here, and will migrate to the async backend forms as their
+//! files are async-converted. New M2 code calls
+//! `crate::backend::access::table::table::{table_open, table_openrv, table_close}`
+//! directly.
 
 use crate::nodes::primnodes::RangeVar;
 use crate::postgres_ext::Oid;
