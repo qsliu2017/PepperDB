@@ -8,7 +8,9 @@
 //! cleanly as bison, so they live here and the grammar calls them.
 
 use crate::nodes::nodes::Node;
-use crate::nodes::parsenodes::{A_Const, A_Star, ColumnRef, RawStmt, ResTarget, ValUnion};
+use crate::nodes::parsenodes::{
+    A_Const, A_Star, ColumnRef, ColumnRefField, RawStmt, ResTarget, ValUnion,
+};
 use crate::nodes::value::{makeFloat, makeInteger, makeString};
 use crate::parser::parser::RawParseMode;
 
@@ -70,7 +72,7 @@ pub fn do_negate(arg: Node) -> Node {
 /// gram.y `target_el: '*'` - a ResTarget whose value is a ColumnRef of one A_Star.
 pub fn make_star_target() -> Node {
     let cr = ColumnRef {
-        fields: vec![Node::A_Star(Box::new(A_Star {}))],
+        fields: vec![ColumnRefField::Star(A_Star {})],
         location: -1,
     };
     let rt = ResTarget {
@@ -221,7 +223,7 @@ mod tests {
         let Node::ResTarget(rt) = &sel.targetList[0] else { panic!("not ResTarget") };
         let Node::ColumnRef(cr) = rt.val.as_ref().unwrap() else { panic!("not ColumnRef") };
         assert_eq!(cr.fields.len(), 1);
-        assert!(matches!(&cr.fields[0], Node::A_Star(_)));
+        assert!(matches!(&cr.fields[0], ColumnRefField::Star(_)));
     }
 
     #[test]

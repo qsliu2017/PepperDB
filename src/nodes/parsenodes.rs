@@ -172,10 +172,21 @@ pub struct TypeName {
     pub location: ParseLoc,
 }
 
+/// A single element of `ColumnRef.fields`: PG documents this list as holding only
+/// field-name `String` value nodes or an `A_Star` (the latter only as the final
+/// element). Modeling it as a closed enum makes any other node unrepresentable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColumnRefField {
+    /// a column/table/schema name part
+    String(String_),
+    /// the `*` wildcard (last element only, per PG)
+    Star(A_Star),
+}
+
 /// ColumnRef - reference to a column, or possibly a whole tuple.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnRef {
-    pub fields: Vec<Node>,
+    pub fields: Vec<ColumnRefField>,
     pub location: ParseLoc,
 }
 
@@ -496,7 +507,7 @@ pub struct ColumnDef {
 }
 
 /// TableLikeClause - CREATE TABLE ( ... LIKE ... ) clause.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableLikeClause {
     pub relation: Option<Box<RangeVar>>,
     /// OR of TableLikeOption flags
@@ -1469,10 +1480,10 @@ pub struct ObjectWithArgs {
 }
 
 /// AccessPriv - an access privilege with optional list of column names.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccessPriv {
     pub priv_name: Option<String>,
-    pub cols: Vec<Node>,
+    pub cols: Vec<String_>,
 }
 
 /// GrantRoleStmt - Grant/Revoke Role Statement.
@@ -2468,7 +2479,7 @@ pub struct CreateTableAsStmt {
 }
 
 /// RefreshMatViewStmt - REFRESH MATERIALIZED VIEW Statement.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefreshMatViewStmt {
     pub concurrent: bool,
     pub skipData: bool,

@@ -214,7 +214,7 @@ pub fn make_bool_expr(boolop: BoolExprType, args: Vec<Node>, location: i32) -> N
 }
 
 /// PG `makeAlias`: creates an `Alias` node. The name is copied; `colnames` is not.
-pub fn make_alias(aliasname: &str, colnames: Vec<Node>) -> Alias {
+pub fn make_alias(aliasname: &str, colnames: Vec<crate::nodes::value::String_>) -> Alias {
     Alias {
         aliasname: Some(aliasname.to_owned()),
         colnames,

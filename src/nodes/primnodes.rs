@@ -4,6 +4,7 @@ use crate::access::attnum::AttrNumber;
 use crate::access::cmptype::CompareType;
 use crate::nodes::bitmapset::Bitmapset;
 use crate::nodes::nodes::{AggSplit, CmdType, Node, ParseLoc};
+use crate::nodes::value::String_;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 
@@ -23,10 +24,10 @@ pub enum OverridingKind {
 
 /// Alias for a range variable; may rename columns. `colnames` is a list of
 /// String nodes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alias {
     pub aliasname: Option<String>,
-    pub colnames: Vec<Node>,
+    pub colnames: Vec<String_>,
 }
 
 /// What to do at commit time for temporary relations.
@@ -39,7 +40,7 @@ pub enum OnCommitAction {
 }
 
 /// Range variable, used in FROM clauses and as table names in utility stmts.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RangeVar {
     pub catalogname: Option<String>,
     pub schemaname: Option<String>,
@@ -496,7 +497,7 @@ pub struct RowExpr {
     pub args: Vec<Node>,
     pub row_typeid: Oid,
     pub row_format: CoercionForm,
-    pub colnames: Vec<Node>,
+    pub colnames: Vec<String_>,
     pub location: ParseLoc,
 }
 
