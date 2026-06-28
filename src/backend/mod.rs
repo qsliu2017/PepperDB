@@ -3,6 +3,7 @@
 pub mod access;
 pub mod libpq;
 pub mod nodes;
+pub mod optimizer;
 pub mod parser;
 pub mod postmaster;
 pub mod rewrite;

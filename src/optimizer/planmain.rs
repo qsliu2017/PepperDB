@@ -23,9 +23,8 @@ pub static mut ENABLE_SELF_JOIN_ELIMINATION: bool = false;
 pub type QueryPathkeysCallback = fn(root: &mut PlannerInfo);
 
 /* prototypes for plan/planmain.c */
-pub fn query_planner(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback) -> RelOptInfo {
-    unimplemented!()
-}
+/// PG `query_planner`. See `crate::backend::optimizer::plan::planmain`.
+pub use crate::backend::optimizer::plan::planmain::query_planner;
 
 /* prototypes for plan/planagg.c */
 pub fn preprocess_minmax_aggregates(root: &mut PlannerInfo) {
@@ -33,9 +32,9 @@ pub fn preprocess_minmax_aggregates(root: &mut PlannerInfo) {
 }
 
 /* prototypes for plan/createplan.c */
-pub fn create_plan(root: &mut PlannerInfo, best_path: &crate::nodes::pathnodes::Path) -> Plan {
-    unimplemented!()
-}
+/// PG `create_plan`. See `crate::backend::optimizer::plan::planmain`. Returns the
+/// polymorphic top plan node (`Plan *` in C -> `Box<Node>`).
+pub use crate::backend::optimizer::plan::planmain::create_plan;
 
 pub fn make_foreignscan(
     qptlist: Vec<TargetEntry>,
@@ -242,9 +241,9 @@ pub fn remove_useless_self_joins(root: &mut PlannerInfo, joinlist: Vec<Node>) ->
 }
 
 /* prototypes for plan/setrefs.c */
-pub fn set_plan_references(root: &mut PlannerInfo, plan: Box<Plan>) -> Plan {
-    unimplemented!()
-}
+/// PG `set_plan_references`. See `crate::backend::optimizer::plan::setrefs`.
+/// `plan` is the polymorphic top plan node (`Plan *` in C -> `Box<Node>`).
+pub use crate::backend::optimizer::plan::setrefs::set_plan_references;
 
 pub fn trivial_subqueryscan(plan: &SubqueryScan) -> bool {
     unimplemented!()

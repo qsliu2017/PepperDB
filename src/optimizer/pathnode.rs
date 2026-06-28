@@ -36,13 +36,11 @@ pub fn compare_fractional_path_costs(path1: &Path, path2: &Path, fraction: f64) 
     unimplemented!()
 }
 
-pub fn set_cheapest(parent_rel: &mut RelOptInfo) {
-    unimplemented!()
-}
+/// PG `set_cheapest`. See `crate::backend::optimizer::util::pathnode`.
+pub use crate::backend::optimizer::util::pathnode::set_cheapest;
 
-pub fn add_path(parent_rel: &mut RelOptInfo, new_path: Box<Path>) {
-    unimplemented!()
-}
+/// PG `add_path`. See `crate::backend::optimizer::util::pathnode`.
+pub use crate::backend::optimizer::util::pathnode::add_path;
 
 pub fn add_path_precheck(
     parent_rel: &RelOptInfo,
@@ -170,14 +168,8 @@ pub fn create_merge_append_path(
     unimplemented!()
 }
 
-pub fn create_group_result_path(
-    root: &mut PlannerInfo,
-    rel: &RelOptInfo,
-    target: &PathTarget,
-    havingqual: Vec<Box<Node>>,
-) -> Box<GroupResultPath> {
-    unimplemented!()
-}
+/// PG `create_group_result_path`. See `crate::backend::optimizer::util::pathnode`.
+pub use crate::backend::optimizer::util::pathnode::create_group_result_path;
 
 pub fn create_material_path(rel: &RelOptInfo, subpath: Box<Path>) -> Box<MaterialPath> {
     unimplemented!()

@@ -122,9 +122,8 @@ pub fn planner(
     unimplemented!()
 }
 
-pub fn expression_planner(_expr: Box<Node>) -> Box<Node> {
-    unimplemented!()
-}
+/// PG `expression_planner`. See `crate::backend::optimizer::plan::planner`.
+pub use crate::backend::optimizer::plan::planner::expression_planner;
 
 /// C out-params `List **relationOids, List **invalItems` -> returned tuple.
 pub fn expression_planner_with_deps(
@@ -180,12 +179,8 @@ pub fn contain_volatile_functions_not_nextval(_clause: Option<Box<Node>>) -> boo
     unimplemented!()
 }
 
-pub fn eval_const_expressions(
-    _root: Option<PlannerInfoRef>,
-    _node: Option<Box<Node>>,
-) -> Option<Box<Node>> {
-    unimplemented!()
-}
+/// PG `eval_const_expressions`. See `crate::backend::optimizer::util::clauses`.
+pub use crate::backend::optimizer::util::clauses::eval_const_expressions;
 
 pub fn convert_saop_to_hashed_saop(_node: Option<Box<Node>>) {
     unimplemented!()

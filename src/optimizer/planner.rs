@@ -30,33 +30,19 @@ pub type CreateUpperPathsHookType = fn(
 );
 pub static mut CREATE_UPPER_PATHS_HOOK: Option<CreateUpperPathsHookType> = None;
 
-pub fn standard_planner(
-    parse: &mut Query,
-    query_string: &str,
-    cursor_options: i32,
-    bound_params: ParamListInfo,
-) -> PlannedStmt {
-    unimplemented!()
-}
+/// PG `standard_planner`. See `crate::backend::optimizer::plan::planner`.
+/// (`boundParams` is nullable in C -> `Option<ParamListInfo>`.)
+pub use crate::backend::optimizer::plan::planner::standard_planner;
 
-pub fn subquery_planner(
-    glob: &mut PlannerGlobal,
-    parse: &mut Query,
-    parent_root: Option<&mut PlannerInfo>,
-    has_recursion: bool,
-    tuple_fraction: f64,
-    setops: Option<&SetOperationStmt>,
-) -> PlannerInfo {
-    unimplemented!()
-}
+/// PG `subquery_planner`. See `crate::backend::optimizer::plan::planner`.
+pub use crate::backend::optimizer::plan::planner::subquery_planner;
 
 pub fn select_rowmark_type(rte: &RangeTblEntry, strength: LockClauseStrength) -> RowMarkType {
     unimplemented!()
 }
 
-pub fn limit_needed(parse: &Query) -> bool {
-    unimplemented!()
-}
+/// PG `limit_needed`. See `crate::backend::optimizer::plan::planner`.
+pub use crate::backend::optimizer::plan::planner::limit_needed;
 
 pub fn mark_partial_aggref(agg: &mut Aggref, aggsplit: AggSplit) {
     unimplemented!()

@@ -10,9 +10,8 @@ use crate::nodes::pathnodes::{PathTarget, PlannerInfo};
 use crate::nodes::primnodes::{Expr, Index, TargetEntry};
 use crate::postgres_ext::Oid;
 
-pub fn tlist_member(node: &Expr, targetlist: &[TargetEntry]) -> Option<TargetEntry> {
-    unimplemented!()
-}
+/// PG `tlist_member`. See `crate::backend::optimizer::util::tlist`.
+pub use crate::backend::optimizer::util::tlist::tlist_member;
 
 pub fn add_to_flat_tlist(tlist: Vec<TargetEntry>, exprs: &[Expr]) -> Vec<TargetEntry> {
     unimplemented!()
@@ -34,9 +33,8 @@ pub fn tlist_same_collations(tlist: &[TargetEntry], col_collations: &[Oid], junk
     unimplemented!()
 }
 
-pub fn apply_tlist_labeling(dest_tlist: &mut [TargetEntry], src_tlist: &[TargetEntry]) {
-    unimplemented!()
-}
+/// PG `apply_tlist_labeling`. See `crate::backend::optimizer::util::tlist`.
+pub use crate::backend::optimizer::util::tlist::apply_tlist_labeling;
 
 pub fn extract_grouping_ops(group_clause: &[SortGroupClause]) -> Vec<Oid> {
     unimplemented!()
@@ -58,13 +56,11 @@ pub fn grouping_is_hashable(group_clause: &[SortGroupClause]) -> bool {
     unimplemented!()
 }
 
-pub fn make_pathtarget_from_tlist(tlist: &[TargetEntry]) -> PathTarget {
-    unimplemented!()
-}
+/// PG `make_pathtarget_from_tlist`. See `crate::backend::optimizer::util::tlist`.
+pub use crate::backend::optimizer::util::tlist::make_pathtarget_from_tlist;
 
-pub fn make_tlist_from_pathtarget(target: &PathTarget) -> Vec<TargetEntry> {
-    unimplemented!()
-}
+/// PG `make_tlist_from_pathtarget`. See `crate::backend::optimizer::util::tlist`.
+pub use crate::backend::optimizer::util::tlist::make_tlist_from_pathtarget;
 
 pub fn copy_pathtarget(src: &PathTarget) -> PathTarget {
     unimplemented!()

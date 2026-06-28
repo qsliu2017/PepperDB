@@ -64,9 +64,9 @@ pub fn ss_attach_initplans(root: &mut PlannerInfo, plan: &mut Plan) {
     unimplemented!()
 }
 
-pub fn ss_finalize_plan(root: &mut PlannerInfo, plan: &mut Plan) {
-    unimplemented!()
-}
+/// PG `SS_finalize_plan`. See `crate::backend::optimizer::plan::subselect`.
+/// (`plan` is the polymorphic top plan node -> `&mut Node`.)
+pub use crate::backend::optimizer::plan::subselect::ss_finalize_plan;
 
 pub fn ss_make_initplan_output_param(
     root: &mut PlannerInfo,

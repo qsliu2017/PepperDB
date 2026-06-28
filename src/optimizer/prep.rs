@@ -56,9 +56,8 @@ pub fn get_relids_for_join(query: &Query, joinrelid: i32) -> Relids {
 }
 
 /* prototypes for preptlist.c */
-pub fn preprocess_targetlist(root: &mut PlannerInfo) {
-    unimplemented!()
-}
+/// PG `preprocess_targetlist`. See `crate::backend::optimizer::prep::preptlist`.
+pub use crate::backend::optimizer::prep::preptlist::preprocess_targetlist;
 
 pub fn extract_update_targetlist_colnos(tlist: &[TargetEntry]) -> Vec<i32> {
     unimplemented!()
