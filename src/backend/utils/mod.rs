@@ -1,5 +1,6 @@
 //! Directory module: src/backend/utils
 
+pub mod adt;
 pub mod cache;
 pub mod error;
 pub mod fmgr;

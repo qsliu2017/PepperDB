@@ -478,8 +478,25 @@ pub fn getTypeInputInfo(r#type: Oid) -> (Oid, Oid) {
 }
 
 /// C out-params `(Oid *typOutput, bool *typIsVarlena)` -> tuple.
+///
+/// SHIM(step14): hardcoded type->output-fn map; DELETE when syscache/lsyscache lands.
+/// The real `getTypeOutputInfo` reads pg_type via `SearchSysCache1(TYPEOID, ...)`,
+/// which needs the syscache (step 14). Until then M1's printtup needs to map a
+/// result column's type OID to its output-function OID for the int types that
+/// `utils/adt/int.c` (step 02) implements. int2/int4/int8 are pass-by-value
+/// fixed-length, so `typIsVarlena` is false. Any other type hits the
+/// not-yet-translated real lookup.
 pub fn getTypeOutputInfo(r#type: Oid) -> (Oid, bool) {
-    unimplemented!()
+    use crate::catalog::genbki::{INT2OID, INT4OID, INT8OID};
+    use crate::utils::fmgroids::{F_INT2OUT, F_INT4OUT, F_INT8OUT};
+
+    let typoutput = match r#type {
+        t if t == INT4OID => F_INT4OUT,
+        t if t == INT2OID => F_INT2OUT,
+        t if t == INT8OID => F_INT8OUT,
+        _ => unimplemented!("getTypeOutputInfo needs syscache (step14) for non-int types"),
+    };
+    (typoutput, false)
 }
 
 /// C out-params `(Oid *typReceive, Oid *typIOParam)` -> tuple.
