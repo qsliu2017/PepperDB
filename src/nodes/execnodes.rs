@@ -36,12 +36,12 @@ macro_rules! opaque_forward {
 
 mod fwd {
     opaque_forward! {
-        TupleTableSlot, TupleDesc, TupleTableSlotOps, Relation, RelationPtr,
+        Relation, RelationPtr,
         FmgrInfo, FunctionCallInfo, MemoryContext, Tuplestorestate,
-        ParamListInfo, ParamExecData, Snapshot, ScanDirection, PlannedStmt,
+        ParamListInfo, ParamExecData,
         QueryEnvironment, PartitionDirectory, HeapTuple, MinimalTuple,
         ItemPointerData, OffsetNumber, Buffer, TriggerDesc, Instrumentation,
-        WorkerInstrumentation, ErrorSaveContext, ExprEvalStep, SortSupport,
+        WorkerInstrumentation, ErrorSaveContext, SortSupport,
         TupleConversionMap, FdwRoutine, TIDBitmap, ConditionVariable, DlistHead,
         Pairingheap, TuplesortInstrumentation, IndexScanInstrumentation,
         SharedIndexScanInstrumentation, RowMarkType, LockClauseStrength,
@@ -51,6 +51,16 @@ mod fwd {
 }
 
 pub use fwd::*;
+
+// Executor-spine types wired to their real homes (step 08). The placeholders
+// these replace were stand-ins until the executor was translated; the spine now
+// threads real slots/descriptors/steps/snapshots through EState/PlanState/etc.
+pub use crate::access::sdir::ScanDirection;
+pub use crate::access::tupdesc::TupleDesc;
+pub use crate::executor::execExpr::ExprEvalStep;
+pub use crate::executor::tuptable::{TupleTableSlot, TupleTableSlotOps};
+pub use crate::nodes::plannodes::PlannedStmt;
+pub use crate::utils::snapshot::Snapshot;
 
 /// Opaque private/foreign struct only referenced via pointer in the header.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -395,7 +405,6 @@ pub struct AsyncRequest {
 
 /// Working state for an Executor invocation.
 #[allow(deprecated)]
-#[derive(Default)]
 pub struct EState {
     pub direction: ScanDirection,
     pub snapshot: Snapshot,
@@ -453,6 +462,62 @@ pub struct EState {
     pub jit_worker_instr: OpaqueState,
     pub insert_pending_result_relations: Vec<Box<ResultRelInfo>>,
     pub insert_pending_modifytables: Vec<Box<Node>>,
+}
+
+#[allow(deprecated)]
+impl Default for EState {
+    /// PG `CreateExecutorState` zero-inits the struct then sets es_direction =
+    /// ForwardScanDirection; the real ScanDirection enum has no Default, so the
+    /// derive is hand-written to mirror that one initialized field.
+    fn default() -> Self {
+        Self {
+            direction: ScanDirection::Forward,
+            snapshot: Snapshot::default(),
+            crosscheck_snapshot: Snapshot::default(),
+            range_table: Vec::default(),
+            range_table_size: usize::default(),
+            relations: Vec::default(),
+            rowmarks: Vec::default(),
+            rteperminfos: Vec::default(),
+            plannedstmt: Option::default(),
+            part_prune_infos: Vec::default(),
+            part_prune_states: Vec::default(),
+            part_prune_results: Vec::default(),
+            unpruned_relids: Option::default(),
+            source_text: Option::default(),
+            junk_filter: Option::default(),
+            output_cid: crate::c::CommandId::default(),
+            result_relations: Vec::default(),
+            opened_result_relations: Vec::default(),
+            partition_directory: PartitionDirectory,
+            tuple_routing_result_relations: Vec::default(),
+            trig_target_relations: Vec::default(),
+            param_list_info: Option::default(),
+            param_exec_vals: Option::default(),
+            query_env: Option::default(),
+            query_cxt: MemoryContext,
+            tuple_table: Vec::default(),
+            processed: u64::default(),
+            total_processed: u64::default(),
+            top_eflags: i32::default(),
+            instrument: i32::default(),
+            finished: bool::default(),
+            exprcontexts: Vec::default(),
+            subplanstates: Vec::default(),
+            auxmodifytables: Vec::default(),
+            per_tuple_exprcontext: Option::default(),
+            epq_active: Option::default(),
+            use_parallel_mode: bool::default(),
+            parallel_workers_to_launch: i32::default(),
+            parallel_workers_launched: i32::default(),
+            query_dsa: OpaqueState::default(),
+            jit_flags: i32::default(),
+            jit: OpaqueState::default(),
+            jit_worker_instr: OpaqueState::default(),
+            insert_pending_result_relations: Vec::default(),
+            insert_pending_modifytables: Vec::default(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -654,10 +719,10 @@ pub struct PlanState {
     pub ps_proj_info: Option<Box<ProjectionInfo>>,
     pub async_capable: bool,
     pub scandesc: TupleDesc,
-    pub scanops: Option<Box<TupleTableSlotOps>>,
-    pub outerops: Option<Box<TupleTableSlotOps>>,
-    pub innerops: Option<Box<TupleTableSlotOps>>,
-    pub resultops: Option<Box<TupleTableSlotOps>>,
+    pub scanops: Option<&'static dyn TupleTableSlotOps>,
+    pub outerops: Option<&'static dyn TupleTableSlotOps>,
+    pub innerops: Option<&'static dyn TupleTableSlotOps>,
+    pub resultops: Option<&'static dyn TupleTableSlotOps>,
     pub scanopsfixed: bool,
     pub outeropsfixed: bool,
     pub inneropsfixed: bool,
@@ -1169,7 +1234,7 @@ pub struct CustomScanState {
     pub pscan_len: usize,
     /// custom exec methods (C `void *`).
     pub methods: OpaqueState,
-    pub slot_ops: Option<Box<TupleTableSlotOps>>,
+    pub slot_ops: Option<&'static dyn TupleTableSlotOps>,
 }
 
 // ----- Join State -----

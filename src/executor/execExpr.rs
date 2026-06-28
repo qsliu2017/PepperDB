@@ -754,14 +754,10 @@ pub struct ScalarArrayOpExprHashTable;
 // functions in execExpr.c
 // ---------------------------------------------------------------------------
 
-pub fn ExprEvalPushStep(_es: &mut ExprState, _s: &ExprEvalStep) {
-    unimplemented!()
-}
+pub use crate::backend::executor::execExpr::expr_eval_push_step as ExprEvalPushStep;
 
 // functions in execExprInterp.c
-pub fn ExecReadyInterpretedExpr(_state: &mut ExprState) {
-    unimplemented!()
-}
+pub use crate::backend::executor::execExprInterp::exec_ready_interpreted_expr as ExecReadyInterpretedExpr;
 
 pub fn ExecEvalStepOp(_state: &ExprState, _op: &ExprEvalStep) -> ExprEvalOp {
     unimplemented!()

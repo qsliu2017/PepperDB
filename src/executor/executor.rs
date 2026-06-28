@@ -253,30 +253,30 @@ pub fn ExecGetJunkAttribute(slot: &mut TupleTableSlot, attno: AttrNumber) -> Opt
 // ---------------------------------------------------------------------------
 // execMain.c
 // ---------------------------------------------------------------------------
-pub fn ExecutorStart(_query_desc: &mut QueryDesc, _eflags: i32) {
-    unimplemented!()
+/// PG `ExecutorStart`: dispatches to the hook or `standard_ExecutorStart`. M1
+/// always uses the standard path (no plugin hook installed).
+pub fn ExecutorStart(query_desc: &mut QueryDesc, eflags: i32) {
+    standard_ExecutorStart(query_desc, eflags);
 }
-pub fn standard_ExecutorStart(_query_desc: &mut QueryDesc, _eflags: i32) {
-    unimplemented!()
+pub use crate::backend::executor::execMain::standard_executor_start as standard_ExecutorStart;
+
+/// PG `ExecutorRun`: hook or `standard_ExecutorRun`.
+pub fn ExecutorRun(query_desc: &mut QueryDesc, direction: ScanDirection, count: u64) {
+    standard_ExecutorRun(query_desc, direction, count);
 }
-pub fn ExecutorRun(_query_desc: &mut QueryDesc, _direction: ScanDirection, _count: u64) {
-    unimplemented!()
+pub use crate::backend::executor::execMain::standard_executor_run as standard_ExecutorRun;
+
+/// PG `ExecutorFinish`: hook or `standard_ExecutorFinish`.
+pub fn ExecutorFinish(query_desc: &mut QueryDesc) {
+    standard_ExecutorFinish(query_desc);
 }
-pub fn standard_ExecutorRun(_query_desc: &mut QueryDesc, _direction: ScanDirection, _count: u64) {
-    unimplemented!()
+pub use crate::backend::executor::execMain::standard_executor_finish as standard_ExecutorFinish;
+
+/// PG `ExecutorEnd`: hook or `standard_ExecutorEnd`.
+pub fn ExecutorEnd(query_desc: &mut QueryDesc) {
+    standard_ExecutorEnd(query_desc);
 }
-pub fn ExecutorFinish(_query_desc: &mut QueryDesc) {
-    unimplemented!()
-}
-pub fn standard_ExecutorFinish(_query_desc: &mut QueryDesc) {
-    unimplemented!()
-}
-pub fn ExecutorEnd(_query_desc: &mut QueryDesc) {
-    unimplemented!()
-}
-pub fn standard_ExecutorEnd(_query_desc: &mut QueryDesc) {
-    unimplemented!()
-}
+pub use crate::backend::executor::execMain::standard_executor_end as standard_ExecutorEnd;
 pub fn ExecutorRewind(_query_desc: &mut QueryDesc) {
     unimplemented!()
 }
@@ -433,13 +433,10 @@ pub fn EvalPlanQualEnd(_epqstate: &mut EPQState) {
 // ---------------------------------------------------------------------------
 // execProcnode.c
 // ---------------------------------------------------------------------------
-pub fn ExecInitNode(
-    _node: Option<&crate::nodes::plannodes::Plan>,
-    _estate: &mut EState,
-    _eflags: i32,
-) -> Box<crate::nodes::execnodes::PlanState> {
-    unimplemented!()
-}
+/// PG `ExecInitNode`. The plan-state tree is a downcast-free enum in this port
+/// (execProcnode.rs), so this takes `&Node` (the plan tree) and returns the
+/// `PlanStateNode` enum rather than a `PlanState*`.
+pub use crate::backend::executor::execProcnode::exec_init_node as ExecInitNode;
 pub fn ExecSetExecProcNode(
     node: &mut crate::nodes::execnodes::PlanState,
     function: crate::nodes::execnodes::ExecProcNodeMtd,
@@ -449,9 +446,8 @@ pub fn ExecSetExecProcNode(
 pub fn MultiExecProcNode(_node: &mut crate::nodes::execnodes::PlanState) -> Option<Box<Node>> {
     unimplemented!()
 }
-pub fn ExecEndNode(_node: &mut crate::nodes::execnodes::PlanState) {
-    unimplemented!()
-}
+/// PG `ExecEndNode`. Takes the `PlanStateNode` enum (downcast-free dispatch).
+pub use crate::backend::executor::execProcnode::exec_end_node as ExecEndNode;
 pub fn ExecShutdownNode(_node: &mut crate::nodes::execnodes::PlanState) {
     unimplemented!()
 }
@@ -459,36 +455,24 @@ pub fn ExecSetTupleBound(_tuples_needed: i64, _child_node: &mut crate::nodes::ex
     unimplemented!()
 }
 
-/// ExecProcNode - execute the given node to return a(nother) tuple.
-/// Dispatches through `PlanState.exec_proc_node` (was a function pointer).
-pub fn ExecProcNode(
-    node: &mut crate::nodes::execnodes::PlanState,
-) -> Option<Box<TupleTableSlot>> {
-    let _ = node;
-    unimplemented!()
-}
+/// ExecProcNode - execute the given node to return a(nother) tuple. Dispatches
+/// on the `PlanStateNode` enum (PG's per-node function pointer + downcast).
+pub use crate::backend::executor::execProcnode::exec_proc_node as ExecProcNode;
 
 // ---------------------------------------------------------------------------
 // execExpr.c
 // ---------------------------------------------------------------------------
-pub fn ExecInitExpr(
-    _node: Option<&crate::nodes::primnodes::Expr>,
-    _parent: Option<&mut crate::nodes::execnodes::PlanState>,
-) -> Box<ExprState> {
-    unimplemented!()
-}
+/// PG `ExecInitExpr`. Returns None for a null node (C returns NULL).
+pub use crate::backend::executor::execExpr::exec_init_expr as ExecInitExpr;
 pub fn ExecInitExprWithParams(
     _node: Option<&crate::nodes::primnodes::Expr>,
     _ext_params: crate::nodes::params::ParamListInfo,
 ) -> Box<ExprState> {
     unimplemented!()
 }
-pub fn ExecInitQual(
-    _qual: &[Box<Node>],
-    _parent: Option<&mut crate::nodes::execnodes::PlanState>,
-) -> Box<ExprState> {
-    unimplemented!()
-}
+/// PG `ExecInitQual`. Returns None for an empty qual (C returns NULL =
+/// always-true).
+pub use crate::backend::executor::execExpr::exec_init_qual as ExecInitQual;
 pub fn ExecInitCheck(
     _qual: &[Box<Node>],
     _parent: Option<&mut crate::nodes::execnodes::PlanState>,
@@ -759,12 +743,8 @@ pub fn ExecInitNullTupleSlot(
 ) -> Box<TupleTableSlot> {
     unimplemented!()
 }
-pub fn ExecTypeFromTL(_target_list: &[Box<Node>]) -> TupleDesc {
-    unimplemented!()
-}
-pub fn ExecCleanTypeFromTL(_target_list: &[Box<Node>]) -> TupleDesc {
-    unimplemented!()
-}
+pub use crate::backend::executor::execTuples::exec_type_from_tl as ExecTypeFromTL;
+pub use crate::backend::executor::execTuples::exec_clean_type_from_tl as ExecCleanTypeFromTL;
 pub fn ExecTypeFromExprList(_expr_list: &[Box<Node>]) -> TupleDesc {
     unimplemented!()
 }
@@ -808,15 +788,9 @@ pub fn do_text_output_oneline(tstate: &mut TupOutputState, str_to_emit: &str) {
 // ---------------------------------------------------------------------------
 // execUtils.c
 // ---------------------------------------------------------------------------
-pub fn CreateExecutorState() -> Box<EState> {
-    unimplemented!()
-}
-pub fn FreeExecutorState(_estate: Box<EState>) {
-    unimplemented!()
-}
-pub fn CreateExprContext(_estate: &mut EState) -> Box<ExprContext> {
-    unimplemented!()
-}
+pub use crate::backend::executor::execUtils::create_executor_state as CreateExecutorState;
+pub use crate::backend::executor::execUtils::free_executor_state as FreeExecutorState;
+pub use crate::backend::executor::execUtils::create_expr_context as CreateExprContext;
 pub fn CreateWorkExprContext(_estate: &mut EState) -> Box<ExprContext> {
     unimplemented!()
 }
@@ -831,21 +805,10 @@ pub fn ReScanExprContext(_econtext: &mut ExprContext) {
 }
 
 /// `#define ResetExprContext(econtext) MemoryContextReset(...per_tuple_memory)`.
-pub fn ResetExprContext(econtext: &mut ExprContext) {
-    // TODO(memory): per-tuple memory context type unification.
-    let _ = econtext;
-    unimplemented!()
-}
+/// Memory is tombstoned (rules.md s6.4); see the backend body.
+pub use crate::backend::executor::execUtils::reset_expr_context as ResetExprContext;
 
-/// Helper for the ResetExprContext macro (the underlying MemoryContextReset).
-fn ResetExprContext_ctx(_mcxt: MemoryContext) {
-    // TODO: MemoryContextReset not yet available in utils::palloc.
-    unimplemented!()
-}
-
-pub fn MakePerTupleExprContext(_estate: &mut EState) -> &mut ExprContext {
-    unimplemented!()
-}
+pub use crate::backend::executor::execUtils::make_per_tuple_expr_context as MakePerTupleExprContext;
 
 /// `GetPerTupleExprContext` - get (creating if needed) the per-output-tuple
 /// exprcontext. Was a macro selecting the cached one or making it.
@@ -870,12 +833,8 @@ pub fn ResetPerTupleExprContext(estate: &mut EState) {
     }
 }
 
-pub fn ExecAssignExprContext(_estate: &mut EState, _planstate: &mut crate::nodes::execnodes::PlanState) {
-    unimplemented!()
-}
-pub fn ExecGetResultType(_planstate: &mut crate::nodes::execnodes::PlanState) -> TupleDesc {
-    unimplemented!()
-}
+pub use crate::backend::executor::execUtils::exec_assign_expr_context as ExecAssignExprContext;
+pub use crate::backend::executor::execUtils::exec_get_result_type as ExecGetResultType;
 /// `isfixed` out-param folded into the tuple.
 pub fn ExecGetResultSlotOps(
     _planstate: &mut crate::nodes::execnodes::PlanState,
@@ -892,12 +851,7 @@ pub fn ExecGetCommonChildSlotOps(
 ) -> &'static dyn TupleTableSlotOps {
     unimplemented!()
 }
-pub fn ExecAssignProjectionInfo(
-    _planstate: &mut crate::nodes::execnodes::PlanState,
-    _input_desc: TupleDesc,
-) {
-    unimplemented!()
-}
+pub use crate::backend::executor::execUtils::exec_assign_projection_info as ExecAssignProjectionInfo;
 pub fn ExecConditionalAssignProjectionInfo(
     _planstate: &mut crate::nodes::execnodes::PlanState,
     _input_desc: TupleDesc,
@@ -982,12 +936,8 @@ pub fn GetAttributeByNum(
     unimplemented!()
 }
 
-pub fn ExecTargetListLength(_targetlist: &[Box<Node>]) -> i32 {
-    unimplemented!()
-}
-pub fn ExecCleanTargetListLength(_targetlist: &[Box<Node>]) -> i32 {
-    unimplemented!()
-}
+pub use crate::backend::executor::execTuples::exec_target_list_length as ExecTargetListLength;
+pub use crate::backend::executor::execTuples::exec_clean_target_list_length as ExecCleanTargetListLength;
 
 pub fn ExecGetTriggerOldSlot(_estate: &mut EState, _rel_info: &mut ResultRelInfo) -> Box<TupleTableSlot> {
     unimplemented!()

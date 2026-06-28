@@ -1,14 +1,11 @@
 //! Translated from PostgreSQL src/include/executor/nodeResult.h
 
-use crate::nodes::execnodes::{EState, ResultState};
-use crate::nodes::plannodes::Result;
+use crate::nodes::execnodes::ResultState;
 
-pub fn ExecInitResult(_node: &Result, _estate: &mut EState, _eflags: i32) -> *mut ResultState {
-    unimplemented!() // TODO(ptr)
-}
-pub fn ExecEndResult(_node: &mut ResultState) {
-    unimplemented!()
-}
+/// PG `ExecInitResult`. Returns an owned `Box<ResultState>` (the C `ResultState*`
+/// is owned by the plan-state enum in this port).
+pub use crate::backend::executor::nodeResult::exec_init_result as ExecInitResult;
+pub use crate::backend::executor::nodeResult::exec_end_result as ExecEndResult;
 pub fn ExecResultMarkPos(_node: &mut ResultState) {
     unimplemented!()
 }

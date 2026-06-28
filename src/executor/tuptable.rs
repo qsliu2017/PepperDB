@@ -28,13 +28,19 @@ bitflags! {
 }
 
 /// Base tuple table slot type. In-memory: no layout contract.
+///
+/// The C `tts_values`/`tts_isnull` flexible arrays (palloc'd in the same block
+/// as the slot, length `tupleDescriptor->natts`) become owned `Vec`s here: there
+/// is no layout contract, nothing outside this file pointer-walked them, and an
+/// owning `Vec` removes the raw-pointer aliasing the C model relied on.
+#[derive(Clone)]
 pub struct TupleTableSlot {
     pub flags: TtsFlags,           // Boolean states
     pub nvalid: i16,               // # of valid values in values
     pub ops: &'static dyn TupleTableSlotOps, // implementation of slot; TODO(ptr)
     pub tupleDescriptor: TupleDesc, // slot's tuple descriptor
-    pub values: *mut Datum,        // current per-attribute values; TODO(ptr)
-    pub isnull: *mut bool,         // current per-attribute isnull flags; TODO(ptr)
+    pub values: Vec<Datum>,        // current per-attribute values (C tts_values[])
+    pub isnull: Vec<bool>,         // current per-attribute isnull flags (C tts_isnull[])
     pub mcxt: MemoryContext,       // slot itself is in this context
     pub tid: ItemPointerData,      // stored tuple's tid
     pub tableOid: Oid,             // table oid of tuple
@@ -75,8 +81,12 @@ pub trait TupleTableSlotOps {
 }
 
 // Predefined ops singletons identify the slot type. Concrete impls live in
-// execTuples.c (Phase 2); declared here as the builtin set.
+// execTuples.c; declared here as the builtin set. Step 08 lands the virtual one;
+// the heap/minimal/buffer ops grow with heapam.
 // extern const TupleTableSlotOps TTSOps{Virtual,HeapTuple,MinimalTuple,BufferHeapTuple}
+
+/// PG `TTSOpsVirtual`: the `&'static dyn TupleTableSlotOps` for virtual slots.
+pub use crate::backend::executor::execTuples::TTS_OPS_VIRTUAL as TTSOpsVirtual;
 
 /// Virtual slot: Datum/isnull arrays are authoritative.
 pub struct VirtualTupleTableSlot {
@@ -141,32 +151,14 @@ pub fn tup_is_null(slot: Option<&TupleTableSlot>) -> bool {
 }
 
 // === in executor/execTuples.c ===
+// Slots are owned `Box<TupleTableSlot>` in this port (the C single-palloc block
+// becomes one allocation owning its value/null Vecs); `ExecAllocTableSlot`
+// returns the slot's index in the tuple table rather than a raw pointer.
 
-pub fn MakeTupleTableSlot(
-    _tupleDesc: TupleDesc,
-    _tts_ops: &'static dyn TupleTableSlotOps,
-) -> *mut TupleTableSlot {
-    unimplemented!()
-}
-
-pub fn ExecAllocTableSlot(
-    _tupleTable: &mut Vec<*mut TupleTableSlot>,
-    _desc: TupleDesc,
-    _tts_ops: &'static dyn TupleTableSlotOps,
-) -> *mut TupleTableSlot {
-    unimplemented!()
-}
-
-pub fn ExecResetTupleTable(_tupleTable: &mut Vec<*mut TupleTableSlot>, _shouldFree: bool) {
-    unimplemented!()
-}
-
-pub fn MakeSingleTupleTableSlot(
-    _tupdesc: TupleDesc,
-    _tts_ops: &'static dyn TupleTableSlotOps,
-) -> *mut TupleTableSlot {
-    unimplemented!()
-}
+pub use crate::backend::executor::execTuples::exec_alloc_table_slot as ExecAllocTableSlot;
+pub use crate::backend::executor::execTuples::exec_reset_tuple_table as ExecResetTupleTable;
+pub use crate::backend::executor::execTuples::make_single_tuple_table_slot as MakeSingleTupleTableSlot;
+pub use crate::backend::executor::execTuples::make_tuple_table_slot as MakeTupleTableSlot;
 
 pub fn ExecDropSingleTupleTableSlot(_slot: &mut TupleTableSlot) {
     unimplemented!()
@@ -216,13 +208,10 @@ pub fn ExecForceStoreMinimalTuple(_mtup: MinimalTuple, _slot: &mut TupleTableSlo
     unimplemented!()
 }
 
-pub fn ExecStoreVirtualTuple(_slot: &mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!()
-}
-
-pub fn ExecStoreAllNullTuple(_slot: &mut TupleTableSlot) -> *mut TupleTableSlot {
-    unimplemented!()
-}
+/// PG `ExecStoreVirtualTuple`. The C return-the-slot chaining is dropped (the
+/// caller already holds the slot); see the backend body.
+pub use crate::backend::executor::execTuples::exec_store_virtual_tuple as ExecStoreVirtualTuple;
+pub use crate::backend::executor::execTuples::exec_store_all_null_tuple as ExecStoreAllNullTuple;
 
 pub fn ExecStoreHeapTupleDatum(_data: Datum, _slot: &mut TupleTableSlot) {
     unimplemented!()
@@ -276,7 +265,7 @@ pub fn slot_attisnull(slot: &mut TupleTableSlot, attnum: i32) -> bool {
         slot_getsomeattrs(slot, attnum);
     }
 
-    unsafe { *slot.isnull.add((attnum - 1) as usize) }
+    slot.isnull[(attnum - 1) as usize]
 }
 
 /// Fetch one attribute of the slot's contents. None == SQL NULL (folds isnull).
@@ -288,12 +277,10 @@ pub fn slot_getattr(slot: &mut TupleTableSlot, attnum: i32) -> Option<Datum> {
     }
 
     let idx = (attnum - 1) as usize;
-    unsafe {
-        if *slot.isnull.add(idx) {
-            None
-        } else {
-            Some(*slot.values.add(idx))
-        }
+    if slot.isnull[idx] {
+        None
+    } else {
+        Some(slot.values[idx])
     }
 }
 

@@ -2,11 +2,14 @@
 
 use crate::executor::instrument::InstrumentOption;
 use crate::nodes::execnodes::{
-    EState, Instrumentation, ParamListInfo, PlanState, PlannedStmt, QueryEnvironment, Snapshot,
-    TupleDesc,
+    EState, Instrumentation, ParamListInfo, PlannedStmt, QueryEnvironment, Snapshot, TupleDesc,
 };
 use crate::nodes::nodes::CmdType;
 use crate::tcop::dest::DestReceiver;
+
+/// The live plan-state tree (PG `PlanState *`). In this port the concrete node
+/// states are held in an enum (downcast-free dispatch); see execProcnode.rs.
+pub use crate::backend::executor::execProcnode::PlanStateNode;
 
 /// A QueryDesc encapsulates everything the executor needs to execute the query.
 /// In-memory executor state (not a Node).
@@ -24,9 +27,9 @@ pub struct QueryDesc {
     pub instrument_options: InstrumentOption,
 
     /* These fields are set by ExecutorStart */
-    pub tupDesc: Option<Box<TupleDesc>>,
+    pub tupDesc: Option<TupleDesc>,
     pub estate: Option<Box<EState>>,
-    pub planstate: Option<Box<PlanState>>,
+    pub planstate: Option<Box<PlanStateNode>>,
 
     /* This field is set by ExecutePlan */
     pub already_executed: bool,
