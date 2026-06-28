@@ -1,5 +1,9 @@
 //! Translated from PostgreSQL src/include/parser/parser.h
 //! Definitions for the "raw" parser (flex and bison phases only).
+//!
+//! The driver body (`raw_parser`) lives in the backend definition module
+//! (`crate::backend::parser::parser`); this header re-exports it. The enums/GUC
+//! declarations below are part of the header itself.
 
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::TypeName;
@@ -34,10 +38,8 @@ pub static mut BACKSLASH_QUOTE: i32 = 0;
 pub static mut ESCAPE_STRING_WARNING: bool = false;
 pub static mut STANDARD_CONFORMING_STRINGS: bool = false;
 
-/// Primary entry point for the raw parsing functions.
-pub fn raw_parser(_str: &str, _mode: RawParseMode) -> Vec<Box<Node>> {
-    unimplemented!()
-}
+/// Primary entry point for the raw parsing functions (`crate::backend::parser::parser`).
+pub use crate::backend::parser::parser::raw_parser;
 
 /// Utility function exported by gram.y.
 pub fn system_func_name(_name: &str) -> Vec<Box<Node>> {

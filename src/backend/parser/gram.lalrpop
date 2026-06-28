@@ -1,0 +1,176 @@
+// Translated from PostgreSQL src/backend/parser/gram.y
+//
+// The SQL grammar. PG generates the LALR parser with bison; we use lalrpop (also
+// LALR), so gram.y productions map across nearly one-to-one. The lexer is the
+// logos token source in scan.rs (external-token mode below); semantic actions
+// build PG's exact RawStmt/SelectStmt/ResTarget/A_Const node trees via the helpers
+// in this file's sibling parser.rs (the makeXxxConst / makeRawStmt analogs).
+//
+// GROW discipline (README): the production hierarchy is scaffolded in full even
+// where a nonterminal currently has one alternative, so later milestones ADD
+// alternatives instead of restructuring. Every reachable production is complete.
+
+use crate::backend::parser::scan::Token;
+use crate::backend::parser::parser::{
+    make_int_const, make_float_const, make_string_const, make_raw_stmt, make_star_target,
+    do_negate, ResTargetBox, NodeBox, SelectStmtBox, RawStmtVec,
+};
+use crate::nodes::nodes::Node;
+use crate::nodes::parsenodes::{ResTarget, SelectStmt};
+
+grammar;
+
+// --- external lexer interface (scan.rs feeds these terminals) ---------------
+extern {
+    type Location = i32;
+    type Error = crate::backend::parser::scan::LexError;
+
+    enum Token {
+        // keywords by canonical spelling (scan.rs resolves words against kwlist)
+        "SELECT"  => Token::Keyword("select"),
+        // literals / identifiers
+        "IDENT"   => Token::Ident(<String>),
+        "ICONST"  => Token::IConst(<i32>),
+        "FCONST"  => Token::FConst(<String>),
+        "SCONST"  => Token::SConst(<String>),
+        // punctuation
+        ";"       => Token::Semi,
+        ","       => Token::Comma,
+        "*"       => Token::Star,
+        "("       => Token::LParen,
+        ")"       => Token::RParen,
+        "."       => Token::Dot,
+        "+"       => Token::Plus,
+        "-"       => Token::Minus,
+    }
+}
+
+// ===========================================================================
+//  Top level: a semicolon-separated list of statements, each wrapped in RawStmt.
+//  (gram.y `stmtmulti`; the MODE_* alternate entry points are added when plpgsql
+//  / type-name parsing lands.)
+// ===========================================================================
+
+// gram.y wraps the whole result in `parse_toplevel`; the driver calls this rule.
+pub Stmtmulti: RawStmtVec = {
+    <mut list:Stmtmulti> ";" <s:TopLevelStmt> => {
+        if let Some(stmt) = s { list.push(make_raw_stmt(stmt)); }
+        list
+    },
+    <s:TopLevelStmt> => {
+        let mut list = Vec::new();
+        if let Some(stmt) = s { list.push(make_raw_stmt(stmt)); }
+        list
+    },
+};
+
+// gram.y `toplevel_stmt`: stmt (+ TransactionStmtLegacy, added with BEGIN/END).
+TopLevelStmt: Option<NodeBox> = {
+    Stmt,
+};
+
+// gram.y `stmt`: the giant alternation over every statement kind. Grows one
+// statement type per milestone; an empty statement yields None (dropped above).
+Stmt: Option<NodeBox> = {
+    <s:SelectStmt> => Some(s),
+    => None,            // empty statement (e.g. trailing ';')
+};
+
+// ===========================================================================
+//  SELECT
+// ===========================================================================
+
+// gram.y `SelectStmt`: select_no_parens | select_with_parens. The paren form and
+// the with/sort/locking/limit wrappers in select_no_parens arrive at their
+// milestones (M5 sort/limit, M12 set ops).
+SelectStmt: NodeBox = {
+    SelectNoParens,
+};
+
+SelectNoParens: NodeBox = {
+    SimpleSelect,
+};
+
+SelectClause: NodeBox = {
+    SimpleSelect,
+};
+
+// gram.y `simple_select`. The first alternative (SELECT target_list ...) is the
+// only one reachable in M1; FROM/WHERE/GROUP/HAVING/DISTINCT/VALUES/TABLE and the
+// set operations are added at their milestones.
+SimpleSelect: NodeBox = {
+    "SELECT" <targets:OptTargetList> => {
+        let n = SelectStmt {
+            distinctClause: Vec::new(),
+            intoClause: None,
+            targetList: targets,
+            fromClause: Vec::new(),
+            whereClause: None,
+            groupClause: Vec::new(),
+            groupDistinct: false,
+            havingClause: None,
+            windowClause: Vec::new(),
+            valuesLists: Vec::new(),
+            sortClause: Vec::new(),
+            limitOffset: None,
+            limitCount: None,
+            limitOption: crate::nodes::nodes::LimitOption::COUNT,  // makeNode zero default
+            lockingClause: Vec::new(),
+            withClause: None,
+            op: crate::nodes::parsenodes::SetOperation::NONE,
+            all: false,
+            larg: None,
+            rarg: None,
+        };
+        Box::new(Node::SelectStmt(Box::new(n)))
+    },
+};
+
+// ===========================================================================
+//  Target list
+// ===========================================================================
+
+OptTargetList: Vec<NodeBox> = {
+    TargetList,
+    => Vec::new(),         // gram.y opt_target_list: /*EMPTY*/
+};
+
+TargetList: Vec<NodeBox> = {
+    <t:TargetEl> => vec![t],
+    <mut list:TargetList> "," <t:TargetEl> => { list.push(t); list },
+};
+
+// gram.y `target_el`. The AS/BareColLabel aliasing alternatives arrive with the
+// keyword/label machinery; '*' and a bare expression are the M1 reachable forms.
+TargetEl: NodeBox = {
+    <v:AExpr> => {
+        let rt = ResTarget { name: None, indirection: Vec::new(), val: Some(v), location: -1 };
+        Box::new(Node::ResTarget(Box::new(rt)))
+    },
+    "*" => make_star_target(),
+};
+
+// ===========================================================================
+//  Expressions  (gram.y a_expr -> c_expr -> AexprConst).  The full operator /
+//  comparison / function tower is built out in M3+.
+// ===========================================================================
+
+AExpr: NodeBox = {
+    CExpr,
+    // gram.y: '-' a_expr %prec UMINUS { doNegate }, '+' a_expr %prec UMINUS.
+    // Restricted to a constant operand for now (no general unary expr yet).
+    "-" <c:CExpr> => do_negate(c),
+    "+" <c:CExpr> => c,
+};
+
+CExpr: NodeBox = {
+    AexprConst,
+};
+
+// gram.y `AexprConst`. Iconst/FCONST/Sconst are the M1 forms; BCONST/XCONST and
+// the typed-literal (`typename 'string'`) forms arrive with the type machinery.
+AexprConst: NodeBox = {
+    <i:"ICONST"> => make_int_const(i),
+    <f:"FCONST"> => make_float_const(f),
+    <s:"SCONST"> => make_string_const(s),
+};

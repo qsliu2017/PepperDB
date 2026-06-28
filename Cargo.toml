@@ -58,6 +58,10 @@ cast_precision_loss = "allow"
 [lints]
 workspace = true
 
+[build-dependencies]
+# Bison analog: gram.y -> gram.lalrpop is processed at build time into OUT_DIR.
+lalrpop = "0.22"
+
 [dependencies]
 bitflags = "2"
 parking_lot = "0.12"
@@ -65,3 +69,8 @@ pepperdb-derive = { path = "crates/pepperdb-derive" }
 pepperdb-util = { path = "crates/pepperdb-util" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "net", "time", "io-util", "macros", "signal"] }
 futures-util = "0.3"
+# Parser spine (plan 003 gating decision 1): lalrpop (LALR, bison analog) over a
+# logos lexer (scan.l analog), external-token mode. lalrpop-util "lexer" feature is
+# unused (we feed our own tokens) but harmless; keep it minimal.
+lalrpop-util = "0.22"
+logos = "0.15"

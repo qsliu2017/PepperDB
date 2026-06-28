@@ -39,6 +39,13 @@ fn main() {
         println!("cargo:rerun-if-changed={}", d.display());
     }
     std::fs::write(out.join("catalog_oids_generated.rs"), gen_catalog_oids(&dats)).unwrap();
+
+    // Grammar (gram.y analog): process every .lalrpop under src/ into OUT_DIR
+    // (mirroring the source path), so gram.rs can include it via lalrpop_mod!.
+    // Isolated from the .dat codegen above. lalrpop emits no rerun directives, so
+    // declare the grammar as an input ourselves.
+    println!("cargo:rerun-if-changed=src/backend/parser/gram.lalrpop");
+    lalrpop::process_root().unwrap();
 }
 
 struct Proc {
