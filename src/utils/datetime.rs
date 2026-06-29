@@ -203,6 +203,22 @@ pub const TZNAME_FIXED_OFFSET: i32 = 0;
 pub const TZNAME_DYNTZ: i32 = 1;
 pub const TZNAME_ZONE: i32 = 2;
 
+// =========================================================================
+// Function bodies. Decode/encode core lives in
+// src/backend/utils/adt/datetime.rs (plan-002 .c-defs invariant); re-exported
+// here so callers keep using `crate::utils::datetime::*`.
+// =========================================================================
+
+pub use crate::backend::utils::adt::datetime::{
+    date2j, j2date, j2day, AdjustTimestampForTypmod, DecodeDateTime, DecodeISO8601Interval,
+    DecodeInterval, DecodeSpecial, DecodeTimeOnly, DecodeTimezone, DecodeUnits, EncodeDateOnly,
+    EncodeDateTime, EncodeInterval, EncodeTimeOnly, ParseDateTime, ValidateDate, DATETKTBL,
+    DAYS, DAY_TAB, DELTATKTBL, MONTHS,
+};
+
+// --- STAGED: paths that need the unported IANA timezone database / session
+// timezone GUC, or planner nodes. TODO(timezone-db). ---
+
 pub fn GetCurrentDateTime(_tm: &mut pg_tm) {
     unimplemented!()
 }
@@ -212,79 +228,11 @@ pub fn GetCurrentTimeUsec(_tm: &mut pg_tm) -> (fsec_t, i32) {
     unimplemented!()
 }
 
-/// j2date out-params (year, month, day) -> tuple.
-pub fn j2date(_jd: i32) -> (i32, i32, i32) {
-    unimplemented!()
-}
-
-pub fn date2j(_year: i32, _month: i32, _day: i32) -> i32 {
-    unimplemented!()
-}
-
-/// Splits timestr into fields; returns (numfields) or DTERR_* code.
-/// field/ftype filled in caller-provided slices.
-pub fn ParseDateTime(
-    _timestr: &str,
-    _workbuf: &mut [u8],
-    _field: &mut [*mut u8],
-    _ftype: &mut [i32],
-    _maxfields: i32,
-) -> i32 {
-    unimplemented!()
-}
-
-/// Returns 0/positive on success or DTERR_* on failure; fills dtype/tm/fsec/tzp.
-pub fn DecodeDateTime(
-    _field: &[*mut u8],
-    _ftype: &[i32],
-    _nf: i32,
-    _dtype: &mut i32,
-    _tm: &mut pg_tm,
-    _fsec: &mut fsec_t,
-    _tzp: &mut i32,
-    _extra: &mut DateTimeErrorExtra,
-) -> i32 {
-    unimplemented!()
-}
-
-pub fn DecodeTimezone(_str: &str, _tzp: &mut i32) -> i32 {
-    unimplemented!()
-}
-
-pub fn DecodeTimeOnly(
-    _field: &[*mut u8],
-    _ftype: &[i32],
-    _nf: i32,
-    _dtype: &mut i32,
-    _tm: &mut pg_tm,
-    _fsec: &mut fsec_t,
-    _tzp: &mut i32,
-    _extra: &mut DateTimeErrorExtra,
-) -> i32 {
-    unimplemented!()
-}
-
-pub fn DecodeInterval(
-    _field: &[*mut u8],
-    _ftype: &[i32],
-    _nf: i32,
-    _range: i32,
-    _dtype: &mut i32,
-    _itm_in: &mut pg_itm_in,
-) -> i32 {
-    unimplemented!()
-}
-
-pub fn DecodeISO8601Interval(_str: &str, _dtype: &mut i32, _itm_in: &mut pg_itm_in) -> i32 {
-    unimplemented!()
-}
-
 pub fn DateTimeParseError(
     _dterr: i32,
     _extra: &DateTimeErrorExtra,
     _str: &str,
     _datatype: &str,
-    // struct Node *escontext -> soft-error context; TODO(panic) on hard error.
 ) {
     unimplemented!()
 }
@@ -302,48 +250,7 @@ pub fn DetermineTimeZoneAbbrevOffsetTS(_ts: Timestamp, _abbr: &str, _tzp: &pg_tz
     unimplemented!()
 }
 
-pub fn EncodeDateOnly(_tm: &pg_tm, _style: i32, _str: &mut [u8]) {
-    unimplemented!()
-}
-
-pub fn EncodeTimeOnly(
-    _tm: &pg_tm,
-    _fsec: fsec_t,
-    _print_tz: bool,
-    _tz: i32,
-    _style: i32,
-    _str: &mut [u8],
-) {
-    unimplemented!()
-}
-
-pub fn EncodeDateTime(
-    _tm: &pg_tm,
-    _fsec: fsec_t,
-    _print_tz: bool,
-    _tz: i32,
-    _tzn: Option<&str>,
-    _style: i32,
-    _str: &mut [u8],
-) {
-    unimplemented!()
-}
-
-pub fn EncodeInterval(_itm: &pg_itm, _style: i32, _str: &mut [u8]) {
-    unimplemented!()
-}
-
 pub fn EncodeSpecialTimestamp(_dt: Timestamp, _str: &mut [u8]) {
-    unimplemented!()
-}
-
-pub fn ValidateDate(
-    _fmask: i32,
-    _isjulian: bool,
-    _is2digits: bool,
-    _bc: bool,
-    _tm: &mut pg_tm,
-) -> i32 {
     unimplemented!()
 }
 
@@ -353,16 +260,6 @@ pub fn DecodeTimezoneAbbrev(
     _lowtoken: &str,
     _extra: &mut DateTimeErrorExtra,
 ) -> (i32, i32, i32, Option<Box<pg_tz>>) {
-    unimplemented!()
-}
-
-/// out-param val -> tuple with the int status.
-pub fn DecodeSpecial(_field: i32, _lowtoken: &str) -> (i32, i32) {
-    unimplemented!()
-}
-
-/// out-param val -> tuple with the int status.
-pub fn DecodeUnits(_field: i32, _lowtoken: &str) -> (i32, i32) {
     unimplemented!()
 }
 
@@ -384,10 +281,6 @@ pub fn ClearTimeZoneAbbrevCache() {
     unimplemented!()
 }
 
-pub fn j2day(_date: i32) -> i32 {
-    unimplemented!()
-}
-
 // TemporalSimplify takes/returns a planner Node; out of scope for the skeleton.
 pub fn TemporalSimplify(_max_precis: i32 /* node: &mut Node */) {
     unimplemented!()
@@ -403,10 +296,5 @@ pub fn ConvertTimeZoneAbbrevs(/* abbrevs: &[tzEntry] */) -> TimeZoneAbbrevTable 
 }
 
 pub fn InstallTimeZoneAbbrevs(_tbl: &TimeZoneAbbrevTable) {
-    unimplemented!()
-}
-
-/// In-place adjust; soft-error escontext -> TODO(panic) / later Result.
-pub fn AdjustTimestampForTypmod(_time: &mut Timestamp, _typmod: i32) -> bool {
     unimplemented!()
 }

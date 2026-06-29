@@ -2,6 +2,7 @@
 
 pub mod bool;
 pub mod char;
+pub mod datetime;
 pub mod float;
 pub mod int;
 pub mod name;
