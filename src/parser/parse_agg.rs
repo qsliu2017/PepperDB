@@ -6,15 +6,9 @@ use crate::nodes::primnodes::{Aggref, GroupingFunc, WindowFunc};
 use crate::parser::parse_node::ParseState;
 use crate::postgres_ext::Oid;
 
-pub fn transformAggregateCall(
-    _pstate: &mut ParseState,
-    _agg: &mut Aggref,
-    _args: Vec<Node>,
-    _aggorder: Vec<Node>,
-    _agg_distinct: bool,
-) {
-    unimplemented!()
-}
+/// PG `transformAggregateCall`. See `crate::backend::parser::parse_agg` (M5 body):
+/// fills the Aggref's args/aggargtypes and marks `pstate.p_has_aggs`.
+pub use crate::backend::parser::parse_agg::transformAggregateCall;
 
 pub fn transformGroupingFunc(_pstate: &mut ParseState, _p: &mut GroupingFunc) -> Node {
     unimplemented!()
@@ -28,9 +22,9 @@ pub fn transformWindowFuncCall(
     unimplemented!()
 }
 
-pub fn parseCheckAggregates(_pstate: &mut ParseState, _qry: &mut Query) {
-    unimplemented!()
-}
+/// PG `parseCheckAggregates`. See `crate::backend::parser::parse_agg` (M5 body):
+/// verifies the targetlist/HAVING reference only grouped columns or aggregates.
+pub use crate::backend::parser::parse_agg::parseCheckAggregates;
 
 pub fn expand_grouping_sets(
     _grouping_sets: Vec<Node>,

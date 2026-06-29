@@ -202,6 +202,24 @@ fn assign_collations_walker(
             no_collation(context);
             false
         }
+        // M5 (step 26): an Aggref. Descend into its argument expressions (the
+        // TargetEntry-wrapped inputs) so nested collatable expressions are visited;
+        // the M5 aggregates (count/sum/min/max over int) produce uncollatable
+        // results, so the node's own collation is InvalidOid. The aggregate's input
+        // collation (inputcollid) selection over collatable inputs grows with text.
+        Node::Aggref(agg) => {
+            for arg in &mut agg.args {
+                if let Node::TargetEntry(te) = arg
+                    && let Some(expr) = te.expr.as_mut()
+                {
+                    assign_expr_collations(pstate, expr);
+                } else {
+                    assign_expr_collations(pstate, arg);
+                }
+            }
+            no_collation(context);
+            false
+        }
         // CollateExpr / SubLink / ... (collation-bearing) grow per milestone.
         other => not_yet_reachable(other),
     }

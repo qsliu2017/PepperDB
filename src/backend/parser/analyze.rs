@@ -352,8 +352,15 @@ async fn transform_select_stmt_async(
     // caches the statement references before the sync transform runs.
     warm_expr_caches(shared, pstate, &stmt.targetList, stmt.whereClause.as_ref()).await;
 
+    // M5 (step 26): warm the aggregate-resolution caches (PROCNAMEARGSNSP for the
+    // aggregate names, AGGFNOID for the resolved aggregate) and the grouping/sort
+    // comparison operators (`=`/`<`/`>` over the column types) so the sync GROUP BY
+    // / ORDER BY / aggregate transforms resolve over the wire.
+    warm_grouping_caches(shared, pstate, stmt).await;
+
     // Transform the target list (now that the namespace is populated, `*` and
-    // column refs resolve).
+    // column refs resolve). Aggregate calls in the target list resolve to Aggref
+    // nodes here (transformAggregateCall, which sets pstate.p_has_aggs).
     qry.targetList =
         transformTargetList(pstate, stmt.targetList.clone(), ParseExprKind::SelectTarget);
 
@@ -365,10 +372,93 @@ async fn transform_select_stmt_async(
         "WHERE",
     );
 
+    // GROUP BY -> Query.groupClause; ORDER BY -> Query.sortClause; DISTINCT ->
+    // Query.distinctClause; LIMIT/OFFSET -> Query.limit{Count,Offset}. PG's clause
+    // ordering: GROUP BY (which may extend the tlist) before ORDER BY/DISTINCT,
+    // which reference the (now-final) tlist; LIMIT/OFFSET last. (M5, step 26.)
+    transform_select_clauses(pstate, stmt, &mut qry);
+
     reject_unsupported_select_clauses(stmt);
 
     finish_query(pstate, &mut qry, qual);
+
+    // parseCheckAggregates runs only when the query is an aggregate/grouped query.
+    if qry.hasAggs || !qry.groupClause.is_empty() || qry.havingQual.is_some() {
+        crate::parser::parse_agg::parseCheckAggregates(pstate, &mut qry);
+    }
+
     qry
+}
+
+/// Transform the GROUP BY / ORDER BY / DISTINCT / LIMIT / OFFSET clauses of a
+/// SELECT into their `Query` fields (M5, step 26). Factored out of
+/// `transform_select_stmt_async` because `finish_query` consumes pstate's tlist
+/// staging; these run before that.
+fn transform_select_clauses(
+    pstate: &mut ParseState,
+    stmt: &SelectStmt,
+    qry: &mut Query,
+) {
+    use crate::backend::parser::parse_clause::{
+        transform_distinct_clause, transform_group_clause, transform_limit_clause,
+        transform_sort_clause,
+    };
+
+    // GROUP BY first: it can append resjunk tlist entries that ORDER BY/DISTINCT
+    // then see. The ORDER BY clauses are passed in so GROUP BY can reuse their refs.
+    if !stmt.groupClause.is_empty() {
+        let presort = transform_sort_clause(
+            pstate,
+            stmt.sortClause.clone(),
+            &mut qry.targetList,
+            ParseExprKind::OrderBy,
+            true,
+        );
+        qry.groupClause = transform_group_clause(
+            pstate,
+            stmt.groupClause.clone(),
+            &mut qry.groupingSets,
+            &mut qry.targetList,
+            presort.clone(),
+            ParseExprKind::GroupBy,
+            true,
+        );
+        qry.sortClause = presort;
+    } else if !stmt.sortClause.is_empty() {
+        qry.sortClause = transform_sort_clause(
+            pstate,
+            stmt.sortClause.clone(),
+            &mut qry.targetList,
+            ParseExprKind::OrderBy,
+            false,
+        );
+    }
+
+    // DISTINCT (over the whole select list), aligned with ORDER BY's leading refs.
+    if !stmt.distinctClause.is_empty() {
+        qry.distinctClause =
+            transform_distinct_clause(pstate, &mut qry.targetList, qry.sortClause.clone(), false);
+    }
+
+    // LIMIT / OFFSET (coerced to int8).
+    qry.limitOffset = transform_limit_clause(
+        pstate,
+        stmt.limitOffset.clone(),
+        ParseExprKind::Offset,
+        "OFFSET",
+        crate::nodes::nodes::LimitOption::COUNT,
+    );
+    qry.limitCount = transform_limit_clause(
+        pstate,
+        stmt.limitCount.clone(),
+        ParseExprKind::Limit,
+        "LIMIT",
+        stmt.limitOption,
+    );
+    qry.limitOption = stmt.limitOption;
+
+    // hasAggs is read from pstate (set by transformAggregateCall during the tlist
+    // transform); finish_query copies it onto qry.
 }
 
 /// Async-warm the operator/function syscaches the SELECT's expressions reference,
@@ -383,6 +473,132 @@ async fn transform_select_stmt_async(
 /// every operator/function name found in the target list + WHERE clause is warmed
 /// against that small type set (`OPERNAMENSP` -> `OPEROID` -> `PROCOID`, and
 /// `PROCNAMEARGSNSP` -> `PROCOID` for function calls). Over-warming a few unused
+/// M5 (step 26): async-warm the aggregate-resolution + grouping/ordering operator
+/// caches the SYNC transform needs over the wire. There is no async aggregate /
+/// clause transform, so the caches must be hit-warm before `transformTargetList` /
+/// `transformGroupClause` / `transformSortClause` run:
+///   - PROCNAMEARGSNSP for every aggregate name in the target list, over the empty
+///     arg list (`count(*)`) and each candidate single-arg type; then AGGFNOID for
+///     the resolved aggregate (read off the warmed pg_proc row).
+///   - OPERNAMENSP for `=` / `<` / `>` over the candidate column types (the eqop /
+///     sortop the GROUP BY / ORDER BY clause resolution looks up).
+///
+/// Over-warming unused combinations is harmless (a negative cache entry).
+#[allow(
+    clippy::cast_ptr_alignment,
+    reason = "GETSTRUCT returns the MAXALIGN'd tuple body, aligned for Form_pg_proc"
+)]
+async fn warm_grouping_caches(shared: &Arc<SharedState>, pstate: &ParseState, stmt: &SelectStmt) {
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+    use crate::catalog::genbki::INT4OID;
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    use crate::catalog::pg_proc::FormData_pg_proc;
+    use crate::postgres::{NameGetDatum, ObjectIdGetDatum, PointerGetDatum};
+    use crate::utils::syscache::SysCacheIdentifier as Sc;
+
+    // Candidate operand/argument types: the namespace column types + int4.
+    let mut types: Vec<Oid> = vec![INT4OID];
+    for nsitem in &pstate.p_namespace {
+        for col in &nsitem.nscolumns {
+            if col.vartype != Oid(0) && !types.contains(&col.vartype) {
+                types.push(col.vartype);
+            }
+        }
+    }
+
+    // 1) Aggregate names in the target list (FuncCall nodes). Warm PROCNAMEARGSNSP
+    //    over the empty arg list (count(*)) and each single candidate-type arg, then
+    //    AGGFNOID for whatever pg_proc row resolves (an aggregate prokind 'a').
+    let mut agg_names: Vec<String> = Vec::new();
+    for n in &stmt.targetList {
+        if let Node::ResTarget(rt) = n {
+            collect_func_names(rt.val.as_ref(), &mut agg_names);
+        }
+    }
+    for name in &agg_names {
+        let nd = name_data(name);
+        // Try the zero-arg form (count(*)) and each single-arg type.
+        let mut arglists: Vec<Vec<Oid>> = vec![Vec::new()];
+        for &t in &types {
+            arglists.push(vec![t]);
+        }
+        for argtypes in &arglists {
+            let argvec = crate::utils::builtins::buildoidvector(argtypes);
+            let keys = [
+                NameGetDatum(&nd),
+                PointerGetDatum(argvec.cast::<u8>()),
+                ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
+            ];
+            let Some(tup) = search_sys_cache_populate(shared, Sc::PROCNAMEARGSNSP, &keys).await
+            else {
+                continue;
+            };
+            let aggfnoid = {
+                // SAFETY: a held PROCNAMEARGSNSP hit -> a pg_proc row.
+                let form = unsafe {
+                    &*crate::access::htup_details::GETSTRUCT(&*tup).cast::<FormData_pg_proc>()
+                };
+                (form.prokind == crate::catalog::pg_proc::PROKIND_AGGREGATE).then_some(form.oid)
+            };
+            release_sys_cache(tup);
+            if let Some(oid) = aggfnoid
+                && let Some(t) =
+                    search_sys_cache_populate(shared, Sc::AGGFNOID, &[ObjectIdGetDatum(oid)]).await
+            {
+                release_sys_cache(t);
+            }
+        }
+    }
+
+    // 2) The grouping / ordering comparison operators (`=`/`<`/`>`) over each
+    //    candidate type, but only when the query actually groups/sorts/distincts.
+    if stmt.groupClause.is_empty()
+        && stmt.sortClause.is_empty()
+        && stmt.distinctClause.is_empty()
+    {
+        return;
+    }
+    for opname in ["=", "<", ">"] {
+        let nd = name_data(opname);
+        for &t in &types {
+            let keys = [
+                NameGetDatum(&nd),
+                ObjectIdGetDatum(t),
+                ObjectIdGetDatum(t),
+                ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
+            ];
+            if let Some(tup) = search_sys_cache_populate(shared, Sc::OPERNAMENSP, &keys).await {
+                release_sys_cache(tup);
+            }
+        }
+    }
+}
+
+/// Collect the (last-component) function names of every `FuncCall` in a raw
+/// expression tree, for aggregate-cache pre-warming.
+fn collect_func_names(node: Option<&Node>, names: &mut Vec<String>) {
+    let Some(node) = node else { return };
+    match node {
+        Node::FuncCall(fc) => {
+            if let Some(Node::String_(s)) = fc.funcname.last()
+                && !names.contains(&s.sval)
+            {
+                names.push(s.sval.clone());
+            }
+            for arg in &fc.args {
+                collect_func_names(Some(arg), names);
+            }
+        }
+        Node::A_Expr(a) => {
+            collect_func_names(a.lexpr.as_ref(), names);
+            collect_func_names(a.rexpr.as_ref(), names);
+        }
+        Node::TypeCast(tc) => collect_func_names(tc.arg.as_ref(), names),
+        _ => {}
+    }
+}
+
 /// type combinations is harmless (a negative cache entry).
 #[allow(
     clippy::cast_ptr_alignment,
@@ -854,23 +1070,12 @@ fn finish_query(pstate: &mut ParseState, qry: &mut Query, qual: Option<Node>) {
     assign_query_collations(pstate, qry);
 }
 
-/// The not-yet-reachable clause guards shared by the SELECT transforms.
+/// The not-yet-reachable clause guards shared by the SELECT transforms. WHERE
+/// (transform_where_clause), GROUP BY / ORDER BY / DISTINCT / LIMIT / OFFSET
+/// (transform_select_clauses) are handled as of M5; HAVING / WINDOW / locking grow.
 fn reject_unsupported_select_clauses(stmt: &SelectStmt) {
-    // WHERE is handled (transform_where_clause); HAVING/ORDER BY/GROUP BY/etc. grow.
     if stmt.havingClause.is_some() {
         not_yet_reachable("transformSelectStmt: HAVING clause");
-    }
-    if !stmt.sortClause.is_empty() {
-        not_yet_reachable("transformSelectStmt: ORDER BY clause");
-    }
-    if !stmt.groupClause.is_empty() {
-        not_yet_reachable("transformSelectStmt: GROUP BY clause");
-    }
-    if !stmt.distinctClause.is_empty() {
-        not_yet_reachable("transformSelectStmt: DISTINCT clause");
-    }
-    if stmt.limitOffset.is_some() || stmt.limitCount.is_some() {
-        not_yet_reachable("transformSelectStmt: LIMIT/OFFSET clause");
     }
     if !stmt.windowClause.is_empty() {
         not_yet_reachable("transformSelectStmt: WINDOW clause");
@@ -1610,6 +1815,121 @@ mod relation_tests {
             let Node::RangeTblEntry(rte) = &stmt.rtable[0] else { panic!("not an RTE") };
             assert_eq!(rte.rtekind, crate::nodes::parsenodes::RTEKind::RESULT);
             assert!(matches!(&stmt.plan_tree, Node::Result(_)), "still a Result plan");
+        }))
+        .await;
+    }
+
+    // ---- M5 (step 26): grouping / aggregation / ordering / distinct / limit -----
+
+    /// `SELECT count(*) FROM t` -> hasAggs, one Aggref (count, OID 2803, int8) in the
+    /// targetlist; plans to a plain Agg over the SeqScan.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn count_star_analyzes_and_plans_to_plain_agg() {
+        use crate::nodes::nodes::AggStrategy;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT count(*) FROM t").await;
+            assert!(q.hasAggs, "count(*) sets hasAggs");
+            assert!(q.groupClause.is_empty(), "no GROUP BY");
+            let Node::TargetEntry(te) = &q.targetList[0] else { panic!("not a TargetEntry") };
+            let Node::Aggref(agg) = te.expr.as_ref().unwrap() else { panic!("not an Aggref") };
+            assert_eq!(agg.aggfnoid, Oid(2803), "count() aggregate OID");
+            assert_eq!(agg.aggtype, Oid(20), "count returns int8");
+            assert!(agg.aggstar, "count(*) sets aggstar");
+
+            let stmt = plan(&shared, *q);
+            let Node::Agg(a) = &stmt.plan_tree else { panic!("plan is not an Agg") };
+            assert!(matches!(a.aggstrategy, AggStrategy::PLAIN), "no GROUP BY -> AGG_PLAIN");
+            assert_eq!(a.num_cols, 0, "no grouping columns");
+            assert!(matches!(a.plan.lefttree.as_ref(), Some(Node::SeqScan(_))), "Agg over SeqScan");
+        }))
+        .await;
+    }
+
+    /// `SELECT a, count(*) FROM t GROUP BY a` -> one SortGroupClause (eqop int4eq 96),
+    /// the targetlist Var a + Aggref count; plans to AGG_SORTED over a Sort over the
+    /// SeqScan, with grpColIdx pointing at the group key.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn group_by_analyzes_and_plans_to_sorted_agg() {
+        use crate::nodes::nodes::AggStrategy;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT a, count(*) FROM t GROUP BY a").await;
+            assert!(q.hasAggs);
+            assert_eq!(q.groupClause.len(), 1, "one GROUP BY column");
+            let Node::SortGroupClause(sgc) = &q.groupClause[0] else { panic!("not a SortGroupClause") };
+            assert_eq!(sgc.eqop, Oid(96), "int4 equality operator (int4eq)");
+            assert_ne!(sgc.tleSortGroupRef, 0, "the group column has a sortgroupref");
+
+            let stmt = plan(&shared, *q);
+            let Node::Agg(a) = &stmt.plan_tree else { panic!("plan is not an Agg") };
+            assert!(matches!(a.aggstrategy, AggStrategy::SORTED), "GROUP BY -> AGG_SORTED");
+            assert_eq!(a.num_cols, 1);
+            assert_eq!(a.grp_col_idx.len(), 1, "one grouping column index");
+            assert_eq!(a.grp_operators[0], Oid(96));
+            // The Agg's child is a Sort on the group key, over the SeqScan.
+            let Some(Node::Sort(s)) = a.plan.lefttree.as_ref() else { panic!("Agg child is not a Sort") };
+            assert_eq!(s.num_cols, 1, "Sort on the single group key");
+            assert!(matches!(s.plan.lefttree.as_ref(), Some(Node::SeqScan(_))), "Sort over SeqScan");
+        }))
+        .await;
+    }
+
+    /// `SELECT a FROM t ORDER BY a DESC` -> one ORDER BY SortGroupClause with the `>`
+    /// sortop (int4gt 521) and reverse_sort; plans to a Sort over the SeqScan.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn order_by_desc_analyzes_and_plans_to_sort() {
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT a FROM t ORDER BY a DESC").await;
+            assert_eq!(q.sortClause.len(), 1);
+            let Node::SortGroupClause(sgc) = &q.sortClause[0] else { panic!("not a SortGroupClause") };
+            assert!(sgc.reverse_sort, "DESC sets reverse_sort");
+            assert_eq!(sgc.sortop, Oid(521), "int4 `>` operator for DESC");
+
+            let stmt = plan(&shared, *q);
+            let Node::Sort(s) = &stmt.plan_tree else { panic!("plan is not a Sort") };
+            assert_eq!(s.num_cols, 1);
+            assert_eq!(s.sort_operators[0], Oid(521));
+            assert!(s.nulls_first[0], "DESC default is NULLS FIRST");
+        }))
+        .await;
+    }
+
+    /// `SELECT DISTINCT a FROM t` -> distinctClause set; plans to a Unique over a
+    /// Sort over the SeqScan. `SELECT a FROM t ORDER BY a LIMIT 2` -> a Limit (int8
+    /// count Const) over a Sort over the SeqScan.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn distinct_and_limit_plan_shapes() {
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT DISTINCT a FROM t").await;
+            assert_eq!(q.distinctClause.len(), 1, "one DISTINCT column");
+            let stmt = plan(&shared, *q);
+            let Node::Unique(u) = &stmt.plan_tree else { panic!("plan is not a Unique") };
+            assert_eq!(u.num_cols, 1);
+            assert!(matches!(u.plan.lefttree.as_ref(), Some(Node::Sort(_))), "Unique over Sort");
+
+            let q = analyze(&shared, "SELECT a FROM t ORDER BY a LIMIT 2").await;
+            assert!(q.limitCount.is_some(), "LIMIT count set");
+            let Some(Node::Const(c)) = q.limitCount.as_ref() else { panic!("LIMIT not a Const") };
+            assert_eq!(c.consttype, Oid(20), "LIMIT count coerced to int8");
+            assert_eq!(crate::postgres::DatumGetInt64(c.constvalue), 2);
+            let stmt = plan(&shared, *q);
+            let Node::Limit(l) = &stmt.plan_tree else { panic!("plan is not a Limit") };
+            assert!(matches!(l.plan.lefttree.as_ref(), Some(Node::Sort(_))), "Limit over Sort");
         }))
         .await;
     }

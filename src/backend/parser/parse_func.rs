@@ -35,11 +35,13 @@ use crate::postgres_ext::{InvalidOid, Oid};
 use crate::utils::syscache::SysCacheIdentifier;
 
 /// The resolved-function details `func_get_detail` returns (PG's trailing pointer
-/// out-params, folded into one struct). M3 fills the regular-function subset.
+/// out-params, folded into one struct). M3 fills the regular-function subset; M5
+/// (step 26) adds `prokind` so the aggregate path is recognized.
 pub struct FuncDetail {
     pub funcid: Oid,
     pub rettype: Oid,
     pub retset: bool,
+    pub prokind: i8,
 }
 
 /// Read the `Form_pg_proc` out of a held syscache tuple; the borrow is tied to the
@@ -92,9 +94,19 @@ pub fn func_get_detail(funcname: &[Node], argtypes: &[Oid]) -> (FuncDetailCode, 
     };
     // SAFETY: `tup` is a held PROCNAMEARGSNSP hit -> a pg_proc row.
     let form = unsafe { proc_form(&*tup) };
-    let detail = FuncDetail { funcid: form.oid, rettype: form.prorettype, retset: form.proretset };
+    let detail = FuncDetail {
+        funcid: form.oid,
+        rettype: form.prorettype,
+        retset: form.proretset,
+        prokind: form.prokind,
+    };
     release_sys_cache(tup);
-    (FuncDetailCode::Normal, detail.into())
+    // M5 (step 26): an aggregate proc (prokind 'a') routes to the aggregate path.
+    let code = match detail.prokind {
+        crate::catalog::pg_proc::PROKIND_AGGREGATE => FuncDetailCode::Aggregate,
+        _ => FuncDetailCode::Normal,
+    };
+    (code, detail.into())
 }
 
 /// PG `make_fn_expr` (the FuncExpr-building tail of ParseFuncOrColumn): build the
@@ -120,29 +132,84 @@ fn make_fn_expr(detail: &FuncDetail, args: Vec<Node>, funcformat: CoercionForm, 
 /// projection fallback, aggregates/window funcs, VARIADIC / named / default args,
 /// and the argument type-coercion (`make_fn_arguments`) grow at their milestones.
 pub fn parse_func_or_column(
-    _pstate: &ParseState,
+    pstate: &mut ParseState,
     funcname: &[Node],
     fargs: Vec<Node>,
     fn_: &crate::nodes::parsenodes::FuncCall,
     location: i32,
 ) -> Node {
-    let _ = fn_;
     let actual_arg_types: Vec<Oid> = fargs.iter().map(exprType).collect();
 
     let (fdresult, detail) = func_get_detail(funcname, &actual_arg_types);
-    if fdresult == FuncDetailCode::Normal {
-        let detail = detail.unwrap_or_else(|| unreachable!("NORMAL implies a detail"));
-        // M3 argument types match the function's declared types exactly, so no
-        // make_fn_arguments coercion is needed (wired with the coercible path).
-        return make_fn_expr(&detail, fargs, CoercionForm::EXPLICIT_CALL, location);
+    match fdresult {
+        FuncDetailCode::Normal => {
+            let detail = detail.unwrap_or_else(|| unreachable!("NORMAL implies a detail"));
+            // M3 argument types match the function's declared types exactly, so no
+            // make_fn_arguments coercion is needed (wired with the coercible path).
+            make_fn_expr(&detail, fargs, CoercionForm::EXPLICIT_CALL, location)
+        }
+        FuncDetailCode::Aggregate => {
+            // M5 (step 26): build the Aggref and resolve it through transformAggregateCall.
+            let detail = detail.unwrap_or_else(|| unreachable!("AGGREGATE implies a detail"));
+            make_aggref(pstate, &detail, fargs, fn_, location)
+        }
+        _ => {
+            // The window / procedure / coercion FuncDetailCodes and the func-vs-column
+            // projection fallback grow at their milestones; an unresolved name errors.
+            let name = func_name_str(funcname);
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_FUNCTION)
+                    .errmsg(format!("function {name} does not exist"));
+            });
+            unreachable!("ereport(ERROR) diverges");
+        }
     }
-    // The aggregate / window / procedure / coercion FuncDetailCodes and the
-    // func-vs-column projection fallback grow at their milestones; an unresolved
-    // name is an error here.
-    let name = func_name_str(funcname);
-    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
-        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_FUNCTION)
-            .errmsg(format!("function {name} does not exist"));
-    });
-    unreachable!("ereport(ERROR) diverges");
+}
+
+/// PG `ParseFuncOrColumn` aggregate arm (M5 subset): build the partially-filled
+/// `Aggref` (aggfnoid/aggtype/args/aggstar from the resolved detail + raw call) and
+/// hand it to `transformAggregateCall`, which fills the remaining fields and marks
+/// `pstate.p_hasAggs`. Returns the `Aggref` node.
+fn make_aggref(
+    pstate: &mut ParseState,
+    detail: &FuncDetail,
+    fargs: Vec<Node>,
+    fn_: &crate::nodes::parsenodes::FuncCall,
+    location: i32,
+) -> Node {
+    use crate::nodes::nodes::AggSplit;
+    use crate::nodes::primnodes::Aggref;
+
+    let mut aggref = Aggref {
+        aggfnoid: detail.funcid,
+        aggtype: detail.rettype,
+        aggcollid: InvalidOid,
+        inputcollid: InvalidOid,
+        aggtranstype: InvalidOid, // set by the planner (resolve_aggregate_transtype)
+        aggargtypes: Vec::new(),
+        aggdirectargs: Vec::new(),
+        args: Vec::new(),  // filled by transformAggregateCall (TargetEntry list)
+        aggorder: Vec::new(),
+        aggdistinct: Vec::new(),
+        aggfilter: None,
+        aggstar: fn_.agg_star,
+        aggvariadic: false,
+        aggkind: b'n' as i8,
+        aggpresorted: false,
+        agglevelsup: 0,
+        aggsplit: AggSplit::SIMPLE,
+        aggno: -1,
+        aggtransno: -1,
+        location,
+    };
+
+    crate::parser::parse_agg::transformAggregateCall(
+        pstate,
+        &mut aggref,
+        fargs,
+        fn_.agg_order.clone(),
+        fn_.agg_distinct,
+    );
+
+    Node::Aggref(Box::new(aggref))
 }

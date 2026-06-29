@@ -2,6 +2,7 @@
 
 pub mod analyze;
 pub mod gram;
+pub mod parse_agg;
 pub mod parse_clause;
 pub mod parse_coerce;
 pub mod parse_collate;

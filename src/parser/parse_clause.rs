@@ -24,38 +24,17 @@ pub fn setTargetTable(
 /// PG `transformWhereClause`. See `crate::backend::parser::parse_clause`.
 pub use crate::backend::parser::parse_clause::transform_where_clause as transformWhereClause;
 
-pub fn transformLimitClause(
-    _pstate: &mut ParseState,
-    _clause: Option<Node>,
-    _expr_kind: ParseExprKind,
-    _construct_name: &str,
-    _limit_option: LimitOption,
-) -> Option<Node> {
-    unimplemented!()
-}
+/// PG `transformLimitClause`. See `crate::backend::parser::parse_clause` (M5 body):
+/// transforms + coerces the LIMIT/OFFSET expression to int8.
+pub use crate::backend::parser::parse_clause::transform_limit_clause as transformLimitClause;
 
-/// `groupingSets`, `targetlist` are in/out params -> threaded as `&mut`.
-pub fn transformGroupClause(
-    _pstate: &mut ParseState,
-    _grouplist: Vec<Node>,
-    _grouping_sets: &mut Vec<Node>,
-    _targetlist: &mut Vec<Node>,
-    _sort_clause: Vec<Node>,
-    _expr_kind: ParseExprKind,
-    _use_sql99: bool,
-) -> Vec<Node> {
-    unimplemented!()
-}
+/// PG `transformGroupClause`. See `crate::backend::parser::parse_clause` (M5 body):
+/// builds the GROUP BY SortGroupClause list (in/out `grouping_sets`/`targetlist`).
+pub use crate::backend::parser::parse_clause::transform_group_clause as transformGroupClause;
 
-pub fn transformSortClause(
-    _pstate: &mut ParseState,
-    _orderlist: Vec<Node>,
-    _targetlist: &mut Vec<Node>,
-    _expr_kind: ParseExprKind,
-    _use_sql99: bool,
-) -> Vec<Node> {
-    unimplemented!()
-}
+/// PG `transformSortClause`. See `crate::backend::parser::parse_clause` (M5 body):
+/// builds the ORDER BY SortGroupClause list.
+pub use crate::backend::parser::parse_clause::transform_sort_clause as transformSortClause;
 
 pub fn transformWindowDefinitions(
     _pstate: &mut ParseState,
@@ -65,14 +44,9 @@ pub fn transformWindowDefinitions(
     unimplemented!()
 }
 
-pub fn transformDistinctClause(
-    _pstate: &mut ParseState,
-    _targetlist: &mut Vec<Node>,
-    _sort_clause: Vec<Node>,
-    _is_agg: bool,
-) -> Vec<Node> {
-    unimplemented!()
-}
+/// PG `transformDistinctClause`. See `crate::backend::parser::parse_clause` (M5
+/// body): builds the DISTINCT SortGroupClause list over the select-list columns.
+pub use crate::backend::parser::parse_clause::transform_distinct_clause as transformDistinctClause;
 
 pub fn transformDistinctOnClause(
     _pstate: &mut ParseState,

@@ -31,6 +31,19 @@ fn not_yet_reachable(what: &str) -> ! {
     unimplemented!("{what}: not yet translated for this milestone");
 }
 
+/// Whether the query has an upper (grouping/aggregation/distinct/sort/limit) stage,
+/// in which case the base scan computes the `scan_input_tlist` (which may be empty,
+/// e.g. for a bare `count(*)`) rather than the final `processed_tlist`. Mirrors the
+/// `needs_upper` test in `grouping_planner`.
+fn query_has_upper_stage(root: &PlannerInfo) -> bool {
+    root.parse.hasAggs
+        || !root.parse.groupClause.is_empty()
+        || !root.parse.distinctClause.is_empty()
+        || !root.parse.sortClause.is_empty()
+        || root.parse.limitCount.is_some()
+        || root.parse.limitOffset.is_some()
+}
+
 /// PG `query_planner`: generate paths for the scan/join portion of the query.
 /// Returns the RelOptInfo for the topmost scan/join relation.
 ///
@@ -184,17 +197,22 @@ fn setup_simple_rel_arrays(root: &mut PlannerInfo) {
     }
 }
 
-/// Build the dummy result rel's PathTarget from `root.processed_tlist`. The
-/// processed_tlist holds `Node` (TargetEntry-wrapped); unwrap them for
-/// make_pathtarget_from_tlist.
+/// Build the base scan rel's PathTarget. When the query groups/aggregates, the scan
+/// computes the `scan_input_tlist` (the flattened group/agg-input Vars) rather than
+/// the final `processed_tlist` (which carries the Aggrefs, computed above by the Agg
+/// node). Both hold `Node` (TargetEntry-wrapped); unwrap for make_pathtarget_from_tlist.
 fn make_pathtarget_from_tlist_nodes(root: &PlannerInfo) -> PathTarget {
     use crate::nodes::nodes::Node;
-    let tlist: Vec<_> = root
-        .processed_tlist
+    let source = if query_has_upper_stage(root) {
+        &root.scan_input_tlist
+    } else {
+        &root.processed_tlist
+    };
+    let tlist: Vec<_> = source
         .iter()
         .map(|n| match n {
             Node::TargetEntry(te) => (**te).clone(),
-            _ => not_yet_reachable("query_planner: processed_tlist entry is not a TargetEntry"),
+            _ => not_yet_reachable("query_planner: tlist entry is not a TargetEntry"),
         })
         .collect();
     make_pathtarget_from_tlist(&tlist)
@@ -303,7 +321,15 @@ pub fn create_plan(root: &mut PlannerInfo, best_path: &Path) -> crate::nodes::no
 
 /// `apply_tlist_labeling(plan->targetlist, root->processed_tlist)` over the top
 /// plan node's targetlist (Result or SeqScan). Both are `Vec<Node>` of TargetEntries.
+/// When the query groups, the base scan computes `scan_input_tlist` (the group/agg
+/// input Vars), so the scan plan is labeled against that; the final names land on
+/// the Agg's tlist (labeled when the upper plan is assembled).
 fn apply_top_tlist_labeling(root: &PlannerInfo, plan: &mut crate::nodes::nodes::Node) {
+    let label_src = if query_has_upper_stage(root) {
+        &root.scan_input_tlist
+    } else {
+        &root.processed_tlist
+    };
     let tlist = top_plan_tlist_mut(plan);
     let mut dest: Vec<_> = tlist
         .iter()
@@ -312,12 +338,11 @@ fn apply_top_tlist_labeling(root: &PlannerInfo, plan: &mut crate::nodes::nodes::
             _ => not_yet_reachable("apply_tlist_labeling: plan tlist entry is not a TargetEntry"),
         })
         .collect();
-    let src: Vec<_> = root
-        .processed_tlist
+    let src: Vec<_> = label_src
         .iter()
         .map(|n| match n {
             crate::nodes::nodes::Node::TargetEntry(te) => (**te).clone(),
-            _ => not_yet_reachable("apply_tlist_labeling: processed_tlist entry is not a TargetEntry"),
+            _ => not_yet_reachable("apply_tlist_labeling: tlist entry is not a TargetEntry"),
         })
         .collect();
     crate::backend::optimizer::util::tlist::apply_tlist_labeling(&mut dest, &src);

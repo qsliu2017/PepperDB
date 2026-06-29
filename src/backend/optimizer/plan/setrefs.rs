@@ -16,7 +16,8 @@
 
 use crate::nodes::nodes::Node;
 use crate::nodes::pathnodes::PlannerInfo;
-use crate::nodes::plannodes::{Result, SeqScan};
+use crate::nodes::plannodes::{Agg, Limit, Result, SeqScan, Sort, Unique};
+use crate::nodes::primnodes::OUTER_VAR;
 
 /// Panic for a setrefs path not yet translated for this milestone (rules.md s4).
 #[cold]
@@ -64,7 +65,190 @@ fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
         Node::Result(r) => Node::Result(Box::new(set_result_refs(root, *r, rtoffset))),
         Node::SeqScan(s) => Node::SeqScan(Box::new(set_seqscan_refs(root, *s, rtoffset))),
         Node::ModifyTable(m) => Node::ModifyTable(Box::new(set_modifytable_refs(root, *m, rtoffset))),
+        Node::Agg(a) => Node::Agg(Box::new(set_agg_refs(root, *a, rtoffset))),
+        Node::Sort(s) => Node::Sort(Box::new(set_sort_refs(root, *s, rtoffset))),
+        Node::Unique(u) => Node::Unique(Box::new(set_unique_refs(root, *u, rtoffset))),
+        Node::Limit(l) => Node::Limit(Box::new(set_limit_refs(root, *l, rtoffset))),
         other => not_yet_reachable(&format!("set_plan_refs: {other:?}")),
+    }
+}
+
+/// PG `set_plan_refs` T_Agg arm + `set_upper_references`: recurse into the child,
+/// then rewrite the Agg's tlist Vars to reference the child (subplan) output by
+/// position (OUTER_VAR), and assign each Aggref its sequential `aggno`. (M5: no
+/// partial-agg combine, no HAVING qual, no grouping sets.)
+fn set_agg_refs(root: &mut PlannerInfo, mut plan: Agg, rtoffset: usize) -> Agg {
+    crate::assert!(plan.chain.is_empty() && plan.grouping_sets.is_empty());
+    let child = plan
+        .plan
+        .lefttree
+        .take()
+        .unwrap_or_else(|| not_yet_reachable("set_plan_refs: Agg without child"));
+    let child = set_plan_refs(root, child, rtoffset);
+    let child_tlist = plan_tlist(&child).to_vec();
+
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
+    crate::assert!(plan.plan.qual.is_empty(), "set_plan_refs: Agg HAVING qual not yet reachable");
+    assign_agg_nos(&mut plan.plan.targetlist);
+    plan.plan.lefttree = Some(child);
+    plan
+}
+
+/// PG `set_plan_refs` T_Sort arm: recurse into the child, assign the node id; the
+/// Sort's tlist is its child's (a passthrough), so its Var refs are already
+/// child-relative (no rewrite needed). The sortColIdx are child output positions.
+fn set_sort_refs(root: &mut PlannerInfo, mut plan: Sort, rtoffset: usize) -> Sort {
+    let child = plan
+        .plan
+        .lefttree
+        .take()
+        .unwrap_or_else(|| not_yet_reachable("set_plan_refs: Sort without child"));
+    let child = set_plan_refs(root, child, rtoffset);
+    let child_tlist = plan_tlist(&child).to_vec();
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    // A Sort projects nothing; its tlist mirrors the child output. Rewrite any Vars
+    // to OUTER_VAR positions for faithfulness (identity when already positional).
+    fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
+    plan.plan.lefttree = Some(child);
+    plan
+}
+
+/// PG `set_plan_refs` T_Unique arm: like Sort -- recurse, assign id, passthrough tlist.
+fn set_unique_refs(root: &mut PlannerInfo, mut plan: Unique, rtoffset: usize) -> Unique {
+    let child = plan
+        .plan
+        .lefttree
+        .take()
+        .unwrap_or_else(|| not_yet_reachable("set_plan_refs: Unique without child"));
+    let child = set_plan_refs(root, child, rtoffset);
+    let child_tlist = plan_tlist(&child).to_vec();
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
+    plan.plan.lefttree = Some(child);
+    plan
+}
+
+/// PG `set_plan_refs` T_Limit arm: recurse, assign id; passthrough tlist. The
+/// OFFSET/COUNT exprs are Consts (no Vars to fix).
+fn set_limit_refs(root: &mut PlannerInfo, mut plan: Limit, rtoffset: usize) -> Limit {
+    let child = plan
+        .plan
+        .lefttree
+        .take()
+        .unwrap_or_else(|| not_yet_reachable("set_plan_refs: Limit without child"));
+    let child = set_plan_refs(root, child, rtoffset);
+    let child_tlist = plan_tlist(&child).to_vec();
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
+    plan.plan.lefttree = Some(child);
+    plan
+}
+
+/// Allocate the next plan node id (PG's `glob->last_plan_node_id`).
+fn next_plan_node_id(root: &mut PlannerInfo) -> i32 {
+    let id = root.glob.last_plan_node_id;
+    root.glob.last_plan_node_id += 1;
+    id
+}
+
+/// The output targetlist of a plan node (`Plan.targetlist`).
+fn plan_tlist(plan: &Node) -> &[Node] {
+    match plan {
+        Node::Result(r) => &r.plan.targetlist,
+        Node::SeqScan(s) => &s.scan.plan.targetlist,
+        Node::Agg(a) => &a.plan.targetlist,
+        Node::Sort(s) => &s.plan.targetlist,
+        Node::Unique(u) => &u.plan.targetlist,
+        Node::Limit(l) => &l.plan.targetlist,
+        other => not_yet_reachable(&format!("set_plan_refs: child tlist of {other:?}")),
+    }
+}
+
+/// PG `set_upper_references` core: rewrite every `Var` in an upper node's tlist to
+/// reference the subplan's output by position (varno OUTER_VAR, varattno = the child
+/// output column holding that Var). The executor reads the rewritten `varattno`
+/// directly into the child tuple. Aggref-argument Vars are rewritten too.
+fn fix_upper_tlist(tlist: &mut [Node], child_tlist: &[Node]) {
+    for entry in tlist.iter_mut() {
+        let Node::TargetEntry(te) = entry else { continue };
+        if let Some(expr) = te.expr.take() {
+            te.expr = Some(fix_upper_expr(expr, child_tlist));
+        }
+    }
+}
+
+/// Rewrite the Vars in `expr` to OUTER_VAR positions over the child output. The
+/// M5-reachable upper expressions are bare Vars (grouping/sort columns), Aggrefs
+/// (whose argument Vars are rewritten), and Consts.
+fn fix_upper_expr(expr: Node, child_tlist: &[Node]) -> Node {
+    match expr {
+        Node::Var(mut v) => {
+            let pos = child_position_of_var(child_tlist, v.varno, v.varattno).unwrap_or_else(|| {
+                not_yet_reachable("set_upper_references: Var not found in subplan output")
+            });
+            v.varno = OUTER_VAR;
+            v.varattno = pos;
+            Node::Var(v)
+        }
+        Node::Aggref(mut agg) => {
+            // Rewrite the aggregate's argument Vars (TargetEntry-wrapped) to point at
+            // the child output. The Aggref node itself stays in the Agg tlist.
+            agg.args = agg
+                .args
+                .into_iter()
+                .map(|a| match a {
+                    Node::TargetEntry(mut te) => {
+                        if let Some(inner) = te.expr.take() {
+                            te.expr = Some(fix_upper_expr(inner, child_tlist));
+                        }
+                        Node::TargetEntry(te)
+                    }
+                    other => fix_upper_expr(other, child_tlist),
+                })
+                .collect();
+            Node::Aggref(agg)
+        }
+        other => other,
+    }
+}
+
+/// The child output column position (1-based) holding the base-rel Var
+/// (`varno`,`varattno`), or None.
+fn child_position_of_var(
+    child_tlist: &[Node],
+    varno: i32,
+    varattno: crate::access::attnum::AttrNumber,
+) -> Option<crate::access::attnum::AttrNumber> {
+    for n in child_tlist {
+        let Node::TargetEntry(te) = n else { continue };
+        match te.expr.as_ref() {
+            // The child entry is itself a base-rel Var: match on varno/varattno.
+            Some(Node::Var(cv)) if cv.varno == varno && cv.varattno == varattno => {
+                return Some(te.resno);
+            }
+            // The child entry is an OUTER_VAR (already-rewritten lower upper node):
+            // match on the rewritten attno.
+            Some(Node::Var(cv)) if cv.varno == OUTER_VAR && cv.varattno == varattno => {
+                return Some(te.resno);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// PG `set_upper_references` Aggref `aggno` assignment: number the Aggrefs in the
+/// Agg's tlist 0..n in resno order (nodeAgg resolves them positionally).
+fn assign_agg_nos(tlist: &mut [Node]) {
+    let mut aggno = 0;
+    for n in tlist.iter_mut() {
+        let Node::TargetEntry(te) = n else { continue };
+        if let Some(Node::Aggref(agg)) = te.expr.as_mut() {
+            agg.aggno = aggno;
+            agg.aggtransno = aggno;
+            aggno += 1;
+        }
     }
 }
 

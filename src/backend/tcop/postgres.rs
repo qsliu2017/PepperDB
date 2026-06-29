@@ -1513,6 +1513,102 @@ mod wire_tests {
             .expect("supervisor task ok");
     }
 
+    /// THE M5 MILESTONE: GROUP BY + aggregates + ORDER BY + DISTINCT + LIMIT over the
+    /// wire. Over t(a int) with rows {3,1,2,1,3,1}:
+    ///   - `SELECT count(*) FROM t`                 -> 6 (plain agg).
+    ///   - `SELECT a, count(*) FROM t GROUP BY a ORDER BY a` -> (1,3),(2,1),(3,2).
+    ///   - `SELECT a FROM t ORDER BY a` / `... DESC`.
+    ///   - `SELECT DISTINCT a FROM t`               -> 1,2,3.
+    ///   - `SELECT a FROM t ORDER BY a LIMIT 2`     -> 1,1; `LIMIT 2 OFFSET 1` -> 1,1.
+    ///   - `SELECT a, count(*) FROM t GROUP BY a ORDER BY a LIMIT 5` (the headline).
+    ///   - `SELECT sum(a), min(a), max(a) FROM t`   -> 10, 1, 3.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m5_grouping_and_ordering_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        simple_query(&mut client, &mut buf, "CREATE TABLE t (a int)").await;
+        for v in [3, 1, 2, 1, 3, 1] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO t VALUES ({v})")).await;
+        }
+
+        let texts = |msgs: &[Msg]| -> Vec<Vec<String>> {
+            msgs.iter().filter(|m| m.ty == b'D').map(|m| datarow_texts(&m.body)).collect()
+        };
+        let single = |msgs: &[Msg]| -> Vec<String> {
+            msgs.iter().filter(|m| m.ty == b'D').map(|m| datarow_single_text(&m.body)).collect()
+        };
+
+        // count(*) over the whole table (plain aggregation, no GROUP BY).
+        let sel = simple_query(&mut client, &mut buf, "SELECT count(*) FROM t").await;
+        assert_eq!(single(&sel), vec!["6"], "count(*) = 6");
+
+        // The milestone shape (GROUP BY a ORDER BY a).
+        let sel = simple_query(&mut client, &mut buf, "SELECT a, count(*) FROM t GROUP BY a ORDER BY a").await;
+        assert_eq!(
+            texts(&sel),
+            vec![
+                vec!["1".to_owned(), "3".to_owned()],
+                vec!["2".to_owned(), "1".to_owned()],
+                vec!["3".to_owned(), "2".to_owned()],
+            ],
+            "per-group counts ordered by a"
+        );
+
+        // ORDER BY a (ascending) and ORDER BY a DESC.
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM t ORDER BY a").await;
+        assert_eq!(single(&sel), vec!["1", "1", "1", "2", "3", "3"], "ORDER BY a");
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM t ORDER BY a DESC").await;
+        assert_eq!(single(&sel), vec!["3", "3", "2", "1", "1", "1"], "ORDER BY a DESC");
+
+        // DISTINCT a.
+        let sel = simple_query(&mut client, &mut buf, "SELECT DISTINCT a FROM t").await;
+        assert_eq!(single(&sel), vec!["1", "2", "3"], "DISTINCT a");
+
+        // LIMIT and LIMIT/OFFSET over the sorted rows {1,1,1,2,3,3}.
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM t ORDER BY a LIMIT 2").await;
+        assert_eq!(single(&sel), vec!["1", "1"], "ORDER BY a LIMIT 2");
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM t ORDER BY a LIMIT 2 OFFSET 1").await;
+        assert_eq!(single(&sel), vec!["1", "1"], "ORDER BY a LIMIT 2 OFFSET 1");
+
+        // THE HEADLINE: GROUP BY a ORDER BY a LIMIT 5 -> the three groups (under 5).
+        let sel = simple_query(&mut client, &mut buf, "SELECT a, count(*) FROM t GROUP BY a ORDER BY a LIMIT 5").await;
+        let types: Vec<u8> = sel.iter().map(|m| m.ty).collect();
+        assert_eq!(
+            types,
+            vec![b'T', b'D', b'D', b'D', b'C', b'Z'],
+            "RowDescription + 3 group DataRows + CommandComplete + ReadyForQuery"
+        );
+        assert_eq!(
+            texts(&sel),
+            vec![
+                vec!["1".to_owned(), "3".to_owned()],
+                vec!["2".to_owned(), "1".to_owned()],
+                vec!["3".to_owned(), "2".to_owned()],
+            ],
+            "SELECT a, count(*) FROM t GROUP BY a ORDER BY a LIMIT 5"
+        );
+
+        // sum / min / max over the whole table: 3+1+2+1+3+1 = 11... rows are
+        // {3,1,2,1,3,1} so sum = 11, min = 1, max = 3.
+        let sel = simple_query(&mut client, &mut buf, "SELECT sum(a), min(a), max(a) FROM t").await;
+        assert_eq!(
+            texts(&sel),
+            vec![vec!["11".to_owned(), "1".to_owned(), "3".to_owned()]],
+            "sum(a), min(a), max(a)"
+        );
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
     /// M3 BoolExpr qual over the wire: `WHERE a > 0 AND a < 3` keeps {1,2} -- the
     /// AND short-circuit + per-clause int4 comparison. (Three-valued NULL logic is
     /// unit-tested in execExprInterp; the NULL literal is not yet parseable.)

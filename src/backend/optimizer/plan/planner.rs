@@ -128,6 +128,15 @@ pub fn standard_planner(
 
     let mut top_plan = create_plan(&mut root, &best_path);
 
+    // M5 (step 26): build the upper (grouping/aggregation/distinct/sort/limit) plan
+    // on top of the scan/join plan. PG builds these as Paths in grouping_planner and
+    // turns them into plan nodes in create_plan; with the port's flat Path this is
+    // assembled directly here from the query's clauses (the ModifyTable precedent
+    // below). SELECT only -- an INSERT source has no grouping stage.
+    if parse.commandType == CmdType::SELECT {
+        top_plan = crate::backend::optimizer::plan::createplan::build_upper_plan(&root, top_plan);
+    }
+
     // For a data-modifying statement, wrap the source plan in a ModifyTable. PG
     // builds a ModifyTablePath in grouping_planner; M2 wraps the source plan here
     // for the single, non-inherited target (the ModifyTablePath/bitmapset path for
@@ -320,13 +329,14 @@ pub fn subquery_planner(
     if root.parse.hasTargetSRFs {
         not_yet_reachable("subquery_planner: set-returning functions in tlist");
     }
+    // LIMIT/OFFSET expressions are int8 Consts (transformLimitClause const-folds the
+    // literal form), so preprocess_expression over them is an identity; they need no
+    // guard. RETURNING/WCO/onConflict/merge/window expression preprocessing grows.
     if !root.parse.returningList.is_empty()
         || !root.parse.withCheckOptions.is_empty()
         || root.parse.onConflict.is_some()
         || !root.parse.mergeActionList.is_empty()
         || !root.parse.windowClause.is_empty()
-        || root.parse.limitOffset.is_some()
-        || root.parse.limitCount.is_some()
     {
         not_yet_reachable("subquery_planner: expression preprocessing");
     }
@@ -402,6 +412,7 @@ fn make_planner_info(glob: &PlannerGlobal, parse: &Query, query_level: usize) ->
         processed_group_clause: Vec::new(),
         processed_distinct_clause: Vec::new(),
         processed_tlist: Vec::new(),
+        scan_input_tlist: Vec::new(),
         update_colnos: Vec::new(),
         grouping_map: Vec::new(),
         minmax_aggs: Vec::new(),
@@ -439,9 +450,6 @@ fn make_planner_info(glob: &PlannerGlobal, parse: &Query, query_level: usize) ->
 fn grouping_planner(root: &mut PlannerInfo, tuple_fraction: f64, setops: Option<&SetOperationStmt>) {
     let parse = &root.parse;
 
-    if parse.limitCount.is_some() || parse.limitOffset.is_some() {
-        not_yet_reachable("grouping_planner: LIMIT/OFFSET");
-    }
     root.tuple_fraction = tuple_fraction;
 
     if parse.setOperations.is_some() || setops.is_some() {
@@ -451,55 +459,50 @@ fn grouping_planner(root: &mut PlannerInfo, tuple_fraction: f64, setops: Option<
     // No set operations: regular planning.
     crate::assert!(!root.has_recursion);
 
-    if !root.parse.groupingSets.is_empty() || !root.parse.groupClause.is_empty() {
-        not_yet_reachable("grouping_planner: GROUP BY / grouping sets");
+    if !root.parse.groupingSets.is_empty() {
+        not_yet_reachable("grouping_planner: grouping sets");
+    }
+    if root.parse.hasWindowFuncs || !root.parse.windowClause.is_empty() {
+        not_yet_reachable("grouping_planner: window functions");
     }
 
-    // Preprocess targetlist into root->processed_tlist.
+    // Preprocess targetlist into root->processed_tlist (the FINAL tlist; carries the
+    // Aggrefs and the grouping/sort-keyed ressortgrouprefs).
     preprocess_targetlist(root);
 
-    if root.parse.hasAggs {
-        not_yet_reachable("grouping_planner: aggregates");
-    }
-    if root.parse.hasWindowFuncs {
-        not_yet_reachable("grouping_planner: window functions");
+    // M5 (step 26): the query has an upper (grouping/aggregation/sort/distinct/limit)
+    // stage when it groups, aggregates, distincts, sorts, or limits. When it does,
+    // the base scan must compute the *group/agg-input* tlist (the flattened Vars the
+    // grouping/aggregation reads), not the final Aggref-bearing tlist; compute it and
+    // stash it in `scan_input_tlist` so query_planner builds the scan rel from it.
+    let needs_upper = root.parse.hasAggs
+        || !root.parse.groupClause.is_empty()
+        || !root.parse.distinctClause.is_empty()
+        || !root.parse.sortClause.is_empty()
+        || root.parse.limitCount.is_some()
+        || root.parse.limitOffset.is_some();
+    if needs_upper {
+        root.scan_input_tlist = make_scan_input_tlist(root);
     }
 
     root.limit_tuples = -1.0;
 
     // Generate the best paths for the scan/join portion of the query (the
     // FROM/WHERE processing). For a table-less SELECT this builds the dummy
-    // result rel with its one Result path. qp_callback computes query pathkeys;
-    // M1 has none.
+    // result rel with its one Result path.
     let current_rel = query_planner(root, standard_qp_callback);
 
-    // Convert the result tlist into PathTarget form and stash the upper targets.
-    // M1: jams the processed tlist into the result rel's reltarget directly and
-    // skips apply_scanjoin_target_to_paths; PG applies the scan/join target to
-    // paths in grouping_planner.
-    // TODO(M2): route through apply_scanjoin_target_to_paths when the real
-    // scan/join target machinery lands.
-    if root.parse.sortClause.is_empty()
-        && root.parse.distinctClause.is_empty()
-        && root.parse.windowClause.is_empty()
-    {
-        // final_target == scanjoin_target == the rel's reltarget (the const tlist).
-        let final_target = current_rel
-            .reltarget
-            .clone()
-            .unwrap_or_else(|| not_yet_reachable("grouping_planner: missing reltarget"));
-        for slot in &mut root.upper_targets {
-            *slot = Some(final_target.clone());
-        }
-    } else {
-        not_yet_reachable("grouping_planner: ORDER BY / DISTINCT / WINDOW targets");
+    // The scan/join (reltarget) is the scan-input target when grouping, else the
+    // final target. Stash it in the upper-target slots (read by callers that build
+    // upper rels; the M5 upper plan is built in standard_planner from the clauses).
+    let scan_target = current_rel
+        .reltarget
+        .clone()
+        .unwrap_or_else(|| not_yet_reachable("grouping_planner: missing reltarget"));
+    for slot in &mut root.upper_targets {
+        *slot = Some(scan_target.clone());
     }
 
-    // The final-output upper rel IS the scan/join rel for SELECT and the source
-    // rel for INSERT (M2 wraps the source plan in a ModifyTable in standard_planner
-    // rather than building a ModifyTablePath here -- the path/bitmapset machinery
-    // for inherited result rels grows later). LockRows (rowMarks) and the
-    // UPDATE/DELETE/MERGE ModifyTable paths are grow guards.
     if !root.parse.rowMarks.is_empty() {
         not_yet_reachable("grouping_planner: LockRows (FOR UPDATE/SHARE)");
     }
@@ -510,17 +513,92 @@ fn grouping_planner(root: &mut PlannerInfo, tuple_fraction: f64, setops: Option<
     root.upper_rels[UpperRelationKind::FINAL as usize] = vec![Box::new(current_rel)];
 }
 
-/// PG `standard_qp_callback`: compute the query's sort/group/distinct/setop
-/// pathkeys for query_planner. M1 has no ordering clauses, so all pathkey lists
-/// stay empty; this is a no-op. Grows with ORDER BY / GROUP BY / DISTINCT.
-fn standard_qp_callback(root: &mut PlannerInfo) {
-    if !root.parse.sortClause.is_empty()
-        || !root.parse.groupClause.is_empty()
-        || !root.parse.distinctClause.is_empty()
-    {
-        not_yet_reachable("standard_qp_callback: pathkeys for ordering clauses");
+/// Build the scan/join (group/agg-input) targetlist: the flattened set of base-rel
+/// `Var`s the grouping/aggregation/sort reads, in stable order. For the M5 milestone
+/// shape this is the distinct Vars appearing in the final tlist's grouping columns,
+/// aggregate arguments, and ORDER BY expressions (PG's `make_group_input_target` /
+/// `make_sort_input_target`, collapsed to the Var-pulling core). Resnos are assigned
+/// 1..n and the ressortgrouprefs are carried so the upper nodes can find group keys.
+fn make_scan_input_tlist(root: &PlannerInfo) -> Vec<Node> {
+    let mut exprs: Vec<Node> = Vec::new();
+    let mut sortgrouprefs: Vec<crate::c::Index> = Vec::new();
+    // Pull every Var out of the final tlist (the aggregate inputs are Vars inside
+    // Aggrefs; the grouping/sort columns are Vars directly). Deduplicate by Var
+    // identity (varno/varattno), keeping the first occurrence's sortgroupref.
+    for n in &root.processed_tlist {
+        let Node::TargetEntry(te) = n else { continue };
+        let Some(expr) = te.expr.as_ref() else { continue };
+        pull_vars_into(expr, te.ressortgroupref, &mut exprs, &mut sortgrouprefs);
+    }
+
+    exprs
+        .into_iter()
+        .zip(sortgrouprefs)
+        .enumerate()
+        .map(|(i, (expr, sgr))| {
+            let mut tle = crate::nodes::makefuncs::makeTargetEntry(
+                Some(expr),
+                (i + 1) as crate::access::attnum::AttrNumber,
+                None,
+                false,
+            );
+            tle.ressortgroupref = sgr;
+            Node::TargetEntry(Box::new(tle))
+        })
+        .collect()
+}
+
+/// Pull the base-rel `Var`s out of a final-tlist expression into the scan-input
+/// list (deduplicating on varno/varattno). A bare grouping/sort Var carries its
+/// `sortgroupref`; Aggref-argument Vars carry 0. The M5-reachable expression kinds
+/// (Var, Aggref over a Var arg) are handled; richer exprs grow with the general
+/// pull_var_clause.
+fn pull_vars_into(
+    expr: &Node,
+    sortgroupref: crate::c::Index,
+    exprs: &mut Vec<Node>,
+    refs: &mut Vec<crate::c::Index>,
+) {
+    match expr {
+        Node::Var(v) => {
+            // Deduplicate on (varno, varattno); keep the first sortgroupref seen.
+            for (i, e) in exprs.iter().enumerate() {
+                if let Node::Var(ev) = e
+                    && ev.varno == v.varno
+                    && ev.varattno == v.varattno
+                {
+                    if refs[i] == 0 {
+                        refs[i] = sortgroupref;
+                    }
+                    return;
+                }
+            }
+            exprs.push(expr.clone());
+            refs.push(sortgroupref);
+        }
+        Node::Aggref(agg) => {
+            for arg in &agg.args {
+                // Aggref args are TargetEntry-wrapped (transformAggregateCall).
+                let inner = match arg {
+                    Node::TargetEntry(te) => te.expr.as_ref(),
+                    other => Some(other),
+                };
+                if let Some(inner) = inner {
+                    pull_vars_into(inner, 0, exprs, refs);
+                }
+            }
+        }
+        // M5 milestone tlists are flat (a Var or an Aggref per column). Constants
+        // carry no Var; richer projection expressions grow with pull_var_clause.
+        _ => {}
     }
 }
+
+/// PG `standard_qp_callback`: compute the query's sort/group/distinct/setop
+/// pathkeys for query_planner. The M5 sorted-aggregation plan is built directly in
+/// standard_planner (not via pathkey-driven path selection), so the pathkey lists
+/// stay empty here; they grow when cost-based ordered-path selection lands.
+fn standard_qp_callback(_root: &mut PlannerInfo) {}
 
 /// Fetch the final-output upper rel (`fetch_upper_rel(root, UPPERREL_FINAL)`).
 /// query_planner/grouping_planner store it directly in `upper_rels[FINAL]` for

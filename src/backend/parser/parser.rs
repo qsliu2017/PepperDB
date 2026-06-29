@@ -269,6 +269,65 @@ pub fn make_func_call(name_parts: Vec<String>, args: Vec<Node>) -> Node {
     Node::FuncCall(Box::new(fc))
 }
 
+/// gram.y `func_application: func_name '(' '*' ')'` -> a `FuncCall` with
+/// `agg_star`. The classic `count(*)` form.
+pub fn make_agg_star_call(name_parts: Vec<String>) -> Node {
+    let Node::FuncCall(mut fc) = make_func_call(name_parts, Vec::new()) else {
+        unreachable!("make_func_call yields a FuncCall");
+    };
+    fc.agg_star = true;
+    Node::FuncCall(fc)
+}
+
+/// gram.y `func_application: func_name '(' DISTINCT func_arg_list ')'` -> a
+/// `FuncCall` with `agg_distinct`.
+pub fn make_distinct_func_call(name_parts: Vec<String>, args: Vec<Node>) -> Node {
+    let Node::FuncCall(mut fc) = make_func_call(name_parts, args) else {
+        unreachable!("make_func_call yields a FuncCall");
+    };
+    fc.agg_distinct = true;
+    Node::FuncCall(fc)
+}
+
+/// gram.y `sortby: a_expr opt_asc_desc opt_nulls_order` -> a `SortBy` node.
+pub fn make_sortby(
+    expr: Node,
+    dir: crate::nodes::parsenodes::SortByDir,
+    nulls: crate::nodes::parsenodes::SortByNulls,
+) -> Node {
+    Node::SortBy(Box::new(crate::nodes::parsenodes::SortBy {
+        node: Some(expr),
+        sortby_dir: dir,
+        sortby_nulls: nulls,
+        useOp: Vec::new(),
+        location: -1,
+    }))
+}
+
+/// gram.y `insertSelectOptions`: stamp ORDER BY / LIMIT / OFFSET onto the
+/// SelectStmt built by `simple_select`. M5 supports a leaf simple_select (no WITH /
+/// set-op wrapper, which PG rejects multiple sort/limit clauses for).
+pub fn insert_select_options(
+    stmt: Node,
+    sort_clause: Vec<Node>,
+    limit_offset: Option<Node>,
+    limit_count: Option<Node>,
+) -> Node {
+    let Node::SelectStmt(mut sel) = stmt else {
+        unreachable!("insert_select_options over a SelectStmt");
+    };
+    if !sort_clause.is_empty() {
+        sel.sortClause = sort_clause;
+    }
+    if limit_offset.is_some() {
+        sel.limitOffset = limit_offset;
+    }
+    if limit_count.is_some() {
+        sel.limitCount = limit_count;
+    }
+    Node::SelectStmt(sel)
+}
+
 /// gram.y `insert_rest: VALUES ...`: wrap the parsed VALUES rows in a SelectStmt
 /// carrying `valuesLists`, exactly as gram.y builds the VALUES clause. Each row is
 /// a RowExpr carrier (see gram.lalrpop ValuesRow). The targetList/fromClause are

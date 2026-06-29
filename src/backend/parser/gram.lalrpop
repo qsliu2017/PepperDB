@@ -17,10 +17,11 @@ use crate::backend::parser::parser::{
     make_insert_stmt, make_values_select, make_column_ref, make_range_var_table_ref,
     make_a_expr, make_and_expr, make_or_expr, make_not_expr, make_func_call, RawStmtVec,
     make_type_cast, make_case_expr, make_case_when, make_coalesce_expr, make_min_max_expr,
-    make_nullif_expr, make_string_const_cast,
+    make_nullif_expr, make_string_const_cast, make_agg_star_call, make_distinct_func_call,
+    make_sortby, insert_select_options,
 };
 use crate::nodes::nodes::Node;
-use crate::nodes::parsenodes::{ResTarget, SelectStmt, TypeName};
+use crate::nodes::parsenodes::{ResTarget, SelectStmt, SortByDir, SortByNulls, TypeName};
 
 grammar;
 
@@ -70,6 +71,19 @@ extern {
         // `date` is not a SQL keyword (it reaches the grammar as an IDENT via
         // GenericType); only `timestamp` is a keyword here.
         "TIMESTAMP" => Token::Keyword("timestamp"),
+        // M5 (step 26): grouping / ordering / distinct / limit keywords.
+        "GROUP"    => Token::Keyword("group"),
+        "ORDER"    => Token::Keyword("order"),
+        "BY"       => Token::Keyword("by"),
+        "DISTINCT" => Token::Keyword("distinct"),
+        "ASC"      => Token::Keyword("asc"),
+        "DESC"     => Token::Keyword("desc"),
+        "NULLS"    => Token::Keyword("nulls"),
+        "FIRST"    => Token::Keyword("first"),
+        "LAST"     => Token::Keyword("last"),
+        "LIMIT"    => Token::Keyword("limit"),
+        "OFFSET"   => Token::Keyword("offset"),
+        "ALL"      => Token::Keyword("all"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -309,26 +323,36 @@ SelectStmt: Node = {
     SelectNoParens,
 };
 
+// gram.y `select_no_parens`: a `simple_select` optionally followed by ORDER BY and
+// LIMIT/OFFSET (the trailing `opt_sort_clause opt_select_limit` arm). The sort and
+// limit clauses are stamped onto the SelectStmt built by `simple_select` (PG's
+// insertSelectOptions). The WITH / FOR-locking wrappers grow at their milestones.
 SelectNoParens: Node = {
     SimpleSelect,
+    <s:SimpleSelect> <sort:SortClause> => insert_select_options(s, sort, None, None),
+    <s:SimpleSelect> <lim:SelectLimit> =>
+        insert_select_options(s, Vec::new(), lim.0, lim.1),
+    <s:SimpleSelect> <sort:SortClause> <lim:SelectLimit> =>
+        insert_select_options(s, sort, lim.0, lim.1),
 };
 
 SelectClause: Node = {
     SimpleSelect,
 };
 
-// gram.y `simple_select`. The first alternative (SELECT target_list ...) is the
-// only one reachable in M1; FROM/WHERE/GROUP/HAVING/DISTINCT/VALUES/TABLE and the
-// set operations are added at their milestones.
+// gram.y `simple_select`. M5 (step 26) reaches the `SELECT [DISTINCT] target_list
+// FROM ... WHERE ... GROUP BY ...` shape; HAVING/WINDOW/VALUES/TABLE and the set
+// operations are added at their milestones.
 SimpleSelect: Node = {
-    "SELECT" <targets:OptTargetList> <frm:FromClause> <whr:WhereClause> => {
+    "SELECT" <distinct:OptDistinctClause> <targets:OptTargetList> <frm:FromClause>
+        <whr:WhereClause> <grp:GroupClause> => {
         let n = SelectStmt {
-            distinctClause: Vec::new(),
+            distinctClause: distinct,
             intoClause: None,
             targetList: targets,
             fromClause: frm,
             whereClause: whr,
-            groupClause: Vec::new(),
+            groupClause: grp,
             groupDistinct: false,
             havingClause: None,
             windowClause: Vec::new(),
@@ -346,6 +370,88 @@ SimpleSelect: Node = {
         };
         Node::SelectStmt(Box::new(n))
     },
+};
+
+// gram.y `distinct_clause` / `opt_all_clause` (the `SELECT [ALL|DISTINCT]` prefix).
+// gram.y `distinct_clause: DISTINCT` returns `list_make1(NIL)` -- a one-element
+// list whose lone element is NULL, distinguishing "DISTINCT (over all columns)"
+// from "no DISTINCT" (an empty list). The port has no NIL Node, so the marker is a
+// bare `A_Star` (transformDistinctClause keys off the list being non-empty with a
+// NULL/A_Star head). `DISTINCT ON (...)` grows later.
+OptDistinctClause: Vec<Node> = {
+    "DISTINCT" => vec![Node::A_Star(Box::new(crate::nodes::parsenodes::A_Star {}))],
+    "ALL" => Vec::new(),
+    => Vec::new(),
+};
+
+// gram.y `group_clause: GROUP BY set_quantifier group_by_list | /*EMPTY*/`. M5
+// covers `GROUP BY a, b, ...` (plain expression group items); ROLLUP/CUBE/GROUPING
+// SETS grow with the grouping-set machinery.
+GroupClause: Vec<Node> = {
+    "GROUP" "BY" <list:GroupByList> => list,
+    => Vec::new(),
+};
+
+GroupByList: Vec<Node> = {
+    <e:AExpr> => vec![e],
+    <mut list:GroupByList> "," <e:AExpr> => { list.push(e); list },
+};
+
+// ===========================================================================
+//  ORDER BY  (gram.y sort_clause -> sortby_list -> sortby)
+// ===========================================================================
+
+// gram.y `sort_clause: ORDER BY sortby_list`.
+SortClause: Vec<Node> = {
+    "ORDER" "BY" <list:SortbyList> => list,
+};
+
+SortbyList: Vec<Node> = {
+    <s:Sortby> => vec![s],
+    <mut list:SortbyList> "," <s:Sortby> => { list.push(s); list },
+};
+
+// gram.y `sortby: a_expr opt_asc_desc opt_nulls_order`. The USING-operator form
+// (`a_expr USING op`) grows with operator-class ordering. Builds a SortBy node.
+Sortby: Node = {
+    <e:AExpr> <dir:OptAscDesc> <nulls:OptNullsOrder> => make_sortby(e, dir, nulls),
+};
+
+OptAscDesc: SortByDir = {
+    "ASC"  => SortByDir::ASC,
+    "DESC" => SortByDir::DESC,
+    => SortByDir::DEFAULT,
+};
+
+OptNullsOrder: SortByNulls = {
+    "NULLS" "FIRST" => SortByNulls::FIRST,
+    "NULLS" "LAST"  => SortByNulls::LAST,
+    => SortByNulls::DEFAULT,
+};
+
+// ===========================================================================
+//  LIMIT / OFFSET  (gram.y select_limit -> limit_clause / offset_clause)
+// ===========================================================================
+
+// gram.y `select_limit`: any combination of LIMIT and OFFSET, in either order.
+// Returns (limitOffset, limitCount). FETCH FIRST / WITH TIES grow at their
+// milestone; M5 covers `LIMIT count`, `OFFSET n`, and both orders.
+SelectLimit: (Option<Node>, Option<Node>) = {
+    <c:LimitClause> <o:OffsetClause> => (Some(o), c),
+    <o:OffsetClause> <c:LimitClause> => (Some(o), c),
+    <c:LimitClause> => (None, c),
+    <o:OffsetClause> => (Some(o), None),
+};
+
+// gram.y `limit_clause: LIMIT select_limit_value`. `LIMIT ALL` is no count (None).
+LimitClause: Option<Node> = {
+    "LIMIT" <e:AExpr> => Some(e),
+    "LIMIT" "ALL" => None,
+};
+
+// gram.y `offset_clause: OFFSET select_offset_value`.
+OffsetClause: Node = {
+    "OFFSET" <e:AExpr> => e,
 };
 
 // ===========================================================================
@@ -553,12 +659,15 @@ CaseDefault: Option<Node> = {
     => None,
 };
 
-// gram.y `func_application: func_name '(' func_arg_list ')' | func_name '(' ')'`.
-// M3 covers an unqualified function name over a (possibly empty) positional
-// argument list; VARIADIC / ORDER BY / named args / '*' grow at their milestones.
+// gram.y `func_application: func_name '(' func_arg_list ')' | func_name '(' '*' ')'
+// | func_name '(' DISTINCT func_arg_list ')' | func_name '(' ')'`. M5 (step 26)
+// adds the aggregate spellings: `count(*)` (agg_star) and `agg(DISTINCT expr)`
+// (agg_distinct). VARIADIC / ORDER BY / named args grow at their milestones.
 FuncApplication: Node = {
     <n:ColId> "(" ")" => make_func_call(vec![n], Vec::new()),
     <n:ColId> "(" <args:ExprList> ")" => make_func_call(vec![n], args),
+    <n:ColId> "(" "*" ")" => make_agg_star_call(vec![n]),
+    <n:ColId> "(" "DISTINCT" <args:ExprList> ")" => make_distinct_func_call(vec![n], args),
 };
 
 // gram.y `columnref: ColId | ColId indirection`. M2 covers `col` and

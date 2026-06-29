@@ -224,6 +224,11 @@ pub struct PlannerInfo {
     pub processed_distinct_clause: Vec<Node>,
     /// Fully-processed targetlist.
     pub processed_tlist: Vec<Node>,
+    /// The scan/join (group-input) targetlist the base scan should compute: the
+    /// flattened Vars feeding the grouping/aggregation. Empty when the scan target
+    /// equals `processed_tlist` (no grouping). (Port helper; PG carries this as the
+    /// scanjoin/grouping PathTargets in `upper_targets`.)
+    pub scan_input_tlist: Vec<Node>,
     /// UPDATE target attribute numbers for first N processed_tlist entries.
     pub update_colnos: Vec<i32>,
     /// For GroupingFunc fixup.
