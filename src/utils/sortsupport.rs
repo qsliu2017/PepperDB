@@ -225,15 +225,34 @@ pub fn ApplySortAbbrevFullComparator(
     }
 }
 
-// Datum comparison functions with specialized sort routines.
-pub fn ssup_datum_unsigned_cmp(_x: Datum, _y: Datum, _ssup: &SortSupportData) -> i32 {
-    unimplemented!()
+// Datum comparison functions with specialized sort routines (defined in PG's
+// tuplesort.c, declared in sortsupport.h; the canonical home in this port).
+
+/// PG `ssup_datum_unsigned_cmp`: 3-way compare treating the Datum bits unsigned.
+pub fn ssup_datum_unsigned_cmp(x: Datum, y: Datum, _ssup: &SortSupportData) -> i32 {
+    match x.0.cmp(&y.0) {
+        Ordering::Less => -1,
+        Ordering::Greater => 1,
+        Ordering::Equal => 0,
+    }
 }
-pub fn ssup_datum_signed_cmp(_x: Datum, _y: Datum, _ssup: &SortSupportData) -> i32 {
-    unimplemented!()
+
+/// PG `ssup_datum_signed_cmp`: 3-way compare of int64 datums.
+pub fn ssup_datum_signed_cmp(x: Datum, y: Datum, _ssup: &SortSupportData) -> i32 {
+    match DatumGetInt64(x).cmp(&DatumGetInt64(y)) {
+        Ordering::Less => -1,
+        Ordering::Greater => 1,
+        Ordering::Equal => 0,
+    }
 }
-pub fn ssup_datum_int32_cmp(_x: Datum, _y: Datum, _ssup: &SortSupportData) -> i32 {
-    unimplemented!()
+
+/// PG `ssup_datum_int32_cmp`: 3-way compare of int32 datums.
+pub fn ssup_datum_int32_cmp(x: Datum, y: Datum, _ssup: &SortSupportData) -> i32 {
+    match DatumGetInt32(x).cmp(&DatumGetInt32(y)) {
+        Ordering::Less => -1,
+        Ordering::Greater => 1,
+        Ordering::Equal => 0,
+    }
 }
 
 pub fn PrepareSortSupportComparisonShim(_cmp_func: Oid, _ssup: SortSupport) {

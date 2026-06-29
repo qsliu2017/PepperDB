@@ -7,4 +7,5 @@ pub mod fmgr;
 pub mod init;
 pub mod misc;
 pub mod resowner;
+pub mod sort;
 pub mod time;
