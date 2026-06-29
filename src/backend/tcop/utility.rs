@@ -62,7 +62,7 @@ pub async fn standard_process_utility(
         .unwrap_or_else(|| unreachable!("a CMD_UTILITY PlannedStmt carries its utilityStmt"));
 
     match parsetree {
-        Node::CreateStmt(_) => {
+        Node::CreateStmt(_) | Node::IndexStmt(_) => {
             process_utility_slow(shared, pstmt, parsetree, query_string, context, dest, qc).await;
         }
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
@@ -83,6 +83,14 @@ async fn process_utility_slow(
     _dest: &mut dyn DestReceiver,
     _qc: Option<&mut QueryCompletion>,
 ) {
+    // CREATE INDEX: parse analysis (transformIndexStmt) is staged for the simple
+    // single-column btree case; DefineIndex resolves the table + columns directly.
+    if let Node::IndexStmt(istmt) = parsetree {
+        crate::backend::commands::indexcmds::define_index(shared, istmt).await;
+        crate::backend::access::transam::xact::CommandCounterIncrement();
+        return;
+    }
+
     let Node::CreateStmt(cstmt) = parsetree else {
         not_yet_reachable("ProcessUtilitySlow: non-CreateStmt");
     };
@@ -127,6 +135,7 @@ async fn process_utility_slow(
 pub fn create_command_tag(parsetree: &Node) -> CommandTag {
     match parsetree {
         Node::CreateStmt(_) => CommandTag::CreateTable,
+        Node::IndexStmt(_) => CommandTag::CreateIndex,
         other => not_yet_reachable(&format!("CreateCommandTag: {other:?}")),
     }
 }

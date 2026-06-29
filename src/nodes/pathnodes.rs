@@ -698,6 +698,31 @@ pub struct Path {
     pub total_cost: Cost,
     /// Sort ordering of path's output.
     pub pathkeys: Vec<Box<PathKey>>,
+    /// Index/bitmap path detail carried alongside the base `Path` in the rel's
+    /// pathlist. In PG `create_plan_recurse` downcasts `Path*` to the concrete path
+    /// node (IndexPath/BitmapHeapPath) by `pathtype`; the port's pathlist is a flat
+    /// `Vec<Box<Path>>`, so the extra fields ride here. `None` for plain paths
+    /// (SeqScan/Result); `Some` only for IndexScan/IndexOnlyScan/BitmapHeapScan.
+    pub index_detail: Option<Box<IndexPathDetail>>,
+}
+
+/// The index/bitmap-path detail `create_plan_recurse` needs to build an IndexScan /
+/// BitmapHeapScan plan (the fields of IndexPath/BitmapHeapPath beyond the base Path).
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndexPathDetail {
+    /// The chosen index.
+    pub indexinfo: Box<IndexOptInfo>,
+    /// The matched index clauses (the index quals).
+    pub indexclauses: Vec<Box<IndexClause>>,
+    /// Scan direction.
+    pub indexscandir: ScanDirection,
+    /// The index-access-only cost (excludes the heap fetch); used as the bitmap
+    /// producer cost when this index path feeds a BitmapHeapScan.
+    pub indextotalcost: Cost,
+    /// The index selectivity (the fraction of heap rows the index quals select).
+    pub indexselectivity: Selectivity,
+    /// For a BitmapHeapScan path: the bitmap-producer subpath (an IndexScan path).
+    pub bitmapqual: Option<Box<Path>>,
 }
 
 /// The Plan-node NodeTag a Path can produce. In C this is a raw NodeTag stored

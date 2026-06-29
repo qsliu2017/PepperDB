@@ -37,8 +37,171 @@ pub fn create_plan_recurse(root: &mut PlannerInfo, best_path: &Path) -> Node {
             Node::Result(Box::new(create_group_result_plan(root, best_path)))
         }
         PathType::SeqScan => Node::SeqScan(Box::new(create_seqscan_plan(root, best_path))),
+        PathType::IndexScan => Node::IndexScan(Box::new(create_indexscan_plan(root, best_path))),
+        PathType::BitmapHeapScan => {
+            Node::BitmapHeapScan(Box::new(create_bitmap_scan_plan(root, best_path)))
+        }
         other => not_yet_reachable(&format!("create_plan_recurse: {other:?}")),
     }
+}
+
+/// PG `create_indexscan_plan` (M6 plain IndexScan form): build an `IndexScan` from an
+/// index Path. The plan's `indexqual` is the matched clauses with the index-column
+/// Var rewritten to `INDEX_VAR` (`fix_indexqual_clause`); `indexqualorig` keeps the
+/// original heap-Var clauses (for the recheck). The scan's filter `qual` is the
+/// base restriction clauses not handled by the index (so they are not applied
+/// twice). The targetlist comes from the path's pathtarget.
+fn create_indexscan_plan(root: &mut PlannerInfo, best_path: &Path) -> crate::nodes::plannodes::IndexScan {
+    use crate::nodes::plannodes::IndexScan;
+
+    let parent = best_path
+        .parent
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("create_indexscan_plan: missing parent rel"));
+    let scan_relid = parent.relid;
+    crate::assert!(scan_relid > 0);
+
+    let detail = best_path
+        .index_detail
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("create_indexscan_plan: path carries no index detail"));
+
+    // The original (heap-Var) index clauses, and the index-Var-rewritten quals.
+    let indexqualorig = index_clause_quals(&detail.indexclauses);
+    let indexqual: Vec<Node> = indexqualorig
+        .iter()
+        .map(|c| fix_indexqual_clause(c, &detail.indexinfo))
+        .collect();
+
+    // The scan filter is the base restriction clauses minus those the index checks
+    // (M6 indexquals are exact, not lossy, so the index-handled clauses are dropped).
+    let scan_clauses: Vec<crate::nodes::pathnodes::RestrictInfo> =
+        parent.baserestrictinfo.iter().map(|ri| (**ri).clone()).collect();
+    let all_clauses = crate::backend::optimizer::util::restrictinfo::extract_actual_clauses(
+        &scan_clauses,
+        false,
+    );
+    let qual: Vec<Node> = all_clauses
+        .into_iter()
+        .filter(|c| !indexqualorig.contains(c))
+        .collect();
+
+    let tlist = build_path_tlist(root, best_path);
+
+    let mut plan = IndexScan {
+        scan: Scan { plan: empty_plan(tlist, qual), scanrelid: scan_relid },
+        indexid: detail.indexinfo.indexoid,
+        indexqual,
+        indexqualorig,
+        indexorderby: Vec::new(),
+        indexorderbyorig: Vec::new(),
+        indexorderbyops: Vec::new(),
+        indexorderdir: detail.indexscandir,
+    };
+    copy_generic_path_info(&mut plan.scan.plan, best_path);
+    plan
+}
+
+/// PG `create_bitmap_scan_plan` (M6 form): build a `BitmapHeapScan` over a
+/// `BitmapIndexScan` child. The heap node carries `bitmapqualorig` (the original
+/// heap-Var clauses, for the lossy-page recheck); its lefttree is the bitmap index
+/// scan producing the TID bitmap.
+fn create_bitmap_scan_plan(
+    root: &mut PlannerInfo,
+    best_path: &Path,
+) -> crate::nodes::plannodes::BitmapHeapScan {
+    use crate::nodes::plannodes::{BitmapHeapScan, BitmapIndexScan};
+
+    let parent = best_path
+        .parent
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("create_bitmap_scan_plan: missing parent rel"));
+    let scan_relid = parent.relid;
+    crate::assert!(scan_relid > 0);
+
+    let detail = best_path
+        .index_detail
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("create_bitmap_scan_plan: path carries no index detail"));
+
+    let indexqualorig = index_clause_quals(&detail.indexclauses);
+    let indexqual: Vec<Node> = indexqualorig
+        .iter()
+        .map(|c| fix_indexqual_clause(c, &detail.indexinfo))
+        .collect();
+
+    // The BitmapIndexScan child: produces the TID bitmap from the index quals.
+    let bitmap_index = BitmapIndexScan {
+        scan: Scan { plan: empty_plan(Vec::new(), Vec::new()), scanrelid: scan_relid },
+        indexid: detail.indexinfo.indexoid,
+        isshared: false,
+        indexqual,
+        indexqualorig: indexqualorig.clone(),
+    };
+
+    // The heap scan: recheck the original clauses on lossy pages; filter the
+    // remaining base restriction clauses.
+    let scan_clauses: Vec<crate::nodes::pathnodes::RestrictInfo> =
+        parent.baserestrictinfo.iter().map(|ri| (**ri).clone()).collect();
+    let all_clauses = crate::backend::optimizer::util::restrictinfo::extract_actual_clauses(
+        &scan_clauses,
+        false,
+    );
+    let qual: Vec<Node> = all_clauses
+        .into_iter()
+        .filter(|c| !indexqualorig.contains(c))
+        .collect();
+
+    let tlist = build_path_tlist(root, best_path);
+
+    let mut plan = BitmapHeapScan {
+        scan: Scan { plan: empty_plan(tlist, qual), scanrelid: scan_relid },
+        bitmapqualorig: indexqualorig,
+    };
+    // The bitmap producer is the BitmapHeapScan's lefttree (execProcnode inits it via
+    // s.scan.plan.lefttree and drives it through MultiExecProcNode).
+    plan.scan.plan.lefttree = Some(Node::BitmapIndexScan(Box::new(bitmap_index)));
+    copy_generic_path_info(&mut plan.scan.plan, best_path);
+    plan
+}
+
+/// The original (heap-Var) clauses of a set of `IndexClause`s.
+fn index_clause_quals(indexclauses: &[Box<crate::nodes::pathnodes::IndexClause>]) -> Vec<Node> {
+    indexclauses
+        .iter()
+        .flat_map(|ic| ic.indexquals.iter().map(|ri| ri.clause.clone()))
+        .collect()
+}
+
+/// PG `fix_indexqual_clause` / `fix_indexqual_operand`: rewrite the index-column Var
+/// in an `indexcol op const` clause from its heap (varno, heap-attno) form to the
+/// `INDEX_VAR` form the index AM expects -- `varno = INDEX_VAR`, `varattno = the
+/// 1-based index column position`. M6 handles a binary OpExpr with the indexed Var
+/// on the left and a Const on the right.
+fn fix_indexqual_clause(clause: &Node, index: &crate::nodes::pathnodes::IndexOptInfo) -> Node {
+    use crate::nodes::primnodes::INDEX_VAR;
+    let Node::OpExpr(op) = clause else {
+        not_yet_reachable("fix_indexqual_clause: non-OpExpr index clause");
+    };
+    let mut op = op.clone();
+    let Some(Node::Var(var)) = op.args.first() else {
+        not_yet_reachable("fix_indexqual_clause: index clause has no Var operand");
+    };
+    // Find which index key column this heap attno is, so the index Var's attno is the
+    // 1-based index column position.
+    let heap_attno = i32::from(var.varattno);
+    let indexcol = index
+        .indexkeys
+        .iter()
+        .position(|&k| k == heap_attno)
+        .unwrap_or_else(|| not_yet_reachable("fix_indexqual_clause: Var not an index column"));
+    let mut newvar = var.clone();
+    newvar.varno = INDEX_VAR;
+    newvar.varattno = (indexcol + 1) as i16;
+    newvar.varnosyn = INDEX_VAR as crate::c::Index;
+    newvar.varattnosyn = (indexcol + 1) as i16;
+    op.args[0] = Node::Var(newvar);
+    Node::OpExpr(op)
 }
 
 /// PG `create_seqscan_plan`: build a `SeqScan` plan from a seqscan Path. The plan's

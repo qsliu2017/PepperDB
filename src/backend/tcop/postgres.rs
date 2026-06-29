@@ -540,7 +540,7 @@ async fn run_plan_over_wire(
     use crate::access::sdir::ScanDirection;
     use crate::backend::executor::execMain::{
         standard_executor_end, standard_executor_finish, standard_executor_run,
-        standard_executor_start,
+        standard_executor_start_indexed,
     };
 
     // Open every RTE_RELATION in the range table (PG opens them before InitPlan,
@@ -548,6 +548,12 @@ async fn run_plan_over_wire(
     // `'rel` ownership root, a stack binding that strictly encloses the executor run
     // below (relation-ownership-plan §1.2). The executor BORROWS from it.
     let opened = open_range_table_relations(shared, plan).await;
+
+    // Open the index relations the plan's index/bitmap scans reference (PG resolves
+    // these via index_open in ExecInitIndexScan; the M6 wire path opens them up front
+    // from the index registry so the executor borrows them off es_index_rels). The
+    // owned `Arc`s live in this frame alongside `opened` (the `'rel` root).
+    let opened_indexes = open_plan_index_relations(&plan.plan_tree);
 
     // Build the borrowed range-table indexed by RT index (PG `es_relations`): slot
     // `rti - 1` is `Some(&*arc)` for an opened RELATION RTE, `None` otherwise.
@@ -572,7 +578,18 @@ async fn run_plan_over_wire(
     let snapshot_ref = snap.as_deref();
     let mut query_desc = make_query_desc(plan, query_string, snap.clone(), receiver);
 
-    standard_executor_start(&mut query_desc, &range_table_rels, snapshot_ref, 0);
+    // Borrowed index-relation slice (PG es_index_rels): the executor's
+    // ExecGetIndexRelation finds the open index by OID among these.
+    let index_rels: Vec<Option<&crate::utils::rel::RelationData>> =
+        opened_indexes.iter().map(|r| Some(&**r)).collect();
+
+    standard_executor_start_indexed(
+        &mut query_desc,
+        &range_table_rels,
+        &index_rels,
+        snapshot_ref,
+        0,
+    );
     standard_executor_run(Some(shared), &mut query_desc, ScanDirection::Forward, 0).await;
     standard_executor_finish(&mut query_desc);
     let processed = query_desc.estate.as_ref().map_or(0, |e| e.processed);
@@ -583,11 +600,71 @@ async fn run_plan_over_wire(
     // Drop the borrows before closing the owners.
     drop(query_desc);
     drop(range_table_rels);
+    drop(index_rels);
 
     // Close the relations we opened (drop the relcache refcount).
     for (_rti, rel) in opened {
         crate::backend::utils::cache::relcache::relation_close(rel);
     }
+    // The index Arcs are registry clones; dropping them just releases the refcount.
+    drop(opened_indexes);
+}
+
+/// Open the index relations a plan's IndexScan / IndexOnlyScan / BitmapIndexScan
+/// nodes reference, by collecting their `indexid`s and fetching each from the index
+/// registry. Returns owned `Arc`s (registry clones). PG resolves these via
+/// index_open in the executor; the M6 wire path opens them up front.
+fn open_plan_index_relations(
+    plan_tree: &crate::nodes::nodes::Node,
+) -> Vec<Arc<crate::utils::rel::RelationData>> {
+    use crate::backend::catalog::indexing::find_registered_index;
+    let mut oids = Vec::new();
+    collect_plan_index_oids(plan_tree, &mut oids);
+    oids.into_iter()
+        .filter_map(find_registered_index)
+        .collect()
+}
+
+/// Walk a plan tree collecting the index OIDs of its index/bitmap scan nodes.
+fn collect_plan_index_oids(node: &crate::nodes::nodes::Node, out: &mut Vec<crate::postgres_ext::Oid>) {
+    use crate::nodes::nodes::Node;
+    match node {
+        Node::IndexScan(s) => out.push(s.indexid),
+        Node::IndexOnlyScan(s) => out.push(s.indexid),
+        Node::BitmapIndexScan(s) => out.push(s.indexid),
+        _ => {}
+    }
+    for child in plan_children(node) {
+        collect_plan_index_oids(child, out);
+    }
+}
+
+/// The child plan nodes of a plan node (its lefttree/righttree), for the plan-tree
+/// walk. Returns the concrete `Plan`-bearing children.
+fn plan_children(node: &crate::nodes::nodes::Node) -> Vec<&crate::nodes::nodes::Node> {
+    use crate::nodes::nodes::Node;
+    let plan = match node {
+        Node::Result(r) => &r.plan,
+        Node::SeqScan(s) => &s.scan.plan,
+        Node::IndexScan(s) => &s.scan.plan,
+        Node::IndexOnlyScan(s) => &s.scan.plan,
+        Node::BitmapHeapScan(s) => &s.scan.plan,
+        Node::BitmapIndexScan(s) => &s.scan.plan,
+        Node::Agg(a) => &a.plan,
+        Node::Sort(s) => &s.plan,
+        Node::Unique(u) => &u.plan,
+        Node::Limit(l) => &l.plan,
+        Node::ModifyTable(m) => &m.plan,
+        _ => return Vec::new(),
+    };
+    let mut children = Vec::new();
+    if let Some(lt) = plan.lefttree.as_ref() {
+        children.push(lt);
+    }
+    if let Some(rt) = plan.righttree.as_ref() {
+        children.push(rt);
+    }
+    children
 }
 
 /// Open the open `Relation` for each RTE_RELATION in the plan's range table, keyed
@@ -1729,6 +1806,82 @@ mod wire_tests {
         dr.extend_from_slice(&1u32.to_be_bytes());
         dr.extend_from_slice(b"2");
         assert_eq!(d.body, dr);
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// THE M6 MILESTONE: `CREATE INDEX i ON t(a)` then `SELECT * FROM t WHERE a = v`
+    /// over the wire returns the right rows through the index. The table is populated
+    /// to several heap pages so the cost-based planner prefers the index/bitmap path
+    /// over a seqscan for the selective qual; the plan-choice assertion (IndexScan /
+    /// BitmapHeapScan over SeqScan) is verified in the inline planner test
+    /// `index_plan_chosen_over_seqscan`. Here we assert the rows are correct.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m6_create_index_and_index_scan_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let create = simple_query(&mut client, &mut buf, "CREATE TABLE t (a int)").await;
+        assert_eq!(create[0].body, b"CREATE TABLE\0");
+
+        // Populate t with 0..600 (a multi-page heap) so a selective WHERE qual makes
+        // the index/bitmap path the cheapest plan. (Multi-row VALUES is staged, so
+        // these are single-row INSERTs.)
+        for v in 0..600 {
+            let ins = simple_query(&mut client, &mut buf, &format!("INSERT INTO t VALUES ({v})")).await;
+            assert_eq!(ins[0].body, b"INSERT 0 1\0", "INSERT {v}");
+        }
+
+        // CREATE INDEX i ON t (a) -> CommandComplete "CREATE INDEX" + ReadyForQuery.
+        let ci = simple_query(&mut client, &mut buf, "CREATE INDEX i ON t (a)").await;
+        let types: Vec<u8> = ci.iter().map(|m| m.ty).collect();
+        assert_eq!(types, vec![b'C', b'Z'], "CREATE INDEX: CommandComplete + ReadyForQuery");
+        assert_eq!(ci[0].body, b"CREATE INDEX\0");
+
+        // SELECT * FROM t WHERE a = 20 -> RowDescription + one DataRow "20" + CC + RFQ,
+        // served through the index.
+        let sel = simple_query(&mut client, &mut buf, "SELECT * FROM t WHERE a = 20").await;
+        let types: Vec<u8> = sel.iter().map(|m| m.ty).collect();
+        assert_eq!(
+            types,
+            vec![b'T', b'D', b'C', b'Z'],
+            "point lookup: RowDescription + one DataRow + CommandComplete + ReadyForQuery"
+        );
+        let values: Vec<String> = sel
+            .iter()
+            .filter(|m| m.ty == b'D')
+            .map(|m| datarow_single_text(&m.body))
+            .collect();
+        assert_eq!(values, vec!["20"], "a = 20 returns the one matching row via the index");
+        assert_eq!(sel[2].body, b"SELECT 1\0");
+
+        // A non-matching point lookup returns no rows.
+        let none = simple_query(&mut client, &mut buf, "SELECT * FROM t WHERE a = 1000").await;
+        assert!(none.iter().all(|m| m.ty != b'D'), "a = 1000 matches no row");
+        let cc = none.iter().find(|m| m.ty == b'C').expect("a CommandComplete");
+        assert_eq!(cc.body, b"SELECT 0\0");
+
+        // A selective range scan WHERE a > 595 -> {596, 597, 598, 599} (4 rows). The
+        // planner may pick the plain IndexScan (index order) or the BitmapHeapScan
+        // (physical order), so compare the result set, not the row order.
+        let rng = simple_query(&mut client, &mut buf, "SELECT * FROM t WHERE a > 595").await;
+        let mut rvals: Vec<i32> = rng
+            .iter()
+            .filter(|m| m.ty == b'D')
+            .map(|m| datarow_single_text(&m.body).parse().expect("int4 text"))
+            .collect();
+        rvals.sort_unstable();
+        assert_eq!(rvals, vec![596, 597, 598, 599], "a > 595 returns the four rows above 595");
+        let cc = rng.iter().find(|m| m.ty == b'C').expect("a CommandComplete");
+        assert_eq!(cc.body, b"SELECT 4\0");
 
         drop(client);
         sup.shutdown.trigger();

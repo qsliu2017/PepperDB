@@ -86,9 +86,8 @@ pub fn generate_partitionwise_join_paths(root: &mut PlannerInfo, rel: &mut RelOp
 /*
  * indxpath.c -- routines to generate index paths
  */
-pub fn create_index_paths(root: &mut PlannerInfo, rel: &mut RelOptInfo) {
-    unimplemented!()
-}
+/// PG `create_index_paths`. See `crate::backend::optimizer::path::indxpath`.
+pub use crate::backend::optimizer::path::indxpath::create_index_paths;
 
 pub fn relation_has_unique_index_for(
     root: &mut PlannerInfo,

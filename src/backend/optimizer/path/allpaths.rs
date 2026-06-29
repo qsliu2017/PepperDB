@@ -112,7 +112,10 @@ fn set_plain_rel_pathlist(root: &mut PlannerInfo, rel: &mut RelOptInfo, _rte: &R
     let seqscan = create_seqscan_path(root, rel, 0);
     add_path(rel, seqscan);
 
-    // create_index_paths / create_tidscan_paths / parallel paths grow later.
+    // create_index_paths: add IndexScan / BitmapHeapScan paths that beat the seqscan
+    // by cost when a WHERE clause matches an index (M6). create_tidscan_paths /
+    // parallel paths grow later.
+    crate::backend::optimizer::path::indxpath::create_index_paths(root, rel);
 
     set_cheapest(rel);
 }

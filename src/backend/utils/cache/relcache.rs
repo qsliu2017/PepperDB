@@ -143,6 +143,23 @@ pub fn relation_close(relation: Arc<RelationData>) {
     relation.decr_ref_count();
 }
 
+/// `index_update_stats`' relcache effect (M6): update a cached relation's size
+/// estimate (`relpages`/`reltuples`) so the planner's `estimate_rel_size` sees the
+/// post-build row count. PG writes these to pg_class via CatalogTupleUpdate (staged
+/// here); the planner reads the relcache form, so the cached form is patched in
+/// place. Requires the cached `Arc` to be uniquely held (call after closing other
+/// handles); a no-op if the relation is not cached or is shared.
+pub fn update_relation_stats(relid: Oid, relpages: i32, reltuples: f32) {
+    with_state(|st| {
+        let Some(entry) = st.by_oid.get_mut(&relid.0) else { return };
+        let Some(rel) = Arc::get_mut(entry) else { return };
+        if let Some(form) = rel.rd_rel.as_deref_mut() {
+            form.relpages = relpages;
+            form.reltuples = reltuples;
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Phase 2/3: nail the formrdesc catalogs
 // ---------------------------------------------------------------------------

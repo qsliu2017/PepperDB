@@ -64,6 +64,13 @@ fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
     match plan {
         Node::Result(r) => Node::Result(Box::new(set_result_refs(root, *r, rtoffset))),
         Node::SeqScan(s) => Node::SeqScan(Box::new(set_seqscan_refs(root, *s, rtoffset))),
+        Node::IndexScan(s) => Node::IndexScan(Box::new(set_indexscan_refs(root, *s, rtoffset))),
+        Node::BitmapHeapScan(s) => {
+            Node::BitmapHeapScan(Box::new(set_bitmap_heapscan_refs(root, *s, rtoffset)))
+        }
+        Node::BitmapIndexScan(s) => {
+            Node::BitmapIndexScan(Box::new(set_bitmap_indexscan_refs(root, *s, rtoffset)))
+        }
         Node::ModifyTable(m) => Node::ModifyTable(Box::new(set_modifytable_refs(root, *m, rtoffset))),
         Node::Agg(a) => Node::Agg(Box::new(set_agg_refs(root, *a, rtoffset))),
         Node::Sort(s) => Node::Sort(Box::new(set_sort_refs(root, *s, rtoffset))),
@@ -296,6 +303,70 @@ fn set_seqscan_refs(root: &mut PlannerInfo, mut plan: SeqScan, rtoffset: usize) 
     // present on the M3 scan plan.
     fix_scan_tlist_identity(&plan.scan.plan.targetlist, rtoffset);
     fix_scan_qual_identity(&plan.scan.plan.qual, rtoffset);
+    plan
+}
+
+/// PG `set_plan_refs` T_IndexScan arm + `fix_indexqual_references`: offset the
+/// scanrelid, assign the node id, and fix the scan tlist/qual Var references. The
+/// `indexqual` (already in INDEX_VAR form from createplan) and `indexqualorig` (heap
+/// Vars) are identity-validated at rtoffset 0; createplan already did the
+/// INDEX_VAR rewrite, so setrefs only assigns the node id and offsets the scanrelid.
+fn set_indexscan_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::IndexScan,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::IndexScan {
+    plan.scan.scanrelid += rtoffset as crate::nodes::primnodes::Index;
+    plan.scan.plan.plan_node_id = next_plan_node_id(root);
+
+    fix_scan_tlist_identity(&plan.scan.plan.targetlist, rtoffset);
+    fix_scan_qual_identity(&plan.scan.plan.qual, rtoffset);
+    // The indexqualorig is the heap-Var recheck clause (identity at rtoffset 0); the
+    // indexqual is already INDEX_VAR-rewritten. Validate both contain only expected
+    // node kinds (Var/Const/OpExpr).
+    for clause in &plan.indexqualorig {
+        fix_scan_expr_identity(Some(clause));
+    }
+    plan
+}
+
+/// PG `set_plan_refs` T_BitmapHeapScan arm: offset the scanrelid, assign the node id,
+/// fix the scan tlist/qual, recurse into the BitmapIndexScan child, and validate the
+/// `bitmapqualorig` recheck clause.
+fn set_bitmap_heapscan_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::BitmapHeapScan,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::BitmapHeapScan {
+    plan.scan.scanrelid += rtoffset as crate::nodes::primnodes::Index;
+    plan.scan.plan.plan_node_id = next_plan_node_id(root);
+
+    fix_scan_tlist_identity(&plan.scan.plan.targetlist, rtoffset);
+    fix_scan_qual_identity(&plan.scan.plan.qual, rtoffset);
+    for clause in &plan.bitmapqualorig {
+        fix_scan_expr_identity(Some(clause));
+    }
+
+    // Recurse into the bitmap producer (BitmapIndexScan) child.
+    if let Some(child) = plan.scan.plan.lefttree.take() {
+        plan.scan.plan.lefttree = Some(set_plan_refs(root, child, rtoffset));
+    }
+    plan
+}
+
+/// PG `set_plan_refs` T_BitmapIndexScan arm: offset the scanrelid, assign the node
+/// id. The indexqual is already INDEX_VAR-rewritten; the recheck `indexqualorig` is
+/// the heap-Var clause (identity at rtoffset 0).
+fn set_bitmap_indexscan_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::BitmapIndexScan,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::BitmapIndexScan {
+    plan.scan.scanrelid += rtoffset as crate::nodes::primnodes::Index;
+    plan.scan.plan.plan_node_id = next_plan_node_id(root);
+    for clause in &plan.indexqualorig {
+        fix_scan_expr_identity(Some(clause));
+    }
     plan
 }
 

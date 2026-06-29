@@ -359,6 +359,9 @@ fn top_plan_tlist_mut(plan: &mut crate::nodes::nodes::Node) -> &mut Vec<crate::n
     match plan {
         Node::Result(r) => &mut r.plan.targetlist,
         Node::SeqScan(s) => &mut s.scan.plan.targetlist,
+        Node::IndexScan(s) => &mut s.scan.plan.targetlist,
+        Node::IndexOnlyScan(s) => &mut s.scan.plan.targetlist,
+        Node::BitmapHeapScan(s) => &mut s.scan.plan.targetlist,
         _ => not_yet_reachable("apply_tlist_labeling: unexpected top plan node"),
     }
 }

@@ -249,10 +249,12 @@ pub async fn index_build(
     heap_relation: &RelationData,
     index_relation: &RelationData,
     index_info: &IndexInfo,
-) {
-    let _stats = btbuild(shared, heap_relation, index_relation, index_info).await;
-    // STAGED (rules.md s4): index_update_stats(heap, true, stats.heap_tuples);
-    // index_update_stats(index, false, stats.index_tuples); needs CatalogTupleUpdate.
+) -> crate::access::genam::IndexBuildResult {
+    btbuild(shared, heap_relation, index_relation, index_info).await
+    // STAGED (rules.md s4): the pg_class relpages/reltuples write (index_update_stats)
+    // needs CatalogTupleUpdate; the relcache-side stat update is applied by the
+    // caller (DefineIndex) via relcache::update_relation_stats from the returned
+    // counts, so the planner's size estimate reflects the built index.
 }
 
 /// Fabricate the index's pg_index Form (`rd_index`) from `index_info` so the btree

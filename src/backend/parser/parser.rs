@@ -9,8 +9,8 @@
 
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{
-    A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, InsertStmt, RawStmt, ResTarget,
-    SelectStmt, SetOperation, TypeName, ValUnion,
+    A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, IndexElem, IndexStmt, InsertStmt,
+    RawStmt, ResTarget, SelectStmt, SetOperation, SortByDir, SortByNulls, TypeName, ValUnion,
 };
 use crate::nodes::primnodes::{OnCommitAction, OverridingKind, RangeVar};
 use crate::nodes::value::{makeFloat, makeInteger, makeString};
@@ -401,6 +401,63 @@ pub fn make_create_stmt(relation: RangeVar, table_elts: Vec<Node>) -> Node {
         tablespacename: None,
         accessMethod: None,
         if_not_exists: false,
+    }))
+}
+
+/// gram.y `IndexStmt: CREATE [UNIQUE] INDEX [name] ON qualified_name
+/// [USING am] '(' index_params ')'` (the M6 plain form). Builds the raw
+/// `IndexStmt`; CONCURRENTLY / IF NOT EXISTS / INCLUDE / WITH / tablespace /
+/// WHERE (partial) / constraint forms default to empty and grow at their milestones.
+pub fn make_index_stmt(
+    unique: bool,
+    idxname: Option<String>,
+    relation: RangeVar,
+    access_method: Option<String>,
+    index_params: Vec<Node>,
+) -> Node {
+    use crate::postgres_ext::InvalidOid;
+    Node::IndexStmt(Box::new(IndexStmt {
+        idxname,
+        relation: Some(Box::new(relation)),
+        accessMethod: access_method,
+        tableSpace: None,
+        indexParams: index_params,
+        indexIncludingParams: Vec::new(),
+        options: Vec::new(),
+        whereClause: None,
+        excludeOpNames: Vec::new(),
+        idxcomment: None,
+        indexOid: InvalidOid,
+        oldNumber: InvalidOid,
+        oldCreateSubid: crate::c::SubTransactionId(0),
+        oldFirstRelfilelocatorSubid: crate::c::SubTransactionId(0),
+        unique,
+        nulls_not_distinct: false,
+        primary: false,
+        isconstraint: false,
+        iswithoutoverlaps: false,
+        deferrable: false,
+        initdeferred: false,
+        transformed: false,
+        concurrent: false,
+        if_not_exists: false,
+        reset_default_tblspc: false,
+    }))
+}
+
+/// gram.y `index_elem: ColId opt_asc_desc ...` (the M6 plain form). A bare column
+/// name with optional ASC/DESC; opclasses / expressions / collations / NULLS
+/// ordering grow at their milestones.
+pub fn make_index_elem(name: String, ordering: SortByDir) -> Node {
+    Node::IndexElem(Box::new(IndexElem {
+        name: Some(name),
+        expr: None,
+        indexcolname: None,
+        collation: Vec::new(),
+        opclass: Vec::new(),
+        opclassopts: Vec::new(),
+        ordering,
+        nulls_ordering: SortByNulls::DEFAULT,
     }))
 }
 

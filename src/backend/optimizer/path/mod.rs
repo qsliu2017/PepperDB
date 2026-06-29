@@ -4,3 +4,4 @@
 pub mod allpaths;
 pub mod clausesel;
 pub mod costsize;
+pub mod indxpath;

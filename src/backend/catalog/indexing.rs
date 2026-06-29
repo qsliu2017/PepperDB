@@ -105,6 +105,56 @@ fn lookup_catalog_indexes(heap_relid: Oid) -> Vec<(Arc<RelationData>, Vec<i32>)>
         .unwrap_or_default()
 }
 
+/// One index of a heap relation, as the planner / executor need it: the open index
+/// relation (an `Arc` clone, a refcount bump pinning it) and its key heap-attnums.
+pub struct RegisteredIndexInfo {
+    pub index: Arc<RelationData>,
+    pub key_attnums: Vec<i16>,
+    pub unique: bool,
+}
+
+/// PG `RelationGetIndexList` (the registry-backed M6 form): the indexes of a heap
+/// relation `heap_relid`. Used by the planner's `get_relation_info` (to build the
+/// `IndexOptInfo` list) and the wire executor (to open the index relations). Returns
+/// owned `Arc` clones + each index's key columns; empty if none registered. The
+/// pg_index-scan-backed `rd_indexlist` grows when pg_index is an on-disk catalog.
+#[must_use]
+pub fn relation_get_index_list(heap_relid: Oid) -> Vec<RegisteredIndexInfo> {
+    CATALOG_INDEXES
+        .try_with(|cell| {
+            cell.borrow()
+                .get(&heap_relid.0)
+                .map(|v| {
+                    v.iter()
+                        .map(|ri| RegisteredIndexInfo {
+                            index: Arc::clone(&ri.index),
+                            key_attnums: ri.info.index_attr_numbers.clone(),
+                            unique: ri.info.unique,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+}
+
+/// The open index relation with OID `indexoid`, if it is registered (by
+/// `index_create`). An `Arc` clone (a refcount bump). Used by the wire executor to
+/// open the index relations a planned index/bitmap scan references -- the registry
+/// holds the fully-initialized index relation (rd_index + opclass support), which a
+/// relcache rebuild from the staged pg_index cannot reconstruct on M6.
+#[must_use]
+pub fn find_registered_index(indexoid: Oid) -> Option<Arc<RelationData>> {
+    CATALOG_INDEXES
+        .try_with(|cell| {
+            cell.borrow().values().flatten().find_map(|ri| {
+                (ri.index.rd_id == indexoid).then(|| Arc::clone(&ri.index))
+            })
+        })
+        .ok()
+        .flatten()
+}
+
 // ---------------------------------------------------------------------------
 // CatalogIndexState: the open-indexes handle (PG ResultRelInfo stand-in)
 // ---------------------------------------------------------------------------

@@ -18,7 +18,7 @@ use crate::backend::parser::parser::{
     make_a_expr, make_and_expr, make_or_expr, make_not_expr, make_func_call, RawStmtVec,
     make_type_cast, make_case_expr, make_case_when, make_coalesce_expr, make_min_max_expr,
     make_nullif_expr, make_string_const_cast, make_agg_star_call, make_distinct_func_call,
-    make_sortby, insert_select_options,
+    make_sortby, insert_select_options, make_index_stmt, make_index_elem,
 };
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{ResTarget, SelectStmt, SortByDir, SortByNulls, TypeName};
@@ -84,6 +84,11 @@ extern {
         "LIMIT"    => Token::Keyword("limit"),
         "OFFSET"   => Token::Keyword("offset"),
         "ALL"      => Token::Keyword("all"),
+        // M6 (step 28): CREATE INDEX keywords.
+        "INDEX"    => Token::Keyword("index"),
+        "ON"       => Token::Keyword("on"),
+        "USING"    => Token::Keyword("using"),
+        "UNIQUE"   => Token::Keyword("unique"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -139,6 +144,7 @@ TopLevelStmt: Option<Node> = {
 Stmt: Option<Node> = {
     <s:SelectStmt> => Some(s),
     <s:CreateStmt> => Some(s),
+    <s:IndexStmt> => Some(s),
     <s:InsertStmt> => Some(s),
     => None,            // empty statement (e.g. trailing ';')
 };
@@ -256,6 +262,48 @@ TableElement: Node = {
 // the ColQualList machinery.
 ColumnDef: Node = {
     <name:ColId> <typ:Typename> => make_column_def_elt(name, typ),
+};
+
+// ===========================================================================
+//  CREATE INDEX
+// ===========================================================================
+
+// gram.y `IndexStmt`: CREATE [UNIQUE] INDEX [name] ON relation [USING am]
+// '(' index_params ')'. M6 reaches the plain single-/multi-column btree index;
+// CONCURRENTLY, IF NOT EXISTS, INCLUDE, WITH options, tablespace, WHERE (partial),
+// and the constraint forms grow at their milestones.
+IndexStmt: Node = {
+    "CREATE" <uniq:OptUnique> "INDEX" <name:OptIndexName> "ON" <rel:QualifiedName>
+        <am:OptAccessMethodClause> "(" <params:IndexParams> ")" =>
+        make_index_stmt(uniq, name, rel, am, params),
+};
+
+OptUnique: bool = {
+    "UNIQUE" => true,
+    => false,
+};
+
+OptIndexName: Option<String> = {
+    <n:ColId> => Some(n),
+    => None,
+};
+
+// gram.y `access_method_clause: USING name | /*EMPTY*/`. Defaults to btree.
+OptAccessMethodClause: Option<String> = {
+    "USING" <n:ColId> => Some(n),
+    => None,
+};
+
+// gram.y `index_params: index_elem (',' index_elem)*`.
+IndexParams: Vec<Node> = {
+    <e:IndexElem> => vec![e],
+    <mut list:IndexParams> "," <e:IndexElem> => { list.push(e); list },
+};
+
+// gram.y `index_elem: ColId index_elem_options ...`. M6 covers a bare column name
+// (with ASC/DESC); opclasses, expressions, collations, and NULLS ordering grow.
+IndexElem: Node = {
+    <n:ColId> <dir:OptAscDesc> => make_index_elem(n, dir),
 };
 
 // ===========================================================================

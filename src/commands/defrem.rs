@@ -77,8 +77,10 @@ pub fn CheckIndexCompatible(
     unimplemented!()
 }
 
-pub fn GetDefaultOpClass(_type_id: Oid, _am_id: Oid) -> Oid {
-    unimplemented!()
+/// PG `GetDefaultOpClass`. See `crate::backend::commands::indexcmds`.
+#[must_use]
+pub fn GetDefaultOpClass(type_id: Oid, am_id: Oid) -> Oid {
+    crate::backend::commands::indexcmds::get_default_op_class(type_id, am_id)
 }
 
 pub fn ResolveOpClass(

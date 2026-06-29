@@ -12,9 +12,11 @@
 //! more than one path). The many `create_*_path` constructors for scans/joins/
 //! aggregates/sorts/limits remain hollow stubs and grow per milestone.
 
+use crate::access::sdir::ScanDirection;
 use crate::nodes::nodes::Node;
 use crate::nodes::pathnodes::{
-    GroupResultPath, Path, PathTarget, PathType, PlannerInfo, RelOptInfo,
+    BitmapHeapPath, CostSelector, GroupResultPath, IndexClause, IndexOptInfo, IndexPath, Path,
+    PathTarget, PathType, PlannerInfo, RelOptInfo,
 };
 use crate::elog;
 use crate::optimizer::cost::DEFAULT_CPU_TUPLE_COST;
@@ -30,19 +32,59 @@ pub fn set_cheapest(parent_rel: &mut RelOptInfo) {
         elog!(ERROR, "could not devise a query plan for the given query");
     }
 
-    if parent_rel.pathlist.len() > 1 {
-        not_yet_reachable("set_cheapest: multiple-path comparison");
+    // M6: none of the competing paths are parameterized (no lateral refs / nestloop
+    // params yet), so cheapest-startup and cheapest-total are simply the minima over
+    // the pathlist. The parameterized-path / cheapest-unique tracking grows when a
+    // rel gains parameterized paths.
+    let mut cheapest_startup = 0usize;
+    let mut cheapest_total = 0usize;
+    for (i, path) in parent_rel.pathlist.iter().enumerate() {
+        if path.param_info.is_some() {
+            not_yet_reachable("set_cheapest: parameterized path selection");
+        }
+        if compare_path_costs(path, &parent_rel.pathlist[cheapest_startup], CostSelector::STARTUP_COST) < 0 {
+            cheapest_startup = i;
+        }
+        if compare_path_costs(path, &parent_rel.pathlist[cheapest_total], CostSelector::TOTAL_COST) < 0 {
+            cheapest_total = i;
+        }
     }
 
-    let path = parent_rel.pathlist[0].clone();
-    if path.param_info.is_some() {
-        not_yet_reachable("set_cheapest: parameterized path selection");
-    }
-
-    parent_rel.cheapest_startup_path = Some(path.clone());
-    parent_rel.cheapest_total_path = Some(path);
+    parent_rel.cheapest_startup_path = Some(parent_rel.pathlist[cheapest_startup].clone());
+    parent_rel.cheapest_total_path = Some(parent_rel.pathlist[cheapest_total].clone());
     parent_rel.cheapest_unique_path = None;
     parent_rel.cheapest_parameterized_paths = Vec::new();
+}
+
+/// PG `compare_path_costs`: order two paths by the given cost criterion. Returns -1
+/// if `path1` is cheaper, +1 if dearer, 0 if equal. The disabled-node count is the
+/// primary key (a disabled node always loses), as in PG's `compare_path_costs`.
+#[must_use]
+pub fn compare_path_costs(path1: &Path, path2: &Path, criterion: CostSelector) -> i32 {
+    use std::cmp::Ordering;
+
+    let ord_to_i32 = |o: Ordering| match o {
+        Ordering::Less => -1,
+        Ordering::Equal => 0,
+        Ordering::Greater => 1,
+    };
+
+    // The disabled-node count is the primary key (a disabled node always loses).
+    if path1.disabled_nodes != path2.disabled_nodes {
+        return ord_to_i32(path1.disabled_nodes.cmp(&path2.disabled_nodes));
+    }
+    let (c1, c2) = match criterion {
+        CostSelector::STARTUP_COST => (path1.startup_cost, path2.startup_cost),
+        CostSelector::TOTAL_COST => (path1.total_cost, path2.total_cost),
+    };
+    match c1.partial_cmp(&c2) {
+        Some(Ordering::Equal) | None if matches!(criterion, CostSelector::TOTAL_COST) => {
+            // For TOTAL_COST, ties break on startup cost (PG does the same).
+            ord_to_i32(path1.startup_cost.partial_cmp(&path2.startup_cost).unwrap_or(Ordering::Equal))
+        }
+        Some(ord) => ord_to_i32(ord),
+        None => 0,
+    }
 }
 
 /// PG `add_path`: consider a potential implementation path for the given
@@ -51,9 +93,11 @@ pub fn set_cheapest(parent_rel: &mut RelOptInfo) {
 /// pruning (and `Drop`-of-rejected-path bookkeeping) grows when multiple paths
 /// compete (M3+).
 pub fn add_path(parent_rel: &mut RelOptInfo, new_path: Box<Path>) {
-    if !parent_rel.pathlist.is_empty() {
-        not_yet_reachable("add_path: cost-based path domination");
-    }
+    // M6 keeps every candidate path and lets `set_cheapest` pick the minimum-cost
+    // one. PG prunes dominated paths here (cost + pathkeys + parameterization +
+    // row-count comparison, freeing the loser); that pruning grows when the pathlist
+    // gets large enough to matter. The set is small on M6 (seqscan + per-index
+    // index/bitmap paths), so retaining all of them is correct, just not minimal.
     parent_rel.pathlist.push(new_path);
 }
 
@@ -91,6 +135,7 @@ pub fn create_group_result_path(
         startup_cost: target.cost.startup,
         total_cost: target.cost.startup + DEFAULT_CPU_TUPLE_COST + target.cost.per_tuple,
         pathkeys: Vec::new(),
+        index_detail: None,
     };
 
     Box::new(GroupResultPath { path, quals: havingqual })
@@ -126,11 +171,151 @@ pub fn create_seqscan_path(
         total_cost: 0.0,
         // seqscan has an unordered result.
         pathkeys: Vec::new(),
+        index_detail: None,
     };
 
     crate::backend::optimizer::path::costsize::cost_seqscan(&mut path, root, rel, None);
 
     Box::new(path)
+}
+
+/// PG `create_index_path`: build an `IndexPath` over `index` for the base relation
+/// `rel`, with the matched `indexclauses`. The path's selectivity is the product of
+/// the clause selectivities; `cost_index` fills its costs. M6 has no
+/// parameterization, no index ORDER BY, and no index-only scan (the regular
+/// IndexScan form). The index-only-scan decision + the pathkeys grow later.
+pub fn create_index_path(
+    root: &mut PlannerInfo,
+    rel: &RelOptInfo,
+    index: &IndexOptInfo,
+    indexclauses: Vec<Box<IndexClause>>,
+    indexscandir: ScanDirection,
+) -> Box<IndexPath> {
+    use crate::nodes::nodes::JoinType;
+
+    let Some(target) = rel.reltarget.as_ref().map(|t| (**t).clone()) else {
+        not_yet_reachable("create_index_path: missing reltarget");
+    };
+
+    // The index selectivity is the selectivity of the index quals (the clauses the
+    // index checks). clauselist_selectivity over those clauses (M6: the same rough
+    // default the seqscan-rel size uses).
+    let qual_clauses: Vec<Node> = indexclauses
+        .iter()
+        .flat_map(|ic| ic.indexquals.iter().map(|ri| ri.clause.clone()))
+        .collect();
+    let indexselectivity = if qual_clauses.is_empty() {
+        1.0
+    } else {
+        crate::backend::optimizer::path::clausesel::clauselist_selectivity(
+            root,
+            qual_clauses,
+            rel.relid as i32,
+            JoinType::INNER,
+            None,
+        )
+    };
+
+    let detail = crate::nodes::pathnodes::IndexPathDetail {
+        indexinfo: Box::new(index.clone()),
+        indexclauses: indexclauses.clone(),
+        indexscandir,
+        indextotalcost: 0.0,
+        indexselectivity,
+        bitmapqual: None,
+    };
+
+    let path = Path {
+        pathtype: PathType::IndexScan,
+        parent: Some(Box::new(rel.clone())),
+        pathtarget: Some(Box::new(target)),
+        param_info: None,
+        parallel_aware: false,
+        parallel_safe: rel.consider_parallel,
+        parallel_workers: 0,
+        rows: 0.0,
+        disabled_nodes: 0,
+        startup_cost: 0.0,
+        total_cost: 0.0,
+        pathkeys: Vec::new(),
+        index_detail: Some(Box::new(detail)),
+    };
+
+    let mut ipath = IndexPath {
+        path,
+        indexinfo: Box::new(index.clone()),
+        indexclauses,
+        indexorderbys: Vec::new(),
+        indexorderbycols: Vec::new(),
+        indexscandir,
+        indextotalcost: 0.0,
+        indexselectivity,
+    };
+
+    crate::backend::optimizer::path::costsize::cost_index(&mut ipath, root, 1.0, false);
+
+    // Record the index-access-only cost on the path detail so a BitmapHeapPath built
+    // over this index path can cost its bitmap producer (the index access) without
+    // the IndexScan's per-tuple heap fetch.
+    if let Some(d) = ipath.path.index_detail.as_mut() {
+        d.indextotalcost = ipath.indextotalcost;
+    }
+
+    Box::new(ipath)
+}
+
+/// PG `create_bitmap_heap_path`: build a `BitmapHeapPath` whose bitmap producer is
+/// `bitmapqual` (an IndexPath/BitmapAnd/BitmapOr path). `cost_bitmap_heap_scan`
+/// fills its costs. M6 wraps a single IndexPath's quals (the bitmap form of the same
+/// index scan).
+pub fn create_bitmap_heap_path(
+    root: &mut PlannerInfo,
+    rel: &RelOptInfo,
+    bitmapqual: Box<Path>,
+) -> Box<BitmapHeapPath> {
+    let Some(target) = rel.reltarget.as_ref().map(|t| (**t).clone()) else {
+        not_yet_reachable("create_bitmap_heap_path: missing reltarget");
+    };
+
+    // The bitmap producer (an IndexScan path) carries the index detail; the bitmap
+    // heap path's detail re-homes it under `bitmapqual` for createplan, copying the
+    // producer's indexinfo/indexclauses for the BitmapIndexScan child.
+    let producer_detail = bitmapqual
+        .index_detail
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("create_bitmap_heap_path: bitmap producer has no index detail"));
+    let detail = crate::nodes::pathnodes::IndexPathDetail {
+        indexinfo: producer_detail.indexinfo.clone(),
+        indexclauses: producer_detail.indexclauses.clone(),
+        indexscandir: producer_detail.indexscandir,
+        indextotalcost: producer_detail.indextotalcost,
+        indexselectivity: producer_detail.indexselectivity,
+        bitmapqual: Some(bitmapqual.clone()),
+    };
+
+    let path = Path {
+        pathtype: PathType::BitmapHeapScan,
+        parent: Some(Box::new(rel.clone())),
+        pathtarget: Some(Box::new(target)),
+        param_info: None,
+        parallel_aware: false,
+        parallel_safe: rel.consider_parallel,
+        parallel_workers: 0,
+        rows: 0.0,
+        disabled_nodes: 0,
+        startup_cost: 0.0,
+        total_cost: 0.0,
+        pathkeys: Vec::new(),
+        index_detail: Some(Box::new(detail)),
+    };
+
+    let mut bpath = BitmapHeapPath { path, bitmapqual };
+
+    crate::backend::optimizer::path::costsize::cost_bitmap_heap_scan(
+        &mut bpath, root, rel, 1.0,
+    );
+
+    Box::new(bpath)
 }
 
 /// Panic for a pathnode path not yet translated for this milestone (rules.md s4).
