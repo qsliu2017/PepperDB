@@ -35,12 +35,13 @@ use crate::access::toast_compression::INVALID_COMPRESSION_METHOD;
 use crate::c::{NameData, NameStr, NAMEDATALEN, PG_INT16_MAX};
 use crate::catalog::catalog::IsCatalogRelationOid;
 use crate::catalog::genbki::{
-    BOOLOID, DEFAULT_COLLATION_OID, INT4OID, INT8OID, OIDOID, RECORDOID, TEXTARRAYOID, TEXTOID,
+    BOOLOID, DATEOID, DEFAULT_COLLATION_OID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID, INT8OID,
+    NUMERICOID, OIDOID, RECORDOID, TEXTARRAYOID, TEXTOID, TIMESTAMPOID,
 };
 use crate::catalog::pg_attribute::{FormData_pg_attribute, ATTRIBUTE_FIXED_PART_SIZE};
 use crate::catalog::pg_type::{
     FormData_pg_type, Form_pg_type, TYPALIGN_CHAR, TYPALIGN_DOUBLE, TYPALIGN_INT, TYPALIGN_SHORT,
-    TYPSTORAGE_EXTENDED, TYPSTORAGE_PLAIN,
+    TYPSTORAGE_EXTENDED, TYPSTORAGE_MAIN, TYPSTORAGE_PLAIN,
 };
 use crate::common::hashfn::hash_uint32;
 use crate::nodes::nodes::{stringToNode, Node};
@@ -642,6 +643,43 @@ impl TupleDescData {
             att.attbyval = true;
             att.attalign = TYPALIGN_INT;
             att.attstorage = TYPSTORAGE_PLAIN;
+            att.attcompression = INVALID_COMPRESSION_METHOD as i8;
+            att.attcollation = InvalidOid;
+        } else if oidtypeid == INT2OID {
+            att.attlen = 2;
+            att.attbyval = true;
+            att.attalign = TYPALIGN_SHORT;
+            att.attstorage = TYPSTORAGE_PLAIN;
+            att.attcompression = INVALID_COMPRESSION_METHOD as i8;
+            att.attcollation = InvalidOid;
+        } else if oidtypeid == FLOAT4OID {
+            att.attlen = 4;
+            att.attbyval = true;
+            att.attalign = TYPALIGN_INT;
+            att.attstorage = TYPSTORAGE_PLAIN;
+            att.attcompression = INVALID_COMPRESSION_METHOD as i8;
+            att.attcollation = InvalidOid;
+        } else if oidtypeid == FLOAT8OID || oidtypeid == TIMESTAMPOID {
+            // float8 / timestamp: 8-byte pass-by-value (on 64-bit), double-aligned.
+            att.attlen = 8;
+            att.attbyval = FLOAT8PASSBYVAL;
+            att.attalign = TYPALIGN_DOUBLE;
+            att.attstorage = TYPSTORAGE_PLAIN;
+            att.attcompression = INVALID_COMPRESSION_METHOD as i8;
+            att.attcollation = InvalidOid;
+        } else if oidtypeid == DATEOID {
+            att.attlen = 4;
+            att.attbyval = true;
+            att.attalign = TYPALIGN_INT;
+            att.attstorage = TYPSTORAGE_PLAIN;
+            att.attcompression = INVALID_COMPRESSION_METHOD as i8;
+            att.attcollation = InvalidOid;
+        } else if oidtypeid == NUMERICOID {
+            // numeric: varlena, MAIN storage, int-aligned.
+            att.attlen = -1;
+            att.attbyval = false;
+            att.attalign = TYPALIGN_INT;
+            att.attstorage = TYPSTORAGE_MAIN;
             att.attcompression = INVALID_COMPRESSION_METHOD as i8;
             att.attcollation = InvalidOid;
         } else {

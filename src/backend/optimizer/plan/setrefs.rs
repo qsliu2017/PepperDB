@@ -170,10 +170,28 @@ fn fix_scan_qual_identity(qual: &[Node], rtoffset: usize) {
 fn fix_scan_expr_identity(expr: Option<&Node>) {
     let Some(expr) = expr else { return };
     match expr {
-        Node::Const(_) | Node::Var(_) => {}
-        Node::OpExpr(op) => op.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
+        Node::Const(_) | Node::Var(_) | Node::CaseTestExpr(_) => {}
+        Node::OpExpr(op) | Node::NullIfExpr(op) => {
+            op.args.iter().for_each(|a| fix_scan_expr_identity(Some(a)));
+        }
         Node::FuncExpr(f) => f.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
         Node::BoolExpr(b) => b.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
+        // M4 (step 23): casts + conditional expressions -- recurse into children.
+        Node::RelabelType(r) => fix_scan_expr_identity(r.arg.as_ref()),
+        Node::CoerceViaIO(c) => fix_scan_expr_identity(c.arg.as_ref()),
+        Node::CaseExpr(c) => {
+            fix_scan_expr_identity(c.arg.as_ref());
+            for arm in &c.args {
+                fix_scan_expr_identity(Some(arm));
+            }
+            fix_scan_expr_identity(c.defresult.as_ref());
+        }
+        Node::CaseWhen(w) => {
+            fix_scan_expr_identity(w.expr.as_ref());
+            fix_scan_expr_identity(w.result.as_ref());
+        }
+        Node::CoalesceExpr(c) => c.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
+        Node::MinMaxExpr(m) => m.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
         other => not_yet_reachable(&format!("set_plan_refs: unexpected scan expr {other:?}")),
     }
 }

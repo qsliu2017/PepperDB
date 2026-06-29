@@ -46,13 +46,61 @@ pub fn typenameType(
     unimplemented!()
 }
 
-pub fn typenameTypeId(_pstate: &mut ParseState, _type_name: &TypeName) -> Oid {
-    unimplemented!()
+pub fn typenameTypeId(pstate: &mut ParseState, type_name: &TypeName) -> Oid {
+    typenameTypeIdAndMod(pstate, type_name).0
 }
 
-/// `typeid_p`/`typmod_p` out-params -> returned tuple.
-pub fn typenameTypeIdAndMod(_pstate: &mut ParseState, _type_name: &TypeName) -> (Oid, i32) {
-    unimplemented!()
+/// `typeid_p`/`typmod_p` out-params -> returned tuple. M4 (step 23): resolve the
+/// `TypeName` to `(typeOid, typmod)` synchronously via the (warm) TYPEOID /
+/// TYPENAMENSP syscache -- the cast transform runs in sync context, and
+/// `warm_expr_caches` pre-warms the type-name caches over the wire. typmod-bearing
+/// types (numeric(p,s)) grow with the opt_type_modifiers machinery; M4 passes -1.
+pub fn typenameTypeIdAndMod(_pstate: &mut ParseState, type_name: &TypeName) -> (Oid, i32) {
+    use crate::backend::utils::cache::syscache::{get_sys_cache_oid, search_sys_cache, release_sys_cache};
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    use crate::catalog::pg_type::Anum_pg_type_oid;
+    use crate::utils::syscache::SysCacheIdentifier;
+
+    // An internally generated TypeName carries the OID directly (names == NIL).
+    if type_name.names.is_empty() {
+        if type_name.typeOid == InvalidOid {
+            unimplemented!("typenameTypeIdAndMod: OID-less internal TypeName");
+        }
+        return (type_name.typeOid, type_name.typemod);
+    }
+    if !type_name.typmods.is_empty() {
+        unimplemented!("typenameTypeIdAndMod: type modifiers");
+    }
+
+    let names: Vec<&str> = type_name.names.iter().map(|s| s.sval.as_str()).collect();
+    let typname = match names.as_slice() {
+        // A pg_catalog-qualified (`pg_catalog.int4`) or bare (`numeric`) name. M4
+        // resolves both against pg_catalog (the only namespace seeded base types
+        // live in); the general search-path / explicit-schema lookup grows later.
+        [n] | ["pg_catalog", n] => *n,
+        _ => unimplemented!("typenameTypeIdAndMod: schema-qualified / 3+-part type name"),
+    };
+
+    // TYPENAMENSP (typname, typnamespace) -> the row; read its oid column.
+    let nd = crate::backend::catalog::heap::name_data(typname);
+    let keys = [
+        crate::postgres::NameGetDatum(&nd),
+        crate::postgres::ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
+    ];
+    if let Some(oid) =
+        get_sys_cache_oid(SysCacheIdentifier::TYPENAMENSP, Anum_pg_type_oid as i16, &keys)
+    {
+        return (oid, -1);
+    }
+    // Negative-cache / cold miss: release any held tuple and raise.
+    if let Some(t) = search_sys_cache(SysCacheIdentifier::TYPENAMENSP, &keys) {
+        release_sys_cache(t);
+    }
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_OBJECT)
+            .errmsg(format!("type \"{}\" does not exist", names.join(".")));
+    });
+    unreachable!("ereport(ERROR) diverges");
 }
 
 pub fn TypeNameToString(_type_name: &TypeName) -> String {

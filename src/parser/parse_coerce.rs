@@ -49,14 +49,8 @@ pub fn TypeCategory(_ty: Oid) -> TYPCATEGORY {
 /// PG `coerce_to_target_type`. See `crate::backend::parser::parse_coerce`.
 pub use crate::backend::parser::parse_coerce::coerce_to_target_type;
 
-pub fn can_coerce_type(
-    _nargs: i32,
-    _input_typeids: &[Oid],
-    _target_typeids: &[Oid],
-    _ccontext: CoercionContext,
-) -> bool {
-    unimplemented!()
-}
+/// PG `can_coerce_type`. See `crate::backend::parser::parse_coerce`.
+pub use crate::backend::parser::parse_coerce::can_coerce_type;
 
 /// PG `coerce_type`. See `crate::backend::parser::parse_coerce`.
 pub use crate::backend::parser::parse_coerce::coerce_type;
@@ -114,23 +108,11 @@ pub fn parser_coercion_errposition(
     unimplemented!()
 }
 
-/// `which_expr` out-param folded into the return as the second tuple element.
-pub fn select_common_type(
-    _pstate: &mut ParseState,
-    _exprs: &[Node],
-    _context: &str,
-) -> (Oid, Option<Node>) {
-    unimplemented!()
-}
+/// PG `select_common_type`. See `crate::backend::parser::parse_coerce`.
+pub use crate::backend::parser::parse_coerce::select_common_type;
 
-pub fn coerce_to_common_type(
-    _pstate: &mut ParseState,
-    _node: Node,
-    _target_type_id: Oid,
-    _context: &str,
-) -> Node {
-    unimplemented!()
-}
+/// PG `coerce_to_common_type`. See `crate::backend::parser::parse_coerce`.
+pub use crate::backend::parser::parse_coerce::coerce_to_common_type;
 
 pub fn verify_common_type(_common_type: Oid, _exprs: &[Node]) -> bool {
     unimplemented!()
@@ -180,15 +162,8 @@ pub fn check_valid_internal_signature(
     unimplemented!()
 }
 
-/// `funcid` out-param folded into the return.
-pub fn find_coercion_pathway(
-    _target_type_id: Oid,
-    _source_type_id: Oid,
-    _ccontext: CoercionContext,
-    _funcid: &mut Oid,
-) -> CoercionPathType {
-    unimplemented!()
-}
+/// PG `find_coercion_pathway`. See `crate::backend::parser::parse_coerce`.
+pub use crate::backend::parser::parse_coerce::find_coercion_pathway;
 
 /// `funcid` out-param folded into the return.
 pub fn find_typmod_coercion_function(_type_id: Oid, _funcid: &mut Oid) -> CoercionPathType {

@@ -139,6 +139,8 @@ where
     use crate::backend::utils::resowner::resowner;
     use crate::backend::utils::time::{combocid::combocid_scope, snapmgr::snapmgr_scope};
 
+    use crate::backend::storage::buffer::buf_init::with_private_refcount;
+
     let _ = &shared;
     let owner = resowner::ResourceOwner::create(None, "backend top-level");
 
@@ -151,6 +153,13 @@ where
         crate::backend::utils::cache::relcache::relation_cache_initialize_phase3();
         inner.await;
     };
+
+    // Establish this task's PrivateRefCount map (PG's per-backend pin cache). On the
+    // multi-thread runtime a backend/bootstrap task migrates between workers across
+    // `.await`s; the buffer pin bookkeeping must be task_local so a pin held across a
+    // suspension point follows the task (a thread_local fallback would strand half
+    // the pins on the origin worker -> the buffer-pin assertions trip).
+    let inner = with_private_refcount(|| inner);
 
     let body = Box::pin(catalog_index_scope(Box::pin(inner)));
     let body = Box::pin(relcache_scope(body));
@@ -1377,6 +1386,94 @@ mod wire_tests {
 
         assert_eq!(sel[4].body, b"SELECT 3\0", "three rows selected");
         assert_eq!(sel[5].body, b"I");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// Decode every text column of a DataRow body (a NULL column -> the literal
+    /// "NULL" sentinel so the assertion can name it).
+    fn datarow_texts(body: &[u8]) -> Vec<String> {
+        let ncols = u16::from_be_bytes([body[0], body[1]]) as usize;
+        let mut out = Vec::with_capacity(ncols);
+        let mut off = 2usize;
+        for _ in 0..ncols {
+            let len = i32::from_be_bytes([body[off], body[off + 1], body[off + 2], body[off + 3]]);
+            off += 4;
+            if len < 0 {
+                out.push("NULL".to_owned());
+            } else {
+                let n = len as usize;
+                out.push(String::from_utf8(body[off..off + n].to_vec()).expect("utf8"));
+                off += n;
+            }
+        }
+        out
+    }
+
+    /// THE M4 MILESTONE: casts + CASE + COALESCE + NULLIF + GREATEST/LEAST over the
+    /// wire. Over rows a in {-1, 0, 2}:
+    ///   - `a::numeric` -> "-1","0","2" (int4_numeric via-func cast),
+    ///   - `a::text`    -> "-1","0","2" (int4out CoerceViaIO),
+    ///   - `CASE WHEN a > 0 THEN 'pos' ELSE 'neg' END` -> "neg","neg","pos",
+    ///   - `COALESCE(NULLIF(a,0), -9)` -> "-1","-9","2" (NULLIF nulls the 0, COALESCE
+    ///     substitutes -9),
+    ///   - `GREATEST(a,0)` / `LEAST(a,0)` -> (0,-1),(0,0),(2,0).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m4_casts_and_conditionals_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        simple_query(&mut client, &mut buf, "CREATE TABLE t (a int)").await;
+        for v in [-1, 0, 2] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO t VALUES ({v})")).await;
+        }
+
+        // a::numeric
+        let sel = simple_query(&mut client, &mut buf, "SELECT a::numeric FROM t").await;
+        let vals: Vec<String> = sel.iter().filter(|m| m.ty == b'D').map(|m| datarow_single_text(&m.body)).collect();
+        assert_eq!(vals, vec!["-1", "0", "2"], "a::numeric");
+
+        // CAST(a AS float8) -- via i4tod; float8out renders integers with no fraction.
+        let sel = simple_query(&mut client, &mut buf, "SELECT CAST(a AS float8) FROM t").await;
+        let vals: Vec<String> = sel.iter().filter(|m| m.ty == b'D').map(|m| datarow_single_text(&m.body)).collect();
+        assert_eq!(vals, vec!["-1", "0", "2"], "CAST(a AS float8)");
+
+        // a::text (int4out CoerceViaIO)
+        let sel = simple_query(&mut client, &mut buf, "SELECT a::text FROM t").await;
+        let vals: Vec<String> = sel.iter().filter(|m| m.ty == b'D').map(|m| datarow_single_text(&m.body)).collect();
+        assert_eq!(vals, vec!["-1", "0", "2"], "a::text");
+
+        // CASE WHEN a > 0 THEN 1 ELSE 0 END
+        let sel = simple_query(&mut client, &mut buf, "SELECT CASE WHEN a > 0 THEN 1 ELSE 0 END FROM t").await;
+        let vals: Vec<String> = sel.iter().filter(|m| m.ty == b'D').map(|m| datarow_single_text(&m.body)).collect();
+        assert_eq!(vals, vec!["0", "0", "1"], "CASE WHEN a>0 THEN 1 ELSE 0");
+
+        // COALESCE(NULLIF(a, 0), -9): NULLIF nulls the row where a=0; COALESCE then
+        // substitutes -9. Rows -1,0,2 -> -1,-9,2.
+        let sel = simple_query(&mut client, &mut buf, "SELECT COALESCE(NULLIF(a, 0), -9) FROM t").await;
+        let vals: Vec<String> = sel.iter().filter(|m| m.ty == b'D').map(|m| datarow_single_text(&m.body)).collect();
+        assert_eq!(vals, vec!["-1", "-9", "2"], "COALESCE(NULLIF(a,0), -9)");
+
+        // GREATEST(a, 0), LEAST(a, 0): two columns per row.
+        let sel = simple_query(&mut client, &mut buf, "SELECT GREATEST(a, 0), LEAST(a, 0) FROM t").await;
+        let rows: Vec<Vec<String>> = sel.iter().filter(|m| m.ty == b'D').map(|m| datarow_texts(&m.body)).collect();
+        assert_eq!(
+            rows,
+            vec![
+                vec!["0".to_owned(), "-1".to_owned()],
+                vec!["0".to_owned(), "0".to_owned()],
+                vec!["2".to_owned(), "0".to_owned()],
+            ],
+            "GREATEST(a,0), LEAST(a,0)"
+        );
 
         drop(client);
         sup.shutdown.trigger();

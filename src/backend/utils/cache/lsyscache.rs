@@ -262,5 +262,84 @@ pub fn get_func_rettype(funcid: Oid) -> Oid {
     rettype
 }
 
+// ---------------------------------------------------------------------------
+// M4 (step 23): cast-resolution accessors (getTypeInputInfo / get_cast_func /
+// get_type_category_preferred). Sync (warm-hit) readers over the syscache.
+// ---------------------------------------------------------------------------
+
+/// `getTypeInputInfo` (SYNC, hit): `(typinput, typioparam)` for `type`. The
+/// typioparam is the type's element type if it is an array type, else the type's
+/// own OID (PG `getTypeIOParam`). Reads pg_type via a warm TYPEOID hit; falls back
+/// to the builtin int2/4/8 input map for the catalog-less bootstrap window.
+#[must_use]
+pub fn get_type_input_info(r#type: Oid) -> (Oid, Oid) {
+    if let Some(tuple) = search_sys_cache(SysCacheIdentifier::TYPEOID, &[ObjectIdGetDatum(r#type)]) {
+        // SAFETY: held syscache tuple; borrow ends before release_sys_cache.
+        let out = {
+            let pt = unsafe { type_form(&*tuple) };
+            let typioparam = if pt.typelem == crate::postgres_ext::InvalidOid {
+                r#type
+            } else {
+                pt.typelem
+            };
+            (pt.typinput, typioparam)
+        };
+        release_sys_cache(tuple);
+        return out;
+    }
+    builtin_type_input(r#type)
+}
+
+/// The builtin int2/4/8 input map (bootstrap-window fallback; typioparam is the
+/// type's own OID since none is an array type).
+fn builtin_type_input(r#type: Oid) -> (Oid, Oid) {
+    use crate::catalog::genbki::{INT2OID, INT4OID, INT8OID};
+    use crate::utils::fmgroids::{F_INT2IN, F_INT4IN, F_INT8IN};
+    let typinput = match r#type {
+        t if t == INT4OID => F_INT4IN,
+        t if t == INT2OID => F_INT2IN,
+        t if t == INT8OID => F_INT8IN,
+        _ => cache_lookup_failed(r#type),
+    };
+    (typinput, r#type)
+}
+
+/// `get_type_category_preferred` (SYNC, hit): `(typcategory, typispreferred)`.
+/// Reads pg_type via a warm TYPEOID hit (used by `select_common_type`).
+#[must_use]
+pub fn get_type_category_preferred(typid: Oid) -> (i8, bool) {
+    let Some(tuple) = search_sys_cache(SysCacheIdentifier::TYPEOID, &[ObjectIdGetDatum(typid)])
+    else {
+        cache_lookup_failed(typid);
+    };
+    // SAFETY: held syscache tuple; borrow ends before release_sys_cache.
+    let out = {
+        let pt = unsafe { type_form(&*tuple) };
+        (pt.typcategory, pt.typispreferred)
+    };
+    release_sys_cache(tuple);
+    out
+}
+
+/// Read the `(castfunc, castcontext, castmethod)` of a pg_cast row for
+/// `(source, target)` via a warm CASTSOURCETARGET hit. `None` if no such cast.
+/// PG's `find_coercion_pathway` inlines this `SearchSysCache2(CASTSOURCETARGET)`.
+#[must_use]
+pub fn get_cast_info(source: Oid, target: Oid) -> Option<(Oid, i8, i8)> {
+    use crate::catalog::pg_cast::{Form_pg_cast, FormData_pg_cast};
+    let tuple = search_sys_cache(
+        SysCacheIdentifier::CASTSOURCETARGET,
+        &[ObjectIdGetDatum(source), ObjectIdGetDatum(target)],
+    )?;
+    // SAFETY: a held CASTSOURCETARGET hit -> a pg_cast row.
+    let out = {
+        let pc: Form_pg_cast = GETSTRUCT(unsafe { &*tuple }).cast::<FormData_pg_cast>();
+        let pc = unsafe { &*pc };
+        (pc.castfunc, pc.castcontext, pc.castmethod)
+    };
+    release_sys_cache(tuple);
+    Some(out)
+}
+
 // Keep Datum referenced (used by the public header re-exports' signatures).
 const _: fn(Oid) -> Datum = ObjectIdGetDatum;

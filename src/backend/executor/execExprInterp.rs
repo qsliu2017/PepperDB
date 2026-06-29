@@ -120,6 +120,10 @@ pub fn exec_interp_expr(state: &mut ExprState, econtext: &mut ExprContext, is_nu
 /// `resnull` (the scratch) and return the next program counter (`pc + 1`, or the
 /// step's jump target for a short-circuit). Shared by the top-level interpreter
 /// and the per-argument sub-program runner.
+#[allow(
+    clippy::too_many_lines,
+    reason = "1:1 with PG ExecInterpExpr's single per-opcode dispatch switch; splitting the arms across functions would obscure the EEOP <-> handler mapping"
+)]
 fn exec_interp_step(
     step: &mut ExprEvalStep,
     econtext: &mut ExprContext,
@@ -223,9 +227,216 @@ fn exec_interp_step(
             };
             j.jumpdone as usize
         }
+        // M4 (step 23): NULLIF -- like a strict 2-arg function, but if the two args
+        // compare equal (the "=" operator returns TRUE) the result is NULL; else the
+        // result is the FIRST argument (not the operator's boolean result).
+        ExprEvalOp::NULLIF => {
+            eval_nullif(step, econtext, resvalue, resnull);
+            pc + 1
+        }
+        // CoerceViaIO: out-func(source) -> cstring, then in-func(target). NULL in,
+        // NULL out (strict).
+        ExprEvalOp::IOCOERCE => {
+            eval_iocoerce(step, econtext, resvalue, resnull);
+            pc + 1
+        }
+        ExprEvalOp::CASE => {
+            eval_case(step, econtext, resvalue, resnull);
+            pc + 1
+        }
+        ExprEvalOp::COALESCE => {
+            eval_coalesce(step, econtext, resvalue, resnull);
+            pc + 1
+        }
+        ExprEvalOp::MINMAX => {
+            eval_minmax(step, econtext, resvalue, resnull);
+            pc + 1
+        }
         // DONE_RETURN/DONE_NO_RETURN are handled by the two callers
         // (exec_interp_expr top level, run_scalar sub-program) before dispatch.
         other => not_yet_reachable(other),
+    }
+}
+
+/// EEOP_NULLIF: run the two args (a NullIfExpr is a strict 2-arg "=" OpExpr-shaped
+/// node). If either arg is NULL the result is the first arg (PG: a NULL first arg
+/// yields NULL, which is the first arg). If the "=" comparison is TRUE the result is
+/// NULL; otherwise the result is the first argument.
+fn eval_nullif(
+    step: &mut ExprEvalStep,
+    econtext: &mut ExprContext,
+    resvalue: &mut Datum,
+    resnull: &mut bool,
+) {
+    use crate::postgres::DatumGetBool;
+    let ExprEvalStepData::Func(f) = &mut step.d else {
+        unreachable!("EEOP_NULLIF without Func payload");
+    };
+    let nargs = f.nargs as usize;
+    crate::assert!(nargs == 2, "NULLIF has exactly two arguments");
+
+    // Evaluate both args (const args were filled at init; sub-programs run here).
+    for i in 0..nargs {
+        if let Some(steps) = f.arg_steps[i].as_mut() {
+            let (v, n) = run_scalar(steps, econtext);
+            let fcinfo = f.fcinfo_data.as_mut().unwrap_or_else(|| unimplemented!("NULLIF fcinfo"));
+            fcinfo.args[i].value = v;
+            fcinfo.args[i].isnull = n;
+        }
+    }
+    let fcinfo = f.fcinfo_data.as_mut().unwrap_or_else(|| unimplemented!("NULLIF fcinfo"));
+    let (arg0, arg0null) = (fcinfo.args[0].value, fcinfo.args[0].isnull);
+
+    // The result defaults to the first argument.
+    *resvalue = arg0;
+    *resnull = arg0null;
+
+    // If either input is NULL, the "=" operator (strict) yields NULL -> not equal,
+    // so the result stays the first argument.
+    if fcinfo.args[0].isnull || fcinfo.args[1].isnull {
+        return;
+    }
+    let fn_addr = f.fn_addr.unwrap_or_else(|| unimplemented!("NULLIF fn_addr"));
+    fcinfo.isnull = false;
+    let eq = fn_addr(fcinfo);
+    if !fcinfo.isnull && DatumGetBool(eq) {
+        // Args are equal -> NULLIF returns NULL.
+        *resnull = true;
+    }
+}
+
+/// EEOP_IOCOERCE: source typoutput -> cstring -> target typinput. NULL passes
+/// through (the I/O coercion is strict in PG's CoerceViaIO).
+fn eval_iocoerce(
+    step: &mut ExprEvalStep,
+    econtext: &mut ExprContext,
+    resvalue: &mut Datum,
+    resnull: &mut bool,
+) {
+    use crate::backend::utils::fmgr::fmgr::{OutputFunctionCall, InputFunctionCall};
+    let ExprEvalStepData::Iocoerce(io) = &mut step.d else {
+        unreachable!("EEOP_IOCOERCE without Iocoerce payload");
+    };
+    let (v, n) = run_scalar(&mut io.arg_steps, econtext);
+    if n {
+        *resnull = true;
+        return;
+    }
+    // Output the source value to its text form, then feed it to the target's input.
+    let out_flinfo = io.finfo_out.as_mut().unwrap_or_else(|| unimplemented!("IOCOERCE out finfo"));
+    let s = OutputFunctionCall(out_flinfo, v);
+    let in_flinfo = io.finfo_in.as_mut().unwrap_or_else(|| unimplemented!("IOCOERCE in finfo"));
+    let typioparam = io.typioparam;
+    let out = InputFunctionCall(in_flinfo, &s, typioparam, -1)
+        .unwrap_or_else(|| unimplemented!("IOCOERCE input returned NULL"));
+    *resvalue = out;
+    *resnull = false;
+}
+
+/// EEOP_CASE: evaluate the WHEN conditions in order; the first TRUE arm's result is
+/// the value; if none is TRUE, the ELSE (default) result. (The simple-CASE test arg
+/// with its CaseTestExpr placeholder is staged; the searched form -- the M4
+/// milestone -- needs no test value.)
+fn eval_case(
+    step: &mut ExprEvalStep,
+    econtext: &mut ExprContext,
+    resvalue: &mut Datum,
+    resnull: &mut bool,
+) {
+    use crate::postgres::DatumGetBool;
+    let ExprEvalStepData::Case(c) = &mut step.d else {
+        unreachable!("EEOP_CASE without Case payload");
+    };
+    if c.arg_steps.is_some() {
+        unimplemented!("EEOP_CASE: simple-CASE test value (CaseTestExpr) not yet reachable");
+    }
+    for (cond, result) in &mut c.when_steps {
+        let (cv, cn) = run_scalar(cond, econtext);
+        if !cn && DatumGetBool(cv) {
+            let (rv, rn) = run_scalar(result, econtext);
+            *resvalue = rv;
+            *resnull = rn;
+            return;
+        }
+    }
+    let (dv, dn) = run_scalar(&mut c.default_steps, econtext);
+    *resvalue = dv;
+    *resnull = dn;
+}
+
+/// EEOP_COALESCE: return the first non-NULL argument; NULL if all are NULL.
+fn eval_coalesce(
+    step: &mut ExprEvalStep,
+    econtext: &mut ExprContext,
+    resvalue: &mut Datum,
+    resnull: &mut bool,
+) {
+    let ExprEvalStepData::Coalesce(c) = &mut step.d else {
+        unreachable!("EEOP_COALESCE without Coalesce payload");
+    };
+    for arg in &mut c.arg_steps {
+        let (v, n) = run_scalar(arg, econtext);
+        if !n {
+            *resvalue = v;
+            *resnull = false;
+            return;
+        }
+    }
+    *resnull = true;
+}
+
+/// EEOP_MINMAX: GREATEST/LEAST. Evaluate every argument; skip NULLs; fold with the
+/// type's btree comparison function (>0 means arg0 > arg1). The result is NULL only
+/// if every argument is NULL.
+fn eval_minmax(
+    step: &mut ExprEvalStep,
+    econtext: &mut ExprContext,
+    resvalue: &mut Datum,
+    resnull: &mut bool,
+) {
+    use crate::nodes::primnodes::MinMaxOp;
+    use crate::postgres::DatumGetInt32;
+    let ExprEvalStepData::Minmax(m) = &mut step.d else {
+        unreachable!("EEOP_MINMAX without Minmax payload");
+    };
+    let nelems = m.nelems as usize;
+    for i in 0..nelems {
+        let (v, n) = run_scalar(&mut m.arg_steps[i], econtext);
+        m.values[i] = v;
+        m.nulls[i] = n;
+    }
+
+    let cmp_addr = m.cmp_addr.unwrap_or_else(|| unimplemented!("MINMAX cmp fn"));
+    let is_greatest = matches!(m.op, MinMaxOp::GREATEST);
+    let mut have: Option<Datum> = None;
+    for i in 0..nelems {
+        if m.nulls[i] {
+            continue;
+        }
+        let candidate = m.values[i];
+        match have {
+            None => have = Some(candidate),
+            Some(cur) => {
+                let fcinfo = m.fcinfo_data.as_mut().unwrap_or_else(|| unimplemented!("MINMAX fcinfo"));
+                fcinfo.args[0].value = candidate;
+                fcinfo.args[0].isnull = false;
+                fcinfo.args[1].value = cur;
+                fcinfo.args[1].isnull = false;
+                fcinfo.isnull = false;
+                let cmp = DatumGetInt32(cmp_addr(fcinfo));
+                // GREATEST keeps the larger (cmp > 0), LEAST the smaller (cmp < 0).
+                if (is_greatest && cmp > 0) || (!is_greatest && cmp < 0) {
+                    have = Some(candidate);
+                }
+            }
+        }
+    }
+    match have {
+        Some(v) => {
+            *resvalue = v;
+            *resnull = false;
+        }
+        None => *resnull = true,
     }
 }
 

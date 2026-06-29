@@ -288,11 +288,32 @@ pub fn exprCollation(expr: &Node) -> Oid {
 }
 
 /// PG `exprIsLengthCoercion`: whether the expr is a length coercion; the coerced
-/// typmod is the payload when so.
-pub fn exprIsLengthCoercion(_expr: &Node) -> Option<i32> {
-    // Reaches the FuncExpr/length-coercion-function recognition (syscache lookup
-    // of the coercion function) not translated for M1.
-    unimplemented!("exprIsLengthCoercion: length-coercion recognition deferred")
+/// typmod is the payload (`Some(typmod)`) when so, else `None`.
+///
+/// A scalar length coercion is a cast-context FuncExpr with 2-3 args whose second
+/// arg is a non-NULL int4 Const (the typmod). M4's single-argument cast functions
+/// are *type* coercions, not length coercions, so they return `None`. (The array
+/// ArrayCoerceExpr arm grows with arrays.)
+pub fn exprIsLengthCoercion(expr: &Node) -> Option<i32> {
+    use crate::catalog::genbki::INT4OID;
+    use crate::nodes::primnodes::CoercionForm;
+    let Node::FuncExpr(func) = expr else {
+        return None;
+    };
+    if !matches!(func.funcformat, CoercionForm::EXPLICIT_CAST | CoercionForm::IMPLICIT_CAST) {
+        return None;
+    }
+    let nargs = func.args.len();
+    if !(2..=3).contains(&nargs) {
+        return None;
+    }
+    let Node::Const(second) = &func.args[1] else {
+        return None;
+    };
+    if second.consttype != INT4OID || second.constisnull {
+        return None;
+    }
+    Some(crate::postgres::DatumGetInt32(second.constvalue))
 }
 
 /// PG `exprSetCollation`: set the collation of an expression's result. M3 reaches

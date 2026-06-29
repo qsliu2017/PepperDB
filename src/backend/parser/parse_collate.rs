@@ -129,7 +129,7 @@ fn assign_collations_walker(
         // CollateStrength::None and the node's collation is InvalidOid (the general
         // collation-merge over collatable inputs grows with text/varchar). The walk
         // must still descend so nested OpExprs are visited.
-        Node::OpExpr(_) | Node::FuncExpr(_) | Node::BoolExpr(_) => {
+        Node::OpExpr(_) | Node::FuncExpr(_) | Node::BoolExpr(_) | Node::NullIfExpr(_) => {
             walk_args(pstate, node);
             let collation = exprCollation(node);
             // exprSetCollation is a no-op when the result type is uncollatable, but
@@ -140,9 +140,79 @@ fn assign_collations_walker(
             context.location = -1;
             false
         }
-        // CollateExpr / CaseExpr / ... (collation-bearing) grow per milestone.
+        // M4 (step 23): casts + conditional expressions. The M4-reachable result
+        // types (numeric/int/float/date) are all uncollatable, so the walk descends
+        // into the children (so nested OpExprs are visited) and sets the node's
+        // collation to InvalidOid. The general collation merge over collatable inputs
+        // grows with text/varchar.
+        Node::RelabelType(r) => {
+            if let Some(arg) = r.arg.as_mut() {
+                assign_expr_collations(pstate, arg);
+            }
+            no_collation(context);
+            false
+        }
+        Node::CoerceViaIO(c) => {
+            if let Some(arg) = c.arg.as_mut() {
+                assign_expr_collations(pstate, arg);
+            }
+            no_collation(context);
+            false
+        }
+        Node::CaseExpr(c) => {
+            if let Some(arg) = c.arg.as_mut() {
+                assign_expr_collations(pstate, arg);
+            }
+            for arm in &mut c.args {
+                assign_expr_collations(pstate, arm);
+            }
+            if let Some(def) = c.defresult.as_mut() {
+                assign_expr_collations(pstate, def);
+            }
+            no_collation(context);
+            false
+        }
+        Node::CaseWhen(w) => {
+            if let Some(cond) = w.expr.as_mut() {
+                assign_expr_collations(pstate, cond);
+            }
+            if let Some(res) = w.result.as_mut() {
+                assign_expr_collations(pstate, res);
+            }
+            no_collation(context);
+            false
+        }
+        Node::CoalesceExpr(c) => {
+            for arg in &mut c.args {
+                assign_expr_collations(pstate, arg);
+            }
+            no_collation(context);
+            false
+        }
+        Node::MinMaxExpr(m) => {
+            for arg in &mut m.args {
+                assign_expr_collations(pstate, arg);
+            }
+            no_collation(context);
+            false
+        }
+        // CaseTestExpr is an uncollatable placeholder (M4 reaches it only in the
+        // staged simple-CASE form, but the leaf walk is a no-op).
+        Node::CaseTestExpr(_) => {
+            no_collation(context);
+            false
+        }
+        // CollateExpr / SubLink / ... (collation-bearing) grow per milestone.
         other => not_yet_reachable(other),
     }
+}
+
+/// Set the walker context to "no collation" (an uncollatable result). The M4 node
+/// types all produce uncollatable (numeric/int/date) results.
+fn no_collation(context: &mut AssignCollationsContext) {
+    context.collation = InvalidOid;
+    context.strength = CollateStrength::None;
+    context.location = -1;
 }
 
 /// Walk each argument of an OpExpr / FuncExpr / BoolExpr (the recursive descent of

@@ -119,12 +119,23 @@ pub fn make_const(_pstate: &mut ParseState, aconst: &A_Const) -> Box<Const> {
     let (val, typeid, typelen, typebyval): (Datum, _, i32, bool) = match &aconst.val {
         ValUnion::Integer(i) => (Int32GetDatum(intVal(i)), INT4OID, 4, true),
         ValUnion::Boolean(b) => (BoolGetDatum(boolVal(b)), BOOLOID, 1, true),
-        ValUnion::String(_s) => {
-            // UNKNOWN's internal representation is the same as CSTRING; the value
-            // is a CStringGetDatum of the literal text. The cstring->Datum bridge
-            // for an owned String is part of the not-yet-translated varlena/cstring
-            // datum layer; reachable later (string literals appear from M2+).
-            unimplemented!("make_const T_String: CStringGetDatum bridge deferred")
+        ValUnion::String(s) => {
+            // PG `makeConst(UNKNOWNOID, ..., CStringGetDatum(strVal(val)), ...)`: an
+            // UNKNOWN-typed const whose value is the literal text as a cstring
+            // (UNKNOWN's internal repr == cstring). The owned `String` is leaked to a
+            // NUL-terminated buffer so the Datum (a `*const i8`) stays valid for the
+            // plan's lifetime, then coerce_type retypes it via the target's typinput.
+            // SQL string literals carry no interior NUL (the scanner rejects it); if
+            // one slips through, truncate at the first NUL (C-string semantics).
+            let bytes = s.sval.as_bytes();
+            let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+            let cstr = std::ffi::CString::new(&bytes[..end]).unwrap_or_default();
+            let ptr: *const i8 = std::boxed::Box::leak(cstr.into_boxed_c_str()).as_ptr();
+            let mut con = makeConst(
+                UNKNOWNOID, -1, InvalidOid, -2, crate::postgres::CStringGetDatum(ptr), false, false,
+            );
+            con.location = aconst.location;
+            return Box::new(con);
         }
         ValUnion::Float(_f) => {
             // Could be an oversize integer or a true float; PG runs

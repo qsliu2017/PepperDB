@@ -56,6 +56,7 @@ pub enum Token {
     Lt,      // <
     Gt,      // >
     Eq,      // =
+    Typecast, // ::  (PG TYPECAST)
     // Multi-character comparison operators (PG's LESS_EQUALS / GREATER_EQUALS /
     // NOT_EQUALS; `!=` is lexed as `<>` per PG scan.l).
     LessEquals,    // <=
@@ -102,6 +103,9 @@ enum Raw {
     #[token("-")] Minus,
     #[token("/")] Slash,
     #[token("%")] Percent,
+    // PG's TYPECAST (`::`). Listed before the single-char operators so logos's
+    // longest-match picks it (there is no bare `:` token in the grammar yet).
+    #[token("::")] Typecast,
     // Multi-char comparison operators first (logos picks the longest match, but
     // the spellings are listed explicitly to mirror PG scan.l's self/op rules).
     #[token("<=")] LessEquals,
@@ -151,6 +155,7 @@ pub fn lex(src: &str) -> impl Iterator<Item = Result<(Loc, Token, Loc), LexError
             Raw::Lt => Token::Lt,
             Raw::Gt => Token::Gt,
             Raw::Eq => Token::Eq,
+            Raw::Typecast => Token::Typecast,
             Raw::LessEquals => Token::LessEquals,
             Raw::GreaterEquals => Token::GreaterEquals,
             // PG scan.l rewrites `!=` to `<>` at scan time; both yield NotEquals.
@@ -251,3 +256,4 @@ mod tests {
         assert_eq!(errs, vec![LexError { location: 2 }]);
     }
 }
+

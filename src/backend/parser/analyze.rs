@@ -474,6 +474,142 @@ async fn warm_expr_caches(
     // wire milestone; the M3 wire path reaches operators (warmed above). The
     // collected `fn_names` are recorded so that pass can grow here.
     let _ = &fn_names;
+
+    // M4 (step 23): warm the cast-resolution caches the sync transform needs over
+    // the wire -- the type-name lookups (TYPENAMENSP), the type metadata (TYPEOID),
+    // and the cast catalog (CASTSOURCETARGET). The transform resolves casts in sync
+    // context, so these must be hit-warm. Warm:
+    //  - TYPENAMENSP for every type name referenced in a CAST/typed-literal, plus
+    //    the M4 base-type names (so `::numeric`/`::float8`/`::text` resolve),
+    //  - TYPEOID for the M4 base types (typinput/output/category reads),
+    //  - CASTSOURCETARGET for the candidate-source x M4-target type cross product.
+    warm_cast_caches(shared, target_list, where_clause, &types).await;
+}
+
+/// Async-warm the M4 cast-resolution syscaches (TYPENAMENSP / TYPEOID /
+/// CASTSOURCETARGET) so the SYNC cast transform hits them over the wire. See
+/// `warm_expr_caches`. The M4 base-type set is the numeric tower + date/time + the
+/// existing namespace types in `candidate_types`.
+async fn warm_cast_caches(
+    shared: &Arc<SharedState>,
+    target_list: &[Node],
+    where_clause: Option<&Node>,
+    candidate_types: &[Oid],
+) {
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+    use crate::catalog::genbki::{
+        BOOLOID, DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID, INT8OID, NUMERICOID, TEXTOID,
+        TIMESTAMPOID,
+    };
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    use crate::postgres::{NameGetDatum, ObjectIdGetDatum};
+    use crate::utils::syscache::SysCacheIdentifier as Sc;
+
+    // The M4 base types (oid + the canonical pg_catalog name to resolve by name).
+    let base_types: &[(Oid, &str)] = &[
+        (INT2OID, "int2"), (INT4OID, "int4"), (INT8OID, "int8"),
+        (FLOAT4OID, "float4"), (FLOAT8OID, "float8"), (NUMERICOID, "numeric"),
+        (DATEOID, "date"), (TIMESTAMPOID, "timestamp"), (TEXTOID, "text"), (BOOLOID, "bool"),
+    ];
+
+    // TYPEOID + TYPENAMENSP for each base type (name and oid resolution).
+    for &(oid, name) in base_types {
+        if let Some(t) = search_sys_cache_populate(shared, Sc::TYPEOID, &[ObjectIdGetDatum(oid)]).await {
+            release_sys_cache(t);
+        }
+        let nd = name_data(name);
+        let keys = [NameGetDatum(&nd), ObjectIdGetDatum(PG_CATALOG_NAMESPACE)];
+        if let Some(t) = search_sys_cache_populate(shared, Sc::TYPENAMENSP, &keys).await {
+            release_sys_cache(t);
+        }
+    }
+
+    // Also warm TYPENAMENSP for any explicit type name in the query's casts/literals
+    // (covers user-spelled names; the base set above covers the keyword spellings).
+    let mut type_names: Vec<String> = Vec::new();
+    for n in target_list {
+        if let Node::ResTarget(rt) = n {
+            collect_type_names(rt.val.as_ref(), &mut type_names);
+        }
+    }
+    collect_type_names(where_clause, &mut type_names);
+    for tn in &type_names {
+        let nd = name_data(tn);
+        let keys = [NameGetDatum(&nd), ObjectIdGetDatum(PG_CATALOG_NAMESPACE)];
+        if let Some(t) = search_sys_cache_populate(shared, Sc::TYPENAMENSP, &keys).await {
+            release_sys_cache(t);
+        }
+    }
+
+    // CASTSOURCETARGET for (candidate source) x (every base target). Over-warming
+    // unused pairs is harmless (a negative cache entry).
+    let mut sources: Vec<Oid> = candidate_types.to_vec();
+    for &(oid, _) in base_types {
+        if !sources.contains(&oid) {
+            sources.push(oid);
+        }
+    }
+    for &src in &sources {
+        for &(tgt, _) in base_types {
+            let keys = [ObjectIdGetDatum(src), ObjectIdGetDatum(tgt)];
+            if let Some(t) = search_sys_cache_populate(shared, Sc::CASTSOURCETARGET, &keys).await {
+                release_sys_cache(t);
+            }
+        }
+    }
+}
+
+/// Collect the (last-component) type names referenced in a raw expression's
+/// TypeCasts (and the typed-literal TypeCasts), for cast-cache pre-warming.
+fn collect_type_names(node: Option<&Node>, names: &mut Vec<String>) {
+    let Some(node) = node else { return };
+    match node {
+        Node::TypeCast(tc) => {
+            if let Some(tn) = &tc.typeName
+                && let Some(last) = tn.names.last()
+                && !names.contains(&last.sval)
+            {
+                names.push(last.sval.clone());
+            }
+            collect_type_names(tc.arg.as_ref(), names);
+        }
+        Node::A_Expr(a) => {
+            collect_type_names(a.lexpr.as_ref(), names);
+            collect_type_names(a.rexpr.as_ref(), names);
+        }
+        Node::BoolExpr(b) => {
+            for arg in &b.args {
+                collect_type_names(Some(arg), names);
+            }
+        }
+        Node::FuncCall(fc) => {
+            for arg in &fc.args {
+                collect_type_names(Some(arg), names);
+            }
+        }
+        Node::CaseExpr(c) => {
+            collect_type_names(c.arg.as_ref(), names);
+            for arm in &c.args {
+                if let Node::CaseWhen(w) = arm {
+                    collect_type_names(w.expr.as_ref(), names);
+                    collect_type_names(w.result.as_ref(), names);
+                }
+            }
+            collect_type_names(c.defresult.as_ref(), names);
+        }
+        Node::CoalesceExpr(c) => {
+            for arg in &c.args {
+                collect_type_names(Some(arg), names);
+            }
+        }
+        Node::MinMaxExpr(m) => {
+            for arg in &m.args {
+                collect_type_names(Some(arg), names);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Recursively collect operator names (from `A_Expr`) and function names (from
@@ -502,6 +638,29 @@ fn collect_expr_names(node: Option<&Node>, ops: &mut Vec<String>, funcs: &mut Ve
                 funcs.push(s.sval.clone());
             }
             for arg in &fc.args {
+                collect_expr_names(Some(arg), ops, funcs);
+            }
+        }
+        // M4 (step 23): recurse into casts + conditional expressions so the
+        // operators inside (e.g. `a > 0` in a CASE WHEN, or NULLIF's "=") are warmed.
+        Node::TypeCast(tc) => collect_expr_names(tc.arg.as_ref(), ops, funcs),
+        Node::CaseExpr(c) => {
+            collect_expr_names(c.arg.as_ref(), ops, funcs);
+            for arm in &c.args {
+                if let Node::CaseWhen(w) = arm {
+                    collect_expr_names(w.expr.as_ref(), ops, funcs);
+                    collect_expr_names(w.result.as_ref(), ops, funcs);
+                }
+            }
+            collect_expr_names(c.defresult.as_ref(), ops, funcs);
+        }
+        Node::CoalesceExpr(c) => {
+            for arg in &c.args {
+                collect_expr_names(Some(arg), ops, funcs);
+            }
+        }
+        Node::MinMaxExpr(m) => {
+            for arg in &m.args {
                 collect_expr_names(Some(arg), ops, funcs);
             }
         }
@@ -1136,6 +1295,163 @@ mod relation_tests {
             assert!(matches!(op.args[1], Node::Const(_)), "rhs is the Const 1");
         }))
         .await;
+    }
+
+    // ---------------------------------------------------------------------
+    // M4 (step 23): casts + conditional expressions.
+    // ---------------------------------------------------------------------
+
+    /// `SELECT a::numeric FROM t` -> a FuncExpr calling int4_numeric (the via-func
+    /// cast from pg_cast), result type numeric.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cast_int4_to_numeric_resolves_to_funcexpr() {
+        use crate::catalog::genbki::NUMERICOID;
+        // The int4->numeric cast function is `int4_numeric` (proname `numeric`, arg
+        // int4) -- OID 1740, whose fmgroid is F_NUMERIC_INT4 (Gen_fmgrtab names by
+        // proname_argtypes, not prosrc).
+        use crate::utils::fmgroids::F_NUMERIC_INT4;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT a::numeric FROM t").await;
+            let Node::TargetEntry(te) = &q.targetList[0] else { panic!("not a TargetEntry") };
+            let Node::FuncExpr(f) = te.expr.as_ref().unwrap() else { panic!("cast not a FuncExpr") };
+            assert_eq!(f.funcid, F_NUMERIC_INT4, "cast func is int4->numeric (OID 1740)");
+            assert_eq!(f.funcresulttype, NUMERICOID, "result type numeric");
+            assert_eq!(f.args.len(), 1);
+        }))
+        .await;
+    }
+
+    /// `SELECT CAST(a AS float8) FROM t` -> a FuncExpr calling i4tod, result float8.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cast_int4_to_float8_resolves_to_funcexpr() {
+        use crate::catalog::genbki::FLOAT8OID;
+        use crate::utils::fmgroids::F_FLOAT8_INT4;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT CAST(a AS float8) FROM t").await;
+            let Node::TargetEntry(te) = &q.targetList[0] else { panic!() };
+            let Node::FuncExpr(f) = te.expr.as_ref().unwrap() else { panic!("not a FuncExpr") };
+            assert_eq!(f.funcid, F_FLOAT8_INT4, "cast func is int4->float8 (i4tod, OID 316)");
+            assert_eq!(f.funcresulttype, FLOAT8OID);
+        }))
+        .await;
+    }
+
+    /// `SELECT a::text FROM t` -> a CoerceViaIO node (int4 -> text has no pg_cast
+    /// row; find_coercion_pathway returns COERCEVIAIO for the string-category target).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cast_int4_to_text_resolves_to_coerce_via_io() {
+        use crate::catalog::genbki::TEXTOID;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT a::text FROM t").await;
+            let Node::TargetEntry(te) = &q.targetList[0] else { panic!() };
+            let Node::CoerceViaIO(c) = te.expr.as_ref().unwrap() else { panic!("text cast not a CoerceViaIO") };
+            assert_eq!(c.resulttype, TEXTOID);
+        }))
+        .await;
+    }
+
+    /// `SELECT CASE WHEN a > 0 THEN 1 ELSE 0 END FROM t` -> a CaseExpr (searched
+    /// form, casetype int4) with one WHEN arm and an ELSE.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn case_when_resolves_to_caseexpr() {
+        use crate::catalog::genbki::INT4OID;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT CASE WHEN a > 0 THEN 1 ELSE 0 END FROM t").await;
+            let Node::TargetEntry(te) = &q.targetList[0] else { panic!() };
+            let Node::CaseExpr(c) = te.expr.as_ref().unwrap() else { panic!("not a CaseExpr") };
+            assert!(c.arg.is_none(), "searched CASE");
+            assert_eq!(c.casetype, INT4OID);
+            assert_eq!(c.args.len(), 1);
+            assert!(c.defresult.is_some());
+        }))
+        .await;
+    }
+
+    /// `SELECT COALESCE(a, 0) FROM t` -> a CoalesceExpr; `NULLIF(a, 0)` -> a
+    /// NullIfExpr; `GREATEST(a,0)`/`LEAST(a,0)` -> MinMaxExprs.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn coalesce_nullif_minmax_resolve() {
+        use crate::catalog::genbki::INT4OID;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let target = |q: &crate::nodes::parsenodes::Query| -> Node {
+                let Node::TargetEntry(te) = &q.targetList[0] else { panic!("no target") };
+                te.expr.clone().unwrap()
+            };
+
+            let coalesce_q = analyze(&shared, "SELECT COALESCE(a, 0) FROM t").await;
+            let Node::CoalesceExpr(coalesce) = target(&coalesce_q) else { panic!("not a CoalesceExpr") };
+            assert_eq!(coalesce.coalescetype, INT4OID);
+            assert_eq!(coalesce.args.len(), 2);
+
+            let nullif_q = analyze(&shared, "SELECT NULLIF(a, 0) FROM t").await;
+            let Node::NullIfExpr(nullif) = target(&nullif_q) else { panic!("not a NullIfExpr") };
+            assert_eq!(nullif.opresulttype, INT4OID, "NULLIF result type is arg0's type");
+
+            let greatest_q = analyze(&shared, "SELECT GREATEST(a, 0) FROM t").await;
+            let Node::MinMaxExpr(greatest) = target(&greatest_q) else { panic!("not a MinMaxExpr") };
+            assert!(matches!(greatest.op, crate::nodes::primnodes::MinMaxOp::GREATEST));
+            assert_eq!(greatest.minmaxtype, INT4OID);
+
+            let least_q = analyze(&shared, "SELECT LEAST(a, 0) FROM t").await;
+            let Node::MinMaxExpr(least) = target(&least_q) else { panic!("not a MinMaxExpr") };
+            assert!(matches!(least.op, crate::nodes::primnodes::MinMaxOp::LEAST));
+        }))
+        .await;
+    }
+
+    /// Unit: `find_coercion_pathway(int4 -> numeric)` is a via-function cast, and a
+    /// string literal coerces to date (via the date typinput).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn find_coercion_pathway_int4_numeric_is_func() {
+        use crate::catalog::genbki::{INT4OID, NUMERICOID};
+        use crate::nodes::primnodes::CoercionContext;
+        use crate::parser::parse_coerce::{find_coercion_pathway, CoercionPathType};
+        use crate::utils::fmgroids::F_NUMERIC_INT4;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            // Warm the CASTSOURCETARGET entry (the sync find_coercion_pathway is hit-only).
+            warm_one_cast(&shared, INT4OID, NUMERICOID).await;
+
+            let mut funcid = crate::postgres_ext::InvalidOid;
+            let path = find_coercion_pathway(NUMERICOID, INT4OID, CoercionContext::IMPLICIT, &mut funcid);
+            assert_eq!(path, CoercionPathType::Func, "int4->numeric is a via-func cast");
+            assert_eq!(funcid, F_NUMERIC_INT4);
+        }))
+        .await;
+    }
+
+    /// Warm a single CASTSOURCETARGET entry (test helper).
+    async fn warm_one_cast(shared: &Arc<SharedState>, src: Oid, tgt: Oid) {
+        use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+        use crate::postgres::ObjectIdGetDatum;
+        use crate::utils::syscache::SysCacheIdentifier;
+        let keys = [ObjectIdGetDatum(src), ObjectIdGetDatum(tgt)];
+        if let Some(t) =
+            search_sys_cache_populate(shared, SysCacheIdentifier::CASTSOURCETARGET, &keys).await
+        {
+            release_sys_cache(t);
+        }
     }
 
     /// `SELECT a FROM t WHERE a > 0` -> the qual is an OpExpr for int4gt with

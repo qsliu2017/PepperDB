@@ -435,9 +435,12 @@ pub fn type_is_multirange(typid: Oid) -> bool {
     unimplemented!()
 }
 
-/// C out-params `(char *typcategory, bool *typispreferred)` -> tuple.
+/// C out-params `(char *typcategory, bool *typispreferred)` -> tuple. Reads pg_type
+/// via a warm TYPEOID hit (M4, step 23; used by `select_common_type`).
+#[must_use]
 pub fn get_type_category_preferred(typid: Oid) -> (u8, bool) {
-    unimplemented!()
+    let (cat, pref) = crate::backend::utils::cache::lsyscache::get_type_category_preferred(typid);
+    (cat as u8, pref)
 }
 
 pub fn get_typ_typrelid(typid: Oid) -> Oid {
@@ -461,10 +464,9 @@ pub fn get_base_element_type(typid: Oid) -> Option<Oid> {
     unimplemented!()
 }
 
-/// C out-params `(Oid *typInput, Oid *typIOParam)` -> tuple.
-pub fn getTypeInputInfo(r#type: Oid) -> (Oid, Oid) {
-    unimplemented!()
-}
+/// C out-params `(Oid *typInput, Oid *typIOParam)` -> tuple. Reads pg_type via a
+/// warm TYPEOID hit (M4, step 23; used by CoerceViaIO + the unknown-literal cast).
+pub use crate::backend::utils::cache::lsyscache::get_type_input_info as getTypeInputInfo;
 
 /// C out-params `(Oid *typOutput, bool *typIsVarlena)` -> tuple.
 ///
@@ -508,12 +510,15 @@ pub fn getSubscriptingRoutines(typid: Oid) -> (Option<&'static SubscriptRoutines
 }
 
 pub fn getBaseType(typid: Oid) -> Oid {
-    unimplemented!()
+    getBaseTypeAndTypmod(typid, -1).0
 }
 
-/// C `Oid getBaseTypeAndTypmod(typid, int32 *typmod)` -> (basetype, typmod).
+/// C `Oid getBaseTypeAndTypmod(typid, int32 *typmod)` -> (basetype, typmod). M4
+/// (step 23) has no domains, so the base type is the type itself and the typmod is
+/// unchanged. The domain-unwrapping loop grows with the domain milestone.
+#[must_use]
 pub fn getBaseTypeAndTypmod(typid: Oid, typmod: i32) -> (Oid, i32) {
-    unimplemented!()
+    (typid, typmod)
 }
 
 pub fn get_typavgwidth(typid: Oid, typmod: i32) -> i32 {

@@ -16,6 +16,8 @@ use crate::backend::parser::parser::{
     do_negate, make_create_stmt, make_column_def_elt, system_type_name, generic_type_name,
     make_insert_stmt, make_values_select, make_column_ref, make_range_var_table_ref,
     make_a_expr, make_and_expr, make_or_expr, make_not_expr, make_func_call, RawStmtVec,
+    make_type_cast, make_case_expr, make_case_when, make_coalesce_expr, make_min_max_expr,
+    make_nullif_expr, make_string_const_cast,
 };
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{ResTarget, SelectStmt, TypeName};
@@ -43,6 +45,31 @@ extern {
         "AND"     => Token::Keyword("and"),
         "OR"      => Token::Keyword("or"),
         "NOT"     => Token::Keyword("not"),
+        // M4 (step 23): cast + conditional-expression keywords.
+        "CAST"     => Token::Keyword("cast"),
+        "CASE"     => Token::Keyword("case"),
+        "WHEN"     => Token::Keyword("when"),
+        "THEN"     => Token::Keyword("then"),
+        "ELSE"     => Token::Keyword("else"),
+        "END"      => Token::Keyword("end"),
+        "COALESCE" => Token::Keyword("coalesce"),
+        "NULLIF"   => Token::Keyword("nullif"),
+        "GREATEST" => Token::Keyword("greatest"),
+        "LEAST"    => Token::Keyword("least"),
+        // M4 type-name keywords (the Numeric / ConstTypename spellings).
+        "NUMERIC"   => Token::Keyword("numeric"),
+        "DECIMAL"   => Token::Keyword("decimal"),
+        "REAL"      => Token::Keyword("real"),
+        "FLOAT"     => Token::Keyword("float"),
+        "DOUBLE"    => Token::Keyword("double"),
+        "PRECISION" => Token::Keyword("precision"),
+        "SMALLINT"  => Token::Keyword("smallint"),
+        "BIGINT"    => Token::Keyword("bigint"),
+        "BOOLEAN"   => Token::Keyword("boolean"),
+        "TEXT"      => Token::Keyword("text"),
+        // `date` is not a SQL keyword (it reaches the grammar as an IDENT via
+        // GenericType); only `timestamp` is a keyword here.
+        "TIMESTAMP" => Token::Keyword("timestamp"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -62,6 +89,7 @@ extern {
         "<"       => Token::Lt,
         ">"       => Token::Gt,
         "="       => Token::Eq,
+        "::"      => Token::Typecast,
         "<="      => Token::LessEquals,
         ">="      => Token::GreaterEquals,
         "<>"      => Token::NotEquals,
@@ -229,16 +257,32 @@ Typename: TypeName = {
 
 SimpleTypename: TypeName = {
     Numeric,
+    // The keyword-spelled non-Numeric built-in types (text + timestamp). `date` is
+    // not a SQL keyword in PG, so it arrives via GenericType (a bare catalog name);
+    // `text`/`timestamp` ARE keywords and need an explicit arm.
+    "TEXT"      => system_type_name("text"),
+    "TIMESTAMP" => system_type_name("timestamp"),
     GenericType,
 };
 
-// gram.y `Numeric`: the built-in numeric/boolean spellings. M2 maps the integer
-// aliases to their pg_catalog type; the rest (smallint/bigint/real/double/numeric/
-// decimal/boolean and their typmods) grow as the lexer gains those keywords.
+// gram.y `Numeric`: the built-in numeric/boolean spellings. The integer aliases map
+// to their pg_catalog type; M4 (step 23) adds smallint/bigint/real/float/double
+// precision/numeric/decimal/boolean (typmods on numeric/decimal/float grow with the
+// opt_type_modifiers machinery). `float8`/`numeric` etc. resolve to their seeded
+// pg_type rows.
 Numeric: TypeName = {
     "INT"     => system_type_name("int4"),
     "INTEGER" => system_type_name("int4"),
+    "SMALLINT" => system_type_name("int2"),
+    "BIGINT"  => system_type_name("int8"),
+    "REAL"    => system_type_name("float4"),
+    "FLOAT"   => system_type_name("float8"),
+    "DOUBLE" "PRECISION" => system_type_name("float8"),
+    "BOOLEAN" => system_type_name("bool"),
+    "NUMERIC" => system_type_name("numeric"),
+    "DECIMAL" => system_type_name("numeric"),
 };
+
 
 // gram.y `GenericType`: a (possibly schema-qualified) user/catalog type name,
 // resolved by catalog lookup at analysis time. M2 takes a bare type identifier;
@@ -432,6 +476,14 @@ MulExpr: Node = {
 UnaryExpr: Node = {
     "-" <e:UnaryExpr> => do_negate(e),
     "+" <e:UnaryExpr> => e,
+    TypecastExpr,
+};
+
+// gram.y `a_expr TYPECAST Typename` (%left TYPECAST -- binds tighter than the
+// arithmetic/unary operators). A postfix chain of `:: Typename` casts; each builds a
+// TypeCast node over the inner expression (M4, step 23).
+TypecastExpr: Node = {
+    <e:TypecastExpr> "::" <t:Typename> => make_type_cast(e, t),
     CExpr,
 };
 
@@ -443,13 +495,62 @@ CExpr: Node = {
     "(" <e:AExpr> ")" => e,
     // gram.y `c_expr: func_expr`.
     FuncExpr,
+    // gram.y `c_expr: case_expr` (M4, step 23).
+    CaseExpr,
 };
 
-// gram.y `func_expr: func_application ...`. M3 reaches a plain function call
-// `name ( arglist )`; WITHIN GROUP / FILTER / OVER and the special func_expr
-// forms (CURRENT_DATE, COALESCE, ...) grow at their milestones.
+// gram.y `func_expr: func_application ... | func_expr_common_subexpr`. M3 reaches a
+// plain function call `name ( arglist )`; M4 (step 23) adds the cast/conditional
+// special forms (CAST, COALESCE, NULLIF, GREATEST, LEAST). WITHIN GROUP / FILTER /
+// OVER and the remaining common-subexpr forms (CURRENT_DATE, ...) grow later.
 FuncExpr: Node = {
     FuncApplication,
+    FuncExprCommonSubexpr,
+};
+
+// gram.y `func_expr_common_subexpr` (M4 subset): the SQL-keyword "function" forms.
+//   CAST '(' a_expr AS Typename ')'   -> a TypeCast (explicit cast)
+//   COALESCE '(' expr_list ')'        -> a CoalesceExpr
+//   GREATEST '(' expr_list ')'        -> a MinMaxExpr(IS_GREATEST)
+//   LEAST '(' expr_list ')'           -> a MinMaxExpr(IS_LEAST)
+//   NULLIF '(' a_expr ',' a_expr ')'  -> an A_Expr(AEXPR_NULLIF, "=")
+FuncExprCommonSubexpr: Node = {
+    "CAST" "(" <e:AExpr> "AS" <t:Typename> ")" => make_type_cast(e, t),
+    "COALESCE" "(" <args:ExprList> ")" => make_coalesce_expr(args),
+    "GREATEST" "(" <args:ExprList> ")" => make_min_max_expr(true, args),
+    "LEAST" "(" <args:ExprList> ")" => make_min_max_expr(false, args),
+    "NULLIF" "(" <l:AExpr> "," <r:AExpr> ")" => make_nullif_expr(l, r),
+};
+
+// gram.y `case_expr: CASE case_arg when_clause_list case_default END`.
+// The optional `case_arg` is the simple-CASE test value; `when_clause_list` is one
+// or more WHEN..THEN arms; `case_default` is the optional ELSE.
+CaseExpr: Node = {
+    "CASE" <arg:CaseArg> <whens:WhenClauseList> <def:CaseDefault> "END" =>
+        make_case_expr(arg, whens, def),
+};
+
+// gram.y `case_arg: a_expr | /*EMPTY*/`.
+CaseArg: Option<Node> = {
+    <e:AExpr> => Some(e),
+    => None,
+};
+
+// gram.y `when_clause_list: when_clause | when_clause_list when_clause`.
+WhenClauseList: Vec<Node> = {
+    <w:WhenClause> => vec![w],
+    <mut list:WhenClauseList> <w:WhenClause> => { list.push(w); list },
+};
+
+// gram.y `when_clause: WHEN a_expr THEN a_expr` -> a CaseWhen node.
+WhenClause: Node = {
+    "WHEN" <c:AExpr> "THEN" <r:AExpr> => make_case_when(c, r),
+};
+
+// gram.y `case_default: ELSE a_expr | /*EMPTY*/`.
+CaseDefault: Option<Node> = {
+    "ELSE" <e:AExpr> => Some(e),
+    => None,
 };
 
 // gram.y `func_application: func_name '(' func_arg_list ')' | func_name '(' ')'`.
@@ -468,10 +569,19 @@ ColumnRef: Node = {
     <t:ColId> "." <n:ColId> => make_column_ref(vec![t, n]),
 };
 
-// gram.y `AexprConst`. Iconst/FCONST/Sconst are the M1 forms; BCONST/XCONST and
-// the typed-literal (`typename 'string'`) forms arrive with the type machinery.
+// gram.y `AexprConst`. Iconst/FCONST/Sconst are the plain forms; M4 (step 23) adds
+// the typed-literal forms `Numeric Sconst` / `ConstTypename Sconst` (e.g.
+// `NUMERIC '1.5'`, `DATE '2024-01-15'`), which PG builds as a string A_Const wrapped
+// in a TypeCast to the named type (makeStringConstCast). BCONST/XCONST and the
+// func_name-Sconst / typmod'd forms grow later.
 AexprConst: Node = {
     <i:"ICONST"> => make_int_const(i),
     <f:"FCONST"> => make_float_const(f),
     <s:"SCONST"> => make_string_const(s),
+    // gram.y `ConstTypename Sconst` / `Numeric Sconst`: the typed-literal form
+    // `typename 'string'` (e.g. `NUMERIC '1.5'`, `DATE '2024-01-15'`). Reuses the
+    // single shared `SimpleTypename` (no duplicate keyword nonterminal) so the only
+    // decision after a type keyword is shift-SCONST vs reduce-to-SimpleTypename --
+    // resolved by lalrpop toward the typed-literal on SCONST lookahead.
+    <t:SimpleTypename> <s:"SCONST"> => make_string_const_cast(s, t),
 };

@@ -166,6 +166,13 @@ pub enum ExprEvalOp {
     CASE_TESTVAL,
     CASE_TESTVAL_EXT,
 
+    /// M4 (step 23) self-contained CASE / COALESCE steps. PG compiles these to flat
+    /// CASE_TESTVAL + JUMP_IF_NOT_TRUE / JUMP_IF_NOT_NULL sequences; the Send-owned
+    /// executor (rules.md s10) carries each branch as an owned sub-program in one
+    /// step instead, with identical short-circuit semantics.
+    CASE,
+    COALESCE,
+
     /// apply MakeExpandedObjectReadOnly() to target value
     MAKE_READONLY,
 
@@ -331,6 +338,10 @@ pub enum ExprEvalStepData {
     RowcompareFinal(RowcompareFinalData),
     /// for MINMAX
     Minmax(MinmaxData),
+    /// for COALESCE (the M4 self-contained step; PG uses flat JUMP_IF_NOT_NULL)
+    Coalesce(CoalesceData),
+    /// for CASE (the M4 self-contained step; PG uses flat CASE_TESTVAL + jumps)
+    Case(CaseData),
     /// for FIELDSELECT
     Fieldselect(FieldselectData),
     /// for FIELDSTORE_DEFORM / FIELDSTORE_FORM
@@ -493,6 +504,14 @@ pub struct IocoerceData {
     pub fcinfo_data_out: Option<Box<crate::fmgr::FunctionCallInfoBaseData>>,
     pub finfo_in: Option<Box<FmgrInfo>>,
     pub fcinfo_data_in: Option<Box<crate::fmgr::FunctionCallInfoBaseData>>,
+    /// The output function's address (source typoutput) and the input function's
+    /// address (target typinput), plus the input function's typioparam. Resolved at
+    /// init time so the interp call is a direct fmgr invoke (Send-owned, no syscache
+    /// at eval). The arg sub-program produces the value to coerce.
+    pub out_addr: Option<PGFunction>,
+    pub in_addr: Option<PGFunction>,
+    pub typioparam: Oid,
+    pub arg_steps: Vec<ExprEvalStep>,
 }
 
 pub struct SqlvaluefunctionData {
@@ -546,6 +565,30 @@ pub struct MinmaxData {
     pub op: MinMaxOp,
     pub finfo: Option<Box<FmgrInfo>>,
     pub fcinfo_data: Option<Box<crate::fmgr::FunctionCallInfoBaseData>>,
+    /// The btree comparison function's address (resolved at init), and the per-arg
+    /// sub-programs that produce the values to compare (Send-owned, rules.md s10).
+    pub cmp_addr: Option<PGFunction>,
+    pub arg_steps: Vec<Vec<ExprEvalStep>>,
+}
+
+/// EEOP_COALESCE: COALESCE(args) -- return the first non-NULL argument. Each arg is
+/// an owned sub-program (Send, no resv pointer); the interp runs them in order.
+pub struct CoalesceData {
+    pub arg_steps: Vec<Vec<ExprEvalStep>>,
+}
+
+/// EEOP_CASE: a CASE expression compiled to a self-contained step. The optional test
+/// arg (simple CASE) is evaluated into a per-CASE test cell that the WHEN conditions'
+/// CaseTestExpr placeholders read; each (cond, result) arm short-circuits to its
+/// result on a TRUE condition; the default is the ELSE (or NULL). All sub-programs
+/// are owned (Send).
+pub struct CaseData {
+    /// Test-arg sub-program (None for a searched CASE).
+    pub arg_steps: Option<Vec<ExprEvalStep>>,
+    /// (condition sub-program, result sub-program) per WHEN arm.
+    pub when_steps: Vec<(Vec<ExprEvalStep>, Vec<ExprEvalStep>)>,
+    /// ELSE sub-program.
+    pub default_steps: Vec<ExprEvalStep>,
 }
 
 pub struct FieldselectData {

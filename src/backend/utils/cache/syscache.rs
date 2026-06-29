@@ -62,6 +62,7 @@ pub fn cacheinfo() -> Vec<CacheDesc> {
     use crate::catalog::pg_am::AccessMethodRelationId;
     use crate::catalog::pg_amproc::AccessMethodProcedureRelationId;
     use crate::catalog::pg_attribute::AttributeRelationId;
+    use crate::catalog::pg_cast::CastRelationId;
     use crate::catalog::pg_class::RelationRelationId;
     use crate::catalog::pg_namespace::NamespaceRelationId;
     use crate::catalog::pg_opclass::OperatorClassRelationId;
@@ -146,6 +147,35 @@ pub fn cacheinfo() -> Vec<CacheDesc> {
             16,
         ),
     );
+    // M4 (step 23): pg_cast (castsource, casttarget) -- the cast-resolution key
+    // (find_coercion_pathway via SearchSysCache2(CASTSOURCETARGET)).
+    {
+        use crate::catalog::pg_cast as c;
+        set(
+            SysCacheIdentifier::CASTSOURCETARGET,
+            cd(
+                CastRelationId,
+                [c::Anum_pg_cast_castsource as i16, c::Anum_pg_cast_casttarget as i16, 0, 0],
+                2,
+                256,
+            ),
+        );
+    }
+    // M4: pg_type (typname, typnamespace) -- the type-name resolution key
+    // (typenameTypeId via SearchSysCache2(TYPENAMENSP)), used by the cast TypeName
+    // resolution in the sync expression transform.
+    {
+        use crate::catalog::pg_type as t;
+        set(
+            SysCacheIdentifier::TYPENAMENSP,
+            cd(
+                TypeRelationId,
+                [t::Anum_pg_type_typname as i16, t::Anum_pg_type_typnamespace as i16, 0, 0],
+                2,
+                64,
+            ),
+        );
+    }
 
     v
 }

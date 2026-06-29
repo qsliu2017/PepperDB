@@ -178,6 +178,81 @@ pub fn make_not_expr(expr: Node) -> Node {
     }))
 }
 
+/// gram.y `makeTypeCast`: a TypeCast node coercing `arg` to `type_name` (the
+/// explicit `CAST(... AS t)` / `... :: t` display form is chosen at analysis time).
+pub fn make_type_cast(arg: Node, type_name: TypeName) -> Node {
+    Node::TypeCast(Box::new(crate::nodes::parsenodes::TypeCast {
+        arg: Some(arg),
+        typeName: Some(Box::new(type_name)),
+        location: -1,
+    }))
+}
+
+/// gram.y `makeStringConstCast`: a string A_Const wrapped in a TypeCast to
+/// `type_name` -- the typed-literal form `typename 'string'` (e.g. `DATE '...'`).
+pub fn make_string_const_cast(text: String, type_name: TypeName) -> Node {
+    make_type_cast(make_string_const(text), type_name)
+}
+
+/// gram.y `case_expr`: a CaseExpr from the optional test arg, the WHEN/THEN arms
+/// (a list of CaseWhen nodes), and the optional ELSE default.
+pub fn make_case_expr(arg: Option<Node>, whens: Vec<Node>, defresult: Option<Node>) -> Node {
+    Node::CaseExpr(Box::new(crate::nodes::primnodes::CaseExpr {
+        casetype: crate::postgres_ext::InvalidOid,
+        casecollid: crate::postgres_ext::InvalidOid,
+        arg,
+        args: whens,
+        defresult,
+        location: -1,
+    }))
+}
+
+/// gram.y `when_clause`: a CaseWhen node (the condition + result of one arm).
+pub fn make_case_when(expr: Node, result: Node) -> Node {
+    Node::CaseWhen(Box::new(crate::nodes::primnodes::CaseWhen {
+        expr: Some(expr),
+        result: Some(result),
+        location: -1,
+    }))
+}
+
+/// gram.y `COALESCE '(' expr_list ')'`: a CoalesceExpr over the argument list.
+pub fn make_coalesce_expr(args: Vec<Node>) -> Node {
+    Node::CoalesceExpr(Box::new(crate::nodes::primnodes::CoalesceExpr {
+        coalescetype: crate::postgres_ext::InvalidOid,
+        coalescecollid: crate::postgres_ext::InvalidOid,
+        args,
+        location: -1,
+    }))
+}
+
+/// gram.y `GREATEST`/`LEAST '(' expr_list ')'`: a MinMaxExpr over the arguments.
+/// `is_greatest` selects IS_GREATEST vs IS_LEAST.
+pub fn make_min_max_expr(is_greatest: bool, args: Vec<Node>) -> Node {
+    use crate::nodes::primnodes::MinMaxOp;
+    Node::MinMaxExpr(Box::new(crate::nodes::primnodes::MinMaxExpr {
+        minmaxtype: crate::postgres_ext::InvalidOid,
+        minmaxcollid: crate::postgres_ext::InvalidOid,
+        inputcollid: crate::postgres_ext::InvalidOid,
+        op: if is_greatest { MinMaxOp::GREATEST } else { MinMaxOp::LEAST },
+        args,
+        location: -1,
+    }))
+}
+
+/// gram.y `NULLIF '(' a_expr ',' a_expr ')'`: makeSimpleA_Expr(AEXPR_NULLIF, "=").
+pub fn make_nullif_expr(lexpr: Node, rexpr: Node) -> Node {
+    use crate::nodes::parsenodes::A_Expr_Kind;
+    let a = crate::nodes::makefuncs::makeSimpleA_Expr(
+        A_Expr_Kind::NULLIF,
+        "=",
+        Some(lexpr),
+        Some(rexpr),
+        -1,
+    );
+    Node::A_Expr(Box::new(a))
+}
+
 /// gram.y `func_application`: build a FuncCall node from an (unqualified) function
 /// name and a positional argument list (the EXPLICIT_CALL display form).
 pub fn make_func_call(name_parts: Vec<String>, args: Vec<Node>) -> Node {
@@ -628,6 +703,69 @@ mod tests {
         let Some(Node::BoolExpr(and)) = &sel.whereClause else { panic!() };
         assert!(matches!(and.boolop, crate::nodes::primnodes::BoolExprType::AND_EXPR));
         assert_eq!(and.args.len(), 3);
+    }
+
+    #[test]
+    fn cast_operator_and_keyword_parse_to_typecast() {
+        // `a :: numeric` and `CAST(a AS numeric)` both yield a TypeCast.
+        for sql in ["SELECT a::numeric FROM t", "SELECT CAST(a AS numeric) FROM t"] {
+            let list = parse(sql);
+            let sel = one_select(&list);
+            let Node::ResTarget(rt) = &sel.targetList[0] else { panic!() };
+            let Node::TypeCast(tc) = rt.val.as_ref().unwrap() else { panic!("not a TypeCast: {sql}") };
+            let names: Vec<&str> = tc.typeName.as_ref().unwrap().names.iter().map(|s| s.sval.as_str()).collect();
+            assert_eq!(names, ["pg_catalog", "numeric"]);
+        }
+    }
+
+    #[test]
+    fn case_expr_parses() {
+        let list = parse("SELECT CASE WHEN a > 0 THEN 1 ELSE 0 END FROM t");
+        let sel = one_select(&list);
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!() };
+        let Node::CaseExpr(c) = rt.val.as_ref().unwrap() else { panic!("not a CaseExpr") };
+        assert!(c.arg.is_none(), "searched CASE has no test arg");
+        assert_eq!(c.args.len(), 1);
+        assert!(c.defresult.is_some(), "ELSE present");
+        let Node::CaseWhen(_) = &c.args[0] else { panic!("arm not a CaseWhen") };
+    }
+
+    #[test]
+    fn coalesce_nullif_greatest_least_parse() {
+        let Node::CoalesceExpr(c) = expr_of(&parse("SELECT COALESCE(a, 0) FROM t")) else { panic!("not Coalesce") };
+        assert_eq!(c.args.len(), 2);
+
+        let Node::A_Expr(a) = expr_of(&parse("SELECT NULLIF(a, 0) FROM t")) else { panic!("not A_Expr") };
+        assert!(matches!(a.kind, crate::nodes::parsenodes::A_Expr_Kind::NULLIF));
+
+        let Node::MinMaxExpr(g) = expr_of(&parse("SELECT GREATEST(a, 0) FROM t")) else { panic!("not MinMax") };
+        assert!(matches!(g.op, crate::nodes::primnodes::MinMaxOp::GREATEST));
+        let Node::MinMaxExpr(l) = expr_of(&parse("SELECT LEAST(a, 0) FROM t")) else { panic!("not MinMax") };
+        assert!(matches!(l.op, crate::nodes::primnodes::MinMaxOp::LEAST));
+    }
+
+    #[test]
+    fn typed_literal_parses_to_typecast() {
+        // `NUMERIC '1.5'` -> a TypeCast of a string A_Const to pg_catalog.numeric
+        // (`numeric` is a Numeric-production keyword).
+        let Node::TypeCast(tc) = expr_of(&parse("SELECT NUMERIC '1.5'")) else { panic!("not a TypeCast (numeric)") };
+        let names: Vec<&str> = tc.typeName.as_ref().unwrap().names.iter().map(|s| s.sval.as_str()).collect();
+        assert_eq!(names, ["pg_catalog", "numeric"]);
+        assert!(matches!(tc.arg.as_ref(), Some(Node::A_Const(_))));
+
+        // `DATE '2024-01-15'` -> a TypeCast to the (unqualified) `date` type. `date`
+        // is not a SQL keyword in PG, so it flows through GenericType (a bare name
+        // resolved by catalog lookup), exactly as PG does.
+        let Node::TypeCast(tc) = expr_of(&parse("SELECT DATE '2024-01-15'")) else { panic!("not a TypeCast (date)") };
+        let names: Vec<&str> = tc.typeName.as_ref().unwrap().names.iter().map(|s| s.sval.as_str()).collect();
+        assert_eq!(names, ["date"]);
+    }
+
+    /// The (cloned) target-list value of a single-target SELECT.
+    fn expr_of(list: &RawStmtVec) -> Node {
+        let sel = one_select(list);
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!("not ResTarget") };
+        rt.val.clone().expect("ResTarget has a val")
     }
 
     #[test]

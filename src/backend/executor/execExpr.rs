@@ -105,7 +105,208 @@ fn exec_init_expr_rec(node: &Node, state: &mut ExprState) {
             expr_eval_push_step(state, step);
         }
         Node::BoolExpr(b) => exec_init_boolexpr(b, state),
+        // M4 (step 23): NULLIF is an OpExpr-shaped node; the interp special-cases it
+        // (NULL when args compare equal). Compiled like a strict 2-arg function over
+        // the "=" operator, then tagged NULLIF.
+        Node::NullIfExpr(op) => {
+            let mut step = exec_init_func(node, &op.args, op.opfuncid, op.inputcollid);
+            step.opcode = ExprEvalOp::NULLIF;
+            expr_eval_push_step(state, step);
+        }
+        // RelabelType: a no-op binary relabel -- just compile the inner expr (its
+        // result already has the right physical representation).
+        Node::RelabelType(r) => {
+            let arg = r.arg.as_ref().unwrap_or_else(|| not_yet_reachable("RelabelType: no arg"));
+            exec_init_expr_rec(arg, state);
+        }
+        Node::CoerceViaIO(c) => exec_init_coerce_via_io(c, state),
+        Node::CaseExpr(c) => exec_init_case(c, state),
+        Node::CoalesceExpr(c) => exec_init_coalesce(c, state),
+        Node::MinMaxExpr(m) => exec_init_minmax(m, state),
         other => not_yet_reachable(&format!("ExecInitExprRec: {other:?}")),
+    }
+}
+
+/// PG `ExecInitExprRec` T_CoerceViaIO arm: out-func(source) then in-func(target).
+/// Resolves both I/O functions at init (Send-owned fmgr addrs); the arg sub-program
+/// produces the value to coerce.
+fn exec_init_coerce_via_io(c: &crate::nodes::primnodes::CoerceViaIO, state: &mut ExprState) {
+    use crate::backend::utils::cache::lsyscache::{get_type_input_info, get_type_output_info};
+    use crate::executor::execExpr::IocoerceData;
+    use crate::nodes::nodeFuncs::exprType;
+
+    let arg = c.arg.as_ref().unwrap_or_else(|| not_yet_reachable("CoerceViaIO: no arg"));
+    let source_type = exprType(arg);
+    let (typoutput, _) = get_type_output_info(source_type);
+    let (typinput, typioparam) = get_type_input_info(c.resulttype);
+
+    let mut out_flinfo = empty_flinfo();
+    fmgr_info(typoutput, &mut out_flinfo);
+    let mut in_flinfo = empty_flinfo();
+    fmgr_info(typinput, &mut in_flinfo);
+
+    let arg_steps = compile_scalar_subprogram(arg);
+
+    expr_eval_push_step(
+        state,
+        ExprEvalStep {
+            opcode: ExprEvalOp::IOCOERCE,
+            resvalue: None,
+            resnull: None,
+            d: ExprEvalStepData::Iocoerce(IocoerceData {
+                out_addr: out_flinfo.fn_addr,
+                in_addr: in_flinfo.fn_addr,
+                finfo_out: Some(Box::new(out_flinfo)),
+                fcinfo_data_out: None,
+                finfo_in: Some(Box::new(in_flinfo)),
+                fcinfo_data_in: None,
+                typioparam,
+                arg_steps,
+            }),
+        },
+    );
+}
+
+/// A zeroed FmgrInfo for an init-time `fmgr_info` lookup.
+fn empty_flinfo() -> FmgrInfo {
+    FmgrInfo {
+        fn_addr: None,
+        oid: Oid(0),
+        nargs: 0,
+        strict: false,
+        retset: false,
+        stats: 0,
+        extra: 0,
+        mcxt: (),
+        expr: None,
+    }
+}
+
+/// PG `ExecInitExprRec` T_CaseExpr arm (M4 self-contained form): compile the test
+/// arg + each (cond, result) arm + the ELSE default into owned sub-programs. The
+/// interp evaluates them with CASE short-circuit semantics. (PG emits flat
+/// CASE_TESTVAL + JUMP_IF_NOT_TRUE/JUMP steps; the owned-subprogram form is the
+/// Send-faithful equivalent -- same semantics, no resv pointers, rules.md s10.)
+fn exec_init_case(c: &crate::nodes::primnodes::CaseExpr, state: &mut ExprState) {
+    use crate::executor::execExpr::CaseData;
+
+    let arg_steps = c.arg.as_ref().map(compile_scalar_subprogram);
+    let when_steps = c
+        .args
+        .iter()
+        .map(|arm| {
+            let Node::CaseWhen(w) = arm else {
+                not_yet_reachable("ExecInitExprRec: CASE arm is not a CaseWhen");
+            };
+            let cond = w.expr.as_ref().unwrap_or_else(|| not_yet_reachable("CaseWhen: no condition"));
+            let result = w.result.as_ref().unwrap_or_else(|| not_yet_reachable("CaseWhen: no result"));
+            (compile_scalar_subprogram(cond), compile_scalar_subprogram(result))
+        })
+        .collect::<Vec<_>>();
+    let default_steps = c.defresult.as_ref().map_or_else(
+        || compile_scalar_subprogram(&null_const_node(c.casetype)),
+        compile_scalar_subprogram,
+    );
+
+    expr_eval_push_step(
+        state,
+        ExprEvalStep {
+            opcode: ExprEvalOp::CASE,
+            resvalue: None,
+            resnull: None,
+            d: ExprEvalStepData::Case(CaseData { arg_steps, when_steps, default_steps }),
+        },
+    );
+}
+
+/// A typed-NULL Const node (the synthesized CASE ELSE when none is written).
+fn null_const_node(typeid: Oid) -> Node {
+    Node::Const(Box::new(crate::nodes::makefuncs::makeNullConst(
+        typeid,
+        -1,
+        Oid(0),
+    )))
+}
+
+/// PG `ExecInitExprRec` T_CoalesceExpr arm (M4 self-contained form): each argument
+/// is an owned sub-program; the interp returns the first non-NULL.
+fn exec_init_coalesce(c: &crate::nodes::primnodes::CoalesceExpr, state: &mut ExprState) {
+    use crate::executor::execExpr::CoalesceData;
+    let arg_steps = c.args.iter().map(compile_scalar_subprogram).collect();
+    expr_eval_push_step(
+        state,
+        ExprEvalStep {
+            opcode: ExprEvalOp::COALESCE,
+            resvalue: None,
+            resnull: None,
+            d: ExprEvalStepData::Coalesce(CoalesceData { arg_steps }),
+        },
+    );
+}
+
+/// PG `ExecInitExprRec` T_MinMaxExpr arm: look up the type's btree comparison
+/// function, compile each argument into an owned sub-program, and push a MINMAX step
+/// the interp folds (GREATEST keeps the max, LEAST the min; NULLs are skipped).
+fn exec_init_minmax(m: &crate::nodes::primnodes::MinMaxExpr, state: &mut ExprState) {
+    use crate::executor::execExpr::MinmaxData;
+
+    let nelems = m.args.len();
+    let cmp_proc = type_cmp_proc(m.minmaxtype);
+    let mut cmp_flinfo = empty_flinfo();
+    fmgr_info(cmp_proc, &mut cmp_flinfo);
+    let cmp_fn = cmp_flinfo.fn_addr;
+
+    let mut fcinfo = FunctionCallInfoBaseData {
+        flinfo: None,
+        context: None,
+        resultinfo: None,
+        fncollation: Oid(0),
+        isnull: false,
+        nargs: 0,
+        args: vec![NullableDatum { value: Datum(0), isnull: true }; 2],
+    };
+    InitFunctionCallInfoData(&mut fcinfo, None, 2, m.inputcollid, None, None);
+
+    let arg_steps = m.args.iter().map(compile_scalar_subprogram).collect();
+
+    expr_eval_push_step(
+        state,
+        ExprEvalStep {
+            opcode: ExprEvalOp::MINMAX,
+            resvalue: None,
+            resnull: None,
+            d: ExprEvalStepData::Minmax(MinmaxData {
+                values: vec![Datum(0); nelems],
+                nulls: vec![true; nelems],
+                nelems: i32::try_from(nelems).unwrap_or(0),
+                op: m.op,
+                finfo: Some(Box::new(cmp_flinfo)),
+                fcinfo_data: Some(Box::new(fcinfo)),
+                cmp_addr: cmp_fn,
+                arg_steps,
+            }),
+        },
+    );
+}
+
+/// The btree comparison function (proc OID) for a MinMax result type. M4 covers the
+/// numeric tower + date/timestamp; the general lookup (TYPECACHE_CMP_PROC over the
+/// default btree opclass) grows with the type cache.
+fn type_cmp_proc(typeid: Oid) -> Oid {
+    use crate::catalog::genbki::{
+        DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID, INT8OID, NUMERICOID, TIMESTAMPOID,
+    };
+    use crate::utils::fmgroids as f;
+    match typeid {
+        t if t == INT4OID => f::F_BTINT4CMP,
+        t if t == INT2OID => f::F_BTINT2CMP,
+        t if t == INT8OID => f::F_BTINT8CMP,
+        t if t == FLOAT4OID => f::F_BTFLOAT4CMP,
+        t if t == FLOAT8OID => f::F_BTFLOAT8CMP,
+        t if t == NUMERICOID => f::F_NUMERIC_CMP,
+        t if t == DATEOID => f::F_DATE_CMP,
+        t if t == TIMESTAMPOID => f::F_TIMESTAMP_CMP,
+        _ => not_yet_reachable(&format!("MinMax: no comparison function for type {}", typeid.0)),
     }
 }
 
@@ -527,14 +728,16 @@ pub fn exec_qual(state: Option<&mut ExprState>, econtext: &mut ExprContext) -> b
 /// OpExpr/FuncExpr routes its result type through the (warm) syscache via
 /// `get_typlenbyval`. Other node kinds grow later.
 fn expr_typlen(expr: &Node) -> i32 {
+    let typlen = |oid: Oid| i32::from(crate::backend::utils::cache::lsyscache::get_typlenbyval(oid).0);
     match expr {
         Node::Const(con) => con.constlen,
-        Node::OpExpr(op) => {
-            i32::from(crate::backend::utils::cache::lsyscache::get_typlenbyval(op.opresulttype).0)
-        }
-        Node::FuncExpr(f) => {
-            i32::from(crate::backend::utils::cache::lsyscache::get_typlenbyval(f.funcresulttype).0)
-        }
+        Node::OpExpr(op) | Node::NullIfExpr(op) => typlen(op.opresulttype),
+        Node::FuncExpr(f) => typlen(f.funcresulttype),
+        Node::RelabelType(r) => typlen(r.resulttype),
+        Node::CoerceViaIO(c) => typlen(c.resulttype),
+        Node::CaseExpr(c) => typlen(c.casetype),
+        Node::CoalesceExpr(c) => typlen(c.coalescetype),
+        Node::MinMaxExpr(m) => typlen(m.minmaxtype),
         other => not_yet_reachable(&format!("expr_typlen: {other:?}")),
     }
 }
