@@ -5,64 +5,15 @@ pub const M_PI: f64 = std::f64::consts::PI;
 /// Radians per degree, a.k.a. PI / 180.
 pub const RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
 
-// Utility functions in float.c (bare declarations -> stubs).
-
-/// pg_noreturn: raises a "value out of range: overflow" error.
-pub fn float_overflow_error() -> ! {
-    unimplemented!()
-}
-
-/// pg_noreturn: raises a "value out of range: underflow" error.
-pub fn float_underflow_error() -> ! {
-    unimplemented!()
-}
-
-/// pg_noreturn: raises a "division by zero" error.
-pub fn float_zero_divide_error() -> ! {
-    unimplemented!()
-}
-
-/// is_infinite: 1 for +inf, -1 for -inf, 0 otherwise.
-pub fn is_infinite(val: f64) -> i32 {
-    let _ = val;
-    unimplemented!()
-}
-
-/// float8in_internal: parse a float8; escontext soft-error folds into Result.
-pub fn float8in_internal(
-    num: &str,
-    type_name: &str,
-    orig_string: &str,
-) -> Result<(f64, usize), String> {
-    let _ = (num, type_name, orig_string);
-    unimplemented!()
-}
-
-/// float4in_internal: parse a float4; escontext soft-error folds into Result.
-pub fn float4in_internal(
-    num: &str,
-    type_name: &str,
-    orig_string: &str,
-) -> Result<(f32, usize), String> {
-    let _ = (num, type_name, orig_string);
-    unimplemented!()
-}
-
-/// float8out_internal: client-visible text output.
-pub fn float8out_internal(num: f64) -> String {
-    let _ = num;
-    unimplemented!()
-}
-
-pub fn float4_cmp_internal(a: f32, b: f32) -> i32 {
-    let _ = (a, b);
-    unimplemented!()
-}
-
-pub fn float8_cmp_internal(a: f64, b: f64) -> i32 {
-    let _ = (a, b);
-    unimplemented!()
-}
+// Utility functions in float.c: the bodies live in the adt/float leaf; the
+// header re-exports them (rules.md s3). float_overflow_error/underflow/
+// zero_divide are pg_noreturn; is_infinite, the in/out internals, and the
+// cmp_internal 3-way comparators round out float.h's float.c declarations.
+pub use crate::backend::utils::adt::float::{
+    float4_cmp_internal, float4in_internal, float8_cmp_internal, float8in_internal,
+    float8out_internal, float_overflow_error, float_underflow_error, float_zero_divide_error,
+    is_infinite,
+};
 
 // Inline infinity/NaN constructors.
 
