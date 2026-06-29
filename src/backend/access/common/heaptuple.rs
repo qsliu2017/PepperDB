@@ -926,6 +926,14 @@ pub fn heap_form_minimal_tuple(
 /// Allocate a zeroed block of `size` bytes for a minimal tuple (the `extra`
 /// prefix + the tuple). Reclaimed by [`heap_free_minimal_tuple`] via the stored
 /// `t_len` (callers that used `extra` must track it themselves, as in C).
+///
+/// Stays a raw `alloc_zeroed` (not an owned `Box`): a `MinimalTuple` is returned
+/// as a raw `*mut MinimalTupleData` that the caller owns (the executor's
+/// transient-tuple ABI), AND the minimal-tuple builders return a pointer OFFSET
+/// by `extra` into the middle of the block (`block + extra`), so the returned
+/// pointer is not the allocation base -- `Box::from_raw` cannot reconstitute it.
+/// Composite-Datum copies likewise leak the block into a byref Datum. This is the
+/// output-raw / interior-pointer case, not an owned single allocation.
 fn alloc_minimal_block(size: usize) -> *mut u8 {
     let n = size.max(1);
     let layout = Layout::from_size_align(n, crate::pg_config::MAXIMUM_ALIGNOF)

@@ -66,6 +66,12 @@ use crate::varatt::{SET_VARSIZE, VARDATA, VARDATA_ANY, VARSIZE_ANY_EXHDR};
 
 /// Allocate a leaked 4-byte-header varlena buffer of `len` payload bytes and
 /// copy `src` into the data area. Returns a pointer to the header.
+///
+/// The result is carried in a varlena (byref) Datum that must outlive the call,
+/// so the owned buffer is leaked into a raw pointer -- the same output-Datum
+/// convention int.rs (`pg_return_cstring` -> `CString::into_raw`) uses.
+/// TODO(memory-context): reclaim via the per-call/statement memory context when
+/// that lands, replacing the leak.
 fn make_varlena(src: &[u8]) -> *mut u8 {
     let total = src.len() + VARHDRSZ as usize;
     let mut buf = vec![0u8; total].into_boxed_slice();
@@ -78,7 +84,6 @@ fn make_varlena(src: &[u8]) -> *mut u8 {
             core::ptr::copy_nonoverlapping(src.as_ptr(), VARDATA(ptr), src.len());
         }
     }
-    // Leak: no MemoryContext to own this yet (mirrors int.rs output leaking).
     Box::leak(buf).as_mut_ptr()
 }
 

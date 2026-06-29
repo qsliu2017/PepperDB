@@ -46,11 +46,16 @@ unsafe fn pg_getarg_name<'a>(fcinfo: &FunctionCallInfoBaseData, n: usize) -> &'a
 }
 
 /// Build a leaked, zero-padded `NameData` from the first `len` bytes of `bytes`.
+///
+/// The result is carried in a `Name` (byref) Datum that must outlive the call,
+/// so the owned `Box<NameData>` is leaked into a raw pointer -- the same
+/// output-Datum convention int.rs (`pg_return_cstring` -> `CString::into_raw`)
+/// uses. TODO(memory-context): reclaim via the per-call/statement memory context
+/// when that lands, replacing the leak.
 fn make_name(bytes: &[u8]) -> *mut NameData {
     let mut nd = Box::new(NameData { data: [0u8; NAMEDATALEN] });
     let n = bytes.len().min(NAMEDATALEN - 1);
     nd.data[..n].copy_from_slice(&bytes[..n]);
-    // Leak: no MemoryContext to own this yet (mirrors int.rs output leaking).
     Box::into_raw(nd)
 }
 

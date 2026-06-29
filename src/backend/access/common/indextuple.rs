@@ -9,13 +9,11 @@
 //! `t_info` word packs HasNulls (bit 15), HasVarwidth (bit 14), an AM-reserved
 //! bit (13), and the 13-bit size, mirrored byte-for-byte from C.
 //!
-//! Soundness: the block is allocated MAXALIGN(8)-aligned, the
-//! `*mut u8 -> *mut IndexTupleData` overlay cast is sound (header align 4
+//! Soundness: the block is an owned 8-aligned `Box<[u64]>` (leaked into the raw
+//! `IndexTuple` handle, reclaimed by [`free_index_tuple`]), so the
+//! `*mut u8 -> *mut IndexTupleData` overlay cast is sound (header align 2
 //! divides 8), and all field access goes through the unaligned
-//! `fetch_att`/varlena accessors (see heaptuple.rs), so no `cast_ptr_alignment`
-//! allow is needed.
-
-use core::alloc::Layout;
+//! `fetch_att`/varlena accessors (see heaptuple.rs).
 
 use crate::access::itup::{
     IndexAttributeBitMapData, IndexInfoFindDataOffset, IndexTuple, IndexTupleData, IndexTupleSize,
@@ -35,32 +33,37 @@ use crate::utils::elog::ERROR;
 // tupmask. heap_fill_tuple sets these; index_form_tuple reinterprets them.
 use crate::access::htup_details::HEAP_HASVARWIDTH;
 
-/// Allocate a zeroed index-tuple block of `size` bytes (C
-/// `MemoryContextAllocZero`). Reclaimed by [`free_index_tuple`].
+/// Allocate a zeroed, 8-aligned index-tuple block of `size` bytes (C
+/// `MemoryContextAllocZero`). The backing is an owned `Box<[u64]>` (8-aligned, so
+/// the `IndexTupleData` overlay base is MAXALIGN'd) leaked into the raw
+/// `IndexTuple` handle the AM passes around; [`free_index_tuple`] reconstitutes
+/// and drops the `Box` (no manual `dealloc`). `size` is always MAXALIGN'd by the
+/// callers, so it is an exact multiple of 8 words.
 fn alloc_index_tuple(size: usize) -> *mut u8 {
-    let n = size.max(1);
-    let layout = Layout::from_size_align(n, crate::pg_config::MAXIMUM_ALIGNOF)
-        .unwrap_or_else(|_| Layout::new::<u8>());
-    // SAFETY: non-zero size; alloc_zeroed returns zeroed memory or null (OOM).
-    let p = unsafe { std::alloc::alloc_zeroed(layout) };
-    if p.is_null() {
-        crate::elog!(ERROR, "out of memory forming index tuple".to_string());
-    }
-    p
+    let nwords = size.max(1).div_ceil(8);
+    let body: Box<[u64]> = vec![0u64; nwords].into_boxed_slice();
+    Box::into_raw(body).cast::<u8>()
 }
 
 /// Reclaim an index tuple allocated by [`alloc_index_tuple`]. `size` must be the
-/// `IndexTupleSize` the tuple was allocated with.
+/// `IndexTupleSize` the tuple was allocated with (MAXALIGN'd, the same value
+/// `alloc_index_tuple` rounded up).
 ///
 /// SAFETY: `tup` came from `alloc_index_tuple(size)` and was not yet freed.
 unsafe fn free_index_tuple(tup: IndexTuple, size: usize) {
     if tup.is_null() {
         return;
     }
-    let n = size.max(1);
-    let layout = Layout::from_size_align(n, crate::pg_config::MAXIMUM_ALIGNOF)
-        .unwrap_or_else(|_| Layout::new::<u8>());
-    std::alloc::dealloc(tup.cast::<u8>(), layout);
+    // Rebuild the exact `Box<[u64]>` fat pointer (base + word count) that
+    // `alloc_index_tuple` leaked, then drop it. `nwords` matches because the
+    // allocation size is MAXALIGN'd (a whole number of 8-byte words).
+    let nwords = size.max(1).div_ceil(8);
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "sound: the block was leaked from a Box<[u64]> in alloc_index_tuple, so tup is 8-aligned"
+    )]
+    let slice = core::ptr::slice_from_raw_parts_mut(tup.cast::<u64>(), nwords);
+    drop(unsafe { Box::from_raw(slice) });
 }
 
 /// `index_form_tuple`: construct an index tuple in (conceptually) the current
@@ -110,7 +113,7 @@ pub fn index_form_tuple_context(
     let tp = alloc_index_tuple(size);
     #[allow(
         clippy::cast_ptr_alignment,
-        reason = "sound overlay: tp is alloc_zeroed at MAXIMUM_ALIGNOF (8); IndexTupleData's align (2) divides 8"
+        reason = "sound overlay: tp heads an 8-aligned Box<[u64]> block; IndexTupleData's align (2) divides 8"
     )]
     let tuple = tp.cast::<IndexTupleData>();
 
@@ -341,7 +344,7 @@ pub unsafe fn copy_index_tuple(source: IndexTuple) -> IndexTuple {
     core::ptr::copy_nonoverlapping(source.cast::<u8>(), result, size);
     #[allow(
         clippy::cast_ptr_alignment,
-        reason = "sound overlay: result is alloc_zeroed at MAXIMUM_ALIGNOF (8); IndexTupleData's align (2) divides 8"
+        reason = "sound overlay: result heads an 8-aligned Box<[u64]> block; IndexTupleData's align (2) divides 8"
     )]
     result.cast::<IndexTupleData>()
 }
