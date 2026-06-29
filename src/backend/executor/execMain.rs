@@ -120,14 +120,7 @@ fn init_plan(query_desc: &mut QueryDesc<'_>, eflags: i32) {
 }
 
 /// The result TupleDesc of a plan-state node (PG `ExecGetResultType`).
-fn result_type_of(node: &PlanStateNode<'_>) -> Option<crate::access::tupdesc::TupleDesc> {
-    match node {
-        PlanStateNode::Result(rs) => rs.ps.ps_result_tuple_desc.clone(),
-        PlanStateNode::SeqScan(ss) => ss.state.ss.ps.ps_result_tuple_desc.clone(),
-        // A non-RETURNING ModifyTable returns no tuples.
-        PlanStateNode::ModifyTable(mt) => mt.state.ps.ps_result_tuple_desc.clone(),
-    }
-}
+use crate::backend::executor::execProcnode::result_type_of;
 
 /// PG `standard_ExecutorRun`: drive the plan, sending tuples to the destination.
 /// Async because the scan path reaches the table AM's buffer reads (rules.md s5);

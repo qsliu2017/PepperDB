@@ -290,6 +290,13 @@ pub fn slot_getattr(slot: &mut TupleTableSlot, attnum: i32) -> Option<Datum> {
     }
 }
 
+/// Convenience: map a `slot_getattr` result to `Option<i32>` (None == SQL NULL).
+/// Folds the common int4-column read used by the sort/group/limit node tests.
+#[must_use]
+pub fn DatumGetInt32_opt(d: Option<Datum>) -> Option<i32> {
+    d.map(crate::postgres::DatumGetInt32)
+}
+
 /// Fetch a system attribute of the slot's current tuple. None == SQL NULL.
 pub fn slot_getsysattr(slot: &mut TupleTableSlot, attnum: i32) -> Option<Datum> {
     debug_assert!(attnum < 0); // caller error

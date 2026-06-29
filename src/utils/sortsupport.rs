@@ -255,11 +255,215 @@ pub fn ssup_datum_int32_cmp(x: Datum, y: Datum, _ssup: &SortSupportData) -> i32 
     }
 }
 
-pub fn PrepareSortSupportComparisonShim(_cmp_func: Oid, _ssup: SortSupport) {
-    unimplemented!()
+pub fn PrepareSortSupportComparisonShim(cmp_func: Oid, ssup: SortSupport) {
+    // PG allocates a SortShimExtra (FmgrInfo + reusable fcinfo) in ssup_cxt and sets
+    // ssup->comparator = comparison_shim. The shim reads the looked-up function from
+    // ssup_extra and FunctionCall2-invokes it. In this port `SortKey`/the sort only
+    // copy `comparator` (a plain `fn`, kept `Send`), so rather than stash a raw
+    // FmgrInfo behind `ssup_extra` we resolve a per-proc `fn` comparator directly
+    // (the builtin btree cmp procs the M5 opclasses use). The resolved `fn` calls the
+    // builtin through `OidFunctionCall2Coll`, which is the same FunctionCall the C
+    // shim makes; no captured state, so it stays a plain `fn`.
+    ssup.comparator = Some(shim_comparator_for(cmp_func));
 }
-pub fn PrepareSortSupportFromOrderingOp(_ordering_op: Oid, _ssup: SortSupport) {
-    unimplemented!()
+
+/// The set of builtin BTORDER_PROC comparators reachable for M5 sorts. Each maps to
+/// a `SortComparator` `fn` that invokes the builtin (via `OidFunctionCall2Coll`),
+/// reading the collation from the live `SortSupportData` (text cmp honors it). PG
+/// looks the proc up in pg_amproc and shims it generically; here the proc OID picks
+/// a fixed `fn` so the comparator stays a plain (Send) `fn` for `SortKey`.
+fn shim_comparator_for(cmp_func: Oid) -> SortComparator {
+    use crate::utils::fmgroids as f;
+    match cmp_func {
+        c if c == f::F_BTINT4CMP => ssup_datum_int32_cmp,
+        c if c == f::F_BTINT8CMP => ssup_datum_signed_cmp,
+        c if c == f::F_BTTEXTCMP => call_bttextcmp,
+        c if c == f::F_DATE_CMP => call_date_cmp,
+        c if c == f::F_NUMERIC_CMP => call_numeric_cmp,
+        c if c == f::F_BTINT2CMP => call_btint2cmp,
+        c if c == f::F_BTOIDCMP => call_btoidcmp,
+        _ => {
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                format!("no sort-support comparator for function {}", cmp_func.0)
+            );
+            unreachable!("elog!(ERROR) raises")
+        }
+    }
+}
+
+/// Invoke a builtin btree comparator by OID, returning its int4 result as i32.
+/// Mirrors the C `comparison_shim` (FunctionCall2 over the looked-up proc); the
+/// collation comes from the call-site `SortSupportData` (text needs it).
+fn call_cmp(cmp_func: Oid, x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
+    let r = crate::fmgr::OidFunctionCall2Coll(cmp_func, ssup.ssup_collation, x, y)
+        .unwrap_or_else(|| {
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                format!("comparator function {} returned NULL", cmp_func.0)
+            );
+            unreachable!("elog!(ERROR) raises")
+        });
+    DatumGetInt32(r)
+}
+
+fn call_bttextcmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
+    call_cmp(crate::utils::fmgroids::F_BTTEXTCMP, x, y, ssup)
+}
+fn call_date_cmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
+    call_cmp(crate::utils::fmgroids::F_DATE_CMP, x, y, ssup)
+}
+fn call_numeric_cmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
+    call_cmp(crate::utils::fmgroids::F_NUMERIC_CMP, x, y, ssup)
+}
+fn call_btint2cmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
+    call_cmp(crate::utils::fmgroids::F_BTINT2CMP, x, y, ssup)
+}
+fn call_btoidcmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
+    call_cmp(crate::utils::fmgroids::F_BTOIDCMP, x, y, ssup)
+}
+
+/// PG `PrepareSortSupportFromOrderingOp`: fill `ssup` from a btree "<" or ">"
+/// ordering operator. Resolves the operator's btree opfamily + input type +
+/// compare direction (`get_ordering_op_properties`), sets `ssup_reverse` for ">",
+/// then resolves the BTORDER_PROC support function (`FinishSortSupportFunction`)
+/// into `ssup.comparator`.
+///
+/// The `get_ordering_op_properties` step searches pg_amop by the operator OID; PG
+/// uses the AMOPOPID cat-list cache, which is not translated yet, so M5 resolves
+/// the (opfamily, opcintype, cmptype) of the seeded int4/int8/text/date/numeric
+/// btree ordering operators from a static table -- the same `(op -> opclass info)`
+/// the seed data encodes (the established M-stand-in pattern; rules.md s4). The
+/// BTORDER_PROC is then resolved through `get_opfamily_proc` over the (warm)
+/// AMPROCNUM syscache when available, else the matching static opfamily->proc map.
+pub fn PrepareSortSupportFromOrderingOp(ordering_op: Oid, ssup: SortSupport) {
+    crate::assert!(ssup.comparator.is_none());
+    let Some((opfamily, opcintype, cmptype)) = get_ordering_op_properties(ordering_op) else {
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("operator {} is not a valid ordering operator", ordering_op.0)
+        );
+        unreachable!("elog!(ERROR) raises")
+    };
+    ssup.ssup_reverse = cmptype == crate::access::cmptype::CompareType::Gt;
+    finish_sort_support_function(opfamily, opcintype, ssup);
+}
+
+/// PG `FinishSortSupportFunction`: resolve the BTSORTSUPPORT_PROC (none builtin
+/// here) then fall back to the BTORDER_PROC comparator shim. M5 uses the order
+/// proc directly.
+fn finish_sort_support_function(opfamily: Oid, opcintype: Oid, ssup: SortSupport) {
+    let sort_function = get_opfamily_proc(opfamily, opcintype, opcintype, BTORDER_PROC);
+    if sort_function == crate::postgres_ext::InvalidOid {
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!(
+                "missing support function {}({},{}) in opfamily {}",
+                BTORDER_PROC, opcintype.0, opcintype.0, opfamily.0
+            )
+        );
+    }
+    PrepareSortSupportComparisonShim(sort_function, ssup);
+}
+
+/// BTORDER_PROC support-function number (access/nbtree.h `BTORDER_PROC`).
+const BTORDER_PROC: i16 = 1;
+
+/// PG `get_ordering_op_properties` (M5 static subset): map a btree "<"/">"
+/// ordering operator OID to `(opfamily, opcintype, cmptype)`. Covers the seeded
+/// single-type int2/int4/int8/oid/text/date/numeric btree ordering operators.
+fn get_ordering_op_properties(opno: Oid) -> Option<(Oid, Oid, crate::access::cmptype::CompareType)> {
+    use crate::access::cmptype::CompareType::{Gt, Lt};
+    // (opfamily, opcintype) for each btree default opclass family; OIDs from the
+    // seeded pg_opfamily / pg_type rows.
+    const INTEGER_OPS: Oid = Oid(1976); // btree/integer_ops
+    const OID_OPS: Oid = Oid(1989); // btree/oid_ops
+    const TEXT_OPS: Oid = Oid(1994); // btree/text_ops
+    const DATETIME_OPS: Oid = Oid(434); // btree/datetime_ops
+    const NUMERIC_OPS: Oid = Oid(1988); // btree/numeric_ops
+    const INT2: Oid = Oid(21);
+    const INT4: Oid = Oid(23);
+    const INT8: Oid = Oid(20);
+    const OID_T: Oid = Oid(26);
+    const TEXT: Oid = Oid(25);
+    const DATE: Oid = Oid(1082);
+    const NUMERIC: Oid = Oid(1700);
+    let (family, intype, cmp) = match opno.0 {
+        95 => (INTEGER_OPS, INT2, Lt),   // int2lt
+        520 => (INTEGER_OPS, INT2, Gt),  // int2gt
+        97 => (INTEGER_OPS, INT4, Lt),   // int4lt
+        521 => (INTEGER_OPS, INT4, Gt),  // int4gt
+        412 => (INTEGER_OPS, INT8, Lt),  // int8lt
+        413 => (INTEGER_OPS, INT8, Gt),  // int8gt
+        609 => (OID_OPS, OID_T, Lt),     // oidlt
+        610 => (OID_OPS, OID_T, Gt),     // oidgt
+        664 => (TEXT_OPS, TEXT, Lt),     // text_lt
+        666 => (TEXT_OPS, TEXT, Gt),     // text_gt
+        1095 => (DATETIME_OPS, DATE, Lt), // date_lt
+        1097 => (DATETIME_OPS, DATE, Gt), // date_gt
+        1754 => (NUMERIC_OPS, NUMERIC, Lt), // numeric_lt
+        1756 => (NUMERIC_OPS, NUMERIC, Gt), // numeric_gt
+        _ => return None,
+    };
+    Some((family, intype, cmp))
+}
+
+/// PG `get_opfamily_proc`: the support-function OID for
+/// `(opfamily, lefttype, righttype, procnum)` via the AMPROCNUM syscache, when the
+/// cache is warm. Falls back to the builtin opfamily->BTORDER_PROC map for the
+/// catalog-cold bootstrap window (the same value the pg_amproc seed encodes).
+fn get_opfamily_proc(opfamily: Oid, lefttype: Oid, righttype: Oid, procnum: i16) -> Oid {
+    use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache};
+    use crate::postgres::{Int16GetDatum, ObjectIdGetDatum};
+    use crate::utils::syscache::SysCacheIdentifier;
+    if let Some(tuple) = search_sys_cache(
+        SysCacheIdentifier::AMPROCNUM,
+        &[
+            ObjectIdGetDatum(opfamily),
+            ObjectIdGetDatum(lefttype),
+            ObjectIdGetDatum(righttype),
+            Int16GetDatum(procnum),
+        ],
+    ) {
+        // SAFETY: held AMPROCNUM hit -> a pg_amproc row; borrow ends before release.
+        #[allow(
+            clippy::cast_ptr_alignment,
+            reason = "faithful GETSTRUCT reinterpretation of a heap tuple to Form_pg_amproc (MAXALIGN'd body covers the Form alignment)"
+        )]
+        let proc = {
+            use crate::access::htup_details::GETSTRUCT;
+            use crate::catalog::pg_amproc::FormData_pg_amproc;
+            let p = GETSTRUCT(unsafe { &*tuple }).cast::<FormData_pg_amproc>();
+            unsafe { &*p }.amproc
+        };
+        release_sys_cache(tuple);
+        if proc != crate::postgres_ext::InvalidOid {
+            return proc;
+        }
+    }
+    builtin_opfamily_order_proc(opfamily, lefttype, procnum)
+}
+
+/// Builtin opfamily -> BTORDER_PROC map (bootstrap-window fallback; the pg_amproc
+/// seed encodes the same proc).
+fn builtin_opfamily_order_proc(opfamily: Oid, lefttype: Oid, procnum: i16) -> Oid {
+    use crate::utils::fmgroids as f;
+    if procnum != BTORDER_PROC {
+        return crate::postgres_ext::InvalidOid;
+    }
+    match lefttype.0 {
+        21 => f::F_BTINT2CMP,
+        23 => f::F_BTINT4CMP,
+        20 => f::F_BTINT8CMP,
+        26 => f::F_BTOIDCMP,
+        25 => f::F_BTTEXTCMP,
+        1082 => f::F_DATE_CMP,
+        1700 => f::F_NUMERIC_CMP,
+        _ => {
+            let _ = opfamily;
+            crate::postgres_ext::InvalidOid
+        }
+    }
 }
 pub fn PrepareSortSupportFromIndexRel(_index_rel: &RelationData, _reverse: bool, _ssup: SortSupport) {
     unimplemented!()

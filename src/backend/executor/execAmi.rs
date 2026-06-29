@@ -25,5 +25,16 @@ pub fn exec_rescan(shared: &Arc<SharedState>, node: &mut PlanStateNode) {
         PlanStateNode::ModifyTable(_) => {
             unimplemented!("ExecReScan: ModifyTable rescan not reachable")
         }
+        // M5 upper nodes: rescan resets the node (and forgets/rewinds buffered
+        // output); the child rescan is driven by the node's own rescan helper.
+        PlanStateNode::Sort(s) => crate::backend::executor::nodeSort::exec_rescan_sort(s),
+        PlanStateNode::Limit(l) => crate::backend::executor::nodeLimit::exec_rescan_limit(l),
+        PlanStateNode::Material(m) => crate::backend::executor::nodeMaterial::exec_rescan_material(m),
+        PlanStateNode::Unique(u) => crate::backend::executor::nodeUnique::exec_rescan_unique(u),
+        PlanStateNode::Group(g) => crate::backend::executor::nodeGroup::exec_rescan_group(g),
+        #[cfg(test)]
+        PlanStateNode::TupleSource(_) => {
+            unimplemented!("ExecReScan: test tuple source is not rescannable")
+        }
     }
 }
