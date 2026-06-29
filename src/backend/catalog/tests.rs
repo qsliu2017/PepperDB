@@ -256,7 +256,7 @@ async fn catalog_index_scan_finds_seeded_pg_type_row() {
         if let Some(t) = found {
             let desc = pg_type.rd_att.clone().unwrap();
             let (oid_d, isnull) =
-                unsafe { crate::backend::access::common::heaptuple::heap_getattr(&*t, Anum_pg_type_oid, &desc) };
+                unsafe { crate::backend::access::common::heaptuple::heap_getattr(t, Anum_pg_type_oid, &desc) };
             assert!(!isnull);
             assert_eq!(DatumGetObjectId(oid_d), INT4OID);
         }

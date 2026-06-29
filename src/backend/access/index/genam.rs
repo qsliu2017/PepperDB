@@ -164,11 +164,18 @@ pub fn systable_beginscan_indexed<'rel, 'snap>(
 }
 
 /// `systable_getnext`: return the next tuple matching the scan keys, or `None` at
-/// end of scan. The returned `HeapTuple` is an owned copy held by the scan (PG
-/// returns a buffer reference; we copy eagerly so the pointer stays valid across
-/// the caller's processing without holding the buffer pin). The previous tuple is
-/// freed here.
-pub async fn systable_getnext(shared: &Arc<SharedState>, sysscan: &mut SysScanState<'_, '_>) -> Option<HeapTuple> {
+/// end of scan. The found tuple is an owned copy held by the scan (`sysscan.cur`,
+/// PG returns a buffer reference; we copy eagerly so the borrow stays valid across
+/// the caller's processing without holding the buffer pin) and is returned as a
+/// borrow rooted in that owner (rule 10: `Option<&HeapTupleData>`, `None` = the C
+/// NULL). The borrow lives until the caller's next `systable_getnext`/
+/// `systable_endscan` (both reborrow `sysscan` mutably, ending it); the scan owner
+/// sits in the caller's frame above every such use. The previous tuple is freed
+/// here at the start of the next call.
+pub async fn systable_getnext<'scan>(
+    shared: &Arc<SharedState>,
+    sysscan: &'scan mut SysScanState<'_, '_>,
+) -> Option<&'scan HeapTupleData> {
     // Free the previously returned copy.
     if let Some(old) = sysscan.cur.take() {
         heap_freetuple(*old); // frees the copied body once
@@ -184,14 +191,12 @@ pub async fn systable_getnext(shared: &Arc<SharedState>, sysscan: &mut SysScanSt
     // compare directly) for safety against any non-key columns.
     if sysscan.iscan.is_some() {
         let iscan = sysscan.iscan.as_mut().unwrap_or_else(|| unreachable!());
-        while let Some(mut tup) =
+        while let Some(tup) =
             crate::backend::access::index::indexam::index_getnext_heaptuple(shared, iscan, ScanDirection::Forward).await
         {
-            let matched = scankeys_match(&tup, &tupdesc, &sysscan.keys);
-            if matched {
-                let ptr: *mut HeapTupleData = std::ptr::from_mut::<HeapTupleData>(tup.as_mut());
-                sysscan.cur = Some(tup);
-                return Some(ptr);
+            if scankeys_match(&tup, &tupdesc, &sysscan.keys) {
+                // Stash the owned copy; return a borrow rooted in `sysscan.cur`.
+                return Some(&**sysscan.cur.insert(tup));
             }
             // Else free and continue (index_getnext_heaptuple returns an owned copy).
             heap_freetuple(*tup);
@@ -211,13 +216,11 @@ pub async fn systable_getnext(shared: &Arc<SharedState>, sysscan: &mut SysScanSt
         // SAFETY: tup points into the pinned scan buffer; valid until next getnext.
         let tref: &HeapTupleData = unsafe { &*tup };
         if scankeys_match(tref, &tupdesc, keys) {
-            // Copy before the buffer can be reused (PG: caller must copy).
+            // Copy before the buffer can be reused (PG: caller must copy), then
+            // return a borrow rooted in `sysscan.cur` (the scan owns the copy).
             // SAFETY: tref is a live tuple over the pinned page.
             let copy = unsafe { heap_copytuple(tref) };
-            let mut boxed = Box::new(copy);
-            let ptr: *mut HeapTupleData = std::ptr::from_mut::<HeapTupleData>(boxed.as_mut());
-            *cur = Some(boxed);
-            return Some(ptr);
+            return Some(&**cur.insert(Box::new(copy)));
         }
     }
     None

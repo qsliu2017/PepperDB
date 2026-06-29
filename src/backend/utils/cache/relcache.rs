@@ -311,7 +311,7 @@ async fn scan_pg_relation(shared: &Arc<SharedState>, target_rel_id: Oid) -> Opti
     let result = Box::pin(systable_getnext(shared, &mut scan))
         .await
         // SAFETY: live scan tuple; copy before endscan.
-        .map(|t| unsafe { heap_copytuple(&*t) });
+        .map(|t| unsafe { heap_copytuple(t) });
     systable_endscan(shared, &mut scan);
     relation_close(pg_class);
     result
@@ -352,9 +352,7 @@ async fn relation_build_tuple_desc(
         &key,
     );
 
-    while let Some(t) = Box::pin(systable_getnext(shared, &mut scan)).await {
-        // SAFETY: live scan tuple.
-        let tref: &HeapTupleData = unsafe { &*t };
+    while let Some(tref) = Box::pin(systable_getnext(shared, &mut scan)).await {
         let attp = GETSTRUCT(tref).cast::<FormData_pg_attribute>();
         // SAFETY: attp points at the pg_attribute fixed part.
         let att = unsafe { &*attp };

@@ -30,13 +30,17 @@ use crate::postgres_ext::Oid;
 use crate::shared_state::SharedState;
 use crate::utils::syscache::SysCacheIdentifier;
 
-/// Read the `Form_pg_type` out of a held TYPEOID syscache tuple.
+/// Read the `Form_pg_type` out of a held TYPEOID syscache tuple, returning a borrow
+/// tied to the tuple borrow (rule 10: `&FormData_pg_type` lifetime-rooted in the
+/// `&HeapTupleData`, not a fake `'static`). The caller holds the syscache reference
+/// (and releases it) for at least as long as this borrow lives.
 ///
-/// SAFETY: `tuple` is a live, held syscache tuple whose fixed part is a pg_type
-/// row.
-unsafe fn type_form(tuple: *mut HeapTupleData) -> &'static FormData_pg_type {
-    let pt: Form_pg_type = GETSTRUCT(&*tuple).cast::<FormData_pg_type>();
-    &*pt
+/// SAFETY: `tuple`'s fixed part is a pg_type row (a held TYPEOID syscache hit).
+unsafe fn type_form(tuple: &HeapTupleData) -> &FormData_pg_type {
+    let pt: Form_pg_type = GETSTRUCT(tuple).cast::<FormData_pg_type>();
+    // SAFETY: `pt` points into `tuple`'s body (GETSTRUCT offset); the returned
+    // borrow is tied to `tuple`'s lifetime so it cannot outlive the held tuple.
+    unsafe { &*pt }
 }
 
 // ---------------------------------------------------------------------------
@@ -54,9 +58,11 @@ unsafe fn type_form(tuple: *mut HeapTupleData) -> &'static FormData_pg_type {
 #[must_use]
 pub fn get_type_output_info(r#type: Oid) -> (Oid, bool) {
     if let Some(tuple) = search_sys_cache(SysCacheIdentifier::TYPEOID, &[ObjectIdGetDatum(r#type)]) {
-        // SAFETY: held syscache tuple.
-        let pt = unsafe { type_form(tuple) };
-        let out = (pt.typoutput, (!pt.typbyval) && pt.typlen == -1);
+        // SAFETY: held syscache tuple; borrow ends before release_sys_cache.
+        let out = {
+            let pt = unsafe { type_form(&*tuple) };
+            (pt.typoutput, (!pt.typbyval) && pt.typlen == -1)
+        };
         release_sys_cache(tuple);
         return out;
     }
@@ -69,9 +75,11 @@ pub async fn get_type_output_info_populate(shared: &Arc<SharedState>, r#type: Oi
     if let Some(tuple) =
         search_sys_cache_populate(shared, SysCacheIdentifier::TYPEOID, &[ObjectIdGetDatum(r#type)]).await
     {
-        // SAFETY: held syscache tuple.
-        let pt = unsafe { type_form(tuple) };
-        let out = (pt.typoutput, (!pt.typbyval) && pt.typlen == -1);
+        // SAFETY: held syscache tuple; borrow ends before release_sys_cache.
+        let out = {
+            let pt = unsafe { type_form(&*tuple) };
+            (pt.typoutput, (!pt.typbyval) && pt.typlen == -1)
+        };
         release_sys_cache(tuple);
         return out;
     }
@@ -112,9 +120,11 @@ fn cache_lookup_failed(typid: Oid) -> ! {
 #[must_use]
 pub fn get_typlenbyval(typid: Oid) -> (i16, bool) {
     if let Some(tuple) = search_sys_cache(SysCacheIdentifier::TYPEOID, &[ObjectIdGetDatum(typid)]) {
-        // SAFETY: held syscache tuple.
-        let pt = unsafe { type_form(tuple) };
-        let out = (pt.typlen, pt.typbyval);
+        // SAFETY: held syscache tuple; borrow ends before release_sys_cache.
+        let out = {
+            let pt = unsafe { type_form(&*tuple) };
+            (pt.typlen, pt.typbyval)
+        };
         release_sys_cache(tuple);
         return out;
     }
@@ -128,9 +138,11 @@ pub fn get_typlenbyval(typid: Oid) -> (i16, bool) {
 #[must_use]
 pub fn get_typlenbyvalalign(typid: Oid) -> (i16, bool, u8) {
     if let Some(tuple) = search_sys_cache(SysCacheIdentifier::TYPEOID, &[ObjectIdGetDatum(typid)]) {
-        // SAFETY: held syscache tuple.
-        let pt = unsafe { type_form(tuple) };
-        let out = (pt.typlen, pt.typbyval, pt.typalign as u8);
+        // SAFETY: held syscache tuple; borrow ends before release_sys_cache.
+        let out = {
+            let pt = unsafe { type_form(&*tuple) };
+            (pt.typlen, pt.typbyval, pt.typalign as u8)
+        };
         release_sys_cache(tuple);
         return out;
     }
@@ -142,9 +154,11 @@ pub async fn get_typlenbyvalalign_populate(shared: &Arc<SharedState>, typid: Oid
     if let Some(tuple) =
         search_sys_cache_populate(shared, SysCacheIdentifier::TYPEOID, &[ObjectIdGetDatum(typid)]).await
     {
-        // SAFETY: held syscache tuple.
-        let pt = unsafe { type_form(tuple) };
-        let out = (pt.typlen, pt.typbyval, pt.typalign as u8);
+        // SAFETY: held syscache tuple; borrow ends before release_sys_cache.
+        let out = {
+            let pt = unsafe { type_form(&*tuple) };
+            (pt.typlen, pt.typbyval, pt.typalign as u8)
+        };
         release_sys_cache(tuple);
         return out;
     }

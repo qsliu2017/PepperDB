@@ -167,9 +167,7 @@ async fn scan_name_nsp(
     let mut scan = systable_beginscan(shared, &catalog, InvalidOid, false, &snap, &key);
 
     let mut result = None;
-    while let Some(tup) = systable_getnext(shared, &mut scan).await {
-        // SAFETY: tup is a live owned tuple copy held by the scan.
-        let tref: &HeapTupleData = unsafe { &*tup };
+    while let Some(tref) = systable_getnext(shared, &mut scan).await {
         if !tuple_name_eq(tref, &desc, name_attno, name) {
             continue;
         }

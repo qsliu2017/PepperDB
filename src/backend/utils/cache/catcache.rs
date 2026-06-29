@@ -360,10 +360,8 @@ pub async fn search_cat_cache_populate(
     let mut scan = systable_beginscan(shared, &relation, indexoid, false, &snap, &skeys);
 
     let matched = Box::pin(systable_getnext(shared, &mut scan)).await;
-    let found: Option<HeapTuple> = matched.and_then(|ntp| {
-        // ntp is an owned copy held by the scan; copy it into a cache entry.
-        // SAFETY: ntp is a live tuple held by the scan.
-        let tref = unsafe { &*ntp };
+    let found: Option<HeapTuple> = matched.and_then(|tref| {
+        // tref borrows the scan's owned copy; copy it into a cache entry.
         let entry = build_entry(cache_id, tref, &search, false);
         insert_entry(cache_id, entry)
     });

@@ -563,9 +563,7 @@ async fn systable_index_scan_finds_row() {
         let snap = txn_snapshot(&shared).expect("snapshot");
         let mut sysscan =
             systable_beginscan_indexed(&shared, &heap, &index, &snap, &key);
-        let tup = systable_getnext(&shared, &mut sysscan).await.expect("row 300 found");
-        // SAFETY: live owned tuple held by the scan.
-        let tref = unsafe { &*tup };
+        let tref = systable_getnext(&shared, &mut sysscan).await.expect("row 300 found");
         let desc = heap.rd_att.clone().unwrap();
         let (vals, _n) =
             unsafe { crate::backend::access::common::heaptuple::heap_deform_tuple(tref, &desc) };
