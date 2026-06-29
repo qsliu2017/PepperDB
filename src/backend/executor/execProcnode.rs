@@ -25,6 +25,20 @@ use crate::nodes::execnodes::{EState, ResultState, TupleTableSlot};
 use crate::nodes::nodes::Node;
 
 use crate::backend::executor::nodeAgg::{exec_agg, exec_end_agg, exec_init_agg, AggRun};
+use crate::backend::executor::nodeBitmapAnd::{
+    exec_end_bitmap_and, exec_init_bitmap_and, multi_exec_bitmap_and, BitmapAndRun,
+};
+use crate::backend::executor::nodeBitmapHeapscan::{
+    exec_bitmap_heap_scan, exec_end_bitmap_heap_scan, exec_init_bitmap_heap_scan,
+    BitmapHeapScanRun,
+};
+use crate::backend::executor::nodeBitmapIndexscan::{
+    exec_end_bitmap_index_scan, exec_init_bitmap_index_scan, multi_exec_bitmap_index_scan,
+    BitmapIndexScanRun,
+};
+use crate::backend::executor::nodeBitmapOr::{
+    exec_end_bitmap_or, exec_init_bitmap_or, multi_exec_bitmap_or, BitmapOrRun,
+};
 use crate::backend::executor::nodeGroup::{exec_end_group, exec_group, exec_init_group, GroupRun};
 use crate::backend::executor::nodeIndexonlyscan::{
     exec_end_index_only_scan, exec_index_only_scan, exec_init_index_only_scan, IndexOnlyScanRun,
@@ -74,7 +88,15 @@ pub enum PlanStateNode<'rel> {
     IndexScan(Box<IndexScanRun<'rel>>),
     /// T_IndexOnlyScanState (+ its open AM index-scan descriptor).
     IndexOnlyScan(Box<IndexOnlyScanRun<'rel>>),
-    // The bitmap agent adds T_BitmapIndexScan / T_BitmapHeapScan arms here next.
+    /// T_BitmapHeapScanState (+ its bitmap-producer child + iteration cursor).
+    BitmapHeapScan(Box<BitmapHeapScanRun<'rel>>),
+    /// T_BitmapIndexScanState. A bitmap PRODUCER: driven via `multi_exec_proc_node`
+    /// (yields a `TIDBitmap`, not a slot); its `ExecProcNode` arm is an error.
+    BitmapIndexScan(Box<BitmapIndexScanRun<'rel>>),
+    /// T_BitmapAndState. A bitmap producer (intersects child bitmaps).
+    BitmapAnd(Box<BitmapAndRun<'rel>>),
+    /// T_BitmapOrState. A bitmap producer (unions child bitmaps).
+    BitmapOr(Box<BitmapOrRun<'rel>>),
     /// T_ModifyTableState (+ its child plan-state).
     ModifyTable(Box<ModifyTableRun<'rel>>),
     /// T_SortState (+ child + tuplesort).
@@ -127,6 +149,11 @@ pub fn result_type_of(node: &PlanStateNode<'_>) -> Option<TupleDesc> {
         PlanStateNode::SeqScan(ss) => ss.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::IndexScan(is) => is.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::IndexOnlyScan(ios) => ios.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::BitmapHeapScan(bhs) => bhs.ss.ps.ps_result_tuple_desc.clone(),
+        // The bitmap producers yield a TIDBitmap, not tuples; no result rowtype.
+        PlanStateNode::BitmapIndexScan(_)
+        | PlanStateNode::BitmapAnd(_)
+        | PlanStateNode::BitmapOr(_) => None,
         PlanStateNode::ModifyTable(mt) => mt.state.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Sort(s) => s.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Limit(l) => l.state.ps.ps_result_tuple_desc.clone(),
@@ -156,6 +183,24 @@ pub fn exec_init_node<'rel>(
         Node::IndexOnlyScan(s) => Some(PlanStateNode::IndexOnlyScan(exec_init_index_only_scan(
             s, estate, eflags,
         ))),
+        Node::BitmapHeapScan(s) => {
+            // The bitmap-producer child is the scan node's lefttree (PG `outerPlan`).
+            let child = init_child(s.scan.plan.lefttree.as_ref(), estate, eflags);
+            Some(PlanStateNode::BitmapHeapScan(exec_init_bitmap_heap_scan(
+                s, estate, eflags, child,
+            )))
+        }
+        Node::BitmapIndexScan(s) => Some(PlanStateNode::BitmapIndexScan(
+            exec_init_bitmap_index_scan(s, estate, eflags),
+        )),
+        Node::BitmapAnd(a) => {
+            let children = init_bitmap_children(&a.bitmapplans, estate, eflags);
+            Some(PlanStateNode::BitmapAnd(exec_init_bitmap_and(a, children)))
+        }
+        Node::BitmapOr(o) => {
+            let children = init_bitmap_children(&o.bitmapplans, estate, eflags);
+            Some(PlanStateNode::BitmapOr(exec_init_bitmap_or(o, children)))
+        }
         Node::ModifyTable(m) => Some(PlanStateNode::ModifyTable(exec_init_modify_table(
             m, estate, eflags,
         ))),
@@ -196,6 +241,21 @@ fn init_child<'rel>(child: Option<&Node>, estate: &mut EState<'rel>, eflags: i32
         .unwrap_or_else(|| unimplemented!("ExecInitNode: upper node without a child subplan"))
 }
 
+/// Init the bitmap subplans of a BitmapAnd/BitmapOr (each a bitmap producer).
+fn init_bitmap_children<'rel>(
+    plans: &[Node],
+    estate: &mut EState<'rel>,
+    eflags: i32,
+) -> Vec<PlanStateNode<'rel>> {
+    plans
+        .iter()
+        .map(|p| {
+            exec_init_node(Some(p), estate, eflags)
+                .unwrap_or_else(|| unimplemented!("ExecInitNode: empty bitmap subplan"))
+        })
+        .collect()
+}
+
 /// Sort/Material shield the child from REWIND/BACKWARD/MARK (they materialize).
 fn child_eflags(eflags: i32) -> i32 {
     eflags
@@ -225,6 +285,15 @@ pub async fn exec_proc_node<'n>(
         PlanStateNode::IndexOnlyScan(ios) => {
             exec_index_only_scan(expect_shared(shared), ios).await
         }
+        PlanStateNode::BitmapHeapScan(bhs) => {
+            exec_bitmap_heap_scan(expect_shared(shared), bhs).await
+        }
+        // The bitmap producers do not return tuples; they go through MultiExecProcNode.
+        PlanStateNode::BitmapIndexScan(_)
+        | PlanStateNode::BitmapAnd(_)
+        | PlanStateNode::BitmapOr(_) => {
+            unimplemented!("ExecProcNode: a bitmap producer is driven via MultiExecProcNode")
+        }
         PlanStateNode::ModifyTable(mt) => exec_modify_table(expect_shared(shared), mt).await,
         PlanStateNode::Sort(s) => exec_sort(shared, s).await,
         PlanStateNode::Limit(l) => exec_limit(shared, l).await,
@@ -237,6 +306,27 @@ pub async fn exec_proc_node<'n>(
             t.current = t.rows.pop_front();
             t.current.as_deref_mut()
         }
+    }
+}
+
+/// PG `MultiExecProcNode`: run a bitmap-producer node to completion and return its
+/// `TIDBitmap` (the alternate return path PG uses for nodes whose `ExecProcNode` is
+/// an error). `result` is an optional pre-made accumulator a parent stashed for a
+/// BitmapIndexScan child to OR directly into (the BitmapOr fast path); BitmapAnd /
+/// BitmapOr build their own accumulator and ignore it. Async (the index descent +
+/// child MultiExecs reach buffer reads).
+pub async fn multi_exec_proc_node(
+    shared: &Arc<SharedState>,
+    node: &mut PlanStateNode<'_>,
+    result: Option<Box<crate::backend::nodes::tidbitmap::TIDBitmap>>,
+) -> Box<crate::backend::nodes::tidbitmap::TIDBitmap> {
+    match node {
+        PlanStateNode::BitmapIndexScan(bis) => {
+            multi_exec_bitmap_index_scan(shared, bis, result).await
+        }
+        PlanStateNode::BitmapAnd(ba) => Box::pin(multi_exec_bitmap_and(shared, ba)).await,
+        PlanStateNode::BitmapOr(bo) => Box::pin(multi_exec_bitmap_or(shared, bo)).await,
+        _ => unimplemented!("MultiExecProcNode: node is not a bitmap producer"),
     }
 }
 
@@ -256,6 +346,12 @@ pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode
         PlanStateNode::SeqScan(ss) => exec_end_seq_scan(expect_shared(shared), ss),
         PlanStateNode::IndexScan(is) => exec_end_index_scan(expect_shared(shared), is),
         PlanStateNode::IndexOnlyScan(ios) => exec_end_index_only_scan(expect_shared(shared), ios),
+        PlanStateNode::BitmapHeapScan(bhs) => exec_end_bitmap_heap_scan(shared, bhs),
+        PlanStateNode::BitmapIndexScan(bis) => {
+            exec_end_bitmap_index_scan(expect_shared(shared), bis);
+        }
+        PlanStateNode::BitmapAnd(ba) => exec_end_bitmap_and(shared, ba),
+        PlanStateNode::BitmapOr(bo) => exec_end_bitmap_or(shared, bo),
         PlanStateNode::ModifyTable(mt) => exec_end_modify_table(expect_shared(shared), mt),
         PlanStateNode::Sort(s) => exec_end_sort(shared, s),
         PlanStateNode::Limit(l) => exec_end_limit(shared, l),

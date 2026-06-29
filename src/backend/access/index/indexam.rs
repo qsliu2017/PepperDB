@@ -199,3 +199,26 @@ pub async fn index_getnext_heaptuple(
     }
     None
 }
+
+/// `index_getbitmap` (`amgetbitmap`): scan the index and collect ALL matching heap
+/// TIDs into `bitmap`, returning the number added. Drives the AM's `getnext_tid`
+/// in a loop (the btree always reports exact, non-lossy matches), inserting each
+/// TID via `tbm_add_tuples`. Used by the bitmap index scan, which builds a
+/// `TIDBitmap` rather than returning tuples one-by-one.
+///
+/// Unlike `index_getnext_heaptuple` this does NO heap visibility fetch: the bitmap
+/// records candidate TIDs, and the bitmap HEAP scan applies the MVCC visibility
+/// test when it fetches each tuple (PG's decoupled index/heap bitmap scan).
+pub async fn index_getbitmap(
+    shared: &Arc<SharedState>,
+    scan: &mut IndexScanState<'_, '_, '_>,
+    bitmap: &mut crate::backend::nodes::tidbitmap::TIDBitmap,
+) -> i64 {
+    use crate::access::sdir::ScanDirection;
+    let mut ntids: i64 = 0;
+    while let Some(tid) = index_getnext_tid(shared, scan, ScanDirection::Forward).await {
+        crate::backend::nodes::tidbitmap::tbm_add_tuples(bitmap, &[tid], false);
+        ntids += 1;
+    }
+    ntids
+}

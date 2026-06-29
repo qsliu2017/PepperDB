@@ -25,6 +25,22 @@ pub fn exec_rescan(shared: &Arc<SharedState>, node: &mut PlanStateNode) {
         PlanStateNode::IndexOnlyScan(ios) => {
             crate::backend::executor::nodeIndexonlyscan::exec_rescan_index_only_scan(shared, ios);
         }
+        PlanStateNode::BitmapHeapScan(bhs) => {
+            crate::backend::executor::nodeBitmapHeapscan::exec_rescan_bitmap_heap_scan(shared, bhs);
+        }
+        PlanStateNode::BitmapIndexScan(bis) => {
+            crate::backend::executor::nodeBitmapIndexscan::exec_rescan_bitmap_index_scan(shared, bis);
+        }
+        PlanStateNode::BitmapAnd(ba) => {
+            for child in &mut ba.bitmapplans {
+                exec_rescan(shared, child);
+            }
+        }
+        PlanStateNode::BitmapOr(bo) => {
+            for child in &mut bo.bitmapplans {
+                exec_rescan(shared, child);
+            }
+        }
         PlanStateNode::Result(_) => {
             unimplemented!("ExecReScan: ExecReScanResult not yet reachable")
         }

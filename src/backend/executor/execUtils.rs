@@ -106,6 +106,7 @@ fn plan_targetlist(planstate: &PlanState) -> Vec<crate::nodes::nodes::Node> {
         Node::SeqScan(s) => s.scan.plan.targetlist.clone(),
         Node::IndexScan(s) => s.scan.plan.targetlist.clone(),
         Node::IndexOnlyScan(s) => s.scan.plan.targetlist.clone(),
+        Node::BitmapHeapScan(s) => s.scan.plan.targetlist.clone(),
         other => unimplemented!("plan_targetlist: {other:?} not reachable for this milestone"),
     }
 }

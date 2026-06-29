@@ -3,3 +3,4 @@
 pub mod list;
 pub mod makefuncs;
 pub mod nodeFuncs;
+pub mod tidbitmap;

@@ -642,6 +642,25 @@ pub async fn heap_fetch_tid(
     Some(result)
 }
 
+/// The max line-pointer offset of a heap block (for the bitmap heap scan's
+/// lossy-page path, where the bitmap only records that a page must be visited and
+/// the scan must examine every tuple offset on it). Reads the page line count under
+/// a brief SHARE lock and releases the buffer. Returns 0 for an empty/new page.
+pub async fn heap_block_max_offset(
+    shared: &Arc<SharedState>,
+    relation: &RelationData,
+    block: BlockNumber,
+) -> OffsetNumber {
+    let buffer = read_relation_block(shared, relation, block).await;
+    let max = {
+        let pool = shared.buffers();
+        let _g = pool.content_share(buffer);
+        pool.buffer_get_page(buffer).get_max_offset_number()
+    };
+    shared.buffers().release_buffer(buffer);
+    max
+}
+
 /// `heap_update`: grow guard (M8).
 pub fn heap_update() {
     unimplemented!("heap_update: M8")
