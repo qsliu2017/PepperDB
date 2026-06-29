@@ -12,6 +12,11 @@
 //! search), partitioning, parallel paths, and the non-RELATION RTE pathlists are
 //! grow guards (rules.md s4).
 
+#![allow(
+    clippy::vec_box,
+    reason = "1:1 PG port: List* of RelOptInfo pointers maps to Vec<Box<_>> (matches pathnodes types)"
+)]
+
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{RTEKind, RangeTblEntry};
 use crate::nodes::pathnodes::{PlannerInfo, RelOptInfo, RelOptKind};
@@ -120,21 +125,78 @@ fn set_plain_rel_pathlist(root: &mut PlannerInfo, rel: &mut RelOptInfo, _rte: &R
     set_cheapest(rel);
 }
 
-/// PG `make_rel_from_joinlist` (M2 subset): for a single-element joinlist (one
-/// `RangeTblRef`), the result is that base rel. The join search over a multi-item
-/// joinlist grows at M-join.
+/// PG `make_rel_from_joinlist`: build the final scan/join rel from the joinlist. A
+/// single-item joinlist returns that base rel; a multi-item joinlist runs the join
+/// search over the initial rels (one per item). M7 covers the flat (non-nested)
+/// joinlist of base-rel `RangeTblRef`s; sub-joinlists (explicit JOIN syntax that
+/// resists flattening) and GEQO grow later.
 fn make_rel_from_joinlist(root: &mut PlannerInfo, joinlist: &[Node]) -> RelOptInfo {
-    if joinlist.len() != 1 {
-        not_yet_reachable("make_rel_from_joinlist: join of multiple relations");
+    let levels_needed = joinlist.len();
+    if levels_needed == 0 {
+        not_yet_reachable("make_rel_from_joinlist: empty joinlist");
     }
-    let Node::RangeTblRef(rtr) = &joinlist[0] else {
-        not_yet_reachable("make_rel_from_joinlist: non-RangeTblRef joinlist item");
-    };
-    let rti = rtr.rtindex as usize;
-    let Some(rel) = root.simple_rel_array[rti].take() else {
-        not_yet_reachable("make_rel_from_joinlist: missing base rel");
-    };
-    *rel
+
+    // One initial rel per joinlist item (base rels; sub-joinlists grow later).
+    let mut initial_rels: Vec<Box<RelOptInfo>> = Vec::with_capacity(levels_needed);
+    for jlnode in joinlist {
+        let Node::RangeTblRef(rtr) = jlnode else {
+            not_yet_reachable("make_rel_from_joinlist: non-RangeTblRef joinlist item (sub-joinlist)");
+        };
+        let rti = rtr.rtindex as usize;
+        let Some(rel) = root.simple_rel_array[rti].clone() else {
+            not_yet_reachable("make_rel_from_joinlist: missing base rel");
+        };
+        initial_rels.push(rel);
+    }
+
+    if levels_needed == 1 {
+        return *initial_rels.into_iter().next().unwrap_or_else(|| {
+            not_yet_reachable("make_rel_from_joinlist: missing single base rel")
+        });
+    }
+
+    // The join search needs initial_rels available (has_legal_joinclause peeks at
+    // it). GEQO / the join_search_hook grow later; M7 uses the exhaustive search.
+    root.initial_rels.clone_from(&initial_rels);
+    standard_join_search(root, levels_needed, initial_rels)
+}
+
+/// PG `standard_join_search`: the dynamic-programming join search. Level 1 is the
+/// initial rels; each higher level joins lower-level rels into bigger join rels via
+/// `join_search_one_level`, then `set_cheapest` is run over the new joinrels. Returns
+/// the final (all-rels) joinrel. M7 inner join: the per-level set_cheapest /
+/// gather / partitionwise steps reduce to set_cheapest (done inside make_join_rel),
+/// so this drives the levels and returns the top joinrel.
+fn standard_join_search(
+    root: &mut PlannerInfo,
+    levels_needed: usize,
+    initial_rels: Vec<Box<RelOptInfo>>,
+) -> RelOptInfo {
+    use crate::nodes::bitmapset::bms_equal;
+
+    // join_rel_level[1] = initial_rels; the rest start empty.
+    root.join_rel_level = (0..=levels_needed).map(|_| Vec::new()).collect();
+    root.join_rel_level[1] = initial_rels;
+
+    for lev in 2..=levels_needed {
+        crate::backend::optimizer::path::joinrels::join_search_one_level(root, lev);
+        // set_cheapest over each just-built joinrel is done inside make_join_rel
+        // (the gather / partitionwise-join steps grow later).
+    }
+
+    // The final joinrel is the single rel at the top level.
+    let top = root.join_rel_level[levels_needed]
+        .iter()
+        .find(|r| {
+            r.relids
+                .as_ref()
+                .zip(root.all_query_rels.as_ref())
+                .is_some_and(|(a, b)| bms_equal(a, b))
+        })
+        .or_else(|| root.join_rel_level[levels_needed].first())
+        .cloned()
+        .unwrap_or_else(|| not_yet_reachable("standard_join_search: no final joinrel produced"));
+    *top
 }
 
 #[cold]

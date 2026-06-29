@@ -12,11 +12,17 @@
 //! more than one path). The many `create_*_path` constructors for scans/joins/
 //! aggregates/sorts/limits remain hollow stubs and grow per milestone.
 
+#![allow(
+    clippy::vec_box,
+    reason = "1:1 PG port: List* of RestrictInfo/PathKey pointers maps to Vec<Box<_>> (matches pathnodes types)"
+)]
+
 use crate::access::sdir::ScanDirection;
-use crate::nodes::nodes::Node;
+use crate::nodes::nodes::{JoinType, Node};
 use crate::nodes::pathnodes::{
-    BitmapHeapPath, CostSelector, GroupResultPath, IndexClause, IndexOptInfo, IndexPath, Path,
-    PathTarget, PathType, PlannerInfo, RelOptInfo,
+    BitmapHeapPath, CostSelector, GroupResultPath, HashPath, IndexClause, IndexOptInfo, IndexPath,
+    JoinCostWorkspace, JoinPath, JoinPathExtraData, MergePath, NestPath, Path, PathKey, PathTarget,
+    PathType, PlannerInfo, RelOptInfo, RestrictInfo,
 };
 use crate::elog;
 use crate::optimizer::cost::DEFAULT_CPU_TUPLE_COST;
@@ -136,6 +142,7 @@ pub fn create_group_result_path(
         total_cost: target.cost.startup + DEFAULT_CPU_TUPLE_COST + target.cost.per_tuple,
         pathkeys: Vec::new(),
         index_detail: None,
+        join_detail: None,
     };
 
     Box::new(GroupResultPath { path, quals: havingqual })
@@ -172,6 +179,7 @@ pub fn create_seqscan_path(
         // seqscan has an unordered result.
         pathkeys: Vec::new(),
         index_detail: None,
+        join_detail: None,
     };
 
     crate::backend::optimizer::path::costsize::cost_seqscan(&mut path, root, rel, None);
@@ -239,6 +247,7 @@ pub fn create_index_path(
         total_cost: 0.0,
         pathkeys: Vec::new(),
         index_detail: Some(Box::new(detail)),
+        join_detail: None,
     };
 
     let mut ipath = IndexPath {
@@ -307,6 +316,7 @@ pub fn create_bitmap_heap_path(
         total_cost: 0.0,
         pathkeys: Vec::new(),
         index_detail: Some(Box::new(detail)),
+        join_detail: None,
     };
 
     let mut bpath = BitmapHeapPath { path, bitmapqual };
@@ -316,6 +326,185 @@ pub fn create_bitmap_heap_path(
     );
 
     Box::new(bpath)
+}
+
+/// Build the base `Path` shared by the three join-path constructors: pathtype,
+/// the joinrel parent + reltarget, parallel-safety, and the join `JoinPath` fields.
+/// `required_outer` is empty on M7 (no parameterized join paths), so `param_info`
+/// is None; the parameterized-path machinery grows later.
+fn make_join_base_path(
+    pathtype: PathType,
+    joinrel: &RelOptInfo,
+    jointype: JoinType,
+    extra: &JoinPathExtraData,
+    outer_path: Box<Path>,
+    inner_path: Box<Path>,
+    pathkeys: Vec<Box<PathKey>>,
+) -> Path {
+    let parallel_safe = joinrel.consider_parallel && outer_path.parallel_safe && inner_path.parallel_safe;
+    let parallel_workers = outer_path.parallel_workers;
+    Path {
+        pathtype,
+        parent: Some(Box::new(joinrel.clone())),
+        pathtarget: joinrel.reltarget.clone(),
+        param_info: None,
+        parallel_aware: false,
+        parallel_safe,
+        parallel_workers,
+        rows: 0.0,
+        disabled_nodes: 0,
+        startup_cost: 0.0,
+        total_cost: 0.0,
+        pathkeys,
+        index_detail: None,
+        join_detail: Some(Box::new(crate::nodes::pathnodes::JoinPathDetail {
+            jointype,
+            inner_unique: extra.inner_unique,
+            outerjoinpath: outer_path,
+            innerjoinpath: inner_path,
+            joinrestrictinfo: Vec::new(),
+            merge: None,
+            hash: None,
+        })),
+    }
+}
+
+/// Reconstruct a `NestPath` (for the cost call) from the base path + the join detail.
+fn join_path_from(base: &Path, restrict_clauses: Vec<Box<RestrictInfo>>) -> JoinPath {
+    let d = base
+        .join_detail
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("join_path_from: missing join detail"));
+    JoinPath {
+        path: base.clone(),
+        jointype: d.jointype,
+        inner_unique: d.inner_unique,
+        outerjoinpath: d.outerjoinpath.clone(),
+        innerjoinpath: d.innerjoinpath.clone(),
+        joinrestrictinfo: restrict_clauses,
+    }
+}
+
+/// PG `create_nestloop_path`: build a NestLoop join path over `outer_path`/`inner_path`.
+/// `final_cost_nestloop` fills the cost. M7: `required_outer` empty (no parameterized
+/// nestloop / inner-index nestloop yet).
+#[allow(clippy::too_many_arguments, reason = "1:1 PG create_nestloop_path signature")]
+pub fn create_nestloop_path(
+    root: &mut PlannerInfo,
+    joinrel: &RelOptInfo,
+    jointype: JoinType,
+    workspace: &JoinCostWorkspace,
+    extra: &JoinPathExtraData,
+    outer_path: Box<Path>,
+    inner_path: Box<Path>,
+    restrict_clauses: Vec<Box<RestrictInfo>>,
+    pathkeys: Vec<Box<PathKey>>,
+    _required_outer: Option<crate::nodes::pathnodes::Relids>,
+) -> Box<Path> {
+    let base = make_join_base_path(PathType::NestLoop, joinrel, jointype, extra, outer_path, inner_path, pathkeys);
+    let mut pathnode = NestPath { jpath: join_path_from(&base, restrict_clauses.clone()) };
+    crate::backend::optimizer::path::costsize::final_cost_nestloop(root, &mut pathnode, workspace, extra);
+    Box::new(nest_to_path(pathnode, restrict_clauses))
+}
+
+/// PG `create_mergejoin_path`: build a MergeJoin path. `final_cost_mergejoin` fills
+/// the cost + skip_mark_restore + materialize_inner.
+#[allow(clippy::too_many_arguments, reason = "1:1 PG create_mergejoin_path signature")]
+pub fn create_mergejoin_path(
+    root: &mut PlannerInfo,
+    joinrel: &RelOptInfo,
+    jointype: JoinType,
+    workspace: &JoinCostWorkspace,
+    extra: &JoinPathExtraData,
+    outer_path: Box<Path>,
+    inner_path: Box<Path>,
+    restrict_clauses: Vec<Box<RestrictInfo>>,
+    pathkeys: Vec<Box<PathKey>>,
+    _required_outer: Option<crate::nodes::pathnodes::Relids>,
+    mergeclauses: Vec<Box<RestrictInfo>>,
+    outersortkeys: Vec<Box<PathKey>>,
+    innersortkeys: Vec<Box<PathKey>>,
+    outer_presorted_keys: i32,
+) -> Box<Path> {
+    let base = make_join_base_path(PathType::MergeJoin, joinrel, jointype, extra, outer_path, inner_path, pathkeys);
+    let mut pathnode = MergePath {
+        jpath: join_path_from(&base, restrict_clauses.clone()),
+        path_mergeclauses: mergeclauses,
+        outersortkeys,
+        innersortkeys,
+        outer_presorted_keys,
+        skip_mark_restore: false,
+        materialize_inner: false,
+    };
+    crate::backend::optimizer::path::costsize::final_cost_mergejoin(root, &mut pathnode, workspace, extra);
+    Box::new(merge_to_path(pathnode, restrict_clauses))
+}
+
+/// PG `create_hashjoin_path`: build a HashJoin path. `final_cost_hashjoin` fills the
+/// cost + num_batches. A hashjoin never has output pathkeys.
+#[allow(clippy::too_many_arguments, reason = "1:1 PG create_hashjoin_path signature")]
+pub fn create_hashjoin_path(
+    root: &mut PlannerInfo,
+    joinrel: &RelOptInfo,
+    jointype: JoinType,
+    workspace: &JoinCostWorkspace,
+    extra: &JoinPathExtraData,
+    outer_path: Box<Path>,
+    inner_path: Box<Path>,
+    _parallel_hash: bool,
+    restrict_clauses: Vec<Box<RestrictInfo>>,
+    _required_outer: Option<crate::nodes::pathnodes::Relids>,
+    hashclauses: Vec<Box<RestrictInfo>>,
+) -> Box<Path> {
+    let base = make_join_base_path(PathType::HashJoin, joinrel, jointype, extra, outer_path, inner_path, Vec::new());
+    let mut pathnode = HashPath {
+        jpath: join_path_from(&base, restrict_clauses.clone()),
+        path_hashclauses: hashclauses,
+        num_batches: 0,
+        inner_rows_total: 0.0,
+    };
+    crate::backend::optimizer::path::costsize::final_cost_hashjoin(root, &mut pathnode, workspace, extra);
+    Box::new(hash_to_path(pathnode, restrict_clauses))
+}
+
+/// Fold a costed `NestPath` back into a flat `Path` carrying its join detail.
+fn nest_to_path(p: NestPath, restrict_clauses: Vec<Box<RestrictInfo>>) -> Path {
+    let mut path = p.jpath.path;
+    if let Some(d) = path.join_detail.as_mut() {
+        d.joinrestrictinfo = restrict_clauses;
+    }
+    path
+}
+
+/// Fold a costed `MergePath` back into a flat `Path` carrying its join + merge detail.
+fn merge_to_path(p: MergePath, restrict_clauses: Vec<Box<RestrictInfo>>) -> Path {
+    let mut path = p.jpath.path;
+    if let Some(d) = path.join_detail.as_mut() {
+        d.joinrestrictinfo = restrict_clauses;
+        d.merge = Some(crate::nodes::pathnodes::MergePathDetail {
+            path_mergeclauses: p.path_mergeclauses,
+            outersortkeys: p.outersortkeys,
+            innersortkeys: p.innersortkeys,
+            outer_presorted_keys: p.outer_presorted_keys,
+            skip_mark_restore: p.skip_mark_restore,
+            materialize_inner: p.materialize_inner,
+        });
+    }
+    path
+}
+
+/// Fold a costed `HashPath` back into a flat `Path` carrying its join + hash detail.
+fn hash_to_path(p: HashPath, restrict_clauses: Vec<Box<RestrictInfo>>) -> Path {
+    let mut path = p.jpath.path;
+    if let Some(d) = path.join_detail.as_mut() {
+        d.joinrestrictinfo = restrict_clauses;
+        d.hash = Some(crate::nodes::pathnodes::HashPathDetail {
+            path_hashclauses: p.path_hashclauses,
+            num_batches: p.num_batches,
+            inner_rows_total: p.inner_rows_total,
+        });
+    }
+    path
 }
 
 /// Panic for a pathnode path not yet translated for this milestone (rules.md s4).

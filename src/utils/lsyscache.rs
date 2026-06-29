@@ -125,9 +125,11 @@ pub fn get_ordering_op_for_equality_op(opno: Oid, use_lhs_type: bool) -> Option<
     unimplemented!()
 }
 
-pub fn get_mergejoin_opfamilies(opno: Oid) -> Vec<Oid> {
-    unimplemented!()
-}
+// Join-operator interpretation bodies live in the backend module (rules.md s3);
+// re-export under the C names. M7 builtin-table form (pg_amop list-scan staged).
+pub use crate::backend::utils::cache::lsyscache::{
+    get_mergejoin_opfamilies, get_op_index_interpretation, op_hashjoinable, op_mergejoinable,
+};
 
 /// C out-params `(Oid *lhs_opno, Oid *rhs_opno)` + bool success.
 pub fn get_compatible_hash_operators(opno: Oid) -> Option<(Oid, Oid)> {
@@ -136,10 +138,6 @@ pub fn get_compatible_hash_operators(opno: Oid) -> Option<(Oid, Oid)> {
 
 /// C out-params `(RegProcedure *lhs_procno, RegProcedure *rhs_procno)` + bool.
 pub fn get_op_hash_functions(opno: Oid) -> Option<(RegProcedure, RegProcedure)> {
-    unimplemented!()
-}
-
-pub fn get_op_index_interpretation(opno: Oid) -> Vec<OpIndexInterpretation> {
     unimplemented!()
 }
 
@@ -251,18 +249,9 @@ pub fn get_op_rettype(opno: Oid) -> Option<Oid> {
     unimplemented!()
 }
 
-/// C out-params `(Oid *lefttype, Oid *righttype)` -> tuple.
-pub fn op_input_types(opno: Oid) -> (Oid, Oid) {
-    unimplemented!()
-}
-
-pub fn op_mergejoinable(opno: Oid, inputtype: Oid) -> bool {
-    unimplemented!()
-}
-
-pub fn op_hashjoinable(opno: Oid, inputtype: Oid) -> bool {
-    unimplemented!()
-}
+/// C out-params `(Oid *lefttype, Oid *righttype)` -> tuple. Body lives in the
+/// backend module (warm OPEROID syscache + builtin fallback).
+pub use crate::backend::utils::cache::lsyscache::op_input_types;
 
 pub fn op_strict(opno: Oid) -> bool {
     unimplemented!()

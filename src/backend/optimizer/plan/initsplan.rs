@@ -904,22 +904,17 @@ fn contain_volatile_functions_or_false(clause: &Node) -> bool {
     false
 }
 
-/// `op_mergejoinable` (lsyscache) is not wired yet. Until the btree-opfamily
-/// catalog lookups land, a clause is conservatively treated as NOT mergejoinable
-/// -- it stays an ordinary join/restriction clause instead of being absorbed
-/// into an EquivalenceClass. Correct (just unoptimized: no EC-derived joins).
+/// `op_mergejoinable` (lsyscache): the M7 builtin-table form recognizes the seeded
+/// "=" operators (the pg_amop list-scan syscache grows later). A mergejoinable
+/// clause is absorbed into an EquivalenceClass and offered as a merge clause.
 fn op_mergejoinable_or_false(opno: Oid, inputtype: Oid) -> bool {
-    let _ = (opno, inputtype);
-    // TODO(syscache): call op_mergejoinable once lsyscache is implemented.
-    false
+    crate::utils::lsyscache::op_mergejoinable(opno, inputtype)
 }
 
-/// `op_hashjoinable` (lsyscache) is not wired yet; treat as not-hashjoinable
-/// (the clause just won't get a hashjoinoperator). Correct, unoptimized.
+/// `op_hashjoinable` (lsyscache): the M7 builtin-table form recognizes the seeded
+/// "=" operators so they get a hashjoinoperator and can drive a hash join.
 fn op_hashjoinable_or_false(opno: Oid, inputtype: Oid) -> bool {
-    let _ = (opno, inputtype);
-    // TODO(syscache): call op_hashjoinable once lsyscache is implemented.
-    false
+    crate::utils::lsyscache::op_hashjoinable(opno, inputtype)
 }
 
 #[cfg(test)]

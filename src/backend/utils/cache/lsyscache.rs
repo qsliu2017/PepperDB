@@ -343,3 +343,123 @@ pub fn get_cast_info(source: Oid, target: Oid) -> Option<(Oid, i8, i8)> {
 
 // Keep Datum referenced (used by the public header re-exports' signatures).
 const _: fn(Oid) -> Datum = ObjectIdGetDatum;
+
+// ---------------------------------------------------------------------------
+// Join-operator interpretation (op_mergejoinable / op_hashjoinable /
+// get_mergejoin_opfamilies / get_op_index_interpretation)
+// ---------------------------------------------------------------------------
+//
+// PG answers these from pg_amop (the AMOPOPID syscache list) and the
+// pg_operator.oprcanmerge/oprcanhash flags. In this port the AMOPOPID list-scan
+// syscache is not wired and bootstrap seeds oprcanmerge/oprcanhash as false, so
+// neither source is usable yet. For M7 we recognize the builtin "=" operators of
+// the seeded types and map each to its btree/hash opfamily, exactly as
+// pg_amop.dat/pg_operator.dat declare. This is the builtin-table form of the
+// pg_amop lookup; it lights up EC absorption (initsplan check_mergejoinable) and
+// the merge/hash clause discovery in joinpath. The cross-type "=" operators and
+// the array_eq/record_eq typcache cases grow with the AMOPOPID syscache.
+// TODO(syscache): replace with the AMOPOPID list-scan once it lands.
+
+use crate::access::cmptype::CompareType;
+
+/// One builtin "=" operator's opfamily memberships (the rows pg_amop.dat declares
+/// for that operator). `btree_opfamily`/`hash_opfamily` are the integer/text/...
+/// opfamily OIDs; either may be `None` if the type has no such index AM (none of
+/// the M7 types lack one, but the shape is kept general).
+struct EqOpFamilies {
+    opno: u32,
+    lefttype: u32,
+    righttype: u32,
+    btree_opfamily: Oid,
+    hash_opfamily: Option<Oid>,
+}
+
+// btree/hash opfamily OIDs (catalog_oids_generated): integer_ops 1976/1977,
+// text_ops 1994/1995, oid_ops 1989/1990, bool_ops 424/2222.
+const BTREE_INTEGER_FAM: Oid = Oid(1976);
+const HASH_INTEGER_FAM: Oid = Oid(1977);
+const BTREE_TEXT_FAM: Oid = Oid(1994);
+const HASH_TEXT_FAM: Oid = Oid(1995);
+const BTREE_OID_FAM: Oid = Oid(1989);
+const HASH_OID_FAM: Oid = Oid(1990);
+const BTREE_BOOL_FAM: Oid = Oid(424);
+const HASH_BOOL_FAM: Oid = Oid(2222);
+
+// The builtin same-type "=" operators of the M7 seed (pg_operator.dat). int2/int4/
+// int8 share the integer opfamilies; bool/text/oid each have their own.
+const BUILTIN_EQ_OPS: &[EqOpFamilies] = &[
+    EqOpFamilies { opno: 94, lefttype: 21, righttype: 21, btree_opfamily: BTREE_INTEGER_FAM, hash_opfamily: Some(HASH_INTEGER_FAM) }, // int2 =
+    EqOpFamilies { opno: 96, lefttype: 23, righttype: 23, btree_opfamily: BTREE_INTEGER_FAM, hash_opfamily: Some(HASH_INTEGER_FAM) }, // int4 =
+    EqOpFamilies { opno: 410, lefttype: 20, righttype: 20, btree_opfamily: BTREE_INTEGER_FAM, hash_opfamily: Some(HASH_INTEGER_FAM) }, // int8 =
+    EqOpFamilies { opno: 91, lefttype: 16, righttype: 16, btree_opfamily: BTREE_BOOL_FAM, hash_opfamily: Some(HASH_BOOL_FAM) }, // bool =
+    EqOpFamilies { opno: 98, lefttype: 25, righttype: 25, btree_opfamily: BTREE_TEXT_FAM, hash_opfamily: Some(HASH_TEXT_FAM) }, // text =
+    EqOpFamilies { opno: 607, lefttype: 26, righttype: 26, btree_opfamily: BTREE_OID_FAM, hash_opfamily: Some(HASH_OID_FAM) }, // oid =
+];
+
+fn lookup_builtin_eq(opno: Oid) -> Option<&'static EqOpFamilies> {
+    BUILTIN_EQ_OPS.iter().find(|e| e.opno == opno.0)
+}
+
+/// PG `op_mergejoinable`: true if the operator can be used as a mergejoin clause
+/// (a btree equality member of some opfamily). M7 recognizes the builtin "="
+/// operators; `inputtype` is unused for these (only array_eq/record_eq need it).
+#[must_use]
+pub fn op_mergejoinable(opno: Oid, _inputtype: Oid) -> bool {
+    lookup_builtin_eq(opno).is_some()
+}
+
+/// PG `op_hashjoinable`: true if the operator can be used as a hashjoin clause
+/// (a hash equality member of some opfamily). M7 recognizes the builtin "="
+/// operators that have a hash opfamily.
+#[must_use]
+pub fn op_hashjoinable(opno: Oid, _inputtype: Oid) -> bool {
+    lookup_builtin_eq(opno).is_some_and(|e| e.hash_opfamily.is_some())
+}
+
+/// PG `get_mergejoin_opfamilies`: the btree opfamilies in which `opno` is the
+/// equality operator. M7 returns the single builtin btree opfamily for a known
+/// "=" operator, else empty.
+#[must_use]
+pub fn get_mergejoin_opfamilies(opno: Oid) -> Vec<Oid> {
+    lookup_builtin_eq(opno).map_or_else(Vec::new, |e| vec![e.btree_opfamily])
+}
+
+/// PG `op_input_types`: the operator's `(oprleft, oprright)` input types. Reads the
+/// OPEROID syscache when warm; falls back to the builtin "=" table for the seeded
+/// operators (the bootstrap window / unit tests where pg_operator isn't warmed).
+#[must_use]
+pub fn op_input_types(opno: Oid) -> (Oid, Oid) {
+    use crate::access::htup_details::GETSTRUCT;
+    use crate::catalog::pg_operator::{Form_pg_operator, FormData_pg_operator};
+    if let Some(tuple) = search_sys_cache(SysCacheIdentifier::OPEROID, &[ObjectIdGetDatum(opno)]) {
+        // SAFETY: a held OPEROID hit -> a pg_operator row.
+        let out = {
+            let op: Form_pg_operator = GETSTRUCT(unsafe { &*tuple }).cast::<FormData_pg_operator>();
+            let op = unsafe { &*op };
+            (op.oprleft, op.oprright)
+        };
+        release_sys_cache(tuple);
+        return out;
+    }
+    // Builtin fallback (catalog not warm): the known "=" operators.
+    if let Some(e) = lookup_builtin_eq(opno) {
+        return (Oid(e.lefttype), Oid(e.righttype));
+    }
+    (crate::postgres_ext::InvalidOid, crate::postgres_ext::InvalidOid)
+}
+
+/// PG `get_op_index_interpretation`: the amcanorder (btree) opfamilies the
+/// operator belongs to, with its strategy/cmptype and input types. M7 returns the
+/// single builtin btree-equality interpretation for a known "=" operator. The
+/// "<>-as-negator-of-=" case (COMPARE_NE) grows with the AMOPOPID list-scan.
+#[must_use]
+pub fn get_op_index_interpretation(opno: Oid) -> Vec<crate::utils::lsyscache::OpIndexInterpretation> {
+    lookup_builtin_eq(opno).map_or_else(Vec::new, |e| {
+        vec![crate::utils::lsyscache::OpIndexInterpretation {
+            opfamily_id: e.btree_opfamily,
+            cmptype: CompareType::Eq,
+            oplefttype: Oid(e.lefttype),
+            oprighttype: Oid(e.righttype),
+        }]
+    })
+}

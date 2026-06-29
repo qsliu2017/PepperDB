@@ -46,17 +46,12 @@ pub type JoinSearchHookType =
     fn(root: &mut PlannerInfo, levels_needed: i32, initial_rels: &[RelOptInfo]) -> RelOptInfo;
 pub static mut JOIN_SEARCH_HOOK: Option<JoinSearchHookType> = None;
 
-pub fn make_one_rel(root: &mut PlannerInfo, joinlist: &[Node]) -> RelOptInfo {
-    unimplemented!()
-}
-
-pub fn standard_join_search(
-    root: &mut PlannerInfo,
-    levels_needed: i32,
-    initial_rels: &[RelOptInfo],
-) -> RelOptInfo {
-    unimplemented!()
-}
+// allpaths.c bodies live in backend/optimizer/path/allpaths.rs. The single-base-rel
+// scan path + the multi-rel inner-join search (make_rel_from_joinlist ->
+// standard_join_search) are translated there; make_one_rel is re-exported under the
+// C name. standard_join_search is a private helper of that module (driven by
+// make_rel_from_joinlist), not re-exported.
+pub use crate::backend::optimizer::path::allpaths::make_one_rel;
 
 pub fn generate_gather_paths(root: &mut PlannerInfo, rel: &mut RelOptInfo, override_rows: bool) {
     unimplemented!()
@@ -139,29 +134,25 @@ pub fn create_tidscan_paths(root: &mut PlannerInfo, rel: &mut RelOptInfo) -> boo
 
 /*
  * joinpath.c -- routines to create join paths
+ *
+ * Body lives in backend/optimizer/path/joinpath.rs. The inner-join driver
+ * (add_paths_to_joinrel + nestloop/merge/hash generators) is translated there;
+ * re-exported under the C name. Outer-join path generation grows there.
  */
-pub fn add_paths_to_joinrel(
-    root: &mut PlannerInfo,
-    joinrel: &mut RelOptInfo,
-    outerrel: &RelOptInfo,
-    innerrel: &RelOptInfo,
-    jointype: JoinType,
-    sjinfo: &SpecialJoinInfo,
-    restrictlist: &[RestrictInfo],
-) {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::path::joinpath::add_paths_to_joinrel;
 
 /*
  * joinrels.c -- routines to determine which relations to join
+ *
+ * Bodies live in backend/optimizer/path/joinrels.rs. The inner-join DP search
+ * (join_search_one_level / make_join_rel) + the dummy-sjinfo / join-order-
+ * restriction / dummy-rel helpers are translated there; re-exported under the C
+ * names. add_outer_joins_to_relids (outer joins) stays a stub.
  */
-pub fn join_search_one_level(root: &mut PlannerInfo, level: i32) {
-    unimplemented!()
-}
-
-pub fn make_join_rel(root: &mut PlannerInfo, rel1: &RelOptInfo, rel2: &RelOptInfo) -> RelOptInfo {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::path::joinrels::{
+    have_join_order_restriction, init_dummy_sjinfo, is_dummy_rel, join_search_one_level,
+    make_join_rel, mark_dummy_rel,
+};
 
 /// out-param `pushed_down_joins` folded into the returned tuple.
 pub fn add_outer_joins_to_relids(
@@ -169,22 +160,6 @@ pub fn add_outer_joins_to_relids(
     input_relids: Relids,
     sjinfo: &SpecialJoinInfo,
 ) -> (Relids, Vec<SpecialJoinInfo>) {
-    unimplemented!()
-}
-
-pub fn have_join_order_restriction(
-    root: &mut PlannerInfo,
-    rel1: &RelOptInfo,
-    rel2: &RelOptInfo,
-) -> bool {
-    unimplemented!()
-}
-
-pub fn mark_dummy_rel(rel: &mut RelOptInfo) {
-    unimplemented!()
-}
-
-pub fn init_dummy_sjinfo(sjinfo: &mut SpecialJoinInfo, left_relids: Relids, right_relids: Relids) {
     unimplemented!()
 }
 

@@ -6,4 +6,6 @@ pub mod clausesel;
 pub mod costsize;
 pub mod equivclass;
 pub mod indxpath;
+pub mod joinpath;
+pub mod joinrels;
 pub mod pathkeys;

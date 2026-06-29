@@ -704,6 +704,47 @@ pub struct Path {
     /// `Vec<Box<Path>>`, so the extra fields ride here. `None` for plain paths
     /// (SeqScan/Result); `Some` only for IndexScan/IndexOnlyScan/BitmapHeapScan.
     pub index_detail: Option<Box<IndexPathDetail>>,
+    /// Join-path detail carried alongside the base `Path` for a join path (NestLoop/
+    /// MergeJoin/HashJoin). As with `index_detail`, PG downcasts `Path*` to the
+    /// concrete NestPath/MergePath/HashPath by `pathtype`; the flat pathlist rides
+    /// the extra fields here. `None` for non-join paths.
+    pub join_detail: Option<Box<JoinPathDetail>>,
+}
+
+/// The join-path detail `create_plan_recurse` (step 32) needs to build a NestLoop/
+/// MergeJoin/HashJoin plan: the JoinPath fields plus the merge/hash specifics. The
+/// outer/inner subpaths are full `Path`s (which themselves may carry index/join
+/// detail), so a join tree round-trips through the flat pathlist.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JoinPathDetail {
+    pub jointype: JoinType,
+    pub inner_unique: bool,
+    pub outerjoinpath: Box<Path>,
+    pub innerjoinpath: Box<Path>,
+    pub joinrestrictinfo: Vec<Box<RestrictInfo>>,
+    /// MergeJoin: the merge clauses + explicit sort keys + materialize flag.
+    pub merge: Option<MergePathDetail>,
+    /// HashJoin: the hash clauses + batch count.
+    pub hash: Option<HashPathDetail>,
+}
+
+/// MergeJoin-specific path detail (the MergePath fields beyond JoinPath).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MergePathDetail {
+    pub path_mergeclauses: Vec<Box<RestrictInfo>>,
+    pub outersortkeys: Vec<Box<PathKey>>,
+    pub innersortkeys: Vec<Box<PathKey>>,
+    pub outer_presorted_keys: i32,
+    pub skip_mark_restore: bool,
+    pub materialize_inner: bool,
+}
+
+/// HashJoin-specific path detail (the HashPath fields beyond JoinPath).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HashPathDetail {
+    pub path_hashclauses: Vec<Box<RestrictInfo>>,
+    pub num_batches: i32,
+    pub inner_rows_total: Cardinality,
 }
 
 /// The index/bitmap-path detail `create_plan_recurse` needs to build an IndexScan /

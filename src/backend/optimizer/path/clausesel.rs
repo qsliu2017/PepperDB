@@ -120,9 +120,16 @@ pub fn clause_selectivity_ext(
 /// `DEFAULT_EQ_SEL`, ordering comparisons get `DEFAULT_INEQ_SEL`. Pre-statistics
 /// we only need to distinguish "=" from the ordering comparisons; the exact
 /// operator set grows with the type set.
+///
+/// This serves both restriction clauses ("a = const", PG `eqsel`) and join clauses
+/// ("a.x = b.y", PG `eqjoinsel`): with no pg_statistic, both estimators fall back to
+/// `DEFAULT_EQ_SEL`, which is what drives the join-rel row estimate in
+/// `calc_joinrel_size_estimate` (costsize.rs). The per-operator estimators that read
+/// real stats (eqsel/eqjoinsel/scalarltsel) are selfuncs, step 31.
 fn op_clause_default_selectivity(opno: crate::postgres_ext::Oid) -> Selectivity {
-    // pg_operator.dat "=" OIDs: bool(91), int2(94), int4(96), int8(410).
-    let is_equality = matches!(opno.0, 91 | 94 | 96 | 410);
+    // pg_operator.dat "=" OIDs: bool(91), int2(94), int4(96), text(98), int8(410),
+    // oid(607). (Cross-type "=" OIDs grow with the selfuncs lookup.)
+    let is_equality = matches!(opno.0, 91 | 94 | 96 | 98 | 410 | 607);
     if is_equality {
         DEFAULT_EQ_SEL
     } else {

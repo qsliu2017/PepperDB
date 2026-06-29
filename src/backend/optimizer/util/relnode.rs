@@ -74,7 +74,7 @@ fn create_empty_pathtarget() -> PathTarget {
 /// `build_simple_rel`/`build_join_rel`/`fetch_upper_rel` then overwrite the
 /// fields that matter for their case. Mirrors planmain's `make_result_rel`
 /// field-for-field; kept local so this module is self-contained.
-fn make_node_reloptinfo(reloptkind: RelOptKind) -> RelOptInfo {
+pub(crate) fn make_node_reloptinfo(reloptkind: RelOptKind) -> RelOptInfo {
     RelOptInfo {
         reloptkind,
         relids: None,
