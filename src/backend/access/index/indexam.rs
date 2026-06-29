@@ -105,6 +105,28 @@ pub fn index_rescan(scan: &mut IndexScanState<'_, '_, '_>, keys: Vec<(i32, crate
     scan.xs_heaptid = None;
 }
 
+/// `index_rescan` (strategy-aware form for the executor): (re)start the scan with
+/// strategy-tagged keys `(attno, strategy, argument)` so range quals
+/// (`<`/`<=`/`>`/`>=`) work, not just equality. M6 single-column int4 btree.
+pub fn index_rescan_keys(
+    scan: &mut IndexScanState<'_, '_, '_>,
+    keys: Vec<(i32, crate::access::stratnum::StrategyNumber, crate::postgres::Datum)>,
+) {
+    scan.bt.set_strategy_keys(keys);
+    scan.xs_heaptid = None;
+}
+
+/// Deform the index tuple at the scan's current position into `(values, isnull)`
+/// (PG `IndexScanDesc.xs_itup` via `index_deform_tuple`). The index-only scan uses
+/// this to return the indexed columns without a heap fetch. `None` if no item is
+/// current.
+#[must_use]
+pub fn index_current_index_values(
+    scan: &IndexScanState<'_, '_, '_>,
+) -> Option<(Vec<crate::postgres::Datum>, Vec<bool>)> {
+    scan.bt.current_index_values()
+}
+
 /// `index_getnext_tid`: advance the scan and return the next matching heap TID, or
 /// `None` at end of scan. Drives the btree `_bt_first`/`_bt_next`.
 pub async fn index_getnext_tid(

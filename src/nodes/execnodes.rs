@@ -436,6 +436,11 @@ pub struct EState<'rel> {
     /// the command frame's `Arc<RelationData>` owners. `ExecGetRangeTableRelation`
     /// indexes this by RT index.
     pub es_range_table_rels: RangeTableRels<'rel>,
+    /// The open index relations a scan may use, borrowed from the command frame
+    /// (PG resolves these via `index_open(indexid)` against the relcache; until the
+    /// relcache index-open path is wired, the command frame publishes the borrows
+    /// here and `ExecOpenIndexRelation` looks one up by OID). M6 index scan.
+    pub es_index_rels: &'rel [Option<&'rel crate::utils::rel::RelationData>],
     /// The query snapshot a scan reads under, borrowed from the command frame's
     /// `Arc<SnapshotData>` owner (PG's `es_snapshot`, reachable to the scan nodes).
     /// `snapshot` below keeps the owned `Arc` copy for the non-scan paths; the scan
@@ -506,6 +511,7 @@ impl Default for EState<'_> {
             range_table: Vec::default(),
             range_table_size: usize::default(),
             es_range_table_rels: &[],
+            es_index_rels: &[],
             es_snapshot_ref: None,
             relations: Vec::default(),
             rowmarks: Vec::default(),

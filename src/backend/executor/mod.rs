@@ -19,6 +19,8 @@ pub mod execTuples;
 pub mod execUtils;
 pub mod nodeAgg;
 pub mod nodeGroup;
+pub mod nodeIndexonlyscan;
+pub mod nodeIndexscan;
 pub mod nodeLimit;
 pub mod nodeMaterial;
 pub mod nodeModifyTable;

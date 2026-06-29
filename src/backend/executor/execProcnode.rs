@@ -26,6 +26,12 @@ use crate::nodes::nodes::Node;
 
 use crate::backend::executor::nodeAgg::{exec_agg, exec_end_agg, exec_init_agg, AggRun};
 use crate::backend::executor::nodeGroup::{exec_end_group, exec_group, exec_init_group, GroupRun};
+use crate::backend::executor::nodeIndexonlyscan::{
+    exec_end_index_only_scan, exec_index_only_scan, exec_init_index_only_scan, IndexOnlyScanRun,
+};
+use crate::backend::executor::nodeIndexscan::{
+    exec_end_index_scan, exec_index_scan, exec_init_index_scan, IndexScanRun,
+};
 use crate::backend::executor::nodeLimit::{exec_end_limit, exec_init_limit, exec_limit, LimitRun};
 use crate::backend::executor::nodeMaterial::{
     exec_end_material, exec_init_material, exec_material, MaterialRun,
@@ -64,6 +70,11 @@ pub enum PlanStateNode<'rel> {
     Result(Box<ResultState>),
     /// T_SeqScanState (+ its open heap scan descriptor borrowing from EState).
     SeqScan(Box<SeqScanRun<'rel>>),
+    /// T_IndexScanState (+ its open AM index-scan descriptor borrowing from EState).
+    IndexScan(Box<IndexScanRun<'rel>>),
+    /// T_IndexOnlyScanState (+ its open AM index-scan descriptor).
+    IndexOnlyScan(Box<IndexOnlyScanRun<'rel>>),
+    // The bitmap agent adds T_BitmapIndexScan / T_BitmapHeapScan arms here next.
     /// T_ModifyTableState (+ its child plan-state).
     ModifyTable(Box<ModifyTableRun<'rel>>),
     /// T_SortState (+ child + tuplesort).
@@ -114,6 +125,8 @@ pub fn result_type_of(node: &PlanStateNode<'_>) -> Option<TupleDesc> {
     match node {
         PlanStateNode::Result(rs) => rs.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::SeqScan(ss) => ss.state.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::IndexScan(is) => is.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::IndexOnlyScan(ios) => ios.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::ModifyTable(mt) => mt.state.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Sort(s) => s.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Limit(l) => l.state.ps.ps_result_tuple_desc.clone(),
@@ -139,6 +152,10 @@ pub fn exec_init_node<'rel>(
     match node {
         Node::Result(r) => Some(PlanStateNode::Result(exec_init_result(r, estate, eflags))),
         Node::SeqScan(s) => Some(PlanStateNode::SeqScan(exec_init_seq_scan(s, estate, eflags))),
+        Node::IndexScan(s) => Some(PlanStateNode::IndexScan(exec_init_index_scan(s, estate, eflags))),
+        Node::IndexOnlyScan(s) => Some(PlanStateNode::IndexOnlyScan(exec_init_index_only_scan(
+            s, estate, eflags,
+        ))),
         Node::ModifyTable(m) => Some(PlanStateNode::ModifyTable(exec_init_modify_table(
             m, estate, eflags,
         ))),
@@ -204,6 +221,10 @@ pub async fn exec_proc_node<'n>(
     match node {
         PlanStateNode::Result(rs) => exec_result(rs),
         PlanStateNode::SeqScan(ss) => exec_seq_scan(expect_shared(shared), ss).await,
+        PlanStateNode::IndexScan(is) => exec_index_scan(expect_shared(shared), is).await,
+        PlanStateNode::IndexOnlyScan(ios) => {
+            exec_index_only_scan(expect_shared(shared), ios).await
+        }
         PlanStateNode::ModifyTable(mt) => exec_modify_table(expect_shared(shared), mt).await,
         PlanStateNode::Sort(s) => exec_sort(shared, s).await,
         PlanStateNode::Limit(l) => exec_limit(shared, l).await,
@@ -233,6 +254,8 @@ pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode
     match node {
         PlanStateNode::Result(rs) => exec_end_result(rs),
         PlanStateNode::SeqScan(ss) => exec_end_seq_scan(expect_shared(shared), ss),
+        PlanStateNode::IndexScan(is) => exec_end_index_scan(expect_shared(shared), is),
+        PlanStateNode::IndexOnlyScan(ios) => exec_end_index_only_scan(expect_shared(shared), ios),
         PlanStateNode::ModifyTable(mt) => exec_end_modify_table(expect_shared(shared), mt),
         PlanStateNode::Sort(s) => exec_end_sort(shared, s),
         PlanStateNode::Limit(l) => exec_end_limit(shared, l),

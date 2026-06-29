@@ -31,13 +31,17 @@ use crate::access::nbtree::{
     P_RIGHTMOST, SK_BT_DESC, SK_BT_NULLS_FIRST, P_NONE,
 };
 use crate::access::sdir::{scan_direction_is_forward, ScanDirection};
+use crate::access::stratnum::{
+    StrategyNumber, BT_EQUAL_STRATEGY_NUMBER, BT_GREATER_EQUAL_STRATEGY_NUMBER,
+    BT_GREATER_STRATEGY_NUMBER, BT_LESS_EQUAL_STRATEGY_NUMBER, BT_LESS_STRATEGY_NUMBER,
+};
 use crate::access::tupdesc::TupleDescData;
 use crate::backend::access::common::indextuple::index_getattr;
 use crate::backend::access::nbtree::nbtpage::{
     bt_getroot_read, bt_metaversion, bt_read_buffer, bt_read_page_copy, bt_relbuf,
 };
 use crate::backend::access::nbtree::nbtutils::{
-    bt_checkkeys_eq, bt_compare, bt_mkscankey, bt_scankey_set_search_args,
+    bt_compare, bt_compare_col_value, bt_mkscankey, bt_scankey_set_search_args,
 };
 use crate::access::itup::IndexTuple;
 use crate::postgres::Datum;
@@ -405,8 +409,10 @@ pub struct BtScan<'irel> {
     /// the owner (the `IndexScanState`'s caller frame) holds the `Arc` above; the
     /// scan borrows it for its bounded, properly-nested lifetime.
     pub rel: &'irel RelationData,
-    /// Search-argument equality keys `(attno, datum)` for the leading columns.
-    search_keys: Vec<(i32, Datum)>,
+    /// Search keys `(attno, strategy, datum)` for the leading columns. An equality
+    /// scan uses `BT_EQUAL`; the executor's range scans (`<`/`<=`/`>`/`>=`) tag
+    /// each key with its btree strategy number (M6 single-column int4).
+    search_keys: Vec<(i32, StrategyNumber, Datum)>,
     /// The insertion scankey (comparators + args), built on first `bt_first`.
     key: Option<Box<BTScanInsertData>>,
     /// Current leaf page copy + its block number.
@@ -440,12 +446,73 @@ impl<'irel> BtScan<'irel> {
 
     /// Set the equality search keys (the `index_rescan` keys). Resets position.
     pub fn set_search_keys(&mut self, keys: Vec<(i32, Datum)>) {
+        self.search_keys = keys
+            .into_iter()
+            .map(|(a, d)| (a, BT_EQUAL_STRATEGY_NUMBER, d))
+            .collect();
+        self.key = None;
+        self.cur_page = None;
+        self.started = false;
+        self.done = false;
+    }
+
+    /// Set strategy-tagged search keys (the executor's `index_rescan` keys). Each
+    /// key is `(attno, strategy, argument)`; `=`/`<`/`<=`/`>`/`>=` are honored
+    /// (M6 single-column int4). Resets position.
+    pub fn set_strategy_keys(&mut self, keys: Vec<(i32, StrategyNumber, Datum)>) {
         self.search_keys = keys;
         self.key = None;
         self.cur_page = None;
         self.started = false;
         self.done = false;
     }
+
+    /// Deform the index tuple last returned by `bt_first`/`bt_next` into
+    /// `(values, isnull)` of length `itupdesc.natts` (PG `index_deform_tuple`, the
+    /// index-only-scan data source). The current item is at `cur_off - 1` (the scan
+    /// advances `cur_off` past it on return). Returns `None` if no item is current.
+    #[must_use]
+    pub fn current_index_values(&self) -> Option<(Vec<Datum>, Vec<bool>)> {
+        let page = self.cur_page.as_ref()?;
+        if self.cur_off == 0 {
+            return None;
+        }
+        let off = self.cur_off - 1;
+        if off < P_FIRSTDATAKEY_for(page) || off > self.max_off {
+            return None;
+        }
+        let item_id = page.get_item_id(off);
+        if item_id.lp_flags() != LP_NORMAL {
+            return None;
+        }
+        let item = page.get_item(&item_id);
+        let itup = item_as_index_tuple(item);
+        let itupdesc = self.rel.descr();
+        let natts = itupdesc.natts as usize;
+        let mut values = vec![Datum(0); natts];
+        let mut isnull = vec![false; natts];
+        // SAFETY: itup is a live leaf index tuple; itupdesc is the index rowtype.
+        unsafe {
+            crate::backend::access::common::indextuple::index_deform_tuple(
+                itup, &itupdesc, &mut values, &mut isnull,
+            );
+        }
+        Some((values, isnull))
+    }
+}
+
+/// The argument of the leading key with a lower-bound strategy (`=`/`>=`/`>`), if
+/// any. Used to decide whether `bt_first` descends to a key or to the leftmost
+/// leaf. Returns `(attno, strategy, datum)`.
+fn lower_bound_key(scan: &BtScan<'_>) -> Option<(i32, StrategyNumber, Datum)> {
+    scan.search_keys
+        .iter()
+        .copied()
+        .find(|&(_, strat, _)| {
+            strat == BT_EQUAL_STRATEGY_NUMBER
+                || strat == BT_GREATER_EQUAL_STRATEGY_NUMBER
+                || strat == BT_GREATER_STRATEGY_NUMBER
+        })
 }
 
 /// Read the current item's heap TID from the scan's leaf page at `cur_off`.
@@ -489,16 +556,22 @@ pub async fn bt_first(
     scan.started = true;
 
     // Build the insertion scankey (comparators from the opclass), set heapkeyspace
-    // from the meta page, and install the search-argument datums.
+    // from the meta page, and install the lower-bound argument (if any). A scan
+    // with only an upper bound (`<`/`<=`) or no key starts at the leftmost leaf.
     let mut key = bt_mkscankey(scan.rel, None);
     let (heapkeyspace, allequalimage) = bt_metaversion(shared, scan.rel).await;
     key.heapkeyspace = heapkeyspace;
     key.allequalimage = allequalimage;
-    let args: Vec<(Datum, bool)> = scan.search_keys.iter().map(|&(_a, d)| (d, false)).collect();
-    bt_scankey_set_search_args(&mut key, &args);
 
-    // A full scan (no keys) descends to the LEFTMOST leaf; a keyed search descends
-    // to the leaf that would contain the key.
+    let lower = lower_bound_key(scan);
+    if let Some((_attno, _strat, datum)) = lower {
+        bt_scankey_set_search_args(&mut key, &[(datum, false)]);
+    } else {
+        key.keysz = 0;
+    }
+
+    // A scan with a lower bound descends to the leaf that would contain it;
+    // otherwise (no lower bound) descend to the LEFTMOST leaf.
     let descended = if key.keysz == 0 {
         bt_get_endpoint_leftmost(shared, scan.rel).await
     } else {
@@ -512,8 +585,8 @@ pub async fn bt_first(
     let firstdatakey = p_firstdatakey_page(&page);
     let maxoff = page.get_max_offset_number();
 
-    // Binary search for the first leaf offset >= the search key (the equality
-    // start). With no keys, start at the first data key (full scan).
+    // Binary search for the first leaf offset >= the lower bound. With no lower
+    // bound, start at the first data key (left endpoint).
     let start = if key.keysz == 0 {
         firstdatakey
     } else {
@@ -588,18 +661,14 @@ async fn advance_to_match(
             continue;
         }
 
-        // Check equality keys (if any). With no keys, every tuple matches.
+        // Check the search keys (if any). With no keys, every tuple matches.
         if scan.search_keys.is_empty() {
             let tid = scan_current_tid(scan);
             scan.cur_off += 1;
             return tid;
         }
 
-        let (matches, continuescan) = {
-            let key = scan.key.as_mut()?;
-            let page = scan.cur_page.as_ref()?;
-            bt_checkkeys_eq(scan.rel, key, page, scan.cur_off)
-        };
+        let (matches, continuescan) = check_strategy_keys(scan);
         if matches {
             let tid = scan_current_tid(scan);
             scan.cur_off += 1;
@@ -611,6 +680,44 @@ async fn advance_to_match(
         }
         scan.cur_off += 1;
     }
+}
+
+/// Evaluate every strategy search key against the current item, returning
+/// `(matches, continuescan)`. `matches` is true when all keys are satisfied;
+/// `continuescan` is false once an ascending upper bound (`<`/`<=`, or the upper
+/// edge of `=`) is passed, so the scan can stop (mirrors `_bt_checkkeys`).
+fn check_strategy_keys(scan: &mut BtScan<'_>) -> (bool, bool) {
+    let keys = scan.search_keys.clone();
+    let rel = scan.rel;
+    let Some(page) = scan.cur_page.as_ref() else {
+        return (false, false);
+    };
+    let off = scan.cur_off;
+    let Some(key) = scan.key.as_mut() else {
+        return (false, false);
+    };
+
+    let mut matches = true;
+    let mut continuescan = true;
+    for (attno, strat, arg) in keys {
+        // cmp = index_value <=> arg.
+        let cmp = bt_compare_col_value(rel, key, attno, arg, page, off);
+        let (ok, cont) = match strat {
+            BT_EQUAL_STRATEGY_NUMBER => (cmp == 0, cmp <= 0),
+            BT_GREATER_EQUAL_STRATEGY_NUMBER => (cmp >= 0, true),
+            BT_GREATER_STRATEGY_NUMBER => (cmp > 0, true),
+            BT_LESS_EQUAL_STRATEGY_NUMBER => (cmp <= 0, cmp <= 0),
+            BT_LESS_STRATEGY_NUMBER => (cmp < 0, cmp < 0),
+            _ => unreachable!("M6 btree scan keys use only the five comparison strategies"),
+        };
+        if !ok {
+            matches = false;
+        }
+        if !cont {
+            continuescan = false;
+        }
+    }
+    (matches, continuescan)
 }
 
 /// `_bt_steppage` (forward): advance to the right-sibling leaf, loading its page

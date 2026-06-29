@@ -203,6 +203,35 @@ pub fn bt_compare(
     i32::from(key.keysz > tupnatts)
 }
 
+/// Compare one key column of the index tuple at `offnum` against `arg`, returning
+/// the raw comparator sign `index_value <=> arg` (`< 0` / `0` / `> 0`). `key`
+/// supplies the per-column comparator (`func`) + collation resolved from the
+/// opclass. Used by the strategy-aware (range) scan to apply `<`/`<=`/`>`/`>=`
+/// semantics per key (M6 single-column int4).
+///
+/// SAFETY: `page` holds a valid index tuple at `offnum`; `attno` is a 1-based key
+/// attribute present on the tuple.
+#[must_use]
+pub fn bt_compare_col_value(
+    rel: &RelationData,
+    key: &mut BTScanInsertData,
+    attno: i32,
+    arg: Datum,
+    page: &Page,
+    offnum: OffsetNumber,
+) -> i32 {
+    let itupdesc = rel.descr();
+    let item_id = page.get_item_id(offnum);
+    debug_assert_eq!(item_id.lp_flags(), LP_NORMAL);
+    let item = page.get_item(&item_id);
+    let itup = item_as_index_tuple(item);
+
+    let sk = &mut key.scankeys[(attno - 1) as usize];
+    // SAFETY: itup live; attno is a 1-based key attribute.
+    let (datum, _isnull) = unsafe { index_getattr(itup, attno, &itupdesc) };
+    call_cmp(&mut sk.func, sk.collation, datum, arg)
+}
+
 /// Invoke a btree comparator (`bt*cmp`) returning its `i32` three-way result.
 fn call_cmp(func: &mut FmgrInfo, collation: crate::postgres_ext::Oid, a: Datum, b: Datum) -> i32 {
     let d = FunctionCall2Coll(func, collation, a, b)

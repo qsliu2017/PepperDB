@@ -45,6 +45,19 @@ pub fn standard_executor_start<'rel>(
     snapshot_ref: Option<&'rel crate::utils::snapshot::SnapshotData>,
     eflags: i32,
 ) {
+    standard_executor_start_indexed(query_desc, range_table_rels, &[], snapshot_ref, eflags);
+}
+
+/// `standard_ExecutorStart` with the borrowed open index relations also published
+/// (PG resolves these via `index_open`; here the command frame passes the borrows).
+/// The plain `standard_executor_start` forwards here with no index relations.
+pub fn standard_executor_start_indexed<'rel>(
+    query_desc: &mut QueryDesc<'rel>,
+    range_table_rels: RangeTableRels<'rel>,
+    index_rels: &'rel [Option<&'rel crate::utils::rel::RelationData>],
+    snapshot_ref: Option<&'rel crate::utils::snapshot::SnapshotData>,
+    eflags: i32,
+) {
     crate::assert!(query_desc.estate.is_none());
 
     let estate = create_executor_state();
@@ -55,6 +68,7 @@ pub fn standard_executor_start<'rel>(
         .unwrap_or_else(|| unreachable!("estate just set"));
 
     estate.es_range_table_rels = range_table_rels;
+    estate.es_index_rels = index_rels;
     estate.es_snapshot_ref = snapshot_ref;
     estate.top_eflags = eflags;
     // es_snapshot / es_crosscheck_snapshot: the scan path (M2) reads tuples under

@@ -19,6 +19,12 @@ use crate::shared_state::SharedState;
 pub fn exec_rescan(shared: &Arc<SharedState>, node: &mut PlanStateNode) {
     match node {
         PlanStateNode::SeqScan(ss) => exec_rescan_seq_scan(shared, ss),
+        PlanStateNode::IndexScan(is) => {
+            crate::backend::executor::nodeIndexscan::exec_rescan_index_scan(shared, is);
+        }
+        PlanStateNode::IndexOnlyScan(ios) => {
+            crate::backend::executor::nodeIndexonlyscan::exec_rescan_index_only_scan(shared, ios);
+        }
         PlanStateNode::Result(_) => {
             unimplemented!("ExecReScan: ExecReScanResult not yet reachable")
         }

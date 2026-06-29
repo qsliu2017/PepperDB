@@ -104,6 +104,8 @@ fn plan_targetlist(planstate: &PlanState) -> Vec<crate::nodes::nodes::Node> {
     match plan {
         Node::Result(r) => r.plan.targetlist.clone(),
         Node::SeqScan(s) => s.scan.plan.targetlist.clone(),
+        Node::IndexScan(s) => s.scan.plan.targetlist.clone(),
+        Node::IndexOnlyScan(s) => s.scan.plan.targetlist.clone(),
         other => unimplemented!("plan_targetlist: {other:?} not reachable for this milestone"),
     }
 }
