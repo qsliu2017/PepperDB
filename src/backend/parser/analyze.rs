@@ -351,9 +351,17 @@ async fn transform_select_stmt_async(
     qry.targetList =
         transformTargetList(pstate, stmt.targetList.clone(), ParseExprKind::SelectTarget);
 
+    // Transform the WHERE clause (coerced to boolean) into the jointree qual.
+    let qual = crate::backend::parser::parse_clause::transform_where_clause(
+        pstate,
+        stmt.whereClause.clone(),
+        ParseExprKind::Where,
+        "WHERE",
+    );
+
     reject_unsupported_select_clauses(stmt);
 
-    finish_query(pstate, &mut qry);
+    finish_query(pstate, &mut qry, qual);
     qry
 }
 
@@ -445,7 +453,9 @@ async fn transform_insert_stmt(
         })
         .collect();
 
-    finish_query(pstate, &mut qry);
+    // INSERT has no WHERE qual on its own jointree (the source SELECT, if any, was
+    // transformed separately).
+    finish_query(pstate, &mut qry, None);
     qry
 }
 
@@ -520,7 +530,7 @@ fn transform_expression_list(
 
 /// Tail shared by the async transforms: flatten rtable/perminfos, build the
 /// jointree, copy the pstate flags, and assign collations.
-fn finish_query(pstate: &mut ParseState, qry: &mut Query) {
+fn finish_query(pstate: &mut ParseState, qry: &mut Query, qual: Option<Node>) {
     qry.rtable = std::mem::take(&mut pstate.p_rtable)
         .into_iter()
         .map(|rte| Node::RangeTblEntry(Box::new(rte)))
@@ -531,7 +541,7 @@ fn finish_query(pstate: &mut ParseState, qry: &mut Query) {
         .collect();
     let joinlist = std::mem::take(&mut pstate.p_joinlist);
     qry.jointree =
-        Some(Node::FromExpr(Box::new(crate::nodes::makefuncs::makeFromExpr(joinlist, None))));
+        Some(Node::FromExpr(Box::new(crate::nodes::makefuncs::makeFromExpr(joinlist, qual))));
 
     qry.hasSubLinks = pstate.p_has_sub_links;
     qry.hasWindowFuncs = pstate.p_has_window_funcs;
@@ -543,9 +553,7 @@ fn finish_query(pstate: &mut ParseState, qry: &mut Query) {
 
 /// The not-yet-reachable clause guards shared by the SELECT transforms.
 fn reject_unsupported_select_clauses(stmt: &SelectStmt) {
-    if stmt.whereClause.is_some() {
-        not_yet_reachable("transformSelectStmt: WHERE clause");
-    }
+    // WHERE is handled (transform_where_clause); HAVING/ORDER BY/GROUP BY/etc. grow.
     if stmt.havingClause.is_some() {
         not_yet_reachable("transformSelectStmt: HAVING clause");
     }
@@ -955,6 +963,142 @@ mod relation_tests {
             let Node::Var(v) = te.expr.as_ref().unwrap() else { panic!("`a` did not resolve to a Var") };
             assert_eq!(v.varattno, 1, "column a resolves to attno 1");
             assert_eq!(v.varno, 1, "the only FROM rel is RT index 1");
+        }))
+        .await;
+    }
+
+    // ---- M3: operator / function resolution -------------------------------
+
+    /// `SELECT a + 1 FROM t` -> the targetlist expr is an OpExpr resolving `+` over
+    /// (int4, int4) to operator 551, function int4pl (177), result int4.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn select_a_plus_one_resolves_to_int4pl_opexpr() {
+        use crate::catalog::genbki::INT4OID;
+        use crate::utils::fmgroids::F_INT4PL;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT a + 1 FROM t").await;
+            let Node::TargetEntry(te) = &q.targetList[0] else { panic!("not a TargetEntry") };
+            let Node::OpExpr(op) = te.expr.as_ref().unwrap() else { panic!("a + 1 not an OpExpr") };
+            assert_eq!(op.opno, Oid(551), "the int4 + operator");
+            assert_eq!(op.opfuncid, F_INT4PL, "opfuncid is int4pl");
+            assert_eq!(op.opresulttype, INT4OID, "result type int4");
+            assert!(!op.opretset);
+            assert_eq!(op.args.len(), 2);
+            assert!(matches!(op.args[0], Node::Var(_)), "lhs is the Var a");
+            assert!(matches!(op.args[1], Node::Const(_)), "rhs is the Const 1");
+        }))
+        .await;
+    }
+
+    /// `SELECT a FROM t WHERE a > 0` -> the qual is an OpExpr for int4gt with
+    /// result type bool.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn where_a_gt_zero_resolves_to_int4gt_opexpr() {
+        use crate::catalog::genbki::BOOLOID;
+        use crate::utils::fmgroids::F_INT4GT;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT a FROM t WHERE a > 0").await;
+            let Node::FromExpr(jt) = q.jointree.as_ref().expect("jointree") else { panic!("not FromExpr") };
+            let Some(Node::OpExpr(op)) = jt.quals.as_ref() else { panic!("WHERE qual is not an OpExpr") };
+            assert_eq!(op.opno, Oid(521), "the int4 > operator");
+            assert_eq!(op.opfuncid, F_INT4GT, "opfuncid is int4gt");
+            assert_eq!(op.opresulttype, BOOLOID, "comparison result type is bool");
+        }))
+        .await;
+    }
+
+    /// `a AND b` / `NOT a` parse-analyze to BoolExpr nodes (booleans flow through
+    /// unchanged for boolean operands).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bool_ops_resolve_to_boolexpr() {
+        use crate::nodes::primnodes::BoolExprType;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            // `a > 0 AND a < 5` -> AND BoolExpr of two comparison OpExprs.
+            let q = analyze(&shared, "SELECT a FROM t WHERE a > 0 AND a < 5").await;
+            let Node::FromExpr(jt) = q.jointree.as_ref().expect("jointree") else { panic!("not FromExpr") };
+            let Some(Node::BoolExpr(b)) = jt.quals.as_ref() else { panic!("WHERE qual is not a BoolExpr") };
+            assert!(matches!(b.boolop, BoolExprType::AND_EXPR));
+            assert_eq!(b.args.len(), 2);
+            assert!(b.args.iter().all(|a| matches!(a, Node::OpExpr(_))));
+
+            // `NOT (a > 0)` -> NOT BoolExpr.
+            let q2 = analyze(&shared, "SELECT a FROM t WHERE NOT a > 0").await;
+            let Node::FromExpr(jt2) = q2.jointree.as_ref().expect("jointree") else { panic!("not FromExpr") };
+            let Some(Node::BoolExpr(n)) = jt2.quals.as_ref() else { panic!("WHERE qual is not a BoolExpr") };
+            assert!(matches!(n.boolop, BoolExprType::NOT_EXPR));
+            assert_eq!(n.args.len(), 1);
+        }))
+        .await;
+    }
+
+    /// SearchSysCache(OPERNAMENSP, '+', int4, int4) returns int4pl's operator row.
+    #[tokio::test(flavor = "multi_thread")]
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "GETSTRUCT returns the MAXALIGN'd tuple body, aligned for Form_pg_operator"
+    )]
+    async fn searchsyscache_opernamensp_resolves_plus() {
+        use crate::access::htup_details::GETSTRUCT;
+        use crate::backend::catalog::heap::name_data;
+        use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+        use crate::catalog::genbki::INT4OID;
+        use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+        use crate::catalog::pg_operator::FormData_pg_operator;
+        use crate::postgres::{NameGetDatum, ObjectIdGetDatum};
+        use crate::utils::fmgroids::F_INT4PL;
+        use crate::utils::syscache::SysCacheIdentifier;
+
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+
+            let nd = name_data("+");
+            let keys = [
+                NameGetDatum(&nd),
+                ObjectIdGetDatum(INT4OID),
+                ObjectIdGetDatum(INT4OID),
+                ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
+            ];
+            let tup = search_sys_cache_populate(&shared, SysCacheIdentifier::OPERNAMENSP, &keys).await;
+            let tup = tup.expect("OPERNAMENSP('+',int4,int4,pg_catalog) must resolve");
+            // SAFETY: a held OPERNAMENSP hit -> a pg_operator row.
+            let form = unsafe { &*GETSTRUCT(&*tup).cast::<FormData_pg_operator>() };
+            assert_eq!(form.oid, Oid(551), "+(int4,int4) is operator 551");
+            assert_eq!(form.oprcode, F_INT4PL, "oprcode is int4pl");
+            assert_eq!(form.oprresult, INT4OID);
+            release_sys_cache(tup);
+        }))
+        .await;
+    }
+
+    /// A function call `int4pl(a, 1)` resolves via PROCNAMEARGSNSP to a FuncExpr.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn func_call_resolves_to_funcexpr() {
+        use crate::catalog::genbki::INT4OID;
+        use crate::utils::fmgroids::F_INT4PL;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT int4pl(a, 1) FROM t").await;
+            let Node::TargetEntry(te) = &q.targetList[0] else { panic!("not a TargetEntry") };
+            let Node::FuncExpr(f) = te.expr.as_ref().unwrap() else { panic!("not a FuncExpr") };
+            assert_eq!(f.funcid, F_INT4PL, "resolved to int4pl");
+            assert_eq!(f.funcresulttype, INT4OID);
+            assert_eq!(f.args.len(), 2);
         }))
         .await;
     }

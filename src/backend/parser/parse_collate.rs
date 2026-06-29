@@ -101,13 +101,8 @@ pub fn assign_expr_collations(pstate: &mut ParseState, expr: &mut Node) {
 ///
 /// Grow dispatcher: the uncollatable-leaf arm (`Const`, etc.) is the only one
 /// reached for M1 and is a no-op. Collation-bearing / recursive arms grow later.
-#[allow(
-    clippy::needless_pass_by_ref_mut,
-    reason = "grow scaffold: the M1 leaf arm only reads `node`, but the collation-\
-              bearing arms added later call exprSetCollation through this &mut"
-)]
 fn assign_collations_walker(
-    _pstate: &mut ParseState,
+    pstate: &mut ParseState,
     node: &mut Node,
     context: &mut AssignCollationsContext,
 ) -> bool {
@@ -128,9 +123,43 @@ fn assign_collations_walker(
             context.location = -1;
             false
         }
-        // CollateExpr / FuncExpr / OpExpr / CaseExpr / ... (collation-bearing or
-        // recursive) grow per milestone.
+        // OpExpr / FuncExpr / BoolExpr: recurse into the argument list, then set the
+        // node's own result collation. For the M3 int4/bool operators and support
+        // functions every input and result is uncollatable, so each child reports
+        // CollateStrength::None and the node's collation is InvalidOid (the general
+        // collation-merge over collatable inputs grows with text/varchar). The walk
+        // must still descend so nested OpExprs are visited.
+        Node::OpExpr(_) | Node::FuncExpr(_) | Node::BoolExpr(_) => {
+            walk_args(pstate, node);
+            let collation = exprCollation(node);
+            // exprSetCollation is a no-op when the result type is uncollatable, but
+            // is faithful for the general case; M3 collation is always InvalidOid.
+            crate::nodes::nodeFuncs::exprSetCollation(node, collation);
+            context.collation = InvalidOid;
+            context.strength = CollateStrength::None;
+            context.location = -1;
+            false
+        }
+        // CollateExpr / CaseExpr / ... (collation-bearing) grow per milestone.
         other => not_yet_reachable(other),
+    }
+}
+
+/// Walk each argument of an OpExpr / FuncExpr / BoolExpr (the recursive descent of
+/// the collation walker over a node's `args` list). Each child gets its own context
+/// (PG threads a fresh per-child context, then merges; the M3 uncollatable case
+/// needs no merge).
+fn walk_args(pstate: &mut ParseState, node: &mut Node) {
+    let args: Option<&mut Vec<Node>> = match node {
+        Node::OpExpr(op) => Some(&mut op.args),
+        Node::FuncExpr(f) => Some(&mut f.args),
+        Node::BoolExpr(b) => Some(&mut b.args),
+        _ => None,
+    };
+    if let Some(args) = args {
+        for arg in args {
+            assign_expr_collations(pstate, arg);
+        }
     }
 }
 

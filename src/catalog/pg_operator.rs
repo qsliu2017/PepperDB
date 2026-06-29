@@ -11,6 +11,15 @@ use crate::catalog::objectaddress::ObjectAddress;
 use crate::postgres_ext::Oid;
 
 pub const OperatorRelationId: Oid = Oid(2617);
+/// pg_operator's composite (row) type OID. genbki auto-assigns catalog rowtypes;
+/// the value is only stored as the nailed descriptor's `tdtypeid` (not load-bearing
+/// for M3 resolution).
+pub const OperatorRelation_Rowtype_Id: Oid = Oid(11631);
+
+// DECLARE_UNIQUE_INDEX_PKEY(pg_operator_oid_index, 2688, OperatorOidIndexId)
+pub const OperatorOidIndexId: Oid = Oid(2688);
+// DECLARE_UNIQUE_INDEX(pg_operator_oprname_l_r_n_index, 2689, OperatorNameNspIndexId)
+pub const OperatorNameNspIndexId: Oid = Oid(2689);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

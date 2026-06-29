@@ -21,14 +21,8 @@ pub fn setTargetTable(
     unimplemented!()
 }
 
-pub fn transformWhereClause(
-    _pstate: &mut ParseState,
-    _clause: Option<Node>,
-    _expr_kind: ParseExprKind,
-    _construct_name: &str,
-) -> Option<Node> {
-    unimplemented!()
-}
+/// PG `transformWhereClause`. See `crate::backend::parser::parse_clause`.
+pub use crate::backend::parser::parse_clause::transform_where_clause as transformWhereClause;
 
 pub fn transformLimitClause(
     _pstate: &mut ParseState,

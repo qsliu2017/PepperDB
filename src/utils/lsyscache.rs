@@ -296,9 +296,7 @@ pub fn get_func_namespace(funcid: Oid) -> Option<Oid> {
     unimplemented!()
 }
 
-pub fn get_func_rettype(funcid: Oid) -> Oid {
-    unimplemented!()
-}
+pub use crate::backend::utils::cache::lsyscache::get_func_rettype;
 
 pub fn get_func_nargs(funcid: Oid) -> i32 {
     unimplemented!()
@@ -314,9 +312,7 @@ pub fn get_func_variadictype(funcid: Oid) -> Oid {
     unimplemented!()
 }
 
-pub fn get_func_retset(funcid: Oid) -> bool {
-    unimplemented!()
-}
+pub use crate::backend::utils::cache::lsyscache::get_func_retset;
 
 pub fn func_strict(funcid: Oid) -> bool {
     unimplemented!()

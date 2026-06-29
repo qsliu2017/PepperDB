@@ -33,17 +33,12 @@ pub fn LookupOperWithArgs(_oper: &ObjectWithArgs, _no_error: bool) -> Option<Oid
     unimplemented!()
 }
 
-/// Invalid-tuple sentinel (when `noError`) -> `Option`.
-pub fn oper(
-    _pstate: &mut ParseState,
-    _opname: Vec<Node>,
-    _ltype_id: Oid,
-    _rtype_id: Oid,
-    _no_error: bool,
-    _location: i32,
-) -> Option<Operator> {
-    unimplemented!()
-}
+/// PG `oper`. See `crate::backend::parser::parse_oper` (M3 body). `opname` is the
+/// operator name list (`&[Node]` of String value nodes); `pstate` borrowed shared.
+pub use crate::backend::parser::parse_oper::oper;
+
+/// PG `OpernameGetOprid` (namespace.c). See `crate::backend::parser::parse_oper`.
+pub use crate::backend::parser::parse_oper::opername_get_oprid as OpernameGetOprid;
 
 /// Invalid-tuple sentinel (when `noError`) -> `Option`.
 pub fn left_oper(
@@ -101,16 +96,8 @@ pub fn oprfuncid(_op: Operator) -> Oid {
     unimplemented!()
 }
 
-pub fn make_op(
-    _pstate: &mut ParseState,
-    _opname: Vec<Node>,
-    _ltree: Option<Node>,
-    _rtree: Option<Node>,
-    _last_srf: Option<Node>,
-    _location: i32,
-) -> Node {
-    unimplemented!()
-}
+/// PG `make_op`. See `crate::backend::parser::parse_oper` (M3 body).
+pub use crate::backend::parser::parse_oper::make_op;
 
 pub fn make_scalar_array_op(
     _pstate: &mut ParseState,

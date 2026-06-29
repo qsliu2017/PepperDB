@@ -48,6 +48,10 @@ pub enum KeyKind {
     Int2,
     Int4,
     Name,
+    /// A varlena array key compared by its raw bytes (PROCNAMEARGSNSP's
+    /// `proargtypes` oidvector). Equality/hash use the varlena payload, so a
+    /// `buildoidvector` Datum matches a scanned oidvector tuple value.
+    Oidvector,
 }
 
 /// One catalog cache: metadata (which catalog/keys) plus the hash buckets of
@@ -118,6 +122,8 @@ impl CatCache {
             self.cc_keykind[i] = match (att.attbyval, att.attlen) {
                 (true, 2) => KeyKind::Int2,
                 (false, 64) => KeyKind::Name,
+                // varlena (attlen -1) by-ref key: the oidvector argtypes key.
+                (false, -1) => KeyKind::Oidvector,
                 // by-value 4-byte (oid resolved below + int4) and any other: Int4.
                 _ => KeyKind::Int4,
             };
@@ -160,6 +166,14 @@ fn hash_one_key(kind: KeyKind, v: Datum) -> u32 {
                 return h;
             }
         }
+        KeyKind::Oidvector => {
+            // varlena array key: hash the payload bytes.
+            let mut h: u32 = 2166136261;
+            for &b in varlena_bytes(v) {
+                h = (h ^ u32::from(b)).wrapping_mul(16777619);
+            }
+            return h;
+        }
     };
     // FNV-ish finalizer over the 4 raw bytes.
     let mut h: u32 = 2166136261;
@@ -195,6 +209,28 @@ fn key_eq(kind: KeyKind, a: Datum, b: Datum) -> bool {
             let pb = unsafe { &*(b.0 as *const crate::c::NameData) };
             pa.data == pb.data
         }
+        KeyKind::Oidvector => {
+            if a.0 == 0 || b.0 == 0 {
+                return a.0 == b.0;
+            }
+            varlena_bytes(a) == varlena_bytes(b)
+        }
+    }
+}
+
+/// Borrow a varlena Datum's full bytes (4-byte header + payload) for byte-equality
+/// of an array key (the oidvector PROCNAMEARGSNSP key). The Datum points at a
+/// 4-byte-header varlena (the catalog never stores these keys short/toasted).
+fn varlena_bytes<'a>(v: Datum) -> &'a [u8] {
+    if v.0 == 0 {
+        return &[];
+    }
+    // SAFETY: v points at a 4-byte-header varlena; the first 4 bytes carry the
+    // total length, which bounds the slice.
+    unsafe {
+        let p = v.0 as *const u8;
+        let len = crate::varatt::VARSIZE(p) as usize;
+        std::slice::from_raw_parts(p, len)
     }
 }
 

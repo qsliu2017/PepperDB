@@ -49,13 +49,21 @@ fn a_const(val: ValUnion) -> Node {
     Node::A_Const(Box::new(A_Const { val, isnull: false, location: -1 }))
 }
 
-/// PG `doNegate` for a numeric A_Const operand: an integer flips its sign in
-/// place; a float gets a leading '-' prepended to its text (matching gram.y's
-/// `doNegateFloat`). The general case (`- arg` -> a '-' operator OpExpr over a
-/// non-constant) needs the A_Expr/operator path, deferred to M3.
+/// PG `doNegate`: an integer A_Const flips its sign in place; a float A_Const gets
+/// a leading '-' prepended to its text (gram.y's `doNegateFloat`). Any other
+/// operand becomes the unary-minus operator A_Expr (`-` with a NULL left operand),
+/// resolved to int4um/etc. at analysis time.
 pub fn do_negate(arg: Node) -> Node {
     let Node::A_Const(mut c) = arg else {
-        unimplemented!("unary minus over non-constant: A_Expr operator path deferred to M3");
+        // Non-constant operand: makeSimpleA_Expr(AEXPR_OP, "-", NULL, arg).
+        let a = crate::nodes::makefuncs::makeSimpleA_Expr(
+            crate::nodes::parsenodes::A_Expr_Kind::OP,
+            "-",
+            None,
+            Some(arg),
+            -1,
+        );
+        return Node::A_Expr(Box::new(a));
     };
     match &mut c.val {
         ValUnion::Integer(i) => i.ival = -i.ival,
@@ -66,7 +74,19 @@ pub fn do_negate(arg: Node) -> Node {
                 f.fval.insert(0, '-');
             }
         }
-        _ => unimplemented!("unary minus over a non-numeric constant: deferred to M3"),
+        // A non-numeric constant (e.g. a string) also routes through the '-'
+        // operator A_Expr (PG falls through to makeSimpleA_Expr); reachable once
+        // string operands hit unary minus, not on the M3 numeric path.
+        _ => {
+            let a = crate::nodes::makefuncs::makeSimpleA_Expr(
+                crate::nodes::parsenodes::A_Expr_Kind::OP,
+                "-",
+                None,
+                Some(Node::A_Const(c)),
+                -1,
+            );
+            return Node::A_Expr(Box::new(a));
+        }
     }
     Node::A_Const(c)
 }
@@ -100,6 +120,78 @@ pub fn make_column_ref(parts: Vec<String>) -> Node {
 /// grow at their milestones.
 pub fn make_range_var_table_ref(relation: RangeVar) -> Node {
     Node::RangeVar(Box::new(relation))
+}
+
+/// gram.y `a_expr <op> a_expr`: a simple binary operator A_Expr (AEXPR_OP). The
+/// operator name is a one-element list of a String value node (makeSimpleA_Expr).
+pub fn make_a_expr(op: &str, lexpr: Node, rexpr: Node) -> Node {
+    use crate::nodes::parsenodes::A_Expr_Kind;
+    let a = crate::nodes::makefuncs::makeSimpleA_Expr(
+        A_Expr_Kind::OP,
+        op,
+        Some(lexpr),
+        Some(rexpr),
+        -1,
+    );
+    Node::A_Expr(Box::new(a))
+}
+
+/// gram.y `a_expr AND a_expr` (makeAndExpr): flatten a left-nested AND chain into
+/// one BoolExpr(AND_EXPR).
+pub fn make_and_expr(lexpr: Node, rexpr: Node) -> Node {
+    bool_chain(crate::nodes::primnodes::BoolExprType::AND_EXPR, lexpr, rexpr)
+}
+
+/// gram.y `a_expr OR a_expr` (makeOrExpr): flatten a left-nested OR chain.
+pub fn make_or_expr(lexpr: Node, rexpr: Node) -> Node {
+    bool_chain(crate::nodes::primnodes::BoolExprType::OR_EXPR, lexpr, rexpr)
+}
+
+/// Shared body of makeAndExpr/makeOrExpr: if `lexpr` is already a BoolExpr of the
+/// same boolop, append `rexpr` to its args (PG's on-sight flattening); else build
+/// a new two-arg BoolExpr.
+fn bool_chain(boolop: crate::nodes::primnodes::BoolExprType, lexpr: Node, rexpr: Node) -> Node {
+    if let Node::BoolExpr(mut b) = lexpr {
+        if b.boolop == boolop {
+            b.args.push(rexpr);
+            return Node::BoolExpr(b);
+        }
+        return Node::BoolExpr(Box::new(crate::nodes::primnodes::BoolExpr {
+            boolop,
+            args: vec![Node::BoolExpr(b), rexpr],
+            location: -1,
+        }));
+    }
+    Node::BoolExpr(Box::new(crate::nodes::primnodes::BoolExpr {
+        boolop,
+        args: vec![lexpr, rexpr],
+        location: -1,
+    }))
+}
+
+/// gram.y `NOT a_expr` (makeNotExpr): a one-arg BoolExpr(NOT_EXPR).
+pub fn make_not_expr(expr: Node) -> Node {
+    Node::BoolExpr(Box::new(crate::nodes::primnodes::BoolExpr {
+        boolop: crate::nodes::primnodes::BoolExprType::NOT_EXPR,
+        args: vec![expr],
+        location: -1,
+    }))
+}
+
+/// gram.y `func_application`: build a FuncCall node from an (unqualified) function
+/// name and a positional argument list (the EXPLICIT_CALL display form).
+pub fn make_func_call(name_parts: Vec<String>, args: Vec<Node>) -> Node {
+    let funcname = name_parts
+        .into_iter()
+        .map(|p| Node::String_(makeString(p)))
+        .collect();
+    let fc = crate::nodes::makefuncs::makeFuncCall(
+        funcname,
+        args,
+        crate::nodes::primnodes::CoercionForm::EXPLICIT_CALL,
+        -1,
+    );
+    Node::FuncCall(Box::new(fc))
 }
 
 /// gram.y `insert_rest: VALUES ...`: wrap the parsed VALUES rows in a SelectStmt
@@ -474,6 +566,93 @@ mod tests {
         assert_eq!(ins.cols.len(), 1);
         let Node::ResTarget(rt) = &ins.cols[0] else { panic!("col not a ResTarget") };
         assert_eq!(rt.name.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn select_binary_op_parses() {
+        let list = parse("SELECT a + 1 FROM t");
+        let sel = one_select(&list);
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!() };
+        let Node::A_Expr(a) = rt.val.as_ref().unwrap() else { panic!("not an A_Expr") };
+        assert!(matches!(a.kind, crate::nodes::parsenodes::A_Expr_Kind::OP));
+        // name is a one-element list of the String "+".
+        let Node::String_(s) = &a.name[0] else { panic!("op name not a String node") };
+        assert_eq!(s.sval, "+");
+        assert!(matches!(a.lexpr, Some(Node::ColumnRef(_))));
+        assert!(matches!(a.rexpr, Some(Node::A_Const(_))));
+    }
+
+    #[test]
+    fn precedence_mul_binds_tighter_than_add() {
+        // a + b * c  parses as  a + (b * c)
+        let list = parse("SELECT a + b * c");
+        let sel = one_select(&list);
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!() };
+        let Node::A_Expr(add) = rt.val.as_ref().unwrap() else { panic!() };
+        let Node::String_(s) = &add.name[0] else { panic!() };
+        assert_eq!(s.sval, "+");
+        // right operand is the `b * c` A_Expr.
+        let Some(Node::A_Expr(mul)) = &add.rexpr else { panic!("rhs not the mul A_Expr") };
+        let Node::String_(ms) = &mul.name[0] else { panic!() };
+        assert_eq!(ms.sval, "*");
+    }
+
+    #[test]
+    fn where_clause_comparison_parses() {
+        let list = parse("SELECT a FROM t WHERE a > 0");
+        let sel = one_select(&list);
+        let Some(Node::A_Expr(a)) = &sel.whereClause else { panic!("no WHERE A_Expr") };
+        let Node::String_(s) = &a.name[0] else { panic!() };
+        assert_eq!(s.sval, ">");
+    }
+
+    #[test]
+    fn bool_and_or_not_parse_to_boolexpr() {
+        // `a AND b OR NOT c` -> OR( AND(a,b), NOT(c) )
+        let list = parse("SELECT a FROM t WHERE a AND b OR NOT c");
+        let sel = one_select(&list);
+        let Some(Node::BoolExpr(or)) = &sel.whereClause else { panic!("top not BoolExpr") };
+        assert!(matches!(or.boolop, crate::nodes::primnodes::BoolExprType::OR_EXPR));
+        assert_eq!(or.args.len(), 2);
+        let Node::BoolExpr(and) = &or.args[0] else { panic!("lhs not AND") };
+        assert!(matches!(and.boolop, crate::nodes::primnodes::BoolExprType::AND_EXPR));
+        let Node::BoolExpr(not) = &or.args[1] else { panic!("rhs not NOT") };
+        assert!(matches!(not.boolop, crate::nodes::primnodes::BoolExprType::NOT_EXPR));
+    }
+
+    #[test]
+    fn and_chain_flattens() {
+        // a AND b AND c -> one AND BoolExpr with three args.
+        let list = parse("SELECT a FROM t WHERE a AND b AND c");
+        let sel = one_select(&list);
+        let Some(Node::BoolExpr(and)) = &sel.whereClause else { panic!() };
+        assert!(matches!(and.boolop, crate::nodes::primnodes::BoolExprType::AND_EXPR));
+        assert_eq!(and.args.len(), 3);
+    }
+
+    #[test]
+    fn func_call_parses() {
+        let list = parse("SELECT f(a, 1) FROM t");
+        let sel = one_select(&list);
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!() };
+        let Node::FuncCall(fc) = rt.val.as_ref().unwrap() else { panic!("not a FuncCall") };
+        let Node::String_(s) = &fc.funcname[0] else { panic!() };
+        assert_eq!(s.sval, "f");
+        assert_eq!(fc.args.len(), 2);
+    }
+
+    #[test]
+    fn parenthesized_expr_parses() {
+        // (a + b) * c  -> mul whose lhs is the add A_Expr.
+        let list = parse("SELECT (a + b) * c");
+        let sel = one_select(&list);
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!() };
+        let Node::A_Expr(mul) = rt.val.as_ref().unwrap() else { panic!() };
+        let Node::String_(s) = &mul.name[0] else { panic!() };
+        assert_eq!(s.sval, "*");
+        let Some(Node::A_Expr(add)) = &mul.lexpr else { panic!("lhs not the add A_Expr") };
+        let Node::String_(asym) = &add.name[0] else { panic!() };
+        assert_eq!(asym.sval, "+");
     }
 
     #[test]

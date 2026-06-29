@@ -15,7 +15,7 @@ use crate::backend::parser::parser::{
     make_int_const, make_float_const, make_string_const, make_raw_stmt, make_star_target,
     do_negate, make_create_stmt, make_column_def_elt, system_type_name, generic_type_name,
     make_insert_stmt, make_values_select, make_column_ref, make_range_var_table_ref,
-    RawStmtVec,
+    make_a_expr, make_and_expr, make_or_expr, make_not_expr, make_func_call, RawStmtVec,
 };
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{ResTarget, SelectStmt, TypeName};
@@ -39,6 +39,10 @@ extern {
         "INSERT"  => Token::Keyword("insert"),
         "INTO"    => Token::Keyword("into"),
         "VALUES"  => Token::Keyword("values"),
+        "WHERE"   => Token::Keyword("where"),
+        "AND"     => Token::Keyword("and"),
+        "OR"      => Token::Keyword("or"),
+        "NOT"     => Token::Keyword("not"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -53,6 +57,14 @@ extern {
         "."       => Token::Dot,
         "+"       => Token::Plus,
         "-"       => Token::Minus,
+        "/"       => Token::Slash,
+        "%"       => Token::Percent,
+        "<"       => Token::Lt,
+        ">"       => Token::Gt,
+        "="       => Token::Eq,
+        "<="      => Token::LessEquals,
+        ">="      => Token::GreaterEquals,
+        "<>"      => Token::NotEquals,
     }
 }
 
@@ -265,13 +277,13 @@ SelectClause: Node = {
 // only one reachable in M1; FROM/WHERE/GROUP/HAVING/DISTINCT/VALUES/TABLE and the
 // set operations are added at their milestones.
 SimpleSelect: Node = {
-    "SELECT" <targets:OptTargetList> <frm:FromClause> => {
+    "SELECT" <targets:OptTargetList> <frm:FromClause> <whr:WhereClause> => {
         let n = SelectStmt {
             distinctClause: Vec::new(),
             intoClause: None,
             targetList: targets,
             fromClause: frm,
-            whereClause: None,
+            whereClause: whr,
             groupClause: Vec::new(),
             groupDistinct: false,
             havingClause: None,
@@ -315,6 +327,13 @@ TableRef: Node = {
     <r:QualifiedName> => make_range_var_table_ref(r),
 };
 
+// gram.y `where_clause: WHERE a_expr | /*EMPTY*/`. The qual expression is
+// transformed (-> bool) at analysis time; CURRENT OF grows at its milestone.
+WhereClause: Option<Node> = {
+    "WHERE" <e:AExpr> => Some(e),
+    => None,
+};
+
 // ===========================================================================
 //  Target list
 // ===========================================================================
@@ -349,18 +368,96 @@ TargetEl: Node = {
 //  comparison / function tower is built out in M3+.
 // ===========================================================================
 
+// gram.y `a_expr` is one big rule whose alternatives carry %prec annotations; we
+// reproduce its operator precedence (gram.y's %left/%nonassoc/%right table) with
+// a precedence-tier nonterminal cascade instead. Loosest binding first:
+//   OR  <  AND  <  NOT  <  comparison(nonassoc)  <  '+' '-'  <  '*' '/' '%'  <
+//   unary '-'  <  c_expr.
+// M3 reaches the boolean (AND/OR/NOT), comparison, and arithmetic operators over
+// the c_expr leaves; IS / BETWEEN / IN / LIKE / casts etc. grow at their
+// milestones. Every alternative is complete.
 AExpr: Node = {
+    OrExpr,
+};
+
+// gram.y `a_expr OR a_expr` (%left OR). A_Expr boolean op -> BoolExpr(OR).
+OrExpr: Node = {
+    <l:OrExpr> "OR" <r:AndExpr> => make_or_expr(l, r),
+    AndExpr,
+};
+
+// gram.y `a_expr AND a_expr` (%left AND).
+AndExpr: Node = {
+    <l:AndExpr> "AND" <r:NotExpr> => make_and_expr(l, r),
+    NotExpr,
+};
+
+// gram.y `NOT a_expr` (%right NOT).
+NotExpr: Node = {
+    "NOT" <e:NotExpr> => make_not_expr(e),
+    CompareExpr,
+};
+
+// gram.y comparison operators (%nonassoc: no chaining, so the operands are the
+// next-tighter tier). Each builds an A_Expr(OP) over the named operator.
+CompareExpr: Node = {
+    <l:AddExpr> "<"  <r:AddExpr> => make_a_expr("<", l, r),
+    <l:AddExpr> ">"  <r:AddExpr> => make_a_expr(">", l, r),
+    <l:AddExpr> "="  <r:AddExpr> => make_a_expr("=", l, r),
+    <l:AddExpr> "<=" <r:AddExpr> => make_a_expr("<=", l, r),
+    <l:AddExpr> ">=" <r:AddExpr> => make_a_expr(">=", l, r),
+    <l:AddExpr> "<>" <r:AddExpr> => make_a_expr("<>", l, r),
+    AddExpr,
+};
+
+// gram.y `a_expr '+'/'-' a_expr` (%left '+' '-').
+AddExpr: Node = {
+    <l:AddExpr> "+" <r:MulExpr> => make_a_expr("+", l, r),
+    <l:AddExpr> "-" <r:MulExpr> => make_a_expr("-", l, r),
+    MulExpr,
+};
+
+// gram.y `a_expr '*'/'/'/'%' a_expr` (%left '*' '/' '%').
+MulExpr: Node = {
+    <l:MulExpr> "*" <r:UnaryExpr> => make_a_expr("*", l, r),
+    <l:MulExpr> "/" <r:UnaryExpr> => make_a_expr("/", l, r),
+    <l:MulExpr> "%" <r:UnaryExpr> => make_a_expr("%", l, r),
+    UnaryExpr,
+};
+
+// gram.y `'-' a_expr %prec UMINUS` / `'+' a_expr %prec UMINUS` (%right UMINUS).
+// A leading '-' on a constant negates it in place (doNegate); over a non-constant
+// it becomes the unary-minus operator A_Expr (deferred to its milestone in
+// do_negate). A leading '+' is a no-op.
+UnaryExpr: Node = {
+    "-" <e:UnaryExpr> => do_negate(e),
+    "+" <e:UnaryExpr> => e,
     CExpr,
-    // gram.y: '-' a_expr %prec UMINUS { doNegate }, '+' a_expr %prec UMINUS.
-    // Restricted to a constant operand for now (no general unary expr yet).
-    "-" <c:CExpr> => do_negate(c),
-    "+" <c:CExpr> => c,
 };
 
 CExpr: Node = {
     AexprConst,
     // gram.y `c_expr: columnref`. A bare or table-qualified column reference.
     ColumnRef,
+    // gram.y `c_expr: '(' a_expr ')'`.
+    "(" <e:AExpr> ")" => e,
+    // gram.y `c_expr: func_expr`.
+    FuncExpr,
+};
+
+// gram.y `func_expr: func_application ...`. M3 reaches a plain function call
+// `name ( arglist )`; WITHIN GROUP / FILTER / OVER and the special func_expr
+// forms (CURRENT_DATE, COALESCE, ...) grow at their milestones.
+FuncExpr: Node = {
+    FuncApplication,
+};
+
+// gram.y `func_application: func_name '(' func_arg_list ')' | func_name '(' ')'`.
+// M3 covers an unqualified function name over a (possibly empty) positional
+// argument list; VARIADIC / ORDER BY / named args / '*' grow at their milestones.
+FuncApplication: Node = {
+    <n:ColId> "(" ")" => make_func_call(vec![n], Vec::new()),
+    <n:ColId> "(" <args:ExprList> ")" => make_func_call(vec![n], args),
 };
 
 // gram.y `columnref: ColId | ColId indirection`. M2 covers `col` and

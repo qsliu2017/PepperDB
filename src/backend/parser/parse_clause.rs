@@ -151,3 +151,18 @@ fn relation_does_not_exist(relname: &str) -> ! {
     });
     unreachable!("ereport(ERROR) diverges");
 }
+
+/// PG `transformWhereClause`: transform a WHERE/HAVING-style qualifier expression
+/// and coerce it to boolean. A NULL clause yields no qual. `construct_name` names
+/// the clause for the type-mismatch error (e.g. "WHERE").
+#[must_use]
+pub fn transform_where_clause(
+    pstate: &mut ParseState,
+    clause: Option<Node>,
+    expr_kind: crate::parser::parse_node::ParseExprKind,
+    construct_name: &str,
+) -> Option<Node> {
+    let clause = clause?;
+    let qual = crate::parser::parse_expr::transformExpr(pstate, Some(clause), expr_kind)?;
+    Some(crate::parser::parse_coerce::coerce_to_boolean(pstate, qual, construct_name))
+}

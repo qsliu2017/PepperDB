@@ -36,30 +36,14 @@ pub struct FuncDetail {
     pub argdefaults: Vec<Node>,
 }
 
-pub fn ParseFuncOrColumn(
-    _pstate: &mut ParseState,
-    _funcname: Vec<Node>,
-    _fargs: Vec<Node>,
-    _last_srf: Option<Node>,
-    _fn_: &FuncCall,
-    _proc_call: bool,
-    _location: i32,
-) -> Node {
-    unimplemented!()
-}
+/// PG `ParseFuncOrColumn`. See `crate::backend::parser::parse_func` (M3 body):
+/// `(pstate, funcname: &[Node], fargs, fn_, location)`. The `last_srf`/`proc_call`
+/// parameters of the C signature are threaded in once the SRF / CALL paths land.
+pub use crate::backend::parser::parse_func::parse_func_or_column as ParseFuncOrColumn;
 
-pub fn func_get_detail(
-    _funcname: Vec<Node>,
-    _fargs: Vec<Node>,
-    _fargnames: Vec<Node>,
-    _nargs: i32,
-    _argtypes: &[Oid],
-    _expand_variadic: bool,
-    _expand_defaults: bool,
-    _include_out_arguments: bool,
-) -> (FuncDetailCode, FuncDetail) {
-    unimplemented!()
-}
+/// PG `func_get_detail`. See `crate::backend::parser::parse_func` (M3 body):
+/// `(funcname: &[Node], argtypes) -> (FuncDetailCode, Option<FuncDetail>)`.
+pub use crate::backend::parser::parse_func::func_get_detail;
 
 /// Returns the number of matches; fills `candidates` out-param.
 pub fn func_match_argtypes(

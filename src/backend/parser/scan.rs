@@ -51,6 +51,16 @@ pub enum Token {
     Dot,     // .
     Plus,    // +
     Minus,   // -
+    Slash,   // /
+    Percent, // %
+    Lt,      // <
+    Gt,      // >
+    Eq,      // =
+    // Multi-character comparison operators (PG's LESS_EQUALS / GREATER_EQUALS /
+    // NOT_EQUALS; `!=` is lexed as `<>` per PG scan.l).
+    LessEquals,    // <=
+    GreaterEquals, // >=
+    NotEquals,     // <>  (also the spelling for !=)
 }
 
 /// Raw token classes emitted by logos before keyword resolution and literal
@@ -90,6 +100,17 @@ enum Raw {
     #[token(".")] Dot,
     #[token("+")] Plus,
     #[token("-")] Minus,
+    #[token("/")] Slash,
+    #[token("%")] Percent,
+    // Multi-char comparison operators first (logos picks the longest match, but
+    // the spellings are listed explicitly to mirror PG scan.l's self/op rules).
+    #[token("<=")] LessEquals,
+    #[token(">=")] GreaterEquals,
+    #[token("<>")] NotEquals,
+    #[token("!=")] BangEquals,
+    #[token("<")] Lt,
+    #[token(">")] Gt,
+    #[token("=")] Eq,
 }
 
 /// Strip the surrounding single quotes and collapse doubled `''` to a single `'`.
@@ -125,6 +146,15 @@ pub fn lex(src: &str) -> impl Iterator<Item = Result<(Loc, Token, Loc), LexError
             Raw::Dot => Token::Dot,
             Raw::Plus => Token::Plus,
             Raw::Minus => Token::Minus,
+            Raw::Slash => Token::Slash,
+            Raw::Percent => Token::Percent,
+            Raw::Lt => Token::Lt,
+            Raw::Gt => Token::Gt,
+            Raw::Eq => Token::Eq,
+            Raw::LessEquals => Token::LessEquals,
+            Raw::GreaterEquals => Token::GreaterEquals,
+            // PG scan.l rewrites `!=` to `<>` at scan time; both yield NotEquals.
+            Raw::NotEquals | Raw::BangEquals => Token::NotEquals,
         };
         Ok((start, tok, end))
     })
@@ -183,6 +213,18 @@ mod tests {
             vec![
                 Token::Semi, Token::Comma, Token::Star, Token::LParen,
                 Token::RParen, Token::Dot, Token::Plus, Token::Minus,
+            ]
+        );
+    }
+
+    #[test]
+    fn arithmetic_and_comparison_operators() {
+        assert_eq!(
+            toks("+ - * / % < > = <= >= <> !="),
+            vec![
+                Token::Plus, Token::Minus, Token::Star, Token::Slash, Token::Percent,
+                Token::Lt, Token::Gt, Token::Eq, Token::LessEquals, Token::GreaterEquals,
+                Token::NotEquals, Token::NotEquals,
             ]
         );
     }

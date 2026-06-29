@@ -277,8 +277,27 @@ fn datum_eq_by_type(
         (true, 4) => DatumGetInt32(a) == DatumGetInt32(b), // oid/int4: low 32 bits
         (true, 2) => DatumGetInt16(a) == DatumGetInt16(b),
         (false, 64) => name_eq(a, b), // NAMEDATALEN fixed name
-        // by-value other widths, and by-ref pointer/other: compare datum bits.
+        // by-ref varlena (attlen -1): compare the value bytes (the oidvector
+        // proargtypes key of PROCNAMEARGSNSP). The catalog never toasts these keys.
+        (false, -1) => varlena_eq(a, b),
+        // by-value other widths, and other by-ref: compare datum bits.
         _ => a.0 == b.0,
+    }
+}
+
+/// Compare two 4-byte-header varlena datums by their full bytes (the oidvector
+/// catalog key). A null pointer compares equal only to another null pointer.
+fn varlena_eq(a: Datum, b: Datum) -> bool {
+    if a.0 == 0 || b.0 == 0 {
+        return a.0 == b.0;
+    }
+    // SAFETY: each Datum points at a 4-byte-header varlena; VARSIZE bounds the slice.
+    unsafe {
+        let pa = a.0 as *const u8;
+        let pb = b.0 as *const u8;
+        let la = crate::varatt::VARSIZE(pa) as usize;
+        let lb = crate::varatt::VARSIZE(pb) as usize;
+        la == lb && std::slice::from_raw_parts(pa, la) == std::slice::from_raw_parts(pb, lb)
     }
 }
 

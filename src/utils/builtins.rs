@@ -107,8 +107,45 @@ pub fn pg_ultostr(_str: &mut [u8], _value: u32) -> *mut u8 {
 }
 
 // oid.c
-pub fn buildoidvector(_oids: &[Oid]) -> *mut oidvector {
-    unimplemented!()
+/// PG `buildoidvector`: build a 1-D `oidvector` from `oids`. Lays out the standard
+/// array header (ndim 1, dataoffset 0, elemtype OID, lbound 0 for historical
+/// reasons) followed by the element OIDs, with the varlena length set. The buffer
+/// is leaked (no MemoryContext yet); callers carry it in a byref Datum.
+/// TODO(memory-context): reclaim via the per-call context when palloc lands.
+#[must_use]
+#[allow(
+    clippy::cast_ptr_alignment,
+    reason = "the buffer is a fresh u64-backed Box (8-byte aligned), which satisfies \
+              oidvector's 4-byte field alignment; the cast is sound"
+)]
+pub fn buildoidvector(oids: &[Oid]) -> *mut oidvector {
+    use crate::varatt::SET_VARSIZE;
+    let n = oids.len();
+    // OidVectorSize(n): the fixed header up to `values`, plus n element OIDs.
+    let header = core::mem::offset_of!(oidvector, values);
+    let total = header + core::mem::size_of_val(oids);
+    // Back the buffer with a `u64` Vec so it is 8-byte aligned (>= oidvector's
+    // 4-byte field alignment); a plain `Vec<u8>` would not guarantee alignment.
+    let words = total.div_ceil(core::mem::size_of::<u64>());
+    let mut buf = vec![0u64; words].into_boxed_slice();
+    let base = buf.as_mut_ptr().cast::<u8>();
+    let ptr = base.cast::<oidvector>();
+    // SAFETY: `base`/`ptr` head a freshly-allocated, 8-byte-aligned buffer of at
+    // least `total` bytes laid out exactly as `oidvector` (repr(C)); the field
+    // writes and the element copy stay in bounds.
+    unsafe {
+        SET_VARSIZE(base, total as u32);
+        (*ptr).ndim = 1;
+        (*ptr).dataoffset = 0;
+        (*ptr).elemtype = crate::catalog::genbki::OIDOID;
+        (*ptr).dim1 = i32::try_from(n).unwrap_or(0);
+        (*ptr).lbound1 = 0;
+        if n > 0 {
+            let vptr = std::ptr::addr_of_mut!((*ptr).values).cast::<Oid>();
+            core::ptr::copy_nonoverlapping(oids.as_ptr(), vptr, n);
+        }
+    }
+    Box::leak(buf).as_mut_ptr().cast::<oidvector>()
 }
 pub fn check_valid_oidvector(_oid_array: &oidvector) {
     unimplemented!()

@@ -295,6 +295,43 @@ pub fn exprIsLengthCoercion(_expr: &Node) -> Option<i32> {
     unimplemented!("exprIsLengthCoercion: length-coercion recognition deferred")
 }
 
+/// PG `exprSetCollation`: set the collation of an expression's result. M3 reaches
+/// the nodes the operator/function transform produces (`OpExpr` / `FuncExpr` /
+/// `BoolExpr`); for boolean-result nodes (BoolExpr, and comparison OpExprs whose
+/// result is bool) PG asserts the collation is InvalidOid, which holds for the M3
+/// int4/bool path. The remaining collation-bearing arms grow with their node types.
+pub fn exprSetCollation(expr: &mut Node, collation: Oid) {
+    match expr {
+        Node::OpExpr(o) | Node::DistinctExpr(o) | Node::NullIfExpr(o) => o.opcollid = collation,
+        Node::FuncExpr(f) => f.funccollid = collation,
+        // BoolExpr's result is boolean (uncollatable); nothing to set.
+        Node::BoolExpr(_) => {}
+        other => not_yet_reachable("exprSetCollation", other),
+    }
+}
+
+/// PG `exprLocation`: the parse location of an expression (for error positioning).
+/// M3 covers the nodes the operator/function transform produces and their leaves;
+/// the remaining arms grow with their node types. `-1` means "unknown".
+#[must_use]
+pub fn exprLocation(expr: &Node) -> i32 {
+    match expr {
+        Node::Var(v) => v.location,
+        Node::Const(c) => c.location,
+        Node::Param(p) => p.location,
+        Node::FuncExpr(f) => f.location,
+        Node::OpExpr(o) | Node::DistinctExpr(o) | Node::NullIfExpr(o) => o.location,
+        Node::BoolExpr(b) => b.location,
+        Node::A_Expr(a) => a.location,
+        Node::A_Const(c) => c.location,
+        Node::ColumnRef(c) => c.location,
+        Node::FuncCall(fc) => fc.location,
+        // Unknown / not-yet-covered nodes (incl. TargetEntry, which has no location)
+        // report "unknown location" (-1), PG's safe default.
+        _ => -1,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Expression tree walker / mutator framework.
 //

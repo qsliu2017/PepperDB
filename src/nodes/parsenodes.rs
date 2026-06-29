@@ -235,7 +235,11 @@ pub enum A_Expr_Kind {
     NOT_BETWEEN_SYM,
 }
 
-// TODO(M3): restructure A_Expr into a per-kind enum (OP/OP_ANY/OP_ALL/...), each variant keeping only its needed fields; deferred until operator productions populate it at M3.
+// A_Expr is kept as a single struct with a `kind` discriminant (matching PG's
+// `A_Expr`), not a per-kind Rust enum. M3 populates only AEXPR_OP; restructuring
+// into a per-kind enum is deferred -- the struct + `kind` field mirrors gram.y/
+// makeSimpleA_Expr exactly and the OP arm needs no extra fields, so the enum split
+// buys nothing yet (revisit if the OP_ANY/OP_ALL/IN/BETWEEN kinds diverge in shape).
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct A_Expr {

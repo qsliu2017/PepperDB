@@ -74,3 +74,42 @@ pub fn coerce_to_target_type(
     }
     not_yet_reachable();
 }
+
+/// PG `coerce_to_boolean`: coerce `expr` to type boolean (for WHERE/HAVING/etc).
+/// M3 reaches the case where the expression is already boolean (a comparison
+/// OpExpr) -- the identity. A non-boolean argument routes through `coerce_to_target_type`
+/// (the implicit-cast search), which grows with the cast catalog; `coerce_to_boolean`
+/// raises the "argument of X must be type boolean" error for an uncoercible type.
+pub fn coerce_to_boolean(
+    pstate: &mut ParseState,
+    expr: Node,
+    construct_name: &str,
+) -> Node {
+    use crate::catalog::genbki::BOOLOID;
+    use crate::nodes::nodeFuncs::exprType;
+
+    let input_type_id = exprType(&expr);
+    if input_type_id == BOOLOID {
+        return expr;
+    }
+    // Try an implicit coercion to bool (covers the unknown-literal case once casts
+    // land). On failure, PG raises an error naming `construct_name`.
+    let location = crate::nodes::nodeFuncs::exprLocation(&expr);
+    coerce_to_target_type(
+        pstate,
+        Some(expr),
+        input_type_id,
+        BOOLOID,
+        -1,
+        CoercionContext::ASSIGNMENT,
+        CoercionForm::IMPLICIT_CAST,
+        location,
+    )
+    .unwrap_or_else(|| {
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_DATATYPE_MISMATCH)
+                .errmsg(format!("argument of {construct_name} must be type boolean"));
+        });
+        unreachable!("ereport(ERROR) diverges");
+    })
+}

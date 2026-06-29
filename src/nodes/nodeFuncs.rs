@@ -61,9 +61,9 @@ bitflags! {
 // Translated bodies (crate::backend::nodes::nodeFuncs), re-exported under C names
 // (these are already C-cased) and snake_case names where PG uses them.
 pub use crate::backend::nodes::nodeFuncs::{
-    exprCollation, exprIsLengthCoercion, exprType, exprTypmod, expression_tree_mutator,
-    expression_tree_walker, get_leftop, get_notclausearg, get_rightop, is_andclause,
-    is_funcclause, is_notclause, is_opclause, is_orclause,
+    exprCollation, exprIsLengthCoercion, exprLocation, exprSetCollation, exprType, exprTypmod,
+    expression_tree_mutator, expression_tree_walker, get_leftop, get_notclausearg, get_rightop,
+    is_andclause, is_funcclause, is_notclause, is_opclause, is_orclause,
 };
 
 pub fn applyRelabelType(
@@ -99,18 +99,8 @@ pub fn exprInputCollation(expr: &Node) -> Oid {
     unimplemented!()
 }
 
-pub fn exprSetCollation(expr: &mut Node, collation: Oid) {
-    let _ = (expr, collation);
-    unimplemented!()
-}
-
 pub fn exprSetInputCollation(expr: &mut Node, inputcollation: Oid) {
     let _ = (expr, inputcollation);
-    unimplemented!()
-}
-
-pub fn exprLocation(expr: &Node) -> i32 {
-    let _ = expr;
     unimplemented!()
 }
 

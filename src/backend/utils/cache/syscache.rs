@@ -97,6 +97,45 @@ pub fn cacheinfo() -> Vec<CacheDesc> {
     set(SysCacheIdentifier::CLAOID, cd(OperatorClassRelationId, [1, 0, 0, 0], 1, 8));
     // pg_operator.oid.
     set(SysCacheIdentifier::OPEROID, cd(OperatorRelationId, [1, 0, 0, 0], 1, 32));
+    // pg_operator (oprname, oprleft, oprright, oprnamespace) -- the operator
+    // resolution key (OpernameGetOprid via SearchSysCache4(OPERNAMENSP)).
+    {
+        use crate::catalog::pg_operator as o;
+        set(
+            SysCacheIdentifier::OPERNAMENSP,
+            cd(
+                OperatorRelationId,
+                [
+                    o::Anum_pg_operator_oprname as i16,
+                    o::Anum_pg_operator_oprleft as i16,
+                    o::Anum_pg_operator_oprright as i16,
+                    o::Anum_pg_operator_oprnamespace as i16,
+                ],
+                4,
+                256,
+            ),
+        );
+    }
+    // pg_proc (proname, proargtypes, pronamespace) -- function resolution key
+    // (func_get_detail via SearchSysCache3(PROCNAMEARGSNSP)). proargtypes is an
+    // oidvector key (compared by value bytes; see catcache KeyKind::Oidvector).
+    {
+        use crate::catalog::pg_proc as p;
+        set(
+            SysCacheIdentifier::PROCNAMEARGSNSP,
+            cd(
+                ProcedureRelationId,
+                [
+                    p::Anum_pg_proc_proname as i16,
+                    p::Anum_pg_proc_proargtypes as i16,
+                    p::Anum_pg_proc_pronamespace as i16,
+                    0,
+                ],
+                3,
+                128,
+            ),
+        );
+    }
     // pg_amproc (amprocfamily, amproclefttype, amprocrighttype, amprocnum).
     set(
         SysCacheIdentifier::AMPROCNUM,

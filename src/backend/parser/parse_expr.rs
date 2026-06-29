@@ -55,10 +55,68 @@ fn transform_expr_recurse(pstate: &mut ParseState, expr: Option<Node>) -> Option
             Some(Node::Const(crate::parser::parse_node::make_const(pstate, &aconst)))
         }
         Node::ColumnRef(cref) => Some(transform_column_ref(pstate, &cref)),
-        // ParamRef / A_Expr / FuncCall / TypeCast / ... arms are filled by later
-        // milestones; for now they route here cleanly.
+        Node::A_Expr(aexpr) => Some(transform_a_expr(pstate, *aexpr)),
+        Node::BoolExpr(bexpr) => Some(transform_bool_expr(pstate, *bexpr)),
+        Node::FuncCall(fc) => Some(transform_func_call(pstate, &fc)),
+        // ParamRef / TypeCast / CaseExpr / ... arms are filled by later milestones;
+        // for now they route here cleanly.
         other => not_yet_reachable(&other),
     }
+}
+
+/// PG `transformAExprOp` (the AEXPR_OP arm of transformAExpr): transform both
+/// operands and resolve the operator into an `OpExpr` via `make_op`. M3 reaches the
+/// plain binary operator; the row-comparison / "expr op (subselect)" / scalar-array
+/// special cases grow at their milestones.
+fn transform_a_expr(pstate: &mut ParseState, a: crate::nodes::parsenodes::A_Expr) -> Node {
+    use crate::nodes::parsenodes::A_Expr_Kind;
+    if a.kind != A_Expr_Kind::OP {
+        unimplemented!("transformAExpr: non-OP A_Expr kind not yet reachable for this milestone");
+    }
+    let last_srf = pstate.p_last_srf.clone();
+    let lexpr = transform_expr_recurse(pstate, a.lexpr);
+    let rexpr = transform_expr_recurse(pstate, a.rexpr);
+    crate::parser::parse_oper::make_op(pstate, &a.name, lexpr, rexpr, last_srf.as_ref(), a.location)
+}
+
+/// PG `transformBoolExpr`: transform each argument to bool and build the BoolExpr.
+/// Each argument is coerced to boolean (`coerce_to_boolean`); for M3 the AND/OR/NOT
+/// operands are already boolean expressions (comparisons), so the coercion is the
+/// identity. The non-boolean-argument coercion grows with `coerce_to_boolean`.
+fn transform_bool_expr(pstate: &mut ParseState, b: crate::nodes::primnodes::BoolExpr) -> Node {
+    let args = b
+        .args
+        .into_iter()
+        .map(|arg| {
+            transform_expr_recurse(pstate, Some(arg))
+                .unwrap_or_else(|| not_yet_reachable_msg("transformBoolExpr: NULL argument"))
+        })
+        .collect();
+    Node::BoolExpr(Box::new(crate::nodes::primnodes::BoolExpr {
+        boolop: b.boolop,
+        args,
+        location: b.location,
+    }))
+}
+
+/// PG `transformFuncCall` -> `ParseFuncOrColumn`: transform the argument list and
+/// resolve the function (or column projection) into a FuncExpr.
+fn transform_func_call(pstate: &mut ParseState, fc: &crate::nodes::parsenodes::FuncCall) -> Node {
+    let args = fc
+        .args
+        .iter()
+        .cloned()
+        .map(|arg| {
+            transform_expr_recurse(pstate, Some(arg))
+                .unwrap_or_else(|| not_yet_reachable_msg("transformFuncCall: NULL argument"))
+        })
+        .collect();
+    crate::parser::parse_func::ParseFuncOrColumn(pstate, &fc.funcname, args, fc, fc.location)
+}
+
+#[cold]
+fn not_yet_reachable_msg(msg: &str) -> ! {
+    unimplemented!("{msg}");
 }
 
 /// PG `transformColumnRef`: resolve a `ColumnRef` to a `Var` (or whole-row ref).

@@ -210,5 +210,57 @@ fn name_to_string(name: &crate::c::NameData) -> String {
     String::from_utf8_lossy(&name.data[..end]).into_owned()
 }
 
+// ---------------------------------------------------------------------------
+// pg_proc accessors (SYNC, warm-hit): read a few columns of a pg_proc row.
+// ---------------------------------------------------------------------------
+
+/// Raise PG's "cache lookup failed for function" error (a sync accessor hit a cold
+/// PROCOID cache). Diverges (>= ERROR).
+#[cold]
+fn proc_cache_lookup_failed(funcid: Oid) -> ! {
+    crate::elog!(
+        crate::utils::elog::ERROR,
+        format!("cache lookup failed for function {} (syscache not warm)", funcid.0)
+    );
+    unreachable!("elog!(ERROR) raises")
+}
+
+/// Read the `Form_pg_proc` out of a held PROCOID syscache tuple. The borrow is tied
+/// to the tuple borrow (rule 10).
+///
+/// SAFETY: `tuple`'s fixed part is a pg_proc row (a held PROCOID syscache hit).
+unsafe fn proc_form(tuple: &HeapTupleData) -> &crate::catalog::pg_proc::FormData_pg_proc {
+    let p = GETSTRUCT(tuple).cast::<crate::catalog::pg_proc::FormData_pg_proc>();
+    // SAFETY: `p` points into `tuple`'s body; the borrow is rooted in `tuple`.
+    unsafe { &*p }
+}
+
+/// `get_func_retset` (SYNC): whether the function returns a set (proretset). Reads
+/// pg_proc via a warm PROCOID hit. Used by make_op to set `OpExpr.opretset`.
+#[must_use]
+pub fn get_func_retset(funcid: Oid) -> bool {
+    let Some(tuple) = search_sys_cache(SysCacheIdentifier::PROCOID, &[ObjectIdGetDatum(funcid)])
+    else {
+        proc_cache_lookup_failed(funcid);
+    };
+    // SAFETY: `tuple` is a held PROCOID hit -> a pg_proc row.
+    let retset = unsafe { proc_form(&*tuple) }.proretset;
+    release_sys_cache(tuple);
+    retset
+}
+
+/// `get_func_rettype` (SYNC): the function's result type (prorettype).
+#[must_use]
+pub fn get_func_rettype(funcid: Oid) -> Oid {
+    let Some(tuple) = search_sys_cache(SysCacheIdentifier::PROCOID, &[ObjectIdGetDatum(funcid)])
+    else {
+        proc_cache_lookup_failed(funcid);
+    };
+    // SAFETY: `tuple` is a held PROCOID hit -> a pg_proc row.
+    let rettype = unsafe { proc_form(&*tuple) }.prorettype;
+    release_sys_cache(tuple);
+    rettype
+}
+
 // Keep Datum referenced (used by the public header re-exports' signatures).
 const _: fn(Oid) -> Datum = ObjectIdGetDatum;

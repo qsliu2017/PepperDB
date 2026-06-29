@@ -54,15 +54,16 @@ pub fn make_a_expr(
 
 /// PG `makeSimpleA_Expr`: as `make_a_expr`, given a simple (unqualified) operator name.
 pub fn make_simple_a_expr(
-    _kind: A_Expr_Kind,
-    _name: &str,
-    _lexpr: Option<Node>,
-    _rexpr: Option<Node>,
-    _location: i32,
+    kind: A_Expr_Kind,
+    name: &str,
+    lexpr: Option<Node>,
+    rexpr: Option<Node>,
+    location: i32,
 ) -> A_Expr {
-    // name = list_make1(makeString(name)); a T_String value node is not yet a
-    // Node enum variant (crate::nodes::value). Not reachable for M1.
-    unimplemented!("makeSimpleA_Expr: T_String value node not yet a Node variant")
+    // C: name = list_make1(makeString(name)) -- a one-element list of a T_String
+    // value node.
+    let namelist = vec![Node::String_(makeString(name.to_owned()))];
+    make_a_expr(kind, namelist, lexpr, rexpr, location)
 }
 
 /// PG `makeVar`: creates a `Var` node.

@@ -64,7 +64,9 @@ pub type Form_pg_proc = *mut FormData_pg_proc; // TODO(ptr)
 
 // DECLARE_TOAST(pg_proc, 2836, 2837)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_proc_oid_index, 2690, ProcedureOidIndexId, ...)
+pub const ProcedureOidIndexId: Oid = Oid(2690);
 // DECLARE_UNIQUE_INDEX(pg_proc_proname_args_nsp_index, 2691, ProcedureNameArgsNspIndexId, ...)
+pub const ProcedureNameArgsNspIndexId: Oid = Oid(2691);
 // MAKE_SYSCACHE(PROCOID, pg_proc_oid_index, 128)
 // MAKE_SYSCACHE(PROCNAMEARGSNSP, pg_proc_proname_args_nsp_index, 128)
 

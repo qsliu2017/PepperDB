@@ -74,13 +74,8 @@ pub fn coerce_to_domain(
     unimplemented!()
 }
 
-pub fn coerce_to_boolean(
-    _pstate: &mut ParseState,
-    _node: Node,
-    _construct_name: &str,
-) -> Node {
-    unimplemented!()
-}
+/// PG `coerce_to_boolean`. See `crate::backend::parser::parse_coerce`.
+pub use crate::backend::parser::parse_coerce::coerce_to_boolean;
 
 pub fn coerce_to_specific_type(
     _pstate: &mut ParseState,

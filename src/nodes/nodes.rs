@@ -419,6 +419,17 @@ pub enum Node {
         Box<crate::nodes::supportnodes::SupportRequestOptimizeWindowClause>,
     ),
     SupportRequestModifyInPlace(Box<crate::nodes::supportnodes::SupportRequestModifyInPlace>),
+
+    // from nodes/value.rs -- the primitive value nodes (nodes.h T_Integer / T_Float
+    // / T_Boolean / T_String / T_BitString). These appear inside node lists (e.g.
+    // an operator name `List *` is a list of T_String, a type name's name parts,
+    // DefElem args). They carry their value inline (no Box: each is one machine
+    // word or a String).
+    Integer(crate::nodes::value::Integer),
+    Float(crate::nodes::value::Float),
+    Boolean(crate::nodes::value::Boolean),
+    String_(crate::nodes::value::String_),
+    BitString(crate::nodes::value::BitString),
     // NOTE: executor-state nodes (nodes/execnodes.rs) are runtime state that PG's
     // copyObject/equal/outNode never touch; they cannot derive Clone/PartialEq
     // (closures/opaque handles), so they are NOT Node variants. They live as plain
