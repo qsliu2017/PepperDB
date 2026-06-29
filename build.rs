@@ -921,6 +921,19 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("timetz_zone", "crate::backend::utils::adt::date::timetz_zone"),
     ("timetztypmodin", "crate::backend::utils::adt::date::timetztypmodin"),
     ("timetztypmodout", "crate::backend::utils::adt::date::timetztypmodout"),
+    // utils/adt/formatting.c (step 22C): to_char/to_date/to_timestamp/to_number,
+    // sorted by prosrc within this module block.
+    ("float4_to_char", "crate::backend::utils::adt::formatting::float4_to_char"),
+    ("float8_to_char", "crate::backend::utils::adt::formatting::float8_to_char"),
+    ("int4_to_char", "crate::backend::utils::adt::formatting::int4_to_char"),
+    ("int8_to_char", "crate::backend::utils::adt::formatting::int8_to_char"),
+    ("interval_to_char", "crate::backend::utils::adt::formatting::interval_to_char"),
+    ("numeric_to_char", "crate::backend::utils::adt::formatting::numeric_to_char"),
+    ("numeric_to_number", "crate::backend::utils::adt::formatting::numeric_to_number"),
+    ("timestamp_to_char", "crate::backend::utils::adt::formatting::timestamp_to_char"),
+    ("timestamptz_to_char", "crate::backend::utils::adt::formatting::timestamptz_to_char"),
+    ("to_date", "crate::backend::utils::adt::formatting::to_date"),
+    ("to_timestamp", "crate::backend::utils::adt::formatting::to_timestamp"),
 ];
 
 fn builtin_fn_path(prosrc: &str) -> Option<&'static str> {

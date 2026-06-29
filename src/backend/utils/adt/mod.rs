@@ -5,6 +5,7 @@ pub mod char;
 pub mod date;
 pub mod datetime;
 pub mod float;
+pub mod formatting;
 pub mod int;
 pub mod name;
 pub mod numeric;
