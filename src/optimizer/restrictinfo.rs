@@ -6,64 +6,16 @@
 
 use crate::nodes::bitmapset::{bms_is_subset, Bitmapset};
 use crate::nodes::pathnodes::{PlannerInfo, RelOptInfo, Relids, RestrictInfo};
-use crate::nodes::primnodes::{Expr, Index};
-use crate::postgres_ext::Oid;
+use crate::nodes::primnodes::Expr;
 
-pub fn make_plain_restrictinfo(
-    root: &mut PlannerInfo,
-    clause: Box<Expr>,
-    orclause: Box<Expr>,
-    is_pushed_down: bool,
-    has_clone: bool,
-    is_clone: bool,
-    pseudoconstant: bool,
-    security_level: Index,
-    required_relids: Relids,
-    incompatible_relids: Relids,
-    outer_relids: Relids,
-) -> RestrictInfo {
-    unimplemented!()
-}
-
-pub fn make_restrictinfo(
-    root: &mut PlannerInfo,
-    clause: Box<Expr>,
-    is_pushed_down: bool,
-    has_clone: bool,
-    is_clone: bool,
-    pseudoconstant: bool,
-    security_level: Index,
-    required_relids: Option<Relids>,
-    incompatible_relids: Option<Relids>,
-    outer_relids: Option<Relids>,
-) -> RestrictInfo {
-    unimplemented!()
-}
-
-/// Convenience for the common case of a valid-everywhere qual.
-pub fn make_simple_restrictinfo(root: &mut PlannerInfo, clause: Box<Expr>) -> RestrictInfo {
-    make_restrictinfo(
-        root, clause, true, false, false, false, 0, None, None, None,
-    )
-}
-
-pub fn commute_restrictinfo(rinfo: &RestrictInfo, comm_op: Oid) -> RestrictInfo {
-    unimplemented!()
-}
-
-pub fn restriction_is_or_clause(restrictinfo: &RestrictInfo) -> bool {
-    unimplemented!()
-}
+// Bodies live in the backend definition module (rules.md s3); re-export them so
+// `crate::optimizer::restrictinfo::<name>` keeps resolving under the C name.
+pub use crate::backend::optimizer::util::restrictinfo::{
+    commute_restrictinfo, extract_actual_clauses, get_actual_clauses, make_plain_restrictinfo,
+    make_restrictinfo, make_simple_restrictinfo, restriction_is_or_clause,
+};
 
 pub fn restriction_is_securely_promotable(restrictinfo: &RestrictInfo, rel: &RelOptInfo) -> bool {
-    unimplemented!()
-}
-
-pub fn get_actual_clauses(restrictinfo_list: &[RestrictInfo]) -> Vec<Expr> {
-    unimplemented!()
-}
-
-pub fn extract_actual_clauses(restrictinfo_list: &[RestrictInfo], pseudoconstant: bool) -> Vec<Expr> {
     unimplemented!()
 }
 

@@ -68,10 +68,6 @@ pub struct SeqScanRun<'rel> {
 pub fn exec_init_seq_scan<'rel>(node: &SeqScan, estate: &mut EState<'rel>, eflags: i32) -> Box<SeqScanRun<'rel>> {
     let _ = eflags;
     crate::assert!(
-        node.scan.plan.qual.is_empty(),
-        "ExecInitSeqScan: WHERE qual not yet reachable"
-    );
-    crate::assert!(
         node.scan.plan.lefttree.is_none() && node.scan.plan.righttree.is_none(),
         "ExecInitSeqScan: a scan node is childless"
     );
@@ -115,6 +111,10 @@ pub fn exec_init_seq_scan<'rel>(node: &SeqScan, estate: &mut EState<'rel>, eflag
     // with input desc = the scan slot's descriptor (so scan Vars resolve).
     exec_assign_projection_info(&mut ps, Some(Arc::clone(&scan_desc)));
 
+    // ExecInitQual: compile the WHERE qual (the scan slot is virtual, so the scan
+    // Vars in the qual read ecxt_scantuple directly). None when there is no WHERE.
+    ps.qual = crate::backend::executor::execExpr::exec_init_qual(&node.scan.plan.qual, None);
+
     let ss = ScanState {
         ps,
         ss_current_relation: None,
@@ -137,15 +137,28 @@ pub async fn exec_seq_scan<'r>(
     shared: &Arc<SharedState>,
     run: &'r mut SeqScanRun<'_>,
 ) -> Option<&'r mut TupleTableSlot> {
-    // ExecScanFetch -> SeqNext: lazily open the scan, fetch+deform the next tuple
-    // into the scan slot. Returns true if a tuple was produced.
-    let got = seq_next(shared, run).await;
-    if !got {
-        return None;
+    // PG's ExecScan loops fetch -> ExecQual -> project; the async fetch lives here,
+    // so loop: fetch+deform the next tuple (SeqNext), evaluate the WHERE qual +
+    // project (ExecScan). A qual-failed row yields None from exec_scan -> fetch the
+    // next one; a passing row returns the projected slot; end-of-scan returns None
+    // from seq_next. The borrow-checker needs the success/failure split below
+    // because `exec_scan` borrows `run` mutably for the returned slot's lifetime.
+    loop {
+        let got = seq_next(shared, run).await;
+        if !got {
+            return None;
+        }
+        // ExecScan: qual-check the scan slot; if it passes, project and stop.
+        if exec_scan(&mut run.state.ss).is_some() {
+            return run
+                .state
+                .ss
+                .ps
+                .ps_proj_info
+                .as_mut()
+                .and_then(|p| p.state.resultslot.as_deref_mut());
+        }
     }
-    // ExecScan: project the scan slot (Vars read econtext->ecxt_scantuple) and
-    // return the projected row. No WHERE qual in M2 (ExecQual is always true).
-    exec_scan(&mut run.state.ss)
 }
 
 /// PG `SeqNext`: fetch the next tuple from the table AM and store it in the scan

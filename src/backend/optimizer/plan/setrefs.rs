@@ -106,11 +106,12 @@ fn set_seqscan_refs(root: &mut PlannerInfo, mut plan: SeqScan, rtoffset: usize) 
     plan.scan.plan.plan_node_id = root.glob.last_plan_node_id;
     root.glob.last_plan_node_id += 1;
 
-    // fix_scan_list over the tlist: with rtoffset 0, a base-rel Var keeps its
-    // varno/varattno; the only fixups (ROWID_VAR / Param / upper-var offsetting)
-    // are not present on the M2 scan tlist.
+    // fix_scan_list over the tlist + qual: with rtoffset 0, a base-rel Var keeps
+    // its varno/varattno and every other expr (Const/OpExpr/FuncExpr/BoolExpr) is
+    // unchanged; the only fixups (ROWID_VAR / Param / upper-var offsetting) are not
+    // present on the M3 scan plan.
     fix_scan_tlist_identity(&plan.scan.plan.targetlist, rtoffset);
-    crate::assert!(plan.scan.plan.qual.is_empty());
+    fix_scan_qual_identity(&plan.scan.plan.qual, rtoffset);
     plan
 }
 
@@ -135,10 +136,10 @@ fn set_result_refs(root: &mut PlannerInfo, mut plan: Result, rtoffset: usize) ->
     plan
 }
 
-/// `fix_scan_list` over an M1/M2 scan/result targetlist. With `rtoffset == 0` the
-/// fixup is identity: a base-rel `Var` keeps its varno/varattno and a `Const`
-/// folds to itself. A non-zero offset, or a non-Var/Const expr (OpExpr/FuncCall),
-/// needs the general `fix_scan_expr` walk that grows with WHERE/expression plans.
+/// `fix_scan_list` over a scan/result targetlist. With `rtoffset == 0` the fixup
+/// is identity: a base-rel `Var` keeps its varno/varattno and every other expr
+/// folds to itself. A non-zero offset needs the general `fix_scan_expr` walk
+/// (ROWID_VAR / Param / upper-var offsetting) that grows with multi-query plans.
 fn fix_scan_tlist_identity(tlist: &[Node], rtoffset: usize) {
     if rtoffset != 0 {
         not_yet_reachable("set_plan_refs: non-zero rtoffset Var fixup");
@@ -147,9 +148,32 @@ fn fix_scan_tlist_identity(tlist: &[Node], rtoffset: usize) {
         let Node::TargetEntry(te) = entry else {
             not_yet_reachable("set_plan_refs: tlist entry is not a TargetEntry");
         };
-        match te.expr.as_ref() {
-            Some(Node::Const(_) | Node::Var(_)) | None => {}
-            Some(_) => not_yet_reachable("set_plan_refs: non-Var/Const expr in scan tlist"),
-        }
+        fix_scan_expr_identity(te.expr.as_ref());
+    }
+}
+
+/// `fix_scan_list` over a scan node's qual (an implicit-AND list of clauses).
+/// Identity at `rtoffset == 0`, like the tlist fixup.
+fn fix_scan_qual_identity(qual: &[Node], rtoffset: usize) {
+    if rtoffset != 0 {
+        not_yet_reachable("set_plan_refs: non-zero rtoffset qual fixup");
+    }
+    for clause in qual {
+        fix_scan_expr_identity(Some(clause));
+    }
+}
+
+/// `fix_scan_expr` (identity at rtoffset 0): validate that an expression contains
+/// only the node kinds reachable on the M3 scan plan (Var/Const/OpExpr/FuncExpr/
+/// BoolExpr); recurse to assert no surprising node deeper in. Var offsetting,
+/// PlaceHolderVar/Param/ROWID_VAR rewriting grow with multi-query plans.
+fn fix_scan_expr_identity(expr: Option<&Node>) {
+    let Some(expr) = expr else { return };
+    match expr {
+        Node::Const(_) | Node::Var(_) => {}
+        Node::OpExpr(op) => op.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
+        Node::FuncExpr(f) => f.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
+        Node::BoolExpr(b) => b.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
+        other => not_yet_reachable(&format!("set_plan_refs: unexpected scan expr {other:?}")),
     }
 }

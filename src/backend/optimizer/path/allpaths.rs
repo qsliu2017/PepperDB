@@ -33,19 +33,39 @@ pub fn make_one_rel(root: &mut PlannerInfo, joinlist: &[Node]) -> RelOptInfo {
     make_rel_from_joinlist(root, joinlist)
 }
 
-/// PG `set_base_rel_sizes` (M2 subset): set each base rel's row estimate. The
-/// `rows` come from `get_relation_info`'s tuple estimate (no restriction quals to
-/// apply in M2).
+/// PG `set_base_rel_sizes` -> `set_baserel_size_estimates`: set each base rel's
+/// row estimate as `tuples * clauselist_selectivity(baserestrictinfo)`. With no
+/// quals the selectivity is 1.0 (rows = tuples); a WHERE qual scales it by the
+/// rough default selectivities (clausesel.rs), enough to cost a qual'd scan.
 fn set_base_rel_sizes(root: &mut PlannerInfo) {
+    use crate::nodes::nodes::JoinType;
+
     for rti in 1..root.simple_rel_array.len() {
-        let Some(rel) = root.simple_rel_array[rti].as_mut() else {
+        // Take the rel out so we can pass `root` to clauselist_selectivity, then
+        // put it back (the rel's clauses are cloned for the estimate).
+        let Some(mut rel) = root.simple_rel_array[rti].take() else {
             continue;
         };
         if rel.reloptkind != RelOptKind::BASEREL {
+            root.simple_rel_array[rti] = Some(rel);
             continue;
         }
-        // set_baserel_size_estimates: rows = tuples (selectivity 1.0, no quals).
-        rel.rows = if rel.tuples > 0.0 { rel.tuples } else { 1.0 };
+        let clauses: Vec<Node> = rel.baserestrictinfo.iter().map(|ri| ri.clause.clone()).collect();
+        let selec = if clauses.is_empty() {
+            1.0
+        } else {
+            crate::backend::optimizer::path::clausesel::clauselist_selectivity(
+                root,
+                clauses,
+                0,
+                JoinType::INNER,
+                None,
+            )
+        };
+        let base = if rel.tuples > 0.0 { rel.tuples } else { 1.0 };
+        // clamp_row_est: at least one estimated row.
+        rel.rows = (base * selec).max(1.0);
+        root.simple_rel_array[rti] = Some(rel);
     }
 }
 

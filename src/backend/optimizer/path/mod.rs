@@ -2,4 +2,5 @@
 //! ref/postgres/src/backend/optimizer/path/.
 
 pub mod allpaths;
+pub mod clausesel;
 pub mod costsize;

@@ -4,4 +4,5 @@
 pub mod clauses;
 pub mod pathnode;
 pub mod plancat;
+pub mod restrictinfo;
 pub mod tlist;

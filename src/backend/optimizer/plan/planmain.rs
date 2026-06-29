@@ -136,11 +136,37 @@ fn build_scan_rel_with_path(
     let mut rel = make_base_rel(rti, reltarget);
     crate::backend::optimizer::util::plancat::get_relation_info(root, relid, false, &mut rel);
 
+    // deconstruct_jointree (initsplan): distribute the WHERE quals to the rels
+    // they reference. M3 has a single base rel, so every jointree qual is a
+    // base-restriction clause on it. Wrap each AND sub-clause in a RestrictInfo
+    // and append to baserestrictinfo before path generation.
+    distribute_jointree_quals_to_baserel(root, &mut rel);
+
     // Park the rel in the simple_rel_array so make_one_rel can find it by index.
     root.simple_rel_array[rti] = Some(Box::new(rel));
 
     let joinlist = jointree_fromlist(root);
     crate::backend::optimizer::path::allpaths::make_one_rel(root, &joinlist)
+}
+
+/// initsplan `deconstruct_jointree` / `distribute_restrictinfo_to_rels` (M3
+/// single-rel subset): take the jointree's WHERE quals (an implicit-AND list),
+/// wrap each clause in a RestrictInfo, and append to the single base rel's
+/// `baserestrictinfo`. With one base relation every qual is a base restriction;
+/// the join-clause distribution grows with joins.
+fn distribute_jointree_quals_to_baserel(root: &mut PlannerInfo, rel: &mut RelOptInfo) {
+    use crate::backend::nodes::makefuncs::make_ands_implicit;
+    use crate::backend::optimizer::util::restrictinfo::make_simple_restrictinfo;
+    use crate::nodes::nodes::Node;
+
+    let quals = match root.parse.jointree.as_ref() {
+        Some(Node::FromExpr(f)) => f.quals.clone(),
+        _ => None,
+    };
+    for clause in make_ands_implicit(quals) {
+        let rinfo = make_simple_restrictinfo(root, Box::new(clause));
+        rel.baserestrictinfo.push(Box::new(rinfo));
+    }
 }
 
 /// PG `setup_simple_rel_arrays`: size `simple_rel_array`/`simple_rte_array` to

@@ -42,24 +42,32 @@ pub fn create_plan_recurse(root: &mut PlannerInfo, best_path: &Path) -> Node {
 }
 
 /// PG `create_seqscan_plan`: build a `SeqScan` plan from a seqscan Path. The plan's
-/// targetlist is built from the path's pathtarget (`build_path_tlist`); M2 has no
-/// scan_clauses (no WHERE), so the qual is empty. The scanrelid is the base rel's
-/// RT index.
+/// targetlist is built from the path's pathtarget (`build_path_tlist`); its qual is
+/// the base rel's restriction clauses (the WHERE), stripped of their RestrictInfo
+/// wrappers by `extract_actual_clauses`. The scanrelid is the base rel's RT index.
 fn create_seqscan_plan(root: &mut PlannerInfo, best_path: &Path) -> SeqScan {
-    let scan_relid = best_path
+    let parent = best_path
         .parent
         .as_ref()
-        .unwrap_or_else(|| not_yet_reachable("create_seqscan_plan: missing parent rel"))
-        .relid;
+        .unwrap_or_else(|| not_yet_reachable("create_seqscan_plan: missing parent rel"));
+    let scan_relid = parent.relid;
     crate::assert!(scan_relid > 0);
 
     if best_path.param_info.is_some() {
         not_yet_reachable("create_seqscan_plan: parameterized scan (nestloop params)");
     }
 
+    // scan_clauses = rel->baserestrictinfo. Sort/qpqual reordering and
+    // index-implied-clause removal grow later; M3 takes the per-tuple clauses.
+    let scan_clauses: Vec<crate::nodes::pathnodes::RestrictInfo> =
+        parent.baserestrictinfo.iter().map(|ri| (**ri).clone()).collect();
+    let qual = crate::backend::optimizer::util::restrictinfo::extract_actual_clauses(
+        &scan_clauses,
+        false,
+    );
+
     let tlist = build_path_tlist(root, best_path);
-    // scan_clauses are rel->baserestrictinfo, empty in M2 (no WHERE).
-    let mut plan = make_seqscan(tlist, Vec::new(), scan_relid);
+    let mut plan = make_seqscan(tlist, qual, scan_relid);
     copy_generic_path_info(&mut plan.scan.plan, best_path);
     plan
 }

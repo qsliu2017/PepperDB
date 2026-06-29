@@ -14,15 +14,19 @@
 )]
 
 use crate::executor::execExpr::{
-    AssignTmpData, AssignVarData, ConstvalData, ExprEvalOp, ExprEvalStep, ExprEvalStepData,
-    FetchData, VarData,
+    AssignTmpData, AssignVarData, BoolexprData, ConstvalData, ExprEvalOp, ExprEvalStep,
+    ExprEvalStepData, FetchData, FuncData, QualexprData, VarData,
 };
-use crate::nodes::execnodes::{ExprContext, ExprState, PlanState, ProjectionInfo};
+use crate::nodes::execnodes::{EeoFlag, ExprContext, ExprState, PlanState, ProjectionInfo};
 use crate::nodes::nodes::Node;
-use crate::nodes::primnodes::{Expr, Var, VarReturningType};
-use crate::postgres::Datum;
+use crate::nodes::primnodes::{BoolExpr, BoolExprType, Expr, FuncExpr, OpExpr, Var, VarReturningType};
+use crate::postgres::{Datum, NullableDatum};
+use crate::postgres_ext::Oid;
 
 use crate::backend::executor::execExprInterp::exec_ready_interpreted_expr;
+use crate::fmgr::{
+    fmgr_info, fmgr_info_set_expr, FmgrInfo, FunctionCallInfoBaseData, InitFunctionCallInfoData,
+};
 
 /// Panic for an expression node kind not yet translated (rules.md s4).
 #[cold]
@@ -65,8 +69,211 @@ fn exec_init_expr_rec(node: &Node, state: &mut ExprState) {
             };
             expr_eval_push_step(state, step);
         }
+        Node::Var(var) => {
+            // EEOP_SCAN_VAR: read the scan-slot attribute into the scratch. M3
+            // plans only SeqScans, so every Var is a scan Var (OUTER/INNER for join
+            // inputs grow with join nodes). System / whole-row Vars grow later.
+            crate::assert!(var.varattno > 0, "system/whole-row Var not yet reachable");
+            crate::assert!(
+                var.varreturningtype == VarReturningType::DEFAULT,
+                "OLD/NEW returning Var not yet reachable"
+            );
+            expr_eval_push_step(
+                state,
+                ExprEvalStep {
+                    opcode: ExprEvalOp::SCAN_VAR,
+                    resvalue: None,
+                    resnull: None,
+                    d: ExprEvalStepData::Var(VarData {
+                        attnum: i32::from(var.varattno) - 1,
+                        vartype: var.vartype,
+                        varreturningtype: var.varreturningtype,
+                    }),
+                },
+            );
+        }
+        Node::OpExpr(op) => {
+            // An OpExpr is a function call through the operator's opfuncid.
+            let step = exec_init_func(node, &op.args, op.opfuncid, op.inputcollid);
+            expr_eval_push_step(state, step);
+        }
+        Node::FuncExpr(func) => {
+            if func.funcretset {
+                not_yet_reachable("ExecInitExprRec: set-returning function");
+            }
+            let step = exec_init_func(node, &func.args, func.funcid, func.inputcollid);
+            expr_eval_push_step(state, step);
+        }
+        Node::BoolExpr(b) => exec_init_boolexpr(b, state),
         other => not_yet_reachable(&format!("ExecInitExprRec: {other:?}")),
     }
+}
+
+/// PG `ExecInitFunc`: build the `EEOP_FUNCEXPR[_STRICT]` step for an OpExpr /
+/// FuncExpr. Looks up the function (`fmgr_info`), sizes the fcinfo for `nargs`,
+/// fills constant args inline (PG's const-arg shortcut) and compiles each
+/// non-constant arg into its own sub-program (`arg_steps[i]`), then chooses the
+/// opcode by strictness.
+#[allow(clippy::similar_names, reason = "flinfo/fcinfo mirror PG's ExecInitFunc identifiers")]
+fn exec_init_func(node: &Node, args: &[Node], funcid: Oid, inputcollid: Oid) -> ExprEvalStep {
+    let nargs = args.len();
+
+    let mut flinfo = FmgrInfo {
+        fn_addr: None,
+        oid: Oid(0),
+        nargs: 0,
+        strict: false,
+        retset: false,
+        stats: 0,
+        extra: 0,
+        mcxt: (),
+        expr: None,
+    };
+    fmgr_info(funcid, &mut flinfo);
+    fmgr_info_set_expr(Some(Box::new(node.clone())), &mut flinfo);
+
+    if flinfo.retset {
+        not_yet_reachable("ExecInitFunc: set-returning function");
+    }
+    let strict = flinfo.strict;
+    let fn_addr = flinfo.fn_addr;
+
+    let mut fcinfo = FunctionCallInfoBaseData {
+        flinfo: None,
+        context: None,
+        resultinfo: None,
+        fncollation: Oid(0),
+        isnull: false,
+        nargs: 0,
+        args: vec![NullableDatum { value: Datum(0), isnull: true }; nargs],
+    };
+    InitFunctionCallInfoData(
+        &mut fcinfo,
+        None,
+        i16::try_from(nargs).unwrap_or(0),
+        inputcollid,
+        None,
+        None,
+    );
+
+    // Fill const args inline; compile non-const args into sub-programs.
+    let mut arg_steps: Vec<Option<Vec<ExprEvalStep>>> = Vec::with_capacity(nargs);
+    for arg in args {
+        match arg {
+            Node::Const(con) => {
+                arg_steps.push(None);
+                let i = arg_steps.len() - 1;
+                fcinfo.args[i].value = con.constvalue;
+                fcinfo.args[i].isnull = con.constisnull;
+            }
+            other => arg_steps.push(Some(compile_scalar_subprogram(other))),
+        }
+    }
+
+    // Choose the opcode by strictness (PG also has _1/_2 fast paths and the
+    // fusage variants; the plain STRICT covers them semantically here).
+    let opcode = if strict && nargs > 0 {
+        match nargs {
+            1 => ExprEvalOp::FUNCEXPR_STRICT_1,
+            2 => ExprEvalOp::FUNCEXPR_STRICT_2,
+            _ => ExprEvalOp::FUNCEXPR_STRICT,
+        }
+    } else {
+        ExprEvalOp::FUNCEXPR
+    };
+
+    ExprEvalStep {
+        opcode,
+        resvalue: None,
+        resnull: None,
+        d: ExprEvalStepData::Func(FuncData {
+            finfo: Some(Box::new(flinfo)),
+            fcinfo_data: Some(Box::new(fcinfo)),
+            fn_addr,
+            nargs: i32::try_from(nargs).unwrap_or(0),
+            make_ro: false,
+            arg_steps,
+        }),
+    }
+}
+
+/// PG `ExecInitExprRec` T_BoolExpr arm: emit the AND/OR/NOT step sequence. Each
+/// argument is evaluated into the scratch, then the appropriate BOOL step
+/// inspects it (three-valued logic, short-circuit jump to the end on FALSE for
+/// AND / TRUE for OR). AND/OR split into FIRST/STEP*/LAST (anynull lives across
+/// the steps); NOT is a single step.
+fn exec_init_boolexpr(b: &BoolExpr, state: &mut ExprState) {
+    let nargs = b.args.len();
+    let mut jump_steps: Vec<usize> = Vec::with_capacity(nargs);
+
+    // PG `anynull = palloc(sizeof(bool))`: one cell per BoolExpr, shared by every
+    // AND/OR step so a NULL seen by an early step reaches STEP_LAST. Unused by NOT.
+    let anynull = (b.boolop != BoolExprType::NOT_EXPR)
+        .then(|| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
+
+    for (off, arg) in b.args.iter().enumerate() {
+        exec_init_expr_rec(arg, state);
+
+        let opcode = match b.boolop {
+            BoolExprType::AND_EXPR => {
+                crate::assert!(nargs >= 2);
+                if off == 0 {
+                    ExprEvalOp::BOOL_AND_STEP_FIRST
+                } else if off + 1 == nargs {
+                    ExprEvalOp::BOOL_AND_STEP_LAST
+                } else {
+                    ExprEvalOp::BOOL_AND_STEP
+                }
+            }
+            BoolExprType::OR_EXPR => {
+                crate::assert!(nargs >= 2);
+                if off == 0 {
+                    ExprEvalOp::BOOL_OR_STEP_FIRST
+                } else if off + 1 == nargs {
+                    ExprEvalOp::BOOL_OR_STEP_LAST
+                } else {
+                    ExprEvalOp::BOOL_OR_STEP
+                }
+            }
+            BoolExprType::NOT_EXPR => {
+                crate::assert!(nargs == 1);
+                ExprEvalOp::BOOL_NOT_STEP
+            }
+        };
+
+        let d = ExprEvalStepData::Boolexpr(BoolexprData {
+            anynull: anynull.clone(),
+            jumpdone: -1,
+        });
+        expr_eval_push_step(state, ExprEvalStep { opcode, resvalue: None, resnull: None, d });
+        jump_steps.push(state.steps.len() - 1);
+    }
+
+    // Patch every BOOL step's jumpdone to the step after the sequence.
+    let target = i32::try_from(state.steps.len()).unwrap_or(0);
+    for idx in jump_steps {
+        if let ExprEvalStepData::Boolexpr(bd) = &mut state.steps[idx].d {
+            bd.jumpdone = target;
+        }
+    }
+}
+
+/// Compile a scalar expression into a standalone sub-program (its own step list
+/// ending in `EEOP_DONE_RETURN`), for use as a function argument. The interpreter
+/// runs it into the fcinfo arg slot (rules.md s10: owned steps, no `resv` ptr).
+fn compile_scalar_subprogram(node: &Node) -> Vec<ExprEvalStep> {
+    let mut sub = ExprState::default();
+    exec_init_expr_rec(node, &mut sub);
+    expr_eval_push_step(
+        &mut sub,
+        ExprEvalStep {
+            opcode: ExprEvalOp::DONE_RETURN,
+            resvalue: None,
+            resnull: None,
+            d: ExprEvalStepData::Constval(ConstvalData { value: Datum(0), isnull: false }),
+        },
+    );
+    sub.steps
 }
 
 /// PG `ExecInitExpr`: compile a standalone scalar expression. Terminates with
@@ -238,23 +445,96 @@ fn push_assign_scan_var(state: &mut ExprState, var: &Var, resultnum: i32) {
     );
 }
 
-/// PG `ExecInitQual`: an empty qual (the M1 const path has none) yields None
-/// (C returns NULL, which `ExecQual` treats as always-true). A non-empty qual
-/// grows in later milestones.
+/// PG `ExecInitQual`: compile a qual (an implicit-AND list of boolean clauses)
+/// for `ExecQual`. An empty qual yields None (C returns NULL, which `ExecQual`
+/// treats as always-true). Each clause is compiled into the scratch, then an
+/// `EEOP_QUAL` step short-circuits the whole qual to FALSE if that clause is
+/// FALSE or NULL; otherwise control falls through. The last clause's TRUE value
+/// is the qual's result, returned by the trailing `EEOP_DONE_RETURN`.
+///
+/// The scan slot is virtual (fully deformed by the SeqScan), so PG's
+/// `ExecCreateExprSetupSteps` FETCHSOME prologue is a documented no-op here and
+/// is omitted; `EEOP_SCAN_VAR` reads `ecxt_scantuple` directly.
 pub fn exec_init_qual(qual: &[Node], parent: Option<&mut PlanState>) -> Option<Box<ExprState>> {
     let _ = parent;
     if qual.is_empty() {
         return None;
     }
-    not_yet_reachable("ExecInitQual: non-empty qual");
+
+    let mut state = Box::new(ExprState {
+        flags: EeoFlag::IS_QUAL,
+        ..ExprState::default()
+    });
+
+    let mut qual_steps: Vec<usize> = Vec::with_capacity(qual.len());
+    for clause in qual {
+        // First evaluate the clause expression into the scratch.
+        exec_init_expr_rec(clause, &mut state);
+        // Then emit EEOP_QUAL to detect FALSE/NULL and short-circuit.
+        expr_eval_push_step(
+            &mut state,
+            ExprEvalStep {
+                opcode: ExprEvalOp::QUAL,
+                resvalue: None,
+                resnull: None,
+                d: ExprEvalStepData::Qualexpr(QualexprData { jumpdone: -1 }),
+            },
+        );
+        qual_steps.push(state.steps.len() - 1);
+    }
+
+    // Adjust the QUAL jump targets to the step after the qual sequence.
+    let target = i32::try_from(state.steps.len()).unwrap_or(0);
+    for idx in qual_steps {
+        if let ExprEvalStepData::Qualexpr(q) = &mut state.steps[idx].d {
+            q.jumpdone = target;
+        }
+    }
+
+    expr_eval_push_step(
+        &mut state,
+        ExprEvalStep {
+            opcode: ExprEvalOp::DONE_RETURN,
+            resvalue: None,
+            resnull: None,
+            d: ExprEvalStepData::Constval(ConstvalData { value: Datum(0), isnull: false }),
+        },
+    );
+
+    exec_ready_expr(&mut state);
+    Some(state)
 }
 
-/// typlen of an expr's result. The M1 path only reaches a `Const`, which carries
-/// its own `constlen`; generic types route through the (untranslated) syscache
-/// and grow later.
+/// PG `ExecQual` (inline in executor.h): evaluate a qual prepared by
+/// `ExecInitQual`. `None` (empty qual) is always-true. The `EEOP_QUAL` steps
+/// guarantee a non-NULL boolean result, so the qual's value is the answer.
+pub fn exec_qual(state: Option<&mut ExprState>, econtext: &mut ExprContext) -> bool {
+    let Some(state) = state else {
+        return true;
+    };
+    crate::assert!(state.flags.contains(EeoFlag::IS_QUAL));
+    let evalfunc = state
+        .evalfunc
+        .unwrap_or_else(|| unimplemented!("ExecQual: qual not ready"));
+    let mut isnull = false;
+    let ret = evalfunc(state, econtext, &mut isnull);
+    crate::assert!(!isnull, "EEOP_QUAL should never return NULL");
+    crate::postgres::DatumGetBool(ret)
+}
+
+/// typlen of an expr's result (selects ASSIGN_TMP vs ASSIGN_TMP_MAKE_RO; -1 means
+/// varlena/expanded -> MAKE_RO). A `Const` carries its own `constlen`; an
+/// OpExpr/FuncExpr routes its result type through the (warm) syscache via
+/// `get_typlenbyval`. Other node kinds grow later.
 fn expr_typlen(expr: &Node) -> i32 {
     match expr {
         Node::Const(con) => con.constlen,
+        Node::OpExpr(op) => {
+            i32::from(crate::backend::utils::cache::lsyscache::get_typlenbyval(op.opresulttype).0)
+        }
+        Node::FuncExpr(f) => {
+            i32::from(crate::backend::utils::cache::lsyscache::get_typlenbyval(f.funcresulttype).0)
+        }
         other => not_yet_reachable(&format!("expr_typlen: {other:?}")),
     }
 }

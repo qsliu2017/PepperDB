@@ -63,20 +63,50 @@ fn eval_const_expressions_mutator(
 ) -> Option<Node> {
     let node = node?;
 
-    match &node {
-        // A Const folds to itself (PG: falls through to the generic default,
-        // which copies the node unchanged because it has no subexpressions).
-        Node::Const(_) => Some(node),
+    match node {
+        // A Const folds to itself, and a Var has no subexpressions (PG: the
+        // generic default copies them unchanged).
+        Node::Const(_) | Node::Var(_) => Some(node),
 
-        // Param substitution from boundParams (T_Param), OpExpr/FuncExpr/
-        // DistinctExpr folding, BoolExpr short-circuiting, RelabelType/CoerceVia*,
-        // CASE/COALESCE/ArrayExpr simplification, and the generic
-        // recurse-into-subexpressions default all grow in later milestones.
+        // OpExpr/FuncExpr: recurse into the arguments. PG additionally tries
+        // `simplify_function` -- evaluating the call when all args are Const and
+        // the function is immutable (the `evaluate_expr` fold). That fold is
+        // STAGED behind the volatility/permission metadata (deferred), so for now
+        // the arguments are simplified in place and the call is left intact, which
+        // is always safe (rules.md s4). The common case (an arg is a Var) is never
+        // foldable anyway, exactly as PG would conclude.
+        Node::OpExpr(mut op) => {
+            op.args = simplify_args(std::mem::take(&mut op.args), context);
+            Some(Node::OpExpr(op))
+        }
+        Node::FuncExpr(mut f) => {
+            f.args = simplify_args(std::mem::take(&mut f.args), context);
+            Some(Node::FuncExpr(f))
+        }
+        // BoolExpr: simplify the arguments. PG also folds out constant TRUE/FALSE
+        // operands (e.g. `x AND true` -> `x`); that simplification is staged, so
+        // the BoolExpr is rebuilt with simplified args.
+        Node::BoolExpr(mut b) => {
+            b.args = simplify_args(std::mem::take(&mut b.args), context);
+            Some(Node::BoolExpr(b))
+        }
+
+        // Param substitution from boundParams (T_Param), DistinctExpr folding,
+        // RelabelType/CoerceVia*, CASE/COALESCE/ArrayExpr simplification, and the
+        // generic recurse-into-subexpressions default grow in later milestones.
         other => {
             let _ = context.estimate;
             not_yet_reachable(&format!("eval_const_expressions_mutator: {other:?}"));
         }
     }
+}
+
+/// Recurse `eval_const_expressions_mutator` over each argument of a call /
+/// boolean node, dropping any that fold to nothing (none do at M3).
+fn simplify_args(args: Vec<Node>, context: &EvalConstContext<'_>) -> Vec<Node> {
+    args.into_iter()
+        .filter_map(|a| eval_const_expressions_mutator(Some(a), context))
+        .collect()
 }
 
 #[cfg(test)]
@@ -112,5 +142,41 @@ mod tests {
     #[test]
     fn null_folds_to_null() {
         assert!(eval_const_expressions(None, None).is_none());
+    }
+
+    /// An OpExpr with a Var argument is not foldable; it is left intact (its args
+    /// recursed but unchanged).
+    #[test]
+    fn opexpr_with_var_left_intact() {
+        use crate::nodes::primnodes::{OpExpr, Var, VarReturningType};
+        use crate::postgres_ext::Oid;
+        let var = Node::Var(Box::new(Var {
+            varno: 1,
+            varattno: 1,
+            vartype: INT4OID,
+            vartypmod: -1,
+            varcollid: InvalidOid,
+            varnullingrels: None,
+            varlevelsup: 0,
+            varreturningtype: VarReturningType::DEFAULT,
+            varnosyn: 1,
+            varattnosyn: 1,
+            location: -1,
+        }));
+        let op = Node::OpExpr(Box::new(OpExpr {
+            opno: Oid(551),
+            opfuncid: Oid(177),
+            opresulttype: INT4OID,
+            opretset: false,
+            opcollid: InvalidOid,
+            inputcollid: InvalidOid,
+            args: vec![var, int4(1)],
+            location: -1,
+        }));
+        let folded = eval_const_expressions(None, Some(op)).expect("OpExpr stays a node");
+        let Node::OpExpr(o) = folded else { panic!("OpExpr must remain an OpExpr (not folded)") };
+        assert_eq!(o.args.len(), 2);
+        assert!(matches!(o.args[0], Node::Var(_)), "Var arg preserved");
+        assert!(matches!(o.args[1], Node::Const(_)), "Const arg preserved");
     }
 }

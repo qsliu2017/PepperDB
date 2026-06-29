@@ -20,49 +20,11 @@ type PlannerInfoRef<'a> = &'a mut PlannerInfo;
 type SpecialJoinInfoRef<'a> = &'a SpecialJoinInfo;
 type IndexOptInfoRef<'a> = &'a IndexOptInfo;
 
-// in path/clausesel.c:
-
-pub fn clause_selectivity(
-    _root: PlannerInfoRef,
-    _clause: Option<Node>,
-    _var_relid: i32,
-    _jointype: JoinType,
-    _sjinfo: Option<SpecialJoinInfoRef>,
-) -> Selectivity {
-    unimplemented!()
-}
-
-pub fn clause_selectivity_ext(
-    _root: PlannerInfoRef,
-    _clause: Option<Node>,
-    _var_relid: i32,
-    _jointype: JoinType,
-    _sjinfo: Option<SpecialJoinInfoRef>,
-    _use_extended_stats: bool,
-) -> Selectivity {
-    unimplemented!()
-}
-
-pub fn clauselist_selectivity(
-    _root: PlannerInfoRef,
-    _clauses: Vec<Node>,
-    _var_relid: i32,
-    _jointype: JoinType,
-    _sjinfo: Option<SpecialJoinInfoRef>,
-) -> Selectivity {
-    unimplemented!()
-}
-
-pub fn clauselist_selectivity_ext(
-    _root: PlannerInfoRef,
-    _clauses: Vec<Node>,
-    _var_relid: i32,
-    _jointype: JoinType,
-    _sjinfo: Option<SpecialJoinInfoRef>,
-    _use_extended_stats: bool,
-) -> Selectivity {
-    unimplemented!()
-}
+// in path/clausesel.c: bodies in the backend definition module (rules.md s3).
+pub use crate::backend::optimizer::path::clausesel::{
+    clause_selectivity, clause_selectivity_ext, clauselist_selectivity,
+    clauselist_selectivity_ext,
+};
 
 // in path/costsize.c: widely used cost parameters.
 // TODO(global): migrate these GUCs to session/planner config.

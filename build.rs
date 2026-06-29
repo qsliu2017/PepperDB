@@ -168,7 +168,8 @@ fn parse_record(rec: &str) -> Option<Proc> {
         oid,
         proname,
         proargtypes,
-        strict: kv.get("proisstrict").is_some_and(|s| s == "t"),
+        // pg_proc.h: proisstrict BKI_DEFAULT(t) -- absent means strict.
+        strict: kv.get("proisstrict").is_none_or(|s| s == "t"),
         retset: kv.get("proretset").is_some_and(|s| s == "t"),
         lang: kv.get("prolang").cloned().unwrap_or_else(|| "internal".into()),
         prosrc: kv.get("prosrc").cloned().unwrap_or_default(),

@@ -346,6 +346,12 @@ async fn transform_select_stmt_async(
     )
     .await;
 
+    // The target-list / WHERE expression transform is synchronous and resolves
+    // operators/functions through the (hit-only) syscache. Over the wire each
+    // backend has a cold per-task catcache, so async-warm the operator/function
+    // caches the statement references before the sync transform runs.
+    warm_expr_caches(shared, pstate, &stmt.targetList, stmt.whereClause.as_ref()).await;
+
     // Transform the target list (now that the namespace is populated, `*` and
     // column refs resolve).
     qry.targetList =
@@ -363,6 +369,144 @@ async fn transform_select_stmt_async(
 
     finish_query(pstate, &mut qry, qual);
     qry
+}
+
+/// Async-warm the operator/function syscaches the SELECT's expressions reference,
+/// so the synchronous expression transform (`make_op`/`make_fn` -> hit-only
+/// `search_sys_cache`) resolves them in a cold per-backend catcache (the wire
+/// path). This is the operator/function analog of how `transform_from_clause`
+/// warms the relation caches: there is no async expression transform, so the
+/// caches are warmed up-front here.
+///
+/// The candidate operand types are the column types visible in the namespace plus
+/// `int4`/`bool` (the integer-literal and boolean-result types reachable at M3);
+/// every operator/function name found in the target list + WHERE clause is warmed
+/// against that small type set (`OPERNAMENSP` -> `OPEROID` -> `PROCOID`, and
+/// `PROCNAMEARGSNSP` -> `PROCOID` for function calls). Over-warming a few unused
+/// type combinations is harmless (a negative cache entry).
+#[allow(
+    clippy::cast_ptr_alignment,
+    reason = "GETSTRUCT returns the MAXALIGN'd tuple body, aligned for Form_pg_operator"
+)]
+async fn warm_expr_caches(
+    shared: &Arc<SharedState>,
+    pstate: &ParseState,
+    target_list: &[Node],
+    where_clause: Option<&Node>,
+) {
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+    use crate::catalog::genbki::{BOOLOID, INT4OID};
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    use crate::catalog::pg_operator::FormData_pg_operator;
+    use crate::postgres::{NameGetDatum, ObjectIdGetDatum};
+    use crate::utils::syscache::SysCacheIdentifier;
+
+    // Candidate operand types: the namespace column types + int4 + bool.
+    let mut types: Vec<Oid> = vec![INT4OID, BOOLOID];
+    for nsitem in &pstate.p_namespace {
+        for col in &nsitem.nscolumns {
+            if col.vartype != Oid(0) && !types.contains(&col.vartype) {
+                types.push(col.vartype);
+            }
+        }
+    }
+
+    // Collect operator names + function names from the target list + WHERE.
+    let mut op_names: Vec<String> = Vec::new();
+    let mut fn_names: Vec<String> = Vec::new();
+    for n in target_list {
+        if let Node::ResTarget(rt) = n {
+            collect_expr_names(rt.val.as_ref(), &mut op_names, &mut fn_names);
+        }
+    }
+    collect_expr_names(where_clause, &mut op_names, &mut fn_names);
+
+    // Warm each operator over the candidate type cross-product.
+    for opname in &op_names {
+        let nd = name_data(opname);
+        for &lt in &types {
+            for &rt in &types {
+                let keys = [
+                    NameGetDatum(&nd),
+                    ObjectIdGetDatum(lt),
+                    ObjectIdGetDatum(rt),
+                    ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
+                ];
+                let Some(tup) =
+                    search_sys_cache_populate(shared, SysCacheIdentifier::OPERNAMENSP, &keys).await
+                else {
+                    continue;
+                };
+                // Also warm OPEROID + the operator function's PROCOID.
+                let (oid, oprcode) = {
+                    // SAFETY: a held OPERNAMENSP hit -> a pg_operator row.
+                    let form = unsafe {
+                        &*crate::access::htup_details::GETSTRUCT(&*tup)
+                            .cast::<FormData_pg_operator>()
+                    };
+                    (form.oid, form.oprcode)
+                };
+                release_sys_cache(tup);
+                if let Some(t) = search_sys_cache_populate(
+                    shared,
+                    SysCacheIdentifier::OPEROID,
+                    &[ObjectIdGetDatum(oid)],
+                )
+                .await
+                {
+                    release_sys_cache(t);
+                }
+                if let Some(t) = search_sys_cache_populate(
+                    shared,
+                    SysCacheIdentifier::PROCOID,
+                    &[ObjectIdGetDatum(oprcode)],
+                )
+                .await
+                {
+                    release_sys_cache(t);
+                }
+            }
+        }
+    }
+
+    // Function-call warming (PROCNAMEARGSNSP) is staged with the function-call
+    // wire milestone; the M3 wire path reaches operators (warmed above). The
+    // collected `fn_names` are recorded so that pass can grow here.
+    let _ = &fn_names;
+}
+
+/// Recursively collect operator names (from `A_Expr`) and function names (from
+/// `FuncCall`) out of a raw expression tree, for cache pre-warming.
+fn collect_expr_names(node: Option<&Node>, ops: &mut Vec<String>, funcs: &mut Vec<String>) {
+    let Some(node) = node else { return };
+    match node {
+        Node::A_Expr(a) => {
+            if let Some(Node::String_(s)) = a.name.first()
+                && !ops.contains(&s.sval)
+            {
+                ops.push(s.sval.clone());
+            }
+            collect_expr_names(a.lexpr.as_ref(), ops, funcs);
+            collect_expr_names(a.rexpr.as_ref(), ops, funcs);
+        }
+        Node::BoolExpr(b) => {
+            for arg in &b.args {
+                collect_expr_names(Some(arg), ops, funcs);
+            }
+        }
+        Node::FuncCall(fc) => {
+            if let Some(Node::String_(s)) = fc.funcname.last()
+                && !funcs.contains(&s.sval)
+            {
+                funcs.push(s.sval.clone());
+            }
+            for arg in &fc.args {
+                collect_expr_names(Some(arg), ops, funcs);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// PG `transformInsertStmt` (M2 subset): `INSERT INTO t [(cols)] VALUES (row)` and
@@ -1011,6 +1155,35 @@ mod relation_tests {
             assert_eq!(op.opno, Oid(521), "the int4 > operator");
             assert_eq!(op.opfuncid, F_INT4GT, "opfuncid is int4gt");
             assert_eq!(op.opresulttype, BOOLOID, "comparison result type is bool");
+        }))
+        .await;
+    }
+
+    /// M3 qual planning: `SELECT a + 1 FROM t WHERE a > 0` plans to a SeqScan whose
+    /// `plan.qual` carries the int4gt clause (from the WHERE via RestrictInfo) and
+    /// whose targetlist carries the int4pl OpExpr (the projection).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn where_qual_attaches_to_seqscan_plan() {
+        use crate::nodes::plannodes::PlannedStmt;
+        use crate::utils::fmgroids::{F_INT4GT, F_INT4PL};
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            create_table_t(&shared).await;
+
+            let q = analyze(&shared, "SELECT a + 1 FROM t WHERE a > 0").await;
+            let stmt: PlannedStmt = plan(&shared, *q);
+            let Node::SeqScan(seqscan) = &stmt.plan_tree else {
+                panic!("top plan is not a SeqScan");
+            };
+            // The WHERE qual landed on the SeqScan as an int4gt OpExpr.
+            assert_eq!(seqscan.scan.plan.qual.len(), 1, "one qual clause");
+            let Node::OpExpr(qop) = &seqscan.scan.plan.qual[0] else { panic!("qual not an OpExpr") };
+            assert_eq!(qop.opfuncid, F_INT4GT, "qual is int4gt");
+            // The projection a+1 is an int4pl OpExpr in the targetlist.
+            let Node::TargetEntry(te) = &seqscan.scan.plan.targetlist[0] else { panic!("not a TargetEntry") };
+            let Node::OpExpr(top) = te.expr.as_ref().unwrap() else { panic!("tlist expr not an OpExpr") };
+            assert_eq!(top.opfuncid, F_INT4PL, "projection is int4pl");
         }))
         .await;
     }

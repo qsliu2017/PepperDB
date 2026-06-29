@@ -1327,6 +1327,98 @@ mod wire_tests {
             .expect("supervisor task ok");
     }
 
+    /// Decode the single-column int4 text value of a DataRow message body. The
+    /// body is `int16 ncols` then per column `int32 len` + `len` bytes of text.
+    fn datarow_single_text(body: &[u8]) -> String {
+        let ncols = u16::from_be_bytes([body[0], body[1]]);
+        assert_eq!(ncols, 1, "one column DataRow");
+        let len = i32::from_be_bytes([body[2], body[3], body[4], body[5]]);
+        assert!(len >= 0, "column is not NULL");
+        let s = &body[6..6 + len as usize];
+        String::from_utf8(s.to_vec()).expect("text value is utf8")
+    }
+
+    /// THE M3 MILESTONE: `SELECT a + 1 FROM t WHERE a > 0` over the wire. The
+    /// projection computes a+1 per row via int4pl, and the WHERE qual filters rows
+    /// via int4gt. Rows -2,-1,0,1,2,3 -> filter a>0 keeps 1,2,3 -> project a+1 ->
+    /// 2,3,4.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m3_projection_and_qual_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let create = simple_query(&mut client, &mut buf, "CREATE TABLE t (a int)").await;
+        assert_eq!(create[0].body, b"CREATE TABLE\0");
+
+        for v in [-2, -1, 0, 1, 2, 3] {
+            let ins = simple_query(&mut client, &mut buf, &format!("INSERT INTO t VALUES ({v})")).await;
+            assert_eq!(ins[0].body, b"INSERT 0 1\0", "INSERT {v}");
+        }
+
+        // SELECT a + 1 FROM t WHERE a > 0 -> RowDescription + 3 DataRows + CC + RFQ.
+        let sel = simple_query(&mut client, &mut buf, "SELECT a + 1 FROM t WHERE a > 0").await;
+        let types: Vec<u8> = sel.iter().map(|m| m.ty).collect();
+        assert_eq!(
+            types,
+            vec![b'T', b'D', b'D', b'D', b'C', b'Z'],
+            "RowDescription + 3 DataRows + CommandComplete + ReadyForQuery"
+        );
+
+        // The qual a>0 keeps {1,2,3}; the projection a+1 yields {2,3,4}.
+        let values: Vec<String> = sel
+            .iter()
+            .filter(|m| m.ty == b'D')
+            .map(|m| datarow_single_text(&m.body))
+            .collect();
+        assert_eq!(values, vec!["2", "3", "4"], "a+1 over rows where a>0");
+
+        assert_eq!(sel[4].body, b"SELECT 3\0", "three rows selected");
+        assert_eq!(sel[5].body, b"I");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// M3 BoolExpr qual over the wire: `WHERE a > 0 AND a < 3` keeps {1,2} -- the
+    /// AND short-circuit + per-clause int4 comparison. (Three-valued NULL logic is
+    /// unit-tested in execExprInterp; the NULL literal is not yet parseable.)
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m3_boolexpr_and_qual_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        simple_query(&mut client, &mut buf, "CREATE TABLE t (a int)").await;
+        for v in [-1, 0, 1, 2, 3] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO t VALUES ({v})")).await;
+        }
+
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM t WHERE a > 0 AND a < 3").await;
+        let values: Vec<String> = sel
+            .iter()
+            .filter(|m| m.ty == b'D')
+            .map(|m| datarow_single_text(&m.body))
+            .collect();
+        assert_eq!(values, vec!["1", "2"], "a where a>0 AND a<3");
+        assert_eq!(sel.last().unwrap().body, b"I");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
     /// M1 REGRESSION: SELECT 1 over the wire still returns the const int4 row.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn m1_select_1_over_the_wire() {

@@ -433,10 +433,23 @@ pub struct FuncData {
     pub nargs: i32,
     /// make arg0 R/O (used only for NULLIF).
     pub make_ro: bool,
+    /// Compiled sub-program for each non-constant argument. C fills `fcinfo->args`
+    /// via preceding flat steps whose `resv` points into the arg slot; with no raw
+    /// `resv` pointers (genuinely-Send executor, rules.md s10) each arg's steps are
+    /// owned here and run into `fcinfo.args[i]` at FUNCEXPR time. A `None` entry is
+    /// a constant arg already deposited into `fcinfo.args[i]` at init time (PG's
+    /// const-arg shortcut). Order matches `fcinfo.args`.
+    pub arg_steps: Vec<Option<Vec<ExprEvalStep>>>,
 }
 
 pub struct BoolexprData {
-    pub anynull: Option<Box<bool>>,
+    /// PG `bool *anynull`: a single cell `palloc`'d once per BoolExpr and shared by
+    /// every BOOL_*_STEP_FIRST/STEP/STEP_LAST of that BoolExpr, so a NULL recorded
+    /// by an early step is visible to STEP_LAST (three-valued logic). Here it is a
+    /// shared `Arc<AtomicBool>` so the same cell travels with the steps even when a
+    /// sub-program's steps are detached into `FuncData::arg_steps`, while staying
+    /// `Send` (rules.md s5; `Rc<Cell<bool>>` would be `!Send`). None for NOT_EXPR.
+    pub anynull: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub jumpdone: i32,
 }
 

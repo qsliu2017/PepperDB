@@ -16,27 +16,22 @@
 
 use crate::nodes::execnodes::{PlanState, ScanState, TupleTableSlot};
 
+use crate::backend::executor::execExpr::exec_qual;
 use crate::backend::executor::execTuples::exec_store_virtual_tuple;
 use crate::executor::tuptable::ExecClearTuple;
 
-/// PG `ExecScan` (M2 qual-free tail): the scan slot already holds the current
-/// tuple (filled by the node's access method). Evaluate the qual (none in M2 ->
-/// always true), then project and return a borrow of the projection result slot.
+/// PG `ExecScan` (qual + project tail): the scan slot already holds the current
+/// tuple (filled by the node's access method). Evaluate the qual against the scan
+/// slot; if it FAILS, return `None` (the caller fetches the next tuple). If it
+/// passes (or there is no qual), project and return a borrow of the projection
+/// result slot.
+///
+/// PG's `ExecScan` runs the fetch loop internally; here the async fetch lives in
+/// the caller (`exec_seq_scan`), which loops while this returns `None` for a
+/// qual-failed row -- the same semantics, split across the sync/async boundary.
 pub fn exec_scan(ss: &mut ScanState) -> Option<&mut TupleTableSlot> {
-    // ExecQual(node->ps.qual, econtext): M2 scans carry no WHERE, so the qual is
-    // None and always passes. The qual-eval branch grows with WHERE support.
-    crate::assert!(ss.ps.qual.is_none(), "ExecScan: WHERE qual not yet reachable");
-
-    Some(exec_scan_project(ss))
-}
-
-/// `ExecProject` for a scan node: alias the node-owned scan slot into
-/// `econtext->ecxt_scantuple`, run the projection (Vars read ecxt_scantuple),
-/// restore the scan slot, return a borrow of the projection result slot.
-fn exec_scan_project(ss: &mut ScanState) -> &mut TupleTableSlot {
-    // Move the scan slot into the exprcontext (O(1) Box move) so EEOP_SCAN_VAR /
-    // ASSIGN_SCAN_VAR read it; take the exprcontext + projection out to satisfy
-    // the borrow checker, run the projection, then put everything back.
+    // Alias the node-owned scan slot into econtext->ecxt_scantuple (O(1) Box move)
+    // so the qual's and projection's EEOP_SCAN_VAR read the live row.
     let scan_slot = ss
         .ss_scan_tuple_slot
         .take()
@@ -48,7 +43,10 @@ fn exec_scan_project(ss: &mut ScanState) -> &mut TupleTableSlot {
         .unwrap_or_else(|| unimplemented!("ExecScan: scan node has no exprcontext"));
     econtext.ecxt_scantuple = Some(scan_slot);
 
-    {
+    // ExecQual(node->ps.qual, econtext): None qual is always-true.
+    let passes = exec_qual(ss.ps.qual.as_deref_mut(), &mut econtext);
+
+    if passes {
         let proj = ss
             .ps
             .ps_proj_info
@@ -61,11 +59,16 @@ fn exec_scan_project(ss: &mut ScanState) -> &mut TupleTableSlot {
     ss.ss_scan_tuple_slot = econtext.ecxt_scantuple.take();
     ss.ps.ps_expr_context = Some(econtext);
 
-    ss.ps
-        .ps_proj_info
-        .as_mut()
-        .and_then(|p| p.state.resultslot.as_deref_mut())
-        .unwrap_or_else(|| unimplemented!("ExecScan: projection lost its result slot"))
+    if !passes {
+        return None;
+    }
+    Some(
+        ss.ps
+            .ps_proj_info
+            .as_mut()
+            .and_then(|p| p.state.resultslot.as_deref_mut())
+            .unwrap_or_else(|| unimplemented!("ExecScan: projection lost its result slot")),
+    )
 }
 
 /// Run a projection ExprState: clear the result slot, run the interpreter (it
