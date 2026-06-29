@@ -64,6 +64,10 @@ const MAX_STARTUP_PACKET_LENGTH: usize = 10000;
 /// - `identity`: the supervisor's child-registry key (opaque; logging only).
 /// - `cancel`: the supervisor's per-child termination Notify (PG's SIGTERM
 ///   target). The command loop selects on it to raise ProcDie on shutdown.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: the connect-to-database pipeline holds task-confined !Send state (raw Relation handles, the DestReceiver, TupleTableSlot value arrays) across awaits. The backend runs on its OWN dedicated current-thread runtime (one thread per backend, postmaster.rs run_backend_confined), so the future is never sent across threads."
+)]
 pub async fn backend_main(
     mut stream: TcpStream,
     peer: SocketAddr,
@@ -109,12 +113,15 @@ pub async fn backend_main(
     let owner = ResourceOwner::create(None, "backend");
 
     // Nest the three task-local scopes so Session/proc-signal/resource-owner
-    // `current()` all resolve inside PostgresMain.
+    // `current()` all resolve inside PostgresMain. PostgresMain itself establishes
+    // the connect-to-database scope stack (InitPostgres) and owns the backend's
+    // top-level resource owner; this resource-owner scope is the bootstrap one for
+    // the startup slice.
     session::scope(
         session,
         procsignal::scope(
             slot.clone(),
-            resowner::scope(owner, run_backend(stream, startup, slot, cancel)),
+            resowner::scope(owner, run_backend(stream, shared.clone(), startup, slot, cancel)),
         ),
     )
     .await;
@@ -126,8 +133,13 @@ pub async fn backend_main(
 /// Run `PostgresMain` racing the supervisor's `cancel` Notify and the slot latch.
 /// When `cancel` fires (shutdown), raise ProcDie on the slot and ring the latch
 /// so the next `CHECK_FOR_INTERRUPTS` in `PostgresMain` terminates the backend.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: drives the !Send connect-to-database pipeline; the backend runs on its own dedicated current-thread runtime (postmaster run_backend_confined)."
+)]
 async fn run_backend(
     stream: TcpStream,
+    shared: Arc<SharedState>,
     startup: StartupParams,
     slot: Arc<ProcSignalSlot>,
     cancel: Arc<Notify>,
@@ -135,7 +147,7 @@ async fn run_backend(
     let dbname = startup.database.unwrap_or_default();
     let username = startup.user.unwrap_or_default();
 
-    let main = crate::backend::tcop::postgres::postgres_main(stream, dbname, username);
+    let main = crate::backend::tcop::postgres::postgres_main(stream, shared, dbname, username);
     tokio::pin!(main);
 
     loop {

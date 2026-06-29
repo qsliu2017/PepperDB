@@ -32,6 +32,7 @@ use std::sync::Arc;
 
 use tokio::net::TcpStream;
 
+use crate::shared_state::SharedState;
 use crate::backend::libpq::pqcomm::{self as pq, PqComm};
 use crate::backend::storage::ipc::procsignal::{self, ProcSignalSlot};
 use crate::libpq::libpq::PQ_LARGE_MESSAGE_LIMIT;
@@ -70,31 +71,171 @@ const WHERE_TO_SEND_OUTPUT: CommandDest = CommandDest::DestRemote;
 /// mutex inside pqcomm).
 ///
 /// The whole loop runs inside `pqcomm::scope` (publishes the per-task `PqComm`,
-/// PG's `MyProcPort`) and `xact_scope` (a per-task transaction state so
-/// `TransactionBlockStatusCode` reports 'I' idle for ReadyForQuery; M1's
-/// start/finish_xact_command are near-no-ops over it).
-pub async fn postgres_main(stream: TcpStream, dbname: String, username: String) {
-    let _ = (&dbname, &username);
+/// PG's `MyProcPort`), the full per-task database scope stack established by
+/// [`init_postgres`] (relcache / catcache / catalog-index / exec-relations /
+/// resowner / xact / snapmgr / combocid / WAL insertion -- the connect-to-database
+/// phase), so the pipeline can open relations and the executor can scan/modify
+/// them.
+///
+/// The default database OID a connecting backend attaches to. PG resolves the
+/// database name to its pg_database OID in InitPostgres; M2 has a single seeded
+/// database at this fixed OID (matching the boot initdb), so the name is recorded
+/// on the Session for diagnostics but every backend attaches here.
+pub const DEFAULT_DATABASE_OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(90000);
 
-    // PG runs InitPostgres (auth + connect-to-database) here; that is the
-    // deferred auth/catalog phase. backend_startup already ran the identity
-    // slice (backend_task_init) and published the Session, so we only flip to
-    // normal processing mode for the loop.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: the connect-to-database pipeline is task-confined !Send; the backend runs on its own dedicated current-thread runtime (postmaster run_backend_confined)."
+)]
+pub async fn postgres_main(
+    stream: TcpStream,
+    shared: Arc<SharedState>,
+    dbname: String,
+    username: String,
+) {
+    let _ = &username;
+
+    // PG runs InitPostgres (auth + connect-to-database) here; backend_startup
+    // already ran the identity slice (backend_task_init) and published the
+    // Session, so we flip to normal processing mode and record the attached db.
     crate::miscadmin::set_processing_mode(crate::miscadmin::ProcessingMode::NormalProcessing);
+    if let Some(s) = crate::session::try_current() {
+        s.set_database_id(DEFAULT_DATABASE_OID);
+        s.set_database_tablespace(crate::common::relpath::DEFAULTTABLESPACE_OID);
+        if !dbname.is_empty() {
+            s.set_database_name(Some(dbname));
+        }
+    }
 
-    // Install the wire transport (PG `pq_init` over MyProcPort) and the per-task
-    // transaction state, then run the command loop inside both scopes. The loop
-    // future is boxed: the SYNC pipeline's transient locals + the per-task
-    // `XactState` make the combined future large, and `Box::pin` keeps it off the
-    // caller's stack (clippy::large_futures) without changing behavior.
+    // Install the wire transport (PG `pq_init` over MyProcPort), then run the
+    // command loop inside the connect-to-database scope stack.
+    //
+    // DEEP-STACK NOTE (rules.md s5): the nested scope futures plus the per-command
+    // SYNC pipeline locals make this future very large in debug. Each scope layer
+    // is individually `Box::pin`-ed inside `init_postgres` (heap, not stack), and
+    // the backend task itself is spawned with an enlarged stack (backend_startup),
+    // so the real backend does not stack-overflow.
     let comm = Arc::new(PqComm::new(stream));
-    let loop_fut = Box::pin(crate::backend::access::transam::xact::xact_scope(command_loop()));
+    let loop_fut = Box::pin(init_postgres(shared.clone(), command_loop(shared)));
     pq::scope(comm, loop_fut).await;
 }
 
+/// PG `InitPostgres` (the connect-to-database phase). Establish the full per-task
+/// scope stack a backend needs to read on-disk catalogs and run the executor, then
+/// drive `inner` inside it. Models `catalog/tests.rs::in_scopes` + the step-18A
+/// exec-relations registry; the exec-relations scope is opened EMPTY here and
+/// re-populated per query in `exec_simple_query` (the open range-table relations of
+/// the plan being run).
+///
+/// Each nested scope future is `Box::pin`-ed so the combined future lives on the
+/// heap rather than one giant stack frame (the stack is shallow at each layer).
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: establishes !Send per-task scopes (relcache/exec-relations) holding raw handles across awaits; the backend task runs on its own current-thread runtime."
+)]
+async fn init_postgres<F>(shared: Arc<SharedState>, inner: F)
+where
+    F: std::future::Future<Output = ()>,
+{
+    use crate::backend::access::transam::xact::xact_scope;
+    use crate::backend::access::transam::xloginsert::with_insertion;
+    use crate::backend::catalog::indexing::scope_async as catalog_index_scope;
+    use crate::backend::executor::execMain::with_exec_relations;
+    use crate::backend::utils::cache::catcache::scope_async as catcache_scope;
+    use crate::backend::utils::cache::relcache::scope_async as relcache_scope;
+    use crate::backend::utils::resowner::resowner;
+    use crate::backend::utils::time::{combocid::combocid_scope, snapmgr::snapmgr_scope};
+
+    let _ = &shared;
+    let owner = resowner::ResourceOwner::create(None, "backend top-level");
+
+    // RelationCacheInitializePhase3 (local-catalog half): nail this task's relcache
+    // with the formrdesc catalogs (pg_class/pg_attribute/pg_proc/pg_type) so the
+    // catalog caches can read the on-disk catalogs. The relcache is per-task
+    // (task_local), so every backend re-nails inside its own relcache scope (PG runs
+    // Phase3 in InitPostgres). Must be inside the relcache scope, before `inner`.
+    let inner = async {
+        crate::backend::utils::cache::relcache::relation_cache_initialize_phase3();
+        inner.await;
+    };
+
+    let body = Box::pin(with_exec_relations(Vec::new(), Box::pin(inner)));
+    let body = Box::pin(catalog_index_scope(body));
+    let body = Box::pin(relcache_scope(body));
+    let body = Box::pin(catcache_scope(body));
+    let body = Box::pin(with_insertion(body));
+    let body = Box::pin(combocid_scope(body));
+    let body = Box::pin(snapmgr_scope(body));
+    let body = Box::pin(xact_scope(body));
+    resowner::scope(owner, body).await;
+}
+
+/// initdb at server boot (PG's `initdb` / bootstrap mode, run once before any
+/// backend connects). Establish a boot session at the default database OID + the
+/// connect-to-database scope stack, then run `bootstrap_catalogs` (step-15 initdb)
+/// inside a committed transaction so pg_type etc. exist on disk (and the seeded
+/// xids are committed in clog) before any backend's snapshot reads them.
+///
+/// The supervisor calls this exactly once at startup. Boxed/pinned for the deep
+/// scope stack, like the backend path.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: bootstrap holds !Send catalog state across awaits; it runs on its own dedicated current-thread runtime (postmaster boot) before any backend connects."
+)]
+pub async fn bootstrap_cluster(shared: Arc<SharedState>) {
+    let sess = Arc::new(crate::session::Session::new(crate::miscadmin::BackendType::BACKEND));
+    sess.set_database_id(DEFAULT_DATABASE_OID);
+    sess.set_database_tablespace(crate::common::relpath::DEFAULTTABLESPACE_OID);
+
+    let run = Box::pin(init_postgres(shared.clone(), Box::pin(do_initdb(shared.clone()))));
+    crate::session::scope(sess, run).await;
+}
+
+/// The initdb body, run inside the boot session + connect-to-database scopes:
+/// open a transaction, push the active snapshot the index build reads, seed the
+/// catalogs, then commit so the rows are durable + committed for later backends.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: bootstrap holds task-confined !Send catalog state across awaits; the boot task runs alone before any backend connects."
+)]
+async fn do_initdb(shared: Arc<SharedState>) {
+    use crate::backend::access::transam::xact::{
+        CommandCounterIncrement, CommitTransactionCommand, GetCurrentCommandId,
+        GetCurrentTransactionIdIfAny, StartTransactionCommand,
+    };
+    use crate::backend::utils::time::snapmgr::{
+        GetTransactionSnapshot, InvalidateCatalogSnapshot, PopActiveSnapshot, PushActiveSnapshot,
+    };
+
+    StartTransactionCommand(&shared).await;
+    let mut snap = GetTransactionSnapshot(&shared);
+    if let Some(s) = snap.as_mut() {
+        Arc::make_mut(s).curcid = GetCurrentCommandId(false);
+    }
+    PushActiveSnapshot(snap);
+
+    crate::backend::bootstrap::bootstrap::bootstrap_catalogs(&shared).await;
+
+    CommandCounterIncrement();
+    InvalidateCatalogSnapshot();
+    PopActiveSnapshot();
+
+    let committed = GetCurrentTransactionIdIfAny();
+    CommitTransactionCommand(&shared).await;
+    // Make the seeded rows visible to later backends' snapshots: advance the
+    // shared latestCompletedXid past the bootstrap xid (see publish_committed_xid).
+    publish_committed_xid(&shared, committed);
+}
+
 /// The backend message loop proper (PG `PostgresMain`'s `for (;;)`), run inside
-/// the pqcomm + xact scopes. Async (awaits the wire read + flush).
-async fn command_loop() {
+/// the pqcomm + connect-to-database scopes. Async (awaits the wire read + flush,
+/// and the per-command pipeline reaches the buffer pool / WAL).
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: dispatches the !Send simple-query pipeline; the backend runs on its own current-thread runtime."
+)]
+async fn command_loop(shared: Arc<SharedState>) {
+    use futures_util::FutureExt;
     // Send this backend's cancellation key to the frontend (BackendKeyData).
     send_backend_key_data().await;
 
@@ -124,14 +265,16 @@ async fn command_loop() {
         };
 
         // (7) Per-command recovery point (error.md s2.2, boundary 2 -- PG's
-        // top-level sigsetjmp). The SYNC dispatch builds all reply bytes into the
-        // send buffer; wrap it in catch_unwind so an ERROR (a panic carrying
-        // ErrorData) is recovered HERE, backend-local, and the loop continues.
-        // FATAL / non-ErrorData bug-panics resume to the task boundary. No lock
-        // guard or future is held across the catch.
-        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dispatch_command(firstchar, &body)
-        }));
+        // top-level sigsetjmp). The dispatch is now ASYNC (the pipeline reaches the
+        // buffer pool / WAL); wrap the dispatch future in `FutureExt::catch_unwind`
+        // so an ERROR (a panic carrying ErrorData) is recovered HERE, backend-local,
+        // and the loop continues. FATAL / non-ErrorData bug-panics resume to the
+        // task boundary. No lock guard is held across any `.await` (the scope_async
+        // helpers manage borrow lifetimes; the dispatch borrows, copies, drops, then
+        // awaits).
+        let outcome = std::panic::AssertUnwindSafe(dispatch_command(&shared, firstchar, &body))
+            .catch_unwind()
+            .await;
 
         match outcome {
             Ok(CommandResult::Continue { ready }) => {
@@ -145,6 +288,10 @@ async fn command_loop() {
             Err(payload) => match payload.downcast::<crate::utils::elog::ErrorData>() {
                 Ok(edata) if edata.elevel < crate::utils::elog::FATAL => {
                     recover_from_error(&edata);
+                    // Roll back the aborted command's transaction (autocommit): the
+                    // recovery handler is sync, AbortCurrentTransaction is async, so
+                    // drive it here after the catch (no future held across the catch).
+                    crate::backend::access::transam::xact::AbortCurrentTransaction(&shared).await;
                     // Flush the buffered ErrorResponse, then announce idle.
                     let _ = pq::pq_flush().await;
                     send_ready_for_query = true;
@@ -165,16 +312,21 @@ enum CommandResult {
 }
 
 /// Dispatch one already-read client command by message type (step 7 of
-/// `PostgresMain`). SYNC (no `.await`) so the whole unit sits inside the
-/// per-command `catch_unwind`. An `elog(ERROR/FATAL)` raised here unwinds as a
-/// panic. The simple-Query / DestRemote path is COMPLETE; the extended-protocol
-/// arms are grow guards (rules.md s4).
-fn dispatch_command(firstchar: u8, body: &[u8]) -> CommandResult {
+/// `PostgresMain`). ASYNC: the simple-Query pipeline reaches the buffer pool / WAL.
+/// The whole unit sits inside the per-command `catch_unwind` (the loop wraps the
+/// returned future). An `elog(ERROR/FATAL)` raised here unwinds as a panic. The
+/// simple-Query / DestRemote path is COMPLETE; the extended-protocol arms are grow
+/// guards (rules.md s4).
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: the simple-query pipeline holds task-confined !Send state (raw Relation handles, TupleTableSlot value arrays) across awaits; a backend runs on one task, never sent across tasks."
+)]
+async fn dispatch_command(shared: &Arc<SharedState>, firstchar: u8, body: &[u8]) -> CommandResult {
     match firstchar {
         PQMSG_QUERY => {
             // Body is the null-terminated query string.
             let query_string = cstr_body(body);
-            exec_simple_query(query_string);
+            exec_simple_query(shared, query_string).await;
             CommandResult::Continue { ready: true }
         }
         PQMSG_PARSE | PQMSG_BIND | PQMSG_EXECUTE | PQMSG_DESCRIBE | PQMSG_CLOSE => {
@@ -205,42 +357,57 @@ fn dispatch_command(firstchar: u8, body: &[u8]) -> CommandResult {
 
 /// PG `exec_simple_query`: the real pipeline for a simple Query message.
 ///
-/// raw_parser -> parse_analyze_fixedparams + QueryRewrite -> standard_planner ->
-/// CreatePortal/PortalDefineQuery/PortalStart/PortalRun (driving a DestRemote
-/// printtup receiver) -> EndCommand (CommandComplete). Everything here is
-/// synchronous and buffers its wire output via `pq_putmessage_sync`; the command
-/// loop flushes after this returns.
+/// StartTransactionCommand + push active snapshot -> raw_parser ->
+/// parse_analyze_fixedparams_async + QueryRewrite -> standard_planner -> route by
+/// command type:
+///   - CMD_UTILITY (CREATE TABLE) -> ProcessUtility -> DefineRelation. Tag the
+///     utility statement (CreateCommandTag, "CREATE TABLE").
+///   - CMD_SELECT / CMD_INSERT -> open the plan's range-table relations, register
+///     them in the per-task exec-relations registry, drive ExecutorStart/Run/End
+///     against a DestRemote printtup receiver (SELECT yields RowDescription +
+///     DataRow(s); INSERT yields a row count). Tags "SELECT <n>" / "INSERT 0 <n>".
 ///
-/// M1 scope: exactly one SELECT statement. An empty query string -> NullCommand
-/// (EmptyQueryResponse). Multi-statement strings, utility/DML statements, and the
-/// implicit-transaction-block handling grow with their subsystems (rules.md s4).
-fn exec_simple_query(query_string: &str) {
-    use crate::backend::parser::analyze::parse_analyze_fixedparams;
+/// Then EndCommand (CommandComplete) and CommitTransactionCommand (autocommit).
+///
+/// ASYNC: parse-analysis can open relations, ProcessUtility / the executor reach
+/// the buffer pool + WAL. The receiver buffers each wire message synchronously via
+/// `pq_putmessage_sync`; the command loop flushes after this returns (step 09).
+///
+/// STAGED (rules.md s4): empty query string -> NullCommand; multi-statement strings,
+/// RETURNING, ON CONFLICT, extended protocol. An empty query is handled below.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: the executor/utility path holds task-confined !Send state (raw Relation handles, TupleTableSlot value arrays) across awaits; a backend runs on one task."
+)]
+async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
+    use crate::backend::parser::analyze::parse_analyze_fixedparams_async;
     use crate::backend::parser::parser::raw_parser;
     use crate::backend::optimizer::plan::planner::standard_planner;
     use crate::backend::rewrite::rewriteHandler::query_rewrite;
-    use crate::nodes::nodes::Node;
-    use crate::nodes::parsenodes::{RawStmt, FETCH_ALL};
+    use crate::nodes::nodes::{CmdType, Node};
+    use crate::nodes::parsenodes::RawStmt;
     use crate::parser::parser::RawParseMode;
 
     let dest = WHERE_TO_SEND_OUTPUT;
 
-    // start_xact_command(): near-no-op over the xact scope for M1 (the loop runs
-    // inside xact_scope; full StartTransactionCommand grows with xact.rs wiring).
-    start_xact_command();
+    // start_xact_command(): open the per-statement transaction (autocommit) and push
+    // the active snapshot the analyze/plan/executor read under (mirrors PG's
+    // start_xact_command + the portal snapshot; here it bounds the whole statement).
+    start_xact_command_async(shared).await;
+    push_statement_snapshot(shared);
 
-    // pg_parse_query: raw parse. (tcopprot.c's pg_parse_query wrapper is deferred;
-    // call the parser body directly, as the executor tests do.)
+    // pg_parse_query: raw parse.
     let mut parsetrees = raw_parser(query_string, RawParseMode::Default);
 
     // Empty query string: tell the frontend and finish.
     if parsetrees.is_empty() {
-        finish_xact_command();
+        crate::backend::utils::time::snapmgr::PopActiveSnapshot();
+        finish_xact_command_async(shared).await;
         crate::backend::tcop::dest::null_command(dest);
         return;
     }
 
-    // M1 handles a single statement; multi-statement strings grow.
+    // M2 handles a single statement; multi-statement strings grow.
     if parsetrees.len() != 1 {
         unimplemented!("exec_simple_query: multi-statement query strings deferred");
     }
@@ -254,72 +421,285 @@ fn exec_simple_query(query_string: &str) {
     // If we got a cancel signal in parsing, quit.
     crate::miscadmin::check_for_interrupts();
 
-    // pg_analyze_and_rewrite_fixedparams: parse analysis + rewrite.
-    let analyzed = parse_analyze_fixedparams(&raw, query_string, &[], 0, None);
-    let mut rewritten = query_rewrite(*analyzed);
-    if rewritten.len() != 1 {
-        unimplemented!("exec_simple_query: query rewrite producing multiple queries deferred");
-    }
+    // pg_analyze_and_rewrite_fixedparams: parse analysis (ASYNC -- opens relations
+    // for SELECT/INSERT) + rewrite. The rewriter's INSERT/UPDATE/DELETE target-list
+    // rewriting + rule firing is staged (rewriteHandler.rs s4); M2 has no rules or
+    // views and `transform_insert_stmt` already builds a complete, attno-ordered
+    // INSERT targetlist, so a plain INSERT is passed straight to the planner without
+    // the rewrite pass. SELECT (and UTILITY) go through QueryRewrite as usual.
+    let analyzed = parse_analyze_fixedparams_async(shared, &raw, query_string, &[], 0).await;
+    let mut query = if analyzed.commandType == CmdType::INSERT {
+        *analyzed
+    } else {
+        let mut rewritten = query_rewrite(*analyzed);
+        if rewritten.len() != 1 {
+            unimplemented!("exec_simple_query: query rewrite producing multiple queries deferred");
+        }
+        rewritten.remove(0)
+    };
 
-    // pg_plan_queries: plan.
-    let mut query = rewritten.remove(0);
-    let plan = standard_planner(&mut query, query_string, 0, None);
+    // pg_plan_queries: plan. A utility Query (commandType == UTILITY) is NOT run
+    // through the planner -- PG wraps its utilityStmt in a trivial CMD_UTILITY
+    // PlannedStmt; only a plannable query reaches standard_planner.
+    let plan = if query.commandType == CmdType::UTILITY {
+        wrap_utility_stmt(&query)
+    } else {
+        standard_planner(&mut query, query_string, 0, None)
+    };
 
     crate::miscadmin::check_for_interrupts();
 
-    // The command tag for the completion message (SELECT directly; a utility plan
-    // via CreateCommandTag, e.g. "CREATE TABLE").
+    // The command tag for the completion message.
     let command_tag = command_tag_for(&plan);
+    let mut qc = crate::tcop::cmdtag::QueryCompletion { command_tag, nprocessed: 0 };
 
-    // A utility statement (CMD_UTILITY) runs through the multi-query portal path
-    // (ChoosePortalStrategy -> MULTI_QUERY -> PortalRunMulti -> PortalRunUtility ->
-    // ProcessUtility), which is async (DefineRelation -> heap_create_with_catalog
-    // reaches the buffer pool/WAL). The socket command loop does not yet own an
-    // `Arc<SharedState>` nor the per-task database scopes (relcache / snapmgr /
-    // catalog-index / WAL insertion) that initdb + heap_create_with_catalog need
-    // (InitPostgres / connect-to-database is the deferred backend phase, see
-    // postgres_main); driving CREATE TABLE over the wire is therefore staged here.
-    // The full routing machinery (utility portal path) is exercised end-to-end by
-    // the parser/utility integration tests over the initdb'd catalogs. rules.md s4.
-    if plan.command_type == crate::nodes::nodes::CmdType::UTILITY {
-        unimplemented!(
-            "exec_simple_query: utility statement over the wire needs the backend \
-             database-init phase (Arc<SharedState> + per-task catalog scopes); \
-             the utility portal path is wired and tested via the integration tests"
-        );
+    match plan.command_type {
+        CmdType::UTILITY => {
+            // PortalRunUtility -> ProcessUtility -> DefineRelation. The utility path
+            // reaches the catalog/heap create (async).
+            let mut receiver = crate::backend::tcop::dest::create_dest_receiver(dest);
+            crate::backend::tcop::utility::process_utility(
+                shared,
+                &plan,
+                query_string,
+                crate::tcop::utility::ProcessUtilityContext::Toplevel,
+                receiver.as_mut(),
+                Some(&mut qc),
+            )
+            .await;
+        }
+        CmdType::SELECT | CmdType::INSERT => {
+            run_plan_over_wire(shared, &plan, query_string, command_tag, dest, &mut qc).await;
+        }
+        other => unimplemented!("exec_simple_query: command type {other:?} deferred"),
     }
 
-    // CreatePortal / PortalDefineQuery / PortalStart.
-    let mut portal = crate::backend::tcop::pquery::create_portal("");
-    crate::backend::tcop::pquery::portal_define_query(
-        &mut portal,
-        query_string,
-        command_tag,
-        vec![plan],
-    );
-    // Select the wire format: text (0) for every column in simple Query mode.
-    crate::backend::tcop::pquery::portal_set_result_format(&mut portal, &[]);
-    crate::backend::tcop::pquery::portal_start(&mut portal);
+    crate::backend::utils::time::snapmgr::PopActiveSnapshot();
 
-    // Create the destination receiver and bind it to the portal (formats).
+    // CommandComplete, then commit the autocommit transaction. Capture the xid the
+    // statement may have assigned (a writing INSERT/CREATE) before committing, then
+    // advance the shared latestCompletedXid so the NEXT statement's snapshot sees it.
+    crate::backend::tcop::dest::end_command(&qc, dest, false);
+    let committed = crate::backend::access::transam::xact::GetCurrentTransactionIdIfAny();
+    finish_xact_command_async(shared).await;
+    publish_committed_xid(shared, committed);
+}
+
+/// Advance the shared `latestCompletedXid` past a just-committed xid so later
+/// transactions' snapshots treat it as completed (and its rows as visible).
+///
+/// PG does this inside `ProcArrayEndTransaction` under ProcArrayLock, keyed off the
+/// committing backend's PGPROC. The single-process backend tasks here do not yet
+/// register a PGPROC (InitProcess is deferred -- postinit.rs), so that path no-ops;
+/// advancing the shared variable cache directly reproduces the visible effect that
+/// makes committed work observable across the autocommit transaction boundary. A
+/// read-only statement assigns no xid (`None`) and needs no advance.
+fn publish_committed_xid(shared: &Arc<SharedState>, committed: Option<crate::c::TransactionId>) {
+    use crate::access::transam::{
+        full_transaction_id_from_u64, u64_from_full_transaction_id, xid_from_full_transaction_id,
+    };
+    let Some(xid) = committed.filter(|x| x.is_valid()) else { return };
+    shared.variable_cache().with(|v| {
+        // Same rule as MaintainLatestCompletedXid: bump to `xid` if it is newer,
+        // lifting the 32-bit xid into the cache's current epoch (FullXidRelativeTo).
+        let cur = v.latest_completed_xid;
+        if !xid_from_full_transaction_id(cur).precedes(xid) {
+            return;
+        }
+        let rel_xid = xid_from_full_transaction_id(cur);
+        let delta = xid.0.wrapping_sub(rel_xid.0) as i32;
+        v.latest_completed_xid = full_transaction_id_from_u64(
+            u64_from_full_transaction_id(cur).wrapping_add(i64::from(delta) as u64),
+        );
+    });
+}
+
+/// Drive a planned SELECT / INSERT to completion over the wire: open the plan's
+/// range-table relations, register them in the per-task exec-relations registry
+/// (the es_relations equivalent), then run ExecutorStart/Run/Finish/End against a
+/// DestRemote printtup receiver. Relations opened here are closed before returning.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: raw Relation handles + the executor's per-query slots are !Send and task-confined to this backend."
+)]
+async fn run_plan_over_wire(
+    shared: &Arc<SharedState>,
+    plan: &crate::nodes::plannodes::PlannedStmt,
+    query_string: &str,
+    command_tag: CommandTag,
+    dest: CommandDest,
+    qc: &mut crate::tcop::cmdtag::QueryCompletion,
+) {
+    use crate::access::sdir::ScanDirection;
+    use crate::backend::executor::execMain::{
+        standard_executor_end, standard_executor_finish, standard_executor_run,
+        standard_executor_start, with_exec_relations,
+    };
+
+    // Open every RTE_RELATION in the range table (PG opens them before InitPlan,
+    // under the right locks). The handle for RTI i (1-based) is registered so
+    // ExecGetRangeTableRelation resolves it.
+    let opened = open_range_table_relations(shared, plan).await;
+    let registry: Vec<(usize, *mut crate::utils::relcache::RelationData)> =
+        opened.iter().map(|(rti, rel)| (*rti, *rel)).collect();
+
+    // Build the QueryDesc with the active snapshot + a DestRemote printtup receiver
+    // (text format for every column in simple Query mode).
     let mut receiver = crate::backend::tcop::dest::create_dest_receiver(dest);
     if dest == CommandDest::DestRemote {
-        crate::access::printtup::SetRemoteDestReceiverParams(receiver.as_mut(), portal.as_mut());
+        crate::backend::access::common::printtup::set_remote_dest_receiver_params(
+            receiver.as_mut(),
+            &[],
+        );
     }
+    let snap = crate::backend::utils::time::snapmgr::GetActiveSnapshot();
+    let mut query_desc = make_query_desc(plan, query_string, snap, receiver);
 
-    // Run the portal to completion (drives ExecutorRun -> printtup, which appends
-    // RowDescription + DataRow(s) to the send buffer), then finish + drop.
-    let mut qc = crate::tcop::cmdtag::QueryCompletion { command_tag, nprocessed: 0 };
-    crate::backend::tcop::pquery::portal_run(&mut portal, FETCH_ALL, receiver, Some(&mut qc));
+    with_exec_relations(
+        registry,
+        Box::pin(async {
+            standard_executor_start(&mut query_desc, 0);
+            standard_executor_run(Some(shared), &mut query_desc, ScanDirection::Forward, 0).await;
+            standard_executor_finish(&mut query_desc);
+            let processed = query_desc.estate.as_ref().map_or(0, |e| e.processed);
+            qc.command_tag = command_tag;
+            qc.nprocessed = processed;
+            standard_executor_end(Some(shared), &mut query_desc);
+        }),
+    )
+    .await;
 
-    if let Some(query_desc) = portal.query_desc.as_mut() {
-        crate::executor::executor::ExecutorFinish(query_desc);
+    // Close the relations we opened (drop the relcache refcount).
+    for (_rti, rel) in opened {
+        crate::backend::utils::cache::relcache::relation_close(rel);
     }
-    crate::backend::tcop::pquery::portal_drop(&mut portal);
+}
 
-    // Close the transaction statement (near-no-op for M1), then report completion.
-    finish_xact_command();
-    crate::backend::tcop::dest::end_command(&qc, dest, false);
+/// Open the open `Relation` for each RTE_RELATION in the plan's range table, keyed
+/// by RT index (1-based). Warms the relcache (async build from pg_class/pg_attribute
+/// for a user table), sets the physical address (the relcache build leaves
+/// rd_locator zeroed -- PG's RelationInitPhysicalAddr fills it from
+/// reltablespace/relfilenode), and takes a refcount via RelationIdGetRelation.
+#[allow(
+    clippy::future_not_send,
+    reason = "rules.md s5: returns raw Relation handles, task-confined to this backend."
+)]
+async fn open_range_table_relations(
+    shared: &Arc<SharedState>,
+    plan: &crate::nodes::plannodes::PlannedStmt,
+) -> Vec<(usize, *mut crate::utils::relcache::RelationData)> {
+    use crate::nodes::nodes::Node;
+    use crate::nodes::parsenodes::RTEKind;
+
+    let mut opened = Vec::new();
+    for (i, rte_node) in plan.rtable.iter().enumerate() {
+        let Node::RangeTblEntry(rte) = rte_node else {
+            continue; // non-RTE placeholder (e.g. the const RTE_RESULT for SELECT 1)
+        };
+        if rte.rtekind != RTEKind::RELATION || rte.relid.0 == 0 {
+            continue;
+        }
+        let rti = i + 1;
+        let relid = rte.relid;
+
+        // Warm the relcache (async heap scan of pg_class/pg_attribute), then take an
+        // open handle. The build leaves rd_locator zeroed; fill the physical address.
+        crate::backend::utils::cache::relcache::relation_build_desc(shared, relid).await;
+        let rel = crate::backend::utils::cache::relcache::relation_id_get_relation(relid)
+            .unwrap_or_else(|| unreachable!("relation {relid:?} just built into the relcache"));
+        init_relation_physical_addr(rel, relid);
+        opened.push((rti, rel));
+    }
+    opened
+}
+
+/// Fill a freshly-built relation's physical address (PG `RelationInitPhysicalAddr`).
+/// `relation_build_desc` leaves `rd_locator` zeroed; a user table's storage lives at
+/// {default tablespace, current db, relfilenode == relid} (M2: filenode == oid).
+fn init_relation_physical_addr(rel: *mut crate::utils::relcache::RelationData, relid: crate::postgres_ext::Oid) {
+    let dbid = crate::session::current().database_id();
+    // SAFETY: `rel` is a live relcache handle just returned by RelationIdGetRelation.
+    unsafe {
+        if (*rel).rd_locator.relNumber.0 == 0 {
+            (*rel).rd_locator = crate::storage::relfilelocator::RelFileLocator {
+                spcOid: crate::common::relpath::DEFAULTTABLESPACE_OID,
+                dbOid: dbid,
+                relNumber: relid,
+            };
+        }
+        (*rel).rd_lockInfo = crate::utils::rel::LockInfoData {
+            lockRelId: crate::utils::rel::LockRelId { relId: relid, dbId: dbid },
+        };
+    }
+}
+
+/// Build a QueryDesc for the wire path: carries the active snapshot + the DestRemote
+/// printtup receiver. (PG `CreateQueryDesc`.)
+#[allow(deprecated)]
+fn make_query_desc(
+    plan: &crate::nodes::plannodes::PlannedStmt,
+    query_string: &str,
+    snapshot: crate::utils::snapshot::Snapshot,
+    dest: Box<dyn crate::tcop::dest::DestReceiver>,
+) -> crate::executor::execdesc::QueryDesc {
+    crate::executor::execdesc::QueryDesc {
+        operation: plan.command_type,
+        plannedstmt: Some(Box::new(plan.clone())),
+        sourceText: query_string.to_string(),
+        snapshot: Some(Box::new(snapshot)),
+        crosscheck_snapshot: None,
+        dest: Some(dest),
+        params: None,
+        queryEnv: None,
+        instrument_options: crate::executor::instrument::InstrumentOption::empty(),
+        tupDesc: None,
+        estate: None,
+        planstate: None,
+        already_executed: false,
+        totaltime: None,
+    }
+}
+
+/// PG `pg_plan_query`'s utility shortcut: wrap a CMD_UTILITY `Query`'s utilityStmt
+/// in a trivial `PlannedStmt` (no plan tree, no range table) that ProcessUtility
+/// consumes. The planner is never invoked for a utility statement.
+fn wrap_utility_stmt(query: &crate::nodes::parsenodes::Query) -> crate::nodes::plannodes::PlannedStmt {
+    use crate::nodes::nodes::CmdType;
+    let utility_stmt = query
+        .utilityStmt
+        .clone()
+        .unwrap_or_else(|| unreachable!("a CMD_UTILITY Query carries its utilityStmt"));
+    crate::nodes::plannodes::PlannedStmt {
+        command_type: CmdType::UTILITY,
+        query_id: query.queryId,
+        plan_id: 0,
+        has_returning: false,
+        has_modifying_cte: false,
+        can_set_tag: query.canSetTag,
+        transient_plan: false,
+        depends_on_role: false,
+        parallel_mode_needed: false,
+        jit_flags: 0,
+        // A utility PlannedStmt carries no plan tree; ProcessUtility dispatches on
+        // utility_stmt, never plan_tree. Reuse the utilityStmt node as the unread
+        // plan_tree slot (the Node enum has no unit/placeholder variant).
+        plan_tree: utility_stmt.clone(),
+        part_prune_infos: Vec::new(),
+        rtable: Vec::new(),
+        unprunable_relids: None,
+        perm_infos: Vec::new(),
+        result_relations: Vec::new(),
+        append_relations: Vec::new(),
+        subplans: Vec::new(),
+        rewind_plan_ids: None,
+        row_marks: Vec::new(),
+        relation_oids: Vec::new(),
+        inval_items: Vec::new(),
+        param_exec_types: Vec::new(),
+        utility_stmt: Some(utility_stmt),
+        stmt_location: query.stmt_location,
+        stmt_len: query.stmt_len,
+    }
 }
 
 /// Derive the completion command tag from a planned statement. SELECT derives
@@ -329,6 +709,7 @@ fn exec_simple_query(query_string: &str) {
 fn command_tag_for(plan: &crate::nodes::plannodes::PlannedStmt) -> CommandTag {
     match plan.command_type {
         crate::nodes::nodes::CmdType::SELECT => CommandTag::Select,
+        crate::nodes::nodes::CmdType::INSERT => CommandTag::Insert,
         crate::nodes::nodes::CmdType::UTILITY => {
             let stmt = plan.utility_stmt.as_ref().unwrap_or_else(|| {
                 unreachable!("a CMD_UTILITY plan carries its utilityStmt")
@@ -339,17 +720,35 @@ fn command_tag_for(plan: &crate::nodes::plannodes::PlannedStmt) -> CommandTag {
     }
 }
 
-/// PG `start_xact_command`: ensure a transaction command is open. M1 runs the
-/// whole loop inside `xact_scope`, so this is a near-no-op; the full
-/// StartTransactionCommand wiring grows with xact.rs.
-fn start_xact_command() {
-    // TODO(xact): StartTransactionCommand(&shared) + statement-timeout arm.
+/// PG `start_xact_command`: open the per-statement (autocommit) transaction. The
+/// statement-timeout arm grows with the timeout subsystem.
+async fn start_xact_command_async(shared: &Arc<SharedState>) {
+    crate::backend::access::transam::xact::StartTransactionCommand(shared).await;
 }
 
-/// PG `finish_xact_command`: close the transaction statement. Near-no-op for M1
-/// (see `start_xact_command`); CommitTransactionCommand grows with xact.rs.
+/// PG `finish_xact_command`: commit the per-statement (autocommit) transaction.
+async fn finish_xact_command_async(shared: &Arc<SharedState>) {
+    crate::backend::access::transam::xact::CommitTransactionCommand(shared).await;
+}
+
+/// Sync `finish_xact_command` for the Sync-message path (extended protocol, M1
+/// near-no-op): nothing to commit when no statement transaction is open.
 fn finish_xact_command() {
-    // TODO(xact): CommitTransactionCommand(&shared).
+    // Sync between extended-protocol commands: the autocommit transaction is opened
+    // and committed per simple-Query statement, so there is nothing to do here yet.
+}
+
+/// Push the active snapshot the statement runs under (PG's portal/transaction
+/// snapshot). Take the transaction snapshot with curcid set to the current command
+/// id so the statement sees its own prior commands within the transaction.
+fn push_statement_snapshot(shared: &Arc<SharedState>) {
+    use crate::backend::access::transam::xact::GetCurrentCommandId;
+    use crate::backend::utils::time::snapmgr::{GetTransactionSnapshot, PushActiveSnapshot};
+    let mut snap = GetTransactionSnapshot(shared);
+    if let Some(s) = snap.as_mut() {
+        std::sync::Arc::make_mut(s).curcid = GetCurrentCommandId(false);
+    }
+    PushActiveSnapshot(snap);
 }
 
 /// Recover from a backend-local ERROR caught at the per-command recovery point
@@ -781,17 +1180,26 @@ mod tests {
     }
 }
 
-// --- end-to-end M1 wire test (the SELECT 1 milestone) ----------------------
+// --- end-to-end wire tests (the M2 milestone + the M1 SELECT 1 regression) -----
+//
+// These drive the REAL backend over a socket: a tempdir cluster is initdb'd at
+// supervisor boot, a TCP client connects with a v3 startup packet, then sends the
+// simple-Query messages and we assert the decoded backend->frontend bytes.
 #[cfg(test)]
 mod wire_tests {
-    use super::*;
-    use std::sync::Arc;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use std::net::SocketAddr;
+    use std::time::Duration;
 
-    use crate::backend::libpq::pqcomm::{self as pq, PqComm};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream as ClientStream;
+
+    use crate::backend::postmaster::auxprocess::aux_test_serial;
+    use crate::backend::postmaster::postmaster::start_supervisor;
+    use crate::backend::tcop::backend_startup::test_hook;
+    use crate::shared_state::SharedStateConfig;
 
     /// One decoded backend->frontend message: type byte + body (length stripped).
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     struct Msg {
         ty: u8,
         body: Vec<u8>,
@@ -803,6 +1211,9 @@ mod wire_tests {
         while bytes.len() >= 5 {
             let ty = bytes[0];
             let len = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
+            if bytes.len() < 1 + len {
+                break;
+            }
             let body = bytes[5..5 + (len - 4)].to_vec();
             out.push(Msg { ty, body });
             bytes = &bytes[1 + len..];
@@ -818,146 +1229,246 @@ mod wire_tests {
         v
     }
 
-    /// Drive the backend command loop for a single simple Query, returning the
-    /// decoded message sequence the client received.
-    ///
-    /// The backend runs as its own task over the server end of a duplex. The
-    /// client writes the Query, then reads the whole response (the M1 reply is
-    /// fully flushed before the backend blocks on the next read), then drops the
-    /// duplex client end -- which makes the backend's next read see EOF, so it
-    /// exits cleanly. We read a bounded amount with a timeout rather than to EOF,
-    /// because `tokio::io::duplex` only signals EOF once the WHOLE peer end drops.
-    async fn run_query(sql: &str) -> Vec<Msg> {
-        let (server, mut client) = tokio::io::duplex(64 * 1024);
+    /// Frame a startup packet (int32 len-incl-self + body, no type byte).
+    fn framed_startup(body: &[u8]) -> Vec<u8> {
+        let total = (body.len() + 4) as u32;
+        let mut out = total.to_be_bytes().to_vec();
+        out.extend_from_slice(body);
+        out
+    }
 
-        let backend = tokio::spawn(async move {
-            let comm = Arc::new(PqComm::new(server));
-            let loop_fut =
-                Box::pin(crate::backend::access::transam::xact::xact_scope(command_loop()));
-            pq::scope(comm, loop_fut).await;
-        });
+    fn loopback_port0() -> SocketAddr {
+        (std::net::Ipv4Addr::LOCALHOST, 0).into()
+    }
 
+    /// A SharedStateConfig pointing at a fresh per-test tempdir cluster directory.
+    fn tempdir_config() -> SharedStateConfig {
+        static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("pepperdb-wire-{}-{}", std::process::id(), n));
+        let _ = std::fs::create_dir_all(&dir);
+        SharedStateConfig {
+            data_dir: Some(dir.to_string_lossy().into_owned()),
+            nbuffers: 256,
+            ..Default::default()
+        }
+    }
+
+    /// Read framed messages from the socket until `done` is satisfied by the decoded
+    /// set so far (or a timeout fires).
+    async fn read_until(
+        client: &mut ClientStream,
+        buf: &mut Vec<u8>,
+        done: impl Fn(&[Msg]) -> bool,
+    ) -> Vec<Msg> {
+        let mut chunk = [0u8; 8192];
+        loop {
+            if done(&decode(buf)) {
+                return decode(buf);
+            }
+            let n = tokio::time::timeout(Duration::from_secs(10), client.read(&mut chunk))
+                .await
+                .expect("backend response timed out")
+                .expect("socket read");
+            assert!(n != 0, "backend closed the socket unexpectedly");
+            buf.extend_from_slice(&chunk[..n]);
+        }
+    }
+
+    /// Connect a client, send the v3 startup packet, and consume the backend's
+    /// startup reply up to (and including) the first ReadyForQuery ('Z').
+    async fn connect_and_startup(addr: SocketAddr) -> (ClientStream, Vec<u8>) {
+        let mut client = ClientStream::connect(addr).await.expect("connect");
+        // protocol 0x00030000 + "user\0postgres\0database\0postgres\0\0".
+        let mut body = 0x0003_0000u32.to_be_bytes().to_vec();
+        body.extend_from_slice(b"user\0postgres\0database\0postgres\0\0");
+        client.write_all(&framed_startup(&body)).await.expect("write startup");
+        client.flush().await.expect("flush startup");
+
+        // The backend sends BackendKeyData('K') then the idle ReadyForQuery('Z').
+        let mut buf = Vec::new();
+        read_until(&mut client, &mut buf, |m| m.iter().any(|x| x.ty == b'Z')).await;
+        (client, buf)
+    }
+
+    /// Send one simple Query and read its reply up to the terminating
+    /// ReadyForQuery; returns ONLY the messages produced by this query (the new
+    /// bytes appended after `already_seen`).
+    async fn simple_query(client: &mut ClientStream, buf: &mut Vec<u8>, sql: &str) -> Vec<Msg> {
+        let before = decode(buf).len();
         let mut q = sql.as_bytes().to_vec();
-        q.push(0); // null-terminated query string
+        q.push(0);
         client
             .write_all(&framed(crate::libpq::protocol::PQMSG_QUERY, &q))
             .await
-            .unwrap();
-        client.flush().await.unwrap();
+            .expect("write query");
+        client.flush().await.expect("flush query");
 
-        // Read the response until it ends with a ReadyForQuery ('Z') message --
-        // the M1 reply terminates with the idle 'Z' that closes the query cycle.
-        let mut buf = Vec::new();
-        let mut chunk = [0u8; 4096];
-        loop {
-            let n = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                client.read(&mut chunk),
-            )
-            .await
-            .expect("backend response timed out")
-            .unwrap();
-            if n == 0 {
-                break;
-            }
-            buf.extend_from_slice(&chunk[..n]);
-            // The cycle is done once we've seen the post-query ReadyForQuery: the
-            // startup 'Z' plus the 'Z' that follows CommandComplete => two 'Z's.
-            let msgs = decode(&buf);
-            let zcount = msgs.iter().filter(|m| m.ty == b'Z').count();
-            if zcount >= 2 && total_decoded_len(&msgs) == buf.len() {
-                break;
-            }
-        }
-
-        // Drop the client -> backend's next read sees EOF -> command loop exits.
-        drop(client);
-        backend.await.unwrap();
-        decode(&buf)
+        // Done when one more ReadyForQuery has arrived past the ones already seen.
+        let target_z = decode(buf).iter().filter(|m| m.ty == b'Z').count() + 1;
+        let all = read_until(client, buf, |m| {
+            m.iter().filter(|x| x.ty == b'Z').count() >= target_z
+        })
+        .await;
+        all[before..].to_vec()
     }
 
-    /// Sum of the on-wire size of decoded messages (1 type byte + int32 len).
-    fn total_decoded_len(msgs: &[Msg]) -> usize {
-        msgs.iter().map(|m| 1 + 4 + m.body.len()).sum()
-    }
+    /// THE MILESTONE: CREATE TABLE / INSERT / SELECT over the wire on an initdb'd
+    /// tempdir cluster. Asserts the full message sequence per statement.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m2_create_insert_select_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn select_1_produces_full_message_sequence() {
-        let msgs = run_query("SELECT 1").await;
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
 
-        // Sequence: BackendKeyData('K') | ReadyForQuery('Z','I') |
-        //           RowDescription('T') | DataRow('D') | CommandComplete('C') |
-        //           ReadyForQuery('Z','I')
-        let types: Vec<u8> = msgs.iter().map(|m| m.ty).collect();
+        // 1) CREATE TABLE t (a int) -> CommandComplete "CREATE TABLE" + ReadyForQuery.
+        let create = simple_query(&mut client, &mut buf, "CREATE TABLE t (a int)").await;
+        let types: Vec<u8> = create.iter().map(|m| m.ty).collect();
+        assert_eq!(types, vec![b'C', b'Z'], "CREATE TABLE: CommandComplete + ReadyForQuery");
+        assert_eq!(create[0].body, b"CREATE TABLE\0");
+        assert_eq!(create[1].body, b"I");
+
+        // 2) INSERT INTO t VALUES (1) -> CommandComplete "INSERT 0 1" + ReadyForQuery.
+        let insert = simple_query(&mut client, &mut buf, "INSERT INTO t VALUES (1)").await;
+        let types: Vec<u8> = insert.iter().map(|m| m.ty).collect();
+        assert_eq!(types, vec![b'C', b'Z'], "INSERT: CommandComplete + ReadyForQuery");
+        assert_eq!(insert[0].body, b"INSERT 0 1\0");
+        assert_eq!(insert[1].body, b"I");
+
+        // 3) SELECT * FROM t -> RowDescription + DataRow + CommandComplete + RFQ.
+        let select = simple_query(&mut client, &mut buf, "SELECT * FROM t").await;
+        let types: Vec<u8> = select.iter().map(|m| m.ty).collect();
         assert_eq!(
             types,
-            vec![b'K', b'Z', b'T', b'D', b'C', b'Z'],
-            "M1 message sequence"
+            vec![b'T', b'D', b'C', b'Z'],
+            "SELECT: RowDescription + DataRow + CommandComplete + ReadyForQuery"
         );
 
-        // RowDescription: 1 field "?column?", type OID 23, attlen 4, typmod -1, fmt 0.
-        let t = &msgs[2];
-        assert_eq!(t.ty, b'T');
-        let mut td = Vec::new();
-        td.extend_from_slice(&1u16.to_be_bytes()); // natts
-        td.extend_from_slice(b"?column?\0");
-        td.extend_from_slice(&0u32.to_be_bytes()); // resorigtbl
-        td.extend_from_slice(&0u16.to_be_bytes()); // resorigcol
-        td.extend_from_slice(&23u32.to_be_bytes()); // INT4OID
-        td.extend_from_slice(&4u16.to_be_bytes()); // attlen
-        td.extend_from_slice(&(-1i32 as u32).to_be_bytes()); // typmod
-        td.extend_from_slice(&0u16.to_be_bytes()); // format
-        assert_eq!(t.body, td);
+        // RowDescription: 1 field "a", type OID 23 (int4), attlen 4, typmod -1, fmt 0.
+        let t = &select[0];
+        let natts = u16::from_be_bytes([t.body[0], t.body[1]]);
+        assert_eq!(natts, 1, "one field");
+        // field name "a\0"
+        assert_eq!(&t.body[2..4], b"a\0");
+        // after name: resorigtbl(4) resorigcol(2) typoid(4) ...
+        let typoid = u32::from_be_bytes([t.body[10], t.body[11], t.body[12], t.body[13]]);
+        assert_eq!(typoid, 23, "int4 type OID");
 
         // DataRow: 1 column, text "1".
-        let d = &msgs[3];
-        assert_eq!(d.ty, b'D');
+        let d = &select[1];
         let mut dr = Vec::new();
-        dr.extend_from_slice(&1u16.to_be_bytes()); // 1 column
-        dr.extend_from_slice(&1u32.to_be_bytes()); // length 1
+        dr.extend_from_slice(&1u16.to_be_bytes());
+        dr.extend_from_slice(&1u32.to_be_bytes());
+        dr.extend_from_slice(b"1");
+        assert_eq!(d.body, dr, "DataRow text \"1\"");
+
+        // CommandComplete "SELECT 1" + idle ReadyForQuery.
+        assert_eq!(select[2].body, b"SELECT 1\0");
+        assert_eq!(select[3].body, b"I");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// M1 REGRESSION: SELECT 1 over the wire still returns the const int4 row.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m1_select_1_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let select = simple_query(&mut client, &mut buf, "SELECT 1").await;
+        let types: Vec<u8> = select.iter().map(|m| m.ty).collect();
+        assert_eq!(types, vec![b'T', b'D', b'C', b'Z'], "M1 SELECT 1 sequence");
+
+        // RowDescription: field "?column?", type OID 23.
+        let t = &select[0];
+        assert_eq!(&t.body[0..2], &1u16.to_be_bytes(), "one field");
+        assert_eq!(&t.body[2..11], b"?column?\0");
+
+        // DataRow: text "1".
+        let d = &select[1];
+        let mut dr = Vec::new();
+        dr.extend_from_slice(&1u16.to_be_bytes());
+        dr.extend_from_slice(&1u32.to_be_bytes());
         dr.extend_from_slice(b"1");
         assert_eq!(d.body, dr);
 
-        // CommandComplete: "SELECT 1\0".
-        assert_eq!(msgs[4].ty, b'C');
-        assert_eq!(msgs[4].body, b"SELECT 1\0");
+        assert_eq!(select[2].body, b"SELECT 1\0");
+        assert_eq!(select[3].body, b"I");
 
-        // ReadyForQuery: 'I' idle.
-        assert_eq!(msgs[5].ty, b'Z');
-        assert_eq!(msgs[5].body, b"I");
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn select_42_data_row_is_text_42() {
-        let msgs = run_query("SELECT 42").await;
-        let d = msgs.iter().find(|m| m.ty == b'D').expect("a DataRow");
+    /// M1 REGRESSION: a const SELECT with a different value returns its text.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m1_select_42_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let select = simple_query(&mut client, &mut buf, "SELECT 42").await;
+        let d = select.iter().find(|m| m.ty == b'D').expect("a DataRow");
         let mut dr = Vec::new();
         dr.extend_from_slice(&1u16.to_be_bytes());
         dr.extend_from_slice(&2u32.to_be_bytes()); // "42" is 2 bytes
         dr.extend_from_slice(b"42");
         assert_eq!(d.body, dr);
-
-        let c = msgs.iter().find(|m| m.ty == b'C').expect("a CommandComplete");
+        let c = select.iter().find(|m| m.ty == b'C').expect("a CommandComplete");
         assert_eq!(c.body, b"SELECT 1\0"); // one row processed
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn select_two_columns() {
-        let msgs = run_query("SELECT 1, 2").await;
+    /// M1 REGRESSION: a two-column const SELECT returns a two-field RowDescription
+    /// and a two-column DataRow.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m1_select_two_columns_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
 
-        // RowDescription has 2 fields.
-        let t = msgs.iter().find(|m| m.ty == b'T').expect("a RowDescription");
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let select = simple_query(&mut client, &mut buf, "SELECT 1, 2").await;
+        let t = select.iter().find(|m| m.ty == b'T').expect("a RowDescription");
         let natts = u16::from_be_bytes([t.body[0], t.body[1]]);
         assert_eq!(natts, 2);
 
-        // DataRow has 2 text columns "1","2".
-        let d = msgs.iter().find(|m| m.ty == b'D').expect("a DataRow");
+        let d = select.iter().find(|m| m.ty == b'D').expect("a DataRow");
         let mut dr = Vec::new();
-        dr.extend_from_slice(&2u16.to_be_bytes()); // 2 columns
+        dr.extend_from_slice(&2u16.to_be_bytes());
         dr.extend_from_slice(&1u32.to_be_bytes());
         dr.extend_from_slice(b"1");
         dr.extend_from_slice(&1u32.to_be_bytes());
         dr.extend_from_slice(b"2");
         assert_eq!(d.body, dr);
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
     }
 }

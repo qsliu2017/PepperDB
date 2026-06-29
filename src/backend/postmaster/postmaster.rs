@@ -244,6 +244,29 @@ async fn server_loop(
     let (worker_tx, mut worker_rx) = unbounded_channel::<JoinHandle<()>>();
     let mut workers: JoinSet<()> = JoinSet::new();
 
+    // initdb at server boot (PG runs initdb before the first postmaster start; the
+    // cluster must have its catalogs seeded before any backend connects, since
+    // backends read on-disk catalogs). Ensure the cluster directory layout exists,
+    // then seed the catalogs ONCE here, before the accept loop admits connections.
+    // Gated on a configured data directory: a cluster has a DataDir, and the
+    // identity/accept-path supervisor tests (which never run a query) use the
+    // default config with no DataDir and must not pay for / write a bootstrap.
+    if shared.config().data_dir().is_some() {
+        ensure_cluster_dirs(&shared);
+        // Bootstrap holds `!Send` catalog state across awaits (like a backend), so
+        // run it on a dedicated current-thread runtime off the supervisor task,
+        // joining before the accept loop starts (nothing connects until it returns).
+        let boot_shared = shared.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("bootstrap runtime");
+            rt.block_on(crate::backend::tcop::postgres::bootstrap_cluster(boot_shared));
+        })
+        .await;
+    }
+
     // Start the long-lived auxiliary tasks (PG launches them right after shared
     // memory is up) and install the on-demand spawner hooks.
     let mut aux = AuxTasks::new();
@@ -304,6 +327,23 @@ async fn server_loop(
     drain(&mut backends, &registry, &mut workers, &mut aux).await;
 }
 
+/// Ensure the cluster's on-disk directory layout exists before initdb seeds it
+/// (PG's initdb creates these). The WAL directory (`pg_wal`) and the per-database
+/// storage directory (`base/<dboid>`) for the default database must exist before
+/// `bootstrap_catalogs` writes catalog heap/index files. A no-op if no data
+/// directory is configured (the storage layer then errors at first I/O).
+fn ensure_cluster_dirs(shared: &Arc<SharedState>) {
+    let Some(dir) = shared.config().data_dir() else {
+        return;
+    };
+    let base = std::path::Path::new(&dir);
+    let _ = std::fs::create_dir_all(base.join(crate::access::xlog_internal::XLOGDIR));
+    let _ = std::fs::create_dir_all(
+        base.join("base")
+            .join(crate::backend::tcop::postgres::DEFAULT_DATABASE_OID.0.to_string()),
+    );
+}
+
 /// An aux task ended during NORMAL operation (PG treats an aux exit outside
 /// shutdown as a crash and relaunches it). Identify the role and respawn it.
 fn respawn_aux(
@@ -360,31 +400,78 @@ fn admit_and_spawn(
     let key = registry.register(entry);
 
     let shared = shared.clone();
-    // type -> async-entry dispatch (replaces launch_backend's child_process_kinds[]).
-    // A connection is always a client backend; the aux tasks (checkpointer,
-    // bgwriter, walwriter, autovacuum, archiver) are spawned by
-    // launch_missing_background_tasks, never through connection admission -- so any
-    // other type here is unreachable.
-    // `cancel` is the per-child termination Notify (PG's SIGTERM target); the
-    // backend selects on it to set ProcDie (step 09 Part B).
-    let entry_fut = match backend_type_for_connection() {
-        BackendType::BACKEND => backend_main(stream, peer, shared, key, cancel),
+    match backend_type_for_connection() {
+        BackendType::BACKEND => {}
         other => unreachable!("supervisor only spawns client backends, got {other:?}"),
+    }
+
+    // ONE THREAD PER BACKEND (the faithful PG one-process-per-backend model under
+    // tokio): a backend's per-task state holds raw `Relation`/tuple handles (`!Send`,
+    // task-confined) across `.await`, which a multi-thread `tokio::spawn` would
+    // reject (the future is not `Send`) and which a migrating worker thread could
+    // corrupt. So each backend runs on its OWN OS thread with a dedicated
+    // current-thread runtime: the `!Send` future is built and driven entirely inside
+    // that runtime (it never crosses a thread boundary), and the spawned-blocking
+    // bridge that joins the thread only moves `Send` values (the std socket, the
+    // `Arc<SharedState>`, the key, the cancel Notify). This also gives the backend a
+    // large, dedicated stack for the deep connect-to-database scope nesting.
+    //
+    // The accepted tokio `TcpStream` is converted to a std socket here (still in the
+    // supervisor runtime) and re-wrapped inside the backend's runtime (into_std /
+    // from_std), the supported way to move a socket between tokio runtimes.
+    let std_stream = match stream.into_std() {
+        Ok(s) => s,
+        Err(e) => {
+            crate::elog!(crate::utils::elog::LOG, format!("backend socket detach failed: {e}"));
+            registry.remove(key);
+            return;
+        }
     };
 
     // catch_unwind at the task boundary (design-000 error model): an
-    // elog(ERROR)-as-panic inside the backend is contained here so the
-    // supervisor never crashes. The critical-section abort path uses
-    // process::abort and correctly bypasses this.
+    // elog(ERROR)-as-panic inside the backend is contained so the supervisor never
+    // crashes. spawn_blocking runs the dedicated-runtime driver off the async
+    // workers; the JoinSet yields the key for the reaper.
     backends.spawn(async move {
-        use futures_util::FutureExt;
-        let result = std::panic::AssertUnwindSafe(entry_fut).catch_unwind().await;
-        if let Err(payload) = result {
+        let _ = tokio::task::spawn_blocking(move || {
+            run_backend_confined(std_stream, peer, shared, key, cancel);
+        })
+        .await;
+        key
+    });
+}
+
+/// Drive one backend to completion on a dedicated current-thread tokio runtime,
+/// wrapped in `catch_unwind`. Runs on a `spawn_blocking` thread so the backend's
+/// `!Send` per-task state never migrates. Re-wraps the std socket as a tokio
+/// `TcpStream` inside this runtime before entering `backend_main`.
+fn run_backend_confined(
+    std_stream: std::net::TcpStream,
+    peer: SocketAddr,
+    shared: Arc<SharedState>,
+    key: ChildKey,
+    cancel: Arc<Notify>,
+) {
+    use futures_util::FutureExt;
+    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(rt) => rt,
+        Err(e) => {
+            crate::elog!(crate::utils::elog::LOG, format!("backend runtime build failed: {e}"));
+            return;
+        }
+    };
+    rt.block_on(async move {
+        let stream = match TcpStream::from_std(std_stream) {
+            Ok(s) => s,
+            Err(e) => {
+                crate::elog!(crate::utils::elog::LOG, format!("backend socket attach failed: {e}"));
+                return;
+            }
+        };
+        let fut = backend_main(stream, peer, shared, key, cancel);
+        if let Err(payload) = std::panic::AssertUnwindSafe(fut).catch_unwind().await {
             log_caught_panic(&*payload);
         }
-        // Yield the key so the supervisor reaper can deregister this child,
-        // whether it returned normally or panicked.
-        key
     });
 }
 
