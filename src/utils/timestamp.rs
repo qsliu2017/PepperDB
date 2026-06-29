@@ -94,10 +94,16 @@ pub fn TimestampDifferenceMicroseconds(start_time: TimestampTz, stop_time: Times
 pub static mut PgStartTime: TimestampTz = 0;
 pub static mut PgReloadTime: TimestampTz = 0;
 
-// Internal routines (not fmgr-callable)
-pub fn anytimestamp_typmod_check(istz: bool, typmod: i32) -> i32 {
-    unimplemented!()
-}
+// Internal routines (not fmgr-callable). The bodies live in
+// crate::backend::utils::adt::timestamp (the .c-defs invariant); re-exported here
+// so callers keep using `crate::utils::timestamp::*`.
+pub use crate::backend::utils::adt::timestamp::{
+    anytimestamp_typmod_check, date2isoweek, date2isoyear, date2isoyearday, dt2time, interval2itm,
+    isoweek2date, isoweek2j, isoweekdate2date, itm2interval, itmin2interval, GetEpochTime,
+    SetEpochTimestamp, timestamp2timestamptz_opt_overflow, timestamp2tm, timestamp_cmp_internal,
+    timestamp_cmp_timestamptz_internal, tm2timestamp,
+};
+
 pub fn GetCurrentTimestamp() -> TimestampTz {
     // PG `GetCurrentTimestamp`: microseconds since the PostgreSQL epoch
     // (2000-01-01 UTC). Computed from the system clock.
@@ -146,78 +152,10 @@ pub fn timestamptz_to_str(t: TimestampTz) -> String {
     unimplemented!()
 }
 
-/// `int *tzp` skippable out-param -> Option; (tm, fsec) folded into the tuple.
-pub fn tm2timestamp(tm: &pg_tm, fsec: fsec_t, tzp: Option<&i32>, result: &mut Timestamp) -> i32 {
-    unimplemented!()
-}
-pub fn timestamp2tm(
-    dt: Timestamp,
-    tzp: Option<&mut i32>,
-    tm: &mut pg_tm,
-    fsec: &mut fsec_t,
-    tzn: Option<&mut *const u8>,
-    attimezone: *mut pg_tz,
-) -> i32 {
-    unimplemented!() // TODO(ptr)
-}
-/// out-params (hour, min, sec, fsec) -> tuple.
-pub fn dt2time(jd: Timestamp) -> (i32, i32, i32, fsec_t) {
-    unimplemented!()
-}
-
-pub fn interval2itm(span: Interval, itm: &mut pg_itm) {
-    unimplemented!()
-}
-pub fn itm2interval(itm: &mut pg_itm, span: &mut Interval) -> i32 {
-    unimplemented!()
-}
-pub fn itmin2interval(itm_in: &mut pg_itm_in, span: &mut Interval) -> i32 {
-    unimplemented!()
-}
-
-pub fn SetEpochTimestamp() -> Timestamp {
-    unimplemented!()
-}
-pub fn GetEpochTime(tm: &mut pg_tm) {
-    unimplemented!()
-}
-
-pub fn timestamp_cmp_internal(dt1: Timestamp, dt2: Timestamp) -> i32 {
-    unimplemented!()
-}
-
 // timestamp comparison works for timestamptz too.
 #[inline]
 pub fn timestamptz_cmp_internal(dt1: TimestampTz, dt2: TimestampTz) -> i32 {
     timestamp_cmp_internal(dt1, dt2)
-}
-
-/// `int *overflow` out-param -> tuple.
-pub fn timestamp2timestamptz_opt_overflow(timestamp: Timestamp) -> (TimestampTz, i32) {
-    unimplemented!()
-}
-pub fn timestamp_cmp_timestamptz_internal(timestamp_val: Timestamp, dt2: TimestampTz) -> i32 {
-    unimplemented!()
-}
-
-pub fn isoweek2j(year: i32, week: i32) -> i32 {
-    unimplemented!()
-}
-/// out-params (year, mon, mday) -> tuple.
-pub fn isoweek2date(woy: i32) -> (i32, i32, i32) {
-    unimplemented!()
-}
-pub fn isoweekdate2date(isoweek: i32, wday: i32) -> (i32, i32, i32) {
-    unimplemented!()
-}
-pub fn date2isoweek(year: i32, mon: i32, mday: i32) -> i32 {
-    unimplemented!()
-}
-pub fn date2isoyear(year: i32, mon: i32, mday: i32) -> i32 {
-    unimplemented!()
-}
-pub fn date2isoyearday(year: i32, mon: i32, mday: i32) -> i32 {
-    unimplemented!()
 }
 
 pub fn TimestampTimestampTzRequiresRewrite() -> bool {

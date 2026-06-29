@@ -260,8 +260,8 @@ pub const DATEORDER_YMD: i32 = 0;
 pub const DATEORDER_DMY: i32 = 1;
 pub const DATEORDER_MDY: i32 = 2;
 
-pub static mut DateStyle: i32 = 0;
-pub static mut DateOrder: i32 = 0;
+pub static mut DateStyle: i32 = USE_ISO_DATES;
+pub static mut DateOrder: i32 = DATEORDER_MDY;
 
 pub const INTSTYLE_POSTGRES: i32 = 0;
 pub const INTSTYLE_POSTGRES_VERBOSE: i32 = 1;

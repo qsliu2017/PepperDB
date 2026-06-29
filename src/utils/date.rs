@@ -73,27 +73,17 @@ pub fn TimeTzADTPGetDatum(x: &TimeTzADT) -> Datum {
     Datum(std::ptr::from_ref::<TimeTzADT>(x) as usize) // TODO(ptr)
 }
 
-// date.c
-pub fn anytime_typmod_check(istz: bool, typmod: i32) -> i32 {
-    unimplemented!()
-}
-pub fn date2timestamp_no_overflow(date_val: DateADT) -> f64 {
-    unimplemented!()
-}
-/// `int *overflow` skippable out-param -> tuple (value, overflow flag).
-pub fn date2timestamp_opt_overflow(date_val: DateADT) -> (Timestamp, i32) {
-    unimplemented!()
-}
-pub fn date2timestamptz_opt_overflow(date_val: DateADT) -> (TimestampTz, i32) {
-    unimplemented!()
-}
-pub fn date_cmp_timestamp_internal(date_val: DateADT, dt2: Timestamp) -> i32 {
-    unimplemented!()
-}
-pub fn date_cmp_timestamptz_internal(date_val: DateADT, dt2: TimestampTz) -> i32 {
-    unimplemented!()
-}
+// date.c bodies live in crate::backend::utils::adt::date (.c-defs invariant);
+// re-exported so callers keep using `crate::utils::date::*`. AdjustTimeForTypmod
+// is the deprecated C name for the backend's `adjust_time_for_typmod`.
+pub use crate::backend::utils::adt::date::{
+    adjust_time_for_typmod as AdjustTimeForTypmod, anytime_typmod_check,
+    date2timestamp_no_overflow, date2timestamp_opt_overflow, date2timestamptz_opt_overflow,
+    date_cmp_timestamp_internal, date_cmp_timestamptz_internal, float_time_overflows, time2tm,
+    time_overflows, timetz2tm, tm2time, tm2timetz,
+};
 
+// STAGED: need session/transaction state or the IANA tz DB. TODO(timezone-db).
 pub fn EncodeSpecialDate(dt: DateADT) -> String {
     unimplemented!()
 }
@@ -104,27 +94,5 @@ pub fn GetSQLCurrentTime(typmod: i32) -> *mut TimeTzADT {
     unimplemented!() // TODO(ptr)
 }
 pub fn GetSQLLocalTime(typmod: i32) -> TimeADT {
-    unimplemented!()
-}
-/// out-params (tm, fsec) -> tuple; int status return kept as bool.
-pub fn time2tm(time: TimeADT, tm: &mut pg_tm, fsec: &mut fsec_t) -> i32 {
-    unimplemented!()
-}
-pub fn timetz2tm(time: &mut TimeTzADT, tm: &mut pg_tm, fsec: &mut fsec_t, tzp: &mut i32) -> i32 {
-    unimplemented!()
-}
-pub fn tm2time(tm: &pg_tm, fsec: fsec_t, result: &mut TimeADT) -> i32 {
-    unimplemented!()
-}
-pub fn tm2timetz(tm: &pg_tm, fsec: fsec_t, tz: i32, result: &mut TimeTzADT) -> i32 {
-    unimplemented!()
-}
-pub fn time_overflows(hour: i32, min: i32, sec: i32, fsec: fsec_t) -> bool {
-    unimplemented!()
-}
-pub fn float_time_overflows(hour: i32, min: i32, sec: f64) -> bool {
-    unimplemented!()
-}
-pub fn AdjustTimeForTypmod(time: &mut TimeADT, typmod: i32) {
     unimplemented!()
 }
