@@ -39,6 +39,12 @@ fn not_yet_reachable(what: &str) -> ! {
     unimplemented!("{what}: not yet translated for this milestone");
 }
 
+/// Is this opclause binary (exactly two args)? PG's
+/// `list_length(((OpExpr *) clause)->args) == 2`.
+fn opclause_is_binary(clause: &Node) -> bool {
+    matches!(clause, Node::OpExpr(e) if e.args.len() == 2)
+}
+
 /// Is this clause a top-level OR clause (`BoolExpr` with `OR_EXPR`)?
 fn is_orclause(clause: &Node) -> bool {
     matches!(clause, Node::BoolExpr(b) if b.boolop == crate::nodes::primnodes::BoolExprType::OR_EXPR)
@@ -85,9 +91,14 @@ pub fn make_restrictinfo(
 }
 
 /// PG `make_plain_restrictinfo`: construct a RestrictInfo from a non-OR clause.
-/// The relid sets (left/right/clause) are computed by `pull_varnos` in PG; for
-/// the single-rel M3 scan qual they are unused (no join-clause detection, no
-/// index-path matching), so they are left `None` and grow with joins/indexes.
+///
+/// The relid sets are computed via `pull_varnos`: for a binary opclause the
+/// left/right relids are set (and `can_join` if they're disjoint and nonempty,
+/// the syntactic join-clause test); otherwise only `clause_relids` is set.
+/// `required_relids` defaults to `clause_relids`. `num_base_rels` counts the
+/// base rels in `clause_relids` (dropping `root.outer_join_rels`), and a fresh
+/// `rinfo_serial` is assigned. This is what lets `distribute_restrictinfo_to_rels`
+/// tell a base restriction (singleton) from a join clause (multiple).
 #[allow(clippy::too_many_arguments, reason = "1:1 PG port: matches the C signature")]
 pub fn make_plain_restrictinfo(
     root: &mut PlannerInfo,
@@ -102,7 +113,46 @@ pub fn make_plain_restrictinfo(
     incompatible_relids: Option<Relids>,
     outer_relids: Option<Relids>,
 ) -> RestrictInfo {
-    let _ = root;
+    use crate::nodes::bitmapset::{bms_difference, bms_num_members, bms_overlap, bms_union};
+    use crate::nodes::nodeFuncs::{get_leftop, get_rightop, is_opclause};
+
+    let clause_node: Node = (*clause).clone();
+
+    let mut can_join = false;
+    let (left_relids, right_relids, clause_relids): (Option<Relids>, Option<Relids>, Option<Relids>) =
+        if is_opclause(Some(&clause_node)) && opclause_is_binary(&clause_node) {
+            let left = get_leftop(&clause_node).cloned();
+            let right = get_rightop(&clause_node).cloned();
+            let lrelids = crate::backend::optimizer::util::var::pull_varnos(root, left);
+            let rrelids = crate::backend::optimizer::util::var::pull_varnos(root, right);
+            let crelids = bms_union(&lrelids, &rrelids);
+            // Does it look like a normal join clause? (binary op over disjoint,
+            // both-nonempty relid sets) -- a purely syntactic test.
+            if bms_num_members(&lrelids) != 0
+                && bms_num_members(&rrelids) != 0
+                && !bms_overlap(&lrelids, &rrelids)
+            {
+                can_join = true;
+                crate::assert!(!pseudoconstant);
+            }
+            (Some(lrelids), Some(rrelids), Some(crelids))
+        } else {
+            let crelids = crate::backend::optimizer::util::var::pull_varnos(root, Some(clause_node));
+            (None, None, Some(crelids))
+        };
+
+    // required_relids defaults to clause_relids.
+    let required_relids = required_relids.or_else(|| clause_relids.clone());
+
+    // Count base rels in clause_relids (delete outer_join_rels, count survivors).
+    let outer_join_rels = root.outer_join_rels.clone().unwrap_or_default();
+    let baserels = bms_difference(&clause_relids.clone().unwrap_or_default(), &outer_join_rels);
+    let num_base_rels = bms_num_members(&baserels);
+
+    // Fresh serial number.
+    root.last_rinfo_serial += 1;
+    let rinfo_serial = root.last_rinfo_serial;
+
     RestrictInfo {
         clause: *clause,
         orclause: orclause.map(|b| *b),
@@ -110,20 +160,19 @@ pub fn make_plain_restrictinfo(
         pseudoconstant,
         has_clone,
         is_clone,
-        can_join: false,
+        can_join,
         security_level,
         incompatible_relids,
         outer_relids,
         // security_level == 0 quals are never delayed, so leakproof is "don't know".
         leakproof: false,
         has_volatile: VolatileFunctionStatus::UNKNOWN,
-        // pull_varnos-derived relids are deferred (single-rel scan qual).
-        clause_relids: None,
-        left_relids: None,
-        right_relids: None,
+        clause_relids,
+        left_relids,
+        right_relids,
         required_relids,
-        num_base_rels: 0,
-        rinfo_serial: 0,
+        num_base_rels,
+        rinfo_serial,
         parent_ec: None,
         eval_cost: QualCost { startup: -1.0, per_tuple: -1.0 },
         norm_selec: -1.0,

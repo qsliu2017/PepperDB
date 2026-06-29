@@ -27,9 +27,7 @@ pub type QueryPathkeysCallback = fn(root: &mut PlannerInfo);
 pub use crate::backend::optimizer::plan::planmain::query_planner;
 
 /* prototypes for plan/planagg.c */
-pub fn preprocess_minmax_aggregates(root: &mut PlannerInfo) {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::plan::planagg::preprocess_minmax_aggregates;
 
 /* prototypes for plan/createplan.c */
 /// PG `create_plan`. See `crate::backend::optimizer::plan::planmain`. Returns the
@@ -109,25 +107,10 @@ pub fn make_limit(
 pub static mut FROM_COLLAPSE_LIMIT: i32 = 0;
 pub static mut JOIN_COLLAPSE_LIMIT: i32 = 0;
 
-pub fn add_base_rels_to_query(root: &mut PlannerInfo, jtnode: &Node) {
-    unimplemented!()
-}
-
-pub fn add_other_rels_to_query(root: &mut PlannerInfo) {
-    unimplemented!()
-}
-
-pub fn build_base_rel_tlists(root: &mut PlannerInfo, final_tlist: &[TargetEntry]) {
-    unimplemented!()
-}
-
-pub fn add_vars_to_targetlist(root: &mut PlannerInfo, vars: &[Node], where_needed: Relids) {
-    unimplemented!()
-}
-
-pub fn add_vars_to_attr_needed(root: &mut PlannerInfo, vars: &[Node], where_needed: Relids) {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::plan::initsplan::{
+    add_base_rels_to_query, add_other_rels_to_query, add_vars_to_attr_needed,
+    add_vars_to_targetlist, build_base_rel_tlists,
+};
 
 pub fn remove_useless_groupby_columns(root: &mut PlannerInfo) {
     unimplemented!()
@@ -145,46 +128,14 @@ pub fn create_lateral_join_info(root: &mut PlannerInfo) {
     unimplemented!()
 }
 
-pub fn deconstruct_jointree(root: &mut PlannerInfo) -> Vec<Node> {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::plan::initsplan::{
+    deconstruct_jointree, distribute_restrictinfo_to_rels, restriction_is_always_false,
+    restriction_is_always_true,
+};
 
-pub fn restriction_is_always_true(root: &mut PlannerInfo, restrictinfo: &RestrictInfo) -> bool {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::plan::initsplan::process_implied_equality;
 
-pub fn restriction_is_always_false(root: &mut PlannerInfo, restrictinfo: &RestrictInfo) -> bool {
-    unimplemented!()
-}
-
-pub fn distribute_restrictinfo_to_rels(root: &mut PlannerInfo, restrictinfo: &RestrictInfo) {
-    unimplemented!()
-}
-
-pub fn process_implied_equality(
-    root: &mut PlannerInfo,
-    opno: Oid,
-    collation: Oid,
-    item1: &Expr,
-    item2: &Expr,
-    qualscope: Relids,
-    security_level: Index,
-    both_const: bool,
-) -> RestrictInfo {
-    unimplemented!()
-}
-
-pub fn build_implied_join_equality(
-    root: &mut PlannerInfo,
-    opno: Oid,
-    collation: Oid,
-    item1: &Expr,
-    item2: &Expr,
-    qualscope: Relids,
-    security_level: Index,
-) -> RestrictInfo {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::plan::initsplan::build_implied_join_equality;
 
 pub fn rebuild_joinclause_attr_needed(root: &mut PlannerInfo) {
     unimplemented!()
@@ -195,50 +146,10 @@ pub fn match_foreign_keys_to_quals(root: &mut PlannerInfo) {
 }
 
 /* prototypes for plan/analyzejoins.c */
-pub fn remove_useless_joins(root: &mut PlannerInfo, joinlist: Vec<Node>) -> Vec<Node> {
-    unimplemented!()
-}
-
-pub fn reduce_unique_semijoins(root: &mut PlannerInfo) {
-    unimplemented!()
-}
-
-pub fn query_supports_distinctness(query: &Query) -> bool {
-    unimplemented!()
-}
-
-pub fn query_is_distinct_for(query: &Query, colnos: &[Node], opids: &[Oid]) -> bool {
-    unimplemented!()
-}
-
-pub fn innerrel_is_unique(
-    root: &mut PlannerInfo,
-    joinrelids: Relids,
-    outerrelids: Relids,
-    innerrel: &RelOptInfo,
-    jointype: JoinType,
-    restrictlist: &[RestrictInfo],
-    force_cache: bool,
-) -> bool {
-    unimplemented!()
-}
-
-/// out-param `extra_clauses` folded into the returned tuple alongside the bool.
-pub fn innerrel_is_unique_ext(
-    root: &mut PlannerInfo,
-    joinrelids: Relids,
-    outerrelids: Relids,
-    innerrel: &RelOptInfo,
-    jointype: JoinType,
-    restrictlist: &[RestrictInfo],
-    force_cache: bool,
-) -> (bool, Vec<RestrictInfo>) {
-    unimplemented!()
-}
-
-pub fn remove_useless_self_joins(root: &mut PlannerInfo, joinlist: Vec<Node>) -> Vec<Node> {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::plan::analyzejoins::{
+    innerrel_is_unique, innerrel_is_unique_ext, query_is_distinct_for, query_supports_distinctness,
+    reduce_unique_semijoins, remove_useless_joins, remove_useless_self_joins,
+};
 
 /* prototypes for plan/setrefs.c */
 /// PG `set_plan_references`. See `crate::backend::optimizer::plan::setrefs`.

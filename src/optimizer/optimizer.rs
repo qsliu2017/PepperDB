@@ -118,13 +118,18 @@ pub fn extract_query_dependencies(_query: Option<Node>) -> (Vec<Oid>, Vec<Node>,
 
 // in prep/prepqual.c:
 
-pub fn negate_clause(_node: Option<Node>) -> Option<Node> {
-    unimplemented!()
+/// PG `negate_clause` (`Node *negate_clause(Node *)`): erroring on NULL input,
+/// per PG. The leaf lives in `prep::prepqual`.
+pub fn negate_clause(node: Option<Node>) -> Option<Node> {
+    let Some(node) = node else {
+        crate::elog!(crate::utils::elog::ERROR, "can't negate an empty subexpression");
+        #[allow(unreachable_code, reason = "elog(ERROR) diverges")]
+        return None;
+    };
+    Some(crate::backend::optimizer::prep::prepqual::negate_clause(node))
 }
 
-pub fn canonicalize_qual(_qual: Option<Node>, _is_check: bool) -> Option<Node> {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::prep::prepqual::canonicalize_qual;
 
 // in util/clauses.c:
 

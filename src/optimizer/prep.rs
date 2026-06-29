@@ -25,13 +25,7 @@ pub fn expand_virtual_generated_columns(root: &mut PlannerInfo) -> Query {
     unimplemented!()
 }
 
-pub fn pull_up_subqueries(root: &mut PlannerInfo) {
-    unimplemented!()
-}
-
-pub fn flatten_simple_union_all(root: &mut PlannerInfo) {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::prep::prepjointree::{flatten_simple_union_all, pull_up_subqueries};
 
 pub fn reduce_outer_joins(root: &mut PlannerInfo) {
     unimplemented!()
@@ -70,9 +64,7 @@ pub fn get_agg_clause_costs(root: &mut PlannerInfo, aggsplit: AggSplit, costs: &
     unimplemented!()
 }
 
-pub fn preprocess_aggrefs(root: &mut PlannerInfo, clause: &Node) {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::prep::prepagg::preprocess_aggrefs;
 
 /* prototypes for prepunion.c */
 pub fn plan_set_operations(root: &mut PlannerInfo) -> RelOptInfo {
