@@ -253,8 +253,9 @@ async fn server_loop(
     // default config with no DataDir and must not pay for / write a bootstrap.
     if shared.config().data_dir().is_some() {
         ensure_cluster_dirs(&shared);
-        // Bootstrap holds `!Send` catalog state across awaits (like a backend), so
-        // run it on a dedicated current-thread runtime off the supervisor task,
+        // Bootstrap's future is Send (like a backend's), but it nests the deep
+        // per-task scope stack; run it once on a dedicated current-thread runtime on
+        // its own spawn_blocking OS thread (full stack, isolated from the supervisor),
         // joining before the accept loop starts (nothing connects until it returns).
         let boot_shared = shared.clone();
         let _ = tokio::task::spawn_blocking(move || {
