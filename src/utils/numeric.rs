@@ -2,6 +2,16 @@
 //!
 //! Numeric is a varlena (on-disk); its contents are private to numeric.c, so it
 //! stays an opaque varlena-backed type here.
+//!
+//! The numeric type's I/O, arithmetic, comparison, cast, and basic helper
+//! BODIES live in `crate::backend::utils::adt::numeric` (the numeric.c port).
+//! That module operates on the on-disk varlena bytes directly rather than the
+//! opaque `*mut NumericData` pointer below, so the fmgr-bound entry points are
+//! resolved there, not re-exported through this header. This header retains the
+//! opaque `Numeric`/`NumericData` type (still referenced by jsonb.rs and
+//! jsonpath.rs) and the `Numeric`-pointer-based helper declarations, which stay
+//! `unimplemented!()` until the toast/detoast pointer path that backs them
+//! lands. See that module's header comment for the full translation status.
 
 use crate::common::pg_prng::PgPrngState;
 use crate::postgres::Datum;
