@@ -4,4 +4,6 @@
 pub mod allpaths;
 pub mod clausesel;
 pub mod costsize;
+pub mod equivclass;
 pub mod indxpath;
+pub mod pathkeys;

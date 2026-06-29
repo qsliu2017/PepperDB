@@ -42,8 +42,15 @@ pub fn clamp_row_est(_nrows: f64) -> f64 {
     unimplemented!()
 }
 
-pub fn clamp_width_est(_tuple_width: i64) -> i32 {
-    unimplemented!()
+pub fn clamp_width_est(tuple_width: i64) -> i32 {
+    // Anything more than MaxAllocSize (0x3fffffff, 1 GB - 1) is bogus: we could
+    // not create a tuple that large.
+    const MAX_ALLOC_SIZE: i64 = 0x3fff_ffff;
+    if tuple_width > MAX_ALLOC_SIZE {
+        return MAX_ALLOC_SIZE as i32;
+    }
+    crate::assert!(tuple_width >= 0);
+    tuple_width as i32
 }
 
 pub fn clamp_cardinality_to_long(_x: Cardinality) -> i64 {
@@ -268,46 +275,13 @@ bitflags! {
     }
 }
 
-pub fn pull_varnos(_root: PlannerInfoRef, _node: Option<Node>) -> Bitmapset {
-    unimplemented!()
-}
-
-pub fn pull_varnos_of_level(
-    _root: PlannerInfoRef,
-    _node: Option<Node>,
-    _levelsup: i32,
-) -> Bitmapset {
-    unimplemented!()
-}
-
-/// C out-param `Bitmapset **varattnos` -> returned value.
-pub fn pull_varattnos(_node: Option<Node>, _varno: Index) -> Bitmapset {
-    unimplemented!()
-}
-
-pub fn pull_vars_of_level(_node: Option<Node>, _levelsup: i32) -> Vec<Node> {
-    unimplemented!()
-}
-
-pub fn contain_var_clause(_node: Option<Node>) -> bool {
-    unimplemented!()
-}
-
-pub fn contain_vars_of_level(_node: Option<Node>, _levelsup: i32) -> bool {
-    unimplemented!()
-}
-
-pub fn contain_vars_returning_old_or_new(_node: Option<Node>) -> bool {
-    unimplemented!()
-}
-
-pub fn locate_var_of_level(_node: Option<Node>, _levelsup: i32) -> i32 {
-    unimplemented!()
-}
-
-pub fn pull_var_clause(_node: Option<Node>, _flags: PullVarClauseFlags) -> Vec<Node> {
-    unimplemented!()
-}
+// Bodies in util/var.rs (rules.md s3). `pull_varattnos`'s C out-param
+// `Bitmapset **varattnos` becomes an in/out value argument + return.
+pub use crate::backend::optimizer::util::var::{
+    contain_var_clause, contain_vars_of_level, contain_vars_returning_old_or_new,
+    locate_var_of_level, pull_var_clause, pull_varattnos, pull_varnos, pull_varnos_of_level,
+    pull_vars_of_level,
+};
 
 pub fn flatten_join_alias_vars(
     _root: PlannerInfoRef,

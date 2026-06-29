@@ -198,190 +198,21 @@ pub type EcMatchesCallbackType = fn(
     em: &EquivalenceMember,
 ) -> bool;
 
-/// in-out param `p_restrictinfo` modeled as `&mut`.
-pub fn process_equivalence(
-    root: &mut PlannerInfo,
-    p_restrictinfo: &mut RestrictInfo,
-    jdomain: &JoinDomain,
-) -> bool {
-    unimplemented!()
-}
-
-pub fn canonicalize_ec_expression(expr: Box<Expr>, req_type: Oid, req_collation: Oid) -> Box<Expr> {
-    unimplemented!()
-}
-
-pub fn reconsider_outer_join_clauses(root: &mut PlannerInfo) {
-    unimplemented!()
-}
-
-pub fn rebuild_eclass_attr_needed(root: &mut PlannerInfo) {
-    unimplemented!()
-}
-
-pub fn get_eclass_for_sort_expr(
-    root: &mut PlannerInfo,
-    expr: &Expr,
-    opfamilies: &[Oid],
-    opcintype: Oid,
-    collation: Oid,
-    sortref: Index,
-    rel: Relids,
-    create_it: bool,
-) -> Option<EquivalenceClass> {
-    unimplemented!()
-}
-
-pub fn find_ec_member_matching_expr(
-    ec: &EquivalenceClass,
-    expr: &Expr,
-    relids: Relids,
-) -> Option<EquivalenceMember> {
-    unimplemented!()
-}
-
-pub fn find_computable_ec_member(
-    root: &mut PlannerInfo,
-    ec: &EquivalenceClass,
-    exprs: &[Expr],
-    relids: Relids,
-    require_parallel_safe: bool,
-) -> Option<EquivalenceMember> {
-    unimplemented!()
-}
-
-pub fn relation_can_be_sorted_early(
-    root: &mut PlannerInfo,
-    rel: &RelOptInfo,
-    ec: &EquivalenceClass,
-    require_parallel_safe: bool,
-) -> bool {
-    unimplemented!()
-}
-
-pub fn generate_base_implied_equalities(root: &mut PlannerInfo) {
-    unimplemented!()
-}
-
-pub fn generate_join_implied_equalities(
-    root: &mut PlannerInfo,
-    join_relids: Relids,
-    outer_relids: Relids,
-    inner_rel: &RelOptInfo,
-    sjinfo: &SpecialJoinInfo,
-) -> Vec<RestrictInfo> {
-    unimplemented!()
-}
-
-pub fn generate_join_implied_equalities_for_ecs(
-    root: &mut PlannerInfo,
-    eclasses: &[EquivalenceClass],
-    join_relids: Relids,
-    outer_relids: Relids,
-    inner_rel: &RelOptInfo,
-) -> Vec<RestrictInfo> {
-    unimplemented!()
-}
-
-pub fn exprs_known_equal(root: &mut PlannerInfo, item1: &Node, item2: &Node, opfamily: Oid) -> bool {
-    unimplemented!()
-}
-
-pub fn match_eclasses_to_foreign_key_col(
-    root: &mut PlannerInfo,
-    fkinfo: &ForeignKeyOptInfo,
-    colno: i32,
-) -> Option<EquivalenceClass> {
-    unimplemented!()
-}
-
-pub fn find_derived_clause_for_ec_member(
-    root: &mut PlannerInfo,
-    ec: &EquivalenceClass,
-    em: &EquivalenceMember,
-) -> Option<RestrictInfo> {
-    unimplemented!()
-}
-
-pub fn add_child_rel_equivalences(
-    root: &mut PlannerInfo,
-    appinfo: &AppendRelInfo,
-    parent_rel: &RelOptInfo,
-    child_rel: &mut RelOptInfo,
-) {
-    unimplemented!()
-}
-
-pub fn add_child_join_rel_equivalences(
-    root: &mut PlannerInfo,
-    appinfos: &[AppendRelInfo],
-    parent_joinrel: &RelOptInfo,
-    child_joinrel: &mut RelOptInfo,
-) {
-    unimplemented!()
-}
-
-pub fn add_setop_child_rel_equivalences(
-    root: &mut PlannerInfo,
-    child_rel: &mut RelOptInfo,
-    child_tlist: &[crate::nodes::primnodes::TargetEntry],
-    setop_pathkeys: &[PathKey],
-) {
-    unimplemented!()
-}
-
-pub fn setup_eclass_member_iterator(
-    it: &mut EquivalenceMemberIterator,
-    ec: &EquivalenceClass,
-    child_relids: Relids,
-) {
-    unimplemented!()
-}
-
-pub fn eclass_member_iterator_next(it: &mut EquivalenceMemberIterator) -> Option<EquivalenceMember> {
-    unimplemented!()
-}
-
-pub fn generate_implied_equalities_for_column(
-    root: &mut PlannerInfo,
-    rel: &RelOptInfo,
-    callback: EcMatchesCallbackType,
-    prohibited_rels: Relids,
-) -> Vec<RestrictInfo> {
-    unimplemented!()
-}
-
-pub fn have_relevant_eclass_joinclause(
-    root: &mut PlannerInfo,
-    rel1: &RelOptInfo,
-    rel2: &RelOptInfo,
-) -> bool {
-    unimplemented!()
-}
-
-pub fn has_relevant_eclass_joinclause(root: &mut PlannerInfo, rel1: &RelOptInfo) -> bool {
-    unimplemented!()
-}
-
-pub fn eclass_useful_for_merging(
-    root: &mut PlannerInfo,
-    eclass: &EquivalenceClass,
-    rel: &RelOptInfo,
-) -> bool {
-    unimplemented!()
-}
-
-pub fn is_redundant_derived_clause(rinfo: &RestrictInfo, clauselist: &[RestrictInfo]) -> bool {
-    unimplemented!()
-}
-
-pub fn is_redundant_with_indexclauses(rinfo: &RestrictInfo, indexclauses: &[Node]) -> bool {
-    unimplemented!()
-}
-
-pub fn ec_clear_derived_clauses(ec: &mut EquivalenceClass) {
-    unimplemented!()
-}
+// equivclass.c bodies live in backend/optimizer/path/equivclass.rs. The
+// INNER-JOIN path is fully translated; outer-join/appendrel/setop/FK/index
+// helpers are staged stubs inside that module.
+pub use crate::backend::optimizer::path::equivclass::{
+    add_child_join_rel_equivalences, add_child_rel_equivalences, add_setop_child_rel_equivalences,
+    canonicalize_ec_expression, ec_clear_derived_clauses, eclass_member_iterator_next,
+    eclass_useful_for_merging, exprs_known_equal, find_computable_ec_member,
+    find_derived_clause_for_ec_member, find_ec_member_matching_expr,
+    generate_base_implied_equalities, generate_implied_equalities_for_column,
+    generate_join_implied_equalities, generate_join_implied_equalities_for_ecs,
+    get_eclass_for_sort_expr, has_relevant_eclass_joinclause, have_relevant_eclass_joinclause,
+    is_redundant_derived_clause, is_redundant_with_indexclauses, match_eclasses_to_foreign_key_col,
+    process_equivalence, rebuild_eclass_attr_needed, reconsider_outer_join_clauses,
+    relation_can_be_sorted_early, setup_eclass_member_iterator,
+};
 
 /*
  * pathkeys.c -- utilities for matching and building path keys
@@ -393,176 +224,23 @@ pub enum PathKeysComparison {
     Different, // neither pathkey includes the other
 }
 
-pub fn compare_pathkeys(keys1: &[PathKey], keys2: &[PathKey]) -> PathKeysComparison {
-    unimplemented!()
-}
-
-pub fn pathkeys_contained_in(keys1: &[PathKey], keys2: &[PathKey]) -> bool {
-    unimplemented!()
-}
-
-/// out-param `n_common` folded into the returned tuple.
-pub fn pathkeys_count_contained_in(keys1: &[PathKey], keys2: &[PathKey]) -> (bool, i32) {
-    unimplemented!()
-}
-
-pub fn get_useful_group_keys_orderings(root: &mut PlannerInfo, path: &Path) -> Vec<Node> {
-    unimplemented!()
-}
-
-pub fn get_cheapest_path_for_pathkeys(
-    paths: &[Path],
-    pathkeys: &[PathKey],
-    required_outer: Relids,
-    cost_criterion: CostSelector,
-    require_parallel_safe: bool,
-) -> Option<Path> {
-    unimplemented!()
-}
-
-pub fn get_cheapest_fractional_path_for_pathkeys(
-    paths: &[Path],
-    pathkeys: &[PathKey],
-    required_outer: Relids,
-    fraction: f64,
-) -> Option<Path> {
-    unimplemented!()
-}
-
-pub fn get_cheapest_parallel_safe_total_inner(paths: &[Path]) -> Option<Path> {
-    unimplemented!()
-}
-
-pub fn build_index_pathkeys(
-    root: &mut PlannerInfo,
-    index: &IndexOptInfo,
-    scandir: ScanDirection,
-) -> Vec<PathKey> {
-    unimplemented!()
-}
-
-/// out-param `partialkeys` folded into the returned tuple.
-pub fn build_partition_pathkeys(
-    root: &mut PlannerInfo,
-    partrel: &RelOptInfo,
-    scandir: ScanDirection,
-) -> (Vec<PathKey>, bool) {
-    unimplemented!()
-}
-
-pub fn build_expression_pathkey(
-    root: &mut PlannerInfo,
-    expr: &Expr,
-    opno: Oid,
-    rel: Relids,
-    create_it: bool,
-) -> Vec<PathKey> {
-    unimplemented!()
-}
-
-pub fn convert_subquery_pathkeys(
-    root: &mut PlannerInfo,
-    rel: &RelOptInfo,
-    subquery_pathkeys: &[PathKey],
-    subquery_tlist: &[crate::nodes::primnodes::TargetEntry],
-) -> Vec<PathKey> {
-    unimplemented!()
-}
-
-pub fn build_join_pathkeys(
-    root: &mut PlannerInfo,
-    joinrel: &RelOptInfo,
-    jointype: JoinType,
-    outer_pathkeys: &[PathKey],
-) -> Vec<PathKey> {
-    unimplemented!()
-}
-
-pub fn make_pathkeys_for_sortclauses(
-    root: &mut PlannerInfo,
-    sortclauses: &[crate::nodes::parsenodes::SortGroupClause],
-    tlist: &[crate::nodes::primnodes::TargetEntry],
-) -> Vec<PathKey> {
-    unimplemented!()
-}
-
-/// in-out `sortclauses` and out `sortable` folded into the returned tuple.
-pub fn make_pathkeys_for_sortclauses_extended(
-    root: &mut PlannerInfo,
-    sortclauses: &mut Vec<crate::nodes::parsenodes::SortGroupClause>,
-    tlist: &[crate::nodes::primnodes::TargetEntry],
-    remove_redundant: bool,
-    remove_group_rtindex: bool,
-    set_ec_sortref: bool,
-) -> (Vec<PathKey>, bool) {
-    unimplemented!()
-}
-
-pub fn initialize_mergeclause_eclasses(root: &mut PlannerInfo, restrictinfo: &mut RestrictInfo) {
-    unimplemented!()
-}
-
-pub fn update_mergeclause_eclasses(root: &mut PlannerInfo, restrictinfo: &mut RestrictInfo) {
-    unimplemented!()
-}
-
-pub fn find_mergeclauses_for_outer_pathkeys(
-    root: &mut PlannerInfo,
-    pathkeys: &[PathKey],
-    restrictinfos: &[RestrictInfo],
-) -> Vec<RestrictInfo> {
-    unimplemented!()
-}
-
-pub fn select_outer_pathkeys_for_merge(
-    root: &mut PlannerInfo,
-    mergeclauses: &[RestrictInfo],
-    joinrel: &RelOptInfo,
-) -> Vec<PathKey> {
-    unimplemented!()
-}
-
-pub fn make_inner_pathkeys_for_merge(
-    root: &mut PlannerInfo,
-    mergeclauses: &[RestrictInfo],
-    outer_pathkeys: &[PathKey],
-) -> Vec<PathKey> {
-    unimplemented!()
-}
-
-pub fn trim_mergeclauses_for_inner_pathkeys(
-    root: &mut PlannerInfo,
-    mergeclauses: &[RestrictInfo],
-    pathkeys: &[PathKey],
-) -> Vec<RestrictInfo> {
-    unimplemented!()
-}
-
-pub fn truncate_useless_pathkeys(
-    root: &mut PlannerInfo,
-    rel: &RelOptInfo,
-    pathkeys: &[PathKey],
-) -> Vec<PathKey> {
-    unimplemented!()
-}
-
-pub fn has_useful_pathkeys(root: &mut PlannerInfo, rel: &RelOptInfo) -> bool {
-    unimplemented!()
-}
-
-pub fn append_pathkeys(target: Vec<PathKey>, source: &[PathKey]) -> Vec<PathKey> {
-    unimplemented!()
-}
-
-pub fn make_canonical_pathkey(
-    root: &mut PlannerInfo,
-    eclass: &EquivalenceClass,
-    opfamily: Oid,
-    cmptype: CompareType,
-    nulls_first: bool,
-) -> PathKey {
-    unimplemented!()
-}
+// pathkeys.c bodies live in backend/optimizer/path/pathkeys.rs. The INNER-JOIN +
+// ORDER BY path (canonical pathkeys, sortclause -> pathkeys, containment, index
+// pathkeys, merge-clause reasoning, usefulness checks) is fully translated;
+// partitioning/subquery/group-by-reordering helpers are staged stubs there.
+// PathKey identity uses value equality (cloned EC snapshot) instead of PG's
+// pointer identity -- see the module's representation note.
+pub use crate::backend::optimizer::path::pathkeys::{
+    append_pathkeys, build_expression_pathkey, build_index_pathkeys, build_join_pathkeys,
+    build_partition_pathkeys, compare_pathkeys, convert_subquery_pathkeys,
+    find_mergeclauses_for_outer_pathkeys, get_cheapest_fractional_path_for_pathkeys,
+    get_cheapest_parallel_safe_total_inner, get_cheapest_path_for_pathkeys,
+    get_useful_group_keys_orderings, has_useful_pathkeys, initialize_mergeclause_eclasses,
+    make_canonical_pathkey, make_inner_pathkeys_for_merge, make_pathkeys_for_sortclauses,
+    make_pathkeys_for_sortclauses_extended, pathkeys_contained_in, pathkeys_count_contained_in,
+    select_outer_pathkeys_for_merge, trim_mergeclauses_for_inner_pathkeys,
+    truncate_useless_pathkeys, update_mergeclause_eclasses,
+};
 
 pub fn add_paths_to_append_rel(
     root: &mut PlannerInfo,

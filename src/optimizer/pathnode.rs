@@ -629,119 +629,17 @@ pub fn path_is_reparameterizable_by_child(path: &Path, child_rel: &RelOptInfo) -
 }
 
 /*
- * prototypes for relnode.c
+ * prototypes for relnode.c -- bodies in crate::backend::optimizer::util::relnode.
+ * The inner-join path (setup_simple_rel_arrays, build_simple_rel, find_base_rel
+ * + variants, find_join_rel, build_join_rel, build_joinrel_tlist,
+ * min_join_parameterization, fetch_upper_rel) is fully translated; the
+ * parameterized-path / partitionwise / appendrel entries are translated with
+ * staged bodies (their unparameterized fast paths work).
  */
-pub fn setup_simple_rel_arrays(root: &mut PlannerInfo) {
-    unimplemented!()
-}
-
-pub fn expand_planner_arrays(root: &mut PlannerInfo, add_size: i32) {
-    unimplemented!()
-}
-
-pub fn build_simple_rel(
-    root: &mut PlannerInfo,
-    relid: i32,
-    parent: Option<&RelOptInfo>,
-) -> Box<RelOptInfo> {
-    unimplemented!()
-}
-
-pub fn find_base_rel(root: &mut PlannerInfo, relid: i32) -> Box<RelOptInfo> {
-    unimplemented!()
-}
-
-pub fn find_base_rel_noerr(root: &mut PlannerInfo, relid: i32) -> Option<Box<RelOptInfo>> {
-    unimplemented!()
-}
-
-pub fn find_base_rel_ignore_join(root: &mut PlannerInfo, relid: i32) -> Box<RelOptInfo> {
-    unimplemented!()
-}
-
-pub fn find_join_rel(root: &mut PlannerInfo, relids: Relids) -> Option<Box<RelOptInfo>> {
-    unimplemented!()
-}
-
-/// C out-param `restrictlist_ptr` -> second element of returned tuple.
-pub fn build_join_rel(
-    root: &mut PlannerInfo,
-    joinrelids: Relids,
-    outer_rel: &RelOptInfo,
-    inner_rel: &RelOptInfo,
-    sjinfo: &SpecialJoinInfo,
-    pushed_down_joins: Vec<Node>,
-) -> (Box<RelOptInfo>, Vec<Node>) {
-    unimplemented!()
-}
-
-pub fn min_join_parameterization(
-    root: &mut PlannerInfo,
-    joinrelids: Relids,
-    outer_rel: &RelOptInfo,
-    inner_rel: &RelOptInfo,
-) -> Relids {
-    unimplemented!()
-}
-
-pub fn fetch_upper_rel(
-    root: &mut PlannerInfo,
-    kind: UpperRelationKind,
-    relids: Relids,
-) -> Box<RelOptInfo> {
-    unimplemented!()
-}
-
-pub fn find_childrel_parents(root: &mut PlannerInfo, rel: &RelOptInfo) -> Relids {
-    unimplemented!()
-}
-
-pub fn get_baserel_parampathinfo(
-    root: &mut PlannerInfo,
-    baserel: &RelOptInfo,
-    required_outer: Relids,
-) -> Option<Box<ParamPathInfo>> {
-    unimplemented!()
-}
-
-/// C out-param `restrict_clauses` -> second element of returned tuple.
-pub fn get_joinrel_parampathinfo(
-    root: &mut PlannerInfo,
-    joinrel: &RelOptInfo,
-    outer_path: &Path,
-    inner_path: &Path,
-    sjinfo: &SpecialJoinInfo,
-    required_outer: Relids,
-) -> (Option<Box<ParamPathInfo>>, Vec<Node>) {
-    unimplemented!()
-}
-
-pub fn get_appendrel_parampathinfo(
-    appendrel: &RelOptInfo,
-    required_outer: Relids,
-) -> Option<Box<ParamPathInfo>> {
-    unimplemented!()
-}
-
-pub fn find_param_path_info(
-    rel: &RelOptInfo,
-    required_outer: Relids,
-) -> Option<Box<ParamPathInfo>> {
-    unimplemented!()
-}
-
-pub fn get_param_path_clause_serials(path: &Path) -> Bitmapset {
-    unimplemented!()
-}
-
-pub fn build_child_join_rel(
-    root: &mut PlannerInfo,
-    outer_rel: &RelOptInfo,
-    inner_rel: &RelOptInfo,
-    parent_joinrel: &RelOptInfo,
-    restrictlist: Vec<Node>,
-    sjinfo: &SpecialJoinInfo,
-    appinfos: &[&AppendRelInfo],
-) -> Box<RelOptInfo> {
-    unimplemented!()
-}
+pub use crate::backend::optimizer::util::relnode::{
+    build_child_join_rel, build_join_rel, build_simple_rel, expand_planner_arrays,
+    fetch_upper_rel, find_base_rel, find_base_rel_ignore_join, find_base_rel_noerr,
+    find_childrel_parents, find_join_rel, find_param_path_info, get_appendrel_parampathinfo,
+    get_baserel_parampathinfo, get_joinrel_parampathinfo, get_param_path_clause_serials,
+    min_join_parameterization, setup_simple_rel_arrays,
+};
