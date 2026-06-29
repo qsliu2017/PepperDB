@@ -326,7 +326,74 @@ stay for grep; the SIGNATURE now carries the contract.
 
 ---
 
-## 10. Idiomatic Rust style
+## 10. Pointers and ownership: translate C pointers to Rust ownership, not `*mut`
+
+A C `T *` is not a Rust `*mut T`. A raw pointer is a LAST RESORT, not the default translation.
+Each pointer in the C source encodes an ownership/borrow/nullability intent; recover that intent
+and express it in the type. A bare `*mut`/`*const` in translated code is a defect to fix unless
+it falls under "genuinely raw" below. (This section is the lesson of the post-M2 borrow
+migration; see `ai/harness/relation-ownership-plan.md` for the worked example.)
+
+**The mapping (read the C ahead to pick the right one):**
+- `T *` used as a non-null borrow -> `&T` (read) / `&mut T` (write). The DEFAULT.
+- `T *` that may be `NULL` (a sentinel) -> `Option<&T>` / `Option<&mut T>`. Never invent an
+  `InvalidT` magic value; `None` IS the null. Delete `Invalid*` sentinels.
+- `T *` that OWNS a single heap value (the allocator/owner of it) -> `Box<T>` / `Option<Box<T>>`.
+- `T *` to a contiguous run (pointer + count, a C array / `palloc`'d vector) -> `Vec<T>` (owned)
+  or `&[T]` / `&mut [T]` (borrowed). Drop the separate count field.
+- A value SHARED by several long-lived owners with no single owner (a cache entry many holders
+  reference, cross-task sharing) -> `Arc<T>`. This is RARE. Do not reach for `Arc` to dodge a
+  lifetime; prefer a borrow rooted in an owner that outlives it (next bullet). Per-row/per-call
+  `Arc::clone` on a hot path is a smell - deref to `&T`, clone only to own past a borrow.
+- A genuinely shared MUTABLE arena (the ex-shmem structures: buffer pool, lock table, procarray,
+  sinval ring) -> the s8 pattern (`Vec<UnsafeCell<T>>` + index handle + atomic mirror, behind a
+  documented lock) with a justified `unsafe impl Send/Sync`. This is the ONLY place a raw
+  pointer / `unsafe impl Send` is legitimate. Everything per-backend must be genuinely `Send`
+  WITHOUT `unsafe` (see below).
+
+**Decide the lifetime by looking ahead in the PG source.** Before choosing `&'a` vs `Box` vs
+`Arc`, find who allocates the value, who frees it, and how long every reader needs it (read the
+`.c`, not just the `.h`). The owner becomes the long-lived binding (a command-frame `Box`/`Arc`,
+a cache slot); borrowers take `&'a T` parameterized by that owner's lifetime. Lifetime-parameterize
+the borrowing structs (`Scan<'rel,'snap> { rel: &'rel RelationData, snap: &'snap SnapshotData }`)
+- this forces the data model to be explicit. NEVER build a self-referential struct (one that owns
+a value AND stores a borrow into it): the owner goes in an ANCESTOR frame, the borrower below.
+Borrows held across `.await` must be rooted in an owning binding in a suspended ancestor stack
+frame, NEVER borrowed out of a `task_local! RefCell` and held across the await (that is UB and the
+`await_holding_refcell_ref` deny). The few genuinely-mutable fields of an otherwise-shared
+immutable value become interior-mutable (`AtomicI32`/`AtomicBool`/`Mutex<...>`); rebuild-on-change
+swaps the owner's slot for a fresh value rather than mutating in place, so live borrowers keep
+their snapshot.
+
+**For `unimplemented!()` stubs, take the STRICTEST type (`&T`, not `*mut T` / `Arc<T>`).** A stub
+signature is a contract the future real translation must satisfy; making it `&T` forces that pass
+to work out the true ownership rather than inheriting a lazy raw pointer. Do not leave `*mut` in a
+stub "to decide later".
+
+**Delete the `*Data` pointer aliases.** PG's `typedef struct FooData *Foo;` becomes NOTHING - there
+is no `type Foo = ...`. Write `&FooData` / `&mut FooData` / `Box<FooData>` / `Arc<FooData>` /
+`Option<&FooData>` EXPLICITLY at each site so ownership is visible in the signature. The data
+struct KEEPS its PG `Data` suffix (`RelationData`, `HeapTupleData`, `TupleDescData`); if an earlier
+pass stripped the suffix (named it `Relation`/`HeapTuple`), RENAME it back to `<Foo>Data` to match
+PG, and free the bare `Foo` name (it was only ever the pointer alias).
+
+**Owned struct fields stay owned; do not inline a big sub-struct into its parent.** PG's `Foo *bar`
+field is `bar: Option<Box<BarData>>` (or `Box<BarData>` if non-null), NOT a flattened copy of
+`BarData`'s fields hoisted into `Foo`. If an earlier pass expanded a sub-struct inline, revert it to
+the owned `Box`/`Option<Box>` field - it preserves the 1:1 struct shape and the nullability.
+
+**Genuine `Send` without `unsafe`.** Per-backend types must be auto-`Send` - achieve it by fixing
+the fields, not by `unsafe impl Send`: a dead/tombstoned raw pointer (`MemoryContext`, an unused
+`Node*`) becomes `()` / `Option<Box<Node>>`; a stateless C vtable (`*Ops`) becomes a trait with a
+`Send + Sync` supertrait bound (the impls are zero-sized); an owned overlay buffer (a tuple body
+read as an on-disk struct) becomes an 8-aligned owned allocation (`Box<[u64]>`) with
+`read_unaligned` accessors - never form `&Overlay` over a possibly-misaligned address (s5/s11
+soundness denies). Reserve `unsafe impl Send/Sync` for the shmem arenas only; a compile-time
+`assert_send_sync::<T>()` test pins the property.
+
+---
+
+## 11. Idiomatic Rust style
 
 1. **`let ... else`** for bail-on-None/Err, not `let x = match opt { Some(v)=>v, None=>return };`.
 2. **Iterator pipelines** (`filter`/`filter_map`/`map`/`collect`, `?` and `bool::then_some`
@@ -341,7 +408,7 @@ stay for grep; the SIGNATURE now carries the contract.
 
 ---
 
-## 11. Clippy (enforced; keep it 0/0)
+## 12. Clippy (enforced; keep it 0/0)
 
 Workspace lint policy in `[workspace.lints.clippy]` (members opt in via `[lints] workspace =
 true`); `cargo clippy --all-targets` must be 0 warnings / 0 errors - a new warning is a
@@ -363,7 +430,7 @@ regression.
 
 ---
 
-## 12. Validation and workflow
+## 13. Validation and workflow
 
 - `cargo check` + `cargo clippy --all-targets` stay green/0; `cargo test --lib` green and
   growing. Inline `#[cfg(test)]`; `#[tokio::test(flavor="multi_thread")]` for async/cross-task
